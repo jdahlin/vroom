@@ -352,7 +352,7 @@ kärnan och kan vänta.
   scopes via ett träd från förskanningen, `for`-satsens första led); alignment
   över 16 (lokaler från rbx = justerad ram, stackargument via sparad och
   justerad rsp); bit-fält över en 8-bytegräns (delat vid gränsen).
-- `bench/vcc-x86.py`: 1667/1770, lika i `--pie` och `--pic` (vcc-sidan
+- `bench/vcc-x86.py`: 1669/1770, lika i `--pie` och `--pic` (vcc-sidan
   `-fPIE`/`-fPIC`, länkad `-pie`). Körfel bara där clangs optimerare krävs
   (`20030125-1`, `bcp-1`, `builtin-constant`) och 11 länkfel av samma slag eller
   `__builtin_setjmp`. `vcc-abi.py --target x86_64`: 12/12, med tre nya tester
