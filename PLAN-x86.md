@@ -340,6 +340,23 @@ kärnan och kan vänta.
 
 ## Status
 
+### X5 (2026-11-11): direktkodning från posterna, plan
+
+Mätt: kernel/fork.c `-c` 0,15 s mot `-S` 0,11 s; assemblern på texten är ~25 %
+av TU:n.  Väg, steg för steg, varje steg byte-identiskt (`vcc-x86.py --objcmp`):
+1. En assemblersession utan text (`as_open/as_close` på ElfObj, som `as_run`
+   gör men utan källa): sektioner, symboler, etiketter (`as_label`), hopp via
+   `as_branch` (samma relaxering), och `as_line` för det som får vara text
+   (data, direktiv, CFI, `.loc`, inline asm) i samma session.
+2. `x64_encode(e, rec)`: posterna X_MOV/X_LD/X_ST/X_LEA/ALU/X_CMP/X_TEST/
+   X_SETCC/X_CALL/X_JMP/X_JCC/X_PUSH/X_POP direkt till `XForm` + `x64_emit`
+   (assemblerns kodare: MC:s val ärvs); övriga poster som en rad text.
+3. Andelen textrader mot noll: SSE/x87-posterna, prolog/epilog, CFI (`cfi_*`
+   anrop i stället för `.cfi_*`-text), `.loc` (dw_row direkt).
+4. Data och sektionshuvuden direkt (som arm64:s IT_SYMHDR/IT_DATA).
+Validering per steg: --objcmp 100 %, -g/-fasynchronous-unwind-tables, kärnans
+TU:er (`vcc -c` mot `vcc -S | vasm`: samma objekt), tid per TU (vbench).
+
 ### X8 (2026-11-11): x86-kärnan byggs med vpp, påbörjat
 
 - `work/vcc-x86-cc.sh` (vpp som CC, bara versionsfrågorna till clang),
