@@ -1896,6 +1896,12 @@ jämförelserna ligger i `work/opt-profile/control-parity/result.json`.
 Den generella algoritmen gör ingen extra helträdsanalys för accepterade
 bevis; wasm:s befintliga fallback för övriga former är avsiktligt kvar.
 
+Efter integration av `54580f7` (PR48:s regressionsunderlag) bygger unity
+och alla 16 nya nivå-/målkontroller passerar igen. Hela egna native-sviten
+ger 216/216 x86-PASS med sex synliga referensundantag och 221/221 arm64-PASS
+med ett befintligt kört XFAIL. Loggar finns i
+`work/opt-pr-tmp/control-integrated-{build,x86,arm}.log`.
+
 ### OPT5 regressionsunderlag: genererade minnesceller (2026-11-11)
 
 `bench/gen-memory-cells.py` skapar deterministiskt 12 funktioner med totalt
