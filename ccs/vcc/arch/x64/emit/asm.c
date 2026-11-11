@@ -5,7 +5,7 @@
 typedef struct xasmop {
 	int reg, tie, size;
 	uint32_t allowed;
-	int32_t slot, addr;
+	int64_t slot, addr;
 	bool memory, immediate, read;
 	int64_t imm;
 } xasmop;
@@ -108,7 +108,7 @@ static bool x64_asm_constraint(ecx *e, const casm *a, uint32_t i, xasmop *o, uns
 	return true;
 }
 
-static lval x64_asm_slot(int32_t off) { return (lval){ .k = L_FRAME, .off = off }; }
+static lval x64_asm_slot(int64_t off) { return (lval){ .k = L_FRAME, .off = off }; }
 
 /* The scalar lowering keeps no live values on the x87 stack between records.
    Stage the operands in memory, populate st(1) before st(0), then empty the
@@ -119,7 +119,8 @@ static bool x64_asm_x87(ecx *e, const casm *a)
 	cc *c = e->c;
 	uint32_t count = a->nout + a->nin;
 	bool found = false, input[2] = { false }, output[2] = { false };
-	int position[64], in_slot[2] = { 0 }, out_addr[2] = { 0 }, out_size[2] = { 0 };
+	int position[64], out_size[2] = { 0 };
+	int64_t in_slot[2] = { 0 }, out_addr[2] = { 0 };
 	unsigned popped = 0;
 
 	for (uint32_t i = 0; i < count; i++) {
@@ -225,7 +226,7 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 	const casm *a = &c->asms[N(n)->a];
 	uint32_t count = a->nout + a->nin, used = 0, save = 0;
 	xasmop ops[64] = { 0 };
-	int32_t saved[16] = { 0 };
+	int64_t saved[16] = { 0 };
 
 	if (x64_asm_x87(e, a)) return;
 

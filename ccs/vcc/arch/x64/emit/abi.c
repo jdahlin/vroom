@@ -164,7 +164,7 @@ VPRIV void x64_x87st(ecx *e, const lval *l);
 
 /* ---------------- calls ---------------- */
 
-static lval x64_fr(int32_t off) { return (lval){ .k = L_FRAME, .off = off, .align = 8 }; }
+static lval x64_fr(int64_t off) { return (lval){ .k = L_FRAME, .off = off, .align = 8 }; }
 
 VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool variadic, const wkarg *r, qty rt)
 {
@@ -176,7 +176,7 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 	int gp = r && r->mem && !r->x87 && !r->up ? 1 : 0, fp = 0;
 	int64_t total = 0, pad;
 	uint32_t stackalign = 16;
-	int32_t savedsp = 0;
+	int64_t savedsp = 0;
 	int64_t *place = calloc((size_t)(n ? n : 1), sizeof *place);	/* stack offset, or -1: registers */
 	rec *i;
 
@@ -229,7 +229,7 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 		if (place[k] < 0)
 			continue;
 		for (uint64_t o = 0; o < a[k].size; o += 8) {
-			lval s = x64_fr(a[k].slot + (int32_t)o), d = { .k = L_REG, .r = RSP, .off = place[k] + (int64_t)o };
+			lval s = x64_fr(a[k].slot + (int64_t)o), d = { .k = L_REG, .r = RSP, .off = place[k] + (int64_t)o };
 
 			x64_mem(e, X_LD, 8, R11, &s, false);
 			x64_mem(e, X_ST, 8, R11, &d, false);
@@ -360,7 +360,7 @@ VPRIV void x64_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic)
 		}
 		/* on the stack: the parameter is where the caller put it */
 		stk = (stk + a[k].align - 1) & ~(int64_t)(a[k].align - 1);
-		a[k].slot = (int32_t)(16 + stk);
+		a[k].slot = 16 + stk;
 		stk += (int64_t)((a[k].size + 7) & ~(uint64_t)7);
 	}
 	X->ngp = gp, X->nfp = fp, X->stk = (int32_t)stk;

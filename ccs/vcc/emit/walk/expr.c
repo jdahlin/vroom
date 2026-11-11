@@ -164,7 +164,7 @@ static void wk_lfree(ecx *e, const lval *l)
 }
 
 /* a local's frame slot, made on first use */
-VPRIV int32_t wk_local(ecx *e, uint32_t s)
+VPRIV int64_t wk_local(ecx *e, uint32_t s)
 {
 	wkst *W = e->wk;
 	cc *c = e->c;
@@ -733,7 +733,7 @@ VPRIV void wk_vla_fix(ecx *e, qty t, bool pure)
 			LO(store)(e, r, &l, 8);
 			LO(tfree)(e, r);
 			W->vgen[a->n] = W->gen;
-			W->voff[a->n] = (int32_t)l.off;
+			W->voff[a->n] = (int64_t)l.off;
 		}
 		t = a->base;
 	}
@@ -767,7 +767,7 @@ static val wk_ptradd_vla(ecx *e, val p, val i, qty it, qty pt, bool sub)
 VPRIV void wk_vla_decl(ecx *e, uint32_t s, bool zero)
 {
 	cc *c = e->c;
-	int32_t off = wk_local(e, s);
+	int64_t off = wk_local(e, s);
 	lval la = { .k = L_FRAME, .off = off, .align = 8 }, lsp = la, ln = la;
 	val n = wk_vla_bytes(e, c->syms[s].ty), p;
 	int r;
@@ -842,7 +842,7 @@ static bool wk_short(ecx *e, qty t) { return wk_freg(e, t) ? LO(nffree)(e) < 3 :
 static val wk_rhs(ecx *e, val *a, uint32_t rn, qty at)
 {
 	if (a->k == V_REG && wk_short(e, at)) {
-		int32_t sl = wk_slot(e, 8, 8);
+		int64_t sl = wk_slot(e, 8, 8);
 		lval l = { .k = L_FRAME, .off = sl, .align = 8 };
 		val b;
 
@@ -1007,7 +1007,7 @@ static val wk_binary(ecx *e, uint32_t n)
 /* a value 0 or 1 from a condition */
 static val wk_condval(ecx *e, uint32_t n)
 {
-	int32_t sl = wk_slot(e, 4, 4);
+	int64_t sl = wk_slot(e, 4, 4);
 	lval l = { .k = L_FRAME, .off = sl, .align = 4 };
 	uint32_t lf = wk_newlabel(e), lj = wk_newlabel(e);
 	val one = vconst(1), zero = vconst(0);
@@ -1031,7 +1031,7 @@ static val wk_ternary(ecx *e, uint32_t n)
 	const node *x = N(n);
 	qty t = x->ty;
 	bool vd = KIND(c, t) == TY_VOID;
-	int32_t sl = vd ? 0 : wk_slot(e, 8, 8);
+	int64_t sl = vd ? 0 : wk_slot(e, 8, 8);
 	lval l = { .k = L_FRAME, .off = sl, .align = 8 };
 	uint32_t lf = wk_newlabel(e), lj = wk_newlabel(e);
 	val v;
@@ -1168,7 +1168,7 @@ static val wk_assign(ecx *e, uint32_t n)
 		/* as clang: the right side first, then the left's address and value */
 		b = wk_gen(e, x->b);
 		if (b.k == V_REG && wk_short(e, rt)) {
-			int32_t sl = wk_slot(e, 8, 8);
+			int64_t sl = wk_slot(e, 8, 8);
 			lval t = { .k = L_FRAME, .off = sl, .align = 8 };
 
 			LO(store)(e, b.r, &t, 8);

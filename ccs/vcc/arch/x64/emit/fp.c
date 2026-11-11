@@ -12,6 +12,16 @@ static val x64_vr(int r) { return (val){ .k = V_REG, .r = (uint8_t)r }; }
 /* an x87 instruction, with its memory operand l (NULL: none) */
 VPRIV void x64_x87(ecx *e, int xf, const lval *l, int sz)
 {
+	if (l && (l->off < INT32_MIN || l->off > INT32_MAX)) {
+		uint32_t live = e->x64->live;
+		if (l->k == L_REG && l->r < 32) e->x64->live |= 1u << l->r;
+		int address = x64_treg(e);
+		x64_mem(e, X_LEA, 8, address, l, false);
+		lval at = { .k = L_REG, .r = (uint8_t)address };
+		x64_x87(e, xf, &at, sz);
+		e->x64->live = live;
+		return;
+	}
 	uint32_t ref = 0;
 	int base = l ? x64_base(e, l, &ref) : 0;
 	rec *i = x64_put(e, X_X87);
@@ -55,7 +65,7 @@ static val x64_half_call(ecx *e, int name, val v, qty from, qty to)
 	lval slot = x64_slot(e, 16);
 
 	x64_classify(e, from, &a);
-	a.slot = (int32_t)slot.off;
+	a.slot = slot.off;
 	if (x64_isld(e->c, from)) {
 		lval src = x64_at(x64_toreg(e, &v, 8));
 

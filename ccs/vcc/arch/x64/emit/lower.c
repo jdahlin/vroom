@@ -94,9 +94,11 @@ VPRIV void x64_mem(ecx *e, int op, int sz, int r, const lval *l, bool sgn)
 		if (l->k == L_REG && l->r < 32) e->x64->live |= 1u << l->r;
 		int address = x64_treg(e), offset = x64_treg(e);
 		lval origin = *l;
-		origin.off = 0;
+		/* A negative frame displacement marks a local for the printer's final
+		   R12 realignment rewrite. Keep that marker in the address anchor. */
+		origin.off = l->k == L_FRAME && l->off < 0 ? -1 : 0;
 		x64_mem(e, X_LEA, 8, address, &origin, false);
-		x64_movi(e, offset, l->off);
+		x64_movi(e, offset, l->off - origin.off);
 		x64_op3(e, X_ADD, 8, address, address, offset);
 		lval at = { .k = L_REG, .r = (uint8_t)address };
 		x64_mem(e, op, sz, r, &at, sgn);
@@ -519,7 +521,7 @@ VPRIV val x64_setjmp(ecx *e, int rb)
 	rec *i;
 	int r;
 	uint32_t saved = e->x64->live & (X_TEMPS | X_FTEMPS) & ~(1u << rb);
-	int32_t slots[32] = {0};
+	int64_t slots[32] = {0};
 
 	/* A nonlocal return also clobbers temporaries live around the call. */
 	for (int q = 0; q < 32; q++) if (saved & (1u << q)) {

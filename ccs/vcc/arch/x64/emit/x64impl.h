@@ -95,8 +95,8 @@ typedef struct xst {
 	/* the function's incoming arguments (abi.c) */
 	int ngp, nfp;		/* named arguments in general and vector registers */
 	int32_t stk;		/* bytes of named stack arguments */
-	int32_t sret;		/* frame slot of the hidden result pointer (0: none) */
-	int32_t save;		/* variadic: the register save area's slot (0: none) */
+	int64_t sret;		/* frame slot of the hidden result pointer (0: none) */
+	int64_t save;		/* variadic: the register save area's slot (0: none) */
 } xst;
 
 /* the integer argument registers, in order */

@@ -32,7 +32,7 @@
  * slot (8-byte words; a scalar extended to 64 bits).
  */
 enum { WA_INT, WA_SSE };
-typedef struct wkarg { uint8_t n, cls[2]; bool mem, x87, up; uint32_t align; uint64_t size; int32_t slot; } wkarg;	/* x87: returned in st(0); up: one 16-byte SSE word (x86-64 SSEUP) */
+typedef struct wkarg { uint8_t n, cls[2]; bool mem, x87, up; uint32_t align; uint64_t size; int64_t slot; } wkarg;	/* x87: returned in st(0); up: one 16-byte SSE word (x86-64 SSEUP) */
 /* ---------------- walker state (one per ecx) ---------------- */
 
 #define WK_MAXLOOP 1024
@@ -47,24 +47,24 @@ typedef struct wkinl {
 	struct wkinl *up;
 	uint32_t fn, endlbl;
 	qty rty;
-	int32_t rslot;		/* the result's slot (a value held by address: its object) */
+	int64_t rslot;		/* the result's slot (a value held by address: its object) */
 	int cbase;		/* the cleanups live at the call */
 	bool any, cst_ok;	/* a return seen; every return so far the constant cst */
 	val cst;
 } wkinl;
 
 typedef struct wkst {
-	int32_t foff;		/* bytes of locals below the frame base so far */
+	int64_t foff;		/* bytes of locals below the frame base so far */
 	uint32_t falign;
 	uint32_t nlabel;	/* local labels handed out in this function (1..) */
 	uint32_t gen;		/* bindings below are valid when their gen is this */
 	uint32_t *sgen;		/* per sym */
-	int32_t *soff;		/* per sym: frame offset */
+	int64_t *soff;		/* per sym: frame offset */
 	uint32_t *lgen, *ulbl;	/* per user label: local label */
 	uint32_t *clbl;		/* per node (N_CASE/N_DEFAULT): local label, valid when cgen == gen */
 	uint32_t *cgen;
 	uint32_t *vgen;		/* per node (a VLA size): its value is in slot voff when vgen == gen */
-	int32_t *voff;
+	int64_t *voff;
 	uint32_t *zgen;		/* per sym (a VLA): its saved sp was zeroed on entry when zgen == gen */
 	wkloop loop[WK_MAXLOOP];
 	int nloop;
@@ -99,8 +99,8 @@ VPRIV bool wk_const_sym(ecx *e, uint32_t s, val *v);	/* s is bound to the consta
 VPRIV val wk_inline(ecx *e, uint32_t n, uint32_t s);	/* the call n to s, inlined (wk_can_inline) */
 VPRIV bool wk_can_inline(ecx *e, uint32_t s);
 VPRIV void wk_function(ecx *e, uint32_t s);	/* emit/walk/func.c: what emit/tu.c calls for x86-64 */
-VPRIV int32_t wk_slot(ecx *e, uint64_t size, uint32_t align);
-VPRIV int32_t wk_local(ecx *e, uint32_t s);	/* a local's slot, made on first use (a goto may reach a use first) */
+VPRIV int64_t wk_slot(ecx *e, uint64_t size, uint32_t align);
+VPRIV int64_t wk_local(ecx *e, uint32_t s);	/* a local's slot, made on first use (a goto may reach a use first) */
 VPRIV uint32_t wk_newlabel(ecx *e);
 VPRIV val wk_gen(ecx *e, uint32_t n);
 VPRIV lval wk_lval(ecx *e, uint32_t n);

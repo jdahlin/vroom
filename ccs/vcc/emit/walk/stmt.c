@@ -24,7 +24,7 @@ VPRIV wkst *wk_state(ecx *e)
 	if (!W->sgen) {
 		/* sized for this TU (gen-tagged: never cleared); one TU per ecx */
 		W->sgen = reserve(((size_t)c->nsym + 64) * sizeof(uint32_t));
-		W->soff = reserve(((size_t)c->nsym + 64) * sizeof(int32_t));
+		W->soff = reserve(((size_t)c->nsym + 64) * sizeof(int64_t));
 		W->lgen = reserve(((size_t)c->nlabel + 64) * sizeof(uint32_t));
 		W->ulbl = reserve(((size_t)c->nlabel + 64) * sizeof(uint32_t));
 		W->cgen = reserve(((size_t)c->nnode + 64) * sizeof(uint32_t));
@@ -39,7 +39,7 @@ VPRIV wkst *wk_state(ecx *e)
 		W->lcg = reserve(((size_t)c->nlabel + 64) * sizeof(uint32_t));
 		W->zgen = reserve(((size_t)c->nsym + 64) * sizeof(uint32_t));
 		W->vgen = reserve(((size_t)c->nnode + 64) * sizeof(uint32_t));
-		W->voff = reserve(((size_t)c->nnode + 64) * sizeof(int32_t));
+		W->voff = reserve(((size_t)c->nnode + 64) * sizeof(int64_t));
 	}
 	return W;
 }
@@ -57,7 +57,7 @@ VPRIV void wk_ecx_free(ecx *e)
 		return;
 	if (W->sgen) {
 		munmap(W->sgen, ((size_t)c->nsym + 64) * sizeof(uint32_t));
-		munmap(W->soff, ((size_t)c->nsym + 64) * sizeof(int32_t));
+		munmap(W->soff, ((size_t)c->nsym + 64) * sizeof(int64_t));
 		munmap(W->lgen, ((size_t)c->nlabel + 64) * sizeof(uint32_t));
 		munmap(W->ulbl, ((size_t)c->nlabel + 64) * sizeof(uint32_t));
 		munmap(W->cgen, ((size_t)c->nnode + 64) * sizeof(uint32_t));
@@ -72,7 +72,7 @@ VPRIV void wk_ecx_free(ecx *e)
 		munmap(W->lcg, ((size_t)c->nlabel + 64) * sizeof(uint32_t));
 		munmap(W->zgen, ((size_t)c->nsym + 64) * sizeof(uint32_t));
 		munmap(W->vgen, ((size_t)c->nnode + 64) * sizeof(uint32_t));
-		munmap(W->voff, ((size_t)c->nnode + 64) * sizeof(int32_t));
+		munmap(W->voff, ((size_t)c->nnode + 64) * sizeof(int64_t));
 	}
 	munmap(W->cases, WK_MAXCASE * sizeof(wkcase));
 	free(W);
@@ -80,23 +80,24 @@ VPRIV void wk_ecx_free(ecx *e)
 }
 
 /* a frame slot of size bytes: its offset from the frame base (negative) */
-VPRIV int32_t wk_slot(ecx *e, uint64_t size, uint32_t align)
+VPRIV int64_t wk_slot(ecx *e, uint64_t size, uint32_t align)
 {
 	wkst *W = e->wk;
 	int64_t o;
 
 	if (align < 1)
 		align = 1;
-	if (size > ((uint64_t)1 << 30))
+	/* Reserve alignment rounding and the prologue's final 16-byte rounding
+	   before adding, so even malformed enormous objects cannot overflow. */
+	uint64_t limit = (uint64_t)INT64_MAX - align - 15;
+	if ((uint64_t)W->foff > limit || size > limit - (uint64_t)W->foff)
 		efatal(e, e->curloc, "x86-64: frame too large");
-	o = (int64_t)W->foff + (int64_t)size;
+	o = W->foff + (int64_t)size;
 	o = (o + align - 1) & ~(int64_t)(align - 1);
-	if (o > INT32_MAX - 15)
-		efatal(e, e->curloc, "x86-64: frame too large");
-	W->foff = (int32_t)o;
+	W->foff = o;
 	if (align > W->falign)
 		W->falign = align;
-	return -(int32_t)o;
+	return -(int64_t)o;
 }
 
 VPRIV uint32_t wk_newlabel(ecx *e) { return ++e->wk->nlabel; }
@@ -1004,7 +1005,7 @@ VPRIV val wk_inline(ecx *e, uint32_t n, uint32_t s)
 	   argument that inlines the same function again cannot overwrite them */
 	{
 		val av[64];
-		int32_t as[64];
+		int64_t as[64];
 
 		for (uint32_t i = 0; i < body->aux; i++) {
 			uint32_t p = c->lists[body->a + i];
@@ -1015,7 +1016,7 @@ VPRIV val wk_inline(ecx *e, uint32_t n, uint32_t s)
 			if (v.k != V_CONST || wk_mem(e, pt) || is_flt(c, pt)) {
 				lval l = { .k = L_FRAME, .off = wk_slot(e, tsize(c, pt) ? tsize(c, pt) : 8, talign(c, pt) < 8 ? 8 : talign(c, pt)), .align = 8 };
 
-				as[i] = (int32_t)l.off;
+				as[i] = (int64_t)l.off;
 				if (wk_mem(e, pt)) {
 					v = wk_putmem(e, &l, pt, v);
 					wk_free(e, &v);

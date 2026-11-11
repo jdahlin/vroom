@@ -138,7 +138,7 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 					   [X_IMUL] = "imul", [X_ADC] = "adc", [X_SBB] = "sbb", [X_ADDI] = "add", [X_SUBI] = "sub", [X_ANDI] = "and", [X_ORI] = "or",
 					   [X_XORI] = "xor", [X_SHLI] = "shl", [X_SHRI] = "shr", [X_SARI] = "sar", [X_SHL] = "shl",
 					   [X_SHR] = "shr", [X_SAR] = "sar", [X_NEG] = "neg", [X_NOT] = "not" };
-	int32_t frame = (e->wk->foff + 15) & ~15;
+	int64_t frame = (e->wk->foff + 15) & ~(int64_t)15;
 
 	tb_s(b, "\tpushq\t%rbp\n\tmovq\t%rsp, %rbp\n");
 	if (e->wk->falign > 16) {
@@ -146,7 +146,11 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 		tb_i(b, -(int64_t)e->wk->falign);
 		tb_s(b, ", %rsp\n\tmovq\t%rsp, %r12\n");
 	}
-	if (frame) {
+	if (frame > INT32_MAX) {
+		tb_s(b, "\tmovabsq\t$");
+		tb_i(b, frame);
+		tb_s(b, ", %r11\n\tsubq\t%r11, %rsp\n");
+	} else if (frame) {
 		tb_s(b, "\tsubq\t$");
 		tb_i(b, frame);
 		tb_s(b, ", %rsp\n");
