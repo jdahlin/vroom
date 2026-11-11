@@ -314,6 +314,12 @@ Riggen sparar mellanresultat och slutar schemalägga när tid eller felgräns
 nås; redan körande prov avslutas. Felgränsen räknar felande prov, inte
 unika kompilatorbuggar. Detta ersätter inte 24h-grinden.
 
+En efterföljande ARM/QEMU-rökprovning med Csmith-frön 3000000–3000019
+(`52261ef`, två arbetare) ger **16 godkända, 0 vcc-fel och 4 filtrerade**
+på grund av clang -O0-körningens timeout. Evidens:
+`work/random-tests/20261111-100225-3305520-aarch64-linux-gnu/`.
+Detta är 20 genererade prov, inte en långkörning.
+
 **Klart när:** 24 h per generator utan avvikelse, på båda målen
 (PLAN-release G1).
 
