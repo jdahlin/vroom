@@ -246,6 +246,17 @@ static int primary(Lx *l, Val *v)
 		v->c = c == '~' ? ~v->c : !v->c;
 		return 0;
 	}
+	if (c == '%' && a->o->machine == EM_X86_64) {
+		/* a register as a value (.if \\reg == %rsp): its name's hash, the same for the same register */
+		const char *p = l->p + 1, *s = p;
+		while (p < l->e && (isidc((unsigned char)*p) || c_digit((unsigned char)*p))) p++;
+		if (p == s) return err(a, "unknown token in expression");
+		uint64_t h = 1469598103934665603ull;
+		for (const char *q = s; q < p; q++) h = (h ^ (uint64_t)c_lower((unsigned char)*q)) * 1099511628211ull;
+		l->p = p;
+		*v = (Val){ 0, 0, (int64_t)(h >> 2) | ((int64_t)1 << 61) };
+		return 0;
+	}
 	if (c_digit((unsigned char)c)) return parse_number(l, v);
 	if (c == '\'') {
 		const char *p = l->p + 1;
@@ -280,6 +291,15 @@ static int primary(Lx *l, Val *v)
 		}
 		uint32_t y = sym(a, s, (size_t)(p - s));
 		*v = (Val){ y, 0, 0 };
+		if (a->nralias) {
+			const char *rn = as_ralias(a, y);
+			if (rn) {	/* an alias of a register: as the register */
+				uint64_t h = 1469598103934665603ull;
+				for (const char *q = rn; *q; q++) h = (h ^ (uint64_t)c_lower((unsigned char)*q)) * 1099511628211ull;
+				*v = (Val){ 0, 0, (int64_t)(h >> 2) | ((int64_t)1 << 61) };
+				return 0;
+			}
+		}
 		if (a->vcount) {
 			Var *vr = var_slot(a, y, 0);
 			if (vr && vr->v.add != (uint32_t)-1) *v = vr->v;
@@ -1360,10 +1380,44 @@ static int d_size(As *a, const char *p, const char *e)
 }
 
 /* name = expr / .set name, expr */
+/* x86: the register sym was made an alias of, or NULL */
+VPRIV const char *as_ralias(As *a, uint32_t y)
+{
+	for (uint32_t i = a->nralias; i-- > 0;)
+		if (a->ralias[i].sym == y)
+			return a->ralias[i].reg[0] ? a->ralias[i].reg : NULL;
+	return NULL;
+}
+
 static int assign(As *a, Sv n, const char *p, const char *e)
 {
 	uint32_t y = sym(a, n.s, n.n);
 	Val v;
+	if (a->o->machine == EM_X86_64) {
+		/* name = %reg: the register by another name (crypto code), not a symbol */
+		const char *q = ws(p, e), *r;
+		const char *t = e;
+		while (t > q && (t[-1] == ' ' || t[-1] == '\t')) t--;
+		if (q < t && *q == '%') {
+			for (r = q + 1; r < t && (isidc((unsigned char)*r) || c_digit((unsigned char)*r)); r++)
+				;
+			if (r == t && r - q - 1 < 8) {
+				if (a->nralias == a->raliascap) {
+					uint32_t nc = a->raliascap ? a->raliascap * 2 : 32;
+					void *nb = rget(&a->defs, sizeof *a->ralias * nc);
+					if (a->nralias) memcpy(nb, a->ralias, sizeof *a->ralias * a->nralias);
+					a->ralias = nb, a->raliascap = nc;
+				}
+				a->ralias[a->nralias].sym = y;
+				memset(a->ralias[a->nralias].reg, 0, 8);
+				memcpy(a->ralias[a->nralias].reg, q + 1, (size_t)(r - q - 1));
+				a->nralias++;
+				return 0;
+			}
+		}
+		for (uint32_t i = 0; i < a->nralias; i++)	/* (redefined as a value: no longer an alias) */
+			if (a->ralias[i].sym == y) a->ralias[i].reg[0] = 0;
+	}
 	if (val_expr(a, &p, e, &v)) return -1;
 	elf_reg(a->o, y);
 	elf_reg(a->o, v.add); elf_reg(a->o, v.sub);

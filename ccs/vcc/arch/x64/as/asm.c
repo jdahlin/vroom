@@ -6,7 +6,7 @@
  */
 #include "../../../as/asimpl.h"
 
-enum { XR_NONE, XR_GPR, XR_XMM, XR_ST, XR_SEG, XR_RIP };
+enum { XR_NONE, XR_GPR, XR_XMM, XR_ST, XR_SEG, XR_RIP, XR_CR, XR_DR };
 enum { XK_REG, XK_IMM, XK_MEM, XK_EXPR };	/* XK_EXPR: a bare expression (branch target, absolute memory) */
 /* relocation modifiers: sym@MOD */
 enum { XM_NONE, XM_PLT, XM_GOTPCREL, XM_TPOFF, XM_GOTTPOFF, XM_TLSGD, XM_TLSLD, XM_DTPOFF, XM_GOTOFF, XM_GOT };
@@ -67,6 +67,17 @@ static int x64_regname(const char *s, size_t n, XOp *o)
 		return 0;
 	}
 	if (!strcmp(b, "rip")) { o->cls = XR_RIP; return 0; }
+	if ((!strncmp(b, "cr", 2) || !strncmp(b, "db", 2) || !strncmp(b, "dr", 2)) && c_digit((unsigned char)b[2])) {
+		int r = atoi(b + 2);
+		const char *t = b + 2;
+
+		while (c_digit((unsigned char)*t))
+			t++;
+		if (r > 15 || *t)
+			return -1;
+		o->cls = b[0] == 'c' ? XR_CR : XR_DR, o->reg = (uint8_t)r, o->size = 8;
+		return 0;
+	}
 	if (!strcmp(b, "fs")) { o->cls = XR_SEG, o->reg = 0x64; return 0; }
 	if (!strcmp(b, "es")) { o->cls = XR_SEG, o->reg = 0x26; return 0; }
 	if (!strcmp(b, "ds")) { o->cls = XR_SEG, o->reg = 0x3e; return 0; }
@@ -662,6 +673,37 @@ VPRIV int x64_instruction(As *a, const char *p, const char *e, size_t wn)
 		}
 		return 0;
 	}
+	if (a->nralias) {
+		/* register aliases (name = %reg) written out as their registers */
+		static _Thread_local char rb[4096];
+		size_t n = 0;
+		int sub = 0;
+
+		for (const char *q = p; q < e && n < sizeof rb - 16;) {
+			if (isids((unsigned char)*q) && (q == p || (!isidc((unsigned char)q[-1]) && q[-1] != '%' && q[-1] != '$' && q[-1] != '.'))) {
+				const char *t = q;
+				const char *rn;
+
+				while (t < e && isidc((unsigned char)*t))
+					t++;
+				rn = as_ralias(a, elf_sym_lookup(a->o, q, (uint32_t)(t - q)));
+				if (rn && n + 10 < sizeof rb) {
+					rb[n++] = '%';
+					for (; *rn; rn++)
+						rb[n++] = *rn;
+					sub = 1;
+				} else {
+					memcpy(rb + n, q, (size_t)(t - q) < sizeof rb - 16 - n ? (size_t)(t - q) : 0);
+					n += (size_t)(t - q);
+				}
+				q = t;
+				continue;
+			}
+			rb[n++] = *q++;
+		}
+		if (sub)
+			p = rb, e = rb + n;
+	}
 	while (p < e) {
 		if (nops == 4)
 			return err(a, "too many operands");
@@ -692,6 +734,18 @@ VPRIV int x64_instruction(As *a, const char *p, const char *e, size_t wn)
 				b[0] = 0x66;
 			return z == 8 || z == 2 ? x64_raw(a, b, 2) : x64_raw(a, b + 1, 1);
 		}
+	}
+	/* ---- mov to and from control and debug registers (always 64-bit) ---- */
+	if (nops == 2 && (!strcmp(mn, "mov") || !strcmp(mn, "movq")) &&
+	    ((o[0].kind == XK_REG && (o[0].cls == XR_CR || o[0].cls == XR_DR)) ||
+	     (o[1].kind == XK_REG && (o[1].cls == XR_CR || o[1].cls == XR_DR)))) {
+		bool to = o[1].cls == XR_CR || o[1].cls == XR_DR;
+		XOp *sr = to ? &o[1] : &o[0], *g = to ? &o[0] : &o[1];
+		uint8_t ops[2] = { 0x0f, (uint8_t)((sr->cls == XR_CR ? 0x20 : 0x21) | (to ? 2 : 0)) };
+
+		if (g->kind != XK_REG || g->cls != XR_GPR || g->size != 8)
+			return err(a, "invalid operand for instruction");
+		return x64_emit(a, &F(.op = ops, .nop = 2, .reg = sr->reg, .rm = g));
 	}
 	/* ---- no operands ---- */
 	{
