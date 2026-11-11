@@ -413,3 +413,11 @@ slot-observable, switch-plan och debugrader passerar i båda byggsätten.
 ASan/UBSan passerar IEEE, konstantprov och snapshot/replay på båda målen.
 CI kör nu flyttalsmatrisen och sanitizer-replay. Evidens:
 `work/results/bitint-float-main-reviewed/`.
+
+Importen ovanpå PR #60 behåller dess fulla Linux-baslinjer och ändrar
+endast flyttalsuppföljningen. Båda oförändrade x86-Kefir-fallen
+`bitint_cast_fix2` och `bitint_typeconv6` är nu 2/2 godkända med fyra
+kompilatorkombinationer vardera; motsvarande standard-ARM-körning
+redovisar två Clang-referensavvisningar. Det breda ARM-värdebeviset
+kommer från IEEE-matrisen och de separat redovisade vcc-kalleeanropen.
+G1/G2 och strikt flyttalsmiljö är fortsatt öppna.
