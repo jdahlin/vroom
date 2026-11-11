@@ -58,9 +58,11 @@ arm64)
 	build vcc
 	if [ "$(uname -s)/$(uname -m)" = Linux/x86_64 ]; then
 		step interrupt python3 bench/vcc-interrupt.py
+		step x86-intrinsics-wide env VPP="$BUILD/vpp" CLANG="${LLVM:-/usr/lib/llvm-23}/bin/clang" python3 bench/vcc-x86-wide.py
 	fi
 	step runtime-exceptions python3 bench/test-runtime-exceptions.py
 	step memory-cells-generated python3 bench/gen-memory-cells.py --check
+	step x86-intrinsic-data python3 bench/test-x86-intrinsic-data.py
 	step ctests       python3 bench/vcc-ctests.py -j "$J"
 	step switch-plan python3 bench/vcc-switch-plan.py --sanitize
 	step udivconst python3 bench/vcc-udivconst.py --sanitize
