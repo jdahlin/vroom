@@ -65,12 +65,12 @@ try:
  lines=[int(n) for n in re.findall(r'vector-reject\.c:(\d+):\d+: error: vector integer elements wider than 128 bits are not supported',q.stderr)]
  if q.returncode==0 or lines!=[2,3,4,5] or q.stderr.count(': error:')!=4:raise RuntimeError('wide vector rejection mismatch: '+q.stderr)
  for filename,expected,number in [
-  ('runtime-to-float-reject.c','floating conversion',1),
-  ('runtime-from-float-reject.c','floating conversion',1),
   ('switch-large-reject.c','wide integer constant is not representable in this 128-bit constant-expression context',4)]:
   cmd=[vpp,target,'-std=c23','-S',str(testdir/filename),'-o',str(out/'unsupported.s')]
   q=subprocess.run(cmd,capture_output=True,text=True,timeout=60)
   records.append(dict(argv=cmd,rc=q.returncode,stderr=q.stderr,stdout=q.stdout))
   if q.returncode<=0 or q.stderr.count(expected)!=number:raise RuntimeError('unsupported contract mismatch: '+q.stderr)
+ for filename in ['runtime-to-float.c','runtime-from-float.c']:
+  run([vpp,target,'-std=c23','-S',str(testdir/filename),'-o',str(out/'supported.s')])
  print(f'{count} static values and constexpr contracts passed: '+', '.join(n for n,_ in compilers))
 finally:(out/'commands.json').write_text(json.dumps(records,indent=2))

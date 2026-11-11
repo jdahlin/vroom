@@ -1132,6 +1132,7 @@ static val gen_inner(ecx *e, uint32_t n)
 		return vreg(r);
 	}
 	case N_CAST:
+		if (x->c) return gen(e, x->c);
 		switch (x->aux) {
 		case CK_DECAY: {
 			lval l = gen_lval(e, x->a);

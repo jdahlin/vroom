@@ -212,6 +212,8 @@ static inline bool is_int_kind(int k);
 static inline bool is_flt_kind(int k);
 VPRIV bool is_integer(cc *c, qty t);
 VPRIV bool is_bigint(cc *c, qty t);
+VPRIV uint32_t big_float_cast(cc *, uint32_t, qty);
+VPRIV uint32_t big_bitcount(cc *, int, uint32_t, uint32_t, unsigned, uint32_t);
 VPRIV bool big_conversion_exact(cc *, const cval *, qty, qty);
 VPRIV char *big_value_string(cc *, const cval *, qty);
 VPRIV uint32_t mk_big_words(cc *, const uint32_t *, qty, uint32_t);
