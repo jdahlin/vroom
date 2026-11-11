@@ -318,6 +318,15 @@ måste hållas synlig vid nästa premerge. De tre `pr84682`-asmfallen är nu
 riktat gröna på båda Linux-målen utan nya kodändringar; asm-runtime går
 7/7 x86 med två tidigare undantag och 9/9 ARM.
 
+128-bitars bitfält är rättade på båda Linux-målen: ARM:s ogiltiga
+`UBFM #64` och x86:s råa objektläsning ersätts av ordvis extraktion och
+inlagring med signerad utvidgning. `pr89091` går i fem GCC-konfigurationer
+per mål (en explicit upstream-filtrering). Regressioner täcker 63–128
+bitars fält, packade offset, höga ord, trunkerade tilldelningsresultat,
+inkrement och grannfält, inklusive objekt mot en skyddssida. Unity/nonunity
+och riktade runtime-prov vid -O0/-O2 går grönt på båda målen. De fulla
+baslinjesiffrorna ovan gäller fortfarande före denna rättning.
+
 Kvar:
 - Alla återstående matchande filer och optimeringskonfigurationer; nästlade
   kataloger med egna `.exp`-drivrutiner och LTO har ännu ingen motsvarighet.
