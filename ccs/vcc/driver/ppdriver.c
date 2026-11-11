@@ -971,6 +971,27 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 		if (!strcmp(a, "-trigraphs") || !strcmp(a, "-ftrigraphs")) { tri = 1; continue; }
 		if (!strcmp(a, "-fno-trigraphs")) { tri = 0; continue; }
 		if (!strcmp(a, "-fgnu89-inline")) { gnu89_inline = 1; continue; }
+		{
+			/* gcc-only options clang 23 rejects: rejected too, so configure and kbuild probes
+			   (cc-option) choose what they choose with clang */
+			static const char *const gcconly[] = {
+				"--param", "-fdiagnostics-show-context", "-falign-jumps", "-finline-stringops",
+				"-fno-allow-store-data-races", "-fallow-store-data-races", "-fzero-init-padding-bits",
+				"-fmin-function-alignment", "-mnop-mcount", "-mrecord-mcount", "-fconserve-stack",
+				"-fno-var-tracking-assignments", "-mpreferred-stack-boundary",
+				"-mindirect-branch=", "-mindirect-branch-register",
+			};
+
+			for (size_t k = 0; k < sizeof gcconly / sizeof *gcconly; k++) {
+				size_t n = strlen(gcconly[k]);
+
+				if (!strncmp(a, gcconly[k], n) && (!a[n] || a[n] == '=' || gcconly[k][n - 1] == '=')) {
+					dprintf(errfd, "clang: error: unknown argument: '%s'\n", a);
+					status = 1;
+					goto out;
+				}
+			}
+		}
 		if (!strcmp(a, "-fvcc-kernel")) { vcc_kernel = 1; continue; }
 		if (!strcmp(a, "-fno-gnu89-inline")) { gnu89_inline = 0; continue; }
 		if ((a[1] == 'W' && a[2] && a[3] != ',') || !strcmp(a, "-w") || strstr(a, "-pedantic") == a + (a[1] == '-')) {
