@@ -3068,3 +3068,73 @@ den delade värdens lilla urval bevisar ingen generell tidsvinst. Proveniens,
 flaggor och sampel: `work/opt-profile/double-unary-cost/result.json` och
 `work/opt-profile/double-unary-cputime/kernel-batch-result.json`. G5/G7 och
 generell O2-täckning återstår.
+
+### Nästa steg: begränsad lokal återanvändning av värden (2026-11-11)
+
+En konkret lucka är `(a+b)*(a+b)`: aktuell x86, arm64 och wasm emitterar
+två additioner, medan Clang 23 `-O2` beräknar summan en gång. Även när
+summan tilldelas en lokal variabel beräknas motsvarande uttryck om. Det här
+är lokal CSE, inte löst av identitetsreglerna ovan.
+
+Första kontrollunderlaget är `tests/vcc/local_value_reuse.c`, som körs O0–O3
+på fyra mål via `--rule localvalues`: vanlig återanvändning och kommutering,
+ändrad operand, anrop som ändrar global data, volatile, möjlig pekaralias och
+kontrollflödesjoin. Dessa är endast semantiska regressioner; de bevisar inte
+att någon optimering är implementerad. Basen passerar alla 16 kombinationer.
+
+Genomför i små granskbara steg: (1) beskriv rena heltalsuttryck med typ,
+operation och stabila värdeidentiteter i en begränsad tabell per grundblock;
+kräv budget och billig kandidatkontroll så vanlig kod slipper allokering och
+fullständiga extra vandringar; (2) invalidera vid definitioner, okända effekter,
+kontrollflödesgränser och aliaserande minne; volatile/atomic, trappande och
+flyttalsmiljöberoende operationer får aldrig återanvändas utan separat bevis;
+(3) ge x86/arm64-adaptrarna korrekt registerlivstid, implicit register-/flaggeffekt
+och debugremappning, och wasm en typad lokal/stackhantering snarare än
+assemblertextomskrivning; (4) lägg till kodformskrav först när respektive
+backend implementerats, samt budget-/barriär-/alias-/joinnegativfall och
+O0/noopt-paritet. Mät faktiskt kompilerings-CPU och instruktioner för både
+kontroller och uttrycksmättade filer samt den sammansatta stacken. Ingen av
+punkterna är implementerad eller godkänd ännu; hela O2 och G5/G7 återstår.
+
+Första byggstenen finns lokalt i `emit/flow/values.{h,c}`: en fast 32-platsers
+tabell utan allokering med explicita budgetsteg. Kollision kan bara kasta bort
+möjligheter; vid budgetslut publiceras inga fler fakta före reset. Adaptern
+måste själv skapa nya värde-ID vid definition, nollställa vid barriär och
+bevisa att ett resultat fortfarande finns i en användbar plats. ASan/UBSan-
+kontrakt testar olika nyckeldelar, kollision, blockgräns och budgetslut;
+unity- och filvis bygge samt de 16 semantiska mål-/nivåproven passerar.
+Ingen backend använder tabellen ännu; den optimerar alltså ingen kod och är
+inte en genomförd CSE-lösning. Nästa arbete är en faktisk konsument med säker
+platshantering och dokumenterad kandidat-/kostnadsgräns.
+
+Första konsumenten finns nu i `emit/opt/sibling-values.c`: när båda
+operanderna till en heltalsoperation är rena, strukturellt identiska uttryck
+av ordinära lokala värden, beräknas uttrycket en gång. Begränsningen är 32
+AST-noder och 64 tabelloperationer per kandidat; billig rotkontroll föregår
+allokeringen av den lilla tabellen på stacken. Kollision och budgetslut ger
+konservativ fallback. Kommutativa inre operationer kan ha omvända operander.
+Flyttal, BitInt, indirekta läsningar, volatile, atomic, adresstagna lokaler,
+anrop och obevisade operationer avvisas. Native behåller värdet i separata
+register; wasm använder en typad temporär lokal. Detta är endast återanvändning
+mellan syskon i ett uttryck, inte generell CSE över satser eller block.
+
+O0–O3 körnings-/kodgenereringsprov passerar på x86, arm64, wasm32 och wasm64
+i båda bygglägen, inklusive nästlade uttryck, alias, volatile, atomic, anrop
+och joins. ASan/UBSan-tabellkontrakt passerar; O0/noopt-assembler är identisk
+mot `b261315`. Vcc-sviten passerar 256/256 med en befintlig xfail. Matchad
+Callgrind-korpus mot samma bas gav compiler-Ir +0,085 % x86, +0,088 % arm64,
++0,100 % wasm32, +0,087 % wasm64; 1 %-grinden passerar. Tre växelvisa
+seriella rundor av 28 förprocessade arm64-kärn-TU:er gav median användar-CPU
+0,79110 → 0,79335 s (+0,28 %). Två TU:er är exkluderade och det begränsade
+urvalet på delad värd bevisar inte helt bygges eller wasm-kostnad. Proveniens
+finns i `work/opt-profile/local-values-cost/result.json` och
+`work/opt-profile/local-values-cputime/kernel-batch-result.json`. Återbruk över
+satser/block, generell CSE och G5/G7 återstår.
+
+Efter att #93 mergats till main och arm64:s ABI-ändringar tillkommit byggdes
+båda sidor om mot exakt main `87975fa`. Fyrmålsproven passerar i båda
+bygglägen och arm64:s korskompilator-ABI passerar 34/34. Den matchade fasta
+Callgrind-grinden ger nu compiler-Ir +0,112 % x86, +0,113 % arm64, +0,119 %
+wasm32 och +0,117 % wasm64; 1 %-grinden passerar med samma redovisade
+wasm-uteslutningar. Denna mätning ersätter inte CPU-tid och underlag finns i
+`work/opt-profile/local-values-main-cost/result.json`.

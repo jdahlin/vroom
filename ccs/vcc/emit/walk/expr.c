@@ -1371,6 +1371,16 @@ static val wk_binary(ecx *e, uint32_t n)
 		wk_free(e, &v);
 		return vconst(bound);
 	}
+	if (em_sibling_values(e, n)) {
+		int ra, rb;
+		a = wk_gen(e, x->a);
+		if (a.k == V_CONST)
+			return wk_arith(e, op, x->ty, a, a);
+		ra = wk_reg(e, &a, lt);
+		rb = LO(treg)(e);
+		LO(mov)(e, rb, ra);
+		return wk_arith(e, op, x->ty, a, wk_vreg(rb));
+	}
 	if (unlikely(is_vec(c, x->ty) || is_vec(c, lt) || is_vec(c, rt))) {
 		a = wk_gen(e, x->a);
 		b = wk_rhs(e, &a, x->b, is_vec(c, lt) ? prim(TY_ULONG) : lt);

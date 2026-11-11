@@ -118,6 +118,7 @@ static inline bool inline_only(const sym *y)
 #include "../arch/a64/emit/ins.h"
 #include "rec/rec.h"
 #include "flow/flow.h"
+#include "flow/values.h"
 
 /* references to things with a symbol: kind in the top 4 bits */
 enum { RK_SYM = 0, RK_STR = 1, RK_LBL = 2, RK_NAME = 3, RK_TABLE = 4 };
@@ -579,6 +580,7 @@ VPRIV val a64_sdivconst(ecx *e, val a, const em_sdivconst_recipe *r);
 VPRIV bool em_bound_constant(cc *c, uint32_t n, i128 *value);
 VPRIV int em_cmpbounds(ecx *e, uint32_t n, uint32_t *operand);
 VPRIV int em_repeated_integer(ecx *e, uint32_t n);
+VPRIV bool em_sibling_values(ecx *e, uint32_t n);
 VPRIV uint32_t em_double_unary(ecx *e, uint32_t n);
 
 VPRIV bool em_cmpzero(ecx *e, uint32_t n, uint32_t *operand);

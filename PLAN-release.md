@@ -724,3 +724,7 @@ identitetsreceptet, med NaN-regression och fyrmålsmätning i PLAN-fas2.md.
 
 Dubbla unära heltalsoperationer förenklas gemensamt för alla mål; tester och
 avgränsade kompilatorkostnadsprov finns i PLAN-fas2.md. G5/G7 återstår.
+
+En första budgeterad värdetabell återanvänder säkra identiska syskonuttryck
+på alla mål; tester och avgränsade kompilatorkostnader finns i PLAN-fas2.md.
+Generell lokal CSE, G5/G7 och full O2-täckning återstår.
