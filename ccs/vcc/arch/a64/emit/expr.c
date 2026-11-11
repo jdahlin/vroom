@@ -105,6 +105,58 @@ VPRIV void move_to(ecx *e, int r, int r2, val *v, qty t)
 	}
 }
 
+/* In the pressure retry, a conditional's merge value waits in the frame
+ * instead of reserving temporaries across arbitrarily nested alternatives. */
+static void cond_spill_value(ecx *e, int64_t sl, qty t, val *v)
+{
+	bool wide = is_wide(e->c, t);
+
+	if (wide)
+		toreg2(e, v, is_signed(e->c, t));
+	else
+		toreg(e, v);
+	mem(e, I_ST, 3, 0, v->r, FRAME, sl);
+	if (wide)
+		mem(e, I_ST, 3, 0, v->r2, FRAME, sl + 8);
+}
+
+static val gen_cond_spill(ecx *e, uint32_t n)
+{
+	cc *c = e->c;
+	const node *x = N(n);
+	qty t = x->ty;
+	bool wide = is_wide(c, t);
+	int64_t sl = slot(e, wide ? 16 : 8, 8);
+	uint32_t lelse = newlabel(e), lend = newlabel(e);
+	val v = gen(e, x->a);
+
+	if (!x->b) {
+		/* GNU a ?: c evaluates a once; save it before the truth test
+		   consumes its registers. The false alternative may then reuse them. */
+		cond_spill_value(e, sl, t, &v);
+		test_zero(e, &v, t, lend, true);
+	} else {
+		test_zero(e, &v, N(x->a)->ty, lelse, false);
+		v = gen(e, x->b);
+		cond_spill_value(e, sl, t, &v);
+		val_free(e, &v);
+		jump(e, lend);
+		deflabel(e, lelse);
+	}
+	v = gen(e, x->c);
+	cond_spill_value(e, sl, t, &v);
+	val_free(e, &v);
+	deflabel(e, lend);
+	v = vreg(treg(e));
+	mem(e, I_LD, 3, 0, v.r, FRAME, sl);
+	if (wide) {
+		v.k = V_REG2;
+		v.r2 = treg(e);
+		mem(e, I_LD, 3, 0, v.r2, FRAME, sl + 8);
+	}
+	return v;
+}
+
 static val gen_cond_expr(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
@@ -115,6 +167,8 @@ static val gen_cond_expr(ecx *e, uint32_t n)
 	int r = -1, r2 = -1;
 	val v;
 
+	if (unlikely(e->spill) && !vd)
+		return gen_cond_spill(e, n);
 	if (!x->b) {		/* a ?: c */
 		v = gen(e, x->a);
 		if (!is_flt(c, t) && (v.k == V_CONST || v.k == V_ADDR)) {
