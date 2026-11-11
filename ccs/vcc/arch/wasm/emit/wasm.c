@@ -420,8 +420,7 @@ VPRIV bool wreg_ok(ecx *e, uint32_t s)
 	const sym *y = &c->syms[s];
 	int k = wty(c, y->ty);
 
-	return k != WT_MEM && k != WT_NONE && !e->E->lnoreg[s] && !(y->flags & SF_ADDR_TAKEN) &&
-	       !(QQ(y->ty) & Q_VOLATILE) && !sym_attrs(c, s)->cleanup && !(T(c, y->ty)->flags & TF_ATOMIC);
+	return k != WT_MEM && k != WT_NONE && em_local_eligible(e, s);
 }
 
 /* the parameters: wasm locals 0.. as the ABI passes them, bound to locals or frame slots */

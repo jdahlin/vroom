@@ -197,6 +197,8 @@ VPRIV lval wk_lval(ecx *e, uint32_t n)
 			return wk_fromval(e, wk_vreg(r), c->syms[s].ty);
 		}
 		if (is_local_var(c, s)) {
+			if (LO(local)(e, s, &l))
+				return l;
 			l.k = L_FRAME;
 			l.off = wk_local(e, s);
 			l.align = sym_align(c, s);
@@ -836,6 +838,34 @@ static val wk_arith(ecx *e, int op, qty t, val a, val b)
 		return LO(wbin)(e, op, wk_signed(c, t), a, b);
 	if (a.k == V_CONST && b.k == V_CONST && wk_fold(c, op, t, a.i, b.i, &r))
 		return vconst(r);
+	if (b.k == V_CONST) {
+		int id = em_bin_identity(c, t, op, b.i);
+
+		if (id == EM_ID_LEFT) {
+			int size = wk_size(c, t);
+
+			if (a.k == V_CONST)
+				return wk_const(c, a.i, t);
+			if (size <= 4) {
+				int ra = wk_reg(e, &a, t);
+
+				/* Keep narrow results extended; a 32-bit operation clears high bits. */
+				LO(ext)(e, ra, size, size < 4 && wk_signed(c, t));
+			}
+			return a;
+		}
+		if (id == EM_ID_ZERO || id == EM_ID_ONES) {
+			wk_free(e, &a);
+			return wk_const(c, id == EM_ID_ZERO ? 0 : -1, t);
+		}
+		{
+			em_sdivpow2_recipe recipe;
+
+			if (em_sdivpow2(c, t, op, b.i, &recipe))
+				return wk_sdivpow2(e, t, a, &recipe);
+		}
+		em_divpow2(c, t, &op, &b.i);
+	}
 	if (a.k == V_ADDR && b.k == V_CONST && (op == T_PLUS || op == T_MINUS))
 		return (val){ .k = V_ADDR, .ref = a.ref, .i = op == T_PLUS ? a.i + b.i : a.i - b.i };
 	{
@@ -2257,8 +2287,6 @@ static val wk_builtin(ecx *e, uint32_t n)
 		int r = wk_reg(e, &p, prim(TY_ULONG));
 
 		if (x->aux == BI_SETJMP) {
-			if (e->wk->falign > 16)
-				wk_unsup(e, n, "__builtin_setjmp in a function with locals aligned above 16");
 			return LO(setjmp)(e, r);
 		}
 		{

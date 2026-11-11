@@ -192,30 +192,26 @@ static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int
 	out_chunk(e, (uint64_t)s << 1, start);
 }
 
-/* drop each b to a label among those right after it: the code falls through anyway */
+typedef struct a64_fallthrough_debug {
+	ecx *e;
+	uint32_t cursor;
+} a64_fallthrough_debug;
+
+static void a64_fallthrough_remap(void *ctx, uint32_t old, uint32_t next)
+{
+	a64_fallthrough_debug *d = ctx;
+
+	dbg_remap(d->e, &d->cursor, old, next);
+}
+
 static void drop_fallthrough(ecx *e)
 {
-	uint32_t n = 0, dj = 0;
+	static const em_rec_layout layout = {
+		sizeof(ins), offsetof(ins, op), offsetof(ins, label), I_B, I_LABEL,
+	};
+	a64_fallthrough_debug d = { e, 0 };
 
-	for (uint32_t k = 0; k < e->nin; k++) {
-		const ins *i = &e->in[k];
-
-		if (e->ndl)
-			dbg_remap(e, &dj, k, n);
-
-		if (i->op == I_B) {
-			uint32_t j = k + 1;
-
-			while (j < e->nin && e->in[j].op == I_LABEL && e->in[j].label != i->label)
-				j++;
-			if (j < e->nin && e->in[j].op == I_LABEL)
-				continue;
-		}
-		e->in[n++] = *i;
-	}
-	if (e->ndl)
-		dbg_remap(e, &dj, UINT32_MAX, n);
-	e->nin = n;
+	e->nin = em_rec_fallthrough(e->in, e->nin, &layout, e->ndl ? a64_fallthrough_remap : NULL, &d);
 }
 
 static void finish_function(ecx *e, uint32_t s)
@@ -236,6 +232,8 @@ static void finish_function(ecx *e, uint32_t s)
 		uint64_t u;
 		const uint32_t csm = (1u << 29) - (1u << 19);	/* x19-x28 */
 
+		if (!e->E->noopt)
+			a64_unreachable(e);
 		drop_fallthrough(e);
 		if (!e->E->noopt)
 			opt_function(e);
@@ -430,35 +428,14 @@ static void finish_function(ecx *e, uint32_t s)
  */
 static void choose_lregs(ecx *e, uint32_t s, int max)
 {
-	cc *c = e->c;
-	emitter *E = e->E;
-	uint32_t lo = E->lspan[2 * s], hi = E->lspan[2 * s + 1];
-	int k = 0;
+	unsigned k;
 	uint32_t cand[MAXLREG];
 
 	e->nlr = 0;
-	if (!max || lo > hi || e->vararg || e->E->o->opt < 1)
+	if (!max || e->vararg || e->E->o->opt < 1)
 		return;
-	for (uint32_t v = lo; v <= hi; v++) {
-		const sym *y = &c->syms[v];
-		qty t = y->ty;
-		int j;
-
-		if (!E->luse[v] || E->lnoreg[v] || y->kind != S_VAR || !is_local_var(c, v) || y->sc == SC_STATIC ||
-		    !(is_integer(c, t) || is_ptr(c, t)) || is_wide(c, t) || (QQ(t) & Q_VOLATILE) ||
-		    tsize(c, t) - 1 >= 8 || (T(c, t)->flags & (TF_VLA | TF_ATOMIC)) || sym_attrs(c, v)->cleanup ||
-		    regvar_reg(c, v) >= 0)
-			continue;
-		if (k == max && E->luse[cand[k - 1]] >= E->luse[v])
-			continue;
-		j = k < max ? k++ : k - 1;
-		while (j > 0 && E->luse[cand[j - 1]] < E->luse[v]) {
-			cand[j] = cand[j - 1];
-			j--;
-		}
-		cand[j] = v;
-	}
-	for (int i = 0; i < k; i++) {
+	k = em_select_locals(e, s, cand, (unsigned)max, em_local_gpr_type);
+	for (unsigned i = 0; i < k; i++) {
 		int r = 28 - i;
 
 		e->lrsym[i] = cand[i];

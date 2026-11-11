@@ -463,6 +463,8 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 VPRIV void x64_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic)
 {
 	xst *X = e->x64;
+	cc *c = e->c;
+	const node *body = N(c->syms[e->wk->fsym].body);
 	int gp = 0, fp = 0;
 	int64_t stk = 0;
 
@@ -475,6 +477,10 @@ VPRIV void x64_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic)
 	}
 	for (int k = 0; k < n; k++) {
 		int ng = x64_need(&a[k], WA_INT), nf = x64_need(&a[k], WA_SSE);
+		uint32_t sym = c->lists[body->a + (uint32_t)k];
+		qty ty = c->syms[sym].ty;
+		lval home;
+		bool local = x64_local(e, sym, &home);
 
 		if (a[k].blanes) {
 			for (uint32_t bit = 0; bit < a[k].blanes; bit++) {
@@ -498,6 +504,14 @@ VPRIV void x64_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic)
 		if (!a[k].mem && a[k].n == 0)
 			continue;
 		if (!a[k].mem && gp + ng <= 6 && fp + nf <= 8) {
+			if (local) {
+				/* Selected homes are scalar integer/pointer words. Bind directly
+				   without creating a stack copy; preserve the usual ABI count. */
+				lval from = { .k = L_VREG, .r = (uint8_t)x64_argreg(gp++) };
+
+				x64_load(e, home.r, &from, wk_size(c, ty), wk_signed(c, ty));
+				continue;
+			}
 			for (int w = 0; w < a[k].n; w++) {
 				lval d = x64_fr(a[k].slot + 8 * w);
 
@@ -508,6 +522,11 @@ VPRIV void x64_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic)
 		/* on the stack: the parameter is where the caller put it */
 		stk = (stk + a[k].align - 1) & ~(int64_t)(a[k].align - 1);
 		a[k].slot = 16 + stk;
+		if (local) {
+			lval from = x64_fr(a[k].slot);
+
+			x64_load(e, home.r, &from, wk_size(c, ty), wk_signed(c, ty));
+		}
 		stk += (int64_t)((a[k].size + 7) & ~(uint64_t)7);
 	}
 	X->ngp = gp, X->nfp = fp, X->stk = (int32_t)stk;

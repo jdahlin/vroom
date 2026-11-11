@@ -106,6 +106,7 @@ VPRIV int64_t wk_local(ecx *e, uint32_t s);	/* a local's slot, made on first use
 VPRIV uint32_t wk_newlabel(ecx *e);
 VPRIV val wk_gen(ecx *e, uint32_t n);
 VPRIV lval wk_lval(ecx *e, uint32_t n);
+VPRIV val wk_sdivpow2(ecx *e, qty t, val a, const em_sdivpow2_recipe *r);
 VPRIV int wk_reg(ecx *e, val *v, qty t);
 VPRIV void wk_free(ecx *e, const val *v);
 VPRIV void wk_cond(ecx *e, uint32_t n, bool jump_if, uint32_t lbl);
@@ -198,7 +199,8 @@ VPRIV void LO(named)(ecx *e, uint32_t ref);		/* a label with a symbol name here 
 VPRIV void LO(classify)(ecx *e, qty t, wkarg *a);
 /* r: a record result (its slot receives it), NULL otherwise; retsize/retsgn: a scalar result */
 VPRIV val LO(call)(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool variadic, const wkarg *r, qty rt);
-/* the incoming arguments to their slots; a parameter the caller left on the stack gets that place as its slot */
+/* Incoming arguments to their slots or selected register homes; a parameter
+   left on the stack keeps the caller's location as its slot. */
 VPRIV void LO(params)(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic);
 VPRIV void LO(ret)(ecx *e, val *v, qty t, uint32_t lbl);	/* a scalar result of type t (v may be NULL), then to lbl */
 VPRIV void LO(retrec)(ecx *e, int raddr, const wkarg *r, uint32_t lbl);	/* a record result from the object at raddr */
@@ -206,6 +208,8 @@ VPRIV void LO(va_start)(ecx *e, int rap);			/* the va_list at rap */
 VPRIV int LO(va_arg)(ecx *e, int rap, qty t);		/* the next argument's address */
 /* the function: before its body, and once it is generated (frame, prologue, output) */
 VPRIV void LO(begin)(ecx *e, uint32_t s);
+VPRIV void LO(locals_begin)(ecx *e, uint32_t s);
+VPRIV bool LO(local)(ecx *e, uint32_t s, lval *l);
 VPRIV void LO(finish)(ecx *e, uint32_t s);
 
 #endif

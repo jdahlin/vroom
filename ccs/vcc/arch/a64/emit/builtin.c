@@ -29,7 +29,7 @@ VPRIV bool side_effects(cc *c, uint32_t n)
 		return true;
 	case N_BUILTIN:
 		switch (x->aux) {
-		case BI_VA_START: case BI_VA_COPY: case BI_VA_END: case BI_ALLOCA: case BI_TRAP:
+		case BI_VA_START: case BI_VA_COPY: case BI_VA_END: case BI_ALLOCA: case BI_TRAP: case BI_DEBUGTRAP:
 		case BI_UNREACHABLE:
 		case BI_ADD_OVERFLOW: case BI_SUB_OVERFLOW: case BI_MUL_OVERFLOW:	/* store the result */
 		case BI_ADDC: case BI_SUBC:

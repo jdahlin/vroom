@@ -1172,6 +1172,25 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   register assignment, ABI and structured wasm lowering stay with targets.
   The first rule must be consumed by all three backends, including wasm32
   and wasm64 for supported types. No new IR/SSA or unbounded pass loops.
+  First delivered slice (2026-11-11): unsigned power-of-two div/rem in
+  `emit/opt/divpow2.c`, all three consumers, codegen/runtime checks at O0–O3.
+  Integer identities now live in separate `emit/opt/identity.c`, shared by
+  all targets; keep future algorithms in named files, with small walker
+  adapters. Both build modes pass 32 target/level/rule checks.
+  Next slice: shared `emit/rec/fallthrough.c` on arm64/x86; wasm
+  terminal while-backedge cleanup in separate reachability unit. OPT2
+  now also removes unreachable suffixes and has x86 effect metadata.
+  Shared block/liveness contracts remain pending. Signed power-of-two
+  recipes are in separate sdivpow2.c files; wasm chooses compact div/rem
+  except cheaper -1/MIN cases. OPT3 register locals are next; builtin
+  setjmp now preserves all potential promoted callee-save registers,
+  including inherited R12; final alignment is reconstructed on resume.
+  Shared locals.c eligibility/selection now feeds all targets and x86
+  promotes profitable scalar locals in four callee-save homes. Direct
+  ABI-to-home binding is now direct for selected register/stack parameters;
+  generic copy/extension cleanup and improved profitability remain pending.
+  Wasm checks use our assembler/linker and plain Node; full replacement
+  of Emscripten's test/explorer runtime is tracked in `PLAN-wasm.md` W9.
   *Validate:* common C semantics plus target-specific code assertions;
   extraction commits preserve output byte for byte, activation commits
   pass suites/ABI/stress and relevant debug/kernel gates. Measure compiler
