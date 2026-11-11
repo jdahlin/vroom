@@ -103,6 +103,11 @@ VPRIV bool em_sibling_values(ecx *e, uint32_t n)
  a = N(x->a); b = N(x->b);
  if (a->op != N_BINARY || b->op != N_BINARY || QUNQ(a->ty) != QUNQ(x->ty) ||
      QUNQ(b->ty) != QUNQ(x->ty) || c->nsym >= UINT32_MAX - 32) return false;
+ /* Different unary operations paired with the same plain local cannot
+  * produce the same structural key, even if the binary operator commutes. */
+ if (a->aux == b->aux && N(a->a)->op == N_UNARY && N(b->a)->op == N_UNARY &&
+     N(a->a)->aux != N(b->a)->aux && N(a->b)->op == N_VAR && N(b->b)->op == N_VAR &&
+     N(a->b)->a == N(b->b)->a) return false;
  /* Distinct local operands of ordered shifts cannot have the same value ID.
   * Avoid constructing a value table for this common failed candidate. */
  if (a->aux == b->aux && (a->aux == T_LESSLESS || a->aux == T_GREATERGREATER) &&
