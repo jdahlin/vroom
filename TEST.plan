@@ -384,6 +384,16 @@ unity/nonunity på x86 och ARM/QEMU. ABI-riggen stöder befintligt
 887/887 i både per-process- och batchläge. Övriga lagringsklassdiagnoser
 har inte ändrats av denna länkfix.
 
+`__builtin_powi/powif/powil` använder kompilatorruntime-symbolerna
+`__powidf2`, `__powisf2` respektive målets `__powixf2`/`__powitf2`.
+Det stoppar rekursion till användarens egna wrapper-funktioner i
+`pr19402-2`, utan att ändra vanliga funktionsanrop. Isolerad rättning
+mot `ad4cf9a` klarar originalprovet och regression på båda Linux-målen,
+unity/nonunity; regressionen täcker hjälpar-ABI, en evaluering av varje
+operand, negativa exponenter, INT_MIN, signed zero och NaN/inf upphöjt
+till noll. Kernel-sema 887/887 i båda lägena. Kombinerade fulla totalsiffror
+ovan gäller före denna rättning och följande integration verifieras separat.
+
 Kvar:
 - Alla återstående matchande filer och optimeringskonfigurationer; nästlade
   kataloger med egna `.exp`-drivrutiner och LTO har ännu ingen motsvarighet.
