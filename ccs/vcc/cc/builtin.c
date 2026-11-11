@@ -1142,6 +1142,94 @@ static uint32_t fixed_bitcount(cc *c, int id, uint32_t x, bool wide, uint32_t lo
 	return mk_builtin(c, fid, prim(TY_INT), loc, &args);
 }
 
+/* A compact limb loop keeps the AST independent of the integer precision.
+ * Explicit declarations preserve operand snapshots across loop iterations. */
+static uint32_t bitcount_local(cc *c, vec *body, qty t, uint32_t init, uint32_t loc)
+{
+	uint32_t sym = sym_new(c, S_VAR, 0, t, loc);
+	c->syms[sym].sc = SC_AUTO;
+	uint32_t var = mk(c, N_VAR, t, loc);
+	N(var)->a = sym;
+	N(var)->flags = NF_LVALUE;
+	vpush(c, body, mk2(c, N_DECL, prim(TY_VOID), loc, sym, init));
+	return var;
+}
+
+static void bitcount_statement(cc *c, vec *body, uint32_t n, uint32_t loc)
+{
+	vpush(c, body, mkstmt(c, N_EXPR, loc, n, 0, 0));
+}
+
+static uint32_t big_bitcount(cc *c, int id, uint32_t x, uint32_t fallback, unsigned bits, uint32_t loc)
+{
+	cval cv;
+	unsigned limbs = (bits + 63) / 64;
+	if (cc_eval(c, x, &cv) && cv.kind == CV_BIGINT && cv.ice) {
+		unsigned count = 0, words = (bits + 31) / 32;
+		bool nonzero = false;
+		for (unsigned j = 0; j < words; j++) {
+			unsigned i = id == BI_CLZG ? words - 1 - j : j;
+			uint32_t w = c->lists[cv.big + i];
+			if (i == words - 1 && (bits & 31))
+				w &= UINT32_MAX >> (32 - (bits & 31));
+			nonzero |= w != 0;
+			if (id == BI_POPCOUNTG)
+				count += (unsigned)__builtin_popcount(w);
+			else if (w) {
+				count += (unsigned)(id == BI_CLZG ? __builtin_clz(w) : __builtin_ctz(w));
+				break;
+			} else count += 32;
+		}
+		if (!nonzero && fallback)
+			return fallback;
+		if (id == BI_CLZG) count -= words * 32 - bits;
+		return with_pre(c, fallback, mk_int(c, count, prim(TY_INT), loc));
+	}
+	vec body, loop, found;
+	vinit(&body); vinit(&loop); vinit(&found);
+	uint32_t value = bitcount_local(c, &body, QUNQ(N(x)->ty), x, loc);
+	uint32_t fb = fallback ? bitcount_local(c, &body, prim(TY_INT), fallback, loc) : 0;
+	uint32_t result = bitcount_local(c, &body, prim(TY_INT), mk_int(c, 0, prim(TY_INT), loc), loc);
+	uint32_t index = bitcount_local(c, &body, prim(TY_INT), mk_int(c, id == BI_CLZG ? limbs - 1 : 0, prim(TY_INT), loc), loc);
+	uint32_t address = mk(c, N_ADDR, ty_ptr(c, N(value)->ty), loc);
+	N(address)->a = value;
+	address = cast_node(c, address, ty_ptr(c, prim(TY_ULLONG)), CK_NOP);
+	uint32_t word = rvalue(c, deref(c, binop(c, T_PLUS, address, rvalue(c, index), loc), loc));
+	if (bits & 63) {
+		uint32_t top = binop(c, T_EQUALEQUAL, rvalue(c, index), mk_int(c, limbs - 1, prim(TY_INT), loc), loc);
+		uint32_t mask = mk_int(c, (i128)(UINT64_MAX >> (64 - (bits & 63))), prim(TY_ULLONG), loc);
+		word = conditional(c, top, binop(c, T_AMP, word, mask, loc), word, loc);
+	}
+	word = bitcount_local(c, &loop, prim(TY_ULLONG), word, loc);
+	uint32_t count = fixed_bitcount(c, id, rvalue(c, word), true, loc);
+	if (id == BI_POPCOUNTG) {
+		bitcount_statement(c, &loop, assign(c, T_PLUS, result, count, loc), loc);
+	} else {
+		bitcount_statement(c, &found, assign(c, T_PLUS, result, count, loc), loc);
+		vpush(c, &found, mkstmt(c, N_BREAK, loc, 0, 0, 0));
+		uint32_t block = mkstmt(c, N_BLOCK, loc, 0, vfreeze(c, &found), found.n);
+		vpush(c, &loop, mkstmt(c, N_IF, loc, rvalue(c, word), block, 0));
+		bitcount_statement(c, &loop, assign(c, T_PLUS, result, mk_int(c, 64, prim(TY_INT), loc), loc), loc);
+	}
+	bitcount_statement(c, &loop, assign(c, id == BI_CLZG ? T_MINUS : T_PLUS, index, mk_int(c, 1, prim(TY_INT), loc), loc), loc);
+	uint32_t cond = binop(c, id == BI_CLZG ? T_GREATEREQ : T_LESS, rvalue(c, index),
+	                     mk_int(c, id == BI_CLZG ? 0 : limbs, prim(TY_INT), loc), loc);
+	uint32_t block = mkstmt(c, N_BLOCK, loc, 0, vfreeze(c, &loop), loop.n);
+	vpush(c, &body, mkstmt(c, N_WHILE, loc, cond, block, 0));
+	uint32_t out = rvalue(c, result);
+	if (id == BI_CLZG && (bits & 63))
+		out = binop(c, T_MINUS, out, mk_int(c, limbs * 64 - bits, prim(TY_INT), loc), loc);
+	if (fb) {
+		uint32_t zero = binop(c, T_EQUALEQUAL, rvalue(c, result), mk_int(c, limbs * 64, prim(TY_INT), loc), loc);
+		out = conditional(c, zero, rvalue(c, fb), out, loc);
+	}
+	bitcount_statement(c, &body, out, loc);
+	block = mkstmt(c, N_BLOCK, loc, 0, vfreeze(c, &body), body.n);
+	out = mk(c, N_STMTEXPR, prim(TY_INT), loc);
+	N(out)->a = block;
+	return out;
+}
+
 /* Generic bit counts use the operand's precision, without integer promotion.
  * Save effectful operands before selecting a half or the zero fallback; both
  * arguments to a builtin call are evaluated even when the fallback is unused. */
@@ -1159,13 +1247,12 @@ static uint32_t generic_bitcount(cc *c, int id, uint32_t loc)
 	}
 	x = decay(c, args.v[0]);
 	xt = QUNQ(N(x)->ty);
-	if (!is_integer(c, xt) || is_signed(c, xt) || int_bits(c, xt) > 128) {
-		cc_error(c, N(x)->loc, "1st argument must be a scalar unsigned integer type of at most 128 bits");
+	if (!is_integer(c, xt) || is_signed(c, xt)) {
+		cc_error(c, N(x)->loc, "1st argument must be a scalar unsigned integer type");
 		return mk_int(c, 0, prim(TY_INT), loc);
 	}
 	bits = KIND(c, xt) == TY_BOOL ? 1 : int_bits(c, xt);
 	width = bits > 64 ? 128 : bits > 32 ? 64 : 32;
-	x = cplx_reuse(c, x, &pre);
 	if (args.n == 2) {
 		uint32_t y = decay(c, args.v[1]);
 		qty ft = promoted(c, y);
@@ -1173,8 +1260,12 @@ static uint32_t generic_bitcount(cc *c, int id, uint32_t loc)
 			cc_error(c, N(y)->loc, "2nd argument must have type int after integer promotion");
 			return mk_int(c, 0, prim(TY_INT), loc);
 		}
-		fb = cplx_reuse(c, convert(c, y, prim(TY_INT)), &fbpre);
+		fb = convert(c, y, prim(TY_INT));
 	}
+	if (bits > 128)
+		return big_bitcount(c, id, x, fb, bits, loc);
+	x = cplx_reuse(c, x, &pre);
+	if (fb) fb = cplx_reuse(c, fb, &fbpre);
 	if (width == 128) {
 		uint32_t w = convert(c, x, prim(TY_UINT128));
 		uint32_t lo = convert(c, w, prim(TY_ULLONG));
