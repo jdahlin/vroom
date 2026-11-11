@@ -34,6 +34,11 @@ static uint32_t at_call(cc *c, const char *name, qty result, vec *args, uint32_t
 	return call;
 }
 
+VPRIV uint32_t atomic_lock_free_runtime(cc *c, vec *args, uint32_t loc)
+{
+	return at_call(c, "__atomic_is_lock_free", prim(TY_BOOL), args, loc);
+}
+
 static void at_statement(cc *c, vec *body, uint32_t expr, uint32_t loc)
 {
 	vpush(c, body, mkstmt(c, N_EXPR, loc, expr, 0, 0));

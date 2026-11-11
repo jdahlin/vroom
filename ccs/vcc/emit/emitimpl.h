@@ -163,7 +163,7 @@ enum { SA_WRITTEN = 1, SA_CLEANUP_FN = 2, SA_MUSTFOLD = 4, SA_CWRITE = 8, SA_CMU
        SA_AESC = 128 /* a local array used other than as a[CONST] */ };
 /* USED: a local or param read; NOINL: a static local holds a label address (one copy of the code only) */
 /* CWRITE: only ever assigned integer constants (all cwval unless CMULTI) */	/* per sym; MUSTFOLD: a function that calls an error() function */
-enum { NA_LABEL = 1 };				/* per node: statement contains a label or case */
+enum { NA_LABEL = 1, NA_ALLOCA = 2 };				/* per node: statement contains a label or case */
 
 typedef struct emitter {
 	cc *c;

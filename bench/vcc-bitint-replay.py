@@ -10,11 +10,16 @@ out=pathlib.Path(args.output).resolve();out.mkdir(parents=True,exist_ok=True)
 bin=pathlib.Path(args.bin_dir).resolve()/'vpp'
 h=out/'common.h'
 h.write_text('\n'.join(f'constexpr unsigned _BitInt(310) item{i}=((unsigned _BitInt(310))1<<200)+{i};\nstatic_assert((item{i}>>200)==1);' for i in range(180)))
+h.write_text(h.read_text()+'''
+static inline float wide_fp(unsigned _BitInt(310) x) { return x; }
+static inline unsigned _BitInt(310) wide_int(double x) { return x; }
+static inline double wide_constant(void) { return (unsigned _BitInt(310))1 << 200; }
+''')
 records=[]
 for target in ['x86_64-linux-gnu','aarch64-linux-gnu']:
  jobs=[]
  for i in range(8):
-  p=out/f'tu{i}.c';p.write_text(f'#include "common.h"\nunsigned _BitInt(310) result{i}=item179;\n')
+  p=out/f'tu{i}.c';p.write_text(f'#include "common.h"\nunsigned _BitInt(310) result{i}=item179;\nfloat fp{i}(unsigned _BitInt(310) x) {{ return wide_fp(x); }}\nunsigned _BitInt(310) ip{i}(double x) {{ return wide_int(x); }}\ndouble cp{i}(void) {{ return wide_constant(); }}\n')
   args=[f'--target={target}','-std=c23','-S',str(p),'-o',str(out/f'{target}-{i}.s')]
   q=subprocess.run([str(bin),*args],capture_output=True,text=True);assert q.returncode==0,q.stderr
   (out/f'{target}-{i}.reference').write_bytes((out/f'{target}-{i}.s').read_bytes())

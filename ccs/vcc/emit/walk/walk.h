@@ -51,6 +51,7 @@ typedef struct wkinl {
 	qty rty;
 	int64_t rslot;		/* the result's slot (a value held by address: its object) */
 	int cbase;		/* the cleanups live at the call */
+	int vbase;		/* caller VLA saves must outlive callee alloca */
 	bool any, cst_ok;	/* a return seen; every return so far the constant cst */
 	val cst;
 	wkael ael0[16];		/* the caller's known array elements at the call (restored after the copy) */
@@ -68,6 +69,10 @@ typedef struct wkst {
 	   statements being walked (a stack, marked per statement); tf: free. */
 	struct wktslot { int64_t off; uint32_t size, align; } tu[WK_MAXTSLOT], tf[WK_MAXTSLOT];
 	uint32_t ntu, ntf, sdepth;
+	/* the locals of the inline copies being walked: free (and unbound) when
+	   the copy ends; inlocal: inside a copy's parameters or body */
+	struct wklslot { int64_t off; uint32_t size, align, sym; } lu[WK_MAXTSLOT];
+	uint32_t nlu, inlocal;
 	uint32_t nlabel;	/* local labels handed out in this function (1..) */
 	uint32_t gen;		/* bindings below are valid when their gen is this */
 	uint32_t *sgen;		/* per sym */

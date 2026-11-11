@@ -1282,9 +1282,12 @@ VPRIV val wk_inline(ecx *e, uint32_t n, uint32_t s)
 	wkst *W = e->wk;
 	const node *x = N(n), *body = N(c->syms[s].body);
 	wkinl I = { .up = W->inl, .fn = s, .call = n, .endlbl = wk_newlabel(e), .rty = T(c, c->syms[s].ty)->base, .cbase = W->nclean,
-		    .cst_ok = true };
+		    .cst_ok = true, .vbase = W->nvla };
 	uint32_t inst0 = W->inst;
+	int64_t saved_sp = 0;
 	val res;
+
+	uint32_t lmark = W->nlu;
 
 	memcpy(I.ael0, W->ael, sizeof I.ael0), I.nael0 = W->nael;
 	walk_fn(e, s);
@@ -1325,6 +1328,7 @@ VPRIV val wk_inline(ecx *e, uint32_t n, uint32_t s)
 			}
 			av[i] = v;
 		}
+		W->inlocal++;
 		for (uint32_t i = 0; i < body->aux; i++) {
 			uint32_t p = c->lists[body->a + i];
 			qty pt = c->syms[p].ty;
@@ -1371,14 +1375,36 @@ VPRIV val wk_inline(ecx *e, uint32_t n, uint32_t s)
 		}
 		wk_vla_scan(e, c->syms[s].body, &top);
 	}
+	/* alloca belongs to this function instance, including its early returns. */
+	if (e->E->nflags[c->syms[s].body] & NA_ALLOCA) {
+		lval l = { .k = L_FRAME, .off = saved_sp = wk_slot(e, 8, 8), .align = 8 };
+		int r = LO(spget)(e);
+		LO(store)(e, r, &l, 8);
+		LO(tfree)(e, r);
+	}
 	W->inst = ++W->ninst;
 	W->inl = &I;
 	W->depth++;
 	wk_stmt(e, c->syms[s].body);
 	W->depth--;
+	W->inlocal--;
+	/* the copy's locals and parameters are dead: their slots free, the symbols unbound */
+	while (W->nlu > lmark) {
+		struct wklslot l = W->lu[--W->nlu];
+
+		W->sgen[l.sym] = 0;
+		if (W->ntf < WK_MAXTSLOT)
+			W->tf[W->ntf++] = (struct wktslot){ l.off, l.size, l.align };
+	}
 	W->inl = I.up;
 	W->inst = inst0;
 	wk_label(e, I.endlbl);
+	if (saved_sp) {
+		lval l = { .k = L_FRAME, .off = saved_sp, .align = 8 };
+		int r = LO(treg)(e);
+		LO(load)(e, r, &l, 8, false);
+		LO(spset)(e, r);
+	}
 	/* the callee cannot touch the caller's non-escaping local arrays: their known
 	   elements (the snapshot at the call) hold past the copy's labels */
 	memcpy(W->ael, I.ael0, sizeof I.ael0), W->nael = I.nael0;
@@ -1422,7 +1448,7 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 	W->gen++;
 	W->foff = 0;
 	W->falign = 16;
-	W->ntu = W->ntf = W->sdepth = 0;
+	W->ntu = W->ntf = W->sdepth = W->nlu = W->inlocal = 0;
 	W->nlabel = 0;
 	W->nloop = 0;
 	W->ncases = 0;

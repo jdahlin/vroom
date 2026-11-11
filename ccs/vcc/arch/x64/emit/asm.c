@@ -446,6 +446,10 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 			o->tied = (int8_t)tied;
 			continue;
 		}
+		/* Flexible FP inputs may stay in memory. Reserving an XMM temporary
+		   for every "xm" input can exhaust the register class even though
+		   the instruction accepts the original scalar memory operand. */
+		if (o->flt && mem_ok && !o->fixed) reg_ok = false;
 		if (mem_ok && !reg_ok && !strpbrk(cs, "inIJKLMNeZ")) {
 			if (N(en)->op == N_CAST && N(en)->aux == CK_DECAY)
 				en = N(en)->a;	/* an array as a memory operand: the array itself */
