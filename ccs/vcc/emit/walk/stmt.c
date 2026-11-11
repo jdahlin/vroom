@@ -293,7 +293,7 @@ VPRIV void wk_cleanups(ecx *e, int to)
 		wkarg a;
 		val r;
 
-		LO(classify)(e, prim(TY_ULONG), &a);
+		LO(classify)(e, prim(TY_ULONG), &a, false);
 		a.slot = wk_slot(e, 8, 8);
 		{
 			int ra = LO(laddr)(e, &l);
@@ -984,6 +984,17 @@ VPRIV bool wk_can_inline(ecx *e, uint32_t s)
 
 	if (!(y->flags & SF_DEFINED) || !y->body || (ft->flags & (TF_VARIADIC | TF_NOPROTO)) || N(y->body)->aux > 64)
 		return false;
+	if (X86(c)) {
+		uint32_t caller = e->wk->inl ? e->wk->inl->fn : e->wk->fsym;
+		x86_features need = cc_x86_features(c, s), have = cc_x86_features(c, caller);
+		if (!x86_features_subset(need, have)) {
+			if (y->flags & SF_ALWAYS_INLINE)
+				for (unsigned bit = 0; bit < X86_FEATURE_COUNT; bit++)
+					if (x86_feature_has(need, bit) && !x86_feature_has(have, bit))
+						efatal(e, e->curloc, "always_inline function requires target feature '%s', but the caller is compiled without it", x86_feature_names[bit]);
+			return false;
+		}
+	}
 	for (uint32_t i = 0; i < N(y->body)->aux; i++)
 		if (vm_type(c, c->syms[c->lists[N(y->body)->a + i]].ty))
 			return false;	/* (a parameter's VLA sizes) */
@@ -1162,7 +1173,7 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 	}
 	W->retlbl = wk_newlabel(e);
 	if (wk_mem(e, W->rty)) {
-		LO(classify)(e, W->rty, &W->rrec);
+		LO(classify)(e, W->rty, &W->rrec, false);
 		W->rrec.slot = wk_slot(e, 8, 8);	/* (memory: the hidden pointer's slot) */
 	}
 	/* parameters: their slots, filled from the registers (or left on the stack) */
@@ -1175,7 +1186,7 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 			efatal(e, c->syms[p].loc, "x86-64: this parameter type is not supported yet (PLAN-x86.md X3)");
 		if ((ft->flags & TF_NOPROTO) && k == TY_FLOAT)
 			pt = prim(TY_DOUBLE);	/* K&R: received as the caller promoted it */
-		LO(classify)(e, pt, &pa[i]);
+		LO(classify)(e, pt, &pa[i], false);
 		pa[i].slot = wk_slot(e, pa[i].size > 8 ? (pa[i].size + 7) & ~(uint64_t)7 : 8, pa[i].align);
 	}
 	LO(params)(e, pa, (int)body->aux, wk_mem(e, W->rty) ? &W->rrec : NULL, (ft->flags & TF_VARIADIC) != 0);

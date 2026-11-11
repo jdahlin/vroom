@@ -94,6 +94,8 @@ put:
 }
 
 static void bstr(buf *b, const char *s) { bput(b, s, strlen(s)); }
+#include "x86predefines.h"
+#include "../lib/x86native.h"
 
 static void define_arg(buf *b, const char *d)
 {
@@ -647,6 +649,83 @@ static __attribute__((noinline)) size_t env_ndirs(const char *v)
 	return k;
 }
 
+/* Resolve CPU first, then feature options in command-line order, as clang. */
+static const char *x86_driver_features(int argc, char **argv,
+                                     x86_features *features, x86_features *disabled,
+                                     x86_features *raw, x86_features *on, x86_features *off,
+                                     const char **cpu)
+{
+ *cpu = "x86-64";
+	for (int i = 1; i < argc; i++)
+		if (!strncmp(argv[i], "-march=", 7)) *cpu = argv[i] + 7;
+	if (!strcmp(*cpu, "native")) {
+		if (!x86_native_features(features, disabled, cpu)) return "native";
+  *on = *features; *off = *disabled;
+	} else if (!x86_cpu_features(*cpu, features)) return *cpu;
+	for (int i = 1; i < argc; i++) {
+		const char *a = argv[i];
+		if (!strncmp(a, "-mcpu=", 6)) return a;
+		if (!strncmp(a, "-mtune=", 7)) {
+			x86_features unused = {0};
+			if (strcmp(a + 7, "generic") && strcmp(a + 7, "native") && !x86_cpu_features(a + 7, &unused)) return a;
+			continue;
+		}
+		if (!strcmp(a, "-mllvm")) { i++; continue; }
+		if (!strcmp(a, "-mgeneral-regs-only")) {
+			const unsigned bits[] = {X86_FEATURE_X87, X86_FEATURE_MMX, X86_FEATURE_SSE};
+			for (unsigned j = 0; j < sizeof(bits)/sizeof(*bits); j++) {
+				x86_feature_apply(features, bits[j], false);
+				for (unsigned w = 0; w < X86_FEATURE_WORDS; w++) {
+					off->bits[w] |= x86_feature_deps[bits[j]][0].bits[w];
+					on->bits[w] &= ~x86_feature_deps[bits[j]][0].bits[w];
+				}
+				disabled->bits[bits[j]/64] |= UINT64_C(1) << (bits[j]%64);
+			}
+			continue;
+		}
+		if (strncmp(a, "-m", 2)) continue;
+		bool enable = strncmp(a, "-mno-", 5) != 0;
+		const char *name = a + (enable ? 2 : 5);
+		if (!strcmp(name, "80387")) name = "x87";
+		if (!strcmp(name, "sse4")) name = enable ? "sse4.2" : "sse4.1";
+		int bit = x86_feature_find(name);
+		if (bit < 0 || !x86_feature_has(x86_cli_valid, (unsigned)bit)) {
+			/* Driver/code-model switches are not instruction-set feature names. */
+			if (!strncmp(name, "arch=", 5) || !strncmp(name, "tune=", 5) ||
+	!strncmp(name, "cmodel=", 7) || !strncmp(name, "stack-alignment=", 16) ||
+	!strncmp(name, "stack-protector-guard", 21) || !strcmp(name, "64") || !strcmp(name, "red-zone") ||
+	!strcmp(name, "stackrealign") || !strcmp(name, "omit-leaf-frame-pointer") ||
+	!strcmp(name, "stack-arg-probe") || !strcmp(name, "accumulate-outgoing-args") ||
+	!strcmp(name, "outline-atomics") || !strcmp(name, "strict-align")) continue;
+			return a;
+		}
+		/* Clang's driver retains only the last spelling of each feature before
+					dependency expansion; an overridden enable must not leave prerequisites. */
+		bool superseded = false;
+		for (int j = i + 1; j < argc; j++) {
+			const char *later = argv[j];
+			if (!strcmp(later, "-mllvm")) { j++; continue; }
+			if (strncmp(later, "-m", 2)) continue;
+			later += strncmp(later, "-mno-", 5) ? 2 : 5;
+			const char *current = a + (enable ? 2 : 5);
+			if (!strcmp(later, current)) { superseded = true; break; }
+		}
+		if (superseded) continue;
+		x86_feature_apply(features, (unsigned)bit, enable);
+		x86_features expanded = x86_feature_change((unsigned)bit, enable);
+		for (unsigned w = 0; w < X86_FEATURE_WORDS; w++) {
+			uint64_t change = expanded.bits[w];
+			if (enable) on->bits[w] |= change, off->bits[w] &= ~change;
+			else off->bits[w] |= change, on->bits[w] &= ~change;
+		}
+		if (!enable) disabled->bits[bit/64] |= UINT64_C(1) << (bit%64);
+		else disabled->bits[bit/64] &= ~(UINT64_C(1) << (bit%64));
+	}
+ *raw = *features;
+	x86_features_finish(features, *disabled);
+	return NULL;
+}
+
 /* -f[un]signed-char against the target's default, the math flags, -pthread */
 static __attribute__((noinline, cold)) void predef_flags(buf *pre, int darwin, int uchar_def, int uchar, int fmath)
 {
@@ -860,6 +939,8 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 	int march_lse = -1, mcpu_lse = -1, lse;
 	int sjlj = 0;
 	int opt = 0, olevel = 0, os = 0, pie = -1, pic = 0, tlsmodel = 0, sections = 0, debug = 0, freestanding = 0, nobuiltin = 0, instr = 0, cfi = -1, strict_align = 0, tiny = 0, gregs = 0;
+	x86_features x86_features_ = {0}, x86_disabled = {0}, x86_raw = {0}, x86_on = {0}, x86_off = {0};
+	const char *x86_cpu = "x86-64";
 	int nosse = 0, nosse2 = 0, nommx = 0;	/* x86-64: -mno-sse, -mno-sse2, -mno-mmx (last one wins) */
 	uint64_t disabled_builtins[CC_DISABLED_BUILTIN_WORDS] = { 0 };
 	pp_opts po = { 0 };
@@ -1150,6 +1231,21 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 				raw_asm = 1;	/* clang: .s is assembled without the preprocessor */
 		}
 	}
+	if (x86) {
+		const char *unsupported = x86_driver_features(argc, argv, &x86_features_, &x86_disabled, &x86_raw, &x86_on, &x86_off, &x86_cpu);
+		if (unsupported) {
+			if (!strcmp(unsupported, "native"))
+				dprintf(errfd, "vcc: error: -march=native requires a matching x86-64 host; use an explicit x86 CPU name for cross-compilation\n");
+			else
+				dprintf(errfd, "vcc: error: unsupported x86 target CPU or feature '%s'\n", unsupported);
+			status = 1;
+			goto out;
+		}
+		nosse = !x86_feature_has(x86_features_, X86_FEATURE_SSE);
+		nosse2 = !x86_feature_has(x86_features_, X86_FEATURE_SSE2);
+		nommx = !x86_feature_has(x86_features_, X86_FEATURE_MMX);
+		gregs = 0; /* already applied in option order; derive SIMD restriction below */
+				}
 	vjob_fail_fd = vjob_escape_fd = errfd;	/* (vccd: the client's stderr, not the server's) */
 	if (badval) {
 		const char *eq = strchr(badval, '=');
@@ -1457,6 +1553,7 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 			   "#undef __ARM_FEATURE_SHA3\n#undef __ARM_FEATURE_SHA512\n#undef __ARM_FP\n"
 			   "#undef __ARM_NEON\n#undef __ARM_NEON_FP\n");
 	if (x86 && !undef) {
+		x86_feature_predefines(&pre, x86_features_, x86_cpu);
 		/* clang: -mgeneral-regs-only is -mno-sse -mno-mmx; without SSE2 no _Float16 either */
 		if (gregs || nosse)
 			bstr(&pre, "#undef __SSE__\n#undef __SSE_MATH__\n");
@@ -1589,6 +1686,7 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 				.std = std, .c2y = std == 23 && stdver && !strcmp(stdver, "202400L"), .implicit_int = std == 89 || wimpl_int, .implicit_fn = std == 89 || wimpl_fn, .conv_warn = conv_warn,
 				.strict_std = strict,
 				.fast_math = fast_root4 && (fmath & 7) == 7, .gnu89_inline = gnu89_inline, .no_builtin = freestanding || nobuiltin, .instrument = instr, .wasm_sjlj = sjlj,
+				.x86_features = x86_features_, .x86_disabled = x86_disabled, .x86_features_set = x86, .x86_raw = x86_raw, .x86_override_on = x86_on, .x86_override_off = x86_off,
 				.general_regs_only = gregs || (x86 && (nosse || nosse2)), .vcc_kernel = vcc_kernel, .lse = lse, .opt = olevel, .pic = pic ? 2 : pie ? 1 : 0, .tlsmodel = tlsmodel, .sections = sections, .debug = debug, .cfi = cfi > 0, .dbg_name = main_file,
 			       .outfd = env->outfd };
 		int fd = -1;

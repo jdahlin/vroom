@@ -1362,6 +1362,13 @@ static uint64_t opt_sig(const cc_opts *o)
 	       (uint64_t)!!o->implicit_fn << 25 | (uint64_t)!!o->emit << 26 | (uint64_t)!!o->fast_math << 27 | (uint64_t)!!o->c2y << 28;
 	for (unsigned i = 0; i < CC_DISABLED_BUILTIN_WORDS; i++)
 		sig = (sig ^ o->disabled_builtins[i]) * UINT64_C(1099511628211);
+	if (o->target == PP_LINUX_X86_64) {
+		const x86_features *sets[] = {&o->x86_features, &o->x86_disabled, &o->x86_raw, &o->x86_override_on, &o->x86_override_off};
+		sig = (sig ^ (uint64_t)o->x86_features_set) * UINT64_C(1099511628211);
+		for (unsigned k = 0; k < sizeof(sets)/sizeof(*sets); k++)
+			for (unsigned i = 0; i < X86_FEATURE_WORDS; i++)
+				sig = (sig ^ sets[k]->bits[i]) * UINT64_C(1099511628211);
+	}
 	return sig;
 }
 

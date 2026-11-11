@@ -326,7 +326,7 @@ VPRIV val x64_wcvt(ecx *e, val v, qty from, qty to)
 		int fn = tw ? (wk_signed(c, to) ? FN_FIXXFTI : FN_FIXUNSXFTI) :
 			(wk_signed(c, from) ? FN_FLOATTIXF : FN_FLOATUNTIXF);
 
-		x64_classify(e, from, &arg);
+		x64_classify(e, from, &arg, false);
 		arg.slot = wk_slot(e, 16, 16);
 		for (int w = 0; w < 2; w++) {
 			lval src = x64_wat(ra, 8 * w);
@@ -336,7 +336,7 @@ VPRIV val x64_wcvt(ecx *e, val v, qty from, qty to)
 			x64_mem(e, X_ST, 8, R11, &dst, false);
 		}
 		x64_tfree(e, ra);
-		x64_classify(e, to, &result);
+		x64_classify(e, to, &result, false);
 		result.slot = wk_slot(e, 16, 16);
 		x64_call(e, FIXED(fn), NULL, &arg, 1, false, &result, to);
 		lval dst = { .k = L_FRAME, .off = result.slot, .align = 16 };

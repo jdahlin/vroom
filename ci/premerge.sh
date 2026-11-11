@@ -56,9 +56,14 @@ build() {	# build MAKE-TARGET: a build failure ends the job
 case $JOB in
 arm64)
 	build vcc
+	if [ "$(uname -s)/$(uname -m)" = Linux/x86_64 ]; then
+		step interrupt python3 bench/vcc-interrupt.py
+	fi
 	step ctests       python3 bench/vcc-ctests.py -j "$J"
 	step c2y-cache    python3 bench/vcc-c2y-cache.py
 	step diag         python3 bench/vcc-diag.py -j "$J"
+	step x86-features python3 bench/vcc-x86features.py --clang "${LLVM:-/usr/lib/llvm-23}/bin/clang" --vpp "$BUILD/vpp"
+	step x86-targets  python3 bench/vcc-x86target.py --clang "${LLVM:-/usr/lib/llvm-23}/bin/clang" --vpp "$BUILD/vpp"
 	step stress       python3 bench/vcc-stress.py
 	step stress-vccd  python3 bench/vcc-stress.py --vccd
 	step vccd         python3 bench/vccd-test.py

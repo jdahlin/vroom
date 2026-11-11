@@ -15,6 +15,7 @@ static void arity(cc *c, uint32_t loc, unsigned want, const vec *args)
 }
 
 static const builtin builtins[] = {
+	{ "__builtin_ia32_pblendvb128", BI_X86_BLENDVB, 1, "BBBB" },
 	{ "__builtin_elementwise_abs", BI_ELEMENTWISE_ABS, 1, "i." },
 	{ "__builtin_ia32_movmskps", BI_X86_SIMD, 1, "iF" },
 	{ "__builtin_ia32_shufps", BI_X86_SIMD, 1, "FFFi" },
@@ -23,6 +24,20 @@ static const builtin builtins[] = {
 	{ "__builtin_ia32_cmpnleps", BI_X86_SIMD, 1, "FFF" },
 	{ "__builtin_ia32_psllwi128", BI_X86_SIMD, 1, "HHi" },
 	{ "__builtin_ia32_psrlwi128", BI_X86_SIMD, 1, "HHi" },
+	{ "__builtin_ia32_pcmpistri128", BI_X86_PCMPSTR, 1, "iBBc" },
+	{ "__builtin_ia32_pcmpistrm128", BI_X86_PCMPSTR, 1, "BBBc" },
+	{ "__builtin_ia32_pcmpistria128", BI_X86_PCMPSTR, 1, "iBBc" },
+	{ "__builtin_ia32_pcmpistric128", BI_X86_PCMPSTR, 1, "iBBc" },
+	{ "__builtin_ia32_pcmpistrio128", BI_X86_PCMPSTR, 1, "iBBc" },
+	{ "__builtin_ia32_pcmpistris128", BI_X86_PCMPSTR, 1, "iBBc" },
+	{ "__builtin_ia32_pcmpistriz128", BI_X86_PCMPSTR, 1, "iBBc" },
+	{ "__builtin_ia32_pcmpestri128", BI_X86_PCMPSTR, 1, "iBiBic" },
+	{ "__builtin_ia32_pcmpestrm128", BI_X86_PCMPSTR, 1, "BBiBic" },
+	{ "__builtin_ia32_pcmpestria128", BI_X86_PCMPSTR, 1, "iBiBic" },
+	{ "__builtin_ia32_pcmpestric128", BI_X86_PCMPSTR, 1, "iBiBic" },
+	{ "__builtin_ia32_pcmpestrio128", BI_X86_PCMPSTR, 1, "iBiBic" },
+	{ "__builtin_ia32_pcmpestris128", BI_X86_PCMPSTR, 1, "iBiBic" },
+	{ "__builtin_ia32_pcmpestriz128", BI_X86_PCMPSTR, 1, "iBiBic" },
 	{ "__builtin_constant_p", BI_CONSTANT_P, 1, "i." },
 	{ "__builtin_expect", BI_EXPECT, 1, "lll" },
 	{ "__builtin_expect_with_probability", BI_EXPECT_PROB, 1, "llld" },
@@ -226,6 +241,7 @@ static const builtin builtins[] = {
 	{ "__builtin_fabs", BI_LIB, 1, "dd" }, { "__builtin_fabsf", BI_LIB, 1, "ff" }, { "__builtin_fabsl", BI_LIB, 1, "DD" },
 	{ "__builtin_copysign", BI_LIB, 1, "ddd" }, { "__builtin_copysignf", BI_LIB, 1, "fff" },
 	{ "__builtin_copysignl", BI_LIB, 1, "DDD" },
+	{ "__builtin_pow", BI_LIB, 1, "ddd" },
 	{ "__builtin_sqrt", BI_LIB, 0, "dd" }, { "__builtin_sqrtf", BI_LIB, 0, "ff" },
 	{ "__builtin_floor", BI_LIB, 0, "dd" }, { "__builtin_ceil", BI_LIB, 0, "dd" },
 	{ "__builtin_fmax", BI_LIB, 0, "ddd" }, { "__builtin_fmin", BI_LIB, 0, "ddd" },
@@ -287,6 +303,8 @@ static qty sigtype(cc *c, char ch)
 	case 'd': return prim(TY_DOUBLE);
 	case 'f': return prim(TY_FLOAT);
 	case 'F': return ty_vector(c, prim(TY_FLOAT), 16);
+	case 'c': return prim(TY_CHAR);
+	case 'B': return ty_vector(c, prim(TY_CHAR), 16);
 	case 'H': return ty_vector(c, prim(TY_SHORT), 16);
 	case 'D': return prim(TY_LDOUBLE);
 	case 'p': return ty_ptr(c, prim(TY_VOID));
@@ -1166,6 +1184,29 @@ static uint32_t builtin_vector_lane(cc *c, uint32_t v, qty et, unsigned i, uint3
 	return n;
 }
 
+/* The builtin converts its constant control to char, as Clang does. The final hidden
+ * argument identifies the result projection and explicit-length variant. */
+static uint32_t x86_pcmpstr_call(cc *c, const builtin *b, vec *args, qty rt, uint32_t loc)
+{
+	bool explicit = strstr(b->name, "pcmpestr") != NULL;
+	unsigned count = explicit ? 5 : 3;
+	i128 imm;
+	if (c->o->target != PP_LINUX_X86_64) {
+		cc_error(c, loc, "'%s' requires an x86-64 target", b->name);
+		return err_node(c, loc);
+	}
+	if (args->n != count) return err_node(c, loc);
+	if (has_side_effects(c, args->v[count - 1]) || !const_int(c, args->v[count - 1], &imm)) {
+		cc_error(c, loc, "argument to '%s' must be a constant integer", b->name);
+		return err_node(c, loc);
+	}
+	const char *name = strstr(b->name, "str") + 3;
+	unsigned kind = name[0] == 'm' ? 1 : name[1] == 'a' ? 2 : name[1] == 'c' ? 3 :
+		name[1] == 'o' ? 4 : name[1] == 's' ? 5 : name[1] == 'z' ? 6 : 0;
+	vpush(c, args, mk_int(c, kind | (explicit ? 8 : 0), prim(TY_INT), loc));
+	return mk_builtin(c, BI_X86_PCMPSTR, rt, loc, args);
+}
+
 static uint32_t x86_simd_call(cc *c, const builtin *b, vec *args, qty rt, uint32_t loc)
 {
 	const char *name = b->name + sizeof("__builtin_ia32_") - 1;
@@ -1380,7 +1421,8 @@ VPRIV uint32_t fp_sign_call(cc *c, const char *name, size_t len, qty ft, const v
 		return mk_flt(c, __builtin_copysign(a.f, copy ? b.f : 1.0), t, loc);
 	if (c->o->target != PP_LINUX_X86_64 && c->o->target != PP_LINUX_AARCH64)
 		return 0;
-	if (c->o->general_regs_only) {
+	if (c->o->target == PP_LINUX_X86_64 ?
+	    !x86_feature_has(cc_x86_features(c, c->fn), single ? X86_FEATURE_SSE : X86_FEATURE_SSE2) : c->o->general_regs_only) {
 		cc_error(c, loc, "%s floating point is not supported", "-mgeneral-regs-only:");
 		return err_node(c, loc);
 	}
@@ -1492,6 +1534,56 @@ static uint32_t stdc_rotate(cc *c, const builtin *b, uint32_t loc)
 	uint32_t z = binop(c, left ? T_GREATERGREATER : T_LESSLESS, rvalue(c, x), reverse, loc);
 	uint32_t value = convert(c, binop(c, T_PIPE, a, z, loc), t);
 	return with_pre(c, prex, with_pre(c, precount, with_pre(c, pren, value)));
+}
+
+/* Full fast-math permits roots and short multiplication chains without
+ * errno or strict rounding/exception preservation. Library identity is checked
+ * by the caller; builtin spelling is an explicit request for these semantics. */
+VPRIV uint32_t fast_math_call(cc *c, const char *name, size_t len, qty ft, const vec *args, uint32_t loc)
+{
+	if (!c->o->fast_math || (c->o->target != PP_LINUX_X86_64 && c->o->target != PP_LINUX_AARCH64)) return 0;
+	bool power = len == 3 && !memcmp(name, "pow", 3);
+	bool root = (len == 4 && !memcmp(name, "sqrt", 4)) || (len == 5 && !memcmp(name, "sqrtf", 5));
+	if (!power && !root) return 0;
+	bool single = !power && len == 5;
+	qty t = prim(single ? TY_FLOAT : TY_DOUBLE);
+	if ((T(c, ft)->flags & (TF_NOPROTO | TF_VARIADIC)) || args->n != (power ? 2 : 1) ||
+	    !compatible(c, ft, sig_func_type(c, power ? "ddd" : single ? "ff" : "dd"))) return 0;
+	cval exponent;
+	double e = 0.5;
+	if (power) {
+		if (elementwise_abs_effects(c, args->v[1], true) || !cc_eval(c, args->v[1], &exponent) ||
+		    exponent.kind != CV_FLT || exponent.ld) return 0;
+		e = exponent.f;
+		if (e != 0.25 && e != 0.5 && !(e >= -64 && e <= 64 && e == (int)e)) return 0;
+	}
+	if (c->o->target == PP_LINUX_X86_64 ?
+	    !x86_feature_has(cc_x86_features(c, c->fn), single ? X86_FEATURE_SSE : X86_FEATURE_SSE2) : c->o->general_regs_only) {
+		cc_error(c, loc, "%s floating point is not supported", "-mgeneral-regs-only:");
+		return err_node(c, loc);
+	}
+	if (e == 0.25 || e == 0.5) {
+		vec one; vinit(&one); vpush(c, &one, args->v[0]);
+		return mk_builtin(c, e == 0.25 ? BI_FAST_ROOT4 : BI_FAST_SQRT, t, loc, &one);
+	}
+	unsigned n = e < 0 ? (unsigned)-e : (unsigned)e;
+	uint32_t pre[8], np = 0, value = args->v[0], result = mk_flt(c, 1.0, t, loc);
+	for (;;) {
+		/* Every reusable factor is materialized, including the original base:
+		 * volatile reads and calls occur once even for a zero exponent. */
+		uint32_t s = sym_new(c, S_VAR, 0, t, loc);
+		c->syms[s].sc = SC_AUTO;
+		uint32_t tmp = mk(c, N_VAR, t, loc); N(tmp)->a = s; N(tmp)->flags = NF_LVALUE;
+		pre[np++] = mk2(c, N_ASSIGN, t, loc, tmp, value);
+		value = rvalue(c, tmp);
+		if (n & 1) result = mk_bin(c, T_STAR, t, result, value, loc);
+		n >>= 1;
+		if (!n) break;
+		value = mk_bin(c, T_STAR, t, value, value, loc);
+	}
+	if (e < 0) result = mk_bin(c, T_SLASH, t, mk_flt(c, 1.0, t, loc), result, loc);
+	while (np) result = with_pre(c, pre[--np], result);
+	return result;
 }
 
 VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
@@ -1718,6 +1810,8 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 		}
 		if (args.n < np || (args.n > np && !(f->flags & TF_VARIADIC)))
 			arity(c, loc, np, &args);
+		if (b->id == BI_X86_PCMPSTR)
+			return x86_pcmpstr_call(c, b, &args, rt, loc);
 		if (b->id == BI_X86_SIMD)
 			return x86_simd_call(c, b, &args, rt, loc);
 		switch (b->id) {
@@ -1769,6 +1863,7 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 		}
 		if (b->id == BI_LIB) {
 			uint32_t result = fp_sign_call(c, b->name + 10, strlen(b->name + 10), ft, &args, loc);
+			if (!result) result = fast_math_call(c, b->name + 10, strlen(b->name + 10), ft, &args, loc);
 			if (result) return result;
 		}
 		if (b->id == BI_LIB || b->id == BI_STRLEN || b->id == BI_NAN || b->id == BI_NANF || b->id == BI_NANS) {

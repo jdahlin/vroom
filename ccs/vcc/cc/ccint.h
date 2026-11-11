@@ -37,6 +37,8 @@ typedef struct label {
 } label;
 
 typedef struct attrs {		/* the attributes of one declaration */
+	x86_features x86_features;
+	uint32_t x86_target;	/* effective function target features are present */
 	uint32_t aligned;	/* bytes; 0: none */
 	uint32_t section, alias, asmname;	/* string index + 1, 0: none */
 	uint32_t cleanup;	/* sym */
@@ -51,6 +53,7 @@ typedef struct attrs {		/* the attributes of one declaration */
 	uint32_t ifunc;		/* ifunc("resolver"): alias is the resolver, an STT_GNU_IFUNC symbol */
 	uint32_t counted_by;	/* identifier id */
 	uint32_t errmsg;	/* error("..."): string index + 1, 0: none */
+	uint32_t interrupt;	/* x86 interrupt calling convention */
 	uint32_t ms_struct;	/* Microsoft record layout */
 	uint32_t tlsloc;		/* tls_model attribute location */
 	uint32_t visibility;
@@ -314,9 +317,10 @@ enum {
 	BI_LIB,	/* plain library call with a prototype */
 	BI_NANS, BI_ISSIGNALING,
 	BI_ISFPCLASS, BI_ISSUBNORMAL, BI_ISZERO,
-	BI_X86_SIMD,
+	BI_X86_SIMD, BI_X86_PCMPSTR, BI_X86_BLENDVB,
 	BI_ELEMENTWISE_ABS,
 	BI_STDC_ROTL, BI_STDC_ROTR,
+	BI_FAST_SQRT,	/* internal hardware sqrt, full fast-math only */
 	BI_FAST_ROOT4,	/* internal double sqrt(sqrt(x)), full fast-math only */
 	BI_COMPLEX,
 	BI_COUNT
@@ -346,5 +350,16 @@ bool cc_is_signed(cc *c, qty t);
 const char *cc_builtin_name(int64_t i);
 const char *cc_lib_sig(const char *name, int *clang_enc);
 uint32_t cc_global_named(cc *c, const char *s);
+
+/* A declaration's target state overrides the translation-unit default. */
+static inline x86_features cc_x86_features(const cc *c, uint32_t fn)
+{
+	if (fn && c->syms[fn].attrs && c->attr[c->syms[fn].attrs].x86_target)
+		return c->attr[c->syms[fn].attrs].x86_features;
+	if (c->o->x86_features_set) return c->o->x86_features;
+	x86_features features = {0};
+	x86_cpu_features("x86-64", &features);
+	return features;
+}
 
 #endif
