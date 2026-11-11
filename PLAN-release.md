@@ -312,3 +312,15 @@ Signed/u64-reciproker och full O2-täckning återstår.
 Efter integrering med main54580f7: samma kompilatorkod, 180/180 riktade fall,
 221/221 arm64-regressioner (ett befintligt xfail), 216/216 x86-regressioner
 (sex referensskips) samt sanitiserade reciprok-/tryckkontrakt passerar.
+
+### Status 2026-11-11: G5/G7, unsigned64 reciprokdivision
+
+OPT8 har nu separata u32/u64-recept, native högprodukt med bevarade implicita
+register och billig wasm-u64-jämförelsekvot. 196 riktade fall, sanitiserade
+matematik-/registerkontrakt, unity/fil-för-fil, 222 arm64-/217 x86-regressioner,
+ABI och unwind passerar. Mot exakt 046c6dc kostar kontroll-/loopprov högst
++0,00021 % och den konfigurerade mixen −0,00794…+0,00082 %.
+Mättade u64-funktioner kostar däremot +14,10 % x86/+17,99 % arm64 att kompilera;
+ett avgränsat seedat x86-körprov minskar median barn-CPU 69,55 % med samma svar.
+Avvägning, exakta hashvärden och begränsningar står i PLAN-fas2. Signed,
+dyrare wasm-klasser och full O2 återstår; G5/G7 stängs inte av detta delsteg.
