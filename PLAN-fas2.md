@@ -1660,3 +1660,12 @@ fortsatt separat från integrations-PR38; ingen ny PR för det ännu.
    strukturerade minnesoperationsposter eller scalar replacement före
    textemission. Ingen omskrivning av färdig assemblertext; adress-
    producenter, smala extensioner och stackbalans måste bevaras.
+
+### Verifierad leverans (2026-11-11)
+
+Integrations-PR38 är mergad till main med head 14379fe. Slutlig CI-körning
+43017255611 klarade arm64, wasm, ASan, TSan och gate. Det tidigare felet
+med saknad X_FSQRT-effektmetadata är åtgärdat, med riktade kontrakt för
+skalära FP-resultat och bevarade övre SIMD-lanes. DNS-felet från första
+ASan-installationen återkom inte. OPT4:s nya kopiearbete ligger kvar i
+separat lokal gren och är ännu inte publicerat på grund av kostnadsfrågan.
