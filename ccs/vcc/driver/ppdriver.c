@@ -1152,6 +1152,48 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 		status = 2;
 		goto out;
 	}
+	if (nwargs) {
+		/* clang: a -W option naming no warning group is -Wunknown-warning-option, which kbuild's
+		   cc-option probes make an error: gcc-only flags must fail as with clang */
+		static const char *const wgroups[] = {
+#include "../vccd/warnings.inc"
+		};
+		bool strict = false;
+
+		for (int i = 0; i < nwargs; i++)
+			if (!strcmp(wargs[i], "-Werror=unknown-warning-option"))
+				strict = true;
+		for (int i = 0; strict && i < nwargs; i++) {
+			const char *w = wargs[i] + 2;
+			char name[128];
+			size_t n;
+			bool found = false;
+
+			if (wargs[i][1] != 'W' || !strcmp(w, "error") || !strcmp(w, "all") || !strcmp(w, "extra") || !strcmp(w, "everything"))
+				continue;
+			if (!strncmp(w, "no-", 3))
+				w += 3;
+			if (!strncmp(w, "error=", 6))
+				w += 6;
+			else if (!strncmp(w, "no-error=", 9))
+				w += 9;
+			n = strcspn(w, "=");
+			if (!n || n >= sizeof name)
+				continue;
+			memcpy(name, w, n);
+			name[n] = 0;
+			for (size_t k = 0; k < sizeof wgroups / sizeof *wgroups && !found; k++)
+				found = !strcmp(wgroups[k], name);
+			if (found && w[n] == '=' && strcmp(name, "frame-larger-than") && strcmp(name, "larger-than") &&
+			    strcmp(name, "format"))
+				found = false;	/* (clang takes a value for these only: -Wimplicit-fallthrough=5 is unknown) */
+			if (!found) {
+				dprintf(errfd, "error: unknown warning option '%s' [-Werror,-Wunknown-warning-option]\n", wargs[i]);
+				status = 1;
+				goto out;
+			}
+		}
+	}
 	if (!strcmp(main_file, "-") && raw_asm == 1) {
 		dprintf(errfd, "vcc: error: assembler input from stdin is not supported\n");
 		status = 2;
