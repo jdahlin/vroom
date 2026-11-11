@@ -868,8 +868,11 @@ static uint32_t label_sub(cc *c, uint32_t loc)
 				 "label followed by a declaration is a C23 extension");
 		vinit(&items);
 		declaration(c, &items, false);
-		/* the declaration stays in the enclosing scope: (approximation) */
-		return mkstmt(c, N_BLOCK, loc, 0, vfreeze(c, &items), items.n);
+		/* Declaration packing does not introduce a lexical scope. */
+		uint32_t n = mkstmt(c, N_BLOCK, loc, 0, vfreeze(c, &items), items.n);
+
+		N(n)->aux = 1;
+		return n;
 	}
 	return statement(c);
 }
@@ -998,7 +1001,12 @@ static uint32_t labeled_statement(cc *c, bool sed)
 	} while (at_label(c));
 	c->se_direct = sed;
 	body = label_sub(c, N(last)->loc);
-	if (sed && named) {
+	if (N(body)->op == N_BLOCK && N(body)->aux == 1) {
+		/* Keep labeled declarations in the enclosing block, including all
+		 * declarators and their cleanup/stack lifetimes. */
+		for (uint32_t i = 0; i < N(body)->c; i++)
+			vpush(c, &labels, c->lists[N(body)->b + i]);
+	} else if (sed && named) {
 		/* In a statement expression the value is the final expression,
 		 * with its labels emitted immediately before it. */
 		vpush(c, &labels, body);

@@ -80,6 +80,15 @@ kan gå parallellt.
 
 ## Status
 
+### Status 2026-11-11: G1/G4, livstid för deklarationer efter etiketter
+
+På `a41361e` rättas frontendens syntetiska scope runt deklarationer efter
+etiketter. Detta eliminerar överlappande levande ARM-stackplatser och
+för tidig cleanup även på x86. Kefir std_attributes18 klarar alla fyra
+kombinationer på båda Linux-målen och byggen; egna sviter, sema och diag
+är gröna med befintliga undantag. Se `TEST.plan` S5b och
+`work/arm-computed-goto/` för avgränsade resultat. G1/G4 är fortsatt öppna.
+
 ### Status 2026-11-11: G1/G4, kombinerad native-stack ovanpå 1c5b5d1
 
 Sju separata native-rättningar har kombinerats och validerats på exakt

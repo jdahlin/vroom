@@ -640,6 +640,20 @@ Detta är fortfarande inte runtime- eller QBE-ekvivalens.
 
 ### S5b Kefir — importerad, Linux-baslinje uppmätt
 
+**Deklaration direkt efter etikett (2026-11-11, bas `a41361e`):**
+Frontendens syntetiska deklarationspaket plattas nu ut i det omgivande
+blocket. Paketet är ingen ny lexikal scope: ARM får inte återanvända dess
+stackplatser medan variablerna lever, och cleanup får inte köras tidigt
+på något mål. Oförändrade Kefir `std_attributes18` passerar alla fyra
+Clang/vcc-kombinationer på x86 och ARM, både unity och filvis bygge.
+Minimal baseline ger ARM-fel för två levande volatile-lokaler; separat
+cleanup-regression avslöjar samma scope-fel även på x86. Ny regression
+samt switch-/statement-expression-prober passerar 36/36 kombinationer
+(Clang/unity/filvis × O0/O2/O3 × två mål × två källor). Egna sviter:
+x86 233/233 med sex befintliga referensundantag, ARM 238/238 med ett
+befintligt xfail; sema run/batch 887/887 på båda byggen, diagnostik 225/225.
+Evidens: `work/arm-computed-goto/`. Ingen ny full Kefir-baslinje påstås.
+
 **Legacy `_ExtInt` (2026-11-11):** nyckelordet går genom samma parser- och
 typväg som `_BitInt`, med `-Wdeprecated-type` som hos Clang. Oförändrade
 `extint1` passerar alla fyra Clang/vcc-kombinationer på x86-64. ARM:s
