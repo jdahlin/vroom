@@ -139,7 +139,7 @@ VPRIV void rec_save(cc *c, recov *r)
 {
 	r->prev = c->rec;
 	r->depth = c->depth, r->ndops = c->ndops, r->ncase = c->ncase, r->case_base = c->case_base;
-	r->dead = c->dead, r->fn = c->fn;
+	r->dead = c->dead, r->fn = c->fn, r->constexpr_init = c->constexpr_init;
 	r->in_loop = c->in_loop, r->in_switch = c->in_switch, r->in_stmtexpr = c->in_stmtexpr;
 	r->unevaluated = c->unevaluated, r->in_struct = c->in_struct, r->ibr = c->ibr, r->in_tyname = c->in_tyname;
 	r->switch_cases = c->switch_cases, r->switch_ty = c->switch_ty;
@@ -239,7 +239,7 @@ VPRIV void rec_restore(cc *c, recov *r, int mode)
 	while (c->depth > r->depth)
 		scope_close(c);
 	c->ndops = r->ndops, c->ncase = r->ncase, c->case_base = r->case_base;
-	c->dead = r->dead, c->fn = r->fn;
+	c->dead = r->dead, c->fn = r->fn, c->constexpr_init = r->constexpr_init;
 	c->in_loop = r->in_loop, c->in_switch = r->in_switch, c->in_stmtexpr = r->in_stmtexpr;
 	c->unevaluated = r->unevaluated, c->in_struct = r->in_struct, c->in_tyname = r->in_tyname;
 	int open = is(c, T_SEMI) ? 0 : c->ibr - r->ibr;	/* initializer braces left open, unless a ';' ends them */

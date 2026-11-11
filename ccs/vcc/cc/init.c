@@ -275,6 +275,28 @@ static pp_span skip_braces(cc *c)
 /* a string literal for a char array of known size: longer than it (the terminator may go) */
 static void str_fit(cc *c, qty arr, uint32_t s)
 {
+	if (unlikely(c->constexpr_init) && is_array(c, arr) && N(s)->op == N_STR) {
+		const cstr *str = &c->strs[N(s)->a];
+		qty from = T(c, N(s)->ty)->base, to = T(c, arr)->base;
+		uint64_t count = str->n;
+
+		if (!(T(c, arr)->flags & TF_INCOMPLETE) && count > arr_len(c, arr))
+			count = arr_len(c, arr);
+		for (uint64_t i = 0; i < count; i++) {
+			i128 value = 0;
+
+			for (unsigned k = 0; k < str->esz; k++)
+				value |= (i128)(unsigned char)str->s[i * str->esz + k] << (8*k);
+			value = trunc_to(c, value, from);
+			if (trunc_to(c, value, to) != value) {
+				char text[48];
+
+				i128s_(text, sizeof text, value);
+				cc_error(c, N(s)->loc, "constexpr initializer evaluates to %s which is not exactly representable in type '%s'", text, tyname(c, to));
+				break;
+			}
+		}
+	}
 	if (is_array(c, arr) && !(T(c, arr)->flags & (TF_INCOMPLETE | TF_VLA)) && N(s)->op == N_STR &&
 	    c->strs[N(s)->a].esz == 1 && c->strs[N(s)->a].n - 1 > T(c, arr)->n) {
 		pp_span r = rng(c, s);
@@ -378,6 +400,8 @@ static void il_elem(cc *c, ilist *l, uint64_t pos, uint32_t v, bool st)
 	}
 	if (!l->array && is_record(c, l->ty) && c->tags[T(c, l->ty)->aux].f[pos].bitfield)
 		bitfield_const(c, &c->tags[T(c, l->ty)->aux].f[pos], decay(c, v), 0);
+	if (unlikely(c->constexpr_init))
+		constexpr_conversion(c, decay(c, v), et);
 	il_set(c, l, pos, is_record(c, et) && !is_complex(c, et) ? v : convert(c, decay(c, v), et), NULL);
 }
 
@@ -521,6 +545,8 @@ static uint64_t il_designation(cc *c, ilist *l, bool st)
 				il_run(c, l, lo, hi, 0, s);
 			} else {
 				if (!(is_array(c, et) || is_record(c, et) || is_vector(c, et))) {
+					if (unlikely(c->constexpr_init))
+						constexpr_conversion(c, decay(c, v), et);
 					v = convert(c, decay(c, v), et);
 				}
 				il_run(c, l, lo, hi, v, NULL);
@@ -711,10 +737,9 @@ VPRIV uint32_t initializer(cc *c, qty *ty, bool st)
 				cc_error(c, c->cv_what == CX_INIT ? c->cv_loc : loc, "array initializer must be an initializer list");
 				return v;
 			}
+			str_fit(c, t, v);
 			if (T(c, t)->flags & TF_INCOMPLETE)
 				*ty = QT(QI(ty_array(c, T(c, t)->base, c->strs[N(v)->a].n, 0)), QQ(t));
-			else
-				str_fit(c, t, v);
 			return v;
 		}
 		if (is_record(c, t) && !is_complex(c, t)) {

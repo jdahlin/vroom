@@ -691,8 +691,12 @@ again:
 		case KW__Thread_local: case KW___thread:
 			ds->thread = true;
 			break;
+		case KW_constexpr:
+			ds->constexpr_ = true;
+			if (!allow_sc)
+				cc_error(c, t->loc, "type name does not allow constexpr");
+			break;
 		case KW_const: case KW___const__: case KW___const:
-		case KW_constexpr:	/* C23: a const object with a constant initializer (not checked) */
 			q |= Q_CONST;
 			break;
 		case KW_volatile: case KW___volatile__: case KW___volatile:

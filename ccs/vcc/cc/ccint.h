@@ -147,6 +147,7 @@ struct cc {
 	uint16_t cnd;
 	uint32_t in_proto;
 	uint32_t nconv;		/* conversion errors (clang's DefaultError warnings): later checks still run */
+	uint32_t constexpr_init;	/* symbol being initialized as a C23 constant object, 0 otherwise */
 	bool sie;		/* static_init_ok looks through NF_ERR (after such an error) */
 	uint32_t tn_tdef;	/* the last type_name's typedef (sym), 0: none */
 	uint32_t *ptag, nptag, cptag;	/* tags declared in the outermost parameter list: a definition's body sees them */	/* parameter declarations being parsed: a new tag there is -Wvisibility */

@@ -90,7 +90,7 @@ enum { CX_NONE, CX_INIT, CX_PASS, CX_RETURN, CX_ASSIGN };
 typedef struct dspec {
 	qty ty;
 	int sc;
-	bool inline_, noreturn, thread, auto_type, has_type;
+	bool inline_, noreturn, thread, auto_type, has_type, constexpr_;
 	bool invalid;		/* an unknown type name stands for the type (int) */
 	uint16_t sckw;		/* the storage-class keyword, if any */
 	uint32_t sgnloc, longloc, baseloc;	/* signed/unsigned, the first long, short: for clang's errors */
@@ -282,7 +282,7 @@ VPRIV __attribute__((noinline, cold, noreturn)) void expect_here_fail(cc *c, con
 typedef struct recov {
 	jmp_buf jb;
 	struct recov *prev;
-	uint32_t depth, ndops, ncase, case_base, dead, fn;
+	uint32_t depth, ndops, ncase, case_base, dead, fn, constexpr_init;
 	int in_loop, in_switch, in_stmtexpr, unevaluated, in_struct, ibr, in_tyname;
 	uint32_t *switch_cases;
 	qty switch_ty;
@@ -360,6 +360,9 @@ VPRIV __attribute__((noinline)) uint32_t decay_slow(cc *c, uint32_t n, qty t, in
 static inline uint32_t decay(cc *c, uint32_t n);
 VPRIV const field *bitfield_of(cc *c, uint32_t n);
 VPRIV void bitfield_const(cc *c, const field *f, uint32_t v, uint32_t op);
+VPRIV bool constexpr_init_ok(cc *c, uint32_t init);
+VPRIV void constexpr_conversion(cc *c, uint32_t n, qty to);
+VPRIV bool constexpr_type_ok(cc *c, qty t);
 VPRIV bool static_init_ok(cc *c, qty ty, uint32_t init, uint32_t *bad);
 VPRIV void deprecated_use(cc *c, uint32_t loc, uint32_t name, const attrs *a, uint32_t dloc);
 VPRIV void tag_deprecate(cc *c, uint32_t ti, const attrs *a);

@@ -96,6 +96,8 @@ static bool param_list(cc *c, dop *op, const attrs *leading)
 					if (kind) ds.ty = prim(kind);
 				}
 			}
+			if (ds.constexpr_)
+				cc_error(c, ds.loc, "function parameter cannot be constexpr");
 			declarator(c, &d, true, &first, &nops);
 			if (!d.name && !d.loc)
 				d.loc = tok(c)->loc;	/* an unnamed parameter: where its name would be (clang) */

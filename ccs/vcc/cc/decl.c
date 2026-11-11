@@ -913,8 +913,11 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 			fatal(c, tok(c)->loc, "expected identifier or '('");
 		}
 	}
-	if (accept(c, T_SEMI))
+	if (accept(c, T_SEMI)) {
+		if (ds.constexpr_)
+			cc_error(c, ds.loc, "constexpr can only be used in variable declarations");
 		return;
+	}
 	for (;;) {
 		declr d;
 		uint32_t first, nops, s;
@@ -922,6 +925,8 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 
 		declarator(c, &d, false, &first, &nops);
 		t = apply_declarator(c, ds.ty, first, nops);
+		if (ds.constexpr_ && !is_func(c, t))
+			t = qualify(c, t, Q_CONST);
 		if (file) {
 			qty vm = t;
 
@@ -964,12 +969,20 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 			}
 			expect(c, T_EQUAL, "'=' (__auto_type requires an initializer)");
 			v = decay(c, assign_expr(c));
-			t = QT(QI(QUNQ(N(v)->ty)), QQ(ds.ty));
+			t = QT(QI(QUNQ(N(v)->ty)), QQ(ds.ty) | (ds.constexpr_ ? Q_CONST : 0));
 			{
 				dspec d2 = ds;
 
 				d2.ty = t;
 				s = declare(c, &d2, &d, t, file);
+			}
+			if (ds.constexpr_) {
+				c->syms[s].flags |= SF_CONSTEXPR;
+				if (!constexpr_type_ok(c, t))
+					cc_error(c, d.loc, "constexpr variable cannot have type '%s'", tyname(c, t));
+				constexpr_conversion(c, v, t);
+				if (!constexpr_init_ok(c, v))
+					cc_error(c, d.loc, "constexpr variable '%.*s' must be initialized by a constant expression", IDF(d.name));
 			}
 			c->syms[s].body = v;
 			c->syms[s].flags |= SF_DEFINED;
@@ -995,6 +1008,17 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 			ds.invalid = true;
 		}
 		s = declare(c, &ds, &d, t, file);
+		if (ds.constexpr_) {
+			if (c->syms[s].kind != S_VAR)
+				cc_error(c, d.loc, "constexpr can only be used in variable declarations");
+			else {
+				c->syms[s].flags |= SF_CONSTEXPR;
+				if (!constexpr_type_ok(c, t))
+					cc_error(c, d.loc, "constexpr variable cannot have type '%s'", tyname(c, t));
+			}
+			if (ds.sc == SC_EXTERN || ds.thread)
+				cc_error(c, d.loc, "constexpr cannot be combined with extern or thread-local storage");
+		}
 		if (unlikely(ds.invalid | d.invalid)) {
 			c->syms[s].flags |= SF_INVALID;	/* its type was an error: uses say nothing more */
 			delayed_bug(c, d.loc, "an invalid declaration without an error");
@@ -1077,8 +1101,12 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 				c->syms[s].defloc = d.loc;
 				uint16_t nr0 = c->syms[s].nref;
 
-				c->defer_rt = st, c->ndefer = 0;
+				uint32_t saved_constexpr = c->constexpr_init;
+
+				c->constexpr_init = ds.constexpr_ ? s : 0;
+				c->defer_rt = st || ds.constexpr_, c->ndefer = 0;
 				v = initializer(c, &it, st);
+				c->constexpr_init = saved_constexpr;
 				if (c->syms[s].nref != nr0 && !st)
 					c->uv_any |= 2;	/* (a self-reference: -Wuninitialized) */
 				c->defer_rt = 0;
@@ -1099,6 +1127,8 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 			}
 			y->body = v;
 			y->flags |= SF_DEFINED;
+			if (ds.constexpr_ && c->errors == nerr && !constexpr_init_ok(c, v))
+				cc_error(c, d.loc, "constexpr variable '%.*s' must be initialized by a constant expression", IDF(d.name));
 			{
 				uint32_t bad = 0;
 
@@ -1106,7 +1136,7 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 				   conversion errors, which are clang's warnings defaulting to errors */
 				bool ok = true;
 
-				if (st && v && c->errors - c->nconv == nerr - nconv0) {
+				if (st && !ds.constexpr_ && v && c->errors - c->nconv == nerr - nconv0) {
 					c->sie = c->errors != nerr;
 					ok = static_init_ok(c, y->ty, v, &bad);
 					c->sie = false;
@@ -1131,6 +1161,8 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 		} else {
 			sym *y = &c->syms[s];
 
+			if (ds.constexpr_ && y->kind == S_VAR)
+				cc_error(c, d.loc, "constexpr variable '%.*s' must be initialized by a constant expression", IDF(d.name));
 			if (y->kind == S_VAR && ds.sc != SC_EXTERN && ds.sc != SC_TYPEDEF) {
 				if (file)
 					y->flags |= SF_TENTATIVE;

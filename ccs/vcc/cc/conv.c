@@ -652,6 +652,8 @@ VPRIV uint32_t convert_as(cc *c, uint32_t n, qty to, int what, uint32_t loc)
 	uint32_t sl = c->cv_loc;
 
 	c->cv_what = (uint8_t)what, c->cv_loc = loc;
+	if (unlikely(c->constexpr_init && what == CX_INIT) && !ISERR(n))
+		constexpr_conversion(c, n, to);
 	if (what) {
 		n = conv_check(c, n, to);
 		if (!(N(n)->flags & NF_ERR))
