@@ -80,6 +80,29 @@ kan gå parallellt.
 
 ## Status
 
+### Status 2026-11-11: G1/G4, semantisk följdmilstolpe ovanpå native-stacken
+
+Fyra separata rättningar bygger vidare på verklig Git-förälder `74f6ec4`:
+livstid för deklarationer efter etiketter, oberoende nästlade GNU-ranglistor,
+C90:s digrafer/satsscope med blandade cachejobb samt full bredd i generiska
+rotationer. Inga kompletta C23-recordkompatibilitetsändringar ingår.
+
+Unity och filvis bygge: egna x86-prov 235/235 med sex referensundantag,
+ARM/QEMU 240/240 med ett befintligt xfail; ABI 33/33 per mål/bygge;
+diagnostik 225/225. Kernel-sema run/batch 887/887 på båda byggena.
+Full PP-paritet är 920/920 i cmp/batch både före ändringen på föräldern
+och efteråt (unity). Fyra riktade oförändrade GCC-fall passerar per mål/bygge;
+C90-orakeln kör sju lägen och 21 blandade cachejobb. Fem fokuserade runtimeprov
+passerar även O2/O3. ASan/UBSan passerar diagnostik, tre nya runtimeprov och
+C90-matrisen på båda Linuxmålen. Wasm64-preflight: 191 pass, 39 befintliga
+xfail, 11 referensundantag; inga XPASS-markörer behövde ändras.
+
+Nio utvalda Kefir-fall passerar alla kombinationer på x86; ARM ger fem pass
+och fyra explicita Clang-referensavvisningar (wchar-/bredtypskontrakt).
+Detta är riktad återvalidering, inte en ny full S4/S5-körning. Artefakter,
+bundle med bevarad Git-historik och manifest: `work/results/semantic-stack-74/`.
+G1/G4 är fortfarande öppna.
+
 ### Status 2026-11-11: G1/G4, rotationer över 128 bitar
 
 På basen `a41361e` behålls operandens och räknarens fulla bredd före modulo

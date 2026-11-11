@@ -374,6 +374,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `push`, `push,N`, `push,id`, `push,id,N`, `pop`, `pop,id`, `pop,N`, `pack()`,
   `show` ignored).
 - [x] **Designated-initializer overrides differ from clang** [P].
+  Nested GNU range lists now detach on later writes, preserving independent
+  element values and positional continuation (`range_designator_overwrite.c`,
+  unchanged GCC `gnu99-init-1.c`).
   (done, cc/init.c: an array element or range a later designator covers is
   dropped, not evaluated; a designator into a sub-object initialized by one
   value keeps the rest of it: a string becomes one element per character,
@@ -862,6 +865,10 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [ ] **Blocks (`^{}`)** for Darwin headers.
   *Validate:* T3 compile programs including `<dispatch/dispatch.h>` and
   calling a block.
+- [x] **C90 digraph and statement scope semantics** [P]. Strict C89/C90
+  disables digraphs; C94 and GNU89 enable them. Implicit selection/loop
+  scopes start with C99. Lexer/header-cache modes, paste, stdin and `-D`
+  are checked by `bench/vcc-c90.py`, including 21 mixed-mode jobs.
 - [x] **Scope details**: (done: a declaration after a label, `case` or
   `default` (C23; -Wc23-extensions before), also after `__attribute__`s;
   a prototype definition's parameter-list tags are visible in its body, K&R's
@@ -871,6 +878,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   "array has incomplete element type"; "previous definition is here" for a
   defined function: tests/vcc `label_decl.c`, diag `label_decl_kr_vis.c`,
   `incomplete_var.c`, `conflict_prev_def.c`.)
+  Labeled declaration groups remain in their enclosing lexical scope;
+  stack lifetime and cleanup are covered by `label_declaration_lifetime.c`
+  and unchanged Kefir `std_attributes18`.
 - [ ] **Fixed limits** (struct members now 1M; flat declarator operators use
   growing arena buffers with a 1M resource budget; genuinely nested declarators
   remain stack-guarded). Flat labels parse iteratively into flat AST lists;

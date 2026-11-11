@@ -248,6 +248,14 @@ workerstack; stackgränser, test och sanitizerkontroller har inte ändrats.
 
 ### S4 gcc.dg — påbörjad (2026-11-11)
 
+**Samlad semantisk följdmilstolpe på `74f6ec4`:** C90, nästlade
+GNU-ranginitialiseringar, deklarationslivstid efter etiketter och breda
+rotationer har validerats tillsammans. Fyra berörda oförändrade GCC-fall
+passerar på båda Linuxmålen och båda byggena; fem fokuserade runtimeprov
+passerar även O2/O3. Fullständiga grindar, explicita referensundantag och
+Wasm/ASan-resultat finns i PLAN-release.md och
+`work/results/semantic-stack-74/`. Ingen full S4-passökning hävdas.
+
 **C90-digrafer och satsscope (2026-11-11):** de oförändrade
 `c90-digraph-1.c` och `c90-scope-1.c` går nu från runtime-abort till godkänt
 på Linux x86-64 och arm64, både unity och nonunity. Strikt C89/C90 läser
