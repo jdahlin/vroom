@@ -433,3 +433,51 @@ fortfarande `error:oracle-compile` för test utan detta uttryckliga källkontrak
 diagnostiktext får aldrig omklassificera en krasch, timeout eller verktygsfel
 till en skip. `bench/test-runtime-oracle.py` kontrollerar båda vägarna.
 Oväntade `fail` och `error` skriver alltid svit/testnamn även utan `-v`.
+
+### OPT5: typade ramcellsoperationer (pågående)
+
+Wasm delar nu den exakta cell-/överlappsanalysen (`emit/rec/slots.c`) och
+värdetillgängligheten (`emit/rec/slot-values.c`) med arm64. Den separata
+adaptern `arch/wasm/emit/slots.c` registrerar typade load/store-, överlapps-
+och kontrollhändelser när kroppen produceras. Optimeraren väljer handlingar
+före renderingen; ingen assemblertext läses eller mönstermatchas. Stabila
+allokerings-ID:n följer direkta ramobjekt och deras structfält. Endast utvalda
+vidarebefordringar får egna wasm-locals, som inte återanvänds av temporärpoolen.
+
+Första delen ersätter exakta 4/8-bytes heltals- och flyttalsladdningar samt
+tar bort överskrivna butiker inom raka kodsegment vid O1–O3. Operanderna
+utvärderas fortfarande: en laddning blir `drop; local.get`, en borttagen
+butik konsumerar fortfarande adress och högerled. Överlapp, volatile och
+atomic utesluts via samma cellanalys; okända minnesoperationer, anrop, asm
+och strukturerade kontrollgränser bryter tillgängligheten. Objekt vars adress
+lämnar den direkta åtkomsten utesluts. VLA/dynamiska ramar och setjmp-funktioner
+optimeras ännu inte. Smala celler, allmänt olästa butiker och borttagning av
+överflödiga adressproducenter återstår.
+
+Verifierat lokalt: unity- och fil-för-fil-bygge samt 16 kombinationer i
+`bench/vcc-wasm-cells.py` (wasm32/64 × O0–O3 × två källfiler), med både
+kodformskrav och körning genom egna assemblern/länkaren och Node. Kraven
+visar borttagna laddningar från oberoende structfält, två butiker till en,
+tre laddningar till en efter asm-gräns, samt bevarade volatile/atomic-
+operationer. Körfallen täcker också högerledseffekter, union/bitfält,
+kontrollflöde och adresser som lämnar objektet. Kostnadsmätning och CI återstår;
+detta är delprogress, inte full O2-täckning.
+
+Kostnadsprov mot `opt/slot-values` (`e6bad4c`), båda värdbyggen med
+`-O3 -march=x86-64-v3`, Callgrind hela processen inklusive start, 500
+funktioner per prov, wasm32/64 och O1/O2:
+
+| Prov | Ökning i värdinstruktioner |
+|---|---:|
+| Ren heltalskod, ingen ram | +0,185–0,186 % |
+| Pekarladdningsslinga, ingen optimerbar ramcell | +0,298 % |
+| Struct med två fält och upprepade åtkomster | +8,19 % |
+
+Structprovet tar bort tre laddningar och en överskriven butik per funktion
+(sex minnesoperationer till två). Mätningen visar adapterkostnaden när den
+faktiskt arbetar; den uppfyller inte en generell kostnadsgräns på 1 % och
+påstår ingen förbättring i programmets körtid. Binär-/källhashar, kommandon
+och profiler finns lokalt i `work/opt-profile/wasm-cells-cost/result.json`.
+Det gamla bygget avvisas av det nya positiva kodformskravet. Samma 16
+kombinationer passerar också med ASan+UBSan. Kostnadsgranskning och CI är
+fortfarande öppna leveransvillkor.

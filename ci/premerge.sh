@@ -113,6 +113,7 @@ wasm)
 	build vcc
 	step opt-rules-wasm32 python3 bench/vcc-opt-rules.py --target wasm32-unknown-emscripten --run
 	step opt-rules-wasm64 python3 bench/vcc-opt-rules.py --target wasm64-unknown-emscripten --run
+	step wasm-cells python3 bench/vcc-wasm-cells.py
 	step wasm64       python3 bench/vcc-wasm.py -j "$J"
 	;;
 *)

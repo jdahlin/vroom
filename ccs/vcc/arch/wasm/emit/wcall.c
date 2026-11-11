@@ -261,7 +261,7 @@ static int wsetjmp(ecx *e, uint32_t n, bool want)
 	wconst(e, WT_I32, 0);
 	wset(e, W->sjl);
 	wget(e, W->sjv);
-	wi(e, "else");
+	wboundary(e, "else");
 	wexpr(e, c->lists[x->b], true);
 	wconst(e, WT_I32, k + 1);
 	wslot_addr(e, W->sjfid);
@@ -885,7 +885,7 @@ static int wbi_atomic(ecx *e, uint32_t n, bool want)
 			wload(e, &l, vt);
 		wstore(e, &l, vt);
 		wconst(e, WT_I32, 1);
-		wi(e, "else");
+		wboundary(e, "else");
 		if (!sync) {
 			wget(e, v1);
 			wget(e, cur);
