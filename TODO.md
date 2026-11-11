@@ -1159,6 +1159,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   Integer identities now live in separate `emit/opt/identity.c`, shared by
   all targets; keep future algorithms in named files, with small walker
   adapters. Both build modes pass 32 target/level/rule checks.
+  Next slice: shared `emit/rec/fallthrough.c` on arm64/x86; wasm
+  terminal while-backedge cleanup in separate reachability unit. OPT2
+  remains partial; effect tables and general block cleanup are pending.
   Wasm checks use our assembler/linker and plain Node; full replacement
   of Emscripten's test/explorer runtime is tracked in `PLAN-wasm.md` W9.
   *Validate:* common C semantics plus target-specific code assertions;

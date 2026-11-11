@@ -19,7 +19,7 @@ for m in as obj cc pp emit; do
 	obj) f="vcc/obj/obj.c vcc/arch/a64/obj/fixup.c vcc/platform/linux/elf.c";;
 	cc) f=$(ls vcc/cc/*.c);;
 	pp) f=$(ls vcc/pp/*.c | grep -v dircache);;
-	emit) f=$(ls vcc/emit/*.c vcc/emit/opt/*.c vcc/arch/a64/emit/*.c vcc/arch/wasm/emit/*.c);;
+	emit) f=$(ls vcc/emit/*.c vcc/emit/opt/*.c vcc/emit/rec/*.c vcc/arch/a64/emit/*.c vcc/arch/wasm/emit/*.c);;
 	esac
 	{ echo '#define VCC_UNITY 1'; for x in $f; do echo "#include \"$PWD/$x\""; done; } > $OUT/obj/u-$m.c
 	SRC="$SRC $OUT/obj/u-$m.c"

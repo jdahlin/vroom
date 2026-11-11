@@ -944,6 +944,58 @@ OPT1:s identiteter och unsigned tvåpotenser är levererade. Detta slutför
 inte OPT2–OPT8 eller hela O2-målet; nästa steg är separat gemensam
 fallthrough-städning med bevarad debug-remapping.
 
+### Status OPT2 (2026-11-11): delad fallthrough-städning
+
+`emit/rec/fallthrough.c` delar nu arm64:s befintliga borttagning av
+ovillkorliga hopp till den direkt följande följden av lokala etiketter.
+X86 kör samma pass vid O1 och uppåt före tvåadresskonverteringen.
+Postlayouten beskrivs med stride/fältoffset; label läses med memcpy så
+arm64:s `ins` aldrig typ-punnas till x86:s `rec`. Asm och namngivna
+etiketter är barriärer. En linjär framåtsvepning, ingen allokering eller
+fixpunkt. Senare borttagningar kan exponera tidigare hopp; kaskadfallen
+är fortsatt körtestade men utlovas inte borttagna i detta steg.
+
+Wasm:s befintliga konservativa `wlabels`/`wterm` har fått egen fil,
+`arch/wasm/emit/reachability.c`. While emitterar inte längre en extra
+loopgren efter en kropp som bevisligen inte kan falla igenom. Explicit
+continue har kvar sin gren och cleanup; do-villkor och for-inkrement
+bevaras. Detta är strukturerad målsänkning, inte ett artificiellt
+maskinpostpass på wasm.
+
+Bas `f7ccaff`, vpp SHA256
+`f3899f1f5e51ff895d15903f547797bf6096ba16c8f2016f00aa005e1c70178f`;
+kandidat före dokumentation
+`384cfd5f6c83fba8852dbc9ff0c1e7ad3ce323a489519164d304d55fcc8b36eb`.
+Arm64:s 131 befintliga kompilerbara egensvitfiler ger byte-identisk
+O1 -S med -g och unwind-direktiv mot basen; fem tidigare avvisningar är
+oförändrade. De två nya testfilerna undantogs från den jämförelsen då de
+fortfarande redigerades när basen togs. Båda byggsätten klarar 64
+mål-/nivå-/regelkombinationer, med målrelevanta kodkrav och körning på
+alla fyra mål. X86-egensvit 133/133 (samma fem filtrerade), arm64
+138/138, -j 6 --no-cache. O1 DWARF-verifiering, oförändrad .text med -g
+och direktobjekt mot assemblerutdata gröna för båda nya testfilerna.
+Befintliga CI-anrop inkluderar automatiskt de nya reglerna.
+
+Genererad kod vid O1, antal ovillkorliga grenar i respektive nya testfil:
+x86 `branch_fallthrough.c` 31→21, arm64 20→20 (ren extraktion);
+wasm32/64 `while_backedge.c` 44→38. Körsemantik täcker bakåthopp,
+label-följder, switch-fallthrough, sidoeffekter, asm-barriär, goto in/ut
+ur loop, cleanup och continue.
+
+Korta parade mätningar (tre repetitioner, fyra 3000-funktions-TU:er,
+-j 1 --warm 1, O1 -S) finns med bas/kandidathash och rådata i
+`build/linux/opt-flow-baseline/paired.json`; riktad ommätning i
+`recheck.json`. Första medianen för flödeskorpus i ms var x86
+25,586→25,436, arm64 29,313→29,784, wasm32 24,381→28,059 och wasm64
+22,922→22,644. Kontrollkorpus sparas separat. Ommätningen varierar
+kraftigt, särskilt wasm32; ingen liten CPU-regression eller vinst kan
+fastställas och 1 %-grinden är inte bevisad. Hårdvaruräknare fortsatt
+blockerade; inga systeminställningar ändrade. Programkörtidsvinst ej mätt.
+
+OPT2 är endast **påbörjat**: full effektbeskrivning, blockkontrakt och
+död kod efter terminator återstår. Registerlokaler (OPT3) och resterande
+OPT-steg/O2-målet är fortsatt öppna.
+
 ## Risker
 - **GNU C-ytan och inline asm** är det stora jobbet. Uppskattat: lexer + pp ~2 kloc,
   parser + sema ~10–15 kloc, emitter ~5 kloc, assembler ~4 kloc, länkare ~3 kloc.

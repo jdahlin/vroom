@@ -54,6 +54,7 @@
 #include <pthread.h>
 #include <stdarg.h>
 #include <stdatomic.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -514,6 +515,13 @@ VPRIV bool em_divpow2(cc *c, qty ty, int *op, i128 *rhs);
 /* opt/identity.c */
 enum { EM_ID_NONE, EM_ID_LEFT, EM_ID_ZERO, EM_ID_ONES };
 VPRIV int em_bin_identity(cc *c, qty ty, int op, i128 rhs);
+/* rec/fallthrough.c: opaque records; no shared struct layout is assumed. */
+typedef struct em_rec_layout {
+	size_t stride, op_offset, label_offset;
+	uint8_t jump_op, label_op;
+} em_rec_layout;
+VPRIV uint32_t em_rec_fallthrough(void *records, uint32_t count, const em_rec_layout *layout,
+				void (*remap)(void *, uint32_t, uint32_t), void *ctx);
 /* insn.c */
 extern const char cond_name[][8];
 VPRIV bool logimm_ok(uint64_t v, int x);

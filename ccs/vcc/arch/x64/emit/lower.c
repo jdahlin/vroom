@@ -616,11 +616,16 @@ VPRIV void x64_begin(ecx *e, uint32_t s)
 
 VPRIV void x64_finish(ecx *e, uint32_t s)
 {
+	static const em_rec_layout layout = {
+		sizeof(rec), offsetof(rec, op), offsetof(rec, label), X_JMP, X_LABEL,
+	};
 	tbuf *b = &e->out;
 	size_t start;
 
 	if (e->x64->live)
 		efatal(e, e->curloc, "internal error: x86-64 temporaries left live (%#x)", e->x64->live);
+	if (e->E->o->opt >= 1)
+		e->x64->nin = em_rec_fallthrough(e->x64->in, e->x64->nin, &layout, NULL, NULL);
 	x64_twoaddr(e);
 	b->n = (b->n + 7) & ~(size_t)7;
 	start = b->n;

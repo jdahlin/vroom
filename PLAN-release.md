@@ -80,6 +80,15 @@ kan gå parallellt.
 
 ## Status
 
+### Status 2026-11-11: G5/G7, delad grenstädning
+
+Arm64 och x86 använder nu `emit/rec/fallthrough.c`; arm64:s extraktion
+är byte-identisk för 131 befintliga testfiler med O1 och -g. Wasm
+utelämnar redundanta while-grenar med separat nåbarhetsbevis. Båda
+byggsätten klarar 64 fokuserade kod-/körkombinationer; egensviter x86
+133/133 och arm64 138/138. Mätdata och kvarvarande CPU-osäkerhet finns
+vid OPT2 i `PLAN-fas2.md`. G5/G7 och O2-målet är fortsatt öppna.
+
 ### Status 2026-11-11: G5/G7, delade heltalsidentiteter
 
 `emit/opt/identity.c` delar nu typkorrekta heltalsidentiteter mellan alla
