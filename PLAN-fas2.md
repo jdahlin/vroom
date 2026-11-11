@@ -2783,3 +2783,19 @@ ASan/UBSan. `build/linux/postfix-evidence/integration-*.log` innehåller resulta
 Den tidigare breda sviten och matchade Ir-proven har inte körts om; inga
 integreringsfel motiverade det. Rättningen är fortfarande avgränsad till
 registerrepresenterad postfix och ligger kvar ovanpå multiplikationsföräldern.
+
+### OPT1: två bitregler (2026-11-11)
+
+Multiplikation med en tvåpotens sänks direkt till maskinskift för 32-/64-bitars
+heltal; XOR med enbart ettor blir komplement. Recepten ligger i separata
+målgeneriska filer, utan ny AST-vandring. O0 och VCC_NOOPT är oförändrade;
+_BitInt och bredare typer ingår inte. O1–O3, bieffekter och operandkonvertering
+kontrolleras på x86, arm64, wasm32 och wasm64. Unity och filvis bygge samt
+36 O0/noopt/overflow-paritetsprov passerade.
+
+Matchad seriell Callgrind-profil (`work/opt-profile/bit-rule-audit/result.json`,
+kompilatorkällor och binärhashar i manifestet) mäter hela kompilatorprocessens
+instruktioner, inte cykler eller programkörtid. Fyra blandade x86-prov gav
++0,0112 %; 200 regelfria funktioner +0,052–0,469 % beroende på mål; 200
+regelmättade funktioner −1,39–1,79 %. Detta är små prov, inte en fullständig
+prestandagrind. Jämförelseregler för heltalsgränser och bred O2-täckning återstår.
