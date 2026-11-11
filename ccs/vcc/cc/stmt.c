@@ -148,6 +148,8 @@ static bool uv_warn(cc *c, uint32_t e, uvw *w)
 			return false;	/* a volatile load */
 		goto plain;
 	case N_STMTEXPR: {
+		if (x->aux == N_ASSIGN || x->aux == N_PREINC || x->aux == N_PREDEC || x->aux == N_POSTINC || x->aux == N_POSTDEC)
+			return false; /* lowered atomic complex increment/decrement */
 		uint32_t b = x->a, n = N(b)->c, ls = n ? c->lists[N(b)->b + n - 1] : 0;
 
 		while (ls && N(ls)->op == N_LABEL)

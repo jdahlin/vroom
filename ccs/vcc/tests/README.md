@@ -38,7 +38,7 @@ and tcc tests2 covers the same ground).
 `bench/fetch-testsuites.sh [NAME...]` downloads these (shallow, sparse) at
 the commits pinned in the script; `work/testsuites/MANIFEST` records what is
 there.  About 320 MB, half a minute.  `bench/vcc-verify.py` runs clang's -verify
-tests (TODO.md T20); the rest have no harness yet.
+tests (TODO.md T20); see TEST.plan for the other suite harnesses.
 
 | name | what (C files) | license |
 |---|---|---|
@@ -47,8 +47,15 @@ tests (TODO.md T20); the rest have no harness yet.
 | `c-testsuite` | small self-checking programs with expected output (220) | per test (`.c.tags`), runner under its own LICENSE |
 | `llvm-test-suite` | `SingleSource/` UnitTests, Regression/C, Benchmarks, with reference outputs (2520) | Apache-2.0 WITH LLVM-exception |
 | `csmith`, `yarpgen` | random-program generators (T10); source only, not built | BSD-2 / Apache-2.0 |
+| `kefir` | 875 end2end host/test runtime pairs (1764 C files); 231 compiler-internal snapshot directories inventoried separately. `bench/vcc-kefir.py`: Clang oracle and four host/test compiler combinations on Linux | GPL-3.0-only; runtime headers BSD-3-Clause |
 | `libc-test` | musl's libc tests: functional, regression, math edge cases (466) | MIT |
 | `chibicc`, `cproc` | the compilers' own C11 tests (50, 213) | MIT / ISC |
+
+Kefir source provenance, migration, licenses and mapped upstream contracts are
+recorded in `bench/kefir-source.json`. Its baseline requires the clean pinned
+checkout; artifacts retain the immutable source snapshot, hashes, raw profiles
+and every compile/link/run command. Unsupported capabilities and oracle errors
+are reported separately from candidate failures.
 
 ## Updating
 

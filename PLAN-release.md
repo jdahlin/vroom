@@ -80,6 +80,25 @@ kan gå parallellt.
 
 ## Status
 
+### Status 2026-11-11: G1, padding i BitInt-uttryck
+
+Sammansatta tilldelningar normaliserar nu gamla `_BitInt`-värdet innan
+skift, division och rest på både Linux x86-64 och arm64. Det oförändrade
+Kefir-fallet `bitint_assign_shift1` passerar alla fyra Clang/vcc-parningar
+på båda målen. Regressionen provar 9–128 bitar, smutsig padding, tecken och
+engångsevaluering av operander. Unity och separata filer samt kärnans
+sema 887/887 individuellt och i batch är verifierade för den isolerade
+fixen. Den kombinerade milstolpen `04209a5` passerar 18 oförändrade Kefir-par
+med fyra kompilatorkombinationer per Linux-mål (144 körningar), båda
+byggsätten, diagnostik 220/220, ABI 32/32 per mål och ASan 19/19 per mål.
+Egna ARM-prov: 189/189; x86: 183/183 plus ett separat godkänt `branch_far`
+med PR37:s granskade 300 s-kontrakt (ursprunglig 60 s-timeout bevaras i
+loggen). Fem övriga x86-referensundantag återstår. Wasm64 går 148/148 med
+31 körda XFAIL och tio referensundantag; fokuserad Wasm32 5/5 med sju XFAIL.
+Padding-testets Wasm-lucka är bevisad med båda tidigare baslinjerna.
+Manifest och slutgrind: `work/validate-kefir-7eca264/validation.json` och
+`final-manifest.json`. G1 är fortsatt öppen.
+
 ### Status 2026-11-11: G5/G7, registerlokaler på x86
 
 Gemensamt behörighetsurval i `emit/opt/locals.c` används av alla tre
@@ -160,6 +179,15 @@ kodkontroller för befintliga egenskaper. Flaggor, passloggar och kod sparas
 av `bench/vcc-optaudit.py`; vcc O1/O2/O3 ger samma assembler här.
 Inga optimeringar implementerade eller uppmätt
 körtidsmål; G5 är fortsatt öppet och benchmarksvitens X är inte fastställt.
+
+### Status 2026-11-11: atomiska helobjekt på Linux
+Större atomiska record, heltal och komplexa värden använder nu libatomic-ABI
+när den inbyggda 1/2/4/8-bytevägen inte räcker. Jämför-och-byt-loopar behåller
+hela objektet och rätt förväntat värde även vid padding och konkurrens.
+Pthread-prov samt atomikregressioner klarar Linux x86 och ARM i unity,
+filvis bygge och ASan/UBSan; kernel-sema är 887/887 i båda körsätten.
+Den nya snabba värdriggen körs i normal och ASan-CI. Atomiska vektortyper
+återstår i frontend; G1/G2 är fortsatt öppna.
 
 ### Status 2026-11-11: objektrepresentationer och packade boolvektorer
 `__builtin_bit_cast` har körning och bytebaserad konstanttolkning med okänd

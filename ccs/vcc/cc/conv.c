@@ -34,8 +34,11 @@ VPRIV uint32_t cast_node(cc *c, uint32_t n, qty to, int kind)
 
 VPRIV __attribute__((noinline)) uint32_t decay_slow(cc *c, uint32_t n, qty t, int k)
 {
-	if (T(c, t)->flags & TF_ATOMIC)	/* lvalue conversion drops _Atomic: the load is atomic (emit) */
+	if (T(c, t)->flags & TF_ATOMIC) {
+		if ((N(n)->flags & NF_LVALUE) && atomic_wide(c, t))
+			return atomic_load_expr(c, n);
 		return cast_node(c, n, QUNQ(ty_unatomic(c, t)), CK_NOP);
+	}
 	if (k == TY_ARRAY)
 		return cast_node(c, n, ty_ptr(c, T(c, t)->base), CK_DECAY);
 	return cast_node(c, n, ty_ptr(c, QUNQ(t)), CK_FDECAY);
