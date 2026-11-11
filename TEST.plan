@@ -273,6 +273,15 @@ arbetskopian tidigare gick grönt ersätter inte isolerad verifiering av
 committade ändringar. Källor/kommandon finns i
 `work/abi-generated/committed-{x86,arm}/`.
 
+Efter isolerad rättning av tomma HFA-medlemmar och tomma variadiska
+argument (`8461ee2`) går den fulla ARM-omkörningen **778 GCC-fall och
+1000 LLVM-fall utan vcc-fel** (222 clang-filtrerade). Alla fyra
+anroparkombinationer körs per fall. Tillsammans med x86-körningen ovan
+är den valda mängden om 1000 genererade fall per generator nu grön på
+båda Linux-målen bland clang-giltiga fall. ARM-evidens:
+`work/abi-generated/empty-fixed-arm/results.json`. Utökning av frön/antal
+och senare ABI-ändringar kräver nya körningar.
+
 **Klart när:** N genererade fall per plattform utan skillnad.
 
 ### S7 Slumpprogram (TODO T10) — rigg klar, långkörningar återstår
