@@ -787,6 +787,30 @@ och återanvänd kapacitet; en andra agent har granskat adapterflytten.
 X86-/wasm-adaptrar och kostnadsmätning av kombinationen pågår i separata
 arbetskopior; detta är fortsatt delprogress i OPT5, inte full O2-täckning.
 
+### OPT5 värdekärna: kontroll mot mergad main (2026-11-11)
+
+Bas f866a31 innehåller nu PR43 och PR45. Unity och fil-för-fil bygger;
+6117/6117 arm64-objekt/text är identiska mot basen (2039 filer ×
+O1-objekt/O2-objekt/O2-text). Egen arm64-svit 193/193, inklusive nya
+stack_cells; det nya körfallet passerar också med fil-för-fil-binären.
+Cell-/värdekontrakten körs sanitiserat. Den portabla regressionen har
+också verifierats O0–O3 på x86, arm64, wasm32 och wasm64 (16 körningar).
+
+Callgrind 3.26, hela `vpp --target=aarch64-linux-gnu -O2 -S`,
+`VCC_LREGS=0`, identiska clang23 `-O3 -march=x86-64-v3`-byggen:
+
+| 500-funktionskorpus | Bas f866a31, Ir | Värdekärna e6bad4c, Ir | Skillnad |
+| --- | ---: | ---: | ---: |
+| summeringsloop | 35 612 350 | 35 511 064 | −0,284 % |
+| rak heltalskod | 17 431 966 | 17 400 666 | −0,180 % |
+
+Assemblern är identisk i båda proverna. Rådata, binärhashar, källor och
+körkommando finns i `work/opt-profile/values-main-*`,
+`values-main-profile.json`, `values-measure.py` och `{loops,control}-500.c`.
+Detta mäter refaktoreringens instruktionsarbete på två avgränsade prover;
+G5/G7 kräver fortfarande bredare kodkvalitets-/prestandagrindar.
+X86:s metadatakostnad och wasm:s typade händelser ingår inte i denna mätning.
+
 ### Kontrakt som styr implementationen
 
 - **Wasm-integrering:** aritmetikhjälparen returnerar ett typat beslut,
