@@ -2513,5 +2513,12 @@ filvis bygge klarar samtliga 32 kombinationer av fyra mål och O0–O3. Den tidi
 oförändrade parent69-postfixvägen avvisas av läsningskontrollen: två läsningar i
 stället för en. x86:s egna C-svit klarar 228/228, med sex befintliga överhoppade.
 Loggar: `build/linux/postfix-evidence/`. Ingen ytterligare bred testkörning behövs
-för detta delsteg. En liten matchad Ir-jämförelse mot exakt f7327bd/v3 görs efter
-checkpoint; inga tids- eller hastighetsanspråk ännu.
+för detta delsteg. En liten matchad Ir-jämförelse efter checkpoint 6a726c0 finns i
+`build/linux/postfix-evidence/cost/result.json`: samma clang23,
+`-O3 -march=x86-64-v3`, exakt f7327bd-baslinje och en seriell Callgrind-körning
+per binär/källa, inklusive processstart. För 64 funktioner utan postfix ändras
+6 703 455 till 6 703 542 Ir (+87; +0,0013 %), med identisk assemblertext.
+För 64 postfix-funktioner ändras 6 717 886 till 6 731 413 Ir (+13 527;
++0,2014 %), samtidigt som varje funktions ordinära objektläsningar minskar
+från två till en. Detta mäter kompilatorarbete i två små prov, inte en full
+1 %-grind eller körtid/hastighetsvinst hos det genererade programmet.
