@@ -175,8 +175,17 @@ avslutas därför fortfarande med felstatus. Vcc:s egen djupa record-krasch
 hela ARM-sviten omkörd. Loggar: `/tmp/vroom-milestone-compile-{x86,arm}.log`.
 Kompilatorns SHA-256:
 `d08f33e9ea2e0f61e7203d246fdd398b71cebca4e3b1a69d21589ebbea2a0de0`.
-Kombinerad runtime-, ABI- och sanitizerverifiering på denna commit pågår;
-compile-milstolpen innebär inte att hela S3 eller testplanen är klar.
+Kombinerad verifiering på samma commit är nu också klar: vendrade
+runtime-sviter **1839/1839 x86** (134 filtrerade) och **1846/1846 ARM/QEMU**
+(127 filtrerade). ASan/UBSan: **124 x86-regressioner** och **129 ARM** utan
+fynd; x86:s stora `branch_far` kontrollerades separat efter en 60-sekunders
+timeout i clangreferensen. En exakt referensomkörning tog 39,2 s och dess
+program gav förväntad utdata; därefter gick ASan-fallet. Fem bestående
+x86-referensluckor redovisas fortfarande uttryckligen. Stress: **29/29**
+standalone och **30/30** med daemonöverlevnad. Normal- och sanitizerkörningar
+har separata `VCC_BUILD`-kataloger; x86-runtime kördes om isolerat efter att
+en delad referenskatalog upptäckts. Detta innebär inte att hela S3 eller
+testplanen är klar. Upstream-integration kräver egna körningar.
 
 **Klart när:** inga krascher i `compile/`; `ieee/` och `builtins/` lika
 gröna som `execute/`.
