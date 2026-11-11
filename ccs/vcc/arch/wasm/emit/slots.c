@@ -169,14 +169,8 @@ VPRIV void wmem_optimize(ecx *e)
 	for (uint32_t i = 0; i < W->nmem; i++) {
 		wmem *m = &W->mem[i];
 		if (m->kind != WM_FENCE)
-			em_slot_access(s, m->id, (int64_t)m->off, m->size);
+			em_slot_collect(s, m->id, (int64_t)m->off, m->size);
 	}
-	if (s->multi)
-		for (uint32_t i = 0; i < W->nmem; i++) {
-			wmem *m = &W->mem[i];
-			if (m->kind == WM_LOAD || m->kind == WM_STORE)
-				em_slot_detail(s, m->id, (int64_t)m->off, m->size);
-		}
 	if (!em_slot_finish(s) || !em_slot_values_begin(&W->values, s->count))
 		return;
 	for (uint32_t i = 0; i < W->nmem; i++) {

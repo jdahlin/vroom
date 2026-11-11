@@ -417,6 +417,33 @@ static val bf_load_wide(ecx *e, const lval *l)
 	return v;
 }
 
+/* Materialize a wide scalar field without reading outside its covered bytes.
+ * Extend from the field precision, rather than the declared storage width. */
+static val bf_load_big(ecx *e, const lval *l, qty t)
+{
+	uint64_t size = tsize(e->c, t);
+	lval dst = { .k = L_FRAME, .off = slot(e, size, talign(e->c, t)), .align = 8 };
+	int fill = treg(e);
+	movi(e, 1, fill, 0);
+	for (uint64_t off = 0; off < size; off += 8) {
+		int bits = (int)l->width - (int)(off * 8);
+		if (bits > 0) {
+			if (bits > 64) bits = 64;
+			int r = bf_read_word(e, l, (int)(off * 8), bits);
+			if (off * 8 + bits == l->width) {
+				if (l->sgn) {
+					opbf(e, I_SBFM, 1, r, r, 0, bits - 1);
+					shift_imm(e, I_ASRV, 1, fill, r, 63);
+				}
+			}
+			store_n(e, r, &dst, off, 8);
+			tfree(e, r);
+		} else store_n(e, fill, &dst, off, 8);
+	}
+	tfree(e, fill);
+	return laddr(e, &dst);
+}
+
 static val load1(ecx *e, lval *l, qty t);
 
 /* a volatile access stays untagged: opt.c then leaves its slot alone */
@@ -439,6 +466,8 @@ static val load1(ecx *e, lval *l, qty t)
 
 	if (is_atomic_lv(e, l, t))
 		return ldar_load(e, l, t);
+	if (l->bf && em_bigint(c, t))
+		return bf_load_big(e, l, t);
 	if (is_agg(c, t) || is_func(c, t))
 		return laddr(e, l);
 	if (is_flt(c, t) && !is_ld(c, t))
@@ -521,6 +550,27 @@ static void store1(ecx *e, lval *l, qty t, val *v)
 
 	if (is_atomic_lv(e, l, t)) {
 		stlr_store(e, l, t, v);
+		return;
+	}
+	if (l->bf && em_bigint(c, t)) {
+		lval src = { .k = L_REG, .r = (uint8_t)toreg(e, v), .align = 8 };
+		int r = treg(e);
+		for (unsigned bit = 0; bit < l->width; bit += 64) {
+			unsigned bits = l->width - bit;
+			if (bits > 64) bits = 64;
+			src.off = bit / 8;
+			load_n(e, r, &src, 8, 0);
+			bf_write_word(e, l, bit, bits, r);
+		}
+		tfree(e, r);
+		/* Assignment yields the converted field value without rereading a
+		 * potentially volatile destination. */
+		src.off = 0;
+		src.width = l->width;
+		src.sgn = l->sgn;
+		val result = bf_load_big(e, &src, t);
+		val_free(e, v);
+		*v = result;
 		return;
 	}
 	if (is_agg(c, t)) {

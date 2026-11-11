@@ -296,7 +296,7 @@ static int walk(pre *P, uint32_t n)
 				P->E->sflags[P->fn] |= SA_NOINL;
 		}
 		return false;
-	case N_NUM: case N_FNUM: case N_STR: case N_ZERO:
+	case N_NUM: case N_BIGNUM: case N_FNUM: case N_STR: case N_ZERO:
 		return false;
 	case N_SIZEOF_VLA:
 		lab = walk(P, x->a);

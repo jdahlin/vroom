@@ -19,6 +19,10 @@ VPRIV qty vector_attribute(cc *c, qty t, uint32_t size, uint32_t loc)
 		}
 		return QT(ty_intern(c, &outer), QQ(t));
 	}
+	if (is_bigint(c, t)) {
+		cc_error(c, loc, "vector integer elements wider than 128 bits are not supported");
+		return t;
+	}
 	if (kind == TY_BOOL || !is_arith(c, t) || is_complex(c, t) || !ty_size(c, t) ||
 	    ty_size(c, t) > size || size % ty_size(c, t)) {
 		cc_error(c, loc, "invalid vector element type '%s'", tyname(c, t));

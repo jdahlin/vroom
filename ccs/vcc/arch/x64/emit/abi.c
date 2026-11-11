@@ -247,6 +247,13 @@ VPRIV void x64_classify0(ecx *e, qty t, wkarg *a)
 	a->vector = is_vec(c, t);
 	a->wide_record = x64_wide_record(c, t);
 	a->align = talign(c, t) > 8 ? talign(c, t) : 8;
+	/* SysV classifies _BitInt wider than 128 bits as MEMORY, including
+	 * unnamed variadic arguments. Returns use the ordinary hidden pointer. */
+	if (em_bigint(c, t)) {
+		a->align = 8; /* typedef alignment does not change the scalar ABI */
+		a->mem = true;
+		return;
+	}
 	if (!is_record(c, t) && !is_array(c, t) && !is_vec(c, t)) {
 		a->n = size > 8 ? 2 : 1;
 		a->cls[0] = a->cls[1] = is_flt(c, t) ? WA_SSE : WA_INT;
@@ -640,11 +647,24 @@ VPRIV void x64_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic)
 		}
 		/* on the stack: the parameter is where the caller put it */
 		stk = (stk + a[k].align - 1) & ~(int64_t)(a[k].align - 1);
-		a[k].slot = 16 + stk;
-		if (local) {
-			lval from = x64_fr(a[k].slot);
+		/* Overaligned wide scalars arrive at ABI alignment eight, but need
+		 * their declared alignment when addressed in the function body.
+		 * R11 is not an argument register, so later arguments stay intact. */
+		uint32_t home_align = sym_align(c, sym);
+		if (em_bigint(c, ty) && home_align > 8) {
+			a[k].slot = wk_slot(e, a[k].size, home_align);
+			for (uint64_t off = 0; off < a[k].size; off += 8) {
+				lval src = x64_fr(16 + stk + (int64_t)off), dst = x64_fr(a[k].slot + (int64_t)off);
+				x64_mem(e, X_LD, 8, R11, &src, false);
+				x64_mem(e, X_ST, 8, R11, &dst, false);
+			}
+		} else {
+			a[k].slot = 16 + stk;
+			if (local) {
+				lval from = x64_fr(a[k].slot);
 
-			x64_load(e, home.r, &from, wk_size(c, ty), wk_signed(c, ty));
+				x64_load(e, home.r, &from, wk_size(c, ty), wk_signed(c, ty));
+			}
 		}
 		stk += (int64_t)((a[k].size + 7) & ~(uint64_t)7);
 	}
