@@ -130,6 +130,7 @@ VPRIV int LO(ftreg)(ecx *e);				/* a free float temporary */
 VPRIV val LO(fconst)(ecx *e, uint64_t bits, int size);	/* a float (4) or double (8) constant */
 VPRIV val LO(fbin)(ecx *e, int op, qty t, val a, val b);	/* + - * / */
 VPRIV val LO(fneg)(ecx *e, qty t, val a);
+enum { WK_FCMP_UNORDERED = 0x10000, WK_FCMP_ORDERED_NE };
 VPRIV val LO(fcmp)(ecx *e, int op, qty t, val a, val b);	/* 0 or 1, false when unordered (but !=) */
 VPRIV val LO(cvt)(ecx *e, val v, qty from, qty to);	/* a float on either side (to may be _Bool) */
 /* builtins the CPU does */

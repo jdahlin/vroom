@@ -330,6 +330,15 @@ kärnan och kan vänta.
 
 ## Status
 
+### X3 (2026-11-11): flyttalsinbyggda
+Vandraren sänker nu ordnade/oordnade jämförelseinbyggda för float,
+double och x87 long double, och konstantfoldade NaN/infinity-värden.
+Runtime-klassning (`isnan`, `isinf`, `isfinite`, `isnormal`) använder
+bitmönstren utan flyttalsundantag. GCC IEEE: 48 godkända, ett fel
+(tom inline asm med memory-clobber), 30 filtrerade. Regressionerna
+`fp_compare_builtin.c` och `fp_classify_builtin.c` passerar på x86;
+fil-för-fil-bygget passerar också.
+
 ### X3 (2026-11-11): void-lvärden
 GCC:s `compile/20000701-1.c` kraschade när ett void-lvärde gav en
 minnesläsning med storlek noll. Vandraren utvärderar nu adressen och

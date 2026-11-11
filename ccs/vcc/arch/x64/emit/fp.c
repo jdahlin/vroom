@@ -107,6 +107,10 @@ VPRIV val x64_fcmp(ecx *e, int op, qty t, val a, val b)
 	int cc = op == T_LESS || op == T_GREATER ? CC_A : CC_AE;
 	int rd;
 
+	if (op == WK_FCMP_UNORDERED)
+		cc = CC_P;
+	else if (op == WK_FCMP_ORDERED_NE)
+		cc = CC_NE;
 	if (x64_isld(c, t)) {
 		int ra = x64_toreg(e, &a, 8), rb = x64_toreg(e, &b, 8);
 		lval ma = x64_at(ra), mb = x64_at(rb);
