@@ -1148,6 +1148,46 @@ runtime:
 		tfree(e, nanregs[0]);
 		return ne;
 	}
+	case BI_ISINF_SIGN: {
+		/* Inspect the representation once: return +1/-1 for infinities,
+		   zero for every other value, without quieting signaling NaNs. */
+		qty at = N(arg[0])->ty;
+		val a = gen(e, arg[0]);
+		bool ld = is_ld(c, at), half = KIND(c, at) == TY_FLOAT16 || KIND(c, at) == TY_BFLOAT16;
+		bool bf = KIND(c, at) == TY_BFLOAT16;
+		int d = ld || fpk(e, at), r, sign = treg(e);
+		uint64_t inf;
+		if (ld) {
+			toreg2(e, &a, false);
+			r = a.r2;
+			shift_imm(e, I_ASRV, 1, sign, r, 63);
+			opi(e, I_SUBSI, 1, ZR, a.r, 0);
+			cset(e, a.r, C_NE);
+			shift_imm(e, T_LESSLESS, 1, r, r, 1);
+			op3(e, I_ORR, 1, r, r, a.r);
+			tfree(e, a.r);
+			inf = UINT64_C(0xfffe000000000000);
+		} else {
+			r = toreg(e, &a);
+			if (half) {
+				shift_imm(e, T_LESSLESS, 0, sign, r, 16);
+				shift_imm(e, I_ASRV, 0, sign, sign, 31);
+				opi(e, I_ANDI, 0, r, r, 0x7fff);
+				inf = bf ? 0x7f80 : 0x7c00;
+			} else {
+				shift_imm(e, I_ASRV, d, sign, r, d ? 63 : 31);
+				shift_imm(e, T_LESSLESS, d, r, r, 1);
+				inf = d ? UINT64_C(0xffe0000000000000) : UINT64_C(0xff000000);
+			}
+		}
+		opi(e, I_ORRI, 0, sign, sign, 1);
+		opi(e, I_SUBSI, d, ZR, r, (int64_t)inf);
+		cset(e, r, C_EQ);
+		op3(e, I_SUB, 0, r, ZR, r);
+		op3(e, I_AND, 0, r, r, sign);
+		tfree(e, sign);
+		return vreg(r);
+	}
 	case BI_ISSIGNALING: {
 		qty at = N(arg[0])->ty;
 		val a = gen(e, arg[0]);
