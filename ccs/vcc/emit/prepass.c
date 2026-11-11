@@ -129,12 +129,12 @@ static void mark_written(pre *P, uint32_t n, bool addr)
 			break;
 		}
 	}
-	if (N(n)->op == N_VAR) {
+	if (N(n)->op == N_VAR && is_local_var(c, N(n)->a)) {
 		P->E->sflags[N(n)->a] |= SA_WRITTEN | SA_AESC, P->E->ffacts[N(n)->a] |= FF_BAD;
 		if (addr && is_local_var(P->c, N(n)->a))
 			P->E->lnoreg[N(n)->a] = 1;
 	}
-	else if (N(n)->op == N_COMPLIT)
+	else if (N(n)->op == N_COMPLIT && is_local_var(c, N(n)->b))
 		P->E->sflags[N(n)->b] |= SA_WRITTEN;
 }
 
@@ -190,7 +190,7 @@ static void note_assign(pre *P, uint32_t s, uint32_t rhs)
 	emitter *E = P->E;
 	cval cv;
 
-	if (E->sflags[s] & SA_WRITTEN)
+	if (!is_local_var(c, s) || (E->sflags[s] & SA_WRITTEN))
 		return;
 	if (!is_integer(c, c->syms[s].ty) || !cc_eval(c, rhs, &cv) || cv.kind != CV_INT) {
 		E->sflags[s] |= SA_WRITTEN;
@@ -209,7 +209,9 @@ static void note_assign(pre *P, uint32_t s, uint32_t rhs)
  * The prepass runs per function, the first time a function is emitted or
  * inlined: most of a TU's functions are header inlines nobody uses.  The
  * facts it records (writes to params and locals, labels) belong to that
- * function alone, so one walk per function is all that is needed.
+ * function alone, so one walk per function is all that is needed. Nonlocal
+ * variables have conservative immutable facts installed before workers start;
+ * no lazy walk may update them.
  */
 static int walk(pre *P, uint32_t n);
 
@@ -325,8 +327,12 @@ static int walk(pre *P, uint32_t n)
 	case N_ASSIGN:
 		if (!x->aux && N(x->a)->op == N_VAR)
 			note_assign(P, N(x->a)->a, x->b), note_fwrite(P, N(x->a)->a, x->b);
-		else if (!x->aux && is_aconst(c, x->a))
-			P->E->sflags[N(N(N(x->a)->a)->a)->a] |= SA_WRITTEN;
+		else if (!x->aux && is_aconst(c, x->a)) {
+			uint32_t s = N(N(N(x->a)->a)->a)->a;
+
+			if (is_local_var(c, s))
+				P->E->sflags[s] |= SA_WRITTEN;
+		}
 		else
 			mark_written(P, x->a, false);
 		lab = walk(P, x->a) | walk(P, x->b);

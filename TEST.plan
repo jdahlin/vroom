@@ -494,6 +494,15 @@ cykeldiagnostik samt kernel-sema 887/887 i båda lägen. Ny permanent
 500-globalsregression använder riggens `vcc-threads-same`-markör för
 upprepade parallella emissioner även i TSan-CI.
 
+En separat TSan-kapplöpning i prepassens skriv-/konstantmetadata är också
+rättad: funktionslokala fakta ägs av respektive lazy walk; globala fakta
+initialiseras konservativt före arbetstrådarna. Emittertrådarna förblir
+parallella, och lokal konstantpropagering behålls. **8036/8036** O0/O2-utdata
+på båda Linux-målen är byte-identiska mot `6cda644`; verkligt kernelobjekt
+`map_kernel.o` är oförändrat. Ny 200-funktionsregression med delade globala
+skrivningar går i normal/nonunity/TSan på båda mål, sex-trådsreproduceraren
+är ren och permanent test kräver upprepad trådad emission.
+
 Kombinerat fryst checkpoint `7afcdea`, före signmask-/typnamnsrättningarna,
 är verifierat i båda byggsätten: **145/145 x86** (fem referensundantag),
 **150/150 ARM/QEMU**, tvåfils-constexpr-ABI samt tre ursprungliga GCC-fall
