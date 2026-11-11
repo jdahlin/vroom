@@ -75,6 +75,7 @@ arm64)
 	step opt-rules-x86 python3 bench/vcc-opt-rules.py --target x86_64-linux-gnu --run
 	step const-control-x86 python3 bench/vcc-constant-control.py --target x86_64-linux-gnu
 	step c2y-cache    python3 bench/vcc-c2y-cache.py
+	step embed-search python3 bench/vcc-embed-search.py
 	step diag         python3 bench/vcc-diag.py -j "$J"
 	step x86-features python3 bench/vcc-x86features.py --clang "${LLVM:-/usr/lib/llvm-23}/bin/clang" --vpp "$BUILD/vpp"
 	step x86-targets  python3 bench/vcc-x86target.py --clang "${LLVM:-/usr/lib/llvm-23}/bin/clang" --vpp "$BUILD/vpp"

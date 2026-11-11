@@ -274,7 +274,7 @@ VPRIV uint32_t number(cc *c, const ptok *t)
 }
 
 /* one (possibly multi-byte UTF-8) escape or character of a literal */
-static uint32_t lit_char(cc *c, const char **ps, const char *e, const ptok *t, bool *wide_ok)
+static uint32_t lit_char(cc *c, const char **ps, const char *e, const ptok *t, int kind, bool *wide_ok)
 {
 	const unsigned char *s = (const unsigned char *)*ps;
 	uint32_t v;
@@ -302,9 +302,9 @@ static uint32_t lit_char(cc *c, const char **ps, const char *e, const ptok *t, b
 	case 'e': case 'E': v = 27; s++; break;
 	case '\\': case '\'': case '"': case '?': v = *s++; break;
 	case 'x': {
-		uint32_t limit = t->kind == T_U16CHAR || t->kind == T_U16STRING ? 0xffffu :
-			(t->kind == T_WCHAR || t->kind == T_WSTRING) ? (c->o->short_wchar ? 0xffffu : UINT32_MAX) :
-			(t->kind == T_U32CHAR || t->kind == T_U32STRING) ? UINT32_MAX : 0xffu;
+		uint32_t limit = kind == T_U16CHAR || kind == T_U16STRING ? 0xffffu :
+			(kind == T_WCHAR || kind == T_WSTRING) ? (c->o->short_wchar ? 0xffffu : UINT32_MAX) :
+			(kind == T_U32CHAR || kind == T_U32STRING) ? UINT32_MAX : 0xffu;
 		bool overflow = false;
 
 		s++;
@@ -387,27 +387,40 @@ VPRIV uint32_t string_lit(cc *c)
 {
 	uint32_t loc = tok(c)->loc;
 	int kind = T_STRING;
-	size_t n = 0;
-	char *buf = c->hp;	/* built in place at the top of the heap (nothing else allocates meanwhile) */
-	int esz;
+	size_t n = 0, count = 0, cap = 8;
+	ptok local[8], *tokens = local;
 
-	/* first pass: the literal kind (any prefixed one wins) */
-	for (int k = 0;; k++) {
-		ptok *t = peek(c, k);
-
-		if (!is_strtok(t->kind))
-			break;
-		if (t->kind != T_STRING && (t->kind != T_U8STRING || kind == T_STRING))
-			kind = t->kind;
-		if (k >= 2) {	/* the lookahead buffer is small: just stop counting */
-			break;
-		}
-	}
-	esz = lit_esz(kind, c->o->short_wchar);
+	/* The final prefix applies to every token, even a narrow escape before
+	 * the prefixed token. Save the complete run before decoding; pp's
+	 * temporary spellings must survive advancing beyond its token window. */
+	pp_hold_tmp(c->p, 1);
 	while (is_strtok(tok(c)->kind)) {
 		ptok *t = tok(c);
+		if (count == cap) {
+			cap *= 2;
+			ptok *more = malloc(cap * sizeof(*more));
+			if (!more)
+				fatal(c, loc, "out of memory");
+			memcpy(more, tokens, count * sizeof(*more));
+			if (tokens != local)
+				free(tokens);
+			tokens = more;
+		}
+		tokens[count++] = *t;
+		if (t->kind != T_STRING) {
+			if (kind != T_STRING && kind != t->kind)
+				cc_error(c, t->loc, "unsupported non-standard concatenation of string literals");
+			else
+				kind = t->kind;
+		}
+		next(c);
+	}
+	int esz = lit_esz(kind, c->o->short_wchar);
+	char *buf = c->hp; /* decoding does not fetch tokens or allocate AST data */
+	for (size_t i = 0; i < count; i++) {
+		const ptok *t = &tokens[i];
 		char *tmp = NULL;
-		size_t sl = t->len, used;
+		size_t sl = t->len;
 		const char *s = t->s, *e;
 
 		if (unlikely(t->flags & TF_DIRTY))
@@ -418,10 +431,6 @@ VPRIV uint32_t string_lit(cc *c)
 			fatal(c, t->loc, "translation unit too large (front-end heap full)");
 		}
 
-		if (t->kind != T_STRING && t->kind != T_U8STRING && t->kind != kind && esz != lit_esz(t->kind, c->o->short_wchar))
-			cc_error(c, t->loc, "unsupported non-standard concatenation of string literals");
-		if (t->kind != T_STRING && t->kind != T_U8STRING && kind == T_STRING)
-			kind = t->kind, esz = lit_esz(kind, c->o->short_wchar);
 		while (*s != '"')
 			s++;
 		s++;
@@ -440,7 +449,7 @@ VPRIV uint32_t string_lit(cc *c)
 				if (s == e)
 					break;
 			}
-			v = lit_char(c, &s, e, t, &ok);
+			v = lit_char(c, &s, e, t, kind, &ok);
 			if (esz == 1) {
 				if (!ok && (v & 0x80000000u))
 					n += utf8_enc(v & 0x7fffffffu, buf + n);
@@ -475,18 +484,10 @@ VPRIV uint32_t string_lit(cc *c)
 			}
 		}
 		free(tmp);
-		/* own the bytes while the next token is fetched */
-		used = (n + 15) & ~(size_t)15;
-		c->hp = buf + used;
-		next(c);
-		if (unlikely(c->hp != buf + used)) {
-			char *nb = halloc(c, used);
-
-			memcpy(nb, buf, n);
-			buf = nb;
-		}
-		c->hp = buf;
 	}
+	pp_hold_tmp(c->p, 0);
+	if (tokens != local)
+		free(tokens);
 	memset(buf + n, 0, (size_t)esz);
 	n += (size_t)esz;
 	{
@@ -523,7 +524,7 @@ VPRIV uint32_t char_lit(cc *c)
 	s++;
 	while (s < e) {
 		bool ok;
-		uint32_t x = lit_char(c, &s, e, t, &ok);
+		uint32_t x = lit_char(c, &s, e, t, kind, &ok);
 
 		if (kind == T_CHAR) {
 			if (!ok && (x & 0x80000000u)) {

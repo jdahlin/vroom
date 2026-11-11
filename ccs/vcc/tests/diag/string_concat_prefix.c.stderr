@@ -1,0 +1,10 @@
+string_concat_prefix.c:2:30: error: unsupported non-standard concatenation of string literals
+    2 |     (void)(u8"a" "b" "c" "d" u"e");
+      |                              ^
+string_concat_prefix.c:3:29: error: unsupported non-standard concatenation of string literals
+    3 |     (void)(U"a" "b" "c" "d" L"e");
+      |                             ^
+string_concat_prefix.c:4:13: error: hex escape sequence out of range
+    4 |     (void)("\x10000" "b" "c" "d" u"e");
+      |             ^
+3 errors generated.
