@@ -1690,6 +1690,7 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 		const char *msg;
 
 		as_set_dir(tl_as, env->cwd);
+		elf_set_machine(tl_obj, x86 ? EM_X86_64 : EM_AARCH64);	/* (a .S file: preprocessed, then assembled) */
 		char *dt = NULL;
 		size_t dn = o.n;
 
