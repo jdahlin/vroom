@@ -1128,7 +1128,8 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 		format_check(c, fmt, args.v, aty, atd, args.n);
 	if (!c->o->no_builtin && !lib_builtin_disabled(c->o, "strncmp", 7) && args.n == 3 &&
 	    N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC &&
-	    (c->syms[N(callee)->a].flags & SF_GLOBAL) && c->syms[N(callee)->a].sc != SC_STATIC) {
+	    (c->syms[N(callee)->a].flags & SF_GLOBAL) && c->syms[N(callee)->a].sc != SC_STATIC &&
+	    !(c->syms[N(callee)->a].attrs && c->attr[c->syms[N(callee)->a].attrs].asmname)) {
 		int nl;
 		const char *nm = idname(c->syms[N(callee)->a].name, &nl);
 		if (nl == 7 && !memcmp(nm, "strncmp", 7) && f->n == 3 &&
@@ -1139,7 +1140,8 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 		}
 	}
 	if (!c->o->no_builtin && args.n == 1 && N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC &&
-	    (c->syms[N(callee)->a].flags & SF_GLOBAL) &&
+	    (c->syms[N(callee)->a].flags & SF_GLOBAL) && c->syms[N(callee)->a].sc != SC_STATIC &&
+	    !(c->syms[N(callee)->a].attrs && c->attr[c->syms[N(callee)->a].attrs].asmname) &&
 	    !lib_builtin_disabled(c->o, idstr_(c->syms[N(callee)->a].name), idlen_(c->syms[N(callee)->a].name))) {
 		/* clang: abs, labs and llabs declared with their library types are builtins (inline) */
 		int nl, k = KIND(c, T(c, ft)->base);
