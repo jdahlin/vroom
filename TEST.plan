@@ -220,6 +220,18 @@ nu också: `array-8.c` och `pointer-arith-{1,2,3}.c` går på båda målen.
 Det isolerade paketets array-/incomplete-/subscript-diagnostiktester går
 10/10, både med unity- och filvis byggd kompilator.
 
+**Utökad fryst baslinje `5e17f47`:** samtliga 1563 matchande
+`torture/pr`-filer vid -O0 har nu kontrollerats, utan `--limit`.
+X86: **1189 godkända, 18 fel, 356 filtrerade, inga kompilatorkrascher
+eller referenskrascher**. ARM/QEMU: **1184 godkända, 6 fel, 373
+filtrerade, inga krascher**. Detta är fortfarande en delmängd av S4,
+inte hela gcc.dg eller optimeringsmatrisen. X86-felen omfattar bland annat
+interrupt-ABI, inline-asm, saknade builtins och ett reproducerat fel vid
+128-bitars skift (`pr69909`); ARM har bland annat samma frontendluckor
+och ett assembleringsfel. `pow`/`fabsl`-länkfelen är verkliga skillnader i
+lowering/optimering, inte skäl att lägga till `-lm` i riggen när upstream
+inte begär det. Resultat: `work/results/vroom-milestone-s4-pr-{x86,arm}.json`.
+
 Kvar:
 - Alla återstående matchande filer och optimeringskonfigurationer; nästlade
   kataloger med egna `.exp`-drivrutiner och LTO har ännu ingen motsvarighet.
