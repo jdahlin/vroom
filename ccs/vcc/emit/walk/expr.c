@@ -2654,13 +2654,18 @@ VPRIV void wk_cond(ecx *e, uint32_t n, bool jump_if, uint32_t lbl)
 
 		if (and != jump_if) {
 			/* a && b falls through when false: both must hold (or one hold for ||) */
+			wk_state(e)->cjump = false;
 			wk_cond(e, x->a, jump_if, lbl);
+			if (wk_state(e)->cjump)
+				return;	/* (a decided it: b is dead, __builtin_constant_p(x) && ...) */
 			wk_cond(e, x->b, jump_if, lbl);
 		} else {
 			uint32_t skip = wk_newlabel(e);
 
+			wk_state(e)->cjump = false;
 			wk_cond(e, x->a, !jump_if, skip);
-			wk_cond(e, x->b, jump_if, lbl);
+			if (!wk_state(e)->cjump)	/* (else b is dead: a always goes past it) */
+				wk_cond(e, x->b, jump_if, lbl);
 			LO(label)(e, skip);
 			wk_state(e)->cjump = false;	/* (skip falls through) */
 		}
