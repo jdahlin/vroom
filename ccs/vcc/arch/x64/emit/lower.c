@@ -627,6 +627,8 @@ VPRIV void x64_finish(ecx *e, uint32_t s)
 	if (e->E->o->opt >= 1)
 		e->x64->nin = em_rec_fallthrough(e->x64->in, e->x64->nin, &layout,
 					       e->ndl ? x64_compact_remap : NULL, &d);
+	if (e->E->o->opt >= 1 && !e->E->noopt)
+		x64_dead(e);
 	x64_twoaddr(e);
 	b->n = (b->n + 7) & ~(size_t)7;
 	start = b->n;
