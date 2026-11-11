@@ -70,8 +70,8 @@ def main():
                    check=True)
 
     x86 = a.arch == "x86_64"
-    cmd = ["qemu-system-x86_64", "-M", "q35", "-accel", "kvm" if os.path.exists("/dev/kvm") else "tcg",
-           "-cpu", "host" if os.path.exists("/dev/kvm") else "max"] if x86 else \
+    cmd = ["qemu-system-x86_64", "-M", "q35", "-accel", "kvm" if os.access("/dev/kvm", os.R_OK | os.W_OK) else "tcg",
+           "-cpu", "host" if os.access("/dev/kvm", os.R_OK | os.W_OK) else "max"] if x86 else \
           ["qemu-system-aarch64", "-M", "virt", "-accel", "hvf", "-cpu", "host"]
     cmd += [
            "-smp", "4", "-m", "2048", "-nographic", "-no-reboot",

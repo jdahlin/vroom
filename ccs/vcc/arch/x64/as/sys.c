@@ -7,6 +7,27 @@ VPRIV int x64_i_crdr(As *a, char *mn, XOp *o, int nops)
 	int sz = 0, cc;
 
 	(void)a, (void)mn, (void)o, (void)nops, (void)stem, (void)sz, (void)cc;
+
+	/* mov to/from a segment register: 8e /r (to; MC: movw has no 0x66, movq REX.W), 8c /r (from) */
+	if (nops == 2 && (!strcmp(mn, "mov") || !strcmp(mn, "movl") || !strcmp(mn, "movw") || !strcmp(mn, "movq")) &&
+	    ((o[0].kind == XK_REG && o[0].cls == XR_SEG) || (o[1].kind == XK_REG && o[1].cls == XR_SEG))) {
+		static const uint8_t pfx[6] = { 0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65 };	/* es cs ss ds fs gs */
+		bool to = o[1].kind == XK_REG && o[1].cls == XR_SEG;
+		XOp *sr = to ? &o[1] : &o[0], *g = to ? &o[0] : &o[1];
+		int sn = -1;
+
+		for (int k = 0; k < 6; k++)
+			if (pfx[k] == sr->reg)
+				sn = k;
+		if (sn < 0)
+			return err(a, "invalid segment register");
+		if (g->kind == XK_EXPR)
+			g->kind = XK_MEM;
+		if (to)
+			return x64_emit(a, &F(.w = g->kind == XK_REG && g->size == 8, .op = OPB(0x8e), .nop = 1, .reg = sn, .rm = g));
+		return x64_emit(a, &F(.w = g->kind == XK_REG && g->size == 8, .opsz16 = g->kind == XK_REG && g->size == 2,
+				      .op = OPB(0x8c), .nop = 1, .reg = sn, .rm = g));
+	}
 	/* ---- mov to and from control and debug registers (always 64-bit) ---- */
 	if (nops == 2 && (!strcmp(mn, "mov") || !strcmp(mn, "movq")) &&
 	    ((o[0].kind == XK_REG && (o[0].cls == XR_CR || o[0].cls == XR_DR)) ||
