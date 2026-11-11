@@ -948,6 +948,12 @@ static val wk_arith(ecx *e, int op, qty t, val a, val b)
 			if (em_sdivpow2(c, t, op, b.i, &recipe))
 				return wk_sdivpow2(e, t, a, &recipe);
 		}
+		if ((op == T_SLASH || op == T_PERCENT) && e->E->o->opt && !e->E->noopt) {
+			em_udivconst_recipe recipe;
+			/* Bound the extra live temporaries; pressure retains native divide. */
+			if (em_udivconst(c, t, op, b.i, &recipe) && wk_udivconst_ok(e, a, &recipe))
+				return wk_udivconst(e, t, a, &recipe);
+		}
 		em_divpow2(c, t, &op, &b.i);
 	}
 	if (a.k == V_ADDR && b.k == V_CONST && (op == T_PLUS || op == T_MINUS))

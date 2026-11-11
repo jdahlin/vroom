@@ -140,6 +140,8 @@ VPRIV uint32_t wk_newlabel(ecx *e);
 VPRIV val wk_gen(ecx *e, uint32_t n);
 VPRIV lval wk_lval(ecx *e, uint32_t n);
 VPRIV val wk_sdivpow2(ecx *e, qty t, val a, const em_sdivpow2_recipe *r);
+VPRIV bool wk_udivconst_ok(ecx *e, val a, const em_udivconst_recipe *r);
+VPRIV val wk_udivconst(ecx *e, qty ty, val a, const em_udivconst_recipe *r);
 VPRIV int wk_reg(ecx *e, val *v, qty t);
 VPRIV void wk_free(ecx *e, const val *v);
 VPRIV void wk_cond(ecx *e, uint32_t n, bool jump_if, uint32_t lbl);
@@ -151,7 +153,6 @@ VPRIV bool wk_mem(ecx *e, qty t);	/* values of t are held by address (records, a
 VPRIV val wk_conv(ecx *e, val v, qty from, qty to);
 VPRIV void wk_store(ecx *e, const lval *l, qty t, val *v);
 VPRIV val wk_reload(ecx *e, const lval *l, qty t);	/* l's value again (a new register or address) */
-VPRIV void wk_store(ecx *e, const lval *l, qty t, val *v);
 VPRIV val wk_putmem(ecx *e, lval *l, qty t, val v);	/* v's bytes (held by address) into l: l's address */
 VPRIV void ctor_entry(cc *c, tbuf *b, uint32_t s, bool fini);	/* arch/a64/emit/func.c (shared) */
 VPRIV bool wk_signed(cc *c, qty t);

@@ -525,6 +525,17 @@ typedef struct em_sdivpow2_recipe {
 	bool negative, remainder;
 } em_sdivpow2_recipe;
 VPRIV bool em_sdivpow2(cc *c, qty ty, int op, i128 rhs, em_sdivpow2_recipe *r);
+/* opt/udivconst.c: unsigned32 reciprocal; quotient = high32(n*magic),
+ * optional ((n-q)>>1)+q correction, then shift. compare means q=(n>=d). */
+typedef struct em_udivconst_recipe {
+	uint32_t divisor, magic;
+	uint8_t shift;
+	bool add, compare, remainder;
+} em_udivconst_recipe;
+VPRIV bool em_udivconst32(uint32_t divisor, bool remainder, em_udivconst_recipe *r);
+VPRIV bool em_udivconst(cc *c, qty ty, int op, i128 rhs, em_udivconst_recipe *r);
+VPRIV bool a64_udivconst_ok(ecx *e, val a, const em_udivconst_recipe *r);
+VPRIV val a64_udivconst(ecx *e, val a, const em_udivconst_recipe *r);
 /* opt/identity.c */
 enum { EM_ID_NONE, EM_ID_LEFT, EM_ID_ZERO, EM_ID_ONES };
 VPRIV int em_bin_identity(cc *c, qty ty, int op, i128 rhs);

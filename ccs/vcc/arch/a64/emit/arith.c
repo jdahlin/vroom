@@ -342,6 +342,14 @@ VPRIV val arith(ecx *e, int op, qty ty, val a, val b)
 			val_free(e, &a);
 			return vconst(id == EM_ID_ZERO ? 0 : em_trunc_to(c, -1, ty));
 		}
+		if (e->E->o->opt && !e->E->noopt && (op == T_SLASH || op == T_PERCENT)) {
+			em_udivconst_recipe recipe;
+
+			/* All unsigned32 recipes fit <=12 baseline instructions, including
+			 * normalization, two-word constant construction and remainder. */
+			if (em_udivconst(c, ty, op, b.i, &recipe) && a64_udivconst_ok(e, a, &recipe))
+				return a64_udivconst(e, a, &recipe);
+		}
 		{
 			em_sdivpow2_recipe recipe;
 
