@@ -169,6 +169,8 @@ VPRIV int LO(tlsaddr)(ecx *e, uint32_t ref, int model);	/* a thread-local's addr
    rexp -> the old value; FENCE */
 enum { WK_ALOAD, WK_ASTORE, WK_AXCHG, WK_AXADD, WK_ACAS, WK_AFENCE };
 VPRIV int LO(atomic)(ecx *e, int op, int size, int rp, int rv, int rexp);
+VPRIV val LO(setjmp)(ecx *e, int rbuf);		/* __builtin_setjmp: 0, then 1 when longjmp comes back */
+VPRIV void LO(longjmp)(ecx *e, int rbuf);
 VPRIV int LO(spget)(ecx *e);				/* the stack pointer in a temporary */
 VPRIV void LO(spset)(ecx *e, int r);			/* the stack pointer = r (r freed) */
 VPRIV val LO(fbits)(ecx *e, val v, int size);		/* a float's bits in an integer register */

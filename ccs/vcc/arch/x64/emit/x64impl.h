@@ -59,6 +59,7 @@ enum {
 	X_CMPXCHG,	/* lock cmpxchg: if [r1 + off] == rax then = r2, else rax = [r1 + off] */
 	X_MFENCE,
 	X_JMPR,		/* jmp *r1 */
+	X_LEAL,		/* r0 = the address of local label `label` */
 	X_NAMED,	/* ref's name as a label here */
 	X_BSF, X_BSR,	/* r0 = index of the lowest / highest set bit of r1 */
 	X_BSWAP,	/* r0 = r0 byte-reversed (sz 4, 8) */

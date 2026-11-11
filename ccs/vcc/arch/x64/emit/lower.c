@@ -493,6 +493,43 @@ VPRIV void x64_brz(ecx *e, val a, int size, bool nz, uint32_t lbl)
 
 VPRIV void x64_label(ecx *e, uint32_t l) { x64_put(e, X_LABEL)->label = l; }
 VPRIV void x64_jump(ecx *e, uint32_t l) { x64_put(e, X_JMP)->label = l; }
+/* buf: rbp, the resume label, rsp (as clang); 0 now, 1 at the label */
+VPRIV val x64_setjmp(ecx *e, int rb)
+{
+	uint32_t resume = wk_newlabel(e), done = wk_newlabel(e);
+	lval b0 = { .k = L_REG, .r = (uint8_t)rb }, b1 = b0, b2 = b0;
+	rec *i;
+	int r;
+
+	b1.off = 8, b2.off = 16;
+	x64_mem(e, X_ST, 8, RBP, &b0, false);
+	i = x64_put(e, X_LEAL);
+	i->r[0] = R11;
+	i->label = resume;
+	x64_mem(e, X_ST, 8, R11, &b1, false);
+	x64_mem(e, X_ST, 8, RSP, &b2, false);
+	x64_tfree(e, rb);
+	r = x64_treg(e);
+	x64_movi(e, r, 0);
+	x64_jump(e, done);
+	x64_label(e, resume);
+	x64_movi(e, r, 1);
+	x64_label(e, done);
+	return (val){ .k = V_REG, .r = (uint8_t)r };
+}
+
+VPRIV void x64_longjmp(ecx *e, int rb)
+{
+	lval b0 = { .k = L_REG, .r = (uint8_t)rb }, b1 = b0, b2 = b0;
+
+	b1.off = 8, b2.off = 16;
+	x64_mem(e, X_LD, 8, R11, &b1, false);
+	x64_mem(e, X_LD, 8, RSP, &b2, false);
+	x64_mem(e, X_LD, 8, RBP, &b0, false);
+	x64_op3(e, X_JMPR, 8, XNOREG, R11, XNOREG);
+	x64_tfree(e, rb);
+}
+
 VPRIV void x64_jumpr(ecx *e, int r) { x64_op3(e, X_JMPR, 8, XNOREG, r, XNOREG); x64_tfree(e, r); }
 VPRIV void x64_named(ecx *e, uint32_t ref) { x64_put(e, X_NAMED)->ref = ref; }
 

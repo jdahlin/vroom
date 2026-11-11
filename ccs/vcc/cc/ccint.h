@@ -305,6 +305,7 @@ enum {
 	/* ACLE hints and barriers (side effects: BI_ARM_NOP..BI_ARM_TRAP) */
 	BI_ARM_NOP, BI_ARM_YIELD, BI_ARM_WFE, BI_ARM_WFI, BI_ARM_SEV, BI_ARM_SEVL, BI_ARM_CLREX,
 	BI_ARM_ISB, BI_ARM_DMB, BI_ARM_DSB, BI_ARM_TRAP,
+	BI_SETJMP, BI_LONGJMP,	/* GCC's __builtin_setjmp/__builtin_longjmp: buf[0] frame, [1] resume address, [2] sp */
 	BI_LIB,	/* plain library call with a prototype */
 	BI_COUNT
 };

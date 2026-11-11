@@ -2000,6 +2000,58 @@ static val wk_builtin(ecx *e, uint32_t n)
 			wk_free(e, &a);
 		}
 		return vconst(1);
+	case BI_SETJMP: case BI_LONGJMP: {
+		val p = wk_gen(e, arg[0]);
+		int r = wk_reg(e, &p, prim(TY_ULONG));
+
+		if (x->aux == BI_SETJMP) {
+			if (e->wk->falign > 16)
+				wk_unsup(e, n, "__builtin_setjmp in a function with locals aligned above 16");
+			return LO(setjmp)(e, r);
+		}
+		{
+			val k = wk_gen(e, arg[1]);	/* (GCC requires 1) */
+
+			wk_free(e, &k);
+		}
+		LO(longjmp)(e, r);
+		return vconst(0);
+	}
+	case BI_ADD_OVERFLOW: case BI_SUB_OVERFLOW: case BI_MUL_OVERFLOW:
+		if (wk_size(c, N(arg[0])->ty) <= 8 && wk_size(c, N(arg[1])->ty) <= 8 && wk_size(c, T(c, N(arg[2])->ty)->base) == 16 &&
+		    LO(i128mem)()) {
+			/*
+			 * Operands of up to 64 bits, a 128-bit result: the exact value fits 128 bits
+			 * (two unsigned 64-bit factors as unsigned 128, the rest as signed 128), so
+			 * the overflow is its sign against the result's signedness.
+			 */
+			qty ta = N(arg[0])->ty, tb = N(arg[1])->ty, tr = T(c, N(arg[2])->ty)->base, w = prim(TY_INT128);
+			int op = x->aux == BI_ADD_OVERFLOW ? T_PLUS : x->aux == BI_SUB_OVERFLOW ? T_MINUS : T_STAR;
+			bool uu = op == T_STAR && !wk_signed(c, ta) && !wk_signed(c, tb);
+			val a = wk_conv(e, wk_gen(e, arg[0]), ta, w), b = wk_conv(e, wk_gen(e, arg[1]), tb, w), r, d;
+			lval hi;
+			int rr, s;
+
+			r = LO(wbin)(e, op, true, a, b);
+			d = wk_gen(e, arg[2]);
+			{
+				lval l = wk_fromval(e, d, tr);
+
+				r = wk_putmem(e, &l, tr, r);	/* (the stored object's address) */
+			}
+			rr = wk_reg(e, &r, prim(TY_ULONG));
+			if (uu == wk_signed(c, tr)) {
+				/* unsigned x unsigned into signed, or anything else into unsigned: the sign bit */
+				hi = (lval){ .k = L_REG, .r = (uint8_t)rr, .off = 8, .align = 8 };
+				s = LO(treg)(e);
+				LO(load)(e, s, &hi, 8, false);
+				LO(tfree)(e, rr);
+				return LO(bin)(e, T_GREATERGREATER, 8, false, wk_vreg(s), vconst(63));
+			}
+			LO(tfree)(e, rr);
+			return vconst(0);
+		}
+		goto ovf64;
 	case BI_ALLOCA: case BI_ALLOCA_UNINIT: {
 		val v = wk_gen(e, arg[0]);
 
@@ -2113,7 +2165,7 @@ static val wk_builtin(ecx *e, uint32_t n)
 			return LO(bin)(e, T_PIPE, 4, false, u, w);
 		}
 	}
-	case BI_ADD_OVERFLOW: case BI_SUB_OVERFLOW: case BI_MUL_OVERFLOW: {
+	ovf64: {
 		/* the exact result in 128 bits; overflow when it differs from the stored one extended back */
 		qty ta = N(arg[0])->ty, tb = N(arg[1])->ty, tr = T(c, N(arg[2])->ty)->base, w = prim(TY_INT128);
 		int op = x->aux == BI_ADD_OVERFLOW ? T_PLUS : x->aux == BI_SUB_OVERFLOW ? T_MINUS : T_STAR;
