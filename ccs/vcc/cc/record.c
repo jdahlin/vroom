@@ -214,7 +214,7 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 	x->n = base;
 }
 
-VPRIV void enum_body(cc *c, uint32_t ti, attrs *after)
+VPRIV void enum_body(cc *c, uint32_t ti, attrs *after, uint32_t loc)
 {
 	i128 v = -1, mn = 0, mx = 0;
 	bool any = false;
@@ -224,10 +224,62 @@ VPRIV void enum_body(cc *c, uint32_t ti, attrs *after)
 	DR_TAGWRITE(c, ti);
 	vinit(&cs);
 	if (accept(c, T_COLON)) {
-		fixed = type_name(c);
-		c->ty[c->tags[ti].ty].base = QUNQ(fixed);
+		dspec ds;
+		uint32_t baseloc = tok(c)->loc, colon = c->prevloc;
+		tag *r = &c->tags[ti];
+		qty old = c->ty[r->ty].base;
+
+		if (!decl_specs(c, &ds, false))
+			fatal(c, baseloc, "expected an integer underlying type");
+		fixed = ds.ty;
+		if (T(c, fixed)->flags & TF_ATOMIC) {
+			cc_error(c, baseloc, "atomic enumeration underlying type is not supported");
+			fixed = QT(T(c, fixed)->n, QQ(fixed));
+		}
+		if (!is_integer(c, fixed) || KIND(c, fixed) == TY_ENUM ||
+		    (is_int_kind(KIND(c, fixed)) && T(c, fixed)->n)) {
+			cc_error(c, baseloc, "'%s' is an invalid underlying type", tyname(c, fixed));
+			fixed = prim(TY_INT);
+		}
+		if (QQ(fixed))
+			cc_warnx(c, "ignored-qualifiers", true, NULL, baseloc, NULL, 0, NULL, 0,
+				 "qualifiers in enumeration underlying type are ignored");
+		fixed = QUNQ(fixed);
+		if ((r->flags & RF_ENUM_DECLARED) && !(r->flags & RF_ENUM_FIXED)) {
+			cc_error(c, loc, "enumeration previously declared with nonfixed underlying type");
+			note(c, r->loc, "previous declaration is here");
+		} else if ((r->flags & RF_ENUM_FIXED) && !compatible(c, fixed, old)) {
+			cc_error(c, loc, "enumeration redeclared with different underlying type '%s' (was '%s')",
+				 tyname(c, fixed), tyname(c, old));
+			note(c, r->loc, "previous declaration is here");
+		}
+		r->flags |= RF_ENUM_FIXED | RF_COMPLETE;
+		c->ty[r->ty].base = fixed;
+		c->ty[r->ty].size = r->size = ty_size(c, fixed);
+		c->ty[r->ty].align = r->align = ty_align(c, fixed);
+		if (c->o->std != 23)
+			EXT_WARN(c, "c23-extensions", w_ped, loc, "enumeration types with a fixed underlying type are a C23 extension");
+		else {
+			static const char *const compat_groups[] = { "pre-c23-compat-pedantic", NULL };
+			cc_warnx(c, "pre-c23-compat", false, compat_groups, loc, NULL, 0, NULL, 0,
+				 "enumeration types with a fixed underlying type are incompatible with C standards before C23");
+		}
+		if (!is(c, T_LBRACE)) {
+			if (!is(c, T_SEMI))
+				cc_error(c, colon, "non-defining declaration of enumeration with a fixed underlying type must be standalone [-Welaborated-enum-base]");
+			return;
+		}
+	} else if (c->tags[ti].flags & RF_ENUM_FIXED) {
+		cc_error(c, loc, "enumeration previously declared with fixed underlying type");
+		note(c, c->tags[ti].loc, "previous declaration is here");
+		fixed = c->ty[c->tags[ti].ty].base;
+	}
+	if (c->tags[ti].flags & RF_ENUM_DEFINED) {
+		cc_error(c, loc, "redefinition of enumeration");
+		note(c, c->tags[ti].loc, "previous definition is here");
 	}
 	expect(c, T_LBRACE, "'{'");
+	c->tags[ti].flags |= RF_BEING_DEFINED;
 	while (!is(c, T_RBRACE)) {
 		uint32_t name, loc, s;
 		attrs ea = { 0 };
@@ -238,10 +290,27 @@ VPRIV void enum_body(cc *c, uint32_t ti, attrs *after)
 		loc = tok(c)->loc;
 		next(c);
 		attribute_list(c, &ea);
-		if (accept(c, T_EQUAL))
+		bool explicit_value = accept(c, T_EQUAL);
+		if (explicit_value)
 			const_expr(c, &v, NULL);
 		else
 			v++;
+		if (fixed) {
+			unsigned bits = KIND(c, fixed) == TY_BOOL ? 1 : (unsigned)ty_size(c, fixed) * 8;
+			bool sign = is_signed(c, fixed);
+			i128 lo = sign && bits < 128 ? -((i128)1 << (bits - 1)) : 0;
+			u128 hi = bits == 128 ? ~(u128)0 >> sign : ((u128)1 << (bits - sign)) - 1;
+
+			if (bits < 128 && (v < lo || (v >= 0 && (u128)v > hi))) {
+				if (explicit_value)
+					cc_error(c, loc, "enumerator value is not representable in underlying type '%s'", tyname(c, fixed));
+				else {
+					char b[48];
+					i128s_(b, sizeof b, v);
+					cc_error(c, loc, "enumerator value %s is not representable in underlying type '%s'", b, tyname(c, fixed));
+				}
+			}
+		}
 		if (!any || v < mn)
 			mn = v;
 		if (!any || v > mx)
@@ -258,14 +327,14 @@ VPRIV void enum_body(cc *c, uint32_t ti, attrs *after)
 				note(c, c->syms[o].loc, "previous definition is here");
 			}
 		}
-		if (unlikely(v < INT32_MIN || v > INT32_MAX) && c->o->std != 23) {
+		if (!fixed && unlikely(v < INT32_MIN || v > INT32_MAX) && c->o->std != 23) {
 			char b[48];
 
 			i128s_(b, sizeof b, v);
 			EXT_WARN(c, "c23-extensions", w_ped, loc, "enumerator value which exceeds the range of 'int' is a C23 extension "
 				 "(%s is too %s)", b, v < 0 ? "small" : "large");
 		}
-		s = sym_new(c, S_ENUMCONST, name, v >= INT32_MIN && v <= INT32_MAX ? prim(TY_INT) :
+		s = sym_new(c, S_ENUMCONST, name, fixed ? QT(c->tags[ti].ty, 0) : v >= INT32_MIN && v <= INT32_MAX ? prim(TY_INT) :
 						 v >= 0 && v <= UINT32_MAX ? prim(TY_UINT) : v >= INT64_MIN && v <= INT64_MAX ? prim(CC_I64(c, false)) : prim(CC_I64(c, true)), loc);
 		if (unlikely(ea.depr))
 			apply_sym_attrs(c, &c->syms[s], &ea);
@@ -299,7 +368,7 @@ VPRIV void enum_body(cc *c, uint32_t ti, attrs *after)
 		et->base = best;
 		et->size = ty_size(c, best);
 		et->align = ty_align(c, best);
-		c->tags[ti].flags |= RF_COMPLETE;
+		c->tags[ti].flags = (c->tags[ti].flags | RF_COMPLETE | RF_ENUM_DEFINED) & ~(uint32_t)RF_BEING_DEFINED;
 		c->tags[ti].size = et->size;
 		c->tags[ti].align = et->align;
 		/* clang: if every value fits int the enumerators are int, else all of

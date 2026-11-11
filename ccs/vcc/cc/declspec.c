@@ -871,13 +871,13 @@ again:
 				tag *r = &c->tags[ti];
 
 				tag_deprecate(c, ti, &pre);
-				if (r->flags & RF_COMPLETE) {
+				if ((r->flags & RF_COMPLETE) && kind != TY_ENUM) {
 					cc_error(c, loc, "redefinition of '%.*s'", IDF(name));
 					note(c, r->loc, "previous definition is here");
 				}
 				if (kind == TY_ENUM) {
 					merge_attrs(&post, &pre);
-					enum_body(c, ti, &post);
+					enum_body(c, ti, &post, loc);
 					tag_body_end(c, kind);
 				} else {
 					DR_TAGWRITE(c, ti);
@@ -901,6 +901,8 @@ again:
 			} else {
 				ds->tag_bare = true;
 			}
+			if (kind == TY_ENUM)
+				c->tags[ti].flags |= RF_ENUM_DECLARED;
 			ds->tagdecl = ti;
 			named = QT(c->tags[ti].ty, 0);
 			have_named = true;

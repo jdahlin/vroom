@@ -464,7 +464,7 @@ VPRIV qty type_name(cc *c);
 /* record.c */
 extern _Thread_local fscratch tl_fscr;
 VPRIV __attribute__((noinline)) void struct_body(cc *c, uint32_t ti);
-VPRIV void enum_body(cc *c, uint32_t ti, attrs *after);
+VPRIV void enum_body(cc *c, uint32_t ti, attrs *after, uint32_t loc);
 /* init.c */
 VPRIV uint32_t initializer(cc *c, qty *ty, bool st);
 /* decl.c */

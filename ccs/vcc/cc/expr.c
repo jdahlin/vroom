@@ -607,7 +607,7 @@ static inline __attribute__((always_inline)) uint32_t primary_sym(cc *c, uint32_
 		y = &c->syms[s];
 	}
 	if (y->kind == S_ENUMCONST) {
-		uint32_t n = mk_int(c, y->val, y->ty, loc);
+		uint32_t n = mk_int(c, trunc_to(c, y->val, y->ty), y->ty, loc);
 
 		if (N(n)->op == N_NUM)
 			N(n)->aux |= NUM_ENUM;
