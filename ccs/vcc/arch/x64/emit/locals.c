@@ -45,7 +45,7 @@ VPRIV void x64_locals_begin(ecx *e, uint32_t s)
 	for (unsigned i = 0; i < X->nlreg; i++) {
 		X->lreg[i] = regs[i];
 		if (!X->csslot[X->lreg[i]])
-			X->csslot[X->lreg[i]] = wk_slot(e, 8, 8);
+			X->csslot[X->lreg[i]] = wk_pslot(e, 8, 8);
 	}
 }
 

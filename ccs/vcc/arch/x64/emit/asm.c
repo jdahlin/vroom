@@ -193,7 +193,7 @@ VPRIV void x64_csused(ecx *e, int r)
 		if (r == R12 && e->wk->falign > 16)
 			efatal(e, e->curloc, "x86-64: asm using r12 in a function with locals aligned above 16 is not supported");
 		if (!X->csslot[r])
-			X->csslot[r] = wk_slot(e, 8, 8);
+			X->csslot[r] = wk_pslot(e, 8, 8);
 	}
 }
 
@@ -209,6 +209,7 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 	uint32_t serial = e->asmk++, nplus = 0;
 	uint32_t edges[64], done = 0;
 	const char *csop[64];
+	const char *ccop[64] = { 0 };	/* "=@cc<cond>": the flag the output reads (set<cond> after the template) */
 	uint32_t fixed = 0, saved = 0, reserved = 0;
 	int64_t sslot[32] = { 0 };
 	xopnd *op;
@@ -231,6 +232,7 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 	for (unsigned alt = 0; alt < alternatives; alt++) {
 		bool valid = true;
 		uint32_t occupied = 0, early = 0;
+		const char *q_cc;
 		for (uint32_t i = 0; i < a->nclob; i++) {
 			int r = x64_rname(c->strs[a->clob[i] - 1].s);
 			if (r >= 0) occupied |= 1u << r;
@@ -248,6 +250,11 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 			memcpy(copy + 1, cs, len);
 			copy[len + 1] = 0;
 			csop[i] = copy;
+			if (i < a->nout && (q_cc = strstr(copy, "@cc"))) {
+				ccop[i] = q_cc + 3;
+				csop[i] = "=r";
+				continue;
+			}
 			int r = -1;
 			for (const char *q = copy; *q && *q != '[' && r < 0; q++) r = x64_creg(*q);
 			if (r >= 0) {
@@ -676,6 +683,22 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 			}
 		}
 	}
+	/* flag outputs: the condition as 0 or 1 in the output's register */
+	for (uint32_t i = 0; i < a->nout; i++)
+		if (ccop[i]) {
+			if (op[i].kind != XO_REG || op[i].fixed)
+				efatal(e, x->loc, "x86-64: unsupported asm flag output");
+			if (rb->n > start && rb->p[rb->n - 1] != '\n')
+				tb_c(rb, '\n');
+			tb_s(rb, "\tset");
+			tb_s(rb, ccop[i]);
+			tb_c(rb, ' ');
+			x64_asmreg(rb, op[i].reg, 1, false);
+			tb_s(rb, "\n\tmovzbl ");
+			x64_asmreg(rb, op[i].reg, 1, false);
+			tb_s(rb, ", ");
+			x64_asmreg(rb, op[i].reg, 4, false);
+		}
 	ri = x64_put(e, X_RAW);
 	ri->off = (int32_t)start;
 	ri->ref = (uint32_t)(rb->n - start);
