@@ -568,6 +568,18 @@ typedef struct em_switch_case {
 enum { EM_SWITCH_LINEAR, EM_SWITCH_TREE, EM_SWITCH_TABLE };
 VPRIV int em_switch_strategy(uint32_t n, i128 lo, i128 hi, bool ranges, bool tables);
 VPRIV bool em_switch_prepare(em_switch_case *cases, uint32_t n, unsigned bits, bool sg);
+/* One bounded membership test for a run of stacked case labels. The original
+ * body remains intact; node names its final case label, not a new destination. */
+typedef struct em_switch_bitset_recipe {
+	i128 lo;
+	uint64_t mask;
+	uint32_t node;
+	uint8_t span, bits;
+} em_switch_bitset_recipe;
+VPRIV bool em_switch_bitset_plan(cc *c, uint32_t body, uint32_t nlabels,
+				 unsigned bits, bool sg, em_switch_bitset_recipe *out);
+VPRIV bool a64_switch_bitset(ecx *e, uint32_t body, uint32_t base, int r,
+			    int cx, bool sg, uint32_t dflt);
 /* opt/unusedinit.c: bounded recipes for never-referenced integer declarations. */
 enum { EM_UNUSED_KEEP, EM_UNUSED_OMIT, EM_UNUSED_EVAL };
 VPRIV bool em_unused_local(ecx *e, uint32_t s, uint32_t fn);

@@ -1797,6 +1797,26 @@ funktionsavgränsade debug-/text-/DWARF-kontroller är gröna. Ny CI följer
 PR:n; CPU-mätningarna och instruktionsprofilen ovan har sina uttryckliga
 äldre baser och är inte ett generellt godkännande av G5.
 
+### OPT6 status: bitmask för switchmedlemskap (2026-11-11)
+
+En begränsad gemensam analys känner igen minst fyra staplade case-etiketter
+med samma ingång och högst 64 möjliga värden. Arm64, x86, wasm32 och wasm64
+använder vid O1–O3 en bitmask med unsigned intervallkontroll före skiftet;
+default, kroppar och fallthrough behåller sina ursprungliga etiketter. Täta
+masker, skilda ingångar, dolda case, `_BitInt` och större spann använder
+befintlig dispatch. O0 och `VCC_NOOPT` påverkas inte.
+
+`vcc-switch-bitsets.py --run` passerar O0–O3 och `VCC_NOOPT` på alla fyra mål,
+inklusive signed/unsigned-gränser, intervall, sidoeffekter och fallback. Unity
+och fil-för-fil bygger; fil-för-fil kör också x86 och wasm64-testen. Vcc-sviten
+passerar 246/246 med en befintlig xfail. På exakt föräldern 032e9dc jämfört
+med ändringen är x86-O2-funktionen `bs64` 131 → 85 byte (utan alignment),
+ett riktat kodstorleksprov. Tolv alternerande körningar av en korpus med 500
+matchande switchfunktioner gav median 4,52 → 4,34 ms för hela kompilatorn
+(intervall 4,27–5,06 respektive 4,13–4,76 ms); dessa korta väggtider är inte
+en generell prestandagrind. Hårdvaruräknare var otillgängliga på värden.
+Värdetabeller och bitset-kluster med flera destinationer återstår.
+
 ### OPT6 status: balanserad switchdispatch (2026-11-11)
 
 Gemensam policy, 32/64-bitars normalisering och sortering finns i
@@ -2299,7 +2319,7 @@ ett påstående om stöd eller avsaknad görs.
 | Heltalsförenkling: InstCombine, reassoc, div/rem | **Delvis, alla tre.** `opt/{identity,divpow2,sdivpow2,udivconst}.c` med separata adaptrar. U32-reciproker har målkostnad/fallback; inte generell InstCombine. Små konstantmultiplikationer, fler bitregler, delat kvot/rest-recept och signed/u64-reciproker återstår. Float2Int är inte bevisat av heltalsreglerna. |
 | Värdefakta, CSE/PRE, intervall: CCP, GVN, SCCP | **Delvis lokalt.** `rec/copies.c`, `rec/slot-values.c` och förpassfakta; a64:s `opt.c`, x64:s `copies.c`/`extensions.c`, wasms `slots.c`. Ingen gemensam global GVN/PRE/SCCP eller generell intervallanalys. Börja med begränsad blocklokal cache för rena uttryck. |
 | Död kod och minne: DCE/DSE, store merging | **Delvis.** Gemensamma exakta frame-celler/storefakta och nåbarhetsstädning; a64 har egna dead-result-pass, x64 effektbeskrivning, wasm typade accesshändelser. Heap/global-DSE, bitvis DCE, allokeringseliminering, generell last/store-motion och looplasteliminering återstår/är overifierade. |
-| Kontroll och switch: SimplifyCFG, jump threading, bit tests | **Delvis.** `opt/control.c`, `opt/switch.c`, `rec/{fallthrough,unreachable}.c`; alla mål använder delade beslut, wasm har tät `br_table`. Värdetabeller/bitset-kluster, generell threading, compare merging och tail merging återstår. |
+| Kontroll och switch: SimplifyCFG, jump threading, bit tests | **Delvis.** `opt/control.c`, `opt/switch.c`, `rec/{fallthrough,unreachable}.c`; alla mål använder delade beslut och begränsade medlemsmasker, wasm har tät `br_table`. Värdetabeller/bitset-kluster med flera destinationer, generell threading, compare merging och tail merging återstår. |
 | Skalär ersättning/promotion: SROA, mem2reg | **Delvis.** `opt/locals.c`, förpass och celler; a64 registerbindning, x64 fyra valda GPR-hem, wasm typade lokaler. Detta är inte generell aggregatsplittring eller join-medveten mem2reg. |
 | Loopmotion/induktion: LICM, IV opts, loop sink | **Saknas generellt.** Alla mål sänker loopar; förpassets loopviktade lokalval är inte LICM. CFG, dominans, loop-/beroendefakta och bevis om noll iterationer behövs före säker hoisting/IV-omskrivning. |
 | Loopform: rotation, deletion, unroll, unswitch/distribute | **Saknas generellt.** Målen har direkt satssänkning, inte dessa transformpass. Kräver trip-count-/effekt-/entrybevis och kodstorleksbudget; börja eventuellt med små exakt konstanta loopar. |
