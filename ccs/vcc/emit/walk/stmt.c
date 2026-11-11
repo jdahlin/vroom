@@ -45,7 +45,7 @@ VPRIV wkst *wk_state(ecx *e)
 	return W;
 }
 
-VPRIV void x64_ecx_free(ecx *e);
+VPRIV void LO(ecx_free)(ecx *e);
 
 /* the walker's and the lowering's state of this ecx, given back (the TU is done) */
 VPRIV void wk_ecx_free(ecx *e)
@@ -53,7 +53,7 @@ VPRIV void wk_ecx_free(ecx *e)
 	cc *c = e->c;
 	wkst *W = e->wk;
 
-	x64_ecx_free(e);
+	LO(ecx_free)(e);
 	if (!W)
 		return;
 	if (W->sgen) {

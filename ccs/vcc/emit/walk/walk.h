@@ -20,10 +20,20 @@
  */
 #ifndef VCC_WALK_H
 #define VCC_WALK_H
+#include "prefix.h"	/* generated (bench/gen-walkprefix.py): WK_PREFIX renames the walker's functions; first, so that emitimpl.h's wk_ prototypes are renamed too */
 #include "../emitimpl.h"
 #include "../rec/rec.h"
 
+/* The lowering target: x64_ today.  A second instantiation of the walker
+   (SPEC-vir.md X1) defines WK_PREFIX and LO_PREFIX before including the
+   walker files; LO_PREFIX is then the prefix of the target's operations. */
+#ifdef LO_PREFIX
+#define LO_PASTE_(p, n) p##n
+#define LO_PASTE(p, n) LO_PASTE_(p, n)	/* (the extra level expands LO_PREFIX first) */
+#define LO(name) LO_PASTE(LO_PREFIX, name)
+#else
 #define LO(name) x64_##name
+#endif
 
 /*
  * An argument, parameter or result as the ABI passes it (LO(classify)): n
