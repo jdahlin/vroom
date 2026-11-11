@@ -274,6 +274,7 @@ typedef struct fnctx {		/* one function instance: the emitted function or an inl
 
 #define NTEMP 17
 #define MAXLREG 10	/* x19-x28 */
+#define LEAF_LREGS 5	/* x15 down: a leaf function's register variables are caller-saved */
 #define LREGS_DEFAULT 6	/* the rest stay expression temporaries */
 #define INLINE_FREE_FAST 5
 #define INLINE_FREE_SAFE 8
@@ -348,7 +349,7 @@ typedef struct ecx {
 	uint32_t nvsz;
 	int64_t cl_top;		/* frame offset above the block's compound literals (kept past statements) */
 	int64_t outmax;		/* outgoing stack argument bytes */
-	bool dyn, calls, vararg;
+	bool dyn, calls, vararg, hasasm;
 	bool discarded_scalar;	/* lowering exposed an already-emitted unused scalar result */
 	int64_t vaslot;		/* variadic register save area */
 	int ngr_named, nstk_named;	/* variadic: named GPR args, named stack bytes */

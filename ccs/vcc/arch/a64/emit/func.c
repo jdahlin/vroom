@@ -457,7 +457,7 @@ static void finish_function(ecx *e, uint32_t s)
  * callee-saved registers x28 down for the whole function: no slot, a read
  * is a mov.  Those registers are then not expression temporaries here.
  */
-static void choose_lregs(ecx *e, uint32_t s, int max)
+static void choose_lregs(ecx *e, uint32_t s, int max, bool leaf)
 {
 	unsigned k;
 	uint32_t cand[MAXLREG];
@@ -465,21 +465,31 @@ static void choose_lregs(ecx *e, uint32_t s, int max)
 	e->nlr = 0;
 	if (!max || e->vararg || e->E->o->opt < 1)
 		return;
+	if (leaf)
+		max = LEAF_LREGS;
 	k = em_select_locals(e, s, cand, (unsigned)max, em_local_gpr_type);
 	for (unsigned i = 0; i < k; i++) {
-		int r = 28 - i;
+		/* leaf: x15 down (tempregs[6 - i]): caller-saved, no prologue save */
+		int ti = leaf ? 6 - (int)i : 16 - (int)i;
 
 		e->lrsym[i] = cand[i];
-		e->lrreg[i] = (uint8_t)r;
-		e->live |= 1u << (16 - i);	/* tempregs[16 - i] == x(28 - i) */
-		e->resv |= 1u << (16 - i);
-		e->usedcs |= 1u << r;
+		e->lrreg[i] = tempregs[ti];
+		e->live |= 1u << ti;
+		e->resv |= 1u << ti;
+		if (!leaf)
+			e->usedcs |= 1u << tempregs[ti];
 	}
 	e->nlr = k;
 }
 
-/* true: out of temporaries with register variables, generate it again without */
-static bool emit_function1(ecx *e, uint32_t s, int nlreg)
+/*
+ * 0: done.  1: out of temporaries with register variables, generate it again
+ * without.  2: leaf mode and the function turned out to call (a libcall, an
+ * inlined call's call, memcpy) or to contain inline asm: again with callee-saved
+ * register variables.  (Calls spill live caller-saved registers, so even a
+ * missed one would be correct; the retry keeps it from being slow.)
+ */
+static int emit_function1(ecx *e, uint32_t s, int nlreg, bool leaf)
 {
 	em_switch_values_reset(e);
 	cc *c = e->c;
@@ -509,7 +519,8 @@ static bool emit_function1(ecx *e, uint32_t s, int nlreg)
 	e->asmk = 0;
 	e->inline_depth = 0;
 	e->vararg = (ft->flags & TF_VARIADIC) != 0;
-	choose_lregs(e, s, nlreg);
+	choose_lregs(e, s, nlreg, leaf);
+	e->hasasm = false;
 	memset(&F, 0, sizeof(F));
 	F.fn = s;
 	F.inst = ++e->inst_next;
@@ -521,10 +532,10 @@ static bool emit_function1(ecx *e, uint32_t s, int nlreg)
 		break;
 	case 2:
 		e->f = NULL;
-		return true;
+		return 1;
 	default:
 		e->f = NULL;
-		return false;
+		return 0;
 	}
 	if (is_sret(c, rty)) {
 		F.retslot = slot(e, 8, 8);
@@ -660,6 +671,8 @@ static bool emit_function1(ecx *e, uint32_t s, int nlreg)
 		movi(e, 0, 0, 0);
 	deflabel(e, F.retlbl);
 	e->f = NULL;
+	if (leaf && e->nlr && (e->calls || e->hasasm))
+		return 2;
 	if (unlikely(e->E->stats)) {
 		double t = now();
 
@@ -668,18 +681,34 @@ static bool emit_function1(ecx *e, uint32_t s, int nlreg)
 	} else {
 		finish_function(e, s);
 	}
-	return false;
+	return 0;
+}
+
+/* a try that is generated again: the bindings of the function's locals are those of the last try (other registers, other slots) */
+static void reset_bindings(ecx *e, uint32_t s)
+{
+	emitter *E = e->E;
+
+	for (uint32_t v = E->lspan[2 * s]; v <= E->lspan[2 * s + 1]; v++)
+		memset(binding(e, v), 0, sizeof(bind));
 }
 
 VPRIV void emit_function(ecx *e, uint32_t s)
 {
 	/* out of temporaries: again without register variables and with more of them free in inlined calls */
 	e->inlfree = INLINE_FREE_FAST;
-	if (emit_function1(e, s, e->E->nlreg)) {
+	int r = emit_function1(e, s, e->E->nlreg, true);
+
+	if (r && e->E->nlreg) {	/* out of temporaries with the leaf registers, or not a leaf: callee-saved ones */
+		reset_bindings(e, s);
+		r = emit_function1(e, s, e->E->nlreg, false);
+	}
+	if (r) {
 		e->inlfree = INLINE_FREE_SAFE;
-		if (emit_function1(e, s, 0)) {
+		reset_bindings(e, s);
+		if (emit_function1(e, s, 0, false)) {
 			e->spill = 1;	/* still out: spill (expr.c gen_binary) */
-			emit_function1(e, s, 0);
+			emit_function1(e, s, 0, false);
 		}
 	}
 	e->nlr = 0, e->resv = 0, e->inlfree = 0, e->spill = 0;	/* out of a function: no register variables */
