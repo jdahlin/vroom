@@ -62,7 +62,7 @@ VPRIV void wk_free(ecx *e, const val *v)
 static val wk_vreg(int r) { return (val){ .k = V_REG, .r = (uint8_t)r }; }
 
 /* an address that may be 0 at run time: an undefined weak symbol's */
-static bool wk_weak0(cc *c, val v)
+VPRIV bool wk_weak0(cc *c, val v)
 {
 	const sym *y;
 

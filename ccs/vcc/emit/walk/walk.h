@@ -98,7 +98,8 @@ typedef struct wkst {
 
 VPRIV wkst *wk_state(ecx *e);
 VPRIV bool wk_const_sym(ecx *e, uint32_t s, val *v);
-VPRIV void wk_ael_clear(ecx *e, uint32_t s);	/* UINT32_MAX: every array */
+VPRIV void wk_ael_clear(ecx *e, uint32_t s);
+VPRIV bool wk_weak0(cc *c, val v);	/* the address of a weak undefined symbol (may be 0) */	/* UINT32_MAX: every array */
 VPRIV bool wk_isconst(ecx *e, uint32_t n);	/* n is a constant (constants, bound locals, no loads) */
 VPRIV val wk_conv(ecx *e, val v, qty from, qty to);	/* s is bound to the constant *v */
 VPRIV val wk_inline(ecx *e, uint32_t n, uint32_t s);	/* the call n to s, inlined (wk_can_inline) */

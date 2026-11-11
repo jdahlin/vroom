@@ -79,6 +79,10 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
     PLAN-x86.md's layers 1 and 3; `arch/x64/emit/`: x86-64's lowering
     (`x64impl.h`, `lower.c`), two-address pass and AT&T printer (`print.c`).
     x86-64 is their only user; arm64 moves to them later (TODO.md).
+  - `arch/x64/as/`: the x86-64 assembler, AT&T syntax with MC's encodings:
+    operands, the encoder (REX and VEX) and the dispatcher in `asm.c`
+    (shared header `x64as.h`), one file per instruction family (`sys.c`,
+    `gpr.c`, `x87.c`, `sse.c`, `avx.c`); `vas-obj.py` checks `x86-*.s`.
   - `arch/wasm/emit/`: the WebAssembly (wasm64) code generator, AST to
     LLVM's wasm `.s` (`wimpl.h`; `wasm.c` functions, ABI, header; `wexpr.c`,
     `wcall.c`, `wstmt.c`), also in the `emit` unity TU: every name starts
