@@ -298,7 +298,8 @@ def init(fe, rth, nocache=False):
     FE_ONLY, RTHASH, NOCACHE = fe, rth, nocache
 
 if __name__ == '__main__':
-    av = sys.argv[1:]
+    av = [part for arg in sys.argv[1:]
+          for part in (('-j', arg[2:]) if re.fullmatch(r'-j[0-9]+', arg) else (arg,))]
     j, suite, show, verbose = 6, None, None, False
     fe = '--fe' in av
     nocache = '--no-cache' in av
@@ -315,6 +316,8 @@ if __name__ == '__main__':
     pat = av[0] if av else None
     rth = build_rt()
     ts = tests(suite, pat)
+    if not ts:
+        sys.exit('no tests matched the requested suite/pattern')
     t0 = time.time()
     with Pool(j, initializer=init, initargs=(fe, rth, nocache)) as pool:
         res = pool.map(one, ts, chunksize=1)
