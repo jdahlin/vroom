@@ -348,6 +348,39 @@ def check_copies(assembly, arch):
     # than prescribing their physical register allocation.
 
 
+def check_udivconst64(assembly, arch):
+    wasm = arch.startswith('wasm')
+    divide = r'\b(?:i64\.(?:div|rem)_[su]|[su]div|idiv[lq]?|div[lq]?)\b'
+    divisors = [3,5,7,10,11,14,19,37,63,4294967295,4294967297,
+                9223372036854775807,9223372036854775809,18446744073709551615,
+                1099511640121,281474976722345,72057594038002501,1152921504625935719]
+    selected = [9223372036854775809,18446744073709551615] if wasm else divisors
+    probes = ['u64_q'+str(d) for d in selected]
+    if not wasm:
+        probes += ['u64_r'+str(d) for d in divisors]
+        probes += ['oa_div10', 'u64_compound', 'u64_compoundrem']
+    for name in probes:
+        text = body(assembly,name,wasm)
+        if re.search(divide,text):
+            raise RuntimeError(f'{name}: retained unsigned64 constant division\n{text}')
+    for name in ['u64_effect','u64_effectrem','u64_rhs','u64_rhsrem']:
+        text = body(assembly,name,wasm)
+        if len(re.findall(r'\b(?:callq?|bl)\s+next\b',text)) != 1:
+            raise RuntimeError(f'{name}: expected one call to next\n{text}')
+    if wasm:
+        for name in ['u64_q3','u64_r3']:
+            if not re.search(divide,body(assembly,name,True)):
+                raise RuntimeError(f'{name}: expanded unsupported wasm high product')
+        if not re.search(r'i64\.ge_u\s*\n\s*i64\.extend_i32_u',body(assembly,'u64_q18446744073709551615',True)):
+            raise RuntimeError('u64 high-divisor comparison must produce an i64 quotient')
+    else:
+        high = r'\bumulh\b' if arch=='aarch64' else r'\bmulq\b'
+        if not re.search(high,body(assembly,'u64_q10',False)):
+            raise RuntimeError('u64_q10: missing genuine high64 product')
+    if not re.search(divide,body(assembly,'u64_dynamic',wasm)):
+        raise RuntimeError('u64_dynamic: lost genuine runtime division')
+
+
 def check_udivconst(assembly, arch):
     wasm = arch.startswith('wasm')
     divide = r'\b(?:i(?:32|64)\.(?:div|rem)_[su]|[su]div|idiv[lq]?|div[lq]?)\b'
@@ -494,7 +527,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--vpp', default=str(Path(BUILD) / 'vpp'))
     ap.add_argument('--target', default='x86_64-linux-gnu')
-    ap.add_argument('--rule', choices=['pow2', 'signedpow2', 'identities', 'fallthrough', 'loopback', 'unreachable', 'locals', 'localjmp', 'copies', 'extensions', 'switches', 'udivconst', 'all'], default='all')
+    ap.add_argument('--rule', choices=['pow2', 'signedpow2', 'identities', 'fallthrough', 'loopback', 'unreachable', 'locals', 'localjmp', 'copies', 'extensions', 'switches', 'udivconst', 'udivconst64', 'all'], default='all')
     ap.add_argument('--run', action='store_true', help='also execute literal-answer correctness checks')
     ap.add_argument('--clang', default=llvm('clang'))
     ap.add_argument('--vlink', default=str(Path(BUILD) / 'vlink'))
@@ -524,7 +557,8 @@ def main():
              'copies': ('record_copies.c', check_copies),
              'extensions': ('known_extensions.c', check_extensions),
              'switches': ('switch_dispatch.c', check_switches),
-             'udivconst': ('unsigned_divconst.c', check_udivconst)}
+             'udivconst': ('unsigned_divconst.c', check_udivconst),
+             'udivconst64': ('unsigned_divconst64.c', check_udivconst64)}
     selected = rules if args.rule == 'all' else {args.rule: rules[args.rule]}
     with tempfile.TemporaryDirectory(prefix='vcc-opt-rules-') as tmp:
         directory = Path(tmp)
@@ -539,7 +573,7 @@ def main():
                 checked = ((arch == 'x86_64' and level >= 1) if rule in ['locals', 'copies', 'extensions'] else
                            (not arch.startswith('wasm') and level >= 1) if rule in ['fallthrough', 'unreachable'] else
                            arch.startswith('wasm') if rule == 'loopback' else True)
-                checked = checked and check is not None and (rule not in ['switches', 'udivconst'] or level >= 1)
+                checked = checked and check is not None and (rule not in ['switches', 'udivconst', 'udivconst64'] or level >= 1)
                 if checked:
                     check(assembly.read_text(), arch)
                 if args.run:

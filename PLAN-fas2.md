@@ -2016,3 +2016,81 @@ sanitiserade reciprok-/tryckkontrakten passerar på kombinationen, liksom
 221/221 arm64-regressioner (ett befintligt xfail) och 216/216 x86-regressioner
 (sex referensskips). Mätningarnas JSON anger exakt 781ca69→58263be och
 `compiler-sources.json` binder de tio ändrade kompilatorfilerna med SHA256.
+
+### OPT8 status: unsigned64 reciprokdivision (2026-11-11)
+
+Delsteget från exakt 046c6dc utökar `emit/opt/udivconst.c` med separat u64-
+konstruktion i host-u128, kontrollerad mot libdivides u64-generator ovan.
+U32 behåller sin egen billigare konstruktion. Native använder befintlig
+UMULH/MULW via en separat walker-hook, med sparning av levande implicita
+RAX/RDX. Budgeten räknar lat input, magic och sparat original/korrektion;
+registertryck behåller vanlig division. Ingen SSA eller ny AST-genomgång.
+Wasm avvisar vanliga u64-reciproker före konstruktionen och väljer bara
+jämförelsekvot vid divisor>2^63, som clang23:s faktiska wasm-sänkning.
+U64-rest och låga divisorer behåller wasm `div_u`/`rem_u`.
+
+Sanitiserade kontrakt prövar 4096 fullbreddsdivisorer, 32 slumpdivisorer per
+exakt bredd 2–63, tvåpotensgrannar, extremvärden och multipler mot oberoende
+division/modulo; de gamla u32-kontrakten kvarstår. Den faktiska x86-hooken
+prövas i 1536 register-/alias-/livemaskfall inklusive RAX/RDX. Körprovet har
+18 divisorklasser, fullbreddsinput, multipler ±1, /= och %=, volatile,
+sidoeffekter en gång, fasta RAX/RDX och nästlat adress-/registertryck.
+Unity och fil-för-fil bygger. 196/196 regel-/nivå-/målkombinationer passerar
+på x86, arm64, wasm32 och wasm64, även de 16 nya u64-fallen med fil-för-fil.
+222 arm64-regressioner (ett befintligt xfail), 217 x86-regressioner (sex
+referensskips), ABI 32/32 per native-mål, libgcc-unwind och x86-debug passerar.
+Den oberoende läsgranskningen fann ingen kvarvarande blockerare.
+
+Parade Callgrind-mätningar använder exakt 046c6dc mot e1fdb3d:s kompilatorkod,
+clang23 `-O3 -march=x86-64-v3`. På fyra mål är 500-funktionskontroller och
+loopkontroller högst +0,00021 % extra arbete. Befintlig mättad u32-korpus
+kostar +0,052…+0,122 %, med identisk assembler. Inga av dessa eller wasm:s
+avvisade u64-fall exekverar hostens `__udivti3`. En konfigurerad oförändrad
+12-filers native-mix kostar −0,00303 % på x86 och +0,00082 % på arm64;
+10 respektive 11 basstödda wasm-filer kostar −0,00794 %/−0,00462 %.
+Wasm-mixen utesluter befintligt ej stödda atomics/BitInt-fall enligt JSON.
+Detta är avgränsad kontroll-/mix-evidens, inte hela G7-grinden.
+
+Den mättade nya u64-korpusen (`x/7ULL+x%10ULL`, 500 funktioner) kostar
+**+14,10 % på x86 och +17,99 % på arm64 att kompilera**. Den avvägningen
+är uttrycklig: reciproksekvenser och host-u128-konstruktion gör mer arbete.
+På x86 kör en separat loop med tre miljoner seedade fullbredds-LCG-input
+samma kvot-/restsumma: två uppvärmningar och nio alternerande barnprocesser
+per binär ger median CPU 10,920→3,325 ms (−69,55 %), med identiskt
+clang-verifierat svar. Detta gäller denna korpus/värd och inkluderar
+processstart; det är inget generellt hastighetslöfte. Arm64 har statisk
+UMULH-/restkod verifierad men ingen mätning på verklig arm64-hårdvara.
+Wasm behåller sin dyrare klass enligt kostnadspolicyn.
+
+Källor, exakta kommandon, binär-/källhashar och råa prov finns under
+`work/opt-profile/udivconst64/`: `compiler-profile.json`, `mixed/result.json`
+och `native-runtime-profile.json` med respektive `*-measure.py`.
+Signed reciproker, billigare wasm-u64/rest/korrektion, bredare registerallokering,
+fulla G5/G7-grindar och full O2-täckning återstår. U32-statusens äldre
++19,54 % mättade arm64-kostnad gäller fortfarande dess separata basmätning.
+
+U64 efter integration med PR51 `54c8f3f` och main `f97d16d`: kompilatorkod
+`d8957b3` bygger unity/fil-för-fil och passerar 196 regelprov, 16 separata
+kontrollprov, 229 arm64-PASS (ett befintligt xfail), 224 x86-PASS (sex synliga
+referensundantag), ABI 32 per native-mål, unwind/debug och sanitiserade
+reciprok-/registerparskontrakt. Fil-för-fil kör de 16 u64-fallen på fyra mål;
+O0/noopt-assemblern är byte-identisk mot den nya föräldern i åtta jämförelser.
+Båda sidors planstatus och main:s x86-ändringar behålls.
+
+Nya parade mätningar av exakt `54c8f3f`→`d8957b3`, samma clang23/v3-flaggor,
+finns separat i `work/opt-profile/udivconst64-integrated/` med källhashmanifest.
+Kontroll/loop är högst +0,000105 %; u32 +0,052…+0,121 % med identisk assembler.
+Mättad u64-korpus kostar **+13,55 % x86/+17,97 % arm64** att kompilera.
+Samma fixerade mix kostar +0,00429 % x86 (12 filer), +0,00065 % arm64 (12),
+−0,00458 % wasm32 (10) och +0,01954 % wasm64 (11); samma basstödsundantag.
+Det seedade x86-provet ger nu median 11,047→3,396 ms (−69,26 %) och identiska
+körbinärhashar/svar som den historiska jämförelsen. De tidigare
++14,10 %/+17,99 % gäller fortsatt uttryckligen 046c6dc→e1fdb3d. Ingen av
+mätningarna ersätter full G7 eller ger ett generellt körprestandalöfte.
+
+U64 efter main2dc4ea3 via uppdaterad PR51head15551a7: unitybygge, samtliga
+196 riktade kör-/kodkrav, sanitiserade matematik-/registerparskontrakt och
+x86-bladramens policy/cache/debug/härdning/signal-unwind passerar igen.
+Reciprok- och högproduktkällorna är oförändrade av integrationen.
+Profilernas exakta 54c8f3f→d8957b3-avgränsning behålls; inga nya kostnads-
+eller generella fartpåståenden görs för denna integration av bladramar.
