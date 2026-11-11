@@ -484,7 +484,9 @@ static void gen_switch(ecx *e, uint32_t n)
 	} else {
 		int r = toreg(e, &v);
 
-		bool tree = a64_switch_dispatch(e, base, r, cx, is_signed(c, ct), dflt);
+		bool tree = (!em_bitint(c, ct) &&
+		             a64_switch_bitset(e, x->b, base, r, cx, is_signed(c, ct), dflt)) ||
+			    a64_switch_dispatch(e, base, r, cx, is_signed(c, ct), dflt);
 		if (!tree) {
 			for (uint32_t k = base; k < e->ncases; k++) {
 				const node *cn = N(e->cases[k]);
