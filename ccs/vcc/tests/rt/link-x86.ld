@@ -10,6 +10,7 @@ SECTIONS {
 	.fini_array : { __fini_array_start = .; KEEP(*(SORT(.fini_array.*))) KEEP(*(.fini_array)) __fini_array_end = .; }
 	.data : { *(.data*) }
 	.got : { *(.got) }
+	. = ALIGN(4096);	/* (.got is RELRO: what follows is a segment of its own, whose first page the kernel maps anew) */
 	.tdata : { __tdata_start = .; *(.tdata*) }
 	.tbss : { *(.tbss*) }
 	__tdata_size = SIZEOF(.tdata);

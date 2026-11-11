@@ -330,6 +330,21 @@ kärnan och kan vänta.
 
 ## Status
 
+### X7 (2026-11-11): vlink för x86-64, statiska länkar klara
+
+- `arch/x64/ld/x64.inc` (inkluderas av `ld/ld.c`): relokeringsskanning och
+  -tillämpning, GOTPCRELX-avslappning, GD/IE→LE, TLS variant 2
+  (`tls_tp` = blockets slut), 4K sidstorlek som standard, `SHT_X86_64_UNWIND`
+  som indata (utdata PROGBITS som lld), int3-utfyllnad i körbara sektioner,
+  tom `.got` kvar efter avslappad GD/LD, `__tls_get_addr` ej odefinierad.
+- `.note.gnu.property`: när AND av FEATURE_1_AND är 0 släpps alla (som lld);
+  annars ligger indata kvar (sammanslagen not: kvar att göra).
+- Testkörtid: `tests/rt/start-x86.S`, `link-x86.ld` (statiskt, eget TLS).
+- `bench/vcc-x86.py -j 6 --vlink`: 1750/1751 laddade bilder byte-identiska
+  med lld:s och körs; kvar 20030125-1 (floor→floorf, kräver optimeraren).
+  arm64 oförändrad: `VCC_LDCMP=1 vcc-ctests.py` 1780/1780, vlink-opts, vlink-bad.
+- Kvar: delade objekt/PIE-länkar (PLT, dynamiska relokeringar) för x86.
+
 ### X5/X6 (2026-11-11): assembler och objekt, påbörjat
 - `arch/x64/as/asm.c`: AT&T-parser och kodare (heltal, SSE, x87, prefix, `@PLT`/`@GOTPCREL`/
   TLS-modifierare), med MC:s val av form (ackumulatorformer, imm8/disp8, `c7`/`b8`, `d1` för

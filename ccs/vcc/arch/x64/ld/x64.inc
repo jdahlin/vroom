@@ -42,6 +42,9 @@ static bool x64_needs_got(const Obj *o, const ISec *is, const Rela *rl)
 	uint32_t type = (uint32_t)rl->r_info;
 	Target t;
 
+	/* lld keeps .got (empty if need be) once a GD/LD sequence is relaxed */
+	if (type == R_X86_64_TLSGD || type == R_X86_64_TLSLD)
+		return true;
 	if (type != R_X86_64_GOTPCREL && type != R_X86_64_GOTPCRELX && type != R_X86_64_REX_GOTPCRELX)
 		return false;
 	reloc_class(o, (uint32_t)(rl->r_info >> 32), &t);
