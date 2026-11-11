@@ -627,7 +627,7 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 			return false;
 		}
 		switch (x->aux) {
-		case T_MINUS: v->i = trunc_to(c, -a.i, x->ty); break;
+		case T_MINUS: v->i = trunc_to(c, (i128)((u128)0 - (u128)a.i), x->ty); break;
 		case T_TILDE: v->i = trunc_to(c, ~a.i, x->ty); break;
 		case T_EXCLAIM: v->i = a.i == 0; break;
 		}
@@ -799,8 +799,8 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 
 			ok = true;
 			switch (op) {
-			case T_PLUS: v->i = l + r; break;
-			case T_MINUS: v->i = l - r; break;
+			case T_PLUS: v->i = (i128)((u128)l + (u128)r); break;
+			case T_MINUS: v->i = (i128)((u128)l - (u128)r); break;
 			case T_STAR: v->i = sg ? l * r : (i128)((u128)l * (u128)r); break;
 			case T_SLASH:
 			case T_PERCENT:

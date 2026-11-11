@@ -33,8 +33,8 @@ VPRIV val fold_int_bin(ecx *e, int op, qty ot, qty rt, i128 l, i128 r, bool *ok)
 	}
 	*ok = true;
 	switch (op) {
-	case T_PLUS: v = l + r; break;
-	case T_MINUS: v = l - r; break;
+	case T_PLUS: v = (i128)((u128)l + (u128)r); break;
+	case T_MINUS: v = (i128)((u128)l - (u128)r); break;
 	case T_STAR: v = (i128)((u128)l * (u128)r); break;
 	case T_SLASH:
 	case T_PERCENT:
