@@ -1,3 +1,4 @@
+/* vcc-xfail-wasm: TODO.md wasm: 128-bit overflow builtins: full-width arithmetic and overflow flags are not lowered. */
 /* Runtime operand/result-pointer calls are each evaluated once; the result is
  * stored even on overflow.  Each callback has independent state. */
 typedef unsigned __int128 U;

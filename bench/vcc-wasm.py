@@ -69,7 +69,7 @@ WASM_XFAIL.update({
     'deep_conditional': 'TODO.md wasm: Linux-correctness coverage gaps: nested GNU omitted-middle conditionals mishandle __int128 values',
     'fabs_asm_identity': 'TODO.md wasm: Linux-correctness coverage gaps: fabs/fabsf intrinsic selection ignores asm-renamed function identity',
     'fp_classify_builtin': 'TODO.md wasm: Linux-correctness coverage gaps: runtime __builtin_isnormal/__builtin_fpclassify are not lowered',
-    'fp_compare_builtin': 'TODO.md wasm: Linux-correctness coverage gaps: ordered/unordered floating comparison builtins are not lowered',
+    'fp_compare_builtin': 'TODO.md wasm: Linux-correctness coverage gaps: long-double ordered/unordered comparison builtins are not lowered',
     'fpclassify': 'TODO.md wasm: Linux-correctness coverage gaps: runtime __builtin_isnormal/__builtin_fpclassify are not lowered',
     'generic_bitcount': 'TODO.md wasm: Linux-correctness coverage gaps: _BitInt runtime precision and generic bitcount lowering are not implemented',
     'gnu_conditional_float': 'TODO.md wasm: Linux-correctness coverage gaps: GNU omitted-middle floating conditional mishandles truth/value conversion',

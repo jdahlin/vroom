@@ -1200,6 +1200,34 @@ VPRIV int wbuiltin(ecx *e, uint32_t n, bool want)
 		wop(e, ak, x->aux == BI_ROTL32 || x->aux == BI_ROTL64 ? "rotl" : "rotr");
 		return k;
 	}
+	case BI_ISGREATER: case BI_ISGREATEREQUAL: case BI_ISLESS: case BI_ISLESSEQUAL:
+	case BI_ISLESSGREATER: case BI_ISUNORDERED: {
+		uint32_t a = warg_n(c, n, 0), b = warg_n(c, n, 1);
+		qty at = N(a)->ty, bt = N(b)->ty;
+		int ak = wty(c, at), bk = wty(c, bt);
+		if (ak == WT_MEM || bk == WT_MEM) break;
+		qty ty = prim(ak == WT_F64 || bk == WT_F64 ? TY_DOUBLE : TY_FLOAT);
+		int k = wty(c, ty);
+		uint32_t left = wtmp(e, k), right = wtmp(e, k);
+		wexpr(e, a, true); wconv(e, at, ty); wset(e, left);
+		wexpr(e, b, true); wconv(e, bt, ty); wset(e, right);
+		if (x->aux == BI_ISUNORDERED) {
+			wget(e, left); wget(e, left); wop(e, k, "ne");
+			wget(e, right); wget(e, right); wop(e, k, "ne");
+			wi(e, "i32.or");
+		} else {
+			wget(e, left); wget(e, right);
+			const char *op = x->aux == BI_ISGREATER ? "gt" : x->aux == BI_ISGREATEREQUAL ? "ge" :
+			                 x->aux == BI_ISLESSEQUAL ? "le" : "lt";
+			wop(e, k, op);
+			if (x->aux == BI_ISLESSGREATER) {
+				wget(e, left); wget(e, right); wop(e, k, "gt");
+				wi(e, "i32.or");
+			}
+		}
+		wfree(e, left); wfree(e, right);
+		return WT_I32;
+	}
 	case BI_ISNAN: {
 		uint32_t a = warg_n(c, n, 0);
 		int ak = wty(c, N(a)->ty);
@@ -1214,17 +1242,31 @@ VPRIV int wbuiltin(ecx *e, uint32_t n, bool want)
 		wfree(e, t);
 		return WT_I32;
 	}
-	case BI_ISINF: case BI_ISFINITE: {
+	case BI_ISINF: case BI_ISINF_SIGN: case BI_ISFINITE: {
 		/* |x| == inf, |x| < inf (false for a NaN) */
 		uint32_t a = warg_n(c, n, 0);
 		int ak = wty(c, N(a)->ty);
 
 		if (ak != WT_F32 && ak != WT_F64)
 			break;
+		uint32_t t = x->aux == BI_ISINF_SIGN ? wtmp(e, ak) : 0;
 		wexpr(e, a, true);
+		if (x->aux == BI_ISINF_SIGN) wtee(e, t);
 		wop(e, ak, "abs");
 		wfconst(e, ak, __builtin_inf());
-		wop(e, ak, x->aux == BI_ISINF ? "eq" : "lt");
+		wop(e, ak, x->aux == BI_ISFINITE ? "lt" : "eq");
+		if (x->aux == BI_ISINF_SIGN) {
+			/* isinf(x) * (1 - 2 * (x < 0)), with one argument evaluation. */
+			wconst(e, WT_I32, 1);
+			wget(e, t);
+			wfconst(e, ak, 0);
+			wop(e, ak, "lt");
+			wconst(e, WT_I32, 1);
+			wi(e, "i32.shl");
+			wi(e, "i32.sub");
+			wi(e, "i32.mul");
+			wfree(e, t);
+		}
 		return WT_I32;
 	}
 	case BI_ADD_OVERFLOW: case BI_SUB_OVERFLOW: case BI_MUL_OVERFLOW:

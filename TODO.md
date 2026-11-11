@@ -531,6 +531,18 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `bcp-1` needs `__builtin_constant_p` of an inlined argument.  They are
   `WASM_XFAIL` in `bench/vcc-wasm.py` (premerge's wasm job).
   *Validate:* `bench/vcc-wasm.py -j 6` reports them as XPASS; remove the entries.
+- [ ] **wasm: 128-bit overflow builtins** [C]. `overflow128` covers standard
+  integer operands and destinations independently of `_BitInt`;
+  `overflow128_effects` checks evaluation counts and result stores on overflow.
+  Both are rejected by the Wasm emitter on the same sources with the
+  `1f4c8d2` baseline compiler (code-identical to `b97022e`) and the current
+  compiler, on wasm32 and wasm64. Implement full-width add/subtract/multiply
+  overflow and mixed signedness without truncating operands. The separate
+  `overflow128_bitint` also requires the remaining-target `_BitInt` ABI work.
+  All three remain required on Linux; Wasm expected failures are executed and
+  must become XPASS when fixed, never skipped.
+  *Validate:* `bench/vcc-wasm.py -j 6 --suite vcc --no-cache overflow128`
+  and `--wasm32`; remove each marker after its full runtime test passes.
 - [ ] **wasm: wide integer bitfields** [C]. `bitfield_int128` and
   `bitfield_int128_static` exercise packed fields with `__int128` base types,
   signed extension and neighboring bits. The Wasm emitter handles these as
@@ -550,7 +562,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `bench/vcc-wasm.py` records each as an explicit expected failure, executes it
   against clang, and rejects XPASS. They are not skipped.
   - Runtime classification/comparison: `fp_classify_builtin`, `fpclassify`,
-    `fp_compare_builtin`, `isfpclass`, `signaling_nan`; long-double
+    `fp_compare_builtin` (long-double comparisons), `isfpclass`, `signaling_nan`; long-double
     classification in `complex_div_runtime`.
   - Integer/aggregate lowering: `atomic_record` (128-bit atomic value conversion),
     `generic_bitcount` (_BitInt runtime precision), `int128_shift_count`
