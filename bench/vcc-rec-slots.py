@@ -43,6 +43,15 @@ int main(void)
      * Width changes and containment invalidate all intersecting exact cells.
      * An observable (ID 0) test_access poisons even a cell with no surviving load.
      */
+    /* Both tiny-sort and general-sort sides must preserve classifications,
+     * especially duplicates and poison boundaries around the cutoff. */
+    for (unsigned n=15;n<=17;n++) {
+        test_access edges[20];
+        for (unsigned k=0;k<n;k++)
+            edges[k]=(test_access){1,(int64_t)(n-k)*8,4};
+        edges[n]=(test_access){0,8,1};
+        check(&s,edges,n+1,0);
+    }
     test_access explicit[]={ {1,-16,8},{1,-16,8},{2,-16,8},{3,0,8},{3,8,8},
                         {4,0,8},{4,2,2},{4,7,2},{5,32,8},{0,39,1},
                         {6,64,8},{0,72,1},{7,80,8},{8,88,8} };

@@ -481,3 +481,11 @@ och profiler finns lokalt i `work/opt-profile/wasm-cells-cost/result.json`.
 Det gamla bygget avvisas av det nya positiva kodformskravet. Samma 16
 kombinationer passerar också med ASan+UBSan. Kostnadsgranskning och CI är
 fortfarande öppna leveransvillkor.
+
+Separat liten kostnadsändring: högst 16 cellintervall sorteras med begränsad
+insättningssortering i den gemensamma klassificeraren; större mängder behåller
+`qsort`. Samma positiva 500-funktionsprov går från cirka +8,19 % till +7,03 %
+hela processens värdinstruktioner mot basen. De tolv assemblerutdata för
+kontroll-, sling- och structproven är byteidentiska före/efter sorteringsbytet.
+De sanitiserade intervall-/värdekontrakten och 16 wasm-kombinationer passerar;
+intervallprovet har också uttryckliga fall på båda sidor om gränsen 16.
