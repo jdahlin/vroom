@@ -245,6 +245,7 @@ VPRIV val LO(call)(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 /* Incoming arguments to their slots or selected register homes; a parameter
    left on the stack keeps the caller's location as its slot. */
 VPRIV void LO(params)(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic);
+VPRIV bool LO(tail_return)(ecx *e, uint32_t expr);
 VPRIV void LO(ret)(ecx *e, val *v, qty t, uint32_t lbl);	/* a scalar result of type t (v may be NULL), then to lbl */
 VPRIV void LO(retrec)(ecx *e, int raddr, const wkarg *r, uint32_t lbl);	/* a record result from the object at raddr */
 VPRIV val LO(pcmpstr)(ecx *e, uint32_t n);

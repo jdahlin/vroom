@@ -73,6 +73,8 @@ arm64)
 	step x86-leaf-frame python3 bench/vcc-x86-leaf-frame.py --no-run
 	step rec-copies python3 bench/vcc-rec-copies.py
 	step opt-rules-arm64 python3 bench/vcc-opt-rules.py --target aarch64-linux-gnu
+	step tail-controls python3 bench/vcc-tail-controls.py
+	step tail-object-arm64 python3 bench/vcc-opt-rules.py --target aarch64-linux-gnu --rule tails --run --tail-obj --cfi
 	step const-control-arm64 python3 bench/vcc-constant-control.py --target aarch64-linux-gnu
 	step opt-rules-x86 python3 bench/vcc-opt-rules.py --target x86_64-linux-gnu --run
 	step const-control-x86 python3 bench/vcc-constant-control.py --target x86_64-linux-gnu

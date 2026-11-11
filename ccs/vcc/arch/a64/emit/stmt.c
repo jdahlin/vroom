@@ -529,7 +529,11 @@ static void gen_return(ecx *e, const node *x)
 	cc *c = e->c;
 	fnctx *f = e->f;
 	qty rt = f->rty;
-	val v = x->a ? gen(e, x->a) : vnone();
+	val v;
+
+	if (x->a && a64_tail_return(e, x->a))
+		return;
+	v = x->a ? gen(e, x->a) : vnone();
 
 	if (!e->reach) {
 		val_free(e, &v);

@@ -551,6 +551,10 @@ enum { EM_SWITCH_LINEAR, EM_SWITCH_TREE, EM_SWITCH_TABLE };
 VPRIV int em_switch_strategy(uint32_t n, i128 lo, i128 hi, bool ranges, bool tables);
 VPRIV bool em_switch_prepare(em_switch_case *cases, uint32_t n, unsigned bits, bool sg);
 /* opt/locals.c: eligibility and bounded selection from the existing prepass. */
+/* opt/tail.c: exact direct forwarding wrappers; target capability/ABI checks follow. */
+VPRIV bool em_tail_candidate(ecx *e, uint32_t fn, uint32_t expr, uint32_t maxargs, uint32_t *callee);
+VPRIV bool a64_tail_return(ecx *e, uint32_t expr);
+VPRIV uint32_t a64_tail_ref(const ecx *e);
 VPRIV bool em_local_eligible(ecx *e, uint32_t s);
 VPRIV bool em_local_gpr_type(cc *c, qty ty);
 VPRIV unsigned em_select_locals(ecx *e, uint32_t fn, uint32_t *cand, unsigned max,
