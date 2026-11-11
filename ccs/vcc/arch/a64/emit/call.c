@@ -491,8 +491,13 @@ VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n, uint32_t call)
 		F.retreg = (uint8_t)(treg(e) + 1);	/* returns put the value there: no slot */
 	else if (!is_void(c, rty))
 		F.retslot = slot(e, tsize(c, rty) ? tsize(c, rty) : 8, talign(c, rty) > 16 ? 16 : talign(c, rty));
-	for (int i = 0; i < n; i++)
-		if (args[i].slot != 1) {	/* parked: back in a register */
+	for (int i = 0; i < (int)body->aux; i++) {
+		uint32_t p = c->lists[body->a + i];
+		const sym *ps = &c->syms[p];
+		bind *b = binding(e, p);
+		/* Reload only this parameter: restoring all parked values together
+		 * exhausts temporaries for wide or numerous inline arguments. */
+		if (i < n && args[i].slot != 1) {	/* parked: back in a register */
 			if (is_agg(c, args[i].t)) {
 				int r = treg(e);
 
@@ -505,10 +510,6 @@ VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n, uint32_t call)
 			}
 			args[i].slot = 1;
 		}
-	for (int i = 0; i < (int)body->aux; i++) {
-		uint32_t p = c->lists[body->a + i];
-		const sym *ps = &c->syms[p];
-		bind *b = binding(e, p);
 		val v = i < n ? args[i].v : vconst(0);
 
 		if (const_var(e, p, &v) && !is_agg(c, ps->ty) &&
