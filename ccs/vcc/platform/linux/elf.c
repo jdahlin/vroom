@@ -42,7 +42,7 @@ VPRIV void elf_reloc(ElfObj *o, Out *w, ElfFix *x, uint64_t P, uint32_t type, El
 	int keep = tls || type == R_AARCH64_ADR_GOT_PAGE || type == R_AARCH64_LD64_GOT_LO12_NC || type == R_AARCH64_GOT_LD_PREL19;
 
 	if (o->machine == EM_X86_64)
-		keep = x64_keepsym(type, &tls);
+		keep = x64_keepsym(type, &tls) || x->pad;	/* (sym@PLT names sym, MC) */
 	if (a && tls && a->type == STT_NOTYPE) a->type = STT_TLS;
 	if (a && !keep && insec(a) && a->bind == STB_LOCAL && !(a->flags & ESYM_SECTION) && a->type != STT_GNU_IFUNC &&
 	    !(add && (elf_sec(o, symsec(o, a))->flags & SHF_MERGE))) {

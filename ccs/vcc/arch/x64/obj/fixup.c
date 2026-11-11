@@ -94,7 +94,7 @@ VPRIV void x64_resolve(ElfObj *o, Out *w, ElfFix *x)
 		x64_patch(o, x, x64_pcrel(type) ? c - (int64_t)P : c);
 		return;
 	}
-	if (x64_pcrel(type) && type != R_X86_64_GOTPCREL && type != R_X86_64_GOTPCRELX && type != R_X86_64_REX_GOTPCRELX &&
+	if (x64_pcrel(type) && !x->pad && type != R_X86_64_GOTPCREL && type != R_X86_64_GOTPCRELX && type != R_X86_64_REX_GOTPCRELX &&
 	    type != R_X86_64_GOTTPOFF && type != R_X86_64_TLSGD && type != R_X86_64_TLSLD && insec(a) && symsec(o, a) == S &&
 	    a->bind == STB_LOCAL && a->type != STT_GNU_IFUNC) {
 		x64_patch(o, x, (int64_t)symoff(o, a) + c - (int64_t)P);

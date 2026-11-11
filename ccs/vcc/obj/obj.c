@@ -347,7 +347,7 @@ void elf_fixup(ElfObj *o, uint32_t frag, uint64_t off, uint8_t *p, uint32_t type
 {
 	ElfFix *x = rpush(&o->fixes, sizeof *x, 8);
 	uint32_t id = o->nfix++;
-	x->frag = frag; x->next = 0; x->type = type; x->off = off; x->p = p; x->v = v;
+	x->frag = frag; x->next = 0; x->type = type; x->pad = 0; x->off = off; x->p = p; x->v = v;
 	ElfFrag *f = elf_frag(o, frag);
 	if (f->fix_tail) ((ElfFix *)o->fixes.base)[f->fix_tail].next = id; else f->fix_head = id;
 	f->fix_tail = id;

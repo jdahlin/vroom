@@ -2759,6 +2759,9 @@ VPRIV int as_branch(As *a, int cc, Val v, int mod)
 
 	(void)mod;
 	elf_code(a->o, a->cur);
+	fold(a, &v);
+	elf_reg(a->o, v.add);	/* (the symbol table's order: where the fixup would be made, MC) */
+	elf_reg(a->o, v.sub);
 	it = var_item(a, VI_X86BR);
 	it->code = (uint8_t)cc;
 	it->v = v;
@@ -2791,16 +2794,21 @@ static int d_prefalign(As *a, const char *p, const char *e)
 }
 
 /* sizes before the variable items are final: offsets with the current estimates */
+static _Thread_local const uint64_t *var_prev;	/* sizes of the previous relaxation pass (MC's stale offsets), or NULL */
+
 static uint64_t frag_base(As *a, uint32_t frag)
 {
 	ElfObj *o = a->o;
 	uint64_t off = 0;
 	for (uint32_t f = elf_frag(o, frag)->sec; f && f != frag; f = elf_frag(o, f)->next) {
 		off += elf_frag(o, f)->size;
-		if (elf_frag(o, f)->cont && elf_frag(o, f)->aux) off += a->pfa[elf_frag(o, f)->aux - 1].size;
+		if (elf_frag(o, f)->cont && elf_frag(o, f)->aux)
+			off += var_prev ? var_prev[elf_frag(o, f)->aux - 1] : a->pfa[elf_frag(o, f)->aux - 1].size;
 	}
 	return off;
 }
+
+
 
 static int sym_secoff(As *a, uint32_t y, uint32_t *sec, int64_t *off)
 {
@@ -2838,8 +2846,12 @@ static void var_finish(As *a)
 {
 	ElfObj *o = a->o;
 	for (uint32_t i = 0; i < a->npfa; i++) elf_frag(o, a->pfa[i].frag)->aux = i + 1;
-	for (int it = 0;; it++) {
+	uint64_t *prev = rget(&a->defs, sizeof(uint64_t) * (a->npfa + 1));
+	/* pass -1 lays out the items with every jump short (MC's first layout); then each pass
+	   relaxes the jumps against the previous pass's layout and lays the rest out again */
+	for (int it = -1;; it++) {
 		int changed = 0;
+		for (uint32_t i = 0; i < a->npfa; i++) prev[i] = a->pfa[i].size;
 		for (uint32_t i = 0; i < a->npfa; i++) {
 			struct VarItem *v = &a->pfa[i];
 			uint64_t end = frag_base(a, v->frag) + elf_frag(o, v->frag)->size, ns = 0;
@@ -2867,11 +2879,19 @@ static void var_finish(As *a)
 
 				fold(a, &t);
 				ns = v->size;
-				if (ns == 2) {
+				if (ns == 2 && it >= 0) {
 					ElfSym *y = t.add ? elf_symp(o, t.add) : NULL;
+					int r;
 
-					if (!y || t.sub || y->bind != STB_LOCAL || sym_secoff(a, t.add, &sc, &to) || sc != elf_frag(o, v->frag)->sec ||
-					    !fits_i8(to + t.c - (int64_t)(end + 2)))
+					uint64_t pend;
+
+					/* every jump against the previous pass's layout, its own place too (MC's
+					   relaxOnce relaxes a section's fragments, then lays it out again) */
+					var_prev = prev;
+					pend = frag_base(a, v->frag) + elf_frag(o, v->frag)->size;
+					r = !y || t.sub || y->bind != STB_LOCAL || sym_secoff(a, t.add, &sc, &to) || sc != elf_frag(o, v->frag)->sec;
+					var_prev = NULL;
+					if (r || !fits_i8(to + t.c - (int64_t)(pend + 2)))
 						ns = big;
 				}
 			} else {
@@ -2882,7 +2902,7 @@ static void var_finish(As *a)
 			}
 			if (ns != v->size) { v->size = ns; changed = 1; }
 		}
-		if (!changed) break;
+		if (!changed && it >= 0) break;
 		if (it == 64) { err(a, "relaxation did not converge"); return; }
 	}
 	for (uint32_t i = 0; i < a->npfa; i++) {
@@ -2908,7 +2928,7 @@ static void var_finish(As *a)
 			else { q[0] = 0x0f; q[1] = (uint8_t)(0x80 + v->code); }
 			memset(q + pad - 4, 0, 4);
 			t.c -= 4;
-			elf_fixup(o, v->frag, qoff + pad - 4, q + pad - 4, t.add && !elf_symp(o, t.add)->bind ? R_X86_64_PC32 : R_X86_64_PLT32, t);
+			elf_fixup(o, v->frag, qoff + pad - 4, q + pad - 4, R_X86_64_PLT32, t);	/* (MC: every branch) */
 			continue;
 		}
 		if (v->kind == VI_ULEB || v->kind == VI_SLEB) {

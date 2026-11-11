@@ -68,6 +68,10 @@ static int x64_regname(const char *s, size_t n, XOp *o)
 	}
 	if (!strcmp(b, "rip")) { o->cls = XR_RIP; return 0; }
 	if (!strcmp(b, "fs")) { o->cls = XR_SEG, o->reg = 0x64; return 0; }
+	if (!strcmp(b, "es")) { o->cls = XR_SEG, o->reg = 0x26; return 0; }
+	if (!strcmp(b, "ds")) { o->cls = XR_SEG, o->reg = 0x3e; return 0; }
+	if (!strcmp(b, "cs")) { o->cls = XR_SEG, o->reg = 0x2e; return 0; }
+	if (!strcmp(b, "ss")) { o->cls = XR_SEG, o->reg = 0x36; return 0; }
 	if (!strcmp(b, "gs")) { o->cls = XR_SEG, o->reg = 0x65; return 0; }
 	if (!strcmp(b, "st")) { o->cls = XR_ST, o->reg = 0; return 0; }
 	return -1;
@@ -145,7 +149,7 @@ static int x64_expr(As *a, const char **pp, const char *e, Val *v, uint8_t *mod)
 		if (val_expr(a, &x, at, v))
 			return -1;
 		/* sym@MOD+k */
-		if (me < q) {
+		if (ws(me, q) < q) {
 			int64_t k;
 			const char *y = me;
 
@@ -475,12 +479,21 @@ static int sfxsize(char c) { return c == 'b' ? 1 : c == 'w' ? 2 : c == 'l' ? 4 :
 /* an operand's size from its register, 0 for none */
 static int opsize(const XOp *o) { return o->kind == XK_REG && o->cls == XR_GPR ? o->size : 0; }
 
+static _Thread_local int x64_isz;	/* the operation's size: a constant immediate is taken at it (MC) */
+
 static int x64_imm(As *a, const XOp *o, XForm *f, int64_t *k)
 {
 	Val v = o->v;
 
-	if (isconst(a, &v, k) && !o->mod)
+	if (isconst(a, &v, k) && !o->mod) {
+		if (x64_isz == 1)
+			*k = (int8_t)*k;
+		else if (x64_isz == 2)
+			*k = (int16_t)*k;
+		else if (x64_isz == 4)
+			*k = (int32_t)*k;
 		return 0;
+	}
 	f->immsym = 1;
 	f->immv = o->v;
 	f->immmod = o->mod;
@@ -520,6 +533,7 @@ static int x64_alu(As *a, int n, int sz, XOp *o, int nops)
 	XOp *s = &o[0], *d = &o[1];
 	int w = sz == 8, p16 = sz == 2, b = sz == 1;
 
+	x64_isz = sz;
 	if (nops != 2)
 		return err(a, "invalid operand count");
 	if (s->kind == XK_IMM) {
@@ -545,12 +559,13 @@ static int x64_alu(As *a, int n, int sz, XOp *o, int nops)
 	if (s->kind == XK_REG) {
 		uint8_t op = (uint8_t)(n * 8 + (b ? 0 : 1));
 
-		return x64_emit(a, &F(.w = w, .opsz16 = p16, .op = &op, .nop = 1, .reg = s->reg, .rm = d, .rex8 = rex8(s) || rex8(d), .gotx = 1));
+		return x64_emit(a, &F(.w = w, .opsz16 = p16, .op = &op, .nop = 1, .reg = s->reg, .rm = d, .rex8 = rex8(s) || rex8(d)));
 	}
 	if (d->kind == XK_REG) {
 		uint8_t op = (uint8_t)(n * 8 + (b ? 2 : 3));
 
-		return x64_emit(a, &F(.w = w, .opsz16 = p16, .op = &op, .nop = 1, .reg = d->reg, .rm = s, .rex8 = rex8(d), .gotx = 1));
+		/* (a load form relaxes GOTPCRELX, MC's list: adc add and cmp or sbb sub xor) */
+		return x64_emit(a, &F(.w = w, .opsz16 = p16, .op = &op, .nop = 1, .reg = d->reg, .rm = s, .rex8 = rex8(d), .gotx = 2));
 	}
 	return err(a, "invalid operand for instruction");
 }
@@ -573,6 +588,8 @@ static int x64_branch(As *a, int cc, XOp *t, int call)
 		memcpy(p, x.b, 5);
 		v.c -= 4;
 		elf_fixup(a->o, fr, off + 1, p + 1, R_X86_64_PLT32, v);
+		if (t->mod == XM_PLT)
+			((ElfFix *)a->o->fixes.base)[a->o->nfix - 1].pad = 1;	/* sym@PLT: never resolved in place (MC) */
 		return 0;
 	}
 	return as_branch(a, cc, t->v, t->mod);
@@ -609,6 +626,7 @@ VPRIV int x64_instruction(As *a, const char *p, const char *e, size_t wn)
 
 	if (wn >= sizeof mn)
 		return err(a, "invalid instruction mnemonic");
+	x64_isz = 0;
 	for (size_t i = 0; i < wn; i++)
 		mn[i] = (char)c_lower((unsigned char)p[i]);
 	mn[wn] = 0;
@@ -655,6 +673,25 @@ VPRIV int x64_instruction(As *a, const char *p, const char *e, size_t wn)
 		else if (p < e)
 			return err(a, "unexpected token in argument list");
 	}
+	/* string instructions with their implicit operands written out: as without */
+	if (nops && (!strncmp(mn, "movs", 4) || !strncmp(mn, "stos", 4) || !strncmp(mn, "lods", 4) || !strncmp(mn, "cmps", 4) ||
+		     !strncmp(mn, "scas", 4)) && strlen(mn) == 5 && sfxsize(mn[4])) {
+		int implicit = 1;
+
+		for (int i = 0; i < nops; i++)
+			if (o[i].kind != XK_MEM && !(o[i].kind == XK_REG && o[i].reg == 0))
+				implicit = 0;
+		if (implicit) {
+			int z = sfxsize(mn[4]);
+			uint8_t base = !strncmp(mn, "movs", 4) ? 0xa4 : !strncmp(mn, "stos", 4) ? 0xaa : !strncmp(mn, "lods", 4) ? 0xac :
+				       !strncmp(mn, "cmps", 4) ? 0xa6 : 0xae;
+			uint8_t b[2] = { 0x48, (uint8_t)(base + (z != 1)) };
+
+			if (z == 2)
+				b[0] = 0x66;
+			return z == 8 || z == 2 ? x64_raw(a, b, 2) : x64_raw(a, b + 1, 1);
+		}
+	}
 	/* ---- no operands ---- */
 	{
 		static const struct { const char *n; uint8_t b[4]; int k; } zero[] = {
@@ -685,7 +722,7 @@ VPRIV int x64_instruction(As *a, const char *p, const char *e, size_t wn)
 		if (!strcmp(mn, "jmp") || !strcmp(mn, "jmpq")) {
 			if (o[0].star || o[0].kind == XK_REG || o[0].kind == XK_MEM) {
 				o[0].kind = o[0].kind == XK_EXPR ? XK_MEM : o[0].kind;
-				return x64_emit(a, &F(.op = OPB(0xff), .nop = 1, .reg = 4, .rm = &o[0]));
+				return x64_emit(a, &F(.op = OPB(0xff), .nop = 1, .reg = 4, .rm = &o[0], .gotx = 2));
 			}
 			return x64_branch(a, 16, &o[0], 0);
 		}
@@ -695,7 +732,7 @@ VPRIV int x64_instruction(As *a, const char *p, const char *e, size_t wn)
 	if ((!strcmp(mn, "call") || !strcmp(mn, "callq")) && nops == 1) {
 		if (o[0].star || o[0].kind == XK_REG || o[0].kind == XK_MEM) {
 			o[0].kind = o[0].kind == XK_EXPR ? XK_MEM : o[0].kind;
-			return x64_emit(a, &F(.op = OPB(0xff), .nop = 1, .reg = 2, .rm = &o[0]));
+			return x64_emit(a, &F(.op = OPB(0xff), .nop = 1, .reg = 2, .rm = &o[0], .gotx = 2));
 		}
 		return x64_branch(a, -1, &o[0], 1);
 	}
@@ -853,6 +890,237 @@ VPRIV int x64_instruction(As *a, const char *p, const char *e, size_t wn)
 			}
 		}
 	}
+	/* ---- SSE2 packed integer and more SSE (66/none 0f op /r) ---- */
+	{
+		static const struct { const char *n; uint8_t pfx, op; } pk[] = {
+			{ "paddb", 0x66, 0xfc }, { "paddw", 0x66, 0xfd }, { "paddd", 0x66, 0xfe }, { "paddq", 0x66, 0xd4 },
+			{ "psubb", 0x66, 0xf8 }, { "psubw", 0x66, 0xf9 }, { "psubd", 0x66, 0xfa }, { "psubq", 0x66, 0xfb },
+			{ "pand", 0x66, 0xdb }, { "pandn", 0x66, 0xdf }, { "por", 0x66, 0xeb },
+			{ "pcmpeqb", 0x66, 0x74 }, { "pcmpeqw", 0x66, 0x75 }, { "pcmpeqd", 0x66, 0x76 },
+			{ "pcmpgtb", 0x66, 0x64 }, { "pcmpgtw", 0x66, 0x65 }, { "pcmpgtd", 0x66, 0x66 },
+			{ "punpcklbw", 0x66, 0x60 }, { "punpcklwd", 0x66, 0x61 }, { "punpckldq", 0x66, 0x62 }, { "punpcklqdq", 0x66, 0x6c },
+			{ "punpckhbw", 0x66, 0x68 }, { "punpckhwd", 0x66, 0x69 }, { "punpckhdq", 0x66, 0x6a }, { "punpckhqdq", 0x66, 0x6d },
+			{ "packsswb", 0x66, 0x63 }, { "packuswb", 0x66, 0x67 }, { "packssdw", 0x66, 0x6b },
+			{ "pmullw", 0x66, 0xd5 }, { "pmuludq", 0x66, 0xf4 }, { "pmaxub", 0x66, 0xde }, { "pminub", 0x66, 0xda },
+			{ "pmaxsw", 0x66, 0xee }, { "pminsw", 0x66, 0xea }, { "pmulhw", 0x66, 0xe5 }, { "pmulhuw", 0x66, 0xe4 },
+			{ "pmaddwd", 0x66, 0xf5 }, { "pavgb", 0x66, 0xe0 }, { "pavgw", 0x66, 0xe3 }, { "psadbw", 0x66, 0xf6 },
+			{ "paddusb", 0x66, 0xdc }, { "paddusw", 0x66, 0xdd }, { "psubusb", 0x66, 0xd8 }, { "psubusw", 0x66, 0xd9 },
+			{ "paddsb", 0x66, 0xec }, { "paddsw", 0x66, 0xed }, { "psubsb", 0x66, 0xe8 }, { "psubsw", 0x66, 0xe9 },
+			{ "psrlw", 0x66, 0xd1 }, { "psrld", 0x66, 0xd2 }, { "psrlq", 0x66, 0xd3 }, { "psraw", 0x66, 0xe1 },
+			{ "psrad", 0x66, 0xe2 }, { "psllw", 0x66, 0xf1 }, { "pslld", 0x66, 0xf2 }, { "psllq", 0x66, 0xf3 },
+			{ "unpckhps", 0, 0x15 }, { "unpckhpd", 0x66, 0x15 }, { "andnpd", 0x66, 0x55 }, { "orpd", 0x66, 0x56 },
+			{ "cvtdq2pd", 0xf3, 0xe6 }, { "cvtdq2ps", 0, 0x5b }, { "cvttps2dq", 0xf3, 0x5b }, { "cvtps2dq", 0x66, 0x5b },
+			{ "cvtps2pd", 0, 0x5a }, { "cvtpd2ps", 0x66, 0x5a }, { "cvttpd2dq", 0x66, 0xe6 }, { "cvtpd2dq", 0xf2, 0xe6 },
+			{ "addpd", 0x66, 0x58 }, { "mulpd", 0x66, 0x59 }, { "subpd", 0x66, 0x5c }, { "divpd", 0x66, 0x5e },
+			{ "maxps", 0, 0x5f }, { "minps", 0, 0x5d }, { "maxpd", 0x66, 0x5f }, { "minpd", 0x66, 0x5d },
+			{ "sqrtps", 0, 0x51 }, { "sqrtpd", 0x66, 0x51 }, { "rcpps", 0, 0x53 }, { "rsqrtps", 0, 0x52 },
+			{ "movhlps", 0, 0x12 }, { "movlhps", 0, 0x16 },
+		};
+		static const struct { const char *n; uint8_t op, d; } pki[] = {	/* shift by an immediate: 66 0f op /d ib */
+			{ "psrlw", 0x71, 2 }, { "psraw", 0x71, 4 }, { "psllw", 0x71, 6 }, { "psrld", 0x72, 2 }, { "psrad", 0x72, 4 },
+			{ "pslld", 0x72, 6 }, { "psrlq", 0x73, 2 }, { "psllq", 0x73, 6 }, { "psrldq", 0x73, 3 }, { "pslldq", 0x73, 7 },
+		};
+
+		if (nops == 2 && o[1].kind == XK_REG && o[1].cls == XR_XMM) {
+			if (o[0].kind == XK_IMM) {
+				for (size_t i = 0; i < sizeof pki / sizeof *pki; i++)
+					if (!strcmp(mn, pki[i].n)) {
+						int64_t c = 0;
+						uint8_t ops[2] = { 0x0f, pki[i].op };
+						XForm f = F(.opsz16 = 1, .op = ops, .nop = 2, .reg = pki[i].d, .rm = &o[1], .isz = 1);
+
+						x64_imm(a, &o[0], &f, &c);
+						f.imm = c;
+						return x64_emit(a, &f);
+					}
+			}
+			for (size_t i = 0; i < sizeof pk / sizeof *pk; i++)
+				if (!strcmp(mn, pk[i].n)) {
+					if (o[0].kind == XK_EXPR)
+						o[0].kind = XK_MEM;
+					return x64_sse(a, pk[i].pfx, pk[i].op, 0, o[1].reg, &o[0]);
+				}
+		}
+		/* with an immediate: pshufd $k, src, dst; shufps; cmpXXss as cmpss $pred */
+		if (nops == 3 && o[0].kind == XK_IMM && o[2].kind == XK_REG && o[2].cls == XR_XMM) {
+			static const struct { const char *n; uint8_t pfx, op; } si[] = {
+				{ "pshufd", 0x66, 0x70 }, { "pshuflw", 0xf2, 0x70 }, { "pshufhw", 0xf3, 0x70 }, { "shufps", 0, 0xc6 },
+				{ "shufpd", 0x66, 0xc6 }, { "cmpss", 0xf3, 0xc2 }, { "cmpsd", 0xf2, 0xc2 }, { "cmpps", 0, 0xc2 }, { "cmppd", 0x66, 0xc2 },
+			};
+
+			for (size_t i = 0; i < sizeof si / sizeof *si; i++)
+				if (!strcmp(mn, si[i].n)) {
+					int64_t c = 0;
+					uint8_t ops[2] = { 0x0f, si[i].op };
+					XForm f = F(.rep = si[i].pfx == 0x66 ? 0 : si[i].pfx, .opsz16 = si[i].pfx == 0x66, .op = ops, .nop = 2,
+						    .reg = o[2].reg, .rm = &o[1], .isz = 1);
+
+					if (o[1].kind == XK_EXPR)
+						o[1].kind = XK_MEM;
+					x64_imm(a, &o[0], &f, &c);
+					f.imm = c;
+					return x64_emit(a, &f);
+				}
+		}
+		/* cmpeqss ...: the predicate in the name */
+		if (!strncmp(mn, "cmp", 3) && nops == 2 && o[1].kind == XK_REG && o[1].cls == XR_XMM) {
+			static const char *const pr[8] = { "eq", "lt", "le", "unord", "neq", "nlt", "nle", "ord" };
+			size_t n = strlen(mn);
+
+			if (n > 5) {
+				const char *ty = mn + n - 2;
+				uint8_t pfx = !strcmp(ty, "ss") ? 0xf3 : !strcmp(ty, "sd") ? 0xf2 : !strcmp(ty, "pd") ? 0x66 : !strcmp(ty, "ps") ? 1 : 0;
+
+				for (int k = 0; k < 8 && pfx; k++)
+					if (strlen(pr[k]) == n - 5 && !memcmp(mn + 3, pr[k], n - 5)) {
+						uint8_t ops[2] = { 0x0f, 0xc2 };
+						XForm f = F(.rep = pfx == 0x66 || pfx == 1 ? 0 : pfx, .opsz16 = pfx == 0x66, .op = ops, .nop = 2,
+							    .reg = o[1].reg, .rm = &o[0], .isz = 1, .imm = k);
+
+						if (o[0].kind == XK_EXPR)
+							o[0].kind = XK_MEM;
+						return x64_emit(a, &f);
+					}
+			}
+		}
+		/* movlpd/movhpd/movlps/movhps: load 12/16, store 13/17 */
+		{
+			static const struct { const char *n; uint8_t pfx, ld; } lh[] = {
+				{ "movlpd", 0x66, 0x12 }, { "movhpd", 0x66, 0x16 }, { "movlps", 0, 0x12 }, { "movhps", 0, 0x16 },
+			};
+
+			if (nops == 2)
+				for (size_t i = 0; i < sizeof lh / sizeof *lh; i++)
+					if (!strcmp(mn, lh[i].n)) {
+						for (int k = 0; k < 2; k++)
+							if (o[k].kind == XK_EXPR)
+								o[k].kind = XK_MEM;
+						if (o[1].kind == XK_REG && o[1].cls == XR_XMM)
+							return x64_sse(a, lh[i].pfx, lh[i].ld, 0, o[1].reg, &o[0]);
+						return x64_sse(a, lh[i].pfx, lh[i].ld + 1, 0, o[0].reg, &o[1]);
+					}
+		}
+		if ((!strcmp(mn, "movmskps") || !strcmp(mn, "movmskpd") || !strcmp(mn, "pmovmskb")) && nops == 2)
+			return x64_sse(a, mn[7] == 'd' || mn[0] == 'p' ? 0x66 : 0, mn[0] == 'p' ? 0xd7 : 0x50, 0, o[1].reg, &o[0]);
+	}
+	/* ---- shld/shrd, bt*, prefetch ---- */
+	{
+		char st2[32];
+		int s2 = 0;
+
+		if (!split_sfx(mn, st2, &s2))
+			strcpy(st2, mn);
+		if ((!strcmp(st2, "shld") || !strcmp(st2, "shrd")) && nops == 3) {
+			int z = s2 ? s2 : opsize(&o[2]), r = st2[2] == 'r';
+			XOp *d = &o[2];
+
+			if (d->kind == XK_EXPR)
+				d->kind = XK_MEM;
+			if (o[0].kind == XK_REG && o[0].reg == 1 && o[0].size == 1) {
+				uint8_t ops[2] = { 0x0f, (uint8_t)(r ? 0xad : 0xa5) };
+
+				return x64_emit(a, &F(.w = z == 8, .opsz16 = z == 2, .op = ops, .nop = 2, .reg = o[1].reg, .rm = d));
+			}
+			{
+				int64_t c = 0;
+				uint8_t ops[2] = { 0x0f, (uint8_t)(r ? 0xac : 0xa4) };
+				XForm f = F(.w = z == 8, .opsz16 = z == 2, .op = ops, .nop = 2, .reg = o[1].reg, .rm = d, .isz = 1);
+
+				x64_imm(a, &o[0], &f, &c);
+				f.imm = c;
+				return x64_emit(a, &f);
+			}
+		}
+		{
+			static const char *const btn[4] = { "bt", "bts", "btr", "btc" };
+
+			for (int k = 0; k < 4; k++)
+				if (!strcmp(st2, btn[k]) && nops == 2) {
+					int z = s2 ? s2 : opsize(&o[1]) ? opsize(&o[1]) : opsize(&o[0]);
+
+					if (o[1].kind == XK_EXPR)
+						o[1].kind = XK_MEM;
+					if (o[0].kind == XK_IMM) {
+						int64_t c = 0;
+						XForm f = F(.w = z == 8, .opsz16 = z == 2, .op = OPB(0x0f, 0xba), .nop = 2, .reg = 4 + k, .rm = &o[1], .isz = 1);
+
+						x64_imm(a, &o[0], &f, &c);
+						f.imm = c;
+						return x64_emit(a, &f);
+					}
+					{
+						uint8_t ops[2] = { 0x0f, (uint8_t)(0xa3 + 8 * k) };
+
+						return x64_emit(a, &F(.w = z == 8, .opsz16 = z == 2, .op = ops, .nop = 2, .reg = o[0].reg, .rm = &o[1]));
+					}
+				}
+		}
+		if (!strncmp(mn, "prefetch", 8) && nops == 1) {
+			static const struct { const char *n; uint8_t op, d; } pf[] = {
+				{ "prefetchnta", 0x18, 0 }, { "prefetcht0", 0x18, 1 }, { "prefetcht1", 0x18, 2 }, { "prefetcht2", 0x18, 3 },
+				{ "prefetchw", 0x0d, 1 }, { "prefetch", 0x0d, 0 },
+			};
+
+			if (o[0].kind == XK_EXPR)
+				o[0].kind = XK_MEM;
+			for (size_t i = 0; i < sizeof pf / sizeof *pf; i++)
+				if (!strcmp(mn, pf[i].n)) {
+					uint8_t ops[2] = { 0x0f, pf[i].op };
+
+					return x64_emit(a, &F(.op = ops, .nop = 2, .reg = pf[i].d, .rm = &o[0]));
+				}
+		}
+	}
+	/* ---- x87 arithmetic with st registers and integer memory, fcmov ---- */
+	if (mn[0] == 'f') {
+		static const char *const ar[4] = { "fadd", "fmul", "fsub", "fdiv" };
+		static const uint8_t base0[4] = { 0xc0, 0xc8, 0xe0, 0xf0 };	/* op %st(i), %st */
+
+		for (int k = 0; k < 4; k++) {
+			size_t l = strlen(ar[k]);
+
+			if (!strncmp(mn, ar[k], l) && mn[l] == 'r' && !mn[l + 1] && nops == 2 && o[0].cls == XR_ST && o[1].cls == XR_ST) {
+				/* fsubr/fdivr %st(i), %st and %st, %st(i) */
+				if (o[1].reg == 0)
+					return x64_x87r(a, 0xd8, base0[k] + 8, o[0].reg);
+				return x64_x87r(a, 0xdc, base0[k] + 8, o[1].reg);
+			}
+			if (!strcmp(mn, ar[k]) && nops == 2 && o[0].kind == XK_REG && o[0].cls == XR_ST && o[1].cls == XR_ST) {
+				if (o[1].reg == 0)
+					return x64_x87r(a, 0xd8, base0[k], o[0].reg);
+				return x64_x87r(a, 0xdc, base0[k], o[1].reg);
+			}
+			if (!strcmp(mn, ar[k]) && nops == 1 && o[0].kind == XK_REG && o[0].cls == XR_ST)
+				return x64_x87r(a, 0xd8, base0[k], o[0].reg);
+		}
+		{
+			static const struct { const char *n; uint8_t op, d; } im[] = {
+				{ "fiaddl", 0xda, 0 }, { "fimull", 0xda, 1 }, { "fisubl", 0xda, 4 }, { "fisubrl", 0xda, 5 }, { "fidivl", 0xda, 6 },
+				{ "fidivrl", 0xda, 7 }, { "fiadds", 0xde, 0 }, { "fimuls", 0xde, 1 }, { "fisubs", 0xde, 4 }, { "fidivs", 0xde, 6 },
+				{ "fsubrs", 0xd8, 5 }, { "fsubrl", 0xdc, 5 }, { "fdivrs", 0xd8, 7 }, { "fdivrl", 0xdc, 7 },
+				{ "fcoms", 0xd8, 2 }, { "fcoml", 0xdc, 2 }, { "fcomps", 0xd8, 3 }, { "fcompl", 0xdc, 3 },
+				{ "fisttpl", 0xdb, 1 }, { "fisttps", 0xdf, 1 }, { "fnstenv", 0xd9, 6 }, { "fldenv", 0xd9, 4 },
+			};
+
+			if (nops == 1 && o[0].kind != XK_REG) {
+				if (o[0].kind == XK_EXPR)
+					o[0].kind = XK_MEM;
+				for (size_t i = 0; i < sizeof im / sizeof *im; i++)
+					if (!strcmp(mn, im[i].n))
+						return x64_x87m(a, im[i].op, im[i].d, &o[0]);
+			}
+		}
+		if (!strncmp(mn, "fcmov", 5) && nops == 2 && o[0].cls == XR_ST) {
+			static const struct { const char *n; uint8_t op, base; } cm[] = {
+				{ "b", 0xda, 0xc0 }, { "e", 0xda, 0xc8 }, { "be", 0xda, 0xd0 }, { "u", 0xda, 0xd8 },
+				{ "nb", 0xdb, 0xc0 }, { "ne", 0xdb, 0xc8 }, { "nbe", 0xdb, 0xd0 }, { "nu", 0xdb, 0xd8 },
+			};
+
+			for (size_t i = 0; i < sizeof cm / sizeof *cm; i++)
+				if (!strcmp(mn + 5, cm[i].n))
+					return x64_x87r(a, cm[i].op, cm[i].base, o[0].reg);
+		}
+	}
 	/* ---- integer instructions: the full name, then stem + suffix ---- */
 	{
 		static const char *const alu[] = { "add", "or", "adc", "sbb", "and", "sub", "xor", "cmp" };
@@ -926,7 +1194,7 @@ VPRIV int x64_instruction(As *a, const char *p, const char *e, size_t wn)
 				}
 				if (s->kind == XK_REG && s->cls == XR_GPR)
 					return x64_emit(a, &F(.w = z == 8, .opsz16 = z == 2, .op = z == 1 ? OPB(0x88) : OPB(0x89), .nop = 1, .reg = s->reg,
-							      .rm = d, .rex8 = rex8(s) || rex8(d), .gotx = 2));
+							      .rm = d, .rex8 = rex8(s) || rex8(d)));
 				if (d->kind == XK_REG)
 					return x64_emit(a, &F(.w = z == 8, .opsz16 = z == 2, .op = z == 1 ? OPB(0x8a) : OPB(0x8b), .nop = 1, .reg = d->reg,
 							      .rm = s, .rex8 = rex8(d), .gotx = 2));
@@ -968,7 +1236,7 @@ VPRIV int x64_instruction(As *a, const char *p, const char *e, size_t wn)
 					return x64_emit(a, &f);
 				}
 				return x64_emit(a, &F(.w = z == 8, .opsz16 = z == 2, .op = z == 1 ? OPB(0x84) : OPB(0x85), .nop = 1, .reg = s->reg,
-						      .rm = d, .rex8 = rex8(s) || rex8(d)));
+						      .rm = d, .rex8 = rex8(s) || rex8(d), .gotx = 2));
 			}
 			{
 				static const struct { const char *n; uint8_t d; } un[] = {
@@ -996,6 +1264,7 @@ VPRIV int x64_instruction(As *a, const char *p, const char *e, size_t wn)
 			if (!strcmp(m, "imul")) {
 				int z = x64_size(a, sz, &o[0], &o[nops - 1]);
 
+				x64_isz = z;
 				for (int i = 0; i < nops; i++)
 					if (o[i].kind == XK_EXPR)
 						o[i].kind = XK_MEM;
