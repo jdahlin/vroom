@@ -291,7 +291,7 @@ VPRIV val gen_block(ecx *e, uint32_t n, bool want)
 			break;
 		}
 		uint32_t from, to;
-		if (i && em_decl_return_values(e, c->lists[x->b + i - 1], s, &from, &to)) {
+		if (i && em_block_return_values(e, x, 0, i, &from, &to)) {
 			uint32_t oldfrom = e->reuse_from, oldto = e->reuse_to;
 			e->reuse_from = from; e->reuse_to = to;
 			gen_stmt(e, s);

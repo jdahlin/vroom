@@ -8,6 +8,11 @@ unsigned lvr_distinct(unsigned a, unsigned b) { return (a-b)*(b-a); }
 unsigned lvr_atomic(_Atomic unsigned *p) { return (__c11_atomic_load(p,5)+1)*(__c11_atomic_load(p,5)+1); }
 unsigned lvr_reuse(unsigned a, unsigned b) { unsigned x = a + b; return x * (a + b); }
 unsigned lvr_commute(unsigned a, unsigned b) { return (a + b) ^ (b + a); }
+unsigned lvr_intervening(unsigned a, unsigned b) { unsigned x = a+b; unsigned y = a^b; return x*y+(a+b); }
+unsigned lvr_intervening_assign(unsigned a, unsigned b) { unsigned x = a+b; unsigned y = (a=3); return x*y+(a+b); }
+unsigned lvr_intervening_call(unsigned a, unsigned b) { unsigned x = a+b; unsigned y = update(); return x*y+(a+b); }
+unsigned lvr_intervening_write(unsigned a, unsigned b) { unsigned x = a+b; a++; unsigned y = a^b; return x*y+(a+b); }
+unsigned lvr_intervening_volatile(unsigned a, unsigned b) { unsigned x = a+b; unsigned y = observed; return x*y+(a+b); }
 unsigned lvr_written(unsigned a, unsigned b) { unsigned x = a+b; return (x++)*(a+b); }
 unsigned lvr_volatile_local(unsigned a, unsigned b) { volatile unsigned x = a+b; return x*(a+b); }
 unsigned lvr_kill(unsigned a, unsigned b) { unsigned x = a + b; a++; return x + (a + b); }
@@ -20,14 +25,16 @@ int main(void)
  unsigned v = 3, w = 5;
  if (lvr_square(2, 3) != 25 || lvr_reuse(2, 3) != 25 || lvr_commute(3, 4) ||
      lvr_nested(2, 3, 4) != 4 || lvr_distinct(5, 2) != (3U * (0U-3U)) ||
+     lvr_intervening(2, 3) != 10 || lvr_intervening_assign(2, 3) != 21 || lvr_intervening_write(2, 3) != 6 ||
      lvr_written(2, 3) != 25 || lvr_volatile_local(2, 3) != 25 ||
      lvr_kill(2, 3) != 11 || lvr_join(2, 3, 0) != 10 || lvr_join(2, 3, 1) != 11) return 1;
  global_value = 4;
  if (lvr_call() != 22 || global_value != 5) return 2;
  _Atomic unsigned atom = 3;
  if (lvr_atomic(&atom) != 16) return 5;
+ if (lvr_intervening_call(2, 3) != 40 || global_value != 6) return 6;
  observed = 3;
- if (lvr_volatile() != 16) return 3;
+ if (lvr_volatile() != 16 || lvr_intervening_volatile(2, 3) != 20) return 3;
  if (lvr_alias(&v, &v) != 14 || v != 7 || lvr_alias(&v, &w) != 18 || w != 7) return 4;
  return 0;
 }

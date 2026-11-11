@@ -52,6 +52,9 @@ def check_localvalues(assembly, arch):
     text = body(assembly, 'lvr_reuse', wasm)
     if len(re.findall(add, text)) != 1:
         raise RuntimeError(f'declaration value must be reused in return\n{text}')
+    text = body(assembly, 'lvr_intervening', wasm)
+    if len(re.findall(add, text)) != 2:
+        raise RuntimeError(f'value must survive a pure declaration\n{text}')
     text = body(assembly, 'lvr_volatile', wasm)
     load = r'i32\.load\b' if wasm else r'\bldr\s+w' if arch == 'aarch64' else r'observed\(%rip\)'
     if len(re.findall(load, text)) != 2:

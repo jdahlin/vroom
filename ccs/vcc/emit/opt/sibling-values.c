@@ -5,6 +5,7 @@ typedef struct em_sibling_state {
  em_value_table table;
  uint32_t next, nodes;
  uint32_t target, match, symbol, symnode;
+ em_value_key last_key, target_key;
 } em_sibling_state;
 
 static uint32_t em_sibling_value(cc *c, em_sibling_state *s, uint32_t n)
@@ -39,7 +40,17 @@ static uint32_t em_sibling_value(cc *c, em_sibling_state *s, uint32_t n)
   key.operation = 2 + x->aux;
   key.left = left; key.right = right;
  } else return 0;
+ s->last_key = key;
  value = em_values_lookup(&s->table, key);
+ if (!s->table.active) return 0;
+ /* Keep the initializer's identity available even if intervening expression
+  * entries collide with it. Matching every field prevents false hits. */
+ if (s->target && key.operation == s->target_key.operation && key.type == s->target_key.type &&
+     key.left == s->target_key.left && key.right == s->target_key.right &&
+     key.immediate == s->target_key.immediate) {
+  if (x->op == N_BINARY) s->match = n;
+  return s->target;
+ }
  if (value) {
   if (s->target && value == s->target && x->op == N_BINARY) s->match = n;
   return value;
@@ -84,6 +95,7 @@ static __attribute__((noinline)) bool em_decl_return_match(cc *c, uint32_t init,
  em_values_reset(&s.table, 64);
  s.target = em_sibling_value(c, &s, init);
  if (!s.target) return false;
+ s.target_key = s.last_key;
  result = em_sibling_value(c, &s, ret);
  if (!result || !s.match || !s.symnode) return false;
  *from = s.match; *to = s.symnode;
@@ -105,4 +117,44 @@ VPRIV bool em_decl_return_values(ecx *e, uint32_t decl, uint32_t ret, uint32_t *
      sym_attrs(c, d->a)->cleanup || sym_attrs(c, d->a)->asmname ||
      QUNQ(s->ty) != QUNQ(N(d->b)->ty)) return false;
  return em_decl_return_match(c, d->b, r->a, d->a, from, to);
+}
+
+/* A declaration of a new, nonobservable scalar with a pure initializer cannot
+ * change an earlier local value. Used only while scanning a short block suffix. */
+static __attribute__((noinline)) bool em_value_pure_decl(ecx *e, uint32_t n)
+{
+ cc *c = e->c;
+ const node *d = N(n);
+ const sym *y;
+ em_sibling_state s = {0};
+ if (d->op != N_DECL) return false;
+ y = &c->syms[d->a];
+ if (!is_local_var(c, d->a) || y->kind != S_VAR || y->sc == SC_STATIC || y->sc == SC_EXTERN ||
+     (y->flags & SF_ADDR_TAKEN) || (QQ(y->ty) & Q_VOLATILE) || (T(c, y->ty)->flags & TF_ATOMIC) ||
+     sym_attrs(c, d->a)->cleanup || sym_attrs(c, d->a)->asmname || !is_integer(c, y->ty) ||
+     em_bitint(c, y->ty) || (tsize(c, y->ty) != 4 && tsize(c, y->ty) != 8)) return false;
+ if (!d->b) return true;
+ if (QUNQ(y->ty) != QUNQ(N(d->b)->ty) || c->nsym >= UINT32_MAX - 32) return false;
+ s.next = c->nsym + 1; s.nodes = 32;
+ em_values_reset(&s.table, 64);
+ return em_sibling_value(c, &s, d->b) != 0;
+}
+
+/* Scan at most eight immediately preceding pure local declarations. Any
+ * other statement is a barrier; no facts cross a branch or side effect. */
+VPRIV bool em_block_return_values(ecx *e, const node *block, uint32_t first, uint32_t i,
+                                   uint32_t *from, uint32_t *to)
+{
+ cc *c = e->c;
+ uint32_t ret, count = 0;
+ if (!e->E->o->opt || e->E->noopt || i <= first) return false;
+ ret = c->lists[block->b + i];
+ if (N(ret)->op != N_RETURN) return false;
+ while (i > first && count++ < 8) {
+  uint32_t prev = c->lists[block->b + --i];
+  if (N(prev)->op != N_DECL) break;
+  if (em_decl_return_values(e, prev, ret, from, to)) return true;
+  if (!em_value_pure_decl(e, prev)) break;
+ }
+ return false;
 }

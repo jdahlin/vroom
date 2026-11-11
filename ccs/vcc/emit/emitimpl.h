@@ -583,6 +583,7 @@ VPRIV int em_cmpbounds(ecx *e, uint32_t n, uint32_t *operand);
 VPRIV int em_repeated_integer(ecx *e, uint32_t n);
 VPRIV bool em_sibling_values(ecx *e, uint32_t n);
 VPRIV bool em_decl_return_values(ecx *e, uint32_t decl, uint32_t ret, uint32_t *from, uint32_t *to);
+VPRIV bool em_block_return_values(ecx *e, const node *block, uint32_t first, uint32_t i, uint32_t *from, uint32_t *to);
 VPRIV uint32_t em_double_unary(ecx *e, uint32_t n);
 
 VPRIV bool em_cmpzero(ecx *e, uint32_t n, uint32_t *operand);
