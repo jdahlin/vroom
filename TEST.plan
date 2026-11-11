@@ -640,6 +640,18 @@ Detta är fortfarande inte runtime- eller QBE-ekvivalens.
 
 ### S5b Kefir — importerad, Linux-baslinje uppmätt
 
+**Legacy `_ExtInt` (2026-11-11):** nyckelordet går genom samma parser- och
+typväg som `_BitInt`, med `-Wdeprecated-type` som hos Clang. Oförändrade
+`extint1` passerar alla fyra Clang/vcc-kombinationer på x86-64. ARM:s
+Clang-referens avvisar 310 bitar och förblir filtrerad; separat körs dess
+oförändrade Clang-host mot vcc-callee under QEMU. `bench/vcc-extint.py`
+kontrollerar typidentitet, C89/C11/C23 och varningsflaggor, 24 anrops-
+kombinationer på x86 samt 20 på ARM upp till 120 bitar. ARM 310 bitar
+kontrolleras separat mot Python-genererade bytes, inte mot en obefintlig
+Clang-referens. Unity och filvis bygge ger samma resultat. PP-paritet:
+920/920 före och efter, i både processvis och batchkörning. Artefakter:
+`work/results/extint-alias/`, `work/results/extint-{before,after}-{cmp,batch}.log`.
+
 **Samlad frontendmilstolpe (2026-11-11, bas 2dc4ea3):** Tre avgränsade
 rättningar: hela följden av strängliteral bestämmer kodningen före
 avkodning (även sena `u`/`U`/`L` och hex-escapes); citerad `#embed` söker
