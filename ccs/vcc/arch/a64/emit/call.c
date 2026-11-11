@@ -642,9 +642,39 @@ static val fold_strcmp(ecx *e, const node *x)
  * intrinsic; the vDSO has no memcpy to call: get/put_unaligned in
  * lib/vdso/getrandom.c).  Plain memcpy() stays a call.  The value is dst.
  */
-static bool mem_inline(ecx *e, uint32_t ref, carg *args, val *res)
+/* one ldp/stp of x registers at [base + off] (off: 8-aligned, -512..504) */
+static void pair(ecx *e, int op, int r1, int r2, int base, int64_t off)
 {
-	int kind = cc_builtin_libkind(RIDX(ref));
+	ins *i;
+
+	if (!e->reach)
+		return;
+	i = put(e, op);
+	i->sz = 1, i->rd = (uint8_t)r1, i->ra = (uint8_t)r2, i->rn = (uint8_t)base, i->imm = off;
+}
+
+/* memcpy of 16 to 128 bytes: ldp/stp pairs, the rest as copy_mem */
+static void copy_pairs(ecx *e, int d, int sr, uint64_t n)
+{
+	uint64_t o = 0;
+
+	for (; n - o >= 16; o += 16) {
+		pair(e, I_LDP, R_X16, R_X17, sr, (int64_t)o);
+		pair(e, I_STP, R_X16, R_X17, d, (int64_t)o);
+	}
+	if (o < n) {
+		int t = R_X16;
+
+		for (uint64_t k; o < n; o += k) {
+			k = n - o >= 8 ? 8 : n - o >= 4 ? 4 : n - o >= 2 ? 2 : 1;
+			mem(e, I_LD, log2sz(k), 0, t, sr, (int64_t)o);
+			mem(e, I_ST, log2sz(k), 0, t, d, (int64_t)o);
+		}
+	}
+}
+
+static bool mem_inline(ecx *e, int kind, carg *args, val *res)
+{
 	uint64_t n;
 	int d;
 
@@ -657,7 +687,10 @@ static bool mem_inline(ecx *e, uint32_t ref, carg *args, val *res)
 	if (kind < 3) {
 		int sr = toreg(e, &args[1].v);
 
-		copy_mem(e, d, sr, n);
+		if (kind == CC_LIB_MEMCPY && n >= 16 && e->E->o->opt >= 1)
+			copy_pairs(e, d, sr, n);
+		else
+			copy_mem(e, d, sr, n);
 		val_free(e, &args[1].v);
 	} else if (!(args[1].v.i & 0xff)) {
 		zero_mem(e, d, n);
@@ -675,6 +708,41 @@ static bool mem_inline(ecx *e, uint32_t ref, carg *args, val *res)
 	}
 	*res = args[0].v;
 	return true;
+}
+
+/* memcpy/memmove/memset declared by a header: clang's builtin at -O1 and up (not under
+ * -ffreestanding/-fno-builtin[-NAME]); a size of 64 bytes or less is inlined */
+static int plain_mem_kind(ecx *e, uint32_t s, int na)
+{
+	cc *c = e->c;
+	const sym *y = &c->syms[s];
+	uint32_t id = y->name;
+
+	if (na != 3 || e->E->o->opt < 1 || e->E->o->no_builtin || y->sc == SC_STATIC || !(y->flags & SF_GLOBAL) ||
+	    sym_attrs(c, s)->asmname)
+		return 0;
+	for (unsigned i = 0; i < CC_DISABLED_BUILTIN_WORDS; i++)
+		if (e->E->o->disabled_builtins[i])
+			return 0;
+	return EM_IDENT_IS(id, "memcpy") ? CC_LIB_MEMCPY : EM_IDENT_IS(id, "memmove") ? CC_LIB_MEMMOVE :
+	       EM_IDENT_IS(id, "memset") ? CC_LIB_MEMSET : 0;
+}
+
+/* __builtin___mem*_chk and friends whose check cannot fail (object size unknown, (size_t)-1, or
+ * a constant length within a constant object size) are the plain function, as clang's
+ * fortify simplification; its warnings come from the front end.  New callee or -1. */
+static int64_t chk_plain(const carg *args, int na, int64_t bi)
+{
+	int64_t p = cc_builtin_plain(bi);
+	const val *o = &args[na - 1].v;
+	bool ok;
+
+	if (p < 0 || na < 3 || o->k != V_CONST)
+		return -1;
+	ok = (uint64_t)o->i == ~(uint64_t)0;
+	if (!ok && na >= 4 && args[na - 2].v.k == V_CONST)	/* the length is the argument before the size */
+		ok = (uint64_t)args[na - 2].v.i <= (uint64_t)o->i;
+	return ok ? p : -1;
 }
 
 /* Keep the argument scratch buffer out of gen_inner's recursive frame.
@@ -729,6 +797,14 @@ __attribute__((noinline)) VPRIV val gen_call(ecx *e, uint32_t n)
 		    (args[i].v.k == V_REG || args[i].v.k == V_REG2))
 			park(e, &args[i]);
 	}
+	if (!s && RKIND(ref) == RK_NAME && RIDX(ref) < 0x8000000u && na >= 3 && cc_builtin_libkind(RIDX(ref)) == CC_LIB_CHK) {
+		int64_t p = chk_plain(args, na, RIDX(ref));
+
+		if (p >= 0) {
+			ref = REF(RK_NAME, (uint32_t)p);
+			na--;
+		}
+	}
 	if (!s && RKIND(ref) == RK_NAME && RIDX(ref) < 0x8000000u && na == 1 &&
 	    is_ld(c, x->ty) && cc_builtin_libkind(RIDX(ref)) == CC_LIB_FABSL) {
 		/* Clear binary128's sign without touching a signaling NaN payload. */
@@ -741,7 +817,11 @@ __attribute__((noinline)) VPRIV val gen_call(ecx *e, uint32_t n)
 		}
 	} else if (inl) {
 		r = inline_call(e, s, args, na, n);
-	} else if (!s && ref && na == 3 && RKIND(ref) == RK_NAME && mem_inline(e, ref, args, &r)) {
+	} else if (!s && ref && na == 3 && RKIND(ref) == RK_NAME && RIDX(ref) < 0x8000000u &&
+		   mem_inline(e, cc_builtin_libkind(RIDX(ref)), args, &r)) {
+		/* inlined */
+	} else if (s && plain_mem_kind(e, s, na) && args[2].v.k == V_CONST && (uint64_t)args[2].v.i <= 64 &&
+		   mem_inline(e, plain_mem_kind(e, s, na), args, &r)) {
 		/* inlined */
 	} else {
 		qty ft = N(x->a)->ty;

@@ -252,10 +252,10 @@ static const builtin builtins[] = {
 	{ "__builtin_trunc", BI_LIB, 0, "dd" }, { "__builtin_truncf", BI_LIB, 0, "ff" },
 	{ "__builtin_round", BI_LIB, 0, "dd" }, { "__builtin_roundf", BI_LIB, 0, "ff" },
 	{ "__builtin_fmaxf", BI_LIB, 0, "fff" }, { "__builtin_fminf", BI_LIB, 0, "fff" },
-	{ "__builtin___memcpy_chk", BI_LIB, 0, "ppPzz" }, { "__builtin___memmove_chk", BI_LIB, 0, "ppPzz" },
-	{ "__builtin___memset_chk", BI_LIB, 0, "ppizz" }, { "__builtin___strcpy_chk", BI_LIB, 0, "ssSz" },
-	{ "__builtin___stpcpy_chk", BI_LIB, 0, "ssSz" }, { "__builtin___strcat_chk", BI_LIB, 0, "ssSz" },
-	{ "__builtin___strncpy_chk", BI_LIB, 0, "ssSzz" }, { "__builtin___strncat_chk", BI_LIB, 0, "ssSzz" },
+	{ "__builtin___memcpy_chk", BI_LIB, CC_LIB_CHK << 1, "ppPzz" }, { "__builtin___memmove_chk", BI_LIB, CC_LIB_CHK << 1, "ppPzz" },
+	{ "__builtin___memset_chk", BI_LIB, CC_LIB_CHK << 1, "ppizz" }, { "__builtin___strcpy_chk", BI_LIB, CC_LIB_CHK << 1, "ssSz" },
+	{ "__builtin___stpcpy_chk", BI_LIB, 0, "ssSz" }, { "__builtin___strcat_chk", BI_LIB, CC_LIB_CHK << 1, "ssSz" },
+	{ "__builtin___strncpy_chk", BI_LIB, CC_LIB_CHK << 1, "ssSzz" }, { "__builtin___strncat_chk", BI_LIB, CC_LIB_CHK << 1, "ssSzz" },
 	{ "__builtin___stpncpy_chk", BI_LIB, 0, "ssSzz" }, { "__builtin___strlcpy_chk", BI_LIB, 0, "zsSzz" },
 	{ "__builtin___strlcat_chk", BI_LIB, 0, "zsSzz" }, { "__builtin___memccpy_chk", BI_LIB, 0, "ppPizz" },
 	{ "__builtin___sprintf_chk", BI_LIB, 0, "isizS." }, { "__builtin___snprintf_chk", BI_LIB, 0, "iszizS." },
@@ -266,6 +266,24 @@ static const builtin builtins[] = {
 /* name of a library builtin (sym val of an S_BUILTIN) */
 const char *cc_builtin_name(int64_t i) { return builtins[i].name; }
 int cc_builtin_libkind(int64_t i) { return builtins[i].flags >> 1; }
+
+/* __builtin___X_chk -> __builtin_X (fortified call with the object size dropped), -1: none */
+int64_t cc_builtin_plain(int64_t i)
+{
+	const char *n = builtins[i].name;
+	size_t len = strlen(n);
+	char b[64];
+
+	if (strncmp(n, "__builtin___", 12) || len < 16 || len - 4 >= sizeof b || strcmp(n + len - 4, "_chk"))
+		return -1;
+	memcpy(b, "__builtin_", 10);
+	memcpy(b + 10, n + 12, len - 16);
+	b[len - 6] = 0;
+	for (int64_t j = 0; builtins[j].name; j++)
+		if (builtins[j].id == BI_LIB && !strcmp(builtins[j].name, b))
+			return j;
+	return -1;
+}
 
 /* the prototype clang gives an implicitly declared library function name (no
  * declaration made): vcc's signature letters (*clang_enc 0, see sigtype) or
