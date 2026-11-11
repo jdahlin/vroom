@@ -2090,9 +2090,8 @@ inte en uppmätt kompilatorkostnadsgrind. Okända/indirekta flöden, rå/named
 asm, label-adresser och interrupt-/noreturn-konventioner avstår helt.
 Alla ändringar väntar tills analysen lyckats; kompaktering använder befintlig
 `dbg_remap` före tvåadresspasset. Arm64:s befintliga block-/livenessanalys är
-oförändrad. Wasm använder ännu **inte** denna graf; nästa separata konsument
-kräver typade kontrollhändelser, inte parsning av text eller återanvända
-branch-depth-tal som blockidentitet.
+oförändrad. Vid detta första checkpoint använder wasm ännu inte grafen;
+den separata wasm-konsumenten beskrivs i nästa statusavsnitt.
 
 Kodformsbevis mot exakt uppdaterad förälder `0dde275`: `unsigned f(unsigned
 x) { return (x*13u)&0u; }` behåller `imull $13` i basen men inte i kandidaten
@@ -2119,6 +2118,7 @@ detta reproducerades även utan det nya passet. Proben kör därför inte den
 unsupported funktionen. Clang 23 avvisar motsvarande rena C-kropp med
 `non-ASM statement in naked function is not supported`. Vanlig asm med
 absorberande uttryck provas däremot både i kodform och vid körning.
+
 Efter integration av uppdaterad PR53, leaf50 och ledgern (`7691f6c`,
 förälder `69c1bd7`) bygger både unity och fil-för-fil med `-j 1`. Även
 fil-för-fil-binären passerar alla 16 nya regel-/nivå-/målkombinationer.
@@ -2166,6 +2166,92 @@ binärhashar finns i `work/opt-profile/flow-cost/{measure.py,result.json}`.
 
 Fjärr-CI och nästa wasm-konsument återstår. OPT4/O2 och G5/G7 är fortsatt
 öppna.
+
+### OPT5 fortsättning: wasm-DSE över strukturerade joins (2026-11-11)
+
+På `1d8e29a`, med flödesföräldern `7691f6c`, använder nu även wasm32/64
+den gemensamma graf-/masklösaren. `arch/wasm/emit/flow.c` registrerar typade
+block-, if/else-, slut- och branchhändelser från funktionens början under
+ordinarie emission. Varje öppning får en unik token; wasm:s återanvända
+lexikala branch-depth översätts till token när grenen emitteras. Ingen
+assemblertext tolkas, extra AST-vandring eller SSA införs inte.
+
+Första konsumenten tar bort lagringar till privata exakta 4/8-byte ramceller
+som skrivs över före varje följande läsning, även genom nästlade diamanter.
+Heltal och flyttal stöds; befintlig cell-/överlapps-/escapeanalys avgör
+behörighet. Adress och högerled utvärderas fortfarande av befintlig renderer,
+inklusive eventuella fångade wasm-locals. Rena kontrollgränser bryter den
+lokala vidarebefordringen men är inte minnesläsningar i DSE. Riktiga anrops-/
+minnesbarriärer sammanslås bara inom samma kontrollepok: en barriär efter
+en tom else/join får inte flyttas till bara ena föregångaren.
+
+Liveness förenar efterföljares läsbehov och betraktar alla celler som lästa
+vid funktionsutgång. Detta är alltså överskrivnings-DSE, inte generell
+unread-/livstidssluts-DSE eller global värdevidarebefordring. Alla beslut
+väntar på full konvergens och publiceras först efter separat staging.
+Loopar, switch/dispatchers, goto, asm, SJLJ och dynamiska ramar avstår.
+Gränser: 8192 kontrollhändelser, djup 256, 64 cellbitar och högst 1048576
+solverbesök. Graf-/solverarbete startar först efter komplett emission och
+verkliga privata upprepade stores genom en join. O0/noopt avstår; fel och
+budgetslut lämnar denna konsuments omskrivningar opublicerade.
+
+Verifierat: unitybygge med `-j 1`, fristående syntaxkontroll av samtliga
+ändrade wasm-C-filer samt **114** SDK-fria konfigurationer genom egna
+assemblern/länkaren och Node: 10 nya flödeskontroller (wasm32/64 O0–O3
+med körning och kodform, samt O2/noopt-kodform), 16 befintliga cellfall och
+88 opt-regelkontroller. Positiva fall behåller exakt en slutlig store;
+negativa fall täcker läsningar/utgångar, escape, överlapp, volatile/atomic,
+anrop, effekter, flyttalsbitar och uteslutet flöde. En isolerad mutant som
+tar bort epokvillkoret avvisas av den avsedda tom-else-kodkontrollen på
+både wasm32 och wasm64; originalkällorna ändrades inte. Oberoende review
+fann inga kvarstående korrekthetsblockerare. `vcc-wasm-flow.py` ligger i
+wasm-jobbets snabba CI-uppsättning; fjärrkörning återstår.
+
+Hela egna SDK-baserade sviter på samma `1d8e29a` avslutar med status 0:
+wasm32 **178/178 PASS**, 36 körda XFAIL och 16 skips (12 clang-reject,
+1 noref, 3 ref-fail); wasm64 **182/182 PASS**, 37 körda XFAIL och 11 skips
+(8 clang-reject, 1 noref, 2 ref-fail). Undantagen är inte PASS.
+Loggar: `work/opt-pr-tmp/wasm-flow-full32.log` och `wasm-flow-full64.log`;
+källbevis, mutanthashar och fokuserade resultat i
+`build/linux/flow-evidence/`. Efter sammanslagning av den exakta
+flödesföräldern `f7327bd` till `1458a90` passerar återigen alla 114
+konfigurationer och fristående syntaxkontroll av ändrade wasm-C-filer.
+66 O0-/O2-noopt-par är byteidentiska mot den föräldern; två ytterligare
+par avvisas av båda byggenas befintliga ILP32-layoutassert i `atomic_ops`.
+De SDK-baserade helsvitssiffrorna ovan hör fortfarande till `1d8e29a`,
+inte den senare integrationen.
+
+Avgränsad kostnadsjämförelse: exakt `f7327bd` mot `1458a90`, båda vpp
+byggda av clang 23 med `-O3 -march=x86-64-v3`. Callgrind räknar hela
+processen inklusive start, en seriell mätning per binär/källa/mål, wasm32
+och wasm64 med `-O2 -S`, uttryckliga LLVM-resurs-/rt-huvuden och samma
+källfiler. Inga väggklocke- eller programkörtidsvärden används.
+
+| Prov | wasm32 extra värd-Ir | wasm64 extra värd-Ir |
+|---|---:|---:|
+| Rak skalärkod, 200 funktioner | +0,314 % | +0,314 % |
+| Villkor utan privata ramceller, 200 funktioner | +0,552 % | +0,552 % |
+| Loopar som avstår från analys, 200 funktioner | +0,351 % | +0,351 % |
+| Positiva diamanter, 200 funktioner | +4,495 % | +4,494 % |
+| Positiva nästlade diamanter, 200 funktioner | +4,683 % | +4,682 % |
+| Befintlig fast blandning, processernas summa | +0,106 % | +0,095 % |
+
+Kontrollernas assembler och objekt är byteidentiska. De positiva proven
+minskar 800 respektive 1000 stores till 200; separat vanlig `-c` ger
+2,886–3,325 % mindre relocerbara objekt totalt. Detta är objektstorlek,
+inte laddad kodstorlek eller uppmätt programfart. Aktiv analys kostar
+alltså mer än 1 % i dessa koncentrerade positiva prov; tabellen gäller
+inte som en generell kostnadsgrind. Den fasta blandningen är elva
+befintliga regressionsfiler för wasm64 och tio för wasm32: `atomic_ops`
+avvisas av både bas och kandidat på sin LP64-layoutassert i wasm32 och
+utesluts öppet. Två av blandningens assemblerutdata ändras per mål.
+
+Fulla kommandon, käll-/binärhashar, råa Callgrind-filer, objekt och
+feltexter finns i `build/linux/flow-evidence/cost/result.json` med
+angränsande artefakter; pariteten i `noopt-parity.json`. Dessa mätningar
+hör till denna konsument och ersätter inte full prestandagrind,
+programkörtidsmätning eller fjärr-CI. OPT5/O2 och G5/G7 är fortsatt öppna.
+
 ### Fortsatt O0–O2-täckning: familjeledger efter OPT0–OPT8 (2026-11-11)
 
 **OPT0–OPT8 är första delsteg, inte hela O2-målet.** Den här kartan binder
