@@ -226,7 +226,8 @@ vcc-sema.py runs are green (878/879: modpost.c lacks a generated header).
 ## CI and the premerge gate
 `.github/workflows/premerge.yml` runs one reusable workflow per target in
 parallel (`arm64.yml`: jobs arm64, asan, tsan; `wasm.yml`; x86-64 gets its
-own), each on GitHub's ubuntu-24.04-arm in a Debian 13 container
+own), each on GitHub's ubuntu-24.04-arm (tsan and wasm on x86-64's
+ubuntu-24.04 for now) in a Debian 13 container
 (`ci/setup-debian.sh`: clang 23 from apt.llvm.org, qemu, emsdk for wasm).
 The test set is `ci/premerge.sh JOB`: the vendored C suites under qemu and
 the fast harnesses, no kernel, PostgreSQL or anything needing `work/`.
