@@ -357,7 +357,7 @@ av TU:n.  Väg, steg för steg, varje steg byte-identiskt (`vcc-x86.py --objcmp`
 Validering per steg: --objcmp 100 %, -g/-fasynchronous-unwind-tables, kärnans
 TU:er (`vcc -c` mot `vcc -S | vasm`: samma objekt), tid per TU (vbench).
 
-### X8 (2026-11-11): x86-kärnan byggs med vpp, påbörjat
+### X8 (2026-11-11): x86-kärnan byggd med vpp bootar Debian
 
 - `work/vcc-x86-cc.sh` (vpp som CC, bara versionsfrågorna till clang),
   `make O=work/build-x86 ARCH=x86_64 LLVM=1 CC=... defconfig vmlinux`.
@@ -377,9 +377,17 @@ TU:er (`vcc -c` mot `vcc -S | vasm`: samma objekt), tid per TU (vbench).
   ALTERNATIVE (.skip/.fill som layouten avgör), x86-assemblern (SSE4, AES,
   SHA, CRC32, AVX/AVX2 via VEX, system- och CET-instruktioner, kontroll-
   register, registeralias), x86-assemblern delad per instruktionsfamilj.
-- Kvar (24 objekt av ~2950): `.code32`/`.code16` (realmode, efi-mixed,
-  vdso32, kompat-entry), AVX-512 (EVEX) i krypto, `.org`-mål, några
-  direktiv; sedan länkning (vlink), objtool och boot under qemu.
+- Bootar Debian 13 (2026-11-11): `bench/boot-test.py --arch x86_64` BOOT OK,
+  running, 0 trasiga enheter, klar på 4,9 s (KVM; 44 s med TCG).  Länkat
+  med vroom-ld (5 stubbar), 25 objekt fortfarande via clang
+  (`work/vcc-x86-fallback.txt`).  Hittat genom att bisekta per objekt från
+  ett helt clang-bygge som bootar, och en gdb-vaktpunkt på `__preempt_count`:
+  asm-flaggutdata (`=@ccc`, boot_cpu_has), scoped_guard (städningen kördes
+  två gånger), och ramarna (16 KiB-stacken räckte inte: temporära slottar och
+  inline-kopiornas lokala återanvänds nu, kedjan 20,6 KB -> 13,3 KB).
+- Kvar: de 25 clang-objekten (`.code32`/`.code16`: realmode, efi-mixed,
+  vdso32, kompat-entry; AVX-512 (EVEX) i krypto; `.org`-mål), länkning med
+  vlink i stället för vroom-ld, objtool.
 
 ### X4 (2026-11-11): påbörjat, vikningar i vandraren
 
