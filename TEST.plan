@@ -415,6 +415,16 @@ klarar unity/nonunity, -O0/-O2 regressioner och kernel-sema 887/887 i båda
 lägen. Nya regressionen kör också grönt i wasm64 via emsdk/node.
 Två `typeof`-fall, `pr114831-2` och `vla-15`, samt inline-alloca återstår.
 
+Efterföljande `typeof`-rättning evaluerar VM-operanden en gång och sparar
+nya dimensioner från de ursprungliga cachade dimensionerna, även om
+operanden ändrar gränsvariablerna. Därmed går också `pr114831-2` och
+`vla-15`: sex riktade upstream-prov per Linux-mål, inga undantag.
+Ny flerdimensionell regression går med clang/vcc vid -O0/-O2 i båda
+byggsätten, samt faktiskt wasm64-runtime (två VLA-prov). Kernel-sema
+är 887/887 i båda lägen. Separat kvarstående fel: senare variabeldeklaration
+med en VM-typedef kan fortfarande evaluera om dess redan sparade gräns;
+den generella typedef-återanvändningen och inline-alloca är inte färdiga.
+
 Kombinerat fryst checkpoint `7afcdea`, före signmask-/typnamnsrättningarna,
 är verifierat i båda byggsätten: **145/145 x86** (fem referensundantag),
 **150/150 ARM/QEMU**, tvåfils-constexpr-ABI samt tre ursprungliga GCC-fall
