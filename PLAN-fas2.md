@@ -1873,3 +1873,14 @@ på samma experimentella x86-binär med slots av/på går från 88 till 77
 frame-moves (382 till 378 instruktioner). Motsvarande wasm32-fall går från
 46 till 32 i32.load och 31 till 29 i32.store mot tidigare referensbinär.
 Det sista är en avgränsad jämförelse mellan binärer, inte isolerad kostnad.
+
+OPT5 gemensam cellklassificering: em_slot_collect samlar intervall i en enda
+ström. Första exakta intervallet sparas när en allokering övergår från ett till
+flera intervall; alla följande intervall går direkt till gemensam klassificering.
+Anropare behöver varken spela upp posterna eller skapa en separat indexbuffert.
+Blanda inte insamlingslägen efter övergången till flera intervall.
+ASan/UBSan: samma deterministiska intervalloracle för båda API-lägena,
+400 slumpade återanvändningar av scratch, sortgränser 15/16/17, överlappningar,
+ID0-förgiftning, escapes, duplicerade första intervall och ogiltiga ID/storlekar.
+Mutationen som tappar första intervallet avvisas. x86 används först;
+arm64/wasm kan byta till hjälparen separat med paritets- och kostnadskontroll.

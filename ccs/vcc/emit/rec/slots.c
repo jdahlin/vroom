@@ -119,6 +119,20 @@ VPRIV void em_slot_detail(em_slot_cells *s, uint32_t id, int64_t off, uint32_t s
 	s->c[s->nm++] = (em_slot_range){ id, off, size, false, false };
 }
 
+/* Retain the first exact range only when a distinct second range appears.
+ * Repeated first-range accesses need no duplicate details: finish deduplicates
+ * them anyway. Unknown physical ranges still use the ordinary poison path. */
+VPRIV void em_slot_collect(em_slot_cells *s, uint32_t id, int64_t off, uint32_t size)
+{
+	uint8_t before = s->valid && id && id < s->na ? s->a[id].state : 0;
+	em_slot_access(s, id, off, size);
+	if (!s->valid || !id || s->a[id].state != 2)
+		return;
+	if (before == 1)
+		em_slot_detail(s, id, s->a[id].off, s->a[id].size);
+	em_slot_detail(s, id, off, size);
+}
+
 VPRIV bool em_slot_finish(em_slot_cells *s)
 {
 	uint32_t na = s->na, nm = s->nm;

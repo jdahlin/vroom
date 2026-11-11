@@ -16,10 +16,14 @@ static unsigned next(void) { seed ^= seed << 13; seed ^= seed >> 17; seed ^= see
 static bool intersects(test_access a, test_access b) { return a.off < b.off+b.size && b.off < a.off+a.size; }
 static void check(em_slot_cells *s, test_access *a, unsigned n, unsigned escaped)
 {
+    for (unsigned single=0;single<2;single++) {
     assert(em_slot_begin(s, 9));
-    for (unsigned k=0;k<n;k++) em_slot_access(s,a[k].id,a[k].off,a[k].size);
+    for (unsigned k=0;k<n;k++) {
+        if (single) em_slot_collect(s,a[k].id,a[k].off,a[k].size);
+        else em_slot_access(s,a[k].id,a[k].off,a[k].size);
+    }
     for (unsigned id=1;id<9;id++) if (escaped & (1u<<id)) em_slot_escape(s,id);
-    for (unsigned k=0;k<n;k++) em_slot_detail(s,a[k].id,a[k].off,a[k].size);
+    if (!single) for (unsigned k=0;k<n;k++) em_slot_detail(s,a[k].id,a[k].off,a[k].size);
     assert(em_slot_finish(s));
     for (unsigned k=0;k<n;k++) {
         if (!a[k].id) continue;
@@ -34,6 +38,7 @@ static void check(em_slot_cells *s, test_access *a, unsigned n, unsigned escaped
         assert(!!(s->flags[cell]&EM_SLOT_ESCAPED)==!!(escaped&(1u<<a[k].id)));
         for (unsigned j=0;j<k;j++) if (a[j].id && a[j].id!=a[k].id)
             assert(cell!=em_slot_find(s,a[j].id,a[j].off,a[j].size));
+    }
     }
 }
 int main(void)
@@ -86,6 +91,25 @@ int main(void)
     assert(!em_slot_finish(&s));
     assert(!em_slot_begin(&s,0));
     assert(!em_slot_begin(&s,0x10001));
+    assert(em_slot_begin(&s,2));
+    em_slot_collect(&s,2,0,8); /* invalid ID must not index a[2] */
+    assert(!s.valid && !em_slot_finish(&s));
+    assert(em_slot_begin(&s,2));
+    em_slot_collect(&s,1,INT64_MAX,8);
+    assert(!s.valid);
+    assert(em_slot_begin(&s,2));
+    em_slot_collect(&s,1,0,0);
+    assert(!s.valid);
+    assert(em_slot_begin(&s,2));
+    em_slot_collect(&s,0,INT64_MAX,1);
+    assert(!s.valid);
+    assert(em_slot_begin(&s,2));
+    em_slot_collect(&s,1,-8,8);
+    em_slot_collect(&s,1,-8,8); /* duplicates before the transition */
+    em_slot_collect(&s,1,0,8);
+    em_slot_collect(&s,1,-8,8); /* first range repeated after transition */
+    assert(em_slot_finish(&s));
+    assert(em_slot_find(&s,1,-8,8) && em_slot_find(&s,1,0,8));
     free(s.a); free(s.c); free(s.w); free(s.wend); free(s.flags);
     return 0;
 }
@@ -96,6 +120,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--cc', default=llvm('clang'))
     parser.add_argument('--sanitize', action='store_true')
+    parser.add_argument('--check-mutation', action='store_true')
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix='vcc-rec-slots-') as tmp:
         source = Path(tmp) / 'slots.c'
@@ -105,6 +130,18 @@ def main():
         subprocess.run([args.cc, '-std=gnu11', '-O1', '-g', '-I', str(Path(R) / 'ccs'),
                         *flags, str(source), '-o', str(binary)], check=True, timeout=30)
         subprocess.run([str(binary)], check=True, timeout=10)
+        if args.check_mutation:
+            implementation=(Path(R)/'ccs/vcc/emit/rec/slots.c').read_text()
+            implementation=implementation.replace('#include "../emitimpl.h"',
+                '#include "'+str(Path(R)/'ccs/vcc/emit/emitimpl.h')+'"')
+            dropped=implementation.replace('if (before == 1)', 'if (false)')
+            assert dropped != implementation
+            source.write_text(SOURCE.replace('#include "vcc/emit/rec/slots.c"',dropped))
+            subprocess.run([args.cc,'-std=gnu11','-O1','-g','-I',str(Path(R)/'ccs'),
+                            *flags,str(source),'-o',str(binary)],check=True,timeout=30)
+            result=subprocess.run([str(binary)],capture_output=True,cwd=tmp,timeout=10)
+            if result.returncode==0 or b'Assertion' not in result.stderr:
+                raise RuntimeError('streaming first-range mutation was not rejected')
     print('machine record exact-slot contracts: PASS')
 
 
