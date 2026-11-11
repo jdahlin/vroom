@@ -30,6 +30,7 @@ enum {
 	X_LD,		/* r0 = [r1 + off (+ ref)]: sz bytes, cond 1 sign-extended (to 64 bits) */
 	X_ST,		/* [r1 + off (+ ref)] = r2: sz bytes */
 	X_LEA,		/* r0 = r1 + off (+ ref) */
+	X_LEASCALE,	/* r0 = r1 + (r2 << sh), sz 4 zero-extends or sz 8 */
 	/* r0 = r1 op r2 (sz 4 or 8) */
 	X_ADD, X_SUB, X_AND, X_OR, X_XOR, X_IMUL, X_ADC, X_SBB,
 	/* r0 = r1 op imm (32-bit signed) */
@@ -51,6 +52,7 @@ enum {
 	X_CQO,		/* rdx = sign of rax (sz 4: cltd, 8: cqto) */
 	X_IDIV, X_DIV,	/* rdx:rax / r1: rax quotient, rdx remainder */
 	X_MULW,		/* rdx:rax = rax * r1 (unsigned, 64 x 64 -> 128) */
+	X_SMULW,	/* rdx:rax = rax * r1 (signed, 64 x 64 -> 128) */
 	X_UD2,
 	X_TLS,		/* r0 = the address of ref, thread-local: cond 0 local-exec, 1 initial-exec;
 			   2 general dynamic: rax = __tls_get_addr(ref's descriptor) (a call) */
@@ -124,12 +126,16 @@ VPRIV int x64_ftreg(ecx *e);
 VPRIV void x64_csused(ecx *e, int r);	/* a callee-saved register used: the prologue saves it */
 VPRIV rec *x64_put(ecx *e, int op);
 VPRIV void x64_twoaddr(ecx *e);
+VPRIV bool x64_mulconst(ecx *e, int size, int r, i128 rhs);
+
 VPRIV bool x64_tail_return(ecx *e, uint32_t expr);
 VPRIV uint32_t x64_tail_ref(const ecx *e);
 VPRIV bool x64_framefree_candidate(ecx *e);
 VPRIV bool x64_framefree_record(ecx *e, const rec *i);
 VPRIV bool x64_copy_forward_at(ecx *e, uint32_t k);
 VPRIV bool x64_last_u32(const ecx *e, int r);
+VPRIV void x64_dead(ecx *e);
+VPRIV void x64_dead_budget(ecx *e, uint32_t budget);	/* internal bounded-fallback contracts */
 VPRIV void x64_locals_begin(ecx *e, uint32_t s);
 VPRIV bool x64_local(ecx *e, uint32_t s, lval *l);
 /* effects.c: logical records before or after two-address expansion. */

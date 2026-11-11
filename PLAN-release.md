@@ -80,6 +80,31 @@ kan gå parallellt.
 
 ## Status
 
+### Status 2026-11-11: G5/G7, wasm-lagringar över strukturerade joins
+
+På `1d8e29a` använder wasm32/64 den gemensamma budgeterade flödeslösaren
+för privata exakta 4/8-byte ramceller. Typade kontrollhändelser och unika
+blocktoken beskriver flödet utan textparsning eller SSA. Överskrivna stores
+tas bort genom strukturerade joins; operandutvärderingar och riktiga
+barriärer bevaras. Loopar, dispatchers/goto, asm, SJLJ och dynamiska ramar
+avstår. Full konvergens krävs före publicering.
+
+114 fokuserade/befintliga SDK-fria nivå-/mål-/regelkontroller passerar;
+avsiktligt felaktig barriärsammanslagning avvisas på wasm32 och wasm64.
+Oberoende review är klar. Hela egna SDK-sviter avslutar med status 0:
+wasm32 178/178 PASS, 36 XFAIL, 16 skips; wasm64 182/182 PASS, 37 XFAIL,
+11 skips. Undantagen räknas inte som PASS; kategorier och loggar står i
+`PLAN-fas2.md`/`PLAN-wasm.md`. CI-steget är tillagt, fjärrkörning återstår.
+Senare integration `1458a90` mot exakt flödesförälder `f7327bd` passerar
+samma 114 kontroller och 66 byteidentiska O0/noopt-par. Matchade clang 23
+v3-byggen ger +0,314–0,552 % Callgrind-Ir i oförändrade kontroller,
++0,106/+0,095 % i fast wasm32/64-blandning, och +4,494–4,683 % i
+koncentrerade positiva diamantprov. De senare minskar stores 800/1000
+till 200 och relocerbara objekt 2,886–3,325 %. Aktiv analys kostar mer än
+1 % där; resultatet ersätter inte full prestandagrind eller uppmätt
+programfart. Exakta korpusundantag och metod står i planerna. G5/G7,
+generell DSE och full O2 förblir öppna.
+
 ### Status 2026-11-11: G5/G7, wasm frame-cell forwarding
 
 Wasm32/64 använder nu den gemensamma cell-/värdekärnan för exakta
@@ -422,6 +447,19 @@ variadiska boolparametrar verifieras även via indirekta anrop. Båda bygglägen
 klarar egna Linuxsviter (176 x86, 181 ARM), ABI 32 per mål, 220 diagnostikprov
 och 887 kernel-TU:er i båda semalägena. G1/G2/G5 förblir öppna.
 
+
+### Status 2026-11-11: G5/G7, enoperationsrecept för gånger 3/5/9
+
+Ett delat konstanttidsrecept väljer separata native-adaptrar: skalad LEA på
+x86 och skiftad ADD på arm64, O1+ utan VCC_NOOPT. Wasm behåller mul enligt
+referensens kostnadsval. O0/NOOPT/overflow-paritet, modulär sanitizer-/mutationsoracle,
+posteffekter, två bygglägen och fyra måls O0–O3-körfall passerar. Kodformsvinst
+är belagd; matchad mikrokostnad mot historisk bas 69c1bd7 är högst +0,126 %
+för kontroller; positivt prov kostar +0,353 % x86 och −2,147 % arm64.
+Wasm är byteidentiskt. Detta är kompileringens Ir, inte körtidsvinst eller full
+prestandagrind; slutlig integrations-CI återstår. Faktorer
+6/7/10/15 och bredare aritmetikregler är öppna. G5/G7 och full O2 förblir öppna.
+
 Efter konfliktintegration med main4bb6d52 via OPT3-huvudet 9b18f64: unitybygge,
 16/16 riktade unsigned32-fall på fyra mål samt sanitiserade reciprok-/tryck-
 och registereffektkontrakt passerar. Båda planernas status behålls.
@@ -457,3 +495,28 @@ Detta bevisar ingen generell fartvinst. G5/G7 och full O2 är fortsatt öppna.
 U64 har också integrerat main2dc4ea3 via PR51head15551a7: 196 riktade fall,
 sanitiserade kontrakt och hela bladramsharnessen passerar. Reciprokfilerna är
 oförändrade; mätningarna förblir bundna till sina tidigare exakta hashvärden.
+
+### Status 2026-11-11: G5/G7, signed32/64 reciprokdivision
+
+OPT8:s signed-del ovanpå `f585591` har gemensamma typade reciproker och
+separata x86/arm64-adaptrar. Kvot och rest följer C:s avrundning mot noll,
+även för negativa divisorer och INT_MIN; wasm behåller motorns signed
+division/rest. Ett bevisat likhetsfall tar bort onödig täljaraddition för
+bland annat `/3`. O0, `noopt` och högt registertryck behåller tidigare väg.
+
+Unity/fristående implementationer, 16 mål-/nivåkörningar och fyra noopt-
+kontroller passerar, liksom sanitiserade matematik-/tryck-/registerparskontrakt.
+Native ger 230 arm64-PASS (ett befintligt xfail), 225 x86-PASS (sex synliga
+referensundantag), ABI 32 per mål samt x86 debug/unwind. Parade v3-mätningar
+av exakt `f585591`→`fbc7105` ger fixerad mix högst +0,00572 % extra
+kompilatorinstruktioner. Mättad native signed32/64-kod kostar +14,21…+30,03 %;
+ett avgränsat x86-körprov ger −63,59 % barn-CPU, med clang-identiska svar.
+Åtta O0/noopt-assemblerjämförelser är byte-identiska. Fulla G5/G7 förblir öppna.
+Implementations- och valideringsgränserna står i PLAN-fas2:s signed-status.
+
+
+OPT1-integrationskontroll på 60027c7 efter wasm-föräldern 6d60e73:
+båda bygglägen, 16 fulla assemblerpar, 16 mål/nivå-körfall, sanitiserade
+recept-/postkontrakt och 36 policy-/overflow-paritetsjämförelser passerar.
+Tidigare kompilatorkostnad gäller fortfarande historiska 69c1bd7 till f92b67b;
+den tillskrivs inte denna nya förälder. Integrations-CI och full G7 återstår.

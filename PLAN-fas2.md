@@ -2064,6 +2064,194 @@ hela slutversionens basjämförelser finns i `stream-collectors-prune{,-large}-c
 Separat x86-integration rapporterar 13 397 färre Ir i sin riktiga grind;
 det är inte en full grind för denna arm64-/wasm-ändring. Ingen emissionsändring.
 
+### OPT4 fortsättning: budgeterad flödeskärna och första x86-konsument (2026-11-11)
+
+`emit/flow/{graph,maskflow}.c` bygger validerad blockadjacens med valfria
+föregångare och löser bakåtriktad 64-bitars may-liveness. Källpositioner,
+register/effekter och omskrivningar tillhör adaptern; kärnan antar varken
+maskinposter, fysisk registermodell, wasm-stack eller SSA. Arrayer återanvänds
+per worker. Varje block-/kantbesök belastar en uttrycklig arbetsbudget;
+resultatet är giltigt först efter full konvergens. Felaktiga kanter,
+allokeringsfel eller budgetslut ger inga beroende omskrivningar.
+
+Första nyttan finns i `arch/x64/emit/dead.c`: en absorberande heltalsregel
+som lämnar ett redan emitterat registerresultat oanvänt sätter en billig
+kandidatflagga. Utan den byggs ingen graf. Konsumenten tar bara bort rena,
+icke-trappande registeroperationer vars samtliga utdata är döda. Läsningar,
+lagringar, atomics, FP-effekter, anrop och barriärer bevaras. Flaggläsningar
+propageras konservativt bakåt; en flaggskrivning antas inte döda hela
+flaggtillståndet. Partialregister och implicita register tas ur målets
+befintliga effekter. Epilogens ABI-resultat, frame-/stackbaser och
+callee-saved-register är konservativt levande vid utgång.
+
+Gränserna är 256 block, 1024 kanter och 65536 poster; solverbudgeten är
+`n + 32*(block+kanter) + 64` besök. Det är implementationens fallbackgränser,
+inte en uppmätt kompilatorkostnadsgrind. Okända/indirekta flöden, rå/named
+asm, label-adresser och interrupt-/noreturn-konventioner avstår helt.
+Alla ändringar väntar tills analysen lyckats; kompaktering använder befintlig
+`dbg_remap` före tvåadresspasset. Arm64:s befintliga block-/livenessanalys är
+oförändrad. Vid detta första checkpoint använder wasm ännu inte grafen;
+den separata wasm-konsumenten beskrivs i nästa statusavsnitt.
+
+Kodformsbevis mot exakt uppdaterad förälder `0dde275`: `unsigned f(unsigned
+x) { return (x*13u)&0u; }` behåller `imull $13` i basen men inte i kandidaten
+på `7f88daa`. Skyddade stackläsningar står kvar. Detta visar en verklig
+begränsad lucka/vinst, inte generell DCE eller uppmätt körtid. Basbinärens
+SHA256 är `a26750515e4e215f6485e3f75624a5422d9b29b25d9268bb81c9e3dfbb2fc8c6`;
+assembly och bygg-/testloggar finns i `build/linux/flow-evidence/`.
+Värdflaggorna skiljer mellan dessa byggen, så de används inte för kostnads-
+jämförelse. Senare main-integrering och dess verifiering redovisas nedan.
+
+Verifierat hittills: unitybygge med `-j 1`; `--rule deadresults --run`
+passerar 16/16 nivå-/målkombinationer (x86, arm64/QEMU, wasm32/64 med Node
+26.13). Positiva x86-kodkrav gäller O1–O3; kontroller behåller division,
+volatile access, anrop och opaque-asm-fallback. `vcc-flow.py` jämför med en
+oberoende bitvis vägnåbarhetsmodell, inklusive loopar, joins, dublett-/self-
+kanter, exakta/tomma budgetar och återanvändning efter fel. `vcc-rec-dead.py`
+prövar riktiga posteffekter, ABI, flaggor/carry, partialregister,
+kompakterings-/debugcallback och transaktionellt budget-/opaque-fallback.
+Båda kontrakten passerar ASan/UBSan och ligger i den snabba CI-grinden.
+
+Naked-proben är kodformsunderlag: giltig asm-kropp är opaque och avstår.
+Vcc:s befintliga ignorerade naked-attribut ger fel prolog för direkt asm-ret;
+detta reproducerades även utan det nya passet. Proben kör därför inte den
+unsupported funktionen. Clang 23 avvisar motsvarande rena C-kropp med
+`non-ASM statement in naked function is not supported`. Vanlig asm med
+absorberande uttryck provas däremot både i kodform och vid körning.
+
+Efter integration av uppdaterad PR53, leaf50 och ledgern (`7691f6c`,
+förälder `69c1bd7`) bygger både unity och fil-för-fil med `-j 1`. Även
+fil-för-fil-binären passerar alla 16 nya regel-/nivå-/målkombinationer.
+Kontrollerna för carry, partialregister, overflow, loop och båda ABI-
+resultatparen innehåller nu faktiskt evaluerade absorberande uttryck, så
+den nya konsumenten aktiveras; utvalda kontroller kräver också att den
+extra multiplikationen verkligen försvinner. En separat vanlig funktion
+utan kandidat stannar utan graf-/scratchallokering i kontrakttestet.
+
+Egna x86-sviten ger 223/223 PASS och sex explicita referensskips; arm64
+228/228 PASS och ett befintligt XFAIL (`--no-cache`, `-j 1`). Befintliga
+cross-compiler-ABI-fixturer ger 32/32 på vardera native-målet. Debugharnessen
+har ett faktiskt aktiverat dead-result-fall med en efterföljande källrad;
+O0–O3 passerar radkrav, DWARF-verifiering och identisk `.text` med/utan `-g`.
+Mot exakt `69c1bd7` är 17/17 assemblypar byte-identiska: fyra mål vid O0 och
+O2/noopt, samt arm64/wasm32/wasm64 vid O1/O2/O3. Samma förälder behåller
+fortfarande `imull $13` i det positiva x86-provet. Råloggar ligger i
+`work/opt-pr-tmp/flow-final-{x86,a64}.log`; övriga artefakter, kompletta
+paritetskommandon och käll-/binärhashar i `build/linux/flow-evidence/`.
+
+Kostnad mot exakt `69c1bd7`, båda byggen med Clang 23
+`-O3 -march=x86-64-v3`, Callgrind för hela `vpp -S`-processen. 21 seriella
+par; måttet är värdinstruktioner, inte hårdvarucykler eller väggtid:
+
+| Korpus | Mål/nivå | Ändrat instruktionsarbete | Genererad assembler |
+| --- | --- | ---: | --- |
+| Rak kod, 500 funktioner utan kandidat | x86 O1 och O2 | +0,0468 % | Identisk |
+| Summeringsloop, 500 funktioner utan kandidat | x86 O1 och O2 | +0,0009 % | Identisk |
+| Avsiktligt mättade dead-result-diamanter, 500 funktioner | x86 O1 och O2 | **+7,7486 %** | Döda multiplikationer försvinner |
+| Tolv befintliga C-regressioner, summerat | x86 O2 | +0,06964 % | 10 identiska, 2 ändrade |
+| Rak kontrollkod, 500 funktioner | arm64 O2 | +0,0221 % | Identisk |
+| Samma kontrollkod | wasm32 och wasm64 O2 | +0,0187 % | Identisk |
+
+Den blandade sviten kostar 140 485 975 → 140 583 816 instruktioner, utan
+exkluderade filer. Den använder tidigare `deep_mixed`, `register_locals`,
+`bit_cast`, `stack_cells`, `integer_identities`, `deep_conditional`,
+`unsigned_pow2`, `signed_pow2`, `atomic_ops`, `mem_builtin_inline`,
+`bitint_runtime` och `wasm_frame_cells`, inte den nya positiva fixturen.
+Tradeoffen är verklig: mättad kandidatkod kostar cirka 7,75 % mer att
+kompilera; kontroll-/blandproverna ligger under +0,1 %. Ingen generell
+runtimevinst, minnesgrind eller komplett prestandagrind påstås. Körningen
+är en instruktionräkning under delad maskinlast, inte en tidsjämförelse.
+Råa `.cg`/loggar/assembly, versionssträngar, kompletta kommandon och käll-/
+binärhashar finns i `work/opt-profile/flow-cost/{measure.py,result.json}`.
+
+Fjärr-CI och nästa wasm-konsument återstår. OPT4/O2 och G5/G7 är fortsatt
+öppna.
+
+### OPT5 fortsättning: wasm-DSE över strukturerade joins (2026-11-11)
+
+På `1d8e29a`, med flödesföräldern `7691f6c`, använder nu även wasm32/64
+den gemensamma graf-/masklösaren. `arch/wasm/emit/flow.c` registrerar typade
+block-, if/else-, slut- och branchhändelser från funktionens början under
+ordinarie emission. Varje öppning får en unik token; wasm:s återanvända
+lexikala branch-depth översätts till token när grenen emitteras. Ingen
+assemblertext tolkas, extra AST-vandring eller SSA införs inte.
+
+Första konsumenten tar bort lagringar till privata exakta 4/8-byte ramceller
+som skrivs över före varje följande läsning, även genom nästlade diamanter.
+Heltal och flyttal stöds; befintlig cell-/överlapps-/escapeanalys avgör
+behörighet. Adress och högerled utvärderas fortfarande av befintlig renderer,
+inklusive eventuella fångade wasm-locals. Rena kontrollgränser bryter den
+lokala vidarebefordringen men är inte minnesläsningar i DSE. Riktiga anrops-/
+minnesbarriärer sammanslås bara inom samma kontrollepok: en barriär efter
+en tom else/join får inte flyttas till bara ena föregångaren.
+
+Liveness förenar efterföljares läsbehov och betraktar alla celler som lästa
+vid funktionsutgång. Detta är alltså överskrivnings-DSE, inte generell
+unread-/livstidssluts-DSE eller global värdevidarebefordring. Alla beslut
+väntar på full konvergens och publiceras först efter separat staging.
+Loopar, switch/dispatchers, goto, asm, SJLJ och dynamiska ramar avstår.
+Gränser: 8192 kontrollhändelser, djup 256, 64 cellbitar och högst 1048576
+solverbesök. Graf-/solverarbete startar först efter komplett emission och
+verkliga privata upprepade stores genom en join. O0/noopt avstår; fel och
+budgetslut lämnar denna konsuments omskrivningar opublicerade.
+
+Verifierat: unitybygge med `-j 1`, fristående syntaxkontroll av samtliga
+ändrade wasm-C-filer samt **114** SDK-fria konfigurationer genom egna
+assemblern/länkaren och Node: 10 nya flödeskontroller (wasm32/64 O0–O3
+med körning och kodform, samt O2/noopt-kodform), 16 befintliga cellfall och
+88 opt-regelkontroller. Positiva fall behåller exakt en slutlig store;
+negativa fall täcker läsningar/utgångar, escape, överlapp, volatile/atomic,
+anrop, effekter, flyttalsbitar och uteslutet flöde. En isolerad mutant som
+tar bort epokvillkoret avvisas av den avsedda tom-else-kodkontrollen på
+både wasm32 och wasm64; originalkällorna ändrades inte. Oberoende review
+fann inga kvarstående korrekthetsblockerare. `vcc-wasm-flow.py` ligger i
+wasm-jobbets snabba CI-uppsättning; fjärrkörning återstår.
+
+Hela egna SDK-baserade sviter på samma `1d8e29a` avslutar med status 0:
+wasm32 **178/178 PASS**, 36 körda XFAIL och 16 skips (12 clang-reject,
+1 noref, 3 ref-fail); wasm64 **182/182 PASS**, 37 körda XFAIL och 11 skips
+(8 clang-reject, 1 noref, 2 ref-fail). Undantagen är inte PASS.
+Loggar: `work/opt-pr-tmp/wasm-flow-full32.log` och `wasm-flow-full64.log`;
+källbevis, mutanthashar och fokuserade resultat i
+`build/linux/flow-evidence/`. Efter sammanslagning av den exakta
+flödesföräldern `f7327bd` till `1458a90` passerar återigen alla 114
+konfigurationer och fristående syntaxkontroll av ändrade wasm-C-filer.
+66 O0-/O2-noopt-par är byteidentiska mot den föräldern; två ytterligare
+par avvisas av båda byggenas befintliga ILP32-layoutassert i `atomic_ops`.
+De SDK-baserade helsvitssiffrorna ovan hör fortfarande till `1d8e29a`,
+inte den senare integrationen.
+
+Avgränsad kostnadsjämförelse: exakt `f7327bd` mot `1458a90`, båda vpp
+byggda av clang 23 med `-O3 -march=x86-64-v3`. Callgrind räknar hela
+processen inklusive start, en seriell mätning per binär/källa/mål, wasm32
+och wasm64 med `-O2 -S`, uttryckliga LLVM-resurs-/rt-huvuden och samma
+källfiler. Inga väggklocke- eller programkörtidsvärden används.
+
+| Prov | wasm32 extra värd-Ir | wasm64 extra värd-Ir |
+|---|---:|---:|
+| Rak skalärkod, 200 funktioner | +0,314 % | +0,314 % |
+| Villkor utan privata ramceller, 200 funktioner | +0,552 % | +0,552 % |
+| Loopar som avstår från analys, 200 funktioner | +0,351 % | +0,351 % |
+| Positiva diamanter, 200 funktioner | +4,495 % | +4,494 % |
+| Positiva nästlade diamanter, 200 funktioner | +4,683 % | +4,682 % |
+| Befintlig fast blandning, processernas summa | +0,106 % | +0,095 % |
+
+Kontrollernas assembler och objekt är byteidentiska. De positiva proven
+minskar 800 respektive 1000 stores till 200; separat vanlig `-c` ger
+2,886–3,325 % mindre relocerbara objekt totalt. Detta är objektstorlek,
+inte laddad kodstorlek eller uppmätt programfart. Aktiv analys kostar
+alltså mer än 1 % i dessa koncentrerade positiva prov; tabellen gäller
+inte som en generell kostnadsgrind. Den fasta blandningen är elva
+befintliga regressionsfiler för wasm64 och tio för wasm32: `atomic_ops`
+avvisas av både bas och kandidat på sin LP64-layoutassert i wasm32 och
+utesluts öppet. Två av blandningens assemblerutdata ändras per mål.
+
+Fulla kommandon, käll-/binärhashar, råa Callgrind-filer, objekt och
+feltexter finns i `build/linux/flow-evidence/cost/result.json` med
+angränsande artefakter; pariteten i `noopt-parity.json`. Dessa mätningar
+hör till denna konsument och ersätter inte full prestandagrind,
+programkörtidsmätning eller fjärr-CI. OPT5/O2 och G5/G7 är fortsatt öppna.
+
 ### Fortsatt O0–O2-täckning: familjeledger efter OPT0–OPT8 (2026-11-11)
 
 **OPT0–OPT8 är första delsteg, inte hela O2-målet.** Den här kartan binder
@@ -2170,6 +2358,64 @@ när mätningar motiverar dem; ingen nivå döps om för att hävda paritet.
 G5/G7 och full O2-täckning förblir öppna. Detta dokumentsteg kör inga byggen
 eller nya benchmarks; annexets mängd-/unikhets-/nivå-/filhashkontroller
 är datakontroller av befintligt underlag.
+
+
+### OPT1: små konstantmultiplikationer med målkostnad (2026-11-11)
+
+Implementerat första avgränsade steget: `opt/mulconst.c` normaliserar konstanten
+till 32/64 bitar och väljer i konstant tid skift 1/2/3 för faktorerna 3/5/9.
+Separata `arch/{a64,x64}/emit/mulconst.c` använder receptet vid O1+ och utan
+`VCC_NOOPT`: arm64 väljer befintlig ADD med skiftad operand, x86 en ny ren
+skalad LEA-post med båda registeranvändningarna och utan flagg-/minneseffekter.
+32-bitarsresultatet nollutvidgas innan en eventuell senare teckenutvidgning.
+Ingen extra temp, AST-genomgång eller operandutvärdering behövs. Wasm behåller
+mul, som Clang 23; ett påtvingat skift/add-recept skulle lägga till operationer.
+
+Lokal audit mot 69c1bd7 (aritmetikfiler identiska med main 2dc4ea3) och
+Clang 23.1.6/GCC 15.2.0 visar att detta saknas på båda native-målen.
+Arm64 har redan multiplikation med tvåpotenser; noll/ett finns i gemensam regel.
+Faktorer 6/7/10/15 skjuts upp: referenserna använder två operationer där x86
+har en omedelbar imul och arm64 två mov/madd; bredare målkostnad krävs.
+Manifest med käll-/binärhashar, samtliga 36 auditkommandon och assembler ligger
+lokalt i `work/opt-profile/multiply-audit/`. Basbinären har SHA256
+`61249ca189d71743da9c506100c3d3dc8451cb3338e2898bc904b03d7cda87f4`.
+Detta är kodformsbelägg, inte uppmätt körtidsvinst.
+
+Verifierat före kostnadsmätning: unity och fil-för-fil med j2, 16 fullständigt
+byteidentiska assemblerpar mellan byggena, 16 mål/nivå-kombinationer O0–O3
+med bokstavliga körsvar och avsedda kodformer. Fallen omfattar signed/unsigned
+32/64, negativa definierade produkter, wraparound, smalning med smutsiga höga
+bitar, efterföljande utvidgning, *=, kommuterad konstant, en enda pekar-/värdefunktion
+samt global volatile-laddning. 36 bytejämförelser mot basen bevarar O0,
+`VCC_NOOPT` och overflow-builtins. Det redan ignorerade attributet optnone
+utgör inget nytt löfte. ASan/UBSan för receptets modulära oracle och mutation,
+samt x86-posternas användningar/definitioner/flaggor/nollutvidgning passerar.
+CI kör den nya receptkontrollen och befintlig opt-rules tar automatiskt det nya
+fallet. Slutlig integrations-CI återstår; avgränsad kostnadsmätning finns nedan.
+Ingen SSA, generell InstCombine eller full O2-täckning är implementerad.
+
+
+OPT1 matchad kostnad för 3/5/9: exakt ren kandidat `f92b67b` mot historisk
+bas `69c1bd7`, båda värdbyggen `-O3 -march=x86-64-v3`, hela processens
+Callgrind-Ir och 500 funktioner per prov, O1/O2 för alla fyra måltrippelar.
+Skalär kontroll med faktor 37 (receptet avböjs) kostar +0,1256 % x86,
++0,1231 % arm64 och +0,0141–0,0142 % wasm. Pekarslingan kostar +0,0863 %,
++0,0041 % respektive +0,0080 %. Alla kontrollutdata är byteidentiska.
+Positivt prov med faktorerna 3/5/9 kostar +0,3529 % x86, −2,1465 % arm64
+samt +0,0160–0,0161 % wasm. Där blir 500 imul till 500 skalade LEA på
+x86 och 500 materialiserade konstant+madd till 500 skiftade ADD på arm64;
+wasm behåller 500 mul och dess assembler är byteidentisk. Detta mäter
+kompileringsarbete, inte programmets körtid eller hela prestandagrinden.
+
+Kandidatbinärens SHA256 är
+`8492bdd0cb53f89d1ad3173ac48bcb837f668a20a4860b0b3fa64ee232ccf362`.
+`work/opt-profile/mulconst-cost/result.json` bevarar samtliga 24 matchade par,
+exakta kommandon, kompileringsflaggor, käll-/binärhashar och kodformsräkningar.
+`work/opt-profile/mulconst-unity-parity/result.json` bevarar de 16
+byteidentiska bygglägesparen. Bas 69 är avsiktligt historisk; en senare
+integration får inte beskriva dessa tal som mätning mot dess nya förälder.
+Slutlig integrations-CI och full G7 är fortsatt öppna.
+
 OPT8-integrering: implementationen är 58263be; därefter har main54580f7
 (PR48:s genererade minnesregression) mergats som 6b0e195. Konflikten gällde
 bara denna plan; båda statusblocken är bevarade. Kompilatorkällorna är
@@ -2314,3 +2560,136 @@ x86-bladramens policy/cache/debug/härdning/signal-unwind passerar igen.
 Reciprok- och högproduktkällorna är oförändrade av integrationen.
 Profilernas exakta 54c8f3f→d8957b3-avgränsning behålls; inga nya kostnads-
 eller generella fartpåståenden görs för denna integration av bladramar.
+
+### OPT8 status: signed32/64 reciprokdivision (2026-11-11)
+
+Delsteget ovanpå exakt `f585591` använder `emit/opt/sdivconst.c` för en
+gemensam reciprok för signed32 och signed64. Separata native-adaptrar
+använder signed högprodukt, eventuell addition av täljaren, aritmetiskt
+skift och en teckenbitskorrektion för C:s avrundning mot noll. Negativ
+divisor negerar bara kvoten; resten beräknas med positiv divisormagnitud.
+Noll, ±1 och tvåpotenser behåller befintliga regler. _BitInt, FP, pekare,
+vektorer och andra bredder avvisas. Wasm behåller sin `div_s`/`rem_s`,
+liksom clang23 för samma små prov.
+
+Receptet byggs bara för konstant högeroperand vid O1+ utanför `noopt`.
+Signed32 använder en host64-division; bara signed64 använder host-u128.
+Tryckgränsen är högst två extra temporärer plus eventuell materialisering
+av input; otillräckligt utrymme behåller vanlig division. x86:s separata
+signed högprodukt återanvänder unsigned-variantens ägarskap och skydd för
+RAX/RDX. Ingen SSA, ny AST-genomgång eller dynamisk allokering tillkommer.
+
+Likhetsfallet i reciprokens felgräns tillåts utan extra täljaraddition.
+Ett fullbreddsbevis i hjälparens kommentar omfattar även INT_MIN. Därmed
+får `/3` samma korta magiska multiplikator som clang (`0x55555556` respektive
+`0x5555555555555556`), utan att kräva samma register-/ramkod. Regressioner
+täcker ±3/6/7/10/12/37, stora divisorer, extrema täljare, grannar till
+multipler, signed64 ±9/129, lazy narrowing, compound-lvärden och effekter.
+
+Aktuell integration bygger unity och de åtta ändrade/nya implementationerna
+kompilerar var för sig. Fyra mål × O0–O3 passerar körning och kodkrav;
+ytterligare fyra O2-`VCC_NOOPT`-kontroller passerar. Sanitiserade matematik-,
+tryck- och signed/unsigned registerparskontrakt passerar. Native-sviterna ger
+230 arm64-PASS (ett befintligt xfail) och 225 x86-PASS (sex uttryckliga
+referensundantag). ABI ger 32 PASS per native-mål. x86:s debugrader O0–O3
+och verklig unwind genom vanliga/överjusterade ramar vid O1/O2 passerar.
+O0/noopt-assemblern är dessutom byte-identisk med `f585591` i åtta
+mål-/policyjämförelser.
+
+Parade Callgrind-mätningar använder nya binärer från exakt
+`f585591`→`fbc7105`, båda med clang23 och `-O3 -march=x86-64-v3`.
+500-funktionskontrollen har identisk assembler och kostar +0,0261 % x86,
++0,0270 % arm64. Loopkontrollen kostar +0,00795 % respektive +0,00091 %.
+Wasm-kontrollerna och signed-korpusen har identisk assembler och ändras
+högst 0,000214 % i instruktioner. Avsiktligt mättade native-korpusar med
+500 funktioner (`x/7 + x%10`) visar kostnaden för extra kompilatorarbete:
+
+| Mål | Signed32, kompilator-Ir | Signed64, kompilator-Ir |
+| --- | ---: | ---: |
+| x86-64 | +14,21 % | +17,79 % |
+| arm64 | +30,03 % | +20,44 % |
+
+Samma fixerade 12-filsmix som u64-steget kostar +0,00256 % x86 (12 filer),
++0,00572 % arm64 (12), +0,000141 % wasm32 (10) och −0,000034 % wasm64
+(11). Basstödsundantagen är synliga: wasm32 atomic_ops/bitint_runtime,
+wasm64 bitint_runtime; inga nya målundantag har lagts till.
+
+Ett separat seedat x86-körprov summerar signed64 `/-37`, `%129` och
+signed32 `/3`, `%-7` för tre miljoner fullbreddstäljare. Samtliga svar
+matchar clang. Nio alternerade barn-CPU-prov efter två uppvärmningar ger
+median **18,217→6,633 ms (−63,59 %)**, inklusive processstart. Det är ett
+avgränsat prov, inte ett generellt fartlöfte eller mätning på arm64-hårdvara.
+Käll-/binärhashar, exakta kommandon och rådata finns i
+`work/opt-profile/sdivconst/`: `compiler-sources.json`,
+`compiler-profile.json`, `mixed/result.json`, `native-runtime-profile.json`
+och `noopt-identity.json` med respektive mätskript. Full G7 och full
+O2-täckning återstår.
+
+Bounded-flow efter stackintegration med signed/tail/u64 (`661d552`): unity,
+sanitiserade flow-/dead-result-kontrakt, 16 mål-/nivåprov med körning och
+x86-debug O0–O3 passerar. Tidigare hela sviter och Ir-mätningar ovan gäller
+sina exakta angivna versioner; integrationen är ingen ny kostnadsmätning.
+
+### Gemensam walker: en värdeläsning för skalär postfix (2026-11-11)
+
+Status: implementerat och lokalt verifierat i `opt/postfix-eval`, före
+integreringscommit. `wk_incdec` i `emit/walk/expr.c` läser ett ordinärt
+registerrepresenterat värde en gång, behåller det gamla värdet och gör en
+registerkopia i rätt registerklass före den destruktiva aritmetiken. Detta är
+en evalueringsrättning vid O0–O3, utan optimeringspass, SSA eller kostsam analys.
+Den gemensamma walkern används fortfarande bara av x86; arm64 och wasm behåller
+sina befintliga vägar och valideras av samma semantiska test.
+
+Avgränsning: `_Atomic` går oförändrat genom sin separata RMW/CAS-väg. Typer
+som `wk_mem` håller via adress, exempelvis x86 `__int128` och `long double`,
+behåller också sin befintliga snapshot-/läsningsväg; detta delsteg lovar inte en
+enda originalläsning för dem. Postfix-bitfält använder den nya registerkopian:
+två behållarläsningar återstår, en för fältvärdet och en för att bevara grannbitar,
+som i de undersökta clang/GCC-fallen. Prefix-bitfältens extra resultatläsning och
+fältbreddsnormalisering ändras inte här.
+
+Validering: `postfix_eval.c` och `vcc-opt-rules.py --rule postfix --run`
+kontrollerar exakt en ordinär skalär läsning och skrivning (eller en kombinerad
+RMW), gamla/nya värden, bortkastat och castat resultat, smala heltal, bool,
+FP/GPR-registertryck, fasta adressregister, pekarsteg, sidoeffekt i adressen,
+bitfältsgrannar och separata atomiska/adressbaserade kontroller. Unity och
+filvis bygge klarar samtliga 32 kombinationer av fyra mål och O0–O3. Den tidigare
+oförändrade parent69-postfixvägen avvisas av läsningskontrollen: två läsningar i
+stället för en. x86:s egna C-svit klarar 228/228, med sex befintliga överhoppade.
+Loggar: `build/linux/postfix-evidence/`. Ingen ytterligare bred testkörning behövs
+för detta delsteg. En liten matchad Ir-jämförelse efter checkpoint 6a726c0 finns i
+`build/linux/postfix-evidence/cost/result.json`: samma clang23,
+`-O3 -march=x86-64-v3`, exakt f7327bd-baslinje och en seriell Callgrind-körning
+per binär/källa, inklusive processstart. För 64 funktioner utan postfix ändras
+6 703 455 till 6 703 542 Ir (+87; +0,0013 %), med identisk assemblertext.
+För 64 postfix-funktioner ändras 6 717 886 till 6 731 413 Ir (+13 527;
++0,2014 %), samtidigt som varje funktions ordinära objektläsningar minskar
+från två till en. Detta mäter kompilatorarbete i två små prov, inte en full
+1 %-grind eller körtid/hastighetsvinst hos det genererade programmet.
+
+
+OPT1 integration efter wasm-flödesföräldern: på `60027c7` med förälder
+`6d60e73` passerar unity och fil-för-fil (j2), 16 kompletta byteidentiska
+assemblerpar mellan bygglägena, samtliga 16 multiplikationsfall O0–O3 på
+x86/arm64/wasm32/wasm64, sanitiserat recept med mutation och posteffektskontrakt.
+36 O0/VCC_NOOPT/overflow-jämförelser mot förälderns binär är byteidentiska
+(byggd 1458a90, produktionskällor verifierat identiska med 6d60e73).
+Native-körharnessen kontrollerar nu även bevarade register för detta fall.
+CI-/harness-unionen behåller tails, deadresults, flödeskontrakt, wasm-flow och
+mulconst. Aktuell unity-binär har SHA256
+`398f139ca1489cd83a8822c0db8958f54df72cc73cc7fb252e5add4781a30a2e`;
+kommandon/binärhashar och 16 par finns i
+`work/opt-profile/mulconst-integration-parity/result.json`, kör-/kontraktsloggar
+i `work/mulconst-integration-{contracts,policy,runtime}.log`.
+Ingen historisk kostnadsprofil har upprepats: talen ovan gäller fortfarande
+exakt 69c1bd7 till f92b67b, inte denna integrationsförälder. Integrations-CI
+återstår; G5/G7 och hela O2 är fortsatt öppna.
+
+Postfix-integrering efter multiplikationsföräldern: e63bf47 staplar rättningen
+på PR71/f295999. Aktuellt unity-bygge är grönt. Samtliga 16 postfix- och 16
+konstantmultiplikationsfall (fyra mål, O0–O3) klarar kodgenereringskontroller och
+körning; multiplikationsrecept med mutationskontroll och registereffekter klarar
+ASan/UBSan. `build/linux/postfix-evidence/integration-*.log` innehåller resultaten.
+Den tidigare breda sviten och matchade Ir-proven har inte körts om; inga
+integreringsfel motiverade det. Rättningen är fortfarande avgränsad till
+registerrepresenterad postfix och ligger kvar ovanpå multiplikationsföräldern.

@@ -369,6 +369,17 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			tb_s(b, ", ");
 			x64_reg(b, i->r[0], 8);
 			break;
+		case X_LEASCALE:
+			x64_ins(b, "lea", sz);
+			tb_c(b, '(');
+			x64_reg(b, i->r[1], 8);
+			tb_c(b, ',');
+			x64_reg(b, i->r[2], 8);
+			tb_c(b, ',');
+			tb_u(b, 1u << i->sh);
+			tb_s(b, "), ");
+			x64_reg(b, i->r[0], sz);
+			break;
 		case X_ADD: case X_SUB: case X_AND: case X_OR: case X_XOR: case X_IMUL: case X_ADC: case X_SBB:
 			x64_ins(b, alu[i->op], sz);
 			x64_reg(b, i->r[2], sz);
@@ -570,8 +581,8 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			x64_ins(b, "bswap", sz);
 			x64_reg(b, i->r[0], sz);
 			break;
-		case X_MULW:
-			x64_ins(b, "mul", sz);
+		case X_MULW: case X_SMULW:
+			x64_ins(b, i->op == X_SMULW ? "imul" : "mul", sz);
 			x64_reg(b, i->r[1], sz);
 			break;
 		case X_IDIV: case X_DIV:

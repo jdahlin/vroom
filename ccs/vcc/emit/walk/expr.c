@@ -949,6 +949,7 @@ static val wk_arith(ecx *e, int op, qty t, val a, val b)
 		return vconst(r);
 	/* x & 0, x * 0, 0 & x, 0 * x: 0 (x evaluated already, its effects done: IS_DAX(i) = i->i_flags & 0) */
 	if ((op == T_AMP || op == T_STAR) && ((b.k == V_CONST && b.i == 0) || (a.k == V_CONST && a.i == 0))) {
+		e->discarded_scalar |= a.k == V_REG || b.k == V_REG;
 		wk_free(e, &a);
 		wk_free(e, &b);
 		return vconst(0);
@@ -956,6 +957,7 @@ static val wk_arith(ecx *e, int op, qty t, val a, val b)
 	/* 0 << x, 0 >> x, -1 >> x (signed): the constant, whatever x is (as arm64) */
 	if ((op == T_LESSLESS || op == T_GREATERGREATER) && a.k == V_CONST && b.k != V_CONST &&
 	    (em_trunc_to(c, a.i, t) == 0 || (op == T_GREATERGREATER && wk_signed(c, t) && em_trunc_to(c, a.i, t) == -1))) {
+		e->discarded_scalar |= b.k == V_REG;
 		wk_free(e, &b);
 		return vconst(em_trunc_to(c, a.i, t));
 	}
@@ -976,6 +978,7 @@ static val wk_arith(ecx *e, int op, qty t, val a, val b)
 			return a;
 		}
 		if (id == EM_ID_ZERO || id == EM_ID_ONES) {
+			e->discarded_scalar |= a.k == V_REG;
 			wk_free(e, &a);
 			return wk_const(c, id == EM_ID_ZERO ? 0 : -1, t);
 		}
@@ -987,9 +990,12 @@ static val wk_arith(ecx *e, int op, qty t, val a, val b)
 		}
 		if ((op == T_SLASH || op == T_PERCENT) && e->E->o->opt && !e->E->noopt) {
 			em_udivconst_recipe recipe;
+			em_sdivconst_recipe signed_recipe;
 			/* Bound the extra live temporaries; pressure retains native divide. */
 			if (em_udivconst(c, t, op, b.i, &recipe) && wk_udivconst_ok(e, a, &recipe))
 				return wk_udivconst(e, t, a, &recipe);
+			if (em_sdivconst(c, t, op, b.i, &signed_recipe) && wk_sdivconst_ok(e, a, &signed_recipe))
+				return wk_sdivconst(e, t, a, &signed_recipe);
 		}
 		em_divpow2(c, t, &op, &b.i);
 	}
@@ -1846,10 +1852,21 @@ static val wk_incdec(ecx *e, uint32_t n)
 		lval cp = { .k = L_FRAME, .off = wk_slot(e, tsize(c, t), talign(c, t)), .align = talign(c, t) };
 
 		old = wk_putmem(e, &cp, t, wk_reload(e, &l, t));
-	} else if (post) {
-		old = wk_reload(e, &l, t);
+		nv = wk_incval(e, t, dec, wk_reload(e, &l, t));
+	} else {
+		nv = wk_reload(e, &l, t);
+		if (post) {
+			/* One lvalue read supplies both results. The arithmetic consumes
+			 * its register, so keep the old value and increment a typed copy.
+			 */
+			old = nv;
+			int copy = wk_treg(e, t);
+
+			LO(mov)(e, copy, wk_reg(e, &nv, t));
+			nv = wk_vreg(copy);
+		}
+		nv = wk_incval(e, t, dec, nv);
 	}
-	nv = wk_incval(e, t, dec, wk_reload(e, &l, t));
 	if (wk_mem(e, t)) {
 		nv = wk_putmem(e, &l, t, nv);
 		if (post) {

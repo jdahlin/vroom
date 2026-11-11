@@ -593,7 +593,7 @@ VPRIV void wasm_emit_function(ecx *e, uint32_t s)
 	if (W->rt != WT_NONE)
 		W->rv = wnewloc(e, W->rt);
 	wgoto_scan(e, y->body);
-	wblock(e, "block");	/* index 0: return branches out of it */
+	wblock(e, "block", WF_BLOCK);	/* index 0: return branches out of it */
 	if (W->nsj)
 		wsj_begin(e);
 	wstmt(e, y->body);

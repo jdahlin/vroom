@@ -12,6 +12,7 @@ The wasm path needs neither Emscripten nor LLVM; --node selects the JS engine.
 The ordinary C regression suites also run the source files for correctness.
 """
 import argparse
+import os
 import platform
 from pathlib import Path
 import re
@@ -23,8 +24,8 @@ import tempfile
 from hostenv import BUILD, R, llvm
 
 
-def run(cmd):
-    p = subprocess.run([str(x) for x in cmd], capture_output=True, text=True, timeout=60)
+def run(cmd, env=None):
+    p = subprocess.run([str(x) for x in cmd], capture_output=True, text=True, timeout=60, env=env)
     if p.returncode:
         raise RuntimeError(f'{cmd}: exit {p.returncode}\n{p.stdout}{p.stderr}')
     return p.stdout
@@ -348,6 +349,31 @@ def check_copies(assembly, arch):
     # than prescribing their physical register allocation.
 
 
+def check_sdivconst(assembly, arch, optimized=True):
+    wasm = arch.startswith('wasm')
+    divide = r'\b(?:i(?:32|64)\.(?:div|rem)_s|sdiv|idiv[lq]?)\b'
+    suffixes = ['p3', 'n3', 'p6', 'n6', 'p12', 'n12', 'p7', 'n7', 'p10', 'n10', 'p37', 'n37',
+                'plarge', 'nlarge', 'pmax', 'nmax']
+    for width in [32, 64]:
+        selected = suffixes + (['p9', 'n9', 'p129', 'n129', 'pwide', 'nwide'] if width == 64 else [])
+        for operation in ['q', 'r']:
+            for suffix in selected:
+                name = f'sd{width}_{operation}_{suffix}'
+                text = body(assembly, name, wasm)
+                retained = re.search(divide, text) is not None
+                # Wasm has no economical signed high-product instruction.
+                if retained != (wasm or not optimized):
+                    expectation = 'retained' if wasm or not optimized else 'expanded'
+                    raise RuntimeError(f'{name}: expected {expectation} signed division\n{text}')
+            name = f'sd{width}_dynamic_{operation}'
+            if not re.search(divide, body(assembly, name, wasm)):
+                raise RuntimeError(f'{name}: lost genuine runtime division')
+    for name in ['sd_effect', 'sd_effect_r', 'sd_rhs', 'sd_rhs_r', 'sd_compound_rhs']:
+        text = body(assembly, name, wasm)
+        if len(re.findall(r'\b(?:callq?|bl)\s+next\b', text)) != 1:
+            raise RuntimeError(f'{name}: expected one call to next\n{text}')
+
+
 def check_udivconst64(assembly, arch):
     wasm = arch.startswith('wasm')
     divide = r'\b(?:i64\.(?:div|rem)_[su]|[su]div|idiv[lq]?|div[lq]?)\b'
@@ -533,6 +559,128 @@ def check_tails(assembly, arch, level, cfi=False, disabled=False):
         raise RuntimeError(f'tc_indirect: expected ordinary indirect call\n{text}')
 
 
+def check_deadresults(assembly, arch):
+    # Assert the semantic operation family, not register choices, instruction
+    # totals or a full assembly snapshot. The discarded result still requires
+    # evaluating effects and potentially trapping instructions.
+    for name in ['dr_mul', 'dr_mul64', 'dr_diamond', 'dr_chain',
+                 'dr_zero_left', 'dr_ones', 'dr_rem_one',
+                 # These controls also discard a multiplication, proving the
+                 # consumer ran while preserving their flags and ABI results.
+                 'dr_overflow', 'dr_carry', 'dr_partial', 'dr_fp_result']:
+        text = body(assembly, name, False)
+        if re.search(r'\bimul[lq]?\b', text):
+            raise RuntimeError(f'{name}: retained dead pure multiplication\n{text}')
+    for name in ['dr_div', 'dr_remainder']:
+        text = body(assembly, name, False)
+        if not re.search(r'\bdiv[lq]?\b', text):
+            raise RuntimeError(f'{name}: removed potentially trapping division\n{text}')
+    text = body(assembly, 'dr_volatile', False)
+    if not re.search(r'\bmovl\s+(?:-?[0-9]+)?\(%(?!rbp\b|rsp\b)\w+\)\s*,\s*%', text):
+        raise RuntimeError(f'dr_volatile: removed volatile operand read\n{text}')
+    text = body(assembly, 'dr_call', False)
+    if len(re.findall(r'\bcallq?\s+dr_effect\b', text)) != 1:
+        raise RuntimeError(f'dr_call: expected exactly one effectful call\n{text}')
+    text = body(assembly, 'dr_fp_div', False)
+    if not re.search(r'\bdivsd\b', text):
+        raise RuntimeError(f'dr_fp_div: removed returned floating-point operation\n{text}')
+    text = body(assembly, 'dr_opaque', False)
+    if 'dr_opaque_barrier' not in text or not re.search(r'\bimul[lq]?\b', text):
+        raise RuntimeError(f'dr_opaque: opaque whole-function fallback was lost\n{text}')
+
+
+def scalar_memory_accesses(text, arch):
+    """Count accesses in probes with one data object; ignore frame/literals.
+
+    A memory RMW supplies one read and one write. No arbitrary CFG or alias
+    inference is needed: these named probes contain only a single update.
+    """
+    if arch.startswith('wasm'):
+        return (len(re.findall(r'\b(?:i32|i64|f32|f64)\.load\w*\b', text)),
+                len(re.findall(r'\b(?:i32|i64|f32|f64)\.store\w*\b', text)))
+    reads = writes = 0
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith(('.', '#', '//')):
+            continue
+        fields = line.split(None, 1)
+        if len(fields) != 2:
+            continue
+        op, operands = fields
+        if arch == 'aarch64':
+            if '[' not in operands or re.search(r'\[(?:sp|x29)\b|\.LC', operands):
+                continue
+            reads += op.startswith('ld')
+            writes += op.startswith('st')
+            continue
+        if op.startswith('lea'):
+            continue
+        for index, operand in enumerate(operands.split(',')):
+            if '(' not in operand or re.search(r'\(%(?:rbp|rsp)\b|\.LC', operand):
+                continue
+            destination = index == len(operands.split(',')) - 1
+            if op.startswith('mov'):
+                writes += destination
+                reads += not destination
+            else:
+                reads += 1
+                writes += destination and not op.startswith(('cmp', 'test'))
+    return reads, writes
+
+
+def check_postfix(assembly, arch):
+    probes = ['pe_global_post', 'pe_global_pre', 'pe_global_postdec', 'pe_global_predec',
+              'pe_global_unused', 'pe_global_cast', 'pe_global_post64', 'pe_byte_post',
+              'pe_byte_pre', 'pe_bool_post', 'pe_bool_pre', 'pe_float_post', 'pe_double_post',
+              'pe_pointer_post', 'pe_post', 'pe_pre', 'pe_postdec', 'pe_predec', 'pe_unused',
+              'pe_short_post', 'pe_char_post', 'pe_plain', 'pe_address_post']
+    for name in probes + ['pe_bits_post', 'pe_bits_unused']:
+        text = body(assembly, name, arch.startswith('wasm'))
+        expected = (2 if name.startswith('pe_bits_') else 1, 1)
+        actual = scalar_memory_accesses(text, arch)
+        if actual != expected:
+            raise RuntimeError(f'{name}: expected reads/writes {expected}, found {actual}\n{text}')
+    text = body(assembly, 'pe_address_post', arch.startswith('wasm'))
+    if len(re.findall(r'\b(?:callq?|bl)\s+pe_address\b', text)) != 1:
+        raise RuntimeError(f'pe_address_post: address must be evaluated once\n{text}')
+    if arch == 'x86_64':
+        for name in ['pe_atomic_post', 'pe_atomic_pre']:
+            text = body(assembly, name, False)
+            if not re.search(r'\block\s+(?:cmpxchg|xadd)\w*\b', text):
+                raise RuntimeError(f'{name}: lost atomic RMW protocol\n{text}')
+    if not arch.startswith('wasm'):
+        text = body(assembly, 'pe_fixed_address', False)
+        if scalar_memory_accesses(text, arch) != (1, 1):
+            raise RuntimeError(f'pe_fixed_address: expected one scalar update\n{text}')
+
+def check_mulconst(assembly, arch):
+    wasm = arch.startswith('wasm')
+    probes = [(f'mc_{tag}_{factor}', shift) for tag in ['u32', 's32', 'u64', 's64']
+              for factor, shift in [(3, 1), (5, 2), (9, 3)]]
+    probes += [('mc_commuted', 2), ('mc_narrow', 1), ('mc_compound', 3),
+               ('mc_post', 2), ('mc_pointer3', 1), ('mc_call5', 2), ('mc_volatile9', 3)]
+    for name, shift in probes:
+        text = body(assembly, name, wasm)
+        if wasm:
+            if not re.search(r'\bi(?:32|64)\.mul\b', text):
+                raise RuntimeError(f'{name}: wasm should retain multiply\n{text}')
+        elif arch == 'aarch64':
+            if re.search(r'\b(?:madd|mul)\b', text) or not re.search(
+                    r'\badd\s+[^\n]+,\s*lsl\s*#' + str(shift) + r'\b', text):
+                raise RuntimeError(f'{name}: missing one shifted add\n{text}')
+        elif re.search(r'\bimul[lq]?\b', text) or not re.search(
+                r'\blea[lq]\s+[^\n]*,[^\n]*,' + str(1 << shift) + r'\)', text):
+            raise RuntimeError(f'{name}: missing one scaled LEA\n{text}')
+    # The direct volatile load is independent of the pre-existing x86
+    # volatile-postincrement issue. Its multiply must still read the global.
+    text = body(assembly, 'mc_volatile9', wasm)
+    observed_load = (r'\bi32\.load\b' if wasm else
+                     r'\bldr\s+w[^\n]*:lo12:mc_observed' if arch == 'aarch64' else
+                     r'\bmovl\s+mc_observed\(%rip\),')
+    if not re.search(observed_load, text):
+        raise RuntimeError(f'mc_volatile9: lost volatile global read\n{text}')
+
+
 def x64_start(check_preserved):
     if not check_preserved:
         return 'call main\nmov %eax, %edi\nmov $60, %eax\nsyscall\n'
@@ -586,7 +734,7 @@ def execute(args, directory, assembly, arch, source, level):
             run([assembler, f'--target={args.target}', '-c', assembly, '-o', obj])
         start = directory / 'start.s'
         start.write_text('.text\n.globl _start\n_start:\n' +
-                         (x64_start(args.rule in ['locals', 'localjmp', 'tails', 'all'])
+                         (x64_start(args.rule in ['locals', 'localjmp', 'tails', 'deadresults', 'mulconst', 'all'])
                           if arch == 'x86_64' else
                           'bl main\nmov x8, #93\nsvc #0\n'))
         run([args.clang, f'--target={args.target}', '-fuse-ld=lld',
@@ -601,7 +749,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--vpp', default=str(Path(BUILD) / 'vpp'))
     ap.add_argument('--target', default='x86_64-linux-gnu')
-    ap.add_argument('--rule', choices=['pow2', 'signedpow2', 'identities', 'fallthrough', 'loopback', 'unreachable', 'locals', 'localjmp', 'copies', 'extensions', 'switches', 'tails', 'udivconst', 'udivconst64', 'all'], default='all')
+    ap.add_argument('--rule', choices=['pow2', 'signedpow2', 'identities', 'fallthrough', 'loopback', 'unreachable', 'locals', 'localjmp', 'copies', 'extensions', 'switches', 'tails', 'udivconst', 'udivconst64', 'sdivconst', 'deadresults', 'mulconst', 'postfix', 'all'], default='all')
     ap.add_argument('--run', action='store_true', help='also execute literal-answer correctness checks')
     ap.add_argument('--cfi', action='store_true', help='also check unwind state with tail calls')
     ap.add_argument('--sibling-calls', choices=['default', 'on', 'off'], default='default',
@@ -641,7 +789,11 @@ def main():
              'switches': ('switch_dispatch.c', check_switches),
              'tails': ('tail_calls.c', check_tails),
              'udivconst': ('unsigned_divconst.c', check_udivconst),
-             'udivconst64': ('unsigned_divconst64.c', check_udivconst64)}
+             'udivconst64': ('unsigned_divconst64.c', check_udivconst64),
+             'sdivconst': ('signed_divconst.c', check_sdivconst),
+             'deadresults': ('dead_results.c', check_deadresults),
+             'mulconst': ('multiply_constants.c', check_mulconst),
+             'postfix': ('postfix_eval.c', check_postfix)}
     selected = rules if args.rule == 'all' else {args.rule: rules[args.rule]}
     with tempfile.TemporaryDirectory(prefix='vcc-opt-rules-') as tmp:
         directory = Path(tmp)
@@ -657,12 +809,14 @@ def main():
                      *(['-foptimize-sibling-calls'] if args.sibling_calls == 'on' else
                        ['-fno-optimize-sibling-calls'] if args.sibling_calls == 'off' else []),
                      '-S', source, '-o', assembly])
-                checked = ((arch == 'x86_64' and level >= 1) if rule in ['locals', 'copies', 'extensions'] else
+                checked = ((arch == 'x86_64' and level >= 1) if rule in ['locals', 'copies', 'extensions', 'deadresults'] else
                            (not arch.startswith('wasm') and level >= 1) if rule in ['fallthrough', 'unreachable'] else
                            arch.startswith('wasm') if rule == 'loopback' else True)
-                checked = checked and check is not None and (rule not in ['switches', 'udivconst', 'udivconst64'] or level >= 1)
+                checked = checked and check is not None and (rule not in ['switches', 'udivconst', 'udivconst64', 'mulconst'] or level >= 1)
                 if checked:
-                    if rule == 'tails':
+                    if rule == 'sdivconst':
+                        check(assembly.read_text(), arch, optimized=level >= 1)
+                    elif rule == 'tails':
                         check(assembly.read_text(), arch, level, args.cfi, args.sibling_calls == 'off')
                     else:
                         check(assembly.read_text(), arch)
@@ -671,6 +825,14 @@ def main():
                 print(f'{args.target} {rule} O{level}: ' +
                       ('codegen' if checked else 'compile') +
                       (' and execution' if args.run else '') + ' OK')
+            if rule == 'sdivconst':
+                # Check the debugging escape hatch independently of O0.
+                assembly = directory / 'sdivconst-noopt.s'
+                run([args.vpp, f'--target={args.target}', '-O2',
+                     '-ffreestanding', '-fno-stack-protector', '-S', source, '-o', assembly],
+                    env={**os.environ, 'VCC_NOOPT': '1'})
+                check_sdivconst(assembly.read_text(), arch, optimized=False)
+                print(f'{args.target} sdivconst O2 VCC_NOOPT: codegen OK')
     return 0
 
 
