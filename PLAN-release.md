@@ -349,6 +349,16 @@ byte-identiska och extra Callgrind-kompileringsarbete högst +0,180 %; ett
 riktat x86-switchprov minskar exekverade instruktioner 48,39 %. Avgränsning,
 rådata och kvarvarande OPT6-delar står i PLAN-fas2. G5/G7 och full O2 är öppna.
 
+
+### Status 2026-11-11: G5/G7, billigare gemensam cellinsamling
+
+Arm64/wasm använder den delade strömmande intervallinsamlaren utan ändrad
+kodgenerering. Matchade O1/O2-mikrofall minskar hela kompileringens Ir med
+0,145–0,453 % för flera fält; ett fält kostar 0,050–0,053 % och kontroller
+0,006–0,071 %. Randomiserad sanitizer-/mutationsoracle, 118 byteparitetspar,
+observerbara accesser och fokuserade wasm-körfall passerar. Detaljer och
+avvisade varianter finns i PLAN-fas2. Ingen bred prestandagrind eller ny
+optimeringsregel ingår; G5/G7 och full O2 är fortsatt öppna.
 ### Status 2026-11-11: G5/G7, unsigned32 reciprokdivision
 
 OPT8:s u32-del använder gemensamma reciproker för native kvot/rest och

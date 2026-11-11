@@ -83,6 +83,9 @@ VPRIV void em_slot_access(em_slot_cells *s, uint32_t id, int64_t off, uint32_t s
 		return;
 	}
 	if (!id) {
+		/* Poison classification needs the range union, not multiplicity. */
+		if (s->nw && s->w[s->nw - 1].off == off && s->w[s->nw - 1].size == size)
+			return;
 		s->w = em_slot_grow(s->w, &s->capw, s->nw + 1, sizeof(*s->w));
 		s->w[s->nw++] = (em_slot_range){ 0, off, size, false, false };
 	} else {
@@ -117,6 +120,36 @@ VPRIV void em_slot_detail(em_slot_cells *s, uint32_t id, int64_t off, uint32_t s
 		return;
 	s->c = em_slot_grow(s->c, &s->capc, s->nm + 1, sizeof(*s->c));
 	s->c[s->nm++] = (em_slot_range){ id, off, size, false, false };
+}
+
+/* Retain the first exact range only when a distinct second range appears.
+ * Repeated first-range accesses need no duplicate details: finish deduplicates
+ * them anyway. Unknown physical ranges still use the ordinary poison path. */
+VPRIV void em_slot_collect(em_slot_cells *s, uint32_t id, int64_t off, uint32_t size)
+{
+	if (!id) {
+		em_slot_access(s, id, off, size);
+		return;
+	}
+	if (!s->valid)
+		return;
+	if (id >= s->na || !size || off > INT64_MAX - size) {
+		s->valid = false;
+		return;
+	}
+	em_slot_alloc *a = &s->a[id];
+	uint8_t before = a->state;
+
+	if (!before) {
+		a->state = 1, a->off = off, a->size = size;
+		return;
+	}
+	if (before == 1 && a->off == off && a->size == size)
+		return;
+	a->state = 2, s->multi = true;
+	if (before == 1)
+		em_slot_detail(s, id, a->off, a->size);
+	em_slot_detail(s, id, off, size);
 }
 
 VPRIV bool em_slot_finish(em_slot_cells *s)
