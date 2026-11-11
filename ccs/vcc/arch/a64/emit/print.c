@@ -338,6 +338,13 @@ VPRIV void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *raw
 		ref_name(c, b, i->ref);
 		tb_s(b, "]\n");
 		return;
+	case I_JTE:
+		tb_s(b, "\t.word\t");
+		p_lbl(b, fid, i->label);
+		tb_c(b, '-');
+		p_lbl(b, fid, i->ref);
+		tb_c(b, '\n');
+		return;
 	case I_ADR:
 		tb_s(b, "\tadr\t");
 		reg(b, i->rd, 1);

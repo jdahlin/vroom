@@ -204,6 +204,7 @@ VPRIV val wk_sdivconst(ecx *e, qty ty, val a, const em_sdivconst_recipe *r);
 VPRIV val LO(bin)(ecx *e, int op, int size, bool sgn, val a, val b);	/* T_PLUS T_MINUS T_STAR T_SLASH T_PERCENT T_AMP T_PIPE T_CARET T_LESSLESS T_GREATERGREATER */
 VPRIV void LO(switch_bitset)(ecx *e, int r, int size, const em_switch_bitset_recipe *recipe,
 			   uint32_t target, uint32_t dflt);
+VPRIV void LO(switch_table)(ecx *e, int r, int size, const em_switch_case *cases, uint32_t n, uint32_t dflt);
 VPRIV val LO(un)(ecx *e, int op, int size, val a);			/* T_MINUS T_TILDE */
 VPRIV void LO(ext)(ecx *e, int r, int from, bool sgn);		/* low `from` bytes of r extended to 64 bits */
 VPRIV val LO(cmp)(ecx *e, int op, int size, bool sgn, val a, val b);	/* 0 or 1 */

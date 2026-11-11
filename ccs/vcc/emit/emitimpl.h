@@ -380,6 +380,9 @@ typedef struct ecx {
 	uint32_t *weakref;	/* weak undefined syms this thread referenced first */
 	uint32_t nweakref;
 	uint32_t ncases;
+	uint32_t *jtl, njtl, capjtl;	/* jump tables of the function: case labels, table after table */
+	struct ejt { uint32_t tab, off, n; } *jt;	/* table label, first entry in jtl, entries */
+	uint32_t njt, capjt;
 	uint32_t *rlog;		/* this round's item logs: (RL_*, value) pairs */
 	size_t nrlog, rlog0;	/* ... and where the current item's starts */
 	jmp_buf bail;

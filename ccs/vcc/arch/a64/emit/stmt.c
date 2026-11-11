@@ -370,30 +370,95 @@ static void a64_switch_tree(ecx *e, const em_switch_case *cases, uint32_t n,
 	}
 }
 
-static bool a64_switch_dispatch(ecx *e, uint32_t base, int r, int cx,
-                                bool sg, uint32_t dflt)
+/* A dense switch: index = v - lo, one unsigned bounds check, then I_JT (finish_function
+ * expands it and appends the table of label differences after the function's code). */
+static void a64_switch_table(ecx *e, const em_switch_case *cases, uint32_t n, int r, int cx, uint32_t dflt)
 {
-	if (!e->E->o->opt || e->E->noopt || e->ncases - base < 8)
+	i128 lo = cases[0].lo, span = cases[n - 1].hi - lo;
+	uint32_t tab = newlabel(e), off = e->njtl;
+
+	if (!e->reach)
+		return;
+	int t = r, own = 0;
+	if (lo || !cx) {
+		t = treg(e);
+		own = 1;
+		if (lo) {
+			ins *i = put(e, I_SUBI);
+			i->sz = (uint8_t)cx, i->rd = (uint8_t)t, i->rn = (uint8_t)r, i->imm = (int64_t)lo;
+		} else {
+			ins *i = put(e, I_MOV);
+			i->sz = 0, i->rd = (uint8_t)t, i->rn = (uint8_t)r;
+		}
+	}
+	val a = vreg(t), b = vconst((i128)span);
+	int cond = emit_cmp(e, T_GREATER, cx, false, &a, &b);
+	val_free(e, &b);
+	bcond(e, cond, dflt);
+	if (e->njtl + (uint32_t)span + 1 > e->capjtl) {
+		e->capjtl = (e->njtl + (uint32_t)span + 1) * 2;
+		e->jtl = realloc(e->jtl, (size_t)e->capjtl * sizeof *e->jtl);
+	}
+	if (e->njt == e->capjt) {
+		e->capjt = e->capjt ? e->capjt * 2 : 4;
+		e->jt = realloc(e->jt, (size_t)e->capjt * sizeof *e->jt);
+	}
+	if (!e->jtl || !e->jt)
+		abort();
+	uint32_t k = 0;
+	for (i128 v = lo; v <= lo + span; v++) {
+		while (k < n && cases[k].hi < v)
+			k++;
+		uint32_t l = k < n && cases[k].lo <= v ? cases[k].target : dflt;
+		e->jtl[e->njtl++] = l;
+		if (!(e->lrefc[l] & LREF_EXT)) {
+			kv_edge(e, l);
+			e->lrefc[l]++;
+			e->lrefc[l] |= LREF_EXT;
+		}
+	}
+	e->jt[e->njt++] = (struct ejt){ tab, off, (uint32_t)span + 1 };
+	ins *i = put(e, I_JT);
+	i->rd = (uint8_t)t;
+	i->label = tab;
+	e->reach = false;
+	if (own)
+		tfree(e, t);
+}
+
+static bool a64_switch_dispatch(ecx *e, uint32_t base, int r, int cx,
+                                bool sg, bool tables, uint32_t dflt)
+{
+	if (!e->E->o->opt || e->E->noopt || e->ncases - base < 4)
 		return false;
 	cc *c = e->c;
 	uint32_t count = 0;
 	for (uint32_t k = base; k < e->ncases; k++)
 		count += N(e->cases[k])->op == N_CASE;
-	if (em_switch_strategy(count, 0, 0, false, false) != EM_SWITCH_TREE)
+	if (count < 4)
 		return false;
 	em_switch_case *cases = malloc((size_t)count * sizeof *cases);
 	if (!cases)
 		return false;
 	uint32_t j = 0;
+	bool ranges = false;
 	for (uint32_t k = base; k < e->ncases; k++) {
 		uint32_t cn = e->cases[k];
-		if (N(cn)->op == N_CASE)
+		if (N(cn)->op == N_CASE) {
 			cases[j++] = (em_switch_case){c->ipool[N(cn)->a],
 				c->ipool[N(cn)->b], e->caselbl[cn]};
+			ranges |= c->ipool[N(cn)->a] != c->ipool[N(cn)->b];
+		}
 	}
 	bool valid = em_switch_prepare(cases, count, cx ? 64 : 32, sg);
-	if (valid)
+	int strat = valid ? em_switch_strategy(count, cases[0].lo, cases[count - 1].hi, ranges,
+	                                       tables && !c->o->no_jump_tables) : EM_SWITCH_LINEAR;
+	if (strat == EM_SWITCH_TABLE)
+		a64_switch_table(e, cases, count, r, cx, dflt);
+	else if (strat == EM_SWITCH_TREE)
 		a64_switch_tree(e, cases, count, r, cx, sg, dflt);
+	else
+		valid = false;
 	free(cases);
 	return valid;
 }
@@ -487,7 +552,7 @@ static void gen_switch(ecx *e, uint32_t n)
 
 		bool tree = (!em_bitint(c, ct) &&
 		             a64_switch_bitset(e, x->b, base, r, cx, is_signed(c, ct), dflt)) ||
-			    a64_switch_dispatch(e, base, r, cx, is_signed(c, ct), dflt);
+			    a64_switch_dispatch(e, base, r, cx, is_signed(c, ct), !em_bitint(c, ct), dflt);
 		if (!tree) {
 			for (uint32_t k = base; k < e->ncases; k++) {
 				const node *cn = N(e->cases[k]);
