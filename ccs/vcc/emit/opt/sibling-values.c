@@ -239,6 +239,12 @@ VPRIV bool em_block_value_reuse(ecx *e, const node *block, uint32_t first, uint3
  uint32_t consumer, count = 0, killed[8], writes[8], nkilled = 0;
  if (!e->E->o->opt || e->E->noopt || i <= first) return false;
  consumer = c->lists[block->b + i];
+ if (N(consumer)->op == N_IF) {
+  const node *stmt = N(consumer), *cond;
+  if ((e->E->nflags[consumer] & NA_LABEL) || !stmt->a || N(stmt->a)->op != N_BINARY) return false;
+  cond = N(stmt->a);
+  if (N(cond->a)->op != N_BINARY && N(cond->b)->op != N_BINARY) return false;
+ }
  if (N(consumer)->op == N_EXPR) {
   const node *stmt = N(consumer), *assign, *rhs;
   if (!stmt->a || N(stmt->a)->op != N_ASSIGN) return false;
@@ -262,7 +268,8 @@ VPRIV bool em_block_value_reuse(ecx *e, const node *block, uint32_t first, uint3
     if (!em_value_local_assignment(e, writes[j])) return false;
    return true;
   }
-  if (!em_value_pure_decl(e, prev)) break;
+  /* No older candidate can be reached after the first slot or the budget. */
+  if (i == first || count == 8 || !em_value_pure_decl(e, prev)) break;
  }
  return false;
 }
