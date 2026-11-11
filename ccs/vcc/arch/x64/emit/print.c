@@ -518,8 +518,8 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			x64_ins(b, "bswap", sz);
 			x64_reg(b, i->r[0], sz);
 			break;
-		case X_MULW:
-			x64_ins(b, "mul", sz);
+		case X_MULW: case X_SMULW:
+			x64_ins(b, i->op == X_SMULW ? "imul" : "mul", sz);
 			x64_reg(b, i->r[1], sz);
 			break;
 		case X_IDIV: case X_DIV:

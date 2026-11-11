@@ -173,6 +173,9 @@ VPRIV void LO(copy)(ecx *e, int rdst, int rsrc, uint64_t n);	/* n bytes; the add
 VPRIV void LO(zero)(ecx *e, int rdst, uint64_t n);
 /* integers: size 4 or 8 (the operation's width); results in a's register */
 VPRIV val LO(umulhi)(ecx *e, val a, val b);	/* high64(a*b), consumes both, returns a register */
+VPRIV val LO(smulhi)(ecx *e, val a, val b);	/* signed high64(a*b), same ownership as umulhi */
+VPRIV bool wk_sdivconst_ok(ecx *e, val a, const em_sdivconst_recipe *r);
+VPRIV val wk_sdivconst(ecx *e, qty ty, val a, const em_sdivconst_recipe *r);
 VPRIV val LO(bin)(ecx *e, int op, int size, bool sgn, val a, val b);	/* T_PLUS T_MINUS T_STAR T_SLASH T_PERCENT T_AMP T_PIPE T_CARET T_LESSLESS T_GREATERGREATER */
 VPRIV val LO(un)(ecx *e, int op, int size, val a);			/* T_MINUS T_TILDE */
 VPRIV void LO(ext)(ecx *e, int r, int from, bool sgn);		/* low `from` bytes of r extended to 64 bits */
