@@ -56,6 +56,7 @@ WASM_XFAIL = {n: _WOPT for n in ('20020720-1', '20030216-1', '20041114-1', 'comp
 WASM_XFAIL.update({
     'fp_class_runtime': 'wasm: __builtin_isfpclass/__builtin_fpclassify not lowered (PLAN-wasm.md W4)',
     'inline_walk': 'wasm: inlining (const parameters, labels per instance) only in the shared walker, not the wasm emitter',
+    'vec_wide_lanes': 'wasm: __int128/double vector lanes (TODO.md tier 1, as arm64)',
 })
 
 def set_target(w32):
