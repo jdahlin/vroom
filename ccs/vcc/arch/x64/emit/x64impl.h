@@ -61,6 +61,8 @@ enum {
 	X_BARRIER,	/* empty asm: a compiler memory/flags barrier, no machine instruction */
 	X_JMPR,		/* jmp *r1 */
 	X_LEAL,		/* r0 = the address of local label `label` */
+	X_BLENDVB,	/* SSE4.1: xmm1 = select(xmm1, xmm2, high bits of xmm0) */
+	X_PCMPSTR,	/* SSE4.2: xmm0/xmm1, eax/edx lengths; cond selects opcode, imm control */
 	X_RAW,		/* inline asm: e->raw's text at off, ref bytes */
 	X_NAMED,	/* ref's name as a label here */
 	X_BSF, X_BSR,	/* r0 = index of the lowest / highest set bit of r1 */
@@ -99,6 +101,7 @@ typedef struct xst {
 	uint32_t lsym[4];
 	uint8_t lreg[4], nlreg;
 	/* the function's incoming arguments (abi.c) */
+	int interrupt;		/* interrupt handler parameter count, zero for normal ABI */
 	int ngp, nfp;		/* named arguments in general and vector registers */
 	int32_t stk;		/* bytes of named stack arguments */
 	int64_t sret;		/* frame slot of the hidden result pointer (0: none) */
@@ -138,6 +141,7 @@ VPRIV int x64_asm_namedreg(const char *name);
 VPRIV int x64_tlsaddr(ecx *e, uint32_t ref, int model);
 VPRIV bool sym_needs_got(cc *c, uint32_t ref);	/* arch/a64/emit/value.c (shared) */
 VPRIV int x64_base(ecx *e, const lval *l, uint32_t *ref);
+VPRIV bool x64_nosimd(ecx *e);
 VPRIV void x64_nofp(ecx *e);
 VPRIV void x64_x87(ecx *e, int xf, const lval *l, int sz);	/* an x87 record (fp.c) */	/* fatal under -mgeneral-regs-only / -mno-sse */
 
