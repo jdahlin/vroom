@@ -46,9 +46,12 @@ clangs VerifyDiagnosticConsumer.  Clangs sida cachas.  `results.json` visar
 tester som gått från godkänd till underkänd.
 
 **Linux x86-64 2026-11-11:** `bench/vcc-verify.py --target
-x86_64-linux-gnu -j 6` ger 399/1640 godkända och inga krascher efter rättningar av
-`Sema/attr-tls_model.c` och `Sema/constexpr.c`. Resultat och referenser
+x86_64-linux-gnu -j 6` ger nu **409/1640 godkända, 1231 fel och inga
+krascher** (10 fler godkända än föregående körning). ARM/QEMU-målets
+frontendkontroll ger **416/1805 godkända, 1389 fel, inga krascher**;
+testkällorna körs inte som program i denna svit. Resultat och referenser
 hålls skilda per mål; arm64 väljs med `--target aarch64-linux-gnu`.
+Kvarvarande fel omfattar både semantik och avvikelser i exakt diagnostik.
 
 **Status 2026-11-10:** 412/1841 giltiga tester godkända (22 %), 1 krasch.
 
