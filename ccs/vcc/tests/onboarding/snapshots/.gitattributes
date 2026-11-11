@@ -1,0 +1,2 @@
+# Preserve literal diagnostic caret padding in exact-output fixtures.
+*.stderr whitespace=-blank-at-eol

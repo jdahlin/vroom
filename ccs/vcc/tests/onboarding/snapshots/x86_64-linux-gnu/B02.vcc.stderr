@@ -1,0 +1,7 @@
+02_unmatched_delimiter/broken.c:2:11: error: expected ')'
+    2 |     if (1 { return 0; }
+      |        -  ^
+      |        |
+      |        to match this '('
+02_unmatched_delimiter/broken.c:2:8: note: to match this '('
+1 error generated.

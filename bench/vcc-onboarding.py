@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check the 25 beginner C repair stories against semantic diagnostic contracts.
+"""Check 25 beginner C repair stories against exact messages and semantic contracts.
 
 LLVM=/usr/lib/llvm-23 bench/vcc-onboarding.py --target x86_64-linux-gnu -j 4
 Repeat with --target aarch64-linux-gnu. Broken programs are never executed.
@@ -9,6 +9,7 @@ The link story uses the same Clang/linker driver for both generated objects;
 it measures the external linker, not vcc's own driver or linker diagnostics.
 """
 import argparse
+import difflib
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 import importlib.util
@@ -79,6 +80,21 @@ def clang_records(text):
             for m in re.finditer(pattern, text, re.M)]
 
 
+def check_snapshot(path, actual, bless=False):
+    """An independent, checked-in expected message; never accept a regex alone."""
+    if bless:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(actual)
+    if not path.is_file():
+        return f'missing diagnostic snapshot {path.name}; generate with --bless and review'
+    expected = path.read_text()
+    if expected == actual:
+        return None
+    diff = '\n'.join(difflib.unified_diff(expected.splitlines(), actual.splitlines(),
+                                         str(path), 'actual diagnostic', n=2))
+    return 'diagnostic snapshot differs:\n' + diff
+
+
 def validate_manifest(cases, corpus=CORPUS):
     if len(cases) != 25 or len({c['id'] for c in cases}) != 25:
         raise ValueError('manifest must contain exactly 25 distinct cases')
@@ -97,6 +113,12 @@ def validate_manifest(cases, corpus=CORPUS):
 
 def one(case, args, includes, vpp):
     evidence, problems = {}, []
+    snapshot_dir = CORPUS / 'snapshots' / args.target
+
+    def snapshot(style, actual):
+        problem = check_snapshot(snapshot_dir / f"{case['id']}.{style}.stderr", actual, args.bless)
+        if problem:
+            problems.append(problem)
     base = [f'--target={args.target}', '-std=c17', '-Wall', '-Wextra', '-Wconversion',
             '-fno-color-diagnostics', *includes, *case.get('flags', [])]
     for compiler, exe in (('clang', args.clang), ('vcc', vpp)):
@@ -129,7 +151,16 @@ def one(case, args, includes, vpp):
                         problems.append(f'{compiler} {variant}: corrected link failed')
                     elif variant == 'broken' and (link['returncode'] in (None, 0) or any(not re.search(w['pattern'], link['stderr'], re.I) for w in case['expect'])):
                         problems.append(f'{compiler}: missing expected external-linker explanation')
+                    if compiler == 'vcc' and variant == 'broken':
+                        # The directory is generated per run; retain every other byte.
+                        snapshot('link', link['stderr'].replace(wd, '<temporary>'))
     else:
+        snapshot('vcc', broken['stderr'])
+        narrated = invoke([vpp, *base, '-fsyntax-only', '-fdiagnostics-style=narrated', case['broken']], CORPUS)
+        evidence['vcc']['narrated'] = narrated
+        snapshot('narrated', narrated['stderr'])
+        if narrated['returncode'] != broken['returncode']:
+            problems.append('narrated/text exit status differs')
         structured = invoke([vpp, *base, '-fsyntax-only', '-fdiagnostics-format=json', case['broken']], CORPUS)
         evidence['vcc']['json'] = structured
         try:
@@ -173,6 +204,7 @@ def main():
     ap.add_argument('--target', choices=['x86_64-linux-gnu', 'aarch64-linux-gnu'], default='x86_64-linux-gnu')
     ap.add_argument('--bin-dir', default=os.environ.get('VCC_BIN', BUILD))
     ap.add_argument('--baseline', action='store_true')
+    ap.add_argument('--bless', action='store_true', help='write exact message snapshots; review changes before committing')
     ap.add_argument('--json', type=Path)
     ap.add_argument('-j', type=int, default=4)
     ap.add_argument('pattern', nargs='?', default='')

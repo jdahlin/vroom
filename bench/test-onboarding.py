@@ -2,6 +2,7 @@
 """The onboarding verifier must distinguish useful diagnostics from snippets."""
 import importlib.util
 from pathlib import Path
+import tempfile
 import unittest
 
 spec = importlib.util.spec_from_file_location('onboarding', Path(__file__).with_name('vcc-onboarding.py'))
@@ -42,6 +43,25 @@ class DiagnosticContracts(unittest.TestCase):
     def test_empty_or_partial_corpus_is_rejected(self):
         with self.assertRaisesRegex(ValueError, 'exactly 25'):
             onboarding.validate_manifest([])
+
+    def test_exact_wording_and_display_are_verified(self):
+        expected = "broken.c:3:5: error: expected ';'\n    3 | int n\n      |      ^\nnote: declaration ends here\n"
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / 'B01.vcc.stderr'
+            self.assertIn('missing diagnostic snapshot', onboarding.check_snapshot(path, expected))
+            path.write_text(expected)
+            self.assertIsNone(onboarding.check_snapshot(path, expected))
+            for actual in (expected.replace('expected', 'missing'),
+                           expected.replace('      ^', '     ^'),
+                           expected.replace('note: declaration ends here\n', '')):
+                self.assertIn('snapshot differs', onboarding.check_snapshot(path, actual))
+
+    def test_empty_snapshot_does_not_hide_new_output(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / 'B10.vcc.stderr'
+            path.write_text('')
+            self.assertIsNone(onboarding.check_snapshot(path, ''))
+            self.assertIn('snapshot differs', onboarding.check_snapshot(path, 'warning: integer division\n'))
 
 
 if __name__ == '__main__':
