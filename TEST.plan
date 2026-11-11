@@ -165,13 +165,33 @@ retur av en skalär till `_Complex` konverteras nu innan kodgenerering.
 Båda upstreamfallen `pr116454-{1,2}` och en regression med skalära och
 komplexa returkonverteringar går på båda målen.
 
+`--suite errors` jämför nu samtliga felrader mot clang för de 1214 direkta
+`gcc.dg/*.c` som har `dg-error`. Relativa rader, `dg-line` och målselektorer
+stöds; varje saknad eller extra felrad ger fel. Clang-fel utanför aktiva
+annoteringar och okända kontrakt filtreras uttryckligen. Detta mäter
+felradsparitet, inte GCC:s meddelandetext eller varningar/noter.
+Baslinje: x86 359 godkända/369 fel/1 krasch/482 filtrerade/3 referensfel;
+arm64 353/373/0/485/3. Kraschen (`cwsc0.c`) kom från ett ofullständigt
+`void`-argument i ett oprototypat anrop och är rättad med en egen regression.
+Den riktade kontrollen kraschar inte längre, men static-chain-builtin saknas
+fortfarande och upstreamfallet är därför inte grönt. Fulla omkörningar efter
+rättningen återstår.
+Arraytypkontrollen ligger nu vid själva deklaratorn, även för fält,
+typedefs och parametrar: `array-9.c` och `array-15.c` går i riktade
+kontroller på båda Linux-målen. Regressionen kontrollerar både ogiltiga
+elementtyper och giltiga ofullständiga ytterdimensioner/VLA-prototyper.
+Indexering av funktionspekare och pekare till ofullständiga typer avvisas
+nu också: `array-8.c` och `pointer-arith-{1,2,3}.c` går på båda målen.
+Det isolerade paketets array-/incomplete-/subscript-diagnostiktester går
+10/10, både med unity- och filvis byggd kompilator.
+
 Kvar:
 - Alla återstående matchande filer och optimeringskonfigurationer; nästlade
   kataloger med egna `.exp`-drivrutiner och LTO har ännu ingen motsvarighet.
 - Fler verifierade effektiva mål och villkorliga direktiv; okända kontrakt
   får inte bli tysta godkännanden.
-- `dg-error` (1720) används omvänt: vcc ska avvisa varje rad som clang
-  avvisar och godta resten. Raden räknas, inte texten. Den riggen återstår.
+- De nästlade `dg-error`-fallen och kvarvarande ostödda diagnostikkontrakt
+  (bland annat källradsmappning, rad 0 och multiline-direktiv).
 
 **Klart när:** körtesterna lika gröna som clangs; ingen fil som clang godtar
 avvisas av vcc.

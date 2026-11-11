@@ -1136,13 +1136,7 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 		} else {
 			sym *y = &c->syms[s];
 
-			if (y->kind == S_VAR && is_array(c, y->ty) && !complete(c, T(c, y->ty)->base)) {
-				qty e = T(c, y->ty)->base;	/* (clang: on any array declarator; variables here) */
-
-				cc_error(c, pp_tok_end(c->p, d.loc), "array has incomplete element type '%s'", tyname(c, e));
-				if (is_record(c, e) || KIND(c, e) == TY_ENUM)
-					note(c, c->tags[T(c, e)->aux].loc, "forward declaration of '%s'", tyname(c, e));
-			} else if (y->kind == S_VAR && ds.sc != SC_EXTERN && ds.sc != SC_TYPEDEF) {
+			if (y->kind == S_VAR && ds.sc != SC_EXTERN && ds.sc != SC_TYPEDEF) {
 				if (file)
 					y->flags |= SF_TENTATIVE;
 				else if (!complete(c, y->ty) && ds.sc != SC_STATIC) {

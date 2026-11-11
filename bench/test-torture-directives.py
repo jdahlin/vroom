@@ -12,6 +12,12 @@ class Directives(unittest.TestCase):
         self.assertTrue(selector('aarch64*-*-*', 'aarch64-linux-gnu'))
         self.assertFalse(selector('arm*-*-*', 'aarch64-linux-gnu'))
 
+    def test_linux_scalar_capabilities(self):
+        # target-supports.exp tests sizeof(int)==4, stdint.h and constant inf.
+        for target in ('x86_64-linux-gnu', 'aarch64-linux-gnu'):
+            for name in ('int32', 'stdint_types', 'inf', 'inff'):
+                self.assertTrue(selector(name, target))
+
     def test_unknown_logic(self):
         self.assertIsNone(selector(['!', 'mystery'], 'x86_64-linux-gnu'))
         self.assertFalse(selector(['m68k-*-*', '&&', 'coldfire_fpu'], 'x86_64-linux-gnu'))

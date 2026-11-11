@@ -1109,6 +1109,13 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 		} else {
 			/* default argument promotions */
 			a = rvalue(c, a);
+			if (!(N(a)->flags & NF_ERR) && !complete(c, N(a)->ty)) {
+				pp_span r = rng(c, a);
+
+				report(c, "error", r.b, &r, 1, NULL, 0, "argument type '%s' is incomplete", tyname(c, N(a)->ty));
+				fwd_note(c, N(a)->ty);
+				a = err_node(c, N(a)->loc);
+			}
 			if (KIND(c, N(a)->ty) == TY_FLOAT)
 				a = cast_node(c, a, prim(TY_DOUBLE), CK_F2F);
 		}
@@ -1244,7 +1251,25 @@ VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 			if (!is_ptr(c, at) || !is_integer(c, it)) {
 				pp_span r[2] = { rng(c, n), rng(c, ix) };
 
-				report(c, "error", loc, r, 2, NULL, 0, "subscripted value is not an array, pointer, or vector");
+				if (!is_ptr(c, at))
+					report(c, "error", loc, r, 2, NULL, 0, "subscripted value is not an array, pointer, or vector");
+				else
+					report(c, "error", loc, r, 2, NULL, 0, "array subscript is not an integer");
+				n = err_node(c, loc);
+				continue;
+			}
+			if (is_func(c, T(c, at)->base)) {
+				pp_span r = rng(c, n);
+
+				report(c, "error", r.b, &r, 1, NULL, 0, "subscript of pointer to function type '%s'", tyname(c, T(c, at)->base));
+				n = err_node(c, loc);
+				continue;
+			}
+			if (!is_void(c, T(c, at)->base) && !complete(c, T(c, at)->base)) {
+				pp_span r = rng(c, n);
+
+				report(c, "error", loc, &r, 1, NULL, 0, "subscript of pointer to incomplete type '%s'", tyname(c, T(c, at)->base));
+				fwd_note(c, T(c, at)->base);
 				n = err_node(c, loc);
 				continue;
 			}

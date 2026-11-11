@@ -109,6 +109,7 @@ typedef struct dop {
 	uint16_t fl;		/* array: TF_*; func: TF_* */
 	uint32_t a, b;		/* array: length lo/hi or vla node; func: params start, count */
 	uint32_t np;		/* func: parameter syms (after the types; K&R: no types); array: the size's location */
+	uint32_t loc;		/* array: opening bracket for element-type diagnostics */
 	bool kr;		/* func: K&R identifier list */
 } dop;
 

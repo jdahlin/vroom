@@ -65,7 +65,7 @@ def selector(expr, target):
                     'untyped_assembly', 'non_strict_prototype', 'int32plus', 'ptr32plus',
                     'size32plus', 'int128', 'double64', 'double64plus', 'lp64', 'exceptions',
                     'named_sections', 'fpic', 'large_initializer', 'alloca', 'return_address',
-                    'c99_runtime'}:
+                    'c99_runtime', 'int32', 'stdint_types', 'inf', 'inff'}:
             return True
         if expr in {'ia32', 'ilp32', 'newlib_nano_io', 'freestanding', 'stack_size'}:
             return False

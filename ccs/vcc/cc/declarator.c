@@ -155,6 +155,7 @@ static void array_suffix(cc *c, dop *op, uint32_t name)
 	int q = 0;
 
 	op->kind = 1;
+	op->loc = c->prevloc;
 	op->fl = 0;
 	for (;;) {
 		int kw = kwof(tok(c));
@@ -397,6 +398,10 @@ VPRIV qty apply_declarator(cc *c, qty t, uint32_t first, uint32_t nops)
 				t = ty_atomic(c, t, 0);
 			break;
 		case 1:
+			if (!complete(c, t)) {
+				cc_error(c, o->loc, "array has incomplete element type '%s'", tyname(c, t));
+				fwd_note(c, t);
+			}
 			if (KIND(c, t) == TY_SVE)
 				cc_error(c, o->np, "array has sizeless element type '%s'", tyname(c, t));
 			if (is_func(c, t))
