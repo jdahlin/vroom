@@ -162,6 +162,22 @@ return-mismatch-flaggfall, två parsergränser och en saknad SIMD-builtin.
 Riktade rättningar räknas först efter isolerad validering; detta är den
 senaste fulla baslinjen.
 
+**Compile-milstolpe 2026-11-11, fryst commit `5e17f47`:** hela de 2016
+filerna har nu kontrollerats på båda Linux-målen. X86: **1859 godkända,
+0 vcc-fel, 0 vcc-krascher, 155 filtrerade och 2 referensfel**. ARM/QEMU:s
+kompileringsmål: **1855 godkända, 0 vcc-fel, 0 vcc-krascher, 159
+filtrerade och 2 referensfel**. Detta är kompilering/assemblering, inte
+körning av dessa filer. Referensfelen är clang SIGSEGV i
+`limits-exprparen.c` och `limits-structnest.c` på båda målen; harnessen
+avslutas därför fortfarande med felstatus. Vcc:s egen djupa record-krasch
+är rättad med ett separat stressprov som även verifierar daemonens
+överlevnad. ARM:s sista registertrycksfel (`20121107-1.c`) är rättat och
+hela ARM-sviten omkörd. Loggar: `/tmp/vroom-milestone-compile-{x86,arm}.log`.
+Kompilatorns SHA-256:
+`d08f33e9ea2e0f61e7203d246fdd398b71cebca4e3b1a69d21589ebbea2a0de0`.
+Kombinerad runtime-, ABI- och sanitizerverifiering på denna commit pågår;
+compile-milstolpen innebär inte att hela S3 eller testplanen är klar.
+
 **Klart när:** inga krascher i `compile/`; `ieee/` och `builtins/` lika
 gröna som `execute/`.
 
