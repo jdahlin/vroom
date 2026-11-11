@@ -688,14 +688,33 @@ sina egna stödobjekt och DSO:er; clang assemblerar/länkar. Riggen behåller
 flaggor, källor, kommandon, binärer, status och kompilatorhash i en ny
 artefaktkatalog. ARM använder QEMU och en explicit privat libcrypt-overlay
 med verifierade glibc-symbolkrav; `-lcrypt` tas inte bort. De fulla resultaten
-ovan är verifierade; sju checkout-only harnessprov går i premerge.
+ovan är verifierade; elva checkout-only harnessprov går i premerge.
 Vanliga clang-avvisningar/libc-avvikelser filtreras separat, medan
 kompilatorkrascher, timeout, saknade verktyg/regler och oförklarade makefel
 måste ge felstatus även om andra tester passerar. Injicerad clang-SIGSEGV
 är verifierad röd; normal pow10-avvisning tillsammans med giltiga prover
-och hela x86-körningen avslutas korrekt. API:s compile-only-aggregat,
-statiska varianter och musl-interna kategorier ingår ännu inte; hela S8
-påstås därför inte vara färdig.
+och hela x86-körningen avslutas korrekt.
+
+Riggen kartlägger även hela pinnade grafen med `--suite full --linkage both`:
+**565 kontrakt** (345 dynamiska mål, 141 statiska mål och 79 API-objekt).
+API:s fulla länkaggregat behålls oförändrat; genererade API-headern
+preprocessas med respektive kompilator. `--linkage static` följer upstreams
+beroenden på dynamiska prov och redovisar deras sidoresultat separat.
+Full separat verifiering mot `7afcdea` ger **424 godkända x86-kontrakt**,
+83 referensbyggfel, 57 referenskörfel och ett upstream-avstängt prov;
+ARM/QEMU ger **430 godkända**, 83/51 referensfel och samma avstängda prov.
+Noll vcc-fel och noll infrastrukturfel. Elva offlineprov kontrollerar graf,
+status, preprocessningsval och att ett avstängt recept faktiskt matchar
+upstream. Artefakter: `/tmp/libc-expanded-full-{x86,arm}` och
+`/tmp/libc-expanded-evidence.json`.
+
+API:s strikta oförändrade flaggor gör att Clang avvisar 79 av 80 kontrakt
+i denna glibc-miljö; dessa påstås inte verifiera vcc. Musl:s dynamiska
+`pleval` är uttryckligen avstängt av upstream, och det statiska provet
+behöver en privat libc-funktion (Clang avvisar redan källan här).
+Ett statiskt ARM-referensprov gav SIGBUS i en tidigare separat körning
+och gick i den fulla körningen; båda artefakterna är bevarade. Fullständig
+S8-konformans eller musl-validering påstås fortfarande inte.
 
 musl:s libc-test kräver en riktig libc.  Det görs när vcc bygger musl, eller
 mot glibc i Linux-containern.  Funktionstesterna och math-testerna
