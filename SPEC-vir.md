@@ -1,6 +1,9 @@
 # VIR 1.0 specification
 
-Status: **draft 0.3, 2026-11-11**. Nothing here is implemented. Plan and steps
+Status: **draft 0.4, 2026-11-11** (corrections found while implementing the
+format, the text form and the verifier, step V1's first half; the changes
+are listed in the pull request). The format and its tools described in
+sections 3-12, 16-18 and 22.5 are implemented; nothing else is. Plan and steps
 are in `PLAN-vir.md`; the reasons behind the rules are in `RESEARCH-vir.md`
 (rule numbers R1-R20 refer to its section 5).
 
@@ -69,6 +72,14 @@ and the block order), so one forward sweep sees definitions before uses.
 line, declarations of symbols, signatures and asm templates, and functions.
 Inside the compiler the same information comes from `cc` and the emitter.
 
+2.6 The **builder form** is what `vir_const` and `vir_ins_add` produce before
+`vir_canon`: constants and block instructions are created in the order the
+walker needs them, so a constant may lie inside the range of the block that
+was open when it was created (the block's `n` counts it); blocks may be in
+any order, there may be `nop`s and unreachable blocks, and `nconst` is 0.
+`vir_canon` takes either form to the canonical one. The verifier requires the
+regions of 2.3 (rule S1), so it is run on canonical or parsed functions.
+
 ## 3. In-memory format
 
 3.1 Instruction, 16 bytes, little-endian fields:
@@ -92,7 +103,9 @@ typedef struct vir_blk {
 	uint16_t depth;		/* loop nesting, 0 outside loops */
 	uint16_t pad;
 	uint32_t pred, npred;	/* predecessors: extra[pred .. pred+npred), block ids; valid after vir_cfg */
-} vir_blk;
+	uint32_t idom;		/* immediate dominator (block 0: itself); ~0 if unreachable; valid after vir_dom */
+	uint32_t pre, post;	/* dominator-tree preorder number, and the largest one in the subtree (22.5) */
+} vir_blk;				/* 36 bytes */
 ```
 
 The last instruction of a block is its only terminator (section 8).
@@ -128,6 +141,15 @@ typedef struct vir_fn {
 
 All arrays come from the thread's `ecx` and are reset per function. A pass
 that needs more room writes a new set of arrays and swaps them in.
+
+`vir_loc` is `{ uint32_t first, loc; }`: the index of the first instruction of
+a run, and the compiler's source-location id. The flag values are: `VB_LOOP`
+1, `VB_ADDR` 2, `VB_COLD` 4; `VS_PARAM` 1, `VS_EXPOSED` 2; `VF_NOFP` 1,
+`VF_FENV` 2, `VF_NULLINVALID` 4, `VF_VARIADIC` 8, `VF_NORETURN` 16,
+`VF_LOCAL` 32 (the symbol is local to the unit), `VF_EXPOSURE` 64 (every
+`VS_EXPOSED` is valid: `mem` computes it, rule M1 checks it). The targets are
+`VTG_X86_64_LINUX` 1, `VTG_A64_LINUX` 2, `VTG_A64_DARWIN` 3. Offset 0 of
+`extra` is a reserved word, so an extra offset of 0 means "none".
 
 3.5 `extra` holds every variable-length operand list. An instruction refers to
 its list by offset; the layouts are given per instruction. Words are values,
@@ -245,7 +267,7 @@ terminator.
 | `clz ctz` | 3 `NZ` | A zero operand is immediate UB |
 | `ptradd` | 4 `INB` | Reserved, must be 0 in 1.0 |
 | `load store` and atomics | 0-1 `W`: log2 of the width in bytes; 2 `S`: sign-extend (load); 4-7 log2 of the alignment; 8 `VOL` volatile |
-| `ext` | 0-1 log2 of the source width in bytes (1, 2, 4); 2 `S` |
+| `ext` | 0-1 log2 of the source width in bytes (1, 2, 4, 8); 2 `S` |
 | `icmp fcmp` | 0-3 condition code |
 | `memcpy memset` | 4-7 log2 alignment of `a`; 8-11 of `b` (memcpy) |
 | `call` | 0 `NORETURN`, 1 `PURE`, 2 `CONST`, 3 `TAIL` (reserved, 0) |
@@ -478,7 +500,7 @@ identically. Encoding is UTF-8; names are ASCII.
 
 11.2 Lexical elements: a comment is `;` to the end of the line. Names:
 `@name` symbol, `%name` signature, `$N` slot, `!N` asm template, `bN` block,
-`vN` value (`N` any run of letters, digits, `_` and `.`). Integers are decimal
+`vN` value (`N` any run of letters, digits, `_` and `.`; at least one). Integers are decimal
 or `0x` hexadecimal, optionally negative. Floats are C hexadecimal floats
 (`0x1.8p+1`) or `bits:0x...` for an exact pattern. Strings are in double
 quotes with C escapes.
@@ -487,6 +509,7 @@ quotes with C escapes.
 
 ```
 unit      = "vir" INT NL "target" TARGET NL { decl } .
+TARGET    = "x86_64-linux" | "arm64-linux" | "arm64-darwin" .
 decl      = sigdecl | asmdecl | datadecl | externdecl | func .
 sigdecl   = "sig" SIG "=" "(" [ group { "," group } [ "," "..." ] ] ")" "->" group NL .
 group     = "none" | piece { ":" piece } | "mem" INT "align" INT | "sret" .
@@ -497,12 +520,18 @@ datadecl  = ( "data" | "tdata" ) SYM "align" INT "=" "{" item { "," item } "}" N
 item      = TYPE const | "zero" INT | "bytes" STRING .
 externdecl= "extern" SYM NL .
 func      = "func" SYM SIG { fflag } "{" NL { slotdecl } block { block } "}" NL .
-fflag     = "nofp" | "fenv" | "nullinvalid" | "noreturn" | "local" .
-slotdecl  = "slot" SLOT "size" INT "align" INT [ "hint" INT ] NL .
+fflag     = "nofp" | "fenv" | "nullinvalid" | "noreturn" | "local" | "exposure" .
+slotdecl  = "slot" SLOT "size" INT "align" INT [ "hint" INT ] { "param" | "exposed" } NL .
 block     = BLOCK [ "(" bp { "," bp } ")" ] { bflag } ":" NL { instr NL } term NL .
 bp        = VALUE ":" TYPE .
 bflag     = "loop" | "addr" | "cold" .
 instr     = [ VALUE ":" TYPE "=" ] OP [ "." suffix ] [ operands ] { iflag } .
+            (* a constant op (`iconst`, `fconst`, `symaddr`, `slotaddr`, `labeladdr`) written as an
+               instruction, `v7:i32 = iconst 5`, names a constant of the constant region as written:
+               it is not unified with an equal one and need not be used. The printer never writes
+               one; tests use them to build the duplicate and unused constants that `vir_canon`
+               removes and the verifier rejects (S2, N1). `bparam` written as an instruction is a
+               stray block parameter (S4). *)
 operand   = VALUE | const [ ":" TYPE ] .
 const     = INT | FLOAT | SYM [ addend ] | SLOT [ addend ] | "&" BLOCK .
 iflag     = "nsw" | "nuw" | "exact" | "nz" | "volatile" | "align" INT | "tag" INT
@@ -531,17 +560,37 @@ ibr v1 [b3, b4]
 asmgoto !4 outs() ins(0 v1) -> b5 [b6]
 ret v3
 trap
+v12:ptr = va_arg v1, int:f64            ; the group as in a signature
+v13:ptr = tlsaddr @tls, 0               ; symbol, model
+v14:i64 = param 0xffff.0                ; the sret pointer of the result group
+memcpy v1, v2, 24 align 8 align 4       ; two alignments: destination, source
+br b2                                   ; no parentheses when the block has no parameters
 ```
+
+The number of arguments of a `br` is the target's number of parameters (8.1);
+a text that passes another number is a syntax error, not a verifier failure.
+A `call` names its signature as `%name` after the callee; a memory operand
+of `asm` is a value of type `ptr` among the inputs (8.6).
 
 11.5 Constants are written in operand position; the parser creates the
 constant instruction. A constant's type is the type the operand position
 requires; where the position does not fix it (call arguments, `store` values,
-both `icmp` operands constant, `ret`), the `:type` suffix is required, and the
-printer writes it exactly there.
+`ret` values, asm inputs, the condition of `brif` and `select`, the operand of
+`switch`, `ext` and the conversions, both `icmp` or `fcmp` operands constant),
+the `:type` suffix is required, and the printer writes it exactly there. The
+operands of `br` take the type of the target's parameters. `vir_opnd_fixed`
+(the opcode table) answers the question for the parser and the printer. An
+address constant (`@x`, `$N`, `&bN`) is a `ptr` whatever the position, and the
+parser does not require its suffix.
 
 11.6 The printer names values `v0, v1, ...` and blocks `b0, b1, ...` in order
 of appearance, and writes instruction flags in the order of 11.3. Constants
-get no name.
+get no name. Signatures are named `%s0 ...` and asm templates `!0 ...` by
+their number in the unit (the parser unifies equal signatures). The unit is
+printed as: `vir`, `target`, `extern`s, data, signatures, asm templates,
+then the functions, each after a blank line. Floats are printed as a
+hexadecimal float when that is exact for a normal number, otherwise as
+`bits:`.
 
 11.7 `vpp -fvir-dump=STAGE[,FUNC]` prints functions after a stage: `build`,
 `simplify`, `gvn`, `mem`, `dce`, `alloc`. In a dump a `; loc FILE:LINE` comment
@@ -583,6 +632,34 @@ internal compiler error with a dump.
 | F2 | Not `VF_VARIADIC`: no `va_start` |
 | M1 | Slot `align` is a power of two; `size` fits; `VS_EXPOSED` equals the result of 6.4 when the function claims it is computed |
 | N1 | Canonical form (2.4): no `nop` in blocks, no unused constant, constants in first-use order |
+
+Details the table leaves out, as implemented:
+
+- A failure is reported as `@func bN.I: RULE: message` (block N, instruction I
+  of the block; `@func bN` and `@func` for a block or the function). The
+  verifier stops after the structural rules (S1-S5, T2's reference checks)
+  when the graph cannot be built, and checks C, D, A, F, M and N only then;
+  N1 is checked only when nothing else failed.
+- T2 also covers a reference that is out of range: a block id that is not a
+  block, an operand list that runs past `extra`, a value operand that is
+  `void` or not a value.
+- T3 includes the condition codes (`icmp` 0-9, signed codes not on `ptr`;
+  `fcmp` 0-7). T4 also rejects `S` on a load that is not an integer.
+- C3 compares types only: the number of `br` arguments is the target's
+  number of parameters by definition (8.1).
+- A1 includes that each signature is well formed (register groups of 1-4
+  pieces with classes, memory groups with a size, `sret` only as the result
+  group, a result that is not a memory group). A2 checks the function's own
+  signature the same way.
+- A4: for a template with `a` register outputs, `b` memory outputs and `c`
+  inputs, the instruction has `nout = a` and `nin = c + b` (the address of a
+  memory output is an input value); a template with labels is `asmgoto` with
+  as many labels, and `asm` has none; the result is `void`, one value, or
+  `multi` for `nout` 0, 1, more. An operand whose constraint contains `m`,
+  `o`, `V` or `Q` is a memory operand. It needs the unit's template table.
+- D1 for the result of an `asmgoto`: the block that uses it must be strictly
+  dominated by the block of the `asmgoto`.
+- M1's exposure check runs when the function has `VF_EXPOSURE`.
 
 ## 13. Interpreter (`virrun`)
 
@@ -703,7 +780,7 @@ without moves produces no code.
 
 | Tool | Use |
 |---|---|
-| `virtest FILE` | Parse, verify, run the passes named in the file, print; `--equiv` adds 13.9; `--bless` rewrites the expected output |
+| `virtest [--no-verify] [--bless] FILE` | Parse, run the passes named in the file (only `canon` until the passes exist), verify, print, and parse and print the result again (11.1); `--equiv` adds 13.9 (with the interpreter); `--bless` rewrites the expected output |
 | `virrun FILE` | Section 13 |
 | `virgen --seed=N [--size=N]` | A random verified unit using the built-in externs only, for `--equiv` and for `fuzz-vir` |
 | `vpp -fvir-dump=...` | 11.7 |
@@ -729,9 +806,16 @@ comments at the top:
 ; EXPECT-UB: no
 ```
 
-followed by the unit, a line `; ---`, and the expected printed output.
-`bench/vir-test.py -j 6` runs them all; `--bless PATTERN` rewrites
-expectations.
+followed by the unit, a line `; ---`, and the expected output of
+`virtest` (the printed unit, or the error lines). The unit is the text before
+that line. `PASSES: canon` puts each function in canonical form before it is
+verified; `VERIFY: no` is `--no-verify`; `DOM: yes` appends each function's
+dominator tree (`; dom @f bN idom bM pre P post Q`) as comments. The tests
+under `tests/vir/bad/` must make `virtest` exit with status 1; a file named
+`bad/RULE-name.vir` (`RULE` a rule of section 12) must produce failures of
+exactly that rule. `bench/vir-test.py -j 6` runs them all; `--bless PATTERN`
+rewrites expectations; `--mutate N` runs random mutants of the units and
+requires that `virtest` never crashes.
 
 17.2 Required test sets before a step is done:
 - parser/printer: every instruction and flag once; round trip identical;
@@ -1127,12 +1211,15 @@ statement); the format does not change.
 
 The builder appends in the walker's order with a few `nop`s and provisional
 parameters. One finalizing sweep (`vir_canon`) does all of the following
-while copying to the second array: drops `nop`s and unreachable blocks,
+while copying to the second array (after a read-only loop over the operands
+that finds the constants in order of first use and so how many there are): drops `nop`s and unreachable blocks,
 resolves the alias table (a removed parameter becomes its value), writes
 `br` argument lists, renumbers values, and orders constants by first use. When
 the walker's order already has every block after its immediate dominator (true
 for structured code that does not rotate loops) the block order is kept;
-otherwise blocks are emitted in reverse postorder in the same sweep. Dominators
+otherwise blocks are emitted in reverse postorder (the depth-first search
+visits a block's successors last to first, so that the first successor comes
+first) in the same sweep. Dominators
 are computed once here (Cooper-Harvey-Kennedy on the block array) and stored
 per block with preorder and postorder numbers, so "does A dominate B" is two
 compares for every later pass.
@@ -1160,7 +1247,10 @@ pipeline fuses them as above.
   written by `vir_dbgrow`. A statement's instructions share one entry.
 - **No `tmp` initialization:** a pass that uses `tmp` writes every entry it
   later reads, or stamps it.
-- **`extra` is append-only** during building; lists are never edited in place.
+- **`extra` is append-only** during building; lists are never edited in place
+  (`vir_canon` rewrites the value and block words of the lists it keeps, each
+  of which belongs to one instruction, and `vir_cfg` appends the predecessor
+  lists, replacing those of its last call).
 - **Use counts** are a `uint8_t` per value saturating at 255, computed in
   sweep 5 where the allocator and lowering need "used once".
 - **No pass allocates** except from the thread's reservations; a pass that
