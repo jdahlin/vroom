@@ -70,6 +70,7 @@ arm64)
 	step torture-dg   python3 bench/test-torture-directives.py
 	step gcc-dg       python3 bench/test-gcc-dg.py
 	step libc-test-harness python3 bench/test-libc-test.py
+	step kefir-harness python3 bench/test-kefir.py
 	step runtime-oracle-harness python3 bench/test-runtime-oracle.py
 	step verify-contract python3 bench/test-verify.py
 	step onboarding-verifier python3 bench/test-onboarding.py

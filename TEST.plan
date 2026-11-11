@@ -578,6 +578,29 @@ Detta är fortfarande inte runtime- eller QBE-ekvivalens.
 
 **Klart när:** allt som clang klarar klarar också vcc.
 
+### S5b Kefir — importerad, baslinje under verifiering
+
+Officiella repot är nu `https://git.protopopov.lv/kefir.git`, låst till
+`7c59547068eaa0723b4db83d3fb70f448b0f0cb1`; gamla sr.ht HEAD innehåller
+bara flyttmeddelandet. Käll-/licensmetadata finns i `bench/kefir-source.json`.
+`bench/vcc-kefir.py` inventerar 1106 end2end-kataloger: 875 runtime-par
+(875 host-filer, 889 test-filer) och 231 kompilatorinterna snapshot-kataloger.
+Varje runtime-par behåller alla följeslagarfiler, upstreams profilflaggor,
+aktiva host-assertioner och Linux-länkning med pthread/atomic/m.
+Clang/Clang måste först klara exitstatuskontraktet; därefter körs
+Clang/vcc, vcc/Clang och vcc/vcc. Ingen utdatajämförelse uppfinns.
+
+Råa profiler, basflaggor, slutliga/mappade flaggor, miljö, exakta kommandon,
+källträdshash och filhashar sparas. Snapshot kommer från `git archive` av
+rätt ren pin. Okända profil-/make-/run-kontrakt är uttryckligen unsupported.
+Decimal-kapabilitetsvakter får aldrig bli tomma godkända tester; på ARM
+separeras även x86-vakter/intrinsics/inline-asm. Interna AST/IR/asmgen-
+snapshots och upstreams kopiering av förväntad utdata körs inte som tester.
+Clang-avvisning filtreras separat; signaler, timeouter, saknade verktyg och
+tysta kompilatorfel är synliga fel med exitstatus 1, även när andra fall passerar.
+Tio checkout-only riggtester ingår i CI. Detta är en ny felbaslinje,
+inte en grön svit eller full täckning av Kefirs interna tester.
+
 ### S6 ABI-generatorer — rigg klar, fel rättas
 `gcc.dg/compat/struct-layout-1_generate.c` och clangs `utils/ABITest`
 genererar tusentals anrop mellan två kompilatorer.  Kopplas in i
