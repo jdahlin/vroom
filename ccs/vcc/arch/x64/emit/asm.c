@@ -8,7 +8,7 @@
  * reserved before any operand is evaluated: a temporary that is live in
  * one (the enclosing expression's) is saved to a slot and restored after.
  */
-enum { XO_REG, XO_MEM, XO_IMM };
+enum { XO_REG, XO_MEM, XO_IMM, XO_X87 };	/* XO_X87: on the x87 stack, reg 0 st(0) (t), 1 st(1) (u) */
 
 typedef struct xopnd {
 	uint8_t kind, reg, out, inout, flt, fixed;
@@ -122,6 +122,12 @@ static void x64_asmmem(cc *c, tbuf *b, const lval *l)
 	tb_c(b, ')');
 }
 
+/* a float value as an x87 long double object's address (fld of it) */
+static val wk_x87val(ecx *e, val v, qty t)
+{
+	return wk_conv(e, v, t, prim(TY_LDOUBLE));
+}
+
 static bool x64_immok(int ch, i128 v)
 {
 	switch (ch) {
@@ -233,6 +239,11 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 		o->size = wk_size(c, o->t);
 		o->flt = strpbrk(cs, "xy") != NULL && is_flt(c, o->t);
 		o->l = wk_lval(e, en);
+		if (strpbrk(cs, "tu") && is_flt(c, o->t)) {
+			o->kind = XO_X87;
+			o->reg = strchr(cs, 'u') ? 1 : 0;
+			continue;
+		}
 		if (mem_ok && !reg_ok) {
 			o->kind = XO_MEM;
 			if (o->l.bf)
@@ -260,6 +271,19 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 		for (const char *p = cs; *p; p++)
 			if (*p >= '0' && *p <= '9')
 				tied = atoi(p);
+		if (tied >= 0 && (uint32_t)tied < a->nout && op[tied].kind == XO_X87) {
+			o->kind = XO_X87;
+			o->reg = op[tied].reg;
+			o->tied = (int8_t)tied;
+			o->v = wk_x87val(e, wk_gen(e, en), o->t);
+			continue;
+		}
+		if (strpbrk(cs, "tu") && is_flt(c, o->t)) {
+			o->kind = XO_X87;
+			o->reg = strchr(cs, 'u') ? 1 : 0;
+			o->v = wk_x87val(e, wk_gen(e, en), o->t);
+			continue;
+		}
 		if (tied >= 0 && (uint32_t)tied < a->nout) {
 			/* the output's register, holding this value before the template */
 			xopnd *to = &op[tied];
@@ -363,6 +387,16 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 
 			x64_mem(e, X_LD, 8, op[i].reg, &s, false);
 		}
+	/* x87 inputs pushed: st(1) first, then st(0) */
+	for (int st = 1; st >= 0; st--)
+		for (uint32_t i = a->nout; i < nops; i++)
+			if (op[i].kind == XO_X87 && op[i].reg == st) {
+				lval m = { .k = L_REG, .r = op[i].v.r };
+
+				x64_x87(e, XF_LDT, &m, 10);
+				x64_tfree(e, op[i].v.r);
+				break;
+			}
 	/* the template: {att|intel} alternatives keep the first */
 	start = rb->n;
 	if (basic) {
@@ -457,6 +491,9 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 				case XO_MEM:
 					x64_asmmem(c, rb, &o->l);
 					break;
+				case XO_X87:
+					tb_s(rb, o->reg ? "%st(1)" : "%st");
+					break;
 				case XO_IMM:
 					if (mod != 'c' && mod != 'P' && mod != 'a' && mod != 'n')
 						tb_c(rb, '$');
@@ -472,6 +509,52 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 	ri = x64_put(e, X_RAW);
 	ri->off = (int32_t)start;
 	ri->ref = (uint32_t)(rb->n - start);
+	/* the x87 stack after the asm: its outputs from st(0) up, then the inputs it did not pop
+	   (one in st(1) is popped by the asm when it clobbers st(1), as GCC's rules) */
+	{
+		int depth = 0, popped = 0;
+		bool in0 = false, in1 = false, out0 = false, out1 = false;
+
+		for (uint32_t i = 0; i < nops; i++)
+			if (op[i].kind == XO_X87) {
+				if (op[i].out && op[i].reg)
+					out1 = true;
+				else if (op[i].out)
+					out0 = true;
+				else if (op[i].reg)
+					in1 = true;
+				else
+					in0 = true;
+			}
+		for (uint32_t i = 0; i < a->nclob; i++) {
+			const char *cl = c->strs[a->clob[i] - 1].s;
+
+			if (!strcmp(cl, "st(1)"))
+				popped |= 2;
+			if (!strcmp(cl, "st") || !strcmp(cl, "st(0)"))
+				popped |= 1;
+		}
+		depth = (in0 || out0 ? 1 : 0) + (in1 || out1 ? 1 : 0);
+		if (in1 && !out1 && (popped & 2))
+			depth--;
+		for (int st = 0; st < 2 && depth > 0; st++) {
+			for (uint32_t i = 0; i < a->nout; i++)
+				if (op[i].kind == XO_X87 && op[i].reg == st) {
+					int sz = wk_size(c, op[i].t);
+					lval l = op[i].l;
+
+					if (KIND(c, op[i].t) == TY_LDOUBLE)
+						x64_x87(e, XF_STPT, &l, 10);
+					else
+						x64_x87(e, XF_STP, &l, sz);
+					depth--;
+					goto next;
+				}
+			x64_x87(e, XF_POP, NULL, 0);
+			depth--;
+		next:;
+		}
+	}
 	/* outputs stored */
 	for (uint32_t i = 0; i < a->nout; i++) {
 		xopnd *o = &op[i];
@@ -493,6 +576,8 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 
 		if (o->kind == XO_REG && !o->fixed && o->tied < 0)
 			x64_tfree(e, o->reg);
+		if (o->kind == XO_X87 && o->out && o->l.k == L_REG)
+			x64_tfree(e, o->l.r);
 		if (o->out && o->l.k == L_REG && !o->l.bf)
 			x64_tfree(e, o->l.r);
 		if (!o->out && o->kind == XO_MEM && o->l.k == L_REG)

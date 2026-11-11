@@ -361,13 +361,15 @@ kärnan och kan vänta.
   före bindning, etiketter och case per kopia, förskanning per kopia),
   konstanta lokaler och parametrar, `__builtin_constant_p` efter inlining;
   `-mgeneral-regs-only`/`-mno-sse`/`-mno-sse2`/`-mno-mmx` (makron som clang, inga
-  vektorregister, flyttal ett fel; `vcc-x86.py --fpcheck`); UTF-8-namn citerade.
-- `bench/vcc-x86.py`: 1683/1773, lika i `--pie` och `--pic` (vcc-sidan
-  `-fPIE`/`-fPIC`, länkad `-pie`). Körfel bara där clangs optimerare krävs
-  (`20030125-1`: `floor` -> `floorf`) och 11 länkfel av samma slag eller
-  `__builtin_setjmp`. `vcc-abi.py --target x86_64`: 12/12, med tre nya tester
+  vektorregister, flyttal ett fel; `vcc-x86.py --fpcheck`); UTF-8-namn citerade;
+  inline asm för `-S` (X6:s del i emittern: AT&T, begränsningar, modifierare, x87
+  `t`/`u`, `asm goto`); `__builtin_setjmp`; död kod efter hopp och i konstanta
+  `if` som clang -O2; vektorer av `__int128`/`long double`.
+- `bench/vcc-x86.py`: 1768/1776, lika i `--pie` och `--pic` (vcc-sidan
+  `-fPIE`/`-fPIC`, länkad `-pie`). Kvar: körfelet `20030125-1` (clangs `floor` -> `floorf`) och 7
+  länkfel där clang -O2 tar bort ett `link_error`-anrop (X4:s pass). `vcc-abi.py --target x86_64`: 12/12, med tre nya tester
   (`int_records`, `fp_records`, `complex_args`).
-- Kvar i X3: vektorer av `__int128`, bit-fält bredare än 64 bitar, 128-bitars overflow-inbyggda med 128-bitars operander, `need_fold` (ett
+- Kvar i X3: bit-fält bredare än 64 bitar, 128-bitars overflow-inbyggda med 128-bitars operander, `need_fold` (ett
   error()-anrop kvar efter inlining), `VCC_WALKLOG`.
 
 ### X2 (2026-11-10): påbörjat, i gren `claude/x86-x2-walker`
