@@ -897,7 +897,7 @@ __attribute__((destructor)) static void stat_dump(void)
 	NEXT();								\
 } while (0)
 
-uint32_t vlex(const char *s, size_t n, vtok *out, void *scratch)
+static uint32_t lex_mode(const char *s, size_t n, vtok *out, void *scratch, bool digraphs)
 {
 	static const void *disp[256];
 	size_t nb = n / 64 + 3, nblk = n / 64 + 1, p = 0, st = 0, q, a, b, bad;
@@ -1241,7 +1241,7 @@ l_hash:
 l_colon:
 	a = nx(s, p);
 	if (s[a] == ':') PUNCT(2, T_COLONCOLON, a + 1);
-	if (s[a] == '>') PUNCT(2, T_RSQUARE, a + 1);
+	if (s[a] == '>' && digraphs) PUNCT(2, T_RSQUARE, a + 1);
 	PUNCT(1, T_COLON, p + 1);
 l_less:
 	a = nx(s, p);
@@ -1250,8 +1250,8 @@ l_less:
 		PUNCT(2, T_LESSLESS, a + 1);
 	}
 	if (s[a] == '=') PUNCT(2, T_LESSEQ, a + 1);
-	if (s[a] == ':') PUNCT(2, T_LSQUARE, a + 1);
-	if (s[a] == '%') PUNCT(2, T_LBRACE, a + 1);
+	if (s[a] == ':' && digraphs) PUNCT(2, T_LSQUARE, a + 1);
+	if (s[a] == '%' && digraphs) PUNCT(2, T_LBRACE, a + 1);
 	PUNCT(1, T_LESS, p + 1);
 l_greater:
 	a = nx(s, p);
@@ -1264,8 +1264,8 @@ l_greater:
 l_percent:
 	a = nx(s, p);
 	if (s[a] == '=') PUNCT(2, T_PERCENTEQ, a + 1);
-	if (s[a] == '>') PUNCT(2, T_RBRACE, a + 1);
-	if (s[a] == ':') {
+	if (s[a] == '>' && digraphs) PUNCT(2, T_RBRACE, a + 1);
+	if (s[a] == ':' && digraphs) {
 		b = nx(s, a);
 		if (s[b] == '%' && s[q = nx(s, b)] == ':') PUNCT(4, T_HASHHASH, q + 1);
 		PUNCT(2, T_HASH, a + 1);
@@ -1339,6 +1339,11 @@ done:
 		intern_list(ic, s, out, il, ni);
 	STAT_T1(320);
 	return (uint32_t)(t - out);
+}
+
+uint32_t vlex(const char *s, size_t n, vtok *out, void *scratch)
+{
+	return lex_mode(s, n, out, scratch, true);
 }
 
 size_t vlex_spell(const char *s, const vtok *t, char *buf)
@@ -1452,7 +1457,7 @@ static bool read_src(const char *path, const char **src, size_t *size, uint64_t 
 }
 
 /* lex src (from read_src) into f, tokens in this thread's arena */
-static void lex_src(vlex_file *f, const char *src, size_t size)
+static void lex_src_mode(vlex_file *f, const char *src, size_t size, bool digraphs)
 {
 	size_t need = vlex_scratch_size(size);
 	vtok *tok;
@@ -1468,9 +1473,29 @@ static void lex_src(vlex_file *f, const char *src, size_t size)
 	tok = arena((size + 2) * sizeof(vtok));
 	f->src = src;
 	f->size = (uint32_t)size;
-	f->ntok = vlex(src, size, tok, scratch);
+	f->ntok = lex_mode(src, size, tok, scratch, digraphs);
 	f->tok = tok;
 	arena_trim(tok, (f->ntok + 1) * sizeof(vtok));
+}
+
+static void lex_src(vlex_file *f, const char *src, size_t size)
+{
+	lex_src_mode(f, src, size, true);
+}
+
+/* Strict C90 uses private tokens; never change the shared cached file.
+ * Retain source bytes and offsets, including digraph-looking text in strings
+ * and comments and the spacing of adjacent tokens used by stringization. */
+const vlex_file *vlex_nodigraphs(const vlex_file *f)
+{
+	vlex_file *nf = arena(sizeof(*nf));
+
+	memset(nf, 0, sizeof(*nf));
+	nf->path = f->path;
+	nf->dev = f->dev;
+	nf->ino = f->ino;
+	lex_src_mode(nf, f->src, f->size, false);
+	return nf;
 }
 
 static bool load(vlex_file *f, const char *path)

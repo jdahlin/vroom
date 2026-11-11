@@ -1758,9 +1758,9 @@ static uint32_t stdc_rotate(cc *c, const builtin *b, uint32_t loc)
 		return err_node(c, loc);
 	}
 	unsigned bits = KIND(c, t) == TY_BOOL ? 1 : int_bits(c, t);
-	qty work = prim(bits <= 32 ? TY_UINT : bits <= 64 ? TY_ULLONG : TY_UINT128);
+	qty work = bits > 128 ? t : prim(bits <= 32 ? TY_UINT : bits <= 64 ? TY_ULLONG : TY_UINT128);
 	unsigned countbits = int_bits(c, ct);
-	ct = prim(countbits <= 32 ? TY_UINT : countbits <= 64 ? TY_ULLONG : TY_UINT128);
+	ct = countbits > 128 ? unsigned_of(c, ct) : prim(countbits <= 32 ? TY_UINT : countbits <= 64 ? TY_ULLONG : TY_UINT128);
 	uint32_t x = cplx_reuse(c, convert(c, rvalue(c, args.v[0]), work), &prex);
 	uint32_t count = cplx_reuse(c, convert(c, rvalue(c, args.v[1]), ct), &precount);
 	uint32_t n = binop(c, T_PERCENT, rvalue(c, count), mk_int(c, bits, ct, loc), loc);
