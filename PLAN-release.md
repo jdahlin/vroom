@@ -80,6 +80,25 @@ kan gå parallellt.
 
 ## Status
 
+### Status 2026-11-11: G5/G7, wasm-lagringar över strukturerade joins
+
+På `1d8e29a` använder wasm32/64 den gemensamma budgeterade flödeslösaren
+för privata exakta 4/8-byte ramceller. Typade kontrollhändelser och unika
+blocktoken ersätter inget med textparsning eller SSA. Överskrivna stores
+tas bort genom strukturerade joins; operandutvärderingar och riktiga
+barriärer bevaras. Loopar, dispatchers/goto, asm, SJLJ och dynamiska ramar
+avstår. Full konvergens krävs före publicering.
+
+114 fokuserade/befintliga SDK-fria nivå-/mål-/regelkontroller passerar;
+avsiktligt felaktig barriärsammanslagning avvisas på wasm32 och wasm64.
+Oberoende review är klar. Hela egna SDK-sviter avslutar med status 0:
+wasm32 178/178 PASS, 36 XFAIL, 16 skips; wasm64 182/182 PASS, 37 XFAIL,
+11 skips. Undantagen räknas inte som PASS; kategorier och loggar står i
+`PLAN-fas2.md`/`PLAN-wasm.md`. CI-steget är tillagt, fjärrkörning återstår.
+Kompilatorkostnad och kod-/programvinst är ännu inte mätta för detta
+delsteg; äldre mätningar återanvänds inte som dess kostnadsbevis. G5/G7,
+generell DSE och full O2 förblir öppna.
+
 ### Status 2026-11-11: G5/G7, wasm frame-cell forwarding
 
 Wasm32/64 använder nu den gemensamma cell-/värdekärnan för exakta

@@ -2006,9 +2006,8 @@ inte en uppmätt kompilatorkostnadsgrind. Okända/indirekta flöden, rå/named
 asm, label-adresser och interrupt-/noreturn-konventioner avstår helt.
 Alla ändringar väntar tills analysen lyckats; kompaktering använder befintlig
 `dbg_remap` före tvåadresspasset. Arm64:s befintliga block-/livenessanalys är
-oförändrad. Wasm använder ännu **inte** denna graf; nästa separata konsument
-kräver typade kontrollhändelser, inte parsning av text eller återanvända
-branch-depth-tal som blockidentitet.
+oförändrad. Vid detta första checkpoint använder wasm ännu inte grafen;
+den separata wasm-konsumenten beskrivs i nästa statusavsnitt.
 
 Kodformsbevis mot exakt uppdaterad förälder `0dde275`: `unsigned f(unsigned
 x) { return (x*13u)&0u; }` behåller `imull $13` i basen men inte i kandidaten
@@ -2038,6 +2037,59 @@ absorberande uttryck provas däremot både i kodform och vid körning.
 Bred regression/ABI/debug, fil-för-fil, O0/noopt-paritet, helkompilatorns
 kostnad, fjärr-CI och nästa wasm-konsument återstår. OPT4/O2 och G5/G7 är
 fortsatt öppna.
+
+### OPT5 fortsättning: wasm-DSE över strukturerade joins (2026-11-11)
+
+På `1d8e29a`, med flödesföräldern `7691f6c`, använder nu även wasm32/64
+den gemensamma graf-/masklösaren. `arch/wasm/emit/flow.c` registrerar typade
+block-, if/else-, slut- och branchhändelser från funktionens början under
+ordinarie emission. Varje öppning får en unik token; wasm:s återanvända
+lexikala branch-depth översätts till token när grenen emitteras. Ingen
+assemblertext tolkas, extra AST-vandring eller SSA införs inte.
+
+Första konsumenten tar bort lagringar till privata exakta 4/8-byte ramceller
+som skrivs över före varje följande läsning, även genom nästlade diamanter.
+Heltal och flyttal stöds; befintlig cell-/överlapps-/escapeanalys avgör
+behörighet. Adress och högerled utvärderas fortfarande av befintlig renderer,
+inklusive eventuella fångade wasm-locals. Rena kontrollgränser bryter den
+lokala vidarebefordringen men är inte minnesläsningar i DSE. Riktiga anrops-/
+minnesbarriärer sammanslås bara inom samma kontrollepok: en barriär efter
+en tom else/join får inte flyttas till bara ena föregångaren.
+
+Liveness förenar efterföljares läsbehov och betraktar alla celler som lästa
+vid funktionsutgång. Detta är alltså överskrivnings-DSE, inte generell
+unread-/livstidssluts-DSE eller global värdevidarebefordring. Alla beslut
+väntar på full konvergens och publiceras först efter separat staging.
+Loopar, switch/dispatchers, goto, asm, SJLJ och dynamiska ramar avstår.
+Gränser: 8192 kontrollhändelser, djup 256, 64 cellbitar och högst 1048576
+solverbesök. Graf-/solverarbete startar först efter komplett emission och
+verkliga privata upprepade stores genom en join. O0/noopt avstår; fel och
+budgetslut lämnar denna konsuments omskrivningar opublicerade.
+
+Verifierat: unitybygge med `-j 1`, fristående syntaxkontroll av samtliga
+ändrade wasm-C-filer samt **114** SDK-fria konfigurationer genom egna
+assemblern/länkaren och Node: 10 nya flödeskontroller (wasm32/64 O0–O3
+med körning och kodform, samt O2/noopt-kodform), 16 befintliga cellfall och
+88 opt-regelkontroller. Positiva fall behåller exakt en slutlig store;
+negativa fall täcker läsningar/utgångar, escape, överlapp, volatile/atomic,
+anrop, effekter, flyttalsbitar och uteslutet flöde. En isolerad mutant som
+tar bort epokvillkoret avvisas av den avsedda tom-else-kodkontrollen på
+både wasm32 och wasm64; originalkällorna ändrades inte. Oberoende review
+fann inga kvarstående korrekthetsblockerare. `vcc-wasm-flow.py` ligger i
+wasm-jobbets snabba CI-uppsättning; fjärrkörning återstår.
+
+Hela egna SDK-baserade sviter på samma `1d8e29a` avslutar med status 0:
+wasm32 **178/178 PASS**, 36 körda XFAIL och 16 skips (12 clang-reject,
+1 noref, 3 ref-fail); wasm64 **182/182 PASS**, 37 körda XFAIL och 11 skips
+(8 clang-reject, 1 noref, 2 ref-fail). Undantagen är inte PASS.
+Loggar: `work/opt-pr-tmp/wasm-flow-full32.log` och `wasm-flow-full64.log`;
+källbevis, mutanthashar och fokuserade resultat i
+`build/linux/flow-evidence/`. Kompilatorkostnad, genererad kodstorlek och
+programkörtidsvinst är **inte mätta för detta delsteg**. Tidigare
+cell-/flödesmätningar gäller inte denna konsument. OPT5/O2 och G5/G7 är
+fortsatt öppna tills separat kostnadsgranskning och återstående grindar är
+klara.
+
 ### Fortsatt O0–O2-täckning: familjeledger efter OPT0–OPT8 (2026-11-11)
 
 **OPT0–OPT8 är första delsteg, inte hela O2-målet.** Den här kartan binder
