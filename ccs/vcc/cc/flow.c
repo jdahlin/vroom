@@ -428,6 +428,10 @@ typedef struct uwk {
 	pp_span ur[64];
 	uint32_t sself[16], sloc[16];	/* self-initializations */
 	pp_span sr[16];
+	/* T x = x (exactly): x stays uninitialized; a later read reports the initialization (clang) */
+	uint64_t selfv;
+	uint32_t xloc[64], xsym[64];
+	pp_span xr[64];
 } uwk;
 
 /* the condition can be a constant (fl_const's cases): most are not, and cc_eval is not free */
@@ -918,6 +922,20 @@ static void uv_stmt(uwk *w, uint32_t n, ust *st)
 				st->u |= 1ull << k, st->i &= ~(1ull << k);
 			return;
 		}
+		{
+			uint32_t b0 = x->b;
+
+			while (N(b0)->op == N_CAST && N(b0)->aux == CK_NOP)
+				b0 = N(b0)->a;
+			if (N(b0)->op == N_VAR && N(b0)->a == x->a && k < 0 && uv_tracked(c, c->syms[x->a].ty))
+				k = uv_add(w, x->a);	/* (tracked from here: a later read is the report) */
+			if (k >= 0 && N(b0)->op == N_VAR && N(b0)->a == x->a) {
+				if (st->live)
+					st->u |= 1ull << k, st->i &= ~(1ull << k);
+				w->selfv |= 1ull << k, w->xsym[k] = x->a, w->xloc[k] = N(b0)->loc, w->xr[k] = rng_np(c, b0);
+				return;
+			}
+		}
 		if (k >= 0)
 			st->u &= ~(1ull << k), st->i |= 1ull << k;
 		{
@@ -1163,9 +1181,8 @@ static void uv_stmt(uwk *w, uint32_t n, ust *st)
 			uint32_t e = a->ops[i].expr;
 			const char *cs = a->ops[i].constraint ? c->strs[a->ops[i].constraint - 1].s : "";
 
+			(void)cs;	/* (clang: a "+" operand is not a use, -Wuninitialized) */
 			if (N(e)->op == N_VAR) {
-				if (*cs == '+')
-					uv_read(w, e, st);
 				uv_write(w, e, st);
 			} else
 				uv_lv(w, e, st);
@@ -1357,6 +1374,13 @@ VPRIV void uninit_check(cc *c, uint32_t body, uint32_t first_label)
 		const sym *y = &c->syms[w->var[k]];
 		const char *z = uv_zero(c, y->ty);
 
+		if (w->kind[k] == 1 && (w->selfv >> k & 1) && w->xsym[k] == w->var[k]) {
+			pp_span r[2] = { { y->loc, pp_tok_end(c->p, y->loc) }, w->xr[k] };
+
+			cc_warnx(c, "uninitialized", false, w_all, w->xloc[k], r, 2, NULL, 0,
+				 "variable '%.*s' is uninitialized when used within its own initialization", IDF(y->name));
+			continue;
+		}
 		if (w->kind[k] == 2) {
 			if (!uv_sometimes(c, w, k))
 				continue;
