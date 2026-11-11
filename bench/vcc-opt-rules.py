@@ -64,7 +64,7 @@ def check_localvalues(assembly, arch):
     text = body(assembly, 'lvr_intervening', wasm)
     if len(re.findall(add, text)) != 2:
         raise RuntimeError(f'value must survive a pure declaration\n{text}')
-    for name in ['lvr_assignment_call', 'lvr_assignment_volatile']:
+    for name in ['lvr_assignment_call', 'lvr_assignment_volatile', 'lvr_assignment_hidden_write']:
         text = body(assembly, name, wasm)
         if len(re.findall(add, text)) < 3:
             raise RuntimeError(f'{name}: effectful assignment must remain a barrier\n{text}')
