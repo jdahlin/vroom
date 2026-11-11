@@ -297,3 +297,14 @@ med b63c269 bygger unity/fil-för-fil och passerar 164 riktade kör-/kodkrav,
 byte-identiska och extra Callgrind-kompileringsarbete högst +0,180 %; ett
 riktat x86-switchprov minskar exekverade instruktioner 48,39 %. Avgränsning,
 rådata och kvarvarande OPT6-delar står i PLAN-fas2. G5/G7 och full O2 är öppna.
+
+### Status 2026-11-11: G5/G7, unsigned32 reciprokdivision
+
+OPT8:s u32-del använder gemensamma reciproker för native kvot/rest och
+begränsade wasm-kvoter. 180 riktade kör-/kodkrav, sanitiserade matematik- och
+tryckkontrakt, unity/fil-för-fil samt 220 arm64-/215 x86-regressioner passerar.
+Mot exakt 781ca69 ligger extra arbete i kontroller under +0,442 % och en
+konfigurerad 10–12-filers mix mellan −0,017 % och +0,018 %. En mättad
+arm64-divisionskorpus kostar däremot +19,54 % att kompilera; avvägningen och
+avgränsade x86/wasm-körprov står i PLAN-fas2. Detta stänger inte G5/G7.
+Signed/u64-reciproker och full O2-täckning återstår.
