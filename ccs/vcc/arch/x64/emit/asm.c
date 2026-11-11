@@ -193,7 +193,7 @@ VPRIV void x64_csused(ecx *e, int r)
 		if (r == R12 && e->wk->falign > 16)
 			efatal(e, e->curloc, "x86-64: asm using r12 in a function with locals aligned above 16 is not supported");
 		if (!X->csslot[r])
-			X->csslot[r] = wk_slot(e, 8, 8);
+			X->csslot[r] = wk_pslot(e, 8, 8);
 	}
 }
 
