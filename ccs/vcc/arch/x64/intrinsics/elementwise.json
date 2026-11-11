@@ -1,0 +1,2270 @@
+[
+  {
+    "op": "MIN",
+    "sig": "V16a V16a V16a",
+    "features": "sse4.1",
+    "class": "XI_TIED",
+    "mnemonic": "pminsb",
+    "order": "1r",
+    "width": 16,
+    "evidence": {
+      "probe": "MIN-V16a.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MIN",
+    "sig": "V16c V16c V16c",
+    "features": "sse4.1",
+    "class": "XI_TIED",
+    "mnemonic": "pminsb",
+    "order": "1r",
+    "width": 16,
+    "evidence": {
+      "probe": "MIN-V16c.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MIN",
+    "sig": "V16C V16C V16C",
+    "features": "sse2",
+    "class": "XI_TIED",
+    "mnemonic": "pminub",
+    "order": "1r",
+    "width": 16,
+    "evidence": {
+      "probe": "MIN-V16C.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MIN",
+    "sig": "V8s V8s V8s",
+    "features": "sse2",
+    "class": "XI_TIED",
+    "mnemonic": "pminsw",
+    "order": "1r",
+    "width": 16,
+    "evidence": {
+      "probe": "MIN-V8s.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MIN",
+    "sig": "V8S V8S V8S",
+    "features": "sse4.1",
+    "class": "XI_TIED",
+    "mnemonic": "pminuw",
+    "order": "1r",
+    "width": 16,
+    "evidence": {
+      "probe": "MIN-V8S.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MIN",
+    "sig": "V4i V4i V4i",
+    "features": "sse4.1",
+    "class": "XI_TIED",
+    "mnemonic": "pminsd",
+    "order": "1r",
+    "width": 16,
+    "evidence": {
+      "probe": "MIN-V4i.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MIN",
+    "sig": "V4I V4I V4I",
+    "features": "sse4.1",
+    "class": "XI_TIED",
+    "mnemonic": "pminud",
+    "order": "1r",
+    "width": 16,
+    "evidence": {
+      "probe": "MIN-V4I.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MIN",
+    "sig": "V2l V2l V2l",
+    "features": "avx512f,avx512vl",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpminsq",
+    "order": "10r",
+    "width": 16,
+    "evidence": {
+      "probe": "MIN-V2l.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MIN",
+    "sig": "V2L V2L V2L",
+    "features": "avx512f,avx512vl",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpminuq",
+    "order": "10r",
+    "width": 16,
+    "evidence": {
+      "probe": "MIN-V2L.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MIN",
+    "sig": "V2q V2q V2q",
+    "features": "avx512f,avx512vl",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpminsq",
+    "order": "10r",
+    "width": 16,
+    "evidence": {
+      "probe": "MIN-V2q.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MIN",
+    "sig": "V2Q V2Q V2Q",
+    "features": "avx512f,avx512vl",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpminuq",
+    "order": "10r",
+    "width": 16,
+    "evidence": {
+      "probe": "MIN-V2Q.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MIN",
+    "sig": "V32a V32a V32a",
+    "features": "avx2",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpminsb",
+    "order": "10r",
+    "width": 32,
+    "evidence": {
+      "probe": "MIN-V32a.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MIN",
+    "sig": "V32c V32c V32c",
+    "features": "avx2",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpminsb",
+    "order": "10r",
+    "width": 32,
+    "evidence": {
+      "probe": "MIN-V32c.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MIN",
+    "sig": "V32C V32C V32C",
+    "features": "avx2",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpminub",
+    "order": "10r",
+    "width": 32,
+    "evidence": {
+      "probe": "MIN-V32C.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MIN",
+    "sig": "V16s V16s V16s",
+    "features": "avx2",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpminsw",
+    "order": "10r",
+    "width": 32,
+    "evidence": {
+      "probe": "MIN-V16s.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MIN",
+    "sig": "V16S V16S V16S",
+    "features": "avx2",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpminuw",
+    "order": "10r",
+    "width": 32,
+    "evidence": {
+      "probe": "MIN-V16S.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MIN",
+    "sig": "V8i V8i V8i",
+    "features": "avx2",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpminsd",
+    "order": "10r",
+    "width": 32,
+    "evidence": {
+      "probe": "MIN-V8i.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MIN",
+    "sig": "V8I V8I V8I",
+    "features": "avx2",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpminud",
+    "order": "10r",
+    "width": 32,
+    "evidence": {
+      "probe": "MIN-V8I.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MIN",
+    "sig": "V4l V4l V4l",
+    "features": "avx512f,avx512vl",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpminsq",
+    "order": "10r",
+    "width": 32,
+    "evidence": {
+      "probe": "MIN-V4l.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MIN",
+    "sig": "V4L V4L V4L",
+    "features": "avx512f,avx512vl",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpminuq",
+    "order": "10r",
+    "width": 32,
+    "evidence": {
+      "probe": "MIN-V4L.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MIN",
+    "sig": "V4q V4q V4q",
+    "features": "avx512f,avx512vl",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpminsq",
+    "order": "10r",
+    "width": 32,
+    "evidence": {
+      "probe": "MIN-V4q.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MIN",
+    "sig": "V4Q V4Q V4Q",
+    "features": "avx512f,avx512vl",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpminuq",
+    "order": "10r",
+    "width": 32,
+    "evidence": {
+      "probe": "MIN-V4Q.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MIN",
+    "sig": "V64a V64a V64a",
+    "features": "avx512bw",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpminsb",
+    "order": "10r",
+    "width": 64,
+    "evidence": {
+      "probe": "MIN-V64a.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "MIN",
+    "sig": "V64c V64c V64c",
+    "features": "avx512bw",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpminsb",
+    "order": "10r",
+    "width": 64,
+    "evidence": {
+      "probe": "MIN-V64c.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "MIN",
+    "sig": "V64C V64C V64C",
+    "features": "avx512bw",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpminub",
+    "order": "10r",
+    "width": 64,
+    "evidence": {
+      "probe": "MIN-V64C.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "MIN",
+    "sig": "V32s V32s V32s",
+    "features": "avx512bw",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpminsw",
+    "order": "10r",
+    "width": 64,
+    "evidence": {
+      "probe": "MIN-V32s.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "MIN",
+    "sig": "V32S V32S V32S",
+    "features": "avx512bw",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpminuw",
+    "order": "10r",
+    "width": 64,
+    "evidence": {
+      "probe": "MIN-V32S.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "MIN",
+    "sig": "V16i V16i V16i",
+    "features": "avx512f",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpminsd",
+    "order": "10r",
+    "width": 64,
+    "evidence": {
+      "probe": "MIN-V16i.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "MIN",
+    "sig": "V16I V16I V16I",
+    "features": "avx512f",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpminud",
+    "order": "10r",
+    "width": 64,
+    "evidence": {
+      "probe": "MIN-V16I.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "MIN",
+    "sig": "V8l V8l V8l",
+    "features": "avx512f",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpminsq",
+    "order": "10r",
+    "width": 64,
+    "evidence": {
+      "probe": "MIN-V8l.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "MIN",
+    "sig": "V8L V8L V8L",
+    "features": "avx512f",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpminuq",
+    "order": "10r",
+    "width": 64,
+    "evidence": {
+      "probe": "MIN-V8L.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "MIN",
+    "sig": "V8q V8q V8q",
+    "features": "avx512f",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpminsq",
+    "order": "10r",
+    "width": 64,
+    "evidence": {
+      "probe": "MIN-V8q.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "MIN",
+    "sig": "V8Q V8Q V8Q",
+    "features": "avx512f",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpminuq",
+    "order": "10r",
+    "width": 64,
+    "evidence": {
+      "probe": "MIN-V8Q.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "MAX",
+    "sig": "V16a V16a V16a",
+    "features": "sse4.1",
+    "class": "XI_TIED",
+    "mnemonic": "pmaxsb",
+    "order": "1r",
+    "width": 16,
+    "evidence": {
+      "probe": "MAX-V16a.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MAX",
+    "sig": "V16c V16c V16c",
+    "features": "sse4.1",
+    "class": "XI_TIED",
+    "mnemonic": "pmaxsb",
+    "order": "1r",
+    "width": 16,
+    "evidence": {
+      "probe": "MAX-V16c.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MAX",
+    "sig": "V16C V16C V16C",
+    "features": "sse2",
+    "class": "XI_TIED",
+    "mnemonic": "pmaxub",
+    "order": "1r",
+    "width": 16,
+    "evidence": {
+      "probe": "MAX-V16C.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MAX",
+    "sig": "V8s V8s V8s",
+    "features": "sse2",
+    "class": "XI_TIED",
+    "mnemonic": "pmaxsw",
+    "order": "1r",
+    "width": 16,
+    "evidence": {
+      "probe": "MAX-V8s.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MAX",
+    "sig": "V8S V8S V8S",
+    "features": "sse4.1",
+    "class": "XI_TIED",
+    "mnemonic": "pmaxuw",
+    "order": "1r",
+    "width": 16,
+    "evidence": {
+      "probe": "MAX-V8S.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MAX",
+    "sig": "V4i V4i V4i",
+    "features": "sse4.1",
+    "class": "XI_TIED",
+    "mnemonic": "pmaxsd",
+    "order": "1r",
+    "width": 16,
+    "evidence": {
+      "probe": "MAX-V4i.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MAX",
+    "sig": "V4I V4I V4I",
+    "features": "sse4.1",
+    "class": "XI_TIED",
+    "mnemonic": "pmaxud",
+    "order": "1r",
+    "width": 16,
+    "evidence": {
+      "probe": "MAX-V4I.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MAX",
+    "sig": "V2l V2l V2l",
+    "features": "avx512f,avx512vl",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpmaxsq",
+    "order": "10r",
+    "width": 16,
+    "evidence": {
+      "probe": "MAX-V2l.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MAX",
+    "sig": "V2L V2L V2L",
+    "features": "avx512f,avx512vl",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpmaxuq",
+    "order": "10r",
+    "width": 16,
+    "evidence": {
+      "probe": "MAX-V2L.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MAX",
+    "sig": "V2q V2q V2q",
+    "features": "avx512f,avx512vl",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpmaxsq",
+    "order": "10r",
+    "width": 16,
+    "evidence": {
+      "probe": "MAX-V2q.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MAX",
+    "sig": "V2Q V2Q V2Q",
+    "features": "avx512f,avx512vl",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpmaxuq",
+    "order": "10r",
+    "width": 16,
+    "evidence": {
+      "probe": "MAX-V2Q.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MAX",
+    "sig": "V32a V32a V32a",
+    "features": "avx2",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpmaxsb",
+    "order": "10r",
+    "width": 32,
+    "evidence": {
+      "probe": "MAX-V32a.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MAX",
+    "sig": "V32c V32c V32c",
+    "features": "avx2",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpmaxsb",
+    "order": "10r",
+    "width": 32,
+    "evidence": {
+      "probe": "MAX-V32c.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MAX",
+    "sig": "V32C V32C V32C",
+    "features": "avx2",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpmaxub",
+    "order": "10r",
+    "width": 32,
+    "evidence": {
+      "probe": "MAX-V32C.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MAX",
+    "sig": "V16s V16s V16s",
+    "features": "avx2",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpmaxsw",
+    "order": "10r",
+    "width": 32,
+    "evidence": {
+      "probe": "MAX-V16s.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MAX",
+    "sig": "V16S V16S V16S",
+    "features": "avx2",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpmaxuw",
+    "order": "10r",
+    "width": 32,
+    "evidence": {
+      "probe": "MAX-V16S.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MAX",
+    "sig": "V8i V8i V8i",
+    "features": "avx2",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpmaxsd",
+    "order": "10r",
+    "width": 32,
+    "evidence": {
+      "probe": "MAX-V8i.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MAX",
+    "sig": "V8I V8I V8I",
+    "features": "avx2",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpmaxud",
+    "order": "10r",
+    "width": 32,
+    "evidence": {
+      "probe": "MAX-V8I.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MAX",
+    "sig": "V4l V4l V4l",
+    "features": "avx512f,avx512vl",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpmaxsq",
+    "order": "10r",
+    "width": 32,
+    "evidence": {
+      "probe": "MAX-V4l.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MAX",
+    "sig": "V4L V4L V4L",
+    "features": "avx512f,avx512vl",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpmaxuq",
+    "order": "10r",
+    "width": 32,
+    "evidence": {
+      "probe": "MAX-V4L.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MAX",
+    "sig": "V4q V4q V4q",
+    "features": "avx512f,avx512vl",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpmaxsq",
+    "order": "10r",
+    "width": 32,
+    "evidence": {
+      "probe": "MAX-V4q.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MAX",
+    "sig": "V4Q V4Q V4Q",
+    "features": "avx512f,avx512vl",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpmaxuq",
+    "order": "10r",
+    "width": 32,
+    "evidence": {
+      "probe": "MAX-V4Q.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "MAX",
+    "sig": "V64a V64a V64a",
+    "features": "avx512bw",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpmaxsb",
+    "order": "10r",
+    "width": 64,
+    "evidence": {
+      "probe": "MAX-V64a.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "MAX",
+    "sig": "V64c V64c V64c",
+    "features": "avx512bw",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpmaxsb",
+    "order": "10r",
+    "width": 64,
+    "evidence": {
+      "probe": "MAX-V64c.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "MAX",
+    "sig": "V64C V64C V64C",
+    "features": "avx512bw",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpmaxub",
+    "order": "10r",
+    "width": 64,
+    "evidence": {
+      "probe": "MAX-V64C.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "MAX",
+    "sig": "V32s V32s V32s",
+    "features": "avx512bw",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpmaxsw",
+    "order": "10r",
+    "width": 64,
+    "evidence": {
+      "probe": "MAX-V32s.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "MAX",
+    "sig": "V32S V32S V32S",
+    "features": "avx512bw",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpmaxuw",
+    "order": "10r",
+    "width": 64,
+    "evidence": {
+      "probe": "MAX-V32S.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "MAX",
+    "sig": "V16i V16i V16i",
+    "features": "avx512f",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpmaxsd",
+    "order": "10r",
+    "width": 64,
+    "evidence": {
+      "probe": "MAX-V16i.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "MAX",
+    "sig": "V16I V16I V16I",
+    "features": "avx512f",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpmaxud",
+    "order": "10r",
+    "width": 64,
+    "evidence": {
+      "probe": "MAX-V16I.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "MAX",
+    "sig": "V8l V8l V8l",
+    "features": "avx512f",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpmaxsq",
+    "order": "10r",
+    "width": 64,
+    "evidence": {
+      "probe": "MAX-V8l.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "MAX",
+    "sig": "V8L V8L V8L",
+    "features": "avx512f",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpmaxuq",
+    "order": "10r",
+    "width": 64,
+    "evidence": {
+      "probe": "MAX-V8L.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "MAX",
+    "sig": "V8q V8q V8q",
+    "features": "avx512f",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpmaxsq",
+    "order": "10r",
+    "width": 64,
+    "evidence": {
+      "probe": "MAX-V8q.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "MAX",
+    "sig": "V8Q V8Q V8Q",
+    "features": "avx512f",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpmaxuq",
+    "order": "10r",
+    "width": 64,
+    "evidence": {
+      "probe": "MAX-V8Q.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "ADD_SAT",
+    "sig": "V16a V16a V16a",
+    "features": "sse2",
+    "class": "XI_TIED",
+    "mnemonic": "paddsb",
+    "order": "1r",
+    "width": 16,
+    "evidence": {
+      "probe": "ADD_SAT-V16a.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "ADD_SAT",
+    "sig": "V16c V16c V16c",
+    "features": "sse2",
+    "class": "XI_TIED",
+    "mnemonic": "paddsb",
+    "order": "1r",
+    "width": 16,
+    "evidence": {
+      "probe": "ADD_SAT-V16c.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "ADD_SAT",
+    "sig": "V16C V16C V16C",
+    "features": "sse2",
+    "class": "XI_TIED",
+    "mnemonic": "paddusb",
+    "order": "1r",
+    "width": 16,
+    "evidence": {
+      "probe": "ADD_SAT-V16C.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "ADD_SAT",
+    "sig": "V8s V8s V8s",
+    "features": "sse2",
+    "class": "XI_TIED",
+    "mnemonic": "paddsw",
+    "order": "1r",
+    "width": 16,
+    "evidence": {
+      "probe": "ADD_SAT-V8s.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "ADD_SAT",
+    "sig": "V8S V8S V8S",
+    "features": "sse2",
+    "class": "XI_TIED",
+    "mnemonic": "paddusw",
+    "order": "1r",
+    "width": 16,
+    "evidence": {
+      "probe": "ADD_SAT-V8S.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "ADD_SAT",
+    "sig": "V32a V32a V32a",
+    "features": "avx2",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpaddsb",
+    "order": "10r",
+    "width": 32,
+    "evidence": {
+      "probe": "ADD_SAT-V32a.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "ADD_SAT",
+    "sig": "V32c V32c V32c",
+    "features": "avx2",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpaddsb",
+    "order": "10r",
+    "width": 32,
+    "evidence": {
+      "probe": "ADD_SAT-V32c.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "ADD_SAT",
+    "sig": "V32C V32C V32C",
+    "features": "avx2",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpaddusb",
+    "order": "10r",
+    "width": 32,
+    "evidence": {
+      "probe": "ADD_SAT-V32C.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "ADD_SAT",
+    "sig": "V16s V16s V16s",
+    "features": "avx2",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpaddsw",
+    "order": "10r",
+    "width": 32,
+    "evidence": {
+      "probe": "ADD_SAT-V16s.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "ADD_SAT",
+    "sig": "V16S V16S V16S",
+    "features": "avx2",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpaddusw",
+    "order": "10r",
+    "width": 32,
+    "evidence": {
+      "probe": "ADD_SAT-V16S.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "ADD_SAT",
+    "sig": "V64a V64a V64a",
+    "features": "avx512bw",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpaddsb",
+    "order": "10r",
+    "width": 64,
+    "evidence": {
+      "probe": "ADD_SAT-V64a.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "ADD_SAT",
+    "sig": "V64c V64c V64c",
+    "features": "avx512bw",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpaddsb",
+    "order": "10r",
+    "width": 64,
+    "evidence": {
+      "probe": "ADD_SAT-V64c.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "ADD_SAT",
+    "sig": "V64C V64C V64C",
+    "features": "avx512bw",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpaddusb",
+    "order": "10r",
+    "width": 64,
+    "evidence": {
+      "probe": "ADD_SAT-V64C.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "ADD_SAT",
+    "sig": "V32s V32s V32s",
+    "features": "avx512bw",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpaddsw",
+    "order": "10r",
+    "width": 64,
+    "evidence": {
+      "probe": "ADD_SAT-V32s.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "ADD_SAT",
+    "sig": "V32S V32S V32S",
+    "features": "avx512bw",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpaddusw",
+    "order": "10r",
+    "width": 64,
+    "evidence": {
+      "probe": "ADD_SAT-V32S.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "SUB_SAT",
+    "sig": "V16a V16a V16a",
+    "features": "sse2",
+    "class": "XI_TIED",
+    "mnemonic": "psubsb",
+    "order": "1r",
+    "width": 16,
+    "evidence": {
+      "probe": "SUB_SAT-V16a.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "SUB_SAT",
+    "sig": "V16c V16c V16c",
+    "features": "sse2",
+    "class": "XI_TIED",
+    "mnemonic": "psubsb",
+    "order": "1r",
+    "width": 16,
+    "evidence": {
+      "probe": "SUB_SAT-V16c.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "SUB_SAT",
+    "sig": "V16C V16C V16C",
+    "features": "sse2",
+    "class": "XI_TIED",
+    "mnemonic": "psubusb",
+    "order": "1r",
+    "width": 16,
+    "evidence": {
+      "probe": "SUB_SAT-V16C.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "SUB_SAT",
+    "sig": "V8s V8s V8s",
+    "features": "sse2",
+    "class": "XI_TIED",
+    "mnemonic": "psubsw",
+    "order": "1r",
+    "width": 16,
+    "evidence": {
+      "probe": "SUB_SAT-V8s.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "SUB_SAT",
+    "sig": "V8S V8S V8S",
+    "features": "sse2",
+    "class": "XI_TIED",
+    "mnemonic": "psubusw",
+    "order": "1r",
+    "width": 16,
+    "evidence": {
+      "probe": "SUB_SAT-V8S.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "SUB_SAT",
+    "sig": "V32a V32a V32a",
+    "features": "avx2",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpsubsb",
+    "order": "10r",
+    "width": 32,
+    "evidence": {
+      "probe": "SUB_SAT-V32a.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "SUB_SAT",
+    "sig": "V32c V32c V32c",
+    "features": "avx2",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpsubsb",
+    "order": "10r",
+    "width": 32,
+    "evidence": {
+      "probe": "SUB_SAT-V32c.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "SUB_SAT",
+    "sig": "V32C V32C V32C",
+    "features": "avx2",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpsubusb",
+    "order": "10r",
+    "width": 32,
+    "evidence": {
+      "probe": "SUB_SAT-V32C.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "SUB_SAT",
+    "sig": "V16s V16s V16s",
+    "features": "avx2",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpsubsw",
+    "order": "10r",
+    "width": 32,
+    "evidence": {
+      "probe": "SUB_SAT-V16s.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "SUB_SAT",
+    "sig": "V16S V16S V16S",
+    "features": "avx2",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpsubusw",
+    "order": "10r",
+    "width": 32,
+    "evidence": {
+      "probe": "SUB_SAT-V16S.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "SUB_SAT",
+    "sig": "V64a V64a V64a",
+    "features": "avx512bw",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpsubsb",
+    "order": "10r",
+    "width": 64,
+    "evidence": {
+      "probe": "SUB_SAT-V64a.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "SUB_SAT",
+    "sig": "V64c V64c V64c",
+    "features": "avx512bw",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpsubsb",
+    "order": "10r",
+    "width": 64,
+    "evidence": {
+      "probe": "SUB_SAT-V64c.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "SUB_SAT",
+    "sig": "V64C V64C V64C",
+    "features": "avx512bw",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpsubusb",
+    "order": "10r",
+    "width": 64,
+    "evidence": {
+      "probe": "SUB_SAT-V64C.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "SUB_SAT",
+    "sig": "V32s V32s V32s",
+    "features": "avx512bw",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpsubsw",
+    "order": "10r",
+    "width": 64,
+    "evidence": {
+      "probe": "SUB_SAT-V32s.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "SUB_SAT",
+    "sig": "V32S V32S V32S",
+    "features": "avx512bw",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpsubusw",
+    "order": "10r",
+    "width": 64,
+    "evidence": {
+      "probe": "SUB_SAT-V32S.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "POPCOUNT",
+    "sig": "V16a V16a",
+    "features": "avx512bitalg,avx512vl",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpopcntb",
+    "order": "0r",
+    "width": 16,
+    "evidence": {
+      "probe": "POPCOUNT-V16a.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "POPCOUNT",
+    "sig": "V16c V16c",
+    "features": "avx512bitalg,avx512vl",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpopcntb",
+    "order": "0r",
+    "width": 16,
+    "evidence": {
+      "probe": "POPCOUNT-V16c.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "POPCOUNT",
+    "sig": "V16C V16C",
+    "features": "avx512bitalg,avx512vl",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpopcntb",
+    "order": "0r",
+    "width": 16,
+    "evidence": {
+      "probe": "POPCOUNT-V16C.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "POPCOUNT",
+    "sig": "V8s V8s",
+    "features": "avx512bitalg,avx512vl",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpopcntw",
+    "order": "0r",
+    "width": 16,
+    "evidence": {
+      "probe": "POPCOUNT-V8s.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "POPCOUNT",
+    "sig": "V8S V8S",
+    "features": "avx512bitalg,avx512vl",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpopcntw",
+    "order": "0r",
+    "width": 16,
+    "evidence": {
+      "probe": "POPCOUNT-V8S.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "POPCOUNT",
+    "sig": "V4i V4i",
+    "features": "avx512vpopcntdq,avx512vl",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpopcntd",
+    "order": "0r",
+    "width": 16,
+    "evidence": {
+      "probe": "POPCOUNT-V4i.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "POPCOUNT",
+    "sig": "V4I V4I",
+    "features": "avx512vpopcntdq,avx512vl",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpopcntd",
+    "order": "0r",
+    "width": 16,
+    "evidence": {
+      "probe": "POPCOUNT-V4I.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "POPCOUNT",
+    "sig": "V2l V2l",
+    "features": "avx512vpopcntdq,avx512vl",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpopcntq",
+    "order": "0r",
+    "width": 16,
+    "evidence": {
+      "probe": "POPCOUNT-V2l.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "POPCOUNT",
+    "sig": "V2L V2L",
+    "features": "avx512vpopcntdq,avx512vl",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpopcntq",
+    "order": "0r",
+    "width": 16,
+    "evidence": {
+      "probe": "POPCOUNT-V2L.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "POPCOUNT",
+    "sig": "V2q V2q",
+    "features": "avx512vpopcntdq,avx512vl",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpopcntq",
+    "order": "0r",
+    "width": 16,
+    "evidence": {
+      "probe": "POPCOUNT-V2q.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "POPCOUNT",
+    "sig": "V2Q V2Q",
+    "features": "avx512vpopcntdq,avx512vl",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpopcntq",
+    "order": "0r",
+    "width": 16,
+    "evidence": {
+      "probe": "POPCOUNT-V2Q.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "POPCOUNT",
+    "sig": "V32a V32a",
+    "features": "avx512bitalg,avx512vl",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpopcntb",
+    "order": "0r",
+    "width": 32,
+    "evidence": {
+      "probe": "POPCOUNT-V32a.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "POPCOUNT",
+    "sig": "V32c V32c",
+    "features": "avx512bitalg,avx512vl",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpopcntb",
+    "order": "0r",
+    "width": 32,
+    "evidence": {
+      "probe": "POPCOUNT-V32c.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "POPCOUNT",
+    "sig": "V32C V32C",
+    "features": "avx512bitalg,avx512vl",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpopcntb",
+    "order": "0r",
+    "width": 32,
+    "evidence": {
+      "probe": "POPCOUNT-V32C.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "POPCOUNT",
+    "sig": "V16s V16s",
+    "features": "avx512bitalg,avx512vl",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpopcntw",
+    "order": "0r",
+    "width": 32,
+    "evidence": {
+      "probe": "POPCOUNT-V16s.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "POPCOUNT",
+    "sig": "V16S V16S",
+    "features": "avx512bitalg,avx512vl",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpopcntw",
+    "order": "0r",
+    "width": 32,
+    "evidence": {
+      "probe": "POPCOUNT-V16S.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "POPCOUNT",
+    "sig": "V8i V8i",
+    "features": "avx512vpopcntdq,avx512vl",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpopcntd",
+    "order": "0r",
+    "width": 32,
+    "evidence": {
+      "probe": "POPCOUNT-V8i.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "POPCOUNT",
+    "sig": "V8I V8I",
+    "features": "avx512vpopcntdq,avx512vl",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpopcntd",
+    "order": "0r",
+    "width": 32,
+    "evidence": {
+      "probe": "POPCOUNT-V8I.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "POPCOUNT",
+    "sig": "V4l V4l",
+    "features": "avx512vpopcntdq,avx512vl",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpopcntq",
+    "order": "0r",
+    "width": 32,
+    "evidence": {
+      "probe": "POPCOUNT-V4l.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "POPCOUNT",
+    "sig": "V4L V4L",
+    "features": "avx512vpopcntdq,avx512vl",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpopcntq",
+    "order": "0r",
+    "width": 32,
+    "evidence": {
+      "probe": "POPCOUNT-V4L.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "POPCOUNT",
+    "sig": "V4q V4q",
+    "features": "avx512vpopcntdq,avx512vl",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpopcntq",
+    "order": "0r",
+    "width": 32,
+    "evidence": {
+      "probe": "POPCOUNT-V4q.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "POPCOUNT",
+    "sig": "V4Q V4Q",
+    "features": "avx512vpopcntdq,avx512vl",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpopcntq",
+    "order": "0r",
+    "width": 32,
+    "evidence": {
+      "probe": "POPCOUNT-V4Q.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "POPCOUNT",
+    "sig": "V64a V64a",
+    "features": "avx512bitalg",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpopcntb",
+    "order": "0r",
+    "width": 64,
+    "evidence": {
+      "probe": "POPCOUNT-V64a.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "POPCOUNT",
+    "sig": "V64c V64c",
+    "features": "avx512bitalg",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpopcntb",
+    "order": "0r",
+    "width": 64,
+    "evidence": {
+      "probe": "POPCOUNT-V64c.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "POPCOUNT",
+    "sig": "V64C V64C",
+    "features": "avx512bitalg",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpopcntb",
+    "order": "0r",
+    "width": 64,
+    "evidence": {
+      "probe": "POPCOUNT-V64C.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "POPCOUNT",
+    "sig": "V32s V32s",
+    "features": "avx512bitalg",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpopcntw",
+    "order": "0r",
+    "width": 64,
+    "evidence": {
+      "probe": "POPCOUNT-V32s.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "POPCOUNT",
+    "sig": "V32S V32S",
+    "features": "avx512bitalg",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpopcntw",
+    "order": "0r",
+    "width": 64,
+    "evidence": {
+      "probe": "POPCOUNT-V32S.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "POPCOUNT",
+    "sig": "V16i V16i",
+    "features": "avx512vpopcntdq",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpopcntd",
+    "order": "0r",
+    "width": 64,
+    "evidence": {
+      "probe": "POPCOUNT-V16i.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "POPCOUNT",
+    "sig": "V16I V16I",
+    "features": "avx512vpopcntdq",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpopcntd",
+    "order": "0r",
+    "width": 64,
+    "evidence": {
+      "probe": "POPCOUNT-V16I.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "POPCOUNT",
+    "sig": "V8l V8l",
+    "features": "avx512vpopcntdq",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpopcntq",
+    "order": "0r",
+    "width": 64,
+    "evidence": {
+      "probe": "POPCOUNT-V8l.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "POPCOUNT",
+    "sig": "V8L V8L",
+    "features": "avx512vpopcntdq",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpopcntq",
+    "order": "0r",
+    "width": 64,
+    "evidence": {
+      "probe": "POPCOUNT-V8L.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "POPCOUNT",
+    "sig": "V8q V8q",
+    "features": "avx512vpopcntdq",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpopcntq",
+    "order": "0r",
+    "width": 64,
+    "evidence": {
+      "probe": "POPCOUNT-V8q.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "POPCOUNT",
+    "sig": "V8Q V8Q",
+    "features": "avx512vpopcntdq",
+    "class": "XI_DIRECT",
+    "mnemonic": "vpopcntq",
+    "order": "0r",
+    "width": 64,
+    "evidence": {
+      "probe": "POPCOUNT-V8Q.c",
+      "kind": "Clang direct instruction",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "REDUCE_ADD",
+    "sig": "a V16a",
+    "features": "sse2",
+    "class": "XI_REDUCE",
+    "mnemonic": "paddb",
+    "order": "0r",
+    "width": 16,
+    "evidence": {
+      "probe": "REDUCE_ADD-V16a.c",
+      "kind": "Clang reduction sequence",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "REDUCE_ADD",
+    "sig": "c V16c",
+    "features": "sse2",
+    "class": "XI_REDUCE",
+    "mnemonic": "paddb",
+    "order": "0r",
+    "width": 16,
+    "evidence": {
+      "probe": "REDUCE_ADD-V16c.c",
+      "kind": "Clang reduction sequence",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "REDUCE_ADD",
+    "sig": "C V16C",
+    "features": "sse2",
+    "class": "XI_REDUCE",
+    "mnemonic": "paddb",
+    "order": "0r",
+    "width": 16,
+    "evidence": {
+      "probe": "REDUCE_ADD-V16C.c",
+      "kind": "Clang reduction sequence",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "REDUCE_ADD",
+    "sig": "s V8s",
+    "features": "sse2",
+    "class": "XI_REDUCE",
+    "mnemonic": "paddw",
+    "order": "0r",
+    "width": 16,
+    "evidence": {
+      "probe": "REDUCE_ADD-V8s.c",
+      "kind": "Clang reduction sequence",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "REDUCE_ADD",
+    "sig": "S V8S",
+    "features": "sse2",
+    "class": "XI_REDUCE",
+    "mnemonic": "paddw",
+    "order": "0r",
+    "width": 16,
+    "evidence": {
+      "probe": "REDUCE_ADD-V8S.c",
+      "kind": "Clang reduction sequence",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "REDUCE_ADD",
+    "sig": "i V4i",
+    "features": "sse2",
+    "class": "XI_REDUCE",
+    "mnemonic": "paddd",
+    "order": "0r",
+    "width": 16,
+    "evidence": {
+      "probe": "REDUCE_ADD-V4i.c",
+      "kind": "Clang reduction sequence",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "REDUCE_ADD",
+    "sig": "I V4I",
+    "features": "sse2",
+    "class": "XI_REDUCE",
+    "mnemonic": "paddd",
+    "order": "0r",
+    "width": 16,
+    "evidence": {
+      "probe": "REDUCE_ADD-V4I.c",
+      "kind": "Clang reduction sequence",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "REDUCE_ADD",
+    "sig": "l V2l",
+    "features": "sse2",
+    "class": "XI_REDUCE",
+    "mnemonic": "paddq",
+    "order": "0r",
+    "width": 16,
+    "evidence": {
+      "probe": "REDUCE_ADD-V2l.c",
+      "kind": "Clang reduction sequence",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "REDUCE_ADD",
+    "sig": "L V2L",
+    "features": "sse2",
+    "class": "XI_REDUCE",
+    "mnemonic": "paddq",
+    "order": "0r",
+    "width": 16,
+    "evidence": {
+      "probe": "REDUCE_ADD-V2L.c",
+      "kind": "Clang reduction sequence",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "REDUCE_ADD",
+    "sig": "q V2q",
+    "features": "sse2",
+    "class": "XI_REDUCE",
+    "mnemonic": "paddq",
+    "order": "0r",
+    "width": 16,
+    "evidence": {
+      "probe": "REDUCE_ADD-V2q.c",
+      "kind": "Clang reduction sequence",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "REDUCE_ADD",
+    "sig": "Q V2Q",
+    "features": "sse2",
+    "class": "XI_REDUCE",
+    "mnemonic": "paddq",
+    "order": "0r",
+    "width": 16,
+    "evidence": {
+      "probe": "REDUCE_ADD-V2Q.c",
+      "kind": "Clang reduction sequence",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "REDUCE_ADD",
+    "sig": "a V32a",
+    "features": "avx2",
+    "class": "XI_REDUCE",
+    "mnemonic": "vpaddb",
+    "order": "0r",
+    "width": 32,
+    "evidence": {
+      "probe": "REDUCE_ADD-V32a.c",
+      "kind": "Clang reduction sequence",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "REDUCE_ADD",
+    "sig": "c V32c",
+    "features": "avx2",
+    "class": "XI_REDUCE",
+    "mnemonic": "vpaddb",
+    "order": "0r",
+    "width": 32,
+    "evidence": {
+      "probe": "REDUCE_ADD-V32c.c",
+      "kind": "Clang reduction sequence",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "REDUCE_ADD",
+    "sig": "C V32C",
+    "features": "avx2",
+    "class": "XI_REDUCE",
+    "mnemonic": "vpaddb",
+    "order": "0r",
+    "width": 32,
+    "evidence": {
+      "probe": "REDUCE_ADD-V32C.c",
+      "kind": "Clang reduction sequence",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "REDUCE_ADD",
+    "sig": "s V16s",
+    "features": "avx2",
+    "class": "XI_REDUCE",
+    "mnemonic": "vpaddw",
+    "order": "0r",
+    "width": 32,
+    "evidence": {
+      "probe": "REDUCE_ADD-V16s.c",
+      "kind": "Clang reduction sequence",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "REDUCE_ADD",
+    "sig": "S V16S",
+    "features": "avx2",
+    "class": "XI_REDUCE",
+    "mnemonic": "vpaddw",
+    "order": "0r",
+    "width": 32,
+    "evidence": {
+      "probe": "REDUCE_ADD-V16S.c",
+      "kind": "Clang reduction sequence",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "REDUCE_ADD",
+    "sig": "i V8i",
+    "features": "avx2",
+    "class": "XI_REDUCE",
+    "mnemonic": "vpaddd",
+    "order": "0r",
+    "width": 32,
+    "evidence": {
+      "probe": "REDUCE_ADD-V8i.c",
+      "kind": "Clang reduction sequence",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "REDUCE_ADD",
+    "sig": "I V8I",
+    "features": "avx2",
+    "class": "XI_REDUCE",
+    "mnemonic": "vpaddd",
+    "order": "0r",
+    "width": 32,
+    "evidence": {
+      "probe": "REDUCE_ADD-V8I.c",
+      "kind": "Clang reduction sequence",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "REDUCE_ADD",
+    "sig": "l V4l",
+    "features": "avx2",
+    "class": "XI_REDUCE",
+    "mnemonic": "vpaddq",
+    "order": "0r",
+    "width": 32,
+    "evidence": {
+      "probe": "REDUCE_ADD-V4l.c",
+      "kind": "Clang reduction sequence",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "REDUCE_ADD",
+    "sig": "L V4L",
+    "features": "avx2",
+    "class": "XI_REDUCE",
+    "mnemonic": "vpaddq",
+    "order": "0r",
+    "width": 32,
+    "evidence": {
+      "probe": "REDUCE_ADD-V4L.c",
+      "kind": "Clang reduction sequence",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "REDUCE_ADD",
+    "sig": "q V4q",
+    "features": "avx2",
+    "class": "XI_REDUCE",
+    "mnemonic": "vpaddq",
+    "order": "0r",
+    "width": 32,
+    "evidence": {
+      "probe": "REDUCE_ADD-V4q.c",
+      "kind": "Clang reduction sequence",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "REDUCE_ADD",
+    "sig": "Q V4Q",
+    "features": "avx2",
+    "class": "XI_REDUCE",
+    "mnemonic": "vpaddq",
+    "order": "0r",
+    "width": 32,
+    "evidence": {
+      "probe": "REDUCE_ADD-V4Q.c",
+      "kind": "Clang reduction sequence",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrSSE.td"
+    }
+  },
+  {
+    "op": "REDUCE_ADD",
+    "sig": "a V64a",
+    "features": "avx512bw",
+    "class": "XI_REDUCE",
+    "mnemonic": "vpaddb",
+    "order": "0r",
+    "width": 64,
+    "evidence": {
+      "probe": "REDUCE_ADD-V64a.c",
+      "kind": "Clang reduction sequence",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "REDUCE_ADD",
+    "sig": "c V64c",
+    "features": "avx512bw",
+    "class": "XI_REDUCE",
+    "mnemonic": "vpaddb",
+    "order": "0r",
+    "width": 64,
+    "evidence": {
+      "probe": "REDUCE_ADD-V64c.c",
+      "kind": "Clang reduction sequence",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "REDUCE_ADD",
+    "sig": "C V64C",
+    "features": "avx512bw",
+    "class": "XI_REDUCE",
+    "mnemonic": "vpaddb",
+    "order": "0r",
+    "width": 64,
+    "evidence": {
+      "probe": "REDUCE_ADD-V64C.c",
+      "kind": "Clang reduction sequence",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "REDUCE_ADD",
+    "sig": "s V32s",
+    "features": "avx512bw",
+    "class": "XI_REDUCE",
+    "mnemonic": "vpaddw",
+    "order": "0r",
+    "width": 64,
+    "evidence": {
+      "probe": "REDUCE_ADD-V32s.c",
+      "kind": "Clang reduction sequence",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "REDUCE_ADD",
+    "sig": "S V32S",
+    "features": "avx512bw",
+    "class": "XI_REDUCE",
+    "mnemonic": "vpaddw",
+    "order": "0r",
+    "width": 64,
+    "evidence": {
+      "probe": "REDUCE_ADD-V32S.c",
+      "kind": "Clang reduction sequence",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "REDUCE_ADD",
+    "sig": "i V16i",
+    "features": "avx512f",
+    "class": "XI_REDUCE",
+    "mnemonic": "vpaddd",
+    "order": "0r",
+    "width": 64,
+    "evidence": {
+      "probe": "REDUCE_ADD-V16i.c",
+      "kind": "Clang reduction sequence",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "REDUCE_ADD",
+    "sig": "I V16I",
+    "features": "avx512f",
+    "class": "XI_REDUCE",
+    "mnemonic": "vpaddd",
+    "order": "0r",
+    "width": 64,
+    "evidence": {
+      "probe": "REDUCE_ADD-V16I.c",
+      "kind": "Clang reduction sequence",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "REDUCE_ADD",
+    "sig": "l V8l",
+    "features": "avx512f",
+    "class": "XI_REDUCE",
+    "mnemonic": "vpaddq",
+    "order": "0r",
+    "width": 64,
+    "evidence": {
+      "probe": "REDUCE_ADD-V8l.c",
+      "kind": "Clang reduction sequence",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "REDUCE_ADD",
+    "sig": "L V8L",
+    "features": "avx512f",
+    "class": "XI_REDUCE",
+    "mnemonic": "vpaddq",
+    "order": "0r",
+    "width": 64,
+    "evidence": {
+      "probe": "REDUCE_ADD-V8L.c",
+      "kind": "Clang reduction sequence",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "REDUCE_ADD",
+    "sig": "q V8q",
+    "features": "avx512f",
+    "class": "XI_REDUCE",
+    "mnemonic": "vpaddq",
+    "order": "0r",
+    "width": 64,
+    "evidence": {
+      "probe": "REDUCE_ADD-V8q.c",
+      "kind": "Clang reduction sequence",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  },
+  {
+    "op": "REDUCE_ADD",
+    "sig": "Q V8Q",
+    "features": "avx512f",
+    "class": "XI_REDUCE",
+    "mnemonic": "vpaddq",
+    "order": "0r",
+    "width": 64,
+    "evidence": {
+      "probe": "REDUCE_ADD-V8Q.c",
+      "kind": "Clang reduction sequence",
+      "llvm_source": "llvm/lib/Target/X86/X86InstrAVX512.td"
+    }
+  }
+]
