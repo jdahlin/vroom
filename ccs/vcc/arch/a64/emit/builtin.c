@@ -911,9 +911,10 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 	}
 	case BI_OBJECT_SIZE:
 	case BI_DYNAMIC_OBJECT_SIZE: {
-		val t = gen(e, arg[1]);
-
-		return vconst(t.k == V_CONST && (t.i & 2) ? 0 : (i128)(uint64_t)-1);
+		cval cv;
+		if (cc_eval(c, n, &cv) && cv.kind == CV_INT)
+			return vconst(cv.i);
+		return vconst((i128)(uint64_t)-1);
 	}
 	case BI_IS_CONSTANT_EVALUATED:
 		return vconst(0);

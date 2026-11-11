@@ -142,6 +142,8 @@ enum {
 	SF_WUR = 1u << 20,	/* warn_unused_result / nodiscard (attrs record's wur) */
 	SF_NONNULL = 1u << 21,	/* a parameter declared nonnull */
 	SF_INVALID = 1u << 23,	/* declared with an error (incomplete type): uses report nothing more (clang) */
+	SF_BOS_QUERY = 1u << 24,	/* function contains an object-size query */
+	SF_BOS_INIT = 1u << 25,	/* local pointer has a certified immutable initializer */
 	SF_UVPEND = 1u << 22,	/* -Wuninitialized: declared without an initializer, not yet assigned in the text */
 };
 

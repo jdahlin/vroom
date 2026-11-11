@@ -389,6 +389,181 @@ static int classify_type(cc *c, qty t)
 bool cc_eval(cc *c, uint32_t n, cval *v) { return eval(c, n, v); }
 bool cc_is_signed(cc *c, qty t) { return is_signed(c, t); }
 
+/* Object-size queries never evaluate their pointer operand. Track an address's
+   enclosing allocation and nearest subobject independently, so modes 0/2 and
+   1/3 retain their distinct bounds through casts and pointer arithmetic. */
+typedef struct object_bound {
+	i128 offset, whole, sub;
+	qty storage;
+} object_bound;
+
+static uint64_t object_init_extent(cc *c, qty ty, uint32_t init, unsigned depth)
+{
+	uint64_t size = ty_size(c, ty);
+	if (!init || depth > 64)
+		return size;
+	const node *x = N(init);
+	if (is_array(c, ty) && x->op == N_STR) {
+		const cstr *s = &c->strs[x->a];
+		uint64_t n = (uint64_t)s->n * s->esz;
+		return (T(c, ty)->flags & TF_INCOMPLETE) && n > size ? n : size;
+	}
+	if (x->op != N_INIT)
+		return size;
+	const uint32_t *v = &c->lists[x->b];
+	if (x->aux == 1) {
+		if (!(T(c, ty)->flags & TF_INCOMPLETE))
+			return size;
+		uint64_t es = ty_size(c, T(c, ty)->base);
+		for (uint32_t i = 0; i < x->c; i++) {
+			uint64_t end = ((uint64_t)v[3 * i + 1] + 1) * es;
+			if (end > size) size = end;
+		}
+	} else if (is_record(c, ty)) {
+		const tag *r = &c->tags[T(c, ty)->aux];
+		for (uint32_t i = 0; i < x->c && i < r->nfield; i++) {
+			const field *f = &r->f[i];
+			if (!v[i] || f->bitfield || (x->aux == 2 && i != x->a))
+				continue;
+			uint64_t end = f->off / 8 + object_init_extent(c, f->ty, v[i], depth + 1);
+			if (end > size) size = end;
+		}
+	}
+	return size;
+}
+
+static uint64_t object_element_size(cc *c, qty pointer)
+{
+	qty base = T(c, pointer)->base;
+	return KIND(c, base) == TY_VOID || KIND(c, base) == TY_FUNC ? 1 : ty_size(c, base);
+}
+
+static bool object_pointer_bound(cc *c, uint32_t n, object_bound *b, unsigned depth);
+
+static bool object_lvalue_bound(cc *c, uint32_t n, object_bound *b, unsigned depth)
+{
+	if (!n || depth > 64)
+		return false;
+	const node *x = N(n);
+	cval index;
+	switch (x->op) {
+	case N_VAR:
+	case N_COMPLIT: {
+		const sym *s = &c->syms[x->op == N_VAR ? x->a : x->b];
+		if (s->kind != S_VAR || (is_array(c, s->ty) &&
+		    ((T(c, s->ty)->flags & TF_VLA) || ((T(c, s->ty)->flags & TF_INCOMPLETE) && !s->body))))
+			return false;
+		*b = (object_bound){ .whole = object_init_extent(c, s->ty, s->body, 0), .storage = s->ty };
+		b->sub = b->whole;
+		return true;
+	}
+	case N_STR:
+		*b = (object_bound){ .whole = (uint64_t)c->strs[x->a].n * c->strs[x->a].esz };
+		b->sub = b->whole;
+		return true;
+	case N_MEMBER: {
+		const field *f = node_field(c, x);
+		if (f->bitfield || !object_lvalue_bound(c, x->a, b, depth + 1))
+			return false;
+		b->offset += f->off / 8;
+		/* Clang treats a trailing array as extending through its enclosing
+		   allocation, even when a fixed bound is written (the struct hack).
+		   A nested record's endpoint was retained by the enclosing member. */
+		if (!(is_array(c, f->ty) && x->c + 1 == c->tags[x->b].nfield))
+			b->sub = b->offset + ty_size(c, f->ty);
+		b->storage = f->ty;
+		return true;
+	}
+	case N_INDEX:
+		if (!object_pointer_bound(c, x->a, b, depth + 1) || !eval(c, x->b, &index) || index.kind != CV_INT)
+			return false;
+		b->offset += index.i * object_element_size(c, N(x->a)->ty);
+		if (is_record(c, x->ty) && b->storage &&
+		    (QUNQ(b->storage) == QUNQ(x->ty) ||
+		     (is_array(c, b->storage) && QUNQ(T(c, b->storage)->base) == QUNQ(x->ty))))
+			b->sub = b->offset + ty_size(c, x->ty);
+		if (b->storage && is_array(c, b->storage))
+			b->storage = T(c, b->storage)->base;
+		return true;
+	case N_DEREF:
+		return object_pointer_bound(c, x->a, b, depth + 1);
+	default:
+		return false;
+	}
+}
+
+static bool object_pointer_bound(cc *c, uint32_t n, object_bound *b, unsigned depth)
+{
+	if (!n || depth > 64)
+		return false;
+	const node *x = N(n);
+	cval index;
+	if (x->op == N_VAR && (c->syms[x->a].flags & SF_BOS_INIT))
+		return object_pointer_bound(c, c->syms[x->a].body, b, depth + 1);
+	if (x->op == N_CALL && !c->o->no_builtin) {
+		uint32_t callee = x->a;
+		while (N(callee)->op == N_CAST || N(callee)->op == N_ADDR)
+			callee = N(callee)->a;
+		if (N(callee)->op != N_VAR)
+			return false;
+		const sym *s = &c->syms[N(callee)->a];
+		if (s->kind != S_FUNC || !(s->flags & SF_GLOBAL) || s->sc == SC_STATIC || s->asmname ||
+		    lib_builtin_disabled(c->o, idstr_(s->name), idlen_(s->name)))
+			return false;
+		const char *name = idstr_(s->name);
+		uint32_t ai = 0;
+		bool multiply = false;
+		if (idlen_(s->name) == 6 && !memcmp(name, "malloc", 6)) { }
+		else if (idlen_(s->name) == 6 && !memcmp(name, "calloc", 6)) multiply = true;
+		else if (idlen_(s->name) == 7 && !memcmp(name, "realloc", 7)) ai = 1;
+		else return false;
+		const ctype *ft = T(c, s->ty);
+		uint32_t nargs = multiply || ai ? 2 : 1;
+		if (ft->kind != TY_FUNC || (ft->flags & (TF_NOPROTO | TF_VARIADIC)) ||
+		    ft->n != nargs || x->c != nargs || !is_ptr(c, ft->base) || !is_void(c, T(c, ft->base)->base))
+			return false;
+		for (uint32_t i = 0; i < nargs; i++) {
+			qty p = c->params[ft->aux + i];
+			if (ai && i == 0 ? (!is_ptr(c, p) || !is_void(c, T(c, p)->base)) : QUNQ(p) != QUNQ(c->t_size))
+				return false;
+		}
+		if (!eval(c, c->lists[x->b + ai], &index) || index.kind != CV_INT || index.i < 0)
+			return false;
+		u128 size = (u128)index.i;
+		if (multiply) {
+			if (!eval(c, c->lists[x->b + 1], &index) || index.kind != CV_INT || index.i < 0)
+				return false;
+			size *= (u128)index.i;
+		}
+		if (size > (ty_size(c, c->t_size) == 4 ? UINT32_MAX : UINT64_MAX))
+			return false;
+		*b = (object_bound){ .whole = (i128)size, .sub = (i128)size };
+		return true;
+	}
+	if (x->op == N_ADDR || (x->op == N_CAST && x->aux == CK_DECAY))
+		return object_lvalue_bound(c, x->a, b, depth + 1);
+	if (x->op == N_CAST && is_ptr(c, N(x->a)->ty)) {
+		if (!object_pointer_bound(c, x->a, b, depth + 1))
+			return false;
+		if (is_ptr(c, x->ty) && is_record(c, T(c, x->ty)->base) &&
+		    QUNQ(T(c, x->ty)->base) != QUNQ(T(c, N(x->a)->ty)->base))
+			b->sub = b->whole;
+		return true;
+	}
+	if (is_array(c, x->ty))
+		return object_lvalue_bound(c, n, b, depth + 1);
+	if (x->op == N_BINARY && (x->aux == T_PLUS || x->aux == T_MINUS)) {
+		uint32_t p = x->a, i = x->b;
+		if (!is_ptr(c, N(p)->ty) && x->aux == T_PLUS) p = x->b, i = x->a;
+		if (!is_ptr(c, N(p)->ty) || !object_pointer_bound(c, p, b, depth + 1) ||
+		    !eval(c, i, &index) || index.kind != CV_INT)
+			return false;
+		b->offset += (x->aux == T_MINUS ? -index.i : index.i) * object_element_size(c, N(p)->ty);
+		return true;
+	}
+	return false;
+}
+
 VPRIV bool eval_builtin(cc *c, const node *x, cval *v)
 {
 	const uint32_t *arg = &c->lists[x->b];
@@ -397,6 +572,18 @@ VPRIV bool eval_builtin(cc *c, const node *x, cval *v)
 	v->kind = CV_INT;
 	v->ice = true;
 	switch (x->aux) {
+	case BI_OBJECT_SIZE: case BI_DYNAMIC_OBJECT_SIZE: {
+		object_bound b;
+		if (!eval(c, arg[1], &a) || a.kind != CV_INT)
+			return false;
+		if (object_pointer_bound(c, arg[0], &b, 0)) {
+			const i128 end = (a.i & 1) && b.sub < b.whole ? b.sub : b.whole;
+			v->i = b.offset < 0 || b.offset > end ? 0 : end - b.offset;
+		} else
+			v->i = a.i & 2 ? 0 : (i128)(uint64_t)-1;
+		v->ice = false;
+		return true;
+	}
 	case BI_CONSTANT_P:
 		if (eval(c, arg[0], &a) && (a.kind == CV_INT || a.kind == CV_FLT || (a.kind == CV_ADDR && a.str && a.i == 0)))
 			v->i = 1;
@@ -592,6 +779,8 @@ VPRIV uint32_t mk_builtin(cc *c, int id, qty ty, uint32_t loc, const vec *args)
 	uint32_t n = mk(c, N_BUILTIN, ty, loc);
 
 	N(n)->aux = (uint16_t)id;
+	if (c->fn && (id == BI_OBJECT_SIZE || id == BI_DYNAMIC_OBJECT_SIZE))
+		c->syms[c->fn].flags |= SF_BOS_QUERY;
 	N(n)->b = vfreeze(c, args);
 	N(n)->c = args->n;
 	return n;

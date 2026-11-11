@@ -1843,9 +1843,10 @@ static val wk_builtin(ecx *e, uint32_t n)
 		return LO(frame)(e, x->aux == BI_RETURN_ADDRESS, (uint32_t)v.i);
 	}
 	case BI_OBJECT_SIZE: case BI_DYNAMIC_OBJECT_SIZE: {
-		val t = wk_gen(e, arg[1]);
-
-		return vconst(t.k == V_CONST && (t.i & 2) ? 0 : (i128)(uint64_t)-1);
+		cval cv;
+		if (cc_eval(c, n, &cv) && cv.kind == CV_INT)
+			return vconst(cv.i);
+		return vconst((i128)(uint64_t)-1);
 	}
 	case BI_SHUFFLEVECTOR: case BI_CONVERTVECTOR: {
 		/* lane by lane through a frame object (vectors are addresses) */
