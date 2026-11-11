@@ -21,7 +21,7 @@ VPRIV val x64_setjmp(ecx *e, int rb)
 	   to a caller, or hold this function's reconstructed aligned frame base. */
 	for (int q = 0; q < 32; q++) if (saved & (1u << q)) {
 		int size = IS_XMM(q) ? 16 : 8;
-		slots[q] = wk_slot(e, size, size);
+		slots[q] = wk_pslot(e, size, size);	/* (read when longjmp returns here, later) */
 		lval slot = { .k = L_FRAME, .off = slots[q] };
 		x64_mem(e, X_ST, size, q, &slot, false);
 	}
