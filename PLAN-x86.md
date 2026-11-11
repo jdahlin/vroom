@@ -845,3 +845,11 @@ omkörning med explicit SDK-konfiguration är grön. TSan klarar 44 kompileringa
 på 11 käll-/målkombinationer med 1 respektive 6 emittertrådar, identisk
 assembler och inga rapporter. Exakta kommandon och binärhashar sparas i
 `work/results/pr39-merge-validation/`.
+### OPT4 kopior och kanoniska unsigned-resultat (2026-11-11)
+
+Separat copies.c använder delad native-kärna och kräver lokal
+överskrivning innan en kopia kan försvinna; tvåadressvandringen tar även
+hand om borttagning/debugrader. extensions.c bevisar från föregående
+post när högbitar redan är noll. Inga nya fulla pass/allokeringar/SSA.
+Riktade O0–O3-körningar, debug/unwind och sanitiserade kontrakt gröna;
+prestandaprofil och dess begränsningar finns vid OPT4 i PLAN-fas2.md.
