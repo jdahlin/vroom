@@ -109,6 +109,12 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   (official test suite), zlib/zstd/xz (round trips and checksums over a
   corpus), musl + libc-test (integer, string and FP edge cases), CPython
   (`make test`).  Darwin host first, Linux user space once PIC/PIE exists.
+  SQLite 3.50.4 on Darwin (2026-11-11): vcc builds testfixture + shell via
+  `bench/pg/cc`; `testrunner.tcl --jobs 6` gives the same result as clang
+  -O2 (329068 tests, only interrupt2.test fails, timing, both compilers)
+  after the Apple variadic-slot fix (tests/abi/va_int_slot).  speedtest1
+  --size 100 --memdb: clang -O2 2.49 s, gcc-16 -O2 2.44 s, vcc -O2 3.92 s;
+  sqlite3.c compiles in 0.13 s (clang -O2 7.9 s, gcc 22 s).  Not yet a script.
 - [ ] **T14 the kernel runs, not just boots.**  KUnit built in
   (`CONFIG_KUNIT=y` plus the common suites, run at boot, TAP on the
   console), compared with the clang build's TAP; then kselftests and an LTP
