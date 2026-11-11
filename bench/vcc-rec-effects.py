@@ -14,6 +14,7 @@ from hostenv import R, llvm
 SOURCE = r'''
 #include <assert.h>
 #include "vcc/arch/x64/emit/effects.c"
+#include "vcc/arch/x64/emit/extensions.c"
 
 static rec instruction(int op, int size)
 {
@@ -46,6 +47,40 @@ int main(void)
         assert(!(f.fl & (OD_PURE|OD_WFLAGS)) && f.br == RB_NONE);
         assert(x64_flow_table()[X_FSQRT] == EM_FLOW_NEXT);
     }
+
+    /* SSE4's fixed operands/results are not explicit record registers. */
+    i = instruction(X_BLENDVB, 16);
+    f = x64_effects(NULL, &i);
+    assert(f.def == X_BIT(XMM0 + 1));
+    assert(f.use == (X_BIT(XMM0) | X_BIT(XMM0 + 1) | X_BIT(XMM0 + 2)));
+    assert(f.fl == OD_PURE && f.br == RB_NONE);
+    assert(x64_flow_table()[X_BLENDVB] == EM_FLOW_NEXT);
+    for (unsigned kind = 0; kind < 4; kind++) {
+        i = instruction(X_PCMPSTR, 16); i.cond = kind;
+        f = x64_effects(NULL, &i);
+        assert(f.def == X_BIT((kind & 1) ? RCX : XMM0));
+        assert(f.use == (X_BIT(XMM0) | X_BIT(XMM0 + 1) |
+                        ((kind & 2) ? 0 : X_BIT(RAX) | X_BIT(RDX))));
+        assert((f.fl & OD_WFLAGS) && !(f.fl & (OD_RFLAGS | OD_FP)));
+        assert(f.br == RB_NONE && x64_flow_table()[X_PCMPSTR] == EM_FLOW_NEXT);
+    }
+    /* A local width proof must not cross labels or mistake a zero-count
+       shift/partial/signed write for a full unsigned result. */
+    xst state = { .nin=1, .in=&i };
+    ecx context = { .x64=&state };
+    i = instruction(X_LD,4);
+    assert(x64_last_u32(&context,RAX));
+    assert(!x64_last_u32(&context,RCX));
+    i.cond=1; assert(!x64_last_u32(&context,RAX));
+    i = instruction(X_MOV,1); assert(!x64_last_u32(&context,RAX));
+    i.sz=4; assert(x64_last_u32(&context,RAX));
+    i = instruction(X_ADDI,4); assert(x64_last_u32(&context,RAX));
+    i = instruction(X_SHLI,4); i.imm=0; assert(!x64_last_u32(&context,RAX));
+    i = instruction(X_BSF,4); assert(!x64_last_u32(&context,RAX));
+    i = instruction(X_LABEL,4); assert(!x64_last_u32(&context,RAX));
+    i = instruction(X_MOVI,8); i.imm=UINT32_MAX; assert(x64_last_u32(&context,RAX));
+    i.imm=-1; assert(!x64_last_u32(&context,RAX));
+    state.nin=0; assert(!x64_last_u32(&context,RAX));
 
     /* Whole-register liveness must retain high bits of partial GPR writes. */
     i = instruction(X_MOV, 1);

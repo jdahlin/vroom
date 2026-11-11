@@ -32,7 +32,7 @@
  * slot (8-byte words; a scalar extended to 64 bits).
  */
 enum { WA_INT, WA_SSE };
-typedef struct wkarg { uint8_t n, cls[2]; bool mem, x87, up; uint32_t align, blanes; uint64_t size; int64_t slot; } wkarg;	/* x87: returned in st(0); up: one 16-byte SSE word (x86-64 SSEUP) */
+typedef struct wkarg { uint8_t n, cls[2]; bool mem, x87, up, vector, wide_record, unnamed; uint32_t align, blanes; uint64_t size; int64_t slot; } wkarg;	/* x87: returned in st(0); up: one 16-byte SSE word (x86-64 SSEUP) */
 /* ---------------- walker state (one per ecx) ---------------- */
 
 #define WK_MAXLOOP 1024
@@ -47,7 +47,7 @@ typedef struct wkael { uint32_t s, gen, inst; int64_t idx; i128 v; } wkael;	/* a
 
 typedef struct wkinl {
 	struct wkinl *up;
-	uint32_t fn, endlbl, inst;
+	uint32_t fn, endlbl, inst, call;
 	qty rty;
 	int64_t rslot;		/* the result's slot (a value held by address: its object) */
 	int cbase;		/* the cleanups live at the call */
@@ -150,6 +150,7 @@ VPRIV int wk_size(cc *c, qty t);
 VPRIV bool wk_mem(ecx *e, qty t);	/* values of t are held by address (records, arrays, x87 long double) */
 VPRIV val wk_conv(ecx *e, val v, qty from, qty to);
 VPRIV val wk_reload(ecx *e, const lval *l, qty t);	/* l's value again (a new register or address) */
+VPRIV void wk_store(ecx *e, const lval *l, qty t, val *v);
 VPRIV val wk_putmem(ecx *e, lval *l, qty t, val v);	/* v's bytes (held by address) into l: l's address */
 VPRIV void ctor_entry(cc *c, tbuf *b, uint32_t s, bool fini);	/* arch/a64/emit/func.c (shared) */
 VPRIV bool wk_signed(cc *c, qty t);
@@ -199,6 +200,7 @@ VPRIV int LO(ftreg)(ecx *e);				/* a free float temporary */
 VPRIV val LO(fconst)(ecx *e, uint64_t bits, int size);	/* a float (4) or double (8) constant */
 VPRIV val LO(fbin)(ecx *e, int op, qty t, val a, val b);	/* + - * / */
 VPRIV val LO(fneg)(ecx *e, qty t, val a);
+VPRIV val LO(fsqrt)(ecx *e, qty t, val a);
 VPRIV val LO(root4)(ecx *e, val a);
 enum { WK_FCMP_UNORDERED = 0x10000, WK_FCMP_ORDERED_NE };
 VPRIV val LO(fcmp)(ecx *e, int op, qty t, val a, val b);	/* 0 or 1, false when unordered (but !=) */
@@ -229,7 +231,7 @@ VPRIV void LO(jump)(ecx *e, uint32_t l);
 VPRIV void LO(jumpr)(ecx *e, int r);			/* to the address in r (computed goto) */
 VPRIV void LO(named)(ecx *e, uint32_t ref);		/* a label with a symbol name here (ref: RK_LBL, an address taken) */
 /* calls: the arguments are in frame slots (8 bytes each, extended); ref: a direct callee, else fn */
-VPRIV void LO(classify)(ecx *e, qty t, wkarg *a);
+VPRIV void LO(classify)(ecx *e, qty t, wkarg *a, bool unnamed);
 /* r: a record result (its slot receives it), NULL otherwise; retsize/retsgn: a scalar result */
 VPRIV val LO(call)(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool variadic, const wkarg *r, qty rt);
 /* Incoming arguments to their slots or selected register homes; a parameter
@@ -237,6 +239,7 @@ VPRIV val LO(call)(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 VPRIV void LO(params)(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic);
 VPRIV void LO(ret)(ecx *e, val *v, qty t, uint32_t lbl);	/* a scalar result of type t (v may be NULL), then to lbl */
 VPRIV void LO(retrec)(ecx *e, int raddr, const wkarg *r, uint32_t lbl);	/* a record result from the object at raddr */
+VPRIV val LO(pcmpstr)(ecx *e, uint32_t n);
 VPRIV void LO(va_start)(ecx *e, int rap);			/* the va_list at rap */
 VPRIV int LO(va_arg)(ecx *e, int rap, qty t);		/* the next argument's address */
 /* the function: before its body, and once it is generated (frame, prologue, output) */

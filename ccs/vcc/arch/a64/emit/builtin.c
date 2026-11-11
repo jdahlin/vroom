@@ -921,14 +921,17 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 		v = dry(e, arg[0]);
 		return vconst(v.k == V_CONST);
 	}
-	case BI_FAST_ROOT4:
+	case BI_FAST_ROOT4: case BI_FAST_SQRT: {
+		int d = KIND(c, x->ty) == TY_DOUBLE;
 		v = gen(e, arg[0]);
 		toreg(e, &v);
-		word(e, f_in(1, 16, v.r));
-		word(e, 0x1e61c000u | 16u << 5 | 16u); /* fsqrt d16, d16 */
-		word(e, 0x1e61c000u | 16u << 5 | 16u);
-		word(e, f_out(1, v.r, 16));
+		word(e, f_in(d, 16, v.r));
+		word(e, 0x1e21c000u | (uint32_t)d << 22 | 16u << 5 | 16u);
+		if (x->aux == BI_FAST_ROOT4)
+			word(e, 0x1e21c000u | (uint32_t)d << 22 | 16u << 5 | 16u);
+		word(e, f_out(d, v.r, 16));
 		return v;
+	}
 	case BI_EXPECT:
 	case BI_EXPECT_PROB:
 		/* the hint is still evaluated (argument order is unspecified: first, so that
@@ -1054,6 +1057,9 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 	case BI_OBJECT_SIZE:
 	case BI_DYNAMIC_OBJECT_SIZE: {
 		cval cv;
+		i128 size;
+		if (e->f && e->f->inl && inline_object_size(e, e->f->fn, e->f->call, arg[0], arg[1], &size))
+			return vconst(size);
 		if (cc_eval(c, n, &cv) && cv.kind == CV_INT)
 			return vconst(cv.i);
 		return vconst((i128)(uint64_t)-1);

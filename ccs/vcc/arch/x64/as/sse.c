@@ -102,6 +102,33 @@ VPRIV int x64_i_sse4(As *a, char *mn, XOp *o, int nops)
 	int sz = 0, cc;
 
 	(void)a, (void)mn, (void)o, (void)nops, (void)stem, (void)sz, (void)cc;
+		/* SSE4.1 byte blend has an implicit xmm0 mask (optional in AT&T). */
+		if (!strcmp(mn, "pblendvb") && (nops == 2 || (nops == 3 &&
+		    o[0].kind == XK_REG && o[0].cls == XR_XMM && o[0].reg == 0))) {
+			XOp *src = &o[nops - 2], *dst = &o[nops - 1];
+			if (src->kind == XK_EXPR) src->kind = XK_MEM;
+			if (dst->kind == XK_REG && dst->cls == XR_XMM &&
+			    (src->kind == XK_MEM || (src->kind == XK_REG && src->cls == XR_XMM))) {
+				uint8_t ops[] = { 0x0f, 0x38, 0x10 };
+				XForm f = F(.opsz16 = 1, .op = ops, .nop = 3, .reg = dst->reg, .rm = src);
+				return x64_emit(a, &f);
+			}
+		}
+		/* SSE4.2 packed string comparisons: 66 0f 3a 60..63 /r ib. */
+		if (nops == 3 && o[0].kind == XK_IMM && o[2].kind == XK_REG && o[2].cls == XR_XMM) {
+			static const char *const names[] = { "pcmpestrm", "pcmpestri", "pcmpistrm", "pcmpistri" };
+			for (unsigned k = 0; k < 4; k++) if (!strcmp(mn, names[k])) {
+				if (o[1].kind == XK_EXPR) o[1].kind = XK_MEM;
+				if (o[1].kind != XK_MEM && !(o[1].kind == XK_REG && o[1].cls == XR_XMM))
+					break;
+				int64_t imm = 0;
+				uint8_t ops[] = { 0x0f, 0x3a, (uint8_t)(0x60 + k) };
+				XForm f = F(.opsz16 = 1, .op = ops, .nop = 3, .reg = o[2].reg, .rm = &o[1], .isz = 1);
+				x64_imm(a, &o[0], &f, &imm);
+				f.imm = imm;
+				return x64_emit(a, &f);
+			}
+		}
 	/* ---- SSSE3/SSE4, AES-NI, PCLMUL, SHA, CRC32 (0f 38 / 0f 3a maps), FS/GS base ---- */
 	{
 		static const struct { const char *n; uint8_t pfx, map, op, imm; } x3[] = {

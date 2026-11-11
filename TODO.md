@@ -588,8 +588,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
     `transparent_union_redecl` (member calling convention).
   - Expression/call lowering: `gnu_conditional_float` (GNU floating conditional),
     `parenthesized_function` (nested function-pointer return signature),
-    `void_lvalue` (void expressions leave stack values), `fabs_asm_identity`
-    and `math_library_identity` (asm-renamed functions mistaken for intrinsics).
+    `void_lvalue` (void expressions leave stack values).
   - Optimization/inlining: `array_constants`, `dead_branch_entries`,
     `optimized_conditions` leave unreachable references; `inline_constants`
     needs argument propagation into `__builtin_constant_p`.
@@ -762,6 +761,23 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `B(__clang__)`) it is 1 and the error is clang's "expected ']'" (not
   "expected attribute name").  The `]` fix-it line and clang's later errors there belong to
   the error recovery item.)
+- [ ] **General object-size provenance** [P]. The Linux milestone on base
+  `9d022c3` handles strict-flex levels 0–3, declared subobjects without padding,
+  minimum mode 3, stable `counted_by` pointer fields (dynamic modes 0–2), and
+  direct immutable inline pointer parameters. Volatile pointer/base expressions
+  stay unknown without reads. Five unchanged GCC cases (`pr101836_1/2/3`,
+  `pr39343`, `pointer-counted-by-8`) and permanent regressions cover this scope.
+  Still missing: general control-flow/alias provenance, transitive inline
+  bindings, `alloc_size` inference, and dynamic side-effecting expressions.
+  Wasm inline argument-bound propagation remains unsupported: the unchanged
+  `object_size_inline` regression gives identical assembly and runtime failure
+  with main `9d022c3` and this milestone on wasm32/64; Clang passes. Its
+  expected-failure marker executes the test and rejects XPASS.
+  Do not infer a whole allocation from a known subobject or treat unknown as
+  known. Full S4 and non-Linux targets remain separate gates.
+  *Validate:* unity and file-by-file builds; own x86/ARM runtime suites;
+  `vcc-gcc-dg.py` on those five sources; strict-flex 0–3, volatile/null-base and
+  raw allocation probes; kernel `vcc-sema.py run` and `batch` (887 TUs).
 - [x] **Attributes without effect**: none left.  Accepted
   and needing nothing today: `returns_twice` (locals live in memory:
   `tests/vcc/returns_twice.c`; the optimizer item must honour it when
@@ -1222,7 +1238,16 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   Shared locals.c eligibility/selection now feeds all targets and x86
   promotes profitable scalar locals in four callee-save homes. Direct
   ABI-to-home binding is now direct for selected register/stack parameters;
-  generic copy/extension cleanup and improved profitability remain pending.
+  `emit/rec/copies.c` now shares arm64's forward-copy search with the x86
+  adapter in `arch/x64/emit/copies.c`: bounded transactional rewrites of
+  full-width GPR temporaries within a block, with target effect/operand
+  contracts. Native 32-bit/XMM copy cleanup, shared extension facts and
+  improved profitability remain pending. Unity/nonunity builds, 32 focused
+  target/level runtime combinations and normal/sanitized record contracts
+  pass; prior arm64 debug/unwind and wasm output snapshots are unchanged.
+  Short paired compiler CPU samples are noisy (even unchanged wasm control
+  varies 17.5%); the unchanged sum program's runtime difference is noise.
+  OPT4 documents raw before/after numbers; the 1% performance gate is open.
   Wasm checks use our assembler/linker and plain Node; full replacement
   of Emscripten's test/explorer runtime is tracked in `PLAN-wasm.md` W9.
   *Validate:* common C semantics plus target-specific code assertions;

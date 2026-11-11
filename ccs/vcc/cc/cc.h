@@ -28,6 +28,7 @@
 #include <stdint.h>
 
 #include "../pp/pp.h"
+#include "../lib/x86features.h"
 
 /* ---------------- types ---------------- */
 
@@ -269,6 +270,7 @@ typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl 
 	int target;		/* PP_LINUX_AARCH64 / PP_DARWIN / PP_WASM64 */
 	int unsigned_char;
 	int ms_anon;		/* -fms-anonymous-structs / -fms-extensions: "struct S;" members */
+	int strict_flex_arrays; /* -fstrict-flex-arrays=0..3 */
 	int short_wchar;	/* -fshort-wchar */
 	int std;		/* -std=: 89, 99, 11, 17, 23 (0: gnu17) */
 	int implicit_int;	/* implicit int allowed (-std=gnu89, -Wno-error=implicit-int) */
@@ -276,6 +278,8 @@ typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl 
 	int instrument;		/* -finstrument-functions */
 	int vcc_kernel;		/* -fvcc-kernel (or -D__KERNEL__): error() calls left after folding are dropped */
 	int lse;		/* target has LSE atomics (else ldaxr/stlxr loops) */
+	x86_features x86_features, x86_disabled, x86_raw, x86_override_on, x86_override_off;
+	int x86_features_set;	/* explicitly resolved by the driver; zero uses x86-64 */
 	int general_regs_only;	/* -mgeneral-regs-only: no FP/SIMD registers (variadic: no v0-v7 save area) */
 	int fast_math;		/* full fast-math permits finite, unsigned-zero root transforms */
 	int no_builtin;		/* -ffreestanding / -fno-builtin: abs() etc. are plain calls */

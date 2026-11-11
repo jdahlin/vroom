@@ -81,6 +81,9 @@
 #endif
 #endif
 
+/* Exact allocation/cell analysis shared by machine-record optimizers. */
+#include "rec/slots.h"
+
 #define N(i) (&c->nodes[i])
 /* Apple arm64 (Mach-O): '_' names, GOT for symbols outside the TU, variadic
  * arguments on the stack, va_list a char *, stack arguments packed */
@@ -253,7 +256,7 @@ typedef struct loopctx {
 } loopctx;
 
 typedef struct fnctx {		/* one function instance: the emitted function or an inlined body */
-	uint32_t fn, inst;
+	uint32_t fn, inst, call;
 	uint32_t retlbl;
 	int64_t retslot;
 	uint8_t retreg;		/* inlined: the result's temporary + 1 (0: in retslot) */
@@ -541,6 +544,28 @@ VPRIV uint32_t em_rec_fallthrough(void *records, uint32_t count, const em_rec_la
 VPRIV uint32_t em_rec_unreachable(void *records, uint32_t count, size_t stride, size_t op_offset,
 				const uint8_t *flow, size_t nflow,
 				void (*remap)(void *, uint32_t, uint32_t), void *ctx);
+/* rec/copies.c: inclusive block end, whole-register t/v below 64. The target
+ * preflights each rewritten record without mutation (apply=false); applying
+ * the same rewrite must then succeed. Existing conservative liveness is only
+ * enlarged, and no effects/liveness table is built by this scan.
+ */
+typedef struct em_rec_copy_scan {
+	void *records;
+	size_t stride, op_offset;
+	uint8_t deleted_op;
+	const void *flags;
+	size_t flags_stride;
+	uint16_t opaque_mask;
+	uint64_t *read, *live;
+	const uint64_t *write;
+	/* Optional on-demand effects. False is an opaque boundary. With no live
+	 * array a copy must reach an explicit overwrite; block end proves nothing.
+	 */
+	bool (*inspect)(void *ctx, uint32_t j, uint64_t *read, uint64_t *write);
+	bool (*rewrite)(void *ctx, uint32_t j, uint8_t from, uint8_t to, bool apply);
+	void *ctx;
+} em_rec_copy_scan;
+VPRIV bool em_rec_copy_forward(const em_rec_copy_scan *s, uint32_t k, uint32_t end, uint8_t t, uint8_t v);
 /* insn.c */
 extern const char cond_name[][8];
 VPRIV bool logimm_ok(uint64_t v, int x);
@@ -714,7 +739,8 @@ VPRIV void kv_track(ecx *e, uint32_t s, const val *v);
 VPRIV int ael_slot(ecx *e, uint32_t n, bool create);
 VPRIV bool const_var(ecx *e, uint32_t s, const val *v);
 VPRIV bool can_inline(ecx *e, uint32_t s);
-VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n);
+VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n, uint32_t call);
+VPRIV bool inline_object_size(ecx *e, uint32_t fn, uint32_t call, uint32_t pointer, uint32_t mode, i128 *size);
 VPRIV uint32_t direct_callee(cc *c, uint32_t fn, uint32_t *ref);
 VPRIV val gen_call(ecx *e, uint32_t n);
 /* builtin.c */

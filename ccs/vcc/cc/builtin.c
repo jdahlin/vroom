@@ -15,6 +15,7 @@ static void arity(cc *c, uint32_t loc, unsigned want, const vec *args)
 }
 
 static const builtin builtins[] = {
+	{ "__builtin_ia32_pblendvb128", BI_X86_BLENDVB, 1, "BBBB" },
 	{ "__builtin_elementwise_abs", BI_ELEMENTWISE_ABS, 1, "i." },
 	{ "__builtin_ia32_movmskps", BI_X86_SIMD, 1, "iF" },
 	{ "__builtin_ia32_shufps", BI_X86_SIMD, 1, "FFFi" },
@@ -23,6 +24,20 @@ static const builtin builtins[] = {
 	{ "__builtin_ia32_cmpnleps", BI_X86_SIMD, 1, "FFF" },
 	{ "__builtin_ia32_psllwi128", BI_X86_SIMD, 1, "HHi" },
 	{ "__builtin_ia32_psrlwi128", BI_X86_SIMD, 1, "HHi" },
+	{ "__builtin_ia32_pcmpistri128", BI_X86_PCMPSTR, 1, "iBBc" },
+	{ "__builtin_ia32_pcmpistrm128", BI_X86_PCMPSTR, 1, "BBBc" },
+	{ "__builtin_ia32_pcmpistria128", BI_X86_PCMPSTR, 1, "iBBc" },
+	{ "__builtin_ia32_pcmpistric128", BI_X86_PCMPSTR, 1, "iBBc" },
+	{ "__builtin_ia32_pcmpistrio128", BI_X86_PCMPSTR, 1, "iBBc" },
+	{ "__builtin_ia32_pcmpistris128", BI_X86_PCMPSTR, 1, "iBBc" },
+	{ "__builtin_ia32_pcmpistriz128", BI_X86_PCMPSTR, 1, "iBBc" },
+	{ "__builtin_ia32_pcmpestri128", BI_X86_PCMPSTR, 1, "iBiBic" },
+	{ "__builtin_ia32_pcmpestrm128", BI_X86_PCMPSTR, 1, "BBiBic" },
+	{ "__builtin_ia32_pcmpestria128", BI_X86_PCMPSTR, 1, "iBiBic" },
+	{ "__builtin_ia32_pcmpestric128", BI_X86_PCMPSTR, 1, "iBiBic" },
+	{ "__builtin_ia32_pcmpestrio128", BI_X86_PCMPSTR, 1, "iBiBic" },
+	{ "__builtin_ia32_pcmpestris128", BI_X86_PCMPSTR, 1, "iBiBic" },
+	{ "__builtin_ia32_pcmpestriz128", BI_X86_PCMPSTR, 1, "iBiBic" },
 	{ "__builtin_constant_p", BI_CONSTANT_P, 1, "i." },
 	{ "__builtin_expect", BI_EXPECT, 1, "lll" },
 	{ "__builtin_expect_with_probability", BI_EXPECT_PROB, 1, "llld" },
@@ -289,6 +304,8 @@ static qty sigtype(cc *c, char ch)
 	case 'd': return prim(TY_DOUBLE);
 	case 'f': return prim(TY_FLOAT);
 	case 'F': return ty_vector(c, prim(TY_FLOAT), 16);
+	case 'c': return prim(TY_CHAR);
+	case 'B': return ty_vector(c, prim(TY_CHAR), 16);
 	case 'H': return ty_vector(c, prim(TY_SHORT), 16);
 	case 'D': return prim(TY_LDOUBLE);
 	case 'p': return ty_ptr(c, prim(TY_VOID));
@@ -445,9 +462,23 @@ static uint64_t object_element_size(cc *c, qty pointer)
 	return KIND(c, base) == TY_VOID || KIND(c, base) == TY_FUNC ? 1 : ty_size(c, base);
 }
 
-static bool object_pointer_bound(cc *c, uint32_t n, object_bound *b, unsigned depth);
+/* Only the last array member can use the historical struct-hack bound. */
+static bool object_flexible_member(cc *c, const node *x)
+{
+	qty t = node_field(c, x)->ty;
+	if (!is_array(c, t) || x->c + 1 != c->tags[x->b].nfield)
+		return false;
+	if (T(c, t)->flags & TF_INCOMPLETE)
+		return true;
+	uint64_t n = arr_len(c, t);
+	return c->o->strict_flex_arrays == 0 ||
+	       (c->o->strict_flex_arrays == 1 && n <= 1) ||
+	       (c->o->strict_flex_arrays == 2 && n == 0);
+}
 
-static bool object_lvalue_bound(cc *c, uint32_t n, object_bound *b, unsigned depth)
+static bool object_pointer_bound(cc *c, uint32_t n, object_bound *b, unsigned depth, unsigned mode);
+
+static bool object_lvalue_bound(cc *c, uint32_t n, object_bound *b, unsigned depth, unsigned mode)
 {
 	if (!n || depth > 64)
 		return false;
@@ -470,19 +501,31 @@ static bool object_lvalue_bound(cc *c, uint32_t n, object_bound *b, unsigned dep
 		return true;
 	case N_MEMBER: {
 		const field *f = node_field(c, x);
-		if (f->bitfield || !object_lvalue_bound(c, x->a, b, depth + 1))
+		if (f->bitfield)
 			return false;
+		bool flexible = object_flexible_member(c, x);
+		if (!object_lvalue_bound(c, x->a, b, depth + 1, mode)) {
+			/* The array's declared subobject bound is independent of the
+			   unknown enclosing allocation. Do not invent a whole bound. */
+			if (!is_array(c, f->ty) || (T(c, f->ty)->flags & TF_INCOMPLETE) || (flexible && mode != 3))
+				return false;
+			*b = (object_bound){ .whole = -1, .sub = ty_size(c, f->ty), .storage = f->ty };
+			return true;
+		}
 		b->offset += f->off / 8;
 		/* Clang treats a trailing array as extending through its enclosing
 		   allocation, even when a fixed bound is written (the struct hack).
 		   A nested record's endpoint was retained by the enclosing member. */
-		if (!(is_array(c, f->ty) && x->c + 1 == c->tags[x->b].nfield))
+		/* A declared record object (including an element of a declared
+		   array) does not give its trailing member the record's padding.
+		   Raw allocations/reinterpreted storage still permit the struct hack. */
+		if (mode == 3 || !flexible || (b->storage && !(T(c, f->ty)->flags & TF_INCOMPLETE)))
 			b->sub = b->offset + ty_size(c, f->ty);
 		b->storage = f->ty;
 		return true;
 	}
 	case N_INDEX:
-		if (!object_pointer_bound(c, x->a, b, depth + 1) || !eval(c, x->b, &index) || index.kind != CV_INT)
+		if (!object_pointer_bound(c, x->a, b, depth + 1, mode) || !eval(c, x->b, &index) || index.kind != CV_INT)
 			return false;
 		b->offset += index.i * object_element_size(c, N(x->a)->ty);
 		if (is_record(c, x->ty) && b->storage &&
@@ -493,20 +536,20 @@ static bool object_lvalue_bound(cc *c, uint32_t n, object_bound *b, unsigned dep
 			b->storage = T(c, b->storage)->base;
 		return true;
 	case N_DEREF:
-		return object_pointer_bound(c, x->a, b, depth + 1);
+		return object_pointer_bound(c, x->a, b, depth + 1, mode);
 	default:
 		return false;
 	}
 }
 
-static bool object_pointer_bound(cc *c, uint32_t n, object_bound *b, unsigned depth)
+static bool object_pointer_bound(cc *c, uint32_t n, object_bound *b, unsigned depth, unsigned mode)
 {
 	if (!n || depth > 64)
 		return false;
 	const node *x = N(n);
 	cval index;
 	if (x->op == N_VAR && (c->syms[x->a].flags & SF_BOS_INIT))
-		return object_pointer_bound(c, c->syms[x->a].body, b, depth + 1);
+		return object_pointer_bound(c, c->syms[x->a].body, b, depth + 1, mode);
 	if (x->op == N_CALL && !c->o->no_builtin) {
 		uint32_t callee = x->a;
 		while (N(callee)->op == N_CAST || N(callee)->op == N_ADDR)
@@ -548,27 +591,42 @@ static bool object_pointer_bound(cc *c, uint32_t n, object_bound *b, unsigned de
 		return true;
 	}
 	if (x->op == N_ADDR || (x->op == N_CAST && x->aux == CK_DECAY))
-		return object_lvalue_bound(c, x->a, b, depth + 1);
+		return object_lvalue_bound(c, x->a, b, depth + 1, mode);
 	if (x->op == N_CAST && is_ptr(c, N(x->a)->ty)) {
-		if (!object_pointer_bound(c, x->a, b, depth + 1))
+		if (!object_pointer_bound(c, x->a, b, depth + 1, mode))
 			return false;
-		if (is_ptr(c, x->ty) && is_record(c, T(c, x->ty)->base) &&
-		    QUNQ(T(c, x->ty)->base) != QUNQ(T(c, N(x->a)->ty)->base))
-			b->sub = b->whole;
+		if (is_ptr(c, x->ty) && is_record(c, T(c, x->ty)->base)) {
+			qty base = T(c, x->ty)->base;
+			if (!b->storage || (QUNQ(b->storage) != QUNQ(base) &&
+			    !(is_array(c, b->storage) && QUNQ(T(c, b->storage)->base) == QUNQ(base)))) {
+				b->sub = b->whole;
+				b->storage = 0;
+			}
+		}
 		return true;
 	}
 	if (is_array(c, x->ty))
-		return object_lvalue_bound(c, n, b, depth + 1);
+		return object_lvalue_bound(c, n, b, depth + 1, mode);
 	if (x->op == N_BINARY && (x->aux == T_PLUS || x->aux == T_MINUS)) {
 		uint32_t p = x->a, i = x->b;
 		if (!is_ptr(c, N(p)->ty) && x->aux == T_PLUS) p = x->b, i = x->a;
-		if (!is_ptr(c, N(p)->ty) || !object_pointer_bound(c, p, b, depth + 1) ||
+		if (!is_ptr(c, N(p)->ty) || !object_pointer_bound(c, p, b, depth + 1, mode) ||
 		    !eval(c, i, &index) || index.kind != CV_INT)
 			return false;
 		b->offset += (x->aux == T_MINUS ? -index.i : index.i) * object_element_size(c, N(p)->ty);
 		return true;
 	}
 	return false;
+}
+
+bool cc_object_size(cc *c, uint32_t pointer, unsigned mode, i128 *size)
+{
+	object_bound b;
+	if (mode > 3 || !object_pointer_bound(c, pointer, &b, 0, mode)) return false;
+	i128 end = (mode & 1) && (b.whole < 0 || b.sub < b.whole) ? b.sub : b.whole;
+	if (end < 0) return false;
+	*size = b.offset < 0 || b.offset > end ? 0 : end - b.offset;
+	return true;
 }
 
 static bool elementwise_abs_effects(cc *c, uint32_t n, bool load);
@@ -585,9 +643,10 @@ VPRIV bool eval_builtin(cc *c, const node *x, cval *v)
 		object_bound b;
 		if (!eval(c, arg[1], &a) || a.kind != CV_INT)
 			return false;
-		if (object_pointer_bound(c, arg[0], &b, 0)) {
-			const i128 end = (a.i & 1) && b.sub < b.whole ? b.sub : b.whole;
-			v->i = b.offset < 0 || b.offset > end ? 0 : end - b.offset;
+		if (object_pointer_bound(c, arg[0], &b, 0, (unsigned)a.i)) {
+			const i128 end = (a.i & 1) && (b.whole < 0 || b.sub < b.whole) ? b.sub : b.whole;
+			v->i = end < 0 ? (a.i & 2 ? 0 : (i128)(uint64_t)-1) :
+			       b.offset < 0 || b.offset > end ? 0 : end - b.offset;
 		} else
 			v->i = a.i & 2 ? 0 : (i128)(uint64_t)-1;
 		v->ice = false;
@@ -813,8 +872,34 @@ static qty unqual_array(cc *c, qty t)
 	}
 }
 
+static bool elementwise_abs_effects(cc *c, uint32_t n, bool load);
+
 VPRIV uint32_t mk_builtin(cc *c, int id, qty ty, uint32_t loc, const vec *args)
 {
+	/* A counted pointer has a runtime extent even if its allocation is
+	   unknown. Read the sibling count at the query, not at declaration.
+	   Restrict this lowering to a stable base so no operand effects are lost. */
+	if (id == BI_DYNAMIC_OBJECT_SIZE && args->n == 2) {
+		uint32_t m = args->v[0];
+		cval mode;
+		while (N(m)->op == N_CAST)
+			m = N(m)->a;
+		if (N(m)->op == N_MEMBER && is_ptr(c, N(m)->ty) &&
+		    !elementwise_abs_effects(c, args->v[0], true) && eval(c, args->v[1], &mode) &&
+		    mode.kind == CV_INT && mode.i >= 0 && mode.i <= 2) {
+			uint32_t count = node_field(c, N(m))->counted_by;
+			const tag *r = &c->tags[N(m)->b];
+			for (uint32_t i = 0; count && i < r->nfield; i++) {
+				if (r->f[i].name != count || !is_integer(c, r->f[i].ty))
+					continue;
+				uint32_t base = N(m)->a;
+				uint64_t size = ty_size(c, T(c, N(m)->ty)->base);
+				if (!size) break;
+				uint32_t cnt = convert(c, rvalue(c, member(c, base, count, loc)), c->t_size);
+				return mk_bin(c, T_STAR, c->t_size, cnt, mk_int(c, size, c->t_size, loc), loc);
+			}
+		}
+	}
 	uint32_t n = mk(c, N_BUILTIN, ty, loc);
 
 	N(n)->aux = (uint16_t)id;
@@ -1209,6 +1294,29 @@ static uint32_t builtin_vector_lane(cc *c, uint32_t v, qty et, unsigned i, uint3
 	return n;
 }
 
+/* The builtin converts its constant control to char, as Clang does. The final hidden
+ * argument identifies the result projection and explicit-length variant. */
+static uint32_t x86_pcmpstr_call(cc *c, const builtin *b, vec *args, qty rt, uint32_t loc)
+{
+	bool explicit = strstr(b->name, "pcmpestr") != NULL;
+	unsigned count = explicit ? 5 : 3;
+	i128 imm;
+	if (c->o->target != PP_LINUX_X86_64) {
+		cc_error(c, loc, "'%s' requires an x86-64 target", b->name);
+		return err_node(c, loc);
+	}
+	if (args->n != count) return err_node(c, loc);
+	if (has_side_effects(c, args->v[count - 1]) || !const_int(c, args->v[count - 1], &imm)) {
+		cc_error(c, loc, "argument to '%s' must be a constant integer", b->name);
+		return err_node(c, loc);
+	}
+	const char *name = strstr(b->name, "str") + 3;
+	unsigned kind = name[0] == 'm' ? 1 : name[1] == 'a' ? 2 : name[1] == 'c' ? 3 :
+		name[1] == 'o' ? 4 : name[1] == 's' ? 5 : name[1] == 'z' ? 6 : 0;
+	vpush(c, args, mk_int(c, kind | (explicit ? 8 : 0), prim(TY_INT), loc));
+	return mk_builtin(c, BI_X86_PCMPSTR, rt, loc, args);
+}
+
 static uint32_t x86_simd_call(cc *c, const builtin *b, vec *args, qty rt, uint32_t loc)
 {
 	const char *name = b->name + sizeof("__builtin_ia32_") - 1;
@@ -1430,7 +1538,8 @@ VPRIV uint32_t fp_sign_call(cc *c, const char *name, size_t len, qty ft, const v
 	if (extended) return 0;
 	if (c->o->target != PP_LINUX_X86_64 && c->o->target != PP_LINUX_AARCH64)
 		return 0;
-	if (c->o->general_regs_only) {
+	if (c->o->target == PP_LINUX_X86_64 ?
+	    !x86_feature_has(cc_x86_features(c, c->fn), single ? X86_FEATURE_SSE : X86_FEATURE_SSE2) : c->o->general_regs_only) {
 		cc_error(c, loc, "%s floating point is not supported", "-mgeneral-regs-only:");
 		return err_node(c, loc);
 	}
@@ -1542,6 +1651,56 @@ static uint32_t stdc_rotate(cc *c, const builtin *b, uint32_t loc)
 	uint32_t z = binop(c, left ? T_GREATERGREATER : T_LESSLESS, rvalue(c, x), reverse, loc);
 	uint32_t value = convert(c, binop(c, T_PIPE, a, z, loc), t);
 	return with_pre(c, prex, with_pre(c, precount, with_pre(c, pren, value)));
+}
+
+/* Full fast-math permits roots and short multiplication chains without
+ * errno or strict rounding/exception preservation. Library identity is checked
+ * by the caller; builtin spelling is an explicit request for these semantics. */
+VPRIV uint32_t fast_math_call(cc *c, const char *name, size_t len, qty ft, const vec *args, uint32_t loc)
+{
+	if (!c->o->fast_math || (c->o->target != PP_LINUX_X86_64 && c->o->target != PP_LINUX_AARCH64)) return 0;
+	bool power = len == 3 && !memcmp(name, "pow", 3);
+	bool root = (len == 4 && !memcmp(name, "sqrt", 4)) || (len == 5 && !memcmp(name, "sqrtf", 5));
+	if (!power && !root) return 0;
+	bool single = !power && len == 5;
+	qty t = prim(single ? TY_FLOAT : TY_DOUBLE);
+	if ((T(c, ft)->flags & (TF_NOPROTO | TF_VARIADIC)) || args->n != (power ? 2 : 1) ||
+	    !compatible(c, ft, sig_func_type(c, power ? "ddd" : single ? "ff" : "dd"))) return 0;
+	cval exponent;
+	double e = 0.5;
+	if (power) {
+		if (elementwise_abs_effects(c, args->v[1], true) || !cc_eval(c, args->v[1], &exponent) ||
+		    exponent.kind != CV_FLT || exponent.ld) return 0;
+		e = exponent.f;
+		if (e != 0.25 && e != 0.5 && !(e >= -64 && e <= 64 && e == (int)e)) return 0;
+	}
+	if (c->o->target == PP_LINUX_X86_64 ?
+	    !x86_feature_has(cc_x86_features(c, c->fn), single ? X86_FEATURE_SSE : X86_FEATURE_SSE2) : c->o->general_regs_only) {
+		cc_error(c, loc, "%s floating point is not supported", "-mgeneral-regs-only:");
+		return err_node(c, loc);
+	}
+	if (e == 0.25 || e == 0.5) {
+		vec one; vinit(&one); vpush(c, &one, args->v[0]);
+		return mk_builtin(c, e == 0.25 ? BI_FAST_ROOT4 : BI_FAST_SQRT, t, loc, &one);
+	}
+	unsigned n = e < 0 ? (unsigned)-e : (unsigned)e;
+	uint32_t pre[8], np = 0, value = args->v[0], result = mk_flt(c, 1.0, t, loc);
+	for (;;) {
+		/* Every reusable factor is materialized, including the original base:
+		 * volatile reads and calls occur once even for a zero exponent. */
+		uint32_t s = sym_new(c, S_VAR, 0, t, loc);
+		c->syms[s].sc = SC_AUTO;
+		uint32_t tmp = mk(c, N_VAR, t, loc); N(tmp)->a = s; N(tmp)->flags = NF_LVALUE;
+		pre[np++] = mk2(c, N_ASSIGN, t, loc, tmp, value);
+		value = rvalue(c, tmp);
+		if (n & 1) result = mk_bin(c, T_STAR, t, result, value, loc);
+		n >>= 1;
+		if (!n) break;
+		value = mk_bin(c, T_STAR, t, value, value, loc);
+	}
+	if (e < 0) result = mk_bin(c, T_SLASH, t, mk_flt(c, 1.0, t, loc), result, loc);
+	while (np) result = with_pre(c, pre[--np], result);
+	return result;
 }
 
 VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
@@ -1768,6 +1927,8 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 		}
 		if (args.n < np || (args.n > np && !(f->flags & TF_VARIADIC)))
 			arity(c, loc, np, &args);
+		if (b->id == BI_X86_PCMPSTR)
+			return x86_pcmpstr_call(c, b, &args, rt, loc);
 		if (b->id == BI_X86_SIMD)
 			return x86_simd_call(c, b, &args, rt, loc);
 		switch (b->id) {
@@ -1819,6 +1980,7 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 		}
 		if (b->id == BI_LIB) {
 			uint32_t result = fp_sign_call(c, b->name + 10, strlen(b->name + 10), ft, &args, loc);
+			if (!result) result = fast_math_call(c, b->name + 10, strlen(b->name + 10), ft, &args, loc);
 			if (result) return result;
 		}
 		if (b->id == BI_LIB || b->id == BI_STRLEN || b->id == BI_NAN || b->id == BI_NANF || b->id == BI_NANS) {

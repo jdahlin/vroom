@@ -172,9 +172,15 @@ VPRIV void x64_tkeep(ecx *e, int r)
 		e->x64->live |= 1u << r;
 }
 
+VPRIV bool x64_nosimd(ecx *e)
+{
+	uint32_t fn = e->wk->inl ? e->wk->inl->fn : e->wk->fsym;
+	return !x86_feature_has(cc_x86_features(e->c, fn), X86_FEATURE_SSE2);
+}
+
 VPRIV void x64_nofp(ecx *e)
 {
-	if (e->c->o->general_regs_only)
+	if (x64_nosimd(e))
 		efatal(e, e->curloc, "x86-64: floating point with -mgeneral-regs-only or -mno-sse is not supported (PLAN-x86.md X3)");
 }
 
@@ -346,6 +352,8 @@ VPRIV void x64_ext(ecx *e, int r, int from, bool sgn)
 	rec *i;
 
 	if (from >= 8)
+		return;
+	if (from == 4 && !sgn && e->E->o->opt >= 1 && !e->E->noopt && x64_last_u32(e, r))
 		return;
 	i = x64_op3(e, X_EXT, from, r, r, XNOREG);
 	i->cond = sgn;
@@ -933,4 +941,81 @@ VPRIV val x64_fbits(ecx *e, val v, int size)
 	if (size == 2) x64_op3(e, X_ANDI, 4, r, r, XNOREG)->imm = 0xffff;
 	x64_tfree(e, v.r);
 	return (val){ .k = V_REG, .r = (uint8_t)r };
+}
+
+/* SSE4.2 string comparisons have fixed result registers and, with explicit
+ * lengths, fixed integer inputs. Evaluate and park each argument first; then
+ * preserve the enclosing expression's live registers across the instruction. */
+VPRIV val x64_pcmpstr(ecx *e, uint32_t n)
+{
+	cc *c = e->c;
+	const node *x = N(n);
+	const uint32_t *arg = &c->lists[x->b];
+	cval cv;
+	bool blend = x->aux == BI_X86_BLENDVB;
+	uint32_t fn = e->wk->inl ? e->wk->inl->fn : e->wk->fsym;
+	if (!x86_feature_has(cc_x86_features(c, fn), blend ? X86_FEATURE_SSE41 : X86_FEATURE_SSE42))
+		efatal(e, x->loc, "builtin requires target feature '%s'", blend ? "sse4.1" : "sse4.2");
+	if (!blend) cc_eval(c, arg[x->c - 1], &cv);
+	unsigned mode = blend ? 1 : (unsigned)cv.i, kind = mode & 7;
+	bool explicit = (mode & 8) != 0;
+	unsigned count = blend ? 3 : explicit ? 4 : 2;
+	if (!blend) cc_eval(c, arg[count], &cv);
+	unsigned control = blend ? 0 : (unsigned)cv.i;
+	int64_t slot[4], saved[32] = { 0 };
+	uint32_t live = e->x64->live;
+	uint32_t fixed = (1u << XMM0) | (1u << (XMM0 + 1)) | (blend ? (1u << (XMM0 + 2)) : (1u << RCX)) |
+		(explicit ? (1u << RAX) | (1u << RDX) : 0);
+	x64_nofp(e);
+	for (unsigned i = 0; i < count; i++) {
+		bool vector = !explicit || !(i & 1);
+		lval l = { .k = L_FRAME, .off = slot[i] = wk_slot(e, vector ? 16 : 4, vector ? 16 : 4) };
+		val v = wk_gen(e, arg[i]);
+		if (vector) {
+			v = wk_putmem(e, &l, N(arg[i])->ty, v);
+		} else {
+			int r = wk_reg(e, &v, prim(TY_INT));
+			x64_store(e, r, &l, 4);
+		}
+		wk_free(e, &v);
+	}
+	for (int r = 0; r < 32; r++)
+		if ((live & fixed) & (1u << r)) {
+			int size = r >= XMM0 ? 16 : 8;
+			lval l = { .k = L_FRAME, .off = saved[r] = wk_slot(e, size, size) };
+			x64_store(e, r, &l, size);
+		}
+	e->x64->live |= fixed;
+	for (unsigned i = 0; i < count; i++) {
+		bool vector = !explicit || !(i & 1);
+		int r = blend ? XMM0 + (i == 2 ? 0 : (int)i + 1) :
+			vector ? (i == 0 ? XMM0 : (XMM0 + 1)) : i == 1 ? RAX : RDX;
+		lval l = { .k = L_FRAME, .off = slot[i] };
+		x64_load(e, r, &l, vector ? 16 : 4, false);
+	}
+	rec *ins = x64_put(e, blend ? X_BLENDVB : X_PCMPSTR);
+	ins->cond = (explicit ? 0 : 2) | (kind == 1 ? 0 : 1);
+	ins->imm = control;
+	val result;
+	if (kind == 1) {
+		lval l = { .k = L_FRAME, .off = wk_slot(e, 16, 16) };
+		x64_store(e, blend ? XMM0 + 1 : XMM0, &l, 16);
+		result = (val){ .k = V_REG, .r = (uint8_t)x64_laddr(e, &l) };
+	} else {
+		int r = x64_treg(e);
+		if (kind == 0) x64_mov(e, r, RCX);
+		else {
+			static const uint8_t cc[] = { 0, 0, CC_A, CC_B, CC_O, CC_S, CC_E };
+			ins = x64_op3(e, X_SETCC, 4, r, XNOREG, XNOREG);
+			ins->cond = cc[kind];
+		}
+		result = (val){ .k = V_REG, .r = (uint8_t)r };
+	}
+	for (int r = 0; r < 32; r++)
+		if (saved[r]) {
+			lval l = { .k = L_FRAME, .off = saved[r] };
+			x64_load(e, r, &l, r >= XMM0 ? 16 : 8, false);
+		}
+	e->x64->live = live | (1u << result.r);
+	return result;
 }

@@ -1,0 +1,807 @@
+{
+  "attr_features": [
+    "adx",
+    "aes",
+    "amx-avx512",
+    "amx-bf16",
+    "amx-complex",
+    "amx-fp16",
+    "amx-fp8",
+    "amx-int8",
+    "amx-movrs",
+    "amx-tile",
+    "apxf",
+    "avx",
+    "avx10.1",
+    "avx10.2",
+    "avx2",
+    "avx512bf16",
+    "avx512bitalg",
+    "avx512bmm",
+    "avx512bw",
+    "avx512cd",
+    "avx512dq",
+    "avx512f",
+    "avx512fp16",
+    "avx512ifma",
+    "avx512vbmi",
+    "avx512vbmi2",
+    "avx512vl",
+    "avx512vnni",
+    "avx512vp2intersect",
+    "avx512vpopcntdq",
+    "avxifma",
+    "avxneconvert",
+    "avxvnni",
+    "avxvnniint16",
+    "avxvnniint8",
+    "bmi",
+    "bmi2",
+    "ccmp",
+    "cf",
+    "cldemote",
+    "clflushopt",
+    "clwb",
+    "clzero",
+    "cmpccxadd",
+    "crc32",
+    "cx16",
+    "egpr",
+    "enqcmd",
+    "f16c",
+    "fma",
+    "fma4",
+    "fsgsbase",
+    "fxsr",
+    "gfni",
+    "hreset",
+    "invpcid",
+    "jmpabs",
+    "kl",
+    "lwp",
+    "lzcnt",
+    "mmx",
+    "movbe",
+    "movdir64b",
+    "movdiri",
+    "movrs",
+    "mwaitx",
+    "ndd",
+    "nf",
+    "pclmul",
+    "pconfig",
+    "pku",
+    "popcnt",
+    "ppx",
+    "prefer-256-bit",
+    "prefetchi",
+    "prfchw",
+    "ptwrite",
+    "push2pop2",
+    "raoint",
+    "rdpid",
+    "rdpru",
+    "rdrnd",
+    "rdseed",
+    "rtm",
+    "sahf",
+    "serialize",
+    "sgx",
+    "sha",
+    "sha512",
+    "shstk",
+    "sm3",
+    "sm4",
+    "sse",
+    "sse2",
+    "sse3",
+    "sse4.1",
+    "sse4.2",
+    "sse4a",
+    "ssse3",
+    "tbm",
+    "tsxldtrk",
+    "uintr",
+    "usermsr",
+    "vaes",
+    "vpclmulqdq",
+    "waitpkg",
+    "wbnoinvd",
+    "widekl",
+    "x87",
+    "xop",
+    "xsave",
+    "xsavec",
+    "xsaveopt",
+    "xsaves",
+    "zu"
+  ],
+  "cli_features": [
+    "adx",
+    "aes",
+    "amx-avx512",
+    "amx-bf16",
+    "amx-complex",
+    "amx-fp16",
+    "amx-fp8",
+    "amx-int8",
+    "amx-movrs",
+    "amx-tile",
+    "apxf",
+    "avx",
+    "avx10.1",
+    "avx10.2",
+    "avx2",
+    "avx512bf16",
+    "avx512bitalg",
+    "avx512bmm",
+    "avx512bw",
+    "avx512cd",
+    "avx512dq",
+    "avx512f",
+    "avx512fp16",
+    "avx512ifma",
+    "avx512vbmi",
+    "avx512vbmi2",
+    "avx512vl",
+    "avx512vnni",
+    "avx512vp2intersect",
+    "avx512vpopcntdq",
+    "avxifma",
+    "avxneconvert",
+    "avxvnni",
+    "avxvnniint16",
+    "avxvnniint8",
+    "bmi",
+    "bmi2",
+    "cldemote",
+    "clflushopt",
+    "clwb",
+    "clzero",
+    "cmpccxadd",
+    "crc32",
+    "cx16",
+    "enqcmd",
+    "f16c",
+    "fma",
+    "fma4",
+    "fsgsbase",
+    "fxsr",
+    "gfni",
+    "hreset",
+    "invpcid",
+    "kl",
+    "lvi-cfi",
+    "lwp",
+    "lzcnt",
+    "mmx",
+    "movbe",
+    "movdir64b",
+    "movdiri",
+    "movrs",
+    "mwaitx",
+    "pclmul",
+    "pconfig",
+    "pku",
+    "popcnt",
+    "prefetchi",
+    "prfchw",
+    "ptwrite",
+    "raoint",
+    "rdpid",
+    "rdpru",
+    "rdrnd",
+    "rdseed",
+    "retpoline-external-thunk",
+    "rtm",
+    "sahf",
+    "serialize",
+    "sgx",
+    "sha",
+    "sha512",
+    "shstk",
+    "sm3",
+    "sm4",
+    "sse",
+    "sse2",
+    "sse3",
+    "sse4.1",
+    "sse4.2",
+    "sse4a",
+    "ssse3",
+    "tbm",
+    "tsxldtrk",
+    "uintr",
+    "usermsr",
+    "vaes",
+    "vpclmulqdq",
+    "vzeroupper",
+    "waitpkg",
+    "wbnoinvd",
+    "widekl",
+    "x87",
+    "xop",
+    "xsave",
+    "xsavec",
+    "xsaveopt",
+    "xsaves"
+  ],
+  "cpu_macro_names": [
+    "__amdfam10",
+    "__amdfam10__",
+    "__atom",
+    "__atom__",
+    "__bdver1",
+    "__bdver1__",
+    "__bdver2",
+    "__bdver2__",
+    "__bdver3",
+    "__bdver3__",
+    "__bdver4",
+    "__bdver4__",
+    "__btver1",
+    "__btver1__",
+    "__btver2",
+    "__btver2__",
+    "__c86_4g_m4",
+    "__c86_4g_m4__",
+    "__c86_4g_m6",
+    "__c86_4g_m6__",
+    "__c86_4g_m7",
+    "__c86_4g_m7__",
+    "__c86_4g_m8",
+    "__c86_4g_m8__",
+    "__core2",
+    "__core2__",
+    "__corei7",
+    "__corei7__",
+    "__goldmont",
+    "__goldmont__",
+    "__goldmont_plus",
+    "__goldmont_plus__",
+    "__k8",
+    "__k8__",
+    "__knl",
+    "__knl__",
+    "__nocona",
+    "__nocona__",
+    "__slm",
+    "__slm__",
+    "__tremont",
+    "__tremont__",
+    "__tune_amdfam10__",
+    "__tune_atom__",
+    "__tune_bdver1__",
+    "__tune_bdver2__",
+    "__tune_bdver3__",
+    "__tune_bdver4__",
+    "__tune_btver1__",
+    "__tune_btver2__",
+    "__tune_c86_4g_m4__",
+    "__tune_c86_4g_m6__",
+    "__tune_c86_4g_m7__",
+    "__tune_c86_4g_m8__",
+    "__tune_core2__",
+    "__tune_corei7__",
+    "__tune_goldmont__",
+    "__tune_goldmont_plus__",
+    "__tune_k8__",
+    "__tune_knl__",
+    "__tune_nocona__",
+    "__tune_slm__",
+    "__tune_tremont__",
+    "__tune_znver1__",
+    "__tune_znver2__",
+    "__tune_znver3__",
+    "__tune_znver4__",
+    "__tune_znver5__",
+    "__tune_znver6__",
+    "__znver1",
+    "__znver1__",
+    "__znver2",
+    "__znver2__",
+    "__znver3",
+    "__znver3__",
+    "__znver4",
+    "__znver4__",
+    "__znver5",
+    "__znver5__",
+    "__znver6",
+    "__znver6__"
+  ],
+  "cpus": [
+    "nocona",
+    "core2",
+    "penryn",
+    "bonnell",
+    "atom",
+    "silvermont",
+    "slm",
+    "goldmont",
+    "goldmont-plus",
+    "tremont",
+    "nehalem",
+    "corei7",
+    "westmere",
+    "sandybridge",
+    "corei7-avx",
+    "ivybridge",
+    "core-avx-i",
+    "haswell",
+    "core-avx2",
+    "broadwell",
+    "skylake",
+    "skylake-avx512",
+    "skx",
+    "cascadelake",
+    "cooperlake",
+    "cannonlake",
+    "icelake-client",
+    "rocketlake",
+    "icelake-server",
+    "tigerlake",
+    "sapphirerapids",
+    "alderlake",
+    "raptorlake",
+    "meteorlake",
+    "arrowlake",
+    "arrowlake-s",
+    "lunarlake",
+    "gracemont",
+    "pantherlake",
+    "wildcatlake",
+    "novalake",
+    "sierraforest",
+    "grandridge",
+    "graniterapids",
+    "graniterapids-d",
+    "emeraldrapids",
+    "clearwaterforest",
+    "diamondrapids",
+    "knl",
+    "knm",
+    "k8",
+    "athlon64",
+    "athlon-fx",
+    "opteron",
+    "k8-sse3",
+    "athlon64-sse3",
+    "opteron-sse3",
+    "amdfam10",
+    "barcelona",
+    "btver1",
+    "btver2",
+    "bdver1",
+    "bdver2",
+    "bdver3",
+    "bdver4",
+    "znver1",
+    "znver2",
+    "znver3",
+    "znver4",
+    "znver5",
+    "znver6",
+    "c86-4g-m4",
+    "c86-4g-m6",
+    "c86-4g-m7",
+    "c86-4g-m8",
+    "x86-64",
+    "x86-64-v2",
+    "x86-64-v3",
+    "x86-64-v4"
+  ],
+  "feature_macros": {
+    "__ADX__": [
+      "adx"
+    ],
+    "__AES__": [
+      "aes"
+    ],
+    "__AMX_AVX512__": [
+      "amx-avx512"
+    ],
+    "__AMX_BF16__": [
+      "amx-bf16"
+    ],
+    "__AMX_COMPLEX__": [
+      "amx-complex"
+    ],
+    "__AMX_FP16__": [
+      "amx-fp16"
+    ],
+    "__AMX_FP8__": [
+      "amx-fp8"
+    ],
+    "__AMX_INT8__": [
+      "amx-int8"
+    ],
+    "__AMX_MOVRS__": [
+      "amx-movrs"
+    ],
+    "__AMX_TILE__": [
+      "amx-tile"
+    ],
+    "__APX_F__": [
+      "ccmp",
+      "egpr",
+      "jmpabs",
+      "ndd",
+      "nf",
+      "ppx",
+      "push2pop2",
+      "zu"
+    ],
+    "__APX_INLINE_ASM_USE_GPR32__": [
+      "egpr",
+      "inline-asm-use-gpr32"
+    ],
+    "__AVX10_1_512__": [
+      "avx10.1"
+    ],
+    "__AVX10_1__": [
+      "avx10.1"
+    ],
+    "__AVX10_2_512__": [
+      "avx10.2"
+    ],
+    "__AVX10_2__": [
+      "avx10.2"
+    ],
+    "__AVX2__": [
+      "avx2"
+    ],
+    "__AVX512BF16__": [
+      "avx512bf16"
+    ],
+    "__AVX512BITALG__": [
+      "avx512bitalg"
+    ],
+    "__AVX512BMM__": [
+      "avx512bmm"
+    ],
+    "__AVX512BW__": [
+      "avx512bw"
+    ],
+    "__AVX512CD__": [
+      "avx512cd"
+    ],
+    "__AVX512DQ__": [
+      "avx512dq"
+    ],
+    "__AVX512FP16__": [
+      "avx512fp16"
+    ],
+    "__AVX512F__": [
+      "avx512f"
+    ],
+    "__AVX512IFMA__": [
+      "avx512ifma"
+    ],
+    "__AVX512VBMI2__": [
+      "avx512vbmi2"
+    ],
+    "__AVX512VBMI__": [
+      "avx512vbmi"
+    ],
+    "__AVX512VL__": [
+      "avx512vl"
+    ],
+    "__AVX512VNNI__": [
+      "avx512vnni"
+    ],
+    "__AVX512VP2INTERSECT__": [
+      "avx512vp2intersect"
+    ],
+    "__AVX512VPOPCNTDQ__": [
+      "avx512vpopcntdq"
+    ],
+    "__AVXIFMA__": [
+      "avxifma"
+    ],
+    "__AVXNECONVERT__": [
+      "avxneconvert"
+    ],
+    "__AVXVNNIINT16__": [
+      "avxvnniint16"
+    ],
+    "__AVXVNNIINT8__": [
+      "avxvnniint8"
+    ],
+    "__AVXVNNI__": [
+      "avxvnni"
+    ],
+    "__AVX__": [
+      "avx"
+    ],
+    "__BMI2__": [
+      "bmi2"
+    ],
+    "__BMI__": [
+      "bmi"
+    ],
+    "__CCMP__": [
+      "ccmp"
+    ],
+    "__CF__": [
+      "cf"
+    ],
+    "__CLDEMOTE__": [
+      "cldemote"
+    ],
+    "__CLFLUSHOPT__": [
+      "clflushopt"
+    ],
+    "__CLWB__": [
+      "clwb"
+    ],
+    "__CLZERO__": [
+      "clzero"
+    ],
+    "__CMPCCXADD__": [
+      "cmpccxadd"
+    ],
+    "__CRC32__": [
+      "crc32"
+    ],
+    "__EGPR__": [
+      "egpr"
+    ],
+    "__ENQCMD__": [
+      "enqcmd"
+    ],
+    "__F16C__": [
+      "f16c"
+    ],
+    "__FLT16_DECIMAL_DIG__": [
+      "sse2"
+    ],
+    "__FLT16_DENORM_MIN__": [
+      "sse2"
+    ],
+    "__FLT16_DIG__": [
+      "sse2"
+    ],
+    "__FLT16_EPSILON__": [
+      "sse2"
+    ],
+    "__FLT16_HAS_DENORM__": [
+      "sse2"
+    ],
+    "__FLT16_HAS_INFINITY__": [
+      "sse2"
+    ],
+    "__FLT16_HAS_QUIET_NAN__": [
+      "sse2"
+    ],
+    "__FLT16_MANT_DIG__": [
+      "sse2"
+    ],
+    "__FLT16_MAX_10_EXP__": [
+      "sse2"
+    ],
+    "__FLT16_MAX_EXP__": [
+      "sse2"
+    ],
+    "__FLT16_MAX__": [
+      "sse2"
+    ],
+    "__FLT16_MIN_10_EXP__": [
+      "sse2"
+    ],
+    "__FLT16_MIN_EXP__": [
+      "sse2"
+    ],
+    "__FLT16_MIN__": [
+      "sse2"
+    ],
+    "__FLT16_NORM_MAX__": [
+      "sse2"
+    ],
+    "__FMA4__": [
+      "fma4"
+    ],
+    "__FMA__": [
+      "fma"
+    ],
+    "__FSGSBASE__": [
+      "fsgsbase"
+    ],
+    "__FXSR__": [
+      "fxsr"
+    ],
+    "__GCC_HAVE_SYNC_COMPARE_AND_SWAP_16": [
+      "cx16"
+    ],
+    "__GCC_HAVE_SYNC_COMPARE_AND_SWAP_8": [
+      "cx8"
+    ],
+    "__GFNI__": [
+      "gfni"
+    ],
+    "__HRESET__": [
+      "hreset"
+    ],
+    "__INVPCID__": [
+      "invpcid"
+    ],
+    "__JMPABS__": [
+      "jmpabs"
+    ],
+    "__KL__": [
+      "kl"
+    ],
+    "__LAHF_SAHF__": [
+      "sahf"
+    ],
+    "__LWP__": [
+      "lwp"
+    ],
+    "__LZCNT__": [
+      "lzcnt"
+    ],
+    "__MMX__": [
+      "mmx"
+    ],
+    "__MOVBE__": [
+      "movbe"
+    ],
+    "__MOVDIR64B__": [
+      "movdir64b"
+    ],
+    "__MOVDIRI__": [
+      "movdiri"
+    ],
+    "__MOVRS__": [
+      "movrs"
+    ],
+    "__MWAITX__": [
+      "mwaitx"
+    ],
+    "__NDD__": [
+      "ndd"
+    ],
+    "__NF__": [
+      "nf"
+    ],
+    "__PCLMUL__": [
+      "pclmul"
+    ],
+    "__PCONFIG__": [
+      "pconfig"
+    ],
+    "__PKU__": [
+      "pku"
+    ],
+    "__POPCNT__": [
+      "popcnt"
+    ],
+    "__PPX__": [
+      "ppx"
+    ],
+    "__PREFETCHI__": [
+      "prefetchi"
+    ],
+    "__PRFCHW__": [
+      "prfchw"
+    ],
+    "__PTWRITE__": [
+      "ptwrite"
+    ],
+    "__PUSH2POP2__": [
+      "push2pop2"
+    ],
+    "__RAOINT__": [
+      "raoint"
+    ],
+    "__RDPID__": [
+      "rdpid"
+    ],
+    "__RDPRU__": [
+      "rdpru"
+    ],
+    "__RDRND__": [
+      "rdrnd"
+    ],
+    "__RDSEED__": [
+      "rdseed"
+    ],
+    "__RTM__": [
+      "rtm"
+    ],
+    "__SERIALIZE__": [
+      "serialize"
+    ],
+    "__SGX__": [
+      "sgx"
+    ],
+    "__SHA512__": [
+      "sha512"
+    ],
+    "__SHA__": [
+      "sha"
+    ],
+    "__SHSTK__": [
+      "shstk"
+    ],
+    "__SM3__": [
+      "sm3"
+    ],
+    "__SM4__": [
+      "sm4"
+    ],
+    "__SSE2_MATH__": [
+      "sse2"
+    ],
+    "__SSE2__": [
+      "sse2"
+    ],
+    "__SSE3__": [
+      "sse3"
+    ],
+    "__SSE4A__": [
+      "sse4a"
+    ],
+    "__SSE4_1__": [
+      "sse4.1"
+    ],
+    "__SSE4_2__": [
+      "sse4.2"
+    ],
+    "__SSE_MATH__": [
+      "sse"
+    ],
+    "__SSE__": [
+      "sse"
+    ],
+    "__SSSE3__": [
+      "ssse3"
+    ],
+    "__TBM__": [
+      "tbm"
+    ],
+    "__TSXLDTRK__": [
+      "tsxldtrk"
+    ],
+    "__UINTR__": [
+      "uintr"
+    ],
+    "__USERMSR__": [
+      "usermsr"
+    ],
+    "__VAES__": [
+      "vaes"
+    ],
+    "__VPCLMULQDQ__": [
+      "vpclmulqdq"
+    ],
+    "__WAITPKG__": [
+      "waitpkg"
+    ],
+    "__WBNOINVD__": [
+      "wbnoinvd"
+    ],
+    "__WIDEKL__": [
+      "widekl"
+    ],
+    "__XOP__": [
+      "xop"
+    ],
+    "__XSAVEC__": [
+      "xsavec"
+    ],
+    "__XSAVEOPT__": [
+      "xsaveopt"
+    ],
+    "__XSAVES__": [
+      "xsaves"
+    ],
+    "__XSAVE__": [
+      "xsave"
+    ],
+    "__ZU__": [
+      "zu"
+    ]
+  },
+  "source_sha256": "4f0fdd41b3990b79a721f9839ff7e1a35524642b645df0d030bf5619dee6fbf0",
+  "version": "Ubuntu clang version 23.1.6 (++20261108033809+c47d7823685a-1~exp1~20261108153913.94)"
+}
