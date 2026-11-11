@@ -141,6 +141,52 @@ W1 kan delvis gå parallellt med W0.
 
 ## Status
 
+### W9 (2026-11-11): ersätt Emscripten, första fristående testvägen klar
+
+Målet är att bygga och köra wasm utan emcc/emsdk. Emscripten är i dag
+test-/runtimeinfrastruktur, inte en nödvändig del av vcc:s wasm-kodgenerator.
+Vcc har redan assembler, objektskrivare och `ld/wasmld.c`; W8 ersätter
+länkaren men den gamla testvägens emcc väljer fortfarande bibliotek och
+genererar JS. `wasm*-unknown-emscripten` anger nuvarande mål-ABI, inte att
+programmet måste byggas eller startas med Emscripten.
+
+| Steg | Leverans | Status och verifiering |
+| --- | --- | --- |
+| W9.1 | Libc-fri testväg: vpp -S för kodkrav, vpp -c för eget objekt, vlink för modul, liten Node-launcher | Klar för OPT1:s första regel: `bench/vcc-opt-rules.py --target wasm32-unknown-emscripten --run` och motsvarande wasm64. O0–O3 kör samma C-regression. Ingen emcc, LLVM-assembler, wasm-ld eller SDK används i denna wasm-väg. Verifierat med systemets `/usr/bin/node` 24.22.2 och därefter 25.9.0 utan SDK-sökväg. Tidigare Node 22 saknade table64 och kunde inte köra denna wasm64-modul. |
+| W9.2 | Egen test-runtime för ett uttryckligt urval av de vendrade C-sviterna | Planerad. Återanvänd portabel C ur `tests/rt/rt.c` eller granskade libc/compiler-rt-källor; bygg med vcc. Separera arm64-start, UART/exit- och FP-asm. Lägg små JS-importer för output/exit samt heap med memory.grow. Behåll samma deklarationer/testkontrakt och verifiera även referenskompilatorns program mot runtime. |
+| W9.3 | Komplett bibliotek-/builtinsstöd för testkorpuset, inklusive exceptionbaserad setjmp | Planerad. Inventera faktiska undefined-symboler; implementera eller vcc-bygg kompatibla __int128/binary128/complex-hjälpare och libc/libm-källor. __wasm_setjmp/__wasm_longjmp och __c_longjmp-taggen kräver egna ABI-/EH-tester. Saknade funktioner ger uttryckligt unsupported, inte falskt godkända eller tyst filtrerade tester. |
+| W9.4 | Fristående explorer och självbygge | Planerad. Ersätt em-config/sysroot-val, libc-header/runtimeleverans, startup/argv/stdout/exit och genererade VccModule/FS/callMain/ExitStatus med egen adapter. Packa filerna i VFS; behåll worker-API eller migrera worker/selfrun i samma steg. Testa filer, minnestillväxt, diagnostik och självbyggets stage2=stage3. |
+| W9.5 | GHA:s obligatoriska wasm-grind använder den egna kedjan | Påbörjad med W9.1-regressionerna i `ci/premerge.sh`; den gamla fullsviten behöver fortfarande emcc. Ta bort SDK-installationen först när samma beslutade korpus och ABI-tester går med W9.2–W9.4. Emscripten kan därefter finnas som valfri jämförelsereferens, aldrig som obligatorisk bygg-/runtimekomponent. |
+
+Det krävs inte en nyskriven full libc. Valda befintliga källor kan byggas
+av vcc, med dokumenterat ursprung/licens och testad wasm32/64-ABI. Den
+generiska optimeraren väntar inte på detta runtimearbete: W9.1 ger redan
+egen kedja för dess positiva kodkrav och sidoeffekts-/gränsvärdestester.
+Installation på värden och aktivering av emsdk är inte en produktleverans.
+
+Kodinventering: `bench/vcc-wasm.py` använder emcc för `rt/wasm.c` och
+slutlänk/JS; `rt/wasm.c` är bara assert-adaptern mot extern libc.
+`ccs/wasm/build.sh` använder Emscriptens sysroot och JS-fil-/processglue.
+`explorer/worker.js` och `selfrun.mjs` använder VccModule, FS och callMain.
+`ccs/wasm/mman.c` äger redan reservationspolicyn men behöver sbrk, pread,
+errno och standardbiblioteksfunktioner. Wasm-generatorn emitterar
+compiler-rt-anrop och EH-ramar men levererar ännu inte deras runtime.
+
+### Gemensamma optimeringar (2026-11-11): planerade för wasm32 och wasm64
+
+`PLAN-fas2.md`, **Gemensam optimerare utan SSA**, OPT0–OPT8 äger den nya
+optimeringsplanen. Wasm är obligatorisk konsument av gemensamma C-regler
+och strategier tillsammans med x86 och arm64. Anslutningar finns i
+`wexpr.c` (`wbinary`/`warith`, `wknown`, `wlocal`, `wvlanes`), `wstmt.c`
+(`wswitch`, nåbarhet) och `wcall.c:wcall`. Behåll operandstack, wasm-lokaler,
+strukturerade resultatblock och `br_table`; inga fysiska registerpass krävs.
+Gemensam inliningpolicy måste kompletteras med verkliga wasm-bindningar
+och retur-/goto-/cleanup-remappning. Native-only verktyg eller en x86-grön
+audit räknas inte som wasm-verifiering. Kör båda pekarbredderna, med
+scalar-fallback utan SIMD/tail-call-features. Rena extraktioner skall ge
+samma utdata; nya regler får avsedda, testade förbättringar på wasm också.
+Ingen regel implementerad i detta steg; befintliga W-statusar ändras inte.
+
 Före planen: wasm-*bygget* av vcc via emscripten (`ccs/wasm/`, commit 8e9f9da) och
 explorer-sidan.
 

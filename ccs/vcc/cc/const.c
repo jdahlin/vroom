@@ -310,6 +310,8 @@ VPRIV bool constexpr_init_ok(cc *c, uint32_t n)
 	x = N(n);
 	if (ISERR(n))
 		return true;
+	if (vector_constant(c,n))
+		return true;
 	switch (x->op) {
 	case N_NUM: case N_FNUM: case N_ZERO: case N_STR:
 		return true;
@@ -336,10 +338,12 @@ VPRIV bool constexpr_init_ok(cc *c, uint32_t n)
 		return ok;
 	}
 	case N_MEMBER: case N_INDEX:
+		if (bitcast_constant(c, n)) return true;
 		return eval(c, n, &v) && constexpr_subobject(c, n, &obj, &ice) && obj.init != n && constexpr_init_ok(c, obj.init);
 	case N_COMPLIT:
 		return constexpr_init_ok(c, x->a);
 	case N_CAST: case N_UNARY:
+		if (x->op == N_CAST && x->aux == CK_BITS) return bitcast_constant(c, n);
 		return constexpr_init_ok(c, x->a) && eval(c, n, &v);
 	case N_BINARY:
 		return constexpr_init_ok(c, x->a) && constexpr_init_ok(c, x->b) && eval(c, n, &v);
@@ -483,7 +487,7 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 		v->ice = true;
 		return is_scalar(c, x->ty);
 	case N_MEMBER:
-		return constexpr_value(c, n, v);
+		return constexpr_value(c, n, v) || bitcast_value(c, n, v);
 	case N_VAR: {
 		/* a const integer variable with a constant initializer folds (not an ICE) */
 		const sym *s = &c->syms[x->a];
@@ -517,6 +521,8 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 			v->kind = CV_INT;
 			v->ice = eval(c, x->a, &a) && a.ice;
 			return true;
+		case CK_BITS:
+			return bitcast_value(c, n, v);
 		case CK_UNION: case CK_SPLAT:
 			return false;
 		}
@@ -912,7 +918,7 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 		return true;
 	case N_INDEX:
 	case N_DEREF: {
-		if (x->op == N_INDEX && constexpr_value(c, n, v))
+		if (x->op == N_INDEX && (constexpr_value(c, n, v) || bitcast_value(c, n, v)))
 			return true;
 		/* "abc"[1], *"abc": an element of a string literal folds (clang) */
 		const cstr *st;

@@ -1,0 +1,61 @@
+bit_cast_constraints.c:12:9: error: __builtin_bit_cast source and destination have different sizes (4 and 8 bytes)
+   12 |   (void)__builtin_bit_cast(unsigned long, 1);
+      |         ^
+bit_cast_constraints.c:13:9: error: __builtin_bit_cast requires complete object types of constant size
+   13 |   (void)__builtin_bit_cast(void, 1);
+      |         ^
+bit_cast_constraints.c:14:9: error: __builtin_bit_cast requires complete object types of constant size
+   14 |   (void)__builtin_bit_cast(struct Incomplete, 1);
+      |         ^
+bit_cast_constraints.c:15:9: error: __builtin_bit_cast source type must be trivially copyable
+   15 |   (void)__builtin_bit_cast(unsigned, atomic);
+      |         ^
+bit_cast_constraints.c:17:9: error: __builtin_bit_cast requires complete object types of constant size
+   17 |   (void)__builtin_bit_cast(unsigned, vla);
+      |         ^
+bit_cast_constraints.c:19:25: error: constexpr variable 'pointer_bits' must be initialized by a constant expression
+   19 | constexpr unsigned long pointer_bits = __builtin_bit_cast(unsigned long, (void *)0);
+      |                         ^
+bit_cast_constraints.c:21:20: error: constexpr variable 'union_bits' must be initialized by a constant expression
+   21 | constexpr unsigned union_bits = __builtin_bit_cast(unsigned, (union U){1});
+      |                    ^
+bit_cast_constraints.c:23:25: error: constexpr variable 'padding_bits' must be initialized by a constant expression
+   23 | constexpr unsigned long padding_bits = __builtin_bit_cast(unsigned long, (struct Padding){1,2});
+      |                         ^
+bit_cast_constraints.c:24:17: error: constexpr variable 'invalid_bool' must be initialized by a constant expression
+   24 | constexpr _Bool invalid_bool = __builtin_bit_cast(_Bool, (unsigned char)2);
+      |                 ^
+bit_cast_constraints.c:26:20: error: constexpr variable 'effect' must be initialized by a constant expression
+   26 | constexpr unsigned effect = __builtin_bit_cast(unsigned, (side_effect(), 1));
+      |                    ^
+bit_cast_constraints.c:28:27: error: constexpr variable 'uninitialized_byte' must be initialized by a constant expression
+   28 | constexpr struct ByteView uninitialized_byte = __builtin_bit_cast(struct ByteView, (struct Padding){1,2});
+      |                           ^
+bit_cast_constraints.c:29:25: error: constexpr variable 'regenerated_padding' must be initialized by a constant expression
+   29 | constexpr unsigned long regenerated_padding = __builtin_bit_cast(unsigned long,
+      |                         ^
+bit_cast_constraints.c:31:25: error: constexpr variable 'hidden_invalid_bool' must be initialized by a constant expression
+   31 | constexpr unsigned char hidden_invalid_bool = __builtin_bit_cast(unsigned char,
+      |                         ^
+bit_cast_constraints.c:35:20: error: constexpr variable 'not_constexpr_object' must be initialized by a constant expression
+   35 | constexpr unsigned not_constexpr_object = __builtin_bit_cast(unsigned,ordinary_constant);
+      |                    ^
+bit_cast_constraints.c:39:20: error: constexpr variable 'inactive_member' must be initialized by a constant expression
+   39 | constexpr unsigned inactive_member = __builtin_bit_cast(unsigned,active_union.f);
+      |                    ^
+bit_cast_constraints.c:42:20: error: constexpr variable 'nested_inactive_member' must be initialized by a constant expression
+   42 | constexpr unsigned nested_inactive_member = __builtin_bit_cast(unsigned,nested_union.member.f);
+      |                    ^
+bit_cast_constraints.c:44:20: error: constexpr variable 'indexed_inactive_member' must be initialized by a constant expression
+   44 | constexpr unsigned indexed_inactive_member = __builtin_bit_cast(unsigned,union_array[0].f);
+      |                    ^
+bit_cast_constraints.c:46:20: error: constexpr variable 'reinterpreted_index' must be initialized by a constant expression
+   46 | constexpr unsigned reinterpreted_index = __builtin_bit_cast(unsigned,((const float*)integer_array)[0]);
+      |                    ^
+bit_cast_constraints.c:47:20: error: constexpr variable 'live_logical_call' must be initialized by a constant expression
+   47 | constexpr unsigned live_logical_call = __builtin_bit_cast(unsigned,1 && side_effect());
+      |                    ^
+bit_cast_constraints.c:50:20: error: constexpr variable 'exposed_unnamed_padding' must be initialized by a constant expression
+   50 | constexpr unsigned exposed_unnamed_padding = __builtin_bit_cast(unsigned,unnamed_bits);
+      |                    ^
+20 errors generated.

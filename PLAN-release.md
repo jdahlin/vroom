@@ -80,6 +80,95 @@ kan gå parallellt.
 
 ## Status
 
+### Status 2026-11-11: G5/G7, registerlokaler på x86
+
+Gemensamt behörighetsurval i `emit/opt/locals.c` används av alla tre
+bakändar; x86 håller nu lönsamma skalärer i fyra callee-save-register.
+Cold-prober är oförändrade; ett native loopprov går 7,830→6,345 ms men
+divisionsfritt loopkorpus kostar cirka 11 % mer kompilator-CPU. Det är
+inte en godkänd 1 %-grind. Snapshot/ABI-säkerhet för builtin setjmp och
+sena/inlinade justerade ramar är testad. Båda byggsätten: 116 fokuserade
+kombinationer; x86-egensvit 137/137, arm64 142/142, kors-ABI 22/22.
+CI kör nu x86-prober under qemu-user. Se OPT3 i `PLAN-fas2.md` för
+hashar, mätmetod och återstående arbete. G5/G7/O2-målet fortsatt öppna.
+
+### Status 2026-11-11: G5/G7, direkt parameterbindning
+
+Utvalda x86-parametrar binds direkt till registerhem utan extra ABI-spill
+eller efterladdning. Smala typer, stackargument, mixed GP/FP, hidden sret
+och varargs verifierade O0–O3; kors-ABI 22/22. Parade korta mätningar och
+begränsningar finns i OPT3 i `PLAN-fas2.md`. G5/G7/O2-målet fortsatt öppna.
+
+### Status 2026-11-11: G5/G7, onåbar kod och signed tvåpotenser
+
+Delat linjärt record-pass tar bort säkert onåbara suffix; x86 har nu
+register-/effektkontrakt för nästa kopie-/livenesssteg. Signed konstant
+tvåpotensdivision/-rest delar ett recept mellan alla bakändar; wasm
+behåller kompakt div/rem där clang också gör det. Separate regelfiler
+och måladaptrar. Båda byggsätten klarar 96 fokuserade kontroller;
+egensviter x86 135/135 och arm64 140/140. Syntetisk kompilator-CPU-kostnad
+och kvarvarande osäkerhet redovisas vid OPT8 i `PLAN-fas2.md`.
+G5/G7 och hela O2-målet är fortsatt öppna.
+
+### Status 2026-11-11: G5/G7, delad grenstädning
+
+Arm64 och x86 använder nu `emit/rec/fallthrough.c`; arm64:s extraktion
+är byte-identisk för 131 befintliga testfiler med O1 och -g. Wasm
+utelämnar redundanta while-grenar med separat nåbarhetsbevis. Båda
+byggsätten klarar 64 fokuserade kod-/körkombinationer; egensviter x86
+133/133 och arm64 138/138. Mätdata och kvarvarande CPU-osäkerhet finns
+vid OPT2 i `PLAN-fas2.md`. G5/G7 och O2-målet är fortsatt öppna.
+
+### Status 2026-11-11: G5/G7, delade heltalsidentiteter
+
+`emit/opt/identity.c` delar nu typkorrekta heltalsidentiteter mellan alla
+bakändar; tvåpotensregeln ligger separat i `divpow2.c`. Unity och
+fil-för-fil klarar 32 kod-/körkontroller vid O0–O3. Egna sviter: x86
+131/131, arm64 136/136. Effekter och smala/höga registerbitar täcks av
+regressioner. Mätbrus hindrar slutsats om små kompilator-CPU-skillnader;
+se OPT1 i `PLAN-fas2.md`. G5/G7 och hela O2-målet är fortsatt öppna.
+
+### Status 2026-11-11: G5/G7, första gemensamma regel implementerad
+
+Unsigned konstant tvåpotensdivision/-rest sänks nu genom samma hjälpare
+för x86, arm64 och wasm32/64. Alla 16 mål-/nivåkombinationer klarar
+kodkrav och literalbaserad körkontroll, även fil-för-fil. Egna sviter:
+x86 130/130, arm64 135/135. Wasm-testvägen använder vcc:s egna objekt
+och länkare plus systemets Node 24/25, utan Emscripten; full
+runtimeersättning är W9 i `PLAN-wasm.md`. Korta före/efter-mätningar
+och begränsningarna för hårdvaruräknare är dokumenterade vid OPT1
+i `PLAN-fas2.md`. Detta är delprogress; G5/G7 är fortsatt öppna.
+
+### Status 2026-11-11: G5/G7, gemensam implementationsplan
+
+`PLAN-fas2.md` **Gemensam optimerare utan SSA** äger nu OPT0–OPT8 efter
+kodgranskning av alla tre generatorer. C-regler/strategier delas av x86,
+arm64 och wasm32/wasm64; arm64:s befintliga postoptimerare extraheras för
+registermålen. X4 och wasm-planen äger inkoppling och målsänkning.
+Planen anger beroenden, effekt-/ABI-/minneskontrakt, begränsad CPU-kostnad,
+tester och separata mätningar av kompilator och genererad kod. Nästa
+leverans är en ny bas och en delad heltalsregel med tre konsumenter.
+Ingen optimering implementerad; G5/G7 är fortsatt öppna och G5:s X saknas.
+
+### Status 2026-11-11: G5, audit av x86-kodkvalitet
+
+`PLAN-x86.md` X4 har en prioriterad audit mot clang 23.1.6 och GCC 15.2.0
+på Ryzen 7 9700X: lokala optimeringar med låg kompilatorkostnad utan
+IR/SSA. Utökad med 29 reproducerbara prober vid O0–O3, baseline och
+native: 24/24 körningar ger samma checksumma samt klarar gränsvärden och
+kodkontroller för befintliga egenskaper. Flaggor, passloggar och kod sparas
+av `bench/vcc-optaudit.py`; vcc O1/O2/O3 ger samma assembler här.
+Inga optimeringar implementerade eller uppmätt
+körtidsmål; G5 är fortsatt öppet och benchmarksvitens X är inte fastställt.
+
+### Status 2026-11-11: objektrepresentationer och packade boolvektorer
+`__builtin_bit_cast` har körning och bytebaserad konstanttolkning med okänd
+padding; packade boolvektorer har logiska element, bitlagring och verifierad
+Linux/Wasm-ABI. Isolerad unity/filvis validering är 164/164 egna x86-prov,
+169/169 ARM-prov och 32/32 ABI-prov per mål. TSan och skyddssidesprov är
+gröna; se `TEST.plan` S2 för gränser och validering. Detta flyttar G1/G2 men
+stänger dem inte; separat `nullptr_t`-identitet återstår.
+
 ### Status 2026-11-11: externa tester på Linux x86-64
 ARM64:s stackallokering och slots använder nu 64-bitars offset med kontrollerad
 överflödeshantering. GCC `20031023-{1..4}` kompilerar (4/4); `frame_wide`

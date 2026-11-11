@@ -626,6 +626,619 @@ ingen emulering. Samma image fungerar i en qemu-system-aarch64-gäst med `-accel
 3. vroom-build.sh (zsh, perl för tid) portabelt, och shimmen statisk utan libc-init på
    Linux.
 
+## Gemensam optimerare utan SSA
+
+### Beslut och kodläge (2026-11-11)
+
+Implementationsplan efter x86-auditen i `PLAN-x86.md` X4. Detta avsnitt
+äger de gemensamma optimeringarna; x86-planen äger målens instruktioner,
+ABI, kodning och inkoppling. Ingen ny optimering är implementerad av denna
+plan. G5:s kvalitetsmål och G7:s kompileringstid måste mätas separat.
+
+Kodgranskningen är gjord efter rebase på main `4daebd9`; auditens siffror
+gäller uttryckligen dess äldre bas `52261ef`. Nästa kodsteg bygger och mäter
+en ny bas innan någon prestandajämförelse. De gamla resultaten skrivs inte om.
+
+- `emit/tu.c` väljer tre generatorer. `emit/walk/` används bara av x86;
+  `walk.h` har hårdkodat `LO(name) x64_##name`. `wkarg` och dess
+  SSE/eightbyte-klasser är också SysV-specifika. Katalogens namn betyder
+  därför inte att arm64/wasm redan använder den.
+- `emit/prepass.c` har redan `luse`, `lnoreg`, `lspan`, `sflags`,
+  `fnsize`, skrivnings- och adressflyktsfakta. Återanvänd dem, med
+  konservativ komplettering där de inte bevisar vad en ny regel behöver.
+- arm64:s `choose_lregs`/`bind_lreg` håller utvalda skalärer i register.
+  `arch/a64/emit/opt.c` har block/liveness, kopior, stackceller, kända
+  utvidgningar och döda resultat. `finish_function` väljer ram och sparade
+  register efter städningen. Det är befintlig funktionalitet att extrahera,
+  inte en ny optimerare att skriva en gång till för x86.
+- x86:s `wk_arith`, `wk_decl`, `wk_const_if`, `wk_can_inline` innehåller
+  semantiska regler; `x64_finish` kör bara `x64_twoaddr` och skrivaren.
+  `rec.h` har ett 16-byte-format och `opdesc`, men ingen inkopplad
+  gemensam passmotor eller fullständig x86-op-tabell.
+- Wasm håller redan lämpliga skalärer i wasm-lokaler. Dess operandstack
+  och strukturerade kontrollflöde kräver inte fysisk registerliveness.
+  Dela C-regler, analyser och strategier med wasm; tvinga inte in dess
+  värden i en registermaskins representation för att kalla koden gemensam.
+  Konkreta anslutningar: `wexpr.c` har `wbinary`/`warith`, `wknown`,
+  `wlocal` och `wvlanes`; `wstmt.c` har `wswitch`, `wlabels`, `wterm` och
+  strukturerade grenar inklusive `br_table`; `wcall.c:wcall` har anropen.
+  Dessa överlappar redan x86/arm64 i semantik, men inte i värderepresentation.
+
+### Gränser mellan gemensamt och mål
+
+| Gemensamt ansvar | Föreslagen plats | Målets ansvar |
+| --- | --- | --- |
+| Typkorrekta algebraregler, konstantdivisionens parametrar | `emit/opt/identity.c`, `divpow2.c` och separata regelfiler | Shift/mask/mulhi/div, immediatgränser och kostnad för en sekvens |
+| Nåbarhet, bevarade sidoeffekter, lokala fakta | `emit/opt/flow.c`, befintligt `prepass.c` | Hur gren/etikett/retur emitteras |
+| Inliningens behörighet och budget | `emit/opt/inline.c` | Argument/resultat, register, ABI och målbegränsningar |
+| Urval av lokaler som kan bo utanför minnet | `emit/opt/locals.c` | Fysiska register eller wasm-lokaler, callee-save, prolog och spill |
+| Switchens sortering, densitet och strategival | `emit/opt/switch.c` | Trädgrenar, kod-/värdetabeller, relokeringar eller wasm `br_table` |
+| Blockgränser, kopior, döda resultat, stackceller, utvidgningsfakta | `emit/rec/` | Op-beskrivningar, faktaöverföring för målinstruktioner, säkra omskrivningar |
+| Adressens bas/index/skala/displacement och typbredd | Gemensam adressbeskrivning vid `lval`/walk | x86 SIB/LEA, arm64:s index-/offsetformer, wasm-adressberäkning |
+| Explicit vektoroperations semantik och fallback | Gemensam regel vid vektoruttrycket | SSE2/NEON/wasm SIMD, målfeatures, alignment och ABI |
+| Tail calls: semantisk tillåtlighet | Gemensamt retur-/anropsbeslut | Stacklayout, ABI-kompatibilitet och epilog + jump |
+
+`emit/opt/` är rena emitterhjälpare, inte en ny graf/IR eller ett nytt
+optimeringssteg över hela AST:t. Små beslut/sekvensbeskrivningar får
+returneras utan allokering. De tar typer, flaggor och explicit anropskontext;
+ingen modifiering av delat AST, `ccsnap` eller funktionskroppar som flera
+trådar/inlininginstanser använder. Reglerna får inte känna x86-opkoder,
+registernummer eller `DARWIN`. Målanpassningen får inte kopiera reglerna.
+
+**Tre konsumenter är leveranskravet.** En generell heltals-/flödesregel
+är inte klar när den bara anropas från x86. Koppla in och testa den i
+x86, arm64 och både wasm32/wasm64 för typer som målet stöder. Ett saknat
+wasm-verktyg rapporteras som overifierat, inte som ett godkänt steg.
+Registermaskinens postpass kräver två konsumenter (x86 och arm64); wasm
+har i stället samma semantiska regel och en egen strukturerad sänkning.
+
+Det befintliga AST:t och maskinposterna behålls. `ins` och `rec` har samma
+fältpositioner men olika betydelse: arm64:s `sz` är inte x86:s bytebredd,
+och stores använder olika registerfält. Använd uttryckliga adaptrar; gör
+ingen aliasande cast mellan struct-typer och anta inte samma semantik av
+att båda är 16 byte. `emit_SRC` i `ccs/Makefile` behöver ta med nya
+`emit/opt/*.c` och `emit/rec/*.c`; varje fil skall fungera även utan unity.
+
+### Ordning, leveranser och verifiering
+
+Alla OPT-steg nedan är **planerade**; endast den tidigare x86-auditen finns.
+Implementera små steg med egen commit och uppdaterad status/mätning här.
+
+**Uppdatering 2026-11-11:** OPT1:s första del är nu implementerad;
+statusen och mätningen nedan gäller bara unsigned tvåpotensdivision/-rest.
+Övriga rader är fortsatt planerade.
+
+| Steg | Leverans och beroende | Bevis innan klart |
+| --- | --- | --- |
+| OPT0 | Ny byggd bas efter rebase; dela probe-förväntningar i C-semantik och per-mål-kodkrav. Utöka auditens anropare med befintliga arm64/wasm-runners utan krav på att alla referenser finns i CI. | Befintligt x86-resultat reproducerat; tillgängliga mål kör samma definierade indata. Separata resultat för optflagga och mål. Inget gammalt mätvärde ges en ny revision. |
+| OPT1 | Extrahera och koppla in gemensamma heltalsregler i alla tre generatorerna: `+0`, `-0`, `*1`, bitidentiteter, unsigned `/1`, `/2^k`, `%2^k`. Återanvänd befintlig vikning och normalisering. Kräver OPT0. | Semantiska tester på x86/arm64/wasm; riktade shift/mask-krav där målet stödjer dem, negativa tester för volatile och sidoeffekter. Oförändrad kod för exempel utan regeln. |
+| OPT2 | Gemensamma effekt- och postkontrakt, komplett op-tabell för x86 och adapter för arm64. Extrahera blockidentifiering/kompaktering ur arm64; första generiska städning tar bara säkra fallthrough-hopp och död kod efter terminator. Kräver OPT0. | Arm64:s extraktion byte-identisk; x86:s onödiga hopp/döda arm försvinner; asm goto, `&&label`, switch/case i if(0), noreturn, VLA/cleanup och debug-remapping korrekta. |
+| OPT3 | Flytta kandidaturvalet ur `choose_lregs` till gemensam `locals.c`, koppla till x86:s bindningar. Begränsad top-K efter befintliga loopviktade `luse`; målet anger K/register. Wasm återanvänder behörighetsreglerna, inte en artificiell registergräns. Kräver OPT0 och effektkontraktet i OPT2. | Parametrar/lokaler slutar gå genom stacken i proberna; blandade anrop, rekursion, fasta asm-register, varargs, returns_twice, överjusterad ram, VLA och registertryck. Arm64:s ursprungliga val och utdata identiska i extraktionscommitten. |
+| OPT4 | Återanvänd arm64:s kopie-/dead-result-/utvidgningsalgoritmer i `emit/rec/`, först per block på x86. Måltabeller beskriver registeröverlapp, flaggor och omskrivningar. OPT2 krävs; OPT3 ger större kodvinst men är inte ett krav. | Positiva och negativa kodkrav; inga fel över anrop/asm/blockgränser. 32-bitars självmove på x86 tas bara bort om övre halvan redan är noll. FP- och implicita register/flags bevaras. |
+| OPT5 | Extrahera arm64:s stackcellsalgoritm och anslut x86 via explicit allokerings-/accessmetadata. Återanvänd samma algoritm för load forwarding och DSE. Kräver OPT2/OPT4; välj exakta icke-flydda frame-celler först. | Arm64:s t8/t10-egenskaper portade till C-regressioner: scope-återanvändning, överlapp/union, smala typer, adressflykt, pekare precis efter objekt, anrop/asm/atomics. Volatila läsningar/skrivningar kvar. |
+| OPT6 | Gemensamt switchval och utökad inliningbehörighet. Separata commits: först balanserade switchträd och värdetabeller; sedan små vanliga statiska funktioner och oanvända lokala initierare. Kräver OPT1/OPT2; inliningens stacktrafik motiverar OPT3/OPT5 först. | Täta/glesa/signed/range-case, overflow vid densitetsräkning och computed goto. Inlining: recursion, labels, VLA, cleanup, asm-immediater och sidoeffekter. Oanvänd init tas bara bort när både objektet och init saknar observerbar effekt. |
+| OPT7 | Gemensam beskrivning för skalade adresser, direkt explicit vektoroperation och store-constant-hook med scalar/register-fallback. Därefter små målspecifika regler för LEA/SIB, NEON/SSE2 och instruktionsfeatures. Kräver OPT1; metadata från OPT2 följer med. | Samma C-resultat på målen; målkrav visar indexerad load/packed add/store-immediate. Negativa alignment-, bredd-, alias-, lane- och featurefall; baseline får aldrig native-instruktioner av misstag. |
+| OPT8 | Gemensam konstantdivisionsalgoritm för signed tvåpotenser och övriga konstanter; targetsänkt mulhi/shift eller normal div enligt målbudget. Begränsade tail calls med gemensam kontroll och ABI-hook i egen commit. Kräver OPT1 och, för tail calls, OPT2/OPT3. | Division/remainder 32/64 bitar, negativa tal, extremvärden, slump och gränser kring multipler. Tail calls: inga pekare till egen ram, stackargument, cleanup eller ABI-konverteringar utan uttryckligt stöd. |
+
+**Första kodcommit:** OPT0 + extraktion av en enda heltalsregel i OPT1,
+anropad av x86, arm64 och wasm32/wasm64 för stödda typer. Det
+visar delningen i faktisk användning innan fler regler läggs till. OPT2
+kan förberedas därefter; registerarbetet OPT3 har högre prioritet än
+mer aggressiv inlining. Ingen stor flytt av hela arm64-generatorn krävs
+för att börja dela regler eller postpass.
+
+### Kontrakt som styr implementationen
+
+- **Wasm-integrering:** aritmetikhjälparen returnerar ett typat beslut,
+  inte ett `val` med fysiskt register. `wbinary` kan välja beslut innan
+  operandstacken fylls; om en operand redan emitterats måste adapterkoden
+  bevara rätt stackdjup och använda drop/local vid behov. Gemensamma
+  faktabindningar är per funktions-/inlininginstans. Wasm-inlining kräver
+  egna parameterlokaler, strukturerad resultat-/returblockhantering och
+  remappade goto/cleanup/VLA-scope; delad policy ensam är ingen inliner.
+  `wswitch` återanvänder strategivalet men behåller `br_table` och
+  segment/goto-modellen. Wasm32 normaliserar pekare som 32 bitar även på
+  denna 64-bitars värd. Explicit SIMD kräver målfeature; utan den behålls
+  lane-fallback. Magic division utan billig mulhi och tail call utan
+  aktiverad/stödd wasm-tail-call-funktion behåller vanlig div/anrop.
+- **Typer och effekter:** första aritmetikreglerna gäller vanliga heltal
+  upp till 64 bitar; `_BitInt`, 128 bitar, FP och pekare har explicit
+  fallback tills deras regel verifierats. Använd operationens promoverade
+  bredd och signedness; signed division avrundar mot noll. Tvåpotens-
+  kontroll måste utesluta noll. Ingen FP-identitet eller fast-math-regel
+  smygs in. Operander med anrop, volatile eller atomics utvärderas exakt
+  som tidigare även när resultatet blir konstant. Valnivåregler efter
+  operandgenerering behåller effekter; överhoppning på AST-nivå kräver
+  separat effektbevis. Återkommande effektfrågor cacheas per instans eller
+  tas ur förpasset, inte rekursiva omvandringar med kvadratisk kostnad.
+- **Register:** gemensamt urval är policy, registerbindning är målmekanik.
+  Börja som arm64 med ett fåtal callee-saved GPR för icke adressflydda,
+  icke-volatila/atomiska heltal och pekare. x86 måste reservera dem från
+  temporärpoolen och hantera r12 som rambas samt asm-clobbers. Använda
+  callee-saved-register sparas/återställs enligt mål-ABI, inklusive
+  unwind/debug. Återförsök är högst ett konservativt utan lokala register;
+  kvarvarande tryck använder befintlig spill/felväg. FP och registerpar
+  är senare separata utvidgningar. Lägg inte samtidigt ett konkurrerande
+  generellt registercache ovanpå bindningarna.
+  Wasm behåller även sina redan stödda flyttalslokaler; gemensamma
+  behörighetsregler parametriseras av målets typstöd och får inte göra
+  registermaskinernas första GPR-begränsning till en wasm-regression.
+- **Posteffekter:** tabellerna behöver reads/writes inklusive implicita
+  register, flaggor/partiella flaggskrivningar, minnesläsning/skrivning,
+  volatile/atomic/order, trap/terminator/barriär, stackförändring och
+  externa etikettinträden. Okänd instruktion/asm är konservativ. En load
+  kan vara observerbar eller kasta fel även om resultatregistret är dött.
+  Börja DCE med rena registeroperationer och bevisat säkra frame-läsningar.
+  Anrop/TLS, x87-stack och x86:s delregister kräver egna beskrivningar.
+- **Minnesidentitet:** återanvänd inte slot-offset som objektidentitet.
+  Behåll stabilt allokerings-id, intervall/bredd, accessart och escape;
+  byteoffset är 64 bitar efter mains ramändringar. Överlapp och
+  one-past-adresser hanteras konservativt som arm64 redan gör. Föredra
+  lat sidometadata i optläget framför att göra varje 16-byte-post större;
+  byt inte ut arm64:s taggar förrän ersättningen är bytevis verifierad.
+  Sidometadata måste följa insertion/kompaktering/twoaddr och debugrader.
+- **Passkostnad:** opcode-tabell på snabbvägen, målcallback bara när en
+  verklig omskrivning eller avvikande instruktion kräver det. Buffertar
+  återanvänds per worker, utan lås och utan allokering per nod/post.
+  Kör inte ett pass utan relevanta instruktioner/celler. Konstantstor
+  registerfakta ger O(n); top-K är O(lokaler*K) med litet fast K;
+  switchsortering O(k log k) och tabellstorlek har tak. Magisk division
+  får O(bitbredd) per ny konstant och begränsad cache, inte sökning.
+- **CFG-budget:** inga globala fixpunktsanalyser krävs för första x86-
+  passen. Vid blockslut är okända live-out konservativt levande, inte
+  döda. Senare delad CFG-liveness får separat arbetsbudget; om den tar
+  slut används säkra fakta/utdata utan beroende omskrivningar. Ofärdig
+  liveness får aldrig godtas som korrekt. Arm64:s befintliga analyser
+  behålls tills delad ersättning ger minst samma korrekthet och uppmätt
+  kostnad; en lokal variant får inte tyst försämra dess befintliga O1.
+- **Kodordning:** semantikregler vid AST-sänkning; delade record-pass på
+  giltiga effekter; x86 tvåadress efter delade pass; målspecifik städning;
+  slutligt register-/rambeslut och kodning. Om tvåadress inför nya kopior
+  räcker en avgränsad efterstädning, ingen generell fixpunkt. Debug/CFI
+  får inte referera till gamla postindex eller borttagna sparningar.
+
+### Filstruktur för optimeringar
+
+Varje avgränsad optimering eller tätt sammanhängande regelfamilj får en
+namngiven fil: nu `emit/opt/identity.c` och `emit/opt/divpow2.c`.
+Gemensamma postpass får motsvarande filer under `emit/rec/`. Lägg inte
+algoritmerna i en växande `walk.c` eller uttrycksvandrare. Vandrarna och
+bakändarna behåller små anrop/adaptrar för operandutvärdering, typer,
+register och wasm-stack. Undvik att dela upp en liten sammanhängande
+regel i en fil per operator. Fil-för-fil-bygget verifierar gränserna.
+
+### Nivåer, testkrav och mätning
+
+`-O0` får billiga direkta sänkningsregler utan att starta dataflowpass.
+Vilka regler som är default mäts, inte antas. O1 är de budgeterade
+gemensamma förbättringarna ovan. O2/O3 förblir ärligt samma tills en
+separat, mätt policy finns; ändra inte bara makron eller nivånamn för
+att påstå Clang-paritet. LICM, global GVN, automatisk vektorisering,
+loop-unrolling/unswitching och generell IPA ligger efter den första serien
+OPT0–OPT8, men ingår i det fortsatta målet att täcka Clang/GCC O2 på
+alla tre bakändar. Skapa IR/SSA först för de analyser som behöver det;
+varje senare pass måste ha en mätt CPU-budget. Begränsad
+blocklokal CSE kan läggas efter OPT4 när dess nytta motiverar en
+värdecache med fast storlek; ingen helfunktionssökning eller generell aliasanalys.
+
+Varje semantisk regel får C-regressioner i `tests/vcc` som kör på alla
+stödda mål. Positiva kodkrav är arkitekturspecifika; negativa kontroller
+för effekter är gemensamma. Upstream GCC:s C-fall är komplettering, inte
+ersättning för kontroll av deras `dg-final`. Lägg en liten vcc-only
+regressionskörning i `ci/premerge.sh` för mål där den kan köras; den
+interaktiva trekompilatorsauditen skall inte bli CI:s beroende av native
+GCC, GNU objdump eller alla valfria runners.
+
+Rena extraktionscommits kräver byte-identiska utdata mot före-bas på
+berörda mål, unity och nonunity. När regeln aktiveras får bara de
+avsedda kodskillnaderna uppstå: kör suites/ABI/stress för berörda mål,
+arm64:s slot/asm/extension-regressioner, och de CFI/DWARF-/kernel- eller
+hostkontroller som förändringen faktiskt berör. Parser/pp ändras inte
+för emitteroptimeringar. Om de ändå måste ändras gäller AGENTS.md:s
+sema-/paritetsgrindar före ändringen. G1/G2 blir inte klara av denna plan.
+
+Mät före/efter med korta körningar och högst `-j 6`: kompilatorns
+instruktioner/cykler och minne, genererad kodstorlek/instruktioner och
+riktig körtid på ett fast litet korpus. Redovisa O0/O1 och per mål,
+inklusive uteslutna fall och saknade verktyg. Befintlig `vbench.py gate`
+gäller; tills dess x86-stöd är bekräftat får den inte anges som körd
+x86-grind. Godkänn ingen tänkt passbudget som en uppmätt siffra. Spara
+basrevision, binärhash och mätresultat vid varje färdigt OPT-steg här.
+
+### Status OPT0/OPT1 (2026-11-11): första delade aritmetikregeln
+
+Ny bas byggd på `990c9fe` (main-kod från `4daebd9`); vpp SHA256
+`b1d0c06a74de9695c8c04e67993c81e686d91d946afd8f32ecea169843af91f3`.
+Basens x86-egensvit går 130/130, fem filtrerade fall. Basen sparades som
+`build/linux/opt-baseline/vpp` före ändringen.
+
+`emit/opt/divpow2.c:em_divpow2` äger nu en gemensam regel för unsigned
+vanliga heltal upp till 64 bitar: division med konstant 2^k blir logiskt
+högerskift och rest blir AND med 2^k−1. Divisorn normaliseras till
+operationens promoverade typ före testet; noll, signed, pekare, FP,
+vektorer, _BitInt och bredare heltal faller tillbaka. Ingen allokering,
+AST-modifiering, SSA eller passloop; regeln gäller även O0.
+
+Anslutningar: arm64:s centrala `arith`, x86-vandrarens `wk_arith`, och
+wasms `wbinary`/`wassign`. Binära uttryck samt skalära `/=` och `%=`
+omfattas. Registermålens operander är redan utvärderade; wasm byter bara
+en bevisat effektfri konstant RHS och behåller övrig evaluation och
+stacktyper. Vektorlaner med dynamisk representation och andra algebra-
+identiteter är inte nya leveranser i detta steg.
+
+`tests/vcc/unsigned_pow2.c` testar literalbaserade svar, 32/64-bitars
+maxvärden/högbit, divisor 1, trunkerade/signed-konverterade konstanter,
+signed/non-power/dynamiska kontrollfall, volatile-effekter, anrop,
+comma-RHS och compound-tilldelningar. `bench/vcc-opt-rules.py` granskar
+funktionerna separat vid O0–O3 och kan köra utan libc på alla fyra mål.
+Wasm använder vpp:s egna C→objektväg och vlink, inte Emscripten; se
+`PLAN-wasm.md` W9. En .s-fil genom vpp -c väljer i dag inte wasm-
+assemblern, så testet kompilerar samma C med samma nivå till eget objekt.
+Detta är en känd driverlucka, inte en LLVM-fallback i testet.
+
+Kandidat SHA256 före dokumentation
+`77c05982e3bc056476aeeac6cc02c3309cba10026db19ecbd5e3a846b1dde440`.
+Kort interfolierad mätning på Ryzen 7 9700X: tre repetitioner, åtta
+6000-funktions-TU:er, seriell batch, warm=1, O1 -S, utan header-/declcache.
+Median för summan av jobbtiderna (ms, bas→kandidat):
+
+| Mål | Tvåpotensaritmetik | Oförändrat kontrollkorpus |
+| --- | --- | --- |
+| x86-64 | 44,370 → 37,864 | 36,940 → 36,176 |
+| arm64 | 57,737 → 54,005 | 53,619 → 53,747 |
+| wasm64 | 34,475 → 35,131 | 32,468 → 32,616 |
+
+Detta är väggtid i korta varma jobb, inte hårdvaruinstruktioner eller
+bevis på en 1 %-grind: perf är blockerat (perf_event_paranoid=4) och
+Linux-vperf ger noll. Ingen systeminställning ändrad. Små differenser är
+brus; mätningen visar ingen stor kontrollregression. Källor, kommandon,
+rådata och parade resultat finns i `build/linux/opt-perf/paired.json`.
+Två minimala kodexempel, unsigned /8 och %8: x86 16→12 instruktioner
+vardera; arm64 11→10 för division och 12→10 för rest; wasm32/64 får
+shr_u/and i stället för div_u/rem_u med lika många stackoperationer.
+Ingen påstådd förbättring av programmets körtid är uppmätt här.
+
+Verifierat: kandidatens x86-egensvit 130/130 (samma fem filtrerade fall
+som basen), arm64-egensvit 135/135 via QEMU, med -j 6 och --no-cache.
+Unity och fullt fil-för-fil-bygge gröna; båda byggsätten klarar alla
+16 kombinationer av fyra mål och O0–O3 i kod-/körharnessen. Systemets
+Node 24.22.2 och därefter 25.9.0 klarar wasm32/64 utan SDK-sökväg.
+Den nya kodgrinden avvisar före-basens division på alla fyra mål, så
+den detekterar själva optimeringsluckan utöver korrekt C-resultat.
+Syntaxkontroll av Python och shell samt `git diff --check` gröna.
+GHA-hookar är tillagda men ingen fjärr-CI eller full Emscripten-baserad
+wasm-svit har körts i detta steg.
+
+OPT1 är därmed **påbörjat**, inte helt klart: identiteterna och övriga
+OPT-steg återstår. Emscripten-oberoende wasm-testväg är levererad separat
+från ersättningen av full runtime/explorer. G5/G7 är fortsatt öppna.
+
+### Status OPT1 (2026-11-11): separata filer och heltalsidentiteter
+
+Tvåpotensregeln har flyttats oförändrad till `emit/opt/divpow2.c`.
+`emit/opt/identity.c` äger nu typkontrollerade RHS-regler för +0, −0,
+*0/*1, /1, %1, &0/&alla-ettor, |0/|alla-ettor, ^0 och skift med noll.
+Alla tre generatorer använder samma recept. Operandeffekter behålls;
+32-bitars registerresultat normaliseras även efter lat trunkering.
+FP, pekare, vektorer, _BitInt och bredare heltal omfattas inte.
+Ingen allokering, ny IR eller analysloop införs.
+
+Bas: `e4c1c9a`, vpp SHA256
+`77c05982e3bc056476aeeac6cc02c3309cba10026db19ecbd5e3a846b1dde440`.
+Kandidat före dokumentation:
+`f3899f1f5e51ff895d15903f547797bf6096ba16c8f2016f00aa005e1c70178f`.
+Verifierat unity och fil-för-fil: 32 kod-/körkombinationer (två regler,
+fyra mål, O0–O3), utan Emscripten. Systemets Node 26.13.0 kör wasm.
+X86-egensvit 131/131 (samma fem filtrerade fall), arm64 136/136 via QEMU,
+-j 6 och --no-cache. Regressioner täcker smala typer, högbitar efter
+trunkering, signed extremvärden, volatile och exakt en sidoeffekt.
+
+Kort parad kompilatormätning finns i
+`build/linux/opt-identity-perf/paired.json`. Stort värdtidsbrus och
+blockerade hårdvaruräknare hindrar slutsatser om små CPU-skillnader;
+ingen 1 %-grind eller programkörtidsvinst påstås. Minimala /1-funktioner
+minskar från 16→12 instruktioner på x86, 11→10 på arm64 och 9→7 på
+wasm32/64. Kontrollkorpus och rådata sparades separat.
+
+OPT1:s identiteter och unsigned tvåpotenser är levererade. Detta slutför
+inte OPT2–OPT8 eller hela O2-målet; nästa steg är separat gemensam
+fallthrough-städning med bevarad debug-remapping.
+
+### Status OPT2 (2026-11-11): delad fallthrough-städning
+
+`emit/rec/fallthrough.c` delar nu arm64:s befintliga borttagning av
+ovillkorliga hopp till den direkt följande följden av lokala etiketter.
+X86 kör samma pass vid O1 och uppåt före tvåadresskonverteringen.
+Postlayouten beskrivs med stride/fältoffset; label läses med memcpy så
+arm64:s `ins` aldrig typ-punnas till x86:s `rec`. Asm och namngivna
+etiketter är barriärer. En linjär framåtsvepning, ingen allokering eller
+fixpunkt. Senare borttagningar kan exponera tidigare hopp; kaskadfallen
+är fortsatt körtestade men utlovas inte borttagna i detta steg.
+
+Wasm:s befintliga konservativa `wlabels`/`wterm` har fått egen fil,
+`arch/wasm/emit/reachability.c`. While emitterar inte längre en extra
+loopgren efter en kropp som bevisligen inte kan falla igenom. Explicit
+continue har kvar sin gren och cleanup; do-villkor och for-inkrement
+bevaras. Detta är strukturerad målsänkning, inte ett artificiellt
+maskinpostpass på wasm.
+
+Bas `f7ccaff`, vpp SHA256
+`f3899f1f5e51ff895d15903f547797bf6096ba16c8f2016f00aa005e1c70178f`;
+kandidat före dokumentation
+`384cfd5f6c83fba8852dbc9ff0c1e7ad3ce323a489519164d304d55fcc8b36eb`.
+Arm64:s 131 befintliga kompilerbara egensvitfiler ger byte-identisk
+O1 -S med -g och unwind-direktiv mot basen; fem tidigare avvisningar är
+oförändrade. De två nya testfilerna undantogs från den jämförelsen då de
+fortfarande redigerades när basen togs. Båda byggsätten klarar 64
+mål-/nivå-/regelkombinationer, med målrelevanta kodkrav och körning på
+alla fyra mål. X86-egensvit 133/133 (samma fem filtrerade), arm64
+138/138, -j 6 --no-cache. O1 DWARF-verifiering, oförändrad .text med -g
+och direktobjekt mot assemblerutdata gröna för båda nya testfilerna.
+Befintliga CI-anrop inkluderar automatiskt de nya reglerna.
+
+Genererad kod vid O1, antal ovillkorliga grenar i respektive nya testfil:
+x86 `branch_fallthrough.c` 31→21, arm64 20→20 (ren extraktion);
+wasm32/64 `while_backedge.c` 44→38. Körsemantik täcker bakåthopp,
+label-följder, switch-fallthrough, sidoeffekter, asm-barriär, goto in/ut
+ur loop, cleanup och continue.
+
+Korta parade mätningar (tre repetitioner, fyra 3000-funktions-TU:er,
+-j 1 --warm 1, O1 -S) finns med bas/kandidathash och rådata i
+`build/linux/opt-flow-baseline/paired.json`; riktad ommätning i
+`recheck.json`. Första medianen för flödeskorpus i ms var x86
+25,586→25,436, arm64 29,313→29,784, wasm32 24,381→28,059 och wasm64
+22,922→22,644. Kontrollkorpus sparas separat. Ommätningen varierar
+kraftigt, särskilt wasm32; ingen liten CPU-regression eller vinst kan
+fastställas och 1 %-grinden är inte bevisad. Hårdvaruräknare fortsatt
+blockerade; inga systeminställningar ändrade. Programkörtidsvinst ej mätt.
+
+OPT2 är endast **påbörjat**: full effektbeskrivning, blockkontrakt och
+död kod efter terminator återstår. Registerlokaler (OPT3) och resterande
+OPT-steg/O2-målet är fortsatt öppna.
+
+### Status OPT2 (2026-11-11): onåbara poster och x86-effekter
+
+`emit/rec/unreachable.c` tar i en linjär, allokeringsfri svepning bort
+posterna efter en säker ovillkorlig transfer fram till nästa möjlig
+inträdespunkt. Arm64:s adapter ligger separat i
+`arch/a64/emit/unreachable.c`; x86 har en billig enbyte-flödestabell i
+`arch/x64/emit/effects.c`. O1 och uppåt, med befintlig noopt-spärr.
+Alla etiketter, raw asm, namngivna etiketter, okända instruktioner och
+indirekta transfers är konservativa barriärer. Debug-remapping körs för
+varje gammalt postindex och slutmarkören. Wasm:s strukturerade dödkod
+använder redan motsvarande AST-bevis; dess semantik körtestas också.
+
+Arm64 BRK är **inte** en säker terminator: debugger/arm_trap kan återgå.
+Granskningen fann även att gemensamma side_effects saknade DEBUGTRAP;
+den klassas nu som effekt så ett oanvänt debugtrap-anrop behålls.
+Regressionerna kontrollerar både breakpoint och fortsättning utan att
+exekvera dessa compile-only-funktioner.
+
+X86:s fulla register-/effektkontrakt för kommande kopie-/livenesspass
+finns i samma målspecifika effects.c. Det beskriver implicita register,
+flaggor, partial writes, TLS, REP, x87, FP-miljö, R11-scratch och R12 som
+justerad rambas. Okänd/saknad metadata blir opak, aldrig pure.
+`bench/vcc-rec-effects.py` testar dessa kontrakt normalt och med
+ASan/UBSan; det normala snabba testet ingår i arm64:s premerge-jobb.
+Ingen full registeranalys startas för enkel flödesstädning.
+
+`unreachable_records.c` testar goto/return/break/continue, nåbara effekter,
+volatile, computed goto, asm goto, asm-barriärer, cleanup och VLA.
+Kodkrav avvisar basens x86-kod; literalbaserade körresultat bevaras på
+alla fyra mål vid O0–O3. Auditens x86-probe `oa_cond_fold` går vid O1/O2
+från 16 till 11 instruktioner. Båda byggsätten och relevanta DWARF-test
+verifieras tillsammans med den följande signed-tvåpotensregeln; fulla
+mätdata och revisionshashar redovisas vid OPT8 nedan.
+
+OPT2 är fortfarande **påbörjat**: delade block-/effektadapter för hela
+arm64-optimeraren och full CFG-nåbarhet återstår. Detta är inte generell
+SimplifyCFG. Nästa större steg är registerlokaler med gemensam behörighet
+(OPT3), därefter kopie-/utvidgningsstädning (OPT4).
+
+### Status OPT8 (2026-11-11): signed tvåpotenser med målkostnad
+
+`emit/opt/sdivpow2.c` beskriver en gemensam regel för signed division och
+rest med positiva/negativa konstanta tvåpotenser upp till 64 bitar,
+inklusive minsta divisorn och −1. Bias före aritmetiskt skift ger C:s
+avrundning mot noll. Rester beräknas från lågbitmask och samma bias.
+Magnituden räknas i i128 för att inte ge overflow i kompilatorn.
+Separata `sdivpow2.c` i arm64, walk och wasm äger sänkningen; anropen i
+uttrycksvandrarna är små. Ingen ny analys, allokering, SSA eller AST-mutation.
+_BitInt, bredare heltal, pekare, FP och vektorer omfattas inte.
+
+**Wasm:s kostnadsval:** direkt jämförelse med lokal clang 23 -O2 visar
+att LLVM lämnar /8 och %8 som en div_s/rem_s. Därför expanderar wasm
+inte den långa biassekvensen. Den använder samma recept för billig /−1,
+%−1 och quotient med MIN-divisor (likhetsjämförelse, i64 utvidgas från
+i32). Övriga signed tvåpotenser behåller kompakt wasm-kod för motorn.
+Det är ett målbeslut, inte saknad C-semantik. Pure konstant RHS krävs
+fortfarande i wasm; en effektfull comma-RHS utvärderas normalt.
+
+Tester: `signed_pow2.c` täcker 32/64 bitar, båda divisortecknen, skift
+1/3/4/30/31/62/63, extremvärden, −1 (utesluter MIN/−1 som är C-UB),
+smala promoverade typer, lat trunkering med skräp i högbitarna,
+compound/volatile, exakt en sidoeffekt och nästlade temporärer.
+Referensresultat räknas med volatile dynamiska divisorer, så provet
+jämför maskinens divide-väg mot den nya konstantsänkningen.
+
+Verifiering för OPT2/OPT8 tillsammans: unity och fil-för-fil bygger utan
+nya varningar; båda klarar alla 96 mål-/nivå-/regelkombinationer med
+kodkrav där relevanta och körning på x86, arm64, wasm32 och wasm64.
+X86-egensvit 135/135 (fem tidigare filtrerade), arm64 140/140, -j 6 och
+--no-cache. O1 DWARF-test för nya flödes-/divisionsfall gröna; metadata-
+kontrakt testade med ASan/UBSan. Ingen fjärr-CI eller full wasm-runtime
+med Emscripten har körts. Varken G5/G7 eller hela O2-målet är klara.
+
+Mätbas för serien: `98da0c3`, vpp SHA256
+`384cfd5f6c83fba8852dbc9ff0c1e7ad3ce323a489519164d304d55fcc8b36eb`;
+slutkandidat före dokumentation
+`294cc2a1264fdee3a21c413e826d1ab5062b12a4076c51178882022ed21691a9`.
+`build/linux/opt-next-baseline/paired.json` innehåller tre alternerade
+repetitioner, fyra 3000-funktions-TU:er per batch, O1 -S, -j 1 warm=1.
+Utöver jobbtid sparas barnprocessens user+sys CPU-tid, inklusive warmup
+men utan väntan på andra processers schemaläggning. CPU-tid är inte
+hårdvarucykler och varierar också med värdens frekvens/cache/minneslast.
+Medianer för signed-korpuset i ms (bas→kandidat): x86 46,668→53,825,
+arm64 46,220→52,126, wasm32 46,286→41,464, wasm64 40,145→48,886.
+Flödes- och oförändrat kontrollkorpus samt alla råa repetitioner sparas
+separat. Native biasexpansion genererar fler enkla poster och har en
+mätbar kostnad i det avsiktligt divisionstäta mikrokorpuset. Ingen
+1 %-grind eller generell frånvaro av kompilatorregression påstås.
+Tidigare wasm-biasexpansion förkastades till förmån för kompakt kod.
+
+Trekompilatorsauditen före/efter finns i samma katalog som
+`optaudit-before/` och `optaudit-after/`. Alla 12 baslinjekombinationer
+har samma checksumma `1922a5c83358247b`. X86 signed-/8-proben har vid
+O1 lika många instruktioner (14) men divide går 1→0; onåbar arm i
+`oa_cond_fold` går 16→11 instruktioner. Auditen efter är från kandidaten
+före den separata debugtrap-korrigeringen; slutlig fokuserad verifiering
+omfattar korrigeringen. Programkörtidsvinst är inte uppmätt.
+
+OPT8 är **påbörjat**: övrig konstantdivision (mulhi), gemensam
+kostnadsmodell, samt tail calls återstår. Fortsatt full O2-plan kräver
+även loop-/alias-/globala analyser efter OPT0–OPT8. OPT3 bör nu minska
+stack-/kopietrafiken före mer avancerade pass.
+
+**Förberedelse OPT3:** kodgranskning visar att x86 kan använda
+RBX/R13–R15 för lokaler; R12 tillhör justerade ramar. Gemensamt urval
+återanvänder lspan/luse/lnoreg. Befintliga L_VREG kan användas, men läsning
+måste kopiera till en ägd temporär och normalisera smala typer. Alla
+potentiellt promoverade callee-save-register måste dessutom sparas av
+builtin setjmp även när setjmp-funktionen själv inte väljer dem: annars
+kan longjmp förbi en promoverad mellanram förstöra anroparens lokaler.
+Detta och asm-clobbers/inline-instansgränser är krav före aktivering.
+
+### Status OPT3 (2026-11-11): gemensamt urval och x86-registerlokaler
+
+`emit/opt/locals.c` äger nu gemensam behörighet och stabilt viktat top-K
+med befintliga lspan/luse/lnoreg. Ingen ny AST-vandring, graf eller
+allokering. Arm64 behåller sitt fysiska registerval och wasm sina
+representationskrav, inklusive FP/i128/SIMD-lokaler. Gemensamma undantag
+är adressflykt, volatile, atomic, VLA, cleanup och fasta asm-register.
+Prepassens adressmarkering följer nu även comma-RHS som emitterarnas
+lvalue-sänkning. Parser och preprocessor är inte ändrade.
+
+X86:s målbindning ligger i separat `arch/x64/emit/locals.c`: högst fyra
+hem i RBX/R13/R14/R15, O1+, !noopt, med VCC_LREGS-budgeten (0 stänger av).
+R12 tillhör justerade ramar. L_VREG läses till en ägd temporär; smal
+läsning använder en direkt X_EXT från hemmet, så högbitar normaliseras
+utan en extra kopia. Hemmens originalvärden sparas i vanliga frame-slotar
+före parameterbindningen och återställs vid gemensamma returetiketten.
+Stackargumentens offset ändras inte. Parametrar går ännu via sina
+befintliga ABI-slotar och läses sedan till hemmet en gång. Inline-kopior
+använder separata minnesbindningar (inst != 0), ingen aliasning av hem.
+
+**Billig lönsamhet:** x86 kräver minst fyra loopviktade referenser och
+utesluter lokaler som redan konstantbinds utan lagring. Högst fyra sådana
+kontroller, ingen andra symbol-/AST-svepning. Filtrerade kandidater fylls
+ännu inte på. Detta undviker extra ABI-spill i kalla enkla funktioner;
+auditen visar nu oförändrad kod för alla kalla prober. Loopfunktionerna
+har fler statiska instruktioner för prolog/epilog men mindre dynamisk
+stacktrafik. Direkt ABI→hem och kopiestädning är nästa möjligheter.
+
+Asm kräver ingen TU-global registerspärr: befintlig asm-sänkning sparar
+alla operand-/clobber-register och återställer dem på varje asm-goto-kant
+före output-skrivningar. Fyra samtidigt levande hem testas mot verkliga
+clobbers och både tagen/fallthrough asm-goto. Inga upprepade asm-skanningar
+eller globala avstängningar av orelaterade funktioner införs.
+
+**Nonlocal jumps:** separat `arch/x64/emit/setjmp.c` sparar alltid alla
+icke-frame callee-save-register RBX/R12/R13/R14/R15, även ärvda värden från
+anroparen när destinationen själv saknar promoverade lokaler. Publik
+builtin-bufferlayout oförändrad. En X_RESUME_FRAME-post återskapar R12
+som align_down(RBP−8, slutlig falign) före privata snapshot-laddningar.
+Skrivaren använder literal LEA/AND så normal minnesomskrivning inte byter
+bas. Ojusterad ram emitterar ingenting. Detta stöder även alignment som
+upptäcks efter setjmp eller i en inline-kropp; den tidigare lokala
+avvisningen kan tas bort. Regressionsfallet hoppar förbi en annan ram
+med alignment 256. Metadata beskriver pseudopostens register/flaggor.
+
+Verifierat: unity och fil-för-fil utan nya varningar; 116 tillämpliga
+regler/nivåer/mål per byggsätt (32 x86, 28 vardera arm64/wasm32/wasm64),
+alla med körning vid O0–O3 och avgränsade kodkrav. Efter aligned-resume-
+ändringen kördes relevanta fyra nonlocal-fall om för båda byggsätten.
+X86-egensvit 137/137 (fem tidigare filtrerade), arm64 142/142, -j 6
+--no-cache. X86 kors-ABI clang/vcc 22/22, O1 DWARF för nya testfiler 2/2,
+metadata-kontrakt med ASan/UBSan grönt. Basen avvisas av nya register-
+kodkrav och nonlocal-regressionen; clang klarar nonlocal-fallet O0–O3.
+Arm64-extraktion: 135/135 kompilerbara befintliga testfiler byte-identiska
+med O1 -g/unwind; wasm32 114 och wasm64 117 byte-identiska. Alla äldre
+avvisningar oförändrade. Indatahashar och resultat i snapshot-JSON.
+
+CI installerar nu qemu-user och kör x86:s libc-fria optimeringssvit från
+arm64-jobbet; QEMU-versionen ingår i toolfingerprint. Harnessen väljer
+qemu-x86_64 på annan värd och kan tvinga emulator lokalt med --qemu-x86.
+Alla x86-fall har även provats med denna prefixväg, inklusive slutliga
+nonlocal-fall. Ingen fjärr-GHA körd eller full wasm-runtime ersatt här.
+
+Bas `eddfc69`, vpp SHA256
+`294cc2a1264fdee3a21c413e826d1ab5062b12a4076c51178882022ed21691a9`.
+Mätkandidat före aligned-resume-tillägget:
+`645d2d05f88339aa11d316bb85fbd1eefba1e354f9f30ff8b47dc63ff51d8c75`;
+slutkandidat före dokumentation:
+`3b399256f3b795cc5267d72394cfdd4dfc9b3a271fc3c30f38ff1dbaef202ade`.
+Artefakter i `build/linux/opt-locals-baseline/`, inklusive före/efter-audit,
+snapshots, kompilatormätning och runtime.py/runtime.json.
+
+Kompilator-CPU (barnets user+sys, tre alternerade repetitioner, fyra
+3000-funktions-TU:er per batch, O1 -S, -j 1 warm=1):
+
+| Mål | Loopkorpus ms, bas→kandidat | Oförändrat kontrollkorpus ms |
+| --- | --- | --- |
+| x86-64 | 55,650 → 61,701 | 24,630 → 25,112 |
+| arm64 | 88,148 → 88,696 | 33,659 → 32,337 |
+| wasm32 | 47,222 → 45,502 | 22,401 → 22,011 |
+| wasm64 | 43,927 → 43,046 | 22,156 → 22,139 |
+
+Native loopkorpus kostar cirka 11 % mer kompilator-CPU i denna syntetiska
+mätning; cold-kod förblir oförändrad men själva urvalet kostar också tid.
+Ingen 1 %-grind eller generell regressionsfrihet är bevisad. Hårdvaru-
+räknare saknas; delad värds frekvens/cache/minneslast påverkar CPU-tid.
+Mätkandidaten ovan är från före det sista, sällan använda resume-stödet.
+
+Kort native programtest, unsigned summa av 4096 element anropad 2000
+gånger via extern funktion (ingen LTO, identisk checksumma 4096177840),
+tre alternerade user+sys-sampel inklusive processstart: vcc O1 bas
+7,830 ms → kandidat 6,345 ms (cirka 19 % kortare). Clang O2 0,778 ms,
+GCC O2 3,330 ms på samma korpus visar fortsatt stor kvalitetslucka.
+Detta är ett litet loopprov, inte generell programspeedup. Auditens
+sum-funktion har 33→43 statiska instruktioner, stackreferenser 14→12
+(ABI-spill ingår); minskad looptrafik betalar här prolog/epilog.
+
+OPT3:s första del är levererad, men direkt parameterbindning, bättre
+lönsamhetsurval och OPT4:s kopie-/utvidgningsstädning återstår. Full O2-
+täckning, allmänna SSA-/alias-/loopanalyser och G5/G7 är fortsatt öppna.
+
+
+### Status OPT3 (2026-11-11): direkt ABI-bindning
+
+X86 binder nu utvalda skalära registerparametrar direkt från ABI-registret
+med deklarerad bredd/signering. Utvalda stackparametrar laddas en gång
+från anroparens befintliga offset. Den separata efterladdningshooken och
+onyttiga parameterslotar är borttagna. Befintlig klassificering äger
+fortfarande GP/FP-budget, aggregate rollback, hidden sret och varargs;
+ingen ny analys, AST-vandring eller allokering.
+
+Unity och fil-för-fil bygger; parameterfallen kör O0–O3 på x86, arm64,
+wasm32 och wasm64. Kodkraven avvisar basens spill/laddning. Nya fall täcker
+smala signed/unsigned typer, register-/stackargument, blandad FP/GP,
+24-byte sret och varargs. X86 kors-ABI 22/22; nonlocal-regression O0–O3; x86-egensvit
+137/137 med fem oförändrade filtreringar (--no-cache, -j 6).
+
+Bas d8e02c8 SHA256
+`3b399256f3b795cc5267d72394cfdd4dfc9b3a271fc3c30f38ff1dbaef202ade`;
+kandidat `08fa144ebfd7166f9e5b499b6f209413a6ba131cf9374064b5d5c0816744a20c`.
+Artefakter `build/linux/opt-params-baseline/`. Samma metod som föregående
+OPT3-mätning, tre alternerade repetitioner: x86 loopkompilator-CPU
+60,282→58,437 ms, kontroll 24,806→25,012 ms. Övriga bakändars källkod är
+oförändrad; deras mättider varierar inom värdens brus. Samma lilla summa-
+program ger 3,263→3,057 ms, identisk checksumma; clang O2 0,508 ms och
+GCC O2 1,793 ms. Tider från olika mättillfällen får inte jämföras direkt.
+Ingen generell speedup eller godkänd 1 %-grind hävdas.
+
+Direktbindningen är levererad. Bättre urval, kopie-/utvidgningsstädning,
+minnesoptimeringar och full O2-täckning återstår; ingen SSA införd.
+
 ## Risker
 - **GNU C-ytan och inline asm** är det stora jobbet. Uppskattat: lexer + pp ~2 kloc,
   parser + sema ~10–15 kloc, emitter ~5 kloc, assembler ~4 kloc, länkare ~3 kloc.
@@ -893,3 +1506,45 @@ makron.
 
 Kvar: noten för fler diagnostiker än odeklarerade namn, nästlade makron (en
 nivå i dag), fler -Wall-varningar.
+
+### Integration på aktuell main (PR-serie, 2026-11-11)
+
+X86:s nytillkomna debugrader remappas nu genom både onåbarhets- och
+fallthrough-kompaktering, och slutraden remappas även genom twoaddr.
+`bench/vcc-opt-debug.py` kontrollerar källrader vid levande operationer,
+.text med/utan -g och dwarfdump --verify vid O0–O3; ingår i CI.
+
+### OPT3 på aktuell main (PR-serie, 2026-11-11)
+
+Registerhemmens ABI-sparning använder nu x86-skrivarens befintliga csslot
+för prolog/epilog och korrekt CFI, även vid realignment. Den separata
+lsave-/restore-hooken är borttagen. Asm tar dessutom privata snapshots av
+aktuella registerhem när fasta operand-/clobber-register överlappar dem;
+temporärägandet återställs på varje kant. Alla asm-output hålls adresserbara
+av prepassens lnoreg-regel, så deras resultat skrivs före snapshot-restore.
+Fasta RBX-output och asm-goto-output testas mot ett samtidigt levande hem.
+
+Rebaserad unity och fil-för-fil bygger. Unity: 116 fokuserade
+regel/nivå/mål-kombinationer med körning, inklusive smala parametrar och
+setjmp/alignment. Relevanta åtta x86-local/nonlocal-fall även fil-för-fil.
+X86 kors-ABI 22/22. `bench/vcc-x86-unwind-locals.py` använder libgcc:s riktiga
+unwinder för att återvinna anroparens RBX/R13–R15 genom vcc-funktioner med
+vanlig och 64-byte-justerad ram vid O1/O2, båda byggsätten. Clang-referensen
+klarar testet; äldre audit-binär avvisas. Skriptet kräver native x86 Linux,
+CI:s arm64-jobb kör fortfarande de libc-fria x86-proberna under QEMU.
+`bench/vcc-opt-debug.py` och ASan/UBSan-effektkontrakt gröna.
+
+Dessa resultat ersätter inte en ny prestandagrind på aktuell main.
+De tidigare mätningarna ovan behåller sina dokumenterade baser/hashar.
+G5/G7 och full O2-täckning är fortsatt öppna.
+
+### Leveransintegration (2026-11-11)
+
+PR33–36 mergades i sina stackbaser efter att föregående bas redan var
+mergad till main. Deras optimeringar fanns därför inte i main. Grenen
+`opt/optimizer-integration` samlar de redan granskade ändringarna med
+main b0b483d och behåller samtliga CI-kontroller, inklusive C2y-cache.
+Unity, 116 fokuserade körkombinationer på fyra targetkonfigurationer,
+debugrad-/DWARF-/textkontroll och riktig x86-unwind O1/O2 är gröna efter
+integrationen. Prepassens trådpublicering och VLA-fakta är granskade mot
+registerurvalet. Ny CI krävs på den integrerade committen.
