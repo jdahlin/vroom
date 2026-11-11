@@ -334,6 +334,19 @@ ett avgränsat seedat x86-körprov minskar median barn-CPU 69,55 % med samma sva
 Avvägning, exakta hashvärden och begränsningar står i PLAN-fas2. Signed,
 dyrare wasm-klasser och full O2 återstår; G5/G7 stängs inte av detta delsteg.
 
+### Status 2026-11-11: G5/G7, x86-blad utan ram
+
+Verkligt ramfria x86-blad kan nu hoppa över rbp-prolog/epilog; policy och
+begränsad effektkontroll ligger i en egen frame.c och den redan befintliga
+postvandringen. Explicit frame-pointer-policy och blandade deklarationscacher
+är testade. CFI/debug, hårdningsinträden och en riktig signal-unwind genom ett
+ramfritt blad är verifierade; övriga funktioner behåller sin ram. Egna x86-prov
+215/215, ABI 32/32 och befintliga registerhems-unwindprov är gröna.
+Två kalla 501-funktions-profiler ger −0,176 %/−0,537 % Ir; kontrollens assembler
+är identisk. Käll-/binärhashar, flaggor och bytebegränsningar står i PLAN-x86.md.
+Ingen generell fart- eller programkörtidsvinst är bevisad. G5/G7 och hela O2
+är fortsatt öppna; parameterhem och bredare mätningar återstår.
+
 ### Status 2026-11-11: G5/G7, rena konstanta kontrollbeslut
 
 OPT6:s gemensamma kontrollhjälpare används av x86, arm64 och wasm med
@@ -371,3 +384,11 @@ passerar. Ny exakt föräldramätning54c8f3f→d8957b3: fixerad mix högst
 +0,01955 %, mättad u64-korpus +13,55 % x86/+17,97 % arm64 kompilatorarbete;
 avgränsat x86-körprov −69,26 % barn-CPU. Historiska siffror ovan och fulla
 öppna G5/G7-grindar behålls; se PLAN-fas2 för hashvärden och provens gränser.
+
+Efter main2dc4ea3 (#50:s x86-blad): unity, 16 division-/nivå-/målfall,
+sanitiserade reciprok-/registereffektkontrakt och bladramens policy, cache-,
+debug-/härdnings- och signal-unwindprov passerar. Båda statusblock behålls.
+
+U64 har också integrerat main2dc4ea3 via PR51head15551a7: 196 riktade fall,
+sanitiserade kontrakt och hela bladramsharnessen passerar. Reciprokfilerna är
+oförändrade; mätningarna förblir bundna till sina tidigare exakta hashvärden.
