@@ -393,8 +393,9 @@ implementera dem i x86:s `lower.c`. Ingen optimering implementerad; X4 öppet.
 OPT3 i `PLAN-fas2.md` har gemensamt urval och x86:s fyra callee-save-hem,
 med asm-/nonlocal-/alignmentsäkerhet. Egna sviten 137/137, kors-ABI 22/22;
 alla kalla auditprober oförändrade efter lönsamhetsfilter. En liten loop
-förbättras men kompilator-CPU-grinden är fortsatt öppen. Direkt ABI-bindning
-och kopiestädning återstår; full O2-paritet är inte uppnådd.
+förbättras men kompilator-CPU-grinden är fortsatt öppen. Direkt ABI-bindning är nu levererad och verifierad med smala argument,
+stackargument, sret och varargs. Kopiestädning återstår; full O2-paritet
+är inte uppnådd. Se OPT3:s nästa statusblock för parade mätningar.
 
 ### X4 (2026-11-11): reproducerbar nivåmatris och testprober
 

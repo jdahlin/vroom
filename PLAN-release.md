@@ -92,6 +92,13 @@ kombinationer; x86-egensvit 137/137, arm64 142/142, kors-ABI 22/22.
 CI kör nu x86-prober under qemu-user. Se OPT3 i `PLAN-fas2.md` för
 hashar, mätmetod och återstående arbete. G5/G7/O2-målet fortsatt öppna.
 
+### Status 2026-11-11: G5/G7, direkt parameterbindning
+
+Utvalda x86-parametrar binds direkt till registerhem utan extra ABI-spill
+eller efterladdning. Smala typer, stackargument, mixed GP/FP, hidden sret
+och varargs verifierade O0–O3; kors-ABI 22/22. Parade korta mätningar och
+begränsningar finns i OPT3 i `PLAN-fas2.md`. G5/G7/O2-målet fortsatt öppna.
+
 ### Status 2026-11-11: G5/G7, onåbar kod och signed tvåpotenser
 
 Delat linjärt record-pass tar bort säkert onåbara suffix; x86 har nu

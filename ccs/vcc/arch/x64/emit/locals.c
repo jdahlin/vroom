@@ -2,7 +2,7 @@
    this file only supplies physical homes and preserves the System V ABI. */
 #include "x64impl.h"
 
-/* A home adds a save and restore; a parameter also needs an entry load.
+/* A home adds a save and restore; a stack parameter also needs an entry load.
    Require at least four weighted references to repay that memory traffic.
    Loop references already carry the shared prepass's loop weight. */
 static bool x64_local_profitable(ecx *e, uint32_t s)
@@ -48,25 +48,6 @@ VPRIV void x64_locals_begin(ecx *e, uint32_t s)
 		lval save = { .k = L_FRAME, .off = X->lsave[i], .align = 8 };
 
 		x64_store(e, X->lreg[i], &save, 8);
-	}
-}
-
-/* Arguments have first passed through their normal ABI homes. No incoming
-   stack displacement changes: callee saves use ordinary local slots. */
-VPRIV void x64_locals_params(ecx *e)
-{
-	xst *X = e->x64;
-	wkst *W = e->wk;
-
-	for (unsigned i = 0; i < X->nlreg; i++) {
-		uint32_t s = X->lsym[i];
-
-		if (W->sgen[s] == W->gen) {
-			lval from = { .k = L_FRAME, .off = W->soff[s], .align = 8 };
-			qty ty = e->c->syms[s].ty;
-
-			x64_load(e, X->lreg[i], &from, wk_size(e->c, ty), wk_signed(e->c, ty));
-		}
 	}
 }
 

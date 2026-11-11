@@ -1209,6 +1209,36 @@ OPT3:s första del är levererad, men direkt parameterbindning, bättre
 lönsamhetsurval och OPT4:s kopie-/utvidgningsstädning återstår. Full O2-
 täckning, allmänna SSA-/alias-/loopanalyser och G5/G7 är fortsatt öppna.
 
+
+### Status OPT3 (2026-11-11): direkt ABI-bindning
+
+X86 binder nu utvalda skalära registerparametrar direkt från ABI-registret
+med deklarerad bredd/signering. Utvalda stackparametrar laddas en gång
+från anroparens befintliga offset. Den separata efterladdningshooken och
+onyttiga parameterslotar är borttagna. Befintlig klassificering äger
+fortfarande GP/FP-budget, aggregate rollback, hidden sret och varargs;
+ingen ny analys, AST-vandring eller allokering.
+
+Unity och fil-för-fil bygger; parameterfallen kör O0–O3 på x86, arm64,
+wasm32 och wasm64. Kodkraven avvisar basens spill/laddning. Nya fall täcker
+smala signed/unsigned typer, register-/stackargument, blandad FP/GP,
+24-byte sret och varargs. X86 kors-ABI 22/22; nonlocal-regression O0–O3; x86-egensvit
+137/137 med fem oförändrade filtreringar (--no-cache, -j 6).
+
+Bas d8e02c8 SHA256
+`3b399256f3b795cc5267d72394cfdd4dfc9b3a271fc3c30f38ff1dbaef202ade`;
+kandidat `08fa144ebfd7166f9e5b499b6f209413a6ba131cf9374064b5d5c0816744a20c`.
+Artefakter `build/linux/opt-params-baseline/`. Samma metod som föregående
+OPT3-mätning, tre alternerade repetitioner: x86 loopkompilator-CPU
+60,282→58,437 ms, kontroll 24,806→25,012 ms. Övriga bakändars källkod är
+oförändrad; deras mättider varierar inom värdens brus. Samma lilla summa-
+program ger 3,263→3,057 ms, identisk checksumma; clang O2 0,508 ms och
+GCC O2 1,793 ms. Tider från olika mättillfällen får inte jämföras direkt.
+Ingen generell speedup eller godkänd 1 %-grind hävdas.
+
+Direktbindningen är levererad. Bättre urval, kopie-/utvidgningsstädning,
+minnesoptimeringar och full O2-täckning återstår; ingen SSA införd.
+
 ## Risker
 - **GNU C-ytan och inline asm** är det stora jobbet. Uppskattat: lexer + pp ~2 kloc,
   parser + sema ~10–15 kloc, emitter ~5 kloc, assembler ~4 kloc, länkare ~3 kloc.

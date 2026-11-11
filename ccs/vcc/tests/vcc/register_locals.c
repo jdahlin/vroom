@@ -178,6 +178,45 @@ NI long rl_asm_goto_four(long n, int take)
 taken:
     return a + 2 * b + 3 * c + 4 * d + 5;
 }
+/* Selected arguments should enter their homes directly from the ABI. */
+NI int rl_bind(int n) { n += 3; n *= 2; n -= 1; n += 5; return n; }
+NI long long rl_bind_stack(int a, int b, int c, int d, int e, int f, long long g)
+{
+    g += 3; g *= 2; g -= 1; g += 5;
+    return g;
+}
+NI int rl_bind_narrow(signed char a, unsigned char b, short c, unsigned short d)
+{
+    a += 1; a -= 2; a += 3;
+    b += 3; b -= 1; b += 1;
+    c += 7; c -= 2; c += 1;
+    d += 5; d -= 2; d += 1;
+    return a + b + c + d;
+}
+NI int rl_bind_mixed(double a, int n, float b, int m, double c, int k, double d)
+{
+    n += 3; n *= 2; n -= 1; n += 5;
+    m += 1; m *= 3; m -= 2; m += 4;
+    k += 2; k *= 2; k -= 3; k += 5;
+    return n + m + k + (int)(a + b + c + d);
+}
+struct rl_result { long long a, b, c; };
+NI struct rl_result rl_bind_sret(int n, double d)
+{
+    n += 3; n *= 2; n -= 1; n += 5;
+    struct rl_result r = { n, (long long)d, n + (long long)d };
+    return r;
+}
+NI int rl_bind_variadic(int n, ...)
+{
+    __builtin_va_list ap;
+    __builtin_va_start(ap, n);
+    n += 3; n *= 2; n -= 1; n += 5;
+    n += __builtin_va_arg(ap, int);
+    n += __builtin_va_arg(ap, int);
+    __builtin_va_end(ap);
+    return n;
+}
 int main(void)
 {
     if (rl_cold(5) != 6) return 17;
@@ -203,5 +242,12 @@ int main(void)
 #endif
     if (rl_asm_four(5) != 380) return 15;
     if (rl_asm_goto_four(5, 0) != 380 || rl_asm_goto_four(5, 1) != 385) return 16;
+    if (rl_bind(5) != 20) return 18;
+    if (rl_bind_stack(1, 2, 3, 4, 5, 6, 1234567890123ll) != 2469135780256ll) return 19;
+    if (rl_bind_narrow(-128, 254, -32768, 65534) != -32885) return 20;
+    if (rl_bind_mixed(1.0, 5, 2.0f, 7, 3.0, 9, 4.0) != 80) return 21;
+    struct rl_result result = rl_bind_sret(5, 3.0);
+    if (result.a != 20 || result.b != 3 || result.c != 23) return 22;
+    if (rl_bind_variadic(5, 7, 9) != 36) return 23;
     return 0;
 }

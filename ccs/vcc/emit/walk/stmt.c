@@ -1159,7 +1159,7 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 		LO(classify)(e, W->rty, &W->rrec);
 		W->rrec.slot = wk_slot(e, 8, 8);	/* (memory: the hidden pointer's slot) */
 	}
-	/* parameters: their slots, filled from the registers (or left on the stack) */
+	/* Parameters: slots unless the lowering selected a persistent register home. */
 	for (uint32_t i = 0; i < body->aux; i++) {
 		uint32_t p = c->lists[body->a + i];
 		qty pt = c->syms[p].ty;
@@ -1170,7 +1170,9 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 		if ((ft->flags & TF_NOPROTO) && k == TY_FLOAT)
 			pt = prim(TY_DOUBLE);	/* K&R: received as the caller promoted it */
 		LO(classify)(e, pt, &pa[i]);
-		pa[i].slot = wk_slot(e, pa[i].size > 8 ? (pa[i].size + 7) & ~(uint64_t)7 : 8, pa[i].align);
+		lval home;
+		pa[i].slot = LO(local)(e, p, &home) ? 0 :
+			wk_slot(e, pa[i].size > 8 ? (pa[i].size + 7) & ~(uint64_t)7 : 8, pa[i].align);
 	}
 	LO(params)(e, pa, (int)body->aux, wk_mem(e, W->rty) ? &W->rrec : NULL, (ft->flags & TF_VARIADIC) != 0);
 	for (uint32_t i = 0; i < body->aux; i++) {
@@ -1191,7 +1193,6 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 			LO(tfree)(e, r);
 		}
 	}
-	LO(locals_params)(e);
 	for (uint32_t i = 0; i < body->aux; i++) {	/* int (*a)[n]: n as on entry */
 		qty pt = c->syms[c->lists[body->a + i]].ty;
 

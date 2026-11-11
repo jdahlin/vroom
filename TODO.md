@@ -1169,7 +1169,8 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   including inherited R12; final alignment is reconstructed on resume.
   Shared locals.c eligibility/selection now feeds all targets and x86
   promotes profitable scalar locals in four callee-save homes. Direct
-  ABI-to-home binding and generic copy/extension cleanup remain pending.
+  ABI-to-home binding is now direct for selected register/stack parameters;
+  generic copy/extension cleanup and improved profitability remain pending.
   Wasm checks use our assembler/linker and plain Node; full replacement
   of Emscripten's test/explorer runtime is tracked in `PLAN-wasm.md` W9.
   *Validate:* common C semantics plus target-specific code assertions;

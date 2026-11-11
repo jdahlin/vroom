@@ -267,6 +267,30 @@ def check_signedpow2(assembly, arch):
 def check_locals(assembly, arch):
     if arch != 'x86_64':
         return
+    # Selected scalar parameters bind to their homes at the ABI boundary.
+    # Ignore callee-save slots and unrelated FP/variadic save areas: only a
+    # store of the named incoming integer register reveals the old detour.
+    probes = {
+        'rl_bind': ['rdi|edi|di|dil'],
+        'rl_bind_narrow': ['rdi|edi|di|dil', 'rsi|esi|si|sil',
+                           'rdx|edx|dx|dl', 'rcx|ecx|cx|cl'],
+        'rl_bind_mixed': ['rdi|edi|di|dil', 'rsi|esi|si|sil', 'rdx|edx|dx|dl'],
+        'rl_bind_sret': ['rsi|esi|si|sil'],
+        'rl_bind_variadic': ['rdi|edi|di|dil'],
+    }
+    homes = r'(?:[re]bx|bx|bl|r1[345][dwb]?)'
+    for name, registers in probes.items():
+        text = body(assembly, name, False)
+        for register in registers:
+            if re.search(r'\bmov\w*\s+%(?:' + register +
+                         r')\s*,\s*-?[0-9]*\(%rbp\)', text):
+                raise RuntimeError(f'{name}: selected parameter retained ABI spill\n{text}')
+            if not re.search(r'\bmov\w*\s+%(?:' + register +
+                             r')\s*,\s*%' + homes + r'\b', text):
+                raise RuntimeError(f'{name}: missing direct ABI register binding\n{text}')
+    text = body(assembly, 'rl_bind_stack', False)
+    if not re.search(r'\bmovq\s+16\(%rbp\)\s*,\s*%' + homes + r'\b', text):
+        raise RuntimeError(f'rl_bind_stack: missing direct incoming stack binding\n{text}')
     text = body(assembly, 'rl_cold', False)
     if re.search(r'%(?:rbx|ebx|r1[345][dwb]?)\b', text):
         raise RuntimeError(f'rl_cold: unprofitable preserved register binding\n{text}')
