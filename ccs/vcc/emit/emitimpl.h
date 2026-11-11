@@ -528,6 +528,16 @@ VPRIV bool em_sdivpow2(cc *c, qty ty, int op, i128 rhs, em_sdivpow2_recipe *r);
 /* opt/identity.c */
 enum { EM_ID_NONE, EM_ID_LEFT, EM_ID_ZERO, EM_ID_ONES };
 VPRIV int em_bin_identity(cc *c, qty ty, int op, i128 rhs);
+/* opt/switch.c: inclusive ranges in controlling-type order. Preparation only
+ * for tree dispatch (>=8 cases); no allocation or target state in the policy.
+ * Preparation rejects wrapped/overlapping ranges: callers retain the chain. */
+typedef struct em_switch_case {
+	i128 lo, hi;
+	uint32_t target;
+} em_switch_case;
+enum { EM_SWITCH_LINEAR, EM_SWITCH_TREE, EM_SWITCH_TABLE };
+VPRIV int em_switch_strategy(uint32_t n, i128 lo, i128 hi, bool ranges, bool tables);
+VPRIV bool em_switch_prepare(em_switch_case *cases, uint32_t n, unsigned bits, bool sg);
 /* opt/locals.c: eligibility and bounded selection from the existing prepass. */
 VPRIV bool em_local_eligible(ecx *e, uint32_t s);
 VPRIV bool em_local_gpr_type(cc *c, qty ty);
@@ -700,6 +710,10 @@ VPRIV uint64_t opt_regs(ecx *e, unsigned *fl);
 VPRIV lval bind_lreg(ecx *e, uint32_t s);
 VPRIV val fold_int_bin(ecx *e, int op, qty ot, qty rt, i128 l, i128 r, bool *ok);
 VPRIV bool em_is_cmp(int op);
+/* Pure control proofs: bounded shared walk, no committed target instructions. */
+VPRIV bool em_const_strcmp(cc *c, uint32_t n, i128 *value);
+VPRIV int em_const_truth(ecx *e, uint32_t n, int (*constant_p)(ecx *, uint32_t));
+VPRIV int a64_constant_p(ecx *e, uint32_t arg);
 VPRIV int emit_cmp(ecx *e, int op, int x, bool sg, val *a, val *b);
 VPRIV int emit_cmp2(ecx *e, int op, bool sg, val *a, val *b);
 VPRIV int test_zero(ecx *e, val *v, qty t, uint32_t l, bool nz);

@@ -139,12 +139,14 @@ VPRIV wbind *wlocal(ecx *e, uint32_t s)
 	if (b->gen == W->gen)
 		return b;
 	b->gen = W->gen;
+	b->cellid = 0;
 	if (wreg_ok(e, s)) {
 		b->k = WB_LOC;
 		b->loc = wnewloc(e, wty(c, c->syms[s].ty));
 	} else {
 		b->k = WB_FRAME;
 		b->off = wslot(e, tsize(c, c->syms[s].ty), sym_align(c, s));
+		b->cellid = wmem_id(e, b->off);
 	}
 	return b;
 }
@@ -298,7 +300,7 @@ VPRIV void wlval(ecx *e, uint32_t n, wlv *l, qty t)
 
 	memset(l, 0, sizeof *l);
 	l->k = WL_MEM;
-	l->vol = (QQ(x->ty) & Q_VOLATILE) != 0;
+	l->vol = (QQ(x->ty) & Q_VOLATILE) != 0 || (T(c, x->ty)->flags & TF_ATOMIC) != 0;
 	switch (x->op) {
 	case N_VAR: {
 		uint32_t s = x->a;
@@ -318,6 +320,8 @@ VPRIV void wlval(ecx *e, uint32_t n, wlv *l, qty t)
 			}
 			wget(e, wfp(e));
 			l->off = b->off;
+			l->cellid = b->cellid;
+			l->celloff = b->off;
 			break;
 		}
 		if (y->kind == S_FUNC || y->kind == S_BUILTIN) {
@@ -343,7 +347,8 @@ VPRIV void wlval(ecx *e, uint32_t n, wlv *l, qty t)
 		if (l->k != WL_MEM)
 			efatal(e, x->loc, "wasm: member of a non-memory object");
 		l->off += f->off / 8;
-		l->vol |= (QQ(x->ty) & Q_VOLATILE) != 0;
+		l->celloff += f->off / 8;
+		l->vol |= (QQ(x->ty) & Q_VOLATILE) != 0 || (T(c, x->ty)->flags & TF_ATOMIC) != 0;
 		if (f->bitfield) {
 			l->bf = 1;
 			l->bitoff = (uint16_t)(f->off % 8);
@@ -400,10 +405,13 @@ VPRIV void wlval(ecx *e, uint32_t n, wlv *l, qty t)
 			b->gen = W->gen;
 			b->k = WB_FRAME;
 			b->off = wslot(e, tsize(c, x->ty), sym_align(c, s));
+			b->cellid = wmem_id(e, b->off);
 		}
 		winit(e, b->off, x->ty, x->a, false);
 		wget(e, wfp(e));
 		l->off = b->off;
+		l->cellid = b->cellid;
+		l->celloff = b->off;
 		break;
 	}
 	case N_STR:
@@ -476,9 +484,12 @@ VPRIV void wload(ecx *e, wlv *l, qty t)
 		return;
 	}
 	if (wty(c, t) == WT_MEM) {
+		wmem_poison(e, l, tsize(c, t));
 		wfold_off(e, l);
 		return;
 	}
+	if (l->bf)
+		wmem_poison(e, l, l->bf == 2 ? tsize(c, t) : (uint64_t)wbf_bytes(e, l));
 	if (l->bf == 2) {
 		wiu(e, "i32.load8_u", l->off);
 		wslot_addr(e, l->dynbit_slot);
@@ -538,7 +549,9 @@ VPRIV void wload(ecx *e, wlv *l, qty t)
 			wi(e, "i32.wrap_i64");
 		return;
 	}
+	size_t begin = e->w->b.n;
 	wiu(e, wmemop(c, t, false), l->off);
+	wmem_access(e, l, t, false, begin);
 }
 
 /* stack: [address] value (WL_MEM), or value (WL_LOC); records: [dst src], dst folded */
@@ -554,6 +567,8 @@ VPRIV void wstore(ecx *e, wlv *l, qty t)
 		wcopy(e, tsize(c, t));
 		return;
 	}
+	if (l->bf)
+		wmem_poison(e, l, l->bf == 2 ? tsize(c, t) : (uint64_t)wbf_bytes(e, l));
 	if (l->bf == 2) {
 		uint32_t tv = wtmp(e, WT_I32), ta = wtmp(e, WPT(c)), tm = wtmp(e, WT_I32);
 		wset(e, tv);
@@ -647,12 +662,15 @@ VPRIV void wstore(ecx *e, wlv *l, qty t)
 		wfree(e, ta);
 		return;
 	}
+	size_t begin = e->w->b.n;
 	wiu(e, wmemop(c, t, true), l->off);
+	wmem_access(e, l, t, true, begin);
 }
 
 /* stack: [dst src] -> [] */
 VPRIV void wcopy(ecx *e, uint64_t n)
 {
+	wmem_fence(e);
 	wpconst(e, (int64_t)n);
 	wi(e, "memory.copy\t0, 0");
 }
@@ -705,6 +723,7 @@ static void wrt(ecx *e, const char *name, const char *sig)
 {
 	wst *W = e->w;
 
+	wmem_fence(e);
 	tb_s(&W->decl, name);
 	tb_c(&W->decl, '\t');
 	for (; *sig; sig++)
@@ -1481,15 +1500,19 @@ VPRIV int wknown(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
 	cval cv;
+	int known = c->o->opt && !e->E->noopt ? em_const_truth(e, n, wconstant_p) : -1;
 	uint32_t r = n;
 
+	if (known >= 0)
+		return known;
 	while (N(r)->op == N_CAST && (N(r)->aux == CK_INT || N(r)->aux == CK_NOP || N(r)->aux == CK_BOOL))
 		r = N(r)->a;
 	if (N(r)->op == N_BUILTIN && N(r)->aux == BI_CONSTANT_P)
 		return wconstant_p(e, c->lists[N(r)->b]);
-	if (wbcp_in(c, n))
-		return -1;
-	if (side_effects(c, n) || !cc_eval(c, n, &cv))
+	/* Other front-end constant forms (arithmetic, floats, addresses) retain
+	 * their existing semantics. Never ask cc_eval to reinterpret constant_p
+	 * under a compound expression: target bindings may change its answer. */
+	if (wbcp_in(c, n) || side_effects(c, n) || !cc_eval(c, n, &cv))
 		return -1;
 	if (cv.kind == CV_INT)
 		return cv.i != 0;
@@ -1528,7 +1551,7 @@ static int wcond_expr(ecx *e, uint32_t n, bool want)
 			wget(e, t);
 			wconv(e, at, x->ty);
 		}
-		wi(e, "else");
+		wboundary(e, "else");
 		wexpr(e, x->c, want);
 		wend(e, "end_if");
 		wfree(e, t);
@@ -1537,7 +1560,7 @@ static int wcond_expr(ecx *e, uint32_t n, bool want)
 	wtruth(e, x->a);
 	wblock(e, wif(k));
 	wexpr(e, x->b, want);
-	wi(e, "else");
+	wboundary(e, "else");
 	wexpr(e, x->c, want);
 	wend(e, "end_if");
 	return k;
@@ -1892,6 +1915,7 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 		wlval(e, x->a, &l, prim(TY_VOID));
 		if (l.k != WL_MEM)
 			efatal(e, x->loc, "wasm: address of a register local");
+		wmem_escape(e, l.cellid);
 		wfold_off(e, &l);
 		return WPT(c);
 	}
@@ -1903,6 +1927,7 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 			wlval(e, x->a, &l, prim(TY_VOID));
 			if (l.k != WL_MEM)
 				efatal(e, x->loc, "wasm: array in a register");
+			wmem_escape(e, l.cellid);
 			wfold_off(e, &l);
 			return WPT(c);
 		}
@@ -1930,6 +1955,7 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 							wlv part = src;
 							unsigned start = bit < src.width ? bit : src.width - 1;
 							part.off += (src.bitoff + start) / 8;
+							part.celloff += (src.bitoff + start) / 8;
 							part.bitoff = (src.bitoff + start) % 8;
 							part.width = bit >= src.width ? 1 : src.width - bit < 8 ? src.width - bit : 8;
 							part.sgn = src.sgn && bit + 8 >= src.width;
@@ -1940,8 +1966,9 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 					wfree(e, addr);
 
 				} else {
+					wmem_poison(e, &src, tsize(c, from));
 					wfold_off(e, &src);
-					wpconst(e, (int64_t)tsize(c, from)); wi(e, "memory.copy\t0, 0");
+					wcopy(e, tsize(c, from));
 				}
 			} else { wexpr(e, x->a, true); wstore(e, &d, from); }
 			wslot_addr(e, sl);
@@ -1956,6 +1983,7 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 			wslot_addr(e, sl);
 			wconst(e, WT_I32, 0);
 			wpconst(e, (int64_t)tsize(c, x->ty));
+			wmem_fence(e);
 			wi(e, "memory.fill\t0");
 			wslot_addr(e, sl);
 			wexpr(e, x->a, true);
@@ -2092,7 +2120,7 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 			wbool(e, x->b);
 		else
 			wconst(e, WT_I32, 1);
-		wi(e, "else");
+		wboundary(e, "else");
 		if (x->op == N_LOGAND)
 			wconst(e, WT_I32, 0);
 		else
@@ -2107,9 +2135,14 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 		wexpr(e, x->a, false);
 		return wexpr(e, x->b, want);
 	case N_CALL:
-		return wcall(e, n, want);
-	case N_BUILTIN:
-		return wbuiltin(e, n, want);
+	case N_BUILTIN: {
+		wmem_fence(e);
+		e->w->memopaque++;
+		int r = x->op == N_CALL ? wcall(e, n, want) : wbuiltin(e, n, want);
+		e->w->memopaque--;
+		wmem_fence(e);
+		return r;
+	}
 	case N_STMTEXPR:
 		return wstmtexpr(e, x->a, want);
 	case N_ZERO:
@@ -2119,6 +2152,7 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 			wslot_addr(e, sl);
 			wconst(e, WT_I32, 0);
 			wpconst(e, (int64_t)tsize(c, x->ty));
+			wmem_fence(e);
 			wi(e, "memory.fill\t0");
 			wslot_addr(e, sl);
 			return WPT(c);
@@ -2143,8 +2177,14 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 		wslot_addr(e, sl);
 		return WPT(c);
 	}
-	case N_VAARG:
-		return wbuiltin(e, n, want);
+	case N_VAARG: {
+		wmem_fence(e);
+		e->w->memopaque++;
+		int r = wbuiltin(e, n, want);
+		e->w->memopaque--;
+		wmem_fence(e);
+		return r;
+	}
 	case N_LABELADDR:
 		/* its number (1-based), as in data: goto * compares against these */
 		wpconst(e, (int64_t)x->a + 1);

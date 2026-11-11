@@ -23,6 +23,7 @@ typedef struct wbind {
 	uint32_t gen;		/* valid if == W->gen */
 	uint8_t k;
 	uint32_t loc;		/* WB_LOC / WB_PTR: local index */
+	uint32_t cellid;		/* stable frame allocation identity */
 	uint64_t off;		/* WB_FRAME: offset from the frame base */
 } wbind;
 
@@ -35,7 +36,20 @@ typedef struct wlv {
 	uint64_t dynbit_slot;
 	uint64_t off;
 	bool vol;
+	uint32_t cellid;
+	uint64_t celloff;	/* absolute frame offset, independent of emitted address */
 } wlv;
+
+/* Typed memory events: body offsets delimit emitted operations, never parsed. */
+enum { WM_FENCE, WM_LOAD, WM_STORE, WM_POISON };
+typedef struct wmem {
+	size_t begin, end;
+	uint64_t off;
+	uint32_t id, size, source, cache;
+	uint8_t kind, type;
+	bool dead, capture;
+} wmem;
+typedef struct walloc { uint64_t off, size; bool escaped; } walloc;
 
 /* a switch case: its range and segment */
 typedef struct wswc { i128 lo, hi; uint32_t seg; bool dflt; } wswc;
@@ -88,6 +102,14 @@ typedef struct wst {
 	int sjloop;
 	uint32_t notop;		/* a compound only entered by goto (the dead branch of if (0)) */
 	uint32_t sxv, sxt;	/* the statement expression's value statement, its local */
+	wmem *mem;
+	uint32_t nmem, capmem;
+	walloc *alloc;
+	uint32_t nalloc, capalloc;
+	em_slot_cells cells;
+	em_slot_values values;
+	bool memopt, memfailed, memchanged;
+	uint32_t memopaque;
 	struct wst *next;	/* the free list */
 } wst;
 
@@ -145,6 +167,18 @@ static inline int wty(cc *c, qty t)
 
 /* its representation on the operand stack */
 static inline int wrep(cc *c, int t) { return t == WT_MEM ? WPT(c) : t; }
+
+/* slots.c: typed memory-event collection, analysis, and rendering. */
+VPRIV void wmem_begin(ecx *e);
+VPRIV void wmem_alloc(ecx *e, uint64_t off, uint64_t size);
+VPRIV uint32_t wmem_id(ecx *e, uint64_t off);
+VPRIV void wmem_lval(ecx *e, wlv *l, uint64_t off);
+VPRIV void wmem_escape(ecx *e, uint32_t id);
+VPRIV void wmem_fence(ecx *e);
+VPRIV void wmem_access(ecx *e, const wlv *l, qty t, bool store, size_t begin);
+VPRIV void wmem_poison(ecx *e, const wlv *l, uint64_t size);
+VPRIV void wmem_optimize(ecx *e);
+VPRIV void wmem_render(ecx *e, tbuf *out);
 
 /* ---------------- printing ---------------- */
 
@@ -234,6 +268,12 @@ static inline void waddr_ref(ecx *e, uint32_t ref, int64_t off)
 	tb_c(b, '\n');
 }
 
+static inline void wboundary(ecx *e, const char *op)
+{
+	wmem_fence(e);
+	wi(e, op);
+}
+
 /* ---------------- locals ---------------- */
 
 static inline uint32_t wnewloc(ecx *e, int t)
@@ -292,6 +332,7 @@ static inline uint64_t wslot(ecx *e, uint64_t size, uint32_t align)
 		W->falign = align;
 	o = (W->frame + align - 1) & ~(uint64_t)(align - 1);
 	W->frame = o + (size ? size : 1);
+	wmem_alloc(e, o, size ? size : 1);
 	return o;
 }
 
@@ -309,6 +350,7 @@ static inline void wslot_addr(ecx *e, uint64_t off)
 
 static inline int wblock(ecx *e, const char *kind)
 {
+	wmem_fence(e);
 	wi(e, kind);
 	return e->w->depth++;
 }
@@ -316,11 +358,13 @@ static inline int wblock(ecx *e, const char *kind)
 static inline void wend(ecx *e, const char *kind)
 {
 	e->w->depth--;
+	wmem_fence(e);
 	wi(e, kind);
 }
 
 static inline void wbr(ecx *e, const char *op, int target)
 {
+	wmem_fence(e);
 	wiu(e, op, (uint64_t)(e->w->depth - 1 - target));
 }
 

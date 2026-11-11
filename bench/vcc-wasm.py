@@ -58,8 +58,6 @@ WASM_XFAIL.update({
     'inline_walk': 'wasm: inlining (const parameters, labels per instance) only in the shared walker, not the wasm emitter',
     'vec_wide_lanes': 'wasm: __int128/double vector lanes (TODO.md tier 1, as arm64)',
     'switch_const_fold': 'wasm: a constant switch keeps every case (the x86 walker folds it)',
-    'if_call_const': 'wasm: an if on a call folded to a constant keeps both branches (the x86 walker folds it)',
-    'cond_dead_and': 'wasm: the dead operand of a known && is generated (the x86 walker drops it)',
     'and_zero_fold': 'wasm: x & 0 with x not constant is not folded (the x86 walker folds it)',
     'if_stmtexpr_const': 'wasm: a statement expression constant does not decide an if (the x86 walker folds it)',
     'dead_after_inline_return': 'wasm: statements after an inlined return are generated (the x86 walker drops them)',
@@ -122,6 +120,9 @@ def set_target(w32):
     BASE = [TGT] + BASE[1:]
     LINK = [a for a in LINK if a != '-sMEMORY64=1']
     RTO = f'{OUT}/rt.o'
+    # Baseline f866a31 already passes this on wasm32; its remaining
+    # function-pointer signature failure is specific to wasm64.
+    WASM_XFAIL.pop('parenthesized_function', None)
 
 def sh(cmd, timeout=60, **kw):
     return ct.sh(cmd, timeout=timeout, **kw)

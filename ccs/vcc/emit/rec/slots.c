@@ -25,6 +25,26 @@ static int em_slot_cmp(const void *a, const void *b)
 	return x->size < y->size ? -1 : x->size > y->size;
 }
 
+/* Exact cell sets are usually one or two aggregate fields. Avoid libc's
+ * general sorting machinery for bounded tiny sets; retain qsort above 16. */
+static void em_slot_sort(em_slot_range *v, uint32_t n)
+{
+	if (n > 16) {
+		qsort(v, n, sizeof(*v), em_slot_cmp);
+		return;
+	}
+	for (uint32_t i = 1; i < n; i++) {
+		em_slot_range key = v[i];
+		uint32_t j = i;
+
+		while (j && em_slot_cmp(&key, &v[j - 1]) < 0) {
+			v[j] = v[j - 1];
+			j--;
+		}
+		v[j] = key;
+	}
+}
+
 static bool em_slot_hits(const em_slot_cells *s, int64_t off, uint32_t size)
 {
 	int64_t end = off + size;
@@ -113,7 +133,7 @@ VPRIV bool em_slot_finish(em_slot_cells *s)
 	if (nm) {
 		uint32_t u = 0;
 
-		qsort(s->c, nm, sizeof(*s->c), em_slot_cmp);
+		em_slot_sort(s->c, nm);
 		for (uint32_t k = 0; k < nm; k++)
 			if (!u || em_slot_cmp(&s->c[k], &s->c[u - 1]))
 				s->c[u++] = s->c[k];
@@ -134,7 +154,7 @@ VPRIV bool em_slot_finish(em_slot_cells *s)
 		}
 	}
 	if (s->nw) {
-		qsort(s->w, s->nw, sizeof(*s->w), em_slot_cmp);
+		em_slot_sort(s->w, s->nw);
 		s->wend = em_slot_grow(s->wend, &s->capwe, s->nw, sizeof(*s->wend));
 		for (uint32_t k = 0; k < s->nw; k++) {
 			int64_t end = s->w[k].off + s->w[k].size;

@@ -587,7 +587,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
     (wide shift counts), `deep_conditional` (wide GNU omitted-middle values),
     `transparent_union_redecl` (member calling convention).
   - Expression/call lowering: `gnu_conditional_float` (GNU floating conditional),
-    `parenthesized_function` (nested function-pointer return signature),
+    `parenthesized_function` (wasm64 only: nested function-pointer return signature; wasm32 passes on baseline f866a31),
     `void_lvalue` (void expressions leave stack values).
   - Optimization/inlining: `array_constants`, `dead_branch_entries`,
     `optimized_conditions` leave unreachable references; `inline_constants`

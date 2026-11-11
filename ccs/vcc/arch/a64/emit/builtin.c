@@ -842,6 +842,46 @@ static val gen_atomic(ecx *e, const node *x, const uint32_t *arg)
 	return res;
 }
 
+/* Preserve the existing front-end/literal/dry policy for both builtin values
+ * and shared control proofs. dry() restores the target emission state. */
+VPRIV int a64_constant_p(ecx *e, uint32_t arg)
+{
+	cc *c = e->c;
+	val v;
+	/*
+	 * clang: 1 if the front end folds the operand (a pointer only as a
+	 * string literal at offset 0); else 0 if it has side effects or is
+	 * not arithmetic; else whatever the optimizer folds, which here is
+	 * the operand after inlining (dry).
+	 */
+	cval cv;
+	qty at = N(arg)->ty;
+
+	if (cc_eval(c, arg, &cv) && (cv.kind == CV_INT || cv.kind == CV_FLT ||
+					 (cv.kind == CV_ADDR && cv.str && cv.i == 0 && !cv.sym && !cv.label)))
+		return 1;
+	if (side_effects(c, arg) || !(is_integer(c, at) || is_flt(c, at)))
+		return 0;
+	{
+		/* "hi"[0]: the optimizer reads a character of a literal */
+		uint32_t r = arg;
+		cval ix;
+
+		while (N(r)->op == N_CAST && (N(r)->aux == CK_INT || N(r)->aux == CK_NOP))
+			r = N(r)->a;
+		if (N(r)->op == N_INDEX && cc_eval(c, N(r)->b, &ix) && ix.kind == CV_INT) {
+			uint32_t s = N(r)->a;
+
+			while (N(s)->op == N_CAST && (N(s)->aux == CK_DECAY || N(s)->aux == CK_NOP))
+				s = N(s)->a;
+			if (N(s)->op == N_STR && ix.i >= 0 && (uint64_t)ix.i < c->strs[N(s)->a].n)
+				return 1;
+		}
+	}
+	v = dry(e, arg);
+	return v.k == V_CONST;
+}
+
 VPRIV val gen_builtin(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
@@ -887,40 +927,8 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 			tfree(e, rb);
 		return vreg(rd);
 	}
-	case BI_CONSTANT_P: {
-		/*
-		 * clang: 1 if the front end folds the operand (a pointer only as a
-		 * string literal at offset 0); else 0 if it has side effects or is
-		 * not arithmetic; else whatever the optimizer folds, which here is
-		 * the operand after inlining (dry).
-		 */
-		cval cv;
-		qty at = N(arg[0])->ty;
-
-		if (cc_eval(c, arg[0], &cv) && (cv.kind == CV_INT || cv.kind == CV_FLT ||
-						 (cv.kind == CV_ADDR && cv.str && cv.i == 0 && !cv.sym && !cv.label)))
-			return vconst(1);
-		if (side_effects(c, arg[0]) || !(is_integer(c, at) || is_flt(c, at)))
-			return vconst(0);
-		{
-			/* "hi"[0]: the optimizer reads a character of a literal */
-			uint32_t r = arg[0];
-			cval ix;
-
-			while (N(r)->op == N_CAST && (N(r)->aux == CK_INT || N(r)->aux == CK_NOP))
-				r = N(r)->a;
-			if (N(r)->op == N_INDEX && cc_eval(c, N(r)->b, &ix) && ix.kind == CV_INT) {
-				uint32_t s = N(r)->a;
-
-				while (N(s)->op == N_CAST && (N(s)->aux == CK_DECAY || N(s)->aux == CK_NOP))
-					s = N(s)->a;
-				if (N(s)->op == N_STR && ix.i >= 0 && (uint64_t)ix.i < c->strs[N(s)->a].n)
-					return vconst(1);
-			}
-		}
-		v = dry(e, arg[0]);
-		return vconst(v.k == V_CONST);
-	}
+	case BI_CONSTANT_P:
+		return vconst(a64_constant_p(e, arg[0]));
 	case BI_FAST_ROOT4: case BI_FAST_SQRT: {
 		int d = KIND(c, x->ty) == TY_DOUBLE;
 		v = gen(e, arg[0]);

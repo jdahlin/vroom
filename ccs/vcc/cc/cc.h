@@ -291,6 +291,8 @@ typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl 
 	int conv_warn;		/* -Wno-error= (or -Wno-) of: 1 int-conversion, 2 incompatible-pointer-types,
 				   4 incompatible-function-pointer-types: a warning, not an error */
 	int dump_layouts;	/* append _Static_assert checks for clang to verify */
+	/* Before outfd so declaration-cache identity includes the frame policy. */
+	int omit_frame_pointer; /* x86: permit frame-free leaf omission; explicit flags win */
 	int outfd;
 	int emit;		/* generate code (emit/): 1 = assembly text to outfd, 2 = object into obj */
 	int opt;		/* -O level for code generation: 0 (default, -O0), 1 (-O1, -Og), 2 (-O2, -O3, -Os, -Oz, -O) */
