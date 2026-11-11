@@ -90,7 +90,7 @@ The runner checks issue-specific diagnostic content, source line, severity, stab
 IDs, exact text reconstruction from JSON in both text styles, and valid SARIF. It
 also requires all 50 repaired/intentional examples to compile without diagnostics
 in both vcc and Clang. Link tests build corrected examples but never execute any
-program. Broken programs are never executed. Five verifier regression tests guard
+program. Broken programs are never executed. Seven verifier regression tests guard
 against matching source snippets, unrelated locations, or incomplete corpora.
 
 Validated baseline on both Linux targets: x86 has 10 covered cases and 15 gaps;
@@ -100,3 +100,31 @@ each target is the external-linker story. See `BASELINE.md` for captured message
 B09 explicitly uses `-Wno-error=parentheses`: Clang 23 otherwise diagnoses this
 legal chained comparison as an error by default; this corpus tests explaining its
 meaning without requiring language rejection.
+
+## Exact expected messages
+
+`snapshots/TARGET/Bxx.vcc.stderr` and `Bxx.narrated.stderr` are checked-in expected
+messages. Every normal run compares the complete output byte for byte: wording,
+line/column, source excerpts, caret placement, fix-it display, notes, help, and
+summary. A changed or missing snapshot fails even with `--baseline`; semantic
+regex checks and JSON reconstruction remain additional requirements. The link case
+has `B05.link.stderr`, with only its generated temporary-directory name normalized.
+Caret-padding spaces are preserved deliberately.
+
+To update messages after an intentional change:
+
+```sh
+LLVM=/usr/lib/llvm-23 python3 bench/vcc-onboarding.py --baseline --bless
+LLVM=/usr/lib/llvm-23 python3 bench/vcc-onboarding.py --baseline --bless --target aarch64-linux-gnu
+git diff -- ccs/vcc/tests/onboarding/snapshots
+```
+
+Review every changed message; ordinary tests and CI never bless output. Empty
+snapshots record currently silent cases and do not satisfy their semantic contract.
+They remain explicit gaps. When implementing a missing warning, review the new
+message and remove its matching gap marker together.
+
+`fixed.c` preserves the corresponding `broken.c` layout and changes only the repair.
+Some repairs require additional statements or a changed API. B24 demonstrates
+static storage when a shared persistent object is intended; it is not a general
+recommendation to make locals static or an automatic fix for every lifetime error.

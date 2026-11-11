@@ -1,0 +1,12 @@
+06_assignment_condition/broken.c:3:11: warning: using the result of an assignment as a condition without parentheses [-Wparentheses]
+    3 |     if (n = 3) return 0;
+      |         ~~^~~
+06_assignment_condition/broken.c:3:11: note: place parentheses around the assignment to silence this warning
+    3 |     if (n = 3) return 0;
+      |           ^  
+      |         (    )
+06_assignment_condition/broken.c:3:11: note: use '==' to turn this assignment into an equality comparison
+    3 |     if (n = 3) return 0;
+      |           ^
+      |           ==
+1 warning generated.

@@ -1,0 +1,7 @@
+12_missing_return/broken.c:3:1: warning: non-void function does not return a value in all control paths [-Wreturn-type]
+    2 |     if (ready) return 1;
+      |         ~~~~~ (1) 'ready' is false
+    3 | }
+      | ^ (2) 'choose' ends here without a return
+      = help: 'choose' returns 'int': end it with a return statement
+1 warning generated.
