@@ -37,6 +37,11 @@ static uint32_t em_sibling_value(cc *c, em_sibling_state *s, uint32_t n)
  if (x->op == N_NUM) {
   key.operation = 1;
   key.immediate = (uint64_t)em_trunc_to(c, c->ipool[x->a], x->ty);
+ } else if (x->op == N_CAST && (x->aux == CK_INT || x->aux == CK_NOP || x->aux == CK_BOOL)) {
+  left = em_sibling_value(c, s, x->a);
+  if (!left) return 0;
+  key.operation = UINT32_C(0x80000000) | x->aux;
+  key.left = left;
  } else if (x->op == N_BINARY && (x->aux == T_PLUS || x->aux == T_MINUS || x->aux == T_STAR ||
                                   x->aux == T_AMP || x->aux == T_PIPE || x->aux == T_CARET)) {
   left = em_sibling_value(c, s, x->a);
@@ -136,6 +141,19 @@ VPRIV bool em_decl_reuse_values(ecx *e, uint32_t decl, uint32_t consumer,
       sym_attrs(c, r->a)->cleanup || sym_attrs(c, r->a)->asmname || !r->b ||
       QUNQ(out->ty) != QUNQ(N(r->b)->ty)) return false;
   expr = r->b;
+ } else if (r->op == N_EXPR && r->a) {
+  const node *assign = N(r->a), *lhs;
+  const sym *out;
+  if (assign->op != N_ASSIGN || !assign->a || !assign->b ||
+      (assign->aux && assign->aux != T_PLUS && assign->aux != T_MINUS && assign->aux != T_STAR &&
+       assign->aux != T_AMP && assign->aux != T_PIPE && assign->aux != T_CARET)) return false;
+  lhs = N(assign->a);
+  if (lhs->op != N_VAR) return false;
+  out = &c->syms[lhs->a];
+  if (!is_local_var(c, lhs->a) || out->kind != S_VAR || out->sc == SC_STATIC || out->sc == SC_EXTERN ||
+      (out->flags & SF_ADDR_TAKEN) || (QQ(out->ty) & Q_VOLATILE) || (T(c, out->ty)->flags & TF_ATOMIC) ||
+      sym_attrs(c, lhs->a)->asmname || QUNQ(out->ty) != QUNQ(N(assign->b)->ty)) return false;
+  expr = assign->b;
  } else return false;
  if (!expr || N(expr)->op != N_BINARY) return false;
  /* Common two-variable expressions need no table when an operand was written. */
@@ -216,7 +234,14 @@ VPRIV bool em_block_value_reuse(ecx *e, const node *block, uint32_t first, uint3
  uint32_t consumer, count = 0, killed[8], writes[8], nkilled = 0;
  if (!e->E->o->opt || e->E->noopt || i <= first) return false;
  consumer = c->lists[block->b + i];
- if (N(consumer)->op != N_RETURN && N(consumer)->op != N_DECL) return false;
+ if (N(consumer)->op == N_EXPR) {
+  const node *stmt = N(consumer), *assign, *rhs;
+  if (!stmt->a || N(stmt->a)->op != N_ASSIGN) return false;
+  assign = N(stmt->a);
+  if (!assign->b || N(assign->b)->op != N_BINARY) return false;
+  rhs = N(assign->b);
+  if (N(rhs->a)->op != N_BINARY && N(rhs->b)->op != N_BINARY) return false;
+ } else if (N(consumer)->op != N_RETURN && N(consumer)->op != N_DECL) return false;
  while (i > first && count++ < 8) {
   uint32_t prev = c->lists[block->b + --i];
   if (N(prev)->op == N_EXPR) {
