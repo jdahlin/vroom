@@ -92,7 +92,19 @@ static bool x64_cls(cc *c, qty t, uint64_t off, int cls[2])
 	return true;
 }
 
+VPRIV void x64_classify0(ecx *e, qty t, wkarg *a);
+
+/* -mgeneral-regs-only, -mno-sse: no value may travel in a vector or x87 register */
 VPRIV void x64_classify(ecx *e, qty t, wkarg *a)
+{
+	x64_classify0(e, t, a);
+	if (e->c->o->general_regs_only && a->mem && a->up)
+		a->up = false;	/* a 32-byte vector: returned in memory, not xmm0:xmm1 */
+	if (e->c->o->general_regs_only && (a->x87 || (!a->mem && a->n && (a->cls[0] == WA_SSE || (a->n > 1 && a->cls[1] == WA_SSE)))))
+		x64_nofp(e);
+}
+
+VPRIV void x64_classify0(ecx *e, qty t, wkarg *a)
 {
 	cc *c = e->c;
 	uint64_t size = tsize(c, t);
@@ -366,6 +378,8 @@ VPRIV void x64_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic)
 
 			x64_mem(e, X_ST, 8, x64_argreg(k), &d, false);
 		}
+		if (e->c->o->general_regs_only)
+			return;	/* no vector registers to save (-mgeneral-regs-only, -mno-sse): as clang */
 		x64_op3(e, X_TEST, 1, XNOREG, RAX, XNOREG);
 		j = x64_put(e, X_JCC);
 		j->cond = CC_E;

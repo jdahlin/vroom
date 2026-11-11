@@ -42,6 +42,17 @@ typedef struct wkloop { uint32_t brk, cont; int cdepth; } wkloop;	/* cdepth: the
 #define WK_MAXCLEAN 1024
 typedef struct wkcase { i128 lo, hi; uint32_t node; } wkcase;
 
+/* an inlined call: where its returns go */
+typedef struct wkinl {
+	struct wkinl *up;
+	uint32_t fn, endlbl, inst;
+	qty rty;
+	int32_t rslot;		/* the result's slot (a value held by address: its object) */
+	int cbase;		/* the cleanups live at the call */
+	bool any, cst_ok;	/* a return seen; every return so far the constant cst */
+	val cst;
+} wkinl;
+
 typedef struct wkst {
 	int32_t foff;		/* bytes of locals below the frame base so far */
 	uint32_t falign;
@@ -70,9 +81,20 @@ typedef struct wkst {
 	struct { uint32_t sym, parent; } cn[WK_MAXCLEAN];
 	uint32_t ncn;
 	uint32_t *csn, *csg, *lcn, *lcg;
+	/* constants: a local or parameter never written (or only ever assigned its initial
+	   constant) is that constant, bound per sym when kgen == gen */
+	uint32_t *kgen;
+	val *kval;
+	/* inlining: the copy being generated (0: the function itself), labels per copy */
+	uint32_t inst, ninst, *linst, *cinst;
+	struct wkinl *inl;	/* the innermost inlined call, NULL in the function itself */
+	int depth;
 } wkst;
 
 VPRIV wkst *wk_state(ecx *e);
+VPRIV bool wk_const_sym(ecx *e, uint32_t s, val *v);	/* s is bound to the constant *v */
+VPRIV val wk_inline(ecx *e, uint32_t n, uint32_t s);	/* the call n to s, inlined (wk_can_inline) */
+VPRIV bool wk_can_inline(ecx *e, uint32_t s);
 VPRIV void wk_function(ecx *e, uint32_t s);	/* emit/walk/func.c: what emit/tu.c calls for x86-64 */
 VPRIV int32_t wk_slot(ecx *e, uint64_t size, uint32_t align);
 VPRIV int32_t wk_local(ecx *e, uint32_t s);	/* a local's slot, made on first use (a goto may reach a use first) */
@@ -87,6 +109,8 @@ VPRIV void wk_init(ecx *e, const lval *dst, qty t, uint32_t init);
 VPRIV void wk_bfinit(ecx *e, const lval *l, qty t, uint32_t init);	/* a bit-field initialized */	/* an object initialized by init (0: none) */
 VPRIV int wk_size(cc *c, qty t);
 VPRIV bool wk_mem(ecx *e, qty t);	/* values of t are held by address (records, arrays, x87 long double) */
+VPRIV val wk_reload(ecx *e, const lval *l, qty t);	/* l's value again (a new register or address) */
+VPRIV val wk_putmem(ecx *e, lval *l, qty t, val v);	/* v's bytes (held by address) into l: l's address */
 VPRIV void ctor_entry(cc *c, tbuf *b, uint32_t s, bool fini);	/* arch/a64/emit/func.c (shared) */
 VPRIV bool wk_signed(cc *c, qty t);
 VPRIV void wk_vla_fix(ecx *e, qty t, bool pure);	/* the VLA sizes in t evaluated now, into slots */
