@@ -50,4 +50,3 @@ VPRIV bool wterm(cc *c, uint32_t n)
 		return false;
 	}
 }
-

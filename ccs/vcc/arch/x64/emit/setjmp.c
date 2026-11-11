@@ -61,4 +61,3 @@ VPRIV void x64_longjmp(ecx *e, int rb)
 	x64_op3(e, X_JMPR, 8, XNOREG, R11, XNOREG);
 	x64_tfree(e, rb);
 }
-
