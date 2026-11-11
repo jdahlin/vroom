@@ -6,6 +6,7 @@ unsigned lvr_shift(unsigned a, unsigned b) { return (a << b) * (a << b); }
 unsigned long long lvr_shift64(unsigned long long a, unsigned b) { return (a >> b)*(a >> b); }
 unsigned lvr_shift_decl(unsigned a, unsigned b) { unsigned x=a >> b; return x+(a >> b); }
 unsigned lvr_shift_kill(unsigned a, unsigned b) { unsigned x=a >> b; b++; return x+(a >> b); }
+unsigned lvr_shift_different(unsigned a, unsigned b, unsigned c) { return (a << b) - (a << c); }
 unsigned lvr_shift_order(unsigned a, unsigned b) { return (a << b)-(b << a); }
 unsigned lvr_shift_volatile(unsigned a) { return (a << observed)*(a << observed); }
 int lvr_shift_signed(int a, unsigned b) { int x=a >> b; return x+(a >> b); }
@@ -62,7 +63,7 @@ int main(void)
 {
  unsigned v = 3, w = 5;
  if (lvr_shift(3, 2) != 144 || lvr_shift64(1ULL << 40, 20) != (1ULL << 40) || lvr_shift_decl(20, 2) != 10 || lvr_shift_kill(20, 2) != 7 ||
-     lvr_shift_order(3, 2) != (12U-16U) || lvr_shift_signed(-20, 2) != -10 ||
+     lvr_shift_different(3, 2, 1) != 6 || lvr_shift_order(3, 2) != (12U-16U) || lvr_shift_signed(-20, 2) != -10 ||
      lvr_square(2, 3) != 25 || lvr_reuse(2, 3) != 25 || lvr_commute(3, 4) ||
      lvr_nested(2, 3, 4) != 4 || lvr_distinct(5, 2) != (3U * (0U-3U)) ||
      lvr_cmp_order(1, 2) != 1 || lvr_cmp_order(2, 1) != ~0U || lvr_cmp_repeat(1, 2) ||

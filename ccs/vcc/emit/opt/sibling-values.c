@@ -97,6 +97,12 @@ VPRIV bool em_sibling_values(ecx *e, uint32_t n)
  a = N(x->a); b = N(x->b);
  if (a->op != N_BINARY || b->op != N_BINARY || QUNQ(a->ty) != QUNQ(x->ty) ||
      QUNQ(b->ty) != QUNQ(x->ty) || c->nsym >= UINT32_MAX - 32) return false;
+ /* Distinct local operands of ordered shifts cannot have the same value ID.
+  * Avoid constructing a value table for this common failed candidate. */
+ if (a->aux == b->aux && (a->aux == T_LESSLESS || a->aux == T_GREATERGREATER) &&
+     N(a->a)->op == N_VAR && N(a->b)->op == N_VAR &&
+     N(b->a)->op == N_VAR && N(b->b)->op == N_VAR &&
+     (N(a->a)->a != N(b->a)->a || N(a->b)->a != N(b->b)->a)) return false;
  return em_sibling_match(c, x->a, x->b);
 }
 
