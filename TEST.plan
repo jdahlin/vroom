@@ -586,6 +586,13 @@ vendorerade körsvit **1883/1883**, 126 undantag. Wasm64 klarar **1825/1825**,
 och identiska backendfel utan direktivet förblir fel. Alla oväntade
 Wasm-utfall skriver nu testnamnet även utan verbose-läge.
 
+Efter merge av `main` (`9d022c3`) passerar samma rigg `62390af`
+**1895/1895 ARM** (177 egna prov, 126 explicita undantag) och
+**1839/1839 Wasm64** (140 egna prov, 34 körda XFAIL, 148 undantag).
+Ingen oväntad failure, XPASS eller orakelfel rapporteras. De 35
+checkout-grupperna samt verkliga ARM-undantagsprober och native stdio
+passerar också. Loggar: `work/results/pr37-merged-{arm,wasm}.log`.
+
 Kvar:
 - Alla återstående matchande filer och optimeringskonfigurationer; nästlade
   kataloger med egna `.exp`-drivrutiner och LTO har ännu ingen motsvarighet.
