@@ -327,6 +327,14 @@ inkrement och grannfält, inklusive objekt mot en skyddssida. Unity/nonunity
 och riktade runtime-prov vid -O0/-O2 går grönt på båda målen. De fulla
 baslinjesiffrorna ovan gäller fortfarande före denna rättning.
 
+VLA-`sizeof` tappar inte längre operandens biverkningar: alla tre
+emittervägarna evaluerar arrayadressoperanden, och prepass besöker den och
+VLA-gränserna så konstantlokaloptimering inte använder gamla värden.
+`typename-vla-{1,2}` och `vla-stexp-9` går nu på båda Linux-målen.
+Regressionen täcker komma, pekarinkrement och statement expressions,
+inklusive att fast `sizeof` förblir oevaluerad. Unity/nonunity samt
+-O0/-O2 körprov går grönt; sex andra fall i VLA-klustret återstår.
+
 Kvar:
 - Alla återstående matchande filer och optimeringskonfigurationer; nästlade
   kataloger med egna `.exp`-drivrutiner och LTO har ännu ingen motsvarighet.

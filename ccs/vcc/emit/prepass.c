@@ -290,8 +290,14 @@ static int walk(pre *P, uint32_t n)
 				P->E->sflags[P->fn] |= SA_NOINL;
 		}
 		return false;
-	case N_NUM: case N_FNUM: case N_STR: case N_ZERO: case N_SIZEOF_VLA:
+	case N_NUM: case N_FNUM: case N_STR: case N_ZERO:
 		return false;
+	case N_SIZEOF_VLA:
+		lab = walk(P, x->a);
+		for (qty t = x->b; is_array(c, t); t = T(c, t)->base)
+			if ((T(c, t)->flags & TF_VLA) && T(c, t)->n)
+				lab |= walk(P, T(c, t)->n);
+		break;
 	case N_LABELADDR:
 		P->E->lref[x->a] |= LR_REF | LR_BACK;
 		return false;

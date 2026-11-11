@@ -2646,6 +2646,11 @@ static val wk_gen_inner(ecx *e, uint32_t n)
 			LO(load)(e, r, &l, 8, false);
 			return wk_vreg(r);
 		}
+		if (x->a) {
+			val operand = wk_gen(e, x->a);
+
+			wk_free(e, &operand);
+		}
 		return wk_vla_bytes(e, x->b);
 	case N_CPLX: {
 		/* a _Complex value from its parts: both into a temporary object, its address */

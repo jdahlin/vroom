@@ -1978,6 +1978,7 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 		wpconst(e, (int64_t)x->a + 1);
 		return WPT(c);
 	case N_SIZEOF_VLA:
+		if (x->a) wexpr(e, x->a, false);
 		wvla_bytes(e, x->b);
 		wconv(e, prim(TY_ULONG), x->ty);
 		return k;

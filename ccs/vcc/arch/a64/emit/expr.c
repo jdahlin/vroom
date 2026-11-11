@@ -1183,6 +1183,11 @@ static val gen_inner(ecx *e, uint32_t n)
 			mem(e, I_LD, 3, 0, r, FRAME, binding(e, N(x->a)->a)->slot + 16);
 			return vreg(r);
 		}
+		if (x->a) {
+			val operand = gen(e, x->a);
+
+			val_free(e, &operand);
+		}
 		return vla_bytes(e, x->b);
 	}
 	default:
