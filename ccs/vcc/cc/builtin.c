@@ -101,6 +101,9 @@ static const builtin builtins[] = {
 	{ "__builtin_isfinite", BI_ISFINITE, 1, "i." }, { "__builtin_signbit", BI_SIGNBIT, 1, "i." },
 	{ "__builtin_fpclassify", BI_FPCLASSIFY, 1, "i." }, { "__builtin_isinf_sign", BI_ISINF_SIGN, 1, "i." },
 	{ "__builtin_isnormal", BI_ISNORMAL, 1, "i." },
+	{ "__builtin_isfpclass", BI_ISFPCLASS, 1, "i." },
+	{ "__builtin_issubnormal", BI_ISSUBNORMAL, 1, "i." },
+	{ "__builtin_iszero", BI_ISZERO, 1, "i." },
 	{ "__builtin_isgreater", BI_ISGREATER, 1, "i." }, { "__builtin_isgreaterequal", BI_ISGREATEREQUAL, 1, "i." },
 	{ "__builtin_isless", BI_ISLESS, 1, "i." }, { "__builtin_islessequal", BI_ISLESSEQUAL, 1, "i." },
 	{ "__builtin_islessgreater", BI_ISLESSGREATER, 1, "i." }, { "__builtin_isunordered", BI_ISUNORDERED, 1, "i." },
@@ -459,6 +462,24 @@ VPRIV bool eval_builtin(cc *c, const node *x, cval *v)
 			payload |= (u128)1 << (p - 1);
 		v->q = (u128)0x7fff << 112 | payload << (112 - p);
 		v->kind = CV_FLT, v->ld = true, v->f = q_to_d(v->q), v->ice = false;
+		return true;
+	}
+	case BI_ISNAN: case BI_ISINF: case BI_ISFINITE: case BI_ISNORMAL: case BI_SIGNBIT: {
+		if (!eval(c, arg[0], &a) || a.kind != CV_FLT)
+			return false;
+		u128 q = a.ld ? a.q : q_of_d(a.f);
+		unsigned exponent = (unsigned)(q >> 112) & 0x7fff;
+		int kind = KIND(c, N(arg[0])->ty);
+		unsigned minimum = kind == TY_FLOAT16 ? 16383 - 14 : kind == TY_FLOAT || kind == TY_BFLOAT16 ? 16383 - 126 :
+		                   kind == TY_DOUBLE || c->o->target == PP_DARWIN ? 16383 - 1022 : 1;
+		switch (x->aux) {
+		case BI_ISNAN: v->i = q_isnan(q); break;
+		case BI_ISINF: v->i = q_isinf(q); break;
+		case BI_ISFINITE: v->i = exponent != 0x7fff; break;
+		case BI_ISNORMAL: v->i = exponent >= minimum && exponent != 0x7fff; break;
+		default: v->i = q >> 127; break;
+		}
+		v->ice = false;
 		return true;
 	}
 	case BI_ISSIGNALING:
@@ -1001,6 +1022,81 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 	qty rt = sigtype(c, b->sig[0]);
 
 	switch (b->id) {
+	case BI_ISFPCLASS: case BI_ISSUBNORMAL: case BI_ISZERO: {
+		i128 mask = b->id == BI_ISSUBNORMAL ? 144 : 96;
+		unsigned nargs = b->id == BI_ISFPCLASS ? 2 : 1;
+		uint32_t pre;
+
+		args_list(c, &args);
+		if (args.n != nargs) {
+			arity(c, loc, nargs, &args);
+			return err_node(c, loc);
+		}
+		if (!is_float(c, N(args.v[0])->ty)) {
+			cc_error(c, N(args.v[0])->loc, "floating point classification requires argument of floating point type (passed in '%s')",
+			         tyname(c, N(args.v[0])->ty));
+			return err_node(c, loc);
+		}
+		if (b->id == BI_ISFPCLASS && !const_int(c, args.v[1], &mask)) {
+			cc_error(c, loc, "argument to '%s' must be a constant integer", b->name);
+			return err_node(c, loc);
+		}
+		if (mask < 0 || mask > 1023) {
+			cc_error(c, loc, "argument value %lld is outside the valid range [0, 1023]", (long long)mask);
+			return err_node(c, loc);
+		}
+		uint32_t a = cplx_reuse(c, rvalue(c, args.v[0]), &pre);
+		vec unary = {0};
+		vpush(c, &unary, rvalue(c, a));
+		uint32_t sign = mk_builtin(c, BI_SIGNBIT, prim(TY_INT), loc, &unary);
+		/* Each pair is the negative/positive membership bit, except NaNs,
+		 * whose class is determined by the quiet bit rather than their sign. */
+		const int bits[5][2] = {{0,1}, {2,9}, {3,8}, {4,7}, {5,6}};
+		uint32_t member[5];
+		for (int i = 0; i < 5; i++) {
+			uint32_t neg = mk_int(c, !!(mask & ((i128)1 << bits[i][0])), prim(TY_INT), loc);
+			uint32_t pos = mk_int(c, !!(mask & ((i128)1 << bits[i][1])), prim(TY_INT), loc);
+			uint32_t cond = i ? sign : mk_builtin(c, BI_ISSIGNALING, prim(TY_INT), loc, &unary);
+			member[i] = conditional(c, cond, neg, pos, loc);
+		}
+		uint32_t n = conditional(c, a, member[3], member[4], loc);
+		const int ids[] = {BI_ISNAN, BI_ISINF, BI_ISNORMAL};
+		for (int i = 2; i >= 0; i--)
+			n = conditional(c, mk_builtin(c, ids[i], prim(TY_INT), loc, &unary), member[i], n, loc);
+		return with_pre(c, pre, n);
+	}
+	case BI_FPCLASSIFY: {
+		uint32_t saved[6], pre[6];
+
+		args_list(c, &args);
+		if (args.n != 6) {
+			arity(c, loc, 6, &args);
+			return err_node(c, loc);
+		}
+		if (!is_float(c, N(args.v[5])->ty)) {
+			cc_error(c, N(args.v[5])->loc, "floating point classification requires argument of floating point type (passed in '%s')",
+			         tyname(c, N(args.v[5])->ty));
+			return err_node(c, loc);
+		}
+		for (int i = 0; i < 6; i++) {
+			uint32_t a = rvalue(c, args.v[i]);
+			if (i < 5)
+				a = convert(c, a, prim(TY_INT));
+			saved[i] = cplx_reuse(c, a, &pre[i]);
+		}
+		/* Match clang's classification tree: save the operand once, test zero,
+		 * then NaN and infinity, and finally distinguish normal/subnormal.
+		 * A class code is evaluated as its corresponding test is reached. */
+		vec unary = {0};
+		vpush(c, &unary, rvalue(c, saved[5]));
+		uint32_t n = conditional(c, mk_builtin(c, BI_ISNORMAL, prim(TY_INT), loc, &unary), saved[2], saved[3], loc);
+		n = with_pre(c, pre[2], with_pre(c, pre[3], n));
+		const int ids[] = {BI_ISNAN, BI_ISINF};
+		for (int i = 1; i >= 0; i--)
+			n = with_pre(c, pre[i], conditional(c, mk_builtin(c, ids[i], prim(TY_INT), loc, &unary), saved[i], n, loc));
+		n = with_pre(c, pre[4], conditional(c, saved[5], n, saved[4], loc));
+		return with_pre(c, pre[5], n);
+	}
 	case BI_CHOOSE: {
 		uint32_t cond, x, y;
 		i128 v = 0;
