@@ -49,7 +49,7 @@ def check_strlen_offset(assembly, arch):
         text = body(assembly, name, wasm)
         if re.search(r'\b(?:callq?|bl)\s+strlen\b|\bcall\s+strlen\b', text):
             raise RuntimeError(f'{name}: literal offset left a strlen call\n{text}')
-    for name in ['sl_oob', 'sl_negative']:
+    for name in ['sl_oob', 'sl_negative', 'sl_scaled', 'sl_non_ice']:
         text = body(assembly, name, wasm)
         if not re.search(r'\b(?:callq?|bl)\s+strlen\b|\bcall\s+strlen\b', text):
             raise RuntimeError(f'{name}: invalid offset must retain the call\n{text}')
