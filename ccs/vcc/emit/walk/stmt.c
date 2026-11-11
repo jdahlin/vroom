@@ -1388,7 +1388,7 @@ VPRIV val wk_inline(ecx *e, uint32_t n, uint32_t s)
 		for (uint32_t i = 0; i < body->aux; i++) {
 			uint32_t p = c->lists[body->a + i];
 			qty pt = c->syms[p].ty;
-			lval l = { .k = L_FRAME, .off = wk_local(e, p), .align = sym_align(c, p) }, t = { .k = L_FRAME, .off = as[i], .align = 8 };
+			lval l, t = { .k = L_FRAME, .off = as[i], .align = 8 };
 			val v;
 
 			if (!as[i] && !(e->E->sflags[p] & (SA_WRITTEN | SA_CWRITE)) && !(QQ(pt) & Q_VOLATILE) &&
@@ -1397,6 +1397,12 @@ VPRIV val wk_inline(ecx *e, uint32_t n, uint32_t s)
 				W->kval[p] = av[i].k == V_ADDR ? av[i] : vconst(em_trunc_to(c, av[i].i, pt));
 				continue;
 			}
+			/* the home the copy's body reads: a lowering's variable of the copy's own instance
+			   (VIR), else the frame slot */
+			W->inst = W->ninst + 1;
+			if (!LO(local)(e, p, &l))
+				l = (lval){ .k = L_FRAME, .off = wk_local(e, p), .align = sym_align(c, p) };
+			W->inst = inst0;
 			W->kgen[p] = 0;
 			if ((av[i].k == V_CONST || (av[i].k == V_ADDR && is_ptr(c, pt) && !wk_weak0(c, av[i]))) && !wk_mem(e, pt) &&
 			    !is_flt(c, pt) && W->npk < 16) {

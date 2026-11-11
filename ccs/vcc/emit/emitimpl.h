@@ -769,6 +769,8 @@ VPRIV void classify(ecx *e, qty t, int *ngrn, int *nsaa, abiarg *a);
 VPRIV void spill_live(ecx *e, spill *s);
 VPRIV void unspill(ecx *e, const spill *s);
 VPRIV void call_fixed(ecx *e, int fn, int a0, int a1, int a2, int64_t n);
+VPRIV void finish_function(ecx *e, uint32_t s);	/* arch/a64/emit/func.c: optimise, lay out and print the records */
+VPRIV bool sym_needs_got(cc *c, uint32_t ref);
 /* bind.c */
 static inline int64_t keep_cl(const ecx *e, int64_t mark);
 static inline int X(cc *c, qty t);
@@ -889,6 +891,7 @@ VPRIV void wasm_emit_function(ecx *e, uint32_t s);
 VPRIV void wasm_ecx_free(ecx *e);
 VPRIV void wk_function(ecx *e, uint32_t s);
 VPRIV void wk_ecx_free(ecx *e);
+VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why);	/* emit/vir/a64.c: the built VIR as arm64 records */
 VPRIV bool vw_try(ecx *e, uint32_t s);	/* emit/vir/: s through VIR (VCC_VIR); false: emit it as before */
 VPRIV void vw_wk_ecx_free(ecx *e);
 VPRIV void wasm_data_ref(ecx *e, uint32_t ref);

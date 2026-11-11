@@ -19,6 +19,7 @@ typedef struct vwb {
 	uint32_t pred, npred;	/* predecessors: vwst.pr[pred..pred+npred), distinct */
 	uint32_t fin;		/* final block id, VW_NOBLK unreachable */
 	uint8_t fall, reach;
+	uint8_t def;		/* a variable is written in it: not empty, whatever its instructions */
 } vwb;
 
 typedef struct vwh { uint64_t key; uint32_t v; } vwh;	/* (block, variable) -> current definition */

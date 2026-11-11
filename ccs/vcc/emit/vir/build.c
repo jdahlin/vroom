@@ -240,6 +240,7 @@ static uint32_t vw_find(vwst *V, uint32_t v)
 static void vw_write(ecx *e, uint32_t var, uint32_t b, uint32_t v)
 {
 	*vw_hslot(e, b, var, true) = v;
+	e->vw->b[b].def = 1;
 }
 
 /* the type a parameter of var gets when its value has type ty */
@@ -1320,7 +1321,7 @@ static uint32_t vw_group(const wkarg *a, uint32_t *w)
 	uint32_t pc = a->cls[0] == WA_SSE ? (a->size == 4 ? VC_F32 : VC_F64) : VC_INT;
 
 	w[0] = VG_WORD0(VG_REG, 1, pc, 0, 0, 0, a->unnamed ? VG_UNNAMED : 0);
-	w[1] = 0;
+	w[1] = VG_WORD1(a->size, 0);	/* (the size: Apple packs stack arguments) */
 	return pc;
 }
 
@@ -1438,17 +1439,26 @@ VPRIV void vw_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic)
 		vw_fail(e, "VIR: a record result");
 	if (variadic)
 		vw_fail(e, "VIR: a variadic function");
+	uint32_t pv0 = V->np;	/* the params first (SPEC 15.2: the allocator reads them from the ABI registers) */
+
 	for (int k = 0; k < n; k++) {
 		uint32_t sym = c->lists[body->a + (uint32_t)k];
 		qty ty = c->syms[sym].ty;
 		uint32_t pc = a[k].cls[0] == WA_SSE ? (a[k].size == 4 ? VC_F32 : VC_F64) : VC_INT;
-		uint32_t pty = pc == VC_INT && is_ptr(c, ty) ? VT_PTR : vw_pcty(pc);
-		uint32_t v = vw_ins(e, VO_PARAM, pty, 0, (uint32_t)k, 0, 0);
-		lval home;
-		int q;
 
 		if (a[k].mem || a[k].n != 1)
 			vw_fail(e, "VIR: a record parameter");
+		if (vw_ins(e, VO_PARAM, pc == VC_INT && is_ptr(c, ty) ? VT_PTR : vw_pcty(pc), 0, (uint32_t)k, 0, 0) != pv0 + (uint32_t)k)
+			vw_fail(e, "VIR: parameters");
+	}
+	for (int k = 0; k < n; k++) {
+		uint32_t sym = c->lists[body->a + (uint32_t)k];
+		qty ty = c->syms[sym].ty;
+		uint32_t pc = a[k].cls[0] == WA_SSE ? (a[k].size == 4 ? VC_F32 : VC_F64) : VC_INT;
+		uint32_t v = pv0 + (uint32_t)k;
+		lval home;
+		int q;
+
 		q = pc == VC_INT ? vw_treg(e) : vw_ftreg(e);
 		vw_set(e, q, v);
 		if (pc == VC_INT && wk_size(c, ty) == 4)
@@ -1618,7 +1628,7 @@ static void vw_thread(ecx *e)
 			for (int hop = 0; hop < 64; hop++) {
 				vwb *q = &V->b[*t];
 
-				if (*t == 0 || q->head || q->phead || !q->term || V->p[q->term].in.op != VO_BR || V->p[q->term].in.a == *t)
+				if (*t == 0 || q->head || q->phead || q->def || !q->term || V->p[q->term].in.op != VO_BR || V->p[q->term].in.a == *t)
 					break;
 				*t = V->p[q->term].in.a;
 			}

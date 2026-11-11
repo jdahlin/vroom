@@ -297,7 +297,7 @@ static void expand_tables(ecx *e, uint32_t fid)
 	e->nin = (uint32_t)total;
 }
 
-static void finish_function(ecx *e, uint32_t s)
+VPRIV void finish_function(ecx *e, uint32_t s)
 {
 	cc *c = e->c;
 	tbuf *b = &e->out;
