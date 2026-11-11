@@ -330,6 +330,18 @@ kärnan och kan vänta.
 
 ## Status
 
+### X4 (2026-11-11): påbörjat, vikningar i vandraren
+
+- `wk_cond` och `if`/`?:` använder arm64:s formvikningar (`cond_fold`: x >> 0 != x,
+  x < y && x > y, intervall); ett villkor som alltid hoppar gör grenen död
+  (`wkst.cjump`), och `?:` med känt villkor (efter inlining) genererar en arm.
+- 0 << x, 0 >> x, -1 >> x viks; laster av const-globaler (heltal, och (int) av
+  en const double) viks som arm64:s `const_global`.
+- `vcc-x86.py -j 6`: 1774/1776 (var 1768); --pic samma, --objcmp 1846/1846,
+  --fpcheck 1908/1908, vcc-abi x86_64 12/12.  Kvar: pure-1 (lagring→last-
+  vidarebefordran genom pure-anrop: ett pass på records, som arm64:s opt.c),
+  20030125-1 (floor→floorf).
+
 ### X7 (2026-11-11): vlink för x86-64, statiska länkar klara
 
 - `arch/x64/ld/x64.inc` (inkluderas av `ld/ld.c`): relokeringsskanning och

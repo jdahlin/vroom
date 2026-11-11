@@ -89,6 +89,7 @@ typedef struct wkst {
 	uint32_t inst, ninst, *linst, *cinst;
 	struct wkinl *inl;	/* the innermost inlined call, NULL in the function itself */
 	int depth;
+	bool cjump;	/* wk_cond jumped whatever the condition (N_IF: the branch it skips is dead) */
 } wkst;
 
 VPRIV wkst *wk_state(ecx *e);

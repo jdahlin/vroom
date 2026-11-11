@@ -633,6 +633,12 @@ static val wk_arith(ecx *e, int op, qty t, val a, val b)
 		return LO(wbin)(e, op, wk_signed(c, t), a, b);
 	if (a.k == V_CONST && b.k == V_CONST && wk_fold(c, op, t, a.i, b.i, &r))
 		return vconst(r);
+	/* 0 << x, 0 >> x, -1 >> x (signed): the constant, whatever x is (as arm64) */
+	if ((op == T_LESSLESS || op == T_GREATERGREATER) && a.k == V_CONST && b.k != V_CONST &&
+	    (em_trunc_to(c, a.i, t) == 0 || (op == T_GREATERGREATER && wk_signed(c, t) && em_trunc_to(c, a.i, t) == -1))) {
+		wk_free(e, &b);
+		return vconst(em_trunc_to(c, a.i, t));
+	}
 	if (a.k == V_ADDR && b.k == V_CONST && (op == T_PLUS || op == T_MINUS))
 		return (val){ .k = V_ADDR, .ref = a.ref, .i = op == T_PLUS ? a.i + b.i : a.i - b.i };
 	{
@@ -1015,16 +1021,44 @@ static val wk_ternary(ecx *e, uint32_t n)
 		LO(brz)(e, a, opw(c, N(x->a)->ty), false, lf);
 		LO(jump)(e, lj);
 	} else {
-		wk_cond(e, x->a, false, lf);
-		v = wk_gen(e, x->b);
-		if (vd) {
-			wk_free(e, &v);
-		} else {
+		int k = -1;
+
+		/* a condition known here (after inlining, or from its form): one arm only, as
+		   clang -O2 (an error() call or a link_error in the other is gone) */
+		if (!(e->E->nflags[x->b] & NA_LABEL) && !(e->E->nflags[x->c] & NA_LABEL)) {
+			k = cond_fold(e, x->a);
+			if (k < 0 && !side_effects(c, x->a) && wk_isconst(e, x->a)) {
+				val kv = wk_conv(e, wk_gen(e, x->a), N(x->a)->ty, prim(TY_BOOL));
+
+				k = kv.k == V_CONST ? kv.i != 0 : (wk_free(e, &kv), -1);
+			}
+		}
+		if (k >= 0) {
+			v = wk_gen(e, k ? x->b : x->c);
+			if (vd)
+				return wk_free(e, &v), vconst(0);
 			r = wk_reg(e, &v, t);
 			LO(store)(e, r, &l, 8);
 			LO(tfree)(e, r);
+			r = wk_treg(e, t);
+			LO(load)(e, r, &l, 8, false);
+			return wk_vreg(r);
 		}
-		LO(jump)(e, lj);
+		wk_state(e)->cjump = false;
+		wk_cond(e, x->a, false, lf);
+		if (wk_state(e)->cjump) {	/* (false whatever its operands: b is dead) */
+			wk_state(e)->cjump = false;
+		} else {
+			v = wk_gen(e, x->b);
+			if (vd) {
+				wk_free(e, &v);
+			} else {
+				r = wk_reg(e, &v, t);
+				LO(store)(e, r, &l, 8);
+				LO(tfree)(e, r);
+			}
+			LO(jump)(e, lj);
+		}
 	}
 	LO(label)(e, lf);
 	v = wk_gen(e, x->c);
@@ -2252,6 +2286,20 @@ static val wk_builtin(ecx *e, uint32_t n)
 
 /* ---------------- expressions ---------------- */
 
+/* a const (not volatile) global with a constant initializer: its value (arm64's const_global) */
+static bool wk_global_cv(ecx *e, uint32_t s, cval *cv)
+{
+	cc *c = e->c;
+	const sym *y;
+
+	s = canon_sym(c, s);
+	y = &c->syms[s];
+	return y->kind == S_VAR && !is_local_var(c, s) && (QQ(y->ty) & (Q_CONST | Q_VOLATILE)) == Q_CONST &&
+	       (is_integer(c, y->ty) || (is_flt(c, y->ty) && tsize(c, y->ty) != 2)) && !wk_wide(c, y->ty) &&
+	       y->body && N(y->body)->op != N_INIT && cc_eval(c, y->body, cv) &&
+	       cv->kind == (is_integer(c, y->ty) ? CV_INT : CV_FLT);
+}
+
 VPRIV val wk_gen(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
@@ -2281,6 +2329,12 @@ VPRIV val wk_gen(ecx *e, uint32_t n)
 			if (wk_const_sym(e, x->a, &k))
 				return k;
 		}
+		{
+			cval cv;
+
+			if (is_integer(c, x->ty) && wk_global_cv(e, x->a, &cv))
+				return vconst(em_trunc_to(c, cv.i, x->ty));
+		}
 		wk_scalar(e, n, x->ty);
 		return wk_load(e, wk_lval(e, n), x->ty);
 	}
@@ -2309,8 +2363,20 @@ VPRIV val wk_gen(ecx *e, uint32_t n)
 			return (val){ .k = V_ADDR, .ref = l.ref, .i = l.off };
 		return wk_vreg(LO(laddr)(e, &l));
 	}
-	case N_CAST:
+	case N_CAST: {
+		cval cv;
+
+		/* (int)k for a const double k = 1.0: folded, as clang -O2 */
+		if (is_integer(c, x->ty) && !wk_wide(c, x->ty) && KIND(c, x->ty) != TY_BOOL && N(x->a)->op == N_VAR &&
+		    is_flt(c, N(x->a)->ty) && !is_ld(c, N(x->a)->ty) && wk_global_cv(e, N(x->a)->a, &cv) &&
+		    cv.f > -9.2e18 && cv.f < 9.2e18) {
+			i128 v = (i128)(int64_t)cv.f;
+
+			if (em_trunc_to(c, v, x->ty) == v)	/* (in range: else UB, left to the code) */
+				return vconst(v);
+		}
 		return wk_cast(e, n);
+	}
 	case N_UNARY:
 		return wk_unary(e, n);
 	case N_BINARY:
@@ -2440,6 +2506,14 @@ VPRIV void wk_cond(ecx *e, uint32_t n, bool jump_if, uint32_t lbl)
 {
 	cc *c = e->c;
 	const node *x = N(n);
+	/* known from its form (x >> 0 != x, x < y && x > y, ...): arm64's folds (cond.c) */
+	int k = cond_fold(e, n);
+
+	if (k >= 0) {
+		if (k == (int)jump_if)
+			LO(jump)(e, lbl), wk_state(e)->cjump = true;	/* (always: what follows is dead) */
+		return;
+	}
 
 	switch (x->op) {
 	case N_LOGAND: case N_LOGOR: {
@@ -2455,6 +2529,7 @@ VPRIV void wk_cond(ecx *e, uint32_t n, bool jump_if, uint32_t lbl)
 			wk_cond(e, x->a, !jump_if, skip);
 			wk_cond(e, x->b, jump_if, lbl);
 			LO(label)(e, skip);
+			wk_state(e)->cjump = false;	/* (skip falls through) */
 		}
 		return;
 	}
@@ -2475,7 +2550,7 @@ VPRIV void wk_cond(ecx *e, uint32_t n, bool jump_if, uint32_t lbl)
 			b = wk_rhs(e, &a, x->b, lt);
 			if (a.k == V_CONST && b.k == V_CONST) {
 				if (wk_fold_cmp(op, wk_signed(c, lt), em_trunc_to(c, a.i, lt), em_trunc_to(c, b.i, lt)) == jump_if)
-					LO(jump)(e, lbl);
+					LO(jump)(e, lbl), wk_state(e)->cjump = true;	/* (always: what follows is dead) */
 				return;
 			}
 			if (!jump_if)
@@ -2513,12 +2588,12 @@ VPRIV void wk_cond(ecx *e, uint32_t n, bool jump_if, uint32_t lbl)
 		}
 		if (v.k == V_CONST) {
 			if ((v.i != 0) == jump_if)
-				LO(jump)(e, lbl);
+				LO(jump)(e, lbl), wk_state(e)->cjump = true;	/* (always: what follows is dead) */
 			return;
 		}
 		if (v.k == V_ADDR && !wk_weak0(c, v)) {
 			if (jump_if)
-				LO(jump)(e, lbl);
+				LO(jump)(e, lbl), wk_state(e)->cjump = true;	/* (always: what follows is dead) */
 			return;
 		}
 		LO(brz)(e, v, is_ptr(c, x->ty) ? 8 : opw(c, x->ty), jump_if, lbl);

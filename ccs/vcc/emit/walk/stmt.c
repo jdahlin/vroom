@@ -574,9 +574,11 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 	case N_IF: {
 		uint32_t lelse = wk_newlabel(e), lend = wk_newlabel(e);
 
-		if (!side_effects(c, x->a) && wk_isconst(e, x->a)) {
+		int kf = cond_fold(e, x->a);	/* (known from its form: x >> 0 != x, ...) */
+
+		if (kf >= 0 || (!side_effects(c, x->a) && wk_isconst(e, x->a))) {
 			/* a constant condition: the other branch only for its labels (dead code, as clang -O2) */
-			val v = wk_conv(e, wk_gen(e, x->a), N(x->a)->ty, prim(TY_BOOL));
+			val v = kf >= 0 ? vconst(kf) : wk_conv(e, wk_gen(e, x->a), N(x->a)->ty, prim(TY_BOOL));
 
 			if (v.k == V_CONST) {
 				bool r0 = e->reach;
@@ -604,7 +606,17 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 			}
 			wk_free(e, &v);
 		}
+		e->wk->cjump = false;
 		wk_cond(e, x->a, false, lelse);
+		if (e->wk->cjump && e->reach && !(e->E->nflags[x->b] & NA_LABEL)) {
+			/* the condition is false whatever its operands (0 << x != 0): the then branch is dead */
+			e->wk->cjump = false;
+			LO(label)(e, lelse);
+			if (x->c)
+				wk_stmt(e, x->c);
+			LO(label)(e, lend);
+			return;
+		}
 		wk_stmt(e, x->b);
 		if (x->c) {
 			LO(jump)(e, lend);
