@@ -1395,6 +1395,10 @@ VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 
 			next(c);
 			need_lvalue(c, n, loc);
+			if (is_complex(c, N(n)->ty)) {
+				n = cplx_incdec(c, n, op, loc);
+				continue;
+			}
 			need_scalar(c, n, "increment");
 			if (is_ptr(c, N(n)->ty) && KIND(c, T(c, N(n)->ty)->base) == TY_SVE)
 				void_ptr_arith(c, N(n)->ty, loc, false);

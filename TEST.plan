@@ -425,6 +425,16 @@ byggsätten, samt faktiskt wasm64-runtime (två VLA-prov). Kernel-sema
 med en VM-typedef kan fortfarande evaluera om dess redan sparade gräns;
 den generella typedef-återanvändningen och inline-alloca är inte färdiga.
 
+`__builtin_complex` konstruerar komplexa tal utan att tappa signed zero,
+NaN-bitar eller argumentbiverkningar. Komplexa `++`/`--` uppdaterar bara
+realdelen med en läsning, en beräkning och en skrivning; imaginärdelen
+bevaras. C2y-läget skiljs från C23 även i replay-cachens nyckel, och
+case ranges accepteras korrekt i C2y. Fyra ursprungliga komplexprov och
+nya regressioner går på båda Linux-målen, unity/nonunity; kernel-sema
+887/887 i båda lägen. Sexton blandade C23/C2y-cachebatcher kontrollerar
+båda varmordningarna och cachevägarna. Atomära komplexa uppdateringar
+avvisas ännu uttryckligen och följs separat i TODO.md.
+
 Kombinerat fryst checkpoint `7afcdea`, före signmask-/typnamnsrättningarna,
 är verifierat i båda byggsätten: **145/145 x86** (fem referensundantag),
 **150/150 ARM/QEMU**, tvåfils-constexpr-ABI samt tre ursprungliga GCC-fall

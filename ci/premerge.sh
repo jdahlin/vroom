@@ -57,6 +57,7 @@ case $JOB in
 arm64)
 	build vcc
 	step ctests       python3 bench/vcc-ctests.py -j "$J"
+	step c2y-cache    python3 bench/vcc-c2y-cache.py
 	step diag         python3 bench/vcc-diag.py -j "$J"
 	step stress       python3 bench/vcc-stress.py
 	step stress-vccd  python3 bench/vcc-stress.py --vccd

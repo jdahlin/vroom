@@ -219,6 +219,7 @@ static const builtin builtins[] = {
 	{ "__builtin_snprintf", BI_LIB, 0, "iszS." }, { "__builtin_vsnprintf", BI_LIB, 0, "iszSV" },
 	{ "__builtin_vsprintf", BI_LIB, 0, "isSV" }, { "__builtin_puts", BI_LIB, 0, "iS" },
 	{ "__builtin_abs", BI_LIB, 1, "ii" }, { "__builtin_labs", BI_LIB, 1, "ll" }, { "__builtin_llabs", BI_LIB, 1, "ww" },
+	{ "__builtin_complex", BI_COMPLEX, 1, "i." },
 	{ "__builtin_conj", BI_CONJ, 0, "d." }, { "__builtin_conjf", BI_CONJ, 0, "f." }, { "__builtin_conjl", BI_CONJ, 0, "D." },
 	{ "__builtin_creal", BI_CREAL, 0, "d." }, { "__builtin_crealf", BI_CREAL, 0, "f." }, { "__builtin_creall", BI_CREAL, 0, "D." },
 	{ "__builtin_cimag", BI_CIMAG, 0, "d." }, { "__builtin_cimagf", BI_CIMAG, 0, "f." }, { "__builtin_cimagl", BI_CIMAG, 0, "D." },
@@ -1639,6 +1640,30 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 	case BI_ATOMIC_TEST_AND_SET: case BI_ATOMIC_CLEAR:
 	case BI_SYNC_VAL_CAS: case BI_SYNC_BOOL_CAS: case BI_SYNC_LOCK_RELEASE: case BI_SYNC_SYNCHRONIZE:
 		return atomic_call(c, b, loc);
+	case BI_COMPLEX: {
+		args_list(c, &args);
+		if (args.n != 2) {
+			arity(c, loc, 2, &args);
+			return err_node(c, loc);
+		}
+		for (int i = 0; i < 2; i++) {
+			args.v[i] = rvalue(c, args.v[i]);
+			if (!is_float(c, N(args.v[i])->ty)) {
+				cc_error(c, N(args.v[i])->loc, "argument type '%s' is not a real floating point type", tyname(c, N(args.v[i])->ty));
+				return err_node(c, loc);
+			}
+		}
+		qty t = N(args.v[0])->ty;
+		if (QI(canon(c, t)) != QI(canon(c, N(args.v[1])->ty))) {
+			cc_error(c, loc, "arguments are of different types ('%s' vs '%s')", tyname(c, t), tyname(c, N(args.v[1])->ty));
+			return err_node(c, loc);
+		}
+		/* Both arguments are evaluated even if a surrounding __real__ or
+		   __imag__ expression only extracts one component. */
+		uint32_t p0, p1;
+		uint32_t re = cplx_reuse(c, args.v[0], &p0), im = cplx_reuse(c, args.v[1], &p1);
+		return with_pre(c, p0, with_pre(c, p1, mk_cplx(c, ty_complex(c, t), re, im, loc)));
+	}
 	case BI_CONJ: case BI_CREAL: case BI_CIMAG: {
 		qty ct = ty_complex(c, sigtype(c, b->sig[0]));
 		uint32_t a;

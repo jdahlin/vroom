@@ -278,6 +278,7 @@ typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl 
 	uint64_t disabled_builtins[CC_DISABLED_BUILTIN_WORDS]; /* -fno-builtin-NAME */
 	int wasm_sjlj;		/* -mllvm -wasm-enable-sjlj: setjmp/longjmp through wasm exceptions */
 	int implicit_fn;	/* implicit function declarations allowed (... implicit-function-declaration) */
+	int c2y;		/* C2y additions, with the C23 keyword set */
 	int strict_std;		/* -std=cNN (not gnuNN): clang's GNU-only library functions are not known */
 	int conv_warn;		/* -Wno-error= (or -Wno-) of: 1 int-conversion, 2 incompatible-pointer-types,
 				   4 incompatible-function-pointer-types: a warning, not an error */

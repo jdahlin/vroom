@@ -389,3 +389,51 @@ VPRIV uint32_t cplx_unary(cc *c, int op, uint32_t n, uint32_t loc)
 	cplx_parts(c, n, &re, &im, &pre);
 	return with_pre(c, pre, mk_cplx(c, t, op == T_MINUS ? neg(c, re) : re, neg(c, im), loc));
 }
+
+/* Increment/decrement only the real component, retaining the original
+ * imaginary representation and evaluating the operand's location once. */
+VPRIV uint32_t cplx_incdec(cc *c, uint32_t n, int op, uint32_t loc)
+{
+	bool inc = op == N_PREINC || op == N_POSTINC;
+	bool post = op == N_POSTINC || op == N_POSTDEC;
+	qty t = QUNQ(ty_unatomic(c, N(n)->ty)), et = cplx_elem(c, t);
+	uint32_t pre = 0, save, tmp, value, put;
+	if (!c->o->c2y) {
+		static const char *const g[] = { "pedantic", NULL };
+		EXT_WARN_MS(c, inc ? "++" : "--", "c2y-extensions", g, loc,
+		            "'%s' on an object of complex type is a C2y extension", inc ? "++" : "--");
+	}
+	if (T(c, N(n)->ty)->flags & TF_ATOMIC) {
+		cc_error(c, loc, "atomic complex increment and decrement are not supported yet");
+		return err_node(c, loc);
+	}
+	if (N(n)->op != N_VAR) {
+		/* This is an internal address, also valid for a register aggregate. */
+		uint32_t address = mk(c, N_ADDR, ty_ptr(c, N(n)->ty), loc);
+		N(address)->a = n;
+		address = cplx_reuse(c, address, &pre);
+		n = deref(c, address, loc);
+	}
+	uint32_t sym = sym_new(c, S_VAR, 0, t, loc);
+	c->syms[sym].sc = SC_AUTO;
+	tmp = mk(c, N_VAR, t, loc);
+	N(tmp)->a = sym;
+	N(tmp)->flags = NF_LVALUE;
+	save = mk2(c, N_ASSIGN, t, loc, tmp, rvalue(c, n));
+	value = binop(c, inc ? T_PLUS : T_MINUS, rvalue(c, cplx_part(c, tmp, 0)), mk_int(c, 1, prim(TY_INT), loc), loc);
+	value = convert(c, value, et);
+	/* Materialize the arithmetic once: storing the updated real component
+	 * and producing a prefix result must not repeat a trapping FP operation. */
+	uint32_t desired_sym = sym_new(c, S_VAR, 0, et, loc);
+	c->syms[desired_sym].sc = SC_AUTO;
+	uint32_t desired = mk(c, N_VAR, et, loc);
+	N(desired)->a = desired_sym;
+	N(desired)->flags = NF_LVALUE;
+	uint32_t compute = mk2(c, N_ASSIGN, et, loc, desired, value);
+	value = rvalue(c, desired);
+	put = assign(c, 0, cplx_part(c, n, 0), value, loc);
+	uint32_t result = post ? rvalue(c, tmp) : mk_cplx(c, t, value, rvalue(c, cplx_part(c, tmp, 1)), loc);
+	uint32_t out = with_pre(c, pre, with_pre(c, save, with_pre(c, compute, with_pre(c, put, result))));
+	N(out)->aux = (uint16_t)op; /* retain the source operation for unused-value diagnostics */
+	return out;
+}

@@ -208,6 +208,13 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* T1 `align_local.c` (`_Alignas(32/64/128/4096)` locals, arrays
   and VLAs of over-aligned types, inside recursion and alongside alloca;
   check `(uintptr_t)&x % A == 0`).
+- [ ] **Atomic complex increment/decrement** [P]. Non-atomic complex
+  `++`/`--` update only the real component and preserve the imaginary bits.
+  `_Atomic(_Complex T)` still requires a whole-object compare-exchange loop;
+  reject it explicitly rather than lowering to a non-atomic component write.
+  *Validate:* concurrent increments on `_Atomic(_Complex float/double)` on
+  both Linux targets, including unchanged imaginary NaN/signed-zero bits.
+
 - [x] **`_Atomic` dropped** [P].  Done: `_Atomic(T)` and the qualifier
   (also `T *_Atomic`) make a type of its own (`TF_ATOMIC`, `ty_atomic()` in
   cc/type.c) with clang's layout; lvalue conversion (`decay_slow`) yields

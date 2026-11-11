@@ -100,6 +100,8 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 		if (ISERR(n))
 			return n;
 		need_lvalue(c, n, t->loc);
+		if (is_complex(c, N(n)->ty))
+			return cplx_incdec(c, n, op, loc);
 		need_scalar(c, n, "increment");
 		if (is_ptr(c, N(n)->ty) && KIND(c, T(c, N(n)->ty)->base) == TY_SVE)
 			cc_error(c, loc, "arithmetic on a pointer to sizeless type '%s'", tyname(c, T(c, N(n)->ty)->base));
