@@ -825,6 +825,38 @@ bridge-fall. Ingen ny full 875-falls-baslinje påstås. Reproducerbara
 kommandon, exakta käll-/binärhashar och symlänkar finns i
 `work/native-stack64/{run-gates.py,manifest.json,final-evidence.json,logs/}`.
 
+**Sammanlagd Linux-stack, fryst `a41361e` ovanpå `1c5b5d1`:**
+hela Kefirs 875 runtime-par är körda först på x86, därefter ARM/QEMU,
+med sex arbetare, 30 s kompilering och 5 s körning. X86: **585 godkända,
+0 vcc-kompileringsfel, 6 körfel/tidsgränser**, 161 referenskompileringsfel,
+6 referenslänkfel, 51 referenssignal/tidsgräns och 66 unsupported.
+ARM: **461 godkända, 0 vcc-kompileringsfel, 4 körfel**, 249/6/51
+referensfel enligt samma kategorier och 104 unsupported. Båda körningarna
+avslutas med status 1; varken undantag eller kvarvarande fel räknas som pass.
+
+Rättningarna omfattar atomiska lock-free-frågor, ARM:s parkerade inline-
+argument, x86-arrayalignering, tillåtna minnesoperander för FP-asm,
+breda strängars inbäddade nollor, äldre `_ExtInt` samt inline-`alloca`-
+allokeringars livstid. Det sista rättar även GCC:s `pr113596.c` på båda mål.
+Båda byggena passerar egna Linux-prov **232 x86 / 237 ARM**, ABI 33 per mål,
+PP-paritet 920, sema 887 i båda lägen och diagnostik 225. ASan/UBSan passerar
+samma egna Linuxprov. Wasm64: 189 godkända, 38 körda kända XFAIL och elva
+referensundantag. Det nya `_ExtInt`-provets XFAIL följer den befintliga
+BitInt-ABI-luckan: en motsvarande `_BitInt`-version avvisas identiskt av
+föräldrakompilatorn på Wasm32 och Wasm64; inget nytt native-fel döljs.
+
+Kvarvarande x86-fall har underlag för ospecificerad padding/inkompatibla
+funktionssignaturer, odefinierade skift, ett ogiltigt asm-kontrakt,
+`__builtin_unreachable` och en tidsgräns. ARM:s `std_attributes18` har ett
+kvarvarande faktiskt runtimefel under utredning. Övriga ARM-fall kräver
+separat klassificering av negativa float-till-unsigned-konverteringar och
+pekare efter objektlivstid; de står kvar som fel. Hela S5b/G1/G2 är öppna.
+
+Evidens: `work/results/kefir-native-stack-{x86,arm}/`,
+`work/native-stack64/{manifest,final-evidence}.json` och
+`work/results/native-stack64-ci-preflight/`. Fryst kompilator SHA256:
+`9eeab468752c45bfec75b211fc822eddaa926343d498b35d20c3114cc86b64cf`.
+
 ### S6 ABI-generatorer — rigg klar, fel rättas
 `gcc.dg/compat/struct-layout-1_generate.c` och clangs `utils/ABITest`
 genererar tusentals anrop mellan två kompilatorer.  Kopplas in i

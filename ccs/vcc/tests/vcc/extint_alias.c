@@ -1,3 +1,4 @@
+/* vcc-xfail-wasm: TODO.md _BitInt remaining targets: wasm runtime precision not implemented. */
 /* _ExtInt is a deprecated spelling of the same bit-precise integer type. */
 #define CHECK(N) \
     _Static_assert(__builtin_types_compatible_p(_ExtInt(N), _BitInt(N)), "signed identity"); \

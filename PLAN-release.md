@@ -501,3 +501,12 @@ kompilatorkombinationer vardera; motsvarande standard-ARM-körning
 redovisar två Clang-referensavvisningar. Det breda ARM-värdebeviset
 kommer från IEEE-matrisen och de separat redovisade vcc-kalleeanropen.
 G1/G2 och strikt flyttalsmiljö är fortsatt öppna.
+
+Fulla Kefir-omkörningar på den frysta stacken `a41361e` ger 585 godkända
+x86-fall och 461 ARM/QEMU-fall, utan vcc-kompileringsfel. Sex respektive fyra
+runtime-/tidsfel och samtliga referens-/unsupported-kategorier behålls;
+G1/G2 är fortsatt öppna. Linux-ASan/UBSan går 232/232 x86 och 237/237 ARM
+med befintliga undantag. Wasm64-preflight går 189/189 med 38 körda XFAIL;
+ExtInt-provet täcker den redan verifierade BitInt-ABI-luckan på Wasm32/64.
+Exakta kommandon, oförändrad kompilatorkod och testmarkörens föräldraprov:
+`work/results/native-stack64-ci-preflight/`.
