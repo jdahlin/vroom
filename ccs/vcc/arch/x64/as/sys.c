@@ -167,6 +167,40 @@ VPRIV int x64_i_sys(As *a, char *mn, XOp *o, int nops)
 				}
 			}
 		}
+		/* CET shadow stack: wrss[dq]/wruss[dq] reg, mem; incssp/rdssp[dq] reg */
+		if (nops == 2 && (!strncmp(mn, "wrss", 4) || !strncmp(mn, "wruss", 5)) && o[0].kind == XK_REG && o[0].cls == XR_GPR) {
+			bool u = mn[2] == 'u';
+			uint8_t ops[3] = { 0x0f, 0x38, (uint8_t)(u ? 0xf5 : 0xf6) };
+
+			if (o[1].kind == XK_EXPR)
+				o[1].kind = XK_MEM;
+			return x64_emit(a, &F(.w = o[0].size == 8, .opsz16 = u, .op = ops, .nop = 3, .reg = o[0].reg, .rm = &o[1]));
+		}
+		if (nops == 1 && (!strncmp(mn, "incssp", 6) || !strncmp(mn, "rdssp", 5)) && o[0].kind == XK_REG && o[0].cls == XR_GPR) {
+			bool inc = mn[0] == 'i';
+			uint8_t ops[2] = { 0x0f, (uint8_t)(inc ? 0xae : 0x1e) };
+
+			return x64_emit(a, &F(.w = o[0].size == 8, .rep = 0xf3, .op = ops, .nop = 2, .reg = inc ? 5 : 1, .rm = &o[0]));
+		}
+		/* invpcid m128, r64: 66 0f 38 82 /r */
+		if (nops == 2 && !strcmp(mn, "invpcid") && o[1].kind == XK_REG && o[1].cls == XR_GPR) {
+			uint8_t ops[3] = { 0x0f, 0x38, 0x82 };
+
+			if (o[0].kind == XK_EXPR)
+				o[0].kind = XK_MEM;
+			return x64_emit(a, &F(.opsz16 = 1, .op = ops, .nop = 3, .reg = o[1].reg, .rm = &o[0]));
+		}
+		/* ret/lret $imm16 */
+		if (nops == 1 && o[0].kind == XK_IMM && !o[0].v.add && !o[0].v.sub &&
+		    (!strcmp(mn, "ret") || !strcmp(mn, "retq") || !strcmp(mn, "lret") || !strcmp(mn, "lretl") || !strcmp(mn, "lretq"))) {
+			uint8_t b[4], n = 0;
+
+			if (!strcmp(mn, "lretq"))
+				b[n++] = 0x48;
+			b[n++] = mn[0] == 'l' ? 0xca : 0xc2;
+			b[n++] = (uint8_t)o[0].v.c, b[n++] = (uint8_t)(o[0].v.c >> 8);
+			return x64_raw(a, b, n);
+		}
 		/* int $n */
 		if (!strcmp(mn, "int") && nops == 1 && o[0].kind == XK_IMM && !o[0].v.add && !o[0].v.sub) {
 			uint8_t b[2] = { 0xcd, (uint8_t)o[0].v.c };
