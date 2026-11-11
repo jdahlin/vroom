@@ -1585,3 +1585,21 @@ CI:s arm64-jobb kör fortfarande de libc-fria x86-proberna under QEMU.
 Dessa resultat ersätter inte en ny prestandagrind på aktuell main.
 De tidigare mätningarna ovan behåller sina dokumenterade baser/hashar.
 G5/G7 och full O2-täckning är fortsatt öppna.
+
+### OPT4 på aktuell main (lokal fortsättning, 2026-11-11)
+
+Kopiepasset är överflyttat till PR-seriens nya bas i separat lokal gren
+`opt/native-copies`; ingår ännu inte i de fem öppna PR:arna. X86:s
+kompaktering remappar nu varje debug-index och slutraden före twoaddr.
+Debugregressionen har en extra funktionslokal markör efter borttagbara
+registerkopior. Unity och fil-för-fil bygger; 16 nya regel/nivå/mål-fall
+med körning klaras i unity, fyra x86-fall även fil-för-fil. Debugrader,
+.text-likhet och DWARF-struktur klaras O0–O3 i båda byggsätten; sanitiserade
+record-kontrakt och riktig native unwind genom vanliga/justerade ramar
+klaras. Äldre mätningar ovan är fortfarande knutna till sin äldre bas;
+ny prestandagrind och PR/CI för denna fortsättning återstår.
+
+Den delade värdens /tmp fick slut på inoder. 756 befintliga snapshotfiler
+arkiverades och verifierades byte-för-byte före lokal städning i
+`/source/vroom/work/opt-audit-artifacts/copy-snapshots.tar`; JSON/hashar och
+mätdata är kvar i den ursprungliga opt-copies-baseline-katalogen.

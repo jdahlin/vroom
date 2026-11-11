@@ -122,9 +122,14 @@ VPRIV void x64_copies(ecx *e)
 	}
 	if (!changed)
 		return;
-	uint32_t out = 0;
-	for (uint32_t k = 0; k < n; k++)
+	uint32_t out = 0, dj = 0;
+	for (uint32_t k = 0; k < n; k++) {
+		if (e->ndl)
+			dbg_remap(e, &dj, k, out);
 		if (x->in[k].op != X_COPY_DELETED)
 			x->in[out++] = x->in[k];
+	}
+	if (e->ndl)
+		dbg_remap(e, &dj, UINT32_MAX, out);
 	x->nin = out;
 }
