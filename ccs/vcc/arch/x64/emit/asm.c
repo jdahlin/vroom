@@ -169,6 +169,20 @@ static val x64_asmbits(ecx *e, val v, qty t, int size)
 	return v;
 }
 
+/* Fixed operands are loaded only after all expressions have been evaluated.
+ * Park their input values immediately so several read/write outputs do not
+ * consume the few temporaries left after reserving the fixed registers. */
+static void x64_asmpark(ecx *e, xopnd *o)
+{
+	if (!o->flt) o->v = x64_asmbits(e, o->v, o->t, o->size);
+	int r = wk_reg(e, &o->v, o->flt ? o->t : prim(TY_ULLONG));
+	lval l = { .k = L_FRAME, .off = o->park = wk_slot(e, 8, 8), .align = 8 };
+
+	x64_store(e, r, &l, o->flt ? o->size : 8);
+	wk_free(e, &o->v);
+	o->v = (val){ 0 };
+}
+
 /* a callee-saved register the asm uses: saved by the prologue */
 static void x64_csused(ecx *e, int r)
 {
@@ -331,8 +345,12 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 			continue;
 		}
 		o->kind = XO_REG;
-		if (o->inout)
+		if (wk_mem(e, o->t) && (o->flt || o->size > 8))
+			efatal(e, x->loc, "x86-64: address-held asm register operand is not supported");
+		if (o->inout) {
 			o->v = wk_reload(e, &o->l, o->t);
+			if (o->fixed) x64_asmpark(e, o);
+		}
 	}
 	/* inputs */
 	for (uint32_t i = a->nout; i < nops; i++) {
@@ -380,6 +398,7 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 				wk_free(e, &to->v);
 			to->v = v;
 			to->inout = 1;
+			if (to->fixed) x64_asmpark(e, to);
 			o->kind = XO_REG;
 			o->tied = (int8_t)tied;
 			continue;
@@ -427,6 +446,8 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 			continue;
 		}
 		o->kind = XO_REG;
+		if (wk_mem(e, o->t) && (o->flt || o->size > 8))
+			efatal(e, x->loc, "x86-64: address-held asm register operand is not supported");
 		if (!o->flt) v = x64_asmbits(e, v, o->t, o->size);
 		if (!o->flt && o->size > 8)
 			efatal(e, x->loc, "x86-64: an asm register operand of this type is not supported");
@@ -447,20 +468,9 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 	for (uint32_t i = 0; i < a->nout; i++) {
 		xopnd *o = &op[i];
 
-		if (o->kind != XO_REG)
+		if (o->kind != XO_REG || o->fixed)
 			continue;
 		if (o->inout && !o->flt) o->v = x64_asmbits(e, o->v, o->t, o->size);
-		if (o->fixed) {
-			if (o->inout) {
-				lval s = { .k = L_FRAME, .off = o->park = wk_slot(e, 8, 8), .align = 8 };
-				int r = wk_reg(e, &o->v, o->flt ? o->t : prim(TY_ULLONG));
-
-				x64_mem(e, X_ST, 8, r, &s, false);
-				x64_tfree(e, r);
-				o->v = (val){ 0 };
-			}
-			continue;
-		}
 		if (o->inout) {
 			wk_reg(e, &o->v, o->flt ? o->t : prim(TY_ULLONG));
 			o->reg = o->v.r;

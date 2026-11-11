@@ -190,6 +190,21 @@ testplanen är klar. Upstream-integration kräver egna körningar.
 **Klart när:** inga krascher i `compile/`; `ieee/` och `builtins/` lika
 gröna som `execute/`.
 
+**Upstream-integrerad kontroll, träd `4ef4ea8`:** [PR #28](https://github.com/jdahlin/vroom/pull/28)
+är draft medan integrationsfel rättas. ARM compile går 1855/0/0 med
+159 filtrerade och två kända clang-krascher. X86 går 1858/1/0 med samma
+155 filtrerade och två clang-krascher: en ny registertrycksregression i
+`asmgoto-3.c` är rättad separat och full omkörning återstår. Den rättade
+asm-motorn går 18/18 GCC-asmprov vid -O0/-O2, asm-runtime samt unity/nonunity.
+Runtime på frysta trädet: **1847/1847 x86**, **1852/1852 ARM**; ASan/UBSan
+**130/130 x86**, **135/135 ARM**, stress 29/29 respektive daemon 30/30.
+ABI-generatorerna går åter 777+1000 på x86 och 778+1000 på ARM med samma
+referensundantag som ovan. Kernel sema går 887/887 i båda körsätten och
+PP 920/920; diagnostik 215/215. Unity/nonunity och riktade CFI/debug/
+direktobjekt-kontroller går grönt. Dessa siffror gäller frysta trädet före
+asm-rättningen; de är inte ett påstående om färdig premerge. Wasm-CI har
+22 nytäckta fel som utreds mot upstreams kompilator separat.
+
 ### S4 gcc.dg — påbörjad (2026-11-11)
 `bench/vcc-gcc-dg.py -j 6 --target x86_64-linux-gnu` kör direkta
 `gcc.dg/*.c` med `dg-do run` (1276 filer) och direkta
