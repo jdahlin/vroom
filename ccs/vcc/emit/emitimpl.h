@@ -451,13 +451,14 @@ typedef struct lval {
 	uint8_t r;		/* L_REG: base register (a temp, owned); L_GLOBREG: the register */
 	uint8_t bf;		/* bit-field */
 	uint8_t sgn;		/* bit-field signedness */
+	int64_t dynbit_slot;	/* packed vector lane: saved dynamic bit index, 0 for static */
 	uint16_t bitoff, width;	/* bit-field: bits from the byte at off */
 	uint32_t ref;		/* L_SYM */
 	int64_t off;		/* byte offset (L_FRAME: slot offset) */
 	uint32_t align;		/* known alignment of the address */
 } lval;
 
-enum { A_IGNORE, A_REG, A_STACK, A_REF_REG, A_REF_STACK, A_VREG, A_HFA };	/* A_VREG: float/double in v<reg>; A_HFA: nreg members of fsz bytes in v<reg>.. */
+enum { A_IGNORE, A_REG, A_STACK, A_REF_REG, A_REF_STACK, A_VREG, A_HFA, A_BOOL_LANES };	/* A_VREG: float/double in v<reg>; A_HFA: nreg members of fsz bytes in v<reg>.. */
 
 typedef struct abiarg {
 	uint8_t kind, reg, nreg, fsz;
@@ -598,6 +599,8 @@ VPRIV void zero_mem(ecx *e, int dst, uint64_t n);
 /* abi.c */
 VPRIV int hfa(cc *c, qty t, int *n);
 VPRIV bool vec_small(cc *c, qty t);
+VPRIV void bvec_ret(ecx *e, qty t, int rs);
+VPRIV void bvec_res(ecx *e, qty t, int64_t sl);
 VPRIV void vec_small_ret(ecx *e, qty t, int rs);
 VPRIV void vec_small_res(ecx *e, qty t, int64_t sl);
 VPRIV bool is_sret(cc *c, qty t);
@@ -748,6 +751,7 @@ static inline bool is_array(cc *c, qty t) { return KIND(c, t) == TY_ARRAY; }
 static inline bool is_func(cc *c, qty t) { return KIND(c, t) == TY_FUNC; }
 static inline bool is_void(cc *c, qty t) { return KIND(c, t) == TY_VOID; }
 static inline bool is_vec(cc *c, qty t) { return KIND(c, t) == TY_VECTOR; }
+static inline bool is_bvec(cc *c, qty t) { return is_vec(c, t) && KIND(c, T(c, t)->base) == TY_BOOL; }
 /* passed and returned like a record (vcc's own convention for vectors) */
 static inline bool is_recabi(cc *c, qty t) { return is_record(c, t) || is_vec(c, t); }
 static inline bool is_agg(cc *c, qty t) { return is_record(c, t) || is_array(c, t) || is_vec(c, t); }

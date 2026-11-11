@@ -76,6 +76,11 @@ static bool x64_cls(cc *c, qty t, uint64_t off, int cls[2])
 			cls[off / 8] = x64_merge(cls[off / 8], XC_SSE);
 			return true;
 		}
+		if (is_bvec(c, t) && sz == 16 && off == 0) {
+			cls[0] = x64_merge(cls[0], XC_SSE);
+			cls[1] = x64_merge(cls[1], XC_SSEUP);
+			return true;
+		}
 		if (sz == 16 && off == 0 && cls[0] == XC_NONE && cls[1] == XC_NONE) {
 			cls[0] = XC_SSE, cls[1] = XC_SSEUP;
 			return true;
@@ -100,6 +105,27 @@ static bool x64_cls(cc *c, qty t, uint64_t off, int cls[2])
 		return true;
 	cls[off / 8] = x64_merge(cls[off / 8], is_flt(c, t) ? XC_SSE : XC_INT);
 	return true;
+}
+
+/* Clang retains the i1-vector ABI through singleton aggregate wrappers. */
+static uint32_t x64_bool_lanes(cc *c, qty t)
+{
+	const ctype *ty = T(c, t);
+	if (is_bvec(c, t)) return ty->n;
+	if (is_array(c, t) && tsize(c, t) == tsize(c, ty->base))
+		return x64_bool_lanes(c, ty->base);
+	if (is_record(c, t)) {
+		const tag *r = &c->tags[ty->aux];
+		const field *only = NULL;
+		for (uint32_t k = 0; k < r->nfield; k++) {
+			const field *f = &r->f[k];
+			if (!tsize(c, f->ty) || (f->bitfield && !f->width)) continue;
+			if (only || f->off || f->bitfield) return 0;
+			only = f;
+		}
+		if (only && tsize(c, only->ty) == tsize(c, t)) return x64_bool_lanes(c, only->ty);
+	}
+	return 0;
 }
 
 VPRIV void x64_classify0(ecx *e, qty t, wkarg *a);
@@ -134,6 +160,15 @@ VPRIV void x64_classify0(ecx *e, qty t, wkarg *a)
 	}
 	if (size == 0)
 		return;	/* an empty record: nothing is passed */
+	uint32_t blanes = x64_bool_lanes(c, t);
+	if (blanes && size > 8) {
+		/* LLVM scalarizes <65..128 x i1> arguments into individual integer
+		   arguments. Results use a hidden pointer; larger arguments are
+		   packed by-value memory rather than ordinary SIMD vectors. */
+		a->mem = true;
+		a->blanes = blanes <= 128 ? blanes : 0;
+		return;
+	}
 	if (is_vec(c, t) && (size == 32 || size == 64)) {
 		/* clang without AVX: passed in memory, returned in 2 or 4 xmm registers (-Wpsabi) */
 		a->mem = true, a->up = true;
@@ -155,11 +190,9 @@ VPRIV void x64_classify0(ecx *e, qty t, wkarg *a)
 		a->mem = true;
 		return;
 	}
+	/* An orphan SSEUP eightbyte (e.g. vector/integer union) is SSE. */
+	if (cls[1] == XC_SSEUP && cls[0] != XC_SSE) cls[1] = XC_SSE;
 	if (cls[1] == XC_SSEUP) {
-		if (cls[0] != XC_SSE) {
-			a->mem = true;
-			return;
-		}
 		a->n = 1, a->cls[0] = WA_SSE, a->up = true;	/* one xmm register */
 		return;
 	}
@@ -190,6 +223,17 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 {
 	cc *c = e->c;
 
+	if (variadic) {
+		uint32_t fixed = 0;
+		if (!fn && RKIND(ref) == RK_SYM) {
+			const ctype *ft = T(c, c->syms[RIDX(ref)].ty);
+			if (ft->kind == TY_FUNC && !(ft->flags & TF_NOPROTO)) fixed = ft->n;
+		}
+		for (int k = 0; k < n; k++)
+			if (a[k].blanes && (uint32_t)k >= fixed)
+				efatal(e, e->curloc, "x86-64: variadic transport of 65..128-lane packed boolean vectors is not supported");
+	}
+
 	/* An explicit builtin needs no libm symbol. Copy the x87 representation
 	 * and clear only its sign, without an FP load that could alter a NaN. */
 	if (RKIND(ref) == RK_NAME && RIDX(ref) < 0x8000000u && n == 1 && r && r->x87 &&
@@ -216,11 +260,19 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 	uint32_t stackalign = 16;
 	int64_t savedsp = 0;
 	int64_t *place = calloc((size_t)(n ? n : 1), sizeof *place);	/* stack offset, or -1: registers */
+	int *bregs = calloc((size_t)(n ? n : 1), sizeof *bregs);
 	rec *i;
 
 	for (int k = 0; k < n; k++) {
 		int ng = x64_need(&a[k], WA_INT), nf = x64_need(&a[k], WA_SSE);
 
+		if (a[k].blanes) {
+			bregs[k] = 6 - gp;
+			gp = 6;
+			place[k] = total;
+			total += ((int64_t)a[k].blanes - bregs[k]) * 8;
+			continue;
+		}
 		if (!a[k].mem && a[k].n == 0) {
 			place[k] = -1;
 			continue;
@@ -266,6 +318,17 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 	for (int k = 0; k < n; k++) {
 		if (place[k] < 0)
 			continue;
+		if (a[k].blanes) {
+			for (uint32_t bit = (uint32_t)bregs[k]; bit < a[k].blanes; bit++) {
+				lval src = x64_fr(a[k].slot + bit / 8);
+				lval dst = { .k = L_REG, .r = RSP, .off = place[k] + 8 * (bit - bregs[k]) };
+				x64_mem(e, X_LD, 1, R11, &src, false);
+				if (bit % 8) x64_op3(e, X_SHRI, 8, R11, R11, XNOREG)->imm = bit % 8;
+				x64_op3(e, X_ANDI, 8, R11, R11, XNOREG)->imm = 1;
+				x64_mem(e, X_ST, 8, R11, &dst, false);
+			}
+			continue;
+		}
 		if (a[k].size > 128) {
 			/* A large by-value aggregate must not expand to one record per
 			   word. Preserve live values (including an indirect callee)
@@ -299,6 +362,16 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 		x64_mem(e, X_LEA, 8, x64_argreg(gp++), &s, false);
 	}
 	for (int k = 0; k < n; k++) {
+		if (a[k].blanes) {
+			for (int bit = 0; bit < bregs[k]; bit++) {
+				lval src = x64_fr(a[k].slot + bit / 8);
+				int reg = x64_argreg(gp++);
+				x64_mem(e, X_LD, 1, reg, &src, false);
+				if (bit % 8) x64_op3(e, X_SHRI, 8, reg, reg, XNOREG)->imm = bit % 8;
+				x64_op3(e, X_ANDI, 8, reg, reg, XNOREG)->imm = 1;
+			}
+			continue;
+		}
 		if (place[k] >= 0)
 			continue;
 		for (int w = 0; w < a[k].n; w++) {
@@ -308,6 +381,7 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 		}
 	}
 	free(place);
+	free(bregs);
 	if (variadic)
 		x64_op3(e, X_MOVI, 4, RAX, XNOREG, XNOREG)->imm = fp;	/* al: vector registers used */
 	if (fn) {
@@ -402,6 +476,25 @@ VPRIV void x64_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic)
 	for (int k = 0; k < n; k++) {
 		int ng = x64_need(&a[k], WA_INT), nf = x64_need(&a[k], WA_SSE);
 
+		if (a[k].blanes) {
+			for (uint32_t bit = 0; bit < a[k].blanes; bit++) {
+				if (!(bit % 8)) x64_movi(e, R10, 0);
+				if (gp < 6) x64_mov(e, R11, x64_argreg(gp++));
+				else {
+					lval src = x64_fr(16 + stk);
+					x64_mem(e, X_LD, 8, R11, &src, false);
+					stk += 8;
+				}
+				x64_op3(e, X_ANDI, 8, R11, R11, XNOREG)->imm = 1;
+				if (bit % 8) x64_op3(e, X_SHLI, 8, R11, R11, XNOREG)->imm = bit % 8;
+				x64_op3(e, X_OR, 8, R10, R10, R11);
+				if (bit % 8 == 7 || bit + 1 == a[k].blanes) {
+					lval dst = x64_fr(a[k].slot + bit / 8);
+					x64_mem(e, X_ST, 1, R10, &dst, false);
+				}
+			}
+			continue;
+		}
 		if (!a[k].mem && a[k].n == 0)
 			continue;
 		if (!a[k].mem && gp + ng <= 6 && fp + nf <= 8) {
@@ -525,6 +618,8 @@ VPRIV int x64_va_arg(ecx *e, int rap, qty t)
 	uint32_t lstk = wk_newlabel(e), ldone = wk_newlabel(e);
 
 	x64_classify(e, t, &a);
+	if (a.blanes)
+		efatal(e, e->curloc, "x86-64: variadic transport of 65..128-lane packed boolean vectors is not supported");
 	ng = x64_need(&a, WA_INT), nf = x64_need(&a, WA_SSE);
 	if (!a.mem && a.n) {
 		int rg = x64_treg(e), rf = x64_treg(e), rs = x64_treg(e);

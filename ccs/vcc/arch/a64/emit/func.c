@@ -557,6 +557,21 @@ static bool emit_function1(ecx *e, uint32_t s, int nlreg)
 			bd->kind = B_SLOT;
 			bd->slot = slot(e, 8, 8);
 			break;
+		case A_BOOL_LANES: {
+			bd->kind = B_SLOT;
+			bd->slot = slot(e, sz, 16);
+			int acc = treg(e), r = treg(e);
+			for (unsigned k = 0; k < T(c, pt)->n; k++) {
+				if (!(k % 8)) movi(e, 1, acc, 0);
+				if (k < ab.nreg) mov(e, 0, r, ab.reg + k);
+				else mem(e, I_LD, 0, 0, r, R_FP, 16 + ab.stk + (k - ab.nreg) * 8);
+				opbf(e, I_UBFM, 1, r, r, 0, 0);
+				op3s(e, I_ORR, 1, acc, acc, r, 0, k % 8);
+				if (k % 8 == 7) mem(e, I_ST, 0, 0, acc, FRAME, bd->slot + k / 8);
+			}
+			tfree(e, acc), tfree(e, r);
+			break;
+		}
 		case A_REG:
 			bd->kind = B_SLOT;
 			bd->slot = slot(e, (sz + 7) & ~(uint64_t)7, talign(c, pt) > 8 ? 16 : 8);

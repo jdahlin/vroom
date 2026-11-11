@@ -102,8 +102,10 @@ VPRIV int conv_kind(cc *c, qty from, qty to, uint32_t n)
 	if ((tk == TY_STRUCT || tk == TY_UNION) && compatible(c, ty_unatomic(c, from), ty_unatomic(c, to)))
 		return CK_NOP;
 	/* vectors of one size convert lane-agnostically (clang's lax integer vector conversions) */
-	if (tk == TY_VECTOR && fk == TY_VECTOR && T(c, to)->size == T(c, from)->size)
+	if (tk == TY_VECTOR && fk == TY_VECTOR && T(c, to)->size == T(c, from)->size) {
+		if ((is_bool_vector(c, to) || is_bool_vector(c, from)) && !compatible(c, to, from)) return -1;
 		return CK_NOP;
+	}
 	return -1;
 }
 
