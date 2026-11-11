@@ -86,6 +86,7 @@ arm64)
 	step pic          python3 bench/vcc-pic.py
 	step vas-obj      python3 bench/vas-obj.py
 	step vlink-opts   python3 bench/vlink-opts.py
+	step vlink-x86    python3 bench/vlink-x86.py
 	step vsh          python3 bench/vsh-test.py
 	step torture-dg   python3 bench/test-torture-directives.py
 	step gcc-dg       python3 bench/test-gcc-dg.py
