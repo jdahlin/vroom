@@ -3161,3 +3161,6 @@ uteslutna och det lilla urvalet på delad värd bevisar ingen generell tidsvinst
 Detaljer och hashad proveniens: `work/opt-profile/decl-return-cost/result.json`
 och `work/opt-profile/decl-return-cputime/kernel-batch-result.json`.
 Generell lokal CSE, G5/G7 och full O2-täckning återstår.
+Samma 28-TU-prov vid O0 gav median användar-CPU 0,76171 → 0,76136 s över
+tre växelvisa rundor. Detta korta sampel på delad värd är inte en generell
+CPU-tidsgrind; rådata finns i `work/opt-profile/decl-return-o0-cputime/`.
