@@ -165,6 +165,49 @@ VPRIV int x64_i_avx(As *a, char *mn, XOp *o, int nops)
 			return x64_emit(a, &f);
 		}
 	}
+	/* BMI1/BMI2 on GPRs (VEX 0f38; W from the destination, an l/q suffix allowed) */
+	{
+		static const struct { const char *n; uint8_t pp, op, form, d; } bm[] = {
+			/* form 0: src2/m, src1 (vvvv), dst; 1: ctl (vvvv), r/m, dst; 2: r/m, dst (vvvv), /d */
+			{ "andn", 0, 0xf2, 0, 0 }, { "pdep", 3, 0xf5, 0, 0 }, { "pext", 2, 0xf5, 0, 0 }, { "mulx", 3, 0xf6, 0, 0 },
+			{ "bextr", 0, 0xf7, 1, 0 }, { "bzhi", 0, 0xf5, 1, 0 }, { "sarx", 2, 0xf7, 1, 0 }, { "shlx", 1, 0xf7, 1, 0 },
+			{ "shrx", 3, 0xf7, 1, 0 },
+			{ "blsr", 0, 0xf3, 2, 1 }, { "blsmsk", 0, 0xf3, 2, 2 }, { "blsi", 0, 0xf3, 2, 3 },
+		};
+		char t[16];
+		size_t n = strlen(mn);
+
+		if (n < sizeof t) {
+			memcpy(t, mn, n + 1);
+			for (int pass = 0; pass < 2; pass++) {
+				for (size_t i = 0; i < sizeof bm / sizeof *bm; i++) {
+					XOp *d = &o[nops - 1];
+					uint8_t ops[3] = { 0x0f, 0x38, bm[i].op };
+
+					if (strcmp(t, bm[i].n) || nops != (bm[i].form == 2 ? 2 : 3) || d->kind != XK_REG || d->cls != XR_GPR)
+						continue;
+					for (int k = 0; k < nops - 1; k++)
+						if (o[k].kind == XK_EXPR)
+							o[k].kind = XK_MEM;
+					XForm f = F(.w = d->size == 8, .opsz16 = 0, .rep = bm[i].pp == 2 ? 0xf3 : bm[i].pp == 3 ? 0xf2 : 0,
+						    .op = ops, .nop = 3, .vex = 1);
+					if (bm[i].pp == 1)
+						f.opsz16 = 1;
+					if (bm[i].form == 0)
+						f.reg = d->reg, f.rm = &o[0], f.vvvv = o[1].reg;
+					else if (bm[i].form == 1)
+						f.reg = d->reg, f.rm = &o[1], f.vvvv = o[0].reg;
+					else
+						f.reg = bm[i].d, f.rm = &o[0], f.vvvv = d->reg;
+					return x64_emit(a, &f);
+				}
+				if (n > 1 && (t[n - 1] == 'l' || t[n - 1] == 'q'))
+					t[n - 1] = 0;
+				else
+					break;
+			}
+		}
+	}
 	/* rorx $imm, r/m, r (BMI2: VEX f2 0f3a f0) */
 	if (nops == 3 && !strncmp(mn, "rorx", 4) && o[0].kind == XK_IMM && o[2].kind == XK_REG && o[2].cls == XR_GPR) {
 		uint8_t ops[3] = { 0x0f, 0x3a, 0xf0 };

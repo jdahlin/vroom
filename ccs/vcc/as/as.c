@@ -2557,7 +2557,7 @@ void as_begin(As *a, ElfObj *o, const char *name)
 	memset(a->alh, 0, sizeof a->alh);
 	a->fname = name;
 	a->nident = 0; a->ended = 0; a->altmacro = 0; a->eofline = 0;
-	a->ncfi = a->cficap = a->nfde = a->fdecap = 0; a->infde = 0; a->cfi_eh = 0; a->nsv = a->svcap = 0; a->nasg = a->asgcap = 0;
+	a->ncfi = a->cficap = a->nfde = a->fdecap = 0; a->infde = 0; a->cfi_eh = 0; a->cfi_dbg = 0; a->nsv = a->svcap = 0; a->nasg = a->asgcap = 0;
 	a->ndwf = a->dwfcap = a->ndwd = a->dwdcap = a->ndwl = a->dwlcap = 0; a->npfa = a->pfacap = 0; a->dwlocp = a->dwtab = 0;
 	memset(&a->dwcur, 0, sizeof a->dwcur); a->dwcur.flags = 1;
 	a->mmask = 255; a->mcount = 0;
@@ -2700,8 +2700,8 @@ static int d_cfi(As *a, Sv w, const char *p, const char *e)
 			p = ws(p, e);
 			if (p < e && *p == ',') p = ws(p + 1, e);
 		}
-		if (dbg) return err(a, ".debug_frame is not supported");
 		a->cfi_eh = !eh;
+		a->cfi_dbg = dbg;
 		return 0;
 	}
 	if (CIS("cfi_startproc")) {
@@ -2781,15 +2781,25 @@ static void sleb(Buf8 *b, int64_t v)
 	}
 }
 
-/* .eh_frame as MC's FrameEmitterImpl writes it: per FDE, its CIE first when
- * it is new; entries padded to 4 with DW_CFA_nop */
+static void cfi_frames(As *a, int dbg);
+
 static void cfi_finish(As *a)
 {
-	ElfObj *o = a->o;
 	if (a->infde) { err(a, "unfinished frame"); return; }
-	if (!a->nfde || a->cfi_eh) return;
+	if (!a->nfde) return;
+	if (!a->cfi_eh) cfi_frames(a, 0);
+	if (a->cfi_dbg && !a->err) cfi_frames(a, 1);
+}
+
+/* .eh_frame as MC's FrameEmitterImpl writes it: per FDE, its CIE first when
+ * it is new; entries padded to 4 with DW_CFA_nop.  dbg: .debug_frame (DWARF 4
+ * CIE without augmentation, absolute CIE pointers and addresses, 8-aligned) */
+static void cfi_frames(As *a, int dbg)
+{
+	ElfObj *o = a->o;
 	int x86 = o->machine == EM_X86_64;
-	uint32_t sec = elf_section(o, ".eh_frame", 9, x86 ? 0x70000001u /* SHT_X86_64_UNWIND */ : SHT_PROGBITS, SHF_ALLOC, 0, 0);
+	uint32_t sec = dbg ? elf_section(o, ".debug_frame", 12, SHT_PROGBITS, 0, 0, 0)
+			   : elf_section(o, ".eh_frame", 9, x86 ? 0x70000001u /* SHT_X86_64_UNWIND */ : SHT_PROGBITS, SHF_ALLOC, 0, 0);
 	uint32_t fr = sec;
 	if (elf_sec(o, sec)->align < 3) elf_sec(o, sec)->align = 3;
 	elf_data(o, fr);
@@ -2824,7 +2834,13 @@ static void cfi_finish(As *a)
 			cies[ncie].key = key; cies[ncie].off = (uint32_t)b.n; ncie++;
 			size_t st = b.n;
 			b.n += 4;
-			memset(b.p + b.n, 0, 4); b.n += 4;	/* CIE id */
+			memset(b.p + b.n, dbg ? 0xff : 0, 4); b.n += 4;	/* CIE id */
+			if (dbg) {
+				b.p[b.n++] = 4; b.p[b.n++] = 0;	/* version 4, no augmentation */
+				b.p[b.n++] = 8; b.p[b.n++] = 0;	/* address and segment selector sizes */
+				uleb(&b, 1); sleb(&b, x86 ? -8 : -4);
+				uleb(&b, f->ra);
+			} else {
 			b.p[b.n++] = 1;				/* version */
 			b.p[b.n++] = 'z'; b.p[b.n++] = 'R';
 			if (f->sig) b.p[b.n++] = 'S';
@@ -2833,22 +2849,23 @@ static void cfi_finish(As *a)
 			uleb(&b, 1); sleb(&b, x86 ? -8 : -4);
 			b.p[b.n++] = (uint8_t)f->ra;
 			uleb(&b, 1); b.p[b.n++] = 0x1b;	/* augmentation: pcrel sdata4 */
+			}
 			if (!f->simple && x86) {	/* cfa = rsp + 8, the return address at cfa - 8 */
 				b.p[b.n++] = 0x0c; uleb(&b, 7); uleb(&b, 8);
 				b.p[b.n++] = 0x80 | 16; uleb(&b, 1);
 			} else if (!f->simple) { b.p[b.n++] = 0x0c; uleb(&b, 31); uleb(&b, 0); }
-			while ((b.n - st) & 3) b.p[b.n++] = 0;
+			while ((b.n - st) & (dbg ? 7 : 3)) b.p[b.n++] = 0;
 			uint32_t len = (uint32_t)(b.n - st - 4);
 			memcpy(b.p + st, &len, 4);
 		}
 		size_t st = b.n;
 		b.n += 4;
-		uint32_t cptr = (uint32_t)(b.n - cies[ci].off);
+		uint32_t cptr = dbg ? cies[ci].off : (uint32_t)(b.n - cies[ci].off);
 		memcpy(b.p + b.n, &cptr, 4); b.n += 4;
 		size_t pcb = b.n;
-		memset(b.p + b.n, 0, 8); b.n += 8;	/* pc_begin, pc_range: fixups */
-		uleb(&b, 0);
-		int64_t cfa = 0;
+		memset(b.p + b.n, 0, dbg ? 16 : 8); b.n += dbg ? 16 : 8;	/* pc_begin, pc_range: fixups */
+		if (!dbg) uleb(&b, 0);
+		int64_t cfa = !f->simple && x86 ? 8 : 0;	/* (the CIE's rsp + 8) */
 		uint32_t base = f->start;
 		for (uint32_t k = f->first; k < f->first + f->n; k++) {
 			struct Cfi *c = &a->cfi[k];
@@ -2893,7 +2910,7 @@ static void cfi_finish(As *a)
 			case CF_ESCAPE: memcpy(b.p + b.n, c->esc, (size_t)c->off); b.n += (size_t)c->off; break;
 			}
 		}
-		while ((b.n - st) & 3) b.p[b.n++] = 0;
+		while ((b.n - st) & (dbg ? 7 : 3)) b.p[b.n++] = 0;
 		if (oi == a->nfde - 1) while (b.n & 7) b.p[b.n++] = 0;	/* the section ends 8-aligned (MC) */
 		uint32_t len = (uint32_t)(b.n - st - 4);
 		memcpy(b.p + st, &len, 4);
@@ -2902,6 +2919,24 @@ static void cfi_finish(As *a)
 	uint64_t at = elf_frag(o, fr)->size;
 	uint8_t *q = elf_grow(o, fr, b.n);
 	memcpy(q, b.p, b.n);
+	if (dbg) {
+		/* the CIE pointers: the section's offsets, absolute; addresses and ranges 8 bytes */
+		uint32_t s0 = tmpsym(a);
+
+		elf_define(o, s0, fr, at);
+		for (uint32_t oi = 0; oi < a->nfde; oi++) {
+			uint32_t i = ord[oi];
+			struct Fde *f = &a->fde[i];
+			uint32_t cp;
+
+			memcpy(&cp, q + pcbs[i] - 4, 4);
+			memset(q + pcbs[i] - 4, 0, 4);
+			elf_fixup(o, fr, at + pcbs[i] - 4, q + pcbs[i] - 4, x86 ? R_X86_64_32 : R_AARCH64_ABS32, (Val){ s0, 0, (int64_t)cp });
+			elf_fixup(o, fr, at + pcbs[i], q + pcbs[i], x86 ? R_X86_64_64 : R_AARCH64_ABS64, (Val){ f->start, 0, 0 });
+			elf_fixup(o, fr, at + pcbs[i] + 8, q + pcbs[i] + 8, x86 ? R_X86_64_64 : R_AARCH64_ABS64, (Val){ f->end, f->start, 0 });
+		}
+		return;
+	}
 	for (uint32_t oi = 0; oi < a->nfde; oi++) {
 		uint32_t i = ord[oi];
 		struct Fde *f = &a->fde[i];

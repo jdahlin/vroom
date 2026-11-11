@@ -21,6 +21,41 @@ VPRIV int x64_i_jump(As *a, char *mn, XOp *o, int nops)
 		if ((cc = x64_cc(c)) >= 0)
 			return x64_branch(a, cc, &o[0], 0);
 	}
+	/* loop/loope/loopne, jrcxz/jecxz: rel8 only (out of range is an error, as MC) */
+	if (nops == 1 && o[0].kind == XK_EXPR && !o[0].star) {
+		static const struct { const char *n; uint8_t a32, op; } r8[] = {
+			{ "loop", 0, 0xe2 }, { "loope", 0, 0xe1 }, { "loopz", 0, 0xe1 }, { "loopne", 0, 0xe0 }, { "loopnz", 0, 0xe0 },
+			{ "jrcxz", 0, 0xe3 }, { "jecxz", 1, 0xe3 },
+		};
+		for (size_t i = 0; i < sizeof r8 / sizeof *r8; i++)
+			if (!strcmp(mn, r8[i].n)) {
+				uint32_t fr = a->cur;
+				uint64_t off;
+				uint8_t *p;
+				Val v = o[0].v;
+				int n = 2 + r8[i].a32;
+
+				elf_code(a->o, fr);
+				off = elf_frag(a->o, fr)->size;
+				p = elf_grow(a->o, fr, (uint64_t)n);
+				if (r8[i].a32)
+					p[0] = 0x67;
+				p[n - 2] = r8[i].op, p[n - 1] = 0;
+				v.c -= 1;
+				elf_fixup(a->o, fr, off + (uint64_t)n - 1, p + n - 1, R_X86_64_PC8, v);
+				return 0;
+			}
+	}
+	/* ljmp/lcall through memory: ff /5, ff /3 (l: 32-bit offset, q: REX.W) */
+	if (nops == 1 && (o[0].star || o[0].kind == XK_MEM) &&
+	    (!strcmp(mn, "ljmp") || !strcmp(mn, "ljmpl") || !strcmp(mn, "ljmpq") || !strcmp(mn, "ljmpw") ||
+	     !strcmp(mn, "lcall") || !strcmp(mn, "lcalll") || !strcmp(mn, "lcallq") || !strcmp(mn, "lcallw"))) {
+		char s = mn[strlen(mn) - 1];
+
+		if (o[0].kind == XK_EXPR)
+			o[0].kind = XK_MEM;
+		return x64_emit(a, &F(.w = s == 'q', .opsz16 = s == 'w', .op = OPB(0xff), .nop = 1, .reg = mn[1] == 'j' ? 5 : 3, .rm = &o[0]));
+	}
 	if ((!strcmp(mn, "call") || !strcmp(mn, "callq")) && nops == 1) {
 		if (o[0].star || o[0].kind == XK_REG || o[0].kind == XK_MEM) {
 			o[0].kind = o[0].kind == XK_EXPR ? XK_MEM : o[0].kind;
@@ -342,6 +377,13 @@ VPRIV int x64_i_int(As *a, char *mn, XOp *o, int nops)
 				if (o[0].kind == XK_EXPR)
 					o[0].kind = XK_MEM;
 				return x64_emit(a, &F(.w = z == 8, .opsz16 = z == 2, .rep = m[0] == 'b' ? 0 : 0xf3, .op = ops, .nop = 2, .reg = o[1].reg, .rm = &o[0]));
+			}
+			if (!strcmp(m, "ud1") && nops == 2) {	/* 0f b9 /r: the kernel's BUG/UBSAN trap with operands */
+				int z = x64_size(a, sz, &o[0], &o[1]);
+
+				if (o[0].kind == XK_EXPR)
+					o[0].kind = XK_MEM;
+				return x64_emit(a, &F(.w = z == 8, .opsz16 = z == 2, .op = OPB(0x0f, 0xb9), .nop = 2, .reg = o[1].reg, .rm = &o[0]));
 			}
 			if (!strcmp(m, "bswap") && nops == 1) {
 				int z = x64_size(a, sz, &o[0], &o[0]);

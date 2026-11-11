@@ -18,6 +18,7 @@ typedef struct {
 	uint8_t kind, cls, reg, size, hi8, star, needrex;	/* register: class, number, size; hi8: ah..bh */
 	int8_t base, index;	/* memory: -1 none; base 16: rip */
 	uint8_t scale, seg, mod;	/* seg: 0 none, 0x64 fs, 0x65 gs */
+	uint8_t a32;		/* memory through 32-bit registers: the 0x67 prefix */
 	Val v;			/* immediate / displacement / target */
 	int hasv;
 } XOp;

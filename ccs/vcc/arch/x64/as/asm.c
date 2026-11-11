@@ -78,7 +78,10 @@ static int x64_regname(const char *s, size_t n, XOp *o)
 /* a register at p (after %): its name's end */
 static const char *x64_reg(As *a, const char *p, const char *e, XOp *o)
 {
-	const char *q = p;
+	const char *q;
+
+	p = ws(p, e);	/* (MC: "% rip", as a macro's -E output writes it) */
+	q = p;
 
 	while (q < e && (isidc((unsigned char)*q) || c_digit((unsigned char)*q)))
 		q++;
@@ -231,8 +234,9 @@ mem:
 				return 0;
 			}
 			o->base = (int8_t)(r.cls == XR_RIP ? 16 : r.reg);
-			if (r.cls != XR_RIP && (r.cls != XR_GPR || r.size != 8))
+			if (r.cls != XR_RIP && (r.cls != XR_GPR || (r.size != 8 && r.size != 4)))
 				return err(a, "invalid base register");
+			o->a32 = r.cls == XR_GPR && r.size == 4;
 			p = ws(q, e);
 		}
 		if (p < e && *p == ',') {
@@ -242,8 +246,10 @@ mem:
 
 				if (!q)
 					return -1;
-				if (r.cls != XR_GPR || r.size != 8 || r.reg == 4)
+				if (r.cls != XR_GPR || (r.size != 8 && r.size != 4) || r.reg == 4 ||
+				    (o->base >= 0 && o->base != 16 && (r.size == 4) != o->a32))
 					return err(a, "invalid index register");
+				o->a32 = r.size == 4;
 				o->index = (int8_t)r.reg;
 				p = ws(q, e);
 			}
@@ -368,6 +374,8 @@ VPRIV int x64_emit(As *a, XForm *f)
 		rex |= 0x40;
 	if (seg)
 		eb(&x, seg);
+	if (rm && rm->kind == XK_MEM && rm->a32)
+		eb(&x, 0x67);
 	if (f->opsz16 && !f->vex)
 		eb(&x, 0x66);
 	if (a->x64_lock) {
