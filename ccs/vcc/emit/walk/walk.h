@@ -36,7 +36,7 @@ typedef struct wkarg { uint8_t n, cls[2]; bool mem, x87, up; uint32_t align; uin
 /* ---------------- walker state (one per ecx) ---------------- */
 
 #define WK_MAXLOOP 1024
-#define WK_MAXCASE (1u << 16)
+#define WK_MAXCASE (1u << 20)
 
 typedef struct wkloop { uint32_t brk, cont; int cdepth; } wkloop;	/* cdepth: the cleanups live at its entry */
 #define WK_MAXCLEAN 1024

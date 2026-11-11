@@ -124,7 +124,7 @@ typedef struct declr {
 } declr;
 
 /* the declarator op stack (shared, nested declarators push and pop) */
-#define DOPS_MAX 4096
+#define DOPS_MAX (1u << 20)
 #define FM_DEPTH 256	/* nested anonymous members find_member follows */
 
 /* ---------------- struct / union / enum bodies ---------------- */

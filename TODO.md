@@ -714,12 +714,16 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   "array has incomplete element type"; "previous definition is here" for a
   defined function: tests/vcc `label_decl.c`, diag `label_decl_kr_vis.c`,
   `incomplete_var.c`, `conflict_prev_def.c`.)
-- [ ] **Fixed limits** (struct members now 1M, pointer levels 1024, nested
-  declarators stack-guarded): 4096 struct members (`cc.c:6255,6313`), 64
-  declarator levels (`cc.c:6047-6113`), `DOPS_MAX` 4096 (`cc.c:5551`), 16
-  nested anonymous members (`find_member` `cc.c:3310`), 256 K&R params
-  (`cc.c:7339`).
-  *Validate:* T1 `fe-limits.c` (generated, at 2× each limit).
+- [ ] **Fixed limits** (struct members now 1M; flat declarator operators use
+  growing arena buffers with a 1M resource budget; genuinely nested declarators
+  remain stack-guarded). Flat labels parse iteratively into flat AST lists;
+  large switch duplicate checks use a sorted interval sweep. GCC's unchanged
+  10,000-pointer and 100,000-case tests compile on Linux x86-64 and ARM64.
+  Remaining limits include 16 nested anonymous members (`find_member`) and
+  256 K&R parameters.
+  *Validate:* `flat_declarators_labels.c`, stress `pointer-10k` and
+  `case-labels-*`; GCC `limits-pointer.c` and `limits-caselabels.c`;
+  excessive pointer storage and genuine expression nesting fail cleanly.
 
 ### Preprocessor and lexer (`pp.c`, `lex/lex.c`)
 - [x] **`#pragma once` by path string, capped at 4096** [P].  (Done: by (dev, ino) from

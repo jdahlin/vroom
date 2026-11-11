@@ -266,9 +266,27 @@ static bool nested_declarator(cc *c, bool abstract_ok)
  * order they apply to the base type (pointers, suffixes right to left, then
  * the nested declarator's ops).
  */
+/* Arena-backed growth keeps flat declarators off the C stack. Recovery resets
+ * ndops; temporary buffers are reclaimed with the translation unit arena. */
+static dop *dop_grow(cc *c, dop *old, uint32_t used, uint32_t *cap, uint32_t need)
+{
+	uint32_t nc = *cap;
+	dop *p;
+
+	if (need > DOPS_MAX)
+		fatal(c, tok(c)->loc, "declarator too complex");
+	while (nc < need)
+		nc *= 2;
+	p = halloc(c, nc * sizeof(*p));
+	memcpy(p, old, used * sizeof(*p));
+	*cap = nc;
+	return p;
+}
+
 VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32_t *nops)
 {
-	dop ptrs[1024], sufs[64];	/* (clang: no limit; DOPS_MAX bounds the whole) */
+	dop ptrbuf[16], sufbuf[8], *ptrs = ptrbuf, *sufs = sufbuf;
+	uint32_t pcap = 16, scap = 8;
 	int np = 0, ns = 0;
 	uint32_t ifirst = 0, inops = 0;
 	bool inner = false;
@@ -306,8 +324,8 @@ VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32
 					break;
 				next(c);
 			}
-			if (np >= 1024)
-				fatal(c, tok(c)->loc, "declarator too complex");
+			if ((uint32_t)np == pcap)
+				ptrs = dop_grow(c, ptrs, np, &pcap, pcap + 1);
 			ptrs[np++] = (dop){ .kind = 0, .q = (uint8_t)q, .fl = (uint16_t)(blk ? TF_BLOCK : 0) };
 			continue;
 		}
@@ -362,16 +380,16 @@ VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32
 	attribute_list(c, &d->at);
 	for (;;) {
 		if (accept(c, T_LSQUARE)) {
-			if (ns >= 64)
-				fatal(c, tok(c)->loc, "declarator too complex");
+			if ((uint32_t)ns == scap)
+				sufs = dop_grow(c, sufs, ns, &scap, scap + 1);
 			array_suffix(c, &sufs[ns++], d->name);
 		} else if (is(c, T_LPAREN)) {
 			uint32_t plb;
 
 			next(c);
 			plb = tok(c)->loc;
-			if (ns >= 64)
-				fatal(c, tok(c)->loc, "declarator too complex");
+			if ((uint32_t)ns == scap)
+				sufs = dop_grow(c, sufs, ns, &scap, scap + 1);
 			if (unlikely(!param_list(c, &sufs[ns], NULL)))
 				d->invalid = true;
 			/* Grouping a name adds no operators: (f)(int x) still defines x.
@@ -394,19 +412,16 @@ VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32
 		uint32_t at = c->ndops;
 		uint32_t n = (uint32_t)np + (uint32_t)ns + inops;
 
-		if (at + n > DOPS_MAX)
-			fatal(c, tok(c)->loc, "declarator too complex");
+		if (at + n > c->capdops)
+			c->dops = dop_grow(c, c->dops, c->ndops, &c->capdops, at + n);
 		/* the inner ops sit at [ifirst, ifirst + inops) which is below at */
 		if (inner) {
-			dop tmp[inops ? inops : 1];
-
-			memcpy(tmp, &c->dops[ifirst], inops * sizeof(dop));
 			at = ifirst;
+			memmove(&c->dops[at + np + ns], &c->dops[ifirst], inops * sizeof(dop));
 			for (int i = 0; i < np; i++)
 				c->dops[at + (uint32_t)i] = ptrs[i];
 			for (int i = 0; i < ns; i++)
 				c->dops[at + (uint32_t)np + (uint32_t)i] = sufs[ns - 1 - i];
-			memcpy(&c->dops[at + (uint32_t)np + (uint32_t)ns], tmp, inops * sizeof(dop));
 		} else {
 			for (int i = 0; i < np; i++)
 				c->dops[at + (uint32_t)i] = ptrs[i];

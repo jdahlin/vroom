@@ -53,6 +53,17 @@ def cases(d):
     case('ternary-100k', 'any', {'a.c': 'int x = ' + '1 ? ' * 100000 + '1' + ' : 0' * 100000 + ';\n'}, 'a.c')
     case('cast-chain-100k', 'any', {'a.c': 'long x = ' + '(long)' * 100000 + '1;\n'}, 'a.c')
     case('block-nest-5000', 'any', {'a.c': 'void f(void) ' + nest('{', '}', 5000, '') + '\n'}, 'a.c')
+    # Flat sequences use scalable storage and iterative parsing, not C recursion.
+    case('pointer-10k', 'ok', {'a.c': 'int ' + '* ' * 10000 + 'p;\n'}, 'a.c')
+    for order in ('forward', 'reverse'):
+        values = range(100000) if order == 'forward' else reversed(range(100000))
+        labels = ''.join(f'case {i}:' for i in values)
+        case('case-labels-100k-' + order, 'ok',
+             {'a.c': 'int f(int n) { switch(n) {' + labels + 'return 1; default:return 2;} }\n'}, 'a.c')
+    labels = ''.join(f'case {i}:' for i in range(1000))
+    case('case-labels-late-duplicate', 'error',
+         {'a.c': 'int f(int n) { switch(n) {' + labels + 'case 10:return 1;}return 0;}\n'},
+         'a.c', regex='duplicate case')
     # preprocessor recursion
     case('pp-if-parens-200k', 'any', {'a.c': '#if ' + nest('(', ')', 200000, '1') + '\nint x;\n#endif\n'}, 'a.c')
     case('pp-macro-nest-100k', 'any', {'a.c': '#define F(x) x\nint y = ' + nest('F(', ')', 100000, '1') + ';\n'}, 'a.c')

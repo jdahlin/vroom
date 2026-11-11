@@ -52,7 +52,8 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 	c->lzs = vmreg_get(&ccr[20], (size_t)1 << 31, "cc.lzs");
 	c->paren = vmreg_get(&ccr[21], (size_t)1 << 30, "cc.paren");
 	c->hend = c->heap + ((size_t)1 << 32);
-	c->dops = halloc(c, DOPS_MAX * sizeof(dop));
+	c->capdops = 4096;
+	c->dops = halloc(c, c->capdops * sizeof(dop));
 	c->ndops = 0;
 	tl_fscr.n = 0;
 	c->tyhcap = 1 << 16;

@@ -194,7 +194,7 @@ struct cc {
 
 	char *heap, *hp, *hend;	/* bump allocator for everything else */
 	struct dop *dops;	/* declarator op stack (cc/declarator.c) */
-	uint32_t ndops;
+	uint32_t ndops, capdops;
 
 	/* scopes: identifier id -> innermost binding (sym index) */
 	uint32_t *odir[NDIR], *tdir[NDIR], *ldir[NDIR];

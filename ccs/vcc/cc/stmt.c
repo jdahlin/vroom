@@ -399,6 +399,62 @@ static void assign_cond_warn(cc *c, uint32_t e)
 	}
 }
 
+/* Large switches are checked with a sorted interval sweep, rather than a
+ * quadratic scan at every label. Keep the small-switch diagnostic order. */
+typedef struct case_order {
+	struct swcase v;
+	uint32_t index;
+} case_order;
+
+static int case_compare(const void *ap, const void *bp)
+{
+	const case_order *a = ap, *b = bp;
+
+	if (a->v.lo != b->v.lo)
+		return a->v.lo < b->v.lo ? -1 : 1;
+	return (a->index > b->index) - (a->index < b->index);
+}
+
+static void switch_duplicates(cc *c)
+{
+	uint32_t n = c->ncase - c->case_base, count = 0;
+	case_order *a, *high;
+
+	if (n <= 64)
+		return;
+	a = halloc(c, n * sizeof(*a));
+	for (uint32_t i = 0; i < n; i++) {
+		struct swcase v = c->cases[c->case_base + i];
+
+		if (v.lo <= v.hi)
+			a[count++] = (case_order){v, i};
+	}
+	qsort(a, count, sizeof(*a), case_compare);
+	if (!count)
+		return;
+	high = &a[0];
+	for (uint32_t i = 1; i < count; i++) {
+		case_order *cur = &a[i];
+
+		if (cur->v.lo <= high->v.hi) {
+			case_order *later = cur->index > high->index ? cur : high;
+			case_order *prior = later == cur ? high : cur;
+
+			if (later->index >= 64) {
+				char b[48];
+
+				snprintf(b, sizeof b, "%lld", (long long)cur->v.lo);
+				report(c, "error", later->v.loc, NULL, 0, NULL, 0,
+				       later->v.lo == later->v.hi && prior->v.lo == prior->v.hi ?
+				       "duplicate case value '%s'" : "duplicate case value '%s' in case range", b);
+				note(c, prior->v.loc, "previous case defined here");
+			}
+		}
+		if (cur->v.hi > high->v.hi)
+			high = cur;
+	}
+}
+
 /* -Wswitch: "enumeration value 'B' not handled in switch" (no default label) */
 static void switch_enum_warn(cc *c, qty et, uint32_t cnd)
 {
@@ -695,7 +751,16 @@ static void block_item(cc *c, uint32_t loc, vec *items, bool se, uint32_t *sedon
 	    undeclared_type_decl(c, items))
 		return;
 	c->se_direct = se;
-	vpush(c, items, statement(c));
+	uint32_t n = statement(c);
+
+	if (N(n)->op == N_BLOCK && N(n)->aux == 1) {
+		/* A flat label list is part of this block: in particular, its last
+		 * labeled expression still supplies a statement expression's value. */
+		for (uint32_t i = 0; i < N(n)->c; i++)
+			vpush(c, items, c->lists[N(n)->b + i]);
+	} else {
+		vpush(c, items, n);
+	}
 }
 
 VPRIV uint32_t compound_stmt(cc *c, qty *last)
@@ -802,6 +867,134 @@ static uint32_t label_sub(cc *c, uint32_t loc)
 	return statement(c);
 }
 
+/* Flat label sequences are one block, not a chain of recursive statements.
+ * This also bounds recursion in the semantic and machine-code AST walkers. */
+static bool at_label(cc *c)
+{
+	return iskw(c, KW_case) || iskw(c, KW_default) ||
+	       (is(c, T_IDENT) && !kwof(tok(c)) && peek(c, 1)->kind == T_COLON);
+}
+
+static uint32_t label_head(cc *c)
+{
+	ptok *t = tok(c);
+	uint32_t loc = t->loc;
+	int kw = kwof(t);
+
+	switch (t->kind) {
+	case T_IDENT:
+		if (!kw && peek(c, 1)->kind == T_COLON) {
+			uint32_t l = label_ref(c, t->id, loc), n, s;
+			attrs la = { 0 };
+
+			next(c), next(c);
+			attribute_list(c, &la);
+			if (c->labels[l].defined)
+				cc_error(c, loc, "redefinition of label '%.*s'", IDF(c->labels[l].name));
+			s = 0;
+			n = mkstmt(c, N_LABEL, loc, l, 0, s);
+			c->labels[l].defined = n;
+			return n;
+		}
+		break;
+	default: break;
+	}
+	switch (kw) {
+	case KW_case: {
+		i128 lo, hi;
+		uint32_t s, n;
+
+		uint32_t vloc;
+
+		next(c);
+		vloc = tok(c)->loc;
+		if (!c->in_switch)
+			cc_error(c, loc, "'case' statement not in switch statement");
+		const_expr(c, &lo, NULL);
+		hi = lo;
+		if (is(c, T_ELLIPSIS)) {
+			static const char *const g[] = { "pedantic", NULL };
+
+			EXT_WARN_MS(c, "...", "c2y-extensions", g, tok(c)->loc, "case ranges are a C2y extension");
+			next(c);
+			const_expr(c, &hi, NULL);
+		}
+		expect(c, T_COLON, "':'");
+		if (c->switch_ty)
+			lo = trunc_to(c, lo, c->switch_ty), hi = trunc_to(c, hi, c->switch_ty);
+		if (c->in_switch) {
+			for (uint32_t i = c->case_base; c->ncase - c->case_base < 64 && i < c->ncase; i++)
+				if (lo <= c->cases[i].hi && c->cases[i].lo <= hi) {
+					char b[48];
+					i128 d = lo > c->cases[i].lo ? lo : c->cases[i].lo;
+
+					snprintf(b, sizeof(b), "%lld", (long long)d);
+					report(c, "error", vloc, NULL, 0, NULL, 0, lo == hi && c->cases[i].lo == c->cases[i].hi
+					       ? "duplicate case value '%s'" : "duplicate case value '%s' in case range", b);
+					note(c, c->cases[i].loc, "previous case defined here");
+					break;
+				}
+			if (c->ncase == c->capcase) {
+				c->capcase = c->capcase ? c->capcase * 2 : 64;
+				c->cases = realloc(c->cases, c->capcase * sizeof(*c->cases));
+			}
+			c->cases[c->ncase++] = (struct swcase){ lo, hi, vloc };
+		}
+		s = 0;
+		c->ipool[c->nipool] = lo;
+		c->ipool[c->nipool + 1] = hi;
+		if (c->uv_any & 1)
+			c->uv_any |= 8;	/* (a jump from the switch: run the analysis) */
+		n = mkstmt(c, N_CASE, loc, c->nipool, c->nipool + 1, s);
+		c->nipool += 2;
+		return n;
+	}
+	case KW_default: {
+		uint32_t s;
+
+		next(c);
+		expect(c, T_COLON, "':'");
+		if (!c->in_switch)
+			cc_error(c, loc, "'default' statement not in switch statement");
+		c->sw_default = true;
+		s = 0;
+		if (c->uv_any & 1)
+			c->uv_any |= 8;
+		return mkstmt(c, N_DEFAULT, loc, 0, 0, s);
+	}
+	default: return 0;
+	}
+}
+
+static uint32_t labeled_statement(cc *c, bool sed)
+{
+	vec labels;
+	uint32_t loc = tok(c)->loc, last, body;
+	bool named = true;
+
+	vinit(&labels);
+	do {
+		last = label_head(c);
+		named &= N(last)->op == N_LABEL;
+		vpush(c, &labels, last);
+	} while (at_label(c));
+	c->se_direct = sed;
+	body = label_sub(c, N(last)->loc);
+	if (sed && named) {
+		/* In a statement expression the value is the final expression,
+		 * with its labels emitted immediately before it. */
+		vpush(c, &labels, body);
+	} else {
+		N(last)->c = body;
+	}
+	if (labels.n == 1)
+		return last;
+	uint32_t n = mkstmt(c, N_BLOCK, loc, 0, vfreeze(c, &labels), labels.n);
+
+	N(n)->aux = 1; /* synthetic label list, flattened by block_item */
+	return n;
+}
+
 VPRIV uint32_t statement(cc *c)
 {
 	ptok *t = tok(c);
@@ -812,6 +1005,8 @@ VPRIV uint32_t statement(cc *c)
 	c->se_direct = 0;
 	if (vstack_low())	/* { { { ... and if/while bodies nest statements (scope_open's limit may come later) */
 		fatal(c, loc, "statements nested too deeply");
+	if (at_label(c))
+		return labeled_statement(c, sed);
 	switch (t->kind) {
 	case T_LBRACE:
 		return compound_stmt(c, NULL);
@@ -826,22 +1021,6 @@ VPRIV uint32_t statement(cc *c)
 	case T_SEMI:
 		next(c);
 		return mkstmt(c, N_EXPR, loc, 0, 0, 0);
-	case T_IDENT:
-		if (!kw && peek(c, 1)->kind == T_COLON) {
-			uint32_t l = label_ref(c, t->id, loc), n, s;
-			attrs la = { 0 };
-
-			next(c), next(c);
-			attribute_list(c, &la);
-			if (c->labels[l].defined)
-				cc_error(c, loc, "redefinition of label '%.*s'", IDF(c->labels[l].name));
-			c->se_direct = sed;	/* (a labeled last statement gives the value) */
-			s = label_sub(c, loc);
-			n = mkstmt(c, N_LABEL, loc, l, 0, s);
-			c->labels[l].defined = n;
-			return n;
-		}
-		break;
 	default:
 		break;
 	}
@@ -1014,6 +1193,7 @@ VPRIV uint32_t statement(cc *c)
 					}
 				}
 			}
+			switch_duplicates(c);
 			c->ncase = c->case_base, c->case_base = sb;
 			c->sw_default = sd;
 		}
@@ -1021,68 +1201,6 @@ VPRIV uint32_t statement(cc *c)
 		c->switch_ty = saved;
 		scope_close(c);
 		return mkstmt(c, N_SWITCH, loc, cnd, body, 0);
-	}
-	case KW_case: {
-		i128 lo, hi;
-		uint32_t s, n;
-
-		uint32_t vloc;
-
-		next(c);
-		vloc = tok(c)->loc;
-		if (!c->in_switch)
-			cc_error(c, loc, "'case' statement not in switch statement");
-		const_expr(c, &lo, NULL);
-		hi = lo;
-		if (is(c, T_ELLIPSIS)) {
-			static const char *const g[] = { "pedantic", NULL };
-
-			EXT_WARN_MS(c, "...", "c2y-extensions", g, tok(c)->loc, "case ranges are a C2y extension");
-			next(c);
-			const_expr(c, &hi, NULL);
-		}
-		expect(c, T_COLON, "':'");
-		if (c->switch_ty)
-			lo = trunc_to(c, lo, c->switch_ty), hi = trunc_to(c, hi, c->switch_ty);
-		if (c->in_switch) {
-			for (uint32_t i = c->case_base; i < c->ncase; i++)
-				if (lo <= c->cases[i].hi && c->cases[i].lo <= hi) {
-					char b[48];
-					i128 d = lo > c->cases[i].lo ? lo : c->cases[i].lo;
-
-					snprintf(b, sizeof(b), "%lld", (long long)d);
-					report(c, "error", vloc, NULL, 0, NULL, 0, lo == hi && c->cases[i].lo == c->cases[i].hi
-					       ? "duplicate case value '%s'" : "duplicate case value '%s' in case range", b);
-					note(c, c->cases[i].loc, "previous case defined here");
-					break;
-				}
-			if (c->ncase == c->capcase) {
-				c->capcase = c->capcase ? c->capcase * 2 : 64;
-				c->cases = realloc(c->cases, c->capcase * sizeof(*c->cases));
-			}
-			c->cases[c->ncase++] = (struct swcase){ lo, hi, vloc };
-		}
-		s = label_sub(c, loc);
-		c->ipool[c->nipool] = lo;
-		c->ipool[c->nipool + 1] = hi;
-		if (c->uv_any & 1)
-			c->uv_any |= 8;	/* (a jump from the switch: run the analysis) */
-		n = mkstmt(c, N_CASE, loc, c->nipool, c->nipool + 1, s);
-		c->nipool += 2;
-		return n;
-	}
-	case KW_default: {
-		uint32_t s;
-
-		next(c);
-		expect(c, T_COLON, "':'");
-		if (!c->in_switch)
-			cc_error(c, loc, "'default' statement not in switch statement");
-		c->sw_default = true;
-		s = label_sub(c, loc);
-		if (c->uv_any & 1)
-			c->uv_any |= 8;
-		return mkstmt(c, N_DEFAULT, loc, 0, 0, s);
 	}
 	case KW_break:
 		next(c);
