@@ -253,15 +253,18 @@ VLINK = os.path.join(os.path.dirname(VPP), 'vlink')
 LLD = os.path.join(os.path.dirname(CL), 'ld.lld')
 
 def rt86():
+    global RTO86
+    if PIC:     # --vlink --pie/--pic: a static PIE (start-x86.S applies its R_X86_64_RELATIVE)
+        RTO86 = f'{OUT}/rt86-pie'
     os.makedirs(RTO86, exist_ok=True)
     for src, o in (('rt.c', 'rt.o'), ('start-x86.S', 'start.o')):
         if not os.path.exists(f'{RTO86}/{o}') or os.path.getmtime(f'{RTO86}/{o}') < os.path.getmtime(f'{ct.RT}/{src}'):
-            subprocess.run([CL, TGT, '-O2', '-fno-PIE', '-ffreestanding', '-fno-builtin', '-I', f'{ct.RT}/include', '-c',
+            subprocess.run([CL, TGT, '-O2', PIC or '-fno-PIE', '-ffreestanding', '-fno-builtin', '-I', f'{ct.RT}/include', '-c',
                             f'{ct.RT}/{src}', '-o', f'{RTO86}/{o}'], check=True)
             subprocess.run([os.path.join(os.path.dirname(CL), 'llvm-objcopy'), '--weaken', f'{RTO86}/{o}'], check=True)
 
 def link86(ld, objs, exe):
-    rc, _, err = sh([ld, '-static', '-T', f'{ct.RT}/link-x86.ld', f'{RTO86}/start.o'] + objs + [f'{RTO86}/rt.o', LIBGCC, '-o', exe], timeout=60)
+    rc, _, err = sh([ld, '-static'] + (['-pie', '--no-dynamic-linker'] if PIC else []) + ['-T', f'{ct.RT}/link-x86.ld', f'{RTO86}/start.o'] + objs + [f'{RTO86}/rt.o', LIBGCC, '-o', exe], timeout=60)
     return rc, err.decode(errors='replace')
 
 def vlink1(t):
@@ -275,7 +278,7 @@ def vlink1(t):
     cwd = os.path.dirname(path)
     src = open(path, 'rb').read().decode('latin-1')
     flags = ct.dg_flags(src) if suite == 'gcc' else ct.exec_marks(src)[0] if suite == 'vcc' else []
-    fl = BASE + ct.CLFL + flags
+    fl = [PIC if a == '-fno-PIE' and PIC else a for a in BASE] + ct.CLFL + flags
     timeout = ct.reference_timeout(path)
     rc, _, err = sh([CL] + fl + ['-c', path, '-o', f'{wd}/ref.o'], cwd=cwd, timeout=timeout)
     failure = ct.oracle_error(rc, err, 'compile', timeout)
@@ -295,8 +298,8 @@ def vlink1(t):
     if runtime_failure:
         return t, 'skip', runtime_failure['skip'], runtime_failure['why']
     failure = ct.oracle_error(rrc, err, 'run', 20)
-    if failure:
-        return t, 'error', failure['error'], failure['why']
+    if failure:	# (the bare static runtime: a reference that hangs there is no vlink question)
+        return t, 'skip', 'ref-fail', 'bare runtime: ' + failure['why']
     if suite in ('gcc', 'vcc') and rrc != 0:
         return t, 'skip', 'ref-fail', f'clang build exits {rrc}'
     rc, _, err = sh([VPP, '-c'] + fl + [path, '-o', f'{wd}/vcc.o'], cwd=cwd)
@@ -357,10 +360,10 @@ if __name__ == '__main__':
     ocmode = '--objcmp' in av
     vlmode = '--vlink' in av
     av = [a for a in av if a not in ('--fpcheck', '--objcmp', '--vlink')]
-    if vlmode:
-        rt86()
     for o, f in (('--pie', '-fPIE'), ('--pic', '-fPIC')):
         if o in av: PIC = f; av.remove(o)
+    if vlmode:
+        rt86()
     if '--obj' in av: OBJ = True; av.remove('--obj')
     for opt in ('-j', '--suite', '--show'):
         if opt in av:

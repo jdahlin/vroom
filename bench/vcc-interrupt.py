@@ -45,6 +45,20 @@ with tempfile.TemporaryDirectory(prefix='vcc-interrupt-') as tmp:
         run([vpp, *base, flag, '-O2', '-c', d / 'local-fp.c', '-o', d / 'local-fp.o'])
         run([clang, d / 'local-fp.o', src / 'entry.S', '-o', d / 'local-fp'])
         run([d / 'local-fp'])
+    # The kernel entry/return flags also apply when interrupt frames are used.
+    (d / 'thunk.S').write_text('.text\n.globl __x86_return_thunk\n__x86_return_thunk:\nret\n.section .note.GNU-stack,"",@progbits\n')
+    hardening = ['-fcf-protection=branch', '-fpatchable-function-entry=3,1',
+                 '-mfunction-return=thunk-extern', '-mindirect-branch-cs-prefix',
+                 '-fstack-protector-all']
+    for mode in ('-S', '-c'):
+        obj = d / ('hardened.s' if mode == '-S' else 'hardened.o')
+        run([vpp, *base, '-O2', *hardening, mode, src / 'return.c', '-o', obj])
+        if mode == '-S':
+            text = obj.read_text()
+            if 'endbr64' not in text or '__x86_return_thunk' not in text:
+                raise SystemExit('interrupt integration lost kernel entry/return protection')
+        run([clang, obj, src / 'entry.S', d / 'thunk.S', '-o', d / 'hardened'])
+        run([d / 'hardened'])
     cases = [
         'int __attribute__((interrupt)) f(void *p) { return 0; }',
         'void __attribute__((interrupt)) f(void) {}',
@@ -92,4 +106,4 @@ int main(void) {
         raise SystemExit('function-local UIRET selection leaked or was ignored')
     run([clang, d/'local-ui.s', '-o', d/'local-ui'])
     run([d/'local-ui'])
-print('interrupt: 14 entry/return executions, 6 diagnostic comparisons, global/local UIRET frame/encoding passed')
+print('interrupt: 16 entry/return executions, 6 diagnostic comparisons, global/local UIRET frame/encoding passed')

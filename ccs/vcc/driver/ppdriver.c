@@ -943,12 +943,14 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 	const char *x86_cpu = "x86-64";
 	int nosse = 0, nosse2 = 0, nommx = 0;	/* x86-64: -mno-sse, -mno-sse2, -mno-mmx (last one wins) */
 	uint64_t disabled_builtins[CC_DISABLED_BUILTIN_WORDS] = { 0 };
+	int xcf = 0, pfe_n = 0, pfe_m = 0, sprot = 0, sp_gs = 0, autozero = 0;
+	const char *sp_sym = NULL;	/* x86-64 hardening (cc_opts.xcf ...) */
 	pp_opts po = { 0 };
 	char *pmap = NULL;
 	double t0;
 	pp *p;
 	int comments = 0, nomarkers = 0;
-	int dmacros = 0, showinc = 0, ddefs = 0, syntax = 0, layout = 0, ms_anon = 0, short_wchar = 0, tokhash = 0, emit = 0, objmode = 0;
+	int dmacros = 0, showinc = 0, ddefs = 0, syntax = 0, layout = 0, ms_anon = 0, short_wchar = 0, strict_flex_arrays = 0, tokhash = 0, emit = 0, objmode = 0;
 	const char *stdver = NULL, *macos_min = NULL;
 	int fast_root4 = 0;
 	int macos_min_flag = 0, uchar = -1, fmath = 0;	/* fmath: 1 finite-only, 2 no errno, 4 __FAST_MATH__, 8 -pthread, 16 errno, 32 __ARM_FP_FAST */
@@ -975,6 +977,15 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 		}
 		if (!strcmp(a, "-dD")) { ddefs = 1; continue; }
 		if (!strcmp(a, "-fms-anonymous-structs") || !strcmp(a, "-fms-extensions")) { ms_anon = 1; continue; }
+		if (!strncmp(a, "-fstrict-flex-arrays=", 21)) {
+			if (a[21] < '0' || a[21] > '3' || a[22]) {
+				dprintf(errfd, "vcc: error: invalid argument '%s' to -fstrict-flex-arrays=\n", a + 21);
+				status = 2;
+				goto out;
+			}
+			strict_flex_arrays = a[21] - '0';
+			continue;
+		}
 		if (!strcmp(a, "-fshort-wchar")) { short_wchar = 1; continue; }
 		if (!strcmp(a, "-funsigned-char") || !strcmp(a, "-fno-signed-char")) { uchar = 1; continue; }
 		if (!strcmp(a, "-fsigned-char") || !strcmp(a, "-fno-unsigned-char")) { uchar = 0; continue; }
@@ -1062,6 +1073,27 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 		if (!strcmp(a, "-trigraphs") || !strcmp(a, "-ftrigraphs")) { tri = 1; continue; }
 		if (!strcmp(a, "-fno-trigraphs")) { tri = 0; continue; }
 		if (!strcmp(a, "-fgnu89-inline")) { gnu89_inline = 1; continue; }
+		{
+			/* gcc-only options clang 23 rejects: rejected too, so configure and kbuild probes
+			   (cc-option) choose what they choose with clang */
+			static const char *const gcconly[] = {
+				"--param", "-fdiagnostics-show-context", "-falign-jumps", "-finline-stringops",
+				"-fno-allow-store-data-races", "-fallow-store-data-races", "-fzero-init-padding-bits",
+				"-fmin-function-alignment", "-mnop-mcount", "-mrecord-mcount", "-fconserve-stack",
+				"-fno-var-tracking-assignments", "-mpreferred-stack-boundary",
+				"-mindirect-branch=", "-mindirect-branch-register",
+			};
+
+			for (size_t k = 0; k < sizeof gcconly / sizeof *gcconly; k++) {
+				size_t n = strlen(gcconly[k]);
+
+				if (!strncmp(a, gcconly[k], n) && (!a[n] || a[n] == '=' || gcconly[k][n - 1] == '=')) {
+					dprintf(errfd, "clang: error: unknown argument: '%s'\n", a);
+					status = 1;
+					goto out;
+				}
+			}
+		}
 		if (!strcmp(a, "-fvcc-kernel")) { vcc_kernel = 1; continue; }
 		if (!strcmp(a, "-fno-gnu89-inline")) { gnu89_inline = 0; continue; }
 		if ((a[1] == 'W' && a[2] && a[3] != ',') || !strcmp(a, "-w") || strstr(a, "-pedantic") == a + (a[1] == '-')) {
@@ -1219,6 +1251,24 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 		else if (!strncmp(a, "-march=", 7) && arch_lse(a + 7, false) >= 0) march_lse = arch_lse(a + 7, false);
 		else if (!strncmp(a, "-mcpu=", 6) && arch_lse(a + 6, true) >= 0) mcpu_lse = arch_lse(a + 6, true);
 		else if (!strcmp(a, "-mcmodel=tiny")) tiny = 1;
+		else if (!strcmp(a, "-fcf-protection=branch") || !strcmp(a, "-fcf-protection=full") || !strcmp(a, "-fcf-protection")) xcf |= 1;
+		else if (!strcmp(a, "-fcf-protection=none") || !strcmp(a, "-fcf-protection=return")) xcf &= ~1;
+		else if (!strcmp(a, "-mfunction-return=thunk-extern")) xcf |= 2;
+		else if (!strcmp(a, "-mfunction-return=keep")) xcf &= ~2;
+		else if (!strcmp(a, "-mretpoline-external-thunk")) xcf |= 4;
+		else if (!strcmp(a, "-mindirect-branch-cs-prefix")) xcf |= 8;
+		else if (!strncmp(a, "-fpatchable-function-entry=", 27)) {
+			pfe_n = atoi(a + 27), pfe_m = strchr(a + 27, ',') ? atoi(strchr(a + 27, ',') + 1) : 0;
+		}
+		else if (!strcmp(a, "-fstack-protector")) sprot = 1;
+		else if (!strcmp(a, "-fstack-protector-strong")) sprot = 2;
+		else if (!strcmp(a, "-fstack-protector-all")) sprot = 3;
+		else if (!strcmp(a, "-fno-stack-protector")) sprot = 0;
+		else if (!strcmp(a, "-mstack-protector-guard-reg=gs")) sp_gs = 1;
+		else if (!strcmp(a, "-mstack-protector-guard-reg=fs")) sp_gs = 0;
+		else if (!strncmp(a, "-mstack-protector-guard-symbol=", 31)) sp_sym = a + 31;
+		else if (!strcmp(a, "-ftrivial-auto-var-init=zero")) autozero = 1;
+		else if (!strcmp(a, "-ftrivial-auto-var-init=uninitialized")) autozero = 0;
 		else if (!strcmp(a, "-"))
 			main_file = a;	/* stdin, as clang: "<stdin>" in diagnostics and line markers */
 		else if (a[0] != '-' && a[0] && (xlang || src_suffix(a))) {
@@ -1259,6 +1309,48 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 		status = 2;
 		goto out;
 	}
+	if (nwargs) {
+		/* clang: a -W option naming no warning group is -Wunknown-warning-option, which kbuild's
+		   cc-option probes make an error: gcc-only flags must fail as with clang */
+		static const char *const wgroups[] = {
+#include "../vccd/warnings.inc"
+		};
+		bool strict = false;
+
+		for (int i = 0; i < nwargs; i++)
+			if (!strcmp(wargs[i], "-Werror=unknown-warning-option"))
+				strict = true;
+		for (int i = 0; strict && i < nwargs; i++) {
+			const char *w = wargs[i] + 2;
+			char name[128];
+			size_t n;
+			bool found = false;
+
+			if (wargs[i][1] != 'W' || !strcmp(w, "error") || !strcmp(w, "all") || !strcmp(w, "extra") || !strcmp(w, "everything"))
+				continue;
+			if (!strncmp(w, "no-", 3))
+				w += 3;
+			if (!strcmp(w, "error") || !strcmp(w, "everything"))
+				continue;	/* (-Wno-error) */
+			if (!strncmp(w, "error=", 6))
+				w += 6;
+			n = strcspn(w, "=");
+			if (!n || n >= sizeof name)
+				continue;
+			memcpy(name, w, n);
+			name[n] = 0;
+			for (size_t k = 0; k < sizeof wgroups / sizeof *wgroups && !found; k++)
+				found = !strcmp(wgroups[k], name);
+			if (found && w[n] == '=' && strcmp(name, "frame-larger-than") && strcmp(name, "larger-than") &&
+			    strcmp(name, "format"))
+				found = false;	/* (clang takes a value for these only: -Wimplicit-fallthrough=5 is unknown) */
+			if (!found) {
+				dprintf(errfd, "error: unknown warning option '%s' [-Werror,-Wunknown-warning-option]\n", wargs[i]);
+				status = 1;
+				goto out;
+			}
+		}
+	}
 	if (!strcmp(main_file, "-") && raw_asm == 1) {
 		dprintf(errfd, "vcc: error: assembler input from stdin is not supported\n");
 		status = 2;
@@ -1270,6 +1362,22 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 		if (read_stdin_all(env->infd, errfd, &stdin_src, &stdin_len)) {
 			status = 1;
 			goto out;
+		}
+	} else {
+		/* a device or pipe (kbuild's probes compile /dev/null): read whole, as stdin */
+		struct stat dst;
+
+		if (!stat(main_file, &dst) && !S_ISREG(dst.st_mode) && !S_ISDIR(dst.st_mode)) {
+			int dfd = open(main_file, O_RDONLY);
+
+			if (dfd < 0 || read_stdin_all(dfd, errfd, &stdin_src, &stdin_len)) {
+				if (dfd >= 0)
+					close(dfd);
+				dprintf(errfd, "vcc: error: %s: cannot read\n", main_file);
+				status = 1;
+				goto out;
+			}
+			close(dfd);
 		}
 	}
 	if (emit == 1 && !objmode && !out && !layout) {
@@ -1682,12 +1790,13 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 		goto done;
 	}
 	if (syntax) {
-		cc_opts co = { .target = po.target, .unsigned_char = po.unsigned_char, .dump_layouts = layout, .ms_anon = ms_anon, .short_wchar = short_wchar,
+		cc_opts co = { .target = po.target, .unsigned_char = po.unsigned_char, .dump_layouts = layout, .ms_anon = ms_anon, .short_wchar = short_wchar, .strict_flex_arrays = strict_flex_arrays,
 				.std = std, .c2y = std == 23 && stdver && !strcmp(stdver, "202400L"), .implicit_int = std == 89 || wimpl_int, .implicit_fn = std == 89 || wimpl_fn, .conv_warn = conv_warn,
 				.strict_std = strict,
 				.fast_math = fast_root4 && (fmath & 7) == 7, .gnu89_inline = gnu89_inline, .no_builtin = freestanding || nobuiltin, .instrument = instr, .wasm_sjlj = sjlj,
 				.x86_features = x86_features_, .x86_disabled = x86_disabled, .x86_features_set = x86, .x86_raw = x86_raw, .x86_override_on = x86_on, .x86_override_off = x86_off,
 				.general_regs_only = gregs || (x86 && (nosse || nosse2)), .vcc_kernel = vcc_kernel, .lse = lse, .opt = olevel, .pic = pic ? 2 : pie ? 1 : 0, .tlsmodel = tlsmodel, .sections = sections, .debug = debug, .cfi = cfi > 0, .dbg_name = main_file,
+				.xcf = x86 ? xcf : 0, .pfe_n = x86 ? pfe_n : 0, .pfe_m = pfe_m, .sprot = x86 ? sprot : 0, .sp_gs = sp_gs, .sp_sym = sp_sym, .autozero = x86 ? autozero : 0,
 			       .outfd = env->outfd };
 		int fd = -1;
 		char outpath[4096], outtmp[4200];
@@ -1784,6 +1893,7 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 		const char *msg;
 
 		as_set_dir(tl_as, env->cwd);
+		elf_set_machine(tl_obj, x86 ? EM_X86_64 : EM_AARCH64);	/* (a .S file: preprocessed, then assembled) */
 		char *dt = NULL;
 		size_t dn = o.n;
 

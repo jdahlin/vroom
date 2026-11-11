@@ -43,7 +43,10 @@ def main():
     stub_o = out + ".vroom-stubs.o"
     with open(stub_s, "w") as f:
         f.write("\n".join(asm) + "\n")
-    subprocess.run([CLANG, "--target=aarch64-linux-gnu", "-c", stub_s, "-o", stub_o], check=True)
+    # the link's machine: -m elf_x86_64 (the x86-64 kernel, PLAN-x86.md X8), else arm64
+    x86 = any(a in ("elf_x86_64", "-melf_x86_64") for a in args)
+    subprocess.run([CLANG, "--target=x86_64-linux-gnu" if x86 else "--target=aarch64-linux-gnu", "-c", stub_s, "-o", stub_o],
+                   check=True)
     with open(out + ".vroom-stubs", "w") as f:
         f.write("\n".join(undef) + "\n")
     p = subprocess.run([LLD] + args + [stub_o])

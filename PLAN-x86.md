@@ -340,6 +340,64 @@ kärnan och kan vänta.
 
 ## Status
 
+### X5 (2026-11-11): direktkodning från posterna, plan
+
+Mätt: kernel/fork.c `-c` 0,15 s mot `-S` 0,11 s; assemblern på texten är ~25 %
+av TU:n.  Väg, steg för steg, varje steg byte-identiskt (`vcc-x86.py --objcmp`):
+1. En assemblersession utan text (`as_open/as_close` på ElfObj, som `as_run`
+   gör men utan källa): sektioner, symboler, etiketter (`as_label`), hopp via
+   `as_branch` (samma relaxering), och `as_line` för det som får vara text
+   (data, direktiv, CFI, `.loc`, inline asm) i samma session.
+2. `x64_encode(e, rec)`: posterna X_MOV/X_LD/X_ST/X_LEA/ALU/X_CMP/X_TEST/
+   X_SETCC/X_CALL/X_JMP/X_JCC/X_PUSH/X_POP direkt till `XForm` + `x64_emit`
+   (assemblerns kodare: MC:s val ärvs); övriga poster som en rad text.
+3. Andelen textrader mot noll: SSE/x87-posterna, prolog/epilog, CFI (`cfi_*`
+   anrop i stället för `.cfi_*`-text), `.loc` (dw_row direkt).
+4. Data och sektionshuvuden direkt (som arm64:s IT_SYMHDR/IT_DATA).
+Validering per steg: --objcmp 100 %, -g/-fasynchronous-unwind-tables, kärnans
+TU:er (`vcc -c` mot `vcc -S | vasm`: samma objekt), tid per TU (vbench).
+
+### X8 (2026-11-11): x86-kärnan byggs med vpp, påbörjat
+
+- `work/vcc-x86-cc.sh` (vpp som CC, bara versionsfrågorna till clang),
+  `make O=work/build-x86 ARCH=x86_64 LLVM=1 CC=... defconfig vmlinux`.
+  Kbuilds sonder ger nu samma `.config` som clang:s (utom CC_CAN_LINK):
+  okända -W och gcc-flaggor avvisas som clang, -D som omdefinierar ett
+  fördefinierat makro varnar.
+- Härdningen som kärnan begär, som clang skriver den: `-fcf-protection=branch`
+  (endbr64, IBT-noten), `-fpatchable-function-entry=N,M` (nop:ar, sektionen
+  `__patchable_function_entries` med SHF_LINK_ORDER per funktion),
+  `-mfunction-return=thunk-extern`, `-mretpoline-external-thunk` med
+  `-mindirect-branch-cs-prefix`, `-fstack-protector*` med
+  `-mstack-protector-guard-reg/-symbol`, `-ftrivial-auto-var-init=zero`.
+- Rättat på vägen: statiska grenar (adress-argument bundna vid inlining,
+  "i" från frontändens konstant), ASM_CALL_CONSTRAINT (%rsp), cpuid (utdata
+  via pekare), call_on_stack (callee-saved operander), rip_rel_ptr,
+  `#pragma GCC visibility`, döda &&-operander, asm goto med utdata,
+  ALTERNATIVE (.skip/.fill som layouten avgör), x86-assemblern (SSE4, AES,
+  SHA, CRC32, AVX/AVX2 via VEX, system- och CET-instruktioner, kontroll-
+  register, registeralias), x86-assemblern delad per instruktionsfamilj.
+- Kvar (24 objekt av ~2950): `.code32`/`.code16` (realmode, efi-mixed,
+  vdso32, kompat-entry), AVX-512 (EVEX) i krypto, `.org`-mål, några
+  direktiv; sedan länkning (vlink), objtool och boot under qemu.
+
+### X4 (2026-11-11): påbörjat, vikningar i vandraren
+
+- `wk_cond` och `if`/`?:` använder arm64:s formvikningar (`cond_fold`: x >> 0 != x,
+  x < y && x > y, intervall); ett villkor som alltid hoppar gör grenen död
+  (`wkst.cjump`), och `?:` med känt villkor (efter inlining) genererar en arm.
+- 0 << x, 0 >> x, -1 >> x viks; laster av const-globaler (heltal, och (int) av
+  en const double) viks som arm64:s `const_global`.
+- a[K] = konstant för lokala fält som bara används som a[KONST] (ingen SA_AESC)
+  följer med till laster i rak kod (`wkst.ael`; en etikett glömmer dem), som
+  arm64:s ael: pure-1.
+- (float)floor((double)f) → floorf(f) (även ceil, trunc, round, rint,
+  nearbyint, fabs) med optimering, som clang -O2: 20030125-1.
+- `vcc-x86.py -j 6`: 1776/1776; --pic, --obj och -g lika; --objcmp 1846/1846,
+  --fpcheck 1908/1908, --vlink 1758/1758, vcc-abi x86_64 12/12; arm64 oförändrad.
+- Kvar i X4: ett riktigt pass på records (registerallokering, kopie-
+  propagering, som arm64:s opt.c) och -O1 som eget läge.
+
 ### X7 (2026-11-11): vlink för x86-64, statiska länkar klara
 
 - `arch/x64/ld/x64.inc` (inkluderas av `ld/ld.c`): relokeringsskanning och
@@ -353,7 +411,10 @@ kärnan och kan vänta.
 - `bench/vcc-x86.py -j 6 --vlink`: 1750/1751 laddade bilder byte-identiska
   med lld:s och körs; kvar 20030125-1 (floor→floorf, kräver optimeraren).
   arm64 oförändrad: `VCC_LDCMP=1 vcc-ctests.py` 1780/1780, vlink-opts, vlink-bad.
-- Kvar: delade objekt/PIE-länkar (PLT, dynamiska relokeringar) för x86.
+- Statisk PIE (`--vlink --pie`: rt med -fPIE, `-static -pie --no-dynamic-linker`,
+  start-x86.S tillämpar R_X86_64_RELATIVE): 1749/1750 byte-identiska och körs.
+  Tom `.rela.dyn` som skriptet namnger blir RELA som lld:s (bara x86 än så länge).
+- Kvar: delade objekt och dynamiskt länkade program (PLT, .dynamic) för x86.
 
 ### X5/X6 (2026-11-11): assembler och objekt, påbörjat
 - `arch/x64/as/asm.c`: AT&T-parser och kodare (heltal, SSE, x87, prefix, `@PLT`/`@GOTPCREL`/

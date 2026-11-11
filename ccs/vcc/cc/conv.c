@@ -547,6 +547,16 @@ static void const_conv(cc *c, uint32_t n, qty to)
 	tw = (int)int_bits(c, to), sw = (int)int_bits(c, from);
 	if (tw >= sw || tw > 64)
 		return;
+	{
+		/* clang: __builtin_object_size is no constant here (it is evaluated after
+		   optimization): no -Wconstant-conversion for its (size_t)-1 */
+		uint32_t e = n;
+
+		while (N(e)->op == N_CAST && N(e)->a)
+			e = N(e)->a;
+		if (N(e)->op == N_BUILTIN && (N(e)->aux == BI_OBJECT_SIZE || N(e)->aux == BI_DYNAMIC_OBJECT_SIZE))
+			return;
+	}
 	tnn = !is_signed(c, to);
 	v = cv.i;
 	if (!is_signed(c, from) && sw <= 64)

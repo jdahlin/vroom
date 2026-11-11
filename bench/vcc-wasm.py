@@ -57,6 +57,15 @@ WASM_XFAIL.update({
     'fp_class_runtime': 'wasm: __builtin_isfpclass/__builtin_fpclassify not lowered (PLAN-wasm.md W4)',
     'inline_walk': 'wasm: inlining (const parameters, labels per instance) only in the shared walker, not the wasm emitter',
     'vec_wide_lanes': 'wasm: __int128/double vector lanes (TODO.md tier 1, as arm64)',
+    'switch_const_fold': 'wasm: a constant switch keeps every case (the x86 walker folds it)',
+    'if_call_const': 'wasm: an if on a call folded to a constant keeps both branches (the x86 walker folds it)',
+    'cond_dead_and': 'wasm: the dead operand of a known && is generated (the x86 walker drops it)',
+    'and_zero_fold': 'wasm: x & 0 with x not constant is not folded (the x86 walker folds it)',
+    'if_stmtexpr_const': 'wasm: a statement expression constant does not decide an if (the x86 walker folds it)',
+    'dead_after_inline_return': 'wasm: statements after an inlined return are generated (the x86 walker drops them)',
+    'inline_unused_arg': 'wasm: an inlined function evaluates its unused arguments (the x86 walker skips them)',
+    'warn_once_const': 'wasm: a statement expression constant does not decide an if (the x86 walker folds it)',
+    'autoinit_zero': 'wasm: -ftrivial-auto-var-init=zero is x86-64 only so far (TODO.md tier 1)',
 })
 
 # New coverage of existing Wasm gaps; never skip the compile/run or accept XPASS.

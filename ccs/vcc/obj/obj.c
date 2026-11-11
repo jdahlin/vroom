@@ -163,6 +163,45 @@ void elf_expr_sym(ElfObj *o, uint32_t s, int op, ElfVal x, ElfVal y)
 	o->expr_tail = &e->next;
 }
 
+/* the expression that defines temporary s (elf_expr_sym): 1, else 0 */
+int elf_expr_get(ElfObj *o, uint32_t s, int *op, ElfVal *x, ElfVal *y)
+{
+	for (ElfExpr *e = o->expr; e; e = e->next)
+		if (e->sym == s) {
+			*op = e->op, *x = e->x, *y = e->y;
+			return 1;
+		}
+	return 0;
+}
+
+/* p op q as GNU as computes it (comparisons: -1 true); 0 for an operator it does not know */
+int elf_expr_op(int op, int64_t p, int64_t q, int64_t *r)
+{
+	switch (op) {
+	case '+': *r = (int64_t)((uint64_t)p + (uint64_t)q); break;
+	case '-': *r = (int64_t)((uint64_t)p - (uint64_t)q); break;
+	case '*': *r = (int64_t)((uint64_t)p * (uint64_t)q); break;
+	case '/': if (!q) return 0; *r = p / q; break;
+	case '%': if (!q) return 0; *r = p % q; break;
+	case 'L': *r = (int64_t)((uint64_t)p << (q & 63)); break;
+	case 'R': *r = (int64_t)((uint64_t)p >> (q & 63)); break;
+	case '&': *r = p & q; break;
+	case '|': *r = p | q; break;
+	case '^': *r = p ^ q; break;
+	case '!': *r = p | ~q; break;
+	case 'A': *r = p && q; break;
+	case 'O': *r = p || q; break;
+	case 'E': *r = p == q ? -1 : 0; break;
+	case 'N': *r = p != q ? -1 : 0; break;
+	case '<': *r = p < q ? -1 : 0; break;
+	case '>': *r = p > q ? -1 : 0; break;
+	case 'l': *r = p <= q ? -1 : 0; break;
+	case 'g': *r = p >= q ? -1 : 0; break;
+	default: return 0;
+	}
+	return 1;
+}
+
 void elf_size_expr(ElfObj *o, uint32_t s, ElfVal v)
 {
 	ElfSym *y = elf_symp(o, s);
@@ -183,9 +222,38 @@ uint32_t elf_find_section(ElfObj *o, const char *name, uint32_t len, uint32_t gr
 {
 	for (uint32_t i = 1; i < o->nsec; i++) {
 		ElfSec *s = elf_sec(o, i);
-		if (s->len == len && s->group == group && !memcmp(s->name, name, len)) return i;
+		if (s->len == len && s->group == group && !s->linksec && !memcmp(s->name, name, len)) return i;
 	}
 	return 0;
+}
+
+uint32_t elf_section_lo(ElfObj *o, const char *name, uint32_t len, uint32_t type, uint64_t flags, uint32_t entsize,
+			uint32_t group, uint32_t linksec, uint32_t linksym)
+{
+	for (uint32_t i = 1; i < o->nsec; i++) {
+		ElfSec *s = elf_sec(o, i);
+		if (s->len == len && s->group == group && s->linksec && s->linksym == linksym && !memcmp(s->name, name, len)) return i;
+	}
+	if (!linksec)
+		return elf_section(o, name, len, type, flags, entsize, group);
+	/* (a fresh one: elf_section finds none with linksec 0 of this name only if there is none) */
+	uint32_t save = o->nsec, i;
+	for (i = 1; i < o->nsec; i++) {
+		ElfSec *s = elf_sec(o, i);
+		if (s->len == len && s->group == group && !s->linksec && !memcmp(s->name, name, len)) break;
+	}
+	if (i < o->nsec) {	/* hide a same-named unlinked section while creating this one */
+		ElfSec *s = elf_sec(o, i);
+		s->linksec = UINT32_MAX;
+		uint32_t n = elf_section(o, name, len, type, flags, entsize, group);
+		s->linksec = 0;
+		elf_sec(o, n)->linksec = linksec, elf_sec(o, n)->linksym = linksym;
+		return n;
+	}
+	(void)save;
+	uint32_t n = elf_section(o, name, len, type, flags, entsize, group);
+	elf_sec(o, n)->linksec = linksec, elf_sec(o, n)->linksym = linksym;
+	return n;
 }
 
 uint32_t elf_section(ElfObj *o, const char *name, uint32_t len, uint32_t type,
@@ -414,19 +482,8 @@ void elf_layout(ElfObj *o)
 			if (b && ok) { if (b->flags & ESYM_ABS) v[k] -= (int64_t)b->value; else if (insec(b) && a) v[k] -= (int64_t)symoff(o, b); else ok = 0; }
 		}
 		if (!ok) { elf_error(o, "expected absolute expression"); continue; }
-		int64_t p = v[0], q = v[1], r = 0;
-		switch (e->op) {
-		case '*': r = (int64_t)((uint64_t)p * (uint64_t)q); break;
-		case '/': if (!q) { elf_error(o, "division by zero"); continue; } r = p / q; break;
-		case '%': if (!q) { elf_error(o, "division by zero"); continue; } r = p % q; break;
-		case 'L': r = (int64_t)((uint64_t)p << (q & 63)); break;
-		case 'R': r = (int64_t)((uint64_t)p >> (q & 63)); break;
-		case '&': r = p & q; break;
-		case '|': r = p | q; break;
-		case '^': r = p ^ q; break;
-		case '!': r = p | ~q; break;
-		default: elf_error(o, "bad operator in deferred expression"); continue;
-		}
+		int64_t r = 0;
+		if (!elf_expr_op(e->op, v[0], v[1], &r)) { elf_error(o, e->op == '/' || e->op == '%' ? "division by zero" : "bad operator in deferred expression"); continue; }
 		elf_define_abs(o, e->sym, (uint64_t)r);
 	}
 }

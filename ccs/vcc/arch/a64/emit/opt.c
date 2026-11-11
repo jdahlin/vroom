@@ -435,10 +435,7 @@ static _Thread_local struct {
 	em_slot_cells cells;
 	int32_t *rc;		/* per record: its cell, or -1 */
 	uint32_t caprc;
-	uint32_t *nld;		/* per cell: loads left */
-	uint32_t capnld;
-	struct av { uint32_t gen, ver, mv, pos, last; int8_t reg; } *av;	/* per cell */
-	uint32_t capav;
+	em_slot_values values;
 } SL;
 
 static void *grow_to(void *p, uint32_t *cap, uint32_t n, size_t sz)
@@ -520,10 +517,8 @@ static void slots(ecx *e)
 		if (!(cells->flags[cell] & EM_SLOT_BAD))
 			SL.rc[k] = (int32_t)cell;
 	}
-	SL.av = grow_to(SL.av, &SL.capav, ncell, sizeof(*SL.av));
-	memset(SL.av, 0, (size_t)ncell * sizeof(*SL.av));
-	SL.nld = grow_to(SL.nld, &SL.capnld, ncell, sizeof(uint32_t));
-	memset(SL.nld, 0, (size_t)ncell * sizeof(uint32_t));
+	if (!em_slot_values_begin(&SL.values, ncell))
+		return;
 	nb = W.blk[n - 1] + 1;
 	for (uint32_t b = 0; b < nb; b++) {
 		uint32_t gen = b + 1;
@@ -531,18 +526,17 @@ static void slots(ecx *e)
 		for (uint32_t k = W.bs[b]; k <= W.be[b]; k++) {
 			ins *i = &in[k];
 			int32_t ci = SL.rc[k];
-			struct av *a = ci >= 0 ? &SL.av[ci] : NULL;
+			em_slot_value *a = ci >= 0 ? em_slot_value_get(&SL.values, (uint32_t)ci, gen, i->op == I_LD) : NULL;
 			bool esc = ci >= 0 && (cells->flags[ci] & EM_SLOT_ESCAPED);
 			rmask w;
 
 			if (i->op == DELETED)
 				continue;
-			if (a && a->gen != gen)
-				a->gen = gen, a->reg = -1, a->last = UINT32_MAX;
 			if (a && i->op == I_LD) {
-				a->last = UINT32_MAX;	/* the pending store is read */
-				if (a->reg >= 0 && (a->reg == ZR || ver[a->reg] == a->ver) && (!esc || a->mv == mver)) {
-					int r = a->reg;
+				uint32_t version = a->value < ZR ? ver[a->value] : a->version;
+
+				if (em_slot_value_available(a, version, mver, esc)) {
+					int r = (int)a->value;
 
 					if (r != ZR)
 						for (uint32_t q = a->pos; q < k; q++)
@@ -568,19 +562,13 @@ static void slots(ecx *e)
 					mver++;	/* may write an escaped cell */
 				continue;
 			}
-			if (i->op == I_LD)
-				SL.nld[ci]++;
-			if (i->op == I_ST) {
-				SL.rc[nst++] = (int32_t)k;	/* (rc of earlier records is done with) */
-				if (!esc && a->last != UINT32_MAX)
-					in[a->last].op = DELETED;	/* overwritten before any load */
-				a->last = esc ? UINT32_MAX : k;	/* (escaped: read through a pointer, perhaps) */
-			}
-			a->reg = (int8_t)i->rd;	/* (31: zr) */
-			if (a->reg != ZR)
-				a->ver = ver[a->reg];
-			a->mv = mver;
-			a->pos = k;
+			uint32_t overwritten = em_slot_value_record(a, i->op == I_LD, esc, i->rd,
+				i->rd == ZR ? 0 : ver[i->rd], mver, k);
+
+			if (i->op == I_ST)
+				SL.rc[nst++] = (int32_t)k; /* rc of earlier records is done with */
+			if (overwritten != EM_SLOT_NO_STORE)
+				in[overwritten].op = DELETED;
 		}
 	}
 	/* a cell no load reads: its stores go */
@@ -591,7 +579,7 @@ static void slots(ecx *e)
 		if (i->op != I_ST)
 			continue;	/* (deleted meanwhile) */
 		cell = em_slot_find(cells, cell, i->imm, 1u << i->sz);
-		if (!SL.nld[cell] && !(cells->flags[cell] & EM_SLOT_ESCAPED))
+		if (em_slot_value_dead(&SL.values, cell, cells->flags[cell] & EM_SLOT_ESCAPED))
 			i->op = DELETED;
 	}
 }

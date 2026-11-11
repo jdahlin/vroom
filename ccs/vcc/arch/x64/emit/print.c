@@ -139,6 +139,17 @@ static void x64_imm(tbuf *b, int64_t v)
 	tb_i(b, v);
 }
 
+/* the stack protector's guard into r11: %fs:40 (glibc's TCB), or as -mstack-protector-guard-* say */
+static void x64_guard(ecx *e, tbuf *b)
+{
+	const cc_opts *o = e->E->o;
+
+	if (o->sp_sym)
+		tb_f(b, "\tmovq\t%%%s:%s(%%rip), %%r11\n", o->sp_gs ? "gs" : "fs", o->sp_sym);
+	else
+		tb_f(b, "\tmovq\t%%%s:40, %%r11\n", o->sp_gs ? "gs" : "fs");
+}
+
 /* Prologue callee-save slots can follow a frame larger than disp32. */
 static void x64_cs_access(ecx *e, tbuf *b, int r, bool load)
 {
@@ -200,10 +211,16 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 		if (dbg_where(e, c->syms[s].body ? N(c->syms[s].body)->loc : c->syms[s].loc, &f, &l, &cl))
 			tb_f(b, "\t.loc\t%u %u 0\n", f, l);
 	}
+	if (cfi)
+		tb_s(b, "\t.cfi_startproc\n");
+	if (e->E->o->xcf & 1)
+		tb_s(b, "\tendbr64\n");
+	for (int k = e->E->o->pfe_m; k < e->E->o->pfe_n; k++)
+		tb_s(b, "\tnop\n");
 	if (X->interrupt) {
 		int cfa = X->interrupt == 2 ? 24 : 16;
 		if (cfi) {
-			tb_s(b, "\t.cfi_startproc\n\t.cfi_signal_frame\n");
+			tb_s(b, "\t.cfi_signal_frame\n");
 			tb_f(b, "\t.cfi_def_cfa %%rsp, %d\n\t.cfi_offset %%rsp, %d\n", cfa - 8, uintr ? 8 : 16);
 		}
 		tb_s(b, "\tpushq\t%rbp\n\tmovq\t%rsp, %rbp\n");
@@ -231,7 +248,7 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 		if (cfi && !x64_nosimd(e))
 			for (int k = 0; k < 16; k++) x64_cs_cfi(b, 17 + k, 160 + 16 * k);
 	} else {
-		tb_s(b, cfi ? "\t.cfi_startproc\n\tpushq\t%rbp\n\t.cfi_def_cfa_offset 16\n\t.cfi_offset %rbp, -16\n"
+		tb_s(b, cfi ? "\tpushq\t%rbp\n\t.cfi_def_cfa_offset 16\n\t.cfi_offset %rbp, -16\n"
 			      "\tmovq\t%rsp, %rbp\n\t.cfi_def_cfa_register %rbp\n" : "\tpushq\t%rbp\n\tmovq\t%rsp, %rbp\n");
 		if (A > 16) {
 			tb_s(b, "\tpushq\t%r12\n");
@@ -249,6 +266,11 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 		tb_s(b, "\tsubq\t$");
 		tb_i(b, frame);
 		tb_s(b, ", %rsp\n");
+	}
+	if (e->wk->spneed) {
+		/* -fstack-protector: the guard into the canary slot (r11: no argument lives there) */
+		x64_guard(e, b);
+		tb_f(b, "\tmovq\t%%r11, %d(%s)\n", e->wk->canary, A > 16 ? "%r12" : "%rbp");
 	}
 	for (int r = 0; r < 16; r++)
 		if (X->csslot[r]) {
@@ -416,6 +438,11 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 				tb_s(b, "@PLT");
 			break;
 		case X_CALLR:
+			if (e->E->o->xcf & 4) {	/* -mretpoline-external-thunk */
+				tb_s(b, (e->E->o->xcf & 8) && i->r[1] >= 8 ? "\tcs\n\tcallq\t__x86_indirect_thunk_" : "\tcallq\t__x86_indirect_thunk_");
+				tb_s(b, x64_r64[i->r[1]]);
+				break;
+			}
 			tb_s(b, "\tcallq\t*");
 			x64_reg(b, i->r[1], 8);
 			break;
@@ -470,12 +497,19 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			tb_s(b, "\n#NO_APP");
 			break;
 		case X_JMPR:
+			if (e->E->o->xcf & 4) {
+				tb_s(b, (e->E->o->xcf & 8) && i->r[1] >= 8 ? "\tcs\n\tjmp\t__x86_indirect_thunk_" : "\tjmp\t__x86_indirect_thunk_");
+				tb_s(b, x64_r64[i->r[1]]);
+				break;
+			}
 			tb_s(b, "\tjmpq\t*");
 			x64_reg(b, i->r[1], 8);
 			break;
 		case X_NAMED:
 			ref_name(c, b, i->ref);
 			tb_c(b, ':');
+			if (e->E->o->xcf & 1)
+				tb_s(b, "\n\tendbr64");	/* (&&label: an indirect jump's target) */
 			break;
 		case X_MFENCE:
 			tb_s(b, "\tmfence");
@@ -636,6 +670,10 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 		}
 		tb_c(b, '\n');
 	}
+	if (e->wk->spneed) {
+		x64_guard(e, b);
+		tb_f(b, "\tcmpq\t%d(%s), %%r11\n\tjne\t.Lspfail%u\n", e->wk->canary, e->wk->falign > 16 ? "%r12" : "%rbp", s);
+	}
 	for (int r = 0; r < 16; r++)
 		if (X->csslot[r]) {
 			x64_cs_access(e, b, r, true);
@@ -662,16 +700,18 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 		if (cfi) tb_s(b, "\t.cfi_def_cfa %rsp, 8\n\t.cfi_same_value %rbp\n");
 		/* Encodings accepted by the integrated assembler as well as GNU as. */
 		tb_s(b, uintr ? "\t.byte 0xf3, 0x0f, 0x01, 0xec # uiret\n" : "\t.byte 0x48, 0xcf # iretq\n");
-		if (cfi) tb_s(b, "\t.cfi_endproc\n");
-		tb_s(b, ".Lfunc_end");
 	} else {
 		if (e->wk->falign > 16) {
 			tb_s(b, "\tmovq\t-8(%rbp), %r12\n");
 			if (cfi) tb_s(b, "\t.cfi_same_value %r12\n");
 		}
-		tb_s(b, cfi ? "\tmovq\t%rbp, %rsp\n\tpopq\t%rbp\n\t.cfi_def_cfa %rsp, 8\n\tretq\n\t.cfi_endproc\n.Lfunc_end" :
-			      "\tmovq\t%rbp, %rsp\n\tpopq\t%rbp\n\tretq\n.Lfunc_end");
+		tb_s(b, cfi ? "\tmovq\t%rbp, %rsp\n\tpopq\t%rbp\n\t.cfi_def_cfa %rsp, 8\n" : "\tmovq\t%rbp, %rsp\n\tpopq\t%rbp\n");
+		/* An interrupt returns to its saved frame; ordinary functions use the selected return thunk. */
+		tb_s(b, (e->E->o->xcf & 2) ? ((e->E->o->xcf & 8) ? "\tcs\n\tjmp\t__x86_return_thunk\n" : "\tjmp\t__x86_return_thunk\n") : "\tretq\n");
 	}
+	if (e->wk->spneed)
+		tb_f(b, ".Lspfail%u:\n\tcallq\t__stack_chk_fail%s\n", s, e->E->o->pic ? "@PLT" : "");
+	tb_s(b, cfi ? "\t.cfi_endproc\n.Lfunc_end" : ".Lfunc_end");
 	tb_u(b, s);
 	tb_s(b, ":\n\t.size\t");
 	sym_name(c, b, s);

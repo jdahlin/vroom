@@ -1359,7 +1359,7 @@ static uint64_t opt_sig(const cc_opts *o)
 	       (uint64_t)!!o->short_wchar << 10 | (uint64_t)o->std << 11 | (uint64_t)!!o->implicit_int << 20 |
 	       (uint64_t)!!o->gnu89_inline << 21 | (uint64_t)!!o->instrument << 22 |
 	       (uint64_t)!!o->general_regs_only << 23 | (uint64_t)!!o->no_builtin << 24 |
-	       (uint64_t)!!o->implicit_fn << 25 | (uint64_t)!!o->emit << 26 | (uint64_t)!!o->fast_math << 27 | (uint64_t)!!o->c2y << 28;
+	       (uint64_t)!!o->implicit_fn << 25 | (uint64_t)!!o->emit << 26 | (uint64_t)!!o->fast_math << 27 | (uint64_t)!!o->c2y << 28 | (uint64_t)o->strict_flex_arrays << 29;
 	for (unsigned i = 0; i < CC_DISABLED_BUILTIN_WORDS; i++)
 		sig = (sig ^ o->disabled_builtins[i]) * UINT64_C(1099511628211);
 	if (o->target == PP_LINUX_X86_64) {
