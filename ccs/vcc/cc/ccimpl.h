@@ -483,6 +483,7 @@ VPRIV void include_fix(cc *c, vdiag *d, uint32_t loc, const char *hdr);
 VPRIV qty implicit_lib_type(cc *c, uint32_t id);
 VPRIV uint32_t implicit_lib_func(cc *c, uint32_t id, uint32_t loc, qty t);
 VPRIV qty sig_func_type(cc *c, const char *sig);
+VPRIV uint32_t fold_strncmp_zero(cc *c, const vec *args, uint32_t loc);
 VPRIV void declaration(cc *c, vec *out, bool file);
 /* stmt.c */
 VPRIV uint32_t label_ref(cc *c, uint32_t name, uint32_t loc);

@@ -1358,7 +1358,8 @@ static uint64_t opt_sig(const cc_opts *o)
 	       (uint64_t)!!o->short_wchar << 10 | (uint64_t)o->std << 11 | (uint64_t)!!o->implicit_int << 20 |
 	       (uint64_t)!!o->gnu89_inline << 21 | (uint64_t)!!o->instrument << 22 |
 	       (uint64_t)!!o->general_regs_only << 23 | (uint64_t)!!o->no_builtin << 24 |
-	       (uint64_t)!!o->implicit_fn << 25 | (uint64_t)!!o->emit << 26;
+	       (uint64_t)!!o->implicit_fn << 25 | (uint64_t)!!o->emit << 26 |
+	       (uint64_t)!!o->no_builtin_strncmp << 27;
 }
 
 /* copy n bytes of the A heap at p into the entry heap: its offset + 1; 0 if p is not the region's */

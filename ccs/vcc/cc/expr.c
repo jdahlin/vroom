@@ -1115,6 +1115,18 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 		nonnull_args(c, N(callee)->a, ft, args.v, args.n);
 	if (fmt)
 		format_check(c, fmt, args.v, aty, atd, args.n);
+	if (!c->o->no_builtin && !c->o->no_builtin_strncmp && args.n == 3 &&
+	    N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC &&
+	    (c->syms[N(callee)->a].flags & SF_GLOBAL) && c->syms[N(callee)->a].sc != SC_STATIC) {
+		int nl;
+		const char *nm = idname(c->syms[N(callee)->a].name, &nl);
+		if (nl == 7 && !memcmp(nm, "strncmp", 7) && f->n == 3 &&
+		    !(f->flags & (TF_NOPROTO | TF_VARIADIC)) && compatible(c, ft, sig_func_type(c, "iSSz"))) {
+			uint32_t folded = fold_strncmp_zero(c, &args, loc);
+			if (folded)
+				return folded;
+		}
+	}
 	if (!c->o->no_builtin && args.n == 1 && N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC &&
 	    (c->syms[N(callee)->a].flags & SF_GLOBAL)) {
 		/* clang: abs, labs and llabs declared with their library types are builtins (inline) */

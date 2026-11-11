@@ -329,7 +329,72 @@ static void wk_bf_unit(ecx *e, const lval *l, qty t, int64_t *uoff, int *us, int
 			return;
 		}
 	}
-	efatal(e, e->curloc, "x86-64: a bit-field across 8 bytes is not supported yet (PLAN-x86.md X3)");
+	/* Packed fields can span two machine words. Access only their actual
+	   bytes, avoiding an over-read beyond the containing packed object. */
+	*uoff = wk_floordiv(bit, 8), *us = 0, *pos = (int)(bit - *uoff * 8);
+}
+
+/* The largest machine load/store contained in the remaining field bytes. */
+static int wk_bf_piece(int pos, int width)
+{
+	int bytes = (pos + width + 7) / 8;
+
+	return bytes >= 8 ? 8 : bytes >= 4 ? 4 : bytes >= 2 ? 2 : 1;
+}
+
+static val wk_bf_load_split(ecx *e, lval u, int pos, int width)
+{
+	val out = vconst(0);
+	int done = 0;
+
+	while (width) {
+		int size = wk_bf_piece(pos, width);
+		int bits = size * 8 - pos;
+		val v = { .k = V_REG, .r = (uint8_t)LO(treg)(e) };
+
+		if (bits > width) bits = width;
+		LO(load)(e, v.r, &u, size, false);
+		if (pos)
+			v = LO(bin)(e, T_GREATERGREATER, 8, false, v, vconst(pos));
+		if (bits < 64)
+			v = LO(bin)(e, T_AMP, 8, false, v, vconst(((uint64_t)1 << bits) - 1));
+		if (done)
+			v = LO(bin)(e, T_LESSLESS, 8, false, v, vconst(done));
+		out = done ? LO(bin)(e, T_PIPE, 8, false, out, v) : v;
+		done += bits, width -= bits, pos = 0, u.off += size;
+	}
+	return out;
+}
+
+static void wk_bf_store_split(ecx *e, lval u, int pos, int width, int rv)
+{
+	int done = 0;
+
+	while (width) {
+		int size = wk_bf_piece(pos, width);
+		int bits = size * 8 - pos;
+		val v = { .k = V_REG, .r = (uint8_t)LO(treg)(e) };
+
+		if (bits > width) bits = width;
+		uint64_t mask = (bits == 64 ? UINT64_MAX : ((uint64_t)1 << bits) - 1) << pos;
+
+		LO(mov)(e, v.r, rv);
+		if (done)
+			v = LO(bin)(e, T_GREATERGREATER, 8, false, v, vconst(done));
+		if (pos)
+			v = LO(bin)(e, T_LESSLESS, 8, false, v, vconst(pos));
+		if (bits < size * 8) {
+			val old = { .k = V_REG, .r = (uint8_t)LO(treg)(e) };
+
+			LO(load)(e, old.r, &u, size, false);
+			old = LO(bin)(e, T_AMP, 8, false, old, vconst((i128)(int64_t)~mask));
+			v = LO(bin)(e, T_AMP, 8, false, v, vconst((i128)(int64_t)mask));
+			v = LO(bin)(e, T_PIPE, 8, false, v, old);
+		}
+		LO(store)(e, v.r, &u, size);
+		LO(tfree)(e, v.r);
+		done += bits, width -= bits, pos = 0, u.off += size;
+	}
 }
 
 /* a bit-field's value in a new register (l stays) */
@@ -342,8 +407,13 @@ static val wk_bf_load(ecx *e, const lval *l, qty t)
 
 	wk_bf_unit(e, l, t, &uo, &us, &pos);
 	u.bf = 0, u.off = uo;
-	v = (val){ .k = V_REG, .r = (uint8_t)LO(treg)(e) };
-	LO(load)(e, v.r, &u, us, false);
+	if (!us) {
+		v = wk_bf_load_split(e, u, pos, w);
+		pos = 0;
+	} else {
+		v = (val){ .k = V_REG, .r = (uint8_t)LO(treg)(e) };
+		LO(load)(e, v.r, &u, us, false);
+	}
 	if (l->sgn) {
 		if (64 - pos - w)
 			v = LO(bin)(e, T_LESSLESS, 8, false, v, vconst(64 - pos - w));
@@ -369,6 +439,10 @@ static void wk_bf_store(ecx *e, const lval *l, qty t, int rv)
 
 	wk_bf_unit(e, l, t, &uo, &us, &pos);
 	u.bf = 0, u.off = uo;
+	if (!us) {
+		wk_bf_store_split(e, u, pos, w, rv);
+		return;
+	}
 	m = (w >= 64 ? ~(uint64_t)0 : (((uint64_t)1 << w) - 1)) << pos;
 	if (us < 8)
 		m &= ((uint64_t)1 << (us * 8)) - 1;

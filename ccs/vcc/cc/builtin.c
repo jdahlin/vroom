@@ -850,6 +850,19 @@ VPRIV uint32_t vector_builtin(cc *c, bool shuffle, uint32_t loc)
 	return mk_builtin(c, BI_SHUFFLEVECTOR, rt, loc, &args);
 }
 
+/* A zero bound reads neither string, but all argument expressions still run. */
+VPRIV uint32_t fold_strncmp_zero(cc *c, const vec *args, uint32_t loc)
+{
+	cval cv;
+
+	if (args->n != 3 || !cc_eval(c, args->v[2], &cv) || cv.kind != CV_INT || cv.i)
+		return 0;
+	uint32_t n = mk_int(c, 0, prim(TY_INT), loc);
+	for (int i = 2; i >= 0; i--)
+		n = with_pre(c, args->v[i], n);
+	return n;
+}
+
 VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 {
 	vec args;
@@ -985,6 +998,12 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 
 			if (cc_eval(c, n, &cv) && cv.kind == CV_INT)
 				return n;
+		}
+		if (b->id == BI_LIB && !c->o->no_builtin && !c->o->no_builtin_strncmp &&
+		    !strcmp(b->name, "__builtin_strncmp")) {
+			uint32_t folded = fold_strncmp_zero(c, &args, loc);
+			if (folded)
+				return folded;
 		}
 		if (b->id == BI_LIB || b->id == BI_STRLEN) {
 			/* a call to the library function the builtin names */

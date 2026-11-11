@@ -265,6 +265,7 @@ typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl 
 	int lse;		/* target has LSE atomics (else ldaxr/stlxr loops) */
 	int general_regs_only;	/* -mgeneral-regs-only: no FP/SIMD registers (variadic: no v0-v7 save area) */
 	int no_builtin;		/* -ffreestanding / -fno-builtin: abs() etc. are plain calls */
+	int no_builtin_strncmp;	/* -fno-builtin-strncmp: leave strncmp calls intact */
 	int wasm_sjlj;		/* -mllvm -wasm-enable-sjlj: setjmp/longjmp through wasm exceptions */
 	int implicit_fn;	/* implicit function declarations allowed (... implicit-function-declaration) */
 	int strict_std;		/* -std=cNN (not gnuNN): clang's GNU-only library functions are not known */
