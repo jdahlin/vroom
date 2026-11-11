@@ -136,18 +136,145 @@ static val popcount(ecx *e, val v, int x)
 	return v;
 }
 
+/* Extend using source precision, not BitInt's padded storage width. */
+static void overflow_wide_operand(ecx *e, uint32_t n, int64_t sl)
+{
+	cc *c = e->c;
+	qty t = N(n)->ty;
+	unsigned bits = em_bitint(c, t) ? T(c, t)->n : (unsigned)tsize(c, t) * 8;
+	bool sign = is_signed(c, t);
+	val v = gen(e, n);
+	int ext = treg(e);
+
+	toreg2(e, &v, sign);
+	if (bits <= 64) {
+		if (bits < 64) opbf(e, sign ? I_SBFM : I_UBFM, 1, v.r, v.r, 0, bits - 1);
+		if (sign) shift_imm(e, I_ASRV, 1, v.r2, v.r, 63);
+		else movi(e, 1, v.r2, 0);
+	} else if (bits < 128) {
+		opbf(e, sign ? I_SBFM : I_UBFM, 1, v.r2, v.r2, 0, bits - 65);
+	}
+	if (sign) shift_imm(e, I_ASRV, 1, ext, v.r2, 63);
+	else movi(e, 1, ext, 0);
+	mem(e, I_ST, 3, 0, v.r, FRAME, sl);
+	mem(e, I_ST, 3, 0, v.r2, FRAME, sl + 8);
+	mem(e, I_ST, 3, 0, ext, FRAME, sl + 16);
+	mem(e, I_ST, 3, 0, ext, FRAME, sl + 24);
+	tfree(e, ext);
+	val_free(e, &v);
+}
+
+/* Exact 256-bit arithmetic.  The largest unsigned128 product is
+ * 2^256-2^129+1, so it cannot wrap onto a representable <=128-bit result.
+ * Signed products fit signed256.  No runtime helper is needed. */
+static val gen_overflow_wide(ecx *e, const node *x, const uint32_t *arg)
+{
+	cc *c = e->c;
+	qty tr = T(c, N(arg[2])->ty)->base;
+	unsigned bits = em_bitint(c, tr) ? T(c, tr)->n : (unsigned)tsize(c, tr) * 8;
+	bool sign = is_signed(c, tr);
+	int64_t as = slot(e, 32, 8), bs = slot(e, 32, 8), rs = slot(e, 32, 8), ps = slot(e, 8, 8);
+	val p;
+	int a, b, lo, hi, acc;
+
+	overflow_wide_operand(e, arg[0], as);
+	overflow_wide_operand(e, arg[1], bs);
+	p = gen(e, arg[2]);
+	mem(e, I_ST, 3, 0, toreg(e, &p), FRAME, ps);
+	val_free(e, &p);
+	a = treg(e), b = treg(e), lo = treg(e), hi = treg(e), acc = treg(e);
+	if (x->aux != BI_MUL_OVERFLOW) {
+		bool add = x->aux == BI_ADD_OVERFLOW;
+		for (unsigned i = 0; i < 4; i++) {
+			mem(e, I_LD, 3, 0, a, FRAME, as + i * 8);
+			mem(e, I_LD, 3, 0, b, FRAME, bs + i * 8);
+			op3(e, i == 0 ? (add ? I_ADDS : I_SUBS) : (add ? I_ADCS : I_SBCS), 1, lo, a, b);
+			mem(e, I_ST, 3, 0, lo, FRAME, rs + i * 8);
+		}
+	} else {
+		for (unsigned i = 0; i < 4; i++) mem(e, I_ST, 3, 0, ZR, FRAME, rs + i * 8);
+		/* Accumulate four full 64x64 products, propagating every carry. */
+		for (unsigned i = 0; i < 2; i++) for (unsigned j = 0; j < 2; j++) {
+			unsigned k = i + j;
+			mem(e, I_LD, 3, 0, a, FRAME, as + i * 8);
+			mem(e, I_LD, 3, 0, b, FRAME, bs + j * 8);
+			op3(e, I_UMULH, 1, hi, a, b);
+			op4(e, I_MADD, 1, lo, a, b, ZR);
+			mem(e, I_LD, 3, 0, acc, FRAME, rs + k * 8);
+			op3(e, I_ADDS, 1, lo, acc, lo);
+			mem(e, I_ST, 3, 0, lo, FRAME, rs + k * 8);
+			mem(e, I_LD, 3, 0, acc, FRAME, rs + (k + 1) * 8);
+			op3(e, I_ADCS, 1, hi, acc, hi);
+			mem(e, I_ST, 3, 0, hi, FRAME, rs + (k + 1) * 8);
+			for (unsigned h = k + 2; h < 4; h++) {
+				mem(e, I_LD, 3, 0, acc, FRAME, rs + h * 8);
+				op3(e, I_ADCS, 1, acc, acc, ZR);
+				mem(e, I_ST, 3, 0, acc, FRAME, rs + h * 8);
+			}
+		}
+		/* A = unsigned(A)-negative(A)*2^128.  Correct the product's high
+		 * half for each negative factor, using its all-ones sign mask. */
+		for (unsigned i = 0; i < 2; i++) {
+			int64_t s = i ? bs : as, other = i ? as : bs;
+			mem(e, I_LD, 3, 0, acc, FRAME, s + 16);
+			mem(e, I_LD, 3, 0, a, FRAME, other);
+			mem(e, I_LD, 3, 0, b, FRAME, other + 8);
+			op3(e, I_AND, 1, a, a, acc);
+			op3(e, I_AND, 1, b, b, acc);
+			mem(e, I_LD, 3, 0, lo, FRAME, rs + 16);
+			mem(e, I_LD, 3, 0, hi, FRAME, rs + 24);
+			op3(e, I_SUBS, 1, lo, lo, a);
+			op3(e, I_SBC, 1, hi, hi, b);
+			mem(e, I_ST, 3, 0, lo, FRAME, rs + 16);
+			mem(e, I_ST, 3, 0, hi, FRAME, rs + 24);
+		}
+	}
+	/* Compare against the destination conversion extended back to 256 bits;
+	 * keep that conversion for the builtin's mandatory result store. */
+	mem(e, I_LD, 3, 0, lo, FRAME, rs);
+	mem(e, I_LD, 3, 0, hi, FRAME, rs + 8);
+	if (bits <= 64) {
+		if (bits < 64) opbf(e, sign ? I_SBFM : I_UBFM, 1, lo, lo, 0, bits - 1);
+		if (sign) shift_imm(e, I_ASRV, 1, hi, lo, 63);
+		else movi(e, 1, hi, 0);
+	} else if (bits < 128) {
+		opbf(e, sign ? I_SBFM : I_UBFM, 1, hi, hi, 0, bits - 65);
+	}
+	if (sign) shift_imm(e, I_ASRV, 1, b, hi, 63);
+	else movi(e, 1, b, 0);
+	movi(e, 1, acc, 0);
+	for (unsigned i = 0; i < 4; i++) {
+		mem(e, I_LD, 3, 0, a, FRAME, rs + i * 8);
+		op3(e, I_EOR, 1, a, a, i == 0 ? lo : i == 1 ? hi : b);
+		op3(e, I_ORR, 1, acc, acc, a);
+	}
+	op3(e, I_SUBS, 1, ZR, acc, ZR);
+	cset(e, acc, C_NE);
+	tfree(e, a);
+	tfree(e, b);
+	mem(e, I_LD, 3, 0, a = treg(e), FRAME, ps);
+	{
+		lval l = { .k = L_REG, .r = (uint8_t)a, .align = talign(c, tr) };
+		val r = { .k = V_REG2, .r = (uint8_t)lo, .r2 = (uint8_t)hi };
+		store(e, &l, tr, &r);
+		val_free(e, &r);
+		lfree(e, &l);
+	}
+	return vreg(acc);
+}
+
 static val gen_overflow(ecx *e, const node *x, const uint32_t *arg)
 {
 	cc *c = e->c;
 	qty ta = N(arg[0])->ty, tb = N(arg[1])->ty, tr = T(c, N(arg[2])->ty)->base;
+	if (tsize(c, ta) > 8 || tsize(c, tb) > 8 || (em_bitint(c, tr) && T(c, tr)->n > 64))
+		return gen_overflow_wide(e, x, arg);
 	val a = gen(e, arg[0]), b = gen(e, arg[1]), p = gen(e, arg[2]);
 	int bits = em_bitint(c, tr) ? (int)T(c, tr)->n : (int)tsize(c, tr) * 8;
 	bool sr = is_signed(c, tr);
 	int lo, hi, t, ok;
 	lval l;
 
-	if (tsize(c, ta) > 8 || tsize(c, tb) > 8 || (em_bitint(c, tr) && bits > 64))
-		efatal(e, x->loc, "128-bit overflow builtins are not supported");
 	/* exact result in 128 bits */
 	{
 		int ra = toreg(e, &a), rb = toreg(e, &b);
