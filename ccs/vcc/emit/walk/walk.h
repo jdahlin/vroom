@@ -47,7 +47,7 @@ typedef struct wkael { uint32_t s, gen, inst; int64_t idx; i128 v; } wkael;	/* a
 
 typedef struct wkinl {
 	struct wkinl *up;
-	uint32_t fn, endlbl, inst;
+	uint32_t fn, endlbl, inst, call;
 	qty rty;
 	int64_t rslot;		/* the result's slot (a value held by address: its object) */
 	int cbase;		/* the cleanups live at the call */

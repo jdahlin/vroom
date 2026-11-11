@@ -269,6 +269,7 @@ typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl 
 	int target;		/* PP_LINUX_AARCH64 / PP_DARWIN / PP_WASM64 */
 	int unsigned_char;
 	int ms_anon;		/* -fms-anonymous-structs / -fms-extensions: "struct S;" members */
+	int strict_flex_arrays; /* -fstrict-flex-arrays=0..3 */
 	int short_wchar;	/* -fshort-wchar */
 	int std;		/* -std=: 89, 99, 11, 17, 23 (0: gnu17) */
 	int implicit_int;	/* implicit int allowed (-std=gnu89, -Wno-error=implicit-int) */

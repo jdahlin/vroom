@@ -2696,6 +2696,10 @@ static val wk_builtin(ecx *e, uint32_t n)
 	}
 	case BI_OBJECT_SIZE: case BI_DYNAMIC_OBJECT_SIZE: {
 		cval cv;
+		i128 size;
+		wkinl *inl = e->wk->inl;
+		if (inl && inline_object_size(e, inl->fn, inl->call, arg[0], arg[1], &size))
+			return vconst(size);
 		if (cc_eval(c, n, &cv) && cv.kind == CV_INT)
 			return vconst(cv.i);
 		return vconst((i128)(uint64_t)-1);

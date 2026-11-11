@@ -256,7 +256,7 @@ typedef struct loopctx {
 } loopctx;
 
 typedef struct fnctx {		/* one function instance: the emitted function or an inlined body */
-	uint32_t fn, inst;
+	uint32_t fn, inst, call;
 	uint32_t retlbl;
 	int64_t retslot;
 	uint8_t retreg;		/* inlined: the result's temporary + 1 (0: in retslot) */
@@ -739,7 +739,8 @@ VPRIV void kv_track(ecx *e, uint32_t s, const val *v);
 VPRIV int ael_slot(ecx *e, uint32_t n, bool create);
 VPRIV bool const_var(ecx *e, uint32_t s, const val *v);
 VPRIV bool can_inline(ecx *e, uint32_t s);
-VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n);
+VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n, uint32_t call);
+VPRIV bool inline_object_size(ecx *e, uint32_t fn, uint32_t call, uint32_t pointer, uint32_t mode, i128 *size);
 VPRIV uint32_t direct_callee(cc *c, uint32_t fn, uint32_t *ref);
 VPRIV val gen_call(ecx *e, uint32_t n);
 /* builtin.c */

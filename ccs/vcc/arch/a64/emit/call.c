@@ -466,7 +466,7 @@ static bool is_temp(int r)
 	return false;
 }
 
-VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n)
+VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n, uint32_t call)
 {
 	cc *c = e->c;
 	const sym *y = &c->syms[s];
@@ -478,6 +478,7 @@ VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n)
 	walk_fn(e, s);
 	memset(&F, 0, sizeof(F));
 	F.fn = s;
+	F.call = call;
 	F.inst = ++e->inst_next;
 	F.inl = true;
 	F.rty = rty;
@@ -726,7 +727,7 @@ __attribute__((noinline)) VPRIV val gen_call(ecx *e, uint32_t n)
 			opi(e, I_ANDI, 1, r.r2, r.r2, INT64_MAX);
 		}
 	} else if (inl) {
-		r = inline_call(e, s, args, na);
+		r = inline_call(e, s, args, na, n);
 	} else if (!s && ref && na == 3 && RKIND(ref) == RK_NAME && mem_inline(e, ref, args, &r)) {
 		/* inlined */
 	} else {
