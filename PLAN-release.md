@@ -710,3 +710,7 @@ kompilatorinstruktionsgrind redovisas i PLAN-fas2.md. G5/G7 återstår.
 Typgränser skrivna som begränsade rena konstantuttryck förenklas nu på de
 fyra målen. Tester och den avgränsade kompilatorinstruktionsmätningen finns i
 PLAN-fas2.md; G5/G7 och generell O2-täckning är fortsatt öppna.
+
+Avgränsade identiteter för samma ordinära lokala heltalsvariabel förenklas
+på alla mål. Fyrmålstester och kompilatorinstruktionsmätning finns i
+PLAN-fas2.md; G5/G7 och generell O2-täckning är fortsatt öppna.

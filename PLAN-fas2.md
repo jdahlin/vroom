@@ -2972,3 +2972,21 @@ som avvisas av båda på respektive wasm-mål redovisas separat. Proveniens,
 kommandon och fall finns i `work/opt-profile/bounds-expressions-cost/result.json`.
 Detta är en liten korpus och instruktionstal, inte ett mått på CPU-tid.
 Generell O2-täckning och G5/G7 återstår.
+
+### Identiska heltalsoperander (2026-11-11)
+
+Ett gemensamt recept i `emit/opt/repeated.c` förenklar `x-x` och `x^x` till
+noll och `x&x`/`x|x` till en läsning för samma ordinära automatiska
+heltalsvariabel. Adresstagna, volatile, atomiska, statiska och externa värden
+avvisas; inga godtyckliga uttryck jämförs. Alla tre emitterfamiljer använder
+beslutet. Fokuserade O0–O3-prov passerar på x86, arm64, wasm32 och wasm64
+med både unity och filvis bygge; två volatile-läsningar bevaras. O0 och
+`VCC_NOOPT=1` ger byteidentisk assembler mot basen. Vcc-sviten passerar
+253/253 med en befintlig xfail.
+
+Matchad seriell Callgrind-grind mot `22a91b8` gav förändringar i
+kompilatorinstruktioner +0,099 % x86, +0,121 % arm64, +0,115 % wasm32 och
++0,123 % wasm64; 1 %-grinden passerar. 12 nativefiler, 10 wasm32 och 11
+wasm64 ingår; wasm-fall som båda avvisar och mätproveniens finns i
+`work/opt-profile/repeated-integer-cost/result.json`. Det är en liten korpus
+med instruktionstal, inte CPU-tid; generell O2-täckning och G5/G7 återstår.
