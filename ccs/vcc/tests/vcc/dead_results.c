@@ -25,30 +25,30 @@ NI unsigned dr_atomic(unsigned *p) { return (__atomic_fetch_add(p, 7, 5) * 13u) 
 NI unsigned dr_overflow(unsigned x, unsigned y)
 {
     unsigned discarded;
-    return __builtin_add_overflow(x, y, &discarded);
+    return __builtin_add_overflow(x, y, &discarded) + ((x * 13u) & 0u);
 }
 NI U dr_carry(U a, U b, U carry)
 {
     U sum = a + b, carry1 = sum < a;
     U result = sum + carry, carry2 = result < sum;
-    return (carry1 | carry2) + result;
+    return (carry1 | carry2) + result + ((a * 13ULL) & 0ULL);
 }
 NI U dr_partial(U x, unsigned y)
 {
     unsigned char byte = (unsigned char)y;
     unsigned short half = (unsigned short)(y >> 8);
-    return x ^ ((U)byte << 40) ^ half;
+    return (x ^ ((U)byte << 40) ^ half) + ((x * 13ULL) & 0ULL);
 }
 typedef struct { U low, high; } dr_pair;
 NI dr_pair dr_pair_result(U x, U y)
 {
-    dr_pair result = { x * 13, y * 17 };
+    dr_pair result = { x * 13 + ((y * 13ULL) & 0ULL), y * 17 };
     return result;
 }
 typedef struct { double first, second; } dr_fp_pair;
 NI dr_fp_pair dr_fp_result(double x, double y)
 {
-    dr_fp_pair result = { x + 1.5, y / 2.0 };
+    dr_fp_pair result = { x + 1.5 + (double)(((unsigned)y * 13u) & 0u), y / 2.0 };
     return result;
 }
 NI double dr_fp_div(double x, double y) { return x / y; }
@@ -57,8 +57,7 @@ NI unsigned dr_call(unsigned x) { return (dr_effect(x * 13u) * 17u) & 0u; }
 NI unsigned dr_loop(unsigned x, unsigned n)
 {
     while (n--) {
-        (void)((x * 13u) & 0u);
-        x += n;
+        x += n + ((x * 13u) & 0u);
     }
     return x;
 }

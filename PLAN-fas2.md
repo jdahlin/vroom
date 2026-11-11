@@ -2017,7 +2017,7 @@ begränsad lucka/vinst, inte generell DCE eller uppmätt körtid. Basbinärens
 SHA256 är `a26750515e4e215f6485e3f75624a5422d9b29b25d9268bb81c9e3dfbb2fc8c6`;
 assembly och bygg-/testloggar finns i `build/linux/flow-evidence/`.
 Värdflaggorna skiljer mellan dessa byggen, så de används inte för kostnads-
-jämförelse. Slutlig main-integrering och identiska värdbyggen återstår.
+jämförelse. Senare main-integrering och dess verifiering redovisas nedan.
 
 Verifierat hittills: unitybygge med `-j 1`; `--rule deadresults --run`
 passerar 16/16 nivå-/målkombinationer (x86, arm64/QEMU, wasm32/64 med Node
@@ -2035,9 +2035,53 @@ detta reproducerades även utan det nya passet. Proben kör därför inte den
 unsupported funktionen. Clang 23 avvisar motsvarande rena C-kropp med
 `non-ASM statement in naked function is not supported`. Vanlig asm med
 absorberande uttryck provas däremot både i kodform och vid körning.
-Bred regression/ABI/debug, fil-för-fil, O0/noopt-paritet, helkompilatorns
-kostnad, fjärr-CI och nästa wasm-konsument återstår. OPT4/O2 och G5/G7 är
-fortsatt öppna.
+Efter integration av uppdaterad PR53, leaf50 och ledgern (`7691f6c`,
+förälder `69c1bd7`) bygger både unity och fil-för-fil med `-j 1`. Även
+fil-för-fil-binären passerar alla 16 nya regel-/nivå-/målkombinationer.
+Kontrollerna för carry, partialregister, overflow, loop och båda ABI-
+resultatparen innehåller nu faktiskt evaluerade absorberande uttryck, så
+den nya konsumenten aktiveras; utvalda kontroller kräver också att den
+extra multiplikationen verkligen försvinner. En separat vanlig funktion
+utan kandidat stannar utan graf-/scratchallokering i kontrakttestet.
+
+Egna x86-sviten ger 223/223 PASS och sex explicita referensskips; arm64
+228/228 PASS och ett befintligt XFAIL (`--no-cache`, `-j 1`). Befintliga
+cross-compiler-ABI-fixturer ger 32/32 på vardera native-målet. Debugharnessen
+har ett faktiskt aktiverat dead-result-fall med en efterföljande källrad;
+O0–O3 passerar radkrav, DWARF-verifiering och identisk `.text` med/utan `-g`.
+Mot exakt `69c1bd7` är 17/17 assemblypar byte-identiska: fyra mål vid O0 och
+O2/noopt, samt arm64/wasm32/wasm64 vid O1/O2/O3. Samma förälder behåller
+fortfarande `imull $13` i det positiva x86-provet. Råloggar ligger i
+`work/opt-pr-tmp/flow-final-{x86,a64}.log`; övriga artefakter, kompletta
+paritetskommandon och käll-/binärhashar i `build/linux/flow-evidence/`.
+
+Kostnad mot exakt `69c1bd7`, båda byggen med Clang 23
+`-O3 -march=x86-64-v3`, Callgrind för hela `vpp -S`-processen. 21 seriella
+par; måttet är värdinstruktioner, inte hårdvarucykler eller väggtid:
+
+| Korpus | Mål/nivå | Ändrat instruktionsarbete | Genererad assembler |
+| --- | --- | ---: | --- |
+| Rak kod, 500 funktioner utan kandidat | x86 O1 och O2 | +0,0468 % | Identisk |
+| Summeringsloop, 500 funktioner utan kandidat | x86 O1 och O2 | +0,0009 % | Identisk |
+| Avsiktligt mättade dead-result-diamanter, 500 funktioner | x86 O1 och O2 | **+7,7486 %** | Döda multiplikationer försvinner |
+| Tolv befintliga C-regressioner, summerat | x86 O2 | +0,06964 % | 10 identiska, 2 ändrade |
+| Rak kontrollkod, 500 funktioner | arm64 O2 | +0,0221 % | Identisk |
+| Samma kontrollkod | wasm32 och wasm64 O2 | +0,0187 % | Identisk |
+
+Den blandade sviten kostar 140 485 975 → 140 583 816 instruktioner, utan
+exkluderade filer. Den använder tidigare `deep_mixed`, `register_locals`,
+`bit_cast`, `stack_cells`, `integer_identities`, `deep_conditional`,
+`unsigned_pow2`, `signed_pow2`, `atomic_ops`, `mem_builtin_inline`,
+`bitint_runtime` och `wasm_frame_cells`, inte den nya positiva fixturen.
+Tradeoffen är verklig: mättad kandidatkod kostar cirka 7,75 % mer att
+kompilera; kontroll-/blandproverna ligger under +0,1 %. Ingen generell
+runtimevinst, minnesgrind eller komplett prestandagrind påstås. Körningen
+är en instruktionräkning under delad maskinlast, inte en tidsjämförelse.
+Råa `.cg`/loggar/assembly, versionssträngar, kompletta kommandon och käll-/
+binärhashar finns i `work/opt-profile/flow-cost/{measure.py,result.json}`.
+
+Fjärr-CI och nästa wasm-konsument återstår. OPT4/O2 och G5/G7 är fortsatt
+öppna.
 ### Fortsatt O0–O2-täckning: familjeledger efter OPT0–OPT8 (2026-11-11)
 
 **OPT0–OPT8 är första delsteg, inte hela O2-målet.** Den här kartan binder

@@ -415,7 +415,10 @@ def check_deadresults(assembly, arch):
     # totals or a full assembly snapshot. The discarded result still requires
     # evaluating effects and potentially trapping instructions.
     for name in ['dr_mul', 'dr_mul64', 'dr_diamond', 'dr_chain',
-                 'dr_zero_left', 'dr_ones', 'dr_rem_one']:
+                 'dr_zero_left', 'dr_ones', 'dr_rem_one',
+                 # These controls also discard a multiplication, proving the
+                 # consumer ran while preserving their flags and ABI results.
+                 'dr_overflow', 'dr_carry', 'dr_partial', 'dr_fp_result']:
         text = body(assembly, name, False)
         if re.search(r'\bimul[lq]?\b', text):
             raise RuntimeError(f'{name}: retained dead pure multiplication\n{text}')
