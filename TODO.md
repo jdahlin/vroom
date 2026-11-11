@@ -267,6 +267,19 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   Was: `ptr_add_vla` `emit.c:6051` only covers binary `+`/`-` and subscripting.
   *Validate:* T1 `vla_ptr.c` (`int (*q)[n]`: `q++`, `q--`, `q += 2`,
   `q -= 1`, `q3 - q`, `&q[1] - q`, 2-D VLA of VLA).
+- [x] **Adjacent string literals decode before the final prefix is known** [P].
+  Collect the complete sequence before decoding so late `u`/`U`/`L` prefixes
+  determine the encoding and escape range; reject incompatible prefixes.
+  *Validate:* `string_concat_late_prefix.c`, diagnostic `string_concat_prefix.c`;
+  unchanged Kefir `string_literals1` and `wide_string_literals2` on x86-64.
+  Their signed-`wchar_t` assumptions are rejected by Clang on ARM; the
+  portable regression covers ARM/QEMU instead.
+- [x] **Foldable VLA bounds lose evaluated side effects** [P]. Array
+  bounds such as `(callback(), 1)` retain their runtime expression even
+  when folding produces an integer. Unevaluated calls in an integer constant
+  expression still permit a fixed array.
+  *Validate:* `vla_bound_effects.c`; unchanged Kefir `vla1`, all four
+  Clang/vcc combinations on Linux x86-64 and ARM/QEMU.
 - [x] **VLA with initializer accepted; garbage at run time** [P].  Done:
   rejected as clang does, same location and range (cc/decl.c); `= {}`
   (accepted by clang in every mode) zeroes the array at run time
@@ -874,12 +887,16 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* T4.
 - [x] **`#embed` / `__has_embed`** [P].  (done: `#embed "x"` with limit,
   clang::offset, prefix, suffix, if_empty, `__has_embed` 0/1/2, -Wc23-extensions,
-  -M lists the file, clang's search (absolute, or the includer's directory);
+  -M lists the file, clang's search (absolute, or for quoted names the
+  includer's directory followed by the working directory);
   tests/vcc `embed.c` checksums the file embedding itself; `--embed-dir` (`<x>`
-  only there, `"x"` after the includer's directory); `-E`/`-E -P` placement of
+  only there, `"x"` after the includer and working directories); `-E`/`-E -P` placement of
   the token after the data, byte for byte as clang; limit() takes a constant
   expression; a header with #embed is not cached (replay would not see a
   changed data file).)
+  *Validate:* `bench/vcc-embed-search.py`: 40 Clang comparisons on both
+  Linux targets, including search precedence, queries and dependencies;
+  unchanged Kefir `preprocessor_embed7` in all four compiler combinations.
 - [ ] **Output modes**: `-CC` (comments in macro definitions and arguments,
   `//` as `/* */`) and `-traditional-cpp` are rejected with an error.
   *Validate:* `bench/vcc-diff.py text` (bytes, not tokens) for `-E` with and

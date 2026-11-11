@@ -412,6 +412,34 @@ Efter main2dc4ea3 (#50:s x86-blad): unity, 16 division-/nivå-/målfall,
 sanitiserade reciprok-/registereffektkontrakt och bladramens policy, cache-,
 debug-/härdnings- och signal-unwindprov passerar. Båda statusblock behålls.
 
+### Status 2026-11-11: G1, promotion av bitfältsuttryck
+
+Smala unsigned-bitfält behåller sin promotionsbredd genom tilldelning,
+sammansatt tilldelning, komma och prefixinkrement. `sizeof`/`typeof`,
+postfix och explicita kast behåller sina separata deklarerade typregler.
+Det rättar två oförändrade Kefir-kontrakt på Linux x86-64 och ARM64/QEMU,
+alla fyra Clang/vcc-parningar. Regressionen provar även sidoeffekter.
+Unity/separata filer, sema run/batch 887/887 och egna körsviter
+223/223 x86 respektive 228/228 ARM är verifierade; sex x86-referensundantag
+och ett befintligt kört ARM-XFAIL redovisas separat. Hela Kefir-sviten och
+G1/G2 återstår. Evidens: `work/agents/kefir-bitfield/results/evidence.txt`.
+
+### Status 2026-11-11: G1/G2, strängprefix, embed och VLA-gränser
+
+Sen kodningsprefix styr nu hela följden av angränsande strängliteraler och
+föregående escape-sekvenser. C23:s citerade `#embed` söker arbetskatalogen
+efter inkluderarens katalog och före explicita embed-kataloger. Vikbara
+arraygränser med sidoeffekter utvärderas som VLA i stället för att tappa anropen.
+Fyra oförändrade Kefir-fall passerar alla Clang/vcc-kombinationer på x86;
+ARM/QEMU passerar embed och VLA, medan två strängfall avvisas av Clang
+på grund av upstreams signed-wchar-antaganden. Portabla strängregressioner
+passerar ARM. Unity/separata filer: egna x86 224/224 med sex referensundantag,
+ARM 229/229 med ett befintligt kört XFAIL, diagnostik 224/224 och 40 embed-
+orakeljämförelser. Kernelns sema 887/887 och full PP-paritet 920/920
+passerar både per process och i batch. G1/G2 är fortsatt öppna.
+Fryst källkod och verifieringsunderlag: `86c7352`,
+`work/results/frontend-milestone-2dc/`.
+
 ### Status 2026-11-11: G1, breda heltal till/från flyttal
 
 Linux-konverteringar använder hela heltalsmagnituden med guard/sticky-bitar
