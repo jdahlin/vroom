@@ -1005,17 +1005,27 @@ static uint32_t atomic_call(cc *c, const builtin *b, uint32_t loc)
 	return mk_builtin(c, id, rt, loc, &args);
 }
 
-/* __builtin_clzg/ctzg/popcountg (x[, fallback]), clang's type-generic forms:
-   x unsigned, up to 64 bits; the fixed-width builtin on x widened, clz
-   corrected for the narrower width; the fallback is the result for x == 0
-   (x is then read twice: one with side effects is not supported yet). */
+/* A fixed-width bit operation used by the generic forms. */
+static uint32_t fixed_bitcount(cc *c, int id, uint32_t x, bool wide, uint32_t loc)
+{
+	vec args;
+	int fid = id == BI_CLZG ? (wide ? BI_CLZLL : BI_CLZ) :
+	          id == BI_CTZG ? (wide ? BI_CTZLL : BI_CTZ) :
+	                         (wide ? BI_POPCOUNTLL : BI_POPCOUNT);
+	vinit(&args);
+	vpush(c, &args, x);
+	return mk_builtin(c, fid, prim(TY_INT), loc, &args);
+}
+
+/* Generic bit counts use the operand's precision, without integer promotion.
+ * Save effectful operands before selecting a half or the zero fallback; both
+ * arguments to a builtin call are evaluated even when the fallback is unused. */
 static uint32_t generic_bitcount(cc *c, int id, uint32_t loc)
 {
 	vec args;
-	uint32_t x, r, w;
+	uint32_t x, r, pre, fbpre = 0, fb = 0;
 	qty xt;
-	unsigned bits;
-	int fid;
+	unsigned bits, width;
 
 	args_list(c, &args);
 	if (args.n < 1 || args.n > (id == BI_POPCOUNTG ? 1u : 2u)) {
@@ -1023,34 +1033,49 @@ static uint32_t generic_bitcount(cc *c, int id, uint32_t loc)
 		return mk_int(c, 0, prim(TY_INT), loc);
 	}
 	x = decay(c, args.v[0]);
-	xt = QUNQ(N(x)->ty);	/* before promotion: the width counts */
-	if (!is_integer(c, xt) || is_signed(c, xt) || KIND(c, xt) == TY_BOOL || ty_size(c, xt) > 8) {
-		cc_error(c, N(x)->loc, "1st argument must be a scalar unsigned integer type of at most 64 bits");
+	xt = QUNQ(N(x)->ty);
+	if (!is_integer(c, xt) || is_signed(c, xt) || int_bits(c, xt) > 128) {
+		cc_error(c, N(x)->loc, "1st argument must be a scalar unsigned integer type of at most 128 bits");
 		return mk_int(c, 0, prim(TY_INT), loc);
 	}
-	bits = (unsigned)ty_size(c, xt) * 8;
-	w = convert(c, x, prim(bits == 64 ? TY_ULLONG : TY_UINT));
-	fid = id == BI_CLZG ? (bits == 64 ? BI_CLZLL : BI_CLZ) : id == BI_CTZG ? (bits == 64 ? BI_CTZLL : BI_CTZ)
-	    : (bits == 64 ? BI_POPCOUNTLL : BI_POPCOUNT);
-	{
-		vec a1;
-
-		vinit(&a1);
-		vpush(c, &a1, w);
-		r = mk_builtin(c, fid, prim(TY_INT), loc, &a1);
-	}
-	if (id == BI_CLZG && bits < 32)
-		r = binop(c, T_MINUS, r, mk_int(c, 32 - bits, prim(TY_INT), loc), loc);
+	bits = KIND(c, xt) == TY_BOOL ? 1 : int_bits(c, xt);
+	width = bits > 64 ? 128 : bits > 32 ? 64 : 32;
+	x = cplx_reuse(c, x, &pre);
 	if (args.n == 2) {
-		uint32_t fb = convert(c, rvalue(c, decay(c, args.v[1])), prim(TY_INT));
-
-		if (has_side_effects(c, x)) {
-			cc_error(c, N(x)->loc, "unsupported: a fallback with an argument that has side effects");
-			return r;
+		uint32_t y = decay(c, args.v[1]);
+		qty ft = promoted(c, y);
+		if (KIND(c, ft) != TY_INT || T(c, ft)->n) {
+			cc_error(c, N(y)->loc, "2nd argument must have type int after integer promotion");
+			return mk_int(c, 0, prim(TY_INT), loc);
 		}
-		r = conditional(c, binop(c, T_EXCLAIMEQ, x, mk_int(c, 0, xt, loc), loc), r, fb, loc);
+		fb = cplx_reuse(c, convert(c, y, prim(TY_INT)), &fbpre);
 	}
-	return r;
+	if (width == 128) {
+		uint32_t w = convert(c, x, prim(TY_UINT128));
+		uint32_t lo = convert(c, w, prim(TY_ULLONG));
+		uint32_t hi = convert(c, binop(c, T_GREATERGREATER, w,
+		                             mk_int(c, 64, prim(TY_INT), loc), loc), prim(TY_ULLONG));
+		uint32_t low = fixed_bitcount(c, id, lo, true, loc);
+		uint32_t high = fixed_bitcount(c, id, hi, true, loc);
+		if (id == BI_POPCOUNTG)
+			r = binop(c, T_PLUS, low, high, loc);
+		else {
+			uint32_t first = id == BI_CLZG ? hi : lo;
+			uint32_t count = id == BI_CLZG ? high : low;
+			uint32_t other = id == BI_CLZG ? low : high;
+			uint32_t cond = binop(c, T_EXCLAIMEQ, first, mk_int(c, 0, prim(TY_ULLONG), loc), loc);
+			r = conditional(c, cond, count,
+			                binop(c, T_PLUS, mk_int(c, 64, prim(TY_INT), loc), other, loc), loc);
+		}
+	} else {
+		uint32_t w = convert(c, x, prim(width == 64 ? TY_ULLONG : TY_UINT));
+		r = fixed_bitcount(c, id, w, width == 64, loc);
+	}
+	if (id == BI_CLZG && bits < width)
+		r = binop(c, T_MINUS, r, mk_int(c, width - bits, prim(TY_INT), loc), loc);
+	if (args.n == 2)
+		r = conditional(c, binop(c, T_EXCLAIMEQ, x, mk_int(c, 0, xt, loc), loc), r, fb, loc);
+	return with_pre(c, pre, with_pre(c, fbpre, r));
 }
 
 /*
