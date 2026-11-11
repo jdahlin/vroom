@@ -637,3 +637,7 @@ matchad kompilatorkostnadsprofil i PLAN-fas2.md. G5/G7 och generell O2-täckning
 Begränsade switch-värdetabeller har validerats på fyra mål; syntetiska
 kompilatorkostnader och deras begränsningar finns i PLAN-fas2.md. G5/G7 och
 en realistisk sammansatt kostnadsgrind återstår.
+
+Avgränsade heltalsjämförelser vid typgränser är implementerade för alla fyra
+mål och har fokuserade korrekthets- och kompilatorkostnadsprov i PLAN-fas2.md.
+G5/G7 och generell O2-täckning är fortsatt öppna.
