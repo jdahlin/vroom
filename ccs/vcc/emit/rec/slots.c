@@ -124,12 +124,28 @@ VPRIV void em_slot_detail(em_slot_cells *s, uint32_t id, int64_t off, uint32_t s
  * them anyway. Unknown physical ranges still use the ordinary poison path. */
 VPRIV void em_slot_collect(em_slot_cells *s, uint32_t id, int64_t off, uint32_t size)
 {
-	uint8_t before = s->valid && id && id < s->na ? s->a[id].state : 0;
-	em_slot_access(s, id, off, size);
-	if (!s->valid || !id || s->a[id].state != 2)
+	if (!id) {
+		em_slot_access(s, id, off, size);
 		return;
+	}
+	if (!s->valid)
+		return;
+	if (id >= s->na || !size || off > INT64_MAX - size) {
+		s->valid = false;
+		return;
+	}
+	em_slot_alloc *a = &s->a[id];
+	uint8_t before = a->state;
+
+	if (!before) {
+		a->state = 1, a->off = off, a->size = size;
+		return;
+	}
+	if (before == 1 && a->off == off && a->size == size)
+		return;
+	a->state = 2, s->multi = true;
 	if (before == 1)
-		em_slot_detail(s, id, s->a[id].off, s->a[id].size);
+		em_slot_detail(s, id, a->off, a->size);
 	em_slot_detail(s, id, off, size);
 }
 
