@@ -80,6 +80,28 @@ kan gå parallellt.
 
 ## Status
 
+### Status 2026-11-11: G5/G7, gemensam implementationsplan
+
+`PLAN-fas2.md` **Gemensam optimerare utan SSA** äger nu OPT0–OPT8 efter
+kodgranskning av alla tre generatorer. C-regler/strategier delas av x86,
+arm64 och wasm32/wasm64; arm64:s befintliga postoptimerare extraheras för
+registermålen. X4 och wasm-planen äger inkoppling och målsänkning.
+Planen anger beroenden, effekt-/ABI-/minneskontrakt, begränsad CPU-kostnad,
+tester och separata mätningar av kompilator och genererad kod. Nästa
+leverans är en ny bas och en delad heltalsregel med tre konsumenter.
+Ingen optimering implementerad; G5/G7 är fortsatt öppna och G5:s X saknas.
+
+### Status 2026-11-11: G5, audit av x86-kodkvalitet
+
+`PLAN-x86.md` X4 har en prioriterad audit mot clang 23.1.6 och GCC 15.2.0
+på Ryzen 7 9700X: lokala optimeringar med låg kompilatorkostnad utan
+IR/SSA. Utökad med 29 reproducerbara prober vid O0–O3, baseline och
+native: 24/24 körningar ger samma checksumma samt klarar gränsvärden och
+kodkontroller för befintliga egenskaper. Flaggor, passloggar och kod sparas
+av `bench/vcc-optaudit.py`; vcc O1/O2/O3 ger samma assembler här.
+Inga optimeringar implementerade eller uppmätt
+körtidsmål; G5 är fortsatt öppet och benchmarksvitens X är inte fastställt.
+
 ### Status 2026-11-11: externa tester på Linux x86-64
 ARM64:s stackallokering och slots använder nu 64-bitars offset med kontrollerad
 överflödeshantering. GCC `20031023-{1..4}` kompilerar (4/4); `frame_wide`
