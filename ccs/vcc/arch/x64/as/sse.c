@@ -7,11 +7,29 @@ VPRIV int x64_i_sse(As *a, char *mn, XOp *o, int nops)
 	int sz = 0, cc;
 
 	(void)a, (void)mn, (void)o, (void)nops, (void)stem, (void)sz, (void)cc;
+	/* Legacy compare aliases carry the predicate in the mnemonic. */
+	if (!strncmp(mn, "cmp", 3) && nops == 2) {
+		static const char *const pred[] = {"eq", "lt", "le", "unord", "neq", "nlt", "nle", "ord"};
+		static const char *const suffix[] = {"ps", "pd", "ss", "sd"};
+		static const int prefix[] = {0, 0x66, 0xf3, 0xf2};
+		for (int i = 0; i < 8; i++) for (int j = 0; j < 4; j++) {
+			size_t len = strlen(pred[i]);
+			if (strncmp(mn + 3, pred[i], len) || strcmp(mn + 3 + len, suffix[j])) continue;
+			if (o[1].kind != XK_REG || o[1].cls != XR_XMM || o[1].size != 16 ||
+			    (o[0].kind == XK_REG && (o[0].cls != XR_XMM || o[0].size != 16)) || o[0].kind == XK_IMM)
+				return err(a, "invalid SSE comparison operands");
+			if (o[0].kind == XK_EXPR) o[0].kind = XK_MEM;
+			return x64_emit(a, &F(.op=OPB(0x0f,0xc2), .nop=2, .reg=o[1].reg, .rm=&o[0],
+				.opsz16=prefix[j]==0x66, .rep=prefix[j]==0x66?0:prefix[j], .isz=1, .imm=i));
+		}
+	}
+
 	/* ---- SSE ---- */
 	{
 		static const struct { const char *n; uint8_t pfx, op; } sse[] = {
 			{ "addss", 0xf3, 0x58 }, { "addsd", 0xf2, 0x58 }, { "subss", 0xf3, 0x5c }, { "subsd", 0xf2, 0x5c },
 			{ "mulss", 0xf3, 0x59 }, { "mulsd", 0xf2, 0x59 }, { "divss", 0xf3, 0x5e }, { "divsd", 0xf2, 0x5e },
+			{ "rcpss", 0xf3, 0x53 }, { "rsqrtss", 0xf3, 0x52 },
 			{ "sqrtss", 0xf3, 0x51 }, { "sqrtsd", 0xf2, 0x51 }, { "minss", 0xf3, 0x5d }, { "minsd", 0xf2, 0x5d },
 			{ "maxss", 0xf3, 0x5f }, { "maxsd", 0xf2, 0x5f }, { "xorps", 0, 0x57 }, { "xorpd", 0x66, 0x57 },
 			{ "andps", 0, 0x54 }, { "andpd", 0x66, 0x54 }, { "orps", 0, 0x56 }, { "andnps", 0, 0x55 },
@@ -132,6 +150,18 @@ VPRIV int x64_i_sse4(As *a, char *mn, XOp *o, int nops)
 	/* ---- SSSE3/SSE4, AES-NI, PCLMUL, SHA, CRC32 (0f 38 / 0f 3a maps), FS/GS base ---- */
 	{
 		static const struct { const char *n; uint8_t pfx, map, op, imm; } x3[] = {
+			{ "phaddsw", 0x66, 0x38, 0x03, 0 },
+			{ "phsubw", 0x66, 0x38, 0x05, 0 },
+			{ "phsubd", 0x66, 0x38, 0x06, 0 },
+			{ "phsubsw", 0x66, 0x38, 0x07, 0 },
+			{ "psignw", 0x66, 0x38, 0x09, 0 },
+			{ "psignd", 0x66, 0x38, 0x0a, 0 },
+			{ "phminposuw", 0x66, 0x38, 0x41, 0 },
+			{ "dpps", 0x66, 0x3a, 0x40, 1 },
+			{ "dppd", 0x66, 0x3a, 0x41, 1 },
+			{ "mpsadbw", 0x66, 0x3a, 0x42, 1 },
+			{ "roundps", 0x66, 0x3a, 0x08, 1 },
+			{ "roundpd", 0x66, 0x3a, 0x09, 1 },
 			{ "pshufb", 0x66, 0x38, 0x00, 0 }, { "phaddw", 0x66, 0x38, 0x01, 0 }, { "phaddd", 0x66, 0x38, 0x02, 0 },
 			{ "pmaddubsw", 0x66, 0x38, 0x04, 0 }, { "psignb", 0x66, 0x38, 0x08, 0 }, { "pmulhrsw", 0x66, 0x38, 0x0b, 0 },
 			{ "pabsb", 0x66, 0x38, 0x1c, 0 }, { "pabsw", 0x66, 0x38, 0x1d, 0 }, { "pabsd", 0x66, 0x38, 0x1e, 0 },

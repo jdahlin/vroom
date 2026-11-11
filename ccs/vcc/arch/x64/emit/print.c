@@ -88,7 +88,7 @@ VPRIV int x64_asm_namedreg(const char *name)
 VPRIV void x64_reg(tbuf *b, int r, int sz)
 {
 	if (IS_XMM(r)) {
-		tb_s(b, "%xmm");
+		tb_s(b, sz == 64 ? "%zmm" : sz == 32 ? "%ymm" : "%xmm");
 		tb_u(b, (uint64_t)(r - XMM0));
 		return;
 	}
@@ -192,6 +192,72 @@ static void x64_cs_cfi(tbuf *b, int r, int64_t off)
 
 /* R12 first keeps its incoming value at -8(%rbp), as for normal realignment. */
 static const int interrupt_saved[14] = { R12, RAX, RCX, RDX, RBX, RSI, RDI, R8, R9, R10, R11, R13, R14, R15 };
+
+static void x64_print_intrinsic(ecx *e, tbuf *b, uint32_t n)
+{
+ cc *c = e->c;
+ const node *x = N(n);
+ const x86_intrinsic *d = cc_x86_intrinsic(x->a);
+ const uint32_t *arg = &c->lists[x->b];
+ if (d->kind == XI_REDUCE) {
+  unsigned width = tsize(c, N(arg[0])->ty), elem = tsize(c, x->ty);
+  const char *add = d->mnemonic + (d->mnemonic[0] == 'v');
+  if (width == 64) {
+   tb_s(b, "\tvextracti64x4\t$1, %zmm1, %ymm2\n\tv"); tb_s(b, add);
+   tb_s(b, "\t%ymm2, %ymm1, %ymm1\n");
+  }
+  if (width >= 32) {
+   tb_s(b, "\tvextracti128\t$1, %ymm1, %xmm2\n\t"); tb_s(b, add);
+   tb_s(b, "\t%xmm2, %xmm1\n");
+  }
+  for (unsigned step = 8; step >= elem; step /= 2) {
+   tb_s(b, "\tmovaps\t%xmm1, %xmm2\n\tpsrldq\t$"); tb_u(b, step);
+   tb_s(b, ", %xmm2\n\t"); tb_s(b, add); tb_s(b, "\t%xmm2, %xmm1\n");
+  }
+  tb_s(b, elem == 8 ? "\tmovq\t%xmm1, %rax" : "\tmovd\t%xmm1, %eax");
+  return;
+ }
+ static const uint8_t gp[] = { RAX, RCX, RDX, RSI, RDI, R8 };
+ if (d->kind == XI_XGETBV) {
+  tb_s(b, "\tmovl\t%eax, %ecx\n\txgetbv\n\tshlq\t$32, %rdx\n\torq\t%rdx, %rax");
+  return;
+ }
+ if (d->kind == XI_LANE) {
+  cval lane; cc_eval(c, arg[1], &lane);
+  if (lane.i) tb_s(b, "\tpsrldq\t$8, %xmm1\n");
+  tb_s(b, "\tmovq\t%xmm1, %rax");
+  return;
+ }
+ bool masked = d->kind == XI_MASK || d->kind == XI_MASKZ || d->kind == XI_LOAD || d->kind == XI_EXTRACT;
+ if (masked) {
+  unsigned mi = x->c - 1;
+  bool wide = tsize(c, N(arg[mi])->ty) == 8;
+  tb_s(b, wide ? "\tkmovq\t" : "\tkmovw\t"); x64_reg(b, gp[mi], wide ? 8 : 4);
+  tb_s(b, ", %k1\n");
+ }
+ tb_c(b, '\t'); tb_s(b, d->mnemonic); tb_c(b, '\t');
+ for (const char *p = d->order; *p; p++) {
+  if (p != d->order) tb_s(b, ", ");
+  if (*p == 'i') {
+   const char *range = d->constraints;
+   unsigned index = *range ? (unsigned)strtoul(range, NULL, 10) : x->c - 1;
+   cval cv;
+   if (!cc_eval(c, arg[index], &cv) || cv.kind != CV_INT)
+    efatal(e, x->loc, "intrinsic immediate is not constant");
+   tb_c(b, '$'); tb_i(b, (int64_t)cv.i);
+  } else if (*p == 'r') {
+   x64_reg(b, is_vec(c, x->ty) || is_flt(c, x->ty) ? XMM0 : RAX, tsize(c, x->ty));
+   if (masked) tb_s(b, d->kind == XI_MASKZ ? "{%k1}{z}" : "{%k1}");
+  } else {
+   unsigned index = *p - '0';
+   qty t = N(arg[index])->ty;
+   bool vector = is_vec(c, t) || is_flt(c, t) || (d->kind == XI_SHIFT && index == 1);
+   if (d->kind == XI_LOAD && index == 0) tb_c(b, '(');
+   x64_reg(b, vector ? XMM0 + 1 + index : gp[index], vector && d->kind == XI_SHIFT ? 16 : tsize(c, t));
+   if (d->kind == XI_LOAD && index == 0) tb_c(b, ')');
+  }
+ }
+}
 
 VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 {
@@ -301,7 +367,7 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			continue;
 		case X_MOV:
 			if (IS_XMM(i->r[0]) && IS_XMM(i->r[1]))
-				tb_s(b, "\tmovaps\t");
+				tb_s(b, sz > 16 ? "\tvmovaps\t" : "\tmovaps\t");
 			else if (IS_XMM(i->r[0]) || IS_XMM(i->r[1]))
 				tb_s(b, sz == 4 ? "\tmovd\t" : "\tmovq\t");
 			else
@@ -338,10 +404,10 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 		}
 		case X_LD:
 			if (IS_XMM(i->r[0])) {
-				tb_s(b, sz == 4 ? "\tmovss\t" : sz == 8 ? "\tmovsd\t" : "\tmovups\t");
+				tb_s(b, sz == 4 ? "\tmovss\t" : sz == 8 ? "\tmovsd\t" : sz == 64 ? "\tvmovdqu64\t" : sz == 32 ? "\tvmovdqu\t" : "\tmovups\t");
 				x64_memop(e, b, i);
 				tb_s(b, ", ");
-				x64_reg(b, i->r[0], 8);
+				x64_reg(b, i->r[0], sz);
 				break;
 			}
 			{
@@ -356,7 +422,7 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			}
 		case X_ST:
 			if (IS_XMM(i->r[2]))
-				tb_s(b, sz == 4 ? "\tmovss\t" : sz == 8 ? "\tmovsd\t" : "\tmovups\t");
+				tb_s(b, sz == 4 ? "\tmovss\t" : sz == 8 ? "\tmovsd\t" : sz == 64 ? "\tvmovdqu64\t" : sz == 32 ? "\tvmovdqu\t" : "\tmovups\t");
 			else
 				x64_ins(b, "mov", sz);
 			x64_reg(b, i->r[2], sz);
@@ -506,6 +572,9 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			tb_s(b, i->cond & 1 ? "stri\t$" : "strm\t$");
 			tb_u(b, (uint8_t)i->imm);
 			tb_s(b, ", %xmm1, %xmm0");
+			break;
+		case X_INTRINSIC:
+			x64_print_intrinsic(e, b, i->ref);
 			break;
 		case X_RAW:
 			if (i->cond && e->wk->falign > 16)

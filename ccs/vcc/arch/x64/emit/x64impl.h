@@ -65,6 +65,7 @@ enum {
 	X_JMPR,		/* jmp *r1 */
 	X_LEAL,		/* r0 = the address of local label `label` */
 	X_BLENDVB,	/* SSE4.1: xmm1 = select(xmm1, xmm2, high bits of xmm0) */
+	X_INTRINSIC,	/* generated descriptor with fixed scratch operands */
 	X_PCMPSTR,	/* SSE4.2: xmm0/xmm1, eax/edx lengths; cond selects opcode, imm control */
 	X_RAW,		/* inline asm: e->raw's text at off, ref bytes */
 	X_NAMED,	/* ref's name as a label here */

@@ -1,0 +1,20 @@
+.text
+vmovdqu8 %zmm32,%zmm0
+vmovdqu8 %zmm0junk,%zmm0
+vmovdqu8 %zmm0,%zmm1{%k0}
+vmovdqu8 %zmm0,(%rax){%k1}{z}
+vmovdqu8 %zmm0{%k1},%zmm1
+vmovdqu8 %ymm0,%zmm1
+vpaddq %zmm0,%ymm1,%zmm2
+vpaddq (%rax){1to4},%zmm1,%zmm2
+vpaddq %zmm0{1to8},%zmm1,%zmm2
+vpclmulqdq $0,%zmm0,%zmm1,%zmm2{%k1}
+vextracti32x4 $0,%xmm1,%xmm2
+vextracti64x4 $0,%ymm1,%ymm2
+vinserti32x8 $0,%ymm0,%ymm1,%ymm2
+vpopcntq %zmm0,%zmm1{%k1}{%k2}
+kmovq %eax,%k1
+kmovb %ax,%k1
+kmovd %k1,%ax
+kmovq %zmm0,%k1
+addps %xmm16,%xmm0
