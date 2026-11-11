@@ -27,4 +27,3 @@ VPRIV val a64_sdivpow2(ecx *e, val a, const em_sdivpow2_recipe *r)
 	tfree(e, bias);
 	return a;
 }
-

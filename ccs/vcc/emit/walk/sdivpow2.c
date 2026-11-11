@@ -29,4 +29,3 @@ VPRIV val wk_sdivpow2(ecx *e, qty t, val a, const em_sdivpow2_recipe *r)
 	a = LO(bin)(e, T_GREATERGREATER, size, true, a, vconst(r->shift));
 	return r->negative ? LO(un)(e, T_MINUS, size, a) : a;
 }
-
