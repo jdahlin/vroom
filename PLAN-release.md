@@ -136,6 +136,41 @@ volatile/high-bit/signed-regressioner; båda byggsätt och sanitiserade
 kontrakt verifierade. 500-funktions v3-instruktionsprober mot14379fe ger
 +0,23% loop och −0,74% kontroll för kombinationen. Profilens räckvidd
 är begränsad; vbench/native helkorpus och hela G5/G7/O2-målet kvarstår.
+### Status 2026-11-11: G1, breda BitInt på Linux
+
+Skalära `_BitInt` över 128 bitar har nu limb-baserad kodgenerering för
+Linux x86-64 och arm64, med de befintliga snabbvägarna för högst 128 bitar
+bevarade. Milstolpen omfattar heltalsaritmetik, jämförelser, konvertering
+mellan heltal, bitfält, generiska biträkningar, konstantuttryck och replay.
+Körtidskonvertering till/från flyttal, vektorelement över 128 bitar och
+switch-gränser utanför signed 128-bitars representation avvisas uttryckligen.
+Detta slutför inte C23 eller G1.
+
+Validering av integrationen på `ae941cb`: unity och separata filer,
+egna x86-prov 184/184 med fem referensundantag och ARM 189/189. Oberoende
+säkerhets- och avvisningsprober passerar 36/36 över båda byggsätten och
+målen. Kärnans sema passerar 887/887 individuellt och i batch för båda
+byggsätten. Bred aritmetik och biträkning passerar tolv bredder 129–7001,
+konstantproven 128 värden plus positiva/negativa kontrakt, replay åtta
+översättningsenheter på två mål och bred ABI 24 former i fyra riktningar
+per mål och byggsätt (384 körningar). Diagnostik: 220/220 per byggsätt.
+Optimizerregler O0–O3 och registereffekter med ASan passerar.
+Fullständiga kommandon och resultat finns i
+`work/results/bitint-integration/`. ARM:s Clang 23 saknar native-stöd för
+bredder över 128; ARM:s breda ABI-prov använder dokumenterade C-aggregat
+som proxy och får inte beskrivas som native Clang BitInt-paritet.
+
+**Återintegration på main `2dc4ea3`:** båda byggsätten passerar egna
+Linux x86 222/222 med sex referensundantag och ARM 227/227 med ett kört
+befintligt XFAIL. Full egen Wasm64-svit: 180/180, 37 körda befintliga
+XFAIL och elva referensundantag. Kärnsema är 887/887 i båda körsätt och
+byggen. Oberoende BitInt-prober är 36/36; dagens leaf-frame-, cell-,
+kopierings- och konstantkontrollgrindar passerar på båda byggena.
+Körtidskonvertering till/från flyttal är fortfarande uttryckligen
+utanför denna integration. Exakta kommandon, resultat och källmanifest:
+`work/results/bitint-main2dc/`. Hela externa Linux-korpusen och G1/G2
+är fortsatt öppna; dessa integrationsgrindar ersätter inte den körningen.
+
 
 ### Status 2026-11-11: G1, padding i BitInt-uttryck
 

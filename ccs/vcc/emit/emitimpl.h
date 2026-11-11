@@ -810,11 +810,12 @@ VPRIV void enqueue(emitter *E, uint32_t item);
 /* ---------------- types (the few predicates the emitter needs) ---------------- */
 
 static inline qty prim(int k) { return QT(k, 0); }
-static inline bool k_int(int k) { return (k >= TY_BOOL && k <= TY_UINT128) || k == TY_ENUM; }
+static inline bool k_int(int k) { return (k >= TY_BOOL && k <= TY_UINT128) || k == TY_BITINT || k == TY_UBITINT || k == TY_ENUM; }
+static inline bool em_bigint(cc *c, qty t) { int k = KIND(c, t); return k == TY_BITINT || k == TY_UBITINT; }
 static inline bool is_integer(cc *c, qty t) { return k_int(KIND(c, t)); }
 static inline bool em_bitint(cc *c, qty t)
 {
-	return KIND(c, t) >= TY_CHAR && KIND(c, t) <= TY_UINT128 &&
+	return ((KIND(c, t) >= TY_CHAR && KIND(c, t) <= TY_UINT128) || em_bigint(c, t)) &&
 	       !(T(c, t)->flags & TF_ATOMIC) && T(c, t)->n;
 }
 static inline bool is_ptr(cc *c, qty t) { return KIND(c, t) == TY_PTR; }
@@ -826,8 +827,8 @@ static inline bool is_void(cc *c, qty t) { return KIND(c, t) == TY_VOID; }
 static inline bool is_vec(cc *c, qty t) { return KIND(c, t) == TY_VECTOR; }
 static inline bool is_bvec(cc *c, qty t) { return is_vec(c, t) && KIND(c, T(c, t)->base) == TY_BOOL; }
 /* passed and returned like a record (vcc's own convention for vectors) */
-static inline bool is_recabi(cc *c, qty t) { return is_record(c, t) || is_vec(c, t); }
-static inline bool is_agg(cc *c, qty t) { return is_record(c, t) || is_array(c, t) || is_vec(c, t); }
+static inline bool is_recabi(cc *c, qty t) { return is_record(c, t) || is_vec(c, t) || em_bigint(c, t); }
+static inline bool is_agg(cc *c, qty t) { return is_record(c, t) || is_array(c, t) || is_vec(c, t) || em_bigint(c, t); }
 static inline uint64_t tsize(cc *c, qty t) { return T(c, t)->size; }
 
 /* Apple arm64: an integer under 4 bytes in a register is extended to 32 bits by its producer */
