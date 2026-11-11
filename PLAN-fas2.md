@@ -3095,3 +3095,14 @@ backend implementerats, samt budget-/barriär-/alias-/joinnegativfall och
 O0/noopt-paritet. Mät faktiskt kompilerings-CPU och instruktioner för både
 kontroller och uttrycksmättade filer samt den sammansatta stacken. Ingen av
 punkterna är implementerad eller godkänd ännu; hela O2 och G5/G7 återstår.
+
+Första byggstenen finns lokalt i `emit/flow/values.{h,c}`: en fast 32-platsers
+tabell utan allokering med explicita budgetsteg. Kollision kan bara kasta bort
+möjligheter; vid budgetslut publiceras inga fler fakta före reset. Adaptern
+måste själv skapa nya värde-ID vid definition, nollställa vid barriär och
+bevisa att ett resultat fortfarande finns i en användbar plats. ASan/UBSan-
+kontrakt testar olika nyckeldelar, kollision, blockgräns och budgetslut;
+unity- och filvis bygge samt de 16 semantiska mål-/nivåproven passerar.
+Ingen backend använder tabellen ännu; den optimerar alltså ingen kod och är
+inte en genomförd CSE-lösning. Nästa arbete är en faktisk konsument med säker
+platshantering och dokumenterad kandidat-/kostnadsgräns.
