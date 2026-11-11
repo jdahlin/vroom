@@ -6,11 +6,13 @@
   bench/vcc-opt-rules.py --target wasm64-unknown-emscripten --run
 
 Only --run requires target tools: clang/lld and native execution or qemu-aarch64,
-or vcc/vlink and node (Node 24+ for wasm64 table64). No libc or SDK is used.
+or qemu-x86_64 on another host; wasm uses vcc/vlink and node (Node 24+
+for wasm64 table64). No libc or SDK is used.
 The wasm path needs neither Emscripten nor LLVM; --node selects the JS engine.
 The ordinary C regression suites also run the source files for correctness.
 """
 import argparse
+import platform
 from pathlib import Path
 import re
 import shutil
@@ -262,6 +264,52 @@ def check_signedpow2(assembly, arch):
             raise RuntimeError(f'{name}: dropped volatile access\n{text}')
 
 
+def check_locals(assembly, arch):
+    if arch != 'x86_64':
+        return
+    text = body(assembly, 'rl_cold', False)
+    if re.search(r'%(?:rbx|ebx|r1[345][dwb]?)\b', text):
+        raise RuntimeError(f'rl_cold: unprofitable preserved register binding\n{text}')
+    # Confirm all four clobbered homes are actually used after the opaque asm;
+    # memory-only lowering would pass the runtime checks without testing the
+    # promotion/asm interaction. Snapshot stores and restores do not match.
+    for name in ['rl_asm_four', 'rl_asm_goto_four']:
+        text = body(assembly, name, False)
+        marker = re.search(r'^.*mov \$123, %rbx;.*$', text, re.M)
+        if not marker:
+            raise RuntimeError(f'{name}: missing actual register clobbers')
+        after = text[marker.end():]
+        for register in ['rbx', 'r13', 'r14', 'r15']:
+            if not re.search(r'\bmovq\s+%' + register + r'\s*,\s*%', after):
+                raise RuntimeError(f'{name}: {register} not live after asm\n{after}')
+    # These two straight-line-return probes need only their scalar loop state.
+    # A save/restore pair (or one short-lived call spill) may touch a frame slot
+    # twice. Repeated accesses to the same slot expose a stack-resident loop
+    # local, regardless of register numbering or prologue layout.
+    for name in ['rl_loop', 'rl_calls']:
+        text = body(assembly, name, False)
+        accesses = re.findall(r'(-?[0-9]+)\(%rbp\)', text)
+        for slot in set(accesses):
+            if accesses.count(slot) > 2:
+                raise RuntimeError(f'{name}: repeated loop-local frame access at {slot}(%rbp)\n{text}')
+        if not re.search(r'%(?:rbx|ebx|r1[345][dwb]?)\b', text):
+            raise RuntimeError(f'{name}: missing preserved register local\n{text}')
+
+
+def x64_start(check_preserved):
+    if not check_preserved:
+        return 'call main\nmov %eax, %edi\nmov $60, %eax\nsyscall\n'
+    # External assembly caller: generated main must preserve all registers used
+    # by local promotion, including through nested generated callees and asm.
+    registers = [('rbx', 0x12345), ('r13', 0x23456), ('r14', 0x34567), ('r15', 0x45678)]
+    text = ''.join(f'mov ${value}, %{reg}\n' for reg, value in registers)
+    text += 'call main\ntest %eax, %eax\njnz 1f\n'
+    for reg, value in registers:
+        text += f'cmp ${value}, %{reg}\njne 2f\n'
+    return text + ('1: mov %eax, %edi\nmov $60, %eax\nsyscall\n'
+                   '2: mov $97, %edi\nmov $60, %eax\nsyscall\n')
+
+
 def execute(args, directory, assembly, arch, source, level):
     obj = directory / 'probe.o'
     exe = directory / ('probe.wasm' if arch.startswith('wasm') else 'probe')
@@ -287,28 +335,34 @@ def execute(args, directory, assembly, arch, source, level):
         run([assembler, f'--target={args.target}', '-c', assembly, '-o', obj])
         start = directory / 'start.s'
         start.write_text('.text\n.globl _start\n_start:\n' +
-                         ('call main\nmov %eax, %edi\nmov $60, %eax\nsyscall\n'
+                         (x64_start(args.rule in ['locals', 'localjmp', 'all'])
                           if arch == 'x86_64' else
                           'bl main\nmov x8, #93\nsvc #0\n'))
         run([args.clang, f'--target={args.target}', '-fuse-ld=lld',
              '-nostdlib', '-static', '-Wl,-e,_start', start, obj, '-o', exe])
-        run(([args.qemu] if arch == 'aarch64' else []) + [exe])
+        runner = [args.qemu] if arch == 'aarch64' else []
+        if arch == 'x86_64' and (args.qemu_x86 or platform.machine() != 'x86_64'):
+            runner = [args.qemu_x86 or 'qemu-x86_64']
+        run(runner + [exe])
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--vpp', default=str(Path(BUILD) / 'vpp'))
     ap.add_argument('--target', default='x86_64-linux-gnu')
-    ap.add_argument('--rule', choices=['pow2', 'signedpow2', 'identities', 'fallthrough', 'loopback', 'unreachable', 'all'], default='all')
+    ap.add_argument('--rule', choices=['pow2', 'signedpow2', 'identities', 'fallthrough', 'loopback', 'unreachable', 'locals', 'localjmp', 'all'], default='all')
     ap.add_argument('--run', action='store_true', help='also execute literal-answer correctness checks')
     ap.add_argument('--clang', default=llvm('clang'))
     ap.add_argument('--vlink', default=str(Path(BUILD) / 'vlink'))
     ap.add_argument('--node', default='node')
     ap.add_argument('--qemu', default='qemu-aarch64')
+    ap.add_argument('--qemu-x86', help='force x86 emulator; auto qemu-x86_64 on non-x86 hosts')
     args = ap.parse_args()
     arch = args.target.split('-')[0]
     if arch not in ['x86_64', 'aarch64', 'wasm32', 'wasm64']:
         ap.error('target must be x86_64, aarch64, wasm32 or wasm64')
+    if args.rule == 'localjmp' and arch != 'x86_64':
+        ap.error('localjmp tests x86 callee-save preservation')
     args.node_flags = []
     if args.run and arch == 'wasm64':
         # Older V8 requires a flag; current Node enables memory64 by default
@@ -320,18 +374,24 @@ def main():
              'identities': ('integer_identities.c', check_identities),
              'fallthrough': ('branch_fallthrough.c', check_fallthrough),
              'loopback': ('while_backedge.c', check_loopback),
-             'unreachable': ('unreachable_records.c', check_unreachable)}
+             'unreachable': ('unreachable_records.c', check_unreachable),
+             'locals': ('register_locals.c', check_locals),
+             'localjmp': ('register_locals_setjmp.c', None)}
     selected = rules if args.rule == 'all' else {args.rule: rules[args.rule]}
     with tempfile.TemporaryDirectory(prefix='vcc-opt-rules-') as tmp:
         directory = Path(tmp)
         for rule, (filename, check) in selected.items():
+            if rule == 'localjmp' and arch != 'x86_64':
+                continue
             source = Path(R) / 'ccs/vcc/tests/vcc' / filename
             for level in range(4):
                 assembly = directory / f'{rule}-O{level}.s'
                 run([args.vpp, f'--target={args.target}', f'-O{level}',
                      '-ffreestanding', '-fno-stack-protector', '-S', source, '-o', assembly])
-                checked = ((not arch.startswith('wasm') and level >= 1) if rule in ['fallthrough', 'unreachable'] else
+                checked = ((arch == 'x86_64' and level >= 1) if rule == 'locals' else
+                           (not arch.startswith('wasm') and level >= 1) if rule in ['fallthrough', 'unreachable'] else
                            arch.startswith('wasm') if rule == 'loopback' else True)
+                checked = checked and check is not None
                 if checked:
                     check(assembly.read_text(), arch)
                 if args.run:

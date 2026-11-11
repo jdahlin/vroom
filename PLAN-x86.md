@@ -388,6 +388,14 @@ konkreta filer, beroenden, kostnadsgränser och tester på alla tre backends.
 De tidigare auditernas x86-regler är fynd/prioritering, inte beslut att
 implementera dem i x86:s `lower.c`. Ingen optimering implementerad; X4 öppet.
 
+### Registerlokaler, delprogress 2026-11-11
+
+OPT3 i `PLAN-fas2.md` har gemensamt urval och x86:s fyra callee-save-hem,
+med asm-/nonlocal-/alignmentsäkerhet. Egna sviten 137/137, kors-ABI 22/22;
+alla kalla auditprober oförändrade efter lönsamhetsfilter. En liten loop
+förbättras men kompilator-CPU-grinden är fortsatt öppen. Direkt ABI-bindning
+och kopiestädning återstår; full O2-paritet är inte uppnådd.
+
 ### X4 (2026-11-11): reproducerbar nivåmatris och testprober
 
 `bench/vcc-optaudit.py` jämför 29 funktioner i

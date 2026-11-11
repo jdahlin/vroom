@@ -428,35 +428,14 @@ static void finish_function(ecx *e, uint32_t s)
  */
 static void choose_lregs(ecx *e, uint32_t s, int max)
 {
-	cc *c = e->c;
-	emitter *E = e->E;
-	uint32_t lo = E->lspan[2 * s], hi = E->lspan[2 * s + 1];
-	int k = 0;
+	unsigned k;
 	uint32_t cand[MAXLREG];
 
 	e->nlr = 0;
-	if (!max || lo > hi || e->vararg || e->E->o->opt < 1)
+	if (!max || e->vararg || e->E->o->opt < 1)
 		return;
-	for (uint32_t v = lo; v <= hi; v++) {
-		const sym *y = &c->syms[v];
-		qty t = y->ty;
-		int j;
-
-		if (!E->luse[v] || E->lnoreg[v] || y->kind != S_VAR || !is_local_var(c, v) || y->sc == SC_STATIC ||
-		    !(is_integer(c, t) || is_ptr(c, t)) || is_wide(c, t) || (QQ(t) & Q_VOLATILE) ||
-		    tsize(c, t) - 1 >= 8 || (T(c, t)->flags & (TF_VLA | TF_ATOMIC)) || sym_attrs(c, v)->cleanup ||
-		    regvar_reg(c, v) >= 0)
-			continue;
-		if (k == max && E->luse[cand[k - 1]] >= E->luse[v])
-			continue;
-		j = k < max ? k++ : k - 1;
-		while (j > 0 && E->luse[cand[j - 1]] < E->luse[v]) {
-			cand[j] = cand[j - 1];
-			j--;
-		}
-		cand[j] = v;
-	}
-	for (int i = 0; i < k; i++) {
+	k = em_select_locals(e, s, cand, (unsigned)max, em_local_gpr_type);
+	for (unsigned i = 0; i < k; i++) {
 		int r = 28 - i;
 
 		e->lrsym[i] = cand[i];

@@ -337,7 +337,8 @@ static void wk_decl(ecx *e, const node *x)
 	{
 		lval l = { .k = L_FRAME, .align = sym_align(c, s) };
 
-		l.off = wk_local(e, s);
+		if (!LO(local)(e, s, &l))
+			l.off = wk_local(e, s);
 		wk_init(e, &l, y->ty, x->b);
 	}
 	if (sym_attrs(c, s)->cleanup) {
@@ -1153,6 +1154,7 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 			efatal(e, y->loc, "x86-64: this return type is not supported yet (PLAN-x86.md X3)");
 	}
 	W->retlbl = wk_newlabel(e);
+	LO(locals_begin)(e, s);
 	if (wk_mem(e, W->rty)) {
 		LO(classify)(e, W->rty, &W->rrec);
 		W->rrec.slot = wk_slot(e, 8, 8);	/* (memory: the hidden pointer's slot) */
@@ -1189,6 +1191,7 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 			LO(tfree)(e, r);
 		}
 	}
+	LO(locals_params)(e);
 	for (uint32_t i = 0; i < body->aux; i++) {	/* int (*a)[n]: n as on entry */
 		qty pt = c->syms[c->lists[body->a + i]].ty;
 
@@ -1208,6 +1211,7 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 		LO(ret)(e, &z, prim(TY_INT), W->retlbl);	/* falling off the end of main returns 0 */
 	}
 	wk_label(e, W->retlbl);
+	LO(locals_restore)(e);
 	LO(finish)(e, s);
 	if (pa != pabuf) free(pa);
 }

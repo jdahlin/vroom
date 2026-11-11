@@ -197,7 +197,12 @@ VPRIV int x64_toreg(ecx *e, val *v, int size)
 
 VPRIV void x64_load(ecx *e, int rd, const lval *l, int size, bool sgn)
 {
-	if (size == 2 && IS_XMM(rd)) {
+	if (l->k == L_VREG) {
+		if (size < 8)
+			x64_op3(e, X_EXT, size, rd, l->r, XNOREG)->cond = sgn;
+		else
+			x64_mov(e, rd, l->r);
+	} else if (size == 2 && IS_XMM(rd)) {
 		x64_mem(e, X_LD, 2, R11, l, false);
 		x64_op3(e, X_MOV, 4, rd, R11, XNOREG);
 	} else
@@ -206,7 +211,9 @@ VPRIV void x64_load(ecx *e, int rd, const lval *l, int size, bool sgn)
 
 VPRIV void x64_store(ecx *e, int rs, const lval *l, int size)
 {
-	if (size == 2 && IS_XMM(rs)) {
+	if (l->k == L_VREG) {
+		x64_mov(e, l->r, rs);
+	} else if (size == 2 && IS_XMM(rs)) {
 		x64_op3(e, X_MOV, 4, R11, rs, XNOREG);
 		x64_mem(e, X_ST, 2, R11, l, false);
 	} else
@@ -215,6 +222,8 @@ VPRIV void x64_store(ecx *e, int rs, const lval *l, int size)
 
 VPRIV int x64_laddr(ecx *e, const lval *l)
 {
+	if (l->k == L_VREG)
+		efatal(e, e->curloc, "internal error: address of a register local");
 	int r = l->k == L_REG ? l->r : x64_treg(e);
 
 	if (l->k != L_REG || l->off)
@@ -544,57 +553,6 @@ VPRIV void x64_label(ecx *e, uint32_t l)
 	e->reach = true;	/* (the walker skips label-free statements after a jump) */
 }
 VPRIV void x64_jump(ecx *e, uint32_t l) { x64_put(e, X_JMP)->label = l; }
-/* buf: rbp, the resume label, rsp (as clang); 0 now, 1 at the label */
-VPRIV val x64_setjmp(ecx *e, int rb)
-{
-	uint32_t resume = wk_newlabel(e), done = wk_newlabel(e);
-	lval b0 = { .k = L_REG, .r = (uint8_t)rb }, b1 = b0, b2 = b0;
-	rec *i;
-	int r;
-	uint32_t saved = e->x64->live & (X_TEMPS | X_FTEMPS) & ~(1u << rb);
-	int64_t slots[32] = {0};
-
-	/* A nonlocal return also clobbers temporaries live around the call. */
-	for (int q = 0; q < 32; q++) if (saved & (1u << q)) {
-		int size = IS_XMM(q) ? 16 : 8;
-		slots[q] = wk_slot(e, size, size);
-		lval slot = { .k = L_FRAME, .off = slots[q] };
-		x64_mem(e, X_ST, size, q, &slot, false);
-	}
-
-	b1.off = 8, b2.off = 16;
-	x64_mem(e, X_ST, 8, RBP, &b0, false);
-	i = x64_put(e, X_LEAL);
-	i->r[0] = R11;
-	i->label = resume;
-	x64_mem(e, X_ST, 8, R11, &b1, false);
-	x64_mem(e, X_ST, 8, RSP, &b2, false);
-	x64_tfree(e, rb);
-	r = x64_treg(e);
-	x64_movi(e, r, 0);
-	x64_jump(e, done);
-	x64_label(e, resume);
-	x64_movi(e, r, 1);
-	x64_label(e, done);
-	for (int q = 0; q < 32; q++) if (saved & (1u << q)) {
-		lval slot = { .k = L_FRAME, .off = slots[q] };
-		x64_mem(e, X_LD, IS_XMM(q) ? 16 : 8, q, &slot, false);
-	}
-	return (val){ .k = V_REG, .r = (uint8_t)r };
-}
-
-VPRIV void x64_longjmp(ecx *e, int rb)
-{
-	lval b0 = { .k = L_REG, .r = (uint8_t)rb }, b1 = b0, b2 = b0;
-
-	b1.off = 8, b2.off = 16;
-	x64_mem(e, X_LD, 8, R11, &b1, false);
-	x64_mem(e, X_LD, 8, RSP, &b2, false);
-	x64_mem(e, X_LD, 8, RBP, &b0, false);
-	x64_op3(e, X_JMPR, 8, XNOREG, R11, XNOREG);
-	x64_tfree(e, rb);
-}
-
 VPRIV void x64_jumpr(ecx *e, int r) { x64_op3(e, X_JMPR, 8, XNOREG, r, XNOREG); x64_tfree(e, r); }
 VPRIV void x64_named(ecx *e, uint32_t ref) { x64_put(e, X_NAMED)->ref = ref; }
 
