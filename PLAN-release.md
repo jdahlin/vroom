@@ -645,3 +645,6 @@ G5/G7 och generell O2-täckning är fortsatt öppna.
 Den sammansatta optimeringsstacken med värdetabeller klarar den begränsade
 1 %-kompilatorkostnadsgrinden på fyra mål (PLAN-fas2.md); den mättade
 switchkostnaden och releasegrindarna G5/G7 återstår att följa upp.
+
+Switch-värdetabellernas byteutmatning har snabbats upp efter `perf`-profilering;
+matchade mätningar och deras begränsningar finns i PLAN-fas2.md. G5/G7 kvarstår.
