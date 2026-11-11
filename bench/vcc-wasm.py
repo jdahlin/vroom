@@ -65,6 +65,7 @@ WASM_XFAIL.update({
     'warn_once_const': 'wasm: a statement expression constant does not decide an if (the x86 walker folds it)',
     'dead_closed_label': 'wasm: an unreachable labelled statement reached only from inside it is kept (the x86 walker drops it)',
     'dead_after_const_or': 'wasm: an if that never reaches its else keeps what follows a returning then (the x86 walker drops it)',
+    'known_local_join': 'wasm: a local assigned a constant does not decide a later if (the x86 walker tracks it)',
     'autoinit_zero': 'wasm: -ftrivial-auto-var-init=zero is x86-64 only so far (TODO.md tier 1)',
 })
 

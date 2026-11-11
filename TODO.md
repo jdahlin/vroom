@@ -550,6 +550,13 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   an inlined `return 0` otherwise calls functions no one defines
   (p4d_free_pud_page, __scoped_seqlock_bug, ...).
   *Validate:* `ccs/vcc/tests/vcc/dead_closed_label.c` (xfail on arm64 and wasm).
+
+- [ ] **arm64/wasm: a scalar local assigned a constant in straight-line code
+  is not known at the next read.**  The x86 walker keeps the constant until
+  the next label, asm or inline copy (`wkst.kl`): mm/shmem.c's
+  `orders = shmem_allowable_huge_orders()` (an inline 0 without THP) then
+  `if (orders > 0)` calls vma_thp_gfp_mask, which nothing defines.
+  *Validate:* `ccs/vcc/tests/vcc/known_local_join.c` (xfail on arm64 and wasm).
 - [ ] **wasm: the optimizations the gcc torture tests assume** [P].  The
   wasm generator (`arch/wasm/emit/`) has no inliner or dead-code removal:
   `20020720-1`, `20030216-1`, `20041114-1`, `compare-3`, `pure-1`,

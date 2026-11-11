@@ -8,6 +8,7 @@
 VPRIV void wk_label(ecx *e, uint32_t label)
 {
 	e->kvalid = 0;
+	e->wk->nkl = 0;
 	LO(label)(e, label);
 }
 
@@ -347,6 +348,9 @@ static void wk_decl(ecx *e, const node *x)
 	const sym *y = &c->syms[s];
 
 	wk_ael_clear(e, s);
+	for (uint32_t i = 0; i < e->wk->nkl; i++)
+		if (e->wk->kl[i].s == s)
+			e->wk->kl[i--] = e->wk->kl[--e->wk->nkl];
 
 	if (!x->aux && unlikely(vm_type(c, y->ty)))
 		wk_vla_fix(e, y->ty, false);
@@ -758,6 +762,7 @@ static void wk_switch(ecx *e, uint32_t n)
 			W->swon = on0, W->swsel = sel0;
 			W->nloop--;
 			LO(label)(e, lbrk);
+			W->nkl = 0;	/* (the breaks join here) */
 			return;
 		}
 		wk_free(e, &v);
@@ -1264,6 +1269,7 @@ static void wk_stmt1(ecx *e, uint32_t n)
 		return;
 	case N_ASM: {
 		e->kvalid = 0;
+		W->nkl = 0;
 		const casm *a = &c->asms[x->a];
 		bool empty = a->tmpl && !*c->strs[a->tmpl - 1].s && !a->nout && !a->nin && !a->go;
 
@@ -1300,10 +1306,37 @@ VPRIV bool wk_const_sym(ecx *e, uint32_t s, val *v)
 {
 	wkst *W = e->wk;
 
-	if (W->kgen[s] != W->gen)
+	if (W->kgen[s] != W->gen) {
+		for (uint32_t i = 0; i < W->nkl; i++)
+			if (W->kl[i].s == s) {
+				*v = W->kl[i].v;
+				return true;
+			}
 		return false;
+	}
 	*v = W->kval[s];
 	return true;
+}
+
+VPRIV void wk_kl_note(ecx *e, uint32_t lhs, qty t, const val *v)
+{
+	cc *c = e->c;
+	wkst *W = e->wk;
+	uint32_t s;
+
+	if (!lhs || N(lhs)->op != N_VAR)
+		return;
+	s = N(lhs)->a;
+	for (uint32_t i = 0; i < W->nkl; i++)
+		if (W->kl[i].s == s)
+			W->kl[i--] = W->kl[--W->nkl];
+	if (!v || v->k != V_CONST || !e->E->o->opt || !is_local_var(c, s) || c->syms[s].sc == SC_STATIC ||
+	    e->E->lnoreg[s] || !(is_integer(c, t) || is_ptr(c, t)) || wk_wide(c, t) || tsize(c, t) > 8 ||
+	    (QQ(c->syms[s].ty) & Q_VOLATILE) || (T(c, t)->flags & TF_ATOMIC) || sym_attrs(c, s)->cleanup || W->nkl == 16)
+		return;
+	W->kl[W->nkl].s = s;
+	W->kl[W->nkl].v = vconst(em_trunc_to(c, v->i, t));
+	W->nkl++;
 }
 
 /*
@@ -1487,8 +1520,10 @@ VPRIV val wk_inline(ecx *e, uint32_t n, uint32_t s)
 	W->inst = ++W->ninst;
 	W->inl = &I;
 	W->depth++;
+	W->nkl = 0;	/* (the copy's locals share symbols with other copies) */
 	wk_stmt(e, c->syms[s].body);
 	W->depth--;
+	W->nkl = 0;
 	W->inlocal--;
 	/* the copy's locals and parameters are dead: their slots free, the symbols unbound */
 	while (W->nlu > lmark) {
@@ -1551,6 +1586,7 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 	W->rty = ft->base;
 	W->fsym = s;
 	e->nkv = e->nael = e->kvalid = 0;
+	W->nkl = 0;
 	W->rrec = (wkarg){ 0 };
 	W->nclean = W->nvla = 0;
 	W->inst = 0;

@@ -1642,6 +1642,7 @@ static val wk_assign_(ecx *e, uint32_t n)
 	}
 	if (wk_mem(e, lt))
 		return wk_putmem(e, &l, lt, v);
+	wk_kl_note(e, x->a, lt, &v);
 	if (e->E->o->opt && tsize(c, lt) <= 8) {
 		int k = ael_slot(e, x->a, true);
 		if (k >= 0) {
@@ -1788,6 +1789,8 @@ static val wk_incdec(ecx *e, uint32_t n)
 	qty t = N(x->a)->ty;
 	bool post = x->op == N_POSTINC || x->op == N_POSTDEC, dec = x->op == N_PREDEC || x->op == N_POSTDEC;
 	int64_t d = is_ptr(c, t) ? (int64_t)tsize(c, T(c, t)->base) : 1;
+
+	wk_kl_note(e, x->a, t, NULL);	/* (a known local: forgotten) */
 	qty ot = is_ptr(c, t) ? prim(TY_ULONG) : t;
 	lval l;
 	val old = { 0 }, nv;
