@@ -223,6 +223,13 @@ mem:
 
 			if (!q)
 				return -1;
+			if (r.cls == XR_GPR && r.size == 2 && r.reg == 2 && !o->hasv && ws(q, e) < e && *ws(q, e) == ')') {
+				/* in/out (%dx): the port register */
+				*o = r;
+				o->kind = XK_REG, o->base = o->index = -1;
+				*pp = ws(q, e) + 1;
+				return 0;
+			}
 			o->base = (int8_t)(r.cls == XR_RIP ? 16 : r.reg);
 			if (r.cls != XR_RIP && (r.cls != XR_GPR || r.size != 8))
 				return err(a, "invalid base register");
@@ -624,9 +631,11 @@ VPRIV int x64_instruction(As *a, const char *p, const char *e, size_t wn)
 	p = ws(p + wn, e);
 	/* prefixes written as their own word: lock, rep, data16, rex64 */
 	if (!strcmp(mn, "lock") || !strcmp(mn, "rep") || !strcmp(mn, "repz") || !strcmp(mn, "repe") || !strcmp(mn, "repnz") ||
-	    !strcmp(mn, "repne") || !strcmp(mn, "data16") || !strcmp(mn, "rex64") || !strcmp(mn, "cs") || !strcmp(mn, "notrack")) {
+	    !strcmp(mn, "repne") || !strcmp(mn, "data16") || !strcmp(mn, "rex64") || !strcmp(mn, "cs") || !strcmp(mn, "notrack") ||
+	    !strcmp(mn, "ds") || !strcmp(mn, "ss") || !strcmp(mn, "es") || !strcmp(mn, "fs") || !strcmp(mn, "gs")) {
 		uint8_t b = !strcmp(mn, "lock") ? 0xf0 : !strcmp(mn, "data16") ? 0x66 : !strcmp(mn, "rex64") ? 0x48 :
-			    !strcmp(mn, "cs") ? 0x2e : !strcmp(mn, "notrack") ? 0x3e : mn[3] == 'n' ? 0xf2 : 0xf3;
+			    !strcmp(mn, "cs") ? 0x2e : !strcmp(mn, "notrack") || !strcmp(mn, "ds") ? 0x3e : !strcmp(mn, "ss") ? 0x36 :
+			    !strcmp(mn, "es") ? 0x26 : !strcmp(mn, "fs") ? 0x64 : !strcmp(mn, "gs") ? 0x65 : mn[3] == 'n' ? 0xf2 : 0xf3;
 
 		if (p < e && b == 0xf0) {
 			const char *q = p;

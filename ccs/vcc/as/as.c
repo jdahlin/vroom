@@ -1410,8 +1410,11 @@ VPRIV const char *as_ralias(As *a, uint32_t y)
 	return NULL;
 }
 
+static int d_org(As *a, const char *p, const char *e);
 static int assign(As *a, Sv n, const char *p, const char *e)
 {
+	if (n.n == 1 && n.s[0] == '.')	/* . = expr: .org expr */
+		return d_org(a, p, e);
 	uint32_t y = sym(a, n.s, n.n);
 	Val v;
 	if (a->o->machine == EM_X86_64) {
@@ -1419,10 +1422,19 @@ static int assign(As *a, Sv n, const char *p, const char *e)
 		const char *q = ws(p, e), *r;
 		const char *t = e;
 		while (t > q && (t[-1] == ' ' || t[-1] == '\t')) t--;
-		if (q < t && *q == '%') {
-			for (r = q + 1; r < t && (isidc((unsigned char)*r) || c_digit((unsigned char)*r)); r++)
+		const char *ar = NULL;
+		if (q < t && isids((unsigned char)*q) && a->nralias) {	/* X_ = X0: an alias of an alias */
+			for (r = q; r < t && isidc((unsigned char)*r); r++)
 				;
-			if (r == t && r - q - 1 < 8) {
+			if (r == t) ar = as_ralias(a, elf_sym_lookup(a->o, q, (uint32_t)(t - q)));
+		}
+		if (ar || (q < t && *q == '%')) {
+			if (!ar)
+				for (r = q + 1; r < t && (isidc((unsigned char)*r) || c_digit((unsigned char)*r)); r++)
+					;
+			else
+				q = ar - 1, r = ar + strlen(ar);
+			if (r == (ar ? r : t) && r - q - 1 < 8) {
 				if (a->nralias == a->raliascap) {
 					uint32_t nc = a->raliascap ? a->raliascap * 2 : 32;
 					void *nb = rget(&a->defs, sizeof *a->ralias * nc);
