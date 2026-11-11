@@ -35,7 +35,7 @@ done
     journalctl -b -u "$u" --no-pager -o cat | tail -n 8 | sed "s/^/VROOM_JOURNAL $u: /"
   done
   echo VROOM_END_$((40+2))
-} > /dev/ttyAMA0 2>&1
+} > /dev/console 2>&1
 """
 CHECK_B64 = base64.b64encode(CHECK_SCRIPT.encode()).decode()
 # Körs av systemd.run=; startar kontrollen som en egen tjänst efter multi-user.target
