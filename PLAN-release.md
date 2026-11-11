@@ -80,6 +80,20 @@ kan gå parallellt.
 
 ## Status
 
+### Status 2026-11-11: G5/G7, wasm frame-cell forwarding
+
+Wasm32/64 använder nu den gemensamma cell-/värdekärnan för exakta
+4/8-byte frame-celler och tar bort överskrivna lagringar. Typade
+emissionshändelser bevarar adress-/RHS-effekter och operandstack; inga
+SSA-grafer eller assemblertextmönster. Positivt aggregatprov går från sex
+till två minnesoperationer. Blandat elvafilersprov ger +0,599 % värd-Ir,
+kontroller +0,18–0,30 %, positivt prov +7,03 %. Detta är avgränsad data,
+inte hela G7. 16 fokuserade kör-/kodkrav, sanitiserare, oberoende review,
+6120 identiska native-resultat och 149 egna wasm32-PASS verifierar steget.
+Lokal wasm64-referenskrasch är baslinjereproducerad och synlig; se
+PLAN-wasm.md. X86:s adapter är fortsatt experimentell på grund av kostnad;
+smala wasm-celler, generell unread-DSE, full O2 och G5/G7 återstår.
+
 ### Status 2026-11-11: G5/G7, kopior och direkt utvidgningsbevis
 
 Delad native kopiekärna återanvänder arm64:s analys; x86 gör endast
