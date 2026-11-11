@@ -31,6 +31,7 @@
 #include "ld.h"
 #include "../lib/buf.h"
 #include "../lib/defer.h"
+#include "../lib/ckd.h"
 #include "../lib/vec.h"
 #include "../lib/ldhash.h"
 #include "../lib/vperf.h"
@@ -1737,11 +1738,10 @@ static bool obj_valid(Obj *o, const Ehdr *eh)
 	if (nsh == 0 || nsh > (n - eh->e_shoff) / sizeof(Shdr))
 		BAD("%s: section header table goes past the end of the file", o->path);
 	o->nsh = nsh;
-	for (uint32_t s = 1; s < o->nsh; s++) {
+	for (uint32_t s = 0; s < o->nsh; s++) {	/* (0 too: shstrndx and sh_link may name it) */
 		const Shdr *h = &o->sh[s];
 
-		if (h->sh_type != SHT_NOBITS && h->sh_type != SHT_NULL &&
-		    (h->sh_offset > n || h->sh_size > n - h->sh_offset))
+		if (h->sh_type != SHT_NOBITS && h->sh_type != SHT_NULL && !vckd_range(h->sh_offset, h->sh_size, n))
 			BAD("%s: section %u goes past the end of the file", o->path, s);
 		if (h->sh_addralign & (h->sh_addralign - 1))
 			BAD("%s: section %u: sh_addralign is not a power of 2", o->path, s);

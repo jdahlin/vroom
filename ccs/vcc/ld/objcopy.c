@@ -24,6 +24,7 @@
 #include "ld.h"
 #include "../lib/hash.h"
 #include "../lib/defer.h"
+#include "../lib/ckd.h"
 #include "ldelf.h"
 
 #include <ctype.h>
@@ -116,10 +117,11 @@ static bool elf_valid(Elf *e)
 		return h->e_shoff == 0 || h->e_shstrndx == 0;
 	if (h->e_shstrndx >= e->nsh)
 		return false;
-	for (uint32_t k = 1; k < e->nsh; k++) {
+	/* section 0 too: e_shstrndx and sh_link may name it, and its type is the file's to choose */
+	for (uint32_t k = 0; k < e->nsh; k++) {
 		const Shdr *s = &e->sh[k];
 
-		if (s->sh_type != SHT_NOBITS && (s->sh_offset > e->size || s->sh_size > e->size - s->sh_offset))
+		if (s->sh_type != SHT_NOBITS && s->sh_type != SHT_NULL && !vckd_range(s->sh_offset, s->sh_size, e->size))
 			return false;
 		if (s->sh_addralign & (s->sh_addralign - 1))
 			return false;
