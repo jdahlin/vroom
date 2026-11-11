@@ -702,3 +702,7 @@ switchkostnaden och releasegrindarna G5/G7 återstår att följa upp.
 
 Switch-värdetabellernas byteutmatning har snabbats upp efter `perf`-profilering;
 matchade mätningar och deras begränsningar finns i PLAN-fas2.md. G5/G7 kvarstår.
+
+Aritmetik- och switchstacken som tidigare hamnade i featuregrenar integreras
+nu på main. Fyra måls fokuserade tester, native-sviter och aktuell matchad
+kompilatorinstruktionsgrind redovisas i PLAN-fas2.md. G5/G7 återstår.

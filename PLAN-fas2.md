@@ -2926,3 +2926,28 @@ Kommandon, binär-/indatahashar och alla mätvärden finns i
 `work/opt-profile/switch-speed/{perf-stat.json,run.log}`. O0–O3-körning och
 optimeringskontroller passerar på fyra mål; wasm assembleras även av clang.
 Detta mäter kompilering, inte den genererade kodens körtid.
+
+### Integrering på main: aritmetik och switch (2026-11-11)
+
+De tidigare PR #77–#82 mergades in i featuregrenar efter att deras föräldrar
+redan mergats. Integreringscommit `d24fb15` för in hela stacken på main
+`ccbbc21`: bitregler, gränsjämförelser, switch-bitset, switch-värdetabeller,
+wasm `.size` och snabbare tabellutmatning. Konflikter i planerna löstes genom
+att behålla båda sidors historik; emitter- och CI-ändringarna från main finns
+kvar.
+
+Unity och filvis bygge passerar. I båda bygglägen körs bitregler,
+gränsjämförelser, switchtabeller, bitset och konstantkontroll O0–O3 på x86,
+arm64, wasm32 och wasm64; relevanta noopt-fall, extern wasm-assemblering och
+arm64-direktobjekt med PIC/debug/CFI ingår. Emitter-namnkontrakten klarar
+ASan/UBSan. Vcc-sviten: arm64 252/252 och en befintlig xfail; x86 247/247
+körbara och sex referensundantag.
+
+Matchad seriell Callgrind-grind för hela integreringen mot `ccbbc21`, båda
+binärer byggda med clang 23 `-O3 -march=x86-64-v3`, gav compiler-Ir: x86
++0,169 %, arm64 +0,143 %, wasm32 +0,274 %, wasm64 +0,248 %. 12/12 nativefiler,
+10 wasm32 och 11 wasm64 ingår; atomic_ops/bitint_runtime som avvisas av båda
+kompilatorerna på respektive wasm-mål redovisas separat. Grinden på 1 %
+passerar. Källträds-/binärhashar, exakta kommandon och fall finns i
+`work/opt-profile/consolidated-main-cost/result.json`. Detta är en liten fast
+korpus med kompilatorinstruktioner, inte en gräns för vägg- eller CPU-tid.
