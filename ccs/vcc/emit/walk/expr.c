@@ -1718,6 +1718,10 @@ static val wk_fpconst(ecx *e, qty t, double d, u128 q)
 	{
 		float f = (float)d;
 		uint64_t bits = 0;
+		if (q_isnan(q)) {
+			int sz = wk_size(c, t);
+			return LO(fconst)(e, q_nan_storage(q, KIND(c, t) == TY_BFLOAT16 ? 7 : sz == 2 ? 10 : sz == 4 ? 23 : 52, KIND(c, t) == TY_BFLOAT16 ? 8 : sz == 2 ? 5 : sz == 4 ? 8 : 11), sz);
+		}
 
 		if (KIND(c, t) == TY_BFLOAT16)
 			return LO(fconst)(e, q_to_bf(q), 2);
@@ -1879,7 +1883,7 @@ static val wk_builtin(ecx *e, uint32_t n)
 		back = wk_conv(e, lo, tr, w);
 		return LO(wcmp)(e, T_EXCLAIMEQ, true, (val){ .k = V_REG, .r = (uint8_t)rr }, back);
 	}
-	case BI_ISNAN: case BI_ISINF: case BI_ISFINITE: case BI_ISNORMAL: {
+	case BI_ISNAN: case BI_ISINF: case BI_ISFINITE: case BI_ISNORMAL: case BI_ISSIGNALING: {
 		qty at = N(arg[0])->ty;
 		val v = wk_gen(e, arg[0]);
 		int sz = wk_size(c, at);
@@ -1893,23 +1897,50 @@ static val wk_builtin(ecx *e, uint32_t n)
 			hi.off += 8;
 			LO(load)(e, re, &hi, 2, false);
 			exp = LO(bin)(e, T_AMP, 4, false, wk_vreg(re), vconst(0x7fff));
-			if (x->aux == BI_ISFINITE || x->aux == BI_ISNORMAL) {
-				wk_lfree(e, &l);
-				if (x->aux == BI_ISNORMAL)
-					exp = LO(bin)(e, T_MINUS, 4, false, exp, vconst(1));
-				return LO(cmp)(e, T_LESS, 4, false, exp, vconst(x->aux == BI_ISNORMAL ? 0x7ffe : 0x7fff));
-			}
 			re = LO(treg)(e);
 			LO(load)(e, re, &l, 8, false);
 			wk_lfree(e, &l);
+			val sig = wk_vreg(re);
+			val integer = vconst(0);
+			if (x->aux == BI_ISFINITE || x->aux == BI_ISNORMAL || x->aux == BI_ISNAN)
+				integer = LO(cmp)(e, T_GREATEREQ, 8, false, wk_vreg(wk_dup(e, sig.r)), vconst((i128)1 << 63));
+			if (x->aux == BI_ISFINITE || x->aux == BI_ISNORMAL) {
+				val valid = integer;
+				if (x->aux == BI_ISFINITE) {
+					val zeroexp = LO(cmp)(e, T_EQUALEQUAL, 4, false, wk_vreg(wk_dup(e, exp.r)), vconst(0));
+					valid = LO(bin)(e, T_PIPE, 4, false, valid, zeroexp);
+				} else
+					exp = LO(bin)(e, T_MINUS, 4, false, exp, vconst(1));
+				exp = LO(cmp)(e, T_LESS, 4, false, exp, vconst(x->aux == BI_ISNORMAL ? 0x7ffe : 0x7fff));
+				LO(tfree)(e, sig.r);
+				return LO(bin)(e, T_AMP, 4, false, exp, valid);
+			}
+			if (x->aux == BI_ISSIGNALING) {
+				/* Unsupported encodings (integer bit clear) are quiet NaNs. */
+				mant = LO(bin)(e, T_MINUS, 8, false, sig, vconst(((i128)1 << 63) + 1));
+				mant = LO(cmp)(e, T_LESS, 8, false, mant, vconst(((i128)1 << 62) - 1));
+				exp = LO(cmp)(e, T_EQUALEQUAL, 4, false, exp, vconst(0x7fff));
+				return LO(bin)(e, T_AMP, 4, false, exp, mant);
+			}
+			val unsupported = vconst(0);
+			if (x->aux == BI_ISNAN) {
+				val nonzero = LO(cmp)(e, T_EXCLAIMEQ, 4, false, wk_vreg(wk_dup(e, exp.r)), vconst(0));
+				val nointeger = LO(bin)(e, T_CARET, 4, false, integer, vconst(1));
+				unsupported = LO(bin)(e, T_AMP, 4, false, nonzero, nointeger);
+			}
 			mant = LO(cmp)(e, x->aux == BI_ISNAN ? T_EXCLAIMEQ : T_EQUALEQUAL,
-				8, false, wk_vreg(re), vconst((i128)1 << 63));
+				8, false, sig, vconst((i128)1 << 63));
 			exp = LO(cmp)(e, T_EQUALEQUAL, 4, false, exp, vconst(0x7fff));
-			return LO(bin)(e, T_AMP, 4, false, exp, mant);
+			val result = LO(bin)(e, T_AMP, 4, false, exp, mant);
+			return x->aux == BI_ISNAN ? LO(bin)(e, T_PIPE, 4, false, result, unsupported) : result;
 		}
 		v = LO(fbits)(e, v, sz);
 		v = LO(bin)(e, T_AMP, 8, false, v,
 			vconst(sz == 2 ? 0x7fffULL : sz == 4 ? 0x7fffffffULL : 0x7fffffffffffffffULL));
+		if (x->aux == BI_ISSIGNALING) {
+			v = LO(bin)(e, T_MINUS, 8, false, v, vconst(KIND(c, at) == TY_BFLOAT16 ? 0x7f81ULL : sz == 2 ? 0x7c01ULL : sz == 4 ? 0x7f800001ULL : 0x7ff0000000000001ULL));
+			return LO(cmp)(e, T_LESS, 8, false, v, vconst(KIND(c, at) == TY_BFLOAT16 ? 0x3fULL : sz == 2 ? 0x1ffULL : sz == 4 ? 0x3fffffULL : 0x7ffffffffffffULL));
+		}
 		if (x->aux == BI_ISNORMAL) {
 			v = LO(bin)(e, T_GREATERGREATER, 8, false, v, vconst(KIND(c, at) == TY_BFLOAT16 ? 7 : sz == 2 ? 10 : sz == 4 ? 23 : 52));
 			v = LO(bin)(e, T_MINUS, 8, false, v, vconst(1));

@@ -1130,6 +1130,35 @@ runtime:
 		tfree(e, nanregs[0]);
 		return ne;
 	}
+	case BI_ISSIGNALING: {
+		qty at = N(arg[0])->ty;
+		val a = gen(e, arg[0]);
+		int r, d;
+		uint64_t inf, quiet;
+		if (is_ld(c, at)) {
+			/* Fold low payload bits into a sticky bit after discarding sign. */
+			toreg2(e, &a, false);
+			r = a.r2, d = 1;
+			opi(e, I_SUBSI, 1, ZR, a.r, 0);
+			cset(e, a.r, C_NE);
+			shift_imm(e, T_LESSLESS, 1, r, r, 1);
+			op3(e, I_ORR, 1, r, r, a.r);
+			tfree(e, a.r);
+			inf = UINT64_C(0xfffe000000000000), quiet = UINT64_C(1) << 48;
+		} else {
+			bool half = KIND(c, at) == TY_FLOAT16 || KIND(c, at) == TY_BFLOAT16;
+			bool bf = KIND(c, at) == TY_BFLOAT16;
+			d = fpk(e, at);
+			r = toreg(e, &a);
+			opi(e, I_ANDI, d, r, r, half ? 0x7fff : d ? INT64_MAX : 0x7fffffff);
+			inf = bf ? UINT64_C(0x7f80) : half ? UINT64_C(0x7c00) : d ? UINT64_C(0x7ff0000000000000) : UINT64_C(0x7f800000);
+			quiet = UINT64_C(1) << (bf ? 6 : half ? 9 : d ? 51 : 22);
+		}
+		opi(e, I_SUBI, d, r, r, (int64_t)(inf + 1));
+		opi(e, I_SUBSI, d, ZR, r, (int64_t)(quiet - 1));
+		cset(e, r, C_LO);
+		return vreg(r);
+	}
 	case BI_ISNAN: case BI_ISINF: case BI_ISFINITE: case BI_SIGNBIT: case BI_ISNORMAL: {
 		cval cv;
 

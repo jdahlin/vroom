@@ -136,6 +136,10 @@ VPRIV val f_const_cv(ecx *e, qty t, const cval *cv)
 {
 	if (is_ld(e->c, t))
 		return vconst(cv->ld ? (i128)cv->q : ld_of_d(cv->f));
+	if (cv->ld && q_isnan(cv->q)) {
+		int sz = (int)tsize(e->c, t);
+		return vconst(q_nan_storage(cv->q, KIND(e->c, t) == TY_BFLOAT16 ? 7 : sz == 2 ? 10 : sz == 4 ? 23 : 52, KIND(e->c, t) == TY_BFLOAT16 ? 8 : sz == 2 ? 5 : sz == 4 ? 8 : 11));
+	}
 	return f_const_t(e, t, cv->f);
 }
 

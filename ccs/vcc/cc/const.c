@@ -256,6 +256,7 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 		case CK_F2F:
 			if (a.kind != CV_FLT)
 				return false;
+			if (a.ld && q_isnan(a.q)) a.q |= (u128)1 << 111;
 			v->ice = false;
 			if (is_q(c, to))
 				set_q(v, q_to_p(get_q(&a, true), q_prec(c, to)));

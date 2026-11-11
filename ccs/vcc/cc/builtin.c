@@ -87,6 +87,8 @@ static const builtin builtins[] = {
 	{ "__builtin_huge_vall", BI_HUGE_VAL, 1, "D" },
 	{ "__builtin_inf", BI_INF, 1, "d" }, { "__builtin_inff", BI_INFF, 1, "f" }, { "__builtin_infl", BI_INF, 1, "D" },
 	{ "__builtin_nan", BI_NAN, 1, "dS" }, { "__builtin_nanf", BI_NANF, 1, "fS" }, { "__builtin_nanl", BI_NAN, 1, "DS" },
+	{ "__builtin_nans", BI_NANS, 1, "dS" }, { "__builtin_nansf", BI_NANS, 1, "fS" }, { "__builtin_nansl", BI_NANS, 1, "DS" },
+	{ "__builtin_issignaling", BI_ISSIGNALING, 1, "i." },
 	{ "__builtin_isnan", BI_ISNAN, 1, "i." }, { "__builtin_isinf", BI_ISINF, 1, "i." },
 	{ "__builtin_isfinite", BI_ISFINITE, 1, "i." }, { "__builtin_signbit", BI_SIGNBIT, 1, "i." },
 	{ "__builtin_fpclassify", BI_FPCLASSIFY, 1, "i." }, { "__builtin_isinf_sign", BI_ISINF_SIGN, 1, "i." },
@@ -411,8 +413,49 @@ VPRIV bool eval_builtin(cc *c, const node *x, cval *v)
 	case BI_HUGE_VAL: case BI_HUGE_VALF: case BI_INF: case BI_INFF:
 		v->kind = CV_FLT, v->f = __builtin_inf(), v->ice = false;
 		return true;
-	case BI_NAN: case BI_NANF:
-		v->kind = CV_FLT, v->f = __builtin_nan(""), v->ice = false;
+	case BI_NAN: case BI_NANF: case BI_NANS: {
+		uint32_t n = arg[0];
+		while (N(n)->op == N_CAST)
+			n = N(n)->a;
+		if (N(n)->op != N_STR)
+			return false;
+		const char *text = c->strs[N(n)->a].s;
+		int p = KIND(c, x->ty) == TY_FLOAT16 ? 10 : KIND(c, x->ty) == TY_FLOAT ? 23 : KIND(c, x->ty) == TY_DOUBLE ? 52 :
+		        c->o->target == PP_DARWIN ? 52 : c->o->target == PP_LINUX_X86_64 ? 63 : 112;
+		u128 payload = 0;
+		unsigned base = 10;
+		bool valid = true;
+		if (text[0] == '0') {
+			base = 8;
+			if (text[1] == 'x' || text[1] == 'X')
+				base = 16, text += 2;
+			if (base == 16 && !*text)
+				valid = false;
+		}
+		for (; *text; text++) {
+			unsigned digit = *text >= '0' && *text <= '9' ? (unsigned)(*text - '0') :
+			                 *text >= 'a' && *text <= 'f' ? (unsigned)(*text - 'a' + 10) :
+			                 *text >= 'A' && *text <= 'F' ? (unsigned)(*text - 'A' + 10) : base;
+			if (digit >= base || payload > (UINT64_MAX - digit) / base) { valid = false; break; }
+			payload = payload * base + digit;
+		}
+		if (!valid)
+			return false;
+		payload &= (((u128)1 << (p - 1)) - 1);
+		if (x->aux == BI_NANS) {
+			if (!payload)
+				payload = (u128)1 << (p - 2);
+		} else
+			payload |= (u128)1 << (p - 1);
+		v->q = (u128)0x7fff << 112 | payload << (112 - p);
+		v->kind = CV_FLT, v->ld = true, v->f = q_to_d(v->q), v->ice = false;
+		return true;
+	}
+	case BI_ISSIGNALING:
+		if (!eval(c, arg[0], &a) || a.kind != CV_FLT)
+			return false;
+		v->i = a.ld ? q_isnan(a.q) && !(a.q & ((u128)1 << 111)) : 0;
+		v->ice = false;
 		return true;
 	case BI_CLZ: case BI_CLZL: case BI_CLZLL: case BI_CTZ: case BI_CTZL: case BI_CTZLL:
 	case BI_FFS: case BI_FFSL: case BI_FFSLL: case BI_POPCOUNT: case BI_POPCOUNTL: case BI_POPCOUNTLL:
@@ -990,13 +1033,26 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 		case BI_ISNAN: case BI_ISINF: case BI_ISFINITE: case BI_SIGNBIT: case BI_ISNORMAL:
 		case BI_ISINF_SIGN: case BI_FPCLASSIFY:
 			break;
+		case BI_ISSIGNALING:
+			if (args.n != 1) {
+				arity(c, loc, 1, &args);
+				return err_node(c, loc);
+			}
+			if (!is_float(c, N(args.v[0])->ty)) {
+				cc_error(c, c->prevloc, "floating point classification requires argument of floating point type (passed in '%s')",
+				         tyname(c, N(args.v[0])->ty));
+				return err_node(c, loc);
+			}
+			break;
 		}
-		if (b->id == BI_STRLEN) {
-			/* folds when the string is known; otherwise the library call */
+		if (b->id == BI_STRLEN || b->id == BI_NAN || b->id == BI_NANF || b->id == BI_NANS) {
+			/* Fold known strings/payloads; otherwise emit the library call. */
+			if (args.n != 1)
+				return err_node(c, loc);
 			uint32_t n = mk_builtin(c, b->id, rt, loc, &args);
 			cval cv;
 
-			if (cc_eval(c, n, &cv) && cv.kind == CV_INT)
+			if (cc_eval(c, n, &cv) && (cv.kind == CV_INT || cv.kind == CV_FLT))
 				return n;
 		}
 		if (b->id == BI_LIB && !c->o->no_builtin && !lib_builtin_disabled(c->o, "strncmp", 7) &&
@@ -1005,7 +1061,7 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 			if (folded)
 				return folded;
 		}
-		if (b->id == BI_LIB || b->id == BI_STRLEN) {
+		if (b->id == BI_LIB || b->id == BI_STRLEN || b->id == BI_NAN || b->id == BI_NANF || b->id == BI_NANS) {
 			/* a call to the library function the builtin names */
 			uint32_t s = sym_new(c, S_BUILTIN, 0, ft, loc), fn, n;
 

@@ -28,6 +28,15 @@ F128_UNUSED static bool q_isinf(u128 u) { return (u << 1) == ((u128)0x7fff << 11
 F128_UNUSED static bool q_nz(u128 u) { return (u << 1) != 0; }	/* NaN counts as true, as in C */
 F128_UNUSED static u128 q_qnan(void) { return (u128)0x7fff8 << 108; }
 
+/* Exact NaN storage, without a floating conversion that would quiet it.
+ * The payload is left-aligned in binary128, including the quiet bit. */
+F128_UNUSED static uint64_t q_nan_storage(u128 q, int p, int eb)
+{
+	return (uint64_t)(q >> 127) << (p + eb) |
+	       ((UINT64_C(1) << eb) - 1) << p |
+	       (uint64_t)((q & Q_M112) >> (112 - p));
+}
+
 /* sign, biased exponent and significand m, any width, whose value is
    m * 2^(e - bias - p - 3); rounds to nearest even with m's low bit sticky */
 F128_UNUSED static u128 q_round(int s, int e, u128 m, int p, int emax)
