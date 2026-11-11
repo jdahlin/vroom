@@ -154,6 +154,14 @@ optimeringsfall under arbete; detta är inte ett godkännande av hela S3.
 Kernelns frontendkontroller går samtidigt 887/887 i både separata
 processer och batch.
 
+Ny compile-körning med isolerad committad `1009175` ger
+**1843 godkända, 16 fel, 0 krascher, 155 filtrerade och 2 referensfel**
+på x86. Kvar finns stora statiska stackramar (4), vektordeklaratorer/attribut
+(4), två array-/scopefall, ett stort argumentkopieringsfall, två
+return-mismatch-flaggfall, två parsergränser och en saknad SIMD-builtin.
+Riktade rättningar räknas först efter isolerad validering; detta är den
+senaste fulla baslinjen.
+
 **Klart när:** inga krascher i `compile/`; `ieee/` och `builtins/` lika
 gröna som `execute/`.
 
