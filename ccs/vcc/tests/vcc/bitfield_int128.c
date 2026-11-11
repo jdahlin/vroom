@@ -1,3 +1,4 @@
+/* vcc-xfail-wasm: TODO.md wasm: wide integer bitfields: extraction, signed extension and masked stores are not lowered. */
 typedef unsigned __int128 U;
 typedef __int128 S;
 struct Base { U value : 65; };

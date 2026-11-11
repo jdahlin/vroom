@@ -454,6 +454,16 @@ gränsprov går på båda mål/byggsätt. Oförändrad tillämplig GCC-konverter
 är nu **35 godkända x86-konfigurationer** och **30 ARM-konfigurationer**,
 noll fel; befintliga upstream-/orakelfiltreringar är oförändrade.
 
+Wasm-förkontrollen behåller generiska rotationsprov som obligatoriska och
+lägger BitInt-delproven i en separat körbar regression. Konstant
+`fabs`/`copysign` viks måloberoende; powi-provet jämför negativ oändlighet
+direkt i stället för att kräva en separat ännu ostödd long-double-builtin.
+Dessa tre fulla regressioner kör grönt i wasm64 och på båda Linux-målen.
+Två breda bitfältsprov och separat BitInt-rotation är uttryckliga,
+fortfarande körda Wasm-XFAIL med TODO-referenser: samma källor fallerar
+redan med byteverifierad uppströmsbas `2339f69`. Linuxproven är fortsatt
+obligatoriska. Wasm-felen döljs inte som godkända eller överhoppade prov.
+
 Kombinerat fryst checkpoint `7afcdea`, före signmask-/typnamnsrättningarna,
 är verifierat i båda byggsätten: **145/145 x86** (fem referensundantag),
 **150/150 ARM/QEMU**, tvåfils-constexpr-ABI samt tre ursprungliga GCC-fall

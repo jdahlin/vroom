@@ -29,6 +29,6 @@ int main(void)
   if (powif(-1.f, INT_MIN + 1) != -1.f || powi(-1., INT_MIN + 1) != -1. || powil(-1.L, INT_MIN + 1) != -1.L) return 4;
   if (powi(__builtin_nan(""), 0) != 1. || powil(__builtin_infl(), 0) != 1.L) return 5;
   if (!__builtin_signbit(powi(-0., 3)) || __builtin_signbit(powi(-0., 2))) return 6;
-  if (!__builtin_isinf(powil(-0.L, -3)) || !__builtin_signbit(powil(-0.L, -3))) return 7;
+  if (powil(-0.L, -3) != -__builtin_infl()) return 7;
   return 0;
 }

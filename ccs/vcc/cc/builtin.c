@@ -1364,8 +1364,6 @@ static bool elementwise_abs_effects(cc *c, uint32_t n, bool load)
  * signaling NaNs and signed zero. Anonymous locals evaluate each operand once. */
 VPRIV uint32_t fp_sign_call(cc *c, const char *name, size_t len, qty ft, const vec *args, uint32_t loc)
 {
-	if (c->o->target != PP_LINUX_X86_64 && c->o->target != PP_LINUX_AARCH64)
-		return 0;
 	bool copy = (len == 8 && !memcmp(name, "copysign", 8)) ||
 		    (len == 9 && !memcmp(name, "copysignf", 9));
 	bool abs = (len == 4 && !memcmp(name, "fabs", 4)) ||
@@ -1380,6 +1378,8 @@ VPRIV uint32_t fp_sign_call(cc *c, const char *name, size_t len, qty ft, const v
 	if (!elementwise_abs_effects(c, args->v[0], true) && cc_eval(c, args->v[0], &a) && a.kind == CV_FLT &&
 	    (!copy || (!elementwise_abs_effects(c, args->v[1], true) && cc_eval(c, args->v[1], &b) && b.kind == CV_FLT)))
 		return mk_flt(c, __builtin_copysign(a.f, copy ? b.f : 1.0), t, loc);
+	if (c->o->target != PP_LINUX_X86_64 && c->o->target != PP_LINUX_AARCH64)
+		return 0;
 	if (c->o->general_regs_only) {
 		cc_error(c, loc, "%s floating point is not supported", "-mgeneral-regs-only:");
 		return err_node(c, loc);
