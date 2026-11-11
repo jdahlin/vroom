@@ -297,6 +297,8 @@ static void wk_decl(ecx *e, const node *x)
 	uint32_t s = x->a;
 	const sym *y = &c->syms[s];
 
+	wk_ael_clear(e, s);
+
 	if (unlikely(vm_type(c, y->ty)))
 		wk_vla_fix(e, y->ty, false);
 	if (y->kind != S_VAR || y->sc == SC_STATIC || y->sc == SC_EXTERN || y->sc == SC_TYPEDEF)

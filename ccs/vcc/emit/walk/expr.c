@@ -177,11 +177,65 @@ VPRIV int32_t wk_local(ecx *e, uint32_t s)
 	return W->soff[s];
 }
 
+/* n is a[K] of a local array that does not escape, an integer element: a and K */
+static bool wk_ael_of(ecx *e, uint32_t n, uint32_t *s, int64_t *k)
+{
+	cc *c = e->c;
+	const node *x = N(n);
+	uint32_t a;
+	const ctype *at;
+
+	if (!is_aconst(c, n) || !is_integer(c, x->ty) || wk_wide(c, x->ty) || (QQ(x->ty) & Q_VOLATILE))
+		return false;
+	a = N(N(x->a)->a)->a, at = T(c, c->syms[a].ty);
+	if (!is_local_var(c, a) || c->syms[a].sc == SC_STATIC || (e->E->sflags[a] & SA_AESC) ||
+	    (QQ(c->syms[a].ty) & Q_VOLATILE) || sym_attrs(c, a)->cleanup || at->kind != TY_ARRAY ||
+	    (at->flags & (TF_VLA | TF_INCOMPLETE)) || aconst_idx(c, n) >= at->n)
+		return false;
+	*s = a, *k = aconst_idx(c, n);
+	return true;
+}
+
+static int wk_ael_find(ecx *e, uint32_t s, int64_t k)
+{
+	wkst *W = e->wk;
+
+	for (int i = 0; i < W->nael; i++)
+		if (W->ael[i].s == s && W->ael[i].idx == k && W->ael[i].gen == W->gen && W->ael[i].inst == W->inst)
+			return i;
+	return -1;
+}
+
+static void wk_ael_drop(ecx *e, uint32_t s, int64_t k, bool all)
+{
+	wkst *W = e->wk;
+
+	for (int i = 0; i < W->nael; i++)
+		if (W->ael[i].s == s && (all || W->ael[i].idx == k))
+			W->ael[i] = W->ael[--W->nael], i--;
+}
+
+/* a local array's element values are unknown again (a label, its declaration) */
+VPRIV void wk_ael_clear(ecx *e, uint32_t s)
+{
+	if (s == UINT32_MAX)
+		e->wk->nael = 0;
+	else
+		wk_ael_drop(e, s, 0, true);
+}
+
 VPRIV lval wk_lval(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
 	const node *x = N(n);
 	lval l = { 0 };
+	{
+		uint32_t as;
+		int64_t ak;
+
+		if (wk_ael_of(e, n, &as, &ak))
+			wk_ael_drop(e, as, ak, false);	/* (written, or its address used) */
+	}
 
 	switch (x->op) {
 	case N_VAR: {
@@ -1124,7 +1178,29 @@ static qty wk_optype(cc *c, int op, qty lt, qty rt)
 }
 
 /* x = y, x op= y: the value stored */
+static val wk_assign_(ecx *e, uint32_t n);
 static val wk_assign(ecx *e, uint32_t n)
+{
+	cc *c = e->c;
+	const node *x = N(n);
+	uint32_t as;
+	int64_t ak;
+	bool ael = !x->aux && wk_ael_of(e, x->a, &as, &ak);
+	val v = wk_assign_(e, n);
+	wkst *W = e->wk;
+
+	cval cv;
+
+	if (ael && W->nael < 16 && (v.k == V_CONST || (cc_eval(c, x->b, &cv) && cv.kind == CV_INT))) {
+		int i = W->nael++;
+
+		W->ael[i].s = as, W->ael[i].gen = W->gen, W->ael[i].inst = W->inst;
+		W->ael[i].idx = ak, W->ael[i].v = em_trunc_to(c, v.k == V_CONST ? v.i : cv.i, N(x->a)->ty);
+	}
+	return v;
+}
+
+static val wk_assign_(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
 	const node *x = N(n);
@@ -1431,6 +1507,26 @@ static void wk_argslot(ecx *e, wkarg *a, qty t, val v)
 	}
 }
 
+/* f((double)x) for x a float and f floor, ceil, ... (exact in float): fN in float
+   (clang -O2's shrinking of library calls): FN_* + 1, 0 when not */
+static int wk_shrink(ecx *e, uint32_t n, uint32_t s)
+{
+	static const char *const nm[] = { "floor", "ceil", "trunc", "round", "rint", "nearbyint", "fabs" };
+	cc *c = e->c;
+	const node *x = N(n), *a;
+	const vident *id = &vintern_ents[c->syms[s].name];
+
+	if (x->c != 1 || c->syms[s].sc == SC_STATIC || KIND(c, N(n)->ty) != TY_DOUBLE || !e->E->o->opt)
+		return 0;
+	a = N(c->lists[x->b]);
+	if (a->op != N_CAST || KIND(c, a->ty) != TY_DOUBLE || KIND(c, N(a->a)->ty) != TY_FLOAT)
+		return 0;
+	for (int k = 0; k < 7; k++)
+		if (id->len == strlen(nm[k]) && !memcmp(id->s, nm[k], id->len))
+			return FN_FLOORF + k + 1;
+	return 0;
+}
+
 static val wk_call(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
@@ -1454,6 +1550,17 @@ static val wk_call(ecx *e, uint32_t n)
 			ref = REF(RK_NAME, (uint32_t)c->syms[s].val);	/* a library function by name */
 		} else if (wk_can_inline(e, s)) {
 			return wk_inline(e, n, s);
+		} else if (wk_shrink(e, n, s)) {
+			int k = wk_shrink(e, n, s) - 1;
+			uint32_t an = N(c->lists[x->b])->a;	/* the float */
+			wkarg fa;
+			val v;
+
+			LO(classify)(e, N(an)->ty, &fa);
+			wk_argslot(e, &fa, N(an)->ty, wk_gen(e, an));
+			e->calls = true;
+			v = LO(call)(e, FIXED(k), NULL, &fa, 1, false, NULL, prim(TY_FLOAT));
+			return wk_conv(e, v, prim(TY_FLOAT), prim(TY_DOUBLE));
 		} else {
 			note_ref(e, REF(RK_SYM, s));
 			ref = REF(RK_SYM, s);
@@ -2344,6 +2451,14 @@ VPRIV val wk_gen(ecx *e, uint32_t n)
 		return wk_load(e, l, x->ty);
 	}
 	case N_STR: case N_MEMBER: case N_INDEX: case N_DEREF:
+		if (x->op == N_INDEX) {
+			uint32_t as;
+			int64_t ak;
+			int i;
+
+			if (wk_ael_of(e, n, &as, &ak) && (i = wk_ael_find(e, as, ak)) >= 0)
+				return vconst(e->wk->ael[i].v);
+		}
 		if (!is_array(c, x->ty) && !is_func(c, x->ty))
 			wk_scalar(e, n, x->ty);
 		return wk_load(e, wk_lval(e, n), x->ty);

@@ -89,11 +89,16 @@ typedef struct wkst {
 	uint32_t inst, ninst, *linst, *cinst;
 	struct wkinl *inl;	/* the innermost inlined call, NULL in the function itself */
 	int depth;
-	bool cjump;	/* wk_cond jumped whatever the condition (N_IF: the branch it skips is dead) */
+	bool cjump;
+	/* a[K] = constant for local arrays used only as a[CONST] (no SA_AESC): straight-line
+	   code only (a label drops them all), as arm64's ael */
+	struct { uint32_t s, gen, inst; int64_t idx; i128 v; } ael[16];
+	int nael;	/* wk_cond jumped whatever the condition (N_IF: the branch it skips is dead) */
 } wkst;
 
 VPRIV wkst *wk_state(ecx *e);
 VPRIV bool wk_const_sym(ecx *e, uint32_t s, val *v);
+VPRIV void wk_ael_clear(ecx *e, uint32_t s);	/* UINT32_MAX: every array */
 VPRIV bool wk_isconst(ecx *e, uint32_t n);	/* n is a constant (constants, bound locals, no loads) */
 VPRIV val wk_conv(ecx *e, val v, qty from, qty to);	/* s is bound to the constant *v */
 VPRIV val wk_inline(ecx *e, uint32_t n, uint32_t s);	/* the call n to s, inlined (wk_can_inline) */

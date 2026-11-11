@@ -337,10 +337,15 @@ kärnan och kan vänta.
   (`wkst.cjump`), och `?:` med känt villkor (efter inlining) genererar en arm.
 - 0 << x, 0 >> x, -1 >> x viks; laster av const-globaler (heltal, och (int) av
   en const double) viks som arm64:s `const_global`.
-- `vcc-x86.py -j 6`: 1774/1776 (var 1768); --pic samma, --objcmp 1846/1846,
-  --fpcheck 1908/1908, vcc-abi x86_64 12/12.  Kvar: pure-1 (lagring→last-
-  vidarebefordran genom pure-anrop: ett pass på records, som arm64:s opt.c),
-  20030125-1 (floor→floorf).
+- a[K] = konstant för lokala fält som bara används som a[KONST] (ingen SA_AESC)
+  följer med till laster i rak kod (`wkst.ael`; en etikett glömmer dem), som
+  arm64:s ael: pure-1.
+- (float)floor((double)f) → floorf(f) (även ceil, trunc, round, rint,
+  nearbyint, fabs) med optimering, som clang -O2: 20030125-1.
+- `vcc-x86.py -j 6`: 1776/1776; --pic, --obj och -g lika; --objcmp 1846/1846,
+  --fpcheck 1908/1908, --vlink 1758/1758, vcc-abi x86_64 12/12; arm64 oförändrad.
+- Kvar i X4: ett riktigt pass på records (registerallokering, kopie-
+  propagering, som arm64:s opt.c) och -O1 som eget läge.
 
 ### X7 (2026-11-11): vlink för x86-64, statiska länkar klara
 

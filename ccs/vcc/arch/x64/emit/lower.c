@@ -510,6 +510,7 @@ VPRIV void x64_dbgrow(ecx *e, uint32_t loc)
 VPRIV void x64_label(ecx *e, uint32_t l)
 {
 	x64_put(e, X_LABEL)->label = l;
+	wk_ael_clear(e, UINT32_MAX);	/* (other edges come in: element values unknown) */
 	e->reach = true;	/* (the walker skips label-free statements after a jump) */
 }
 VPRIV void x64_jump(ecx *e, uint32_t l) { x64_put(e, X_JMP)->label = l; }
