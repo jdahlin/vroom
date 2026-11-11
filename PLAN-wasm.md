@@ -602,3 +602,11 @@ Kommandon, hashmanifest, råprofiler, objekt och undantag finns i
 programfart, och detta ersätter inte full prestandagrind eller fjärr-CI.
 Programkörtidsvinst är fortfarande omätt; bredare kontrollflöde, generell
 DSE, OPT5/O2 och G5/G7 återstår.
+
+### Begränsad skalär inlining (2026-11-11)
+
+Statiska funktioner med en ren skalär retur kan nu instansieras i wasm med
+bindningar i typade lokaler. Argument värderas en gång; en budget per
+anropare och konservativ fallback begränsar arbete och kodtillväxt. Det är
+inte stöd för generella funktionskroppar, minnesåtkomst eller rekursiv
+inlining. Fyrmålsprov, wasm-sviter och kostnad finns i PLAN-fas2.md.

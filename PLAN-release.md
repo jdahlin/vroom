@@ -745,3 +745,7 @@ fyrmålsprov, kostnader och begränsningar finns i PLAN-fas2.md. G5/G7 återstå
 
 Lokal värdeåteranvändning från PR #97 och #100 integreras på main; samlade
 fyrmålsprov och kompilatorkostnader finns i PLAN-fas2.md. G5/G7 återstår.
+
+Wasm har begränsad inlining av rena skalära statiska funktioner med budget och
+konservativ fallback; tester och kostnader finns i PLAN-fas2.md. Generell wasm-
+inlining, gemensam policy och G5/G7 återstår.

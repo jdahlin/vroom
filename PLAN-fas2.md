@@ -3273,3 +3273,43 @@ växelvisa rundor med 28 förprocessade arm64-kärnfiler gav median användar-CP
 0,825 → 0,791 s; två filer uteslöts efter preflight och korta sampel på delad
 värd visar ingen generell hastighetsförändring. Proveniens finns i
 `work/opt-profile/local-values-integration-{cost,cputime}/`.
+
+### Begränsad wasm-inlining av rena skalära funktioner
+
+Wasm har nu en egen instansiering för statiska funktioner vars enda sats är
+`return` med ett rent skalärt uttryck. Argument värderas en gång i ordning
+och binds till typade wasm-lokaler; nästlade argument, pekare, heltal,
+flyttal och smala konverteringar stöds. Variadiska, noinline, rekursiva,
+adresstagna/volatila parametrar, lokaler, minnesåtkomst och okända uttryck
+faller tillbaka till vanliga anrop. Högst 48 uttrycksnoder prövas per
+kandidat; en budget på 256 viktade noder/bindningar per anropare debiterar
+även misslyckade sökningar och faller tillbaka när den är slut. Det är en
+första wasm-konsument, inte generell inlining eller gemensam inlinepolicy.
+
+O0–O3-prov för beteende och kodform passerar x86, arm64, wasm32 och wasm64 i
+unity- och separatfilbygge; O0/noopt är byteidentiskt mot main `f0ec9f67`.
+Prov täcker argumentens sidoeffekter, nästlade anrop, typkonverteringar,
+pekare, float, noinline, rekursion, budget och misslyckade kandidater.
+ASan/UBSan-provet för wasm32/64 passerar; vcc-sviten 259/259 med en befintlig
+xfail. Full lokal wasm64-premerge passerar 1909/1909, 46 befintliga xfail och
+149 skip; wasm32-vcc 205/205, 38 xfail och 17 skip.
+
+Matchad Callgrind-korpus mot main: compiler-Ir +0,030 % x86, +0,025 % arm64,
++0,067 % wasm32 och +0,065 % wasm64; två respektive en wasm-filer uteslutna
+på båda sidor. Sju växelvisa rundor med 11 av 28 förprocessade Linux-filer
+som båda kompilatorerna accepterar för wasm64 (målspecifika flaggor justerade,
+två kompileringar per fil) gav median användar-CPU 0,49652 → 0,50665 s
+(+2,04 %); 17 filer uteslöts. Sju `perf stat`-rundor på samma filer, inklusive
+Python-driver och 22 barnprocesser, gav median user-instruktioner −0,002 %,
+user-cykler −0,21 % och task-clock −1,51 %; mätningarna har olika omfattning
+och korta sampel på delad värd ger ingen generell tidsändring.
+
+En mättad funktion med 2 000 anrop gav +0,47–0,48 % compiler-instruktioner;
+42 anrop inlinades och 1 958 följde fallback. En kandidat med 2 000 avvisade
+anrop gav +0,58 % med identisk assembler, och externa anrop +0,13–0,14 % med
+identisk assembler. Detta är syntetiska extremfall. Ett Node 26-prov med en
+femmiljonersloop gav median 3,618 → 3,611 ms wasm32 och 3,609 → 3,606 ms
+wasm64, utan säker mätbar körhastighetsvinst; länkad wasm var 190 → 166 byte
+på båda målen. Proveniens finns i `work/opt-profile/wasm-scalar-inline-
+{budget-cost,kernel-cputime,kernel-perf,saturated,runtime}/`. Generell wasm-
+inlining, gemensam policy och G5/G7 återstår.
