@@ -144,6 +144,7 @@ VPRIV void winit(ecx *e, uint64_t off, qty ty, uint32_t init, bool zeroed)
  */
 static void wasm_asm(ecx *e, const node *x)
 {
+	wflow_reject(e);
 	wmem_fence(e);
 	cc *c = e->c;
 	const casm *a = &c->asms[x->a];
@@ -214,6 +215,7 @@ static void wstmts(ecx *e, const node *x, uint32_t i0, uint32_t i1)
 /* call the cleanup of variable s: f(&s) */
 static void wcleanup(ecx *e, uint32_t s)
 {
+	wflow_reject(e);
 	cc *c = e->c;
 	uint32_t f = canon_sym(c, sym_attrs(c, s)->cleanup), ref = REF(RK_SYM, f);
 	const ctype *ft = T(c, c->syms[f].ty);
@@ -646,6 +648,7 @@ static const wgp *wglabel(wst *W, uint32_t lb)
 
 static void wgoto(ecx *e, uint32_t lb, uint32_t loc)
 {
+	wflow_reject(e);
 	wst *W = e->w;
 	const wgp *p = wglabel(W, lb);
 	int d, a;
@@ -677,7 +680,7 @@ static void wgoto(ecx *e, uint32_t lb, uint32_t loc)
 	}
 	wcleanup_leave(e, W->gd[a].loop);
 	wvla_leave(e, W->gd[a].loop, aidx);
-	wbr(e, "br", W->gd[a].loop);
+	wbr(e, "br", W->gd[a].loop, false);
 }
 
 /*
@@ -706,8 +709,8 @@ VPRIV void wsj_begin(ecx *e)
 			       "__wasm_longjmp\t(i64, i32) -> ()\n");
 	wi(e, "global.get\t__stack_pointer");
 	wset(e, W->sjsp);
-	W->sjloop = wblock(e, "loop");
-	wblock(e, "try");
+	W->sjloop = wblock(e, "loop", WF_LOOP);
+	wblock(e, "try", WF_UNKNOWN);
 	for (uint32_t k = 0; k < W->nsj; k++) {
 		const wgp *p = wglabel(W, WG_SJ | k);
 		int d = (int)p->d;
@@ -716,7 +719,7 @@ VPRIV void wsj_begin(ecx *e)
 		wget(e, W->sjl);
 		wconst(e, WT_I32, k + 1);
 		wi(e, "i32.eq");
-		wblock(e, "if");
+		wblock(e, "if", WF_IF);
 		/* the states on the way down from the body (its dispatch picks them up) */
 		for (;;) {
 			if (W->gd[d].st != UINT32_MAX) {
@@ -741,7 +744,7 @@ VPRIV void wsj_end(ecx *e)
 	int b;
 
 	/* the exception's payload: { void *env; int val; } */
-	wboundary(e, "catch\t__c_longjmp");
+	wboundary(e, "catch\t__c_longjmp", WF_UNKNOWN);
 	wset(e, W->sjp);
 	wget(e, W->sjsp);
 	wi(e, "global.set\t__stack_pointer");
@@ -751,19 +754,20 @@ VPRIV void wsj_end(ecx *e)
 	wget(e, W->sjp);
 	wiu(e, w32 ? "i32.load" : "i64.load", 0);
 	wset(e, W->sjp);
-	b = wblock(e, "block");
+	b = wblock(e, "block", WF_BLOCK);
 	wget(e, W->sjp);
 	wslot_addr(e, W->sjfid);
 	wi(e, "call\t__wasm_setjmp_test");
 	wtee(e, W->sjl);
-	wbr(e, "br_if", b);
+	wbr(e, "br_if", b, true);
 	/* not a setjmp of this invocation: on to the next frame */
 	wget(e, W->sjp);
 	wget(e, W->sjv);
 	wi(e, "call\t__wasm_longjmp");
+	wflow_reject(e);
 	wi(e, "unreachable");
 	wend(e, "end_block");
-	wbr(e, "br", W->sjloop);
+	wbr(e, "br", W->sjloop, false);
 	wend(e, "end_try");
 	wend(e, "end_loop");
 }
@@ -775,11 +779,11 @@ static void wgtest(ecx *e, uint32_t st, uint32_t cond, int out)
 
 	wget(e, st);
 	wi(e, "i32.eqz");
-	wblock(e, "if");
+	wblock(e, "if", WF_IF);
 	if (cond) {
 		wtruth(e, cond);
 		wi(e, "i32.eqz");
-		wbr(e, "br_if", out);
+		wbr(e, "br_if", out, true);
 	}
 	wend(e, "end_if");
 	wconst(e, WT_I32, 0);
@@ -797,10 +801,10 @@ static void wgblock(ecx *e, const node *x, int r)
 	int *sb = malloc(m * sizeof(int));
 	tbuf *b = &W->b;
 
-	d->loop = wblock(e, "loop");
+	d->loop = wblock(e, "loop", WF_LOOP);
 	if (m > 1) {
 		for (uint32_t j = m; j-- > 0;)
-			sb[j] = wblock(e, "block");
+			sb[j] = wblock(e, "block", WF_BLOCK);
 		wget(e, d->st);
 		wconst(e, WT_I32, 0);
 		wset(e, d->st);
@@ -955,7 +959,7 @@ static void wswitch_tree(ecx *e, const em_switch_case *v, uint32_t n,
 			 uint32_t t, int k, bool sg, int dflt)
 {
 	if (!n) {
-		wbr(e, "br", dflt);
+		wbr(e, "br", dflt, false);
 		return;
 	}
 	if (n == 1) {
@@ -968,8 +972,8 @@ static void wswitch_tree(ecx *e, const em_switch_case *v, uint32_t n,
 			wconst(e, k, (int64_t)(v->hi - v->lo));
 			wop(e, k, "le_u");
 		}
-		wbr(e, "br_if", (int)v->target);
-		wbr(e, "br", dflt);
+		wbr(e, "br_if", (int)v->target, true);
+		wbr(e, "br", dflt, false);
 		return;
 	}
 	uint32_t mid = n / 2;
@@ -978,19 +982,20 @@ static void wswitch_tree(ecx *e, const em_switch_case *v, uint32_t n,
 	wget(e, t);
 	wconst(e, k, (int64_t)s->lo);
 	wop(e, k, sg ? "lt_s" : "lt_u");
-	wblock(e, "if");
+	wblock(e, "if", WF_IF);
 	wswitch_tree(e, v, mid, t, k, sg, dflt);
-	wboundary(e, "else");
+	wboundary(e, "else", WF_ELSE);
 	wget(e, t);
 	wconst(e, k, (int64_t)s->hi);
 	wop(e, k, sg ? "le_s" : "le_u");
-	wbr(e, "br_if", (int)s->target);
+	wbr(e, "br_if", (int)s->target, true);
 	wswitch_tree(e, s + 1, n - mid - 1, t, k, sg, dflt);
 	wend(e, "end_if");
 }
 
 static void wswitch(ecx *e, uint32_t n)
 {
+	wflow_reject(e);
 	cc *c = e->c;
 	wst *W = e->w;
 	const node *x = N(n);
@@ -1075,7 +1080,7 @@ static void wswitch(ecx *e, uint32_t n)
 		/* entered by goto: the controlling expression is not evaluated */
 		wget(e, g->st);
 		wi(e, "i32.eqz");
-		wblock(e, "if");
+		wblock(e, "if", WF_IF);
 	}
 	wexpr(e, x->a, true);
 	if (wide) {
@@ -1085,21 +1090,21 @@ static void wswitch(ecx *e, uint32_t n)
 	wset(e, t);
 	if (g)
 		wend(e, "end_if");
-	brk = wblock(e, "block");
+	brk = wblock(e, "block", WF_BLOCK);
 	if (g)
-		g->loop = wblock(e, "loop");
+		g->loop = wblock(e, "loop", WF_LOOP);
 	sb = malloc((m + nnc + 1) * sizeof(int));
 	for (uint32_t j = m; j-- > 0;)
-		sb[j] = wblock(e, "block");
+		sb[j] = wblock(e, "block", WF_BLOCK);
 	for (uint32_t j = m + nnc; j-- > m;)
-		sb[j] = wblock(e, "block");
+		sb[j] = wblock(e, "block", WF_BLOCK);
 	if (g) {
 		/* st - 1: the statement to start at */
 		tbuf *b = &W->b;
 		uint32_t j = 0;
 
 		wget(e, g->st);
-		wblock(e, "if");
+		wblock(e, "if", WF_IF);
 		wget(e, g->st);
 		wconst(e, WT_I32, 1);
 		wi(e, "i32.sub");
@@ -1169,9 +1174,9 @@ static void wswitch(ecx *e, uint32_t n)
 				wfree(e, dl);
 				wfree(e, dh);
 			}
-			wbr(e, "br_if", sb[s->seg]);
+			wbr(e, "br_if", sb[s->seg], true);
 		}
-		wbr(e, "br", dseg != UINT32_MAX ? sb[dseg] : brk);
+		wbr(e, "br", dseg != UINT32_MAX ? sb[dseg] : brk, false);
 		wfree(e, th);
 	} else if (em_switch_strategy(ncase, lo, hi, ranges, true) == EM_SWITCH_TABLE) {
 		/* dense: a branch table on t - lo */
@@ -1199,7 +1204,7 @@ static void wswitch(ecx *e, uint32_t n)
 			wtee(e, u);
 			wconst(e, WT_I64, span);
 			wi(e, "i64.ge_u");
-			wbr(e, "br_if", dflt);
+			wbr(e, "br_if", dflt, true);
 			wget(e, u);
 			wi(e, "i32.wrap_i64");
 			wfree(e, u);
@@ -1242,9 +1247,9 @@ static void wswitch(ecx *e, uint32_t n)
 					wconst(e, k, (int64_t)(s->hi - s->lo));
 					wop(e, k, "le_u");
 				}
-				wbr(e, "br_if", sb[s->seg]);
+				wbr(e, "br_if", sb[s->seg], true);
 			}
-			wbr(e, "br", dseg != UINT32_MAX ? sb[dseg] : brk);
+			wbr(e, "br", dseg != UINT32_MAX ? sb[dseg] : brk, false);
 		}
 	}
 	wfree(e, t);
@@ -1307,7 +1312,7 @@ static void wreturn(ecx *e, const node *x)
 				wget(e, W->sret);
 				wexpr(e, x->a, true);
 				wcopy(e, tsize(c, W->rty));
-				wbr(e, "br", 0);
+				wbr(e, "br", 0, false);
 				return;
 			}
 			wget(e, W->sret);
@@ -1329,7 +1334,7 @@ static void wreturn(ecx *e, const node *x)
 		}
 	}
 	wcleanups(e, 0, false);
-	wbr(e, "br", 0);
+	wbr(e, "br", 0, false);
 }
 
 VPRIV void wstmt(ecx *e, uint32_t n)
@@ -1403,9 +1408,9 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 
 			wget(e, st);
 			wi(e, "i32.eqz");
-			wblock(e, "if\ti32");
+			wblock(e, "if\ti32", WF_IF);
 			wtruth(e, x->a);
-			wboundary(e, "else");
+			wboundary(e, "else", WF_ELSE);
 			wget(e, st);
 			wconst(e, WT_I32, 1);
 			wi(e, "i32.eq");
@@ -1415,13 +1420,13 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 		} else {
 			wtruth(e, x->a);
 		}
-		wblock(e, "if");
+		wblock(e, "if", WF_IF);
 		/* if (0) { a; L: b; }: the branch not taken is only entered by goto,
 		   what comes before its first label is dead */
 		W->notop = kn == 0 ? x->b : 0;
 		wstmt(e, x->b);
 		if (x->c) {
-			wboundary(e, "else");
+			wboundary(e, "else", WF_ELSE);
 			W->notop = kn == 1 ? x->c : 0;
 			wstmt(e, x->c);
 		}
@@ -1430,7 +1435,7 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 		break;
 	}
 	case N_WHILE: {
-		int ob = W->brk, oc = W->cont, b = wblock(e, "block"), l = wblock(e, "loop");
+		int ob = W->brk, oc = W->cont, b = wblock(e, "block", WF_BLOCK), l = wblock(e, "loop", WF_LOOP);
 		int r = W->ngdx ? wgfind(W, n) : -1;
 
 		if (r >= 0)
@@ -1438,27 +1443,27 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 		else {
 			wtruth(e, x->a);
 			wi(e, "i32.eqz");
-			wbr(e, "br_if", b);
+			wbr(e, "br_if", b, true);
 		}
 		W->brk = b, W->cont = l;
 		wstmt(e, x->b);
 		/* continue already branches to l; other terminal paths leave the loop. */
 		if (!wterm(c, x->b))
-			wbr(e, "br", l);
+			wbr(e, "br", l, false);
 		W->brk = ob, W->cont = oc;
 		wend(e, "end_loop");
 		wend(e, "end_block");
 		break;
 	}
 	case N_DO: {
-		int ob = W->brk, oc = W->cont, b = wblock(e, "block"), l = wblock(e, "loop"), k = wblock(e, "block");
+		int ob = W->brk, oc = W->cont, b = wblock(e, "block", WF_BLOCK), l = wblock(e, "loop", WF_LOOP), k = wblock(e, "block", WF_BLOCK);
 
 		W->brk = b, W->cont = k;
 		wstmt(e, x->b);
 		W->brk = ob, W->cont = oc;
 		wend(e, "end_block");
 		wtruth(e, x->a);
-		wbr(e, "br_if", l);
+		wbr(e, "br_if", l, true);
 		wend(e, "end_loop");
 		wend(e, "end_block");
 		break;
@@ -1474,30 +1479,30 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 				/* entered by goto: no initialization */
 				wget(e, W->gd[r].st);
 				wi(e, "i32.eqz");
-				wblock(e, "if");
+				wblock(e, "if", WF_IF);
 				wfor_init(e, x->a);
 				wend(e, "end_if");
 			} else {
 				wfor_init(e, x->a);
 			}
 		}
-		b = wblock(e, "block");
-		l = wblock(e, "loop");
+		b = wblock(e, "block", WF_BLOCK);
+		l = wblock(e, "loop", WF_LOOP);
 		if (r >= 0)
 			wgtest(e, W->gd[r].st, x->b, b);
 		else if (x->b) {
 			wtruth(e, x->b);
 			wi(e, "i32.eqz");
-			wbr(e, "br_if", b);
+			wbr(e, "br_if", b, true);
 		}
-		k = wblock(e, "block");
+		k = wblock(e, "block", WF_BLOCK);
 		W->brk = b, W->cont = k;
 		wstmt(e, body);
 		W->brk = ob, W->cont = oc;
 		wend(e, "end_block");
 		if (step)
 			wexpr(e, step, false);
-		wbr(e, "br", l);
+		wbr(e, "br", l, false);
 		wend(e, "end_loop");
 		wend(e, "end_block");
 		if (W->ncl > cl0)
@@ -1534,11 +1539,12 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 			wget(e, t);
 			wpconst(e, (int64_t)L[i].label + 1);
 			wpop(e, "eq");
-			wblock(e, "if");
+			wblock(e, "if", WF_IF);
 			wgoto(e, L[i].label, x->loc);
 			wend(e, "end_if");
 		}
 		wfree(e, t);
+		wflow_reject(e);
 		wi(e, "unreachable");
 		break;
 	}
@@ -1550,7 +1556,7 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 			efatal(e, x->loc, "break/continue outside a loop");
 		wcleanup_leave(e, t);
 		wvla_leave(e, t, UINT32_MAX);
-		wbr(e, "br", t);
+		wbr(e, "br", t, false);
 		break;
 	}
 	case N_RETURN:

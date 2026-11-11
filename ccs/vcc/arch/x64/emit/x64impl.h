@@ -30,6 +30,7 @@ enum {
 	X_LD,		/* r0 = [r1 + off (+ ref)]: sz bytes, cond 1 sign-extended (to 64 bits) */
 	X_ST,		/* [r1 + off (+ ref)] = r2: sz bytes */
 	X_LEA,		/* r0 = r1 + off (+ ref) */
+	X_LEASCALE,	/* r0 = r1 + (r2 << sh), sz 4 zero-extends or sz 8 */
 	/* r0 = r1 op r2 (sz 4 or 8) */
 	X_ADD, X_SUB, X_AND, X_OR, X_XOR, X_IMUL, X_ADC, X_SBB,
 	/* r0 = r1 op imm (32-bit signed) */
@@ -125,6 +126,8 @@ VPRIV int x64_ftreg(ecx *e);
 VPRIV void x64_csused(ecx *e, int r);	/* a callee-saved register used: the prologue saves it */
 VPRIV rec *x64_put(ecx *e, int op);
 VPRIV void x64_twoaddr(ecx *e);
+VPRIV bool x64_mulconst(ecx *e, int size, int r, i128 rhs);
+
 VPRIV bool x64_tail_return(ecx *e, uint32_t expr);
 VPRIV uint32_t x64_tail_ref(const ecx *e);
 VPRIV bool x64_framefree_candidate(ecx *e);

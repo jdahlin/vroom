@@ -536,3 +536,69 @@ båda wasm-lägena och native-målen. Inlining, konstant switch med borttagna
 segment och WARN-statement expressions är fortsatt öppna; WARN-provet med
 volatile asm `nop` behöver dessutom stöd för den instruktionen i wasm-asm.
 Se OPT6-status i `PLAN-fas2.md` för bevis, kostnader och avgränsning.
+
+### OPT5 fortsättning: privata stores genom strukturerade joins
+
+På `1d8e29a` (flödesförälder `7691f6c`) använder den separata wasm-adaptern
+`arch/wasm/emit/flow.c` den gemensamma `emit/flow`-grafen och budgeterade
+masklösaren. Typade kontrollhändelser fångas från funktionsinträdet under
+ordinarie emission; unika öppningstoken skiljer branchmål även när lexikalt
+djup återanvänds. Ingen ny AST-vandring, SSA eller assemblertextparsning.
+
+Privata exakta 4/8-byte heltals-/flyttalsceller får överskrivnings-DSE över
+if/else-joins och nästlade diamanter. Rena kontrollfences bryter fortfarande
+lokal forwarding; riktiga minnes-/anropsbarriärer bryter också DSE och får
+bara sammanslås inom samma kontrollepok. Det bevarar barriären efter en tom
+gren på alla vägar. Befintlig renderer behåller adress-/RHS-effekter och
+lokala värdefångster. Full konvergens och separat staging krävs före ändring.
+Alla celler är konservativt levande vid utgång: generell unread-DSE ingår
+inte. Loopar, switch/dispatchers, goto, asm, SJLJ och dynamiska ramar avstår.
+Capture-, cell- och arbetsgränser ger fallback; O0/noopt avstår. Grafen
+byggs först efter komplett emission, exakt cellklassificering och verkliga
+upprepade privata stores genom en join.
+
+114 konfigurationer passerar genom egna verktyg och Node: 10 nya flödesfall
+(wasm32/64 × O0–O3 kodform/körning, samt O2/noopt-kodform), 16 befintliga
+cellfall och 88 opt-regelkontroller. Positiva fall har exakt en slutstore;
+volatile/atomic, läsningar före overwrite, utgångar, alias/escape, effekter,
+flyttalsbitar och uteslutna kontrollformer kontrolleras. En isolerad mutant
+utan fence-epokvillkor avvisas av den avsedda tom-else-kodkontrollen på
+båda bredderna; originalkällorna lämnas intakta. Unitybygge med `-j 1`,
+fristående syntaxkontroll av ändrade wasm-C-filer och oberoende review är
+klara. Snabbgrinden kör nu `bench/vcc-wasm-flow.py`; fjärr-CI återstår.
+
+Hela egna SDK-baserade sviter på samma revision avslutar med status 0:
+
+| Mål | PASS | Körda XFAIL | Skips |
+|---|---:|---:|---|
+| wasm32 | 178/178 | 36 | 16: 12 clang-reject, 1 noref, 3 ref-fail |
+| wasm64 | 182/182 | 37 | 11: 8 clang-reject, 1 noref, 2 ref-fail |
+
+Undantag räknas inte som PASS. Loggarna är
+`work/opt-pr-tmp/wasm-flow-full32.log` och `wasm-flow-full64.log`.
+Fokuserad validering, källbevis och isolerade mutantloggar/hashar finns i
+`build/linux/flow-evidence/`. Efter integration av exakt flödesförälder
+`f7327bd` till `1458a90` passerar samma 114 konfigurationer och fristående
+syntaxkontroll igen. 66 O0-/O2-noopt-par är byteidentiska mot föräldern;
+två ytterligare par avvisas av bådas befintliga ILP32-layoutassert i
+`atomic_ops`. SDK-helsvitssiffrorna ovan gäller fortfarande `1d8e29a`.
+
+Matchade clang 23-värdbyggen med `-O3 -march=x86-64-v3`, exakt `f7327bd`
+mot `1458a90`, ger följande separata Callgrind-underlag. Hela processen
+inklusive start räknas, wasm32/64 O2 `-S`, seriellt en gång per prov/binär:
+200-funktionskontroller med rak kod, villkor och uteslutna loopar kostar
++0,314–0,552 % värd-Ir med byteidentisk assembler och objekt. Två positiva
+diamantprov kostar +4,494–4,683 % extra värd-Ir; stores går från 800/1000
+till 200 och vanliga `-c`-objekt minskar 2,886–3,325 %. Aktiv analys är
+alltså dyrare än 1 % i dessa koncentrerade positiva prov.
+
+En fast blandning av befintliga regressionsfiler ger sammanlagt +0,106 %
+värd-Ir på wasm32 (10 filer) och +0,095 % på wasm64 (11 filer).
+`atomic_ops` utesluts på wasm32 eftersom båda byggen avvisar dess
+LP64-layoutassert; detta är inte PASS. Två assemblerutdata ändras per mål.
+Kommandon, hashmanifest, råprofiler, objekt och undantag finns i
+`build/linux/flow-evidence/cost/result.json`; hela tabellen står i
+`PLAN-fas2.md`. Relocerbar objektstorlek är inte laddad kodstorlek eller
+programfart, och detta ersätter inte full prestandagrind eller fjärr-CI.
+Programkörtidsvinst är fortfarande omätt; bredare kontrollflöde, generell
+DSE, OPT5/O2 och G5/G7 återstår.

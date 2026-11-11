@@ -37,6 +37,16 @@ int main(void)
     assert(f.def == X_ALL_REGS && f.use == X_ALL_REGS);
     assert((f.fl & OD_BARRIER) && !(f.fl & OD_PURE));
 
+    /* Scaled LEA is integer address arithmetic, with two explicit sources
+       and no flags, memory or implicit register effects. */
+    for (int size=4;size<=8;size+=4) {
+        i = instruction(X_LEASCALE,size); i.sh=3;
+        f = x64_effects(NULL,&i);
+        assert(f.def == X_BIT(RAX) && f.use == (X_BIT(RCX)|X_BIT(RDX)));
+        assert(f.fl == OD_PURE && f.br == RB_NONE);
+        assert(x64_flow_table()[X_LEASCALE] == EM_FLOW_NEXT);
+    }
+
     /* Legacy scalar square root retains the destination's upper SIMD lanes
        and can raise an FP exception; it neither branches nor changes flags. */
     for (int size = 4; size <= 8; size += 4) {
@@ -75,6 +85,8 @@ int main(void)
     i = instruction(X_MOV,1); assert(!x64_last_u32(&context,RAX));
     i.sz=4; assert(x64_last_u32(&context,RAX));
     i = instruction(X_ADDI,4); assert(x64_last_u32(&context,RAX));
+    i = instruction(X_LEASCALE,4); assert(x64_last_u32(&context,RAX));
+    i.sz=8; assert(!x64_last_u32(&context,RAX));
     i = instruction(X_SHLI,4); i.imm=0; assert(!x64_last_u32(&context,RAX));
     i = instruction(X_BSF,4); assert(!x64_last_u32(&context,RAX));
     i = instruction(X_LABEL,4); assert(!x64_last_u32(&context,RAX));

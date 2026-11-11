@@ -1233,7 +1233,24 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   Next slice: shared `emit/rec/fallthrough.c` on arm64/x86; wasm
   terminal while-backedge cleanup in separate reachability unit. OPT2
   now also removes unreachable suffixes and has x86 effect metadata.
-  Shared block/liveness contracts remain pending. Signed power-of-two
+  Shared bounded block/liveness contracts now live in `emit/flow/`.
+  Wasm's separate typed-flow consumer removes overwritten private exact
+  4/8-byte frame stores through structured joins; unique opening tokens
+  preserve branch identity and epoch-scoped real fences preserve calls
+  after empty arms. Loops, dispatchers/goto, asm, SJLJ and dynamic frames
+  remain excluded. At `1d8e29a`, 114 focused/existing configurations and
+  isolated epoch-coalescing mutations pass, plus the full own SDK suites:
+  wasm32 178 PASS/36 XFAIL/16 skips, wasm64 182 PASS/37 XFAIL/11 skips.
+  New fast harness: `bench/vcc-wasm-flow.py`; full results and limitations
+  in PLAN-fas2/PLAN-wasm. Integrated `1458a90` against exact flow parent
+  `f7327bd` again passes 114 checks and 66 byte-identical O0/noopt pairs.
+  Matched v3 whole-process Callgrind controls cost +0.314–0.552%; fixed
+  wasm32/64 mixes +0.106/+0.095%; concentrated positive diamonds cost
+  +4.494–4.683%, reducing 800/1000 stores to 200 and relocatable object
+  size 2.886–3.325%. Corpus exclusions, raw profiles and limits are in
+  the plans; active analysis exceeds 1% on the positive probes. The full
+  performance gate and remote CI remain pending; this does not close
+  general DSE, O2 or G5/G7. Signed power-of-two
   recipes are in separate sdivpow2.c files; wasm chooses compact div/rem
   except cheaper -1/MIN cases. OPT3 register locals are next; builtin
   setjmp now preserves all potential promoted callee-save registers,
