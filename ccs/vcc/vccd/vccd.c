@@ -91,6 +91,7 @@
 #include "ar.h"
 #include "rsh.h"
 #include "../ld/ld.h"
+#include "../lib/defer.h"
 
 #define MAX_STRS	(VROOM_MAX_PAYLOAD / 2)
 
@@ -114,15 +115,15 @@ static pthread_cond_t qcond = PTHREAD_COND_INITIALIZER;
 
 static void queue_push(int fd)
 {
-	pthread_mutex_lock(&qlock);
-	if (qtail - qhead == QSIZE) {
-		pthread_mutex_unlock(&qlock);
-		close(fd);		/* overload: the shim reports an error */
-		return;
+	{
+		VLOCK(qlock);
+		if (qtail - qhead < QSIZE) {
+			queue[qtail++ % QSIZE] = fd;
+			pthread_cond_signal(&qcond);
+			return;
+		}
 	}
-	queue[qtail++ % QSIZE] = fd;
-	pthread_cond_signal(&qcond);
-	pthread_mutex_unlock(&qlock);
+	close(fd);		/* overload: the shim reports an error */
 }
 
 static _Atomic int n_active;
@@ -248,18 +249,16 @@ static void do_restart(void)
    then restart (do_restart) */
 static int gen_enter(uint32_t pgrp)
 {
-	pthread_mutex_lock(&gen_mu);
+	VLOCK(gen_mu);
 	while (gen_flushing && !atomic_load(&gen_restart))
 		pthread_cond_wait(&gen_cv, &gen_mu);
 	if (atomic_load(&gen_restart)) {
-		pthread_mutex_unlock(&gen_mu);
 		return 1;
 	}
 	if (atomic_load(&vtables_full) && !gen_running && g_ls >= 0 && self_exe[0]) {
 		/* identifiers are never freed: a full table fails every later TU */
 		atomic_store(&gen_restart, 1);
 		pthread_cond_broadcast(&gen_cv);
-		pthread_mutex_unlock(&gen_mu);
 		return 2;
 	}
 	if (pgrp && pgrp != gen_pgrp) {
@@ -271,7 +270,6 @@ static int gen_enter(uint32_t pgrp)
 				atomic_store(&gen_restart, 1);
 				gen_flushing = 0;
 				pthread_cond_broadcast(&gen_cv);	/* (waiters see gen_restart) */
-				pthread_mutex_unlock(&gen_mu);
 				return 2;
 			}
 			vlex_cache_flush();
@@ -285,28 +283,25 @@ static int gen_enter(uint32_t pgrp)
 		gen_pgrp = pgrp;
 	}
 	gen_running++;
-	pthread_mutex_unlock(&gen_mu);
 	return 0;
 }
 
 static void gen_leave(void)
 {
-	pthread_mutex_lock(&gen_mu);
+	VLOCK(gen_mu);
 	if (!--gen_running)
 		pthread_cond_broadcast(&gen_cv);
-	pthread_mutex_unlock(&gen_mu);
 }	/* connections taken by a worker, not yet answered */
 
 static int queue_pop(void)
 {
 	int fd;
 
-	pthread_mutex_lock(&qlock);
+	VLOCK(qlock);
 	while (qhead == qtail)
 		pthread_cond_wait(&qcond, &qlock);
 	fd = queue[qhead++ % QSIZE];
 	atomic_fetch_add(&n_active, 1);	/* under the lock: drain_exit never sees it in neither place */
-	pthread_mutex_unlock(&qlock);
 	return fd;
 }
 
@@ -1853,9 +1848,12 @@ static __attribute__((noreturn)) void drain_exit(int ls, const char *sock)
 	close(ls);
 	unlink(sock);
 	for (;;) {
-		pthread_mutex_lock(&qlock);
-		bool idle = qhead == qtail && !atomic_load(&n_active);
-		pthread_mutex_unlock(&qlock);
+		bool idle;
+
+		{
+			VLOCK(qlock);
+			idle = qhead == qtail && !atomic_load(&n_active);
+		}
 		if (idle)
 			exit(0);
 		usleep(5000);

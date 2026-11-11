@@ -14,6 +14,7 @@
  * records) and by dedup lookups, both rare next to a compile.
  */
 #include "dstore.h"
+#include "../lib/defer.h"
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -107,7 +108,7 @@ static bool seen(pp_dsink *s, uint64_t key)
 
 	(void)s;
 	key |= 1;	/* never 0 */
-	pthread_mutex_lock(&dmu);
+	VLOCK(dmu);
 	if (2 * (dn + 1) > dcap) {
 		size_t nc = dcap ? 2 * dcap : 1024;
 		uint64_t *n = calloc(nc, sizeof(*n));
@@ -136,7 +137,6 @@ static bool seen(pp_dsink *s, uint64_t key)
 			break;
 		}
 	}
-	pthread_mutex_unlock(&dmu);
 	return dup;
 }
 
@@ -173,12 +173,13 @@ static void record(pp_dsink *s, const pp_drec *r)
 	dstore_job *j = (dstore_job *)s;
 	struct drec_s d = { (unsigned char)r->level, NULL, NULL };
 
-	pthread_mutex_lock(&dmu);
-	d.flag = intern(r->flag, false);
-	d.path = intern(r->path, true);
-	if (!s->nojson && (j->nrec >= TU_JSON_MAX || json_bytes + j->njson + r->jlen > JSON_BUDGET))
-		s->nojson = 1;	/* (pp sends no more JSON for this TU) */
-	pthread_mutex_unlock(&dmu);
+	{
+		VLOCK(dmu);
+		d.flag = intern(r->flag, false);
+		d.path = intern(r->path, true);
+		if (!s->nojson && (j->nrec >= TU_JSON_MAX || json_bytes + j->njson + r->jlen > JSON_BUDGET))
+			s->nojson = 1;	/* (pp sends no more JSON for this TU) */
+	}
 	if (j->nrec == j->crec) {
 		j->crec = j->crec ? 2 * j->crec : 8;
 		j->recs = xrealloc(j->recs, j->crec * sizeof(*j->recs));
@@ -236,18 +237,19 @@ void dstore_end(dstore_job *j, int ok)
 		*nt = (tent){ NULL, j->tu, j->json, j->njson, j->recs, j->nrec };
 		j->tu = NULL, j->json = NULL, j->recs = NULL, j->nrec = 0;
 	}
-	pthread_mutex_lock(&dmu);
-	for (tent **pp = &buckets[b]; *pp; pp = &(*pp)->next)
-		if (!strcmp((*pp)->tu, nt ? nt->tu : j->tu)) {
-			old = *pp;
-			*pp = old->next;
-			break;
-		}
-	if (old)
-		json_bytes -= old->njson;
-	if (nt)
-		nt->next = buckets[b], buckets[b] = nt, json_bytes += nt->njson;
-	pthread_mutex_unlock(&dmu);
+	{
+		VLOCK(dmu);
+		for (tent **pp = &buckets[b]; *pp; pp = &(*pp)->next)
+			if (!strcmp((*pp)->tu, nt ? nt->tu : j->tu)) {
+				old = *pp;
+				*pp = old->next;
+				break;
+			}
+		if (old)
+			json_bytes -= old->njson;
+		if (nt)
+			nt->next = buckets[b], buckets[b] = nt, json_bytes += nt->njson;
+	}
 	if (old)
 		tent_free(old);
 	free(j->recs);
@@ -258,12 +260,11 @@ void dstore_end(dstore_job *j, int ok)
 
 void dstore_new_build(void)
 {
-	pthread_mutex_lock(&dmu);
+	VLOCK(dmu);
 	if (dset)
 		memset(dset, 0, dcap * sizeof(*dset));
 	dn = 0;
 	ndup_build = 0;
-	pthread_mutex_unlock(&dmu);
 }
 
 /* ---------------- queries ---------------- */
@@ -332,7 +333,7 @@ int dstore_query(const char *what, int fd, int errfd)
 		dprintf(errfd, "vcc: error: --vccd-diagnostics=%s: summary or json\n", what);
 		return 1;
 	}
-	pthread_mutex_lock(&dmu);
+	VLOCK_AS(dg, dmu);
 	for (unsigned b = 0; b < NBUCKET; b++)
 		for (tent *t = buckets[b]; t; t = t->next) {
 			if (n == c)
@@ -377,7 +378,7 @@ int dstore_query(const char *what, int fd, int errfd)
 		free(fl);
 		free(fi);
 	}
-	pthread_mutex_unlock(&dmu);
+	VUNLOCK(dg);
 	free(all);
 	return 0;
 }

@@ -2,6 +2,7 @@
 #include "emitimpl.h"
 #include "../arch/wasm/as/wasmas.h"
 #include "../lib/buf.h"
+#include "../lib/defer.h"
 
 VPRIV void *reserve(size_t n) { return vreserve(n, MAP_NORESERVE, "vcc: mmap"); }
 
@@ -21,11 +22,10 @@ VPRIV void ediag(ecx *e, uint32_t loc, const char *fmt, ...)
 	pp_diag_pc = __builtin_return_address(0);
 	va_list ap;
 
-	pthread_mutex_lock(&e->E->emu);
+	VLOCK(e->E->emu);
 	va_start(ap, fmt);
 	pp_vdiag(e->c->p, loc, "note", fmt, ap);
 	va_end(ap);
-	pthread_mutex_unlock(&e->E->emu);
 }
 
 __attribute__((format(printf, 3, 4)))
@@ -34,11 +34,12 @@ VPRIV void eerror(ecx *e, uint32_t loc, const char *fmt, ...)
 	pp_diag_pc = __builtin_return_address(0);
 	va_list ap;
 
-	pthread_mutex_lock(&e->E->emu);
-	va_start(ap, fmt);
-	pp_vdiag(e->c->p, loc, "error", fmt, ap);
-	va_end(ap);
-	pthread_mutex_unlock(&e->E->emu);
+	{
+		VLOCK(e->E->emu);
+		va_start(ap, fmt);
+		pp_vdiag(e->c->p, loc, "error", fmt, ap);
+		va_end(ap);
+	}
 	e->E->errors++;
 }
 
@@ -48,11 +49,12 @@ VPRIV void efatal(ecx *e, uint32_t loc, const char *fmt, ...)
 	pp_diag_pc = __builtin_return_address(0);
 	va_list ap;
 
-	pthread_mutex_lock(&e->E->emu);
-	va_start(ap, fmt);
-	pp_vdiag(e->c->p, loc, "error", fmt, ap);
-	va_end(ap);
-	pthread_mutex_unlock(&e->E->emu);
+	{	/* (the lock is dropped before the longjmp: cleanups do not run on it) */
+		VLOCK(e->E->emu);
+		va_start(ap, fmt);
+		pp_vdiag(e->c->p, loc, "error", fmt, ap);
+		va_end(ap);
+	}
 	e->E->errors++;
 	_longjmp(e->bail, 1);
 }
@@ -61,10 +63,9 @@ VPRIV void efatal(ecx *e, uint32_t loc, const char *fmt, ...)
 
 VPRIV void enqueue(emitter *E, uint32_t item)
 {
-	pthread_mutex_lock(&E->mu);
+	VLOCK(E->mu);
 	E->q[E->qt++] = item;
 	pthread_cond_signal(&E->cv);
-	pthread_mutex_unlock(&E->mu);
 }
 
 /* the regions of a ctx[i] (ecx_init takes a set, ecx_free gives it back) */

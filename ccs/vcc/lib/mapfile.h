@@ -11,13 +11,14 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include "attr.h"
 
 typedef struct vmapped {
 	const unsigned char *p;
 	size_t n;
 } vmapped;
 
-static inline bool vmap_file(const char *abs, vmapped *m, struct stat *st)
+static inline VUSE VNONNULL_ALL bool vmap_file(const char *abs, vmapped *m, struct stat *st)
 {
 	int fd = open(abs, O_RDONLY);
 	void *p;
@@ -42,7 +43,7 @@ static inline bool vmap_file(const char *abs, vmapped *m, struct stat *st)
 	return true;
 }
 
-static inline void vunmap_file(vmapped *m)
+static inline VNONNULL_ALL void vunmap_file(vmapped *m)
 {
 	if (m->p)
 		munmap((void *)m->p, m->n);

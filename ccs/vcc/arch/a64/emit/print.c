@@ -367,7 +367,8 @@ VPRIV void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *raw
 	case I_TAIL:
 		if (!i->cond)
 			return;
-		/* fall through: symbol quoting is identical for bl and b. */
+		/* symbol quoting is identical for bl and b. */
+		__attribute__((fallthrough));
 	case I_BL: {
 		tb_s(b, i->op == I_TAIL ? "\tb\t" : "\tbl\t");
 		size_t at = b->n;

@@ -26,6 +26,8 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "attr.h"
+
 /* ---------------- vbuf ---------------- */
 
 typedef struct vbuf {
@@ -33,7 +35,7 @@ typedef struct vbuf {
 	size_t n, cap;
 } vbuf;
 
-static inline void vbuf_put(vbuf *b, const void *s, size_t n)
+static inline VNONNULL(1) void vbuf_put(vbuf *b, const void *s, size_t n)
 {
 	if (b->n + n > b->cap) {
 		size_t c = b->cap ? b->cap * 2 : 4096;
@@ -72,7 +74,7 @@ typedef struct vsbuf {
 	bool oom;
 } vsbuf;
 
-static inline void vsbuf_put(vsbuf *b, const void *s, size_t n)
+static inline VNONNULL(1) void vsbuf_put(vsbuf *b, const void *s, size_t n)
 {
 	if (b->oom)
 		return;
@@ -105,7 +107,7 @@ typedef struct vzbuf {
 	size_t n, cap;
 } vzbuf;
 
-static inline bool vzbuf_put(vzbuf *b, const char *s, size_t n)
+static inline VUSE VNONNULL(1) bool vzbuf_put(vzbuf *b, const char *s, size_t n)
 {
 	if (b->n + n + 1 > b->cap) {
 		size_t cap = b->cap ? b->cap : 256;

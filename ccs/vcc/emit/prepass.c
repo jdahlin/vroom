@@ -361,7 +361,7 @@ static int walk(pre *P, uint32_t n)
 			lab = walk(P, N(x->a)->a) | walk(P, x->b);
 			break;
 		}
-		/* fall through */
+		__attribute__((fallthrough));
 	case N_BINARY: case N_LOGAND: case N_LOGOR: case N_COMMA: case N_CPLX:
 		lab = walk(P, x->a) | walk(P, x->b);
 		break;
@@ -375,7 +375,7 @@ static int walk(pre *P, uint32_t n)
 			P->E->sflags[P->fn] |= SA_MUSTFOLD;
 		lab = walk(P, x->a);
 	}
-		/* fall through */
+		__attribute__((fallthrough));
 	case N_BUILTIN:
 		if (x->op == N_BUILTIN && (x->aux == BI_ALLOCA || x->aux == BI_ALLOCA_UNINIT))
 			P->E->nflags[c->syms[P->fn].body] |= NA_ALLOCA;

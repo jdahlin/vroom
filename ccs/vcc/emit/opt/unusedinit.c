@@ -43,7 +43,7 @@ static bool em_unused_pure(cc *c, uint32_t n, unsigned *left)
 		default:
 			return false;
 		}
-		/* fall through */
+		__attribute__((fallthrough));
 	case N_LOGAND: case N_LOGOR: case N_COMMA:
 		return em_unused_pure(c, x->a, left) && em_unused_pure(c, x->b, left);
 	case N_COND:

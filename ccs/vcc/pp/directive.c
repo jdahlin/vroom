@@ -538,7 +538,7 @@ VPRIV int directive(pp *p, ctx *c, ptok *out)
 	case D_LINEMARK:
 		if (p->o->asm_mode)
 			goto pass;
-		/* fallthrough */
+		__attribute__((fallthrough));
 	case D_LINE:
 		line_directive(p, c, d->kind == D_LINE ? b + 1 : b, e, d->kind == D_LINE, loc);
 		return 0;

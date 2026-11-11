@@ -419,7 +419,7 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 			case A_IFUNC:
 				a->ifunc = 1;
 				an = A_ALIAS;
-				/* fall through */
+				__attribute__((fallthrough));
 			case A_SECTION:
 			case A_ALIAS:
 			case A_VISIBILITY:
