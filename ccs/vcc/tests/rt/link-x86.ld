@@ -5,6 +5,7 @@ SECTIONS {
 	. = ALIGN(4096);
 	.rodata : { *(.rodata*) }
 	.eh_frame : { *(.eh_frame) }
+	.rela.dyn : { __rela_start = .; *(.rela.dyn) __rela_end = .; }	/* (a static PIE's) */
 	. = ALIGN(4096);
 	.init_array : { __init_array_start = .; KEEP(*(SORT(.init_array.*))) KEEP(*(.init_array)) __init_array_end = .; }
 	.fini_array : { __fini_array_start = .; KEEP(*(SORT(.fini_array.*))) KEEP(*(.fini_array)) __fini_array_end = .; }

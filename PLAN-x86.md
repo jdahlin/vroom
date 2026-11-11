@@ -343,7 +343,10 @@ kärnan och kan vänta.
 - `bench/vcc-x86.py -j 6 --vlink`: 1750/1751 laddade bilder byte-identiska
   med lld:s och körs; kvar 20030125-1 (floor→floorf, kräver optimeraren).
   arm64 oförändrad: `VCC_LDCMP=1 vcc-ctests.py` 1780/1780, vlink-opts, vlink-bad.
-- Kvar: delade objekt/PIE-länkar (PLT, dynamiska relokeringar) för x86.
+- Statisk PIE (`--vlink --pie`: rt med -fPIE, `-static -pie --no-dynamic-linker`,
+  start-x86.S tillämpar R_X86_64_RELATIVE): 1749/1750 byte-identiska och körs.
+  Tom `.rela.dyn` som skriptet namnger blir RELA som lld:s (bara x86 än så länge).
+- Kvar: delade objekt och dynamiskt länkade program (PLT, .dynamic) för x86.
 
 ### X5/X6 (2026-11-11): assembler och objekt, påbörjat
 - `arch/x64/as/asm.c`: AT&T-parser och kodare (heltal, SSE, x87, prefix, `@PLT`/`@GOTPCREL`/

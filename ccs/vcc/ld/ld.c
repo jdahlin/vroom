@@ -5339,7 +5339,9 @@ static void add_synthetic_sections(void)
 		c->size = n;
 		c->entsize = 1;
 	}
-	if (pic)
+	/* (lld always has .rela.dyn: dropped when empty, but a script that names it
+	   keeps an empty RELA output section) */
+	if (pic || (x86_ld && opt.script && !opt.relocatable))
 	{
 		reladyn_isec = new_isec(".rela.dyn", K_RELADYN, SHT_RELA, SHF_ALLOC, 8);
 		isecs.v[reladyn_isec].entsize = sizeof(Rela);
