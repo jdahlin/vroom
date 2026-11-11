@@ -80,6 +80,17 @@ kan gå parallellt.
 
 ## Status
 
+### Status 2026-11-11: G5/G7, gemensam implementationsplan
+
+`PLAN-fas2.md` **Gemensam optimerare utan SSA** äger nu OPT0–OPT8 efter
+kodgranskning av alla tre generatorer. C-regler/strategier delas av x86,
+arm64 och wasm32/wasm64; arm64:s befintliga postoptimerare extraheras för
+registermålen. X4 och wasm-planen äger inkoppling och målsänkning.
+Planen anger beroenden, effekt-/ABI-/minneskontrakt, begränsad CPU-kostnad,
+tester och separata mätningar av kompilator och genererad kod. Nästa
+leverans är en ny bas och en delad heltalsregel med tre konsumenter.
+Ingen optimering implementerad; G5/G7 är fortsatt öppna och G5:s X saknas.
+
 ### Status 2026-11-11: G5, audit av x86-kodkvalitet
 
 `PLAN-x86.md` X4 har en prioriterad audit mot clang 23.1.6 och GCC 15.2.0

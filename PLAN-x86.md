@@ -93,7 +93,17 @@ cc/:s AST ──▶ 1. AST-vandrare (emit/walk/) ──LO()-anrop──▶ 2. s�
                                          tvåadress, titthål, skrivare/kodare (arch/x64/emit/)
 ```
 
-**Avgränsning:** x86-64 är första och enda användaren. arm64 och wasm behåller sina
+**Gemensam implementationsplan (2026-11-11):** se
+`PLAN-fas2.md`, **Gemensam optimerare utan SSA**, OPT0–OPT8. C-semantik,
+strategier och postalgoritmer ägs där; X4 ansluter x86 via målbeskrivningar.
+Generella regler skall användas av x86, arm64 och wasm, inte utvecklas
+som nya x86-specialfall. Arm64:s befintliga optimerare är källan till
+delade record-pass. Rena extraktioner bevarar utdata bytevis; när en
+gemensam regel aktiveras är dess avsedda ändringar på alla mål tillåtna
+och verifieras enligt den gemensamma planen. Detta preciserar den äldre
+regeln ovan om oförändrade arm64/wasm-utdata.
+
+**Nuvarande avgränsning:** x86-64 är första och enda användaren. arm64 och wasm behåller sina
 generatorer tills de flyttas, och det är en egen arbetspunkt (TODO.md: "arm64 and
 wasm on the shared walker"). Gränssnitten ritas för det x86-64 behöver. Två billiga förberedelser
 görs redan nu, eftersom flytten annars blir dyrare: anropen går genom `LO()`, och
@@ -267,7 +277,7 @@ Det som skiljer x86-64 och som lager 2 och de x86-specifika passen tar hand om:
 | X1 | **Målval och front end.** `PP_LINUX_X86_64`, predefines ur clang, layout (tabellen ovan), `lib/f80.h` för x87-konstanter, `__float128` | `vpp -dM -E` = `clang -dM -E` (även `-march`-deltan, `bench/vcc-predef.py`); `vcc-sema.py layout` med x86-64 som mål; `vcc-ldconst.py` för x87; `vcc-bflayout.py` för x86-64; arm64/wasm byte-identiska |
 | X2 | **Lagren på plats, heltals-`-S`.** `emit/rec/rec.h` och x86:s op-tabell; `emit/walk/` med `lower.h` och `LO()`; x86-64 i måltabellen (`emit/tu.c` väljer vandraren för x86-64); `arch/x64/emit/` för heltal, locals i stackplatser, parametrar, direkta anrop, `if`/loopar/`break`/`continue`/`switch` (kedja), `return`; prolog/epilog med `rbp`; `twoaddr.c` (behövs på alla nivåer: posterna är treadress), `print.c`. Bara `-O0`, inga optimeringspass | `-S` assembleras av `clang -c`, länkas mot glibc och körs nativt med samma resultat som clangs; nytt `bench/vcc-x86.py` (som `vcc-wasm.py`: testhuvudena mot glibc, nativ körning, cache); arm64/wasm byte-identiska (`vcc-same.py`) |
 | X3 | **Hela C i vandraren och sänkningen.** Aggregat och initierare, SysV-klassning (`abi.c`), varargs, hopptabeller, flyttal (SSE, x87), `__int128`, `__float128` via `FN_*`, bit-fält, VLA/`alloca`, atomics, TLS, PIC/PIE, inbyggda, inlining och `need_fold`, kända värden, spill; `VCC_WALKLOG` | gcc-torture och tcc-tests2 vid `-O0`: samma godkända som clang; `vcc-abi.py --target x86_64` (clang/vcc × anropare/anropad, gcc som tredje part); `vcc-pic.py`, `vcc-fpcheck.py` för x86-64; `bench/vcc-walkcmp.py` mot arm64 grönt |
-| X4 | **Gemensamma pass och `-O1`.** `emit/rec/` (liveness, kopiepropagering, döda resultat, stackplatser, hopp) över op-tabellen; `B_LREG` i `rbx r12–r15`; `peep.c`; `twoaddr.c` byter kommutativa operander | Sviterna ovan vid `-O1` och `-O2`; kodstorlek per funktion mot `clang -O1` på kärn-TU:er (mål: inom arm64:s kvot mot clang); tid per funktion mot arm64 med `vbench.py` |
+| X4 | **Inkoppling av gemensam optimerare och `-O1`.** `PLAN-fas2.md` OPT0–OPT8 äger regler/algoritmer; x86 fyller op-/effekttabeller och ansluter `emit/rec/`, lokala register och måloperationer. SIB/LEA, SSE2, målfeatures, prolog och tvåadress förblir x86. Ingen egen kopia av generisk optimeringspolicy. | C-regressioner på alla tre backends, x86-kodkrav och ABI vid O0–O3; ren extraktion byte-identisk på arm64. Mät kompilatorns kostnad och genererad kod enligt OPT-planen; bekräfta x86-stöd innan `vbench.py` anges som x86-grind. |
 | X5 | **Objektfiler.** Kodare för det generatorn skriver, fixups, ELF-maskin 62, hoppavslappning; `-c` direkt från posterna utan text; CFI och DWARF med x86-registernummer | `vas-obj.py`: vcc:s `-c` byte-identiskt med `clang -c` av samma `.s`; `vas-enc.py` mot llvm-mc; X4:s sviter med `-c`; `vcc-cfi.py` och `vcc-dwarf.py` för x86-64 |
 | X6 | **Inline asm och `vas` för x86-64.** AT&T-parser, begränsningar och modifierare, flaggutdata, `asm goto`; hela ISA:n inklusive SSE/AVX/AVX-512 (kärnans krypto-`.S`) | `vas-corpus.py` för x86-64 (`clang -S` av testfilerna, `clang -c` mot `vas`); kärnans `.S` byte-identiska med clangs objekt |
 | X7 | **vlink för x86-64.** Relokeringar, GOT/PLT, TLS-avslappning (GD/IE→LE), GOTPCRELX-avslappning | `bench/vcc-x86.py` med vlink: laddad bild byte-identisk med lld:s; `vlink-opts.py` |
@@ -369,6 +379,15 @@ kärnan och kan vänta.
   genom vcc:s funktioner; `vas-corpus` med `-g` 3679/3680.
 - Kvar: kodning direkt från posterna (utan text), hela ISA:n (AVX, AVX-512 för kärnans
   krypto) och `vas-enc.py` för x86-64.
+### X4 (2026-11-11): implementationsplan flyttad till gemensam emitter
+
+Kodgranskning efter rebase på main: arm64 har redan registerlokaler och
+record-pass, x86 saknar inkopplingen, wasm har egna lokaler och strukturerad
+sänkning. `PLAN-fas2.md` **Gemensam optimerare utan SSA** har OPT0–OPT8 med
+konkreta filer, beroenden, kostnadsgränser och tester på alla tre backends.
+De tidigare auditernas x86-regler är fynd/prioritering, inte beslut att
+implementera dem i x86:s `lower.c`. Ingen optimering implementerad; X4 öppet.
+
 ### X4 (2026-11-11): reproducerbar nivåmatris och testprober
 
 `bench/vcc-optaudit.py` jämför 29 funktioner i
