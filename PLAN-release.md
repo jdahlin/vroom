@@ -287,3 +287,13 @@ grindarna: `vcc-diff.py`, `vcc-sema.py`, `vcc-ctests.py`, `vcc-abi.py`,
 `bench/pg/`, `vccd-kbuild.sh` + `boot-test.py`.  Det saknas README,
 LICENSE, x86-64-backend, wasm-backend, -O1, SQLite-korpus, Debian-urval,
 Csmith/YARPGen-rigg och paketering.
+
+### Status 2026-11-11: G5/G7, balanserad switchdispatch
+
+OPT6:s första del använder gemensamt strategival/sortering och balanserade
+jämförelseträd på x86, arm64 och wasm; täta wasm-tabeller behålls. Kombinationen
+med b63c269 bygger unity/fil-för-fil och passerar 164 riktade kör-/kodkrav,
+219 arm64- och 214 x86-regressioner. På fded15a-basen är 500-funktionskontroller
+byte-identiska och extra Callgrind-kompileringsarbete högst +0,180 %; ett
+riktat x86-switchprov minskar exekverade instruktioner 48,39 %. Avgränsning,
+rådata och kvarvarande OPT6-delar står i PLAN-fas2. G5/G7 och full O2 är öppna.
