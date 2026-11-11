@@ -72,6 +72,11 @@ typedef struct wkst {
 	   the copy ends; inlocal: inside a copy's parameters or body */
 	struct wklslot { int64_t off; uint32_t size, align, sym; } lu[WK_MAXTSLOT];
 	uint32_t nlu, inlocal;
+	uint32_t lwatch, lhits;
+	/* scalar locals whose address is never needed, with the constant last stored in
+	   straight-line code (forgotten at every label, asm and inline copy): orders = 0 */
+	struct { uint32_t s; val v; } kl[16];
+	uint32_t nkl;	/* wk_cond: the branches it makes to label lwatch (if: is the else reached?) */
 	uint32_t nlabel;	/* local labels handed out in this function (1..) */
 	uint32_t gen;		/* bindings below are valid when their gen is this */
 	uint32_t *sgen;		/* per sym */
@@ -129,7 +134,8 @@ VPRIV void wk_label(ecx *e, uint32_t label);
 VPRIV bool wk_isconst(ecx *e, uint32_t n);
 VPRIV int wk_condfold(ecx *e, uint32_t n);
 VPRIV bool wk_branch_entry(cc *c, uint32_t n);
-VPRIV bool wk_const_sym(ecx *e, uint32_t s, val *v);	/* s is bound to the constant *v */
+VPRIV bool wk_const_sym(ecx *e, uint32_t s, val *v);
+VPRIV void wk_kl_note(ecx *e, uint32_t lhs, qty t, const val *v);	/* lhs = v: remember a constant, else forget */	/* s is bound to the constant *v */
 VPRIV void wk_ael_clear(ecx *e, uint32_t s);	/* UINT32_MAX: every array */
 VPRIV bool wk_pk_get(ecx *e, uint32_t s, val *v);	/* a provisional constant of parameter s (wkst.pk) */
 VPRIV bool wk_weak0(cc *c, val v);	/* the address of a weak undefined symbol (may be 0) */
