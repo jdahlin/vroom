@@ -175,8 +175,27 @@ VPRIV int64_t wk_local(ecx *e, uint32_t s)
 			W->spneed = true;	/* (clang's -fstack-protector-strong, a superset) */
 		if (T(c, c->syms[s].ty)->flags & TF_VLA)
 			W->soff[s] = wk_pslot(e, 24, 8);	/* { address, sp before it, bytes } */
-		else
-			W->soff[s] = wk_pslot(e, tsize(c, c->syms[s].ty) ? tsize(c, c->syms[s].ty) : 1, sym_align(c, s));
+		else {
+			uint64_t size = tsize(c, c->syms[s].ty) ? tsize(c, c->syms[s].ty) : 1;
+			uint32_t align = sym_align(c, s) ? sym_align(c, s) : 1;
+			uint32_t i = W->ntf;
+
+			if (W->inlocal && W->nlu < WK_MAXTSLOT && size <= UINT32_MAX) {
+				/* a local of an inline copy: a free slot, given back when the copy ends */
+				while (i-- > 0)
+					if (W->tf[i].size == size && W->tf[i].align == align)
+						break;
+				if (i != UINT32_MAX) {
+					W->soff[s] = W->tf[i].off;
+					W->tf[i] = W->tf[--W->ntf];
+				} else {
+					W->soff[s] = wk_pslot(e, size, align);
+				}
+				W->lu[W->nlu++] = (struct wklslot){ W->soff[s], (uint32_t)size, align, s };
+			} else {
+				W->soff[s] = wk_pslot(e, size, align);
+			}
+		}
 	}
 	return W->soff[s];
 }
