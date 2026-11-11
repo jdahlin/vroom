@@ -51,6 +51,9 @@ def check_localvalues(assembly, arch):
         text = body(assembly, name, wasm)
         if len(re.findall(shift, text)) != count:
             raise RuntimeError(f'{name}: shift reuse or barrier failed\n{text}')
+    shift64 = r'i64\.shr_u\b' if wasm else r'\blsr\s+x' if arch == 'aarch64' else r'\bshrq\b'
+    if len(re.findall(shift64, body(assembly, 'lvr_shift64', wasm))) != 1:
+        raise RuntimeError('64-bit repeated shift must be computed once')
     text = body(assembly, 'lvr_square', wasm)
     add = r'i32\.add\b' if wasm else r'\badd\s+w' if arch == 'aarch64' else r'\baddl\b'
     if len(re.findall(add, text)) != 1:
