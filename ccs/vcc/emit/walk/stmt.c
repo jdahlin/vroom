@@ -754,6 +754,8 @@ VPRIV void wk_stmt(ecx *e, uint32_t n)
 	if (!n)
 		return;
 	x = N(n);
+	if (!e->reach && !(e->E->nflags[n] & NA_LABEL) && x->op != N_BLOCK)
+		return;	/* unreachable and no label or case in it: nothing to generate */
 	e->curloc = x->loc;
 	if (unlikely(e->E->o->debug) && x->op != N_BLOCK)
 		LO(dbgrow)(e, x->loc);
