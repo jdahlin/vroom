@@ -415,6 +415,7 @@ VPRIV uint32_t neg(cc *c, uint32_t n);
 VPRIV void bad_operands(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc);
 VPRIV const char *punct_spell(int k);
 VPRIV uint32_t cplx_binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc);
+VPRIV uint32_t atomic_lock_free_runtime(cc *c, vec *args, uint32_t loc);
 VPRIV bool atomic_wide(cc *c, qty t);
 VPRIV uint32_t atomic_load_expr(cc *c, uint32_t n);
 VPRIV uint32_t atomic_assign_expr(cc *c, uint32_t lhs, uint32_t rhs, int op, bool post, uint32_t loc);

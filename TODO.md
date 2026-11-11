@@ -241,6 +241,12 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   accesses use the libatomic pointer ABI when a native 1/2/4/8-byte access is
   unavailable; native 16-byte instructions remain an optimization. Atomic
   vector types remain unsupported by the frontend.
+  Lock-free queries fold guaranteed native 1/2/4/8-byte aligned accesses;
+  `__atomic_always_lock_free` is an integer constant expression and leaves its
+  pointer unevaluated. Unknown Linux sizes/alignment query libatomic instead
+  of claiming every access is lock-free. Library-backed 16-byte operations
+  are conservatively not always lock-free. Tests: `atomic_lock_free.c`,
+  hosted `tests/atomic/lock_free_runtime.c` (both Linux targets).
   Differs from clang on
   purpose: clang 21/23 zero-extend a signed old value when the compound
   operation leaves int arithmetic (`x /= -2` on `_Atomic signed char` -2

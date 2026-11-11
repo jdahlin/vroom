@@ -1794,12 +1794,66 @@ VPRIV uint32_t fast_math_call(cc *c, const char *name, size_t len, qty ft, const
 	return result;
 }
 
+/* The always query is a constant expression; its pointer is unevaluated.
+ * Only widths emitted as native atomic operations are guaranteed lock-free.
+ * In particular, Linux 16-byte accesses currently use libatomic. */
+static uint32_t atomic_lock_free_call(cc *c, const builtin *b, uint32_t loc)
+{
+	vec args;
+	args_list(c, &args);
+	unsigned want = !strcmp(b->name, "__c11_atomic_is_lock_free") ? 1 : 2;
+	if (args.n != want) { arity(c, loc, want, &args); return err_node(c, loc); }
+	bool always = !strcmp(b->name, "__atomic_always_lock_free");
+	uint32_t size = convert(c, decay(c, args.v[0]), c->t_size);
+	uint32_t pointer = want == 2 ? decay(c, args.v[1]) : mk_int(c, 0, c->t_size, loc);
+	uint64_t alignment = is_ptr(c, N(pointer)->ty) ? ty_align(c, T(c, N(pointer)->ty)->base) : 1;
+	cval cv, pv;
+	bool constant = eval(c, size, &cv) && cv.kind == CV_INT && cv.ice &&
+	                !elementwise_abs_effects(c, size, true);
+	if (eval(c, pointer, &pv) && (pv.kind == CV_INT || pv.kind == CV_ADDR)) {
+		if (pv.kind == CV_INT || (!pv.sym && !pv.str && !pv.label && !pv.sublabel)) {
+			alignment = pv.i ? (uint64_t)pv.i & (0 - (uint64_t)pv.i) : UINT64_MAX;
+		} else if (pv.sym) {
+			alignment = ty_align(c, c->syms[pv.sym].ty);
+			if (c->syms[pv.sym].align > alignment) alignment = c->syms[pv.sym].align;
+			if (pv.i) {
+				uint64_t offset_align = (uint64_t)pv.i & (0 - (uint64_t)pv.i);
+				if (offset_align < alignment) alignment = offset_align;
+			}
+		}
+	}
+	uint32_t address = pointer;
+	while (N(address)->op == N_CAST) address = N(address)->a;
+	if (N(address)->op == N_ADDR && N(N(address)->a)->op == N_MEMBER) {
+		const node *member = N(N(address)->a);
+		uint64_t member_align = c->tags[member->b].f[member->c].align;
+		if (member_align < alignment) alignment = member_align;
+	}
+	pointer = convert(c, pointer, ty_ptr(c, prim(TY_VOID) | Q_CONST | Q_VOLATILE));
+	bool native = constant && (cv.i == 1 || cv.i == 2 || cv.i == 4 || cv.i == 8) && alignment >= (uint64_t)cv.i;
+	if (always) {
+		if (!constant) cc_error(c, loc, "argument to '%s' must be a constant integer", b->name);
+		return mk_int(c, native, prim(TY_BOOL), loc);
+	}
+	/* Like GCC/Clang, a query resolved from size/alignment does not
+	 * evaluate the optional pointer. The runtime path evaluates it once. */
+	if (native)
+		return mk_int(c, 1, prim(TY_BOOL), loc);
+	args.n = 0;
+	vpush(c, &args, size); vpush(c, &args, pointer);
+	if (c->o->target == PP_LINUX_AARCH64 || c->o->target == PP_LINUX_X86_64)
+		return atomic_lock_free_runtime(c, &args, loc);
+	return mk_builtin(c, BI_ATOMIC_LOCK_FREE, prim(TY_BOOL), loc, &args);
+}
+
 VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 {
 	vec args;
 	qty rt = sigtype(c, b->sig[0]);
 
 	switch (b->id) {
+	case BI_ATOMIC_LOCK_FREE:
+		return atomic_lock_free_call(c, b, loc);
 	case BI_STDC_ROTL: case BI_STDC_ROTR:
 		return stdc_rotate(c, b, loc);
 	case BI_ELEMENTWISE_ABS:
