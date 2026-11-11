@@ -45,12 +45,16 @@ static int x64_regname(const char *s, size_t n, XOp *o)
 		o->size = !*t ? 8 : !strcmp(t, "d") ? 4 : !strcmp(t, "w") ? 2 : !strcmp(t, "b") ? 1 : 0;
 		return o->size ? 0 : -1;
 	}
-	if ((!strncmp(b, "xmm", 3) || !strncmp(b, "ymm", 3)) && c_digit((unsigned char)b[3])) {
+	if ((!strncmp(b, "xmm", 3) || !strncmp(b, "ymm", 3) || !strncmp(b, "zmm", 3)) && c_digit((unsigned char)b[3])) {
 		int r = atoi(b + 3);
 
-		if (r > 15)
+		if (r > 31)
 			return -1;
-		o->cls = XR_XMM, o->reg = (uint8_t)r, o->size = b[0] == 'y' ? 32 : 16;
+		o->cls = XR_XMM, o->reg = (uint8_t)r, o->size = b[0] == 'z' ? 64 : b[0] == 'y' ? 32 : 16;
+		return 0;
+	}
+	if (b[0] == 'k' && b[1] >= '0' && b[1] <= '7' && !b[2]) {
+		o->cls = XR_K, o->reg = (uint8_t)(b[1] - '0'), o->size = 8;
 		return 0;
 	}
 	if (!strcmp(b, "rip")) { o->cls = XR_RIP; return 0; }
@@ -357,7 +361,8 @@ VPRIV int x64_emit(As *a, XForm *f)
 
 			if (base >= 0 && base & 8) rex |= 1;
 			if (index >= 0 && index & 8) rex |= 2;
-			md = dsym ? 2 : (base < 0 ? 0 : disp == 0 && (base & 7) != 5 ? 0 : fits8(disp) ? 1 : 2);
+			md = dsym ? 2 : (base < 0 ? 0 : disp == 0 && (base & 7) != 5 ? 0 :
+					 (f->evex && f->dn > 1 ? disp % f->dn == 0 && fits8(disp / f->dn) : fits8(disp)) ? 1 : 2);
 			if (base < 0) {
 				/* no base: SIB base 101 with mod 00 means disp32 */
 				modrm[nm++] = (uint8_t)((f->reg & 7) << 3 | 4);
@@ -389,7 +394,26 @@ VPRIV int x64_emit(As *a, XForm *f)
 		eb(&x, 0xf0);
 		a->x64_lock = 0;
 	}
-	if (f->vex) {
+	if ((a->x64_kmask || a->x64_kz) && !f->evex)
+		return err(a, "masking requires an AVX-512 instruction");
+	if (f->evex) {
+		/* EVEX: 62, R X B R' 0 0 mm; W vvvv 1 pp; z L'L b V' aaa (R X B R' V' inverted; X is bit 4 of a register r/m) */
+		int rr = rm && rm->kind == XK_REG ? rm->reg : -1;
+		int R = !(f->reg & 8), R2 = !(f->reg & 16), B = !(rex & 1), X = rr >= 0 ? !(rr & 16) : !(rex & 2);
+		int W = !!(rex & 8) || f->w;
+		int mm = f->nop == 3 ? (f->op[1] == 0x38 ? 2 : 3) : 1;
+		int pp = f->opsz16 ? 1 : f->rep == 0xf3 ? 2 : f->rep == 0xf2 ? 3 : 0;
+
+		if (rr >= 0)
+			B = !(rr & 8);
+		eb(&x, 0x62);
+		eb(&x, (uint8_t)(R << 7 | X << 6 | B << 5 | R2 << 4 | mm));
+		eb(&x, (uint8_t)(W << 7 | (~f->vvvv & 15) << 3 | 4 | pp));
+		eb(&x, (uint8_t)(a->x64_kz << 7 | f->ll << 5 | !(f->vvvv & 16) << 3 | a->x64_kmask));
+		eb(&x, f->op[f->nop - 1]);
+	} else if (f->vex) {
+		if (f->reg > 15 || f->vvvv > 15 || (rm && rm->kind == XK_REG && rm->reg > 15))
+			return err(a, "register requires AVX-512 (EVEX)");
 		/* VEX: R X B (inverted) and W from REX, mmmmm from the map, pp from the prefix */
 		int R = !(rex & 4), X = !(rex & 2), B = !(rex & 1), W = !!(rex & 8);
 		int mm = f->nop == 3 ? (f->op[1] == 0x38 ? 2 : 3) : 1;
@@ -433,7 +457,7 @@ VPRIV int x64_emit(As *a, XForm *f)
 				ew(&x, 0, 4);
 			}
 		} else {
-			ew(&x, disp, dispsz);
+			ew(&x, dispsz == 1 && f->evex && f->dn > 1 ? disp / f->dn : disp, dispsz);	/* (EVEX: disp8*N) */
 		}
 	}
 	if (f->isz) {
@@ -640,6 +664,7 @@ VPRIV int x64_instruction(As *a, const char *p, const char *e, size_t wn)
 	if (wn >= sizeof mn)
 		return err(a, "invalid instruction mnemonic");
 	a->x64_isz = 0;
+	a->x64_kmask = a->x64_kz = 0;
 	for (size_t i = 0; i < wn; i++)
 		mn[i] = (char)c_lower((unsigned char)p[i]);
 	mn[wn] = 0;
@@ -714,6 +739,20 @@ VPRIV int x64_instruction(As *a, const char *p, const char *e, size_t wn)
 			return -1;
 		nops++;
 		p = ws(p, e);
+		while (p < e && *p == '{') {	/* AVX-512: {%kN} {z} */
+			const char *q = ws(p + 1, e);
+
+			if (q + 2 < e && q[0] == '%' && (q[1] | 0x20) == 'k' && q[2] >= '1' && q[2] <= '7')
+				a->x64_kmask = q[2] - '0', q += 3;
+			else if (q < e && (*q | 0x20) == 'z')
+				a->x64_kz = 1, q++;
+			else
+				return err(a, "invalid operand decoration");
+			q = ws(q, e);
+			if (q >= e || *q != '}')
+				return err(a, "expected '}'");
+			p = ws(q + 1, e);
+		}
 		if (p < e && *p == ',')
 			p = ws(p + 1, e);
 		else if (p < e)
@@ -746,6 +785,7 @@ VPRIV int x64_instruction(As *a, const char *p, const char *e, size_t wn)
 			x64_i_setcc,
 			x64_i_x87,
 			x64_i_sse,
+			x64_i_evex,
 			x64_i_avx,
 			x64_i_sse4,
 			x64_i_ssepk,
