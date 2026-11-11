@@ -556,6 +556,7 @@ VPRIV bool em_sdivconst(cc *c, qty ty, int op, i128 rhs, em_sdivconst_recipe *r)
 VPRIV bool a64_sdivconst_ok(ecx *e, val a, const em_sdivconst_recipe *r);
 VPRIV val a64_sdivconst(ecx *e, val a, const em_sdivconst_recipe *r);
 /* opt/mulshift.c and opt/xor-not.c: machine recipes, no operand evaluation. */
+VPRIV int em_cmpbounds(ecx *e, uint32_t n, uint32_t *operand);
 VPRIV bool em_mulshift(cc *c, qty ty, int *op, i128 *rhs);
 VPRIV bool em_xor_not(cc *c, qty ty, int op, i128 rhs);
 /* opt/identity.c */

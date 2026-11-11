@@ -1353,7 +1353,14 @@ static int wbinary(ecx *e, uint32_t n)
 	const node *x = N(n);
 	int op = x->aux;
 	qty lt = N(x->a)->ty, rt = N(x->b)->ty, ty = x->ty;
+	uint32_t operand;
+	int bound = em_cmpbounds(e, n, &operand);
 
+	if (bound >= 0) {
+		wexpr(e, operand, false);
+		wconst(e, WT_I32, bound);
+		return WT_I32;
+	}
 	if (unlikely(vstack_low()))
 		efatal(e, x->loc, "expression nested too deeply");
 	if (is_vec(c, ty) || is_vec(c, lt)) {

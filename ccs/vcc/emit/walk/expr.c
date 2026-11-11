@@ -1355,7 +1355,14 @@ static val wk_binary(ecx *e, uint32_t n)
 	int op = x->aux;
 	qty lt = N(x->a)->ty, rt = N(x->b)->ty;
 	val a, b;
+	uint32_t operand;
+	int bound = em_cmpbounds(e, n, &operand);
 
+	if (bound >= 0) {
+		val v = wk_gen(e, operand);
+		wk_free(e, &v);
+		return vconst(bound);
+	}
 	if (unlikely(is_vec(c, x->ty) || is_vec(c, lt) || is_vec(c, rt))) {
 		a = wk_gen(e, x->a);
 		b = wk_rhs(e, &a, x->b, is_vec(c, lt) ? prim(TY_ULONG) : lt);
@@ -3563,7 +3570,16 @@ VPRIV void wk_cond(ecx *e, uint32_t n, bool jump_if, uint32_t lbl)
 			return;
 		}
 		break;
-	case N_BINARY:
+	case N_BINARY: {
+		uint32_t operand;
+		int bound = em_cmpbounds(e, n, &operand);
+		if (bound >= 0) {
+			val v = wk_gen(e, operand);
+			wk_free(e, &v);
+			if (bound == (int)jump_if)
+				LO(jump)(e, lbl), wk_state(e)->cjump = true;
+			return;
+		}
 		if (wk_is_cmp(x->aux) && !is_flt(c, N(x->a)->ty) && !wk_mem(e, N(x->a)->ty)) {
 			qty lt = N(x->a)->ty;
 			int op = x->aux;
@@ -3584,6 +3600,7 @@ VPRIV void wk_cond(ecx *e, uint32_t n, bool jump_if, uint32_t lbl)
 			return;
 		}
 		break;
+	}
 	case N_CAST:
 		if ((x->aux == CK_BOOL || x->aux == CK_NOP || x->aux == CK_INT) && !is_flt(c, N(x->a)->ty) &&
 		    wk_size(c, x->ty) >= wk_size(c, N(x->a)->ty)) {
