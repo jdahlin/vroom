@@ -1,0 +1,12 @@
+; a float in a nofp function
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+func @f %s nofp {
+b0:
+  v0:i64 = param 0.0
+  v1:f64 = s2f v0
+  ret v0
+}
+; ---
+@f b0.1: F1: s2f has type f64 in a nofp function

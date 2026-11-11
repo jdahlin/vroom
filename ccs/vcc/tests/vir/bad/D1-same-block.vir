@@ -1,0 +1,13 @@
+; a value used before it is defined in its own block
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  v2:i64 = add v1, v0
+  v1:i64 = add v0, 1
+  ret v2
+}
+; ---
+@f b0.1: D1: add uses a value defined later in the block

@@ -1,0 +1,13 @@
+; asm operand counts that do not match the template
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+asm !0 "mov $0, $1" outs("=r") ins("r") clobber()
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  v1:i64 = asm !0 outs(0) ins()
+  ret v1
+}
+; ---
+@f b0.1: A4: asm !0 has 1 register outputs and 1 inputs, the instruction 1 and 0

@@ -1,0 +1,11 @@
+; a branch to a block that does not exist
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  br b7
+}
+; ---
+bad/syntax-undefined-block.vir:8:6: undefined block b7

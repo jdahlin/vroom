@@ -1,0 +1,3 @@
+; an empty file
+; ---
+bad/syntax-empty.vir:2:1: expected `vir`

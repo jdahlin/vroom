@@ -1,0 +1,14 @@
+; an i32 switch case that does not fit
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  v1:i32 = trunc v0
+  switch v1, b1 [4294967296: b1]
+b1:
+  ret v0
+}
+; ---
+bad/syntax-switch-range.vir:9:18: case value out of range for i32

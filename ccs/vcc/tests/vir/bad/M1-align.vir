@@ -1,0 +1,12 @@
+; a slot alignment that is not a power of two
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+func @f %s {
+  slot $0 size 8 align 3
+b0:
+  v0:i64 = param 0.0
+  ret v0
+}
+; ---
+@f: M1: slot $0: the alignment 3 is not a power of two

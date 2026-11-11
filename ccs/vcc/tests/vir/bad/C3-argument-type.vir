@@ -1,0 +1,13 @@
+; a br argument of a type other than the parameter
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  br b1(5:i32)
+b1(v1:i64):
+  ret v1
+}
+; ---
+@f b0.1: C3: br b1: argument 0 has type i32, the parameter i64

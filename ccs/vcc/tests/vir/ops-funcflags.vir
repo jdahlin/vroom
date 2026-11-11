@@ -1,0 +1,37 @@
+; function flags, slot flags, and exposure claimed by the function and true
+vir 1
+target arm64-linux
+sig %s = (int) -> int
+func @flags %s nofp fenv nullinvalid noreturn local exposure {
+  slot $0 size 8 align 8 exposed
+  slot $1 size 16 align 16 hint 32
+  slot $2 size 8 align 8 param
+b0:
+  v0:i64 = param 0.0
+  v1:ptr = i2p v0
+  store.8 v1, $0:ptr
+  store.8 $1, v0
+  v2:i64 = load.8u $1+8
+  v3:ptr = ptradd $2, 4
+  store.4 v3, 1:i32
+  trap
+}
+; ---
+vir 1
+target arm64-linux
+sig %s0 = (int) -> int
+
+func @flags %s0 nofp fenv nullinvalid noreturn local exposure {
+  slot $0 size 8 align 8 exposed
+  slot $1 size 16 align 16 hint 32
+  slot $2 size 8 align 8 param
+b0:
+  v0:i64 = param 0.0
+  v1:ptr = i2p v0
+  store.8 v1, $0:ptr
+  store.8 $1, v0
+  v2:i64 = load.8u $1+8
+  v3:ptr = ptradd $2, 4
+  store.4 v3, 1:i32
+  trap
+}

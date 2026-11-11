@@ -1,0 +1,55 @@
+; the edges of constants: extreme integers, pointers, normal and special floats
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+func @consts %s {
+b0:
+  v0:i64 = param 0.0
+  v1:i64 = add v0, -9223372036854775808
+  v2:i64 = add v1, 0xffffffffffffffff
+  v3:i32 = trunc v0
+  v4:i32 = add v3, -2147483648
+  v5:i32 = add v4, 4294967295
+  v6:i32 = add v5, 0x7fffffff
+  v7:ptr = i2p v0
+  store.8 v7, 0x10:ptr align 8
+  store.8 v7, 0xffffffffffffffff:ptr
+  v8:ptr = ptradd v7, -1
+  v9:f64 = fadd 0x1.fffffffffffffp+1023, bits:0x7ff0000000000000
+  v10:f64 = fadd v9, 0x1p-1022
+  v11:f64 = fadd v10, bits:0x1
+  v12:f32 = ftrunc v11
+  v13:f32 = fadd v12, 0x1.fffffep+127
+  v14:f32 = fadd v13, 0x1p-126
+  v15:f32 = fadd v14, -0x0p+0
+  v16:f32 = fadd v15, bits:0xff800000
+  ret v2
+}
+; ---
+vir 1
+target x86_64-linux
+sig %s0 = (int) -> int
+
+func @consts %s0 {
+b0:
+  v0:i64 = param 0.0
+  v1:i64 = add v0, -9223372036854775808
+  v2:i64 = add v1, -1
+  v3:i32 = trunc v0
+  v4:i32 = add v3, -2147483648
+  v5:i32 = add v4, -1
+  v6:i32 = add v5, 2147483647
+  v7:ptr = i2p v0
+  store.8 v7, 0x10:ptr align 8
+  store.8 v7, 0xffffffffffffffff:ptr
+  v8:ptr = ptradd v7, -1
+  v9:f64 = fadd 0x1.fffffffffffffp+1023, bits:0x7ff0000000000000
+  v10:f64 = fadd v9, 0x1p-1022
+  v11:f64 = fadd v10, bits:0x1
+  v12:f32 = ftrunc v11
+  v13:f32 = fadd v12, 0x1.fffffep+127
+  v14:f32 = fadd v13, 0x1p-126
+  v15:f32 = fadd v14, -0x0p+0
+  v16:f32 = fadd v15, bits:0xff800000
+  ret v2
+}

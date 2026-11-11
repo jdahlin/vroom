@@ -1,0 +1,7 @@
+; a symbol defined twice
+vir 1
+target x86_64-linux
+extern @x
+data @x align 4 = { i32 1 }
+; ---
+bad/syntax-symbol-twice.vir:5:6: symbol @x defined twice

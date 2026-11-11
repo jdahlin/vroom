@@ -1,0 +1,6 @@
+; a signature with a group that does not exist
+vir 1
+target x86_64-linux
+sig %s = (quad) -> int
+; ---
+bad/syntax-bad-group.vir:4:11: expected a group (none, int, f32, f64, mem, sret)

@@ -1,0 +1,25 @@
+; PASSES: canon
+; a nop inside a block is removed
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+func @f %s {
+b0:
+  nop
+  v0:i64 = param 0.0
+  nop
+  v1:i64 = add v0, 1
+  nop
+  ret v1
+}
+; ---
+vir 1
+target x86_64-linux
+sig %s0 = (int) -> int
+
+func @f %s0 {
+b0:
+  v0:i64 = param 0.0
+  v1:i64 = add v0, 1
+  ret v1
+}

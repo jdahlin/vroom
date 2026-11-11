@@ -1,0 +1,13 @@
+; a terminator before the end of a block
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  ret v0
+  v1:i64 = add v0, 1
+  ret v1
+}
+; ---
+@f b0.1: S3: a terminator before the end of the block

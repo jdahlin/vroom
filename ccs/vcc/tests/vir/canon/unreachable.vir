@@ -1,0 +1,41 @@
+; PASSES: canon
+; unreachable blocks go, with the constants only they use; the order of the others stays
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  v1:i32 = icmp.eq v0, 0
+  brif v1, b2, b3
+b1:
+  v2:i64 = mul v0, 99
+  v3:f64 = fadd 0x1.8p+1:f64, 0x1p+0:f64
+  br b4
+b2:
+  ret 1:i64
+b3:
+  br b5
+b4:
+  v4:i64 = add v2, 12345
+  br b1
+b5:
+  ret v0
+}
+; ---
+vir 1
+target x86_64-linux
+sig %s0 = (int) -> int
+
+func @f %s0 {
+b0:
+  v0:i64 = param 0.0
+  v1:i32 = icmp.eq v0, 0
+  brif v1, b1, b2
+b1:
+  ret 1:i64
+b2:
+  br b3
+b3:
+  ret v0
+}
