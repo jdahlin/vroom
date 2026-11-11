@@ -45,6 +45,7 @@ commits, `work/testsuites/MANIFEST`.
 | csmith, yarpgen | slumpprogramgeneratorer (källkod) | BSD-2 / Apache-2.0 |
 | libc-test | musl:s libc-tester (466) | MIT |
 | chibicc, cproc | kompilatorernas egna tester (50, 213) | MIT / ISC |
+| kefir | 875 end2end-runtimepar, 231 interna snapshot-kataloger inventerade separat | GPL-3.0-only; runtime-header BSD-3-Clause |
 
 ### S2 clangs -verify-tester — påbörjad (62ea29a, TODO T20)
 `bench/vcc-verify.py -j 6 [-v] [PAT]`.  Varje `%clang_cc1 … -verify`-rad i
@@ -561,6 +562,37 @@ Kombinerat fryst checkpoint `7afcdea`, före signmask-/typnamnsrättningarna,
 **150/150 ARM/QEMU**, tvåfils-constexpr-ABI samt tre ursprungliga GCC-fall
 per mål. Fulla binärhashar/loggar: `work/results/checkpoint-7afcdea-validation.json`.
 
+Runtime-riggarna skiljer nu referenskompilatorns signal/timeout/verktygsfel
+från vanliga källkodsavvisningar. Orakelfel ger felstatus, ingår i
+sammanfattningen och cachas inte som permanenta undantag. Gamla missvisande
+cacheposter invalideras. Det stora `branch_far` har en uttrycklig begränsad
+referenstid på 300 sekunder; övriga prov behåller 60. Fjorton offlinegrupper
+injicerar fel i alla tre riggar, och en full CLI-injektion ger 0 godkända,
+0 överhoppade, ett orakelfel och exit1. Verkliga `branch_far` och
+`signaling_nan` går 2/2 på x86 och ARM/QEMU med nya klassificeringen.
+
+CI-följdkontrollen återställde braced `dg-options`, bland annat den
+`-fwrapv` som `930529-1` kräver; samma Wasm-referens går från 20 s timeout
+till exit0 på 0,020 s. ARM-gästens undantagsvektor ger nu exit125 med
+diagnostik vid verkligt gästfel, medan en oändlig loop fortfarande är ett
+orakelfel. Native-referensprogrammets signal redovisas som avvisat
+runtime-kontrakt med signal och stderr; kompilator-/länkar-/QEMU-/Node-fel
+och timeouter förblir orakelfel. Saknade `freopen`/`fscanf`-prototyper i
+riggens stdio-header rättades: två felande native-referenser passerar nu.
+Full GCC-körning: **1615/1615 x86**, 86 explicita undantag; ARM:s kompletta
+vendorerade körsvit **1883/1883**, 126 undantag. Wasm64 klarar **1825/1825**,
+34 XFAIL och 150 undantag; 19 av dessa följer svitens uttryckliga
+`label_values`-krav som Wasm saknar. Inget testnamn används för det filtret,
+och identiska backendfel utan direktivet förblir fel. Alla oväntade
+Wasm-utfall skriver nu testnamnet även utan verbose-läge.
+
+Efter merge av `main` (`9d022c3`) passerar samma rigg `62390af`
+**1895/1895 ARM** (177 egna prov, 126 explicita undantag) och
+**1839/1839 Wasm64** (140 egna prov, 34 körda XFAIL, 148 undantag).
+Ingen oväntad failure, XPASS eller orakelfel rapporteras. De 35
+checkout-grupperna samt verkliga ARM-undantagsprober och native stdio
+passerar också. Loggar: `work/results/pr37-merged-{arm,wasm}.log`.
+
 Kvar:
 - Alla återstående matchande filer och optimeringskonfigurationer; nästlade
   kataloger med egna `.exp`-drivrutiner och LTO har ännu ingen motsvarighet.
@@ -605,6 +637,53 @@ Efter rättningar: 183 godkända/0 fel/13 filtrerade på båda målen.
 Detta är fortfarande inte runtime- eller QBE-ekvivalens.
 
 **Klart när:** allt som clang klarar klarar också vcc.
+
+### S5b Kefir — importerad, Linux-baslinje uppmätt
+
+Officiella repot är nu `https://git.protopopov.lv/kefir.git`, låst till
+`7c59547068eaa0723b4db83d3fb70f448b0f0cb1`; gamla sr.ht HEAD innehåller
+bara flyttmeddelandet. Käll-/licensmetadata finns i `bench/kefir-source.json`.
+`bench/vcc-kefir.py` inventerar 1106 end2end-kataloger: 875 runtime-par
+(875 host-filer, 889 test-filer) och 231 kompilatorinterna snapshot-kataloger.
+Varje runtime-par behåller alla följeslagarfiler, upstreams profilflaggor,
+aktiva host-assertioner och Linux-länkning med pthread/atomic/m.
+Clang/Clang måste först klara exitstatuskontraktet; därefter körs
+Clang/vcc, vcc/Clang och vcc/vcc. Ingen utdatajämförelse uppfinns.
+
+Råa profiler, basflaggor, slutliga/mappade flaggor, miljö, exakta kommandon,
+källträdshash och filhashar sparas. Snapshot kommer från `git archive` av
+rätt ren pin. Okända profil-/make-/run-kontrakt är uttryckligen unsupported.
+Decimal-kapabilitetsvakter får aldrig bli tomma godkända tester; på ARM
+separeras även x86-vakter/intrinsics/inline-asm. Interna AST/IR/asmgen-
+snapshots och upstreams kopiering av förväntad utdata körs inte som tester.
+Clang-avvisning filtreras separat; signaler, timeouter, saknade verktyg och
+tysta kompilatorfel är synliga fel med exitstatus 1, även när andra fall passerar.
+Tio checkout-only riggtester ingår i CI. Detta är en ny felbaslinje,
+inte en grön svit eller full täckning av Kefirs interna tester.
+
+**Baslinje 2026-11-11**, vcc `0757803` (binär SHA256
+`40ff9fbbde546e93bd306f6511219719dd27a644b08d9456e7d88571531741bb`),
+Clang 23.1.6, 6 arbetare, 30 s kompilering / 5 s körning:
+
+| mål | alla fyra kombinationer godkända | vcc-fel | vcc signal/timeout | referenskompilering avvisad | referenslänk avvisad | referens signal/timeout | unsupported |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| x86-64 Linux | 448 | 129 | 14 | 161 | 6 | 51 | 66 |
+| ARM64 Linux/QEMU | 414 | 38 | 9 | 249 | 6 | 55 | 104 |
+
+Båda körningarna avslutas med status 1. Clang/Clang klarar 591 respektive
+461 runtime-kontrakt. Unsupported är 46 decimalvakter, 19 okända profilflaggor
+och ett extension-fall på båda mål; ARM har dessutom 38 x86/asm-kontrakt.
+Referensfel får inte räknas som godkända vcc-tester. Alla sex referenslänkfel
+per mål har riktiga, icke-tomma länkardiagnostikfiler.
+Artefakter: `/tmp/kefir-final-x86`,
+`work/results/kefir-final-arm`, gemensamt `work/results/kefir-evidence.json`.
+En tidigare partiell ARM-körning stoppades av slut på tmpfs-inoder och
+behålls separat; slutkörningen ovan skrevs till workspace-filsystemet.
+
+Separat tidsgränsprob: `compound_assign_simplify1` på x86, en arbetare och
+30 s körgräns, klarar alla fyra kombinationer. Fullbaslinjens V/C-timeout
+vid 5 s ändras inte; detta är tidsgränsevidens, inte en semantisk rättning.
+Artefakter: `work/results/kefir-slow-probe-x86`.
 
 ### S6 ABI-generatorer — rigg klar, fel rättas
 `gcc.dg/compat/struct-layout-1_generate.c` och clangs `utils/ABITest`
@@ -716,14 +795,33 @@ sina egna stödobjekt och DSO:er; clang assemblerar/länkar. Riggen behåller
 flaggor, källor, kommandon, binärer, status och kompilatorhash i en ny
 artefaktkatalog. ARM använder QEMU och en explicit privat libcrypt-overlay
 med verifierade glibc-symbolkrav; `-lcrypt` tas inte bort. De fulla resultaten
-ovan är verifierade; sju checkout-only harnessprov går i premerge.
+ovan är verifierade; elva checkout-only harnessprov går i premerge.
 Vanliga clang-avvisningar/libc-avvikelser filtreras separat, medan
 kompilatorkrascher, timeout, saknade verktyg/regler och oförklarade makefel
 måste ge felstatus även om andra tester passerar. Injicerad clang-SIGSEGV
 är verifierad röd; normal pow10-avvisning tillsammans med giltiga prover
-och hela x86-körningen avslutas korrekt. API:s compile-only-aggregat,
-statiska varianter och musl-interna kategorier ingår ännu inte; hela S8
-påstås därför inte vara färdig.
+och hela x86-körningen avslutas korrekt.
+
+Riggen kartlägger även hela pinnade grafen med `--suite full --linkage both`:
+**565 kontrakt** (345 dynamiska mål, 141 statiska mål och 79 API-objekt).
+API:s fulla länkaggregat behålls oförändrat; genererade API-headern
+preprocessas med respektive kompilator. `--linkage static` följer upstreams
+beroenden på dynamiska prov och redovisar deras sidoresultat separat.
+Full separat verifiering mot `7afcdea` ger **424 godkända x86-kontrakt**,
+83 referensbyggfel, 57 referenskörfel och ett upstream-avstängt prov;
+ARM/QEMU ger **430 godkända**, 83/51 referensfel och samma avstängda prov.
+Noll vcc-fel och noll infrastrukturfel. Elva offlineprov kontrollerar graf,
+status, preprocessningsval och att ett avstängt recept faktiskt matchar
+upstream. Artefakter: `/tmp/libc-expanded-full-{x86,arm}` och
+`/tmp/libc-expanded-evidence.json`.
+
+API:s strikta oförändrade flaggor gör att Clang avvisar 79 av 80 kontrakt
+i denna glibc-miljö; dessa påstås inte verifiera vcc. Musl:s dynamiska
+`pleval` är uttryckligen avstängt av upstream, och det statiska provet
+behöver en privat libc-funktion (Clang avvisar redan källan här).
+Ett statiskt ARM-referensprov gav SIGBUS i en tidigare separat körning
+och gick i den fulla körningen; båda artefakterna är bevarade. Fullständig
+S8-konformans eller musl-validering påstås fortfarande inte.
 
 musl:s libc-test kräver en riktig libc.  Det görs när vcc bygger musl, eller
 mot glibc i Linux-containern.  Funktionstesterna och math-testerna

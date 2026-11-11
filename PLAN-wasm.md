@@ -416,3 +416,20 @@ felet till en varning som clang.
   -S, -E, Darwin -c/-S) mot bygget före, `vbench.py check --quick` 66/66;
   `vcc-diff batch --cmp --kernel` 873/873, `vcc-sema batch` 878/879, `vcc-driver`
   41/41, `vcc-ctests --suite vcc` 34/34.
+
+## Referenskontrakt för GCC-körtesterna
+
+`bench/vcc-wasm.py` respekterar GCC:s uttryckliga, ovillkorliga
+`dg-require-effective-target label_values` före kompilering: LLVM:s Wasm-mål
+kan inte representera GNU-etikettadresser som lämnar funktionen eller lagras i
+data. Dessa fall redovisas som `skip:unsupported-target`, inte som godkända test.
+Att en enklare etikettadress kan optimeras bort innebär inte stöd för kravet.
+Övriga målvillkor, exempelvis `indirect_jumps`, omfattas inte av denna regel.
+
+Verifierat med LLVM 23 på `20071220-1`, `20071220-2` (etikettadress i statisk
+tabell) och `990208-1` (etikettadress lämnar inline-funktionen). Utan
+målvillkorskontrollen ger LLVM fatala backendfel med stackdump. Dessa fel är
+fortfarande `error:oracle-compile` för test utan detta uttryckliga källkontrakt;
+diagnostiktext får aldrig omklassificera en krasch, timeout eller verktygsfel
+till en skip. `bench/test-runtime-oracle.py` kontrollerar båda vägarna.
+Oväntade `fail` och `error` skriver alltid svit/testnamn även utan `-v`.
