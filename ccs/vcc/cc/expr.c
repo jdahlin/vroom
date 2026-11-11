@@ -1155,6 +1155,12 @@ static __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 
 			return with_pre(c, pre, conditional(c, lt, neg, x, loc));
 		}
+		if (k == TY_DOUBLE && f->n == 1 && !(f->flags & (TF_NOPROTO | TF_VARIADIC)) &&
+		    KIND(c, c->params[f->aux]) == TY_DOUBLE && c->syms[N(callee)->a].sc != SC_STATIC) {
+			uint32_t narrowed = narrow_math_call(c, nm, (size_t)nl, args.v[0], loc);
+			if (narrowed)
+				return narrowed;
+		}
 		/* clang folds the libm functions on a constant (double f(double)) */
 		static const struct { const char *s; double (*f)(double); } mf[] = {
 			{ "sin", sin }, { "cos", cos }, { "tan", tan }, { "exp", exp }, { "log", log }, { "sqrt", sqrt },

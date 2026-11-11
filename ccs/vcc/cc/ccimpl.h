@@ -412,6 +412,7 @@ VPRIV uint32_t args_list(cc *c, vec *args);
 VPRIV uint32_t mk_builtin(cc *c, int id, qty ty, uint32_t loc, const vec *args);
 VPRIV uint32_t vector_builtin(cc *c, bool shuffle, uint32_t loc);
 VPRIV uint32_t offsetof_expr(cc *c, uint32_t loc);
+VPRIV uint32_t narrow_math_call(cc *c, const char *name, size_t len, uint32_t arg, uint32_t loc);
 VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc);
 /* expr.c */
 VPRIV uint32_t paren_expr(cc *c, uint32_t loc);

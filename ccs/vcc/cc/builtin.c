@@ -1205,6 +1205,42 @@ static uint32_t x86_simd_call(cc *c, const builtin *b, vec *args, qty rt, uint32
 	return with_pre(c, pre[0], with_pre(c, pre[1], result));
 }
 
+/* Rounding a value promoted from float has an exact float result. Unlike
+ * transcendental functions, narrowing these operations cannot double-round. */
+VPRIV uint32_t narrow_math_call(cc *c, const char *name, size_t len, uint32_t arg, uint32_t loc)
+{
+	if (!c->o->opt || N(arg)->op != N_CAST || N(arg)->aux != CK_F2F ||
+	    KIND(c, N(arg)->ty) != TY_DOUBLE || KIND(c, N(N(arg)->a)->ty) != TY_FLOAT)
+		return 0;
+	if (!((len == 5 && (!memcmp(name, "floor", 5) || !memcmp(name, "trunc", 5) || !memcmp(name, "round", 5))) ||
+	      (len == 4 && !memcmp(name, "ceil", 4))))
+		return 0;
+	cval cv;
+	if (cc_eval(c, arg, &cv))
+		return 0;	/* leave constant arguments to the existing libm fold */
+	char target[32] = "__builtin_";
+	memcpy(target + 10, name, len);
+	target[10 + len] = 'f';
+	target[11 + len] = 0;
+	for (const builtin *b = builtins; b->name; b++) {
+		if (strcmp(b->name, target))
+			continue;
+		qty ft = builtin_type(c, b);
+		uint32_t s = sym_new(c, S_BUILTIN, 0, ft, loc);
+		c->syms[s].val = b - builtins;
+		uint32_t fn = mk(c, N_VAR, ft, loc);
+		N(fn)->a = s;
+		vec args = {0};
+		vpush(c, &args, N(arg)->a);
+		uint32_t n = mk(c, N_CALL, prim(TY_FLOAT), loc);
+		N(n)->a = decay(c, fn);
+		N(n)->b = vfreeze(c, &args);
+		N(n)->c = 1;
+		return convert(c, n, prim(TY_DOUBLE));
+	}
+	return 0;
+}
+
 VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 {
 	vec args;
