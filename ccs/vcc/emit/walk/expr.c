@@ -1021,7 +1021,8 @@ static val wk_ternary(ecx *e, uint32_t n)
 		int ra = wk_reg(e, &a, N(x->a)->ty);
 
 		LO(store)(e, ra, &l, 8);
-		LO(brz)(e, a, opw(c, N(x->a)->ty), false, lf);
+		a = wk_conv(e, a, N(x->a)->ty, prim(TY_BOOL));
+		LO(brz)(e, a, 4, false, lf);
 		LO(jump)(e, lj);
 	} else {
 		wk_cond(e, x->a, false, lf);

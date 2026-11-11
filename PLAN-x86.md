@@ -330,6 +330,13 @@ kärnan och kan vänta.
 
 ## Status
 
+### X3 (2026-11-11): GNU-villkor och debug-assembler
+GNU `a ?: b` omvandlar det sparade värdet till bool för grenen, också
+när a är float/double/long double. DWARF använder portabla
+`.long`/`.short`/`.quad` i stället för arm64-specifika direktiv.
+Regressionsfallen kör på x86; GCC `20121107-1.c` och `pr41679.c`
+assembleras, och `llvm-dwarfdump --verify` godtar debug-objektet.
+
 ### X6 (2026-11-11): tomma compiler barriers
 Tom inline asm utan operander, med `memory`/`cc`-clobber, bevaras som
 en barrier-post utan maskininstruktion. Andra asm-former återstår.
