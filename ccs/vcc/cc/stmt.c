@@ -1234,13 +1234,13 @@ VPRIV uint32_t statement(cc *c)
 			else if (is_void(c, rt) && !is_void(c, N(e)->ty) && c->fn && !(N(e)->flags & NF_ERR)) {
 				pp_span r = rng(c, e);
 
-				report(c, "error", loc, &r, 1, NULL, 0, "void function '%.*s' should not return a value [-Wreturn-mismatch]",
+				cc_errorx(c, "return-mismatch", (const char *const[]){"return-type", NULL}, loc, &r, 1, "void function '%.*s' should not return a value",
 				       IDF(c->syms[c->fn].name));
 			} else if (is_void(c, rt) && c->fn)	/* (clang -pedantic) */
 				EXT_WARN(c, "pedantic", NULL, loc, "void function '%.*s' should not return void expression",
 					 IDF(c->syms[c->fn].name));
 		} else if (c->fn && !is_void(c, rt) && !c->o->implicit_int) {
-			report(c, "error", loc, NULL, 0, NULL, 0, "non-void function '%.*s' should return a value [-Wreturn-mismatch]",
+			cc_errorx(c, "return-mismatch", (const char *const[]){"return-type", NULL}, loc, NULL, 0, "non-void function '%.*s' should return a value",
 			       IDF(c->syms[c->fn].name));
 		}
 		if (unlikely(e && ISERR(e)) && !is(c, T_SEMI))

@@ -190,6 +190,8 @@ extern const char *const w_ped[];	/* { "pedantic" } */
 	do { if (unlikely(ext_on((c), (flag), (groups)))) { (c)->dms = (ms); \
 		if (!((tf) & PF_MACRO)) (c)->dfx = (pp_fixit){ (loc), (loc) + (uint32_t)strlen(ms), "", VDA_MACHINE }; \
 		ext_warn((c), (flag), (groups), (loc), __VA_ARGS__); } } while (0)
+VPRIV void cc_errorx(cc *c, const char *flag, const char *const *groups, uint32_t loc,
+                     const pp_span *r, int nr, const char *fmt, ...) __attribute__((format(printf, 7, 8)));
 VPRIV __attribute__((format(printf, 6, 7))) vdiag *cc_warn_begin(cc *c, const char *flag, bool on, const char *const *groups, uint32_t loc, const char *fmt, ...);
 extern const char *const w_conv[];
 extern const char *const w_selfassign[];

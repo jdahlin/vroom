@@ -3,14 +3,15 @@
 
 /* ---------------- diagnostics ---------------- */
 
-/* clang's -ferror-limit (default 20, 0: none): stop the TU with its fatal error */
+/* Clang's implicit limit permits 19 errors plus the fatal record; an explicit
+ * -ferror-limit=N permits N errors before the fatal (0 means unlimited). */
 VPRIV void error_limit(cc *c)
 {
 	int lim = pp_error_limit(c->p);
 
 	if (!lim)
-		lim = 20;
-	if (lim > 0 && pp_errors(c->p) + 1 >= lim) {
+		lim = 19;
+	if (lim > 0 && pp_errors(c->p) >= lim) {
 		pp_dinfo d = { "fatal error", UINT32_MAX, NULL, 0, NULL, 0, NULL, 0 };
 
 		pp_diagx(c->p, &d, "too many errors emitted, stopping now [-ferror-limit=]");
@@ -408,6 +409,27 @@ VPRIV bool cc_warnx(cc *c, const char *flag, bool on, const char *const *groups,
 	d->werror = lv == VDL_ERROR;
 	pp_diag_emit(c->p, d);
 	return true;
+}
+
+/* A default error that participates in named -W controls and pragmas. */
+__attribute__((format(printf, 7, 8)))
+VPRIV void cc_errorx(cc *c, const char *flag, const char *const *groups, uint32_t loc,
+                   const pp_span *r, int nr, const char *fmt, ...)
+{
+	int lv = pp_diag_elevel(c->p, flag, groups, loc);
+	va_list ap;
+
+	if (lv < 0) { c->dms = NULL; return; }
+	pp_diag_pc = __builtin_return_address(0);
+	if (lv == VDL_ERROR)
+		unknown_toks(c), error_limit(c), c->errors++;
+	c->ndiag++;
+	va_start(ap, fmt);
+	vdiag *d = rec(c, lv, loc, r, nr, NULL, 0, fmt, ap);
+	va_end(ap);
+	pp_diag_flag(d, flag);
+	d->werror = lv == VDL_ERROR && pp_werror_named(c->p, flag, groups) > 0;
+	pp_diag_emit(c->p, d);
 }
 
 /* a warning record of clang's flag to fill in (labels, help) and pp_diag_emit; NULL if off */
