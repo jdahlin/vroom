@@ -41,17 +41,23 @@ commits, `work/testsuites/MANIFEST`.
 diagnostiker står i filen (`// expected-error {{...}}`).  `test/C` är ordnad
 per standard, WG14-paper och Defect Report (`drs/`), och är det som ligger
 närmast test262.  Harnessen läser direktiven ur rå källkod med `#line`;
-överhoppade `#if`-grenar tar den reda på via clang.  Matchningen följer
-clangs VerifyDiagnosticConsumer.  Clangs sida cachas.  `results.json` visar
-tester som gått från godkänd till underkänd.
+överhoppade `#if`-grenar tar den reda på via clang. Matchningen kontrollerar
+diagnostikens nivå, fil, rad och antal. Vcc:s formuleringar får skilja sig
+från clangs; våra egna snapshots verifierar vcc:s hela meddelanden.
+`--match-messages` är en frivillig jämförelse med clangs text. Clangs sida
+cachas och dess ursprungliga kontrakt kontrolleras fortfarande. Separata
+`results.locations.json` och `results.messages.json` visar förändringar
+inom samma jämförelsepolicy.
 
 **Linux x86-64 2026-11-11:** `bench/vcc-verify.py --target
-x86_64-linux-gnu -j 6` ger nu **409/1640 godkända, 1231 fel och inga
-krascher** (10 fler godkända än föregående körning). ARM/QEMU-målets
-frontendkontroll ger **416/1805 godkända, 1389 fel, inga krascher**;
-testkällorna körs inte som program i denna svit. Resultat och referenser
-hålls skilda per mål; arm64 väljs med `--target aarch64-linux-gnu`.
-Kvarvarande fel omfattar både semantik och avvikelser i exakt diagnostik.
+x86_64-linux-gnu -j 6` ger nu **443/1640 godkända, 1197 fel och inga
+krascher** med oberoende meddelandetext. ARM-målets frontendkontroll ger
+**450/1805 godkända, 1355 fel, inga krascher**; testkällorna körs inte som
+program i denna svit. Detta frigör 34 tester per mål från rena textkrav,
+utan någon semantisk kompilatorändring. Föregående strikta textjämförelse
+gav 409 respektive 416 godkända. Resultat och referenser hålls skilda per
+mål; arm64 väljs med `--target aarch64-linux-gnu`. Återstående fel kräver
+utredning av semantik, diagnostiknivå, rad, antal och återhämtning.
 
 **Status 2026-11-10:** 412/1841 giltiga tester godkända (22 %), 1 krasch.
 
