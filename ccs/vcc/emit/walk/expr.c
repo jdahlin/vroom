@@ -1022,6 +1022,9 @@ static val wk_binary(ecx *e, uint32_t n)
 		return wk_ptradd(e, a, b, rt, (int64_t)tsize(c, T(c, lt)->base) ?: 1, op == T_MINUS);
 	if (is_ptr(c, rt) && op == T_PLUS)
 		return wk_ptradd(e, b, a, lt, (int64_t)tsize(c, T(c, rt)->base) ?: 1, false);
+	/* Wide integer values are addresses; shift helpers need a scalar count. */
+	if ((op == T_LESSLESS || op == T_GREATERGREATER) && wk_wide(c, rt))
+		b = wk_conv(e, b, rt, prim(TY_INT));
 	return wk_arith(e, op, x->ty, a, b);
 }
 
@@ -1207,6 +1210,10 @@ static val wk_assign(ecx *e, uint32_t n)
 
 		/* as clang: the right side first, then the left's address and value */
 		b = wk_gen(e, x->b);
+		if ((x->aux == T_LESSLESS || x->aux == T_GREATERGREATER) && wk_wide(c, rt)) {
+			b = wk_conv(e, b, rt, prim(TY_INT));
+			rt = prim(TY_INT);
+		}
 		if (b.k == V_REG && wk_short(e, rt)) {
 			int64_t sl = wk_slot(e, 8, 8);
 			lval t = { .k = L_FRAME, .off = sl, .align = 8 };
