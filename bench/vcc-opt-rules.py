@@ -46,7 +46,7 @@ def body(assembly, name, wasm):
 def check_wasm_inline(assembly, arch):
     if not arch.startswith('wasm'):
         return
-    for name in ['wi_sum8', 'wi_mix', 'wi_add', 'wi_nested', 'wi_effect', 'wi_unused', 'wi_pointer', 'wi_narrow', 'wi_float', 'wi_choose']:
+    for name in ['wi_sum8', 'wi_mix', 'wi_add', 'wi_nested', 'wi_effect', 'wi_unused', 'wi_pointer', 'wi_narrow', 'wi_signed_narrow', 'wi_bool', 'wi_float', 'wi_choose']:
         text = body(assembly, name, True)
         if re.search(r'\bcall\b', text):
             raise RuntimeError(f'{name}: scalar static call should be inlined\n{text}')
