@@ -195,7 +195,8 @@ static void do_item(ecx *e, uint32_t it)
 	if (c->syms[it].kind == S_FUNC && WASM(c)) {
 		wasm_emit_function(e, it);
 	} else if (c->syms[it].kind == S_FUNC && X86(c)) {
-		wk_function(e, it);
+		if (!vw_try(e, it))
+			wk_function(e, it);
 	} else if (c->syms[it].kind == S_FUNC) {
 		if (!reuse(e, it) && !vw_try(e, it))
 			emit_function(e, it);

@@ -1706,6 +1706,29 @@ static bool vl_vec(vl *L, const vir_ins *in, uint8_t res)
 	case VO_VS2F:
 		VW2(0x4e21d800u | D, vl_fx(L, 0), vd);	/* scvtf */
 		return true;
+	case VO_VINSERT: {
+		uint32_t wide = in->ty == VT_F64X2 || in->ty == VT_I64X2;
+		uint32_t imm5 = (wide ? 8u : 4u) | (in->c << (wide ? 4 : 3));
+		int a = vl_fx(L, 0);
+		bool fp = L->opr[1] != VR_NONE && vl_fcls(L->opr[1]);
+		int b = fp ? vl_fx(L, 1) : vl_ix(L, 1, R_X16);
+		if (fp && b == vd && a != vd) {
+			VW3(0x4ea01c00u, b, b, 31);
+			b = 31;
+		}
+		if (a != vd) VW3(0x4ea01c00u, a, a, vd);
+		VW2((fp ? 0x6e000400u : 0x4e001c00u) | imm5 << 16, b, vd);
+		return true;
+	}
+	case VO_VEXTRACT: {
+		uint32_t wide = in->ty == VT_F64 || in->ty == VT_I64;
+		uint32_t imm5 = (wide ? 8u : 4u) | (in->b << (wide ? 4 : 3));
+		if (in->ty == VT_F32 || in->ty == VT_F64)
+			VW2(0x5e000400u | imm5 << 16, vl_fx(L, 0), vd);
+		else
+			VW2((wide ? 0x4e003c00u : 0x0e003c00u) | imm5 << 16, vl_fx(L, 0), res == VR_NONE ? R_X16 : vl_gx(res));
+		return true;
+	}
 	case VO_VREV:
 		if (D) {	/* (two lanes: the halves swapped) */
 			int a = vl_fx(L, 0);
@@ -2342,8 +2365,8 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 			}
 	}
 
+	/* Keep result tables queued by the VIR walker: end_function emits them. */
 	/* the emitter's per-function state, as emit_function1 sets it */
-	em_switch_values_reset(e);
 	e->nin = 0;
 	e->ndl = 0;
 	e->raw.n = 0;

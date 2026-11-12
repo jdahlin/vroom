@@ -6,9 +6,9 @@
  * A loop it takes: innermost; the header H has two predecessors (P outside, the latch) and ends
  * in `brif icmp(u, n)` with u linear in the iteration and n invariant; the body is a chain of
  * blocks with one way in and one way out.  Every parameter of H is an induction (p + K each
- * iteration) or an i32 sum.  The instructions are pure, loads or stores; a load or store of 4
- * bytes addresses `symbol + 4*t + ...` or `symbol - 4*t + ...`, or (a load) an address that does
- * not change and that no store of the loop can reach.
+ * iteration), a sum, a shifted value or an ordered reduction.  The instructions are pure, loads or stores; a load or store of 4
+ * or 8 bytes has a constant element-aligned stride. Indexed reads require proven separation
+ * from every written object; invariant reads must be unreachable by the loop's stores.
  *
  * What it builds, in front of the loop, which stays as it is and runs what is left:
  *
@@ -25,7 +25,7 @@
  * scalar loop's order within an iteration, so it reads and writes nothing the program would not
  * (4.1, 4.2).  Two accesses of one symbol at a distance of 1-3 iterations are allowed only when
  * the earlier iteration's one is not a store read back, and comes first in the body (6.3).
- * Nothing is reassociated: there are no float reductions (4.5).
+ * Nothing is reassociated: float reductions consume extracted lanes in scalar order (4.5).
  *
  * A value of the loop is one of: invariant (INV), linear in the iteration (LIN: an induction and
  * what add, sub, mul by a constant and ext make of it), different in each lane (VEC), a
@@ -35,7 +35,7 @@
  */
 
 enum { VK_NONE, VK_INV, VK_LIN, VK_VEC, VK_MASK, VK_RED, VK_REDUPD, VK_BAD,
-       VK_W32 };	/* an i64 that is an i32 lane widened (ext, or a select of such): only its trunc is a lane */
+       VK_W32, VK_SCALAR, VK_CARRY, VK_FOLD };	/* an i64 that is an i32 lane widened (ext, or a select of such): only its trunc is a lane */
 enum { VJ_NONE, VJ_SYM, VJ_PTR };
 
 typedef struct vvi {
@@ -60,8 +60,11 @@ typedef struct vvs {
 	uint32_t H, P, L, X, jP, jL;		/* header, entry predecessor, latch, exit; their slots in H's predecessors */
 	uint32_t VPRE, VPH, VB, VX, J;
 	vvacc acc[64]; uint32_t nacc;
+	uint32_t gather[64], ngather;
 	uint32_t invld[64], ninvld;		/* loads taken as invariant */
 	vvred red[8]; uint32_t nred;
+	struct { uint32_t p, next, acc, last, cur; } fold[8]; uint32_t nfold;
+	struct { uint32_t p, next, par, last; bool busy; } carry[8]; uint32_t ncarry;
 	uint32_t ind[32], indb[32], indn[32], nind;	/* H's inductions; VB's parameter and its next value */
 	int64_t indk[32];			/* ... what an iteration adds */
 	uint32_t one[8], none;			/* steps that are values: the vector loop runs when each is 1 */
@@ -126,7 +129,7 @@ static vvi *vv_get(vvs *S, uint32_t v)
 
 static bool vv_isk(const vvi *x) { return x->kind == VK_INV && x->exact && !x->bv && !x->objk; }	/* a constant */
 static bool vv_lin(const vvi *x) { return x->kind == VK_INV || x->kind == VK_LIN; }
-static bool vv_lane(const vvi *x) { return x->kind == VK_INV || x->kind == VK_LIN || x->kind == VK_VEC; }
+static bool vv_lane(const vvi *x) { return x->kind == VK_INV || x->kind == VK_LIN || x->kind == VK_VEC || x->kind == VK_CARRY; }
 
 /* r = a + s*b as linear forms; false when it has no such form (two objects, two invariant terms) */
 static bool vv_comb(vvi *r, const vvi *a, const vvi *b, int s)
@@ -189,6 +192,11 @@ static bool vv_classify(vvs *S, uint32_t q)
 			allinv &= o[k]->kind == VK_INV;
 			no++;
 		}
+	for (uint32_t k = 0; k < no; k++) if (o[k]->kind == VK_FOLD) {
+		if (!(vir_optab[in.op].eff & EF_P)) return vv_no(S, "an ordered reduction used by an effect");
+		r.kind = VK_FOLD;
+		goto done;
+	}
 	for (uint32_t i = 0; i < S->nred; i++)
 		if (S->red[i].upd == q) {
 			vvi *x = vv_get(S, vw_find(V, S->red[i].x));
@@ -331,7 +339,12 @@ static bool vv_classify(vvs *S, uint32_t q)
 				return vv_no(S, "too many invariant loads");
 			S->invld[S->ninvld++] = q;
 			vv_opaque(S, q, &r);
-		} else if (VIF_W(in.fl) == S->lg && (in.ty == S->fty || in.ty == S->ity) && (o[0]->c == (int64_t)S->esz || o[0]->c == -(int64_t)S->esz)) {
+		} else if (S->lg == 2 && VIF_W(in.fl) == 2 && in.ty == VT_I64 &&
+		           (o[0]->c == 4 || o[0]->c == -4)) {
+			if (S->nacc == 64) return vv_no(S, "too many accesses");
+			S->acc[S->nacc++] = (vvacc){q, S->pos, false};
+			r.kind = VK_W32;
+		} else if (VIF_W(in.fl) == S->lg && (in.ty == S->fty || in.ty == S->ity) && (o[0]->c && o[0]->c % S->esz == 0 && o[0]->c >= -(1 << 20) && o[0]->c <= (1 << 20))) {
 			if (S->nacc == 64)
 				return vv_no(S, "too many accesses");
 			S->acc[S->nacc++] = (vvacc){ q, S->pos, false };
@@ -347,7 +360,7 @@ static bool vv_classify(vvs *S, uint32_t q)
 			return vv_no(S, "a volatile store");
 		if (!vv_lin(o[0]) || !o[0]->exact || !o[0]->objk)
 			return vv_no(S, "a store whose address is not base + linear");
-		if (o[0]->c != (int64_t)S->esz && o[0]->c != -(int64_t)S->esz)
+		if (!o[0]->c || o[0]->c % S->esz || o[0]->c < -(1 << 20) || o[0]->c > (1 << 20))
 			return vv_no(S, o[0]->c ? "a store with a stride other than its size" : "a store to one address");
 		if (VIF_W(in.fl) != S->lg || (vt != S->fty && vt != S->ity))
 			return vv_no(S, "a store of another width than the loop's lanes");
@@ -361,6 +374,28 @@ static bool vv_classify(vvs *S, uint32_t q)
 	}
 	default:
 		return vv_no(S, "an instruction with effects (a call, a block copy, an atomic)");
+	}
+	/* Expand pure address arithmetic lane by lane when it has no packed form. */
+	if (r.kind == VK_BAD && (in.op == VO_ADD || in.op == VO_SUB || in.op == VO_MUL || in.op == VO_SHL ||
+	    in.op == VO_LSHR || in.op == VO_ASHR || in.op == VO_EXT || in.op == VO_TRUNC || in.op == VO_I2P ||
+	    in.op == VO_P2I || in.op == VO_PTRADD || in.op == VO_AND || in.op == VO_OR || in.op == VO_XOR)) {
+		bool ok = true;
+		for (uint32_t k = 0; k < no; k++)
+			ok &= vv_lane(o[k]) || o[k]->kind == VK_W32 || o[k]->kind == VK_SCALAR;
+		if (ok) {
+			r.kind = VK_SCALAR;
+			if (in.op == VO_ADD || in.op == VO_PTRADD || in.op == VO_SUB) {
+				if (o[0]->objk && !o[1]->objk) r.objk = o[0]->objk, r.objv = o[0]->objv;
+				else if (in.op != VO_SUB && o[1]->objk && !o[0]->objk) r.objk = o[1]->objk, r.objv = o[1]->objv;
+			} else if (in.op == VO_I2P || in.op == VO_P2I)
+				r.objk = o[0]->objk, r.objv = o[0]->objv;
+		}
+	}
+	if (in.op == VO_LOAD && r.kind == VK_BAD && o[0]->kind == VK_SCALAR && o[0]->objk &&
+	    VIF_W(in.fl) == S->lg && (in.ty == S->fty || in.ty == S->ity)) {
+		if (S->ngather == 64) return vv_no(S, "too many indexed reads");
+		S->gather[S->ngather++] = q;
+		r.kind = VK_VEC;
 	}
 done:
 	{
@@ -393,6 +428,15 @@ static bool vv_depend(vvs *S)
 {
 	vwst *V = S->e->vw;
 
+	/* An indexed read is safe only when every written object is a distinct symbol. */
+	for (uint32_t i = 0; i < S->ngather; i++) {
+		const vvi *a = vv_get(S, vw_find(V, V->p[S->gather[i]].in.a));
+		for (uint32_t j = 0; j < S->nacc; j++) {
+			const vvi *b = vv_get(S, vw_find(V, V->p[S->acc[j].q].in.a));
+			if (S->acc[j].store && !(a->objk == VJ_SYM && b->objk == VJ_SYM && a->objv != b->objv))
+				return vv_no(S, "an indexed read that may alias a store");
+		}
+	}
 	for (uint32_t i = 0; i < S->ninvld; i++) {
 		const vvi *a = vv_get(S, vw_find(V, V->p[S->invld[i]].in.a));
 
@@ -431,6 +475,8 @@ static bool vv_depend(vvs *S)
 			}
 			if ((s->k - a->k) % (int64_t)S->esz)
 				return vv_no(S, "two accesses of one array that overlap in part");
+			if ((s->k - a->k) % s->c)
+				continue; /* aligned elements in different residue classes of the stride */
 			d = (s->k - a->k) / s->c;	/* a touches the store's element d iterations later */
 			g = d < 0 ? -d : d;
 			if (!d || g >= (int64_t)S->vf)
@@ -543,6 +589,7 @@ static uint32_t vv_step(vvs *S, int64_t c)
 	return s;
 }
 
+static uint32_t vv_addr(vvs *S, uint32_t q, bool *rev);
 static uint32_t vv_vec(vvs *S, uint32_t v);
 static uint32_t vv_mask(vvs *S, uint32_t v);
 
@@ -598,6 +645,62 @@ static uint32_t vv_w32(vvs *S, uint32_t v)
 	return r;
 }
 
+/* Reconstruct a scalar address or integer expression for one active lane. */
+static uint32_t vv_at(vvs *S, uint32_t v, uint32_t lane, uint32_t *budget)
+{
+	if (!*budget) return vv_no(S, "an indexed expression beyond the budget"), 0;
+	--*budget;
+	vwst *V = S->e->vw;
+	v = vw_find(V, v);
+	vvi *x = vv_get(S, v);
+	vir_ins in = V->p[v].in;
+	if (x->kind == VK_INV) return vv_scalar(S, v, VM_BODY);
+	if (x->kind == VK_LIN) {
+		uint32_t a = vv_scalar(S, v, VM_BODY);
+		if (!a || !lane) return a;
+		return vv_ins(S, S->VB, in.ty == VT_PTR ? VO_PTRADD : VO_ADD, in.ty, 0, a,
+			vw_iconst(S->e, in.ty == VT_I32 ? VT_I32 : VT_I64, lane * x->c), 0);
+	}
+	if (x->kind == VK_MASK) {
+		uint32_t a=vv_mask(S,v);
+		if(!a)return 0;
+		uint32_t r=vv_ins(S,S->VB,VO_VEXTRACT,S->ity,0,a,lane,0);
+		return S->ity==VT_I32?r:vv_ins(S,S->VB,VO_TRUNC,VT_I32,0,r,0,0);
+	}
+	if (x->kind == VK_VEC || x->kind == VK_CARRY) {
+		uint32_t a = vv_vec(S, v);
+		return a ? vv_ins(S, S->VB, VO_VEXTRACT, in.ty, 0, a, lane, 0) : 0;
+	}
+	if (x->kind == VK_W32 && in.op == VO_LOAD) {
+		if (!x->vec) return vv_no(S, "an indexed operand used before its load"), 0;
+		uint32_t a = vv_ins(S, S->VB, VO_VEXTRACT, VT_I32, 0, x->vec, lane, 0);
+		return vv_ins(S, S->VB, VO_EXT, VT_I64, 2 | (in.fl & VIF_MS), a, 0, 0);
+	}
+	if (x->kind == VK_SCALAR || x->kind == VK_W32) {
+		uint32_t w[3] = {in.a, in.b, in.c};
+		for (int k = 0; k < 3; k++)
+			if (vw_isval(vir_optab[in.op].k[k]) && !(w[k] = vv_at(S, w[k], lane, budget))) return 0;
+		return vv_ins(S, S->VB, in.op, in.ty, in.fl, w[0], w[1], w[2]);
+	}
+	return vv_no(S, "an address operand that cannot be expanded"), 0;
+}
+
+/* Clone only the recurrence expression; independent work stays packed. */
+static uint32_t vv_foldat(vvs *S, uint32_t v, uint32_t lane, uint32_t *budget)
+{
+	vwst *V = S->e->vw;
+	v = vw_find(V, v);
+	for(uint32_t i=0;i<S->nfold;i++)if(v==S->fold[i].p)return S->fold[i].cur;
+	if (vv_get(S, v)->kind != VK_FOLD) return vv_at(S, v, lane, budget);
+	if (!*budget || V->p[v].in.op == VO_BPARAM) return vv_no(S, "an ordered reduction expression beyond the budget"), 0;
+	--*budget;
+	vir_ins in = V->p[v].in;
+	uint32_t w[3] = {in.a,in.b,in.c};
+	for (int k=0;k<3;k++) if (vw_isval(vir_optab[in.op].k[k]))
+		if (!(w[k] = vv_foldat(S,w[k],lane,budget))) return 0;
+	return vv_ins(S,S->VB,in.op,in.ty,in.fl,w[0],w[1],w[2]);
+}
+
 /* v's lanes */
 static uint32_t vv_vec(vvs *S, uint32_t v)
 {
@@ -631,6 +734,21 @@ static uint32_t vv_vec(vvs *S, uint32_t v)
 		r = vv_ins(S, S->VB, VO_ADD, vt, 0, a, vv_step(S, cc), 0);
 		break;
 	}
+	case VK_CARRY:
+		for (uint32_t i = 0; i < S->ncarry; i++) if (S->carry[i].p == v) {
+			if (S->carry[i].busy) return vv_no(S, "a cyclic carried expression"), 0;
+			S->carry[i].busy = true;
+			if (!(a = vv_vec(S, S->carry[i].next))) return 0;
+			r = vv_ins(S, S->VB, VO_VSPLAT, vt, 0, S->carry[i].par, 0, 0);
+			for (uint32_t lane = 1; lane < S->vf; lane++) {
+				b = vv_ins(S, S->VB, VO_VEXTRACT, ty, 0, a, lane-1, 0);
+				r = vv_ins(S, S->VB, VO_VINSERT, vt, 0, r, b, lane);
+			}
+			S->carry[i].last = vv_ins(S, S->VB, VO_VEXTRACT, ty, 0, a, S->vf-1, 0);
+			S->carry[i].busy = false;
+			break;
+		}
+		break;
 	case VK_VEC:
 		switch (in.op) {
 		case VO_ADD: case VO_SUB: case VO_MUL: case VO_AND: case VO_OR: case VO_XOR:
@@ -674,6 +792,24 @@ static uint32_t vv_vec(vvs *S, uint32_t v)
 				return 0;
 			r = vv_ins(S, S->VB, VO_VBITSEL, vt, 0, a, b, c);
 			break;
+		case VO_LOAD: {
+			/* A recurrence can need a later load. Move it only past stores to other symbols. */
+			const vvi *addr = vv_get(S, vw_find(V,in.a));
+			uint32_t pos = UINT32_MAX;
+			for (uint32_t k=0;k<S->nacc;k++) if (S->acc[k].q == v) pos = S->acc[k].pos;
+			if (pos == UINT32_MAX || (addr->c != (int64_t)S->esz && addr->c != -(int64_t)S->esz))
+				return vv_no(S,"an indexed recurrence load"),0;
+			for (uint32_t k=0;k<S->nacc;k++) if (S->acc[k].store && S->acc[k].pos < pos) {
+				const vvi *st = vv_get(S,vw_find(V,V->p[S->acc[k].q].in.a));
+				if (!(addr->objk == VJ_SYM && st->objk == VJ_SYM && addr->objv != st->objv))
+					return vv_no(S,"a recurrence load that may cross a store"),0;
+			}
+			bool rev;
+			if (!(a=vv_addr(S,v,&rev))) return 0;
+			r=vv_ins(S,S->VB,VO_LOAD,vt,in.fl & ~(uint32_t)VIF_MS,a,in.b,0);
+			if (rev) r=vv_ins(S,S->VB,VO_VREV,vt,0,r,0,0);
+			break;
+		}
 		default:	/* (a load: made where the scalar loop has it) */
 			return vv_no(S, "a lane used before it is made"), 0;
 		}
@@ -688,13 +824,13 @@ static uint32_t vv_vec(vvs *S, uint32_t v)
 static uint32_t vv_param(vvs *S, uint32_t b, uint32_t ty, uint32_t x0, uint32_t x1, uint32_t x2);
 
 /* the address of the four elements load or store q touches in one go, and whether they are
- * reversed: a pointer of the vector body that steps 16 bytes (the lowest of the four addresses) */
+ * reversed: a pointer of the vector body that steps vf * stride (contiguous reversed accesses use the lowest address) */
 static uint32_t vv_addr(vvs *S, uint32_t q, bool *rev)
 {
 	vwst *V = S->e->vw;
 	uint32_t a = vw_find(V, V->p[q].in.a), s;
 
-	*rev = vv_get(S, a)->c < 0;
+	*rev = vv_get(S, a)->c == -(int64_t)S->esz;
 	for (uint32_t i = 0; i < S->npin; i++)
 		if (S->pin[i].a == a)
 			return S->pin[i].par;
@@ -716,6 +852,14 @@ static bool vv_range(vvs *S, uint32_t x, uint32_t span, uint32_t *lo, uint32_t *
 
 	if (!s)
 		return false;
+	int64_t stride = vv_get(S, a)->c, mag = stride < 0 ? -stride : stride;
+	if (x < 64 && mag != S->esz) {
+		/* Cover the first through last touched element, including gaps. */
+		span = vv_ins(S, S->VPH, VO_LSHR, VT_I64, 0, span, vw_iconst(S->e, VT_I64, S->lg), 0);
+		span = vv_ins(S, S->VPH, VO_SUB, VT_I64, 0, span, vw_iconst(S->e, VT_I64, 1), 0);
+		span = vv_ins(S, S->VPH, VO_MUL, VT_I64, 0, span, vw_iconst(S->e, VT_I64, mag), 0);
+		span = vv_ins(S, S->VPH, VO_ADD, VT_I64, 0, span, vw_iconst(S->e, VT_I64, S->esz), 0);
+	}
 	if (x >= 64) {
 		*lo = s, *hi = vv_ins(S, S->VPH, VO_PTRADD, VT_PTR, 0, s, vw_iconst(S->e, VT_I64, 1 << VIF_W(V->p[q].in.fl)), 0);
 	} else if (vv_get(S, a)->c > 0) {
@@ -813,6 +957,20 @@ static bool vv_ultctl(vvs *S, uint32_t p)
 }
 
 /* the loop headed by H (S->lb, P, L, X set): analysed and, when it can be, vectorized */
+/* Does the update depend on this carried parameter, without following another phi? */
+static bool vv_reaches(vwst *V, uint32_t v, uint32_t p, uint32_t *budget)
+{
+	v = vw_find(V,v);
+	if (v == p) return true;
+	if (!*budget) return true;
+	--*budget;
+	vir_ins in = V->p[v].in;
+	if (V->p[v].blk == VW_NOBLK || in.op == VO_BPARAM) return false;
+	uint32_t w[3] = {in.a,in.b,in.c};
+	for (int k=0;k<3;k++) if (vw_isval(vir_optab[in.op].k[k]) && vv_reaches(V,w[k],p,budget)) return true;
+	return false;
+}
+
 static bool vv_loop(vvs *S)
 {
 	ecx *e = S->e;
@@ -823,7 +981,7 @@ static bool vv_loop(vvs *S)
 	vvi *ui, *ni;
 	uint32_t jp[40], njp = 0;	/* J's parameter per live parameter of H, in H's order */
 
-	S->nacc = S->ninvld = S->nred = S->nind = S->nstep = S->nchk = S->npin = S->none = 0, S->pos = 0, S->why = NULL;
+	S->nfold = S->ncarry = S->ngather = S->nacc = S->ninvld = S->nred = S->nind = S->nstep = S->nchk = S->npin = S->none = 0, S->pos = 0, S->why = NULL;
 	/* the lanes: the width of the loop's first store (of its first load when it stores nothing) */
 	S->lg = 0;
 	for (int st = 1; st >= 0 && !S->lg; st--)
@@ -843,7 +1001,7 @@ static bool vv_loop(vvs *S)
 	S->ity = S->lg == 2 ? VT_I32 : VT_I64, S->fty = S->lg == 2 ? VT_F32 : VT_F64;
 	/* H's parameters */
 	for (uint32_t p = V->b[H].phead; p; p = V->p[p].next) {
-		uint32_t init, nx, ty = V->p[p].in.ty;
+		uint32_t init, nx, ty = V->p[p].in.ty, budget = 256;
 		vir_ins N;
 		vvi *x, r = { 0 };
 		int64_t K = 0;
@@ -852,7 +1010,7 @@ static bool vv_loop(vvs *S)
 		if (V->fwd[p] != p)
 			continue;
 		init = vw_find(V, V->x[V->p[p].in.b + S->jP]), nx = vw_find(V, V->x[V->p[p].in.b + S->jL]);
-		if (init >= S->n0 || nx >= S->n0 || V->p[nx].blk == VW_NOBLK || !S->inl[V->p[nx].blk] || V->p[nx].in.op == VO_BPARAM)
+		if (init >= S->n0 || nx >= S->n0 || V->p[nx].blk == VW_NOBLK || !S->inl[V->p[nx].blk])
 			return vv_no(S, "a value carried around the loop that is neither an induction nor a sum");
 		if (V->p[init].blk != VW_NOBLK && S->inl[V->p[init].blk])
 			return vv_no(S, "an initial value from inside the loop");
@@ -870,11 +1028,21 @@ static bool vv_loop(vvs *S)
 				return vv_no(S, "an induction without a linear form");
 			S->indk[S->nind] = K;
 			S->ind[S->nind++] = p;
-		} else if (ty == S->ity && ((N.op == VO_ADD && (vw_find(V, N.a) == p || vw_find(V, N.b) == p)) || (N.op == VO_SUB && vw_find(V, N.a) == p))) {
+		} else if ((ty == S->fty && ((N.op == VO_FADD || N.op == VO_FMUL) && (vw_find(V, N.a) == p || vw_find(V, N.b) == p) || (N.op == VO_FSUB || N.op == VO_FDIV) && vw_find(V, N.a) == p)) ||
+			   (ty == S->ity && ((N.op == VO_ADD && (vw_find(V, N.a) == p || vw_find(V, N.b) == p)) || (N.op == VO_SUB && vw_find(V, N.a) == p)))) {
 			if (S->nred == 8)
 				return vv_no(S, "too many sums");
 			S->red[S->nred++] = (vvred){ p, nx, vw_find(V, N.a) == p ? N.b : N.a, 0, 0 };
 			r.kind = VK_RED;
+		} else if ((ty == S->fty || (ty == S->ity && N.op == VO_SELECT)) && S->nfold < 8 && vv_reaches(V, nx, p, &budget) && (N.op == VO_SELECT || N.op == VO_FADD || N.op == VO_FSUB || N.op == VO_FMUL || N.op == VO_FDIV)) {
+			S->fold[S->nfold].p = p;
+			S->fold[S->nfold++].next = nx;
+			r.kind = VK_FOLD;
+		} else if ((ty == S->fty || ty == S->ity) && S->ncarry < 8 && (N.op == VO_LOAD || N.op == VO_FMUL || N.op == VO_FADD || N.op == VO_FSUB || N.op == VO_BPARAM)) {
+			S->carry[S->ncarry].p = p;
+			S->carry[S->ncarry].next = nx;
+			S->carry[S->ncarry++].busy = false;
+			r.kind = VK_CARRY;
 		} else {
 			return vv_no(S, ty == VT_F32 || ty == VT_F64 ? "a float carried around the loop (a reduction or a recurrence: order matters)" :
 					"a value carried around the loop that is neither an induction nor a sum");
@@ -896,10 +1064,10 @@ static bool vv_loop(vvs *S)
 				x->nuse++;
 		}
 	}
-	if (!S->nacc && !S->nred)
+	if (!S->nacc && !S->nred && !S->nfold)
 		return vv_no(S, "nothing to vectorize: no store and no sum");
 	{
-		bool st = S->nred != 0;
+		bool st = S->nred != 0 || S->nfold != 0;
 
 		for (uint32_t i = 0; i < S->nacc; i++)
 			st |= S->acc[i].store;
@@ -1000,7 +1168,12 @@ static bool vv_loop(vvs *S)
 	nv = d;
 	if (ac != 1) {
 		nv = vv_ins(S, S->VPH, VO_ADD, VT_I64, 0, nv, vw_iconst(e, VT_I64, ac - 1), 0);
-		nv = vv_ins(S, S->VPH, VO_UDIV, VT_I64, 0, nv, vw_iconst(e, VT_I64, ac), 0);
+		if (!(ac & (ac - 1))) {
+			uint32_t shift = 0;
+			for (int64_t v = ac; v > 1; v >>= 1) shift++;
+			nv = vv_ins(S, S->VPH, VO_LSHR, VT_I64, 0, nv, vw_iconst(e, VT_I64, shift), 0);
+		} else
+			nv = vv_ins(S, S->VPH, VO_UDIV, VT_I64, 0, nv, vw_iconst(e, VT_I64, ac), 0);
 	}
 	nv = vv_ins(S, S->VPH, VO_AND, VT_I64, 0, nv, vw_iconst(e, VT_I64, -(int64_t)S->vf), 0);
 	/* VB's parameters: operand 0 from VPH, 1 from VB (filled at the end) */
@@ -1011,9 +1184,22 @@ static bool vv_loop(vvs *S)
 		S->indb[i] = vv_param(S, S->VB, V->p[p].in.ty, vw_find(V, V->x[V->p[p].in.b + S->jP]), 0, 0);
 	}
 	for (uint32_t i = 0; i < S->nred; i++) {
+		if (V->p[S->red[i].p].in.ty == S->fty) {
+			uint32_t p = S->red[i].p;
+			S->red[i].acc = vv_param(S, S->VB, S->fty, vw_find(V, V->x[V->p[p].in.b + S->jP]), 0, 0);
+			continue;
+		}
 		if (!z)
 			z = vv_ins(S, S->VPH, VO_VSPLAT, vv_vty(S, S->ity), 0, vw_iconst(e, S->ity, 0), 0, 0);
 		S->red[i].acc = vv_param(S, S->VB, vv_vty(S, S->ity), z, 0, 0);
+	}
+	for (uint32_t i = 0; i < S->nfold; i++) {
+		uint32_t p = S->fold[i].p;
+		S->fold[i].acc = vv_param(S, S->VB, V->p[p].in.ty, vw_find(V, V->x[V->p[p].in.b + S->jP]), 0, 0);
+	}
+	for (uint32_t i = 0; i < S->ncarry; i++) {
+		uint32_t p = S->carry[i].p;
+		S->carry[i].par = vv_param(S, S->VB, V->p[p].in.ty, vw_find(V, V->x[V->p[p].in.b + S->jP]), 0, 0);
 	}
 	/* the body */
 	for (uint32_t i = 0; i < S->nlb && !S->why; i++)
@@ -1025,10 +1211,36 @@ static bool vv_loop(vvs *S)
 			if (q >= S->n0 || vv_skip(V, q))
 				continue;
 			in = V->p[q].in;
-			if (in.op == VO_LOAD && S->I[q].kind == VK_VEC) {
+			if (in.op == VO_LOAD && S->I[q].vec) continue;
+			if (in.op == VO_LOAD && S->I[q].kind == VK_W32) {
+				if (!(a = vv_addr(S, q, &rev))) break;
+				x = vv_ins(S, S->VB, VO_LOAD, VT_I32X4, in.fl & ~(uint32_t)VIF_MS, a, in.b, 0);
+				if (rev) x = vv_ins(S, S->VB, VO_VREV, VT_I32X4, 0, x, 0, 0);
+				S->I[q].vec = x;
+			} else if (in.op == VO_LOAD && S->I[q].kind == VK_VEC) {
+				if (vv_get(S, vw_find(V, in.a))->kind == VK_SCALAR) {
+					x = 0;
+					for (uint32_t lane = 0; lane < S->vf; lane++) {
+						uint32_t budget = 256;
+						if (!(a = vv_at(S, in.a, lane, &budget))) break;
+						uint32_t val = vv_ins(S, S->VB, VO_LOAD, in.ty, in.fl, a, in.b, 0);
+						x = lane ? vv_ins(S, S->VB, VO_VINSERT, vv_vty(S, in.ty), 0, x, val, lane) : vv_ins(S, S->VB, VO_VSPLAT, vv_vty(S, in.ty), 0, val, 0, 0);
+					}
+					S->I[q].vec = x;
+					continue;
+				}
 				if (!(a = vv_addr(S, q, &rev)))
 					break;
-				x = vv_ins(S, S->VB, VO_LOAD, vv_vty(S, in.ty), in.fl & ~(uint32_t)VIF_MS, a, in.b, 0);
+				int64_t stride = vv_get(S, vw_find(V, in.a))->c;
+				if (stride != (int64_t)S->esz && stride != -(int64_t)S->esz) {
+					x = 0;
+					for (uint32_t lane = 0; lane < S->vf; lane++) {
+						uint32_t addr = lane ? vv_ins(S, S->VB, VO_PTRADD, VT_PTR, 0, a, vw_iconst(e, VT_I64, lane * stride), 0) : a;
+						uint32_t val = vv_ins(S, S->VB, VO_LOAD, in.ty, in.fl, addr, in.b, 0);
+						x = lane ? vv_ins(S, S->VB, VO_VINSERT, vv_vty(S, in.ty), 0, x, val, lane) : vv_ins(S, S->VB, VO_VSPLAT, vv_vty(S, in.ty), 0, val, 0, 0);
+					}
+				} else
+					x = vv_ins(S, S->VB, VO_LOAD, vv_vty(S, in.ty), in.fl & ~(uint32_t)VIF_MS, a, in.b, 0);
 				if (rev)
 					x = vv_ins(S, S->VB, VO_VREV, vv_vty(S, in.ty), 0, x, 0, 0);
 				S->I[q].vec = x;
@@ -1037,18 +1249,54 @@ static bool vv_loop(vvs *S)
 					break;
 				if (rev)
 					x = vv_ins(S, S->VB, VO_VREV, V->p[x].in.ty, 0, x, 0, 0);
-				vv_ins(S, S->VB, VO_STORE, VT_VOID, in.fl, a, x, 0);
+				int64_t stride = vv_get(S, vw_find(V, in.a))->c;
+				if (stride != (int64_t)S->esz && stride != -(int64_t)S->esz) {
+					for (uint32_t lane = 0; lane < S->vf; lane++) {
+						uint32_t addr = lane ? vv_ins(S, S->VB, VO_PTRADD, VT_PTR, 0, a, vw_iconst(e, VT_I64, lane * stride), 0) : a;
+						uint32_t val = vv_ins(S, S->VB, VO_VEXTRACT, V->p[in.b].in.ty, 0, x, lane, 0);
+						vv_ins(S, S->VB, VO_STORE, VT_VOID, in.fl, addr, val, 0);
+					}
+				} else
+					vv_ins(S, S->VB, VO_STORE, VT_VOID, in.fl, a, x, 0);
 			} else if (S->I[q].kind == VK_REDUPD) {
 				for (uint32_t k = 0; k < S->nred; k++)
 					if (S->red[k].upd == q) {
 						if (!(x = vv_vec(S, S->red[k].x)))
 							break;
-						S->red[k].accnext = vv_ins(S, S->VB, in.op, vv_vty(S, S->ity), 0, S->red[k].acc, x, 0);
+						if (V->p[S->red[k].p].in.ty == S->fty) {
+							/* Preserve the scalar recurrence, including rounding at every step. */
+							uint32_t acc = S->red[k].acc;
+							bool left = vw_find(V, in.a) == S->red[k].p;
+							for (uint32_t lane = 0; lane < S->vf; lane++) {
+								uint32_t val = vv_ins(S, S->VB, VO_VEXTRACT, S->fty, 0, x, lane, 0);
+								acc = vv_ins(S, S->VB, in.op, S->fty, in.fl, left ? acc : val, left ? val : acc, 0);
+							}
+							S->red[k].accnext = acc;
+						} else
+							S->red[k].accnext = vv_ins(S, S->VB, in.op, vv_vty(S, S->ity), 0, S->red[k].acc, x, 0);
 					}
 			}
 		}
 	if (S->why)
 		return false;
+	for (uint32_t i = 0; i < S->ncarry; i++) {
+		if (!S->carry[i].last && !vv_vec(S, S->carry[i].p)) return false;
+		V->x[V->p[S->carry[i].par].in.b + 1] = S->carry[i].last;
+	}
+	for(uint32_t i=0;i<S->nfold;i++) S->fold[i].cur=S->fold[i].acc;
+	for(uint32_t lane=0;lane<S->vf;lane++) {
+		uint32_t nx[8];
+		for(uint32_t i=0;i<S->nfold;i++) {
+			uint32_t budget=256;
+			nx[i]=vv_foldat(S,S->fold[i].next,lane,&budget);
+			if(!nx[i])return false;
+		}
+		for(uint32_t i=0;i<S->nfold;i++)S->fold[i].cur=nx[i];
+	}
+	for(uint32_t i=0;i<S->nfold;i++) {
+		S->fold[i].last=S->fold[i].cur;
+		V->x[V->p[S->fold[i].acc].in.b+1]=S->fold[i].last;
+	}
 	/* the inductions step four iterations; the counter */
 	for (uint32_t i = 0; i < S->nind; i++) {
 		uint32_t p = S->ind[i], ty = V->p[p].in.ty;
@@ -1060,7 +1308,7 @@ static bool vv_loop(vvs *S)
 	for (uint32_t i = 0; i < S->nred; i++)
 		V->x[V->p[S->red[i].acc].in.b + 1] = S->red[i].accnext;
 	for (uint32_t i = 0; i < S->npin; i++)
-		V->x[V->p[S->pin[i].par].in.b + 1] = vv_ins(S, S->VB, VO_PTRADD, VT_PTR, 0, S->pin[i].par, vw_iconst(e, VT_I64, S->pin[i].rev ? -16 : 16), 0);
+		V->x[V->p[S->pin[i].par].in.b + 1] = vv_ins(S, S->VB, VO_PTRADD, VT_PTR, 0, S->pin[i].par, vw_iconst(e, VT_I64, vv_get(S, S->pin[i].a)->c * S->vf), 0);
 	cntn = vv_ins(S, S->VB, VO_ADD, VT_I64, 0, cnt, vw_iconst(e, VT_I64, -(int64_t)S->vf), 0);
 	V->x[V->p[cnt].in.b + 1] = cntn;
 	guard = vv_ins(S, S->VB, VO_ICMP, VT_I32, 1, cntn, vw_iconst(e, VT_I64, 0), 0);
@@ -1077,9 +1325,17 @@ static bool vv_loop(vvs *S)
 				fin = S->indn[i];
 		for (uint32_t i = 0; i < S->nred; i++)
 			if (S->red[i].p == p) {
+				if (V->p[p].in.ty == S->fty) {
+					fin = S->red[i].accnext;
+					break;
+				}
 				fin = vv_ins(S, S->VX, VO_VREDUCE, S->ity, 0, S->red[i].accnext, 0, 0);
 				fin = vv_ins(S, S->VX, VO_ADD, S->ity, 0, init, fin, 0);
 			}
+		for (uint32_t i = 0; i < S->ncarry; i++)
+			if (S->carry[i].p == p) fin = S->carry[i].last;
+		for (uint32_t i = 0; i < S->nfold; i++)
+			if (S->fold[i].p == p) fin = S->fold[i].last;
 		if (!fin || njp == 40)
 			return vv_no(S, "a parameter without a final value");
 		jp[njp++] = vv_param(S, S->J, V->p[p].in.ty, init, fin, init);
@@ -1215,7 +1471,7 @@ static void vv_pin(vvs *S, uint32_t pre)
 
 static int vv_env(void)
 {
-	static int m = -1;
+	static _Thread_local int m = -1;
 
 	if (m < 0) {
 		const char *s = getenv("VCC_VIR_VEC");	/* 0: off; r: report each loop to stderr; n: no constants hoisted */

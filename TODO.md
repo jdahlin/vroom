@@ -102,6 +102,26 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   idle-connection timeout, cancel on client disconnect, stale-cache
   invalidation after `touch`/edit/create, version mismatch, memory after
   N builds.
+- [ ] **Linux x86 corpus blockers found through VIR (2026-11-12)** [P].
+  PostgreSQL 18.6: 13 of 1504 compile jobs reject clang 23's intrinsic
+  headers: missing `__builtin_ia32_pmovmskb128`,
+  `__builtin_elementwise_sub_sat` and `__builtin_elementwise_min`.
+  CPython 3.13.2: four of 334 compile jobs reject
+  `__builtin_flt_rounds` (Objects/floatobject.c, Python/dtoa.c) or MMX/SSE
+  packing/saturation builtins (Modules/_blake2/blake2{b,s}_impl.c:
+  `__builtin_ia32_emms`, `__builtin_ia32_packsswb128`,
+  `__builtin_ia32_packssdw128`, `__builtin_ia32_packuswb128`, elementwise
+  add/sub saturation). With those TUs explicitly built by clang, CPython
+  also lacks `_mi_page_malloc`, `_mi_heap_malloc_zero_ex`,
+  `_mi_bitmap_try_find_claim_field` and `_mm_pause` at link time.
+  Exact obmalloc.c commands reproduce all four undefined symbols with VIR
+  both off and on; clang defines the three mimalloc helpers and emits no
+  `_mm_pause` call. Their inline/linkage path needs investigation, not a
+  VIR-only workaround. *Validate:* minimal builtins/inline regressions
+  against clang; all original compile commands must pass without compiler
+  fallback, then full native project tests. Source versions, raw diagnostics
+  and command records: work/vir-x86-corpus/{manifest.json,logs}; corpus runner
+  bench/vcc-vir-corpus.py. Gate/status: PLAN-vir.md V2/V3.
 - [ ] **T13 real programs with their own test suites.**  Like PostgreSQL
   (42ecfb3, `meson test` as the oracle): build each with clang and with vcc
   and compare test outcomes, not just "green".  Candidates with strong

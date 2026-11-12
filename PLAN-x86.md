@@ -978,3 +978,21 @@ ramfri policy gäller uttryckligen bara vanliga funktioner. Unity -j1,
 bladens flagg-/cache-/hårdningsprov inklusive interrupt-undantaget,
 riktig signal-unwind genom ett ramfritt blad, befintlig vanlig/64-alignad
 unwind O1/O2 samt debugrader O0–O3 passerar. CI för integrationshuvudet återstår.
+
+### 2026-11-12: VIR:s första x86-64-sänkning
+
+`VCC_VIR=bl -O2`: allokerade SysV-bladfunktioner och den gemensamma
+loopvektoriserarens SSE2-del fungerar nu också på x86-64. Detaljer,
+kvarvarande reträtter, riktade prov och mätningar finns i `PLAN-vir.md`,
+V2/V4-status 2026-11-12. Ingen ändring av standardvalet eller -O0/-O1.
+
+### 2026-11-12: VIR med anrop och 82 TSVC-vektorloopar
+
+VIR sänker nu SysV-anrop, FCMP/select, packad jämförelse och maskval, SSE2-
+i32-multiplikation samt signerade vektorkonverteringar, division/rest och blockminne.
+TSVC: 151/151 checksummor, 157/158 byggda funktioner sänkta och 82/82
+vektorkandidater i maskinkod (tidigare fem funktioner). SQLite, zlib,
+PostgreSQL/psql och CPython är provade; de två sistas namngivna kvarvarande
+builtin-/inline-luckor hålls synliga. Se PLAN-vir.md V2/V3 och TODO T13.
+Nya C-prov och assemblerns INT64_MIN-prov går i unity/nonunity och med
+sanitisering; standardvalet och -O0/-O1 är oförändrade.

@@ -62,12 +62,12 @@ def build(name, cmd, env=None):
     return rows
 
 vpp = [os.path.join(bind, 'vpp'), '-O2'] + (['-isysroot', sdk] if sdk else [])
-env0 = {k: v for k, v in os.environ.items() if k != 'VCC_VIR'}
+env0 = dict(os.environ, VCC_VIR='0')
 ref = build('clang', [clang, '-O3'])
 runs = [('vcc', build('vcc', vpp, env0)), ('vir', build('vir', vpp, dict(env0, VCC_VIR=os.environ.get('VCC_VIR', 'bl'))))]
 # the vectorizer's own account (VCC_VIR_VEC=r): one line per innermost loop it looked at
-rep = subprocess.run(vpp + ['-c', 'tsvc.c', '-o', os.devnull], cwd=out, capture_output=True, text=True,
-                     env=dict(env0, VCC_VIR=os.environ.get('VCC_VIR', 'bl'), VCC_VIR_VEC='r')).stderr
+rep = run(vpp + ['-c', 'tsvc.c', '-o', os.devnull], cwd=out,
+          env=dict(env0, VCC_VIR=os.environ.get('VCC_VIR', 'bl') + 's', VCC_VIR_VEC='r', VCC_VIR_CORPUS_REPORT='1')).stderr
 loops = [l for l in rep.split('\n') if l.startswith('vec: ')]
 vec = [l for l in loops if l.endswith(': vectorized')]
 bad = 0
@@ -79,7 +79,10 @@ for name, rows in runs:
     print(f'{name}: {len(ref) - len(wrong)}/{len(ref)} checksums, {sum(t for t, _ in rows.values()):.2f} s'
           f' (clang -O3 {sum(t for t, _ in ref.values()):.2f} s)'
           + (f', {cyc[name]:.2f} G cycles (clang {cyc["clang"]:.2f})' if cyc.get('clang') else ''))
-print(f'vectorized: {len(vec)} of {len(loops)} loops, in {len({l.split()[1] for l in vec})} of {len(ref)} functions')
+lowered = set(re.findall(r'^vir: (.*?): lowered,', rep, re.M))
+active = [l for l in vec if l.split(': ')[1] in lowered]
+print(f'vectorized: {len(vec)} candidates of {len(loops)} loops; {len(active)} in lowered functions; '
+      f'{len(lowered)} functions lowered through VIR')
 if '--why' in sys.argv:
     why = {}
     for l in loops:

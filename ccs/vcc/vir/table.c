@@ -87,6 +87,8 @@ const vir_opinfo vir_optab[256] = {
 	R(VO_VBITSEL, "vbitsel", FM_STD, TM_VEC, VI, T, T, 0, EF_P),
 	R(VO_VS2F, "vs2f", FM_STD, TM_VF, VI, NONE, NONE, 0, EF_P | EF_F),
 	R(VO_VREV, "vrev", FM_STD, TM_VEC, T, NONE, NONE, 0, EF_P),
+	R(VO_VINSERT, "vinsert", FM_STD, TM_VEC, T, ELEM, IMM, 0, EF_P),
+	R(VO_VEXTRACT, "vextract", FM_STD, TM_I | TM_F, VLANES, IMM, NONE, 0, EF_P),
 	R(VO_VREDUCE, "vreduce", FM_STD, TM_I, VRED, NONE, NONE, 0, EF_P),
 	R(VO_BR, "br", FM_BR, TM_V, BLK, NONE, EXT, 0, EF_T),
 	R(VO_BRIF, "brif", FM_STD, TM_V, I, BLK, BLK, VIF_LIKELY | VIF_UNLIKELY, EF_T),
@@ -132,6 +134,7 @@ uint32_t vir_opnd_fixed(uint32_t op, uint32_t ty, uint32_t k)
 	case OK_VI: return vir_vint(ty);
 	case OK_VF: return vir_vflt(ty);
 	case OK_ELEM: return vir_velem(ty);
+	case OK_VLANES: return ty == VT_I32 ? VT_I32X4 : ty == VT_I64 ? VT_I64X2 : ty == VT_F32 ? VT_F32X4 : ty == VT_F64 ? VT_F64X2 : VT_VOID;
 	case OK_VRED: return ty == VT_I32 ? VT_I32X4 : ty == VT_I64 ? VT_I64X2 : VT_VOID;
 	case OK_BITC: return ty == VT_I32 ? VT_F32 : ty == VT_F32 ? VT_I32 : ty == VT_I64 ? VT_F64 : ty == VT_F64 ? VT_I64 : VT_VOID;
 	default: return VT_VOID;

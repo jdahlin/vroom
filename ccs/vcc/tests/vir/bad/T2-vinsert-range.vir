@@ -1,0 +1,11 @@
+vir 1
+target x86_64-linux
+sig %s = () -> none
+func @f %s {
+b0:
+  v0:i64x2 = vsplat 0:i64
+  v1:i64x2 = vinsert v0, 1:i64, 2
+  ret
+}
+; ---
+@f b0.1: T2: vinsert: lane index out of range

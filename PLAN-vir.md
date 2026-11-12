@@ -237,6 +237,151 @@ ekvivalenstestning återstår. Genererade program använder inga externa anrop.
 
 ## Status
 
+### V2/V3 x86-64 (2026-11-12): TSVC och fem verkliga korpusar
+
+Efter första bladskivan provades TSVC_2, SQLite 3.50.4, PostgreSQL 18.6
+(inklusive psql), CPython 3.13.2 och zlib 1.4 på Linux x86-64. Isolerade
+byggträd och alla rådiagnoser ligger under `work/vir-x86-corpus/`; versioner,
+commit-id och kompilatorns hash i `manifest.json`. `bench/vcc-vir-corpus.py`
+är en VPP-wrapper som tvingar x86-64/-O2/-g0, kör verifierare och
+allokerarkontroll och sparar kommando, arbetskatalog, tidsåtgång, fel och
+VIR-täckning per kompilering. `--summary DIR` skriver `summary.json`;
+förväntade configure-prober hålls skilda från riktiga TU-fel. Använd den som
+`VPP=$PWD/bench/vcc-vir-corpus.py VCC_VIR_CORPUS_LOG=DIR` med projektens
+befintliga byggriggar. Systeminclude-sökvägar kan anges med
+`VCC_VIR_CORPUS_SYSINCLUDES` (annars upptäcks LLVM-/Linux-sökvägarna).
+
+**Ändrat efter fynden:** riktiga SysV-anrop (direkta, indirekta och
+variadiska anrop; separata heltals-/SSE-registerbanker och stackargument,
+upp till 23 argument), anropsklobber och FP-spill; registersave-områden för
+variadiska *definitioner* saknas fortfarande. `returns_twice` och setjmp-
+namnen går den tidigare vägen. FCMP följer NaN-reglerna; scalar select,
+heltals-/FP-konverteringar, fneg/fabs/fsqrt, packad jämförelse/maskval,
+i32x4-multiplikation på SSE2 (`pmuludq` + ompackning), i32x4→f32x4 och
+ordnad banvis i64x2→f64x2 är sänkta. Memcpy/memset använder rep movsb/stosb
+med fasta register. Ostödda operationer namnges nu i reträttens orsak.
+
+| Korpus | Resultat med den nya sänkningen | Sänkta/byggda VIR-funktioner |
+|---|---|---|
+| TSVC_2, pinnen i fetch-testsuites.sh, 256 iterationer | 151/151 checksummor mot clang; 82/82 vektorkandidater når maskinkod | 157/158 (s442 har switch) |
+| SQLite 3.50.4 | Testfixture och shell byggda; nya sqlite3.c + speedtest1 körs, verifieringshash samma som clang | 1737/1883 i speedtest-bygget |
+| zlib 1.4 | 15/15 biblioteks-TU:er; example/infcover, minigzip-rundresor och samma storlekar/CRC som clang | 147/154 |
+| PostgreSQL 18.6 | 1504 C-kompileringar, 13 avvisade på intrinsicluckor; strikt vcc-bygge är alltså inte grönt | 24411/26439 |
+| CPython 3.13.2 | 334 C-kompileringar, fyra avvisade; också separata länkluckor i mimalloc | 12239/13044 |
+
+Antalen är instrumenterade funktionsinstanser, inte procent av alla
+källfunktioner (byggaren kan också avstå). Ingen verifierar- eller
+allokerarkontroll rapporterar fel. PostgreSQL länkas separat med clang
+endast för de 13 avvisade kompileringarna: psql/postgres --version fungerar,
+meson ger **81 godkända, 0 fel, 249 överhoppade**. Det är uttryckligen ett
+blandbygge, inte godkänd vcc-korpus eller stängd G2/G4-grind. CPython kan
+inte länkas ens efter motsvarande fyra clang-kompileringar; se TODO T13.
+
+TSVC:s ursprungliga fem sänkta funktioner blev först 117 med anropen
+(41 verkliga vektorloopar), sedan 157 (alla 43). Riggen skiljer nu mellan
+vektoriserarens *kandidater* och loopar i faktiskt sänkta funktioner; den
+förra rapporten kunde räkna en vektorloop vars hela funktion föll tillbaka.
+**Nästa vektorskiva når 82 av 125 granskade loopar, alla i sänkta
+funktioner; 151/151 kontrollsummor.** Från 43 verkliga vektorloopar före
+ändringen: stridade laster/lagringar med banvis gather/scatter, indexerade
+laster endast när skrivna objekt bevisligen är andra symboler, första-
+ordningens rekurrenser (även två fördröjda värden), ordnade flyttalssummor,
+kedjade reduktioner och kopplad max/index-reduktion. Nya `vinsert`/`vextract`
+är typade, verifierar banindex och sänks med SSE2/NEON. Flyttalsreduktionen
+extraherar banor och räknar i skalär ordning: ingen reassociering eller
+fast-math. Beroendekontrollen skiljer stridens restklasser och räknar hela
+adressintervallet inklusive mellanrum vid runtime-aliasprovet.
+
+If-konverteringen återanvänder exakta uttryck och redan lästa värden över
+villkorsarmen endast utan mellanliggande skrivning/anrop; flera phi-värden
+blir select tillsammans. Ingen ny spekulativ minnesläsning. Skalär x86-
+division/rest är också sänkt med RAX/RDX-klobber och separat divisor.
+TSVC:s summerade looptider på delad värd: före direkt 3,87 s, VIR 2,36 s,
+clang -O3 0,84 s; efter direkt 3,84 s, VIR 1,67 s, clang 0,88 s. En kort
+körning vardera, ingen kvalitetsgrind. Återstår framför allt riktiga
+minnesberoenden och villkorliga lagringar, inte uppluckrade beroendekrav.
+SQLite speedtest1 storlek 10: VIR 0,25 s mot clang 0,13 s, samma hash;
+switch-reträtten omfattar ännu de stora dispatchfunktionerna. Zlib, best
+av en CPU-körning: direkt 610 ms, VIR 626 ms, clang 359 ms; korrektheten är
+god, generell kodkvalitet återstår.
+
+Nya runtime-regressioner testar stack-/indirekta/variadiska anrop och
+levande värden över dem, NaN/inf/signed-zero i scalar/packad jämförelse,
+maskval, modulo-multiplikation och 32-/64-bitars vektorkonvertering. Riggen
+kräver att dessa funktioner verkligen sänks och att SIMD-instruktionerna
+finns, med vektorisering av/på, ett/sex emittertrådar och både clangs och
+vår egen objektväg. Unity/nonunity, ASan/UBSan och TSan är gröna i den fokuserade riggen. Egna
+x86-runtimeprov **285/285**, GCC **1615/1615**, TCC **105/105**; inline
+**83/88**, samma fem kända fel. De fokuserade C-proven går också på
+arm64/QEMU. Hela TSVC där: **151/151**, **77** verkliga vektorloopar
+(målens byggarformer skiljer sig; x86-64 ger 82). VIR-formatproven omfattar
+nu insert/extract och avvisar fel banindex och bantyp; 300 ASan-mutanter
+överlever utan krasch. Sanitizern hittade dessutom signed negation av INT64_MIN i
+assemblerns uttryck: negationen är nu unsigned modularitet, nytt objektprov;
+vas-obj **61/61 byteidentiska**, även ASan/UBSan.
+
+Slutlig korpusomkörning: zlib byggs om genom VIR och klarar självtest,
+storlekar och CRC. SQLite blottlade ett dött skalärt resultat i pageFreeArray:
+x86-sänkningen använder nu reserverat scratchregister när allokatorn anger
+VR_NONE, så varken ogiltig registertext eller krasch i -S kan uppstå.
+SQLite speedtest1:s verifieringshash är åter samma som clangs (0,26 mot
+0,14 s i storlek 10). Arm64:s befintliga switch-resultattabellprov hittade
+att sänkningen kastade byggarens tabellkö före end_function; kön bevaras nu
+till emission, och de sju riktade switch-proven går igenom. Hela arm64:s
+egna runtime-svit: **290/290**, ett känt xfail.
+
+Nästa backendsteg: switch, mulhi och fler ABI-grupper, följt av
+SIMD-poster/adressvikning och fler loopformer. De hittade intrinsic-/inline-
+luckorna är egna frontend-/ABI-punkter, inte skäl att dölja fallback i
+projektbyggena.
+
+
+### V2/V4 x86-64 (2026-11-12): första allokerade bladfunktioner och SSE2
+
+`VCC_VIR=bl` på x86-64 går nu genom samma byggare och loopvektoriserare som
+arm64; funktionen märks `x86_64-linux`. `arch/x64/emit/vir.c` sänker skalära
+bladfunktioner med SysV:s heltals-/FP-register och stackparametrar, fasta
+`cl`, callee-sparade register, spill och sekvenserade kantflyttar. Ram- och
+spilltabeller återanvänds per `ecx`. `VCC_VIR_CHECK=1` kontrollerar den riktiga
+målallokeringen. Lägescacherna för VIR, vektorisering och jämförelsesammanslagning är trådlokala;
+sextrådsprovet hittade och avlägsnade den sistas kapplöpning.
+
+SSE2-skivan omfattar 128-bitars laddningar/lagringar, float/double-aritmetik,
+heltalsaddition/subtraktion och bitoperationer, splat, indexföljd, omvända
+banor och heltalsreduktion. Den delade vektoriseraren behåller sina alias-
+och restloopskontroller. En räknare i `cl` måste överleva även när resultatet
+får `rcx`; regressionen testar detta särskilt. SIMD skrivs tills vidare som
+opaka `X_RAW`-poster: korrekt men konservativt för postoptimeraren.
+
+`bench/vcc-vir-x86.py` kräver nio faktiskt sänkta funktioner och fem loopar
+med SSE2-instruktioner; de körs både med och utan vektorisering, via clangs
+assembler och vår egen objektväg. Provet jämför en och sex emittertrådar och
+kräver identisk `-O0/-O1`-text med VIR av/på. Unity, separatfilbygge och
+ASan/UBSan går grönt (också hela egna x86-sviten: 282/282). Linux x86-körsviter utan cache med VIR + allokerarkontroll:
+**1615/1615 GCC, 105/105 TCC, 282/282 egna**. Inline-sviten är **83/88**:
+samma fem fel och 22 undantag med VIR av som på; inga nya fel.
+Det nya egna provet kör också på arm64/QEMU. De 22 egna `vir_`-proven
+går även med `-fPIC`. Det riktade provet är grönt under TSan med sex
+emittertrådar och körs i det befintliga x86-värdade TSan-CI-jobbet.
+
+Kort mikromätning på denna delade x86-värd: 4096 float-element,
+`a[i]=b[i]*c[i]+1.5f`, 10000 anrop, strikt `-ffp-contract=off`, median av sju
+växelvisa körningar (CPU-tid): direkt **26,931 ms**, VIR **7,709 ms**,
+clang -O2 **2,427 ms**, samma kontrollsumma. VIR är 3,49 gånger snabbare än
+direktvägen men fortfarande 3,18 gånger långsammare än clang på just detta
+prov; ingen allmän kvalitetsgrind är uppnådd. Varm processkompilering av den
+lilla TU:n, median av elva: direkt **2,86 ms**, VIR **3,27 ms**, clang
+**18,12 ms** (processstart ingår). Källor, assembler och alla sampel finns i
+`build/linux/vir-x86-results/measurements.json` och dess katalog.
+
+**Kvar för V2/V3/V4:** anrop, fler ABI-grupper, varargs, division, fler
+skaläroperationer, vektormultiplikation/-jämförelser/-konverteringar och
+maskval. Ostödda funktioner använder den tidigare vägen. VIR är fortsatt
+uttryckligen påslaget och bara för `-O2`; varken x86-täckningsgrinden eller
+V4:s kodkvalitetsgrind är stängd. Nästa kodkvalitetssteg: egna SIMD-poster,
+konstanta skift utan `cl`, adressvikning och effektivare loopgrenar.
+
+
 ### Vektorer och loopvektorisering (2026-11-12): första skivan, TSVC_2 151/151
 
 Underlag och design: `RESEARCH-vectors.md` (ändrar SPEC 1.3/1.4: VIR har egna
