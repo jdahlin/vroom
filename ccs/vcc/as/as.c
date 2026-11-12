@@ -237,10 +237,10 @@ static int primary(Lx *l, Val *v)
 		if (primary(l, v)) return -1;
 		if (c == '+') return 0;
 		if (c == '-') {
-			if (v->add && v->sub) { uint32_t t = v->add; v->add = v->sub; v->sub = t; v->c = -v->c; return 0; }
+			if (v->add && v->sub) { uint32_t t = v->add; v->add = v->sub; v->sub = t; v->c = (int64_t)(0 - (uint64_t)v->c); return 0; }
 			if (is_xsym(a, v)) { Val z = { 0, 0, 0 }, y = *v; *v = z; defer_op(a, '-', v, &y); return 0; }
 			if (!is_abs(a, v)) return err(a, "unsupported negation of a symbol");
-			v->c = -v->c; return 0;
+			v->c = (int64_t)(0 - (uint64_t)v->c); return 0;
 		}
 		if (is_xsym(a, v) || (v->add && v->sub)) {	/* ~x = x ^ -1, !x = x == 0 */
 			Val k = { 0, 0, c == '~' ? -1 : 0 };
