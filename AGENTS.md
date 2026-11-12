@@ -290,6 +290,8 @@ Targets build with Homebrew LLVM's libFuzzer and ASan+UBSan into
 minus coverage feedback).
 - `fuzz-lex`: vlex on raw bytes; checks token-array invariants, spelling,
   interning, NEON vs a scalar build of lex.c (`lexref.c`), buffer alignment.
+- `fuzz-vir`: parses and verifies VIR, then checks print–parse–print stability
+  for verified units; regression inputs are in `ccs/fuzz/regress/vir/`.
 - `fuzz-diag`: control bytes \x01 a source file; random records (spans,
   labels, fix-its, notes, help) through every style and output.
   `FUZZ_DIAG_PRINT=1` prints them.
