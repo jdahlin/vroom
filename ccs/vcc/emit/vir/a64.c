@@ -9,8 +9,9 @@
  *   integer: x0-x15 and x19-x28 (callee-saved); x16 is VR_SCR0 and the
  *            lowering's own scratch, x17 the printer's (large immediates),
  *            x18 the platform's, x29/x30 the frame
- *   float:   v0-v7 and v16-v30, all caller-saved (the prologue saves no
- *            v register); v31 is VR_SCR1
+ *   float:   v0-v7 and v16-v30, caller-saved, and v8-v15, whose low 64 bits a
+ *            call keeps: offered when no vector lives across a call (vl_vcross)
+ *            and saved and restored here, not by the prologue; v31 is VR_SCR1
  *
  * Floating-point operations are encoded words (I_WORD), as in fp.c.  A
  * value in a spill slot or a VIR slot is addressed from FRAME, so the frame
@@ -56,6 +57,7 @@ typedef struct vl {
 	bool risk;		/* x17 held data across a frame access: the frame must stay small */
 	bool tail;		/* a call right before a ret may be a sibling call (vl_notail) */
 	bool ret32;		/* the function returns a 32-bit integer: the upper half of x0 is unspecified */
+	int64_t fcs[8];		/* the FRAME offsets where d8-d15 are kept (those in o->callee[1]) */
 	uint32_t skip;		/* an instruction not to lower (the ret after a sibling call), 0 none */
 	uint32_t at;		/* the block whose place in the layout the code is at (a copy of another block's: vl_dup) */
 	int dup;		/* ... copies being lowered, one in another: vl_dupok */
@@ -168,6 +170,7 @@ static uint8_t vl_retreg(uint32_t ty) { return ty == VT_F32 || ty == VT_F64 ? VR
 #define VL_CALLER0 ((1ull << 16) - 1)				/* x0-x15 */
 #define VL_ALLOC0 (VL_CALLER0 | ((1ull << 29) - (1ull << 19)))	/* ... and x19-x28 */
 #define VL_ALLOC1 (((1ull << 8) - 1) | ((1ull << 31) - (1ull << 16)))	/* v0-v7, v16-v30 */
+#define VL_FCS 0xff00ull						/* v8-v15: a call keeps their low 64 bits */
 
 static bool vl_bigmem(const vir_fn *f, const vir_ins *in)
 {
@@ -275,7 +278,7 @@ static void vl_fixed(const vir_fn *f, uint32_t v, vir_fix *x, void *ctx)
 
 static uint8_t vl_opfix[256];
 
-static void vl_regs(vir_regs *r, bool darwin)
+static void vl_regs(vir_regs *r, bool darwin, bool fcs)
 {
 	static const uint8_t ops[] = { VO_PARAM, VO_CALL, VO_RET, VO_MEMCPY, VO_MEMSET, VO_LOAD, VO_STORE, VO_ADD, VO_SUB,
 				       VO_AND, VO_OR, VO_XOR, VO_ICMP, VO_PTRADD, VO_SHL, VO_LSHR, VO_ASHR, VO_MUL,
@@ -285,9 +288,9 @@ static void vl_regs(vir_regs *r, bool darwin)
 		vl_opfix[ops[i]] = 1;
 	*r = (vir_regs){ 0 };
 	r->alloc[0] = VL_ALLOC0;
-	r->alloc[1] = VL_ALLOC1;
+	r->alloc[1] = VL_ALLOC1 | (fcs ? VL_FCS : 0);
 	r->callee[0] = VL_ALLOC0 & ~VL_CALLER0;
-	r->callee[1] = 0;
+	r->callee[1] = fcs ? VL_FCS : 0;
 	r->fixed = vl_fixed;
 	r->ctx = darwin ? (void *)1 : NULL;
 	r->opfix = vl_opfix;
@@ -527,6 +530,7 @@ static void vl_emoves(vl *L, uint32_t g)
 	}
 }
 
+static void vl_fcsave(vl *L, bool restore, int t);
 static bool vl_plain(vl *L, uint32_t b, uint32_t k);
 static uint32_t vl_chase(vl *L, uint32_t t);
 static void vl_block(vl *L, uint32_t b);
@@ -997,7 +1001,12 @@ static void vl_call(vl *L, uint32_t b, uint32_t i, const vir_ins *in)
 		}
 	}
 	if (!stk && vl_sibling(L, b, i)) {
-		ins *t = put(e, I_TAIL);
+		ins *t;
+
+		if (L->o->callee[1] && L->opr[0] != VR_NONE)	/* (the callee's address may be in x16: through x17) */
+			L->risk = true;
+		vl_fcsave(L, true, L->opr[0] != VR_NONE ? R_X17 : R_X16);
+		t = put(e, I_TAIL);
 
 		if (L->opr[0] == VR_NONE) {
 			const vir_ins *k = &f->ins[in->a];
@@ -1360,6 +1369,21 @@ static void vl_chases(vl *L, uint32_t *path)
 }
 
 /* a return: the epilogue and ret, or a jump to the shared one (finish_function decides) */
+/* d8-d15 as the caller had them: at the entry into their slots, before every way out back */
+static void vl_fcsave(vl *L, bool restore, int t)
+{
+	for (int r = 8; r < 16; r++)
+		if (L->o->callee[1] >> r & 1) {
+			if (restore) {
+				mem(L->e, I_LD, 3, 0, t, FRAME, L->fcs[r - 8]);
+				word(L->e, f_in(1, r, t));
+			} else {
+				word(L->e, f_out(1, t, r));
+				mem(L->e, I_ST, 3, 0, t, FRAME, L->fcs[r - 8]);
+			}
+		}
+}
+
 static void vl_ret(vl *L)
 {
 	ecx *e = L->e;
@@ -1367,6 +1391,7 @@ static void vl_ret(vl *L)
 
 	if (!e->reach)
 		return;
+	vl_fcsave(L, true, R_X16);
 	t = put(e, I_TAIL);
 	t->cond = 4;
 	t->label = L->retlbl;
@@ -1950,6 +1975,7 @@ static void vl_body(vl *L)
 	ecx *e = L->e;
 	vir_fn *f = L->f;
 
+	vl_fcsave(L, false, R_X16);
 	for (uint32_t b = 0; b < f->nblk; b++) {
 		if (vl_skip(L, b))
 			continue;
@@ -1958,6 +1984,73 @@ static void vl_body(vl *L)
 		L->fallok = true;
 		vl_block(L, b);
 	}
+}
+
+/* does a vector live across a call?  (A call keeps only the low half of v8-v15: such a function
+ * is not offered them.)  Liveness of the vector values alone, a bit each */
+static bool vl_vcross(vir_fn *f)
+{
+	uint32_t nv = 0, W, *ix;
+	uint64_t *in, *out, *live;
+	bool calls = false, hit = false;
+
+	for (uint32_t b = 0; b < f->nblk; b++)
+		for (uint32_t i = f->blk[b].first; i < f->blk[b].first + f->blk[b].n; i++) {
+			nv += vir_isvec(f->ins[i].ty);
+			calls |= f->ins[i].op == VO_CALL || ((f->ins[i].op == VO_MEMCPY || f->ins[i].op == VO_MEMSET) && vl_bigmem(f, &f->ins[i]));
+		}
+	if (!nv || !calls)
+		return false;
+	W = (nv + 63) / 64;
+	ix = malloc((size_t)f->nins * sizeof *ix);
+	in = calloc((size_t)(2 * f->nblk + 1) * W, sizeof *in);
+	if (!ix || !in) {
+		free(ix), free(in);
+		return true;
+	}
+	out = in + (size_t)f->nblk * W, live = out + (size_t)f->nblk * W;
+	nv = 0;
+	for (uint32_t i = 0; i < f->nins; i++)
+		ix[i] = vir_isvec(f->ins[i].ty) ? nv++ : UINT32_MAX;
+	for (int pass = 0, ch = 1; ch || pass < 2; pass += !ch) {	/* to a fixed point, then once more to look at the calls */
+		ch = 0;
+		for (uint32_t b = f->nblk; b-- > 0;) {
+			const vir_blk *k = &f->blk[b];
+			vir_ins t = f->ins[k->first + k->n - 1];
+			vir_oit it;
+			uint32_t *p;
+
+			memset(live, 0, W * sizeof *live);
+			vir_oit_init(&it, f, &t, true);
+			while ((p = vir_oit_next(&it)))
+				if (*p < f->nblk)
+					for (uint32_t w = 0; w < W; w++)
+						live[w] |= in[(size_t)*p * W + w];
+			for (uint32_t w = 0; w < W; w++)
+				if (out[(size_t)b * W + w] != live[w])
+					out[(size_t)b * W + w] = live[w], ch = 1;
+			for (uint32_t i = k->first + k->n; i-- > k->first;) {
+				vir_ins x = f->ins[i];
+
+				if (ix[i] != UINT32_MAX)
+					live[ix[i] / 64] &= ~(1ull << (ix[i] & 63));
+				if (pass && (x.op == VO_CALL || x.op == VO_MEMCPY || x.op == VO_MEMSET))
+					for (uint32_t w = 0; w < W; w++)
+						hit |= live[w] != 0;
+				vir_oit_init(&it, f, &x, false);
+				while ((p = vir_oit_next(&it)))
+					if (*p < f->nins && ix[*p] != UINT32_MAX)
+						live[ix[*p] / 64] |= 1ull << (ix[*p] & 63);
+			}
+			for (uint32_t w = 0; w < W; w++)
+				if (in[(size_t)b * W + w] != live[w])
+					in[(size_t)b * W + w] = live[w], ch = 1;
+		}
+		if (pass && !ch)
+			break;
+	}
+	free(ix), free(in);
+	return hit;
 }
 
 /* lower V->f (allocated in V->ao) for function s; false: why in *why, nothing emitted */
@@ -1975,7 +2068,8 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 		*why = "VIR lowering: -g";
 		return false;
 	}
-	vl_regs(&regs, DARWIN(c));
+	/* (unwind tables would have to describe the d registers' slots: not written) */
+	vl_regs(&regs, DARWIN(c), !e->E->o->cfi && !vl_vcross(f));
 	if (!vir_loops_build(f, &V->lp)) {
 		*why = "VIR: loops";
 		return false;
@@ -2117,6 +2211,9 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 	}
 	for (uint32_t k = 0; k < V->ao.nspill; k++)
 		L.spoff[k] = slot(e, V->ao.ssz[k], V->ao.ssz[k]);
+	for (int r = 8; r < 16; r++)
+		if (V->ao.callee[1] >> r & 1)
+			L.fcs[r - 8] = slot(e, 8, 8);
 	for (uint32_t b = 0; b < f->nblk; b++)
 		L.lbl[b] = newlabel(e);
 	L.retlbl = newlabel(e);
@@ -2127,8 +2224,6 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 	for (int r = 19; r <= 28; r++)
 		if (V->ao.callee[0] >> r & 1)
 			e->usedcs |= 1u << r;
-	if (V->ao.callee[1])
-		vl_fail(&L, "VIR lowering: a callee-saved float register");
 	finish_function(e, s);
 	e->vtry = false;
 	e->vlow = false;
