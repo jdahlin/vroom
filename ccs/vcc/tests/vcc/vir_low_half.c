@@ -102,17 +102,17 @@ int main(void)
 	signed char b[2] = { -7, 9 };
 	unsigned char ub[8] = { 1, 2, 3, 4, 5, 6, 7, 200 };
 	S big = (S)0x123456789abcdefLL, neg = (S)0xfedcba98fffffff9LL;
-	S t = 0;
+	U t = 0;
 
 	for (int a = -2; a < 9; a++)
-		t = t * 31 + pick(b, a, a & 1 ? big : neg);
+		t = t * 31 + (0ull + pick(b, a, a & 1 ? big : neg));
 	for (unsigned a = 0; a < 8; a++)
-		t = t * 31 + upick(ub, a);
-	t = t * 31 + widen(1, neg) + widen(-1, neg) + (S)uwiden(0xfffffff0u);
-	t = t * 31 + args(big, -5, 0xfffffffbu) + args(neg, 7, 3);
+		t = t * 31 + (0ull + upick(ub, a));
+	t = t * 31 + (0ull + widen(1, neg) + widen(-1, neg) + (S)uwiden(0xfffffff0u));
+	t = t * 31 + (0ull + args(big, -5, 0xfffffffbu) + args(neg, 7, 3));
 	for (int x = -3; x < 10; x++)
-		t = t * 31 + sw(x) + swl(x) + swl((S)x << 32) + swb(x + 98);
-	t = t * 31 + sw(-2147483647 - 1) + swt(big) + swt(neg) + swt((S)5 << 32 | 3);
-	printf("%lld\n", t);
+		t = t * 31 + (0ull + sw(x) + swl(x) + swl((S)((U)x << 32)) + swb(x + 98));
+	t = t * 31 + (0ull + sw(-2147483647 - 1) + swt(big) + swt(neg) + swt((S)5 << 32 | 3));
+	printf("%llu\n", t);
 	return 0;
 }

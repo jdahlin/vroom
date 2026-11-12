@@ -2799,6 +2799,159 @@ static void vw_simplify(ecx *e)
 	free(stk);
 }
 
+/*
+ * If-conversion, as LLVM's SimplifyCFG folds a two-entry phi: b ends in brif c, T, F
+ * where the arms hold nothing (or at most two cheap instructions without effects
+ * each, which move up into b) and meet in J (a diamond: both arms empty blocks of b's
+ * alone; a triangle: one arm, the other edge goes to J itself) and J's parameters
+ * differ between the two entries in one value only.  That one becomes select c, t, f
+ * at the end of b (its operands are defined in b or above it now), b jumps to
+ * J and the arms go.  One select: its compare is still read once and sets the flags
+ * the csel reads.
+ */
+static bool vw_armempty(vwst *V, uint32_t a, uint32_t b, uint32_t cond, uint32_t *n)
+{
+	const vwb *k = &V->b[a];
+
+	if (a == b || !k->term || V->p[k->term].in.op != VO_BR || k->npred != 1 || V->pr[k->pred] != b)
+		return false;
+	for (uint32_t p = k->phead; p; p = V->p[p].next)
+		if (V->fwd[p] == p)
+			return false;
+	for (uint32_t q = k->head; q; q = V->p[q].next) {
+		uint32_t op = V->p[q].in.op;
+
+		if (vw_find(V, q) != q || vw_promdead(V, q) || (op == VO_MEMSET && (V->p[q].in.fl & VW_LIFETIME)))
+			continue;
+		/* cheap and without effects: computed whichever way the branch went (at most 2) */
+		if ((op != VO_ADD && op != VO_SUB && op != VO_AND && op != VO_OR && op != VO_XOR && op != VO_SHL && op != VO_LSHR &&
+		     op != VO_ASHR && op != VO_EXT && op != VO_TRUNC && op != VO_I2P && op != VO_P2I && op != VO_PTRADD) ||
+		    V->p[q].in.a == cond || V->p[q].in.b == cond || ++*n > 2)
+			return false;
+	}
+	return true;
+}
+
+/* arm a's instructions into b, before b's last instruction when that is the condition
+ * (the select stays next to its compare) */
+static void vw_hoist(vwst *V, uint32_t a, uint32_t b, uint32_t cond)
+{
+	vwb *k = &V->b[b];
+	uint32_t prev = 0, last = 0, nx;
+
+	if (k->tail == cond) {
+		last = cond;
+		for (uint32_t q = k->head; q != cond; q = V->p[q].next)
+			prev = q;
+	} else {
+		prev = k->tail;
+	}
+	for (uint32_t q = V->b[a].head; q; q = nx) {
+		nx = V->p[q].next;
+		if (vw_find(V, q) != q || vw_promdead(V, q) || V->p[q].in.op == VO_MEMSET)
+			continue;
+		V->p[q].blk = b;
+		V->p[q].next = last;
+		if (prev)
+			V->p[prev].next = q;
+		else
+			k->head = q;
+		prev = q;
+	}
+	if (!last)
+		k->tail = prev;
+	V->b[a].head = V->b[a].tail = 0;
+}
+
+static uint32_t vw_predix(const vwst *V, uint32_t j, uint32_t b)
+{
+	for (uint32_t i = 0; i < V->b[j].npred; i++)
+		if (V->pr[V->b[j].pred + i] == b)
+			return i;
+	return VW_NOBLK;
+}
+
+static bool vw_ifconv(ecx *e)
+{
+	vwst *V = e->vw;
+	bool any = false;
+
+	for (uint32_t i = 0; i < V->norder; i++) {
+		uint32_t b = V->order[i], t = V->b[b].term, T, F, J, it, jf, sel = 0, nsel = 0, vt = 0, vf = 0, cond, nt, nf;
+		bool et, ef;
+
+		if (!t || V->p[t].in.op != VO_BRIF)
+			continue;
+		T = V->p[t].in.b, F = V->p[t].in.c;
+		if (T == F)
+			continue;
+		cond = vw_find(V, V->p[t].in.a);
+		nt = nf = 0;
+		et = vw_armempty(V, T, b, cond, &nt), ef = vw_armempty(V, F, b, cond, &nf);
+		if (et && ef && V->p[V->b[T].term].in.a == V->p[V->b[F].term].in.a)
+			J = V->p[V->b[T].term].in.a;
+		else if (et && V->p[V->b[T].term].in.a == F)
+			J = F, ef = false;
+		else if (ef && V->p[V->b[F].term].in.a == T)
+			J = T, et = false;
+		else
+			continue;
+		if (J == b || (et && ef && (J == T || J == F)))
+			continue;
+		it = vw_predix(V, J, et ? T : b), jf = vw_predix(V, J, ef ? F : b);
+		if (it == VW_NOBLK || jf == VW_NOBLK || it == jf)
+			continue;
+		for (uint32_t p = V->b[J].phead; p; p = V->p[p].next) {
+			uint32_t a, c;
+
+			if (V->fwd[p] != p)
+				continue;
+			a = vw_find(V, V->x[V->p[p].in.b + it]), c = vw_find(V, V->x[V->p[p].in.b + jf]);
+			if (a == c)
+				continue;
+			nsel++, sel = p, vt = a, vf = c;
+		}
+		if (nsel > 1 || (nsel && (V->p[sel].in.ty == VT_VOID || V->p[sel].in.ty == VT_MULTI || vt == sel || vf == sel)))
+			continue;
+		if (!nsel && (et ? nt : 0) + (ef ? nf : 0))	/* (nothing to select: the arms' work is dead or shared; leave it) */
+			continue;
+		if (et)
+			vw_hoist(V, T, b, cond);
+		if (ef)
+			vw_hoist(V, F, b, cond);
+		if (nsel) {
+			uint32_t s = vw_ins_in(e, b, VO_SELECT, V->p[sel].in.ty, 0, cond, vt, vf);
+
+			V->p[s].loc = V->p[t].loc;
+			V->x[V->p[sel].in.b + it] = s;
+		}
+		/* J's entry `it` is b's now; entry jf goes */
+		V->pr[V->b[J].pred + it] = b;
+		for (uint32_t p = V->b[J].phead; p; p = V->p[p].next)
+			if (V->p[p].in.b != VW_NOBLK)
+				for (uint32_t k = jf; k + 1 < V->b[J].npred; k++)
+					V->x[V->p[p].in.b + k] = V->x[V->p[p].in.b + k + 1];
+		for (uint32_t k = jf; k + 1 < V->b[J].npred; k++)
+			V->pr[V->b[J].pred + k] = V->pr[V->b[J].pred + k + 1];
+		V->b[J].npred--;
+		V->p[t].in = (vir_ins){ VO_BR, VT_VOID, 0, J, 0, 0 };
+		if (et)
+			V->b[T].reach = 0;
+		if (ef)
+			V->b[F].reach = 0;
+		any = true;
+	}
+	if (any) {
+		uint32_t m = 0;
+
+		for (uint32_t i = 0; i < V->norder; i++)
+			if (V->b[V->order[i]].reach)
+				V->order[m++] = V->order[i];
+		V->norder = m;
+	}
+	return any;
+}
+
 /* the edge b -> t needs a block of its own: t has parameters and b does not end in br */
 static void vw_split(ecx *e)
 {
@@ -3003,6 +3156,9 @@ VPRIV bool vw_emit(ecx *e)
 		vw_deadparams(e);
 		vw_simplify(e);
 	}
+	if (vw_ifconv(e))
+		while (vw_trivial(e))
+			;
 	vw_split(e);
 	/* stores to a slot that is not exposed and that nothing reads are dead */
 	for (uint32_t s = 0; s < V->nsl; s++)

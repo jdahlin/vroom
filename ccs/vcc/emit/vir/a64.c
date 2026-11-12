@@ -586,7 +586,7 @@ static int vl_cond(vl *L, const vir_ins *in)
 		L->fcc = -1;
 		return c;
 	}
-	opi(L->e, I_SUBSI, 0, ZR, vl_ix(L, 0, R_X16), 0);
+	opi(L->e, I_SUBSI, vl_x(L->f, in->a), ZR, vl_ix(L, 0, R_X16), 0);	/* (a condition of either width) */
 	return C_NE;
 }
 
@@ -1872,6 +1872,11 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 						if (!L.lo32[t->first + j] && L.lo32[a])
 							L.lo32[a] = 0, ch = true;
 					}
+					continue;
+				}
+				if (x.op == VO_SELECT && L.lo32[i]) {	/* its values are read as it is */
+					if (L.lo32[x.a])
+						L.lo32[x.a] = 0, ch = true;
 					continue;
 				}
 				if (x.op == VO_CALL) {	/* an integer argument of 4 bytes or less: its upper half is unspecified */

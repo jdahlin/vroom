@@ -613,6 +613,14 @@ cykler mot virpol, nu +9,9 %.  Samplingar per funktion (storlek 300) varierar
   som `fmulk` viker får inget register (`vl_fix`: −0,4 % instr., cykler inom
   bruset).  Mot virpol +5,5 % [+5,1 .. +5,7], mot clang -O2 ca +10 %.
   Kvar här: `x * -1 + a` blir madd med −1 i stället för sub.
+- If-konvertering i byggaren (`vw_ifconv`, före `vw_split`): en gren vars armar
+  är tomma eller har högst två billiga instruktioner utan effekter och som
+  skiljer sig i ett värde vid sammanflödet blir `select`.  sqlite3.s: csel
+  0 → 984 (LLVM 980), villkorliga hopp 30360 → 29372, 438 färre
+  instruktioner statiskt; parvis +0,2 % instr., cykler −0,1 % [−0,8 .. +0,3]
+  och −0,9 % [−1,6 .. −0,3] i två körningar (inom bruset).  Mot virpol
+  +5,5 %, mot clang -O2 +10,0 %.  Kvar: konstanter i csel (csinc/wzr),
+  `and` + `subs` före csel som `tst`.
 - Tester: `vir_branch_bits.c`, `vir_flags_reuse.c`, `vir_layout_exits.c`,
   `vir_operand_fold.c`, `vir_byte_assembly.c`, `vir_constants.c` (.o och .s).
 
