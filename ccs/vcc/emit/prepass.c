@@ -18,11 +18,13 @@ VPRIV uint32_t sym_align(cc *c, uint32_t s)
 
 /* ---------------- prepass: what the emitter needs to know before it starts ---------------- */
 
-/* Declarations of SVE types are useful without SVE lowering (notably libc's
-   math prototypes). Reject actual values before any fixed-size frame/ABI work. */
+/* SVE values live in frame slots and go through Z and P registers only inside
+   inline asm (include/arm_sve.h).  What is not lowered: a sizeless argument or
+   result (the vector PCS) and operators on sizeless vectors. */
 VPRIV bool sve_codegen_ok(cc *c)
 {
 	uint32_t loc = 0;
+	const char *what = "an SVE argument or result";
 
 	if (c->o->target != PP_LINUX_AARCH64 && c->o->target != PP_DARWIN)
 		return true;
@@ -41,13 +43,20 @@ VPRIV bool sve_codegen_ok(cc *c)
 	for (uint32_t i = 1; i < c->nnode && !loc; i++) {
 		const node *n = &c->nodes[i];
 
-		if (KIND(c, n->ty) == TY_SVE ||
-		    (n->op == N_DECL && KIND(c, c->syms[n->a].ty) == TY_SVE))
+		if (n->op == N_CALL)
+			for (uint32_t j = 0; j < n->c && !loc; j++)
+				if (KIND(c, N(c->lists[n->b + j])->ty) == TY_SVE)
+					loc = n->loc;
+		if (KIND(c, n->ty) != TY_SVE)
+			continue;
+		if (n->op == N_CALL || n->op == N_VAARG)
 			loc = n->loc;
+		else if (n->op == N_BINARY || n->op == N_UNARY || (n->op == N_CAST && n->aux != CK_NOP))
+			loc = n->loc, what = "an operator on an SVE value";
 	}
 	if (!loc)
 		return true;
-	pp_diag_emit(c->p, pp_diag_begin(c->p, VDL_ERROR, loc, "SVE value code generation is not supported yet"));
+	pp_diag_emit(c->p, pp_diag_begin(c->p, VDL_ERROR, loc, "code generation for %s is not supported yet", what));
 	return false;
 }
 

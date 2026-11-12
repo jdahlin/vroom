@@ -39,7 +39,7 @@ VPRIV bool wk_mem(ecx *e, qty t)
 {
 	cc *c = e->c;
 
-	return em_bigint(c, t) || is_record(c, t) || is_array(c, t) || is_vec(c, t) || KIND(c, t) == TY_FLOAT128 || (KIND(c, t) == TY_LDOUBLE && LO(ldmem)()) || (wk_wide(c, t) && LO(i128mem)());
+	return em_bigint(c, t) || is_record(c, t) || is_array(c, t) || is_vec(c, t) || is_sve(c, t) || KIND(c, t) == TY_FLOAT128 || (KIND(c, t) == TY_LDOUBLE && LO(ldmem)()) || (wk_wide(c, t) && LO(i128mem)());
 }
 
 /* t is IEEE binary128: __float128, or long double off x86-64 (arm64 Linux; x86-64's is x87) */

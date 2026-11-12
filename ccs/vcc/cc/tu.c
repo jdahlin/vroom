@@ -161,7 +161,11 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 
 			for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
 				uint32_t name = vintern_cstr(names[i]);
-				ctype t = { .kind = TY_SVE, .align = 1, .aux = name };
+				/* Sizeless to the language (sizeof is an error); the size is the
+				   emitter's frame slot: the architectural maximum, a 2048-bit Z
+				   register or its 256-bit predicate. */
+				bool pred = i >= 13;
+				ctype t = { .kind = TY_SVE, .size = pred ? 32 : 256, .align = pred ? 2 : 16, .aux = name };
 
 				s = sym_new(c, S_TYPEDEF, name, QT(ty_intern(c, &t), 0), 0);
 				sym_bind(c, s);

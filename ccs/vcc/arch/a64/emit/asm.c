@@ -196,8 +196,8 @@ static int clob_reg(const char *s)
 	return -1;
 }
 
-/* a vector register load or store as raw text: op qv|dv, [xr] */
-static void vraw(ecx *e, const char *opn, bool q, int v, int xr)
+/* a vector register load or store as raw text: op qv|dv, [xr] (k 'z', 'p': an SVE register) */
+static void vraw(ecx *e, const char *opn, int k, int v, int xr)
 {
 	tbuf *rb = &e->raw;
 	size_t st = rb->n;
@@ -206,7 +206,7 @@ static void vraw(ecx *e, const char *opn, bool q, int v, int xr)
 	tb_c(rb, '\t');
 	tb_s(rb, opn);
 	tb_c(rb, '\t');
-	tb_c(rb, q ? 'q' : 'd');
+	tb_c(rb, (char)k);
 	tb_u(rb, (uint64_t)v);
 	tb_s(rb, ", [");
 	reg(rb, xr, 1);
@@ -214,6 +214,25 @@ static void vraw(ecx *e, const char *opn, bool q, int v, int xr)
 	i = put(e, I_RAW);
 	i->off = (int32_t)st;
 	i->ref = (uint32_t)(rb->n - st);
+}
+
+/* the register name's letter of a vector operand's load and store */
+static int vreg_kind(cc *c, qty t)
+{
+	return is_svpred(c, t) ? 'p' : is_sve(c, t) ? 'z' : tsize(c, t) == 16 ? 'q' : 'd';
+}
+
+/* the register of a vector operand: v16+ (z16+), an SVE predicate p0+ (a governing predicate must be p0-p7) */
+static uint8_t sve_opreg(ecx *e, uint32_t loc, qty t, int *nv, int *np)
+{
+	if (is_svpred(e->c, t)) {
+		if (*np >= 8)
+			efatal(e, loc, "too many SVE predicate asm operands");
+		return (uint8_t)(*np)++;
+	}
+	if (*nv >= 15)
+		efatal(e, loc, "too many vector asm operands");
+	return (uint8_t)(16 + (*nv)++);
 }
 
 VPRIV void gen_asm(ecx *e, uint32_t n)
@@ -231,7 +250,7 @@ VPRIV void gen_asm(ecx *e, uint32_t n)
 	tbuf *rb = &e->raw;
 	size_t start;
 	uint64_t uniq;
-	int nvreg = 0;
+	int nvreg = 0, npreg = 0;
 
 	if (!e->reach)
 		return;
@@ -273,10 +292,10 @@ VPRIV void gen_asm(ecx *e, uint32_t n)
 		o->inout = strchr(cs, '+') != NULL;
 		o->t = N(en)->ty;
 		o->name = ao->name;
-		if (is_vec(c, o->t) && strpbrk(cs, "wx")) {
-			/* a vector in v16+: loaded before the template if read, stored after it */
+		if ((is_vec(c, o->t) || is_sve(c, o->t)) && strpbrk(cs, "wxU")) {
+			/* a vector in v16+ (an SVE predicate in p0+): loaded before the template if read, stored after it */
 			o->kind = AO_VREG;
-			o->reg = (uint8_t)(16 + nvreg++);
+			o->reg = sve_opreg(e, x->loc, o->t, &nvreg, &npreg);
 			o->l = gen_lval(e, en);
 			continue;
 		}
@@ -319,12 +338,12 @@ VPRIV void gen_asm(ecx *e, uint32_t n)
 		for (const char *p = cs; *p; p++)
 			if (*p >= '0' && *p <= '9')
 				tied = atoi(p);
-		if (is_vec(c, o->t) && strpbrk(cs, "wx") && tied < 0) {
+		if ((is_vec(c, o->t) || is_sve(c, o->t)) && strpbrk(cs, "wxU") && tied < 0) {
 			val v = gen(e, en);	/* the vector's address */
 
 			toreg(e, &v);
 			o->kind = AO_VREG;
-			o->reg = (uint8_t)(16 + nvreg++);
+			o->reg = sve_opreg(e, x->loc, o->t, &nvreg, &npreg);
 			o->v = v;
 			continue;
 		}
@@ -453,7 +472,7 @@ VPRIV void gen_asm(ecx *e, uint32_t n)
 	/* vector operands into their registers, last so no call in between clobbers them */
 	for (uint32_t i = 0; i < nops; i++) {
 		asmopnd *o = &op[i];
-		bool q = tsize(c, o->t) == 16;
+		int q = vreg_kind(c, o->t);
 
 		if (o->kind != AO_VREG)
 			continue;
@@ -541,6 +560,11 @@ VPRIV void gen_asm(ecx *e, uint32_t n)
 					o = &op[o->inout];
 				switch (o->kind) {
 				case AO_VREG:
+					if (is_sve(c, o->t)) {
+						tb_c(rb, (char)vreg_kind(c, o->t));
+						tb_u(rb, o->reg);
+						break;
+					}
 					tb_c(rb, mod == 'q' || mod == 'd' || mod == 's' || mod == 'h' || mod == 'b' ? mod : 'v');
 					tb_u(rb, o->reg);
 					break;
@@ -619,7 +643,7 @@ VPRIV void gen_asm(ecx *e, uint32_t n)
 			val av = laddr(e, &l2);
 			int r = toreg(e, &av);
 
-			vraw(e, "str", tsize(c, o->t) == 16, o->reg, r);
+			vraw(e, "str", vreg_kind(c, o->t), o->reg, r);
 			val_free(e, &av);
 		}
 	}
