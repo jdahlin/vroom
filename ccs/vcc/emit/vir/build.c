@@ -2043,18 +2043,25 @@ out:
  *
  * The walker's output, instruction by instruction, carries what its direct target folds as it
  * emits: extensions of values already extended, a truncation of a widening, x * 1, a chain of
- * constant offsets, the same address computed again, the same byte loaded again.  One pass in
- * reverse postorder rewrites each instruction (vw_simp1) and then looks it up among the
- * block's earlier pure instructions and loads (a load is forgotten at anything that may write
- * memory; a store remembers its value for a load of the same address and type).  What nothing
- * uses any more goes at the end. */
+ * constant offsets, the same address computed again, the same byte loaded again.  One walk
+ * over the dominator tree rewrites each instruction (vw_simp1) and then looks it up: a pure
+ * one among the block's earlier ones, a load among those of the block and of the blocks that
+ * lead to it alone (a block with one predecessor continues its memory state; anything that
+ * may write memory starts a new one, and a store remembers its value for a load of the same
+ * address and type).  Constants are numbered first: the walker makes one per use.  What
+ * nothing uses any more goes at the end. */
 
 typedef struct vwhe { uint32_t op, ty, fl, a, b, c, gen, v; } vwhe;	/* (key) -> value */
 
 typedef struct vwsimp {
 	uint32_t *cnt, n0;	/* uses per value; values from n0 on are the pass's constants */
-	vwhe *ht; uint32_t hmask, cht;
-	uint32_t memgen;
+	vwhe *ht; uint32_t hmask;	/* pure instructions and loads of the dominators, by content */
+	uint32_t *log, nlog;	/* ... the entries added, in order (undone leaving a block) */
+	uint32_t *kt, kmask, ncst, nk;	/* constants: value + 1 */
+	uint32_t memgen, gens, *egen;	/* the memory state loads are keyed by; per block at its end */
+	uint32_t blk;		/* the block pure instructions are keyed by: one kept live into other
+				 * blocks costs a register more often than it saves an instruction */
+	uint32_t *idom, *dkid, *dnext;	/* the dominator tree */
 	uint32_t undef[VT_N];
 } vwsimp;
 
@@ -2299,6 +2306,163 @@ static vwhe *vw_hlook(vwsimp *S, const vwhe *x)
 	}
 }
 
+/* one pre-IR value per constant (the walker makes one per use) */
+static uint32_t vw_kcanon(vwst *V, vwsimp *S, uint32_t v)
+{
+	const vir_ins *in = &V->p[v].in;
+	uint64_t h;
+
+	if (V->p[v].blk != VW_NOBLK || in->op == VO_BPARAM)
+		return v;
+	h = ((uint64_t)in->op << 8 | in->ty) * 0x9e3779b97f4a7c15ull;
+	h = (h ^ in->a ^ (uint64_t)in->b << 32) * 0xff51afd7ed558ccdull;
+	h = (h ^ in->c) * 0xc4ceb9fe1a85ec53ull;
+	for (uint32_t i = (uint32_t)(h >> 40) & S->kmask;; i = (i + 1) & S->kmask) {
+		uint32_t k = S->kt[i];
+
+		if (!k) {
+			if (2 * ++S->nk > S->kmask)
+				return v;	/* (full: v as it is) */
+			S->kt[i] = v + 1;
+			return v;
+		}
+		k--;
+		if (V->p[k].in.op == in->op && V->p[k].in.ty == in->ty && V->p[k].in.a == in->a &&
+		    V->p[k].in.b == in->b && V->p[k].in.c == in->c)
+			return k;
+	}
+}
+
+/* the block's instructions, rewritten and numbered (S->ht holds what its dominators computed) */
+static void vw_cse_blk(ecx *e, vwsimp *S_, uint32_t b)
+{
+	vwst *V = e->vw;
+	vwsimp *S = S_;
+
+	for (uint32_t q = V->b[b].head; q; q = V->p[q].next) {
+		uint32_t r, op, eff;
+		vwhe key, *t;
+
+		if (vw_find(V, q) != q)
+			continue;
+		VW_EACHOP(V, q, o, *o = vw_kcanon(V, S, vw_find(V, *o)));
+		for (int it = 0; vw_simp1(e, S, q, &r) && it < 8; it++)
+			;	/* (rewritten in place: again) */
+		if (r != q) {
+			r = vw_kcanon(V, S, vw_find(V, r));
+			if (r < S->n0 && V->p[r].blk != VW_NOBLK)
+				S->cnt[r] += S->cnt[q];
+			VW_EACHOP(V, q, o, vw_dec(V, S, *o));
+			S->cnt[q] = 0;
+			V->fwd[q] = r;
+			continue;
+		}
+		op = V->p[q].in.op;
+		eff = vir_optab[op].eff;
+		if (op == VO_STORE && (V->p[q].slot && V->sl[V->p[q].slot - 1].prom))
+			continue;
+		if (eff & (EF_W | EF_C | EF_A) || op == VO_BARRIER || op == VO_VA_ARG || op == VO_VA_START)
+			S->memgen = ++S->gens;
+		if (op == VO_STORE) {
+			vir_ins in = V->p[q].in;
+			uint32_t vt = V->p[in.b].in.ty;
+
+			if (!(in.fl & VIF_VOL) && vir_tysize(vt) && 1u << VIF_W(in.fl) == vir_tysize(vt)) {
+				key = (vwhe){ VO_LOAD, vt, VIF_W(in.fl), in.a, 0, 0, S->memgen, 0 };
+				t = vw_hlook(S, &key);
+				if (!t->v)
+					S->log[S->nlog++] = (uint32_t)(t - S->ht);
+				*t = key;
+				t->v = in.b;
+			}
+			continue;
+		}
+		if (op == VO_LOAD) {
+			vir_ins in = V->p[q].in;
+
+			if (in.fl & VIF_VOL)
+				continue;
+			key = (vwhe){ VO_LOAD, in.ty, in.fl & (3 | VIF_MS), in.a, 0, 0, S->memgen, 0 };
+		} else if ((eff & ~EF_UF) == EF_P && op != VO_BPARAM && op != VO_PARAM && op != VO_PROJ) {
+			vir_ins in = V->p[q].in;
+
+			if (vw_commutes(op) && in.a > in.b)
+				key = (vwhe){ op, in.ty, in.fl, in.b, in.a, in.c, S->blk, 0 };
+			else
+				key = (vwhe){ op, in.ty, in.fl, in.a, in.b, in.c, S->blk, 0 };
+		} else
+			continue;
+		t = vw_hlook(S, &key);
+		if (t->v && V->p[vw_find(V, t->v)].in.ty == V->p[q].in.ty) {
+			r = vw_find(V, t->v);
+			if (r < S->n0 && V->p[r].blk != VW_NOBLK)
+				S->cnt[r] += S->cnt[q];
+			VW_EACHOP(V, q, o, vw_dec(V, S, *o));
+			S->cnt[q] = 0;
+			V->fwd[q] = r;
+			continue;
+		}
+		if (!t->v) {
+			S->log[S->nlog++] = (uint32_t)(t - S->ht);
+			*t = key;
+			t->v = q;
+		}
+	}
+}
+
+/* immediate dominators (Cooper, Harvey, Kennedy) and the tree's children, in reverse postorder */
+static void vw_doms(ecx *e, vwsimp *S)
+{
+	vwst *V = e->vw;
+	uint32_t n = V->norder, *ri = malloc(((size_t)V->nb + 1) * sizeof *ri);
+	bool changed = true;
+
+	S->idom = malloc(((size_t)V->nb + 1) * sizeof *S->idom);
+	S->dkid = malloc(((size_t)V->nb + 1) * sizeof *S->dkid);
+	S->dnext = malloc(((size_t)V->nb + 1) * sizeof *S->dnext);
+	if (!ri || !S->idom || !S->dkid || !S->dnext)
+		vw_fail(e, "out of memory");
+	for (uint32_t b = 0; b < V->nb; b++)
+		ri[b] = VW_NOBLK, S->idom[b] = VW_NOBLK, S->dkid[b] = VW_NOBLK, S->dnext[b] = VW_NOBLK;
+	for (uint32_t i = 0; i < n; i++)
+		ri[V->order[i]] = i;
+	S->idom[V->order[0]] = V->order[0];
+	while (changed) {
+		changed = false;
+		for (uint32_t i = 1; i < n; i++) {
+			uint32_t b = V->order[i], d = VW_NOBLK;
+
+			for (uint32_t j = 0; j < V->b[b].npred; j++) {
+				uint32_t p = V->pr[V->b[b].pred + j];
+
+				if (ri[p] == VW_NOBLK || S->idom[p] == VW_NOBLK)
+					continue;
+				if (d == VW_NOBLK) {
+					d = p;
+					continue;
+				}
+				while (p != d) {
+					while (ri[p] > ri[d])
+						p = S->idom[p];
+					while (ri[d] > ri[p])
+						d = S->idom[d];
+				}
+			}
+			if (d != S->idom[b]) {
+				S->idom[b] = d;
+				changed = true;
+			}
+		}
+	}
+	for (uint32_t i = n; i-- > 1;) {	/* (pushed in reverse: kept in order) */
+		uint32_t b = V->order[i], d = S->idom[b];
+
+		S->dnext[b] = S->dkid[d];
+		S->dkid[d] = b;
+	}
+	free(ri);
+}
+
 static void vw_simplify(ecx *e)
 {
 	vwst *V = e->vw;
@@ -2308,7 +2472,17 @@ static void vw_simplify(ecx *e)
 	S.n0 = V->np;
 	S.cnt = calloc((size_t)S.n0 + 1, sizeof *S.cnt);
 	stk = malloc(((size_t)S.n0 + 1) * sizeof *stk);
-	if (!S.cnt || !stk)
+	{
+		uint32_t kc = 16;
+
+		for (uint32_t i = 0; i < V->np; i++)
+			S.ncst += V->p[i].blk == VW_NOBLK;
+		while (kc < 2 * (V->np + 64))	/* (and the constants the pass makes) */
+			kc *= 2;
+		S.kt = calloc(kc, sizeof *S.kt);
+		S.kmask = kc - 1;
+	}
+	if (!S.cnt || !stk || !S.kt)
 		vw_fail(e, "out of memory");
 	/* uses */
 	for (uint32_t i = 0; i < V->norder; i++) {
@@ -2329,90 +2503,39 @@ static void vw_simplify(ecx *e)
 				break;
 		}
 	}
-	/* rewriting and numbering, block by block */
-	for (uint32_t i = 0; i < V->norder; i++) {
-		uint32_t b = V->order[i], n = 0, cap = 16;
+	/* rewriting and numbering over the dominator tree */
+	vw_doms(e, &S);
+	{
+		uint32_t cap = 16, top = 0, *bst = malloc((size_t)(V->nb + 1) * 2 * sizeof *bst);
 
-		for (uint32_t q = V->b[b].head; q; q = V->p[q].next)
-			n++;
-		while (cap < 2 * n + 2)
+		while (cap < 2 * (V->np - S.ncst) + 2)
 			cap *= 2;
-		if (cap > S.cht) {
-			free(S.ht);
-			S.ht = malloc(cap * sizeof *S.ht);
-			if (!S.ht)
-				vw_fail(e, "out of memory");
-			S.cht = cap;
-		}
+		S.ht = calloc(cap, sizeof *S.ht);
 		S.hmask = cap - 1;
-		memset(S.ht, 0, cap * sizeof *S.ht);
-		S.memgen = 1;
-		for (uint32_t q = V->b[b].head; q; q = V->p[q].next) {
-			uint32_t r, op, eff;
-			vwhe key, *t;
+		S.log = malloc(((size_t)V->np + 1) * sizeof *S.log);
+		S.egen = malloc(((size_t)V->nb + 1) * sizeof *S.egen);
+		if (!S.ht || !S.log || !bst || !S.egen)
+			vw_fail(e, "out of memory");
+		bst[top++] = V->order[0], bst[top++] = 0;
+		while (top) {
+			uint32_t ph = bst[--top], b = bst[--top];
 
-			if (vw_find(V, q) != q)
-				continue;
-			VW_EACHOP(V, q, o, *o = vw_find(V, *o));
-			for (int it = 0; vw_simp1(e, &S, q, &r) && it < 8; it++)
-				;	/* (rewritten in place: again) */
-			if (r != q) {
-				r = vw_find(V, r);
-				if (r < S.n0 && V->p[r].blk != VW_NOBLK)
-					S.cnt[r] += S.cnt[q];
-				VW_EACHOP(V, q, o, vw_dec(V, &S, *o));
-				S.cnt[q] = 0;
-				V->fwd[q] = r;
-				continue;
-			}
-			op = V->p[q].in.op;
-			eff = vir_optab[op].eff;
-			if (op == VO_STORE && (V->p[q].slot && V->sl[V->p[q].slot - 1].prom))
-				continue;
-			if (eff & (EF_W | EF_C | EF_A) || op == VO_BARRIER || op == VO_VA_ARG || op == VO_VA_START)
-				S.memgen++;
-			if (op == VO_STORE) {
-				vir_ins in = V->p[q].in;
-				uint32_t vt = V->p[in.b].in.ty;
-
-				if (!(in.fl & VIF_VOL) && vir_tysize(vt) && 1u << VIF_W(in.fl) == vir_tysize(vt)) {
-					key = (vwhe){ VO_LOAD, vt, VIF_W(in.fl), in.a, 0, 0, S.memgen, 0 };
-					t = vw_hlook(&S, &key);
-					*t = key;
-					t->v = in.b;
+			if (ph) {	/* leaving b: its entries go */
+				while (S.nlog > ph - 1) {
+					S.nlog--;
+					S.ht[S.log[S.nlog]].v = 0;
 				}
 				continue;
 			}
-			if (op == VO_LOAD) {
-				vir_ins in = V->p[q].in;
-
-				if (in.fl & VIF_VOL)
-					continue;
-				key = (vwhe){ VO_LOAD, in.ty, in.fl & (3 | VIF_MS), in.a, 0, 0, S.memgen, 0 };
-			} else if ((eff & ~EF_UF) == EF_P && op != VO_BPARAM && op != VO_PARAM && op != VO_PROJ) {
-				vir_ins in = V->p[q].in;
-
-				if (vw_commutes(op) && in.a > in.b)
-					key = (vwhe){ op, in.ty, in.fl, in.b, in.a, in.c, 0, 0 };
-				else
-					key = (vwhe){ op, in.ty, in.fl, in.a, in.b, in.c, 0, 0 };
-			} else
-				continue;
-			t = vw_hlook(&S, &key);
-			if (t->v && V->p[vw_find(V, t->v)].in.ty == V->p[q].in.ty) {
-				r = vw_find(V, t->v);
-				if (r < S.n0 && V->p[r].blk != VW_NOBLK)
-					S.cnt[r] += S.cnt[q];
-				VW_EACHOP(V, q, o, vw_dec(V, &S, *o));
-				S.cnt[q] = 0;
-				V->fwd[q] = r;
-				continue;
-			}
-			if (!t->v) {
-				*t = key;
-				t->v = q;
-			}
+			bst[top++] = b, bst[top++] = S.nlog + 1;
+			S.memgen = V->b[b].npred == 1 ? S.egen[V->pr[V->b[b].pred]] : ++S.gens;
+			S.blk = ++S.gens;
+			vw_cse_blk(e, &S, b);
+			S.egen[b] = S.memgen;
+			for (uint32_t c = S.dkid[b]; c != VW_NOBLK; c = S.dnext[c])
+				bst[top++] = c, bst[top++] = 0;
 		}
+		free(bst);
 	}
 	/* what nothing reads */
 	for (uint32_t i = 0; i < V->norder; i++)
@@ -2436,7 +2559,8 @@ static void vw_simplify(ecx *e)
 		});
 		V->fwd[q] = vw_undefk(e, &S, V->p[q].in.ty);
 	}
-	free(S.ht);
+	free(S.ht), free(S.log), free(S.egen), free(S.kt);
+	free(S.idom), free(S.dkid), free(S.dnext);
 	free(S.cnt);
 	free(stk);
 }
