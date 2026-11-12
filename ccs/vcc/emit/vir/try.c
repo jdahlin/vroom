@@ -97,7 +97,12 @@ VPRIV bool vw_try(ecx *e, uint32_t s)
 		return false;
 	e->vtry = true;
 	e->vfail = NULL;
-	vw_wk_function(e, s);
+	{
+		int novtag = e->novtag;	/* (a bail out of a volatile access leaves it raised) */
+
+		vw_wk_function(e, s);
+		e->novtag = novtag;
+	}
 	e->vtry = false;
 	if (m & 8)
 		vw_name(e, s, nm, sizeof nm);

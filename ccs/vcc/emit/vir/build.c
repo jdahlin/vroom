@@ -555,17 +555,17 @@ static uint32_t vw_slotaddr(ecx *e, uint32_t s, int64_t rel)
 	return vw_k(e, VO_SLOTADDR, VT_PTR, s, (uint32_t)rel, (uint32_t)((uint64_t)rel >> 32));
 }
 
+/*
+ * A store through a pointer, a call or a barrier: what the store table knows of the
+ * frame is gone.  Not only of slots whose address has been taken so far: the walk is
+ * in text order, and a loop can run this code after an address taken further down
+ * (x = i; *p = 1; s += x; p = &x;).  A slot whose address is never taken is promoted
+ * afterwards (vw_promote, with the whole function's uses), so its loads go anyway.
+ */
 static void vw_st_clear(ecx *e, bool exposed_only)
 {
-	vwst *V = e->vw;
-
-	if (!exposed_only) {
-		V->nst = 0;
-		return;
-	}
-	for (uint32_t i = 0; i < V->nst; i++)
-		if (V->sl[V->st[i].slot].exposed)
-			V->st[i--] = V->st[--V->nst];
+	(void)exposed_only;
+	e->vw->nst = 0;
 }
 
 /* the address of l (a ptr value); *slot: the slot (VW_NOBLK: not a frame access), *rel its offset */
@@ -1613,6 +1613,7 @@ VPRIV void vw_begin(ecx *e, uint32_t s)
 	if (V->clab)
 		memset(V->lab, 0xff, V->clab * sizeof *V->lab);
 	V->sealing = false;
+	V->why = NULL;	/* (one function's reason is not the next one's) */
 	V->rty = VT_VOID;
 	V->nparam = 0;
 	V->cur = vw_newblk(e);
