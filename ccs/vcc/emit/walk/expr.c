@@ -697,10 +697,14 @@ static void wk_bf_store(ecx *e, const lval *l, qty t, int rv)
 /* r stored to l as type t (a bit-field or not); r stays */
 VPRIV void wk_put(ecx *e, const lval *l, qty t, int r)
 {
+	int vol = (QQ(t) & Q_VOLATILE) != 0;
+
+	e->novtag += vol;
 	if (l->bf)
 		wk_bf_store(e, l, t, r);
 	else
 		LO(store)(e, r, l, wk_size(e->c, t));
+	e->novtag -= vol;
 }
 
 VPRIV void wk_bfinit(ecx *e, const lval *l, qty t, uint32_t init)
@@ -722,10 +726,11 @@ static int wk_atomic_record_size(ecx *e, qty t)
 	return (int)size;
 }
 
+/* (a volatile access: e->novtag, so the lowering keeps it as it is) */
 static val wk_load(ecx *e, lval l, qty t)
 {
 	cc *c = e->c;
-	int r;
+	int r, vol = (QQ(t) & Q_VOLATILE) != 0;
 
 	/* GNU void lvalues evaluate their address, but have no value to load,
 	   including when qualified volatile. */
@@ -758,21 +763,27 @@ static val wk_load(ecx *e, lval l, qty t)
 	}
 	if (wk_freg(e, t)) {
 		r = LO(ftreg)(e);
+		e->novtag += vol;
 		LO(load)(e, r, &l, wk_size(c, t), false);
+		e->novtag -= vol;
 		wk_lfree(e, &l);
 		return wk_vreg(r);
 	}
 	r = l.k == L_REG ? l.r : LO(treg)(e);
+	e->novtag += vol;
 	LO(load)(e, r, &l, wk_size(c, t), wk_signed(c, t) || KIND(c, t) == TY_BOOL ? wk_signed(c, t) : false);
+	e->novtag -= vol;
 	return wk_vreg(r);
 }
 
 /* v stored to l as type t; v is consumed, l is not */
 VPRIV void wk_store(ecx *e, const lval *l, qty t, val *v)
 {
-	int r = wk_reg(e, v, t);
+	int r = wk_reg(e, v, t), vol = (QQ(t) & Q_VOLATILE) != 0;
 
+	e->novtag += vol;
 	LO(store)(e, r, l, wk_size(e->c, t));
+	e->novtag -= vol;
 	LO(tfree)(e, r);
 }
 

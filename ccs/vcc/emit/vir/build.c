@@ -628,7 +628,7 @@ VPRIV void vw_load(ecx *e, int rd, const lval *l, int size, bool sgn)
 	if (!ty)
 		vw_fail(e, "VIR: a float load of this size");
 	a = vw_addr(e, l, (uint64_t)size, &slot, &rel);
-	if (slot != VW_NOBLK) {	/* the value last stored here, in this block */
+	if (slot != VW_NOBLK && !e->novtag) {	/* the value last stored here, in this block (not volatile) */
 		for (uint32_t i = V->nst; i-- > 0;) {
 			vwstent *s = &V->st[i];
 
@@ -648,7 +648,7 @@ VPRIV void vw_load(ecx *e, int rd, const lval *l, int size, bool sgn)
 		}
 		V->sl[slot].loads++;
 	}
-	v = vw_ins(e, VO_LOAD, ty, vw_mfl(size, l->align, !f && sgn && size < 8), a, 0, 0);
+	v = vw_ins(e, VO_LOAD, ty, vw_mfl(size, l->align, !f && sgn && size < 8) | (e->novtag ? VIF_VOL : 0), a, 0, 0);
 	if (slot != VW_NOBLK)
 		V->p[v].slot = slot + 1;	/* (which slot: for the dead-store pass) */
 	vw_set(e, rd, v);
@@ -698,7 +698,7 @@ VPRIV void vw_store(ecx *e, int rs, const lval *l, int size)
 	a = vw_addr(e, l, (uint64_t)size, &slot, &rel);
 	v = vw_conv(e, v, ty);
 	{
-		uint32_t s = vw_ins(e, VO_STORE, VT_VOID, vw_mfl(size, l->align, false), a, v, 0);
+		uint32_t s = vw_ins(e, VO_STORE, VT_VOID, vw_mfl(size, l->align, false) | (e->novtag ? VIF_VOL : 0), a, v, 0);
 
 		if (slot != VW_NOBLK)
 			V->p[s].slot = slot + 1;
