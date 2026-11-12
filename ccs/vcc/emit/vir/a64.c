@@ -1586,6 +1586,7 @@ static void vl_ret(vl *L)
  */
 static bool vl_dupok(vl *L, uint32_t t);
 static bool vl_rotok(const vir_fn *f, uint32_t b);
+static bool vl_plainblk(const vir_fn *f, uint32_t b, uint8_t term);
 
 /* A jump forward from b to a block t that only tests (a join's `brif` on what its
  * predecessors made, one instruction before it at most): a copy of t in place of the jump,
@@ -1596,8 +1597,11 @@ static bool vl_small(vl *L, uint32_t b, uint32_t t)
 {
 	const vir_blk *k = &L->f->blk[t];
 
-	return !L->e->E->noopt && t > b && L->dup < 2 && k->n - k->nparam <= 2 && !(L->f->blk[b].fl & VB_COLD) &&
-	       vl_rotok(L->f, t);
+	if (L->e->E->noopt || t <= b || L->dup >= 2 || k->n - k->nparam > 2 || (L->f->blk[b].fl & VB_COLD))
+		return false;
+	/* ... or does one thing and goes on (the `pOp++` every case of an interpreter's switch
+	 * breaks to, in front of the jump back to the dispatch): two jumps a round become one */
+	return vl_rotok(L->f, t) || vl_plainblk(L->f, t, VO_BR);
 }
 
 /* from block b's code, on to block t (an edge without moves left): a jump, or a copy of t */
@@ -2262,11 +2266,11 @@ static void vl_block(vl *L, uint32_t b)
  * speedtest1 ran more instructions than without the rotation (short loops).  VLT.hl[b] is
  * the loop of a header placed so, else VIR_NOBLK.  VCC_VIR_ROT=0: VIR's order.
  */
-static bool vl_rotok(const vir_fn *f, uint32_t b)
+static bool vl_plainblk(const vir_fn *f, uint32_t b, uint8_t term)
 {
 	const vir_blk *k = &f->blk[b];
 
-	if ((k->fl & VB_ADDR) || k->n - k->nparam > 8 || f->ins[k->first + k->n - 1].op != VO_BRIF)
+	if ((k->fl & VB_ADDR) || k->n - k->nparam > 8 || f->ins[k->first + k->n - 1].op != term)
 		return false;
 	for (uint32_t i = k->first + k->nparam; i < k->first + k->n; i++)
 		switch (f->ins[i].op) {
@@ -2275,6 +2279,8 @@ static bool vl_rotok(const vir_fn *f, uint32_t b)
 		}
 	return true;
 }
+
+static bool vl_rotok(const vir_fn *f, uint32_t b) { return vl_plainblk(f, b, VO_BRIF); }
 
 static void vl_order_range(vl *L, uint32_t lo, uint32_t hi, uint32_t *n)
 {

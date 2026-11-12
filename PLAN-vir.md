@@ -1487,6 +1487,26 @@ instruktioner; bruset mellan körningar är ca ±0,005 G.
   värden (0,73 G när det mättes) och flyttar till callee-saved: 0,06 G fler
   anrop à ca tre flyttar är ungefär hälften av gapet.  Det följer inliningen.
 
+### Tolkens `break`-block kopieras in i fallen (2026-11-12)
+
+- **Orsak till `b` i sqlite3VdbeExec (0,39 G mot clangs 0,27 G):** 201 av
+  funktionens 1181 `b` gick till ett block med `add x25, x25, #24; b` (`pOp++`
+  och hoppet tillbaka till dispatchen).  Varje opcode körde alltså två
+  ovillkorliga hopp, clang ett.
+- **Gjort (`vl_small`):** ett hopp framåt till ett block med högst en
+  instruktion före sitt `br` ersätts av en kopia av blocket, som redan gällde
+  för block som slutar i `brif`.
+- **Mätt, sqlite speedtest1 `--size 100`:** 25,720 G → 25,574 G instruktioner
+  (**−0,57 %**), kod +1,05 % (295 592 → 298 695); cykler −1,4 %, −0,5 %, +0,1 %
+  i tre parade körningar.  Mot clang 1,078x i instruktioner.
+- **Tester:** nytt `vcc/vir_break_dup.c`; C-sviterna genom VIR med kontrollen
+  2102/2102 (de tre switch-felen är borta på main), inline 85/85, vcc 299/299
+  direkt, TSVC 151/151, sqlite samma hash.
+- **TSVC på main är 7,37 G cykler, var 6,29 G före #125** (77 vektoriserade
+  loopar mot 43).  Samma tal med och utan den här ändringen, med
+  `VCC_VIR_SHRINK=0` och med `VCC_VIR_ROT=0`: det kommer inte härifrån och är
+  inte undersökt.
+
 ### Underlag för V4 (2026-11-11): registerallokering, ingen kod
 
 - `RESEARCH-regalloc.md`: vad GCC (IRA, LRA) och LLVM (Greedy, Fast, PBQP,
