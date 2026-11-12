@@ -1,0 +1,14 @@
+; a constant call argument without its type suffix
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+sig %c = (int) -> int
+extern @g
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  v1:i64 = call @g %c (5)
+  ret v1
+}
+; ---
+bad/syntax-missing-type.vir:10:24: a `:type` suffix is required here

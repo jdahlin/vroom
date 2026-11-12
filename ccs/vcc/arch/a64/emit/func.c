@@ -129,6 +129,22 @@ VPRIV void ctor_entry(cc *c, tbuf *b, uint32_t s, bool fini)
 	tb_c(b, '\n');
 }
 
+/*
+ * VIR's functions (e->vlow) get two more frame shapes: a function that calls nothing and
+ * does not touch x29/x30 but has slots or callee-saved registers keeps no frame record
+ * (as LLVM's leaf functions: sub sp, saves from sp, add sp); and with no slot below the
+ * record, sp is x29 all along and the epilogue needs no mov sp, x29.
+ */
+static _Thread_local struct {
+	bool sleaf;		/* the first: sp-relative saves, fsz bytes below the incoming sp */
+	bool nomov;		/* the second */
+	int64_t fsz;
+} FK;
+
+/* where callee-saved register k of csave bytes is: base register and offset */
+static inline int cs_base(void) { return FK.sleaf ? SP : R_FP; }
+static inline int64_t cs_off(int32_t csave, int k) { return (FK.sleaf ? FK.fsz : 0) - csave + 8 * k; }
+
 /* finish_function for the object backend: the same function as items */
 /* ctor: 1 constructor, 2 destructor, 4 x28 is the frame base (mov x28, sp after the saves), 8 no frame (leaf) */
 static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int ncs, int32_t csave, int64_t total, int ctor)
@@ -152,6 +168,8 @@ static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int
 #define PUT(...) (in[n++] = (ins){ __VA_ARGS__ })
 	if (ctor & 8)
 		;
+	else if (FK.sleaf)
+		PUT(.op = I_SUBI, .sz = 1, .rd = SP, .rn = SP, .imm = FK.fsz);
 	else if (PUT(.op = I_STP, .sz = 1, .rd = R_FP, .ra = R_LR, .rn = SP, .cond = 1, .imm = -16),
 		 PUT(.op = I_MOV, .sz = 1, .rd = R_FP, .rn = SP), e->falign > 16) {	/* sp = (sp - frame) & -falign */
 		PUT(.op = I_SUBI, .sz = 1, .rd = R_X16, .rn = SP, .imm = total - 16);
@@ -160,19 +178,24 @@ static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int
 		PUT(.op = I_SUBI, .sz = 1, .rd = SP, .rn = SP, .imm = total - 16);
 	}
 	for (int k = 0; k + 1 < ncs; k += 2)
-		PUT(.op = I_STP, .sz = 1, .rd = (uint8_t)cs[k], .ra = (uint8_t)cs[k + 1], .rn = R_FP, .imm = -csave + 8 * k);
+		PUT(.op = I_STP, .sz = 1, .rd = (uint8_t)cs[k], .ra = (uint8_t)cs[k + 1], .rn = (uint8_t)cs_base(), .imm = cs_off(csave, k));
 	if (ncs & 1)
-		PUT(.op = I_ST, .sz = 3, .rd = (uint8_t)cs[ncs - 1], .rn = R_FP, .imm = -csave + 8 * (ncs - 1));
+		PUT(.op = I_ST, .sz = 3, .rd = (uint8_t)cs[ncs - 1], .rn = (uint8_t)cs_base(), .imm = cs_off(csave, ncs - 1));
 	if (ctor & 4)
 		PUT(.op = I_MOV, .sz = 1, .rd = R_BP, .rn = SP);
 	memcpy(in + n, e->in, (size_t)e->nin * sizeof(ins));
 	n += e->nin;
 	for (int k = 0; k + 1 < ncs; k += 2)
-		PUT(.op = I_LDP, .sz = 1, .rd = (uint8_t)cs[k], .ra = (uint8_t)cs[k + 1], .rn = R_FP, .imm = -csave + 8 * k);
+		PUT(.op = I_LDP, .sz = 1, .rd = (uint8_t)cs[k], .ra = (uint8_t)cs[k + 1], .rn = (uint8_t)cs_base(), .imm = cs_off(csave, k));
 	if (ncs & 1)
-		PUT(.op = I_LD, .sz = 3, .rd = (uint8_t)cs[ncs - 1], .rn = R_FP, .imm = -csave + 8 * (ncs - 1));
-	if (!(ctor & 8)) {
-		PUT(.op = I_MOV, .sz = 1, .rd = SP, .rn = R_FP);
+		PUT(.op = I_LD, .sz = 3, .rd = (uint8_t)cs[ncs - 1], .rn = (uint8_t)cs_base(), .imm = cs_off(csave, ncs - 1));
+	if (ctor & 8)
+		;
+	else if (FK.sleaf) {
+		PUT(.op = I_ADDI, .sz = 1, .rd = SP, .rn = SP, .imm = FK.fsz);
+	} else {
+		if (!FK.nomov)
+			PUT(.op = I_MOV, .sz = 1, .rd = SP, .rn = R_FP);
 		PUT(.op = I_LDP, .sz = 1, .rd = R_FP, .ra = R_LR, .rn = SP, .cond = 2, .imm = 16);
 	}
 	if (tail)
@@ -275,7 +298,7 @@ static void expand_tables(ecx *e, uint32_t fid)
 		d -= 6 + j->n;
 		ins *o = &e->in[d];
 		o[0] = (ins){ .op = I_ADR, .rd = R_X16, .label = x.label };
-		o[1] = (ins){ .op = I_ADD, .sz = 1, .rd = R_X17, .rn = R_X16, .rm = x.rd, .sh = 2 };
+		o[1] = (ins){ .op = I_ADD, .sz = 1, .rd = R_X17, .rn = R_X16, .rm = x.rd, .sh = 2, .cond = x.cond ? 8 + 2 : 0 };
 		o[2] = (ins){ .op = I_LD, .sz = 2, .cond = 1, .rd = R_X17, .rn = R_X17 };
 		o[3] = (ins){ .op = I_ADD, .sz = 1, .rd = R_X16, .rn = R_X16, .rm = R_X17 };
 		o[4] = (ins){ .op = I_BR, .rn = R_X16 };
@@ -297,7 +320,145 @@ static void expand_tables(ecx *e, uint32_t fid)
 	e->nin = (uint32_t)total;
 }
 
-static void finish_function(ecx *e, uint32_t s)
+/*
+ * tbz/tbnz reach +-32 KB: one whose label may be farther (word offsets from a64_words, with
+ * room for the printer's and the object writer's own relaxation of b.cond) becomes the
+ * inverted test over a b, as LLVM's BranchRelaxation does.
+ */
+static void tbz_relax(ecx *e)
+{
+	enum { NEAR = 6000 };	/* words, of the 8191 tbz reaches */
+	uint32_t m = 0, n = e->nin, *at, total = 0;
+
+	for (uint32_t k = 0; k < n; k++)
+		m += e->in[k].op == I_TBZ || e->in[k].op == I_TBNZ;
+	if (!m)
+		return;
+	at = malloc(((size_t)n + 1 + e->nlabel) * sizeof *at);
+	if (!at)
+		abort();
+	uint32_t *lat = at + n + 1;
+
+	for (uint32_t k = 0; k < n; k++) {
+		at[k] = total;
+		if (e->in[k].op == I_LABEL)
+			lat[e->in[k].label] = total;
+		total += a64_words(&e->in[k]);
+		if (total > (1u << 30))
+			total = 1u << 30;
+	}
+	at[n] = total;
+	if ((uint64_t)n + 2ull * m > e->capin) {
+		fputs("vcc: function too large\n", stderr);
+		abort();
+	}
+	uint32_t w = n + 2 * m;
+
+	for (uint32_t k = n; k-- > 0;) {
+		ins t = e->in[k];
+		int64_t d;
+
+		if (t.op != I_TBZ && t.op != I_TBNZ) {
+			e->in[--w] = t;
+			continue;
+		}
+		d = (int64_t)lat[t.label] - at[k];
+		if (total < (1u << 17) && d > -NEAR && d < NEAR) {
+			e->in[--w] = t;
+			continue;
+		}
+		uint32_t l = newlabel(e);
+
+		for (uint32_t r = 0; r < e->ndl; r++)	/* (-g rows after it move by the two records) */
+			if (e->dl[r].k > k)
+				e->dl[r].k += 2;
+		e->in[--w] = (ins){ .op = I_LABEL, .label = l };
+		e->in[--w] = (ins){ .op = I_B, .label = t.label };
+		t.op = t.op == I_TBZ ? I_TBNZ : I_TBZ;
+		t.label = l;
+		e->lrefc[l] = 1;
+		e->in[--w] = t;
+	}
+	free(at);
+	memmove(e->in, e->in + w, (size_t)(n + 2 * m - w) * sizeof(ins));
+	e->nin = n + 2 * m - w;
+}
+
+/* I_NOP.cond in a sibling call's epilogue with unwind tables: the printer's .cfi rows */
+enum { NOP_CFI_REMEMBER = 0xc1, NOP_CFI_EPILOGUE, NOP_CFI_RESTORE };
+
+/* VIR's sibling calls in the body (I_TAIL cond 2, 3): the epilogue, then the branch; with
+ * unwind tables between .cfi_remember_state and .cfi_restore_state (as clang) */
+static void tail_expand(ecx *e, const int *cs, int ncs, int32_t csave, bool leaf, bool cfi)
+{
+	uint32_t m = 0, add = (uint32_t)(ncs + 1) / 2 + 7;
+	/* a return (cond 4) gets its own epilogue up to this many instructions, ret included */
+	bool dup = (ncs + 1) / 2 + (leaf ? 0 : FK.sleaf || FK.nomov ? 1 : 2) + 1 <= 6;
+
+	for (uint32_t k = 0; k < e->nin; k++)
+		m += e->in[k].op == I_TAIL && e->in[k].cond >= 2;
+	if (!m)
+		return;
+	cfi &= !leaf;	/* (no frame: the CFA stays sp) */
+	if ((uint64_t)e->nin + (uint64_t)m * add > e->capin) {
+		fputs("vcc: function too large\n", stderr);
+		abort();
+	}
+	uint32_t n = e->nin + m * add, w = n;
+
+	for (uint32_t k = e->nin; k-- > 0;) {
+		ins t = e->in[k], seq[20];
+		uint32_t q = 0;
+
+		if (t.op != I_TAIL || t.cond < 2) {
+			e->in[--w] = t;
+			continue;
+		}
+		if (t.cond == 4) {
+			uint32_t j = k + 1;
+
+			while (j < e->nin && e->in[j].op == I_LABEL)
+				j++;
+			if (j == e->nin)	/* the last record: falls into the shared epilogue */
+				continue;
+			if (!dup) {
+				e->in[--w] = (ins){ .op = I_B, .label = t.label };
+				continue;
+			}
+		}
+		if (t.cond == 3 && t.rn != R_X16)
+			seq[q++] = (ins){ .op = I_MOV, .sz = 1, .rd = R_X16, .rn = t.rn };
+		if (cfi)
+			seq[q++] = (ins){ .op = I_NOP, .cond = NOP_CFI_REMEMBER };
+		for (int j = 0; j + 1 < ncs; j += 2)
+			seq[q++] = (ins){ .op = I_LDP, .sz = 1, .rd = (uint8_t)cs[j], .ra = (uint8_t)cs[j + 1], .rn = (uint8_t)cs_base(),
+					  .imm = cs_off(csave, j) };
+		if (ncs & 1)
+			seq[q++] = (ins){ .op = I_LD, .sz = 3, .rd = (uint8_t)cs[ncs - 1], .rn = (uint8_t)cs_base(), .imm = cs_off(csave, ncs - 1) };
+		if (leaf)
+			;
+		else if (FK.sleaf) {
+			seq[q++] = (ins){ .op = I_ADDI, .sz = 1, .rd = SP, .rn = SP, .imm = FK.fsz };
+		} else {
+			if (!FK.nomov)
+				seq[q++] = (ins){ .op = I_MOV, .sz = 1, .rd = SP, .rn = R_FP };
+			seq[q++] = (ins){ .op = I_LDP, .sz = 1, .rd = R_FP, .ra = R_LR, .rn = SP, .cond = 2, .imm = 16 };
+		}
+		if (cfi)
+			seq[q++] = (ins){ .op = I_NOP, .cond = NOP_CFI_EPILOGUE };
+		seq[q++] = t.cond == 2 ? (ins){ .op = I_TAIL, .cond = 1, .ref = t.ref } :
+			   t.cond == 4 ? (ins){ .op = I_RET } : (ins){ .op = I_BR, .rn = R_X16 };
+		if (cfi)
+			seq[q++] = (ins){ .op = I_NOP, .cond = NOP_CFI_RESTORE };
+		w -= q;
+		memcpy(&e->in[w], seq, q * sizeof(ins));
+	}
+	/* (w > 0: the room not used, at the front) */
+	memmove(e->in, e->in + w, (size_t)(n - w) * sizeof(ins));
+	e->nin = n - w;
+}
+
+VPRIV void finish_function(ecx *e, uint32_t s)
 {
 	cc *c = e->c;
 	tbuf *b = &e->out;
@@ -309,6 +470,8 @@ static void finish_function(ecx *e, uint32_t s)
 	uint32_t align = 4;
 
 	bool bp = e->falign > 16 && e->dyn, leaf = false;
+
+	FK.sleaf = FK.nomov = false;
 
 	if (e->E->o->opt >= 1) {	/* -O1 and up */
 		unsigned fl;
@@ -334,6 +497,8 @@ static void finish_function(ecx *e, uint32_t s)
 				e->fmax = 0;
 			leaf = !(fl & (OPF_CALL | OPF_FRAME)) && !e->dyn && !bp && e->falign <= 16 && !e->outmax &&
 			       !(e->usedcs & csm) && !(u & ((1ull << 29) | (1ull << 30)));
+			FK.sleaf = !leaf && e->vlow && !(fl & OPF_CALL) && !e->dyn && !bp && e->falign <= 16 && !e->outmax &&
+				   !(u & ((1ull << 29) | (1ull << 30)));
 		}
 	}
 
@@ -364,6 +529,11 @@ static void finish_function(ecx *e, uint32_t s)
 	if (locals > INT64_MAX - outs - csave - 16)
 		efatal(e, 0, "stack frame too large");
 	total = 16 + csave + locals + outs;
+	FK.fsz = total - 16;
+	if (FK.sleaf && FK.fsz > 496)	/* (ldp/stp from sp reach 504) */
+		FK.sleaf = false;
+	FK.nomov = e->vlow && !leaf && !FK.sleaf && total == 16 && !e->dyn && !bp && e->falign <= 16;
+	tail_expand(e, cs, ncs, csave, leaf, e->E->o->cfi && !DARWIN(c));
 	/* rewrite frame-slot references */
 	for (uint32_t k = 0; k < e->nin; k++) {
 		ins *i = &e->in[k];
@@ -393,6 +563,7 @@ static void finish_function(ecx *e, uint32_t s)
 		align = a->aligned;
 	if (c->syms[s].align > align)
 		align = c->syms[s].align;
+	tbz_relax(e);
 	if (direct(e)) {
 		finish_direct(e, s, align, cs, ncs, csave, total, (a->constructor != 0) | (a->destructor != 0) << 1 | bp << 2 | leaf << 3);
 		return;
@@ -415,7 +586,13 @@ static void finish_function(ecx *e, uint32_t s)
 		tb_s(b, "\t.cfi_startproc\n");
 	if (leaf)
 		;
-	else if (tb_s(b, cfi ? "\tstp\tx29, x30, [sp, #-16]!\n\t.cfi_def_cfa_offset 16\n\tmov\tx29, sp\n"
+	else if (FK.sleaf) {
+		ins i = { .op = I_SUBI, .sz = 1, .rd = SP, .rn = SP, .imm = FK.fsz };
+
+		print_ins(c, b, &i, s, e->raw.p);
+		if (cfi)
+			tb_f(b, "\t.cfi_def_cfa_offset %d\n", (int)FK.fsz);
+	} else if (tb_s(b, cfi ? "\tstp\tx29, x30, [sp, #-16]!\n\t.cfi_def_cfa_offset 16\n\tmov\tx29, sp\n"
 			      "\t.cfi_def_cfa w29, 16\n\t.cfi_offset w30, -8\n\t.cfi_offset w29, -16\n" :
 			      "\tstp\tx29, x30, [sp, #-16]!\n\tmov\tx29, sp\n"), e->falign > 16) {
 		ins i = { .op = I_SUBI, .sz = 1, .rd = R_X16, .rn = SP, .imm = total - 16 };
@@ -429,12 +606,12 @@ static void finish_function(ecx *e, uint32_t s)
 		print_ins(c, b, &i, s, e->raw.p);
 	}
 	for (int k = 0; k + 1 < ncs; k += 2)
-		tb_f(b, "\tstp\tx%d, x%d, [x29, #%d]\n", cs[k], cs[k + 1], -csave + 8 * k);
+		tb_f(b, "\tstp\tx%d, x%d, [%s, #%d]\n", cs[k], cs[k + 1], FK.sleaf ? "sp" : "x29", (int)cs_off(csave, k));
 	if (ncs & 1)
-		tb_f(b, "\tstr\tx%d, [x29, #%d]\n", cs[ncs - 1], -csave + 8 * (ncs - 1));
+		tb_f(b, "\tstr\tx%d, [%s, #%d]\n", cs[ncs - 1], FK.sleaf ? "sp" : "x29", (int)cs_off(csave, ncs - 1));
 	if (cfi)
 		for (int k = 0; k < ncs; k++)
-			tb_f(b, "\t.cfi_offset w%d, %d\n", cs[k], -csave + 8 * k - 16);
+			tb_f(b, "\t.cfi_offset w%d, %d\n", cs[k], -csave + 8 * k - (FK.sleaf ? 0 : 16));
 	if (bp)
 		tb_s(b, "\tmov\tx28, sp\n");
 	/* text has no relaxation (the object writer's r_relax): in a function that
@@ -470,6 +647,20 @@ static void finish_function(ecx *e, uint32_t s)
 			}
 			continue;
 		}
+		if (i->op == I_NOP && cfi && i->cond >= NOP_CFI_REMEMBER) {
+			if (i->cond == NOP_CFI_REMEMBER) {
+				tb_s(b, "\t.cfi_remember_state\n");
+			} else if (i->cond == NOP_CFI_RESTORE) {
+				tb_s(b, "\t.cfi_restore_state\n");
+			} else {
+				for (int k = 0; k < ncs; k++)
+					tb_f(b, "\t.cfi_restore w%d\n", cs[k]);
+				if (!leaf && !FK.sleaf)
+					tb_s(b, "\t.cfi_restore w29\n\t.cfi_restore w30\n");
+				tb_s(b, "\t.cfi_def_cfa wsp, 0\n");
+			}
+			continue;
+		}
 		print_ins(c, b, i, s, e->raw.p);
 	}
 	for (; dj < e->ndl; dj++)
@@ -478,18 +669,24 @@ static void finish_function(ecx *e, uint32_t s)
 			     e->dl[dj].file, e->dl[dj].line, e->dl[dj].col);
 	/* epilogue */
 	for (int k = 0; k + 1 < ncs; k += 2)
-		tb_f(b, "\tldp\tx%d, x%d, [x29, #%d]\n", cs[k], cs[k + 1], -csave + 8 * k);
+		tb_f(b, "\tldp\tx%d, x%d, [%s, #%d]\n", cs[k], cs[k + 1], FK.sleaf ? "sp" : "x29", (int)cs_off(csave, k));
 	if (ncs & 1)
-		tb_f(b, "\tldr\tx%d, [x29, #%d]\n", cs[ncs - 1], -csave + 8 * (ncs - 1));
+		tb_f(b, "\tldr\tx%d, [%s, #%d]\n", cs[ncs - 1], FK.sleaf ? "sp" : "x29", (int)cs_off(csave, ncs - 1));
 	uint32_t tail = a64_tail_ref(e);
 
-	if (!leaf)
-		tb_s(b, "\tmov\tsp, x29\n\tldp\tx29, x30, [sp], #16\n");
+	if (leaf)
+		;
+	else if (FK.sleaf) {
+		ins i = { .op = I_ADDI, .sz = 1, .rd = SP, .rn = SP, .imm = FK.fsz };
+
+		print_ins(c, b, &i, s, e->raw.p);
+	} else
+		tb_s(b, FK.nomov ? "\tldp\tx29, x30, [sp], #16\n" : "\tmov\tsp, x29\n\tldp\tx29, x30, [sp], #16\n");
 	if (tail) {
 		if (cfi) {
 			for (int k = 0; k < ncs; k++)
 				tb_f(b, "\t.cfi_restore w%d\n", cs[k]);
-			if (!leaf)
+			if (!leaf && !FK.sleaf)
 				tb_s(b, "\t.cfi_restore w29\n\t.cfi_restore w30\n");
 			tb_s(b, "\t.cfi_def_cfa wsp, 0\n");
 		}

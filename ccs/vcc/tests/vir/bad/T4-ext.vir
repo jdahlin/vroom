@@ -1,0 +1,13 @@
+; ext of more bytes than its operand has
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  v1:i32 = trunc v0
+  v2:i64 = ext.8s v1
+  ret v2
+}
+; ---
+@f b0.2: T4: ext: width 8 does not fit i32

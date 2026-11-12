@@ -292,6 +292,7 @@ VPRIV void wk_init(ecx *e, const lval *d, qty t, uint32_t init)
 {
 	cc *c = e->c;
 	const node *x = N(init);
+	int vol = (QQ(t) & Q_VOLATILE) != 0;
 
 	if (!init)
 		return;
@@ -300,11 +301,15 @@ VPRIV void wk_init(ecx *e, const lval *d, qty t, uint32_t init)
 
 		LO(zero)(e, rd, tsize(c, t));
 		LO(tfree)(e, rd);
+		e->novtag += vol;	/* (a volatile object's initializing stores are volatile accesses too) */
 		wk_elems(e, d, t, init);
+		e->novtag -= vol;
 		return;
 	}
 	if (wk_mem(e, t)) {
+		e->novtag += vol;
 		wk_elems(e, d, t, init);	/* another object's bytes */
+		e->novtag -= vol;
 		return;
 	}
 	{
@@ -312,7 +317,9 @@ VPRIV void wk_init(ecx *e, const lval *d, qty t, uint32_t init)
 		val v = wk_gen(e, init);
 		int r = wk_reg(e, &v, t);
 
+		e->novtag += vol;
 		LO(store)(e, r, d, wk_size(c, t));
+		e->novtag -= vol;
 		LO(tfree)(e, r);
 	}
 }
@@ -409,6 +416,10 @@ static void wk_decl(ecx *e, const node *x)
 				wk_store(e, &l, y->ty, &z);
 			}
 		}
+#ifdef WK_PREFIX
+		if (!x->b && !e->E->o->autozero)
+			LO(undecl)(e, &l, tsize(c, y->ty));
+#endif
 		wk_init(e, &l, y->ty, x->b);
 	}
 	if (sym_attrs(c, s)->cleanup) {
@@ -1241,6 +1252,9 @@ static void wk_stmt1(ecx *e, uint32_t n)
 /* ---------------- inlining ---------------- */
 
 #define WK_INLINE_NODES 40	/* AST nodes: a few statements (as arm64) */
+#ifndef WK_INLINE_ONCE
+#define WK_INLINE_ONCE 4000	/* under VIR: a static function with one call */
+#endif
 
 VPRIV bool wk_const_sym(ecx *e, uint32_t s, val *v)
 {
@@ -1311,12 +1325,28 @@ VPRIV bool wk_can_inline(ecx *e, uint32_t s)
 		if (vm_type(c, c->syms[c->lists[N(y->body)->a + i]].ty))
 			return false;	/* (a parameter's VLA sizes) */
 	if (!(y->flags & SF_ALWAYS_INLINE)) {
+		uint32_t lim = WK_INLINE_NODES;
+
 		if (!e->E->o->opt)
 			return false;
 		if ((y->flags & SF_NOINLINE) || (!(y->flags & SF_INLINE) && y->sc != SC_STATIC))
 			return false;
+#ifdef WK_PREFIX
+		/* VIR: per call site by the callee's size with the callees it inlines itself
+		   (fn_isize, bottom-up as LLVM), so nested copies cannot grow exponentially; a
+		   static function called once is its only copy, so inlined up to a large body
+		   (clang's last-call-to-static bonus) */
+		if (e->vtry && e->E->isz) {
+			bool once = (e->E->once[s] & 1) && y->sc == SC_STATIC && !sym_attrs(c, s)->used;
+
+			lim = once ? WK_INLINE_ONCE : WK_INLINE_VIR;
+			walk_fn(e, s);
+			if (!once && e->E->isz[s] > lim)
+				return false;
+		}
+#endif
 		walk_fn(e, s);
-		if (e->E->fnsize[s] > WK_INLINE_NODES)
+		if (e->E->fnsize[s] > lim)
 			return false;	/* (a tiny static function too, as clang: an empty stub drops its arguments) */
 		if (!(y->flags & SF_INLINE) && !wk_tiny_ok(c, y->body))
 			return false;
@@ -1324,8 +1354,16 @@ VPRIV bool wk_can_inline(ecx *e, uint32_t s)
 	ensure_walked(e->E, c, s);
 	if (e->E->sflags[s] & SA_NOINL)
 		return false;
+#ifdef WK_PREFIX
+	if (e->vtry && e->E->once && (e->E->once[s] & 2))
+		return false;	/* (calls setjmp: prepass.c) */
+#endif
 	if (s == e->wk->fsym || e->wk->depth >= 16)
 		return false;
+#ifdef WK_PREFIX
+	if (e->vtry && e->E->scc && e->E->scc[s] == e->E->scc[e->wk->inl ? e->wk->inl->fn : e->wk->fsym])
+		return false;	/* (its own recursion group: fn_isize) */
+#endif
 	for (wkinl *I = e->wk->inl; I; I = I->up)
 		if (I->fn == s)
 			return false;
@@ -1388,7 +1426,7 @@ VPRIV val wk_inline(ecx *e, uint32_t n, uint32_t s)
 		for (uint32_t i = 0; i < body->aux; i++) {
 			uint32_t p = c->lists[body->a + i];
 			qty pt = c->syms[p].ty;
-			lval l = { .k = L_FRAME, .off = wk_local(e, p), .align = sym_align(c, p) }, t = { .k = L_FRAME, .off = as[i], .align = 8 };
+			lval l, t = { .k = L_FRAME, .off = as[i], .align = 8 };
 			val v;
 
 			if (!as[i] && !(e->E->sflags[p] & (SA_WRITTEN | SA_CWRITE)) && !(QQ(pt) & Q_VOLATILE) &&
@@ -1397,6 +1435,12 @@ VPRIV val wk_inline(ecx *e, uint32_t n, uint32_t s)
 				W->kval[p] = av[i].k == V_ADDR ? av[i] : vconst(em_trunc_to(c, av[i].i, pt));
 				continue;
 			}
+			/* the home the copy's body reads: a lowering's variable of the copy's own instance
+			   (VIR), else the frame slot */
+			W->inst = W->ninst + 1;
+			if (!LO(local)(e, p, &l))
+				l = (lval){ .k = L_FRAME, .off = wk_local(e, p), .align = sym_align(c, p) };
+			W->inst = inst0;
 			W->kgen[p] = 0;
 			if ((av[i].k == V_CONST || (av[i].k == V_ADDR && is_ptr(c, pt) && !wk_weak0(c, av[i]))) && !wk_mem(e, pt) &&
 			    !is_flt(c, pt) && W->npk < 16) {

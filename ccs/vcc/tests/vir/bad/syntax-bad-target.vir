@@ -1,0 +1,5 @@
+; an unknown target
+vir 1
+target mips-linux
+; ---
+bad/syntax-bad-target.vir:3:8: unknown target (x86_64-linux, arm64-linux, arm64-darwin)

@@ -1,0 +1,12 @@
+; an arithmetic flag on a compare
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  v1:i32 = icmp.slt v0, 1 nsw
+  ret v0
+}
+; ---
+bad/syntax-flag-on-compare.vir:8:27: flag `nsw` is not allowed on icmp

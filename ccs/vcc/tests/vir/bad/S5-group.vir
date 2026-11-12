@@ -1,0 +1,11 @@
+; param names a group the signature does not have
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+func @f %s {
+b0:
+  v0:i64 = param 5.0
+  ret v0
+}
+; ---
+@f b0.0: S5: group 5 does not exist (1 groups)

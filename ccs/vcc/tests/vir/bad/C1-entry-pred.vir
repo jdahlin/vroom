@@ -1,0 +1,15 @@
+; block 0 has a predecessor
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  brif v0, b1, b2
+b1:
+  br b0
+b2:
+  ret v0
+}
+; ---
+@f b0: C1: block 0 has predecessors

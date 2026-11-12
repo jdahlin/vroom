@@ -577,7 +577,15 @@ static void store1(ecx *e, lval *l, qty t, val *v)
 		val d = laddr(e, l);
 		int rs = toreg(e, v), rd = toreg(e, &d);
 
-		copy_mem(e, rd, rs, size);
+		if (is_sve(c, t)) {
+			/* the bytes of this vector length, through z31 or p15: ldr, str */
+			uint32_t z = is_svpred(c, t) ? 15 : 0x4000 | 31;
+
+			word(e, 0x85800000u | z | (unsigned)rs << 5);
+			word(e, 0xe5800000u | z | (unsigned)rd << 5);
+		} else {
+			copy_mem(e, rd, rs, size);
+		}
 		val_free(e, &d);
 		return;
 	}

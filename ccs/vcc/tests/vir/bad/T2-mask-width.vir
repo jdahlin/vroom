@@ -1,0 +1,15 @@
+; a mask of 32-bit lanes selecting 64-bit ones
+vir 1
+target arm64-darwin
+sig %s = (int) -> none
+func @f %s {
+b0:
+  v0:ptr = param 0.0
+  v1:f64x2 = load.8 v0 align 8
+  v2:i32x4 = vseries
+  v3:f64x2 = vbitsel v2, v1, v1
+  store.8 v0, v3 align 8
+  ret
+}
+; ---
+@f b0.3: T2: vbitsel: operand a has type i32x4

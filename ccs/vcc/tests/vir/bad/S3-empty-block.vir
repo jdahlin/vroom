@@ -1,0 +1,11 @@
+; a block with no instructions
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+func @f %s {
+b0:
+  br b1
+b1:
+}
+; ---
+@f b1: S3: the block is empty

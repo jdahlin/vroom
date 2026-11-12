@@ -1,0 +1,32 @@
+; VERIFY: no
+; DOM: yes
+; a block nothing reaches has no dominator
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  ret v0
+b1:
+  br b2
+b2:
+  br b1
+}
+; ---
+vir 1
+target x86_64-linux
+sig %s0 = (int) -> int
+
+func @f %s0 {
+b0:
+  v0:i64 = param 0.0
+  ret v0
+b1:
+  br b2
+b2:
+  br b1
+}
+; dom @f b0 idom b0 pre 0 post 0
+; dom @f b1 unreachable
+; dom @f b2 unreachable

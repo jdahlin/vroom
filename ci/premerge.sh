@@ -75,6 +75,8 @@ arm64)
 
 	step flow-contracts python3 bench/vcc-flow.py --sanitize
 	step flow-values python3 bench/vcc-flow-values.py --sanitize
+	step vir-tests python3 bench/vir-test.py -j "$J" --bin-dir "$BUILD"
+	step vir-exposure python3 bench/vir-exposure.py --bin-dir "$BUILD"
 	step rec-dead python3 bench/vcc-rec-dead.py --sanitize
 	step emit-names python3 bench/vcc-emit-names.py --sanitize
 	step unused-init-contracts python3 bench/vcc-unused-init.py --sanitize
@@ -134,7 +136,10 @@ asan)
 	# its arenas and caches mapped, by design, so every compile would "leak"
 	export ASAN_OPTIONS=${ASAN_OPTIONS:+$ASAN_OPTIONS:}detect_leaks=0
 	step ctests-vcc   env VCC_BIN="$B" python3 bench/vcc-ctests.py -j "$J" --suite vcc
+	step vir-tests-asan python3 bench/vir-test.py -j "$J" --bin-dir "$B"
+	step vir-exposure-asan python3 bench/vir-exposure.py --bin-dir "$B"
 	step atomic       python3 bench/vcc-atomic.py --bin-dir "$B" --target aarch64-linux-gnu
+	step virgen       python3 bench/virgen-test.py --bin-dir "$B"
 	step bitint-replay python3 bench/vcc-bitint-replay.py --bin-dir "$B" --output "$LOGS/bitint-replay-asan"
 	step diag         python3 bench/vcc-diag.py -j "$J" --bin-dir "$B"
 	step stress       python3 bench/vcc-stress.py --bin-dir "$B"
@@ -144,7 +149,9 @@ asan)
 tsan)
 	build vcc-tsan
 	B=$(dirname "$BUILD")/ccs-tsan
-	step ctests-vcc   env VCC_BIN="$B" python3 bench/vcc-ctests.py -j "$J" --suite vcc
+	# a test's vcc-timeout bounds the normal build; TSan's is 15-20x slower
+	# (init_large: 10 s was not enough on the x86-64 runner)
+	step ctests-vcc   env VCC_BIN="$B" VCC_TIMEOUT_SCALE=6 python3 bench/vcc-ctests.py -j "$J" --suite vcc
 	step vccd         python3 bench/vccd-test.py --bin-dir "$B"
 	step stress-vccd  python3 bench/vcc-stress.py --vccd --bin-dir "$B"
 	;;

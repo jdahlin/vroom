@@ -1,0 +1,13 @@
+; asm of a template with labels
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+asm !0 "jmp $l" outs() ins() clobber() labels 1
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  asm !0 outs() ins()
+  ret v0
+}
+; ---
+@f b0.1: A4: asm !0 has labels: it must be asmgoto

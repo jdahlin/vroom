@@ -1,0 +1,38 @@
+; PASSES: canon
+; constants written as instructions: a duplicate is unified, an unused one dropped, the rest ordered by first use
+vir 1
+target x86_64-linux
+extern @g
+sig %s = (int) -> int
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  v1:i64 = iconst 7
+  v2:i64 = iconst 3
+  v3:i64 = iconst 7
+  v4:i64 = iconst 99
+  v8:ptr = symaddr @g+8
+  v9:ptr = symaddr @g+8
+  v5:i64 = add v0, v2
+  v6:i64 = add v5, v1
+  v7:i64 = add v6, v3
+  store.8 v8, v7
+  store.8 v9, 3:i64
+  ret v7
+}
+; ---
+vir 1
+target x86_64-linux
+extern @g
+sig %s0 = (int) -> int
+
+func @f %s0 {
+b0:
+  v0:i64 = param 0.0
+  v1:i64 = add v0, 3
+  v2:i64 = add v1, 7
+  v3:i64 = add v2, 7
+  store.8 @g+8, v3
+  store.8 @g+8, 3:i64
+  ret v3
+}

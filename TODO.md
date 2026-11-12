@@ -115,6 +115,22 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   after the Apple variadic-slot fix (tests/abi/va_int_slot).  speedtest1
   --size 100 --memdb: clang -O2 2.49 s, gcc-16 -O2 2.44 s, vcc -O2 3.92 s;
   sqlite3.c compiles in 0.13 s (clang -O2 7.9 s, gcc 22 s).  `bench/sqlite/run.py all`.
+  zlib 1.4 on Darwin (2026-11-12, `bench/zlib/run.py all`): vcc and VIR
+  (`VCC_VIR=bl`) pass example, infcover and the minigzip round trips, and
+  deflate at levels 1/6/9 gives clang's bytes.  All 131 functions VIR sees
+  are lowered; only `crc32_z` (inline asm) falls back.  zbench on zlib's own
+  source tar, CPU time against clang -O2: vcc 1.37x, VIR 1.10x, gcc-16 0.99x
+  (VIR: deflate-1 1.32x, deflate-6 1.12x, deflate-9 1.09x, inflate 1.00-1.04x,
+  crc32 1.18x, adler32 0.98x).  Where VIR loses (sample profile):
+  `fill_window` 19x clang's share (clang vectorizes `slide_hash`),
+  `deflate_fast` 1.6x, `compress_block` 1.25x, `pqdownheap` not inlined into
+  `build_tree`; `.text` 79896 bytes against clang's 71598 and vcc's 72580.
+  After the allocator's parameter vote and load reuse across blocks
+  (PLAN-vir.md, 2026-11-12): VIR 1.03x in total, deflate-9 1.00x, deflate-6
+  1.09x, deflate-1 1.36x; `.text` 78304.  After own field addresses, narrow
+  stores, sub+cmp and csel with zero: total 1.02x, deflate-1 1.19x, deflate-6
+  1.02x; `.text` 74436.  Left on level 1: vectorizing `slide_hash`, and
+  type-based aliasing for `deflate_fast` (a flag, not decided).
 - [ ] **T14 the kernel runs, not just boots.**  KUnit built in
   (`CONFIG_KUNIT=y` plus the common suites, run at boot, TAP on the
   console), compared with the clang build's TAP; then kselftests and an LTP
@@ -596,6 +612,19 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `bcp-1` needs `__builtin_constant_p` of an inlined argument.  They are
   `WASM_XFAIL` in `bench/vcc-wasm.py` (premerge's wasm job).
   *Validate:* `bench/vcc-wasm.py -j 6` reports them as XPASS; remove the entries.
+- [ ] **wasm: a signed 32-bit constant widened to 64 bits** [C].
+  `long long a(void) { return (long long)(int)0x80ff0102; }` gives
+  `i64.const 2164195586` for wasm64 (the front end is right: a
+  `_Static_assert` that it is negative holds; arm64 is right).  Found by
+  `vir_byte_assembly` (marked `vcc-xfail-wasm`).
+  *Validate:* `bench/vcc-wasm.py -j 6 --suite vcc vir_byte_assembly` XPASSes; remove the marker.
+- [ ] **wasm: the inline suite** [C].  `bench/vcc-wasm.py` leaves the
+  `inline` suite (gcc/llvm inlining and IPA run tests, vendored for VIR) out
+  of its default run: in premerge's wasm job `gcc.dg-ipa-ipa-sra-1`,
+  `gcc.dg-ipa-pr119318`, `gcc.dg-ipa-pr92497-1`, `gcc.dg-torture-matrix-2`
+  and `gcc.dg-torture-matrix-6` differ from clang (only the first on a macOS
+  host), not looked into.
+  *Validate:* `bench/vcc-wasm.py -j 6 --suite inline` is green in CI; drop the filter.
 - [ ] **wasm: 128-bit overflow builtins** [C]. `overflow128` covers standard
   integer operands and destinations independently of `_BitInt`;
   `overflow128_effects` checks evaluation counts and result stores on overflow.
@@ -806,10 +835,32 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [ ] **SVE in the front end**: baseline AArch64 builtin sizeless types and
   libc declarations work; invalid size, array, field, storage and pointer
   arithmetic uses are diagnosed. Four diagnostics and declaration runtime
-  checks pass on Linux x86/ARM; ARM c-testsuite 220/220. Full `arm_sve.h`
-  tuple/intrinsic APIs, `target("+sve")` validation and scalable lowering
-  remain unsupported and are diagnosed explicitly.
-  *Validate:* T1 under `qemu -cpu max`, layout checks for the types.
+  checks pass on Linux x86/ARM; ARM c-testsuite 220/220.
+  Done (2026-11-12): sizeless values in the arm64 direct emitter and a
+  vcc-owned `include/arm_sve.h` for what PostgreSQL's
+  `pg_popcount_aarch64.c` uses (`svptrue_b*`, `svcnt[bhwd]`, `svdup_u8/u64`,
+  `svld1_u8/u64`, `svadd/svand[_n]_u8/u64_x`, `svcnt_u8/u64_x`,
+  `svaddv_u8/u64`, `svwhilelt_b8_s32/s64`), each a macro around inline asm.
+  A sizeless object is a frame slot of the architectural maximum (256 bytes,
+  a predicate 32); a copy moves the bytes of this vector length through
+  z31/p15 (`ldr`/`str`); an asm operand "w" is loaded into z16+ and "Upa"/
+  "Upl" into p0+ around the template (`arch/a64/emit/asm.c`).  `?:` on two
+  values of one sizeless type is accepted.  VIR leaves such functions to the
+  direct emitter (inline asm).  `bench/pg/speed.py` on a clang-configured
+  build: 1574/1574.
+  Left: the rest of `arm_sve.h` (tuples, the other element types, `_m`/`_z`
+  forms, operators on sizeless vectors, which sema rejects), sizeless
+  arguments and results (the vector PCS: diagnosed "code generation for an
+  SVE argument or result is not supported yet", so no intrinsic can be a
+  function), `target("+sve")` validation (a call to an intrinsic outside
+  such a function is not diagnosed), values in registers across statements
+  (every intrinsic loads and stores its operands), the `__mfp8` builtin type
+  (not needed once the header is vcc's own), and the unbraced
+  `ld1d z0.d, p0/z, [x0]` spelling in vas (GNU as takes it; the header
+  writes `{z0.d}`).
+  *Validate:* tests/vcc/sve_popcount.c under `qemu -cpu max` against clang
+  (the runtime's start.S sets CPACR_EL1.ZEN); tests/diag/sve_*.c; layout
+  checks for the types.
 - [x] **`ext_vector_type` silently dropped; unknown attributes no warning** [P].
   Done: `ext_vector_type` (tests/vcc/ext_vector.c);
   `-Wunknown-attributes` for GNU syntax from clang's attribute names per
@@ -1287,6 +1338,14 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   paths, ENOENT/EACCES/ENOTDIR messages).
 
 ## Tier 4: quality
+
+- [ ] **IPA constant propagation.** A static function's parameter that every
+  call passes the same constant is that constant in the body (clang's IPSCCP,
+  gcc's IPA-CP), noinline functions included: `__builtin_constant_p` of it is 1
+  and branches on it fold.  VIR inlines once-called statics (walker,
+  `fn_once`); calls it keeps see nothing of their arguments.
+  *Validate:* `bench/vcc-ctests.py --suite inline`: `gcc.dg-ipa-pr92497-1`
+  turns from xfail to XPASS (drop it from `INLINE_XFAIL`).
 
 - [ ] **Optimizer shared across x86, arm64 and wasm**. Implementation
   owner: `PLAN-fas2.md`, **Gemensam optimerare utan SSA**, OPT0–OPT8.

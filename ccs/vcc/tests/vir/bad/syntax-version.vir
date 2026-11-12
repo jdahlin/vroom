@@ -1,0 +1,4 @@
+; a version that is not a number
+vir one
+; ---
+bad/syntax-version.vir:2:5: expected an integer

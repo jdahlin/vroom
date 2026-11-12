@@ -1,8 +1,21 @@
 # VIR 1.0 specification
 
-Status: **draft 0.3, 2026-11-11**. Nothing here is implemented. Plan and steps
+Status: **draft 0.5, 2026-11-11**. Implemented: the format and its tools in
+sections 3-12, 16-18 and 22.5 (V1's first half; 0.4's corrections are listed
+in its pull request), and section 15's allocator and checker on a synthetic
+target (`PLAN-vir.md` V4, first part); nothing else. Plan and steps
 are in `PLAN-vir.md`; the reasons behind the rules are in `RESEARCH-vir.md`
-(rule numbers R1-R20 refer to its section 5).
+(rule numbers R1-R20 refer to its section 5). Changed in 0.5, from the
+allocator's implementation: 15.1 the full `vir_regs`/`vir_fix`; 15.2 spill
+slots in the allocator's own table, preconditions, the loop forest as input;
+15.5 `lend` at every back-edge target, the rule for edges into the middle of a
+loop and slots for blocks entered in slots (all three irreducible-flow fixes
+found by random testing), linear mode as a restart; 15.6 the step order with
+clobbers, the tied fallback, the header rule's count; 15.8 the choice of
+predecessor, cycle breaking; 15.11 what the checker checks. Changed in 0.4: section 15's
+allocator is no longer linear scan over intervals but greedy SSA assignment
+with farthest-next-use spilling, from `RESEARCH-regalloc.md` section 7
+(15.2, 15.3, new 15.5-15.11; 22.6 rows 5 and 6; the sweep count is unchanged).
 
 This document is the complete definition of the format and of the tools
 around it. Code is written to it, and a disagreement between code and this
@@ -32,7 +45,8 @@ macOS. All are little-endian with 64-bit pointers; VIR 1.0 assumes both.
 1.3 Not in 1.0 (a function that needs one of these is not built as VIR and
 takes the ordinary path): calls to `returns_twice` functions, `setjmp`,
 `alloca` and VLAs, `__int128`/`_BitInt` values wider than 64 bits, x87
-`long double` and binary128 as values, vector types, `_Float16`, tail calls,
+`long double` and binary128 as values, C vector types (VIR's own vectors,
+section 7.5, are made by the loop vectorizer only), `_Float16`, tail calls,
 `naked` functions, interrupt calling conventions, and (until the step that
 splits the target's asm handling, X6) inline assembly other than an empty
 barrier.
@@ -69,6 +83,14 @@ and the block order), so one forward sweep sees definitions before uses.
 line, declarations of symbols, signatures and asm templates, and functions.
 Inside the compiler the same information comes from `cc` and the emitter.
 
+2.6 The **builder form** is what `vir_const` and `vir_ins_add` produce before
+`vir_canon`: constants and block instructions are created in the order the
+walker needs them, so a constant may lie inside the range of the block that
+was open when it was created (the block's `n` counts it); blocks may be in
+any order, there may be `nop`s and unreachable blocks, and `nconst` is 0.
+`vir_canon` takes either form to the canonical one. The verifier requires the
+regions of 2.3 (rule S1), so it is run on canonical or parsed functions.
+
 ## 3. In-memory format
 
 3.1 Instruction, 16 bytes, little-endian fields:
@@ -92,7 +114,9 @@ typedef struct vir_blk {
 	uint16_t depth;		/* loop nesting, 0 outside loops */
 	uint16_t pad;
 	uint32_t pred, npred;	/* predecessors: extra[pred .. pred+npred), block ids; valid after vir_cfg */
-} vir_blk;
+	uint32_t idom;		/* immediate dominator (block 0: itself); ~0 if unreachable; valid after vir_dom */
+	uint32_t pre, post;	/* dominator-tree preorder number, and the largest one in the subtree (22.5) */
+} vir_blk;				/* 36 bytes */
 ```
 
 The last instruction of a block is its only terminator (section 8).
@@ -129,6 +153,15 @@ typedef struct vir_fn {
 All arrays come from the thread's `ecx` and are reset per function. A pass
 that needs more room writes a new set of arrays and swaps them in.
 
+`vir_loc` is `{ uint32_t first, loc; }`: the index of the first instruction of
+a run, and the compiler's source-location id. The flag values are: `VB_LOOP`
+1, `VB_ADDR` 2, `VB_COLD` 4; `VS_PARAM` 1, `VS_EXPOSED` 2; `VF_NOFP` 1,
+`VF_FENV` 2, `VF_NULLINVALID` 4, `VF_VARIADIC` 8, `VF_NORETURN` 16,
+`VF_LOCAL` 32 (the symbol is local to the unit), `VF_EXPOSURE` 64 (every
+`VS_EXPOSED` is valid: `mem` computes it, rule M1 checks it). The targets are
+`VTG_X86_64_LINUX` 1, `VTG_A64_LINUX` 2, `VTG_A64_DARWIN` 3. Offset 0 of
+`extra` is a reserved word, so an extra offset of 0 means "none".
+
 3.5 `extra` holds every variable-length operand list. An instruction refers to
 its list by offset; the layouts are given per instruction. Words are values,
 block ids, immediates or packed descriptors as stated.
@@ -147,6 +180,10 @@ one sweep when a pass asks for it.
 | 4 | `f64` | IEEE binary64 |
 | 5 | `ptr` | Address with provenance (section 6), 64 bits |
 | 6 | `multi` | Several results, read with `proj` |
+| 7 | `f32x4` | Four `f32` lanes, 128 bits (section 7.5) |
+| 8 | `i32x4` | Four `i32` lanes, 128 bits (section 7.5) |
+| 9 | `f64x2` | Two `f64` lanes, 128 bits (section 7.5) |
+| 10 | `i64x2` | Two `i64` lanes, 128 bits (section 7.5) |
 
 4.1 There are no 8- or 16-bit values, no booleans, no aggregates. Narrow
 integers exist as load and store widths and as the `ext` operation.
@@ -245,7 +282,7 @@ terminator.
 | `clz ctz` | 3 `NZ` | A zero operand is immediate UB |
 | `ptradd` | 4 `INB` | Reserved, must be 0 in 1.0 |
 | `load store` and atomics | 0-1 `W`: log2 of the width in bytes; 2 `S`: sign-extend (load); 4-7 log2 of the alignment; 8 `VOL` volatile |
-| `ext` | 0-1 log2 of the source width in bytes (1, 2, 4); 2 `S` |
+| `ext` | 0-1 log2 of the source width in bytes (1, 2, 4, 8); 2 `S` |
 | `icmp fcmp` | 0-3 condition code |
 | `memcpy memset` | 4-7 log2 alignment of `a`; 8-11 of `b` (memcpy) |
 | `call` | 0 `NORETURN`, 1 `PURE`, 2 `CONST`, 3 `TAIL` (reserved, 0) |
@@ -264,6 +301,7 @@ other than to equal values, must clear its UB flags (R2).
 | 6 | `bparam` | any but void, multi | - | - | - | P | Block parameter; value supplied by each `br` to the block |
 | 7 | `param` | i64 f32 f64 ptr | # group | # piece | - | P | Incoming argument piece, or for a memory group the address of its bytes (section 9); only in block 0 |
 | 8 | `proj` | per producer | v producer (`multi`) | # index | - | P | Result number `b` of a call or asm |
+| 9 | `fma` | f32 f64 | v:T | v:T | v:T | P/F | `a * b + c` rounded once (IEEE fusedMultiplyAdd). Flags: `negp` the product is negated, `negc` the addend is negated, both exact |
 | 10 | `add` | i32 i64 | v:T | v:T | - | P,U* | Sum modulo 2^n |
 | 11 | `sub` | i32 i64 | v:T | v:T | - | P,U* | Difference modulo 2^n |
 | 12 | `mul` | i32 i64 | v:T | v:T | - | P,U* | Product modulo 2^n |
@@ -343,6 +381,42 @@ are not observable.
 The constant folder therefore does not fold an operation whose result is a NaN.
 7.4.3 A function with `VF_NOFP` must contain no value of type `f32` or `f64`
 and no `fconst`.
+
+### 7.5 Vectors
+
+Draft (2026-11-12; `RESEARCH-vectors.md` section 5 is the design and says what
+is left out). Lane 0 is at the lowest address.
+
+7.5.1 A vector is a value like any other: a block parameter, a `select` arm
+(the condition is a scalar and picks a whole vector), a `load` result, a
+`store` operand. A `load` or `store` of a vector moves 16 bytes; its width
+field is the lane's, and its alignment is at least the lane's, never 16 by
+default.
+7.5.2 These operations take a vector type as their result type, lane by lane:
+`add sub and or xor neg not` on `i32x4` and `i64x2`, `mul` on `i32x4` only
+(no target has a 64-bit lane multiply); `fadd fsub fmul fdiv fneg fabs fsqrt`
+on `f32x4` and `f64x2`, each lane as 7.4. No flag (`nsw`, `nuw`) is allowed to
+mean anything on a vector: lanes wrap.
+7.5.3 There is no mask type. A mask is the integer vector of the same lane
+width (`i32x4` for `f32x4` and `i32x4`, `i64x2` for the other two) whose
+lanes are 0 or -1; `vbitsel` is defined for every bit pattern. Below, V is
+any vector type, I(V) the integer and F(V) the float vector of V's lane width.
+
+| # | Name | `ty` | `a` | `b` | `c` | Eff | Meaning |
+|---|---|---|---|---|---|---|---|
+| 72 | `vsplat` | V | lane type | - | - | P | `a` in every lane |
+| 73 | `vseries` | integer V | - | - | - | P | Lanes 0, 1, 2, ... |
+| 74 | `vicmp.cc` | integer V | V | V | - | P | `icmp`'s codes per lane: -1 or 0 |
+| 75 | `vfcmp.cc` | integer V | F(V) | F(V) | - | P | `fcmp`'s codes per lane: -1 or 0 |
+| 76 | `vbitsel` | V | I(V) | V | V | P | Per bit: `a` set takes `b`, clear takes `c` |
+| 77 | `vs2f` | float V | I(V) | - | - | P,F | Signed lanes to float of the same width |
+| 78 | `vrev` | V | V | - | - | P | The lanes in reverse order |
+| 79 | `vreduce` | `i32` `i64` | the vector of such lanes | - | - | P | The lanes' wrapping sum |
+
+7.5.4 Register allocation: vectors are in the float class; a vector's spill
+slot is 16 bytes (15.2), and no v register keeps a vector across a call. A
+target may still report float registers as callee-saved (arm64's v8-v15, low
+halves only) for a function in which no vector is live across a call.
 
 ## 8. Control flow
 
@@ -465,7 +539,9 @@ exposed memory at return, a `trap`, and non-termination.
 access L under 6.3-6.5 and whose byte range is not provably disjoint; any
 call or asm with memory effects, and `barrier`, if L is exposed. Two accesses
 based on the same slot or symbol with constant offsets are disjoint when their
-ranges do not overlap. Everything else may overlap.
+ranges do not overlap, and so are two accesses whose addresses are the same
+value plus constant offsets with ranges that do not overlap. Everything else
+may overlap.
 
 10.4 No pass may iterate to a fixpoint without a budget. A pass that exceeds
 its budget stops and leaves the function in canonical form (R14).
@@ -478,7 +554,7 @@ identically. Encoding is UTF-8; names are ASCII.
 
 11.2 Lexical elements: a comment is `;` to the end of the line. Names:
 `@name` symbol, `%name` signature, `$N` slot, `!N` asm template, `bN` block,
-`vN` value (`N` any run of letters, digits, `_` and `.`). Integers are decimal
+`vN` value (`N` any run of letters, digits, `_` and `.`; at least one). Integers are decimal
 or `0x` hexadecimal, optionally negative. Floats are C hexadecimal floats
 (`0x1.8p+1`) or `bits:0x...` for an exact pattern. Strings are in double
 quotes with C escapes.
@@ -487,6 +563,7 @@ quotes with C escapes.
 
 ```
 unit      = "vir" INT NL "target" TARGET NL { decl } .
+TARGET    = "x86_64-linux" | "arm64-linux" | "arm64-darwin" .
 decl      = sigdecl | asmdecl | datadecl | externdecl | func .
 sigdecl   = "sig" SIG "=" "(" [ group { "," group } [ "," "..." ] ] ")" "->" group NL .
 group     = "none" | piece { ":" piece } | "mem" INT "align" INT | "sret" .
@@ -497,12 +574,18 @@ datadecl  = ( "data" | "tdata" ) SYM "align" INT "=" "{" item { "," item } "}" N
 item      = TYPE const | "zero" INT | "bytes" STRING .
 externdecl= "extern" SYM NL .
 func      = "func" SYM SIG { fflag } "{" NL { slotdecl } block { block } "}" NL .
-fflag     = "nofp" | "fenv" | "nullinvalid" | "noreturn" | "local" .
-slotdecl  = "slot" SLOT "size" INT "align" INT [ "hint" INT ] NL .
+fflag     = "nofp" | "fenv" | "nullinvalid" | "noreturn" | "local" | "exposure" .
+slotdecl  = "slot" SLOT "size" INT "align" INT [ "hint" INT ] { "param" | "exposed" } NL .
 block     = BLOCK [ "(" bp { "," bp } ")" ] { bflag } ":" NL { instr NL } term NL .
 bp        = VALUE ":" TYPE .
 bflag     = "loop" | "addr" | "cold" .
 instr     = [ VALUE ":" TYPE "=" ] OP [ "." suffix ] [ operands ] { iflag } .
+            (* a constant op (`iconst`, `fconst`, `symaddr`, `slotaddr`, `labeladdr`) written as an
+               instruction, `v7:i32 = iconst 5`, names a constant of the constant region as written:
+               it is not unified with an equal one and need not be used. The printer never writes
+               one; tests use them to build the duplicate and unused constants that `vir_canon`
+               removes and the verifier rejects (S2, N1). `bparam` written as an instruction is a
+               stray block parameter (S4). *)
 operand   = VALUE | const [ ":" TYPE ] .
 const     = INT | FLOAT | SYM [ addend ] | SLOT [ addend ] | "&" BLOCK .
 iflag     = "nsw" | "nuw" | "exact" | "nz" | "volatile" | "align" INT | "tag" INT
@@ -531,17 +614,37 @@ ibr v1 [b3, b4]
 asmgoto !4 outs() ins(0 v1) -> b5 [b6]
 ret v3
 trap
+v12:ptr = va_arg v1, int:f64            ; the group as in a signature
+v13:ptr = tlsaddr @tls, 0               ; symbol, model
+v14:i64 = param 0xffff.0                ; the sret pointer of the result group
+memcpy v1, v2, 24 align 8 align 4       ; two alignments: destination, source
+br b2                                   ; no parentheses when the block has no parameters
 ```
+
+The number of arguments of a `br` is the target's number of parameters (8.1);
+a text that passes another number is a syntax error, not a verifier failure.
+A `call` names its signature as `%name` after the callee; a memory operand
+of `asm` is a value of type `ptr` among the inputs (8.6).
 
 11.5 Constants are written in operand position; the parser creates the
 constant instruction. A constant's type is the type the operand position
 requires; where the position does not fix it (call arguments, `store` values,
-both `icmp` operands constant, `ret`), the `:type` suffix is required, and the
-printer writes it exactly there.
+`ret` values, asm inputs, the condition of `brif` and `select`, the operand of
+`switch`, `ext` and the conversions, both `icmp` or `fcmp` operands constant),
+the `:type` suffix is required, and the printer writes it exactly there. The
+operands of `br` take the type of the target's parameters. `vir_opnd_fixed`
+(the opcode table) answers the question for the parser and the printer. An
+address constant (`@x`, `$N`, `&bN`) is a `ptr` whatever the position, and the
+parser does not require its suffix.
 
 11.6 The printer names values `v0, v1, ...` and blocks `b0, b1, ...` in order
 of appearance, and writes instruction flags in the order of 11.3. Constants
-get no name.
+get no name. Signatures are named `%s0 ...` and asm templates `!0 ...` by
+their number in the unit (the parser unifies equal signatures). The unit is
+printed as: `vir`, `target`, `extern`s, data, signatures, asm templates,
+then the functions, each after a blank line. Floats are printed as a
+hexadecimal float when that is exact for a normal number, otherwise as
+`bits:`.
 
 11.7 `vpp -fvir-dump=STAGE[,FUNC]` prints functions after a stage: `build`,
 `simplify`, `gvn`, `mem`, `dce`, `alloc`. In a dump a `; loc FILE:LINE` comment
@@ -583,6 +686,34 @@ internal compiler error with a dump.
 | F2 | Not `VF_VARIADIC`: no `va_start` |
 | M1 | Slot `align` is a power of two; `size` fits; `VS_EXPOSED` equals the result of 6.4 when the function claims it is computed |
 | N1 | Canonical form (2.4): no `nop` in blocks, no unused constant, constants in first-use order |
+
+Details the table leaves out, as implemented:
+
+- A failure is reported as `@func bN.I: RULE: message` (block N, instruction I
+  of the block; `@func bN` and `@func` for a block or the function). The
+  verifier stops after the structural rules (S1-S5, T2's reference checks)
+  when the graph cannot be built, and checks C, D, A, F, M and N only then;
+  N1 is checked only when nothing else failed.
+- T2 also covers a reference that is out of range: a block id that is not a
+  block, an operand list that runs past `extra`, a value operand that is
+  `void` or not a value.
+- T3 includes the condition codes (`icmp` 0-9, signed codes not on `ptr`;
+  `fcmp` 0-7). T4 also rejects `S` on a load that is not an integer.
+- C3 compares types only: the number of `br` arguments is the target's
+  number of parameters by definition (8.1).
+- A1 includes that each signature is well formed (register groups of 1-4
+  pieces with classes, memory groups with a size, `sret` only as the result
+  group, a result that is not a memory group). A2 checks the function's own
+  signature the same way.
+- A4: for a template with `a` register outputs, `b` memory outputs and `c`
+  inputs, the instruction has `nout = a` and `nin = c + b` (the address of a
+  memory output is an input value); a template with labels is `asmgoto` with
+  as many labels, and `asm` has none; the result is `void`, one value, or
+  `multi` for `nout` 0, 1, more. An operand whose constraint contains `m`,
+  `o`, `V` or `Q` is a memory operand. It needs the unit's template table.
+- D1 for the result of an `asmgoto`: the block that uses it must be strictly
+  dominated by the block of the `asmgoto`.
+- M1's exposure check runs when the function has `VF_EXPOSURE`.
 
 ## 13. Interpreter (`virrun`)
 
@@ -675,21 +806,72 @@ Cooper-Harvey-Kennedy), `vir_uses` are utilities, not passes.
 typedef struct vir_regs {
 	uint64_t alloc[2];	/* allocatable registers per class: 0 integer, 1 float */
 	uint64_t callee[2];	/* callee-saved */
-	/* fixed operands and clobbers of an instruction (x86 div, shifts, calls, asm) */
-	void (*fixed)(const vir_fn *, uint32_t v, struct vir_fix *out);
+	/* fixed operands and clobbers of instruction v (x86 div, shifts, calls, params, ret);
+	 * out arrives cleared: every register VR_NONE, nothing clobbered */
+	void (*fixed)(const vir_fn *f, uint32_t v, vir_fix *out, void *ctx);
+	void *ctx;
+	const uint8_t *opfix;	/* per opcode: nonzero if fixed() can say anything (NULL: always ask) */
 } vir_regs;
+
+typedef struct vir_fix {
+	uint8_t nopnd;		/* operands described in opnd[] */
+	uint8_t res;		/* the result's register, VR_NONE: any */
+	uint8_t fl;		/* TIED: result in the first operand's register; COMMUT: the first
+				 * two may be swapped; RESTMEM: operands past nopnd need no register */
+	uint8_t opnd[24];	/* per value operand, in vir_oit order without `multi` ones */
+	uint32_t mem;		/* bit i: operand i may be memory or an immediate */
+	uint64_t clob[2];	/* written after the operands are read */
+	uint64_t eclob[2];	/* written before: no operand without a fixed register may be in one */
+} vir_fix;
 ```
 
-15.2 `vir_alloc(f, regs, out)` produces, without changing the function: per
-value a location (register, or a spill slot id added to the slot table); per
-`br` a sequence of parallel moves already ordered with cycles broken; the set
-of used callee-saved registers. Algorithm: linear scan over SSA live intervals
-in block order; block parameters and their arguments are hinted to the same
-register; values live across a call prefer callee-saved registers; an asm
-operand takes the first constraint alternative the allocator can satisfy.
+A register is a byte: 0-63 the integer class, 64-127 the float class,
+`VR_NONE` (0xff) none. The scratch register of each class (X7) is not in
+`alloc`; edge moves name it as `VR_SCR0`/`VR_SCR1`. A fixed register must be
+allocatable. `opfix` keeps the indirect call off the instructions that have no
+constraints; at the target's discretion, an instruction whose constant operand
+is encodable as an immediate reports that operand in `mem`.
+
+15.2 `vir_alloc(f, loops, regs, opt, out)` produces, without changing the
+function, in the thread's reservations (valid until its next call):
+- per value, a spill slot or none. Spill slots are the allocator's own table
+  (`out->nspill`, each 4, 8 or 16 bytes), not VIR slots: no instruction names
+  them, and lowering adds them to the frame;
+- per value operand and per result, in the order sweep 6 visits them, the
+  register it is in at that instruction (one byte each; a value can be in
+  different registers at different uses; `VR_NONE` for an immediate or memory
+  operand and for an unused result). A block's parameters come first, at its
+  top. A `br`'s bytes say where its arguments are before the edge's moves, for
+  information: the edge's parallel move reads them;
+- an **edit stream** in position order: reload from a slot, rematerialize a
+  constant, move between registers, "operands swapped" for a commutative
+  instruction;
+- per control-flow edge that needs one, a parallel move already ordered with
+  cycles broken (block arguments and the moves of 15.8 together); a location
+  is a register or a spill slot (a block parameter that starts in its slot is
+  stored by the edge);
+- the set of used callee-saved registers, each with the first block using it.
+
+Preconditions besides canonical form, checked: block 0's `param`s come
+first, and the `proj`s of a call follow the call directly (both read
+registers the ABI fills before anything else may run). The loop forest
+(15.5) is an input; until `vir_canon` builds it (22.5), `vir_loops_build`
+computes it from the block order.
+
+Algorithm: a backward sweep builds liveness and next-use chains (15.5); a
+forward sweep over the blocks assigns registers greedily, follows hints, and
+when no register is free evicts the value whose next use is farthest (15.6).
+There are no live intervals, no interference graph and no fixed point. The
+reasons and sources are in `RESEARCH-regalloc.md`.
 
 15.3 **Lowering** walks the blocks once and calls the target's operations with
-the assigned registers, by the protocol in X7. A value used once, by the next selected instruction in
+the assigned registers, by the protocol in X7, applying the edits before the
+instruction they are positioned at. After the definition of a value that has a
+spill slot it emits the store to the slot (a block parameter's store is at the
+top of its block). An edge's moves go before the `br` when the source block
+ends in one, else at the top of the target when it has one predecessor, else
+(a critical edge) into a block lowering creates for that edge: the branch
+targets a new label, the moves follow, then a jump. A value used once, by the next selected instruction in
 the same block, may be folded into that instruction by the target (an
 immediate, an addressing mode, a compare into a branch). The target then runs
 its existing record passes, frame layout and output.
@@ -699,11 +881,188 @@ its existing record passes, frame layout and output.
 `trap` is the target's trapping instruction. A block that consists of one `br`
 without moves produces no code.
 
+15.5 **Liveness and next use** (sweep 5, backward, in the same sweep as
+`dce`). Positions are instruction indices. The sweep keeps the live set `W` as
+a sparse set (a list and a per-value index that validate each other).
+- At a value operand `v` at position `p`: push one word on the **use stack**,
+  the position of the next later use of `v` (`nu[v]`, 0 for none) with the top
+  bit set when `v` is not in `W` (a **kill**); set `nu[v] = p`; add `v` to `W`.
+  Constants are chained in the same way but are never in `W`.
+- At the definition of `v`: remove it from `W`. `nu[v]` is its first use; 0
+  means unused, and `dce` drops a removable instruction. `xcall[v]` records
+  whether the nearest later call outside `VB_COLD` blocks is before `v`'s last
+  use. Hints are recorded (15.7).
+- At the bottom of a block `W` is the union of the live-in lists of its
+  forward successors; at the top `W` is appended to the **live-in pool**.
+- At the top of the target `t` of a back edge `s -> t` (`s >= t`) every `v` in
+  `W` gets a **loop range**: from the first instruction of the head `H` of the
+  innermost loop `L` that contains both `s` and `t`, to an end that depends on
+  `v`. If `v`'s definition strictly dominates `H` (it is defined before the
+  loop), the end is `L`'s end: `v` is live round the loop. Otherwise every path
+  from `H` to `t` passes the definition again, so the edges into `H` do not
+  carry `v`: the end is that of `t`'s group, the back edges of `L` to other
+  blocks than `H` merged where their target..source ranges overlap. In a
+  dispatch loop whose body has backward `goto`s, this keeps a value of one
+  case from being live at the latch. `lend[v]` is the largest end, for linear
+  mode. A value is live in a block when its live-in list has it or a range of
+  its covers the block's first instruction; a use inside a range is not a kill
+  (15.6). In irreducible flow `t` can be any entry of a merged range, and
+  applying the rule only at the head loses a value that is live into `t` but
+  not into the head. This replaces iteration.
+- An edge `b -> t` into a loop `L` from before its head (the outermost such
+  `L`) also brings into `W` the live-in lists of `L`'s back-edge targets, for
+  the values defined before `t` whose definition dominates `b`. They are live
+  around `L` without being in `t`'s list when their use is reached only past a
+  back edge: an edge into the middle (irreducible), or into the head of a loop
+  whose use is behind an irreducible entry. Without this rule a loop around
+  `b` would not keep them. The dominance test drops values defined inside `L`
+  (strict SSA: such a value cannot be live at `b`); taking them in made a value
+  of one inner loop live across the whole enclosing loop.
+- A value live at the top of a block that starts with everything in its slot
+  (`VB_ADDR`, or a block with no earlier predecessor, 15.8) gets a slot when
+  it is defined. That includes a value live around a loop that contains such
+  a block, before or after the back-edge target (it is live there by `lend`
+  without being in the block's list).
+- A **loop** here is a range of the block array: for each edge to the same or
+  an earlier block, target to source, with partially overlapping ranges
+  merged. `vir_canon` builds the forest with the dominators (22.5). On
+  irreducible control flow a value can be listed as live in a block its
+  definition does not dominate; it is never read there (15.8).
+- **Linear mode.** If the live-in pool would exceed its limit (the
+  reservation, or `opt->pool` for tests) the sweep restarts without lists and
+  without resetting `W` at block bottoms, and a value is live in block `B`
+  exactly when its definition is before `B` and the later of its last use and
+  `lend[v]` is at or after `B`'s first instruction. Always correct; a value
+  then holds its register through a branch arm that does not use it.
+- `dce` is fused into this sweep from V5 on; until then a result without a
+  use is assigned a register that is freed at once.
+
+15.6 **Assignment** (sweep 6, forward). State: `regval[r]`, the value in a
+register; `reg[v]`, valid when `regval[reg[v]] == v`; `slot[v]`; `nu[v]`, kept
+current by popping the use stack in the reverse of the order it was pushed.
+At an instruction, the use stack is popped per operand first (so `nu` names
+the next use after this one), then in order:
+1. the fixed operands the target reports (15.1, X7): a live value in a
+   required register is moved to a free register, else evicted; the operand
+   is copied into its required register (it stays where it was too);
+2. each other value operand that is not in a register gets one (free, else by
+   eviction) and a reload or rematerialize edit, unless the target reports
+   that this operand may be memory or an immediate and it is a constant or
+   has a slot; an operand in an `eclob` register moves out;
+3. the registers of killed values are freed, and the copies of step 1;
+4. clobbers: a live value in a clobbered register moves to a free register
+   that is not clobbered, else is evicted (at a call: every value in a
+   caller-saved register that is live after it);
+5. the result takes its fixed register, else its hint if that register is
+   free, else a free register, else one freed by eviction. For an operation
+   whose result must be in its first operand's register (X7): that register
+   if the operand was killed; else, if the operation is commutative and the
+   second operand was killed, the operands are swapped; else its own
+   register, and lowering copies; and if every register holds an operand, the
+   first operand is evicted and the result is computed in place.
+
+**Eviction** takes the value with the largest next-use distance among the
+registers of the class that the instruction does not use. The distance is
+`nu[v] - p`, except: when `nu[v]` is 0 or beyond the innermost loop around `p`
+and `v` was defined or last used inside that loop, the next use is the loop's
+end; a use beyond the innermost loop has 100000 added per loop left. At equal
+distance a constant goes first. Evicting writes no code: it gives `v` a slot
+if it has none and clears the register. A value with a slot is stored once,
+after its definition (15.3), so its slot is current wherever it is live.
+
+A slot is shared with an earlier value of the same size class whose linear
+range ended before `v`'s definition (bounded probe of a free list).
+
+At a loop header, when the loop's largest `W` (recorded by sweep 5, the loops
+inside included; it counts the values live through the loop) exceeds the
+class's registers, that many values of the entry state without a use before
+the loop's end leave it (they get a slot). At a call every value in a
+caller-saved register that is live after it is evicted.
+
+15.7 **Hints.** `hint[v]` is a register or a value whose register `v` should
+share: the ABI register for a call argument that is not live after the call;
+the return register for a returned value; a required register (15.6 step 1);
+for a `br` argument, the block parameter it feeds (the first argument assigned
+sets the parameter's tentative register; a loop header's parameter is assigned
+before its back-edge argument); and the hint of a result-in-first-operand
+instruction is copied to that operand if it has none. A value with `xcall`
+prefers a callee-saved register when the function already uses one, or when
+the value is used in a deeper loop than its definition or crosses a call
+inside a loop; otherwise a caller-saved one. A hint is taken only when the
+register is free.
+
+15.8 **Blocks and edges.** A block with one predecessor starts from that
+predecessor's end state without the values that are not live in. A block with
+several starts from the end state of one already visited predecessor: the one
+with the most live-in values in registers, then the deepest loop, then
+not `VB_COLD`, then the preceding block; that edge needs no moves unless the
+block has parameters. A block with no earlier predecessor (irreducible) starts
+like a `VB_ADDR` block. Every other edge gets a parallel move
+that produces the entry state: a move for a value in another register, a
+reload for a value only in its slot, nothing for a value the entry state has
+in its slot; block arguments are part of the same parallel move. A move whose
+source is neither in a register nor has a slot is omitted (15.5). A `VB_ADDR`
+block starts with every live-in value in its slot and none in a register. A
+cycle is broken with a free register (one the target's entry state does not
+use), else an exchange of two registers, else the scratch register (a cycle
+through a slot); a move an exchange already did is dropped.
+
+**Webs.** A block parameter and its `br` arguments (not constants) are one
+variable, a web (union-find). Two webs are not joined when both have a
+parameter of the same block, since those are live together at its top. A member
+leaves its web when another member is live at its definition. At a parameter,
+the members live there leave instead of the parameter. After sweep 5, the
+members a member's loop ranges cover leave too. The members that stay share:
+- one spill slot, given the first time one of them needs a slot and never
+  returned to the free list, so an edge moves nothing for an argument that is
+  already stored there;
+- one register: the first register a parameter of the web takes, which
+  `choose` returns after the hint when it is free and the value is not about
+  to cross a call;
+- the parameter's entry: a web parameter that crosses a call and is not used
+  before one (`CALLFIRST`), or is only passed on to the block's `br`, enters in
+  the web's slot. One that is only passed on to a loop header's parameter
+  already placed takes that parameter's place, register or slot.
+On the edge, an argument stored in the web's slot needs no move to a parameter
+that enters in it. Effect on `sqlite3VdbeExec` (1664 functions of sqlite3.c
+through VIR): stack accesses fell from 5197 to 2587. The dispatch latch is
+`add x25, x25, #24` in place. Each of its predecessors used to reload three
+values and copy `pOp`; now they store only a changed `rc` in its web slot.
+Cycles of speedtest1 did not change measurably (9.00 G before, 9.05 G after;
+instructions 33.78 G to 32.51 G).
+
+15.9 **Constants** (`iconst`, `fconst`, `symaddr`, `slotaddr`, `labeladdr`)
+are never stored: they are materialized into a register at a use that needs
+one, stay there like a value, are dropped on eviction and recomputed on
+reload. One is kept across an edge only into a block with one predecessor, or
+into a loop header when its next use is inside the loop. No other value is
+rematerialized in 1.0.
+
+15.10 **Inline assembly** (after X6). The operands' classes, fixed registers,
+tied outputs and the clobber mask are constraints as in 15.6 step 1. An
+operand that allows both a register and memory takes a register if its value
+is in one or one is free; else memory through the value's slot; else a
+register by eviction. An early-clobber output takes a register no input of
+the instruction holds. Operands that cannot be satisfied with every other
+value evicted are an error.
+
+15.11 **Checking.** `vir_alloc_check(f, regs, out, msg)` walks the function
+forward with the allocator's output, tracking which value each register and
+slot holds (a forward dataflow over locations, meet by intersection, to a
+fixed point, then one checking pass); every operand must read its own value
+on every path. It also checks the fixed registers, `eclob`, the tied rule, that
+a swap is only on a commutative instruction, block parameters at edges, and
+that every callee-saved register written is in the reported set. It runs
+after allocation whenever the verifier does (section 12), and `fuzz-vir` runs
+the allocator with a random number of registers. `viralloc` and
+`bench/vir-alloc.py` run it on a synthetic target (any number of registers,
+x86-like constraints) until V2 brings real input.
+
 ## 16. Tools
 
 | Tool | Use |
 |---|---|
-| `virtest FILE` | Parse, verify, run the passes named in the file, print; `--equiv` adds 13.9; `--bless` rewrites the expected output |
+| `virtest [--no-verify] [--bless] FILE` | Parse, run the passes named in the file (only `canon` until the passes exist), verify, print, and parse and print the result again (11.1); `--equiv` adds 13.9 (with the interpreter); `--bless` rewrites the expected output |
 | `virrun FILE` | Section 13 |
 | `virgen --seed=N [--size=N]` | A random verified unit using the built-in externs only, for `--equiv` and for `fuzz-vir` |
 | `vpp -fvir-dump=...` | 11.7 |
@@ -729,9 +1088,16 @@ comments at the top:
 ; EXPECT-UB: no
 ```
 
-followed by the unit, a line `; ---`, and the expected printed output.
-`bench/vir-test.py -j 6` runs them all; `--bless PATTERN` rewrites
-expectations.
+followed by the unit, a line `; ---`, and the expected output of
+`virtest` (the printed unit, or the error lines). The unit is the text before
+that line. `PASSES: canon` puts each function in canonical form before it is
+verified; `VERIFY: no` is `--no-verify`; `DOM: yes` appends each function's
+dominator tree (`; dom @f bN idom bM pre P post Q`) as comments. The tests
+under `tests/vir/bad/` must make `virtest` exit with status 1; a file named
+`bad/RULE-name.vir` (`RULE` a rule of section 12) must produce failures of
+exactly that rule. `bench/vir-test.py -j 6` runs them all; `--bless PATTERN`
+rewrites expectations; `--mutate N` runs random mutants of the units and
+requires that `virtest` never crashes.
 
 17.2 Required test sets before a step is done:
 - parser/printer: every instruction and flag once; round trip identical;
@@ -1070,6 +1436,7 @@ in V1 and V2 with `bench/vbench.py`, not results.
 | Calls to `malloc`, `mmap`, `free` per function | 0 after the thread's first function | The walker and x86 lowering already work this way |
 | Bytes cleared per function | Proportional to what the function used, never to capacity | — |
 | Building, per VIR instruction (the `vir_*` operations only) | 30 ns | The arm64 emitter spends 103 ns per machine instruction in total (PLAN-fas2, status 2.6) |
+| Register allocation, sweeps 5 and 6 together, per VIR instruction | 200 ns for now; the target is 60 ns (`RESEARCH-regalloc.md` 7), after code quality | 177 ns on an interpreter-shaped function, 81–83 ns on random functions (PLAN-vir V4) |
 | Sweeps over the instruction array at `-O2`, build to lowered records | 7 | — |
 | `-O0` and `-O1` | No VIR code runs; output byte-identical | — |
 
@@ -1127,12 +1494,15 @@ statement); the format does not change.
 
 The builder appends in the walker's order with a few `nop`s and provisional
 parameters. One finalizing sweep (`vir_canon`) does all of the following
-while copying to the second array: drops `nop`s and unreachable blocks,
+while copying to the second array (after a read-only loop over the operands
+that finds the constants in order of first use and so how many there are): drops `nop`s and unreachable blocks,
 resolves the alias table (a removed parameter becomes its value), writes
 `br` argument lists, renumbers values, and orders constants by first use. When
 the walker's order already has every block after its immediate dominator (true
 for structured code that does not rotate loops) the block order is kept;
-otherwise blocks are emitted in reverse postorder in the same sweep. Dominators
+otherwise blocks are emitted in reverse postorder (the depth-first search
+visits a block's successors last to first, so that the first successor comes
+first) in the same sweep. Dominators
 are computed once here (Cooper-Harvey-Kennedy on the block array) and stored
 per block with preorder and postorder numbers, so "does A dominate B" is two
 compares for every later pass.
@@ -1145,9 +1515,9 @@ compares for every later pass.
 | 2 | Canon | Forward, copying | 22.5 |
 | 3 | `simplify` + `gvn` | Forward | One pass does both: the value table is global and a hit counts if its defining block dominates (22.5), so no scoped table and no dominator-tree walk |
 | 4 | `mem` | Forward | Exposure, forwarding, dead stores |
-| 5 | `dce` + liveness | Backward | One pass marks live instructions and builds the allocator's live intervals (loop heads extend intervals to the loop end, as in linear scan on SSA; no iterative dataflow) |
-| 6 | Allocation | Forward over intervals | 15.2 |
-| 7 | Lowering | Forward | 15.3 |
+| 5 | `dce` + liveness | Backward | One pass marks live instructions and builds the allocator's next-use chains and per-block live-in lists (a value live into a loop head is live to the loop end; no iterative dataflow), 15.5 |
+| 6 | Allocation | Forward over blocks | 15.6-15.10; pops the use stack sweep 5 pushed |
+| 7 | Lowering | Forward | 15.3; reads the operand registers and edits sequentially |
 
 Section 14 describes `simplify`, `gvn` and `dce` as separate contracts; they
 stay separately callable for tests (`VCC_VIR_PASSES`), and the default
@@ -1160,7 +1530,10 @@ pipeline fuses them as above.
   written by `vir_dbgrow`. A statement's instructions share one entry.
 - **No `tmp` initialization:** a pass that uses `tmp` writes every entry it
   later reads, or stamps it.
-- **`extra` is append-only** during building; lists are never edited in place.
+- **`extra` is append-only** during building; lists are never edited in place
+  (`vir_canon` rewrites the value and block words of the lists it keeps, each
+  of which belongs to one instruction, and `vir_cfg` appends the predecessor
+  lists, replacing those of its last call).
 - **Use counts** are a `uint8_t` per value saturating at 255, computed in
   sweep 5 where the allocator and lowering need "used once".
 - **No pass allocates** except from the thread's reservations; a pass that

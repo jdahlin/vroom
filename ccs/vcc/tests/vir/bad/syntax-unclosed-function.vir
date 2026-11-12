@@ -1,0 +1,10 @@
+; a function without its closing brace
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  ret v0
+; ---
+bad/syntax-unclosed-function.vir:9:1: the function is not closed (`}` expected)

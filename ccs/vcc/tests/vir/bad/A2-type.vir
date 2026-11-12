@@ -1,0 +1,12 @@
+; ret of a value of the wrong type
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  v1:f64 = fext 0x1p+0:f32
+  ret v1
+}
+; ---
+@f b0.2: A2: ret: value 0 has type f64, the result wants i64 or ptr

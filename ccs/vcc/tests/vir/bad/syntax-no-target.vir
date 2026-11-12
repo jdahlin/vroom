@@ -1,0 +1,5 @@
+; the target line is missing
+vir 1
+sig %s = (int) -> int
+; ---
+bad/syntax-no-target.vir:3:1: expected `target`

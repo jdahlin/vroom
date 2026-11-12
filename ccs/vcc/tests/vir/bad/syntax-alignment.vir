@@ -1,0 +1,12 @@
+; an alignment that is not a power of two
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  v1:i32 = load.4u v0 align 3
+  ret v0
+}
+; ---
+bad/syntax-alignment.vir:8:29: an alignment must be a power of two

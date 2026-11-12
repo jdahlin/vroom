@@ -34,6 +34,11 @@ VPRIV void eerror(ecx *e, uint32_t loc, const char *fmt, ...)
 	pp_diag_pc = __builtin_return_address(0);
 	va_list ap;
 
+	if (e->vtry) {	/* the VIR walker: the function falls back (emit/vir/) */
+		if (!e->vfail)
+			e->vfail = fmt;
+		return;
+	}
 	{
 		VLOCK(e->E->emu);
 		va_start(ap, fmt);
@@ -49,6 +54,11 @@ VPRIV void efatal(ecx *e, uint32_t loc, const char *fmt, ...)
 	pp_diag_pc = __builtin_return_address(0);
 	va_list ap;
 
+	if (e->vtry) {	/* the VIR walker: no diagnostic, the function falls back (emit/vir/) */
+		if (!e->vfail)
+			e->vfail = fmt;
+		_longjmp(e->bail, 1);
+	}
 	{	/* (the lock is dropped before the longjmp: cleanups do not run on it) */
 		VLOCK(e->E->emu);
 		va_start(ap, fmt);
@@ -140,6 +150,7 @@ static void ecx_free(ecx *e, vmreg *r)
 	vmpool_give(&ecxpool, r);
 	wasm_ecx_free(e);
 	wk_ecx_free(e);
+	vw_wk_ecx_free(e);
 }
 
 /* a function the previous round generated, if nothing it asked about has been marked since */
@@ -186,7 +197,7 @@ static void do_item(ecx *e, uint32_t it)
 	} else if (c->syms[it].kind == S_FUNC && X86(c)) {
 		wk_function(e, it);
 	} else if (c->syms[it].kind == S_FUNC) {
-		if (!reuse(e, it))
+		if (!reuse(e, it) && !vw_try(e, it))
 			emit_function(e, it);
 	} else {
 		emit_object(e, it);
@@ -451,6 +462,11 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 			E.sflags[s] = SA_WRITTEN | SA_AESC;
 			E.ffacts[s] = FF_BAD;
 		}
+	/* VIR: the functions called once, which its walker inlines whatever their size */
+	if (!WASM(c) && !X86(c) && vw_enabled(o))
+		E.once = fn_once(c);
+	if (E.once)
+		fn_isize(&E, c, WK_INLINE_VIR);
 	/* roots */
 	for (uint32_t i = 0; i < c->ntoplevel; i++) {
 		uint32_t s = c->toplevel[i];
@@ -476,12 +492,43 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	ctx = calloc((size_t)nthr, sizeof(ecx));
 	for (int i = 0; i < nthr; i++)
 		ecx_init(&ctx[i], &E, xr[i] = vmpool_take(&ecxpool));
-	for (int i = 1; i < nthr; i++)
-		pthread_create(&th[i], NULL, worker, &ctx[i]);
+	{
+		/* the walkers recurse with the input's nesting and fall back when the stack runs
+		 * low (vstack_low): a worker gets a stack as large as this thread's, so that a
+		 * function compiles the same on any of them (Darwin's default for a new thread
+		 * is 512 KB, where deep input that compiled on one thread did not on several) */
+		pthread_attr_t at;
+		size_t ss = (size_t)8 << 20;
+
+#ifdef __APPLE__
+		ss = pthread_get_stacksize_np(pthread_self());
+#else
+		{
+			pthread_attr_t me;
+			void *addr;
+
+			if (!pthread_getattr_np(pthread_self(), &me)) {
+				pthread_attr_getstack(&me, &addr, &ss);
+				pthread_attr_destroy(&me);
+			}
+		}
+#endif
+		if (ss < ((size_t)1 << 20))
+			ss = (size_t)1 << 20;
+		pthread_attr_init(&at);
+		pthread_attr_setstacksize(&at, ss);
+		for (int i = 1; i < nthr; i++)
+			pthread_create(&th[i], &at, worker, &ctx[i]);
+		pthread_attr_destroy(&at);
+	}
 	worker(&ctx[0]);
 	for (int i = 1; i < nthr; i++)
 		pthread_join(th[i], NULL);
 	t2 = now();
+	free(E.once);
+	E.once = NULL;
+	free(E.cg), free(E.cgoff), free(E.cgn), free(E.scc), free(E.isz);
+	E.cg = E.cgoff = E.cgn = E.scc = NULL, E.isz = NULL;
 	/* stitch */
 	qsort(E.chunks, E.nchunk, sizeof(chunk), chunk_cmp);
 	tb_reg(&hdr, &er[12], (size_t)1 << 26, "emit.hdr");

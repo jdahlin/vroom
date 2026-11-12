@@ -143,3 +143,17 @@ VPRIV void cbz(ecx *e, bool nz, int x, int r, uint32_t l)
 	i->label = l;
 	e->lrefc[l]++;
 }
+
+/* tbz, tbnz: bit of register r (finish_function relaxes one whose label may be beyond 32 KB) */
+VPRIV void tbz(ecx *e, bool nz, int r, int bit, uint32_t l)
+{
+	ins *i;
+
+	if (!e->reach)
+		return;
+	kv_edge(e, l);
+	i = put(e, nz ? I_TBNZ : I_TBZ);
+	i->sz = bit >= 32, i->rd = (uint8_t)r, i->sh = (uint8_t)bit;
+	i->label = l;
+	e->lrefc[l]++;
+}

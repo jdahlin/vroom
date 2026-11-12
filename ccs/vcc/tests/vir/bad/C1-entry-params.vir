@@ -1,0 +1,10 @@
+; block 0 has parameters
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+func @f %s {
+b0(v0:i64):
+  ret v0
+}
+; ---
+@f b0: C1: block 0 has parameters
