@@ -1070,3 +1070,43 @@ Separat tidigare fel på basen: en tom VIR-blockkropp ger UBSan i
 998/1000 utan sanitizerfel; båda träffarna har samma basfel. Minsta indata
 finns i `work/opt-pr-tmp/vir-empty-block-ubsan.vir`. Parserfelet ingår inte i
 exponeringsändringen; V1:s sanitizer-/fuzzgrind är därför fortsatt öppen.
+
+### ffmpeg som testprojekt (2026-11-12)
+
+`bench/ffmpeg/run.py` (gren `claude/rust-compilation-speed-research-ff36c4`):
+ffmpeg n8.1.3, macOS arm64, `--disable-asm --disable-autodetect`, `-O3`, så
+att DSP-kodens C-varianter är det som körs.  Alla träd konfigureras av clang
+(samma `config.h`); vcc kompilerar alla 2019 C-filer, clang länkar.
+
+- **Korrekthet:** inga filer föll tillbaka på clang.  FATE utan samples: 2740
+  av 2740 för clang, direkta emittern och VIR.  Ett fel hittat och rättat
+  (b44a3918): variabla argument till biblioteks-builtins fick inte
+  standardbefordran (`float` till `double`), 23 FATE-fel.  Med
+  `-ffp-contract=off` ger alla 21 arbetslaster i `speed` clangs byte från båda
+  vägarna; med kontraktion skiljer fyra flyttalslaster (andra fmadd-val).
+  FATE med samples (avkodarna mot riktiga strömmar) är inte kört.
+- **Kompileringstid** (2022 filer, `-j 6`, bäst av 2, delad maskin med
+  lastmedel 10; objekt och beroendefiler skrivs till en tom katalog,
+  diagnostik skrivs ut):
+
+  | | vägg | mot clang | CPU | mot clang |
+  |---|---|---|---|---|
+  | clang -O3 | 51,7 s | 1 | 292,8 s | 1 |
+  | vpp, direkt, en process per fil | 13,2 s | 3,9× | 71,2 s | 4,1× |
+  | vpp, VIR, en process per fil | 14,6 s | 3,5× | 79,8 s | 3,7× |
+  | `vpp --batch`, direkt | 0,97 s | 53× | 5,2 s | 57× |
+  | `vpp --batch`, VIR | 1,63 s | 32× | 9,1 s | 32× |
+
+  Batchlägets 2022 objekt och beroendefiler är byteidentiska med dem från en
+  process per fil (harnessen kontrollerar det), och objekten är desamma som i
+  de make-byggda träd som klarade FATE.  Väggtiden varierar med lasten
+  (0,85–1,6 s direkt, 1,55–3,4 s VIR i enskilda körningar); CPU-tiden är
+  stabil.  Skillnaden mot en process per fil är delade cachar (31 000 av
+  38 000 inkluderingar spelas upp ur headercachen, deklarationscachen hoppar
+  över 10,9 M token) och ca 35 ms start per process.  Inte mätt: ett bygge
+  genom make med vccd, som är den väg en användare får batchlägets cachar på;
+  ar och länkning ingår inte.
+- **Körtid** (`speed`, `-threads 1`, CPU, en omgång; inte åtgärdat, tas
+  senare): totalt VIR 1,70× clang, direkta emittern 2,88×.  Sämst genom VIR:
+  mpeg4/mpeg2-kodning 3,15×, convolution 3,4×, gblur 2,7×, aac-kodning 2,3×,
+  unsharp 2,3×, ffv1 1,8–1,9×; avkodarna 1,1–1,3×.
