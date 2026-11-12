@@ -4033,7 +4033,7 @@ static void load_inputs(void)
 {
 	bool lazy = false;
 
-	for (uint32_t i = 0; i < opt.inputs.n && !opt.relocatable; i++)
+	for (uint32_t i = 0; i < opt.inputs.n; i++)
 		if (!opt.inputs.v[i].whole) {
 			const char *p = opt.inputs.v[i].path;
 			size_t l = strlen(p);
@@ -4047,7 +4047,7 @@ static void load_inputs(void)
 		if (!b)
 			continue;
 		if (n >= 8 && (!memcmp(b, "!<arch>\n", 8) || !memcmp(b, "!<thin>\n", 8))) {
-			if (lazy && !opt.inputs.v[i].whole && !opt.relocatable) {
+			if (lazy && !opt.inputs.v[i].whole) {
 				uint32_t before = pending.n, c0 = lcand.n;
 
 				add_archive(p, b, n);

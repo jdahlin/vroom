@@ -236,6 +236,21 @@ def main():
             print(f'FAIL --print-gc-sections:\n  vlink {pr[0]}\n  lld   {pr[1]}')
         elif v:
             print(f'ok   --print-gc-sections: {len(pr[0])} removed')
+        # -r stays lazy: of two members defining the same symbol only the needed one is
+        # read (the kernel's vmlinux.o and libstub's zboot.o vs efi-stub-entry.o)
+        shutil.copy(f'{t}/b1.o', f'{t}/b1dup.o')
+        subprocess.run([llvm('llvm-ar'), 'rcs', f'{t}/lib/libdup.a', f'{t}/b1.o', f'{t}/b1dup.o'], check=True)
+        syms = []
+        for exe in (VLINK, LLD):
+            p = subprocess.run([exe, '-r', f'{t}/c.o', '--start-group', f'{t}/lib/libdup.a', '--end-group',
+                                '-o', f'{t}/r.o'], capture_output=True, text=True)
+            nm = subprocess.run([llvm('llvm-nm'), f'{t}/r.o'], capture_output=True, text=True).stdout if p.returncode == 0 else ''
+            syms.append((p.returncode, first_err(p.stderr), sorted(nm.split('\n'))))
+        if syms[0] != syms[1] or syms[0][0]:
+            bad += 1
+            print(f'FAIL -r lazy archive:\n  vlink {syms[0][:2]}\n  lld   {syms[1][:2]}')
+        elif v:
+            print('ok   -r lazy archive')
         # undefined symbols: lld's whole stderr (every reference with its source file and function,
         # 3 then "referenced N more times", "did you mean" for the first two, archive members,
         # blank lines after multi-line errors), the program name aside
