@@ -25,6 +25,7 @@ libc-test|https://repo.or.cz/libc-test.git|63e36e934e8f2bedf645303a90b64098e2af6
 chibicc|https://github.com/rui314/chibicc.git|90d1f7f199cc55b13c7fdb5839d1409806633fdb|
 cproc|https://github.com/michaelforney/cproc.git|d1c53ddf56571573a7025324c8dd5c6d547a4d1f|
 kefir|https://git:public@git.protopopov.lv/kefir.git|7c59547068eaa0723b4db83d3fb70f448b0f0cb1|
+TSVC_2|https://github.com/UoB-HPC/TSVC_2.git|911fc639b933df38a7728477ce4b2e68e9c8eeff|
 '
 
 pin() {  # the pinned commit, or HEAD

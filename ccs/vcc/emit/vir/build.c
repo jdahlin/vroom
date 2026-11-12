@@ -633,6 +633,11 @@ VPRIV void vw_load(ecx *e, int rd, const lval *l, int size, bool sgn)
 	if (!ty)
 		vw_fail(e, "VIR: a float load of this size");
 	a = vw_addr(e, l, (uint64_t)size, &slot, &rel);
+	if (f && size == 8 && slot != VW_NOBLK && V->sl[slot].size == 8 && V->sl[slot].f32w) {
+		/* the word of a float temporary (a conditional expression's value): the f32 stored in it */
+		size = 4, ty = VT_F32;
+		a = vw_addr(e, l, 4, &slot, &rel);
+	}
 	if (slot != VW_NOBLK && !e->novtag) {	/* the value last stored here, in this block (not volatile) */
 		for (uint32_t i = V->nst; i-- > 0;) {
 			vwstent *s = &V->st[i];
@@ -693,14 +698,18 @@ VPRIV void vw_store(ecx *e, int rs, const lval *l, int size)
 		vw_write(e, l->ref, V->cur, v);
 		return;
 	}
-	ty = vw_stty(e, v, size);
-	if (!ty) {
-		if (size == 8 && vw_ty(e, v) == VT_F32)
-			ty = VT_F32, size = 4;	/* (a float's word in an argument slot: its low 4 bytes) */
-		else
+	{
+		bool fw = size == 8 && vw_ty(e, v) == VT_F32;
+
+		if (fw)
+			size = 4;	/* (a float's word in an argument or temporary slot: its low 4 bytes) */
+		ty = vw_stty(e, v, size);
+		if (!ty)
 			vw_fail(e, "VIR: a float store of this size");
+		a = vw_addr(e, l, (uint64_t)size, &slot, &rel);
+		if (slot != VW_NOBLK && V->sl[slot].size == 8 && (fw || size == 8))
+			V->sl[slot].f32w = fw;	/* (what a load of the word into a float name reads back) */
 	}
-	a = vw_addr(e, l, (uint64_t)size, &slot, &rel);
 	v = vw_conv(e, v, ty);
 	{
 		uint32_t s = vw_ins(e, VO_STORE, VT_VOID, vw_mfl(size, l->align, false) | (e->novtag ? VIF_VOL : 0), a, v, 0);
@@ -833,7 +842,8 @@ VPRIV val vw_bin(ecx *e, int op, int size, bool sgn, val a, val b)
 	x = vw_val(e, &a, ty);
 	y = vw_val(e, &b, ty);
 	r = vw_resname(e, &a, &b);
-	vw_set(e, r, vw_ins(e, vop, ty, 0, x, y, 0));
+	/* signed +, -, *: overflow is undefined (not under -fwrapv), which is what makes an index linear */
+	vw_set(e, r, vw_ins(e, vop, ty, sgn && !e->E->o->wrapv && (vop == VO_ADD || vop == VO_SUB || vop == VO_MUL) ? VIF_NSW : 0, x, y, 0));
 	return (val){ .k = V_REG, .r = (uint8_t)r };
 }
 
@@ -2436,6 +2446,42 @@ static bool vw_simp1(ecx *e, vwsimp *S, uint32_t q, uint32_t *r)
 		}
 		return false;
 	}
+	case VO_S2F: case VO_U2F:	/* a constant converted: the constant (to nearest, as the instruction) */
+		if (vw_kint(V, in.a, &k)) {
+			bool w = V->p[in.a].in.ty != VT_I32;
+			double d = in.op == VO_S2F ? (w ? (double)k : (double)(int32_t)k) : (w ? (double)(uint64_t)k : (double)(uint32_t)k);
+			float f = in.op == VO_S2F ? (w ? (float)k : (float)(int32_t)k) : (w ? (float)(uint64_t)k : (float)(uint32_t)k);
+			uint64_t bits;
+			uint32_t fb;
+
+			memcpy(&bits, &d, 8), memcpy(&fb, &f, 4);
+			*r = in.ty == VT_F32 ? vw_k(e, VO_FCONST, VT_F32, 0, fb, 0) : vw_k(e, VO_FCONST, VT_F64, 0, (uint32_t)bits, (uint32_t)(bits >> 32));
+		}
+		return false;
+	case VO_FEXT: case VO_FTRUNC:
+		if (V->p[in.a].in.op == VO_FCONST && V->p[in.a].blk == VW_NOBLK) {
+			uint64_t bits = (uint64_t)V->p[in.a].in.b | (uint64_t)V->p[in.a].in.c << 32;
+			uint32_t fb = (uint32_t)bits;
+			double d;
+			float f;
+
+			if (in.op == VO_FEXT) {
+				memcpy(&f, &fb, 4);
+				d = f;
+				if (d != d)
+					return false;	/* (a NaN's payload: left to the instruction) */
+				memcpy(&bits, &d, 8);
+				*r = vw_k(e, VO_FCONST, VT_F64, 0, (uint32_t)bits, (uint32_t)(bits >> 32));
+			} else {
+				memcpy(&d, &bits, 8);
+				f = (float)d;
+				if (f != f)
+					return false;
+				memcpy(&fb, &f, 4);
+				*r = vw_k(e, VO_FCONST, VT_F32, 0, fb, 0);
+			}
+		}
+		return false;
 	case VO_ADD: case VO_SUB: case VO_OR: case VO_XOR: case VO_SHL: case VO_LSHR: case VO_ASHR:
 		if (vw_kint(V, in.b, &k) && !k)
 			*r = in.a;
@@ -2447,7 +2493,7 @@ static bool vw_simp1(ecx *e, vwsimp *S, uint32_t q, uint32_t *r)
 	case VO_AND:
 		if (vw_kint(V, in.b, &k) && (k == -1 || (in.ty == VT_I32 && (uint32_t)k == 0xffffffffu)))
 			*r = in.a;
-		else if (vw_kint(V, in.b, &k) && k > 0 && !(k & (k + 1)) && vw_zw(V, in.a) < 8 &&
+		else if (vw_kint(V, in.b, &k) && k > 0 && !((uint64_t)k & ((uint64_t)k + 1)) && vw_zw(V, in.a) < 8 &&
 			 (uint64_t)k >= (vw_zw(V, in.a) == 8 ? ~0ull : (1ull << 8 * vw_zw(V, in.a)) - 1))
 			*r = in.a;	/* the mask keeps every bit that can be set */
 		return false;
@@ -3127,6 +3173,8 @@ static bool vw_emit_ins(ecx *e, uint32_t i, uint32_t b)
 	return true;
 }
 
+#include "vec.inc"
+
 VPRIV bool vw_emit(ecx *e)
 {
 	vwst *V = e->vw;
@@ -3165,6 +3213,7 @@ VPRIV bool vw_emit(ecx *e)
 	if (vw_ifconv(e))
 		while (vw_trivial(e))
 			;
+	vw_vectorize(e);
 	vw_split(e);
 	/* stores to a slot that is not exposed and that nothing reads are dead */
 	for (uint32_t s = 0; s < V->nsl; s++)

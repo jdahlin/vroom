@@ -1182,7 +1182,7 @@ static void parse_instr(ps *p, uint32_t rty)
 
 		if (!sfx)
 			PERR(p, ot, "expected a condition code suffix");
-		if (oi->op == VO_ICMP) {
+		if (oi->op == VO_ICMP || oi->op == VO_VICMP) {
 			for (uint32_t i = 0; i < 10; i++)
 				if (strlen(vir_icc[i]) == sl && !memcmp(vir_icc[i], sfx, sl))
 					cc = i;

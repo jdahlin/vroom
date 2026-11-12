@@ -9,8 +9,9 @@
  *   integer: x0-x15 and x19-x28 (callee-saved); x16 is VR_SCR0 and the
  *            lowering's own scratch, x17 the printer's (large immediates),
  *            x18 the platform's, x29/x30 the frame
- *   float:   v0-v7 and v16-v30, all caller-saved (the prologue saves no
- *            v register); v31 is VR_SCR1
+ *   float:   v0-v7 and v16-v30, caller-saved, and v8-v15, whose low 64 bits a
+ *            call keeps: offered when no vector lives across a call (vl_vcross)
+ *            and saved and restored here, not by the prologue; v31 is VR_SCR1
  *
  * Floating-point operations are encoded words (I_WORD), as in fp.c.  A
  * value in a spill slot or a VIR slot is addressed from FRAME, so the frame
@@ -56,6 +57,7 @@ typedef struct vl {
 	bool risk;		/* x17 held data across a frame access: the frame must stay small */
 	bool tail;		/* a call right before a ret may be a sibling call (vl_notail) */
 	bool ret32;		/* the function returns a 32-bit integer: the upper half of x0 is unspecified */
+	int64_t fcs[8];		/* the FRAME offsets where d8-d15 are kept (those in o->callee[1]) */
 	uint32_t skip;		/* an instruction not to lower (the ret after a sibling call), 0 none */
 	uint32_t at;		/* the block whose place in the layout the code is at (a copy of another block's: vl_dup) */
 	int dup;		/* ... copies being lowered, one in another: vl_dupok */
@@ -119,6 +121,11 @@ static inline bool vl_memaddr(const vir_fn *f, uint32_t v)	/* an address a load 
 	return vl_isconst(f, v) && (f->ins[v].op == VO_SLOTADDR || f->ins[v].op == VO_SYMADDR);
 }
 static inline int vl_x(const vir_fn *f, uint32_t v) { return f->ins[v].ty != VT_I32; }	/* 64-bit */
+/* a load or store of a vector: 16 bytes through a base register, no folded address */
+static inline bool vl_vecacc(const vir_fn *f, const vir_ins *m)
+{
+	return vir_isvec(m->op == VO_LOAD ? m->ty : m->op == VO_STORE ? f->ins[m->b].ty : VT_VOID);
+}
 
 /* ---------------- the ABI ---------------- */
 
@@ -163,6 +170,7 @@ static uint8_t vl_retreg(uint32_t ty) { return ty == VT_F32 || ty == VT_F64 ? VR
 #define VL_CALLER0 ((1ull << 16) - 1)				/* x0-x15 */
 #define VL_ALLOC0 (VL_CALLER0 | ((1ull << 29) - (1ull << 19)))	/* ... and x19-x28 */
 #define VL_ALLOC1 (((1ull << 8) - 1) | ((1ull << 31) - (1ull << 16)))	/* v0-v7, v16-v30 */
+#define VL_FCS 0xff00ull						/* v8-v15: a call keeps their low 64 bits */
 
 static bool vl_bigmem(const vir_fn *f, const vir_ins *in)
 {
@@ -270,7 +278,7 @@ static void vl_fixed(const vir_fn *f, uint32_t v, vir_fix *x, void *ctx)
 
 static uint8_t vl_opfix[256];
 
-static void vl_regs(vir_regs *r, bool darwin)
+static void vl_regs(vir_regs *r, bool darwin, bool fcs)
 {
 	static const uint8_t ops[] = { VO_PARAM, VO_CALL, VO_RET, VO_MEMCPY, VO_MEMSET, VO_LOAD, VO_STORE, VO_ADD, VO_SUB,
 				       VO_AND, VO_OR, VO_XOR, VO_ICMP, VO_PTRADD, VO_SHL, VO_LSHR, VO_ASHR, VO_MUL,
@@ -280,9 +288,9 @@ static void vl_regs(vir_regs *r, bool darwin)
 		vl_opfix[ops[i]] = 1;
 	*r = (vir_regs){ 0 };
 	r->alloc[0] = VL_ALLOC0;
-	r->alloc[1] = VL_ALLOC1;
+	r->alloc[1] = VL_ALLOC1 | (fcs ? VL_FCS : 0);
 	r->callee[0] = VL_ALLOC0 & ~VL_CALLER0;
-	r->callee[1] = 0;
+	r->callee[1] = fcs ? VL_FCS : 0;
 	r->fixed = vl_fixed;
 	r->ctx = darwin ? (void *)1 : NULL;
 	r->opfix = vl_opfix;
@@ -373,9 +381,16 @@ static void vl_rmov(vl *L, uint8_t dst, uint8_t src)
 	if (vl_fcls(dst) != vl_fcls(src))
 		vl_fail(L, "VIR lowering: a move between register classes");
 	if (vl_fcls(dst))
-		word(L->e, 0x1e604000u | (unsigned)vl_gv(src) << 5 | (unsigned)vl_gv(dst));	/* fmov d, d */
+		word(L->e, 0x4ea01c00u | (unsigned)vl_gv(src) << 16 | (unsigned)vl_gv(src) << 5 | (unsigned)vl_gv(dst));	/* mov v.16b, v.16b (a vector's upper half too) */
 	else
 		mov(L->e, 1, vl_gx(dst), vl_gx(src));
+}
+
+/* a vector register and its 16-byte spill slot: the slot's address in t, then ldr/str q */
+static void vl_qslot(vl *L, bool load, int v, uint32_t s, int t)
+{
+	opi(L->e, I_ADDI, 1, t, FRAME, L->spoff[s]);
+	word(L->e, (load ? 0x3dc00000u : 0x3d800000u) | (unsigned)t << 5 | (unsigned)v);
 }
 
 /* register dst <- spill slot s, through general register t for a float */
@@ -383,7 +398,9 @@ static void vl_reload(vl *L, uint8_t dst, uint32_t s, int t)
 {
 	int sz = vl_ssz(L, s);
 
-	if (vl_fcls(dst)) {
+	if (L->o->ssz[s] == 16) {
+		vl_qslot(L, true, vl_gv(dst), s, t);
+	} else if (vl_fcls(dst)) {
 		mem(L->e, I_LD, sz, 0, t, FRAME, L->spoff[s]);
 		word(L->e, f_in(sz == 3, vl_gv(dst), t));
 	} else {
@@ -395,7 +412,9 @@ static void vl_spill(vl *L, uint8_t src, uint32_t s, int t)
 {
 	int sz = vl_ssz(L, s);
 
-	if (vl_fcls(src)) {
+	if (L->o->ssz[s] == 16) {
+		vl_qslot(L, false, vl_gv(src), s, t);
+	} else if (vl_fcls(src)) {
 		word(L->e, f_out(sz == 3, t, vl_gv(src)));
 		mem(L->e, I_ST, sz, 0, t, FRAME, L->spoff[s]);
 	} else {
@@ -468,7 +487,16 @@ static void vl_emoves(vl *L, uint32_t g)
 			}
 			break;
 		case VE_MOVE:
-			if (ds && ss) {
+			if (ds && ss && L->o->ssz[sn] == 16) {	/* (through v31: no move of this edge may hold it) */
+				for (uint32_t k = 0; k < ed->n; k++) {
+					const vir_emove *o2 = &o->move[ed->first + k];
+
+					if ((!(o2->dst & VL_SLOT) && o2->dst == VR_SCR1) || (o2->kind != VE_REMAT && !(o2->src & VL_SLOT) && o2->src == VR_SCR1))
+						vl_fail(L, "VIR lowering: a vector moved between spill slots while the scratch register is taken");
+				}
+				vl_qslot(L, true, 31, sn, t);
+				vl_qslot(L, false, 31, dn, t);
+			} else if (ds && ss) {
 				mem(L->e, I_LD, vl_ssz(L, sn), 0, t, FRAME, L->spoff[sn]);
 				mem(L->e, I_ST, vl_ssz(L, dn), 0, t, FRAME, L->spoff[dn]);
 			} else if (ds) {
@@ -485,9 +513,9 @@ static void vl_emoves(vl *L, uint32_t g)
 			if (vl_fcls((uint8_t)dn)) {
 				unsigned a = (unsigned)vl_gv((uint8_t)dn), b = (unsigned)vl_gv((uint8_t)sn);
 
-				word(L->e, 0x2e201c00u | b << 16 | a << 5 | a);	/* eor a.8b, a.8b, b.8b */
-				word(L->e, 0x2e201c00u | a << 16 | b << 5 | b);
-				word(L->e, 0x2e201c00u | b << 16 | a << 5 | a);
+				word(L->e, 0x6e201c00u | b << 16 | a << 5 | a);	/* eor a.16b, a.16b, b.16b */
+				word(L->e, 0x6e201c00u | a << 16 | b << 5 | b);
+				word(L->e, 0x6e201c00u | b << 16 | a << 5 | a);
 			} else {
 				int a = vl_gx((uint8_t)dn), b = vl_gx((uint8_t)sn);
 
@@ -502,6 +530,7 @@ static void vl_emoves(vl *L, uint32_t g)
 	}
 }
 
+static void vl_fcsave(vl *L, bool restore, int t);
 static bool vl_plain(vl *L, uint32_t b, uint32_t k);
 static uint32_t vl_chase(vl *L, uint32_t t);
 static void vl_block(vl *L, uint32_t b);
@@ -714,6 +743,25 @@ static lval vl_addr(vl *L, uint32_t w, int t)
 	return l;
 }
 
+/* a float register loaded from or stored to [base, #off] without a general register in between;
+ * false when the offset has no such form */
+static bool vl_fmem(vl *L, bool load, bool d, int v, int base, int64_t off)
+{
+	int sz = d ? 8 : 4;
+
+	if (base > 30 && base != SP)
+		return false;
+	if (base == SP)
+		base = 31;
+	if (off >= 0 && off % sz == 0 && off / sz < 4096)
+		word(L->e, (load ? 0xbd400000u : 0xbd000000u) | (unsigned)d << 30 | (unsigned)(off / sz) << 10 | (unsigned)base << 5 | (unsigned)v);
+	else if (off >= -256 && off <= 255)
+		word(L->e, (load ? 0xbc400000u : 0xbc000000u) | (unsigned)d << 30 | ((unsigned)off & 0x1ffu) << 12 | (unsigned)base << 5 | (unsigned)v);
+	else
+		return false;
+	return true;
+}
+
 static void vl_load(vl *L, uint32_t i, const vir_ins *in, uint8_t res)
 {
 	ecx *e = L->e;
@@ -722,6 +770,12 @@ static void vl_load(vl *L, uint32_t i, const vir_ins *in, uint8_t res)
 	int rd = fl || res == VR_NONE ? R_X16 : vl_gx(res);
 	lval l;
 
+	if (L->xval && L->xval == L->ov[0] && fl && res != VR_NONE && !(in->fl & VIF_VOL)) {
+		word(e, 0xbc600800u | (unsigned)(w == 3) << 30 | (unsigned)L->xreg << 16 | (unsigned)L->xopt << 13 |
+			(unsigned)(L->xsh != 0) << 12 | (unsigned)L->xbase << 5 | (unsigned)vl_gv(res));	/* ldr s/d, [x, index] */
+		L->xval = 0;
+		return;
+	}
 	if (L->xval && L->xval == L->ov[0]) {
 		ins *x = put(e, I_LDX);
 
@@ -733,6 +787,8 @@ static void vl_load(vl *L, uint32_t i, const vir_ins *in, uint8_t res)
 		return;
 	}
 	l = vl_addr(L, in->fl, R_X16);
+	if (fl && res != VR_NONE && !(in->fl & VIF_VOL) && l.k == L_REG && vl_fmem(L, true, w == 3, vl_gv(res), l.r, l.off))
+		return;	/* (straight into the v register) */
 	e->novtag += (in->fl & VIF_VOL) != 0;	/* (a volatile slot is no slot to the record clean-up) */
 	if (l.k == L_SYM && ext != 2) {
 		load_n(e, rd, &l, 1 << w, ext);
@@ -759,6 +815,16 @@ static void vl_store(vl *L, const vir_ins *in)
 	int base_t = l.k == L_SYM || (l.k == L_REG && l.r == R_X16);	/* the address needs x16 */
 	int rs;
 
+	if (L->opr[1] != VR_NONE && vl_fcls(L->opr[1]) && !(in->fl & VIF_VOL)) {	/* straight from the v register */
+		if (xa) {
+			word(e, 0xbc200800u | (unsigned)(w == 3) << 30 | (unsigned)L->xreg << 16 | (unsigned)L->xopt << 13 |
+				(unsigned)(L->xsh != 0) << 12 | (unsigned)L->xbase << 5 | (unsigned)vl_gv(L->opr[1]));
+			L->xval = 0;
+			return;
+		}
+		if (l.k == L_REG && vl_fmem(L, false, w == 3, vl_gv(L->opr[1]), l.r, l.off))
+			return;
+	}
 	if (L->opr[1] == VR_NONE && vl_zero(L->f, v))
 		rs = ZR;
 	else if (L->opr[1] != VR_NONE && vl_fcls(L->opr[1])) {
@@ -972,7 +1038,12 @@ static void vl_call(vl *L, uint32_t b, uint32_t i, const vir_ins *in)
 		}
 	}
 	if (!stk && vl_sibling(L, b, i)) {
-		ins *t = put(e, I_TAIL);
+		ins *t;
+
+		if (L->o->callee[1] && L->opr[0] != VR_NONE)	/* (the callee's address may be in x16: through x17) */
+			L->risk = true;
+		vl_fcsave(L, true, L->opr[0] != VR_NONE ? R_X17 : R_X16);
+		t = put(e, I_TAIL);
 
 		if (L->opr[0] == VR_NONE) {
 			const vir_ins *k = &f->ins[in->a];
@@ -1144,7 +1215,7 @@ static bool vl_pfold(vl *L, uint32_t b, uint32_t i)
 
 	if (L->opr[1] != VR_NONE || !vl_iconst(f, in->b) || base == VR_NONE || L->uses[i] != 1 ||
 	    L->o->slot[i] != VIR_NOBLK || i + 1 >= f->blk[b].first + f->blk[b].n || nx->a != i ||
-	    (nx->op != VO_LOAD && !(nx->op == VO_STORE && nx->b != i)))
+	    (nx->op != VO_LOAD && !(nx->op == VO_STORE && nx->b != i)) || vl_vecacc(f, nx))
 		return false;
 	k = vl_k64(&f->ins[in->b]);
 	if (k < -256 || k > 32760)
@@ -1187,7 +1258,7 @@ static bool vl_cinfo(const vl *L, uint32_t b, uint32_t c, vlx *x)
 	    (vl_isconst(f, in->a) && in->op != VO_PTRADD))
 		return false;
 	mem = in->op == VO_PTRADD && c + 1 < end && m->a == c && vl_once(L, c) &&
-	      (m->op == VO_LOAD || (m->op == VO_STORE && m->b != c));
+	      (m->op == VO_LOAD || (m->op == VO_STORE && m->b != c)) && !vl_vecacc(f, m);
 	if (mem)
 		w = VIF_W(m->fl);
 	*x = (vlx){ c, j, mem ? VX_MEM : 0, 3, 0, 0 };
@@ -1335,6 +1406,21 @@ static void vl_chases(vl *L, uint32_t *path)
 }
 
 /* a return: the epilogue and ret, or a jump to the shared one (finish_function decides) */
+/* d8-d15 as the caller had them: at the entry into their slots, before every way out back */
+static void vl_fcsave(vl *L, bool restore, int t)
+{
+	for (int r = 8; r < 16; r++)
+		if (L->o->callee[1] >> r & 1) {
+			if (restore) {
+				mem(L->e, I_LD, 3, 0, t, FRAME, L->fcs[r - 8]);
+				word(L->e, f_in(1, r, t));
+			} else {
+				word(L->e, f_out(1, t, r));
+				mem(L->e, I_ST, 3, 0, t, FRAME, L->fcs[r - 8]);
+			}
+		}
+}
+
 static void vl_ret(vl *L)
 {
 	ecx *e = L->e;
@@ -1342,6 +1428,7 @@ static void vl_ret(vl *L)
 
 	if (!e->reach)
 		return;
+	vl_fcsave(L, true, R_X16);
 	t = put(e, I_TAIL);
 	t->cond = 4;
 	t->label = L->retlbl;
@@ -1386,6 +1473,154 @@ static bool vl_dupok(vl *L, uint32_t t)
 }
 
 /* instruction i of block b, its operands collected; res its result's register */
+/* ---------------- vectors (SPEC-vir.md 7.5) ---------------- */
+
+#define VW3(op, m, n, d)	word(e, (op) | (unsigned)(m) << 16 | (unsigned)(n) << 5 | (unsigned)(d))
+#define VW2(op, n, d)		word(e, (op) | (unsigned)(n) << 5 | (unsigned)(d))
+
+/* instruction i if it makes or consumes a vector: true when it was lowered here.  v31 is the
+ * scratch of the two compares that need one */
+static bool vl_vec(vl *L, const vir_ins *in, uint8_t res)
+{
+	ecx *e = L->e;
+	vir_fn *f = L->f;
+	int vd = res == VR_NONE ? 31 : vl_gv(res);
+	/* two 64-bit lanes: the size bit of every lane-wise instruction used here */
+	uint32_t D = in->ty == VT_F64X2 || in->ty == VT_I64X2 || (in->op == VO_VREDUCE && f->ins[in->a].ty == VT_I64X2) ? 0x00400000u : 0;
+
+	switch (in->op) {
+	case VO_LOAD:
+		if (!vir_isvec(in->ty))
+			return false;
+		VW2(0x3dc00000u, vl_ix(L, 0, R_X16), vd);	/* ldr q, [x] */
+		return true;
+	case VO_STORE:
+		if (!vir_isvec(f->ins[in->b].ty))
+			return false;
+		VW2(0x3d800000u, vl_ix(L, 0, R_X16), vl_fx(L, 1));	/* str q, [x] */
+		return true;
+	case VO_FADD: case VO_FSUB: case VO_FMUL: case VO_FDIV: {
+		static const uint32_t op[] = { 0x4e20d400u, 0x4ea0d400u, 0x6e20dc00u, 0x6e20fc00u };
+
+		if (!vir_isvec(in->ty))
+			return false;
+		VW3(op[in->op - VO_FADD] | D, vl_fx(L, 1), vl_fx(L, 0), vd);
+		return true;
+	}
+	case VO_FNEG: case VO_FABS: case VO_FSQRT:
+		if (!vir_isvec(in->ty))
+			return false;
+		VW2((in->op == VO_FNEG ? 0x6ea0f800u : in->op == VO_FABS ? 0x4ea0f800u : 0x6ea1f800u) | D, vl_fx(L, 0), vd);
+		return true;
+	case VO_ADD: case VO_SUB: case VO_MUL: case VO_AND: case VO_OR: case VO_XOR: {
+		static const uint32_t op[] = { [VO_ADD] = 0x4ea08400u, [VO_SUB] = 0x6ea08400u, [VO_MUL] = 0x4ea09c00u,
+					       [VO_AND] = 0x4e201c00u, [VO_OR] = 0x4ea01c00u, [VO_XOR] = 0x6e201c00u };
+
+		if (!vir_isvec(in->ty))
+			return false;
+		VW3(op[in->op] | (in->op == VO_ADD || in->op == VO_SUB ? D : 0), vl_fx(L, 1), vl_fx(L, 0), vd);
+		return true;
+	}
+	case VO_NEG: case VO_NOT:
+		if (!vir_isvec(in->ty))
+			return false;
+		VW2(in->op == VO_NEG ? 0x6ea0b800u | D : 0x6e205800u, vl_fx(L, 0), vd);
+		return true;
+	case VO_SELECT:
+		if (!vir_isvec(in->ty))
+			return false;
+		vl_fail(L, "VIR lowering: select of vectors");
+	case VO_VSPLAT:
+		if (L->opr[0] != VR_NONE && vl_fcls(L->opr[0]))
+			VW2(D ? 0x4e080400u : 0x4e040400u, vl_gv(L->opr[0]), vd);	/* dup v.4s, v.s[0] (.2d, .d[0]) */
+		else	/* (a constant: its bits, an fconst's too, through x16) */
+			VW2(D ? 0x4e080c00u : 0x4e040c00u, vl_ix(L, 0, R_X16), vd);	/* dup v.4s, w (.2d, x) */
+		return true;
+	case VO_VSERIES:
+		movi(e, 1, R_X16, D ? 0 : 0x0000000100000000ll);
+		word(e, f_in(1, vd, R_X16));
+		movi(e, 1, R_X16, D ? 1 : 0x0000000300000002ll);
+		word(e, q_in_hi(vd, R_X16));
+		return true;
+	case VO_VICMP: {
+		/* eq ne slt sle sgt sge ult ule ugt uge: the instruction, operands swapped, inverted */
+		static const struct { uint32_t op; uint8_t sw, inv; } t[10] = {
+			{ 0x6ea08c00u, 0, 0 }, { 0x6ea08c00u, 0, 1 }, { 0x4ea03400u, 1, 0 }, { 0x4ea03c00u, 1, 0 },
+			{ 0x4ea03400u, 0, 0 }, { 0x4ea03c00u, 0, 0 }, { 0x6ea03400u, 1, 0 }, { 0x6ea03c00u, 1, 0 },
+			{ 0x6ea03400u, 0, 0 }, { 0x6ea03c00u, 0, 0 },
+		};
+		int a = vl_fx(L, 0), b = vl_fx(L, 1), c = in->fl & 15;
+
+		VW3(t[c].op | D, t[c].sw ? a : b, t[c].sw ? b : a, vd);
+		if (t[c].inv)
+			VW2(0x6e205800u, vd, vd);
+		return true;
+	}
+	case VO_VFCMP: {
+		int a = vl_fx(L, 0), b = vl_fx(L, 1);
+
+		switch (in->fl & 15) {
+		case 0: VW3(0x4e20e400u | D, b, a, vd); break;	/* oeq */
+		case 1: VW3(0x4e20e400u | D, b, a, vd); VW2(0x6e205800u, vd, vd); break;	/* une */
+		case 2: VW3(0x6ea0e400u | D, a, b, vd); break;	/* olt: b > a */
+		case 3: VW3(0x6e20e400u | D, a, b, vd); break;	/* ole: b >= a */
+		case 4: VW3(0x6ea0e400u | D, b, a, vd); break;	/* ogt */
+		case 5: VW3(0x6e20e400u | D, b, a, vd); break;	/* oge */
+		default:	/* uno: not (a == a and b == b); one: a > b or b > a */
+			if (a == 31 || b == 31 || vd == 31)
+				vl_fail(L, "VIR lowering: a vector compare without a scratch register");
+			if ((in->fl & 15) == 6) {
+				VW3(0x4e20e400u | D, a, a, 31);
+				VW3(0x4e20e400u | D, b, b, vd);
+				VW3(0x4e201c00u, 31, vd, vd);
+				VW2(0x6e205800u, vd, vd);
+			} else {
+				VW3(0x6ea0e400u | D, b, a, 31);
+				VW3(0x6ea0e400u | D, a, b, vd);
+				VW3(0x4ea01c00u, 31, vd, vd);
+			}
+			break;
+		}
+		return true;
+	}
+	case VO_VBITSEL: {
+		int m = vl_fx(L, 0), b = vl_fx(L, 1), c = vl_fx(L, 2);
+
+		if (vd == c && vd != m) {
+			VW3(0x6ea01c00u, m, b, vd);	/* bit: b where the mask is set */
+		} else if (vd == b && vd != m) {
+			VW3(0x6ee01c00u, m, c, vd);	/* bif: c where it is clear */
+		} else {
+			if (vd != m)
+				VW3(0x4ea01c00u, m, m, vd);
+			VW3(0x6e601c00u, c, b, vd);	/* bsl */
+		}
+		return true;
+	}
+	case VO_VS2F:
+		VW2(0x4e21d800u | D, vl_fx(L, 0), vd);	/* scvtf */
+		return true;
+	case VO_VREV:
+		if (D) {	/* (two lanes: the halves swapped) */
+			int a = vl_fx(L, 0);
+
+			word(e, 0x6e004000u | (unsigned)a << 16 | (unsigned)a << 5 | (unsigned)vd);
+			return true;
+		}
+		VW2(0x4ea00800u, vl_fx(L, 0), vd);	/* rev64 .4s, then the halves swapped: ext #8 */
+		word(e, 0x6e004000u | (unsigned)vd << 16 | (unsigned)vd << 5 | (unsigned)vd);
+		return true;
+	case VO_VREDUCE:
+		VW2(D ? 0x5ef1b800u : 0x4eb1b800u, vl_fx(L, 0), 31);	/* addv s31, v.4s (addp d31, v.2d) */
+		word(e, f_out(D != 0, res == VR_NONE ? R_X16 : vl_gx(res), 31));
+		return true;
+	default:
+		return false;
+	}
+}
+#undef VW3
+#undef VW2
+
 static void vl_ins(vl *L, uint32_t b, uint32_t i, uint8_t res)
 {
 	ecx *e = L->e;
@@ -1398,6 +1633,8 @@ static void vl_ins(vl *L, uint32_t b, uint32_t i, uint8_t res)
 
 	if (i > L->tlo && i < L->thi)
 		return;	/* (vl_tfold: in the branch's test) */
+	if (vl_vec(L, in, res))
+		return;
 	switch (in->op) {
 	case VO_PARAM:
 		vl_param(L, in, res);
@@ -1783,6 +2020,7 @@ static void vl_body(vl *L)
 	ecx *e = L->e;
 	vir_fn *f = L->f;
 
+	vl_fcsave(L, false, R_X16);
 	for (uint32_t b = 0; b < f->nblk; b++) {
 		if (vl_skip(L, b))
 			continue;
@@ -1791,6 +2029,73 @@ static void vl_body(vl *L)
 		L->fallok = true;
 		vl_block(L, b);
 	}
+}
+
+/* does a vector live across a call?  (A call keeps only the low half of v8-v15: such a function
+ * is not offered them.)  Liveness of the vector values alone, a bit each */
+static bool vl_vcross(vir_fn *f)
+{
+	uint32_t nv = 0, W, *ix;
+	uint64_t *in, *out, *live;
+	bool calls = false, hit = false;
+
+	for (uint32_t b = 0; b < f->nblk; b++)
+		for (uint32_t i = f->blk[b].first; i < f->blk[b].first + f->blk[b].n; i++) {
+			nv += vir_isvec(f->ins[i].ty);
+			calls |= f->ins[i].op == VO_CALL || ((f->ins[i].op == VO_MEMCPY || f->ins[i].op == VO_MEMSET) && vl_bigmem(f, &f->ins[i]));
+		}
+	if (!nv || !calls)
+		return false;
+	W = (nv + 63) / 64;
+	ix = malloc((size_t)f->nins * sizeof *ix);
+	in = calloc((size_t)(2 * f->nblk + 1) * W, sizeof *in);
+	if (!ix || !in) {
+		free(ix), free(in);
+		return true;
+	}
+	out = in + (size_t)f->nblk * W, live = out + (size_t)f->nblk * W;
+	nv = 0;
+	for (uint32_t i = 0; i < f->nins; i++)
+		ix[i] = vir_isvec(f->ins[i].ty) ? nv++ : UINT32_MAX;
+	for (int pass = 0, ch = 1; ch || pass < 2; pass += !ch) {	/* to a fixed point, then once more to look at the calls */
+		ch = 0;
+		for (uint32_t b = f->nblk; b-- > 0;) {
+			const vir_blk *k = &f->blk[b];
+			vir_ins t = f->ins[k->first + k->n - 1];
+			vir_oit it;
+			uint32_t *p;
+
+			memset(live, 0, W * sizeof *live);
+			vir_oit_init(&it, f, &t, true);
+			while ((p = vir_oit_next(&it)))
+				if (*p < f->nblk)
+					for (uint32_t w = 0; w < W; w++)
+						live[w] |= in[(size_t)*p * W + w];
+			for (uint32_t w = 0; w < W; w++)
+				if (out[(size_t)b * W + w] != live[w])
+					out[(size_t)b * W + w] = live[w], ch = 1;
+			for (uint32_t i = k->first + k->n; i-- > k->first;) {
+				vir_ins x = f->ins[i];
+
+				if (ix[i] != UINT32_MAX)
+					live[ix[i] / 64] &= ~(1ull << (ix[i] & 63));
+				if (pass && (x.op == VO_CALL || x.op == VO_MEMCPY || x.op == VO_MEMSET))
+					for (uint32_t w = 0; w < W; w++)
+						hit |= live[w] != 0;
+				vir_oit_init(&it, f, &x, false);
+				while ((p = vir_oit_next(&it)))
+					if (*p < f->nins && ix[*p] != UINT32_MAX)
+						live[ix[*p] / 64] |= 1ull << (ix[*p] & 63);
+			}
+			for (uint32_t w = 0; w < W; w++)
+				if (in[(size_t)b * W + w] != live[w])
+					in[(size_t)b * W + w] = live[w], ch = 1;
+		}
+		if (pass && !ch)
+			break;
+	}
+	free(ix), free(in);
+	return hit;
 }
 
 /* lower V->f (allocated in V->ao) for function s; false: why in *why, nothing emitted */
@@ -1808,7 +2113,8 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 		*why = "VIR lowering: -g";
 		return false;
 	}
-	vl_regs(&regs, DARWIN(c));
+	/* (unwind tables would have to describe the d registers' slots: not written) */
+	vl_regs(&regs, DARWIN(c), !e->E->o->cfi && !vl_vcross(f));
 	if (!vir_loops_build(f, &V->lp)) {
 		*why = "VIR: loops";
 		return false;
@@ -1950,6 +2256,9 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 	}
 	for (uint32_t k = 0; k < V->ao.nspill; k++)
 		L.spoff[k] = slot(e, V->ao.ssz[k], V->ao.ssz[k]);
+	for (int r = 8; r < 16; r++)
+		if (V->ao.callee[1] >> r & 1)
+			L.fcs[r - 8] = slot(e, 8, 8);
 	for (uint32_t b = 0; b < f->nblk; b++)
 		L.lbl[b] = newlabel(e);
 	L.retlbl = newlabel(e);
@@ -1960,8 +2269,6 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 	for (int r = 19; r <= 28; r++)
 		if (V->ao.callee[0] >> r & 1)
 			e->usedcs |= 1u << r;
-	if (V->ao.callee[1])
-		vl_fail(&L, "VIR lowering: a callee-saved float register");
 	finish_function(e, s);
 	e->vtry = false;
 	e->vlow = false;
