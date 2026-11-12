@@ -738,7 +738,13 @@ VPRIV void vw_copy(ecx *e, int rdst, int rsrc, uint64_t n)
 {
 	uint32_t d = vw_get(e, rdst, VT_PTR), s = vw_get(e, rsrc, VT_PTR);
 
-	vw_ins(e, VO_MEMCPY, VT_VOID, 0, d, s, vw_iconst(e, VT_I64, (int64_t)n));
+	if (n == 1 || n == 2 || n == 4 || n == 8) {	/* one load and store (memcpy(&u, &d, 8)): promotable */
+		uint32_t fl = vw_mfl((int)n, 1, false);
+
+		vw_ins(e, VO_STORE, VT_VOID, fl, d, vw_ins(e, VO_LOAD, n == 8 ? VT_I64 : VT_I32, fl, s, 0, 0), 0);
+	} else {
+		vw_ins(e, VO_MEMCPY, VT_VOID, 0, d, s, vw_iconst(e, VT_I64, (int64_t)n));
+	}
 	vw_st_clear(e, true);
 }
 
