@@ -160,6 +160,10 @@ void vir_alloc_print(vbuf *b, const vir_unit *u, vir_fn *f, const vir_loops *lp,
 					case VE_SWAP:
 						vbuf_s(&ed, "  ; swap operands\n");
 						break;
+					case VE_STORE:
+						vir_reg_name(s3, x2->src);
+						vbuf_f(&ed, "  ; store ss%u <- %s (%s)\n", o->slot[x2->v], s3, s2);
+						break;
 					}
 				}
 				if (ed.n) {
@@ -190,7 +194,7 @@ void vir_alloc_print(vbuf *b, const vir_unit *u, vir_fn *f, const vir_loops *lp,
 				vir_reg_name(s1, r);
 				vbuf_f(b, " -> %s", s1);
 				if (o->slot[ins] != VIR_NOBLK)
-					vbuf_f(b, " [ss%u]", o->slot[ins]);
+					vbuf_f(b, o->sdef[ins] ? " [ss%u]" : " [ss%u later]", o->slot[ins]);
 			}
 			ins++;
 		}
@@ -237,8 +241,8 @@ void vir_alloc_print(vbuf *b, const vir_unit *u, vir_fn *f, const vir_loops *lp,
 	{
 		const vir_astats *s = &o->st;
 
-		vbuf_f(b, "; spills %u reloads %u remats %u moves %u swaps %u; edges %u: moves %u reloads %u remats %u stores %u xchg %u; slots %u callee %u%s\n",
-		       s->spills, s->reloads, s->remats, s->moves, s->swaps, s->edges, s->emoves, s->ereloads, s->eremats, s->estores,
+		vbuf_f(b, "; spills %u reloads %u remats %u moves %u swaps %u stores %u; edges %u: moves %u reloads %u remats %u stores %u xchg %u; slots %u callee %u%s\n",
+		       s->spills, s->reloads, s->remats, s->moves, s->swaps, s->stores, s->edges, s->emoves, s->ereloads, s->eremats, s->estores,
 		       s->xchg, s->slots, s->callee, s->linear ? " linear" : "");
 	}
 	free(t.p);

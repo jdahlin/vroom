@@ -36,5 +36,5 @@ b0:
   ret v4                                ; r0
 }
 ; callee-saved: r2 (b0) f2 (b0)
-; spills 0 reloads 0 remats 2 moves 1 swaps 0; edges 0: moves 0 reloads 0 remats 0 stores 0 xchg 0; slots 0 callee 2
+; spills 0 reloads 0 remats 2 moves 1 swaps 0 stores 0; edges 0: moves 0 reloads 0 remats 0 stores 0 xchg 0; slots 0 callee 2
 ; sweep @f: 48 configurations, 0 failed

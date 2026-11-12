@@ -42,5 +42,5 @@ b3:
 }
 ; edge b0.0 -> b1: r3 <- 0
 ; edge b2.0 -> b1: r4 <- r0 (v3); r0 <- r1 (v4); r1 <- r2 (v5); r2 <- r4 (v3)
-; spills 0 reloads 0 remats 0 moves 0 swaps 0; edges 2: moves 4 reloads 0 remats 1 stores 0 xchg 0; slots 0 callee 0
+; spills 0 reloads 0 remats 0 moves 0 swaps 0 stores 0; edges 2: moves 4 reloads 0 remats 1 stores 0 xchg 0; slots 0 callee 0
 ; sweep @f: 48 configurations, 0 failed

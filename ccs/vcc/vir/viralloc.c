@@ -262,7 +262,10 @@ int main(int argc, char **argv)
 
 					if (e->kind == VE_SWAP)
 						continue;
-					e->dst = VR_MAKE(VR_CLASS(e->dst), (VR_NUM(e->dst) + 1) % (VR_CLASS(e->dst) ? regs[1] : regs[0]));
+					if (e->kind == VE_STORE)	/* (its dst is unused: the register it stores from) */
+						e->src = VR_MAKE(VR_CLASS(e->src), (VR_NUM(e->src) + 1) % (VR_CLASS(e->src) ? regs[1] : regs[0]));
+					else
+						e->dst = VR_MAKE(VR_CLASS(e->dst), (VR_NUM(e->dst) + 1) % (VR_CLASS(e->dst) ? regs[1] : regs[0]));
 				} else if (what == 2 && o.nmove) {
 					vir_emove *e = &o.move[RND() % o.nmove];
 

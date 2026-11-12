@@ -27,13 +27,15 @@ b3(v7:i64):
 ; alloc @f regs 3,2,0,0
 func @f %s0 {
 b0:
-  v0:i64 = param 0.0                    ; -> r0 [ss1]
-  v1:i64 = param 1.0                    ; -> r1 [ss0]
+  v0:i64 = param 0.0                    ; -> r0 [ss1 later]
+  v1:i64 = param 1.0                    ; -> r1 [ss0 later]
   v2:i64 = param 2.0                    ; -> r2
+  ; store ss0 <- r1 (v1)
   v3:i32 = icmp.slt v0, v1              ; r0, r1 -> r1
   brif v3, b1, b2                       ; r1
 b1:
   v4:i64 = mul v0, v2                   ; r0, r2 -> r1
+  ; store ss1 <- r0 (v0)
   ; reload r0 <- v1 (ss0)
   v5:i64 = add v4, v1                   ; r1, r0 -> r0
   br b3(v5)                             ; r0
@@ -48,5 +50,5 @@ b3(v7:i64):                             ; v7 r1
 }
 ; edge b1.0 -> b3: r1 <- r0 (v5); r0 <- ss1 (v0)
 ; spill slots: ss0(8): v1 ss1(8): v0
-; spills 2 reloads 2 remats 0 moves 0 swaps 0; edges 1: moves 1 reloads 1 remats 0 stores 0 xchg 0; slots 2 callee 0
+; spills 2 reloads 2 remats 0 moves 0 swaps 0 stores 2; edges 1: moves 1 reloads 1 remats 0 stores 0 xchg 0; slots 2 callee 0
 ; sweep @f: 12 configurations, 0 failed

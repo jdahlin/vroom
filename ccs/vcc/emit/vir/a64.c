@@ -399,6 +399,9 @@ static void vl_edits(vl *L, uint32_t *ei, uint32_t end, uint32_t pos)
 		case VE_MOVE:
 			vl_rmov(L, x->dst, (uint8_t)x->src);
 			break;
+		case VE_STORE:
+			vl_spill(L, x->src, o->slot[x->v], R_X16);
+			break;
 		default:
 			vl_fail(L, "VIR lowering: swapped operands");
 		}
@@ -883,7 +886,7 @@ static void vl_ins(vl *L, uint32_t b, uint32_t i, uint8_t res)
 	case VO_PTRADD:
 		if (vl_pfold(L, b, i))
 			return;
-		/* fall through */
+		__attribute__((fallthrough));
 	case VO_ADD: case VO_SUB: case VO_AND: case VO_OR: case VO_XOR: {
 		static const uint8_t rr[] = { [VO_ADD] = I_ADD, [VO_SUB] = I_SUB, [VO_AND] = I_AND, [VO_OR] = I_ORR,
 					      [VO_XOR] = I_EOR, [VO_PTRADD] = I_ADD };
@@ -1150,7 +1153,7 @@ static void vl_body(vl *L)
 			uint8_t r = o->opr[pos++];
 			uint32_t v = k->first + q;
 
-			if (o->slot[v] != VIR_NOBLK && r != VR_NONE)
+			if (o->slot[v] != VIR_NOBLK && o->sdef[v] && r != VR_NONE)
 				vl_spill(L, r, o->slot[v], R_X16);
 		}
 		for (uint32_t i = k->first + k->nparam; i < k->first + k->n; i++) {
@@ -1178,7 +1181,7 @@ static void vl_body(vl *L)
 			if (!e->reach)
 				deflabel_forced(e, newlabel(e));	/* (code after a trap: never reached) */
 			vl_ins(L, b, i, res);
-			if (x.ty != VT_VOID && x.ty != VT_MULTI && o->slot[i] != VIR_NOBLK && res != VR_NONE)
+			if (x.ty != VT_VOID && x.ty != VT_MULTI && o->slot[i] != VIR_NOBLK && o->sdef[i] && res != VR_NONE)
 				vl_spill(L, res, o->slot[i], R_X16);
 		}
 		if (e->reach)

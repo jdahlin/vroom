@@ -83,10 +83,11 @@ typedef struct vir_loops {
 bool vir_loops_build(vir_fn *f, vir_loops *lp);
 
 /* ---- 15.2: the output ---- */
-enum { VE_RELOAD, VE_REMAT, VE_MOVE, VE_SWAP, VE_XCHG };
+enum { VE_RELOAD, VE_REMAT, VE_MOVE, VE_SWAP, VE_XCHG, VE_STORE };
 typedef struct vir_edit {	/* 12 bytes */
 	uint32_t pos;		/* before instruction pos (VE_SWAP: of it) */
-	uint8_t kind, dst, src, pad;	/* VE_RELOAD dst <- spill slot of v; VE_REMAT dst <- constant v; VE_MOVE dst <- src */
+	uint8_t kind, dst, src, pad;	/* VE_RELOAD dst <- spill slot of v; VE_REMAT dst <- constant v; VE_MOVE dst <- src;
+					 * VE_STORE spill slot of v <- src (dst VR_NONE) */
 	uint32_t v;		/* the value moved */
 } vir_edit;
 
@@ -105,7 +106,7 @@ typedef struct vir_aedge {
 
 typedef struct vir_astats {
 	uint32_t spills;	/* values given a spill slot */
-	uint32_t reloads, remats, moves, swaps;	/* edits inside blocks */
+	uint32_t reloads, remats, moves, swaps, stores;	/* edits inside blocks */
 	uint32_t emoves, ereloads, eremats, estores, edges, xchg;	/* edge moves: register, reload, rematerialize, to a slot */
 	uint32_t slots;		/* spill slots after sharing */
 	uint32_t callee;	/* callee-saved registers used */
@@ -115,6 +116,9 @@ typedef struct vir_astats {
 
 typedef struct vir_alloc_out {
 	uint32_t *slot;		/* per value: its spill slot, VIR_NOBLK none */
+	uint8_t *sdef;		/* per value with a slot: 1 stored at its definition (a bparam: at its block's
+				 * top); 0 the slot is written by VE_STORE edits and edge moves on the paths
+				 * that read it (a value out of its register is always in its slot) */
 	uint8_t *opr;		/* per value operand, then the result, in block and operand order (bparams: at the block's top) */
 	uint32_t nopr;
 	uint32_t *boff;		/* per block: offset into opr (boff[0..nblk]), then into edit (boff[nblk+1+b], to [2*nblk+1]) */

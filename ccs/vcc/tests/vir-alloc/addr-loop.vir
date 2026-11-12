@@ -58,5 +58,5 @@ b4:
 }
 ; edge b3.0 -> b1: r2 <- ss2 (v2)
 ; spill slots: ss0(8): v0 ss1(8): v1 ss2(8): v2
-; spills 3 reloads 2 remats 1 moves 1 swaps 0; edges 1: moves 0 reloads 1 remats 0 stores 0 xchg 0; slots 3 callee 0
+; spills 3 reloads 2 remats 1 moves 1 swaps 0 stores 0; edges 1: moves 0 reloads 1 remats 0 stores 0 xchg 0; slots 3 callee 0
 ; sweep @f: 72 configurations, 0 failed

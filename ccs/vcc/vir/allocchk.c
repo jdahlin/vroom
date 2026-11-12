@@ -154,7 +154,7 @@ static void block(chk *c, uint32_t b, uint32_t *st, uint32_t *tmp, uint32_t **en
 		uint32_t q = k->first + j;
 		uint8_t r = o->opr[pos++];
 
-		if (r != VR_NONE && o->slot[q] != VIR_NOBLK)
+		if (r != VR_NONE && o->slot[q] != VIR_NOBLK && o->sdef[q])
 			st[SLOC(o->slot[q])] = st[r] == q ? q : 0;	/* the store at the top */
 	}
 	for (uint32_t i = k->first + k->nparam; i < k->first + k->n; i++) {
@@ -168,6 +168,20 @@ static void block(chk *c, uint32_t b, uint32_t *st, uint32_t *tmp, uint32_t **en
 		for (; e < eend && o->edit[e].pos == i; e++) {
 			const vir_edit *d = &o->edit[e];
 
+			if (d->kind == VE_STORE) {
+				if (d->v >= f->nins || o->slot[d->v] == VIR_NOBLK) {
+					vname(c, t1, d->v);
+					bad(c, b, i, "store of %s, which has no slot", t1);
+				} else if (!reg_ok(c, d->src, false)) {
+					bad(c, b, i, "store from register byte %u", d->src);
+				} else {
+					/* on a path where v is not defined (15.5: liveness over loop ranges
+					 * keeps it live there) the register holds something else: the slot
+					 * then holds nothing, which only a read can get wrong */
+					st[SLOC(o->slot[d->v])] = st[d->src] == d->v ? d->v : 0;
+				}
+				continue;
+			}
 			if (d->kind != VE_SWAP && !reg_ok(c, d->dst, false)) {
 				bad(c, b, i, "edit writes register byte %u", d->dst);
 				continue;
@@ -281,7 +295,7 @@ static void block(chk *c, uint32_t b, uint32_t *st, uint32_t *tmp, uint32_t **en
 					wrote(c, r);
 				}
 			}
-			if (o->slot[i] != VIR_NOBLK) {
+			if (o->slot[i] != VIR_NOBLK && o->sdef[i]) {
 				if (r == VR_NONE)
 					bad(c, b, i, "a value with a slot is defined without a register");
 				st[SLOC(o->slot[i])] = r == VR_NONE ? 0 : i;

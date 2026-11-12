@@ -39,5 +39,5 @@ b3:
   ret v7                                ; r0
 }
 ; edge b2.0 -> b1: r0 <-> r1 (v4); r1 <-> r2 (v5)
-; spills 0 reloads 0 remats 0 moves 0 swaps 0; edges 1: moves 0 reloads 0 remats 0 stores 0 xchg 2; slots 0 callee 0
+; spills 0 reloads 0 remats 0 moves 0 swaps 0 stores 0; edges 1: moves 0 reloads 0 remats 0 stores 0 xchg 2; slots 0 callee 0
 ; sweep @f: 12 configurations, 0 failed

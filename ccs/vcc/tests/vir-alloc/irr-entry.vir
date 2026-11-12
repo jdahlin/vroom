@@ -70,5 +70,5 @@ b6:
   ; move r0 <- r1 (v1)
   ret v1                                ; r0
 }
-; spills 0 reloads 0 remats 0 moves 1 swaps 0; edges 0: moves 0 reloads 0 remats 0 stores 0 xchg 0; slots 0 callee 0
+; spills 0 reloads 0 remats 0 moves 1 swaps 0 stores 0; edges 0: moves 0 reloads 0 remats 0 stores 0 xchg 0; slots 0 callee 0
 ; sweep @f: 72 configurations, 0 failed

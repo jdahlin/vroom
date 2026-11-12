@@ -30,18 +30,20 @@ b0:
 func @f %s0 {
 b0:
   v0:i64 = param 0.0                    ; -> r0
-  v1:i64 = param 1.0                    ; -> r1
-  v2:f64 = param 2.0                    ; -> f0
   ; move r4 <- r0 (v0)
-  ; move r0 <- r1 (v1)
+  v1:i64 = param 1.0                    ; -> r1
   ; move r5 <- r1 (v1)
-  ; move r1 <- r4 (v0)
+  v2:f64 = param 2.0                    ; -> f0
   ; move f3 <- f0 (v2)
-  v3:i64 = call @g %s1 (v1, v0)         ; -, r0, r1 -> r0 [ss0]
+  ; move r0 <- r5 (v1)
+  ; move r1 <- r4 (v0)
+  v3:i64 = call @g %s1 (v1, v0)         ; -, r0, r1 -> r0 [ss0 later]
   ; move f0 <- f3 (v2)
-  v4:f64 = call @h %s2 (v2, v3)         ; -, f0, r0 -> f0 [ss1]
+  ; store ss0 <- r0 (v3)
+  v4:f64 = call @h %s2 (v2, v3)         ; -, f0, r0 -> f0 [ss1 later]
   ; reload r0 <- v3 (ss0)
   ; remat r1 <- 1
+  ; store ss1 <- f0 (v4)
   v5:i64 = call @g %s1 (v3, 1:i64)      ; -, r0, r1 -> r0
   v6:i64 = add v5, v0                   ; r0, r4 -> r0
   v7:i64 = add v6, v1                   ; r0, r5 -> r0
@@ -57,5 +59,5 @@ b0:
 }
 ; spill slots: ss0(8): v3 ss1(8): v4
 ; callee-saved: r4 (b0) r5 (b0) f3 (b0)
-; spills 2 reloads 3 remats 1 moves 8 swaps 0; edges 0: moves 0 reloads 0 remats 0 stores 0 xchg 0; slots 2 callee 3
+; spills 2 reloads 3 remats 1 moves 8 swaps 0 stores 2; edges 0: moves 0 reloads 0 remats 0 stores 0 xchg 0; slots 2 callee 3
 ; sweep @f: 144 configurations, 0 failed

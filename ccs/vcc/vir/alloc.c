@@ -31,7 +31,8 @@ static _Thread_local struct actx {
 	bool init;
 	/* per value */
 	uint32_t *nu, *lend, *endp, *hint, *lastpos, *slot, *mark, *estamp, *dmark, *wi, *wd;
-	uint8_t *reg, *vfl, *treg, *eloc;
+	uint8_t *reg, *vfl, *treg, *eloc, *sdef, *epst;
+	uint32_t *sst, *tmk;	/* sst: stored on the current path when == bgen; tmk: conform's mark */
 	uint16_t *nop;	/* per instruction: its operands in ostk (sweep 5 -> 6) */
 	/* sweep 5 */
 	uint32_t *stk, *ostk, *pool, *lin_off, *lin_n, *soff, *succ, *bmark;
@@ -39,7 +40,7 @@ static _Thread_local struct actx {
 	uint32_t *maxp, *lendpos, *lhead, *tend, *tendb, *tbeg, *apre;
 	/* sweep 6 */
 	uint32_t *ent_off, *ent_n, *end_off, *end_n, *pv;
-	uint8_t *pr;
+	uint8_t *pr, *ps;	/* ps: the value is in its slot too (stored on that path) */
 	uint32_t regval[256];
 	uint64_t fr[2];
 	/* output */
@@ -52,7 +53,7 @@ static _Thread_local struct actx {
 	pmv *pm;
 	uint32_t *lcnt, *lcs, *ldm, *lds, *rq, lgen;
 	uint32_t ring[2][8], nring[2], cring[2];
-	uint32_t sgen, mgen;	/* stamps that live across functions (22.3) */
+	uint32_t sgen, mgen, bgen;	/* stamps that live across functions (22.3) */
 	uint8_t vfm[VO_TARGET0];	/* per opcode: bits 0-2 the value fields a, b, c; 8: a list (vir_oit) */
 } ax_tls;
 
@@ -78,12 +79,13 @@ static void ax_init(void)
 	R(ax_tls.nu, nv, 4); R(ax_tls.lend, nv, 4); R(ax_tls.endp, nv, 4); R(ax_tls.hint, nv, 4); R(ax_tls.lastpos, nv, 4);
 	R(ax_tls.slot, nv, 4); R(ax_tls.mark, nv, 4); R(ax_tls.estamp, nv, 4); R(ax_tls.dmark, nv, 4); R(ax_tls.wi, nv, 4); R(ax_tls.wd, nv, 4);
 	R(ax_tls.reg, nv, 1); R(ax_tls.vfl, nv, 1); R(ax_tls.treg, nv, 1); R(ax_tls.eloc, nv, 1);
+	R(ax_tls.sdef, nv, 1); R(ax_tls.epst, nv, 1); R(ax_tls.sst, nv, 4); R(ax_tls.tmk, nv, 4);
 	R(ax_tls.stk, (size_t)1 << 30, 4); R(ax_tls.ostk, (size_t)1 << 30, 4); R(ax_tls.nop, nv, 2); R(ax_tls.pool, nv, 4);
 	R(ax_tls.lin_off, VIR_MAX_BLK, 4); R(ax_tls.lin_n, VIR_MAX_BLK, 4); R(ax_tls.soff, VIR_MAX_BLK + 1, 4);
 	R(ax_tls.succ, VIR_MAX_EXTRA, 4); R(ax_tls.bmark, VIR_MAX_BLK, 4);
 	R(ax_tls.maxp, 2 * (size_t)VIR_MAX_BLK, 4); R(ax_tls.lendpos, VIR_MAX_BLK, 4); R(ax_tls.lhead, VIR_MAX_BLK, 4); R(ax_tls.tend, VIR_MAX_BLK, 4); R(ax_tls.tendb, VIR_MAX_BLK, 4); R(ax_tls.tbeg, VIR_MAX_BLK, 4); R(ax_tls.apre, VIR_MAX_BLK + 1, 4);
 	R(ax_tls.ent_off, VIR_MAX_BLK, 4); R(ax_tls.ent_n, VIR_MAX_BLK, 4); R(ax_tls.end_off, VIR_MAX_BLK, 4); R(ax_tls.end_n, VIR_MAX_BLK, 4);
-	R(ax_tls.pv, (size_t)VIR_MAX_BLK * 256, 4); R(ax_tls.pr, (size_t)VIR_MAX_BLK * 256, 1);
+	R(ax_tls.pv, (size_t)VIR_MAX_BLK * 256, 4); R(ax_tls.pr, (size_t)VIR_MAX_BLK * 256, 1); R(ax_tls.ps, (size_t)VIR_MAX_BLK * 256, 1);
 	R(ax_tls.opr, (size_t)1 << 32, 1); R(ax_tls.ssz, nv, 1);
 	R(ax_tls.boff, 2 * (size_t)VIR_MAX_BLK + 2, 4); R(ax_tls.eidx, VIR_MAX_EXTRA, 4); R(ax_tls.send, nv, 4);
 	R(ax_tls.edit, (size_t)1 << 30, sizeof(vir_edit)); R(ax_tls.edge, VIR_MAX_EXTRA, sizeof(vir_aedge));
@@ -385,13 +387,14 @@ static void edit(A *a, uint32_t pos, uint32_t kind, uint32_t dst, uint32_t src, 
 	e->src = (uint8_t)src;
 	e->pad = 0;
 	e->v = v;
-	if (kind != VE_SWAP && dst < 128 && (a->rg->callee[VR_CLASS(dst)] >> VR_NUM(dst) & 1))
+	if (kind != VE_SWAP && kind != VE_STORE && dst < 128 && (a->rg->callee[VR_CLASS(dst)] >> VR_NUM(dst) & 1))
 		a->used_callee[VR_CLASS(dst)] |= 1ull << VR_NUM(dst);	/* a register written only by an edit */
 	switch (kind) {
 	case VE_RELOAD: a->o->st.reloads++; break;
 	case VE_REMAT: a->o->st.remats++; break;
 	case VE_MOVE: a->o->st.moves++; break;
 	case VE_SWAP: a->o->st.swaps++; break;
+	case VE_STORE: a->o->st.stores++; break;
 	}
 }
 
@@ -433,12 +436,22 @@ static void need_slot(A *a, uint32_t v)
 	a->o->st.spills++;
 }
 
-static void evict(A *a, uint32_t r)
+static inline bool is_stored(A *a, uint32_t v) { return ax.sst[v] == ax.bgen; }
+static inline void stored(A *a, uint32_t v) { ax.sst[v] = ax.bgen; }
+
+/* v leaves register r before instruction pos: into its slot, stored there now unless it is
+ * already (NOPOS: at a block's entry, where the edges into it store it) */
+static void evict(A *a, uint32_t r, uint32_t pos)
 {
 	uint32_t v = ax.regval[r];
 
-	if (v && ax.reg[v] == r)
+	if (v && ax.reg[v] == r && !is_const(a->f, v)) {
 		need_slot(a, v);
+		if (pos != NOPOS && !is_stored(a, v)) {
+			edit(a, pos, VE_STORE, VR_NONE, r, v);
+			stored(a, v);
+		}
+	}
 	clearreg(a, r);
 }
 
@@ -532,7 +545,7 @@ static int getreg(A *a, uint32_t v, uint32_t c, uint64_t avoid, uint32_t p)
 	r = victim(a, c, avoid, p);
 	if (r < 0)
 		return -1;
-	evict(a, (uint32_t)r);
+	evict(a, (uint32_t)r, p);
 	return r;
 }
 
@@ -545,6 +558,7 @@ static bool fetch(A *a, uint32_t v, uint32_t r, uint32_t p)
 		if (ax.slot[v] == VIR_NOBLK)
 			return fail(a, "internal: value %u is in no register and has no slot", v);
 		edit(a, p, VE_RELOAD, r, VR_NONE, v);
+		stored(a, v);	/* (it was out of its register: in its slot) */
 	}
 	return true;
 }
@@ -568,11 +582,13 @@ static void displace(A *a, uint32_t r, uint64_t *avoid, uint32_t p)
 		clearreg(a, r);
 		setreg(a, w, (uint32_t)r2);
 	} else {
-		evict(a, r);
+		evict(a, r, p);
 	}
 }
 
 /* ---------------- sweep 6: edges ---------------- */
+
+static bool livein(A *a, uint32_t v, uint32_t b);
 
 static inline uint32_t lidx(uint32_t l) { return l & VL_SLOT ? 256 + (l & ~VL_SLOT) : l; }
 
@@ -742,11 +758,34 @@ static void conform(A *a, uint32_t p, uint32_t k, uint32_t b)
 
 		ax.estamp[v] = g;
 		ax.eloc[v] = ax.pr[ax.end_off[p] + j];
+		ax.epst[v] = ax.ps[ax.end_off[p] + j];
 	}
 	for (uint32_t j = 0; j < ax.ent_n[b]; j++) {
 		uint32_t r = ax.pr[ax.ent_off[b] + j];
 
 		nmask[VR_CLASS(r)] |= 1ull << VR_NUM(r);
+		ax.tmk[ax.pv[ax.ent_off[b] + j]] = g;
+	}
+	/* stores: b's entry has the value in its slot (out of a register, or stored on the
+	 * earlier paths), p has it only in a register */
+	for (uint32_t j = 0; j < ax.end_n[p]; j++) {
+		uint32_t v = ax.pv[ax.end_off[p] + j];
+
+		if (ax.ps[ax.end_off[p] + j] || is_const(f, v) || ax.slot[v] == VIR_NOBLK || ax.eloc[v] != ax.pr[ax.end_off[p] + j])
+			continue;
+		if (v >= t->first && v < t->first + t->nparam)
+			continue;
+		if (ax.tmk[v] == g) {
+			uint32_t x;
+
+			for (x = 0; x < ax.ent_n[b] && ax.pv[ax.ent_off[b] + x] != v; x++)
+				;
+			if (x == ax.ent_n[b] || !ax.ps[ax.ent_off[b] + x])
+				continue;	/* in a register at b, not taken as stored */
+		} else if (!livein(a, v, b)) {
+			continue;
+		}
+		ax.pm[n++] = (pmv){ VL_SLOT | ax.slot[v], ax.eloc[v], v, VE_MOVE };
 	}
 	for (uint32_t j = 0; j < ax.ent_n[b]; j++) {
 		uint32_t v = ax.pv[ax.ent_off[b] + j], r = ax.pr[ax.ent_off[b] + j];
@@ -815,6 +854,7 @@ static void save_state(A *a, uint32_t *off, uint32_t *cnt, uint32_t b)
 			m &= m - 1;
 			if (v && ax.reg[v] == r) {
 				ax.pv[a->npair] = v;
+				ax.ps[a->npair] = is_stored(a, v);
 				ax.pr[a->npair++] = (uint8_t)r;
 			}
 		}
@@ -850,6 +890,10 @@ static void enter(A *a, uint32_t b)
 	const vir_blk *k = &f->blk[b];
 	uint32_t best = VIR_NOBLK, bs = 0, l = a->lp->inner[b];
 
+	if (!++ax.bgen) {	/* a new path state: nothing stored (the stamps wrapped: clear) */
+		memset(ax.sst, 0, (size_t)VIR_MAX_INS * 4);
+		ax.bgen = 1;
+	}
 	for (int c = 0; c < 2; c++)	/* the registers that can hold a value: allocatable or fixed */
 		for (uint64_t m = a->rmask[c] & ~ax.fr[c]; m; m &= m - 1)
 			ax.regval[VR_MAKE(c, lowbit(m))] = 0;
@@ -882,13 +926,28 @@ static void enter(A *a, uint32_t b)
 				bs = s;
 			}
 		}
-		if (best != VIR_NOBLK)
+		if (best != VIR_NOBLK) {
 			for (uint32_t x = 0; x < ax.end_n[best]; x++) {
 				uint32_t v = ax.pv[ax.end_off[best] + x];
 
-				if (livein(a, v, b))
+				if (livein(a, v, b)) {
 					setreg(a, v, ax.pr[ax.end_off[best] + x]);
+					if (ax.ps[ax.end_off[best] + x])
+						stored(a, v);
+				}
 			}
+			/* stored on entry: on every earlier predecessor (one with it in a register
+			 * and not in its slot clears it; a later one stores it on its edge) */
+			for (uint32_t j = 0; j < k->npred; j++) {
+				uint32_t p = f->extra[k->pred + j];
+
+				if (p >= b || p == best)
+					continue;
+				for (uint32_t x = 0; x < ax.end_n[p]; x++)
+					if (!ax.ps[ax.end_off[p] + x])
+						ax.sst[ax.pv[ax.end_off[p] + x]] = 0;
+			}
+		}
 	}
 	/* the loop-header rule: drop values live through the loop without a use in it */
 	if (l != VIR_NOBLK && a->lp->l[l].head == b)
@@ -902,7 +961,7 @@ static void enter(A *a, uint32_t b)
 
 				m &= m - 1;
 				if (!is_const(f, v) && (ax.nu[v] == 0 || ax.nu[v] > le)) {
-					evict(a, r);
+					evict(a, r, NOPOS);
 					excess--;
 				}
 			}
@@ -924,14 +983,19 @@ static void enter(A *a, uint32_t b)
 			else
 				r = choose(a, q, c, 0);
 		}
+		ax.sdef[q] = 0;
 		if (r >= 0) {
 			setreg(a, q, (uint32_t)r);
 			ax.treg[q] = (uint8_t)r;
 		} else if (!(ax.vfl[q] & DEAD)) {
-			need_slot(a, q);
+			need_slot(a, q);	/* the edges write the slot */
+			stored(a, q);
 		}
-		if (ax.vfl[q] & NEEDSLOT)
+		if (ax.vfl[q] & NEEDSLOT) {
 			need_slot(a, q);
+			ax.sdef[q] = 1;	/* stored at the block's top */
+			stored(a, q);
+		}
 		ax.opr[a->nopr++] = r >= 0 ? (uint8_t)r : VR_NONE;
 	}
 	save_state(a, ax.ent_off, ax.ent_n, b);
@@ -944,8 +1008,6 @@ static void enter(A *a, uint32_t b)
 
 			if (p >= b || ax.bmark[p] == g)	/* bmark doubles as the "done" stamp after sweep 5 */
 				continue;
-			if (p == best && !k->nparam)
-				continue;	/* the entry state is part of p's end state, in the same registers */
 			ax.bmark[p] = g;
 			for (uint32_t s = ax.soff[p]; s < ax.soff[p + 1]; s++)
 				if (ax.succ[s] == b)
@@ -1110,7 +1172,7 @@ static bool instr(A *a, uint32_t b, uint32_t i, bool term)
 				if (r < 0 && byte[0] != VR_NONE) {
 					/* every register holds an operand: the first one leaves for its slot (or is
 					 * dropped, a constant) and the result is computed in place */
-					evict(a, byte[0]);
+					evict(a, byte[0], i);
 					r = byte[0];
 				}
 			}
@@ -1133,10 +1195,30 @@ static bool instr(A *a, uint32_t b, uint32_t i, bool term)
 				ax.treg[h] = (uint8_t)r;	/* the first argument sets the parameter's tentative register */
 		}
 		ax.opr[a->nopr++] = r >= 0 ? (uint8_t)r : VR_NONE;
-		if (ax.vfl[i] & NEEDSLOT)
+		ax.sdef[i] = 0;
+		if (ax.vfl[i] & NEEDSLOT) {
 			need_slot(a, i);
+			ax.sdef[i] = 1;	/* stored at its definition */
+			stored(a, i);
+		}
 		if ((ax.vfl[i] & DEAD) && r >= 0)
 			clearreg(a, (uint32_t)r);
+		/* a fixed result (a parameter, a call's) that lives across a later call leaves its
+		 * caller-saved register now, for a callee-saved one: the register is free for the
+		 * arguments computed before that call, instead of moved away at it */
+		if (fx.res != VR_NONE && r >= 0 && !(ax.vfl[i] & DEAD) && (ax.vfl[i] & XCALL) &&
+		    !(a->rg->callee[c] >> VR_NUM(r) & 1) && i + 1 <= blk_last(f, b)) {
+			uint64_t m = ax.fr[c] & a->rg->alloc[c] & a->rg->callee[c] & ~a->pavoid[c];
+
+			if (m) {
+				uint64_t u = m & a->used_callee[c];
+				uint32_t r2 = VR_MAKE(c, lowbit(u ? u : m));
+
+				edit(a, i + 1, VE_MOVE, r2, (uint32_t)r, i);
+				clearreg(a, (uint32_t)r);
+				setreg(a, i, r2);
+			}
+		}
 	}
 	return true;
 }
@@ -1251,6 +1333,7 @@ bool vir_alloc(vir_fn *f, const vir_loops *lp, const vir_regs *rg, const vir_aop
 	for (uint32_t r = 0; r < 256; r++)
 		ax.cfirst[r] = VIR_NOBLK;
 	memset(ax.slot, 0xff, (size_t)f->nins * 4);
+	memset(ax.sdef, 0, f->nins);
 	memset(ax.treg, VR_NONE, f->nins);
 	if (ax.mgen + (uint64_t)nb + 1 >= UINT32_MAX) {
 		memset(ax.mark, 0, (size_t)VIR_MAX_INS * 4);	/* rare: the stamps wrapped */
@@ -1309,6 +1392,7 @@ bool vir_alloc(vir_fn *f, const vir_loops *lp, const vir_regs *rg, const vir_aop
 	ax.boff[nb] = a->nopr;
 	ax.boff[2 * nb + 1] = a->nedit;
 	out->slot = ax.slot;
+	out->sdef = ax.sdef;
 	out->opr = ax.opr;
 	out->nopr = a->nopr;
 	out->boff = ax.boff;
