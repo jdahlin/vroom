@@ -59,6 +59,11 @@ enum {
 };
 
 enum { TLS_LE = 1, TLS_IE, TLS_DESC };	/* I_TLV.cond on ELF */
+/* I_BL/I_BLR.cond: sh is the mask of the x0-x7 the call's arguments are in (VIR's lowering;
+ * otherwise a call reads x0-x8) */
+#define CALL_ARGS 0xa5
+/* I_LD.ra of a volatile access not at FRAME (VIR's lowering) */
+#define LD_VOLATILE 1
 enum { C_EQ, C_NE, C_HS, C_LO, C_MI, C_PL, C_VS, C_VC, C_HI, C_LS, C_GE, C_LT, C_GT, C_LE, C_AL };
 
 /* I_RAW cond 2: inline asm whose registers follow its text: uint64_t reads, writes */

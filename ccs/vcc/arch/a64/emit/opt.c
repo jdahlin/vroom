@@ -158,8 +158,8 @@ __attribute__((noinline)) static rmask reads_slow(const ins *i, unsigned ro)
 	if (ro & RN_R) s |= m(i->rn);
 	if (ro & RM_R) s |= m(i->rm);
 	if (ro & RA_R) s |= m(i->ra);
-	if (ro & OP_CALL)
-		s |= RB(9) - 1;	/* x0-x8: arguments, indirect result */
+	if (ro & OP_CALL)	/* x0-x8: arguments, indirect result (VIR's: the arguments it passes) */
+		s |= i->cond == CALL_ARGS && (i->op == I_BL || i->op == I_BLR) ? (rmask)i->sh : RB(9) - 1;
 	if (ro & OP_RET)
 		s |= retreads;
 	if (ro & OP_TAIL)
@@ -1374,12 +1374,172 @@ static void fmulk(ecx *e, uint32_t k)
 	}
 }
 
+/*
+ * Bytes assembled into a value: an or of byte loads from one base at adjacent
+ * offsets, each shifted to its place in little- or big-endian order (2, 4 or 8 of
+ * them), becomes one load at the first byte load's place, then rev/rev16 for big
+ * endian, as LLVM.  Nothing between may store, call or be unknown, nor read or
+ * write the result's register; the base is the same for every load.
+ */
+typedef struct fbyte { uint32_t at; int base; int64_t off; int sh, sgn; } fbyte;	/* sgn: ldrsb's cond */
+#define FB_MAX 8
+#define FB_CHAIN 24
+
+static bool fbytes(ecx *e, uint32_t j, int r, int s, int sz, fbyte *b, int *nb, uint32_t *ch, int *nch)
+{
+	const ins *in = e->in;
+	int32_t d = fdefof(e, j, r);
+
+	if (d < 0 || *nch >= FB_CHAIN || s >= (sz ? 64 : 32))
+		return false;
+	const ins *di = &in[d];
+
+	ch[(*nch)++] = (uint32_t)d;
+	if (di->op == I_LD) {
+		if (di->sz || di->rn >= 31 || di->ra == LD_VOLATILE || *nb >= FB_MAX || (s & 7))
+			return false;
+		b[(*nb)++] = (fbyte){ (uint32_t)d, di->rn, di->imm, s, di->cond };
+		return true;
+	}
+	if (di->sz > sz)
+		return false;
+	if (di->sz < sz) {	/* a w value in an x one: zero above bit 31, if its bytes stay below */
+		int n0 = *nb;
+
+		if (!fbytes(e, j, r, 0, 0, b, nb, ch, nch))	/* (d in ch twice: harmless) */
+			return false;
+		for (int q = n0; q < *nb; q++) {
+			b[q].sh += s;
+			b[q].sgn = b[q].sgn ? 2 : 0;	/* (its sign stops at bit 31) */
+		}
+		return true;
+	}
+	if (di->op == I_ORR && !di->cond && di->rn != di->rm)
+		return fbytes(e, (uint32_t)d, di->rn, s, sz, b, nb, ch, nch) &&
+		       fbytes(e, (uint32_t)d, di->rm, s + di->sh, sz, b, nb, ch, nch);
+	fdef f = fclass(di);
+
+	if (f.kind == FD_LSL)
+		return fbytes(e, (uint32_t)d, f.src, s + f.sh, sz, b, nb, ch, nch);
+	return false;
+}
+
+static void fbswap(ecx *e, uint32_t k)
+{
+	ins *in = e->in, *i = &in[k];
+	fbyte b[FB_MAX];
+	uint32_t ch[FB_CHAIN], first = k, lastld = 0;
+	int nb = 0, nch = 0, n, lg, w = i->sz ? 64 : 32;
+	int64_t lo = INT64_MAX;
+	bool le = true, be = true;
+	uint8_t seen = 0;
+
+	if (i->op != I_ORR || i->cond || i->rd >= 29 || i->rn == i->rm || i->rn >= 31 || i->rm >= 31)
+		return;
+	if (!fbytes(e, k, i->rn, 0, i->sz, b, &nb, ch, &nch) || !fbytes(e, k, i->rm, i->sh, i->sz, b, &nb, ch, &nch))
+		return;
+	n = nb;
+	if (n != 2 && n != 4 && n != 8)
+		return;
+	if (n * 8 > w)
+		return;
+	lg = n == 2 ? 1 : n == 4 ? 2 : 3;
+	for (int q = 0; q < n; q++) {
+		if (b[q].base != b[0].base)
+			return;
+		lo = b[q].off < lo ? b[q].off : lo;
+		first = b[q].at < first ? b[q].at : first;
+		lastld = b[q].at > lastld ? b[q].at : lastld;
+	}
+	for (int q = 0; q < n; q++) {
+		int64_t x = b[q].off - lo;
+
+		if (x < 0 || x >= n || (seen & (1u << x)))
+			return;
+		seen |= (uint8_t)(1u << x);
+		le &= b[q].sh == 8 * x;
+		be &= b[q].sh == 8 * (n - 1 - x);
+	}
+	if (!le && !be)
+		return;
+	/* a sign-extended byte: only the top one, then the value sign-extended from 8n bits
+	 * (nothing when it fills the register; into w, ldrsb's bits above 31 are zero) */
+	int sgn = 0;
+
+	for (int q = 0; q < n; q++)
+		if (b[q].sgn) {
+			if (b[q].sh != 8 * (n - 1) || (i->sz && b[q].sgn == 2))
+				return;
+			sgn = 8 * n < w;
+		}
+	/* the records between: the chain's, or ones that leave memory, the base and rd alone */
+	for (uint32_t j = first; j <= k; j++) {
+		bool inch = j == k;
+
+		if (in[j].op == DELETED)
+			continue;
+		for (int q = 0; q < nch && !inch; q++)
+			inch = ch[q] == j;
+		if (inch)
+			continue;
+		unsigned op = in[j].op;
+
+		if ((W.ro[j] & OP_SLOW) || op == I_ST || op == I_STX || op == I_STP || op == I_STLO || op == I_BL ||
+		    op == I_BLR || ((W.rr[j] | W.ww[j]) & RB(i->rd)) || (j < lastld && (W.ww[j] & RB(b[0].base))))
+			return;
+	}
+	for (int q = 0; q < nch; q++)	/* (a chain load writing the base: the last) */
+		if (ch[q] < lastld && in[ch[q]].rd == b[0].base)
+			return;
+	int rd = i->rd, base = b[0].base, sz = i->sz;
+
+	/* rev (big endian) and the sign extension, the last at k, the rev before it in a
+	 * chain record's place (there are at least three: two loads and an or) */
+	uint32_t at[2] = { k, k }, na = 0;
+
+	if (!le && sgn) {
+		for (int q = 0; q < nch && !na; q++)
+			if (ch[q] > first && ch[q] < k)
+				at[0] = ch[q], na = 1;
+		if (!na)
+			return;	/* (cannot happen) */
+	}
+	for (int q = 0; q < nch; q++) {
+		in[ch[q]].op = DELETED;
+		W.rr[ch[q]] = W.ww[ch[q]] = 0;
+	}
+	in[first] = (ins){ .op = I_LD, .sz = (uint8_t)lg, .rd = (uint8_t)rd, .rn = (uint8_t)base, .imm = lo };
+	W.ro[first] = (uint16_t)roles(&in[first]);
+	W.rr[first] = reads(&in[first], W.ro[first]);
+	W.ww[first] = writes(&in[first], W.ro[first]);
+	in[k].op = DELETED;
+	W.rr[k] = W.ww[k] = 0;
+	if (!le)
+		in[at[0]] = (ins){ .op = n == 2 ? I_REV16 : I_REV, .sz = (uint8_t)(n == 8 ? 1 : 0), .rd = (uint8_t)rd, .rn = (uint8_t)rd };
+	if (sgn)
+		in[k] = (ins){ .op = I_SBFM, .sz = (uint8_t)sz, .rd = (uint8_t)rd, .rn = (uint8_t)rd, .imm = 0, .sh = (uint8_t)(8 * n - 1) };
+	for (uint32_t q = 0; q < 2; q++) {
+		uint32_t j = q ? k : at[0];
+
+		if (in[j].op == DELETED)
+			continue;
+		W.ro[j] = (uint16_t)roles(&in[j]);
+		W.rr[j] = reads(&in[j], W.ro[j]);
+		W.ww[j] = writes(&in[j], W.ro[j]);
+	}
+	for (uint32_t j = first; j < k; j++)
+		W.la[j] |= RB(rd);
+}
+
 static void fold(ecx *e)
 {
 	for (uint32_t k = 0; k < e->nin; k++)
 		if (e->in[k].op != DELETED)
 			for (int n = 0; n < 4 && fold1(e, k); n++)
 				;
+	for (uint32_t k = e->nin; k-- > 0;)
+		if (e->in[k].op != DELETED)
+			fbswap(e, k);
 	for (uint32_t k = 0; k < e->nin; k++)
 		if (e->in[k].op != DELETED)
 			fmulk(e, k);

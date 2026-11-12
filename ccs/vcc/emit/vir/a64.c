@@ -726,6 +726,8 @@ static void vl_load(vl *L, uint32_t i, const vir_ins *in, uint8_t res)
 		mem(e, I_LD, w, ext, rd, R_X16, 0);
 	} else {
 		mem(e, I_LD, w, ext, rd, l.k == L_FRAME ? FRAME : l.r, l.off);
+		if ((in->fl & VIF_VOL) && l.k != L_FRAME && e->reach && e->in[e->nin - 1].op == I_LD)
+			e->in[e->nin - 1].ra = LD_VOLATILE;	/* (not merged with its neighbours: opt.c's fold) */
 	}
 	if (fl && res != VR_NONE)
 		word(e, f_in(in->ty == VT_F64, vl_gv(res), R_X16));
@@ -924,6 +926,8 @@ static void vl_call(vl *L, uint32_t b, uint32_t i, const vir_ins *in)
 	if (ng + 1 > L->nop)
 		vl_fail(L, "VIR lowering: call operands");
 	a = __builtin_alloca(sizeof(vlarg) * (ng + 1));
+	uint8_t gm = 0;	/* the x registers the arguments are in */
+
 	vl_assign(DARWIN(e->c), &f->extra[in->b], a, ng, &stk);
 	for (uint32_t k = 0; k < ng; k++) {
 		uint8_t r = L->opr[1 + k];
@@ -931,6 +935,10 @@ static void vl_call(vl *L, uint32_t b, uint32_t i, const vir_ins *in)
 		if (a[k].reg != VR_NONE) {
 			if (r != a[k].reg)
 				vl_fail(L, "VIR lowering: an argument not in its register");
+			if (!vl_fcls(r) && vl_gx(r) < 8)
+				gm |= (uint8_t)(1u << vl_gx(r));
+			else if (!vl_fcls(r))
+				gm = 0xff;	/* (not an argument register: assume all) */
 			continue;
 		}
 		{
@@ -973,9 +981,15 @@ static void vl_call(vl *L, uint32_t b, uint32_t i, const vir_ins *in)
 		if (k->op != VO_SYMADDR || k->b || k->c)
 			vl_fail(L, "VIR lowering: an indirect callee without a register");
 		note_ref(e, k->a);
-		put(e, I_BL)->ref = k->a;
+		ins *c = put(e, I_BL);
+
+		c->ref = k->a;
+		c->cond = CALL_ARGS, c->sh = gm;
 	} else {
-		put(e, I_BLR)->rn = (uint8_t)vl_gx(L->opr[0]);
+		ins *c = put(e, I_BLR);
+
+		c->rn = (uint8_t)vl_gx(L->opr[0]);
+		c->cond = CALL_ARGS, c->sh = gm;
 	}
 }
 
