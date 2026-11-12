@@ -1296,6 +1296,32 @@ VPRIV bool vw_local(ecx *e, uint32_t s, lval *l)
 	return true;
 }
 
+/* a local declared without an initializer: a value from an earlier pass through its scope
+ * (a loop's) is not its value, so its variable or slot gets a definition here and a promoted
+ * local is not carried around the loop.  (The value is 0: vw_undef.)  In a slot, a memset
+ * marked VW_LIFETIME: promotion takes it as zero stores, emission drops it. */
+VPRIV void vw_undecl(ecx *e, const lval *l, uint64_t size)
+{
+	vwst *V = e->vw;
+	uint32_t slot, a, m;
+	int64_t rel;
+
+	if (l->k == L_VAR) {
+		vw_write(e, l->ref, V->cur, vw_undef(e, vw_lvty(e, l)));
+		return;
+	}
+	if (l->k != L_FRAME || !size || size > INT32_MAX)
+		return;
+	a = vw_addr(e, l, size, &slot, &rel);
+	if (slot == VW_NOBLK)
+		return;
+	m = vw_ins(e, VO_MEMSET, VT_VOID, VW_LIFETIME, a, vw_iconst(e, VT_I32, 0), vw_iconst(e, VT_I64, (int64_t)size));
+	V->p[m].slot = slot + 1;
+	for (uint32_t i = 0; i < V->nst; i++)	/* (what store forwarding knew of these bytes) */
+		if (V->st[i].slot == slot && V->st[i].off < l->off + (int64_t)size && l->off < V->st[i].off + V->st[i].size)
+			V->st[i--] = V->st[--V->nst];
+}
+
 /* ---------------- calls ---------------- */
 
 /* the classification for arm64 (the signature's groups): scalars only for now */
@@ -1530,7 +1556,7 @@ VPRIV void vw_begin(ecx *e, uint32_t s)
 	V->np = 1;	/* (0 is no instruction) */
 	GROW(V->p, 0, V->cp, 1);
 	V->p[0] = (vwp){ 0 };
-	V->nb = V->nx = V->nsl = V->nact = V->nst = V->nloc = 0;
+	V->nb = V->nx = V->nsl = V->nact = V->nst = V->nloc = V->nprom = 0;
 	V->live[0] = V->live[1] = V->live[2] = 0;
 	V->flive = 0;
 	V->hn = 0;
@@ -1865,30 +1891,67 @@ static uint32_t vw_entry(ecx *e, uint32_t var, uint32_t b, uint32_t ty, bool def
 	return vw_find(V, p);
 }
 
+static bool vw_kint(const vwst *V, uint32_t v, int64_t *k);
+
+static uint32_t vw_zerok(ecx *e, uint32_t ty)
+{
+	return ty == VT_F32 || ty == VT_F64 ? vw_k(e, VO_FCONST, ty, 0, 0, 0) : vw_iconst(e, ty, 0);
+}
+
+/* memset q, of a constant length with 0: the bytes (len) it zeroes */
+static bool vw_zeroset(vwst *V, uint32_t q, int64_t *len)
+{
+	int64_t z;
+
+	return V->p[q].in.op == VO_MEMSET && vw_kint(V, vw_find(V, V->p[q].in.b), &z) && !z &&
+	       vw_kint(V, vw_find(V, V->p[q].in.c), len) && *len > 0;
+}
+
+struct vwms { uint32_t q, slot; int64_t rel, len; };	/* a memset of a slot with 0 */
+
+static bool vw_mscov(const struct vwms *m, const vwfld *f)
+{
+	return f->slot == m->slot && m->rel <= f->rel && f->rel + (int64_t)f->size <= m->rel + m->len;
+}
+
+/* a store the promotion made dead (a memset of a promoted slot too) */
+static bool vw_promdead(const vwst *V, uint32_t q)
+{
+	const vwp *x = &V->p[q];
+
+	return (x->in.op == VO_STORE || x->in.op == VO_MEMSET) && x->slot && V->sl[x->slot - 1].prom;
+}
+
 /* a slot whose address does not escape, read and written only as fields (offset, size) that
  * do not overlap, becomes one variable per field: its loads read the value the field holds
  * (Braun, as the walker's locals), its stores go */
-static void vw_promote(ecx *e)
+static bool vw_promote(ecx *e)
 {
 	vwst *V = e->vw;
 	vwfld *fd = NULL;
-	uint32_t nf = 0, cf = 0, *fof, *cur, *cst, np0 = V->np;
+	uint32_t nf = 0, cf = 0, *fof, *cur, *cst, np0 = V->np, var0;
 	uint8_t *bad;
+	bool done = false;
+	int64_t rel;
+	struct vwms *ms = NULL;	/* the memsets of slots with 0 */
+	uint32_t nms = 0, cms = 0;
 
 	if (!V->nsl)
-		return;
+		return false;
 	bad = calloc(V->nsl, 1);
 	fof = malloc((size_t)V->np * sizeof *fof);	/* access -> field + 1 */
 	if (!bad || !fof)
 		vw_fail(e, "out of memory");
+	for (uint32_t s = 0; s < V->nsl; s++)
+		bad[s] = V->sl[s].prom;	/* (an earlier run's: its stores are dead, its loads gone) */
 	/* a slot escapes when its address is anything but the address of a load or store (the
 	 * walker's exposed flag is set by any address taken, *(T *)&x too) */
 	for (uint32_t i = 0; i < np0; i++) {
 		const vwp *q = &V->p[i];
 		const vir_opinfo *oi = &vir_optab[q->in.op];
 
-		if (q->blk == VW_NOBLK)
-			continue;
+		if (q->blk == VW_NOBLK || vw_find(V, i) != i || vw_promdead(V, i))
+			continue;	/* (a store to a slot promoted before is dead) */
 		if (q->in.op == VO_BPARAM) {
 			if (q->in.b != VW_NOBLK)
 				for (uint32_t j = 0; j < V->b[q->blk].npred; j++)
@@ -1897,7 +1960,7 @@ static void vw_promote(ecx *e)
 		}
 		for (int k = 0; k < 3; k++)
 			if (vw_isval(oi->k[k]) && !(q->in.op == VO_BRIF && k > 0) &&
-			    !(k == 0 && (q->in.op == VO_LOAD || q->in.op == VO_STORE)))
+			    !(k == 0 && (q->in.op == VO_LOAD || q->in.op == VO_STORE || vw_zeroset(V, i, &rel))))
 				vw_escape(V, bad, (&q->in.a)[k]);
 		if (q->in.op == VO_CALL || q->in.op == VO_RET)
 			for (uint32_t k = 0; k < V->x[q->in.c]; k++)
@@ -1907,10 +1970,11 @@ static void vw_promote(ecx *e)
 	for (uint32_t i = 0; i < np0; i++) {
 		vwp *q = &V->p[i];
 		uint32_t s, size, ty, k, a;
-		int64_t rel;
+		int64_t len;
 
 		fof[i] = 0;
-		if ((q->in.op != VO_LOAD && q->in.op != VO_STORE) || q->blk == VW_NOBLK)
+		if ((q->in.op != VO_LOAD && q->in.op != VO_STORE && q->in.op != VO_MEMSET) ||
+		    q->blk == VW_NOBLK || vw_find(V, i) != i)
 			continue;
 		a = vw_find(V, q->in.a);
 		if (V->p[a].in.op != VO_SLOTADDR)
@@ -1920,6 +1984,16 @@ static void vw_promote(ecx *e)
 		q->slot = s + 1;	/* (also an access through the address taken) */
 		if (bad[s])
 			continue;
+		if (q->in.op == VO_MEMSET) {	/* zeroes the fields it covers: checked once all are known */
+			if (!vw_zeroset(V, i, &len)) {
+				bad[s] = 1;
+				continue;
+			}
+			GROW(ms, nms, cms, 1);
+			ms[nms] = (struct vwms){ i, s, vw_rel(&V->p[a]), len };
+			fof[i] = UINT32_MAX - nms++;	/* (a memset: its index in ms) */
+			continue;
+		}
 		if (q->in.fl & VIF_VOL) {
 			bad[s] = 1;
 			continue;
@@ -1950,12 +2024,22 @@ static void vw_promote(ecx *e)
 		}
 		fof[i] = k + 1;
 	}
+	/* a memset covers each field of its slot whole or not at all */
+	for (uint32_t m = 0; m < nms; m++)
+		for (uint32_t k = 0; k < nf; k++) {
+			const vwfld *f = &fd[k];
+			int64_t lo = ms[m].rel, hi = ms[m].rel + ms[m].len;
+
+			if (f->slot == ms[m].slot && f->rel < hi && lo < f->rel + (int64_t)f->size &&
+			    !(lo <= f->rel && f->rel + (int64_t)f->size <= hi))
+				bad[f->slot] = 1;
+		}
 	/* every load must take the field's stored type with one conversion at most */
 	for (uint32_t i = 0; i < V->np; i++) {
 		vwp *q = &V->p[i];
 		uint32_t op;
 
-		if (!fof[i] || bad[q->slot - 1] || q->in.op != VO_LOAD)
+		if (!fof[i] || q->in.op != VO_LOAD || bad[q->slot - 1])
 			continue;
 		vwfld *f = &fd[fof[i] - 1];
 
@@ -1972,10 +2056,12 @@ static void vw_promote(ecx *e)
 		if (!any)
 			goto out;
 	}
-	/* the variables: VW_VAR0 + nloc + field */
-	GROW(V->vty, V->nloc, V->cvty, nf);
+	/* the variables: VW_VAR0 + nloc + earlier runs' + field */
+	var0 = V->nloc + V->nprom;
+	GROW(V->vty, var0, V->cvty, nf);
 	for (uint32_t k = 0; k < nf; k++)
-		V->vty[V->nloc + k] = (uint8_t)fd[k].ty;
+		V->vty[var0 + k] = (uint8_t)fd[k].ty;
+	V->nprom += nf;
 	cur = malloc((size_t)nf * 2 * sizeof *cur);
 	if (!cur)
 		vw_fail(e, "out of memory");
@@ -1984,14 +2070,18 @@ static void vw_promote(ecx *e)
 	for (uint32_t oi = 0; oi < V->norder; oi++) {
 		uint32_t b = V->order[oi];
 
-		for (uint32_t q = V->b[b].head; q; q = V->p[q].next)
-			if (q < np0 && fof[q] && !bad[V->p[q].slot - 1] && V->p[q].in.op == VO_STORE && vw_find(V, q) == q)
-			{
-				uint32_t var = VW_VAR0 + V->nloc + fof[q] - 1;
+		for (uint32_t q = V->b[b].head; q; q = V->p[q].next) {
+			if (q >= np0 || !fof[q] || bad[V->p[q].slot - 1] || V->p[q].in.op == VO_LOAD || vw_find(V, q) != q)
+				continue;
+			for (uint32_t k = 0; k < nf; k++) {
+				uint32_t var = VW_VAR0 + var0 + k;
 
-				vw_write(e, var, b, V->p[q].in.b);
+				if (V->p[q].in.op == VO_STORE ? k != fof[q] - 1 : !vw_mscov(&ms[UINT32_MAX - fof[q]], &fd[k]))
+					continue;
+				vw_write(e, var, b, V->p[q].in.op == VO_STORE ? V->p[q].in.b : vw_zerok(e, fd[k].ty));
 				*vw_hslot(e, b, var | 0x40000000u, true) = 1;	/* b defines var */
 			}
+		}
 	}
 	for (uint32_t k = 0; k < nf; k++)
 		cst[k] = UINT32_MAX;
@@ -2004,8 +2094,18 @@ static void vw_promote(ecx *e)
 
 			if (q >= np0 || !fof[q] || bad[x->slot - 1] || vw_find(V, q) != q)
 				continue;
+			if (x->in.op == VO_MEMSET) {
+				const struct vwms *m = &ms[UINT32_MAX - fof[q]];
+
+				for (k = 0; k < nf; k++)
+					if (vw_mscov(m, &fd[k])) {
+						cur[k] = vw_zerok(e, fd[k].ty);
+						cst[k] = oi;
+					}
+				continue;
+			}
 			k = fof[q] - 1;
-			var = VW_VAR0 + V->nloc + k;
+			var = VW_VAR0 + var0 + k;
 			if (x->in.op == VO_STORE) {
 				cur[k] = x->in.b;
 				cst[k] = oi;
@@ -2032,11 +2132,13 @@ static void vw_promote(ecx *e)
 	free(cur);
 	for (uint32_t k = 0; k < nf; k++)
 		if (!bad[fd[k].slot])
-			V->sl[fd[k].slot].prom = 1;
+			V->sl[fd[k].slot].prom = 1, done = true;
 out:
+	free(ms);
 	free(fd);
 	free(fof);
 	free(bad);
+	return done;
 }
 
 /* ---------------- simplification ----------------
@@ -2159,6 +2261,10 @@ static bool vw_simp1(ecx *e, vwsimp *S, uint32_t q, uint32_t *r)
 
 	*r = q;
 	switch (in.op) {
+	case VO_I2P: case VO_P2I:	/* a pointer and its address as an integer are the same bits */
+		if (V->p[in.a].in.op == (in.op == VO_I2P ? VO_P2I : VO_I2P))
+			*r = V->p[in.a].in.a;
+		return false;
 	case VO_EXT: {
 		uint32_t x = in.a, K = 1u << VIF_W(in.fl), ts = vir_tysize(in.ty);
 		bool s = in.fl & VIF_MS;
@@ -2270,6 +2376,13 @@ static bool vw_simp1(ecx *e, vwsimp *S, uint32_t q, uint32_t *r)
 			*r = in.a;
 			return false;
 		}
+		if (V->p[in.a].in.op == VO_SLOTADDR && V->p[in.a].blk == VW_NOBLK) {	/* $s+k2 + k: $s+(k2+k) */
+			vir_ins a = V->p[in.a].in;	/* (a copy: vw_k can move V->p) */
+
+			k2 = (int64_t)((uint64_t)a.b | (uint64_t)a.c << 32) + k;
+			*r = vw_k(e, VO_SLOTADDR, VT_PTR, a.a, (uint32_t)k2, (uint32_t)((uint64_t)k2 >> 32));
+			return false;
+		}
 		if (V->p[in.a].in.op == VO_PTRADD && V->p[in.a].blk != VW_NOBLK && vw_kint(V, V->p[in.a].in.b, &k2)) {
 			uint32_t y = V->p[in.a].in.a, c = vw_iconst(e, VT_I64, (int64_t)((uint64_t)k + (uint64_t)k2));
 
@@ -2360,7 +2473,7 @@ static void vw_cse_blk(ecx *e, vwsimp *S_, uint32_t b)
 		}
 		op = V->p[q].in.op;
 		eff = vir_optab[op].eff;
-		if (op == VO_STORE && (V->p[q].slot && V->sl[V->p[q].slot - 1].prom))
+		if (vw_promdead(V, q))
 			continue;
 		if (eff & (EF_W | EF_C | EF_A) || op == VO_BARRIER || op == VO_VA_ARG || op == VO_VA_START)
 			S->memgen = ++S->gens;
@@ -2542,7 +2655,7 @@ static void vw_simplify(ecx *e)
 			if (!x)
 				break;
 			if (vw_find(V, x) == x &&
-			    !(V->p[x].in.op == VO_STORE && V->p[x].slot && V->sl[V->p[x].slot - 1].prom))
+			    !vw_promdead(V, x))
 				VW_EACHOP(V, x, o, vw_inc(V, &S, vw_find(V, *o)));
 			if (!q)
 				break;
@@ -2806,6 +2919,14 @@ VPRIV bool vw_emit(ecx *e)
 		;
 	vw_deadparams(e);
 	vw_simplify(e);
+	/* simplifying can free a slot's address (an inlined call's pointer argument parked as an
+	   integer comes back as i2p(p2i $slot)): promote again, then simplify what it forwards */
+	if (vw_promote(e)) {
+		while (vw_trivial(e))
+			;
+		vw_deadparams(e);
+		vw_simplify(e);
+	}
 	vw_split(e);
 	/* stores to a slot that is not exposed and that nothing reads are dead */
 	for (uint32_t s = 0; s < V->nsl; s++)
@@ -2834,8 +2955,8 @@ VPRIV bool vw_emit(ecx *e)
 
 			if (vw_find(V, q) != q)
 				continue;
-			if ((x->in.op == VO_STORE) && x->slot &&
-			    (V->sl[x->slot - 1].prom || (!V->sl[x->slot - 1].exposed && !V->sl[x->slot - 1].used)))
+			if (vw_promdead(V, q) || (x->in.op == VO_MEMSET && (x->in.fl & VW_LIFETIME)) ||
+			    (x->in.op == VO_STORE && x->slot && !V->sl[x->slot - 1].exposed && !V->sl[x->slot - 1].used))
 				continue;	/* (a dead store) */
 			if (x->loc != lastloc) {
 				vir_loc_add(f, x->loc);

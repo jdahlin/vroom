@@ -35,6 +35,7 @@ typedef struct vwslot {
 	uint8_t prom;		/* promoted to variables (vw_promote): its stores go */
 } vwslot;
 
+#define VW_LIFETIME 0x8000u	/* a memset's flag: the start of a local's lifetime (vw_undecl) */
 typedef struct vwstent { uint32_t slot; int64_t off; int size; uint32_t v; } vwstent;	/* store table */
 typedef struct vwloc { uint32_t sym, inst; } vwloc;
 
@@ -49,6 +50,7 @@ typedef struct vwst {
 	uint32_t *act; uint32_t nact, cact;	/* slots that own their range now */
 	vwstent *st; uint32_t nst, cst;
 	vwloc *loc; uint32_t nloc, cloc;
+	uint32_t nprom;				/* variables of the promoted fields so far (after the locals') */
 	uint8_t *vty; uint32_t cvty;		/* per local: its VIR type */
 	uint8_t *vsgn; uint32_t cvsgn;		/* ... and whether it is a signed integer */
 	uint32_t *pr; uint32_t npr, cpr;	/* predecessor lists */

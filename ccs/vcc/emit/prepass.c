@@ -253,7 +253,7 @@ VPRIV uint8_t *fn_once(cc *c)
 		}
 	}
 	for (uint32_t s = 0; s < c->nsym; s++)
-		r[s] = r[s] == (1 | 4);
+		r[s] = r[s] == (1 | 4);	/* (bit 1: calls setjmp, set by the prepass) */
 	return r;
 }
 
@@ -407,6 +407,12 @@ static int walk(pre *P, uint32_t n)
 
 		if (callee && sym_attrs(c, callee)->error_fn)
 			P->E->sflags[P->fn] |= SA_MUSTFOLD;
+		/* VIR: a function calling setjmp is not inlined (as LLVM): the caller's promoted
+		   locals would take their values at the setjmp after a longjmp */
+		if (callee && P->E->once && ((sym_attrs(c, callee)->flags & AF_TAIL_RETURNS_TWICE) ||
+		    EM_IDENT_IS(c->syms[callee].name, "setjmp") || EM_IDENT_IS(c->syms[callee].name, "_setjmp") ||
+		    EM_IDENT_IS(c->syms[callee].name, "sigsetjmp") || EM_IDENT_IS(c->syms[callee].name, "__sigsetjmp")))
+			P->E->once[P->fn] |= 2;
 		lab = walk(P, x->a);
 	}
 		__attribute__((fallthrough));

@@ -176,7 +176,7 @@ typedef struct emitter {
 	_Atomic uint8_t *extref;	/* per sym: referenced (for .weak of undefined syms) */
 	_Atomic uint8_t *walked;
 	uint16_t *fnsize;		/* per function: AST nodes (prepass) */
-	uint8_t *once;			/* VIR lowering on: per function, 1 when its one reference is a direct call (fn_once), else NULL */
+	uint8_t *once;			/* VIR lowering on: per function, bit 0 when its one reference is a direct call (fn_once), bit 1 when it calls setjmp (prepass); else NULL */
 	uint16_t *luse;			/* per local: uses weighted by loop depth (prepass) */
 	uint8_t *lnoreg;		/* per local: needs memory (address taken, asm operand, {} init) */
 	uint32_t *lspan;		/* per function: [2s] lowest, [2s+1] highest local sym seen */

@@ -409,6 +409,10 @@ static void wk_decl(ecx *e, const node *x)
 				wk_store(e, &l, y->ty, &z);
 			}
 		}
+#ifdef WK_PREFIX
+		if (!x->b && !e->E->o->autozero)
+			LO(undecl)(e, &l, tsize(c, y->ty));
+#endif
 		wk_init(e, &l, y->ty, x->b);
 	}
 	if (sym_attrs(c, s)->cleanup) {
@@ -1334,7 +1338,7 @@ VPRIV bool wk_can_inline(ecx *e, uint32_t s)
 		bool once = false;
 
 		if (e->vtry) {
-			once = e->E->once && e->E->once[s] && y->sc == SC_STATIC && !sym_attrs(c, s)->used;
+			once = e->E->once && (e->E->once[s] & 1) && y->sc == SC_STATIC && !sym_attrs(c, s)->used;
 			lim = once ? WK_INLINE_ONCE : WK_INLINE_VIR;
 			walk_fn(e, s);
 			/* the growth budget: every copy counts but a once-called function's own (which only
@@ -1355,6 +1359,10 @@ VPRIV bool wk_can_inline(ecx *e, uint32_t s)
 	ensure_walked(e->E, c, s);
 	if (e->E->sflags[s] & SA_NOINL)
 		return false;
+#ifdef WK_PREFIX
+	if (e->vtry && e->E->once && (e->E->once[s] & 2))
+		return false;	/* (calls setjmp: prepass.c) */
+#endif
 	if (s == e->wk->fsym || e->wk->depth >= 16)
 		return false;
 	for (wkinl *I = e->wk->inl; I; I = I->up)
