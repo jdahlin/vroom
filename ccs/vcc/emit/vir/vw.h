@@ -22,7 +22,7 @@ typedef struct vwb {
 	uint8_t def;		/* a variable is written in it: not empty, whatever its instructions */
 } vwb;
 
-typedef struct vwh { uint64_t key; uint32_t v; } vwh;	/* (block, variable) -> current definition */
+typedef struct vwh { uint64_t key; uint32_t v, gen; } vwh;	/* (block, variable) -> current definition */
 
 typedef struct vwslot {
 	int64_t off;		/* the walker's frame offset */
@@ -44,9 +44,11 @@ typedef struct vwst {
 	vwp *p; uint32_t np, cp;
 	vwb *b; uint32_t nb, cb;
 	uint32_t *x; uint32_t nx, cx;		/* extra words (pre-IR values) */
-	vwh *h; uint32_t hn, hcap;
+	vwh *h; uint32_t hn, hcap, hgen, halloc;	/* an entry of another gen is empty (no clearing per function);
+						 * hcap: the part in use, small again at each function */
+	uint32_t *lh, lhcap, lhalloc;		/* (symbol, inlining instance) -> local + 1 */
 	uint32_t *fwd; uint32_t cfwd;		/* removed parameters: the value that replaces them */
-	uint32_t *lab; uint32_t clab;		/* walker label -> block */
+	uint32_t *lab; uint32_t clab, labhi;		/* walker label -> block */
 	vwslot *sl; uint32_t nsl, csl;
 	uint32_t *act; uint32_t nact, cact;	/* slots that own their range now */
 	vwstent *st; uint32_t nst, cst;

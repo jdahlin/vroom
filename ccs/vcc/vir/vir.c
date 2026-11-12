@@ -263,20 +263,26 @@ static inline bool is_value_kind(uint32_t k)
 	return (k >= OK_T && k <= OK_BITC) || k == OK_CONSTV;
 }
 
+/* per opcode: the fields that hold values (low three bits) and blocks (the next three) */
+static uint8_t fms[VO_TARGET0];
+
+__attribute__((constructor)) static void fms_init(void)
+{
+	for (uint32_t op = 0; op < VO_TARGET0; op++)
+		for (int k = 0; k < 3; k++)
+			fms[op] |= (uint8_t)((is_value_kind(vir_optab[op].k[k]) ? 1u : 0) << k |
+					     (vir_optab[op].k[k] == OK_BLK ? 8u : 0) << k);
+}
+
 void vir_oit_init(vir_oit *it, vir_fn *f, vir_ins *in, bool blocks)
 {
 	const vir_opinfo *oi = &vir_optab[in->op];
 	uint32_t op = in->op, ne = f->nextra;
 
-	memset(it, 0, sizeof(*it));
-	it->f = f;
-	it->in = in;
-	it->stride = 1;
-	if (!oi->name || op >= VO_TARGET0)
+	*it = (vir_oit){ .f = f, .in = in, .stride = 1 };
+	if (op >= VO_TARGET0 || !oi->name)
 		return;
-	for (int k = 0; k < 3; k++)
-		if (blocks ? oi->k[k] == OK_BLK : is_value_kind(oi->k[k]))
-			it->fm |= 1u << k;
+	it->fm = (blocks ? fms[op] >> 3 : fms[op]) & 7;
 	/* extra lists: n words at base (each a pointer-sized group, stride apart) */
 	if (!blocks) {
 		if ((op == VO_CALL || op == VO_RET) && in->c < ne) {
