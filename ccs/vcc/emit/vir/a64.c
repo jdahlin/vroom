@@ -33,6 +33,8 @@ typedef struct vl {
 	int64_t *spoff;		/* per spill slot */
 	uint32_t *lbl;		/* per block: its label */
 	uint32_t *chs;		/* per block: where a branch to it ends up (vl_chase) */
+	uint32_t *ord, *opos;	/* the layout: the blocks in the order they are emitted, and each block's place in it (vl_order) */
+	const vir_loops *lp;
 	uint8_t *uses;
 	uint8_t *lo32;		/* per value: 1 if every use is a trunc or a ret32 return (only the low 32 bits are read) */
 	uint32_t retlbl;
@@ -68,7 +70,7 @@ typedef struct vl {
 	uint32_t ntr;
 } vl;
 
-static _Thread_local struct { int64_t *soff, *spoff; uint32_t *lbl, *chs, *path; uint8_t *uses, *lo32; uint32_t cs, csp, cl, cch, cpa, cu, c32; } VLT;
+static _Thread_local struct { int64_t *soff, *spoff; uint32_t *lbl, *chs, *path, *ord, *opos, *hl; uint32_t co, cop, chl; uint8_t *uses, *lo32; uint32_t cs, csp, cl, cch, cpa, cu, c32; } VLT;
 
 static __attribute__((noreturn, cold)) void vl_fail(vl *L, const char *why)
 {
@@ -562,9 +564,11 @@ static bool vl_skip(vl *L, uint32_t b) { return b && vl_chase(L, b) != b; }
 
 static uint32_t vl_next(vl *L, uint32_t b)	/* the block emitted after b */
 {
-	while (++b < L->f->nblk && vl_skip(L, b))
+	uint32_t p = L->opos[b], nb = L->f->nblk;
+
+	while (++p < nb && vl_skip(L, L->ord[p]))
 		;
-	return b;
+	return p < nb ? L->ord[p] : nb;
 }
 
 /* the block the code being emitted falls through to (none: UINT32_MAX) */
@@ -1550,7 +1554,11 @@ static bool vl_dupok(vl *L, uint32_t t);
 /* from block b's code, on to block t (an edge without moves left): a jump, or a copy of t */
 static void vl_goto(vl *L, uint32_t b, uint32_t t)
 {
-	if (t != vl_fnext(L) && t != b && vl_dupok(L, t)) {
+	/* into a loop whose test is at its bottom (vl_order): a copy of the test here, so that
+	 * the way in costs no jump (loop rotation with the guard, as LLVM's) */
+	bool in = VLT.hl[t] != VIR_NOBLK && L->dup < 8 && (b < t || b > L->lp->l[VLT.hl[t]].end);
+
+	if (t != vl_fnext(L) && t != b && (in || vl_dupok(L, t))) {
 		int d = L->dup++;
 
 		vl_block(L, t);
@@ -2157,13 +2165,93 @@ static void vl_block(vl *L, uint32_t b)
 	L->ntr = 0;
 }
 
+/*
+ * The layout (L->ord): VIR's block order, except that a loop whose header is a test (a
+ * `brif` after a few plain instructions: a while or for loop) has the header after its
+ * last block when that block ends in a `br` to it.  The latch then falls into the test and
+ * the test's branch goes back to the body: one branch a round instead of two.  The edges
+ * into the loop get a copy of the test (vl_goto), not a jump to it: with the jump,
+ * speedtest1 ran more instructions than without the rotation (short loops).  VLT.hl[b] is
+ * the loop of a header placed so, else VIR_NOBLK.  VCC_VIR_ROT=0: VIR's order.
+ */
+static bool vl_rotok(const vir_fn *f, uint32_t b)
+{
+	const vir_blk *k = &f->blk[b];
+
+	if ((k->fl & VB_ADDR) || k->n - k->nparam > 8 || f->ins[k->first + k->n - 1].op != VO_BRIF)
+		return false;
+	for (uint32_t i = k->first + k->nparam; i < k->first + k->n; i++)
+		switch (f->ins[i].op) {
+		case VO_CALL: case VO_ASM: case VO_ASMGOTO: case VO_MEMCPY: case VO_MEMSET: case VO_SWITCH:
+			return false;
+		}
+	return true;
+}
+
+static void vl_order_range(vl *L, uint32_t lo, uint32_t hi, uint32_t *n)
+{
+	const vir_fn *f = L->f;
+
+	for (uint32_t b = lo; b <= hi;) {
+		uint32_t l = VLT.hl[b], at = *n, last;
+		const vir_ins *t;
+
+		if (l == VIR_NOBLK || !b || L->lp->l[l].end <= b || L->lp->l[l].end > hi || !vl_rotok(f, b)) {
+			VLT.hl[b] = VIR_NOBLK;
+			L->ord[(*n)++] = b++;
+			continue;
+		}
+		vl_order_range(L, b + 1, L->lp->l[l].end, n);
+		for (last = *n; last > at && vl_skip(L, L->ord[last - 1]); last--)
+			;
+		t = last > at ? &f->ins[f->blk[L->ord[last - 1]].first + f->blk[L->ord[last - 1]].n - 1] : NULL;
+		if (t && t->op == VO_BR && vl_chase(L, t->a) == b) {
+			L->ord[(*n)++] = b;
+		} else {
+			memmove(&L->ord[at + 1], &L->ord[at], (size_t)(*n - at) * sizeof *L->ord);
+			L->ord[at] = b;
+			VLT.hl[b] = VIR_NOBLK;
+			++*n;
+		}
+		b = L->lp->l[l].end + 1;
+	}
+}
+
+static void vl_order(vl *L)
+{
+	const vir_fn *f = L->f;
+	static int rot = -1;
+	uint32_t n = 0;
+
+	if (rot < 0) {
+		const char *s = getenv("VCC_VIR_ROT");
+
+		rot = !(s && *s == '0');
+	}
+	for (uint32_t b = 0; b < f->nblk; b++)
+		VLT.hl[b] = VIR_NOBLK;
+	if (rot && !L->e->E->noopt && f->nblk < 60000)	/* (the recursion is as deep as the loops are nested) */
+		for (uint32_t l = 0; l < L->lp->n; l++) {	/* per header: its largest loop */
+			uint32_t h = L->lp->l[l].head;
+
+			if (VLT.hl[h] == VIR_NOBLK || L->lp->l[VLT.hl[h]].end < L->lp->l[l].end)
+				VLT.hl[h] = l;
+		}
+	vl_order_range(L, 0, f->nblk - 1, &n);
+	for (uint32_t p = 0; p < n; p++)
+		L->opos[L->ord[p]] = p;
+}
+
 static void vl_body(vl *L)
 {
 	ecx *e = L->e;
 	vir_fn *f = L->f;
 
+	vl_order(L);
 	vl_fcsave(L, false, R_X16);
-	for (uint32_t b = 0; b < f->nblk; b++) {
+	for (uint32_t p = 0; p < f->nblk; p++) {
+		uint32_t b = L->ord[p];
+
 		if (vl_skip(L, b))
 			continue;
 		deflabel_forced(e, L->lbl[b]);
@@ -2299,6 +2387,10 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 	VLT.path = vl_grow(VLT.path, &VLT.cpa, f->nblk + 1, sizeof(uint32_t));
 	L.soff = VLT.soff, L.spoff = VLT.spoff, L.lbl = VLT.lbl, L.uses = VLT.uses, L.lo32 = VLT.lo32;
 	L.chs = VLT.chs;
+	VLT.ord = vl_grow(VLT.ord, &VLT.co, f->nblk + 1, sizeof(uint32_t));
+	VLT.opos = vl_grow(VLT.opos, &VLT.cop, f->nblk + 1, sizeof(uint32_t));
+	VLT.hl = vl_grow(VLT.hl, &VLT.chl, f->nblk + 1, sizeof(uint32_t));
+	L.ord = VLT.ord, L.opos = VLT.opos, L.lp = &V->lp;
 	vl_chases(&L, VLT.path);
 	L.ret32 = KIND(c, ft->base) != TY_VOID && is_integer(c, ft->base) && tsize(c, ft->base) == 4;
 	L.tail = !(ft->flags & TF_VARIADIC) && em_tail_caller_ok(e, s) && !vl_notail(&L, VLT.lo32);	/* (lo32: scratch until it is filled) */

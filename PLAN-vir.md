@@ -1136,6 +1136,36 @@ inte är.  Bas efter sammanfogningen: 26,18 G (virpol 24,49 G, clang 23,70 G),
   sqlite3PagerWrite och pcache1Fetch har ram hos oss och inte hos clang
   (shrink-wrapping).
 
+### Looprotation i sänkningen (2026-11-12)
+
+- **Gjort (`emit/vir/a64.c`, `vl_order`):** blocken sänks i en egen ordning
+  (`L->ord`; `vl_next` och `vl_body` var de enda ställena som antog VIR:s
+  ordning).  En loop vars huvud är ett test (`brif` efter högst sju enkla
+  instruktioner, inga anrop) får huvudet efter sitt sista block när det
+  blocket slutar med `br` till huvudet: latchen faller in i testet och testets
+  hopp går tillbaka till kroppen, ett hopp per varv i stället för två.
+  Kanterna in i loopen får en kopia av testet (`vl_goto`), som LLVM:s
+  rotation med vakt.  `VCC_VIR_ROT=0` ger VIR:s ordning.
+- **Två varianter mätta** (sqlite speedtest1, instruktioner):
+  bara omordning med ett hopp till testet på vägen in **+0,07 %** (sqlites
+  loopar är korta: hoppet in kostar mer än varven sparar); med kopian
+  **−0,44 %** (25,94 G → 25,83 G).  Statiskt +1,5 % instruktioner (285 802 →
+  289 983), `b` 16 653 → 15 388.  Kopian av ett block med arbete i, som
+  prövades förut vid latchen och ströks, går alltså ihop här, där den ersätter
+  ett hopp som annars körs en gång per loop.
+- **Tid:** sqlite parat (sex körningar, last 10–12): −0,5 % cykler
+  [−1,0 .. +3,5] mot bygget före; mot clang -O2 **1,083x** [1,077 .. 1,094]
+  cykler, 1,090x instruktioner.  TSVC genom VIR: 6,42 G → 6,31 G cykler
+  (−1,7 %), 151/151 kontrollsummor.
+- **Tester:** nytt `vcc/vir_loop_rotate.c` (0, 1 och många varv, nästlat,
+  continue/break, loop nådd från två grenar och med `goto` förbi testet);
+  C-sviterna 2093/2093 direkt och 2090/2093 genom VIR med kontrollen (de tre
+  kända), inline 85/85, vcc-cfi genom VIR 1582/1582, volatile 32/32, vcc-abi
+  `--host` genom VIR 4 fel (de kända fyra enligt ovan; inte jämfört mot ett
+  bygge utan ändringen), sqlite samma hash.
+- **Sett på vägen, inte åtgärdat:** en lövfunktion med vektorinstruktioner
+  får ramrekord (vektorposterna är `I_RAW`, alltså `OP_ALL` för `opt_regs`).
+
 ### Underlag för V4 (2026-11-11): registerallokering, ingen kod
 
 - `RESEARCH-regalloc.md`: vad GCC (IRA, LRA) och LLVM (Greedy, Fast, PBQP,
