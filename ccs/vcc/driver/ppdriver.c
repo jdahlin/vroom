@@ -1298,6 +1298,25 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 				raw_asm = 1;	/* clang: .s is assembled without the preprocessor */
 		}
 	}
+	if (!x86 && !wasm) {
+		/* arm64: x86 instruction-set switches (-mavx2, -mno-sse, ...) are
+		   errors, as clang's TargetSpecific options; -msse4/-msse4.2 are
+		   only unused there, so they stay accepted. */
+		for (int i = 1; i < argc; i++) {
+			const char *a = argv[i];
+			if (!strcmp(a, "-mllvm")) { i++; continue; }
+			if (strncmp(a, "-m", 2)) continue;
+			const char *name = a + (strncmp(a, "-mno-", 5) ? 2 : 5);
+			if (!strcmp(name, "sse4") || !strcmp(name, "sse4.2")) continue;
+			if (!strcmp(name, "80387")) name = "x87";
+			int bit = x86_feature_find(name);
+			if (bit < 0 || !x86_feature_has(x86_cli_valid, (unsigned)bit)) continue;
+			dprintf(errfd, "vcc: error: unsupported option '%s' for target '%s'\n", a,
+			        darwin ? "arm64-apple-darwin" : "aarch64-unknown-linux-gnu");
+			status = 1;
+			goto out;
+		}
+	}
 	if (x86) {
 		const char *unsupported = x86_driver_features(argc, argv, &x86_features_, &x86_disabled, &x86_raw, &x86_on, &x86_off, &x86_cpu);
 		if (unsupported) {

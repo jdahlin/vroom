@@ -255,7 +255,7 @@ static bool is_root(cc *c, uint32_t s)
 			return false;	/* GNU 'extern inline': clang's isInlineDefinitionExternallyVisible */
 		if (y->sc == SC_STATIC)
 			return a->used || a->constructor || a->destructor;
-		if ((y->flags & SF_INLINE) && !(y->flags & SF_GNU_INLINE) && y->sc != SC_EXTERN)
+		if ((y->flags & SF_INLINE) && !(y->flags & (SF_GNU_INLINE | SF_EXTDECL)) && y->sc != SC_EXTERN)
 			return false;	/* C99 inline definition */
 		return true;
 	}

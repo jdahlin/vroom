@@ -1287,6 +1287,9 @@ VPRIV int wbuiltin(ecx *e, uint32_t n, bool want)
 	case BI_ATOMIC_FETCH_MIN: case BI_ATOMIC_NAND_FETCH: case BI_ATOMIC_MAX_FETCH: case BI_ATOMIC_MIN_FETCH: case BI_SYNC_VAL_CAS: case BI_SYNC_BOOL_CAS:
 	case BI_SYNC_LOCK_RELEASE:
 		return wbi_atomic(e, n, want);
+	case BI_FLT_ROUNDS:	/* wasm rounds to nearest only, as clang: 1 */
+		wconst(e, WT_I32, 1);
+		return WT_I32;
 	case BI_ATOMIC_LOCK_FREE:
 		for (uint32_t i = 0; i < x->c; i++)
 			wexpr(e, warg_n(c, n, i), false);

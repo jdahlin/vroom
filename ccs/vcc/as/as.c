@@ -3699,7 +3699,7 @@ static void dt_section(DBuf *b, const char *p, const char *e)
 			return;
 		}
 	/* section("seg,sect") as the attribute gave it; flags from the segment and type
-	 * (the writer folds what it has no section for into __text/__const/__data/__bss) */
+	 * (the Mach-O writer gives each such name its own section) */
 	{
 		const char *te = q;
 		bool text = q - p > 7 && !memcmp(p, "__TEXT,", 7);
@@ -3709,8 +3709,12 @@ static void dt_section(DBuf *b, const char *p, const char *e)
 		bool code = memmem(q, (size_t)(te - q), "pure_instructions", 17) != NULL;
 		bool zero = memmem(q, (size_t)(te - q), "zerofill", 8) != NULL;
 
+		/* the whole spec (seg,sect[,type[,attrs]]): the writer makes it its own section */
+		const char *se = te;
+		while (se > p && (se[-1] == ' ' || se[-1] == '\t' || se[-1] == '\r'))
+			se--;
 		db_s(b, "\t.section\t\"");
-		db_put(b, p, (size_t)(q - p));
+		db_put(b, p, (size_t)(se - p));
 		db_s(b, code ? "\",\"ax\",@progbits\n" : zero ? "\",\"aw\",@nobits\n" :
 			text ? "\",\"a\",@progbits\n" : "\",\"aw\",@progbits\n");
 	}

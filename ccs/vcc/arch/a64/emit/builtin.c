@@ -1152,6 +1152,18 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 		}
 		return vreg(r);
 	}
+	case BI_FLT_ROUNDS: {	/* FLT_ROUNDS from FPCR.RMode, as clang: mrs; add #1<<22; ubfx #22, #2 */
+		int r = treg(e);
+
+		if (e->reach) {
+			ins *i = put(e, I_WORD);
+
+			i->imm = 0xd53b4400 | (unsigned)r;	/* mrs xR, FPCR */
+		}
+		opi(e, I_ADDI, 0, r, r, 1 << 22);
+		opbf(e, I_UBFM, 0, r, r, 22, 23);
+		return vreg(r);
+	}
 	case BI_CLZ: case BI_CLZL: case BI_CLZLL: case BI_CTZ: case BI_CTZL: case BI_CTZLL:
 	case BI_FFS: case BI_FFSL: case BI_FFSLL: case BI_POPCOUNT: case BI_POPCOUNTL: case BI_POPCOUNTLL:
 	case BI_PARITY: case BI_PARITYL: case BI_PARITYLL: case BI_BSWAP16: case BI_BSWAP32: case BI_BSWAP64:

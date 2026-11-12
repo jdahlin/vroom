@@ -437,6 +437,8 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 				y->sc = SC_STATIC;
 			if (ds->inline_)
 				y->flags |= SF_INLINE | (ds->sc != SC_EXTERN ? SF_INLINE_NOEXTERN : 0);
+			if (kind == S_FUNC && file && (!ds->inline_ || ds->sc == SC_EXTERN))
+				y->flags |= SF_EXTDECL;
 			apply_sym_attrs(c, y, &at);
 			if (inner) {
 				/* block-scope extern: a local type, linked to the same entity */
@@ -460,6 +462,8 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 			y->flags |= SF_GLOBAL;
 		if (ds->inline_)
 			y->flags |= SF_INLINE | (ds->sc != SC_EXTERN ? SF_INLINE_NOEXTERN : 0);
+		if (kind == S_FUNC && file && (!ds->inline_ || ds->sc == SC_EXTERN))
+			y->flags |= SF_EXTDECL;
 		if (ds->noreturn)
 			y->flags |= SF_NORETURN;
 		if (ds->thread)

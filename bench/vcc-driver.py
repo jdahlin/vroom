@@ -37,6 +37,9 @@ ROWS += [(TARGETS[0], f, LSE_PROBE) for f in
           '-mcpu=neoverse-n1', '-mcpu=cortex-a72+lse', '-mcpu=cortex-a76 -march=armv8-a',
           '-march=armv8-a -mcpu=cortex-a76', '-mcpu=apple-m1']]
 ROWS += [(TARGETS[1], '', LSE_PROBE)]
+# x86 instruction-set switches on arm64: errors, except -msse4/-msse4.2 (only unused in clang)
+ROWS += [(t, f, LSE_PROBE) for t in TARGETS for f in
+         ['-mavx2', '-msse -msse2', '-mno-avx', '-maes', '-mx87', '-msse4.2', '-msse4', '-mno-red-zone']]
 
 def run(cmd, src):
     r = subprocess.run(cmd + [src], capture_output=True, text=True)
