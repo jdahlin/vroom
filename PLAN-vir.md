@@ -1507,6 +1507,33 @@ instruktioner; bruset mellan körningar är ca ±0,005 G.
   `VCC_VIR_SHRINK=0` och med `VCC_VIR_ROT=0`: det kommer inte härifrån och är
   inte undersökt.
 
+### TSVC efter #125: sökloopar (2026-11-12)
+
+TSVC genom VIR gick från 6,26 G cykler (de4e5a65) till 7,37 G på main.  Per
+loop (`vcc-tsvc.py -v` med båda kompilatorerna) låg allt i fem loopar: s314 och
+s316 (största och minsta värde: 0,026 och 0,019 s → 0,172 och 0,171), s315,
+s3110 och s13110 (största värde med index: 0,005 → 0,035).  Två orsaker, båda
+från #125:
+
+- **Ordnad reduktion ensam vektoriserades:** vektorloopen läste fyra element
+  och tog sedan ut dem ett i taget med jämförelse och val i ordning, alltså
+  den skalära loopen med en vektorlast framför.  En loop utan lagring och utan
+  packad summa vektoriseras inte längre på arm64 (`vec.inc`; x86-64 lämnat som
+  det skrevs, inte mätt här).  7,37 G → 6,60 G.
+- **If-konverteringen** gör nu `select` också när armen bara laddar om det
+  villkoret läste (`vw_armreuse`) och för flera värden per sammanflöde.  I en
+  sökloop blir det en kedja där varje varv väntar på det förra, där hoppet
+  förut nästan aldrig togs.  Värden som vart och ett antingen behåller en
+  blockparameter eller ersätter den förblir nu ett hopp (`vw_ifconv`).
+  6,60 G → 6,21 G.  sqlite speedtest1: 25,56 G → 25,49 G instruktioner,
+  cykler oförändrade.
+- Med bara flera värden undantagna hamnade s314/s316 på clangs nivå (0,053 s);
+  clang konverterar dem också.  Hoppet är snabbare på TSVC:s data.
+- **Tester:** nytt `vcc/vir_search_loop.c` (lika värden, −0, NaN);
+  C-sviterna genom VIR med kontrollen 2103/2103, inline 85/85, vcc 300/300
+  direkt, TSVC 151/151, sqlite samma hash.  x86-64 är inte kört: ändringen i
+  `vw_ifconv` gäller alla mål.
+
 ### Underlag för V4 (2026-11-11): registerallokering, ingen kod
 
 - `RESEARCH-regalloc.md`: vad GCC (IRA, LRA) och LLVM (Greedy, Fast, PBQP,
