@@ -7,7 +7,9 @@
  *             __TEXT,__text, .rodata* -> __TEXT,__const or __DATA,__const
  *             when it holds pointers, .data, .bss, .tdata/.tbss/.tlv ->
  *             the thread-local sections, .init_array -> __mod_init_func);
- *             several ELF sections may share one Mach-O section.
+ *             several ELF sections may share one Mach-O section.  A name
+ *             "seg,sect[,type[,attr+attr]]" (section("...") on Darwin) is
+ *             a section of its own with that type and those attributes.
  *             Non-allocated sections are dropped.
  *   symbols   names are written as they are (the code generator adds
  *             the '_'); .L temporaries that a relocation needs become
@@ -33,16 +35,16 @@ enum {
 };
 
 enum {
-	S_REGULAR = 0, S_ZEROFILL = 1, S_MOD_INIT_FUNC_POINTERS = 9, S_THREAD_LOCAL_REGULAR = 0x11,
+	S_REGULAR = 0, S_ZEROFILL = 1, S_CSTRING_LITERALS = 2, S_MOD_INIT_FUNC_POINTERS = 9, S_THREAD_LOCAL_REGULAR = 0x11,
 	S_THREAD_LOCAL_ZEROFILL = 0x12, S_THREAD_LOCAL_VARIABLES = 0x13,
 	S_ATTR_PURE_INSTRUCTIONS = 0x80000000u, S_ATTR_SOME_INSTRUCTIONS = 0x400,
 };
 
 enum { N_EXT = 1, N_SECT = 0xe, N_PEXT = 0x10, N_WEAK_REF = 0x40, N_WEAK_DEF = 0x80 };
 
-/* the output sections, in segment order (zero-fill last) */
-enum { M_TEXT, M_CONST, M_DCONST, M_DATA, M_TLV, M_TDATA, M_INIT, M_BSS, M_TBSS, M_N };
-static const struct { const char *seg, *sect; uint32_t flags; } mtab[M_N] = {
+/* the output sections; M_USER.. are section("seg,sect,...") names */
+enum { M_TEXT, M_CONST, M_DCONST, M_DATA, M_TLV, M_TDATA, M_INIT, M_BSS, M_TBSS, M_USER, M_N = M_USER + 32 };
+static const struct { const char *seg, *sect; uint32_t flags; } mtab[M_USER] = {
 	[M_TEXT] = { "__TEXT", "__text", S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS },
 	[M_CONST] = { "__TEXT", "__const", S_REGULAR },
 	[M_DCONST] = { "__DATA", "__const", S_REGULAR },
@@ -68,6 +70,10 @@ typedef struct {
 	char *str; uint32_t strsize; uint32_t *strx;	/* per symbol */
 	uint64_t cmdsize, dataoff, symoff, stroff, size;
 	uint8_t *needsym;	/* per symbol: a relocation names it */
+	char seg[M_N][17], sect[M_N][17];	/* per output section: names and flags */
+	uint32_t flags[M_N];
+	int nuser;
+	int8_t ord[M_N];	/* output sections in file order: zero-fill last */
 } Mo;
 
 static void *zalloc(ElfObj *o, size_t n)
@@ -89,10 +95,84 @@ static int pfx(const ElfSec *se, const char *p)
 
 static int is_reloc_word(uint32_t t) { return t == R_AARCH64_ABS64 || t == R_AARCH64_ABS32; }
 
-static int sec_map(ElfObj *o, uint32_t s)
+static int is_zerofill(uint32_t f) { return (f & 0xff) == S_ZEROFILL || (f & 0xff) == S_THREAD_LOCAL_ZEROFILL; }
+
+/* "seg,sect[,type[,attr+attr...]]": a section of its own (0: not such a name, -1: error) */
+static int user_sec(ElfObj *o, Mo *m, const ElfSec *se)
+{
+	static const struct { const char *n; uint32_t v; } types[] = {
+		{ "regular", 0 }, { "zerofill", 1 }, { "cstring_literals", 2 }, { "4byte_literals", 3 },
+		{ "8byte_literals", 4 }, { "literal_pointers", 5 }, { "mod_init_funcs", 9 }, { "mod_term_funcs", 10 },
+		{ "coalesced", 11 }, { "16byte_literals", 14 }, { "thread_local_regular", 0x11 },
+		{ "thread_local_zerofill", 0x12 }, { "thread_local_variables", 0x13 },
+	}, attrs[] = {
+		{ "pure_instructions", 0x80000000u }, { "no_toc", 0x40000000 }, { "strip_static_syms", 0x20000000 },
+		{ "no_dead_strip", 0x10000000 }, { "live_support", 0x08000000 }, { "self_modifying_code", 0x04000000 },
+		{ "debug", 0x02000000 },
+	};
+	const char *p = se->name, *e = se->name + se->len, *f[4];
+	size_t fl[4];
+	int nf = 0;
+	if (!memchr(p, ',', se->len)) return 0;
+	while (nf < 4) {
+		const char *q = memchr(p, ',', (size_t)(e - p));
+		const char *z = q ? q : e;
+		while (p < z && *p == ' ') p++;
+		const char *t = z;
+		while (t > p && t[-1] == ' ') t--;
+		f[nf] = p, fl[nf++] = (size_t)(t - p);
+		if (!q) break;
+		p = q + 1;
+	}
+	if (nf < 2 || !fl[0] || !fl[1] || fl[0] > 16 || fl[1] > 16) {
+		elf_error(o, "Mach-O: section '%.*s' is not 'segment,section' with names of at most 16 characters", (int)se->len, se->name);
+		return -1;
+	}
+	uint32_t flags = 0;
+	if (nf > 2 && fl[2]) {
+		size_t k = 0;
+		while (k < sizeof types / sizeof *types && (strlen(types[k].n) != fl[2] || memcmp(types[k].n, f[2], fl[2]))) k++;
+		if (k == sizeof types / sizeof *types) {
+			elf_error(o, "Mach-O: unknown section type '%.*s'", (int)fl[2], f[2]);
+			return -1;
+		}
+		flags = types[k].v;
+	}
+	for (const char *a = nf > 3 ? f[3] : NULL, *ae = a ? f[3] + fl[3] : NULL; a && a < ae;) {
+		const char *z = memchr(a, '+', (size_t)(ae - a));
+		if (!z) z = ae;
+		size_t k = 0;
+		while (k < sizeof attrs / sizeof *attrs && (strlen(attrs[k].n) != (size_t)(z - a) || memcmp(attrs[k].n, a, (size_t)(z - a)))) k++;
+		if (k == sizeof attrs / sizeof *attrs) {
+			elf_error(o, "Mach-O: unknown section attribute '%.*s'", (int)(z - a), a);
+			return -1;
+		}
+		flags |= attrs[k].v;
+		a = z < ae ? z + 1 : z;
+	}
+	if (se->flags & SHF_EXECINSTR) flags |= S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS;
+	for (int k = M_USER; k < M_USER + m->nuser; k++)
+		if (strlen(m->seg[k]) == fl[0] && !memcmp(m->seg[k], f[0], fl[0]) &&
+		    strlen(m->sect[k]) == fl[1] && !memcmp(m->sect[k], f[1], fl[1])) {
+			m->flags[k] |= flags;
+			return k;
+		}
+	if (m->nuser == M_N - M_USER) {
+		elf_error(o, "Mach-O: more than %d section(\"...\") sections", M_N - M_USER);
+		return -1;
+	}
+	int k = M_USER + m->nuser++;
+	memcpy(m->seg[k], f[0], fl[0]); memcpy(m->sect[k], f[1], fl[1]);
+	m->flags[k] = flags;
+	return k;
+}
+
+static int sec_map(ElfObj *o, Mo *m, uint32_t s)
 {
 	ElfSec *se = elf_sec(o, s);
 	if (!(se->flags & SHF_ALLOC)) return -1;
+	int u = user_sec(o, m, se);
+	if (u) return u;
 	if (pfx(se, ".text")) return M_TEXT;
 	if (pfx(se, ".tbss")) return M_TBSS;
 	if (pfx(se, ".tdata")) return M_TDATA;
@@ -256,8 +336,29 @@ size_t macho_finish(ElfObj *o)
 	/* sections */
 	uint64_t moffs[M_N] = { 0 };
 	for (uint32_t s = 1; s < ns; s++) {
-		int k = sec_map(o, s);
+		int k = sec_map(o, m, s);
 		m->map[s] = (int8_t)k;
+	}
+	if (o->has_err) return 0;
+	for (int k = 0; k < M_USER; k++) {
+		memcpy(m->seg[k], mtab[k].seg, strlen(mtab[k].seg) + 1);
+		memcpy(m->sect[k], mtab[k].sect, strlen(mtab[k].sect) + 1);
+		m->flags[k] = mtab[k].flags;
+	}
+	{
+		/* file order: __text, __const, user __TEXT ones, the fixed data
+		   sections, user data ones, user zero-fill ones, __bss, __thread_bss */
+		int no = 0, nu = M_USER + m->nuser;
+		m->ord[no++] = M_TEXT, m->ord[no++] = M_CONST;
+		for (int k = M_USER; k < nu; k++)
+			if (!is_zerofill(m->flags[k]) && !strcmp(m->seg[k], "__TEXT")) m->ord[no++] = (int8_t)k;
+		for (int k = M_DCONST; k <= M_INIT; k++) m->ord[no++] = (int8_t)k;
+		for (int k = M_USER; k < nu; k++)
+			if (!is_zerofill(m->flags[k]) && strcmp(m->seg[k], "__TEXT")) m->ord[no++] = (int8_t)k;
+		for (int k = M_USER; k < nu; k++)
+			if (is_zerofill(m->flags[k])) m->ord[no++] = (int8_t)k;
+		m->ord[no++] = M_BSS, m->ord[no++] = M_TBSS;
+		for (int k = no; k < M_N; k++) m->ord[k] = -1;
 	}
 	for (int k = 0; k < M_N; k++) {
 		uint64_t off = 0;
@@ -278,7 +379,8 @@ size_t macho_finish(ElfObj *o)
 	{
 		uint64_t addr = 0;
 		uint32_t idx = 0;
-		for (int k = 0; k < M_N; k++) {
+		for (int i = 0; i < M_N && m->ord[i] >= 0; i++) {
+			int k = m->ord[i];
 			if (!moffs[k]) continue;
 			addr = al(addr, (uint64_t)1 << m->malign[k]);
 			m->maddr[k] = addr;
@@ -370,9 +472,10 @@ size_t macho_finish(ElfObj *o)
 	m->cmdsize = (72 + 80 * (uint64_t)m->nmsec) + 24 /* build version */ + 24 /* symtab */ + 80 /* dysymtab */;
 	uint64_t off = 32 + m->cmdsize;
 	m->dataoff = off;
-	for (int k = 0; k < M_N; k++) {
+	for (int i = 0; i < M_N && m->ord[i] >= 0; i++) {
+		int k = m->ord[i];
 		if (!m->midx[k]) continue;
-		if (mtab[k].flags == S_ZEROFILL || mtab[k].flags == S_THREAD_LOCAL_ZEROFILL) { m->moff[k] = 0; continue; }
+		if (is_zerofill(m->flags[k])) { m->moff[k] = 0; continue; }
 		off = al(off, (uint64_t)1 << m->malign[k]);
 		m->moff[k] = off;
 		off += m->msize[k];
@@ -415,13 +518,14 @@ void macho_emit(ElfObj *o, uint8_t *b)
 	p64(c + 24, 0); p64(c + 32, vmsize); p64(c + 40, m->dataoff); p64(c + 48, fileend - m->dataoff);
 	p32(c + 56, 7); p32(c + 60, 7); p32(c + 64, m->nmsec); p32(c + 68, 0);
 	uint8_t *sh = c + 72;
-	for (int k = 0; k < M_N; k++) {
+	for (int i = 0; i < M_N && m->ord[i] >= 0; i++) {
+		int k = m->ord[i];
 		if (!m->midx[k]) continue;
-		pname(sh, mtab[k].sect); pname(sh + 16, mtab[k].seg);
+		pname(sh, m->sect[k]); pname(sh + 16, m->seg[k]);
 		p64(sh + 32, m->maddr[k]); p64(sh + 40, m->msize[k]);
 		p32(sh + 48, m->moff[k]); p32(sh + 52, m->malign[k]);
 		p32(sh + 56, m->nrel[k] ? m->reloff[k] : 0); p32(sh + 60, m->nrel[k]);
-		p32(sh + 64, mtab[k].flags);
+		p32(sh + 64, m->flags[k]);
 		sh += 80;
 	}
 	c = sh;
