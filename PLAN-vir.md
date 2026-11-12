@@ -1143,6 +1143,314 @@ kända rest mot clang: adresstagna lokaler i slingor utan anrop (`balance`:
 `b.nCell` laddas och lagras varje varv; kräver aliasanalys på typ eller
 ursprung, ett beslut för SPEC-vir.md).
 
+### Vad allokerarens kvalitet är värd: LLVM:s allokerare mot varandra (2026-11-12)
+
+Mätningen som "Mäts i V4" nedan utlovade.  sqlite3.c, speedtest1 `--size 100
+--memdb`, Homebrew clang 23.1.4 `-O2` med `-mllvm -regalloc=X`, vcc på
+75bb9062 (`VCC_VIR=bl`), virpol är binären från 12:36 samma dag (äldre
+inlining).  Fem växelvisa rundor, `/usr/bin/time -l`; maskinen hade last 10,
+så cyklerna är median av parade kvoter med [min .. max], och bara skillnader
+över ca 2 % säger något.  Samma verifieringshash i alla sju.
+
+| | Instr. | Cykler mot greedy | Statiskt: totalt | `mov` r,r | sp/fp-laster | sp/fp-lagringar |
+|---|---|---|---|---|---|---|
+| clang greedy | 23,70 G | 0 | 239 k | 21,3 k | 13,0 k | 10,2 k |
+| clang pbqp | +3,5 % | +2,1 % [−0,6 .. +10,7] | 242 k | 22,7 k | 14,7 k | 10,4 k |
+| clang basic | +3,7 % | +7,0 % [+4,7 .. +19,3] | 242 k | 17,4 k | 19,6 k | 10,7 k |
+| clang fast | +44,1 % | +72,4 % | 325 k | 3,1 k | 83,3 k | 44,8 k |
+| virpol | +3,4 % | +6,0 % [+2,2 .. +14,1] (bäst av fem +3,9 %) | 242 k | 21,1 k | 12,6 k | 10,0 k |
+| VIR | +15,3 % | +12,6 % [+10,8 .. +23,9] | 298 k | 35,1 k | 22,0 k | 17,9 k |
+| vcc utan VIR | +60,9 % | +50,7 % | 234 k | 24,0 k | 28,5 k | 21,9 k |
+
+- **VIR mot virpol: +8,4 % cykler [+6,3 .. +8,6], +11,5 % instruktioner.**
+  VIR mot clang basic: +4,1 % [+3,7 .. +7,4].
+- **Greedy mot basic är värt ca 7 % här**, lika mycket som hela VIR:s gap mot
+  virpol.  Basic har färre flyttar än greedy (17,4 k mot 21,3 k) men 50 % fler
+  stacklaster: det som kostar är omladdningar på heta vägar (delning av
+  livslängder), inte antalet `mov`.  Fast visar golvet utan allokering.
+- **Statiskt överskott VIR mot virpol, 56,5 k instruktioner:** flyttar 14,0 k,
+  stacklaster 9,3 k, stacklagringar 8,0 k (tillsammans 55 %: allokering och
+  ramar), hopp 4,9 k, konstanter 3,3 k, övrigt 17 k (urval, kopierade block).
+- **Inte mätt:** allokerarens andel av de 8,4 procenten direkt (kräver samma
+  funktioner genom båda allokerarna; receptet för virpol finns inte i
+  trädet), och inget dynamiskt: de statiska talen säger inte vilka flyttar och
+  laster som körs.  Uppskattning: virpol med basic skulle ligga på ungefär
+  VIR:s nivå (8,11 G × 1,07–1,08 mot 8,79 G).
+- **Slutsats för arbetsordningen:** omladdningar i loopar före flyttar.
+  PBQP:s +2 % visar att en allokerare utan delning kan komma nära greedy med
+  en bra kostnadsmodell.
+
+### Allokeraren: loopingång, argument som parallell flytt, callee-saved direkt (2026-11-12)
+
+Första steget efter mätningen ovan, efter sammanfogning med main (d0cbdcc7).
+Mätt i **instruktioner** (`/usr/bin/time -l`, speedtest1 `--size 100 --memdb`):
+de är stabila till ca 0,05 % också med last 10–20 på maskinen, vilket cyklerna
+inte är.  Bas efter sammanfogningen: 26,18 G (virpol 24,49 G, clang 23,70 G),
+8,5–8,6 G cykler (virpol 8,24 G, clang 7,86 G).
+
+- **Vad som faktiskt körs** (`VCC_VL_PROBE=MASK` i `emit/vir/a64.c`: en `nop`
+  efter varje redigering av ett slag; skillnaden i instruktioner är antalet
+  körningar, en övre gräns eftersom `nop` också stoppar postvikningarna):
+
+  | Slag | Före instruktion | På kant | Summa | Andel av 26,1 G |
+  |---|---|---|---|---|
+  | flytt | 1,23 G | 0,60 G | 1,83 G | 7,0 % |
+  | rematerialisering | 1,00 G | 0,55 G | 1,55 G | 5,9 % |
+  | omladdning | 0,34 G | 0,28 G | 0,62 G | 2,4 % |
+  | lagring till plats | 0,16 G | 0,34 G | 0,50 G | 1,9 % |
+
+  Flyttar och konstanter körs alltså tre gånger så ofta som omladdningar och
+  lagringar.  Slutsatsen i förra avsnittet ("omladdningar i loopar före
+  flyttar") gällde LLVM:s basic mot greedy och gäller inte vår allokerare på
+  den här lasten.  Flyttarna före instruktion per orsak: kopia av ett levande
+  värde till ett anrops argumentregister 0,73 G, parameter eller resultat till
+  callee-saved 0,29 G, levande värde undanflyttat ur ett argumentregister
+  före ett anrop 0,30 G, övrigt 0,15 G.  De två första följer av
+  anropskonventionen; clang har dem också.
+- **Gjort, tre regler i `vir/alloc.c` (SPEC 15.6–15.7 uppdaterad):**
+  1. *Loopingång* (`preload`): ett värde som når loophuvudet i sin plats och
+     används i loopen får register i huvudets ingångstillstånd, så att kanten
+     in i loopen laddar det en gång.  Bara medan register finns över
+     (maxp + 1); i en loop med anrop bara callee-saved.  Per loop finns nu
+     `lcall` (ett anrop utanför kalla block).
+  2. *Fasta operander som parallell flytt:* ett argument som flyttar från ett
+     argumentregister till nästa kopieras innan dess register skrivs.  Det
+     reducerade fallet (`add4(v, 96, base, n, 0, zAff, n)`): 8 → 6
+     instruktioner.
+  3. *Callee-saved direkt:* ett värde som lever över ett anrop tar ett ledigt
+     callee-saved register också utanför loopar och när funktionen inte använt
+     något än.  Förut hamnade det i ett caller-saved och flyttades vid anropet.
+- **Resultat, sqlite:**
+
+  | | Instr. | Statiskt totalt | `mov` r,r | sp/fp-laster | sp/fp-lagringar |
+  |---|---|---|---|---|---|
+  | bas | 26,186 G | 289 168 | 34 535 | 22 379 | 18 100 |
+  | 1 | −0,18 % | 289 060 | 34 486 | 22 318 | 18 111 |
+  | 1 + 2 | −0,23 % | 288 572 | 34 057 | 22 260 | 18 110 |
+  | 1 + 2 + 3 | **−0,42 %** (26,076 G) | 285 866 | 31 591 | 22 269 | 17 996 |
+
+  Cykler: fyra parade körningar inom bruset (last 23).  Ramar oförändrat 1138.
+- **Prövat och struket, alla mätta i instruktioner:**
+  - *Värde ur ingångstillståndet vid ett sammanflöde* när en annan föregångare
+    har det i plats och blocket inte läser det: statiskt −3,4 k stacklaster
+    (−15 %), dynamiskt **+0,6 %**.  Kantomladdningarna (8,6 k statiskt, varav
+    7,0 k för värden som målblocket inte läser) ligger alltså mest på kalla
+    vägar; de statiska talen i förra avsnittet överskattar dem.  Den säkra
+    varianten (blocket anropar före användningen) gav −264 laster och inget
+    mätbart.
+  - *Konstanter i register över loopar utan anrop:* +838 instruktioner
+    statiskt, +0,07 % dynamiskt (fler rematerialiseringar på kanterna).
+  - Sampling (`sample`) per instruktionsslag: samplen hamnar efter
+    felförutsagda hopp och säger inget om instruktionsblandningen.
+- **Tester:** `vir-alloc` 19/19 (nya `loop-preload.vir`, `args-parallel.vir`;
+  `irr-head.vir` och `irreducible.vir` ombekräftade: omladdningen flyttad till
+  kanten), slump 600 enheter (frö 1–300, 1000–1299), `mutate` 3243 av 3355;
+  `vir-test` 126/126; C-sviterna 2091 utan VIR (vcc 288/288), genom VIR med
+  kontrollen 2088/2091 (de tre kända: jump_table, switch_dispatch,
+  switch_values); inline genom VIR 85/85; nytt `vcc/vir_loop_entry.c`; sqlite
+  genom VIR med kontrollen, hash oförändrad.  Inte körda: `vbench.py gate`,
+  TCL-sviten, PostgreSQL, zlib.
+- **Kvar, i ordning efter vad proben visar:** flyttar på kanter (0,60 G:
+  blockparametrar och bakkanter), undanflyttningen före anrop (0,30 G, ett
+  värde som inte är `xcall` enligt levande mängderna men sitter i ett
+  argumentregister), rematerialisering på kanter (0,55 G: konstanter som
+  blockargument).  Gapet mot virpol i instruktioner (+6,5 %) är större än allt
+  allokeraren kan ta av detta; loopar som inte roteras (ett `b` per varv) hör
+  till sänkningen.
+
+### Ram i funktioner med hopptabell, och var kantflyttarna körs (2026-11-12)
+
+- **Mot clang -O2 efter förra avsnittet** (sex parade körningar, last 11–14):
+  cykler **1,095x** [1,083 .. 1,125], instruktioner 1,100x; virpol mot clang
+  1,049x [1,034 .. 1,086].
+- **Ram:** `opt_regs` (arm64, `opt.c`) gav `OPF_ALL` för `I_JT`, så en
+  funktion med hopptabell behöll ramrekord och alla callee-saved fast den inte
+  behövde dem.  `I_JT` läser sitt index och skriver x16/x17; städpassen ser den
+  fortfarande som `OP_ALL`.  vdbeRecordCompareInt (bara syskonanrop) och två
+  till i sqlite tappar `stp/mov/ldp`: 26,10 G → 25,97 G instruktioner
+  (**−0,5 %**, mer än de tre allokeringsreglerna tillsammans), statiskt 1138 →
+  1135 ramar.  Gäller också den direkta emittern.  Test:
+  `vcc/vir_switch_leaf.c`; vcc-cfi 1582/1582 direkt och genom VIR.
+- **Kantflyttar per slag** (nop-prob, G körningar): argument som dör på
+  kanten till en blockparameter i annat register 0,38 framåt och 0,20 på
+  bakkant; vanliga värden 0,16 framåt och 0,06 på bakkant; konstant som
+  blockargument 0,53 (framåt).  Per funktion är de utspridda: störst
+  sqlite3VdbeExec 0,09 och balance 0,06 av de tolv hetaste.  Ingen enskild
+  regel tar dem; inget ändrat.
+- **Ram mot clang i de heta funktionerna efter rättningen:** bara
+  sqlite3PagerWrite och pcache1Fetch har ram hos oss och inte hos clang
+  (shrink-wrapping).
+
+### Looprotation i sänkningen (2026-11-12)
+
+- **Gjort (`emit/vir/a64.c`, `vl_order`):** blocken sänks i en egen ordning
+  (`L->ord`; `vl_next` och `vl_body` var de enda ställena som antog VIR:s
+  ordning).  En loop vars huvud är ett test (`brif` efter högst sju enkla
+  instruktioner, inga anrop) får huvudet efter sitt sista block när det
+  blocket slutar med `br` till huvudet: latchen faller in i testet och testets
+  hopp går tillbaka till kroppen, ett hopp per varv i stället för två.
+  Kanterna in i loopen får en kopia av testet (`vl_goto`), som LLVM:s
+  rotation med vakt.  `VCC_VIR_ROT=0` ger VIR:s ordning.
+- **Två varianter mätta** (sqlite speedtest1, instruktioner):
+  bara omordning med ett hopp till testet på vägen in **+0,07 %** (sqlites
+  loopar är korta: hoppet in kostar mer än varven sparar); med kopian
+  **−0,44 %** (25,94 G → 25,83 G).  Statiskt +1,5 % instruktioner (285 802 →
+  289 983), `b` 16 653 → 15 388.  Kopian av ett block med arbete i, som
+  prövades förut vid latchen och ströks, går alltså ihop här, där den ersätter
+  ett hopp som annars körs en gång per loop.
+- **Tid:** sqlite parat (sex körningar, last 10–12): −0,5 % cykler
+  [−1,0 .. +3,5] mot bygget före; mot clang -O2 **1,083x** [1,077 .. 1,094]
+  cykler, 1,090x instruktioner.  TSVC genom VIR: 6,42 G → 6,31 G cykler
+  (−1,7 %), 151/151 kontrollsummor.
+- **Tester:** nytt `vcc/vir_loop_rotate.c` (0, 1 och många varv, nästlat,
+  continue/break, loop nådd från två grenar och med `goto` förbi testet);
+  C-sviterna 2093/2093 direkt och 2090/2093 genom VIR med kontrollen (de tre
+  kända), inline 85/85, vcc-cfi genom VIR 1582/1582, volatile 32/32, vcc-abi
+  `--host` genom VIR 4 fel (de kända fyra enligt ovan; inte jämfört mot ett
+  bygge utan ändringen), sqlite samma hash.
+- **Sett på vägen, inte åtgärdat:** en lövfunktion med vektorinstruktioner
+  får ramrekord (vektorposterna är `I_RAW`, alltså `OP_ALL` för `opt_regs`).
+
+### Vad som körs, mot clang, per instruktionsslag; kopierade sammanflödestest (2026-11-12)
+
+- **Verktyg:** `bench/sqlite/mix.py`: en `nop` framför varje instruktion av ett
+  slag i kompilatorns `.s`, och skillnaden i instruktioner är antalet
+  körningar.  Fungerar på clangs `.s` också, så blandningen kan jämföras
+  exakt (summan av skillnaderna nedan är 2,16 G mot uppmätt gap 2,13 G).
+- **sqlite speedtest1 `--size 100`, G körda instruktioner** (VIR efter
+  looprotationen 25,82 G, clang -O2 23,69 G):
+
+  | Slag | VIR | clang | Skillnad |
+  |---|---|---|---|
+  | laster (inte sp/fp) | 4,42 | 3,89 | **+0,52** |
+  | villkorliga hopp | 2,87 | 2,51 | **+0,36** |
+  | `mov` r,r | 1,53 | 1,18 | **+0,35** |
+  | `b` | 0,91 | 0,62 | **+0,29** |
+  | add/sub | 2,77 | 2,59 | +0,18 |
+  | cmp/tst | 1,70 | 1,58 | +0,12 |
+  | sp/fp-laster | 1,28 | 1,15 | +0,12 |
+  | sp/fp-lagringar | 1,12 | 1,01 | +0,12 |
+  | lagringar (inte sp/fp) | 1,12 | 1,00 | +0,12 |
+  | anrop + ret | 0,65 | 0,57 | +0,08 |
+  | konstanter (mov #, adrp) | 0,99 | 1,11 | −0,13 |
+  | csel-familjen | 0,10 | 0,19 | −0,09 |
+
+  Stacktrafiken är alltså nästan clangs (+0,24 G av 2,13); det största är
+  vanliga laster (inga laster hissade ur loopar, färre återanvända över block,
+  inlining), sedan hopp och flyttar.  Per funktion sticker
+  sqlite3BtreeIndexMoveto ut (`b` 0,08 mot 0,01, `mov` 0,13 mot 0,07) och
+  sqlite3VdbeExec i `b` (0,39 mot 0,27); VdbeExec har färre `mov` än clang.
+- **Gjort (`vl_small` i `emit/vir/a64.c`):** ett hopp framåt till ett block
+  som bara testar (`brif` med högst en instruktion före, t.ex. `if (c<0)` efter
+  tre grenar som räknar ut `c`) ersätts av en kopia av blocket, som LLVM:s
+  svansduplicering vid sin standardstorlek.  Vägen till testets hoppsida
+  kostar då ett hopp i stället för två.
+- **Mätt:** 25,84 G → 25,76 G instruktioner (**−0,31 %**), cykler bättre i
+  tre parade körningar av tre (−0,5 till −1,8 %), kod +2,7 % (289 983 →
+  297 728).  Större block: 3 instruktioner −0,44 % för +3,9 %, 4: −0,52 % för
+  +5,1 %, 6: −0,59 % för +6,5 %; valt 2.  Bara kopior som faller igenom
+  efteråt: ingen skillnad alls (vinsten ligger på hoppsidan).
+- **Tester:** nytt `vcc/vir_join_dup.c`; C-sviterna genom VIR med kontrollen
+  2091/2094 (de tre kända), vcc 291/291 direkt, inline 85/85, vcc-cfi genom
+  VIR 1582/1582, volatile 32/32, TSVC 151/151 (6,32 G cykler), sqlite samma
+  hash.
+
+### Ramar mot clang per funktion: syskonanrop som returnerar pekare, FP-löv (2026-11-12)
+
+- **Mätt exakt** (en räknare framför varje `stp x29, x30` i `.s`, summerad
+  vid avslut): VIR satte upp 172,9 M ramar på speedtest1 `--size 100`, clang
+  134,0 M.  Störst: pcache1Fetch 6,3 M, sqlite3_value_text och sqlite3ValueText
+  5,8 M var, sqlite3PagerWrite 4,1 M, dekkerMul2 3,7 M, applyAffinity 3,5 M,
+  sqlite3DbMallocRawNN 3,4 M, sqlite3_free 3,2 M (clang 0 i alla).
+- **Det mesta var inte shrink-wrapping utan missade syskonanrop:** en funktion
+  som returnerar en pekare fick aldrig något.  `ret` namnger anropets värde
+  under dess `i2p` (sänkningen läser igenom `i2p`/`p2i`), och `vl_sibling`
+  jämförde med värdet ovanpå.  Nu jämförs värdena utan sådana instruktioner
+  (`vl_under`).  sqlite: 25,755 G → 25,670 G instruktioner (**−0,34 %**), 23
+  funktioner utan ram, 172,9 M → 149,0 M ramar.
+- **FP- och vektorinstruktioner som `I_WORD`** gav `OPF_ALL` i `opt_regs` och
+  därmed ramrekord i varje lövfunktion med flyttal (sqlite3_value_int64,
+  dekkerMul2) eller vektorer (TSVC).  I VIR:s funktioner avkodas ordets
+  registerfält nu som allmänna register (en övermängd; grenar, undantag och
+  fält 31 utanför FP-klassen ger fortfarande `OPF_ALL`).  −0,06 %, 12
+  funktioner; TSVC 6,32 G → 6,29 G cykler.
+- **Kvar som är riktig shrink-wrapping** (ett callee-saved register och ett
+  riktigt anrop på en väg, tidiga returer eller syskonanrop på de andra):
+  sqlite3PagerWrite 4,1 M, applyAffinity 3,5 M, sqlite3_free 3,2 M,
+  sqlite3DbMallocRaw 1,9 M, sqlite3VdbeMemStringify 1,3 M, sqlite3Step 1,1 M:
+  ca 17 M ramar à ca 8 instruktioner, 0,5 %.
+- **Tester:** nytt `vcc/vir_tail_ptr.c`; C-sviterna genom VIR med kontrollen
+  (de tre kända felen), inline 85/85, vcc-cfi genom VIR 1582/1582, vcc-abi
+  `--host` 4 fel både med och utan VIR (alltså inte härifrån), TSVC 151/151,
+  sqlite samma hash.
+
+### Shrink-wrapping (2026-11-12)
+
+- **Gjort, tre delar (SPEC 15.12):**
+  1. *Allokeraren* (`save_point` i `vir/alloc.c`, på begäran genom
+     `vir_aopt.shrink`): sparpunkten S är blocket som dominerar alla block som
+     behöver ramen (anrop som inte är syskonanrop, memcpy/memset, asm,
+     `va_start`, en plats adress, `VB_ADDR`), ligger utanför alla loopar och
+     dominerar allt som nås från det; block som bara returnerar undantas.
+     Framför S ges inga callee-saved register när det går att undvika, och en
+     parameter flyttas inte dit vid sin definition.  Vid S flyttas de värden
+     som lever över anrop till callee-saved (redigeringar före S:s första
+     instruktion).  `vir_alloc_out.spoint`.
+  2. *Sänkningen* (`emit/vir/a64.c`): blocken framför S läggs först, S får
+     markören `NOP_PROLOG` efter sin etikett, returer och syskonanrop framför S
+     märks (`I_TAIL.sh`).  Kod bakom S som går till ett returblock framför S
+     får en egen kopia av det (`vl_lbl`, `VLT.lbf`).  Sänkningen säger före
+     allokeringen vilka anrop som blir syskonanrop (`vl_sibcand`).
+  3. *Ramen* (`finish_function`, `opt_noframe`): prologen läggs vid markören
+     när posterna framför den inte anropar något, inte rör någon ramplats och
+     varken läser eller skriver x19–x30; annars överst som förut och märkena
+     stryks.  Inte med avvecklingstabeller (Linux `-fasynchronous-unwind-tables`),
+     `-g`, VLA/alloca eller överjusterad ram.  `VCC_VIR_SHRINK=0` stänger av.
+- **Mätt, sqlite speedtest1 `--size 100`:** 25,645 G → 25,514 G instruktioner
+  (**−0,51 %**); cykler inom bruset i tre parade körningar.  Statiskt lika
+  många instruktioner (297 581 → 297 580).
+- **Fel på vägen:** ett block med bara `br` hoppades över av sänkningen
+  (`vl_lonebr`) också när det var sparpunkten och bar flyttarna till
+  callee-saved: sqlite3WalkSelect läste parametrarna ur register de aldrig
+  flyttats till.  Allokeringskontrollen såg det inte (allokeringen var rätt);
+  ett block med redigeringar hoppas inte över längre.
+- **Tester:** nytt `vcc/vir_shrink_wrap.c` (kört mot clang på macOS, där
+  shrink-wrapping är på); vcc-sviten 293/293 direkt och 290/293 genom VIR med
+  kontrollen (de tre kända), vir-alloc 19/19, vir-test 126/126, sqlite genom
+  VIR med kontrollen, samma hash.  **Inte körda efter den här ändringen:**
+  hela C-sviten (gcc/tcc-delarna), inline, vcc-cfi, vcc-abi, TSVC, slumpade
+  allokeringar; körningen avbröts.
+- **Sammanlagt på grenen**, instruktioner mot clang -O2 (23,70 G): efter
+  sammanfogningen med main 1,105x, nu 1,077x (25,51 G).
+
+### Vad som är kvar av gapet mot clang, per instruktionsslag (2026-11-12, efter shrink-wrapping)
+
+`bench/sqlite/mix.py`, klasserna sida vid sida (en minut; varje tal ca 0,03 G
+för högt, lika för båda).  VIR 25,55 G, clang -O2 23,72 G: gap **1,84 G
+(7,7 %)**.  G körda instruktioner:
+
+| Slag | VIR | clang | Skillnad | Vid förra mätningen |
+|---|---|---|---|---|
+| laster (inte sp/fp) | 4,45 | 3,99 | **+0,46** | +0,52 |
+| `mov` r,r | 1,59 | 1,21 | **+0,38** | +0,35 |
+| villkorliga hopp | 2,93 | 2,63 | **+0,30** | +0,36 |
+| `b` | 0,90 | 0,64 | **+0,26** | +0,29 |
+| add/sub | 2,77 | 2,58 | +0,19 | +0,18 |
+| cmp/tst | 1,74 | 1,61 | +0,13 | +0,12 |
+| lagringar (inte sp/fp) | 1,15 | 1,04 | +0,12 | +0,12 |
+| sp/fp-lagringar | 1,13 | 1,04 | +0,09 | +0,12 |
+| sp/fp-laster | 1,27 | 1,19 | +0,08 | +0,12 |
+| anrop + ret | 0,72 | 0,61 | +0,11 | +0,08 |
+| konstanter (mov #, adrp) | 1,04 | 1,23 | −0,19 | −0,13 |
+| csel-familjen | 0,14 | 0,20 | −0,06 | −0,09 |
+
+Summan av skillnaderna är 1,87 G.  Ramar (`stp x29, x30`): VIR 0,11 G, clang
+0,16 G: vi sätter nu upp färre ramar än clang.  Stacktrafiken är +0,17 G
+(var +0,24).  Kvar i ordning: vanliga laster (byggaren: inga laster hissade ur
+loopar, färre återanvända över block, inlining), `mov` (allokeraren:
+blockparametrar och argumentkopior), villkorliga hopp (inlining, färre
+`csel`), `b` (blockplacering).
+
 ### Underlag för V4 (2026-11-11): registerallokering, ingen kod
 
 - `RESEARCH-regalloc.md`: vad GCC (IRA, LRA) och LLVM (Greedy, Fast, PBQP,

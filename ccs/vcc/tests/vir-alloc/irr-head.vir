@@ -61,22 +61,22 @@ b2:
   v9:i32 = icmp.slt v8, 5               ; r0, - -> r0
   brif v9, b3, b6                       ; r0
 b3:                                     ; loop to b5 depth 1
-  v10:i32 = icmp.slt v1, 3              ; r1, - -> r0
+  v10:i32 = icmp.slt v1, 3              ; r1, - -> r2
   br b5                                 ;
 b4:
   v11:i64 = add v2, v0                  ; r2, r0 -> r3
   v12:i32 = icmp.slt v11, 9             ; r3, - -> r3
   brif v12, b3, b6                      ; r3
 b5:                                     ; loop to b5 depth 2
-  ; reload r0 <- v0 (ss0)
   v13:i32 = icmp.slt v0, 7              ; r0, - -> r2
   brif v13, b4, b5                      ; r2
 b6:
   ; move r0 <- r1 (v1)
   ret v1                                ; r0
 }
+; edge b2.0 -> b3: r0 <- ss0 (v0)
 ; edge b4.0 -> b3: ss0 <- r0 (v0); ss1 <- r2 (v2)
 ; edge b5.0 -> b4: r2 <- ss1 (v2)
 ; spill slots: ss0(8): v0 ss1(8): v2
-; spills 2 reloads 1 remats 0 moves 1 swaps 0 stores 2; edges 2: moves 0 reloads 1 remats 0 stores 2 xchg 0; slots 2 callee 0
+; spills 2 reloads 0 remats 0 moves 1 swaps 0 stores 2; edges 3: moves 0 reloads 2 remats 0 stores 2 xchg 0; slots 2 callee 0
 ; sweep @f: 24 configurations, 0 failed

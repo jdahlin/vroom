@@ -131,6 +131,9 @@ typedef struct vir_alloc_out {
 	uint32_t nspill;
 	uint64_t callee[2];	/* callee-saved registers used */
 	uint32_t *cfirst;	/* per register byte (0-127): the first block that writes it */
+	uint32_t spoint;	/* shrink-wrapping (15.12): the block in front of which the frame is set up; the
+				 * blocks it does not dominate were given no callee-saved register when one
+				 * could be avoided.  VIR_NOBLK: none (the function's entry) */
 	vir_astats st;
 	char err[160];		/* why vir_alloc returned false */
 } vir_alloc_out;
@@ -138,6 +141,8 @@ typedef struct vir_alloc_out {
 /* tuning and tests */
 typedef struct vir_aopt {
 	uint64_t pool;		/* live-in pool limit in words (0: the reservation) */
+	bool shrink;		/* look for a save point (15.12) */
+	const uint8_t *noframe;	/* with shrink, per instruction: a call that needs no frame (a sibling call); or NULL */
 } vir_aopt;
 
 bool vir_alloc(vir_fn *f, const vir_loops *lp, const vir_regs *regs, const vir_aopt *opt, vir_alloc_out *out);

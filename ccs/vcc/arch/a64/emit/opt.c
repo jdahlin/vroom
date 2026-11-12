@@ -991,6 +991,32 @@ static void dead(ecx *e)
  * every asm lists).  *fl: OPF_ALL a record may touch any register,
  * OPF_CALL a call, OPF_FRAME a frame slot is referenced.
  */
+/*
+ * The general registers an encoded instruction may name, for the frame decision: every
+ * register field read as a general register (a vector register's number then counts as the
+ * general one's: more is kept, never less).  False when the word may do more than that: a
+ * branch, a call, an exception, or a field 31 that can mean sp.
+ */
+static bool word_regs(uint32_t w, rmask *m)
+{
+	unsigned d = w & 31, n = w >> 5 & 31, a = w >> 10 & 31, x = w >> 16 & 31;
+	bool fp = (w >> 25 & 7) == 7;	/* scalar FP and Advanced SIMD data processing: 31 is v31 */
+
+	*m = 0;
+	if ((w >> 26 & 7) == 5) {	/* branches, exceptions, system */
+		if ((w & 0xfffff01fu) == 0xd503201fu || (w & 0xfffff01fu) == 0xd503301fu)
+			return true;	/* hints and barriers: no register */
+		if ((w & 0xffc00000u) != 0xd5000000u)
+			return false;
+		*m = d < 31 ? RB(d) : 0;	/* msr/mrs/sys: Rt */
+		return true;
+	}
+	if (!fp && (d == 31 || n == 31))
+		return false;
+	*m = (d < 31 ? RB(d) : 0) | (n < 31 ? RB(n) : 0) | (a < 31 ? RB(a) : 0) | (x < 31 ? RB(x) : 0);
+	return true;
+}
+
 VPRIV uint64_t opt_regs(ecx *e, unsigned *fl)
 {
 	const ins *in = e->in;
@@ -1000,9 +1026,20 @@ VPRIV uint64_t opt_regs(ecx *e, unsigned *fl)
 	rawp = e->raw.p;
 	for (uint32_t k = 0; k < e->nin; k++) {
 		const ins *i = &in[k];
-		unsigned ro = roles(i);
-		rmask r = reads(i, ro), w = writes(i, ro);
+		unsigned ro;
+		rmask r, w;
 
+		if (i->op == I_JT) {	/* (OP_ALL for the clean-ups, which do not follow it; its registers are known) */
+			u |= RBT[i->rd] | RB(16) | RB(17);
+			continue;
+		}
+		if (i->op == I_WORD && e->vlow && word_regs((uint32_t)i->imm, &r)) {
+			u |= r;	/* (VIR's lowering: FP, vector and system instructions with their registers in them) */
+			continue;
+		}
+		ro = roles(i);
+		r = reads(i, ro);
+		w = writes(i, ro);
 		if (ro & OP_ALL)
 			f |= OPF_ALL;
 		if (ro & OP_CALL)
@@ -1015,6 +1052,40 @@ VPRIV uint64_t opt_regs(ecx *e, unsigned *fl)
 	}
 	*fl = f;
 	return u;
+}
+
+/*
+ * Shrink-wrapping: the first n records can run in front of the prologue.  They call
+ * nothing, name no frame slot, and neither read nor write x19-x30 (a callee-saved register
+ * would be written before it is saved, lr and the frame pointer are the caller's).  Their
+ * returns and sibling calls are marked (I_TAIL.sh).
+ */
+VPRIV bool opt_noframe(ecx *e, uint32_t n)
+{
+	const ins *in = e->in;
+
+	rawp = e->raw.p;
+	for (uint32_t k = 0; k < n; k++) {
+		const ins *i = &in[k];
+		unsigned ro;
+		rmask r;
+
+		if (i->op == I_JT)
+			continue;	/* (its index is not callee-saved: the registers before it are checked) */
+		if (i->op == I_WORD) {
+			if (!word_regs((uint32_t)i->imm, &r) || (r & (RB(31) - RB(19))))
+				return false;
+			continue;
+		}
+		ro = roles(i);
+		if ((ro & (OP_ALL | OP_CALL | OP_ASM | OP_TLV)) || i->rn == FRAME || i->rn == SP || i->rd == SP)
+			return false;
+		if (i->op == I_TAIL && i->cond >= 2 && !i->sh)
+			return false;
+		if ((reads(i, ro) | writes(i, ro)) & (RB(31) - RB(19)))
+			return false;
+	}
+	return true;
 }
 
 /* ---------------- operand folding (VIR's lowering) ---------------- */

@@ -814,6 +814,7 @@ VPRIV void opt_function(ecx *e);
 VPRIV void a64_unreachable(ecx *e);
 enum { OPF_ALL = 1, OPF_CALL = 2, OPF_FRAME = 4 };
 VPRIV uint64_t opt_regs(ecx *e, unsigned *fl);
+VPRIV bool opt_noframe(ecx *e, uint32_t n);
 VPRIV lval bind_lreg(ecx *e, uint32_t s);
 VPRIV val fold_int_bin(ecx *e, int op, qty ot, qty rt, i128 l, i128 r, bool *ok);
 VPRIV bool em_is_cmp(int op);

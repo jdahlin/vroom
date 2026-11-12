@@ -947,9 +947,13 @@ register; `reg[v]`, valid when `regval[reg[v]] == v`; `slot[v]`; `nu[v]`, kept
 current by popping the use stack in the reverse of the order it was pushed.
 At an instruction, the use stack is popped per operand first (so `nu` names
 the next use after this one), then in order:
-1. the fixed operands the target reports (15.1, X7): a live value in a
-   required register is moved to a free register, else evicted; the operand
-   is copied into its required register (it stays where it was too);
+1. the fixed operands the target reports (15.1, X7), as a parallel move: an
+   operand whose required register holds another fixed operand that is not
+   placed yet waits for it (an argument that shifts from one argument register
+   to the next is copied before its register is written); in a cycle the
+   first one goes, and the value in its register is moved aside. A live value
+   in a required register is moved to a free register, else evicted; the
+   operand is copied into its required register (it stays where it was too);
 2. each other value operand that is not in a register gets one (free, else by
    eviction) and a reload or rematerialize edit, unless the target reports
    that this operand may be memory or an immediate and it is a constant or
@@ -981,8 +985,16 @@ range ended before `v`'s definition (bounded probe of a free list).
 At a loop header, when the loop's largest `W` (recorded by sweep 5, the loops
 inside included; it counts the values live through the loop) exceeds the
 class's registers, that many values of the entry state without a use before
-the loop's end leave it (they get a slot). At a call every value in a
-caller-saved register that is live after it is evicted.
+the loop's end leave it (they get a slot). In the other direction, a live-in
+value that reaches the header in its slot and has a use before the loop's end
+takes a register in the entry state, soonest use first (at most 16), so the
+edges into the loop load it once instead of the body on every round. It does
+so while the registers in use, plus the loop's largest `W` beyond the values
+live at the header, plus one, stay below the class's registers; in a loop
+with a call outside `VB_COLD` blocks only callee-saved registers count and
+are taken. Constants are not taken in this way: measured on sqlite it made
+more rematerializations on the edges than it saved (PLAN-vir.md). At a call
+every value in a caller-saved register that is live after it is evicted.
 
 15.7 **Hints.** `hint[v]` is a register or a value whose register `v` should
 share: the ABI register for a call argument that is not live after the call;
@@ -991,10 +1003,9 @@ for a `br` argument, the block parameter it feeds (the first argument assigned
 sets the parameter's tentative register; a loop header's parameter is assigned
 before its back-edge argument); and the hint of a result-in-first-operand
 instruction is copied to that operand if it has none. A value with `xcall`
-prefers a callee-saved register when the function already uses one, or when
-the value is used in a deeper loop than its definition or crosses a call
-inside a loop; otherwise a caller-saved one. A hint is taken only when the
-register is free.
+prefers a free callee-saved register, one the function already uses first (in
+a caller-saved one it is moved to a callee-saved one at the call anyway, or
+stored and loaded). A hint is taken only when the register is free.
 
 15.8 **Blocks and edges.** A block with one predecessor starts from that
 predecessor's end state without the values that are not live in. A block with
@@ -1050,6 +1061,20 @@ is in one or one is free; else memory through the value's slot; else a
 register by eviction. An early-clobber output takes a register no input of
 the instruction holds. Operands that cannot be satisfied with every other
 value evicted are an error.
+
+15.12 **Shrink-wrapping** (on request: `vir_aopt.shrink`; numbered after 15.11, which
+follows). The **save point** S is the block that dominates every block that
+needs the frame (a call the target does not report as needing none, `memcpy`,
+`memset`, inline assembly, `va_start`, `frameaddr`, `retaddr`, `tlsaddr`, an
+operand that is a slot's address, a `VB_ADDR` block), is in no loop, and
+dominates every block reachable from it, blocks that only return (through lone
+`br`s) excepted. There is none when that is the entry block. In the blocks S
+does not dominate a callee-saved register is chosen only when no other is
+free, and a fixed result is not moved to one at its definition. At S the
+values in caller-saved registers that live across a call move to free
+callee-saved ones, by edits before S's first instruction. The output names S
+(`spoint`); the lowering places the prologue there and decides, from the code it
+produced, whether the blocks in front can run without the frame.
 
 15.11 **Checking.** `vir_alloc_check(f, regs, out, msg)` walks the function
 forward with the allocator's output, tracking which value each register and
