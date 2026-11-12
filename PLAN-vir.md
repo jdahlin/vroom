@@ -659,6 +659,27 @@ cykler mot virpol, nu +9,9 %.  Samplingar per funktion (storlek 300) varierar
 - Tester: `vir_branch_bits.c`, `vir_flags_reuse.c`, `vir_layout_exits.c`,
   `vir_operand_fold.c`, `vir_byte_assembly.c`, `vir_constants.c` (.o och .s).
 
+### zlib: blockparameterns register röstas fram av föregångarna (2026-11-12)
+
+`bench/zlib/run.py` (zlib 1.4, zbench på zlibs egen källtar).  Profil mot clang
+-O2: `longest_match` är hetast och var 5 % långsammare.  Orsak: slingans
+vanliga väg (första jämförelsen missar) skickar `scan` och `best_len`
+oförändrade till blocket före bakåtkanten, men parametrarna där fick
+registren från den sällsynta vägen (`treg`: första argumentet som placeras),
+så varje varv gjorde fyra `mov` och två extra hopp.
+- **Åtgärd** (`alloc.c`, `arg_vote`): en blockparameter tar det register där
+  flest redan placerade föregångare har sitt argument (minst två, och fler än
+  i `treg`; 3–32 föregångare).  Den sällsynta vägen får flyttarna.
+- **Resultat:** den heta slingan 16 → 10 instruktioner (clang 12).  zbench mot
+  clang: deflate-9 1,09x → 1,05x, totalt 1,10x → 1,08x; `.text` 79896 → 79860.
+- **Kvar i `longest_match`:** `s->window` läses om varje varv (ingen LICM av
+  laddningar); utanför: `slide_hash` (clang vektoriserar), `crc32_z` (inline
+  asm, går inte genom VIR).
+- Verifierat: vir-alloc 17/17, random 300, mutate, vir-test 119/119;
+  vcc-ctests med `VCC_VIR=bl VCC_VIR_CHECK=1` 2077/2080 (de tre felen,
+  `.Lswitch.values`, finns före ändringen); inline 85/85; sqlite3.c genom VIR
+  med kontrollen; zlib-testerna ger clangs byte.
+
 ### Underlag för V4 (2026-11-11): registerallokering, ingen kod
 
 - `RESEARCH-regalloc.md`: vad GCC (IRA, LRA) och LLVM (Greedy, Fast, PBQP,
