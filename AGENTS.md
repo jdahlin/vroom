@@ -23,6 +23,9 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
 - `PLAN-release.md`: what vcc 1.0 is and its release gates G0-G9 (Swedish);
   work toward the release should move a gate, and update its status there.
 - `RESEARCH-preprocessor.md`: preprocessor design and prior art.
+- `REVIEW-vir-lowering.md`: review of the VIR builder, format and arm64
+  lowering (2026-11-12): bugs fixed and open, compile-time and runtime
+  findings, spec drift, decisions needed.
 - `PLAN-vir.md` (Swedish, steps V0-V7), `SPEC-vir.md` (VIR format, draft) and
   `RESEARCH-vir.md` (LLVM IR's problems): VIR, an SSA IR used only at `-O2`,
   built by compiling the shared walker a second time against a virtual
