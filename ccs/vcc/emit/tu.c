@@ -465,6 +465,8 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	/* VIR: the functions called once, which its walker inlines whatever their size */
 	if (!WASM(c) && !X86(c) && vw_enabled(o))
 		E.once = fn_once(c);
+	if (E.once)
+		fn_isize(&E, c, WK_INLINE_VIR);
 	/* roots */
 	for (uint32_t i = 0; i < c->ntoplevel; i++) {
 		uint32_t s = c->toplevel[i];
@@ -498,6 +500,8 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	t2 = now();
 	free(E.once);
 	E.once = NULL;
+	free(E.cg), free(E.cgoff), free(E.cgn), free(E.scc), free(E.isz);
+	E.cg = E.cgoff = E.cgn = E.scc = NULL, E.isz = NULL;
 	/* stitch */
 	qsort(E.chunks, E.nchunk, sizeof(chunk), chunk_cmp);
 	tb_reg(&hdr, &er[12], (size_t)1 << 26, "emit.hdr");

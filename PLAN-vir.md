@@ -408,6 +408,48 @@ Steg 1 i arbetsordningen för sqlite (SPEC 15.5 och 15.8, "Webs").
   bygger, TCL genom VIR 1 fel (interrupt2, som clang); sqlite
   genom VIR med kontrollen: 1664 funktioner, hash oförändrad.
 
+### Inliner per anropsplats (2026-11-12): storlek nedifrån och upp, ingen tillväxtbudget
+
+Steg 2 i arbetsordningen för sqlite.
+- **Gjort:** förprocessen (`prepass.c`, `fn_isize`) samlar den direkta
+  anropsgrafen och räknar per funktion `isz`: den egna storleken plus `isz` för
+  varje anropad funktion som själv skulle inlinas (som LLVM, nedifrån och upp).
+  Rekursionsgrupper (Tarjans starka komponenter) räknas inte in och inlinas
+  inte inom sig själva, så valet beror inte på trådarnas ordning.  Under VIR
+  inlinas en anropad funktion när `isz <= WK_INLINE_VIR` (150 AST-noder);
+  statiska funktioner med ett enda anrop som förut (4000).  Tillväxtbudgeten
+  per anropare (`inlgrow`, 400) är borta: den var det som höll nere de inkapslade
+  kopiorna, och den gjorde valet beroende av ordningen i anroparen.
+- **Gräns** (speedtest1 storlek 100, cykler; `.text` för sqlite3.o; kompilering av
+  sqlite3.c genom VIR):
+
+  | gräns | cykler | text | kompilering |
+  |---|---|---|---|
+  | 40 + budget (förut) | 8,96 G | 913 KB | 0,37 s |
+  | 80 | 8,91 G | 1049 KB | 0,42 s |
+  | 150 (vald) | 8,83 G | 1356 KB | 0,52 s |
+  | 225 | 8,79 G | 1525 KB | 0,57 s |
+  | 300 | 8,78 G | 1620 KB | 0,58 s |
+
+  Efter 150 kostar varje cykelprocent mer än 10 % kod; 150 är knät.  LLVM:s
+  bygge med bara inlining (st-inl-only) går på 7,66 G, men det tar också bort
+  `noinline` (`SQLITE_NOINLINE`: getCellInfo).  Profil vid storlek 300 (225 mot
+  inl-only): sqlite3VdbeExec 2133 mot 1717, vdbeRecordCompareInt 641 mot 532,
+  jsonTranslateTextToBlob 230 mot 129: gapet ligger i koden per funktion, inte
+  i vad som inlinas.
+- **Fel som inliningen visade:** walkern antog x87-layout för `long double`
+  utom för `__float128`; på arm64 Linux är den IEEE binary128.  En promoverad
+  `long double`-konstant lagrades i fel format (`vcc/ldouble_const` genom VIR),
+  och `__builtin_isinf_sign` läste tecknet på byte 9 (`vcc/isinf_sign`, ett
+  av de sex kända felen).  `wk_quad` avgör formatet på ett ställe.
+- **Tester:** C-sviterna 2064/2064, genom VIR med kontrollen 2059/2064 (fem
+  kända fel kvar: jump_table, switch_dispatch, switch_values, returns_twice,
+  setjmp_sites), inline 85/85 med och utan VIR, vir-test 118/118,
+  `VCC_UNITY=` bygger, TCL genom VIR 1 fel (interrupt2, som clang); sqlite
+  genom VIR med kontrollen: 1420 funktioner, hash oförändrad.  Samma körning:
+  st-web8 9,31 G cykler, nu 9,18 G (maskinen belastad; 32,50 → 32,07 G
+  instruktioner).
+
 ### Underlag för V4 (2026-11-11): registerallokering, ingen kod
 
 - `RESEARCH-regalloc.md`: vad GCC (IRA, LRA) och LLVM (Greedy, Fast, PBQP,

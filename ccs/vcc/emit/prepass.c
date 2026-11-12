@@ -257,6 +257,99 @@ VPRIV uint8_t *fn_once(cc *c)
 	return r;
 }
 
+/* VIR could inline a call to s, its size aside (wk_can_inline's other rules, conservatively) */
+VPRIV bool inl_cand(emitter *E, cc *c, uint32_t s)
+{
+	const sym *y = &c->syms[s];
+	const ctype *ft;
+
+	if (y->kind != S_FUNC || !(y->flags & SF_DEFINED) || !y->body)
+		return false;
+	ft = T(c, y->ty);
+	if ((ft->flags & (TF_VARIADIC | TF_NOPROTO)) || N(y->body)->aux > 64 || (E->sflags[s] & SA_NOINL) || (E->once[s] & 2))
+		return false;
+	if (y->flags & SF_ALWAYS_INLINE)
+		return true;
+	return !(y->flags & SF_NOINLINE) && ((y->flags & SF_INLINE) || y->sc == SC_STATIC);
+}
+
+/*
+ * VIR's inlining sizes, bottom-up as LLVM's inliner: isz[s] is s's AST nodes plus
+ * the isz of each callee it inlines (one whose isz is at most lim, or always_inline),
+ * so a copy of s costs isz[s] however deep its callees inline.  A recursion group
+ * (scc, Tarjan over the direct calls) does not inline into itself, which keeps the
+ * sizes defined and the walker's choices independent of the order threads run in.
+ * Runs before the workers: it walks every function (the prepass records calls).
+ */
+VPRIV void fn_isize(emitter *E, cc *c, uint32_t lim)
+{
+	uint32_t n = c->nsym, *idx, *low, *stk, *cs, *ci, sp = 0, csp = 0, nidx = 0;
+	uint8_t *on;
+
+	E->cgoff = calloc((size_t)n + 64, 4);
+	E->cgn = calloc((size_t)n + 64, 4);
+	E->scc = calloc((size_t)n + 64, 4);
+	E->isz = calloc((size_t)n + 64, 2);
+	idx = calloc((size_t)n + 64, 4), low = calloc((size_t)n + 64, 4), stk = malloc(((size_t)n + 64) * 4);
+	cs = malloc(((size_t)n + 64) * 4), ci = malloc(((size_t)n + 64) * 4), on = calloc((size_t)n + 64, 1);
+	if (!E->cgoff || !E->cgn || !E->scc || !E->isz || !idx || !low || !stk || !cs || !ci || !on)
+		abort();
+	E->cgrec = true;
+	for (uint32_t s = 1; s < n; s++)
+		if (c->syms[s].kind == S_FUNC && c->syms[s].body && (c->syms[s].flags & SF_DEFINED) && canon_sym(c, s) == s) {
+			E->cgoff[s] = E->ncg;
+			ensure_walked(E, c, s);
+			E->cgn[s] = E->ncg - E->cgoff[s];
+		}
+	E->cgrec = false;
+	/* Tarjan, iterative; a group is finished callees first, so its isz is computed there */
+	for (uint32_t r = 1; r < n; r++) {
+		if (idx[r] || c->syms[r].kind != S_FUNC)
+			continue;
+		cs[csp] = r, ci[csp++] = 0;
+		idx[r] = low[r] = ++nidx, stk[sp++] = r, on[r] = 1;
+		while (csp) {
+			uint32_t v = cs[csp - 1];
+
+			if (ci[csp - 1] < E->cgn[v]) {
+				uint32_t w = E->cg[E->cgoff[v] + ci[csp - 1]++];
+
+				if (!idx[w]) {
+					cs[csp] = w, ci[csp++] = 0;
+					idx[w] = low[w] = ++nidx, stk[sp++] = w, on[w] = 1;
+				} else if (on[w] && idx[w] < low[v]) {
+					low[v] = idx[w];
+				}
+				continue;
+			}
+			csp--;
+			if (csp && low[v] < low[cs[csp - 1]])
+				low[cs[csp - 1]] = low[v];
+			if (low[v] != idx[v])
+				continue;
+			/* v roots a group: pop it, then sizes (the group's callees outside it are done) */
+			uint32_t top = sp;
+
+			do
+				E->scc[stk[--sp]] = v, on[stk[sp]] = 0;
+			while (stk[sp] != v);
+			for (uint32_t k = sp; k < top; k++) {
+				uint32_t s = stk[k], z = E->fnsize[s];
+
+				for (uint32_t j = 0; j < E->cgn[s]; j++) {
+					uint32_t t = E->cg[E->cgoff[s] + j];
+
+					if (E->scc[t] != v && inl_cand(E, c, t) &&
+					    ((c->syms[t].flags & SF_ALWAYS_INLINE) || E->isz[t] <= lim))
+						z += E->isz[t];
+				}
+				E->isz[s] = z > 65535 ? 65535 : (uint16_t)z;
+			}
+		}
+	}
+	free(idx), free(low), free(stk), free(cs), free(ci), free(on);
+}
+
 /*
  * The prepass runs per function, the first time a function is emitted or
  * inlined: most of a TU's functions are header inlines nobody uses.  The
@@ -413,6 +506,18 @@ static int walk(pre *P, uint32_t n)
 		    EM_IDENT_IS(c->syms[callee].name, "setjmp") || EM_IDENT_IS(c->syms[callee].name, "_setjmp") ||
 		    EM_IDENT_IS(c->syms[callee].name, "sigsetjmp") || EM_IDENT_IS(c->syms[callee].name, "__sigsetjmp")))
 			P->E->once[P->fn] |= 2;
+		if (callee && P->E->cgrec) {
+			emitter *E = P->E;
+
+			if (E->ncg == E->capcg) {
+				uint32_t *g = realloc(E->cg, (size_t)(E->capcg = E->capcg ? 2 * E->capcg : 1024) * 4);
+
+				if (!g)
+					abort();
+				E->cg = g;
+			}
+			E->cg[E->ncg++] = canon_sym(c, callee);
+		}
 		lab = walk(P, x->a);
 	}
 		__attribute__((fallthrough));

@@ -177,6 +177,11 @@ typedef struct emitter {
 	_Atomic uint8_t *walked;
 	uint16_t *fnsize;		/* per function: AST nodes (prepass) */
 	uint8_t *once;			/* VIR lowering on: per function, bit 0 when its one reference is a direct call (fn_once), bit 1 when it calls setjmp (prepass); else NULL */
+	/* VIR lowering on (with once): the direct call graph the prepass records, per
+	   function its size with the callees it inlines (fn_isize) and its recursion group */
+	uint32_t *cg, ncg, capcg, *cgoff, *cgn, *scc;
+	uint16_t *isz;
+	bool cgrec;			/* the prepass records calls (before the workers start) */
 	uint16_t *luse;			/* per local: uses weighted by loop depth (prepass) */
 	uint8_t *lnoreg;		/* per local: needs memory (address taken, asm operand, {} init) */
 	uint32_t *lspan;		/* per function: [2s] lowest, [2s+1] highest local sym seen */
@@ -905,7 +910,12 @@ VPRIV uint32_t aconst_idx(cc *c, uint32_t n);
 VPRIV bool sve_codegen_ok(cc *c);
 VPRIV bool bitint_codegen_ok(cc *c);
 VPRIV void ensure_walked(emitter *E, cc *c, uint32_t s);
-VPRIV uint8_t *fn_once(cc *c);	/* per function: 1 when its one reference in the TU is a direct call */
+VPRIV uint8_t *fn_once(cc *c);
+#ifndef WK_INLINE_VIR
+#define WK_INLINE_VIR 150	/* under VIR: AST nodes of a callee with what it inlines (fn_isize) */
+#endif
+VPRIV void fn_isize(emitter *E, cc *c, uint32_t lim);	/* E->isz, E->scc: VIR's inlining sizes */
+VPRIV bool inl_cand(emitter *E, cc *c, uint32_t s);	/* VIR could inline a call to s (size aside) */	/* per function: 1 when its one reference in the TU is a direct call */
 VPRIV int u32_cmp(const void *a, const void *b);
 /* tu.c */
 VPRIV void enqueue(emitter *E, uint32_t item);
