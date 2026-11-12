@@ -81,7 +81,7 @@ static unsigned roles_sw(const ins *i)
 	case I_RET:
 		return OP_RET;	/* reads x0, x1 */
 	case I_TAIL:
-		return OP_TAIL;	/* outgoing x0-x7 survive until the sibling branch */
+		return OP_TAIL | (i->cond == 3 ? RN_R : 0);	/* outgoing x0-x7 survive until the sibling branch */
 	case I_LABEL: case I_B: case I_BC: case I_NOP:
 	case I_BRK:	/* a trap (BUG, WARN, __builtin_trap): the handler may print registers, needs none */
 		return 0;
@@ -109,7 +109,7 @@ __attribute__((constructor)) static void opt_tables(void)
 		RT[op] = (uint16_t)roles_sw(&x);
 		BT[op] = (uint8_t)brkind_sw(&x);
 	}
-	RT[I_LDP] = RT[I_STP] = RT[I_RAW] = OP_VAR;
+	RT[I_LDP] = RT[I_STP] = RT[I_RAW] = RT[I_TAIL] = OP_VAR;
 	XT[I_UBFM] = XT[I_SBFM] = XT[I_MOV] = XT[I_ANDI] = 1;
 	for (unsigned r = 0; r < 64; r++)
 		RBT[r] = RB(r);

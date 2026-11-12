@@ -46,6 +46,9 @@ typedef struct vl {
 	int64_t poff;		/* ... and offset */
 	uint32_t ei, eend;	/* the block's edits: the next one, the end */
 	bool risk;		/* x17 held data across a frame access: the frame must stay small */
+	bool tail;		/* a call right before a ret may be a sibling call (vl_notail) */
+	bool ret32;		/* the function returns a 32-bit integer: the upper half of x0 is unspecified */
+	uint32_t skip;		/* an instruction not to lower (the ret after a sibling call), 0 none */
 	struct { uint32_t l, e, to; } tr[1024];	/* moves of a branch's edges, after the block */
 	uint32_t ntr;
 } vl;
@@ -699,7 +702,113 @@ static void vl_mem(vl *L, const vir_ins *in)
 	}
 }
 
-static void vl_call(vl *L, const vir_ins *in)
+/*
+ * Why the function's calls cannot be sibling calls (NULL: those right before a ret can):
+ * the callee must not see the frame, so no slot's address may leave the loads, stores
+ * and copies that use it (as LLVM's TailCallElim: no escaping alloca).
+ */
+/* callee k (a symbol's address) returns twice: setjmp and the like */
+static bool vl_twice(vl *L, const vir_ins *k)
+{
+	cc *c = L->e->c;
+	uint32_t s;
+
+	if (k->op != VO_SYMADDR || RKIND(k->a) != RK_SYM)
+		return false;
+	s = canon_sym(c, RIDX(k->a));
+	return (sym_attrs(c, s)->flags & AF_TAIL_RETURNS_TWICE) ||
+	       EM_IDENT_IS(c->syms[s].name, "setjmp") || EM_IDENT_IS(c->syms[s].name, "_setjmp") ||
+	       EM_IDENT_IS(c->syms[s].name, "sigsetjmp") || EM_IDENT_IS(c->syms[s].name, "__sigsetjmp");
+}
+
+static const char *vl_notail(vl *L, uint8_t *d)
+{
+	const vir_fn *f = L->f;
+	bool ch = true;
+
+	memset(d, 0, f->nins);
+	while (ch) {
+		ch = false;
+		for (uint32_t b = 0; b < f->nblk; b++)
+			for (uint32_t i = f->blk[b].first; i < f->blk[b].first + f->blk[b].n; i++) {
+				vir_ins x = f->ins[i];
+				vir_oit it;
+				uint32_t *p;
+
+				if (x.op == VO_ASM || x.op == VO_ASMGOTO || x.op == VO_FRAMEADDR || x.op == VO_RETADDR ||
+				    x.op == VO_VA_START)
+					return "asm or the frame's address";
+				if (x.op == VO_CALL && vl_twice(L, &f->ins[x.a]))
+					return "a call that returns twice";
+				vir_oit_init(&it, (vir_fn *)f, &x, false);
+				while ((p = vir_oit_next(&it))) {
+					if (f->ins[*p].op != VO_SLOTADDR && !d[*p])
+						continue;
+					if (x.op == VO_PTRADD && it.pos == 0) {
+						ch |= !d[i];
+						d[i] = 1;
+					} else if (!(((x.op == VO_LOAD || x.op == VO_STORE || x.op == VO_MEMSET) && it.pos == 0) ||
+						     (x.op == VO_MEMCPY && it.pos <= 1))) {
+						return "a slot's address escapes";
+					}
+				}
+			}
+	}
+	return NULL;
+}
+
+/* from j in block k: past the instructions that only pass *res on (i2p, p2i; under ret32
+ * trunc to i32 and ext.4: the low half is the result, the upper half unspecified), *res
+ * following them; the first other instruction */
+static uint32_t vl_pass(const vl *L, const vir_blk *k, uint32_t j, uint32_t *res)
+{
+	const vir_fn *f = L->f;
+
+	for (; j < k->first + k->n && f->ins[j].a == *res; j++) {
+		const vir_ins *x = &f->ins[j];
+
+		if (!(x->op == VO_I2P || x->op == VO_P2I ||
+		      (L->ret32 && ((x->op == VO_TRUNC && x->ty == VT_I32) || (x->op == VO_EXT && VIF_W(x->fl) == 2)))))
+			break;
+		*res = j;
+	}
+	return j;
+}
+
+/* the call at i, in b, is a sibling call: what the ret after it returns is its result (or
+ * nothing), also through brs to blocks of only what passes the result on */
+static bool vl_sibling(vl *L, uint32_t b, uint32_t i)
+{
+	const vir_fn *f = L->f;
+	const vir_blk *k = &f->blk[b];
+	const vir_ins *r, *t = &f->ins[f->ins[i].a];
+	uint32_t res = i, j;
+
+	if (!L->tail || f->ins[i].ty == VT_MULTI ||
+	    (t->op == VO_SYMADDR && RKIND(t->a) == RK_SYM && !em_tail_target_ok(L->e, canon_sym(L->e->c, RIDX(t->a)))))
+		return false;
+	j = vl_pass(L, k, i + 1, &res);
+	for (int hop = 0;; hop++) {
+		uint32_t q;
+
+		if (j >= k->first + k->n)
+			return false;
+		r = &f->ins[j];
+		if (r->op != VO_BR || hop == 4)
+			break;
+		k = &f->blk[r->a];
+		for (q = 0; q < k->nparam && f->extra[r->c + q] != res; q++)
+			;
+		if (q < k->nparam)
+			res = k->first + q;	/* (else the ret may name the value itself) */
+		j = vl_pass(L, k, k->first + k->nparam, &res);
+	}
+	if (r->op != VO_RET)
+		return false;
+	return !f->extra[r->c] || (f->extra[r->c] == 1 && f->extra[r->c + 1] == res);
+}
+
+static void vl_call(vl *L, uint32_t b, uint32_t i, const vir_ins *in)
 {
 	ecx *e = L->e;
 	const vir_fn *f = L->f;
@@ -730,6 +839,25 @@ static void vl_call(vl *L, const vir_ins *in)
 			}
 			mem(e, I_ST, sz, 0, rs, SP, a[k].stk);
 		}
+	}
+	if (!stk && vl_sibling(L, b, i)) {
+		ins *t = put(e, I_TAIL);
+
+		if (L->opr[0] == VR_NONE) {
+			const vir_ins *k = &f->ins[in->a];
+
+			if (k->op != VO_SYMADDR || k->b || k->c)
+				vl_fail(L, "VIR lowering: an indirect callee without a register");
+			t->cond = 2;
+			t->ref = f->ins[in->a].a;
+			note_ref(e, t->ref);
+		} else {
+			t->cond = 3;
+			t->rn = (uint8_t)vl_gx(L->opr[0]);
+		}
+		e->reach = false;
+		L->skip = i + 1;
+		return;
 	}
 	if (stk > e->outmax)
 		e->outmax = stk;
@@ -1159,7 +1287,7 @@ static void vl_ins(vl *L, uint32_t b, uint32_t i, uint8_t res)
 	case VO_BARRIER:
 		return;
 	case VO_CALL:
-		vl_call(L, in);
+		vl_call(L, b, i, in);
 		return;
 	case VO_BR: {
 		uint32_t g = L->o->eidx[L->o->soff[b]];
@@ -1247,6 +1375,8 @@ static void vl_body(vl *L)
 			uint32_t *p;
 			uint8_t res = VR_NONE;
 
+			if (i == L->skip)
+				break;	/* (the block's ret: its sibling call left) */
 			vl_edits(L, &ei, eend, i);
 			L->ei = ei, L->eend = eend;
 			L->nop = 0;
@@ -1326,6 +1456,8 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 	L.soff = VLT.soff, L.spoff = VLT.spoff, L.lbl = VLT.lbl, L.uses = VLT.uses, L.lo32 = VLT.lo32;
 	L.chs = VLT.chs;
 	vl_chases(&L, VLT.path);
+	L.ret32 = KIND(c, ft->base) != TY_VOID && is_integer(c, ft->base) && tsize(c, ft->base) == 4;
+	L.tail = !(ft->flags & TF_VARIADIC) && em_tail_caller_ok(e, s) && !vl_notail(&L, VLT.lo32);	/* (lo32: scratch until it is filled) */
 	vir_uses(f, L.uses);
 	memset(L.lo32, 1, f->nins);
 	for (uint32_t b = 0; b < f->nblk; b++)

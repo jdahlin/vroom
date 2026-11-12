@@ -636,6 +636,8 @@ VPRIV bool em_unused_local(ecx *e, uint32_t s, uint32_t fn);
 VPRIV unsigned em_unused_init(ecx *e, const node *decl, uint32_t fn, unsigned budget);
 /* opt/locals.c: eligibility and bounded selection from the existing prepass. */
 /* opt/tail.c: exact direct forwarding wrappers; target capability/ABI checks follow. */
+VPRIV bool em_tail_caller_ok(ecx *e, uint32_t fn);
+VPRIV bool em_tail_target_ok(ecx *e, uint32_t s);
 VPRIV bool em_tail_candidate(ecx *e, uint32_t fn, uint32_t expr, uint32_t maxargs, uint32_t *callee);
 VPRIV bool a64_tail_return(ecx *e, uint32_t expr);
 VPRIV uint32_t a64_tail_ref(const ecx *e);

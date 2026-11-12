@@ -53,5 +53,5 @@ VPRIV uint32_t a64_tail_ref(const ecx *e)
 
 	while (k && e->in[k - 1].op == I_LABEL)
 		k--;
-	return k && e->in[k - 1].op == I_TAIL ? e->in[k - 1].ref : 0;
+	return k && e->in[k - 1].op == I_TAIL && !e->in[k - 1].cond ? e->in[k - 1].ref : 0;
 }

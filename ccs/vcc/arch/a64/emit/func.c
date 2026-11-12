@@ -297,6 +297,59 @@ static void expand_tables(ecx *e, uint32_t fid)
 	e->nin = (uint32_t)total;
 }
 
+/* I_NOP.cond in a sibling call's epilogue with unwind tables: the printer's .cfi rows */
+enum { NOP_CFI_REMEMBER = 0xc1, NOP_CFI_EPILOGUE, NOP_CFI_RESTORE };
+
+/* VIR's sibling calls in the body (I_TAIL cond 2, 3): the epilogue, then the branch; with
+ * unwind tables between .cfi_remember_state and .cfi_restore_state (as clang) */
+static void tail_expand(ecx *e, const int *cs, int ncs, int32_t csave, bool leaf, bool cfi)
+{
+	uint32_t m = 0, add = (uint32_t)(ncs + 1) / 2 + 7;
+
+	for (uint32_t k = 0; k < e->nin; k++)
+		m += e->in[k].op == I_TAIL && e->in[k].cond >= 2;
+	if (!m)
+		return;
+	cfi &= !leaf;	/* (no frame: the CFA stays sp) */
+	if ((uint64_t)e->nin + (uint64_t)m * add > e->capin) {
+		fputs("vcc: function too large\n", stderr);
+		abort();
+	}
+	uint32_t n = e->nin + m * add, w = n;
+
+	for (uint32_t k = e->nin; k-- > 0;) {
+		ins t = e->in[k], seq[20];
+		uint32_t q = 0;
+
+		if (t.op != I_TAIL || t.cond < 2) {
+			e->in[--w] = t;
+			continue;
+		}
+		if (t.cond == 3 && t.rn != R_X16)
+			seq[q++] = (ins){ .op = I_MOV, .sz = 1, .rd = R_X16, .rn = t.rn };
+		if (cfi)
+			seq[q++] = (ins){ .op = I_NOP, .cond = NOP_CFI_REMEMBER };
+		for (int j = 0; j + 1 < ncs; j += 2)
+			seq[q++] = (ins){ .op = I_LDP, .sz = 1, .rd = (uint8_t)cs[j], .ra = (uint8_t)cs[j + 1], .rn = R_FP, .imm = -csave + 8 * j };
+		if (ncs & 1)
+			seq[q++] = (ins){ .op = I_LD, .sz = 3, .rd = (uint8_t)cs[ncs - 1], .rn = R_FP, .imm = -csave + 8 * (ncs - 1) };
+		if (!leaf) {
+			seq[q++] = (ins){ .op = I_MOV, .sz = 1, .rd = SP, .rn = R_FP };
+			seq[q++] = (ins){ .op = I_LDP, .sz = 1, .rd = R_FP, .ra = R_LR, .rn = SP, .cond = 2, .imm = 16 };
+		}
+		if (cfi)
+			seq[q++] = (ins){ .op = I_NOP, .cond = NOP_CFI_EPILOGUE };
+		seq[q++] = t.cond == 2 ? (ins){ .op = I_TAIL, .cond = 1, .ref = t.ref } : (ins){ .op = I_BR, .rn = R_X16 };
+		if (cfi)
+			seq[q++] = (ins){ .op = I_NOP, .cond = NOP_CFI_RESTORE };
+		w -= q;
+		memcpy(&e->in[w], seq, q * sizeof(ins));
+	}
+	/* (w > 0: the room not used, at the front) */
+	memmove(e->in, e->in + w, (size_t)(n - w) * sizeof(ins));
+	e->nin = n - w;
+}
+
 VPRIV void finish_function(ecx *e, uint32_t s)
 {
 	cc *c = e->c;
@@ -364,6 +417,7 @@ VPRIV void finish_function(ecx *e, uint32_t s)
 	if (locals > INT64_MAX - outs - csave - 16)
 		efatal(e, 0, "stack frame too large");
 	total = 16 + csave + locals + outs;
+	tail_expand(e, cs, ncs, csave, leaf, e->E->o->cfi && !DARWIN(c));
 	/* rewrite frame-slot references */
 	for (uint32_t k = 0; k < e->nin; k++) {
 		ins *i = &e->in[k];
@@ -467,6 +521,20 @@ VPRIV void finish_function(ecx *e, uint32_t s)
 				tb_s(b, "1f\n\tb\t");
 				p_lbl(b, s, i->label);
 				tb_s(b, "\n1:\n");
+			}
+			continue;
+		}
+		if (i->op == I_NOP && cfi && i->cond >= NOP_CFI_REMEMBER) {
+			if (i->cond == NOP_CFI_REMEMBER) {
+				tb_s(b, "\t.cfi_remember_state\n");
+			} else if (i->cond == NOP_CFI_RESTORE) {
+				tb_s(b, "\t.cfi_restore_state\n");
+			} else {
+				for (int k = 0; k < ncs; k++)
+					tb_f(b, "\t.cfi_restore w%d\n", cs[k]);
+				if (!leaf)
+					tb_s(b, "\t.cfi_restore w29\n\t.cfi_restore w30\n");
+				tb_s(b, "\t.cfi_def_cfa wsp, 0\n");
 			}
 			continue;
 		}
