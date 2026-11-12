@@ -9,6 +9,7 @@ _start:
 	ldr	x0, =stack_top
 	mov	sp, x0
 	mov	x0, #(3 << 20)
+	orr	x0, x0, #(3 << 16)	/* ZEN: SVE */
 	msr	cpacr_el1, x0
 	ldr	x0, =0xff00
 	msr	mair_el1, x0

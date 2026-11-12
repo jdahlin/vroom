@@ -788,6 +788,215 @@ cykler mot virpol, nu +9,9 %.  Samplingar per funktion (storlek 300) varierar
   funktion (~6 % av sqlite).
 - Tester: `vir_branch_bits.c`, `vir_flags_reuse.c`, `vir_layout_exits.c`,
   `vir_operand_fold.c`, `vir_byte_assembly.c`, `vir_constants.c` (.o och .s).
+- **Flyttalslaster och -lagringar direkt (2026-11-12).**  Nya poster `I_LDF`/
+  `I_STF` (rd är ett v-register, sz 2/3, `[rn + imm]`, också mot FRAME):
+  `ldr d2, [x0]` i stället för `ldr x16` + `fmov`.  Används av VIR:s last och
+  lagring (inte symbol- eller registeroffsetadresser än), spill/återladdning,
+  stackargument och stackparametrar.  Postrensningen: bara basregistret läses;
+  en ramplats som en sådan post rör räknas som undkommen i platsvärdespasset,
+  och `I_STF` är en lagring för platsvärden och bytesammansättningen.
+  sqlite3.o: `fmov` via x16/w16 487 → 114, `.text` −1512 byte;
+  dekkerMul2 89 → 59 instruktioner (clang ca 44 per inlinad kopia).
+  speedtest1 storlek 100, parvis 4 rundor på en lastad maskin: instruktioner
+  −0,45 % (28,65 → 28,52 G), cykler −0,5 .. −3,5 %.  Utan VIR är utdata
+  byte-identiska (`vcc-same.py`).  Test `vir_fp_mem.c`; C-sviterna genom VIR
+  samma tre kända fel (`.Lswitch.values`), vcc-abi (Linux 34/34, `--host`
+  samma fyra), vir-test 119/119, vcc-volatile 32/32, sqlite TCL genom VIR
+  1 fel (interrupt2, som clang).  Kvar i dekkerMul2: inlining i anroparna,
+  `fmadd`, lövram utan ramrekord, `[x0, #8]` i stället för `add` + `[x1]`.
+- **`fma` (2026-11-12).**  Ny VIR-instruktion 9 `fma a, b, c` (72–79 är vektoroperationerna) (flaggor `negp`,
+  `negc`; SPEC-vir.md), sänkt till fmadd/fmsub/fnmsub/fnmadd.  Byggaren
+  kontraherar som clangs `-ffp-contract=on`: en produkt som uttrycket självt
+  just räknade (namnet håller den fortfarande; också negerad) adderas eller
+  subtraheras, vänster operand först; inte en produkt i en variabel, värdet av
+  en tilldelning, en konverterad produkt, en via `?:` eller en konstantprodukt.
+  Negerade faktorer och addender blir flaggor.  `-ffp-contract=off` stänger av
+  (`cc_opts.no_fp_contract`); `#pragma STDC FP_CONTRACT` läses inte, och den
+  direkta emittern kontraherar inte.  Döda flyttalsoperationer tas nu bort i
+  byggaren (statusflaggor bevaras inte, som clang utan FENV_ACCESS).
+  39 provuttryck mot clang -O2: samma operationer utom där värdet ändå är
+  lika.  sqlite3.o: 13 fmadd-familjen (clang 46, varav 36 i de 12 inlinade
+  dekkerMul2); dekkerMul2 59 → 57 instruktioner med clangs tre fmadd;
+  speedtest1 −0,05 % instruktioner (flyttal är en liten del).  Test
+  `vir_fp_contract.c` (alla former fusionerade eller ingen; de clang inte
+  kontraherar förblir okontraherade); C-sviterna genom VIR samma tre kända
+  fel, utan VIR 2082/2082 och byte-identiskt; vir-test 119/119, vir-exposure
+  56/56, virgen 101/101, vcc-abi, vcc-driver 212/212, sqlite TCL genom VIR
+  1 fel (interrupt2).
+  Efter sammanslagningen med vektoriseraren (main 75bb9062): `fma` tar också
+  vektortyper (fmla/fmls, addenden negerad först för `negc`) och
+  vektoriseraren känner den, annars föll TSVC från 43 till 32 vektoriserade
+  slingor; nu 43 av 120, 151/151 kontrollsummor.  Mains direkta
+  flyttalslaster (`vl_fmem`, ord) går först; `I_LDF`/`I_STF` tar ramplatser,
+  volatila åtkomster, spill och stackargument.  sqlite genom VIR mot main:
+  304176 → 303889 instruktioner statiskt, speedtest1 28,63 → 28,53 G.
+- **ccmp (2026-11-12).**  Byggaren (`vw_condmerge`, före if-konverteringen)
+  slår ihop två grenar mot ett gemensamt mål som LLVM:s
+  FoldBranchToCommonDest: `brif c1, S, O` där S bara håller en heltalsjämförelse
+  c2 och grenar på den med O som ena mål blir `and`/`or` av c1 och c2 (c2
+  inverterad vid behov) och en gren; upprepat ger kedjor.  Jämförelser som ensamma
+  är cbz/tbz (mot 0 och -1) lämnas.  Sänkningen (`vl_chain`, `vl_ccmp`): icmp,
+  sedan (icmp, and/or) en eller flera gånger, sedan brif eller select, allt läst
+  en gång och i rad, blir cmp + ccmp/ccmn (omedelbart 0..31, -1..-31, annars via
+  x17) och inget sanningsvärde i register.
+  **Mätt, och därför snålt påslaget:** att slå ihop varje grenpar (`VCC_CCMP=all`)
+  ger på sqlite 380 ccmp (clang 552) men speedtest1 +0,4 % instruktioner (den
+  andra jämförelsen körs också när den första avgjorde) och oförändrade cykler
+  (median 9,10 mot 9,09 G, 8 parvisa körningar).  Mikrotest (4096 par, 60 000
+  varv): oförutsägbara data 1,45 → 1,18 G cykler (−19 %); första villkoret
+  nästan alltid falskt +1 % cykler, +2 % instruktioner; nästan alltid sant och
+  ett slingburet värde 1,98 → 2,47 G (+25 %: den sammanslagna grenen
+  if-konverteras till csel på beroendekedjan; clang gör samma val).  Utan
+  profil är det alltså en chansning.  Standard är därför bara fallen där
+  if-konverteringen kan följa (resultatet är ett värde: `return a == 1 && b
+  == 2`, `x = c1 || c2 ? p : q`): färre instruktioner och inga grenar.  sqlite:
+  19 ccmp, −18 instruktioner statiskt, speedtest1 −0,1 % instruktioner.
+  `VCC_CCMP=off|all` för mätning.  Kvar att pröva: slå ihop grenpar bara när
+  de är dåligt förutsagda (kräver profil), kedjor av tre i värdefallet.
+  Test `vir_ccmp.c` (alla villkorskoder × and/or × 32/64 bitar, omedelbara,
+  kedjor, select) under clang, vcc, VIR val/all/off; C-sviterna genom VIR i
+  båda lägena samma tre kända fel; utan VIR 2083/2083 och byte-identiskt;
+  vir-test, virgen, vir-exposure, vcc-abi, vcc-volatile, vcc-stress; sqlite
+  hash i alla tre lägena, TCL genom VIR 1 fel (interrupt2).
+
+### zlib: blockparameterns register röstas fram av föregångarna (2026-11-12)
+
+`bench/zlib/run.py` (zlib 1.4, zbench på zlibs egen källtar).  Profil mot clang
+-O2: `longest_match` är hetast och var 5 % långsammare.  Orsak: slingans
+vanliga väg (första jämförelsen missar) skickar `scan` och `best_len`
+oförändrade till blocket före bakåtkanten, men parametrarna där fick
+registren från den sällsynta vägen (`treg`: första argumentet som placeras),
+så varje varv gjorde fyra `mov` och två extra hopp.
+- **Åtgärd** (`alloc.c`, `arg_vote`): en blockparameter tar det register där
+  flest redan placerade föregångare har sitt argument (minst två, och fler än
+  i `treg`; 3–32 föregångare).  Den sällsynta vägen får flyttarna.
+- **Resultat:** den heta slingan 16 → 10 instruktioner (clang 12).  zbench mot
+  clang: deflate-9 1,09x → 1,05x, totalt 1,10x → 1,08x; `.text` 79896 → 79860.
+- **Kvar** (efter nästa avsnitt): `slide_hash` (clang vektoriserar), `crc32_z` (inline
+  asm, går inte genom VIR).
+- Verifierat: vir-alloc 17/17, random 300, mutate, vir-test 119/119;
+  vcc-ctests med `VCC_VIR=bl VCC_VIR_CHECK=1` 2077/2080 (de tre felen,
+  `.Lswitch.values`, finns före ändringen); inline 85/85; sqlite3.c genom VIR
+  med kontrollen; zlib-testerna ger clangs byte.
+
+### zlib: en laddning återanvänds över block och slingor (2026-11-12)
+
+Byggarens värdenumrering (`vw_simplify`) återanvände en laddning bara inom ett
+minnestillstånd: det bröts vid varje sammanflöde och varje lagring, och adressen
+(`ptradd`) numreras per block, så `s->window` lästes om i varje varv av
+`longest_match` trots att den lästs före slingan.
+- **Åtgärd** (`build.c`, `vw_far`): en andra tabell håller varje laddning per
+  bas + konstant offset för blocken den dominerar.  En senare laddning av samma
+  byte blir det värdet när inget däremellan kan skriva dem; "däremellan" är
+  positionerna i omvänd postordning efter den första fram till den andra, eller
+  till slutet av den yttersta slinga som håller den andra men inte den första
+  (resonemanget står i kommentaren).  En lagring till samma bas på ett annat
+  offsetintervall skriver inte; annan bas, anrop, `memcpy`, atomära och asm
+  skriver allt.  Högst 32 skrivare granskas per laddning.  Ingen laddning
+  flyttas eller läggs till: en slingas laddning försvinner bara när samma
+  laddning redan finns i ett dominerande block (äkta LICM med förhuvud kvarstår).
+- **zlib** (zbench mot clang -O2): totalt 1,08x → 1,03x, deflate-9 1,05x →
+  1,00x, deflate-6 1,14x → 1,09x; deflate.c 1789 → 1553 laddningar, `.text`
+  79860 → 78304.
+- **sqlite** (genom VIR): laddningar 67304 → 65311, text 1217388 → 1209808,
+  speedtest1 --size 100 CPU 2,785 s → 2,808 s (+0,8 %, inom bruset; fler värden
+  lever över block), kompilering av sqlite3.c 0,632 → 0,643 s.
+- Också rättat: `vw_simp1` räknade `k + 1` med tecken för masken `INT64_MAX`
+  (UBSan, nio tester i vcc-sviten under `build/ccs-asan`).
+- Test: `tests/vcc/vir_load_far.c` (lagring efter laddningen i kroppen, genom
+  annan pekare, överlappande smalare och bredare, anrop, inre slinga, en arm,
+  goto-slinga med ingång i mitten, variabelt index, flydd lokal).
+- Verifierat: vcc-ctests med `VCC_VIR=bl VCC_VIR_CHECK=1` 2077/2080 (samma tre
+  `.Lswitch.values` som förut) och under ASan+UBSan (utöver dem två fel i
+  framänden, `gcc/eeprof-1` och `gcc/pr105613`, inte i VIR); inline 85/85;
+  vir-test, vcc-volatile; sqlite3.c under ASan; zlib ger clangs byte; sqlite
+  speedtest1 samma verifieringshash.
+
+### zlib deflate-1: fältadresser, smala lagringar, sub+cmp, csel med noll (2026-11-12)
+
+Profil av nivå 1 mot clang (sampel, 60 varv): `fill_window` 229 mot 11 (clang
+vektoriserar `slide_hash`), `deflate_fast` 596 mot 422, `longest_match` 838 mot
+722, `compress_block` 389 mot 322.  Fyra allmänna brister i koden åtgärdade:
+- **Fältadress per åtkomst** (`build.c`, `vw_ownaddr`): numreringen ger ett
+  blocks åtkomster till samma fält en delad `ptradd`, och sänkningen viker bara
+  en `ptradd` med en användare direkt efter.  Varje `load`/`store` med bas +
+  kodbar konstant (−256..255, eller multipel av bredden upp till 4095) får nu
+  sin egen kopia precis före sig: `add x1, x19, #160; ldr w2, [x1]; …; str w2,
+  [x1]` blir `ldr w2, [x19, #160]; …; str w2, [x19, #160]`.
+- **Smal lagring** (`vw_simp1`): `store` läser bara de låga byten, så värdets
+  `ext` (minst så bred) eller `trunc` hoppas över (`ubfm` före `strh`/`strb`).
+  Inte för lagringar till befordrade platser: deras operander räknas inte.
+- **sub + cmp** (`opt.c`, `flags`): en `sub` direkt före en `cmp` av samma
+  operander blir `subs` och jämförelsen går.
+- **csel med noll** (`a64.c`): en nollarm läses ur `wzr` i stället för att
+  materialiseras.
+- **Resultat:** `slide_hash`-slingan 10 → 7 instruktioner; deflate.c 5586 →
+  5219 instruktioner; zlib `.text` 78304 → 74436.  zbench mot clang -O2:
+  deflate-1 1,36x → 1,19x, deflate-6 1,09x → 1,02x, totalt 1,03x → 1,02x.
+  sqlite genom VIR: 292365 → 287144 instruktioner, text 1209808 → 1188920,
+  speedtest1 CPU 2,742 → 2,731 s (2,768 före dagens tre ändringar).
+- **Kvar på nivå 1** (kräver beslut): `slide_hash` behöver vektorisering
+  (clang: NEON `uqsub`); `deflate_fast`/`compress_block` läser om `s->`-fält
+  efter varje lagring genom `s->head`/`s->prev` (`ush`), vilket clang slipper
+  med typbaserad alias, som VIR enligt beslutet 2026-11-11 inte har utan flagga.
+  Utan beslut: lagring → laddning över lagringar till samma bas på annat offset
+  (`str w2, [x0, #8]; str w1, [x0, #12]; ldrsw x1, [x0, #8]`).
+- Test: `tests/vcc/vir_field_access.c`.  Verifierat: vcc-ctests `VCC_VIR=bl
+  VCC_VIR_CHECK=1` 2079/2082 (samma tre), med verifieraren (`blv`) vcc-sviten,
+  inline 85/85, direkta emittern 2082/2082, ASan+UBSan som förut, vir-test,
+  vcc-volatile, sqlite3.c med kontrollen och samma verifieringshash, zlib ger
+  clangs byte.
+
+### Kompileringstid genom VIR (2026-11-12): sqlite3.c
+
+Gren `claude/vir-sqlite-optimization-acaf18`.  Mätt på sqlite3.c `-O2`
+(amalgamationen, 1438 funktioner genom VIR), instruktioner för hela
+`vpp`-processen (maskinen är delad: tider är minimum av nio körningar).
+
+| | Instruktioner | Emit, 1 tråd | Emit, 8 trådar |
+|---|---|---|---|
+| direkt emitter | 1,29 G | 57 ms | |
+| VIR före | 4,84 G | 438–540 ms | 90 ms |
+| VIR nu | 3,75 G | 409 ms | 62 ms |
+| clang -O2 (hela kompileringen) | | ca 8–10 s | |
+
+- **Gjort (ac6639cd), samma objekt byte för byte:** `vw_promote` har fältlistor
+  per plats (var kvadratisk: varje åtkomst sökte funktionens alla fält, varje
+  lagring gick igenom dem igen); (block, variabel)-hashen har generationer i
+  stället för rensning per funktion och börjar om på 1024 poster per funktion
+  (granskningens punkt "rensning i största storlek", ~6 % av sqlite);
+  etikettabellen rensas bara så långt den användes; `vw_local` slår upp
+  (symbol, instans) i en hash; `vir_oit_init` läser fältmasken ur en tabell.
+- **Trådar:** `VCC_THREADS=8` ger 62 ms emit (6,6 gånger mot en tråd), vilket
+  är i nivå med direkta emittern på en tråd.  Standard är fortfarande en tråd
+  (kärnbygget parallelliserar över TU:er); beslut behövs om en ensam stor TU
+  ska få fler.
+- **Fel som trådarna visade (b236ef95):** allokerarens `dmark` lästes för värden
+  som ännu inte använts i funktionen, alltså en tidigare funktions stämpel:
+  med flera trådar skilde sqlite3.o mellan körningar (16 funktioner).  Nollas
+  nu vid varje definition; 26 funktioner ändras även på en tråd.  Emit-trådarna
+  fick Darwins standardstack (512 KB): `tests/vcc/limits.c` gav inget objekt
+  på 8 trådar; de får nu den skapande trådens storlek.
+- **Öppet, inte VIR:** `tests/vcc/deep_expr.c` och `deep_mixed.c` ger olika
+  objekt mellan körningar med `VCC_THREADS=8` också på direkta vägen (utan
+  `VCC_VIR`).  Inte utrett.
+- **Kvar i profilen (platt, ingen post över 6 %):** `vw_hslot` 6 % (Brauns
+  uppslag per (block, variabel); cachemissar i VdbeExec), `vw_promote` 4,5 %,
+  `vw_find` 4 %, `vir_oit_next`/`init` 5 %, `vw_simplify` + `vw_cse_blk` 4 %,
+  allokeraren (`instr`, `sweep5`, `conform`, `enter`) ca 8 %, postrensningen
+  (`opt_function`).  Nästa steg med mätbar effekt: operanditeratorn inline i
+  `vir.h` (anropas över TU-gränsen), triviala phi bort direkt (granskningens
+  första rekommendation), `vir_canon` utan dubbla dominatorer.
+
+Kodkvalitet på samma gren (519b6905): flyttal laddas och lagras utan
+allmänt register också för volatile, ramplatser och spill (sqlites
+`dekkerMul2` var 2,9 % av speedtest1); `__builtin___memcpy_chk` m.fl. med
+objektstorlek som inte kan överskridas blir det vanliga anropet också när
+längden inte är konstant (530 `_chk`-anrop i sqlite).  speedtest1 storlek 100:
+8,76 → 8,56 G cykler (clang -O2 7,83 G), samma verifieringshash.  Största
+kända rest mot clang: adresstagna lokaler i slingor utan anrop (`balance`:
+`b.nCell` laddas och lagras varje varv; kräver aliasanalys på typ eller
+ursprung, ett beslut för SPEC-vir.md).
 
 ### Vad allokerarens kvalitet är värd: LLVM:s allokerare mot varandra (2026-11-12)
 

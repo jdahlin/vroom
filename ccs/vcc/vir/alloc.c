@@ -1236,6 +1236,42 @@ static bool livein(A *a, uint32_t v, uint32_t b)
 	return ax.mark[v] == a->mbase + b || inrange(a, v, first);
 }
 
+/* parameter j of b (class c), tentatively in h: the register in which most of the
+ * predecessors placed already end with their argument, when at least two do and more
+ * than have it in h (their edges then move nothing: a loop whose common path passes
+ * its values on unchanged pays for the rare path's moves otherwise); -1 if none */
+static int arg_vote(A *a, uint32_t b, uint32_t j, uint32_t c, uint32_t h)
+{
+	const vir_fn *f = a->f;
+	const vir_blk *k = &f->blk[b];
+	uint8_t cnt[64] = { 0 };
+	int best = -1;
+
+	if (k->npred < 3 || k->npred > 32)
+		return -1;
+	for (uint32_t i = 0; i < k->npred; i++) {
+		uint32_t p = f->extra[k->pred + i], x;
+		const vir_ins *t;
+
+		if (p >= b)
+			continue;
+		t = &f->ins[blk_last(f, p)];
+		if (t->op != VO_BR || t->a != b || is_const(f, x = f->extra[t->c + j]))
+			continue;
+		for (uint32_t y = 0; y < ax.end_n[p]; y++)
+			if (ax.pv[ax.end_off[p] + y] == x) {
+				uint32_t r = ax.pr[ax.end_off[p] + y];
+
+				if (r < 128 && VR_CLASS(r) == c && ++cnt[VR_NUM(r)] > (best < 0 ? 0 : cnt[best]))
+					best = (int)VR_NUM(r);
+				break;
+			}
+	}
+	if (best < 0 || cnt[best] < 2 || (h < 128 && VR_CLASS(h) == c && cnt[VR_NUM(h)] >= cnt[best]))
+		return -1;
+	return (int)VR_MAKE(c, best);
+}
+
 static void enter(A *a, uint32_t b)
 {
 	vir_fn *f = a->f;
@@ -1326,9 +1362,14 @@ static void enter(A *a, uint32_t b)
 		ax.slot[q] = VIR_NOBLK;
 		ax.reg[q] = VR_NONE;
 		ax.lastpos[q] = q;
+		ax.dmark[q] = 0;	/* (not an earlier function's: it is read for any value in a register) */
 		if (!(ax.vfl[q] & DEAD) && !(k->fl & VB_ADDR)) {
 			uint32_t h = ax.treg[q];
+			int vr = arg_vote(a, b, j, c, h);
 
+			if (vr >= 0 && (ax.fr[c] >> VR_NUM((uint32_t)vr) & 1) &&
+			    !caller_for_call(a, q, c, ax.fr[c] & a->rg->alloc[c], (uint32_t)vr))
+				h = (uint32_t)vr;
 			if (h < 128 && VR_CLASS(h) == c && (ax.fr[c] >> VR_NUM(h) & 1) &&
 			    !caller_for_call(a, q, c, ax.fr[c] & a->rg->alloc[c], h))
 				r = (int)h;
@@ -1557,6 +1598,7 @@ static bool instr(A *a, uint32_t b, uint32_t i, bool term)
 		ax.slot[i] = VIR_NOBLK;
 		ax.reg[i] = VR_NONE;
 		ax.lastpos[i] = i;
+		ax.dmark[i] = 0;
 		if (fx.res != VR_NONE) {
 			av[0] = lock[0] | fixm[0];
 			av[1] = lock[1] | fixm[1];

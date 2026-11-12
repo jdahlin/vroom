@@ -50,6 +50,7 @@ const vir_opinfo vir_optab[256] = {
 	R(VO_FNEG, "fneg", FM_STD, TM_F | TM_VF, T, NONE, NONE, 0, EF_P),
 	R(VO_FABS, "fabs", FM_STD, TM_F | TM_VF, T, NONE, NONE, 0, EF_P),
 	R(VO_FSQRT, "fsqrt", FM_STD, TM_F | TM_VF, T, NONE, NONE, 0, EF_P | EF_F),
+	R(VO_FMA, "fma", FM_STD, TM_F | TM_VF, T, T, T, VIF_NEGP | VIF_NEGC, EF_P | EF_F),
 	R(VO_FEXT, "fext", FM_STD, TM_F64, F32, NONE, NONE, 0, EF_P | EF_F),
 	R(VO_FTRUNC, "ftrunc", FM_STD, TM_F32, F64, NONE, NONE, 0, EF_P | EF_F),
 	R(VO_S2F, "s2f", FM_STD, TM_F, I, NONE, NONE, 0, EF_P | EF_F),

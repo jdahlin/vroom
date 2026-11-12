@@ -492,8 +492,35 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	ctx = calloc((size_t)nthr, sizeof(ecx));
 	for (int i = 0; i < nthr; i++)
 		ecx_init(&ctx[i], &E, xr[i] = vmpool_take(&ecxpool));
-	for (int i = 1; i < nthr; i++)
-		pthread_create(&th[i], NULL, worker, &ctx[i]);
+	{
+		/* the walkers recurse with the input's nesting and fall back when the stack runs
+		 * low (vstack_low): a worker gets a stack as large as this thread's, so that a
+		 * function compiles the same on any of them (Darwin's default for a new thread
+		 * is 512 KB, where deep input that compiled on one thread did not on several) */
+		pthread_attr_t at;
+		size_t ss = (size_t)8 << 20;
+
+#ifdef __APPLE__
+		ss = pthread_get_stacksize_np(pthread_self());
+#else
+		{
+			pthread_attr_t me;
+			void *addr;
+
+			if (!pthread_getattr_np(pthread_self(), &me)) {
+				pthread_attr_getstack(&me, &addr, &ss);
+				pthread_attr_destroy(&me);
+			}
+		}
+#endif
+		if (ss < ((size_t)1 << 20))
+			ss = (size_t)1 << 20;
+		pthread_attr_init(&at);
+		pthread_attr_setstacksize(&at, ss);
+		for (int i = 1; i < nthr; i++)
+			pthread_create(&th[i], &at, worker, &ctx[i]);
+		pthread_attr_destroy(&at);
+	}
 	worker(&ctx[0]);
 	for (int i = 1; i < nthr; i++)
 		pthread_join(th[i], NULL);
