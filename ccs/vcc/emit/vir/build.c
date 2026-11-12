@@ -2614,7 +2614,7 @@ static void vw_simplify(ecx *e)
 static void vw_split(ecx *e)
 {
 	vwst *V = e->vw;
-	uint32_t n0 = V->norder;
+	uint32_t n0 = V->norder, nb0 = V->nb;	/* blocks from nb0 on are this pass's edge blocks */
 
 	for (uint32_t i = 0; i < n0; i++) {
 		uint32_t b = V->order[i], ns = vw_nsucc(V, b);
@@ -2643,11 +2643,13 @@ static void vw_split(ecx *e)
 					V->order[V->norder++] = eb;
 					break;
 				}
-			if (eb == VW_NOBLK) {	/* already split: the edge block whose br goes to t */
+			if (eb == VW_NOBLK) {	/* already split: the edge block whose br goes to t
+						 * (not a block of the function that only branches there:
+						 * switch cases 8, 9 -> t and 12 -> { op = 10; br t }) */
 				for (uint32_t j = 0; j < V->b[t].npred; j++) {
 					uint32_t q = V->pr[V->b[t].pred + j];
 
-					if (V->b[q].npred == 1 && V->pr[V->b[q].pred] == b && !V->b[q].head &&
+					if (q >= nb0 && V->b[q].npred == 1 && V->pr[V->b[q].pred] == b && !V->b[q].head &&
 					    V->p[V->b[q].term].in.op == VO_BR && V->p[V->b[q].term].in.a == t)
 						eb = q;
 				}
