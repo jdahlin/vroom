@@ -246,6 +246,10 @@ static void put_flags(pctx *p, const vir_ins *in)
 	case VO_CLZ: case VO_CTZ:
 		if (fl & VIF_NZ) put(p, " nz");
 		break;
+	case VO_FMA:
+		if (fl & VIF_NEGP) put(p, " negp");
+		if (fl & VIF_NEGC) put(p, " negc");
+		break;
 	case VO_LOAD: case VO_STORE: case VO_ALOAD: case VO_ASTORE: case VO_AXCHG: case VO_AXADD: case VO_ACAS:
 		if (fl & VIF_VOL) put(p, " volatile");
 		if (VIF_AL(fl)) putf(p, " align %u", 1u << VIF_AL(fl));

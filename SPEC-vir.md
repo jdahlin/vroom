@@ -301,6 +301,7 @@ other than to equal values, must clear its UB flags (R2).
 | 6 | `bparam` | any but void, multi | - | - | - | P | Block parameter; value supplied by each `br` to the block |
 | 7 | `param` | i64 f32 f64 ptr | # group | # piece | - | P | Incoming argument piece, or for a memory group the address of its bytes (section 9); only in block 0 |
 | 8 | `proj` | per producer | v producer (`multi`) | # index | - | P | Result number `b` of a call or asm |
+| 9 | `fma` | f32 f64 | v:T | v:T | v:T | P/F | `a * b + c` rounded once (IEEE fusedMultiplyAdd). Flags: `negp` the product is negated, `negc` the addend is negated, both exact |
 | 10 | `add` | i32 i64 | v:T | v:T | - | P,U* | Sum modulo 2^n |
 | 11 | `sub` | i32 i64 | v:T | v:T | - | P,U* | Difference modulo 2^n |
 | 12 | `mul` | i32 i64 | v:T | v:T | - | P,U* | Product modulo 2^n |

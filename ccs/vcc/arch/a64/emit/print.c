@@ -73,7 +73,7 @@ static void p_mem(tbuf *b, const ins *i)
 {
 	int64_t off = i->imm;
 	int sz = i->sz, scaled, base = i->rn;
-	int x = i->op == I_ST ? sz == 3 : ld_x(i);
+	int x = i->op == I_ST ? sz == 3 : ld_x(i), v = i->op == I_LDF || i->op == I_STF;
 
 	scaled = off >= 0 && (off & ((1 << sz) - 1)) == 0 && (off >> sz) < 4096;
 	if (!scaled && !(off >= -256 && off < 256)) {
@@ -86,12 +86,17 @@ static void p_mem(tbuf *b, const ins *i)
 		scaled = 1;
 	}
 	tb_c(b, '\t');
-	if (i->op == I_ST)
+	if (i->op == I_ST || i->op == I_STF)
 		tb_n8(b, st_name[!scaled][sz]);
 	else
-		tb_n8(b, ld_name[!scaled][sz][i->cond]);
+		tb_n8(b, ld_name[!scaled][sz][v ? 0 : i->cond]);
 	tb_c(b, '\t');
-	reg(b, i->rd, x);
+	if (v) {
+		tb_c(b, sz == 3 ? 'd' : 's');
+		tb_u(b, i->rd);
+	} else {
+		reg(b, i->rd, x);
+	}
 	tb_s(b, ", [");
 	reg(b, base, 1);
 	if (off) {
@@ -289,7 +294,7 @@ VPRIV void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *raw
 		reg(b, i->rn, i->sz);
 		tb_c(b, '\n');
 		return;
-	case I_LD: case I_ST:
+	case I_LD: case I_ST: case I_LDF: case I_STF:
 		p_mem(b, i);
 		return;
 	case I_SMADDL: case I_UMADDL:
