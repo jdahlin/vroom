@@ -1210,6 +1210,35 @@ inte är.  Bas efter sammanfogningen: 26,18 G (virpol 24,49 G, clang 23,70 G),
   VIR 1582/1582, volatile 32/32, TSVC 151/151 (6,32 G cykler), sqlite samma
   hash.
 
+### Ramar mot clang per funktion: syskonanrop som returnerar pekare, FP-löv (2026-11-12)
+
+- **Mätt exakt** (en räknare framför varje `stp x29, x30` i `.s`, summerad
+  vid avslut): VIR satte upp 172,9 M ramar på speedtest1 `--size 100`, clang
+  134,0 M.  Störst: pcache1Fetch 6,3 M, sqlite3_value_text och sqlite3ValueText
+  5,8 M var, sqlite3PagerWrite 4,1 M, dekkerMul2 3,7 M, applyAffinity 3,5 M,
+  sqlite3DbMallocRawNN 3,4 M, sqlite3_free 3,2 M (clang 0 i alla).
+- **Det mesta var inte shrink-wrapping utan missade syskonanrop:** en funktion
+  som returnerar en pekare fick aldrig något.  `ret` namnger anropets värde
+  under dess `i2p` (sänkningen läser igenom `i2p`/`p2i`), och `vl_sibling`
+  jämförde med värdet ovanpå.  Nu jämförs värdena utan sådana instruktioner
+  (`vl_under`).  sqlite: 25,755 G → 25,670 G instruktioner (**−0,34 %**), 23
+  funktioner utan ram, 172,9 M → 149,0 M ramar.
+- **FP- och vektorinstruktioner som `I_WORD`** gav `OPF_ALL` i `opt_regs` och
+  därmed ramrekord i varje lövfunktion med flyttal (sqlite3_value_int64,
+  dekkerMul2) eller vektorer (TSVC).  I VIR:s funktioner avkodas ordets
+  registerfält nu som allmänna register (en övermängd; grenar, undantag och
+  fält 31 utanför FP-klassen ger fortfarande `OPF_ALL`).  −0,06 %, 12
+  funktioner; TSVC 6,32 G → 6,29 G cykler.
+- **Kvar som är riktig shrink-wrapping** (ett callee-saved register och ett
+  riktigt anrop på en väg, tidiga returer eller syskonanrop på de andra):
+  sqlite3PagerWrite 4,1 M, applyAffinity 3,5 M, sqlite3_free 3,2 M,
+  sqlite3DbMallocRaw 1,9 M, sqlite3VdbeMemStringify 1,3 M, sqlite3Step 1,1 M:
+  ca 17 M ramar à ca 8 instruktioner, 0,5 %.
+- **Tester:** nytt `vcc/vir_tail_ptr.c`; C-sviterna genom VIR med kontrollen
+  (de tre kända felen), inline 85/85, vcc-cfi genom VIR 1582/1582, vcc-abi
+  `--host` 4 fel både med och utan VIR (alltså inte härifrån), TSVC 151/151,
+  sqlite samma hash.
+
 ### Underlag för V4 (2026-11-11): registerallokering, ingen kod
 
 - `RESEARCH-regalloc.md`: vad GCC (IRA, LRA) och LLVM (Greedy, Fast, PBQP,

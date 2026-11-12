@@ -1069,6 +1069,22 @@ static uint32_t vl_pass(const vl *L, const vir_blk *k, uint32_t j, uint32_t *res
 	return j;
 }
 
+/* v without the instructions that only pass a value on (vl_pass's): a reader may name the
+ * value under them, since the lowering reads through i2p and p2i */
+static uint32_t vl_under(const vl *L, uint32_t v)
+{
+	const vir_fn *f = L->f;
+
+	for (;;) {
+		const vir_ins *x = &f->ins[v];
+
+		if (!(x->op == VO_I2P || x->op == VO_P2I ||
+		      (L->ret32 && ((x->op == VO_TRUNC && x->ty == VT_I32) || (x->op == VO_EXT && VIF_W(x->fl) == 2)))))
+			return v;
+		v = x->a;
+	}
+}
+
 /* the call at i, in b, is a sibling call: what the ret after it returns is its result (or
  * nothing), also through brs to blocks of only what passes the result on */
 static bool vl_sibling(vl *L, uint32_t b, uint32_t i)
@@ -1091,7 +1107,7 @@ static bool vl_sibling(vl *L, uint32_t b, uint32_t i)
 		if (r->op != VO_BR || hop == 4)
 			break;
 		k = &f->blk[r->a];
-		for (q = 0; q < k->nparam && f->extra[r->c + q] != res; q++)
+		for (q = 0; q < k->nparam && vl_under(L, f->extra[r->c + q]) != vl_under(L, res); q++)
 			;
 		if (q < k->nparam)
 			res = k->first + q;	/* (else the ret may name the value itself) */
@@ -1099,7 +1115,7 @@ static bool vl_sibling(vl *L, uint32_t b, uint32_t i)
 	}
 	if (r->op != VO_RET)
 		return false;
-	return !f->extra[r->c] || (f->extra[r->c] == 1 && f->extra[r->c + 1] == res);
+	return !f->extra[r->c] || (f->extra[r->c] == 1 && vl_under(L, f->extra[r->c + 1]) == vl_under(L, res));
 }
 
 static void vl_call(vl *L, uint32_t b, uint32_t i, const vir_ins *in)

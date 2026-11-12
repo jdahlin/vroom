@@ -991,6 +991,32 @@ static void dead(ecx *e)
  * every asm lists).  *fl: OPF_ALL a record may touch any register,
  * OPF_CALL a call, OPF_FRAME a frame slot is referenced.
  */
+/*
+ * The general registers an encoded instruction may name, for the frame decision: every
+ * register field read as a general register (a vector register's number then counts as the
+ * general one's: more is kept, never less).  False when the word may do more than that: a
+ * branch, a call, an exception, or a field 31 that can mean sp.
+ */
+static bool word_regs(uint32_t w, rmask *m)
+{
+	unsigned d = w & 31, n = w >> 5 & 31, a = w >> 10 & 31, x = w >> 16 & 31;
+	bool fp = (w >> 25 & 7) == 7;	/* scalar FP and Advanced SIMD data processing: 31 is v31 */
+
+	*m = 0;
+	if ((w >> 26 & 7) == 5) {	/* branches, exceptions, system */
+		if ((w & 0xfffff01fu) == 0xd503201fu || (w & 0xfffff01fu) == 0xd503301fu)
+			return true;	/* hints and barriers: no register */
+		if ((w & 0xffc00000u) != 0xd5000000u)
+			return false;
+		*m = d < 31 ? RB(d) : 0;	/* msr/mrs/sys: Rt */
+		return true;
+	}
+	if (!fp && (d == 31 || n == 31))
+		return false;
+	*m = (d < 31 ? RB(d) : 0) | (n < 31 ? RB(n) : 0) | (a < 31 ? RB(a) : 0) | (x < 31 ? RB(x) : 0);
+	return true;
+}
+
 VPRIV uint64_t opt_regs(ecx *e, unsigned *fl)
 {
 	const ins *in = e->in;
@@ -1005,6 +1031,10 @@ VPRIV uint64_t opt_regs(ecx *e, unsigned *fl)
 
 		if (i->op == I_JT) {	/* (OP_ALL for the clean-ups, which do not follow it; its registers are known) */
 			u |= RBT[i->rd] | RB(16) | RB(17);
+			continue;
+		}
+		if (i->op == I_WORD && e->vlow && word_regs((uint32_t)i->imm, &r)) {
+			u |= r;	/* (VIR's lowering: FP, vector and system instructions with their registers in them) */
 			continue;
 		}
 		ro = roles(i);
