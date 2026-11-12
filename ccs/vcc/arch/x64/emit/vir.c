@@ -55,6 +55,15 @@ static bool vx_imm(const vir_fn *f, uint32_t v, int64_t *value)
 	if (k!=(int32_t)k) return false;
 	*value=k;return true;
 }
+static bool vx_smallmem(const vir_fn *f,const vir_ins *i)
+{
+	const vir_ins *count=&f->ins[i->c];
+	if(count->op!=VO_ICONST || (i->fl&VIF_VOL))return false;
+	uint64_t n=(uint64_t)vx_bits(count);
+	if(i->op==VO_MEMCPY)return n<=128;
+	const vir_ins *byte=&f->ins[i->b];
+	return n<=256 && byte->op==VO_ICONST && !(byte->b&255);
+}
 static void vx_fixed(const vir_fn *f, uint32_t v, vir_fix *x, void *ctx)
 {
 	const vir_ins *i = &f->ins[v];
@@ -64,6 +73,7 @@ static void vx_fixed(const vir_fn *f, uint32_t v, vir_fix *x, void *ctx)
 		x->res = vx_arg(f, f->sig, i->a, &stack);
 	} else if (i->op == VO_MEMCPY || i->op == VO_MEMSET) {
 		x->nopnd = 3;
+		if(vx_smallmem(f,i)) {x->mem=i->op==VO_MEMSET?6:4;return;}
 		x->opnd[0] = RDI;
 		x->opnd[1] = i->op == VO_MEMSET ? RAX : RSI;
 		x->opnd[2] = RCX;
@@ -395,6 +405,26 @@ static bool vx_clear32(const vir_fn *f,uint32_t v)
 	}
 }
 
+/* Small constant blocks do not need REP's fixed registers or their clobbers.
+ * SSE2 handles complete 16-byte pieces; scalar tails never overread. */
+static void vx_memblock(vx *L,const vir_ins *i,int dst,int src)
+{
+	ecx *e=L->e;
+	uint64_t n=(uint64_t)vx_bits(&L->f->ins[i->c]);
+	bool copy=i->op==VO_MEMCPY;
+	if(!copy) {
+		if(n>=16)x64_op3(e,X_FXOR,16,XMM0+14,XMM0+14,XMM0+14);
+		if(n&15)x64_movi(e,R10,0);
+	}
+	for(uint64_t off=0;off<n;) {
+		unsigned width=n-off>=16?16:n-off>=8?8:n-off>=4?4:n-off>=2?2:1;
+		int scratch=width==16?XMM0+14:R10;
+		lval from={.k=L_REG,.r=src,.off=(int64_t)off},to={.k=L_REG,.r=dst,.off=(int64_t)off};
+		if(copy)x64_mem(e,X_LD,width,scratch,&from,false);
+		x64_mem(e,X_ST,width,scratch,&to,false);off+=width;
+	}
+}
+
 static uint8_t vx_condition(vx *L,uint32_t b,uint32_t v,uint32_t value,int reg)
 {
 	ecx *e=L->e;
@@ -518,6 +548,7 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 	case VO_NOP: case VO_BPARAM: return;
 	case VO_BARRIER: x64_put(e, X_BARRIER); return;
 	case VO_MEMCPY: case VO_MEMSET:
+		if(vx_smallmem(L->f,i)){vx_memblock(L,i,a,c);return;}
 		x64_put(e, X_REP)->cond = i->op == VO_MEMSET;
 		return;
 	case VO_CALL: {

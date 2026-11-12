@@ -65,6 +65,7 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
             if run([str(exe)]).stdout != expected:
                 raise SystemExit('output differs from clang')
     for filename, required_more, packed in (
+        ('vir_x86_blocks.c', {'copy1', 'copy24', 'copy127', 'copy128', 'copy129', 'zero24', 'zero256', 'zero257', 'zero_local', 'readbyte', 'dynamic', 'nonzero', 'lowzero'}, {}),
         ('vir_x86_ext.c', {'clean', 'trim', 'mask', 'signedload', 'fromcall'}, {}),
         ('vir_x86_select.c', {'choose', 'uchoose', 'keep', 'boolean', 'pointer'}, {}),
         ('vir_x86_bytes.c', {'be16', 'be32', 'indexed16', 'indexed32', 'bev16', 'signed16', 'changed'}, {}),
@@ -104,6 +105,15 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
                 body = asm.read_text().split('mask:\n', 1)[1].split('.Lfunc_end', 1)[0]
                 if 'movslq' in body:
                     raise SystemExit('mask: nonnegative masked value was sign-extended')
+            if filename == 'vir_x86_blocks.c':
+                for name in ('copy24', 'zero24', 'zero_local'):
+                    body = asm.read_text().split(name + ':\n', 1)[1].split('.Lfunc_end', 1)[0]
+                    if 'rep ' in body or 'movups' not in body:
+                        raise SystemExit(f'{name}: missing direct SSE2 block accesses')
+                for name in ('copy129', 'zero257', 'dynamic', 'nonzero'):
+                    body = asm.read_text().split(name + ':\n', 1)[1].split('.Lfunc_end', 1)[0]
+                    if 'rep ' not in body and not re.search(r'\bcall\w*\s+mem(?:cpy|set)', body):
+                        raise SystemExit(f'{name}: missing generic block-operation fallback')
             if filename == 'vir_x86_bytes.c':
                 body = asm.read_text().split('be16:\n', 1)[1].split('.Lfunc_end', 1)[0]
                 if 'rorw' not in body or 'movzwl' not in body:

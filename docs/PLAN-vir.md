@@ -340,6 +340,16 @@ bytevärden går via assembly/objekt och ASan/UBSan. GCC/TCC 1615/105, egna
 Data: work/vir-x86-perf/ext2/results. Standardstorlek 100 före denna skiva:
 tre prov ger 1,249x CPU; det korta storlek-30-provet är representativt.
 
+Åttonde skivan sänker konstanta små memcpy (högst 128 byte) och nollställning
+(högst 256 byte) utan REP:s fasta register och clobbers: SSE2 för hela
+16-bytebitar, skalära 8/4/2/1-byte-svansar utan överläsning. Större,
+dynamiska, volatila och icke-nollfyllningar behåller tidigare väg.
+Fem kortprov: CPU 347,99 → 344,40 ms (1,233x → 1,220x clang), instruktioner
+oförändrade kring 1,439x. Riktprov täcker gränsstorlekar, ojusterade adresser,
+svansar, 256-byte-lokalnollning och reservvägar. GCC/TCC 1615/105, egna
+303/303, samma fem inline-undantag; assembly/objekt och ASan/UBSan gröna.
+Data: work/vir-x86-perf/block/results/summary.json; 10 %-målet öppet.
+
 
 ### V2/V3 x86-64 (2026-11-12): TSVC och fem verkliga korpusar
 
