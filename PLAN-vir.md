@@ -789,6 +789,43 @@ cykler mot virpol, nu +9,9 %.  Samplingar per funktion (storlek 300) varierar
 - Tester: `vir_branch_bits.c`, `vir_flags_reuse.c`, `vir_layout_exits.c`,
   `vir_operand_fold.c`, `vir_byte_assembly.c`, `vir_constants.c` (.o och .s).
 
+### Vad allokerarens kvalitet är värd: LLVM:s allokerare mot varandra (2026-11-12)
+
+Mätningen som "Mäts i V4" nedan utlovade.  sqlite3.c, speedtest1 `--size 100
+--memdb`, Homebrew clang 23.1.4 `-O2` med `-mllvm -regalloc=X`, vcc på
+75bb9062 (`VCC_VIR=bl`), virpol är binären från 12:36 samma dag (äldre
+inlining).  Fem växelvisa rundor, `/usr/bin/time -l`; maskinen hade last 10,
+så cyklerna är median av parade kvoter med [min .. max], och bara skillnader
+över ca 2 % säger något.  Samma verifieringshash i alla sju.
+
+| | Instr. | Cykler mot greedy | Statiskt: totalt | `mov` r,r | sp/fp-laster | sp/fp-lagringar |
+|---|---|---|---|---|---|---|
+| clang greedy | 23,70 G | 0 | 239 k | 21,3 k | 13,0 k | 10,2 k |
+| clang pbqp | +3,5 % | +2,1 % [−0,6 .. +10,7] | 242 k | 22,7 k | 14,7 k | 10,4 k |
+| clang basic | +3,7 % | +7,0 % [+4,7 .. +19,3] | 242 k | 17,4 k | 19,6 k | 10,7 k |
+| clang fast | +44,1 % | +72,4 % | 325 k | 3,1 k | 83,3 k | 44,8 k |
+| virpol | +3,4 % | +6,0 % [+2,2 .. +14,1] (bäst av fem +3,9 %) | 242 k | 21,1 k | 12,6 k | 10,0 k |
+| VIR | +15,3 % | +12,6 % [+10,8 .. +23,9] | 298 k | 35,1 k | 22,0 k | 17,9 k |
+| vcc utan VIR | +60,9 % | +50,7 % | 234 k | 24,0 k | 28,5 k | 21,9 k |
+
+- **VIR mot virpol: +8,4 % cykler [+6,3 .. +8,6], +11,5 % instruktioner.**
+  VIR mot clang basic: +4,1 % [+3,7 .. +7,4].
+- **Greedy mot basic är värt ca 7 % här**, lika mycket som hela VIR:s gap mot
+  virpol.  Basic har färre flyttar än greedy (17,4 k mot 21,3 k) men 50 % fler
+  stacklaster: det som kostar är omladdningar på heta vägar (delning av
+  livslängder), inte antalet `mov`.  Fast visar golvet utan allokering.
+- **Statiskt överskott VIR mot virpol, 56,5 k instruktioner:** flyttar 14,0 k,
+  stacklaster 9,3 k, stacklagringar 8,0 k (tillsammans 55 %: allokering och
+  ramar), hopp 4,9 k, konstanter 3,3 k, övrigt 17 k (urval, kopierade block).
+- **Inte mätt:** allokerarens andel av de 8,4 procenten direkt (kräver samma
+  funktioner genom båda allokerarna; receptet för virpol finns inte i
+  trädet), och inget dynamiskt: de statiska talen säger inte vilka flyttar och
+  laster som körs.  Uppskattning: virpol med basic skulle ligga på ungefär
+  VIR:s nivå (8,11 G × 1,07–1,08 mot 8,79 G).
+- **Slutsats för arbetsordningen:** omladdningar i loopar före flyttar.
+  PBQP:s +2 % visar att en allokerare utan delning kan komma nära greedy med
+  en bra kostnadsmodell.
+
 ### Underlag för V4 (2026-11-11): registerallokering, ingen kod
 
 - `RESEARCH-regalloc.md`: vad GCC (IRA, LRA) och LLVM (Greedy, Fast, PBQP,
