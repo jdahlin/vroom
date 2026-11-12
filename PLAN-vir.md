@@ -1113,6 +1113,29 @@ inte är.  Bas efter sammanfogningen: 26,18 G (virpol 24,49 G, clang 23,70 G),
   allokeraren kan ta av detta; loopar som inte roteras (ett `b` per varv) hör
   till sänkningen.
 
+### Ram i funktioner med hopptabell, och var kantflyttarna körs (2026-11-12)
+
+- **Mot clang -O2 efter förra avsnittet** (sex parade körningar, last 11–14):
+  cykler **1,095x** [1,083 .. 1,125], instruktioner 1,100x; virpol mot clang
+  1,049x [1,034 .. 1,086].
+- **Ram:** `opt_regs` (arm64, `opt.c`) gav `OPF_ALL` för `I_JT`, så en
+  funktion med hopptabell behöll ramrekord och alla callee-saved fast den inte
+  behövde dem.  `I_JT` läser sitt index och skriver x16/x17; städpassen ser den
+  fortfarande som `OP_ALL`.  vdbeRecordCompareInt (bara syskonanrop) och två
+  till i sqlite tappar `stp/mov/ldp`: 26,10 G → 25,97 G instruktioner
+  (**−0,5 %**, mer än de tre allokeringsreglerna tillsammans), statiskt 1138 →
+  1135 ramar.  Gäller också den direkta emittern.  Test:
+  `vcc/vir_switch_leaf.c`; vcc-cfi 1582/1582 direkt och genom VIR.
+- **Kantflyttar per slag** (nop-prob, G körningar): argument som dör på
+  kanten till en blockparameter i annat register 0,38 framåt och 0,20 på
+  bakkant; vanliga värden 0,16 framåt och 0,06 på bakkant; konstant som
+  blockargument 0,53 (framåt).  Per funktion är de utspridda: störst
+  sqlite3VdbeExec 0,09 och balance 0,06 av de tolv hetaste.  Ingen enskild
+  regel tar dem; inget ändrat.
+- **Ram mot clang i de heta funktionerna efter rättningen:** bara
+  sqlite3PagerWrite och pcache1Fetch har ram hos oss och inte hos clang
+  (shrink-wrapping).
+
 ### Underlag för V4 (2026-11-11): registerallokering, ingen kod
 
 - `RESEARCH-regalloc.md`: vad GCC (IRA, LRA) och LLVM (Greedy, Fast, PBQP,

@@ -1000,9 +1000,16 @@ VPRIV uint64_t opt_regs(ecx *e, unsigned *fl)
 	rawp = e->raw.p;
 	for (uint32_t k = 0; k < e->nin; k++) {
 		const ins *i = &in[k];
-		unsigned ro = roles(i);
-		rmask r = reads(i, ro), w = writes(i, ro);
+		unsigned ro;
+		rmask r, w;
 
+		if (i->op == I_JT) {	/* (OP_ALL for the clean-ups, which do not follow it; its registers are known) */
+			u |= RBT[i->rd] | RB(16) | RB(17);
+			continue;
+		}
+		ro = roles(i);
+		r = reads(i, ro);
+		w = writes(i, ro);
 		if (ro & OP_ALL)
 			f |= OPF_ALL;
 		if (ro & OP_CALL)
