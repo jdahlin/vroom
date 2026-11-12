@@ -2039,6 +2039,408 @@ out:
 	free(bad);
 }
 
+/* ---------------- simplification ----------------
+ *
+ * The walker's output, instruction by instruction, carries what its direct target folds as it
+ * emits: extensions of values already extended, a truncation of a widening, x * 1, a chain of
+ * constant offsets, the same address computed again, the same byte loaded again.  One pass in
+ * reverse postorder rewrites each instruction (vw_simp1) and then looks it up among the
+ * block's earlier pure instructions and loads (a load is forgotten at anything that may write
+ * memory; a store remembers its value for a load of the same address and type).  What nothing
+ * uses any more goes at the end. */
+
+typedef struct vwhe { uint32_t op, ty, fl, a, b, c, gen, v; } vwhe;	/* (key) -> value */
+
+typedef struct vwsimp {
+	uint32_t *cnt, n0;	/* uses per value; values from n0 on are the pass's constants */
+	vwhe *ht; uint32_t hmask, cht;
+	uint32_t memgen;
+	uint32_t undef[VT_N];
+} vwsimp;
+
+static void vw_inc(vwst *V, vwsimp *S, uint32_t v)
+{
+	if (v < S->n0 && V->p[v].blk != VW_NOBLK)
+		S->cnt[v]++;
+}
+
+static void vw_dec(vwst *V, vwsimp *S, uint32_t v)
+{
+	if (v < S->n0 && V->p[v].blk != VW_NOBLK && S->cnt[v])
+		S->cnt[v]--;
+}
+
+/* the value operands of x (a parameter's: one per predecessor), as words that can be rewritten */
+#define VW_EACHOP(V_, X_, O_, BODY_) do { \
+	vwp *x_ = &(V_)->p[X_]; \
+	const vir_opinfo *oi_ = &vir_optab[x_->in.op]; \
+	if (x_->in.op == VO_BPARAM) { \
+		if (x_->in.b != VW_NOBLK) \
+			for (uint32_t j_ = 0; j_ < (V_)->b[x_->blk].npred; j_++) { \
+				uint32_t *O_ = &(V_)->x[x_->in.b + j_]; BODY_; \
+			} \
+		break; \
+	} \
+	for (int k_ = 0; k_ < 3; k_++) \
+		if (vw_isval(oi_->k[k_]) && !(x_->in.op == VO_BRIF && k_ > 0)) { \
+			uint32_t *O_ = &(&x_->in.a)[k_]; BODY_; \
+		} \
+	if (x_->in.op == VO_CALL || x_->in.op == VO_RET) \
+		for (uint32_t k_ = 0; k_ < (V_)->x[x_->in.c]; k_++) { \
+			uint32_t *O_ = &(V_)->x[x_->in.c + 1 + k_]; BODY_; \
+		} \
+} while (0)
+
+static bool vw_kint(const vwst *V, uint32_t v, int64_t *k)
+{
+	const vir_ins *in = &V->p[v].in;
+
+	if (in->op != VO_ICONST)
+		return false;
+	*k = in->ty == VT_I32 ? (int64_t)(int32_t)in->b : (int64_t)((uint64_t)in->b | (uint64_t)in->c << 32);
+	return true;
+}
+
+/* bytes v is zero-extended from (its type's size: nothing known) */
+static uint32_t vw_zw(const vwst *V, uint32_t v)
+{
+	const vir_ins *in = &V->p[v].in;
+	uint32_t sz = vir_tysize(in->ty);
+	int64_t k;
+
+	switch (in->op) {
+	case VO_LOAD:
+		return (in->fl & VIF_MS) ? sz : 1u << VIF_W(in->fl) < sz ? 1u << VIF_W(in->fl) : sz;
+	case VO_EXT:
+		return (in->fl & VIF_MS) ? sz : 1u << VIF_W(in->fl);
+	case VO_ICMP: case VO_FCMP:
+		return 1;
+	case VO_AND:
+		if (vw_kint(V, in->b, &k) && k >= 0)
+			return k <= 0xff ? 1 : k <= 0xffff ? 2 : k <= 0xffffffffll ? 4 : sz;
+		return sz;
+	default:
+		return sz;
+	}
+}
+
+/* bytes v is sign-extended from */
+static uint32_t vw_sw(const vwst *V, uint32_t v)
+{
+	const vir_ins *in = &V->p[v].in;
+	uint32_t sz = vir_tysize(in->ty), z;
+
+	if ((in->op == VO_LOAD || in->op == VO_EXT) && (in->fl & VIF_MS))
+		return 1u << VIF_W(in->fl) < sz ? 1u << VIF_W(in->fl) : sz;
+	z = vw_zw(V, v);
+	return z < sz ? 2 * z : sz;	/* (zero-extended from z bytes: a signed 2z-byte value) */
+}
+
+static uint32_t vw_undefk(ecx *e, vwsimp *S, uint32_t ty)
+{
+	if (!S->undef[ty])
+		S->undef[ty] = vw_undef(e, ty);
+	return S->undef[ty];
+}
+
+/* q rewritten in place (true), or the value that replaces it in *r */
+static bool vw_simp1(ecx *e, vwsimp *S, uint32_t q, uint32_t *r)
+{
+	vwst *V = e->vw;
+	vir_ins in = V->p[q].in;
+	int64_t k, k2;
+
+	*r = q;
+	switch (in.op) {
+	case VO_EXT: {
+		uint32_t x = in.a, K = 1u << VIF_W(in.fl), ts = vir_tysize(in.ty);
+		bool s = in.fl & VIF_MS;
+		vir_ins xi = V->p[x].in;
+		uint32_t xs = vir_tysize(xi.ty);
+
+		if (vw_kint(V, x, &k)) {
+			uint64_t u = (uint64_t)k & (K == 8 ? ~0ull : (1ull << 8 * K) - 1);
+
+			if (s && K < 8 && (u >> (8 * K - 1)) & 1)
+				u |= ~0ull << 8 * K;
+			*r = vw_iconst(e, in.ty, (int64_t)u);
+			return false;
+		}
+		if (K >= ts) {	/* (the whole value: a copy or a plain widening) */
+			if (xs == ts) {
+				*r = x;
+				return false;
+			}
+		}
+		if (xs == ts && (s ? vw_sw(V, x) <= K : vw_zw(V, x) <= K)) {
+			*r = x;
+			return false;
+		}
+		if (xs == ts && s && vw_zw(V, x) < K) {
+			*r = x;
+			return false;
+		}
+		if (xi.op == VO_EXT && vir_tysize(V->p[xi.a].in.ty) <= ts) {
+			uint32_t M = 1u << VIF_W(xi.fl);
+
+			if (K <= M) {	/* the low K bytes of x are y's */
+				vw_dec(V, S, x), vw_inc(V, S, xi.a);
+				V->p[q].in.a = xi.a;
+				return true;
+			}
+			if (s == !!(xi.fl & VIF_MS) || !(xi.fl & VIF_MS)) {	/* x's extension is q's */
+				vw_dec(V, S, x), vw_inc(V, S, xi.a);
+				V->p[q].in.a = xi.a;
+				V->p[q].in.fl = xi.fl;
+				return true;
+			}
+		}
+		/* a load only q reads: the load extends */
+		if (xi.op == VO_LOAD && !(xi.fl & VIF_VOL) && S->cnt[x] == 1 && (1u << VIF_W(xi.fl)) == K) {
+			V->p[x].in.ty = (uint8_t)in.ty;
+			V->p[x].in.fl = (uint16_t)((xi.fl & ~VIF_MS) | (s ? VIF_MS : 0));
+			*r = x;
+			return false;
+		}
+		if (xi.op == VO_LOAD && !(xi.fl & VIF_VOL) && S->cnt[x] == 1 && (1u << VIF_W(xi.fl)) < K &&
+		    (s ? vw_sw(V, x) <= K : vw_zw(V, x) <= K)) {
+			V->p[x].in.ty = (uint8_t)in.ty;
+			*r = x;
+			return false;
+		}
+		return false;
+	}
+	case VO_TRUNC: {
+		uint32_t x = in.a;
+		vir_ins xi = V->p[x].in;
+
+		if (vw_kint(V, x, &k)) {
+			*r = vw_iconst(e, VT_I32, (int64_t)(uint32_t)k);
+			return false;
+		}
+		if (xi.op == VO_EXT && V->p[xi.a].in.ty == VT_I32 && VIF_W(xi.fl) >= 2) {
+			*r = xi.a;
+			return false;
+		}
+		if (xi.op == VO_EXT && V->p[xi.a].in.ty == VT_I32) {	/* a narrower extension, in i32 */
+			vw_dec(V, S, x), vw_inc(V, S, xi.a);
+			V->p[q].in = (vir_ins){ VO_EXT, VT_I32, xi.fl, xi.a, 0, 0 };
+			return true;
+		}
+		if (xi.op == VO_EXT && VIF_W(xi.fl) >= 2) {	/* trunc of a widening of the low half */
+			vw_dec(V, S, x), vw_inc(V, S, xi.a);
+			V->p[q].in.a = xi.a;
+			return true;
+		}
+		if (xi.op == VO_LOAD && !(xi.fl & VIF_VOL) && S->cnt[x] == 1 && VIF_W(xi.fl) <= 2) {
+			V->p[x].in.ty = VT_I32;
+			if (VIF_W(xi.fl) == 2)
+				V->p[x].in.fl &= (uint16_t)~VIF_MS;
+			*r = x;
+			return false;
+		}
+		return false;
+	}
+	case VO_ADD: case VO_SUB: case VO_OR: case VO_XOR: case VO_SHL: case VO_LSHR: case VO_ASHR:
+		if (vw_kint(V, in.b, &k) && !k)
+			*r = in.a;
+		return false;
+	case VO_MUL:
+		if (vw_kint(V, in.b, &k) && k == 1)
+			*r = in.a;
+		return false;
+	case VO_AND:
+		if (vw_kint(V, in.b, &k) && (k == -1 || (in.ty == VT_I32 && (uint32_t)k == 0xffffffffu)))
+			*r = in.a;
+		else if (vw_kint(V, in.b, &k) && k > 0 && !(k & (k + 1)) && vw_zw(V, in.a) < 8 &&
+			 (uint64_t)k >= (vw_zw(V, in.a) == 8 ? ~0ull : (1ull << 8 * vw_zw(V, in.a)) - 1))
+			*r = in.a;	/* the mask keeps every bit that can be set */
+		return false;
+	case VO_PTRADD:
+		if (!vw_kint(V, in.b, &k))
+			return false;
+		if (!k) {
+			*r = in.a;
+			return false;
+		}
+		if (V->p[in.a].in.op == VO_PTRADD && V->p[in.a].blk != VW_NOBLK && vw_kint(V, V->p[in.a].in.b, &k2)) {
+			uint32_t y = V->p[in.a].in.a, c = vw_iconst(e, VT_I64, (int64_t)((uint64_t)k + (uint64_t)k2));
+
+			vw_dec(V, S, in.a), vw_inc(V, S, y);
+			V->p[q].in.a = y, V->p[q].in.b = c;
+			return true;
+		}
+		return false;
+	default:
+		return false;
+	}
+}
+
+static bool vw_commutes(uint32_t op)
+{
+	return op == VO_ADD || op == VO_MUL || op == VO_AND || op == VO_OR || op == VO_XOR ||
+	       op == VO_UMULHI || op == VO_SMULHI;
+}
+
+/* the table's entry for key x (an empty one when it has none) */
+static vwhe *vw_hlook(vwsimp *S, const vwhe *x)
+{
+	uint64_t h = (uint64_t)x->op * 0x9e3779b97f4a7c15ull;
+
+	h = (h ^ x->ty ^ (uint64_t)x->fl << 8) * 0xff51afd7ed558ccdull;
+	h = (h ^ x->a ^ (uint64_t)x->b << 32) * 0xc4ceb9fe1a85ec53ull;
+	h = (h ^ x->c ^ (uint64_t)x->gen << 32) * 0x9e3779b97f4a7c15ull;
+	for (uint32_t i = (uint32_t)(h >> 40) & S->hmask;; i = (i + 1) & S->hmask) {
+		vwhe *t = &S->ht[i];
+
+		if (!t->v || (t->op == x->op && t->ty == x->ty && t->fl == x->fl && t->a == x->a &&
+			      t->b == x->b && t->c == x->c && t->gen == x->gen))
+			return t;
+	}
+}
+
+static void vw_simplify(ecx *e)
+{
+	vwst *V = e->vw;
+	vwsimp S = { 0 };
+	uint32_t *stk, ns = 0;
+
+	S.n0 = V->np;
+	S.cnt = calloc((size_t)S.n0 + 1, sizeof *S.cnt);
+	stk = malloc(((size_t)S.n0 + 1) * sizeof *stk);
+	if (!S.cnt || !stk)
+		vw_fail(e, "out of memory");
+	/* uses */
+	for (uint32_t i = 0; i < V->norder; i++) {
+		uint32_t b = V->order[i];
+
+		for (uint32_t p = V->b[b].phead; p; p = V->p[p].next)
+			if (V->fwd[p] == p)
+				VW_EACHOP(V, p, o, vw_inc(V, &S, vw_find(V, *o)));
+		for (uint32_t q = V->b[b].head;; q = V->p[q].next) {
+			uint32_t x = q ? q : V->b[b].term;
+
+			if (!x)
+				break;
+			if (vw_find(V, x) == x &&
+			    !(V->p[x].in.op == VO_STORE && V->p[x].slot && V->sl[V->p[x].slot - 1].prom))
+				VW_EACHOP(V, x, o, vw_inc(V, &S, vw_find(V, *o)));
+			if (!q)
+				break;
+		}
+	}
+	/* rewriting and numbering, block by block */
+	for (uint32_t i = 0; i < V->norder; i++) {
+		uint32_t b = V->order[i], n = 0, cap = 16;
+
+		for (uint32_t q = V->b[b].head; q; q = V->p[q].next)
+			n++;
+		while (cap < 2 * n + 2)
+			cap *= 2;
+		if (cap > S.cht) {
+			free(S.ht);
+			S.ht = malloc(cap * sizeof *S.ht);
+			if (!S.ht)
+				vw_fail(e, "out of memory");
+			S.cht = cap;
+		}
+		S.hmask = cap - 1;
+		memset(S.ht, 0, cap * sizeof *S.ht);
+		S.memgen = 1;
+		for (uint32_t q = V->b[b].head; q; q = V->p[q].next) {
+			uint32_t r, op, eff;
+			vwhe key, *t;
+
+			if (vw_find(V, q) != q)
+				continue;
+			VW_EACHOP(V, q, o, *o = vw_find(V, *o));
+			for (int it = 0; vw_simp1(e, &S, q, &r) && it < 8; it++)
+				;	/* (rewritten in place: again) */
+			if (r != q) {
+				r = vw_find(V, r);
+				if (r < S.n0 && V->p[r].blk != VW_NOBLK)
+					S.cnt[r] += S.cnt[q];
+				VW_EACHOP(V, q, o, vw_dec(V, &S, *o));
+				S.cnt[q] = 0;
+				V->fwd[q] = r;
+				continue;
+			}
+			op = V->p[q].in.op;
+			eff = vir_optab[op].eff;
+			if (op == VO_STORE && (V->p[q].slot && V->sl[V->p[q].slot - 1].prom))
+				continue;
+			if (eff & (EF_W | EF_C | EF_A) || op == VO_BARRIER || op == VO_VA_ARG || op == VO_VA_START)
+				S.memgen++;
+			if (op == VO_STORE) {
+				vir_ins in = V->p[q].in;
+				uint32_t vt = V->p[in.b].in.ty;
+
+				if (!(in.fl & VIF_VOL) && vir_tysize(vt) && 1u << VIF_W(in.fl) == vir_tysize(vt)) {
+					key = (vwhe){ VO_LOAD, vt, VIF_W(in.fl), in.a, 0, 0, S.memgen, 0 };
+					t = vw_hlook(&S, &key);
+					*t = key;
+					t->v = in.b;
+				}
+				continue;
+			}
+			if (op == VO_LOAD) {
+				vir_ins in = V->p[q].in;
+
+				if (in.fl & VIF_VOL)
+					continue;
+				key = (vwhe){ VO_LOAD, in.ty, in.fl & (3 | VIF_MS), in.a, 0, 0, S.memgen, 0 };
+			} else if ((eff & ~EF_UF) == EF_P && op != VO_BPARAM && op != VO_PARAM && op != VO_PROJ) {
+				vir_ins in = V->p[q].in;
+
+				if (vw_commutes(op) && in.a > in.b)
+					key = (vwhe){ op, in.ty, in.fl, in.b, in.a, in.c, 0, 0 };
+				else
+					key = (vwhe){ op, in.ty, in.fl, in.a, in.b, in.c, 0, 0 };
+			} else
+				continue;
+			t = vw_hlook(&S, &key);
+			if (t->v && V->p[vw_find(V, t->v)].in.ty == V->p[q].in.ty) {
+				r = vw_find(V, t->v);
+				if (r < S.n0 && V->p[r].blk != VW_NOBLK)
+					S.cnt[r] += S.cnt[q];
+				VW_EACHOP(V, q, o, vw_dec(V, &S, *o));
+				S.cnt[q] = 0;
+				V->fwd[q] = r;
+				continue;
+			}
+			if (!t->v) {
+				*t = key;
+				t->v = q;
+			}
+		}
+	}
+	/* what nothing reads */
+	for (uint32_t i = 0; i < V->norder; i++)
+		for (uint32_t q = V->b[V->order[i]].head; q; q = V->p[q].next)
+			if (vw_find(V, q) == q && !S.cnt[q])
+				stk[ns++] = q;
+	while (ns) {
+		uint32_t q = stk[--ns], op = V->p[q].in.op, eff = vir_optab[op].eff;
+
+		if (vw_find(V, q) != q || S.cnt[q] || V->p[q].blk == VW_NOBLK)
+			continue;
+		if (op == VO_LOAD ? (V->p[q].in.fl & VIF_VOL) != 0 :
+		    ((eff & ~EF_UF) != EF_P || op == VO_BPARAM || op == VO_PARAM))
+			continue;
+		VW_EACHOP(V, q, o, {
+			uint32_t x = vw_find(V, *o);
+
+			vw_dec(V, &S, x);
+			if (x < S.n0 && V->p[x].blk != VW_NOBLK && !S.cnt[x] && V->p[x].in.op != VO_BPARAM)
+				stk[ns++] = x;
+		});
+		V->fwd[q] = vw_undefk(e, &S, V->p[q].in.ty);
+	}
+	free(S.ht);
+	free(S.cnt);
+	free(stk);
+}
+
 /* the edge b -> t needs a block of its own: t has parameters and b does not end in br */
 static void vw_split(ecx *e)
 {
@@ -2232,6 +2634,7 @@ VPRIV bool vw_emit(ecx *e)
 	while (vw_trivial(e))
 		;
 	vw_deadparams(e);
+	vw_simplify(e);
 	vw_split(e);
 	/* stores to a slot that is not exposed and that nothing reads are dead */
 	for (uint32_t s = 0; s < V->nsl; s++)

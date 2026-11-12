@@ -968,8 +968,8 @@ static void vl_ins(vl *L, uint32_t b, uint32_t i, uint8_t res)
 	case VO_EXT: {
 		int w = VIF_W(in->fl), a = vl_ix(L, 0, R_X16);
 
-		if (w == 3 || (w == 2 && !x))
-			mov(e, 1, rd, a);
+		if (w == 3 || (w == 2 && (!x || ((in->fl & VIF_MS) && L->lo32[i]))))
+			mov(e, 1, rd, a);	/* (ext.4s whose low half alone is read: a copy) */
 		else if ((in->fl & VIF_MS) && L->lo32[i])	/* only its low half is read: the i32 form */
 			opbf(e, I_SBFM, 0, rd, a, 0, w == 2 ? 31 : (8 << w) - 1);
 		else if (in->fl & VIF_MS)
@@ -980,16 +980,9 @@ static void vl_ins(vl *L, uint32_t b, uint32_t i, uint8_t res)
 			opbf(e, I_UBFM, 0, rd, a, 0, (8 << w) - 1);
 		return;
 	}
-	case VO_TRUNC: {
-		const vir_ins *a = &f->ins[in->a];
-
-		if (L->lo32[in->a] && ((a->op == VO_LOAD && (a->fl & VIF_MS) && VIF_W(a->fl) < 3) ||
-				       (a->op == VO_EXT && (a->fl & VIF_MS) && VIF_W(a->fl) < 3)))
-			mov(e, 1, rd, vl_ix(L, 0, R_X16));	/* (its producer wrote the i32 form) */
-		else
-			op3(e, I_MOV, 0, rd, vl_ix(L, 0, R_X16), 0);
+	case VO_TRUNC:	/* an i32's upper half is never read: a copy (ext.4u clears it) */
+		mov(e, 1, rd, vl_ix(L, 0, R_X16));
 		return;
-	}
 	case VO_P2I: case VO_I2P:
 		mov(e, 1, rd, vl_ix(L, 0, R_X16));
 		return;
