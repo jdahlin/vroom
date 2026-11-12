@@ -43,6 +43,8 @@ typedef struct vl {
 	int fzr, fzx;		/* ... a test of register fzr (fzx: 64-bit) against 0 instead: cbz, cbnz (-1 none) */
 	int fbit;		/* ... of its bit fbit instead (fzr's register): tbz, tbnz (-1 none) */
 	uint32_t tlo, thi;	/* (tlo, thi): instructions folded into a branch (vl_tfold) that emit nothing */
+	uint32_t cclo, cchi;	/* [cclo, cchi]: compares joined by and/or into one condition (cmp, ccmp ...); cchi 0 none */
+	int ccrun;		/* ... the condition the flags hold so far */
 	uint32_t pval;		/* a ptradd the next load or store addresses through (0 none) */
 	int pbase;		/* ... its base register */
 	int64_t poff;		/* ... and offset */
@@ -575,6 +577,73 @@ static void vl_fcmp(vl *L, const vir_ins *in)
 	int d = L->f->ins[in->a].ty == VT_F64;
 
 	word(L->e, 0x1e202000u | (unsigned)d << 22 | (unsigned)vl_fx(L, 1) << 16 | (unsigned)vl_fx(L, 0) << 5);
+}
+
+/*
+ * Compares joined into one condition: icmp, then (icmp, and/or of the value so far and
+ * that compare) once or more, then the brif or select reading the last and/or; every
+ * value read once, nothing in between (the builder's vw_condmerge lays `a && b` out so).
+ * One cmp, then a ccmp per further compare: no register holds a truth value.
+ */
+static bool vl_chain(vl *L, uint32_t b, uint32_t i)
+{
+	const vir_fn *f = L->f;
+	uint32_t end = f->blk[b].first + f->blk[b].n, v = i, j = i + 1;
+
+	for (;;) {
+		const vir_ins *c, *k;
+
+		if (j + 2 >= end || L->uses[v] != 1 || L->o->slot[v] != VIR_NOBLK || L->uses[j] != 1 || L->o->slot[j] != VIR_NOBLK)
+			return false;
+		c = &f->ins[j], k = &f->ins[j + 1];
+		if (c->op != VO_ICMP || (k->op != VO_AND && k->op != VO_OR) || k->ty != VT_I32 || k->a != v || k->b != j)
+			return false;
+		v = j + 1, j += 2;
+		if (f->ins[j].op == VO_ICMP)
+			continue;
+		if ((f->ins[j].op != VO_BRIF && f->ins[j].op != VO_SELECT) || f->ins[j].a != v || L->uses[v] != 1 ||
+		    L->o->slot[v] != VIR_NOBLK)
+			return false;
+		L->cclo = i, L->cchi = v;
+		return true;
+	}
+}
+
+/* a further compare of a chain: flags = its compare when the condition so far allows it (and: holds,
+ * or: fails), else flags that make the joined condition false (and) or true (or) */
+static void vl_ccmp(vl *L, const vir_ins *in, bool isor)
+{
+	static const uint8_t sat[16] = { 4, 0, 2, 0, 8, 0, 1, 0, 2, 0, 0, 8, 0, 4, 0, 0 };	/* nzcv satisfying a condition */
+	ecx *e = L->e;
+	int x = vl_x(L->f, in->a), code = in->fl & 15, cc, rn, rm = -1;
+	int64_t k = 0;
+	bool imm = false;
+	uint32_t w;
+
+	if (L->opr[0] == VR_NONE && vl_iconst(L->f, in->a) && L->opr[1] != VR_NONE) {	/* (as vl_cmp: operands swapped) */
+		rn = vl_gx(L->opr[1]), k = vl_ival(&L->f->ins[in->a]), imm = true;
+		code = vl_swapcc[code];
+	} else {
+		rn = vl_ix(L, 0, R_X16);
+		if (L->opr[1] == VR_NONE && vl_iconst(L->f, in->b))
+			k = vl_ival(&L->f->ins[in->b]), imm = true;
+		else
+			rm = vl_ix(L, 1, R_X17);
+	}
+	if (imm && (k < -31 || k > 31)) {
+		rm = rn == R_X17 ? R_X16 : R_X17;
+		movi(e, 1, rm, k);
+		imm = false;
+	}
+	cc = vl_icc[code];
+	w = (imm && k < 0 ? 0x3a400000u : 0x7a400000u) | (unsigned)x << 31 | (unsigned)(isor ? L->ccrun ^ 1 : L->ccrun) << 12 |
+	    (unsigned)(rn & 31) << 5 | sat[isor ? cc : cc ^ 1];
+	if (imm)
+		w |= 0x800u | (unsigned)(k < 0 ? -k : k) << 16;
+	else
+		w |= (unsigned)(rm & 31) << 16;
+	word(e, w);
+	L->ccrun = cc;
 }
 
 /* the flags of a condition value (operand 0): the fused compare's, else `cmp w, #0` and NE */
@@ -1420,6 +1489,13 @@ static void vl_ins(vl *L, uint32_t b, uint32_t i, uint8_t res)
 			return;
 		__attribute__((fallthrough));
 	case VO_ADD: case VO_SUB: case VO_AND: case VO_OR: case VO_XOR: {
+		if (L->cchi && i > L->cclo && i <= L->cchi) {	/* a chain's and/or: the flags hold it */
+			if (i == L->cchi) {
+				L->fcc = L->ccrun, L->fval = i, L->fzr = -1, L->fbit = -1;
+				L->cchi = 0;
+			}
+			return;
+		}
 		if ((in->op == VO_PTRADD || in->op == VO_ADD || in->op == VO_SUB) && vl_cfold(L, b, i, res))
 			return;
 		if (in->op == VO_AND && vl_tfold(L, b, i))
@@ -1532,6 +1608,15 @@ static void vl_ins(vl *L, uint32_t b, uint32_t i, uint8_t res)
 	case VO_ICMP:
 	case VO_FCMP: {
 		int cc;
+
+		if (in->op == VO_ICMP && L->cchi && i > L->cclo && i < L->cchi) {
+			vl_ccmp(L, in, f->ins[i + 1].op == VO_OR);
+			return;
+		}
+		if (in->op == VO_ICMP && !L->cchi && vl_chain(L, b, i)) {
+			L->ccrun = vl_icc[vl_cmp(L, in)];
+			return;
+		}
 		bool fuse = L->uses[i] == 1 && L->o->slot[i] == VIR_NOBLK && i + 1 < f->blk[b].first + f->blk[b].n &&
 			    (f->ins[i + 1].op == VO_BRIF || f->ins[i + 1].op == VO_SELECT) && f->ins[i + 1].a == i;
 
@@ -1733,6 +1818,7 @@ static void vl_block(vl *L, uint32_t b)
 	uint32_t pos = o->boff[b], ei = o->boff[f->nblk + 1 + b], eend = o->boff[f->nblk + 2 + b];
 
 	L->fcc = -1, L->fzr = -1, L->fbit = -1;
+	L->cchi = 0;
 	L->tlo = L->thi = 0;
 	L->pval = 0, L->xval = 0, L->xc = VIR_NOBLK;
 	L->eb = ei, L->eend = eend;

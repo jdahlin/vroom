@@ -693,6 +693,34 @@ cykler mot virpol, nu +9,9 %.  Samplingar per funktion (storlek 300) varierar
   fel, utan VIR 2082/2082 och byte-identiskt; vir-test 119/119, vir-exposure
   56/56, virgen 101/101, vcc-abi, vcc-driver 212/212, sqlite TCL genom VIR
   1 fel (interrupt2).
+- **ccmp (2026-11-12).**  Byggaren (`vw_condmerge`, före if-konverteringen)
+  slår ihop två grenar mot ett gemensamt mål som LLVM:s
+  FoldBranchToCommonDest: `brif c1, S, O` där S bara håller en heltalsjämförelse
+  c2 och grenar på den med O som ena mål blir `and`/`or` av c1 och c2 (c2
+  inverterad vid behov) och en gren; upprepat ger kedjor.  Jämförelser som ensamma
+  är cbz/tbz (mot 0 och -1) lämnas.  Sänkningen (`vl_chain`, `vl_ccmp`): icmp,
+  sedan (icmp, and/or) en eller flera gånger, sedan brif eller select, allt läst
+  en gång och i rad, blir cmp + ccmp/ccmn (omedelbart 0..31, -1..-31, annars via
+  x17) och inget sanningsvärde i register.
+  **Mätt, och därför snålt påslaget:** att slå ihop varje grenpar (`VCC_CCMP=all`)
+  ger på sqlite 380 ccmp (clang 552) men speedtest1 +0,4 % instruktioner (den
+  andra jämförelsen körs också när den första avgjorde) och oförändrade cykler
+  (median 9,10 mot 9,09 G, 8 parvisa körningar).  Mikrotest (4096 par, 60 000
+  varv): oförutsägbara data 1,45 → 1,18 G cykler (−19 %); första villkoret
+  nästan alltid falskt +1 % cykler, +2 % instruktioner; nästan alltid sant och
+  ett slingburet värde 1,98 → 2,47 G (+25 %: den sammanslagna grenen
+  if-konverteras till csel på beroendekedjan; clang gör samma val).  Utan
+  profil är det alltså en chansning.  Standard är därför bara fallen där
+  if-konverteringen kan följa (resultatet är ett värde: `return a == 1 && b
+  == 2`, `x = c1 || c2 ? p : q`): färre instruktioner och inga grenar.  sqlite:
+  19 ccmp, −18 instruktioner statiskt, speedtest1 −0,1 % instruktioner.
+  `VCC_CCMP=off|all` för mätning.  Kvar att pröva: slå ihop grenpar bara när
+  de är dåligt förutsagda (kräver profil), kedjor av tre i värdefallet.
+  Test `vir_ccmp.c` (alla villkorskoder × and/or × 32/64 bitar, omedelbara,
+  kedjor, select) under clang, vcc, VIR val/all/off; C-sviterna genom VIR i
+  båda lägena samma tre kända fel; utan VIR 2083/2083 och byte-identiskt;
+  vir-test, virgen, vir-exposure, vcc-abi, vcc-volatile, vcc-stress; sqlite
+  hash i alla tre lägena, TCL genom VIR 1 fel (interrupt2).
 
 ### Underlag för V4 (2026-11-11): registerallokering, ingen kod
 
