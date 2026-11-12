@@ -67,8 +67,9 @@ static bool opnd_ok(uint32_t k, uint32_t ty, uint32_t rty)
 	case OK_ANY: return is_valty(ty);
 	case OK_X: return ty == VT_I32 || ty == VT_I64 || ty == VT_PTR;
 	case OK_FP: return ty == VT_F32 || ty == VT_F64;
-	case OK_VI: return ty == VT_I32X4;
-	case OK_VF: return ty == VT_F32X4;
+	case OK_VI: return vir_isvec(rty) && ty == vir_vint(rty);
+	case OK_VF: return vir_isvec(rty) && ty == vir_vflt(rty);
+	case OK_VRED: return vir_isvec(ty) && vir_velem(ty) == rty && ty == vir_vint(ty);
 	case OK_ELEM: return vir_isvec(rty) && ty == vir_velem(rty);
 	case OK_MULTI: return ty == VT_MULTI;
 	case OK_BITC:

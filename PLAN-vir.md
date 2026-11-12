@@ -334,8 +334,33 @@ tre), utan VIR 2083/2083; ASan/UBSan rent.
 
 Mätt i cykler (G): direkt emitter 23,6, VIR 6,33, clang -O3 4,75; 151/151.
 
-Kvar (RESEARCH 6.6 och 5): skalärloopar genom VIR (looprotation: två hopp per
-varv; invarianta uttryck som inte är konstanter); CFI för d8–d15; steg ≠
+**Fjärde omgången (samma dag): 8-bytesbanor och val.**
+
+- **`f64x2` och `i64x2`** (SPEC 4, 7.5; operandslagen `OK_VI`/`OK_VF`/`OK_VRED`
+  följer resultatets banbredd): typer, tabell, verifierare, NEON (`.2d` är
+  `.4s` med storleksbiten), och vektoriseraren är generisk över banbredd
+  (bredden är loopens första lagring; VF 2 eller 4).  Ingen 64-bitars
+  multiplikation; en loop som blandar 4- och 8-bytesdata går skalärt.
+- **Val (`select`)**: jämförelser → `vicmp`/`vfcmp` → `vbitsel` var aldrig
+  testade förut, eftersom testens val hade laddningar i armarna och inte
+  if-konverterades.  Nu 16 jämförelser × två banbredder mot clang.  Två hål
+  det visade: (1) **byggaren tog inte `float`-villkorsuttryck** (`c ? x : y`
+  med `float`: temporärens 8-byteord lästes som `f64`; `vwslot.f32w`), så
+  sådana funktioner gick inte genom VIR alls; (2) heltalsval kommer som
+  `trunc(select i64(ext, ext))` från vandraren och känns nu igen (`VK_W32`).
+- Looprotation i sänkningen (testet kopierat till slutet av loopen) provades:
+  −1,3 % cykler på TSVC, 0 på sqlite, +0,9 % kod.  Inte infört (samma slutsats
+  som tidigare i `vl_dupok`).
+
+`tests/vcc/vir_vec_wide.c` (51 loopar på 8-bytesbanor × varvtal 0–9 och 37).
+TSVC oförändrat (allt där är `float`): 43 av 120, 6,3 G cykler.  SQLites
+speedtest1 genom VIR: samma verifieringshash som clang, 2,29 G cykler (clang
+2,01, direkt emitter 3,05); 5 av 565 innerloopar vektoriseras där (resten är
+listvandringar, anrop och byteloopar).
+
+Kvar (RESEARCH 6.6 och 5): `i8x16`/`i16x8` (byteloopar: kräver att
+i32-räkningen får smalnas); `double` ur `int` (`(double)i`); invarianta
+uttryck som inte är konstanter; CFI för d8–d15; steg ≠
 elementstorlek;
 interleaving; ordnade flyttalsreduktioner; övriga fyra bantyper; x86-64 och
 wasm; tolken och `virgen` känner inte vektorer; kärnan, PostgreSQL och SQLite

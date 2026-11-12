@@ -182,6 +182,8 @@ one sweep when a pass asks for it.
 | 6 | `multi` | Several results, read with `proj` |
 | 7 | `f32x4` | Four `f32` lanes, 128 bits (section 7.5) |
 | 8 | `i32x4` | Four `i32` lanes, 128 bits (section 7.5) |
+| 9 | `f64x2` | Two `f64` lanes, 128 bits (section 7.5) |
+| 10 | `i64x2` | Two `i64` lanes, 128 bits (section 7.5) |
 
 4.1 There are no 8- or 16-bit values, no booleans, no aggregates. Narrow
 integers exist as load and store widths and as the `ext` operation.
@@ -390,22 +392,25 @@ is left out). Lane 0 is at the lowest address.
 field is the lane's, and its alignment is at least the lane's, never 16 by
 default.
 7.5.2 These operations take a vector type as their result type, lane by lane:
-`add sub mul and or xor neg not` on `i32x4`; `fadd fsub fmul fdiv fneg fabs
-fsqrt` on `f32x4`, each lane as 7.4. No flag (`nsw`, `nuw`) is allowed to
+`add sub and or xor neg not` on `i32x4` and `i64x2`, `mul` on `i32x4` only
+(no target has a 64-bit lane multiply); `fadd fsub fmul fdiv fneg fabs fsqrt`
+on `f32x4` and `f64x2`, each lane as 7.4. No flag (`nsw`, `nuw`) is allowed to
 mean anything on a vector: lanes wrap.
-7.5.3 There is no mask type. A mask is an `i32x4` whose lanes are 0 or -1;
-`vbitsel` is defined for every bit pattern.
+7.5.3 There is no mask type. A mask is the integer vector of the same lane
+width (`i32x4` for `f32x4` and `i32x4`, `i64x2` for the other two) whose
+lanes are 0 or -1; `vbitsel` is defined for every bit pattern. Below, V is
+any vector type, I(V) the integer and F(V) the float vector of V's lane width.
 
 | # | Name | `ty` | `a` | `b` | `c` | Eff | Meaning |
 |---|---|---|---|---|---|---|---|
 | 72 | `vsplat` | V | lane type | - | - | P | `a` in every lane |
-| 73 | `vseries` | `i32x4` | - | - | - | P | Lanes 0, 1, 2, 3 |
-| 74 | `vicmp.cc` | `i32x4` | `i32x4` | `i32x4` | - | P | `icmp`'s codes per lane: -1 or 0 |
-| 75 | `vfcmp.cc` | `i32x4` | `f32x4` | `f32x4` | - | P | `fcmp`'s codes per lane: -1 or 0 |
-| 76 | `vbitsel` | V | `i32x4` | V | V | P | Per bit: `a` set takes `b`, clear takes `c` |
-| 77 | `vs2f` | `f32x4` | `i32x4` | - | - | P,F | Signed lanes to float |
+| 73 | `vseries` | integer V | - | - | - | P | Lanes 0, 1, 2, ... |
+| 74 | `vicmp.cc` | integer V | V | V | - | P | `icmp`'s codes per lane: -1 or 0 |
+| 75 | `vfcmp.cc` | integer V | F(V) | F(V) | - | P | `fcmp`'s codes per lane: -1 or 0 |
+| 76 | `vbitsel` | V | I(V) | V | V | P | Per bit: `a` set takes `b`, clear takes `c` |
+| 77 | `vs2f` | float V | I(V) | - | - | P,F | Signed lanes to float of the same width |
 | 78 | `vrev` | V | V | - | - | P | The lanes in reverse order |
-| 79 | `vreduce` | `i32` | `i32x4` | - | - | P | The lanes' wrapping sum |
+| 79 | `vreduce` | `i32` `i64` | the vector of such lanes | - | - | P | The lanes' wrapping sum |
 
 7.5.4 Register allocation: vectors are in the float class; a vector's spill
 slot is 16 bytes (15.2), and no v register keeps a vector across a call. A

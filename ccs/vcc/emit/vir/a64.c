@@ -1485,6 +1485,8 @@ static bool vl_vec(vl *L, const vir_ins *in, uint8_t res)
 	ecx *e = L->e;
 	vir_fn *f = L->f;
 	int vd = res == VR_NONE ? 31 : vl_gv(res);
+	/* two 64-bit lanes: the size bit of every lane-wise instruction used here */
+	uint32_t D = in->ty == VT_F64X2 || in->ty == VT_I64X2 || (in->op == VO_VREDUCE && f->ins[in->a].ty == VT_I64X2) ? 0x00400000u : 0;
 
 	switch (in->op) {
 	case VO_LOAD:
@@ -1502,13 +1504,13 @@ static bool vl_vec(vl *L, const vir_ins *in, uint8_t res)
 
 		if (!vir_isvec(in->ty))
 			return false;
-		VW3(op[in->op - VO_FADD], vl_fx(L, 1), vl_fx(L, 0), vd);
+		VW3(op[in->op - VO_FADD] | D, vl_fx(L, 1), vl_fx(L, 0), vd);
 		return true;
 	}
 	case VO_FNEG: case VO_FABS: case VO_FSQRT:
 		if (!vir_isvec(in->ty))
 			return false;
-		VW2(in->op == VO_FNEG ? 0x6ea0f800u : in->op == VO_FABS ? 0x4ea0f800u : 0x6ea1f800u, vl_fx(L, 0), vd);
+		VW2((in->op == VO_FNEG ? 0x6ea0f800u : in->op == VO_FABS ? 0x4ea0f800u : 0x6ea1f800u) | D, vl_fx(L, 0), vd);
 		return true;
 	case VO_ADD: case VO_SUB: case VO_MUL: case VO_AND: case VO_OR: case VO_XOR: {
 		static const uint32_t op[] = { [VO_ADD] = 0x4ea08400u, [VO_SUB] = 0x6ea08400u, [VO_MUL] = 0x4ea09c00u,
@@ -1516,13 +1518,13 @@ static bool vl_vec(vl *L, const vir_ins *in, uint8_t res)
 
 		if (!vir_isvec(in->ty))
 			return false;
-		VW3(op[in->op], vl_fx(L, 1), vl_fx(L, 0), vd);
+		VW3(op[in->op] | (in->op == VO_ADD || in->op == VO_SUB ? D : 0), vl_fx(L, 1), vl_fx(L, 0), vd);
 		return true;
 	}
 	case VO_NEG: case VO_NOT:
 		if (!vir_isvec(in->ty))
 			return false;
-		VW2(in->op == VO_NEG ? 0x6ea0b800u : 0x6e205800u, vl_fx(L, 0), vd);
+		VW2(in->op == VO_NEG ? 0x6ea0b800u | D : 0x6e205800u, vl_fx(L, 0), vd);
 		return true;
 	case VO_SELECT:
 		if (!vir_isvec(in->ty))
@@ -1530,14 +1532,14 @@ static bool vl_vec(vl *L, const vir_ins *in, uint8_t res)
 		vl_fail(L, "VIR lowering: select of vectors");
 	case VO_VSPLAT:
 		if (L->opr[0] != VR_NONE && vl_fcls(L->opr[0]))
-			VW2(0x4e040400u, vl_gv(L->opr[0]), vd);	/* dup v.4s, v.s[0] */
+			VW2(D ? 0x4e080400u : 0x4e040400u, vl_gv(L->opr[0]), vd);	/* dup v.4s, v.s[0] (.2d, .d[0]) */
 		else	/* (a constant: its bits, an fconst's too, through x16) */
-			VW2(0x4e040c00u, vl_ix(L, 0, R_X16), vd);	/* dup v.4s, w */
+			VW2(D ? 0x4e080c00u : 0x4e040c00u, vl_ix(L, 0, R_X16), vd);	/* dup v.4s, w (.2d, x) */
 		return true;
 	case VO_VSERIES:
-		movi(e, 1, R_X16, 0x0000000100000000ll);
+		movi(e, 1, R_X16, D ? 0 : 0x0000000100000000ll);
 		word(e, f_in(1, vd, R_X16));
-		movi(e, 1, R_X16, 0x0000000300000002ll);
+		movi(e, 1, R_X16, D ? 1 : 0x0000000300000002ll);
 		word(e, q_in_hi(vd, R_X16));
 		return true;
 	case VO_VICMP: {
@@ -1549,7 +1551,7 @@ static bool vl_vec(vl *L, const vir_ins *in, uint8_t res)
 		};
 		int a = vl_fx(L, 0), b = vl_fx(L, 1), c = in->fl & 15;
 
-		VW3(t[c].op, t[c].sw ? a : b, t[c].sw ? b : a, vd);
+		VW3(t[c].op | D, t[c].sw ? a : b, t[c].sw ? b : a, vd);
 		if (t[c].inv)
 			VW2(0x6e205800u, vd, vd);
 		return true;
@@ -1558,23 +1560,23 @@ static bool vl_vec(vl *L, const vir_ins *in, uint8_t res)
 		int a = vl_fx(L, 0), b = vl_fx(L, 1);
 
 		switch (in->fl & 15) {
-		case 0: VW3(0x4e20e400u, b, a, vd); break;	/* oeq */
-		case 1: VW3(0x4e20e400u, b, a, vd); VW2(0x6e205800u, vd, vd); break;	/* une */
-		case 2: VW3(0x6ea0e400u, a, b, vd); break;	/* olt: b > a */
-		case 3: VW3(0x6e20e400u, a, b, vd); break;	/* ole: b >= a */
-		case 4: VW3(0x6ea0e400u, b, a, vd); break;	/* ogt */
-		case 5: VW3(0x6e20e400u, b, a, vd); break;	/* oge */
+		case 0: VW3(0x4e20e400u | D, b, a, vd); break;	/* oeq */
+		case 1: VW3(0x4e20e400u | D, b, a, vd); VW2(0x6e205800u, vd, vd); break;	/* une */
+		case 2: VW3(0x6ea0e400u | D, a, b, vd); break;	/* olt: b > a */
+		case 3: VW3(0x6e20e400u | D, a, b, vd); break;	/* ole: b >= a */
+		case 4: VW3(0x6ea0e400u | D, b, a, vd); break;	/* ogt */
+		case 5: VW3(0x6e20e400u | D, b, a, vd); break;	/* oge */
 		default:	/* uno: not (a == a and b == b); one: a > b or b > a */
 			if (a == 31 || b == 31 || vd == 31)
 				vl_fail(L, "VIR lowering: a vector compare without a scratch register");
 			if ((in->fl & 15) == 6) {
-				VW3(0x4e20e400u, a, a, 31);
-				VW3(0x4e20e400u, b, b, vd);
+				VW3(0x4e20e400u | D, a, a, 31);
+				VW3(0x4e20e400u | D, b, b, vd);
 				VW3(0x4e201c00u, 31, vd, vd);
 				VW2(0x6e205800u, vd, vd);
 			} else {
-				VW3(0x6ea0e400u, b, a, 31);
-				VW3(0x6ea0e400u, a, b, vd);
+				VW3(0x6ea0e400u | D, b, a, 31);
+				VW3(0x6ea0e400u | D, a, b, vd);
 				VW3(0x4ea01c00u, 31, vd, vd);
 			}
 			break;
@@ -1596,15 +1598,21 @@ static bool vl_vec(vl *L, const vir_ins *in, uint8_t res)
 		return true;
 	}
 	case VO_VS2F:
-		VW2(0x4e21d800u, vl_fx(L, 0), vd);	/* scvtf */
+		VW2(0x4e21d800u | D, vl_fx(L, 0), vd);	/* scvtf */
 		return true;
 	case VO_VREV:
+		if (D) {	/* (two lanes: the halves swapped) */
+			int a = vl_fx(L, 0);
+
+			word(e, 0x6e004000u | (unsigned)a << 16 | (unsigned)a << 5 | (unsigned)vd);
+			return true;
+		}
 		VW2(0x4ea00800u, vl_fx(L, 0), vd);	/* rev64 .4s, then the halves swapped: ext #8 */
 		word(e, 0x6e004000u | (unsigned)vd << 16 | (unsigned)vd << 5 | (unsigned)vd);
 		return true;
 	case VO_VREDUCE:
-		VW2(0x4eb1b800u, vl_fx(L, 0), 31);	/* addv s31, v.4s */
-		word(e, f_out(0, res == VR_NONE ? R_X16 : vl_gx(res), 31));
+		VW2(D ? 0x5ef1b800u : 0x4eb1b800u, vl_fx(L, 0), 31);	/* addv s31, v.4s (addp d31, v.2d) */
+		word(e, f_out(D != 0, res == VR_NONE ? R_X16 : vl_gx(res), 31));
 		return true;
 	default:
 		return false;

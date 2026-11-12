@@ -628,6 +628,11 @@ VPRIV void vw_load(ecx *e, int rd, const lval *l, int size, bool sgn)
 	if (!ty)
 		vw_fail(e, "VIR: a float load of this size");
 	a = vw_addr(e, l, (uint64_t)size, &slot, &rel);
+	if (f && size == 8 && slot != VW_NOBLK && V->sl[slot].size == 8 && V->sl[slot].f32w) {
+		/* the word of a float temporary (a conditional expression's value): the f32 stored in it */
+		size = 4, ty = VT_F32;
+		a = vw_addr(e, l, 4, &slot, &rel);
+	}
 	if (slot != VW_NOBLK && !e->novtag) {	/* the value last stored here, in this block (not volatile) */
 		for (uint32_t i = V->nst; i-- > 0;) {
 			vwstent *s = &V->st[i];
@@ -688,12 +693,18 @@ VPRIV void vw_store(ecx *e, int rs, const lval *l, int size)
 		vw_write(e, l->ref, V->cur, v);
 		return;
 	}
-	if (size == 8 && vw_ty(e, v) == VT_F32)
-		size = 4;	/* (a float's word in an argument slot: its low 4 bytes) */
-	ty = vw_stty(e, v, size);
-	if (!ty)
-		vw_fail(e, "VIR: a float store of this size");
-	a = vw_addr(e, l, (uint64_t)size, &slot, &rel);
+	{
+		bool fw = size == 8 && vw_ty(e, v) == VT_F32;
+
+		if (fw)
+			size = 4;	/* (a float's word in an argument or temporary slot: its low 4 bytes) */
+		ty = vw_stty(e, v, size);
+		if (!ty)
+			vw_fail(e, "VIR: a float store of this size");
+		a = vw_addr(e, l, (uint64_t)size, &slot, &rel);
+		if (slot != VW_NOBLK && V->sl[slot].size == 8 && (fw || size == 8))
+			V->sl[slot].f32w = fw;	/* (what a load of the word into a float name reads back) */
+	}
 	v = vw_conv(e, v, ty);
 	{
 		uint32_t s = vw_ins(e, VO_STORE, VT_VOID, vw_mfl(size, l->align, false) | (e->novtag ? VIF_VOL : 0), a, v, 0);

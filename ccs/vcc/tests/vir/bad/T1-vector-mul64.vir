@@ -1,0 +1,14 @@
+; no multiply on 64-bit lanes
+vir 1
+target arm64-darwin
+sig %s = (int) -> none
+func @f %s {
+b0:
+  v0:ptr = param 0.0
+  v1:i64x2 = vseries
+  v2:i64x2 = mul v1, v1
+  store.8 v0, v2 align 8
+  ret
+}
+; ---
+@f b0.2: T1: mul cannot have result type i64x2

@@ -45,6 +45,37 @@ b1(v31:i32x4, v32:f32x4):
   v34:i64 = ext.4s v33
   ret v34
 }
+
+func @vec2 %s {
+b0:
+  v0:ptr = param 0.0
+  v1:ptr = param 1.0
+  v2:i64 = param 2.0
+  v3:f64x2 = load.8 v0 align 8
+  v4:f64x2 = load.8 v1 align 8
+  v5:f64x2 = fadd v3, v4
+  v6:f64x2 = fmul v5, v3
+  v7:f64x2 = fdiv v6, v4
+  v8:f64x2 = fsqrt v7
+  v9:f64x2 = vsplat 0x1p+0:f64
+  v10:i64x2 = vfcmp.oge v8, v9
+  v11:f64x2 = vbitsel v10, v8, v9
+  v12:f64x2 = vrev v11
+  store.8 v0, v12 align 8
+  v13:i64x2 = vsplat v2
+  v14:i64x2 = vseries
+  v15:i64x2 = add v13, v14
+  v16:i64x2 = sub v15, v13
+  v17:i64x2 = xor v16, v14
+  v18:i64x2 = neg v17
+  v19:i64x2 = vicmp.ult v18, v13
+  v20:i64x2 = vbitsel v19, v18, v13
+  v21:f64x2 = vs2f v20
+  store.8 v1, v21 align 8
+  v22:i64 = vreduce v20
+  ret v22
+}
+
 ; ---
 vir 1
 target arm64-darwin
@@ -92,4 +123,34 @@ b1(v31:i32x4, v32:f32x4):
   v33:i32 = vreduce v31
   v34:i64 = ext.4s v33
   ret v34
+}
+
+func @vec2 %s0 {
+b0:
+  v0:ptr = param 0.0
+  v1:ptr = param 1.0
+  v2:i64 = param 2.0
+  v3:f64x2 = load.8 v0 align 8
+  v4:f64x2 = load.8 v1 align 8
+  v5:f64x2 = fadd v3, v4
+  v6:f64x2 = fmul v5, v3
+  v7:f64x2 = fdiv v6, v4
+  v8:f64x2 = fsqrt v7
+  v9:f64x2 = vsplat 0x1p+0
+  v10:i64x2 = vfcmp.oge v8, v9
+  v11:f64x2 = vbitsel v10, v8, v9
+  v12:f64x2 = vrev v11
+  store.8 v0, v12 align 8
+  v13:i64x2 = vsplat v2
+  v14:i64x2 = vseries
+  v15:i64x2 = add v13, v14
+  v16:i64x2 = sub v15, v13
+  v17:i64x2 = xor v16, v14
+  v18:i64x2 = neg v17
+  v19:i64x2 = vicmp.ult v18, v13
+  v20:i64x2 = vbitsel v19, v18, v13
+  v21:f64x2 = vs2f v20
+  store.8 v1, v21 align 8
+  v22:i64 = vreduce v20
+  ret v22
 }

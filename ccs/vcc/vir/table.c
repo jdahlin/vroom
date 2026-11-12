@@ -17,23 +17,23 @@ const vir_opinfo vir_optab[256] = {
 	R(VO_BPARAM, "bparam", FM_BPARAM, TM_ANY | TM_VEC, NONE, NONE, NONE, 0, EF_P),
 	R(VO_PARAM, "param", FM_PARAM, TM_I64 | TM_F | TM_PTR, IMM, IMM, NONE, 0, EF_P),
 	R(VO_PROJ, "proj", FM_STD, TM_ANY, MULTI, IMM, NONE, 0, EF_P),
-	R(VO_ADD, "add", FM_STD, TM_I | TM_I32X4, T, T, NONE, ARITH_FL, EF_P | EF_UF),
-	R(VO_SUB, "sub", FM_STD, TM_I | TM_I32X4, T, T, NONE, ARITH_FL, EF_P | EF_UF),
+	R(VO_ADD, "add", FM_STD, TM_I | TM_VI, T, T, NONE, ARITH_FL, EF_P | EF_UF),
+	R(VO_SUB, "sub", FM_STD, TM_I | TM_VI, T, T, NONE, ARITH_FL, EF_P | EF_UF),
 	R(VO_MUL, "mul", FM_STD, TM_I | TM_I32X4, T, T, NONE, ARITH_FL, EF_P | EF_UF),
 	R(VO_SDIV, "sdiv", FM_STD, TM_I, T, T, NONE, VIF_EXACT, EF_U),
 	R(VO_UDIV, "udiv", FM_STD, TM_I, T, T, NONE, VIF_EXACT, EF_U),
 	R(VO_SREM, "srem", FM_STD, TM_I, T, T, NONE, 0, EF_U),
 	R(VO_UREM, "urem", FM_STD, TM_I, T, T, NONE, 0, EF_U),
-	R(VO_AND, "and", FM_STD, TM_I | TM_I32X4, T, T, NONE, 0, EF_P),
-	R(VO_OR, "or", FM_STD, TM_I | TM_I32X4, T, T, NONE, 0, EF_P),
-	R(VO_XOR, "xor", FM_STD, TM_I | TM_I32X4, T, T, NONE, 0, EF_P),
+	R(VO_AND, "and", FM_STD, TM_I | TM_VI, T, T, NONE, 0, EF_P),
+	R(VO_OR, "or", FM_STD, TM_I | TM_VI, T, T, NONE, 0, EF_P),
+	R(VO_XOR, "xor", FM_STD, TM_I | TM_VI, T, T, NONE, 0, EF_P),
 	R(VO_SHL, "shl", FM_STD, TM_I, T, T, NONE, ARITH_FL, EF_P | EF_UF),
 	R(VO_LSHR, "lshr", FM_STD, TM_I, T, T, NONE, VIF_EXACT, EF_P | EF_UF),
 	R(VO_ASHR, "ashr", FM_STD, TM_I, T, T, NONE, VIF_EXACT, EF_P | EF_UF),
 	R(VO_UMULHI, "umulhi", FM_STD, TM_I64, I64, I64, NONE, 0, EF_P),
 	R(VO_SMULHI, "smulhi", FM_STD, TM_I64, I64, I64, NONE, 0, EF_P),
-	R(VO_NEG, "neg", FM_STD, TM_I | TM_I32X4, T, NONE, NONE, ARITH_FL, EF_P | EF_UF),
-	R(VO_NOT, "not", FM_STD, TM_I | TM_I32X4, T, NONE, NONE, 0, EF_P),
+	R(VO_NEG, "neg", FM_STD, TM_I | TM_VI, T, NONE, NONE, ARITH_FL, EF_P | EF_UF),
+	R(VO_NOT, "not", FM_STD, TM_I | TM_VI, T, NONE, NONE, 0, EF_P),
 	R(VO_CLZ, "clz", FM_STD, TM_I, T, NONE, NONE, VIF_NZ, EF_P | EF_UF),
 	R(VO_CTZ, "ctz", FM_STD, TM_I, T, NONE, NONE, VIF_NZ, EF_P | EF_UF),
 	R(VO_POPCNT, "popcnt", FM_STD, TM_I, T, NONE, NONE, 0, EF_P),
@@ -43,13 +43,13 @@ const vir_opinfo vir_optab[256] = {
 	R(VO_ICMP, "icmp", FM_CC, TM_I32, X, X, NONE, 15, EF_P),
 	R(VO_FCMP, "fcmp", FM_CC, TM_I32, FP, FP, NONE, 15, EF_P),
 	R(VO_SELECT, "select", FM_STD, TM_ANY | TM_VEC, I, T, T, 0, EF_P),
-	R(VO_FADD, "fadd", FM_STD, TM_F | TM_F32X4, T, T, NONE, 0, EF_P | EF_F),
-	R(VO_FSUB, "fsub", FM_STD, TM_F | TM_F32X4, T, T, NONE, 0, EF_P | EF_F),
-	R(VO_FMUL, "fmul", FM_STD, TM_F | TM_F32X4, T, T, NONE, 0, EF_P | EF_F),
-	R(VO_FDIV, "fdiv", FM_STD, TM_F | TM_F32X4, T, T, NONE, 0, EF_P | EF_F),
-	R(VO_FNEG, "fneg", FM_STD, TM_F | TM_F32X4, T, NONE, NONE, 0, EF_P),
-	R(VO_FABS, "fabs", FM_STD, TM_F | TM_F32X4, T, NONE, NONE, 0, EF_P),
-	R(VO_FSQRT, "fsqrt", FM_STD, TM_F | TM_F32X4, T, NONE, NONE, 0, EF_P | EF_F),
+	R(VO_FADD, "fadd", FM_STD, TM_F | TM_VF, T, T, NONE, 0, EF_P | EF_F),
+	R(VO_FSUB, "fsub", FM_STD, TM_F | TM_VF, T, T, NONE, 0, EF_P | EF_F),
+	R(VO_FMUL, "fmul", FM_STD, TM_F | TM_VF, T, T, NONE, 0, EF_P | EF_F),
+	R(VO_FDIV, "fdiv", FM_STD, TM_F | TM_VF, T, T, NONE, 0, EF_P | EF_F),
+	R(VO_FNEG, "fneg", FM_STD, TM_F | TM_VF, T, NONE, NONE, 0, EF_P),
+	R(VO_FABS, "fabs", FM_STD, TM_F | TM_VF, T, NONE, NONE, 0, EF_P),
+	R(VO_FSQRT, "fsqrt", FM_STD, TM_F | TM_VF, T, NONE, NONE, 0, EF_P | EF_F),
 	R(VO_FEXT, "fext", FM_STD, TM_F64, F32, NONE, NONE, 0, EF_P | EF_F),
 	R(VO_FTRUNC, "ftrunc", FM_STD, TM_F32, F64, NONE, NONE, 0, EF_P | EF_F),
 	R(VO_S2F, "s2f", FM_STD, TM_F, I, NONE, NONE, 0, EF_P | EF_F),
@@ -80,13 +80,13 @@ const vir_opinfo vir_optab[256] = {
 	R(VO_FRAMEADDR, "frameaddr", FM_STD, TM_PTR, IMM, NONE, NONE, 0, EF_R),
 	R(VO_RETADDR, "retaddr", FM_STD, TM_PTR, IMM, NONE, NONE, 0, EF_R),
 	R(VO_VSPLAT, "vsplat", FM_STD, TM_VEC, ELEM, NONE, NONE, 0, EF_P),
-	R(VO_VSERIES, "vseries", FM_NONE, TM_I32X4, NONE, NONE, NONE, 0, EF_P),
-	R(VO_VICMP, "vicmp", FM_CC, TM_I32X4, VI, VI, NONE, 15, EF_P),
-	R(VO_VFCMP, "vfcmp", FM_CC, TM_I32X4, VF, VF, NONE, 15, EF_P),
+	R(VO_VSERIES, "vseries", FM_NONE, TM_VI, NONE, NONE, NONE, 0, EF_P),
+	R(VO_VICMP, "vicmp", FM_CC, TM_VI, T, T, NONE, 15, EF_P),
+	R(VO_VFCMP, "vfcmp", FM_CC, TM_VI, VF, VF, NONE, 15, EF_P),
 	R(VO_VBITSEL, "vbitsel", FM_STD, TM_VEC, VI, T, T, 0, EF_P),
-	R(VO_VS2F, "vs2f", FM_STD, TM_F32X4, VI, NONE, NONE, 0, EF_P | EF_F),
+	R(VO_VS2F, "vs2f", FM_STD, TM_VF, VI, NONE, NONE, 0, EF_P | EF_F),
 	R(VO_VREV, "vrev", FM_STD, TM_VEC, T, NONE, NONE, 0, EF_P),
-	R(VO_VREDUCE, "vreduce", FM_STD, TM_I32, VI, NONE, NONE, 0, EF_P),
+	R(VO_VREDUCE, "vreduce", FM_STD, TM_I, VRED, NONE, NONE, 0, EF_P),
 	R(VO_BR, "br", FM_BR, TM_V, BLK, NONE, EXT, 0, EF_T),
 	R(VO_BRIF, "brif", FM_STD, TM_V, I, BLK, BLK, VIF_LIKELY | VIF_UNLIKELY, EF_T),
 	R(VO_SWITCH, "switch", FM_SWITCH, TM_V, I, BLK, EXT, 0, EF_T),
@@ -96,7 +96,7 @@ const vir_opinfo vir_optab[256] = {
 	R(VO_TRAP, "trap", FM_NONE, TM_V, NONE, NONE, NONE, 0, EF_T),
 };
 
-const char *const vir_tyname[VT_N] = { "void", "i32", "i64", "f32", "f64", "ptr", "multi", "f32x4", "i32x4" };
+const char *const vir_tyname[VT_N] = { "void", "i32", "i64", "f32", "f64", "ptr", "multi", "f32x4", "i32x4", "f64x2", "i64x2" };
 const char *const vir_icc[10] = { "eq", "ne", "slt", "sle", "sgt", "sge", "ult", "ule", "ugt", "uge" };
 const char *const vir_fcc[8] = { "oeq", "une", "olt", "ole", "ogt", "oge", "uno", "one" };
 
@@ -128,9 +128,10 @@ uint32_t vir_opnd_fixed(uint32_t op, uint32_t ty, uint32_t k)
 	case OK_I64: case OK_CONSTV: return VT_I64;
 	case OK_F64: return VT_F64;
 	case OK_PTR: return VT_PTR;
-	case OK_VI: return VT_I32X4;
-	case OK_VF: return VT_F32X4;
+	case OK_VI: return vir_vint(ty);
+	case OK_VF: return vir_vflt(ty);
 	case OK_ELEM: return vir_velem(ty);
+	case OK_VRED: return ty == VT_I32 ? VT_I32X4 : ty == VT_I64 ? VT_I64X2 : VT_VOID;
 	case OK_BITC: return ty == VT_I32 ? VT_F32 : ty == VT_F32 ? VT_I32 : ty == VT_I64 ? VT_F64 : ty == VT_F64 ? VT_I64 : VT_VOID;
 	default: return VT_VOID;
 	}

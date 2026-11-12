@@ -464,7 +464,7 @@ than scalar.
    VIR takes the function.
 4. Types, table rows, verifier, parser, printer, allocator slot sizes (5.1
    to 5.4), with `tests/vir/` units; then lowering (5.5); then 6.2 to 6.4.
-   Done for `f32x4` and `i32x4` on arm64, with vector spills and the runtime
+   Done for `f32x4`, `i32x4`, `f64x2` and `i64x2` on arm64, with vector spills and the runtime
    range checks of 6.3, without interleaving: 43 of TSVC's 120 innermost
    loops, 151/151 checksums, 2.65 s against clang's 1.49 s (`PLAN-vir.md`,
    status of 2026-11-12). Of item 3 one part is done: scalar floats stay in

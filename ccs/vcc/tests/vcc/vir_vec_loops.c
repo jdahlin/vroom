@@ -118,6 +118,18 @@ static long r_size(int n) { return l_size(10, 10 + (unsigned long)n); }
 static long r_size2(int n) { return l_size(30, (unsigned long)n); }	/* (lo above hi: no iteration) */
 static long r_uwrap(int n) { return l_uwrap((unsigned)n); }
 
+/* selects the if-conversion makes (both values computed before the test): every comparison */
+#define FSEL(nm, OP) NI long nm(int n) { for (int i = 0; i < n; i++) { float x = b[i + 8], y = c[i + 8] * 4; a[i + 8] = x OP y ? x : y; } return 0; }
+FSEL(s_flt, <) FSEL(s_fle, <=) FSEL(s_fgt, >) FSEL(s_fge, >=) FSEL(s_feq, ==) FSEL(s_fne, !=)
+#define ISEL(nm, T, OP) NI long nm(int n) { for (int i = 0; i < n; i++) { T x = (T)ib[i + 8], y = (T)ic[i + 8]; ia[i + 8] = x OP y ? (int)x : (int)y + 1; } return 0; }
+ISEL(s_ilt, int, <) ISEL(s_ile, int, <=) ISEL(s_igt, int, >) ISEL(s_ige, int, >=) ISEL(s_ieq, int, ==) ISEL(s_ine, int, !=)
+ISEL(s_ult, unsigned, <) ISEL(s_ule, unsigned, <=) ISEL(s_ugt, unsigned, >) ISEL(s_uge, unsigned, >=)
+/* a float test picking integers, an integer test picking floats, a test against the index, a NaN in the data */
+NI long s_fi(int n) { for (int i = 0; i < n; i++) { int x = ib[i + 8], y = ic[i + 8]; ia[i + 8] = b[i + 8] > 9 ? x : y; } return 0; }
+NI long s_if(int n) { for (int i = 0; i < n; i++) { float x = b[i + 8], y = d[i + 8]; a[i + 8] = ib[i + 8] > 40 ? x : y; } return 0; }
+NI long s_idx(int n) { for (int i = 0; i < n; i++) { int x = ib[i + 8], y = ic[i + 8]; ia[i + 8] = i > 3 ? x : y; } return 0; }
+NI long s_nan(int n) { b[10] = __builtin_nanf(""); c[13] = __builtin_nanf(""); for (int i = 0; i < n; i++) { float x = b[i + 8], y = c[i + 8]; a[i + 8] = x < y ? 1.0f : x != y ? 2.0f : 3.0f; } b[10] = c[13] = 0; return 0; }
+
 static long r_param(int n) { return l_param(a + 8, b + 8, n); }
 static long r_param2(int n) { return l_param(a + 9, a + 8, n); }	/* the two overlap: the scalar order shows */
 static long r_param3(int n) { return l_param(a + 8, a + 9, n); }
@@ -132,6 +144,8 @@ int main(void)
 		T(l_dm5), T(l_dm4), T(l_dm3), T(l_dm2), T(l_dm1), T(l_dp1), T(l_dp2), T(l_dp3), T(l_dp4), T(l_dp5),
 		T(l_ddm2), T(l_ddm1), T(l_ddp1), T(l_ddp3), T(l_ddp4), T(l_stld), T(l_stld2), T(l_stst), T(l_stst2),
 		T(l_int), T(l_iota), T(l_iotaf), T(l_sum), T(l_sum2), T(l_fsum), T(l_sel), T(l_isel), T(l_inv), T(l_invsame),
+		T(s_flt), T(s_fle), T(s_fgt), T(s_fge), T(s_feq), T(s_fne), T(s_ilt), T(s_ile), T(s_igt), T(s_ige), T(s_ieq), T(s_ine),
+		T(s_ult), T(s_ule), T(s_ugt), T(s_uge), T(s_fi), T(s_if), T(s_idx), T(s_nan),
 		T(l_2d), T(l_spill), T(r_stepv1), T(r_stepv3), T(l_twice), T(r_distv9), T(r_distv6), T(r_distv50), T(r_uns2), T(r_size),
 		T(r_size2), T(r_uwrap), T(r_param), T(r_param2), T(r_param3), T(r_psum), T(r_lim), T(l_cond), T(l_scal), T(l_wrap),
 	};

@@ -36,11 +36,17 @@
 
 /* ---- 4: types ---- */
 enum { VT_VOID, VT_I32, VT_I64, VT_F32, VT_F64, VT_PTR, VT_MULTI,
-       VT_F32X4, VT_I32X4,	/* 128-bit vectors (RESEARCH-vectors.md 5.1; the other four lane shapes are not in yet) */
+       VT_F32X4, VT_I32X4, VT_F64X2, VT_I64X2,	/* 128-bit vectors (RESEARCH-vectors.md 5.1; i8x16 and i16x8 are not in yet) */
        VT_N };
-static inline bool vir_isvec(uint32_t ty) { return ty == VT_F32X4 || ty == VT_I32X4; }
+static inline bool vir_isvec(uint32_t ty) { return ty >= VT_F32X4 && ty <= VT_I64X2; }
 /* a vector's lane type; a scalar's own */
-static inline uint32_t vir_velem(uint32_t ty) { return ty == VT_F32X4 ? VT_F32 : ty == VT_I32X4 ? VT_I32 : ty; }
+static inline uint32_t vir_velem(uint32_t ty)
+{
+	return ty == VT_F32X4 ? VT_F32 : ty == VT_I32X4 ? VT_I32 : ty == VT_F64X2 ? VT_F64 : ty == VT_I64X2 ? VT_I64 : ty;
+}
+/* the integer vector with a vector's lane width (its mask), the float one; VT_VOID for a scalar */
+static inline uint32_t vir_vint(uint32_t ty) { return ty == VT_F32X4 || ty == VT_I32X4 ? VT_I32X4 : ty == VT_F64X2 || ty == VT_I64X2 ? VT_I64X2 : VT_VOID; }
+static inline uint32_t vir_vflt(uint32_t ty) { return ty == VT_F32X4 || ty == VT_I32X4 ? VT_F32X4 : ty == VT_F64X2 || ty == VT_I64X2 ? VT_F64X2 : VT_VOID; }
 
 /* ---- 7.3, 8.1: opcodes ---- */
 enum {
@@ -61,12 +67,12 @@ enum {
 	/* vectors: add sub mul and or xor neg not, the f* operations, select, load and store take vector
 	 * types as they are; a mask is an i32x4 whose lanes are 0 or -1 */
 	VO_VSPLAT = 72,		/* a in every lane */
-	VO_VSERIES = 73,	/* lanes 0, 1, 2, 3 */
-	VO_VICMP = 74, VO_VFCMP = 75,	/* icmp's, fcmp's codes per lane: 0 or -1 */
+	VO_VSERIES = 73,	/* lanes 0, 1, 2, ... */
+	VO_VICMP = 74, VO_VFCMP = 75,	/* icmp's, fcmp's codes per lane: 0 or -1, in the integer vector of that lane width */
 	VO_VBITSEL = 76,	/* per bit: a ? b : c */
-	VO_VS2F = 77,		/* signed lanes to float */
+	VO_VS2F = 77,		/* signed lanes to float of the same width */
 	VO_VREV = 78,		/* the lanes in reverse order */
-	VO_VREDUCE = 79,	/* the lanes' sum (i32x4 -> i32) */
+	VO_VREDUCE = 79,	/* the lanes' sum (i32x4 -> i32, i64x2 -> i64) */
 	VO_BR = 80, VO_BRIF = 81, VO_SWITCH = 82, VO_IBR = 83, VO_ASMGOTO = 84, VO_RET = 85, VO_TRAP = 86,
 	VO_TARGET0 = 128,	/* 128-255: target instructions introduced by lowering */
 	VO_N = 256
@@ -183,7 +189,8 @@ enum {	/* result type sets */
 	TM_V = 1 << VT_VOID, TM_I32 = 1 << VT_I32, TM_I64 = 1 << VT_I64, TM_F32 = 1 << VT_F32,
 	TM_F64 = 1 << VT_F64, TM_PTR = 1 << VT_PTR, TM_MULTI = 1 << VT_MULTI,
 	TM_I = TM_I32 | TM_I64, TM_F = TM_F32 | TM_F64, TM_ANY = TM_I | TM_F | TM_PTR,
-	TM_F32X4 = 1 << VT_F32X4, TM_I32X4 = 1 << VT_I32X4, TM_VEC = TM_F32X4 | TM_I32X4
+	TM_F32X4 = 1 << VT_F32X4, TM_I32X4 = 1 << VT_I32X4, TM_F64X2 = 1 << VT_F64X2, TM_I64X2 = 1 << VT_I64X2,
+	TM_VI = TM_I32X4 | TM_I64X2, TM_VF = TM_F32X4 | TM_F64X2, TM_VEC = TM_VI | TM_VF
 };
 enum {	/* operand kinds (a, b, c) */
 	OK_NONE,	/* must be 0 */
@@ -194,8 +201,10 @@ enum {	/* operand kinds (a, b, c) */
 	OK_ANY,		/* a value of any type but void and multi */
 	OK_X,		/* icmp: i32, i64 or ptr, both the same */
 	OK_FP,		/* fcmp: f32 or f64, both the same */
-	OK_VI, OK_VF,	/* a value of type i32x4, f32x4 */
+	OK_VI,		/* the integer vector with the result's lane width (a mask; vs2f's operand) */
+	OK_VF,		/* the float vector with the result's lane width (vfcmp) */
 	OK_ELEM,	/* a value of the result's lane type (vsplat) */
+	OK_VRED,	/* the integer vector whose lanes have the result's type (vreduce) */
 	OK_MULTI,	/* a value of type multi (proj) */
 	OK_BITC,	/* bitcast: i32 for f32, f32 for i32, i64 for f64, f64 for i64 */
 	OK_IMM,		/* an immediate */
