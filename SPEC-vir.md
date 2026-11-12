@@ -539,7 +539,9 @@ exposed memory at return, a `trap`, and non-termination.
 access L under 6.3-6.5 and whose byte range is not provably disjoint; any
 call or asm with memory effects, and `barrier`, if L is exposed. Two accesses
 based on the same slot or symbol with constant offsets are disjoint when their
-ranges do not overlap. Everything else may overlap.
+ranges do not overlap, and so are two accesses whose addresses are the same
+value plus constant offsets with ranges that do not overlap. Everything else
+may overlap.
 
 10.4 No pass may iterate to a fixpoint without a budget. A pass that exceeds
 its budget stops and leaves the function in canonical form (R14).

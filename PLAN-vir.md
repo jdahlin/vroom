@@ -859,6 +859,94 @@ cykler mot virpol, nu +9,9 %.  Samplingar per funktion (storlek 300) varierar
   vir-test, virgen, vir-exposure, vcc-abi, vcc-volatile, vcc-stress; sqlite
   hash i alla tre lägena, TCL genom VIR 1 fel (interrupt2).
 
+### zlib: blockparameterns register röstas fram av föregångarna (2026-11-12)
+
+`bench/zlib/run.py` (zlib 1.4, zbench på zlibs egen källtar).  Profil mot clang
+-O2: `longest_match` är hetast och var 5 % långsammare.  Orsak: slingans
+vanliga väg (första jämförelsen missar) skickar `scan` och `best_len`
+oförändrade till blocket före bakåtkanten, men parametrarna där fick
+registren från den sällsynta vägen (`treg`: första argumentet som placeras),
+så varje varv gjorde fyra `mov` och två extra hopp.
+- **Åtgärd** (`alloc.c`, `arg_vote`): en blockparameter tar det register där
+  flest redan placerade föregångare har sitt argument (minst två, och fler än
+  i `treg`; 3–32 föregångare).  Den sällsynta vägen får flyttarna.
+- **Resultat:** den heta slingan 16 → 10 instruktioner (clang 12).  zbench mot
+  clang: deflate-9 1,09x → 1,05x, totalt 1,10x → 1,08x; `.text` 79896 → 79860.
+- **Kvar** (efter nästa avsnitt): `slide_hash` (clang vektoriserar), `crc32_z` (inline
+  asm, går inte genom VIR).
+- Verifierat: vir-alloc 17/17, random 300, mutate, vir-test 119/119;
+  vcc-ctests med `VCC_VIR=bl VCC_VIR_CHECK=1` 2077/2080 (de tre felen,
+  `.Lswitch.values`, finns före ändringen); inline 85/85; sqlite3.c genom VIR
+  med kontrollen; zlib-testerna ger clangs byte.
+
+### zlib: en laddning återanvänds över block och slingor (2026-11-12)
+
+Byggarens värdenumrering (`vw_simplify`) återanvände en laddning bara inom ett
+minnestillstånd: det bröts vid varje sammanflöde och varje lagring, och adressen
+(`ptradd`) numreras per block, så `s->window` lästes om i varje varv av
+`longest_match` trots att den lästs före slingan.
+- **Åtgärd** (`build.c`, `vw_far`): en andra tabell håller varje laddning per
+  bas + konstant offset för blocken den dominerar.  En senare laddning av samma
+  byte blir det värdet när inget däremellan kan skriva dem; "däremellan" är
+  positionerna i omvänd postordning efter den första fram till den andra, eller
+  till slutet av den yttersta slinga som håller den andra men inte den första
+  (resonemanget står i kommentaren).  En lagring till samma bas på ett annat
+  offsetintervall skriver inte; annan bas, anrop, `memcpy`, atomära och asm
+  skriver allt.  Högst 32 skrivare granskas per laddning.  Ingen laddning
+  flyttas eller läggs till: en slingas laddning försvinner bara när samma
+  laddning redan finns i ett dominerande block (äkta LICM med förhuvud kvarstår).
+- **zlib** (zbench mot clang -O2): totalt 1,08x → 1,03x, deflate-9 1,05x →
+  1,00x, deflate-6 1,14x → 1,09x; deflate.c 1789 → 1553 laddningar, `.text`
+  79860 → 78304.
+- **sqlite** (genom VIR): laddningar 67304 → 65311, text 1217388 → 1209808,
+  speedtest1 --size 100 CPU 2,785 s → 2,808 s (+0,8 %, inom bruset; fler värden
+  lever över block), kompilering av sqlite3.c 0,632 → 0,643 s.
+- Också rättat: `vw_simp1` räknade `k + 1` med tecken för masken `INT64_MAX`
+  (UBSan, nio tester i vcc-sviten under `build/ccs-asan`).
+- Test: `tests/vcc/vir_load_far.c` (lagring efter laddningen i kroppen, genom
+  annan pekare, överlappande smalare och bredare, anrop, inre slinga, en arm,
+  goto-slinga med ingång i mitten, variabelt index, flydd lokal).
+- Verifierat: vcc-ctests med `VCC_VIR=bl VCC_VIR_CHECK=1` 2077/2080 (samma tre
+  `.Lswitch.values` som förut) och under ASan+UBSan (utöver dem två fel i
+  framänden, `gcc/eeprof-1` och `gcc/pr105613`, inte i VIR); inline 85/85;
+  vir-test, vcc-volatile; sqlite3.c under ASan; zlib ger clangs byte; sqlite
+  speedtest1 samma verifieringshash.
+
+### zlib deflate-1: fältadresser, smala lagringar, sub+cmp, csel med noll (2026-11-12)
+
+Profil av nivå 1 mot clang (sampel, 60 varv): `fill_window` 229 mot 11 (clang
+vektoriserar `slide_hash`), `deflate_fast` 596 mot 422, `longest_match` 838 mot
+722, `compress_block` 389 mot 322.  Fyra allmänna brister i koden åtgärdade:
+- **Fältadress per åtkomst** (`build.c`, `vw_ownaddr`): numreringen ger ett
+  blocks åtkomster till samma fält en delad `ptradd`, och sänkningen viker bara
+  en `ptradd` med en användare direkt efter.  Varje `load`/`store` med bas +
+  kodbar konstant (−256..255, eller multipel av bredden upp till 4095) får nu
+  sin egen kopia precis före sig: `add x1, x19, #160; ldr w2, [x1]; …; str w2,
+  [x1]` blir `ldr w2, [x19, #160]; …; str w2, [x19, #160]`.
+- **Smal lagring** (`vw_simp1`): `store` läser bara de låga byten, så värdets
+  `ext` (minst så bred) eller `trunc` hoppas över (`ubfm` före `strh`/`strb`).
+  Inte för lagringar till befordrade platser: deras operander räknas inte.
+- **sub + cmp** (`opt.c`, `flags`): en `sub` direkt före en `cmp` av samma
+  operander blir `subs` och jämförelsen går.
+- **csel med noll** (`a64.c`): en nollarm läses ur `wzr` i stället för att
+  materialiseras.
+- **Resultat:** `slide_hash`-slingan 10 → 7 instruktioner; deflate.c 5586 →
+  5219 instruktioner; zlib `.text` 78304 → 74436.  zbench mot clang -O2:
+  deflate-1 1,36x → 1,19x, deflate-6 1,09x → 1,02x, totalt 1,03x → 1,02x.
+  sqlite genom VIR: 292365 → 287144 instruktioner, text 1209808 → 1188920,
+  speedtest1 CPU 2,742 → 2,731 s (2,768 före dagens tre ändringar).
+- **Kvar på nivå 1** (kräver beslut): `slide_hash` behöver vektorisering
+  (clang: NEON `uqsub`); `deflate_fast`/`compress_block` läser om `s->`-fält
+  efter varje lagring genom `s->head`/`s->prev` (`ush`), vilket clang slipper
+  med typbaserad alias, som VIR enligt beslutet 2026-11-11 inte har utan flagga.
+  Utan beslut: lagring → laddning över lagringar till samma bas på annat offset
+  (`str w2, [x0, #8]; str w1, [x0, #12]; ldrsw x1, [x0, #8]`).
+- Test: `tests/vcc/vir_field_access.c`.  Verifierat: vcc-ctests `VCC_VIR=bl
+  VCC_VIR_CHECK=1` 2079/2082 (samma tre), med verifieraren (`blv`) vcc-sviten,
+  inline 85/85, direkta emittern 2082/2082, ASan+UBSan som förut, vir-test,
+  vcc-volatile, sqlite3.c med kontrollen och samma verifieringshash, zlib ger
+  clangs byte.
+
 ### Kompileringstid genom VIR (2026-11-12): sqlite3.c
 
 Gren `claude/vir-sqlite-optimization-acaf18`.  Mätt på sqlite3.c `-O2`
