@@ -35,6 +35,7 @@
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "../../vir/vir.h"
+#include "../../lib/vstack.h"
 #include "vw.h"
 
 /* ---------------- state ---------------- */
@@ -310,6 +311,10 @@ static uint32_t vw_readv(ecx *e, uint32_t var, uint32_t b, uint32_t ty)
 		vw_write(e, var, b, v);
 		return v;
 	}
+	/* one level per block between a read and the definition it reaches (through vw_phiops
+	 * at a join): a function of tens of thousands of blocks in a row goes the ordinary way */
+	if (vstack_low())
+		vw_fail(e, "VIR: a variable read too many blocks from its definition");
 	if (!V->b[b].npred) {
 		v = vw_undef(e, vw_phity(e, var, ty));
 	} else if (V->b[b].npred == 1) {

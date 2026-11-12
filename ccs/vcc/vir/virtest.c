@@ -148,6 +148,15 @@ static int selftest(void)
 	CHECK(vir_failed());
 	vir_begin(&f, VTG_X86_64_LINUX, sym, 0);
 	CHECK(!vir_failed() && vir_const(&f, VO_ICONST, VT_I64, 0, 0, 0) == 1);
+	/* a block takes 65 535 parameters; one more fails instead of wrapping the 16-bit count */
+	vir_begin(&f, VTG_X86_64_LINUX, sym, 0);
+	vir_blk_add(&f, 0);
+	for (uint32_t i = 0; i < VIR_MAX_BPARAM; i++)
+		vir_ins_add(&f, VO_BPARAM, VT_I64, 0, 0, 0, 0);
+	CHECK(!vir_failed() && f.blk[0].nparam == VIR_MAX_BPARAM);
+	CHECK(vir_ins_add(&f, VO_BPARAM, VT_I64, 0, 0, 0, 0) == 0 && vir_failed() && f.blk[0].nparam == VIR_MAX_BPARAM);
+	vir_begin(&f, VTG_X86_64_LINUX, sym, 0);
+	CHECK(!vir_failed());
 #undef CHECK
 	vir_unit_free(&u);
 	free(out.p);
