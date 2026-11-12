@@ -100,6 +100,24 @@ NI long l_spill(int n)
 	return 0;
 }
 
+/* a step that is a value (the vector loop runs when it is 1), an index bumped twice in the body,
+   one array at a distance only known when the loop is entered, unsigned and size_t counters */
+NI long l_stepv(int n, int st) { for (int i = 0; i < n; i += st) a[i + 8] = b[i + 8] * 3; return 0; }
+NI long l_twice(int n) { int j = 7; for (int i = 0; i < n; i++) { j++; a[j] = b[i + 8] + (float)j; j++; j--; } return j; }
+NI long l_distv(int n, int k) { for (int i = 0; i < n; i++) a[i + 8] = a[i + k] + c[i + 8]; return 0; }
+NI long l_uns2(unsigned n) { for (unsigned i = 0; i < n; i++) a[i] = b[i] + 2; return 0; }
+NI long l_size(unsigned long lo, unsigned long hi) { for (unsigned long i = lo; i < hi; i++) a[i] = b[i] * 0.5f; return 0; }
+NI long l_uwrap(unsigned n) { for (unsigned i = 4294967290u; i != n; i++) a[(i + 16) & 63] = b[i & 63]; return 0; }
+static long r_stepv1(int n) { return l_stepv(n, 1); }
+static long r_stepv3(int n) { return l_stepv(n, 3); }
+static long r_distv9(int n) { return l_distv(n, 9); }
+static long r_distv6(int n) { return l_distv(n, 6); }
+static long r_distv50(int n) { return l_distv(n, 50 - n); }
+static long r_uns2(int n) { return l_uns2((unsigned)n); }
+static long r_size(int n) { return l_size(10, 10 + (unsigned long)n); }
+static long r_size2(int n) { return l_size(30, (unsigned long)n); }	/* (lo above hi: no iteration) */
+static long r_uwrap(int n) { return l_uwrap((unsigned)n); }
+
 static long r_param(int n) { return l_param(a + 8, b + 8, n); }
 static long r_param2(int n) { return l_param(a + 9, a + 8, n); }	/* the two overlap: the scalar order shows */
 static long r_param3(int n) { return l_param(a + 8, a + 9, n); }
@@ -114,7 +132,8 @@ int main(void)
 		T(l_dm5), T(l_dm4), T(l_dm3), T(l_dm2), T(l_dm1), T(l_dp1), T(l_dp2), T(l_dp3), T(l_dp4), T(l_dp5),
 		T(l_ddm2), T(l_ddm1), T(l_ddp1), T(l_ddp3), T(l_ddp4), T(l_stld), T(l_stld2), T(l_stst), T(l_stst2),
 		T(l_int), T(l_iota), T(l_iotaf), T(l_sum), T(l_sum2), T(l_fsum), T(l_sel), T(l_isel), T(l_inv), T(l_invsame),
-		T(l_2d), T(l_spill), T(r_param), T(r_param2), T(r_param3), T(r_psum), T(r_lim), T(l_cond), T(l_scal), T(l_wrap),
+		T(l_2d), T(l_spill), T(r_stepv1), T(r_stepv3), T(l_twice), T(r_distv9), T(r_distv6), T(r_distv50), T(r_uns2), T(r_size),
+		T(r_size2), T(r_uwrap), T(r_param), T(r_param2), T(r_param3), T(r_psum), T(r_lim), T(l_cond), T(l_scal), T(l_wrap),
 	};
 	static const int ns[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 37 };
 
