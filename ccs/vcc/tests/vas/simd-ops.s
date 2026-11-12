@@ -173,3 +173,15 @@ ldpsw x3, x4, [x5], #252
 	faddp d0, v1.2d
 	fmaxnmp d0, v0.2d
 	fminp s3, v4.2s
+	rbit v1.16b, v2.16b
+	rbit v31.8b, v0.8b
+	umlal v1.2d, v2.2s, v3.s[0]
+	umull v1.2d, v2.2s, v31.s[3]
+	umlal2 v1.2d, v2.4s, v3.s[3]
+	smull v4.4s, v5.4h, v15.h[7]
+	smlal2 v4.4s, v5.8h, v6.h[5]
+	umlsl v4.4s, v5.4h, v6.h[2]
+	smlsl2 v1.2d, v2.4s, v3.s[1]
+	smull2 v1.2d, v2.4s, v3.s[2]
+	hlt #0xf000
+	hlt #0
