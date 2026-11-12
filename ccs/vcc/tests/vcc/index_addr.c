@@ -1,6 +1,7 @@
 /* Array accesses with a variable index (VIR at -O2 on arm64: [base, index] with the index's
    sign or zero extension and the scaling by the element size folded): every width, signed,
-   unsigned and 64-bit indexes, negative ones, loads and stores, floating point. */
+   unsigned and 64-bit indexes, negative ones, loads and stores, floating point.  Also the
+   addresses (add/sub with an extended register, smaddl/umaddl for a record's size). */
 #define NI __attribute__((noinline))
 typedef long long I;
 
@@ -21,8 +22,21 @@ NI void st64(I *p, int i, I v) { p[i] = v; }
 NI int sum(const int *p, int n) { int s = 0; for (int i = 0; i < n; i++) s += p[i] * (i + 1); return s; }
 NI void fill(short *p, int n) { for (int i = n - 1; i >= 0; i--) p[i] = (short)(i * 3 - 7); }
 
+struct rec { int a; I b; char pad[40]; };	/* 56 bytes */
+
+NI struct rec *recp(struct rec *p, int i) { return &p[i]; }
+NI I recb(const struct rec *p, int i) { return p[i].b; }
+NI I recbu(const struct rec *p, unsigned i) { return p[i].b; }
+NI int *addr32(int *p, int i) { return &p[i]; }
+NI const short *addr16u(const short *p, unsigned i) { return p + i; }
+NI I subw(I x, int i) { return x - i; }
+NI I addsh(I x, int i) { return x + ((I)i << 3); }
+NI I *addsh64(I *p, I i) { return p + i * 4; }
+
 int main(void)
 {
+	struct rec r[3] = { { 1, 11, { 0 } }, { 2, -22, { 0 } }, { 3, 33, { 0 } } };
+
 	int a[8] = { 1, -2, 3, -4, 5, -6, 7, -8 };
 	I q[4] = { 10, -20, 30, -40 };
 	signed char c[4] = { -1, 2, -3, 4 };
@@ -43,5 +57,9 @@ int main(void)
 	if (sum(a, 8) != 77 + 2 * 99 + 3 * 3 + 4 * -4 + 5 * 5 + 6 * -6 + 7 * 7 + 8 * -8) return 9;
 	fill(h, 6);
 	if (h[0] != -7 || h[5] != 8) return 10;
+	if (recp(r, 2) != &r[2] || recp(r + 2, -1) != &r[1] || recb(r, 1) != -22 || recb(r + 2, -2) != 11) return 11;
+	if (recbu(r, 2) != 33) return 12;
+	if (addr32(a, -0) != a || addr32(a + 4, -3) != &a[1] || addr16u(h, 5) != &h[5]) return 13;
+	if (subw(10, -5) != 15 || subw(10, 4) != 6 || addsh(1, -1) != -7 || addsh64(q, 0) != q) return 14;
 	return 0;
 }

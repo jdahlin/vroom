@@ -279,6 +279,31 @@ VPRIV void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *raw
 	case I_LD: case I_ST:
 		p_mem(b, i);
 		return;
+	case I_SMADDL: case I_UMADDL:
+		tb_s(b, i->op == I_SMADDL ? "\tsmaddl\t" : "\tumaddl\t");
+		reg(b, i->rd, 1);
+		tb_s(b, ", ");
+		reg(b, i->rn, 0);
+		tb_s(b, ", ");
+		reg(b, i->rm, 0);
+		tb_s(b, ", ");
+		reg(b, i->ra, 1);
+		tb_c(b, '\n');
+		return;
+	case I_ADDXT: case I_SUBXT:
+		tb_s(b, i->op == I_ADDXT ? "\tadd\t" : "\tsub\t");
+		reg(b, i->rd, 1);
+		tb_s(b, ", ");
+		reg(b, i->rn, 1);
+		tb_s(b, ", ");
+		reg(b, i->rm, 0);
+		tb_s(b, i->ra == 6 ? ", sxtw" : ", uxtw");
+		if (i->sh) {
+			tb_s(b, " #");
+			tb_u(b, i->sh);
+		}
+		tb_c(b, '\n');
+		return;
 	case I_LDX: case I_STX:
 		tb_c(b, '\t');
 		tb_n8(b, i->op == I_STX ? st_name[0][i->sz] : ld_name[0][i->sz][i->cond]);

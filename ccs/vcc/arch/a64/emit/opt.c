@@ -60,8 +60,10 @@ static unsigned roles_sw(const ins *i)
 		return RD_R | RN_R | RM_R;
 	case I_BFM:
 		return RD_R | RN_R | RD_W;
-	case I_MADD: case I_MSUB:
+	case I_MADD: case I_MSUB: case I_SMADDL: case I_UMADDL:
 		return RN_R | RM_R | RA_R | RD_W;
+	case I_ADDXT: case I_SUBXT:
+		return RN_R | RM_R | RD_W;
 	case I_MOVI: case I_ADRP: case I_LDGOT: case I_ADR: case I_MRS:
 		return RD_W;
 	case I_ST: case I_STLO:
@@ -934,7 +936,7 @@ static bool pure(const ins *i)
 	switch (i->op) {
 	case I_ADD: case I_SUB: case I_AND: case I_ORR: case I_EOR: case I_BIC: case I_ORN: case I_ADC: case I_SBC:
 	case I_ADDI: case I_SUBI: case I_ANDI: case I_ORRI: case I_EORI:
-	case I_MOVI: case I_MOV: case I_MADD: case I_MSUB:
+	case I_MOVI: case I_MOV: case I_MADD: case I_MSUB: case I_SMADDL: case I_UMADDL: case I_ADDXT: case I_SUBXT:
 	case I_SDIV: case I_UDIV: case I_SMULH: case I_UMULH: case I_LSLV: case I_LSRV: case I_ASRV:
 	case I_SBFM: case I_UBFM: case I_BFM: case I_CSEL: case I_CSINC: case I_CSINV: case I_CSNEG:
 	case I_CLZ: case I_CLS: case I_RBIT: case I_REV: case I_REV16: case I_REV32:

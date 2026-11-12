@@ -251,6 +251,14 @@ static unsigned enc(const ins *i, uint32_t *w, pfix *f, const uint32_t *loff, ui
 				: a64_ldst_imm9((unsigned)sz, 0, opc, 0, R5(i->rd), R5(base), (int)off);
 		return n;
 	}
+	case I_SMADDL: case I_UMADDL:
+		w[0] = (i->op == I_SMADDL ? 0x9b200000u : 0x9ba00000u) | R5(i->rm) << 16 | R5(i->ra) << 10 | R5(i->rn) << 5 |
+		       R5(i->rd);
+		return 1;
+	case I_ADDXT: case I_SUBXT:	/* (extended register: rd and rn 31 are sp) */
+		w[0] = (i->op == I_ADDXT ? 0x8b200000u : 0xcb200000u) | R5(i->rm) << 16 | (uint32_t)i->ra << 13 |
+		       (uint32_t)i->sh << 10 | R5(i->rn) << 5 | R5(i->rd);
+		return 1;
 	case I_LDX: case I_STX:	/* register offset */
 		w[0] = (uint32_t)i->sz << 30 | 0x38200800u | (i->op == I_STX ? 0 : ld_opc[i->sz][i->cond]) << 22 |
 		       R5(i->rm) << 16 | (uint32_t)i->ra << 13 | (i->sh ? 1u << 12 : 0) | R5(i->rn) << 5 | R5(i->rd);

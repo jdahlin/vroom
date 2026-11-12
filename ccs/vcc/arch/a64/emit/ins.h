@@ -18,6 +18,8 @@ enum {
 	I_MOVI,		/* rd = imm */
 	I_MOV,		/* rd = rn (either may be SP) */
 	I_MADD, I_MSUB,	/* rd = ra +- rn * rm */
+	I_SMADDL, I_UMADDL,	/* x: rd = ra + wn * wm, both extended (signed, unsigned) */
+	I_ADDXT, I_SUBXT,	/* x: rd = rn +- (rm extended by ra: 2 uxtw, 6 sxtw) << sh (0-4) */
 	I_SDIV, I_UDIV, I_SMULH, I_UMULH, I_LSLV, I_LSRV, I_ASRV,
 	I_SBFM, I_UBFM, I_BFM,	/* imm: immr, sh: imms */
 	I_CSEL, I_CSINC, I_CSINV, I_CSNEG,	/* cond */
