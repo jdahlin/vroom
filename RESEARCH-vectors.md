@@ -298,10 +298,12 @@ clang `-O3`:
   addresses (through the GOT) and the constant 1.0 are rebuilt every
   iteration, and each float goes through a general register on its way to
   and from memory.
-- VIR builds 7 of the 158 functions of `tsvc.c`. The other 151 are refused
-  with "a value of one type read as another": an `f32` read back as `f64`.
-  A function containing only `dummy(a, b, 0.)` is refused the same way; the
-  cause is not traced.
+- VIR built 7 of the 158 functions of `tsvc.c`; the other 151 were refused
+  with "a value of one type read as another". Cause: a float argument's
+  8-byte slot word was stored as an `f64` (`vw_store`). Fixed the same day:
+  158 built and lowered, 151/151 checksums, 1.88 s. (At `iterations` 100 the
+  outer loops of s3110 and s13110 run zero times and return an uninitialized
+  value; `bench/vcc-tsvc.py` uses 256.)
 - clang's `tsvc.s` has 98 `fmadd`/`fmsub`; vcc's has none. The checksums do
   not show it at 100 iterations.
 
@@ -452,8 +454,7 @@ be replaced by the measured number. The gate is not that number: it is
 than scalar.
 
 6.6 **Before any of it.** In order:
-1. The builder accepts TSVC's functions (the `f32`/`f64` refusal in 3.6).
-   Until then no loop reaches a vectorizer.
+1. The builder accepts TSVC's functions (the refusal in 3.6). Done.
 2. `VIF_NSW` from the walker's signedness, cleared by `-fwrapv`.
 3. Scalar loops through VIR at least as fast as the direct emitter:
    invariants out of the loop and floats loaded straight into v registers.
@@ -469,8 +470,9 @@ than scalar.
   transformations" non-goal gets one exception.
 - `PLAN-vir.md` gets a step after V4 for 6.6. Its "Inget LICM i 1.0" is in
   the way of 6.6 item 3 and needs a decision.
-- A harness `bench/vcc-tsvc.py`: TSVC_2 at a reduced `iterations`, checksums
-  against clang, the list of vectorized loops, times per loop.
+- A harness, `bench/vcc-tsvc.py`: TSVC_2 at a reduced `iterations`, checksums
+  against clang, times per loop (exists); the list of vectorized loops comes
+  with the vectorizer.
 
 ## Sources
 

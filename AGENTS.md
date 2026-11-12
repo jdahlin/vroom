@@ -240,6 +240,7 @@ bench/pg/build.sh vccd             # ... CC = vcc shim + private vccd (VCC_DELEG
                                    # build: "warnings: N, not from clang: M" (M must be 0; logs in work/build-pg-*.build.log)
 bench/pg/speed.py                  # PostgreSQL compile speed: clang, clang -O0, vpp, vpp --batch
 bench/sqlite/run.py all            # SQLite (macOS): vcc/clang/gcc builds, TCL testrunner (no vcc-only fails), speedtest1 (~4 min)
+bench/vcc-tsvc.py [-v]              # TSVC_2 (macOS; fetch-testsuites.sh TSVC_2): 151 loop checksums vs clang -O3, direct emitter and VIR (~15 s)
 ```
 Fast loop while iterating (cold numbers on a loaded machine, in brackets):
 `vcc-sema.py batch` (3 s [33 s]), `vcc-diff.py batch --cmp --kernel` (3 s
