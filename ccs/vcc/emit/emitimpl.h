@@ -946,7 +946,10 @@ static inline bool is_vec(cc *c, qty t) { return KIND(c, t) == TY_VECTOR; }
 static inline bool is_bvec(cc *c, qty t) { return is_vec(c, t) && KIND(c, T(c, t)->base) == TY_BOOL; }
 /* passed and returned like a record (vcc's own convention for vectors) */
 static inline bool is_recabi(cc *c, qty t) { return is_record(c, t) || is_vec(c, t) || em_bigint(c, t); }
-static inline bool is_agg(cc *c, qty t) { return is_record(c, t) || is_array(c, t) || is_vec(c, t) || em_bigint(c, t); }
+/* an SVE sizeless value: address-valued, in a frame slot of the largest vector length (a predicate's is 32 bytes) */
+static inline bool is_sve(cc *c, qty t) { return KIND(c, t) == TY_SVE; }
+static inline bool is_svpred(cc *c, qty t) { return is_sve(c, t) && T(c, t)->size == 32; }
+static inline bool is_agg(cc *c, qty t) { return is_record(c, t) || is_array(c, t) || is_vec(c, t) || is_sve(c, t) || em_bigint(c, t); }
 static inline uint64_t tsize(cc *c, qty t) { return T(c, t)->size; }
 
 /* Apple arm64: an integer under 4 bytes in a register is extended to 32 bits by its producer */

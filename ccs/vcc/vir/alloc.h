@@ -29,8 +29,8 @@ enum { VR_NONE = 0xff, VR_SCR0 = 0xfe, VR_SCR1 = 0xfd };
 #define VR_MAKE(c, n)	((uint8_t)((c) << 6 | (n)))
 #define VR_SCR(c)	((c) ? VR_SCR1 : VR_SCR0)
 
-/* the register class of a value type: 1 for f32/f64, 0 otherwise */
-static inline uint32_t vir_rclass(uint32_t ty) { return ty == VT_F32 || ty == VT_F64; }
+/* the register class of a value type: 1 for f32/f64 and vectors, 0 otherwise */
+static inline uint32_t vir_rclass(uint32_t ty) { return ty == VT_F32 || ty == VT_F64 || vir_isvec(ty); }
 
 /* ---- 15.1: what the target says about one instruction ---- */
 #define VIR_FIX_N 24
@@ -127,7 +127,7 @@ typedef struct vir_alloc_out {
 	vir_emove *move; uint32_t nmove;
 	uint32_t *eidx;		/* per successor (soff[b] + k): its vir_aedge, VIR_NOBLK none */
 	uint32_t *soff;		/* successor offsets per block, nblk+1 */
-	uint8_t *ssz;		/* per spill slot: 4 or 8 */
+	uint8_t *ssz;		/* per spill slot: 4, 8 or 16 (a vector) */
 	uint32_t nspill;
 	uint64_t callee[2];	/* callee-saved registers used */
 	uint32_t *cfirst;	/* per register byte (0-127): the first block that writes it */

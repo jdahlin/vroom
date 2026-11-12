@@ -115,6 +115,22 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   after the Apple variadic-slot fix (tests/abi/va_int_slot).  speedtest1
   --size 100 --memdb: clang -O2 2.49 s, gcc-16 -O2 2.44 s, vcc -O2 3.92 s;
   sqlite3.c compiles in 0.13 s (clang -O2 7.9 s, gcc 22 s).  `bench/sqlite/run.py all`.
+  zlib 1.4 on Darwin (2026-11-12, `bench/zlib/run.py all`): vcc and VIR
+  (`VCC_VIR=bl`) pass example, infcover and the minigzip round trips, and
+  deflate at levels 1/6/9 gives clang's bytes.  All 131 functions VIR sees
+  are lowered; only `crc32_z` (inline asm) falls back.  zbench on zlib's own
+  source tar, CPU time against clang -O2: vcc 1.37x, VIR 1.10x, gcc-16 0.99x
+  (VIR: deflate-1 1.32x, deflate-6 1.12x, deflate-9 1.09x, inflate 1.00-1.04x,
+  crc32 1.18x, adler32 0.98x).  Where VIR loses (sample profile):
+  `fill_window` 19x clang's share (clang vectorizes `slide_hash`),
+  `deflate_fast` 1.6x, `compress_block` 1.25x, `pqdownheap` not inlined into
+  `build_tree`; `.text` 79896 bytes against clang's 71598 and vcc's 72580.
+  After the allocator's parameter vote and load reuse across blocks
+  (PLAN-vir.md, 2026-11-12): VIR 1.03x in total, deflate-9 1.00x, deflate-6
+  1.09x, deflate-1 1.36x; `.text` 78304.  After own field addresses, narrow
+  stores, sub+cmp and csel with zero: total 1.02x, deflate-1 1.19x, deflate-6
+  1.02x; `.text` 74436.  Left on level 1: vectorizing `slide_hash`, and
+  type-based aliasing for `deflate_fast` (a flag, not decided).
 - [ ] **T14 the kernel runs, not just boots.**  KUnit built in
   (`CONFIG_KUNIT=y` plus the common suites, run at boot, TAP on the
   console), compared with the clang build's TAP; then kselftests and an LTP
@@ -819,10 +835,32 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [ ] **SVE in the front end**: baseline AArch64 builtin sizeless types and
   libc declarations work; invalid size, array, field, storage and pointer
   arithmetic uses are diagnosed. Four diagnostics and declaration runtime
-  checks pass on Linux x86/ARM; ARM c-testsuite 220/220. Full `arm_sve.h`
-  tuple/intrinsic APIs, `target("+sve")` validation and scalable lowering
-  remain unsupported and are diagnosed explicitly.
-  *Validate:* T1 under `qemu -cpu max`, layout checks for the types.
+  checks pass on Linux x86/ARM; ARM c-testsuite 220/220.
+  Done (2026-11-12): sizeless values in the arm64 direct emitter and a
+  vcc-owned `include/arm_sve.h` for what PostgreSQL's
+  `pg_popcount_aarch64.c` uses (`svptrue_b*`, `svcnt[bhwd]`, `svdup_u8/u64`,
+  `svld1_u8/u64`, `svadd/svand[_n]_u8/u64_x`, `svcnt_u8/u64_x`,
+  `svaddv_u8/u64`, `svwhilelt_b8_s32/s64`), each a macro around inline asm.
+  A sizeless object is a frame slot of the architectural maximum (256 bytes,
+  a predicate 32); a copy moves the bytes of this vector length through
+  z31/p15 (`ldr`/`str`); an asm operand "w" is loaded into z16+ and "Upa"/
+  "Upl" into p0+ around the template (`arch/a64/emit/asm.c`).  `?:` on two
+  values of one sizeless type is accepted.  VIR leaves such functions to the
+  direct emitter (inline asm).  `bench/pg/speed.py` on a clang-configured
+  build: 1574/1574.
+  Left: the rest of `arm_sve.h` (tuples, the other element types, `_m`/`_z`
+  forms, operators on sizeless vectors, which sema rejects), sizeless
+  arguments and results (the vector PCS: diagnosed "code generation for an
+  SVE argument or result is not supported yet", so no intrinsic can be a
+  function), `target("+sve")` validation (a call to an intrinsic outside
+  such a function is not diagnosed), values in registers across statements
+  (every intrinsic loads and stores its operands), the `__mfp8` builtin type
+  (not needed once the header is vcc's own), and the unbraced
+  `ld1d z0.d, p0/z, [x0]` spelling in vas (GNU as takes it; the header
+  writes `{z0.d}`).
+  *Validate:* tests/vcc/sve_popcount.c under `qemu -cpu max` against clang
+  (the runtime's start.S sets CPACR_EL1.ZEN); tests/diag/sve_*.c; layout
+  checks for the types.
 - [x] **`ext_vector_type` silently dropped; unknown attributes no warning** [P].
   Done: `ext_vector_type` (tests/vcc/ext_vector.c);
   `-Wunknown-attributes` for GNU syntax from clang's attribute names per

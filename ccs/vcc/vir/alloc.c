@@ -62,7 +62,7 @@ static _Thread_local struct actx {
 	/* parallel moves */
 	pmv *pm;
 	uint32_t *lcnt, *lcs, *ldm, *lds, *rq, lgen;
-	uint32_t ring[2][8], nring[2], cring[2];
+	uint32_t ring[3][8], nring[3], cring[3];	/* by slot size: 4, 8, 16 */
 	uint32_t sgen, mgen, bgen;	/* stamps that live across functions (22.3) */
 	uint8_t vfm[VO_TARGET0];	/* per opcode: bits 0-2 the value fields a, b, c; 8: a list (vir_oit) */
 } ax_tls;
@@ -696,14 +696,14 @@ static void need_slot(A *a, uint32_t v)
 
 	if (ax.slot[v] != VIR_NOBLK || is_const(f, v))
 		return;
-	c = vir_tysize(f->ins[v].ty) == 4 ? 0 : 1;
+	c = vir_tysize(f->ins[v].ty) == 4 ? 0 : vir_tysize(f->ins[v].ty) == 16 ? 2 : 1;
 	{
 		uint32_t w = wvalid(a, v);
 
 		if (w != NOWEB) {	/* one slot for the web, its own (outside the ring) */
 			if (ax.wslot[w] == VIR_NOBLK) {
 				ax.wslot[w] = a->nspill++;
-				ax.ssz[ax.wslot[w]] = c ? 8 : 4;
+				ax.ssz[ax.wslot[w]] = (uint8_t)(4u << c);
 			}
 			ax.slot[v] = ax.wslot[w];
 			a->o->st.spills++;
@@ -720,7 +720,7 @@ static void need_slot(A *a, uint32_t v)
 	}
 	if (s == VIR_NOBLK) {
 		s = a->nspill++;
-		ax.ssz[s] = c ? 8 : 4;
+		ax.ssz[s] = (uint8_t)(4u << c);
 		ax.send[s] = 0;
 		if (ax.nring[c] < 8) {
 			ax.ring[c][ax.nring[c]++] = s;
@@ -1236,6 +1236,42 @@ static bool livein(A *a, uint32_t v, uint32_t b)
 	return ax.mark[v] == a->mbase + b || inrange(a, v, first);
 }
 
+/* parameter j of b (class c), tentatively in h: the register in which most of the
+ * predecessors placed already end with their argument, when at least two do and more
+ * than have it in h (their edges then move nothing: a loop whose common path passes
+ * its values on unchanged pays for the rare path's moves otherwise); -1 if none */
+static int arg_vote(A *a, uint32_t b, uint32_t j, uint32_t c, uint32_t h)
+{
+	const vir_fn *f = a->f;
+	const vir_blk *k = &f->blk[b];
+	uint8_t cnt[64] = { 0 };
+	int best = -1;
+
+	if (k->npred < 3 || k->npred > 32)
+		return -1;
+	for (uint32_t i = 0; i < k->npred; i++) {
+		uint32_t p = f->extra[k->pred + i], x;
+		const vir_ins *t;
+
+		if (p >= b)
+			continue;
+		t = &f->ins[blk_last(f, p)];
+		if (t->op != VO_BR || t->a != b || is_const(f, x = f->extra[t->c + j]))
+			continue;
+		for (uint32_t y = 0; y < ax.end_n[p]; y++)
+			if (ax.pv[ax.end_off[p] + y] == x) {
+				uint32_t r = ax.pr[ax.end_off[p] + y];
+
+				if (r < 128 && VR_CLASS(r) == c && ++cnt[VR_NUM(r)] > (best < 0 ? 0 : cnt[best]))
+					best = (int)VR_NUM(r);
+				break;
+			}
+	}
+	if (best < 0 || cnt[best] < 2 || (h < 128 && VR_CLASS(h) == c && cnt[VR_NUM(h)] >= cnt[best]))
+		return -1;
+	return (int)VR_MAKE(c, best);
+}
+
 static void enter(A *a, uint32_t b)
 {
 	vir_fn *f = a->f;
@@ -1326,9 +1362,14 @@ static void enter(A *a, uint32_t b)
 		ax.slot[q] = VIR_NOBLK;
 		ax.reg[q] = VR_NONE;
 		ax.lastpos[q] = q;
+		ax.dmark[q] = 0;	/* (not an earlier function's: it is read for any value in a register) */
 		if (!(ax.vfl[q] & DEAD) && !(k->fl & VB_ADDR)) {
 			uint32_t h = ax.treg[q];
+			int vr = arg_vote(a, b, j, c, h);
 
+			if (vr >= 0 && (ax.fr[c] >> VR_NUM((uint32_t)vr) & 1) &&
+			    !caller_for_call(a, q, c, ax.fr[c] & a->rg->alloc[c], (uint32_t)vr))
+				h = (uint32_t)vr;
 			if (h < 128 && VR_CLASS(h) == c && (ax.fr[c] >> VR_NUM(h) & 1) &&
 			    !caller_for_call(a, q, c, ax.fr[c] & a->rg->alloc[c], h))
 				r = (int)h;
@@ -1557,6 +1598,7 @@ static bool instr(A *a, uint32_t b, uint32_t i, bool term)
 		ax.slot[i] = VIR_NOBLK;
 		ax.reg[i] = VR_NONE;
 		ax.lastpos[i] = i;
+		ax.dmark[i] = 0;
 		if (fx.res != VR_NONE) {
 			av[0] = lock[0] | fixm[0];
 			av[1] = lock[1] | fixm[1];
@@ -1784,7 +1826,7 @@ bool vir_alloc(vir_fn *f, const vir_loops *lp, const vir_regs *rg, const vir_aop
 	/* sweep 6 */
 	for (uint32_t b = 0; b < nb; b++)
 		ax.bmark[b] = 0;
-	ax.nring[0] = ax.nring[1] = ax.cring[0] = ax.cring[1] = 0;
+	ax.nring[0] = ax.nring[1] = ax.nring[2] = ax.cring[0] = ax.cring[1] = ax.cring[2] = 0;
 	for (uint32_t i = 0; i < f->nconst; i++)
 		ax.reg[i] = VR_NONE;
 	for (uint32_t r = 0; r < 256; r++)

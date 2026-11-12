@@ -164,6 +164,8 @@ static uint32_t vw_lblk(ecx *e, uint32_t l)
 		memset(V->lab + V->clab, 0xff, (nc - V->clab) * sizeof *V->lab);
 		V->clab = nc;
 	}
+	if (l >= V->labhi)
+		V->labhi = l + 1;
 	if (V->lab[l] == VW_NOBLK)
 		V->lab[l] = vw_newblk(e);
 	return V->lab[l];
@@ -185,41 +187,71 @@ static void vw_br(ecx *e, uint32_t blk) { vw_term(e, VO_BR, blk, 0, 0, 0); }
 
 static uint64_t vw_hkey(uint32_t b, uint32_t var) { return (uint64_t)b << 32 | var; }
 
+#define VW_H0 1024
+
+/* every entry of the table empty */
+static void vw_hgen(vwst *V)
+{
+	if (!++V->hgen) {	/* (the generations wrapped) */
+		if (V->halloc)
+			memset(V->h, 0, V->halloc * sizeof *V->h);
+		V->hgen = 1;
+	}
+}
+
 static uint32_t *vw_hslot(ecx *e, uint32_t b, uint32_t var, bool add)
 {
 	vwst *V = e->vw;
 	uint64_t key = vw_hkey(b, var) + 1;
 
 	if (add && (V->hn + 1) * 2 > V->hcap) {
-		uint32_t oc = V->hcap, nc = oc ? oc * 2 : 4096;
-		vwh *old = V->h;
+		/* the next size, inside the allocation when a larger function left one: the table a
+		 * function probes is as large as it needs, not as the largest one seen needed */
+		uint32_t oc = V->hcap, nc = oc ? oc * 2 : VW_H0, n = 0;
+		vwh *live = malloc(((size_t)V->hn + 1) * sizeof *live);
 
-		V->h = calloc(nc, sizeof *V->h);
-		if (!V->h)
+		if (!live)
 			vw_fail(e, "out of memory");
-		V->hcap = nc;
 		for (uint32_t i = 0; i < oc; i++)
-			if (old[i].key) {
-				uint32_t j = (uint32_t)(old[i].key * 0x9e3779b97f4a7c15ull >> 40) & (nc - 1);
-
-				while (V->h[j].key)
-					j = (j + 1) & (nc - 1);
-				V->h[j] = old[i];
+			if (V->h[i].gen == V->hgen)
+				live[n++] = V->h[i];
+		if (nc > V->halloc) {
+			free(V->h);
+			V->h = calloc(nc, sizeof *V->h);
+			if (!V->h) {
+				V->hcap = V->halloc = 0;
+				free(live);
+				vw_fail(e, "out of memory");
 			}
-		free(old);
+			V->halloc = nc;
+			V->hgen = 1;
+		} else {
+			vw_hgen(V);
+		}
+		V->hcap = nc;
+		for (uint32_t i = 0; i < n; i++) {
+			uint32_t j = (uint32_t)(live[i].key * 0x9e3779b97f4a7c15ull >> 40) & (nc - 1);
+
+			while (V->h[j].gen == V->hgen)
+				j = (j + 1) & (nc - 1);
+			V->h[j] = live[i];
+			V->h[j].gen = V->hgen;
+		}
+		free(live);
 	}
 	if (!V->hcap)
 		return NULL;
 	for (uint32_t j = (uint32_t)(key * 0x9e3779b97f4a7c15ull >> 40) & (V->hcap - 1);; j = (j + 1) & (V->hcap - 1)) {
-		if (V->h[j].key == key)
-			return &V->h[j].v;
-		if (!V->h[j].key) {
+		if (V->h[j].gen != V->hgen) {
 			if (!add)
 				return NULL;
 			V->h[j].key = key;
+			V->h[j].gen = V->hgen;
 			V->hn++;
 			return &V->h[j].v;
 		}
+		if (V->h[j].key == key)
+			return &V->h[j].v;
 	}
 }
 
@@ -385,6 +417,8 @@ static void vw_set(ecx *e, int r, uint32_t v)
 {
 	if (r < 0 || r >= VW_NONAME)
 		vw_fail(e, "VIR: no such register");
+	if (r >= VW_FNAME0)
+		e->vw->fprod[r - VW_FNAME0] = 0;
 	vw_write(e, (uint32_t)r, e->vw->cur, v);
 }
 
@@ -633,6 +667,11 @@ VPRIV void vw_load(ecx *e, int rd, const lval *l, int size, bool sgn)
 	if (!ty)
 		vw_fail(e, "VIR: a float load of this size");
 	a = vw_addr(e, l, (uint64_t)size, &slot, &rel);
+	if (f && size == 8 && slot != VW_NOBLK && V->sl[slot].size == 8 && V->sl[slot].f32w) {
+		/* the word of a float temporary (a conditional expression's value): the f32 stored in it */
+		size = 4, ty = VT_F32;
+		a = vw_addr(e, l, 4, &slot, &rel);
+	}
 	if (slot != VW_NOBLK && !e->novtag) {	/* the value last stored here, in this block (not volatile) */
 		for (uint32_t i = V->nst; i-- > 0;) {
 			vwstent *s = &V->st[i];
@@ -677,6 +716,8 @@ VPRIV void vw_store(ecx *e, int rs, const lval *l, int size)
 	uint32_t v = vw_getraw(e, rs), ty, slot, a;
 	int64_t rel;
 
+	if (rs >= VW_FNAME0 && rs < VW_NONAME)
+		V->fprod[rs - VW_FNAME0] = 0;	/* (an assignment's value is not the product any more, as clang) */
 	if (l->bf)
 		vw_fail(e, "VIR: a bit-field lvalue");
 	if (l->k == L_VAR) {
@@ -693,14 +734,18 @@ VPRIV void vw_store(ecx *e, int rs, const lval *l, int size)
 		vw_write(e, l->ref, V->cur, v);
 		return;
 	}
-	ty = vw_stty(e, v, size);
-	if (!ty) {
-		if (size == 8 && vw_ty(e, v) == VT_F32)
-			ty = VT_F32, size = 4;	/* (a float's word in an argument slot: its low 4 bytes) */
-		else
+	{
+		bool fw = size == 8 && vw_ty(e, v) == VT_F32;
+
+		if (fw)
+			size = 4;	/* (a float's word in an argument or temporary slot: its low 4 bytes) */
+		ty = vw_stty(e, v, size);
+		if (!ty)
 			vw_fail(e, "VIR: a float store of this size");
+		a = vw_addr(e, l, (uint64_t)size, &slot, &rel);
+		if (slot != VW_NOBLK && V->sl[slot].size == 8 && (fw || size == 8))
+			V->sl[slot].f32w = fw;	/* (what a load of the word into a float name reads back) */
 	}
-	a = vw_addr(e, l, (uint64_t)size, &slot, &rel);
 	v = vw_conv(e, v, ty);
 	{
 		uint32_t s = vw_ins(e, VO_STORE, VT_VOID, vw_mfl(size, l->align, false) | (e->novtag ? VIF_VOL : 0), a, v, 0);
@@ -833,7 +878,8 @@ VPRIV val vw_bin(ecx *e, int op, int size, bool sgn, val a, val b)
 	x = vw_val(e, &a, ty);
 	y = vw_val(e, &b, ty);
 	r = vw_resname(e, &a, &b);
-	vw_set(e, r, vw_ins(e, vop, ty, 0, x, y, 0));
+	/* signed +, -, *: overflow is undefined (not under -fwrapv), which is what makes an index linear */
+	vw_set(e, r, vw_ins(e, vop, ty, sgn && !e->E->o->wrapv && (vop == VO_ADD || vop == VO_SUB || vop == VO_MUL) ? VIF_NSW : 0, x, y, 0));
 	return (val){ .k = V_REG, .r = (uint8_t)r };
 }
 
@@ -1041,13 +1087,59 @@ VPRIV val vw_fconst(ecx *e, uint64_t bits, int size)
 	return (val){ .k = V_REG, .r = (uint8_t)r };
 }
 
+/* a is the product an expression just made (in its name still), or that negated: the fmul, else 0.
+ * *fl: VIF_NEGP when negated. */
+static uint32_t vw_fprod(ecx *e, const val *a, uint32_t x, uint32_t ty, uint32_t *fl)
+{
+	vwst *V = e->vw;
+	uint32_t m = x;
+
+	*fl = 0;
+	/* (arm64 only: the one lowering with fmadd) */
+	if (e->c->o->no_fp_contract || e->c->o->target > PP_DARWIN || a->k != V_REG || a->r < VW_FNAME0 ||
+	    V->fprod[a->r - VW_FNAME0] != x || !x)
+		return 0;
+	if (V->p[m].in.op == VO_FNEG)
+		*fl |= VIF_NEGP, m = V->p[m].in.a;
+	if (V->p[m].in.op != VO_FMUL || V->p[m].in.ty != ty)
+		return 0;
+	if (V->p[V->p[m].in.a].in.op == VO_FCONST && V->p[V->p[m].in.b].in.op == VO_FCONST)
+		return 0;	/* (a constant product is rounded on its own) */
+	return m;
+}
+
 VPRIV val vw_fbin(ecx *e, int op, qty t, val a, val b)
 {
 	uint32_t ty = vw_fty(e, t), x = vw_val(e, &a, ty), y = vw_val(e, &b, ty);
 	int r = vw_fres(e, &a, &b);
 	uint32_t vop = op == T_PLUS ? VO_FADD : op == T_MINUS ? VO_FSUB : op == T_STAR ? VO_FMUL : VO_FDIV;
+	uint32_t v, m = 0, fl = 0;
+	bool left = true;
 
-	vw_set(e, r, vw_ins(e, vop, ty, 0, x, y, 0));
+	if (vop <= VO_FSUB && !(m = vw_fprod(e, &a, x, ty, &fl)))
+		left = false, m = vw_fprod(e, &b, y, ty, &fl);
+	if (m) {
+		/* a product this expression made, added or subtracted: one fused operation, as clang's
+		 * -ffp-contract=on (the left operand first; the product itself goes when nothing else reads it) */
+		const vwp *P = e->vw->p;
+		uint32_t pa = P[m].in.a, pb = P[m].in.b, c = left ? y : x;
+
+		if (vop == VO_FSUB)
+			fl ^= left ? VIF_NEGC : VIF_NEGP;
+		/* a negated factor or addend is a flag (exact) */
+		if (P[pa].in.op == VO_FNEG)
+			fl ^= VIF_NEGP, pa = P[pa].in.a;
+		if (P[pb].in.op == VO_FNEG)
+			fl ^= VIF_NEGP, pb = P[pb].in.a;
+		if (P[c].in.op == VO_FNEG)
+			fl ^= VIF_NEGC, c = P[c].in.a;
+		v = vw_ins(e, VO_FMA, ty, fl, pa, pb, c);
+	} else {
+		v = vw_ins(e, vop, ty, 0, x, y, 0);
+	}
+	vw_set(e, r, v);
+	if (vop == VO_FMUL)
+		e->vw->fprod[r - VW_FNAME0] = v;
 	return (val){ .k = V_REG, .r = (uint8_t)r };
 }
 
@@ -1056,7 +1148,12 @@ VPRIV val vw_fneg(ecx *e, qty t, val a)
 	uint32_t ty = vw_fty(e, t), x = vw_val(e, &a, ty);
 	int r = vw_fres(e, &a, NULL);
 
-	vw_set(e, r, vw_ins(e, VO_FNEG, ty, 0, x, 0, 0));
+	bool prod = a.k == V_REG && a.r >= VW_FNAME0 && x && e->vw->fprod[a.r - VW_FNAME0] == x && e->vw->p[x].in.op == VO_FMUL;
+	uint32_t v = vw_ins(e, VO_FNEG, ty, 0, x, 0, 0);
+
+	vw_set(e, r, v);
+	if (prod)
+		e->vw->fprod[r - VW_FNAME0] = v;
 	return (val){ .k = V_REG, .r = (uint8_t)r };
 }
 
@@ -1313,13 +1410,18 @@ VPRIV void vw_named(ecx *e, uint32_t ref) { (void)ref; vw_fail(e, "VIR: an addre
 
 VPRIV void vw_locals_begin(ecx *e, uint32_t s) { (void)e, (void)s; }
 
+static uint32_t vw_lhash(uint32_t sym, uint32_t inst)
+{
+	return (uint32_t)(((uint64_t)sym << 32 | inst) * 0x9e3779b97f4a7c15ull >> 40);
+}
+
 /* every eligible scalar local is a variable, keyed by (symbol, inline copy) */
 VPRIV bool vw_local(ecx *e, uint32_t s, lval *l)
 {
 	vwst *V = e->vw;
 	cc *c = e->c;
 	qty t = c->syms[s].ty;
-	uint32_t ty, inst = e->wk->inst;
+	uint32_t ty, inst = e->wk->inst, lj;
 
 	if (!em_local_eligible(e, s))
 		return false;
@@ -1333,11 +1435,38 @@ VPRIV bool vw_local(ecx *e, uint32_t s, lval *l)
 		ty = VT_F64;
 	else
 		return false;
-	for (uint32_t i = 0; i < V->nloc; i++)	/* (few locals; a hash once it matters) */
+	if ((V->nloc + 1) * 2 > V->lhcap) {	/* (a function with everything inlined has thousands) */
+		uint32_t nc = V->lhcap ? V->lhcap * 2 : 256;
+
+		if (nc > V->lhalloc) {
+			free(V->lh);
+			V->lh = malloc(nc * sizeof *V->lh);
+			if (!V->lh) {
+				V->lhcap = V->lhalloc = 0;
+				vw_fail(e, "out of memory");
+			}
+			V->lhalloc = nc;
+		}
+		memset(V->lh, 0, nc * sizeof *V->lh);
+		V->lhcap = nc;
+		for (uint32_t i = 0; i < V->nloc; i++) {
+			uint32_t j = vw_lhash(V->loc[i].sym, V->loc[i].inst) & (nc - 1);
+
+			while (V->lh[j])
+				j = (j + 1) & (nc - 1);
+			V->lh[j] = i + 1;
+		}
+	}
+	lj = vw_lhash(s, inst) & (V->lhcap - 1);
+	for (; V->lh[lj]; lj = (lj + 1) & (V->lhcap - 1)) {
+		uint32_t i = V->lh[lj] - 1;
+
 		if (V->loc[i].sym == s && V->loc[i].inst == inst) {
 			*l = (lval){ .k = L_VAR, .ref = VW_VAR0 + i, .align = sym_align(c, s) };
 			return true;
 		}
+	}
+	V->lh[lj] = V->nloc + 1;
 	GROW(V->loc, V->nloc, V->cloc, 1);
 	GROW(V->vty, V->nloc, V->cvty, 1);
 	GROW(V->vsgn, V->nloc, V->cvsgn, 1);
@@ -1612,11 +1741,16 @@ VPRIV void vw_begin(ecx *e, uint32_t s)
 	V->nb = V->nx = V->nsl = V->nact = V->nst = V->nloc = V->nprom = 0;
 	V->live[0] = V->live[1] = V->live[2] = 0;
 	V->flive = 0;
+	memset(V->fprod, 0, sizeof V->fprod);
 	V->hn = 0;
-	if (V->hcap)
-		memset(V->h, 0, V->hcap * sizeof *V->h);
-	if (V->clab)
-		memset(V->lab, 0xff, V->clab * sizeof *V->lab);
+	vw_hgen(V);
+	V->hcap = V->halloc < VW_H0 ? V->halloc : VW_H0;
+	if (V->lhcap)
+		memset(V->lh, 0, V->lhcap * sizeof *V->lh);
+	V->lhcap = V->lhalloc < 256 ? V->lhalloc : 256;
+	if (V->labhi)	/* (only the labels the last function used) */
+		memset(V->lab, 0xff, V->labhi * sizeof *V->lab);
+	V->labhi = 0;
 	V->sealing = false;
 	V->why = NULL;	/* (one function's reason is not the next one's) */
 	V->rty = VT_VOID;
@@ -1655,7 +1789,7 @@ VPRIV void vw_ecx_free(ecx *e)
 
 	if (!V)
 		return;
-	free(V->p), free(V->b), free(V->x), free(V->h), free(V->fwd), free(V->lab), free(V->sl), free(V->act);
+	free(V->p), free(V->b), free(V->x), free(V->h), free(V->lh), free(V->fwd), free(V->lab), free(V->sl), free(V->act);
 	free(V->st), free(V->loc), free(V->vty), free(V->vsgn), free(V->pr), free(V->map), free(V->order), free(V->bmap);
 	free(V);
 	e->vw = NULL;
@@ -1986,6 +2120,7 @@ static bool vw_promote(ecx *e)
 	vwst *V = e->vw;
 	vwfld *fd = NULL;
 	uint32_t nf = 0, cf = 0, *fof, *cur, *cst, np0 = V->np, var0;
+	uint32_t *sf, *fnx = NULL, cfnx = 0;	/* a slot's fields: first + 1 per slot, next + 1 per field */
 	uint8_t *bad;
 	bool done = false;
 	int64_t rel;
@@ -1995,8 +2130,9 @@ static bool vw_promote(ecx *e)
 	if (!V->nsl)
 		return false;
 	bad = calloc(V->nsl, 1);
+	sf = calloc(V->nsl, sizeof *sf);
 	fof = malloc((size_t)V->np * sizeof *fof);	/* access -> field + 1 */
-	if (!bad || !fof)
+	if (!bad || !fof || !sf)
 		vw_fail(e, "out of memory");
 	for (uint32_t s = 0; s < V->nsl; s++)
 		bad[s] = V->sl[s].prom;	/* (an earlier run's: its stores are dead, its loads gone) */
@@ -2057,11 +2193,9 @@ static bool vw_promote(ecx *e)
 		rel = vw_rel(&V->p[a]);
 		size = 1u << VIF_W(q->in.fl);
 		ty = q->in.op == VO_STORE ? V->p[q->in.b].in.ty : VT_VOID;
-		for (k = 0; k < nf; k++) {
+		for (k = sf[s] - 1; k != UINT32_MAX; k = fnx[k] - 1) {	/* (the slot's own fields only) */
 			vwfld *f = &fd[k];
 
-			if (f->slot != s)
-				continue;
 			if (f->rel == rel && f->size == size)
 				break;
 			if (f->rel < rel + (int64_t)size && rel < f->rel + (int64_t)f->size)
@@ -2069,8 +2203,12 @@ static bool vw_promote(ecx *e)
 		}
 		if (bad[s])
 			continue;
-		if (k == nf) {
+		if (k == UINT32_MAX) {
+			k = nf;
 			GROW(fd, nf, cf, 1);
+			GROW(fnx, nf, cfnx, 1);
+			fnx[nf] = sf[s];
+			sf[s] = nf + 1;
 			fd[nf++] = (vwfld){ s, rel, size, VT_VOID };
 		}
 		if (ty != VT_VOID) {
@@ -2086,7 +2224,7 @@ static bool vw_promote(ecx *e)
 	}
 	/* a memset covers each field of its slot whole or not at all */
 	for (uint32_t m = 0; m < nms; m++)
-		for (uint32_t k = 0; k < nf; k++) {
+		for (uint32_t k = sf[ms[m].slot] - 1; k != UINT32_MAX; k = fnx[k] - 1) {
 			const vwfld *f = &fd[k];
 			int64_t lo = ms[m].rel, hi = ms[m].rel + ms[m].len;
 
@@ -2149,13 +2287,20 @@ static bool vw_promote(ecx *e)
 		for (uint32_t q = V->b[b].head; q; q = V->p[q].next) {
 			if (q >= np0 || !fof[q] || bad[V->p[q].slot - 1] || V->p[q].in.op == VO_LOAD || vw_find(V, q) != q)
 				continue;
-			for (uint32_t k = 0; k < nf; k++) {
+			if (V->p[q].in.op == VO_STORE) {
+				uint32_t var = VW_VAR0 + var0 + fof[q] - 1;
+
+				vw_write(e, var, b, V->p[q].in.b);
+				*vw_hslot(e, b, var | 0x40000000u, true) = 1;	/* b defines var */
+				continue;
+			}
+			for (uint32_t k = sf[V->p[q].slot - 1] - 1; k != UINT32_MAX; k = fnx[k] - 1) {
 				uint32_t var = VW_VAR0 + var0 + k;
 
-				if (V->p[q].in.op == VO_STORE ? k != fof[q] - 1 : !vw_mscov(&ms[UINT32_MAX - fof[q]], &fd[k]))
+				if (!vw_mscov(&ms[UINT32_MAX - fof[q]], &fd[k]))
 					continue;
-				vw_write(e, var, b, V->p[q].in.op == VO_STORE ? V->p[q].in.b : vw_zerok(e, fd[k].ty));
-				*vw_hslot(e, b, var | 0x40000000u, true) = 1;	/* b defines var */
+				vw_write(e, var, b, vw_zerok(e, fd[k].ty));
+				*vw_hslot(e, b, var | 0x40000000u, true) = 1;
 			}
 		}
 	}
@@ -2173,7 +2318,7 @@ static bool vw_promote(ecx *e)
 			if (x->in.op == VO_MEMSET) {
 				const struct vwms *m = &ms[UINT32_MAX - fof[q]];
 
-				for (k = 0; k < nf; k++)
+				for (k = sf[m->slot] - 1; k != UINT32_MAX; k = fnx[k] - 1)
 					if (vw_mscov(m, &fd[k])) {
 						cur[k] = vw_zerok(e, fd[k].ty);
 						cst[k] = oi;
@@ -2212,6 +2357,8 @@ static bool vw_promote(ecx *e)
 out:
 	free(ms);
 	free(fd);
+	free(fnx);
+	free(sf);
 	free(fof);
 	free(bad);
 	return done;
@@ -2241,6 +2388,13 @@ typedef struct vwsimp {
 				 * blocks costs a register more often than it saves an instruction */
 	uint32_t *idom, *dkid, *dnext;	/* the dominator tree */
 	uint32_t undef[VT_N];
+	/* loads across blocks (vw_far): positions in reverse postorder, what may write, the loops */
+	uint32_t *seq;		/* per value below n0: its position (0: none) */
+	uint32_t *wr, nwr;	/* the instructions that may write memory, by position */
+	uint32_t *ri, *bend;	/* per block: its reverse-postorder index; the position of its end */
+	uint32_t *linner;	/* per index: its innermost loop, VW_NOBLK none */
+	uint32_t *lstart, *lend, *lpar;	/* per loop: first and last index, the loop round it */
+	uint8_t *lmerged;	/* ... made of retreating edges to different blocks */
 } vwsimp;
 
 static void vw_inc(vwst *V, vwsimp *S, uint32_t v)
@@ -2347,6 +2501,19 @@ static bool vw_simp1(ecx *e, vwsimp *S, uint32_t q, uint32_t *r)
 		if (V->p[in.a].in.op == (in.op == VO_I2P ? VO_P2I : VO_I2P))
 			*r = V->p[in.a].in.a;
 		return false;
+	case VO_STORE: {	/* only the low bytes go to memory: not their extension, nor a truncation to more */
+		vir_ins xi = V->p[in.b].in;
+
+		if (vw_promdead(V, q))
+			return false;	/* (it goes: its operands are not counted) */
+		if (V->p[in.b].blk != VW_NOBLK && ((xi.op == VO_EXT && VIF_W(xi.fl) >= VIF_W(in.fl)) ||
+						   (xi.op == VO_TRUNC && VIF_W(in.fl) <= 2))) {
+			vw_dec(V, S, in.b), vw_inc(V, S, xi.a);
+			V->p[q].in.b = xi.a;
+			return true;
+		}
+		return false;
+	}
 	case VO_EXT: {
 		uint32_t x = in.a, K = 1u << VIF_W(in.fl), ts = vir_tysize(in.ty);
 		bool s = in.fl & VIF_MS;
@@ -2436,6 +2603,42 @@ static bool vw_simp1(ecx *e, vwsimp *S, uint32_t q, uint32_t *r)
 		}
 		return false;
 	}
+	case VO_S2F: case VO_U2F:	/* a constant converted: the constant (to nearest, as the instruction) */
+		if (vw_kint(V, in.a, &k)) {
+			bool w = V->p[in.a].in.ty != VT_I32;
+			double d = in.op == VO_S2F ? (w ? (double)k : (double)(int32_t)k) : (w ? (double)(uint64_t)k : (double)(uint32_t)k);
+			float f = in.op == VO_S2F ? (w ? (float)k : (float)(int32_t)k) : (w ? (float)(uint64_t)k : (float)(uint32_t)k);
+			uint64_t bits;
+			uint32_t fb;
+
+			memcpy(&bits, &d, 8), memcpy(&fb, &f, 4);
+			*r = in.ty == VT_F32 ? vw_k(e, VO_FCONST, VT_F32, 0, fb, 0) : vw_k(e, VO_FCONST, VT_F64, 0, (uint32_t)bits, (uint32_t)(bits >> 32));
+		}
+		return false;
+	case VO_FEXT: case VO_FTRUNC:
+		if (V->p[in.a].in.op == VO_FCONST && V->p[in.a].blk == VW_NOBLK) {
+			uint64_t bits = (uint64_t)V->p[in.a].in.b | (uint64_t)V->p[in.a].in.c << 32;
+			uint32_t fb = (uint32_t)bits;
+			double d;
+			float f;
+
+			if (in.op == VO_FEXT) {
+				memcpy(&f, &fb, 4);
+				d = f;
+				if (d != d)
+					return false;	/* (a NaN's payload: left to the instruction) */
+				memcpy(&bits, &d, 8);
+				*r = vw_k(e, VO_FCONST, VT_F64, 0, (uint32_t)bits, (uint32_t)(bits >> 32));
+			} else {
+				memcpy(&d, &bits, 8);
+				f = (float)d;
+				if (f != f)
+					return false;
+				memcpy(&fb, &f, 4);
+				*r = vw_k(e, VO_FCONST, VT_F32, 0, fb, 0);
+			}
+		}
+		return false;
 	case VO_ADD: case VO_SUB: case VO_OR: case VO_XOR: case VO_SHL: case VO_LSHR: case VO_ASHR:
 		if (vw_kint(V, in.b, &k) && !k)
 			*r = in.a;
@@ -2447,7 +2650,7 @@ static bool vw_simp1(ecx *e, vwsimp *S, uint32_t q, uint32_t *r)
 	case VO_AND:
 		if (vw_kint(V, in.b, &k) && (k == -1 || (in.ty == VT_I32 && (uint32_t)k == 0xffffffffu)))
 			*r = in.a;
-		else if (vw_kint(V, in.b, &k) && k > 0 && !(k & (k + 1)) && vw_zw(V, in.a) < 8 &&
+		else if (vw_kint(V, in.b, &k) && k > 0 && !((uint64_t)k & ((uint64_t)k + 1)) && vw_zw(V, in.a) < 8 &&
 			 (uint64_t)k >= (vw_zw(V, in.a) == 8 ? ~0ull : (1ull << 8 * vw_zw(V, in.a)) - 1))
 			*r = in.a;	/* the mask keeps every bit that can be set */
 		return false;
@@ -2526,6 +2729,181 @@ static uint32_t vw_kcanon(vwst *V, vwsimp *S, uint32_t v)
 		    V->p[k].in.b == in->b && V->p[k].in.c == in->c)
 			return k;
 	}
+}
+
+/*
+ * A load across blocks.  The memory state above ends at every join and at every store.  A
+ * second table keeps each load by base and constant offset for the blocks it dominates;
+ * a later load of the same bytes is that value when nothing that may write them lies
+ * between the two.  "Between" is by position in reverse postorder: a path from the first
+ * load L1 (after its last execution) to the second, L2, never visits a block before L1's
+ * (one that L1's block does not dominate leads back through L1), and it passes L2's
+ * position only inside a loop that holds L2 and not L1, since it must come back by a
+ * retreating edge.  So the positions to check are those after L1 up to L2, or up to the
+ * end of the outermost such loop: a load in a loop is the one before the loop when the
+ * loop writes nothing there, which is what hoisting it would give.  Loops are the ranges
+ * of retreating edges; ranges that overlap without nesting become one loop (`lmerged`),
+ * which is always checked whole.
+ *
+ * What may write: a store, unless it is to the same base at an offset range apart from
+ * the load's (the same value plus different constants are different addresses), and
+ * everything else that starts a new memory state above, which may write anything.
+ */
+typedef struct vwaddr { uint32_t base; bool slot; int64_t off; } vwaddr;
+
+/* a = base + off: a value or a slot, and the constant offsets added to it */
+static void vw_baseoff(vwst *V, uint32_t a, vwaddr *A)
+{
+	uint64_t off = 0;
+	int64_t k;
+
+	a = vw_find(V, a);
+	for (int hop = 0; hop < 16; hop++) {
+		const vir_ins *in = &V->p[a].in;
+
+		if (in->op != VO_PTRADD || V->p[a].blk == VW_NOBLK || !vw_kint(V, vw_find(V, in->b), &k))
+			break;
+		off += (uint64_t)k;
+		a = vw_find(V, in->a);
+	}
+	A->slot = V->p[a].in.op == VO_SLOTADDR && V->p[a].blk == VW_NOBLK;
+	if (A->slot) {
+		off += (uint64_t)V->p[a].in.b | (uint64_t)V->p[a].in.c << 32;
+		a = V->p[a].in.a;
+	}
+	A->base = a;
+	A->off = (int64_t)off;
+}
+
+#define VW_FAROFF	((int64_t)1 << 40)	/* offsets beyond are not compared */
+#define VW_FARMAX	32			/* writers looked at per load */
+
+/* nothing at positions (lo, hi] may write the w bytes at A */
+static bool vw_unwritten(vwst *V, vwsimp *S, uint32_t lo, uint32_t hi, const vwaddr *A, int64_t w)
+{
+	uint32_t i = 0, n = S->nwr;
+
+	while (i < n) {	/* the first writer after lo */
+		uint32_t m = i + (n - i) / 2;
+
+		if (S->seq[S->wr[m]] <= lo)
+			i = m + 1;
+		else
+			n = m;
+	}
+	for (n = 0; i < S->nwr && S->seq[S->wr[i]] <= hi; i++, n++) {
+		const vir_ins *in = &V->p[S->wr[i]].in;
+		vwaddr B;
+		int64_t sw;
+
+		if (n == VW_FARMAX || in->op != VO_STORE)
+			return false;
+		vw_baseoff(V, in->a, &B);
+		sw = (int64_t)1 << VIF_W(in->fl);
+		if (B.base != A->base || B.slot != A->slot || B.off <= -VW_FAROFF || B.off >= VW_FAROFF ||
+		    !(B.off + sw <= A->off || A->off + w <= B.off))
+			return false;
+	}
+	return true;
+}
+
+/* positions, writers and loops for vw_far (the blocks in reverse postorder) */
+static void vw_far_init(ecx *e, vwsimp *S)
+{
+	vwst *V = e->vw;
+	uint32_t n = V->norder, pos = 0, sp = 0, nl = 0, *stk, *iend;
+
+	S->seq = calloc((size_t)S->n0 + 1, sizeof *S->seq);
+	S->wr = malloc(((size_t)S->n0 + 1) * sizeof *S->wr);
+	S->ri = malloc(((size_t)V->nb + 1) * sizeof *S->ri);
+	S->bend = calloc((size_t)V->nb + 1, sizeof *S->bend);
+	S->linner = malloc(((size_t)n + 1) * sizeof *S->linner);
+	S->lstart = malloc(((size_t)n + 1) * sizeof *S->lstart);
+	S->lend = malloc(((size_t)n + 1) * sizeof *S->lend);
+	S->lpar = malloc(((size_t)n + 1) * sizeof *S->lpar);
+	S->lmerged = calloc((size_t)n + 1, 1);
+	stk = malloc(((size_t)n + 1) * sizeof *stk);
+	iend = malloc(((size_t)n + 1) * sizeof *iend);
+	if (!S->seq || !S->wr || !S->ri || !S->bend || !S->linner || !S->lstart || !S->lend || !S->lpar ||
+	    !S->lmerged || !stk || !iend)
+		vw_fail(e, "out of memory");
+	for (uint32_t b = 0; b < V->nb; b++)
+		S->ri[b] = VW_NOBLK;
+	for (uint32_t i = 0; i < n; i++)
+		S->ri[V->order[i]] = i;
+	for (uint32_t i = 0; i < n; i++) {
+		uint32_t b = V->order[i];
+
+		for (uint32_t q = V->b[b].head;; q = V->p[q].next) {
+			uint32_t x = q ? q : V->b[b].term, op, eff;
+
+			if (!x)
+				break;
+			op = V->p[x].in.op;
+			eff = vir_optab[op].eff;
+			if (x < S->n0 && vw_find(V, x) == x && !vw_promdead(V, x)) {
+				S->seq[x] = ++pos;
+				if (eff & (EF_W | EF_C | EF_A) || op == VO_BARRIER || op == VO_VA_ARG || op == VO_VA_START)
+					S->wr[S->nwr++] = x;
+			}
+			if (!q)
+				break;
+		}
+		S->bend[b] = pos;
+		/* the last index a retreating edge comes from */
+		iend[i] = VW_NOBLK;
+		for (uint32_t j = 0; j < V->b[b].npred; j++) {
+			uint32_t r = S->ri[V->pr[V->b[b].pred + j]];
+
+			if (r != VW_NOBLK && r >= i && (iend[i] == VW_NOBLK || r > iend[i]))
+				iend[i] = r;
+		}
+	}
+	for (uint32_t i = 0; i < n; i++) {
+		while (sp && S->lend[stk[sp - 1]] < i)
+			sp--;
+		if (iend[i] != VW_NOBLK) {
+			if (sp && S->lend[stk[sp - 1]] < iend[i]) {
+				/* it leaves the open loops it ends after: one loop with each of them */
+				for (uint32_t k = sp; k-- > 0 && S->lend[stk[k]] < iend[i];)
+					S->lend[stk[k]] = iend[i], S->lmerged[stk[k]] = 1;
+			} else {
+				S->lstart[nl] = i, S->lend[nl] = iend[i];
+				S->lpar[nl] = sp ? stk[sp - 1] : VW_NOBLK;
+				stk[sp++] = nl++;
+			}
+		}
+		S->linner[i] = sp ? stk[sp - 1] : VW_NOBLK;
+	}
+	free(stk), free(iend);
+}
+
+/* load q of the bytes at A: the table's entry for them, and whether its load (an earlier
+ * one in a dominating block) still holds at q */
+static vwhe *vw_far(vwst *V, vwsimp *S, uint32_t q, const vwaddr *A, bool *ok)
+{
+	const vir_ins *in = &V->p[q].in;
+	vwhe key = { VO_LOAD | 0x100, in->ty, (in->fl & (3 | VIF_MS)) | (A->slot ? 0x100 : 0), A->base,
+		     (uint32_t)(uint64_t)A->off, (uint32_t)((uint64_t)A->off >> 32), 0, 0 };
+	vwhe *t = vw_hlook(S, &key);
+	uint32_t l1 = t->v, hi = S->seq[q], ia;
+
+	*ok = false;
+	if (!l1) {
+		*t = key;	/* (the caller sets v and logs it) */
+		return t;
+	}
+	if (!S->seq[l1] || S->seq[l1] >= S->seq[q] || vw_find(V, l1) != l1 || V->p[l1].in.op != VO_LOAD)
+		return t;
+	ia = S->ri[V->p[l1].blk];
+	for (uint32_t l = S->linner[S->ri[V->p[q].blk]]; l != VW_NOBLK; l = S->lpar[l]) {
+		if (S->lstart[l] <= ia && !S->lmerged[l])
+			break;	/* it holds l1 too: round it is through l1 again */
+		if (S->bend[V->order[S->lend[l]]] > hi)
+			hi = S->bend[V->order[S->lend[l]]];
+	}
+	*ok = vw_unwritten(V, S, S->seq[l1], hi, A, (int64_t)1 << VIF_W(in->fl));
+	return t;
 }
 
 /* the block's instructions, rewritten and numbered (S->ht holds what its dominators computed) */
@@ -2617,6 +2995,29 @@ static void vw_cse_blk(ecx *e, vwsimp *S_, uint32_t b)
 		} else
 			continue;
 		t = vw_hlook(S, &key);
+		if (op == VO_LOAD && !t->v && q < S->n0 && S->seq[q]) {
+			vwaddr A;
+			bool ok;
+
+			vw_baseoff(V, V->p[q].in.a, &A);
+			if (A.off > -VW_FAROFF && A.off < VW_FAROFF) {
+				vwhe *g;
+
+				/* this memory state's entry first: the two lookups may meet in one empty slot */
+				S->log[S->nlog++] = (uint32_t)(t - S->ht);
+				*t = key;
+				t->v = q;
+				g = vw_far(V, S, q, &A, &ok);
+				if (ok)
+					t = g;	/* (q's own entry stays: it is forwarded to the same value) */
+				else if (!g->v) {
+					S->log[S->nlog++] = (uint32_t)(g - S->ht);
+					g->v = q;
+					continue;
+				} else
+					continue;
+			}
+		}
 		if (t->v && op == VO_LOAD && V->p[vw_find(V, t->v)].in.ty != V->p[q].in.ty) {
 			/* the same bytes, loaded as the other integer type (a truncation retyped it) */
 			vir_ins in = V->p[q].in;
@@ -2703,6 +3104,49 @@ static void vw_doms(ecx *e, vwsimp *S)
 	free(ri);
 }
 
+/*
+ * base + constant as an address is the load's or store's own operand on the CPU, but the
+ * lowering folds only a ptradd that its one user follows directly; numbering gives a
+ * block's accesses to one field a shared ptradd, which then costs an instruction and a
+ * register.  So each such access gets its own copy just before it (the shared one dies
+ * when nothing else reads it).  Only offsets every CPU here encodes: -256..255, or a
+ * multiple of the access size up to 4095 of them.
+ */
+static void vw_ownaddr(ecx *e, vwsimp *S)
+{
+	vwst *V = e->vw;
+
+	for (uint32_t i = 0; i < V->norder; i++) {
+		uint32_t b = V->order[i];
+
+		for (uint32_t q = V->b[b].head, pq = 0; q; pq = q, q = V->p[q].next) {
+			vir_ins in = V->p[q].in;
+			uint32_t a, n, w = 1u << VIF_W(in.fl);
+			int64_t k;
+
+			if ((in.op != VO_LOAD && in.op != VO_STORE) || q >= S->n0 || vw_find(V, q) != q || vw_promdead(V, q) ||
+			    (in.op == VO_LOAD && !S->cnt[q] && !(in.fl & VIF_VOL)))
+				continue;
+			a = vw_find(V, in.a);
+			if (a >= S->n0 || V->p[a].in.op != VO_PTRADD || V->p[a].blk == VW_NOBLK ||
+			    !vw_kint(V, vw_find(V, V->p[a].in.b), &k) ||
+			    !((k >= -256 && k <= 255) || (k > 0 && !(k % w) && k / w <= 4095)))
+				continue;
+			if (a == pq && S->cnt[a] == 1)
+				continue;	/* (its own already) */
+			n = vw_put(e, VO_PTRADD, VT_PTR, V->p[a].in.fl, vw_find(V, V->p[a].in.a), vw_find(V, V->p[a].in.b), 0, b);
+			V->p[n].loc = V->p[q].loc;
+			V->p[n].next = q;
+			if (pq)
+				V->p[pq].next = n;
+			else
+				V->b[b].head = n;
+			V->p[q].in.a = n;
+			vw_dec(V, S, a), vw_inc(V, S, V->p[n].in.a);
+		}
+	}
+}
+
 static void vw_simplify(ecx *e)
 {
 	vwst *V = e->vw;
@@ -2745,6 +3189,7 @@ static void vw_simplify(ecx *e)
 	}
 	/* rewriting and numbering over the dominator tree */
 	vw_doms(e, &S);
+	vw_far_init(e, &S);
 	{
 		uint32_t cap = 16, top = 0, *bst = malloc((size_t)(V->nb + 1) * 2 * sizeof *bst);
 
@@ -2752,7 +3197,7 @@ static void vw_simplify(ecx *e)
 			cap *= 2;
 		S.ht = calloc(cap, sizeof *S.ht);
 		S.hmask = cap - 1;
-		S.log = malloc(((size_t)V->np + 1) * sizeof *S.log);
+		S.log = malloc((2 * (size_t)V->np + 2) * sizeof *S.log);	/* (a store or a load adds two) */
 		S.egen = malloc(((size_t)V->nb + 1) * sizeof *S.egen);
 		if (!S.ht || !S.log || !bst || !S.egen)
 			vw_fail(e, "out of memory");
@@ -2777,10 +3222,11 @@ static void vw_simplify(ecx *e)
 		}
 		free(bst);
 	}
+	vw_ownaddr(e, &S);
 	/* what nothing reads */
 	for (uint32_t i = 0; i < V->norder; i++)
 		for (uint32_t q = V->b[V->order[i]].head; q; q = V->p[q].next)
-			if (vw_find(V, q) == q && !S.cnt[q])
+			if (q < S.n0 && vw_find(V, q) == q && !S.cnt[q])
 				stk[ns++] = q;
 	while (ns) {
 		uint32_t q = stk[--ns], op = V->p[q].in.op, eff = vir_optab[op].eff;
@@ -2788,7 +3234,7 @@ static void vw_simplify(ecx *e)
 		if (vw_find(V, q) != q || S.cnt[q] || V->p[q].blk == VW_NOBLK)
 			continue;
 		if (op == VO_LOAD ? (V->p[q].in.fl & VIF_VOL) != 0 :
-		    ((eff & ~EF_UF) != EF_P || op == VO_BPARAM || op == VO_PARAM))
+		    ((eff & ~(EF_UF | EF_F)) != EF_P || op == VO_BPARAM || op == VO_PARAM))	/* (FP status flags are not kept: no FENV_ACCESS) */
 			continue;
 		VW_EACHOP(V, q, o, {
 			uint32_t x = vw_find(V, *o);
@@ -2801,6 +3247,7 @@ static void vw_simplify(ecx *e)
 	}
 	free(S.ht), free(S.log), free(S.egen), free(S.kt);
 	free(S.idom), free(S.dkid), free(S.dnext);
+	free(S.seq), free(S.wr), free(S.ri), free(S.bend), free(S.linner), free(S.lstart), free(S.lend), free(S.lpar), free(S.lmerged);
 	free(S.cnt);
 	free(stk);
 }
@@ -2846,8 +3293,38 @@ static void vw_hoist(vwst *V, uint32_t a, uint32_t b, uint32_t cond)
 	uint32_t prev = 0, last = 0, nx;
 
 	if (k->tail == cond) {
+		/* a joined condition (vw_condmerge: compare, compare, and/or ...) ends b: before all of it,
+		 * when it is b's last instructions and the arm reads none of them */
+		uint32_t m[16], nm = 0, v = cond;
+		bool ok = true;
+
 		last = cond;
-		for (uint32_t q = k->head; q != cond; q = V->p[q].next)
+		while (nm + 2 <= 16 && (V->p[v].in.op == VO_AND || V->p[v].in.op == VO_OR) && V->p[v].in.ty == VT_I32 &&
+		       V->p[v].blk == b && V->p[vw_find(V, V->p[v].in.b)].in.op == VO_ICMP) {
+			m[nm++] = v, m[nm++] = vw_find(V, V->p[v].in.b);
+			v = vw_find(V, V->p[v].in.a);
+		}
+		if (nm && V->p[v].in.op == VO_ICMP && V->p[v].blk == b) {
+			uint32_t q, left = nm + 1;
+
+			m[nm++] = v;
+			for (q = v; q && left; q = V->p[q].next, left--) {	/* v ... cond: exactly the members, in a row */
+				bool in = false;
+
+				for (uint32_t j = 0; j < nm; j++)
+					in |= m[j] == q;
+				if (!in)
+					break;
+			}
+			ok = !q && !left;
+			for (q = V->b[a].head; q && ok; q = V->p[q].next)
+				for (uint32_t j = 0; j < nm; j++)
+					if (vw_find(V, V->p[q].in.a) == m[j] || vw_find(V, V->p[q].in.b) == m[j])
+						ok = false;
+			if (ok)
+				last = v;
+		}
+		for (uint32_t q = k->head; q != last; q = V->p[q].next)
 			prev = q;
 	} else {
 		prev = k->tail;
@@ -2947,6 +3424,209 @@ static bool vw_ifconv(ecx *e)
 			V->b[F].reach = 0;
 		any = true;
 	}
+	if (any) {
+		uint32_t m = 0;
+
+		for (uint32_t i = 0; i < V->norder; i++)
+			if (V->b[V->order[i]].reach)
+				V->order[m++] = V->order[i];
+		V->norder = m;
+	}
+	return any;
+}
+
+/*
+ * Two branches to a common destination become one, as LLVM's SimplifyCFG
+ * (FoldBranchToCommonDest): b ends in brif c1, S, O (or O, S) where S is b's alone,
+ * holds one integer compare c2 and ends in brif c2 with O as one target.  Then b
+ * computes c2 too and branches once on c1 and c2 (S on c1's true side) or c1 or c2
+ * (false side), c2 inverted when O is S's true target; S goes.  O's parameters must
+ * take the same values from b and from S.  The lowering turns the joined condition
+ * into cmp + ccmp, so a compare that is a cbz or tbz on its own (against 0 or -1)
+ * is left as its own branch.  Repeated: a && b && c is one chain.
+ */
+static bool vw_cbzlike(vwst *V, uint32_t c)
+{
+	const vir_ins *in = &V->p[c].in;
+	int cc = in->fl & 15;
+	int64_t k;
+
+	if (!vw_kint(V, vw_find(V, in->b), &k))
+		return false;
+	return !k ? cc == 0 || cc == 1 || cc == 2 || cc == 5 || cc == 7 || cc == 8 : k == -1 && (cc == 3 || cc == 4);
+}
+
+/* v is a condition the lowering reads from the flags: a compare, or and/or of such a
+ * condition and a compare; all in block b, each read once */
+static bool vw_cchain(vwst *V, uint32_t v, const uint32_t *cnt, uint32_t b)
+{
+	for (;;) {
+		const vwp *x = &V->p[v];
+		uint32_t r;
+
+		if (x->blk != b || cnt[v] != 1)
+			return false;
+		if (x->in.op == VO_ICMP)
+			return !vw_cbzlike(V, v);
+		if ((x->in.op != VO_AND && x->in.op != VO_OR) || x->in.ty != VT_I32)
+			return false;
+		r = vw_find(V, x->in.b);
+		if (V->p[r].in.op != VO_ICMP || V->p[r].blk != b || cnt[r] != 1 || vw_cbzlike(V, r))
+			return false;
+		v = vw_find(V, x->in.a);
+	}
+}
+
+static bool vw_condmerge(ecx *e)
+{
+	vwst *V = e->vw;
+	uint32_t ncnt = V->np + V->norder + 1, *cnt = calloc(ncnt, sizeof *cnt);
+	bool any = false, again = true;
+
+	if (!cnt)
+		vw_fail(e, "out of memory");
+	for (uint32_t i = 0; i < V->norder; i++) {
+		uint32_t b = V->order[i];
+
+		for (uint32_t p = V->b[b].phead; p; p = V->p[p].next)
+			if (V->fwd[p] == p)
+				VW_EACHOP(V, p, o, cnt[vw_find(V, *o)]++);
+		for (uint32_t q = V->b[b].head; q; q = V->p[q].next)
+			if (vw_find(V, q) == q && !vw_promdead(V, q))
+				VW_EACHOP(V, q, o, cnt[vw_find(V, *o)]++);
+		if (V->b[b].term)
+			VW_EACHOP(V, V->b[b].term, o, cnt[vw_find(V, *o)]++);
+	}
+	while (again) {
+		again = false;
+		for (uint32_t i = 0; i < V->norder; i++) {
+			static const uint8_t inv[10] = { 1, 0, 5, 4, 3, 2, 9, 8, 7, 6 };
+			uint32_t b = V->order[i], t = V->b[b].term, S, O, X, ts, c1, c2, nlive = 0, ib, is, ix, n, prev;
+			bool onfalse, flip;
+
+			if (!V->b[b].reach || !t || V->p[t].in.op != VO_BRIF || V->p[t].in.b == V->p[t].in.c)
+				continue;
+			c1 = vw_find(V, V->p[t].in.a);
+			for (int side = 0; side < 2; side++) {
+				S = side ? V->p[t].in.c : V->p[t].in.b, O = side ? V->p[t].in.b : V->p[t].in.c;
+				onfalse = side;
+				ts = V->b[S].term;
+				if (S == b || O == b || !V->b[S].reach || V->b[S].npred != 1 || V->pr[V->b[S].pred] != b || !ts ||
+				    V->p[ts].in.op != VO_BRIF || V->p[ts].in.b == V->p[ts].in.c)
+					continue;
+				if (V->p[ts].in.b == O)
+					X = V->p[ts].in.c, flip = !onfalse;	/* (and: S goes on when c2 fails; or: O when c2 holds) */
+				else if (V->p[ts].in.c == O)
+					X = V->p[ts].in.b, flip = onfalse;
+				else
+					continue;
+				if (X == S || X == b)
+					continue;
+				{
+					/* VCC_CCMP: `all` joins every such pair, `off` none.  The default joins only where
+					 * the if-conversion can follow (X an empty arm into O, or both into one block: a
+					 * value, not control flow).  Joining a plain branch pair costs the second compare
+					 * whenever the first decided alone, and pays only when the branches mispredict:
+					 * measured on sqlite, all: +0.4 % instructions, cycles unchanged (PLAN-vir.md). */
+					static int mode = -1;
+					uint32_t dn = 0;
+
+					if (mode < 0) {
+						const char *m = getenv("VCC_CCMP");
+
+						mode = !m ? 1 : !strcmp(m, "off") ? 0 : !strcmp(m, "all") ? 2 : 1;
+					}
+					if (!mode)
+						continue;
+					if (mode == 1) {
+						bool ex = vw_armempty(V, X, S, 0, &dn);
+						uint32_t jx = ex ? V->p[V->b[X].term].in.a : VW_NOBLK;
+						const vwb *ko = &V->b[O];
+
+						bool eo = ko->term && V->p[ko->term].in.op == VO_BR && ko->npred == 2;
+
+						for (uint32_t p = ko->phead; p && eo; p = V->p[p].next)
+							eo = V->fwd[p] != p;
+						for (uint32_t q = ko->head; q && eo; q = V->p[q].next)
+							eo = vw_find(V, q) != q || vw_promdead(V, q) ||
+							     (V->p[q].in.op == VO_MEMSET && (V->p[q].in.fl & VW_LIFETIME));
+						if (!ex || (jx != O && !(eo && V->p[ko->term].in.a == jx)))
+							continue;
+					}
+				}
+				c2 = vw_find(V, V->p[ts].in.a);
+				nlive = 0;
+				for (uint32_t p = V->b[S].phead; p; p = V->p[p].next)
+					nlive += V->fwd[p] == p;
+				for (uint32_t q = V->b[S].head; q; q = V->p[q].next)
+					if (vw_find(V, q) == q && !vw_promdead(V, q) &&
+					    !(V->p[q].in.op == VO_MEMSET && (V->p[q].in.fl & VW_LIFETIME)))
+						nlive += q == c2 ? 0 : 1;
+				if (nlive || V->p[c2].in.op != VO_ICMP || V->p[c2].blk != S || cnt[c2] != 1 || vw_cbzlike(V, c2) ||
+				    !vw_cchain(V, c1, cnt, b))
+					continue;
+				/* c1 is b's last instruction, or a compare that can move there */
+				if (V->b[b].tail != c1 && V->p[c1].in.op != VO_ICMP)
+					continue;
+				ib = vw_predix(V, O, b), is = vw_predix(V, O, S), ix = vw_predix(V, X, S);
+				if (ib == VW_NOBLK || is == VW_NOBLK || ix == VW_NOBLK || ib == is)
+					continue;
+				n = 0;
+				for (uint32_t p = V->b[O].phead; p; p = V->p[p].next)
+					if (V->fwd[p] == p && (V->p[p].in.b == VW_NOBLK ||
+							       vw_find(V, V->x[V->p[p].in.b + ib]) != vw_find(V, V->x[V->p[p].in.b + is])))
+						n++;
+				if (n)
+					continue;
+				/* c1 to b's end, c2 after it, then the and/or */
+				if (V->b[b].tail != c1) {
+					prev = 0;
+					for (uint32_t q = V->b[b].head; q != c1; q = V->p[q].next)
+						prev = q;
+					if (prev)
+						V->p[prev].next = V->p[c1].next;
+					else
+						V->b[b].head = V->p[c1].next;
+					V->p[V->b[b].tail].next = c1;
+					V->p[c1].next = 0;
+					V->b[b].tail = c1;
+				}
+				prev = 0;
+				for (uint32_t q = V->b[S].head; q != c2; q = V->p[q].next)
+					prev = q;
+				if (prev)
+					V->p[prev].next = V->p[c2].next;
+				else
+					V->b[S].head = V->p[c2].next;
+				if (V->b[S].tail == c2)
+					V->b[S].tail = prev;
+				V->p[c2].blk = b, V->p[c2].next = 0;
+				V->p[V->b[b].tail].next = c2;
+				V->b[b].tail = c2;
+				if (flip)
+					V->p[c2].in.fl = (uint16_t)((V->p[c2].in.fl & ~15u) | inv[V->p[c2].in.fl & 15]);
+				n = vw_ins_in(e, b, onfalse ? VO_OR : VO_AND, VT_I32, 0, c1, c2, 0);
+				if (n >= ncnt)
+					vw_fail(e, "VIR: joined conditions");
+				V->p[n].loc = V->p[t].loc;
+				cnt[n] = 1;
+				V->p[t].in = onfalse ? (vir_ins){ VO_BRIF, VT_VOID, 0, n, O, X } : (vir_ins){ VO_BRIF, VT_VOID, 0, n, X, O };
+				/* X is entered from b now; O's entry from S goes */
+				V->pr[V->b[X].pred + ix] = b;
+				for (uint32_t p = V->b[O].phead; p; p = V->p[p].next)
+					if (V->p[p].in.b != VW_NOBLK)
+						for (uint32_t k = is; k + 1 < V->b[O].npred; k++)
+							V->x[V->p[p].in.b + k] = V->x[V->p[p].in.b + k + 1];
+				for (uint32_t k = is; k + 1 < V->b[O].npred; k++)
+					V->pr[V->b[O].pred + k] = V->pr[V->b[O].pred + k + 1];
+				V->b[O].npred--;
+				V->b[S].reach = 0;
+				any = again = true;
+				break;
+			}
+		}
+	}
+	free(cnt);
 	if (any) {
 		uint32_t m = 0;
 
@@ -3127,6 +3807,8 @@ static bool vw_emit_ins(ecx *e, uint32_t i, uint32_t b)
 	return true;
 }
 
+#include "vec.inc"
+
 VPRIV bool vw_emit(ecx *e)
 {
 	vwst *V = e->vw;
@@ -3162,9 +3844,13 @@ VPRIV bool vw_emit(ecx *e)
 		vw_deadparams(e);
 		vw_simplify(e);
 	}
+	if (vw_condmerge(e))
+		while (vw_trivial(e))
+			;
 	if (vw_ifconv(e))
 		while (vw_trivial(e))
 			;
+	vw_vectorize(e);
 	vw_split(e);
 	/* stores to a slot that is not exposed and that nothing reads are dead */
 	for (uint32_t s = 0; s < V->nsl; s++)

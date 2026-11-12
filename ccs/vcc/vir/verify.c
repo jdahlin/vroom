@@ -50,7 +50,7 @@ const char *vir_fname(const vir_unit *u, const vir_fn *f)
 static const char *tyname(uint32_t ty) { return ty < VT_N ? vir_tyname[ty] : "?"; }
 static const char *opname(const vir_ins *in) { return vir_optab[in->op].name ? vir_optab[in->op].name : "?"; }
 
-static bool is_valty(uint32_t ty) { return ty >= VT_I32 && ty <= VT_PTR; }
+static bool is_valty(uint32_t ty) { return (ty >= VT_I32 && ty <= VT_PTR) || vir_isvec(ty); }
 
 /* does a value of type ty satisfy operand kind k of an instruction whose result is rty? */
 static bool opnd_ok(uint32_t k, uint32_t ty, uint32_t rty)
@@ -67,6 +67,10 @@ static bool opnd_ok(uint32_t k, uint32_t ty, uint32_t rty)
 	case OK_ANY: return is_valty(ty);
 	case OK_X: return ty == VT_I32 || ty == VT_I64 || ty == VT_PTR;
 	case OK_FP: return ty == VT_F32 || ty == VT_F64;
+	case OK_VI: return vir_isvec(rty) && ty == vir_vint(rty);
+	case OK_VF: return vir_isvec(rty) && ty == vir_vflt(rty);
+	case OK_VRED: return vir_isvec(ty) && vir_velem(ty) == rty && ty == vir_vint(ty);
+	case OK_ELEM: return vir_isvec(rty) && ty == vir_velem(rty);
 	case OK_MULTI: return ty == VT_MULTI;
 	case OK_BITC:
 		return (rty == VT_I32 && ty == VT_F32) || (rty == VT_F32 && ty == VT_I32) ||
@@ -359,6 +363,14 @@ static void check_ins(vctx *v, uint32_t b, uint32_t i, uint32_t idx)
 		vfail(v, "T3", b, i, "%s: flag bits 0x%x are not allowed", oi->name, in->fl & ~oi->flmask);
 		return;
 	}
+	if (op == VO_VICMP && (in->fl & 15) > 9) {
+		vfail(v, "T3", b, i, "vicmp: condition code %u is not allowed", in->fl & 15);
+		return;
+	}
+	if (op == VO_VFCMP && (in->fl & 15) > 7) {
+		vfail(v, "T3", b, i, "vfcmp: condition code %u is not allowed", in->fl & 15);
+		return;
+	}
 	if (op == VO_ICMP && ((in->fl & 15) > 9 || (opty[0] == VT_PTR && (in->fl & 15) >= 2 && (in->fl & 15) <= 5))) {
 		vfail(v, "T3", b, i, "icmp: condition code %u is not allowed%s", in->fl & 15,
 		      opty[0] == VT_PTR ? " on ptr" : "");
@@ -380,14 +392,14 @@ static void check_ins(vctx *v, uint32_t b, uint32_t i, uint32_t idx)
 		else if (op == VO_EXT)
 			vt = opty[0], chk = true;
 		if (chk) {
-			uint32_t sz = vir_tysize(vt);
-			bool fp = vt == VT_F32 || vt == VT_F64 || vt == VT_PTR;
+			uint32_t sz = vir_tysize(vir_velem(vt));	/* (a vector's width is its lanes') */
+			bool fp = vt == VT_F32 || vt == VT_F64 || vt == VT_PTR || vir_isvec(vt);
 
 			if ((fp && w != sz) || (!fp && w > sz)) {
 				vfail(v, "T4", b, i, "%s: width %u does not fit %s", oi->name, w, tyname(vt));
 				return;
 			}
-			if (op == VO_LOAD && (in->fl & VIF_MS) && (vt == VT_F32 || vt == VT_F64 || vt == VT_PTR)) {
+			if (op == VO_LOAD && (in->fl & VIF_MS) && (vt == VT_F32 || vt == VT_F64 || vt == VT_PTR || vir_isvec(vt))) {
 				vfail(v, "T4", b, i, "load: sign extension of %s", tyname(vt));
 				return;
 			}

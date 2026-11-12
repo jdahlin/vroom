@@ -22,7 +22,7 @@ typedef struct vwb {
 	uint8_t def;		/* a variable is written in it: not empty, whatever its instructions */
 } vwb;
 
-typedef struct vwh { uint64_t key; uint32_t v; } vwh;	/* (block, variable) -> current definition */
+typedef struct vwh { uint64_t key; uint32_t v, gen; } vwh;	/* (block, variable) -> current definition */
 
 typedef struct vwslot {
 	int64_t off;		/* the walker's frame offset */
@@ -33,6 +33,7 @@ typedef struct vwslot {
 	uint8_t used;		/* a reachable load reads it (emission) */
 	uint32_t fin;		/* VIR slot id, VW_NOBLK none yet */
 	uint8_t prom;		/* promoted to variables (vw_promote): its stores go */
+	uint8_t f32w;		/* an 8-byte slot whose last float stored was an f32 (its low 4 bytes) */
 } vwslot;
 
 #define VW_LIFETIME 0x8000u	/* a memset's flag: the start of a local's lifetime (vw_undecl) */
@@ -43,9 +44,11 @@ typedef struct vwst {
 	vwp *p; uint32_t np, cp;
 	vwb *b; uint32_t nb, cb;
 	uint32_t *x; uint32_t nx, cx;		/* extra words (pre-IR values) */
-	vwh *h; uint32_t hn, hcap;
+	vwh *h; uint32_t hn, hcap, hgen, halloc;	/* an entry of another gen is empty (no clearing per function);
+						 * hcap: the part in use, small again at each function */
+	uint32_t *lh, lhcap, lhalloc;		/* (symbol, inlining instance) -> local + 1 */
 	uint32_t *fwd; uint32_t cfwd;		/* removed parameters: the value that replaces them */
-	uint32_t *lab; uint32_t clab;		/* walker label -> block */
+	uint32_t *lab; uint32_t clab, labhi;		/* walker label -> block */
 	vwslot *sl; uint32_t nsl, csl;
 	uint32_t *act; uint32_t nact, cact;	/* slots that own their range now */
 	vwstent *st; uint32_t nst, cst;
@@ -58,6 +61,7 @@ typedef struct vwst {
 	uint32_t *order; uint32_t norder, corder;	/* blocks in emission order */
 	uint32_t *bmap; uint32_t cbmap;		/* scratch */
 	uint64_t live[3], flive;		/* names in use */
+	uint32_t fprod[64];			/* per float name: the product (or its negation) the expression in hand just made, 0 none */
 	uint32_t cur;				/* the block being built */
 	bool sealing;
 	uint32_t rty;				/* the result's type, VT_VOID none */
