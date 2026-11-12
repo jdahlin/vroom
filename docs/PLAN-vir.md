@@ -327,6 +327,19 @@ utökade negativa index/32-bitarsord, assembly/objekt och ASan/UBSan gröna.
 Arithmetik direkt från spillslot och dubblerad inlinegräns gav ingen säker
 vinst och behölls inte. Data: work/vir-x86-perf/be4/results/summary.json.
 
+Sjunde skivan ger identitetskonverteringar tied-preferens, känner igen
+när en i32-definition redan nollställer övre registerbitar och använder en
+begränsad bitmaskanalys för icke-negativa signerade utvidgningar. Parametrar,
+anropsresultat och identitetstrunkeringar antas inte ha rena övre bitar.
+Signerade laster är redan 64-bitars utvidgade, men en spillslot kan bryta
+detta: endast värden utan spillslot får återanvända signutvidgningen.
+Riktprov för smutsiga SysV-register/returer, trunkering, masker och negativa
+bytevärden går via assembly/objekt och ASan/UBSan. GCC/TCC 1615/105, egna
+302/302, samma fem inline-undantag. Fem kortprov: instruktioner 1,461x →
+1,439x clang, CPU 348,58 → 348,45 ms (1,245x → 1,244x): ingen säker CPU-vinst.
+Data: work/vir-x86-perf/ext2/results. Standardstorlek 100 före denna skiva:
+tre prov ger 1,249x CPU; det korta storlek-30-provet är representativt.
+
 
 ### V2/V3 x86-64 (2026-11-12): TSVC och fem verkliga korpusar
 

@@ -65,6 +65,7 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
             if run([str(exe)]).stdout != expected:
                 raise SystemExit('output differs from clang')
     for filename, required_more, packed in (
+        ('vir_x86_ext.c', {'clean', 'trim', 'mask', 'signedload', 'fromcall'}, {}),
         ('vir_x86_select.c', {'choose', 'uchoose', 'keep', 'boolean', 'pointer'}, {}),
         ('vir_x86_bytes.c', {'be16', 'be32', 'indexed16', 'indexed32', 'bev16', 'signed16', 'changed'}, {}),
         ('vir_x86_inline.c', {'work'}, {}),
@@ -99,6 +100,10 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
                     body = asm.read_text().split(name + ':\n', 1)[1].split('.Lfunc_end', 1)[0]
                     if 'cmov' not in body:
                         raise SystemExit(f'{name}: missing conditional move')
+            if filename == 'vir_x86_ext.c':
+                body = asm.read_text().split('mask:\n', 1)[1].split('.Lfunc_end', 1)[0]
+                if 'movslq' in body:
+                    raise SystemExit('mask: nonnegative masked value was sign-extended')
             if filename == 'vir_x86_bytes.c':
                 body = asm.read_text().split('be16:\n', 1)[1].split('.Lfunc_end', 1)[0]
                 if 'rorw' not in body or 'movzwl' not in body:

@@ -104,6 +104,7 @@ static void vx_fixed(const vir_fn *f, uint32_t v, vir_fix *x, void *ctx)
 	switch(i->op) {
 	case VO_SUB: case VO_PSUB: case VO_MUL: case VO_AND: case VO_OR: case VO_XOR:
 	case VO_NEG: case VO_NOT: case VO_SHL: case VO_LSHR: case VO_ASHR:
+	case VO_EXT: case VO_TRUNC: case VO_P2I: case VO_I2P:
 	case VO_FADD: case VO_FSUB: case VO_FMUL: case VO_FDIV:
 		x->fl|=VFX_TIED;break;
 	default:break;
@@ -353,6 +354,47 @@ static bool vx_readword(vx *L,uint32_t b,uint32_t v,unsigned width)
 	return true;
 }
 
+/* Possible one bits, bounded to a small local expression tree. A clear sign
+ * bit proves that a signed i32 extension has the same value as zero extension. */
+static uint32_t vx_mask32(const vir_fn *f,uint32_t v,unsigned depth)
+{
+	const vir_ins *i=&f->ins[v];
+	if(i->ty!=VT_I32 || !depth)return UINT32_MAX;
+	int64_t k;
+	switch(i->op) {
+	case VO_ICONST:return i->b;
+	case VO_LOAD: case VO_EXT:
+		if(!(i->fl&VIF_MS) && VIF_W(i->fl)<2)return VIF_W(i->fl)?0xffff:0xff;
+		return UINT32_MAX;
+	case VO_ICMP: case VO_FCMP:return 1;
+	case VO_AND:return vx_mask32(f,i->a,depth-1)&vx_mask32(f,i->b,depth-1);
+	case VO_OR: case VO_XOR:return vx_mask32(f,i->a,depth-1)|vx_mask32(f,i->b,depth-1);
+	case VO_SHL: case VO_LSHR:
+		if(vx_imm(f,i->b,&k) && k>=0 && k<32) {
+			uint32_t mask=vx_mask32(f,i->a,depth-1);
+			return i->op==VO_SHL?mask<<k:mask>>k;
+		}
+		return UINT32_MAX;
+	default:return UINT32_MAX;
+	}
+}
+/* An IR i32 does not itself guarantee zero upper bits: parameters, calls,
+ * signed narrow loads and identity truncations can retain arbitrary bits. */
+static bool vx_clear32(const vir_fn *f,uint32_t v)
+{
+	const vir_ins *i=&f->ins[v];
+	if(i->ty!=VT_I32)return false;
+	switch(i->op) {
+	case VO_ICONST:return !(i->b>>31);
+	case VO_LOAD: case VO_EXT:return !(i->fl&VIF_MS);
+	case VO_ADD: case VO_SUB: case VO_MUL: case VO_AND: case VO_OR: case VO_XOR:
+	case VO_NEG: case VO_NOT: case VO_ICMP: case VO_FCMP: case VO_F2S: case VO_F2U:
+	case VO_SDIV: case VO_UDIV: case VO_SREM: case VO_UREM: case VO_SMULHI: case VO_UMULHI:return true;
+	case VO_BITCAST:return vir_rclass(f->ins[i->a].ty);
+	default:return false;
+	}
+}
+
 static uint8_t vx_condition(vx *L,uint32_t b,uint32_t v,uint32_t value,int reg)
 {
 	ecx *e=L->e;
@@ -552,6 +594,18 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 		x64_op3(e, X_MOV, sz, d, a, XNOREG); return;
 	case VO_EXT: {
 		if (VIF_W(i->fl) == 3) { x64_mov(e, d, a); return; }
+		const vir_ins *source=&L->f->ins[i->a];
+		if(VIF_W(i->fl)==2 && (i->fl&VIF_MS) && source->ty==VT_I32 &&
+		   (source->op==VO_LOAD || source->op==VO_EXT) && (source->fl&VIF_MS) &&
+		   VIF_W(source->fl)<=2 && L->o->slot[i->a]==VIR_NOBLK) {
+			/* Signed loads already extend to 64 bits. A 4-byte spill reload
+			 * would clear the sign bits, so only unspilled values qualify. */
+			x64_mov(e,d,a);return;
+		}
+		if(VIF_W(i->fl)==2 && vx_clear32(L->f,i->a) &&
+		   (!(i->fl&VIF_MS) || !(vx_mask32(L->f,i->a,8)>>31))) {
+			x64_mov(e,d,a);return;
+		}
 		rec *r = x64_op3(e, X_EXT, 1 << VIF_W(i->fl), d, a, XNOREG);
 		r->cond = !!(i->fl & VIF_MS); return;
 	}
