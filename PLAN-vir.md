@@ -495,6 +495,32 @@ körningar (speedtest1 storlek 100, cykler).
   `vcc/index_addr.c`; C-sviterna genom VIR med allokeringskontrollen, vcc-cfi
   och darwin -S genom VIR (kodningen lika med clangs assemblering av texten).
 
+### Registerkopior kring anrop (2026-11-12)
+
+Uppdrag från jämförelsen mot virpol: `mov` mellan register låg +313 sampel
+över LLVM (2,0x statiskt).  Exemplet (`mov x21, x0; b join` i varje gren av
+vdbeRecordCompareString) var ingen blockparameter: `v3 = trunc v0` är bunden
+(i operandens register när den dör) och stannade i x0, fast den lever genom
+en loop med ett anrop; vid sammanflödet låg den i x21, så varje gren och
+bakkanten flyttade den.  Tre regler i `vir/alloc.c`:
+- en bunden operation vars resultat lever över ett anrop i en loop räknas
+  inte på plats i ett caller-saved register när ett callee-saved är ledigt
+  (en flytt vid definitionen i stället för en per varv);
+- en `ext` (en instruktion i vilket register som helst) tar sin hints
+  register när det är ledigt (alla bundna: fler flyttar, prövat);
+- ett värde vars nästa användning har fasta operander (ett anrops argument)
+  väljer, när hinten är upptagen, inte ett register som en annan av dess
+  operander ska till: memcmp:s `mov x3, x1; mov x1, x2; mov x2, x3` blir
+  `mov x1, x3`.  En fallback till blockparameterns egen hint när den saknar
+  tentativt register prövades: fler instruktioner, struken.
+sqlite: `mov` mellan register 37904 → 35785 (statiskt, hela binären),
+instruktioner 312681 → 310218; parat mot föregående bygge −0,1 % instruktioner, −0,6 %
+cykler (inom bruset för var regel för sig).  Kvar av de heta flyttarna, ur
+profilen: väljaren i en `switch` kopieras till x17 före jämförelsen
+(VdbeExec:s heta dispatch, vdbeRecordCompareInt, SerialGet) och `mov w0, w0`
+före en `ret` (sänkning, lämnat till vir-lowering); en rotation av fyra
+loopparametrar på en bakkant i VdbeExec; resten är sampel efter hopp.
+
 ### Syskonanrop, fritt argumentbyte och va_arg (2026-11-12)
 
 Steg 3 i arbetsordningen för sqlite.

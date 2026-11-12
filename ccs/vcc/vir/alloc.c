@@ -801,6 +801,19 @@ static int choose(A *a, uint32_t v, uint32_t c, uint64_t avoid)
 		    !caller_for_call(a, v, c, m, r))
 			return (int)r;
 	}
+	/* used next by an instruction with fixed operands (a call's arguments): not in the register
+	 * another of its operands goes to, when there is a choice */
+	if (ax.nu[v] && ax.nu[v] < a->f->nins) {
+		vir_fix x;
+		uint64_t o = 0;
+
+		get_fix(a, ax.nu[v], &x);
+		for (uint32_t j = 0; j < x.nopnd; j++)
+			if (x.opnd[j] != VR_NONE && VR_CLASS(x.opnd[j]) == c)
+				o |= 1ull << VR_NUM(x.opnd[j]);
+		if (m & ~o)
+			m &= ~o;
+	}
 	if ((ax.vfl[v] & XCALL) && ((ax.vfl[v] & XLOOP) || (a->used_callee[c] & m)) && (m & cs)) {
 		uint64_t u = m & cs & a->used_callee[c];
 
@@ -1542,9 +1555,22 @@ static bool instr(A *a, uint32_t b, uint32_t i, bool term)
 		} else if (ax.vfl[i] & DEAD) {
 			r = choose(a, i, c, lock[c]);
 		} else if ((fx.fl & VFX_TIED) && n) {
-			if (byte[0] != VR_NONE && ax.dmark[ops[0]] == i && !ax.regval[byte[0]])
+			/* (not in place in a caller-saved register when the result lives across a call
+			 * and a callee-saved one is free: one move here, not one at every call) */
+			uint64_t fm = ax.fr[c] & a->rg->alloc[c] & ~lock[c] & ~a->pavoid[c];
+			bool xc = byte[0] != VR_NONE && (ax.vfl[i] & (XCALL | XLOOP)) == (XCALL | XLOOP) &&
+				  !(a->rg->callee[c] >> VR_NUM(byte[0]) & 1) && (fm & a->rg->callee[c]);
+
+			/* an extension is an instruction in any register: in its hint's, when that is free */
+			uint32_t h = ax.hint[i];
+			bool hx = in->op == VO_EXT && (h & HREG) && VR_CLASS(h & 0xff) == c && (fm >> VR_NUM(h & 0xff) & 1) &&
+				  (h & 0xff) != byte[0];
+
+			if (hx)
+				r = (int)(h & 0xff);
+			else if (!xc && byte[0] != VR_NONE && ax.dmark[ops[0]] == i && !ax.regval[byte[0]])
 				r = byte[0];
-			else if ((fx.fl & VFX_COMMUT) && n >= 2 && byte[1] != VR_NONE && ax.dmark[ops[1]] == i && ops[1] != ops[0] &&
+			else if (!xc && (fx.fl & VFX_COMMUT) && n >= 2 && byte[1] != VR_NONE && ax.dmark[ops[1]] == i && ops[1] != ops[0] &&
 				 !ax.regval[byte[1]]) {
 				edit(a, i, VE_SWAP, VR_NONE, VR_NONE, i);
 				r = byte[1];
