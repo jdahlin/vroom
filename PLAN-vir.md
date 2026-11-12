@@ -1278,6 +1278,34 @@ inte är.  Bas efter sammanfogningen: 26,18 G (virpol 24,49 G, clang 23,70 G),
 - **Sammanlagt på grenen**, instruktioner mot clang -O2 (23,70 G): efter
   sammanfogningen med main 1,105x, nu 1,077x (25,51 G).
 
+### Vad som är kvar av gapet mot clang, per instruktionsslag (2026-11-12, efter shrink-wrapping)
+
+`bench/sqlite/mix.py`, klasserna sida vid sida (en minut; varje tal ca 0,03 G
+för högt, lika för båda).  VIR 25,55 G, clang -O2 23,72 G: gap **1,84 G
+(7,7 %)**.  G körda instruktioner:
+
+| Slag | VIR | clang | Skillnad | Vid förra mätningen |
+|---|---|---|---|---|
+| laster (inte sp/fp) | 4,45 | 3,99 | **+0,46** | +0,52 |
+| `mov` r,r | 1,59 | 1,21 | **+0,38** | +0,35 |
+| villkorliga hopp | 2,93 | 2,63 | **+0,30** | +0,36 |
+| `b` | 0,90 | 0,64 | **+0,26** | +0,29 |
+| add/sub | 2,77 | 2,58 | +0,19 | +0,18 |
+| cmp/tst | 1,74 | 1,61 | +0,13 | +0,12 |
+| lagringar (inte sp/fp) | 1,15 | 1,04 | +0,12 | +0,12 |
+| sp/fp-lagringar | 1,13 | 1,04 | +0,09 | +0,12 |
+| sp/fp-laster | 1,27 | 1,19 | +0,08 | +0,12 |
+| anrop + ret | 0,72 | 0,61 | +0,11 | +0,08 |
+| konstanter (mov #, adrp) | 1,04 | 1,23 | −0,19 | −0,13 |
+| csel-familjen | 0,14 | 0,20 | −0,06 | −0,09 |
+
+Summan av skillnaderna är 1,87 G.  Ramar (`stp x29, x30`): VIR 0,11 G, clang
+0,16 G: vi sätter nu upp färre ramar än clang.  Stacktrafiken är +0,17 G
+(var +0,24).  Kvar i ordning: vanliga laster (byggaren: inga laster hissade ur
+loopar, färre återanvända över block, inlining), `mov` (allokeraren:
+blockparametrar och argumentkopior), villkorliga hopp (inlining, färre
+`csel`), `b` (blockplacering).
+
 ### Underlag för V4 (2026-11-11): registerallokering, ingen kod
 
 - `RESEARCH-regalloc.md`: vad GCC (IRA, LRA) och LLVM (Greedy, Fast, PBQP,

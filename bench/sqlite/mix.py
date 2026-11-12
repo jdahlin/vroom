@@ -10,7 +10,12 @@ unchanged build's is how often that class runs.  Works on any compiler's .s.
   clang: clang -O2 ... -S sqlite3.c -o c.s
 
 A class whose nops push a tbz out of range is run in 2, 4, ... parts and summed.  Run one
-at a time for totals good to about 0.01 G (macOS: /usr/bin/time -l)."""
+at a time for totals good to about 0.01 G (macOS: /usr/bin/time -l).
+
+All classes in a minute instead of ten: the unchanged build once, then a process per class
+(each count comes out about 0.03 G high when they run side by side, for every compiler alike):
+  b=$(MIX_ONLYBASE=1 bench/sqlite/mix.py NAME | tail -1)
+  printf '%s\n' 'sp load' 'sp store' ... | MIX_BASE=$b xargs -P 7 -I{} bench/sqlite/mix.py NAME '{}'"""
 import re,subprocess,sys
 CL='/opt/homebrew/opt/llvm/bin/clang'
 src=open(sys.argv[1]+'.s').read().split('\n')
@@ -28,6 +33,8 @@ C={
  'cmp/tst': r'(cmp\s|cmn\s|tst\s|subs\s+[xw]zr|ands\s+[xw]zr|ccmp\s|ccmn\s)',
  'extend': r'(sxt[bhw]|uxt[bhw]|ubfm|sbfm|ubfx|sbfx|ubfiz|sbfiz|and\s+[xw]\d+, [xw]\d+, #0xff)\b',
  'csel': r'(csel|csinc|csinv|csneg|cset|csetm|cinc)\s',
+ 'add/sub': r'(add|sub|adds|subs)\s+[xw](\d+|sp),',
+ 'frame': r'stp\s+x29, x30',
 }
 def run(lines,tag):
     tag=tag+'-'+'-'.join(sys.argv[2:3]).replace(' ','_').replace('/','_')
@@ -37,9 +44,11 @@ def run(lines,tag):
     subprocess.run([CL,f'mix-{tag}.o','t.o','-o',f'mix-{tag}'],check=True)
     e=subprocess.run(['/usr/bin/time','-l',f'./mix-{tag}','--size','100','--memdb'],capture_output=True,text=True).stderr
     return int(re.search(r'(\d+)\s+instructions retired',e).group(1))
+import os
 tag=sys.argv[1]
-base=run(src,tag)
-print(f"{tag}: total {base/1e9:.3f} G")
+base=int(os.environ['MIX_BASE']) if os.environ.get('MIX_BASE') else run(src,tag)
+if not os.environ.get('MIX_BASE'): print(f"{tag}: total {base/1e9:.3f} G")
+if os.environ.get('MIX_ONLYBASE'): print(base); sys.exit()
 only=sys.argv[2:] 
 for name,rx in C.items():
     if only and name not in only: continue
