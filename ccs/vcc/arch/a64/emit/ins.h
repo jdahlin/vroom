@@ -49,7 +49,7 @@ enum {
 	I_WORD,		/* imm: an encoded instruction (registers already in it) */
 	I_TLV,		/* x0 = address of thread-local ref; cond 0: Darwin TLV descriptor call (clobbers x16, lr),
 			 * TLS_LE/TLS_IE: ELF via tpidr_el0 (clobbers x1), TLS_DESC: ELF TLSDESC call (x1, lr) */
-	I_JT,		/* jump table dispatch: rd = index (already bounds-checked), label: the table; expanded by finish_function
+	I_JT,		/* jump table dispatch: rd = index (already bounds-checked; cond 2: a w register, uxtw), label: the table; expanded by finish_function
 			 * (adr x16; add x17; ldrsw x17; add x16; br x16), every target label is LREF_EXT */
 	I_JTE,		/* a table word: label (off) - ref, both labels, in bytes */
 	I_TAIL,		/* ref: direct sibling target; cond 0 terminal marker, 1 branch after epilogue;

@@ -33,7 +33,7 @@ typedef struct vl {
 	uint32_t *lbl;		/* per block: its label */
 	uint32_t *chs;		/* per block: where a branch to it ends up (vl_chase) */
 	uint8_t *uses;
-	uint8_t *lo32;		/* per value: 1 if every use is a trunc (only the low 32 bits are read) */
+	uint8_t *lo32;		/* per value: 1 if every use is a trunc or a ret32 return (only the low 32 bits are read) */
 	uint32_t retlbl;
 	uint32_t ov[VL_MAXOP];	/* the instruction's value operands (vir_oit order, no multi) */
 	uint8_t opr[VL_MAXOP];	/* ... and their registers */
@@ -1044,13 +1044,15 @@ static void vl_switch(vl *L, uint32_t b, const vir_ins *in)
 	}
 	if (n >= 6 && span < 4096 && span + 1 <= 4 * cnt && !e->E->noopt) {
 		uint32_t tab = newlabel(e), off = e->njtl;
+		int ix = r;
 
-		/* the index in x17: expand_tables' adr writes x16 first */
+		/* the index: the selector itself from 0 (a word through uxtw), else x17; never x16,
+		 * which expand_tables' adr writes first, nor zr */
 		if (lo)
-			opi(e, I_SUBI, x, R_X17, r, (int64_t)lo);
-		else
-			op3(e, I_MOV, x, R_X17, r, 0);
-		opi(e, I_SUBSI, x, ZR, R_X17, (int64_t)span);
+			opi(e, I_SUBI, x, ix = R_X17, r, (int64_t)lo);
+		else if (r == R_X16 || r >= 31)
+			op3(e, I_MOV, x, ix = R_X17, r, 0);
+		opi(e, I_SUBSI, x, ZR, ix, (int64_t)span);
 		bcond(e, C_HI, dl);
 		if (e->njtl + (uint32_t)span + 1 > e->capjtl) {
 			e->capjtl = (e->njtl + (uint32_t)span + 1) * 2;
@@ -1087,7 +1089,8 @@ static void vl_switch(vl *L, uint32_t b, const vir_ins *in)
 		}
 		e->jt[e->njt++] = (struct ejt){ tab, off, (uint32_t)span + 1 };
 		ins *i = put(e, I_JT);
-		i->rd = R_X17;
+		i->rd = (uint8_t)ix;
+		i->cond = ix != R_X17 && !x ? 2 : 0;
 		i->label = tab;
 		e->reach = false;
 		return;
@@ -1409,7 +1412,7 @@ static void vl_ins(vl *L, uint32_t b, uint32_t i, uint8_t res)
 	case VO_MUL:
 		if (vl_cfold(L, b, i, res))
 			return;
-		if (L->opr[1] == VR_NONE && vl_iconst(f, in->b)) {
+		if (L->opr[1] == VR_NONE && vl_iconst(f, in->b) && vl_pow2(&f->ins[in->b]) >= 0) {
 			int w = x ? 64 : 32, k = vl_pow2(&f->ins[in->b]);
 
 			opbf(e, I_UBFM, x, rd, vl_ix(L, 0, R_X16), (w - k) & (w - 1), w - 1 - k);
@@ -1478,8 +1481,8 @@ static void vl_ins(vl *L, uint32_t b, uint32_t i, uint8_t res)
 			return;
 		int w = VIF_W(in->fl), a = vl_ix(L, 0, R_X16);
 
-		if (w == 3 || (w == 2 && (!x || ((in->fl & VIF_MS) && L->lo32[i]))))
-			mov(e, 1, rd, a);	/* (ext.4s whose low half alone is read: a copy) */
+		if (w == 3 || (w == 2 && (!x || L->lo32[i])))
+			mov(e, 1, rd, a);	/* (ext.4 whose low half alone is read: a copy) */
 		else if ((in->fl & VIF_MS) && L->lo32[i])	/* only its low half is read: the i32 form */
 			opbf(e, I_SBFM, 0, rd, a, 0, w == 2 ? 31 : (8 << w) - 1);
 		else if (in->fl & VIF_MS)
@@ -1834,19 +1837,51 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 	L.ret32 = KIND(c, ft->base) != TY_VOID && is_integer(c, ft->base) && tsize(c, ft->base) == 4;
 	L.tail = !(ft->flags & TF_VARIADIC) && em_tail_caller_ok(e, s) && !vl_notail(&L, VLT.lo32);	/* (lo32: scratch until it is filled) */
 	vir_uses(f, L.uses);
+	/* lo32 by a fixed point: only falls; a br argument is read as its parameter is */
 	memset(L.lo32, 1, f->nins);
-	for (uint32_t b = 0; b < f->nblk; b++)
-		for (uint32_t i = f->blk[b].first; i < f->blk[b].first + f->blk[b].n; i++) {
-			vir_ins x = f->ins[i];
-			vir_oit it;
-			uint32_t *p;
+	for (bool ch = true; ch;) {
+		ch = false;
+		for (uint32_t b = 0; b < f->nblk; b++)
+			for (uint32_t i = f->blk[b].first; i < f->blk[b].first + f->blk[b].n; i++) {
+				vir_ins x = f->ins[i];
+				vir_oit it;
+				uint32_t *p;
 
-			if (x.op == VO_TRUNC)
-				continue;
-			vir_oit_init(&it, f, &x, false);
-			while ((p = vir_oit_next(&it)))
-				L.lo32[*p] = 0;
-		}
+				if (x.op == VO_TRUNC || (x.op == VO_RET && L.ret32))	/* (a 32-bit return's upper half is unspecified) */
+					continue;
+				if (x.op == VO_BR) {
+					const vir_blk *t = &f->blk[x.a];
+
+					for (uint32_t j = 0; j < t->nparam; j++) {
+						uint32_t a = f->extra[x.c + j];
+
+						if (!L.lo32[t->first + j] && L.lo32[a])
+							L.lo32[a] = 0, ch = true;
+					}
+					continue;
+				}
+				if (x.op == VO_CALL) {	/* an integer argument of 4 bytes or less: its upper half is unspecified */
+					uint32_t n = f->extra[x.c], hdr = f->extra[x.b];
+
+					for (uint32_t k = 0; k < n; k++) {
+						uint32_t a = f->extra[x.c + 1 + k], w0 = f->extra[x.b + 3 + 2 * k], w1 = f->extra[x.b + 4 + 2 * k];
+
+						if (VSIG_NGROUPS(hdr) == n && VG_KIND(w0) == VG_REG && VG_NPIECE(w0) == 1 &&
+						    VG_CLASS(w0, 0) == VC_INT && VG_SIZE(w1) <= 4)
+							continue;
+						if (L.lo32[a])
+							L.lo32[a] = 0, ch = true;
+					}
+					if (L.lo32[x.a])
+						L.lo32[x.a] = 0, ch = true;
+					continue;
+				}
+				vir_oit_init(&it, f, &x, false);
+				while ((p = vir_oit_next(&it)))
+					if (L.lo32[*p])
+						L.lo32[*p] = 0, ch = true;
+			}
+	}
 
 	/* the emitter's per-function state, as emit_function1 sets it */
 	em_switch_values_reset(e);

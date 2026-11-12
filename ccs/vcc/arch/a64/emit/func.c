@@ -298,7 +298,7 @@ static void expand_tables(ecx *e, uint32_t fid)
 		d -= 6 + j->n;
 		ins *o = &e->in[d];
 		o[0] = (ins){ .op = I_ADR, .rd = R_X16, .label = x.label };
-		o[1] = (ins){ .op = I_ADD, .sz = 1, .rd = R_X17, .rn = R_X16, .rm = x.rd, .sh = 2 };
+		o[1] = (ins){ .op = I_ADD, .sz = 1, .rd = R_X17, .rn = R_X16, .rm = x.rd, .sh = 2, .cond = x.cond ? 8 + 2 : 0 };
 		o[2] = (ins){ .op = I_LD, .sz = 2, .cond = 1, .rd = R_X17, .rn = R_X17 };
 		o[3] = (ins){ .op = I_ADD, .sz = 1, .rd = R_X16, .rn = R_X16, .rm = R_X17 };
 		o[4] = (ins){ .op = I_BR, .rn = R_X16 };
