@@ -398,6 +398,7 @@ typedef struct ecx {
 	struct xst *x64;	/* X86: arch/x64/emit/ state (x64impl.h) */
 	struct vwst *vw;	/* the VIR builder's state (emit/vir/, PLAN-vir.md) */
 	bool vtry;		/* the VIR walker runs: an error is not reported, it makes the function fall back */
+	bool vlow;		/* the records are VIR's lowering (finish_function's clean-ups for it) */
 	const char *vfail;	/* ... and why (NULL: it did not fail) */
 	struct em_switch_values_data *switch_values; /* accepted tables of this real function */
 } ecx;
@@ -741,6 +742,8 @@ VPRIV void at_ldop(ecx *e, unsigned sz, unsigned opc, int rs, int rt, int rn);
 VPRIV void jump(ecx *e, uint32_t l);
 VPRIV void bcond(ecx *e, int cond, uint32_t l);
 VPRIV void cbz(ecx *e, bool nz, int x, int r, uint32_t l);
+VPRIV void tbz(ecx *e, bool nz, int r, int bit, uint32_t l);
+VPRIV uint32_t a64_words(const ins *i);
 /* value.c */
 VPRIV int treg(ecx *e);
 VPRIV void tfree(ecx *e, int r);

@@ -72,7 +72,7 @@ static unsigned roles_sw(const ins *i)
 		return RN_R | RD_W | RA_W | (i->cond ? RN_W : 0);
 	case I_STP:
 		return RD_R | RA_R | RN_R | (i->cond ? RN_W : 0);
-	case I_CBZ: case I_CBNZ:
+	case I_CBZ: case I_CBNZ: case I_TBZ: case I_TBNZ:
 		return RD_R;
 	case I_PRFM:
 		return RN_R;
@@ -134,7 +134,7 @@ static int brkind_sw(const ins *i)
 {
 	switch (i->op) {
 	case I_B: return BR_UNCOND;
-	case I_BC: case I_CBZ: case I_CBNZ: return BR_COND;
+	case I_BC: case I_CBZ: case I_CBNZ: case I_TBZ: case I_TBNZ: return BR_COND;
 	case I_RET: case I_TAIL: case I_JT: return BR_END;
 	case I_BR: return BR_INDIRECT;
 	default: return BR_NONE;
@@ -1011,6 +1011,96 @@ VPRIV uint64_t opt_regs(ecx *e, unsigned *fl)
 	return u;
 }
 
+/* ---------------- repeated compares ---------------- */
+
+static inline bool sets_flags(unsigned op)
+{
+	return op == I_ADDS || op == I_SUBS || op == I_ANDS || op == I_ADCS || op == I_SBCS || op == I_ADDSI ||
+	       op == I_SUBSI || op == I_ANDSI;
+}
+
+/*
+ * A compare (rd zr) identical to the one whose flags still hold goes.  The flags hold
+ * from a compare on, through conditional branches, until a flag writer, a call or
+ * unknown record, or a write of a register the compare reads; at a label, when every
+ * way in (falling through, branches from before it) brings an identical compare.  A
+ * label something branches back to, or reached from outside the records, starts with
+ * nothing known.
+ */
+#define NOCMP UINT32_MAX
+#define MIXED (UINT32_MAX - 1)
+static void flags(ecx *e)
+{
+	static _Thread_local uint32_t *ls, *lp;	/* per label: the compare branches bring (NOCMP, MIXED); its record */
+	static _Thread_local uint32_t cap;
+	ins *in = e->in;
+	uint32_t c = NOCMP, nl = e->nlabel;
+	bool fall = true;	/* the previous record falls through */
+
+	if (nl > cap) {
+		cap = nl + nl / 2 + 64;
+		free(ls);
+		ls = malloc(2 * (size_t)cap * sizeof *ls);
+		if (!ls)
+			abort();
+		lp = ls + cap;
+	}
+	for (uint32_t l = 0; l < nl; l++)
+		ls[l] = NOCMP, lp[l] = UINT32_MAX;
+	for (uint32_t k = 0; k < e->nin; k++)
+		if (in[k].op == I_LABEL)
+			lp[in[k].label] = k;
+	for (uint32_t l = 0; l < nl; l++)	/* (ls: branched to yet; NOCMP below means "nothing came") */
+		ls[l] = e->lrefc[l] & LREF_EXT ? MIXED : NOCMP - 2;
+	for (uint32_t k = 0; k < e->nin; k++) {
+		ins *i = &in[k];
+		unsigned ro;
+		int bk;
+
+		if (i->op == DELETED)
+			continue;
+		if (i->op == I_LABEL) {
+			uint32_t w = ls[i->label];
+
+			if (w == NOCMP - 2)	/* only falling through */
+				w = fall ? c : NOCMP;
+			else if (w != MIXED && fall && (c == NOCMP || memcmp(&in[c], &in[w], sizeof *i)))
+				w = MIXED;
+			c = w == MIXED ? NOCMP : w;
+			ls[i->label] = MIXED;	/* (placed: a later branch to it is a back edge) */
+			fall = true;
+			continue;
+		}
+		if (sets_flags(i->op) && i->rd == ZR) {
+			if (c != NOCMP && !memcmp(&in[c], i, sizeof *i))
+				i->op = DELETED;
+			else
+				c = k;
+			fall = true;
+			continue;
+		}
+		ro = roles(i);
+		bk = brkind(i);
+		if (c != NOCMP && (sets_flags(i->op) || (ro & OP_SLOW) || (writes(i, ro) & reads(&in[c], roles(&in[c])))))
+			c = NOCMP;
+		if ((bk == BR_COND || bk == BR_UNCOND || i->op == I_ADR) && i->label < nl) {
+			uint32_t *w = &ls[i->label];
+
+			if (i->op == I_ADR || lp[i->label] < k || c == NOCMP)
+				*w = MIXED;
+			else if (*w == NOCMP - 2)
+				*w = c;
+			else if (*w != MIXED && memcmp(&in[*w], &in[c], sizeof *i))
+				*w = MIXED;
+		}
+		fall = bk == BR_NONE || bk == BR_COND;
+		if (!fall)
+			c = NOCMP;
+	}
+}
+#undef NOCMP
+#undef MIXED
+
 /* copy propagation (forward, then backward) and dead copies */
 static void copies(ecx *e)
 {
@@ -1069,6 +1159,8 @@ VPRIV void opt_function(ecx *e)
 	exts(e);
 	copies(e);
 	dead(e);
+	if (e->vlow)
+		flags(e);
 	uint32_t dj = 0;
 
 	for (uint32_t k = 0; k < e->nin; k++) {

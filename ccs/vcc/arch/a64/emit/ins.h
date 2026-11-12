@@ -37,6 +37,7 @@ enum {
 	I_ADR,		/* rd = local label */
 	I_B, I_BC,	/* label; I_BC: cond */
 	I_CBZ, I_CBNZ,	/* rd, label */
+	I_TBZ, I_TBNZ,	/* rd, sh: the bit (sz 1 when it is 32-63), label (+-32 KB: finish_function relaxes) */
 	I_BL,		/* ref */
 	I_BLR, I_BR,	/* rn */
 	I_RET,

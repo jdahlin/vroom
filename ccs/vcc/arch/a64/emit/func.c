@@ -297,6 +297,70 @@ static void expand_tables(ecx *e, uint32_t fid)
 	e->nin = (uint32_t)total;
 }
 
+/*
+ * tbz/tbnz reach +-32 KB: one whose label may be farther (word offsets from a64_words, with
+ * room for the printer's and the object writer's own relaxation of b.cond) becomes the
+ * inverted test over a b, as LLVM's BranchRelaxation does.
+ */
+static void tbz_relax(ecx *e)
+{
+	enum { NEAR = 6000 };	/* words, of the 8191 tbz reaches */
+	uint32_t m = 0, n = e->nin, *at, total = 0;
+
+	for (uint32_t k = 0; k < n; k++)
+		m += e->in[k].op == I_TBZ || e->in[k].op == I_TBNZ;
+	if (!m)
+		return;
+	at = malloc(((size_t)n + 1 + e->nlabel) * sizeof *at);
+	if (!at)
+		abort();
+	uint32_t *lat = at + n + 1;
+
+	for (uint32_t k = 0; k < n; k++) {
+		at[k] = total;
+		if (e->in[k].op == I_LABEL)
+			lat[e->in[k].label] = total;
+		total += a64_words(&e->in[k]);
+		if (total > (1u << 30))
+			total = 1u << 30;
+	}
+	at[n] = total;
+	if ((uint64_t)n + 2ull * m > e->capin) {
+		fputs("vcc: function too large\n", stderr);
+		abort();
+	}
+	uint32_t w = n + 2 * m;
+
+	for (uint32_t k = n; k-- > 0;) {
+		ins t = e->in[k];
+		int64_t d;
+
+		if (t.op != I_TBZ && t.op != I_TBNZ) {
+			e->in[--w] = t;
+			continue;
+		}
+		d = (int64_t)lat[t.label] - at[k];
+		if (total < (1u << 17) && d > -NEAR && d < NEAR) {
+			e->in[--w] = t;
+			continue;
+		}
+		uint32_t l = newlabel(e);
+
+		for (uint32_t r = 0; r < e->ndl; r++)	/* (-g rows after it move by the two records) */
+			if (e->dl[r].k > k)
+				e->dl[r].k += 2;
+		e->in[--w] = (ins){ .op = I_LABEL, .label = l };
+		e->in[--w] = (ins){ .op = I_B, .label = t.label };
+		t.op = t.op == I_TBZ ? I_TBNZ : I_TBZ;
+		t.label = l;
+		e->lrefc[l] = 1;
+		e->in[--w] = t;
+	}
+	free(at);
+	memmove(e->in, e->in + w, (size_t)(n + 2 * m - w) * sizeof(ins));
+	e->nin = n + 2 * m - w;
+}
+
 /* I_NOP.cond in a sibling call's epilogue with unwind tables: the printer's .cfi rows */
 enum { NOP_CFI_REMEMBER = 0xc1, NOP_CFI_EPILOGUE, NOP_CFI_RESTORE };
 
@@ -447,6 +511,7 @@ VPRIV void finish_function(ecx *e, uint32_t s)
 		align = a->aligned;
 	if (c->syms[s].align > align)
 		align = c->syms[s].align;
+	tbz_relax(e);
 	if (direct(e)) {
 		finish_direct(e, s, align, cs, ncs, csave, total, (a->constructor != 0) | (a->destructor != 0) << 1 | bp << 2 | leaf << 3);
 		return;

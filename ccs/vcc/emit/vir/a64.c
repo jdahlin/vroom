@@ -41,6 +41,8 @@ typedef struct vl {
 	int fcc;		/* a compare's condition the next instruction reads from the flags, -1 none */
 	uint32_t fval;		/* ... that compare */
 	int fzr, fzx;		/* ... a test of register fzr (fzx: 64-bit) against 0 instead: cbz, cbnz (-1 none) */
+	int fbit;		/* ... of its bit fbit instead (fzr's register): tbz, tbnz (-1 none) */
+	uint32_t tlo, thi;	/* (tlo, thi): instructions folded into a branch (vl_tfold) that emit nothing */
 	uint32_t pval;		/* a ptradd the next load or store addresses through (0 none) */
 	int pbase;		/* ... its base register */
 	int64_t poff;		/* ... and offset */
@@ -568,27 +570,98 @@ static int vl_cond(vl *L, const vir_ins *in)
 }
 
 /* a branch's condition: flags (r < 0) or register r against zero (cc EQ or NE) */
-typedef struct vlcc { int cc, r, x; } vlcc;
+typedef struct vlcc { int cc, r, x, bit; } vlcc;	/* bit >= 0: of r (tbz, tbnz) */
 
 static vlcc vl_brcond(vl *L, const vir_ins *in)
 {
 	if (L->fcc >= 0 && L->fval == in->a) {
-		vlcc c = { L->fcc, L->fzr, L->fzx };
+		vlcc c = { L->fcc, L->fzr, L->fzx, L->fbit };
 
-		L->fcc = -1, L->fzr = -1;
+		L->fcc = -1, L->fzr = -1, L->fbit = -1;
 		return c;
 	}
-	return (vlcc){ C_NE, vl_ix(L, 0, R_X16), vl_x(L->f, in->a) };
+	return (vlcc){ C_NE, vl_ix(L, 0, R_X16), vl_x(L->f, in->a), -1 };
 }
 
 static void vl_bc(ecx *e, vlcc c, bool inv, uint32_t l)
 {
 	int cc = inv ? c.cc ^ 1 : c.cc;
 
-	if (c.r >= 0)
+	if (c.r >= 0 && c.bit >= 0)
+		tbz(e, cc == C_NE, c.r, c.bit, l);
+	else if (c.r >= 0)
 		cbz(e, cc == C_NE, c.x, c.r, l);
 	else
 		bcond(e, cc, l);
+}
+
+/* register r (VIR's) is still there at instruction upto: no edit after the current
+ * instruction and up to upto writes it (x16, the edits' scratch: no edit at all) */
+static bool vl_kept(const vl *L, uint8_t r, uint32_t upto)
+{
+	for (uint32_t x = L->ei; x < L->eend && L->o->edit[x].pos <= upto; x++)
+		if (L->o->edit[x].dst == r || vl_gx(r) == R_X16)
+			return false;
+	return true;
+}
+
+/* instruction j of block b is used once, by j + 1, and not spilled */
+static bool vl_once1(const vl *L, uint32_t b, uint32_t j)
+{
+	return L->uses[j] == 1 && L->o->slot[j] == VIR_NOBLK && j + 1 < L->f->blk[b].first + L->f->blk[b].n &&
+	       L->f->ins[j + 1].a == j;
+}
+
+/*
+ * A test of bits feeding the branch: [lshr/ashr by a constant,] and with a constant[,
+ * trunc][, icmp.eq/ne 0], brif, each used once by the next: tbz/tbnz on the first
+ * operand's register for one bit, else tst and b.ne/b.eq (as LLVM).  Lowered at the
+ * chain's first instruction i; the others up to the brif leave nothing.
+ */
+static bool vl_tfold(vl *L, uint32_t b, uint32_t i)
+{
+	const vir_fn *f = L->f;
+	const vir_ins *in = &f->ins[i];
+	uint32_t j = i;
+	int x = in->ty != VT_I32, cc = C_NE, k = 0;
+	uint64_t wm = x ? ~0ull : 0xffffffffull, m, tm = ~0ull;
+
+	if (L->opr[0] == VR_NONE || !vl_once1(L, b, i))
+		return false;
+	if (in->op == VO_LSHR || in->op == VO_ASHR) {	/* (a constant in a register too: the immediate) */
+		if (!vl_iconst(f, in->b) || (k = (int)vl_ival(&f->ins[in->b])) <= 0 || k >= (x ? 64 : 32))
+			return false;
+		if (!vl_once1(L, b, ++j))
+			return false;
+	}
+	if (f->ins[j].op != VO_AND || !vl_iconst(f, f->ins[j].b) || (f->ins[j].ty != VT_I32) != (x != 0))
+		return false;
+	m = vl_lval(&f->ins[f->ins[j].b]) & wm;
+	j++;
+	if (f->ins[j].op == VO_TRUNC && f->ins[j].ty == VT_I32 && vl_once1(L, b, j))
+		tm = 0xffffffffull, j++;
+	if (f->ins[j].op == VO_ICMP && (f->ins[j].fl & 15) <= 1 && vl_iconst(f, f->ins[j].b) &&
+	    !vl_ival(&f->ins[f->ins[j].b]) && vl_once1(L, b, j))
+		cc = f->ins[j].fl & 15 ? C_NE : C_EQ, j++;
+	if (f->ins[j].op != VO_BRIF || f->ins[j].a != j - 1)
+		return false;
+	m &= tm;
+	if (in->op == VO_ASHR && k && (m >> ((x ? 64 : 32) - k)))
+		return false;	/* (it would test copies of the sign) */
+	m = (m << k) & wm;
+	if (!m || !logimm_ok(m, x))
+		return false;
+	L->fcc = cc;
+	L->fval = j - 1;
+	L->fzr = -1, L->fbit = -1;
+	L->tlo = i, L->thi = j;
+	if (!(m & (m - 1)) && vl_kept(L, L->opr[0], j)) {
+		L->fzr = vl_gx(L->opr[0]);
+		L->fbit = __builtin_ctzll(m);
+		return true;
+	}
+	opi(L->e, I_ANDSI, x, ZR, vl_gx(L->opr[0]), (int64_t)m);
+	return true;
 }
 
 /* load or store at operand 0's address: lv for the symbol or frame cases, else base register */
@@ -1230,6 +1303,8 @@ static void vl_ins(vl *L, uint32_t b, uint32_t i, uint8_t res)
 	int vd = res == VR_NONE || !vl_fcls(res) ? 31 : vl_gv(res);
 	int d = in->ty == VT_F64;
 
+	if (i > L->tlo && i < L->thi)
+		return;	/* (vl_tfold: in the branch's test) */
 	switch (in->op) {
 	case VO_PARAM:
 		vl_param(L, in, res);
@@ -1240,6 +1315,8 @@ static void vl_ins(vl *L, uint32_t b, uint32_t i, uint8_t res)
 		__attribute__((fallthrough));
 	case VO_ADD: case VO_SUB: case VO_AND: case VO_OR: case VO_XOR: {
 		if ((in->op == VO_PTRADD || in->op == VO_ADD || in->op == VO_SUB) && vl_cfold(L, b, i, res))
+			return;
+		if (in->op == VO_AND && vl_tfold(L, b, i))
 			return;
 		static const uint8_t rr[] = { [VO_ADD] = I_ADD, [VO_SUB] = I_SUB, [VO_AND] = I_AND, [VO_OR] = I_ORR,
 					      [VO_XOR] = I_EOR, [VO_PTRADD] = I_ADD };
@@ -1282,6 +1359,8 @@ static void vl_ins(vl *L, uint32_t b, uint32_t i, uint8_t res)
 	}
 	case VO_SHL: case VO_LSHR: case VO_ASHR: {
 		if (in->op == VO_SHL && vl_cfold(L, b, i, res))
+			return;
+		if (in->op != VO_SHL && vl_tfold(L, b, i))
 			return;
 		int a = vl_ix(L, 0, R_X16), w = x ? 64 : 32;
 
@@ -1350,15 +1429,25 @@ static void vl_ins(vl *L, uint32_t b, uint32_t i, uint8_t res)
 		bool fuse = L->uses[i] == 1 && L->o->slot[i] == VIR_NOBLK && i + 1 < f->blk[b].first + f->blk[b].n &&
 			    (f->ins[i + 1].op == VO_BRIF || f->ins[i + 1].op == VO_SELECT) && f->ins[i + 1].a == i;
 
-		/* x == 0, x != 0 for a branch: cbz, cbnz (when nothing is edited in between) */
-		if (fuse && in->op == VO_ICMP && (in->fl & 15) <= 1 && f->ins[i + 1].op == VO_BRIF &&
-		    L->opr[0] != VR_NONE && L->opr[1] == VR_NONE && vl_iconst(f, in->b) && !vl_ival(&f->ins[in->b]) &&
-		    !(L->ei < L->eend && L->o->edit[L->ei].pos == i + 1)) {
-			L->fcc = (in->fl & 15) ? C_NE : C_EQ;
-			L->fval = i;
-			L->fzr = vl_gx(L->opr[0]);
-			L->fzx = vl_x(f, in->a);
-			return;
+		/* against 0 for a branch: x == 0, x != 0, x <=u 0, x >u 0 as cbz, cbnz; x < 0, x >= 0 as
+		 * tbnz, tbz of the sign bit; x <= -1, x > -1 too (when no edit in between writes x) */
+		if (fuse && in->op == VO_ICMP && f->ins[i + 1].op == VO_BRIF && L->opr[0] != VR_NONE &&
+		    L->opr[1] == VR_NONE && vl_iconst(f, in->b) && vl_kept(L, L->opr[0], i + 1)) {
+			int64_t k = vl_ival(&f->ins[in->b]);
+			int c = in->fl & 15, cz = -1, cb = -1;
+
+			if (!k)
+				cz = c == 0 || c == 7 ? C_EQ : c == 1 || c == 8 ? C_NE : -1, cb = c == 2 ? C_NE : c == 5 ? C_EQ : -1;
+			else if (k == -1)
+				cb = c == 3 ? C_NE : c == 4 ? C_EQ : -1;
+			if (cz >= 0 || cb >= 0) {
+				L->fcc = cz >= 0 ? cz : cb;
+				L->fval = i;
+				L->fzr = vl_gx(L->opr[0]);
+				L->fzx = vl_x(f, in->a);
+				L->fbit = cb >= 0 ? (L->fzx ? 63 : 31) : -1;
+				return;
+			}
 		}
 		if (in->op == VO_ICMP) {
 			cc = vl_icc[vl_cmp(L, in)];
@@ -1370,7 +1459,7 @@ static void vl_ins(vl *L, uint32_t b, uint32_t i, uint8_t res)
 		if (cc >= 0 && fuse) {
 			L->fcc = cc;
 			L->fval = i;
-			L->fzr = -1;
+			L->fzr = -1, L->fbit = -1;
 			return;
 		}
 		if (res == VR_NONE)
@@ -1539,7 +1628,8 @@ static void vl_body(vl *L)
 		if (vl_skip(L, b))
 			continue;
 		deflabel_forced(e, L->lbl[b]);
-		L->fcc = -1, L->fzr = -1;
+		L->fcc = -1, L->fzr = -1, L->fbit = -1;
+		L->tlo = L->thi = 0;
 		L->pval = 0, L->xval = 0, L->xc = VIR_NOBLK;
 		L->eb = ei, L->eend = eend;
 		L->ntr = 0;
@@ -1572,7 +1662,7 @@ static void vl_body(vl *L)
 			}
 			if (x.ty != VT_VOID && x.ty != VT_MULTI)
 				res = o->opr[pos++];
-			if (L->fcc >= 0 && L->fval != x.a)
+			if (L->fcc >= 0 && L->fval != x.a && !(i > L->tlo && i < L->thi))
 				L->fcc = -1;
 			if (!e->reach)
 				deflabel_forced(e, newlabel(e));	/* (code after a trap: never reached) */
@@ -1690,6 +1780,7 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 	e->nlr = 0;
 	e->f = NULL;
 	e->vfail = NULL;
+	e->vlow = true;
 	e->vtry = true;	/* efatal, eerror: back here */
 	switch (_setjmp(e->bail)) {
 	case 0:
@@ -1697,6 +1788,7 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 	default:
 		*why = e->vfail ? e->vfail : "VIR lowering: failed";
 		e->vtry = false;
+		e->vlow = false;
 		return false;
 	}
 	for (uint32_t k = 0; k < f->nslot; k++) {
@@ -1720,5 +1812,6 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 		vl_fail(&L, "VIR lowering: a callee-saved float register");
 	finish_function(e, s);
 	e->vtry = false;
+	e->vlow = false;
 	return true;
 }

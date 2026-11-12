@@ -415,6 +415,15 @@ VPRIV void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *raw
 		p_lbl(b, fid, i->label);
 		tb_c(b, '\n');
 		return;
+	case I_TBZ: case I_TBNZ:
+		tb_s(b, i->op == I_TBZ ? "\ttbz\t" : "\ttbnz\t");
+		reg(b, i->rd, i->sz);
+		tb_s(b, ", #");
+		tb_u(b, i->sh);
+		tb_s(b, ", ");
+		p_lbl(b, fid, i->label);
+		tb_c(b, '\n');
+		return;
 	case I_TAIL:
 		if (!i->cond)
 			return;
