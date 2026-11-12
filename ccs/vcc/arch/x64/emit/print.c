@@ -579,6 +579,9 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			x64_reg(b, i->r[0], sz);
 			break;
 		case X_BSWAP:
+			if(sz==2) {
+				tb_s(b,"\trorw\t$8, ");x64_reg(b,i->r[0],2);break;
+			}
 			x64_ins(b, "bswap", sz);
 			x64_reg(b, i->r[0], sz);
 			break;

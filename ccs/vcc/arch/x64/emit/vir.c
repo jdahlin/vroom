@@ -15,6 +15,7 @@ typedef struct vx {
 	uint32_t *label, *edgelab, ret, cmp, cmpblock, setrec;
 	uint8_t *uses;
 	uint32_t memv, scaledv; int membase, memindex, scaleindex; uint8_t memsh, scalesh; bool indexed; int64_t memoff;
+	uint32_t bev; int bebase;
 } vx;
 
 static void *vx_grow(void *p, uint32_t *cap, uint32_t n, size_t size)
@@ -329,6 +330,27 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 	static const uint8_t alu[VO_N] = { [VO_ADD]=X_ADD, [VO_PTRADD]=X_ADD, [VO_SUB]=X_SUB, [VO_PSUB]=X_SUB,
 		[VO_MUL]=X_IMUL, [VO_AND]=X_AND, [VO_OR]=X_OR, [VO_XOR]=X_XOR,
 		[VO_FADD]=X_FADD, [VO_FSUB]=X_FSUB, [VO_FMUL]=X_FMUL, [VO_FDIV]=X_FDIV };
+	if(L->bev) {
+		if(v<L->bev)return;
+		if(v==L->bev) {
+			lval at={.k=L_REG,.r=L->bebase};x64_mem(e,X_LD,2,d,&at,false);
+			x64_op3(e,X_BSWAP,2,d,d,XNOREG);L->bev=0;return;
+		}
+	}
+	/* Two adjacent ordinary byte reads form one exact, unaligned word read.
+	 * Every intermediate dies here, and no allocator edit may use or replace
+	 * a skipped definition or the preserved base register. */
+	if(i->op==VO_LOAD && i->ty==VT_I32 && !(i->fl&(VIF_VOL|VIF_MS|3)) && L->memv!=i->a &&
+	   v+4<L->f->blk[b].first+L->f->blk[b].n) {
+		const vir_ins *s=&L->f->ins[v+1],*padd=&L->f->ins[v+2],*lo=&L->f->ins[v+3],*join=&L->f->ins[v+4];
+		int64_t shift,off;
+		bool ok=s->op==VO_SHL && s->a==v && vx_imm(L->f,s->b,&shift) && shift==8 &&
+			padd->op==VO_PTRADD && padd->a==i->a && vx_imm(L->f,padd->b,&off) && off==1 &&
+			lo->op==VO_LOAD && lo->ty==VT_I32 && lo->a==v+2 && !(lo->fl&(VIF_VOL|VIF_MS|3)) &&
+			join->op==VO_OR && join->ty==VT_I32 && ((join->a==v+1 && join->b==v+3)||(join->b==v+1 && join->a==v+3));
+		for(uint32_t k=v;ok && k<v+4;k++)ok=L->uses[k]==1 && L->o->slot[k]==VIR_NOBLK && vx_foldedits(L,b,k+1,XNOREG);
+		if(ok) {L->bev=v+4;L->bebase=a;return;}
+	}
 	if (i->op == VO_MUL && i->ty == VT_I32X4) {
 		char text[600];
 		snprintf(text, sizeof text,

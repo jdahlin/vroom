@@ -124,6 +124,7 @@ VPRIV receffects x64_effects(const ecx *e, const rec *i)
 		return (receffects){ .def = X_ALL_REGS, .use = X_ALL_REGS,
 			.fl = X_MEM | OD_FP | OD_BARRIER | X_R | X_W, .br = RB_INDIRECT };
 	receffects f = { .def = d->idef, .use = d->iuse, .fl = d->fl, .br = d->br };
+	if(i->op==X_BSWAP && i->sz==2)f.fl|=OD_WFLAGS; /* byte rotate */
 	if (d->regs & OD_DEF0) f.def |= x64_effect_reg(i->r[0]);
 	if (d->regs & OD_USE0) f.use |= x64_effect_reg(i->r[0]);
 	if (d->regs & OD_USE1) f.use |= x64_effect_reg(i->r[1]);

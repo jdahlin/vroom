@@ -65,6 +65,7 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
             if run([str(exe)]).stdout != expected:
                 raise SystemExit('output differs from clang')
     for filename, required_more, packed in (
+        ('vir_x86_bytes.c', {'be16', 'bev16', 'signed16', 'changed'}, {}),
         ('vir_x86_inline.c', {'work'}, {}),
         ('vir_x86_index.c', {'load8', 'load4', 'load2', 'load1', 'store8', 'store4'}, {}),
         ('vir_vector_stride.c', {'stride', 'wide', 'reverse', 'ordered', 'residue', 'gather', 'carry', 'chain', 'maxval', 'maxindex', 'lastnegative'}, {'stride': 'mulps', 'reverse': 'addpd', 'ordered': 'mulps', 'residue': 'addps', 'gather': 'mulps', 'carry': 'mulps'}),
@@ -92,6 +93,13 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
                 body = asm.read_text().split('work:\n', 1)[1].split('.Lfunc_end', 1)[0]
                 if re.search(r'\bcall\w*\b', body):
                     raise SystemExit('work: single-call helper was not inlined')
+            if filename == 'vir_x86_bytes.c':
+                body = asm.read_text().split('be16:\n', 1)[1].split('.Lfunc_end', 1)[0]
+                if 'rorw' not in body or 'movzwl' not in body:
+                    raise SystemExit('be16: missing combined word read and byte rotate')
+                body = asm.read_text().split('bev16:\n', 1)[1].split('.Lfunc_end', 1)[0]
+                if body.count('movzbl') != 2 or 'rorw' in body:
+                    raise SystemExit('bev16: volatile byte reads were combined')
             if filename == 'vir_x86_index.c':
                 for name, scale in [('load8', 8), ('load4', 4), ('load2', 2), ('load1', 1), ('store8', 8), ('store4', 4)]:
                     body = asm.read_text().split(name + ':\n', 1)[1].split('.Lfunc_end', 1)[0]

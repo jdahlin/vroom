@@ -296,6 +296,16 @@ och behålls inte. GCC 1615/1615, TCC 105/105, egna 299/299, samma fem
 inline-fel; riktade objekt-/assemblyprov och ASan/UBSan gröna. 10 %-målet
 är fortsatt öppet. Data: work/vir-x86-perf/inline-final/results/summary.json.
 
+Fjärde skivan känner igen två intilliggande osignerade byte-laster som
+bildar ett big-endian-ord. Fem sammanhängande instruktioner med engångsvärden,
+inga spill och inga mellanliggande edits blir en exakt 16-bitarslast och
+byte-rotation. Volatila/signerade läsningar och mellanliggande lagringar
+kombineras inte. Fem kortprov: CPU 361,49 → 355,25 ms (1,283x → 1,261x
+clang), instruktioner 1,505x → 1,491x. GCC/TCC fortsatt 1615/105 gröna,
+egna 300/300, samma fem inline-fel, riktprov och ASan/UBSan gröna. TSVC
+efter inlinerskivan: 151/151, 82 vektorloopar, 158/158 funktioner sänkta.
+Data: work/vir-x86-perf/be/results/summary.json; 10 %-målet öppet.
+
 
 ### V2/V3 x86-64 (2026-11-12): TSVC och fem verkliga korpusar
 
