@@ -216,7 +216,7 @@ static bool vv_classify(vvs *S, uint32_t q)
 	case VO_MUL: case VO_SHL: {
 		int kc = vv_isk(o[1]) ? 1 : in.op == VO_MUL && vv_isk(o[0]) ? 0 : -1;
 
-		if (kc >= 0 && vv_lin(o[1 - kc]) && !o[1 - kc]->objk && (in.op == VO_MUL || (in.ty == VT_I64 && o[1]->k >= 0 && o[1]->k < 63))) {
+		if (kc >= 0 && vv_lin(o[1 - kc]) && !o[1 - kc]->objk && (in.op == VO_MUL || (o[1]->k >= 0 && o[1]->k < (in.ty == VT_I64 ? 63 : 31)))) {	/* (an i32 shift has no nsw: linear lanes, no exact form) */
 			const vvi *x = o[1 - kc];
 			uint64_t K = in.op == VO_MUL ? (uint64_t)o[kc]->k : 1ull << o[1]->k;
 
@@ -303,7 +303,9 @@ static bool vv_classify(vvs *S, uint32_t q)
 		if (allinv)
 			vv_opaque(S, q, &r);
 		else
-			r.kind = in.ty == S->fty && V->p[w[0]].in.ty == S->ity && vv_lane(o[0]) ? VK_VEC : VK_BAD;
+			r.kind = in.ty == S->fty && V->p[w[0]].in.ty == S->ity && vv_lane(o[0]) ? VK_VEC :
+				 /* (double)i: the i32 index widened lane by lane */
+				 in.ty == VT_F64 && S->fty == VT_F64 && V->p[w[0]].in.ty == VT_I32 && o[0]->kind == VK_LIN && o[0]->exact && !o[0]->uns ? VK_VEC : VK_BAD;
 		break;
 	case VO_SDIV: case VO_UDIV: case VO_SREM: case VO_UREM: case VO_LSHR: case VO_ASHR: case VO_UMULHI: case VO_SMULHI:
 	case VO_CLZ: case VO_CTZ: case VO_POPCNT: case VO_BSWAP: case VO_U2F: case VO_F2S: case VO_F2U: case VO_FEXT:
@@ -641,7 +643,15 @@ static uint32_t vv_vec(vvs *S, uint32_t v)
 				return 0;
 			break;
 		case VO_S2F:
-			if (!(a = vv_vec(S, in.a)))
+			if (V->p[vw_find(V, in.a)].in.ty != S->ity) {	/* (an exact i32 index into 64-bit lanes) */
+				int64_t cc = vv_get(S, vw_find(V, in.a))->c;
+
+				if (!(a = vv_scalar(S, in.a, VM_BODY)))
+					return 0;
+				a = vv_ins(S, S->VB, VO_EXT, VT_I64, 2 | VIF_MS, a, 0, 0);
+				a = vv_ins(S, S->VB, VO_VSPLAT, VT_I64X2, 0, a, 0, 0);
+				a = vv_ins(S, S->VB, VO_ADD, VT_I64X2, 0, a, vv_step(S, cc), 0);
+			} else if (!(a = vv_vec(S, in.a)))
 				return 0;
 			r = vv_ins(S, S->VB, VO_VS2F, vt, 0, a, 0, 0);
 			break;
@@ -772,7 +782,9 @@ no:
 	return false;
 }
 
-/* the loop goes on while parameter p is below an invariant, unsigned: the header's test */
+/* the loop goes on while parameter p is below an invariant, unsigned, or not equal to it: the
+ * header's test (stepping 1 from below, p reaches the bound before it could wrap; the vector loop
+ * is entered only when it starts below: the span's test) */
 static bool vv_ultctl(vvs *S, uint32_t p)
 {
 	vwst *V = S->e->vw;
@@ -783,7 +795,7 @@ static bool vv_ultctl(vvs *S, uint32_t p)
 	cc = V->p[c].in.fl & 15;
 	if (V->p[t].in.b == S->X)
 		cc = (uint32_t[]){ 1, 0, 5, 4, 3, 2, 9, 8, 7, 6 }[cc];
-	return (cc == 6 && vw_find(V, V->p[c].in.a) == p) || (cc == 8 && vw_find(V, V->p[c].in.b) == p);
+	return ((cc == 6 || cc == 1) && vw_find(V, V->p[c].in.a) == p) || ((cc == 8 || cc == 1) && vw_find(V, V->p[c].in.b) == p);
 }
 
 /* the loop headed by H (S->lb, P, L, X set): analysed and, when it can be, vectorized */
@@ -901,17 +913,23 @@ static bool vv_loop(vvs *S)
 		}
 	}
 	ui = vv_get(S, u), ni = vv_get(S, n);
-	if (ui->kind != VK_LIN || !ui->exact || ni->kind != VK_INV || (V->p[u].in.ty != VT_I32 && V->p[u].in.ty != VT_I64))
+	if (ui->kind != VK_LIN || !ui->exact || ni->kind != VK_INV || (V->p[u].in.ty != VT_I32 && V->p[u].in.ty != VT_I64 && V->p[u].in.ty != VT_PTR))
 		return vv_no(S, "an exit test that is not linear against invariant");
 	c = ui->c;
 	if (c > 0 && (cc == 2 || cc == 3) && !ui->uns)
 		incl = cc == 3;
 	else if (c < 0 && (cc == 4 || cc == 5) && !ui->uns)
 		incl = cc == 5;
-	else if (c > 0 && cc == 6 && (ui->uns || V->p[u].in.ty == VT_I64))
+	else if (c > 0 && cc == 6 && (ui->uns || V->p[u].in.ty != VT_I32))
 		incl = false;
+	else if (c < 0 && cc == 8 && V->p[u].in.ty != VT_I32)
+		incl = false;
+	else if (cc == 1 && !((c < 0 ? -c : c) & ((c < 0 ? -c : c) - 1)) && (c > 0 || !ui->uns))
+		incl = false;	/* != : the span must also be a multiple of the step */
 	else
-		return vv_no(S, "an exit test that is not <, <=, >, >= in the direction of the step");
+		return vv_no(S, "an exit test that is not <, <=, >, >=, != in the direction of the step");
+	if (V->p[u].in.ty == VT_PTR && cc >= 2 && cc <= 5)
+		return vv_no(S, "an exit test that is not <, <=, >, >=, != in the direction of the step");
 	ac = c < 0 ? -c : c;
 	if (ac > (1 << 20))
 		return vv_no(S, "a step too large");
@@ -937,11 +955,13 @@ static bool vv_loop(vvs *S)
 			return false;
 		uint32_t more = 0;
 
+		bool ptr = V->p[u].in.ty == VT_PTR;
+
 		if (V->p[u].in.ty == VT_I32) {
-			u0 = vv_ins(S, S->VPRE, VO_EXT, VT_I64, 2 | (cc == 6 ? 0 : VIF_MS), u0, 0, 0);
-			n0 = vv_ins(S, S->VPRE, VO_EXT, VT_I64, 2 | (cc == 6 ? 0 : VIF_MS), n0, 0, 0);
-		} else if (cc == 6) {	/* (64 bits, unsigned: the span is n - u only when u <= n) */
-			more = vv_ins(S, S->VPRE, VO_ICMP, VT_I32, 7, u0, n0, 0);
+			u0 = vv_ins(S, S->VPRE, VO_EXT, VT_I64, 2 | (ui->uns ? 0 : VIF_MS), u0, 0, 0);
+			n0 = vv_ins(S, S->VPRE, VO_EXT, VT_I64, 2 | (ui->uns ? 0 : VIF_MS), n0, 0, 0);
+		} else if (cc == 6 || cc == 8) {	/* (64 bits, unsigned: the span is the difference only when it is not negative) */
+			more = cc == 6 ? vv_ins(S, S->VPRE, VO_ICMP, VT_I32, 7, u0, n0, 0) : vv_ins(S, S->VPRE, VO_ICMP, VT_I32, 7, n0, u0, 0);
 		}
 		for (uint32_t i = 0; i < S->none; i++) {	/* a step that is a value: 1 */
 			uint32_t o = S->one[i], ot = V->p[o].in.ty;
@@ -949,7 +969,12 @@ static bool vv_loop(vvs *S)
 
 			more = more ? vv_ins(S, S->VPRE, VO_AND, VT_I32, 0, more, m, 0) : m;
 		}
-		d = c > 0 ? vv_ins(S, S->VPRE, VO_SUB, VT_I64, 0, n0, u0, 0) : vv_ins(S, S->VPRE, VO_SUB, VT_I64, 0, u0, n0, 0);
+		d = c > 0 ? vv_ins(S, S->VPRE, ptr ? VO_PSUB : VO_SUB, VT_I64, 0, n0, u0, 0) : vv_ins(S, S->VPRE, ptr ? VO_PSUB : VO_SUB, VT_I64, 0, u0, n0, 0);
+		if (cc == 1 && ac > 1) {
+			uint32_t m = vv_ins(S, S->VPRE, VO_ICMP, VT_I32, 0, vv_ins(S, S->VPRE, VO_AND, VT_I64, 0, d, vw_iconst(e, VT_I64, ac - 1), 0), vw_iconst(e, VT_I64, 0), 0);
+
+			more = more ? vv_ins(S, S->VPRE, VO_AND, VT_I32, 0, more, m, 0) : m;
+		}
 		if (incl)
 			d = vv_ins(S, S->VPRE, VO_ADD, VT_I64, 0, d, vw_iconst(e, VT_I64, 1), 0);
 		guard = vv_ins(S, S->VPRE, VO_ICMP, VT_I32, 5, d, vw_iconst(e, VT_I64, (int64_t)S->vf * ac), 0);

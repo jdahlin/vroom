@@ -45,7 +45,7 @@ NI long d_fsum(int n) { double s = 0; for (int i = 0; i < n; i++) s += b[i + 8] 
 NI long d_param(double *p, const double *q, int n) { for (int i = 0; i < n; i++) p[i] = q[i] * 0.5 + 1; return 0; }
 NI long d_size(unsigned long n) { for (unsigned long i = 0; i < n; i++) a[i] = b[i] - c[i]; return 0; }
 NI long d_mixf(int n) { for (int i = 0; i < n; i++) a[i + 8] = (double)fa[i + 8] + b[i + 8]; return 0; }	/* (float and double: scalar) */
-NI long d_mixi(int n) { for (int i = 0; i < n; i++) a[i + 8] = b[i + 8] * (double)i; return 0; }		/* (the int index as data: scalar) */
+NI long d_mixi(int n) { for (int i = 0; i < n; i++) a[i + 8] = b[i + 8] * (double)ia[i + 8]; return 0; }	/* (int data in a double loop: scalar) */
 NI long d_mixs(int n) { for (int i = 0; i < n; i++) { a[i + 8] = b[i + 8]; fa[i + 8] = 1; } return 0; }	/* (two store widths: scalar) */
 NI long l_add(int n) { for (int i = 0; i < n; i++) la[i + 8] = lb[i + 8] + lc[i + 8] - (lb[i + 8] & 0xff00); return 0; }
 NI long l_bits(int n) { for (int i = 0; i < n; i++) la[i + 8] = (lb[i + 8] ^ lc[i + 8]) | ~lc[i + 8]; return 0; }
@@ -82,6 +82,13 @@ ISEL(s_ult, unsigned long, <) ISEL(s_ule, unsigned long, <=) ISEL(s_ugt, unsigne
 NI long s_fi(int n) { for (int i = 0; i < n; i++) { long x = lb[i + 8], y = lc[i + 8]; la[i + 8] = b[i + 8] > 9 ? x : y; } return 0; }
 NI long s_nan(int n) { b[10] = __builtin_nan(""); c[13] = __builtin_nan(""); for (int i = 0; i < n; i++) { double x = b[i + 8], y = c[i + 8]; a[i + 8] = x < y ? 1.0 : x != y ? 2.0 : 3.0; } b[10] = c[13] = 0; return 0; }
 
+/* the int index as a double (widened lane by lane), pointers and != as the loop's control */
+NI long x_idx(int n) { for (int i = 0; i < n; i++) a[i + 8] = b[i + 8] * (double)i + (double)(3 - i); return 0; }
+NI long x_idxd(int n) { for (int i = n - 1; i >= 0; i--) a[i + 8] = (double)i * 0.25; return 0; }
+NI long x_ptr(double *p, const double *end, const double *q) { for (; p != end; p++, q++) *p = *q + 0.5; return 0; }
+NI long x_plt(int n) { for (long *p = la + 8, *q = lb + 8; p < la + 8 + n; p++, q++) *p = *q ^ 0x1234567890L; return 0; }
+static long r_xptr(int n) { return x_ptr(a + 8, a + 8 + n, b + 8); }
+
 static long r_param(int n) { return d_param(a + 8, b + 8, n); }
 static long r_param2(int n) { return d_param(a + 9, a + 8, n); }	/* (overlapping: the scalar order) */
 static long r_param3(int n) { return d_param(a + 8, a + 9, n); }
@@ -97,7 +104,7 @@ int main(void)
 		T(d_add), T(d_ops), T(d_down), T(d_rev), T(d_dm3), T(d_dm2), T(d_dm1), T(d_dp1), T(d_dp2), T(d_stst), T(d_stst2),
 		T(d_sel), T(d_fsum), T(r_param), T(r_param2), T(r_param3), T(r_size), T(d_mixf), T(d_mixi), T(d_mixs), T(l_add),
 		T(l_bits), T(l_neg), T(l_mul), T(r_iota), T(r_iota1), T(l_sum), T(l_sum2), T(l_sel), T(l_usel), T(r_tod), T(l_down),
-		T(d_spill), T(s_flt), T(s_fle), T(s_fgt), T(s_fge), T(s_feq), T(s_fne), T(s_ilt), T(s_ile), T(s_igt), T(s_ige), T(s_ieq),
+		T(x_idx), T(x_idxd), T(r_xptr), T(x_plt), T(d_spill), T(s_flt), T(s_fle), T(s_fgt), T(s_fge), T(s_feq), T(s_fne), T(s_ilt), T(s_ile), T(s_igt), T(s_ige), T(s_ieq),
 		T(s_ine), T(s_ult), T(s_ule), T(s_ugt), T(s_uge), T(s_fi), T(s_nan),
 	};
 	static const int ns[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 37 };

@@ -67,6 +67,7 @@ NI long l_stst2(int n) { for (int i = 0; i < n; i++) { a[i + 9] = b[i + 8]; a[i 
 NI long l_int(int n) { for (int i = 0; i < n; i++) ia[i + 8] = (ib[i + 8] + ic[i + 8] * 3 - (ib[i + 8] & 0xf0)) ^ (ic[i + 8] | 5); return 0; }
 NI long l_iota(int n) { for (int i = 0; i < n; i++) ia[i + 8] = i * 5 - 2; return 0; }
 NI long l_iotaf(int n) { for (int i = 0; i < n; i++) a[i + 8] = (float)i * b[i + 8]; return 0; }
+NI long l_iota2(int n) { for (int i = 0; i < n; i++) { a[i + 8] = (float)(3 - 2 * i) + b[i + 8]; ia[i + 8] = (i << 3) ^ ib[i + 8]; } return 0; }
 NI long l_sum(int n) { int s = 7; for (int i = 0; i < n; i++) s += ib[i + 8] * ic[i + 8]; return s; }
 NI long l_sum2(int n) { int s = 0, t = 100; for (int i = 0; i < n; i++) { s += ib[i + 8]; t -= ic[i + 8]; ia[i + 8] = ib[i + 8] + 1; } return s * 1000 + t; }
 NI long l_fsum(int n) { float s = 0; for (int i = 0; i < n; i++) s += b[i + 8] * 0.1f; return (long)(s * 1000); }
@@ -130,6 +131,26 @@ NI long s_if(int n) { for (int i = 0; i < n; i++) { float x = b[i + 8], y = d[i 
 NI long s_idx(int n) { for (int i = 0; i < n; i++) { int x = ib[i + 8], y = ic[i + 8]; ia[i + 8] = i > 3 ? x : y; } return 0; }
 NI long s_nan(int n) { b[10] = __builtin_nanf(""); c[13] = __builtin_nanf(""); for (int i = 0; i < n; i++) { float x = b[i + 8], y = c[i + 8]; a[i + 8] = x < y ? 1.0f : x != y ? 2.0f : 3.0f; } b[10] = c[13] = 0; return 0; }
 
+/* loops controlled by a pointer or by != (the span must be the trip count: a start past the
+   bound, or a span the step does not divide, stays in the scalar loop) */
+NI long p_lt(int n) { for (float *p = a + 8, *q = b + 8; p < a + 8 + n; p++, q++) *p = *q + 1; return 0; }
+NI long p_ne(float *p, float *end, const float *q) { for (; p != end; p++, q++) *p = *q * 2; return 0; }
+NI long p_gt(int n) { for (float *p = a + 7 + n; p > a + 7; p--) *p = p[1] + b[p - a]; return 0; }
+NI long p_sum(const int *p, const int *end) { int s = 0; while (p < end) s += *p++; return s; }
+NI long n_int(int lo, int hi) { for (int i = lo; i != hi; i++) a[i] = b[i] + 5; return 0; }
+NI long n_uns(unsigned lo, unsigned hi) { for (unsigned i = lo; i != hi; i++) a[i] = b[i] - 5; return 0; }
+NI long n_down(int n) { for (int i = n + 7; i != 7; i--) a[i] = b[i] * 0.5f; return 0; }
+NI long n_long(long n) { for (long i = 0; i != n; i++) a[i + 8] = b[i + 8] + c[i + 8]; return 0; }
+NI long n_two(int n) { for (int i = 0; i != 2 * (n / 2); i += 2) { a[i + 8] = b[i + 8]; a[i + 9] = c[i + 9]; } return 0; }
+static long r_plt(int n) { return p_lt(n); }
+static long r_pne(int n) { return p_ne(a + 8, a + 8 + n, b + 8); }
+static long r_pne0(int n) { return n > 5 ? 0 : p_ne(a + 8 + n, a + 8 + n, b + 8); }	/* (no iteration) */
+static long r_pgt(int n) { return p_gt(n); }
+static long r_psum2(int n) { return p_sum(ib + 8, ib + 8 + n) + p_sum(ib + 20, ib + 8); }	/* (the second: start past the end) */
+static long r_nint(int n) { return n_int(10, 10 + n); }
+static long r_nuns(int n) { return n_uns(10, 10 + (unsigned)n); }
+static long r_nlong(int n) { return n_long(n); }
+
 static long r_param(int n) { return l_param(a + 8, b + 8, n); }
 static long r_param2(int n) { return l_param(a + 9, a + 8, n); }	/* the two overlap: the scalar order shows */
 static long r_param3(int n) { return l_param(a + 8, a + 9, n); }
@@ -143,9 +164,10 @@ int main(void)
 		T(l_add), T(l_ops), T(l_abs), T(l_down), T(l_down2), T(l_rev), T(l_le), T(l_step2), T(l_two), T(l_self),
 		T(l_dm5), T(l_dm4), T(l_dm3), T(l_dm2), T(l_dm1), T(l_dp1), T(l_dp2), T(l_dp3), T(l_dp4), T(l_dp5),
 		T(l_ddm2), T(l_ddm1), T(l_ddp1), T(l_ddp3), T(l_ddp4), T(l_stld), T(l_stld2), T(l_stst), T(l_stst2),
-		T(l_int), T(l_iota), T(l_iotaf), T(l_sum), T(l_sum2), T(l_fsum), T(l_sel), T(l_isel), T(l_inv), T(l_invsame),
+		T(l_int), T(l_iota), T(l_iotaf), T(l_iota2), T(l_sum), T(l_sum2), T(l_fsum), T(l_sel), T(l_isel), T(l_inv), T(l_invsame),
 		T(s_flt), T(s_fle), T(s_fgt), T(s_fge), T(s_feq), T(s_fne), T(s_ilt), T(s_ile), T(s_igt), T(s_ige), T(s_ieq), T(s_ine),
 		T(s_ult), T(s_ule), T(s_ugt), T(s_uge), T(s_fi), T(s_if), T(s_idx), T(s_nan),
+		T(r_plt), T(r_pne), T(r_pne0), T(r_pgt), T(r_psum2), T(r_nint), T(r_nuns), T(n_down), T(r_nlong), T(n_two),
 		T(l_2d), T(l_spill), T(r_stepv1), T(r_stepv3), T(l_twice), T(r_distv9), T(r_distv6), T(r_distv50), T(r_uns2), T(r_size),
 		T(r_size2), T(r_uwrap), T(r_param), T(r_param2), T(r_param3), T(r_psum), T(r_lim), T(l_cond), T(l_scal), T(l_wrap),
 	};
