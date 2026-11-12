@@ -31,8 +31,8 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
   built by compiling the shared walker a second time against a virtual
   lowering target.  Update the status of a step in `PLAN-vir.md`.
 - `ccs/vcc/emit/vir/vec.inc` (#included by `build.c`): the loop vectorizer, on
-  the builder's pre-IR; `VCC_VIR_VEC=0` turns it off, `=r` reports each
-  innermost loop to stderr.  VIR's vectors: `SPEC-vir.md` 7.5.
+  the builder's pre-IR; `VCC_VIR_VEC=0` turns it off, `r` reports each
+  innermost loop to stderr, `n` keeps loop constants unhoisted (`vv_pin`).  VIR's vectors: `SPEC-vir.md` 7.5.
 - `RESEARCH-vectors.md`: vector values in VIR (how Cranelift, Wasm SIMD, B3,
   LLVM and GCC represent them; ABI and spill slots), loop vectorizers (LLVM,
   GCC, dependence rules, TSVC results here and published), the traps, and the

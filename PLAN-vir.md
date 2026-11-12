@@ -315,9 +315,26 @@ spillda vektorer, steg 1 och 3, okänt avstånd, teckenlösa räknare),
 `tests/vcc/vir_fp_callee.c`.  `vcc-ctests.py` med `VCC_VIR=bl` 2080/2083 (samma
 tre), utan VIR 2083/2083; ASan/UBSan rent.
 
-Kvar (RESEARCH 6.6 och 5): skalärloopar genom VIR (invarianter ut ur loopen,
-flyttal direkt i v-register: resten och alla ovektoriserade loopar, som nu är
-större delen av avståndet till clang); CFI för d8–d15; steg ≠ elementstorlek;
+**Tredje omgången (samma dag): skalärloopar.  VIR 6,3 G cykler, clang 4,75.**
+
+- Flyttal laddas och lagras direkt i v-register (`ldr/str s/d`) när adressen
+  är register + offset eller register + index; förut via x16 och `fmov`.
+- `s2f`/`u2f` av heltalskonstant och `fext`/`ftrunc` av flyttalskonstant viks.
+- **Loopkonstanter lyfts ut** (`vv_pin` i `vec.inc`): symboladresser,
+  flyttalskonstanter ≠ 0 och jämförelsegränser som inte är en immediate görs
+  en gång framför de raka innerloopar vektoriseraren ändå tittar på (högst 6,
+  inga loopar med anrop).  **Det här är ett avsteg från "Inget LICM i 1.0"**
+  ovan, begränsat till konstanter; `VCC_VIR_VEC=n` stänger av det.  Effekt på
+  TSVC: −19 % instruktioner, −7 % cykler.  Behöver ett beslut: behålla,
+  bredda eller ta bort.
+- `bench/vcc-tsvc.py` skriver cykler (`/usr/bin/time -l`): maskinen är delad
+  och sekunderna varierar.
+
+Mätt i cykler (G): direkt emitter 23,6, VIR 6,33, clang -O3 4,75; 151/151.
+
+Kvar (RESEARCH 6.6 och 5): skalärloopar genom VIR (looprotation: två hopp per
+varv; invarianta uttryck som inte är konstanter); CFI för d8–d15; steg ≠
+elementstorlek;
 interleaving; ordnade flyttalsreduktioner; övriga fyra bantyper; x86-64 och
 wasm; tolken och `virgen` känner inte vektorer; kärnan, PostgreSQL och SQLite
 är inte körda med VIR efter detta.

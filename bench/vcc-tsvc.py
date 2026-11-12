@@ -45,14 +45,20 @@ sdk = run(['xcrun', '--show-sdk-path']).stdout.strip() if sys.platform == 'darwi
 for f in ('common', 'dummy'):
     run([clang, '-O2', '-c', f + '.c', '-o', f + '.o'], cwd=out)
 
+cyc = {}
+
 def build(name, cmd, env=None):
     run(cmd + ['-c', 'tsvc.c', '-o', f'tsvc_{name}.o'], cwd=out, env=env)
     run([clang, f'tsvc_{name}.o', 'common.o', 'dummy.o', '-lm', '-o', f'tsvc_{name}'], cwd=out)
     rows = {}
-    for line in run([os.path.join(out, f'tsvc_{name}')], cwd=out).stdout.split('\n')[1:]:
+    exe = os.path.join(out, f'tsvc_{name}')
+    r = run((['/usr/bin/time', '-l'] if sys.platform == 'darwin' else []) + [exe], cwd=out)
+    for line in r.stdout.split('\n')[1:]:
         p = line.split()
         if len(p) == 3:
             rows[p[0]] = (float(p[1]), p[2])
+    m = re.search(r'(\d+)\s+cycles elapsed', r.stderr)  # (the machine is shared: cycles say more than seconds)
+    cyc[name] = int(m.group(1)) / 1e9 if m else 0
     return rows
 
 vpp = [os.path.join(bind, 'vpp'), '-O2'] + (['-isysroot', sdk] if sdk else [])
@@ -71,7 +77,8 @@ for name, rows in runs:
     for k in wrong:
         print(f'FAIL {name} {k}: checksum {rows.get(k, (0, "missing"))[1]}, clang {ref[k][1]}')
     print(f'{name}: {len(ref) - len(wrong)}/{len(ref)} checksums, {sum(t for t, _ in rows.values()):.2f} s'
-          f' (clang -O3 {sum(t for t, _ in ref.values()):.2f} s)')
+          f' (clang -O3 {sum(t for t, _ in ref.values()):.2f} s)'
+          + (f', {cyc[name]:.2f} G cycles (clang {cyc["clang"]:.2f})' if cyc.get('clang') else ''))
 print(f'vectorized: {len(vec)} of {len(loops)} loops, in {len({l.split()[1] for l in vec})} of {len(ref)} functions')
 if '--why' in sys.argv:
     why = {}
