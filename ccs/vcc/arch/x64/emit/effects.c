@@ -112,6 +112,7 @@ static const opdesc x64_desc[X_NOPS] = {
 
 static rmask x64_effect_reg(unsigned r)
 {
+	if(r==XFRAME)return X_BIT(RSP);
 	return r <= XMM15 ? X_BIT(r) : 0; /* RIP is not a mutable register. */
 }
 

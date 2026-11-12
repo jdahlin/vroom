@@ -888,7 +888,9 @@ VPRIV bool vw_x64(ecx *e, uint32_t sym, const char **why)
 {
 	vwst *V = e->vw;
 	vir_fn *f = &V->f;
+	bool spframe=e->E->o->omit_frame_pointer && !e->E->noopt;
 	uint64_t cs = (1u << RBX) | (1u << R12) | (1u << R13) | (1u << R14) | (1u << R15);
+	if(spframe)cs|=1u<<RBP;
 	vir_regs regs = { .alloc = { (X_TEMPS & ~(1u << R10)) | cs, (1u << 14) - 1 },
 		.callee = { cs, 0 }, .fixed = vx_fixed };
 	vx L = { .e = e, .f = f, .o = &V->ao };
@@ -948,6 +950,7 @@ VPRIV bool vw_x64(ecx *e, uint32_t sym, const char **why)
 	}
 	e->reach = true;
 	x64_begin(e, sym);
+	e->x64->spframe=spframe;
 	e->x64->interrupt = e->x64->nlreg = 0;
 	e->wk->sdepth = e->wk->ntu = e->wk->ntf = 0;
 	e->wk->foff = 0; e->wk->falign = 16; e->wk->nlabel = 0;

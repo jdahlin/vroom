@@ -1014,3 +1014,10 @@ VIR:s gemensamma storleksstyrda inliner är nu aktiv även på x86. Tillsammans
 med fallthrough för true-kanter, färre identitetskopior och tied-preferenser
 ger fem korta SQLite-prov CPU 1,360x → 1,267x clang och instruktioner
 1,603x → 1,505x. Verifieringshash och regressionsprov stämmer; 10 % är öppet.
+
+Efter små blockkopior, vikta flaggtester och stackrelativ VIR-ram är SQLite
+main på 1,189x clang -O2 i fem kortprov (instruktioner 1,389x). rbp kan nu
+allokeras när rampekaren utelämnas; CFI, stackargument och bevarande av rbp
+är körprovade. Egna 305/305, GCC/TCC 1615/105, samma fem inline-undantag;
+TSVC 151/151 och 82 vektorloopar, unity/nonunity och ASan/UBSan gröna.
+Se V4 i PLAN-vir.md; högst 10 % långsammare är fortfarande öppet.

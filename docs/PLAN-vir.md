@@ -361,6 +361,19 @@ signutvidgade masker, delad bool och reservfallen. GCC/TCC 1615/105, egna
 Fem kortprov: CPU 345,64 → 343,66 ms (1,223x → 1,216x clang), instruktioner
 1,439x → 1,433x. Data: work/vir-x86-perf/testm2/results/summary.json.
 
+Tionde skivan använder en virtuell rambas när -fomit-frame-pointer gäller.
+Sista utskriftspasset räknar om den till rsp, inklusive tillfälliga utgående
+stackargument. rbp blir en sjätte allokerbar callee-save. Prolog/epilog och
+CFI följer rsp; vanliga pekarvärden i rbp skiljs från rambasen. Lokal- och
+spillslots har samma konceptuella offset som tidigare; -fno-omit-frame-pointer
+behåller äldre väg. Fem kortprov: CPU 347,82 → 333,56 ms (1,240x → 1,189x
+clang), instruktioner 1,433x → 1,389x. GCC/TCC 1615/105, egna 305/305,
+samma fem inline-undantag; riktad backtrace genom stackargument, smutsigt
+bevarat rbp och båda ramvalen, assembly/objekt samt ASan/UBSan gröna.
+Unity och fil-för-fil bygger och kör riktproven. TSVC: 151/151, 82 verkliga
+vektorloopar, 158/158 funktioner sänkta. Data: work/vir-x86-perf/spframe/results.
+10 %-målet är öppet.
+
 
 ### V2/V3 x86-64 (2026-11-12): TSVC och fem verkliga korpusar
 
