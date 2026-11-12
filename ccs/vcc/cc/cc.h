@@ -146,7 +146,8 @@ enum {
 	SF_NONNULL = 1u << 21,	/* a parameter declared nonnull */
 	SF_INVALID = 1u << 23,	/* declared with an error (incomplete type): uses report nothing more (clang) */
 	SF_BOS_QUERY = 1u << 24,	/* function contains an object-size query */
-	SF_CONSTEXPR = 1u << 26,	/* C23 constant object: initializer is a constant expression */
+	SF_CONSTEXPR = 1u << 26,
+	SF_EXTDECL = 1u << 27,	/* function: a file-scope declaration without inline, or extern (C99 6.7.4p7: an inline definition is external) */	/* C23 constant object: initializer is a constant expression */
 	SF_BOS_INIT = 1u << 25,	/* local pointer has a certified immutable initializer */
 	SF_UVPEND = 1u << 22,	/* -Wuninitialized: declared without an initializer, not yet assigned in the text */
 };

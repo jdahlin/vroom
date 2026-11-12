@@ -107,7 +107,7 @@ static inline bool inline_only(const sym *y)
 		return false;
 	if ((y->flags & SF_GNU_INLINE) && !(y->flags & SF_INLINE_NOEXTERN))
 		return true;
-	return (y->flags & SF_INLINE) && !(y->flags & SF_GNU_INLINE) && y->sc != SC_EXTERN && y->sc != SC_STATIC;
+	return (y->flags & SF_INLINE) && !(y->flags & (SF_GNU_INLINE | SF_EXTDECL)) && y->sc != SC_EXTERN && y->sc != SC_STATIC;
 }
 /* a symbol offset the relocation itself can carry: ELF RELA 32 bits here, a
  * Mach-O ARM64_RELOC_ADDEND 24 bits signed (clang adds the rest in code) */
