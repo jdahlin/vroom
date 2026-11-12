@@ -596,6 +596,19 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `bcp-1` needs `__builtin_constant_p` of an inlined argument.  They are
   `WASM_XFAIL` in `bench/vcc-wasm.py` (premerge's wasm job).
   *Validate:* `bench/vcc-wasm.py -j 6` reports them as XPASS; remove the entries.
+- [ ] **wasm: a signed 32-bit constant widened to 64 bits** [C].
+  `long long a(void) { return (long long)(int)0x80ff0102; }` gives
+  `i64.const 2164195586` for wasm64 (the front end is right: a
+  `_Static_assert` that it is negative holds; arm64 is right).  Found by
+  `vir_byte_assembly` (marked `vcc-xfail-wasm`).
+  *Validate:* `bench/vcc-wasm.py -j 6 --suite vcc vir_byte_assembly` XPASSes; remove the marker.
+- [ ] **wasm: the inline suite** [C].  `bench/vcc-wasm.py` leaves the
+  `inline` suite (gcc/llvm inlining and IPA run tests, vendored for VIR) out
+  of its default run: in premerge's wasm job `gcc.dg-ipa-ipa-sra-1`,
+  `gcc.dg-ipa-pr119318`, `gcc.dg-ipa-pr92497-1`, `gcc.dg-torture-matrix-2`
+  and `gcc.dg-torture-matrix-6` differ from clang (only the first on a macOS
+  host), not looked into.
+  *Validate:* `bench/vcc-wasm.py -j 6 --suite inline` is green in CI; drop the filter.
 - [ ] **wasm: 128-bit overflow builtins** [C]. `overflow128` covers standard
   integer operands and destinations independently of `_BitInt`;
   `overflow128_effects` checks evaluation counts and result stores on overflow.

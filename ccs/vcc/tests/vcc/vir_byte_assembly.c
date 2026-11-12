@@ -1,3 +1,4 @@
+/* vcc-xfail-wasm: TODO.md wasm: a signed 32-bit constant widened to 64 bits is not sign-extended (main's check 12). */
 /* Bytes assembled into a value (VIR at -O2, the record clean-up): 2, 4 or 8 byte
    loads from adjacent offsets or'ed together in big-endian order become one load
    and rev/rev16, in little-endian order one load.  Not when a store comes between

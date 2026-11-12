@@ -83,11 +83,14 @@ int main(void) {
              !strcmp(s,"__builtin_memmove") ? CC_LIB_MEMMOVE :
              !strcmp(s,"__builtin_memset") ? CC_LIB_MEMSET :
              !strcmp(s,"__builtin_strcmp") ? CC_LIB_STRCMP :
-             !strcmp(s,"__builtin_fabsl") ? CC_LIB_FABSL : CC_LIB_OTHER;
+             !strcmp(s,"__builtin_fabsl") ? CC_LIB_FABSL :
+             !strcmp(s,"__builtin___memcpy_chk") ? CC_LIB_MEMCPY_CHK :
+             !strcmp(s,"__builtin___memmove_chk") ? CC_LIB_MEMMOVE_CHK :
+             !strcmp(s,"__builtin___memset_chk") ? CC_LIB_MEMSET_CHK : CC_LIB_OTHER;
   assert(cc_builtin_libkind(i) == want);
   if (want) { count++; assert((builtins[i].flags & 1) == (want == CC_LIB_FABSL)); }
  }
- assert(count == 5);
+ assert(count == 8);
  return 0;
 }
 '''

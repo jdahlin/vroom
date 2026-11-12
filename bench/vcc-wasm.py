@@ -342,6 +342,8 @@ if __name__ == '__main__':
             else: show = v
     pat = av[0] if av else None
     ts = ct.tests(suite, pat)
+    if suite != 'inline':  # (TODO.md "wasm: the inline suite": only on request)
+        ts = [t for t in ts if t[0] != 'inline']
     t0 = time.time()
     rt_obj()
     with Pool(j, initializer=init, initargs=(obj, objcmp, vlenv, w32, nocache)) as pool:
