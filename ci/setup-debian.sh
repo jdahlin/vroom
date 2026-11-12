@@ -1,6 +1,7 @@
 #!/bin/sh
-# Tools for the premerge jobs in a Debian 13 arm64 container (GitHub's
-# ubuntu-24.04-arm runner with `container: debian:trixie`).  The same clang
+# Tools for the premerge jobs in a Debian 13 container, arm64 or x86-64
+# (GitHub's ubuntu-24.04-arm or ubuntu-24.04 runner with `container:
+# debian:trixie`).  The same clang
 # major as Homebrew's on the Mac and env/linux/Dockerfile, without what only
 # the kernel build and phase 1 need (libclang, bison, flex, libelf ...).
 #

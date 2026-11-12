@@ -144,7 +144,9 @@ asan)
 tsan)
 	build vcc-tsan
 	B=$(dirname "$BUILD")/ccs-tsan
-	step ctests-vcc   env VCC_BIN="$B" python3 bench/vcc-ctests.py -j "$J" --suite vcc
+	# a test's vcc-timeout bounds the normal build; TSan's is 15-20x slower
+	# (init_large: 10 s was not enough on the x86-64 runner)
+	step ctests-vcc   env VCC_BIN="$B" VCC_TIMEOUT_SCALE=6 python3 bench/vcc-ctests.py -j "$J" --suite vcc
 	step vccd         python3 bench/vccd-test.py --bin-dir "$B"
 	step stress-vccd  python3 bench/vcc-stress.py --vccd --bin-dir "$B"
 	;;
