@@ -1222,8 +1222,50 @@ VPRIV void vw_spset(ecx *e, int r) { (void)r; vw_fail(e, "VIR: stack pointer"); 
 VPRIV val vw_setjmp(ecx *e, int rbuf) { (void)rbuf; vw_fail(e, "VIR: setjmp"); }
 VPRIV void vw_longjmp(ecx *e, int rbuf) { (void)rbuf; vw_fail(e, "VIR: longjmp"); }
 VPRIV void vw_asm(ecx *e, uint32_t n) { (void)n; vw_fail(e, "VIR: inline asm"); }
-VPRIV void vw_va_start(ecx *e, int rap) { (void)rap; vw_fail(e, "VIR: va_start"); }
-VPRIV int vw_va_arg(ecx *e, int rap, qty t) { (void)rap, (void)t; vw_fail(e, "VIR: va_arg"); }
+/* the va_list at rap points at the first unnamed argument (Apple's: on the stack) */
+VPRIV void vw_va_start(ecx *e, int rap)
+{
+	if (!DARWIN(e->c))
+		vw_fail(e, "VIR: va_start (AAPCS64's register save areas)");
+	vw_ins(e, VO_VA_START, VT_VOID, 0, vw_get(e, rap, VT_PTR), 0, 0);
+	vw_st_clear(e, true);
+}
+/* the address of the next argument of va_list *rap, which moves past it (as va_arg_ in
+ * arch/a64/emit/builtin.c); Apple's va_list is a pointer into the stack arguments,
+ * 8 bytes each (16-aligned ones aligned first, records over 16 bytes by reference) */
+VPRIV int vw_va_arg(ecx *e, int rap, qty t)
+{
+	cc *c = e->c;
+	uint64_t size = tsize(c, t);
+	bool big = is_recabi(c, t) && size > 16;
+	lval ap = { .k = L_REG, .r = (uint8_t)rap, .align = 8 };
+	uint32_t p, q;
+	int r, rn;
+
+	if (!DARWIN(c))
+		vw_fail(e, "VIR: va_arg (AAPCS64's register save areas)");
+	r = vw_treg(e);
+	vw_load(e, r, &ap, 8, false);
+	p = vw_get(e, r, VT_PTR);
+	if (size && !big && abi_align(c, t) == 16) {
+		q = vw_ins(e, VO_P2I, VT_I64, 0, p, 0, 0);
+		q = vw_ins(e, VO_ADD, VT_I64, 0, q, vw_iconst(e, VT_I64, 15), 0);
+		q = vw_ins(e, VO_AND, VT_I64, 0, q, vw_iconst(e, VT_I64, -16), 0);
+		p = vw_ins(e, VO_I2P, VT_PTR, 0, q, 0, 0);
+	}
+	q = vw_ins(e, VO_PTRADD, VT_PTR, 0, p, vw_iconst(e, VT_I64, big ? 8 : (int64_t)((size + 7) & ~(uint64_t)7)), 0);
+	rn = vw_treg(e);
+	vw_set(e, rn, q);
+	vw_store(e, rn, &ap, 8);
+	vw_tfree(e, rn);
+	vw_set(e, r, p);
+	if (big) {
+		lval m = { .k = L_REG, .r = (uint8_t)r, .align = 8 };
+
+		vw_load(e, r, &m, 8, false);
+	}
+	return r;
+}
 VPRIV void vw_retrec(ecx *e, int raddr, const wkarg *r, uint32_t lbl) { (void)raddr, (void)r, (void)lbl; vw_fail(e, "VIR: a record result"); }
 VPRIV bool vw_tail_return(ecx *e, uint32_t expr) { (void)e, (void)expr; return false; }
 
@@ -1463,8 +1505,8 @@ VPRIV void vw_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic)
 
 	if (r)
 		vw_fail(e, "VIR: a record result");
-	if (variadic)
-		vw_fail(e, "VIR: a variadic function");
+	if (variadic && !DARWIN(c))
+		vw_fail(e, "VIR: a variadic function (AAPCS64's register save areas)");
 	uint32_t pv0 = V->np;	/* the params first (SPEC 15.2: the allocator reads them from the ABI registers) */
 
 	for (int k = 0; k < n; k++) {
@@ -2936,7 +2978,8 @@ VPRIV bool vw_emit(ecx *e)
 			if (V->p[q].in.op == VO_LOAD && V->p[q].slot)
 				V->sl[V->p[q].slot - 1].used = 1;
 	/* emission */
-	vir_begin(f, DARWIN(c) ? VTG_A64_DARWIN : VTG_A64_LINUX, REF(RK_SYM, e->wk->fsym), 0);
+	vir_begin(f, DARWIN(c) ? VTG_A64_DARWIN : VTG_A64_LINUX, REF(RK_SYM, e->wk->fsym),
+		  (T(c, c->syms[e->wk->fsym].ty)->flags & TF_VARIADIC) ? VF_VARIADIC : 0);
 	GROW(V->map, 0, V->cmap, V->np + 1);
 	memset(V->map, 0, (size_t)V->np * sizeof *V->map);
 	for (uint32_t i = 0; i < V->norder; i++)

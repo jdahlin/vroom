@@ -450,6 +450,44 @@ Steg 2 i arbetsordningen för sqlite.
   st-web8 9,31 G cykler, nu 9,18 G (maskinen belastad; 32,50 → 32,07 G
   instruktioner).
 
+### Syskonanrop, fritt argumentbyte och va_arg (2026-11-12)
+
+Steg 3 i arbetsordningen för sqlite.
+- **Syskonanrop:** ett anrop vars resultat (eller inget) är vad `ret` efter
+  det returnerar blir ett hopp efter epilogen, var som helst i kroppen (VIR:s
+  sänkning, `vl_sibling`).  Resultatet får gå via `br` till ett block med bara
+  `ret`, via blockparametrar, `i2p`/`p2i` och, när funktionen returnerar ett
+  32-bitars heltal, `trunc`/`ext.4` (övre halvan är ospecificerad).  Inte när
+  en plats adress lämnar laster, lagringar och kopior (som LLVM:s
+  TailCallElim), med stackargument, asm, `va_start` eller ett anrop som
+  returnerar två gånger; attributen som för arm64-emittern
+  (`em_tail_caller_ok`, `em_tail_target_ok`).  `I_TAIL` cond 2/3 expanderas
+  av `finish_function` till återställning, `mov sp, x29`, `ldp` och `b` eller
+  `br x16`; med avvecklingstabeller mellan `.cfi_remember_state` och
+  `.cfi_restore_state` som clang.  sqlite: 481 direkta och 51 indirekta.
+- **Fritt argumentbyte:** ett värde som dör vid ett anrop och som ett fast
+  argumentregister tränger undan får nu ett register som anropet skriver
+  över, och tas bort helt när dess kopia redan står i ett tidigare
+  argumentregister.  Förut fick det ett callee-saved register, vilket gav en
+  ram i funktioner som getCellInfo.  sqlite: spill 6991 → 5565.
+- **Tidig retur före prologen:** getCellInfo har nu ingen ram alls (`ldrh`,
+  `cbnz`, ..., `br x16`; returen är `ret`).  Allmän shrink-wrapping (en
+  funktion som behöver ram på en väg) är inte gjord.
+- **va_arg och variadiska funktioner (Apple):** `vw_va_arg` flyttar pekaren
+  (8 byte per argument, 16-justerade först, poster över 16 byte via
+  referens), `va_start` blir `add x16, x29, #16+namngivna stackbyte; str`.
+  `wk_valist` tog en pekartypad va_list för x86-64:s array; Apples är en
+  `char *` (lvärde).  AAPCS64 (Linux) vägras som förut.  sqlite: 19
+  variadiska funktioner och sqlite3_str_vappendf går nu genom VIR (1432
+  sänkta, 6 kvar: poster som argument).
+- **Tid:** speedtest1 storlek 100, samma körning: steg 2 9,38–9,42 G cykler,
+  med syskonanrop och argumentbytet 9,28–9,30 G (−1,3 %), instruktioner
+  32,08 → 31,64 G.  va_arg-täckningen ändrar inget mätbart (9,32 G).
+- **Tester:** `vcc/tail_calls_body.c` (syskonanrop i en gren med
+  callee-saved register, via `br`, indirekt, pekare; negativt: `(unsigned)`
+  breddat till 64 bitar, lokal adress), C-sviterna, vcc-cfi genom VIR
+  1567/1567, vcc-abi `--host` genom VIR samma fyra kända fel som utan.
+
 ### Underlag för V4 (2026-11-11): registerallokering, ingen kod
 
 - `RESEARCH-regalloc.md`: vad GCC (IRA, LRA) och LLVM (Greedy, Fast, PBQP,

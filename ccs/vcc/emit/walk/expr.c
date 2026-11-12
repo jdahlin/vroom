@@ -2275,12 +2275,13 @@ VPRIV bool wk_isconst(ecx *e, uint32_t n)
 	}
 }
 
-/* a va_list operand's address in a temporary (x86-64's is an array: it decays) */
+/* a va_list operand's address in a temporary (x86-64's is an array: it decays; Apple's is
+ * a char *, an lvalue like AAPCS64's record) */
 static int wk_valist(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
 
-	if (is_ptr(c, N(n)->ty)) {
+	if (X86(c) && is_ptr(c, N(n)->ty)) {
 		val v = wk_gen(e, n);
 
 		return wk_reg(e, &v, prim(TY_ULONG));

@@ -204,7 +204,7 @@ static void vl_fixed(const vir_fn *f, uint32_t v, vir_fix *x, void *ctx)
 			x->mem |= 2;
 		x->mem |= 4;
 		return;
-	case VO_LOAD:
+	case VO_LOAD: case VO_VA_START:
 		if (vl_memaddr(f, in->a))
 			x->mem |= 1;
 		return;
@@ -1289,6 +1289,23 @@ static void vl_ins(vl *L, uint32_t b, uint32_t i, uint8_t res)
 	case VO_CALL:
 		vl_call(L, b, i, in);
 		return;
+	case VO_VA_START: {	/* Apple's: the first unnamed argument, after the named ones on the stack */
+		vlarg none;
+		int32_t stk;
+		lval l = vl_addr(L, in->fl, R_X16);
+		int t = l.k == L_REG && l.r == R_X16 ? R_X17 : R_X16;
+
+		if (!DARWIN(e->c))
+			vl_fail(L, "VIR lowering: va_start");
+		vl_assign(true, &f->extra[f->sig], &none, 0, &stk);
+		if (l.k == L_SYM) {
+			addr_of_ref(e, R_X17, l.ref, l.off);
+			l = (lval){ .k = L_REG, .r = R_X17 };
+		}
+		opi(e, I_ADDI, 1, t, R_FP, 16 + ((stk + 7) & ~7));
+		mem(e, I_ST, 3, 0, t, l.k == L_FRAME ? FRAME : l.r, l.off);
+		return;
+	}
 	case VO_BR: {
 		uint32_t g = L->o->eidx[L->o->soff[b]];
 
