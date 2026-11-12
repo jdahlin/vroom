@@ -32,6 +32,7 @@ typedef struct vwslot {
 	uint32_t loads;		/* loads the store table did not answer (during the walk) */
 	uint8_t used;		/* a reachable load reads it (emission) */
 	uint32_t fin;		/* VIR slot id, VW_NOBLK none yet */
+	uint8_t prom;		/* promoted to variables (vw_promote): its stores go */
 } vwslot;
 
 typedef struct vwstent { uint32_t slot; int64_t off; int size; uint32_t v; } vwstent;	/* store table */

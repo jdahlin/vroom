@@ -523,7 +523,7 @@ VPRIV void vw_slot(ecx *e, int64_t off, uint64_t size, uint32_t align, int kind)
 	}
 	V->nact = n;
 	GROW(V->sl, V->nsl, V->csl, 1);
-	V->sl[V->nsl] = (vwslot){ off, size, align ? align : 1, 0, 0, 0, VW_NOBLK };
+	V->sl[V->nsl] = (vwslot){ off, size, align ? align : 1, 0, 0, 0, VW_NOBLK, 0 };
 	GROW(V->act, V->nact, V->cact, 1);
 	V->act[V->nact++] = V->nsl++;
 	/* a fresh object: what the store table knew about these bytes is gone */
@@ -1806,6 +1806,239 @@ static void vw_deadparams(ecx *e)
 	free(stk);
 }
 
+/* ---------------- slots to variables ---------------- */
+
+#define VW_NOCONV UINT32_MAX
+
+typedef struct vwfld { uint32_t slot; int64_t rel; uint32_t size, ty; } vwfld;
+
+/* the conversion a load of type ty (flags fl) applies to the stored value of type st: VW_NOCONV
+ * none, VO_EXT/P2I/BITCAST one instruction; false if it takes more */
+static bool vw_ldconv(uint32_t st, uint32_t ty, uint32_t fl, uint32_t *op)
+{
+	uint32_t w = VIF_W(fl);
+
+	if (w < 2 || (fl & VIF_MS)) {	/* a narrow or sign-extending load: the low bytes, extended */
+		*op = VO_EXT;
+		return st == VT_I32 && (ty == VT_I32 || ty == VT_I64);
+	}
+	if (st == ty)
+		*op = VW_NOCONV;
+	else if (st == VT_PTR && ty == VT_I64)
+		*op = VO_P2I;
+	else if ((st == VT_I32 && ty == VT_F32) || (st == VT_F32 && ty == VT_I32) ||
+		 (st == VT_I64 && ty == VT_F64) || (st == VT_F64 && ty == VT_I64))
+		*op = VO_BITCAST;
+	else
+		return false;
+	return true;
+}
+
+static int64_t vw_rel(const vwp *a) { return (int64_t)((uint64_t)a->in.b | (uint64_t)a->in.c << 32); }
+
+static void vw_escape(vwst *V, uint8_t *bad, uint32_t v)
+{
+	const vwp *q = &V->p[vw_find(V, v)];
+
+	if (q->in.op == VO_SLOTADDR && q->blk == VW_NOBLK)
+		bad[q->in.a] = 1;
+}
+
+/* var's value on entry to b (b's own definitions come later in it) */
+static uint32_t vw_entry(ecx *e, uint32_t var, uint32_t b, uint32_t ty, bool defs)
+{
+	vwst *V = e->vw;
+	uint32_t *d, p;
+
+	if (!defs)
+		return vw_readv(e, var, b, ty);
+	if (!V->b[b].npred)
+		return vw_undef(e, ty);
+	if (V->b[b].npred == 1)
+		return vw_readv(e, var, V->pr[V->b[b].pred], ty);
+	d = vw_hslot(e, b, var | 0x80000000u, false);
+	if (d)
+		return vw_find(V, *d);
+	p = vw_newphi(e, b, var, ty);
+	*vw_hslot(e, b, var | 0x80000000u, true) = p;
+	vw_phiops(e, p, b);
+	return vw_find(V, p);
+}
+
+/* a slot whose address does not escape, read and written only as fields (offset, size) that
+ * do not overlap, becomes one variable per field: its loads read the value the field holds
+ * (Braun, as the walker's locals), its stores go */
+static void vw_promote(ecx *e)
+{
+	vwst *V = e->vw;
+	vwfld *fd = NULL;
+	uint32_t nf = 0, cf = 0, *fof, *cur, *cst, np0 = V->np;
+	uint8_t *bad;
+
+	if (!V->nsl)
+		return;
+	bad = calloc(V->nsl, 1);
+	fof = malloc((size_t)V->np * sizeof *fof);	/* access -> field + 1 */
+	if (!bad || !fof)
+		vw_fail(e, "out of memory");
+	/* a slot escapes when its address is anything but the address of a load or store (the
+	 * walker's exposed flag is set by any address taken, *(T *)&x too) */
+	for (uint32_t i = 0; i < np0; i++) {
+		const vwp *q = &V->p[i];
+		const vir_opinfo *oi = &vir_optab[q->in.op];
+
+		if (q->blk == VW_NOBLK)
+			continue;
+		if (q->in.op == VO_BPARAM) {
+			if (q->in.b != VW_NOBLK)
+				for (uint32_t j = 0; j < V->b[q->blk].npred; j++)
+					vw_escape(V, bad, V->x[q->in.b + j]);
+			continue;
+		}
+		for (int k = 0; k < 3; k++)
+			if (vw_isval(oi->k[k]) && !(q->in.op == VO_BRIF && k > 0) &&
+			    !(k == 0 && (q->in.op == VO_LOAD || q->in.op == VO_STORE)))
+				vw_escape(V, bad, (&q->in.a)[k]);
+		if (q->in.op == VO_CALL || q->in.op == VO_RET)
+			for (uint32_t k = 0; k < V->x[q->in.c]; k++)
+				vw_escape(V, bad, V->x[q->in.c + 1 + k]);
+	}
+	/* the fields, and what rules a slot out */
+	for (uint32_t i = 0; i < np0; i++) {
+		vwp *q = &V->p[i];
+		uint32_t s, size, ty, k, a;
+		int64_t rel;
+
+		fof[i] = 0;
+		if ((q->in.op != VO_LOAD && q->in.op != VO_STORE) || q->blk == VW_NOBLK)
+			continue;
+		a = vw_find(V, q->in.a);
+		if (V->p[a].in.op != VO_SLOTADDR)
+			continue;
+		s = V->p[a].in.a;
+		q->in.a = a;
+		q->slot = s + 1;	/* (also an access through the address taken) */
+		if (bad[s])
+			continue;
+		if (q->in.fl & VIF_VOL) {
+			bad[s] = 1;
+			continue;
+		}
+		rel = vw_rel(&V->p[a]);
+		size = 1u << VIF_W(q->in.fl);
+		ty = q->in.op == VO_STORE ? V->p[q->in.b].in.ty : VT_VOID;
+		for (k = 0; k < nf; k++) {
+			vwfld *f = &fd[k];
+
+			if (f->slot != s)
+				continue;
+			if (f->rel == rel && f->size == size)
+				break;
+			if (f->rel < rel + (int64_t)size && rel < f->rel + (int64_t)f->size)
+				bad[s] = 1;	/* overlapping fields */
+		}
+		if (bad[s])
+			continue;
+		if (k == nf) {
+			GROW(fd, nf, cf, 1);
+			fd[nf++] = (vwfld){ s, rel, size, VT_VOID };
+		}
+		if (ty != VT_VOID) {
+			if (fd[k].ty != VT_VOID && fd[k].ty != ty)
+				bad[s] = 1;	/* stores of different types */
+			fd[k].ty = ty;
+		}
+		fof[i] = k + 1;
+	}
+	/* every load must take the field's stored type with one conversion at most */
+	for (uint32_t i = 0; i < V->np; i++) {
+		vwp *q = &V->p[i];
+		uint32_t op;
+
+		if (!fof[i] || bad[q->slot - 1] || q->in.op != VO_LOAD)
+			continue;
+		vwfld *f = &fd[fof[i] - 1];
+
+		if (f->ty == VT_VOID)	/* never stored: as the first load reads it */
+			f->ty = VIF_W(q->in.fl) < 2 || (q->in.fl & VIF_MS) ? VT_I32 : q->in.ty;
+		if (!vw_ldconv(f->ty, q->in.ty, q->in.fl, &op))
+			bad[q->slot - 1] = 1;
+	}
+	{
+		uint32_t any = 0;
+
+		for (uint32_t k = 0; k < nf; k++)
+			any += !bad[fd[k].slot];
+		if (!any)
+			goto out;
+	}
+	/* the variables: VW_VAR0 + nloc + field */
+	GROW(V->vty, V->nloc, V->cvty, nf);
+	for (uint32_t k = 0; k < nf; k++)
+		V->vty[V->nloc + k] = (uint8_t)fd[k].ty;
+	cur = malloc((size_t)nf * 2 * sizeof *cur);
+	if (!cur)
+		vw_fail(e, "out of memory");
+	cst = cur + nf;
+	/* each block's last store to a field is the field's value at its end */
+	for (uint32_t oi = 0; oi < V->norder; oi++) {
+		uint32_t b = V->order[oi];
+
+		for (uint32_t q = V->b[b].head; q; q = V->p[q].next)
+			if (q < np0 && fof[q] && !bad[V->p[q].slot - 1] && V->p[q].in.op == VO_STORE && vw_find(V, q) == q)
+			{
+				uint32_t var = VW_VAR0 + V->nloc + fof[q] - 1;
+
+				vw_write(e, var, b, V->p[q].in.b);
+				*vw_hslot(e, b, var | 0x40000000u, true) = 1;	/* b defines var */
+			}
+	}
+	for (uint32_t k = 0; k < nf; k++)
+		cst[k] = UINT32_MAX;
+	for (uint32_t oi = 0; oi < V->norder; oi++) {
+		uint32_t b = V->order[oi];
+
+		for (uint32_t q = V->b[b].head; q; q = V->p[q].next) {
+			vwp *x = &V->p[q];
+			uint32_t k, var, v, op;
+
+			if (q >= np0 || !fof[q] || bad[x->slot - 1] || vw_find(V, q) != q)
+				continue;
+			k = fof[q] - 1;
+			var = VW_VAR0 + V->nloc + k;
+			if (x->in.op == VO_STORE) {
+				cur[k] = x->in.b;
+				cst[k] = oi;
+				continue;
+			}
+			if (cst[k] == oi) {
+				v = cur[k];
+			} else {
+				v = vw_entry(e, var, b, fd[k].ty, vw_hslot(e, b, var | 0x40000000u, false) != NULL);
+				x = &V->p[q];	/* (vw_entry can grow V->p) */
+			}
+			vw_ldconv(fd[k].ty, x->in.ty, x->in.fl, &op);
+			if (op == VW_NOCONV) {
+				V->fwd[q] = v;
+			} else {
+				x->in.op = op;
+				x->in.fl = op == VO_EXT ? (x->in.fl & (3 | VIF_MS)) : 0;
+				x->in.a = v;
+				x->in.b = x->in.c = 0;
+				x->slot = 0;
+			}
+		}
+	}
+	free(cur);
+	for (uint32_t k = 0; k < nf; k++)
+		if (!bad[fd[k].slot])
+			V->sl[fd[k].slot].prom = 1;
+out:
+	free(fd);
+	free(fof);
+	free(bad);
+}
+
 /* the edge b -> t needs a block of its own: t has parameters and b does not end in br */
 static void vw_split(ecx *e)
 {
@@ -1995,6 +2228,7 @@ VPRIV bool vw_emit(ecx *e)
 			if (V->p[p].in.b == VW_NOBLK)
 				vw_phiops(e, p, b);
 	}
+	vw_promote(e);
 	while (vw_trivial(e))
 		;
 	vw_deadparams(e);
@@ -2026,7 +2260,8 @@ VPRIV bool vw_emit(ecx *e)
 
 			if (vw_find(V, q) != q)
 				continue;
-			if ((x->in.op == VO_STORE) && x->slot && !V->sl[x->slot - 1].exposed && !V->sl[x->slot - 1].used)
+			if ((x->in.op == VO_STORE) && x->slot &&
+			    (V->sl[x->slot - 1].prom || (!V->sl[x->slot - 1].exposed && !V->sl[x->slot - 1].used)))
 				continue;	/* (a dead store) */
 			if (x->loc != lastloc) {
 				vir_loc_add(f, x->loc);
