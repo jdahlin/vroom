@@ -176,6 +176,7 @@ typedef struct emitter {
 	_Atomic uint8_t *extref;	/* per sym: referenced (for .weak of undefined syms) */
 	_Atomic uint8_t *walked;
 	uint16_t *fnsize;		/* per function: AST nodes (prepass) */
+	uint8_t *once;			/* VIR lowering on: per function, 1 when its one reference is a direct call (fn_once), else NULL */
 	uint16_t *luse;			/* per local: uses weighted by loop depth (prepass) */
 	uint8_t *lnoreg;		/* per local: needs memory (address taken, asm operand, {} init) */
 	uint32_t *lspan;		/* per function: [2s] lowest, [2s+1] highest local sym seen */
@@ -893,6 +894,7 @@ VPRIV void wk_function(ecx *e, uint32_t s);
 VPRIV void wk_ecx_free(ecx *e);
 VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why);	/* emit/vir/a64.c: the built VIR as arm64 records */
 VPRIV bool vw_try(ecx *e, uint32_t s);	/* emit/vir/: s through VIR (VCC_VIR); false: emit it as before */
+VPRIV bool vw_enabled(const cc_opts *o);	/* VIR lowers functions (VCC_VIR with l, -O2) */
 VPRIV void vw_wk_ecx_free(ecx *e);
 VPRIV void wasm_data_ref(ecx *e, uint32_t ref);
 VPRIV void wasm_header(cc *c, tbuf *hdr, ecx *ctx, int nthr);
@@ -903,6 +905,7 @@ VPRIV uint32_t aconst_idx(cc *c, uint32_t n);
 VPRIV bool sve_codegen_ok(cc *c);
 VPRIV bool bitint_codegen_ok(cc *c);
 VPRIV void ensure_walked(emitter *E, cc *c, uint32_t s);
+VPRIV uint8_t *fn_once(cc *c);	/* per function: 1 when its one reference in the TU is a direct call */
 VPRIV int u32_cmp(const void *a, const void *b);
 /* tu.c */
 VPRIV void enqueue(emitter *E, uint32_t item);

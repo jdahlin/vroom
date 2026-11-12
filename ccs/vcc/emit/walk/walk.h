@@ -106,6 +106,7 @@ typedef struct wkst {
 	uint32_t inst, ninst, *linst, *cinst;
 	struct wkinl *inl;	/* the innermost inlined call, NULL in the function itself */
 	int depth;
+	uint32_t inlgrow;	/* AST nodes inlined into this function so far (VIR's growth budget) */
 	bool cjump;	/* wk_cond jumped whatever the condition (N_IF: the branch it skips is dead) */
 	/* a[K] = constant for local arrays used only as a[CONST] (no SA_AESC): straight-line
 	   code only (a label drops them all), as arm64's ael */

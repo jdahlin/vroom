@@ -1241,6 +1241,15 @@ static void wk_stmt1(ecx *e, uint32_t n)
 /* ---------------- inlining ---------------- */
 
 #define WK_INLINE_NODES 40	/* AST nodes: a few statements (as arm64) */
+#ifndef WK_INLINE_VIR
+#define WK_INLINE_VIR 40	/* under VIR: any static or inline function */
+#endif
+#ifndef WK_INLINE_GROW
+#define WK_INLINE_GROW 400	/* under VIR: nodes inlined beyond the function's own size */
+#endif
+#ifndef WK_INLINE_ONCE
+#define WK_INLINE_ONCE 4000	/* under VIR: a static function with one call */
+#endif
 
 VPRIV bool wk_const_sym(ecx *e, uint32_t s, val *v)
 {
@@ -1311,12 +1320,34 @@ VPRIV bool wk_can_inline(ecx *e, uint32_t s)
 		if (vm_type(c, c->syms[c->lists[N(y->body)->a + i]].ty))
 			return false;	/* (a parameter's VLA sizes) */
 	if (!(y->flags & SF_ALWAYS_INLINE)) {
+		uint32_t lim = WK_INLINE_NODES;
+
 		if (!e->E->o->opt)
 			return false;
 		if ((y->flags & SF_NOINLINE) || (!(y->flags & SF_INLINE) && y->sc != SC_STATIC))
 			return false;
+#ifdef WK_PREFIX
+		/* VIR: a static function called once is its only copy, so inlined up to a large
+		   body (clang's last-call-to-static bonus); others as the arm64 emitter.  Larger
+		   limits for the others measured slower (sqlite speedtest1: VIR's spills grow
+		   faster than inlining saves) */
+		bool once = false;
+
+		if (e->vtry) {
+			once = e->E->once && e->E->once[s] && y->sc == SC_STATIC && !sym_attrs(c, s)->used;
+			lim = once ? WK_INLINE_ONCE : WK_INLINE_VIR;
+			walk_fn(e, s);
+			/* the growth budget: every copy counts but a once-called function's own (which only
+			   moves its code); without it a top-down walker's nested copies grow exponentially */
+			if (e->E->fnsize[s] <= lim && !(once && !e->wk->inl)) {
+				if (e->wk->inlgrow + e->E->fnsize[s] > WK_INLINE_GROW + e->E->fnsize[e->wk->fsym])
+					return false;
+				e->wk->inlgrow += e->E->fnsize[s];
+			}
+		}
+#endif
 		walk_fn(e, s);
-		if (e->E->fnsize[s] > WK_INLINE_NODES)
+		if (e->E->fnsize[s] > lim)
 			return false;	/* (a tiny static function too, as clang: an empty stub drops its arguments) */
 		if (!(y->flags & SF_INLINE) && !wk_tiny_ok(c, y->body))
 			return false;
@@ -1522,6 +1553,7 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 	W->inst = 0;
 	W->inl = NULL;
 	W->depth = 0;
+	W->inlgrow = 0;
 	e->top = s;
 	e->reach = true;
 	e->calls = false;

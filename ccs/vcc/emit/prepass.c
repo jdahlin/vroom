@@ -224,6 +224,40 @@ static void note_assign(pre *P, uint32_t s, uint32_t rhs)
 }
 
 /*
+ * Per function, 1 when the TU names it exactly once and that is the callee of a
+ * call: a static function clang -O2 inlines whatever its size (its only copy).
+ * Every node counts, unevaluated ones and those of functions never emitted too,
+ * so a count only errs high (no inlining).
+ */
+VPRIV uint8_t *fn_once(cc *c)
+{
+	uint8_t *r = calloc((size_t)c->nsym + 64, 1);	/* refs in bits 0-1, calls in 2-3 (saturating) */
+
+	if (!r)
+		return NULL;
+	for (uint32_t n = 1; n < c->nnode; n++) {
+		const node *x = &c->nodes[n];
+		uint32_t s;
+
+		if (x->op == N_VAR) {
+			s = x->a;
+			if (s < c->nsym && c->syms[s].kind == S_FUNC && ((r[s = canon_sym(c, s)] & 3) != 3))
+				r[s]++;
+		} else if (x->op == N_CALL) {
+			const node *f = &c->nodes[x->a];
+
+			while (f->op == N_CAST && (f->aux == CK_FDECAY || f->aux == CK_NOP || f->aux == CK_P2P))
+				f = &c->nodes[f->a];
+			if (f->op == N_VAR && f->a < c->nsym && c->syms[f->a].kind == S_FUNC && ((r[s = canon_sym(c, f->a)] >> 2) != 3))
+				r[s] += 4;
+		}
+	}
+	for (uint32_t s = 0; s < c->nsym; s++)
+		r[s] = r[s] == (1 | 4);
+	return r;
+}
+
+/*
  * The prepass runs per function, the first time a function is emitted or
  * inlined: most of a TU's functions are header inlines nobody uses.  The
  * facts it records (writes to params and locals, labels) belong to that
