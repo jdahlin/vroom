@@ -1166,6 +1166,50 @@ inte är.  Bas efter sammanfogningen: 26,18 G (virpol 24,49 G, clang 23,70 G),
 - **Sett på vägen, inte åtgärdat:** en lövfunktion med vektorinstruktioner
   får ramrekord (vektorposterna är `I_RAW`, alltså `OP_ALL` för `opt_regs`).
 
+### Vad som körs, mot clang, per instruktionsslag; kopierade sammanflödestest (2026-11-12)
+
+- **Verktyg:** `bench/sqlite/mix.py`: en `nop` framför varje instruktion av ett
+  slag i kompilatorns `.s`, och skillnaden i instruktioner är antalet
+  körningar.  Fungerar på clangs `.s` också, så blandningen kan jämföras
+  exakt (summan av skillnaderna nedan är 2,16 G mot uppmätt gap 2,13 G).
+- **sqlite speedtest1 `--size 100`, G körda instruktioner** (VIR efter
+  looprotationen 25,82 G, clang -O2 23,69 G):
+
+  | Slag | VIR | clang | Skillnad |
+  |---|---|---|---|
+  | laster (inte sp/fp) | 4,42 | 3,89 | **+0,52** |
+  | villkorliga hopp | 2,87 | 2,51 | **+0,36** |
+  | `mov` r,r | 1,53 | 1,18 | **+0,35** |
+  | `b` | 0,91 | 0,62 | **+0,29** |
+  | add/sub | 2,77 | 2,59 | +0,18 |
+  | cmp/tst | 1,70 | 1,58 | +0,12 |
+  | sp/fp-laster | 1,28 | 1,15 | +0,12 |
+  | sp/fp-lagringar | 1,12 | 1,01 | +0,12 |
+  | lagringar (inte sp/fp) | 1,12 | 1,00 | +0,12 |
+  | anrop + ret | 0,65 | 0,57 | +0,08 |
+  | konstanter (mov #, adrp) | 0,99 | 1,11 | −0,13 |
+  | csel-familjen | 0,10 | 0,19 | −0,09 |
+
+  Stacktrafiken är alltså nästan clangs (+0,24 G av 2,13); det största är
+  vanliga laster (inga laster hissade ur loopar, färre återanvända över block,
+  inlining), sedan hopp och flyttar.  Per funktion sticker
+  sqlite3BtreeIndexMoveto ut (`b` 0,08 mot 0,01, `mov` 0,13 mot 0,07) och
+  sqlite3VdbeExec i `b` (0,39 mot 0,27); VdbeExec har färre `mov` än clang.
+- **Gjort (`vl_small` i `emit/vir/a64.c`):** ett hopp framåt till ett block
+  som bara testar (`brif` med högst en instruktion före, t.ex. `if (c<0)` efter
+  tre grenar som räknar ut `c`) ersätts av en kopia av blocket, som LLVM:s
+  svansduplicering vid sin standardstorlek.  Vägen till testets hoppsida
+  kostar då ett hopp i stället för två.
+- **Mätt:** 25,84 G → 25,76 G instruktioner (**−0,31 %**), cykler bättre i
+  tre parade körningar av tre (−0,5 till −1,8 %), kod +2,7 % (289 983 →
+  297 728).  Större block: 3 instruktioner −0,44 % för +3,9 %, 4: −0,52 % för
+  +5,1 %, 6: −0,59 % för +6,5 %; valt 2.  Bara kopior som faller igenom
+  efteråt: ingen skillnad alls (vinsten ligger på hoppsidan).
+- **Tester:** nytt `vcc/vir_join_dup.c`; C-sviterna genom VIR med kontrollen
+  2091/2094 (de tre kända), vcc 291/291 direkt, inline 85/85, vcc-cfi genom
+  VIR 1582/1582, volatile 32/32, TSVC 151/151 (6,32 G cykler), sqlite samma
+  hash.
+
 ### Underlag för V4 (2026-11-11): registerallokering, ingen kod
 
 - `RESEARCH-regalloc.md`: vad GCC (IRA, LRA) och LLVM (Greedy, Fast, PBQP,

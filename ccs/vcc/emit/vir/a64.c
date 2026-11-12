@@ -1550,6 +1550,20 @@ static void vl_ret(vl *L)
  * more instructions on speedtest1: their constants and edge moves are lowered again.
  */
 static bool vl_dupok(vl *L, uint32_t t);
+static bool vl_rotok(const vir_fn *f, uint32_t b);
+
+/* A jump forward from b to a block t that only tests (a join's `brif` on what its
+ * predecessors made, one instruction before it at most): a copy of t in place of the jump,
+ * as LLVM's tail duplication at its default size.  The way to t's taken side is then one
+ * branch instead of two.  Measured on speedtest1 (PLAN-vir.md): -0.3 % instructions for
+ * +2.7 % code; larger blocks buy less per byte.  Not from a cold block. */
+static bool vl_small(vl *L, uint32_t b, uint32_t t)
+{
+	const vir_blk *k = &L->f->blk[t];
+
+	return !L->e->E->noopt && t > b && L->dup < 2 && k->n - k->nparam <= 2 && !(L->f->blk[b].fl & VB_COLD) &&
+	       vl_rotok(L->f, t);
+}
 
 /* from block b's code, on to block t (an edge without moves left): a jump, or a copy of t */
 static void vl_goto(vl *L, uint32_t b, uint32_t t)
@@ -1558,7 +1572,7 @@ static void vl_goto(vl *L, uint32_t b, uint32_t t)
 	 * the way in costs no jump (loop rotation with the guard, as LLVM's) */
 	bool in = VLT.hl[t] != VIR_NOBLK && L->dup < 8 && (b < t || b > L->lp->l[VLT.hl[t]].end);
 
-	if (t != vl_fnext(L) && t != b && (in || vl_dupok(L, t))) {
+	if (t != vl_fnext(L) && t != b && (in || vl_dupok(L, t) || vl_small(L, b, t))) {
 		int d = L->dup++;
 
 		vl_block(L, t);
