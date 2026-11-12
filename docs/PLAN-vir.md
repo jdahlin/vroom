@@ -374,6 +374,18 @@ Unity och fil-för-fil bygger och kör riktproven. TSVC: 151/151, 82 verkliga
 vektorloopar, 158/158 funktioner sänkta. Data: work/vir-x86-perf/spframe/results.
 10 %-målet är öppet.
 
+Elfte skivan kan allokera r10 och använda r11 som generell sänkningsscratch.
+Anrop deklarerar då r10 som caller-clobber. Tät switch får en fast, död
+selector i r10; glesa/delade switchvärden behåller tidigare reserv. Om
+allokatorns kantkopior behöver sin GP-scratch samtidigt räknas funktionen
+om med två reserverade GP-register. Skalär fabs/fneg bygger nu SSE2-masker
+utan GP-scratch. Ett rotationsprov med fler levande värden än register och
+bitexakta noll-/NaN-/infinitetstecken täcker båda FP-bredderna.
+Fem kortprov: CPU 331,41 → 325,35 ms (1,182x → 1,161x clang); instruktioner
+1,389x → 1,388x. GCC/TCC 1615/105, egna 306/306 och samma fem inline-fel;
+assembly/objekt och ASan/UBSan gröna. TSVC 151/151, 82 vektorloopar och
+158/158 funktioner sänkta. Data: work/vir-x86-perf/r10/results/summary.json.
+
 
 ### V2/V3 x86-64 (2026-11-12): TSVC och fem verkliga korpusar
 

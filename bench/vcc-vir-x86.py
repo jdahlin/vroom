@@ -65,6 +65,7 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
             if run([str(exe)]).stdout != expected:
                 raise SystemExit('output differs from clang')
     for filename, required_more, packed in (
+        ('vir_x86_scratch.c', {'rotate', 'negd', 'absd', 'negf', 'absf'}, {}),
         ('vir_x86_frame.c', {'frames', 'pressure', 'callee'}, {}),
         ('vir_x86_testmem.c', {'flag8', 'flag16', 'flag32', 'flag64', 'indexed', 'vol', 'sign', 'shared', 'sharedmask', 'member', 'keep'}, {}),
         ('vir_x86_blocks.c', {'copy1', 'copy24', 'copy127', 'copy128', 'copy129', 'zero24', 'zero256', 'zero257', 'zero_local', 'readbyte', 'dynamic', 'nonzero', 'lowzero'}, {}),

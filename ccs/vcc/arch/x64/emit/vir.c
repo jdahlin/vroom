@@ -1,6 +1,7 @@
 /* Allocated VIR to x86-64 records.  Scalar/SSE2 operations and one-piece SysV calls.
  * Unusual ABI groups and unsupported vector operations fall back per function.
- * r11/xmm15 break edge cycles; r10/xmm14 are lowering scratch, never allocated.
+ * r11/xmm15 break edge cycles; xmm14 is a second FP scratch. R10 can be
+ * allocated when the remaining GP scratch suffices for this function's edges.
  * Keep vector instructions in opaque records until the record vocabulary has SIMD ops.
  */
 #include "x64impl.h"
@@ -12,6 +13,7 @@ typedef struct vx {
 	vir_fn *f;
 	vir_alloc_out *o;
 	int64_t *slot, *spill;
+	int gtmp;
 	uint32_t *label, *edgelab, ret, cmp, cmpblock, setrec;
 	uint8_t *uses;
 	uint32_t memv, memskip, scaledv; int membase, memindex, scaleindex; uint8_t memsh, scalesh; bool indexed; int64_t memoff;
@@ -68,10 +70,14 @@ static bool vx_smallmem(const vir_fn *f,const vir_ins *i)
 static void vx_fixed(const vir_fn *f, uint32_t v, vir_fix *x, void *ctx)
 {
 	const vir_ins *i = &f->ins[v];
-	(void)ctx;
+	bool r10=ctx && *(const bool *)ctx;
 	if (i->op == VO_PARAM) {
 		int stack;
 		x->res = vx_arg(f, f->sig, i->a, &stack);
+	} else if(i->op==VO_SWITCH && r10) {
+		/* Dense dispatch destroys its selector. Only a sole-use selector
+		 * qualifies; fixing it here evacuates every other live r10 value. */
+		x->nopnd=1;x->opnd[0]=R10;
 	} else if (i->op == VO_MEMCPY || i->op == VO_MEMSET) {
 		x->nopnd = 3;
 		if(vx_smallmem(f,i)) {x->mem=i->op==VO_MEMSET?6:4;return;}
@@ -89,7 +95,7 @@ static void vx_fixed(const vir_fn *f, uint32_t v, vir_fix *x, void *ctx)
 		}
 		const vir_ins *callee = &f->ins[i->a];
 		if (callee->op == VO_SYMADDR && !callee->b && !callee->c) x->mem |= 1;
-		x->clob[0] = X_TEMPS & ~(1u << R10);
+		x->clob[0] = r10?X_TEMPS:X_TEMPS & ~(1u << R10);
 		x->clob[1] = (1u << 14) - 1;
 		if (i->ty != VT_VOID) x->res = vir_rclass(i->ty) ? VR_MAKE(1, 0) : RAX;
 	} else if (i->op == VO_RET && f->extra[i->c]) {
@@ -143,8 +149,8 @@ static void vx_mat(vx *L, uint8_t dst, uint32_t v)
 	const vir_ins *i = &L->f->ins[v];
 	int d = vx_reg(dst);
 	if (i->op == VO_FCONST) {
-		x64_movi(L->e, R10, vx_bits(i));
-		x64_op3(L->e, X_MOV, vx_size(i->ty), d, R10, XNOREG);
+		x64_movi(L->e, L->gtmp, vx_bits(i));
+		x64_op3(L->e, X_MOV, vx_size(i->ty), d, L->gtmp, XNOREG);
 	} else if (i->op == VO_ICONST) {
 		x64_movi(L->e, d, vx_bits(i));
 	} else if (i->op == VO_SYMADDR && sym_needs_got(L->e->c, i->a)) {
@@ -184,7 +190,7 @@ static void vx_edge(vx *L, uint32_t b, uint32_t k)
 		const vir_emove *m = &L->o->move[ed->first + j];
 		bool ds = m->dst & VL_SLOT, ss = m->src & VL_SLOT;
 		uint32_t d = m->dst & ~VL_SLOT, s = m->src & ~VL_SLOT;
-		uint8_t tmp = vir_rclass(L->f->ins[m->v].ty) ? VR_MAKE(1, 14) : R10;
+		uint8_t tmp = vir_rclass(L->f->ins[m->v].ty) ? VR_MAKE(1, 14) : L->gtmp;
 		if (m->kind == VE_REMAT) {
 			vx_mat(L, ds ? tmp : d, m->v);
 			if (ds) vx_memslot(L, false, tmp, d);
@@ -415,11 +421,11 @@ static void vx_memblock(vx *L,const vir_ins *i,int dst,int src)
 	bool copy=i->op==VO_MEMCPY;
 	if(!copy) {
 		if(n>=16)x64_op3(e,X_FXOR,16,XMM0+14,XMM0+14,XMM0+14);
-		if(n&15)x64_movi(e,R10,0);
+		if(n&15)x64_movi(e,L->gtmp,0);
 	}
 	for(uint64_t off=0;off<n;) {
 		unsigned width=n-off>=16?16:n-off>=8?8:n-off>=4?4:n-off>=2?2:1;
-		int scratch=width==16?XMM0+14:R10;
+		int scratch=width==16?XMM0+14:L->gtmp;
 		lval from={.k=L_REG,.r=src,.off=(int64_t)off},to={.k=L_REG,.r=dst,.off=(int64_t)off};
 		if(copy)x64_mem(e,X_LD,width,scratch,&from,false);
 		x64_mem(e,X_ST,width,scratch,&to,false);off+=width;
@@ -449,7 +455,7 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 {
 	ecx *e = L->e;
 	const vir_ins *i = &L->f->ins[v];
-	int d = res == VR_NONE ? (vir_rclass(i->ty) ? XMM0 + 14 : R10) : vx_reg(res);
+	int d = res == VR_NONE ? (vir_rclass(i->ty) ? XMM0 + 14 : L->gtmp) : vx_reg(res);
 	int a = n ? vx_reg(p[0]) : XNOREG, c = n > 1 ? vx_reg(p[1]) : XNOREG;
 	int sz = vx_size(i->ty);
 	static const uint8_t alu[VO_N] = { [VO_ADD]=X_ADD, [VO_PTRADD]=X_ADD, [VO_SUB]=X_SUB, [VO_PSUB]=X_SUB,
@@ -595,7 +601,7 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 			uint32_t value = L->f->extra[i->c + 1 + k];
 			uint8_t r = p[k + 1];
 			if (r == VR_NONE) {
-				r = vir_rclass(L->f->ins[value].ty) ? VR_MAKE(1, 14) : R10;
+				r = vir_rclass(L->f->ins[value].ty) ? VR_MAKE(1, 14) : L->gtmp;
 				if (value < L->f->nconst) vx_mat(L, r, value);
 				else vx_memslot(L, true, r, L->o->slot[value]);
 			}
@@ -673,10 +679,10 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 			x64_op3(e,i->op==VO_SHL?X_SHLI:i->op==VO_LSHR?X_SHRI:X_SARI,sz,d,a,XNOREG)->imm=count;return;
 		}
 		/* The result may be rcx: moving the first operand there would destroy cl.
-		 * Shift in reserved r10, then publish the allocated result. */
-		x64_mov(e, R10, a);
-		x64_op3(e, i->op == VO_SHL ? X_SHL : i->op == VO_LSHR ? X_SHR : X_SAR, sz, R10, R10, c);
-		x64_op3(e, X_MOV, sz, d, R10, XNOREG); return;
+		 * Shift in the reserved scratch, then publish the allocated result. */
+		x64_mov(e, L->gtmp, a);
+		x64_op3(e, i->op == VO_SHL ? X_SHL : i->op == VO_LSHR ? X_SHR : X_SAR, sz, L->gtmp, L->gtmp, c);
+		x64_op3(e, X_MOV, sz, d, L->gtmp, XNOREG); return;
 	case VO_ICMP: {
 		static const uint8_t cc[] = { CC_E, CC_NE, CC_L, CC_LE, CC_G, CC_GE, CC_B, CC_BE, CC_A, CC_AE };
 		if (p[1]==VR_NONE) {int64_t k;vx_imm(L->f,i->b,&k);vx_cmpconst(L,a,vx_size(L->f->ins[i->a].ty),(uint64_t)k);}
@@ -700,7 +706,7 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 			if(d==c){int swap=c;c=no;no=swap;cc^=1;}
 			x64_op3(e,X_CMOV,sz,d,no,c)->cond=cc;return;
 		}
-		int tmp = vir_rclass(i->ty) ? XMM0 + 14 : R10;
+		int tmp = vir_rclass(i->ty) ? XMM0 + 14 : L->gtmp;
 		uint32_t done = wk_newlabel(e);
 		x64_op3(e, X_TEST, vx_size(L->f->ins[i->a].ty), XNOREG, a, a);
 		x64_op3(e, X_MOV, sz, tmp, vx_reg(p[2]), XNOREG);
@@ -712,7 +718,7 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 	case VO_FEXT: case VO_FTRUNC: x64_op3(e, X_CVTF2F, sz, d, a, XNOREG); return;
 	case VO_S2F: case VO_U2F: {
 		int from = vx_size(L->f->ins[i->a].ty);
-		if (i->op == VO_U2F) { x64_op3(e, X_MOV, 4, R10, a, XNOREG); a = R10; from = 8; }
+		if (i->op == VO_U2F) { x64_op3(e, X_MOV, 4, L->gtmp, a, XNOREG); a = L->gtmp; from = 8; }
 		x64_op3(e, X_CVTI2F, sz, d, a, XNOREG)->sh = from; return;
 	}
 	case VO_F2S: case VO_F2U: {
@@ -724,18 +730,11 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 	case VO_FNEG: case VO_FABS: {
 		bool wide = vir_velem(i->ty) == VT_F64;
 		char text[240];
-		if (vir_isvec(i->ty)) {
-			snprintf(text, sizeof text, "\tpcmpeqd %%xmm14, %%xmm14\n\t%s $%d, %%xmm14\n\t%s %%xmm%d, %%xmm14\n\tmovaps %%xmm14, %%xmm%d\n",
-				i->op == VO_FNEG ? (wide ? "psllq" : "pslld") : (wide ? "psrlq" : "psrld"),
-				i->op == VO_FNEG ? (wide ? 63 : 31) : 1,
-				i->op == VO_FNEG ? "pxor" : "pand", a-XMM0, d-XMM0);
-			vx_raw(L, text);
-		} else {
-			x64_op3(e, X_MOV, sz, R10, a, XNOREG);
-			x64_movi(e, R11, i->op == VO_FNEG ? (wide ? INT64_MIN : 0x80000000LL) : (wide ? INT64_MAX : 0x7fffffff));
-			x64_op3(e, i->op == VO_FNEG ? X_XOR : X_AND, sz, R10, R10, R11);
-			x64_op3(e, X_MOV, sz, d, R10, XNOREG);
-		}
+		snprintf(text, sizeof text, "\tpcmpeqd %%xmm14, %%xmm14\n\t%s $%d, %%xmm14\n\t%s %%xmm%d, %%xmm14\n\tmovaps %%xmm14, %%xmm%d\n",
+			i->op == VO_FNEG ? (wide ? "psllq" : "pslld") : (wide ? "psrlq" : "psrld"),
+			i->op == VO_FNEG ? (wide ? 63 : 31) : 1,
+			i->op == VO_FNEG ? "pxor" : "pand", a-XMM0, d-XMM0);
+		vx_raw(L, text);
 		return;
 	}
 	case VO_FSQRT:
@@ -750,10 +749,10 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 			char text[100]; snprintf(text, sizeof text, "\tcvtdq2ps %%xmm%d, %%xmm%d\n", a-XMM0, d-XMM0); vx_raw(L, text);
 		} else {
 			char text[100]; snprintf(text, sizeof text, "\tpshufd $78, %%xmm%d, %%xmm14\n", a-XMM0); vx_raw(L, text);
-			x64_op3(e, X_MOV, 8, R10, a, XNOREG);
-			x64_op3(e, X_CVTI2F, 8, d, R10, XNOREG)->sh = 8;
-			x64_op3(e, X_MOV, 8, R10, XMM0+14, XNOREG);
-			x64_op3(e, X_CVTI2F, 8, XMM15, R10, XNOREG)->sh = 8;
+			x64_op3(e, X_MOV, 8, L->gtmp, a, XNOREG);
+			x64_op3(e, X_CVTI2F, 8, d, L->gtmp, XNOREG)->sh = 8;
+			x64_op3(e, X_MOV, 8, L->gtmp, XMM0+14, XNOREG);
+			x64_op3(e, X_CVTI2F, 8, XMM15, L->gtmp, XNOREG)->sh = 8;
 			snprintf(text, sizeof text, "\tunpcklpd %%xmm15, %%xmm%d\n", d-XMM0); vx_raw(L, text);
 		}
 		return;
@@ -799,10 +798,10 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 	case VO_VSERIES: {
 		/* Construct the lane numbers with SSE2, without a constant pool. */
 		char s[240];
-		x64_movi(e, R10, i->ty == VT_I32X4 ? 0x0000000100000000LL : 0);
-		x64_op3(e, X_MOV, 8, d, R10, XNOREG);
-		x64_movi(e, R10, i->ty == VT_I32X4 ? 0x0000000300000002LL : 1);
-		x64_op3(e, X_MOV, 8, (XMM0 + 14), R10, XNOREG);
+		x64_movi(e, L->gtmp, i->ty == VT_I32X4 ? 0x0000000100000000LL : 0);
+		x64_op3(e, X_MOV, 8, d, L->gtmp, XNOREG);
+		x64_movi(e, L->gtmp, i->ty == VT_I32X4 ? 0x0000000300000002LL : 1);
+		x64_op3(e, X_MOV, 8, (XMM0 + 14), L->gtmp, XNOREG);
 		snprintf(s, sizeof s, "\tpunpcklqdq\t%%xmm14, %%xmm%d\n", d-XMM0);
 		vx_raw(L, s); return;
 	}
@@ -852,8 +851,8 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 	}
 	case VO_AFENCE: x64_put(e,X_MFENCE); return;
 	case VO_ASTORE:
-		x64_op3(e,X_MOV,sz=vx_size(L->f->ins[i->b].ty),R10,c,XNOREG);
-		x64_op3(e,X_XCHG,1<<VIF_W(i->fl),R10,a,XNOREG);return;
+		x64_op3(e,X_MOV,sz=vx_size(L->f->ins[i->b].ty),L->gtmp,c,XNOREG);
+		x64_op3(e,X_XCHG,1<<VIF_W(i->fl),L->gtmp,a,XNOREG);return;
 	case VO_SWITCH: vx_switch(L,b,i,a); return;
 	case VO_BR: vx_edge(L, b, 0); x64_jump(e, L->label[i->a]); return;
 	case VO_BRIF: {
@@ -884,15 +883,32 @@ static bool vx_twice(ecx *e, const vir_ins *callee)
 		EM_IDENT_IS(c->syms[sym].name, "sigsetjmp") || EM_IDENT_IS(c->syms[sym].name, "__sigsetjmp");
 }
 
+/* A dense singleton table can consume its sole-use selector in r10. Sparse
+ * ranges still need r10 as an independent temporary, so retain that reserve. */
+static bool vx_r10dispatch(const vir_fn *f,const vir_ins *i)
+{
+	uint32_t n=f->extra[i->c];bool wide=f->ins[i->a].ty==VT_I64;
+	uint32_t st=wide?5:3;const uint32_t *p=&f->extra[i->c+1];
+	if(n<6)return false;
+	uint64_t lo=wide?(uint64_t)p[1]<<32|p[0]:p[0],hi=lo;
+	for(uint32_t k=0;k<n;k++) {
+		uint64_t a=wide?(uint64_t)p[st*k+1]<<32|p[st*k]:p[st*k];
+		hi=wide?(uint64_t)p[st*k+3]<<32|p[st*k+2]:p[st*k+1];
+		if(a!=hi)return false;
+	}
+	return hi-lo<4096 && hi-lo+1<=4*(uint64_t)n;
+}
+
 VPRIV bool vw_x64(ecx *e, uint32_t sym, const char **why)
 {
 	vwst *V = e->vw;
 	vir_fn *f = &V->f;
 	bool spframe=e->E->o->omit_frame_pointer && !e->E->noopt;
+	bool r10=true;
 	uint64_t cs = (1u << RBX) | (1u << R12) | (1u << R13) | (1u << R14) | (1u << R15);
 	if(spframe)cs|=1u<<RBP;
 	vir_regs regs = { .alloc = { (X_TEMPS & ~(1u << R10)) | cs, (1u << 14) - 1 },
-		.callee = { cs, 0 }, .fixed = vx_fixed };
+		.callee = { cs, 0 }, .fixed = vx_fixed, .ctx=&r10 };
 	vx L = { .e = e, .f = f, .o = &V->ao };
 	*why = "VIR x86-64: unsupported operation or ABI";
 	if (e->E->o->debug || e->E->o->sprot || x64_nosimd(e)) return false;
@@ -924,7 +940,25 @@ VPRIV bool vw_x64(ecx *e, uint32_t sym, const char **why)
 		framesz += f->slot[i].size + 16;
 	}
 	if (framesz > INT32_MAX / 2) return false;
-	if (!vir_loops_build(f, &V->lp) || !vir_alloc(f, &V->lp, &regs, NULL, &V->ao)) {
+	L.uses=V->xuses=vx_grow(V->xuses,&V->cxuses,f->nins+1,1);
+	vir_uses(f,L.uses);
+	for(uint32_t i=f->nconst;i<f->nins;i++)if(f->ins[i].op==VO_SWITCH &&
+	   (L.uses[f->ins[i].a]!=1 || !vx_r10dispatch(f,&f->ins[i])))r10=false;
+	if(r10)regs.alloc[0]|=1u<<R10;
+	if(!vir_loops_build(f,&V->lp)){*why="VIR x86-64: loop analysis failed";return false;}
+	bool allocated=vir_alloc(f,&V->lp,&regs,NULL,&V->ao),scratch=false;
+	if(allocated && r10)for(uint32_t k=0;k<V->ao.nmove;k++) {
+		const vir_emove *m=&V->ao.move[k];
+		if(m->src==VR_SCR0 || m->dst==VR_SCR0){scratch=true;break;}
+	}
+	if(r10 && (!allocated || scratch)) {
+		/* A cycle may need the allocator's GP scratch at the same time as
+		 * a slot-to-slot copy. Keep the second reserve for those functions. */
+		r10=false;regs.alloc[0]&=~(UINT64_C(1)<<R10);
+		allocated=vir_alloc(f,&V->lp,&regs,NULL,&V->ao);
+	}
+	L.gtmp=r10?R11:R10;
+	if (!allocated) {
 		*why = "VIR x86-64: allocation failed"; return false;
 	}
 	if (getenv("VCC_VIR_CHECK")) {
@@ -937,8 +971,6 @@ VPRIV bool vw_x64(ecx *e, uint32_t sym, const char **why)
 	/* No partial function is published before x64_finish; a failed lowering retries the walker. */
 	L.edgelab=V->xedgelab=vx_grow(V->xedgelab,&V->cxedgelab,V->ao.nedge+1,sizeof(uint32_t));
 	memset(L.edgelab,0,V->ao.nedge*sizeof(uint32_t));
-	L.uses=V->xuses=vx_grow(V->xuses,&V->cxuses,f->nins+1,1);
-	vir_uses(f,L.uses);
 	L.slot = V->xslot = vx_grow(V->xslot, &V->cxslot, f->nslot + 1, sizeof *L.slot);
 	L.spill = V->xspill = vx_grow(V->xspill, &V->cxspill, V->ao.nspill + 1, sizeof *L.spill);
 	L.label = V->xlabel = vx_grow(V->xlabel, &V->cxlabel, f->nblk + 1, sizeof *L.label);
