@@ -69,6 +69,7 @@ static bool opnd_ok(uint32_t k, uint32_t ty, uint32_t rty)
 	case OK_FP: return ty == VT_F32 || ty == VT_F64;
 	case OK_VI: return vir_isvec(rty) && ty == vir_vint(rty);
 	case OK_VF: return vir_isvec(rty) && ty == vir_vflt(rty);
+	case OK_VLANES: return vir_isvec(ty) && vir_velem(ty) == rty;
 	case OK_VRED: return vir_isvec(ty) && vir_velem(ty) == rty && ty == vir_vint(ty);
 	case OK_ELEM: return vir_isvec(rty) && ty == vir_velem(rty);
 	case OK_MULTI: return ty == VT_MULTI;
@@ -357,6 +358,11 @@ static void check_ins(vctx *v, uint32_t b, uint32_t i, uint32_t idx)
 				vfail(v, "T2", b, i, "%s: an operand in a list is not a value", oi->name);
 				return;
 			}
+	}
+	if ((op == VO_VINSERT && in->c >= (in->ty == VT_I32X4 || in->ty == VT_F32X4 ? 4u : 2u)) ||
+	    (op == VO_VEXTRACT && in->b >= (in->ty == VT_I32 || in->ty == VT_F32 ? 4u : 2u))) {
+		vfail(v, "T2", b, i, "%s: lane index out of range", oi->name);
+		return;
 	}
 	/* T3: flags */
 	if (in->fl & ~oi->flmask) {

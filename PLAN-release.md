@@ -759,3 +759,14 @@ ASan/UBSan/TSan gröna. GCC 1615/1615, TCC 105/105 och egna 282/282 går med VIR
 inline har samma fem fel med SSA av och på. Detta är nytt plattformsunderlag
 för G4, inte en stängd grind: anrop och bredare ABI-/korpustäckning återstår.
 Mätningar och återstående arbete ägs av `PLAN-vir.md` V2/V4.
+
+### Status 2026-11-12: G2/G4, verkliga Linux-korpusar genom x86-VIR
+
+TSVC ger 151/151 checksummor och alla 82 kandidater når x86-maskinkod;
+SQLite bygger och speedtest1:s hash är clangs, zlib klarar självtest och
+byte-/CRC-jämförelse. PostgreSQL/psql och CPython är nu också kompilerade
+som korpus: 13 av 1504 respektive fyra av 334 C-jobb avvisas på namngivna
+builtinluckor (TODO T13); CPython har dessutom länkfel, även utan VIR.
+PostgreSQLs uttryckligt märkta blandbygge ger 81 godkända/0 fel/249
+överhoppade tester och räknas inte som grönt G2. Ingen grind stängs av dessa
+delmängder. Täckning, funktionsvisa reträtter och mätningar i PLAN-vir.md.

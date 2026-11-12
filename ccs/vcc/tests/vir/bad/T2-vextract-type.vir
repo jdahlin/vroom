@@ -1,0 +1,11 @@
+vir 1
+target x86_64-linux
+sig %s = () -> none
+func @f %s {
+b0:
+  v0:i32x4 = vsplat 0:i32
+  v1:f32 = vextract v0, 1
+  ret
+}
+; ---
+@f b0.1: T2: vextract: operand a has type i32x4

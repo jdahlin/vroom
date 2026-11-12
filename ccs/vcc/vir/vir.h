@@ -64,7 +64,7 @@ enum {
 	VO_ALOAD = 58, VO_ASTORE = 59, VO_AXCHG = 60, VO_AXADD = 61, VO_ACAS = 62, VO_AFENCE = 63,
 	VO_CALL = 64, VO_VA_START = 65, VO_VA_ARG = 66, VO_TLSADDR = 67, VO_ASM = 68,
 	VO_BARRIER = 69, VO_FRAMEADDR = 70, VO_RETADDR = 71,
-	VO_FMA = 9,		/* (72-79 are the vector operations) */
+	VO_FMA = 9,		/* (72-79 and 87-88 are vector operations) */
 	/* vectors: add sub mul and or xor neg not, the f* operations, select, load and store take vector
 	 * types as they are; a mask is an i32x4 whose lanes are 0 or -1 */
 	VO_VSPLAT = 72,		/* a in every lane */
@@ -74,6 +74,7 @@ enum {
 	VO_VS2F = 77,		/* signed lanes to float of the same width */
 	VO_VREV = 78,		/* the lanes in reverse order */
 	VO_VREDUCE = 79,	/* the lanes' sum (i32x4 -> i32, i64x2 -> i64) */
+	VO_VINSERT = 87, VO_VEXTRACT = 88, /* constant lane insert/extract */
 	VO_BR = 80, VO_BRIF = 81, VO_SWITCH = 82, VO_IBR = 83, VO_ASMGOTO = 84, VO_RET = 85, VO_TRAP = 86,
 	VO_TARGET0 = 128,	/* 128-255: target instructions introduced by lowering */
 	VO_N = 256
@@ -208,6 +209,7 @@ enum {	/* operand kinds (a, b, c) */
 	OK_VF,		/* the float vector with the result's lane width (vfcmp) */
 	OK_ELEM,	/* a value of the result's lane type (vsplat) */
 	OK_VRED,	/* the integer vector whose lanes have the result's type (vreduce) */
+	OK_VLANES,	/* vector whose element type is the scalar result */
 	OK_MULTI,	/* a value of type multi (proj) */
 	OK_BITC,	/* bitcast: i32 for f32, f32 for i32, i64 for f64, f64 for i64 */
 	OK_IMM,		/* an immediate */

@@ -985,3 +985,14 @@ unwind O1/O2 samt debugrader O0–O3 passerar. CI för integrationshuvudet åter
 loopvektoriserarens SSE2-del fungerar nu också på x86-64. Detaljer,
 kvarvarande reträtter, riktade prov och mätningar finns i `PLAN-vir.md`,
 V2/V4-status 2026-11-12. Ingen ändring av standardvalet eller -O0/-O1.
+
+### 2026-11-12: VIR med anrop och 82 TSVC-vektorloopar
+
+VIR sänker nu SysV-anrop, FCMP/select, packad jämförelse och maskval, SSE2-
+i32-multiplikation samt signerade vektorkonverteringar, division/rest och blockminne.
+TSVC: 151/151 checksummor, 157/158 byggda funktioner sänkta och 82/82
+vektorkandidater i maskinkod (tidigare fem funktioner). SQLite, zlib,
+PostgreSQL/psql och CPython är provade; de två sistas namngivna kvarvarande
+builtin-/inline-luckor hålls synliga. Se PLAN-vir.md V2/V3 och TODO T13.
+Nya C-prov och assemblerns INT64_MIN-prov går i unity/nonunity och med
+sanitisering; standardvalet och -O0/-O1 är oförändrade.

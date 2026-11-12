@@ -412,6 +412,11 @@ any vector type, I(V) the integer and F(V) the float vector of V's lane width.
 | 77 | `vs2f` | float V | I(V) | - | - | P,F | Signed lanes to float of the same width |
 | 78 | `vrev` | V | V | - | - | P | The lanes in reverse order |
 | 79 | `vreduce` | `i32` `i64` | the vector of such lanes | - | - | P | The lanes' wrapping sum |
+| 87 | `vinsert` | V | V | lane type | lane immediate | P | Replace lane `c` of `a` with `b` |
+| 88 | `vextract` | lane type | V | lane immediate | - | P | Extract lane `b` of `a` |
+
+Lane indices must be smaller than the number of lanes (T2). Insert and extract
+preserve the lane's bits, including NaN payloads and signed zeros.
 
 7.5.4 Register allocation: vectors are in the float class; a vector's spill
 slot is 16 bytes (15.2), and no v register keeps a vector across a call. A

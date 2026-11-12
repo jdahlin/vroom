@@ -18,7 +18,10 @@ NI long vx_sum(const long *a,long n)
 { long s=7; for(long i=0;i<n;i++) s+=a[i]; return s; }
 NI void vx_series(long *a,long n)
 { for(long i=0;i<n;i++) a[i]=i+3; }
-NI long vx_fallback(long a,long b) { return a/b; }
+NI long vx_division(long a,long b) { return a/b; }
+NI long vx_srem(long a,long b,long c) {return (a/b)*3+(a%b)*7+c;}
+NI unsigned long vx_udiv64(unsigned long a,unsigned long b,unsigned long c) {return a/b+(a%b)*7+c;}
+NI unsigned vx_udiv32(unsigned a,unsigned b,unsigned c) {return a/b+a%b+c;}
 int main(void)
 {
 	float a[80],b[80],c[80]; double da[80],db[80],dc[80]; int ia[80],ib[80],ic[80]; long la[80];
@@ -47,6 +50,9 @@ int main(void)
 	for(int i=0;i<80;i++)a[i]=i;
 	vx_f32(a+1,a,c,63);
 	float prev=0;for(int i=0;i<63;i++){prev=prev*c[i]+1.5f;if(a[i+1]!=prev)return 11;}
-	if(vx_fallback(-19,3)!=-6)return 12;
+	if(vx_division(-19,3)!=-6)return 12;
+	if(vx_srem(-19,3,100)!=75)return 13;
+	if(vx_udiv64(~0UL,65537,91)!=(~0UL/65537+(~0UL%65537)*7+91))return 14;
+	if(vx_udiv32(0xf1234567u,7,19)!=(0xf1234567u/7+0xf1234567u%7+19))return 15;
 	return 0;
 }
