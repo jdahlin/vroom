@@ -567,6 +567,41 @@ Steg 3 i arbetsordningen för sqlite.
   breddat till 64 bitar, lokal adress), C-sviterna, vcc-cfi genom VIR
   1567/1567, vcc-abi `--host` genom VIR samma fyra kända fel som utan.
 
+### Sänkningen mot LLVM:s backend (2026-11-12): fem punkter, sqlite speedtest1
+
+Gren `claude/vir-lowering-453a57`.  Mätt med `VCC_VIR=bl`, speedtest1
+`--size 100 --memdb`, parvisa körningar (3 rundor) mot bygget före punkten och
+mot virpol; räknare statiskt på sqlite3.o.  Från start (5346e3e6) +14,5 %
+cykler mot virpol, nu +9,9 %.  Samplingar per funktion (storlek 300) varierar
+±10 % med maskinens last och redovisas bara som riktning.
+
+| Punkt | Commit | Räknare före → efter (virpol) | Instr. | Cykler mot föregående | Mot virpol |
+|---|---|---|---|---|---|
+| 1 grenval: tbz/tbnz, cbz/cbnz mot noll och tecken, upprepad jämförelse bort | 71ccdf3c | tbz+tbnz 0 → 2677 (2645), and+cbz 2690 → 497, cmp 13976 → 13072 | −3,0 % | −1,9 % [−2,1 .. −1,6] | +12,0 % |
+| 2 blockordning och utgångar: retur med egen epilog, ensamma `br` kopieras, lövram utan ramrekord | ad813ee8 | b 20213 → 18915 (12145), ret 1473 → 2771 | −0,7 % | −0,9 % [−2,5 .. −0,4] | +11,0 % |
+| 3 aritmetik: registeroffset, skiftade/utökade operander, madd/smaddl, ubfx/sbfiz, multiplikation med konstant | dabc8f08 | registeroffset 0 → 2567 (2675), utökade 0 → 1023 (1283), smaddl 0 → 1753 (1855), sxtw 5509 → 1252 (1629), mul 2892 → 383 (228) | −5,6 % | −1,2 % [−2,7 .. −0,9] | +8,1 % |
+| volatile genom pekare (förutsättning för 4) | 5c4313d5 | dekkerMul2 ldr/str 9/6 → 29/13 (21/12) | +0,4 % | +2,5 % [+2,0 .. +3,1] | |
+| 4 bytesammansättning: en last + rev/rev16; anrop läser bara sina argumentregister | b72162c6 | rev 0 → 100 (186), rev16 0 → 65 (41) | −1,2 % | −0,8 % [−1,2 .. +0,1] | +9,7 % |
+| 5 konstanter: wzr/xzr-lagring, add/sub/cmp- och logiska immediater | a4d0daec | lagrad nolla via register 1722 → 333 (132), konstantflytt 24294 → 22602 | −0,3 % | +0,1 % [−0,2 .. +0,3] | +9,9 % |
+
+- Punkt 2: kopior av små block med arbete i (slingtestet sist i latchen)
+  prövades och togs bort: fler instruktioner (konstanter och kantflyttar
+  sänks en gång per kopia).
+- Punkt 3–5 är ett pass över posterna (`opt.c` `fold`, bara VIR:s
+  funktioner, exakt liveness): definitionen går när dess register bara läses
+  av nästa läsare i blocket och är dött efter den.  VIR:s retur läser bara x0
+  för heltal/pekare ≤ 8 byte.
+- Volatile: VIR byggde varje last/lagring som icke-volatil; rättningen
+  kostar cykler eftersom VIR:s flyttalslaster går via x16 + `fmov`.
+- Kvar per funktion: VdbeExec (slingtest roteras inte, hopptabell med 4-byte
+  poster mot LLVM:s 1 byte), RecordCompareInt/String (parametrar kopieras till
+  callee-saved x19/x20 fast bara syskonanrop följer: allokeraren), SerialGet
+  (LLVM inlinar sqlite3Get4byte), csel används inte alls (0 mot 980).
+- Till allokeraren: konstanter hålls i register genom slingor i stället för
+  att rematerialiseras; parametrar till callee-saved före syskonanrop.
+- Tester: `vir_branch_bits.c`, `vir_flags_reuse.c`, `vir_layout_exits.c`,
+  `vir_operand_fold.c`, `vir_byte_assembly.c`, `vir_constants.c` (.o och .s).
+
 ### Underlag för V4 (2026-11-11): registerallokering, ingen kod
 
 - `RESEARCH-regalloc.md`: vad GCC (IRA, LRA) och LLVM (Greedy, Fast, PBQP,
