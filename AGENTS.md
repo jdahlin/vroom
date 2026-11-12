@@ -173,6 +173,7 @@ bench/vcc-pic.py                    # GOT and TLS relocations per -fno-pic/-fPIE
 bench/vir-test.py -j 6              # VIR: parser/printer round trip, verifier rules, canon, dominators (ccs/vcc/tests/vir, ~1 s)
 bench/vir-test.py --mutate 3000 --bin-dir build/ccs-asan   # random mutants of those units: virtest never crashes (~1 min)
 bench/vcc-ctests.py -j 6 --suite vcc # our own regression tests (ccs/vcc/tests/vcc), ~1 s
+bench/vcc-ctests.py -j 6 --suite inline   # gcc/llvm inlining and IPA run tests (ccs/vcc/tests/inline); VCC_VIR=bl for VIR's inliner
 bench/vcc-ctests.py -j 6 --cpu cortex-a53   # vcc's binaries on a CPU without LSE (atomics as LL/SC)
 VCC_LDCMP=1 bench/vcc-ctests.py -j 6 --no-cache  # also link with vlink: loaded image byte-identical to lld's (VCC_LD=vlink: run vlink's)
                                     # VCC_CFLAGS=-fasynchronous-unwind-tables: extra flags for both compilers (.eh_frame)

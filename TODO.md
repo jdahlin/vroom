@@ -1288,6 +1288,14 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 
 ## Tier 4: quality
 
+- [ ] **IPA constant propagation.** A static function's parameter that every
+  call passes the same constant is that constant in the body (clang's IPSCCP,
+  gcc's IPA-CP), noinline functions included: `__builtin_constant_p` of it is 1
+  and branches on it fold.  VIR inlines once-called statics (walker,
+  `fn_once`); calls it keeps see nothing of their arguments.
+  *Validate:* `bench/vcc-ctests.py --suite inline`: `gcc.dg-ipa-pr92497-1`
+  turns from xfail to XPASS (drop it from `INLINE_XFAIL`).
+
 - [ ] **Optimizer shared across x86, arm64 and wasm**. Implementation
   owner: `PLAN-fas2.md`, **Gemensam optimerare utan SSA**, OPT0–OPT8.
   arm64 already has register locals, copy/dead-result cleanup, stack-cell
