@@ -688,8 +688,9 @@ plain:
 			/* clang: unexpanded argument tokens take the expansion's location */
 			for (size_t j = f; j < p->svn; j++)
 				p->sv[j].loc = eloc, p->sv[j].flags |= PF_MACRO;
+			/* clang: no space after a ## ("A ## ARG"): an assembler's invalid paste stays ". ## foo" -> ".foo" */
 			if (!pseudo)
-				p->sv[f].flags = (p->sv[f].flags & ~(TF_SOL | TF_SPACE)) | (ngs ? TF_SPACE : 0);
+				p->sv[f].flags = (p->sv[f].flags & ~(TF_SOL | TF_SPACE)) | (ngs && !before ? TF_SPACE : 0);
 			ngs = false;
 			continue;
 		}
