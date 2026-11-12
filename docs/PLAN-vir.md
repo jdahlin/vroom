@@ -306,6 +306,15 @@ egna 300/300, samma fem inline-fel, riktprov och ASan/UBSan gröna. TSVC
 efter inlinerskivan: 151/151, 82 vektorloopar, 158/158 funktioner sänkta.
 Data: work/vir-x86-perf/be/results/summary.json; 10 %-målet öppet.
 
+Femte skivan använder CMOV för skalära heltals-/pekarval och samma säkra
+flaggåteranvändning som branch. Båda källorna överlever resultatöverlapp;
+en jämförelse som har fler användare behåller sin boolmaterialisering.
+Riktprov täcker signerad/osignerad jämförelse, boolvillkor och pekare, med
+krav på CMOV i verklig kod. GCC/TCC 1615/105, egna 301/301, samma fem
+inline-fel; assembly/objekt och ASan/UBSan gröna. SQLite instruktioner
+1,491x → 1,482x, CPU oförändrad (360,55 → 360,41 ms; clang 284,89 ms).
+Ingen belagd CPU-vinst från denna skiva. Data: work/vir-x86-perf/cmov2/results.
+
 
 ### V2/V3 x86-64 (2026-11-12): TSVC och fem verkliga korpusar
 

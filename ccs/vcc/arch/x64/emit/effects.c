@@ -20,6 +20,7 @@
 #define X_DESC(regs_, flags_) { .regs = (regs_), .fl = (flags_) }
 
 static const opdesc x64_desc[X_NOPS] = {
+	[X_CMOV] = X_DESC(X_D | X_U | X_V, X_P | X_R),
 	[X_LDX] = X_DESC(X_D | X_U | OD_USE3, OD_LOAD | OD_TRAP),
 	[X_STX] = X_DESC(X_U | X_V | OD_USE3, OD_STORE | OD_TRAP),
 	[X_LABEL] = X_DESC(0, OD_LABEL),
@@ -179,6 +180,7 @@ VPRIV const uint8_t *x64_flow_table(void)
 	static const uint8_t flow[X_NOPS] = {
 		[X_LABEL] = EM_FLOW_ENTRY,
 		[X_MOV] = EM_FLOW_NEXT,
+		[X_CMOV] = EM_FLOW_NEXT,
 		[X_MOVI] = EM_FLOW_NEXT,
 		[X_LD] = EM_FLOW_NEXT,
 		[X_LDX] = EM_FLOW_NEXT,

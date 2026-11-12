@@ -7,7 +7,7 @@
 static bool x64_tied(int op)
 {
 	return (op >= X_ADD && op <= X_SBB) || (op >= X_ADDI && op <= X_XORI) || (op >= X_SHLI && op <= X_SAR) ||
-	       op == X_NEG || op == X_NOT || op == X_BSWAP || (op >= X_FADD && op <= X_FXOR);
+	       op == X_NEG || op == X_NOT || op == X_BSWAP || op == X_CMOV || (op >= X_FADD && op <= X_FXOR);
 }
 
 static bool x64_commutes(int op)
@@ -422,6 +422,9 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			tb_s(b, ", ");
 			x64_reg(b, i->r[1], sz);
 			break;
+		case X_CMOV:
+			tb_s(b,"\tcmov");tb_s(b,x64_ccn[i->cond]);tb_c(b,x64_sfx(sz));tb_c(b,'\t');
+			x64_reg(b,i->r[2],sz);tb_s(b,", ");x64_reg(b,i->r[0],sz);break;
 		case X_SETCC:
 			tb_s(b, "\tset");
 			tb_s(b, x64_ccn[i->cond]);

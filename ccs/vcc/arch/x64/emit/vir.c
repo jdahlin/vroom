@@ -320,6 +320,25 @@ static bool vx_memnext(vx *L,uint32_t b,uint32_t v)
 		vx_foldedits(L,b,v+1,XNOREG);
 }
 
+static uint8_t vx_condition(vx *L,uint32_t b,uint32_t v,uint32_t value,int reg)
+{
+	ecx *e=L->e;
+	bool flags=L->cmp==value && L->cmpblock==b && v==value+1;
+	uint8_t cc=CC_NE;
+	if (flags) {
+		for(uint32_t k=L->setrec+1;k<e->x64->nin;k++)
+			if(x64_effects(e,&e->x64->in[k]).fl & (OD_WFLAGS|OD_BARRIER|OD_CALL)) {flags=false;break;}
+	}
+	if(flags) {
+		cc=e->x64->in[L->setrec].cond;
+		if(L->uses[value]==1 && L->o->slot[value]==VIR_NOBLK) {
+			memmove(&e->x64->in[L->setrec],&e->x64->in[L->setrec+1],(e->x64->nin-L->setrec-1)*sizeof(rec));
+			e->x64->nin--;
+		}
+	} else x64_op3(e, X_TEST, vx_size(L->f->ins[value].ty), XNOREG, reg, reg);
+	return cc;
+}
+
 static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, uint8_t res)
 {
 	ecx *e = L->e;
@@ -511,6 +530,12 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 		return;
 	}
 	case VO_SELECT: {
+		if(!vir_rclass(i->ty)) {
+			uint8_t cc=vx_condition(L,b,v,i->a,a);
+			int no=vx_reg(p[2]);
+			if(d==c){int swap=c;c=no;no=swap;cc^=1;}
+			x64_op3(e,X_CMOV,sz,d,no,c)->cond=cc;return;
+		}
 		int tmp = vir_rclass(i->ty) ? XMM0 + 14 : R10;
 		uint32_t done = wk_newlabel(e);
 		x64_op3(e, X_TEST, vx_size(L->f->ins[i->a].ty), XNOREG, a, a);
@@ -669,19 +694,7 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 	case VO_BR: vx_edge(L, b, 0); x64_jump(e, L->label[i->a]); return;
 	case VO_BRIF: {
 		uint32_t yes = vx_target(L,b,0,i->b), no=vx_target(L,b,1,i->c);
-		bool flags=L->cmp==i->a && L->cmpblock==b && v==i->a+1;
-		uint8_t cc=CC_NE;
-		if (flags) {
-			for(uint32_t k=L->setrec+1;k<e->x64->nin;k++)
-				if(x64_effects(e,&e->x64->in[k]).fl & (OD_WFLAGS|OD_BARRIER|OD_CALL)) {flags=false;break;}
-		}
-		if(flags) {
-			cc=e->x64->in[L->setrec].cond;
-			if(L->uses[i->a]==1 && L->o->slot[i->a]==VIR_NOBLK) {
-				memmove(&e->x64->in[L->setrec],&e->x64->in[L->setrec+1],(e->x64->nin-L->setrec-1)*sizeof(rec));
-				e->x64->nin--;
-			}
-		} else x64_op3(e, X_TEST, vx_size(L->f->ins[i->a].ty), XNOREG, a, a);
+		uint8_t cc=vx_condition(L,b,v,i->a,a);
 		/* Let the next emitted block fall through, including the true edge.
 		 * A deferred edge-copy stub is a different label and cannot fall through. */
 		if(b+1<L->f->nblk && yes==L->label[b+1]) {

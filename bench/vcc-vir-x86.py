@@ -65,6 +65,7 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
             if run([str(exe)]).stdout != expected:
                 raise SystemExit('output differs from clang')
     for filename, required_more, packed in (
+        ('vir_x86_select.c', {'choose', 'uchoose', 'keep', 'boolean', 'pointer'}, {}),
         ('vir_x86_bytes.c', {'be16', 'bev16', 'signed16', 'changed'}, {}),
         ('vir_x86_inline.c', {'work'}, {}),
         ('vir_x86_index.c', {'load8', 'load4', 'load2', 'load1', 'store8', 'store4'}, {}),
@@ -93,6 +94,11 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
                 body = asm.read_text().split('work:\n', 1)[1].split('.Lfunc_end', 1)[0]
                 if re.search(r'\bcall\w*\b', body):
                     raise SystemExit('work: single-call helper was not inlined')
+            if filename == 'vir_x86_select.c':
+                for name in required_more:
+                    body = asm.read_text().split(name + ':\n', 1)[1].split('.Lfunc_end', 1)[0]
+                    if 'cmov' not in body:
+                        raise SystemExit(f'{name}: missing conditional move')
             if filename == 'vir_x86_bytes.c':
                 body = asm.read_text().split('be16:\n', 1)[1].split('.Lfunc_end', 1)[0]
                 if 'rorw' not in body or 'movzwl' not in body:

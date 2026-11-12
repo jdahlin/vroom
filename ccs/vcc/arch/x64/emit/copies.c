@@ -29,6 +29,7 @@ static unsigned x64_copy_fields(const rec *i)
 	case X_ST:
 	case X_ADD: case X_SUB: case X_AND: case X_OR: case X_XOR: case X_IMUL: case X_ADC: case X_SBB:
 	case X_CMP:
+	case X_CMOV:
 		return (1u << 1) | (1u << 2);
 	default:
 		return 0;
