@@ -130,8 +130,8 @@ def speed(names, n, size):
     for _ in range(n):
         for c in names:
             t = time.time()
-            subprocess.run([f'./speedtest1-{c}', '--size', str(size), '--memdb'], cwd=st,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run([f'./speedtest1-{c}', '--size', str(size), '--memdb', '--testset', 'main'], cwd=st,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
             best[c] = min(best[c], time.time() - t)
     base = min(best.values())
     print(f'\nspeedtest1 --size {size} --memdb, best of {n}; sqlite3.c -O2 compile time')

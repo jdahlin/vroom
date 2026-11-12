@@ -355,10 +355,10 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			x64_memop(e, b, i);
 			break;
 		case X_LEA:
-			x64_ins(b, "lea", 8);
+			x64_ins(b, "lea", sz);
 			x64_memop(e, b, i);
 			tb_s(b, ", ");
-			x64_reg(b, i->r[0], 8);
+			x64_reg(b, i->r[0], sz);
 			break;
 		case X_LEASCALE:
 			x64_ins(b, "lea", sz);

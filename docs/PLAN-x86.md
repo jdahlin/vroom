@@ -996,3 +996,11 @@ PostgreSQL/psql och CPython är provade; de två sistas namngivna kvarvarande
 builtin-/inline-luckor hålls synliga. Se PLAN-vir.md V2/V3 och TODO T13.
 Nya C-prov och assemblerns INT64_MIN-prov går i unity/nonunity och med
 sanitisering; standardvalet och -O0/-O1 är oförändrade.
+
+### 2026-11-12: första profilstyrda VIR-skivan efter PR126
+
+SQLite main, tre korta perf-stat-prov: CPU-tid 1,897x → 1,386x clang -O2;
+instruktioner 2,560x → 1,626x, verifieringshash oförändrad. Atomics, switch
+med relativa tabeller, mulhi, immediates, compare+branch och enkla vikta
+adresser; detaljer, kända testundantag och reproduktion i PLAN-vir.md V4.
+Målet högst 10 % långsammare är öppet; indexerade minnesoperander står näst.

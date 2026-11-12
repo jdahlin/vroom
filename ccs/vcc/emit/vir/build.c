@@ -1791,7 +1791,7 @@ VPRIV void vw_ecx_free(ecx *e)
 		return;
 	free(V->p), free(V->b), free(V->x), free(V->h), free(V->lh), free(V->fwd), free(V->lab), free(V->sl), free(V->act);
 	free(V->st), free(V->loc), free(V->vty), free(V->vsgn), free(V->pr), free(V->map), free(V->order), free(V->bmap);
-	free(V->xslot), free(V->xspill), free(V->xlabel);
+	free(V->xslot), free(V->xspill), free(V->xlabel), free(V->xuses), free(V->xedgelab);
 	free(V);
 	e->vw = NULL;
 }

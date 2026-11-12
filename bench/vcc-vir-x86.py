@@ -66,6 +66,7 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
                 raise SystemExit('output differs from clang')
     for filename, required_more, packed in (
         ('vir_vector_stride.c', {'stride', 'wide', 'reverse', 'ordered', 'residue', 'gather', 'carry', 'chain', 'maxval', 'maxindex', 'lastnegative'}, {'stride': 'mulps', 'reverse': 'addpd', 'ordered': 'mulps', 'residue': 'addps', 'gather': 'mulps', 'carry': 'mulps'}),
+        ('vir_x86_dispatch.c', {'dense', 'signed_range', 'high', 'shigh', 'atom'}, {}),
         ('vir_x86_calls.c', {'ints', 'floats', 'caller', 'indirect', 'variadic_caller'}, {}),
         ('vir_x86_vectors.c', {'eq', 'ne', 'lt', 'le', 'gt', 'ge', 'compare', 'mul', 'cvt', 'cvt64', 'negate'},
          {'eq': 'cmpps', 'ne': 'cmpps', 'lt': 'cmpps', 'le': 'cmpps', 'gt': 'cmpps', 'ge': 'cmpps',

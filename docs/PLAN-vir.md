@@ -237,6 +237,43 @@ ekvivalenstestning återstår. Genererade program använder inga externa anrop.
 
 ## Status
 
+### V4 x86-64 mot clang -O2 (2026-11-12), mål högst 10 % långsammare
+
+Efter rebase på main `06c688f4` finns PR126:s gemensamma allokatorregler
+med. Första x86-skivan: sekventiellt konsistenta atomiska laster/lagringar,
+heltals-mulhi och switch (täta relativa tabeller och glesa intervall) öppnar
+bl.a. sqlite3VdbeExec för VIR. Omedelbara operander och skift behöver inget
+register; ett konstant skift väljs från IR även när konstanten redan har
+ett register. Jämförelse direkt följd av branch återanvänder flaggorna och
+kan slopa boolmaterialiseringen. Villkorskanternas registerkopior placeras
+utanför huvudflödet; kanter utan kopior går direkt till målblocken. ADD
+använder LEA:s tre operander; en ptradd med konstant offset och en enda
+omedelbar minneskonsument viks när inga allokator-edits kommer emellan.
+
+**Snabb, kontrollerad mätning:** `bench/sqlite/vir-x86.py build --source DIR`
+kör VIR via -S + clangs assembler (0,63 s för sqlite3.c i stället för den
+långsamma textassemblerns objektväg). `run clang=EXE baseline=EXE vir=EXE`
+kör tre alternerade perf-stat-prov av `--size 30 --memdb --testset main`,
+varje körning under 0,6 s. Alla exits och verifieringshashar kontrolleras;
+råutdata, binärhashar och medianer sparas i summary.json. Den gamla riggens
+tidtagning nådde ett saknat R-tree-test och ignorerade exitstatus; run.py
+kräver nu main och lyckad exit. De äldre väggtiderna är inte en slutgrind.
+
+| Version | CPU-tid median | Cykler/clang | Instruktioner/clang |
+|---|---:|---:|---:|
+| clang -O2 | 279,05 ms | 1,000 | 1,000 |
+| x86 före denna skiva | 529,27 ms | 1,916 | 2,560 |
+| efter, inklusive PR126 | 386,78 ms | 1,399 | 1,626 |
+
+Verifieringshash samma. **10 %-målet är fortfarande öppet.** Nästa mätpunkt
+är indexerade minnesoperander: fler separata adressberäkningar kan tas bort.
+GCC 1615/1615, TCC 105/105, egna x86 297/297; inline 83/88 med samma fem
+kända fel. Riktad rigg kräver riktig VIR-sänkning för switch/intervall,
+atomics och signerad/osignerad mulhi; både -S och egna objekt körs.
+ASan/UBSan i den riktade riggen är grön. TSVC behåller 151/151 och 82
+verkliga vektorloopar; nu går alla 158 byggda funktioner genom VIR.
+
+
 ### V2/V3 x86-64 (2026-11-12): TSVC och fem verkliga korpusar
 
 Efter första bladskivan provades TSVC_2, SQLite 3.50.4, PostgreSQL 18.6
