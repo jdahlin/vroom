@@ -196,6 +196,12 @@ fixpunkter utan budget (samma regel som `emit/flow/`).
 
 "VIR 1.0" är formatet och semantiken så som de ser ut när V7 passerar.
 
+V1 generator: `bench/virgen.py --seed=N --size=N` ger deterministiska
+heltalsprogram med initialiserade stackslotar och förgreningar. 101 fall,
+inklusive maxstorlek, verifieras och skrivs–läses–skrivs under ASan-CI.
+Detta är en första del: flyttal, anrop, fler kontrollflöden, `virrun` och
+ekvivalenstestning återstår. Genererade program använder inga externa anrop.
+
 ## Validering
 
 - Fram till V7 ligger VIR bakom `VCC_VIR=1`; varje commit lämnar

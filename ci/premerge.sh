@@ -139,6 +139,7 @@ asan)
 	step vir-tests-asan python3 bench/vir-test.py -j "$J" --bin-dir "$B"
 	step vir-exposure-asan python3 bench/vir-exposure.py --bin-dir "$B"
 	step atomic       python3 bench/vcc-atomic.py --bin-dir "$B" --target aarch64-linux-gnu
+	step virgen       python3 bench/virgen-test.py --bin-dir "$B"
 	step bitint-replay python3 bench/vcc-bitint-replay.py --bin-dir "$B" --output "$LOGS/bitint-replay-asan"
 	step diag         python3 bench/vcc-diag.py -j "$J" --bin-dir "$B"
 	step stress       python3 bench/vcc-stress.py --bin-dir "$B"
