@@ -813,6 +813,9 @@ static bool emit_function1(ecx *e, uint32_t s, int nlreg)
 	e->ncases = 0;
 	e->njt = e->njtl = 0;
 	e->reach = true;
+	/* a retry (longjmp 2, value.c) or an efatal out of dry()'s gen leaves it raised:
+	 * this attempt, and every later function of this thread, would claim nothing */
+	e->dry = 0;
 	e->top = s;
 	e->asmk = 0;
 	e->inline_depth = 0;
