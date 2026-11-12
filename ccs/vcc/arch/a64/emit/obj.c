@@ -121,6 +121,9 @@ static inline unsigned R5(int r) { return r == SP ? 31u : (unsigned)r & 31; }	/*
 /* add/sub (register), the extended form when sp is involved (as.c addsub_reg) */
 static uint32_t e_addsub_reg(int sf, int op, int s, int rd, int rn, int rm, unsigned kind, unsigned amt)
 {
+	if (kind >= 8)	/* extended register: option kind - 8 */
+		return 0x0b200000u | (uint32_t)sf << 31 | (uint32_t)op << 30 | (uint32_t)s << 29 | R5(rm) << 16 |
+		       (kind - 8) << 13 | (amt & 7) << 10 | R5(rn) << 5 | R5(rd);
 	if (rd == SP || rn == SP)
 		return 0x0b200000u | (uint32_t)sf << 31 | (uint32_t)op << 30 | (uint32_t)s << 29 | R5(rm) << 16 |
 		       (sf ? 3u : 2u) << 13 | (amt & 7) << 10 | R5(rn) << 5 | R5(rd);
@@ -140,7 +143,7 @@ static unsigned enc(const ins *i, uint32_t *w, pfix *f, const uint32_t *loff, ui
 		return 0;
 	case I_ADD: case I_SUB: case I_ADDS: case I_SUBS:
 		w[0] = e_addsub_reg(sf, i->op == I_SUB || i->op == I_SUBS, i->op == I_ADDS || i->op == I_SUBS,
-				    i->rd, i->rn, i->rm, i->sh ? i->cond : 0, i->sh);
+				    i->rd, i->rn, i->rm, i->sh || i->cond >= 8 ? i->cond : 0, i->sh);
 		return 1;
 	case I_AND: case I_ORR: case I_EOR: case I_ANDS: case I_BIC: case I_ORN: {
 		static const uint8_t opc[] = { [I_AND] = 0, [I_ORR] = 1, [I_EOR] = 2, [I_ANDS] = 3, [I_BIC] = 0, [I_ORN] = 1 };
@@ -254,10 +257,6 @@ static unsigned enc(const ins *i, uint32_t *w, pfix *f, const uint32_t *loff, ui
 	case I_SMADDL: case I_UMADDL:
 		w[0] = (i->op == I_SMADDL ? 0x9b200000u : 0x9ba00000u) | R5(i->rm) << 16 | R5(i->ra) << 10 | R5(i->rn) << 5 |
 		       R5(i->rd);
-		return 1;
-	case I_ADDXT: case I_SUBXT:	/* (extended register: rd and rn 31 are sp) */
-		w[0] = (i->op == I_ADDXT ? 0x8b200000u : 0xcb200000u) | R5(i->rm) << 16 | (uint32_t)i->ra << 13 |
-		       (uint32_t)i->sh << 10 | R5(i->rn) << 5 | R5(i->rd);
 		return 1;
 	case I_LDX: case I_STX:	/* register offset */
 		w[0] = (uint32_t)i->sz << 30 | 0x38200800u | (i->op == I_STX ? 0 : ld_opc[i->sz][i->cond]) << 22 |

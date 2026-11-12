@@ -11,7 +11,8 @@ enum { R_FP = 29, R_LR = 30, ZR = 31, SP = 32, FRAME = 33, R_X16 = 16, R_X17 = 1
 enum {
 	I_LABEL,	/* label */
 	I_RAW,		/* off: text pool offset, ref: length; cond 1: inline asm (//APP in -S), RAW_MASKS: with its registers */
-	/* rd = rn op (rm << sh); cond: shift kind (0 lsl, 1 lsr, 2 asr) */
+	/* rd = rn op (rm << sh); cond: shift kind (0 lsl, 1 lsr, 2 asr); I_ADD/I_SUB/I_ADDS/I_SUBS also
+	 * 8 + option: rm extended (option 0-7 uxtb uxth uxtw uxtx sxtb sxth sxtw sxtx), then << sh (0-4) */
 	I_ADD, I_SUB, I_ADDS, I_SUBS, I_AND, I_ORR, I_EOR, I_ANDS, I_BIC, I_ORN, I_ADC, I_SBC, I_ADCS, I_SBCS,
 	/* rd = rn op imm (any value: the backend splits or materialises) */
 	I_ADDI, I_SUBI, I_ADDSI, I_SUBSI, I_ANDI, I_ORRI, I_EORI, I_ANDSI,
@@ -19,7 +20,6 @@ enum {
 	I_MOV,		/* rd = rn (either may be SP) */
 	I_MADD, I_MSUB,	/* rd = ra +- rn * rm */
 	I_SMADDL, I_UMADDL,	/* x: rd = ra + wn * wm, both extended (signed, unsigned) */
-	I_ADDXT, I_SUBXT,	/* x: rd = rn +- (rm extended by ra: 2 uxtw, 6 sxtw) << sh (0-4) */
 	I_SDIV, I_UDIV, I_SMULH, I_UMULH, I_LSLV, I_LSRV, I_ASRV,
 	I_SBFM, I_UBFM, I_BFM,	/* imm: immr, sh: imms */
 	I_CSEL, I_CSINC, I_CSINV, I_CSNEG,	/* cond */

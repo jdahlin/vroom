@@ -1198,9 +1198,9 @@ static void vl_cact(vl *L, uint32_t c, uint8_t res)
 		L->xval = c, L->xbase = a, L->xopt = x->opt, L->xsh = x->sh;
 		return;
 	case VX_EXT: {
-		ins *n = put(e, op == VO_SUB ? I_SUBXT : I_ADDXT);
+		ins *n = put(e, op == VO_SUB ? I_SUB : I_ADD);	/* (extended register: cond 8 + option) */
 
-		n->sz = 1, n->rd = (uint8_t)rd, n->rn = (uint8_t)a, n->rm = (uint8_t)L->xreg, n->ra = x->opt, n->sh = x->sh;
+		n->sz = 1, n->rd = (uint8_t)rd, n->rn = (uint8_t)a, n->rm = (uint8_t)L->xreg, n->cond = (uint8_t)(8 + x->opt), n->sh = x->sh;
 		return;
 	}
 	case VX_LSL:
