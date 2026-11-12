@@ -450,6 +450,51 @@ Steg 2 i arbetsordningen för sqlite.
   st-web8 9,31 G cykler, nu 9,18 G (maskinen belastad; 32,50 → 32,07 G
   instruktioner).
 
+### Allokatorns kvalitet och adresslägen (2026-11-12)
+
+Steg 1 i den nya arbetsordningen: sampel per funktion mot virpol (VIR:s
+inlining, LLVM:s bakända), inte antal stackåtkomster.  Mätt med parade
+körningar (speedtest1 storlek 100, cykler).
+- **Främjande av en plats med pekar- och heltalslagringar:** en lokal pekare
+  vars adress en inlinad läsare tar (`sqlite3Utf8Read(&z)`) lagras som `ptr`
+  och, efter `p++`, som `i64` (`p2i`, `add`, `i2p`); `vw_promote` vägrade
+  fält med olika typer.  Fältet håller nu `i64`, en pekarlagrings värde går
+  via `p2i`.  patternCompare:s zPattern/zString låg i minnet.
+- **`i2p`/`p2i` läses igenom** före allokeringen (användarna läser
+  operanden: en lasts adress blir en `add` som viks in); konstanten i en
+  kommutativ operation läggs andra (en omedelbar).  −1,5 % instruktioner,
+  −0,5 % cykler.
+- **En kopia på 1, 2, 4 eller 8 byte** (`memcpy(&v, &r, 8)` i FpDecode) är
+  en last och en lagring, så att båda platserna främjas.  −0,2 %.
+- **Webbparametrar:** en webbs parameter som lever över ett anrop och inte
+  läses snart gick in i webbens plats.  Nu inte när varje efterföljare (högst
+  två) läser den nära sin början (−0,6 %), och inte när registret är
+  callee-saved och två till är lediga vid blockets början (−2,2 %;
+  patternCompare: sp-laster/lagringar 32/40 → 1/6; utan villkoret tappade
+  VdbeExec:s tidigare lästa värden sina register, +1069 instruktioner).
+- **Adresslägen:** VdbeExec:s gap mot virpol (+195 sampel) var inte
+  stacktrafik (VIR har färre sampel på `[sp]`: 414 mot 484) utan
+  instruktionsval: VIR hade inga registeroffsetadresser (LLVM 2112).  Nya
+  poster `I_LDX`/`I_STX` (`[xn, wm, sxtw #k]`), `I_ADDXT`/`I_SUBXT`
+  (`add x, x, w, sxtw #k`) och `I_SMADDL`/`I_UMADDL`; sänkningen
+  (`vl_cinfo`/`vl_cfold`) viker ett index byggt precis före en `ptradd`,
+  `add` eller `sub` (`ext.4s/4u`, `mul`/`shl` med åtkomstens storlek, `mul`
+  med en 32-bitarskonstant), varje instruktion använd en gång av nästa.
+  Beslutas vid kedjans första instruktion, där indexets register är känt;
+  emellan bara remat/omladdning till andra register.  Laster/lagringar:
+  −2,0 % instruktioner, −1,1 % cykler; add/sub/smaddl: −2,5 %
+  instruktioner, cykler oförändrade (samma latens som det de ersätter).
+- **Summa:** mot steg 3, samma körning: −7,3 % instruktioner, −3,5 %
+  cykler; virpol är nu 9,7 % snabbare (var 12,9 %).  sqlite .text 338547 →
+  312681 instruktioner, spill 5684 → 3753.
+- **Kvar, mätt:** sampel på `[sp]` i mellanstora funktioner (vappendf 95 mot
+  38, BtreeInsert 54 mot 16); f64 som lever över anrop laddas om via x16
+  (inga callee-saved FP-register: `vl_regs` sätter `callee[1] = 0`, 107
+  ställen); konstanter rematerialiseras i loopar (ingen hissning).
+- **Tester:** `vcc/ptr_slot_inline.c`, `vcc/memcpy_small.c`,
+  `vcc/index_addr.c`; C-sviterna genom VIR med allokeringskontrollen, vcc-cfi
+  och darwin -S genom VIR (kodningen lika med clangs assemblering av texten).
+
 ### Syskonanrop, fritt argumentbyte och va_arg (2026-11-12)
 
 Steg 3 i arbetsordningen för sqlite.
