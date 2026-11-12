@@ -381,7 +381,7 @@ VPRIV uint32_t conditional(cc *c, uint32_t cond, uint32_t a, uint32_t b, uint32_
 			rb = convert(c, rb, t);
 		else
 			ra = convert(c, ra, t);
-	} else if ((is_record(c, at) || is_vector(c, at)) && compatible(c, at, bt)) {
+	} else if ((is_record(c, at) || is_vector(c, at) || KIND(c, at) == TY_SVE) && compatible(c, at, bt)) {
 		t = QUNQ(at);
 	} else {
 		cc_error(c, loc, "incompatible operand types in conditional expression");
