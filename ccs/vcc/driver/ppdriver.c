@@ -944,7 +944,7 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 	int hosted = 1, nostdinc = 0, asm_mode = 0, undef = 0, raw_asm = -1, xlang = 0;	/* raw_asm -1: by the suffix; xlang: -x given */
 	int march_lse = -1, mcpu_lse = -1, lse;
 	int sjlj = 0;
-	int opt = 0, olevel = 0, os = 0, pie = -1, pic = 0, tlsmodel = 0, sections = 0, debug = 0, freestanding = 0, nobuiltin = 0, nojt = 0, instr = 0, cfi = -1, strict_align = 0, tiny = 0, gregs = 0;
+	int opt = 0, olevel = 0, os = 0, pie = -1, pic = 0, tlsmodel = 0, sections = 0, debug = 0, freestanding = 0, nobuiltin = 0, nojt = 0, instr = 0, cfi = -1, strict_align = 0, tiny = 0, gregs = 0, wrapv = 0;
 	x86_features x86_features_ = {0}, x86_disabled = {0}, x86_raw = {0}, x86_on = {0}, x86_off = {0};
 	const char *x86_cpu = "x86-64";
 	int nosse = 0, nosse2 = 0, nommx = 0;	/* x86-64: -mno-sse, -mno-sse2, -mno-mmx (last one wins) */
@@ -960,7 +960,7 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 	int comments = 0, nomarkers = 0;
 	int dmacros = 0, showinc = 0, ddefs = 0, syntax = 0, layout = 0, ms_anon = 0, short_wchar = 0, strict_flex_arrays = 0, tokhash = 0, emit = 0, objmode = 0;
 	const char *stdver = NULL, *macos_min = NULL;
-	int fast_root4 = 0;
+	int fast_root4 = 0, nocontract = 0;
 	int macos_min_flag = 0, uchar = -1, fmath = 0;	/* fmath: 1 finite-only, 2 no errno, 4 __FAST_MATH__, 8 -pthread, 16 errno, 32 __ARM_FP_FAST */
 	int tri = -1, std = 0, strict = 0, wimpl_int = 0, wimpl_fn = 0, gnu89_inline = -1, vcc_kernel = 0, conv_warn = 0;
 	char objbuf[1024];
@@ -997,6 +997,7 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 		if (!strcmp(a, "-fshort-wchar")) { short_wchar = 1; continue; }
 		if (!strcmp(a, "-funsigned-char") || !strcmp(a, "-fno-signed-char")) { uchar = 1; continue; }
 		if (!strcmp(a, "-fsigned-char") || !strcmp(a, "-fno-unsigned-char")) { uchar = 0; continue; }
+		if (!strncmp(a, "-ffp-contract=", 14)) { nocontract = !strcmp(a + 14, "off"); continue; }
 		if (!strcmp(a, "-ffast-math")) { fast_root4 = 1; fmath = (fmath | 39) & ~16; continue; }
 		if (!strcmp(a, "-fno-fast-math")) { fast_root4 = 0; fmath &= 8; continue; }
 		if (!strcmp(a, "-ffinite-math-only")) { fmath |= 1; continue; }
@@ -1255,6 +1256,8 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 		else if (!strcmp(a, "-fasynchronous-unwind-tables")) cfi = 1;
 		else if (!strcmp(a, "-fno-asynchronous-unwind-tables")) cfi = 0;
 		else if (!strcmp(a, "-mstrict-align")) strict_align = 1;
+		else if (!strcmp(a, "-fwrapv") || !strcmp(a, "-fno-strict-overflow")) wrapv = 1;
+		else if (!strcmp(a, "-fno-wrapv") || !strcmp(a, "-fstrict-overflow")) wrapv = 0;
 		else if (!strcmp(a, "-mgeneral-regs-only")) gregs = 1;
 		else if (!strcmp(a, "-mno-sse")) nosse = 1;
 		else if (!strcmp(a, "-msse")) nosse = 0;
@@ -1804,9 +1807,9 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 		cc_opts co = { .target = po.target, .unsigned_char = po.unsigned_char, .dump_layouts = layout, .ms_anon = ms_anon, .short_wchar = short_wchar, .strict_flex_arrays = strict_flex_arrays,
 				.std = std, .c2y = std == 23 && stdver && !strcmp(stdver, "202400L"), .implicit_int = std == 89 || wimpl_int, .implicit_fn = std == 89 || wimpl_fn, .conv_warn = conv_warn,
 				.strict_std = strict,
-				.fast_math = fast_root4 && (fmath & 7) == 7, .gnu89_inline = gnu89_inline, .no_builtin = freestanding || nobuiltin, .no_jump_tables = nojt, .instrument = instr, .wasm_sjlj = sjlj,
+				.fast_math = fast_root4 && (fmath & 7) == 7, .no_fp_contract = nocontract, .gnu89_inline = gnu89_inline, .no_builtin = freestanding || nobuiltin, .no_jump_tables = nojt, .instrument = instr, .wasm_sjlj = sjlj,
 				.x86_features = x86_features_, .x86_disabled = x86_disabled, .x86_features_set = x86, .x86_raw = x86_raw, .x86_override_on = x86_on, .x86_override_off = x86_off,
-				.general_regs_only = gregs || (x86 && (nosse || nosse2)), .vcc_kernel = vcc_kernel, .lse = lse, .opt = olevel, .pic = pic ? 2 : pie ? 1 : 0, .tlsmodel = tlsmodel, .sections = sections, .debug = debug, .cfi = cfi > 0, .dbg_name = main_file,
+				.general_regs_only = gregs || (x86 && (nosse || nosse2)), .vcc_kernel = vcc_kernel, .lse = lse, .opt = olevel, .wrapv = wrapv, .pic = pic ? 2 : pie ? 1 : 0, .tlsmodel = tlsmodel, .sections = sections, .debug = debug, .cfi = cfi > 0, .dbg_name = main_file,
 				.omit_frame_pointer = x86 && (omit_frame_pointer < 0 ? olevel > 0 : omit_frame_pointer),
 				.sibling_calls = sibling_calls,
 				.xcf = x86 ? xcf : 0, .pfe_n = x86 ? pfe_n : 0, .pfe_m = pfe_m, .sprot = x86 ? sprot : 0, .sp_gs = sp_gs, .sp_sym = sp_sym, .autozero = x86 ? autozero : 0,

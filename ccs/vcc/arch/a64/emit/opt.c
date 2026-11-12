@@ -73,6 +73,7 @@ static unsigned roles_sw(const ins *i)
 	case I_CBZ: case I_CBNZ: case I_TBZ: case I_TBNZ:
 		return RD_R;
 	case I_PRFM:
+	case I_LDF: case I_STF:	/* (rd is an FP register) */
 		return RN_R;
 	case I_BL:
 		return OP_CALL;
@@ -497,6 +498,11 @@ static void slots(ecx *e)
 		id = SLOT_TAG(i);
 		if (i->op == I_LD || i->op == I_ST) {
 			em_slot_collect(cells, id, i->imm, 1u << i->sz);
+		} else if (i->op == I_LDF || i->op == I_STF) {
+			/* an FP register's access: no value to track, so its object is one the pass leaves alone */
+			em_slot_collect(cells, id, i->imm, 1u << i->sz);
+			if (id)
+				em_slot_escape(cells, id);
 		} else {
 			if (!id)
 				return; /* an address vcc cannot place */
@@ -560,7 +566,7 @@ static void slots(ecx *e)
 			for (; w; w &= w - 1)
 				ver[__builtin_ctzll(w)]++;
 			if (SL.rc[k] < 0) {
-				if (i->op == I_ST || i->op == I_STX || i->op == I_STLO || i->op == I_STP || i->op == I_BL || i->op == I_BLR ||
+				if (i->op == I_ST || i->op == I_STX || i->op == I_STLO || i->op == I_STP || i->op == I_STF || i->op == I_BL || i->op == I_BLR ||
 				    i->op == I_TLV || i->op == I_RAW || W.rr[k] == GPRS)
 					mver++;	/* may write an escaped cell */
 				continue;
@@ -1571,7 +1577,7 @@ static void fbswap(ecx *e, uint32_t k)
 			continue;
 		unsigned op = in[j].op;
 
-		if ((W.ro[j] & OP_SLOW) || op == I_ST || op == I_STX || op == I_STP || op == I_STLO || op == I_BL ||
+		if ((W.ro[j] & OP_SLOW) || op == I_ST || op == I_STX || op == I_STP || op == I_STLO || op == I_STF || op == I_BL ||
 		    op == I_BLR || ((W.rr[j] | W.ww[j]) & RB(i->rd)) || (j < lastld && (W.ww[j] & RB(b[0].base))))
 			return;
 	}

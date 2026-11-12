@@ -1,0 +1,14 @@
+; no integer division on vectors
+vir 1
+target arm64-darwin
+sig %s = (int) -> none
+func @f %s {
+b0:
+  v0:ptr = param 0.0
+  v1:i32x4 = vseries
+  v2:i32x4 = sdiv v1, v1
+  store.4 v0, v2 align 4
+  ret
+}
+; ---
+@f b0.2: T1: sdiv cannot have result type i32x4

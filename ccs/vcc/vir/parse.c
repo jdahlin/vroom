@@ -1014,6 +1014,7 @@ static void parse_flags(ps *p, vir_ins *in)
 		{ "nsw", VIF_NSW, 1 }, { "nuw", VIF_NUW, 1 }, { "exact", VIF_EXACT, 1 }, { "nz", VIF_NZ, 1 },
 		{ "volatile", VIF_VOL, 0 }, { "noreturn", VIF_CALL_NORETURN, 1 }, { "pure", VIF_CALL_PURE, 1 },
 		{ "const", VIF_CALL_CONST, 1 }, { "likely", VIF_LIKELY, 1 }, { "unlikely", VIF_UNLIKELY, 1 },
+		{ "negp", VIF_NEGP, 1 }, { "negc", VIF_NEGC, 1 },
 	};
 	int nalign = 0;
 
@@ -1182,7 +1183,7 @@ static void parse_instr(ps *p, uint32_t rty)
 
 		if (!sfx)
 			PERR(p, ot, "expected a condition code suffix");
-		if (oi->op == VO_ICMP) {
+		if (oi->op == VO_ICMP || oi->op == VO_VICMP) {
 			for (uint32_t i = 0; i < 10; i++)
 				if (strlen(vir_icc[i]) == sl && !memcmp(vir_icc[i], sfx, sl))
 					cc = i;

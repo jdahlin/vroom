@@ -62,7 +62,7 @@ static _Thread_local struct actx {
 	/* parallel moves */
 	pmv *pm;
 	uint32_t *lcnt, *lcs, *ldm, *lds, *rq, lgen;
-	uint32_t ring[2][8], nring[2], cring[2];
+	uint32_t ring[3][8], nring[3], cring[3];	/* by slot size: 4, 8, 16 */
 	uint32_t sgen, mgen, bgen;	/* stamps that live across functions (22.3) */
 	uint8_t vfm[VO_TARGET0];	/* per opcode: bits 0-2 the value fields a, b, c; 8: a list (vir_oit) */
 } ax_tls;
@@ -696,14 +696,14 @@ static void need_slot(A *a, uint32_t v)
 
 	if (ax.slot[v] != VIR_NOBLK || is_const(f, v))
 		return;
-	c = vir_tysize(f->ins[v].ty) == 4 ? 0 : 1;
+	c = vir_tysize(f->ins[v].ty) == 4 ? 0 : vir_tysize(f->ins[v].ty) == 16 ? 2 : 1;
 	{
 		uint32_t w = wvalid(a, v);
 
 		if (w != NOWEB) {	/* one slot for the web, its own (outside the ring) */
 			if (ax.wslot[w] == VIR_NOBLK) {
 				ax.wslot[w] = a->nspill++;
-				ax.ssz[ax.wslot[w]] = c ? 8 : 4;
+				ax.ssz[ax.wslot[w]] = (uint8_t)(4u << c);
 			}
 			ax.slot[v] = ax.wslot[w];
 			a->o->st.spills++;
@@ -720,7 +720,7 @@ static void need_slot(A *a, uint32_t v)
 	}
 	if (s == VIR_NOBLK) {
 		s = a->nspill++;
-		ax.ssz[s] = c ? 8 : 4;
+		ax.ssz[s] = (uint8_t)(4u << c);
 		ax.send[s] = 0;
 		if (ax.nring[c] < 8) {
 			ax.ring[c][ax.nring[c]++] = s;
@@ -1824,7 +1824,7 @@ bool vir_alloc(vir_fn *f, const vir_loops *lp, const vir_regs *rg, const vir_aop
 	/* sweep 6 */
 	for (uint32_t b = 0; b < nb; b++)
 		ax.bmark[b] = 0;
-	ax.nring[0] = ax.nring[1] = ax.cring[0] = ax.cring[1] = 0;
+	ax.nring[0] = ax.nring[1] = ax.nring[2] = ax.cring[0] = ax.cring[1] = ax.cring[2] = 0;
 	for (uint32_t i = 0; i < f->nconst; i++)
 		ax.reg[i] = VR_NONE;
 	for (uint32_t r = 0; r < 256; r++)

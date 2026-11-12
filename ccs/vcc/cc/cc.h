@@ -284,6 +284,7 @@ typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl 
 	int x86_features_set;	/* explicitly resolved by the driver; zero uses x86-64 */
 	int general_regs_only;	/* -mgeneral-regs-only: no FP/SIMD registers (variadic: no v0-v7 save area) */
 	int fast_math;		/* full fast-math permits finite, unsigned-zero root transforms */
+	int no_fp_contract;	/* -ffp-contract=off: a * b + c is two operations (default on, as clang: fused within an expression) */
 	int no_jump_tables;	/* -fno-jump-tables: switches are compare trees */
 	int no_builtin;		/* -ffreestanding / -fno-builtin: abs() etc. are plain calls */
 	uint64_t disabled_builtins[CC_DISABLED_BUILTIN_WORDS]; /* -fno-builtin-NAME */
@@ -300,6 +301,7 @@ typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl 
 	int outfd;
 	int emit;		/* generate code (emit/): 1 = assembly text to outfd, 2 = object into obj */
 	int opt;		/* -O level for code generation: 0 (default, -O0), 1 (-O1, -Og), 2 (-O2, -O3, -Os, -Oz, -O) */
+	int wrapv;		/* -fwrapv, -fno-strict-overflow: signed overflow wraps (VIR sets no nsw) */
 	int sections;		/* 1 -ffunction-sections, 2 -fdata-sections (ELF) */
 	int debug;		/* -g: DWARF line tables (ELF) */
 	int cfi;		/* -fasynchronous-unwind-tables: .cfi_* (ELF), .eh_frame from the assembler */

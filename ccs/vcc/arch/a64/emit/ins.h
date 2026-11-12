@@ -56,6 +56,7 @@ enum {
 			 * VIR, anywhere in the body: 2 a sibling call to ref, 3 to the address in rn (expanded by
 			 * finish_function: the epilogue, then b ref or br x16); 4 a return: the epilogue and ret when
 			 * it is short, else b label (the shared epilogue at the end) */
+	I_LDF, I_STF,	/* FP register rd (v0-v31; sz 2: s, 3: d) and [rn + imm] (VIR's lowering) */
 };
 
 enum { TLS_LE = 1, TLS_IE, TLS_DESC };	/* I_TLV.cond on ELF */

@@ -33,6 +33,7 @@ typedef struct vwslot {
 	uint8_t used;		/* a reachable load reads it (emission) */
 	uint32_t fin;		/* VIR slot id, VW_NOBLK none yet */
 	uint8_t prom;		/* promoted to variables (vw_promote): its stores go */
+	uint8_t f32w;		/* an 8-byte slot whose last float stored was an f32 (its low 4 bytes) */
 } vwslot;
 
 #define VW_LIFETIME 0x8000u	/* a memset's flag: the start of a local's lifetime (vw_undecl) */
@@ -58,6 +59,7 @@ typedef struct vwst {
 	uint32_t *order; uint32_t norder, corder;	/* blocks in emission order */
 	uint32_t *bmap; uint32_t cbmap;		/* scratch */
 	uint64_t live[3], flive;		/* names in use */
+	uint32_t fprod[64];			/* per float name: the product (or its negation) the expression in hand just made, 0 none */
 	uint32_t cur;				/* the block being built */
 	bool sealing;
 	uint32_t rty;				/* the result's type, VT_VOID none */
