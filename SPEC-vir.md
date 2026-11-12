@@ -1057,6 +1057,20 @@ register by eviction. An early-clobber output takes a register no input of
 the instruction holds. Operands that cannot be satisfied with every other
 value evicted are an error.
 
+15.12 **Shrink-wrapping** (on request: `vir_aopt.shrink`; numbered after 15.11, which
+follows). The **save point** S is the block that dominates every block that
+needs the frame (a call the target does not report as needing none, `memcpy`,
+`memset`, inline assembly, `va_start`, `frameaddr`, `retaddr`, `tlsaddr`, an
+operand that is a slot's address, a `VB_ADDR` block), is in no loop, and
+dominates every block reachable from it, blocks that only return (through lone
+`br`s) excepted. There is none when that is the entry block. In the blocks S
+does not dominate a callee-saved register is chosen only when no other is
+free, and a fixed result is not moved to one at its definition. At S the
+values in caller-saved registers that live across a call move to free
+callee-saved ones, by edits before S's first instruction. The output names S
+(`spoint`); the lowering places the prologue there and decides, from the code it
+produced, whether the blocks in front can run without the frame.
+
 15.11 **Checking.** `vir_alloc_check(f, regs, out, msg)` walks the function
 forward with the allocator's output, tracking which value each register and
 slot holds (a forward dataflow over locations, meet by intersection, to a

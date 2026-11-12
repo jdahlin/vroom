@@ -73,6 +73,11 @@ enum { C_EQ, C_NE, C_HS, C_LO, C_MI, C_PL, C_VS, C_VC, C_HI, C_LS, C_GE, C_LT, C
 /* lrefc: a label that inline asm (asm goto) or a label address (&&l) may reach */
 #define LREF_EXT (1u << 31)
 
+/* I_NOP.cond: where VIR's lowering wants the prologue (shrink-wrapping: the records in front
+ * of it run without the frame; finish_function checks that they can, else it goes to the top) */
+enum { NOP_PROLOG = 0xc0 };
+/* I_TAIL.sh: 1 on a return or sibling call (cond 2-4) in front of NOP_PROLOG: no epilogue */
+
 typedef struct ins {
 	uint8_t op, sz;		/* sz: 1 = 64-bit (x), 0 = 32-bit (w); memory: log2 bytes */
 	uint8_t rd, rn, rm, ra;

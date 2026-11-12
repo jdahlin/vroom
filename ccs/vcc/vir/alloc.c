@@ -48,6 +48,7 @@ static _Thread_local struct actx {
 	uint32_t *stk, *ostk, *pool, *lin_off, *lin_n, *soff, *succ, *bmark;
 	/* per loop */
 	uint8_t *lcall;	/* a call outside cold blocks in the loop (the loops inside included) */
+	uint8_t *inp;	/* per block, with a save point: 1 in front of it (not dominated by it) */
 	uint32_t *maxp, *lendpos, *lhead, *tend, *tendb, *tbeg, *apre, *tendi, *tendib;
 	/* sweep 6 */
 	uint32_t *ent_off, *ent_n, *end_off, *end_n, *pv;
@@ -94,7 +95,7 @@ static void ax_init(void)
 	R(ax_tls.stk, (size_t)1 << 30, 4); R(ax_tls.ostk, (size_t)1 << 30, 4); R(ax_tls.nop, nv, 2); R(ax_tls.pool, nv, 4);
 	R(ax_tls.lin_off, VIR_MAX_BLK, 4); R(ax_tls.lin_n, VIR_MAX_BLK, 4); R(ax_tls.soff, VIR_MAX_BLK + 1, 4);
 	R(ax_tls.succ, VIR_MAX_EXTRA, 4); R(ax_tls.bmark, VIR_MAX_BLK, 4);
-	R(ax_tls.lcall, VIR_MAX_BLK, 1); R(ax_tls.maxp, 2 * (size_t)VIR_MAX_BLK, 4); R(ax_tls.lendpos, VIR_MAX_BLK, 4); R(ax_tls.lhead, VIR_MAX_BLK, 4); R(ax_tls.tend, VIR_MAX_BLK, 4); R(ax_tls.tendb, VIR_MAX_BLK, 4); R(ax_tls.tbeg, VIR_MAX_BLK, 4); R(ax_tls.tendi, VIR_MAX_BLK, 4); R(ax_tls.tendib, VIR_MAX_BLK, 4); R(ax_tls.apre, VIR_MAX_BLK + 1, 4);
+	R(ax_tls.lcall, VIR_MAX_BLK, 1); R(ax_tls.inp, VIR_MAX_BLK, 1); R(ax_tls.maxp, 2 * (size_t)VIR_MAX_BLK, 4); R(ax_tls.lendpos, VIR_MAX_BLK, 4); R(ax_tls.lhead, VIR_MAX_BLK, 4); R(ax_tls.tend, VIR_MAX_BLK, 4); R(ax_tls.tendb, VIR_MAX_BLK, 4); R(ax_tls.tbeg, VIR_MAX_BLK, 4); R(ax_tls.tendi, VIR_MAX_BLK, 4); R(ax_tls.tendib, VIR_MAX_BLK, 4); R(ax_tls.apre, VIR_MAX_BLK + 1, 4);
 	R(ax_tls.ent_off, VIR_MAX_BLK, 4); R(ax_tls.ent_n, VIR_MAX_BLK, 4); R(ax_tls.end_off, VIR_MAX_BLK, 4); R(ax_tls.end_n, VIR_MAX_BLK, 4);
 	R(ax_tls.pv, (size_t)VIR_MAX_BLK * 256, 4); R(ax_tls.pr, (size_t)VIR_MAX_BLK * 256, 1); R(ax_tls.ps, (size_t)VIR_MAX_BLK * 256, 1);
 	R(ax_tls.opr, (size_t)1 << 32, 1); R(ax_tls.ssz, nv, 1);
@@ -121,6 +122,8 @@ typedef struct A {
 	struct actx *x;
 	uint64_t rmask[2];	/* registers regval may name: allocatable, and every fixed one seen */
 	bool linear, failed;
+	uint32_t spoint;	/* the save point (15.12), VIR_NOBLK none */
+	bool pre;		/* the block being assigned is in front of it */
 	uint32_t ops[512];
 	uint8_t byte[512];
 	uint8_t dn[512];	/* step 1: operand j is 0 fixed and not placed yet, 1 placed, 2 not fixed */
@@ -802,6 +805,8 @@ static int choose(A *a, uint32_t v, uint32_t c, uint64_t avoid)
 
 	if (!m)
 		return -1;
+	if (a->pre && (m & ~cs))
+		m &= ~cs;	/* in front of the save point: nothing that the frame has to save */
 	if (h) {
 		uint32_t r = VR_NONE;
 
@@ -1342,6 +1347,7 @@ static void enter(A *a, uint32_t b)
 	vir_fn *f = a->f;
 	const vir_blk *k = &f->blk[b];
 	uint32_t best = VIR_NOBLK, bs = 0, l = a->lp->inner[b];
+	bool relocate;
 
 	if (!++ax.bgen) {	/* a new path state: nothing stored (the stamps wrapped: clear) */
 		memset(ax.sst, 0, (size_t)VIR_MAX_INS * 4);
@@ -1490,6 +1496,7 @@ static void enter(A *a, uint32_t b)
 	if (l != VIR_NOBLK && a->lp->l[l].head == b && best != VIR_NOBLK && !a->linear)
 		preload(a, b, l, best);
 	save_state(a, ax.ent_off, ax.ent_n, b);
+	relocate = b == a->spoint;
 	/* forward edges into b */
 	{
 		uint32_t g = stamp(a);
@@ -1505,6 +1512,29 @@ static void enter(A *a, uint32_t b)
 					conform(a, p, s - ax.soff[p], b);
 		}
 	}
+	/* the save point: the values that came through the blocks in front of it in caller-saved
+	 * registers and live across a call move to callee-saved ones here, behind the prologue
+	 * (they would have been given them at their definitions) */
+	if (relocate)
+		for (int c = 0; c < 2; c++) {
+			uint64_t m = a->rg->alloc[c] & ~ax.fr[c] & ~a->rg->callee[c];
+
+			while (m) {
+				uint32_t r = VR_MAKE(c, lowbit(m)), v = ax.regval[r];
+				uint64_t fc = ax.fr[c] & a->rg->alloc[c] & a->rg->callee[c], u = fc & a->used_callee[c];
+				uint32_t r2;
+
+				m &= m - 1;
+				if (!fc)
+					break;
+				if (!v || ax.reg[v] != r || is_const(f, v) || !(ax.vfl[v] & XCALL))
+					continue;
+				r2 = VR_MAKE(c, lowbit(u ? u : fc));
+				edit(a, k->first + k->nparam, VE_MOVE, r2, r, v);
+				clearreg(a, r);
+				setreg(a, v, r2);
+			}
+		}
 }
 
 static bool instr(A *a, uint32_t b, uint32_t i, bool term)
@@ -1756,7 +1786,7 @@ static bool instr(A *a, uint32_t b, uint32_t i, bool term)
 		/* a fixed result (a parameter, a call's) that lives across a later call leaves its
 		 * caller-saved register now, for a callee-saved one: the register is free for the
 		 * arguments computed before that call, instead of moved away at it */
-		if (fx.res != VR_NONE && r >= 0 && !(ax.vfl[i] & DEAD) && (ax.vfl[i] & XCALL) &&
+		if (fx.res != VR_NONE && r >= 0 && !(ax.vfl[i] & DEAD) && (ax.vfl[i] & XCALL) && !a->pre &&
 		    !(a->rg->callee[c] >> VR_NUM(r) & 1) && i + 1 <= blk_last(f, b)) {
 			uint64_t m = ax.fr[c] & a->rg->alloc[c] & a->rg->callee[c] & ~a->pavoid[c];
 
@@ -1797,6 +1827,104 @@ static bool precond(A *a)
 				return fail(a, "`proj` at instruction %u does not follow its call", i);
 		}
 	return true;
+}
+
+/*
+ * Shrink-wrapping (15.12).  The save point S: the block that dominates every block that
+ * needs the frame (a call that is not a sibling call, memcpy/memset, inline asm, va_start,
+ * a slot's address, a block entered through its address), is in no loop, and dominates
+ * every block that can be reached from it.  Each way through the function then passes S
+ * once or never, and a return that S does not dominate is reached without the frame.
+ * VIR_NOBLK when that is the entry, or the dominator tree is not in block order.
+ */
+static uint32_t ncd(const vir_fn *f, uint32_t x, uint32_t y)
+{
+	while (x != y) {
+		uint32_t *hi = x > y ? &x : &y, d = f->blk[*hi].idom;
+
+		if (d == VIR_NOBLK || d >= *hi)
+			return 0;
+		*hi = d;
+	}
+	return x;
+}
+
+/* block t only returns (through lone `br`s at most): the lowering gives each side of the
+ * save point its own copy */
+static bool ret_only(const vir_fn *f, uint32_t t)
+{
+	for (int hop = 0; hop < 8; hop++) {
+		const vir_blk *k = &f->blk[t];
+		const vir_ins *x = &f->ins[k->first + k->n - 1];
+
+		if (k->fl & VB_ADDR)
+			return false;
+		if (k->n - k->nparam == 1 && x->op == VO_RET)
+			return true;
+		if (k->nparam || k->n != 1 || x->op != VO_BR)
+			return false;
+		t = x->a;
+	}
+	return false;
+}
+
+static uint32_t save_point(A *a, const vir_aopt *opt)
+{
+	vir_fn *f = a->f;
+	uint32_t nb = f->nblk, s = VIR_NOBLK;
+	bool ch = true;
+
+	for (uint32_t b = 0; b < nb; b++) {
+		const vir_blk *k = &f->blk[b];
+		bool need = b && (k->fl & VB_ADDR);
+
+		if (k->idom == VIR_NOBLK)
+			return VIR_NOBLK;	/* (an unreachable block: not worth the care) */
+		for (uint32_t i = k->first + k->nparam; i < k->first + k->n && !need; i++) {
+			uint32_t n;
+
+			switch (f->ins[i].op) {
+			case VO_CALL:
+				need = !(opt->noframe && opt->noframe[i]);
+				break;
+			case VO_ASM: case VO_ASMGOTO: case VO_MEMCPY: case VO_MEMSET: case VO_VA_START:
+			case VO_FRAMEADDR: case VO_RETADDR: case VO_TLSADDR:
+				need = true;
+				break;
+			}
+			n = operands(a, i);
+			if (a->failed)
+				return VIR_NOBLK;
+			for (uint32_t j = 0; j < n; j++)
+				need |= f->ins[a->ops[j]].op == VO_SLOTADDR;
+		}
+		if (need)
+			s = s == VIR_NOBLK ? b : ncd(f, s, b);
+		if (!s)
+			return VIR_NOBLK;
+	}
+	if (s == VIR_NOBLK)
+		return VIR_NOBLK;
+	while (ch) {
+		ch = false;
+		while (s && a->lp->inner[s] != VIR_NOBLK)
+			s = f->blk[s].idom < s ? f->blk[s].idom : 0;
+		if (!s)
+			return VIR_NOBLK;
+		for (uint32_t b = s; b < nb && !ch; b++) {
+			if (!vir_dominates(f, s, b))
+				continue;
+			for (uint32_t x = ax.soff[b]; x < ax.soff[b + 1]; x++)
+				if (!vir_dominates(f, s, ax.succ[x]) && !ret_only(f, ax.succ[x])) {
+					s = ncd(f, s, ax.succ[x]);
+					ch = true;
+					break;
+				}
+		}
+		if (!s)
+			return VIR_NOBLK;
+	}
+	return s;
 }
 
 bool vir_alloc(vir_fn *f, const vir_loops *lp, const vir_regs *rg, const vir_aopt *opt, vir_alloc_out *out)
@@ -1913,6 +2041,12 @@ bool vir_alloc(vir_fn *f, const vir_loops *lp, const vir_regs *rg, const vir_aop
 	}
 	webs_loops(a);
 	out->st.pool = a->npool;
+	a->spoint = opt && opt->shrink && !a->linear ? save_point(a, opt) : VIR_NOBLK;
+	if (a->failed)
+		return false;
+	if (a->spoint != VIR_NOBLK)
+		for (uint32_t b = 0; b < nb; b++)
+			ax.inp[b] = !vir_dominates(f, a->spoint, b);
 	/* sweep 6 */
 	for (uint32_t b = 0; b < nb; b++)
 		ax.bmark[b] = 0;
@@ -1946,6 +2080,7 @@ bool vir_alloc(vir_fn *f, const vir_loops *lp, const vir_regs *rg, const vir_aop
 		uint64_t before[2] = { a->used_callee[0], a->used_callee[1] };
 
 		a->cur_loop = lp->inner[b];
+		a->pre = a->spoint != VIR_NOBLK && ax.inp[b];
 		ax.boff[b] = a->nopr;
 		ax.boff[nb + 1 + b] = a->nedit;
 		enter(a, b);
@@ -1998,6 +2133,7 @@ bool vir_alloc(vir_fn *f, const vir_loops *lp, const vir_regs *rg, const vir_aop
 	out->callee[0] = a->used_callee[0];
 	out->callee[1] = a->used_callee[1];
 	out->cfirst = ax.cfirst;
+	out->spoint = a->spoint;
 	out->st.slots = a->nspill;
 	out->st.callee = (uint32_t)(__builtin_popcountll(a->used_callee[0]) + __builtin_popcountll(a->used_callee[1]));
 	return true;

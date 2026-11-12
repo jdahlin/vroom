@@ -1054,6 +1054,40 @@ VPRIV uint64_t opt_regs(ecx *e, unsigned *fl)
 	return u;
 }
 
+/*
+ * Shrink-wrapping: the first n records can run in front of the prologue.  They call
+ * nothing, name no frame slot, and neither read nor write x19-x30 (a callee-saved register
+ * would be written before it is saved, lr and the frame pointer are the caller's).  Their
+ * returns and sibling calls are marked (I_TAIL.sh).
+ */
+VPRIV bool opt_noframe(ecx *e, uint32_t n)
+{
+	const ins *in = e->in;
+
+	rawp = e->raw.p;
+	for (uint32_t k = 0; k < n; k++) {
+		const ins *i = &in[k];
+		unsigned ro;
+		rmask r;
+
+		if (i->op == I_JT)
+			continue;	/* (its index is not callee-saved: the registers before it are checked) */
+		if (i->op == I_WORD) {
+			if (!word_regs((uint32_t)i->imm, &r) || (r & (RB(31) - RB(19))))
+				return false;
+			continue;
+		}
+		ro = roles(i);
+		if ((ro & (OP_ALL | OP_CALL | OP_ASM | OP_TLV)) || i->rn == FRAME || i->rn == SP || i->rd == SP)
+			return false;
+		if (i->op == I_TAIL && i->cond >= 2 && !i->sh)
+			return false;
+		if ((reads(i, ro) | writes(i, ro)) & (RB(31) - RB(19)))
+			return false;
+	}
+	return true;
+}
+
 /* ---------------- operand folding (VIR's lowering) ---------------- */
 
 /*

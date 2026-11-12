@@ -147,8 +147,11 @@ static inline int64_t cs_off(int32_t csave, int k) { return (FK.sleaf ? FK.fsz :
 
 /* finish_function for the object backend: the same function as items */
 /* ctor: 1 constructor, 2 destructor, 4 x28 is the frame base (mov x28, sp after the saves), 8 no frame (leaf) */
-static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int ncs, int32_t csave, int64_t total, int ctor)
+/* kpro: the record (NOP_PROLOG) in whose place the prologue goes, UINT32_MAX: at the top */
+static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int ncs, int32_t csave, int64_t total, int ctor,
+			  uint32_t kpro)
 {
+	uint32_t pre = kpro != UINT32_MAX ? kpro : 0, rest = kpro != UINT32_MAX ? kpro + 1 : 0;
 	cc *c = e->c;
 	tbuf *b = &e->out;
 	size_t start, h;
@@ -166,6 +169,8 @@ static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int
 	ch = it_room(e, sizeof *ch);
 	in = it_room(e, ((size_t)e->nin + 2 * (size_t)ncs + 8) * sizeof(ins));
 #define PUT(...) (in[n++] = (ins){ __VA_ARGS__ })
+	memcpy(in, e->in, (size_t)pre * sizeof(ins));
+	n = pre;
 	if (ctor & 8)
 		;
 	else if (FK.sleaf)
@@ -183,8 +188,8 @@ static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int
 		PUT(.op = I_ST, .sz = 3, .rd = (uint8_t)cs[ncs - 1], .rn = (uint8_t)cs_base(), .imm = cs_off(csave, ncs - 1));
 	if (ctor & 4)
 		PUT(.op = I_MOV, .sz = 1, .rd = R_BP, .rn = SP);
-	memcpy(in + n, e->in, (size_t)e->nin * sizeof(ins));
-	n += e->nin;
+	memcpy(in + n, e->in + rest, (size_t)(e->nin - rest) * sizeof(ins));
+	n += e->nin - rest;
 	for (int k = 0; k + 1 < ncs; k += 2)
 		PUT(.op = I_LDP, .sz = 1, .rd = (uint8_t)cs[k], .ra = (uint8_t)cs[k + 1], .rn = (uint8_t)cs_base(), .imm = cs_off(csave, k));
 	if (ncs & 1)
@@ -414,6 +419,13 @@ static void tail_expand(ecx *e, const int *cs, int ncs, int32_t csave, bool leaf
 			e->in[--w] = t;
 			continue;
 		}
+		if (t.sh) {	/* in front of the prologue (shrink-wrapping): nothing to restore */
+			e->in[--w] = t.cond == 2 ? (ins){ .op = I_TAIL, .cond = 1, .ref = t.ref } :
+				     t.cond == 4 ? (ins){ .op = I_RET } : (ins){ .op = I_BR, .rn = R_X16 };
+			if (t.cond == 3 && t.rn != R_X16)
+				e->in[--w] = (ins){ .op = I_MOV, .sz = 1, .rd = R_X16, .rn = t.rn };
+			continue;
+		}
 		if (t.cond == 4) {
 			uint32_t j = k + 1;
 
@@ -533,7 +545,27 @@ VPRIV void finish_function(ecx *e, uint32_t s)
 	if (FK.sleaf && FK.fsz > 496)	/* (ldp/stp from sp reach 504) */
 		FK.sleaf = false;
 	FK.nomov = e->vlow && !leaf && !FK.sleaf && total == 16 && !e->dyn && !bp && e->falign <= 16;
+	/* shrink-wrapping: VIR's lowering marked where the prologue may go (NOP_PROLOG); it goes
+	 * there when there is a plain frame to set up and the records in front need none of it */
+	uint32_t kpro = UINT32_MAX;
+
+	for (uint32_t k = 0; k < e->nin; k++)
+		if (e->in[k].op == I_NOP && e->in[k].cond == NOP_PROLOG) {
+			if (!leaf && !bp && !e->dyn && e->falign <= 16 && !e->E->o->debug && !(e->E->o->cfi && !DARWIN(c)) &&
+			    opt_noframe(e, k))
+				kpro = k;
+			else
+				e->in[k].cond = 0;
+			break;
+		}
+	if (kpro == UINT32_MAX)
+		for (uint32_t k = 0; k < e->nin; k++)
+			if (e->in[k].op == I_TAIL)
+				e->in[k].sh = 0;
 	tail_expand(e, cs, ncs, csave, leaf, e->E->o->cfi && !DARWIN(c));
+	if (kpro != UINT32_MAX)
+		for (kpro = 0; e->in[kpro].op != I_NOP || e->in[kpro].cond != NOP_PROLOG; kpro++)
+			;
 	/* rewrite frame-slot references */
 	for (uint32_t k = 0; k < e->nin; k++) {
 		ins *i = &e->in[k];
@@ -565,7 +597,8 @@ VPRIV void finish_function(ecx *e, uint32_t s)
 		align = c->syms[s].align;
 	tbz_relax(e);
 	if (direct(e)) {
-		finish_direct(e, s, align, cs, ncs, csave, total, (a->constructor != 0) | (a->destructor != 0) << 1 | bp << 2 | leaf << 3);
+		finish_direct(e, s, align, cs, ncs, csave, total, (a->constructor != 0) | (a->destructor != 0) << 1 | bp << 2 | leaf << 3,
+			      kpro);
 		return;
 	}
 	sym_header(e, b, s, true, "\t.text\n", align);
@@ -584,41 +617,47 @@ VPRIV void finish_function(ecx *e, uint32_t s)
 
 	if (cfi)
 		tb_s(b, "\t.cfi_startproc\n");
-	if (leaf)
-		;
-	else if (FK.sleaf) {
-		ins i = { .op = I_SUBI, .sz = 1, .rd = SP, .rn = SP, .imm = FK.fsz };
-
-		print_ins(c, b, &i, s, e->raw.p);
-		if (cfi)
-			tb_f(b, "\t.cfi_def_cfa_offset %d\n", (int)FK.fsz);
-	} else if (tb_s(b, cfi ? "\tstp\tx29, x30, [sp, #-16]!\n\t.cfi_def_cfa_offset 16\n\tmov\tx29, sp\n"
-			      "\t.cfi_def_cfa w29, 16\n\t.cfi_offset w30, -8\n\t.cfi_offset w29, -16\n" :
-			      "\tstp\tx29, x30, [sp, #-16]!\n\tmov\tx29, sp\n"), e->falign > 16) {
-		ins i = { .op = I_SUBI, .sz = 1, .rd = R_X16, .rn = SP, .imm = total - 16 };
-		ins a = { .op = I_ANDI, .sz = 1, .rd = SP, .rn = R_X16, .imm = -(int64_t)e->falign };
-
-		print_ins(c, b, &i, s, e->raw.p);
-		print_ins(c, b, &a, s, e->raw.p);
-	} else if (total > 16) {
-		ins i = { .op = I_SUBI, .sz = 1, .rd = SP, .rn = SP, .imm = total - 16 };
-
-		print_ins(c, b, &i, s, e->raw.p);
-	}
-	for (int k = 0; k + 1 < ncs; k += 2)
-		tb_f(b, "\tstp\tx%d, x%d, [%s, #%d]\n", cs[k], cs[k + 1], FK.sleaf ? "sp" : "x29", (int)cs_off(csave, k));
-	if (ncs & 1)
-		tb_f(b, "\tstr\tx%d, [%s, #%d]\n", cs[ncs - 1], FK.sleaf ? "sp" : "x29", (int)cs_off(csave, ncs - 1));
-	if (cfi)
-		for (int k = 0; k < ncs; k++)
-			tb_f(b, "\t.cfi_offset w%d, %d\n", cs[k], -csave + 8 * k - (FK.sleaf ? 0 : 16));
-	if (bp)
-		tb_s(b, "\tmov\tx28, sp\n");
 	/* text has no relaxation (the object writer's r_relax): in a function that
 	 * may pass b.cond/cbz's +-1 MB, every one is the inverted branch over a b */
 	bool far = e->nin > (1u << 17);
 
-	for (uint32_t k = 0; k < e->nin; k++) {
+	for (uint32_t k = 0; k <= e->nin; k++) {
+		if (k == (kpro != UINT32_MAX ? kpro : 0)) {	/* the prologue: in front of the body, or at the save point */
+			if (leaf)
+				;
+			else if (FK.sleaf) {
+				ins i = { .op = I_SUBI, .sz = 1, .rd = SP, .rn = SP, .imm = FK.fsz };
+
+				print_ins(c, b, &i, s, e->raw.p);
+				if (cfi)
+					tb_f(b, "\t.cfi_def_cfa_offset %d\n", (int)FK.fsz);
+			} else if (tb_s(b, cfi ? "\tstp\tx29, x30, [sp, #-16]!\n\t.cfi_def_cfa_offset 16\n\tmov\tx29, sp\n"
+					      "\t.cfi_def_cfa w29, 16\n\t.cfi_offset w30, -8\n\t.cfi_offset w29, -16\n" :
+					      "\tstp\tx29, x30, [sp, #-16]!\n\tmov\tx29, sp\n"), e->falign > 16) {
+				ins i = { .op = I_SUBI, .sz = 1, .rd = R_X16, .rn = SP, .imm = total - 16 };
+				ins a = { .op = I_ANDI, .sz = 1, .rd = SP, .rn = R_X16, .imm = -(int64_t)e->falign };
+
+				print_ins(c, b, &i, s, e->raw.p);
+				print_ins(c, b, &a, s, e->raw.p);
+			} else if (total > 16) {
+				ins i = { .op = I_SUBI, .sz = 1, .rd = SP, .rn = SP, .imm = total - 16 };
+
+				print_ins(c, b, &i, s, e->raw.p);
+			}
+			for (int j = 0; j + 1 < ncs; j += 2)
+				tb_f(b, "\tstp\tx%d, x%d, [%s, #%d]\n", cs[j], cs[j + 1], FK.sleaf ? "sp" : "x29", (int)cs_off(csave, j));
+			if (ncs & 1)
+				tb_f(b, "\tstr\tx%d, [%s, #%d]\n", cs[ncs - 1], FK.sleaf ? "sp" : "x29", (int)cs_off(csave, ncs - 1));
+			if (cfi)
+				for (int j = 0; j < ncs; j++)
+					tb_f(b, "\t.cfi_offset w%d, %d\n", cs[j], -csave + 8 * j - (FK.sleaf ? 0 : 16));
+			if (bp)
+				tb_s(b, "\tmov\tx28, sp\n");
+		}
+		if (k == e->nin)
+			break;
+		if (k == kpro)
+			continue;	/* (the marker) */
 		const ins *i = &e->in[k];
 
 		for (; dj < e->ndl && e->dl[dj].k == k; dj++)

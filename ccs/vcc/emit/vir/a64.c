@@ -35,6 +35,8 @@ typedef struct vl {
 	uint32_t *chs;		/* per block: where a branch to it ends up (vl_chase) */
 	uint32_t *ord, *opos;	/* the layout: the blocks in the order they are emitted, and each block's place in it (vl_order) */
 	const vir_loops *lp;
+	uint32_t sp;		/* shrink-wrapping: the save point (vir_alloc_out.spoint), VIR_NOBLK none */
+	bool bare;		/* the code being emitted runs in front of it: returns without an epilogue */
 	uint8_t *uses;
 	uint8_t *lo32;		/* per value: 1 if every use is a trunc or a ret32 return (only the low 32 bits are read) */
 	uint32_t retlbl;
@@ -70,7 +72,7 @@ typedef struct vl {
 	uint32_t ntr;
 } vl;
 
-static _Thread_local struct { int64_t *soff, *spoff; uint32_t *lbl, *chs, *path, *ord, *opos, *hl; uint32_t co, cop, chl; uint8_t *uses, *lo32; uint32_t cs, csp, cl, cch, cpa, cu, c32; } VLT;
+static _Thread_local struct { int64_t *soff, *spoff; uint32_t *lbl, *chs, *path, *ord, *opos, *hl, *lbf; uint8_t *nf; uint32_t co, cop, chl, cnf, clf; uint8_t *uses, *lo32; uint32_t cs, csp, cl, cch, cpa, cu, c32; } VLT;
 
 static __attribute__((noreturn, cold)) void vl_fail(vl *L, const char *why)
 {
@@ -559,6 +561,19 @@ static bool vl_plain(vl *L, uint32_t b, uint32_t k);
 static uint32_t vl_chase(vl *L, uint32_t t);
 static void vl_block(vl *L, uint32_t b);
 
+/* Block t's label for the code being emitted.  With a save point (shrink-wrapping), code
+ * behind the prologue that goes to a block in front of it (a return: vl_order saw to that)
+ * gets a second copy of the block, with the epilogue (VLT.lbf, emitted last by vl_body). */
+static uint32_t vl_lbl(vl *L, uint32_t t)
+{
+	if (L->sp != VIR_NOBLK && !L->bare && !vir_dominates(L->f, L->sp, t)) {
+		if (!VLT.lbf[t])
+			VLT.lbf[t] = newlabel(L->e);
+		return VLT.lbf[t];
+	}
+	return L->lbl[t];
+}
+
 /* a block every branch goes past (vl_chase): not emitted */
 static bool vl_skip(vl *L, uint32_t b) { return b && vl_chase(L, b) != b; }
 
@@ -582,7 +597,7 @@ static uint32_t vl_succ(vl *L, uint32_t b, uint32_t k, uint32_t to)
 	uint32_t g = o->eidx[o->soff[b] + k];
 
 	if (g == VIR_NOBLK || !o->edge[g].n)
-		return L->lbl[vl_chase(L, to)];
+		return vl_lbl(L, vl_chase(L, to));
 	if (L->ntr == sizeof L->tr / sizeof L->tr[0])
 		vl_fail(L, "VIR lowering: too many edges with moves from one block");
 	L->tr[L->ntr].l = newlabel(L->e);
@@ -1167,6 +1182,7 @@ static void vl_call(vl *L, uint32_t b, uint32_t i, const vir_ins *in)
 			L->risk = true;
 		vl_fcsave(L, true, L->opr[0] != VR_NONE ? R_X17 : R_X16);
 		t = put(e, I_TAIL);
+		t->sh = L->bare;
 
 		if (L->opr[0] == VR_NONE) {
 			const vir_ins *k = &f->ins[in->a];
@@ -1490,7 +1506,9 @@ static bool vl_lonebr(vl *L, uint32_t t)
 	const vir_blk *k = &L->f->blk[t];
 	const vir_ins *in = &L->f->ins[k->first];
 
-	return !k->nparam && k->n == 1 && in->op == VO_BR && vl_plain(L, t, 0) && !(k->fl & VB_ADDR);
+	/* (no edits: the save point's block gets moves in front of its br, 15.12) */
+	return !k->nparam && k->n == 1 && in->op == VO_BR && vl_plain(L, t, 0) && !(k->fl & VB_ADDR) &&
+	       L->o->boff[L->f->nblk + 1 + t] == L->o->boff[L->f->nblk + 2 + t];
 }
 
 /* L->chs for every block; in a cycle of lone brs the block the walk reaches twice stays */
@@ -1553,6 +1571,7 @@ static void vl_ret(vl *L)
 	vl_fcsave(L, true, R_X16);
 	t = put(e, I_TAIL);
 	t->cond = 4;
+	t->sh = L->bare;
 	t->label = L->retlbl;
 	e->lrefc[L->retlbl]++;
 	e->reach = false;
@@ -1588,6 +1607,10 @@ static void vl_goto(vl *L, uint32_t b, uint32_t t)
 	 * the way in costs no jump (loop rotation with the guard, as LLVM's) */
 	bool in = VLT.hl[t] != VIR_NOBLK && L->dup < 8 && (b < t || b > L->lp->l[VLT.hl[t]].end);
 
+	if (L->bare && vir_dominates(L->f, L->sp, t)) {	/* to the save point: its code runs behind the prologue */
+		jump(L->e, L->lbl[t]);
+		return;
+	}
 	if (t != vl_fnext(L) && t != b && (in || vl_dupok(L, t) || vl_small(L, b, t))) {
 		int d = L->dup++;
 
@@ -1595,7 +1618,7 @@ static void vl_goto(vl *L, uint32_t b, uint32_t t)
 		L->dup = d;
 		return;
 	}
-	jump(L->e, L->lbl[t]);
+	jump(L->e, vl_lbl(L, t));
 }
 
 static bool vl_dupok(vl *L, uint32_t t)
@@ -1610,6 +1633,18 @@ static bool vl_dupok(vl *L, uint32_t t)
 	if (n == 1 && op == VO_RET)
 		return true;
 	return !L->e->E->noopt && n == 1 && op == VO_BR && L->dup < 8;
+}
+
+/* the call at i will be a sibling call (vl_call's test, before the registers are known) */
+static bool vl_sibcand(vl *L, uint32_t b, uint32_t i)
+{
+	const vir_fn *f = L->f;
+	uint32_t ng = VSIG_NGROUPS(f->extra[f->ins[i].b]);
+	vlarg *a = __builtin_alloca(sizeof(vlarg) * (ng + 1));
+	int32_t stk;
+
+	vl_assign(DARWIN(L->e->c), &f->extra[f->ins[i].b], a, ng, &stk);
+	return !stk && vl_sibling(L, b, i);
 }
 
 /* instruction i of block b, its operands collected; res its result's register */
@@ -2080,17 +2115,17 @@ static void vl_ins(vl *L, uint32_t b, uint32_t i, uint8_t res)
 		bool tp = vl_plain(L, b, 0), fp = vl_plain(L, b, 1);
 
 		if (tp && fp) {
-			uint32_t t = vl_chase(L, in->b), el = L->lbl[vl_chase(L, in->c)];
+			uint32_t t = vl_chase(L, in->b), el = vl_lbl(L, vl_chase(L, in->c));
 
 			if (t == vl_fnext(L)) {
 				vl_bc(e, cc, true, el);
-				jump(e, L->lbl[t]);
+				jump(e, vl_lbl(L, t));
 			} else {
-				vl_bc(e, cc, false, L->lbl[t]);
+				vl_bc(e, cc, false, vl_lbl(L, t));
 				vl_goto(L, b, vl_chase(L, in->c));
 			}
 		} else if (fp) {
-			vl_bc(e, cc, true, L->lbl[vl_chase(L, in->c)]);
+			vl_bc(e, cc, true, vl_lbl(L, vl_chase(L, in->c)));
 			jump(e, vl_succ(L, b, 0, in->b));
 		} else {
 			uint32_t el = vl_succ(L, b, 1, in->c), tl = vl_succ(L, b, 0, in->b);
@@ -2268,6 +2303,35 @@ static void vl_order(vl *L)
 				VLT.hl[h] = l;
 		}
 	vl_order_range(L, 0, f->nblk - 1, &n);
+	if (L->sp != VIR_NOBLK) {
+		/* the blocks in front of the save point first, then it and what it dominates:
+		 * the prologue stands between them (VLT.path: scratch here) */
+		uint32_t np = 0, nq = 0, *q = VLT.path;
+
+		for (uint32_t p = 0; p < n; p++)
+			if (vir_dominates(f, L->sp, L->ord[p]))
+				q[nq++] = L->ord[p];
+			else
+				L->ord[np++] = L->ord[p];
+		memcpy(&L->ord[np], q, (size_t)nq * sizeof *q);
+		if (vl_skip(L, L->sp) || L->ord[np] != L->sp)
+			L->sp = VIR_NOBLK;	/* (never the case in dominator order; the order stays) */
+		/* from behind the save point back in front of it only to a block that is a return */
+		for (uint32_t p = np; p < n && L->sp != VIR_NOBLK; p++) {
+			vir_ins t = f->ins[f->blk[L->ord[p]].first + f->blk[L->ord[p]].n - 1];
+			vir_oit it;
+			uint32_t *x;
+
+			vir_oit_init(&it, (vir_fn *)f, &t, true);
+			while (L->sp != VIR_NOBLK && (x = vir_oit_next(&it))) {
+				const vir_blk *k = &f->blk[vl_chase(L, *x)];
+
+				if (!vir_dominates(f, L->sp, vl_chase(L, *x)) &&
+				    ((k->fl & VB_ADDR) || k->n - k->nparam != 1 || f->ins[k->first + k->n - 1].op != VO_RET))
+					L->sp = VIR_NOBLK;
+			}
+		}
+	}
 	for (uint32_t p = 0; p < n; p++)
 		L->opos[L->ord[p]] = p;
 }
@@ -2285,10 +2349,21 @@ static void vl_body(vl *L)
 		if (vl_skip(L, b))
 			continue;
 		deflabel_forced(e, L->lbl[b]);
+		if (b == L->sp)
+			put(e, I_NOP)->cond = NOP_PROLOG;
+		L->bare = L->sp != VIR_NOBLK && !vir_dominates(f, L->sp, b);
 		L->at = b;
 		L->fallok = true;
 		vl_block(L, b);
 	}
+	for (uint32_t b = 0; b < f->nblk && L->sp != VIR_NOBLK; b++)
+		if (VLT.lbf[b]) {	/* a return in front of the save point, for the code behind it */
+			deflabel_forced(e, VLT.lbf[b]);
+			L->bare = false;
+			L->at = b;
+			L->fallok = false;
+			vl_block(L, b);
+		}
 }
 
 /* does a vector live across a call?  (A call keeps only the low half of v8-v15: such a function
@@ -2391,9 +2466,38 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 				while (f->ins[*p].op == VO_I2P || f->ins[*p].op == VO_P2I)
 					*p = f->ins[*p].a;
 		}
-	if (!vir_alloc(f, &V->lp, &regs, NULL, &V->ao)) {
-		*why = V->ao.err[0] ? V->ao.err : "VIR: allocation failed";
-		return false;
+	/* shrink-wrapping (SPEC-vir.md 15.12): the allocator is told which calls will be sibling
+	 * calls, which need no frame.  Not with unwind tables (the rows would have to follow the
+	 * prologue into the body).  VCC_VIR_SHRINK=0: off */
+	{
+		static int on = -1;
+		vir_aopt ao = { 0 };
+
+		if (on < 0) {
+			const char *x = getenv("VCC_VIR_SHRINK");
+
+			on = !(x && *x == '0');
+		}
+		L.e = e, L.f = f;
+		VLT.lo32 = vl_grow(VLT.lo32, &VLT.c32, f->nins + 1, 1);
+		VLT.nf = vl_grow(VLT.nf, &VLT.cnf, f->nins + 1, 1);
+		L.ret32 = KIND(c, ft->base) != TY_VOID && is_integer(c, ft->base) && tsize(c, ft->base) == 4;
+		L.tail = !(ft->flags & TF_VARIADIC) && em_tail_caller_ok(e, s) && !vl_notail(&L, VLT.lo32);
+		if (on && !e->E->noopt && !(e->E->o->cfi && !DARWIN(c))) {
+			memset(VLT.nf, 0, f->nins);
+			for (uint32_t b = 0; L.tail && b < f->nblk; b++)
+				for (uint32_t i = f->blk[b].first; i < f->blk[b].first + f->blk[b].n; i++)
+					if (f->ins[i].op == VO_CALL) {
+						VLT.nf[i] = vl_sibcand(&L, b, i);
+					}
+			ao.shrink = true;
+			ao.noframe = VLT.nf;
+		}
+		if (!vir_alloc(f, &V->lp, &regs, &ao, &V->ao)) {
+			*why = V->ao.err[0] ? V->ao.err : "VIR: allocation failed";
+			return false;
+		}
+		L.sp = ao.shrink ? V->ao.spoint : VIR_NOBLK;
 	}
 	if (getenv("VCC_VIR_CHECK")) {
 		vbuf msg = { 0 };
@@ -2420,6 +2524,8 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 	VLT.ord = vl_grow(VLT.ord, &VLT.co, f->nblk + 1, sizeof(uint32_t));
 	VLT.opos = vl_grow(VLT.opos, &VLT.cop, f->nblk + 1, sizeof(uint32_t));
 	VLT.hl = vl_grow(VLT.hl, &VLT.chl, f->nblk + 1, sizeof(uint32_t));
+	VLT.lbf = vl_grow(VLT.lbf, &VLT.clf, f->nblk + 1, sizeof(uint32_t));
+	memset(VLT.lbf, 0, (size_t)(f->nblk + 1) * sizeof(uint32_t));
 	L.ord = VLT.ord, L.opos = VLT.opos, L.lp = &V->lp;
 	vl_chases(&L, VLT.path);
 	L.ret32 = KIND(c, ft->base) != TY_VOID && is_integer(c, ft->base) && tsize(c, ft->base) == 4;

@@ -1239,6 +1239,45 @@ inte är.  Bas efter sammanfogningen: 26,18 G (virpol 24,49 G, clang 23,70 G),
   `--host` 4 fel både med och utan VIR (alltså inte härifrån), TSVC 151/151,
   sqlite samma hash.
 
+### Shrink-wrapping (2026-11-12)
+
+- **Gjort, tre delar (SPEC 15.12):**
+  1. *Allokeraren* (`save_point` i `vir/alloc.c`, på begäran genom
+     `vir_aopt.shrink`): sparpunkten S är blocket som dominerar alla block som
+     behöver ramen (anrop som inte är syskonanrop, memcpy/memset, asm,
+     `va_start`, en plats adress, `VB_ADDR`), ligger utanför alla loopar och
+     dominerar allt som nås från det; block som bara returnerar undantas.
+     Framför S ges inga callee-saved register när det går att undvika, och en
+     parameter flyttas inte dit vid sin definition.  Vid S flyttas de värden
+     som lever över anrop till callee-saved (redigeringar före S:s första
+     instruktion).  `vir_alloc_out.spoint`.
+  2. *Sänkningen* (`emit/vir/a64.c`): blocken framför S läggs först, S får
+     markören `NOP_PROLOG` efter sin etikett, returer och syskonanrop framför S
+     märks (`I_TAIL.sh`).  Kod bakom S som går till ett returblock framför S
+     får en egen kopia av det (`vl_lbl`, `VLT.lbf`).  Sänkningen säger före
+     allokeringen vilka anrop som blir syskonanrop (`vl_sibcand`).
+  3. *Ramen* (`finish_function`, `opt_noframe`): prologen läggs vid markören
+     när posterna framför den inte anropar något, inte rör någon ramplats och
+     varken läser eller skriver x19–x30; annars överst som förut och märkena
+     stryks.  Inte med avvecklingstabeller (Linux `-fasynchronous-unwind-tables`),
+     `-g`, VLA/alloca eller överjusterad ram.  `VCC_VIR_SHRINK=0` stänger av.
+- **Mätt, sqlite speedtest1 `--size 100`:** 25,645 G → 25,514 G instruktioner
+  (**−0,51 %**); cykler inom bruset i tre parade körningar.  Statiskt lika
+  många instruktioner (297 581 → 297 580).
+- **Fel på vägen:** ett block med bara `br` hoppades över av sänkningen
+  (`vl_lonebr`) också när det var sparpunkten och bar flyttarna till
+  callee-saved: sqlite3WalkSelect läste parametrarna ur register de aldrig
+  flyttats till.  Allokeringskontrollen såg det inte (allokeringen var rätt);
+  ett block med redigeringar hoppas inte över längre.
+- **Tester:** nytt `vcc/vir_shrink_wrap.c` (kört mot clang på macOS, där
+  shrink-wrapping är på); vcc-sviten 293/293 direkt och 290/293 genom VIR med
+  kontrollen (de tre kända), vir-alloc 19/19, vir-test 126/126, sqlite genom
+  VIR med kontrollen, samma hash.  **Inte körda efter den här ändringen:**
+  hela C-sviten (gcc/tcc-delarna), inline, vcc-cfi, vcc-abi, TSVC, slumpade
+  allokeringar; körningen avbröts.
+- **Sammanlagt på grenen**, instruktioner mot clang -O2 (23,70 G): efter
+  sammanfogningen med main 1,105x, nu 1,077x (25,51 G).
+
 ### Underlag för V4 (2026-11-11): registerallokering, ingen kod
 
 - `RESEARCH-regalloc.md`: vad GCC (IRA, LRA) och LLVM (Greedy, Fast, PBQP,
