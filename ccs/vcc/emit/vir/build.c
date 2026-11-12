@@ -2345,6 +2345,7 @@ static void vw_cse_blk(ecx *e, vwsimp *S_, uint32_t b)
 
 		if (vw_find(V, q) != q)
 			continue;
+	again:
 		VW_EACHOP(V, q, o, *o = vw_kcanon(V, S, vw_find(V, *o)));
 		for (int it = 0; vw_simp1(e, S, q, &r) && it < 8; it++)
 			;	/* (rewritten in place: again) */
@@ -2375,6 +2376,14 @@ static void vw_cse_blk(ecx *e, vwsimp *S_, uint32_t b)
 				*t = key;
 				t->v = in.b;
 			}
+			if (!(in.fl & VIF_VOL) && (vt == VT_I32 || vt == VT_I64)) {	/* (any load of its width) */
+				key = (vwhe){ VO_STORE, 0, VIF_W(in.fl), in.a, 0, 0, S->memgen, 0 };
+				t = vw_hlook(S, &key);
+				if (!t->v)
+					S->log[S->nlog++] = (uint32_t)(t - S->ht);
+				*t = key;
+				t->v = in.b;
+			}
 			continue;
 		}
 		if (op == VO_LOAD) {
@@ -2383,6 +2392,26 @@ static void vw_cse_blk(ecx *e, vwsimp *S_, uint32_t b)
 			if (in.fl & VIF_VOL)
 				continue;
 			key = (vwhe){ VO_LOAD, in.ty, in.fl & (3 | VIF_MS), in.a, 0, 0, S->memgen, 0 };
+			if ((in.ty == VT_I32 || in.ty == VT_I64) && !vw_hlook(S, &key)->v) {
+				/* the value a store of this width left: truncated or extended to the load's */
+				vwhe sk = { VO_STORE, 0, VIF_W(in.fl), in.a, 0, 0, S->memgen, 0 };
+				uint32_t v = vw_hlook(S, &sk)->v, w = VIF_W(in.fl), vt;
+
+				if (v) {
+					v = vw_find(V, v);
+					vt = V->p[v].in.ty;
+					if (in.ty == VT_I32 && vt == VT_I64 && w == 2)
+						V->p[q].in = (vir_ins){ VO_TRUNC, VT_I32, 0, v, 0, 0 };
+					else if (w < 3 && vir_tysize(vt) <= vir_tysize(in.ty))
+						V->p[q].in = (vir_ins){ VO_EXT, (uint8_t)in.ty, (uint16_t)(w | (in.fl & VIF_MS)), v, 0, 0 };
+					else
+						v = 0;
+					if (v) {
+						vw_dec(V, S, in.a), vw_inc(V, S, v);
+						goto again;
+					}
+				}
+			}
 		} else if ((eff & ~EF_UF) == EF_P && op != VO_BPARAM && op != VO_PARAM && op != VO_PROJ) {
 			vir_ins in = V->p[q].in;
 
@@ -2393,6 +2422,22 @@ static void vw_cse_blk(ecx *e, vwsimp *S_, uint32_t b)
 		} else
 			continue;
 		t = vw_hlook(S, &key);
+		if (t->v && op == VO_LOAD && V->p[vw_find(V, t->v)].in.ty != V->p[q].in.ty) {
+			/* the same bytes, loaded as the other integer type (a truncation retyped it) */
+			vir_ins in = V->p[q].in;
+			uint32_t v = vw_find(V, t->v), vt = V->p[v].in.ty;
+
+			if (in.ty == VT_I32 && vt == VT_I64)
+				V->p[q].in = (vir_ins){ VO_TRUNC, VT_I32, 0, v, 0, 0 };
+			else if (in.ty == VT_I64 && vt == VT_I32 && VIF_W(in.fl) < 3)
+				V->p[q].in = (vir_ins){ VO_EXT, VT_I64, (uint16_t)(in.fl & (3 | VIF_MS)), v, 0, 0 };
+			else
+				v = 0;
+			if (v) {
+				vw_dec(V, S, in.a), vw_inc(V, S, v);
+				goto again;
+			}
+		}
 		if (t->v && V->p[vw_find(V, t->v)].in.ty == V->p[q].in.ty) {
 			r = vw_find(V, t->v);
 			if (r < S->n0 && V->p[r].blk != VW_NOBLK)
