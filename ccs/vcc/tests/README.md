@@ -9,6 +9,8 @@ and exits like clang's build.
 |---|---|---|---|---|
 | `gcc-torture/execute/` | gcc.c-torture/execute: all 1701 top-level `.c` (+ its 2 `.h`), not `builtins/` or `ieee/` | https://github.com/gcc-mirror/gcc `gcc/testsuite/gcc.c-torture/execute` | `e6bf7e6fa54d131346c1772f1ef8d33d7c01bf06` (2026-11-08) | GPL-3.0-or-later (`gcc-torture/COPYING3`) |
 | `tcc-tests2/` | tinycc `tests/tests2`, unchanged (145 tests, `.expect`, Makefile) | https://repo.or.cz/tinycc.git `tests/tests2` | `70adbb129760b77e3bdfec447c1f986def763f2c` (2026-11-07) | LGPL-2.1 (`tcc-tests2/COPYING`); picoc-derived parts BSD-3 (`tcc-tests2/LICENSE`) |
+| `inline/gcc/` | inlining and IPA run tests (107): `gcc.dg/ipa` (`dg-do run`), `gcc.dg/torture` (named `*inl*`, or with `always_inline`/`flatten`), `gcc.dg/*inline*`, `c-c++-common/torture` (with `inline`/`always_inline`/`flatten`); multi-file and LTO tests left out.  A file is `DIR-NAME.c` for `DIR/NAME.c` | https://github.com/gcc-mirror/gcc `gcc/testsuite` | `917da9c6e019407c9d469455ad4c50c062470d6c` | GPL-3.0-or-later (`inline/gcc/COPYING3`) |
+| `inline/llvm/` | llvm-test-suite's inliner run tests: `2004-08-12-InlinerAndAllocas`, `2008-07-13-InlineSetjmp`, `extern-inline-redef` (clang's own inlining tests are FileCheck on IR, nothing to run) | https://github.com/llvm/llvm-test-suite `SingleSource` | `2ecf20c22c4c25051026fa450e0b0beb7d922209` | Apache-2.0 WITH LLVM-exception (`inline/llvm/LICENSE.TXT`) |
 | `rt/` | our runtime: start.S, link.ld, a tiny libc (rt.c, include/) | here | | |
 | `emit/` | emitter tests (run.sh) | here | | |
 | `vcc/` | our regression tests, one per bug found outside the kernel (`--suite vcc`; self-checking: exit 0 or `abort()`, output compared with clang's) | here | | |
@@ -70,6 +72,22 @@ cp tinycc/tests/tests2/* ccs/vcc/tests/tcc-tests2/; cp tinycc/COPYING ccs/vcc/te
 ```
 Then update the commits above and the `TCC_SKIP` list in the runner (it
 mirrors the SKIP/FLAGS lines in `tcc-tests2/Makefile`).
+
+The inline suite, from `bench/fetch-testsuites.sh gcc llvm-test-suite`:
+```
+G=work/testsuites/gcc/gcc/testsuite L=work/testsuites/llvm-test-suite D=ccs/vcc/tests/inline
+{ grep -l 'dg-do run' $G/gcc.dg/ipa/*.c; ls $G/gcc.dg/torture/*inl*.c | xargs grep -l 'dg-do run'
+  grep -l 'dg-do run' $G/gcc.dg/torture/*.c | xargs grep -l 'always_inline\|flatten'
+  ls $G/gcc.dg/*inline*.c | xargs grep -l 'dg-do run'
+  ls $G/c-c++-common/torture/*.c | xargs grep -l 'dg-do run' | xargs grep -l 'always_inline\|flatten\|inline'
+} | sort -u | while read f; do cp "$f" "$D/gcc/$(echo ${f#$G/} | tr / -)"; done
+grep -l 'dg-additional-sources\|dg-do link\|lto' $D/gcc/*.c | xargs rm -f
+cp $L/SingleSource/Regression/C/2004-08-12-InlinerAndAllocas.c $L/SingleSource/UnitTests/2008-07-13-InlineSetjmp.c \
+   $L/SingleSource/UnitTests/Integer/extern-inline-redef.c $D/llvm/
+```
+The runner keeps from their `dg-options` only what clang also understands
+(`INLINE_FLAGS`: gcc's pass switches such as `-fipa-pta` only steer gcc), and
+lists compiler-specific tests (`INLINE_SKIP`) and known gaps (`INLINE_XFAIL`).
 
 ## The runtime
 

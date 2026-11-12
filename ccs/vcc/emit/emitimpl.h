@@ -176,6 +176,12 @@ typedef struct emitter {
 	_Atomic uint8_t *extref;	/* per sym: referenced (for .weak of undefined syms) */
 	_Atomic uint8_t *walked;
 	uint16_t *fnsize;		/* per function: AST nodes (prepass) */
+	uint8_t *once;			/* VIR lowering on: per function, bit 0 when its one reference is a direct call (fn_once), bit 1 when it calls setjmp (prepass); else NULL */
+	/* VIR lowering on (with once): the direct call graph the prepass records, per
+	   function its size with the callees it inlines (fn_isize) and its recursion group */
+	uint32_t *cg, ncg, capcg, *cgoff, *cgn, *scc;
+	uint16_t *isz;
+	bool cgrec;			/* the prepass records calls (before the workers start) */
 	uint16_t *luse;			/* per local: uses weighted by loop depth (prepass) */
 	uint8_t *lnoreg;		/* per local: needs memory (address taken, asm operand, {} init) */
 	uint32_t *lspan;		/* per function: [2s] lowest, [2s+1] highest local sym seen */
@@ -390,6 +396,10 @@ typedef struct ecx {
 	struct wst *w;		/* WASM: arch/wasm/emit/ state (wimpl.h) */
 	struct wkst *wk;	/* X86: the walker's state (emit/walk/walk.h) */
 	struct xst *x64;	/* X86: arch/x64/emit/ state (x64impl.h) */
+	struct vwst *vw;	/* the VIR builder's state (emit/vir/, PLAN-vir.md) */
+	bool vtry;		/* the VIR walker runs: an error is not reported, it makes the function fall back */
+	bool vlow;		/* the records are VIR's lowering (finish_function's clean-ups for it) */
+	const char *vfail;	/* ... and why (NULL: it did not fail) */
 	struct em_switch_values_data *switch_values; /* accepted tables of this real function */
 } ecx;
 enum { FN_MEMCPY, FN_MEMSET, FN_MEMMOVE, FN_UDIVTI3, FN_DIVTI3, FN_UMODTI3, FN_MODTI3, FN_STRLEN,
@@ -627,6 +637,8 @@ VPRIV bool em_unused_local(ecx *e, uint32_t s, uint32_t fn);
 VPRIV unsigned em_unused_init(ecx *e, const node *decl, uint32_t fn, unsigned budget);
 /* opt/locals.c: eligibility and bounded selection from the existing prepass. */
 /* opt/tail.c: exact direct forwarding wrappers; target capability/ABI checks follow. */
+VPRIV bool em_tail_caller_ok(ecx *e, uint32_t fn);
+VPRIV bool em_tail_target_ok(ecx *e, uint32_t s);
 VPRIV bool em_tail_candidate(ecx *e, uint32_t fn, uint32_t expr, uint32_t maxargs, uint32_t *callee);
 VPRIV bool a64_tail_return(ecx *e, uint32_t expr);
 VPRIV uint32_t a64_tail_ref(const ecx *e);
@@ -730,6 +742,8 @@ VPRIV void at_ldop(ecx *e, unsigned sz, unsigned opc, int rs, int rt, int rn);
 VPRIV void jump(ecx *e, uint32_t l);
 VPRIV void bcond(ecx *e, int cond, uint32_t l);
 VPRIV void cbz(ecx *e, bool nz, int x, int r, uint32_t l);
+VPRIV void tbz(ecx *e, bool nz, int r, int bit, uint32_t l);
+VPRIV uint32_t a64_words(const ins *i);
 /* value.c */
 VPRIV int treg(ecx *e);
 VPRIV void tfree(ecx *e, int r);
@@ -766,6 +780,8 @@ VPRIV void classify(ecx *e, qty t, int *ngrn, int *nsaa, abiarg *a);
 VPRIV void spill_live(ecx *e, spill *s);
 VPRIV void unspill(ecx *e, const spill *s);
 VPRIV void call_fixed(ecx *e, int fn, int a0, int a1, int a2, int64_t n);
+VPRIV void finish_function(ecx *e, uint32_t s);	/* arch/a64/emit/func.c: optimise, lay out and print the records */
+VPRIV bool sym_needs_got(cc *c, uint32_t ref);
 /* bind.c */
 static inline int64_t keep_cl(const ecx *e, int64_t mark);
 static inline int X(cc *c, qty t);
@@ -886,6 +902,10 @@ VPRIV void wasm_emit_function(ecx *e, uint32_t s);
 VPRIV void wasm_ecx_free(ecx *e);
 VPRIV void wk_function(ecx *e, uint32_t s);
 VPRIV void wk_ecx_free(ecx *e);
+VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why);	/* emit/vir/a64.c: the built VIR as arm64 records */
+VPRIV bool vw_try(ecx *e, uint32_t s);	/* emit/vir/: s through VIR (VCC_VIR); false: emit it as before */
+VPRIV bool vw_enabled(const cc_opts *o);	/* VIR lowers functions (VCC_VIR with l, -O2) */
+VPRIV void vw_wk_ecx_free(ecx *e);
 VPRIV void wasm_data_ref(ecx *e, uint32_t ref);
 VPRIV void wasm_header(cc *c, tbuf *hdr, ecx *ctx, int nthr);
 VPRIV void wasm_tail(cc *c, tbuf *t, _Atomic uint8_t *claimed);
@@ -895,6 +915,12 @@ VPRIV uint32_t aconst_idx(cc *c, uint32_t n);
 VPRIV bool sve_codegen_ok(cc *c);
 VPRIV bool bitint_codegen_ok(cc *c);
 VPRIV void ensure_walked(emitter *E, cc *c, uint32_t s);
+VPRIV uint8_t *fn_once(cc *c);
+#ifndef WK_INLINE_VIR
+#define WK_INLINE_VIR 150	/* under VIR: AST nodes of a callee with what it inlines (fn_isize) */
+#endif
+VPRIV void fn_isize(emitter *E, cc *c, uint32_t lim);	/* E->isz, E->scc: VIR's inlining sizes */
+VPRIV bool inl_cand(emitter *E, cc *c, uint32_t s);	/* VIR could inline a call to s (size aside) */	/* per function: 1 when its one reference in the TU is a direct call */
 VPRIV int u32_cmp(const void *a, const void *b);
 /* tu.c */
 VPRIV void enqueue(emitter *E, uint32_t item);

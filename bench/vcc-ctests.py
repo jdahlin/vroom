@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """vcc-ctests.py: run vendored C compiler test suites through vcc.
 
-  bench/vcc-ctests.py [-j N] [--suite gcc|tcc|vcc] [--fe] [--cpu QEMU_CPU] [-v] [--show CAT] [PAT]
+  bench/vcc-ctests.py [-j N] [--suite gcc|tcc|vcc|inline] [--fe] [--cpu QEMU_CPU] [-v] [--show CAT] [PAT]
 
 Suites (ccs/vcc/tests/, see the README there):
   gcc  gcc.c-torture/execute: exits 0 on success, abort()s on failure
   tcc  tinycc tests2: prints output, compared with clang's (and tcc's .expect)
+  inline  inlining and IPA tests: gcc.dg/ipa, gcc.dg/torture, c-c++-common and
+       llvm-test-suite run tests (ccs/vcc/tests/inline): as gcc, output vs clang's
   vcc  our own regression tests (ccs/vcc/tests/vcc): exit 0 (or abort()) and
        print what clang's build prints.  Comments in a test steer the runner:
          /* vcc-flags: -std=c23 ... */   extra flags for both compilers
@@ -76,6 +78,16 @@ RTFL = ['--target=aarch64-linux-gnu', '-ffreestanding', '-fno-builtin', '-nostdi
 # snippets, bounds checker, other targets, threads/TLS, several files, argv
 # gcc torture tests whose output depends on the compiler, not on correctness
 GCC_SKIP = {'return-addr': 'prints code addresses'}
+# inline suite: tests whose result depends on the compiler, not on correctness
+INLINE_SKIP = {
+    'gcc/gcc.dg-ipa-ipa-sra-1': 'prints an int with %f and stack addresses',
+    'gcc/gcc.dg-torture-matrix-6': 'reads a dead local through a pointer (*vel[1] = &d)',
+    'gcc/gcc.dg-ipa-ipa-pta-19': 'ifunc: rt applies no IRELATIVE (clang -O2 folds the resolver)',
+}
+# inline suite: known vcc gaps (TODO.md), counted as xfail; a pass is an XPASS error
+INLINE_XFAIL = {
+    'gcc/gcc.dg-ipa-pr92497-1': 'TODO.md "IPA constant propagation": __builtin_constant_p of a noinline static function\'s constant argument',
+}
 
 TCC_SKIP = {
     '31_args': 'argv', '137_funcall_struct_args': 'void main: exit status undefined', '79_vla_continue': 'compares addresses of dead VLAs (clang and tcc differ)', '46_grep': 'argv, files', '34_array_assignment': 'not C (tcc skips it)',
@@ -99,6 +111,10 @@ def tests(suite, pat):
         d = f'{T}/tcc-tests2'
         ts += [('tcc', f[:-2], f'{d}/{f}') for f in sorted(os.listdir(d))
                if re.match(r'\d+_.*\.c$', f) and '+' not in f]
+    if suite in (None, 'inline'):
+        for sub in ('gcc', 'llvm'):
+            d = f'{T}/inline/{sub}'
+            ts += [('inline', f'{sub}/{f[:-2]}', f'{d}/{f}') for f in sorted(os.listdir(d)) if f.endswith('.c')]
     if suite in (None, 'vcc'):
         d = f'{T}/vcc'
         ts += [('vcc', f[:-2], f'{d}/{f}') for f in sorted(os.listdir(d)) if f.endswith('.c')]
@@ -117,6 +133,11 @@ def dg_flags(src):
         fl += [x for x in m.group("flags").split() if not x.startswith(('-m', '-fno-tree', '-ftree', '-fdump'))]
     return fl
 
+# the inline suite's dg options: gcc's pass switches (-fipa-pta, -fno-early-inlining, ...)
+# only steer gcc; what clang also understands is kept, the rest dropped
+INLINE_FLAGS = re.compile(r'-O\S*$|-[DU]\S+$|-std=\S+$|-w$|-W\S*$|-f(no-)?(inline|inline-functions|'
+                          r'inline-small-functions|strict-aliasing|wrapv|builtin|gnu89-inline|common|'
+                          r'unroll-loops|omit-frame-pointer|signed-char|unsigned-char)$')
 TMO_SCALE = int(os.environ.get('VCC_TIMEOUT_SCALE', '1'))
 
 
@@ -261,7 +282,7 @@ def reference(suite, name, path, flags, rthash, wd):
             if failure:
                 return dict(r, **failure)
             r['rc'] = rc; r['out'] = out
-            if suite in ('gcc', 'vcc') and rc != 0:
+            if suite in ('gcc', 'vcc', 'inline') and rc != 0:
                 r['skip'] = 'ref-fail'; r['why'] = f'clang build exits {rc}'
                 if err.strip():
                     r['why'] += ': ' + first_err(err.decode(errors='replace'))
@@ -275,6 +296,12 @@ def reference(suite, name, path, flags, rthash, wd):
 
 def one(t):
     t, st, cat, why = one_(t)
+    if t[0] == 'inline' and t[1] in INLINE_XFAIL:
+        xf = INLINE_XFAIL[t[1]]
+        if st == 'fail':
+            return t, 'xfail', cat, f'{xf} [{why}]'
+        if st == 'pass':
+            return t, 'fail', 'xpass', f'passes now: remove it from INLINE_XFAIL ({xf})'
     if t[0] != 'vcc':
         return t, st, cat, why
     _, xf = exec_marks(open(t[2], 'rb').read().decode('latin-1'))
@@ -293,7 +320,9 @@ def one_(t):
         return t, 'skip', 'tcc-specific', TCC_SKIP[name]
     if suite == 'gcc' and name in GCC_SKIP:
         return t, 'skip', 'compiler-specific', GCC_SKIP[name]
-    flags = dg_flags(src) if suite == 'gcc' else exec_marks(src)[0] if suite == 'vcc' else []
+    if suite == 'inline' and name in INLINE_SKIP:
+        return t, 'skip', 'compiler-specific', INLINE_SKIP[name]
+    flags = dg_flags(src) if suite == 'gcc' else [f for f in dg_flags(src) if INLINE_FLAGS.match(f)] if suite == 'inline' else exec_marks(src)[0] if suite == 'vcc' else []
     m = re.search(r'/\*\s*vcc-timeout:\s*(\d+)\s*\*/', src) if suite == 'vcc' else None
     tmo = int(m.group(1)) * TMO_SCALE if m else 60
     if name.startswith('76_dollars'):

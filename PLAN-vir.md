@@ -6,7 +6,8 @@ Den ska användas av x86-64 och arm64 (wasm senare), kosta ingenting på `-O0`
 och inte upprepa LLVM IR:s kända misstag.  Formatet och verktygen är specificerade i
 `SPEC-vir.md`; underlaget finns i
 `RESEARCH-vir.md` (LLVM IR:s problem med källor, och vad B3, Cranelift, Zig,
-Go, Turboshaft, LuaJIT, QBE och TPDE valde i stället).
+Go, Turboshaft, LuaJIT, QBE och TPDE valde i stället).  Registerallokeringen
+har ett eget underlag, `RESEARCH-regalloc.md`.
 
 **Beslut (2026-11-11, frågerunda med Johan):**
 - `-O0` behåller dagens direkta kodgenerering.
@@ -151,10 +152,11 @@ De följer `LO()`-gränssnittet, så att byggaren är en tunn översättning:
    grenar, onåbara block.
 3. **Redundans:** värdenumrering över dominatorträdet, lagring→laddning och
    döda lagringar på oflydda stackplatser, död kod.
-4. **Allokera:** linjär genomsökning över SSA-intervall (heltals- och
-   flyttalsklass, callee-sparade register över anrop, parallella flyttar för
-   blockargument, fasta register för `div`, skift och argument).  Inget LICM i
-   1.0.
+4. **Allokera:** girig tilldelning i blockordning på SSA-formen, med utkastning
+   av värdet vars nästa användning ligger längst bort (SPEC-vir.md 15.5–15.11;
+   heltals- och flyttalsklass, parallella flyttar per kant, fasta register för
+   `div`, skift och argument, tips i stället för sammanslagningsfas).  Inget
+   LICM i 1.0.
 5. **Sänk** genom den riktiga CPU:ns `LO`.
 
 Passlistan är fast: vanliga funktionsanrop, ingen passhanterare, inga
@@ -187,7 +189,7 @@ fixpunkter utan budget (samma regel som `emit/flow/`).
 | V1 | **Format och verktyg.** `vir.h`, skrivare, parser, verifierare, tolk, `virtest`, `fuzz-vir` | Skriv–läs–skriv identiskt på alla tester; verifieraren avvisar en mutationsmängd; standardbygget byte-identiskt (`vbench.py check`) |
 | V2 | **Byggare och enklaste sänkning på x86-64.** Vandraren mot `vir_*`; sänkning där varje värde bor i en stackplats; `VCC_VIR=1`; reträtt per funktion | Med `VCC_VIR=1`: `bench/vcc-x86.py`, `vcc-abi.py --target x86_64`, gcc-torture samma godkända som utan; täckning rapporterad per korpus; utan flaggan byte-identiskt |
 | V3 | **Täckning.** Bit-fält, poster i anrop, varargs, atomära, flyttal, switch (vandrarens sänkning), beräknad goto | Täckning ≥ 95 % av PostgreSQL:s funktioner och av vcc:s egna; x86-kärnan bootar med `VCC_VIR=1` (asm-funktioner går den vanliga vägen); objtool utan varningar |
-| V4 | **Registerallokering.** Linjär genomsökning, fasta register, parallella flyttar | Instruktioner på en fast TU-mängd under dagens `-O2`; allokerarens tid redovisad för sig |
+| V4 | **Registerallokering.** Nästa-användning-kedjor bakåt, girig tilldelning framåt, fasta register, parallella flyttar per kant, `vir_alloc_check` | Instruktioner på en fast TU-mängd under dagens `-O2`; allokerarens tid och räknare (spill, omladdningar, flyttar) redovisade för sig; kontrollen grön på testerna och `fuzz-vir` |
 | V5 | **Pass.** Förenkling, värdenumrering, minnesvidarebefordran, död kod | Per pass: tolkekvivalens, instruktioner och `vbench.py`-tid före och efter, i planen |
 | V5b | **Inline asm.** `x64_asm` delas i planering och emission (SPEC X6); `asm` och `asmgoto` byggs | Utan flaggan: kärnobjekten och `vas-corpus.py` byte-identiska; med: täckning ≥ 99 % av x86-kärnans funktioner |
 | V6 | **arm64.** Kräver att arm64 har en `LO`-sänkning (TODO.md "arm64 and wasm on the shared walker"); VIR driver flytten eller väntar på den | ctests 1729/1729, `vcc-abi.py`, arm64-kärnan bootar med `VCC_VIR=1`; `vcc-obj.py` 840/840 |
@@ -308,6 +310,387 @@ SPEC rättad till utkast 0.4 i egen commit (lista i PR:en).
 - **Återstår av V1:** tolken `virrun`, `virgen`, `fuzz-vir`, `--equiv` och
   mikrobenchmarkarna i SPEC 22.8.  Inga pass finns, så `PASSES:` godtar bara
   `canon`.
+
+### V4, första delen (2026-11-11): allokeraren och kontrollen på ett syntetiskt mål
+
+Gren `claude/vir-regalloc-impl-f22a1d` på `main` (V1:s första halva);
+ingen kod i V1 ändrad.
+- **Gjort:** SPEC 15.1–15.2 som gränssnitt (`vir/alloc.h`: `vir_regs`,
+  `vir_fix`, `vir_alloc_out` i trådens reservationer), loopskogen som
+  intervall av blockföljden (`loops.c`, `vir_loops_build`, ersätts av
+  `vir_canon` i V2), `vir_alloc_check` (`allocchk.c`, skrevs före
+  allokeraren), ett syntetiskt mål (`synth.c`: N heltals- och M
+  flyttalsregister, callee-sparad delmängd, x86-lika fasta register:
+  tvåadress, skiftantal, div, anrop), svep 5 och 6 (`alloc.c`: linjärt läge,
+  tips, loopkorrigeringar, delade spillplatser, huvudregeln, anrop,
+  konstanter, parallella flyttar med cykelbrott via fritt register, `xchg`
+  eller scratch), textdump och verktyget `viralloc` (`allocdump.c`,
+  `viralloc.c`: dump och räknare, `--sweep`, `--time`, `--mutate`).
+  Inline-asm (15.10) och `dce`-sammanslagningen ingår inte.
+- **Tester:** 16 filer i `ccs/vcc/tests/vir-alloc/` med förväntade dumpar
+  (rak kod, diamant, nästlade loopar, genomlevande värden, kritiska kanter,
+  blockargument som byter plats och roterar, anrop, fasta x86-register,
+  `ibr` till `VB_ADDR`, irreducibelt, linjärt läge); varje fil körs vid alla
+  registerantal ned till minimum (3 heltal, 2 flyttal), tre callee-varianter,
+  x86 av och på och linjärt läge: 618 konfigurationer, kontrollen grön på
+  alla.  `bench/vir-alloc.py random`: 1000 slumpenheter (8000 funktioner,
+  frö 1–600 och 1000–1299) gröna, 60 enheter med ASan+UBSan gröna;
+  `mutate`: kontrollen fångar 2869 av 2979 förstörda allokeringar (missarna
+  är `br`-byten som bara är information och döda resultat).
+- **Fel som slumptesterna hittade, alla i irreducibelt flöde och nu regler
+  i SPEC 0.5 med ett test var som faller utan regeln:** `lend` måste sättas
+  vid varje bakkants mål, inte bara loophuvudet (`irr-merged.vir`); en kant in
+  i mitten av en loop för med sig värdena som lever runt loopen
+  (`irr-entry.vir`); ett värde som lever runt en loop med ett block som
+  startar i stackplatser behöver plats (`addr-loop.vir`).  Dessutom:
+  callee-sparat register som bara en redigering skriver (`x86-shift.vir`),
+  tvåadress utan fritt register (första operanden kastas ut), en onödig
+  självväxling efter `xchg` (`rotate.vir`).
+- **Tid (bästa av fem, M1 Pro, delad maskin):** tolkformad funktion
+  (`big_interp`: 2927 instruktioner, 514 block, 25 blockparametrar i
+  slingan) 177 ns/instruktion vid 14+14 register, 172 vid 6+4; slumpade
+  funktioner 81–83 ns.  Under budgeten 200 ns som gäller tills vidare (SPEC
+  22.1, beslut 2026-11-11: kodens hastighet i sqlite först); målet 60 ns
+  ligger kvar till efter kvaliteten.  Profilering gav −13 till
+  −16 %: trådlokal åtkomst via pekare (`_tlv_get_addr` kostade 3–4 %), inget
+  rensat registerfält per block, ingen poängsättning eller kantflytt för
+  ensam föregångare, operandlistor från svep 5 till svep 6, operandfälten
+  utan iterator, kölista för parallella flyttar.  Kvar: kostnad per block
+  proportionell mot antalet levande värden (W byggs om, live-in-poolen,
+  inträdestillstånd), utkastning (avstånd per register), `fixed()` per
+  instruktion och `br` med 25 argument.  Tolkformen är värsta fallet (5,7
+  instruktioner per block); siffran på riktig kod kommer med V2.
+- **Räknare på testmängden** (vid varje fils översta registerantal): 27
+  spill, 34 omladdningar, 17 rematerialiseringar, 15 kanter med flyttar, 2
+  `xchg`, 7 callee-sparade.  Tolkformen vid 14+14: 697 spill, 1617
+  omladdningar, 257 kanter med 1183 lagringar till stackplats (slingans
+  parametrar startar i plats enligt huvudregeln: ett kvalitetsproblem att
+  mäta mot clang i V2).
+- **Mål för V4 som helhet:** `bench/sqlite/run.py all` (på en annan gren):
+  speedtest1 gcc 2,55 s, clang 2,62 s, vcc 4,01 s; VDBE-tolken är den
+  form allokeraren ska göra bättre.  Kan inte köras genom VIR förrän V2.
+- **Det som hindrade i V1:s format:** parsern sätter inte `blk.depth`;
+  `vir_cfg` skriver om `extra`/`nextra` (allokeraren anropar den varje gång);
+  `vir_term_of`/`vir_succ_csr` är `VPRIV` och statiska i enhetsbygget, så
+  allokeraren bygger sina egna efterföljarlistor; formatet säger inte var en
+  `proj` står (allokeraren kräver att den följer sitt anrop direkt) eller att
+  block 0 börjar med sina `param`; ingen loopskog.
+- **Väntar på V2:** riktiga `vir_regs` för x86-64 (och arm64), sänkningen
+  15.3, C som indata, kvalitet mot dagens `-O2` och clang, sqlite.  **V5:**
+  `dce` i svep 5.  **V5b:** inline-asm (15.10).
+- **Standardbygget oförändrat:** `bench/vbench.py check --quick` 66/66
+  identiska mot ögonblicksbilden (`2d122cf1`) och mot commiten före den
+  (`1327df46`); mot sammanfogningsbasen med `main` skiljer 15, från de
+  osammanfogade grenarna under den här, inte från den.  `bench/vir-test.py`
+  118/118.
+
+### V4, webbar (2026-11-12): blockparameter och argument som en variabel
+
+Steg 1 i arbetsordningen för sqlite (SPEC 15.5 och 15.8, "Webs").
+- **Gjort:** en blockparameter och dess `br`-argument är en webb
+  (union-find).  Två webbar med parametrar i samma block slås inte ihop.  En
+  medlem som är levande där en annan definieras lämnar webben; vid en
+  parameter lämnar de levande i stället.  Webben har en gemensam spillplats
+  utanför ringen och ett föredraget register (den första parameterns).  En
+  parameter som korsar ett anrop innan den används, eller bara skickas vidare,
+  startar i webbens plats.  Livslängden runt loopar är nu exakta intervall per
+  värde i stället för `lend` som linjär gräns, och `livein`, `dmark` och
+  webbarnas interferens läser samma intervall.  Två precisionsregler: ett värde
+  vars definition inte dominerar loophuvudet lever bara till slutet av sin
+  grupp av bakkanter, inte runt hela loopen; och regeln för en kant in i en
+  loop tar bara värden vars definition dominerar källblocket (strikt SSA).
+  Den regeln gäller nu också en kant till huvudet (irreducibel loop där
+  användningen ligger bakom en inre bakkant; `irr-head.vir`, hittad av
+  slumpfrö 61, faller utan regeln).
+- **sqlite3VdbeExec:** stackåtkomster 5197 → 2587 (målet var under 1500).
+  Spärren är `add x25, x25, #24` på plats; dess föregångare laddade förut om
+  tre värden och kopierade `pOp`.  Den största källan var regeln för kant in i
+  loop: ett värde från ett fall i tolken räknades som levande runt hela
+  tolkslingan.
+- **Tid:** speedtest1 (storlek 100): 33,75 G → 32,48 G instruktioner, cykler
+  8,83 G → 8,95 G (inom bruset; ssa-llc2 8,39 G).  Profil vid storlek 300:
+  sqlite3VdbeExec 2094 sampel (före 2115; LLVM-bakdelen ssa-llc2 2228; målet
+  1900 motsvarar bygget med bara inlining, 1818: kräver steg 2).
+  Stackåtkomsterna kostade alltså lite: lagring och laddning på stacken
+  vidarebefordras.
+- **Tester:** vir-alloc 17/17, slump 1300 enheter (frö 1–1000, 1000–1299)
+  gröna, `mutate` fångar 2871 av 2980; vir-test 118/118; C-sviterna 2064/2064, genom VIR med kontrollen
+  2058/2064 (samma sex kända fel), inline genom VIR 85/85, `VCC_UNITY=`
+  bygger, TCL genom VIR 1 fel (interrupt2, som clang); sqlite
+  genom VIR med kontrollen: 1664 funktioner, hash oförändrad.
+
+### Inliner per anropsplats (2026-11-12): storlek nedifrån och upp, ingen tillväxtbudget
+
+Steg 2 i arbetsordningen för sqlite.
+- **Gjort:** förprocessen (`prepass.c`, `fn_isize`) samlar den direkta
+  anropsgrafen och räknar per funktion `isz`: den egna storleken plus `isz` för
+  varje anropad funktion som själv skulle inlinas (som LLVM, nedifrån och upp).
+  Rekursionsgrupper (Tarjans starka komponenter) räknas inte in och inlinas
+  inte inom sig själva, så valet beror inte på trådarnas ordning.  Under VIR
+  inlinas en anropad funktion när `isz <= WK_INLINE_VIR` (150 AST-noder);
+  statiska funktioner med ett enda anrop som förut (4000).  Tillväxtbudgeten
+  per anropare (`inlgrow`, 400) är borta: den var det som höll nere de inkapslade
+  kopiorna, och den gjorde valet beroende av ordningen i anroparen.
+- **Gräns** (speedtest1 storlek 100, cykler; `.text` för sqlite3.o; kompilering av
+  sqlite3.c genom VIR):
+
+  | gräns | cykler | text | kompilering |
+  |---|---|---|---|
+  | 40 + budget (förut) | 8,96 G | 913 KB | 0,37 s |
+  | 80 | 8,91 G | 1049 KB | 0,42 s |
+  | 150 (vald) | 8,83 G | 1356 KB | 0,52 s |
+  | 225 | 8,79 G | 1525 KB | 0,57 s |
+  | 300 | 8,78 G | 1620 KB | 0,58 s |
+
+  Efter 150 kostar varje cykelprocent mer än 10 % kod; 150 är knät.  LLVM:s
+  bygge med bara inlining (st-inl-only) går på 7,66 G, men det tar också bort
+  `noinline` (`SQLITE_NOINLINE`: getCellInfo).  Profil vid storlek 300 (225 mot
+  inl-only): sqlite3VdbeExec 2133 mot 1717, vdbeRecordCompareInt 641 mot 532,
+  jsonTranslateTextToBlob 230 mot 129: gapet ligger i koden per funktion, inte
+  i vad som inlinas.
+- **Fel som inliningen visade:** walkern antog x87-layout för `long double`
+  utom för `__float128`; på arm64 Linux är den IEEE binary128.  En promoverad
+  `long double`-konstant lagrades i fel format (`vcc/ldouble_const` genom VIR),
+  och `__builtin_isinf_sign` läste tecknet på byte 9 (`vcc/isinf_sign`, ett
+  av de sex kända felen).  `wk_quad` avgör formatet på ett ställe.
+- **Tester:** C-sviterna 2064/2064, genom VIR med kontrollen 2059/2064 (fem
+  kända fel kvar: jump_table, switch_dispatch, switch_values, returns_twice,
+  setjmp_sites), inline 85/85 med och utan VIR, vir-test 118/118,
+  `VCC_UNITY=` bygger, TCL genom VIR 1 fel (interrupt2, som clang); sqlite
+  genom VIR med kontrollen: 1420 funktioner, hash oförändrad.  Samma körning:
+  st-web8 9,31 G cykler, nu 9,18 G (maskinen belastad; 32,50 → 32,07 G
+  instruktioner).
+
+### Allokatorns kvalitet och adresslägen (2026-11-12)
+
+Steg 1 i den nya arbetsordningen: sampel per funktion mot virpol (VIR:s
+inlining, LLVM:s bakända), inte antal stackåtkomster.  Mätt med parade
+körningar (speedtest1 storlek 100, cykler).
+- **Främjande av en plats med pekar- och heltalslagringar:** en lokal pekare
+  vars adress en inlinad läsare tar (`sqlite3Utf8Read(&z)`) lagras som `ptr`
+  och, efter `p++`, som `i64` (`p2i`, `add`, `i2p`); `vw_promote` vägrade
+  fält med olika typer.  Fältet håller nu `i64`, en pekarlagrings värde går
+  via `p2i`.  patternCompare:s zPattern/zString låg i minnet.
+- **`i2p`/`p2i` läses igenom** före allokeringen (användarna läser
+  operanden: en lasts adress blir en `add` som viks in); konstanten i en
+  kommutativ operation läggs andra (en omedelbar).  −1,5 % instruktioner,
+  −0,5 % cykler.
+- **En kopia på 1, 2, 4 eller 8 byte** (`memcpy(&v, &r, 8)` i FpDecode) är
+  en last och en lagring, så att båda platserna främjas.  −0,2 %.
+- **Webbparametrar:** en webbs parameter som lever över ett anrop och inte
+  läses snart gick in i webbens plats.  Nu inte när varje efterföljare (högst
+  två) läser den nära sin början (−0,6 %), och inte när registret är
+  callee-saved och två till är lediga vid blockets början (−2,2 %;
+  patternCompare: sp-laster/lagringar 32/40 → 1/6; utan villkoret tappade
+  VdbeExec:s tidigare lästa värden sina register, +1069 instruktioner).
+- **Adresslägen:** VdbeExec:s gap mot virpol (+195 sampel) var inte
+  stacktrafik (VIR har färre sampel på `[sp]`: 414 mot 484) utan
+  instruktionsval: VIR hade inga registeroffsetadresser (LLVM 2112).  Nya
+  poster `I_LDX`/`I_STX` (`[xn, wm, sxtw #k]`), `I_ADDXT`/`I_SUBXT`
+  (`add x, x, w, sxtw #k`) och `I_SMADDL`/`I_UMADDL`; sänkningen
+  (`vl_cinfo`/`vl_cfold`) viker ett index byggt precis före en `ptradd`,
+  `add` eller `sub` (`ext.4s/4u`, `mul`/`shl` med åtkomstens storlek, `mul`
+  med en 32-bitarskonstant), varje instruktion använd en gång av nästa.
+  Beslutas vid kedjans första instruktion, där indexets register är känt;
+  emellan bara remat/omladdning till andra register.  Laster/lagringar:
+  −2,0 % instruktioner, −1,1 % cykler; add/sub/smaddl: −2,5 %
+  instruktioner, cykler oförändrade (samma latens som det de ersätter).
+- **Summa:** mot steg 3, samma körning: −7,3 % instruktioner, −3,5 %
+  cykler; virpol är nu 9,7 % snabbare (var 12,9 %).  sqlite .text 338547 →
+  312681 instruktioner, spill 5684 → 3753.
+- **Kvar, mätt:** sampel på `[sp]` i mellanstora funktioner (vappendf 95 mot
+  38, BtreeInsert 54 mot 16); f64 som lever över anrop laddas om via x16
+  (inga callee-saved FP-register: `vl_regs` sätter `callee[1] = 0`, 107
+  ställen); konstanter rematerialiseras i loopar (ingen hissning).
+- **Tester:** `vcc/ptr_slot_inline.c`, `vcc/memcpy_small.c`,
+  `vcc/index_addr.c`; C-sviterna genom VIR med allokeringskontrollen, vcc-cfi
+  och darwin -S genom VIR (kodningen lika med clangs assemblering av texten).
+
+### Registerkopior kring anrop (2026-11-12)
+
+Uppdrag från jämförelsen mot virpol: `mov` mellan register låg +313 sampel
+över LLVM (2,0x statiskt).  Exemplet (`mov x21, x0; b join` i varje gren av
+vdbeRecordCompareString) var ingen blockparameter: `v3 = trunc v0` är bunden
+(i operandens register när den dör) och stannade i x0, fast den lever genom
+en loop med ett anrop; vid sammanflödet låg den i x21, så varje gren och
+bakkanten flyttade den.  Tre regler i `vir/alloc.c`:
+- en bunden operation vars resultat lever över ett anrop i en loop räknas
+  inte på plats i ett caller-saved register när ett callee-saved är ledigt
+  (en flytt vid definitionen i stället för en per varv);
+- en `ext` (en instruktion i vilket register som helst) tar sin hints
+  register när det är ledigt (alla bundna: fler flyttar, prövat);
+- ett värde vars nästa användning har fasta operander (ett anrops argument)
+  väljer, när hinten är upptagen, inte ett register som en annan av dess
+  operander ska till: memcmp:s `mov x3, x1; mov x1, x2; mov x2, x3` blir
+  `mov x1, x3`.  En fallback till blockparameterns egen hint när den saknar
+  tentativt register prövades: fler instruktioner, struken.
+sqlite: `mov` mellan register 37904 → 35785 (statiskt, hela binären),
+instruktioner 312681 → 310218; parat mot föregående bygge −0,1 % instruktioner, −0,6 %
+cykler (inom bruset för var regel för sig).  Kvar av de heta flyttarna, ur
+profilen: väljaren i en `switch` kopieras till x17 före jämförelsen
+(VdbeExec:s heta dispatch, vdbeRecordCompareInt, SerialGet) och `mov w0, w0`
+före en `ret` (sänkning, lämnat till vir-lowering); en rotation av fyra
+loopparametrar på en bakkant i VdbeExec; resten är sampel efter hopp.
+- **Lever över ett anrop, efter levande mängderna:** `XCALL` var ett test i
+  instruktionsordning (ett anrop mellan definitionen och sista användningen),
+  så argumenten till anrop i skilda grenar (vdbeRecordCompareInt:s v1/v2)
+  räknades som levande över anrop och flyttades till x19/x20.  Nu märks vid
+  varje anrop värdena i W (levande efter det); värden som lever runt en loop
+  (utanför W bortom bakkanten) och linjärt läge behåller ordningstestet.
+  sqlite: −1074 instruktioner, −474 `mov`, 17 ramar färre, spill 3787 →
+  3727; parat −1,5 % instruktioner, −0,4 % cykler.
+
+### Syskonanrop, fritt argumentbyte och va_arg (2026-11-12)
+
+Steg 3 i arbetsordningen för sqlite.
+- **Syskonanrop:** ett anrop vars resultat (eller inget) är vad `ret` efter
+  det returnerar blir ett hopp efter epilogen, var som helst i kroppen (VIR:s
+  sänkning, `vl_sibling`).  Resultatet får gå via `br` till ett block med bara
+  `ret`, via blockparametrar, `i2p`/`p2i` och, när funktionen returnerar ett
+  32-bitars heltal, `trunc`/`ext.4` (övre halvan är ospecificerad).  Inte när
+  en plats adress lämnar laster, lagringar och kopior (som LLVM:s
+  TailCallElim), med stackargument, asm, `va_start` eller ett anrop som
+  returnerar två gånger; attributen som för arm64-emittern
+  (`em_tail_caller_ok`, `em_tail_target_ok`).  `I_TAIL` cond 2/3 expanderas
+  av `finish_function` till återställning, `mov sp, x29`, `ldp` och `b` eller
+  `br x16`; med avvecklingstabeller mellan `.cfi_remember_state` och
+  `.cfi_restore_state` som clang.  sqlite: 481 direkta och 51 indirekta.
+- **Fritt argumentbyte:** ett värde som dör vid ett anrop och som ett fast
+  argumentregister tränger undan får nu ett register som anropet skriver
+  över, och tas bort helt när dess kopia redan står i ett tidigare
+  argumentregister.  Förut fick det ett callee-saved register, vilket gav en
+  ram i funktioner som getCellInfo.  sqlite: spill 6991 → 5565.
+- **Tidig retur före prologen:** getCellInfo har nu ingen ram alls (`ldrh`,
+  `cbnz`, ..., `br x16`; returen är `ret`).  Allmän shrink-wrapping (en
+  funktion som behöver ram på en väg) är inte gjord.
+- **va_arg och variadiska funktioner (Apple):** `vw_va_arg` flyttar pekaren
+  (8 byte per argument, 16-justerade först, poster över 16 byte via
+  referens), `va_start` blir `add x16, x29, #16+namngivna stackbyte; str`.
+  `wk_valist` tog en pekartypad va_list för x86-64:s array; Apples är en
+  `char *` (lvärde).  AAPCS64 (Linux) vägras som förut.  sqlite: 19
+  variadiska funktioner och sqlite3_str_vappendf går nu genom VIR (1432
+  sänkta, 6 kvar: poster som argument).
+- **Tid:** speedtest1 storlek 100, samma körning: steg 2 9,38–9,42 G cykler,
+  med syskonanrop och argumentbytet 9,28–9,30 G (−1,3 %), instruktioner
+  32,08 → 31,64 G.  va_arg-täckningen ändrar inget mätbart (9,32 G).
+- **Tester:** `vcc/tail_calls_body.c` (syskonanrop i en gren med
+  callee-saved register, via `br`, indirekt, pekare; negativt: `(unsigned)`
+  breddat till 64 bitar, lokal adress), C-sviterna, vcc-cfi genom VIR
+  1567/1567, vcc-abi `--host` genom VIR samma fyra kända fel som utan.
+
+### Sänkningen mot LLVM:s backend (2026-11-12): fem punkter, sqlite speedtest1
+
+Gren `claude/vir-lowering-453a57`.  Mätt med `VCC_VIR=bl`, speedtest1
+`--size 100 --memdb`, parvisa körningar (3 rundor) mot bygget före punkten och
+mot virpol; räknare statiskt på sqlite3.o.  Från start (5346e3e6) +14,5 %
+cykler mot virpol, nu +9,9 %.  Samplingar per funktion (storlek 300) varierar
+±10 % med maskinens last och redovisas bara som riktning.
+
+| Punkt | Commit | Räknare före → efter (virpol) | Instr. | Cykler mot föregående | Mot virpol |
+|---|---|---|---|---|---|
+| 1 grenval: tbz/tbnz, cbz/cbnz mot noll och tecken, upprepad jämförelse bort | 71ccdf3c | tbz+tbnz 0 → 2677 (2645), and+cbz 2690 → 497, cmp 13976 → 13072 | −3,0 % | −1,9 % [−2,1 .. −1,6] | +12,0 % |
+| 2 blockordning och utgångar: retur med egen epilog, ensamma `br` kopieras, lövram utan ramrekord | ad813ee8 | b 20213 → 18915 (12145), ret 1473 → 2771 | −0,7 % | −0,9 % [−2,5 .. −0,4] | +11,0 % |
+| 3 aritmetik: registeroffset, skiftade/utökade operander, madd/smaddl, ubfx/sbfiz, multiplikation med konstant | dabc8f08 | registeroffset 0 → 2567 (2675), utökade 0 → 1023 (1283), smaddl 0 → 1753 (1855), sxtw 5509 → 1252 (1629), mul 2892 → 383 (228) | −5,6 % | −1,2 % [−2,7 .. −0,9] | +8,1 % |
+| volatile genom pekare (förutsättning för 4) | 5c4313d5 | dekkerMul2 ldr/str 9/6 → 29/13 (21/12) | +0,4 % | +2,5 % [+2,0 .. +3,1] | |
+| 4 bytesammansättning: en last + rev/rev16; anrop läser bara sina argumentregister | b72162c6 | rev 0 → 100 (186), rev16 0 → 65 (41) | −1,2 % | −0,8 % [−1,2 .. +0,1] | +9,7 % |
+| 5 konstanter: wzr/xzr-lagring, add/sub/cmp- och logiska immediater | a4d0daec | lagrad nolla via register 1722 → 333 (132), konstantflytt 24294 → 22602 | −0,3 % | +0,1 % [−0,2 .. +0,3] | +9,9 % |
+
+- Punkt 2: kopior av små block med arbete i (slingtestet sist i latchen)
+  prövades och togs bort: fler instruktioner (konstanter och kantflyttar
+  sänks en gång per kopia).
+- Punkt 3–5 är ett pass över posterna (`opt.c` `fold`, bara VIR:s
+  funktioner, exakt liveness): definitionen går när dess register bara läses
+  av nästa läsare i blocket och är dött efter den.  VIR:s retur läser bara x0
+  för heltal/pekare ≤ 8 byte.
+- Volatile: VIR byggde varje last/lagring som icke-volatil; rättningen
+  kostar cykler eftersom VIR:s flyttalslaster går via x16 + `fmov`.
+- Kvar per funktion: VdbeExec (slingtest roteras inte, hopptabell med 4-byte
+  poster mot LLVM:s 1 byte), RecordCompareInt/String (parametrar kopieras till
+  callee-saved x19/x20 fast bara syskonanrop följer: allokeraren), SerialGet
+  (LLVM inlinar sqlite3Get4byte), csel används inte alls (0 mot 980).
+- Till allokeraren: parametrar till callee-saved före syskonanrop (rättat på
+  `claude/vir-regalloc-impl-f22a1d`: över-anrop-testet går på levande
+  mängder).  Konstanter som en postvikning tar upp ska i stället markeras i
+  `vl_fix` (mem-biten) så att de aldrig får register: sänkningens sak.
+- Ombaserat på allokeringsgrenen (eab5ebd0): en uppsättning poster,
+  dess `I_LDX`/`I_STX`/`I_SMADDL`/`I_UMADDL`; `I_ADDXT`/`I_SUBXT` blev
+  `I_ADD`/`I_SUB` med cond 8 + option (som skiftsorterna).  Parvis, storlek
+  100: mot eab5ebd0 −6,8 % instr., −2,7 % cykler; mot virpol +6,8 % cykler;
+  mot clang -O2 +10,3 % (virpol mot clang -O2 +3,9 %).
+- Efter ombasering på 5ae88996 (allokerarens över-anrop-test): låg halva
+  (32-bitars retur, int-argument, genom blockparametrar) ger ingen
+  `mov wN, wN` (724 → 56 i sqlite3.s), switch indexerar tabellen med
+  väljaren själv (2e4ad9d8: −0,7 % instr., −0,1 % cykler); multiplikatorer
+  som `fmulk` viker får inget register (`vl_fix`: −0,4 % instr., cykler inom
+  bruset).  Mot virpol +5,5 % [+5,1 .. +5,7], mot clang -O2 ca +10 %.
+  Kvar här: `x * -1 + a` blir madd med −1 i stället för sub.
+- If-konvertering i byggaren (`vw_ifconv`, före `vw_split`): en gren vars armar
+  är tomma eller har högst två billiga instruktioner utan effekter och som
+  skiljer sig i ett värde vid sammanflödet blir `select`.  sqlite3.s: csel
+  0 → 984 (LLVM 980), villkorliga hopp 30360 → 29372, 438 färre
+  instruktioner statiskt; parvis +0,2 % instr., cykler −0,1 % [−0,8 .. +0,3]
+  och −0,9 % [−1,6 .. −0,3] i två körningar (inom bruset).  Mot virpol
+  +5,5 %, mot clang -O2 +10,0 %.  Kvar: konstanter i csel (csinc/wzr),
+  `and` + `subs` före csel som `tst`.
+- **Granskning (2026-11-12) och rättningar.**  Tre felkompileringar från den
+  här grenen, alla i postrensningen (`opt.c`), var och en med test som
+  faller utan rättningen (a51b4106): `exts` läste add med utökad operand som
+  vanlig 64-bitars add (`vir_ext_add_facts.c`); `flags` tog bort en jämförelse
+  vid en etikett som ett senare hopp går tillbaka till
+  (`vir_flags_backedge.c`); `fold` flyttade en läsning av x16/x17 förbi en
+  post som bygger om dem (`vir_scratch_fold.c`).  De äldre passen är inte
+  utsatta (bara x0–x15/x19–x28).  `returns_twice` och `setjmp_sites` gick i
+  tidsgräns genom VIR på grund av `flags`-felet: kända fel 5 → 3.
+  **Mätvärdena ovan från punkt 1 och framåt är för bra**: felet träffade
+  `sqlite3_str_vappendf` (en jämförelse vid ett slinghuvud saknades, hashen
+  stämde ändå).  Rättat: +2,2 % instr., +2,7 % cykler [+2,5 .. +2,7]; mot
+  virpol **+7,9 %** [+7,1 .. +8,6].
+- Volatile genom VIR (8dceb271): lokaler, bitfält, initierare och döda
+  lagringar; `bench/vcc-volatile.py` 32/32 (25/32 före), inte i CI än
+  (bara kört på macOS).
+- Låghalvssvepet går bakifrån (b096c081): 4000 kedjade `if` 0,57 s → 0,02 s.
+- Granskningens öppna punkter, väntar på beslut: if-konvertering som pass
+  över färdig VIR i stället för i byggarens för-IR; 32-bitars argument och
+  resultat i SPEC-vir.md (O1 säger att byggaren utökar, sänkningen antar
+  motsatsen); SPEC 15.3/15.4/1.3 mot koden (switch, svansanrop, vikningar).
+  Kompileringstid: `fwriter` är nu begränsad; `tbz_relax` kodar varje post i
+  funktioner med en tbz; byggaren nollar sin hashtabell i största storlek per
+  funktion (~6 % av sqlite).
+- Tester: `vir_branch_bits.c`, `vir_flags_reuse.c`, `vir_layout_exits.c`,
+  `vir_operand_fold.c`, `vir_byte_assembly.c`, `vir_constants.c` (.o och .s).
+
+### Underlag för V4 (2026-11-11): registerallokering, ingen kod
+
+- `RESEARCH-regalloc.md`: vad GCC (IRA, LRA) och LLVM (Greedy, Fast, PBQP,
+  MLGO) gör och var de är svaga; SSA-baserad allokering (kordala grafer,
+  Braun–Hacks spillning, tips i stället för sammanslagning); linjär
+  genomsökning och dess efterföljare (C1, Go, V8, JavaScriptCore, regalloc2,
+  TPDE, LuaJIT, QBE); optimala och inlärda metoder; jämförelsetabell.  Källa
+  per påstående, obekräftade punkter märkta.
+- **Svar på frågan "kan vi göra bättre än clang och gcc?":** på
+  kompileringstid ja, med stor marginal (två linjära svep i stället för
+  intervallträd och prioritetskö); på kodkvalitet nej i allmänhet.  Bättre
+  kod bara på några bestämda ställen: asm-alternativ (`"rm"`) avgörs i
+  allokeraren, valet av callee-sparat register görs med anropens läge känt,
+  och felklasserna kring delregister och tvåadressomskrivning före
+  allokeringen finns inte.  LLVM och GCC ligger före i delning styrd av
+  blockfrekvens, femton års specialfall och shrink-wrapping.
+- **Rekommendation (SPEC-vir.md utkast 0.4, avsnitt 15):** inte linjär
+  genomsökning över intervall.  Svep 5 (bakåt, tillsammans med `dce`) bygger
+  en stack med nästa användning per operand och live-in-listor per block;
+  svep 6 (framåt) tilldelar register girigt, följer tips och kastar ut värdet
+  med längst till nästa användning.  Ett värde med stackplats lagras en gång,
+  efter sin definition.  Antalet svep är oförändrat (7).  Reservalternativ om
+  kvalitetsgrinden i V7 faller på allokeringen: en bakåtspårande allokerare
+  i regalloc2:s stil bakom samma gränssnitt.
+- **Osäkert:** inga egna mätningar (alla tal är andras); kvalitet under
+  registertryck mot dagens Greedy är opublicerad; regeln för irreducibla
+  grafer är härledd här och måste täckas av `vir_alloc_check` och `fuzz-vir`;
+  budgeten 60 ns per VIR-instruktion för svep 5 och 6 är ett förslag.
+- **Mäts i V4:** `vbench.py ab emit` med `VCC_VIR=1`, statiska instruktioner
+  mot dagens `-O2`, clang och gcc, räknarna i `VCC_VIR_STATS`, och samma
+  TU-mängd genom clang med `-mllvm -regalloc=basic` för att se hur mycket
+  allokerarens kvalitet alls är värd.
 
 ### V1 verifier: säker och linjär slot-exponering
 

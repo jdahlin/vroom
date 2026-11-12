@@ -67,7 +67,7 @@ static const char ld_name[2][4][3][8] = {
 };
 static const char st_name[2][4][8] = { { "strb", "strh", "str", "str" }, { "sturb", "sturh", "stur", "stur" } };
 
-static inline int ld_x(const ins *i) { return i->sz == 3 || (i->op == I_LD && i->cond == 1) || (i->op == I_LDLO && i->cond == 1); }
+static inline int ld_x(const ins *i) { return i->sz == 3 || ((i->op == I_LD || i->op == I_LDX || i->op == I_LDLO) && i->cond == 1); }
 
 static void p_mem(tbuf *b, const ins *i)
 {
@@ -207,6 +207,19 @@ VPRIV void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *raw
 		return;
 	case I_ADD: case I_SUB: case I_ADDS: case I_SUBS: case I_AND: case I_ORR: case I_EOR:
 	case I_ANDS: case I_BIC: case I_ORN: case I_ADC: case I_SBC: case I_ADCS: case I_SBCS:
+		if (i->cond >= 8) {	/* extended register */
+			static const char xn[8][5] = { "uxtb", "uxth", "uxtw", "uxtx", "sxtb", "sxth", "sxtw", "sxtx" };
+			int o = i->cond - 8;
+
+			tb_c(b, '\t'), tb_n8(b, alu_name[i->op]), tb_c(b, '\t');
+			reg(b, i->rd, i->sz), tb_s(b, ", ");
+			reg(b, i->rn, i->sz), tb_s(b, ", ");
+			reg(b, i->rm, (o & 3) == 3), tb_s(b, ", "), tb_s(b, xn[o]);
+			if (i->sh)
+				tb_s(b, " #"), tb_u(b, i->sh);
+			tb_c(b, '\n');
+			return;
+		}
 		p_rrr(b, alu_name[i->op], i);
 		if (i->sh) {
 			tb_s(b, i->cond == 0 ? ", lsl #" : i->cond == 1 ? ", lsr #" : ", asr #");
@@ -278,6 +291,36 @@ VPRIV void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *raw
 		return;
 	case I_LD: case I_ST:
 		p_mem(b, i);
+		return;
+	case I_SMADDL: case I_UMADDL:
+		tb_s(b, i->op == I_SMADDL ? "\tsmaddl\t" : "\tumaddl\t");
+		reg(b, i->rd, 1);
+		tb_s(b, ", ");
+		reg(b, i->rn, 0);
+		tb_s(b, ", ");
+		reg(b, i->rm, 0);
+		tb_s(b, ", ");
+		reg(b, i->ra, 1);
+		tb_c(b, '\n');
+		return;
+	case I_LDX: case I_STX:
+		tb_c(b, '\t');
+		tb_n8(b, i->op == I_STX ? st_name[0][i->sz] : ld_name[0][i->sz][i->cond]);
+		tb_c(b, '\t');
+		reg(b, i->rd, i->op == I_STX ? i->sz == 3 : ld_x(i));
+		tb_s(b, ", [");
+		reg(b, i->rn, 1);
+		tb_s(b, ", ");
+		reg(b, i->rm, i->ra == 3);
+		if (i->ra != 3)
+			tb_s(b, i->ra == 6 ? ", sxtw" : ", uxtw");
+		else if (i->sh)
+			tb_s(b, ", lsl");
+		if (i->sh) {
+			tb_s(b, " #");
+			tb_i(b, i->sz);
+		}
+		tb_s(b, "]\n");
 		return;
 	case I_LDP: case I_STP:
 		tb_s(b, i->op == I_LDP ? "\tldp\t" : "\tstp\t");
@@ -367,6 +410,15 @@ VPRIV void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *raw
 	case I_CBZ: case I_CBNZ:
 		tb_s(b, i->op == I_CBZ ? "\tcbz\t" : "\tcbnz\t");
 		reg(b, i->rd, i->sz);
+		tb_s(b, ", ");
+		p_lbl(b, fid, i->label);
+		tb_c(b, '\n');
+		return;
+	case I_TBZ: case I_TBNZ:
+		tb_s(b, i->op == I_TBZ ? "\ttbz\t" : "\ttbnz\t");
+		reg(b, i->rd, i->sz);
+		tb_s(b, ", #");
+		tb_u(b, i->sh);
 		tb_s(b, ", ");
 		p_lbl(b, fid, i->label);
 		tb_c(b, '\n');

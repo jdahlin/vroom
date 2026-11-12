@@ -11,6 +11,30 @@ static bool em_tail_word(cc *c, qty t)
 	       (size == 4 || size == 8);
 }
 
+/* the caller's options and attributes allow sibling calls */
+VPRIV bool em_tail_caller_ok(ecx *e, uint32_t fn)
+{
+	return e->E->o->opt && !e->E->noopt && e->E->o->sibling_calls >= 0 && !e->E->o->instrument &&
+	       !sym_attrs(e->c, fn)->interrupt &&
+	       !(sym_attrs(e->c, fn)->flags & (AF_TAIL_DISABLE | AF_TAIL_RETURNS_TWICE | AF_OPTNONE));
+}
+
+/* function s may be a sibling call's target (as for its attributes) */
+VPRIV bool em_tail_target_ok(ecx *e, uint32_t s)
+{
+	cc *c = e->c;
+	const sym *target = &c->syms[s];
+
+	if (target->kind != S_FUNC || (target->flags & SF_NORETURN) ||
+	    sym_attrs(c, s)->error_fn || sym_attrs(c, s)->ifunc || sym_attrs(c, s)->interrupt ||
+	    (sym_attrs(c, s)->flags & (AF_TAIL_RETURNS_TWICE | AF_TAIL_NOT_CALLED)))
+		return false;
+	/* The standard nonlocal-jump entry points are special even when a caller
+	   supplies a plain prototype without the usual returns_twice attribute. */
+	return !(EM_IDENT_IS(target->name, "setjmp") || EM_IDENT_IS(target->name, "_setjmp") ||
+		 EM_IDENT_IS(target->name, "sigsetjmp") || EM_IDENT_IS(target->name, "__sigsetjmp"));
+}
+
 /* The target must separately reject unsupported ABI/frame states. Capability
    is deliberately absent for default WebAssembly, whose MVP has no tail call. */
 VPRIV bool em_tail_candidate(ecx *e, uint32_t fn, uint32_t expr, uint32_t maxargs, uint32_t *callee)
@@ -23,8 +47,7 @@ VPRIV bool em_tail_candidate(ecx *e, uint32_t fn, uint32_t expr, uint32_t maxarg
 	const ctype *ct;
 	uint32_t s;
 
-	if (!e->E->o->opt || e->E->noopt || e->E->o->sibling_calls < 0 || e->E->o->instrument ||
-	    !expr || body->op != N_BLOCK || body->c != 1 || body->aux > maxargs ||
+	if (!em_tail_caller_ok(e, fn) || !expr || body->op != N_BLOCK || body->c != 1 || body->aux > maxargs ||
 	    (ft->flags & (TF_VARIADIC | TF_NOPROTO)))
 		return false;
 	ret = N(c->lists[body->b]);
@@ -41,16 +64,7 @@ VPRIV bool em_tail_candidate(ecx *e, uint32_t fn, uint32_t expr, uint32_t maxarg
 	name = N(fdec->a);
 	s = canon_sym(c, name->a);
 	target = &c->syms[s];
-	if (target->kind != S_FUNC || (target->flags & (SF_NORETURN | SF_ALWAYS_INLINE | SF_INLINE)) ||
-	    sym_attrs(c, s)->error_fn || sym_attrs(c, s)->ifunc ||
-	    sym_attrs(c, fn)->interrupt || sym_attrs(c, s)->interrupt ||
-	    (sym_attrs(c, fn)->flags & (AF_TAIL_DISABLE | AF_TAIL_RETURNS_TWICE | AF_OPTNONE)) ||
-	    (sym_attrs(c, s)->flags & (AF_TAIL_RETURNS_TWICE | AF_TAIL_NOT_CALLED)))
-		return false;
-	/* The standard nonlocal-jump entry points are special even when a caller
-	   supplies a plain prototype without the usual returns_twice attribute. */
-	if (EM_IDENT_IS(target->name, "setjmp") || EM_IDENT_IS(target->name, "_setjmp") ||
-	    EM_IDENT_IS(target->name, "sigsetjmp") || EM_IDENT_IS(target->name, "__sigsetjmp"))
+	if ((target->flags & (SF_ALWAYS_INLINE | SF_INLINE)) || !em_tail_target_ok(e, s))
 		return false;
 	ct = T(c, target->ty);
 	if (ct->kind != TY_FUNC || (ct->flags & (TF_VARIADIC | TF_NOPROTO)) ||

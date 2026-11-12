@@ -23,10 +23,16 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
 - `PLAN-release.md`: what vcc 1.0 is and its release gates G0-G9 (Swedish);
   work toward the release should move a gate, and update its status there.
 - `RESEARCH-preprocessor.md`: preprocessor design and prior art.
+- `REVIEW-vir-lowering.md`: review of the VIR builder, format and arm64
+  lowering (2026-11-12): bugs fixed and open, compile-time and runtime
+  findings, spec drift, decisions needed.
 - `PLAN-vir.md` (Swedish, steps V0-V7), `SPEC-vir.md` (VIR format, draft) and
   `RESEARCH-vir.md` (LLVM IR's problems): VIR, an SSA IR used only at `-O2`,
   built by compiling the shared walker a second time against a virtual
   lowering target.  Update the status of a step in `PLAN-vir.md`.
+- `RESEARCH-regalloc.md`: register allocation (GCC, LLVM, SSA-based, linear
+  scan and its descendants, optimal and learned methods) and the allocator
+  `SPEC-vir.md` section 15 specifies for VIR, with its fallback.
 - `ccs/`: our code; `ccs/Makefile` builds into `build/ccs/`.  Under `ccs/vcc/`
   generic code is in the component directories, code for one target CPU in
   `arch/<cpu>/<component>/`, code for one target OS in `platform/<os>/`
@@ -167,10 +173,12 @@ bench/vcc-dwarf.py -j 6             # -g line tables: dwarfdump --verify, .text 
 bench/vlink-bad.py                  # corrupt objects/archives: vlink (ASan) fails cleanly (<1 s)
 bench/vlink-opts.py                 # vlink options vs ld.lld: errors and loaded image (<1 s)
 bench/vcc-pic.py                    # GOT and TLS relocations per -fno-pic/-fPIE/-fPIC vs clang (<1 s)
+bench/vcc-volatile.py               # volatile loads/stores kept one for one, direct emitter and VIR (tests/volatile, <1 s)
 bench/vir-test.py -j 6              # VIR: parser/printer round trip, verifier rules, canon, dominators (ccs/vcc/tests/vir, ~1 s)
 bench/vir-exposure.py               # VIR: generated long, cyclic and multi-slot exposure checks (<1 s)
 bench/vir-test.py --mutate 3000 --bin-dir build/ccs-asan   # random mutants of those units: virtest never crashes (~1 min)
 bench/vcc-ctests.py -j 6 --suite vcc # our own regression tests (ccs/vcc/tests/vcc), ~1 s
+bench/vcc-ctests.py -j 6 --suite inline   # gcc/llvm inlining and IPA run tests (ccs/vcc/tests/inline); VCC_VIR=bl for VIR's inliner
 bench/vcc-ctests.py -j 6 --cpu cortex-a53   # vcc's binaries on a CPU without LSE (atomics as LL/SC)
 VCC_LDCMP=1 bench/vcc-ctests.py -j 6 --no-cache  # also link with vlink: loaded image byte-identical to lld's (VCC_LD=vlink: run vlink's)
                                     # VCC_CFLAGS=-fasynchronous-unwind-tables: extra flags for both compilers (.eh_frame)
@@ -202,6 +210,9 @@ bench/vcc-mutate.py -j 6 --fix       # ... vcc --fix on every rejected mutant: n
 bench/vcc-explain.py                # docs/diag pages: the wrong example gives the id, the fixed one nothing
 bench/gen-explain.py [--check]      # driver/explain.inc from ccs/vcc/docs/diag/*.md (vcc --explain ID)
 bench/gen-walkprefix.py [--check]   # emit/walk/prefix.h: the walker's function names, WK_PREFIX compiles it under another name (VIR)
+build/ccs/viralloc --sweep F.vir     # VIR register allocation (vir/alloc.c) on a synthetic target: dump + counters, checker at every register count
+bench/vir-alloc.py [--bless]        # ccs/vcc/tests/vir-alloc: expected dumps and sweeps (<1 s); `random -n N`: generated functions (~1 s/unit)
+bench/vir-alloc.py mutate|time      # the checker catches corrupted allocations; ns per VIR instruction (budget 200 for now, target 60: SPEC 22.1)
 bench/vcc-bflayout.py               # generated bit-field records, layouts checked by clang, Linux + Apple (~1 s)
 bench/vcc-ldconst.py                # generated long double literals and folds, bits vs clang (~2 s)
 bench/vcc-f80.sh [N]                # x87 long double folding (lib/f128.h) vs this x86-64 host's FPU (~3 s)
