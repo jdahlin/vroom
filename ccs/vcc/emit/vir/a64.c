@@ -44,7 +44,11 @@ typedef struct vl {
 	uint32_t pval;		/* a ptradd the next load or store addresses through (0 none) */
 	int pbase;		/* ... its base register */
 	int64_t poff;		/* ... and offset */
+	uint32_t xval;		/* a ptradd the next load or store addresses through as [base, index] (0 none) */
+	int xbase, xreg;	/* ... its base register, the index's */
+	uint8_t xopt, xsh;	/* ... the index's extension (2 uxtw, 3 lsl, 6 sxtw), scaled by the access size */
 	uint32_t ei, eend;	/* the block's edits: the next one, the end */
+	uint32_t eb;		/* ... the first */
 	bool risk;		/* x17 held data across a frame access: the frame must stay small */
 	bool tail;		/* a call right before a ret may be a sibling call (vl_notail) */
 	bool ret32;		/* the function returns a 32-bit integer: the upper half of x0 is unspecified */
@@ -620,8 +624,19 @@ static void vl_load(vl *L, uint32_t i, const vir_ins *in, uint8_t res)
 	int w = VIF_W(in->fl), fl = in->ty == VT_F32 || in->ty == VT_F64;
 	int ext = fl || w == 3 || !(in->fl & VIF_MS) ? 0 : in->ty == VT_I32 || L->lo32[i] ? (w == 2 ? 0 : 2) : 1;
 	int rd = fl || res == VR_NONE ? R_X16 : vl_gx(res);
-	lval l = vl_addr(L, in->fl, R_X16);
+	lval l;
 
+	if (L->xval && L->xval == L->ov[0]) {
+		ins *x = put(e, I_LDX);
+
+		x->sz = (uint8_t)w, x->cond = (uint8_t)ext, x->rd = (uint8_t)rd, x->rn = (uint8_t)L->xbase;
+		x->rm = (uint8_t)L->xreg, x->ra = L->xopt, x->sh = L->xsh;
+		L->xval = 0;
+		if (fl && res != VR_NONE)
+			word(e, f_in(in->ty == VT_F64, vl_gv(res), R_X16));
+		return;
+	}
+	l = vl_addr(L, in->fl, R_X16);
 	if (l.k == L_SYM && ext != 2) {
 		load_n(e, rd, &l, 1 << w, ext);
 	} else if (l.k == L_SYM) {
@@ -639,7 +654,8 @@ static void vl_store(vl *L, const vir_ins *in)
 	ecx *e = L->e;
 	int w = VIF_W(in->fl);
 	uint32_t v = L->ov[1];
-	lval l = vl_addr(L, in->fl, R_X16);
+	bool xa = L->xval && L->xval == L->ov[0];
+	lval l = xa ? (lval){ .k = L_REG, .r = (uint8_t)L->xbase } : vl_addr(L, in->fl, R_X16);
 	int base_t = l.k == L_SYM || (l.k == L_REG && l.r == R_X16);	/* the address needs x16 */
 	int rs;
 
@@ -651,10 +667,17 @@ static void vl_store(vl *L, const vir_ins *in)
 	} else {
 		rs = vl_ix(L, 1, base_t ? R_X17 : R_X16);
 	}
-	if (l.k == L_SYM)
+	if (xa) {
+		ins *x = put(e, I_STX);
+
+		x->sz = (uint8_t)w, x->rd = (uint8_t)rs, x->rn = (uint8_t)L->xbase, x->rm = (uint8_t)L->xreg;
+		x->ra = L->xopt, x->sh = L->xsh;
+		L->xval = 0;
+	} else if (l.k == L_SYM) {
 		store_n(e, rs, &l, 0, 1 << w);
-	else
+	} else {
 		mem(e, I_ST, w, 0, rs, l.k == L_FRAME ? FRAME : l.r, l.off);
+	}
 }
 
 /* an address operand of memcpy/memset: base register and offset */
@@ -1018,6 +1041,74 @@ static bool vl_pfold(vl *L, uint32_t b, uint32_t i)
 	return true;
 }
 
+/* a folded value: used once, by the next instruction, never in a slot */
+static bool vl_once(const vl *L, uint32_t v) { return L->uses[v] == 1 && L->o->slot[v] == VIR_NOBLK; }
+
+/* ptradd p with a variable index, used once by the next instruction, a load or store through it:
+ * the access [base, index] with the index's extension and scaling folded ([ext] [mul or shl by
+ * the access size] in the instructions right before p, each used once by the next); *first: the
+ * first instruction of the chain, *xv the index's value.  The skipped instructions write no
+ * register, so the base and index are still where they were when no edit comes in between. */
+static bool vl_xinfo(const vl *L, uint32_t b, uint32_t p, uint32_t *first, uint32_t *xv, uint8_t *opt, uint8_t *sh)
+{
+	const vir_fn *f = L->f;
+	const vir_blk *k = &f->blk[b];
+	const vir_ins *in = &f->ins[p], *m = &f->ins[p + 1];
+	uint32_t j = in->b, w;
+
+	if (in->op != VO_PTRADD || p + 1 >= k->first + k->n || m->a != p || !vl_once(L, p) ||
+	    (m->op != VO_LOAD && !(m->op == VO_STORE && m->b != p)) || vl_isconst(f, in->a) || vl_isconst(f, j))
+		return false;
+	w = VIF_W(m->fl);
+	*first = p, *xv = j, *opt = 3, *sh = 0;
+	if (j + 1 == p && j > k->first + k->nparam && vl_once(L, j) && w &&
+	    ((f->ins[j].op == VO_MUL && vl_iconst(f, f->ins[j].b) && vl_pow2(&f->ins[f->ins[j].b]) == (int)w) ||
+	     (f->ins[j].op == VO_SHL && vl_iconst(f, f->ins[j].b) && vl_ival(&f->ins[f->ins[j].b]) == (int64_t)w)) &&
+	    !vl_isconst(f, f->ins[j].a)) {
+		*first = j, *xv = f->ins[j].a, *sh = 1;
+		j = f->ins[j].a;
+	}
+	if (j + 1 == *first && j >= k->first + k->nparam && vl_once(L, j) && f->ins[j].op == VO_EXT &&
+	    VIF_W(f->ins[j].fl) == 2 && f->ins[j].ty == VT_I64 && !vl_isconst(f, f->ins[j].a)) {
+		*first = j, *xv = f->ins[j].a, *opt = f->ins[j].fl & VIF_MS ? 6 : 2;
+	}
+	for (uint32_t x = L->eb; x < L->eend && L->o->edit[x].pos <= p + 1; x++)	/* (the same answer at each) */
+		if (L->o->edit[x].pos > *first)
+			return false;
+	return true;
+}
+
+/* instruction i (lowered with its operands collected) is part of a chain vl_xinfo folds: true,
+ * nothing to emit; the index's register taken at the chain's first instruction, the base's at
+ * the ptradd */
+static bool vl_xfold(vl *L, uint32_t b, uint32_t i)
+{
+	const vir_fn *f = L->f;
+	uint32_t first, xv;
+	uint8_t opt, sh;
+
+	for (uint32_t p = i; p <= i + 2 && p < f->blk[b].first + f->blk[b].n; p++) {
+		if (f->ins[p].op != VO_PTRADD)
+			continue;
+		if (!vl_xinfo(L, b, p, &first, &xv, &opt, &sh) || first > i)
+			return false;
+		if (i == first) {
+			uint8_t r = L->opr[i == p ? 1 : 0];
+
+			if (r == VR_NONE || vl_fcls(r))
+				vl_fail(L, "VIR lowering: an index without a register");
+			L->xreg = vl_gx(r);
+		}
+		if (i == p) {
+			if (L->opr[0] == VR_NONE || vl_fcls(L->opr[0]))
+				vl_fail(L, "VIR lowering: a base without a register");
+			L->xval = p, L->xbase = vl_gx(L->opr[0]), L->xopt = opt, L->xsh = sh;
+		}
+		return true;
+	}
+	return false;
+}
+
 /* the block a branch to t ends up in: past blocks that are a lone br without moves */
 static uint32_t vl_chase(vl *L, uint32_t t) { return L->chs[t]; }
 
@@ -1079,7 +1170,7 @@ static void vl_ins(vl *L, uint32_t b, uint32_t i, uint8_t res)
 		vl_param(L, in, res);
 		return;
 	case VO_PTRADD:
-		if (vl_pfold(L, b, i))
+		if (vl_pfold(L, b, i) || vl_xfold(L, b, i))
 			return;
 		__attribute__((fallthrough));
 	case VO_ADD: case VO_SUB: case VO_AND: case VO_OR: case VO_XOR: {
@@ -1100,6 +1191,8 @@ static void vl_ins(vl *L, uint32_t b, uint32_t i, uint8_t res)
 		op3(e, I_SUB, 1, rd, vl_ix(L, 0, R_X16), vl_ix(L, 1, R_X17));
 		return;
 	case VO_MUL:
+		if (vl_xfold(L, b, i))
+			return;
 		if (L->opr[1] == VR_NONE && vl_iconst(f, in->b)) {
 			int w = x ? 64 : 32, k = vl_pow2(&f->ins[in->b]);
 
@@ -1121,6 +1214,8 @@ static void vl_ins(vl *L, uint32_t b, uint32_t i, uint8_t res)
 		return;
 	}
 	case VO_SHL: case VO_LSHR: case VO_ASHR: {
+		if (in->op == VO_SHL && vl_xfold(L, b, i))
+			return;
 		int a = vl_ix(L, 0, R_X16), w = x ? 64 : 32;
 
 		if (L->opr[1] == VR_NONE && vl_iconst(f, in->b)) {
@@ -1161,6 +1256,8 @@ static void vl_ins(vl *L, uint32_t b, uint32_t i, uint8_t res)
 		op3(e, I_REV, x, rd, vl_ix(L, 0, R_X16), 0);
 		return;
 	case VO_EXT: {
+		if (vl_xfold(L, b, i))
+			return;
 		int w = VIF_W(in->fl), a = vl_ix(L, 0, R_X16);
 
 		if (w == 3 || (w == 2 && (!x || ((in->fl & VIF_MS) && L->lo32[i]))))
@@ -1376,7 +1473,8 @@ static void vl_body(vl *L)
 			continue;
 		deflabel_forced(e, L->lbl[b]);
 		L->fcc = -1, L->fzr = -1;
-		L->pval = 0;
+		L->pval = 0, L->xval = 0;
+		L->eb = ei, L->eend = eend;
 		L->ntr = 0;
 		for (uint32_t q = 0; q < k->nparam; q++) {
 			uint8_t r = o->opr[pos++];

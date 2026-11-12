@@ -54,6 +54,10 @@ static unsigned roles_sw(const ins *i)
 	case I_CLZ: case I_CLS: case I_RBIT: case I_REV: case I_REV16: case I_REV32:
 	case I_LD: case I_ADDLO: case I_LDLO:
 		return RN_R | RD_W;
+	case I_LDX:
+		return RN_R | RM_R | RD_W;
+	case I_STX:
+		return RD_R | RN_R | RM_R;
 	case I_BFM:
 		return RD_R | RN_R | RD_W;
 	case I_MADD: case I_MSUB:
@@ -554,7 +558,7 @@ static void slots(ecx *e)
 			for (; w; w &= w - 1)
 				ver[__builtin_ctzll(w)]++;
 			if (SL.rc[k] < 0) {
-				if (i->op == I_ST || i->op == I_STLO || i->op == I_STP || i->op == I_BL || i->op == I_BLR ||
+				if (i->op == I_ST || i->op == I_STX || i->op == I_STLO || i->op == I_STP || i->op == I_BL || i->op == I_BLR ||
 				    i->op == I_TLV || i->op == I_RAW || W.rr[k] == GPRS)
 					mver++;	/* may write an escaped cell */
 				continue;
@@ -623,7 +627,7 @@ static bool xresult(const xf *f, const ins *i, unsigned *zo, unsigned *so)
 	unsigned zn = xz(f, rn), sn = xs(f, rn);
 
 	switch (i->op) {
-	case I_LD: case I_LDLO:
+	case I_LD: case I_LDX: case I_LDLO:
 		if (i->sz == 3)
 			return false;
 		if (i->cond == 0)

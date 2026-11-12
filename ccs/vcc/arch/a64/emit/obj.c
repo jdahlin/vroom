@@ -251,6 +251,10 @@ static unsigned enc(const ins *i, uint32_t *w, pfix *f, const uint32_t *loff, ui
 				: a64_ldst_imm9((unsigned)sz, 0, opc, 0, R5(i->rd), R5(base), (int)off);
 		return n;
 	}
+	case I_LDX: case I_STX:	/* register offset */
+		w[0] = (uint32_t)i->sz << 30 | 0x38200800u | (i->op == I_STX ? 0 : ld_opc[i->sz][i->cond]) << 22 |
+		       R5(i->rm) << 16 | (uint32_t)i->ra << 13 | (i->sh ? 1u << 12 : 0) | R5(i->rn) << 5 | R5(i->rd);
+		return 1;
 	case I_LDP: case I_STP:
 		w[0] = a64_ldstp(2, 0, i->cond == 0 ? 2 : i->cond == 1 ? 3 : 1, i->op == I_LDP, R5(i->rd), R5(i->ra), R5(i->rn),
 				 (int)(i->imm / 8));

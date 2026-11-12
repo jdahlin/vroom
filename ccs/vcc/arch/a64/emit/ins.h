@@ -24,6 +24,8 @@ enum {
 	I_CLZ, I_CLS, I_RBIT, I_REV, I_REV16, I_REV32,
 	/* memory: sz = log2 bytes; cond: 0 zero-extend, 1 sign-extend to x, 2 to w; [rn + imm] */
 	I_LD, I_ST,
+	/* [rn + (rm extended by ra, shifted left by sz when sh)]: ra 2 uxtw, 3 lsl (x), 6 sxtw; sz, cond as I_LD */
+	I_LDX, I_STX,
 	I_LDP, I_STP,	/* x regs rd, ra; [rn + imm]; cond: 0 offset, 1 pre-index, 2 post-index */
 	/* symbol references: ref (see refs below), off: addend */
 	I_ADRP,		/* rd = page(ref + off) */
