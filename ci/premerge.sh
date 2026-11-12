@@ -75,6 +75,8 @@ arm64)
 
 	step flow-contracts python3 bench/vcc-flow.py --sanitize
 	step flow-values python3 bench/vcc-flow-values.py --sanitize
+	step vir-tests python3 bench/vir-test.py -j "$J" --bin-dir "$BUILD"
+	step vir-exposure python3 bench/vir-exposure.py --bin-dir "$BUILD"
 	step rec-dead python3 bench/vcc-rec-dead.py --sanitize
 	step emit-names python3 bench/vcc-emit-names.py --sanitize
 	step unused-init-contracts python3 bench/vcc-unused-init.py --sanitize
@@ -134,6 +136,8 @@ asan)
 	# its arenas and caches mapped, by design, so every compile would "leak"
 	export ASAN_OPTIONS=${ASAN_OPTIONS:+$ASAN_OPTIONS:}detect_leaks=0
 	step ctests-vcc   env VCC_BIN="$B" python3 bench/vcc-ctests.py -j "$J" --suite vcc
+	step vir-tests-asan python3 bench/vir-test.py -j "$J" --bin-dir "$B"
+	step vir-exposure-asan python3 bench/vir-exposure.py --bin-dir "$B"
 	step atomic       python3 bench/vcc-atomic.py --bin-dir "$B" --target aarch64-linux-gnu
 	step bitint-replay python3 bench/vcc-bitint-replay.py --bin-dir "$B" --output "$LOGS/bitint-replay-asan"
 	step diag         python3 bench/vcc-diag.py -j "$J" --bin-dir "$B"
