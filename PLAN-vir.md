@@ -672,13 +672,45 @@ så varje varv gjorde fyra `mov` och två extra hopp.
   i `treg`; 3–32 föregångare).  Den sällsynta vägen får flyttarna.
 - **Resultat:** den heta slingan 16 → 10 instruktioner (clang 12).  zbench mot
   clang: deflate-9 1,09x → 1,05x, totalt 1,10x → 1,08x; `.text` 79896 → 79860.
-- **Kvar i `longest_match`:** `s->window` läses om varje varv (ingen LICM av
-  laddningar); utanför: `slide_hash` (clang vektoriserar), `crc32_z` (inline
+- **Kvar** (efter nästa avsnitt): `slide_hash` (clang vektoriserar), `crc32_z` (inline
   asm, går inte genom VIR).
 - Verifierat: vir-alloc 17/17, random 300, mutate, vir-test 119/119;
   vcc-ctests med `VCC_VIR=bl VCC_VIR_CHECK=1` 2077/2080 (de tre felen,
   `.Lswitch.values`, finns före ändringen); inline 85/85; sqlite3.c genom VIR
   med kontrollen; zlib-testerna ger clangs byte.
+
+### zlib: en laddning återanvänds över block och slingor (2026-11-12)
+
+Byggarens värdenumrering (`vw_simplify`) återanvände en laddning bara inom ett
+minnestillstånd: det bröts vid varje sammanflöde och varje lagring, och adressen
+(`ptradd`) numreras per block, så `s->window` lästes om i varje varv av
+`longest_match` trots att den lästs före slingan.
+- **Åtgärd** (`build.c`, `vw_far`): en andra tabell håller varje laddning per
+  bas + konstant offset för blocken den dominerar.  En senare laddning av samma
+  byte blir det värdet när inget däremellan kan skriva dem; "däremellan" är
+  positionerna i omvänd postordning efter den första fram till den andra, eller
+  till slutet av den yttersta slinga som håller den andra men inte den första
+  (resonemanget står i kommentaren).  En lagring till samma bas på ett annat
+  offsetintervall skriver inte; annan bas, anrop, `memcpy`, atomära och asm
+  skriver allt.  Högst 32 skrivare granskas per laddning.  Ingen laddning
+  flyttas eller läggs till: en slingas laddning försvinner bara när samma
+  laddning redan finns i ett dominerande block (äkta LICM med förhuvud kvarstår).
+- **zlib** (zbench mot clang -O2): totalt 1,08x → 1,03x, deflate-9 1,05x →
+  1,00x, deflate-6 1,14x → 1,09x; deflate.c 1789 → 1553 laddningar, `.text`
+  79860 → 78304.
+- **sqlite** (genom VIR): laddningar 67304 → 65311, text 1217388 → 1209808,
+  speedtest1 --size 100 CPU 2,785 s → 2,808 s (+0,8 %, inom bruset; fler värden
+  lever över block), kompilering av sqlite3.c 0,632 → 0,643 s.
+- Också rättat: `vw_simp1` räknade `k + 1` med tecken för masken `INT64_MAX`
+  (UBSan, nio tester i vcc-sviten under `build/ccs-asan`).
+- Test: `tests/vcc/vir_load_far.c` (lagring efter laddningen i kroppen, genom
+  annan pekare, överlappande smalare och bredare, anrop, inre slinga, en arm,
+  goto-slinga med ingång i mitten, variabelt index, flydd lokal).
+- Verifierat: vcc-ctests med `VCC_VIR=bl VCC_VIR_CHECK=1` 2077/2080 (samma tre
+  `.Lswitch.values` som förut) och under ASan+UBSan (utöver dem två fel i
+  framänden, `gcc/eeprof-1` och `gcc/pr105613`, inte i VIR); inline 85/85;
+  vir-test, vcc-volatile; sqlite3.c under ASan; zlib ger clangs byte; sqlite
+  speedtest1 samma verifieringshash.
 
 ### Underlag för V4 (2026-11-11): registerallokering, ingen kod
 

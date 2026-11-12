@@ -125,6 +125,9 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   `fill_window` 19x clang's share (clang vectorizes `slide_hash`),
   `deflate_fast` 1.6x, `compress_block` 1.25x, `pqdownheap` not inlined into
   `build_tree`; `.text` 79896 bytes against clang's 71598 and vcc's 72580.
+  After the allocator's parameter vote and load reuse across blocks
+  (PLAN-vir.md, 2026-11-12): VIR 1.03x in total, deflate-9 1.00x, deflate-6
+  1.09x, deflate-1 1.36x; `.text` 78304.
 - [ ] **T14 the kernel runs, not just boots.**  KUnit built in
   (`CONFIG_KUNIT=y` plus the common suites, run at boot, TAP on the
   console), compared with the clang build's TAP; then kselftests and an LTP
