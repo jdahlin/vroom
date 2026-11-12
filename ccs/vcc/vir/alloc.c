@@ -1161,6 +1161,34 @@ static void save_state(A *a, uint32_t *off, uint32_t *cnt, uint32_t b)
 	cnt[b] = a->npair - off[b];
 }
 
+/* q, not read in b, is read near the top of each successor of b (two at most) before any call there (a
+ * join's value the next test reads: in its slot it would be stored on each edge and loaded
+ * at once) */
+static bool read_next(A *a, uint32_t b, uint32_t q)
+{
+	vir_fn *f = (vir_fn *)a->f;
+
+	if (ax.soff[b + 1] - ax.soff[b] > 2)
+		return false;
+	for (uint32_t s = ax.soff[b]; s < ax.soff[b + 1]; s++) {
+		const vir_blk *k = &f->blk[ax.succ[s]];
+		uint32_t end = k->first + (k->n < k->nparam + 16 ? k->n : k->nparam + 16);
+		bool hit = false;
+
+		for (uint32_t i = k->first + k->nparam; i < end && !hit && f->ins[i].op != VO_CALL; i++) {
+			vir_oit it;
+			uint32_t *p;
+
+			vir_oit_init(&it, f, &f->ins[i], false);
+			while ((p = vir_oit_next(&it)))
+				hit |= *p == q;
+		}
+		if (!hit)
+			return false;
+	}
+	return ax.soff[b + 1] > ax.soff[b];
+}
+
 static bool livein(A *a, uint32_t v, uint32_t b)
 {
 	const vir_fn *f = a->f;
@@ -1282,13 +1310,15 @@ static void enter(A *a, uint32_t b)
 				r = (int)h;
 			else
 				r = choose(a, q, c, 0);
-			/* a web's parameter that lives across a call and is not used soon (not in b, or
-			 * after a call, or only passed on by b's br) enters in the web's slot: the edges
-			 * then move nothing for an argument already there */
+			/* a web's parameter that lives across a call and is not used soon (not in b nor
+			 * at the top of each successor, or after a call, or only passed on by b's br)
+			 * enters in the web's slot: the edges then move nothing for an argument already
+			 * there */
 			if (r >= 0 && wvalid(a, q) != NOWEB) {
 				uint32_t u = ax.nu[q], e = blk_last(f, b);
 				const vir_ins *t = &f->ins[e];
-				bool late = !u || u > e || (ax.vfl[q] & CALLFIRST);
+				bool late = (!u || u > e || (ax.vfl[q] & CALLFIRST)) &&
+					    !((!u || u > e) && !(ax.vfl[q] & CALLFIRST) && read_next(a, b, q));
 
 				if (u == e && t->op == VO_BR && t->a <= b) {
 					/* only passed on, to a parameter placed already (a loop's header): where
