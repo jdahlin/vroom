@@ -81,6 +81,7 @@
 #undef wk_loop_push
 #undef wk_lval
 #undef wk_mem
+#undef wk_mem_inline
 #undef wk_newlabel
 #undef wk_optype
 #undef wk_opw

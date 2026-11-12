@@ -83,6 +83,7 @@
 #define wk_loop_push WK_NAME(wk_loop_push)
 #define wk_lval WK_NAME(wk_lval)
 #define wk_mem WK_NAME(wk_mem)
+#define wk_mem_inline WK_NAME(wk_mem_inline)
 #define wk_newlabel WK_NAME(wk_newlabel)
 #define wk_optype WK_NAME(wk_optype)
 #define wk_opw WK_NAME(wk_opw)

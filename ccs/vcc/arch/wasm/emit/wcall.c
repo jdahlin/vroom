@@ -80,11 +80,11 @@ static bool wlib_type(cc *c, const char **pp, int enc, uint8_t *out)
 	return true;
 }
 
+static bool wlib_named(cc *c, const char *nm, wlsig *g);
+
 static bool wlib(cc *c, uint32_t ref, wlsig *g)
 {
 	const sym *y;
-	const char *p;
-	int enc;
 	char nm[128];
 
 	if (RKIND(ref) != RK_SYM)
@@ -94,6 +94,15 @@ static bool wlib(cc *c, uint32_t ref, wlsig *g)
 		return false;
 	memcpy(nm, vintern_ents[y->name].s, vintern_ents[y->name].len);
 	nm[vintern_ents[y->name].len] = 0;
+	return wlib_named(c, nm, g);
+}
+
+/* the library function nm's prototype (cc_lib_sig) as wasm types */
+static bool wlib_named(cc *c, const char *nm, wlsig *g)
+{
+	const char *p;
+	int enc;
+
 	p = cc_lib_sig(nm, &enc);
 	if (!p || !wlib_type(c, &p, enc, &g->r))
 		return false;
@@ -392,9 +401,10 @@ VPRIV int wcall(ecx *e, uint32_t n, bool want)
 	int k;
 	uint32_t nfix = f->n;
 	wlsig lg;
-	bool lib = false;
+	bool lib = false, chk = false;	/* chk: a fortified call as the plain one, lg its prototype */
 
 	uint32_t def = 0;
+	uint32_t na = x->c;	/* the arguments passed (a fortified call drops the object size) */
 	i128 constant;
 
 	if (c->o->opt && !e->E->noopt && em_const_strcmp(c, n, &constant)) {
@@ -403,7 +413,27 @@ VPRIV int wcall(ecx *e, uint32_t n, bool want)
 		return want ? WT_I32 : WT_NONE;
 	}
 
-	if (ref && RKIND(ref) == RK_SYM && x->c == 1 && !(c->syms[RIDX(ref)].flags & SF_DEFINED) &&
+	if (ref && RKIND(ref) == RK_NAME && na >= 3 && cc_builtin_libkind(RIDX(ref)) == CC_LIB_CHK) {
+		/* __builtin___X_chk whose check cannot fail: the plain X, as clang */
+		cval ov, lv;
+		bool oc = cc_eval(c, c->lists[x->b + na - 1], &ov) && ov.kind == CV_INT;
+		bool lc = na >= 4 && cc_eval(c, c->lists[x->b + na - 2], &lv) && lv.kind == CV_INT;
+		uint64_t osz = oc ? (uint64_t)ov.i : 0;
+		int64_t p;
+
+		if (WASM32(c) && osz == 0xffffffffu)
+			osz = ~(uint64_t)0;	/* (size_t)-1: the unknown object size */
+		p = cc_chk_simplify(RIDX(ref), (int)na, oc, osz, lc, lc ? (uint64_t)lv.i : 0);
+
+		/* (called with the plain function's prototype: the builtin's type has the object size) */
+		if (p >= 0 && !side_effects(c, c->lists[x->b + na - 1]) &&
+		    wlib_named(c, cc_builtin_name(p) + 10, &lg) && !lg.va && lg.np == na - 1) {
+			ref = REF(RK_NAME, (uint32_t)p);
+			na--;
+			chk = true;
+		}
+	}
+	if (ref && RKIND(ref) == RK_SYM && na == 1 && !(c->syms[RIDX(ref)].flags & SF_DEFINED) &&
 	    EM_IDENT_IS(c->syms[RIDX(ref)].name, "alloca"))
 		return walloca(e, c->lists[x->b]);	/* clang: alloca is a builtin, declared or not */
 	switch (wsjlj_kind(c, n)) {
@@ -415,9 +445,9 @@ VPRIV int wcall(ecx *e, uint32_t n, bool want)
 	{
 		const char *mi = wmath_insn(c, ref, f);
 
-		if (mi && x->c == f->n) {
+		if (mi && na == f->n) {
 			/* sqrt(x): f64.sqrt; the arguments converted to the parameters' type */
-			for (uint32_t i = 0; i < x->c; i++) {
+			for (uint32_t i = 0; i < na; i++) {
 				uint32_t a = c->lists[x->b + i];
 
 				wexpr(e, a, true);
@@ -435,11 +465,11 @@ VPRIV int wcall(ecx *e, uint32_t n, bool want)
 	if (noproto && ref && RKIND(ref) == RK_SYM && c->syms[RIDX(ref)].body &&
 	    N(c->syms[RIDX(ref)].body)->op == N_BLOCK && c->syms[RIDX(ref)].kind == S_FUNC)
 		def = RIDX(ref);	/* a K&R definition here: its parameters, extra arguments dropped */
-	if (!def && noproto && ref && wlib(c, ref, &lg) && (lg.va ? x->c >= lg.np : x->c == lg.np)) {
+	if (chk || (!def && noproto && ref && wlib(c, ref, &lg) && (lg.va ? na >= lg.np : na == lg.np))) {
 		/* clang: an implicitly declared library function has its library prototype */
 		bool ok = true;
 
-		for (uint32_t i = 0; i < x->c; i++) {
+		for (uint32_t i = 0; i < na; i++) {
 			int ak = wty(c, N(c->lists[x->b + i])->ty);
 
 			ok &= ak != WT_MEM && ak != WT_NONE;
@@ -460,7 +490,7 @@ VPRIV int wcall(ecx *e, uint32_t n, bool want)
 		/* the variadic arguments' buffer, laid out first */
 		uint32_t mal = 1;
 
-		for (uint32_t i = nfix; i < x->c; i++) {
+		for (uint32_t i = nfix; i < na; i++) {
 			uint64_t sz;
 			uint32_t al;
 			bool ind;
@@ -471,13 +501,13 @@ VPRIV int wcall(ecx *e, uint32_t n, bool want)
 			if (al > mal)
 				mal = al;
 		}
-		if (x->c > nfix)
+		if (na > nfix)
 			vbuf = wslot(e, vsize, mal > 16 ? mal : 16);
 	}
 	{
 		uint64_t vo = 0;
 
-		for (uint32_t i = 0; i < x->c; i++) {
+		for (uint32_t i = 0; i < na; i++) {
 			uint32_t an = c->lists[x->b + i];
 			qty at = N(an)->ty;
 
@@ -528,7 +558,7 @@ VPRIV int wcall(ecx *e, uint32_t n, bool want)
 		/* parameters the call does not pass: zero */
 		const node *bd = N(c->syms[def].body);
 
-		for (uint32_t i = x->c; i < bd->aux; i++) {
+		for (uint32_t i = na; i < bd->aux; i++) {
 			wabi pa = wclassify(c, wpromote(c, c->syms[c->lists[bd->a + i]].ty));
 
 			for (uint32_t j = 0; j < wparts(pa); j++) {
@@ -540,7 +570,7 @@ VPRIV int wcall(ecx *e, uint32_t n, bool want)
 		}
 	}
 	if (va) {
-		if (x->c > nfix)
+		if (na > nfix)
 			wslot_addr(e, vbuf);
 		else
 			wpconst(e, 0);

@@ -2084,6 +2084,51 @@ static int wk_shrink(ecx *e, uint32_t n, uint32_t s)
 	       EM_IDENT_IS(id, "fabs") ? FN_FLOORF + 7 : 0;
 }
 
+/* memcpy/memmove/memset (kind) of a constant size up to 64 bytes: inline, as clang (a freestanding vDSO
+   has no memcpy); memset only of zero.  The value is the destination, as the call returns. */
+static bool wk_mem_inline(ecx *e, uint32_t n, int kind, val *out)
+{
+	cc *c = e->c;
+	const node *x = N(n);
+	cval cv;
+
+	if (!(kind >= CC_LIB_MEMCPY && kind <= CC_LIB_MEMSET) ||
+	    !(cc_eval(c, c->lists[x->b + 2], &cv) && cv.kind == CV_INT && cv.i >= 0 && cv.i <= 64) ||
+	    (kind == CC_LIB_MEMSET && !(cc_eval(c, c->lists[x->b + 1], &cv) && cv.kind == CV_INT && cv.i == 0)))
+		return false;
+	{
+		uint64_t len;
+		val d = wk_gen(e, c->lists[x->b]), v2;
+		int rd = wk_reg(e, &d, prim(TY_ULONG));
+
+		cc_eval(c, c->lists[x->b + 2], &cv);
+		len = (uint64_t)cv.i;
+		if (kind == CC_LIB_MEMSET) {
+			v2 = wk_gen(e, c->lists[x->b + 1]);
+			wk_free(e, &v2);
+			if (len)
+				LO(zero)(e, rd, len);
+		} else {
+			val sv = wk_gen(e, c->lists[x->b + 1]);
+			int rs = wk_reg(e, &sv, prim(TY_ULONG));
+
+			if (len && kind == CC_LIB_MEMMOVE) {	/* memmove: through a slot (the two may overlap) */
+				lval t = { .k = L_FRAME, .off = wk_slot(e, len, 8), .align = 8 };
+				int rt = LO(laddr)(e, &t);
+
+				LO(copy)(e, rt, rs, len);
+				LO(copy)(e, rd, rt, len);
+				LO(tfree)(e, rt);
+			} else if (len) {
+				LO(copy)(e, rd, rs, len);
+			}
+			LO(tfree)(e, rs);
+		}
+		*out = wk_vreg(rd);
+	}
+	return true;
+}
+
 static val wk_call(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
@@ -2095,7 +2140,8 @@ static val wk_call(ecx *e, uint32_t n)
 	val fn = { 0 };
 	wkarg argbuf[64], *args = argbuf, r = { 0 };
 	bool var = (f->flags & (TF_VARIADIC | TF_NOPROTO)) != 0, rec_ = wk_mem(e, f->base);
-	uint32_t nargs = x->c;
+	val mv;
+	uint32_t na = x->c;	/* the arguments passed (a fortified call drops the object size) */
 
 	/* Keep common calls on the stack; large calls scale with their arity. */
 	if (x->c > sizeof argbuf / sizeof *argbuf &&
@@ -2108,8 +2154,20 @@ static val wk_call(ecx *e, uint32_t n)
 
 		if (c->syms[s].kind == S_BUILTIN) {
 			int kind = cc_builtin_libkind(c->syms[s].val);
-			bool plain = false;
-			cval cv;
+			int64_t bi = c->syms[s].val;
+
+			if (kind == CC_LIB_CHK && x->c >= 3) {
+				cval ov, lv;
+				bool oc = cc_eval(c, c->lists[x->b + x->c - 1], &ov) && ov.kind == CV_INT;
+				bool lc = x->c >= 4 && cc_eval(c, c->lists[x->b + x->c - 2], &lv) && lv.kind == CV_INT;
+				int64_t p = cc_chk_simplify(bi, (int)x->c, oc, oc ? (uint64_t)ov.i : 0, lc, lc ? (uint64_t)lv.i : 0);
+
+				if (p >= 0 && !side_effects(c, c->lists[x->b + x->c - 1])) {
+					bi = p;
+					kind = cc_builtin_libkind(p);
+					na--;
+				}
+			}
 
 			if (x->c == 2 && kind == CC_LIB_STRCMP) {
 				/* two string literals: folded (the kernel's vruntime_cmp(a, "<", b)) */
@@ -2125,56 +2183,12 @@ static val wk_call(ecx *e, uint32_t n)
 					return vconst(r < 0 ? -1 : r > 0);
 				}
 			}
-			/* the fortified forms (Darwin's string.h, _FORTIFY_SOURCE) with an object size that
-			   cannot be exceeded: the plain ones, as clang */
-			if (kind >= CC_LIB_MEMCPY_CHK && kind <= CC_LIB_MEMSET_CHK && x->c == 4 &&
-			    cc_eval(c, c->lists[x->b + 3], &cv) && cv.kind == CV_INT) {
-				uint64_t os = (uint64_t)cv.i;
-
-				if (os == UINT64_MAX || (cc_eval(c, c->lists[x->b + 2], &cv) && cv.kind == CV_INT && (uint64_t)cv.i <= os))
-					kind = kind - CC_LIB_MEMCPY_CHK + CC_LIB_MEMCPY, plain = true;
-			}
-			/* memcpy/memmove/memset of a constant size up to 64 bytes: inline, as clang (8 stores
-			   of 8 bytes; a freestanding vDSO has no memcpy) */
-			if ((x->c == 3 || (x->c == 4 && cc_builtin_libkind(c->syms[s].val) >= CC_LIB_MEMCPY_CHK)) &&
-			    (kind >= CC_LIB_MEMCPY && kind <= CC_LIB_MEMSET) &&
-			    cc_eval(c, c->lists[x->b + 2], &cv) && cv.kind == CV_INT && cv.i >= 0 && cv.i <= 64 &&
-			    (kind != CC_LIB_MEMSET || (cc_eval(c, c->lists[x->b + 1], &cv) && cv.kind == CV_INT && cv.i == 0))) {
-				uint64_t len;
-				val d = wk_gen(e, c->lists[x->b]), v2;
-				int rd = wk_reg(e, &d, prim(TY_ULONG));
-
-				cc_eval(c, c->lists[x->b + 2], &cv);
-				len = (uint64_t)cv.i;
-				if (kind == CC_LIB_MEMSET) {
-					v2 = wk_gen(e, c->lists[x->b + 1]);
-					wk_free(e, &v2);
-					if (len)
-						LO(zero)(e, rd, len);
-				} else {
-					val sv = wk_gen(e, c->lists[x->b + 1]);
-					int rs = wk_reg(e, &sv, prim(TY_ULONG));
-
-					if (len && kind == CC_LIB_MEMMOVE) {	/* memmove: through a slot (the two may overlap) */
-						lval t = { .k = L_FRAME, .off = wk_slot(e, len, 8), .align = 8 };
-						int rt = LO(laddr)(e, &t);
-
-						LO(copy)(e, rt, rs, len);
-						LO(copy)(e, rd, rt, len);
-						LO(tfree)(e, rt);
-					} else if (len) {
-						LO(copy)(e, rd, rs, len);
-					}
-					LO(tfree)(e, rs);
-				}
-				return wk_vreg(rd);	/* (the destination, as the call returns) */
-			}
-			if (plain) {	/* not inlined: the plain function, without the object size */
-				ref = FIXED(kind == CC_LIB_MEMCPY ? FN_MEMCPY : kind == CC_LIB_MEMSET ? FN_MEMSET : FN_MEMMOVE);
-				nargs = 3;
-			} else {
-				ref = REF(RK_NAME, (uint32_t)c->syms[s].val);	/* a library function by name */
-			}
+			if (na == 3 && wk_mem_inline(e, n, kind, &mv))
+				return mv;
+			ref = REF(RK_NAME, (uint32_t)bi);	/* a library function by name */
+		} else if (em_plain_mem_kind(e, s, (int)x->c) && wk_mem_inline(e, n, em_plain_mem_kind(e, s, (int)x->c), &mv)) {
+			if (args != argbuf) free(args);
+			return mv;
 		} else if (wk_can_inline(e, s)) {
 			if (args != argbuf) free(args);
 			return wk_inline(e, n, s);
@@ -2211,7 +2225,7 @@ static val wk_call(ecx *e, uint32_t n)
 			ref = REF(RK_SYM, s);
 		}
 	}
-	for (uint32_t i = 0; i < nargs; i++) {
+	for (uint32_t i = 0; i < na; i++) {
 		uint32_t an = c->lists[x->b + i];
 		qty at = N(an)->ty;
 
@@ -2229,7 +2243,7 @@ static val wk_call(ecx *e, uint32_t n)
 	}
 	e->calls = true;
 	{
-		val v = LO(call)(e, ref, ref ? NULL : &fn, args, (int)nargs, var, rec_ ? &r : NULL, f->base);
+		val v = LO(call)(e, ref, ref ? NULL : &fn, args, (int)na, var, rec_ ? &r : NULL, f->base);
 		lval l = { .k = L_FRAME, .off = r.slot, .align = 8 };
 
 		if (args != argbuf)

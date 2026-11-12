@@ -702,6 +702,23 @@ VPRIV __attribute__((format(printf, 3, 4), noreturn)) void efatal(ecx *e, uint32
 /* type.c */
 VPRIV uint32_t canon_sym(cc *c, uint32_t s);
 VPRIV const attrs *sym_attrs(cc *c, uint32_t s);
+
+/* memcpy/memmove/memset declared by a header (symbol s, na arguments): clang's builtin at -O1 and up (not
+ * under -ffreestanding/-fno-builtin[-NAME]).  CC_LIB_MEMCPY.., or 0 */
+static inline int em_plain_mem_kind(ecx *e, uint32_t s, int na)
+{
+	cc *c = e->c;
+	const sym *y = &c->syms[s];
+
+	if (na != 3 || e->E->o->opt < 1 || e->E->o->no_builtin || y->sc == SC_STATIC || !(y->flags & SF_GLOBAL) ||
+	    sym_attrs(c, s)->asmname)
+		return 0;
+	for (unsigned i = 0; i < CC_DISABLED_BUILTIN_WORDS; i++)
+		if (e->E->o->disabled_builtins[i])
+			return 0;
+	return EM_IDENT_IS(y->name, "memcpy") ? CC_LIB_MEMCPY : EM_IDENT_IS(y->name, "memmove") ? CC_LIB_MEMMOVE :
+	       EM_IDENT_IS(y->name, "memset") ? CC_LIB_MEMSET : 0;
+}
 VPRIV void sym_name(cc *c, tbuf *b, uint32_t s);
 VPRIV bool sym_quoted(cc *c, uint32_t s);
 VPRIV void ref_name(cc *c, tbuf *b, uint32_t r);
