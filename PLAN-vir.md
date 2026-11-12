@@ -597,8 +597,15 @@ cykler mot virpol, nu +9,9 %.  Samplingar per funktion (storlek 300) varierar
   poster mot LLVM:s 1 byte), RecordCompareInt/String (parametrar kopieras till
   callee-saved x19/x20 fast bara syskonanrop följer: allokeraren), SerialGet
   (LLVM inlinar sqlite3Get4byte), csel används inte alls (0 mot 980).
-- Till allokeraren: konstanter hålls i register genom slingor i stället för
-  att rematerialiseras; parametrar till callee-saved före syskonanrop.
+- Till allokeraren: parametrar till callee-saved före syskonanrop (rättat på
+  `claude/vir-regalloc-impl-f22a1d`: över-anrop-testet går på levande
+  mängder).  Konstanter som en postvikning tar upp ska i stället markeras i
+  `vl_fix` (mem-biten) så att de aldrig får register: sänkningens sak.
+- Ombaserat på allokeringsgrenen (eab5ebd0): en uppsättning poster,
+  dess `I_LDX`/`I_STX`/`I_SMADDL`/`I_UMADDL`; `I_ADDXT`/`I_SUBXT` blev
+  `I_ADD`/`I_SUB` med cond 8 + option (som skiftsorterna).  Parvis, storlek
+  100: mot eab5ebd0 −6,8 % instr., −2,7 % cykler; mot virpol +6,8 % cykler;
+  mot clang -O2 +10,3 % (virpol mot clang -O2 +3,9 %).
 - Tester: `vir_branch_bits.c`, `vir_flags_reuse.c`, `vir_layout_exits.c`,
   `vir_operand_fold.c`, `vir_byte_assembly.c`, `vir_constants.c` (.o och .s).
 
