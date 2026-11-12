@@ -658,6 +658,22 @@ cykler mot virpol, nu +9,9 %.  Samplingar per funktion (storlek 300) varierar
   funktion (~6 % av sqlite).
 - Tester: `vir_branch_bits.c`, `vir_flags_reuse.c`, `vir_layout_exits.c`,
   `vir_operand_fold.c`, `vir_byte_assembly.c`, `vir_constants.c` (.o och .s).
+- **Flyttalslaster och -lagringar direkt (2026-11-12).**  Nya poster `I_LDF`/
+  `I_STF` (rd är ett v-register, sz 2/3, `[rn + imm]`, också mot FRAME):
+  `ldr d2, [x0]` i stället för `ldr x16` + `fmov`.  Används av VIR:s last och
+  lagring (inte symbol- eller registeroffsetadresser än), spill/återladdning,
+  stackargument och stackparametrar.  Postrensningen: bara basregistret läses;
+  en ramplats som en sådan post rör räknas som undkommen i platsvärdespasset,
+  och `I_STF` är en lagring för platsvärden och bytesammansättningen.
+  sqlite3.o: `fmov` via x16/w16 487 → 114, `.text` −1512 byte;
+  dekkerMul2 89 → 59 instruktioner (clang ca 44 per inlinad kopia).
+  speedtest1 storlek 100, parvis 4 rundor på en lastad maskin: instruktioner
+  −0,45 % (28,65 → 28,52 G), cykler −0,5 .. −3,5 %.  Utan VIR är utdata
+  byte-identiska (`vcc-same.py`).  Test `vir_fp_mem.c`; C-sviterna genom VIR
+  samma tre kända fel (`.Lswitch.values`), vcc-abi (Linux 34/34, `--host`
+  samma fyra), vir-test 119/119, vcc-volatile 32/32, sqlite TCL genom VIR
+  1 fel (interrupt2, som clang).  Kvar i dekkerMul2: inlining i anroparna,
+  `fmadd`, lövram utan ramrekord, `[x0, #8]` i stället för `add` + `[x1]`.
 
 ### Underlag för V4 (2026-11-11): registerallokering, ingen kod
 

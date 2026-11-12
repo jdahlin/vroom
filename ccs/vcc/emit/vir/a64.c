@@ -384,8 +384,8 @@ static void vl_reload(vl *L, uint8_t dst, uint32_t s, int t)
 	int sz = vl_ssz(L, s);
 
 	if (vl_fcls(dst)) {
-		mem(L->e, I_LD, sz, 0, t, FRAME, L->spoff[s]);
-		word(L->e, f_in(sz == 3, vl_gv(dst), t));
+		(void)t;
+		mem(L->e, I_LDF, sz, 0, vl_gv(dst), FRAME, L->spoff[s]);
 	} else {
 		mem(L->e, I_LD, sz, 0, vl_gx(dst), FRAME, L->spoff[s]);
 	}
@@ -396,8 +396,8 @@ static void vl_spill(vl *L, uint8_t src, uint32_t s, int t)
 	int sz = vl_ssz(L, s);
 
 	if (vl_fcls(src)) {
-		word(L->e, f_out(sz == 3, t, vl_gv(src)));
-		mem(L->e, I_ST, sz, 0, t, FRAME, L->spoff[s]);
+		(void)t;
+		mem(L->e, I_STF, sz, 0, vl_gv(src), FRAME, L->spoff[s]);
 	} else {
 		mem(L->e, I_ST, sz, 0, vl_gx(src), FRAME, L->spoff[s]);
 	}
@@ -739,6 +739,10 @@ static void vl_load(vl *L, uint32_t i, const vir_ins *in, uint8_t res)
 	} else if (l.k == L_SYM) {
 		addr_of_ref(e, R_X16, l.ref, l.off);
 		mem(e, I_LD, w, ext, rd, R_X16, 0);
+	} else if (fl) {	/* straight into the FP register (a result nobody reads: v31, never allocated) */
+		mem(e, I_LDF, w, 0, res == VR_NONE ? 31 : vl_gv(res), l.k == L_FRAME ? FRAME : l.r, l.off);
+		e->novtag -= (in->fl & VIF_VOL) != 0;
+		return;
 	} else {
 		mem(e, I_LD, w, ext, rd, l.k == L_FRAME ? FRAME : l.r, l.off);
 		if ((in->fl & VIF_VOL) && l.k != L_FRAME && e->reach && e->in[e->nin - 1].op == I_LD)
@@ -759,6 +763,12 @@ static void vl_store(vl *L, const vir_ins *in)
 	int base_t = l.k == L_SYM || (l.k == L_REG && l.r == R_X16);	/* the address needs x16 */
 	int rs;
 
+	if (!xa && l.k != L_SYM && L->opr[1] != VR_NONE && vl_fcls(L->opr[1])) {	/* straight from the FP register */
+		e->novtag += (in->fl & VIF_VOL) != 0;
+		mem(e, I_STF, w, 0, vl_gv(L->opr[1]), l.k == L_FRAME ? FRAME : l.r, l.off);
+		e->novtag -= (in->fl & VIF_VOL) != 0;
+		return;
+	}
 	if (L->opr[1] == VR_NONE && vl_zero(L->f, v))
 		rs = ZR;
 	else if (L->opr[1] != VR_NONE && vl_fcls(L->opr[1])) {
@@ -962,6 +972,10 @@ static void vl_call(vl *L, uint32_t b, uint32_t i, const vir_ins *in)
 		{
 			int sz = log2sz(a[k].size), rs;
 
+			if (r != VR_NONE && vl_fcls(r) && sz >= 2) {
+				mem(e, I_STF, sz, 0, vl_gv(r), SP, a[k].stk);
+				continue;
+			}
 			if (r != VR_NONE && vl_fcls(r)) {
 				word(e, f_out(a[k].size == 8, R_X16, vl_gv(r)));
 				rs = R_X16;
@@ -1031,8 +1045,7 @@ static void vl_param(vl *L, const vir_ins *in, uint8_t res)
 	if (res == VR_NONE)
 		return;
 	if (vl_fcls(res)) {
-		mem(e, I_LD, log2sz(a[in->a].size), 0, R_X16, R_FP, 16 + a[in->a].stk);
-		word(e, f_in(in->ty == VT_F64, vl_gv(res), R_X16));
+		mem(e, I_LDF, in->ty == VT_F64 ? 3 : 2, 0, vl_gv(res), R_FP, 16 + a[in->a].stk);
 	} else {
 		mem(e, I_LD, log2sz(a[in->a].size), 0, vl_gx(res), R_FP, 16 + a[in->a].stk);
 	}

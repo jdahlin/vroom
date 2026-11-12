@@ -237,10 +237,10 @@ static unsigned enc(const ins *i, uint32_t *w, pfix *f, const uint32_t *loff, ui
 		w[0] = b | R5(i->rn) << 5 | R5(i->rd);
 		return 1;
 	}
-	case I_LD: case I_ST: {
+	case I_LD: case I_ST: case I_LDF: case I_STF: {
 		int64_t off = i->imm;
-		int sz = i->sz, base = i->rn;
-		unsigned n = 0, opc = i->op == I_ST ? 0 : ld_opc[sz][i->cond];
+		int sz = i->sz, base = i->rn, v = i->op == I_LDF || i->op == I_STF;
+		unsigned n = 0, opc = i->op == I_ST || i->op == I_STF ? 0 : v ? 1 : ld_opc[sz][i->cond];
 		bool scaled = off >= 0 && (off & ((1 << sz) - 1)) == 0 && (off >> sz) < 4096;
 
 		if (!scaled && !(off >= -256 && off < 256)) {
@@ -250,8 +250,8 @@ static unsigned enc(const ins *i, uint32_t *w, pfix *f, const uint32_t *loff, ui
 			off = 0;
 			scaled = true;
 		}
-		w[n++] = scaled ? a64_ldst_uoff((unsigned)sz, 0, opc, R5(i->rd), R5(base), (unsigned)(off >> sz))
-				: a64_ldst_imm9((unsigned)sz, 0, opc, 0, R5(i->rd), R5(base), (int)off);
+		w[n++] = scaled ? a64_ldst_uoff((unsigned)sz, v, opc, R5(i->rd), R5(base), (unsigned)(off >> sz))
+				: a64_ldst_imm9((unsigned)sz, v, opc, 0, R5(i->rd), R5(base), (int)off);
 		return n;
 	}
 	case I_SMADDL: case I_UMADDL:
