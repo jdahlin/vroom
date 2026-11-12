@@ -465,6 +465,14 @@ static uint64_t dist(A *a, uint32_t v, uint32_t p)
 
 static int lowbit(uint64_t m) { return m ? __builtin_ctzll(m) : -1; }
 
+/* hint r is caller-saved, v lives across a call in a loop, and a callee-saved register is free */
+static inline bool caller_for_call(const A *a, uint32_t v, uint32_t c, uint64_t m, uint32_t r)
+{
+	uint64_t cs = a->rg->callee[c];
+
+	return (ax.vfl[v] & (XCALL | XLOOP)) == (XCALL | XLOOP) && !(cs >> VR_NUM(r) & 1) && (m & cs);
+}
+
 /* a free register of class c not in avoid, by v's hint and call preference; -1 if none */
 static int choose(A *a, uint32_t v, uint32_t c, uint64_t avoid)
 {
@@ -480,7 +488,7 @@ static int choose(A *a, uint32_t v, uint32_t c, uint64_t avoid)
 			r = h & 0xff;
 		else if (h < a->f->nins)
 			r = inreg(a, h) ? ax.reg[h] : (a->f->ins[h].op == VO_BPARAM ? ax.treg[h] : VR_NONE);
-		if (r < 128 && VR_CLASS(r) == c && (m >> VR_NUM(r) & 1))
+		if (r < 128 && VR_CLASS(r) == c && (m >> VR_NUM(r) & 1) && !caller_for_call(a, v, c, m, r))
 			return (int)r;
 	}
 	if ((ax.vfl[v] & XCALL) && ((ax.vfl[v] & XLOOP) || (a->used_callee[c] & m)) && (m & cs)) {
@@ -910,7 +918,8 @@ static void enter(A *a, uint32_t b)
 		if (!(ax.vfl[q] & DEAD) && !(k->fl & VB_ADDR)) {
 			uint32_t h = ax.treg[q];
 
-			if (h < 128 && VR_CLASS(h) == c && (ax.fr[c] >> VR_NUM(h) & 1))
+			if (h < 128 && VR_CLASS(h) == c && (ax.fr[c] >> VR_NUM(h) & 1) &&
+			    !caller_for_call(a, q, c, ax.fr[c] & a->rg->alloc[c], h))
 				r = (int)h;
 			else
 				r = choose(a, q, c, 0);
