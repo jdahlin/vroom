@@ -57,6 +57,9 @@ typedef struct vl {
 	bool tail;		/* a call right before a ret may be a sibling call (vl_notail) */
 	bool ret32;		/* the function returns a 32-bit integer: the upper half of x0 is unspecified */
 	uint32_t skip;		/* an instruction not to lower (the ret after a sibling call), 0 none */
+	uint32_t at;		/* the block whose place in the layout the code is at (a copy of another block's: vl_dup) */
+	int dup;		/* ... copies being lowered, one in another: vl_dupok */
+	bool fallok;		/* the code may fall through to the block after at (no edge moves follow) */
 	struct { uint32_t l, e, to; } tr[1024];	/* moves of a branch's edges, after the block */
 	uint32_t ntr;
 } vl;
@@ -487,6 +490,7 @@ static void vl_emoves(vl *L, uint32_t g)
 
 static bool vl_plain(vl *L, uint32_t b, uint32_t k);
 static uint32_t vl_chase(vl *L, uint32_t t);
+static void vl_block(vl *L, uint32_t b);
 
 /* a block every branch goes past (vl_chase): not emitted */
 static bool vl_skip(vl *L, uint32_t b) { return b && vl_chase(L, b) != b; }
@@ -497,6 +501,9 @@ static uint32_t vl_next(vl *L, uint32_t b)	/* the block emitted after b */
 		;
 	return b;
 }
+
+/* the block the code being emitted falls through to (none: UINT32_MAX) */
+static uint32_t vl_fnext(vl *L) { return L->fallok ? vl_next(L, L->at) : UINT32_MAX; }
 
 /* the label a branch from block b to its successor k (block to) takes: the block's, or a
  * new one whose moves follow the block */
@@ -1292,6 +1299,57 @@ static void vl_chases(vl *L, uint32_t *path)
 	}
 }
 
+/* a return: the epilogue and ret, or a jump to the shared one (finish_function decides) */
+static void vl_ret(vl *L)
+{
+	ecx *e = L->e;
+	ins *t;
+
+	if (!e->reach)
+		return;
+	t = put(e, I_TAIL);
+	t->cond = 4;
+	t->label = L->retlbl;
+	e->lrefc[L->retlbl]++;
+	e->reach = false;
+}
+
+/*
+ * Block t may be copied to the end of a block that jumps to it (tail duplication, as
+ * LLVM's block placement): a return (its epilogue, or the jump to the shared one,
+ * finish_function's choice), and a lone br (its edge's moves, then on) up to 8 deep.
+ * Copies of blocks with work in them (a loop's test at the end of the latch) measured
+ * more instructions on speedtest1: their constants and edge moves are lowered again.
+ */
+static bool vl_dupok(vl *L, uint32_t t);
+
+/* from block b's code, on to block t (an edge without moves left): a jump, or a copy of t */
+static void vl_goto(vl *L, uint32_t b, uint32_t t)
+{
+	if (t != vl_fnext(L) && t != b && vl_dupok(L, t)) {
+		int d = L->dup++;
+
+		vl_block(L, t);
+		L->dup = d;
+		return;
+	}
+	jump(L->e, L->lbl[t]);
+}
+
+static bool vl_dupok(vl *L, uint32_t t)
+{
+	const vir_fn *f = L->f;
+	const vir_blk *k = &f->blk[t];
+	uint32_t n = k->n - k->nparam;
+	uint8_t op = f->ins[k->first + k->n - 1].op;
+
+	if (k->fl & VB_ADDR)
+		return false;
+	if (n == 1 && op == VO_RET)
+		return true;
+	return !L->e->E->noopt && n == 1 && op == VO_BR && L->dup < 8;
+}
+
 /* instruction i of block b, its operands collected; res its result's register */
 static void vl_ins(vl *L, uint32_t b, uint32_t i, uint8_t res)
 {
@@ -1559,14 +1617,11 @@ static void vl_ins(vl *L, uint32_t b, uint32_t i, uint8_t res)
 		return;
 	}
 	case VO_BR: {
-		uint32_t g = L->o->eidx[L->o->soff[b]];
+		uint32_t g = L->o->eidx[L->o->soff[b]], t = vl_chase(L, in->a);
 
-		if (g != VIR_NOBLK && L->o->edge[g].n) {
+		if (g != VIR_NOBLK && L->o->edge[g].n)
 			vl_emoves(L, g);
-			jump(e, L->lbl[vl_chase(L, in->a)]);
-		} else {
-			jump(e, L->lbl[vl_chase(L, in->a)]);
-		}
+		vl_goto(L, b, t);
 		return;
 	}
 	case VO_BRIF: {	/* the jump that remains goes to what follows: the next block or the first edge's moves */
@@ -1576,12 +1631,12 @@ static void vl_ins(vl *L, uint32_t b, uint32_t i, uint8_t res)
 		if (tp && fp) {
 			uint32_t t = vl_chase(L, in->b), el = L->lbl[vl_chase(L, in->c)];
 
-			if (t == vl_next(L, b)) {
+			if (t == vl_fnext(L)) {
 				vl_bc(e, cc, true, el);
 				jump(e, L->lbl[t]);
 			} else {
 				vl_bc(e, cc, false, L->lbl[t]);
-				jump(e, el);
+				vl_goto(L, b, vl_chase(L, in->c));
 			}
 		} else if (fp) {
 			vl_bc(e, cc, true, L->lbl[vl_chase(L, in->c)]);
@@ -1598,7 +1653,7 @@ static void vl_ins(vl *L, uint32_t b, uint32_t i, uint8_t res)
 		vl_switch(L, b, in);
 		return;
 	case VO_RET:
-		jump(e, L->retlbl);
+		vl_ret(L);
 		return;
 	case VO_TRAP:
 		put(e, I_BRK)->imm = 1;
@@ -1615,68 +1670,91 @@ static void vl_ins(vl *L, uint32_t b, uint32_t i, uint8_t res)
 
 /* ---------------- the function ---------------- */
 
-static void vl_body(vl *L)
+/* block b's code (its label defined by the caller), with the edge moves of its branches after it */
+static void vl_block(vl *L, uint32_t b)
 {
 	ecx *e = L->e;
 	vir_fn *f = L->f;
 	const vir_alloc_out *o = L->o;
+	const vir_blk *k = &f->blk[b];
+	uint32_t pos = o->boff[b], ei = o->boff[f->nblk + 1 + b], eend = o->boff[f->nblk + 2 + b];
+
+	L->fcc = -1, L->fzr = -1, L->fbit = -1;
+	L->tlo = L->thi = 0;
+	L->pval = 0, L->xval = 0, L->xc = VIR_NOBLK;
+	L->eb = ei, L->eend = eend;
+	L->ntr = 0;
+	L->skip = 0;
+	for (uint32_t q = 0; q < k->nparam; q++) {
+		uint8_t r = o->opr[pos++];
+		uint32_t v = k->first + q;
+
+		if (o->slot[v] != VIR_NOBLK && o->sdef[v] && r != VR_NONE)
+			vl_spill(L, r, o->slot[v], R_X16);
+	}
+	for (uint32_t i = k->first + k->nparam; i < k->first + k->n; i++) {
+		vir_ins x = f->ins[i];
+		vir_oit it;
+		uint32_t *p;
+		uint8_t res = VR_NONE;
+
+		if (i == L->skip)
+			break;	/* (the block's ret: its sibling call left) */
+		vl_edits(L, &ei, eend, i);
+		L->ei = ei, L->eend = eend;
+		L->nop = 0;
+		vir_oit_init(&it, f, &x, false);
+		while ((p = vir_oit_next(&it))) {
+			if (f->ins[*p].ty == VT_MULTI)
+				continue;
+			if (L->nop == VL_MAXOP)
+				vl_fail(L, "VIR lowering: too many operands");
+			L->ov[L->nop] = *p;
+			L->opr[L->nop++] = o->opr[pos++];
+		}
+		if (x.ty != VT_VOID && x.ty != VT_MULTI)
+			res = o->opr[pos++];
+		if (L->fcc >= 0 && L->fval != x.a && !(i > L->tlo && i < L->thi))
+			L->fcc = -1;
+		if (!e->reach)
+			deflabel_forced(e, newlabel(e));	/* (code after a trap: never reached) */
+		vl_ins(L, b, i, res);
+		if (x.ty != VT_VOID && x.ty != VT_MULTI && o->slot[i] != VIR_NOBLK && o->sdef[i] && res != VR_NONE)
+			vl_spill(L, res, o->slot[i], R_X16);
+	}
+	if (e->reach)
+		vl_fail(L, "VIR lowering: a block without a terminator");
+	if (L->ntr) {	/* (a copy in vl_goto reuses L->tr) */
+		uint32_t n = L->ntr;
+		struct { uint32_t l, e, to; } *tr = __builtin_alloca(n * sizeof *tr);
+
+		memcpy(tr, L->tr, n * sizeof *tr);
+		L->ntr = 0;
+		bool fo = L->fallok;
+
+		for (uint32_t t = 0; t < n; t++) {
+			deflabel_forced(e, tr[t].l);
+			vl_emoves(L, tr[t].e);
+			L->fallok = fo && t == n - 1;
+			vl_goto(L, b, vl_chase(L, tr[t].to));
+		}
+		L->fallok = fo;
+	}
+	L->ntr = 0;
+}
+
+static void vl_body(vl *L)
+{
+	ecx *e = L->e;
+	vir_fn *f = L->f;
 
 	for (uint32_t b = 0; b < f->nblk; b++) {
-		const vir_blk *k = &f->blk[b];
-		uint32_t pos = o->boff[b], ei = o->boff[f->nblk + 1 + b], eend = o->boff[f->nblk + 2 + b];
-
 		if (vl_skip(L, b))
 			continue;
 		deflabel_forced(e, L->lbl[b]);
-		L->fcc = -1, L->fzr = -1, L->fbit = -1;
-		L->tlo = L->thi = 0;
-		L->pval = 0, L->xval = 0, L->xc = VIR_NOBLK;
-		L->eb = ei, L->eend = eend;
-		L->ntr = 0;
-		for (uint32_t q = 0; q < k->nparam; q++) {
-			uint8_t r = o->opr[pos++];
-			uint32_t v = k->first + q;
-
-			if (o->slot[v] != VIR_NOBLK && o->sdef[v] && r != VR_NONE)
-				vl_spill(L, r, o->slot[v], R_X16);
-		}
-		for (uint32_t i = k->first + k->nparam; i < k->first + k->n; i++) {
-			vir_ins x = f->ins[i];
-			vir_oit it;
-			uint32_t *p;
-			uint8_t res = VR_NONE;
-
-			if (i == L->skip)
-				break;	/* (the block's ret: its sibling call left) */
-			vl_edits(L, &ei, eend, i);
-			L->ei = ei, L->eend = eend;
-			L->nop = 0;
-			vir_oit_init(&it, f, &x, false);
-			while ((p = vir_oit_next(&it))) {
-				if (f->ins[*p].ty == VT_MULTI)
-					continue;
-				if (L->nop == VL_MAXOP)
-					vl_fail(L, "VIR lowering: too many operands");
-				L->ov[L->nop] = *p;
-				L->opr[L->nop++] = o->opr[pos++];
-			}
-			if (x.ty != VT_VOID && x.ty != VT_MULTI)
-				res = o->opr[pos++];
-			if (L->fcc >= 0 && L->fval != x.a && !(i > L->tlo && i < L->thi))
-				L->fcc = -1;
-			if (!e->reach)
-				deflabel_forced(e, newlabel(e));	/* (code after a trap: never reached) */
-			vl_ins(L, b, i, res);
-			if (x.ty != VT_VOID && x.ty != VT_MULTI && o->slot[i] != VIR_NOBLK && o->sdef[i] && res != VR_NONE)
-				vl_spill(L, res, o->slot[i], R_X16);
-		}
-		if (e->reach)
-			vl_fail(L, "VIR lowering: a block without a terminator");
-		for (uint32_t t = 0; t < L->ntr; t++) {
-			deflabel_forced(e, L->tr[t].l);
-			vl_emoves(L, L->tr[t].e);
-			jump(e, L->lbl[vl_chase(L, L->tr[t].to)]);
-		}
+		L->at = b;
+		L->fallok = true;
+		vl_block(L, b);
 	}
 }
 

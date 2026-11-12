@@ -54,7 +54,8 @@ enum {
 	I_JTE,		/* a table word: label (off) - ref, both labels, in bytes */
 	I_TAIL,		/* ref: direct sibling target; cond 0 terminal marker, 1 branch after epilogue;
 			 * VIR, anywhere in the body: 2 a sibling call to ref, 3 to the address in rn (expanded by
-			 * finish_function: the epilogue, then b ref or br x16) */
+			 * finish_function: the epilogue, then b ref or br x16); 4 a return: the epilogue and ret when
+			 * it is short, else b label (the shared epilogue at the end) */
 };
 
 enum { TLS_LE = 1, TLS_IE, TLS_DESC };	/* I_TLV.cond on ELF */

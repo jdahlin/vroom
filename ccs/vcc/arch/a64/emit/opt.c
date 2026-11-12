@@ -87,6 +87,8 @@ static unsigned roles_sw(const ins *i)
 	case I_RET:
 		return OP_RET;	/* reads x0, x1 */
 	case I_TAIL:
+		if (i->cond == 4)
+			return OP_RET;	/* (VIR's return in the body: the epilogue and ret) */
 		return OP_TAIL | (i->cond == 3 ? RN_R : 0);	/* outgoing x0-x7 survive until the sibling branch */
 	case I_LABEL: case I_B: case I_BC: case I_NOP:
 	case I_BRK:	/* a trap (BUG, WARN, __builtin_trap): the handler may print registers, needs none */
