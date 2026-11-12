@@ -688,13 +688,11 @@ VPRIV void vw_store(ecx *e, int rs, const lval *l, int size)
 		vw_write(e, l->ref, V->cur, v);
 		return;
 	}
+	if (size == 8 && vw_ty(e, v) == VT_F32)
+		size = 4;	/* (a float's word in an argument slot: its low 4 bytes) */
 	ty = vw_stty(e, v, size);
-	if (!ty) {
-		if (size == 8 && vw_ty(e, v) == VT_F32)
-			ty = VT_F32, size = 4;	/* (a float's word in an argument slot: its low 4 bytes) */
-		else
-			vw_fail(e, "VIR: a float store of this size");
-	}
+	if (!ty)
+		vw_fail(e, "VIR: a float store of this size");
 	a = vw_addr(e, l, (uint64_t)size, &slot, &rel);
 	v = vw_conv(e, v, ty);
 	{
