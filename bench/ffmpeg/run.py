@@ -17,8 +17,10 @@ compiled by clang (the build reports the count; it must be 0).
 
 `compile` takes clang's command lines from `gmake -n -B` and runs them
 without make or the wrapper: one process per file on -j workers (clang, vcc,
-vir) or one `vpp --batch` process (vcc-batch, vir-batch).  Wall and CPU, best
-of -n rounds.
+vir) or one `vpp --batch` process (vcc-batch, vir-batch), each into an empty
+directory, objects and depfiles written, diagnostics printed.  Wall and CPU,
+best of -n rounds; a batch mode's files must be byte-identical to those of
+its per-process mode.
 
 `speed` runs each build's ffmpeg with -threads 1 on inputs clang's build
 generated (work/ffmpeg/bench: 100 frames of 720p, 60 s of stereo audio), CPU
@@ -110,7 +112,7 @@ def fate(name):
 # ---- compile time ----
 
 def commands():
-    """clang's -c command lines for the whole build, as argv lists without -o and the depfile flags."""
+    """clang's -c command lines for the whole build, as argv lists without -o, -MF and -MT (-MMD stays)."""
     out = subprocess.run(['gmake', '-n', '-B', 'V=1'], cwd=bdir('clang'), capture_output=True, text=True).stdout
     jobs = []
     for line in out.splitlines():
@@ -121,8 +123,7 @@ def commands():
             if a[i] in ('-MF', '-MT', '-o'):
                 i += 2
                 continue
-            if a[i] != '-MMD':
-                args.append(a[i])
+            args.append(a[i])
             i += 1
         if args[-1].endswith('.c'):
             jobs.append(args)
@@ -134,12 +135,17 @@ def cpu():
     return r.ru_utime + r.ru_stime
 
 
+def outs(out, k):
+    o = os.path.join(out, f'{k}.o')
+    return ['-MF', os.path.join(out, f'{k}.d'), '-MT', 'x.o', '-o', o]
+
+
 def compile_mode(mode, jobs, out):
     shutil.rmtree(out, ignore_errors=True)
     os.makedirs(out)
     cwd = bdir('clang')
     name = mode.split('-')[0]
-    env = dict(os.environ)
+    env = dict(os.environ, VPP_BATCH_ERR='1')       # batch mode prints its diagnostics, as a process does
     if VIR[name] is not None:
         env['VCC_VIR'] = VIR[name]
     t, c = time.perf_counter(), cpu()
@@ -147,13 +153,13 @@ def compile_mode(mode, jobs, out):
         jf = os.path.join(out, 'jobs')
         with open(jf, 'w') as f:
             for k, a in enumerate(jobs):
-                f.write('\x1f'.join(['-'] + a + ['-o', os.path.join(out, f'{k}.o')]) + '\n')
+                f.write('\x1f'.join(['-'] + a + outs(out, k)) + '\n')
         subprocess.run([VPP, '--batch', jf, '-j', JOBS, '-C', cwd], cwd=cwd, env=env, capture_output=True)
     else:
         cc = CLANG if name == 'clang' else VPP
 
         def one(k):
-            return subprocess.run([cc] + jobs[k] + ['-o', os.path.join(out, f'{k}.o')], cwd=cwd, env=env, capture_output=True).returncode
+            return subprocess.run([cc] + jobs[k] + outs(out, k), cwd=cwd, env=env, capture_output=True).returncode
         with concurrent.futures.ThreadPoolExecutor(int(JOBS)) as pool:
             list(pool.map(one, range(len(jobs))))
     wall, used = time.perf_counter() - t, cpu() - c
@@ -173,11 +179,26 @@ def compile_time(modes, n):
                 print(f'{m}: {len(jobs) - ok} of {len(jobs)} files gave no object')
             b = best.get(m)
             best[m] = (min(wall, b[0]), min(used, b[1])) if b else (wall, used)
+    rc = 0
+    for m in modes:         # a batch process must write what one process per file writes
+        ref = os.path.join(W, 'ct-' + m[:-6])
+        if m.endswith('-batch') and os.path.isdir(ref):
+            bad = [k for k in range(len(jobs)) for e in ('.o', '.d')
+                   if not same(os.path.join(ref, f'{k}{e}'), os.path.join(W, 'ct-' + m, f'{k}{e}'))]
+            print(f'{m}: objects and depfiles ' + (f'DIFFER from {m[:-6]}\'s for {len(bad)} files' if bad else f'identical to {m[:-6]}\'s'))
+            rc |= 1 if bad else 0
     print(f'\n{len(jobs)} C files, -j {JOBS}, best of {n}; ratio: {modes[0]} / mode')
     print(f'  {"":10} {"wall s":>8} {"":>7} {"CPU s":>8}')
     for m in modes:
         print(f'  {m:10} {best[m][0]:8.2f} {best[modes[0]][0] / best[m][0]:6.1f}x {best[m][1]:8.2f} {best[modes[0]][1] / best[m][1]:6.1f}x')
-    return 0
+    return rc
+
+
+def same(a, b):
+    try:
+        return open(a, 'rb').read() == open(b, 'rb').read()
+    except OSError:
+        return False
 
 
 # ---- run time ----
