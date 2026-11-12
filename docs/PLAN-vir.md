@@ -315,6 +315,18 @@ inline-fel; assembly/objekt och ASan/UBSan gröna. SQLite instruktioner
 1,491x → 1,482x, CPU oförändrad (360,55 → 360,41 ms; clang 284,89 ms).
 Ingen belagd CPU-vinst från denna skiva. Data: work/vir-x86-perf/cmov2/results.
 
+Sjätte skivan viker även add.i64 + i2p till minnesoperand och känner igen
+exakt två/fyra vanliga byte-laster i big-endian-ord. Fyra bytes blir en
+32-bitarslast och bswap; samma regler om engångsvärden, spill och edits
+gäller hela sekvensen. Ett indexerat byte-ord kan behålla bas/index genom
+de borttagna instruktionerna; ingen överläsning eller ändring av volatila
+accesser. Switch-tabellen använder också indexerad last direkt.
+Fem kortprov: CPU 351,27 → 348,80 ms (1,251x → 1,242x clang), instruktioner
+1,482x → 1,461x. Samma GCC/TCC/egna 1615/105/301 och fem inline-undantag;
+utökade negativa index/32-bitarsord, assembly/objekt och ASan/UBSan gröna.
+Arithmetik direkt från spillslot och dubblerad inlinegräns gav ingen säker
+vinst och behölls inte. Data: work/vir-x86-perf/be4/results/summary.json.
+
 
 ### V2/V3 x86-64 (2026-11-12): TSVC och fem verkliga korpusar
 
