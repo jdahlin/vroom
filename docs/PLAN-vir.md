@@ -237,7 +237,50 @@ ekvivalenstestning återstår. Genererade program använder inga externa anrop.
 
 ## Status
 
-### V4 x86-64 mot clang -O2 (2026-11-12), mål högst 10 % långsammare
+### V4 x86-64 mot clang -O2 (2026-11-12), mål högst 5 % långsammare
+
+
+**2026-11-13: ARM-jämförelse och omprövade x86-försök.** Det aktuella
+användarmålet är högst **1,05× clang -O2** för speedtest1; det är fortfarande
+öppet. Samma SQLite 3.50.4-källa, `-O2`, `SQLITE_THREADSAFE=0` och
+`SQLITE_OMIT_LOAD_EXTENSION` har sänkts med `VCC_VIR=bvls` och allokatorkontroll
+för båda målen. ARM använder sin Linux-cross-sysroot. Statiska instruktioner
+är inte en jämförelse av cykler mellan olika processorer:
+
+| Funktion | ARM64 instruktioner | x86-64 instruktioner | ARM64/x86 spill |
+|---|---:|---:|---:|
+| sqlite3VdbeExec | 17083 | 23197 | 379/570 |
+| sqlite3BtreeIndexMoveto | 537 | 627 | 0/9 |
+| vdbeRecordCompareInt | 81 | 102 | 0/0 |
+
+Konkreta ARM-fördelar: bit-/nollgrenar utan separat flaggmaterialisering,
+extenderad indexaddition och skiftad OR i samma instruktion, fler register
+och syskonanrop utan call/ret. BtreeIndexMoveto har också en roterad loop
+med villkoret i botten. Clangs x86-`-S` bekräftar direkta register-bitprov,
+konstantlagringar och vikta minnesoperander som vår x86 ännu ofta missar.
+
+Följande korta, verifierade försök **behålls inte**: färre instruktioner
+räckte inte till en upprepad CPU-vinst. Alla tabellprov är fem alternerade
+`--size 100 --memdb --testset main`-körningar på CPU 7. Baslinjen är
+`9fefc28a` i respektive samma mätserie; medianer i ms:
+
+| Försök | Baslinje | Försök | Utfall |
+|---|---:|---:|---|
+| register-TEST + adressvikning + fler kopiekällor | 1296,77 | 1288,80 | ej upprepat: 1302,94 mot 1308,31 |
+| dessutom omedelbara lagringar | 1302,94 | 1310,20 | instruktioner 1,382× till 1,352× clang, CPU sämre |
+| direkta syskonanrop med epilog per plats | 1302,04 | 1325,21 | sämre |
+| syskonanrop med delade epiloger för sparade register | 1302,82 | 1318,57 | sämre |
+| återanvändning av stacklaster inom block | 1299,70 | 1305,97 | ingen instruktionsvinst i huvudfunktionerna |
+
+Försöken passerade den fokuserade x86-riggen (assembly och egen objektväg)
+och SQLite-verifieringshashen; syskonanrop kontrollerades dessutom med
+normal retur i samma funktion, heltals-/FP-retur, registertryck, stackargument
+och en lokal adress som måste leva genom anropet. Nollidiomer/smalare
+konstantkodning gav inte heller säker CPU-vinst och är återställda.
+Den behållna baslinjen ligger i dessa serier ungefär **1,15–1,16× clang**;
+den tidigare storlek-100-serien gav 1,143×. Ingen ny prestandavinst eller
+uppnådd grind hävdas. Underlag och assembly finns i
+`work/vir-x86-perf/{arm-compare,testi2,testaddr,framecopies,sti,sib2,sibshared,reload}`.
 
 Efter rebase på main `06c688f4` finns PR126:s gemensamma allokatorregler
 med. Första x86-skivan: sekventiellt konsistenta atomiska laster/lagringar,
