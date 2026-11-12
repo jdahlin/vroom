@@ -1275,7 +1275,7 @@ static bool vl_cfold(vl *L, uint32_t b, uint32_t i, uint8_t res)
 		if (r == VR_NONE || vl_fcls(r) || vl_gx(r) == R_X16 || vl_gx(r) == R_X17)
 			return false;
 		end = c + (x.kind == VX_MEM);
-		for (uint32_t q = L->eb; q < L->eend && L->o->edit[q].pos <= end; q++) {
+		for (uint32_t q = L->ei; q < L->eend && L->o->edit[q].pos <= end; q++) {	/* (those before are at i or earlier) */
 			const vir_edit *d = &L->o->edit[q];
 
 			if (d->pos > i && !(d->pos <= c && (d->kind == VE_REMAT || d->kind == VE_RELOAD) && d->dst != r))
