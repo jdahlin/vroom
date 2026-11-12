@@ -1,0 +1,13 @@
+; a vector load's width is its lanes'
+vir 1
+target arm64-darwin
+sig %s = (int) -> none
+func @f %s {
+b0:
+  v0:ptr = param 0.0
+  v1:f32x4 = load.8 v0 align 4
+  store.4 v0, v1 align 4
+  ret
+}
+; ---
+@f b0.1: T4: load: width 8 does not fit f32x4

@@ -1,0 +1,156 @@
+; 128-bit vectors: f32x4 and i32x4 values, the scalar operations on them, masks
+vir 1
+target arm64-darwin
+sig %s = (int, int, int) -> int
+sig %v = (int) -> none
+func @vec %s {
+b0:
+  v0:ptr = param 0.0
+  v1:ptr = param 1.0
+  v2:i64 = param 2.0
+  v3:i32 = trunc v2
+  v4:f32x4 = load.4 v0 align 4
+  v5:f32x4 = load.4 v1 align 4
+  v6:f32x4 = fadd v4, v5
+  v7:f32x4 = fsub v6, v4
+  v8:f32x4 = fmul v7, v5
+  v9:f32x4 = fdiv v8, v6
+  v10:f32x4 = fneg v9
+  v11:f32x4 = fabs v10
+  v12:f32x4 = fsqrt v11
+  v13:f32x4 = vsplat 0x1p+0:f32
+  v14:i32x4 = vfcmp.olt v12, v13
+  v15:f32x4 = vbitsel v14, v12, v13
+  v16:f32x4 = vrev v15
+  store.4 v0, v16 align 4
+  v17:i32x4 = vsplat v3
+  v18:i32x4 = vseries
+  v19:i32x4 = add v17, v18
+  v20:i32x4 = sub v19, v17
+  v21:i32x4 = mul v20, v19
+  v22:i32x4 = and v21, v19
+  v23:i32x4 = or v22, v18
+  v24:i32x4 = xor v23, v17
+  v25:i32x4 = neg v24
+  v26:i32x4 = not v25
+  v27:i32x4 = vicmp.sgt v26, v17
+  v28:i32x4 = vbitsel v27, v26, v17
+  v29:f32x4 = vs2f v28
+  store.4 v1, v29 align 4
+  v30:i32x4 = select v3, v28, v18
+  br b1(v30, v29)
+b1(v31:i32x4, v32:f32x4):
+  store.4 v1, v32 align 4
+  v33:i32 = vreduce v31
+  v34:i64 = ext.4s v33
+  ret v34
+}
+
+func @vec2 %s {
+b0:
+  v0:ptr = param 0.0
+  v1:ptr = param 1.0
+  v2:i64 = param 2.0
+  v3:f64x2 = load.8 v0 align 8
+  v4:f64x2 = load.8 v1 align 8
+  v5:f64x2 = fadd v3, v4
+  v6:f64x2 = fmul v5, v3
+  v7:f64x2 = fdiv v6, v4
+  v8:f64x2 = fsqrt v7
+  v9:f64x2 = vsplat 0x1p+0:f64
+  v10:i64x2 = vfcmp.oge v8, v9
+  v11:f64x2 = vbitsel v10, v8, v9
+  v12:f64x2 = vrev v11
+  store.8 v0, v12 align 8
+  v13:i64x2 = vsplat v2
+  v14:i64x2 = vseries
+  v15:i64x2 = add v13, v14
+  v16:i64x2 = sub v15, v13
+  v17:i64x2 = xor v16, v14
+  v18:i64x2 = neg v17
+  v19:i64x2 = vicmp.ult v18, v13
+  v20:i64x2 = vbitsel v19, v18, v13
+  v21:f64x2 = vs2f v20
+  store.8 v1, v21 align 8
+  v22:i64 = vreduce v20
+  ret v22
+}
+
+; ---
+vir 1
+target arm64-darwin
+sig %s0 = (int, int, int) -> int
+sig %s1 = (int) -> none
+
+func @vec %s0 {
+b0:
+  v0:ptr = param 0.0
+  v1:ptr = param 1.0
+  v2:i64 = param 2.0
+  v3:i32 = trunc v2
+  v4:f32x4 = load.4 v0 align 4
+  v5:f32x4 = load.4 v1 align 4
+  v6:f32x4 = fadd v4, v5
+  v7:f32x4 = fsub v6, v4
+  v8:f32x4 = fmul v7, v5
+  v9:f32x4 = fdiv v8, v6
+  v10:f32x4 = fneg v9
+  v11:f32x4 = fabs v10
+  v12:f32x4 = fsqrt v11
+  v13:f32x4 = vsplat 0x1p+0
+  v14:i32x4 = vfcmp.olt v12, v13
+  v15:f32x4 = vbitsel v14, v12, v13
+  v16:f32x4 = vrev v15
+  store.4 v0, v16 align 4
+  v17:i32x4 = vsplat v3
+  v18:i32x4 = vseries
+  v19:i32x4 = add v17, v18
+  v20:i32x4 = sub v19, v17
+  v21:i32x4 = mul v20, v19
+  v22:i32x4 = and v21, v19
+  v23:i32x4 = or v22, v18
+  v24:i32x4 = xor v23, v17
+  v25:i32x4 = neg v24
+  v26:i32x4 = not v25
+  v27:i32x4 = vicmp.sgt v26, v17
+  v28:i32x4 = vbitsel v27, v26, v17
+  v29:f32x4 = vs2f v28
+  store.4 v1, v29 align 4
+  v30:i32x4 = select v3, v28, v18
+  br b1(v30, v29)
+b1(v31:i32x4, v32:f32x4):
+  store.4 v1, v32 align 4
+  v33:i32 = vreduce v31
+  v34:i64 = ext.4s v33
+  ret v34
+}
+
+func @vec2 %s0 {
+b0:
+  v0:ptr = param 0.0
+  v1:ptr = param 1.0
+  v2:i64 = param 2.0
+  v3:f64x2 = load.8 v0 align 8
+  v4:f64x2 = load.8 v1 align 8
+  v5:f64x2 = fadd v3, v4
+  v6:f64x2 = fmul v5, v3
+  v7:f64x2 = fdiv v6, v4
+  v8:f64x2 = fsqrt v7
+  v9:f64x2 = vsplat 0x1p+0
+  v10:i64x2 = vfcmp.oge v8, v9
+  v11:f64x2 = vbitsel v10, v8, v9
+  v12:f64x2 = vrev v11
+  store.8 v0, v12 align 8
+  v13:i64x2 = vsplat v2
+  v14:i64x2 = vseries
+  v15:i64x2 = add v13, v14
+  v16:i64x2 = sub v15, v13
+  v17:i64x2 = xor v16, v14
+  v18:i64x2 = neg v17
+  v19:i64x2 = vicmp.ult v18, v13
+  v20:i64x2 = vbitsel v19, v18, v13
+  v21:f64x2 = vs2f v20
+  store.8 v1, v21 align 8
+  v22:i64 = vreduce v20
+  ret v22
+}

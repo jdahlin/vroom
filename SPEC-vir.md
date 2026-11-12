@@ -45,7 +45,8 @@ macOS. All are little-endian with 64-bit pointers; VIR 1.0 assumes both.
 1.3 Not in 1.0 (a function that needs one of these is not built as VIR and
 takes the ordinary path): calls to `returns_twice` functions, `setjmp`,
 `alloca` and VLAs, `__int128`/`_BitInt` values wider than 64 bits, x87
-`long double` and binary128 as values, vector types, `_Float16`, tail calls,
+`long double` and binary128 as values, C vector types (VIR's own vectors,
+section 7.5, are made by the loop vectorizer only), `_Float16`, tail calls,
 `naked` functions, interrupt calling conventions, and (until the step that
 splits the target's asm handling, X6) inline assembly other than an empty
 barrier.
@@ -179,6 +180,10 @@ one sweep when a pass asks for it.
 | 4 | `f64` | IEEE binary64 |
 | 5 | `ptr` | Address with provenance (section 6), 64 bits |
 | 6 | `multi` | Several results, read with `proj` |
+| 7 | `f32x4` | Four `f32` lanes, 128 bits (section 7.5) |
+| 8 | `i32x4` | Four `i32` lanes, 128 bits (section 7.5) |
+| 9 | `f64x2` | Two `f64` lanes, 128 bits (section 7.5) |
+| 10 | `i64x2` | Two `i64` lanes, 128 bits (section 7.5) |
 
 4.1 There are no 8- or 16-bit values, no booleans, no aggregates. Narrow
 integers exist as load and store widths and as the `ext` operation.
@@ -296,6 +301,7 @@ other than to equal values, must clear its UB flags (R2).
 | 6 | `bparam` | any but void, multi | - | - | - | P | Block parameter; value supplied by each `br` to the block |
 | 7 | `param` | i64 f32 f64 ptr | # group | # piece | - | P | Incoming argument piece, or for a memory group the address of its bytes (section 9); only in block 0 |
 | 8 | `proj` | per producer | v producer (`multi`) | # index | - | P | Result number `b` of a call or asm |
+| 9 | `fma` | f32 f64 | v:T | v:T | v:T | P/F | `a * b + c` rounded once (IEEE fusedMultiplyAdd). Flags: `negp` the product is negated, `negc` the addend is negated, both exact |
 | 10 | `add` | i32 i64 | v:T | v:T | - | P,U* | Sum modulo 2^n |
 | 11 | `sub` | i32 i64 | v:T | v:T | - | P,U* | Difference modulo 2^n |
 | 12 | `mul` | i32 i64 | v:T | v:T | - | P,U* | Product modulo 2^n |
@@ -355,7 +361,6 @@ other than to equal values, must clear its UB flags (R2).
 | 69 | `barrier` | void | - | - | - | R,W | Reads and writes all exposed memory; no code |
 | 70 | `frameaddr` | ptr | # level | - | - | R | `__builtin_frame_address(level)` |
 | 71 | `retaddr` | ptr | # level | - | - | R | `__builtin_return_address(level)` |
-| 72 | `fma` | f32 f64 | v:T | v:T | v:T | P/F | `a * b + c` rounded once (IEEE fusedMultiplyAdd). Flags: `negp` the product is negated, `negc` the addend is negated, both exact |
 | 80-86 | terminators | | | | | T | Section 8 |
 
 `U*`: only when a UB flag is set. `P/F`: pure, unless the function has
@@ -376,6 +381,42 @@ are not observable.
 The constant folder therefore does not fold an operation whose result is a NaN.
 7.4.3 A function with `VF_NOFP` must contain no value of type `f32` or `f64`
 and no `fconst`.
+
+### 7.5 Vectors
+
+Draft (2026-11-12; `RESEARCH-vectors.md` section 5 is the design and says what
+is left out). Lane 0 is at the lowest address.
+
+7.5.1 A vector is a value like any other: a block parameter, a `select` arm
+(the condition is a scalar and picks a whole vector), a `load` result, a
+`store` operand. A `load` or `store` of a vector moves 16 bytes; its width
+field is the lane's, and its alignment is at least the lane's, never 16 by
+default.
+7.5.2 These operations take a vector type as their result type, lane by lane:
+`add sub and or xor neg not` on `i32x4` and `i64x2`, `mul` on `i32x4` only
+(no target has a 64-bit lane multiply); `fadd fsub fmul fdiv fneg fabs fsqrt`
+on `f32x4` and `f64x2`, each lane as 7.4. No flag (`nsw`, `nuw`) is allowed to
+mean anything on a vector: lanes wrap.
+7.5.3 There is no mask type. A mask is the integer vector of the same lane
+width (`i32x4` for `f32x4` and `i32x4`, `i64x2` for the other two) whose
+lanes are 0 or -1; `vbitsel` is defined for every bit pattern. Below, V is
+any vector type, I(V) the integer and F(V) the float vector of V's lane width.
+
+| # | Name | `ty` | `a` | `b` | `c` | Eff | Meaning |
+|---|---|---|---|---|---|---|---|
+| 72 | `vsplat` | V | lane type | - | - | P | `a` in every lane |
+| 73 | `vseries` | integer V | - | - | - | P | Lanes 0, 1, 2, ... |
+| 74 | `vicmp.cc` | integer V | V | V | - | P | `icmp`'s codes per lane: -1 or 0 |
+| 75 | `vfcmp.cc` | integer V | F(V) | F(V) | - | P | `fcmp`'s codes per lane: -1 or 0 |
+| 76 | `vbitsel` | V | I(V) | V | V | P | Per bit: `a` set takes `b`, clear takes `c` |
+| 77 | `vs2f` | float V | I(V) | - | - | P,F | Signed lanes to float of the same width |
+| 78 | `vrev` | V | V | - | - | P | The lanes in reverse order |
+| 79 | `vreduce` | `i32` `i64` | the vector of such lanes | - | - | P | The lanes' wrapping sum |
+
+7.5.4 Register allocation: vectors are in the float class; a vector's spill
+slot is 16 bytes (15.2), and no v register keeps a vector across a call. A
+target may still report float registers as callee-saved (arm64's v8-v15, low
+halves only) for a function in which no vector is live across a call.
 
 ## 8. Control flow
 
@@ -792,7 +833,7 @@ is encodable as an immediate reports that operand in `mem`.
 15.2 `vir_alloc(f, loops, regs, opt, out)` produces, without changing the
 function, in the thread's reservations (valid until its next call):
 - per value, a spill slot or none. Spill slots are the allocator's own table
-  (`out->nspill`, each 4 or 8 bytes), not VIR slots: no instruction names
+  (`out->nspill`, each 4, 8 or 16 bytes), not VIR slots: no instruction names
   them, and lowering adds them to the frame;
 - per value operand and per result, in the order sweep 6 visits them, the
   register it is in at that instruction (one byte each; a value can be in

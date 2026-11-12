@@ -156,7 +156,8 @@ De följer `LO()`-gränssnittet, så att byggaren är en tunn översättning:
    av värdet vars nästa användning ligger längst bort (SPEC-vir.md 15.5–15.11;
    heltals- och flyttalsklass, parallella flyttar per kant, fasta register för
    `div`, skift och argument, tips i stället för sammanslagningsfas).  Inget
-   LICM i 1.0.
+   LICM i 1.0, med ett undantag (beslut 2026-11-12): loopkonstanter i raka
+   innerloopar utan anrop lyfts ut (`vv_pin`, `emit/vir/vec.inc`).
 5. **Sänk** genom den riktiga CPU:ns `LO`.
 
 Passlistan är fast: vanliga funktionsanrop, ingen passhanterare, inga
@@ -235,6 +236,135 @@ ekvivalenstestning återstår. Genererade program använder inga externa anrop.
 - **Öppet:** benchmarksvit och X för G5 (PLAN-release).
 
 ## Status
+
+### Vektorer och loopvektorisering (2026-11-12): första skivan, TSVC_2 151/151
+
+Underlag och design: `RESEARCH-vectors.md` (ändrar SPEC 1.3/1.4: VIR har egna
+vektorvärden, och en looptransformation).  Gjort, i den ordningen:
+
+- **Byggaren tog inte flyttalsargument.**  Ett `f32` i argumentplatsens
+  8-byteord lagrades som `f64` (`vw_store`), så varje funktion som anropade
+  något med en `float`-parameter föll tillbaka.  `tsvc.c`: 7 av 158 funktioner
+  byggda före, 158 efter.
+- **`bench/vcc-tsvc.py`**: TSVC_2 (`fetch-testsuites.sh TSVC_2`), 151 loopars
+  kontrollsummor mot clang -O3, direkt emitter och VIR; `--why` ger
+  vektoriserarens skäl per loop.
+- **Typer och operationer** (SPEC 4, 7.5): `f32x4`, `i32x4`; de skalära
+  operationerna tar dem genom `OK_T`; `vsplat vseries vicmp vfcmp vbitsel vs2f
+  vrev vreduce`.  Mask = `i32x4` med 0/-1.  Vektorer i flyttalsklassen,
+  spillplats 16 byte (`4 << klass`).
+- **arm64-sänkning** (`emit/vir/a64.c`, `vl_vec`): NEON som kodade ord, mot
+  clangs assembler; registerflytt och byte är `mov`/`eor v.16b`.  **En vektor
+  i en spillplats sänks inte** (funktionen tar då den vanliga vägen): saknar
+  en post för `ldr/str q` mot ramen.
+- **`nsw`** på tecknad `+ - *` från vandraren; `-fwrapv`/`-fno-strict-overflow`
+  (`cc_opts.wrapv`) stänger av det.  Bara vektoriseraren läser flaggan.
+- **Vektoriseraren** (`emit/vir/vec.inc`, i pre-IR:en efter if-konvertering):
+  innersta loopar med test i huvudet och rak kropp; induktioner och
+  `i32`-summor; laddningar/lagringar `symbol ± 4·t`; beroenderegeln i
+  RESEARCH 6.3; skalärloopen blir kvar som rest.  Av under
+  `-mgeneral-regs-only` och med `VCC_VIR_VEC=0`; `VCC_VIR_VEC=r` rapporterar.
+
+Mätt (M1 Pro, `iterations` 256): direkt emitter 7,2 s, VIR 4,3 s (5,1 s före
+vektoriseraren), clang -O3 1,5 s; 151/151 kontrollsummor på alla tre.
+**28 av 120 innerloopar vektoriserade** (clang: 77 loopar i 66 funktioner).
+De vektoriserade looparna går 5–10× fortare än den direkta emittern och
+1,3–5× långsammare än clangs (ingen interleaving, adresserna räknas om i
+loopen).  Skälen för resten: flyttalsreduktion eller rekurrens 17, lagring
+med annat steg än elementet 16, anrop 11, adress som inte är symbol + linjär
+(pekare) 10, lagrat värde läst 1–3 varv senare 10, värde som inte kan bli
+banor (gather, `double`) 9, fel ordning inom kroppen 6.
+
+Validering: `tests/vcc/vir_vec_loops.c` (47 loopar × varvtal 0–9 och 37 mot
+clang: rest 0–3, nedåtlöpande, avstånd −5..5 inom en array, lagring före
+laddning, summor, val, invariant ur minnet); `vcc-ctests.py` med `VCC_VIR=bl`
+2079/2082 (de tre `.Lswitch.values`-felen fanns före), utan VIR oförändrat;
+ASan/UBSan rent på TSVC och testet; `vir-test.py` 124/124.
+
+**Andra omgången (samma dag): 43 av 120 loopar, VIR 2,6 s.**
+
+- **Körtidskontroll av överlapp.**  Två åtkomster som varken är ett objekt
+  eller två symboler (pekare mot vad som helst, invariant laddning mot en
+  lagring, en array på okänt avstånd `a[i]`/`a[i+k]`) jämförs som byteintervall
+  i VPH; möts två går loopen skalärt.  Högst 8 par (som LLVM).
+- **Pekare** som bas: parametrar, och adresser räknade som heltal (`i2p` av
+  laddad global pekare + index).
+- **Pekarinduktioner** i vektorkroppen i stället för omräknat index.
+- **Induktioner**: flera steg per varv (`j++` två gånger), steg som är ett
+  värde (versioneras på steg = 1), teckenlös `i32`-räknare med steg 1 under
+  teckenlös gräns, `size_t`.
+- **Vektorspill sänks** (`ldr/str q` genom x16, plats till plats genom v31):
+  ingen återgång till den direkta emittern längre.
+- **d8–d15 för skalära flyttal över anrop** (`emit/vir/a64.c`): erbjuds
+  allokatorn som anropsbevarade, sparas vid ingången och återställs före
+  varje retur och syskonanrop.  Inte när en vektor lever över ett anrop
+  (`vl_vcross`; ingen gör det i dag) och inte med
+  `-fasynchronous-unwind-tables` (CFI för platserna saknas).  En
+  flyttalsackumulator i en loop inuti en loop med anrop gick genom minnet
+  varje varv: s311, vsumr, vdotr 0,45 s → 0,08 s (clangs tid).
+
+Mätt: direkt emitter 7,5 s, VIR 2,65 s, clang -O3 1,49 s; 151/151.  Skäl för
+de 77 looparna som är kvar: steg ≠ element 17, flyttalsreduktion/rekurrens 17,
+värde som inte kan bli banor 10, lagrat värde läst 1–3 varv senare 10, adress
+inte bas + linjär 6, anrop 6, ordning i kroppen 6.  Av de 66 funktioner clang
+vektoriserar tar vi 36; störst skillnad: 9 med villkorlig lagring (clang
+skalariserar lagringen per bana), 7 flyttalsreduktioner (clang: ordnade), 6
+med steg som bara är känt i körtid i en multiplikation.
+
+Tester: `tests/vcc/vir_vec_loops.c` (nu även överlappande pekare, 10
+spillda vektorer, steg 1 och 3, okänt avstånd, teckenlösa räknare),
+`tests/vcc/vir_fp_callee.c`.  `vcc-ctests.py` med `VCC_VIR=bl` 2080/2083 (samma
+tre), utan VIR 2083/2083; ASan/UBSan rent.
+
+**Tredje omgången (samma dag): skalärloopar.  VIR 6,3 G cykler, clang 4,75.**
+
+- Flyttal laddas och lagras direkt i v-register (`ldr/str s/d`) när adressen
+  är register + offset eller register + index; förut via x16 och `fmov`.
+- `s2f`/`u2f` av heltalskonstant och `fext`/`ftrunc` av flyttalskonstant viks.
+- **Loopkonstanter lyfts ut** (`vv_pin` i `vec.inc`): symboladresser,
+  flyttalskonstanter ≠ 0 och jämförelsegränser som inte är en immediate görs
+  en gång framför de raka innerloopar vektoriseraren ändå tittar på (högst 6,
+  inga loopar med anrop).  **Det här är ett avsteg från "Inget LICM i 1.0"**
+  ovan, begränsat till konstanter; `VCC_VIR_VEC=n` stänger av det.  Effekt på
+  TSVC: −19 % instruktioner, −7 % cykler.  **Beslut (Johan, 2026-11-12):
+  behålls**, som undantag i passlistan ovan; bredare LICM är fortfarande
+  utanför 1.0.
+- `bench/vcc-tsvc.py` skriver cykler (`/usr/bin/time -l`): maskinen är delad
+  och sekunderna varierar.
+
+Mätt i cykler (G): direkt emitter 23,6, VIR 6,33, clang -O3 4,75; 151/151.
+
+**Fjärde omgången (samma dag): 8-bytesbanor och val.**
+
+- **`f64x2` och `i64x2`** (SPEC 4, 7.5; operandslagen `OK_VI`/`OK_VF`/`OK_VRED`
+  följer resultatets banbredd): typer, tabell, verifierare, NEON (`.2d` är
+  `.4s` med storleksbiten), och vektoriseraren är generisk över banbredd
+  (bredden är loopens första lagring; VF 2 eller 4).  Ingen 64-bitars
+  multiplikation; en loop som blandar 4- och 8-bytesdata går skalärt.
+- **Val (`select`)**: jämförelser → `vicmp`/`vfcmp` → `vbitsel` var aldrig
+  testade förut, eftersom testens val hade laddningar i armarna och inte
+  if-konverterades.  Nu 16 jämförelser × två banbredder mot clang.  Två hål
+  det visade: (1) **byggaren tog inte `float`-villkorsuttryck** (`c ? x : y`
+  med `float`: temporärens 8-byteord lästes som `f64`; `vwslot.f32w`), så
+  sådana funktioner gick inte genom VIR alls; (2) heltalsval kommer som
+  `trunc(select i64(ext, ext))` från vandraren och känns nu igen (`VK_W32`).
+- Looprotation i sänkningen (testet kopierat till slutet av loopen) provades:
+  −1,3 % cykler på TSVC, 0 på sqlite, +0,9 % kod.  Inte infört (samma slutsats
+  som tidigare i `vl_dupok`).
+
+`tests/vcc/vir_vec_wide.c` (51 loopar på 8-bytesbanor × varvtal 0–9 och 37).
+TSVC oförändrat (allt där är `float`): 43 av 120, 6,3 G cykler.  SQLites
+speedtest1 genom VIR: samma verifieringshash som clang, 2,29 G cykler (clang
+2,01, direkt emitter 3,05); 5 av 565 innerloopar vektoriseras där (resten är
+listvandringar, anrop och byteloopar).
+
+Kvar (RESEARCH 6.6 och 5): `i8x16`/`i16x8` (byteloopar: kräver att
+i32-räkningen får smalnas); `double` ur `int` (`(double)i`); invarianta
+uttryck som inte är konstanter; CFI för d8–d15; steg ≠
+elementstorlek;
+interleaving; ordnade flyttalsreduktioner; övriga fyra bantyper; x86-64 och
+wasm; tolken och `virgen` känner inte vektorer; kärnan, PostgreSQL och SQLite
+är inte körda med VIR efter detta.
 
 ### V0 (2026-11-11): klar för granskning
 
@@ -674,7 +804,7 @@ cykler mot virpol, nu +9,9 %.  Samplingar per funktion (storlek 300) varierar
   samma fyra), vir-test 119/119, vcc-volatile 32/32, sqlite TCL genom VIR
   1 fel (interrupt2, som clang).  Kvar i dekkerMul2: inlining i anroparna,
   `fmadd`, lövram utan ramrekord, `[x0, #8]` i stället för `add` + `[x1]`.
-- **`fma` (2026-11-12).**  Ny VIR-instruktion 72 `fma a, b, c` (flaggor `negp`,
+- **`fma` (2026-11-12).**  Ny VIR-instruktion 9 `fma a, b, c` (72–79 är vektoroperationerna) (flaggor `negp`,
   `negc`; SPEC-vir.md), sänkt till fmadd/fmsub/fnmsub/fnmadd.  Byggaren
   kontraherar som clangs `-ffp-contract=on`: en produkt som uttrycket självt
   just räknade (namnet håller den fortfarande; också negerad) adderas eller
@@ -693,6 +823,13 @@ cykler mot virpol, nu +9,9 %.  Samplingar per funktion (storlek 300) varierar
   fel, utan VIR 2082/2082 och byte-identiskt; vir-test 119/119, vir-exposure
   56/56, virgen 101/101, vcc-abi, vcc-driver 212/212, sqlite TCL genom VIR
   1 fel (interrupt2).
+  Efter sammanslagningen med vektoriseraren (main 75bb9062): `fma` tar också
+  vektortyper (fmla/fmls, addenden negerad först för `negc`) och
+  vektoriseraren känner den, annars föll TSVC från 43 till 32 vektoriserade
+  slingor; nu 43 av 120, 151/151 kontrollsummor.  Mains direkta
+  flyttalslaster (`vl_fmem`, ord) går först; `I_LDF`/`I_STF` tar ramplatser,
+  volatila åtkomster, spill och stackargument.  sqlite genom VIR mot main:
+  304176 → 303889 instruktioner statiskt, speedtest1 28,63 → 28,53 G.
 - **ccmp (2026-11-12).**  Byggaren (`vw_condmerge`, före if-konverteringen)
   slår ihop två grenar mot ett gemensamt mål som LLVM:s
   FoldBranchToCommonDest: `brif c1, S, O` där S bara håller en heltalsjämförelse

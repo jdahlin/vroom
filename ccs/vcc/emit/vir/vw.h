@@ -33,6 +33,7 @@ typedef struct vwslot {
 	uint8_t used;		/* a reachable load reads it (emission) */
 	uint32_t fin;		/* VIR slot id, VW_NOBLK none yet */
 	uint8_t prom;		/* promoted to variables (vw_promote): its stores go */
+	uint8_t f32w;		/* an 8-byte slot whose last float stored was an f32 (its low 4 bytes) */
 } vwslot;
 
 #define VW_LIFETIME 0x8000u	/* a memset's flag: the start of a local's lifetime (vw_undecl) */

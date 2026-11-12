@@ -274,9 +274,9 @@ static void put_flags(pctx *p, const vir_ins *in)
 
 static const char *cc_name(uint32_t op, uint32_t cc, char *t)
 {
-	if (op == VO_ICMP && cc < 10)
+	if ((op == VO_ICMP || op == VO_VICMP) && cc < 10)
 		return vir_icc[cc];
-	if (op == VO_FCMP && cc < 8)
+	if ((op == VO_FCMP || op == VO_VFCMP) && cc < 8)
 		return vir_fcc[cc];
 	sprintf(t, "cc%u", cc);
 	return t;
