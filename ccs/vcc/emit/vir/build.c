@@ -2354,6 +2354,19 @@ static bool vw_simp1(ecx *e, vwsimp *S, uint32_t q, uint32_t *r)
 		if (V->p[in.a].in.op == (in.op == VO_I2P ? VO_P2I : VO_I2P))
 			*r = V->p[in.a].in.a;
 		return false;
+	case VO_STORE: {	/* only the low bytes go to memory: not their extension, nor a truncation to more */
+		vir_ins xi = V->p[in.b].in;
+
+		if (vw_promdead(V, q))
+			return false;	/* (it goes: its operands are not counted) */
+		if (V->p[in.b].blk != VW_NOBLK && ((xi.op == VO_EXT && VIF_W(xi.fl) >= VIF_W(in.fl)) ||
+						   (xi.op == VO_TRUNC && VIF_W(in.fl) <= 2))) {
+			vw_dec(V, S, in.b), vw_inc(V, S, xi.a);
+			V->p[q].in.b = xi.a;
+			return true;
+		}
+		return false;
+	}
 	case VO_EXT: {
 		uint32_t x = in.a, K = 1u << VIF_W(in.fl), ts = vir_tysize(in.ty);
 		bool s = in.fl & VIF_MS;
@@ -2908,6 +2921,49 @@ static void vw_doms(ecx *e, vwsimp *S)
 	free(ri);
 }
 
+/*
+ * base + constant as an address is the load's or store's own operand on the CPU, but the
+ * lowering folds only a ptradd that its one user follows directly; numbering gives a
+ * block's accesses to one field a shared ptradd, which then costs an instruction and a
+ * register.  So each such access gets its own copy just before it (the shared one dies
+ * when nothing else reads it).  Only offsets every CPU here encodes: -256..255, or a
+ * multiple of the access size up to 4095 of them.
+ */
+static void vw_ownaddr(ecx *e, vwsimp *S)
+{
+	vwst *V = e->vw;
+
+	for (uint32_t i = 0; i < V->norder; i++) {
+		uint32_t b = V->order[i];
+
+		for (uint32_t q = V->b[b].head, pq = 0; q; pq = q, q = V->p[q].next) {
+			vir_ins in = V->p[q].in;
+			uint32_t a, n, w = 1u << VIF_W(in.fl);
+			int64_t k;
+
+			if ((in.op != VO_LOAD && in.op != VO_STORE) || q >= S->n0 || vw_find(V, q) != q || vw_promdead(V, q) ||
+			    (in.op == VO_LOAD && !S->cnt[q] && !(in.fl & VIF_VOL)))
+				continue;
+			a = vw_find(V, in.a);
+			if (a >= S->n0 || V->p[a].in.op != VO_PTRADD || V->p[a].blk == VW_NOBLK ||
+			    !vw_kint(V, vw_find(V, V->p[a].in.b), &k) ||
+			    !((k >= -256 && k <= 255) || (k > 0 && !(k % w) && k / w <= 4095)))
+				continue;
+			if (a == pq && S->cnt[a] == 1)
+				continue;	/* (its own already) */
+			n = vw_put(e, VO_PTRADD, VT_PTR, V->p[a].in.fl, vw_find(V, V->p[a].in.a), vw_find(V, V->p[a].in.b), 0, b);
+			V->p[n].loc = V->p[q].loc;
+			V->p[n].next = q;
+			if (pq)
+				V->p[pq].next = n;
+			else
+				V->b[b].head = n;
+			V->p[q].in.a = n;
+			vw_dec(V, S, a), vw_inc(V, S, V->p[n].in.a);
+		}
+	}
+}
+
 static void vw_simplify(ecx *e)
 {
 	vwst *V = e->vw;
@@ -2983,10 +3039,11 @@ static void vw_simplify(ecx *e)
 		}
 		free(bst);
 	}
+	vw_ownaddr(e, &S);
 	/* what nothing reads */
 	for (uint32_t i = 0; i < V->norder; i++)
 		for (uint32_t q = V->b[V->order[i]].head; q; q = V->p[q].next)
-			if (vw_find(V, q) == q && !S.cnt[q])
+			if (q < S.n0 && vw_find(V, q) == q && !S.cnt[q])
 				stk[ns++] = q;
 	while (ns) {
 		uint32_t q = stk[--ns], op = V->p[q].in.op, eff = vir_optab[op].eff;

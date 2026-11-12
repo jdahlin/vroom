@@ -239,6 +239,14 @@ static void vl_fixed(const vir_fn *f, uint32_t v, vir_fix *x, void *ctx)
 		if (vl_zero(f, in->b))
 			x->mem |= 2;
 		return;
+	case VO_SELECT:	/* (csel reads zero from wzr) */
+		if (in->ty != VT_F32 && in->ty != VT_F64) {
+			if (vl_zero(f, in->b))
+				x->mem |= 2;
+			if (vl_zero(f, in->c))
+				x->mem |= 4;
+		}
+		return;
 	case VO_AND: case VO_OR: case VO_XOR:	/* (a record's logical immediate must be encodable) */
 		if (vl_iconst(f, in->b) && logimm_ok(vl_lval(&f->ins[in->b]), in->ty != VT_I32))
 			x->mem |= 2;
@@ -274,7 +282,7 @@ static void vl_regs(vir_regs *r, bool darwin)
 {
 	static const uint8_t ops[] = { VO_PARAM, VO_CALL, VO_RET, VO_MEMCPY, VO_MEMSET, VO_LOAD, VO_STORE, VO_ADD, VO_SUB,
 				       VO_AND, VO_OR, VO_XOR, VO_ICMP, VO_PTRADD, VO_SHL, VO_LSHR, VO_ASHR, VO_MUL,
-				       VO_I2P, VO_P2I, VO_TRUNC, VO_EXT };
+				       VO_I2P, VO_P2I, VO_TRUNC, VO_EXT, VO_SELECT };
 
 	for (size_t i = 0; i < sizeof ops; i++)
 		vl_opfix[ops[i]] = 1;

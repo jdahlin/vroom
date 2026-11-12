@@ -712,6 +712,41 @@ minnestillstånd: det bröts vid varje sammanflöde och varje lagring, och adres
   vir-test, vcc-volatile; sqlite3.c under ASan; zlib ger clangs byte; sqlite
   speedtest1 samma verifieringshash.
 
+### zlib deflate-1: fältadresser, smala lagringar, sub+cmp, csel med noll (2026-11-12)
+
+Profil av nivå 1 mot clang (sampel, 60 varv): `fill_window` 229 mot 11 (clang
+vektoriserar `slide_hash`), `deflate_fast` 596 mot 422, `longest_match` 838 mot
+722, `compress_block` 389 mot 322.  Fyra allmänna brister i koden åtgärdade:
+- **Fältadress per åtkomst** (`build.c`, `vw_ownaddr`): numreringen ger ett
+  blocks åtkomster till samma fält en delad `ptradd`, och sänkningen viker bara
+  en `ptradd` med en användare direkt efter.  Varje `load`/`store` med bas +
+  kodbar konstant (−256..255, eller multipel av bredden upp till 4095) får nu
+  sin egen kopia precis före sig: `add x1, x19, #160; ldr w2, [x1]; …; str w2,
+  [x1]` blir `ldr w2, [x19, #160]; …; str w2, [x19, #160]`.
+- **Smal lagring** (`vw_simp1`): `store` läser bara de låga byten, så värdets
+  `ext` (minst så bred) eller `trunc` hoppas över (`ubfm` före `strh`/`strb`).
+  Inte för lagringar till befordrade platser: deras operander räknas inte.
+- **sub + cmp** (`opt.c`, `flags`): en `sub` direkt före en `cmp` av samma
+  operander blir `subs` och jämförelsen går.
+- **csel med noll** (`a64.c`): en nollarm läses ur `wzr` i stället för att
+  materialiseras.
+- **Resultat:** `slide_hash`-slingan 10 → 7 instruktioner; deflate.c 5586 →
+  5219 instruktioner; zlib `.text` 78304 → 74436.  zbench mot clang -O2:
+  deflate-1 1,36x → 1,19x, deflate-6 1,09x → 1,02x, totalt 1,03x → 1,02x.
+  sqlite genom VIR: 292365 → 287144 instruktioner, text 1209808 → 1188920,
+  speedtest1 CPU 2,742 → 2,731 s (2,768 före dagens tre ändringar).
+- **Kvar på nivå 1** (kräver beslut): `slide_hash` behöver vektorisering
+  (clang: NEON `uqsub`); `deflate_fast`/`compress_block` läser om `s->`-fält
+  efter varje lagring genom `s->head`/`s->prev` (`ush`), vilket clang slipper
+  med typbaserad alias, som VIR enligt beslutet 2026-11-11 inte har utan flagga.
+  Utan beslut: lagring → laddning över lagringar till samma bas på annat offset
+  (`str w2, [x0, #8]; str w1, [x0, #12]; ldrsw x1, [x0, #8]`).
+- Test: `tests/vcc/vir_field_access.c`.  Verifierat: vcc-ctests `VCC_VIR=bl
+  VCC_VIR_CHECK=1` 2079/2082 (samma tre), med verifieraren (`blv`) vcc-sviten,
+  inline 85/85, direkta emittern 2082/2082, ASan+UBSan som förut, vir-test,
+  vcc-volatile, sqlite3.c med kontrollen och samma verifieringshash, zlib ger
+  clangs byte.
+
 ### Underlag för V4 (2026-11-11): registerallokering, ingen kod
 
 - `RESEARCH-regalloc.md`: vad GCC (IRA, LRA) och LLVM (Greedy, Fast, PBQP,

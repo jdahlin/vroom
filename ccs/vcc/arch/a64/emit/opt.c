@@ -1702,9 +1702,25 @@ static void flags(ecx *e)
 			continue;
 		}
 		if (sets_flags(i->op) && i->rd == ZR) {
+			uint32_t j = k;
+
+			while (j && in[j - 1].op == DELETED)
+				j--;
 			if (c != NOCMP && !memcmp(&in[c], i, sizeof *i))
 				i->op = DELETED;
-			else
+			else if (j && in[j - 1].op == (i->op == I_SUBS ? I_SUB : i->op == I_SUBSI ? I_SUBI : DELETED) &&
+				 in[j - 1].rd < 31 && in[j - 1].rd != i->rn && (i->op == I_SUBSI || in[j - 1].rd != i->rm)) {
+				/* the subtraction just before it, of the same operands: that one sets the flags */
+				ins t = in[j - 1];
+
+				t.op = i->op, t.rd = ZR;
+				if (!memcmp(&t, i, sizeof t)) {
+					in[j - 1].op = i->op;
+					i->op = DELETED;
+					c = NOCMP;
+				} else
+					c = k;
+			} else
 				c = k;
 			fall = true;
 			continue;

@@ -127,7 +127,10 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   `build_tree`; `.text` 79896 bytes against clang's 71598 and vcc's 72580.
   After the allocator's parameter vote and load reuse across blocks
   (PLAN-vir.md, 2026-11-12): VIR 1.03x in total, deflate-9 1.00x, deflate-6
-  1.09x, deflate-1 1.36x; `.text` 78304.
+  1.09x, deflate-1 1.36x; `.text` 78304.  After own field addresses, narrow
+  stores, sub+cmp and csel with zero: total 1.02x, deflate-1 1.19x, deflate-6
+  1.02x; `.text` 74436.  Left on level 1: vectorizing `slide_hash`, and
+  type-based aliasing for `deflate_fast` (a flag, not decided).
 - [ ] **T14 the kernel runs, not just boots.**  KUnit built in
   (`CONFIG_KUNIT=y` plus the common suites, run at boot, TAP on the
   console), compared with the clang build's TAP; then kselftests and an LTP

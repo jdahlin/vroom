@@ -1,5 +1,6 @@
 /*
- * zbench FILE [REPS]: times zlib's hot loops on one file, for bench/zlib/run.py.
+ * zbench FILE [REPS [LEVEL]]: times zlib's hot loops on one file, for bench/zlib/run.py
+ * (LEVEL: only deflate and inflate at that level, for profiling).
  *
  * One line per measurement: NAME SECONDS BYTES CHECK, where SECONDS is the
  * best CPU time of REPS runs, BYTES the output size and CHECK a CRC of the
@@ -32,7 +33,7 @@ static void line(const char *name, int level, double s, unsigned long n, unsigne
 int main(int argc, char **argv)
 {
 	static const int levels[] = { 1, 6, 9 };
-	int reps = argc > 2 ? atoi(argv[2]) : 3, bad = 0;
+	int reps = argc > 2 ? atoi(argv[2]) : 3, only = argc > 3 ? atoi(argv[3]) : 0, bad = 0;
 	unsigned char *in, *z, *out;
 	unsigned long n, zcap, zn = 0, on, sum = 0;
 	double best, t;
@@ -58,6 +59,8 @@ int main(int argc, char **argv)
 	fclose(f);
 
 	for (unsigned i = 0; i < sizeof levels / sizeof *levels; i++) {
+		if (only && levels[i] != only)
+			continue;
 		best = 1e9;
 		for (int r = 0; r < reps; r++) {
 			zn = zcap;
@@ -84,6 +87,8 @@ int main(int argc, char **argv)
 		line("inflate", levels[i], best, on, crc32(0, out, (uInt)on));
 	}
 
+	if (only)
+		return bad;
 	best = 1e9;
 	for (int r = 0; r < reps; r++) {
 		t = now();
