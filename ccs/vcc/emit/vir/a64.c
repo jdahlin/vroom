@@ -119,6 +119,11 @@ static inline bool vl_memaddr(const vir_fn *f, uint32_t v)	/* an address a load 
 	return vl_isconst(f, v) && (f->ins[v].op == VO_SLOTADDR || f->ins[v].op == VO_SYMADDR);
 }
 static inline int vl_x(const vir_fn *f, uint32_t v) { return f->ins[v].ty != VT_I32; }	/* 64-bit */
+/* a load or store of a vector: 16 bytes through a base register, no folded address */
+static inline bool vl_vecacc(const vir_fn *f, const vir_ins *m)
+{
+	return vir_isvec(m->op == VO_LOAD ? m->ty : m->op == VO_STORE ? f->ins[m->b].ty : VT_VOID);
+}
 
 /* ---------------- the ABI ---------------- */
 
@@ -373,7 +378,7 @@ static void vl_rmov(vl *L, uint8_t dst, uint8_t src)
 	if (vl_fcls(dst) != vl_fcls(src))
 		vl_fail(L, "VIR lowering: a move between register classes");
 	if (vl_fcls(dst))
-		word(L->e, 0x1e604000u | (unsigned)vl_gv(src) << 5 | (unsigned)vl_gv(dst));	/* fmov d, d */
+		word(L->e, 0x4ea01c00u | (unsigned)vl_gv(src) << 16 | (unsigned)vl_gv(src) << 5 | (unsigned)vl_gv(dst));	/* mov v.16b, v.16b (a vector's upper half too) */
 	else
 		mov(L->e, 1, vl_gx(dst), vl_gx(src));
 }
@@ -485,9 +490,9 @@ static void vl_emoves(vl *L, uint32_t g)
 			if (vl_fcls((uint8_t)dn)) {
 				unsigned a = (unsigned)vl_gv((uint8_t)dn), b = (unsigned)vl_gv((uint8_t)sn);
 
-				word(L->e, 0x2e201c00u | b << 16 | a << 5 | a);	/* eor a.8b, a.8b, b.8b */
-				word(L->e, 0x2e201c00u | a << 16 | b << 5 | b);
-				word(L->e, 0x2e201c00u | b << 16 | a << 5 | a);
+				word(L->e, 0x6e201c00u | b << 16 | a << 5 | a);	/* eor a.16b, a.16b, b.16b */
+				word(L->e, 0x6e201c00u | a << 16 | b << 5 | b);
+				word(L->e, 0x6e201c00u | b << 16 | a << 5 | a);
 			} else {
 				int a = vl_gx((uint8_t)dn), b = vl_gx((uint8_t)sn);
 
@@ -1144,7 +1149,7 @@ static bool vl_pfold(vl *L, uint32_t b, uint32_t i)
 
 	if (L->opr[1] != VR_NONE || !vl_iconst(f, in->b) || base == VR_NONE || L->uses[i] != 1 ||
 	    L->o->slot[i] != VIR_NOBLK || i + 1 >= f->blk[b].first + f->blk[b].n || nx->a != i ||
-	    (nx->op != VO_LOAD && !(nx->op == VO_STORE && nx->b != i)))
+	    (nx->op != VO_LOAD && !(nx->op == VO_STORE && nx->b != i)) || vl_vecacc(f, nx))
 		return false;
 	k = vl_k64(&f->ins[in->b]);
 	if (k < -256 || k > 32760)
@@ -1187,7 +1192,7 @@ static bool vl_cinfo(const vl *L, uint32_t b, uint32_t c, vlx *x)
 	    (vl_isconst(f, in->a) && in->op != VO_PTRADD))
 		return false;
 	mem = in->op == VO_PTRADD && c + 1 < end && m->a == c && vl_once(L, c) &&
-	      (m->op == VO_LOAD || (m->op == VO_STORE && m->b != c));
+	      (m->op == VO_LOAD || (m->op == VO_STORE && m->b != c)) && !vl_vecacc(f, m);
 	if (mem)
 		w = VIF_W(m->fl);
 	*x = (vlx){ c, j, mem ? VX_MEM : 0, 3, 0, 0 };
@@ -1386,6 +1391,146 @@ static bool vl_dupok(vl *L, uint32_t t)
 }
 
 /* instruction i of block b, its operands collected; res its result's register */
+/* ---------------- vectors (SPEC-vir.md 7.5) ---------------- */
+
+#define VW3(op, m, n, d)	word(e, (op) | (unsigned)(m) << 16 | (unsigned)(n) << 5 | (unsigned)(d))
+#define VW2(op, n, d)		word(e, (op) | (unsigned)(n) << 5 | (unsigned)(d))
+
+/* instruction i if it makes or consumes a vector: true when it was lowered here.  v31 is the
+ * scratch of the two compares that need one */
+static bool vl_vec(vl *L, const vir_ins *in, uint8_t res)
+{
+	ecx *e = L->e;
+	vir_fn *f = L->f;
+	int vd = res == VR_NONE ? 31 : vl_gv(res);
+
+	switch (in->op) {
+	case VO_LOAD:
+		if (!vir_isvec(in->ty))
+			return false;
+		VW2(0x3dc00000u, vl_ix(L, 0, R_X16), vd);	/* ldr q, [x] */
+		return true;
+	case VO_STORE:
+		if (!vir_isvec(f->ins[in->b].ty))
+			return false;
+		VW2(0x3d800000u, vl_ix(L, 0, R_X16), vl_fx(L, 1));	/* str q, [x] */
+		return true;
+	case VO_FADD: case VO_FSUB: case VO_FMUL: case VO_FDIV: {
+		static const uint32_t op[] = { 0x4e20d400u, 0x4ea0d400u, 0x6e20dc00u, 0x6e20fc00u };
+
+		if (!vir_isvec(in->ty))
+			return false;
+		VW3(op[in->op - VO_FADD], vl_fx(L, 1), vl_fx(L, 0), vd);
+		return true;
+	}
+	case VO_FNEG: case VO_FABS: case VO_FSQRT:
+		if (!vir_isvec(in->ty))
+			return false;
+		VW2(in->op == VO_FNEG ? 0x6ea0f800u : in->op == VO_FABS ? 0x4ea0f800u : 0x6ea1f800u, vl_fx(L, 0), vd);
+		return true;
+	case VO_ADD: case VO_SUB: case VO_MUL: case VO_AND: case VO_OR: case VO_XOR: {
+		static const uint32_t op[] = { [VO_ADD] = 0x4ea08400u, [VO_SUB] = 0x6ea08400u, [VO_MUL] = 0x4ea09c00u,
+					       [VO_AND] = 0x4e201c00u, [VO_OR] = 0x4ea01c00u, [VO_XOR] = 0x6e201c00u };
+
+		if (!vir_isvec(in->ty))
+			return false;
+		VW3(op[in->op], vl_fx(L, 1), vl_fx(L, 0), vd);
+		return true;
+	}
+	case VO_NEG: case VO_NOT:
+		if (!vir_isvec(in->ty))
+			return false;
+		VW2(in->op == VO_NEG ? 0x6ea0b800u : 0x6e205800u, vl_fx(L, 0), vd);
+		return true;
+	case VO_SELECT:
+		if (!vir_isvec(in->ty))
+			return false;
+		vl_fail(L, "VIR lowering: select of vectors");
+	case VO_VSPLAT:
+		if (L->opr[0] != VR_NONE && vl_fcls(L->opr[0]))
+			VW2(0x4e040400u, vl_gv(L->opr[0]), vd);	/* dup v.4s, v.s[0] */
+		else	/* (a constant: its bits, an fconst's too, through x16) */
+			VW2(0x4e040c00u, vl_ix(L, 0, R_X16), vd);	/* dup v.4s, w */
+		return true;
+	case VO_VSERIES:
+		movi(e, 1, R_X16, 0x0000000100000000ll);
+		word(e, f_in(1, vd, R_X16));
+		movi(e, 1, R_X16, 0x0000000300000002ll);
+		word(e, q_in_hi(vd, R_X16));
+		return true;
+	case VO_VICMP: {
+		/* eq ne slt sle sgt sge ult ule ugt uge: the instruction, operands swapped, inverted */
+		static const struct { uint32_t op; uint8_t sw, inv; } t[10] = {
+			{ 0x6ea08c00u, 0, 0 }, { 0x6ea08c00u, 0, 1 }, { 0x4ea03400u, 1, 0 }, { 0x4ea03c00u, 1, 0 },
+			{ 0x4ea03400u, 0, 0 }, { 0x4ea03c00u, 0, 0 }, { 0x6ea03400u, 1, 0 }, { 0x6ea03c00u, 1, 0 },
+			{ 0x6ea03400u, 0, 0 }, { 0x6ea03c00u, 0, 0 },
+		};
+		int a = vl_fx(L, 0), b = vl_fx(L, 1), c = in->fl & 15;
+
+		VW3(t[c].op, t[c].sw ? a : b, t[c].sw ? b : a, vd);
+		if (t[c].inv)
+			VW2(0x6e205800u, vd, vd);
+		return true;
+	}
+	case VO_VFCMP: {
+		int a = vl_fx(L, 0), b = vl_fx(L, 1);
+
+		switch (in->fl & 15) {
+		case 0: VW3(0x4e20e400u, b, a, vd); break;	/* oeq */
+		case 1: VW3(0x4e20e400u, b, a, vd); VW2(0x6e205800u, vd, vd); break;	/* une */
+		case 2: VW3(0x6ea0e400u, a, b, vd); break;	/* olt: b > a */
+		case 3: VW3(0x6e20e400u, a, b, vd); break;	/* ole: b >= a */
+		case 4: VW3(0x6ea0e400u, b, a, vd); break;	/* ogt */
+		case 5: VW3(0x6e20e400u, b, a, vd); break;	/* oge */
+		default:	/* uno: not (a == a and b == b); one: a > b or b > a */
+			if (a == 31 || b == 31 || vd == 31)
+				vl_fail(L, "VIR lowering: a vector compare without a scratch register");
+			if ((in->fl & 15) == 6) {
+				VW3(0x4e20e400u, a, a, 31);
+				VW3(0x4e20e400u, b, b, vd);
+				VW3(0x4e201c00u, 31, vd, vd);
+				VW2(0x6e205800u, vd, vd);
+			} else {
+				VW3(0x6ea0e400u, b, a, 31);
+				VW3(0x6ea0e400u, a, b, vd);
+				VW3(0x4ea01c00u, 31, vd, vd);
+			}
+			break;
+		}
+		return true;
+	}
+	case VO_VBITSEL: {
+		int m = vl_fx(L, 0), b = vl_fx(L, 1), c = vl_fx(L, 2);
+
+		if (vd == c && vd != m) {
+			VW3(0x6ea01c00u, m, b, vd);	/* bit: b where the mask is set */
+		} else if (vd == b && vd != m) {
+			VW3(0x6ee01c00u, m, c, vd);	/* bif: c where it is clear */
+		} else {
+			if (vd != m)
+				VW3(0x4ea01c00u, m, m, vd);
+			VW3(0x6e601c00u, c, b, vd);	/* bsl */
+		}
+		return true;
+	}
+	case VO_VS2F:
+		VW2(0x4e21d800u, vl_fx(L, 0), vd);	/* scvtf */
+		return true;
+	case VO_VREV:
+		VW2(0x4ea00800u, vl_fx(L, 0), vd);	/* rev64 .4s, then the halves swapped: ext #8 */
+		word(e, 0x6e004000u | (unsigned)vd << 16 | (unsigned)vd << 5 | (unsigned)vd);
+		return true;
+	case VO_VREDUCE:
+		VW2(0x4eb1b800u, vl_fx(L, 0), 31);	/* addv s31, v.4s */
+		word(e, f_out(0, res == VR_NONE ? R_X16 : vl_gx(res), 31));
+		return true;
+	default:
+		return false;
+	}
+}
+#undef VW3
+#undef VW2
+
 static void vl_ins(vl *L, uint32_t b, uint32_t i, uint8_t res)
 {
 	ecx *e = L->e;
@@ -1398,6 +1543,8 @@ static void vl_ins(vl *L, uint32_t b, uint32_t i, uint8_t res)
 
 	if (i > L->tlo && i < L->thi)
 		return;	/* (vl_tfold: in the branch's test) */
+	if (vl_vec(L, in, res))
+		return;
 	switch (in->op) {
 	case VO_PARAM:
 		vl_param(L, in, res);
@@ -1948,8 +2095,11 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 			vl_fail(&L, "VIR lowering: an over-aligned slot");
 		L.soff[k] = slot(e, f->slot[k].size ? f->slot[k].size : 1, f->slot[k].align);
 	}
-	for (uint32_t k = 0; k < V->ao.nspill; k++)
+	for (uint32_t k = 0; k < V->ao.nspill; k++) {
+		if (V->ao.ssz[k] > 8)	/* (reloads and spills go through a general register: 8 bytes) */
+			vl_fail(&L, "VIR lowering: a vector in a spill slot");
 		L.spoff[k] = slot(e, V->ao.ssz[k], V->ao.ssz[k]);
+	}
 	for (uint32_t b = 0; b < f->nblk; b++)
 		L.lbl[b] = newlabel(e);
 	L.retlbl = newlabel(e);

@@ -455,13 +455,16 @@ than scalar.
 
 6.6 **Before any of it.** In order:
 1. The builder accepts TSVC's functions (the refusal in 3.6). Done.
-2. `VIF_NSW` from the walker's signedness, cleared by `-fwrapv`.
+2. `VIF_NSW` from the walker's signedness, cleared by `-fwrapv`. Done.
 3. Scalar loops through VIR at least as fast as the direct emitter:
    invariants out of the loop and floats loaded straight into v registers.
    Otherwise the remainder loop and every unvectorized loop get slower when
    VIR takes the function.
 4. Types, table rows, verifier, parser, printer, allocator slot sizes (5.1
    to 5.4), with `tests/vir/` units; then lowering (5.5); then 6.2 to 6.4.
+   Done for `f32x4` and `i32x4` on arm64, without vector spills, runtime
+   checks or interleaving: 28 of TSVC's 120 innermost loops, 151/151
+   checksums (`PLAN-vir.md`, status of 2026-11-12). Item 3 is not done.
 
 ## 7. What this changes in the plans
 

@@ -3,10 +3,11 @@
 macOS: tsvc.c by vpp -O2 through the direct emitter and through VIR (VCC_VIR=bl), the
 helpers and the reference by clang.  Every loop's checksum must equal clang -O3's.
 
-    bench/vcc-tsvc.py [--iterations N] [--bin-dir DIR] [-v]
+    bench/vcc-tsvc.py [--iterations N] [--bin-dir DIR] [-v] [--why]
 
 `iterations` (100000 upstream) is lowered to N (default 256, the least at which every outer loop runs; s176's is run once): seconds, and the
-checksums still cover every loop.  -v lists each loop's times.  RESEARCH-vectors.md."""
+checksums still cover every loop.  -v lists each loop's times, --why the vectorizer's reasons
+for the loops it left (emit/vir/vec.inc).  RESEARCH-vectors.md."""
 import os, re, shutil, subprocess, sys
 
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -58,6 +59,11 @@ vpp = [os.path.join(bind, 'vpp'), '-O2'] + (['-isysroot', sdk] if sdk else [])
 env0 = {k: v for k, v in os.environ.items() if k != 'VCC_VIR'}
 ref = build('clang', [clang, '-O3'])
 runs = [('vcc', build('vcc', vpp, env0)), ('vir', build('vir', vpp, dict(env0, VCC_VIR=os.environ.get('VCC_VIR', 'bl'))))]
+# the vectorizer's own account (VCC_VIR_VEC=r): one line per innermost loop it looked at
+rep = subprocess.run(vpp + ['-c', 'tsvc.c', '-o', os.devnull], cwd=out, capture_output=True, text=True,
+                     env=dict(env0, VCC_VIR=os.environ.get('VCC_VIR', 'bl'), VCC_VIR_VEC='r')).stderr
+loops = [l for l in rep.split('\n') if l.startswith('vec: ')]
+vec = [l for l in loops if l.endswith(': vectorized')]
 bad = 0
 for name, rows in runs:
     wrong = [k for k in ref if rows.get(k, (0, None))[1] != ref[k][1]]
@@ -66,6 +72,14 @@ for name, rows in runs:
         print(f'FAIL {name} {k}: checksum {rows.get(k, (0, "missing"))[1]}, clang {ref[k][1]}')
     print(f'{name}: {len(ref) - len(wrong)}/{len(ref)} checksums, {sum(t for t, _ in rows.values()):.2f} s'
           f' (clang -O3 {sum(t for t, _ in ref.values()):.2f} s)')
+print(f'vectorized: {len(vec)} of {len(loops)} loops, in {len({l.split()[1] for l in vec})} of {len(ref)} functions')
+if '--why' in sys.argv:
+    why = {}
+    for l in loops:
+        if ': no: ' in l:
+            why[l.split(': no: ')[1]] = why.get(l.split(': no: ')[1], 0) + 1
+    for k, v in sorted(why.items(), key=lambda x: -x[1]):
+        print(f'{v:4} {k}')
 if '-v' in sys.argv:
     print(f"{'loop':8} {'clang':>7} " + ' '.join(f'{n:>7}' for n, _ in runs))
     for k in ref:

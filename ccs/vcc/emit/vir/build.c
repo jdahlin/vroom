@@ -826,7 +826,8 @@ VPRIV val vw_bin(ecx *e, int op, int size, bool sgn, val a, val b)
 	x = vw_val(e, &a, ty);
 	y = vw_val(e, &b, ty);
 	r = vw_resname(e, &a, &b);
-	vw_set(e, r, vw_ins(e, vop, ty, 0, x, y, 0));
+	/* signed +, -, *: overflow is undefined (not under -fwrapv), which is what makes an index linear */
+	vw_set(e, r, vw_ins(e, vop, ty, sgn && !e->E->o->wrapv && (vop == VO_ADD || vop == VO_SUB || vop == VO_MUL) ? VIF_NSW : 0, x, y, 0));
 	return (val){ .k = V_REG, .r = (uint8_t)r };
 }
 
@@ -2440,7 +2441,7 @@ static bool vw_simp1(ecx *e, vwsimp *S, uint32_t q, uint32_t *r)
 	case VO_AND:
 		if (vw_kint(V, in.b, &k) && (k == -1 || (in.ty == VT_I32 && (uint32_t)k == 0xffffffffu)))
 			*r = in.a;
-		else if (vw_kint(V, in.b, &k) && k > 0 && !(k & (k + 1)) && vw_zw(V, in.a) < 8 &&
+		else if (vw_kint(V, in.b, &k) && k > 0 && !((uint64_t)k & ((uint64_t)k + 1)) && vw_zw(V, in.a) < 8 &&
 			 (uint64_t)k >= (vw_zw(V, in.a) == 8 ? ~0ull : (1ull << 8 * vw_zw(V, in.a)) - 1))
 			*r = in.a;	/* the mask keeps every bit that can be set */
 		return false;
@@ -3120,6 +3121,8 @@ static bool vw_emit_ins(ecx *e, uint32_t i, uint32_t b)
 	return true;
 }
 
+#include "vec.inc"
+
 VPRIV bool vw_emit(ecx *e)
 {
 	vwst *V = e->vw;
@@ -3158,6 +3161,7 @@ VPRIV bool vw_emit(ecx *e)
 	if (vw_ifconv(e))
 		while (vw_trivial(e))
 			;
+	vw_vectorize(e);
 	vw_split(e);
 	/* stores to a slot that is not exposed and that nothing reads are dead */
 	for (uint32_t s = 0; s < V->nsl; s++)

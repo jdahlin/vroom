@@ -236,6 +236,56 @@ ekvivalenstestning återstår. Genererade program använder inga externa anrop.
 
 ## Status
 
+### Vektorer och loopvektorisering (2026-11-12): första skivan, TSVC_2 151/151
+
+Underlag och design: `RESEARCH-vectors.md` (ändrar SPEC 1.3/1.4: VIR har egna
+vektorvärden, och en looptransformation).  Gjort, i den ordningen:
+
+- **Byggaren tog inte flyttalsargument.**  Ett `f32` i argumentplatsens
+  8-byteord lagrades som `f64` (`vw_store`), så varje funktion som anropade
+  något med en `float`-parameter föll tillbaka.  `tsvc.c`: 7 av 158 funktioner
+  byggda före, 158 efter.
+- **`bench/vcc-tsvc.py`**: TSVC_2 (`fetch-testsuites.sh TSVC_2`), 151 loopars
+  kontrollsummor mot clang -O3, direkt emitter och VIR; `--why` ger
+  vektoriserarens skäl per loop.
+- **Typer och operationer** (SPEC 4, 7.5): `f32x4`, `i32x4`; de skalära
+  operationerna tar dem genom `OK_T`; `vsplat vseries vicmp vfcmp vbitsel vs2f
+  vrev vreduce`.  Mask = `i32x4` med 0/-1.  Vektorer i flyttalsklassen,
+  spillplats 16 byte (`4 << klass`).
+- **arm64-sänkning** (`emit/vir/a64.c`, `vl_vec`): NEON som kodade ord, mot
+  clangs assembler; registerflytt och byte är `mov`/`eor v.16b`.  **En vektor
+  i en spillplats sänks inte** (funktionen tar då den vanliga vägen): saknar
+  en post för `ldr/str q` mot ramen.
+- **`nsw`** på tecknad `+ - *` från vandraren; `-fwrapv`/`-fno-strict-overflow`
+  (`cc_opts.wrapv`) stänger av det.  Bara vektoriseraren läser flaggan.
+- **Vektoriseraren** (`emit/vir/vec.inc`, i pre-IR:en efter if-konvertering):
+  innersta loopar med test i huvudet och rak kropp; induktioner och
+  `i32`-summor; laddningar/lagringar `symbol ± 4·t`; beroenderegeln i
+  RESEARCH 6.3; skalärloopen blir kvar som rest.  Av under
+  `-mgeneral-regs-only` och med `VCC_VIR_VEC=0`; `VCC_VIR_VEC=r` rapporterar.
+
+Mätt (M1 Pro, `iterations` 256): direkt emitter 7,2 s, VIR 4,3 s (5,1 s före
+vektoriseraren), clang -O3 1,5 s; 151/151 kontrollsummor på alla tre.
+**28 av 120 innerloopar vektoriserade** (clang: 77 loopar i 66 funktioner).
+De vektoriserade looparna går 5–10× fortare än den direkta emittern och
+1,3–5× långsammare än clangs (ingen interleaving, adresserna räknas om i
+loopen).  Skälen för resten: flyttalsreduktion eller rekurrens 17, lagring
+med annat steg än elementet 16, anrop 11, adress som inte är symbol + linjär
+(pekare) 10, lagrat värde läst 1–3 varv senare 10, värde som inte kan bli
+banor (gather, `double`) 9, fel ordning inom kroppen 6.
+
+Validering: `tests/vcc/vir_vec_loops.c` (47 loopar × varvtal 0–9 och 37 mot
+clang: rest 0–3, nedåtlöpande, avstånd −5..5 inom en array, lagring före
+laddning, summor, val, invariant ur minnet); `vcc-ctests.py` med `VCC_VIR=bl`
+2079/2082 (de tre `.Lswitch.values`-felen fanns före), utan VIR oförändrat;
+ASan/UBSan rent på TSVC och testet; `vir-test.py` 124/124.
+
+Kvar (RESEARCH 6.6 och 5): spill av vektorer; skalärloopar genom VIR lika
+snabba som den direkta emittern (invarianter ut ur loopen, flyttal direkt i
+v-register: resten och alla ovektoriserade loopar); körtidskontroll för
+pekare; steg ≠ elementstorlek; interleaving; övriga fyra bantyper; x86-64
+och wasm; tolken och `virgen` känner inte vektorer.
+
 ### V0 (2026-11-11): klar för granskning
 
 - `SPEC-vir.md` (utkast 0.1): hela formatet (16-byte-instruktion, block,

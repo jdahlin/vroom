@@ -30,6 +30,9 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
   `RESEARCH-vir.md` (LLVM IR's problems): VIR, an SSA IR used only at `-O2`,
   built by compiling the shared walker a second time against a virtual
   lowering target.  Update the status of a step in `PLAN-vir.md`.
+- `ccs/vcc/emit/vir/vec.inc` (#included by `build.c`): the loop vectorizer, on
+  the builder's pre-IR; `VCC_VIR_VEC=0` turns it off, `=r` reports each
+  innermost loop to stderr.  VIR's vectors: `SPEC-vir.md` 7.5.
 - `RESEARCH-vectors.md`: vector values in VIR (how Cranelift, Wasm SIMD, B3,
   LLVM and GCC represent them; ABI and spill slots), loop vectorizers (LLVM,
   GCC, dependence rules, TSVC results here and published), the traps, and the
@@ -240,7 +243,7 @@ bench/pg/build.sh vccd             # ... CC = vcc shim + private vccd (VCC_DELEG
                                    # build: "warnings: N, not from clang: M" (M must be 0; logs in work/build-pg-*.build.log)
 bench/pg/speed.py                  # PostgreSQL compile speed: clang, clang -O0, vpp, vpp --batch
 bench/sqlite/run.py all            # SQLite (macOS): vcc/clang/gcc builds, TCL testrunner (no vcc-only fails), speedtest1 (~4 min)
-bench/vcc-tsvc.py [-v]              # TSVC_2 (macOS; fetch-testsuites.sh TSVC_2): 151 loop checksums vs clang -O3, direct emitter and VIR (~15 s)
+bench/vcc-tsvc.py [-v] [--why]      # TSVC_2 (macOS; fetch-testsuites.sh TSVC_2): 151 loop checksums vs clang -O3, direct emitter and VIR, loops vectorized (~15 s)
 ```
 Fast loop while iterating (cold numbers on a loaded machine, in brackets):
 `vcc-sema.py batch` (3 s [33 s]), `vcc-diff.py batch --cmp --kernel` (3 s
