@@ -535,6 +535,35 @@ static void literal_conv(cc *c, uint32_t n, qty to)
 }
 
 /* -Wconstant-conversion: integer constant n converted to the narrower integer to */
+
+/* n's value depends on a __builtin_(dynamic_)object_size whose object vcc does not
+   know (folded to (size_t)-1 or 0, which clang leaves to code generation) */
+static bool objsize_unknown(cc *c, uint32_t n, int depth)
+{
+	const node *x = N(n);
+	i128 sz;
+	cval mode;
+
+	if (!n || depth > 32)
+		return false;
+	switch (x->op) {
+	case N_BUILTIN:
+		if (x->aux != BI_OBJECT_SIZE && x->aux != BI_DYNAMIC_OBJECT_SIZE)
+			return false;
+		return x->c != 2 || !cc_eval(c, c->lists[x->b + 1], &mode) || mode.kind != CV_INT ||
+		       !cc_object_size(c, c->lists[x->b], (unsigned)mode.i, &sz);
+	case N_CAST: case N_UNARY:
+		return objsize_unknown(c, x->a, depth + 1);
+	case N_BINARY:
+		return objsize_unknown(c, x->a, depth + 1) || objsize_unknown(c, x->b, depth + 1);
+	case N_COND:
+		return objsize_unknown(c, x->a, depth + 1) || objsize_unknown(c, x->b, depth + 1) ||
+		       objsize_unknown(c, x->c, depth + 1);
+	default:
+		return false;
+	}
+}
+
 static void const_conv(cc *c, uint32_t n, qty to)
 {
 	qty from = N(n)->ty;
@@ -577,16 +606,12 @@ static void const_conv(cc *c, uint32_t n, qty to)
 	tw = (int)int_bits(c, to), sw = (int)int_bits(c, from);
 	if (tw >= sw || tw > 64)
 		return;
-	{
-		/* clang: __builtin_object_size is no constant here (it is evaluated after
-		   optimization): no -Wconstant-conversion for its (size_t)-1 */
-		uint32_t e = n;
-
-		while (N(e)->op == N_CAST && N(e)->a)
-			e = N(e)->a;
-		if (N(e)->op == N_BUILTIN && (N(e)->aux == BI_OBJECT_SIZE || N(e)->aux == BI_DYNAMIC_OBJECT_SIZE))
-			return;
-	}
+	/* clang: __builtin_object_size of an unknown object is no constant here (its
+	   evaluator leaves it to code generation): no -Wconstant-conversion for the
+	   (size_t)-1 or what arithmetic makes of it, nouveau's __member_size(p) /
+	   sizeof(*p); a known size warns as any constant */
+	if (objsize_unknown(c, n, 0))
+		return;
 	tnn = !is_signed(c, to);
 	v = cv.i;
 	if (!is_signed(c, from) && sw <= 64)
