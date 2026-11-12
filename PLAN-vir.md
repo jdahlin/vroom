@@ -1035,6 +1035,84 @@ så cyklerna är median av parade kvoter med [min .. max], och bara skillnader
   PBQP:s +2 % visar att en allokerare utan delning kan komma nära greedy med
   en bra kostnadsmodell.
 
+### Allokeraren: loopingång, argument som parallell flytt, callee-saved direkt (2026-11-12)
+
+Första steget efter mätningen ovan, efter sammanfogning med main (d0cbdcc7).
+Mätt i **instruktioner** (`/usr/bin/time -l`, speedtest1 `--size 100 --memdb`):
+de är stabila till ca 0,05 % också med last 10–20 på maskinen, vilket cyklerna
+inte är.  Bas efter sammanfogningen: 26,18 G (virpol 24,49 G, clang 23,70 G),
+8,5–8,6 G cykler (virpol 8,24 G, clang 7,86 G).
+
+- **Vad som faktiskt körs** (`VCC_VL_PROBE=MASK` i `emit/vir/a64.c`: en `nop`
+  efter varje redigering av ett slag; skillnaden i instruktioner är antalet
+  körningar, en övre gräns eftersom `nop` också stoppar postvikningarna):
+
+  | Slag | Före instruktion | På kant | Summa | Andel av 26,1 G |
+  |---|---|---|---|---|
+  | flytt | 1,23 G | 0,60 G | 1,83 G | 7,0 % |
+  | rematerialisering | 1,00 G | 0,55 G | 1,55 G | 5,9 % |
+  | omladdning | 0,34 G | 0,28 G | 0,62 G | 2,4 % |
+  | lagring till plats | 0,16 G | 0,34 G | 0,50 G | 1,9 % |
+
+  Flyttar och konstanter körs alltså tre gånger så ofta som omladdningar och
+  lagringar.  Slutsatsen i förra avsnittet ("omladdningar i loopar före
+  flyttar") gällde LLVM:s basic mot greedy och gäller inte vår allokerare på
+  den här lasten.  Flyttarna före instruktion per orsak: kopia av ett levande
+  värde till ett anrops argumentregister 0,73 G, parameter eller resultat till
+  callee-saved 0,29 G, levande värde undanflyttat ur ett argumentregister
+  före ett anrop 0,30 G, övrigt 0,15 G.  De två första följer av
+  anropskonventionen; clang har dem också.
+- **Gjort, tre regler i `vir/alloc.c` (SPEC 15.6–15.7 uppdaterad):**
+  1. *Loopingång* (`preload`): ett värde som når loophuvudet i sin plats och
+     används i loopen får register i huvudets ingångstillstånd, så att kanten
+     in i loopen laddar det en gång.  Bara medan register finns över
+     (maxp + 1); i en loop med anrop bara callee-saved.  Per loop finns nu
+     `lcall` (ett anrop utanför kalla block).
+  2. *Fasta operander som parallell flytt:* ett argument som flyttar från ett
+     argumentregister till nästa kopieras innan dess register skrivs.  Det
+     reducerade fallet (`add4(v, 96, base, n, 0, zAff, n)`): 8 → 6
+     instruktioner.
+  3. *Callee-saved direkt:* ett värde som lever över ett anrop tar ett ledigt
+     callee-saved register också utanför loopar och när funktionen inte använt
+     något än.  Förut hamnade det i ett caller-saved och flyttades vid anropet.
+- **Resultat, sqlite:**
+
+  | | Instr. | Statiskt totalt | `mov` r,r | sp/fp-laster | sp/fp-lagringar |
+  |---|---|---|---|---|---|
+  | bas | 26,186 G | 289 168 | 34 535 | 22 379 | 18 100 |
+  | 1 | −0,18 % | 289 060 | 34 486 | 22 318 | 18 111 |
+  | 1 + 2 | −0,23 % | 288 572 | 34 057 | 22 260 | 18 110 |
+  | 1 + 2 + 3 | **−0,42 %** (26,076 G) | 285 866 | 31 591 | 22 269 | 17 996 |
+
+  Cykler: fyra parade körningar inom bruset (last 23).  Ramar oförändrat 1138.
+- **Prövat och struket, alla mätta i instruktioner:**
+  - *Värde ur ingångstillståndet vid ett sammanflöde* när en annan föregångare
+    har det i plats och blocket inte läser det: statiskt −3,4 k stacklaster
+    (−15 %), dynamiskt **+0,6 %**.  Kantomladdningarna (8,6 k statiskt, varav
+    7,0 k för värden som målblocket inte läser) ligger alltså mest på kalla
+    vägar; de statiska talen i förra avsnittet överskattar dem.  Den säkra
+    varianten (blocket anropar före användningen) gav −264 laster och inget
+    mätbart.
+  - *Konstanter i register över loopar utan anrop:* +838 instruktioner
+    statiskt, +0,07 % dynamiskt (fler rematerialiseringar på kanterna).
+  - Sampling (`sample`) per instruktionsslag: samplen hamnar efter
+    felförutsagda hopp och säger inget om instruktionsblandningen.
+- **Tester:** `vir-alloc` 19/19 (nya `loop-preload.vir`, `args-parallel.vir`;
+  `irr-head.vir` och `irreducible.vir` ombekräftade: omladdningen flyttad till
+  kanten), slump 600 enheter (frö 1–300, 1000–1299), `mutate` 3243 av 3355;
+  `vir-test` 126/126; C-sviterna 2091 utan VIR (vcc 288/288), genom VIR med
+  kontrollen 2088/2091 (de tre kända: jump_table, switch_dispatch,
+  switch_values); inline genom VIR 85/85; nytt `vcc/vir_loop_entry.c`; sqlite
+  genom VIR med kontrollen, hash oförändrad.  Inte körda: `vbench.py gate`,
+  TCL-sviten, PostgreSQL, zlib.
+- **Kvar, i ordning efter vad proben visar:** flyttar på kanter (0,60 G:
+  blockparametrar och bakkanter), undanflyttningen före anrop (0,30 G, ett
+  värde som inte är `xcall` enligt levande mängderna men sitter i ett
+  argumentregister), rematerialisering på kanter (0,55 G: konstanter som
+  blockargument).  Gapet mot virpol i instruktioner (+6,5 %) är större än allt
+  allokeraren kan ta av detta; loopar som inte roteras (ett `b` per varv) hör
+  till sänkningen.
+
 ### Underlag för V4 (2026-11-11): registerallokering, ingen kod
 
 - `RESEARCH-regalloc.md`: vad GCC (IRA, LRA) och LLVM (Greedy, Fast, PBQP,

@@ -47,6 +47,7 @@ static _Thread_local struct actx {
 	/* sweep 5 */
 	uint32_t *stk, *ostk, *pool, *lin_off, *lin_n, *soff, *succ, *bmark;
 	/* per loop */
+	uint8_t *lcall;	/* a call outside cold blocks in the loop (the loops inside included) */
 	uint32_t *maxp, *lendpos, *lhead, *tend, *tendb, *tbeg, *apre, *tendi, *tendib;
 	/* sweep 6 */
 	uint32_t *ent_off, *ent_n, *end_off, *end_n, *pv;
@@ -93,7 +94,7 @@ static void ax_init(void)
 	R(ax_tls.stk, (size_t)1 << 30, 4); R(ax_tls.ostk, (size_t)1 << 30, 4); R(ax_tls.nop, nv, 2); R(ax_tls.pool, nv, 4);
 	R(ax_tls.lin_off, VIR_MAX_BLK, 4); R(ax_tls.lin_n, VIR_MAX_BLK, 4); R(ax_tls.soff, VIR_MAX_BLK + 1, 4);
 	R(ax_tls.succ, VIR_MAX_EXTRA, 4); R(ax_tls.bmark, VIR_MAX_BLK, 4);
-	R(ax_tls.maxp, 2 * (size_t)VIR_MAX_BLK, 4); R(ax_tls.lendpos, VIR_MAX_BLK, 4); R(ax_tls.lhead, VIR_MAX_BLK, 4); R(ax_tls.tend, VIR_MAX_BLK, 4); R(ax_tls.tendb, VIR_MAX_BLK, 4); R(ax_tls.tbeg, VIR_MAX_BLK, 4); R(ax_tls.tendi, VIR_MAX_BLK, 4); R(ax_tls.tendib, VIR_MAX_BLK, 4); R(ax_tls.apre, VIR_MAX_BLK + 1, 4);
+	R(ax_tls.lcall, VIR_MAX_BLK, 1); R(ax_tls.maxp, 2 * (size_t)VIR_MAX_BLK, 4); R(ax_tls.lendpos, VIR_MAX_BLK, 4); R(ax_tls.lhead, VIR_MAX_BLK, 4); R(ax_tls.tend, VIR_MAX_BLK, 4); R(ax_tls.tendb, VIR_MAX_BLK, 4); R(ax_tls.tbeg, VIR_MAX_BLK, 4); R(ax_tls.tendi, VIR_MAX_BLK, 4); R(ax_tls.tendib, VIR_MAX_BLK, 4); R(ax_tls.apre, VIR_MAX_BLK + 1, 4);
 	R(ax_tls.ent_off, VIR_MAX_BLK, 4); R(ax_tls.ent_n, VIR_MAX_BLK, 4); R(ax_tls.end_off, VIR_MAX_BLK, 4); R(ax_tls.end_n, VIR_MAX_BLK, 4);
 	R(ax_tls.pv, (size_t)VIR_MAX_BLK * 256, 4); R(ax_tls.pr, (size_t)VIR_MAX_BLK * 256, 1); R(ax_tls.ps, (size_t)VIR_MAX_BLK * 256, 1);
 	R(ax_tls.opr, (size_t)1 << 32, 1); R(ax_tls.ssz, nv, 1);
@@ -122,6 +123,7 @@ typedef struct A {
 	bool linear, failed;
 	uint32_t ops[512];
 	uint8_t byte[512];
+	uint8_t dn[512];	/* step 1: operand j is 0 fixed and not placed yet, 1 placed, 2 not fixed */
 	uint32_t nxt[512];
 } A;
 
@@ -431,6 +433,7 @@ static bool sweep5(A *a)
 	memset(ax.hint, 0, (size_t)f->nins * 4);
 	memset(ax.vfl, 0, f->nins);
 	memset(ax.maxp, 0, (size_t)lp->n * 8);
+	memset(ax.lcall, 0, lp->n);
 	a->sp = a->osp = 0;
 	a->npool = 0;
 	ax.wgen++;
@@ -513,6 +516,8 @@ static bool sweep5(A *a)
 			if (in->op == VO_CALL && !cold) {
 				lastcall = i;
 				callloop = li != VIR_NOBLK;
+				if (callloop)
+					ax.lcall[li] = 1;
 				if (!a->linear)	/* the values live after it (W, before its operands join) */
 					for (uint32_t j = 0; j < wn; j++)
 						ax.vfl[ax.wd[j]] |= PCALL | (callloop ? PLOOP : 0);
@@ -624,10 +629,12 @@ static bool sweep5(A *a)
 	for (uint32_t l = lp->n; l-- > 0;) {
 		uint32_t p = lp->l[l].parent;
 
-		if (p != VIR_NOBLK)
+		if (p != VIR_NOBLK) {
 			for (int c = 0; c < 2; c++)
 				if (ax.maxp[2 * l + c] > ax.maxp[2 * p + c])
 					ax.maxp[2 * p + c] = ax.maxp[2 * l + c];
+			ax.lcall[p] |= ax.lcall[l];
+		}
 	}
 	return true;
 }
@@ -825,7 +832,7 @@ static int choose(A *a, uint32_t v, uint32_t c, uint64_t avoid)
 		if (m & ~o)
 			m &= ~o;
 	}
-	if ((ax.vfl[v] & XCALL) && ((ax.vfl[v] & XLOOP) || (a->used_callee[c] & m)) && (m & cs)) {
+	if ((ax.vfl[v] & XCALL) && (m & cs)) {	/* (a caller-saved one is moved to a callee-saved one at the call) */
 		uint64_t u = m & cs & a->used_callee[c];
 
 		return VR_MAKE(c, lowbit(u ? u : m & cs));
@@ -1272,6 +1279,64 @@ static int arg_vote(A *a, uint32_t b, uint32_t j, uint32_t c, uint32_t h)
 	return (int)VR_MAKE(c, best);
 }
 
+/* The header b of loop l, entered from `best`: a value that is used in the loop and comes
+ * in in its slot takes a register on the way in (the edges into b load it: once, in front
+ * of the loop) when the loop leaves one free: beside the values in registers now, the
+ * most the body has live at once beyond those live here (maxp) and one more, since maxp
+ * does not see a value that is live round the loop below its last use.  In a loop with a call
+ * only a callee-saved register keeps it.  Soonest use first. */
+static void preload(A *a, uint32_t b, uint32_t l, uint32_t best)
+{
+	vir_fn *f = a->f;
+	const vir_blk *k = &f->blk[b];
+	uint32_t le = ax.lendpos[l], live[2] = { 0, 0 }, cand[16], nc = 0;
+
+	for (uint32_t j = 0; j < k->nparam; j++)
+		if (!(ax.vfl[k->first + j] & DEAD))
+			live[vcls(f, k->first + j)]++;
+	for (uint32_t j = 0; j < ax.lin_n[b]; j++) {
+		uint32_t v = ax.pool[ax.lin_off[b] + j];
+
+		if (is_const(f, v))
+			continue;
+		live[vcls(f, v)]++;
+		if (nc < 16 && !inreg(a, v) && ax.slot[v] != VIR_NOBLK && ax.nu[v] && ax.nu[v] <= le)
+			cand[nc++] = v;
+	}
+	while (nc) {
+		uint32_t x = 0, v, c, nr, used, extra;
+		uint64_t set;
+		int r;
+		bool st = true;
+
+		for (uint32_t j = 1; j < nc; j++)
+			if (ax.nu[cand[j]] < ax.nu[cand[x]])
+				x = j;
+		v = cand[x];
+		cand[x] = cand[--nc];
+		c = vcls(f, v);
+		set = a->rg->alloc[c] & (ax.lcall[l] ? a->rg->callee[c] : ~0ull);
+		nr = (uint32_t)__builtin_popcountll(set);
+		used = (uint32_t)__builtin_popcountll(set & ~ax.fr[c]);
+		extra = ax.maxp[2 * l + c] > live[c] ? ax.maxp[2 * l + c] - live[c] : 0;
+		if (used + extra + 1 >= nr || (r = choose(a, v, c, ~set)) < 0)	/* (one is left for a temporary) */
+			continue;
+		setreg(a, v, (uint32_t)r);
+		/* in its slot on the way from `best`; another earlier predecessor may hold it unstored */
+		for (uint32_t j = 0; j < k->npred && st; j++) {
+			uint32_t p = f->extra[k->pred + j];
+
+			if (p >= b || p == best)
+				continue;
+			for (uint32_t y = 0; y < ax.end_n[p]; y++)
+				if (ax.pv[ax.end_off[p] + y] == v && !ax.ps[ax.end_off[p] + y])
+					st = false;
+		}
+		if (st)
+			stored(a, v);
+	}
+}
+
 static void enter(A *a, uint32_t b)
 {
 	vir_fn *f = a->f;
@@ -1422,6 +1487,8 @@ static void enter(A *a, uint32_t b)
 		}
 		ax.opr[a->nopr++] = r >= 0 ? (uint8_t)r : VR_NONE;
 	}
+	if (l != VIR_NOBLK && a->lp->l[l].head == b && best != VIR_NOBLK && !a->linear)
+		preload(a, b, l, best);
 	save_state(a, ax.ent_off, ax.ent_n, b);
 	/* forward edges into b */
 	{
@@ -1476,30 +1543,53 @@ static bool instr(A *a, uint32_t b, uint32_t i, bool term)
 			fixm[VR_CLASS(fx.opnd[j])] |= 1ull << VR_NUM(fx.opnd[j]);
 	a->rmask[0] |= fixm[0];
 	a->rmask[1] |= fixm[1];
-	/* 1: fixed operands */
+	/* 1: fixed operands, as a parallel move: first those whose register does not hold a
+	 * fixed operand that is still to be placed (an argument that moves from one argument
+	 * register to the next is copied before its register is written, not moved aside);
+	 * in a cycle the lowest one, whose register's value is moved aside */
 	for (uint32_t j = 0; j < n; j++) {
-		uint32_t v = ops[j], R;
-
 		byte[j] = VR_NONE;
-		if (j >= fx.nopnd || fx.opnd[j] == VR_NONE)
-			continue;
+		a->dn[j] = j < fx.nopnd && fx.opnd[j] != VR_NONE ? 0 : 2;
+	}
+	for (;;) {
+		uint32_t j = n, first = n, v, R;
+
+		for (uint32_t k = 0; k < n && k < fx.nopnd && j == n; k++) {
+			uint32_t w;
+			bool ok = true;
+
+			if (a->dn[k])
+				continue;
+			if (first == n)
+				first = k;
+			w = ax.regval[fx.opnd[k]];
+			if (w && w != ops[k])
+				for (uint32_t y = 0; y < n && y < fx.nopnd && ok; y++)
+					ok = a->dn[y] || y == k || ops[y] != w;
+			if (ok)
+				j = k;
+		}
+		if (j == n)
+			j = first;
+		if (j == n)
+			break;
+		a->dn[j] = 1;
+		v = ops[j];
 		R = fx.opnd[j];
 		if (ax.regval[R] != v) {
 			uint32_t w = ax.regval[R];
 			bool dies = w && ax.dmark[w] == i;	/* (an operand here, read before the clobbers) */
 
-			/* a value that dies here, with its every operand already placed (copied to an
-			   earlier fixed register): nothing reads it in R any more */
-			for (uint32_t k = j + 1; dies && k < n; k++)
-				dies = ops[k] != w;
-			for (uint32_t k = 0; dies && k < j; k++)
-				if (ops[k] == w && (k >= fx.nopnd || fx.opnd[k] == VR_NONE))
+			/* a value that dies here, with its every operand already placed (copied to its
+			   fixed register): nothing reads it in R any more */
+			for (uint32_t k = 0; dies && k < n; k++)
+				if (k != j && ops[k] == w && a->dn[k] != 1)
 					dies = false;
 			if (dies && ax.reg[w] == R) {
 				bool placed = false;
 
-				for (uint32_t k = 0; k < j; k++)
-					placed |= ops[k] == w;
+				for (uint32_t k = 0; k < n; k++)
+					placed |= k != j && a->dn[k] == 1 && ops[k] == w;
 				if (placed) {
 					clearreg(a, R);
 					goto free;

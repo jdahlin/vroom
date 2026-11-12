@@ -438,6 +438,19 @@ static void vl_remat(vl *L, uint8_t dst, uint32_t v, int t)
 		vl_mat(L, v, vl_gx(dst));
 }
 
+/* VCC_VL_PROBE=MASK (measuring): a nop after every allocator edit of the kinds in MASK, so
+ * that instructions retired minus an unprobed run's is how often that kind executes.
+ * Bits: 0 reload, 1 remat, 2 move, 3 store (edits before an instruction); 4 remat, 5 store,
+ * 6 reload, 7 move (on an edge).  An upper bound: the nop also stops the record folds. */
+static int vl_probe(void)
+{
+	static int m = -1;
+
+	if (m < 0)
+		m = getenv("VCC_VL_PROBE") ? atoi(getenv("VCC_VL_PROBE")) : 0;
+	return m;
+}
+#define PROBE(bit) do { if (vl_probe() >> (bit) & 1) word(L->e, 0xd503201f); } while (0)
 /* the edits before instruction pos */
 static void vl_edits(vl *L, uint32_t *ei, uint32_t end, uint32_t pos)
 {
@@ -448,16 +461,16 @@ static void vl_edits(vl *L, uint32_t *ei, uint32_t end, uint32_t pos)
 
 		switch (x->kind) {
 		case VE_RELOAD:
-			vl_reload(L, x->dst, o->slot[x->v], R_X16);
+			vl_reload(L, x->dst, o->slot[x->v], R_X16); PROBE(0);
 			break;
 		case VE_REMAT:
-			vl_remat(L, x->dst, x->v, R_X16);
+			vl_remat(L, x->dst, x->v, R_X16); PROBE(1);
 			break;
 		case VE_MOVE:
-			vl_rmov(L, x->dst, (uint8_t)x->src);
+			vl_rmov(L, x->dst, (uint8_t)x->src); PROBE(2);
 			break;
 		case VE_STORE:
-			vl_spill(L, x->src, o->slot[x->v], R_X16);
+			vl_spill(L, x->src, o->slot[x->v], R_X16); PROBE(3);
 			break;
 		default:
 			vl_fail(L, "VIR lowering: swapped operands");
@@ -493,6 +506,7 @@ static void vl_emoves(vl *L, uint32_t g)
 			} else {
 				vl_remat(L, (uint8_t)dn, mv->v, t);
 			}
+			PROBE(4);
 			break;
 		case VE_MOVE:
 			if (ds && ss && L->o->ssz[sn] == 16) {	/* (through v31: no move of this edge may hold it) */
@@ -508,11 +522,11 @@ static void vl_emoves(vl *L, uint32_t g)
 				mem(L->e, I_LD, vl_ssz(L, sn), 0, t, FRAME, L->spoff[sn]);
 				mem(L->e, I_ST, vl_ssz(L, dn), 0, t, FRAME, L->spoff[dn]);
 			} else if (ds) {
-				vl_spill(L, (uint8_t)sn, dn, t);
+				vl_spill(L, (uint8_t)sn, dn, t); PROBE(5);
 			} else if (ss) {
-				vl_reload(L, (uint8_t)dn, sn, t);
+				vl_reload(L, (uint8_t)dn, sn, t); PROBE(6);
 			} else {
-				vl_rmov(L, (uint8_t)dn, (uint8_t)sn);
+				vl_rmov(L, (uint8_t)dn, (uint8_t)sn); PROBE(7);
 			}
 			break;
 		case VE_XCHG:
