@@ -621,6 +621,30 @@ cykler mot virpol, nu +9,9 %.  Samplingar per funktion (storlek 300) varierar
   och −0,9 % [−1,6 .. −0,3] i två körningar (inom bruset).  Mot virpol
   +5,5 %, mot clang -O2 +10,0 %.  Kvar: konstanter i csel (csinc/wzr),
   `and` + `subs` före csel som `tst`.
+- **Granskning (2026-11-12) och rättningar.**  Tre felkompileringar från den
+  här grenen, alla i postrensningen (`opt.c`), var och en med test som
+  faller utan rättningen (a51b4106): `exts` läste add med utökad operand som
+  vanlig 64-bitars add (`vir_ext_add_facts.c`); `flags` tog bort en jämförelse
+  vid en etikett som ett senare hopp går tillbaka till
+  (`vir_flags_backedge.c`); `fold` flyttade en läsning av x16/x17 förbi en
+  post som bygger om dem (`vir_scratch_fold.c`).  De äldre passen är inte
+  utsatta (bara x0–x15/x19–x28).  `returns_twice` och `setjmp_sites` gick i
+  tidsgräns genom VIR på grund av `flags`-felet: kända fel 5 → 3.
+  **Mätvärdena ovan från punkt 1 och framåt är för bra**: felet träffade
+  `sqlite3_str_vappendf` (en jämförelse vid ett slinghuvud saknades, hashen
+  stämde ändå).  Rättat: +2,2 % instr., +2,7 % cykler [+2,5 .. +2,7]; mot
+  virpol **+7,9 %** [+7,1 .. +8,6].
+- Volatile genom VIR (8dceb271): lokaler, bitfält, initierare och döda
+  lagringar; `bench/vcc-volatile.py` 32/32 (25/32 före), inte i CI än
+  (bara kört på macOS).
+- Låghalvssvepet går bakifrån (b096c081): 4000 kedjade `if` 0,57 s → 0,02 s.
+- Granskningens öppna punkter, väntar på beslut: if-konvertering som pass
+  över färdig VIR i stället för i byggarens för-IR; 32-bitars argument och
+  resultat i SPEC-vir.md (O1 säger att byggaren utökar, sänkningen antar
+  motsatsen); SPEC 15.3/15.4/1.3 mot koden (switch, svansanrop, vikningar).
+  Kompileringstid: `fwriter` är nu begränsad; `tbz_relax` kodar varje post i
+  funktioner med en tbz; byggaren nollar sin hashtabell i största storlek per
+  funktion (~6 % av sqlite).
 - Tester: `vir_branch_bits.c`, `vir_flags_reuse.c`, `vir_layout_exits.c`,
   `vir_operand_fold.c`, `vir_byte_assembly.c`, `vir_constants.c` (.o och .s).
 
