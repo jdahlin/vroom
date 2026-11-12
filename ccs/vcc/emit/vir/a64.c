@@ -1178,8 +1178,7 @@ static void vl_ins(vl *L, uint32_t b, uint32_t i, uint8_t res)
 	case VO_TRUNC:	/* an i32's upper half is never read: a copy (ext.4u clears it) */
 		mov(e, 1, rd, vl_ix(L, 0, R_X16));
 		return;
-	case VO_P2I: case VO_I2P:
-		mov(e, 1, rd, vl_ix(L, 0, R_X16));
+	case VO_P2I: case VO_I2P:	/* (unused: their users read the operand) */
 		return;
 	case VO_ICMP:
 	case VO_FCMP: {
@@ -1446,6 +1445,18 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 		*why = "VIR: loops";
 		return false;
 	}
+	/* i2p and p2i are copies here: their users read the operand (a load's address an add,
+	 * to fold), and they go unemitted */
+	for (uint32_t b = 0; b < f->nblk; b++)
+		for (uint32_t i = f->blk[b].first; i < f->blk[b].first + f->blk[b].n; i++) {
+			vir_oit it;
+			uint32_t *p;
+
+			vir_oit_init(&it, f, &f->ins[i], false);
+			while ((p = vir_oit_next(&it)))
+				while (f->ins[*p].op == VO_I2P || f->ins[*p].op == VO_P2I)
+					*p = f->ins[*p].a;
+		}
 	if (!vir_alloc(f, &V->lp, &regs, NULL, &V->ao)) {
 		*why = V->ao.err[0] ? V->ao.err : "VIR: allocation failed";
 		return false;

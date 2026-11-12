@@ -1894,6 +1894,8 @@ static bool vw_ldconv(uint32_t st, uint32_t ty, uint32_t fl, uint32_t *op)
 		*op = VW_NOCONV;
 	else if (st == VT_PTR && ty == VT_I64)
 		*op = VO_P2I;
+	else if (st == VT_I64 && ty == VT_PTR)
+		*op = VO_I2P;
 	else if ((st == VT_I32 && ty == VT_F32) || (st == VT_F32 && ty == VT_I32) ||
 		 (st == VT_I64 && ty == VT_F64) || (st == VT_F64 && ty == VT_I64))
 		*op = VO_BITCAST;
@@ -2060,8 +2062,12 @@ static bool vw_promote(ecx *e)
 			fd[nf++] = (vwfld){ s, rel, size, VT_VOID };
 		}
 		if (ty != VT_VOID) {
-			if (fd[k].ty != VT_VOID && fd[k].ty != ty)
-				bad[s] = 1;	/* stores of different types */
+			if (fd[k].ty != VT_VOID && fd[k].ty != ty) {
+				if ((fd[k].ty == VT_PTR || fd[k].ty == VT_I64) && (ty == VT_PTR || ty == VT_I64))
+					ty = VT_I64;	/* a pointer and its integer (p++ as p2i, add, i2p) */
+				else
+					bad[s] = 1;	/* stores of different types */
+			}
 			fd[k].ty = ty;
 		}
 		fof[i] = k + 1;
@@ -2097,6 +2103,22 @@ static bool vw_promote(ecx *e)
 			any += !bad[fd[k].slot];
 		if (!any)
 			goto out;
+	}
+	/* a field of pointer and integer stores holds the integer: a pointer store's value goes
+	 * through a p2i right after the store (which promotion makes dead) */
+	for (uint32_t i = 0; i < np0; i++) {
+		uint32_t p, b;
+
+		if (V->p[i].in.op != VO_STORE || !fof[i] || bad[V->p[i].slot - 1] || vw_find(V, i) != i ||
+		    fd[fof[i] - 1].ty != VT_I64 || V->p[V->p[i].in.b].in.ty != VT_PTR)
+			continue;
+		b = V->p[i].blk;
+		p = vw_put(e, VO_P2I, VT_I64, 0, V->p[i].in.b, 0, 0, b);
+		V->p[p].next = V->p[i].next;
+		V->p[i].next = p;
+		if (V->b[b].tail == i)
+			V->b[b].tail = p;
+		V->p[i].in.b = p;
 	}
 	/* the variables: VW_VAR0 + nloc + earlier runs' + field */
 	var0 = V->nloc + V->nprom;
@@ -2294,6 +2316,8 @@ static uint32_t vw_undefk(ecx *e, vwsimp *S, uint32_t ty)
 	return S->undef[ty];
 }
 
+static bool vw_commutes(uint32_t op);
+
 /* q rewritten in place (true), or the value that replaces it in *r */
 static bool vw_simp1(ecx *e, vwsimp *S, uint32_t q, uint32_t *r)
 {
@@ -2302,6 +2326,10 @@ static bool vw_simp1(ecx *e, vwsimp *S, uint32_t q, uint32_t *r)
 	int64_t k, k2;
 
 	*r = q;
+	if (vw_commutes(in.op) && vw_kint(V, in.a, &k) && !vw_kint(V, in.b, &k2)) {
+		V->p[q].in.a = in.b, V->p[q].in.b = in.a;	/* the constant second (an immediate) */
+		in = V->p[q].in;
+	}
 	switch (in.op) {
 	case VO_I2P: case VO_P2I:	/* a pointer and its address as an integer are the same bits */
 		if (V->p[in.a].in.op == (in.op == VO_I2P ? VO_P2I : VO_I2P))
