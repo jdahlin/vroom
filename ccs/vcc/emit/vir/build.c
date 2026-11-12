@@ -2430,6 +2430,42 @@ static bool vw_simp1(ecx *e, vwsimp *S, uint32_t q, uint32_t *r)
 		}
 		return false;
 	}
+	case VO_S2F: case VO_U2F:	/* a constant converted: the constant (to nearest, as the instruction) */
+		if (vw_kint(V, in.a, &k)) {
+			bool w = V->p[in.a].in.ty != VT_I32;
+			double d = in.op == VO_S2F ? (w ? (double)k : (double)(int32_t)k) : (w ? (double)(uint64_t)k : (double)(uint32_t)k);
+			float f = in.op == VO_S2F ? (w ? (float)k : (float)(int32_t)k) : (w ? (float)(uint64_t)k : (float)(uint32_t)k);
+			uint64_t bits;
+			uint32_t fb;
+
+			memcpy(&bits, &d, 8), memcpy(&fb, &f, 4);
+			*r = in.ty == VT_F32 ? vw_k(e, VO_FCONST, VT_F32, 0, fb, 0) : vw_k(e, VO_FCONST, VT_F64, 0, (uint32_t)bits, (uint32_t)(bits >> 32));
+		}
+		return false;
+	case VO_FEXT: case VO_FTRUNC:
+		if (V->p[in.a].in.op == VO_FCONST && V->p[in.a].blk == VW_NOBLK) {
+			uint64_t bits = (uint64_t)V->p[in.a].in.b | (uint64_t)V->p[in.a].in.c << 32;
+			uint32_t fb = (uint32_t)bits;
+			double d;
+			float f;
+
+			if (in.op == VO_FEXT) {
+				memcpy(&f, &fb, 4);
+				d = f;
+				if (d != d)
+					return false;	/* (a NaN's payload: left to the instruction) */
+				memcpy(&bits, &d, 8);
+				*r = vw_k(e, VO_FCONST, VT_F64, 0, (uint32_t)bits, (uint32_t)(bits >> 32));
+			} else {
+				memcpy(&d, &bits, 8);
+				f = (float)d;
+				if (f != f)
+					return false;
+				memcpy(&fb, &f, 4);
+				*r = vw_k(e, VO_FCONST, VT_F32, 0, fb, 0);
+			}
+		}
+		return false;
 	case VO_ADD: case VO_SUB: case VO_OR: case VO_XOR: case VO_SHL: case VO_LSHR: case VO_ASHR:
 		if (vw_kint(V, in.b, &k) && !k)
 			*r = in.a;

@@ -743,6 +743,25 @@ static lval vl_addr(vl *L, uint32_t w, int t)
 	return l;
 }
 
+/* a float register loaded from or stored to [base, #off] without a general register in between;
+ * false when the offset has no such form */
+static bool vl_fmem(vl *L, bool load, bool d, int v, int base, int64_t off)
+{
+	int sz = d ? 8 : 4;
+
+	if (base > 30 && base != SP)
+		return false;
+	if (base == SP)
+		base = 31;
+	if (off >= 0 && off % sz == 0 && off / sz < 4096)
+		word(L->e, (load ? 0xbd400000u : 0xbd000000u) | (unsigned)d << 30 | (unsigned)(off / sz) << 10 | (unsigned)base << 5 | (unsigned)v);
+	else if (off >= -256 && off <= 255)
+		word(L->e, (load ? 0xbc400000u : 0xbc000000u) | (unsigned)d << 30 | ((unsigned)off & 0x1ffu) << 12 | (unsigned)base << 5 | (unsigned)v);
+	else
+		return false;
+	return true;
+}
+
 static void vl_load(vl *L, uint32_t i, const vir_ins *in, uint8_t res)
 {
 	ecx *e = L->e;
@@ -751,6 +770,12 @@ static void vl_load(vl *L, uint32_t i, const vir_ins *in, uint8_t res)
 	int rd = fl || res == VR_NONE ? R_X16 : vl_gx(res);
 	lval l;
 
+	if (L->xval && L->xval == L->ov[0] && fl && res != VR_NONE && !(in->fl & VIF_VOL)) {
+		word(e, 0xbc600800u | (unsigned)(w == 3) << 30 | (unsigned)L->xreg << 16 | (unsigned)L->xopt << 13 |
+			(unsigned)(L->xsh != 0) << 12 | (unsigned)L->xbase << 5 | (unsigned)vl_gv(res));	/* ldr s/d, [x, index] */
+		L->xval = 0;
+		return;
+	}
 	if (L->xval && L->xval == L->ov[0]) {
 		ins *x = put(e, I_LDX);
 
@@ -762,6 +787,8 @@ static void vl_load(vl *L, uint32_t i, const vir_ins *in, uint8_t res)
 		return;
 	}
 	l = vl_addr(L, in->fl, R_X16);
+	if (fl && res != VR_NONE && !(in->fl & VIF_VOL) && l.k == L_REG && vl_fmem(L, true, w == 3, vl_gv(res), l.r, l.off))
+		return;	/* (straight into the v register) */
 	e->novtag += (in->fl & VIF_VOL) != 0;	/* (a volatile slot is no slot to the record clean-up) */
 	if (l.k == L_SYM && ext != 2) {
 		load_n(e, rd, &l, 1 << w, ext);
@@ -788,6 +815,16 @@ static void vl_store(vl *L, const vir_ins *in)
 	int base_t = l.k == L_SYM || (l.k == L_REG && l.r == R_X16);	/* the address needs x16 */
 	int rs;
 
+	if (L->opr[1] != VR_NONE && vl_fcls(L->opr[1]) && !(in->fl & VIF_VOL)) {	/* straight from the v register */
+		if (xa) {
+			word(e, 0xbc200800u | (unsigned)(w == 3) << 30 | (unsigned)L->xreg << 16 | (unsigned)L->xopt << 13 |
+				(unsigned)(L->xsh != 0) << 12 | (unsigned)L->xbase << 5 | (unsigned)vl_gv(L->opr[1]));
+			L->xval = 0;
+			return;
+		}
+		if (l.k == L_REG && vl_fmem(L, false, w == 3, vl_gv(L->opr[1]), l.r, l.off))
+			return;
+	}
 	if (L->opr[1] == VR_NONE && vl_zero(L->f, v))
 		rs = ZR;
 	else if (L->opr[1] != VR_NONE && vl_fcls(L->opr[1])) {
