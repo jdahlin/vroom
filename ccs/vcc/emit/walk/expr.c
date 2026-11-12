@@ -2095,6 +2095,7 @@ static val wk_call(ecx *e, uint32_t n)
 	val fn = { 0 };
 	wkarg argbuf[64], *args = argbuf, r = { 0 };
 	bool var = (f->flags & (TF_VARIADIC | TF_NOPROTO)) != 0, rec_ = wk_mem(e, f->base);
+	uint32_t nargs = x->c;
 
 	/* Keep common calls on the stack; large calls scale with their arity. */
 	if (x->c > sizeof argbuf / sizeof *argbuf &&
@@ -2107,6 +2108,7 @@ static val wk_call(ecx *e, uint32_t n)
 
 		if (c->syms[s].kind == S_BUILTIN) {
 			int kind = cc_builtin_libkind(c->syms[s].val);
+			bool plain = false;
 			cval cv;
 
 			if (x->c == 2 && kind == CC_LIB_STRCMP) {
@@ -2130,7 +2132,7 @@ static val wk_call(ecx *e, uint32_t n)
 				uint64_t os = (uint64_t)cv.i;
 
 				if (os == UINT64_MAX || (cc_eval(c, c->lists[x->b + 2], &cv) && cv.kind == CV_INT && (uint64_t)cv.i <= os))
-					kind = kind - CC_LIB_MEMCPY_CHK + CC_LIB_MEMCPY;
+					kind = kind - CC_LIB_MEMCPY_CHK + CC_LIB_MEMCPY, plain = true;
 			}
 			/* memcpy/memmove/memset of a constant size up to 64 bytes: inline, as clang (8 stores
 			   of 8 bytes; a freestanding vDSO has no memcpy) */
@@ -2167,7 +2169,12 @@ static val wk_call(ecx *e, uint32_t n)
 				}
 				return wk_vreg(rd);	/* (the destination, as the call returns) */
 			}
-			ref = REF(RK_NAME, (uint32_t)c->syms[s].val);	/* a library function by name */
+			if (plain) {	/* not inlined: the plain function, without the object size */
+				ref = FIXED(kind == CC_LIB_MEMCPY ? FN_MEMCPY : kind == CC_LIB_MEMSET ? FN_MEMSET : FN_MEMMOVE);
+				nargs = 3;
+			} else {
+				ref = REF(RK_NAME, (uint32_t)c->syms[s].val);	/* a library function by name */
+			}
 		} else if (wk_can_inline(e, s)) {
 			if (args != argbuf) free(args);
 			return wk_inline(e, n, s);
@@ -2204,7 +2211,7 @@ static val wk_call(ecx *e, uint32_t n)
 			ref = REF(RK_SYM, s);
 		}
 	}
-	for (uint32_t i = 0; i < x->c; i++) {
+	for (uint32_t i = 0; i < nargs; i++) {
 		uint32_t an = c->lists[x->b + i];
 		qty at = N(an)->ty;
 
@@ -2222,7 +2229,7 @@ static val wk_call(ecx *e, uint32_t n)
 	}
 	e->calls = true;
 	{
-		val v = LO(call)(e, ref, ref ? NULL : &fn, args, (int)x->c, var, rec_ ? &r : NULL, f->base);
+		val v = LO(call)(e, ref, ref ? NULL : &fn, args, (int)nargs, var, rec_ ? &r : NULL, f->base);
 		lval l = { .k = L_FRAME, .off = r.slot, .align = 8 };
 
 		if (args != argbuf)

@@ -164,6 +164,8 @@ static uint32_t vw_lblk(ecx *e, uint32_t l)
 		memset(V->lab + V->clab, 0xff, (nc - V->clab) * sizeof *V->lab);
 		V->clab = nc;
 	}
+	if (l >= V->labhi)
+		V->labhi = l + 1;
 	if (V->lab[l] == VW_NOBLK)
 		V->lab[l] = vw_newblk(e);
 	return V->lab[l];
@@ -185,41 +187,71 @@ static void vw_br(ecx *e, uint32_t blk) { vw_term(e, VO_BR, blk, 0, 0, 0); }
 
 static uint64_t vw_hkey(uint32_t b, uint32_t var) { return (uint64_t)b << 32 | var; }
 
+#define VW_H0 1024
+
+/* every entry of the table empty */
+static void vw_hgen(vwst *V)
+{
+	if (!++V->hgen) {	/* (the generations wrapped) */
+		if (V->halloc)
+			memset(V->h, 0, V->halloc * sizeof *V->h);
+		V->hgen = 1;
+	}
+}
+
 static uint32_t *vw_hslot(ecx *e, uint32_t b, uint32_t var, bool add)
 {
 	vwst *V = e->vw;
 	uint64_t key = vw_hkey(b, var) + 1;
 
 	if (add && (V->hn + 1) * 2 > V->hcap) {
-		uint32_t oc = V->hcap, nc = oc ? oc * 2 : 4096;
-		vwh *old = V->h;
+		/* the next size, inside the allocation when a larger function left one: the table a
+		 * function probes is as large as it needs, not as the largest one seen needed */
+		uint32_t oc = V->hcap, nc = oc ? oc * 2 : VW_H0, n = 0;
+		vwh *live = malloc(((size_t)V->hn + 1) * sizeof *live);
 
-		V->h = calloc(nc, sizeof *V->h);
-		if (!V->h)
+		if (!live)
 			vw_fail(e, "out of memory");
-		V->hcap = nc;
 		for (uint32_t i = 0; i < oc; i++)
-			if (old[i].key) {
-				uint32_t j = (uint32_t)(old[i].key * 0x9e3779b97f4a7c15ull >> 40) & (nc - 1);
-
-				while (V->h[j].key)
-					j = (j + 1) & (nc - 1);
-				V->h[j] = old[i];
+			if (V->h[i].gen == V->hgen)
+				live[n++] = V->h[i];
+		if (nc > V->halloc) {
+			free(V->h);
+			V->h = calloc(nc, sizeof *V->h);
+			if (!V->h) {
+				V->hcap = V->halloc = 0;
+				free(live);
+				vw_fail(e, "out of memory");
 			}
-		free(old);
+			V->halloc = nc;
+			V->hgen = 1;
+		} else {
+			vw_hgen(V);
+		}
+		V->hcap = nc;
+		for (uint32_t i = 0; i < n; i++) {
+			uint32_t j = (uint32_t)(live[i].key * 0x9e3779b97f4a7c15ull >> 40) & (nc - 1);
+
+			while (V->h[j].gen == V->hgen)
+				j = (j + 1) & (nc - 1);
+			V->h[j] = live[i];
+			V->h[j].gen = V->hgen;
+		}
+		free(live);
 	}
 	if (!V->hcap)
 		return NULL;
 	for (uint32_t j = (uint32_t)(key * 0x9e3779b97f4a7c15ull >> 40) & (V->hcap - 1);; j = (j + 1) & (V->hcap - 1)) {
-		if (V->h[j].key == key)
-			return &V->h[j].v;
-		if (!V->h[j].key) {
+		if (V->h[j].gen != V->hgen) {
 			if (!add)
 				return NULL;
 			V->h[j].key = key;
+			V->h[j].gen = V->hgen;
 			V->hn++;
 			return &V->h[j].v;
 		}
+		if (V->h[j].key == key)
+			return &V->h[j].v;
 	}
 }
 
@@ -1378,13 +1410,18 @@ VPRIV void vw_named(ecx *e, uint32_t ref) { (void)ref; vw_fail(e, "VIR: an addre
 
 VPRIV void vw_locals_begin(ecx *e, uint32_t s) { (void)e, (void)s; }
 
+static uint32_t vw_lhash(uint32_t sym, uint32_t inst)
+{
+	return (uint32_t)(((uint64_t)sym << 32 | inst) * 0x9e3779b97f4a7c15ull >> 40);
+}
+
 /* every eligible scalar local is a variable, keyed by (symbol, inline copy) */
 VPRIV bool vw_local(ecx *e, uint32_t s, lval *l)
 {
 	vwst *V = e->vw;
 	cc *c = e->c;
 	qty t = c->syms[s].ty;
-	uint32_t ty, inst = e->wk->inst;
+	uint32_t ty, inst = e->wk->inst, lj;
 
 	if (!em_local_eligible(e, s))
 		return false;
@@ -1398,11 +1435,38 @@ VPRIV bool vw_local(ecx *e, uint32_t s, lval *l)
 		ty = VT_F64;
 	else
 		return false;
-	for (uint32_t i = 0; i < V->nloc; i++)	/* (few locals; a hash once it matters) */
+	if ((V->nloc + 1) * 2 > V->lhcap) {	/* (a function with everything inlined has thousands) */
+		uint32_t nc = V->lhcap ? V->lhcap * 2 : 256;
+
+		if (nc > V->lhalloc) {
+			free(V->lh);
+			V->lh = malloc(nc * sizeof *V->lh);
+			if (!V->lh) {
+				V->lhcap = V->lhalloc = 0;
+				vw_fail(e, "out of memory");
+			}
+			V->lhalloc = nc;
+		}
+		memset(V->lh, 0, nc * sizeof *V->lh);
+		V->lhcap = nc;
+		for (uint32_t i = 0; i < V->nloc; i++) {
+			uint32_t j = vw_lhash(V->loc[i].sym, V->loc[i].inst) & (nc - 1);
+
+			while (V->lh[j])
+				j = (j + 1) & (nc - 1);
+			V->lh[j] = i + 1;
+		}
+	}
+	lj = vw_lhash(s, inst) & (V->lhcap - 1);
+	for (; V->lh[lj]; lj = (lj + 1) & (V->lhcap - 1)) {
+		uint32_t i = V->lh[lj] - 1;
+
 		if (V->loc[i].sym == s && V->loc[i].inst == inst) {
 			*l = (lval){ .k = L_VAR, .ref = VW_VAR0 + i, .align = sym_align(c, s) };
 			return true;
 		}
+	}
+	V->lh[lj] = V->nloc + 1;
 	GROW(V->loc, V->nloc, V->cloc, 1);
 	GROW(V->vty, V->nloc, V->cvty, 1);
 	GROW(V->vsgn, V->nloc, V->cvsgn, 1);
@@ -1679,10 +1743,14 @@ VPRIV void vw_begin(ecx *e, uint32_t s)
 	V->flive = 0;
 	memset(V->fprod, 0, sizeof V->fprod);
 	V->hn = 0;
-	if (V->hcap)
-		memset(V->h, 0, V->hcap * sizeof *V->h);
-	if (V->clab)
-		memset(V->lab, 0xff, V->clab * sizeof *V->lab);
+	vw_hgen(V);
+	V->hcap = V->halloc < VW_H0 ? V->halloc : VW_H0;
+	if (V->lhcap)
+		memset(V->lh, 0, V->lhcap * sizeof *V->lh);
+	V->lhcap = V->lhalloc < 256 ? V->lhalloc : 256;
+	if (V->labhi)	/* (only the labels the last function used) */
+		memset(V->lab, 0xff, V->labhi * sizeof *V->lab);
+	V->labhi = 0;
 	V->sealing = false;
 	V->why = NULL;	/* (one function's reason is not the next one's) */
 	V->rty = VT_VOID;
@@ -1721,7 +1789,7 @@ VPRIV void vw_ecx_free(ecx *e)
 
 	if (!V)
 		return;
-	free(V->p), free(V->b), free(V->x), free(V->h), free(V->fwd), free(V->lab), free(V->sl), free(V->act);
+	free(V->p), free(V->b), free(V->x), free(V->h), free(V->lh), free(V->fwd), free(V->lab), free(V->sl), free(V->act);
 	free(V->st), free(V->loc), free(V->vty), free(V->vsgn), free(V->pr), free(V->map), free(V->order), free(V->bmap);
 	free(V);
 	e->vw = NULL;
@@ -2052,6 +2120,7 @@ static bool vw_promote(ecx *e)
 	vwst *V = e->vw;
 	vwfld *fd = NULL;
 	uint32_t nf = 0, cf = 0, *fof, *cur, *cst, np0 = V->np, var0;
+	uint32_t *sf, *fnx = NULL, cfnx = 0;	/* a slot's fields: first + 1 per slot, next + 1 per field */
 	uint8_t *bad;
 	bool done = false;
 	int64_t rel;
@@ -2061,8 +2130,9 @@ static bool vw_promote(ecx *e)
 	if (!V->nsl)
 		return false;
 	bad = calloc(V->nsl, 1);
+	sf = calloc(V->nsl, sizeof *sf);
 	fof = malloc((size_t)V->np * sizeof *fof);	/* access -> field + 1 */
-	if (!bad || !fof)
+	if (!bad || !fof || !sf)
 		vw_fail(e, "out of memory");
 	for (uint32_t s = 0; s < V->nsl; s++)
 		bad[s] = V->sl[s].prom;	/* (an earlier run's: its stores are dead, its loads gone) */
@@ -2123,11 +2193,9 @@ static bool vw_promote(ecx *e)
 		rel = vw_rel(&V->p[a]);
 		size = 1u << VIF_W(q->in.fl);
 		ty = q->in.op == VO_STORE ? V->p[q->in.b].in.ty : VT_VOID;
-		for (k = 0; k < nf; k++) {
+		for (k = sf[s] - 1; k != UINT32_MAX; k = fnx[k] - 1) {	/* (the slot's own fields only) */
 			vwfld *f = &fd[k];
 
-			if (f->slot != s)
-				continue;
 			if (f->rel == rel && f->size == size)
 				break;
 			if (f->rel < rel + (int64_t)size && rel < f->rel + (int64_t)f->size)
@@ -2135,8 +2203,12 @@ static bool vw_promote(ecx *e)
 		}
 		if (bad[s])
 			continue;
-		if (k == nf) {
+		if (k == UINT32_MAX) {
+			k = nf;
 			GROW(fd, nf, cf, 1);
+			GROW(fnx, nf, cfnx, 1);
+			fnx[nf] = sf[s];
+			sf[s] = nf + 1;
 			fd[nf++] = (vwfld){ s, rel, size, VT_VOID };
 		}
 		if (ty != VT_VOID) {
@@ -2152,7 +2224,7 @@ static bool vw_promote(ecx *e)
 	}
 	/* a memset covers each field of its slot whole or not at all */
 	for (uint32_t m = 0; m < nms; m++)
-		for (uint32_t k = 0; k < nf; k++) {
+		for (uint32_t k = sf[ms[m].slot] - 1; k != UINT32_MAX; k = fnx[k] - 1) {
 			const vwfld *f = &fd[k];
 			int64_t lo = ms[m].rel, hi = ms[m].rel + ms[m].len;
 
@@ -2215,13 +2287,20 @@ static bool vw_promote(ecx *e)
 		for (uint32_t q = V->b[b].head; q; q = V->p[q].next) {
 			if (q >= np0 || !fof[q] || bad[V->p[q].slot - 1] || V->p[q].in.op == VO_LOAD || vw_find(V, q) != q)
 				continue;
-			for (uint32_t k = 0; k < nf; k++) {
+			if (V->p[q].in.op == VO_STORE) {
+				uint32_t var = VW_VAR0 + var0 + fof[q] - 1;
+
+				vw_write(e, var, b, V->p[q].in.b);
+				*vw_hslot(e, b, var | 0x40000000u, true) = 1;	/* b defines var */
+				continue;
+			}
+			for (uint32_t k = sf[V->p[q].slot - 1] - 1; k != UINT32_MAX; k = fnx[k] - 1) {
 				uint32_t var = VW_VAR0 + var0 + k;
 
-				if (V->p[q].in.op == VO_STORE ? k != fof[q] - 1 : !vw_mscov(&ms[UINT32_MAX - fof[q]], &fd[k]))
+				if (!vw_mscov(&ms[UINT32_MAX - fof[q]], &fd[k]))
 					continue;
-				vw_write(e, var, b, V->p[q].in.op == VO_STORE ? V->p[q].in.b : vw_zerok(e, fd[k].ty));
-				*vw_hslot(e, b, var | 0x40000000u, true) = 1;	/* b defines var */
+				vw_write(e, var, b, vw_zerok(e, fd[k].ty));
+				*vw_hslot(e, b, var | 0x40000000u, true) = 1;
 			}
 		}
 	}
@@ -2239,7 +2318,7 @@ static bool vw_promote(ecx *e)
 			if (x->in.op == VO_MEMSET) {
 				const struct vwms *m = &ms[UINT32_MAX - fof[q]];
 
-				for (k = 0; k < nf; k++)
+				for (k = sf[m->slot] - 1; k != UINT32_MAX; k = fnx[k] - 1)
 					if (vw_mscov(m, &fd[k])) {
 						cur[k] = vw_zerok(e, fd[k].ty);
 						cst[k] = oi;
@@ -2278,6 +2357,8 @@ static bool vw_promote(ecx *e)
 out:
 	free(ms);
 	free(fd);
+	free(fnx);
+	free(sf);
 	free(fof);
 	free(bad);
 	return done;

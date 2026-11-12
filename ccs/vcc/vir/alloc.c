@@ -1362,6 +1362,7 @@ static void enter(A *a, uint32_t b)
 		ax.slot[q] = VIR_NOBLK;
 		ax.reg[q] = VR_NONE;
 		ax.lastpos[q] = q;
+		ax.dmark[q] = 0;	/* (not an earlier function's: it is read for any value in a register) */
 		if (!(ax.vfl[q] & DEAD) && !(k->fl & VB_ADDR)) {
 			uint32_t h = ax.treg[q];
 			int vr = arg_vote(a, b, j, c, h);
@@ -1597,6 +1598,7 @@ static bool instr(A *a, uint32_t b, uint32_t i, bool term)
 		ax.slot[i] = VIR_NOBLK;
 		ax.reg[i] = VR_NONE;
 		ax.lastpos[i] = i;
+		ax.dmark[i] = 0;
 		if (fx.res != VR_NONE) {
 			av[0] = lock[0] | fixm[0];
 			av[1] = lock[1] | fixm[1];

@@ -947,6 +947,57 @@ vektoriserar `slide_hash`), `deflate_fast` 596 mot 422, `longest_match` 838 mot
   vcc-volatile, sqlite3.c med kontrollen och samma verifieringshash, zlib ger
   clangs byte.
 
+### Kompileringstid genom VIR (2026-11-12): sqlite3.c
+
+Gren `claude/vir-sqlite-optimization-acaf18`.  Mätt på sqlite3.c `-O2`
+(amalgamationen, 1438 funktioner genom VIR), instruktioner för hela
+`vpp`-processen (maskinen är delad: tider är minimum av nio körningar).
+
+| | Instruktioner | Emit, 1 tråd | Emit, 8 trådar |
+|---|---|---|---|
+| direkt emitter | 1,29 G | 57 ms | |
+| VIR före | 4,84 G | 438–540 ms | 90 ms |
+| VIR nu | 3,75 G | 409 ms | 62 ms |
+| clang -O2 (hela kompileringen) | | ca 8–10 s | |
+
+- **Gjort (ac6639cd), samma objekt byte för byte:** `vw_promote` har fältlistor
+  per plats (var kvadratisk: varje åtkomst sökte funktionens alla fält, varje
+  lagring gick igenom dem igen); (block, variabel)-hashen har generationer i
+  stället för rensning per funktion och börjar om på 1024 poster per funktion
+  (granskningens punkt "rensning i största storlek", ~6 % av sqlite);
+  etikettabellen rensas bara så långt den användes; `vw_local` slår upp
+  (symbol, instans) i en hash; `vir_oit_init` läser fältmasken ur en tabell.
+- **Trådar:** `VCC_THREADS=8` ger 62 ms emit (6,6 gånger mot en tråd), vilket
+  är i nivå med direkta emittern på en tråd.  Standard är fortfarande en tråd
+  (kärnbygget parallelliserar över TU:er); beslut behövs om en ensam stor TU
+  ska få fler.
+- **Fel som trådarna visade (b236ef95):** allokerarens `dmark` lästes för värden
+  som ännu inte använts i funktionen, alltså en tidigare funktions stämpel:
+  med flera trådar skilde sqlite3.o mellan körningar (16 funktioner).  Nollas
+  nu vid varje definition; 26 funktioner ändras även på en tråd.  Emit-trådarna
+  fick Darwins standardstack (512 KB): `tests/vcc/limits.c` gav inget objekt
+  på 8 trådar; de får nu den skapande trådens storlek.
+- **Öppet, inte VIR:** `tests/vcc/deep_expr.c` och `deep_mixed.c` ger olika
+  objekt mellan körningar med `VCC_THREADS=8` också på direkta vägen (utan
+  `VCC_VIR`).  Inte utrett.
+- **Kvar i profilen (platt, ingen post över 6 %):** `vw_hslot` 6 % (Brauns
+  uppslag per (block, variabel); cachemissar i VdbeExec), `vw_promote` 4,5 %,
+  `vw_find` 4 %, `vir_oit_next`/`init` 5 %, `vw_simplify` + `vw_cse_blk` 4 %,
+  allokeraren (`instr`, `sweep5`, `conform`, `enter`) ca 8 %, postrensningen
+  (`opt_function`).  Nästa steg med mätbar effekt: operanditeratorn inline i
+  `vir.h` (anropas över TU-gränsen), triviala phi bort direkt (granskningens
+  första rekommendation), `vir_canon` utan dubbla dominatorer.
+
+Kodkvalitet på samma gren (519b6905): flyttal laddas och lagras utan
+allmänt register också för volatile, ramplatser och spill (sqlites
+`dekkerMul2` var 2,9 % av speedtest1); `__builtin___memcpy_chk` m.fl. med
+objektstorlek som inte kan överskridas blir det vanliga anropet också när
+längden inte är konstant (530 `_chk`-anrop i sqlite).  speedtest1 storlek 100:
+8,76 → 8,56 G cykler (clang -O2 7,83 G), samma verifieringshash.  Största
+kända rest mot clang: adresstagna lokaler i slingor utan anrop (`balance`:
+`b.nCell` laddas och lagras varje varv; kräver aliasanalys på typ eller
+ursprung, ett beslut för SPEC-vir.md).
+
 ### Underlag för V4 (2026-11-11): registerallokering, ingen kod
 
 - `RESEARCH-regalloc.md`: vad GCC (IRA, LRA) och LLVM (Greedy, Fast, PBQP,
