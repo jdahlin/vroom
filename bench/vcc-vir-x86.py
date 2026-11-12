@@ -65,6 +65,7 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
             if run([str(exe)]).stdout != expected:
                 raise SystemExit('output differs from clang')
     for filename, required_more, packed in (
+        ('vir_x86_testmem.c', {'flag8', 'flag16', 'flag32', 'flag64', 'indexed', 'vol', 'sign', 'shared', 'sharedmask', 'member', 'keep'}, {}),
         ('vir_x86_blocks.c', {'copy1', 'copy24', 'copy127', 'copy128', 'copy129', 'zero24', 'zero256', 'zero257', 'zero_local', 'readbyte', 'dynamic', 'nonzero', 'lowzero'}, {}),
         ('vir_x86_ext.c', {'clean', 'trim', 'mask', 'signedload', 'fromcall'}, {}),
         ('vir_x86_select.c', {'choose', 'uchoose', 'keep', 'boolean', 'pointer'}, {}),
@@ -114,6 +115,14 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
                     body = asm.read_text().split(name + ':\n', 1)[1].split('.Lfunc_end', 1)[0]
                     if 'rep ' not in body and not re.search(r'\bcall\w*\s+mem(?:cpy|set)', body):
                         raise SystemExit(f'{name}: missing generic block-operation fallback')
+            if filename == 'vir_x86_testmem.c':
+                for name, op in [('flag8', 'testb'), ('flag16', 'testw'), ('flag32', 'testl'), ('flag64', 'testq')]:
+                    body = asm.read_text().split(name + ':\n', 1)[1].split('.Lfunc_end', 1)[0]
+                    if not re.search(op + r'\s+\$[^,]+,.*\(%', body):
+                        raise SystemExit(f'{name}: missing direct memory test')
+                body = asm.read_text().split('vol:\n', 1)[1].split('.Lfunc_end', 1)[0]
+                if len(re.findall(r'movzbl\s+\(', body)) != 1 or re.search(r'testb\s+\$[^,]+,.*\(%', body):
+                    raise SystemExit('vol: volatile load was combined')
             if filename == 'vir_x86_bytes.c':
                 body = asm.read_text().split('be16:\n', 1)[1].split('.Lfunc_end', 1)[0]
                 if 'rorw' not in body or 'movzwl' not in body:

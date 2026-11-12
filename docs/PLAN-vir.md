@@ -350,6 +350,17 @@ svansar, 256-byte-lokalnollning och reservvägar. GCC/TCC 1615/105, egna
 303/303, samma fem inline-undantag; assembly/objekt och ASan/UBSan gröna.
 Data: work/vir-x86-perf/block/results/summary.json; 10 %-målet öppet.
 
+Nionde skivan viker en vanlig osignerad last, konstant AND och eq/ne mot
+noll till TEST direkt på minnet, med exakt ursprunglig åtkomstbredd. De två
+slopade värdena får bara ha en användare och inga spill/edits. Jämförelsens
+boolvärde materialiseras när det behövs; efterföljande branch/CMOV kan
+återanvända flaggorna. Volatila/signerade eller delade värden kombineras inte.
+Riktprov täcker byte/ord/dubbelord/64 bitar, index och fältdisplacement,
+signutvidgade masker, delad bool och reservfallen. GCC/TCC 1615/105, egna
+304/304, samma fem inline-undantag; assembly/objekt och ASan/UBSan gröna.
+Fem kortprov: CPU 345,64 → 343,66 ms (1,223x → 1,216x clang), instruktioner
+1,439x → 1,433x. Data: work/vir-x86-perf/testm2/results/summary.json.
+
 
 ### V2/V3 x86-64 (2026-11-12): TSVC och fem verkliga korpusar
 

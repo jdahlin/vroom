@@ -86,6 +86,7 @@ enum {
 	X_RESUME_FRAME,	/* rebuild realigned R12 from restored RBP after builtin longjmp */
 	X_LDX, X_STX,	/* memory at r1 + (r3 << sh) + off; load r0 / store r2 */
 	X_CMOV,		/* r0 = flags[cond] ? r2 : r1 */
+	X_TESTM,		/* flags: [r1 + (r3 << sh) + off] & (int32_t)ref; r3 optional */
 	X_NOPS
 };
 

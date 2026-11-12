@@ -21,6 +21,7 @@
 
 static const opdesc x64_desc[X_NOPS] = {
 	[X_CMOV] = X_DESC(X_D | X_U | X_V, X_P | X_R),
+	[X_TESTM] = X_DESC(X_U | OD_USE3, OD_LOAD | OD_TRAP | X_W),
 	[X_LDX] = X_DESC(X_D | X_U | OD_USE3, OD_LOAD | OD_TRAP),
 	[X_STX] = X_DESC(X_U | X_V | OD_USE3, OD_STORE | OD_TRAP),
 	[X_LABEL] = X_DESC(0, OD_LABEL),
@@ -138,7 +139,7 @@ VPRIV receffects x64_effects(const ecx *e, const rec *i)
 	if ((d->regs & OD_DEF0) && i->sz < 4 && i->r[0] < XMM0 &&
 	    i->op != X_LD && i->op != X_LDX && i->op != X_EXT && i->op != X_SETCC && i->op != X_FSETCC)
 		f.use |= x64_effect_reg(i->r[0]);
-	if ((i->op == X_LD || i->op == X_ST || i->op == X_LDX || i->op == X_STX || i->op == X_LEA ||
+	if ((i->op == X_LD || i->op == X_ST || i->op == X_LDX || i->op == X_STX || i->op == X_TESTM || i->op == X_LEA ||
 	     i->op == X_XCHG || i->op == X_XADD || i->op == X_CMPXCHG || i->op == X_X87) &&
 	    i->r[1] == RBP && i->off < 0 && (!e || e->wk->falign > 16))
 		f.use |= X_BIT(R12); /* printer's realigned local-frame base */
@@ -181,6 +182,7 @@ VPRIV const uint8_t *x64_flow_table(void)
 		[X_LABEL] = EM_FLOW_ENTRY,
 		[X_MOV] = EM_FLOW_NEXT,
 		[X_CMOV] = EM_FLOW_NEXT,
+		[X_TESTM] = EM_FLOW_NEXT,
 		[X_MOVI] = EM_FLOW_NEXT,
 		[X_LD] = EM_FLOW_NEXT,
 		[X_LDX] = EM_FLOW_NEXT,

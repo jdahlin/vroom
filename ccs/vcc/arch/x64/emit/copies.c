@@ -18,6 +18,7 @@ static unsigned x64_copy_fields(const rec *i)
 	case X_MOV:
 		return i->r[0] < XMM0 && i->r[1] < XMM0 ? 1u << 1 : 0;
 	case X_LDX: return (1u << 1) | (1u << 3);
+	case X_TESTM: return (1u << 1) | (1u << 3);
 	case X_STX: return (1u << 1) | (1u << 2) | (1u << 3);
 	case X_LD: case X_LEA:
 	case X_ADDI: case X_SUBI: case X_ANDI: case X_ORI: case X_XORI: case X_IMULI:

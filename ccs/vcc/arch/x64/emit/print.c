@@ -114,7 +114,7 @@ static void x64_memop(ecx *e, tbuf *b, const rec *i)
 		tb_i(b, i->off);
 	tb_c(b, '(');
 	x64_reg(b, base, 8);
-	if (i->op == X_LDX || i->op == X_STX) {
+	if (i->op == X_LDX || i->op == X_STX || (i->op == X_TESTM && i->r[3] != XNOREG)) {
 		tb_c(b, ','); x64_reg(b, i->r[3], 8);
 		tb_c(b, ','); tb_u(b, 1u << i->sh);
 	}
@@ -425,6 +425,10 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 		case X_CMOV:
 			tb_s(b,"\tcmov");tb_s(b,x64_ccn[i->cond]);tb_c(b,x64_sfx(sz));tb_c(b,'\t');
 			x64_reg(b,i->r[2],sz);tb_s(b,", ");x64_reg(b,i->r[0],sz);break;
+		case X_TESTM:
+			x64_ins(b,"test",sz);
+			x64_imm(b,sz==1?(uint8_t)i->ref:sz==2?(uint16_t)i->ref:(int32_t)i->ref);
+			tb_s(b,", ");x64_memop(e,b,i);break;
 		case X_SETCC:
 			tb_s(b, "\tset");
 			tb_s(b, x64_ccn[i->cond]);

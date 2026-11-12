@@ -16,6 +16,7 @@ typedef struct vx {
 	uint8_t *uses;
 	uint32_t memv, memskip, scaledv; int membase, memindex, scaleindex; uint8_t memsh, scalesh; bool indexed; int64_t memoff;
 	uint32_t bev; int bebase,beindex; uint8_t besh,bewidth; bool beindexed; int64_t beoff;
+	uint32_t testv; uint8_t testsize; int64_t testimm;
 } vx;
 
 static void *vx_grow(void *p, uint32_t *cap, uint32_t n, size_t size)
@@ -454,6 +455,16 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 	static const uint8_t alu[VO_N] = { [VO_ADD]=X_ADD, [VO_PTRADD]=X_ADD, [VO_SUB]=X_SUB, [VO_PSUB]=X_SUB,
 		[VO_MUL]=X_IMUL, [VO_AND]=X_AND, [VO_OR]=X_OR, [VO_XOR]=X_XOR,
 		[VO_FADD]=X_FADD, [VO_FSUB]=X_FSUB, [VO_FMUL]=X_FMUL, [VO_FDIV]=X_FDIV };
+	if(L->testv) {
+		if(v<L->testv)return;
+		if(v==L->testv) {
+			rec *r=x64_op3(e,X_TESTM,L->testsize,XNOREG,L->membase,XNOREG);
+			r->r[3]=L->indexed?L->memindex:XNOREG;r->sh=L->memsh;r->off=L->memoff;r->ref=(uint32_t)L->testimm;
+			L->cmp=v;L->cmpblock=b;L->setrec=e->x64->nin;
+			x64_op3(e,X_SETCC,4,d,XNOREG,XNOREG)->cond=(i->fl&15)?CC_NE:CC_E;
+			L->testv=0;return;
+		}
+	}
 	if(L->memskip==v){L->memskip=0;return;}
 	if(L->bev) {
 		if(v<L->bev)return;
@@ -463,6 +474,22 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 				rec *r=x64_op3(e,X_LDX,L->bewidth,d,at.r,XNOREG);r->r[3]=L->beindex;r->sh=L->besh;r->off=at.off;
 			} else x64_mem(e,X_LD,L->bewidth,d,&at,false);
 			x64_op3(e,X_BSWAP,L->bewidth,d,d,XNOREG);L->bev=0;return;
+		}
+	}
+	/* A single-use ordinary unsigned load, constant mask and zero comparison
+	 * can test the exact source width in memory. Preserve the address until
+	 * the comparison; neither skipped definition may spill or have edits. */
+	if(i->op==VO_LOAD && (i->ty==VT_I32 || i->ty==VT_I64) && !(i->fl&(VIF_VOL|VIF_MS)) &&
+	   v+2<L->f->blk[b].first+L->f->blk[b].n && L->uses[v]==1 && L->o->slot[v]==VIR_NOBLK) {
+		const vir_ins *mask=&L->f->ins[v+1],*cmp=&L->f->ins[v+2];int64_t k,zero;
+		if(mask->op==VO_AND && mask->ty==i->ty && mask->a==v && vx_imm(L->f,mask->b,&k) &&
+		   L->uses[v+1]==1 && L->o->slot[v+1]==VIR_NOBLK && cmp->op==VO_ICMP &&
+		   (cmp->fl&15)<2 && cmp->a==v+1 && vx_imm(L->f,cmp->b,&zero) && !zero &&
+		   vx_foldedits(L,b,v+1,XNOREG) && vx_foldedits(L,b,v+2,XNOREG)) {
+			L->testv=v+2;L->testsize=1<<VIF_W(i->fl);L->testimm=k;
+			if(L->memv==i->a)L->memv=0;
+			else {L->membase=a;L->memoff=0;L->indexed=false;L->memsh=0;}
+			return;
 		}
 	}
 	if(i->op==VO_LOAD) {
