@@ -31,6 +31,7 @@ typedef struct vl {
 	int64_t *soff;		/* per VIR slot: its FRAME offset */
 	int64_t *spoff;		/* per spill slot */
 	uint32_t *lbl;		/* per block: its label */
+	uint32_t *chs;		/* per block: where a branch to it ends up (vl_chase) */
 	uint8_t *uses;
 	uint8_t *lo32;		/* per value: 1 if every use is a trunc (only the low 32 bits are read) */
 	uint32_t retlbl;
@@ -39,6 +40,7 @@ typedef struct vl {
 	uint32_t nop;
 	int fcc;		/* a compare's condition the next instruction reads from the flags, -1 none */
 	uint32_t fval;		/* ... that compare */
+	int fzr, fzx;		/* ... a test of register fzr (fzx: 64-bit) against 0 instead: cbz, cbnz (-1 none) */
 	uint32_t pval;		/* a ptradd the next load or store addresses through (0 none) */
 	int pbase;		/* ... its base register */
 	int64_t poff;		/* ... and offset */
@@ -48,7 +50,7 @@ typedef struct vl {
 	uint32_t ntr;
 } vl;
 
-static _Thread_local struct { int64_t *soff, *spoff; uint32_t *lbl; uint8_t *uses, *lo32; uint32_t cs, csp, cl, cu, c32; } VLT;
+static _Thread_local struct { int64_t *soff, *spoff; uint32_t *lbl, *chs, *path; uint8_t *uses, *lo32; uint32_t cs, csp, cl, cch, cpa, cu, c32; } VLT;
 
 static __attribute__((noreturn, cold)) void vl_fail(vl *L, const char *why)
 {
@@ -475,6 +477,16 @@ static void vl_emoves(vl *L, uint32_t g)
 static bool vl_plain(vl *L, uint32_t b, uint32_t k);
 static uint32_t vl_chase(vl *L, uint32_t t);
 
+/* a block every branch goes past (vl_chase): not emitted */
+static bool vl_skip(vl *L, uint32_t b) { return b && vl_chase(L, b) != b; }
+
+static uint32_t vl_next(vl *L, uint32_t b)	/* the block emitted after b */
+{
+	while (++b < L->f->nblk && vl_skip(L, b))
+		;
+	return b;
+}
+
 /* the label a branch from block b to its successor k (block to) takes: the block's, or a
  * new one whose moves follow the block */
 static uint32_t vl_succ(vl *L, uint32_t b, uint32_t k, uint32_t to)
@@ -544,6 +556,30 @@ static int vl_cond(vl *L, const vir_ins *in)
 	}
 	opi(L->e, I_SUBSI, 0, ZR, vl_ix(L, 0, R_X16), 0);
 	return C_NE;
+}
+
+/* a branch's condition: flags (r < 0) or register r against zero (cc EQ or NE) */
+typedef struct vlcc { int cc, r, x; } vlcc;
+
+static vlcc vl_brcond(vl *L, const vir_ins *in)
+{
+	if (L->fcc >= 0 && L->fval == in->a) {
+		vlcc c = { L->fcc, L->fzr, L->fzx };
+
+		L->fcc = -1, L->fzr = -1;
+		return c;
+	}
+	return (vlcc){ C_NE, vl_ix(L, 0, R_X16), vl_x(L->f, in->a) };
+}
+
+static void vl_bc(ecx *e, vlcc c, bool inv, uint32_t l)
+{
+	int cc = inv ? c.cc ^ 1 : c.cc;
+
+	if (c.r >= 0)
+		cbz(e, cc == C_NE, c.x, c.r, l);
+	else
+		bcond(e, cc, l);
 }
 
 /* load or store at operand 0's address: lv for the symbol or frame cases, else base register */
@@ -855,17 +891,48 @@ static bool vl_pfold(vl *L, uint32_t b, uint32_t i)
 }
 
 /* the block a branch to t ends up in: past blocks that are a lone br without moves */
-static uint32_t vl_chase(vl *L, uint32_t t)
-{
-	for (int hop = 0; hop < 16; hop++) {
-		const vir_blk *k = &L->f->blk[t];
-		const vir_ins *in = &L->f->ins[k->first];
+static uint32_t vl_chase(vl *L, uint32_t t) { return L->chs[t]; }
 
-		if (k->nparam || k->n != 1 || in->op != VO_BR || in->a == t || !vl_plain(L, t, 0) || (k->fl & VB_ADDR))
-			break;
-		t = in->a;
+static bool vl_lonebr(vl *L, uint32_t t)
+{
+	const vir_blk *k = &L->f->blk[t];
+	const vir_ins *in = &L->f->ins[k->first];
+
+	return !k->nparam && k->n == 1 && in->op == VO_BR && vl_plain(L, t, 0) && !(k->fl & VB_ADDR);
+}
+
+/* L->chs for every block; in a cycle of lone brs the block the walk reaches twice stays */
+static void vl_chases(vl *L, uint32_t *path)
+{
+	uint32_t nb = L->f->nblk, *c = L->chs;
+	const uint32_t todo = UINT32_MAX, busy = UINT32_MAX - 1;
+
+	for (uint32_t b = 0; b < nb; b++)
+		c[b] = todo;
+	for (uint32_t b = 0; b < nb; b++) {
+		uint32_t t = b, n = 0, r;
+
+		for (;;) {
+			if (c[t] == busy) {
+				r = t;
+				break;
+			}
+			if (c[t] != todo) {
+				r = c[t];
+				break;
+			}
+			if (!vl_lonebr(L, t)) {
+				r = t;
+				break;
+			}
+			c[t] = busy;
+			path[n++] = t;
+			t = L->f->ins[L->f->blk[t].first].a;
+		}
+		c[t] = c[t] == busy || c[t] == todo ? r : c[t];
+		while (n)
+			c[path[--n]] = r;
 	}
-	return t;
 }
 
 /* instruction i of block b, its operands collected; res its result's register */
@@ -989,7 +1056,19 @@ static void vl_ins(vl *L, uint32_t b, uint32_t i, uint8_t res)
 	case VO_ICMP:
 	case VO_FCMP: {
 		int cc;
+		bool fuse = L->uses[i] == 1 && L->o->slot[i] == VIR_NOBLK && i + 1 < f->blk[b].first + f->blk[b].n &&
+			    (f->ins[i + 1].op == VO_BRIF || f->ins[i + 1].op == VO_SELECT) && f->ins[i + 1].a == i;
 
+		/* x == 0, x != 0 for a branch: cbz, cbnz (when nothing is edited in between) */
+		if (fuse && in->op == VO_ICMP && (in->fl & 15) <= 1 && f->ins[i + 1].op == VO_BRIF &&
+		    L->opr[0] != VR_NONE && L->opr[1] == VR_NONE && vl_iconst(f, in->b) && !vl_ival(&f->ins[in->b]) &&
+		    !(L->ei < L->eend && L->o->edit[L->ei].pos == i + 1)) {
+			L->fcc = (in->fl & 15) ? C_NE : C_EQ;
+			L->fval = i;
+			L->fzr = vl_gx(L->opr[0]);
+			L->fzx = vl_x(f, in->a);
+			return;
+		}
 		if (in->op == VO_ICMP) {
 			cc = vl_icc[vl_cmp(L, in)];
 		} else {
@@ -997,10 +1076,10 @@ static void vl_ins(vl *L, uint32_t b, uint32_t i, uint8_t res)
 			cc = vl_fccs[in->fl & 7];
 		}
 		/* used once, by the next instruction as its condition: that reads the flags */
-		if (cc >= 0 && L->uses[i] == 1 && L->o->slot[i] == VIR_NOBLK && i + 1 < f->blk[b].first + f->blk[b].n &&
-		    (f->ins[i + 1].op == VO_BRIF || f->ins[i + 1].op == VO_SELECT) && f->ins[i + 1].a == i) {
+		if (cc >= 0 && fuse) {
 			L->fcc = cc;
 			L->fval = i;
+			L->fzr = -1;
 			return;
 		}
 		if (res == VR_NONE)
@@ -1087,22 +1166,33 @@ static void vl_ins(vl *L, uint32_t b, uint32_t i, uint8_t res)
 
 		if (g != VIR_NOBLK && L->o->edge[g].n) {
 			vl_emoves(L, g);
-			jump(e, L->lbl[in->a]);
+			jump(e, L->lbl[vl_chase(L, in->a)]);
 		} else {
 			jump(e, L->lbl[vl_chase(L, in->a)]);
 		}
 		return;
 	}
-	case VO_BRIF: {
-		int cc = vl_cond(L, in);
-		bool tnext = vl_plain(L, b, 0) && vl_chase(L, in->b) == b + 1;
-		uint32_t tl = vl_succ(L, b, 0, in->b), el = vl_succ(L, b, 1, in->c);
+	case VO_BRIF: {	/* the jump that remains goes to what follows: the next block or the first edge's moves */
+		vlcc cc = vl_brcond(L, in);
+		bool tp = vl_plain(L, b, 0), fp = vl_plain(L, b, 1);
 
-		if (tnext) {
-			bcond(e, cc ^ 1, el);
-			jump(e, tl);
+		if (tp && fp) {
+			uint32_t t = vl_chase(L, in->b), el = L->lbl[vl_chase(L, in->c)];
+
+			if (t == vl_next(L, b)) {
+				vl_bc(e, cc, true, el);
+				jump(e, L->lbl[t]);
+			} else {
+				vl_bc(e, cc, false, L->lbl[t]);
+				jump(e, el);
+			}
+		} else if (fp) {
+			vl_bc(e, cc, true, L->lbl[vl_chase(L, in->c)]);
+			jump(e, vl_succ(L, b, 0, in->b));
 		} else {
-			bcond(e, cc, tl);
+			uint32_t el = vl_succ(L, b, 1, in->c), tl = vl_succ(L, b, 0, in->b);
+
+			vl_bc(e, cc, false, tl);
 			jump(e, el);
 		}
 		return;
@@ -1138,8 +1228,10 @@ static void vl_body(vl *L)
 		const vir_blk *k = &f->blk[b];
 		uint32_t pos = o->boff[b], ei = o->boff[f->nblk + 1 + b], eend = o->boff[f->nblk + 2 + b];
 
+		if (vl_skip(L, b))
+			continue;
 		deflabel_forced(e, L->lbl[b]);
-		L->fcc = -1;
+		L->fcc = -1, L->fzr = -1;
 		L->pval = 0;
 		L->ntr = 0;
 		for (uint32_t q = 0; q < k->nparam; q++) {
@@ -1229,7 +1321,11 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 	VLT.lbl = vl_grow(VLT.lbl, &VLT.cl, f->nblk + 1, sizeof(uint32_t));
 	VLT.uses = vl_grow(VLT.uses, &VLT.cu, f->nins + 1, 1);
 	VLT.lo32 = vl_grow(VLT.lo32, &VLT.c32, f->nins + 1, 1);
+	VLT.chs = vl_grow(VLT.chs, &VLT.cch, f->nblk + 1, sizeof(uint32_t));
+	VLT.path = vl_grow(VLT.path, &VLT.cpa, f->nblk + 1, sizeof(uint32_t));
 	L.soff = VLT.soff, L.spoff = VLT.spoff, L.lbl = VLT.lbl, L.uses = VLT.uses, L.lo32 = VLT.lo32;
+	L.chs = VLT.chs;
+	vl_chases(&L, VLT.path);
 	vir_uses(f, L.uses);
 	memset(L.lo32, 1, f->nins);
 	for (uint32_t b = 0; b < f->nblk; b++)
