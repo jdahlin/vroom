@@ -98,6 +98,7 @@
 #define wk_ptradd_vla WK_NAME(wk_ptradd_vla)
 #define wk_put WK_NAME(wk_put)
 #define wk_putmem WK_NAME(wk_putmem)
+#define wk_quad WK_NAME(wk_quad)
 #define wk_reg WK_NAME(wk_reg)
 #define wk_reload WK_NAME(wk_reload)
 #define wk_rhs WK_NAME(wk_rhs)

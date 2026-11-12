@@ -96,6 +96,7 @@
 #undef wk_ptradd_vla
 #undef wk_put
 #undef wk_putmem
+#undef wk_quad
 #undef wk_reg
 #undef wk_reload
 #undef wk_rhs

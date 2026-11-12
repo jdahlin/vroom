@@ -42,6 +42,12 @@ VPRIV bool wk_mem(ecx *e, qty t)
 	return em_bigint(c, t) || is_record(c, t) || is_array(c, t) || is_vec(c, t) || KIND(c, t) == TY_FLOAT128 || (KIND(c, t) == TY_LDOUBLE && LO(ldmem)()) || (wk_wide(c, t) && LO(i128mem)());
 }
 
+/* t is IEEE binary128: __float128, or long double off x86-64 (arm64 Linux; x86-64's is x87) */
+static bool wk_quad(cc *c, qty t)
+{
+	return KIND(c, t) == TY_FLOAT128 || (KIND(c, t) == TY_LDOUBLE && !X86(c) && wk_size(c, t) == 16);
+}
+
 /* a float value's register (float/double: the CPU's float registers) */
 static bool wk_freg(ecx *e, qty t) { return is_flt(e->c, t) && !wk_mem(e, t); }
 
@@ -2529,7 +2535,7 @@ static val wk_fpattern(ecx *e, qty t, int64_t sl, int *eb)
 
 		*eb = 15;
 		LO(load)(e, m, &l, 8, false);
-		if (k == TY_LDOUBLE) {
+		if (k == TY_LDOUBLE && !wk_quad(c, t)) {	/* x87 */
 			LO(load)(e, r, &h, 2, false);
 			s = wk_arith(e, T_LESSLESS, u, wk_vreg(m), vconst(1));
 			s = LO(cmp)(e, T_EXCLAIMEQ, 8, false, s, vconst(0));
@@ -2622,7 +2628,7 @@ static val wk_fpclass(ecx *e, uint32_t n)
 		int k = KIND(c, t), r;
 		val inf = wk_fptest(e, BI_ISINF, t, sl), sg;
 
-		l.off += k == TY_FLOAT16 || k == TY_BFLOAT16 ? 1 : k == TY_FLOAT ? 3 : k == TY_DOUBLE ? 7 : k == TY_LDOUBLE ? 9 : 15;
+		l.off += k == TY_FLOAT16 || k == TY_BFLOAT16 ? 1 : k == TY_FLOAT ? 3 : k == TY_DOUBLE ? 7 : wk_quad(c, t) ? 15 : 9;
 		r = LO(treg)(e);
 		LO(load)(e, r, &l, 1, false);
 		sg = LO(bin)(e, T_GREATERGREATER, 4, false, wk_vreg(r), vconst(7));
@@ -2645,7 +2651,7 @@ static val wk_fpconst(ecx *e, qty t, double d, u128 q)
 		val v;
 		int r;
 
-		if (KIND(c, t) == TY_FLOAT128) {
+		if (wk_quad(c, t)) {
 			lo = (uint64_t)q, hi = (uint64_t)(q >> 64);
 		} else {
 			q_to_x87(q, b);
@@ -3067,12 +3073,12 @@ static val wk_builtin(ecx *e, uint32_t n)
 		return wk_fpclass(e, n);
 	case BI_ISNAN: case BI_ISINF: case BI_ISFINITE: case BI_ISNORMAL: case BI_ISSIGNALING: {
 		qty at = N(arg[0])->ty;
-		if (KIND(c, at) == TY_FLOAT128 && x->aux != BI_ISSIGNALING)
+		if (wk_quad(c, at) && x->aux != BI_ISSIGNALING)
 			return wk_fpclass(e, n);
 		val v = wk_gen(e, arg[0]);
 		int sz = wk_size(c, at);
 
-		if (KIND(c, at) == TY_FLOAT128) {
+		if (wk_quad(c, at)) {
 			/* Signaling quad NaN: all-one exponent, nonzero fraction,
 			   and a clear quiet bit. Preserve the low word as sticky. */
 			lval l = wk_fromval(e, v, at), h = l;
@@ -3153,11 +3159,11 @@ static val wk_builtin(ecx *e, uint32_t n)
 		val v = wk_gen(e, arg[0]);
 
 		if (wk_mem(e, at)) {
-			/* x87: the sign is bit 15 of the top word */
+			/* the sign is bit 15 of the top word (x87: of its 10 bytes) */
 			lval l = wk_fromval(e, v, at);
 			int r = LO(treg)(e);
 
-			l.off += KIND(c, at) == TY_FLOAT128 ? 14 : 8;
+			l.off += wk_quad(c, at) ? 14 : 8;
 			LO(load)(e, r, &l, 2, false);
 			wk_lfree(e, &l);
 			return LO(bin)(e, T_GREATERGREATER, 4, false, (val){ .k = V_REG, .r = (uint8_t)r }, vconst(15));
