@@ -65,6 +65,7 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
             if run([str(exe)]).stdout != expected:
                 raise SystemExit('output differs from clang')
     for filename, required_more, packed in (
+        ('vir_x86_index.c', {'load8', 'load4', 'load2', 'load1', 'store8', 'store4'}, {}),
         ('vir_vector_stride.c', {'stride', 'wide', 'reverse', 'ordered', 'residue', 'gather', 'carry', 'chain', 'maxval', 'maxindex', 'lastnegative'}, {'stride': 'mulps', 'reverse': 'addpd', 'ordered': 'mulps', 'residue': 'addps', 'gather': 'mulps', 'carry': 'mulps'}),
         ('vir_x86_dispatch.c', {'dense', 'signed_range', 'high', 'shigh', 'atom'}, {}),
         ('vir_x86_calls.c', {'ints', 'floats', 'caller', 'indirect', 'variadic_caller'}, {}),
@@ -86,6 +87,11 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
                 env=dict(testenv, VCC_THREADS='6'))
             if threaded.read_bytes() != asm.read_bytes():
                 raise SystemExit(f'{filename}: assembly differs with six emitter threads')
+            if filename == 'vir_x86_index.c':
+                for name, scale in [('load8', 8), ('load4', 4), ('load2', 2), ('load1', 1), ('store8', 8), ('store4', 4)]:
+                    body = asm.read_text().split(name + ':\n', 1)[1].split('.Lfunc_end', 1)[0]
+                    if not re.search(r'\(%\w+,%\w+,' + str(scale) + r'\)', body):
+                        raise SystemExit(f'{name}: missing indexed memory operand with scale {scale}')
             if vec != '0':
                 if filename == 'vir_vector_stride.c':
                     loops = set(re.findall(r'vec: (\w+): loop b\d+: vectorized', p.stderr))

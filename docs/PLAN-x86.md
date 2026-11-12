@@ -1004,3 +1004,8 @@ instruktioner 2,560x → 1,626x, verifieringshash oförändrad. Atomics, switch
 med relativa tabeller, mulhi, immediates, compare+branch och enkla vikta
 adresser; detaljer, kända testundantag och reproduktion i PLAN-vir.md V4.
 Målet högst 10 % långsammare är öppet; indexerade minnesoperander står näst.
+
+Indexerade minnesoperander är nu sänkta med skala 1/2/4/8, utan separat
+ptradd/skift när engångsvärden och allokator-edits tillåter det. SQLite:
+1,626x → 1,603x instruktioner/clang, CPU oförändrad inom kortprovets brus
+(1,380x → 1,378x). Fortsatt öppet 10 %-mål; V4 i PLAN-vir.md har provdata.

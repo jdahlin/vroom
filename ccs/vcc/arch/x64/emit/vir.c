@@ -14,7 +14,7 @@ typedef struct vx {
 	int64_t *slot, *spill;
 	uint32_t *label, *edgelab, ret, cmp, cmpblock, setrec;
 	uint8_t *uses;
-	uint32_t memv; int membase; int64_t memoff;
+	uint32_t memv, scaledv; int membase, memindex, scaleindex; uint8_t memsh, scalesh; bool indexed; int64_t memoff;
 } vx;
 
 static void *vx_grow(void *p, uint32_t *cap, uint32_t n, size_t size)
@@ -292,6 +292,25 @@ static void vx_switch(vx *L, uint32_t block, const vir_ins *in, int selector)
 	free(labels);
 }
 
+/* Edits are sorted by instruction. A folded index must survive the intervening
+ * reloads/rematerializations; memory consumers require no intervening edit. */
+static bool vx_foldedits(vx *L,uint32_t b,uint32_t pos,int keep)
+{
+	uint32_t lo=L->o->boff[L->f->nblk+1+b],hi=L->o->boff[L->f->nblk+2+b],end=hi;
+	while(lo<hi) {uint32_t m=lo+(hi-lo)/2;if(L->o->edit[m].pos<pos)lo=m+1;else hi=m;}
+	for(uint32_t k=lo;k<end && L->o->edit[k].pos==pos;k++) {
+		const vir_edit *edit=&L->o->edit[k];
+		if(keep==XNOREG || (edit->kind!=VE_REMAT && edit->kind!=VE_RELOAD) || vx_reg(edit->dst)==keep)return false;
+	}
+	return true;
+}
+static bool vx_memnext(vx *L,uint32_t b,uint32_t v)
+{
+	return v+1<L->f->blk[b].first+L->f->blk[b].n && L->uses[v]==1 && L->o->slot[v]==VIR_NOBLK &&
+		L->f->ins[v+1].a==v && (L->f->ins[v+1].op==VO_LOAD || L->f->ins[v+1].op==VO_STORE) &&
+		vx_foldedits(L,b,v+1,XNOREG);
+}
+
 static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, uint8_t res)
 {
 	ecx *e = L->e;
@@ -312,13 +331,22 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 			a-XMM0, c-XMM0, c-XMM0, a-XMM0, d-XMM0, d-XMM0, d-XMM0, d-XMM0, d-XMM0);
 		vx_raw(L, text); return;
 	}
-	if (i->op==VO_PTRADD && p[1]==VR_NONE && L->uses[v]==1 && L->o->slot[v]==VIR_NOBLK &&
-	    v+1<L->f->blk[b].first+L->f->blk[b].n && L->f->ins[v+1].a==v &&
-	    (L->f->ins[v+1].op==VO_LOAD || L->f->ins[v+1].op==VO_STORE)) {
-		bool safe=true;
-		for(uint32_t k=L->o->boff[L->f->nblk+1+b];k<L->o->boff[L->f->nblk+2+b];k++)
-			if(L->o->edit[k].pos==v+1) {safe=false;break;}
-		if(safe) {L->memv=v;L->membase=a;vx_imm(L->f,i->b,&L->memoff);return;}
+	if ((i->op==VO_MUL || i->op==VO_SHL) && i->ty==VT_I64 && L->uses[v]==1 && L->o->slot[v]==VIR_NOBLK &&
+	    v+2<L->f->blk[b].first+L->f->blk[b].n && L->f->ins[v+1].op==VO_PTRADD && L->f->ins[v+1].b==v &&
+	    vx_memnext(L,b,v+1) && vx_foldedits(L,b,v+1,a)) {
+		int64_t k;
+		if(vx_imm(L->f,i->b,&k) && (i->op==VO_SHL ? k>=0 && k<=3 : k==1 || k==2 || k==4 || k==8)) {
+			L->scaledv=v;L->scaleindex=a;
+			L->scalesh=i->op==VO_SHL?k:k==8?3:k==4?2:k==2?1:0;
+			return;
+		}
+	}
+	if (i->op==VO_PTRADD && vx_memnext(L,b,v)) {
+		L->memv=v;L->membase=a;L->memoff=0;
+		L->indexed=!vx_imm(L->f,i->b,&L->memoff);
+		L->memindex=L->scaledv==i->b?L->scaleindex:c;
+		L->memsh=L->scaledv==i->b?L->scalesh:0;
+		return;
 	}
 	if (alu[i->op]) {
 		if (n>1 && p[1]==VR_NONE && !vir_rclass(i->ty)) {
@@ -396,11 +424,15 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 	}
 	case VO_ALOAD: case VO_LOAD: case VO_STORE: {
 		lval at = { .k = L_REG, .r = a };
-		if(L->memv==i->a) {at.r=L->membase;at.off=L->memoff;L->memv=0;}
+		bool folded=L->memv==i->a;
+		if(folded) {at.r=L->membase;at.off=L->memoff;L->memv=0;}
 		bool load = i->op != VO_STORE;
 		int ty = load ? i->ty : L->f->ins[i->b].ty;
-		x64_mem(e, load ? X_LD : X_ST, vir_isvec(ty) ? 16 : 1 << VIF_W(i->fl),
-			load ? d : c, &at, i->fl & VIF_MS);
+		int width=vir_isvec(ty)?16:1<<VIF_W(i->fl);
+		if(folded && L->indexed) {
+			rec *r=x64_op3(e,load?X_LDX:X_STX,width,load?d:XNOREG,at.r,load?XNOREG:c);
+			r->r[3]=L->memindex;r->sh=L->memsh;r->cond=!!(i->fl & VIF_MS);r->off=at.off;
+		} else x64_mem(e,load?X_LD:X_ST,width,load?d:c,&at,i->fl & VIF_MS);
 		return;
 	}
 	case VO_NEG: case VO_NOT:

@@ -273,6 +273,16 @@ atomics och signerad/osignerad mulhi; både -S och egna objekt körs.
 ASan/UBSan i den riktade riggen är grön. TSVC behåller 151/151 och 82
 verkliga vektorloopar; nu går alla 158 byggda funktioner genom VIR.
 
+Nästa skiva viker ptradd och intilliggande i64-skala till x86:s indexerade
+minnesoperand (1/2/4/8). Enbart engångsvärden utan spill viks; allokatorns
+edits får inte skriva över det bevarade indexet. Effekter och kopiepass känner
+bas och index. Riktade körprov täcker negativa index, signerade små laster
+och volatila lagringar, med krav på faktisk indexerad maskinkod.
+Fem korta alternerade main-prov: föregående CPU 393,79 ms (1,380x),
+indexerad 393,38 ms (1,378x); instruktioner 1,626x → 1,603x. Ingen säker
+CPU-vinst; 10 %-målet är öppet. GCC/TCC/egna fortsatt gröna, samma fem
+inline-fel. Mätdata: work/vir-x86-perf/indexed/recheck/summary.json.
+
 
 ### V2/V3 x86-64 (2026-11-12): TSVC och fem verkliga korpusar
 

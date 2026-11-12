@@ -33,7 +33,7 @@ def build(a):
     flags = ['--target=x86_64-linux-gnu', '-O2', '-DSQLITE_OMIT_LOAD_EXTENSION',
              '-DSQLITE_THREADSAFE=0', '-I' + str(a.source), '-isystem', resource + '/include',
              '-isystem', '/usr/include/x86_64-linux-gnu', '-isystem', '/usr/include']
-    for variant in ('clang', 'vir'):
+    for variant in a.variants:
         objects = []
         for source in ('sqlite3', 'speedtest1'):
             stem = a.out / (variant + '-' + source)
@@ -106,6 +106,7 @@ def run(a):
 ap = argparse.ArgumentParser(description=__doc__)
 sub = ap.add_subparsers(dest='command', required=True)
 b = sub.add_parser('build')
+b.add_argument('--variants', nargs='+', choices=('clang', 'vir'), default=['clang', 'vir'])
 b.add_argument('--source', type=lambda p: Path(p).resolve(), required=True)
 b.add_argument('--out', type=lambda p: Path(p).resolve(), default=ROOT / 'work/sqlite-x86-perf')
 b.add_argument('--bin-dir', type=lambda p: Path(p).resolve(), default=Path(BUILD).resolve())
