@@ -299,6 +299,12 @@ static bool vv_classify(vvs *S, uint32_t q)
 		else
 			r.kind = in.ty == S->fty && vv_lane(o[0]) && (no < 2 || vv_lane(o[1])) ? VK_VEC : VK_BAD;
 		break;
+	case VO_FMA:
+		if (allinv)
+			vv_opaque(S, q, &r);
+		else
+			r.kind = in.ty == S->fty && vv_lane(o[0]) && vv_lane(o[1]) && vv_lane(o[2]) ? VK_VEC : VK_BAD;
+		break;
 	case VO_S2F:
 		if (allinv)
 			vv_opaque(S, q, &r);
@@ -633,6 +639,14 @@ static uint32_t vv_vec(vvs *S, uint32_t v)
 				return 0;
 			r = vv_ins(S, S->VB, in.op, vt, 0, a, b, 0);
 			break;
+		case VO_FMA: {
+			uint32_t c;
+
+			if (!(a = vv_vec(S, in.a)) || !(b = vv_vec(S, in.b)) || !(c = vv_vec(S, in.c)))
+				return 0;
+			r = vv_ins(S, S->VB, VO_FMA, vt, in.fl, a, b, c);
+			break;
+		}
 		case VO_NEG: case VO_NOT: case VO_FNEG: case VO_FABS: case VO_FSQRT:
 			if (!(a = vv_vec(S, in.a)))
 				return 0;
@@ -1149,6 +1163,7 @@ static void vv_pin(vvs *S, uint32_t pre)
 			case VO_LOAD: case VO_PTRADD: m = 1; break;
 			case VO_STORE: m = (in.fl & VIF_VOL) ? 0 : 3; break;
 			case VO_FADD: case VO_FSUB: case VO_FMUL: case VO_FDIV: case VO_FCMP: m = 3; break;
+			case VO_FMA: m = 7; break;
 			case VO_SELECT: m = V->p[q].in.ty == VT_F32 || V->p[q].in.ty == VT_F64 ? 6 : 0; break;
 			case VO_ICMP: m = 2; break;
 			default: break;

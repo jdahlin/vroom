@@ -61,6 +61,7 @@ typedef struct vwst {
 	uint32_t *order; uint32_t norder, corder;	/* blocks in emission order */
 	uint32_t *bmap; uint32_t cbmap;		/* scratch */
 	uint64_t live[3], flive;		/* names in use */
+	uint32_t fprod[64];			/* per float name: the product (or its negation) the expression in hand just made, 0 none */
 	uint32_t cur;				/* the block being built */
 	bool sealing;
 	uint32_t rty;				/* the result's type, VT_VOID none */
