@@ -520,6 +520,14 @@ profilen: väljaren i en `switch` kopieras till x17 före jämförelsen
 (VdbeExec:s heta dispatch, vdbeRecordCompareInt, SerialGet) och `mov w0, w0`
 före en `ret` (sänkning, lämnat till vir-lowering); en rotation av fyra
 loopparametrar på en bakkant i VdbeExec; resten är sampel efter hopp.
+- **Lever över ett anrop, efter levande mängderna:** `XCALL` var ett test i
+  instruktionsordning (ett anrop mellan definitionen och sista användningen),
+  så argumenten till anrop i skilda grenar (vdbeRecordCompareInt:s v1/v2)
+  räknades som levande över anrop och flyttades till x19/x20.  Nu märks vid
+  varje anrop värdena i W (levande efter det); värden som lever runt en loop
+  (utanför W bortom bakkanten) och linjärt läge behåller ordningstestet.
+  sqlite: −1074 instruktioner, −474 `mov`, 17 ramar färre, spill 3787 →
+  3727; parat −1,5 % instruktioner, −0,4 % cykler.
 
 ### Syskonanrop, fritt argumentbyte och va_arg (2026-11-12)
 

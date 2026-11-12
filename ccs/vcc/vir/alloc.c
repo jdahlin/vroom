@@ -21,7 +21,7 @@
 #define NOPOS	0xffffffffu
 #define FAR	((uint64_t)1 << 40)
 
-enum { XCALL = 1, XLOOP = 2, NEEDSLOT = 4, DEAD = 8, CALLFIRST = 16 };	/* CALLFIRST: a block parameter whose block calls before its first use */
+enum { XCALL = 1, XLOOP = 2, NEEDSLOT = 4, DEAD = 8, CALLFIRST = 16, PCALL = 32, PLOOP = 64 };	/* PCALL/PLOOP: live after a call (in a loop), from the live sets */	/* CALLFIRST: a block parameter whose block calls before its first use */
 #define NOWEB	0xffffffffu
 #define WEBMAX	4096	/* a web with more members is not shared (the loop check walks them) */
 
@@ -406,6 +406,16 @@ static bool defdom(A *a, uint32_t v, uint32_t b)
 	return d == VIR_NOBLK || f->blk[d].idom == VIR_NOBLK || f->blk[b].idom == VIR_NOBLK || vir_dominates(f, d, b);
 }
 
+/* v (whose live range ends at e) lives across a call: after one, by the live sets; a value
+ * live round a loop (not in the live sets past its back edge) or any value in linear mode
+ * by the order of instructions (a call before e) */
+static uint8_t xcall(const A *a, uint32_t v, uint32_t lastcall, bool callloop, uint32_t e)
+{
+	if (!a->linear && ax.rhead[v] == NOWEB)
+		return (ax.vfl[v] & PCALL ? XCALL : 0) | (ax.vfl[v] & PLOOP ? XLOOP : 0);
+	return lastcall && lastcall < e ? XCALL | (callloop ? XLOOP : 0) : 0;
+}
+
 static bool sweep5(A *a)
 {
 	vir_fn *f = a->f;
@@ -492,8 +502,7 @@ static bool sweep5(A *a)
 					wleave(a, i, wn);
 				}
 				ax.endp[i] = e;
-				if (lastcall && lastcall < e)
-					ax.vfl[i] |= XCALL | (callloop ? XLOOP : 0);
+				ax.vfl[i] |= xcall(a, i, lastcall, callloop, e);
 				if (!ax.nu[i] && !ax.lend[i])
 					ax.vfl[i] |= DEAD;
 				if ((fx.fl & VFX_TIED) && ax.hint[i] && in->a && !is_const(f, in->a) && !ax.hint[in->a])
@@ -504,6 +513,9 @@ static bool sweep5(A *a)
 			if (in->op == VO_CALL && !cold) {
 				lastcall = i;
 				callloop = li != VIR_NOBLK;
+				if (!a->linear)	/* the values live after it (W, before its operands join) */
+					for (uint32_t j = 0; j < wn; j++)
+						ax.vfl[ax.wd[j]] |= PCALL | (callloop ? PLOOP : 0);
 			}
 			n = operands(a, i);
 			if (a->failed)
@@ -556,8 +568,7 @@ static bool sweep5(A *a)
 				wleave(a, q, wn);
 			}
 			ax.endp[q] = e;
-			if (lastcall && lastcall < e)
-				ax.vfl[q] |= XCALL | (callloop ? XLOOP : 0);
+			ax.vfl[q] |= xcall(a, q, lastcall, callloop, e);
 			if (!ax.nu[q] && !ax.lend[q])
 				ax.vfl[q] |= DEAD;
 			else if (lastcall && lastcall <= blk_last(f, b) && (!ax.nu[q] || ax.nu[q] > lastcall))
