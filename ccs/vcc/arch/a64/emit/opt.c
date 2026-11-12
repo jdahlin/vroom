@@ -1315,6 +1315,62 @@ static bool fold1(ecx *e, uint32_t k)
 }
 
 /*
+ * A constant the block loaded for one reader, held by the reader instead: zr for a
+ * stored zero, an add/sub/compare immediate (12 bits, maybe shifted, either sign:
+ * the encoder flips the operation), a logical immediate.
+ */
+static bool fconst(ecx *e, uint32_t k)
+{
+	ins *in = e->in, *i = &in[k];
+	int32_t d;
+
+	switch (i->op) {
+	case I_ST: case I_STX: case I_STP:
+		for (int q = 0; q < 2; q++) {
+			int r = q ? i->ra : i->rd;
+
+			if ((q && i->op != I_STP) || r >= 31 || r == i->rn || (i->op == I_STX && r == i->rm) ||
+			    (i->op == I_STP && i->rd == i->ra) || (d = fdefof(e, k, r)) < 0 || in[d].op != I_MOVI ||
+			    ((uint64_t)in[d].imm & (i->op == I_STP || i->sz == 3 ? ~0ull : ((1ull << (8 << i->sz)) - 1))))
+				continue;
+			if (q)
+				i->ra = ZR;
+			else
+				i->rd = ZR;
+			fdone(e, (uint32_t)d, k);
+			return true;
+		}
+		return false;
+	case I_ADD: case I_SUB: case I_ADDS: case I_SUBS: case I_AND: case I_ORR: case I_EOR: case I_ANDS: {
+		bool as = i->op <= I_SUBS, comm = i->op != I_SUB && i->op != I_SUBS;
+
+		if (i->sh || i->cond || i->rn >= 31 || i->rn == i->rm || (i->rd == ZR && (i->op == I_ADD || i->op == I_SUB ||
+		    i->op == I_AND || i->op == I_ORR || i->op == I_EOR)) || i->rd >= 32)
+			return false;
+		for (int side = 0; side < 2; side++) {
+			int r = side ? i->rn : i->rm, a = side ? i->rm : i->rn;
+
+			if ((side && !comm) || r >= 31 || a >= 31 || (d = fdefof(e, k, r)) < 0 || in[d].op != I_MOVI)
+				continue;
+			int64_t v = i->sz ? in[d].imm : (int64_t)(int32_t)in[d].imm, u = v < 0 ? -v : v;
+			static const uint8_t to[] = { [I_ADD] = I_ADDI, [I_SUB] = I_SUBI, [I_ADDS] = I_ADDSI, [I_SUBS] = I_SUBSI,
+						      [I_AND] = I_ANDI, [I_ORR] = I_ORRI, [I_EOR] = I_EORI, [I_ANDS] = I_ANDSI };
+
+			if (as ? v == INT64_MIN || !(u < 4096 || (!(u & 0xfff) && u < (1 << 24))) || (i->sz == 0 && u > 0x7fffffff)
+			       : !logimm_ok(i->sz ? (uint64_t)v : (uint32_t)v, i->sz))
+				continue;
+			*i = (ins){ .op = to[i->op], .sz = i->sz, .rd = i->rd, .rn = (uint8_t)a, .imm = as ? v : (i->sz ? v : (int64_t)(uint32_t)v) };
+			fdone(e, (uint32_t)d, k);
+			return true;
+		}
+		return false;
+	}
+	default:
+		return false;
+	}
+}
+
+/*
  * A product by a constant the block just loaded (once, for it), when no add took it
  * (madd): c = 2^n + 1 one add; (2^n + 1) << m and 2^n - 1 two records, the first in
  * the constant's place with its register, as LLVM.
@@ -1541,8 +1597,11 @@ static void fold(ecx *e)
 		if (e->in[k].op != DELETED)
 			fbswap(e, k);
 	for (uint32_t k = 0; k < e->nin; k++)
-		if (e->in[k].op != DELETED)
+		if (e->in[k].op != DELETED) {
 			fmulk(e, k);
+			if (e->in[k].op != DELETED)
+				fconst(e, k);
+		}
 }
 
 /* ---------------- repeated compares ---------------- */
