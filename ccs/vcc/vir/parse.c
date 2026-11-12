@@ -1836,7 +1836,8 @@ static void finish_function(ps *p, const tok *close)
 	}
 	if (vir_failed() || nconst + p->B.n > VIR_MAX_INS)
 		perr_at(p, close->line, close->col, "function too large");
-	memcpy(&f->ins[nconst], p->B.v, (size_t)p->B.n * sizeof(vir_ins));
+	if (p->B.n)
+		memcpy(&f->ins[nconst], p->B.v, (size_t)p->B.n * sizeof(vir_ins));
 	f->nins = nconst + p->B.n;
 	f->nconst = nconst;
 	for (uint32_t i = 0; i < nb; i++) {

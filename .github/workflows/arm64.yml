@@ -1,7 +1,9 @@
 # arm64 (aarch64-linux-gnu) target: vcc built natively on an arm64 Linux
 # runner, the C suites (gcc torture, tcc tests2, ccs/vcc/tests/vcc) run under
 # qemu-system-aarch64 against clang's build, plus the fast harnesses.  ASan
-# and TSan builds are jobs of their own, alongside.  No kernel, no PostgreSQL.
+# and TSan builds are jobs of their own, alongside; TSan's runs on an x86-64
+# runner for now (the same arm64 target, vcc as an x86-64 program).  No
+# kernel, no PostgreSQL.
 # ci/premerge.sh holds the commands; run it locally in env/linux/run.sh.
 name: arm64
 on:
@@ -12,13 +14,16 @@ permissions:
 jobs:
   test:
     name: ${{ matrix.job }}
-    runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.os }}
     container: debian:trixie
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        job: [arm64, asan, tsan]
+        include:
+          - { job: arm64, os: ubuntu-24.04-arm }
+          - { job: asan,  os: ubuntu-24.04-arm }
+          - { job: tsan,  os: ubuntu-24.04 }
     steps:
       - uses: actions/checkout@v4
       - run: ci/setup-debian.sh
@@ -27,7 +32,8 @@ jobs:
       # commit's vcc: clang's reference results (ctests/ref, dwarfref) and
       # vcc objects byte-identical to ones that passed (ctests/pass).  They
       # check their own keys (source, flags, runtime); toolfp covers the tool
-      # versions.  A PR restores from its own earlier runs, else from main's.
+      # versions, runner.arch the host (ccache holds host objects).  A PR
+      # restores from its own earlier runs, else from main's.
       - uses: actions/cache@v4
         with:
           path: |
@@ -35,8 +41,8 @@ jobs:
             build/linux/ccs/ctests/ref
             build/linux/ccs/ctests/pass
             build/linux/ccs/dwarfref
-          key: ci-${{ matrix.job }}-${{ steps.setup.outputs.toolfp }}-${{ github.sha }}
-          restore-keys: ci-${{ matrix.job }}-${{ steps.setup.outputs.toolfp }}-
+          key: ci-${{ matrix.job }}-${{ runner.arch }}-${{ steps.setup.outputs.toolfp }}-${{ github.sha }}
+          restore-keys: ci-${{ matrix.job }}-${{ runner.arch }}-${{ steps.setup.outputs.toolfp }}-
       - run: ci/premerge.sh ${{ matrix.job }}
       - uses: actions/upload-artifact@v4
         if: failure()

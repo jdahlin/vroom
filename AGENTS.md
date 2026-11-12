@@ -172,6 +172,7 @@ bench/vlink-opts.py                 # vlink options vs ld.lld: errors and loaded
 bench/vcc-pic.py                    # GOT and TLS relocations per -fno-pic/-fPIE/-fPIC vs clang (<1 s)
 bench/vcc-volatile.py               # volatile loads/stores kept one for one, direct emitter and VIR (tests/volatile, <1 s)
 bench/vir-test.py -j 6              # VIR: parser/printer round trip, verifier rules, canon, dominators (ccs/vcc/tests/vir, ~1 s)
+bench/vir-exposure.py               # VIR: generated long, cyclic and multi-slot exposure checks (<1 s)
 bench/vir-test.py --mutate 3000 --bin-dir build/ccs-asan   # random mutants of those units: virtest never crashes (~1 min)
 bench/vcc-ctests.py -j 6 --suite vcc # our own regression tests (ccs/vcc/tests/vcc), ~1 s
 bench/vcc-ctests.py -j 6 --suite inline   # gcc/llvm inlining and IPA run tests (ccs/vcc/tests/inline); VCC_VIR=bl for VIR's inliner
@@ -223,6 +224,7 @@ bench/vcc-x86.py -j 6               # the C suites for x86-64 on an x86-64 host:
 bench/vcc-wasm.py -j 6 --objcmp     # ... and vpp -c's object byte-identical to clang's for the same .s
 bench/vcc-wasm.py -j 6 --obj --vlink  # ... vcc's side through vpp -c and vlink as emcc's wasm-ld (~9 min)
 bench/vcc-same.py --base DIR -j 6    # test-suite outputs byte-identical with DIR/vpp (vbench.py mkbase REV), ~80 s
+python3 bench/virgen-test.py --bin-dir build/linux/ccs  # generated VIR integer/control-flow units verify and round-trip
 bench/vas-enc.py $PWD/ccs/vcc/tests/vas   # vas encodings vs llvm-mc
 bench/vas-obj.py                    # vasm objects vs clang -c byte for byte (ccs/vcc/tests/vas-obj, <1 s)
 bench/vas-corpus.py -j 6 [-O2] [PAT] # clang -S of the test C files: clang -c vs vasm (~6 min for -O0 -O2)
@@ -257,7 +259,8 @@ vcc-sema.py runs are green (878/879: modpost.c lacks a generated header).
 ## CI and the premerge gate
 `.github/workflows/premerge.yml` runs one reusable workflow per target in
 parallel (`arm64.yml`: jobs arm64, asan, tsan; `wasm.yml`; x86-64 gets its
-own), each on GitHub's ubuntu-24.04-arm in a Debian 13 container
+own), each on GitHub's ubuntu-24.04-arm (tsan and wasm on x86-64's
+ubuntu-24.04 for now) in a Debian 13 container
 (`ci/setup-debian.sh`: clang 23 from apt.llvm.org, qemu, emsdk for wasm).
 The test set is `ci/premerge.sh JOB`: the vendored C suites under qemu and
 the fast harnesses, no kernel, PostgreSQL or anything needing `work/`.

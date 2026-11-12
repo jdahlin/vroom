@@ -745,3 +745,7 @@ fyrmålsprov, kostnader och begränsningar finns i PLAN-fas2.md. G5/G7 återstå
 
 Lokal värdeåteranvändning från PR #97 och #100 integreras på main; samlade
 fyrmålsprov och kompilatorkostnader finns i PLAN-fas2.md. G5/G7 återstår.
+
+VIR:s verifiering av slot-exponering har en säker linjär analys för långa
+grafer; test och kostnad redovisas i PLAN-vir.md. Ett separat parserfynd och
+VIR:s återstående V1–V7 samt G5/G7 återstår.

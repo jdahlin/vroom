@@ -1,6 +1,6 @@
 # WebAssembly (wasm64-unknown-emscripten) target: the same C suites through
 # vcc -S, linked by emcc and run under node against clang's build
-# (bench/vcc-wasm.py).  vcc itself runs on an arm64 Linux runner.
+# (bench/vcc-wasm.py).  vcc itself runs on an x86-64 Linux runner for now.
 name: wasm
 on:
   workflow_call:
@@ -9,7 +9,7 @@ permissions:
   contents: read
 jobs:
   wasm:
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-24.04
     container: debian:trixie
     timeout-minutes: 45
     steps:
@@ -26,8 +26,8 @@ jobs:
             /opt/emsdk/upstream/emscripten/cache
             build/linux/ccs/wasmtests/ref
             build/linux/ccs/wasmtests/pass
-          key: ci-wasm-${{ steps.setup.outputs.toolfp }}-${{ github.sha }}
-          restore-keys: ci-wasm-${{ steps.setup.outputs.toolfp }}-
+          key: ci-wasm-${{ runner.arch }}-${{ steps.setup.outputs.toolfp }}-${{ github.sha }}
+          restore-keys: ci-wasm-${{ runner.arch }}-${{ steps.setup.outputs.toolfp }}-
       - run: ci/premerge.sh wasm
       - uses: actions/upload-artifact@v4
         if: failure()

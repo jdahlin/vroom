@@ -198,6 +198,12 @@ fixpunkter utan budget (samma regel som `emit/flow/`).
 
 "VIR 1.0" är formatet och semantiken så som de ser ut när V7 passerar.
 
+V1 generator: `bench/virgen.py --seed=N --size=N` ger deterministiska
+heltalsprogram med initialiserade stackslotar och förgreningar. 101 fall,
+inklusive maxstorlek, verifieras och skrivs–läses–skrivs under ASan-CI.
+Detta är en första del: flyttal, anrop, fler kontrollflöden, `virrun` och
+ekvivalenstestning återstår. Genererade program använder inga externa anrop.
+
 ## Validering
 
 - Fram till V7 ligger VIR bakom `VCC_VIR=1`; varje commit lämnar
@@ -278,6 +284,11 @@ gjorda (SPEC-vir.md avsnitt 19, X1–X3); inget under `ccs/vcc/vir/`.
   instruktioner).  Båda byggena (unity och `VCC_UNITY=`) utan nya varningar.
 
 ### V1, första halvan (2026-11-11): format, textform och verifierare
+
+V1 parser: en tom blockkropp ger nu verifieringsfelet S3 utan att först
+anropa `memcpy` med en nullkälla och längd noll. Regressionsprov och hela
+VIR-sviten passerar under ASan/UBSan (119/119); mutationsprov med seed 42
+passerar 1 000/1 000. Övriga V1-grindar och VIR-stegen återstår.
 
 Klart: `ccs/vcc/vir/` (modul `vir_SRC`, egen unity-TU, länkad bara in i
 `virtest`; inget i `vpp`, `vccd` eller `emit/` ändrat).  `vir.h` (format,
@@ -680,3 +691,43 @@ cykler mot virpol, nu +9,9 %.  Samplingar per funktion (storlek 300) varierar
   mot dagens `-O2`, clang och gcc, räknarna i `VCC_VIR_STATS`, och samma
   TU-mängd genom clang med `-mllvm -regalloc=basic` för att se hur mycket
   allokerarens kvalitet alls är värd.
+
+### V1 verifier: säker och linjär slot-exponering
+
+Den tidigare analysen avbröt efter 1 000 helsvep och kunde då godkänna en
+felaktig `exposure`-deklaration. Ett giltigt dominatorordnat exempel med
+1 003 bakåtpekande blockargument lagrar en slotadress men godkändes utan
+`exposed`; fem länkar avvisades korrekt. Analysen går nu baklänges från
+exponerande användningar via `ptradd`, `select` och blockargument en gång
+för hela funktionen. Arbetet är linjärt i värden, operandanvändningar och
+slotar; en kontrollerad allokering håller temporära kanter och kö. Kan minnet
+eller indexen inte representeras misslyckas verifieringen, aldrig med ett
+obevistat godkännande. Funktioner utan `exposure` eller slotadresser bygger
+ingen sådan graf.
+
+56 genererade fall täcker långa exponerade och oexponerade kedjor, cykler,
+flera slotar och addender samt deterministiska grafer; den ursprungliga
+verifieraren misslyckar det långa regressionsfallet. Befintliga VIR-prov
+118/118 och de nya 56/56 passerar i unity, separatfilbygge och ASan/UBSan.
+Ytterligare 205 små grafer gav exakt samma verifierarresultat som basen.
+VIR-proven körs nu även av arm64- och ASan-premergejobben. Lokal full ASan-
+premerge passerar (en befintlig vccd-peer-kontroll saknar lösenordsfri sudo).
+
+Sju växelvisa `perf stat`-rundor för hela VIR-provkorpusen, inklusive Python-
+driver och 118 barnprocesser, gav +0,006 % user-instruktioner, +0,46 %
+user-cykler och +0,15 % task-clock; korta sampel på delad värd visar ingen
+säker allmän tidsförändring. På syntetiska oexponerade kedjor med 5, 64 och
+1 003 länkar minskade `virtest` user-instruktioner 1,6 %, 35,8 % och 90,4 %;
+med 5, 64 och 1 000 slotar minskade de 0,9 %, 28,3 % och 87,6 %. Dessa är
+hela verktygsprocesser och inte `-O2`-kompilering. Proveniens finns i
+`work/opt-profile/vir-exposure-backward/`. Ändringen länkas bara till virtest:
+32 av 34 gemensamma objekt är byteidentiska mot basen; `vir.o` ändras och
+`ppdriver.o` innehåller worktree-specifik include-sökväg. Åtta riktade
+standardutdata är identiska. `vbench.py check --quick` kunde inte slutföras
+här: workträdets `lex-files.txt` saknas.
+
+Separat tidigare fel på basen: en tom VIR-blockkropp ger UBSan i
+`parse.c:1839` (nollängds `memcpy` med nullkälla). Mutation seed 42 gav
+998/1000 utan sanitizerfel; båda träffarna har samma basfel. Minsta indata
+finns i `work/opt-pr-tmp/vir-empty-block-ubsan.vir`. Parserfelet ingår inte i
+exponeringsändringen; V1:s sanitizer-/fuzzgrind är därför fortsatt öppen.

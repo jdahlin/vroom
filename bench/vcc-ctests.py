@@ -18,6 +18,8 @@ Suites (ccs/vcc/tests/, see the README there):
          /* vcc-timeout: S */            vcc's compile must finish in S seconds
          /* vcc-ref-timeout: S */        clang reference limit (1..600; default 60)
                                          (default 60): a bound on compile time
+                                         (vcc-timeout times $VCC_TIMEOUT_SCALE,
+                                         for a sanitizer build)
          /* vcc-xfail: TODO item */      known vcc bug: a failure is counted as
                                          xfail, a pass as XPASS (an error: drop
                                          the marker in the commit that fixes it)
@@ -136,6 +138,8 @@ def dg_flags(src):
 INLINE_FLAGS = re.compile(r'-O\S*$|-[DU]\S+$|-std=\S+$|-w$|-W\S*$|-f(no-)?(inline|inline-functions|'
                           r'inline-small-functions|strict-aliasing|wrapv|builtin|gnu89-inline|common|'
                           r'unroll-loops|omit-frame-pointer|signed-char|unsigned-char)$')
+TMO_SCALE = int(os.environ.get('VCC_TIMEOUT_SCALE', '1'))
+
 
 def sh(cmd, timeout=60, **kw):
     try:
@@ -320,7 +324,7 @@ def one_(t):
         return t, 'skip', 'compiler-specific', INLINE_SKIP[name]
     flags = dg_flags(src) if suite == 'gcc' else [f for f in dg_flags(src) if INLINE_FLAGS.match(f)] if suite == 'inline' else exec_marks(src)[0] if suite == 'vcc' else []
     m = re.search(r'/\*\s*vcc-timeout:\s*(\d+)\s*\*/', src) if suite == 'vcc' else None
-    tmo = int(m.group(1)) if m else 60
+    tmo = int(m.group(1)) * TMO_SCALE if m else 60
     if name.startswith('76_dollars'):
         flags = ['-fdollars-in-identifiers']
     wd = f'{OUT}/w/{suite}/{name}'
