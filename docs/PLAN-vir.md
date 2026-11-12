@@ -282,6 +282,46 @@ den tidigare storlek-100-serien gav 1,143×. Ingen ny prestandavinst eller
 uppnådd grind hävdas. Underlag och assembly finns i
 `work/vir-x86-perf/{arm-compare,testi2,testaddr,framecopies,sti,sib2,sibshared,reload}`.
 
+
+**2026-11-13: dela optimeringsunderlaget mellan målen.** Historiken visar att
+flera generella delar ligger i ARM-sänkningen och därför riskerar att portas
+som en andra implementation. Första uttaget är nu `vir/facts.c`, utan beroende
+på parsern, emitteraren eller CPU-register:
+
+- `vir_low32`: ARM:s bakåtriktade fixpunkt för vilka användningar som bara
+  behöver de låga 32 bitarna, inklusive loopparametrar, select, anrop och
+  retur-ABI. ARM anropar den gemensamma implementationen.
+- `vir_mask32`: x86:s begränsade analys av möjliga ettbitar i ett i32-uttryck.
+  x86 använder den gemensamma funktionen i sina befintliga extensionsbevis.
+- `virtest --selftest` kontrollerar maskfakta och efterfrågan genom en loop
+  för både full och smal retur. `vir_low32.c` prövar loopar, select och smala/
+  fulla anropsargument på båda CPU:erna.
+
+Det är ett uttag av befintlig logik: ARM:s SQLite-assembly och x86:s
+SQLite-objekt är byteidentiska med före ändringen. Ett separat försök att
+använda low32-fakta för fler borttagna x86-extensions gav färre instruktioner
+men cirka 1 % sämre CPU-tid i upprepade korta speedtest1-prov; det aktiveras
+inte som del av uttaget.
+
+| Historik | Redan gemensamt / vad som bör delas härnäst |
+|---|---|
+| `ef98fd06`, PR126 | Allokatorns loop-entry-, argumentflytts- och callee-save-regler ligger redan i `vir/alloc.c`; ingen ny x86-port behövs. |
+| `6d7fc7f8`, `7d51e03c` | Inlining och dominanta återanvända laster ligger i den gemensamma byggaren; x86 använder dem redan. |
+| `f1bc6bc1`, `eaa9b8f8` | Rotations-/join-kopieringsplan och säkerhetsbevis bör bli gemensamma; även kopian av inträdestestet måste ingå, inte bara blockordningen. |
+| `25157280`, `5f05a106` | Beviset att ramen inte undkommer och att ett resultat bara vidarebefordras till retur är IR-gemensamt. ABI, registerflyttar och epilog/jump hör till målet. |
+| `0c2ec7ed` | Matchning av fältadresser, skala och extension kan ge en gemensam adressform. ARM:s tillåtna extend/scale och x86:s SIB-regler avgörs därefter per mål. |
+| `1795593f` | Save-point-analysen finns i allokatorn; målens val av instruktioner som behöver ram samt prolog/epilog-emission återstår per CPU. |
+
+Validerat: `vir-test` 130/130, nya analysprovet i `virtest --selftest`,
+fokuserad x86-körning via assembly och egen objektväg, ASan/UBSan samt
+filvis bygge. Det nya C-provet går på ARM64/QEMU; bytejämförelserna ovan
+kontrollerar båda målens SQLite-output. Ingen runtime-vinst hävdas för
+refaktoreringen.
+
+Nästa portar av rotation och syskonanrop ska därför börja med att flytta
+IR-bevis/planering till en gemensam modul, med målspecifika legalitets- och
+kostnadsbeslut. Ingen andra kopia av `vl_order`/`vl_sibling` i x86-filen.
+
 Efter rebase på main `06c688f4` finns PR126:s gemensamma allokatorregler
 med. Första x86-skivan: sekventiellt konsistenta atomiska laster/lagringar,
 heltals-mulhi och switch (täta relativa tabeller och glesa intervall) öppnar

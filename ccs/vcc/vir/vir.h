@@ -270,6 +270,10 @@ static inline bool vir_dominates(const vir_fn *f, uint32_t a, uint32_t b)	/* a d
 {
 	return f->blk[a].pre <= f->blk[b].pre && f->blk[b].pre <= f->blk[a].post;
 }
+/* low32 has nins bytes: nonzero if every use needs only the low 32 bits.
+ * ret32: the target ABI ignores the integer return value's high half. */
+void vir_low32(vir_fn *f, bool ret32, uint8_t *low32);
+uint32_t vir_mask32(const vir_fn *f, uint32_t v, unsigned depth); /* possible one bits; UINT32_MAX when unknown */
 void vir_uses(const vir_fn *f, uint8_t *cnt);	/* use count per value, saturating at 255; cnt has nins bytes */
 bool vir_canon(vir_fn *f);	/* 2.4; false (function unchanged) when it exceeds a limit or its graph is malformed */
 

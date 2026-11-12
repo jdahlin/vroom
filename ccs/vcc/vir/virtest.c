@@ -140,6 +140,41 @@ static int selftest(void)
 	CHECK(vir_dominates(&f, 0, 1) && vir_dominates(&f, 0, 2) && !vir_dominates(&f, 1, 2) && vir_dominates(&f, 1, 1));
 	vir_uses(&f, cnt);
 	CHECK(cnt[4] == 2 && cnt[5] == 1 && cnt[6] == 2 && cnt[7] == 1 && cnt[1] == 1 && cnt[2] == 1 && cnt[3] == 1);
+	/* Target-independent demand facts: a return's width must propagate through
+	 * a loop parameter and its back edge. Constants/shift masks have no ABI. */
+	vir_begin(&f, VTG_X86_64_LINUX, sym, 0);
+	f.sig=vir_extra(&f,sg,5);
+	vir_blk_add(&f,0);
+	p=vir_ins_add(&f,VO_PARAM,VT_I64,0,0,0,0);
+	a=vir_ins_add(&f,VO_TRUNC,VT_I32,0,p,0,0);
+	b=vir_ins_add(&f,VO_EXT,VT_I64,2|VIF_MS,a,0,0);
+	l[0]=b;
+	vir_ins_add(&f,VO_BR,VT_VOID,0,1,0,vir_extra(&f,l,1));
+	vir_blk_add(&f,0);
+	p=vir_ins_add(&f,VO_BPARAM,VT_I64,0,0,0,0);
+	a=vir_ins_add(&f,VO_TRUNC,VT_I32,0,p,0,0);
+	c5=vir_const(&f,VO_ICONST,VT_I32,0,15,0);
+	c9=vir_const(&f,VO_ICONST,VT_I32,0,4,0);
+	b=vir_ins_add(&f,VO_AND,VT_I32,0,a,c5,0);
+	b=vir_ins_add(&f,VO_SHL,VT_I32,0,b,c9,0);
+	cond=vir_ins_add(&f,VO_ICMP,VT_I32,0,b,c5,0);
+	vir_ins_add(&f,VO_BRIF,VT_VOID,0,cond,2,3);
+	vir_blk_add(&f,0);
+	l[0]=p;
+	vir_ins_add(&f,VO_BR,VT_VOID,0,1,0,vir_extra(&f,l,1));
+	vir_blk_add(&f,0);
+	l[0]=1;l[1]=p;
+	vir_ins_add(&f,VO_RET,VT_VOID,0,0,0,vir_extra(&f,l,2));
+	CHECK(vir_canon(&f) && f.nins<sizeof cnt);
+	ver.n=0;CHECK(vir_verify(&f,&u,&ver,5)==0);
+	vir_low32(&f,false,cnt);
+	for(uint32_t i=f.nconst;i<f.nins;i++) {
+		if(f.ins[i].op==VO_BPARAM || f.ins[i].op==VO_EXT)CHECK(!cnt[i]);
+		if(f.ins[i].op==VO_SHL)CHECK(vir_mask32(&f,i,8)==0xf0 && vir_mask32(&f,i,0)==UINT32_MAX);
+	}
+	vir_low32(&f,true,cnt);
+	for(uint32_t i=f.nconst;i<f.nins;i++)
+		if(f.ins[i].op==VO_BPARAM || f.ins[i].op==VO_EXT)CHECK(cnt[i]);
 	/* the limit of the constant table: the 2^23+1st constant fails, and the next function starts clean */
 	vir_begin(&f, VTG_X86_64_LINUX, sym, 0);
 	for (uint32_t i = 0; i <= VIR_MAX_CONST; i++)

@@ -2560,58 +2560,7 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 	L.ret32 = KIND(c, ft->base) != TY_VOID && is_integer(c, ft->base) && tsize(c, ft->base) == 4;
 	L.tail = !(ft->flags & TF_VARIADIC) && em_tail_caller_ok(e, s) && !vl_notail(&L, VLT.lo32);	/* (lo32: scratch until it is filled) */
 	vir_uses(f, L.uses);
-	/* lo32 by a fixed point: only falls; a br argument is read as its parameter is.  Facts go
-	 * from a use to its operands: blocks and instructions last to first, so one sweep settles
-	 * all but what a back edge carries */
-	memset(L.lo32, 1, f->nins);
-	for (bool ch = true; ch;) {
-		ch = false;
-		for (uint32_t b = f->nblk; b-- > 0;)
-			for (uint32_t i = f->blk[b].first + f->blk[b].n; i-- > f->blk[b].first;) {
-				vir_ins x = f->ins[i];
-				vir_oit it;
-				uint32_t *p;
-
-				if (x.op == VO_TRUNC || (x.op == VO_RET && L.ret32))	/* (a 32-bit return's upper half is unspecified) */
-					continue;
-				if (x.op == VO_BR) {
-					const vir_blk *t = &f->blk[x.a];
-
-					for (uint32_t j = 0; j < t->nparam; j++) {
-						uint32_t a = f->extra[x.c + j];
-
-						if (!L.lo32[t->first + j] && L.lo32[a])
-							L.lo32[a] = 0, ch = true;
-					}
-					continue;
-				}
-				if (x.op == VO_SELECT && L.lo32[i]) {	/* its values are read as it is */
-					if (L.lo32[x.a])
-						L.lo32[x.a] = 0, ch = true;
-					continue;
-				}
-				if (x.op == VO_CALL) {	/* an integer argument of 4 bytes or less: its upper half is unspecified */
-					uint32_t n = f->extra[x.c], hdr = f->extra[x.b];
-
-					for (uint32_t k = 0; k < n; k++) {
-						uint32_t a = f->extra[x.c + 1 + k], w0 = f->extra[x.b + 3 + 2 * k], w1 = f->extra[x.b + 4 + 2 * k];
-
-						if (VSIG_NGROUPS(hdr) == n && VG_KIND(w0) == VG_REG && VG_NPIECE(w0) == 1 &&
-						    VG_CLASS(w0, 0) == VC_INT && VG_SIZE(w1) <= 4)
-							continue;
-						if (L.lo32[a])
-							L.lo32[a] = 0, ch = true;
-					}
-					if (L.lo32[x.a])
-						L.lo32[x.a] = 0, ch = true;
-					continue;
-				}
-				vir_oit_init(&it, f, &x, false);
-				while ((p = vir_oit_next(&it)))
-					if (L.lo32[*p])
-						L.lo32[*p] = 0, ch = true;
-			}
-	}
+	vir_low32(f, L.ret32, L.lo32);
 
 	/* Keep result tables queued by the VIR walker: end_function emits them. */
 	/* the emitter's per-function state, as emit_function1 sets it */

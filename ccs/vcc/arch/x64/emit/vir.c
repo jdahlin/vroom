@@ -371,30 +371,7 @@ static bool vx_readword(vx *L,uint32_t b,uint32_t v,unsigned width)
 	return true;
 }
 
-/* Possible one bits, bounded to a small local expression tree. A clear sign
- * bit proves that a signed i32 extension has the same value as zero extension. */
-static uint32_t vx_mask32(const vir_fn *f,uint32_t v,unsigned depth)
-{
-	const vir_ins *i=&f->ins[v];
-	if(i->ty!=VT_I32 || !depth)return UINT32_MAX;
-	int64_t k;
-	switch(i->op) {
-	case VO_ICONST:return i->b;
-	case VO_LOAD: case VO_EXT:
-		if(!(i->fl&VIF_MS) && VIF_W(i->fl)<2)return VIF_W(i->fl)?0xffff:0xff;
-		return UINT32_MAX;
-	case VO_ICMP: case VO_FCMP:return 1;
-	case VO_AND:return vx_mask32(f,i->a,depth-1)&vx_mask32(f,i->b,depth-1);
-	case VO_OR: case VO_XOR:return vx_mask32(f,i->a,depth-1)|vx_mask32(f,i->b,depth-1);
-	case VO_SHL: case VO_LSHR:
-		if(vx_imm(f,i->b,&k) && k>=0 && k<32) {
-			uint32_t mask=vx_mask32(f,i->a,depth-1);
-			return i->op==VO_SHL?mask<<k:mask>>k;
-		}
-		return UINT32_MAX;
-	default:return UINT32_MAX;
-	}
-}
+
 /* An IR i32 does not itself guarantee zero upper bits: parameters, calls,
  * signed narrow loads and identity truncations can retain arbitrary bits. */
 static bool vx_clear32(const vir_fn *f,uint32_t v)
@@ -667,7 +644,7 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 			x64_mov(e,d,a);return;
 		}
 		if(VIF_W(i->fl)==2 && vx_clear32(L->f,i->a) &&
-		   (!(i->fl&VIF_MS) || !(vx_mask32(L->f,i->a,8)>>31))) {
+		   (!(i->fl&VIF_MS) || !(vir_mask32(L->f,i->a,8)>>31))) {
 			x64_mov(e,d,a);return;
 		}
 		rec *r = x64_op3(e, X_EXT, 1 << VIF_W(i->fl), d, a, XNOREG);
