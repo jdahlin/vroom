@@ -710,7 +710,7 @@ static bool xresult(const xf *f, const ins *i, unsigned *zo, unsigned *so)
 		break;
 	}
 	case I_ADD:
-		if (i->sh)
+		if (i->sh || i->cond)	/* (shifted, or rm extended, cond 8 + option: nothing known) */
 			break;
 		{
 			unsigned a = umax(zn, xz(f, rm)), b = umax(sn, xs(f, rm));
@@ -1047,11 +1047,38 @@ static fdef fclass(const ins *d)
 	return (fdef){ FD_NONE, 0, 0, 0, 0 };
 }
 
+/* x16/x17 are written by records that do not say so (an immediate or an offset that does
+ * not encode is built in x17, a far branch or a table goes through x16): a value in one
+ * of them is only known to stay there across records that are one plain instruction */
+#define FSCR (RB(16) | RB(17))
+
+/* record i is one instruction of exactly its own registers: it cannot rebuild x16/x17 */
+static bool fplain(const ins *i)
+{
+	switch (i->op) {
+	case I_ADD: case I_SUB: case I_ADDS: case I_SUBS: case I_AND: case I_ORR: case I_EOR: case I_ANDS:
+	case I_BIC: case I_ORN: case I_ADC: case I_SBC: case I_ADCS: case I_SBCS:
+	case I_MOV: case I_MADD: case I_MSUB: case I_SMADDL: case I_UMADDL:
+	case I_SDIV: case I_UDIV: case I_SMULH: case I_UMULH: case I_LSLV: case I_LSRV: case I_ASRV:
+	case I_SBFM: case I_UBFM: case I_BFM: case I_CSEL: case I_CSINC: case I_CSINV: case I_CSNEG:
+	case I_CLZ: case I_CLS: case I_RBIT: case I_REV: case I_REV16: case I_REV32:
+	case I_LDX: case I_STX: case I_MOVI: case I_LABEL:
+		return i->rn < 32 && i->rd < 32;
+	case I_ADDI: case I_SUBI: case I_ADDSI: case I_SUBSI:
+		return i->rn < 32 && i->rd < 32 && i->imm > -4096 && i->imm < 4096;
+	case I_LD: case I_ST:	/* (an offset both the scaled and the unscaled form reach whatever the size) */
+		return i->rn < 32 && i->imm >= 0 && i->imm < 256;
+	default:
+		return false;
+	}
+}
+
 /* the record defining register r for reader k: none read r between, it is dead after k */
 static int32_t fdefof(ecx *e, uint32_t k, int r)
 {
 	const ins *in = e->in;
 	uint32_t lo = W.bs[W.blk[k]], n = 0;
+	bool scr = false;	/* a record between may have rebuilt x16/x17 */
 
 	if (r >= 29 || ((W.la[k] & RB(r)) && !(W.ww[k] & RB(r))))
 		return -1;
@@ -1062,9 +1089,10 @@ static int32_t fdefof(ecx *e, uint32_t k, int r)
 		if (W.ro[j] & OP_SLOW)
 			return -1;
 		if (W.ww[j] & RB(r))
-			return W.ww[j] == RB(r) ? (int32_t)j : -1;
+			return W.ww[j] == RB(r) && (!scr || !(RB(r) & FSCR)) ? (int32_t)j : -1;
 		if (W.rr[j] & RB(r))
 			return -1;
+		scr |= !fplain(&in[j]);
 	}
 	return -1;
 }
@@ -1072,15 +1100,18 @@ static int32_t fdefof(ecx *e, uint32_t k, int r)
 /* the record last writing r before k in its block (a constant's MOVI), whoever else reads r */
 static const ins *fwriter(ecx *e, uint32_t k, int r)
 {
-	uint32_t lo = W.bs[W.blk[k]];
+	uint32_t lo = W.bs[W.blk[k]], n = 0;
+	bool scr = false;
 
-	for (uint32_t j = k; j-- > lo;) {
+	for (uint32_t j = k; j-- > lo && n < 32;) {	/* (bounded, as fdefof) */
 		if (e->in[j].op == DELETED)
 			continue;
+		n++;
 		if (W.ro[j] & OP_SLOW)
 			return NULL;
 		if (W.ww[j] & RB(r))
-			return &e->in[j];
+			return !scr || !(RB(r) & FSCR) ? &e->in[j] : NULL;
+		scr |= !fplain(&e->in[j]);
 	}
 	return NULL;
 }
@@ -1089,7 +1120,7 @@ static const ins *fwriter(ecx *e, uint32_t k, int r)
 static bool fkept(ecx *e, uint32_t d, uint32_t k, rmask src)
 {
 	for (uint32_t j = d + 1; j < k; j++)
-		if (e->in[j].op != DELETED && (W.ww[j] & src))
+		if (e->in[j].op != DELETED && ((W.ww[j] & src) || ((src & FSCR) && !fplain(&e->in[j]))))
 			return false;
 	return true;
 }
@@ -1645,6 +1676,12 @@ static void flags(ecx *e)
 			lp[in[k].label] = k;
 	for (uint32_t l = 0; l < nl; l++)	/* (ls: branched to yet; NOCMP below means "nothing came") */
 		ls[l] = e->lrefc[l] & LREF_EXT ? MIXED : NOCMP - 2;
+	for (uint32_t k = 0; k < e->nin; k++) {	/* a label something branches back to: nothing known at it */
+		int bk = in[k].op == DELETED ? BR_NONE : brkind(&in[k]);
+
+		if ((bk == BR_COND || bk == BR_UNCOND) && in[k].label < nl && lp[in[k].label] <= k)
+			ls[in[k].label] = MIXED;
+	}
 	for (uint32_t k = 0; k < e->nin; k++) {
 		ins *i = &in[k];
 		unsigned ro;
