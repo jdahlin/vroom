@@ -1009,3 +1009,8 @@ Indexerade minnesoperander är nu sänkta med skala 1/2/4/8, utan separat
 ptradd/skift när engångsvärden och allokator-edits tillåter det. SQLite:
 1,626x → 1,603x instruktioner/clang, CPU oförändrad inom kortprovets brus
 (1,380x → 1,378x). Fortsatt öppet 10 %-mål; V4 i PLAN-vir.md har provdata.
+
+VIR:s gemensamma storleksstyrda inliner är nu aktiv även på x86. Tillsammans
+med fallthrough för true-kanter, färre identitetskopior och tied-preferenser
+ger fem korta SQLite-prov CPU 1,360x → 1,267x clang och instruktioner
+1,603x → 1,505x. Verifieringshash och regressionsprov stämmer; 10 % är öppet.

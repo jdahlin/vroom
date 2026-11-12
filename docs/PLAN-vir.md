@@ -283,6 +283,19 @@ indexerad 393,38 ms (1,378x); instruktioner 1,626x → 1,603x. Ingen säker
 CPU-vinst; 10 %-målet är öppet. GCC/TCC/egna fortsatt gröna, samma fem
 inline-fel. Mätdata: work/vir-x86-perf/indexed/recheck/summary.json.
 
+Tredje skivan låter true-kanten falla igenom när dess block står näst,
+slopar identitetskopior vid cast och ger destruktiva operationer en tied-
+preferens i allokatorn. i32 lovar inga övre registerbitar; en senare EXT
+måste fortfarande utvidga. x86 använder nu också den gemensamma VIR-
+inlinerns storleksanalys och engångsanrop (tidigare uttryckligen avstängd
+för x86 i tu.c). Ett större engångshjälpanrop måste försvinna i riktprovet.
+Fem alternerade prov, samma CPU: clang 281,65 ms, föregående 383,12 ms
+(1,360x), ny 356,79 ms (1,267x); instruktioner 1,603x → 1,505x.
+Verifieringshashar lika. En separat provad looplayout gav ingen mätbar vinst
+och behålls inte. GCC 1615/1615, TCC 105/105, egna 299/299, samma fem
+inline-fel; riktade objekt-/assemblyprov och ASan/UBSan gröna. 10 %-målet
+är fortsatt öppet. Data: work/vir-x86-perf/inline-final/results/summary.json.
+
 
 ### V2/V3 x86-64 (2026-11-12): TSVC och fem verkliga korpusar
 

@@ -99,6 +99,14 @@ static void vx_fixed(const vir_fn *f, uint32_t v, vir_fix *x, void *ctx)
 	    i->op==VO_AND || i->op==VO_OR || i->op==VO_XOR || i->op==VO_MUL || i->op==VO_ICMP) && vx_imm(f,i->b,&k)) {
 		x->nopnd=2;x->mem|=2;
 	}
+	/* Prefer the dying first input for x86's destructive operations. */
+	switch(i->op) {
+	case VO_SUB: case VO_PSUB: case VO_MUL: case VO_AND: case VO_OR: case VO_XOR:
+	case VO_NEG: case VO_NOT: case VO_SHL: case VO_LSHR: case VO_ASHR:
+	case VO_FADD: case VO_FSUB: case VO_FMUL: case VO_FDIV:
+		x->fl|=VFX_TIED;break;
+	default:break;
+	}
 }
 static void vx_raw(vx *L, const char *s)
 {
@@ -445,6 +453,9 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 		} else x64_op3(e, i->op == VO_NEG ? X_NEG : X_NOT, sz, d, a, XNOREG);
 		return;
 	case VO_P2I: case VO_I2P: case VO_TRUNC: case VO_BITCAST:
+		/* An i32 value does not promise anything about the upper GPR bits;
+		 * a later unsigned EXT is responsible for clearing them if needed. */
+		if (d==a) return;
 		x64_op3(e, X_MOV, sz, d, a, XNOREG); return;
 	case VO_EXT: {
 		if (VIF_W(i->fl) == 3) { x64_mov(e, d, a); return; }
@@ -649,6 +660,11 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 				e->x64->nin--;
 			}
 		} else x64_op3(e, X_TEST, vx_size(L->f->ins[i->a].ty), XNOREG, a, a);
+		/* Let the next emitted block fall through, including the true edge.
+		 * A deferred edge-copy stub is a different label and cannot fall through. */
+		if(b+1<L->f->nblk && yes==L->label[b+1]) {
+			uint32_t swap=yes;yes=no;no=swap;cc^=1;
+		}
 		rec *r = x64_put(e, X_JCC); r->cond = cc; r->label = yes;
 		x64_jump(e, no); return;
 	}

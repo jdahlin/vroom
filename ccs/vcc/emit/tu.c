@@ -464,7 +464,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 			E.ffacts[s] = FF_BAD;
 		}
 	/* VIR: the functions called once, which its walker inlines whatever their size */
-	if (!WASM(c) && !X86(c) && vw_enabled(o))
+	if (!WASM(c) && vw_enabled(o))
 		E.once = fn_once(c);
 	if (E.once)
 		fn_isize(&E, c, WK_INLINE_VIR);
