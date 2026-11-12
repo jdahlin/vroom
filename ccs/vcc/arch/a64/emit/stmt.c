@@ -48,6 +48,9 @@ static void init_elems(ecx *e, const lval *d, qty ty, uint32_t init)
 	cc *c = e->c;
 	const node *x = N(init);
 
+	/* Initialization precedes publication and copies the plain payload. */
+	ty = (T(c, ty)->flags & TF_ATOMIC) ? QT(T(c, ty)->n, 0) : ty;
+
 	if (!init || x->op == N_ZERO)
 		return;
 	if (x->op == N_INIT) {
@@ -63,6 +66,14 @@ static void init_elems(ecx *e, const lval *d, qty ty, uint32_t init)
 				for (uint64_t k = lo; k <= hi; k++) {
 					lval el = *d;
 
+					if (is_bvec(c, ty)) {
+						val bv = gen(e, val_);
+						el.off += (int64_t)(k / 8);
+						el.bf = 1, el.width = 1, el.bitoff = k % 8;
+						store(e, &el, et, &bv);
+						val_free(e, &bv);
+						continue;
+					}
 					el.off += (int64_t)(k * es);
 					el.align = align_at((uint64_t)el.off, d->align);
 					init_elems(e, &el, et, val_);
@@ -141,6 +152,10 @@ VPRIV void gen_init_local(ecx *e, const lval *dst, qty ty, uint32_t init)
 
 	if (!init)
 		return;
+	if (T(c, ty)->flags & TF_ATOMIC) {
+		zero_lval(e, dst, tsize(c, ty));
+		ty = (T(c, ty)->flags & TF_ATOMIC) ? QT(T(c, ty)->n, 0) : ty;
+	}
 	if (x->op == N_INIT || x->op == N_ZERO || (x->op == N_STR && is_array(c, ty))) {
 		zero_lval(e, dst, tsize(c, ty));
 		init_elems(e, dst, ty, init);
@@ -188,7 +203,7 @@ static void run_cleanup(ecx *e, uint32_t s)
 	a.slot = 1;
 	fn = canon_sym(c, fn);
 	if (can_inline(e, fn)) {
-		val r = inline_call(e, fn, &a, 1);
+		val r = inline_call(e, fn, &a, 1, 0);
 
 		val_free(e, &r);
 		return;
@@ -275,7 +290,15 @@ VPRIV val gen_block(ecx *e, uint32_t n, bool want)
 			}
 			break;
 		}
-		gen_stmt(e, s);
+		uint32_t from, to;
+		if (i && em_block_value_reuse(e, x, 0, i, &from, &to)) {
+			uint32_t oldfrom = e->reuse_from, oldto = e->reuse_to;
+			e->reuse_from = from; e->reuse_to = to;
+			gen_stmt(e, s);
+			e->reuse_from = oldfrom; e->reuse_to = oldto;
+		} else {
+			gen_stmt(e, s);
+		}
 	}
 	if (e->nclean > cmark) {
 		run_cleanups(e, cmark);
@@ -322,8 +345,135 @@ static void collect_cases(ecx *e, uint32_t n)
 	}
 }
 
+/* The selector is borrowed from gen_switch and stays allocated across every
+ * subtree. Only constants used by one comparison own temporary registers. */
+static void a64_switch_tree(ecx *e, const em_switch_case *cases, uint32_t n,
+                            int r, int cx, bool sg, uint32_t dflt)
+{
+	if (!n) {
+		jump(e, dflt);
+		return;
+	}
+	uint32_t mid = n / 2;
+	const em_switch_case *p = &cases[mid];
+	uint32_t left = mid ? newlabel(e) : dflt;
+	val a = vreg(r), b = vconst(p->lo);
+	int cond = emit_cmp(e, T_LESS, cx, sg, &a, &b);
+
+	val_free(e, &b);
+	bcond(e, cond, left);
+	if (p->lo == p->hi) {
+		/* The lower-bound compare also establishes equality. */
+		bcond(e, C_EQ, p->target);
+	} else {
+		b = vconst(p->hi);
+		cond = emit_cmp(e, T_LESSEQ, cx, sg, &a, &b);
+		val_free(e, &b);
+		bcond(e, cond, p->target);
+	}
+	a64_switch_tree(e, cases + mid + 1, n - mid - 1, r, cx, sg, dflt);
+	if (mid) {
+		deflabel(e, left);
+		a64_switch_tree(e, cases, mid, r, cx, sg, dflt);
+	}
+}
+
+/* A dense switch: index = v - lo, one unsigned bounds check, then I_JT (finish_function
+ * expands it and appends the table of label differences after the function's code). */
+static void a64_switch_table(ecx *e, const em_switch_case *cases, uint32_t n, int r, int cx, uint32_t dflt)
+{
+	i128 lo = cases[0].lo, span = cases[n - 1].hi - lo;
+	uint32_t tab = newlabel(e), off = e->njtl;
+
+	if (!e->reach)
+		return;
+	int t = r, own = 0;
+	if (lo || !cx) {
+		t = treg(e);
+		own = 1;
+		if (lo) {
+			ins *i = put(e, I_SUBI);
+			i->sz = (uint8_t)cx, i->rd = (uint8_t)t, i->rn = (uint8_t)r, i->imm = (int64_t)lo;
+		} else {
+			ins *i = put(e, I_MOV);
+			i->sz = 0, i->rd = (uint8_t)t, i->rn = (uint8_t)r;
+		}
+	}
+	val a = vreg(t), b = vconst((i128)span);
+	int cond = emit_cmp(e, T_GREATER, cx, false, &a, &b);
+	val_free(e, &b);
+	bcond(e, cond, dflt);
+	if (e->njtl + (uint32_t)span + 1 > e->capjtl) {
+		e->capjtl = (e->njtl + (uint32_t)span + 1) * 2;
+		e->jtl = realloc(e->jtl, (size_t)e->capjtl * sizeof *e->jtl);
+	}
+	if (e->njt == e->capjt) {
+		e->capjt = e->capjt ? e->capjt * 2 : 4;
+		e->jt = realloc(e->jt, (size_t)e->capjt * sizeof *e->jt);
+	}
+	if (!e->jtl || !e->jt)
+		abort();
+	uint32_t k = 0;
+	for (i128 v = lo; v <= lo + span; v++) {
+		while (k < n && cases[k].hi < v)
+			k++;
+		uint32_t l = k < n && cases[k].lo <= v ? cases[k].target : dflt;
+		e->jtl[e->njtl++] = l;
+		if (!(e->lrefc[l] & LREF_EXT)) {
+			kv_edge(e, l);
+			e->lrefc[l]++;
+			e->lrefc[l] |= LREF_EXT;
+		}
+	}
+	e->jt[e->njt++] = (struct ejt){ tab, off, (uint32_t)span + 1 };
+	ins *i = put(e, I_JT);
+	i->rd = (uint8_t)t;
+	i->label = tab;
+	e->reach = false;
+	if (own)
+		tfree(e, t);
+}
+
+static bool a64_switch_dispatch(ecx *e, uint32_t base, int r, int cx,
+                                bool sg, bool tables, uint32_t dflt)
+{
+	if (!e->E->o->opt || e->E->noopt || e->ncases - base < 4)
+		return false;
+	cc *c = e->c;
+	uint32_t count = 0;
+	for (uint32_t k = base; k < e->ncases; k++)
+		count += N(e->cases[k])->op == N_CASE;
+	if (count < 4)
+		return false;
+	em_switch_case *cases = malloc((size_t)count * sizeof *cases);
+	if (!cases)
+		return false;
+	uint32_t j = 0;
+	bool ranges = false;
+	for (uint32_t k = base; k < e->ncases; k++) {
+		uint32_t cn = e->cases[k];
+		if (N(cn)->op == N_CASE) {
+			cases[j++] = (em_switch_case){c->ipool[N(cn)->a],
+				c->ipool[N(cn)->b], e->caselbl[cn]};
+			ranges |= c->ipool[N(cn)->a] != c->ipool[N(cn)->b];
+		}
+	}
+	bool valid = em_switch_prepare(cases, count, cx ? 64 : 32, sg);
+	int strat = valid ? em_switch_strategy(count, cases[0].lo, cases[count - 1].hi, ranges,
+	                                       tables && !c->o->no_jump_tables) : EM_SWITCH_LINEAR;
+	if (strat == EM_SWITCH_TABLE)
+		a64_switch_table(e, cases, count, r, cx, dflt);
+	else if (strat == EM_SWITCH_TREE)
+		a64_switch_tree(e, cases, count, r, cx, sg, dflt);
+	else
+		valid = false;
+	free(cases);
+	return valid;
+}
+
 static void gen_switch(ecx *e, uint32_t n)
 {
+	if (a64_switch_values(e,n)) return;
 	cc *c = e->c;
 	const node *x = N(n);
 	qty ct = N(x->a)->ty;
@@ -354,6 +504,31 @@ static void gen_switch(ecx *e, uint32_t n)
 			}
 		}
 		jump(e, target);
+	} else if (em_bigint(c, ct)) {
+		int source = toreg(e, &v);
+		for (uint32_t k = base; k < e->ncases; k++) {
+			const node *cn = N(e->cases[k]);
+			if (cn->op != N_CASE) continue;
+			i128 lo = c->ipool[cn->a], hi = c->ipool[cn->b];
+			uint32_t next = newlabel(e);
+			int copy = treg(e);
+			mov(e, 1, copy, source);
+			val test = a64_bigcmp(e, lo == hi ? T_EQUALEQUAL : T_GREATEREQ,
+			                     ct, vreg(copy), vconst(lo));
+			cbz(e, false, 1, toreg(e, &test), next);
+			val_free(e, &test);
+			if (lo != hi) {
+				copy = treg(e);
+				mov(e, 1, copy, source);
+				test = a64_bigcmp(e, T_LESSEQ, ct, vreg(copy), vconst(hi));
+				cbz(e, false, 1, toreg(e, &test), next);
+				val_free(e, &test);
+			}
+			jump(e, e->caselbl[e->cases[k]]);
+			deflabel(e, next);
+		}
+		val_free(e, &v);
+		jump(e, dflt);
 	} else if (is_wide(c, ct)) {
 		/* 128-bit: v - lo <= hi - lo, unsigned, in two words (a single value: hi == lo) */
 		int t0 = treg(e), t1 = treg(e);
@@ -383,32 +558,38 @@ static void gen_switch(ecx *e, uint32_t n)
 	} else {
 		int r = toreg(e, &v);
 
-		for (uint32_t k = base; k < e->ncases; k++) {
-			const node *cn = N(e->cases[k]);
-			i128 lo, hi;
+		bool tree = (!em_bitint(c, ct) &&
+		             a64_switch_bitset(e, x->b, base, r, cx, is_signed(c, ct), dflt)) ||
+			    a64_switch_dispatch(e, base, r, cx, is_signed(c, ct), !em_bitint(c, ct), dflt);
+		if (!tree) {
+			for (uint32_t k = base; k < e->ncases; k++) {
+				const node *cn = N(e->cases[k]);
+				i128 lo, hi;
 
-			if (cn->op != N_CASE)
-				continue;
-			lo = c->ipool[cn->a], hi = c->ipool[cn->b];
-			if (lo == hi) {
-				val a = vreg(r), b = vconst(lo);
+				if (cn->op != N_CASE)
+					continue;
+				lo = c->ipool[cn->a], hi = c->ipool[cn->b];
+				if (lo == hi) {
+					val a = vreg(r), b = vconst(lo);
 
-				emit_cmp(e, T_EQUALEQUAL, cx, false, &a, &b);
-				val_free(e, &b);
-				bcond(e, C_EQ, e->caselbl[e->cases[k]]);
-			} else {
-				opi(e, I_SUBI, cx, R_X16, r, (int64_t)lo);
-				if (hi - lo <= 4095) {
-					opi(e, I_SUBSI, cx, ZR, R_X16, (int64_t)(hi - lo));
+					emit_cmp(e, T_EQUALEQUAL, cx, false, &a, &b);
+					val_free(e, &b);
+					bcond(e, C_EQ, e->caselbl[e->cases[k]]);
 				} else {
-					movi(e, cx, R_X17, (int64_t)(hi - lo));
-					op3(e, I_SUBS, cx, ZR, R_X16, R_X17);
+					opi(e, I_SUBI, cx, R_X16, r, (int64_t)lo);
+					if (hi - lo <= 4095) {
+						opi(e, I_SUBSI, cx, ZR, R_X16, (int64_t)(hi - lo));
+					} else {
+						movi(e, cx, R_X17, (int64_t)(hi - lo));
+						op3(e, I_SUBS, cx, ZR, R_X16, R_X17);
+					}
+					bcond(e, C_LS, e->caselbl[e->cases[k]]);
 				}
-				bcond(e, C_LS, e->caselbl[e->cases[k]]);
 			}
 		}
 		val_free(e, &v);
-		jump(e, dflt);
+		if (!tree)
+			jump(e, dflt);
 	}
 	e->ncases = base + (e->ncases - base);	/* keep the labels until the body is done */
 	e->loops[e->nloop++] = (loopctx){ lbrk, 0, e->nclean };
@@ -424,7 +605,11 @@ static void gen_return(ecx *e, const node *x)
 	cc *c = e->c;
 	fnctx *f = e->f;
 	qty rt = f->rty;
-	val v = x->a ? gen(e, x->a) : vnone();
+	val v;
+
+	if (x->a && a64_tail_return(e, x->a))
+		return;
+	v = x->a ? gen(e, x->a) : vnone();
 
 	if (!e->reach) {
 		val_free(e, &v);
@@ -496,9 +681,11 @@ static void gen_return(ecx *e, const node *x)
 				v = load(e, &l, rt);
 			}
 		}
-		int hn, hb = is_recabi(c, rt) ? hfa(c, rt, &hn) : 0;
+		int hn, hb = is_recabi(c, rt) && !is_sret(c, rt) ? hfa(c, rt, &hn) : 0;
 
-		if (hb) {
+		if (is_bvec(c, rt) && !is_sret(c, rt)) {
+			bvec_ret(e, rt, toreg(e, &v));
+		} else if (hb) {
 			int rs = toreg(e, &v);
 
 			for (int k = 0; k < hn; k++)
@@ -508,7 +695,7 @@ static void gen_return(ecx *e, const node *x)
 		} else if (is_recabi(c, rt)) {
 			int rs = toreg(e, &v);
 
-			if (tsize(c, rt) > 16) {
+			if (is_sret(c, rt)) {
 				int rd = treg(e);
 
 				mem(e, I_LD, 3, 0, rd, FRAME, f->retslot);	/* the caller's buffer (x8 at entry) */
@@ -585,6 +772,17 @@ VPRIV void vla_fix(ecx *e, qty t, bool pure)
 		if (a->kind != TY_ARRAY)
 			return;
 		if ((a->flags & TF_VLA) && a->n && N(a->n)->op != N_NUM && !(pure && side_effects(c, a->n))) {
+			bool captured = false;
+
+			for (uint32_t k = e->nvsz; k-- > 0;)
+				if (e->vsz[k].node == a->n && e->vsz[k].inst == e->f->inst) {
+					captured = true;
+					break;
+				}
+			if (captured) {
+				t = a->base;
+				continue;
+			}
 			val v = cast(e, gen(e, a->n), N(a->n)->ty, c->t_size, CK_INT);
 			int r = toreg(e, &v);
 			int64_t sl = slot(e, 8, 8);
@@ -715,13 +913,25 @@ static void gen_decl(ecx *e, const node *x)
 	const sym *y = &c->syms[s];
 	bind *b;
 
-	if (unlikely(vm_type(c, y->ty)))
+	if (!x->aux && unlikely(vm_type(c, y->ty)))
 		vla_fix(e, y->ty, false);
 	if (y->kind != S_VAR || y->sc == SC_STATIC || y->sc == SC_EXTERN || y->sc == SC_TYPEDEF)
 		return;
 	if (T(c, y->ty)->flags & TF_VLA) {
 		gen_vla_decl(e, x, s);
 		return;
+	}
+	{
+		unsigned recipe = em_unused_init(e, x, e->f->fn, 64);
+
+		if (recipe != EM_UNUSED_KEEP) {
+			if (recipe == EM_UNUSED_EVAL) {
+				val v = gen(e, x->b);
+
+				val_free(e, &v);
+			}
+			return;
+		}
 	}
 	if (x->b && !(e->E->sflags[s] & SA_WRITTEN) && !is_agg(c, y->ty) && !(QQ(y->ty) & Q_VOLATILE) &&
 	    !is_wide(c, y->ty) && y->sc != SC_REGISTER && !sym_attrs(c, s)->cleanup) {

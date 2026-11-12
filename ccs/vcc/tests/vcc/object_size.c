@@ -19,6 +19,7 @@ int main(void)
 	if (__builtin_object_size(p.data + 2, 3) != 6) return 7;
 	if (__builtin_object_size(&tail.data, 0) != 6) return 8;
 	if (__builtin_dynamic_object_size(&tail.data, 0) != 6) return 9;
+	if (__builtin_object_size(tail.data, 3) != 0) return 22;
 	if (__builtin_object_size(((struct zero *)&bytes[1])->data, 1) != 35) return 10;
 	if (__builtin_dynamic_object_size(((struct zero *)&bytes[1])->data, 1) != 35) return 11;
 	if (__builtin_object_size(side_effect(), 0) != (size_t)-1 || calls) return 12;

@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """vcc-ctests.py: run vendored C compiler test suites through vcc.
 
-  bench/vcc-ctests.py [-j N] [--suite gcc|tcc|vcc] [--fe] [--cpu QEMU_CPU] [-v] [--show CAT] [PAT]
+  bench/vcc-ctests.py [-j N] [--suite gcc|tcc|vcc|inline] [--fe] [--cpu QEMU_CPU] [-v] [--show CAT] [PAT]
 
 Suites (ccs/vcc/tests/, see the README there):
   gcc  gcc.c-torture/execute: exits 0 on success, abort()s on failure
   tcc  tinycc tests2: prints output, compared with clang's (and tcc's .expect)
+  inline  inlining and IPA tests: gcc.dg/ipa, gcc.dg/torture, c-c++-common and
+       llvm-test-suite run tests (ccs/vcc/tests/inline): as gcc, output vs clang's
   vcc  our own regression tests (ccs/vcc/tests/vcc): exit 0 (or abort()) and
        print what clang's build prints.  Comments in a test steer the runner:
          /* vcc-flags: -std=c23 ... */   extra flags for both compilers
@@ -14,7 +16,10 @@ Suites (ccs/vcc/tests/, see the README there):
          /* vcc-threads-same */          -S output must be the same with
                                          VCC_THREADS=1 and 8 (four builds)
          /* vcc-timeout: S */            vcc's compile must finish in S seconds
+         /* vcc-ref-timeout: S */        clang reference limit (1..600; default 60)
                                          (default 60): a bound on compile time
+                                         (vcc-timeout times $VCC_TIMEOUT_SCALE,
+                                         for a sanitizer build)
          /* vcc-xfail: TODO item */      known vcc bug: a failure is counted as
                                          xfail, a pass as XPASS (an error: drop
                                          the marker in the commit that fixes it)
@@ -73,6 +78,16 @@ RTFL = ['--target=aarch64-linux-gnu', '-ffreestanding', '-fno-builtin', '-nostdi
 # snippets, bounds checker, other targets, threads/TLS, several files, argv
 # gcc torture tests whose output depends on the compiler, not on correctness
 GCC_SKIP = {'return-addr': 'prints code addresses'}
+# inline suite: tests whose result depends on the compiler, not on correctness
+INLINE_SKIP = {
+    'gcc/gcc.dg-ipa-ipa-sra-1': 'prints an int with %f and stack addresses',
+    'gcc/gcc.dg-torture-matrix-6': 'reads a dead local through a pointer (*vel[1] = &d)',
+    'gcc/gcc.dg-ipa-ipa-pta-19': 'ifunc: rt applies no IRELATIVE (clang -O2 folds the resolver)',
+}
+# inline suite: known vcc gaps (TODO.md), counted as xfail; a pass is an XPASS error
+INLINE_XFAIL = {
+    'gcc/gcc.dg-ipa-pr92497-1': 'TODO.md "IPA constant propagation": __builtin_constant_p of a noinline static function\'s constant argument',
+}
 
 TCC_SKIP = {
     '31_args': 'argv', '137_funcall_struct_args': 'void main: exit status undefined', '79_vla_continue': 'compares addresses of dead VLAs (clang and tcc differ)', '46_grep': 'argv, files', '34_array_assignment': 'not C (tcc skips it)',
@@ -96,6 +111,10 @@ def tests(suite, pat):
         d = f'{T}/tcc-tests2'
         ts += [('tcc', f[:-2], f'{d}/{f}') for f in sorted(os.listdir(d))
                if re.match(r'\d+_.*\.c$', f) and '+' not in f]
+    if suite in (None, 'inline'):
+        for sub in ('gcc', 'llvm'):
+            d = f'{T}/inline/{sub}'
+            ts += [('inline', f'{sub}/{f[:-2]}', f'{d}/{f}') for f in sorted(os.listdir(d)) if f.endswith('.c')]
     if suite in (None, 'vcc'):
         d = f'{T}/vcc'
         ts += [('vcc', f[:-2], f'{d}/{f}') for f in sorted(os.listdir(d)) if f.endswith('.c')]
@@ -103,16 +122,24 @@ def tests(suite, pat):
         ts = [t for t in ts if re.search(pat, f'{t[0]}/{t[1]}')]
     return ts
 
-DG = re.compile(r'\{\s*(dg-options|dg-additional-options)\s+"([^"]*)"\s*(\{[^}]*\})?\s*\}')
+DG = re.compile(r'\{\s*(dg-options|dg-additional-options)\s+(?P<brace>\{\s*)?"(?P<flags>[^"]*)"\s*(?(brace)\}\s*)(?P<selector>\{[^}]*\})?\s*\}')
 def dg_flags(src):
     """options from dg-options/dg-additional-options that apply to aarch64-linux"""
     fl = []
     for m in DG.finditer(src):
-        sel = m.group(3)
+        sel = m.group("selector")
         if sel and not re.search(r'aarch64|\*-\*-\*|lp64|int128|!', sel):
             continue
-        fl += [x for x in m.group(2).split() if not x.startswith(('-m', '-fno-tree', '-ftree', '-fdump'))]
+        fl += [x for x in m.group("flags").split() if not x.startswith(('-m', '-fno-tree', '-ftree', '-fdump'))]
     return fl
+
+# the inline suite's dg options: gcc's pass switches (-fipa-pta, -fno-early-inlining, ...)
+# only steer gcc; what clang also understands is kept, the rest dropped
+INLINE_FLAGS = re.compile(r'-O\S*$|-[DU]\S+$|-std=\S+$|-w$|-W\S*$|-f(no-)?(inline|inline-functions|'
+                          r'inline-small-functions|strict-aliasing|wrapv|builtin|gnu89-inline|common|'
+                          r'unroll-loops|omit-frame-pointer|signed-char|unsigned-char)$')
+TMO_SCALE = int(os.environ.get('VCC_TIMEOUT_SCALE', '1'))
+
 
 def sh(cmd, timeout=60, **kw):
     try:
@@ -120,12 +147,50 @@ def sh(cmd, timeout=60, **kw):
         return p.returncode, p.stdout, p.stderr
     except subprocess.TimeoutExpired as e:
         return 'timeout', e.stdout or b'', e.stderr or b''
+    except OSError as e:
+        return 'tool-error', b'', str(e).encode()
 
-def qemu(elf, cpu='max'):
+
+def reference_timeout(path):
+    """Only explicitly marked heavy references get more than 60 seconds."""
+    with open(path, errors='replace') as source:
+        src = source.read()
+    m = re.search(r'/\*\s*vcc-ref-timeout:\s*(\d+)\s*\*/', src)
+    seconds = int(m.group(1)) if m else 60
+    if not 1 <= seconds <= 600:
+        raise ValueError('vcc-ref-timeout must be between 1 and 600 seconds')
+    return seconds
+
+
+def oracle_error(rc, err, stage, seconds):
+    """Infrastructure failures must never become unsupported-source skips."""
+    if isinstance(err, bytes):
+        err = err.decode(errors='replace')
+    reason = None
+    if rc == 'timeout':
+        reason = f'timed out after {seconds}s'
+    elif rc == 'tool-error':
+        reason = 'could not execute tool'
+    elif isinstance(rc, int) and rc < 0:
+        reason = f'terminated by signal {-rc}'
+    elif rc and re.search(r'PLEASE submit a bug report|frontend command failed|unable to execute command', err):
+        reason = f'tool failure (exit {rc})'
+    elif rc and stage in ('link', 'assemble') and not err.strip():
+        reason = f'tool failure (exit {rc}, no diagnostic)'
+    elif rc and stage == 'compile' and 'error:' not in err:
+        reason = f'tool failure (exit {rc}, no compiler diagnostic)'
+    if reason:
+        detail = first_err(err) if err.strip() else ''
+        return {'error': 'oracle-' + stage,
+                'why': f'{stage}: {reason}' + (': ' + detail if detail else '')}
+    return None
+
+def qemu(elf, cpu='max', diagnostics=False):
     rc, out, err = sh([QEMU, '-M', 'virt', '-cpu', cpu, '-m', '256M', '-nographic',
                        '-monitor', 'none', '-nic', 'none', '-semihosting', '-kernel', elf], timeout=20,
                       stdin=subprocess.DEVNULL)
-    return rc, out.decode('latin-1').replace('\r\n', '\n')
+    result = (rc, out.decode('latin-1').replace('\r\n', '\n'))
+    return (*result, err) if diagnostics else result
 
 VLINK = os.path.join(os.environ.get('VCC_BIN') or BUILD, 'vlink')
 def link(objs, elf):
@@ -181,40 +246,62 @@ def exec_marks(src):
     return fl, (' '.join(m.group(1).split()) if m else None)
 
 def reference(suite, name, path, flags, rthash, wd):
-    key = hashlib.sha1((open(path, 'rb').read().decode('latin-1') + ' '.join(flags) + rthash + ' '.join(CLFL)).encode()).hexdigest()[:16]
+    with open(path, 'rb') as source:
+        src = source.read().decode('latin-1')
+    key = hashlib.sha1(('oracle-status-v2 ' + src + ' '.join(flags) + rthash + ' '.join(CLFL)).encode()).hexdigest()[:16]
     cf = f'{OUT}/ref/{suite}/{name}.json'
     try:
-        r = json.load(open(cf))
-        if r['key'] == key:
+        with open(cf) as cache:
+            r = json.load(cache)
+        if r['key'] == key and 'error' not in r:
             return r
     except (OSError, ValueError, KeyError):
         pass
     r = {'key': key}
-    if suite == 'vcc' and re.search(r'/\*\s*vcc-noref:', open(path, 'rb').read().decode('latin-1')):
+    if suite == 'vcc' and re.search(r'/\*\s*vcc-noref:', src):
         r['rc'] = 0; r['out'] = ''
         return r
-    rc, _, err = sh([CL] + BASE + CLFL + flags + ['-c', path, '-o', f'{wd}/ref.o'], cwd=os.path.dirname(path))
+    timeout = reference_timeout(path)
+    rc, _, err = sh([CL] + BASE + CLFL + flags + ['-c', path, '-o', f'{wd}/ref.o'], cwd=os.path.dirname(path), timeout=timeout)
+    failure = oracle_error(rc, err, 'compile', timeout)
+    if failure:
+        return dict(r, **failure)
     if rc:
         r['skip'] = 'clang-rejects'; r['why'] = first_err(err.decode(errors='replace'))
     else:
         rc, err = link([f'{wd}/ref.o'], f'{wd}/ref.elf')
+        failure = oracle_error(rc, err, 'link', 60)
+        if failure:
+            return dict(r, **failure)
         if rc:
             m = re.search(r'undefined symbol: (\S+)', err)
             r['skip'] = 'ref-fail'; r['why'] = 'link: ' + (m.group(1) if m else first_err(err))
         else:
-            rc, out = qemu(f'{wd}/ref.elf')
+            rc, out, err = qemu(f'{wd}/ref.elf', diagnostics=True)
+            failure = oracle_error(rc, err, 'run', 20)
+            if failure:
+                return dict(r, **failure)
             r['rc'] = rc; r['out'] = out
-            if suite in ('gcc', 'vcc') and rc != 0:
+            if suite in ('gcc', 'vcc', 'inline') and rc != 0:
                 r['skip'] = 'ref-fail'; r['why'] = f'clang build exits {rc}'
+                if err.strip():
+                    r['why'] += ': ' + first_err(err.decode(errors='replace'))
             elif suite == 'tcc':
                 exp = f'{os.path.dirname(path)}/{name}.expect'
                 r['expect_ok'] = os.path.exists(exp) and norm(open(exp, errors='replace').read()) == norm(out)
     os.makedirs(os.path.dirname(cf), exist_ok=True)
-    json.dump(r, open(cf, 'w'))
+    with open(cf, 'w') as cache:
+        json.dump(r, cache)
     return r
 
 def one(t):
     t, st, cat, why = one_(t)
+    if t[0] == 'inline' and t[1] in INLINE_XFAIL:
+        xf = INLINE_XFAIL[t[1]]
+        if st == 'fail':
+            return t, 'xfail', cat, f'{xf} [{why}]'
+        if st == 'pass':
+            return t, 'fail', 'xpass', f'passes now: remove it from INLINE_XFAIL ({xf})'
     if t[0] != 'vcc':
         return t, st, cat, why
     _, xf = exec_marks(open(t[2], 'rb').read().decode('latin-1'))
@@ -233,9 +320,11 @@ def one_(t):
         return t, 'skip', 'tcc-specific', TCC_SKIP[name]
     if suite == 'gcc' and name in GCC_SKIP:
         return t, 'skip', 'compiler-specific', GCC_SKIP[name]
-    flags = dg_flags(src) if suite == 'gcc' else exec_marks(src)[0] if suite == 'vcc' else []
+    if suite == 'inline' and name in INLINE_SKIP:
+        return t, 'skip', 'compiler-specific', INLINE_SKIP[name]
+    flags = dg_flags(src) if suite == 'gcc' else [f for f in dg_flags(src) if INLINE_FLAGS.match(f)] if suite == 'inline' else exec_marks(src)[0] if suite == 'vcc' else []
     m = re.search(r'/\*\s*vcc-timeout:\s*(\d+)\s*\*/', src) if suite == 'vcc' else None
-    tmo = int(m.group(1)) if m else 60
+    tmo = int(m.group(1)) * TMO_SCALE if m else 60
     if name.startswith('76_dollars'):
         flags = ['-fdollars-in-identifiers']
     wd = f'{OUT}/w/{suite}/{name}'
@@ -243,12 +332,18 @@ def one_(t):
     cwd = os.path.dirname(path)
     vfl = BASE + CLFL + flags   # the same flags as clang (vpp ignores what it does not know)
     if FE_ONLY:
-        rc, _, err = sh([CL, '-fsyntax-only'] + BASE + CLFL + flags + [path], cwd=cwd)
+        timeout = reference_timeout(path)
+        rc, _, err = sh([CL, '-fsyntax-only'] + BASE + CLFL + flags + [path], cwd=cwd, timeout=timeout)
+        failure = oracle_error(rc, err, 'compile', timeout)
+        if failure:
+            return t, 'error', failure['error'], failure['why']
         if rc:
             return t, 'skip', 'clang-rejects', first_err(err.decode(errors='replace'))
         rc, _, err = sh([VPP, '-fsyntax-only'] + vfl + [path], cwd=cwd, timeout=tmo)
         return (t, 'pass', '', '') if rc == 0 else (t, 'fail', 'fe', first_err(err.decode(errors='replace')))
     ref = reference(suite, name, path, flags, RTHASH, wd)
+    if 'error' in ref:
+        return t, 'error', ref['error'], ref['why']
     if 'skip' in ref:
         return t, 'skip', ref['skip'], ref['why']
     rc, _, err = sh([VPP, '-c'] + vfl + [path, '-o', f'{wd}/vcc.o'], cwd=cwd, timeout=tmo)
@@ -258,7 +353,7 @@ def one_(t):
             return t, 'fail', 'fe', first_err(err2.decode(errors='replace'))
         e = err.decode(errors='replace')
         cat = 'fp' if re.search(r'floating point|long double', e) else 'emit'
-        return t, 'fail', cat, first_err(e) if rc != 'timeout' and rc > 0 else f'vpp: signal/timeout {rc}: ' + first_err(e)
+        return t, 'fail', cat, first_err(e) if isinstance(rc, int) and rc > 0 else f'vpp: signal/timeout {rc}: ' + first_err(e)
     if suite == 'vcc' and re.search(r'/\*\s*vcc-threads-same\s*\*/', src):
         outs = set()
         for k, n in enumerate(['1', '8', '8', '8']):
@@ -330,12 +425,12 @@ if __name__ == '__main__':
         if st != 'pass':
             by[s][f'{st}:{cat}'] += 1
             whys[(st, cat)][why] += 1
-        if verbose and st == 'fail':
-            print(f'FAIL {cat:5s} {s}/{n}: {why}')
+        if st in ('fail', 'error'):
+            print(f'{st.upper()} {cat:5s} {s}/{n}: {why}')
         if show and st != 'pass' and cat == show:
             print(f'{st} {cat} {s}/{n}: {why}')
     for (st, cat), c in sorted(whys.items()):
-        if st == 'fail' or verbose:
+        if st in ('fail', 'error') or verbose:
             print(f'--- {st} {cat}: {sum(c.values())}')
             for w, k in c.most_common(int(os.environ.get('SHOW', 8))):
                 print(f'  {k:4d}  {w[:150]}')
@@ -343,14 +438,14 @@ if __name__ == '__main__':
     for s in sorted(by):
         c = by[s]; tot.update(c)
     for s, c in sorted(by.items()) + [('all', tot)]:
-        run = c['pass'] + c['fail']
+        run = c['pass'] + c['fail'] + c['error']
         det = ' '.join(f'{k}={v}' for k, v in sorted(c.items()) if ':' in k)
         xf = f', {c["xfail"]} xfail' if c['xfail'] else ''
         print(f'{s:4s} {c["pass"]}/{run} pass ({100 * c["pass"] / max(run, 1):.1f}%){xf}, {c["skip"]} skipped   {det}')
     if suite in (None, 'tcc') and not fe:
-        bad = [n for (s, n, _), st, cat, _ in res if s == 'tcc' and st != 'skip'
+        bad = [n for (s, n, _), st, cat, _ in res if s == 'tcc' and st not in ('skip', 'error')
                and not json.load(open(f'{OUT}/ref/tcc/{n}.json')).get('expect_ok')]
         if bad:
             print(f'note: clang+rt output differs from tcc .expect for {len(bad)}: {" ".join(bad[:12])}')
     print(f'{time.time() - t0:.1f} s')
-    sys.exit(1 if tot['fail'] else 0)
+    sys.exit(1 if tot['fail'] or tot['error'] else 0)

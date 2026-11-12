@@ -48,8 +48,25 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 	if (!init)
 		return;
 	x = N(init);
+	if (x->op == N_CAST && x->aux == CK_BITS) {
+		for (uint64_t pos = 0, size = tsize(c, ty); pos < size;) {
+			unsigned char bytes[16], known[16];
+			unsigned len = size - pos > 16 ? 16 : (unsigned)(size - pos);
+			if (!cc_bitcast_read(c, init, pos, len, bytes, known)) efatal(e, x->loc, "initializer element is not a compile-time constant");
+			for (unsigned i = 0; i < len; i++) data_put(e, off + pos + i, bytes[i] & known[i], 1);
+			pos += len;
+		}
+		return;
+	}
 	if (x->op == N_ZERO)
 		return;
+	if (is_bvec(c, ty) && x->op == N_CAST && x->aux == CK_SPLAT) {
+		if (!cc_eval(c, x->a, &cv) || cv.kind != CV_INT)
+			efatal(e, x->loc, "initializer element is not a compile-time constant");
+		for (uint64_t k = 0; k < T(c, ty)->n; k++)
+			if (cv.i) data_or(e, off + k / 8, 1u << (k % 8));
+		return;
+	}
 	if (x->op == N_INIT) {
 		const uint32_t *v = &c->lists[x->b];
 
@@ -59,6 +76,19 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 
 			uint64_t n = 0;
 
+			if (is_bvec(c, ty)) {
+				for (uint32_t i = 0; i < x->c; i++) {
+					if (!cc_eval(c, v[3*i+2], &cv) || cv.kind != CV_INT)
+						efatal(e, x->loc, "initializer element is not a compile-time constant");
+					for (uint64_t k = v[3*i]; k <= v[3*i+1]; k++) {
+						uint64_t at = off + k / 8;
+						unsigned m = 1u << (k % 8);
+						data_or(e, at, 0);
+						e->data.p[at] = (char)((e->data.p[at] & ~m) | (cv.i ? m : 0));
+					}
+				}
+				return;
+			}
 			for (uint32_t i = 0; i < x->c; i++) {
 				for (uint64_t k = v[3 * i]; k <= v[3 * i + 1]; k++)
 					data_init(e, off + k * es, et, v[3 * i + 2]);
@@ -80,17 +110,20 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 				if (!v[i])
 					continue;
 				if (f->bitfield) {
-					uint64_t bo = f->off, w = f->width, bits;
+					uint64_t bo = f->off, w = f->width;
+					u128 bits;
 
-					if (!cc_eval(c, v[i], &cv) || cv.kind != CV_INT)
+					if (!cc_eval(c, v[i], &cv) || (cv.kind != CV_INT && cv.kind != CV_BIGINT))
 						efatal(e, x->loc, "initializer element is not a compile-time constant");
-					bits = (uint64_t)cv.i & (w >= 64 ? ~(uint64_t)0 : (((uint64_t)1 << w) - 1));
+					/* The per-bit loop truncates to the field width. Keep the
+					   full constant so shifts through bit 127 remain defined. */
+					bits = (u128)cv.i;
 					for (uint64_t k = 0; k < w; k++) {
 						uint64_t at = off + (bo + k) / 8;
 						uint8_t m = (uint8_t)(1u << ((bo + k) % 8));
 
 						data_or(e, at, 0);
-						e->data.p[at] = (char)((e->data.p[at] & ~m) | (((bits >> k) & 1) ? m : 0));
+						e->data.p[at] = (char)((e->data.p[at] & ~m) | ((cv.kind == CV_BIGINT ? (k/32 < cv.nbig && ((c->lists[cv.big+k/32] >> (k%32)) & 1)) : k < 128 ? ((bits >> k) & 1) : cv.i < 0) ? m : 0));
 					}
 					continue;
 				}
@@ -98,6 +131,18 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 			}
 		}
 		return;
+	}
+	if (x->op == N_COMMA) {
+		data_init(e, off, ty, x->b);
+		return;
+	}
+	{
+		uint32_t selected;
+
+		if (cc_init_subobject(c, init, &selected)) {
+			data_init(e, off, ty, selected);
+			return;
+		}
 	}
 	if (x->op == N_STR && is_array(c, ty)) {
 		const cstr *s = &c->strs[x->a];
@@ -122,11 +167,11 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 		data_init(e, off + tsize(c, et), et, x->b);
 		return;
 	}
-	if (x->op == N_CAST && x->aux == CK_NOP && is_agg(c, ty)) {
+	if (x->op == N_CAST && x->aux == CK_NOP && is_agg(c, ty) && !em_bigint(c, ty)) {
 		data_init(e, off, ty, x->a);
 		return;
 	}
-	if (is_agg(c, ty)) {
+	if (is_agg(c, ty) && !em_bigint(c, ty)) {
 		/* a const aggregate object as the initializer (clang extension) */
 		uint32_t m = strip_casts(c, init);
 
@@ -142,7 +187,16 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 		int n = (int)tsize(c, ty);
 
 		switch (cv.kind) {
+		case CV_BIGINT:
+			for (unsigned i = 0; i < cv.nbig; i++)
+				data_put(e, off + 4 * i, c->lists[cv.big + i], 4);
+			return;
 		case CV_INT:
+			if (em_bigint(c, ty)) {
+				for (int i = 0; i < n; i += 8)
+					data_put(e, off + i, i < 16 ? (uint64_t)((u128)cv.i >> (8*i)) : cv.i < 0 ? UINT64_MAX : 0, 8);
+				return;
+			}
 			if (n == 16) {
 				data_put(e, off, (uint64_t)(u128)cv.i, 8);
 				data_put(e, off + 8, (uint64_t)((u128)cv.i >> 64), 8);
@@ -568,9 +622,17 @@ VPRIV void emit_string(ecx *e, uint32_t i)
 	bool nul = false;
 	uint64_t n = (uint64_t)s->n * s->esz;
 
-	for (uint64_t k = 0; k + s->esz < n; k++)
-		if (!s->s[k] && s->esz == 1)
+	/* SHF_STRINGS splits at zero code units, including wide ones.
+	   Only the final terminator may be merged independently. */
+	for (uint64_t k = 0; k + s->esz < n; k += s->esz) {
+		uint32_t unit = 0;
+
+		memcpy(&unit, s->s + k, s->esz);
+		if (!unit) {
 			nul = true;
+			break;
+		}
+	}
 	if (direct(e)) {
 		size_t h;
 		uint32_t ref = REF(RK_STR, i);

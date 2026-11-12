@@ -42,6 +42,7 @@ ElfObj *elf_new(void)
 	o->syms.base = reserve(SYMS_CAP); o->syms.cap = SYMS_CAP;
 	o->fixes.base = reserve(FIX_CAP); o->fixes.cap = FIX_CAP;
 	o->regs.base = reserve(SYMS_CAP); o->regs.cap = SYMS_CAP;
+	o->machine = EM_AARCH64;
 	elf_reset(o);
 	return o;
 }
@@ -162,6 +163,45 @@ void elf_expr_sym(ElfObj *o, uint32_t s, int op, ElfVal x, ElfVal y)
 	o->expr_tail = &e->next;
 }
 
+/* the expression that defines temporary s (elf_expr_sym): 1, else 0 */
+int elf_expr_get(ElfObj *o, uint32_t s, int *op, ElfVal *x, ElfVal *y)
+{
+	for (ElfExpr *e = o->expr; e; e = e->next)
+		if (e->sym == s) {
+			*op = e->op, *x = e->x, *y = e->y;
+			return 1;
+		}
+	return 0;
+}
+
+/* p op q as GNU as computes it (comparisons: -1 true); 0 for an operator it does not know */
+int elf_expr_op(int op, int64_t p, int64_t q, int64_t *r)
+{
+	switch (op) {
+	case '+': *r = (int64_t)((uint64_t)p + (uint64_t)q); break;
+	case '-': *r = (int64_t)((uint64_t)p - (uint64_t)q); break;
+	case '*': *r = (int64_t)((uint64_t)p * (uint64_t)q); break;
+	case '/': if (!q) return 0; *r = p / q; break;
+	case '%': if (!q) return 0; *r = p % q; break;
+	case 'L': *r = (int64_t)((uint64_t)p << (q & 63)); break;
+	case 'R': *r = (int64_t)((uint64_t)p >> (q & 63)); break;
+	case '&': *r = p & q; break;
+	case '|': *r = p | q; break;
+	case '^': *r = p ^ q; break;
+	case '!': *r = p | ~q; break;
+	case 'A': *r = p && q; break;
+	case 'O': *r = p || q; break;
+	case 'E': *r = p == q ? -1 : 0; break;
+	case 'N': *r = p != q ? -1 : 0; break;
+	case '<': *r = p < q ? -1 : 0; break;
+	case '>': *r = p > q ? -1 : 0; break;
+	case 'l': *r = p <= q ? -1 : 0; break;
+	case 'g': *r = p >= q ? -1 : 0; break;
+	default: return 0;
+	}
+	return 1;
+}
+
 void elf_size_expr(ElfObj *o, uint32_t s, ElfVal v)
 {
 	ElfSym *y = elf_symp(o, s);
@@ -182,9 +222,38 @@ uint32_t elf_find_section(ElfObj *o, const char *name, uint32_t len, uint32_t gr
 {
 	for (uint32_t i = 1; i < o->nsec; i++) {
 		ElfSec *s = elf_sec(o, i);
-		if (s->len == len && s->group == group && !memcmp(s->name, name, len)) return i;
+		if (s->len == len && s->group == group && !s->linksec && !memcmp(s->name, name, len)) return i;
 	}
 	return 0;
+}
+
+uint32_t elf_section_lo(ElfObj *o, const char *name, uint32_t len, uint32_t type, uint64_t flags, uint32_t entsize,
+			uint32_t group, uint32_t linksec, uint32_t linksym)
+{
+	for (uint32_t i = 1; i < o->nsec; i++) {
+		ElfSec *s = elf_sec(o, i);
+		if (s->len == len && s->group == group && s->linksec && s->linksym == linksym && !memcmp(s->name, name, len)) return i;
+	}
+	if (!linksec)
+		return elf_section(o, name, len, type, flags, entsize, group);
+	/* (a fresh one: elf_section finds none with linksec 0 of this name only if there is none) */
+	uint32_t save = o->nsec, i;
+	for (i = 1; i < o->nsec; i++) {
+		ElfSec *s = elf_sec(o, i);
+		if (s->len == len && s->group == group && !s->linksec && !memcmp(s->name, name, len)) break;
+	}
+	if (i < o->nsec) {	/* hide a same-named unlinked section while creating this one */
+		ElfSec *s = elf_sec(o, i);
+		s->linksec = UINT32_MAX;
+		uint32_t n = elf_section(o, name, len, type, flags, entsize, group);
+		s->linksec = 0;
+		elf_sec(o, n)->linksec = linksec, elf_sec(o, n)->linksym = linksym;
+		return n;
+	}
+	(void)save;
+	uint32_t n = elf_section(o, name, len, type, flags, entsize, group);
+	elf_sec(o, n)->linksec = linksec, elf_sec(o, n)->linksym = linksym;
+	return n;
 }
 
 uint32_t elf_section(ElfObj *o, const char *name, uint32_t len, uint32_t type,
@@ -296,6 +365,7 @@ void elf_align(ElfObj *o, uint32_t frag, unsigned p2, int code, uint8_t fill, ui
 	if (s->type == SHT_NOBITS) { f->size += pad; return; }
 	uint8_t *p = elf_grow(o, frag, pad);
 	if (!code) { memset(p, fill, pad); return; }
+	if (o->machine == EM_X86_64) { elf_x86_nops(p, pad); return; }
 	uint64_t z = pad & 3;
 	memset(p, 0, z);
 	for (p += z, pad -= z; pad; pad -= 4, p += 4) { p[0] = 0x1f; p[1] = 0x20; p[2] = 0x03; p[3] = 0xd5; }
@@ -306,9 +376,28 @@ static void mapsym(ElfObj *o, uint32_t frag, const char *n)
 	uint32_t y = elf_sym_anon(o, n, 2);
 	elf_define(o, y, frag, elf_frag(o, frag)->size);
 }
+/* x86-64 nops as MC's writeNopData: the longest of up to 10 bytes, repeated */
+void elf_x86_nops(uint8_t *p, uint64_t n)
+{
+	static const uint8_t nop[11][10] = {
+		{ 0 }, { 0x90 }, { 0x66, 0x90 }, { 0x0f, 0x1f, 0x00 }, { 0x0f, 0x1f, 0x40, 0x00 },
+		{ 0x0f, 0x1f, 0x44, 0x00, 0x00 }, { 0x66, 0x0f, 0x1f, 0x44, 0x00, 0x00 },
+		{ 0x0f, 0x1f, 0x80, 0x00, 0x00, 0x00, 0x00 }, { 0x0f, 0x1f, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00 },
+		{ 0x66, 0x0f, 0x1f, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00 },
+		{ 0x66, 0x2e, 0x0f, 0x1f, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00 },
+	};
+	while (n) {
+		uint64_t k = n > 10 ? 10 : n;
+
+		memcpy(p, nop[k], k);
+		p += k, n -= k;
+	}
+}
+
 void elf_code_slow(ElfObj *o, uint32_t frag)
 {
 	ElfSec *s = elf_sec(o, elf_frag(o, frag)->sec);
+	if (o->machine == EM_X86_64) { s->map = 1; return; }	/* (no mapping symbols, no minimum alignment) */
 	s->map = 1;
 	if (s->align < 2) s->align = 2;
 	mapsym(o, frag, "$x");
@@ -316,6 +405,7 @@ void elf_code_slow(ElfObj *o, uint32_t frag)
 void elf_data_slow(ElfObj *o, uint32_t frag)
 {
 	elf_sec(o, elf_frag(o, frag)->sec)->map = 2;
+	if (o->machine == EM_X86_64) return;
 	mapsym(o, frag, "$d");
 }
 
@@ -325,7 +415,7 @@ void elf_fixup(ElfObj *o, uint32_t frag, uint64_t off, uint8_t *p, uint32_t type
 {
 	ElfFix *x = rpush(&o->fixes, sizeof *x, 8);
 	uint32_t id = o->nfix++;
-	x->frag = frag; x->next = 0; x->type = type; x->off = off; x->p = p; x->v = v;
+	x->frag = frag; x->next = 0; x->type = type; x->pad = 0; x->off = off; x->p = p; x->v = v;
 	ElfFrag *f = elf_frag(o, frag);
 	if (f->fix_tail) ((ElfFix *)o->fixes.base)[f->fix_tail].next = id; else f->fix_head = id;
 	f->fix_tail = id;
@@ -392,19 +482,8 @@ void elf_layout(ElfObj *o)
 			if (b && ok) { if (b->flags & ESYM_ABS) v[k] -= (int64_t)b->value; else if (insec(b) && a) v[k] -= (int64_t)symoff(o, b); else ok = 0; }
 		}
 		if (!ok) { elf_error(o, "expected absolute expression"); continue; }
-		int64_t p = v[0], q = v[1], r = 0;
-		switch (e->op) {
-		case '*': r = (int64_t)((uint64_t)p * (uint64_t)q); break;
-		case '/': if (!q) { elf_error(o, "division by zero"); continue; } r = p / q; break;
-		case '%': if (!q) { elf_error(o, "division by zero"); continue; } r = p % q; break;
-		case 'L': r = (int64_t)((uint64_t)p << (q & 63)); break;
-		case 'R': r = (int64_t)((uint64_t)p >> (q & 63)); break;
-		case '&': r = p & q; break;
-		case '|': r = p | q; break;
-		case '^': r = p ^ q; break;
-		case '!': r = p | ~q; break;
-		default: elf_error(o, "bad operator in deferred expression"); continue;
-		}
+		int64_t r = 0;
+		if (!elf_expr_op(e->op, v[0], v[1], &r)) { elf_error(o, e->op == '/' || e->op == '%' ? "division by zero" : "bad operator in deferred expression"); continue; }
 		elf_define_abs(o, e->sym, (uint64_t)r);
 	}
 }

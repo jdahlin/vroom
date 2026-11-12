@@ -139,12 +139,14 @@ VPRIV wbind *wlocal(ecx *e, uint32_t s)
 	if (b->gen == W->gen)
 		return b;
 	b->gen = W->gen;
+	b->cellid = 0;
 	if (wreg_ok(e, s)) {
 		b->k = WB_LOC;
 		b->loc = wnewloc(e, wty(c, c->syms[s].ty));
 	} else {
 		b->k = WB_FRAME;
 		b->off = wslot(e, tsize(c, c->syms[s].ty), sym_align(c, s));
+		b->cellid = wmem_id(e, b->off);
 	}
 	return b;
 }
@@ -217,17 +219,21 @@ VPRIV void wvla_fix(ecx *e, qty t, bool pure)
 
 			for (k = 0; k < W->nvsz && W->vszn[k] != a->n; k++)
 				;
+			if (k < W->nvsz) {
+				t = a->base;
+				continue;
+			}
 			if (k == W->nvsz) {
 				if (W->nvsz >= WMAXGD)
 					efatal(e, e->curloc, "too many variable length array sizes in one function");
 				W->vszn[k] = a->n;
 				W->vszl[k] = wnewloc(e, WPT(c));
+				/* Bound emission may recursively capture another VLA dimension. */
+				W->nvsz++;
 			}
 			wexpr(e, a->n, true);
 			wconv(e, N(a->n)->ty, prim(TY_ULONG));
 			wset(e, W->vszl[k]);
-			if (k == W->nvsz)
-				W->nvsz++;
 		}
 		t = a->base;
 	}
@@ -294,7 +300,7 @@ VPRIV void wlval(ecx *e, uint32_t n, wlv *l, qty t)
 
 	memset(l, 0, sizeof *l);
 	l->k = WL_MEM;
-	l->vol = (QQ(x->ty) & Q_VOLATILE) != 0;
+	l->vol = (QQ(x->ty) & Q_VOLATILE) != 0 || (T(c, x->ty)->flags & TF_ATOMIC) != 0;
 	switch (x->op) {
 	case N_VAR: {
 		uint32_t s = x->a;
@@ -314,6 +320,8 @@ VPRIV void wlval(ecx *e, uint32_t n, wlv *l, qty t)
 			}
 			wget(e, wfp(e));
 			l->off = b->off;
+			l->cellid = b->cellid;
+			l->celloff = b->off;
 			break;
 		}
 		if (y->kind == S_FUNC || y->kind == S_BUILTIN) {
@@ -339,7 +347,8 @@ VPRIV void wlval(ecx *e, uint32_t n, wlv *l, qty t)
 		if (l->k != WL_MEM)
 			efatal(e, x->loc, "wasm: member of a non-memory object");
 		l->off += f->off / 8;
-		l->vol |= (QQ(x->ty) & Q_VOLATILE) != 0;
+		l->celloff += f->off / 8;
+		l->vol |= (QQ(x->ty) & Q_VOLATILE) != 0 || (T(c, x->ty)->flags & TF_ATOMIC) != 0;
 		if (f->bitfield) {
 			l->bf = 1;
 			l->bitoff = (uint16_t)(f->off % 8);
@@ -353,6 +362,30 @@ VPRIV void wlval(ecx *e, uint32_t n, wlv *l, qty t)
 		int64_t k;
 
 		wexpr(e, x->a, true);
+		if (x->aux == 1) {
+			l->bf = 1, l->width = 1;
+			if (wnum(e, x->b, &k) && k >= 0) {
+				l->off = (uint64_t)k / 8, l->bitoff = k % 8;
+				break;
+			}
+			wexpr(e, x->b, true);
+			wconv(e, N(x->b)->ty, prim(TY_UINT));
+			uint32_t ix = wtmp(e, WT_I32);
+			wset(e, ix);
+			l->bf = 2, l->dynbit_slot = wslot(e, 4, 4);
+			wslot_addr(e, l->dynbit_slot);
+			wget(e, ix);
+			wconst(e, WT_I32, 7);
+			wi(e, "i32.and");
+			wiu(e, "i32.store", 0);
+			wget(e, ix);
+			wconst(e, WT_I32, 3);
+			wi(e, "i32.shr_u");
+			wto_ptr(e, prim(TY_UINT));
+			wpop(e, "add");
+			wfree(e, ix);
+			break;
+		}
 		if (es && wnum(e, x->b, &k) && (k * (int64_t)es) >= 0) {
 			l->off = (uint64_t)(k * (int64_t)es);
 			break;
@@ -372,10 +405,13 @@ VPRIV void wlval(ecx *e, uint32_t n, wlv *l, qty t)
 			b->gen = W->gen;
 			b->k = WB_FRAME;
 			b->off = wslot(e, tsize(c, x->ty), sym_align(c, s));
+			b->cellid = wmem_id(e, b->off);
 		}
 		winit(e, b->off, x->ty, x->a, false);
 		wget(e, wfp(e));
 		l->off = b->off;
+		l->cellid = b->cellid;
+		l->celloff = b->off;
 		break;
 	}
 	case N_STR:
@@ -386,7 +422,7 @@ VPRIV void wlval(ecx *e, uint32_t n, wlv *l, qty t)
 			wlval(e, x->a, l, t);
 			return;
 		}
-		/* fall through */
+		__attribute__((fallthrough));
 	default:
 		if (wty(c, x->ty) != WT_MEM)
 			efatal(e, x->loc, "wasm: unsupported lvalue (node %d)", x->op);
@@ -448,7 +484,19 @@ VPRIV void wload(ecx *e, wlv *l, qty t)
 		return;
 	}
 	if (wty(c, t) == WT_MEM) {
+		wmem_poison(e, l, tsize(c, t));
 		wfold_off(e, l);
+		return;
+	}
+	if (l->bf)
+		wmem_poison(e, l, l->bf == 2 ? tsize(c, t) : (uint64_t)wbf_bytes(e, l));
+	if (l->bf == 2) {
+		wiu(e, "i32.load8_u", l->off);
+		wslot_addr(e, l->dynbit_slot);
+		wiu(e, "i32.load", 0);
+		wi(e, "i32.shr_u");
+		wconst(e, WT_I32, 1);
+		wi(e, "i32.and");
 		return;
 	}
 	if (l->bf) {
@@ -501,7 +549,9 @@ VPRIV void wload(ecx *e, wlv *l, qty t)
 			wi(e, "i32.wrap_i64");
 		return;
 	}
+	size_t begin = e->w->b.n;
 	wiu(e, wmemop(c, t, false), l->off);
+	wmem_access(e, l, t, false, begin);
 }
 
 /* stack: [address] value (WL_MEM), or value (WL_LOC); records: [dst src], dst folded */
@@ -515,6 +565,34 @@ VPRIV void wstore(ecx *e, wlv *l, qty t)
 	}
 	if (wty(c, t) == WT_MEM) {
 		wcopy(e, tsize(c, t));
+		return;
+	}
+	if (l->bf)
+		wmem_poison(e, l, l->bf == 2 ? tsize(c, t) : (uint64_t)wbf_bytes(e, l));
+	if (l->bf == 2) {
+		uint32_t tv = wtmp(e, WT_I32), ta = wtmp(e, WPT(c)), tm = wtmp(e, WT_I32);
+		wset(e, tv);
+		wset(e, ta);
+		wconst(e, WT_I32, 1);
+		wslot_addr(e, l->dynbit_slot);
+		wiu(e, "i32.load", 0);
+		wi(e, "i32.shl");
+		wset(e, tm);
+		wget(e, ta);
+		wget(e, ta);
+		wiu(e, "i32.load8_u", l->off);
+		wget(e, tm);
+		wconst(e, WT_I32, -1);
+		wi(e, "i32.xor");
+		wi(e, "i32.and");
+		wconst(e, WT_I32, 0);
+		wget(e, tv);
+		wi(e, "i32.sub");
+		wget(e, tm);
+		wi(e, "i32.and");
+		wi(e, "i32.or");
+		wiu(e, "i32.store8", l->off);
+		wfree(e, tv), wfree(e, ta), wfree(e, tm);
 		return;
 	}
 	if (l->bf) {
@@ -584,12 +662,15 @@ VPRIV void wstore(ecx *e, wlv *l, qty t)
 		wfree(e, ta);
 		return;
 	}
+	size_t begin = e->w->b.n;
 	wiu(e, wmemop(c, t, true), l->off);
+	wmem_access(e, l, t, true, begin);
 }
 
 /* stack: [dst src] -> [] */
 VPRIV void wcopy(ecx *e, uint64_t n)
 {
+	wmem_fence(e);
 	wpconst(e, (int64_t)n);
 	wi(e, "memory.copy\t0, 0");
 }
@@ -642,6 +723,7 @@ static void wrt(ecx *e, const char *name, const char *sig)
 {
 	wst *W = e->w;
 
+	wmem_fence(e);
 	tb_s(&W->decl, name);
 	tb_c(&W->decl, '\t');
 	for (; *sig; sig++)
@@ -1063,7 +1145,7 @@ static void wvlanes(ecx *e, int op, qty at, qty bt, qty rt, bool unary)
 	bool av = is_vec(c, at), bv = !unary && is_vec(c, bt);
 	qty vt = av ? at : bt, et = T(c, vt)->base, rte = T(c, rt)->base;
 	qty yt = unary ? et : bv ? T(c, bt)->base : bt, xt = av ? et : at;
-	uint32_t n = (uint32_t)(tsize(c, vt) / tsize(c, et));
+	uint32_t n = T(c, vt)->n;
 	uint32_t ta, tb = UINT32_MAX;
 	uint64_t sl = wslot(e, tsize(c, rt), 16);
 	int k = wty(c, et);
@@ -1078,6 +1160,8 @@ static void wvlanes(ecx *e, int op, qty at, qty bt, qty rt, bool unary)
 	for (uint32_t i = 0; i < n; i++) {
 		wlv la = { .k = WL_MEM, .off = i * tsize(c, et) }, lr = { .k = WL_MEM, .off = i * tsize(c, rte) };
 
+		if (is_bvec(c, at)) la.off = i / 8, la.bf = 1, la.width = 1, la.bitoff = i % 8;
+		if (is_bvec(c, rt)) lr.off = i / 8, lr.bf = 1, lr.width = 1, lr.bitoff = i % 8;
 		wslot_addr(e, sl);
 		if (unary && op == T_MINUS && k != WT_F32 && k != WT_F64)
 			wconst(e, k, 0);
@@ -1097,6 +1181,7 @@ static void wvlanes(ecx *e, int op, qty at, qty bt, qty rt, bool unary)
 			if (bv) {
 				wlv lb = { .k = WL_MEM, .off = i * tsize(c, yt) };
 
+				if (is_bvec(c, bt)) lb.off = i / 8, lb.bf = 1, lb.width = 1, lb.bitoff = i % 8;
 				wget(e, tb);
 				wload(e, &lb, yt);
 			} else {
@@ -1200,13 +1285,109 @@ VPRIV void wcompare(ecx *e, int op, qty t)
 	wop(e, k, o);
 }
 
+/* The shared rules consume a known RHS; wasm owns its effects and stack. */
+static bool wbinrule(ecx *e, uint32_t n, qty ty, int *op, i128 *rhs, int *identity, em_udivconst_recipe *reciprocal, bool pure)
+{
+	cc *c = e->c;
+	cval cv;
+
+	reciprocal->divisor = 0;
+	switch (*op) {
+	case T_PLUS: case T_MINUS: case T_STAR: case T_SLASH: case T_PERCENT:
+	case T_AMP: case T_PIPE: case T_CARET: case T_LESSLESS: case T_GREATERGREATER:
+		break;
+	default:
+		return false;
+	}
+	if (!cc_eval(c, n, &cv) || cv.kind != CV_INT || (!pure && side_effects(c, n)))
+		return false;
+	*rhs = cv.i;
+	*identity = EM_ID_NONE;
+	if (e->E->o->opt && !e->E->noopt &&
+	    (em_xor_not(c, ty, *op, *rhs) || em_mulshift(c, ty, op, rhs)))
+		return true;
+
+	*identity = em_bin_identity(c, ty, *op, *rhs);
+	if (*identity == EM_ID_NONE && !em_divpow2(c, ty, op, rhs)) {
+		em_sdivpow2_recipe recipe;
+
+		if ((!em_sdivpow2(c, ty, *op, *rhs, &recipe) || !wsdivpow2_ok(&recipe)) &&
+		    !(*op == T_SLASH && e->E->o->opt && !e->E->noopt &&
+		      (tsize(c, ty) == 4 || (tsize(c, ty) == 8 && (uint64_t)*rhs > (UINT64_C(1) << 63))) &&
+		      em_udivconst(c, ty, *op, *rhs, reciprocal) && wudivconst_ok(reciprocal)))
+			return false;
+	}
+	return true;
+}
+
+/* stack: [lhs] converted to ty; omit a pure RHS and apply its shared rule. */
+static void wbinreduced(ecx *e, qty ty, int op, i128 rhs, int identity, const em_udivconst_recipe *reciprocal)
+{
+	if (identity == EM_ID_LEFT)
+		return;
+	if (identity == EM_ID_ZERO || identity == EM_ID_ONES) {
+		wi(e, "drop");
+		wconst(e, wty(e->c, ty), identity == EM_ID_ZERO ? 0 : (int64_t)em_trunc_to(e->c, -1, ty));
+		return;
+	}
+	{
+		em_sdivpow2_recipe recipe;
+
+		if (em_sdivpow2(e->c, ty, op, rhs, &recipe) && wsdivpow2_ok(&recipe)) {
+			wsdivpow2(e, ty, &recipe);
+			return;
+		}
+	}
+	if (reciprocal->divisor) {
+		wudivconst(e, reciprocal);
+		return;
+	}
+	/* The replacement RHS already has the operation's wasm stack type. */
+	wconst(e, wty(e->c, ty), (int64_t)rhs);
+	warith(e, op, ty, 0);
+}
+
 static int wbinary(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
 	const node *x = N(n);
 	int op = x->aux;
 	qty lt = N(x->a)->ty, rt = N(x->b)->ty, ty = x->ty;
+	uint32_t operand;
+	int bound = em_cmpbounds(e, n, &operand);
+	int repeated = em_repeated_integer(e, n);
 
+	if (repeated == EM_ID_ZERO) {
+		wconst(e, wty(c, ty), 0);
+		return wty(c, ty);
+	}
+	if (repeated == EM_ID_TRUE) {
+		wconst(e, WT_I32, 1);
+		return WT_I32;
+	}
+	if (repeated == EM_ID_LEFT)
+		return wexpr(e, x->a, true);
+
+	if (bound >= 0) {
+		wexpr(e, operand, false);
+		wconst(e, WT_I32, bound);
+		return WT_I32;
+	}
+	if (em_cmpzero(e, n, &operand)) {
+		wexpr(e, operand, true);
+		wop(e, wty(c, N(operand)->ty), "eqz");
+		return WT_I32;
+	}
+	if (em_sibling_values(e, n)) {
+		int k = wty(c, ty);
+		uint32_t temp = wtmp(e, k);
+		wexpr(e, x->a, true);
+		wtee(e, temp);
+		wget(e, temp);
+		wfree(e, temp);
+		warith(e, op, ty, 0);
+		return k;
+	}
 	if (unlikely(vstack_low()))
 		efatal(e, x->loc, "expression nested too deeply");
 	if (is_vec(c, ty) || is_vec(c, lt)) {
@@ -1262,13 +1443,31 @@ static int wbinary(ecx *e, uint32_t n)
 		wcompare(e, op, t);
 		return WT_I32;
 	}
-	wexpr(e, x->a, true);
-	if (QUNQ(lt) != QUNQ(ty) && op != T_LESSLESS && op != T_GREATERGREATER)
-		wconv(e, lt, ty);
-	wexpr(e, x->b, true);
-	if (QUNQ(rt) != QUNQ(ty) && op != T_LESSLESS && op != T_GREATERGREATER)
-		wconv(e, rt, ty);
-	warith(e, op, ty, (op == T_LESSLESS || op == T_GREATERGREATER) ? rt : 0);
+	int reduced_op = op;
+	i128 rhs = 0;
+	int identity = EM_ID_NONE;
+	em_udivconst_recipe reciprocal;
+	bool reduced = wbinrule(e, x->b, ty, &reduced_op, &rhs, &identity, &reciprocal, false);
+	uint32_t value = x->a;
+	qty value_type = lt;
+	if (!reduced && e->E->o->opt && !e->E->noopt && (op == T_STAR || op == T_CARET)) {
+		reduced_op = op;
+		if ((reduced = wbinrule(e, x->a, ty, &reduced_op, &rhs, &identity, &reciprocal, false))) {
+			value = x->b;
+			value_type = rt;
+		}
+	}
+	wexpr(e, value, true);
+	if (QUNQ(value_type) != QUNQ(ty) && op != T_LESSLESS && op != T_GREATERGREATER)
+		wconv(e, value_type, ty);
+	if (reduced) {
+		wbinreduced(e, ty, reduced_op, rhs, identity, &reciprocal);
+	} else {
+		wexpr(e, x->b, true);
+		if (QUNQ(rt) != QUNQ(ty) && op != T_LESSLESS && op != T_GREATERGREATER)
+			wconv(e, rt, ty);
+		warith(e, op, ty, (op == T_LESSLESS || op == T_GREATERGREATER) ? rt : 0);
+	}
 	return wty(c, ty);
 }
 
@@ -1338,7 +1537,7 @@ static bool wbcp_in(cc *c, uint32_t n)
 	case N_BUILTIN:
 		if (x->aux == BI_CONSTANT_P)
 			return true;
-		/* fall through */
+		__attribute__((fallthrough));
 	case N_CALL:
 		for (uint32_t i = 0; i < x->c; i++)
 			if (wbcp_in(c, c->lists[x->b + i]))
@@ -1359,15 +1558,19 @@ VPRIV int wknown(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
 	cval cv;
+	int known = c->o->opt && !e->E->noopt ? em_const_truth(e, n, wconstant_p) : -1;
 	uint32_t r = n;
 
+	if (known >= 0)
+		return known;
 	while (N(r)->op == N_CAST && (N(r)->aux == CK_INT || N(r)->aux == CK_NOP || N(r)->aux == CK_BOOL))
 		r = N(r)->a;
 	if (N(r)->op == N_BUILTIN && N(r)->aux == BI_CONSTANT_P)
 		return wconstant_p(e, c->lists[N(r)->b]);
-	if (wbcp_in(c, n))
-		return -1;
-	if (side_effects(c, n) || !cc_eval(c, n, &cv))
+	/* Other front-end constant forms (arithmetic, floats, addresses) retain
+	 * their existing semantics. Never ask cc_eval to reinterpret constant_p
+	 * under a compound expression: target bindings may change its answer. */
+	if (wbcp_in(c, n) || side_effects(c, n) || !cc_eval(c, n, &cv))
 		return -1;
 	if (cv.kind == CV_INT)
 		return cv.i != 0;
@@ -1401,21 +1604,21 @@ static int wcond_expr(ecx *e, uint32_t n, bool want)
 		case WT_F32: wfconst(e, WT_F32, 0); wi(e, "f32.ne"); break;
 		case WT_F64: wfconst(e, WT_F64, 0); wi(e, "f64.ne"); break;
 		}
-		wblock(e, wif(k));
+		wblock(e, wif(k), WF_IF);
 		if (want) {
 			wget(e, t);
 			wconv(e, at, x->ty);
 		}
-		wi(e, "else");
+		wboundary(e, "else", WF_ELSE);
 		wexpr(e, x->c, want);
 		wend(e, "end_if");
 		wfree(e, t);
 		return k;
 	}
 	wtruth(e, x->a);
-	wblock(e, wif(k));
+	wblock(e, wif(k), WF_IF);
 	wexpr(e, x->b, want);
-	wi(e, "else");
+	wboundary(e, "else", WF_ELSE);
 	wexpr(e, x->c, want);
 	wend(e, "end_if");
 	return k;
@@ -1511,16 +1714,29 @@ static int wassign(ecx *e, uint32_t n, bool want)
 			wscale(e, lt, es);
 			wpop(e, op == T_PLUS ? "add" : "sub");
 		} else {
+			int reduced_op = op;
+			i128 rhs = 0;
+			int identity = EM_ID_NONE;
+			em_udivconst_recipe reciprocal;
+			bool reduced = false;
+
 			if (!pt)
 				pt = lt;
+			/* No RHS effects: otherwise it was evaluated into tb above. */
+			if (tb == UINT32_MAX)
+				reduced = wbinrule(e, x->b, pt, &reduced_op, &rhs, &identity, &reciprocal, true);
 			wconv(e, lt, pt);
-			if (tb != UINT32_MAX)
-				wget(e, tb);
-			else
-				wexpr(e, x->b, true);
-			if (op != T_LESSLESS && op != T_GREATERGREATER && QUNQ(bt) != QUNQ(pt))
-				wconv(e, bt, pt);
-			warith(e, op, pt, (op == T_LESSLESS || op == T_GREATERGREATER) ? bt : 0);
+			if (reduced) {
+				wbinreduced(e, pt, reduced_op, rhs, identity, &reciprocal);
+			} else {
+				if (tb != UINT32_MAX)
+					wget(e, tb);
+				else
+					wexpr(e, x->b, true);
+				if (op != T_LESSLESS && op != T_GREATERGREATER && QUNQ(bt) != QUNQ(pt))
+					wconv(e, bt, pt);
+				warith(e, op, pt, (op == T_LESSLESS || op == T_GREATERGREATER) ? bt : 0);
+			}
 			wconv(e, pt, lt);
 		}
 		if (!want) {
@@ -1664,6 +1880,7 @@ static int wexpr1(ecx *e, uint32_t n, bool want);
 /* push the value of n (want), or only do what it does; returns the pushed type */
 VPRIV int wexpr(ecx *e, uint32_t n, bool want)
 {
+	if (n && n == e->reuse_from) n = e->reuse_to;
 	int k;
 
 	if (!want && !side_effects(e->c, n))
@@ -1758,6 +1975,7 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 		wlval(e, x->a, &l, prim(TY_VOID));
 		if (l.k != WL_MEM)
 			efatal(e, x->loc, "wasm: address of a register local");
+		wmem_escape(e, l.cellid);
 		wfold_off(e, &l);
 		return WPT(c);
 	}
@@ -1769,6 +1987,7 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 			wlval(e, x->a, &l, prim(TY_VOID));
 			if (l.k != WL_MEM)
 				efatal(e, x->loc, "wasm: array in a register");
+			wmem_escape(e, l.cellid);
 			wfold_off(e, &l);
 			return WPT(c);
 		}
@@ -1777,6 +1996,45 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 		case CK_VOID:
 			wexpr(e, x->a, false);
 			return WT_NONE;
+		case CK_BITS: {
+			qty from = N(x->a)->ty;
+			uint64_t sl = wslot(e, tsize(c, x->ty), talign(c, x->ty));
+			wlv d = { .k = WL_MEM };
+			wslot_addr(e, sl);
+			if (N(x->a)->flags & NF_LVALUE) {
+				wlv src;
+				wlval(e, x->a, &src, prim(TY_VOID));
+				if (src.bf) {
+					uint32_t addr = wtmp(e, WPT(c));
+					wset(e, addr); wi(e, "drop"); /* retain the source, replace dst per byte */
+					for (unsigned i = 0; i < tsize(c, from); i++) {
+						unsigned bit = i * 8;
+						wlv byte = { .k = WL_MEM, .off = i };
+						wslot_addr(e, sl);
+						if (bit < src.width || src.sgn) {
+							wlv part = src;
+							unsigned start = bit < src.width ? bit : src.width - 1;
+							part.off += (src.bitoff + start) / 8;
+							part.celloff += (src.bitoff + start) / 8;
+							part.bitoff = (src.bitoff + start) % 8;
+							part.width = bit >= src.width ? 1 : src.width - bit < 8 ? src.width - bit : 8;
+							part.sgn = src.sgn && bit + 8 >= src.width;
+							wget(e, addr); wload(e, &part, prim(TY_UCHAR));
+						} else wconst(e, WT_I32, 0);
+						wstore(e, &byte, prim(TY_UCHAR));
+					}
+					wfree(e, addr);
+
+				} else {
+					wmem_poison(e, &src, tsize(c, from));
+					wfold_off(e, &src);
+					wcopy(e, tsize(c, from));
+				}
+			} else { wexpr(e, x->a, true); wstore(e, &d, from); }
+			wslot_addr(e, sl);
+			if (k != WT_MEM) wload(e, &d, x->ty);
+			return k;
+		}
 		case CK_UNION: {
 			qty at = N(x->a)->ty;
 			uint64_t sl = wslot(e, tsize(c, x->ty), talign(c, x->ty));
@@ -1785,6 +2043,7 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 			wslot_addr(e, sl);
 			wconst(e, WT_I32, 0);
 			wpconst(e, (int64_t)tsize(c, x->ty));
+			wmem_fence(e);
 			wi(e, "memory.fill\t0");
 			wslot_addr(e, sl);
 			wexpr(e, x->a, true);
@@ -1794,7 +2053,7 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 		}
 		case CK_SPLAT: {	/* the scalar into every lane of a new vector */
 			qty et = T(c, x->ty)->base;
-			uint64_t es = tsize(c, et), nl = tsize(c, x->ty) / es, sl = wslot(e, tsize(c, x->ty), 16);
+			uint64_t es = tsize(c, et), nl = T(c, x->ty)->n, sl = wslot(e, tsize(c, x->ty), 16);
 			uint32_t t;
 
 			wexpr(e, x->a, true);
@@ -1803,6 +2062,7 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 			for (uint64_t i = 0; i < nl; i++) {
 				wlv l = { .k = WL_MEM, .off = i * es };
 
+				if (is_bvec(c, x->ty)) l.off = i / 8, l.bf = 1, l.width = 1, l.bitoff = i % 8;
 				wslot_addr(e, sl);
 				wget(e, t);
 				wstore(e, &l, et);
@@ -1835,7 +2095,10 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 			return k;
 		}
 		}
-	case N_UNARY:
+	case N_UNARY: {
+		uint32_t operand = em_double_unary(e, n);
+		if (operand)
+			return wexpr(e, operand, want);
 		switch (x->aux) {
 		case T_PLUS:
 			return wexpr(e, x->a, want);
@@ -1882,6 +2145,7 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 			return WT_I32;
 		}
 		efatal(e, x->loc, "wasm: unsupported unary operator");
+	}
 	case N_PREINC: case N_PREDEC: case N_POSTINC: case N_POSTDEC:
 		return wincdec(e, n, want);
 	case N_BINARY:
@@ -1910,17 +2174,17 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 		if (!want) {
 			if (x->op == N_LOGOR)
 				wi(e, "i32.eqz");
-			wblock(e, "if");
+			wblock(e, "if", WF_IF);
 			wexpr(e, x->b, false);
 			wend(e, "end_if");
 			return WT_NONE;
 		}
-		wblock(e, "if\ti32");
+		wblock(e, "if\ti32", WF_IF);
 		if (x->op == N_LOGAND)
 			wbool(e, x->b);
 		else
 			wconst(e, WT_I32, 1);
-		wi(e, "else");
+		wboundary(e, "else", WF_ELSE);
 		if (x->op == N_LOGAND)
 			wconst(e, WT_I32, 0);
 		else
@@ -1935,9 +2199,14 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 		wexpr(e, x->a, false);
 		return wexpr(e, x->b, want);
 	case N_CALL:
-		return wcall(e, n, want);
-	case N_BUILTIN:
-		return wbuiltin(e, n, want);
+	case N_BUILTIN: {
+		wmem_fence(e);
+		e->w->memopaque++;
+		int r = x->op == N_CALL ? wcall(e, n, want) : wbuiltin(e, n, want);
+		e->w->memopaque--;
+		wmem_fence(e);
+		return r;
+	}
 	case N_STMTEXPR:
 		return wstmtexpr(e, x->a, want);
 	case N_ZERO:
@@ -1947,6 +2216,7 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 			wslot_addr(e, sl);
 			wconst(e, WT_I32, 0);
 			wpconst(e, (int64_t)tsize(c, x->ty));
+			wmem_fence(e);
 			wi(e, "memory.fill\t0");
 			wslot_addr(e, sl);
 			return WPT(c);
@@ -1971,13 +2241,26 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 		wslot_addr(e, sl);
 		return WPT(c);
 	}
-	case N_VAARG:
-		return wbuiltin(e, n, want);
+	case N_VAARG: {
+		wmem_fence(e);
+		e->w->memopaque++;
+		int r = wbuiltin(e, n, want);
+		e->w->memopaque--;
+		wmem_fence(e);
+		return r;
+	}
 	case N_LABELADDR:
 		/* its number (1-based), as in data: goto * compares against these */
 		wpconst(e, (int64_t)x->a + 1);
 		return WPT(c);
 	case N_SIZEOF_VLA:
+		if (x->aux == 1) {
+			wvla_fix(e, x->b, false);
+			wvla_bytes(e, x->b);
+			wconv(e, prim(TY_ULONG), x->ty);
+			return k;
+		}
+		if (x->a) wexpr(e, x->a, false);
 		wvla_bytes(e, x->b);
 		wconv(e, prim(TY_ULONG), x->ty);
 		return k;

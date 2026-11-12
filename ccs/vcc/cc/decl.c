@@ -59,6 +59,19 @@ VPRIV void apply_sym_attrs(cc *c, sym *s, const attrs *a)
 {
 	if (attrs_empty(a))
 		return;		/* (no record: sym_attrs() in emit.c reads attrs 0 as none) */
+	if (a->interrupt) {
+		const ctype *ft = T(c, s->ty);
+		if (c->o->target != PP_LINUX_X86_64)
+			cc_error(c, s->loc, "interrupt calling convention is supported only for x86-64 Linux");
+		else if (s->kind != S_FUNC || ft->kind != TY_FUNC)
+			cc_error(c, s->loc, "'interrupt' attribute only applies to functions");
+		else if (KIND(c, ft->base) != TY_VOID)
+			cc_error(c, s->loc, "interrupt function must return void");
+		else if ((ft->flags & TF_NOPROTO) || ft->n < 1 || ft->n > 2 || !is_ptr(c, c->params[ft->aux]))
+			cc_error(c, s->loc, "interrupt function requires a pointer parameter optionally followed by an unsigned long");
+		else if (ft->n == 2 && KIND(c, c->params[ft->aux + 1]) != TY_ULONG && KIND(c, c->params[ft->aux + 1]) != TY_ULLONG)
+			cc_error(c, s->loc, "interrupt function second parameter must have unsigned long type");
+	}
 	if (a->tlsmodel && (s->kind != S_VAR || !(s->flags & SF_THREAD)))
 		cc_error(c, a->tlsloc, "'tls_model' attribute only applies to thread-local variables");
 	if (s->attrs)
@@ -274,6 +287,8 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 	bool inherit_type = true;
 
 	merge_attrs(&at, &ds->at);
+	if (!at.visibility && c->nvis && file)
+		at.visibility = c->visstk[c->nvis - 1];	/* #pragma GCC visibility push */
 	if (ds->align > at.aligned)
 		at.aligned = ds->align;
 	if (d->at.mode && is_arith(c, t)) {
@@ -283,9 +298,11 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 			t = QT(k, QQ(t));
 	}
 	if (at.vecsize) t = vector_attribute(c, t, at.vecsize, d->loc);
-	if (at.extvec && ds->sc == SC_TYPEDEF && is_arith(c, t) && !is_complex(c, t)) {
+	if (at.extvec && ds->sc == SC_TYPEDEF && is_bigint(c, t))
+		cc_error(c, d->loc, "vector integer elements wider than 128 bits are not supported");
+	else if (at.extvec && ds->sc == SC_TYPEDEF && is_arith(c, t) && !is_complex(c, t)) {
 		/* clang: n elements, the size rounded up to a power of 2 (float3: 16) */
-		uint64_t sz = (uint64_t)at.extvec * ty_size(c, t), p = 1;
+		uint64_t sz = KIND(c, t) == TY_BOOL ? (at.extvec + 7) / 8 : (uint64_t)at.extvec * ty_size(c, t), p = 1;
 
 		while (p < sz)
 			p <<= 1;
@@ -293,6 +310,10 @@ static uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 			ctype v = *T(c, ty_vector(c, t, (uint32_t)p));
 
 			v.ext = (uint16_t)at.extvec;
+			if (KIND(c, t) == TY_BOOL) {
+				v.n = at.extvec;
+				if (c->o->target == PP_LINUX_X86_64) v.align = (uint32_t)p;
+			}
 			t = QT(ty_intern(c, &v), QQ(t));
 		}
 	}
@@ -647,12 +668,20 @@ VPRIV uint32_t lib_builtin(cc *c, uint32_t id, uint32_t loc)
 			dspec ds = { .ty = ret, .sc = SC_EXTERN, .loc = loc };
 			declr d = { .name = id, .loc = loc };
 			uint32_t s = declare(c, &ds, &d, fty, true);
-			size_t ll = strlen(b->lib), pre = c->o->target == PP_DARWIN ? 1 : 0;
+			/* Integer-power builtins name compiler-runtime helpers, not C
+			 * library functions named powi (which may be the caller itself). */
+			const char *lib = b->lib;
+			if (!strcmp(b->name, "__builtin_powi")) lib = "__powidf2";
+			else if (!strcmp(b->name, "__builtin_powif")) lib = "__powisf2";
+			else if (!strcmp(b->name, "__builtin_powil"))
+				lib = c->o->target == PP_LINUX_X86_64 ? "__powixf2" :
+				      ty_size(c, ret) == 8 ? "__powidf2" : "__powitf2";
+			size_t ll = strlen(lib), pre = c->o->target == PP_DARWIN ? 1 : 0;
 			char *keep = halloc(c, ll + pre + 1);
 			attrs a;
 
 			keep[0] = '_';
-			memcpy(keep + pre, b->lib, ll + 1);
+			memcpy(keep + pre, lib, ll + 1);
 			memset(&a, 0, sizeof(a));
 			a.asmname = c->nstr + 1;
 			c->strs[c->nstr++] = (cstr){ keep, (uint32_t)(ll + pre + 1), 1, T_STRING };
@@ -998,6 +1027,7 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 			if (out) {
 				uint32_t n = mk2(c, N_DECL, prim(TY_VOID), d.loc, s, v);
 
+				N(n)->aux = 1; /* inferred type: its bounds are evaluated by the initializer */
 				vpush(c, out, n);
 			}
 			if (decl_comma_typo(c))
@@ -1022,6 +1052,8 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 				cc_error(c, d.loc, "constexpr can only be used in variable declarations");
 			else {
 				c->syms[s].flags |= SF_CONSTEXPR;
+				if (file)
+					c->syms[s].sc = SC_STATIC;	/* C23: file-scope constexpr has internal linkage */
 				if (!constexpr_type_ok(c, t))
 					cc_error(c, d.loc, "constexpr variable cannot have type '%s'", tyname(c, t));
 			}
@@ -1196,6 +1228,13 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 					}
 				}
 			}
+		}
+		if (out && ds.sc == SC_TYPEDEF) {
+			for (qty vm = t; is_array(c, vm) || is_ptr(c, vm); vm = T(c, vm)->base)
+				if (T(c, vm)->flags & TF_VLA) {
+					vpush(c, out, mk2(c, N_DECL, prim(TY_VOID), d.loc, s, 0));
+					break;
+				}
 		}
 		if (c->syms[s].kind == S_VAR)	/* the declaration's range, for notes */
 			c->syms[s].plb = dbeg, c->syms[s].ple = c->prevloc;

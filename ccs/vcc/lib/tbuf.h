@@ -36,7 +36,7 @@ static inline void tb_reg(tbuf *b, vmreg *r, size_t cap, const char *name)
 	b->cap = cap;
 }
 
-static inline void tb_need(tbuf *b, size_t n)
+static inline VNONNULL(1) void tb_need(tbuf *b, size_t n)
 {
 	if (__builtin_expect(b->n + n > b->cap, 0)) {
 		fputs("vcc: emitter buffer overflow\n", stderr);
@@ -44,14 +44,14 @@ static inline void tb_need(tbuf *b, size_t n)
 	}
 }
 
-static inline void tb_put(tbuf *b, const char *s, size_t n)
+static inline VNONNULL(1) void tb_put(tbuf *b, const char *s, size_t n)
 {
 	tb_need(b, n);
 	memcpy(b->p + b->n, s, n);
 	b->n += n;
 }
 
-static inline void tb_c(tbuf *b, char ch)
+static inline VNONNULL(1) void tb_c(tbuf *b, char ch)
 {
 	tb_need(b, 1);
 	b->p[b->n++] = ch;

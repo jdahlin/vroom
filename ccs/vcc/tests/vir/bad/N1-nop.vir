@@ -1,0 +1,12 @@
+; a nop in a block
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  nop
+  ret v0
+}
+; ---
+@f b0.1: N1: a nop in the block region

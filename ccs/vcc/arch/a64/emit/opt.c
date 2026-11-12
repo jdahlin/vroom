@@ -32,11 +32,12 @@ typedef uint64_t rmask;
 
 /* operand roles */
 enum { RD_R = 1, RN_R = 2, RM_R = 4, RA_R = 8, RD_W = 16, RA_W = 32, RN_W = 64, OP_ALL = 128, OP_CALL = 256, OP_ASM = 512,
-       OP_RET = 2048, OP_TLV = 4096 };
-#define OP_SLOW (OP_ALL | OP_CALL | OP_ASM | OP_RET | OP_TLV)	/* reads()/writes() beyond the operand fields */
+       OP_RET = 2048, OP_TLV = 4096, OP_TAIL = 8192 };
+#define OP_SLOW (OP_ALL | OP_CALL | OP_ASM | OP_RET | OP_TLV | OP_TAIL)	/* reads()/writes() beyond the operand fields */
 
 /* the function's raw text, for the registers of inline asm (RAW_MASKS) */
 static _Thread_local const char *rawp;
+static _Thread_local rmask retreads;
 /* control */
 enum { BR_NONE, BR_UNCOND, BR_COND, BR_END, BR_INDIRECT };
 
@@ -53,9 +54,13 @@ static unsigned roles_sw(const ins *i)
 	case I_CLZ: case I_CLS: case I_RBIT: case I_REV: case I_REV16: case I_REV32:
 	case I_LD: case I_ADDLO: case I_LDLO:
 		return RN_R | RD_W;
+	case I_LDX:
+		return RN_R | RM_R | RD_W;
+	case I_STX:
+		return RD_R | RN_R | RM_R;
 	case I_BFM:
 		return RD_R | RN_R | RD_W;
-	case I_MADD: case I_MSUB:
+	case I_MADD: case I_MSUB: case I_SMADDL: case I_UMADDL:
 		return RN_R | RM_R | RA_R | RD_W;
 	case I_MOVI: case I_ADRP: case I_LDGOT: case I_ADR: case I_MRS:
 		return RD_W;
@@ -65,9 +70,10 @@ static unsigned roles_sw(const ins *i)
 		return RN_R | RD_W | RA_W | (i->cond ? RN_W : 0);
 	case I_STP:
 		return RD_R | RA_R | RN_R | (i->cond ? RN_W : 0);
-	case I_CBZ: case I_CBNZ:
+	case I_CBZ: case I_CBNZ: case I_TBZ: case I_TBNZ:
 		return RD_R;
 	case I_PRFM:
+	case I_LDF: case I_STF:	/* (rd is an FP register) */
 		return RN_R;
 	case I_BL:
 		return OP_CALL;
@@ -79,6 +85,10 @@ static unsigned roles_sw(const ins *i)
 		return RN_R;
 	case I_RET:
 		return OP_RET;	/* reads x0, x1 */
+	case I_TAIL:
+		if (i->cond == 4)
+			return OP_RET;	/* (VIR's return in the body: the epilogue and ret) */
+		return OP_TAIL | (i->cond == 3 ? RN_R : 0);	/* outgoing x0-x7 survive until the sibling branch */
 	case I_LABEL: case I_B: case I_BC: case I_NOP:
 	case I_BRK:	/* a trap (BUG, WARN, __builtin_trap): the handler may print registers, needs none */
 		return 0;
@@ -106,7 +116,7 @@ __attribute__((constructor)) static void opt_tables(void)
 		RT[op] = (uint16_t)roles_sw(&x);
 		BT[op] = (uint8_t)brkind_sw(&x);
 	}
-	RT[I_LDP] = RT[I_STP] = RT[I_RAW] = OP_VAR;
+	RT[I_LDP] = RT[I_STP] = RT[I_RAW] = RT[I_TAIL] = OP_VAR;
 	XT[I_UBFM] = XT[I_SBFM] = XT[I_MOV] = XT[I_ANDI] = 1;
 	for (unsigned r = 0; r < 64; r++)
 		RBT[r] = RB(r);
@@ -125,8 +135,8 @@ static int brkind_sw(const ins *i)
 {
 	switch (i->op) {
 	case I_B: return BR_UNCOND;
-	case I_BC: case I_CBZ: case I_CBNZ: return BR_COND;
-	case I_RET: return BR_END;
+	case I_BC: case I_CBZ: case I_CBNZ: case I_TBZ: case I_TBNZ: return BR_COND;
+	case I_RET: case I_TAIL: case I_JT: return BR_END;
 	case I_BR: return BR_INDIRECT;
 	default: return BR_NONE;
 	}
@@ -149,10 +159,12 @@ __attribute__((noinline)) static rmask reads_slow(const ins *i, unsigned ro)
 	if (ro & RN_R) s |= m(i->rn);
 	if (ro & RM_R) s |= m(i->rm);
 	if (ro & RA_R) s |= m(i->ra);
-	if (ro & OP_CALL)
-		s |= RB(9) - 1;	/* x0-x8: arguments, indirect result */
+	if (ro & OP_CALL)	/* x0-x8: arguments, indirect result (VIR's: the arguments it passes) */
+		s |= i->cond == CALL_ARGS && (i->op == I_BL || i->op == I_BLR) ? (rmask)i->sh : RB(9) - 1;
 	if (ro & OP_RET)
-		s |= RB(0) | RB(1);
+		s |= retreads;
+	if (ro & OP_TAIL)
+		s |= RB(8) - 1;
 	return s;
 }
 
@@ -308,7 +320,7 @@ static bool liveness(ecx *e)
 			rmask o = 0, i;
 
 			if (b == nb - 1 && brkind(&in[W.be[b]]) != BR_UNCOND)
-				o |= RB(0) | RB(1);	/* falls into the epilogue: the return value */
+				o |= retreads;	/* falls into the epilogue: the return value */
 			if (W.s0[b] >= 0)
 				o |= W.in[W.s0[b]];
 			if (W.s1[b] >= 0)
@@ -357,46 +369,17 @@ static bool is_copy(const ins *i)
 	       (COPYOK & RB(i->rd)) && (COPYOK & RB(i->rn));
 }
 
-/* mov t, v at k: uses of t read v instead */
-static bool forward(ecx *e, uint32_t k)
+/* Operand policy for the shared transaction. Asm registers live in its text,
+ * while tied read/write operands cannot be redirected independently.
+ */
+static bool a64_copy_rewrite(void *ctx, uint32_t j, uint8_t t, uint8_t v, bool apply)
 {
-	ins *in = e->in;
-	int t = in[k].rd, v = in[k].rn;
-	uint32_t b = W.blk[k], j, nrw = 0;
-	static _Thread_local uint32_t rw[256];
+	ecx *e = ctx;
+	unsigned ro = W.ro[j];
 
-	if (!(TEMPS & RB(t)))
-		return false;
-	for (j = k + 1; j <= W.be[b]; j++) {
-		const ins *i = &in[j];
-		unsigned ro;
-		rmask r, w;
-
-		if (i->op == DELETED)
-			continue;
-		ro = W.ro[j];
-		if (ro & OP_ALL)
-			return false;
-		r = W.rr[j], w = W.ww[j];
-		if (r & RB(t)) {
-			if ((ro & OP_ASM) || !can_rewrite(i, ro, t) || nrw == 256)
-				return false;	/* (asm names its registers in its text) */
-			rw[nrw++] = j;
-		}
-		if ((w & RB(t)) || !(W.la[j] & RB(t)))
-			break;	/* t's value dies here */
-		if (w & RB(v))
-			return false;	/* v changes while t still holds the old value */
-	}
-	if (j > W.be[b])
-		return false;
-	for (uint32_t q = 0; q < nrw; q++) {
-		rewrite(&in[rw[q]], W.ro[rw[q]], t, v);
-		W.rr[rw[q]] = (W.rr[rw[q]] & ~RB(t)) | RB(v);
-	}
-	for (uint32_t q = k; nrw && q < rw[nrw - 1]; q++)
-		W.la[q] |= RB(v);	/* v is read further on now */
-	in[k].op = DELETED;
+	if (!apply)
+		return !(ro & OP_ASM) && can_rewrite(&e->in[j], ro, t);
+	rewrite(&e->in[j], ro, t, v);
 	return true;
 }
 
@@ -459,39 +442,11 @@ static bool backward(ecx *e, uint32_t k)
  * stops there) and anything may read it (no store goes).  An untagged
  * address turns the pass off for the function.
  */
-typedef struct cellent {
-	uint32_t id;		/* allocation + 1; 0: untagged */
-	int64_t off;
-	uint32_t size;
-	bool bad, esc;		/* esc: an address points into its allocation */
-} cellent;
-
-/* per allocation: the one range its accesses use, or several (cells sorted apart) */
-typedef struct alc {
-	int64_t off;
-	uint32_t size;
-	uint8_t state;		/* 0: no access, 1: one range, 2: several */
-	bool esc;
-	uint32_t mb, mn;	/* state 2: its cells in SL.c[mb, mb+mn) */
-} alc;
-
 static _Thread_local struct {
-	alc *a;			/* per allocation + 1 */
-	uint32_t capa;
-	cellent *c;		/* cells of state-2 allocations, sorted */
-	uint32_t capc;
-	cellent *w;		/* untagged accesses */
-	uint32_t capw;
-	int64_t *wend;		/* their running maximum end */
-	uint32_t capwe;
+	em_slot_cells cells;
 	int32_t *rc;		/* per record: its cell, or -1 */
 	uint32_t caprc;
-	uint8_t *cf;		/* per cell: bit 0 bad, bit 1 escaped */
-	uint32_t capcf;
-	uint32_t *nld;		/* per cell: loads left */
-	uint32_t capnld;
-	struct av { uint32_t gen, ver, mv, pos, last; int8_t reg; } *av;	/* per cell */
-	uint32_t capav;
+	em_slot_values values;
 } SL;
 
 static void *grow_to(void *p, uint32_t *cap, uint32_t n, size_t sz)
@@ -503,34 +458,6 @@ static void *grow_to(void *p, uint32_t *cap, uint32_t n, size_t sz)
 	if (!p)
 		abort();
 	return p;
-}
-
-static int cell_cmp(const void *a, const void *b)
-{
-	const cellent *x = a, *y = b;
-
-	if (x->id != y->id)
-		return x->id < y->id ? -1 : 1;
-	if (x->off != y->off)
-		return x->off < y->off ? -1 : 1;
-	return x->size < y->size ? -1 : x->size > y->size;
-}
-
-/* an untagged access overlaps [off, off+size) */
-static bool hits_untagged(uint32_t nw, int64_t off, uint32_t size)
-{
-	int64_t end = (int64_t)off + size;
-	uint32_t lo = 0, hi = nw;
-
-	while (lo < hi) {	/* first with w.off >= end */
-		uint32_t mid = (lo + hi) / 2;
-
-		if (SL.w[mid].off < end)
-			lo = mid + 1;
-		else
-			hi = mid;
-	}
-	return lo > 0 && SL.wend[lo - 1] > off;
 }
 
 /* the load at i, its value taken from register r instead (the slot holds r's low bits) */
@@ -556,14 +483,12 @@ static void load_from_reg(ins *i, int r)
 static void slots(ecx *e)
 {
 	ins *in = e->in;
-	uint32_t n = e->nin, na = e->nsla + 1, nm = 0, nw = 0, ncell, nb, nst = 0;
-	bool multi = false;
-	uint32_t ver[32] = { 0 }, mver = 0;	/* mver: memory written through a pointer, or a call */
+	uint32_t n = e->nin, na = e->nsla + 1, ncell, nb, nst = 0;
+	uint32_t ver[32] = { 0 }, mver = 0; /* pointer/call memory version */
+	em_slot_cells *cells = &SL.cells;
 
-	if (e->nsla > 0xffff || !n)
+	if (e->nsla > 0xffff || !n || !em_slot_begin(cells, na))
 		return;
-	SL.a = grow_to(SL.a, &SL.capa, na, sizeof(alc));
-	memset(SL.a, 0, (size_t)na * sizeof(alc));
 	for (uint32_t k = 0; k < n; k++) {
 		const ins *i = &in[k];
 		uint32_t id;
@@ -572,90 +497,23 @@ static void slots(ecx *e)
 			continue;
 		id = SLOT_TAG(i);
 		if (i->op == I_LD || i->op == I_ST) {
-			int64_t off = i->imm;
-			uint32_t size = 1u << i->sz;
-			alc *a = &SL.a[id];
-
-			if (!id) {
-				SL.w = grow_to(SL.w, &SL.capw, nw + 1, sizeof(cellent));
-				SL.w[nw++] = (cellent){ 0, off, size, false, false };
-			} else if (!a->state) {
-				a->state = 1, a->off = off, a->size = size;
-			} else if (a->state == 1 && (a->off != off || a->size != size)) {
-				a->state = 2, multi = true;
-			}
-			continue;
-		}
-		if (!id)
-			return;	/* an address vcc cannot place */
-		SL.a[id].esc = true;
-		if (SLOT_TAG2(i) < na)
-			SL.a[SLOT_TAG2(i)].esc = true;
-	}
-	if (!nw && na == 1)
-		return;	/* (no access of a slot) */
-	{
-		bool any = false;
-
-		for (uint32_t id = 1; id < na && !any; id++)
-			any = SL.a[id].state != 0;
-		if (!any)
-			return;	/* only addresses of slots: nothing to forward or drop */
-	}
-	/* allocations with several ranges: their cells, sorted, overlaps bad */
-	for (uint32_t k = 0; multi && k < n; k++) {
-		const ins *i = &in[k];
-		uint32_t id;
-
-		if (i->rn != FRAME || (i->op != I_LD && i->op != I_ST) || !(id = SLOT_TAG(i)) || SL.a[id].state != 2)
-			continue;
-		SL.c = grow_to(SL.c, &SL.capc, nm + 1, sizeof(cellent));
-		SL.c[nm++] = (cellent){ id, i->imm, 1u << i->sz, false, false };
-	}
-	if (nm) {
-		uint32_t u = 0;
-
-		qsort(SL.c, nm, sizeof(cellent), cell_cmp);
-		for (uint32_t k = 0; k < nm; k++)
-			if (!u || cell_cmp(&SL.c[k], &SL.c[u - 1]))
-				SL.c[u++] = SL.c[k];
-		nm = u;
-		for (uint32_t k = 0, g; k < nm; k = g) {
-			int64_t maxend = INT64_MIN;
-
-			for (g = k; g < nm && SL.c[g].id == SL.c[k].id; g++)
-				;
-			SL.a[SL.c[k].id].mb = k, SL.a[SL.c[k].id].mn = g - k;
-			for (uint32_t q = k; q < g; q++) {
-				int64_t end = (int64_t)SL.c[q].off + SL.c[q].size;
-
-				SL.c[q].bad = SL.c[q].off < maxend || (q + 1 < g && SL.c[q + 1].off < end);
-				if (end > maxend)
-					maxend = end;
-			}
+			em_slot_collect(cells, id, i->imm, 1u << i->sz);
+		} else if (i->op == I_LDF || i->op == I_STF) {
+			/* an FP register's access: no value to track, so its object is one the pass leaves alone */
+			em_slot_collect(cells, id, i->imm, 1u << i->sz);
+			if (id)
+				em_slot_escape(cells, id);
+		} else {
+			if (!id)
+				return; /* an address vcc cannot place */
+			em_slot_escape(cells, id);
+			if (SLOT_TAG2(i) < na)
+				em_slot_escape(cells, SLOT_TAG2(i));
 		}
 	}
-	if (nw) {
-		qsort(SL.w, nw, sizeof(cellent), cell_cmp);	/* (id 0: by offset) */
-		SL.wend = grow_to(SL.wend, &SL.capwe, nw, sizeof(int64_t));
-		for (uint32_t k = 0; k < nw; k++) {
-			int64_t end = (int64_t)SL.w[k].off + SL.w[k].size;
-
-			SL.wend[k] = k && SL.wend[k - 1] > end ? SL.wend[k - 1] : end;
-		}
-	}
-	/* cells: allocation id for one range, na + index for the sorted ones */
-	ncell = na + nm;
-	SL.cf = grow_to(SL.cf, &SL.capcf, ncell, 1);
-	for (uint32_t id = 1; id < na; id++) {
-		const alc *a = &SL.a[id];
-
-		SL.cf[id] = a->state == 1 ? (uint8_t)((nw && hits_untagged(nw, a->off, a->size)) | a->esc << 1) : 1;
-	}
-	SL.cf[0] = 1;
-	for (uint32_t q = 0; q < nm; q++)
-		SL.cf[na + q] = (uint8_t)((SL.c[q].bad || (nw && hits_untagged(nw, SL.c[q].off, SL.c[q].size))) |
-					  SL.a[SL.c[q].id].esc << 1);
+	if (!em_slot_finish(cells))
+		return;
+	ncell = cells->count;
 	SL.rc = grow_to(SL.rc, &SL.caprc, n, sizeof(int32_t));
 	for (uint32_t k = 0; k < n; k++) {
 		const ins *i = &in[k];
@@ -664,29 +522,12 @@ static void slots(ecx *e)
 		SL.rc[k] = -1;
 		if (i->rn != FRAME || (i->op != I_LD && i->op != I_ST) || !(id = SLOT_TAG(i)))
 			continue;
-		if (SL.a[id].state == 1) {
-			cell = id;
-		} else {
-			cellent key = { id, i->imm, 1u << i->sz, false, false };
-			uint32_t lo = SL.a[id].mb, hi = lo + SL.a[id].mn;
-
-			while (lo < hi) {
-				uint32_t mid = (lo + hi) / 2;
-
-				if (cell_cmp(&SL.c[mid], &key) < 0)
-					lo = mid + 1;
-				else
-					hi = mid;
-			}
-			cell = na + lo;
-		}
-		if (!(SL.cf[cell] & 1))
+		cell = em_slot_find(cells, id, i->imm, 1u << i->sz);
+		if (!(cells->flags[cell] & EM_SLOT_BAD))
 			SL.rc[k] = (int32_t)cell;
 	}
-	SL.av = grow_to(SL.av, &SL.capav, ncell, sizeof(*SL.av));
-	memset(SL.av, 0, (size_t)ncell * sizeof(*SL.av));
-	SL.nld = grow_to(SL.nld, &SL.capnld, ncell, sizeof(uint32_t));
-	memset(SL.nld, 0, (size_t)ncell * sizeof(uint32_t));
+	if (!em_slot_values_begin(&SL.values, ncell))
+		return;
 	nb = W.blk[n - 1] + 1;
 	for (uint32_t b = 0; b < nb; b++) {
 		uint32_t gen = b + 1;
@@ -694,18 +535,17 @@ static void slots(ecx *e)
 		for (uint32_t k = W.bs[b]; k <= W.be[b]; k++) {
 			ins *i = &in[k];
 			int32_t ci = SL.rc[k];
-			struct av *a = ci >= 0 ? &SL.av[ci] : NULL;
-			bool esc = ci >= 0 && (SL.cf[ci] & 2);
+			em_slot_value *a = ci >= 0 ? em_slot_value_get(&SL.values, (uint32_t)ci, gen, i->op == I_LD) : NULL;
+			bool esc = ci >= 0 && (cells->flags[ci] & EM_SLOT_ESCAPED);
 			rmask w;
 
 			if (i->op == DELETED)
 				continue;
-			if (a && a->gen != gen)
-				a->gen = gen, a->reg = -1, a->last = UINT32_MAX;
 			if (a && i->op == I_LD) {
-				a->last = UINT32_MAX;	/* the pending store is read */
-				if (a->reg >= 0 && (a->reg == ZR || ver[a->reg] == a->ver) && (!esc || a->mv == mver)) {
-					int r = a->reg;
+				uint32_t version = a->value < ZR ? ver[a->value] : a->version;
+
+				if (em_slot_value_available(a, version, mver, esc)) {
+					int r = (int)a->value;
 
 					if (r != ZR)
 						for (uint32_t q = a->pos; q < k; q++)
@@ -726,24 +566,18 @@ static void slots(ecx *e)
 			for (; w; w &= w - 1)
 				ver[__builtin_ctzll(w)]++;
 			if (SL.rc[k] < 0) {
-				if (i->op == I_ST || i->op == I_STLO || i->op == I_STP || i->op == I_BL || i->op == I_BLR ||
+				if (i->op == I_ST || i->op == I_STX || i->op == I_STLO || i->op == I_STP || i->op == I_STF || i->op == I_BL || i->op == I_BLR ||
 				    i->op == I_TLV || i->op == I_RAW || W.rr[k] == GPRS)
 					mver++;	/* may write an escaped cell */
 				continue;
 			}
-			if (i->op == I_LD)
-				SL.nld[ci]++;
-			if (i->op == I_ST) {
-				SL.rc[nst++] = (int32_t)k;	/* (rc of earlier records is done with) */
-				if (!esc && a->last != UINT32_MAX)
-					in[a->last].op = DELETED;	/* overwritten before any load */
-				a->last = esc ? UINT32_MAX : k;	/* (escaped: read through a pointer, perhaps) */
-			}
-			a->reg = (int8_t)i->rd;	/* (31: zr) */
-			if (a->reg != ZR)
-				a->ver = ver[a->reg];
-			a->mv = mver;
-			a->pos = k;
+			uint32_t overwritten = em_slot_value_record(a, i->op == I_LD, esc, i->rd,
+				i->rd == ZR ? 0 : ver[i->rd], mver, k);
+
+			if (i->op == I_ST)
+				SL.rc[nst++] = (int32_t)k; /* rc of earlier records is done with */
+			if (overwritten != EM_SLOT_NO_STORE)
+				in[overwritten].op = DELETED;
 		}
 	}
 	/* a cell no load reads: its stores go */
@@ -753,21 +587,8 @@ static void slots(ecx *e)
 
 		if (i->op != I_ST)
 			continue;	/* (deleted meanwhile) */
-		if (SL.a[cell].state != 1) {
-			cellent key = { cell, i->imm, 1u << i->sz, false, false };
-			uint32_t lo = SL.a[cell].mb, hi = lo + SL.a[cell].mn;
-
-			while (lo < hi) {
-				uint32_t mid = (lo + hi) / 2;
-
-				if (cell_cmp(&SL.c[mid], &key) < 0)
-					lo = mid + 1;
-				else
-					hi = mid;
-			}
-			cell = na + lo;
-		}
-		if (!SL.nld[cell] && !(SL.cf[cell] & 2))
+		cell = em_slot_find(cells, cell, i->imm, 1u << i->sz);
+		if (em_slot_value_dead(&SL.values, cell, cells->flags[cell] & EM_SLOT_ESCAPED))
 			i->op = DELETED;
 	}
 }
@@ -814,7 +635,7 @@ static bool xresult(const xf *f, const ins *i, unsigned *zo, unsigned *so)
 	unsigned zn = xz(f, rn), sn = xs(f, rn);
 
 	switch (i->op) {
-	case I_LD: case I_LDLO:
+	case I_LD: case I_LDX: case I_LDLO:
 		if (i->sz == 3)
 			return false;
 		if (i->cond == 0)
@@ -895,7 +716,7 @@ static bool xresult(const xf *f, const ins *i, unsigned *zo, unsigned *so)
 		break;
 	}
 	case I_ADD:
-		if (i->sh)
+		if (i->sh || i->cond)	/* (shifted, or rm extended, cond 8 + option: nothing known) */
 			break;
 		{
 			unsigned a = umax(zn, xz(f, rm)), b = umax(sn, xs(f, rm));
@@ -1121,7 +942,7 @@ static bool pure(const ins *i)
 	switch (i->op) {
 	case I_ADD: case I_SUB: case I_AND: case I_ORR: case I_EOR: case I_BIC: case I_ORN: case I_ADC: case I_SBC:
 	case I_ADDI: case I_SUBI: case I_ANDI: case I_ORRI: case I_EORI:
-	case I_MOVI: case I_MOV: case I_MADD: case I_MSUB:
+	case I_MOVI: case I_MOV: case I_MADD: case I_MSUB: case I_SMADDL: case I_UMADDL:
 	case I_SDIV: case I_UDIV: case I_SMULH: case I_UMULH: case I_LSLV: case I_LSRV: case I_ASRV:
 	case I_SBFM: case I_UBFM: case I_BFM: case I_CSEL: case I_CSINC: case I_CSINV: case I_CSNEG:
 	case I_CLZ: case I_CLS: case I_RBIT: case I_REV: case I_REV16: case I_REV32:
@@ -1149,7 +970,7 @@ static void dead(ecx *e)
 		rmask live = W.out[b];
 
 		if (b == nb - 1 && brkind(&in[W.be[b]]) != BR_UNCOND)
-			live |= RB(0) | RB(1);
+			live |= retreads;
 		for (uint32_t k = W.be[b] + 1; k-- > W.bs[b];) {
 			ins *i = &in[k];
 
@@ -1196,10 +1017,751 @@ VPRIV uint64_t opt_regs(ecx *e, unsigned *fl)
 	return u;
 }
 
+/* ---------------- operand folding (VIR's lowering) ---------------- */
+
+/*
+ * A shift, extension, address sum or product whose only reader is the next use of
+ * its register in the block becomes part of that reader, as LLVM selects: shifted
+ * and extended operands of add/sub/logical ops, register-offset loads and stores,
+ * madd/msub/smaddl/umaddl, ubfx/sbfx/ubfiz/sbfiz.  The definition d goes when its
+ * register is read by nothing else up to the reader k and is dead after it, and no
+ * record between writes what d read.
+ */
+enum { FD_NONE, FD_LSL, FD_LSR, FD_ASR, FD_EXT };
+typedef struct fdef { int kind, src, sh, opt, bits; } fdef;	/* FD_EXT: option (0-7), then << sh; bits: field */
+
+static fdef fclass(const ins *d)
+{
+	int w = d->sz ? 64 : 32, r = (int)d->imm, s = d->sh;
+
+	if (d->op == I_UBFM && s != w - 1 && r == (s + 1) % w)
+		return (fdef){ FD_LSL, d->rn, w - 1 - s, 0, 0 };
+	if ((d->op == I_UBFM || d->op == I_SBFM) && s == w - 1 && r > 0)
+		return (fdef){ d->op == I_UBFM ? FD_LSR : FD_ASR, d->rn, r, 0, 0 };
+	if ((d->op == I_UBFM || d->op == I_SBFM) && (s == 7 || s == 15 || (s == 31 && d->sz))) {
+		int sg = d->op == I_SBFM ? 4 : 0, o = sg | (s == 7 ? 0 : s == 15 ? 1 : 2);
+
+		if (r == 0)
+			return (fdef){ FD_EXT, d->rn, 0, o, s + 1 };
+		if (r > s && w - r <= 4)	/* sbfiz/ubfiz: the field moved up by w - r */
+			return (fdef){ FD_EXT, d->rn, w - r, o, s + 1 };
+	}
+	if (d->op == I_MOV && !d->sz && d->rn < 31)
+		return (fdef){ FD_EXT, d->rn, 0, 2, 32 };
+	if (d->op == I_ANDI && (d->imm == 0xff || d->imm == 0xffff))
+		return (fdef){ FD_EXT, d->rn, 0, d->imm == 0xff ? 0 : 1, d->imm == 0xff ? 8 : 16 };
+	return (fdef){ FD_NONE, 0, 0, 0, 0 };
+}
+
+/* x16/x17 are written by records that do not say so (an immediate or an offset that does
+ * not encode is built in x17, a far branch or a table goes through x16): a value in one
+ * of them is only known to stay there across records that are one plain instruction */
+#define FSCR (RB(16) | RB(17))
+
+/* record i is one instruction of exactly its own registers: it cannot rebuild x16/x17 */
+static bool fplain(const ins *i)
+{
+	switch (i->op) {
+	case I_ADD: case I_SUB: case I_ADDS: case I_SUBS: case I_AND: case I_ORR: case I_EOR: case I_ANDS:
+	case I_BIC: case I_ORN: case I_ADC: case I_SBC: case I_ADCS: case I_SBCS:
+	case I_MOV: case I_MADD: case I_MSUB: case I_SMADDL: case I_UMADDL:
+	case I_SDIV: case I_UDIV: case I_SMULH: case I_UMULH: case I_LSLV: case I_LSRV: case I_ASRV:
+	case I_SBFM: case I_UBFM: case I_BFM: case I_CSEL: case I_CSINC: case I_CSINV: case I_CSNEG:
+	case I_CLZ: case I_CLS: case I_RBIT: case I_REV: case I_REV16: case I_REV32:
+	case I_LDX: case I_STX: case I_MOVI: case I_LABEL:
+		return i->rn < 32 && i->rd < 32;
+	case I_ADDI: case I_SUBI: case I_ADDSI: case I_SUBSI:
+		return i->rn < 32 && i->rd < 32 && i->imm > -4096 && i->imm < 4096;
+	case I_LD: case I_ST:	/* (an offset both the scaled and the unscaled form reach whatever the size) */
+		return i->rn < 32 && i->imm >= 0 && i->imm < 256;
+	default:
+		return false;
+	}
+}
+
+/* the record defining register r for reader k: none read r between, it is dead after k */
+static int32_t fdefof(ecx *e, uint32_t k, int r)
+{
+	const ins *in = e->in;
+	uint32_t lo = W.bs[W.blk[k]], n = 0;
+	bool scr = false;	/* a record between may have rebuilt x16/x17 */
+
+	if (r >= 29 || ((W.la[k] & RB(r)) && !(W.ww[k] & RB(r))))
+		return -1;
+	for (uint32_t j = k; j-- > lo && n < 32;) {
+		if (in[j].op == DELETED)
+			continue;
+		n++;
+		if (W.ro[j] & OP_SLOW)
+			return -1;
+		if (W.ww[j] & RB(r))
+			return W.ww[j] == RB(r) && (!scr || !(RB(r) & FSCR)) ? (int32_t)j : -1;
+		if (W.rr[j] & RB(r))
+			return -1;
+		scr |= !fplain(&in[j]);
+	}
+	return -1;
+}
+
+/* the record last writing r before k in its block (a constant's MOVI), whoever else reads r */
+static const ins *fwriter(ecx *e, uint32_t k, int r)
+{
+	uint32_t lo = W.bs[W.blk[k]], n = 0;
+	bool scr = false;
+
+	for (uint32_t j = k; j-- > lo && n < 32;) {	/* (bounded, as fdefof) */
+		if (e->in[j].op == DELETED)
+			continue;
+		n++;
+		if (W.ro[j] & OP_SLOW)
+			return NULL;
+		if (W.ww[j] & RB(r))
+			return !scr || !(RB(r) & FSCR) ? &e->in[j] : NULL;
+		scr |= !fplain(&e->in[j]);
+	}
+	return NULL;
+}
+
+/* d's reads are still there at k */
+static bool fkept(ecx *e, uint32_t d, uint32_t k, rmask src)
+{
+	for (uint32_t j = d + 1; j < k; j++)
+		if (e->in[j].op != DELETED && ((W.ww[j] & src) || ((src & FSCR) && !fplain(&e->in[j]))))
+			return false;
+	return true;
+}
+
+static void fdone(ecx *e, uint32_t d, uint32_t k)
+{
+	ins *in = e->in;
+	rmask src = W.rr[d];
+
+	in[d].op = DELETED;
+	W.rr[d] = W.ww[d] = 0;
+	W.ro[k] = (uint16_t)roles(&in[k]);
+	W.rr[k] = reads(&in[k], W.ro[k]);
+	for (uint32_t j = d; j < k; j++)
+		W.la[j] |= src;
+}
+
+static inline bool fgpr(int r) { return r < 31; }
+
+/* reader k: one fold, true if it changed (k is looked at again) */
+static bool fold1(ecx *e, uint32_t k)
+{
+	ins *in = e->in, *i = &in[k];
+	int32_t d;
+	int w = i->sz ? 64 : 32;
+
+	switch (i->op) {
+	case I_ADD: case I_SUB: case I_ADDS: case I_SUBS: case I_AND: case I_ORR: case I_EOR: case I_ANDS:
+	case I_BIC: case I_ORN: {
+		bool as = i->op <= I_SUBS, comm = i->op == I_ADD || i->op == I_ADDS || i->op == I_AND || i->op == I_ORR ||
+							i->op == I_EOR || i->op == I_ANDS;
+
+		if (i->sh || i->cond || i->rd >= 32 || i->rn >= 32 || i->rn == i->rm)
+			return false;
+		for (int side = 0; side < 2; side++) {
+			int r = side ? i->rn : i->rm;
+
+			if (side && !comm)
+				break;
+			if ((d = fdefof(e, k, r)) < 0)
+				continue;
+			const ins *di = &in[d];
+			fdef f = fclass(di);
+
+			/* madd/msub: the product's register read once */
+			if ((di->op == I_MADD || di->op == I_SMADDL || di->op == I_UMADDL) && di->ra == ZR &&
+			    (di->op == I_MADD ? di->sz == i->sz : i->sz) && (i->op == I_ADD || (i->op == I_SUB && !side))) {
+				int a = side ? i->rm : i->rn;
+
+				if (a >= 31 && a != ZR)
+					continue;
+				if (!fkept(e, (uint32_t)d, k, RB(di->rn) | RB(di->rm)))
+					continue;
+				if (di->op != I_MADD && i->op == I_SUB)
+					continue;
+				*i = (ins){ .op = di->op == I_MADD ? (i->op == I_ADD ? I_MADD : I_MSUB) : di->op, .sz = i->sz,
+					    .rd = i->rd, .rn = di->rn, .rm = di->rm, .ra = (uint8_t)a };
+				fdone(e, (uint32_t)d, k);
+				return true;
+			}
+			/* (an extension into w that zero-extends serves an x reader too) */
+			if (f.kind == FD_NONE || !fgpr(f.src) || !fkept(e, (uint32_t)d, k, RB(f.src)) ||
+			    (di->sz != i->sz && (f.kind != FD_EXT || di->sz || (f.opt & 4))))
+				continue;
+			if (f.kind == FD_EXT) {
+				/* extended register: add/sub only; zr as rn (or rd without flags) would be sp */
+				if (!as || f.sh > 4 || i->rn == ZR || (i->rd == ZR && (i->op == I_ADD || i->op == I_SUB)) ||
+				    (!i->sz && (f.opt & 3) == 2) || (side && i->op != I_ADD && i->op != I_ADDS))
+					continue;
+				if (side)
+					i->rn = i->rm;
+				i->rm = (uint8_t)f.src;
+				i->cond = (uint8_t)(8 + f.opt);
+				i->sh = (uint8_t)f.sh;
+			} else {
+				if (side)
+					i->rn = i->rm;
+				i->rm = (uint8_t)f.src;
+				i->cond = (uint8_t)(f.kind - FD_LSL);
+				i->sh = (uint8_t)f.sh;
+			}
+			fdone(e, (uint32_t)d, k);
+			return true;
+		}
+		return false;
+	}
+	case I_LD: case I_ST: {
+		int r = i->rn;
+
+		if (i->imm || (i->op == I_ST && i->rd == r) || (d = fdefof(e, k, r)) < 0)
+			return false;
+		const ins *di = &in[d];
+		int ix;
+
+		if (di->op != I_ADD || !di->sz || di->rd >= 31 || di->rn >= 31 || !fgpr(di->rm) ||
+		    (di->sh && di->sh != i->sz))
+			return false;
+		if (di->cond == 0 || di->cond == 8 + 3 || di->cond == 8 + 7)
+			ix = 3;	/* lsl */
+		else if (di->cond == 8 + 6 || di->cond == 8 + 2)
+			ix = di->cond - 8;	/* sxtw, uxtw */
+		else
+			return false;
+		if (!fkept(e, (uint32_t)d, k, RB(di->rn) | RB(di->rm)))
+			return false;
+		i->op = i->op == I_LD ? I_LDX : I_STX;
+		i->rn = di->rn;
+		i->rm = di->rm;
+		i->ra = (uint8_t)ix;
+		i->sh = di->sh != 0;
+		fdone(e, (uint32_t)d, k);
+		return true;
+	}
+	case I_MADD: {	/* of two sign (zero) extended words: smaddl (umaddl) */
+		int32_t d2;
+
+		if (!i->sz || i->rn == i->rm || i->ra == i->rn || i->ra == i->rm)
+			return false;
+		for (int side = 0; side < 2; side++) {	/* one of them a constant word */
+			int r = side ? i->rn : i->rm, c = side ? i->rm : i->rn;
+			const ins *mk = fwriter(e, k, c);
+
+			if ((d = fdefof(e, k, r)) < 0 || !mk || mk->op != I_MOVI || !fgpr(c))
+				continue;
+			fdef f = fclass(&in[d]);
+			int64_t v = mk->sz ? mk->imm : (int64_t)(uint32_t)mk->imm;
+
+			if (f.kind != FD_EXT || f.sh || (f.opt & 3) != 2 || !in[d].sz || !fgpr(f.src) ||
+			    !(f.opt & 4 ? v >= INT32_MIN && v <= INT32_MAX : v >= 0 && v <= UINT32_MAX) ||
+			    !fkept(e, (uint32_t)d, k, RB(f.src)) || in[d].rd == c)
+				continue;
+			i->op = f.opt & 4 ? I_SMADDL : I_UMADDL;
+			i->rn = (uint8_t)f.src;
+			i->rm = (uint8_t)c;
+			fdone(e, (uint32_t)d, k);
+			return true;
+		}
+		if ((d = fdefof(e, k, i->rn)) < 0 || (d2 = fdefof(e, k, i->rm)) < 0)
+			return false;
+		fdef f = fclass(&in[d]), g = fclass(&in[d2]);
+
+		if (f.kind != FD_EXT || g.kind != FD_EXT || f.sh || g.sh || f.opt != g.opt || (f.opt & 3) != 2 ||
+		    !in[d].sz || !in[d2].sz || !fgpr(f.src) || !fgpr(g.src))
+			return false;
+		uint32_t lo = d < d2 ? (uint32_t)d : (uint32_t)d2;
+
+		if (!fkept(e, (uint32_t)d, k, RB(f.src)) || !fkept(e, (uint32_t)d2, k, RB(g.src)) ||
+		    (W.rr[lo == (uint32_t)d ? d2 : d] & RB(in[lo].rd)))
+			return false;
+		/* (the later definition must not read the earlier one's register: it reads its own source) */
+		if (in[d].rd == g.src || in[d2].rd == f.src)
+			return false;
+		i->op = f.opt & 4 ? I_SMADDL : I_UMADDL;
+		i->rn = (uint8_t)f.src;
+		i->rm = (uint8_t)g.src;
+		fdone(e, (uint32_t)d, k);
+		fdone(e, (uint32_t)d2, k);
+		return true;
+	}
+	case I_ANDI: {	/* (x >> k) & (2^n - 1): ubfx */
+		uint64_t m = i->sz ? (uint64_t)i->imm : (uint32_t)i->imm;
+		int n;
+
+		if (!m || (m & (m + 1)) || i->rd >= 31 || (d = fdefof(e, k, i->rn)) < 0)
+			return false;
+		n = 64 - __builtin_clzll(m);
+		fdef f = fclass(&in[d]);
+
+		if ((f.kind != FD_LSR && f.kind != FD_ASR) || in[d].sz != i->sz || f.sh + n > w || !fgpr(f.src) ||
+		    !fkept(e, (uint32_t)d, k, RB(f.src)))
+			return false;
+		*i = (ins){ .op = I_UBFM, .sz = i->sz, .rd = i->rd, .rn = (uint8_t)f.src, .imm = f.sh, .sh = (uint8_t)(f.sh + n - 1) };
+		fdone(e, (uint32_t)d, k);
+		return true;
+	}
+	case I_UBFM: case I_SBFM: {
+		fdef me = fclass(i);
+
+		if (i->rd >= 31 || (d = fdefof(e, k, i->rn)) < 0)
+			return false;
+		const ins *di = &in[d];
+		fdef f = fclass(di);
+
+		if (!fgpr(f.src) || (di->sz != i->sz && (f.kind != FD_EXT || di->sz || (f.opt & 4) || di->op == I_ANDI)))
+			return false;
+		if (me.kind == FD_LSL && (f.kind == FD_EXT || (di->op == I_ANDI && !((uint64_t)di->imm & ((uint64_t)di->imm + 1))))) {
+			/* (x & (2^n - 1)) << k, an extension << k: ubfiz/sbfiz */
+			int bits = f.kind == FD_EXT ? f.bits : 64 - __builtin_clzll((uint64_t)di->imm), sg;
+
+			if (f.kind == FD_EXT && f.sh)
+				return false;
+			sg = f.kind == FD_EXT && (f.opt & 4);
+			if (!fkept(e, (uint32_t)d, k, RB(f.kind == FD_EXT ? f.src : di->rn)))
+				return false;
+			int src = f.kind == FD_EXT ? f.src : di->rn;
+
+			if (bits >= w - me.sh) {	/* the field fills the rest: just the shift */
+				i->rn = (uint8_t)src;
+			} else {
+				i->op = sg ? I_SBFM : I_UBFM;
+				i->rn = (uint8_t)src;
+				i->imm = (w - me.sh) % w;
+				i->sh = (uint8_t)(bits - 1);
+			}
+			fdone(e, (uint32_t)d, k);
+			return true;
+		}
+		if ((me.kind == FD_LSR || me.kind == FD_ASR) && f.kind == FD_LSL && me.sh >= f.sh) {
+			/* (x << m) >> k: ubfx/sbfx */
+			if (!fkept(e, (uint32_t)d, k, RB(f.src)))
+				return false;
+			i->rn = (uint8_t)f.src;
+			i->imm = me.sh - f.sh;
+			i->sh = (uint8_t)(w - 1 - f.sh);
+			fdone(e, (uint32_t)d, k);
+			return true;
+		}
+		return false;
+	}
+	default:
+		return false;
+	}
+}
+
+/*
+ * A constant the block loaded for one reader, held by the reader instead: zr for a
+ * stored zero, an add/sub/compare immediate (12 bits, maybe shifted, either sign:
+ * the encoder flips the operation), a logical immediate.
+ */
+static bool fconst(ecx *e, uint32_t k)
+{
+	ins *in = e->in, *i = &in[k];
+	int32_t d;
+
+	switch (i->op) {
+	case I_ST: case I_STX: case I_STP:
+		for (int q = 0; q < 2; q++) {
+			int r = q ? i->ra : i->rd;
+
+			if ((q && i->op != I_STP) || r >= 31 || r == i->rn || (i->op == I_STX && r == i->rm) ||
+			    (i->op == I_STP && i->rd == i->ra) || (d = fdefof(e, k, r)) < 0 || in[d].op != I_MOVI ||
+			    ((uint64_t)in[d].imm & (i->op == I_STP || i->sz == 3 ? ~0ull : ((1ull << (8 << i->sz)) - 1))))
+				continue;
+			if (q)
+				i->ra = ZR;
+			else
+				i->rd = ZR;
+			fdone(e, (uint32_t)d, k);
+			return true;
+		}
+		return false;
+	case I_ADD: case I_SUB: case I_ADDS: case I_SUBS: case I_AND: case I_ORR: case I_EOR: case I_ANDS: {
+		bool as = i->op <= I_SUBS, comm = i->op != I_SUB && i->op != I_SUBS;
+
+		if (i->sh || i->cond || i->rn >= 31 || i->rn == i->rm || (i->rd == ZR && (i->op == I_ADD || i->op == I_SUB ||
+		    i->op == I_AND || i->op == I_ORR || i->op == I_EOR)) || i->rd >= 32)
+			return false;
+		for (int side = 0; side < 2; side++) {
+			int r = side ? i->rn : i->rm, a = side ? i->rm : i->rn;
+
+			if ((side && !comm) || r >= 31 || a >= 31 || (d = fdefof(e, k, r)) < 0 || in[d].op != I_MOVI)
+				continue;
+			int64_t v = i->sz ? in[d].imm : (int64_t)(int32_t)in[d].imm, u = v < 0 ? -v : v;
+			static const uint8_t to[] = { [I_ADD] = I_ADDI, [I_SUB] = I_SUBI, [I_ADDS] = I_ADDSI, [I_SUBS] = I_SUBSI,
+						      [I_AND] = I_ANDI, [I_ORR] = I_ORRI, [I_EOR] = I_EORI, [I_ANDS] = I_ANDSI };
+
+			if (as ? v == INT64_MIN || !(u < 4096 || (!(u & 0xfff) && u < (1 << 24))) || (i->sz == 0 && u > 0x7fffffff)
+			       : !logimm_ok(i->sz ? (uint64_t)v : (uint32_t)v, i->sz))
+				continue;
+			*i = (ins){ .op = to[i->op], .sz = i->sz, .rd = i->rd, .rn = (uint8_t)a, .imm = as ? v : (i->sz ? v : (int64_t)(uint32_t)v) };
+			fdone(e, (uint32_t)d, k);
+			return true;
+		}
+		return false;
+	}
+	default:
+		return false;
+	}
+}
+
+/*
+ * A product by a constant the block just loaded (once, for it), when no add took it
+ * (madd): c = 2^n + 1 one add; (2^n + 1) << m and 2^n - 1 two records, the first in
+ * the constant's place with its register, as LLVM.
+ */
+static void fmulk(ecx *e, uint32_t k)
+{
+	ins *in = e->in, *i = &in[k];
+	int w = i->sz ? 64 : 32;
+
+	if (i->op != I_MADD || i->ra != ZR || i->rd >= 31 || i->rn == i->rm)
+		return;
+	for (int side = 0; side < 2; side++) {
+		int r = side ? i->rn : i->rm, a = side ? i->rm : i->rn;
+		int32_t d = fdefof(e, k, r);
+		uint64_t c, m = i->sz ? ~0ull : 0xffffffffull;
+		int n, sh;
+
+		if (d < 0 || in[d].op != I_MOVI || !fgpr(a))
+			continue;
+		c = (uint64_t)in[d].imm & m;
+		if (!c)
+			continue;
+		if (c == m) {	/* -1: neg */
+			*i = (ins){ .op = I_SUB, .sz = i->sz, .rd = i->rd, .rn = ZR, .rm = (uint8_t)a };
+			fdone(e, (uint32_t)d, k);
+			return;
+		}
+		sh = __builtin_ctzll(c);
+		c >>= sh;
+		if (c > 1 && !((c - 1) & (c - 2)) && sh < w) {	/* (2^n + 1) << sh */
+			n = __builtin_ctzll(c - 1);
+			if (!sh) {
+				*i = (ins){ .op = I_ADD, .sz = i->sz, .rd = i->rd, .rn = (uint8_t)a, .rm = (uint8_t)a, .sh = (uint8_t)n };
+				fdone(e, (uint32_t)d, k);
+				return;
+			}
+		} else if (!sh && c > 3 && !(c & (c + 1)) && 64 - __builtin_clzll(c) < w) {	/* 2^n - 1 */
+			n = 64 - __builtin_clzll(c);
+		} else {
+			continue;
+		}
+		/* the first record in the constant's place: a there already (live through d) */
+		if (!fkept(e, (uint32_t)d, k, RB(a)) || !(W.la[d] & RB(a)))
+			continue;
+		if (sh) {	/* add r, a, a, lsl n; lsl d, r, sh */
+			in[d] = (ins){ .op = I_ADD, .sz = i->sz, .rd = (uint8_t)r, .rn = (uint8_t)a, .rm = (uint8_t)a, .sh = (uint8_t)n };
+			*i = (ins){ .op = I_UBFM, .sz = i->sz, .rd = i->rd, .rn = (uint8_t)r, .imm = (w - sh) % w, .sh = (uint8_t)(w - 1 - sh) };
+		} else {	/* lsl r, a, n; sub d, r, a */
+			in[d] = (ins){ .op = I_UBFM, .sz = i->sz, .rd = (uint8_t)r, .rn = (uint8_t)a, .imm = (w - n) % w, .sh = (uint8_t)(w - 1 - n) };
+			*i = (ins){ .op = I_SUB, .sz = i->sz, .rd = i->rd, .rn = (uint8_t)r, .rm = (uint8_t)a };
+		}
+		W.ro[d] = (uint16_t)roles(&in[d]);
+		W.rr[d] = reads(&in[d], W.ro[d]);
+		W.ro[k] = (uint16_t)roles(i);
+		W.rr[k] = reads(i, W.ro[k]);
+		return;
+	}
+}
+
+/*
+ * Bytes assembled into a value: an or of byte loads from one base at adjacent
+ * offsets, each shifted to its place in little- or big-endian order (2, 4 or 8 of
+ * them), becomes one load at the first byte load's place, then rev/rev16 for big
+ * endian, as LLVM.  Nothing between may store, call or be unknown, nor read or
+ * write the result's register; the base is the same for every load.
+ */
+typedef struct fbyte { uint32_t at; int base; int64_t off; int sh, sgn; } fbyte;	/* sgn: ldrsb's cond */
+#define FB_MAX 8
+#define FB_CHAIN 24
+
+static bool fbytes(ecx *e, uint32_t j, int r, int s, int sz, fbyte *b, int *nb, uint32_t *ch, int *nch)
+{
+	const ins *in = e->in;
+	int32_t d = fdefof(e, j, r);
+
+	if (d < 0 || *nch >= FB_CHAIN || s >= (sz ? 64 : 32))
+		return false;
+	const ins *di = &in[d];
+
+	ch[(*nch)++] = (uint32_t)d;
+	if (di->op == I_LD) {
+		if (di->sz || di->rn >= 31 || di->ra == LD_VOLATILE || *nb >= FB_MAX || (s & 7))
+			return false;
+		b[(*nb)++] = (fbyte){ (uint32_t)d, di->rn, di->imm, s, di->cond };
+		return true;
+	}
+	if (di->sz > sz)
+		return false;
+	if (di->sz < sz) {	/* a w value in an x one: zero above bit 31, if its bytes stay below */
+		int n0 = *nb;
+
+		if (!fbytes(e, j, r, 0, 0, b, nb, ch, nch))	/* (d in ch twice: harmless) */
+			return false;
+		for (int q = n0; q < *nb; q++) {
+			b[q].sh += s;
+			b[q].sgn = b[q].sgn ? 2 : 0;	/* (its sign stops at bit 31) */
+		}
+		return true;
+	}
+	if (di->op == I_ORR && !di->cond && di->rn != di->rm)
+		return fbytes(e, (uint32_t)d, di->rn, s, sz, b, nb, ch, nch) &&
+		       fbytes(e, (uint32_t)d, di->rm, s + di->sh, sz, b, nb, ch, nch);
+	fdef f = fclass(di);
+
+	if (f.kind == FD_LSL)
+		return fbytes(e, (uint32_t)d, f.src, s + f.sh, sz, b, nb, ch, nch);
+	return false;
+}
+
+static void fbswap(ecx *e, uint32_t k)
+{
+	ins *in = e->in, *i = &in[k];
+	fbyte b[FB_MAX];
+	uint32_t ch[FB_CHAIN], first = k, lastld = 0;
+	int nb = 0, nch = 0, n, lg, w = i->sz ? 64 : 32;
+	int64_t lo = INT64_MAX;
+	bool le = true, be = true;
+	uint8_t seen = 0;
+
+	if (i->op != I_ORR || i->cond || i->rd >= 29 || i->rn == i->rm || i->rn >= 31 || i->rm >= 31)
+		return;
+	if (!fbytes(e, k, i->rn, 0, i->sz, b, &nb, ch, &nch) || !fbytes(e, k, i->rm, i->sh, i->sz, b, &nb, ch, &nch))
+		return;
+	n = nb;
+	if (n != 2 && n != 4 && n != 8)
+		return;
+	if (n * 8 > w)
+		return;
+	lg = n == 2 ? 1 : n == 4 ? 2 : 3;
+	for (int q = 0; q < n; q++) {
+		if (b[q].base != b[0].base)
+			return;
+		lo = b[q].off < lo ? b[q].off : lo;
+		first = b[q].at < first ? b[q].at : first;
+		lastld = b[q].at > lastld ? b[q].at : lastld;
+	}
+	for (int q = 0; q < n; q++) {
+		int64_t x = b[q].off - lo;
+
+		if (x < 0 || x >= n || (seen & (1u << x)))
+			return;
+		seen |= (uint8_t)(1u << x);
+		le &= b[q].sh == 8 * x;
+		be &= b[q].sh == 8 * (n - 1 - x);
+	}
+	if (!le && !be)
+		return;
+	/* a sign-extended byte: only the top one, then the value sign-extended from 8n bits
+	 * (nothing when it fills the register; into w, ldrsb's bits above 31 are zero) */
+	int sgn = 0;
+
+	for (int q = 0; q < n; q++)
+		if (b[q].sgn) {
+			if (b[q].sh != 8 * (n - 1) || (i->sz && b[q].sgn == 2))
+				return;
+			sgn = 8 * n < w;
+		}
+	/* the records between: the chain's, or ones that leave memory, the base and rd alone */
+	for (uint32_t j = first; j <= k; j++) {
+		bool inch = j == k;
+
+		if (in[j].op == DELETED)
+			continue;
+		for (int q = 0; q < nch && !inch; q++)
+			inch = ch[q] == j;
+		if (inch)
+			continue;
+		unsigned op = in[j].op;
+
+		if ((W.ro[j] & OP_SLOW) || op == I_ST || op == I_STX || op == I_STP || op == I_STLO || op == I_STF || op == I_BL ||
+		    op == I_BLR || ((W.rr[j] | W.ww[j]) & RB(i->rd)) || (j < lastld && (W.ww[j] & RB(b[0].base))))
+			return;
+	}
+	for (int q = 0; q < nch; q++)	/* (a chain load writing the base: the last) */
+		if (ch[q] < lastld && in[ch[q]].rd == b[0].base)
+			return;
+	int rd = i->rd, base = b[0].base, sz = i->sz;
+
+	/* rev (big endian) and the sign extension, the last at k, the rev before it in a
+	 * chain record's place (there are at least three: two loads and an or) */
+	uint32_t at[2] = { k, k }, na = 0;
+
+	if (!le && sgn) {
+		for (int q = 0; q < nch && !na; q++)
+			if (ch[q] > first && ch[q] < k)
+				at[0] = ch[q], na = 1;
+		if (!na)
+			return;	/* (cannot happen) */
+	}
+	for (int q = 0; q < nch; q++) {
+		in[ch[q]].op = DELETED;
+		W.rr[ch[q]] = W.ww[ch[q]] = 0;
+	}
+	in[first] = (ins){ .op = I_LD, .sz = (uint8_t)lg, .rd = (uint8_t)rd, .rn = (uint8_t)base, .imm = lo };
+	W.ro[first] = (uint16_t)roles(&in[first]);
+	W.rr[first] = reads(&in[first], W.ro[first]);
+	W.ww[first] = writes(&in[first], W.ro[first]);
+	in[k].op = DELETED;
+	W.rr[k] = W.ww[k] = 0;
+	if (!le)
+		in[at[0]] = (ins){ .op = n == 2 ? I_REV16 : I_REV, .sz = (uint8_t)(n == 8 ? 1 : 0), .rd = (uint8_t)rd, .rn = (uint8_t)rd };
+	if (sgn)
+		in[k] = (ins){ .op = I_SBFM, .sz = (uint8_t)sz, .rd = (uint8_t)rd, .rn = (uint8_t)rd, .imm = 0, .sh = (uint8_t)(8 * n - 1) };
+	for (uint32_t q = 0; q < 2; q++) {
+		uint32_t j = q ? k : at[0];
+
+		if (in[j].op == DELETED)
+			continue;
+		W.ro[j] = (uint16_t)roles(&in[j]);
+		W.rr[j] = reads(&in[j], W.ro[j]);
+		W.ww[j] = writes(&in[j], W.ro[j]);
+	}
+	for (uint32_t j = first; j < k; j++)
+		W.la[j] |= RB(rd);
+}
+
+static void fold(ecx *e)
+{
+	for (uint32_t k = 0; k < e->nin; k++)
+		if (e->in[k].op != DELETED)
+			for (int n = 0; n < 4 && fold1(e, k); n++)
+				;
+	for (uint32_t k = e->nin; k-- > 0;)
+		if (e->in[k].op != DELETED)
+			fbswap(e, k);
+	for (uint32_t k = 0; k < e->nin; k++)
+		if (e->in[k].op != DELETED) {
+			fmulk(e, k);
+			if (e->in[k].op != DELETED)
+				fconst(e, k);
+		}
+}
+
+/* ---------------- repeated compares ---------------- */
+
+static inline bool sets_flags(unsigned op)
+{
+	return op == I_ADDS || op == I_SUBS || op == I_ANDS || op == I_ADCS || op == I_SBCS || op == I_ADDSI ||
+	       op == I_SUBSI || op == I_ANDSI;
+}
+
+/*
+ * A compare (rd zr) identical to the one whose flags still hold goes.  The flags hold
+ * from a compare on, through conditional branches, until a flag writer, a call or
+ * unknown record, or a write of a register the compare reads; at a label, when every
+ * way in (falling through, branches from before it) brings an identical compare.  A
+ * label something branches back to, or reached from outside the records, starts with
+ * nothing known.
+ */
+#define NOCMP UINT32_MAX
+#define MIXED (UINT32_MAX - 1)
+static void flags(ecx *e)
+{
+	static _Thread_local uint32_t *ls, *lp;	/* per label: the compare branches bring (NOCMP, MIXED); its record */
+	static _Thread_local uint32_t cap;
+	ins *in = e->in;
+	uint32_t c = NOCMP, nl = e->nlabel;
+	bool fall = true;	/* the previous record falls through */
+
+	if (nl > cap) {
+		cap = nl + nl / 2 + 64;
+		free(ls);
+		ls = malloc(2 * (size_t)cap * sizeof *ls);
+		if (!ls)
+			abort();
+		lp = ls + cap;
+	}
+	for (uint32_t l = 0; l < nl; l++)
+		ls[l] = NOCMP, lp[l] = UINT32_MAX;
+	for (uint32_t k = 0; k < e->nin; k++)
+		if (in[k].op == I_LABEL)
+			lp[in[k].label] = k;
+	for (uint32_t l = 0; l < nl; l++)	/* (ls: branched to yet; NOCMP below means "nothing came") */
+		ls[l] = e->lrefc[l] & LREF_EXT ? MIXED : NOCMP - 2;
+	for (uint32_t k = 0; k < e->nin; k++) {	/* a label something branches back to: nothing known at it */
+		int bk = in[k].op == DELETED ? BR_NONE : brkind(&in[k]);
+
+		if ((bk == BR_COND || bk == BR_UNCOND) && in[k].label < nl && lp[in[k].label] <= k)
+			ls[in[k].label] = MIXED;
+	}
+	for (uint32_t k = 0; k < e->nin; k++) {
+		ins *i = &in[k];
+		unsigned ro;
+		int bk;
+
+		if (i->op == DELETED)
+			continue;
+		if (i->op == I_LABEL) {
+			uint32_t w = ls[i->label];
+
+			if (w == NOCMP - 2)	/* only falling through */
+				w = fall ? c : NOCMP;
+			else if (w != MIXED && fall && (c == NOCMP || memcmp(&in[c], &in[w], sizeof *i)))
+				w = MIXED;
+			c = w == MIXED ? NOCMP : w;
+			ls[i->label] = MIXED;	/* (placed: a later branch to it is a back edge) */
+			fall = true;
+			continue;
+		}
+		if (sets_flags(i->op) && i->rd == ZR) {
+			uint32_t j = k;
+
+			while (j && in[j - 1].op == DELETED)
+				j--;
+			if (c != NOCMP && !memcmp(&in[c], i, sizeof *i))
+				i->op = DELETED;
+			else if (j && in[j - 1].op == (i->op == I_SUBS ? I_SUB : i->op == I_SUBSI ? I_SUBI : DELETED) &&
+				 in[j - 1].rd < 31 && in[j - 1].rd != i->rn && (i->op == I_SUBSI || in[j - 1].rd != i->rm)) {
+				/* the subtraction just before it, of the same operands: that one sets the flags */
+				ins t = in[j - 1];
+
+				t.op = i->op, t.rd = ZR;
+				if (!memcmp(&t, i, sizeof t)) {
+					in[j - 1].op = i->op;
+					i->op = DELETED;
+					c = NOCMP;
+				} else
+					c = k;
+			} else
+				c = k;
+			fall = true;
+			continue;
+		}
+		ro = roles(i);
+		bk = brkind(i);
+		if (c != NOCMP && (sets_flags(i->op) || (ro & OP_SLOW) || (writes(i, ro) & reads(&in[c], roles(&in[c])))))
+			c = NOCMP;
+		if ((bk == BR_COND || bk == BR_UNCOND || i->op == I_ADR) && i->label < nl) {
+			uint32_t *w = &ls[i->label];
+
+			if (i->op == I_ADR || lp[i->label] < k || c == NOCMP)
+				*w = MIXED;
+			else if (*w == NOCMP - 2)
+				*w = c;
+			else if (*w != MIXED && memcmp(&in[*w], &in[c], sizeof *i))
+				*w = MIXED;
+		}
+		fall = bk == BR_NONE || bk == BR_COND;
+		if (!fall)
+			c = NOCMP;
+	}
+}
+#undef NOCMP
+#undef MIXED
+
 /* copy propagation (forward, then backward) and dead copies */
 static void copies(ecx *e)
 {
 	ins *in = e->in;
+	const em_rec_copy_scan scan = {
+		.records = in, .stride = sizeof(ins), .op_offset = offsetof(ins, op), .deleted_op = DELETED,
+		.flags = W.ro, .flags_stride = sizeof(*W.ro), .opaque_mask = OP_ALL,
+		.read = W.rr, .write = W.ww, .live = W.la, .rewrite = a64_copy_rewrite, .ctx = e,
+	};
 
 	for (uint32_t k = 0; k < e->nin; k++) {
 		if (in[k].op == I_MOV && in[k].sz == 1 && in[k].rd == in[k].rn && in[k].rd < 31) {
@@ -1209,8 +1771,8 @@ static void copies(ecx *e)
 		if (is_copy(&in[k])) {
 			if (!(W.la[k] & RB(in[k].rd)) && in[k].rd != 29 && in[k].rd != 30)
 				in[k].op = DELETED;	/* dead */
-			else
-				forward(e, k);
+			else if (TEMPS & RB(in[k].rd))
+				em_rec_copy_forward(&scan, k, W.be[W.blk[k]], in[k].rd, in[k].rn);
 		}
 	}
 	for (uint32_t k = 0; k < e->nin; k++)
@@ -1224,6 +1786,19 @@ VPRIV void opt_function(ecx *e)
 	uint32_t n = 0;
 
 	rawp = e->raw.p;
+	retreads = RB(0) | RB(1);
+	qty rt = T(e->c, e->c->syms[e->top].ty)->base;
+	if (is_bvec(e->c, rt)) {
+		unsigned lanes = T(e->c, rt)->n;
+		if (lanes <= 8 && lanes != 2 && lanes != 4 && lanes != 8)
+			retreads = RB(lanes) - 1;
+	}
+	if (e->vlow) {	/* (VIR's functions: what the return value takes) */
+		if (is_void(e->c, rt) || (is_flt(e->c, rt) && tsize(e->c, rt) <= 8))
+			retreads = 0;
+		else if ((is_integer(e->c, rt) || is_ptr(e->c, rt)) && tsize(e->c, rt) <= 8)
+			retreads = RB(0);
+	}
 	if (!liveness(e))
 		return;
 	/* a temporary saved around a call and dead after its restore: neither */
@@ -1242,6 +1817,10 @@ VPRIV void opt_function(ecx *e)
 	exts(e);
 	copies(e);
 	dead(e);
+	if (e->vlow) {
+		fold(e);
+		flags(e);
+	}
 	uint32_t dj = 0;
 
 	for (uint32_t k = 0; k < e->nin; k++) {

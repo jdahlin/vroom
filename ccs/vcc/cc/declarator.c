@@ -19,7 +19,11 @@ VPRIV qty vector_attribute(cc *c, qty t, uint32_t size, uint32_t loc)
 		}
 		return QT(ty_intern(c, &outer), QQ(t));
 	}
-	if (!is_arith(c, t) || is_complex(c, t) || !ty_size(c, t) ||
+	if (is_bigint(c, t)) {
+		cc_error(c, loc, "vector integer elements wider than 128 bits are not supported");
+		return t;
+	}
+	if (kind == TY_BOOL || !is_arith(c, t) || is_complex(c, t) || !ty_size(c, t) ||
 	    ty_size(c, t) > size || size % ty_size(c, t)) {
 		cc_error(c, loc, "invalid vector element type '%s'", tyname(c, t));
 		return t;
@@ -215,6 +219,7 @@ static void array_suffix(cc *c, dop *op, uint32_t name)
 	{
 		uint32_t n = rvalue(c, assign_expr(c));
 		i128 v;
+		cval bound;
 
 		expect(c, T_RSQUARE, "']'");
 		if (!is_integer(c, N(n)->ty)) {
@@ -222,10 +227,16 @@ static void array_suffix(cc *c, dop *op, uint32_t name)
 
 			report(c, "error", N(n)->loc, &r, 1, NULL, 0, "size of array has non-integer type '%s'", tyname(c, N(n)->ty));
 			v = 1;
-		} else if (!const_int(c, n, &v)) {
+		} else if (!eval(c, n, &bound) || bound.kind != CV_INT ||
+			   (!bound.ice && has_side_effects(c, n))) {
+			/* Knowing the value of (callback(), 1) does not make its
+			   evaluation optional. Keep effectful bounds in the VLA type.
+			   An ICE may contain unevaluated calls in a short-circuit arm. */
 			op->fl = TF_VLA;
 			op->a = n;
 			return;
+		} else {
+			v = bound.i;
 		}
 		if (v < 0) {
 			pp_span r = rng(c, n);

@@ -1,0 +1,14 @@
+; a noreturn call not followed by trap
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+sig %n = () -> none
+extern @abort
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  call @abort %n () noreturn
+  ret v0
+}
+; ---
+@f b0.1: A3: a noreturn call is not followed by trap

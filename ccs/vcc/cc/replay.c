@@ -201,6 +201,7 @@ static void node_kinds(const node *x, uint8_t k[3])
 	switch (x->op) {
 	case N_NONE: case N_ZERO: case N_BREAK: case N_CONTINUE: break;
 	case N_NUM: k[0] = K_IPOOL; break;
+	case N_BIGNUM: k[0] = K_LIST; break;
 	case N_FNUM: k[0] = K_FPOOL; break;
 	case N_STR: k[0] = K_STR; break;
 	case N_VAR: k[0] = K_SYM; break;
@@ -212,10 +213,12 @@ static void node_kinds(const node *x, uint8_t k[3])
 	case N_COND: case N_IF: k[0] = k[1] = k[2] = K_NODE; break;
 	case N_CALL: k[0] = K_NODE, k[1] = K_LIST; break;
 	case N_BUILTIN: case N_INIT: k[1] = K_LIST; break;
-	case N_CAST: case N_UNARY: case N_ADDR: case N_DEREF: case N_PREINC: case N_PREDEC: case N_POSTINC:
-	case N_POSTDEC: case N_SIZEOF_VLA: case N_STMTEXPR: case N_VAARG: case N_EXPR: case N_GOTO_IND: case N_RETURN:
+	case N_CAST: k[0] = k[2] = K_NODE; break;
+	case N_UNARY: case N_ADDR: case N_DEREF: case N_PREINC: case N_PREDEC: case N_POSTINC:
+	case N_POSTDEC: case N_STMTEXPR: case N_VAARG: case N_EXPR: case N_GOTO_IND: case N_RETURN:
 		k[0] = K_NODE;
 		break;
+	case N_SIZEOF_VLA: k[0] = K_NODE, k[1] = K_TYPE; break;
 	case N_COMPLIT: k[0] = K_NODE, k[1] = K_SYM; break;
 	case N_BLOCK: k[0] = x->aux ? K_LIST : K_LISTO, k[1] = K_LIST; break;
 	case N_DECL: k[0] = K_SYM, k[1] = K_NODE; break;
@@ -1358,9 +1361,16 @@ static uint64_t opt_sig(const cc_opts *o)
 	       (uint64_t)!!o->short_wchar << 10 | (uint64_t)o->std << 11 | (uint64_t)!!o->implicit_int << 20 |
 	       (uint64_t)!!o->gnu89_inline << 21 | (uint64_t)!!o->instrument << 22 |
 	       (uint64_t)!!o->general_regs_only << 23 | (uint64_t)!!o->no_builtin << 24 |
-	       (uint64_t)!!o->implicit_fn << 25 | (uint64_t)!!o->emit << 26;
+	       (uint64_t)!!o->implicit_fn << 25 | (uint64_t)!!o->emit << 26 | (uint64_t)!!o->fast_math << 27 | (uint64_t)!!o->c2y << 28 | (uint64_t)o->strict_flex_arrays << 29;
 	for (unsigned i = 0; i < CC_DISABLED_BUILTIN_WORDS; i++)
 		sig = (sig ^ o->disabled_builtins[i]) * UINT64_C(1099511628211);
+	if (o->target == PP_LINUX_X86_64) {
+		const x86_features *sets[] = {&o->x86_features, &o->x86_disabled, &o->x86_raw, &o->x86_override_on, &o->x86_override_off};
+		sig = (sig ^ (uint64_t)o->x86_features_set) * UINT64_C(1099511628211);
+		for (unsigned k = 0; k < sizeof(sets)/sizeof(*sets); k++)
+			for (unsigned i = 0; i < X86_FEATURE_WORDS; i++)
+				sig = (sig ^ sets[k]->bits[i]) * UINT64_C(1099511628211);
+	}
 	return sig;
 }
 
@@ -1577,7 +1587,8 @@ static bool rel_build(drent *e)
 		e->dn[a][RO_DA + 1] = t;
 		e->dof[a] = malloc((t + 1) * sizeof(uint32_t));
 		for (int k = 0; k <= RO_DA; k++) {
-			memcpy(e->dof[a] + e->dn[a][k], rl[a].d[k].v, rl[a].d[k].n * sizeof(uint32_t));
+			if (rl[a].d[k].n)
+				memcpy(e->dof[a] + e->dn[a][k], rl[a].d[k].v, rl[a].d[k].n * sizeof(uint32_t));
 			free(rl[a].d[k].v);
 		}
 	}
@@ -2114,6 +2125,7 @@ static void rec_close(cc *c, uint64_t endpos)
 			if (d->aux)
 				MARK(d->a, d->aux, K_SYM, false);
 			break;
+		case N_BIGNUM: MARK(d->a, d->b, LK_IMM, false); break;
 		case N_INIT:
 			if (d->aux == 1)
 				MARK(d->b, d->c * 3, j_ % 3 == 2 ? K_NODE : LK_IMM, false);
@@ -2484,7 +2496,7 @@ static bool pair(un *u, int k, uint64_t a64, uint64_t b64)
 		if (QQ(a) != QQ(b))
 			return false;
 		a = QI(a), b = QI(b);
-		/* fallthrough */
+		__attribute__((fallthrough));
 	case K_TIDX:
 		if (a < e->nty_bi || b < e->nty_bi)
 			return a == b;
@@ -2499,7 +2511,7 @@ static bool pair(un *u, int k, uint64_t a64, uint64_t b64)
 		if (!a || !b)
 			return a == b;
 		a--, b--;
-		/* fallthrough */
+		__attribute__((fallthrough));
 	case K_STR:
 		if (!a || !b)
 			return a == b;
@@ -2516,7 +2528,7 @@ static bool pair(un *u, int k, uint64_t a64, uint64_t b64)
 		if (!a || !b)
 			return a == b;
 		a--, b--;
-		/* fallthrough */
+		__attribute__((fallthrough));
 	case K_LIST:
 		return pair_w(u, W_LIST, a, b, &found) && found;
 	default:

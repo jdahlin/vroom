@@ -1,0 +1,12 @@
+; a value defined twice
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  v0:i64 = add v0, 1
+  ret v0
+}
+; ---
+bad/syntax-duplicate-value.vir:8:3: value v0 defined twice

@@ -30,6 +30,7 @@ enum {
 	X_LD,		/* r0 = [r1 + off (+ ref)]: sz bytes, cond 1 sign-extended (to 64 bits) */
 	X_ST,		/* [r1 + off (+ ref)] = r2: sz bytes */
 	X_LEA,		/* r0 = r1 + off (+ ref) */
+	X_LEASCALE,	/* r0 = r1 + (r2 << sh), sz 4 zero-extends or sz 8 */
 	/* r0 = r1 op r2 (sz 4 or 8) */
 	X_ADD, X_SUB, X_AND, X_OR, X_XOR, X_IMUL, X_ADC, X_SBB,
 	/* r0 = r1 op imm (32-bit signed) */
@@ -45,11 +46,13 @@ enum {
 	X_JCC,		/* cond, label */
 	X_CALL,		/* ref; cond 1: variadic (al already set) */
 	X_CALLR,	/* r1 */
+	X_TAIL,		/* ref: terminal sibling-call marker, emitted after the epilogue */
 	X_PUSH, X_POP,	/* r1 / r0 */
 	X_ADJSP,	/* rsp += imm */
 	X_CQO,		/* rdx = sign of rax (sz 4: cltd, 8: cqto) */
 	X_IDIV, X_DIV,	/* rdx:rax / r1: rax quotient, rdx remainder */
 	X_MULW,		/* rdx:rax = rax * r1 (unsigned, 64 x 64 -> 128) */
+	X_SMULW,	/* rdx:rax = rax * r1 (signed, 64 x 64 -> 128) */
 	X_UD2,
 	X_TLS,		/* r0 = the address of ref, thread-local: cond 0 local-exec, 1 initial-exec;
 			   2 general dynamic: rax = __tls_get_addr(ref's descriptor) (a call) */
@@ -58,10 +61,12 @@ enum {
 	X_XADD,		/* lock xadd: r0 = [r1 + off], [r1 + off] += old r0 */
 	X_CMPXCHG,	/* lock cmpxchg: if [r1 + off] == rax then = r2, else rax = [r1 + off] */
 	X_MFENCE,
-	X_RAW,		/* raw inline asm: off/length in e->raw */
 	X_BARRIER,	/* empty asm: a compiler memory/flags barrier, no machine instruction */
-	X_LEAL,		/* address of a local code label */
 	X_JMPR,		/* jmp *r1 */
+	X_LEAL,		/* r0 = the address of local label `label` */
+	X_BLENDVB,	/* SSE4.1: xmm1 = select(xmm1, xmm2, high bits of xmm0) */
+	X_PCMPSTR,	/* SSE4.2: xmm0/xmm1, eax/edx lengths; cond selects opcode, imm control */
+	X_RAW,		/* inline asm: e->raw's text at off, ref bytes */
 	X_NAMED,	/* ref's name as a label here */
 	X_BSF, X_BSR,	/* r0 = index of the lowest / highest set bit of r1 */
 	X_BSWAP,	/* r0 = r0 byte-reversed (sz 4, 8) */
@@ -70,12 +75,15 @@ enum {
 	/* SSE (X_LD/X_ST/X_MOV take xmm registers too) */
 	X_FADD, X_FSUB, X_FMUL, X_FDIV,	/* r0 = r1 op r2 (sz 4 ss, 8 sd) */
 	X_FXOR,		/* r0 = r1 ^ r2 (xorps) */
+	X_FSQRT,	/* scalar square root r0 = sqrt(r1) */
 	X_FCMP,		/* flags: ucomis r1 ? r2 */
 	X_FSETCC,	/* r0 = (cond 0: ==, 1: !=) after X_FCMP/x87 compare, NaN-aware (r11 scratch) */
 	X_CVTI2F,	/* xmm r0 = gpr r1: sz float size, sh int size (4, 8) */
 	X_CVTF2I,	/* gpr r0 = xmm r1 truncated: sz int size, sh float size */
 	X_CVTF2F,	/* xmm r0 = xmm r1: sz the result's size */
 	X_X87,		/* cond: XF_* (with a memory operand where it takes one) */
+	X_JTE,		/* a jump table word: .long label - ref (both labels) */
+	X_RESUME_FRAME,	/* rebuild realigned R12 from restored RBP after builtin longjmp */
 	X_NOPS
 };
 
@@ -91,12 +99,19 @@ typedef struct xst {
 	rec *tw;		/* twoaddr.c's output */
 	uint32_t ntw;
 	uint32_t live;		/* temporaries in use (bit = register) */
+	bool asmcs;		/* inside an asm: out of temporaries, take a callee-saved register (saved by the prologue) */
 	int pushes;		/* 8-byte pushes outstanding (the call alignment) */
+	bool framefree;		/* frame.c: no frame/stack dependency in the final body */
+	/* locals.c: persistent homes, disjoint from expression temporaries and R12. */
+	uint32_t lsym[4];
+	uint8_t lreg[4], nlreg;
 	/* the function's incoming arguments (abi.c) */
+	int interrupt;		/* interrupt handler parameter count, zero for normal ABI */
 	int ngp, nfp;		/* named arguments in general and vector registers */
 	int32_t stk;		/* bytes of named stack arguments */
 	int64_t sret;		/* frame slot of the hidden result pointer (0: none) */
 	int64_t save;		/* variadic: the register save area's slot (0: none) */
+	int64_t csslot[16];	/* callee saves for asm and register locals: prologue/epilogue + CFI */
 } xst;
 
 /* the integer argument registers, in order */
@@ -109,16 +124,35 @@ VPRIV void x64_movi(ecx *e, int r, int64_t v);
 VPRIV uint32_t x64_save(ecx *e, const uint8_t *regs, int n, int k0, int k1);
 VPRIV void x64_restore(ecx *e, uint32_t sv);
 VPRIV int x64_ftreg(ecx *e);
+VPRIV void x64_csused(ecx *e, int r);	/* a callee-saved register used: the prologue saves it */
 VPRIV rec *x64_put(ecx *e, int op);
 VPRIV void x64_twoaddr(ecx *e);
+VPRIV bool x64_mulconst(ecx *e, int size, int r, i128 rhs);
+
+VPRIV bool x64_tail_return(ecx *e, uint32_t expr);
+VPRIV uint32_t x64_tail_ref(const ecx *e);
+VPRIV bool x64_framefree_candidate(ecx *e);
+VPRIV bool x64_framefree_record(ecx *e, const rec *i);
+VPRIV bool x64_copy_forward_at(ecx *e, uint32_t k);
+VPRIV bool x64_last_u32(const ecx *e, int r);
+VPRIV void x64_dead(ecx *e);
+VPRIV void x64_dead_budget(ecx *e, uint32_t budget);	/* internal bounded-fallback contracts */
+VPRIV void x64_locals_begin(ecx *e, uint32_t s);
+VPRIV bool x64_local(ecx *e, uint32_t s, lval *l);
+/* effects.c: logical records before or after two-address expansion. */
+VPRIV const uint8_t *x64_flow_table(void);
+/* Prepared for shared copy/liveness passes; also exercised by contract tests. */
+VPRIV __attribute__((unused)) receffects x64_effects(const ecx *e, const rec *i);
 VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s);
 VPRIV void x64_x87(ecx *e, int xf, const lval *l, int sz);
 
 VPRIV void x64_lbl(tbuf *b, uint32_t s, uint32_t l);
 VPRIV void x64_reg(tbuf *b, int r, int sz);
-VPRIV int x64_asm_namedreg(const char *name);
 VPRIV int x64_tlsaddr(ecx *e, uint32_t ref, int model);
 VPRIV bool sym_needs_got(cc *c, uint32_t ref);	/* arch/a64/emit/value.c (shared) */
 VPRIV int x64_base(ecx *e, const lval *l, uint32_t *ref);
+VPRIV bool x64_nosimd(ecx *e);
+VPRIV void x64_nofp(ecx *e);
+VPRIV void x64_x87(ecx *e, int xf, const lval *l, int sz);	/* an x87 record (fp.c) */	/* fatal under -mgeneral-regs-only / -mno-sse */
 
 #endif

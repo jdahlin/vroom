@@ -20,10 +20,9 @@
  */
 #ifndef VCC_WALK_H
 #define VCC_WALK_H
+#include "prefix.h"	/* generated (bench/gen-walkprefix.py): WK_PREFIX renames the walker's functions; first, so that emitimpl.h's wk_ prototypes are renamed too */
 #include "../emitimpl.h"
 #include "../rec/rec.h"
-
-#define LO(name) x64_##name
 
 /*
  * An argument, parameter or result as the ABI passes it (LO(classify)): n
@@ -32,7 +31,7 @@
  * slot (8-byte words; a scalar extended to 64 bits).
  */
 enum { WA_INT, WA_SSE };
-typedef struct wkarg { uint8_t n, cls[2]; bool mem, x87, up; uint32_t align; uint64_t size; int64_t slot; } wkarg;	/* x87: returned in st(0); up: one 16-byte SSE word (x86-64 SSEUP) */
+typedef struct wkarg { uint8_t n, cls[2]; bool mem, x87, up, vector, wide_record, unnamed; uint32_t align, blanes; uint64_t size; int64_t slot; } wkarg;	/* x87: returned in st(0); up: one 16-byte SSE word (x86-64 SSEUP) */
 /* ---------------- walker state (one per ecx) ---------------- */
 
 #define WK_MAXLOOP 1024
@@ -43,19 +42,36 @@ typedef struct wkloop { uint32_t brk, cont; int cdepth; } wkloop;	/* cdepth: the
 typedef struct wkcase { i128 lo, hi; uint32_t node; } wkcase;
 
 /* an inlined call: where its returns go */
+typedef struct wkael { uint32_t s, gen, inst; int64_t idx; i128 v; } wkael;	/* a[K] = constant (wkst.ael) */
+
 typedef struct wkinl {
 	struct wkinl *up;
-	uint32_t fn, endlbl;
+	uint32_t fn, endlbl, inst, call;
 	qty rty;
 	int64_t rslot;		/* the result's slot (a value held by address: its object) */
 	int cbase;		/* the cleanups live at the call */
+	int vbase;		/* caller VLA saves must outlive callee alloca */
 	bool any, cst_ok;	/* a return seen; every return so far the constant cst */
 	val cst;
+	wkael ael0[16];		/* the caller's known array elements at the call (restored after the copy) */
+	int nael0;
 } wkinl;
+
+#define WK_MAXTSLOT 1024
 
 typedef struct wkst {
 	int64_t foff;		/* bytes of locals below the frame base so far */
 	uint32_t falign;
+	/* Temporary slots: one handed out inside a statement is dead when the
+	   statement ends (statement expressions give their value outside the
+	   inner statements), so later statements reuse it.  tu: those of the
+	   statements being walked (a stack, marked per statement); tf: free. */
+	struct wktslot { int64_t off; uint32_t size, align; } tu[WK_MAXTSLOT], tf[WK_MAXTSLOT];
+	uint32_t ntu, ntf, sdepth;
+	/* the locals of the inline copies being walked: free (and unbound) when
+	   the copy ends; inlocal: inside a copy's parameters or body */
+	struct wklslot { int64_t off; uint32_t size, align, sym; } lu[WK_MAXTSLOT];
+	uint32_t nlu, inlocal;
 	uint32_t nlabel;	/* local labels handed out in this function (1..) */
 	uint32_t gen;		/* bindings below are valid when their gen is this */
 	uint32_t *sgen;		/* per sym */
@@ -63,7 +79,7 @@ typedef struct wkst {
 	uint32_t *lgen, *ulbl;	/* per user label: local label */
 	uint32_t *clbl;		/* per node (N_CASE/N_DEFAULT): local label, valid when cgen == gen */
 	uint32_t *cgen;
-	uint32_t *vgen;		/* per node (a VLA size): its value is in slot voff when vgen == gen */
+	uint32_t *vgen, *vinst;	/* per-node VLA size slot, keyed by function and inline instance */
 	int64_t *voff;
 	uint32_t *zgen;		/* per sym (a VLA): its saved sp was zeroed on entry when zgen == gen */
 	wkloop loop[WK_MAXLOOP];
@@ -76,6 +92,8 @@ typedef struct wkst {
 	uint32_t fsym;
 	uint32_t clean[WK_MAXCLEAN];	/* variables with __attribute__((cleanup)) in scope, innermost last */
 	int nclean;
+	uint32_t vla[WK_MAXCLEAN];	/* active VLA restore points, lowered by explicit alloca */
+	int nvla;
 	/* the cleanup scopes as a tree (wk_scan): node k (1..) is a cleanup variable and the one
 	   enclosing it; per sym its node, per user label the innermost node in scope there */
 	struct { uint32_t sym, parent; } cn[WK_MAXCLEAN];
@@ -88,118 +106,28 @@ typedef struct wkst {
 	uint32_t inst, ninst, *linst, *cinst;
 	struct wkinl *inl;	/* the innermost inlined call, NULL in the function itself */
 	int depth;
+	bool cjump;	/* wk_cond jumped whatever the condition (N_IF: the branch it skips is dead) */
+	/* a[K] = constant for local arrays used only as a[CONST] (no SA_AESC): straight-line
+	   code only (a label drops them all), as arm64's ael */
+	wkael ael[16];
+	int nael;
+	/* a parameter of an inlined copy that is written later, bound to its constant argument
+	   until its first write or a label: only an asm "i" operand reads it (rip_rel_ptr) */
+	struct { uint32_t s, gen, inst; val v; } pk[16];
+	int npk;
+	/* -fstack-protector*: the canary's slot (made first: above every local), and whether this
+	   function needs it (an array, an aggregate or an address-taken local; alloca) */
+	int32_t canary;
+	/* a switch on a constant: only its selected case's label is placed (swon, swsel) */
+	bool swon;
+	uint32_t swsel;
+	bool spneed;
 } wkst;
 
-VPRIV wkst *wk_state(ecx *e);
-VPRIV void wk_label(ecx *e, uint32_t label);
-VPRIV bool wk_isconst(ecx *e, uint32_t n);
-VPRIV int wk_condfold(ecx *e, uint32_t n);
-VPRIV bool wk_branch_entry(cc *c, uint32_t n);
-VPRIV bool wk_const_sym(ecx *e, uint32_t s, val *v);	/* s is bound to the constant *v */
-VPRIV val wk_inline(ecx *e, uint32_t n, uint32_t s);	/* the call n to s, inlined (wk_can_inline) */
-VPRIV bool wk_can_inline(ecx *e, uint32_t s);
-VPRIV void wk_function(ecx *e, uint32_t s);	/* emit/walk/func.c: what emit/tu.c calls for x86-64 */
-VPRIV int64_t wk_slot(ecx *e, uint64_t size, uint32_t align);
-VPRIV int64_t wk_local(ecx *e, uint32_t s);	/* a local's slot, made on first use (a goto may reach a use first) */
-VPRIV uint32_t wk_newlabel(ecx *e);
-VPRIV val wk_gen(ecx *e, uint32_t n);
-VPRIV lval wk_lval(ecx *e, uint32_t n);
-VPRIV int wk_reg(ecx *e, val *v, qty t);
-VPRIV void wk_free(ecx *e, const val *v);
-VPRIV void wk_cond(ecx *e, uint32_t n, bool jump_if, uint32_t lbl);
-VPRIV void wk_stmt(ecx *e, uint32_t n);
-VPRIV void wk_init(ecx *e, const lval *dst, qty t, uint32_t init);
-VPRIV void wk_bfinit(ecx *e, const lval *l, qty t, uint32_t init);	/* a bit-field initialized */	/* an object initialized by init (0: none) */
-VPRIV int wk_size(cc *c, qty t);
-VPRIV bool wk_mem(ecx *e, qty t);	/* values of t are held by address (records, arrays, x87 long double) */
-VPRIV val wk_conv(ecx *e, val v, qty from, qty to);
-VPRIV val wk_reload(ecx *e, const lval *l, qty t);	/* l's value again (a new register or address) */
-VPRIV val wk_putmem(ecx *e, lval *l, qty t, val v);	/* v's bytes (held by address) into l: l's address */
-VPRIV void ctor_entry(cc *c, tbuf *b, uint32_t s, bool fini);	/* arch/a64/emit/func.c (shared) */
-VPRIV bool wk_signed(cc *c, qty t);
-VPRIV void wk_vla_fix(ecx *e, qty t, bool pure);	/* the VLA sizes in t evaluated now, into slots */
-VPRIV val wk_vla_bytes(ecx *e, qty t);		/* sizeof t (a VLA: computed) */
-VPRIV void wk_vla_decl(ecx *e, uint32_t s, bool zero);	/* a VLA's storage below sp */
-VPRIV void wk_goto(ecx *e, uint32_t label);
-VPRIV void wk_cleanups(ecx *e, int to);	/* the cleanups above depth `to` run, innermost first (not popped) */
-
-/* ---------------- the lowering interface (layer 2) ---------------- */
-
-/* registers */
-VPRIV int LO(treg)(ecx *e);				/* a free temporary */
-VPRIV void LO(tfree)(ecx *e, int r);
-VPRIV void LO(mov)(ecx *e, int rd, int rs);			/* rd = rs (64 bits) */
-VPRIV void LO(tkeep)(ecx *e, int r);			/* r in use again (an operation consumed it, the walker still holds it) */
-VPRIV int LO(nfree)(ecx *e);				/* free temporaries left */
-VPRIV int LO(nffree)(ecx *e);				/* free float temporaries left */
-VPRIV int LO(toreg)(ecx *e, val *v, int size);	/* a constant or address into a temporary: v becomes V_REG */
-/* memory: size 1, 2, 4, 8; loads extend to 64 bits by sgn */
-VPRIV void LO(load)(ecx *e, int rd, const lval *l, int size, bool sgn);
-VPRIV void LO(store)(ecx *e, int rs, const lval *l, int size);
-VPRIV int LO(laddr)(ecx *e, const lval *l);		/* the address in a temporary (l's register is reused) */
-VPRIV void LO(copy)(ecx *e, int rdst, int rsrc, uint64_t n);	/* n bytes; the address registers stay live */
-VPRIV void LO(zero)(ecx *e, int rdst, uint64_t n);
-/* integers: size 4 or 8 (the operation's width); results in a's register */
-VPRIV val LO(bin)(ecx *e, int op, int size, bool sgn, val a, val b);	/* T_PLUS T_MINUS T_STAR T_SLASH T_PERCENT T_AMP T_PIPE T_CARET T_LESSLESS T_GREATERGREATER */
-VPRIV val LO(un)(ecx *e, int op, int size, val a);			/* T_MINUS T_TILDE */
-VPRIV void LO(ext)(ecx *e, int r, int from, bool sgn);		/* low `from` bytes of r extended to 64 bits */
-VPRIV val LO(cmp)(ecx *e, int op, int size, bool sgn, val a, val b);	/* 0 or 1 */
-VPRIV void LO(cmpbr)(ecx *e, int op, int size, bool sgn, val a, val b, uint32_t lbl);	/* to lbl if a op b */
-VPRIV void LO(brz)(ecx *e, val a, int size, bool nz, uint32_t lbl);	/* to lbl if (a != 0) == nz */
-/* floating point: float and double values in the CPU's float registers; long double as
-   LO(ldmem) says (true: by address, a 16-byte object, as records) */
-VPRIV bool LO(ldmem)(void);
-/* __int128: by address too when LO(i128mem) */
-VPRIV bool LO(i128mem)(void);
-VPRIV val LO(wconst)(ecx *e, i128 v);
-VPRIV val LO(wbitint)(ecx *e, val v, unsigned bits, bool sgn);
-VPRIV val LO(wbin)(ecx *e, int op, bool sgn, val a, val b);	/* b an int for << >> */
-VPRIV val LO(wun)(ecx *e, int op, val a);			/* T_MINUS T_TILDE */
-VPRIV val LO(wcmp)(ecx *e, int op, bool sgn, val a, val b);
-VPRIV val LO(wcvt)(ecx *e, val v, qty from, qty to);	/* __int128 on either side */
-VPRIV int LO(ftreg)(ecx *e);				/* a free float temporary */
-VPRIV val LO(fconst)(ecx *e, uint64_t bits, int size);	/* a float (4) or double (8) constant */
-VPRIV val LO(fbin)(ecx *e, int op, qty t, val a, val b);	/* + - * / */
-VPRIV val LO(fneg)(ecx *e, qty t, val a);
 enum { WK_FCMP_UNORDERED = 0x10000, WK_FCMP_ORDERED_NE };
-VPRIV val LO(fcmp)(ecx *e, int op, qty t, val a, val b);	/* 0 or 1, false when unordered (but !=) */
-VPRIV val LO(cvt)(ecx *e, val v, qty from, qty to);	/* a float on either side (to may be _Bool) */
-/* builtins the CPU does */
-VPRIV void LO(trap)(ecx *e);				/* __builtin_trap, __builtin_unreachable */
-VPRIV void LO(asm)(ecx *e, uint32_t n);
-VPRIV void LO(barrier)(ecx *e);			/* compiler barrier: no machine instruction */
-VPRIV val LO(setjmp)(ecx *e, int rbuf);
-VPRIV void LO(longjmp)(ecx *e, int rbuf);
-VPRIV val LO(frame)(ecx *e, bool ret, uint32_t level);			/* the return address (ret) or the frame address */
-VPRIV val LO(bitop)(ecx *e, int bi, int size, val a);	/* BI_CLZ.. BI_BSWAP64: a nonzero where the builtin requires it */
-VPRIV val LO(alloca)(ecx *e, val n);			/* n bytes on the stack, 16-aligned */
-VPRIV int LO(tlsaddr)(ecx *e, uint32_t ref, int model);	/* a thread-local's address: 0 local-exec, 1 initial-exec, 2 general dynamic */
-/* atomics at [rp], size 1, 2, 4, 8, sequentially consistent; the operand registers stay
-   the caller's; a result is a new temporary, zero-extended:
-   LOAD -> value; STORE rv; XCHG / XADD rv -> the old value; CAS: [rp] = rv if it holds
-   rexp -> the old value; FENCE */
 enum { WK_ALOAD, WK_ASTORE, WK_AXCHG, WK_AXADD, WK_ACAS, WK_AFENCE };
-VPRIV int LO(atomic)(ecx *e, int op, int size, int rp, int rv, int rexp);
-VPRIV int LO(spget)(ecx *e);				/* the stack pointer in a temporary */
-VPRIV void LO(spset)(ecx *e, int r);			/* the stack pointer = r (r freed) */
-VPRIV val LO(fbits)(ecx *e, val v, int size);		/* a float's bits in an integer register */
-/* control */
-VPRIV void LO(label)(ecx *e, uint32_t l);
-VPRIV void LO(jump)(ecx *e, uint32_t l);
-VPRIV void LO(jumpr)(ecx *e, int r);			/* to the address in r (computed goto) */
-VPRIV void LO(named)(ecx *e, uint32_t ref);		/* a label with a symbol name here (ref: RK_LBL, an address taken) */
-/* calls: the arguments are in frame slots (8 bytes each, extended); ref: a direct callee, else fn */
-VPRIV void LO(classify)(ecx *e, qty t, wkarg *a);
-/* r: a record result (its slot receives it), NULL otherwise; retsize/retsgn: a scalar result */
-VPRIV val LO(call)(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool variadic, const wkarg *r, qty rt);
-/* the incoming arguments to their slots; a parameter the caller left on the stack gets that place as its slot */
-VPRIV void LO(params)(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic);
-VPRIV void LO(ret)(ecx *e, val *v, qty t, uint32_t lbl);	/* a scalar result of type t (v may be NULL), then to lbl */
-VPRIV void LO(retrec)(ecx *e, int raddr, const wkarg *r, uint32_t lbl);	/* a record result from the object at raddr */
-VPRIV void LO(va_start)(ecx *e, int rap);			/* the va_list at rap */
-VPRIV int LO(va_arg)(ecx *e, int rap, qty t);		/* the next argument's address */
-/* the function: before its body, and once it is generated (frame, prologue, output) */
-VPRIV void LO(begin)(ecx *e, uint32_t s);
-VPRIV void LO(finish)(ecx *e, uint32_t s);
-
+enum { WK_SLOT_TEMP, WK_SLOT_LOCAL, WK_SLOT_PARAM, WK_SLOT_FUNC };	/* WK_SLOT_FUNC: lives for the whole function */
 #endif
+
+/* the prototypes: again for every instantiation of the walker (proto.h has no guard) */
+#include "proto.h"

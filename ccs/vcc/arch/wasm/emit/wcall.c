@@ -1,5 +1,6 @@
 /* vcc code generator for WebAssembly: calls, variadic arguments, builtins (wimpl.h) */
 #include "wimpl.h"
+#include "../../../lib/f128.h"
 
 /* the direct callee of a call: its reference (0: an indirect call) */
 static uint32_t wcallee(cc *c, uint32_t fn)
@@ -178,6 +179,7 @@ static void warg(ecx *e, uint32_t n, qty t, wabi a)
 		for (uint32_t j = 0; j < a.n; j++) {
 			wlv l = { .k = WL_MEM, .off = j * es };
 
+			if (is_bvec(c, a.ft)) l.off = j / 8, l.bf = 1, l.width = 1, l.bitoff = j % 8;
 			wget(e, ta);
 			wload(e, &l, pt);
 			wretype(e, wty(c, pt), a.st, is_signed(c, pt));
@@ -225,19 +227,14 @@ VPRIV int wsjlj_kind(cc *c, uint32_t n)
 {
 	uint32_t ref;
 	const sym *y;
-	const char *s;
-	uint32_t len;
 
 	if (!c->o->wasm_sjlj || N(n)->op != N_CALL || !(ref = wcallee(c, N(n)->a)) || RKIND(ref) != RK_SYM)
 		return 0;
 	y = &c->syms[RIDX(ref)];
 	if (!y->name || y->sc == SC_STATIC)
 		return 0;
-	s = vintern_ents[y->name].s;
-	len = vintern_ents[y->name].len;
-	if (len && *s == '_')
-		s++, len--;
-	return len == 6 && !memcmp(s, "setjmp", 6) ? 1 : len == 7 && !memcmp(s, "longjmp", 7) ? 2 : 0;
+	return EM_IDENT_IS(y->name, "setjmp") || EM_IDENT_IS(y->name, "_setjmp") ? 1 :
+	       EM_IDENT_IS(y->name, "longjmp") || EM_IDENT_IS(y->name, "_longjmp") ? 2 : 0;
 }
 
 /* setjmp(env) at site k: the value a longjmp resumed with, else __wasm_setjmp and 0 */
@@ -255,11 +252,11 @@ static int wsetjmp(ecx *e, uint32_t n, bool want)
 	wget(e, W->sjl);
 	wconst(e, WT_I32, k + 1);
 	wi(e, "i32.eq");
-	wblock(e, "if\ti32");
+	wblock(e, "if\ti32", WF_IF);
 	wconst(e, WT_I32, 0);
 	wset(e, W->sjl);
 	wget(e, W->sjv);
-	wi(e, "else");
+	wboundary(e, "else", WF_ELSE);
 	wexpr(e, c->lists[x->b], true);
 	wconst(e, WT_I32, k + 1);
 	wslot_addr(e, W->sjfid);
@@ -289,6 +286,7 @@ static int wlongjmp(ecx *e, uint32_t n)
 		wconv(e, N(a1)->ty, prim(TY_INT));
 	tb_s(&e->w->decl, WASM32(c) ? "__wasm_longjmp\t(i32, i32) -> ()\n" : "__wasm_longjmp\t(i64, i32) -> ()\n");
 	wi(e, "call\t__wasm_longjmp");
+	wflow_reject(e);
 	wi(e, "unreachable");
 	return WT_NONE;
 }
@@ -316,7 +314,8 @@ static const char *wmath_insn(cc *c, uint32_t ref, const ctype *f)
 	if (c->o->no_builtin || !ref || RKIND(ref) != RK_SYM)
 		return NULL;
 	y = &c->syms[RIDX(ref)];
-	if (!y->name || y->sc == SC_STATIC || (f->flags & (TF_NOPROTO | TF_VARIADIC)))
+	if (!y->name || y->sc == SC_STATIC || sym_attrs(c, RIDX(ref))->asmname ||
+	    (f->flags & (TF_NOPROTO | TF_VARIADIC)))
 		return NULL;
 	nm = vintern_ents[y->name].s;
 	len = vintern_ents[y->name].len;
@@ -396,10 +395,16 @@ VPRIV int wcall(ecx *e, uint32_t n, bool want)
 	bool lib = false;
 
 	uint32_t def = 0;
+	i128 constant;
+
+	if (c->o->opt && !e->E->noopt && em_const_strcmp(c, n, &constant)) {
+		if (want)
+			wconst(e, WT_I32, (int64_t)constant);
+		return want ? WT_I32 : WT_NONE;
+	}
 
 	if (ref && RKIND(ref) == RK_SYM && x->c == 1 && !(c->syms[RIDX(ref)].flags & SF_DEFINED) &&
-	    c->syms[RIDX(ref)].name &&
-	    vintern_ents[c->syms[RIDX(ref)].name].len == 6 && !memcmp(vintern_ents[c->syms[RIDX(ref)].name].s, "alloca", 6))
+	    EM_IDENT_IS(c->syms[RIDX(ref)].name, "alloca"))
 		return walloca(e, c->lists[x->b]);	/* clang: alloca is a builtin, declared or not */
 	switch (wsjlj_kind(c, n)) {
 	case 1:
@@ -876,14 +881,14 @@ static int wbi_atomic(ecx *e, uint32_t n, bool want)
 		if (!sync)
 			wload(e, &l, vt);
 		wop(e, k, "eq");
-		wblock(e, "if\ti32");
+		wblock(e, "if\ti32", WF_IF);
 		wget(e, tp);
 		wget(e, v2);
 		if (gen)
 			wload(e, &l, vt);
 		wstore(e, &l, vt);
 		wconst(e, WT_I32, 1);
-		wi(e, "else");
+		wboundary(e, "else", WF_ELSE);
 		if (!sync) {
 			wget(e, v1);
 			wget(e, cur);
@@ -960,7 +965,7 @@ static int wbi_vector(ecx *e, uint32_t n)
 	const node *x = N(n);
 	uint32_t a0 = warg_n(c, n, 0);
 	qty at = N(a0)->ty, ae = T(c, at)->base, re = T(c, x->ty)->base;
-	uint32_t na = (uint32_t)(tsize(c, at) / tsize(c, ae)), nr = (uint32_t)(tsize(c, x->ty) / tsize(c, re));
+	uint32_t na = T(c, at)->ext ?: T(c, at)->n, nr = T(c, x->ty)->ext ?: T(c, x->ty)->n;
 	bool sh = x->aux == BI_SHUFFLEVECTOR;
 	uint32_t ta = wtmp(e, WPT(c)), tb = wtmp(e, WPT(c));
 	uint64_t sl = wslot(e, tsize(c, x->ty), 16);
@@ -974,6 +979,7 @@ static int wbi_vector(ecx *e, uint32_t n)
 	for (uint32_t i = 0; i < nr; i++) {
 		wlv d = { .k = WL_MEM, .off = i * tsize(c, re) };
 
+		if (is_bvec(c, x->ty)) d.off = i / 8, d.bf = 1, d.width = 1, d.bitoff = i % 8;
 		wslot_addr(e, sl);
 		if (sh) {
 			int64_t kx = (int64_t)c->ipool[N(warg_n(c, n, 2 + i))->a];
@@ -990,12 +996,14 @@ static int wbi_vector(ecx *e, uint32_t n)
 			} else {
 				wlv s = { .k = WL_MEM, .off = (uint64_t)(kx < (int64_t)na ? kx : kx - (int64_t)na) * tsize(c, ae) };
 
+				if (is_bvec(c, at)) { unsigned j = kx < (int64_t)na ? kx : kx - na; s.off = j / 8, s.bf = 1, s.width = 1, s.bitoff = j % 8; }
 				wget(e, kx < (int64_t)na ? ta : tb);
 				wload(e, &s, ae);
 			}
 		} else {
 			wlv s = { .k = WL_MEM, .off = i * tsize(c, ae) };
 
+			if (is_bvec(c, at)) s.off = i / 8, s.bf = 1, s.width = 1, s.bitoff = i % 8;
 			wget(e, ta);
 			wload(e, &s, ae);
 			wconv(e, ae, re);
@@ -1058,6 +1066,7 @@ VPRIV int wbuiltin(ecx *e, uint32_t n, bool want)
 	case BI_UNREACHABLE:
 	case BI_TRAP:
 	case BI_DEBUGTRAP:
+		wflow_reject(e);
 		wi(e, "unreachable");
 		return WT_NONE;
 	case BI_RETURN_ADDRESS:
@@ -1074,8 +1083,15 @@ VPRIV int wbuiltin(ecx *e, uint32_t n, bool want)
 		return WPT(c);
 	}
 	case BI_ALLOCA:
-	case BI_ALLOCA_UNINIT:
-		return walloca(e, warg_n(c, n, 0));
+	case BI_ALLOCA_UNINIT: {
+		int kind = walloca(e, warg_n(c, n, 0));
+
+		for (uint32_t i = 0; i < e->w->nvb; ++i) {
+			wi(e, "global.get\t__stack_pointer");
+			wset(e, e->w->vb[i].sp);
+		}
+		return kind;
+	}
 	case BI_CLZ: case BI_CLZL: case BI_CLZLL:
 	case BI_CTZ: case BI_CTZL: case BI_CTZLL:
 	case BI_POPCOUNT: case BI_POPCOUNTL: case BI_POPCOUNTLL:
@@ -1192,6 +1208,34 @@ VPRIV int wbuiltin(ecx *e, uint32_t n, bool want)
 		wop(e, ak, x->aux == BI_ROTL32 || x->aux == BI_ROTL64 ? "rotl" : "rotr");
 		return k;
 	}
+	case BI_ISGREATER: case BI_ISGREATEREQUAL: case BI_ISLESS: case BI_ISLESSEQUAL:
+	case BI_ISLESSGREATER: case BI_ISUNORDERED: {
+		uint32_t a = warg_n(c, n, 0), b = warg_n(c, n, 1);
+		qty at = N(a)->ty, bt = N(b)->ty;
+		int ak = wty(c, at), bk = wty(c, bt);
+		if (ak == WT_MEM || bk == WT_MEM) break;
+		qty ty = prim(ak == WT_F64 || bk == WT_F64 ? TY_DOUBLE : TY_FLOAT);
+		int k = wty(c, ty);
+		uint32_t left = wtmp(e, k), right = wtmp(e, k);
+		wexpr(e, a, true); wconv(e, at, ty); wset(e, left);
+		wexpr(e, b, true); wconv(e, bt, ty); wset(e, right);
+		if (x->aux == BI_ISUNORDERED) {
+			wget(e, left); wget(e, left); wop(e, k, "ne");
+			wget(e, right); wget(e, right); wop(e, k, "ne");
+			wi(e, "i32.or");
+		} else {
+			wget(e, left); wget(e, right);
+			const char *op = x->aux == BI_ISGREATER ? "gt" : x->aux == BI_ISGREATEREQUAL ? "ge" :
+			                 x->aux == BI_ISLESSEQUAL ? "le" : "lt";
+			wop(e, k, op);
+			if (x->aux == BI_ISLESSGREATER) {
+				wget(e, left); wget(e, right); wop(e, k, "gt");
+				wi(e, "i32.or");
+			}
+		}
+		wfree(e, left); wfree(e, right);
+		return WT_I32;
+	}
 	case BI_ISNAN: {
 		uint32_t a = warg_n(c, n, 0);
 		int ak = wty(c, N(a)->ty);
@@ -1206,17 +1250,31 @@ VPRIV int wbuiltin(ecx *e, uint32_t n, bool want)
 		wfree(e, t);
 		return WT_I32;
 	}
-	case BI_ISINF: case BI_ISFINITE: {
+	case BI_ISINF: case BI_ISINF_SIGN: case BI_ISFINITE: {
 		/* |x| == inf, |x| < inf (false for a NaN) */
 		uint32_t a = warg_n(c, n, 0);
 		int ak = wty(c, N(a)->ty);
 
 		if (ak != WT_F32 && ak != WT_F64)
 			break;
+		uint32_t t = x->aux == BI_ISINF_SIGN ? wtmp(e, ak) : 0;
 		wexpr(e, a, true);
+		if (x->aux == BI_ISINF_SIGN) wtee(e, t);
 		wop(e, ak, "abs");
 		wfconst(e, ak, __builtin_inf());
-		wop(e, ak, x->aux == BI_ISINF ? "eq" : "lt");
+		wop(e, ak, x->aux == BI_ISFINITE ? "lt" : "eq");
+		if (x->aux == BI_ISINF_SIGN) {
+			/* isinf(x) * (1 - 2 * (x < 0)), with one argument evaluation. */
+			wconst(e, WT_I32, 1);
+			wget(e, t);
+			wfconst(e, ak, 0);
+			wop(e, ak, "lt");
+			wconst(e, WT_I32, 1);
+			wi(e, "i32.shl");
+			wi(e, "i32.sub");
+			wi(e, "i32.mul");
+			wfree(e, t);
+		}
 		return WT_I32;
 	}
 	case BI_ADD_OVERFLOW: case BI_SUB_OVERFLOW: case BI_MUL_OVERFLOW:
@@ -1270,9 +1328,28 @@ VPRIV int wbuiltin(ecx *e, uint32_t n, bool want)
 			wconst(e, WT_I32, wconstant_p(e, warg_n(c, n, 0)));
 		return want ? WT_I32 : WT_NONE;
 	}
-	if (cc_eval(c, n, &cv) && (cv.kind == CV_INT || (cv.kind == CV_FLT && !cv.ld))) {
-		if (k == WT_F32 || k == WT_F64)
-			wfconst(e, k, cv.kind == CV_FLT ? cv.f : (double)cv.i);
+	if (cc_eval(c, n, &cv) && (cv.kind == CV_INT || cv.kind == CV_FLT)) {
+		if (cv.kind == CV_FLT && k == WT_MEM) {
+			/* Binary128 builtins use the same address-valued representation
+			   as N_FNUM, including infinities and exact NaN payloads. */
+			u128 q = cv.ld ? cv.q : q_of_d(cv.f);
+			uint64_t sl = wslot(e, 16, 16);
+			wslot_addr(e, sl);
+			wconst(e, WT_I64, (int64_t)(uint64_t)q);
+			wiu(e, "i64.store", 0);
+			wslot_addr(e, sl);
+			wconst(e, WT_I64, (int64_t)(uint64_t)(q >> 64));
+			wiu(e, "i64.store", 8);
+			wslot_addr(e, sl);
+			return WPT(c);
+		}
+		if (cv.kind == CV_FLT && cv.ld && q_isnan(cv.q) && (k == WT_F32 || k == WT_F64)) {
+			/* Host floating conversions can quiet a signaling NaN. */
+			wconst(e, k == WT_F32 ? WT_I32 : WT_I64,
+			       (int64_t)q_nan_storage(cv.q, k == WT_F32 ? 23 : 52, k == WT_F32 ? 8 : 11));
+			wi(e, k == WT_F32 ? "f32.reinterpret_i32" : "f64.reinterpret_i64");
+		} else if (k == WT_F32 || k == WT_F64)
+			wfconst(e, k, cv.kind == CV_FLT ? cv.ld ? q_to_d(cv.q) : cv.f : (double)cv.i);
 		else if (k == WT_I32 || k == WT_I64)
 			wconst(e, k, (int64_t)em_trunc_to(c, cv.i, x->ty));
 		else if (k == WT_NONE)

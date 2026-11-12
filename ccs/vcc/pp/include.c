@@ -64,6 +64,8 @@ VPRIV const vlex_file *try_path(const pp_opts *o, const char *path, size_t len)
 		f = vlex_trigraphs(f);
 	if (f && o->c89)
 		f = vlex_c89(f);
+	if (f && o->no_digraphs)
+		f = vlex_nodigraphs(f);
 	return f && o->c23 ? vlex_digitsep(f) : f;
 }
 
@@ -829,8 +831,8 @@ static void emb_params(pp *p, embprm *m, bool paren, uint32_t loc)
 	}
 }
 
-/* clang's #embed search: an absolute name; "x" in the includer's directory; then the --embed-dir
-   directories (-I is not searched) */
+/* clang's #embed search: an absolute name; "x" in the includer's directory,
+   then the working directory; finally --embed-dir in order (-I is not searched). */
 static const vlex_file *find_embed(pp *p, const ctx *from, const char *name, size_t nlen, bool angled, const char **path)
 {
 	char buf[4096];
@@ -858,6 +860,13 @@ static const vlex_file *find_embed(pp *p, const ctx *from, const char *name, siz
 				*path = pstrdup(p, buf, dl + nlen);
 				return f;
 			}
+		}
+		/* In particular, __FILE__ may already contain the relative directory
+		 * of the source. Retrying it under that directory would double it. */
+		memcpy(buf, name, nlen), buf[nlen] = 0;
+		if ((f = try_path(p->o, buf, nlen))) {
+			*path = pstrdup(p, buf, nlen);
+			return f;
 		}
 	}
 	for (int k = 0; k < p->o->nedirs; k++) {	/* --embed-dir, in order */

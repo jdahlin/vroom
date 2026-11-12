@@ -10,7 +10,7 @@ static val const_global(ecx *e, uint32_t s)
 	const sym *y = &c->syms[s];
 	cval cv;
 
-	if (y->kind == S_VAR && (QQ(y->ty) & (Q_CONST | Q_VOLATILE)) == Q_CONST && is_integer(c, y->ty) && y->body &&
+	if (y->kind == S_VAR && (QQ(y->ty) & (Q_CONST | Q_VOLATILE)) == Q_CONST && is_integer(c, y->ty) && !em_bigint(c, y->ty) && y->body &&
 	    N(y->body)->op != N_INIT && cc_eval(c, y->body, &cv) && cv.kind == CV_INT)
 		return vconst(em_trunc_to(c, cv.i, y->ty));
 	if (y->kind == S_VAR && (QQ(y->ty) & (Q_CONST | Q_VOLATILE)) == Q_CONST && is_flt(c, y->ty) &&
@@ -182,7 +182,11 @@ static val gen_cond_expr(ecx *e, uint32_t n)
 		} else {
 			r = toreg(e, &v);
 		}
-		if (is_flt(c, t)) {
+		if (em_bigint(c, t)) {
+			val test = vreg(treg(e));
+			mov(e, 1, test.r, r);
+			test_zero(e, &test, t, lend, true);
+		} else if (is_flt(c, t)) {
 			/* Keep the result value intact while testing its C truth value.
 			 * Testing raw floating bits would incorrectly treat -0.0 as true. */
 			val test = vreg(treg(e));
@@ -344,6 +348,7 @@ static val vlane(ecx *e, qty t, int r, unsigned i)
 		qty et = T(c, t)->base;
 		lval l = { .k = L_REG, .r = (uint8_t)r, .off = (int64_t)i * (int64_t)tsize(c, et), .align = talign(c, et) };
 
+		if (is_bvec(c, t)) l.off = i / 8, l.bf = 1, l.width = 1, l.bitoff = i % 8;
 		return load(e, &l, et);
 	}
 	{
@@ -363,7 +368,7 @@ static val gen_vlanes(ecx *e, int op, qty at, val *a, qty bt, val *b, qty rt, bo
 {
 	cc *c = e->c;
 	qty vt = is_vec(c, at) ? at : bt, et = T(c, vt)->base, rte = T(c, rt)->base;
-	unsigned n = (unsigned)(tsize(c, vt) / tsize(c, et));
+	unsigned n = T(c, vt)->n;
 	int ra = toreg(e, a), rb = unary ? -1 : toreg(e, b), rd;
 	int64_t sl = slot(e, tsize(c, rt), 16);
 
@@ -414,6 +419,7 @@ static val gen_vlanes(ecx *e, int op, qty at, val *a, qty bt, val *b, qty rt, bo
 		{
 			lval l = { .k = L_REG, .r = (uint8_t)rd, .off = (int64_t)i * (int64_t)tsize(c, rte), .align = talign(c, rte) };
 
+			if (is_bvec(c, rt)) l.off = i / 8, l.bf = 1, l.width = 1, l.bitoff = i % 8;
 			store(e, &l, rte, &r);
 			val_free(e, &r);
 		}
@@ -428,7 +434,7 @@ static bool vbin_fast(cc *c, int op, qty lt, qty rt, qty ty)
 {
 	uint64_t size = tsize(c, ty);
 
-	return is_vec(c, lt) && is_vec(c, rt) && (size == 8 || size == 16) && !is_flt(c, T(c, ty)->base) &&
+	return !is_bvec(c, ty) && is_vec(c, lt) && is_vec(c, rt) && (size == 8 || size == 16) && !is_flt(c, T(c, ty)->base) &&
 	       (op == T_AMP || op == T_PIPE || op == T_CARET || op == T_PLUS || op == T_MINUS);
 }
 
@@ -440,9 +446,37 @@ static val gen_binary(ecx *e, uint32_t n)
 	qty lt = N(x->a)->ty, rt = N(x->b)->ty, ty = x->ty;
 	int known = em_is_cmp(op) ? cond_fold(e, n) : -1;
 	val a, b;
+	uint32_t operand;
+	int bound = em_cmpbounds(e, n, &operand);
+	int repeated = em_repeated_integer(e, n);
 
+	if (repeated == EM_ID_ZERO)
+		return vconst(0);
+	if (repeated == EM_ID_TRUE)
+		return vconst(1);
+	if (repeated == EM_ID_LEFT)
+		return gen(e, x->a);
+
+	if (bound >= 0) {
+		val v = gen(e, operand);
+		val_free(e, &v);
+		return vconst(bound);
+	}
 	if (known >= 0)
 		return vconst(known);
+	if (em_sibling_values(e, n)) {
+		int ra, rb;
+		a = gen(e, x->a);
+		if (a.k == V_CONST) {
+			bool ok;
+			val v = fold_int_bin(e, op, ty, ty, a.i, a.i, &ok);
+			if (ok) return v;
+		}
+		ra = toreg(e, &a);
+		rb = treg(e);
+		mov(e, X(c, ty), rb, ra);
+		return arith(e, op, ty, a, vreg(rb));
+	}
 	if (unlikely(vstack_low()))	/* nested operators recurse here: an error before the stack runs out */
 		efatal(e, x->loc, "expression nested too deeply");
 	a = gen(e, x->a);
@@ -477,6 +511,10 @@ static val gen_binary(ecx *e, uint32_t n)
 		return r;
 	}
 
+	if ((op == T_LESSLESS || op == T_GREATERGREATER) && (em_bigint(c, rt) || is_wide(c, rt)))
+		b = cast(e, b, rt, prim(TY_INT), CK_INT);
+	if (em_bigint(c, lt))
+		return em_is_cmp(op) ? a64_bigcmp(e, op, lt, a, b) : a64_bigbin(e, op, ty, a, b);
 	if (is_flt(c, lt) || is_flt(c, ty))
 		return em_is_cmp(op) ? f_compare(e, op, lt, a, b) : f_arith(e, op, ty, a, b);
 	/* pointer arithmetic */
@@ -581,7 +619,12 @@ static val gen_unary(ecx *e, uint32_t n)
 	cc *c = e->c;
 	const node *x = N(n);
 	qty t = N(x->a)->ty;
-	val v = gen(e, x->a);
+	uint32_t operand = em_double_unary(e, n);
+	val v;
+
+	if (operand)
+		return gen(e, operand);
+	v = gen(e, x->a);
 
 	if (is_vec(c, x->ty) && (x->aux == T_MINUS || x->aux == T_TILDE))
 		return gen_vlanes(e, x->aux, t, &v, t, NULL, x->ty, true);
@@ -589,10 +632,11 @@ static val gen_unary(ecx *e, uint32_t n)
 	case T_PLUS:
 		return v;
 	case T_MINUS:
+		if (em_bigint(c, x->ty)) return a64_bigbin(e, T_MINUS, x->ty, vconst(0), v);
 		if (is_flt(c, x->ty))
 			return f_neg(e, v, x->ty);
 		if (v.k == V_CONST)
-			return vconst(em_trunc_to(c, -v.i, x->ty));
+			return vconst(em_trunc_to(c, (i128)((u128)0 - (u128)v.i), x->ty));
 		if (is_wide(c, x->ty)) {
 			toreg2(e, &v, is_signed(c, x->ty));
 			op3(e, I_SUBS, 1, v.r, ZR, v.r);
@@ -603,6 +647,7 @@ static val gen_unary(ecx *e, uint32_t n)
 		op3(e, I_SUB, X(c, x->ty), v.r, ZR, v.r);
 		return v;
 	case T_TILDE:
+		if (em_bigint(c, x->ty)) return a64_bigbin(e, T_CARET, x->ty, v, vconst(-1));
 		if (v.k == V_CONST)
 			return vconst(em_trunc_to(c, ~v.i, x->ty));
 		if (is_wide(c, x->ty)) {
@@ -639,13 +684,49 @@ static val conv_back(ecx *e, val v, qty from, qty to)
 	return cast(e, v, from, to, CK_INT);
 }
 
+/* Normalize a value loaded outside gen(), before a compound operation can
+ * move padding into value bits or interpret it as a signed high word. */
+static val bitint_value(ecx *e, val v, qty t)
+{
+	cc *c = e->c;
+	{
+		unsigned bits = T(c, t)->n;
+		bool sgn = is_signed(c, t);
+
+		if (v.k == V_CONST)
+			return vconst(em_trunc_to(c, v.i, t));
+		if (bits > 64) {
+			toreg2(e, &v, sgn);
+			if (bits < 128)
+				opbf(e, sgn ? I_SBFM : I_UBFM, 1, v.r2, v.r2, 0, bits - 65);
+		} else if (bits < 64) {
+			int r = toreg(e, &v);
+
+			opbf(e, sgn ? I_SBFM : I_UBFM, 1, r, r, 0, bits - 1);
+		}
+	}
+	return v;
+}
+
 /* old op= v (x a compound assignment to an lvalue of type lt): the new value, of type lt */
+
 static val assign_op(ecx *e, const node *x, qty lt, val old, val v)
 {
 	cc *c = e->c;
 	qty pt = x->c;
 	int op = x->aux;
 
+	if (em_bitint(c, lt) && !em_bigint(c, lt))
+		old = bitint_value(e, old, lt);
+	if (em_bigint(c, pt)) {
+		if (em_bigint(c, lt)) old = a64_bigcopy(e, old, lt);
+		old = a64_bigcvt(e, old, lt, pt);
+		qty rt = N(x->b)->ty;
+		if ((op == T_LESSLESS || op == T_GREATERGREATER) && (em_bigint(c, rt) || is_wide(c, rt)))
+			v = cast(e, v, rt, prim(TY_INT), CK_INT);
+		old = a64_bigbin(e, op, pt, old, v);
+		return a64_bigcvt(e, old, pt, lt);
+	}
 	if (is_ptr(c, lt)) {
 		old = ptr_to_vla(c, lt) ? ptr_add_vla(e, old, v, lt, op == T_MINUS)
 					: ptr_add(e, old, v, (int64_t)elem_size(c, lt), op == T_MINUS);
@@ -765,6 +846,20 @@ static val atomic_rmw(ecx *e, uint32_t n, bool inc, bool post)
 	return nv;
 }
 
+/* Updating a wide scalar keeps its lvalue alive through the final store.
+ * Aggregate-style loads return its address, so give the arithmetic value
+ * separate register ownership before normalization or arithmetic consumes it. */
+static val load_for_update(ecx *e, lval *l, qty t)
+{
+	val v = load(e, l, t);
+	if (em_bigint(e->c, t) && l->k == L_REG && v.k == V_REG && v.r == l->r) {
+		int r = treg(e);
+		mov(e, 1, r, v.r);
+		v.r = (uint8_t)r;
+	}
+	return v;
+}
+
 static val gen_assign(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
@@ -851,7 +946,7 @@ static val gen_assign(ecx *e, uint32_t n)
 		return atomic_rmw(e, n, false, false);
 	v = gen(e, x->b);
 	l = gen_lval(e, x->a);
-	old = load(e, &l, lt);
+	old = load_for_update(e, &l, lt);
 	old = assign_op(e, x, lt, old, v);
 	store(e, &l, lt, &old);
 	lfree(e, &l);
@@ -865,6 +960,17 @@ static val incdec_op(ecx *e, qty t, bool inc, bool post, val *old)
 	val nv;
 	int64_t d = is_ptr(c, t) ? (int64_t)elem_size(c, t) : 1;
 
+	if (em_bigint(c, t)) {
+		if (post) {
+			*old = a64_bigbin(e, T_PLUS, t, *old, vconst(0));
+			val copy = vreg(treg(e));
+			mov(e, 1, copy.r, old->r);
+			return a64_bigbin(e, inc ? T_PLUS : T_MINUS, t, copy, vconst(1));
+		}
+		nv = a64_bigbin(e, inc ? T_PLUS : T_MINUS, t, *old, vconst(1));
+		*old = nv;
+		return nv;
+	}
 	if (KIND(c, t) == TY_BOOL) {
 		nv = vconst(1);
 		if (!inc) {
@@ -954,7 +1060,7 @@ static val gen_incdec(ecx *e, uint32_t n)
 	if (atomic_target(e, x->a, t))
 		return atomic_rmw(e, n, inc, post);
 	l = gen_lval(e, x->a);
-	old = load(e, &l, t);
+	old = load_for_update(e, &l, t);
 	nv = incdec_op(e, t, inc, post, &old);
 	store(e, &l, t, &nv);
 	lfree(e, &l);
@@ -971,29 +1077,23 @@ static val gen_inner(ecx *e, uint32_t n);
 
 VPRIV val gen(ecx *e, uint32_t n)
 {
+	if (n && n == e->reuse_from) n = e->reuse_to;
 	cc *c = e->c;
 	qty t = N(n)->ty;
 
+	if (em_bigint(c, t)) {
+		val v = gen_inner(e, n);
+		switch (N(n)->op) {
+		case N_VAR: case N_MEMBER: case N_INDEX: case N_DEREF: case N_COMPLIT:
+		case N_CALL: case N_VAARG:
+			return a64_bigcopy(e, v, t);
+		default: return v;
+		}
+	}
 	if (likely(!em_bitint(c, t)))
 		return gen_inner(e, n);
 	val v = gen_inner(e, n);
-	{
-		unsigned bits = T(c, t)->n;
-		bool sgn = is_signed(c, t);
-
-		if (v.k == V_CONST)
-			return vconst(em_trunc_to(c, v.i, t));
-		if (bits > 64) {
-			toreg2(e, &v, sgn);
-			if (bits < 128)
-				opbf(e, sgn ? I_SBFM : I_UBFM, 1, v.r2, v.r2, 0, bits - 65);
-		} else if (bits < 64) {
-			int r = toreg(e, &v);
-
-			opbf(e, sgn ? I_SBFM : I_UBFM, 1, r, r, 0, bits - 1);
-		}
-	}
-	return v;
+	return bitint_value(e, v, t);
 }
 
 static val gen_inner(ecx *e, uint32_t n)
@@ -1002,8 +1102,10 @@ static val gen_inner(ecx *e, uint32_t n)
 	const node *x = N(n);
 
 	switch (x->op) {
+	case N_BIGNUM:
+		return a64_bigconst(e, x->ty, &c->lists[x->a], 0);
 	case N_NUM:
-		return vconst(c->ipool[x->a]);
+		return em_bigint(c, x->ty) ? a64_bigconst(e, x->ty, NULL, c->ipool[x->a]) : vconst(c->ipool[x->a]);
 	case N_FNUM:
 		if (is_ld(c, x->ty)) {
 			u128 q;
@@ -1064,6 +1166,7 @@ static val gen_inner(ecx *e, uint32_t n)
 		return vreg(r);
 	}
 	case N_CAST:
+		if (x->c) return gen(e, x->c);
 		switch (x->aux) {
 		case CK_DECAY: {
 			lval l = gen_lval(e, x->a);
@@ -1076,6 +1179,47 @@ static val gen_inner(ecx *e, uint32_t n)
 			return gen(e, x->a);
 		case CK_VADDR:
 			return gen(e, x->a);	/* a vector value is its address */
+		case CK_BITS: {
+			qty from = N(x->a)->ty;
+			lval d = { .k = L_FRAME, .off = slot(e, tsize(c, x->ty), talign(c, x->ty)), .align = talign(c, x->ty) };
+			if (N(x->a)->flags & NF_LVALUE) {
+				lval src = gen_lval(e, x->a);
+				if (src.dynbit_slot) {
+					val v = load(e, &src, from);
+					store(e, &d, from, &v); val_free(e, &v); lfree(e, &src);
+				} else if (src.bf) {
+					/* Bounded byte pieces cover wide values and avoid aligned
+					 * container loads beyond a packed object's final byte. */
+					for (unsigned i = 0; i < tsize(c, from); i++) {
+						unsigned bit = i * 8;
+						val v = vconst(0);
+						lval byte = d;
+						byte.off += i;
+						if (bit < src.width || src.sgn) {
+							lval part = src;
+							unsigned start = bit < src.width ? bit : src.width - 1;
+							part.off += (src.bitoff + start) / 8;
+							part.bitoff = (src.bitoff + start) % 8;
+							part.width = bit >= src.width ? 1 : src.width - bit < 8 ? src.width - bit : 8;
+							part.sgn = src.sgn && bit + 8 >= src.width;
+							v = load(e, &part, prim(TY_UCHAR));
+						}
+						store(e, &byte, prim(TY_UCHAR), &v); val_free(e, &v);
+					}
+					lfree(e, &src);
+
+				} else {
+					val p = laddr(e, &src), q = laddr(e, &d);
+					copy_mem(e, toreg(e, &q), toreg(e, &p), tsize(c, from));
+					val_free(e, &p); val_free(e, &q);
+				}
+			} else {
+				val v = gen(e, x->a);
+				store(e, &d, from, &v); val_free(e, &v);
+			}
+			if (is_agg(c, x->ty)) return laddr(e, &d);
+			return load(e, &d, x->ty);
+		}
 		case CK_VBITS: {
 			/* the vector's bits as a scalar: load from its address */
 			val v = gen(e, x->a);
@@ -1088,7 +1232,7 @@ static val gen_inner(ecx *e, uint32_t n)
 		}
 		case CK_SPLAT: {	/* the scalar into every lane of a new vector */
 			qty et = T(c, x->ty)->base;
-			uint64_t es = tsize(c, et), nl = tsize(c, x->ty) / es;
+			uint64_t es = tsize(c, et), nl = T(c, x->ty)->n;
 			int64_t sl = slot(e, tsize(c, x->ty), talign(c, x->ty));
 			val v = gen(e, x->a);
 			int r;
@@ -1096,6 +1240,7 @@ static val gen_inner(ecx *e, uint32_t n)
 			for (uint64_t i = 0; i < nl; i++) {
 				lval l = { .k = L_FRAME, .off = sl + (int64_t)(i * es), .align = talign(c, et) };
 
+				if (is_bvec(c, x->ty)) l.off = sl + i / 8, l.bf = 1, l.width = 1, l.bitoff = i % 8;
 				store(e, &l, et, &v);
 			}
 			val_free(e, &v);
@@ -1154,7 +1299,7 @@ static val gen_inner(ecx *e, uint32_t n)
 	case N_VAARG:
 		return va_arg_(e, x);
 	case N_ZERO:
-		return vconst(0);
+		return em_bigint(c, x->ty) ? a64_bigconst(e, x->ty, NULL, 0) : vconst(0);
 	case N_CPLX: {	/* a _Complex value: both parts into a temporary, its address */
 		qty et = c->tags[T(c, x->ty)->aux].f[0].ty;
 		uint64_t es = tsize(c, et);
@@ -1174,6 +1319,10 @@ static val gen_inner(ecx *e, uint32_t n)
 		return vreg(r);
 	}
 	case N_SIZEOF_VLA: {
+		if (x->aux == 1) {
+			vla_fix(e, x->b, false);
+			return vla_bytes(e, x->b);
+		}
 		const sym *y = x->a && N(x->a)->op == N_VAR ? &c->syms[N(x->a)->a] : NULL;
 
 		if (y && y->kind == S_VAR && binding(e, N(x->a)->a)->kind == B_INDIRECT &&
@@ -1182,6 +1331,11 @@ static val gen_inner(ecx *e, uint32_t n)
 
 			mem(e, I_LD, 3, 0, r, FRAME, binding(e, N(x->a)->a)->slot + 16);
 			return vreg(r);
+		}
+		if (x->a) {
+			val operand = gen(e, x->a);
+
+			val_free(e, &operand);
 		}
 		return vla_bytes(e, x->b);
 	}

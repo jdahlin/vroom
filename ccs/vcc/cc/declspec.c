@@ -352,6 +352,31 @@ static qty int_type(cc *c, int nlong, int sgn, int base, uint32_t loc)
 	}
 }
 
+/* A variably modified typeof expression is evaluated once. Fresh capture
+   nodes read the original dimensions' saved values after that evaluation,
+   even when the operand changes their bound variables. */
+static qty typeof_evaluated(cc *c, qty ty, uint32_t *operand, uint32_t loc)
+{
+	ctype t = *T(c, ty);
+	bool changed = false;
+
+	if (t.kind != TY_PTR && t.kind != TY_ARRAY)
+		return ty;
+	if (t.kind == TY_ARRAY && (t.flags & TF_VLA) && t.n) {
+		qty dimension = ty_vla(c, prim(TY_CHAR), t.n);
+
+		t.n = mk2(c, N_SIZEOF_VLA, c->t_size, loc, *operand, dimension);
+		*operand = 0;
+		changed = true;
+	}
+	qty base = typeof_evaluated(c, t.base, operand, loc);
+
+	if (!changed && base == t.base)
+		return ty;
+	t.base = base;
+	return QT(ty_intern(c, &t), QQ(ty));
+}
+
 static qty typeof_spec(cc *c, bool unqual)
 {
 	qty t;
@@ -371,7 +396,7 @@ static qty typeof_spec(cc *c, bool unqual)
 		c->unevaluated--;
 		if (bitfield_of(c, n))
 			cc_error(c, loc, "invalid application of 'typeof' to bit-field");
-		t = N(n)->ty;
+		t = typeof_evaluated(c, N(n)->ty, &n, loc);
 	}
 	expect_match(c, T_RPAREN, open);
 	return unqual ? QUNQ(t) : t;
@@ -766,6 +791,9 @@ again:
 			i128 width = 0;
 			uint32_t loc = t->loc, open;
 
+			if (t->id == KW__ExtInt)
+				cc_warnx(c, "deprecated-type", true, NULL, loc, NULL, 0, NULL, 0,
+					 "'_ExtInt' is deprecated; use '_BitInt' instead");
 			if (base || have_named || nlong)
 				cc_error(c, loc, "invalid combination of type specifiers with _BitInt");
 			base = KW__BitInt;
@@ -774,8 +802,8 @@ again:
 			open = expect_lparen(c);
 			const_expr(c, &width, NULL);
 			expect_match(c, T_RPAREN, open);
-			if (width < 1 || width > 128) {
-				cc_error(c, loc, "_BitInt width must be between 1 and 128");
+			if (width < 1 || width > 8388608) {
+				cc_error(c, loc, "_BitInt width must be between 1 and 8388608");
 				width = 2;
 			}
 			bitwidth = (unsigned)width;

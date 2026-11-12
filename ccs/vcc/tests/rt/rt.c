@@ -19,8 +19,27 @@ FILE *stdin = &f_in, *stdout = &f_out, *stderr = &f_err;
 int errno;
 
 /* ---- output ---- */
+#ifdef __x86_64__
+/* x86-64 Linux (start-x86.S): stdout through write(2), buffered; __rt_flush at exit */
+static char obuf[4096];
+static unsigned on;
+void __rt_flush(void)
+{
+	long r;
+	unsigned k = 0;
+
+	while (k < on) {
+		__asm__ volatile("syscall" : "=a"(r) : "a"(1L), "D"(1L), "S"(obuf + k), "d"((long)(on - k)) : "rcx", "r11", "memory");
+		if (r <= 0) break;
+		k += (unsigned)r;
+	}
+	on = 0;
+}
+static void outc(int c) { obuf[on++] = (char)c; if (on == sizeof obuf) __rt_flush(); }
+#else
 static volatile unsigned int *const uart = (unsigned int *)0x09000000;
 static void outc(int c) { *uart = (unsigned char)c; }
+#endif
 
 /* ---- string ---- */
 void *memcpy(void *d, const void *s, size_t n) { char *a = d; const char *b = s; while (n--) *a++ = *b++; return d; }
@@ -266,8 +285,13 @@ static double ld2d(long double x)
 	return r.d;
 }
 /* not __builtin_sqrt: under -fno-builtin it is a call to sqrt, this function */
+#ifdef __x86_64__
+double sqrt(double x) { double r; __asm__("sqrtsd %1, %0" : "=x"(r) : "x"(x)); return r; }
+float sqrtf(float x) { float r; __asm__("sqrtss %1, %0" : "=x"(r) : "x"(x)); return r; }
+#else
 double sqrt(double x) { double r; __asm__("fsqrt %d0, %d1" : "=w"(r) : "w"(x)); return r; }
 float sqrtf(float x) { float r; __asm__("fsqrt %s0, %s1" : "=w"(r) : "w"(x)); return r; }
+#endif
 double floor(double x) { return __builtin_floor(x); }
 double ceil(double x) { return __builtin_ceil(x); }
 double trunc(double x) { return __builtin_trunc(x); }
@@ -705,6 +729,7 @@ int __rt_main(void)
 	return r;
 }
 
+#ifndef __x86_64__	/* (x86-64: libgcc's, for __float128) */
 /*
  * ---- binary128 soft float (compiler-rt's names and ABI: q registers) ----
  * Only integer arithmetic here, so clang does not call these from within.
@@ -983,6 +1008,7 @@ unsigned long long __fixunstfdi(long double f) { int s; tf_u m = tf_toint(f, &s)
 unsigned __fixunstfsi(long double f) { return (unsigned)__fixunstfdi(f); }
 __int128 __fixtfti(long double f) { int s; tf_u m = tf_toint(f, &s); return s ? -(__int128)m : (__int128)m; }
 tf_u __fixunstfti(long double f) { int s; tf_u m = tf_toint(f, &s); return s ? 0 : m; }
+#endif
 
 /* Scalar bfloat conversions for freestanding ARM tests. Production Linux links
  * the same ABI entry points from libgcc. Work on integer IEEE encodings so the

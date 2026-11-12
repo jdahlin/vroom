@@ -109,6 +109,28 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   (official test suite), zlib/zstd/xz (round trips and checksums over a
   corpus), musl + libc-test (integer, string and FP edge cases), CPython
   (`make test`).  Darwin host first, Linux user space once PIC/PIE exists.
+  SQLite 3.50.4 on Darwin (2026-11-11): vcc builds testfixture + shell via
+  `bench/pg/cc`; `testrunner.tcl --jobs 6` gives the same result as clang
+  -O2 (329068 tests, only interrupt2.test fails, timing, both compilers)
+  after the Apple variadic-slot fix (tests/abi/va_int_slot).  speedtest1
+  --size 100 --memdb: clang -O2 2.49 s, gcc-16 -O2 2.44 s, vcc -O2 3.92 s;
+  sqlite3.c compiles in 0.13 s (clang -O2 7.9 s, gcc 22 s).  `bench/sqlite/run.py all`.
+  zlib 1.4 on Darwin (2026-11-12, `bench/zlib/run.py all`): vcc and VIR
+  (`VCC_VIR=bl`) pass example, infcover and the minigzip round trips, and
+  deflate at levels 1/6/9 gives clang's bytes.  All 131 functions VIR sees
+  are lowered; only `crc32_z` (inline asm) falls back.  zbench on zlib's own
+  source tar, CPU time against clang -O2: vcc 1.37x, VIR 1.10x, gcc-16 0.99x
+  (VIR: deflate-1 1.32x, deflate-6 1.12x, deflate-9 1.09x, inflate 1.00-1.04x,
+  crc32 1.18x, adler32 0.98x).  Where VIR loses (sample profile):
+  `fill_window` 19x clang's share (clang vectorizes `slide_hash`),
+  `deflate_fast` 1.6x, `compress_block` 1.25x, `pqdownheap` not inlined into
+  `build_tree`; `.text` 79896 bytes against clang's 71598 and vcc's 72580.
+  After the allocator's parameter vote and load reuse across blocks
+  (PLAN-vir.md, 2026-11-12): VIR 1.03x in total, deflate-9 1.00x, deflate-6
+  1.09x, deflate-1 1.36x; `.text` 78304.  After own field addresses, narrow
+  stores, sub+cmp and csel with zero: total 1.02x, deflate-1 1.19x, deflate-6
+  1.02x; `.text` 74436.  Left on level 1: vectorizing `slide_hash`, and
+  type-based aliasing for `deflate_fast` (a flag, not decided).
 - [ ] **T14 the kernel runs, not just boots.**  KUnit built in
   (`CONFIG_KUNIT=y` plus the common suites, run at boot, TAP on the
   console), compared with the clang build's TAP; then kselftests and an LTP
@@ -167,7 +189,7 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   `expected-*` directives.  2026-11-10: 412/1841 pass (C/drs 29/70, C/C2y
   32/95, Sema 236/1276), 1 crash (Sema/attr-tls_model.c).  Largest gaps:
   SVE/SME types and builtins (`__SVInt8_t`, streaming checks), `__bf16`,
-  `__mfp8`, `__builtin_bit_cast`, `_Countof`, `__scoped_atomic_*`,
+  `__mfp8`, distinct `nullptr_t` identity for constexpr bit casts, `_Countof`, `__scoped_atomic_*`,
   `_Static_assert` in a struct, `//` comments under -std=c89.  *Validate:*
   no crash; pass count only goes up (results.json lists regressions).
 
@@ -175,6 +197,25 @@ Order once Tier 1 is clear: T10 (finds most wrong code per hour), T2's
 generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 
 ## Tier 1: silent wrong code
+
+- [ ] **arm64: unary minus on `__int128` vector lanes keeps 32 bits.**
+  `-a` for `a` a `vector_size(32)` of `__int128` gives `4294967293` for a
+  lane of 3 (`gen_vlanes` negates through `arith` at the element's width as
+  if 32 bits).  x86-64's walker does it right.
+  *Validate:* `ccs/vcc/tests/vcc/vec_wide_lanes.c` (xfail on arm64).
+
+- [ ] **arm64: the hardening options are accepted and ignored.**
+  `-ftrivial-auto-var-init=zero`, `-fstack-protector*`, `-fpatchable-function-entry`
+  (and on x86 only `-fcf-protection`, `-mfunction-return=`, `-mretpoline-external-thunk`)
+  are implemented for x86-64 (cc_opts.xcf ...); arm64 accepts them silently,
+  so a kernel built with them lacks the protection.
+  *Validate:* `ccs/vcc/tests/vcc/autoinit_zero.c` (xfail on arm64).
+
+- [ ] **arm64: asm flag outputs (`"=@cc<cond>"`) are not implemented.**
+  The output gets an unset register (`cmp w9, #0` then `str w10`): any
+  `"=@cceq"` reads garbage.  x86-64 has them (`set<cond>` + `movzbl`; the
+  kernel's CC_SET in test_bit/boot_cpu_has).
+  *Validate:* `ccs/vcc/tests/vcc/asm_flag_out.c` with an arm64 branch.
 
 - [x] **Branch range: no relaxation for b.cond/cbz/tbz/adr** [P].  Done for
   functions without inline asm (`r_relax` in emit.c: b.!cond .+8; b label,
@@ -202,15 +243,33 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* T1 `align_local.c` (`_Alignas(32/64/128/4096)` locals, arrays
   and VLAs of over-aligned types, inside recursion and alongside alloca;
   check `(uintptr_t)&x % A == 0`).
+- [x] **Atomic complex increment/decrement** [P]. Non-atomic complex
+  `++`/`--` update only the real component and preserve the imaginary bits.
+  Atomic complex values up to eight bytes use a whole-object compare-exchange
+  loop (`tests/vcc/atomic_complex_incdec.c`, `tests/atomic/complex_concurrent.c`).
+  Linux wider complex values use the generic libatomic whole-object ABI and
+  CAS retries. Validated concurrent double/long-double increments, imaginary
+  signed-zero retention, 64-byte aggregate snapshots and 128-bit integer RMW
+  on both Linux targets (`tests/atomic/wide.c`, link with `-latomic -pthread`).
+  Wider atomic operations on other targets remain unsupported.
+
 - [x] **`_Atomic` dropped** [P].  Done: `_Atomic(T)` and the qualifier
   (also `T *_Atomic`) make a type of its own (`TF_ATOMIC`, `ty_atomic()` in
   cc/type.c) with clang's layout; lvalue conversion (`decay_slow`) yields
   T; emit loads with `ldar`, stores with `stlr`, and every compound
   assignment and `++`/`--` is a `casal` loop around the operator's usual
   code (`atomic_rmw`, emit/expr.c).  Tests: `atomic_layout.c`,
-  `atomic_ops.c`.  Left, each a clean error today: 16-byte atomics
-  (`_Atomic __int128`, `long double`; needs `caspal`), loads and stores of
-  whole `_Atomic` structs/unions, `_Atomic` vectors.  Differs from clang on
+  `atomic_ops.c`. Linux whole-object records and wider integer, FP and complex
+  accesses use the libatomic pointer ABI when a native 1/2/4/8-byte access is
+  unavailable; native 16-byte instructions remain an optimization. Atomic
+  vector types remain unsupported by the frontend.
+  Lock-free queries fold guaranteed native 1/2/4/8-byte aligned accesses;
+  `__atomic_always_lock_free` is an integer constant expression and leaves its
+  pointer unevaluated. Unknown Linux sizes/alignment query libatomic instead
+  of claiming every access is lock-free. Library-backed 16-byte operations
+  are conservatively not always lock-free. Tests: `atomic_lock_free.c`,
+  hosted `tests/atomic/lock_free_runtime.c` (both Linux targets).
+  Differs from clang on
   purpose: clang 21/23 zero-extend a signed old value when the compound
   operation leaves int arithmetic (`x /= -2` on `_Atomic signed char` -2
   gives -127); vcc gives 1 as C says.  Clang rejects `+=` on an atomic
@@ -226,6 +285,25 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   T1/T3 `atomic-threads.c` (4 threads × 1M `x++` on `_Atomic int`,
   `_Atomic long double`, `_Atomic struct{char[3]}` → exact count);
   `_Static_assert(sizeof/alignof)` cases in `vcc-sema.py layout` style.
+- [x] **Generic rotations truncate operands/counts above 128 bits** [P].
+  Keep the unsigned wide operand type and the full unsigned count type before
+  normalization. `stdc_rotate_widths.c` covers unsigned scalar/BitInt widths,
+  return types, once-only evaluation and large counts. Unchanged GCC
+  `builtin-stdc-rotate-1.c` passes; its >128-bit section is x86-only because ARM
+  advertises `__BITINT_MAXWIDTH__ == 128`. Clang cannot lower runtime-count
+  funnel shifts above 128 bits: retained separately as an oracle limitation,
+  while the durable wide checks use constant counts and runtime values.
+  *Validate:* unity/file builds, rotation tests O0/O2/O3 x86 then ARM/QEMU,
+  original GCC case, sema run/batch; `work/results/stdc-rotate/validation.json`.
+- [x] **Inlined alloca accumulates across repeated calls** [P]. Linux x86/ARM
+  restore the inline function's entry SP at its common return label, after
+  argument evaluation. Callee alloca no longer rewrites caller VLA restore
+  points. Direct allocations in the containing function retain function
+  lifetime. Regression `inline_alloca_lifetime.c` covers nested inline calls,
+  early returns and live caller VLA/alloca objects; unchanged GCC
+  `gcc.dg/pr113596.c` retains its `-O2` contract.
+  *Validate:* unity/file builds, own x86 then ARM/QEMU suites, O0 regression,
+  and kernel sema run/batch; evidence `work/results/pr113596/validation.json`.
 - [x] **VLA pointer `++`/`--`/`+=`/`-=`/difference ignore runtime size** [P].
   Done (emit/expr.c: assign_op, incdec_op, pointer difference).  Found
   with it: `int a[6][n]` (constant outer bound) was laid out as a 0-byte
@@ -236,6 +314,19 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   Was: `ptr_add_vla` `emit.c:6051` only covers binary `+`/`-` and subscripting.
   *Validate:* T1 `vla_ptr.c` (`int (*q)[n]`: `q++`, `q--`, `q += 2`,
   `q -= 1`, `q3 - q`, `&q[1] - q`, 2-D VLA of VLA).
+- [x] **Adjacent string literals decode before the final prefix is known** [P].
+  Collect the complete sequence before decoding so late `u`/`U`/`L` prefixes
+  determine the encoding and escape range; reject incompatible prefixes.
+  *Validate:* `string_concat_late_prefix.c`, diagnostic `string_concat_prefix.c`;
+  unchanged Kefir `string_literals1` and `wide_string_literals2` on x86-64.
+  Their signed-`wchar_t` assumptions are rejected by Clang on ARM; the
+  portable regression covers ARM/QEMU instead.
+- [x] **Foldable VLA bounds lose evaluated side effects** [P]. Array
+  bounds such as `(callback(), 1)` retain their runtime expression even
+  when folding produces an integer. Unevaluated calls in an integer constant
+  expression still permit a fixed array.
+  *Validate:* `vla_bound_effects.c`; unchanged Kefir `vla1`, all four
+  Clang/vcc combinations on Linux x86-64 and ARM/QEMU.
 - [x] **VLA with initializer accepted; garbage at run time** [P].  Done:
   rejected as clang does, same location and range (cc/decl.c); `= {}`
   (accepted by clang in every mode) zeroes the array at run time
@@ -305,6 +396,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `push`, `push,N`, `push,id`, `push,id,N`, `pop`, `pop,id`, `pop,N`, `pack()`,
   `show` ignored).
 - [x] **Designated-initializer overrides differ from clang** [P].
+  Nested GNU range lists now detach on later writes, preserving independent
+  element values and positional continuation (`range_designator_overwrite.c`,
+  unchanged GCC `gnu99-init-1.c`).
   (done, cc/init.c: an array element or range a later designator covers is
   dropped, not evaluated; a designator into a sub-object initialized by one
   value keeps the rest of it: a string becomes one element per character,
@@ -518,6 +612,67 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `bcp-1` needs `__builtin_constant_p` of an inlined argument.  They are
   `WASM_XFAIL` in `bench/vcc-wasm.py` (premerge's wasm job).
   *Validate:* `bench/vcc-wasm.py -j 6` reports them as XPASS; remove the entries.
+- [ ] **wasm: a signed 32-bit constant widened to 64 bits** [C].
+  `long long a(void) { return (long long)(int)0x80ff0102; }` gives
+  `i64.const 2164195586` for wasm64 (the front end is right: a
+  `_Static_assert` that it is negative holds; arm64 is right).  Found by
+  `vir_byte_assembly` (marked `vcc-xfail-wasm`).
+  *Validate:* `bench/vcc-wasm.py -j 6 --suite vcc vir_byte_assembly` XPASSes; remove the marker.
+- [ ] **wasm: the inline suite** [C].  `bench/vcc-wasm.py` leaves the
+  `inline` suite (gcc/llvm inlining and IPA run tests, vendored for VIR) out
+  of its default run: in premerge's wasm job `gcc.dg-ipa-ipa-sra-1`,
+  `gcc.dg-ipa-pr119318`, `gcc.dg-ipa-pr92497-1`, `gcc.dg-torture-matrix-2`
+  and `gcc.dg-torture-matrix-6` differ from clang (only the first on a macOS
+  host), not looked into.
+  *Validate:* `bench/vcc-wasm.py -j 6 --suite inline` is green in CI; drop the filter.
+- [ ] **wasm: 128-bit overflow builtins** [C]. `overflow128` covers standard
+  integer operands and destinations independently of `_BitInt`;
+  `overflow128_effects` checks evaluation counts and result stores on overflow.
+  Both are rejected by the Wasm emitter on the same sources with the
+  `1f4c8d2` baseline compiler (code-identical to `b97022e`) and the current
+  compiler, on wasm32 and wasm64. Implement full-width add/subtract/multiply
+  overflow and mixed signedness without truncating operands. The separate
+  `overflow128_bitint` also requires the remaining-target `_BitInt` ABI work.
+  All three remain required on Linux; Wasm expected failures are executed and
+  must become XPASS when fixed, never skipped.
+  *Validate:* `bench/vcc-wasm.py -j 6 --suite vcc --no-cache overflow128`
+  and `--wasm32`; remove each marker after its full runtime test passes.
+- [ ] **wasm: wide integer bitfields** [C]. `bitfield_int128` and
+  `bitfield_int128_static` exercise packed fields with `__int128` base types,
+  signed extension and neighboring bits. The Wasm emitter handles these as
+  whole memory values before examining the bitfield metadata; it needs
+  width-aware extraction, signed extension and masked stores without touching
+  adjacent bytes. Both tests fail on the same sources with upstream `2339f69`
+  (runtime exits 61 and 1); after the shared static-initializer fix the latter
+  advances to exit 8, the signed 66-bit `-1` extraction check. Their explicit
+  Wasm expected failures remain executed against Clang and reject XPASS.
+  *Validate:* `bench/vcc-wasm.py -j 6 --suite vcc --no-cache bitfield_int128`;
+  remove each marker only when its full test passes. Linux coverage is required.
+- [ ] **wasm: Linux-correctness coverage gaps** [C]. The Linux milestone
+  adds tests for behavior fixed in the x86/ARM emitters but still missing in
+  the separate Wasm emitter. All 20 tests below also fail with upstream
+  `2339f69`; some fail earlier in its parser, so this is a capability boundary,
+  not evidence that their newly reachable Wasm lowering is correct.
+  `bench/vcc-wasm.py` records each as an explicit expected failure, executes it
+  against clang, and rejects XPASS. They are not skipped.
+  - Runtime classification/comparison: `fp_classify_builtin`, `fpclassify`,
+    `fp_compare_builtin` (long-double comparisons), `isfpclass`, `signaling_nan`; long-double
+    classification in `complex_div_runtime`.
+  - Integer/aggregate lowering: `atomic_record` (128-bit atomic value conversion),
+    `generic_bitcount` (_BitInt runtime precision), `int128_shift_count`
+    (wide shift counts), `deep_conditional` (wide GNU omitted-middle values),
+    `transparent_union_redecl` (member calling convention).
+  - Expression/call lowering: `gnu_conditional_float` (GNU floating conditional),
+    `parenthesized_function` (wasm64 only: nested function-pointer return signature; wasm32 passes on baseline f866a31),
+    `void_lvalue` (void expressions leave stack values).
+  - Optimization/inlining: `array_constants`, `dead_branch_entries`,
+    `optimized_conditions` leave unreachable references; `inline_constants`
+    needs argument propagation into `__builtin_constant_p`.
+  The actual `fp_class_builtins` regression and Unicode static-symbol collision
+  are fixed and must pass without expected-failure markers.
+  *Validate:* `bench/vcc-wasm.py -j 6 --suite vcc --no-cache -v` using emcc 7
+  and Node 24; every named probe must become XPASS when repaired, then remove
+  its corresponding entry and rerun. Also retain the unmarked GCC/TCC gates.
 - [ ] **PIC/PIE** [P]: done: `cc_opts.pic` from the driver (PIE the hosted
   default, `-fno-pic`), `sym_needs_got` (arch/a64/emit/value.c) as clang:
   `-fPIC` every default-visibility non-static symbol, `-fPIE` those not
@@ -626,18 +781,41 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `= {}`, `[[...]]` standard attributes, `#embed` (pp).
   *Validate:* T1 `c23-*.c` with `vcc-flags: -std=c23`; T4 that the same
   keywords are identifiers under `-std=c99` (`int bool = 1;`).
-- [ ] **`_BitInt` widths above 128 and remaining targets**: the front end supports
-  distinct signed/unsigned types of 1–128 bits (signed starts at 2), `wb`/`uwb`
-  literals, target layout, integer rank and constant arithmetic. Linux x86 and
-  arm64 now normalize runtime arithmetic, loads, conversions and call results
-  to the declared precision. Their clang/vcc cross-call tests cover scalar
-  arguments/returns, callbacks, register exhaustion, varargs and aggregates.
-  Wider integers and runtime support on other targets remain to implement;
-  overflow builtins with BitInt operands/destinations above 64 bits are still
-  explicitly diagnosed (the existing wide-overflow lowering limitation).
-  *Validate:* `tests/vcc/bitint_constants.c`, `bitint_runtime.c` (16 widths,
-  eight boundary/pattern inputs, native x86 and ARM/QEMU), `tests/abi/bitint/`
-  (all four compiler combinations on each Linux target), cproc's three cases.
+- [ ] **`_BitInt` remaining operations and targets**: Linux x86-64 and arm64
+  now support scalar widths above 128 through limb objects, while preserving
+  the existing 1–128-bit paths. Wider arithmetic, integer conversions,
+  comparisons, bit-fields, generic counts, constants and replay are covered
+  by independent expected values. The declared maximum width is 8388608;
+  runtime validation covers selected widths through 7001, not every width.
+  x86 wide ABI checks use Clang cross-calls. Clang 23 rejects native ARM types
+  above 128 bits, so ARM wide ABI checks use explicitly documented ordinary-C
+  aggregate proxies; they are not native Clang wide-integer ABI verification.
+  Linux wide integer/floating conversions use full-width magnitude and one
+  nearest-even rounding, or exponent/significand decoding with truncation
+  toward zero. Exact IEEE probes cover 129, 193, 310, 500 and 7001 bits in
+  six x86 formats and five ARM formats; dynamic rounding is not implemented.
+  Vector elements wider than 128 bits and switch bounds outside signed
+  128-bit representation remain explicitly unsupported.
+  Runtime support on other targets remains incomplete. The dirty-padding
+  compound-assignment regression stays a verified Wasm expected failure;
+  Wasm overflow builtins above 64 bits remain explicitly diagnosed.
+  *Validate:* `bench/vcc-bitint.py`, `vcc-bitint-constants.py`,
+  `vcc-bitint-abi.py`, `vcc-bitint-replay.py`, `vcc-bitint-float.py`, existing
+  `tests/vcc/bitint_constants.c`, `bitint_runtime.c`,
+  `bitint_compound_padding.c` and `tests/abi/bitint/`.
+- [ ] **Strict floating environment for wide integer casts**: Linux wide
+  integer-to-float lowering currently constructs nearest-even bits and does
+  not raise inexact/overflow flags. Accepting `-frounding-math` or
+  `-ffp-model=strict` only disables selected fast-math transforms; it does
+  not establish dynamic-rounding or exception support. Do not claim strict
+  floating-environment conformance for these casts.
+  *Validate:* convert volatile unsigned `_BitInt(193)` `(1 << 53) + 1` to
+  double under all four `fesetround` modes and check `fetestexcept`:
+  upward must produce `0x1.0000000000001p53`, while nearest/downward/toward-zero
+  produce `0x1p53`, all with inexact raised. Also test signed values and
+  destination overflow. The current default-mode Clang 23 cast likewise
+  ignores the environment; its `-frounding-math` wide cast fails in the
+  backend, so use exact IEEE expectations rather than that failed oracle.
 - [ ] **Builtins**: ~~`__builtin_shufflevector`, `__builtin_convertvector`~~ (done:
   tests/vcc/vector_builtins.c; vector diagnostics spell clang's unnamed form, without the
   `(vector of N 'T' values)` note and typedef names) [P].  Library builtins (clang's `F`
@@ -678,6 +856,23 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `B(__clang__)`) it is 1 and the error is clang's "expected ']'" (not
   "expected attribute name").  The `]` fix-it line and clang's later errors there belong to
   the error recovery item.)
+- [ ] **General object-size provenance** [P]. The Linux milestone on base
+  `9d022c3` handles strict-flex levels 0–3, declared subobjects without padding,
+  minimum mode 3, stable `counted_by` pointer fields (dynamic modes 0–2), and
+  direct immutable inline pointer parameters. Volatile pointer/base expressions
+  stay unknown without reads. Five unchanged GCC cases (`pr101836_1/2/3`,
+  `pr39343`, `pointer-counted-by-8`) and permanent regressions cover this scope.
+  Still missing: general control-flow/alias provenance, transitive inline
+  bindings, `alloc_size` inference, and dynamic side-effecting expressions.
+  Wasm inline argument-bound propagation remains unsupported: the unchanged
+  `object_size_inline` regression gives identical assembly and runtime failure
+  with main `9d022c3` and this milestone on wasm32/64; Clang passes. Its
+  expected-failure marker executes the test and rejects XPASS.
+  Do not infer a whole allocation from a known subobject or treat unknown as
+  known. Full S4 and non-Linux targets remain separate gates.
+  *Validate:* unity and file-by-file builds; own x86/ARM runtime suites;
+  `vcc-gcc-dg.py` on those five sources; strict-flex 0–3, volatile/null-base and
+  raw allocation probes; kernel `vcc-sema.py run` and `batch` (887 TUs).
 - [x] **Attributes without effect**: none left.  Accepted
   and needing nothing today: `returns_twice` (locals live in memory:
   `tests/vcc/returns_twice.c`; the optimizer item must honour it when
@@ -705,6 +900,10 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [ ] **Blocks (`^{}`)** for Darwin headers.
   *Validate:* T3 compile programs including `<dispatch/dispatch.h>` and
   calling a block.
+- [x] **C90 digraph and statement scope semantics** [P]. Strict C89/C90
+  disables digraphs; C94 and GNU89 enable them. Implicit selection/loop
+  scopes start with C99. Lexer/header-cache modes, paste, stdin and `-D`
+  are checked by `bench/vcc-c90.py`, including 21 mixed-mode jobs.
 - [x] **Scope details**: (done: a declaration after a label, `case` or
   `default` (C23; -Wc23-extensions before), also after `__attribute__`s;
   a prototype definition's parameter-list tags are visible in its body, K&R's
@@ -714,6 +913,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   "array has incomplete element type"; "previous definition is here" for a
   defined function: tests/vcc `label_decl.c`, diag `label_decl_kr_vis.c`,
   `incomplete_var.c`, `conflict_prev_def.c`.)
+  Labeled declaration groups remain in their enclosing lexical scope;
+  stack lifetime and cleanup are covered by `label_declaration_lifetime.c`
+  and unchanged Kefir `std_attributes18`.
 - [ ] **Fixed limits** (struct members now 1M; flat declarator operators use
   growing arena buffers with a 1M resource budget; genuinely nested declarators
   remain stack-guarded). Flat labels parse iteratively into flat AST lists;
@@ -755,12 +957,16 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* T4.
 - [x] **`#embed` / `__has_embed`** [P].  (done: `#embed "x"` with limit,
   clang::offset, prefix, suffix, if_empty, `__has_embed` 0/1/2, -Wc23-extensions,
-  -M lists the file, clang's search (absolute, or the includer's directory);
+  -M lists the file, clang's search (absolute, or for quoted names the
+  includer's directory followed by the working directory);
   tests/vcc `embed.c` checksums the file embedding itself; `--embed-dir` (`<x>`
-  only there, `"x"` after the includer's directory); `-E`/`-E -P` placement of
+  only there, `"x"` after the includer and working directories); `-E`/`-E -P` placement of
   the token after the data, byte for byte as clang; limit() takes a constant
   expression; a header with #embed is not cached (replay would not see a
   changed data file).)
+  *Validate:* `bench/vcc-embed-search.py`: 40 Clang comparisons on both
+  Linux targets, including search precedence, queries and dependencies;
+  unchanged Kefir `preprocessor_embed7` in all four compiler combinations.
 - [ ] **Output modes**: `-CC` (comments in macro definitions and arguments,
   `//` as `/* */`) and `-traditional-cpp` are rejected with an error.
   *Validate:* `bench/vcc-diff.py text` (bytes, not tokens) for `-E` with and
@@ -1111,15 +1317,76 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 
 ## Tier 4: quality
 
-- [ ] **Optimizer**: register allocation of locals, FP values in v
-  registers (`f_arith` `emit.c:3673`), jump tables / binary search for
-  `switch` (`gen_switch` `emit.c:7179`), fewer caller-saved spills
-  (`spill_live` `emit.c:2713`).  Today ~clang -O0 speed, 3-4× slower than
-  -O2; stage-2 vcc build 2.6× slower than the clang-built one.
-  *Validate:* correctness by all of T1/T2/T10 and the kernel boot;
-  performance by `bench/vbench.py` and a small benchmark set
-  (`bench/micro/`: matmul, hash, interpreter, the vcc self-build), numbers
-  in the plan.
+- [ ] **IPA constant propagation.** A static function's parameter that every
+  call passes the same constant is that constant in the body (clang's IPSCCP,
+  gcc's IPA-CP), noinline functions included: `__builtin_constant_p` of it is 1
+  and branches on it fold.  VIR inlines once-called statics (walker,
+  `fn_once`); calls it keeps see nothing of their arguments.
+  *Validate:* `bench/vcc-ctests.py --suite inline`: `gcc.dg-ipa-pr92497-1`
+  turns from xfail to XPASS (drop it from `INLINE_XFAIL`).
+
+- [ ] **Optimizer shared across x86, arm64 and wasm**. Implementation
+  owner: `PLAN-fas2.md`, **Gemensam optimerare utan SSA**, OPT0–OPT8.
+  arm64 already has register locals, copy/dead-result cleanup, stack-cell
+  forwarding and extension facts; wasm already has scalar locals. Extract
+  and reuse those algorithms rather than treating x86's gaps as missing
+  from every backend. Share typed arithmetic, effect/reachability facts,
+  local-candidate selection, inlining and switch policy in `emit/opt/`;
+  record algorithms in `emit/rec/` for register targets. Target instructions,
+  register assignment, ABI and structured wasm lowering stay with targets.
+  The first rule must be consumed by all three backends, including wasm32
+  and wasm64 for supported types. For `-O0`/`-O1`: no new IR/SSA or unbounded pass loops (`-O2` is owned by
+  `PLAN-vir.md`).
+  First delivered slice (2026-11-11): unsigned power-of-two div/rem in
+  `emit/opt/divpow2.c`, all three consumers, codegen/runtime checks at O0–O3.
+  Integer identities now live in separate `emit/opt/identity.c`, shared by
+  all targets; keep future algorithms in named files, with small walker
+  adapters. Both build modes pass 32 target/level/rule checks.
+  Next slice: shared `emit/rec/fallthrough.c` on arm64/x86; wasm
+  terminal while-backedge cleanup in separate reachability unit. OPT2
+  now also removes unreachable suffixes and has x86 effect metadata.
+  Shared bounded block/liveness contracts now live in `emit/flow/`.
+  Wasm's separate typed-flow consumer removes overwritten private exact
+  4/8-byte frame stores through structured joins; unique opening tokens
+  preserve branch identity and epoch-scoped real fences preserve calls
+  after empty arms. Loops, dispatchers/goto, asm, SJLJ and dynamic frames
+  remain excluded. At `1d8e29a`, 114 focused/existing configurations and
+  isolated epoch-coalescing mutations pass, plus the full own SDK suites:
+  wasm32 178 PASS/36 XFAIL/16 skips, wasm64 182 PASS/37 XFAIL/11 skips.
+  New fast harness: `bench/vcc-wasm-flow.py`; full results and limitations
+  in PLAN-fas2/PLAN-wasm. Integrated `1458a90` against exact flow parent
+  `f7327bd` again passes 114 checks and 66 byte-identical O0/noopt pairs.
+  Matched v3 whole-process Callgrind controls cost +0.314–0.552%; fixed
+  wasm32/64 mixes +0.106/+0.095%; concentrated positive diamonds cost
+  +4.494–4.683%, reducing 800/1000 stores to 200 and relocatable object
+  size 2.886–3.325%. Corpus exclusions, raw profiles and limits are in
+  the plans; active analysis exceeds 1% on the positive probes. The full
+  performance gate and remote CI remain pending; this does not close
+  general DSE, O2 or G5/G7. Signed power-of-two
+  recipes are in separate sdivpow2.c files; wasm chooses compact div/rem
+  except cheaper -1/MIN cases. OPT3 register locals are next; builtin
+  setjmp now preserves all potential promoted callee-save registers,
+  including inherited R12; final alignment is reconstructed on resume.
+  Shared locals.c eligibility/selection now feeds all targets and x86
+  promotes profitable scalar locals in four callee-save homes. Direct
+  ABI-to-home binding is now direct for selected register/stack parameters;
+  `emit/rec/copies.c` now shares arm64's forward-copy search with the x86
+  adapter in `arch/x64/emit/copies.c`: bounded transactional rewrites of
+  full-width GPR temporaries within a block, with target effect/operand
+  contracts. Native 32-bit/XMM copy cleanup, shared extension facts and
+  improved profitability remain pending. Unity/nonunity builds, 32 focused
+  target/level runtime combinations and normal/sanitized record contracts
+  pass; prior arm64 debug/unwind and wasm output snapshots are unchanged.
+  Short paired compiler CPU samples are noisy (even unchanged wasm control
+  varies 17.5%); the unchanged sum program's runtime difference is noise.
+  OPT4 documents raw before/after numbers; the 1% performance gate is open.
+  Wasm checks use our assembler/linker and plain Node; full replacement
+  of Emscripten's test/explorer runtime is tracked in `PLAN-wasm.md` W9.
+  *Validate:* common C semantics plus target-specific code assertions;
+  extraction commits preserve output byte for byte, activation commits
+  pass suites/ABI/stress and relevant debug/kernel gates. Measure compiler
+  instructions/cycles and generated-code runtime/size separately; old
+  self-build/runtime ratios are historical, not current x86/wasm evidence.
 - [ ] **Error recovery**: parse errors recover per block, struct body, for
   header and TU, missing closers as clang (PLAN-diag.md D2.2, D2.3: first
   error at clang's place 95.3 %); left: parameter lists: `f(a; )` (clang's
@@ -1377,20 +1644,18 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `ldimpl.h` (named vector types, VPRIV globals), as cc/pp/emit, and the
   fragments real files.  *Validate:* `bench/vbench.py check --base` (the
   vmlinux link byte-identical), `bench/vobjcopy-cmp.sh`, gate.
-- [ ] **arm64 and wasm on the shared walker** (restructure, after PLAN-x86.md
-  X4).  x86-64 is generated by three layers: the AST walker `emit/walk/`
-  (folding, reachability, inlining, `__builtin_constant_p`, bindings, calls),
-  a lowering interface per CPU (`walk/lower.h`, called through `LO()`) and
-  passes over machine records shared through a per-CPU op table
-  (`emit/rec/`).  arm64 still has its own copy of layer 1 in
-  `arch/a64/emit/` and its passes in `opt.c`; wasm has its own walker.
-  Move arm64 to all three layers (records already share the header layout:
-  rename `rd rn rm ra` to `r[0..3]`, `roles`/`BT` become its op table; the
-  walker is instantiated per target by `#include` with another `LO` prefix),
-  then wasm to layer 1 only (a stack machine has no registers for layer 3),
-  and delete the copies.  Until then a rule change goes into both walkers.
-  *Validate:* outputs byte-identical (`bench/vcc-same.py`), `bench/vbench.py
-  gate`; `bench/vcc-walkcmp.py` becomes unnecessary and goes.
+- [ ] **Shared emitter semantics and incremental walker convergence**
+  (revised 2026-11-11; `PLAN-fas2.md` OPT0–OPT8). Do not wait for x86 X4
+  before sharing code. `walk.h` currently binds LO to x64 and `wkarg` is
+  SysV-specific; it is not yet a target-neutral walker. Extract semantic
+  helpers consumed by the three existing generators first. Extract arm64
+  record algorithms with explicit width/effect adapters for x86; equal
+  16-byte layouts do not imply equal field semantics. Retain wasm's stack
+  values, locals, structured blocks and br_table while sharing the policy.
+  Full walker consolidation can follow once real common interfaces emerge;
+  remove duplicate rules when their shared replacement has all consumers.
+  *Validate:* byte-identical output for extraction, common semantic tests
+  for all consumers, unity/nonunity builds and measured compiler cost.
 - [ ] **Target-OS code out of the generic files** (restructure 2026-11-09).
   `platform/` has whole files only (Mach-O writer, ELF writer); the
   target-Darwin branches (`DARWIN(c)` and `PP_DARWIN` tests, ~25) are still

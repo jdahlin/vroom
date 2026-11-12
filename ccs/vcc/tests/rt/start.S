@@ -2,6 +2,10 @@
 	.section .text.start, "ax"
 	.globl _start
 _start:
+	adrp	x0, exception_vectors
+	add	x0, x0, :lo12:exception_vectors
+	msr	vbar_el1, x0
+	isb
 	ldr	x0, =stack_top
 	mov	sp, x0
 	mov	x0, #(3 << 20)
@@ -43,6 +47,25 @@ _exit:
 	mov	x0, #0x18
 	hlt	#0xf000
 1:	b	1b
+
+	/* Every EL1 vector terminates a faulting guest. Without VBAR, a compiler
+	 * trap enters unmapped address zero and looks like a host timeout. No
+	 * guest stack is needed, so stack faults are reported too. */
+	.p2align 11
+exception_vectors:
+	.rept 16
+	b	guest_exception
+	.balign 128
+	.endr
+guest_exception:
+	adrp	x1, exception_message
+	add	x1, x1, :lo12:exception_message
+	mov	x0, #4  /* semihosting SYS_WRITE0, diagnostic to stderr */
+	hlt	#0xf000
+	mov	x0, #125
+	b	_exit
+exception_message:
+	.asciz "runtime: unhandled guest exception\n"
 
 	.globl	setjmp
 	.globl	_setjmp

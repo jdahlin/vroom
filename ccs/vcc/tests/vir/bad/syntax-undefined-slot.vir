@@ -1,0 +1,12 @@
+; a slot that is not declared
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  v1:ptr = ptradd $3, 1
+  ret v0
+}
+; ---
+bad/syntax-undefined-slot.vir:8:19: undefined slot $3

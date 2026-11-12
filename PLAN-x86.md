@@ -93,7 +93,17 @@ cc/:s AST ──▶ 1. AST-vandrare (emit/walk/) ──LO()-anrop──▶ 2. s�
                                          tvåadress, titthål, skrivare/kodare (arch/x64/emit/)
 ```
 
-**Avgränsning:** x86-64 är första och enda användaren. arm64 och wasm behåller sina
+**Gemensam implementationsplan (2026-11-11):** se
+`PLAN-fas2.md`, **Gemensam optimerare utan SSA**, OPT0–OPT8. C-semantik,
+strategier och postalgoritmer ägs där; X4 ansluter x86 via målbeskrivningar.
+Generella regler skall användas av x86, arm64 och wasm, inte utvecklas
+som nya x86-specialfall. Arm64:s befintliga optimerare är källan till
+delade record-pass. Rena extraktioner bevarar utdata bytevis; när en
+gemensam regel aktiveras är dess avsedda ändringar på alla mål tillåtna
+och verifieras enligt den gemensamma planen. Detta preciserar den äldre
+regeln ovan om oförändrade arm64/wasm-utdata.
+
+**Nuvarande avgränsning:** x86-64 är första och enda användaren. arm64 och wasm behåller sina
 generatorer tills de flyttas, och det är en egen arbetspunkt (TODO.md: "arm64 and
 wasm on the shared walker"). Gränssnitten ritas för det x86-64 behöver. Två billiga förberedelser
 görs redan nu, eftersom flytten annars blir dyrare: anropen går genom `LO()`, och
@@ -267,7 +277,7 @@ Det som skiljer x86-64 och som lager 2 och de x86-specifika passen tar hand om:
 | X1 | **Målval och front end.** `PP_LINUX_X86_64`, predefines ur clang, layout (tabellen ovan), `lib/f80.h` för x87-konstanter, `__float128` | `vpp -dM -E` = `clang -dM -E` (även `-march`-deltan, `bench/vcc-predef.py`); `vcc-sema.py layout` med x86-64 som mål; `vcc-ldconst.py` för x87; `vcc-bflayout.py` för x86-64; arm64/wasm byte-identiska |
 | X2 | **Lagren på plats, heltals-`-S`.** `emit/rec/rec.h` och x86:s op-tabell; `emit/walk/` med `lower.h` och `LO()`; x86-64 i måltabellen (`emit/tu.c` väljer vandraren för x86-64); `arch/x64/emit/` för heltal, locals i stackplatser, parametrar, direkta anrop, `if`/loopar/`break`/`continue`/`switch` (kedja), `return`; prolog/epilog med `rbp`; `twoaddr.c` (behövs på alla nivåer: posterna är treadress), `print.c`. Bara `-O0`, inga optimeringspass | `-S` assembleras av `clang -c`, länkas mot glibc och körs nativt med samma resultat som clangs; nytt `bench/vcc-x86.py` (som `vcc-wasm.py`: testhuvudena mot glibc, nativ körning, cache); arm64/wasm byte-identiska (`vcc-same.py`) |
 | X3 | **Hela C i vandraren och sänkningen.** Aggregat och initierare, SysV-klassning (`abi.c`), varargs, hopptabeller, flyttal (SSE, x87), `__int128`, `__float128` via `FN_*`, bit-fält, VLA/`alloca`, atomics, TLS, PIC/PIE, inbyggda, inlining och `need_fold`, kända värden, spill; `VCC_WALKLOG` | gcc-torture och tcc-tests2 vid `-O0`: samma godkända som clang; `vcc-abi.py --target x86_64` (clang/vcc × anropare/anropad, gcc som tredje part); `vcc-pic.py`, `vcc-fpcheck.py` för x86-64; `bench/vcc-walkcmp.py` mot arm64 grönt |
-| X4 | **Gemensamma pass och `-O1`.** `emit/rec/` (liveness, kopiepropagering, döda resultat, stackplatser, hopp) över op-tabellen; `B_LREG` i `rbx r12–r15`; `peep.c`; `twoaddr.c` byter kommutativa operander | Sviterna ovan vid `-O1` och `-O2`; kodstorlek per funktion mot `clang -O1` på kärn-TU:er (mål: inom arm64:s kvot mot clang); tid per funktion mot arm64 med `vbench.py` |
+| X4 | **Inkoppling av gemensam optimerare och `-O1`.** `PLAN-fas2.md` OPT0–OPT8 äger regler/algoritmer; x86 fyller op-/effekttabeller och ansluter `emit/rec/`, lokala register och måloperationer. SIB/LEA, SSE2, målfeatures, prolog och tvåadress förblir x86. Ingen egen kopia av generisk optimeringspolicy. | C-regressioner på alla tre backends, x86-kodkrav och ABI vid O0–O3; ren extraktion byte-identisk på arm64. Mät kompilatorns kostnad och genererad kod enligt OPT-planen; bekräfta x86-stöd innan `vbench.py` anges som x86-grind. |
 | X5 | **Objektfiler.** Kodare för det generatorn skriver, fixups, ELF-maskin 62, hoppavslappning; `-c` direkt från posterna utan text; CFI och DWARF med x86-registernummer | `vas-obj.py`: vcc:s `-c` byte-identiskt med `clang -c` av samma `.s`; `vas-enc.py` mot llvm-mc; X4:s sviter med `-c`; `vcc-cfi.py` och `vcc-dwarf.py` för x86-64 |
 | X6 | **Inline asm och `vas` för x86-64.** AT&T-parser, begränsningar och modifierare, flaggutdata, `asm goto`; hela ISA:n inklusive SSE/AVX/AVX-512 (kärnans krypto-`.S`) | `vas-corpus.py` för x86-64 (`clang -S` av testfilerna, `clang -c` mot `vas`); kärnans `.S` byte-identiska med clangs objekt |
 | X7 | **vlink för x86-64.** Relokeringar, GOT/PLT, TLS-avslappning (GD/IE→LE), GOTPCRELX-avslappning | `bench/vcc-x86.py` med vlink: laddad bild byte-identisk med lld:s; `vlink-opts.py` |
@@ -329,6 +339,334 @@ kärnan och kan vänta.
   stänger TODO-punkten om Darwin-grenarna.
 
 ## Status
+
+### X5 (2026-11-11): direktkodning från posterna, plan
+
+Mätt: kernel/fork.c `-c` 0,15 s mot `-S` 0,11 s; assemblern på texten är ~25 %
+av TU:n.  Väg, steg för steg, varje steg byte-identiskt (`vcc-x86.py --objcmp`):
+1. En assemblersession utan text (`as_open/as_close` på ElfObj, som `as_run`
+   gör men utan källa): sektioner, symboler, etiketter (`as_label`), hopp via
+   `as_branch` (samma relaxering), och `as_line` för det som får vara text
+   (data, direktiv, CFI, `.loc`, inline asm) i samma session.
+2. `x64_encode(e, rec)`: posterna X_MOV/X_LD/X_ST/X_LEA/ALU/X_CMP/X_TEST/
+   X_SETCC/X_CALL/X_JMP/X_JCC/X_PUSH/X_POP direkt till `XForm` + `x64_emit`
+   (assemblerns kodare: MC:s val ärvs); övriga poster som en rad text.
+3. Andelen textrader mot noll: SSE/x87-posterna, prolog/epilog, CFI (`cfi_*`
+   anrop i stället för `.cfi_*`-text), `.loc` (dw_row direkt).
+4. Data och sektionshuvuden direkt (som arm64:s IT_SYMHDR/IT_DATA).
+Validering per steg: --objcmp 100 %, -g/-fasynchronous-unwind-tables, kärnans
+TU:er (`vcc -c` mot `vcc -S | vasm`: samma objekt), tid per TU (vbench).
+
+### X8 (2026-11-11): x86-kärnan byggd med vpp bootar Debian
+
+- `work/vcc-x86-cc.sh` (vpp som CC, bara versionsfrågorna till clang),
+  `make O=work/build-x86 ARCH=x86_64 LLVM=1 CC=... defconfig vmlinux`.
+  Kbuilds sonder ger nu samma `.config` som clang:s (utom CC_CAN_LINK):
+  okända -W och gcc-flaggor avvisas som clang, -D som omdefinierar ett
+  fördefinierat makro varnar.
+- Härdningen som kärnan begär, som clang skriver den: `-fcf-protection=branch`
+  (endbr64, IBT-noten), `-fpatchable-function-entry=N,M` (nop:ar, sektionen
+  `__patchable_function_entries` med SHF_LINK_ORDER per funktion),
+  `-mfunction-return=thunk-extern`, `-mretpoline-external-thunk` med
+  `-mindirect-branch-cs-prefix`, `-fstack-protector*` med
+  `-mstack-protector-guard-reg/-symbol`, `-ftrivial-auto-var-init=zero`.
+- Rättat på vägen: statiska grenar (adress-argument bundna vid inlining,
+  "i" från frontändens konstant), ASM_CALL_CONSTRAINT (%rsp), cpuid (utdata
+  via pekare), call_on_stack (callee-saved operander), rip_rel_ptr,
+  `#pragma GCC visibility`, döda &&-operander, asm goto med utdata,
+  ALTERNATIVE (.skip/.fill som layouten avgör), x86-assemblern (SSE4, AES,
+  SHA, CRC32, AVX/AVX2 via VEX, system- och CET-instruktioner, kontroll-
+  register, registeralias), x86-assemblern delad per instruktionsfamilj.
+- Bootar Debian 13 (2026-11-11): `bench/boot-test.py --arch x86_64` BOOT OK,
+  running, 0 trasiga enheter, klar på 4,9 s (KVM; 44 s med TCG).  Länkat
+  med vroom-ld (5 stubbar), 25 objekt fortfarande via clang
+  (`work/vcc-x86-fallback.txt`).  Hittat genom att bisekta per objekt från
+  ett helt clang-bygge som bootar, och en gdb-vaktpunkt på `__preempt_count`:
+  asm-flaggutdata (`=@ccc`, boot_cpu_has), scoped_guard (städningen kördes
+  två gånger), och ramarna (16 KiB-stacken räckte inte: temporära slottar och
+  inline-kopiornas lokala återanvänds nu, kedjan 20,6 KB -> 13,3 KB).
+- Kvar: de 25 clang-objekten (`.code32`/`.code16`: realmode, efi-mixed,
+  vdso32, kompat-entry; AVX-512 (EVEX) i krypto; `.org`-mål), länkning med
+  vlink i stället för vroom-ld, objtool.
+
+### X4 (2026-11-11): påbörjat, vikningar i vandraren
+
+- `wk_cond` och `if`/`?:` använder arm64:s formvikningar (`cond_fold`: x >> 0 != x,
+  x < y && x > y, intervall); ett villkor som alltid hoppar gör grenen död
+  (`wkst.cjump`), och `?:` med känt villkor (efter inlining) genererar en arm.
+- 0 << x, 0 >> x, -1 >> x viks; laster av const-globaler (heltal, och (int) av
+  en const double) viks som arm64:s `const_global`.
+- a[K] = konstant för lokala fält som bara används som a[KONST] (ingen SA_AESC)
+  följer med till laster i rak kod (`wkst.ael`; en etikett glömmer dem), som
+  arm64:s ael: pure-1.
+- (float)floor((double)f) → floorf(f) (även ceil, trunc, round, rint,
+  nearbyint, fabs) med optimering, som clang -O2: 20030125-1.
+- `vcc-x86.py -j 6`: 1776/1776; --pic, --obj och -g lika; --objcmp 1846/1846,
+  --fpcheck 1908/1908, --vlink 1758/1758, vcc-abi x86_64 12/12; arm64 oförändrad.
+- Kvar i X4: ett riktigt pass på records (registerallokering, kopie-
+  propagering, som arm64:s opt.c) och -O1 som eget läge.
+
+### X7 (2026-11-11): vlink för x86-64, statiska länkar klara
+
+- `arch/x64/ld/x64.inc` (inkluderas av `ld/ld.c`): relokeringsskanning och
+  -tillämpning, GOTPCRELX-avslappning, GD/IE→LE, TLS variant 2
+  (`tls_tp` = blockets slut), 4K sidstorlek som standard, `SHT_X86_64_UNWIND`
+  som indata (utdata PROGBITS som lld), int3-utfyllnad i körbara sektioner,
+  tom `.got` kvar efter avslappad GD/LD, `__tls_get_addr` ej odefinierad.
+- `.note.gnu.property`: när AND av FEATURE_1_AND är 0 släpps alla (som lld);
+  annars ligger indata kvar (sammanslagen not: kvar att göra).
+- Testkörtid: `tests/rt/start-x86.S`, `link-x86.ld` (statiskt, eget TLS).
+- `bench/vcc-x86.py -j 6 --vlink`: 1750/1751 laddade bilder byte-identiska
+  med lld:s och körs; kvar 20030125-1 (floor→floorf, kräver optimeraren).
+  arm64 oförändrad: `VCC_LDCMP=1 vcc-ctests.py` 1780/1780, vlink-opts, vlink-bad.
+- Statisk PIE (`--vlink --pie`: rt med -fPIE, `-static -pie --no-dynamic-linker`,
+  start-x86.S tillämpar R_X86_64_RELATIVE): 1749/1750 byte-identiska och körs.
+  Tom `.rela.dyn` som skriptet namnger blir RELA som lld:s (bara x86 än så länge).
+- Kvar: delade objekt och dynamiskt länkade program (PLT, .dynamic) för x86.
+
+### X5/X6 (2026-11-11): assembler och objekt, påbörjat
+- `arch/x64/as/asm.c`: AT&T-parser och kodare (heltal, SSE, x87, prefix, `@PLT`/`@GOTPCREL`/
+  TLS-modifierare), med MC:s val av form (ackumulatorformer, imm8/disp8, `c7`/`b8`, `d1` för
+  skift med 1); hopp till etiketter som relaxerade poster i `as.c` (`VI_X86BR`, kort tills
+  avståndet eller målet kräver nära form med `PC32`/`PLT32`). `arch/x64/obj/fixup.c`:
+  x86:s fixups (lösta på plats som MC, GOT/TLS behåller symbolen); `ElfObj.machine`
+  (EM_X86_64: inga mappningssymboler, MC:s nop-utfyllnad); `#`-kommentarer, citerade
+  etiketter. `vasm --target=x86_64-linux-gnu`; `-c` för x86-64 går genom texten
+  (`E.objtext`) och assemblern.
+- `vcc-x86.py --objcmp`: vcc:s `.s` genom vasm och genom `clang -c`, objekten byte för
+  byte: 1846/1846. `vcc-x86.py --obj` (vcc:s sida med `vpp -c`): 1768/1776, som med `-S`;
+  lika med `--pic`. arm64: `vas-obj.py` 45/45.
+- `vas-corpus.py --target x86_64-linux-gnu` (clangs `-S` av testfilerna vid `-O0`/`-O2`,
+  vasm mot `clang -c`): 3679/3680 identiska (SSE2-heltal, x87-former, `shld`/`bt`/`prefetch`,
+  CFI med x86:s CIE och `.eh_frame` som `SHT_X86_64_UNWIND`, MC:s relaxering mot förra
+  passets layout). Kvar: `20050224-1 -O2`, ett relaxeringsfall vid en `.prefalign`.
+- CFI (`-fasynchronous-unwind-tables`: prolog och epilog som clang, sparade callee-saved)
+  och `-g` (radtabell från vandraren, `.loc` före posterna, `twoaddr` flyttar raderna) i
+  x86-skrivaren; `.word` är 2 byte på x86; DWARF-katalogen för en delad `.file`-sökväg som
+  MC; `.quad x@DTPOFF` m.fl. i data. Med `VCC_CFLAGS='-g -fasynchronous-unwind-tables'`:
+  sviten 1767/1775 med `-S` och `--obj`, `--objcmp` 1846/1846; `backtrace()` och gdb går
+  genom vcc:s funktioner; `vas-corpus` med `-g` 3679/3680.
+- Kvar: kodning direkt från posterna (utan text), hela ISA:n (AVX, AVX-512 för kärnans
+  krypto) och `vas-enc.py` för x86-64.
+### X3 (2026-11-11): interrupt-anropskonvention
+
+- `interrupt` får hårdvaruram/error-parameter från stacken, sparar alla GPR,
+  rensar DF under handlern och återvänder med IRETQ. `-muintr` ger UIRET och
+  `__UINTR__`. Felaktiga signaturer och direkta C-anrop diagnostiseras.
+- Utan `-mgeneral-regs-only` sparas x87/MXCSR/XMM med FXSAVE64/FXRSTOR64;
+  en privat tom x87-stack gör även en full avbruten stack säker. YMM/ZMM-
+  överdelar används inte av vcc; extern kod/inline asm som ändrar dem måste
+  bevara dem själv. Kärnkod utan aktiverat FP-tillstånd använder som vanligt
+  `-mgeneral-regs-only`.
+- `bench/vcc-interrupt.py`: faktiska syntetiska IRETQ-returer, med/utan
+  error-kod, alla GPR/XMM, full x87-stack, DF och överjusterade lokaler;
+  `-O0/-O1/-O2`, både `-S` och `-c`. UIRET kodning och inkommande ram
+  verifieras, men själva instruktionen kräver OS/hårdvarustöd och körs inte.
+
+### X4 (2026-11-11): implementationsplan flyttad till gemensam emitter
+
+Kodgranskning efter rebase på main: arm64 har redan registerlokaler och
+record-pass, x86 saknar inkopplingen, wasm har egna lokaler och strukturerad
+sänkning. `PLAN-fas2.md` **Gemensam optimerare utan SSA** har OPT0–OPT8 med
+konkreta filer, beroenden, kostnadsgränser och tester på alla tre backends.
+De tidigare auditernas x86-regler är fynd/prioritering, inte beslut att
+implementera dem i x86:s `lower.c`. Ingen optimering implementerad; X4 öppet.
+
+### Registerlokaler, delprogress 2026-11-11
+
+OPT3 i `PLAN-fas2.md` har gemensamt urval och x86:s fyra callee-save-hem,
+med asm-/nonlocal-/alignmentsäkerhet. Egna sviten 137/137, kors-ABI 22/22;
+alla kalla auditprober oförändrade efter lönsamhetsfilter. En liten loop
+förbättras men kompilator-CPU-grinden är fortsatt öppen. Direkt ABI-bindning är nu levererad och verifierad med smala argument,
+stackargument, sret och varargs. Kopiestädning återstår; full O2-paritet
+är inte uppnådd. Se OPT3:s nästa statusblock för parade mätningar.
+
+### X4 (2026-11-11): reproducerbar nivåmatris och testprober
+
+`bench/vcc-optaudit.py` jämför 29 funktioner i
+`bench/optaudit/probe.c` vid O0/O1/O2/O3, baseline x86-64 och Ryzen-native.
+Körning: `PATH=/usr/lib/llvm-23/bin:$PATH python3 bench/vcc-optaudit.py --native`.
+Separat worktree `audit/x86-optimizations`, vcc byggd från `52261ef`,
+clang 23.1.6 och GCC 15.2.0 på Ryzen 7 9700X. Huvudworktreets
+ocommittade ändringar ingår inte. Ingen kompilatorkod ändrad.
+
+Alla 24 kombinationer kompilerar, assemblerar, länkar och ger samma
+checksumma `1922a5c83358247b`. Samma clang-byggda anropare används för alla
+objekt. Den testar 512 deterministiska indatauppsättningar, looplängder
+0–64, signed division med positiva/negativa värden och explicita
+gränsvärden inklusive LONG_MIN/ULONG_MAX. Detta är riktad differentiell
+kontroll, inte ett bevis för all indata. Ingen tidtagning eller tung last.
+Distrohärdning normaliseras med `-fno-stack-protector -fcf-protection=none`;
+alla använder `-fno-pie`.
+
+**Matrisen nedan anger första observerade nivå för just proben.** `saknas`
+betyder att transformationen inte sker vid någon av O0–O3 i denna probe,
+inte att ett helt optimeringsområde är uttömmande testat. En högre nivå
+kan välja annan kod, och samma effekt kan åstadkommas av flera pass.
+
+| Transformation / probe | vcc | Clang | GCC |
+| --- | --- | --- | --- |
+| Literal konstantvikning (`fold`) | O0 | O0 | O0 |
+| Konstant lokalskalär ersätts med literal (`local_const`) | O1 | O1 | O1 |
+| Kända arrayelement viks (`array_const`) | O1, men stores kvar | O1, array borta | O1, array borta |
+| `always_inline` (`always`) | O0 | O0 | O0 |
+| Liten explicit `inline` (`inline`) | O1 | O1 | O1 |
+| Liten vanlig statisk funktion inline (`auto_inline`) | saknas | O1 | O1 |
+| Ta bort `+0` och `*1` helt (`identity`) | saknas | O1 | O0 |
+| Unsigned `/8` med shift (`div8`) | saknas | O0 | O0 |
+| Unsigned `%8` med mask (`mod8`) | saknas | O0 | O0 |
+| Signed `/8` utan idiv (`sdiv8`) | saknas | O1 | O0 |
+| Unsigned `/10` utan div (`div10`) | saknas | O1 | O0 |
+| `x*9` med en LEA (`mul9`) | saknas | O1 | O1; shift/add redan O0 |
+| `p[i+3]` som en indexerad minnesoperand (`indexed`) | saknas | O0 | O1 |
+| Skalära parametrar/lokaler utan stackspill (`add32`, `aggregate`) | saknas | O1 | O1 |
+| Store-immediate (`stores`) | saknas | O0 | O0 |
+| Ta bort överskriven store (`stores`) | saknas | O1 | O1 |
+| Återanvänd icke-volatil load (`reload`) | saknas | O1 | O1 |
+| Behåll båda volatila läsningarna (`volatile`, kontrollfall) | O0–O3 | O0–O3 | O0–O3 |
+| Gemensamt deluttryck beräknas en gång (`cse`) | saknas | O1 | O1 |
+| Eliminera andra intervalltestet (`range`) | saknas | O1 | O1 |
+| Wrapper som tail jump (`tail`) | saknas | O1 | O2 |
+| Täta konstanta switch-resultat som värdetabell (`switch`) | saknas | O1 | O2; kod-hopptabell O1 |
+| Explicit 128-bitars heltalsvektor med packed add (`vector_add`) | saknas, skalär | O0 | O0 |
+| Sum-loop automatiskt vektoriserad (`sum`, baseline) | saknas | O2 | O3 |
+| Sum-loop automatiskt vektoriserad (`sum`, native) | saknas | O2 | O2 |
+| Invariant `x*y+1` ut ur loopen (`licm`) | saknas | O1 | O1 |
+| Restrict-copy-loop blir memcpy (`copy`) | saknas | O1 | O2 |
+| Oanvänd lokal beräkning tas bort (`dead_local`) | saknas | O1 | O1 |
+| Konstant if: död arm tas bort (`cond_fold`) | saknas; grenen väljs men döda instruktioner kvar | O0 | O0 |
+| POPCNT med native-mål (`popcount`) | saknas, SWAR | O0 | O0 |
+
+**Vcc:s nivåer:** `driver/ppdriver.c` skickar opt=0 för O0, opt=1 för O1
+och opt=2 för O2/O3. Alla opt-kontroller i x86-vandraren testar bara
+noll/skilt från noll; `x64_finish` har bara tvåadresspasset. O1/O2/O3 ger
+byte-identisk assembler i detta korpus, både baseline och native.
+Native ändrar inte vcc:s assembler här. Detta visar ingen effektiv
+native-instruktionsselektion för dessa fall; det betyder inte att värden
+alltid skall vara målmaskinen. FP-temporärer ligger redan i SSE-register;
+hela TODO:s äldre formulering om FP-register gäller inte x86 rakt av.
+
+**Aktiverade alternativ kontra verkliga transformationer:**
+`build/linux/optaudit-levels/` innehåller per kombination `.s`, `.o`,
+`.dis`, `.passes` och körbar fil; för GCC även `.options` och `.remarks`.
+`report.json` har kommandon, versioner, CPU, revision, SHA256 för vpp och
+proberna, funktionsstorlekar och råa instruktioner samt passinventarier.
+GCC:s options kommer från `-Q --help=optimizers`, passlistan från
+`-fdump-passes`; Clangs observerade pass och remarks från
+`-Xclang -fdebug-pass-manager -Rpass=.* -Rpass-missed=.* -Rpass-analysis=.*`.
+GCC:s flagglista, dess konfigurerade pass och LLVM:s körda pass är olika
+mått. ON innebär inte att ett pass ändrade programmet; LLVM-listan är
+inte en fullständig inventering av alla backend-transformationer.
+
+Exempel: LLVM kör `LoopVectorizePass` även vid O1 här men sum-loopen
+vektoriseras först vid O2. GCC har loopvektorisering aktiverad vid O2
+men väljer skalär baseline-kod i sum-proben; native får vektorkod redan
+vid O2. O3 gör alltså inte en transformation automatiskt lämplig.
+
+Observerad skillnad O2→O3: GCC lägger bland annat till loop interchange,
+unroll-and-jam, peeling, unswitching, predictive commoning och IPA
+constant-propagation cloning. LLVM:s logg tillför passnamnen
+`ArgumentPromotionPass`, `CallSiteSplittingPass` och
+`ControlHeightReductionPass`; andra redan förekommande pass kan ändra
+budget och heuristik utan att ett nytt namn tillkommer. Dessa områden
+är inventerade men har inte egna isolerade beteendeprober i denna omgång.
+Vcc har inte motsvarande generell analys/pipeline på x86 i auditbasen.
+
+**Från prober till regressionstester:** körkontrollen är redan en testbas.
+Harnessen kräver också två volatila inputläsningar, vikning av
+literaluttrycket och frånvaro av anrop i `always_inline` vid alla nivåer.
+För varje implementerad optimering tillkommer ett riktat kodkrav, t.ex.
+ingen div i unsigned `/8`, packed add för explicit vektor, eller en enda
+icke-volatil läsning. Kraven skall vara funktions- och målavgränsade,
+inte en hel assembler-snapshot eller allmän instruktionstakgräns.
+Saknade optimeringar rapporteras nu som fynd, inte som godkända tester.
+Framtida minnesoptimeringar behöver negativa fall för alias, volatile,
+atomics och asm; loopoptimeringar behöver noll iterationer; inlining
+behöver sidoeffekter och ABI-fall. Prestanda mäts separat för både
+kompilatorn och genererad kod. Denna utvecklaraudit är ingen ny CI-grind:
+den kräver native x86, två referenskompilatorer och GNU binutils och
+jämför även saknade egenskaper. G5:s benchmarkkrav är fortfarande öppet.
+
+GCC använder assembly- och optimeringsdumpkontroller
+([dg-final](https://gcc.gnu.org/onlinedocs/gccint/Final-Actions.html)); LLVM
+har isolerade pass/IR- och backendtester med FileCheck
+([TestingGuide](https://llvm.org/docs/TestingGuide.html)) och separat
+helprogramssvit för korrekthet, kör- och kompileringstid
+([TestSuiteGuide](https://llvm.org/docs/TestSuiteGuide.html)). Deras tester
+är bra förebilder för struktur men ingen garanti för optimalt resultat
+på godtycklig kod. För vcc är små C-tester och maskinpost/assemblerkrav
+mer direkt återanvändbara än LLVM:s IR-tester.
+Vår befintliga `vcc-gcc-dg.py` avvisar kontrakt med `dg-final` (testat i
+`test-gcc-dg.py`); den kör alltså inte GCC:s assemblykontroller i dag.
+Återanvändning av sådana upstreamfall kräver en medveten utökning eller
+portning av kodkravet, inte bara att filerna kompilerar och kör rätt.
+
+### X4 (2026-11-11): audit av billiga optimeringar utan SSA
+
+Audit i separat worktree `audit/x86-optimizations`, bas `52261ef`. Här
+betyder billig låg kompilatorkostnad: lokal sänkning och högst ett linjärt
+pass över maskinposterna, inga fixpunktsiterationer eller global aliasanalys.
+Ingen optimering implementerad; X4 är fortfarande inte färdigt.
+
+På Ryzen 7 9700X jämfördes 13 små funktioner med vcc `-O2`, clang 23.1.6
+och GCC 15.2.0 `-O2 -march=x86-64`; referenserna också med `-march=native`.
+Detta är assemblerinspektion, inte uppmätt körtid eller speedup. Basen är
+committad kod, inte huvudworktreets pågående ändringar. Proberna och de fem
+assemblerfilerna finns lokalt i `build/optaudit/` i audit-worktreet.
+
+| Ordning | Lucka och belägg | Billig implementation utan ny IR/SSA |
+| --- | --- | --- |
+| 1 | `unsigned long x / 8` och `x % 8` använder `divq`; båda referenserna använder `shr` respektive `and` | Specialfall för konstant tvåpotens i `x64_bin`, O(1) per operation. Signed division behöver bias för avrundning mot noll; börja med unsigned. Behåll fel/UB-beteendet för noll separat. |
+| 2 | `add32` innehåller `movl %r10d,%r10d`; `indexed` signutökar ett redan signutökat resultat; returer hoppar till nästa etikett | Ett framåtpass med en liten tabell över registrens kända bredd/utökning samt borttagning av hopp till omedelbart följande etikett. Nollställ fakta vid etiketter, anrop och asm. En 32-bitars självmove kan nollställa övre halvan och får bara tas bort när den redan är känd noll. |
+| 3 | `x*9` använder `imulq`; referenserna `leaq (rdi,rdi,8)` | O(1)-regler för tvåpotenser och 3/5/9; lägg till index/scale i LEA-sänkningen. Behåll flaggornas semantik eller bevisa att de inte används. Undvik långa shift/add-kedjor för godtyckliga konstanter. |
+| 4 | `p[i+3]` använder separat add/mul/add; referenserna `movl 12(rdi,rsi,4),eax` | Matcha adressens AST vid minnesoperationen; bas + index*1/2/4/8 + displacement. Kräver utökning av `lval`/poster/skrivare, men ingen analys över hela funktionen. Respektera bredd, signed index och evaluationsordning. |
+| 5 | `*p=2` materialiserar 2 i ett register | Store-immediate direkt vid sänkning. x86:s 64-bitars store-immediate tar endast signutökad imm32. Att dessutom ta bort en tidigare store är en separat minnesanalysfråga. |
+| 6 | Native referenser använder `popcntq`; vcc använder SWAR | Välj instruktion med en redan beräknad målfeature-bit. Kräver korrekt `-march`/`-m*`-hantering, inte kontroll av byggvärden i backend. SWAR är giltig baseline och är inte i sig en optimeringsbugg. |
+| 7 | Explicit `vector_size(16)` unsigned add går lane för lane via stacken; baseline-referenser använder `paddd` | Direkt SSE2-sänkning för en liten uppsättning explicit angivna vektoroperationer, O(1) per operation. Ingen automatisk vektorisering eller loopanalys behövs. |
+
+Nästa nivå utan SSA, men större arbete:
+
+- **Konstant division utöver tvåpotenser.** `/10` använder `divq`, mot
+  referensernas multiply-high + shift. Beräkna magic multiplier med en
+  verifierad algoritm, högst O(bitbredd) per konstant, gärna cache per TU.
+  Testa 32/64 bitar, signed/unsigned, extremvärden och remainder separat.
+- **Lokalt registercache för frame slots.** Parametrar och lokaler ligger
+  i minnet; alla inkommande parametrar får platser i `wk_function`.
+  Ett begränsat slot→register-cache inom ett basic block kan minska
+  trafik utan SSA. Invalidera för aliasande stores, adressflykt, asm,
+  anrop, joins och volatil/atomisk åtkomst; fysisk registerpress måste
+  hanteras. Detta är större än en peephole, men sannolikt bredare nytta.
+- **Switch.** Åtta konstanta returfall blir en jämförelsekedja; båda
+  referenserna använder värdetabell. Värdetabell för täta konstantfall,
+  hopp-tabell för täta kodfall, balanserat träd för glesa fall. Begränsa
+  tabellstorlek; sortering O(k log k), inte kvadratisk sökning.
+- **Tail calls.** En enkel wrapper gör vanligt anrop och epilog, mot ett
+  `jmp` hos referenserna. Begränsa först till ABI-kompatibla direkta
+  anrop utan stackargument, cleanup, dynamisk stack eller adress till
+  egen ram som kan användas av mottagaren.
+- **Lokal CSE/load forwarding/DSE.** `reload` läser samma pekare två
+  gånger; `stores` behåller båda skrivningarna. Börja bara med exakta,
+  icke adressflydda frame slots. Nuvarande `rec` saknar uttrycklig
+  volatile/atomic-markering; radering av godtyckliga minnesposter är
+  därför inte en säker första regel. Lägg effekter och implicita
+  register/flags i op-tabellen innan generella record-pass.
+
+Befintligt som inte skall räknas som saknat: konstantvikning,
+villkorsvikning med bevarade sidoeffekter, viss lokal konstantpropagering,
+små `inline`/`always_inline`, immediater och direkta jämförelsegrenar.
+`x64_finish` kör i dag bara `x64_twoaddr` före utskrift; registret väljs
+fysiskt vid AST-sänkning. Inget av förslagen kräver att byta det upplägget.
+
+Prioritet: 1–5 först, sedan lokalt registercache; målfeatures och explicit
+SIMD som separata steg. LICM, automatisk vektorisering, global GVN och
+aggressiv inlining hör inte till denna billiga första omgång. SSA är inte
+ett teoretiskt krav för dem heller, men de behöver mer analys och budget.
+Mät varje implementerat steg med instruktioner för kompilatorn och
+körtid/kodstorlek för resultatet; inga prestandasiffror antas av denna audit.
+
+Referenser för terminologi och jämförelse:
+[LLVM passes](https://llvm.org/docs/Passes.html),
+[GCC optimeringsflaggor](https://gcc.gnu.org/onlinedocs/gcc/Optimize-Options.html).
 
 ### X3 (2026-11-11): utökade Linux-körningar
 
@@ -419,16 +757,41 @@ villkorsuttryck. x86:s egna tester: 47/56 godkända, mot 46/56 före
   xmm, 32 byte tillbaka i xmm0:xmm1 som clang utan AVX); etikettadresser
   (`.Ltmp.lbl.N` som datainitierarna) och beräknat `goto`; cleanup-variabler
   (blockslut, `break`/`continue`, `return` med värdet parkerat, `goto` ut ur
-  scopes via ett träd från förskanningen, `for`-satsens första led).
-- `bench/vcc-x86.py`: 1659/1770, lika i `--pie` och `--pic` (vcc-sidan
-  `-fPIE`/`-fPIC`, länkad `-pie`). Körfel bara där clangs optimerare krävs
-  (`20030125-1`, `bcp-1`, `builtin-constant`) och 11 länkfel av samma slag eller
-  `__builtin_setjmp`. `vcc-abi.py --target x86_64`: 10/12, med tre nya tester
-  (`int_records`, `fp_records`, `complex_args`) som klarar alla fyra
-  kombinationerna; resten stannar vid alignment > 16 och bit-fält över 8 byte.
-- Kvar i X3: explicit `r12` i inline asm med överjusterad rambas, `__float128`-aritmetik (libgcc `__addtf3` ...), inlining av
-  `__always_inline` med `need_fold` och `constant_p` efter inlining,
-  `-mgeneral-regs-only`/`-mno-sse`, `VCC_WALKLOG`.
+  scopes via ett träd från förskanningen, `for`-satsens första led); alignment
+  över 16 (lokaler från rbx = justerad ram, stackargument via sparad och
+  justerad rsp); bit-fält över en 8-bytegräns (delat vid gränsen); float-
+  spill som för heltal; `__float128` (via adress, ett xmm i ABI:t, libgcc:s
+  `__addtf3` ..., `__*tf2`, `__extend*`/`__trunc*` även x87, `__float*tf`/`__fix*tf*`);
+  inbyggda i vandraren för alla CPU:er: clrsb, bitreverse, isnan/isinf/isfinite/
+  isnormal/isinf_sign/fpclassify på bitmönstret (alla flyttalstyper), isgreater ...
+  isunordered, inf/nan/huge_val, atomics nand/max/min, test_and_set, clear;
+  inlining i vandraren (`always_inline` och små `inline`, argument parkerade
+  före bindning, etiketter och case per kopia, förskanning per kopia),
+  konstanta lokaler och parametrar, `__builtin_constant_p` efter inlining;
+  `-mgeneral-regs-only`/`-mno-sse`/`-mno-sse2`/`-mno-mmx` (makron som clang, inga
+  vektorregister, flyttal ett fel; `vcc-x86.py --fpcheck`); UTF-8-namn citerade;
+  inline asm för `-S` (X6:s del i emittern: AT&T, begränsningar, modifierare, x87
+  `t`/`u`, `asm goto`); `__builtin_setjmp`; död kod efter hopp och i konstanta
+  `if` som clang -O2; vektorer av `__int128`/`long double`.
+- `bench/vcc-x86.py`: 1768/1776, lika i `--pie` och `--pic` (vcc-sidan
+  `-fPIE`/`-fPIC`, länkad `-pie`). Kvar: körfelet `20030125-1` (clangs `floor` -> `floorf`) och 7
+  länkfel där clang -O2 tar bort ett `link_error`-anrop (X4:s pass). `vcc-abi.py --target x86_64`: 12/12, med tre nya tester
+  (`int_records`, `fp_records`, `complex_args`).
+- Kvar i X3: bit-fält bredare än 64 bitar, 128-bitars overflow-inbyggda med 128-bitars operander, `need_fold` (ett
+  error()-anrop kvar efter inlining), `VCC_WALKLOG`.
+
+#### Historisk status i den lokala grenen före integreringen
+
+>   scopes via ett träd från förskanningen, `for`-satsens första led).
+> - `bench/vcc-x86.py`: 1659/1770, lika i `--pie` och `--pic` (vcc-sidan
+>   `-fPIE`/`-fPIC`, länkad `-pie`). Körfel bara där clangs optimerare krävs
+>   (`20030125-1`, `bcp-1`, `builtin-constant`) och 11 länkfel av samma slag eller
+>   `__builtin_setjmp`. `vcc-abi.py --target x86_64`: 10/12, med tre nya tester
+>   (`int_records`, `fp_records`, `complex_args`) som klarar alla fyra
+>   kombinationerna; resten stannar vid alignment > 16 och bit-fält över 8 byte.
+> - Kvar i X3: explicit `r12` i inline asm med överjusterad rambas, `__float128`-aritmetik (libgcc `__addtf3` ...), inlining av
+>   `__always_inline` med `need_fold` och `constant_p` efter inlining,
+>   `-mgeneral-regs-only`/`-mno-sse`, `VCC_WALKLOG`.
 
 ### X2 (2026-11-10): påbörjat, i gren `claude/x86-x2-walker`
 - Lagren finns i minsta form: `emit/rec/rec.h` (posthuvudet, `opdesc`),
@@ -484,3 +847,134 @@ villkorsuttryck. x86:s egna tester: 47/56 godkända, mot 46/56 före
 
 Övriga steg inte påbörjade. Lagerindelningen (vandrare, sänkning, gemensamma
 pass) beslutad 2026-11-10; arm64 och wasm flyttas senare (TODO.md).
+
+### 2026-11-11: funktionsmål och genererad x86-featuremodell
+
+- CPU- och featureval (`-march`, `-m`/`-mno-`, `target("...")`) delar nu en
+  statisk LLVM/Clang-23-genererad modell med beroenden och makron. `native`
+  läser CPUID/XGETBV på en x86-värd; ingen LLVM/Clang behövs vid körning.
+  Explicita negativa flaggor och ordningen mellan featureflaggor bevaras.
+- Funktionsattribut sparas, deklarationscache nycklas med featureläget och
+  inlining kräver kompatibelt mål. Inkompatibel `always_inline` ger fel vid
+  kodgenerering. SIMD- och variadiska registerregler använder funktionsmålet.
+- CPU-/featureacceptans betyder inte att alla instruktioner eller ABI-varianter
+  är implementerade. YMM/ZMM-anrop saknas: vektorer större än 16 byte som
+  argument/retur med AVX ger nu ett uttryckligt fel i stället för fel ABI,
+  även vid direktanrop till en extern funktion med AVX-attribut.
+- Validering: `bench/vcc-x86features.py` jämför fullständiga `-dM`-resultat
+  med clang (CPU, featureordning och native; syntetiska CPUID/OS-tester ingår).
+  `bench/vcc-x86target.py` jämför attribut/inlining med clang och kontrollerar
+  ABI-felen. Båda körs i den vanliga premerge-grinden även på ARM-värd.
+- ABI-spärren omfattar även struct/union med breda vektorer, inklusive
+  nästlade fält och arrayomslag. Clangs sammanslagning av klasser styr spärren;
+  stora heltalsrecord och record som fortfarande passerar i minnet tillåts.
+  207 jämförelser mot Clangs LLVM-signaturer (SSE2/AVX/AVX512, globala flaggor,
+  funktionsattribut och externa mål) samt 22 x86-ABI-fall passerar.
+
+### 2026-11-11: granskning av nästlade mål och variadisk AVX-ABI
+Inlining kontrollerar nu den aktiva inlinade anroparens featureläge, inte bara
+funktionens yttersta mål. Åtta orakelfall och åtta verifierade cachevägar
+(deklarationssnapshot respektive replay med DRCHECK) passerar.
+Onamngivna variadiska breda vektorer/record går via stacken och va_arg tillåts;
+namngivna YMM/ZMM-parametrar och returvärden är fortfarande spärrade.
+X86-vektorers naturliga alignment är 32/64 byte även utan AVX, medan ARM64
+behåller 16-bytegränsen. 42 variadiska kompilerings-/spärrfall, 18 korsanrop
+med clang och 12 layoutjämförelser passerar i unity och filvis bygge.
+
+### OPT3-integration med X5 (2026-11-11)
+
+Registerlokaler använder samma csslot/CFI som asm. Privata asm-snapshots
+bevarar aktuella hem på alla kanter; riktiga unwind-tester återvinner
+anroparens callee-save-värden genom vanliga och justerade ramar (O1/O2).
+Se OPT3:s PR-status i PLAN-fas2.md; full O2 och prestandagrind kvarstår.
+
+### 2026-11-11: integration av funktionsmål, packad bool-ABI och OPT3
+
+PR39:s funktionsmål behålls vid sammanslagning med `9d022c3` (PR38/PR40).
+ABI-klassificeringen behåller både namngivna/onamngivna argument och packade
+boolvektorers lane-transport; indirekta variadiska anrop använder vandrarens
+information om fasta parametrar. Registerlokaler får fortsatt egna hem,
+medan inlining behåller den aktiva funktionens featureläge.
+SSE4:s blend-/strängposter beskriver nu sina implicita register och flaggor
+för den gemensamma optimeraren. Regressionsprov kontrollerar alla fyra
+strängopvarianter samt fasta boolvektorparametrar via funktionspekare.
+
+Unity och filvis bygge: egna Linuxprov 176/176 x86 (fem referensskip),
+181/181 ARM; ABI 32/32 på båda mål; diagnostik 220/220; sema 887/887 i
+process- och batchläge. OPT-regler O0–O3, registerhem/setjmp, unwind/CFI,
+ASan/UBSan-posteffekter och interrupt-proven passerar. Detta är en
+korrekthetsintegration; ingen ny prestandavinst eller stängd releasegrind
+påstås.
+
+Utökade integrationsgrindar: 587/587 featuremakron och 124/124 SSE4-
+acceptansfall i båda bygglägen; kernel-PP 881/881 i process och batch.
+Wasm32/64 kör det asm-omdöpta matematikprovet 1/1 i båda bygglägen.
+Den första Wasm-starten saknade Emscripten-konfiguration och nådde inte vcc;
+omkörning med explicit SDK-konfiguration är grön. TSan klarar 44 kompileringar
+på 11 käll-/målkombinationer med 1 respektive 6 emittertrådar, identisk
+assembler och inga rapporter. Exakta kommandon och binärhashar sparas i
+`work/results/pr39-merge-validation/`.
+### OPT4 kopior och kanoniska unsigned-resultat (2026-11-11)
+
+Separat copies.c använder delad native-kärna och kräver lokal
+överskrivning innan en kopia kan försvinna; tvåadressvandringen tar även
+hand om borttagning/debugrader. extensions.c bevisar från föregående
+post när högbitar redan är noll. Inga nya fulla pass/allokeringar/SSA.
+Riktade O0–O3-körningar, debug/unwind och sanitiserade kontrakt gröna;
+prestandaprofil och dess begränsningar finns vid OPT4 i PLAN-fas2.md.
+
+### OPT4 blad utan ram (2026-11-11)
+
+`arch/x64/emit/frame.c` avgör nu om en verkligt ramfri bladfunktion kan
+utelämna rbp-prolog/epilog. Beslutet följer den befintliga tvåadressvandringen:
+inga nya fulla pass, allokeringar eller AST-vandringar. Noll frame-bytes och
+ingen justering, canary eller anropsmarkering krävs först; effektbeskrivningen
+av varje kvarvarande post måste sedan sakna rbp/rsp-beroenden och anrop.
+Okänd effekt och rå asm stänger vägen. Stackargument, frame/return-address,
+setjmp, alloca, callee-saves och justerade ramar behåller nuvarande prolog.
+CFI använder den vanliga initiala CFA:n rsp+8; debugrader, endbr, patchbara
+nop-inträden och retur-thunk lämnas kvar.
+
+Drivern tolkar `-fomit-frame-pointer`/`-fno-omit-frame-pointer` i ordning.
+Standard: tillåtet vid O1–O3, O0 behåller ramen; explicit omit tillåter också
+O0 (verifierat mot clang 23). VCC_NOOPT behåller ramen. Policyn ligger före
+`cc_opts.outfd`, så deklarationscachens befintliga optionsignatur tar med den.
+Andra måls ramval ändras inte. Funktionsattributet optnone är sedan tidigare
+ignorerat i parsern; denna leverans inför ingen ny attributsemantik.
+
+Validering: `bench/vcc-x86-leaf-frame.py` klarar nivåer/flaggreordning,
+blandade headercacher med och utan replay, negativa ramkrav, kod och körning,
+patch-inträde, CFI och dwarfdump. En signal avbryter en verkligt anropsfri,
+ramfri bladfunktion; libgcc återfinner både blad och anropare genom dess FDE.
+CI kör den värdoberoende delen med `--no-run`. Egna x86-sviten: 215/215 med
+sex redovisade referensundantag; ABI: 32/32, fyra clang/vcc-kombinationer.
+Befintliga libgcc-prov för registerhem i vanliga/justerade ramar är gröna vid
+O1/O2. Unity-bygge samt fristående syntaxkompilering av ändrade enheter gröna.
+
+Avgränsad CPU-kostnad: kalla separata processer, Callgrind Ir, samma
+`VCC_OPT='-O3 -march=x86-64-v3'`, mål x86-64 O2. Bas 781ca697:s kompilatorkällor
+är hash-verifierat identiska med 54580f7 (enda ccs-skillnaden är en testfil).
+Basbinär SHA256 `6f42919ea1d4eef11100e017f2857b72054e52161620b443a1ada705bab89cf7`,
+kandidat `a01b54686639a58ffe897137851c8abc2fd6793be7533d1ccaa32923cca79672`.
+`work/opt-profile/leaf-cost/report.json` innehåller kommandon, källhashar och diff;
+`work/opt-profile/measure-leaf.py` återskapar de två 501-funktions-TU:erna.
+
+| Korpus | Ir bas → ny | Skillnad | .text bas → ny |
+|---|---:|---:|---:|
+| Positiv: `int fN(void){return 151+N;}` | 10 587 676 → 10 569 032 | −0,176 % | 16 022 → 8 014 byte |
+| Icke tillämplig: `unsigned fN(unsigned x){return x*37u+(x>>3);}` | 16 471 567 → 16 383 053 | −0,537 % | 24 039 → 24 039 byte |
+
+Positiv källhash `eee9910c8737d006d756893be7d52f6bb2e15c36bb39dbf929247aa15d3c362d`;
+kontroll `a939023c599b599a652f3a88ff6fb10aa6cbd2a5d40a1741cf02812063c67b9e`.
+Kontrollens assembler är byte-identisk. Bytevinsten inkluderar funktionsjustering,
+inte bara borttagna instruktioner. Dessa två små syntetiska TU:er mäter varken
+programkörtid, helkorpus eller någon allmän kompilatorförbättring; G5/G7 är öppna.
+Nästa separata kvalitetslucka är kallt använda parametrars vanliga stackhem:
+den nuvarande direkta ABI-bindningen gäller bara lönsamma, utvalda registerhem.
+
+PR50 integration 2026-11-11: uppdaterad mot 9b18f642 (main genom 4bb6d52
+plus PR49). Interrupt-prolog/epilog och nya x86-funktionsmål bevaras;
+ramfri policy gäller uttryckligen bara vanliga funktioner. Unity -j1,
+bladens flagg-/cache-/hårdningsprov inklusive interrupt-undantaget,
+riktig signal-unwind genom ett ramfritt blad, befintlig vanlig/64-alignad
+unwind O1/O2 samt debugrader O0–O3 passerar. CI för integrationshuvudet återstår.

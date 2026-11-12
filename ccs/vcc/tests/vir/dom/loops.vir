@@ -1,0 +1,46 @@
+; DOM: yes
+; nested loops with an exit from the inner one
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  br b1
+b1 loop:
+  brif v0, b2, b5
+b2 loop:
+  brif v0, b3, b4
+b3:
+  br b2
+b4:
+  br b1
+b5:
+  ret v0
+}
+; ---
+vir 1
+target x86_64-linux
+sig %s0 = (int) -> int
+
+func @f %s0 {
+b0:
+  v0:i64 = param 0.0
+  br b1
+b1 loop:
+  brif v0, b2, b5
+b2 loop:
+  brif v0, b3, b4
+b3:
+  br b2
+b4:
+  br b1
+b5:
+  ret v0
+}
+; dom @f b0 idom b0 pre 0 post 5
+; dom @f b1 idom b0 pre 1 post 5
+; dom @f b2 idom b1 pre 2 post 4
+; dom @f b3 idom b2 pre 3 post 3
+; dom @f b4 idom b2 pre 4 post 4
+; dom @f b5 idom b1 pre 5 post 5

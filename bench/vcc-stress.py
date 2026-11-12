@@ -45,8 +45,8 @@ def nest(open_, close, n, inner):
 #        main file, extra args)
 def cases(d):
     C = {}
-    def case(name, expect, files, main, args=(), regex=None, xfail=None, budget=None):
-        C[name] = dict(expect=expect, regex=regex, xfail=xfail, files=files, main=main, args=list(args), budget=budget)
+    def case(name, expect, files, main, args=(), regex=None, xfail=None, budget=None, env=None):
+        C[name] = dict(expect=expect, regex=regex, xfail=xfail, files=files, main=main, args=list(args), budget=budget, env=env)
 
     # front end recursion: vstack.h ends the TU before the stack runs out (clang itself crashes here)
     case('paren-200k', 'error', {'a.c': 'int x = ' + nest('(', ')', 200000, '1') + ';\n'}, 'a.c')
@@ -87,6 +87,18 @@ def cases(d):
         return 'volatile long a[64];\nlong f(long x) { return ' + e + '; }\n'
     # right-nested expressions past the temporaries: spilled; far past the stack: an error or code, no crash (clang crashes)
     case('expr-right-nest-250', 'ok', {'a.c': rnest(250)}, 'a.c')
+    # More than 1,000 independent representation proofs followed by a deep tail.
+    # The normal harness timeout detects lost memoization without a tight timing
+    # assertion; valid input must compile rather than hit a fixed cache limit.
+    bit_leaf = '__builtin_bit_cast(unsigned,__builtin_bit_cast(float,1u))'
+    bit_tail = nest('__builtin_bit_cast(unsigned,', ')', 40, '1u')
+    bit_source = ('struct S { unsigned a[601]; };\nconstexpr struct S s = '
+                  '__builtin_bit_cast(struct S,(struct S){{' + ','.join([bit_leaf] * 600 + [bit_tail]) + '}});\n'
+                  'static_assert(s.a[0] == 1 && s.a[600] == 1);\n')
+    for target in ('x86_64', 'aarch64'):
+        case('bit-cast-memo-growth-' + target, 'ok', {'a.c': bit_source}, 'a.c',
+             args=('--target=' + target + '-linux-gnu', '-std=c23', '-fsyntax-only'))
+
     case('expr-right-nest-10k', 'any', {'a.c': rnest(10000)}, 'a.c')	# vccd's stacks are bigger: it compiles
     case('struct-10k-members', 'ok', {'a.c': 'struct s {' + ''.join(f' int m{i};' for i in range(10000)) + ' } v;\n'}, 'a.c')
     case('declarator-100-ptrs', 'ok', {'a.c': 'int ' + '*' * 100 + 'p;\n'}, 'a.c')
@@ -103,6 +115,16 @@ def cases(d):
     # every symbol: clang's -fspell-checking-limit of 50 attempts bounds it; records are in an arena)
     case('errors-40k', 'error', {'a.c': 'int counter;\n' + ''.join(f'int v{i} = countr + undeclared{i};\n' for i in range(40000))},
          'a.c', ['-ferror-limit=0'], budget=3)
+    # VIR (VCC_VIR=bl, without vccd): limits end in the ordinary code generator, not a crash.
+    # A variable read 60 000 blocks below its definition (the builder's SSA lookup recurses per
+    # block), and a loop that carries 66 000 variables (a block takes 65 535 parameters).
+    VIR = {'VCC_VIR': 'bl'}
+    case('vir-read-60k-blocks-down', 'ok', {'a.c': 'int g(int); int f(int a){ int x = g(a); int s = 0;\n' +
+         ''.join(f' if (a & {i + 1}) s += {i};\n' for i in range(60000)) + ' return s + x;}\n'}, 'a.c', ['-O2'], env=VIR)
+    case('vir-66k-loop-variables', 'ok', {'a.c': 'int g(int);\nlong f(int a){\n' +
+         ''.join(f' int v{i}=a+{i};\n' for i in range(66000)) + ' while(g(a)){\n' +
+         ''.join(f' v{i}+=a;\n' for i in range(66000)) + ' }\n long r=0;\n' +
+         ''.join(f' r+=v{i};\n' for i in range(66000)) + ' return r; }\n'}, 'a.c', ['-O2'], env=VIR)
     # control: a normal TU
     case('normal', 'ok', {'a.c': 'int f(int a) { return a * 2 + 1; }\n'}, 'a.c')
     return C
@@ -147,7 +169,7 @@ def run(c, d, vccd):
     if vccd:
         cmd, env = [f'{vd.BIN}/vcc'] + argv, dict(os.environ, VCC_SOCK=vccd.sock)
     else:
-        cmd, env = [vd.VPP] + argv, None
+        cmd, env = [vd.VPP] + argv, dict(os.environ, **c['env']) if c.get('env') else None
     t0 = time.time()
     try:
         p = subprocess.run(cmd, cwd=d, capture_output=True, timeout=TIMEOUT, env=env)

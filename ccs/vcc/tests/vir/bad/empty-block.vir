@@ -1,0 +1,8 @@
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+func @f %s {
+b0:
+}
+; ---
+@f b0: S3: the block is empty

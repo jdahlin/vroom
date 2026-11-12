@@ -121,6 +121,9 @@ static inline unsigned R5(int r) { return r == SP ? 31u : (unsigned)r & 31; }	/*
 /* add/sub (register), the extended form when sp is involved (as.c addsub_reg) */
 static uint32_t e_addsub_reg(int sf, int op, int s, int rd, int rn, int rm, unsigned kind, unsigned amt)
 {
+	if (kind >= 8)	/* extended register: option kind - 8 */
+		return 0x0b200000u | (uint32_t)sf << 31 | (uint32_t)op << 30 | (uint32_t)s << 29 | R5(rm) << 16 |
+		       (kind - 8) << 13 | (amt & 7) << 10 | R5(rn) << 5 | R5(rd);
 	if (rd == SP || rn == SP)
 		return 0x0b200000u | (uint32_t)sf << 31 | (uint32_t)op << 30 | (uint32_t)s << 29 | R5(rm) << 16 |
 		       (sf ? 3u : 2u) << 13 | (amt & 7) << 10 | R5(rn) << 5 | R5(rd);
@@ -140,7 +143,7 @@ static unsigned enc(const ins *i, uint32_t *w, pfix *f, const uint32_t *loff, ui
 		return 0;
 	case I_ADD: case I_SUB: case I_ADDS: case I_SUBS:
 		w[0] = e_addsub_reg(sf, i->op == I_SUB || i->op == I_SUBS, i->op == I_ADDS || i->op == I_SUBS,
-				    i->rd, i->rn, i->rm, i->sh ? i->cond : 0, i->sh);
+				    i->rd, i->rn, i->rm, i->sh || i->cond >= 8 ? i->cond : 0, i->sh);
 		return 1;
 	case I_AND: case I_ORR: case I_EOR: case I_ANDS: case I_BIC: case I_ORN: {
 		static const uint8_t opc[] = { [I_AND] = 0, [I_ORR] = 1, [I_EOR] = 2, [I_ANDS] = 3, [I_BIC] = 0, [I_ORN] = 1 };
@@ -234,10 +237,10 @@ static unsigned enc(const ins *i, uint32_t *w, pfix *f, const uint32_t *loff, ui
 		w[0] = b | R5(i->rn) << 5 | R5(i->rd);
 		return 1;
 	}
-	case I_LD: case I_ST: {
+	case I_LD: case I_ST: case I_LDF: case I_STF: {
 		int64_t off = i->imm;
-		int sz = i->sz, base = i->rn;
-		unsigned n = 0, opc = i->op == I_ST ? 0 : ld_opc[sz][i->cond];
+		int sz = i->sz, base = i->rn, v = i->op == I_LDF || i->op == I_STF;
+		unsigned n = 0, opc = i->op == I_ST || i->op == I_STF ? 0 : v ? 1 : ld_opc[sz][i->cond];
 		bool scaled = off >= 0 && (off & ((1 << sz) - 1)) == 0 && (off >> sz) < 4096;
 
 		if (!scaled && !(off >= -256 && off < 256)) {
@@ -247,10 +250,18 @@ static unsigned enc(const ins *i, uint32_t *w, pfix *f, const uint32_t *loff, ui
 			off = 0;
 			scaled = true;
 		}
-		w[n++] = scaled ? a64_ldst_uoff((unsigned)sz, 0, opc, R5(i->rd), R5(base), (unsigned)(off >> sz))
-				: a64_ldst_imm9((unsigned)sz, 0, opc, 0, R5(i->rd), R5(base), (int)off);
+		w[n++] = scaled ? a64_ldst_uoff((unsigned)sz, v, opc, R5(i->rd), R5(base), (unsigned)(off >> sz))
+				: a64_ldst_imm9((unsigned)sz, v, opc, 0, R5(i->rd), R5(base), (int)off);
 		return n;
 	}
+	case I_SMADDL: case I_UMADDL:
+		w[0] = (i->op == I_SMADDL ? 0x9b200000u : 0x9ba00000u) | R5(i->rm) << 16 | R5(i->ra) << 10 | R5(i->rn) << 5 |
+		       R5(i->rd);
+		return 1;
+	case I_LDX: case I_STX:	/* register offset */
+		w[0] = (uint32_t)i->sz << 30 | 0x38200800u | (i->op == I_STX ? 0 : ld_opc[i->sz][i->cond]) << 22 |
+		       R5(i->rm) << 16 | (uint32_t)i->ra << 13 | (i->sh ? 1u << 12 : 0) | R5(i->rn) << 5 | R5(i->rd);
+		return 1;
 	case I_LDP: case I_STP:
 		w[0] = a64_ldstp(2, 0, i->cond == 0 ? 2 : i->cond == 1 ? 3 : 1, i->op == I_LDP, R5(i->rd), R5(i->ra), R5(i->rn),
 				 (int)(i->imm / 8));
@@ -286,18 +297,34 @@ static unsigned enc(const ins *i, uint32_t *w, pfix *f, const uint32_t *loff, ui
 		w[0] = 0x10000000u | R5(i->rd);
 		*f = (pfix){ 0, 1, R_AARCH64_ADR_PREL_LO21, i->label, 0 };
 		return 1;
-	case I_B: case I_BC: case I_CBZ: case I_CBNZ: {
+	case I_JTE:
+		if (loff) {
+			w[0] = (uint32_t)(((int64_t)loff[i->label] - loff[i->ref]) * 4);
+			return 1;
+		}
+		w[0] = 0;
+		*f = (pfix){ 0, 1, R_AARCH64_ADR_PREL_LO21, i->label, 0 };
+		return 1;
+	case I_B: case I_BC: case I_CBZ: case I_CBNZ: case I_TBZ: case I_TBNZ: {
 		int64_t d = loff ? ((int64_t)loff[i->label] - at) * 4 : 0;
 
 		switch (i->op) {
 		case I_B: w[0] = a64_b(d); break;
 		case I_BC: w[0] = a64_bcond(i->cond, d); break;
+		case I_TBZ: case I_TBNZ: w[0] = a64_tbz(i->op == I_TBNZ, R5(i->rd), i->sh, d); break;
 		default: w[0] = a64_cbz(sf, i->op == I_CBNZ, R5(i->rd), d); break;
 		}
 		if (!loff)
-			*f = (pfix){ 0, 1, i->op == I_B ? R_AARCH64_JUMP26 : R_AARCH64_CONDBR19, i->label, 0 };
+			*f = (pfix){ 0, 1, i->op == I_B ? R_AARCH64_JUMP26 : i->op == I_TBZ || i->op == I_TBNZ ? R_AARCH64_TSTBR14 :
+					   R_AARCH64_CONDBR19, i->label, 0 };
 		return 1;
 	}
+	case I_TAIL:
+		if (!i->cond)
+			return 0;
+		w[0] = 0x14000000u;
+		*f = (pfix){ 0, 0, R_AARCH64_JUMP26, i->ref, 0 };
+		return 1;
 	case I_BL:
 		w[0] = 0x94000000u;
 		*f = (pfix){ 0, 0, R_AARCH64_CALL26, i->ref, 0 };
@@ -357,6 +384,15 @@ static unsigned enc(const ins *i, uint32_t *w, pfix *f, const uint32_t *loff, ui
 		return 4;
 	}
 	return 0;
+}
+
+/* an upper bound on the words record i takes (inline asm: unknown, a lot) */
+VPRIV uint32_t a64_words(const ins *i)
+{
+	uint32_t w[16];
+	pfix f;
+
+	return i->op == I_RAW ? 1u << 20 : enc(i, w, &f, NULL, 0);
 }
 
 static int r_fail(rctx *R, const char *msg)
@@ -435,6 +471,8 @@ static bool r_branch(rctx *R, uint32_t fid, const ins *i, rlab *L, uint32_t frag
 	if (L->frag == frag && !(L->off & 3) && !(off & 3)) {
 		int64_t d = ((int64_t)L->off - off) / 4;
 
+		if ((i->op == I_TBZ || i->op == I_TBNZ) && (d < -(1 << 13) || d >= 1 << 13))
+			return r_fail(R, "function with inline asm too large: tbz beyond 32 KB") == 0;
 		if (i->op != I_B && (d < BR19_MIN || d > BR19_MAX))	/* not relaxed with inline asm in the function */
 			return r_fail(R, "function with inline asm too large: conditional branch or adr beyond 1 MB") == 0;
 		R->loff[i->label] = L->off / 4;
@@ -601,7 +639,8 @@ static int r_code(rctx *R, const code_hdr *h)
 				continue;
 			}
 			d = (int64_t)loff[i->label] - a;
-			if (is_cbr(i->op) ? d < BR19_MIN || d > BR19_MAX :
+			if (i->op == I_TBZ || i->op == I_TBNZ ? d < -(1 << 13) || d >= 1 << 13 :
+			    is_cbr(i->op) ? d < BR19_MIN || d > BR19_MAX :
 			    i->op == I_ADR ? d < BR19_MIN || d > BR19_MAX :
 			    i->op == I_B ? d < -(1 << 25) || d >= 1 << 25 : false)
 				return r_fail(R, i->op == I_ADR ? "function too large: adr to a label beyond 1 MB" :
@@ -677,7 +716,8 @@ static int r_code(rctx *R, const code_hdr *h)
 				}
 				continue;
 			}
-			if (i->op == I_ADR || i->op == I_B || i->op == I_BC || i->op == I_CBZ || i->op == I_CBNZ) {
+			if (i->op == I_ADR || i->op == I_B || i->op == I_BC || i->op == I_CBZ || i->op == I_CBNZ || i->op == I_TBZ ||
+			    i->op == I_TBNZ) {
 				rlab *L = r_lab(R, i->label);
 
 				if (!(L->flags & RL_NAMED)) {

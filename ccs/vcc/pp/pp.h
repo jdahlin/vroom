@@ -82,6 +82,7 @@ typedef struct pp_opts {
 	long long epoch;
 	int trigraphs;			/* strict -std (not c23) or -trigraphs: ??x replaced before lexing */
 	int c89;			/* -std=c89/-ansi: no // comments */
+	int no_digraphs;		/* strict C89/C90, excluding amendment1 (C94) */
 	int c23;			/* -std=c23/gnu23: true is 1 in #if */
 	int dump_defines;		/* -dD: #define/#undef in the -E text */
 	const char *const *dd_order;	/* -dD: clang's order of its predefined macros */

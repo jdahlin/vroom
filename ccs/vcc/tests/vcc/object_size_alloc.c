@@ -53,6 +53,7 @@ int main(void)
 	struct tail *t = (struct tail *)(&u->h + 1);
 	if (__builtin_object_size(t->data, 1) != sizeof(struct tail) + 6 - __builtin_offsetof(struct tail, data)) return 1;
 	if (__builtin_dynamic_object_size(t->data, 1) != sizeof(struct tail) + 6 - __builtin_offsetof(struct tail, data)) return 2;
+	if (__builtin_object_size(t->data, 3) != 1) return 6;
 	free(u);
 	char *p = calloc(3, 19);
 	char *alias = p + 7;

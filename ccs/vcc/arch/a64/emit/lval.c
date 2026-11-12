@@ -172,6 +172,25 @@ VPRIV lval gen_lval(ecx *e, uint32_t n)
 		uint64_t es = elem_size(c, N(x->a)->ty);
 		qty et = T(c, N(x->a)->ty)->base;
 
+		if (x->aux == 1) {
+			if (i.k == V_CONST) {
+				l = lfromval(e, p, 1);
+				l.off += (int64_t)(i.i / 8);
+				l.bf = 1, l.width = 1, l.bitoff = (uint16_t)(i.i & 7);
+				return l;
+			}
+			int ri = toreg(e, &i), rb = treg(e);
+			mov(e, 1, rb, ri);
+			val bit = arith(e, T_AMP, prim(TY_ULONG), vreg(rb), vconst(7));
+			lval bs = { .k = L_FRAME, .off = slot(e, 8, 8), .align = 8 };
+			store(e, &bs, prim(TY_ULONG), &bit);
+			val_free(e, &bit);
+			i = arith(e, T_GREATERGREATER, prim(TY_ULONG), vreg(ri), vconst(3));
+			l = lfromval(e, ptr_add(e, p, i, 1, false), 1);
+			l.bf = 1, l.width = 1, l.dynbit_slot = bs.off;
+			return l;
+		}
+
 		if (ptr_to_vla(c, N(x->a)->ty))
 			return lfromval(e, ptr_add_vla(e, p, i, N(x->a)->ty, false), talign(c, et));
 		if (i.k == V_CONST && (p.k == V_ADDR)) {
@@ -216,7 +235,7 @@ VPRIV lval gen_lval(ecx *e, uint32_t n)
 	case N_CAST:
 		if (x->aux == CK_NOP && (N(x->a)->flags & NF_LVALUE))
 			return gen_lval(e, x->a);
-		/* fall through */
+		__attribute__((fallthrough));
 	default: {
 		val v = gen(e, n);
 
@@ -327,6 +346,104 @@ static void stlr_store(ecx *e, lval *l, qty t, val *v)
 }
 
 
+/* Read/write one word of a wide bit-field. Use only bytes covered by the
+   field, including packed fields whose final byte is at the object's end. */
+static int bf_piece(int pos, int width)
+{
+	int bytes = (pos + width + 7) / 8;
+	return bytes >= 8 ? 8 : bytes >= 4 ? 4 : bytes >= 2 ? 2 : 1;
+}
+
+static int bf_read_word(ecx *e, const lval *l, int start, int width)
+{
+	lval u = *l;
+	int pos = (l->bitoff + start) % 8, done = 0;
+	int out = treg(e), part = treg(e);
+	u.off += (l->bitoff + start) / 8;
+	movi(e, 1, out, 0);
+	while (width) {
+		int size = bf_piece(pos, width), bits = size * 8 - pos;
+		if (bits > width) bits = width;
+		load_n(e, part, &u, size, 0);
+		if (pos) opbf(e, I_UBFM, 1, part, part, pos, 63);
+		opbf(e, I_BFM, 1, out, part, (64 - done) & 63, bits - 1);
+		done += bits, width -= bits, pos = 0, u.off += size;
+	}
+	tfree(e, part);
+	return out;
+}
+
+static void bf_write_word(ecx *e, const lval *l, int start, int width, int value)
+{
+	lval u = *l;
+	int pos = (l->bitoff + start) % 8, done = 0;
+	int old = treg(e), part = treg(e);
+	u.off += (l->bitoff + start) / 8;
+	while (width) {
+		int size = bf_piece(pos, width), bits = size * 8 - pos;
+		if (bits > width) bits = width;
+		if (done) shift_imm(e, I_LSRV, 1, part, value, done);
+		else mov(e, 1, part, value);
+		if (bits == size * 8) {
+			store_n(e, part, &u, 0, size);
+		} else {
+			load_n(e, old, &u, size, 0);
+			opbf(e, I_BFM, 1, old, part, (64 - pos) & 63, bits - 1);
+			store_n(e, old, &u, 0, size);
+		}
+		done += bits, width -= bits, pos = 0, u.off += size;
+	}
+	tfree(e, part);
+	tfree(e, old);
+}
+
+static void bf_extend_wide(ecx *e, const lval *l, val *v)
+{
+	if (l->width > 64) {
+		opbf(e, l->sgn ? I_SBFM : I_UBFM, 1, v->r2, v->r2, 0, l->width - 65);
+	} else {
+		opbf(e, l->sgn ? I_SBFM : I_UBFM, 1, v->r, v->r, 0, l->width - 1);
+		if (l->sgn) opbf(e, I_SBFM, 1, v->r2, v->r, 63, 63);
+		else movi(e, 1, v->r2, 0);
+	}
+}
+
+static val bf_load_wide(ecx *e, const lval *l)
+{
+	int low = l->width < 64 ? l->width : 64;
+	val v = { .k = V_REG2, .r = (uint8_t)bf_read_word(e, l, 0, low) };
+	v.r2 = (uint8_t)(l->width > 64 ? bf_read_word(e, l, 64, l->width - 64) : treg(e));
+	bf_extend_wide(e, l, &v);
+	return v;
+}
+
+/* Materialize a wide scalar field without reading outside its covered bytes.
+ * Extend from the field precision, rather than the declared storage width. */
+static val bf_load_big(ecx *e, const lval *l, qty t)
+{
+	uint64_t size = tsize(e->c, t);
+	lval dst = { .k = L_FRAME, .off = slot(e, size, talign(e->c, t)), .align = 8 };
+	int fill = treg(e);
+	movi(e, 1, fill, 0);
+	for (uint64_t off = 0; off < size; off += 8) {
+		int bits = (int)l->width - (int)(off * 8);
+		if (bits > 0) {
+			if (bits > 64) bits = 64;
+			int r = bf_read_word(e, l, (int)(off * 8), bits);
+			if (off * 8 + bits == l->width) {
+				if (l->sgn) {
+					opbf(e, I_SBFM, 1, r, r, 0, bits - 1);
+					shift_imm(e, I_ASRV, 1, fill, r, 63);
+				}
+			}
+			store_n(e, r, &dst, off, 8);
+			tfree(e, r);
+		} else store_n(e, fill, &dst, off, 8);
+	}
+	tfree(e, fill);
+	return laddr(e, &dst);
+}
+
 static val load1(ecx *e, lval *l, qty t);
 
 /* a volatile access stays untagged: opt.c then leaves its slot alone */
@@ -349,6 +466,8 @@ static val load1(ecx *e, lval *l, qty t)
 
 	if (is_atomic_lv(e, l, t))
 		return ldar_load(e, l, t);
+	if (l->bf && em_bigint(c, t))
+		return bf_load_big(e, l, t);
 	if (is_agg(c, t) || is_func(c, t))
 		return laddr(e, l);
 	if (is_flt(c, t) && !is_ld(c, t))
@@ -358,6 +477,16 @@ static val load1(ecx *e, lval *l, qty t)
 		mov(e, 1, r, l->r);
 		return vreg(r);
 	}
+	if (l->dynbit_slot) {
+		lval bs = { .k = L_FRAME, .off = l->dynbit_slot, .align = 8 };
+		r = treg(e);
+		load_n(e, r, l, 1, 0);
+		val v = arith(e, T_GREATERGREATER, prim(TY_ULONG), vreg(r), load(e, &bs, prim(TY_ULONG)));
+		return arith(e, T_AMP, prim(TY_ULONG), v, vconst(1));
+	}
+
+	if (l->bf && size == 16)
+		return bf_load_wide(e, l);
 	if (l->bf) {
 		int bits = l->bitoff + l->width, nb = bf_bytes(bits);
 
@@ -423,6 +552,27 @@ static void store1(ecx *e, lval *l, qty t, val *v)
 		stlr_store(e, l, t, v);
 		return;
 	}
+	if (l->bf && em_bigint(c, t)) {
+		lval src = { .k = L_REG, .r = (uint8_t)toreg(e, v), .align = 8 };
+		int r = treg(e);
+		for (unsigned bit = 0; bit < l->width; bit += 64) {
+			unsigned bits = l->width - bit;
+			if (bits > 64) bits = 64;
+			src.off = bit / 8;
+			load_n(e, r, &src, 8, 0);
+			bf_write_word(e, l, bit, bits, r);
+		}
+		tfree(e, r);
+		/* Assignment yields the converted field value without rereading a
+		 * potentially volatile destination. */
+		src.off = 0;
+		src.width = l->width;
+		src.sgn = l->sgn;
+		val result = bf_load_big(e, &src, t);
+		val_free(e, v);
+		*v = result;
+		return;
+	}
 	if (is_agg(c, t)) {
 		val d = laddr(e, l);
 		int rs = toreg(e, v), rd = toreg(e, &d);
@@ -449,6 +599,31 @@ static void store1(ecx *e, lval *l, qty t, val *v)
 			else
 				mov(e, 1, l->r, r);
 		}
+		return;
+	}
+	if (l->dynbit_slot) {
+		lval bs = { .k = L_FRAME, .off = l->dynbit_slot, .align = 8 };
+		val mask = arith(e, T_LESSLESS, prim(TY_ULONG), vconst(1), load(e, &bs, prim(TY_ULONG)));
+		int rm = treg(e), rv = toreg(e, v), ro = treg(e), rn = treg(e);
+		mov(e, 1, rm, mask.r);
+		load_n(e, ro, l, 1, 0);
+		val old = arith(e, T_AMP, prim(TY_ULONG), vreg(ro), arith(e, T_CARET, prim(TY_ULONG), mask, vconst(-1)));
+		mov(e, 1, rn, rv);
+		val nv = arith(e, T_MINUS, prim(TY_ULONG), vconst(0), vreg(rn));
+		nv = arith(e, T_AMP, prim(TY_ULONG), nv, vreg(rm));
+		old = arith(e, T_PIPE, prim(TY_ULONG), old, nv);
+		lval byte = *l;
+		byte.bf = 0, byte.dynbit_slot = 0;
+		store(e, &byte, prim(TY_UCHAR), &old);
+		val_free(e, &old);
+		return;
+	}
+
+	if (l->bf && size == 16) {
+		toreg2(e, v, l->sgn);
+		bf_write_word(e, l, 0, l->width < 64 ? l->width : 64, v->r);
+		if (l->width > 64) bf_write_word(e, l, 64, l->width - 64, v->r2);
+		bf_extend_wide(e, l, v);
 		return;
 	}
 	if (l->bf && l->bitoff + l->width > 64) {

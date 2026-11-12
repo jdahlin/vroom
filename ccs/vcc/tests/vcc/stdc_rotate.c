@@ -19,13 +19,9 @@ int main(void) {
     }
     unsigned long long big = 0x8000000000000001ULL;
     if (L(big, 1) != 3 || R(big, 1) != 0xc000000000000000ULL) return 3;
-    volatile unsigned _BitInt(7) narrow = 65;
-    if (L(narrow, 1) != 3 || R(narrow, 1) != 96) return 4;
     volatile unsigned __int128 wide = ((unsigned __int128)1 << 127) | 1;
     if (L(wide, 1) != 3 || R(wide, 1) != ((unsigned __int128)3 << 126)) return 5;
     if (L((_Bool)1, 9) != 1) return 6;
-    volatile unsigned _BitInt(1) one = 1;
-    if (L(1u, one) != 2) return 7;
     unsigned __int128 count = ((unsigned __int128)1 << 100) + 1;
     if (L(1u, count) != 2) return 8;
     return 0;

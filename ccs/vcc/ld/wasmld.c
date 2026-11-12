@@ -22,6 +22,8 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+
+#include "../lib/ckd.h"
 #include <unistd.h>
 
 int wasm_ld_main(int argc, char **argv);
@@ -439,6 +441,11 @@ static void parse_linking(obj *o, rd *r)
 	while (r->p < r->e && !r->bad) {
 		uint8_t t = r8(r);
 		uint64_t len = ruleb(r);
+
+		if (r->bad || len > (uint64_t)(r->e - r->p)) {
+			r->bad = true;
+			break;
+		}
 		rd s = { r->p, r->p + len, false };
 
 		r->p += len;
@@ -539,12 +546,13 @@ static obj *parse_obj(const char *name, const uint8_t *p, size_t n)
 	while (r.p < r.e && !r.bad) {
 		uint8_t id = r8(&r);
 		uint64_t len = ruleb(&r);
-		rd s = { r.p, r.p + len, false };
 
-		if (len > (uint64_t)(r.e - r.p)) {
+		if (r.bad || len > (uint64_t)(r.e - r.p)) {
 			r.bad = true;
 			break;
 		}
+		rd s = { r.p, r.p + len, false };
+
 		r.p += len;
 		switch (id) {
 		case 0: {
@@ -867,11 +875,15 @@ static void load_member(int a, uint32_t off)
 			return;
 	GROW(A->loaded, A->nloaded, A->cloaded);
 	A->loaded[A->nloaded++] = off;
-	if (off + 60 > A->n) {
+	if (!vckd_range(off, 60, A->n)) {
 		err("%s: bad member offset", A->name);
 		return;
 	}
 	sz = ar_size(h);
+	if (!vckd_range((uint64_t)off + 60, sz, A->n)) {
+		err("%s: member goes past the end of the archive", A->name);
+		return;
+	}
 	if (h[0] == '/' && h[1] >= '0' && h[1] <= '9' && A->longnames) {
 		size_t lo = strtoul((const char *)h + 1, NULL, 10), k = 0;
 
@@ -903,9 +915,11 @@ static void add_archive(const char *name, const uint8_t *p, size_t n)
 	A->p = p;
 	A->n = n;
 	/* the long-name table first */
-	for (size_t o2 = 8; o2 + 60 <= n;) {
-		uint64_t sz = ar_size(p + o2);
+	for (size_t o2 = 8; vckd_range(o2, 60, n);) {
+		uint64_t sz = ar_size(p + o2), next;
 
+		if (!vckd_range(o2 + 60, sz, n))
+			break;
 		if (!memcmp(p + o2, "//              ", 16)) {
 			A->longnames = (const char *)p + o2 + 60;
 			A->nlong = (size_t)sz;
@@ -913,7 +927,9 @@ static void add_archive(const char *name, const uint8_t *p, size_t n)
 		}
 		if (memcmp(p + o2, "/ ", 2) && memcmp(p + o2, "/SYM64/", 7))
 			break;
-		o2 += 60 + sz + (sz & 1);
+		if (!vckd_add(o2 + 60 + sz, sz & 1, &next))
+			break;
+		o2 = next;
 	}
 	if (off + 60 > n || (memcmp(p + off, "/ ", 2) && memcmp(p + off, "/SYM64/", 7))) {
 		err("%s: archive without a symbol table", name);
@@ -921,11 +937,22 @@ static void add_archive(const char *name, const uint8_t *p, size_t n)
 	}
 	{
 		const uint8_t *s = p + off + 60;
-		uint64_t sz = ar_size(p + off);
+		uint64_t sz = ar_size(p + off), w, cnt, tab;
 		bool w64 = !memcmp(p + off, "/SYM64/", 7);
-		uint64_t cnt = w64 ? ((uint64_t)be32(s) << 32 | be32(s + 4)) : be32(s);
-		const uint8_t *offs = s + (w64 ? 8 : 4);
-		const char *names = (const char *)offs + cnt * (w64 ? 8 : 4), *end = (const char *)s + sz;
+
+		w = w64 ? 8 : 4;
+		if (!vckd_range(off + 60, sz, n) || sz < w) {
+			err("%s: malformed archive symbol table", name);
+			return;
+		}
+		cnt = w64 ? ((uint64_t)be32(s) << 32 | be32(s + 4)) : be32(s);
+		/* the count and the offsets must fit in the member: cnt * w can wrap */
+		if (!vckd_mul(cnt, w, &tab) || !vckd_range(w, tab, sz)) {
+			err("%s: malformed archive symbol table", name);
+			return;
+		}
+		const uint8_t *offs = s + w;
+		const char *names = (const char *)offs + tab, *end = (const char *)s + sz;
 
 		for (uint64_t i = 0; i < cnt && names < end; i++) {
 			uint32_t mo = w64 ? (uint32_t)((uint64_t)be32(offs + 8 * i) << 32 | be32(offs + 8 * i + 4)) : be32(offs + 4 * i);

@@ -7,9 +7,14 @@
 cross-call generators. It accepts --count, --start, --suite, -j and Linux
 --target triples (or x86_64). See that harness's --help for coverage.
 
+A caller comment `/* abi-targets: linux; reason */` requires the fixture only
+on Linux; other targets report the explicit contract exclusion, never a pass.
+
 Every ccs/vcc/tests/abi/NAME/ has caller.c (main, the checks) and callee.c
 (the functions it calls, and callbacks into the caller); a header there is
-on the include path.  Each half is built by clang and by vcc, and all four
+on the include path. Each half can specify extra compiler options with
+`/* vcc-flags: ... */`, as in the C runtime suite.
+Each half is built by clang and by vcc, and all four
 combinations are linked with the bare-metal runtime (tests/rt) and run as
 bench/vcc-ctests.py does.  A test passes when every combination exits 0
 and prints what clang x clang prints; clang x clang failing is a broken
@@ -45,6 +50,8 @@ HOSTFL = ['-O2', '-fno-stack-protector']
 
 def compile_(cc, src, obj, inc):
     base = HOSTFL if HOST else WASM.BASE if WASM else X86.BASE if X86 else ct.BASE
+    flags, _ = ct.exec_marks(open(src).read())
+    base = [*base, *flags]
     if X86 and cc != 'clang':
         rc, _, err = ct.sh([ct.VPP, '-S'] + base + ['-I', inc, src, '-o', obj + '.s'])
         if not rc:
@@ -61,6 +68,9 @@ def compile_(cc, src, obj, inc):
 def one(name, wd, verbose):
     d = f'{D}/{name}'
     src = open(f'{d}/caller.c').read()
+    contract = re.search(r'/\*\s*abi-targets:\s*linux;(.*?)\*/', src, re.S)
+    if contract and (HOST or WASM):
+        return 'skip', 'Linux-only ABI contract: ' + ' '.join(contract.group(1).split()), None
     xf = re.search(r'/\*\s*vcc-xfail:(.*?)\*/', src, re.S) or (HOST and re.search(r'/\*\s*vcc-xfail-host:(.*?)\*/', src, re.S)) \
         or (WASM and re.search(r'/\*\s*vcc-xfail-wasm:(.*?)\*/', src, re.S)) \
         or (X86 and re.search(r'/\*\s*vcc-xfail-x86:(.*?)\*/', src, re.S))
@@ -158,8 +168,7 @@ def main():
         st, why, xf = one(n, wd, verbose)
         if st == 'skip':
             skips += 1
-            if verbose:
-                print(f'skip  {n}: {why}', flush=True)
+            print(f'skip  {n}: {why}', flush=True)
             continue
         if st == 'test':
             st = 'FAIL'; why = 'broken test: ' + why; fails += 1

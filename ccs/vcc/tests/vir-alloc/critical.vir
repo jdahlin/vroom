@@ -1,0 +1,57 @@
+; a critical edge (b0 -> b2: b0 has two successors, b2 two predecessors) that
+; needs moves, and a conditional back edge
+; REGS: 3,2,0,0
+; SWEEP: yes
+vir 1
+target x86_64-linux
+sig %s = (int, int) -> int
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  v1:i64 = param 1.0
+  v2:i64 = mul v0, v1
+  v3:i32 = icmp.eq v0, 0
+  brif v3, b2, b1
+b1:
+  v4:i64 = add v2, v1
+  v5:i64 = mul v4, v0
+  v6:i64 = sub v5, v1
+  v7:i64 = add v6, v4
+  v8:i32 = icmp.ne v7, 0
+  brif v8, b1, b2
+b2:
+  v9:i64 = add v2, v0
+  v10:i64 = add v9, v1
+  ret v10
+}
+; ---
+; alloc @f regs 3,2,0,0
+func @f %s0 {
+b0:
+  v0:i64 = param 0.0                    ; -> r0 [ss0 later]
+  v1:i64 = param 1.0                    ; -> r1
+  v2:i64 = mul v0, v1                   ; r0, r1 -> r2 [ss1 later]
+  ; store ss0 <- r0 (v0)
+  v3:i32 = icmp.eq v0, 0                ; r0, - -> r0
+  brif v3, b2, b1                       ; r0
+b1:                                     ; loop to b1 depth 1
+  v4:i64 = add v2, v1                   ; r2, r1 -> r0
+  ; store ss1 <- r2 (v2)
+  ; reload r2 <- v0 (ss0)
+  v5:i64 = mul v4, v0                   ; r0, r2 -> r2
+  v6:i64 = sub v5, v1                   ; r2, r1 -> r2
+  v7:i64 = add v6, v4                   ; r2, r0 -> r0
+  v8:i32 = icmp.ne v7, 0                ; r0, - -> r0
+  brif v8, b1, b2                       ; r0
+b2:
+  ; reload r0 <- v2 (ss1)
+  ; reload r2 <- v0 (ss0)
+  v9:i64 = add v2, v0                   ; r0, r2 -> r0
+  v10:i64 = add v9, v1                  ; r0, r1 -> r0
+  ret v10                               ; r0
+}
+; edge b1.0 -> b1: r2 <- ss1 (v2)
+; edge b0.0 -> b2: ss1 <- r2 (v2)
+; spill slots: ss0(8): v0 ss1(8): v2
+; spills 2 reloads 3 remats 0 moves 0 swaps 0 stores 2; edges 2: moves 0 reloads 1 remats 0 stores 1 xchg 0; slots 2 callee 0
+; sweep @f: 12 configurations, 0 failed

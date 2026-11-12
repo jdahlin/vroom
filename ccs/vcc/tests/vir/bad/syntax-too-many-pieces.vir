@@ -1,0 +1,6 @@
+; a register group of five pieces
+vir 1
+target x86_64-linux
+sig %s = (int:int:int:int:int) -> int
+; ---
+bad/syntax-too-many-pieces.vir:4:27: at most 4 pieces in a group

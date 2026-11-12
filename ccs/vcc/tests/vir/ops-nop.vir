@@ -1,0 +1,27 @@
+; VERIFY: no
+; a nop, a stray block parameter and constants written as instructions: printed as they are (the verifier rejects them)
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+func @f %s {
+b0:
+  nop
+  v0:i64 = param 0.0
+  v1:i64 = bparam
+  v2:i64 = iconst 5
+  v3:i64 = add v0, v2
+  ret v3
+}
+; ---
+vir 1
+target x86_64-linux
+sig %s0 = (int) -> int
+
+func @f %s0 {
+b0:
+  nop
+  v0:i64 = param 0.0
+  v1:i64 = bparam
+  v2:i64 = add v0, 5
+  ret v2
+}

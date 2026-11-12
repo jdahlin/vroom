@@ -78,7 +78,7 @@ typedef struct vec {
 typedef struct builtin {
 	const char *name;
 	uint8_t id;
-	uint8_t constexpr_;	/* folds when its arguments do (ICE if they are) */
+	uint8_t flags;		/* bit 0: constexpr; upper bits: CC_LIB_* kind */
 	const char *sig;	/* return type then parameters; '.' variadic (see sigtype) */
 } builtin;
 
@@ -211,6 +211,18 @@ extern const basic_ty basic[TY_PTR];
 static inline bool is_int_kind(int k);
 static inline bool is_flt_kind(int k);
 VPRIV bool is_integer(cc *c, qty t);
+VPRIV bool is_bigint(cc *c, qty t);
+VPRIV uint32_t big_float_cast(cc *, uint32_t, qty);
+VPRIV uint32_t big_bitcount(cc *, int, uint32_t, uint32_t, unsigned, uint32_t);
+VPRIV bool big_conversion_exact(cc *, const cval *, qty, qty);
+VPRIV char *big_value_string(cc *, const cval *, qty);
+VPRIV uint32_t mk_big_words(cc *, const uint32_t *, qty, uint32_t);
+VPRIV uint32_t big_int_node(cc *, i128, qty, uint32_t);
+VPRIV uint32_t big_literal(cc *, const char *, size_t, unsigned, bool, uint32_t);
+VPRIV bool big_read_eval(cc *, uint32_t, cval *);
+VPRIV bool big_nonzero(cc *, const cval *);
+VPRIV uint32_t big_fold_node(cc *, uint32_t);
+
 VPRIV bool is_float(cc *c, qty t);
 VPRIV bool is_arith(cc *c, qty t);
 VPRIV bool is_ptr(cc *c, qty t);
@@ -220,6 +232,7 @@ VPRIV bool is_array(cc *c, qty t);
 VPRIV bool is_func(cc *c, qty t);
 VPRIV bool is_record(cc *c, qty t);
 VPRIV bool is_vector(cc *c, qty t);
+VPRIV bool is_bool_vector(cc *c, qty t);
 VPRIV bool is_complex(cc *c, qty t);
 VPRIV bool is_ilagg(cc *c, qty t);
 VPRIV qty canon(cc *c, qty t);
@@ -354,6 +367,10 @@ VPRIV void i128s_(char *b, size_t n, i128 v);
 VPRIV const field *node_field(cc *c, const node *x);
 VPRIV int clz128(u128 x, unsigned bits);
 VPRIV bool eval(cc *c, uint32_t n, cval *v);
+VPRIV uint32_t bitcast_expr(cc *c, uint32_t loc);
+VPRIV bool bitcast_value(cc *c, uint32_t n, cval *v);
+VPRIV bool bitcast_constant(cc *c, uint32_t n);
+VPRIV bool vector_constant(cc *c, uint32_t n);
 VPRIV bool is_npc(cc *c, uint32_t n);
 VPRIV bool const_int(cc *c, uint32_t n, i128 *out);
 /* conv.c */
@@ -398,6 +415,12 @@ VPRIV uint32_t neg(cc *c, uint32_t n);
 VPRIV void bad_operands(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc);
 VPRIV const char *punct_spell(int k);
 VPRIV uint32_t cplx_binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc);
+VPRIV uint32_t atomic_lock_free_runtime(cc *c, vec *args, uint32_t loc);
+VPRIV bool atomic_wide(cc *c, qty t);
+VPRIV uint32_t atomic_load_expr(cc *c, uint32_t n);
+VPRIV uint32_t atomic_assign_expr(cc *c, uint32_t lhs, uint32_t rhs, int op, bool post, uint32_t loc);
+VPRIV uint32_t atomic_builtin_expr(cc *c, int id, qty t, const vec *input, uint32_t loc);
+VPRIV uint32_t cplx_incdec(cc *c, uint32_t n, int op, uint32_t loc);
 VPRIV uint32_t cplx_unary(cc *c, int op, uint32_t n, uint32_t loc);
 /* expr.c */
 VPRIV bool is_cmp(int op);
@@ -417,6 +440,8 @@ VPRIV uint32_t args_list(cc *c, vec *args);
 VPRIV uint32_t mk_builtin(cc *c, int id, qty ty, uint32_t loc, const vec *args);
 VPRIV uint32_t vector_builtin(cc *c, bool shuffle, uint32_t loc);
 VPRIV uint32_t offsetof_expr(cc *c, uint32_t loc);
+VPRIV uint32_t fast_math_call(cc *c, const char *name, size_t len, qty ft, const vec *args, uint32_t loc);
+VPRIV uint32_t fp_sign_call(cc *c, const char *name, size_t len, qty ft, const vec *args, uint32_t loc);
 VPRIV uint32_t narrow_math_call(cc *c, const char *name, size_t len, uint32_t arg, uint32_t loc);
 VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc);
 /* expr.c */
@@ -425,6 +450,7 @@ VPRIV uint32_t primary(cc *c);
 VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n);
 static inline uint32_t postfix(cc *c, uint32_t n);
 /* exprop.c */
+VPRIV uint32_t capture_vla_bounds(cc *c, qty ty, uint32_t first, uint32_t value, uint32_t loc);
 VPRIV uint32_t cast_expr(cc *c);
 VPRIV uint32_t cond_expr(cc *c);
 VPRIV uint32_t assign_expr(cc *c);
@@ -516,7 +542,7 @@ VPRIV void translation_unit(cc *c);
 VPRIV const char *tyname(cc *c, qty t);
 VPRIV void layout_checks(cc *c);
 
-static inline bool is_int_kind(int k) { return k >= TY_BOOL && k <= TY_UINT128; }
+static inline bool is_int_kind(int k) { return (k >= TY_BOOL && k <= TY_UINT128) || k == TY_BITINT || k == TY_UBITINT; }
 static inline bool is_flt_kind(int k) { return k >= TY_BFLOAT16 && k <= TY_FLOAT128; }
 /* long double as binary128 (aarch64 Linux; Apple's is double) or x87 extended (x86-64), in
    binary128's layout (lib/f128.h) */
@@ -684,6 +710,8 @@ static inline qty ty_unatomic(cc *c, qty t)
 
 static inline uint32_t convert(cc *c, uint32_t n, qty to)
 {
+	if ((N(n)->flags & NF_LVALUE) && (T(c, N(n)->ty)->flags & TF_ATOMIC) && atomic_wide(c, N(n)->ty))
+		n = atomic_load_expr(c, n);
 	to = QUNQ(to);
 	if (QI(canon(c, N(n)->ty)) == QI(canon(c, to)) && !bitfield_of(c, n))
 		return n;

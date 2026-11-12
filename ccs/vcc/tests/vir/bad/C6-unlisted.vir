@@ -1,0 +1,16 @@
+; an ibr that does not list a block whose address is taken
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  v1:ptr = select v0, &b1, &b2
+  ibr v1 [b1]
+b1 addr:
+  br b2
+b2 addr:
+  ret v0
+}
+; ---
+@f b0.2: C6: ibr does not list b2, whose address is taken

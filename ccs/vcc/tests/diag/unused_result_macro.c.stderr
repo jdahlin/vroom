@@ -1,0 +1,4 @@
+unused_result_macro.c:5:37: warning: ignoring return value of function declared with 'warn_unused_result' attribute [-Wunused-result]
+    5 | void h(void) { ({ do { } while (0); f(2); }); }
+      |                                     ^~~~
+1 warning generated.

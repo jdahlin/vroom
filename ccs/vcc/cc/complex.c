@@ -56,7 +56,7 @@ static bool cplx_pure(cc *c, uint32_t n, int d)
 		return !(QQ(x->ty) & Q_VOLATILE);
 	case N_MEMBER: case N_CAST: case N_UNARY: case N_DEREF:
 		return !(QQ(x->ty) & Q_VOLATILE) && cplx_pure(c, x->a, d + 1);
-	case N_BINARY: case N_INDEX: case N_CPLX:
+	case N_BINARY: case N_INDEX: case N_CPLX: case N_LOGAND: case N_LOGOR: case N_COMMA:
 		return cplx_pure(c, x->a, d + 1) && cplx_pure(c, x->b, d + 1);
 	default:
 		return false;
@@ -70,6 +70,15 @@ VPRIV uint32_t cplx_reuse(cc *c, uint32_t n, uint32_t *pre)
 	uint32_t s, v;
 
 	*pre = 0;
+	/* A constant conditional must not acquire an automatic temporary merely
+	   because its selected complex value will be used twice. */
+	if (N(n)->op == N_COND && cplx_pure(c, N(n)->a, 0)) {
+		cval cv;
+		if (cc_eval(c, N(n)->a, &cv) && (cv.kind == CV_INT || cv.kind == CV_FLT)) {
+			bool yes = cv.kind == CV_INT ? cv.i != 0 : cv.ld ? q_nz(cv.q) : cv.f != 0;
+			return cplx_reuse(c, yes ? (N(n)->b ? N(n)->b : N(n)->a) : N(n)->c, pre);
+		}
+	}
 	if (cplx_pure(c, n, 0))
 		return n;
 	s = sym_new(c, S_VAR, 0, t, N(n)->loc);
@@ -388,4 +397,111 @@ VPRIV uint32_t cplx_unary(cc *c, int op, uint32_t n, uint32_t loc)
 		return n;
 	cplx_parts(c, n, &re, &im, &pre);
 	return with_pre(c, pre, mk_cplx(c, t, op == T_MINUS ? neg(c, re) : re, neg(c, im), loc));
+}
+
+/* Atomically update both components with a compare-exchange retry loop.
+ * The expected value is refreshed by each failed CAS, including the imaginary
+ * payload; only the successful old/new snapshot becomes the expression value. */
+static uint32_t cplx_atomic_incdec(cc *c, uint32_t n, int op, uint32_t loc)
+{
+	qty t = QUNQ(ty_unatomic(c, N(n)->ty)), et = cplx_elem(c, t);
+	bool inc = op == N_PREINC || op == N_POSTINC, post = op == N_POSTINC || op == N_POSTDEC;
+	uint32_t vars[2], pointers[2], pre;
+	uint32_t address = mk(c, N_ADDR, ty_ptr(c, N(n)->ty), loc);
+	N(address)->a = n;
+	address = cplx_reuse(c, address, &pre);
+	for (int i = 0; i < 2; i++) {
+		uint32_t sym = sym_new(c, S_VAR, 0, t, loc);
+		c->syms[sym].sc = SC_AUTO;
+		vars[i] = mk(c, N_VAR, t, loc);
+		N(vars[i])->a = sym;
+		N(vars[i])->flags = NF_LVALUE;
+		pointers[i] = mk(c, N_ADDR, ty_ptr(c, t), loc);
+		N(pointers[i])->a = vars[i];
+	}
+	vec args, body;
+	vinit(&args);
+	vinit(&body);
+	if (pre) {
+		vpush(c, &body, mk2(c, N_DECL, prim(TY_VOID), loc, N(N(pre)->a)->a, 0));
+		vpush(c, &body, mkstmt(c, N_EXPR, loc, pre, 0, 0));
+	}
+	for (int i = 0; i < 2; i++)
+		vpush(c, &body, mk2(c, N_DECL, prim(TY_VOID), loc, N(vars[i])->a, 0));
+	vpush(c, &args, address);
+	vpush(c, &args, pointers[0]);
+	vpush(c, &args, mk_int(c, 5, prim(TY_INT), loc));
+	uint32_t load = mk_builtin(c, BI_ATOMIC_LOAD, prim(TY_VOID), loc, &args);
+	vpush(c, &body, mkstmt(c, N_EXPR, loc, load, 0, 0));
+	uint32_t re = binop(c, inc ? T_PLUS : T_MINUS, rvalue(c, cplx_part(c, vars[0], 0)), mk_int(c, 1, prim(TY_INT), loc), loc);
+	uint32_t desired = mk_cplx(c, t, convert(c, re, et), rvalue(c, cplx_part(c, vars[0], 1)), loc);
+	uint32_t update = assign(c, 0, vars[1], desired, loc);
+	args.n = 0;
+	vpush(c, &args, address);
+	vpush(c, &args, pointers[0]);
+	vpush(c, &args, pointers[1]);
+	vpush(c, &args, mk_int(c, 0, prim(TY_INT), loc));
+	vpush(c, &args, mk_int(c, 5, prim(TY_INT), loc));
+	vpush(c, &args, mk_int(c, 5, prim(TY_INT), loc));
+	uint32_t cas = mk_builtin(c, BI_ATOMIC_CMPXCHG, prim(TY_BOOL), loc, &args);
+	uint32_t retry = mk_bin(c, T_EQUALEQUAL, prim(TY_INT), cas, mk_int(c, 0, prim(TY_INT), loc), loc);
+	vpush(c, &body, mkstmt(c, N_DO, loc, retry, mkstmt(c, N_EXPR, loc, update, 0, 0), 0));
+	vpush(c, &body, mkstmt(c, N_EXPR, loc, rvalue(c, vars[post ? 0 : 1]), 0, 0));
+	uint32_t block = mkstmt(c, N_BLOCK, loc, 0, vfreeze(c, &body), body.n);
+	uint32_t out = mk(c, N_STMTEXPR, t, loc);
+	N(out)->a = block;
+	N(out)->aux = (uint16_t)op;
+	return out;
+}
+
+/* Increment/decrement only the real component, retaining the original
+ * imaginary representation and evaluating the operand's location once. */
+VPRIV uint32_t cplx_incdec(cc *c, uint32_t n, int op, uint32_t loc)
+{
+	bool inc = op == N_PREINC || op == N_POSTINC;
+	bool post = op == N_POSTINC || op == N_POSTDEC;
+	qty t = QUNQ(ty_unatomic(c, N(n)->ty)), et = cplx_elem(c, t);
+	uint32_t pre = 0, save, tmp, value, put;
+	if (!c->o->c2y) {
+		static const char *const g[] = { "pedantic", NULL };
+		EXT_WARN_MS(c, inc ? "++" : "--", "c2y-extensions", g, loc,
+		            "'%s' on an object of complex type is a C2y extension", inc ? "++" : "--");
+	}
+	if (T(c, N(n)->ty)->flags & TF_ATOMIC) {
+		if (atomic_wide(c, N(n)->ty))
+			return atomic_assign_expr(c, n, 0, inc ? T_PLUS : T_MINUS, post, loc);
+		if (ty_size(c, t) <= 8)
+			return cplx_atomic_incdec(c, n, op, loc);
+		cc_error(c, loc, "atomic complex increment and decrement are not supported yet");
+		return err_node(c, loc);
+	}
+	if (N(n)->op != N_VAR) {
+		/* This is an internal address, also valid for a register aggregate. */
+		uint32_t address = mk(c, N_ADDR, ty_ptr(c, N(n)->ty), loc);
+		N(address)->a = n;
+		address = cplx_reuse(c, address, &pre);
+		n = deref(c, address, loc);
+	}
+	uint32_t sym = sym_new(c, S_VAR, 0, t, loc);
+	c->syms[sym].sc = SC_AUTO;
+	tmp = mk(c, N_VAR, t, loc);
+	N(tmp)->a = sym;
+	N(tmp)->flags = NF_LVALUE;
+	save = mk2(c, N_ASSIGN, t, loc, tmp, rvalue(c, n));
+	value = binop(c, inc ? T_PLUS : T_MINUS, rvalue(c, cplx_part(c, tmp, 0)), mk_int(c, 1, prim(TY_INT), loc), loc);
+	value = convert(c, value, et);
+	/* Materialize the arithmetic once: storing the updated real component
+	 * and producing a prefix result must not repeat a trapping FP operation. */
+	uint32_t desired_sym = sym_new(c, S_VAR, 0, et, loc);
+	c->syms[desired_sym].sc = SC_AUTO;
+	uint32_t desired = mk(c, N_VAR, et, loc);
+	N(desired)->a = desired_sym;
+	N(desired)->flags = NF_LVALUE;
+	uint32_t compute = mk2(c, N_ASSIGN, et, loc, desired, value);
+	value = rvalue(c, desired);
+	put = assign(c, 0, cplx_part(c, n, 0), value, loc);
+	uint32_t result = post ? rvalue(c, tmp) : mk_cplx(c, t, value, rvalue(c, cplx_part(c, tmp, 1)), loc);
+	uint32_t out = with_pre(c, pre, with_pre(c, save, with_pre(c, compute, with_pre(c, put, result))));
+	N(out)->aux = (uint16_t)op; /* retain the source operation for unused-value diagnostics */
+	return out;
 }

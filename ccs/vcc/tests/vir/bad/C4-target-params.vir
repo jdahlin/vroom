@@ -1,0 +1,15 @@
+; a brif target with parameters
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  brif v0, b1, b2
+b1(v1:i64):
+  ret v1
+b2:
+  ret v0
+}
+; ---
+@f b0.1: C4: brif targets b1, which has parameters

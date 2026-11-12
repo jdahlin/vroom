@@ -19,6 +19,7 @@ typedef struct irun {
 typedef struct ilist {
 	qty ty;
 	bool array, isunion, unknown;
+	bool shared;		/* range elements share this list until a later write */
 	uint64_t n;		/* fields, or array length (unknown: grows) */
 	uint64_t max;		/* array: highest index initialized + 1 */
 	uint32_t *slot;		/* struct/union: value per field */
@@ -57,6 +58,29 @@ static ilist *il_new(cc *c, qty ty)
 	return l;
 }
 
+/* Copy only the mutable level being entered. Descendants remain shared until
+   a designator reaches them, so a large range does not duplicate its tree. */
+static ilist *il_copy(cc *c, const ilist *from)
+{
+	ilist *s = halloc(c, sizeof(*s));
+	*s = *from;
+	s->shared = false;
+	if (s->array) {
+		s->runs = halloc(c, s->caprun * sizeof(irun));
+		if (s->nrun) memcpy(s->runs, from->runs, s->nrun * sizeof(irun));
+		for (uint32_t i = 0; i < s->nrun; i++)
+			if (s->runs[i].sub) s->runs[i].sub->shared = true;
+	} else {
+		s->slot = halloc(c, (s->n + 1) * sizeof(uint32_t));
+		s->sub = halloc(c, (s->n + 1) * sizeof(ilist *));
+		memcpy(s->slot, from->slot, (s->n + 1) * sizeof(uint32_t));
+		memcpy(s->sub, from->sub, (s->n + 1) * sizeof(ilist *));
+		for (uint64_t i = 0; i < s->n; i++)
+			if (s->sub[i]) s->sub[i]->shared = true;
+	}
+	return s;
+}
+
 static qty il_elem_type(cc *c, const ilist *l, uint64_t i)
 {
 	if (l->array)
@@ -86,6 +110,7 @@ static void il_run(cc *c, ilist *l, uint64_t lo, uint64_t hi, uint32_t node, ili
 				l->runs[k++] = l->runs[j];
 		l->nrun = k;
 	}
+	if (sub && lo != hi) sub->shared = true;
 	l->runs[l->nrun++] = (irun){ (uint32_t)lo, (uint32_t)hi, node, sub };
 	if (hi + 1 > l->max)
 		l->max = hi + 1;
@@ -197,14 +222,24 @@ static ilist *il_child(cc *c, ilist *l, uint64_t i)
 	if (l->array) {
 		for (uint32_t k = i < l->max ? l->nrun : 0; k-- > 0;)
 			if (l->runs[k].lo <= i && i <= l->runs[k].hi) {
-				if (l->runs[k].sub && l->runs[k].lo == i && l->runs[k].hi == i)
-					return l->runs[k].sub;
+				if (l->runs[k].sub) {
+					ilist *s = l->runs[k].sub;
+					if (!s->shared) return s;
+					s = il_copy(c, s);
+					il_set(c, l, i, 0, s);
+					return s;
+				}
 				if (!l->runs[k].sub)
 					old = l->runs[k].node;
 				break;
 			}
 	} else if (l->sub[i] && (!l->isunion || l->ufield == i)) {
-		return l->sub[i];
+		ilist *s = l->sub[i];
+		if (s->shared) {
+			s = il_copy(c, s);
+			il_set(c, l, i, 0, s);
+		}
+		return s;
 	} else if (!l->isunion || (l->uset && l->ufield == i)) {
 		old = l->slot[i];
 	} else if (l->ubase) {	/* the same bytes through the member the designator picks */
@@ -386,11 +421,12 @@ static void il_elem(cc *c, ilist *l, uint64_t pos, uint32_t v, bool st)
 	if (!v)
 		v = assign_expr(c);
 	if ((is_ilagg(c, et)) && !string_initializes(c, et, v) &&
-	    !((is_record(c, et) || is_vector(c, et)) && compatible(c, N(v)->ty, et))) {
-		ilist *s = il_new(c, et);
+	    !((is_record(c, et) || is_vector(c, et)) && compatible(c, ty_unatomic(c, N(v)->ty), ty_unatomic(c, et)))) {
+		/* Brace elision writes the first subobjects; unlike an explicit
+		 * braced initializer it does not discard earlier sibling values. */
+		ilist *s = il_child(c, l, pos);
 
 		il_fill(c, s, 0, false, v, st);
-		il_set(c, l, pos, 0, s);
 		return;
 	}
 	if (is_array(c, et)) {
@@ -402,7 +438,7 @@ static void il_elem(cc *c, ilist *l, uint64_t pos, uint32_t v, bool st)
 		bitfield_const(c, &c->tags[T(c, l->ty)->aux].f[pos], decay(c, v), 0);
 	if (unlikely(c->constexpr_init))
 		constexpr_conversion(c, decay(c, v), et);
-	il_set(c, l, pos, is_record(c, et) && !is_complex(c, et) ? v : convert(c, decay(c, v), et), NULL);
+	il_set(c, l, pos, is_record(c, et) && !is_complex(c, et) ? decay(c, v) : convert(c, decay(c, v), et), NULL);
 }
 
 /* a designation starts here: ".f", "[i]" or the old GNU "f:" */
@@ -428,7 +464,7 @@ static void il_continue(cc *c, ilist *l, uint64_t pos, bool st)
 }
 
 /* a designation; returns the position after the top-level designated element */
-static uint64_t il_designation(cc *c, ilist *l, bool st)
+static uint64_t il_designation_path(cc *c, ilist *l, bool st, vec *cursor)
 {
 	uint64_t lo, hi;
 	uint32_t path[FM_DEPTH];
@@ -480,6 +516,13 @@ static uint64_t il_designation(cc *c, ilist *l, bool st)
 		}
 		lo = (uint64_t)a, hi = (uint64_t)b;
 	}
+	/* Remember the final selected element at every level. Undesignated
+	 * elements resume there after the entire range has been installed. */
+	if (depth > 1) {
+		for (int i = 0; i < depth; i++) vpush(c, cursor, path[i]);
+	} else {
+		vpush(c, cursor, (uint32_t)hi);
+	}
 	/* path through anonymous members acts as nested designators */
 	if (depth > 1) {
 		ilist *s = l;
@@ -491,23 +534,19 @@ static uint64_t il_designation(cc *c, ilist *l, bool st)
 
 			if (is(c, T_PERIOD) || is(c, T_LSQUARE)) {
 				ilist *t = il_child(c, s, last);
-				uint64_t np = il_designation(c, t, st);
-
-				il_continue(c, t, np, st);
+				il_designation_path(c, t, st, cursor);
 			} else {
 				if (!accept(c, T_EQUAL))
 					accept(c, T_COLON);
 				il_elem(c, s, last, 0, st);
-				il_continue(c, s, last + 1, st);
 			}
 		}
 		return lo + 1;
 	}
 	if (is(c, T_PERIOD) || is(c, T_LSQUARE)) {
 		ilist *t = il_child(c, l, lo);
-		uint64_t np = il_designation(c, t, st);
-
-		il_continue(c, t, np, st);
+		il_designation_path(c, t, st, cursor);
+		if (lo != hi) t->shared = true;
 		for (uint64_t i = lo + 1; i <= hi; i++)
 			il_set(c, l, i, 0, t);	/* range of the same sub-object */
 		return hi + 1;
@@ -538,7 +577,7 @@ static uint64_t il_designation(cc *c, ilist *l, bool st)
 		} else {
 			v = assign_expr(c);
 			if ((is_ilagg(c, et)) && !string_initializes(c, et, v) &&
-			    !((is_record(c, et) || is_vector(c, et)) && compatible(c, N(v)->ty, et))) {
+			    !((is_record(c, et) || is_vector(c, et)) && compatible(c, ty_unatomic(c, N(v)->ty), ty_unatomic(c, et)))) {
 				ilist *s = il_new(c, et);
 
 				il_fill(c, s, 0, false, v, st);
@@ -549,11 +588,29 @@ static uint64_t il_designation(cc *c, ilist *l, bool st)
 						constexpr_conversion(c, decay(c, v), et);
 					v = convert(c, decay(c, v), et);
 				}
-				il_run(c, l, lo, hi, v, NULL);
+				il_run(c, l, lo, hi, (T(c, N(v)->ty)->flags & TF_ATOMIC) ? decay(c, v) : v, NULL);
 			}
 		}
 	}
 	return hi + 1;
+}
+
+/* Continue inside only the last element selected by a designator chain.
+   Copy shared ancestors before writing any positional continuation. */
+static uint64_t il_designation(cc *c, ilist *l, bool st)
+{
+	vec cursor;
+	vinit(&cursor);
+	uint64_t pos = il_designation_path(c, l, st, &cursor);
+	if (cursor.n > 1) {
+		ilist *small[16], **parents = cursor.n <= 16 ? small : halloc(c, cursor.n * sizeof(*parents));
+		parents[0] = l;
+		for (uint32_t i = 1; i < cursor.n; i++)
+			parents[i] = il_child(c, parents[i - 1], cursor.v[i - 1]);
+		for (uint32_t i = cursor.n; --i > 0;)
+			il_continue(c, parents[i], (uint64_t)cursor.v[i] + 1, st);
+	}
+	return pos;
 }
 
 /* clang's -Wexcess-initializers, once per list; the elements are dropped */
@@ -809,7 +866,7 @@ VPRIV uint32_t initializer(cc *c, qty *ty, bool st)
 		if (is_record(c, t) && !is_complex(c, t)) {
 			if (!compatible(c, ty_unatomic(c, N(v)->ty), ty_unatomic(c, t)))
 				cc_error(c, loc, "initializing with an expression of incompatible type");
-			return v;
+			return decay(c, v);
 		}
 		return convert_as(c, decay(c, v), t, c->cv_what == CX_INIT ? CX_INIT : 0, c->cv_loc);
 	}
@@ -858,7 +915,7 @@ VPRIV bool static_init_ok(cc *c, qty ty, uint32_t init, uint32_t *bad)
 			if ((x->aux == 2 && i != x->a) || !v[i])
 				continue;
 			if (f->bitfield) {
-				if (!eval(c, v[i], &cv) || cv.kind != CV_INT) {
+				if (!eval(c, v[i], &cv) || (cv.kind != CV_INT && cv.kind != CV_BIGINT)) {
 					*bad = v[i];
 					return false;
 				}
@@ -868,6 +925,18 @@ VPRIV bool static_init_ok(cc *c, qty ty, uint32_t init, uint32_t *bad)
 				return false;
 		}
 		return true;
+	}
+	if (x->op == N_COMMA) {
+		if (static_init_ok(c, N(x->a)->ty, x->a, bad) && static_init_ok(c, ty, x->b, bad))
+			return true;
+		*bad = init;
+		return false;
+	}
+	{
+		uint32_t selected;
+
+		if (cc_init_subobject(c, init, &selected))
+			return static_init_ok(c, ty, selected, bad);
 	}
 	if (x->op == N_STR && is_array(c, ty))
 		return true;
@@ -890,7 +959,7 @@ VPRIV bool static_init_ok(cc *c, qty ty, uint32_t init, uint32_t *bad)
 		*bad = init;
 		return false;
 	}
-	if (!eval(c, init, &cv) || (cv.kind != CV_INT && cv.kind != CV_FLT && cv.kind != CV_ADDR)) {
+	if (!eval(c, init, &cv) || (cv.kind != CV_INT && cv.kind != CV_BIGINT && cv.kind != CV_FLT && cv.kind != CV_ADDR)) {
 		*bad = init;
 		return false;
 	}

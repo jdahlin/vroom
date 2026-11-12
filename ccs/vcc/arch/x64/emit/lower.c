@@ -38,6 +38,16 @@ VPRIV rec *x64_put(ecx *e, int op)
 	xst *X = e->x64;
 	rec *r;
 
+	if (!e->reach && op != X_LABEL) {
+		/* unreachable code is not emitted (as arm64): it may name a string or a symbol
+		   nobody claimed (note_ref skips them) */
+		static _Thread_local rec sink;
+
+		memset(&sink, 0, sizeof sink);
+		sink.op = (uint8_t)op;
+		sink.r[0] = sink.r[1] = sink.r[2] = sink.r[3] = XNOREG;
+		return &sink;
+	}
 	if (unlikely(X->nin == X->capin))
 		efatal(e, e->curloc, "function too large");
 	r = &X->in[X->nin++];
@@ -135,6 +145,18 @@ VPRIV int x64_treg(ecx *e)
 			X->live |= 1u << x64_order[k];
 			return x64_order[k];
 		}
+	if (X->asmcs) {
+		/* an asm that clobbers every temporary (call_on_stack): its operands in callee-saved
+		   registers, as clang (the prologue saves them) */
+		static const int cs[] = { RBX, R12, R13, R14, R15 };
+
+		for (int k = 0; k < 5; k++)
+			if (!(X->live & (1u << cs[k]))) {
+				X->live |= 1u << cs[k];
+				x64_csused(e, cs[k]);
+				return cs[k];
+			}
+	}
 	efatal(e, e->curloc, "x86-64: expression too complex (out of registers)");
 }
 
@@ -150,10 +172,23 @@ VPRIV void x64_tkeep(ecx *e, int r)
 		e->x64->live |= 1u << r;
 }
 
+VPRIV bool x64_nosimd(ecx *e)
+{
+	uint32_t fn = e->wk->inl ? e->wk->inl->fn : e->wk->fsym;
+	return !x86_feature_has(cc_x86_features(e->c, fn), X86_FEATURE_SSE2);
+}
+
+VPRIV void x64_nofp(ecx *e)
+{
+	if (x64_nosimd(e))
+		efatal(e, e->curloc, "x86-64: floating point with -mgeneral-regs-only or -mno-sse is not supported (PLAN-x86.md X3)");
+}
+
 VPRIV int x64_ftreg(ecx *e)
 {
 	xst *X = e->x64;
 
+	x64_nofp(e);
 	for (int r = XMM8; r < XMM15; r++)
 		if (!(X->live & (1u << r))) {
 			X->live |= 1u << r;
@@ -190,7 +225,14 @@ VPRIV int x64_toreg(ecx *e, val *v, int size)
 
 VPRIV void x64_load(ecx *e, int rd, const lval *l, int size, bool sgn)
 {
-	if (size == 2 && IS_XMM(rd)) {
+	if (l->k == L_VAR)
+		efatal(e, e->curloc, "internal error: x86-64 load from a virtual variable");
+	if (l->k == L_VREG) {
+		if (size < 8)
+			x64_op3(e, X_EXT, size, rd, l->r, XNOREG)->cond = sgn;
+		else
+			x64_mov(e, rd, l->r);
+	} else if (size == 2 && IS_XMM(rd)) {
 		x64_mem(e, X_LD, 2, R11, l, false);
 		x64_op3(e, X_MOV, 4, rd, R11, XNOREG);
 	} else
@@ -199,7 +241,11 @@ VPRIV void x64_load(ecx *e, int rd, const lval *l, int size, bool sgn)
 
 VPRIV void x64_store(ecx *e, int rs, const lval *l, int size)
 {
-	if (size == 2 && IS_XMM(rs)) {
+	if (l->k == L_VAR)
+		efatal(e, e->curloc, "internal error: x86-64 store to a virtual variable");
+	if (l->k == L_VREG) {
+		x64_mov(e, l->r, rs);
+	} else if (size == 2 && IS_XMM(rs)) {
 		x64_op3(e, X_MOV, 4, R11, rs, XNOREG);
 		x64_mem(e, X_ST, 2, R11, l, false);
 	} else
@@ -208,6 +254,10 @@ VPRIV void x64_store(ecx *e, int rs, const lval *l, int size)
 
 VPRIV int x64_laddr(ecx *e, const lval *l)
 {
+	if (l->k == L_VAR)
+		efatal(e, e->curloc, "internal error: address of a virtual variable");
+	if (l->k == L_VREG)
+		efatal(e, e->curloc, "internal error: address of a register local");
 	int r = l->k == L_REG ? l->r : x64_treg(e);
 
 	if (l->k != L_REG || l->off)
@@ -308,6 +358,8 @@ VPRIV void x64_ext(ecx *e, int r, int from, bool sgn)
 	rec *i;
 
 	if (from >= 8)
+		return;
+	if (from == 4 && !sgn && e->E->o->opt >= 1 && !e->E->noopt && x64_last_u32(e, r))
 		return;
 	i = x64_op3(e, X_EXT, from, r, r, XNOREG);
 	i->cond = sgn;
@@ -416,6 +468,8 @@ VPRIV val x64_bin(ecx *e, int op, int size, bool sgn, val a, val b)
 		a = b, b = t;
 	}
 	ra = x64_toreg(e, &a, size);
+	if (op == T_STAR && b.k == V_CONST && x64_mulconst(e, size, ra, b.i))
+		return a;
 	if (x64_imm32(b)) {
 		rec *i = x64_op3(e, xopi, size, ra, ra, XNOREG);
 
@@ -515,59 +569,29 @@ VPRIV void x64_brz(ecx *e, val a, int size, bool nz, uint32_t lbl)
 
 /* ---------------- control ---------------- */
 
-VPRIV void x64_label(ecx *e, uint32_t l) { x64_put(e, X_LABEL)->label = l; }
+/* -g: a line-table row at the next record (arm64's dbg_row, on x86's records) */
+VPRIV void x64_dbgrow(ecx *e, uint32_t loc)
+{
+	uint32_t file, line, col, nin = e->x64->nin;
+
+	if (!dbg_where(e, loc, &file, &line, &col))
+		return;
+	if (e->ndl && e->dl[e->ndl - 1].k >= nin)
+		e->ndl--;	/* nothing emitted for the previous one */
+	if (e->ndl == e->dlcap) {
+		e->dlcap = e->dlcap ? 2 * e->dlcap : 256;
+		e->dl = realloc(e->dl, e->dlcap * sizeof *e->dl);
+	}
+	e->dl[e->ndl++] = (struct dbgrow){ nin, file, line, col };
+}
+
+VPRIV void x64_label(ecx *e, uint32_t l)
+{
+	e->reach = true;
+	x64_put(e, X_LABEL)->label = l;
+	wk_ael_clear(e, UINT32_MAX);	/* (other edges come in: element values unknown) */	/* (the walker skips label-free statements after a jump) */
+}
 VPRIV void x64_jump(ecx *e, uint32_t l) { x64_put(e, X_JMP)->label = l; }
-/* buf: rbp, the resume label, rsp (as clang); 0 now, 1 at the label */
-VPRIV val x64_setjmp(ecx *e, int rb)
-{
-	uint32_t resume = wk_newlabel(e), done = wk_newlabel(e);
-	lval b0 = { .k = L_REG, .r = (uint8_t)rb }, b1 = b0, b2 = b0;
-	rec *i;
-	int r;
-	uint32_t saved = e->x64->live & (X_TEMPS | X_FTEMPS) & ~(1u << rb);
-	int64_t slots[32] = {0};
-
-	/* A nonlocal return also clobbers temporaries live around the call. */
-	for (int q = 0; q < 32; q++) if (saved & (1u << q)) {
-		int size = IS_XMM(q) ? 16 : 8;
-		slots[q] = wk_slot(e, size, size);
-		lval slot = { .k = L_FRAME, .off = slots[q] };
-		x64_mem(e, X_ST, size, q, &slot, false);
-	}
-
-	b1.off = 8, b2.off = 16;
-	x64_mem(e, X_ST, 8, RBP, &b0, false);
-	i = x64_put(e, X_LEAL);
-	i->r[0] = R11;
-	i->label = resume;
-	x64_mem(e, X_ST, 8, R11, &b1, false);
-	x64_mem(e, X_ST, 8, RSP, &b2, false);
-	x64_tfree(e, rb);
-	r = x64_treg(e);
-	x64_movi(e, r, 0);
-	x64_jump(e, done);
-	x64_label(e, resume);
-	x64_movi(e, r, 1);
-	x64_label(e, done);
-	for (int q = 0; q < 32; q++) if (saved & (1u << q)) {
-		lval slot = { .k = L_FRAME, .off = slots[q] };
-		x64_mem(e, X_LD, IS_XMM(q) ? 16 : 8, q, &slot, false);
-	}
-	return (val){ .k = V_REG, .r = (uint8_t)r };
-}
-
-VPRIV void x64_longjmp(ecx *e, int rb)
-{
-	lval b0 = { .k = L_REG, .r = (uint8_t)rb }, b1 = b0, b2 = b0;
-
-	b1.off = 8, b2.off = 16;
-	x64_mem(e, X_LD, 8, R11, &b1, false);
-	x64_mem(e, X_LD, 8, RSP, &b2, false);
-	x64_mem(e, X_LD, 8, RBP, &b0, false);
-	x64_op3(e, X_JMPR, 8, XNOREG, R11, XNOREG);
-	x64_tfree(e, rb);
-}
-
 VPRIV void x64_jumpr(ecx *e, int r) { x64_op3(e, X_JMPR, 8, XNOREG, r, XNOREG); x64_tfree(e, r); }
 VPRIV void x64_named(ecx *e, uint32_t ref) { x64_put(e, X_NAMED)->ref = ref; }
 
@@ -581,20 +605,63 @@ VPRIV void x64_begin(ecx *e, uint32_t s)
 	X->nin = 0;
 	X->live = 0;
 	X->pushes = 0;
+	e->discarded_scalar = false;
+	memset(X->csslot, 0, sizeof X->csslot);
+	e->ndl = 0;
+	e->raw.n = 0;
+	e->asmk = 0;
+}
+
+typedef struct x64_compact_debug {
+	ecx *e;
+	uint32_t cursor;
+} x64_compact_debug;
+
+static void x64_compact_remap(void *ctx, uint32_t old, uint32_t next)
+{
+	x64_compact_debug *d = ctx;
+
+	dbg_remap(d->e, &d->cursor, old, next);
 }
 
 VPRIV void x64_finish(ecx *e, uint32_t s)
 {
+	static const em_rec_layout layout = {
+		sizeof(rec), offsetof(rec, op), offsetof(rec, label), X_JMP, X_LABEL,
+	};
 	tbuf *b = &e->out;
 	size_t start;
+	x64_compact_debug d = { e, 0 };
 
 	if (e->x64->live)
 		efatal(e, e->curloc, "internal error: x86-64 temporaries left live (%#x)", e->x64->live);
+	if (e->E->o->opt >= 1 && !e->E->noopt)
+		e->x64->nin = em_rec_unreachable(e->x64->in, e->x64->nin, sizeof(rec), offsetof(rec, op),
+						x64_flow_table(), X_NOPS, e->ndl ? x64_compact_remap : NULL, &d);
+	d.cursor = 0;
+	if (e->E->o->opt >= 1)
+		e->x64->nin = em_rec_fallthrough(e->x64->in, e->x64->nin, &layout,
+					       e->ndl ? x64_compact_remap : NULL, &d);
+	if (e->E->o->opt >= 1 && !e->E->noopt)
+		x64_dead(e);
 	x64_twoaddr(e);
 	b->n = (b->n + 7) & ~(size_t)7;
 	start = b->n;
 	sym_header(e, b, s, true, "\t.text\n", 16);
 	x64_print(e, b, s);
+	if (e->E->o->pfe_n) {
+		/* the patchable entry's address (the M nops before it, else the entry itself) */
+		tb_s(b, "\t.pushsection\t__patchable_function_entries,\"awo\",@progbits,");
+		sym_name(e->c, b, s);
+		tb_s(b, "\n\t.p2align\t3\n\t.quad\t");
+		if (e->E->o->pfe_m) {
+			tb_s(b, ".Lpfe");
+			tb_u(b, s);
+		} else {
+			sym_name(e->c, b, s);
+		}
+		tb_s(b, "\n\t.popsection\n");
+	}
 	{
 		const attrs *a = sym_attrs(e->c, s);
 
@@ -604,6 +671,7 @@ VPRIV void x64_finish(ecx *e, uint32_t s)
 			ctor_entry(e->c, b, s, true);
 	}
 	e->E->nfn++;
+	em_switch_values_emit(e);
 	out_chunk(e, (uint64_t)s << 1, start);
 }
 
@@ -885,4 +953,81 @@ VPRIV val x64_fbits(ecx *e, val v, int size)
 	if (size == 2) x64_op3(e, X_ANDI, 4, r, r, XNOREG)->imm = 0xffff;
 	x64_tfree(e, v.r);
 	return (val){ .k = V_REG, .r = (uint8_t)r };
+}
+
+/* SSE4.2 string comparisons have fixed result registers and, with explicit
+ * lengths, fixed integer inputs. Evaluate and park each argument first; then
+ * preserve the enclosing expression's live registers across the instruction. */
+VPRIV val x64_pcmpstr(ecx *e, uint32_t n)
+{
+	cc *c = e->c;
+	const node *x = N(n);
+	const uint32_t *arg = &c->lists[x->b];
+	cval cv;
+	bool blend = x->aux == BI_X86_BLENDVB;
+	uint32_t fn = e->wk->inl ? e->wk->inl->fn : e->wk->fsym;
+	if (!x86_feature_has(cc_x86_features(c, fn), blend ? X86_FEATURE_SSE41 : X86_FEATURE_SSE42))
+		efatal(e, x->loc, "builtin requires target feature '%s'", blend ? "sse4.1" : "sse4.2");
+	if (!blend) cc_eval(c, arg[x->c - 1], &cv);
+	unsigned mode = blend ? 1 : (unsigned)cv.i, kind = mode & 7;
+	bool explicit = (mode & 8) != 0;
+	unsigned count = blend ? 3 : explicit ? 4 : 2;
+	if (!blend) cc_eval(c, arg[count], &cv);
+	unsigned control = blend ? 0 : (unsigned)cv.i;
+	int64_t slot[4], saved[32] = { 0 };
+	uint32_t live = e->x64->live;
+	uint32_t fixed = (1u << XMM0) | (1u << (XMM0 + 1)) | (blend ? (1u << (XMM0 + 2)) : (1u << RCX)) |
+		(explicit ? (1u << RAX) | (1u << RDX) : 0);
+	x64_nofp(e);
+	for (unsigned i = 0; i < count; i++) {
+		bool vector = !explicit || !(i & 1);
+		lval l = { .k = L_FRAME, .off = slot[i] = wk_slot(e, vector ? 16 : 4, vector ? 16 : 4) };
+		val v = wk_gen(e, arg[i]);
+		if (vector) {
+			v = wk_putmem(e, &l, N(arg[i])->ty, v);
+		} else {
+			int r = wk_reg(e, &v, prim(TY_INT));
+			x64_store(e, r, &l, 4);
+		}
+		wk_free(e, &v);
+	}
+	for (int r = 0; r < 32; r++)
+		if ((live & fixed) & (1u << r)) {
+			int size = r >= XMM0 ? 16 : 8;
+			lval l = { .k = L_FRAME, .off = saved[r] = wk_slot(e, size, size) };
+			x64_store(e, r, &l, size);
+		}
+	e->x64->live |= fixed;
+	for (unsigned i = 0; i < count; i++) {
+		bool vector = !explicit || !(i & 1);
+		int r = blend ? XMM0 + (i == 2 ? 0 : (int)i + 1) :
+			vector ? (i == 0 ? XMM0 : (XMM0 + 1)) : i == 1 ? RAX : RDX;
+		lval l = { .k = L_FRAME, .off = slot[i] };
+		x64_load(e, r, &l, vector ? 16 : 4, false);
+	}
+	rec *ins = x64_put(e, blend ? X_BLENDVB : X_PCMPSTR);
+	ins->cond = (explicit ? 0 : 2) | (kind == 1 ? 0 : 1);
+	ins->imm = control;
+	val result;
+	if (kind == 1) {
+		lval l = { .k = L_FRAME, .off = wk_slot(e, 16, 16) };
+		x64_store(e, blend ? XMM0 + 1 : XMM0, &l, 16);
+		result = (val){ .k = V_REG, .r = (uint8_t)x64_laddr(e, &l) };
+	} else {
+		int r = x64_treg(e);
+		if (kind == 0) x64_mov(e, r, RCX);
+		else {
+			static const uint8_t cc[] = { 0, 0, CC_A, CC_B, CC_O, CC_S, CC_E };
+			ins = x64_op3(e, X_SETCC, 4, r, XNOREG, XNOREG);
+			ins->cond = cc[kind];
+		}
+		result = (val){ .k = V_REG, .r = (uint8_t)r };
+	}
+	for (int r = 0; r < 32; r++)
+		if (saved[r]) {
+			lval l = { .k = L_FRAME, .off = saved[r] };
+			x64_load(e, r, &l, r >= XMM0 ? 16 : 8, false);
+		}
+	e->x64->live = live | (1u << result.r);
+	return result;
 }

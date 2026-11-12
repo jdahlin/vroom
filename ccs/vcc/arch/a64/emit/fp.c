@@ -74,7 +74,7 @@ VPRIV void vr_load(ecx *e, int sz, int vr, int base, int64_t off)
 	}
 }
 
-/* host side: binary128 bits of a double (exact), of an integer (truncated), and back (nearest) */
+/* host side: binary128 bits of a double (exact), and back (nearest) */
 VPRIV i128 ld_of_d(double x)
 {
 	uint64_t u;
@@ -94,17 +94,6 @@ VPRIV i128 ld_of_d(double x)
 		m &= (1ull << 52) - 1;
 	}
 	return (i128)((u128)s << 127 | (u128)(ex - 1023 + 16383) << 112 | m << 60);
-}
-static i128 ld_of_u(int s, u128 m)
-{
-	int t = 127;
-
-	if (!m)
-		return (i128)((u128)s << 127);
-	while (!(m >> t))
-		t--;
-	m = t <= 112 ? m << (112 - t) : m >> (t - 112);
-	return (i128)((u128)s << 127 | (u128)(16383 + t) << 112 | (m & (((u128)1 << 112) - 1)));
 }
 static double ld_to_d(i128 b)
 {
@@ -347,7 +336,7 @@ VPRIV val ld_cast(ecx *e, val v, qty from, qty to)
 		if (v.k == V_CONST) {
 			i128 x = em_trunc_to(c, v.i, from);
 
-			return vconst(sg && x < 0 ? ld_of_u(1, -(u128)x) : ld_of_u(0, (u128)x));
+			return vconst(q_of_i(x, sg));
 		}
 		if (fs == 16) {
 			fn = sg ? FN_FLOATTITF : FN_FLOATUNTITF, at = sg ? prim(TY_INT128) : prim(TY_UINT128);
@@ -457,7 +446,8 @@ VPRIV val f_cast(ecx *e, val v, qty from, qty to)
 			qty ft = sg ? prim(TY_INT128) : prim(TY_UINT128);
 
 			if (v.k == V_CONST)
-				return f_const(td, sg ? (double)v.i : (double)(u128)v.i);
+				return f_const(td, td ? (sg ? (double)v.i : (double)(u128)v.i) :
+					       (sg ? (double)(float)v.i : (double)(float)(u128)v.i));
 			r = call_named(e, FIXED(sg ? (td ? FN_FLOATTIDF : FN_FLOATTISF) : (td ? FN_FLOATUNTIDF : FN_FLOATUNTISF)),
 				       &v, &ft, 1, to, false);
 			return r;
@@ -465,7 +455,10 @@ VPRIV val f_cast(ecx *e, val v, qty from, qty to)
 		if (v.k == V_CONST) {
 			i128 x = em_trunc_to(c, v.i, from);
 
-			return f_const(td, sg ? (double)(int64_t)x : (double)(uint64_t)x);
+			/* Round directly to float: going through double loses the
+			 * sticky bit for integers just above a float midpoint. */
+			return f_const(td, td ? (sg ? (double)(int64_t)x : (double)(uint64_t)x) :
+				       (sg ? (double)(float)(int64_t)x : (double)(float)(uint64_t)x));
 		}
 		toreg(e, &v);
 		if (fs < 4)

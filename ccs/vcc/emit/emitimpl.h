@@ -54,6 +54,7 @@
 #include <pthread.h>
 #include <stdarg.h>
 #include <stdatomic.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -70,6 +71,8 @@
 #include "../lib/arena.h"
 #include "../lib/tbuf.h"
 
+#include "name.h"
+
 /* functions one file defines and another calls: static when the directory is
    compiled as one TU (VCC_UNITY, the default build), so they stay internal */
 #ifndef VPRIV
@@ -79,6 +82,9 @@
 #define VPRIV
 #endif
 #endif
+
+/* Exact allocation/cell analysis shared by machine-record optimizers. */
+#include "rec/slots.h"
 
 #define N(i) (&c->nodes[i])
 /* Apple arm64 (Mach-O): '_' names, GOT for symbols outside the TU, variadic
@@ -110,9 +116,12 @@ static inline bool inline_only(const sym *y)
 #define KIND(c, t) CKIND(c, t)
 
 #include "../arch/a64/emit/ins.h"
+#include "rec/rec.h"
+#include "flow/flow.h"
+#include "flow/values.h"
 
 /* references to things with a symbol: kind in the top 4 bits */
-enum { RK_SYM = 0, RK_STR = 1, RK_LBL = 2, RK_NAME = 3 };
+enum { RK_SYM = 0, RK_STR = 1, RK_LBL = 2, RK_NAME = 3, RK_TABLE = 4 };
 #define REF(k, i) (((uint32_t)(k) << 28) | (uint32_t)(i))
 #define RKIND(r) ((r) >> 28)
 #define RIDX(r) ((r) & 0x0fffffffu)
@@ -157,7 +166,7 @@ enum { SA_WRITTEN = 1, SA_CLEANUP_FN = 2, SA_MUSTFOLD = 4, SA_CWRITE = 8, SA_CMU
        SA_AESC = 128 /* a local array used other than as a[CONST] */ };
 /* USED: a local or param read; NOINL: a static local holds a label address (one copy of the code only) */
 /* CWRITE: only ever assigned integer constants (all cwval unless CMULTI) */	/* per sym; MUSTFOLD: a function that calls an error() function */
-enum { NA_LABEL = 1 };				/* per node: statement contains a label or case */
+enum { NA_LABEL = 1, NA_ALLOCA = 2 };				/* per node: statement contains a label or case */
 
 typedef struct emitter {
 	cc *c;
@@ -167,6 +176,12 @@ typedef struct emitter {
 	_Atomic uint8_t *extref;	/* per sym: referenced (for .weak of undefined syms) */
 	_Atomic uint8_t *walked;
 	uint16_t *fnsize;		/* per function: AST nodes (prepass) */
+	uint8_t *once;			/* VIR lowering on: per function, bit 0 when its one reference is a direct call (fn_once), bit 1 when it calls setjmp (prepass); else NULL */
+	/* VIR lowering on (with once): the direct call graph the prepass records, per
+	   function its size with the callees it inlines (fn_isize) and its recursion group */
+	uint32_t *cg, ncg, capcg, *cgoff, *cgn, *scc;
+	uint16_t *isz;
+	bool cgrec;			/* the prepass records calls (before the workers start) */
 	uint16_t *luse;			/* per local: uses weighted by loop depth (prepass) */
 	uint8_t *lnoreg;		/* per local: needs memory (address taken, asm operand, {} init) */
 	uint32_t *lspan;		/* per function: [2s] lowest, [2s+1] highest local sym seen */
@@ -251,7 +266,7 @@ typedef struct loopctx {
 } loopctx;
 
 typedef struct fnctx {		/* one function instance: the emitted function or an inlined body */
-	uint32_t fn, inst;
+	uint32_t fn, inst, call;
 	uint32_t retlbl;
 	int64_t retslot;
 	uint8_t retreg;		/* inlined: the result's temporary + 1 (0: in retslot) */
@@ -301,6 +316,7 @@ typedef struct ecx {
 	uint32_t *sstk, nsstk;	/* the live ones (indices into sla, deepest last) */
 	int novtag;		/* inside a volatile access: its records stay untagged */
 	uint32_t curloc;	/* innermost statement being generated (diagnostics) */
+	uint32_t reuse_from, reuse_to; /* temporary substitution within one pure expression */
 	struct dbgrow { uint32_t k, file, line, col; } *dl;	/* -g: a row at record k */
 	uint32_t ndl, dlcap;
 	const char *dlname;	/* the last file looked up, and its number */
@@ -341,6 +357,7 @@ typedef struct ecx {
 	int64_t cl_top;		/* frame offset above the block's compound literals (kept past statements) */
 	int64_t outmax;		/* outgoing stack argument bytes */
 	bool dyn, calls, vararg;
+	bool discarded_scalar;	/* lowering exposed an already-emitted unused scalar result */
 	int64_t vaslot;		/* variadic register save area */
 	int ngr_named, nstk_named;	/* variadic: named GPR args, named stack bytes */
 	int nvr_named;
@@ -370,20 +387,30 @@ typedef struct ecx {
 	uint32_t *weakref;	/* weak undefined syms this thread referenced first */
 	uint32_t nweakref;
 	uint32_t ncases;
+	uint32_t *jtl, njtl, capjtl;	/* jump tables of the function: case labels, table after table */
+	struct ejt { uint32_t tab, off, n; } *jt;	/* table label, first entry in jtl, entries */
+	uint32_t njt, capjt;
 	uint32_t *rlog;		/* this round's item logs: (RL_*, value) pairs */
 	size_t nrlog, rlog0;	/* ... and where the current item's starts */
 	jmp_buf bail;
 	struct wst *w;		/* WASM: arch/wasm/emit/ state (wimpl.h) */
 	struct wkst *wk;	/* X86: the walker's state (emit/walk/walk.h) */
 	struct xst *x64;	/* X86: arch/x64/emit/ state (x64impl.h) */
+	struct vwst *vw;	/* the VIR builder's state (emit/vir/, PLAN-vir.md) */
+	bool vtry;		/* the VIR walker runs: an error is not reported, it makes the function fall back */
+	bool vlow;		/* the records are VIR's lowering (finish_function's clean-ups for it) */
+	const char *vfail;	/* ... and why (NULL: it did not fail) */
+	struct em_switch_values_data *switch_values; /* accepted tables of this real function */
 } ecx;
 enum { FN_MEMCPY, FN_MEMSET, FN_MEMMOVE, FN_UDIVTI3, FN_DIVTI3, FN_UMODTI3, FN_MODTI3, FN_STRLEN,
        FN_ASHLTI3, FN_LSHRTI3, FN_ASHRTI3, FN_FLOATTISF, FN_FLOATTIDF, FN_FLOATUNTISF, FN_FLOATUNTIDF,
        FN_FIXSFTI, FN_FIXDFTI, FN_FIXUNSSFTI, FN_FIXUNSDFTI,
-       FN_ADDTF3, FN_SUBTF3, FN_MULTF3, FN_DIVTF3, FN_EQTF2, FN_NETF2, FN_LTTF2, FN_LETF2, FN_GTTF2, FN_GETF2,
+       FN_ADDTF3, FN_SUBTF3, FN_MULTF3, FN_DIVTF3, FN_EQTF2, FN_NETF2, FN_LTTF2, FN_LETF2, FN_GTTF2, FN_GETF2, FN_UNORDTF2,
        FN_EXTENDDFTF2, FN_EXTENDSFTF2, FN_TRUNCTFDF2, FN_TRUNCTFSF2, FN_FLOATSITF, FN_FLOATDITF, FN_FLOATUNSITF,
        FN_FLOATUNDITF, FN_FLOATTITF, FN_FLOATUNTITF, FN_FIXTFSI, FN_FIXTFDI, FN_FIXUNSTFSI, FN_FIXUNSTFDI,
-       FN_FIXTFTI, FN_FIXUNSTFTI, FN_EXTENDBFSF2, FN_TRUNCSFBF2, FN_TRUNCDFBF2, FN_TRUNCXFBF2, FN_TRUNCTFBF2, FN_EXTENDHFSF2, FN_TRUNCSFHF2, FN_TRUNCDFHF2, FN_TRUNCXFHF2, FN_TRUNCTFHF2 };
+       FN_FIXTFTI, FN_FIXUNSTFTI, FN_EXTENDXFTF2, FN_TRUNCTFXF2, FN_EXTENDBFSF2, FN_TRUNCSFBF2, FN_TRUNCDFBF2, FN_TRUNCXFBF2, FN_TRUNCTFBF2, FN_EXTENDHFSF2, FN_TRUNCSFHF2, FN_TRUNCDFHF2, FN_TRUNCXFHF2, FN_TRUNCTFHF2,
+       FN_FLOATTIXF, FN_FLOATUNTIXF, FN_FIXXFTI, FN_FIXUNSXFTI,
+       FN_FLOORF, FN_CEILF, FN_TRUNCF, FN_ROUNDF, FN_RINTF, FN_NEARBYINTF, FN_FABSF };
 #define FIXED(k) REF(RK_NAME, 0x8000000u + (k))
 
 /* ---------------- object backend: records -> machine code ---------------- */
@@ -443,20 +470,25 @@ typedef struct rpend { uint32_t next, k, frag, off; uint8_t *p; } rpend;	/* a br
 
 /* ---------------- lvalues ---------------- */
 
-enum { L_FRAME, L_SYM, L_REG, L_GLOBREG, L_VREG };	/* L_VREG: a B_LREG variable, value in r (no address) */
+enum { L_FRAME, L_SYM, L_REG, L_GLOBREG, L_VREG, L_VAR };
+/* L_VREG: a B_LREG variable, value in r (no address).
+   L_VAR: a variable of a virtual lowering target (PLAN-vir.md, SPEC-vir.md
+   X3), its number in lval.ref, no address.  Only that target makes one; the
+   real targets treat it as an internal error. */
 
 typedef struct lval {
 	uint8_t k;
 	uint8_t r;		/* L_REG: base register (a temp, owned); L_GLOBREG: the register */
 	uint8_t bf;		/* bit-field */
 	uint8_t sgn;		/* bit-field signedness */
+	int64_t dynbit_slot;	/* packed vector lane: saved dynamic bit index, 0 for static */
 	uint16_t bitoff, width;	/* bit-field: bits from the byte at off */
 	uint32_t ref;		/* L_SYM */
 	int64_t off;		/* byte offset (L_FRAME: slot offset) */
 	uint32_t align;		/* known alignment of the address */
 } lval;
 
-enum { A_IGNORE, A_REG, A_STACK, A_REF_REG, A_REF_STACK, A_VREG, A_HFA };	/* A_VREG: float/double in v<reg>; A_HFA: nreg members of fsz bytes in v<reg>.. */
+enum { A_IGNORE, A_REG, A_STACK, A_REF_REG, A_REF_STACK, A_VREG, A_HFA, A_BOOL_LANES };	/* A_VREG: float/double in v<reg>; A_HFA: nreg members of fsz bytes in v<reg>.. */
 
 typedef struct abiarg {
 	uint8_t kind, reg, nreg, fsz;
@@ -487,6 +519,23 @@ typedef struct carg {
 
 /* ---------------- across files ---------------- */
 
+/* opt/switch-values.c: bounded integer-result tables, no AST mutation. */
+typedef struct em_switch_values_recipe {
+ i128 lo;
+ uint64_t values[256], fallback;
+ qty ty;
+ uint32_t destination;
+ uint16_t slots;
+ uint8_t selector_bits, element_bytes;
+ bool is_return;
+} em_switch_values_recipe;
+VPRIV bool em_switch_values_plan(cc *c, uint32_t n, em_switch_values_recipe *r);
+VPRIV bool em_switch_values_queue(ecx *e, uint32_t n, const em_switch_values_recipe *r);
+VPRIV void em_switch_values_reset(ecx *e);
+VPRIV void em_switch_values_emit(ecx *e);
+VPRIV bool a64_switch_values(ecx *e, uint32_t n);
+VPRIV bool wk_switch_values(ecx *e, uint32_t n);
+VPRIV bool wswitch_values(ecx *e, uint32_t n);
 /* tu.c */
 VPRIV void *reserve(size_t n);
 VPRIV double now(void);
@@ -509,6 +558,127 @@ static inline bool is_signed(cc *c, qty t);
 static inline bool is_ld(cc *c, qty t);
 static inline bool is_wide(cc *c, qty t);
 VPRIV i128 em_trunc_to(cc *c, i128 v, qty t);
+/* opt/divpow2.c */
+VPRIV bool em_divpow2(cc *c, qty ty, int *op, i128 *rhs);
+/* opt/sdivpow2.c: bias negative dividends to preserve truncation toward zero. */
+typedef struct em_sdivpow2_recipe {
+	uint8_t bits, shift;
+	bool negative, remainder;
+} em_sdivpow2_recipe;
+VPRIV bool em_sdivpow2(cc *c, qty ty, int op, i128 rhs, em_sdivpow2_recipe *r);
+/* opt/mulconst.c: shift for x + (x << shift), or zero to retain multiply. */
+VPRIV unsigned em_mulconst(unsigned bits, i128 rhs);
+
+/* opt/udivconst.c: unsigned32/64 reciprocal; quotient = high_bits(n*magic),
+ * optional ((n-q)>>1)+q correction, then shift. compare means q=(n>=d). */
+typedef struct em_udivconst_recipe {
+	uint64_t divisor, magic;
+	uint8_t bits, shift;
+	bool add, compare, remainder;
+} em_udivconst_recipe;
+VPRIV bool em_udivconst32(uint32_t divisor, bool remainder, em_udivconst_recipe *r);
+VPRIV bool em_udivconst64(uint64_t divisor, bool remainder, em_udivconst_recipe *r);
+VPRIV bool em_udivconst(cc *c, qty ty, int op, i128 rhs, em_udivconst_recipe *r);
+VPRIV bool a64_udivconst_ok(ecx *e, val a, const em_udivconst_recipe *r);
+VPRIV val a64_udivconst(ecx *e, val a, const em_udivconst_recipe *r);
+/* opt/sdivconst.c: reciprocal for a positive divisor magnitude. Signed high
+ * product, optional numerator addition, arithmetic shift, then sign correction. */
+typedef struct em_sdivconst_recipe {
+	uint64_t divisor;
+	int64_t magic;
+	uint8_t bits, shift;
+	bool add, negative, remainder;
+} em_sdivconst_recipe;
+VPRIV bool em_sdivconst32(int32_t divisor, bool remainder, em_sdivconst_recipe *r);
+VPRIV bool em_sdivconst64(int64_t divisor, bool remainder, em_sdivconst_recipe *r);
+VPRIV bool em_sdivconst(cc *c, qty ty, int op, i128 rhs, em_sdivconst_recipe *r);
+VPRIV bool a64_sdivconst_ok(ecx *e, val a, const em_sdivconst_recipe *r);
+VPRIV val a64_sdivconst(ecx *e, val a, const em_sdivconst_recipe *r);
+/* opt/mulshift.c and opt/xor-not.c: machine recipes, no operand evaluation. */
+VPRIV bool em_bound_constant(cc *c, uint32_t n, i128 *value);
+VPRIV int em_cmpbounds(ecx *e, uint32_t n, uint32_t *operand);
+VPRIV int em_repeated_integer(ecx *e, uint32_t n);
+VPRIV bool em_sibling_values(ecx *e, uint32_t n);
+VPRIV bool em_decl_reuse_values(ecx *e, uint32_t decl, uint32_t consumer, const uint32_t *killed, uint32_t nkilled, uint32_t *from, uint32_t *to);
+VPRIV bool em_block_value_reuse(ecx *e, const node *block, uint32_t first, uint32_t i, uint32_t *from, uint32_t *to);
+VPRIV uint32_t em_double_unary(ecx *e, uint32_t n);
+
+VPRIV bool em_cmpzero(ecx *e, uint32_t n, uint32_t *operand);
+VPRIV bool em_mulshift(cc *c, qty ty, int *op, i128 *rhs);
+VPRIV bool em_xor_not(cc *c, qty ty, int op, i128 rhs);
+/* opt/identity.c */
+enum { EM_ID_NONE, EM_ID_LEFT, EM_ID_ZERO, EM_ID_ONES, EM_ID_TRUE };
+VPRIV int em_bin_identity(cc *c, qty ty, int op, i128 rhs);
+/* opt/switch.c: inclusive ranges in controlling-type order. Preparation only
+ * for tree dispatch (>=8 cases); no allocation or target state in the policy.
+ * Preparation rejects wrapped/overlapping ranges: callers retain the chain. */
+typedef struct em_switch_case {
+	i128 lo, hi;
+	uint32_t target;
+} em_switch_case;
+enum { EM_SWITCH_LINEAR, EM_SWITCH_TREE, EM_SWITCH_TABLE };
+VPRIV int em_switch_strategy(uint32_t n, i128 lo, i128 hi, bool ranges, bool tables);
+VPRIV bool em_switch_prepare(em_switch_case *cases, uint32_t n, unsigned bits, bool sg);
+/* One bounded membership test for a run of stacked case labels. The original
+ * body remains intact; node names its final case label, not a new destination. */
+typedef struct em_switch_bitset_recipe {
+	i128 lo;
+	uint64_t mask;
+	uint32_t node;
+	uint8_t span, bits;
+} em_switch_bitset_recipe;
+VPRIV bool em_switch_bitset_plan(cc *c, uint32_t body, uint32_t nlabels,
+				 unsigned bits, bool sg, em_switch_bitset_recipe *out);
+VPRIV bool a64_switch_bitset(ecx *e, uint32_t body, uint32_t base, int r,
+			    int cx, bool sg, uint32_t dflt);
+/* opt/unusedinit.c: bounded recipes for never-referenced integer declarations. */
+enum { EM_UNUSED_KEEP, EM_UNUSED_OMIT, EM_UNUSED_EVAL };
+VPRIV bool em_unused_local(ecx *e, uint32_t s, uint32_t fn);
+VPRIV unsigned em_unused_init(ecx *e, const node *decl, uint32_t fn, unsigned budget);
+/* opt/locals.c: eligibility and bounded selection from the existing prepass. */
+/* opt/tail.c: exact direct forwarding wrappers; target capability/ABI checks follow. */
+VPRIV bool em_tail_caller_ok(ecx *e, uint32_t fn);
+VPRIV bool em_tail_target_ok(ecx *e, uint32_t s);
+VPRIV bool em_tail_candidate(ecx *e, uint32_t fn, uint32_t expr, uint32_t maxargs, uint32_t *callee);
+VPRIV bool a64_tail_return(ecx *e, uint32_t expr);
+VPRIV uint32_t a64_tail_ref(const ecx *e);
+VPRIV bool em_local_eligible(ecx *e, uint32_t s);
+VPRIV bool em_local_gpr_type(cc *c, qty ty);
+VPRIV unsigned em_select_locals(ecx *e, uint32_t fn, uint32_t *cand, unsigned max,
+			       bool (*target_ok)(cc *, qty));
+/* rec/fallthrough.c: opaque records; no shared struct layout is assumed. */
+typedef struct em_rec_layout {
+	size_t stride, op_offset, label_offset;
+	uint8_t jump_op, label_op;
+} em_rec_layout;
+VPRIV uint32_t em_rec_fallthrough(void *records, uint32_t count, const em_rec_layout *layout,
+				void (*remap)(void *, uint32_t, uint32_t), void *ctx);
+/* rec/unreachable.c: unknown opcodes and opaque records are entry barriers. */
+VPRIV uint32_t em_rec_unreachable(void *records, uint32_t count, size_t stride, size_t op_offset,
+				const uint8_t *flow, size_t nflow,
+				void (*remap)(void *, uint32_t, uint32_t), void *ctx);
+/* rec/copies.c: inclusive block end, whole-register t/v below 64. The target
+ * preflights each rewritten record without mutation (apply=false); applying
+ * the same rewrite must then succeed. Existing conservative liveness is only
+ * enlarged, and no effects/liveness table is built by this scan.
+ */
+typedef struct em_rec_copy_scan {
+	void *records;
+	size_t stride, op_offset;
+	uint8_t deleted_op;
+	const void *flags;
+	size_t flags_stride;
+	uint16_t opaque_mask;
+	uint64_t *read, *live;
+	const uint64_t *write;
+	/* Optional on-demand effects. False is an opaque boundary. With no live
+	 * array a copy must reach an explicit overwrite; block end proves nothing.
+	 */
+	bool (*inspect)(void *ctx, uint32_t j, uint64_t *read, uint64_t *write);
+	bool (*rewrite)(void *ctx, uint32_t j, uint8_t from, uint8_t to, bool apply);
+	void *ctx;
+} em_rec_copy_scan;
+VPRIV bool em_rec_copy_forward(const em_rec_copy_scan *s, uint32_t k, uint32_t end, uint8_t t, uint8_t v);
 /* insn.c */
 extern const char cond_name[][8];
 VPRIV bool logimm_ok(uint64_t v, int x);
@@ -572,6 +742,8 @@ VPRIV void at_ldop(ecx *e, unsigned sz, unsigned opc, int rs, int rt, int rn);
 VPRIV void jump(ecx *e, uint32_t l);
 VPRIV void bcond(ecx *e, int cond, uint32_t l);
 VPRIV void cbz(ecx *e, bool nz, int x, int r, uint32_t l);
+VPRIV void tbz(ecx *e, bool nz, int r, int bit, uint32_t l);
+VPRIV uint32_t a64_words(const ins *i);
 /* value.c */
 VPRIV int treg(ecx *e);
 VPRIV void tfree(ecx *e, int r);
@@ -597,6 +769,8 @@ VPRIV void zero_mem(ecx *e, int dst, uint64_t n);
 /* abi.c */
 VPRIV int hfa(cc *c, qty t, int *n);
 VPRIV bool vec_small(cc *c, qty t);
+VPRIV void bvec_ret(ecx *e, qty t, int rs);
+VPRIV void bvec_res(ecx *e, qty t, int64_t sl);
 VPRIV void vec_small_ret(ecx *e, qty t, int rs);
 VPRIV void vec_small_res(ecx *e, qty t, int64_t sl);
 VPRIV bool is_sret(cc *c, qty t);
@@ -606,6 +780,8 @@ VPRIV void classify(ecx *e, qty t, int *ngrn, int *nsaa, abiarg *a);
 VPRIV void spill_live(ecx *e, spill *s);
 VPRIV void unspill(ecx *e, const spill *s);
 VPRIV void call_fixed(ecx *e, int fn, int a0, int a1, int a2, int64_t n);
+VPRIV void finish_function(ecx *e, uint32_t s);	/* arch/a64/emit/func.c: optimise, lay out and print the records */
+VPRIV bool sym_needs_got(cc *c, uint32_t ref);
 /* bind.c */
 static inline int64_t keep_cl(const ecx *e, int64_t mark);
 static inline int X(cc *c, qty t);
@@ -634,11 +810,17 @@ VPRIV void store(ecx *e, lval *l, qty t, val *v);
 VPRIV void extend(ecx *e, int rd, int rs, int from, bool sgn);
 VPRIV int lreg_of(ecx *e, uint32_t s);
 VPRIV void opt_function(ecx *e);
+/* arch/a64/emit/unreachable.c */
+VPRIV void a64_unreachable(ecx *e);
 enum { OPF_ALL = 1, OPF_CALL = 2, OPF_FRAME = 4 };
 VPRIV uint64_t opt_regs(ecx *e, unsigned *fl);
 VPRIV lval bind_lreg(ecx *e, uint32_t s);
 VPRIV val fold_int_bin(ecx *e, int op, qty ot, qty rt, i128 l, i128 r, bool *ok);
 VPRIV bool em_is_cmp(int op);
+/* Pure control proofs: bounded shared walk, no committed target instructions. */
+VPRIV bool em_const_strcmp(cc *c, uint32_t n, i128 *value);
+VPRIV int em_const_truth(ecx *e, uint32_t n, int (*constant_p)(ecx *, uint32_t));
+VPRIV int a64_constant_p(ecx *e, uint32_t arg);
 VPRIV int emit_cmp(ecx *e, int op, int x, bool sg, val *a, val *b);
 VPRIV int emit_cmp2(ecx *e, int op, bool sg, val *a, val *b);
 VPRIV int test_zero(ecx *e, val *v, qty t, uint32_t l, bool nz);
@@ -666,6 +848,8 @@ VPRIV val ld_cast(ecx *e, val v, qty from, qty to);
 VPRIV val f_cast(ecx *e, val v, qty from, qty to);
 /* arith.c */
 VPRIV val cast(ecx *e, val v, qty from, qty to, int kind);
+VPRIV val a64_sdivpow2(ecx *e, val a, const em_sdivpow2_recipe *r);
+VPRIV bool a64_mulconst(ecx *e, qty ty, int r, i128 rhs);
 VPRIV void shift_imm(ecx *e, int op, int x, int rd, int rn, int k);
 VPRIV val arith(ecx *e, int op, qty ty, val a, val b);
 VPRIV val arith2(ecx *e, int op, qty ty, val a, val b);
@@ -677,7 +861,8 @@ VPRIV void kv_track(ecx *e, uint32_t s, const val *v);
 VPRIV int ael_slot(ecx *e, uint32_t n, bool create);
 VPRIV bool const_var(ecx *e, uint32_t s, const val *v);
 VPRIV bool can_inline(ecx *e, uint32_t s);
-VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n);
+VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n, uint32_t call);
+VPRIV bool inline_object_size(ecx *e, uint32_t fn, uint32_t call, uint32_t pointer, uint32_t mode, i128 *size);
 VPRIV uint32_t direct_callee(cc *c, uint32_t fn, uint32_t *ref);
 VPRIV val gen_call(ecx *e, uint32_t n);
 /* builtin.c */
@@ -717,6 +902,10 @@ VPRIV void wasm_emit_function(ecx *e, uint32_t s);
 VPRIV void wasm_ecx_free(ecx *e);
 VPRIV void wk_function(ecx *e, uint32_t s);
 VPRIV void wk_ecx_free(ecx *e);
+VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why);	/* emit/vir/a64.c: the built VIR as arm64 records */
+VPRIV bool vw_try(ecx *e, uint32_t s);	/* emit/vir/: s through VIR (VCC_VIR); false: emit it as before */
+VPRIV bool vw_enabled(const cc_opts *o);	/* VIR lowers functions (VCC_VIR with l, -O2) */
+VPRIV void vw_wk_ecx_free(ecx *e);
 VPRIV void wasm_data_ref(ecx *e, uint32_t ref);
 VPRIV void wasm_header(cc *c, tbuf *hdr, ecx *ctx, int nthr);
 VPRIV void wasm_tail(cc *c, tbuf *t, _Atomic uint8_t *claimed);
@@ -726,6 +915,12 @@ VPRIV uint32_t aconst_idx(cc *c, uint32_t n);
 VPRIV bool sve_codegen_ok(cc *c);
 VPRIV bool bitint_codegen_ok(cc *c);
 VPRIV void ensure_walked(emitter *E, cc *c, uint32_t s);
+VPRIV uint8_t *fn_once(cc *c);
+#ifndef WK_INLINE_VIR
+#define WK_INLINE_VIR 150	/* under VIR: AST nodes of a callee with what it inlines (fn_isize) */
+#endif
+VPRIV void fn_isize(emitter *E, cc *c, uint32_t lim);	/* E->isz, E->scc: VIR's inlining sizes */
+VPRIV bool inl_cand(emitter *E, cc *c, uint32_t s);	/* VIR could inline a call to s (size aside) */	/* per function: 1 when its one reference in the TU is a direct call */
 VPRIV int u32_cmp(const void *a, const void *b);
 /* tu.c */
 VPRIV void enqueue(emitter *E, uint32_t item);
@@ -733,23 +928,25 @@ VPRIV void enqueue(emitter *E, uint32_t item);
 /* ---------------- types (the few predicates the emitter needs) ---------------- */
 
 static inline qty prim(int k) { return QT(k, 0); }
-static inline bool k_int(int k) { return (k >= TY_BOOL && k <= TY_UINT128) || k == TY_ENUM; }
+static inline bool k_int(int k) { return (k >= TY_BOOL && k <= TY_UINT128) || k == TY_BITINT || k == TY_UBITINT || k == TY_ENUM; }
+static inline bool em_bigint(cc *c, qty t) { int k = KIND(c, t); return k == TY_BITINT || k == TY_UBITINT; }
 static inline bool is_integer(cc *c, qty t) { return k_int(KIND(c, t)); }
 static inline bool em_bitint(cc *c, qty t)
 {
-	return KIND(c, t) >= TY_CHAR && KIND(c, t) <= TY_UINT128 &&
+	return ((KIND(c, t) >= TY_CHAR && KIND(c, t) <= TY_UINT128) || em_bigint(c, t)) &&
 	       !(T(c, t)->flags & TF_ATOMIC) && T(c, t)->n;
 }
 static inline bool is_ptr(cc *c, qty t) { return KIND(c, t) == TY_PTR; }
-static inline bool is_flt(cc *c, qty t) { int k = KIND(c, t); return k >= TY_BFLOAT16 && k <= TY_LDOUBLE; }
+static inline bool is_flt(cc *c, qty t) { int k = KIND(c, t); return k >= TY_BFLOAT16 && k <= TY_FLOAT128; }
 static inline bool is_record(cc *c, qty t) { int k = KIND(c, t); return k == TY_STRUCT || k == TY_UNION; }
 static inline bool is_array(cc *c, qty t) { return KIND(c, t) == TY_ARRAY; }
 static inline bool is_func(cc *c, qty t) { return KIND(c, t) == TY_FUNC; }
 static inline bool is_void(cc *c, qty t) { return KIND(c, t) == TY_VOID; }
 static inline bool is_vec(cc *c, qty t) { return KIND(c, t) == TY_VECTOR; }
+static inline bool is_bvec(cc *c, qty t) { return is_vec(c, t) && KIND(c, T(c, t)->base) == TY_BOOL; }
 /* passed and returned like a record (vcc's own convention for vectors) */
-static inline bool is_recabi(cc *c, qty t) { return is_record(c, t) || is_vec(c, t); }
-static inline bool is_agg(cc *c, qty t) { return is_record(c, t) || is_array(c, t) || is_vec(c, t); }
+static inline bool is_recabi(cc *c, qty t) { return is_record(c, t) || is_vec(c, t) || em_bigint(c, t); }
+static inline bool is_agg(cc *c, qty t) { return is_record(c, t) || is_array(c, t) || is_vec(c, t) || em_bigint(c, t); }
 static inline uint64_t tsize(cc *c, qty t) { return T(c, t)->size; }
 
 /* Apple arm64: an integer under 4 bytes in a register is extended to 32 bits by its producer */

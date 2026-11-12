@@ -1,0 +1,9 @@
+; an instruction before the first block
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+func @f %s {
+  v0:i64 = param 0.0
+}
+; ---
+bad/syntax-instruction-outside-block.vir:6:12: an instruction must be inside a block

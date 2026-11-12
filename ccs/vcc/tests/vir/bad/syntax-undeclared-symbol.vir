@@ -1,0 +1,13 @@
+; a symbol that is never declared
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  v1:i64 = add v0, 1
+  v2:ptr = ptradd @nowhere, 8
+  ret v1
+}
+; ---
+bad/syntax-undeclared-symbol.vir:9:19: undeclared symbol @nowhere

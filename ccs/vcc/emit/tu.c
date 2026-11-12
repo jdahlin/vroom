@@ -2,6 +2,7 @@
 #include "emitimpl.h"
 #include "../arch/wasm/as/wasmas.h"
 #include "../lib/buf.h"
+#include "../lib/defer.h"
 
 VPRIV void *reserve(size_t n) { return vreserve(n, MAP_NORESERVE, "vcc: mmap"); }
 
@@ -21,11 +22,10 @@ VPRIV void ediag(ecx *e, uint32_t loc, const char *fmt, ...)
 	pp_diag_pc = __builtin_return_address(0);
 	va_list ap;
 
-	pthread_mutex_lock(&e->E->emu);
+	VLOCK(e->E->emu);
 	va_start(ap, fmt);
 	pp_vdiag(e->c->p, loc, "note", fmt, ap);
 	va_end(ap);
-	pthread_mutex_unlock(&e->E->emu);
 }
 
 __attribute__((format(printf, 3, 4)))
@@ -34,11 +34,17 @@ VPRIV void eerror(ecx *e, uint32_t loc, const char *fmt, ...)
 	pp_diag_pc = __builtin_return_address(0);
 	va_list ap;
 
-	pthread_mutex_lock(&e->E->emu);
-	va_start(ap, fmt);
-	pp_vdiag(e->c->p, loc, "error", fmt, ap);
-	va_end(ap);
-	pthread_mutex_unlock(&e->E->emu);
+	if (e->vtry) {	/* the VIR walker: the function falls back (emit/vir/) */
+		if (!e->vfail)
+			e->vfail = fmt;
+		return;
+	}
+	{
+		VLOCK(e->E->emu);
+		va_start(ap, fmt);
+		pp_vdiag(e->c->p, loc, "error", fmt, ap);
+		va_end(ap);
+	}
 	e->E->errors++;
 }
 
@@ -48,11 +54,17 @@ VPRIV void efatal(ecx *e, uint32_t loc, const char *fmt, ...)
 	pp_diag_pc = __builtin_return_address(0);
 	va_list ap;
 
-	pthread_mutex_lock(&e->E->emu);
-	va_start(ap, fmt);
-	pp_vdiag(e->c->p, loc, "error", fmt, ap);
-	va_end(ap);
-	pthread_mutex_unlock(&e->E->emu);
+	if (e->vtry) {	/* the VIR walker: no diagnostic, the function falls back (emit/vir/) */
+		if (!e->vfail)
+			e->vfail = fmt;
+		_longjmp(e->bail, 1);
+	}
+	{	/* (the lock is dropped before the longjmp: cleanups do not run on it) */
+		VLOCK(e->E->emu);
+		va_start(ap, fmt);
+		pp_vdiag(e->c->p, loc, "error", fmt, ap);
+		va_end(ap);
+	}
 	e->E->errors++;
 	_longjmp(e->bail, 1);
 }
@@ -61,10 +73,9 @@ VPRIV void efatal(ecx *e, uint32_t loc, const char *fmt, ...)
 
 VPRIV void enqueue(emitter *E, uint32_t item)
 {
-	pthread_mutex_lock(&E->mu);
+	VLOCK(E->mu);
 	E->q[E->qt++] = item;
 	pthread_cond_signal(&E->cv);
-	pthread_mutex_unlock(&E->mu);
 }
 
 /* the regions of a ctx[i] (ecx_init takes a set, ecx_free gives it back) */
@@ -115,6 +126,7 @@ static void ecx_init(ecx *e, emitter *E, vmreg *r)
 /* (after the stitch: the chunks point into e->out) */
 static void ecx_free(ecx *e, vmreg *r)
 {
+	em_switch_values_reset(e);
 	cc *c = e->c;
 
 	/* written before read (put, newlabel, the case collection, ...): handed back as is */
@@ -138,6 +150,7 @@ static void ecx_free(ecx *e, vmreg *r)
 	vmpool_give(&ecxpool, r);
 	wasm_ecx_free(e);
 	wk_ecx_free(e);
+	vw_wk_ecx_free(e);
 }
 
 /* a function the previous round generated, if nothing it asked about has been marked since */
@@ -184,7 +197,7 @@ static void do_item(ecx *e, uint32_t it)
 	} else if (c->syms[it].kind == S_FUNC && X86(c)) {
 		wk_function(e, it);
 	} else if (c->syms[it].kind == S_FUNC) {
-		if (!reuse(e, it))
+		if (!reuse(e, it) && !vw_try(e, it))
 			emit_function(e, it);
 	} else {
 		emit_object(e, it);
@@ -431,12 +444,29 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	E.noopt = getenv("VCC_NOOPT") != NULL;
 	/* wasm64: objects from the text, through arch/wasm/as */
 	E.objtext = getenv("VCC_OBJ_TEXT") != NULL || PP_IS_WASM(o->target);
+	/* x86-64: objects from the printer's text through arch/x64/as (PLAN-x86.md X5) */
+	if (X86(c))
+		E.objtext = true;
 	/* -g: the line table is the assembler's, from the printer's .loc */
 	if (o->debug && !DARWIN(c) && !WASM(c))
 		E.objtext = true;
 	/* unwind tables: .eh_frame is the assembler's, from the printer's .cfi_* */
 	if (o->cfi && !DARWIN(c) && !WASM(c))
 		E.objtext = true;
+	/* Lazy walks own only their function's automatic variables. Globals and
+	   static objects can be modified by other functions (including ones not
+	   emitted here); publish conservative immutable facts before workers start.
+	   In particular, never infer a TU-wide constant from one function's writes. */
+	for (uint32_t s = 1; s < c->nsym; s++)
+		if (c->syms[s].kind == S_VAR && !is_local_var(c, s)) {
+			E.sflags[s] = SA_WRITTEN | SA_AESC;
+			E.ffacts[s] = FF_BAD;
+		}
+	/* VIR: the functions called once, which its walker inlines whatever their size */
+	if (!WASM(c) && !X86(c) && vw_enabled(o))
+		E.once = fn_once(c);
+	if (E.once)
+		fn_isize(&E, c, WK_INLINE_VIR);
 	/* roots */
 	for (uint32_t i = 0; i < c->ntoplevel; i++) {
 		uint32_t s = c->toplevel[i];
@@ -462,17 +492,52 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	ctx = calloc((size_t)nthr, sizeof(ecx));
 	for (int i = 0; i < nthr; i++)
 		ecx_init(&ctx[i], &E, xr[i] = vmpool_take(&ecxpool));
-	for (int i = 1; i < nthr; i++)
-		pthread_create(&th[i], NULL, worker, &ctx[i]);
+	{
+		/* the walkers recurse with the input's nesting and fall back when the stack runs
+		 * low (vstack_low): a worker gets a stack as large as this thread's, so that a
+		 * function compiles the same on any of them (Darwin's default for a new thread
+		 * is 512 KB, where deep input that compiled on one thread did not on several) */
+		pthread_attr_t at;
+		size_t ss = (size_t)8 << 20;
+
+#ifdef __APPLE__
+		ss = pthread_get_stacksize_np(pthread_self());
+#else
+		{
+			pthread_attr_t me;
+			void *addr;
+
+			if (!pthread_getattr_np(pthread_self(), &me)) {
+				pthread_attr_getstack(&me, &addr, &ss);
+				pthread_attr_destroy(&me);
+			}
+		}
+#endif
+		if (ss < ((size_t)1 << 20))
+			ss = (size_t)1 << 20;
+		pthread_attr_init(&at);
+		pthread_attr_setstacksize(&at, ss);
+		for (int i = 1; i < nthr; i++)
+			pthread_create(&th[i], &at, worker, &ctx[i]);
+		pthread_attr_destroy(&at);
+	}
 	worker(&ctx[0]);
 	for (int i = 1; i < nthr; i++)
 		pthread_join(th[i], NULL);
 	t2 = now();
+	free(E.once);
+	E.once = NULL;
+	free(E.cg), free(E.cgoff), free(E.cgn), free(E.scc), free(E.isz);
+	E.cg = E.cgoff = E.cgn = E.scc = NULL, E.isz = NULL;
 	/* stitch */
 	qsort(E.chunks, E.nchunk, sizeof(chunk), chunk_cmp);
 	tb_reg(&hdr, &er[12], (size_t)1 << 26, "emit.hdr");
 	if (WASM(c))
 		wasm_header(c, &hdr, ctx, nthr);
+	else if (X86(c) && (o->xcf & 1))
+		/* -fcf-protection=branch: GNU_PROPERTY_X86_FEATURE_1_AND = IBT, as clang's start of file */
+		tb_s(&hdr, "\t.section\t.note.gnu.property,\"a\",@note\n\t.p2align\t3, 0x0\n\t.long\t4\n\t.long\t16\n"
+			   "\t.long\t5\n\t.asciz\t\"GNU\"\n\t.long\t3221225474\n\t.long\t4\n\t.long\t1\n\t.p2align\t3, 0x0\n\t.text\n");
 	else
 		tb_s(&hdr, "\t.text\n");
 	bool dbg = o->debug && !DARWIN(c) && !WASM(c);
@@ -549,18 +614,25 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 		}
 		if (dbg) {
 			/* one compile unit over .text: producer, C11, name, its line table, dir, pc range */
+			/* (x86: .word is 2 bytes there, so .short/.long/.quad) */
+			bool x = X86(c);
+
 			tb_s(&tail, "\t.text\n.Ldbg_text1:\n"
 				    "\t.section\t.debug_abbrev,\"\",@progbits\n.Ldbg_abbrev:\n"
 				    "\t.byte\t1, 17, 0, 37, 8, 19, 5, 3, 8, 16, 23, 27, 8, 17, 1, 18, 6, 0, 0, 0\n"
-				    "\t.section\t.debug_info,\"\",@progbits\n"
-				    "\t.long\t.Ldbg_cu_end-.Ldbg_cu_start\n.Ldbg_cu_start:\n"
-				    "\t.short\t5\n\t.byte\t1, 8\n\t.long\t.Ldbg_abbrev\n\t.byte\t1\n\t.asciz\t\"vcc\"\n"
-				    "\t.short\t29\n\t.asciz\t");
+				    "\t.section\t.debug_info,\"\",@progbits\n");
+			tb_s(&tail, x ? "\t.long\t.Ldbg_cu_end-.Ldbg_cu_start\n.Ldbg_cu_start:\n"
+				        "\t.short\t5\n\t.byte\t1, 8\n\t.long\t.Ldbg_abbrev\n\t.byte\t1\n\t.asciz\t\"vcc\"\n"
+				        "\t.short\t29\n\t.asciz\t" :
+				        "\t.word\t.Ldbg_cu_end-.Ldbg_cu_start\n.Ldbg_cu_start:\n"
+				        "\t.hword\t5\n\t.byte\t1, 8\n\t.word\t.Ldbg_abbrev\n\t.byte\t1\n\t.asciz\t\"vcc\"\n"
+				        "\t.hword\t29\n\t.asciz\t");
 			dbg_str(&tail, o->dbg_name ? o->dbg_name : "<stdin>");
-			tb_s(&tail, "\n\t.long\t.Lline_table_start0\n\t.asciz\t");
+			tb_s(&tail, x ? "\n\t.long\t.Lline_table_start0\n\t.asciz\t" : "\n\t.word\t.Lline_table_start0\n\t.asciz\t");
 			dbg_str(&tail, o->dbg_dir ? o->dbg_dir : ".");
-			tb_s(&tail, "\n\t.quad\t.Ldbg_text0\n\t.long\t.Ldbg_text1-.Ldbg_text0\n.Ldbg_cu_end:\n"
-				    "\t.section\t.debug_line,\"\",@progbits\n.Lline_table_start0:\n");
+			tb_s(&tail, x ? "\n\t.quad\t.Ldbg_text0\n\t.long\t.Ldbg_text1-.Ldbg_text0\n.Ldbg_cu_end:\n" :
+				        "\n\t.xword\t.Ldbg_text0\n\t.word\t.Ldbg_text1-.Ldbg_text0\n.Ldbg_cu_end:\n");
+			tb_s(&tail, "\t.section\t.debug_line,\"\",@progbits\n.Lline_table_start0:\n");
 		}
 		if (WASM(c))
 			wasm_tail(c, &tail, E.claimed);
@@ -597,7 +669,8 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 						vbuf_put(o->wasm_obj, ob, on);
 						free(ob);
 					}
-				} else if (as_run(o->as, o->obj, all.p, all.n, "<vcc>", &msg)) {
+				} else if (elf_set_machine(o->obj, X86(c) ? EM_X86_64 : EM_AARCH64),
+					   as_run(o->as, o->obj, all.p, all.n, "<vcc>", &msg)) {
 					as_error(c, "assembler: %s", msg);
 					E.errors++;
 				}

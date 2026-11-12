@@ -28,6 +28,7 @@
 #include <stdint.h>
 
 #include "../pp/pp.h"
+#include "../lib/x86features.h"
 
 /* ---------------- types ---------------- */
 
@@ -40,6 +41,7 @@ enum {
 	TY_PTR, TY_ARRAY, TY_FUNC, TY_STRUCT, TY_UNION, TY_ENUM,
 	TY_VECTOR,	/* GNU vector_size: base element, n lanes */
 	TY_SVE,		/* AArch64 builtin scalable type: sizeless; aux is its interned name */
+	TY_BITINT, TY_UBITINT, /* bit-precise integers wider than 128 bits */
 	TY_NKINDS
 };
 
@@ -178,13 +180,14 @@ enum {
 	/* expressions */
 	N_NUM,		/* a: constant pool index (integer); aux: NUM_RADIX (a literal not written in decimal), NUM_ENUM */
 	N_FNUM,		/* a: constant pool index (double) */
+	N_BIGNUM,	/* a: immutable LE32 words in lists, b: full storage word count */
 	N_STR,		/* a: string index */
 	N_VAR,		/* a: sym */
 	N_MEMBER,	/* a: base (lvalue struct), b: tag, c: field index */
 	N_INDEX,	/* a[b] (pointer + integer, already in that order) */
 	N_CALL,		/* a: callee, b: list, c: count */
 	N_BUILTIN,	/* aux: builtin id, b: list, c: count */
-	N_CAST,		/* aux: cast kind, a: operand, b: an explicit cast's typedef (sym, in a body) or 0 */
+	N_CAST,		/* aux: cast kind, a: operand, b: an explicit cast's typedef (sym, in a body) or 0; c: folded FP emit value or 0 */
 	N_UNARY,	/* aux: op (T_* kind), a: operand */
 	N_ADDR, N_DEREF,
 	N_PREINC, N_PREDEC, N_POSTINC, N_POSTDEC,
@@ -193,7 +196,7 @@ enum {
 	N_ASSIGN,	/* aux: 0 or the compound op (T_PLUS, ...), a, b */
 	N_COND,		/* a ? b : c (b == 0: GNU a ?: c) */
 	N_COMMA,
-	N_SIZEOF_VLA,	/* a: expression of VLA type */
+	N_SIZEOF_VLA,	/* a: expression, b: VLA type; aux=1 captures a new type-name bound */
 	N_STMTEXPR,	/* a: compound statement */
 	N_COMPLIT,	/* a: init, b: sym of the object */
 	N_INIT,		/* initializer list: b: struct/union (aux 0/2): c values; array (aux 1): c (lo, hi, value) */
@@ -205,7 +208,7 @@ enum {
 	/* statements */
 	N_BLOCK,	/* b: list, c: count */
 	N_EXPR,		/* a */
-	N_DECL,		/* a: sym, b: init or 0 */
+	N_DECL,		/* a: sym, b: init or 0; aux=1: initializer supplies inferred-type bounds */
 	N_IF, N_WHILE, N_DO,
 	N_FOR,		/* a: init, b: cond, c: list of [step, body] */
 	N_SWITCH,	/* a: cond, b: body */
@@ -232,14 +235,18 @@ enum {
 	CK_UNION,	/* -> transparent union / GNU cast to union */
 	CK_NULL,	/* null pointer constant -> pointer */
 	CK_SPLAT,	/* scalar (already the element type) -> every lane of an ext_vector_type */
+	CK_BITS,	/* __builtin_bit_cast: a is the source object, without array decay */
 	CK_VBITS,	/* GNU vector -> scalar of the same size (the bits) */
 	CK_VADDR,	/* GNU vector rvalue -> pointer to its first lane (v[i] on an rvalue) */
 };
 
-enum { NUM_RADIX = 1, NUM_ENUM = 2 };	/* N_NUM aux: spelled not in decimal; an enumerator's value */
+enum { NUM_RADIX = 1, NUM_ENUM = 2, NUM_NO_ICE = 4, NUM_NO_CONSTEXPR = 8 };	/* N_NUM aux: spelled not in decimal; an enumerator's value */
 enum { NF_LVALUE = 1, NF_BITFIELD = 2, NF_PAREN = 4, NF_NPC = 8,
        NF_ERR = 16,
        NF_MACRO = 32, NF_BOUNDS = 64, NF_OVF = 128 };	/* NF_OVF: a constant subexpression overflowed (-Winteger-overflow given once) */	/* NF_BOUNDS: a[CONST] already checked (-Warray-bounds) */	/* NF_MACRO: the operator came from a macro expansion (no style warnings) */	/* NF_ERR: stands in for an expression already diagnosed (no follow-on errors) */
+
+/* N_COMMA result facts, attached by semantic lowering. NaNs are permitted. */
+enum { NC_FP_NONNEG = 1 };
 
 typedef struct node {
 	uint8_t op, flags;
@@ -265,6 +272,7 @@ typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl 
 	int target;		/* PP_LINUX_AARCH64 / PP_DARWIN / PP_WASM64 */
 	int unsigned_char;
 	int ms_anon;		/* -fms-anonymous-structs / -fms-extensions: "struct S;" members */
+	int strict_flex_arrays; /* -fstrict-flex-arrays=0..3 */
 	int short_wchar;	/* -fshort-wchar */
 	int std;		/* -std=: 89, 99, 11, 17, 23 (0: gnu17) */
 	int implicit_int;	/* implicit int allowed (-std=gnu89, -Wno-error=implicit-int) */
@@ -272,24 +280,41 @@ typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl 
 	int instrument;		/* -finstrument-functions */
 	int vcc_kernel;		/* -fvcc-kernel (or -D__KERNEL__): error() calls left after folding are dropped */
 	int lse;		/* target has LSE atomics (else ldaxr/stlxr loops) */
+	x86_features x86_features, x86_disabled, x86_raw, x86_override_on, x86_override_off;
+	int x86_features_set;	/* explicitly resolved by the driver; zero uses x86-64 */
 	int general_regs_only;	/* -mgeneral-regs-only: no FP/SIMD registers (variadic: no v0-v7 save area) */
+	int fast_math;		/* full fast-math permits finite, unsigned-zero root transforms */
+	int no_fp_contract;	/* -ffp-contract=off: a * b + c is two operations (default on, as clang: fused within an expression) */
+	int no_jump_tables;	/* -fno-jump-tables: switches are compare trees */
 	int no_builtin;		/* -ffreestanding / -fno-builtin: abs() etc. are plain calls */
 	uint64_t disabled_builtins[CC_DISABLED_BUILTIN_WORDS]; /* -fno-builtin-NAME */
 	int wasm_sjlj;		/* -mllvm -wasm-enable-sjlj: setjmp/longjmp through wasm exceptions */
 	int implicit_fn;	/* implicit function declarations allowed (... implicit-function-declaration) */
+	int c2y;		/* C2y additions, with the C23 keyword set */
 	int strict_std;		/* -std=cNN (not gnuNN): clang's GNU-only library functions are not known */
 	int conv_warn;		/* -Wno-error= (or -Wno-) of: 1 int-conversion, 2 incompatible-pointer-types,
 				   4 incompatible-function-pointer-types: a warning, not an error */
 	int dump_layouts;	/* append _Static_assert checks for clang to verify */
+	/* Before outfd so declaration-cache identity includes the frame policy. */
+	int omit_frame_pointer; /* x86: permit frame-free leaf omission; explicit flags win */
+	int sibling_calls; /* 0: optimization-level default, 1: explicit enable, -1: explicit disable */
 	int outfd;
 	int emit;		/* generate code (emit/): 1 = assembly text to outfd, 2 = object into obj */
 	int opt;		/* -O level for code generation: 0 (default, -O0), 1 (-O1, -Og), 2 (-O2, -O3, -Os, -Oz, -O) */
+	int wrapv;		/* -fwrapv, -fno-strict-overflow: signed overflow wraps (VIR sets no nsw) */
 	int sections;		/* 1 -ffunction-sections, 2 -fdata-sections (ELF) */
 	int debug;		/* -g: DWARF line tables (ELF) */
 	int cfi;		/* -fasynchronous-unwind-tables: .cfi_* (ELF), .eh_frame from the assembler */
 	const char *dbg_dir, *dbg_name;	/* the compilation directory and the main file, as named */
 	int tlsmodel;		/* -ftls-model=: VCC_TLS_*, 0: the default */
 	int pic;		/* ELF: 0 none (-fno-pic), 1 PIE (-fpie, the hosted default), 2 PIC (-fpic) */
+	/* x86-64 hardening, as clang (the kernel): xcf bits 1 -fcf-protection=branch (endbr64, IBT
+	   note), 2 -mfunction-return=thunk-extern, 4 -mretpoline-external-thunk, 8
+	   -mindirect-branch-cs-prefix; -fpatchable-function-entry=N,M; -fstack-protector (1),
+	   -strong (2), -all (3) with its guard (sp_gs: %gs, sp_sym: the symbol, else %fs:40);
+	   -ftrivial-auto-var-init=zero */
+	int xcf, pfe_n, pfe_m, sprot, sp_gs, autozero;
+	const char *sp_sym;
 	int nthreads;		/* emitter threads (0: 1) */
 	struct ElfObj *obj;	/* emit == 2: the object (reset first; the caller finishes it) */
 	struct As *as;		/* emit == 2: the assembler bound to obj (one per thread) */

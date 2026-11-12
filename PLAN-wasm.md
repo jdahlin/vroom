@@ -141,6 +141,52 @@ W1 kan delvis gå parallellt med W0.
 
 ## Status
 
+### W9 (2026-11-11): ersätt Emscripten, första fristående testvägen klar
+
+Målet är att bygga och köra wasm utan emcc/emsdk. Emscripten är i dag
+test-/runtimeinfrastruktur, inte en nödvändig del av vcc:s wasm-kodgenerator.
+Vcc har redan assembler, objektskrivare och `ld/wasmld.c`; W8 ersätter
+länkaren men den gamla testvägens emcc väljer fortfarande bibliotek och
+genererar JS. `wasm*-unknown-emscripten` anger nuvarande mål-ABI, inte att
+programmet måste byggas eller startas med Emscripten.
+
+| Steg | Leverans | Status och verifiering |
+| --- | --- | --- |
+| W9.1 | Libc-fri testväg: vpp -S för kodkrav, vpp -c för eget objekt, vlink för modul, liten Node-launcher | Klar för OPT1:s första regel: `bench/vcc-opt-rules.py --target wasm32-unknown-emscripten --run` och motsvarande wasm64. O0–O3 kör samma C-regression. Ingen emcc, LLVM-assembler, wasm-ld eller SDK används i denna wasm-väg. Verifierat med systemets `/usr/bin/node` 24.22.2 och därefter 25.9.0 utan SDK-sökväg. Tidigare Node 22 saknade table64 och kunde inte köra denna wasm64-modul. |
+| W9.2 | Egen test-runtime för ett uttryckligt urval av de vendrade C-sviterna | Planerad. Återanvänd portabel C ur `tests/rt/rt.c` eller granskade libc/compiler-rt-källor; bygg med vcc. Separera arm64-start, UART/exit- och FP-asm. Lägg små JS-importer för output/exit samt heap med memory.grow. Behåll samma deklarationer/testkontrakt och verifiera även referenskompilatorns program mot runtime. |
+| W9.3 | Komplett bibliotek-/builtinsstöd för testkorpuset, inklusive exceptionbaserad setjmp | Planerad. Inventera faktiska undefined-symboler; implementera eller vcc-bygg kompatibla __int128/binary128/complex-hjälpare och libc/libm-källor. __wasm_setjmp/__wasm_longjmp och __c_longjmp-taggen kräver egna ABI-/EH-tester. Saknade funktioner ger uttryckligt unsupported, inte falskt godkända eller tyst filtrerade tester. |
+| W9.4 | Fristående explorer och självbygge | Planerad. Ersätt em-config/sysroot-val, libc-header/runtimeleverans, startup/argv/stdout/exit och genererade VccModule/FS/callMain/ExitStatus med egen adapter. Packa filerna i VFS; behåll worker-API eller migrera worker/selfrun i samma steg. Testa filer, minnestillväxt, diagnostik och självbyggets stage2=stage3. |
+| W9.5 | GHA:s obligatoriska wasm-grind använder den egna kedjan | Påbörjad med W9.1-regressionerna i `ci/premerge.sh`; den gamla fullsviten behöver fortfarande emcc. Ta bort SDK-installationen först när samma beslutade korpus och ABI-tester går med W9.2–W9.4. Emscripten kan därefter finnas som valfri jämförelsereferens, aldrig som obligatorisk bygg-/runtimekomponent. |
+
+Det krävs inte en nyskriven full libc. Valda befintliga källor kan byggas
+av vcc, med dokumenterat ursprung/licens och testad wasm32/64-ABI. Den
+generiska optimeraren väntar inte på detta runtimearbete: W9.1 ger redan
+egen kedja för dess positiva kodkrav och sidoeffekts-/gränsvärdestester.
+Installation på värden och aktivering av emsdk är inte en produktleverans.
+
+Kodinventering: `bench/vcc-wasm.py` använder emcc för `rt/wasm.c` och
+slutlänk/JS; `rt/wasm.c` är bara assert-adaptern mot extern libc.
+`ccs/wasm/build.sh` använder Emscriptens sysroot och JS-fil-/processglue.
+`explorer/worker.js` och `selfrun.mjs` använder VccModule, FS och callMain.
+`ccs/wasm/mman.c` äger redan reservationspolicyn men behöver sbrk, pread,
+errno och standardbiblioteksfunktioner. Wasm-generatorn emitterar
+compiler-rt-anrop och EH-ramar men levererar ännu inte deras runtime.
+
+### Gemensamma optimeringar (2026-11-11): planerade för wasm32 och wasm64
+
+`PLAN-fas2.md`, **Gemensam optimerare utan SSA**, OPT0–OPT8 äger den nya
+optimeringsplanen. Wasm är obligatorisk konsument av gemensamma C-regler
+och strategier tillsammans med x86 och arm64. Anslutningar finns i
+`wexpr.c` (`wbinary`/`warith`, `wknown`, `wlocal`, `wvlanes`), `wstmt.c`
+(`wswitch`, nåbarhet) och `wcall.c:wcall`. Behåll operandstack, wasm-lokaler,
+strukturerade resultatblock och `br_table`; inga fysiska registerpass krävs.
+Gemensam inliningpolicy måste kompletteras med verkliga wasm-bindningar
+och retur-/goto-/cleanup-remappning. Native-only verktyg eller en x86-grön
+audit räknas inte som wasm-verifiering. Kör båda pekarbredderna, med
+scalar-fallback utan SIMD/tail-call-features. Rena extraktioner skall ge
+samma utdata; nya regler får avsedda, testade förbättringar på wasm också.
+Ingen regel implementerad i detta steg; befintliga W-statusar ändras inte.
+
 Före planen: wasm-*bygget* av vcc via emscripten (`ccs/wasm/`, commit 8e9f9da) och
 explorer-sidan.
 
@@ -370,3 +416,189 @@ felet till en varning som clang.
   -S, -E, Darwin -c/-S) mot bygget före, `vbench.py check --quick` 66/66;
   `vcc-diff batch --cmp --kernel` 873/873, `vcc-sema batch` 878/879, `vcc-driver`
   41/41, `vcc-ctests --suite vcc` 34/34.
+
+## Referenskontrakt för GCC-körtesterna
+
+`bench/vcc-wasm.py` respekterar GCC:s uttryckliga, ovillkorliga
+`dg-require-effective-target label_values` före kompilering: LLVM:s Wasm-mål
+kan inte representera GNU-etikettadresser som lämnar funktionen eller lagras i
+data. Dessa fall redovisas som `skip:unsupported-target`, inte som godkända test.
+Att en enklare etikettadress kan optimeras bort innebär inte stöd för kravet.
+Övriga målvillkor, exempelvis `indirect_jumps`, omfattas inte av denna regel.
+
+Verifierat med LLVM 23 på `20071220-1`, `20071220-2` (etikettadress i statisk
+tabell) och `990208-1` (etikettadress lämnar inline-funktionen). Utan
+målvillkorskontrollen ger LLVM fatala backendfel med stackdump. Dessa fel är
+fortfarande `error:oracle-compile` för test utan detta uttryckliga källkontrakt;
+diagnostiktext får aldrig omklassificera en krasch, timeout eller verktygsfel
+till en skip. `bench/test-runtime-oracle.py` kontrollerar båda vägarna.
+Oväntade `fail` och `error` skriver alltid svit/testnamn även utan `-v`.
+
+### OPT5: typade ramcellsoperationer (pågående)
+
+Wasm delar nu den exakta cell-/överlappsanalysen (`emit/rec/slots.c`) och
+värdetillgängligheten (`emit/rec/slot-values.c`) med arm64. Den separata
+adaptern `arch/wasm/emit/slots.c` registrerar typade load/store-, överlapps-
+och kontrollhändelser när kroppen produceras. Optimeraren väljer handlingar
+före renderingen; ingen assemblertext läses eller mönstermatchas. Stabila
+allokerings-ID:n följer direkta ramobjekt och deras structfält. Endast utvalda
+vidarebefordringar får egna wasm-locals, som inte återanvänds av temporärpoolen.
+
+Första delen ersätter exakta 4/8-bytes heltals- och flyttalsladdningar samt
+tar bort överskrivna butiker inom raka kodsegment vid O1–O3. Operanderna
+utvärderas fortfarande: en laddning blir `drop; local.get`, en borttagen
+butik konsumerar fortfarande adress och högerled. Överlapp, volatile och
+atomic utesluts via samma cellanalys; okända minnesoperationer, anrop, asm
+och strukturerade kontrollgränser bryter tillgängligheten. Objekt vars adress
+lämnar den direkta åtkomsten utesluts. VLA/dynamiska ramar och setjmp-funktioner
+optimeras ännu inte. Smala celler, allmänt olästa butiker och borttagning av
+överflödiga adressproducenter återstår.
+
+Verifierat lokalt: unity- och fil-för-fil-bygge samt 16 kombinationer i
+`bench/vcc-wasm-cells.py` (wasm32/64 × O0–O3 × två källfiler), med både
+kodformskrav och körning genom egna assemblern/länkaren och Node. Kraven
+visar borttagna laddningar från oberoende structfält, två butiker till en,
+tre laddningar till en efter asm-gräns, samt bevarade volatile/atomic-
+operationer. Körfallen täcker också högerledseffekter, union/bitfält,
+kontrollflöde och adresser som lämnar objektet. Kostnadsmätning och CI återstår;
+detta är delprogress, inte full O2-täckning.
+
+Kostnadsprov mot `opt/slot-values` (`e6bad4c`), båda värdbyggen med
+`-O3 -march=x86-64-v3`, Callgrind hela processen inklusive start, 500
+funktioner per prov, wasm32/64 och O1/O2:
+
+| Prov | Ökning i värdinstruktioner |
+|---|---:|
+| Ren heltalskod, ingen ram | +0,185–0,186 % |
+| Pekarladdningsslinga, ingen optimerbar ramcell | +0,298 % |
+| Struct med två fält och upprepade åtkomster | +8,19 % |
+
+Structprovet tar bort tre laddningar och en överskriven butik per funktion
+(sex minnesoperationer till två). Mätningen visar adapterkostnaden när den
+faktiskt arbetar; den uppfyller inte en generell kostnadsgräns på 1 % och
+påstår ingen förbättring i programmets körtid. Binär-/källhashar, kommandon
+och profiler finns lokalt i `work/opt-profile/wasm-cells-cost/result.json`.
+Det gamla bygget avvisas av det nya positiva kodformskravet. Samma 16
+kombinationer passerar också med ASan+UBSan. Kostnadsgranskning och CI är
+fortfarande öppna leveransvillkor.
+
+Separat liten kostnadsändring: högst 16 cellintervall sorteras med begränsad
+insättningssortering i den gemensamma klassificeraren; större mängder behåller
+`qsort`. Samma positiva 500-funktionsprov går från cirka +8,19 % till +7,03 %
+hela processens värdinstruktioner mot basen. De tolv assemblerutdata för
+kontroll-, sling- och structproven är byteidentiska före/efter sorteringsbytet.
+De sanitiserade intervall-/värdekontrakten och 16 wasm-kombinationer passerar;
+intervallprovet har också uttryckliga fall på båda sidor om gränsen 16.
+
+Ett kort blandat C-prov efter sorteringsändringen kompilerar elva befintliga
+regressionsfiler till wasm64 O2: djupa blandade uttryck, registerlokaler,
+bitkastningar, ramceller, heltalsregler, djupa villkor, potenstvådivisioner,
+atomics, minnesinbyggda och de nya ramcellsfallen. Resurshuvuden från LLVM 23
+anges uttryckligen. Summan för elva separata processer är 96 456 389 till
+97 034 041 värdinstruktioner (+0,599 %); enskilda filer ligger på +0,115 till
++1,337 %. `_BitInt`-runtimefilen avvisas redan av basbygget och räknas inte
+som godkänd eller in i summan. Kommandon, käll-/binärhashar och feltext finns
+lokalt i `work/opt-profile/wasm-cells-mixed-configured-cost/result.json`.
+Detta avgränsade kompileringsprov ersätter inte den ordinarie fulla
+prestandagrinden eller belägger programmets körtid; CI återstår.
+
+### OPT5 integrationskontroll (2026-11-11)
+
+På `opt/wasm-memory`, utifrån PR46 och wasm-steget: unity och fil-för-fil
+bygger. 6120/6120 arm64-objekt/text är identiska mot värdekärnan e6bad4c
+(2040 filer × O1-objekt/O2-objekt/O2-text), inklusive den nya portabla
+wasm_frame_cells-regressionen. Sanitiserade cell-/värdekontrakt och alla
+16 observable-kodkrav (fyra mål × O0–O3), med borttagen unread volatile
+store som negativ mutation, passerar. CI kör nu även observable-kontraktet.
+
+Hela egna wasm32-sviten: 149/149 pass, 30 körda XFAIL och 15
+referensundantag. `parenthesized_function` var felaktigt märkt som XFAIL
+även på wasm32; både f866a31-baslinjen och kandidaten passerar, så wasm32
+kräver nu PASS medan wasm64:s kvarstående signaturbugg fortsatt körs XFAIL.
+Hela egna wasm64-sviten: 153 pass, 31 körda XFAIL, nio referensundantag
+och ett synligt oracle-compile-fel: lokal clang23 kraschar på isinf_sign:s
+unsupported `_Float16`. Samma krasch reproduceras med f866a31-binären;
+ingen referenskrasch döljs eller räknas som PASS. Loggar:
+`work/opt-pr-tmp/wasm-memory-{own64,baseline-oracle,own32-final}.log`.
+Detta är en lokal referensbegränsning, inte ett påstående att hela
+wasm64-sviten är grön. Ny CI och bredare prestandagrind återstår.
+
+### OPT6: kortslutna konstanta kontrollbeslut (delsteg)
+
+Den målgemensamma hjälparen `emit/opt/control.c` används nu också i wasm:
+rena kombinationer av `__builtin_constant_p`, `!`, `&&`/`||` och literal
+`__builtin_strcmp` väljer bara den levande grenen vid O1–O3. Befintlig
+constant_p-policy och O0-utdata bevaras; okända eller effektfulla uttryck
+fortsätter genom den gamla vägen. `if_call_const` och `cond_dead_and`
+passerar wasm32/64 och är obligatoriska. Nytt SDK-fritt prov
+`bench/vcc-constant-control.py` kör alla fyra nivåer och ligger i CI för
+båda wasm-lägena och native-målen. Inlining, konstant switch med borttagna
+segment och WARN-statement expressions är fortsatt öppna; WARN-provet med
+volatile asm `nop` behöver dessutom stöd för den instruktionen i wasm-asm.
+Se OPT6-status i `PLAN-fas2.md` för bevis, kostnader och avgränsning.
+
+### OPT5 fortsättning: privata stores genom strukturerade joins
+
+På `1d8e29a` (flödesförälder `7691f6c`) använder den separata wasm-adaptern
+`arch/wasm/emit/flow.c` den gemensamma `emit/flow`-grafen och budgeterade
+masklösaren. Typade kontrollhändelser fångas från funktionsinträdet under
+ordinarie emission; unika öppningstoken skiljer branchmål även när lexikalt
+djup återanvänds. Ingen ny AST-vandring, SSA eller assemblertextparsning.
+
+Privata exakta 4/8-byte heltals-/flyttalsceller får överskrivnings-DSE över
+if/else-joins och nästlade diamanter. Rena kontrollfences bryter fortfarande
+lokal forwarding; riktiga minnes-/anropsbarriärer bryter också DSE och får
+bara sammanslås inom samma kontrollepok. Det bevarar barriären efter en tom
+gren på alla vägar. Befintlig renderer behåller adress-/RHS-effekter och
+lokala värdefångster. Full konvergens och separat staging krävs före ändring.
+Alla celler är konservativt levande vid utgång: generell unread-DSE ingår
+inte. Loopar, switch/dispatchers, goto, asm, SJLJ och dynamiska ramar avstår.
+Capture-, cell- och arbetsgränser ger fallback; O0/noopt avstår. Grafen
+byggs först efter komplett emission, exakt cellklassificering och verkliga
+upprepade privata stores genom en join.
+
+114 konfigurationer passerar genom egna verktyg och Node: 10 nya flödesfall
+(wasm32/64 × O0–O3 kodform/körning, samt O2/noopt-kodform), 16 befintliga
+cellfall och 88 opt-regelkontroller. Positiva fall har exakt en slutstore;
+volatile/atomic, läsningar före overwrite, utgångar, alias/escape, effekter,
+flyttalsbitar och uteslutna kontrollformer kontrolleras. En isolerad mutant
+utan fence-epokvillkor avvisas av den avsedda tom-else-kodkontrollen på
+båda bredderna; originalkällorna lämnas intakta. Unitybygge med `-j 1`,
+fristående syntaxkontroll av ändrade wasm-C-filer och oberoende review är
+klara. Snabbgrinden kör nu `bench/vcc-wasm-flow.py`; fjärr-CI återstår.
+
+Hela egna SDK-baserade sviter på samma revision avslutar med status 0:
+
+| Mål | PASS | Körda XFAIL | Skips |
+|---|---:|---:|---|
+| wasm32 | 178/178 | 36 | 16: 12 clang-reject, 1 noref, 3 ref-fail |
+| wasm64 | 182/182 | 37 | 11: 8 clang-reject, 1 noref, 2 ref-fail |
+
+Undantag räknas inte som PASS. Loggarna är
+`work/opt-pr-tmp/wasm-flow-full32.log` och `wasm-flow-full64.log`.
+Fokuserad validering, källbevis och isolerade mutantloggar/hashar finns i
+`build/linux/flow-evidence/`. Efter integration av exakt flödesförälder
+`f7327bd` till `1458a90` passerar samma 114 konfigurationer och fristående
+syntaxkontroll igen. 66 O0-/O2-noopt-par är byteidentiska mot föräldern;
+två ytterligare par avvisas av bådas befintliga ILP32-layoutassert i
+`atomic_ops`. SDK-helsvitssiffrorna ovan gäller fortfarande `1d8e29a`.
+
+Matchade clang 23-värdbyggen med `-O3 -march=x86-64-v3`, exakt `f7327bd`
+mot `1458a90`, ger följande separata Callgrind-underlag. Hela processen
+inklusive start räknas, wasm32/64 O2 `-S`, seriellt en gång per prov/binär:
+200-funktionskontroller med rak kod, villkor och uteslutna loopar kostar
++0,314–0,552 % värd-Ir med byteidentisk assembler och objekt. Två positiva
+diamantprov kostar +4,494–4,683 % extra värd-Ir; stores går från 800/1000
+till 200 och vanliga `-c`-objekt minskar 2,886–3,325 %. Aktiv analys är
+alltså dyrare än 1 % i dessa koncentrerade positiva prov.
+
+En fast blandning av befintliga regressionsfiler ger sammanlagt +0,106 %
+värd-Ir på wasm32 (10 filer) och +0,095 % på wasm64 (11 filer).
+`atomic_ops` utesluts på wasm32 eftersom båda byggen avvisar dess
+LP64-layoutassert; detta är inte PASS. Två assemblerutdata ändras per mål.
+Kommandon, hashmanifest, råprofiler, objekt och undantag finns i
+`build/linux/flow-evidence/cost/result.json`; hela tabellen står i
+`PLAN-fas2.md`. Relocerbar objektstorlek är inte laddad kodstorlek eller
+programfart, och detta ersätter inte full prestandagrind eller fjärr-CI.
+Programkörtidsvinst är fortfarande omätt; bredare kontrollflöde, generell
+DSE, OPT5/O2 och G5/G7 återstår.

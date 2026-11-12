@@ -1,0 +1,63 @@
+; values live across calls go to callee-saved registers or slots; arguments
+; and results in their ABI registers; a call result that is not used
+; REGS: 6,4,2,1
+; SWEEP: yes
+vir 1
+target x86_64-linux
+extern @g
+extern @h
+sig %s = (int, int, f64) -> int
+sig %g = (int, int) -> int
+sig %h = (f64, int) -> f64
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  v1:i64 = param 1.0
+  v2:f64 = param 2.0
+  v3:i64 = call @g %g (v1, v0)
+  v4:f64 = call @h %h (v2, v3)
+  v5:i64 = call @g %g (v3, 1:i64)
+  v6:i64 = add v5, v0
+  v7:i64 = add v6, v1
+  v8:f64 = fadd v4, v2
+  v9:i64 = f2s v8
+  v10:i64 = add v7, v9
+  v11:i64 = call @g %g (v10, v3)
+  ret v10
+}
+; ---
+; alloc @f regs 6,4,2,1
+func @f %s0 {
+b0:
+  v0:i64 = param 0.0                    ; -> r0
+  ; move r4 <- r0 (v0)
+  v1:i64 = param 1.0                    ; -> r1
+  ; move r5 <- r1 (v1)
+  v2:f64 = param 2.0                    ; -> f0
+  ; move f3 <- f0 (v2)
+  ; move r0 <- r5 (v1)
+  ; move r1 <- r4 (v0)
+  v3:i64 = call @g %s1 (v1, v0)         ; -, r0, r1 -> r0 [ss0 later]
+  ; move f0 <- f3 (v2)
+  ; store ss0 <- r0 (v3)
+  v4:f64 = call @h %s2 (v2, v3)         ; -, f0, r0 -> f0 [ss1 later]
+  ; reload r0 <- v3 (ss0)
+  ; remat r1 <- 1
+  ; store ss1 <- f0 (v4)
+  v5:i64 = call @g %s1 (v3, 1:i64)      ; -, r0, r1 -> r0
+  v6:i64 = add v5, v0                   ; r0, r4 -> r0
+  v7:i64 = add v6, v1                   ; r0, r5 -> r0
+  ; reload f0 <- v4 (ss1)
+  v8:f64 = fadd v4, v2                  ; f0, f3 -> f0
+  v9:i64 = f2s v8                       ; f0 -> r1
+  v10:i64 = add v7, v9                  ; r0, r1 -> r0
+  ; reload r1 <- v3 (ss0)
+  ; move r4 <- r0 (v10)
+  v11:i64 = call @g %s1 (v10, v3)       ; -, r0, r1 -> r0
+  ; move r0 <- r4 (v10)
+  ret v10                               ; r0
+}
+; spill slots: ss0(8): v3 ss1(8): v4
+; callee-saved: r4 (b0) r5 (b0) f3 (b0)
+; spills 2 reloads 3 remats 1 moves 8 swaps 0 stores 2; edges 0: moves 0 reloads 0 remats 0 stores 0 xchg 0; slots 2 callee 3
+; sweep @f: 144 configurations, 0 failed

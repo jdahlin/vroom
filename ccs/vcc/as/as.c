@@ -143,6 +143,27 @@ VPRIV void fold(As *a, Val *v)
 	}
 }
 
+/* v is a temporary defined by a deferred expression (elf_expr_sym) */
+static int is_xsym(As *a, const Val *v)
+{
+	int op; ElfVal x, y;
+	return v->add && !v->sub && !v->c && elf_expr_get(a->o, v->add, &op, &x, &y);
+}
+
+/* a value the layout settles: a constant, a label difference, a deferred expression */
+static int deferrable(As *a, const Val *v)
+{
+	return is_abs(a, (Val *)v) || (v->add && v->sub) || is_xsym(a, v);
+}
+
+/* x op y as a temporary the layout defines (x and y deferrable) */
+static void defer_op(As *a, int op, Val *x, const Val *y)
+{
+	uint32_t t = tmpsym(a);
+	elf_expr_sym(a->o, t, op, *x, *y);
+	*x = (Val){ t, 0, 0 };
+}
+
 typedef struct { As *a; const char *p, *e; } Lx;
 
 static int expr(Lx *l, Val *v);
@@ -186,6 +207,12 @@ static int parse_number(Lx *l, Val *v)
 			for (const char *q = s; q < p; q++) x = x * 10 + (uint64_t)(*q - '0');
 		}
 	}
+	/* U, L, UL, ULL ... after a number: accepted and ignored, as MC (C headers' constants in .S) */
+	{
+		const char *q = p;
+		while (q < e && (*q == 'u' || *q == 'U' || *q == 'l' || *q == 'L')) q++;
+		if (q > p && (q >= e || !isidc((unsigned char)*q))) p = q;
+	}
 	l->p = p;
 	*v = (Val){ 0, 0, (int64_t)x };
 	return 0;
@@ -211,11 +238,29 @@ static int primary(Lx *l, Val *v)
 		if (c == '+') return 0;
 		if (c == '-') {
 			if (v->add && v->sub) { uint32_t t = v->add; v->add = v->sub; v->sub = t; v->c = -v->c; return 0; }
+			if (is_xsym(a, v)) { Val z = { 0, 0, 0 }, y = *v; *v = z; defer_op(a, '-', v, &y); return 0; }
 			if (!is_abs(a, v)) return err(a, "unsupported negation of a symbol");
 			v->c = -v->c; return 0;
 		}
+		if (is_xsym(a, v) || (v->add && v->sub)) {	/* ~x = x ^ -1, !x = x == 0 */
+			Val k = { 0, 0, c == '~' ? -1 : 0 };
+			defer_op(a, c == '~' ? '^' : 'E', v, &k);
+			if (c == '!') { Val one = { 0, 0, 0 }; Val m = *v; *v = one; defer_op(a, '-', v, &m); }	/* (GNU !: 1, not -1) */
+			return 0;
+		}
 		if (!is_abs(a, v)) return err(a, "expected absolute expression");
 		v->c = c == '~' ? ~v->c : !v->c;
+		return 0;
+	}
+	if (c == '%' && a->o->machine == EM_X86_64) {
+		/* a register as a value (.if \\reg == %rsp): its name's hash, the same for the same register */
+		const char *p = l->p + 1, *s = p;
+		while (p < l->e && (isidc((unsigned char)*p) || c_digit((unsigned char)*p))) p++;
+		if (p == s) return err(a, "unknown token in expression");
+		uint64_t h = 1469598103934665603ull;
+		for (const char *q = s; q < p; q++) h = (h ^ (uint64_t)c_lower((unsigned char)*q)) * 1099511628211ull;
+		l->p = p;
+		*v = (Val){ 0, 0, (int64_t)(h >> 2) | ((int64_t)1 << 61) };
 		return 0;
 	}
 	if (c_digit((unsigned char)c)) return parse_number(l, v);
@@ -252,6 +297,15 @@ static int primary(Lx *l, Val *v)
 		}
 		uint32_t y = sym(a, s, (size_t)(p - s));
 		*v = (Val){ y, 0, 0 };
+		if (a->nralias) {
+			const char *rn = as_ralias(a, y);
+			if (rn) {	/* an alias of a register: as the register */
+				uint64_t h = 1469598103934665603ull;
+				for (const char *q = rn; *q; q++) h = (h ^ (uint64_t)c_lower((unsigned char)*q)) * 1099511628211ull;
+				*v = (Val){ 0, 0, (int64_t)(h >> 2) | ((int64_t)1 << 61) };
+				return 0;
+			}
+		}
 		if (a->vcount) {
 			Var *vr = var_slot(a, y, 0);
 			if (vr && vr->v.add != (uint32_t)-1) *v = vr->v;
@@ -301,12 +355,19 @@ static int apply(As *a, int op, Val *x, Val *y)
 {
 	if (op == '+' || op == '-') {
 		Val r = *y;
+		if ((is_xsym(a, x) || is_xsym(a, y)) && deferrable(a, x) && deferrable(a, y)) {
+			defer_op(a, op, x, y);
+			return 0;
+		}
 		if (op == '-') { r.add = y->sub; r.sub = y->add; r.c = -y->c; }
 		if ((x->add && r.add) || (x->sub && r.sub)) {
 			/* try to cancel: x.add - r.sub etc. handled by fold below */
 			Val t = { x->add, r.sub, 0 }, u = { r.add, x->sub, 0 };
 			fold(a, &t); fold(a, &u);
-			if (t.add && t.sub && u.add && u.sub) return err(a, "expression too complex for a relocation");
+			if (t.add && t.sub && u.add && u.sub) {
+				if (deferrable(a, x) && deferrable(a, y)) { defer_op(a, op, x, y); return 0; }	/* (a-b) - (c-d) across frags */
+				return err(a, "expression too complex for a relocation");
+			}
 			Val res = { 0, 0, x->c + r.c + t.c + u.c };
 			if (t.add) res.add = t.add; if (t.sub) res.sub = t.sub;
 			if (u.add) { if (res.add) return err(a, "expression too complex"); res.add = u.add; }
@@ -324,8 +385,8 @@ static int apply(As *a, int op, Val *x, Val *y)
 	if (!is_abs(a, x) || !is_abs(a, y)) {
 		/* (label difference) op constant, e.g. (end - start) >> 5 with end not yet placed:
 		   a temporary symbol that gets its value once the layout is known */
-		int diff_x = is_abs(a, x) || (x->add && x->sub), diff_y = is_abs(a, y) || (y->add && y->sub);
-		if (!diff_x || !diff_y || !strchr("*/%LR&|^!", op)) return err(a, "expected absolute expression");
+		int diff_x = deferrable(a, x), diff_y = deferrable(a, y);
+		if (!diff_x || !diff_y || !strchr("*/%LR&|^!AOEN<>lg", op)) return err(a, "expected absolute expression");
 		uint32_t t = tmpsym(a);
 		elf_expr_sym(a->o, t, op, *x, *y);
 		*x = (Val){ t, 0, 0 };
@@ -429,6 +490,13 @@ static inline const char *find_stop(const char *p, const char *e)
 	return p;
 }
 
+/* x86-64 text: '#' starts a comment too */
+static inline const char *find_stop86(const char *p, const char *e)
+{
+	while (p < e && !sstop[(uint8_t)*p] && *p != '#') p++;
+	return p;
+}
+
 /* The general case: copy the statement into a->sb without comments. */
 static __attribute__((noinline)) size_t next_stmt_copy(As *a, Frame *f)
 {
@@ -460,8 +528,12 @@ static __attribute__((noinline)) size_t next_stmt_copy(As *a, Frame *f)
 				continue;
 			}
 		}
+		if (c == '#' && a->o->machine == EM_X86_64) {	/* x86: a comment to the end of the line */
+			while (p < e && *p != '\n') p++;
+			continue;
+		}
 		if (!sstop[(uint8_t)c]) {	/* plain run: copy it whole */
-			const char *q = find_stop(p + 1, e);
+			const char *q = a->o->machine == EM_X86_64 ? find_stop86(p + 1, e) : find_stop(p + 1, e);
 			size_t k = (size_t)(q - p);
 			if (k > cap - n) k = cap - n;
 			memcpy(o + n, p, k); n += k; p = q;
@@ -506,6 +578,7 @@ static inline __attribute__((always_inline)) size_t next_stmt(As *a, Frame *f, c
 	f->sline = f->line;
 	const char *q = p;
 	int bol = f->bol;
+	if (a->o->machine == EM_X86_64) goto slow;	/* ('#' comments: the copying scanner) */
 	if (bol) {
 		while (q < e && (*q == ' ' || *q == '\t' || *q == '\r')) q++;
 		if (q < e && *q != '\n') bol = 0;
@@ -583,14 +656,14 @@ static int d_loc(As *a, const char *p, const char *e);
 static void loc_row(As *a);
 static uint64_t frag_base(As *a, uint32_t frag);
 static int d_prefalign(As *a, const char *p, const char *e);
-enum { VI_PREFALIGN, VI_ALIGN, VI_ULEB, VI_SLEB };
+enum { VI_PREFALIGN, VI_ALIGN, VI_ULEB, VI_SLEB, VI_X86BR, VI_SKIP };	/* VI_SKIP: .skip v, fill with v settled by the layout */	/* VI_X86BR: jmp (code 16) / jcc (code cc) to v */
 static struct VarItem *var_item(As *a, int kind);
 /* .section name [, "flags" [, @type [, entsize]]] ; push = .pushsection */
 static int d_section(As *a, const char *p, const char *e, int push)
 {
 	Sv name;
 	if (parse_name(a, &p, e, &name)) return -1;
-	uint32_t type = 0; uint64_t flags = 0; uint32_t entsize = 0, group = 0;
+	uint32_t type = 0; uint64_t flags = 0; uint32_t entsize = 0, group = 0, linksec = 0, linksym = 0;
 	int have_flags = 0, comdat = 0;
 	int64_t sub = 0;
 	p = ws(p, e);
@@ -642,6 +715,16 @@ static int d_section(As *a, const char *p, const char *e, int push)
 						entsize = (uint32_t)es;
 						p = ws(p, e);
 					}
+					if ((flags & SHF_LINK_ORDER) && p < e && *p == ',') {
+						/* ,sym: the section it follows is sym's */
+						p++;
+						Sv ls;
+						if (parse_name(a, &p, e, &ls)) return -1;
+						uint32_t ly = elf_sym_lookup(a->o, ls.s, (uint32_t)ls.n);
+						if (ly && (elf_symp(a->o, ly)->flags & ESYM_DEFINED) && !(elf_symp(a->o, ly)->flags & ESYM_ABS))
+							linksec = elf_frag(a->o, elf_symp(a->o, ly)->frag)->sec, linksym = ly;
+						p = ws(p, e);
+					}
 					if ((flags & SHF_GROUP) && p < e && *p == ',') {
 						p++;
 						Sv g;
@@ -680,17 +763,20 @@ static int d_section(As *a, const char *p, const char *e, int push)
 		a->ss[a->nss].cur = a->cur; a->ss[a->nss].prev = a->prev; a->nss++;
 	}
 	if ((flags & SHF_GROUP) && !group) return err(a, "expected group name");
-	uint32_t s = elf_section(a->o, name.s, name.n, type, flags, entsize, group);
+	uint32_t s = linksec ? elf_section_lo(a->o, name.s, name.n, type, flags, entsize, group, linksec, linksym)
+			     : elf_section(a->o, name.s, name.n, type, flags, entsize, group);
 	if (group) { elf_reg(a->o, group); elf_sec(a->o, s)->comdat = (uint8_t)comdat; }
 	{	/* MC: a code section is at least 4-aligned once switched to */
 		ElfSec *se = elf_sec(a->o, s);
-		if ((se->flags & SHF_EXECINSTR) && se->align < 2) se->align = 2;
+		if ((se->flags & SHF_EXECINSTR) && se->align < 2 && a->o->machine != EM_X86_64) se->align = 2;
 	}
 	switch_to(a, elf_subsection(a->o, s, (int32_t)sub));
 	return 0;
 }
 
 /* ---------------------------------------------------------------- data */
+
+static _Thread_local uint32_t as_dtype;	/* x86 data with sym@MOD: the relocation type emit_value uses */
 
 VPRIV int emit_value(As *a, int size, Val *v)
 {
@@ -716,6 +802,8 @@ VPRIV int emit_value(As *a, int size, Val *v)
 	}
 	memset(p, 0, (size_t)size);
 	uint32_t t = size == 8 ? R_AARCH64_ABS64 : size == 4 ? R_AARCH64_ABS32 : size == 2 ? R_AARCH64_ABS16 : R_VCC_ABS8;
+	if (o->machine == EM_X86_64)
+		t = as_dtype ? as_dtype : size == 8 ? R_X86_64_64 : size == 4 ? R_X86_64_32 : size == 2 ? R_X86_64_16 : R_X86_64_8;
 	elf_fixup(o, a->cur, off, p, t, *v);
 	return 0;
 }
@@ -840,7 +928,27 @@ static int d_data(As *a, const char *p, const char *e, int size)
 	for (;;) {
 		Val v;
 		if (val_expr(a, &p, e, &v)) return -1;
-		if (emit_value(a, size, &v)) return -1;
+		p = ws(p, e);
+		if (a->o->machine == EM_X86_64 && p < e && *p == '@') {
+			/* sym@DTPOFF, @TPOFF, @GOTOFF, @GOTPCREL, @PLT (debug info of TLS, tables) */
+			const char *m = ++p;
+			while (p < e && isidc((unsigned char)*p)) p++;
+			Sv w = { m, (uint32_t)(p - m) };
+			as_dtype = sveq(w, "DTPOFF") ? (size == 8 ? R_X86_64_DTPOFF64 : R_X86_64_DTPOFF32) :
+				   sveq(w, "TPOFF") ? (size == 8 ? R_X86_64_TPOFF64 : R_X86_64_TPOFF32) :
+				   sveq(w, "GOTOFF") ? R_X86_64_GOTOFF64 : sveq(w, "GOTPCREL") ? R_X86_64_GOTPCREL :
+				   sveq(w, "PLT") ? R_X86_64_PLT32 : 0;
+			if (!as_dtype) return err(a, "invalid variant '%.*s'", (int)w.n, w.s);
+			p = ws(p, e);
+			if (p < e && (*p == '+' || *p == '-')) {
+				int64_t k;
+				if (abs_expr(a, &p, e, &k)) return -1;
+				v.c += k;
+			}
+		}
+		int r = emit_value(a, size, &v);
+		as_dtype = 0;
+		if (r) return -1;
 		p = ws(p, e);
 		if (p >= e) return 0;
 		if (*p != ',') return err(a, "unexpected token in directive");
@@ -1098,6 +1206,22 @@ static int d_leb(As *a, const char *p, const char *e, int sgn)
 static int d_space(As *a, const char *p, const char *e)
 {
 	int64_t n, fill = 0;
+	{
+		/* a count only the layout knows (the kernel's ALTERNATIVE: -((b-a)-(d-c) > 0) * ...) */
+		const char *q = p;
+		Val v;
+		if (val_expr(a, &q, e, &v)) return -1;
+		if (!is_abs(a, &v)) {
+			if (!deferrable(a, &v)) return err(a, "expected absolute expression");
+			q = ws(q, e);
+			if (q < e && *q == ',') { q++; if (abs_expr(a, &q, e, &fill)) return -1; }
+			elf_data(a->o, a->cur);
+			struct VarItem *it = var_item(a, VI_SKIP);
+			it->v = v;
+			it->fill = (uint8_t)fill;
+			return 0;
+		}
+	}
 	if (abs_expr(a, &p, e, &n)) return -1;
 	p = ws(p, e);
 	if (p < e && *p == ',') { p++; if (abs_expr(a, &p, e, &fill)) return -1; }
@@ -1110,6 +1234,27 @@ static int d_space(As *a, const char *p, const char *e)
 static int d_fill(As *a, const char *p, const char *e)
 {
 	int64_t n, size = 1, val = 0;
+	{
+		/* .fill end - ., 1, 0xcc: a count the layout settles (the IDT entry stubs), as .skip */
+		const char *q = p;
+		Val v;
+		if (val_expr(a, &q, e, &v)) return -1;
+		if (!is_abs(a, &v)) {
+			int64_t fsz = 1, fv = 0;
+			q = ws(q, e);
+			if (q < e && *q == ',') {
+				q++; if (abs_expr(a, &q, e, &fsz)) return -1;
+				q = ws(q, e);
+				if (q < e && *q == ',') { q++; if (abs_expr(a, &q, e, &fv)) return -1; }
+			}
+			if (fsz != 1 || !deferrable(a, &v)) return err(a, "expected absolute expression");
+			elf_data(a->o, a->cur);
+			struct VarItem *it = var_item(a, VI_SKIP);
+			it->v = v;
+			it->fill = (uint8_t)fv;
+			return 0;
+		}
+	}
 	if (abs_expr(a, &p, e, &n)) return -1;
 	p = ws(p, e);
 	if (p < e && *p == ',') {
@@ -1273,10 +1418,56 @@ static int d_size(As *a, const char *p, const char *e)
 }
 
 /* name = expr / .set name, expr */
+/* x86: the register sym was made an alias of, or NULL */
+VPRIV const char *as_ralias(As *a, uint32_t y)
+{
+	for (uint32_t i = a->nralias; i-- > 0;)
+		if (a->ralias[i].sym == y)
+			return a->ralias[i].reg[0] ? a->ralias[i].reg : NULL;
+	return NULL;
+}
+
+static int d_org(As *a, const char *p, const char *e);
 static int assign(As *a, Sv n, const char *p, const char *e)
 {
+	if (n.n == 1 && n.s[0] == '.')	/* . = expr: .org expr */
+		return d_org(a, p, e);
 	uint32_t y = sym(a, n.s, n.n);
 	Val v;
+	if (a->o->machine == EM_X86_64) {
+		/* name = %reg: the register by another name (crypto code), not a symbol */
+		const char *q = ws(p, e), *r;
+		const char *t = e;
+		while (t > q && (t[-1] == ' ' || t[-1] == '\t')) t--;
+		const char *ar = NULL;
+		if (q < t && isids((unsigned char)*q) && a->nralias) {	/* X_ = X0: an alias of an alias */
+			for (r = q; r < t && isidc((unsigned char)*r); r++)
+				;
+			if (r == t) ar = as_ralias(a, elf_sym_lookup(a->o, q, (uint32_t)(t - q)));
+		}
+		if (ar || (q < t && *q == '%')) {
+			if (!ar)
+				for (r = q + 1; r < t && (isidc((unsigned char)*r) || c_digit((unsigned char)*r)); r++)
+					;
+			else
+				q = ar - 1, r = ar + strlen(ar);
+			if (r == (ar ? r : t) && r - q - 1 < 8) {
+				if (a->nralias == a->raliascap) {
+					uint32_t nc = a->raliascap ? a->raliascap * 2 : 32;
+					void *nb = rget(&a->defs, sizeof *a->ralias * nc);
+					if (a->nralias) memcpy(nb, a->ralias, sizeof *a->ralias * a->nralias);
+					a->ralias = nb, a->raliascap = nc;
+				}
+				a->ralias[a->nralias].sym = y;
+				memset(a->ralias[a->nralias].reg, 0, 8);
+				memcpy(a->ralias[a->nralias].reg, q + 1, (size_t)(r - q - 1));
+				a->nralias++;
+				return 0;
+			}
+		}
+		for (uint32_t i = 0; i < a->nralias; i++)	/* (redefined as a value: no longer an alias) */
+			if (a->ralias[i].sym == y) a->ralias[i].reg[0] = 0;
+	}
 	if (val_expr(a, &p, e, &v)) return -1;
 	elf_reg(a->o, y);
 	elf_reg(a->o, v.add); elf_reg(a->o, v.sub);
@@ -1984,6 +2175,12 @@ static int directive(As *a, Sv w, const char *p, const char *e)
 	const char *d = w.s + 1;
 	size_t n = w.n - 1;
 #define IS(x) (n == sizeof(x) - 1 && !memcmp(d, x, n))
+	if (a->o->machine == EM_X86_64) {
+		if (IS("att_syntax") || IS("code64"))
+			return 0;	/* (AT&T, 64-bit: what x86-64 text is anyway) */
+		if (IS("intel_syntax"))
+			return err(a, "Intel syntax is not supported");
+	}
 	switch (d[0]) {
 	case 'a':
 		if (IS("altmacro")) { a->altmacro = 1; return 0; }
@@ -2000,7 +2197,8 @@ static int directive(As *a, Sv w, const char *p, const char *e)
 			a->asg[a->nasg++] = sym(a, nm.s, nm.n);
 			return 0;
 		}
-		if (IS("align") || IS("p2align")) return d_align(a, p, e, 1);
+		if (IS("p2align") || (IS("align") && a->o->machine != EM_X86_64)) return d_align(a, p, e, 1);
+		if (IS("align")) return d_align(a, p, e, 0);	/* (x86: a byte count, as .balign) */
 		if (IS("ascii")) return d_ascii(a, p, e, 0);
 		if (IS("asciz")) return d_ascii(a, p, e, 1);
 		if (IS("arch") || IS("arch_extension")) return 0;
@@ -2068,6 +2266,7 @@ static int directive(As *a, Sv w, const char *p, const char *e)
 		break;
 	case 'g':
 		if (IS("globl") || IS("global")) return d_symattr(a, p, e, 'g');
+
 		break;
 	case 'h':
 		if (IS("hword") || IS("half")) return d_data(a, p, e, 2);
@@ -2215,7 +2414,7 @@ static int directive(As *a, Sv w, const char *p, const char *e)
 			a->nsv++;
 			return 0;
 		}
-		if (IS("word")) return d_data(a, p, e, 4);
+		if (IS("word")) return d_data(a, p, e, a->o->machine == EM_X86_64 ? 2 : 4);	/* (x86: 2 bytes, as GNU as) */
 		if (IS("weak")) return d_symattr(a, p, e, 'w');
 		if (IS("warning")) {
 			Sv t = trim(p, e);
@@ -2263,6 +2462,20 @@ static int statement(As *a, const char *p, const char *e)
 	int rc, lab = 0;
 	if (w.s[0] == '.' && cond_dir(a, w, w.s + w.n, e, &rc)) return rc;
 	if (cond_ignore(a)) return 0;
+	/* a quoted label: "name": (names with bytes outside ASCII, as clang writes them) */
+	while (p < e && *p == '"') {
+		const char *t = p;
+		Sv qn;
+
+		if (parse_name(a, &t, e, &qn)) return -1;
+		t = ws(t, e);
+		if (t >= e || *t != ':') break;
+		if (define_label(a, qn.s, qn.n)) return -1;
+		p = ws(t + 1, e);
+		if (p >= e) return 0;
+		w = first_word(p, e);
+		lab = 1;
+	}
 	/* labels */
 	const char *q;
 	for (;;) {
@@ -2303,6 +2516,8 @@ static int statement(As *a, const char *p, const char *e)
 	if (m) return invoke(a, m, w.s + w.n, e);
 	if (w.s[0] == '.') return directive(a, w, w.s + w.n, e);
 	if (a->dwlocp) loc_row(a);
+	if (a->o->machine == EM_X86_64)
+		return x64_instruction(a, w.s, e, w.n);
 	return instruction(a, w.s, e, w.n);
 }
 
@@ -2400,9 +2615,37 @@ enum { CF_DEF_CFA, CF_DEF_CFA_OFFSET, CF_DEF_CFA_REGISTER, CF_ADJUST, CF_OFFSET,
        CF_NEGATE_RA };
 
 /* a DWARF register: x0-x30/w0-w30, sp/wsp, fp, lr, v/b/h/s/d/q 0-31 (64+), or a number */
+/* x86-64's DWARF register numbers (the SysV psABI's) */
+static int cfi_reg86(const char *s, size_t n)
+{
+	static const char *const nm[17] = { "rax", "rdx", "rcx", "rbx", "rsi", "rdi", "rbp", "rsp",
+					    "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15", "rip" };
+	char b[8];
+
+	if (n >= sizeof b)
+		return -1;
+	for (size_t i = 0; i < n; i++)
+		b[i] = (char)c_lower((unsigned char)s[i]);
+	b[n] = 0;
+	for (int i = 0; i < 17; i++)
+		if (!strcmp(b, nm[i]))
+			return i;
+	if (!strncmp(b, "xmm", 3) && c_digit((unsigned char)b[3]) && atoi(b + 3) < 16)
+		return 17 + atoi(b + 3);
+	return -1;
+}
+
 static int cfi_reg(As *a, const char **pp, const char *e, uint32_t *r)
 {
 	const char *p = ws(*pp, e), *s = p;
+	if (a->o->machine == EM_X86_64 && p < e && *p == '%') {
+		int k;
+		s = ++p;
+		while (p < e && (isidc((unsigned char)*p) || c_digit((unsigned char)*p))) p++;
+		if ((k = cfi_reg86(s, (size_t)(p - s))) < 0) return err(a, "invalid register name");
+		*pp = p; *r = (uint32_t)k;
+		return 0;
+	}
 	while (p < e && isidc((unsigned char)*p)) p++;
 	size_t n = (size_t)(p - s);
 	if (!n) return err(a, "expected register");
@@ -2473,7 +2716,7 @@ static int d_cfi(As *a, Sv w, const char *p, const char *e)
 		memset(f, 0, sizeof *f);
 		Sv t = trim(p, e);
 		if (t.n) { if (!sveq(t, "simple")) return err(a, "unexpected token"); f->simple = 1; }
-		f->start = here(a); f->first = a->ncfi; f->ra = 30;
+		f->start = here(a); f->first = a->ncfi; f->ra = a->o->machine == EM_X86_64 ? 16 : 30;
 		a->infde = 1;
 		return 0;
 	}
@@ -2545,7 +2788,8 @@ static void cfi_finish(As *a)
 	ElfObj *o = a->o;
 	if (a->infde) { err(a, "unfinished frame"); return; }
 	if (!a->nfde || a->cfi_eh) return;
-	uint32_t sec = elf_section(o, ".eh_frame", 9, SHT_PROGBITS, SHF_ALLOC, 0, 0);
+	int x86 = o->machine == EM_X86_64;
+	uint32_t sec = elf_section(o, ".eh_frame", 9, x86 ? 0x70000001u /* SHT_X86_64_UNWIND */ : SHT_PROGBITS, SHF_ALLOC, 0, 0);
 	uint32_t fr = sec;
 	if (elf_sec(o, sec)->align < 3) elf_sec(o, sec)->align = 3;
 	elf_data(o, fr);
@@ -2586,10 +2830,13 @@ static void cfi_finish(As *a)
 			if (f->sig) b.p[b.n++] = 'S';
 			if (f->bkey) b.p[b.n++] = 'B';
 			b.p[b.n++] = 0;
-			uleb(&b, 1); sleb(&b, -4);
+			uleb(&b, 1); sleb(&b, x86 ? -8 : -4);
 			b.p[b.n++] = (uint8_t)f->ra;
 			uleb(&b, 1); b.p[b.n++] = 0x1b;	/* augmentation: pcrel sdata4 */
-			if (!f->simple) { b.p[b.n++] = 0x0c; uleb(&b, 31); uleb(&b, 0); }
+			if (!f->simple && x86) {	/* cfa = rsp + 8, the return address at cfa - 8 */
+				b.p[b.n++] = 0x0c; uleb(&b, 7); uleb(&b, 8);
+				b.p[b.n++] = 0x80 | 16; uleb(&b, 1);
+			} else if (!f->simple) { b.p[b.n++] = 0x0c; uleb(&b, 31); uleb(&b, 0); }
 			while ((b.n - st) & 3) b.p[b.n++] = 0;
 			uint32_t len = (uint32_t)(b.n - st - 4);
 			memcpy(b.p + st, &len, 4);
@@ -2627,7 +2874,7 @@ static void cfi_finish(As *a)
 			case CF_OFFSET: case CF_REL_OFFSET: {
 				int64_t v = c->off;
 				if (c->op == CF_REL_OFFSET) v -= cfa;
-				v /= -4;
+				v /= x86 ? -8 : -4;
 				if (v < 0) { b.p[b.n++] = 0x11; uleb(&b, c->reg); sleb(&b, v); }
 				else if (c->reg < 64) { b.p[b.n++] = (uint8_t)(0x80 | c->reg); uleb(&b, (uint64_t)v); }
 				else { b.p[b.n++] = 0x05; uleb(&b, c->reg); uleb(&b, (uint64_t)v); }
@@ -2658,8 +2905,8 @@ static void cfi_finish(As *a)
 	for (uint32_t oi = 0; oi < a->nfde; oi++) {
 		uint32_t i = ord[oi];
 		struct Fde *f = &a->fde[i];
-		elf_fixup(o, fr, at + pcbs[i], q + pcbs[i], R_AARCH64_PREL32, (Val){ f->start, 0, 0 });
-		elf_fixup(o, fr, at + pcbs[i] + 4, q + pcbs[i] + 4, R_AARCH64_ABS32, (Val){ f->end, f->start, 0 });
+		elf_fixup(o, fr, at + pcbs[i], q + pcbs[i], x86 ? R_X86_64_PC32 : R_AARCH64_PREL32, (Val){ f->start, 0, 0 });
+		elf_fixup(o, fr, at + pcbs[i] + 4, q + pcbs[i] + 4, x86 ? R_X86_64_32 : R_AARCH64_ABS32, (Val){ f->end, f->start, 0 });
 	}
 }
 
@@ -2680,6 +2927,24 @@ static struct VarItem *var_item(As *a, int kind)
 	v->kind = (uint8_t)kind; v->frag = a->cur;
 	a->cur = elf_split(a->o, a->cur);
 	return v;
+}
+
+/* an x86-64 jump to v (cc 16: jmp): short while a local target in this section is
+ * in range, else the near form with a fixup (MC's relaxation) */
+VPRIV int as_branch(As *a, int cc, Val v, int mod)
+{
+	struct VarItem *it;
+
+	(void)mod;
+	elf_code(a->o, a->cur);
+	fold(a, &v);
+	elf_reg(a->o, v.add);	/* (the symbol table's order: where the fixup would be made, MC) */
+	elf_reg(a->o, v.sub);
+	it = var_item(a, VI_X86BR);
+	it->code = (uint8_t)cc;
+	it->v = v;
+	it->size = 2;
+	return 0;
 }
 
 /* .prefalign p2, end, nop|fill: align to min(2^p2, the power of two that
@@ -2707,16 +2972,21 @@ static int d_prefalign(As *a, const char *p, const char *e)
 }
 
 /* sizes before the variable items are final: offsets with the current estimates */
+static _Thread_local const uint64_t *var_prev;	/* sizes of the previous relaxation pass (MC's stale offsets), or NULL */
+
 static uint64_t frag_base(As *a, uint32_t frag)
 {
 	ElfObj *o = a->o;
 	uint64_t off = 0;
 	for (uint32_t f = elf_frag(o, frag)->sec; f && f != frag; f = elf_frag(o, f)->next) {
 		off += elf_frag(o, f)->size;
-		if (elf_frag(o, f)->cont && elf_frag(o, f)->aux) off += a->pfa[elf_frag(o, f)->aux - 1].size;
+		if (elf_frag(o, f)->cont && elf_frag(o, f)->aux)
+			off += var_prev ? var_prev[elf_frag(o, f)->aux - 1] : a->pfa[elf_frag(o, f)->aux - 1].size;
 	}
 	return off;
 }
+
+
 
 static int sym_secoff(As *a, uint32_t y, uint32_t *sec, int64_t *off)
 {
@@ -2727,11 +2997,36 @@ static int sym_secoff(As *a, uint32_t y, uint32_t *sec, int64_t *off)
 	return 0;
 }
 
+static int fits_i8(int64_t v) { return v >= -128 && v <= 127; }
+
 static int leb_len(int64_t v, int sgn)
 {
 	uint8_t t[16]; Buf8 b = { t, 0 };
 	if (sgn) sleb(&b, v); else uleb(&b, (uint64_t)v);
 	return (int)b.n;
+}
+
+/* v under the current layout: label differences in one section, deferred expressions */
+static int lay_eval(As *a, Val v, int64_t *out, int depth)
+{
+	int64_t x = v.c, k[2] = { 0, 0 };
+	uint32_t y[2] = { v.add, v.sub }, sc[2] = { 0, 0 };
+	int rel[2] = { 0, 0 };
+	if (depth > 64) return -1;
+	for (int i = 0; i < 2; i++) {
+		if (!y[i]) continue;
+		ElfSym *s = elf_symp(a->o, y[i]);
+		int op; ElfVal ex, ey;
+		if (s->flags & ESYM_ABS) k[i] = (int64_t)s->value;
+		else if (elf_expr_get(a->o, y[i], &op, &ex, &ey)) {
+			int64_t p, q;
+			if (lay_eval(a, ex, &p, depth + 1) || lay_eval(a, ey, &q, depth + 1) || !elf_expr_op(op, p, q, &k[i])) return -1;
+		} else if (!sym_secoff(a, y[i], &sc[i], &k[i])) rel[i] = 1;
+		else return -1;
+	}
+	if (rel[0] != rel[1] || (rel[0] && sc[0] != sc[1])) return -1;
+	*out = x + k[0] - k[1];
+	return 0;
 }
 
 static int var_eval(As *a, struct VarItem *v, int64_t *val)
@@ -2752,8 +3047,12 @@ static void var_finish(As *a)
 {
 	ElfObj *o = a->o;
 	for (uint32_t i = 0; i < a->npfa; i++) elf_frag(o, a->pfa[i].frag)->aux = i + 1;
-	for (int it = 0;; it++) {
+	uint64_t *prev = rget(&a->defs, sizeof(uint64_t) * (a->npfa + 1));
+	/* pass -1 lays out the items with every jump short (MC's first layout); then each pass
+	   relaxes the jumps against the previous pass's layout and lays the rest out again */
+	for (int it = -1;; it++) {
 		int changed = 0;
+		for (uint32_t i = 0; i < a->npfa; i++) prev[i] = a->pfa[i].size;
 		for (uint32_t i = 0; i < a->npfa; i++) {
 			struct VarItem *v = &a->pfa[i];
 			uint64_t end = frag_base(a, v->frag) + elf_frag(o, v->frag)->size, ns = 0;
@@ -2765,6 +3064,10 @@ static void var_finish(As *a)
 					uint64_t size = (uint64_t)eo - frag_base(a, nf);
 					al = 1;
 					while (al < size && al < ((uint64_t)1 << v->p2)) al <<= 1;
+					if (o->machine == EM_X86_64) {	/* x86: never lowered (a size and an alignment inside can oscillate) */
+						if (al < (uint64_t)v->v.c) al = (uint64_t)v->v.c;
+						v->v.c = (int64_t)al;
+					}
 				}
 				ns = (al - (end & (al - 1))) & (al - 1);
 				if (v->max && ns > v->max) ns = 0;
@@ -2772,6 +3075,36 @@ static void var_finish(As *a)
 					ElfSec *s = elf_sec(o, elf_frag(o, v->frag)->sec);
 					unsigned lg = (unsigned)__builtin_ctzll(al);
 					if (lg > s->align) s->align = lg;
+				}
+			} else if (v->kind == VI_SKIP) {
+				int64_t x;
+				var_prev = prev;
+				int r = lay_eval(a, v->v, &x, 0);
+				var_prev = NULL;
+				if (r) { err(a, "expected absolute expression"); return; }
+				ns = x > 0 ? (uint64_t)x : 0;
+			} else if (v->kind == VI_X86BR) {
+				/* the short form while the target is a local label of this section within reach */
+				uint64_t big = v->code == 16 ? 5 : 6;
+				Val t = v->v;
+				uint32_t sc; int64_t to;
+
+				fold(a, &t);
+				ns = v->size;
+				if (ns == 2 && it >= 0) {
+					ElfSym *y = t.add ? elf_symp(o, t.add) : NULL;
+					int r;
+
+					uint64_t pend;
+
+					/* every jump against the previous pass's layout, its own place too (MC's
+					   relaxOnce relaxes a section's fragments, then lays it out again) */
+					var_prev = prev;
+					pend = frag_base(a, v->frag) + elf_frag(o, v->frag)->size;
+					r = !y || t.sub || y->bind != STB_LOCAL || sym_secoff(a, t.add, &sc, &to) || sc != elf_frag(o, v->frag)->sec;
+					var_prev = NULL;
+					if (r || !fits_i8(to + t.c - (int64_t)(pend + 2)))
+						ns = big;
 				}
 			} else {
 				int64_t x;
@@ -2781,7 +3114,7 @@ static void var_finish(As *a)
 			}
 			if (ns != v->size) { v->size = ns; changed = 1; }
 		}
-		if (!changed) break;
+		if (!changed && it >= 0) break;
 		if (it == 64) { err(a, "relaxation did not converge"); return; }
 	}
 	for (uint32_t i = 0; i < a->npfa; i++) {
@@ -2789,7 +3122,27 @@ static void var_finish(As *a)
 		uint64_t pad = v->size;
 		elf_frag(o, v->frag)->aux = 0;
 		if (!pad) continue;
+		uint64_t qoff = elf_frag(o, v->frag)->size;
 		uint8_t *q = elf_grow(o, v->frag, pad);
+		if (v->kind == VI_X86BR) {
+			Val t = v->v;
+
+			fold(a, &t);
+			if (pad == 2) {
+				uint32_t sc; int64_t to = 0;
+
+				sym_secoff(a, t.add, &sc, &to);
+				q[0] = (uint8_t)(v->code == 16 ? 0xeb : 0x70 + v->code);
+				q[1] = (uint8_t)(to + t.c - (int64_t)(frag_base(a, v->frag) + qoff + 2));
+				continue;
+			}
+			if (v->code == 16) { q[0] = 0xe9; }
+			else { q[0] = 0x0f; q[1] = (uint8_t)(0x80 + v->code); }
+			memset(q + pad - 4, 0, 4);
+			t.c -= 4;
+			elf_fixup(o, v->frag, qoff + pad - 4, q + pad - 4, R_X86_64_PLT32, t);	/* (MC: every branch) */
+			continue;
+		}
 		if (v->kind == VI_ULEB || v->kind == VI_SLEB) {
 			int64_t x; var_eval(a, v, &x);
 			uint8_t t[16]; Buf8 b = { t, 0 };
@@ -2802,7 +3155,8 @@ static void var_finish(As *a)
 			memcpy(q, t, pad);
 			continue;
 		}
-		if (!v->code) { memset(q, v->fill, pad); continue; }
+		if (!v->code || v->kind == VI_SKIP) { memset(q, v->fill, pad); continue; }
+		if (o->machine == EM_X86_64) { elf_x86_nops(q, pad); continue; }
 		uint64_t z = pad & 3;
 		memset(q, 0, z);
 		for (q += z, pad -= z; pad; pad -= 4, q += 4) { q[0] = 0x1f; q[1] = 0x20; q[2] = 0x03; q[3] = 0xd5; }
@@ -2824,9 +3178,9 @@ static int dw_num(As *a, const char **pp, const char *e, uint64_t *v)
 	return 0;
 }
 
-static uint32_t dw_dir(As *a, Sv d)
+static uint32_t dw_dir_from(As *a, Sv d, uint32_t from)
 {
-	for (uint32_t i = 0; i < a->ndwd; i++) if (a->dwd[i].n == d.n && !memcmp(a->dwd[i].s, d.s, d.n)) return i;
+	for (uint32_t i = from; i < a->ndwd; i++) if (a->dwd[i].n == d.n && !memcmp(a->dwd[i].s, d.s, d.n)) return i;
 	if (a->ndwd == a->dwdcap) {
 		uint32_t nc = a->dwdcap ? a->dwdcap * 2 : 16;
 		Sv *t = rget(&a->defs, sizeof *t * nc);
@@ -2836,6 +3190,8 @@ static uint32_t dw_dir(As *a, Sv d)
 	a->dwd[a->ndwd] = d;
 	return a->ndwd++;
 }
+
+static uint32_t dw_dir(As *a, Sv d) { return dw_dir_from(a, d, 0); }
 
 /* .file N ["dir"] "name" [md5 0x...] */
 static int d_dwfile(As *a, const char *p, const char *e)
@@ -2885,12 +3241,14 @@ static int d_dwfile(As *a, const char *p, const char *e)
 	}
 	if (n >= a->ndwf) a->ndwf = (uint32_t)n + 1;
 	struct DwFile *f = &a->dwf[n];
+	int split = 0;
 	if (!two && n) {	/* "sub/y.h": directory "sub", name "y.h" (MC's tryGetFile) */
 		const char *sl = 0;
 		for (uint32_t i = 0; i < name.n; i++) if (name.s[i] == '/') sl = name.s + i;
 		if (sl && sl + 1 < name.s + name.n && sl > name.s) {
 			dir = (Sv){ name.s, (uint32_t)(sl - name.s) };
 			name = (Sv){ sl + 1, (uint32_t)(name.s + name.n - sl - 1) };
+			split = 1;
 		}
 	}
 	if (!a->ndwd) {	/* directory 0: the root file's, else the compilation directory */
@@ -2905,7 +3263,8 @@ static int d_dwfile(As *a, const char *p, const char *e)
 	if (n == 0) a->dwd[0] = dir;
 	f->name = name; f->set = 1; f->hasmd5 = (uint8_t)hasmd5;
 	if (hasmd5) memcpy(f->md5, md5, 16);
-	f->dir = n == 0 || !dir.n ? 0 : dw_dir(a, dir);
+	/* (a directory split from the name goes in MC's list of the others: never entry 0) */
+	f->dir = n == 0 || !dir.n ? 0 : split && a->o->machine == EM_X86_64 ? dw_dir_from(a, dir, 1) : dw_dir(a, dir);
 	if (!two && n && f->dir == 0 && dir.n) f->dir = dw_dir(a, dir);
 	a->dwtab = 1;
 	return 0;
@@ -3108,13 +3467,14 @@ static void dwline_finish(As *a)
 	memcpy(q, b.p, b.n);
 	uint32_t lsym = elf_sec(o, elf_frag(o, ls)->sec)->sym;
 	for (uint32_t i = 0; i < nsfix; i++)
-		elf_fixup(o, sec, at + sfix[2 * i], q + sfix[2 * i], R_AARCH64_ABS32, (Val){ lsym, 0, (int64_t)sfix[2 * i + 1] });
+		elf_fixup(o, sec, at + sfix[2 * i], q + sfix[2 * i], o->machine == EM_X86_64 ? R_X86_64_32 : R_AARCH64_ABS32,
+			  (Val){ lsym, 0, (int64_t)sfix[2 * i + 1] });
 	for (uint32_t i = 0; i < nafix; i++) {
 		struct DwLoc *l = &a->dwl[afix[2 * i + 1]];
 		uint32_t y = elf_sym_anon(o, ".Ltmp", 5);
 		elf_symp(o, y)->flags |= ESYM_TEMP;
 		elf_define(o, y, l->frag, l->off);
-		elf_fixup(o, sec, at + afix[2 * i], q + afix[2 * i], R_AARCH64_ABS64, (Val){ y, 0, 0 });
+		elf_fixup(o, sec, at + afix[2 * i], q + afix[2 * i], o->machine == EM_X86_64 ? R_X86_64_64 : R_AARCH64_ABS64, (Val){ y, 0, 0 });
 	}
 }
 

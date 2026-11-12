@@ -31,7 +31,10 @@
  * No per-symbol malloc: everything comes from bump arenas.
  */
 #include "ld.h"
+#include "../arch/x64/reloc.h"
 #include "../lib/buf.h"
+#include "../lib/defer.h"
+#include "../lib/ckd.h"
 #include "../lib/vec.h"
 #include "../lib/ldhash.h"
 #include "../lib/vperf.h"
@@ -58,6 +61,9 @@
 #include <unistd.h>
 
 #define NONE 0xffffffffu
+
+static bool x86_ld;		/* the inputs are x86-64 (arch/x64/ld/x64.inc) */
+static uint64_t tls_start;	/* x86: the PT_TLS start (dtpoff) */
 
 #include "ldelf.h"
 
@@ -94,12 +100,13 @@ static void diag(const char *kind, const char *fmt, va_list ap)
 	va_end(aq);
 	if (!m)
 		m = small;
-	pthread_mutex_lock(&errlock);
-	if (prev_multi)
-		fputc('\n', errf);
-	prev_multi = strchr(m, '\n') != NULL;
-	fprintf(errf, "%s: %s: %s\n", argv0, kind, m);
-	pthread_mutex_unlock(&errlock);
+	{
+		VLOCK(errlock);
+		if (prev_multi)
+			fputc('\n', errf);
+		prev_multi = strchr(m, '\n') != NULL;
+		fprintf(errf, "%s: %s: %s\n", argv0, kind, m);
+	}
 	if (m != small)
 		free(m);
 }
@@ -108,9 +115,8 @@ static void error(const char *fmt, ...)
 	int n = atomic_fetch_add(&nerrors, 1);
 	if (error_limit && n >= error_limit) {
 		if (n == error_limit) {
-			pthread_mutex_lock(&errlock);
+			VLOCK(errlock);
 			fprintf(errf, "%s: error: too many errors emitted, stopping now\n", argv0);
-			pthread_mutex_unlock(&errlock);
 		}
 		return;
 	}
@@ -200,10 +206,11 @@ static void *alloc(size_t n)
 		size_t bs = n + sizeof(Block) + 16 > ARENA_BLOCK ? n + sizeof(Block) + 16 : ARENA_BLOCK;
 		Block *b = bigalloc(bs);
 		b->size = bs;
-		pthread_mutex_lock(&blocklock);
-		b->next = blocks;
-		blocks = b;
-		pthread_mutex_unlock(&blocklock);
+		{
+			VLOCK(blocklock);
+			b->next = blocks;
+			blocks = b;
+		}
 		acur = (uint8_t *)b + 32;
 		aend = (uint8_t *)b + bs;
 	}
@@ -258,16 +265,18 @@ static void *worker(void *unused)
 	(void)unused;
 	unsigned seen = 0;
 	for (;;) {
-		pthread_mutex_lock(&plock);
-		while (job.gen == seen)
-			pthread_cond_wait(&pcv, &plock);
-		seen = job.gen;
-		pthread_mutex_unlock(&plock);
+		{
+			VLOCK(plock);
+			while (job.gen == seen)
+				pthread_cond_wait(&pcv, &plock);
+			seen = job.gen;
+		}
 		run_job();
-		pthread_mutex_lock(&plock);
-		if (--job.active == 0)
-			pthread_cond_signal(&pdone);
-		pthread_mutex_unlock(&plock);
+		{
+			VLOCK(plock);
+			if (--job.active == 0)
+				pthread_cond_signal(&pdone);
+		}
 	}
 	return NULL;
 }
@@ -287,20 +296,20 @@ static void pfor(size_t n, pfn fn, void *arg)
 			pthread_create(&pool[t], NULL, worker, NULL);
 		pool_started = nthreads;
 	}
-	pthread_mutex_lock(&plock);
-	job.fn = fn;
-	job.arg = arg;
-	job.n = n;
-	atomic_store(&job.next, 0);
-	job.active = pool_started - 1;
-	job.gen++;
-	pthread_cond_broadcast(&pcv);
-	pthread_mutex_unlock(&plock);
+	{
+		VLOCK(plock);
+		job.fn = fn;
+		job.arg = arg;
+		job.n = n;
+		atomic_store(&job.next, 0);
+		job.active = pool_started - 1;
+		job.gen++;
+		pthread_cond_broadcast(&pcv);
+	}
 	run_job();
-	pthread_mutex_lock(&plock);
+	VLOCK(plock);
 	while (job.active)
 		pthread_cond_wait(&pdone, &plock);
-	pthread_mutex_unlock(&plock);
 }
 
 /* ---------------- options ---------------- */
@@ -1851,11 +1860,10 @@ static bool obj_valid(Obj *o, const Ehdr *eh)
 	if (nsh == 0 || nsh > (n - eh->e_shoff) / sizeof(Shdr))
 		BAD("%s: section header table goes past the end of the file", o->path);
 	o->nsh = nsh;
-	for (uint32_t s = 1; s < o->nsh; s++) {
+	for (uint32_t s = 0; s < o->nsh; s++) {	/* (0 too: shstrndx and sh_link may name it) */
 		const Shdr *h = &o->sh[s];
 
-		if (h->sh_type != SHT_NOBITS && h->sh_type != SHT_NULL &&
-		    (h->sh_offset > n || h->sh_size > n - h->sh_offset))
+		if (h->sh_type != SHT_NOBITS && h->sh_type != SHT_NULL && !vckd_range(h->sh_offset, h->sh_size, n))
 			BAD("%s: section %u goes past the end of the file", o->path, s);
 		if (h->sh_addralign & (h->sh_addralign - 1))
 			BAD("%s: section %u: sh_addralign is not a power of 2", o->path, s);
@@ -1960,11 +1968,13 @@ static void parse_obj(void *arg, size_t i)
 		o->buf = NULL;
 		return;
 	}
-	if (eh->e_type != 1 || eh->e_machine != 183) {
-		error("%s: not an AArch64 relocatable object", o->path);
+	if (eh->e_type != 1 || (eh->e_machine != 183 && eh->e_machine != 62)) {
+		error("%s: not an AArch64 or x86-64 relocatable object", o->path);
 		o->buf = NULL;
 		return;
 	}
+	if (eh->e_machine == 62)
+		x86_ld = true;	/* (one machine for all inputs: checked once loaded) */
 	if (!obj_valid(o, eh)) {
 		o->buf = NULL;
 		return;
@@ -1986,6 +1996,7 @@ static bool is_content(const Shdr *s)
 	switch (s->sh_type) {
 	case SHT_PROGBITS: case SHT_NOBITS: case SHT_NOTE: case SHT_INIT_ARRAY:
 	case SHT_FINI_ARRAY: case SHT_PREINIT_ARRAY:
+	case 0x70000001: /* SHT_X86_64_UNWIND: x86-64's .eh_frame */
 		return true;
 	default:
 		return false;
@@ -2037,6 +2048,56 @@ static void fill_isecs(void *arg, size_t i)
 				error("%s:(%s): writable SHF_MERGE section is not supported", o->path, is->name);
 			is->kind = K_MERGE_IN;
 		}
+	}
+}
+
+/* .note.gnu.property: lld keeps one synthetic note holding the AND of every
+ * input's FEATURE_1_AND (an input without the note counts as 0).  Only the
+ * common case is done: when the AND is 0 every input note is dropped, as lld
+ * emits none; otherwise the inputs stay as they are (TODO: the merged note) */
+static void drop_gnu_property(void)
+{
+	const uint32_t want = x86_ld ? 0xc0000002u : 0xc0000000u;	/* X86 / AARCH64 FEATURE_1_AND */
+	uint32_t and = ~0u;
+
+	if (opt.relocatable)
+		return;
+	for (uint32_t i = 0; i < objs.n && and; i++) {
+		Obj *o = objs.v[i];
+		uint32_t f = 0;
+
+		for (uint32_t s = 0; o->buf && s < o->nsh; s++) {
+			const Shdr *h = &o->sh[s];
+
+			if (h->sh_type != SHT_NOTE || strcmp(isecs.v[o->isec0 + s].name, ".note.gnu.property"))
+				continue;
+			const uint8_t *p = o->buf + h->sh_offset, *e = p + h->sh_size;
+			while (e - p >= 16) {
+				uint32_t nn, dn, ty;
+				memcpy(&nn, p, 4); memcpy(&dn, p + 4, 4); memcpy(&ty, p + 8, 4);
+				const uint8_t *d = p + 12 + ((nn + 3) & ~3u), *de = d + dn;
+				if (de > e || d > e)
+					break;
+				for (const uint8_t *q = d; ty == 5 && de - q >= 8;) {
+					uint32_t pt, pz;
+					memcpy(&pt, q, 4); memcpy(&pz, q + 4, 4);
+					if (pt == want && pz >= 4 && de - q >= 12)
+						memcpy(&f, q + 8, 4);
+					q += 8 + ((pz + 7) & ~7u);
+				}
+				p = d + ((dn + 7) & ~7u);
+			}
+		}
+		and &= f;
+	}
+	if (and)
+		return;
+	for (uint32_t i = 0; i < objs.n; i++) {
+		Obj *o = objs.v[i];
+
+		for (uint32_t s = 0; o->buf && s < o->nsh; s++)
+			if (o->sh[s].sh_type == SHT_NOTE && !strcmp(isecs.v[o->isec0 + s].name, ".note.gnu.property"))
+				isecs.v[o->isec0 + s].kind = K_NONE;
 	}
 }
 
@@ -2708,8 +2769,8 @@ static VVEC(uint32_t) orphans;
 static void commit_section(OSec *os, ISec *is)
 {
 	if (os->type != is->type) {
-		if (!os->has_input)
-			os->type = is->type;
+		if (!os->has_input)	/* (lld's .eh_frame is PROGBITS, x86-64's input too) */
+			os->type = is->type == 0x70000001 && !opt.relocatable ? SHT_PROGBITS : is->type;
 		else if (os->type != SHT_NOBITS || is->type != SHT_NOBITS)
 			os->type = SHT_PROGBITS;
 	}
@@ -3375,6 +3436,9 @@ static void assign_file_offsets(void)
 		if (p->p_type == PT_TLS) {
 			uint64_t a = p->p_align ? p->p_align : 1;
 			tls_tp = p->p_vaddr - alignup(16, a);
+			if (x86_ld)	/* variant 2: the thread pointer at the block's end */
+				tls_tp = p->p_vaddr + alignup(p->p_memsz, a);
+			tls_start = p->p_vaddr;
 			has_tls = true;
 		}
 	}
@@ -3462,6 +3526,8 @@ static void put_sym(Sym *d, uint8_t *strbuf, uint64_t *stroff, const char *name,
 /* ---------------- writing sections ---------------- */
 
 #include "../arch/a64/ld/relocate.inc"
+static _Atomic bool got_seen;
+#include "../arch/x64/ld/x64.inc"
 
 static VVEC(uint32_t) wjobs;		/* ISecs to write */
 
@@ -3480,8 +3546,12 @@ static void write_isec(void *arg, size_t j)
 		memcpy(dst, is->data, is->size);
 		if (is->ehcie)	/* an FDE's CIE pointer: from the field to its CIE */
 			wr32(dst + 4, (uint32_t)(isec_va(si, 4) - isec_va(is->ehcie - 1, 0)));
-		if (is->nrela && (is->flags & SHF_ALLOC || !opt.relocatable))
-			relocate_isec(si, dst);
+		if (is->nrela && (is->flags & SHF_ALLOC || !opt.relocatable)) {
+			if (x86_ld)
+				x64_relocate_isec(si, dst);
+			else
+				relocate_isec(si, dst);
+		}
 		break;
 	case K_MERGE: {
 		Merge *mg = &merges.v[is->aux];
@@ -3642,7 +3712,7 @@ static Obj *make_stub_obj(const char **names, uint32_t n)
 	char *shstr = str + strsz;
 	memcpy(eh->e_ident, "\177ELF\2\1\1", 7);
 	eh->e_type = 1;
-	eh->e_machine = 183;
+	eh->e_machine = x86_ld ? 62 : 183;
 	eh->e_shoff = sizeof(Ehdr);
 	eh->e_shnum = 5;
 	eh->e_shstrndx = 1;
@@ -3710,7 +3780,7 @@ static const char *find_lib(const char *name)
 static bool parse_args(int argc, char **argv)
 {
 	bool whole = false;
-	opt.max_page = 65536;
+	opt.max_page = 0;	/* (default by machine once the inputs are read: arm64 64 KB, x86-64 4 KB, as lld) */
 	opt.relax = true;
 	opt.comment = "Linker: vld (vroom)";
 	for (int i = 1; i < argc; i++) {
@@ -4012,6 +4082,8 @@ static void load_inputs(void)
 		VVEC_PUSH(objs, o, alloc);
 	}
 	pfor(objs.n, parse_obj, NULL);
+	if (!opt.max_page)
+		opt.max_page = x86_ld ? 4096 : 65536;
 }
 
 static void alloc_isecs(uint32_t from)
@@ -4704,7 +4776,7 @@ static void write_headers(void)
 	Ehdr *eh = (Ehdr *)out;
 	memcpy(eh->e_ident, "\177ELF\2\1\1", 7);
 	eh->e_type = opt.relocatable ? 1 : opt.shared ? 3 : 2;
-	eh->e_machine = 183;
+	eh->e_machine = x86_ld ? 62 : 183;
 	eh->e_version = 1;
 	/* lld: -e, else ENTRY(), else _start (silently absent) */
 	const char *en = opt.entry ? opt.entry : entry_name ? entry_name : "_start";
@@ -5151,9 +5223,12 @@ static void write_fills(void)
 		if (topcmds.v[c].kind != C_OSEC)
 			continue;
 		OSec *os = &osecs.v[topcmds.v[c].idx];
-		if (!os->live || !os->fill || os->type == SHT_NOBITS)
+		/* without =FILL lld pads executable sections with the target's trap
+		   instruction: int3 on x86-64 */
+		bool trap = !os->fill && x86_ld && (os->flags & SHF_EXECINSTR);
+		if (!os->live || (!os->fill && !trap) || os->type == SHT_NOBITS)
 			continue;
-		uint32_t v = (uint32_t)ev_value(eval(os->fill));
+		uint32_t v = trap ? 0xccccccccu : (uint32_t)ev_value(eval(os->fill));
 		if (!v)
 			continue;
 		uint8_t f[4] = {v >> 24, v >> 16, v >> 8, v};	/* big-endian (lld readFill) */
@@ -5198,7 +5273,7 @@ static bool any_got(void)
 {
 	atomic_store(&got_seen, false);
 	if (!opt.relocatable)
-		pfor(isecs.n, find_got, NULL);
+		pfor(isecs.n, x86_ld ? x64_find_got : find_got, NULL);
 	return atomic_load(&got_seen);
 }
 
@@ -5268,7 +5343,9 @@ static void add_synthetic_sections(void)
 		c->size = n;
 		c->entsize = 1;
 	}
-	if (pic)
+	/* (lld always has .rela.dyn: dropped when empty, but a script that names it
+	   keeps an empty RELA output section) */
+	if (pic || (x86_ld && opt.script && !opt.relocatable))
 	{
 		reladyn_isec = new_isec(".rela.dyn", K_RELADYN, SHT_RELA, SHF_ALLOC, 8);
 		isecs.v[reladyn_isec].entsize = sizeof(Rela);
@@ -5613,6 +5690,10 @@ static void report_undefined(void)
 			continue;
 		if ((kget(&s->first) >> 32) >= objs.n)	/* referenced only by the script */
 			continue;
+		/* x86-64 executables relax every GD/LD sequence to LE, and its call
+		   to __tls_get_addr goes with it (lld scans no relocation there) */
+		if (x86_ld && !opt.shared && !strcmp(gname(gorder.v[i]), "__tls_get_addr"))
+			continue;
 		if (opt.no_undefined || !opt.shared) {
 			undef_refs(gorder.v[i], objs.v[kget(&s->first) >> 32], n < 2);	/* (lld: spelling for the first two) */
 			n++;
@@ -5715,6 +5796,7 @@ static int run(int argc, char **argv)
 	alloc_isecs(0);
 	pfor(objs.n, fill_isecs, NULL);
 	dedup_comdats();
+	drop_gnu_property();
 	pfor(objs.n, resolve_obj, NULL);
 	pfor(objs.n, check_dups, NULL);
 	phase("resolve symbols");
@@ -5775,7 +5857,7 @@ static int run(int argc, char **argv)
 		for (uint32_t i = 0; i < objs.n; i++)
 			if (objs.v[i]->buf && objs.v[i]->firstg)
 				objs.v[i]->lgot = calloc(objs.v[i]->firstg, 1);
-	pfor(isecs.n, scan_relocs, NULL);
+	pfor(isecs.n, x86_ld ? x64_scan_relocs : scan_relocs, NULL);
 	/* .got: one slot per symbol, globals in symbol id order, then the locals by
 	 * file (lld postScanRelocations) */
 	for (uint32_t g = 0, ng = atomic_load(&ngsyms); g < ng; g++)
@@ -6360,7 +6442,7 @@ static int ld_relocatable(void)
 	Ehdr *eh = (Ehdr *)rbuf;
 	memcpy(eh->e_ident, "\177ELF\2\1\1", 7);
 	eh->e_type = 1;
-	eh->e_machine = 183;
+	eh->e_machine = x86_ld ? 62 : 183;
 	eh->e_version = 1;
 	eh->e_shoff = shoff_r;
 	eh->e_ehsize = sizeof(Ehdr);
@@ -6485,12 +6567,11 @@ int ld_main(int argc, char **argv, int dirfd, FILE *err)
 {
 	if (first_input_macho(argc, argv, dirfd))
 		return ld_macho(argc, argv, dirfd, err);
-	pthread_mutex_lock(&ldlock);
+	VLOCK(ldlock);
 	errf = err ? err : stderr;
 	dirfd_base = dirfd;
 	int rc = run(argc, argv);
 	free_arenas();
-	pthread_mutex_unlock(&ldlock);
 	return rc;
 }
 

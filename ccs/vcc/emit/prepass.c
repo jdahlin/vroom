@@ -1,6 +1,21 @@
 /* vcc code generator: prepass: what the emitter needs to know before it starts */
 #include "emitimpl.h"
 
+/* Object alignment can exceed the C type alignment. The x86-64 SysV ABI
+ * gives arrays of at least 16 bytes 16-byte alignment, unless the declaration
+ * explicitly requests an alignment (matching Clang's aligned attribute). */
+VPRIV uint32_t sym_align(cc *c, uint32_t s)
+{
+	const sym *y = &c->syms[s];
+	uint32_t a = talign(c, y->ty);
+
+	if (y->align > a)
+		a = y->align;
+	if (X86(c) && !y->align && is_array(c, y->ty) && tsize(c, y->ty) >= 16 && a < 16)
+		a = 16;
+	return a;
+}
+
 /* ---------------- prepass: what the emitter needs to know before it starts ---------------- */
 
 /* Declarations of SVE types are useful without SVE lowering (notably libc's
@@ -116,7 +131,9 @@ static void mark_written(pre *P, uint32_t n, bool addr)
 	for (;;) {
 		const node *x = N(n);
 
-		if (x->op == N_MEMBER || (x->op == N_CAST && (x->aux == CK_NOP || x->aux == CK_DECAY))) {
+		if (x->op == N_COMMA) {
+			n = x->b;	/* match the emitters' comma-lvalue addressing */
+		} else if (x->op == N_MEMBER || (x->op == N_CAST && (x->aux == CK_NOP || x->aux == CK_DECAY))) {
 			n = x->a;
 		} else if (x->op == N_INDEX) {
 			const node *b = N(x->a);
@@ -129,12 +146,12 @@ static void mark_written(pre *P, uint32_t n, bool addr)
 			break;
 		}
 	}
-	if (N(n)->op == N_VAR) {
+	if (N(n)->op == N_VAR && is_local_var(c, N(n)->a)) {
 		P->E->sflags[N(n)->a] |= SA_WRITTEN | SA_AESC, P->E->ffacts[N(n)->a] |= FF_BAD;
 		if (addr && is_local_var(P->c, N(n)->a))
 			P->E->lnoreg[N(n)->a] = 1;
 	}
-	else if (N(n)->op == N_COMPLIT)
+	else if (N(n)->op == N_COMPLIT && is_local_var(c, N(n)->b))
 		P->E->sflags[N(n)->b] |= SA_WRITTEN;
 }
 
@@ -164,12 +181,13 @@ static void note_fwrite(pre *P, uint32_t s, uint32_t rhs)
 			k = cv.q == 0 ? FF_NONNEG | FF_ZERO : !(cv.q >> 127) && (cv.q << 1) <= ((u128)0x7fff << 113) ? FF_NONNEG : 0;
 		else
 			k = v == 0 && !__builtin_signbit(v) ? FF_NONNEG | FF_ZERO : v >= 0 ? FF_NONNEG : 0;
+	} else if (N(rhs)->op == N_COMMA && (N(rhs)->aux & NC_FP_NONNEG)) {
+		k = FF_NONNEG;
 	} else if (N(rhs)->op == N_CALL && (callee = direct_callee(c, N(rhs)->a, &ref))) {
 		const sym *fn = &c->syms[callee];
-		const vident *nm = &vintern_ents[fn->name];
 		const ctype *ft = T(c, fn->ty);
-		int want = nm->len == 4 && !memcmp(nm->s, "fabs", 4) ? TY_DOUBLE :
-			   nm->len == 5 && !memcmp(nm->s, "fabsf", 5) ? TY_FLOAT : -1;
+		int want = EM_IDENT_IS(fn->name, "fabs") ? TY_DOUBLE :
+			   EM_IDENT_IS(fn->name, "fabsf") ? TY_FLOAT : -1;
 		bool enabled = !P->E->o->no_builtin;
 		/* The per-name option table belongs to the front end; conservatively
 		   avoid library facts whenever any named builtin was disabled. */
@@ -190,7 +208,7 @@ static void note_assign(pre *P, uint32_t s, uint32_t rhs)
 	emitter *E = P->E;
 	cval cv;
 
-	if (E->sflags[s] & SA_WRITTEN)
+	if (!is_local_var(c, s) || (E->sflags[s] & SA_WRITTEN))
 		return;
 	if (!is_integer(c, c->syms[s].ty) || !cc_eval(c, rhs, &cv) || cv.kind != CV_INT) {
 		E->sflags[s] |= SA_WRITTEN;
@@ -206,10 +224,139 @@ static void note_assign(pre *P, uint32_t s, uint32_t rhs)
 }
 
 /*
+ * Per function, 1 when the TU names it exactly once and that is the callee of a
+ * call: a static function clang -O2 inlines whatever its size (its only copy).
+ * Every node counts, unevaluated ones and those of functions never emitted too,
+ * so a count only errs high (no inlining).
+ */
+VPRIV uint8_t *fn_once(cc *c)
+{
+	uint8_t *r = calloc((size_t)c->nsym + 64, 1);	/* refs in bits 0-1, calls in 2-3 (saturating) */
+
+	if (!r)
+		return NULL;
+	for (uint32_t n = 1; n < c->nnode; n++) {
+		const node *x = &c->nodes[n];
+		uint32_t s;
+
+		if (x->op == N_VAR) {
+			s = x->a;
+			if (s < c->nsym && c->syms[s].kind == S_FUNC && ((r[s = canon_sym(c, s)] & 3) != 3))
+				r[s]++;
+		} else if (x->op == N_CALL) {
+			const node *f = &c->nodes[x->a];
+
+			while (f->op == N_CAST && (f->aux == CK_FDECAY || f->aux == CK_NOP || f->aux == CK_P2P))
+				f = &c->nodes[f->a];
+			if (f->op == N_VAR && f->a < c->nsym && c->syms[f->a].kind == S_FUNC && ((r[s = canon_sym(c, f->a)] >> 2) != 3))
+				r[s] += 4;
+		}
+	}
+	for (uint32_t s = 0; s < c->nsym; s++)
+		r[s] = r[s] == (1 | 4);	/* (bit 1: calls setjmp, set by the prepass) */
+	return r;
+}
+
+/* VIR could inline a call to s, its size aside (wk_can_inline's other rules, conservatively) */
+VPRIV bool inl_cand(emitter *E, cc *c, uint32_t s)
+{
+	const sym *y = &c->syms[s];
+	const ctype *ft;
+
+	if (y->kind != S_FUNC || !(y->flags & SF_DEFINED) || !y->body)
+		return false;
+	ft = T(c, y->ty);
+	if ((ft->flags & (TF_VARIADIC | TF_NOPROTO)) || N(y->body)->aux > 64 || (E->sflags[s] & SA_NOINL) || (E->once[s] & 2))
+		return false;
+	if (y->flags & SF_ALWAYS_INLINE)
+		return true;
+	return !(y->flags & SF_NOINLINE) && ((y->flags & SF_INLINE) || y->sc == SC_STATIC);
+}
+
+/*
+ * VIR's inlining sizes, bottom-up as LLVM's inliner: isz[s] is s's AST nodes plus
+ * the isz of each callee it inlines (one whose isz is at most lim, or always_inline),
+ * so a copy of s costs isz[s] however deep its callees inline.  A recursion group
+ * (scc, Tarjan over the direct calls) does not inline into itself, which keeps the
+ * sizes defined and the walker's choices independent of the order threads run in.
+ * Runs before the workers: it walks every function (the prepass records calls).
+ */
+VPRIV void fn_isize(emitter *E, cc *c, uint32_t lim)
+{
+	uint32_t n = c->nsym, *idx, *low, *stk, *cs, *ci, sp = 0, csp = 0, nidx = 0;
+	uint8_t *on;
+
+	E->cgoff = calloc((size_t)n + 64, 4);
+	E->cgn = calloc((size_t)n + 64, 4);
+	E->scc = calloc((size_t)n + 64, 4);
+	E->isz = calloc((size_t)n + 64, 2);
+	idx = calloc((size_t)n + 64, 4), low = calloc((size_t)n + 64, 4), stk = malloc(((size_t)n + 64) * 4);
+	cs = malloc(((size_t)n + 64) * 4), ci = malloc(((size_t)n + 64) * 4), on = calloc((size_t)n + 64, 1);
+	if (!E->cgoff || !E->cgn || !E->scc || !E->isz || !idx || !low || !stk || !cs || !ci || !on)
+		abort();
+	E->cgrec = true;
+	for (uint32_t s = 1; s < n; s++)
+		if (c->syms[s].kind == S_FUNC && c->syms[s].body && (c->syms[s].flags & SF_DEFINED) && canon_sym(c, s) == s) {
+			E->cgoff[s] = E->ncg;
+			ensure_walked(E, c, s);
+			E->cgn[s] = E->ncg - E->cgoff[s];
+		}
+	E->cgrec = false;
+	/* Tarjan, iterative; a group is finished callees first, so its isz is computed there */
+	for (uint32_t r = 1; r < n; r++) {
+		if (idx[r] || c->syms[r].kind != S_FUNC)
+			continue;
+		cs[csp] = r, ci[csp++] = 0;
+		idx[r] = low[r] = ++nidx, stk[sp++] = r, on[r] = 1;
+		while (csp) {
+			uint32_t v = cs[csp - 1];
+
+			if (ci[csp - 1] < E->cgn[v]) {
+				uint32_t w = E->cg[E->cgoff[v] + ci[csp - 1]++];
+
+				if (!idx[w]) {
+					cs[csp] = w, ci[csp++] = 0;
+					idx[w] = low[w] = ++nidx, stk[sp++] = w, on[w] = 1;
+				} else if (on[w] && idx[w] < low[v]) {
+					low[v] = idx[w];
+				}
+				continue;
+			}
+			csp--;
+			if (csp && low[v] < low[cs[csp - 1]])
+				low[cs[csp - 1]] = low[v];
+			if (low[v] != idx[v])
+				continue;
+			/* v roots a group: pop it, then sizes (the group's callees outside it are done) */
+			uint32_t top = sp;
+
+			do
+				E->scc[stk[--sp]] = v, on[stk[sp]] = 0;
+			while (stk[sp] != v);
+			for (uint32_t k = sp; k < top; k++) {
+				uint32_t s = stk[k], z = E->fnsize[s];
+
+				for (uint32_t j = 0; j < E->cgn[s]; j++) {
+					uint32_t t = E->cg[E->cgoff[s] + j];
+
+					if (E->scc[t] != v && inl_cand(E, c, t) &&
+					    ((c->syms[t].flags & SF_ALWAYS_INLINE) || E->isz[t] <= lim))
+						z += E->isz[t];
+				}
+				E->isz[s] = z > 65535 ? 65535 : (uint16_t)z;
+			}
+		}
+	}
+	free(idx), free(low), free(stk), free(cs), free(ci), free(on);
+}
+
+/*
  * The prepass runs per function, the first time a function is emitted or
  * inlined: most of a TU's functions are header inlines nobody uses.  The
  * facts it records (writes to params and locals, labels) belong to that
- * function alone, so one walk per function is all that is needed.
+ * function alone, so one walk per function is all that is needed. Nonlocal
+ * variables have conservative immutable facts installed before workers start;
+ * no lazy walk may update them.
  */
 static int walk(pre *P, uint32_t n);
 
@@ -290,8 +437,14 @@ static int walk(pre *P, uint32_t n)
 				P->E->sflags[P->fn] |= SA_NOINL;
 		}
 		return false;
-	case N_NUM: case N_FNUM: case N_STR: case N_ZERO: case N_SIZEOF_VLA:
+	case N_NUM: case N_BIGNUM: case N_FNUM: case N_STR: case N_ZERO:
 		return false;
+	case N_SIZEOF_VLA:
+		lab = walk(P, x->a);
+		for (qty t = x->b; is_array(c, t); t = T(c, t)->base)
+			if ((T(c, t)->flags & TF_VLA) && T(c, t)->n)
+				lab |= walk(P, T(c, t)->n);
+		break;
 	case N_LABELADDR:
 		P->E->lref[x->a] |= LR_REF | LR_BACK;
 		return false;
@@ -304,7 +457,7 @@ static int walk(pre *P, uint32_t n)
 		lab = walk(P, x->a);
 		break;
 	case N_CAST:
-		if (x->aux == CK_DECAY)
+		if (x->aux == CK_DECAY || (x->aux == CK_BITS && (N(x->a)->flags & NF_LVALUE)))
 			mark_written(P, x->a, true);
 		lab = walk(P, x->a);
 		break;
@@ -319,8 +472,12 @@ static int walk(pre *P, uint32_t n)
 	case N_ASSIGN:
 		if (!x->aux && N(x->a)->op == N_VAR)
 			note_assign(P, N(x->a)->a, x->b), note_fwrite(P, N(x->a)->a, x->b);
-		else if (!x->aux && is_aconst(c, x->a))
-			P->E->sflags[N(N(N(x->a)->a)->a)->a] |= SA_WRITTEN;
+		else if (!x->aux && is_aconst(c, x->a)) {
+			uint32_t s = N(N(N(x->a)->a)->a)->a;
+
+			if (is_local_var(c, s))
+				P->E->sflags[s] |= SA_WRITTEN;
+		}
 		else
 			mark_written(P, x->a, false);
 		lab = walk(P, x->a) | walk(P, x->b);
@@ -331,7 +488,7 @@ static int walk(pre *P, uint32_t n)
 			lab = walk(P, N(x->a)->a) | walk(P, x->b);
 			break;
 		}
-		/* fall through */
+		__attribute__((fallthrough));
 	case N_BINARY: case N_LOGAND: case N_LOGOR: case N_COMMA: case N_CPLX:
 		lab = walk(P, x->a) | walk(P, x->b);
 		break;
@@ -343,10 +500,30 @@ static int walk(pre *P, uint32_t n)
 
 		if (callee && sym_attrs(c, callee)->error_fn)
 			P->E->sflags[P->fn] |= SA_MUSTFOLD;
+		/* VIR: a function calling setjmp is not inlined (as LLVM): the caller's promoted
+		   locals would take their values at the setjmp after a longjmp */
+		if (callee && P->E->once && ((sym_attrs(c, callee)->flags & AF_TAIL_RETURNS_TWICE) ||
+		    EM_IDENT_IS(c->syms[callee].name, "setjmp") || EM_IDENT_IS(c->syms[callee].name, "_setjmp") ||
+		    EM_IDENT_IS(c->syms[callee].name, "sigsetjmp") || EM_IDENT_IS(c->syms[callee].name, "__sigsetjmp")))
+			P->E->once[P->fn] |= 2;
+		if (callee && P->E->cgrec) {
+			emitter *E = P->E;
+
+			if (E->ncg == E->capcg) {
+				uint32_t *g = realloc(E->cg, (size_t)(E->capcg = E->capcg ? 2 * E->capcg : 1024) * 4);
+
+				if (!g)
+					abort();
+				E->cg = g;
+			}
+			E->cg[E->ncg++] = canon_sym(c, callee);
+		}
 		lab = walk(P, x->a);
 	}
-		/* fall through */
+		__attribute__((fallthrough));
 	case N_BUILTIN:
+		if (x->op == N_BUILTIN && (x->aux == BI_ALLOCA || x->aux == BI_ALLOCA_UNINIT))
+			P->E->nflags[c->syms[P->fn].body] |= NA_ALLOCA;
 		for (uint32_t i = 0; i < x->c; i++)
 			lab |= walk(P, c->lists[x->b + i]);
 		/*
@@ -390,6 +567,10 @@ static int walk(pre *P, uint32_t n)
 		const sym *y = &c->syms[x->a];
 
 		lab = walk(P, x->b);
+		if (!x->aux)
+			for (qty t = y->ty; is_array(c, t) || is_ptr(c, t); t = T(c, t)->base)
+				if ((T(c, t)->flags & TF_VLA) && T(c, t)->n)
+					lab |= walk(P, T(c, t)->n);
 		if (x->b && y->kind == S_VAR)
 			note_fwrite(P, x->a, x->b);
 		if (is_local_var(c, x->a)) {
@@ -487,4 +668,28 @@ VPRIV int u32_cmp(const void *a, const void *b)
 	uint32_t x = *(const uint32_t *)a, y = *(const uint32_t *)b;
 
 	return x < y ? -1 : x > y;
+}
+
+/* Inlining preserves a never-written pointer parameter's incoming object
+   bound. No AST substitution: emission can run concurrently for other callers.
+   Only direct parameters and effect-free actual arguments are covered here. */
+VPRIV bool inline_object_size(ecx *e, uint32_t fn, uint32_t call, uint32_t pointer, uint32_t mode, i128 *size)
+{
+	cc *c = e->c;
+	if (!fn || !call) return false;
+	while (N(pointer)->op == N_CAST) pointer = N(pointer)->a;
+	if (N(pointer)->op != N_VAR) return false;
+	uint32_t p = N(pointer)->a;
+	if (!is_ptr(c, c->syms[p].ty) || (c->syms[p].flags & SF_ADDR_TAKEN) ||
+	    (e->E->sflags[p] & (SA_WRITTEN | SA_CWRITE)) || (QQ(c->syms[p].ty) & Q_VOLATILE))
+		return false;
+	const node *body = N(c->syms[fn].body), *x = N(call);
+	cval cv;
+	if (!cc_eval(c, mode, &cv) || cv.kind != CV_INT || cv.i < 0 || cv.i > 3) return false;
+	for (uint32_t i = 0; i < body->aux && i < x->c; i++) {
+		if (c->lists[body->a + i] != p) continue;
+		uint32_t arg = c->lists[x->b + i];
+		return !side_effects(c, arg) && cc_object_size(c, arg, (unsigned)cv.i, size);
+	}
+	return false;
 }

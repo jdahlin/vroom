@@ -1,0 +1,11 @@
+; ret with no value for a result
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  ret
+}
+; ---
+@f b0.1: A2: ret: the result group has 1 pieces, ret returns 0 values

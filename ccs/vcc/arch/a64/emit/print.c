@@ -67,13 +67,13 @@ static const char ld_name[2][4][3][8] = {
 };
 static const char st_name[2][4][8] = { { "strb", "strh", "str", "str" }, { "sturb", "sturh", "stur", "stur" } };
 
-static inline int ld_x(const ins *i) { return i->sz == 3 || (i->op == I_LD && i->cond == 1) || (i->op == I_LDLO && i->cond == 1); }
+static inline int ld_x(const ins *i) { return i->sz == 3 || ((i->op == I_LD || i->op == I_LDX || i->op == I_LDLO) && i->cond == 1); }
 
 static void p_mem(tbuf *b, const ins *i)
 {
 	int64_t off = i->imm;
 	int sz = i->sz, scaled, base = i->rn;
-	int x = i->op == I_ST ? sz == 3 : ld_x(i);
+	int x = i->op == I_ST ? sz == 3 : ld_x(i), v = i->op == I_LDF || i->op == I_STF;
 
 	scaled = off >= 0 && (off & ((1 << sz) - 1)) == 0 && (off >> sz) < 4096;
 	if (!scaled && !(off >= -256 && off < 256)) {
@@ -86,12 +86,17 @@ static void p_mem(tbuf *b, const ins *i)
 		scaled = 1;
 	}
 	tb_c(b, '\t');
-	if (i->op == I_ST)
+	if (i->op == I_ST || i->op == I_STF)
 		tb_n8(b, st_name[!scaled][sz]);
 	else
-		tb_n8(b, ld_name[!scaled][sz][i->cond]);
+		tb_n8(b, ld_name[!scaled][sz][v ? 0 : i->cond]);
 	tb_c(b, '\t');
-	reg(b, i->rd, x);
+	if (v) {
+		tb_c(b, sz == 3 ? 'd' : 's');
+		tb_u(b, i->rd);
+	} else {
+		reg(b, i->rd, x);
+	}
 	tb_s(b, ", [");
 	reg(b, base, 1);
 	if (off) {
@@ -207,6 +212,19 @@ VPRIV void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *raw
 		return;
 	case I_ADD: case I_SUB: case I_ADDS: case I_SUBS: case I_AND: case I_ORR: case I_EOR:
 	case I_ANDS: case I_BIC: case I_ORN: case I_ADC: case I_SBC: case I_ADCS: case I_SBCS:
+		if (i->cond >= 8) {	/* extended register */
+			static const char xn[8][5] = { "uxtb", "uxth", "uxtw", "uxtx", "sxtb", "sxth", "sxtw", "sxtx" };
+			int o = i->cond - 8;
+
+			tb_c(b, '\t'), tb_n8(b, alu_name[i->op]), tb_c(b, '\t');
+			reg(b, i->rd, i->sz), tb_s(b, ", ");
+			reg(b, i->rn, i->sz), tb_s(b, ", ");
+			reg(b, i->rm, (o & 3) == 3), tb_s(b, ", "), tb_s(b, xn[o]);
+			if (i->sh)
+				tb_s(b, " #"), tb_u(b, i->sh);
+			tb_c(b, '\n');
+			return;
+		}
 		p_rrr(b, alu_name[i->op], i);
 		if (i->sh) {
 			tb_s(b, i->cond == 0 ? ", lsl #" : i->cond == 1 ? ", lsr #" : ", asr #");
@@ -276,8 +294,38 @@ VPRIV void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *raw
 		reg(b, i->rn, i->sz);
 		tb_c(b, '\n');
 		return;
-	case I_LD: case I_ST:
+	case I_LD: case I_ST: case I_LDF: case I_STF:
 		p_mem(b, i);
+		return;
+	case I_SMADDL: case I_UMADDL:
+		tb_s(b, i->op == I_SMADDL ? "\tsmaddl\t" : "\tumaddl\t");
+		reg(b, i->rd, 1);
+		tb_s(b, ", ");
+		reg(b, i->rn, 0);
+		tb_s(b, ", ");
+		reg(b, i->rm, 0);
+		tb_s(b, ", ");
+		reg(b, i->ra, 1);
+		tb_c(b, '\n');
+		return;
+	case I_LDX: case I_STX:
+		tb_c(b, '\t');
+		tb_n8(b, i->op == I_STX ? st_name[0][i->sz] : ld_name[0][i->sz][i->cond]);
+		tb_c(b, '\t');
+		reg(b, i->rd, i->op == I_STX ? i->sz == 3 : ld_x(i));
+		tb_s(b, ", [");
+		reg(b, i->rn, 1);
+		tb_s(b, ", ");
+		reg(b, i->rm, i->ra == 3);
+		if (i->ra != 3)
+			tb_s(b, i->ra == 6 ? ", sxtw" : ", uxtw");
+		else if (i->sh)
+			tb_s(b, ", lsl");
+		if (i->sh) {
+			tb_s(b, " #");
+			tb_i(b, i->sz);
+		}
+		tb_s(b, "]\n");
 		return;
 	case I_LDP: case I_STP:
 		tb_s(b, i->op == I_LDP ? "\tldp\t" : "\tstp\t");
@@ -338,6 +386,13 @@ VPRIV void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *raw
 		ref_name(c, b, i->ref);
 		tb_s(b, "]\n");
 		return;
+	case I_JTE:
+		tb_s(b, "\t.word\t");
+		p_lbl(b, fid, i->label);
+		tb_c(b, '-');
+		p_lbl(b, fid, i->ref);
+		tb_c(b, '\n');
+		return;
 	case I_ADR:
 		tb_s(b, "\tadr\t");
 		reg(b, i->rd, 1);
@@ -364,8 +419,22 @@ VPRIV void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *raw
 		p_lbl(b, fid, i->label);
 		tb_c(b, '\n');
 		return;
+	case I_TBZ: case I_TBNZ:
+		tb_s(b, i->op == I_TBZ ? "\ttbz\t" : "\ttbnz\t");
+		reg(b, i->rd, i->sz);
+		tb_s(b, ", #");
+		tb_u(b, i->sh);
+		tb_s(b, ", ");
+		p_lbl(b, fid, i->label);
+		tb_c(b, '\n');
+		return;
+	case I_TAIL:
+		if (!i->cond)
+			return;
+		/* symbol quoting is identical for bl and b. */
+		__attribute__((fallthrough));
 	case I_BL: {
-		tb_s(b, "\tbl\t");
+		tb_s(b, i->op == I_TAIL ? "\tb\t" : "\tbl\t");
 		size_t at = b->n;
 
 		ref_name(c, b, i->ref);

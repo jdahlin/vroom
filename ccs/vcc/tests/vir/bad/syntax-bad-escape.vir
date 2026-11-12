@@ -1,0 +1,7 @@
+; an unknown escape in a string
+vir 1
+target x86_64-linux
+sig %s = (int) -> int
+asm !0 "\q" outs() ins() clobber()
+; ---
+bad/syntax-bad-escape.vir:5:10: unknown escape sequence

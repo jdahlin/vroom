@@ -76,18 +76,29 @@ static bool x64_cls(cc *c, qty t, uint64_t off, int cls[2])
 			cls[off / 8] = x64_merge(cls[off / 8], XC_SSE);
 			return true;
 		}
+		if (is_bvec(c, t) && sz == 16 && off == 0) {
+			cls[0] = x64_merge(cls[0], XC_SSE);
+			cls[1] = x64_merge(cls[1], XC_SSEUP);
+			return true;
+		}
 		if (sz == 16 && off == 0 && cls[0] == XC_NONE && cls[1] == XC_NONE) {
 			cls[0] = XC_SSE, cls[1] = XC_SSEUP;
 			return true;
 		}
 		return false;	/* (a 32-byte vector alone: see x64_classify) */
 	}
+	if (k == TY_FLOAT128) {
+		if (off % 16 || cls[off / 8] != XC_NONE)
+			return false;
+		cls[off / 8] = XC_SSE, cls[off / 8 + 1] = XC_SSEUP;
+		return true;
+	}
 	if (k == TY_LDOUBLE && off == 0) {
 		cls[0] = x64_merge(cls[0], XC_X87);
 		cls[1] = x64_merge(cls[1], XC_X87UP);
 		return true;
 	}
-	if (k == TY_LDOUBLE || k == TY_FLOAT128 || k == TY_INT128 || k == TY_UINT128)
+	if (k == TY_LDOUBLE || k == TY_INT128 || k == TY_UINT128)
 		return k == TY_INT128 || k == TY_UINT128 ? (cls[off / 8] = x64_merge(cls[off / 8], XC_INT),
 							    cls[off / 8 + 1] = x64_merge(cls[off / 8 + 1], XC_INT), true) : false;
 	if (tsize(c, t) == 0)
@@ -96,7 +107,136 @@ static bool x64_cls(cc *c, qty t, uint64_t off, int cls[2])
 	return true;
 }
 
-VPRIV void x64_classify(ecx *e, qty t, wkarg *a)
+/* Wide records use AVX registers only for SSE followed entirely by SSEUP.
+   Track all eightbytes, including union merges and padding, without changing
+   the existing two-eightbyte transport classifier. */
+static bool x64_wide_cls(cc *c, qty t, uint64_t off, int cls[8])
+{
+	const ctype *x = T(c, t);
+	uint64_t size = tsize(c, t);
+
+	if (off + size > 64)
+		return false;
+	if (x->kind == TY_STRUCT || x->kind == TY_UNION) {
+		const tag *r = &c->tags[x->aux];
+		int fields[8] = {0};
+
+		for (uint32_t i = 0; i < r->nfield; i++) {
+			const field *f = &r->f[i];
+			uint64_t fo = off + f->off / 8;
+
+			if (f->bitfield && !f->name) continue;
+			if (size > 16 && x->kind != TY_UNION && tsize(c, f->ty) != size)
+				return false;
+			if (f->bitfield) {
+				if (f->width) {
+					uint64_t last = fo + (f->off % 8 + f->width - 1) / 8;
+
+					if (last >= 64) return false;
+					for (uint64_t j = fo / 8; j <= last / 8; j++)
+						fields[j] = x64_merge(fields[j], XC_INT);
+				}
+			} else if (!x64_wide_cls(c, f->ty, fo, fields))
+				return false;
+		}
+		if (size > 16) {
+			if (fields[off / 8] != XC_SSE) return false;
+			for (uint64_t i = 1; i < size / 8; i++)
+				if (fields[off / 8 + i] != XC_SSEUP) return false;
+		}
+		for (unsigned i = 0; i < 8; i++) cls[i] = x64_merge(cls[i], fields[i]);
+		return true;
+	}
+	uint32_t align = c->ty[x->canon].align;
+	if (align && off % align)
+		return false;
+	if (x->kind == TY_ARRAY) {
+		uint64_t es = tsize(c, x->base);
+
+		/* Clang's wide-array early exit leaves NoClass after resetting
+		   Current. In a union this contributes nothing to a wide vector. */
+		if (size > 16 && size != es) return true;
+
+		for (uint64_t i = 0; es && i < size / es; i++)
+			if (!x64_wide_cls(c, x->base, off + i * es, cls))
+				return false;
+		return true;
+	}
+	if (!size) return true;
+	if (x->kind == TY_VECTOR && size >= 16) {
+		if (off % 8 || size % 8) return false;
+		for (uint64_t i = 0; i < size / 8; i++)
+			cls[off / 8 + i] = x64_merge(cls[off / 8 + i], i ? XC_SSEUP : XC_SSE);
+		return true;
+	}
+	int leaf[2] = { XC_NONE, XC_NONE };
+	if (size > 16 || !x64_cls(c, t, off % 8, leaf))
+		return false;
+	for (unsigned i = 0; i < 2 && off / 8 + i < 8; i++)
+		cls[off / 8 + i] = x64_merge(cls[off / 8 + i], leaf[i]);
+	return true;
+}
+
+static bool x64_wide_record(cc *c, qty t)
+{
+	uint64_t size = tsize(c, t);
+	int cls[8] = {0};
+
+	if (!is_record(c, t) || (size != 32 && size != 64) || !x64_wide_cls(c, t, 0, cls) || cls[0] != XC_SSE)
+		return false;
+	for (unsigned i = 1; i < size / 8; i++)
+		if (cls[i] != XC_SSEUP) return false;
+	return true;
+}
+
+static void x64_check_vector_abi(ecx *e, uint64_t size, bool vector, bool wide_record, x86_features features)
+{
+	bool unsupported = vector && size > 16 && x86_feature_has(features, X86_FEATURE_AVX);
+
+	unsupported |= wide_record && x86_feature_has(features, size == 64 ? X86_FEATURE_AVX512F : X86_FEATURE_AVX);
+	if (unsupported)
+		efatal(e, e->curloc, "x86-64: AVX vector argument or return ABI is not supported yet (PLAN-x86.md)");
+}
+
+/* Clang retains the i1-vector ABI through singleton aggregate wrappers. */
+static uint32_t x64_bool_lanes(cc *c, qty t)
+{
+	const ctype *ty = T(c, t);
+	if (is_bvec(c, t)) return ty->n;
+	if (is_array(c, t) && tsize(c, t) == tsize(c, ty->base))
+		return x64_bool_lanes(c, ty->base);
+	if (is_record(c, t)) {
+		const tag *r = &c->tags[ty->aux];
+		const field *only = NULL;
+		for (uint32_t k = 0; k < r->nfield; k++) {
+			const field *f = &r->f[k];
+			if (!tsize(c, f->ty) || (f->bitfield && !f->width)) continue;
+			if (only || f->off || f->bitfield) return 0;
+			only = f;
+		}
+		if (only && tsize(c, only->ty) == tsize(c, t)) return x64_bool_lanes(c, only->ty);
+	}
+	return 0;
+}
+
+VPRIV void x64_classify0(ecx *e, qty t, wkarg *a);
+
+/* -mgeneral-regs-only, -mno-sse: no value may travel in a vector or x87 register */
+VPRIV void x64_classify(ecx *e, qty t, wkarg *a, bool unnamed)
+{
+	x64_classify0(e, t, a);
+	a->unnamed = unnamed;
+	uint32_t fn = e->wk->inl ? e->wk->inl->fn : e->wk->fsym;
+	/* Unnamed wide vectors/records use the overflow area, never YMM/ZMM. */
+	if (!unnamed)
+		x64_check_vector_abi(e, a->size, a->vector, a->wide_record, cc_x86_features(e->c, fn));
+	if (x64_nosimd(e) && a->mem && a->up)
+		a->up = false;	/* a 32-byte vector: returned in memory, not xmm0:xmm1 */
+	if (x64_nosimd(e) && (a->x87 || (!a->mem && a->n && (a->cls[0] == WA_SSE || (a->n > 1 && a->cls[1] == WA_SSE)))))
+		x64_nofp(e);
+}
+
+VPRIV void x64_classify0(ecx *e, qty t, wkarg *a)
 {
 	cc *c = e->c;
 	uint64_t size = tsize(c, t);
@@ -104,16 +244,36 @@ VPRIV void x64_classify(ecx *e, qty t, wkarg *a)
 
 	memset(a, 0, sizeof *a);
 	a->size = size;
+	a->vector = is_vec(c, t);
+	a->wide_record = x64_wide_record(c, t);
 	a->align = talign(c, t) > 8 ? talign(c, t) : 8;
+	/* SysV classifies _BitInt wider than 128 bits as MEMORY, including
+	 * unnamed variadic arguments. Returns use the ordinary hidden pointer. */
+	if (em_bigint(c, t)) {
+		a->align = 8; /* typedef alignment does not change the scalar ABI */
+		a->mem = true;
+		return;
+	}
 	if (!is_record(c, t) && !is_array(c, t) && !is_vec(c, t)) {
 		a->n = size > 8 ? 2 : 1;
 		a->cls[0] = a->cls[1] = is_flt(c, t) ? WA_SSE : WA_INT;
-		if (KIND(c, t) == TY_LDOUBLE || KIND(c, t) == TY_FLOAT128)
-			a->mem = true, a->n = 0, a->x87 = KIND(c, t) == TY_LDOUBLE;	/* passed in memory, returned in st(0) */
+		if (KIND(c, t) == TY_LDOUBLE)
+			a->mem = true, a->n = 0, a->x87 = true;	/* passed in memory, returned in st(0) */
+		if (KIND(c, t) == TY_FLOAT128)
+			a->n = 1, a->cls[0] = WA_SSE, a->up = true;	/* SSE + SSEUP: one xmm register */
 		return;
 	}
 	if (size == 0)
 		return;	/* an empty record: nothing is passed */
+	uint32_t blanes = x64_bool_lanes(c, t);
+	if (blanes && size > 8) {
+		/* LLVM scalarizes <65..128 x i1> arguments into individual integer
+		   arguments. Results use a hidden pointer; larger arguments are
+		   packed by-value memory rather than ordinary SIMD vectors. */
+		a->mem = true;
+		a->blanes = blanes <= 128 ? blanes : 0;
+		return;
+	}
 	if (is_vec(c, t) && (size == 32 || size == 64)) {
 		/* clang without AVX: passed in memory, returned in 2 or 4 xmm registers (-Wpsabi) */
 		a->mem = true, a->up = true;
@@ -135,11 +295,9 @@ VPRIV void x64_classify(ecx *e, qty t, wkarg *a)
 		a->mem = true;
 		return;
 	}
+	/* An orphan SSEUP eightbyte (e.g. vector/integer union) is SSE. */
+	if (cls[1] == XC_SSEUP && cls[0] != XC_SSE) cls[1] = XC_SSE;
 	if (cls[1] == XC_SSEUP) {
-		if (cls[0] != XC_SSE) {
-			a->mem = true;
-			return;
-		}
 		a->n = 1, a->cls[0] = WA_SSE, a->up = true;	/* one xmm register */
 		return;
 	}
@@ -170,10 +328,24 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 {
 	cc *c = e->c;
 
+	if (RKIND(ref) == RK_SYM) {
+		x86_features features = cc_x86_features(c, RIDX(ref));
+		for (int k = 0; k < n; k++)
+			if (!a[k].unnamed) x64_check_vector_abi(e, a[k].size, a[k].vector, a[k].wide_record, features);
+		x64_check_vector_abi(e, tsize(c, rt), is_vec(c, rt), x64_wide_record(c, rt), features);
+	}
+
+	if (variadic) {
+		/* The walker knows fixed parameters for direct and indirect calls. */
+		for (int k = 0; k < n; k++)
+			if (a[k].blanes && a[k].unnamed)
+				efatal(e, e->curloc, "x86-64: variadic transport of 65..128-lane packed boolean vectors is not supported");
+	}
+
 	/* An explicit builtin needs no libm symbol. Copy the x87 representation
 	 * and clear only its sign, without an FP load that could alter a NaN. */
 	if (RKIND(ref) == RK_NAME && RIDX(ref) < 0x8000000u && n == 1 && r && r->x87 &&
-	    KIND(c, rt) == TY_LDOUBLE && !strcmp(cc_builtin_name(RIDX(ref)), "__builtin_fabsl")) {
+	    KIND(c, rt) == TY_LDOUBLE && cc_builtin_libkind(RIDX(ref)) == CC_LIB_FABSL) {
 		int q = x64_treg(e);
 		lval src = x64_fr(a[0].slot), dst = x64_fr(r->slot);
 
@@ -196,11 +368,19 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 	uint32_t stackalign = 16;
 	int64_t savedsp = 0;
 	int64_t *place = calloc((size_t)(n ? n : 1), sizeof *place);	/* stack offset, or -1: registers */
+	int *bregs = calloc((size_t)(n ? n : 1), sizeof *bregs);
 	rec *i;
 
 	for (int k = 0; k < n; k++) {
 		int ng = x64_need(&a[k], WA_INT), nf = x64_need(&a[k], WA_SSE);
 
+		if (a[k].blanes) {
+			bregs[k] = 6 - gp;
+			gp = 6;
+			place[k] = total;
+			total += ((int64_t)a[k].blanes - bregs[k]) * 8;
+			continue;
+		}
 		if (!a[k].mem && a[k].n == 0) {
 			place[k] = -1;
 			continue;
@@ -246,6 +426,17 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 	for (int k = 0; k < n; k++) {
 		if (place[k] < 0)
 			continue;
+		if (a[k].blanes) {
+			for (uint32_t bit = (uint32_t)bregs[k]; bit < a[k].blanes; bit++) {
+				lval src = x64_fr(a[k].slot + bit / 8);
+				lval dst = { .k = L_REG, .r = RSP, .off = place[k] + 8 * (bit - bregs[k]) };
+				x64_mem(e, X_LD, 1, R11, &src, false);
+				if (bit % 8) x64_op3(e, X_SHRI, 8, R11, R11, XNOREG)->imm = bit % 8;
+				x64_op3(e, X_ANDI, 8, R11, R11, XNOREG)->imm = 1;
+				x64_mem(e, X_ST, 8, R11, &dst, false);
+			}
+			continue;
+		}
 		if (a[k].size > 128) {
 			/* A large by-value aggregate must not expand to one record per
 			   word. Preserve live values (including an indirect callee)
@@ -279,6 +470,16 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 		x64_mem(e, X_LEA, 8, x64_argreg(gp++), &s, false);
 	}
 	for (int k = 0; k < n; k++) {
+		if (a[k].blanes) {
+			for (int bit = 0; bit < bregs[k]; bit++) {
+				lval src = x64_fr(a[k].slot + bit / 8);
+				int reg = x64_argreg(gp++);
+				x64_mem(e, X_LD, 1, reg, &src, false);
+				if (bit % 8) x64_op3(e, X_SHRI, 8, reg, reg, XNOREG)->imm = bit % 8;
+				x64_op3(e, X_ANDI, 8, reg, reg, XNOREG)->imm = 1;
+			}
+			continue;
+		}
 		if (place[k] >= 0)
 			continue;
 		for (int w = 0; w < a[k].n; w++) {
@@ -288,6 +489,7 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 		}
 	}
 	free(place);
+	free(bregs);
 	if (variadic)
 		x64_op3(e, X_MOVI, 4, RAX, XNOREG, XNOREG)->imm = fp;	/* al: vector registers used */
 	if (fn) {
@@ -369,10 +571,30 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 VPRIV void x64_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic)
 {
 	xst *X = e->x64;
+	cc *c = e->c;
+	const node *body = N(c->syms[e->wk->fsym].body);
 	int gp = 0, fp = 0;
 	int64_t stk = 0;
 
+	const attrs *fa = sym_attrs(e->c, e->wk->fsym);
+	X->interrupt = fa && fa->interrupt ? n : 0;
 	X->sret = 0;
+	if (X->interrupt) {
+		/* The printer saves every GPR and establishes an aligned R12 frame
+		   before these records execute; RBP retains the hardware frame. */
+		if (e->wk->falign < 32) e->wk->falign = 32;
+		lval frame = { .k = L_REG, .r = RBP, .off = n == 2 ? 16 : 8 };
+		lval dst = x64_fr(a[0].slot);
+		x64_mem(e, X_LEA, 8, R11, &frame, false);
+		x64_mem(e, X_ST, 8, R11, &dst, false);
+		if (n == 2) {
+			frame.off = 8;
+			dst = x64_fr(a[1].slot);
+			x64_mem(e, X_LD, 8, R11, &frame, false);
+			x64_mem(e, X_ST, 8, R11, &dst, false);
+		}
+		return;
+	}
 	if (r && r->mem && !r->x87 && !r->up) {
 		lval d = x64_fr(r->slot);
 
@@ -381,10 +603,41 @@ VPRIV void x64_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic)
 	}
 	for (int k = 0; k < n; k++) {
 		int ng = x64_need(&a[k], WA_INT), nf = x64_need(&a[k], WA_SSE);
+		uint32_t sym = c->lists[body->a + (uint32_t)k];
+		qty ty = c->syms[sym].ty;
+		lval home;
+		bool local = x64_local(e, sym, &home);
 
+		if (a[k].blanes) {
+			for (uint32_t bit = 0; bit < a[k].blanes; bit++) {
+				if (!(bit % 8)) x64_movi(e, R10, 0);
+				if (gp < 6) x64_mov(e, R11, x64_argreg(gp++));
+				else {
+					lval src = x64_fr(16 + stk);
+					x64_mem(e, X_LD, 8, R11, &src, false);
+					stk += 8;
+				}
+				x64_op3(e, X_ANDI, 8, R11, R11, XNOREG)->imm = 1;
+				if (bit % 8) x64_op3(e, X_SHLI, 8, R11, R11, XNOREG)->imm = bit % 8;
+				x64_op3(e, X_OR, 8, R10, R10, R11);
+				if (bit % 8 == 7 || bit + 1 == a[k].blanes) {
+					lval dst = x64_fr(a[k].slot + bit / 8);
+					x64_mem(e, X_ST, 1, R10, &dst, false);
+				}
+			}
+			continue;
+		}
 		if (!a[k].mem && a[k].n == 0)
 			continue;
 		if (!a[k].mem && gp + ng <= 6 && fp + nf <= 8) {
+			if (local) {
+				/* Selected homes are scalar integer/pointer words. Bind directly
+				   without creating a stack copy; preserve the usual ABI count. */
+				lval from = { .k = L_VREG, .r = (uint8_t)x64_argreg(gp++) };
+
+				x64_load(e, home.r, &from, wk_size(c, ty), wk_signed(c, ty));
+				continue;
+			}
 			for (int w = 0; w < a[k].n; w++) {
 				lval d = x64_fr(a[k].slot + 8 * w);
 
@@ -394,7 +647,25 @@ VPRIV void x64_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic)
 		}
 		/* on the stack: the parameter is where the caller put it */
 		stk = (stk + a[k].align - 1) & ~(int64_t)(a[k].align - 1);
-		a[k].slot = 16 + stk;
+		/* Overaligned wide scalars arrive at ABI alignment eight, but need
+		 * their declared alignment when addressed in the function body.
+		 * R11 is not an argument register, so later arguments stay intact. */
+		uint32_t home_align = sym_align(c, sym);
+		if (em_bigint(c, ty) && home_align > 8) {
+			a[k].slot = wk_slot(e, a[k].size, home_align);
+			for (uint64_t off = 0; off < a[k].size; off += 8) {
+				lval src = x64_fr(16 + stk + (int64_t)off), dst = x64_fr(a[k].slot + (int64_t)off);
+				x64_mem(e, X_LD, 8, R11, &src, false);
+				x64_mem(e, X_ST, 8, R11, &dst, false);
+			}
+		} else {
+			a[k].slot = 16 + stk;
+			if (local) {
+				lval from = x64_fr(a[k].slot);
+
+				x64_load(e, home.r, &from, wk_size(c, ty), wk_signed(c, ty));
+			}
+		}
 		stk += (int64_t)((a[k].size + 7) & ~(uint64_t)7);
 	}
 	X->ngp = gp, X->nfp = fp, X->stk = (int32_t)stk;
@@ -404,12 +675,14 @@ VPRIV void x64_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic)
 		uint32_t skip = wk_newlabel(e);
 		rec *j;
 
-		X->save = wk_slot(e, 48 + 128, 16);
+		X->save = wk_pslot(e, 48 + 128, 16);
 		for (int k = gp; k < 6; k++) {
 			lval d = x64_fr(X->save + 8 * k);
 
 			x64_mem(e, X_ST, 8, x64_argreg(k), &d, false);
 		}
+		if (x64_nosimd(e))
+			return;	/* no vector registers to save (-mgeneral-regs-only, -mno-sse): as clang */
 		x64_op3(e, X_TEST, 1, XNOREG, RAX, XNOREG);
 		j = x64_put(e, X_JCC);
 		j->cond = CC_E;
@@ -502,7 +775,9 @@ VPRIV int x64_va_arg(ecx *e, int rap, qty t)
 	int ra = x64_treg(e), ng, nf;
 	uint32_t lstk = wk_newlabel(e), ldone = wk_newlabel(e);
 
-	x64_classify(e, t, &a);
+	x64_classify(e, t, &a, true);
+	if (a.blanes)
+		efatal(e, e->curloc, "x86-64: variadic transport of 65..128-lane packed boolean vectors is not supported");
 	ng = x64_need(&a, WA_INT), nf = x64_need(&a, WA_SSE);
 	if (!a.mem && a.n) {
 		int rg = x64_treg(e), rf = x64_treg(e), rs = x64_treg(e);

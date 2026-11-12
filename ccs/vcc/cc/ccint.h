@@ -36,7 +36,17 @@ typedef struct label {
 	uint8_t addr_taken;
 } label;
 
+/* Call-site restrictions kept with declaration attributes, including redeclarations. */
+enum {
+	AF_TAIL_RETURNS_TWICE = 1u << 0,
+	AF_TAIL_DISABLE = 1u << 1,
+	AF_TAIL_NOT_CALLED = 1u << 2,
+	AF_OPTNONE = 1u << 3,	/* currently prevents the new sibling-call transformation */
+};
+
 typedef struct attrs {		/* the attributes of one declaration */
+	x86_features x86_features;
+	uint32_t x86_target;	/* effective function target features are present */
 	uint32_t aligned;	/* bytes; 0: none */
 	uint32_t section, alias, asmname;	/* string index + 1, 0: none */
 	uint32_t cleanup;	/* sym */
@@ -51,10 +61,11 @@ typedef struct attrs {		/* the attributes of one declaration */
 	uint32_t ifunc;		/* ifunc("resolver"): alias is the resolver, an STT_GNU_IFUNC symbol */
 	uint32_t counted_by;	/* identifier id */
 	uint32_t errmsg;	/* error("..."): string index + 1, 0: none */
+	uint32_t interrupt;	/* x86 interrupt calling convention */
 	uint32_t ms_struct;	/* Microsoft record layout */
 	uint32_t tlsloc;		/* tls_model attribute location */
 	uint32_t visibility;
-	uint32_t flags;		/* SF_* */
+	uint32_t flags;		/* AF_* declaration/call restrictions */
 	uint8_t packed, transparent, used, unused, weak, noreturn, constructor, destructor;
 	uint8_t nonstring, may_alias, cold, gnu_inline, always_inline, noinline, ainline, error_fn;
 	uint8_t overloadable, noinstr;
@@ -104,10 +115,8 @@ typedef struct lzfn {
 	pp_lazy z;
 } lzfn;
 
-struct const_eval;
 
 struct cc {
-	struct const_eval *const_eval;	/* active const-variable initializer evaluations */
 	pp *p;
 	const cc_opts *o;
 	struct vfixbuf *tyb;	/* tyname/tyname_sugar: 8 buffers in rotation (allocated at the first) */
@@ -238,6 +247,8 @@ struct cc {
 	uint32_t pack[64];	/* #pragma pack stack (bytes, 0: none) */
 	uint64_t packid[64];	/* labels (token.c pragma_pack) */
 	int npack;
+	uint32_t visstk[16];	/* #pragma GCC visibility push: the visibilities (string + 1), innermost last */
+	int nvis;
 	bool ms_struct;		/* #pragma ms_struct on/off/reset */
 	/* #pragma weak (decl.c): waiting for key's declaration (alias: 0, or the weak alias of key) */
 	struct pweak { uint32_t key, alias, loc, sym; } *pweak;
@@ -312,20 +323,24 @@ enum {
 	/* ACLE hints and barriers (side effects: BI_ARM_NOP..BI_ARM_TRAP) */
 	BI_ARM_NOP, BI_ARM_YIELD, BI_ARM_WFE, BI_ARM_WFI, BI_ARM_SEV, BI_ARM_SEVL, BI_ARM_CLREX,
 	BI_ARM_ISB, BI_ARM_DMB, BI_ARM_DSB, BI_ARM_TRAP,
+	BI_SETJMP, BI_LONGJMP,	/* GCC's __builtin_setjmp/__builtin_longjmp: buf[0] frame, [1] resume address, [2] sp */
 	BI_LIB,	/* plain library call with a prototype */
 	BI_NANS, BI_ISSIGNALING,
-	BI_SETJMP, BI_LONGJMP,
 	BI_ISFPCLASS, BI_ISSUBNORMAL, BI_ISZERO,
-	BI_X86_SIMD,
+	BI_X86_SIMD, BI_X86_PCMPSTR, BI_X86_BLENDVB,
 	BI_ELEMENTWISE_ABS,
 	BI_STDC_ROTL, BI_STDC_ROTR,
+	BI_FAST_SQRT,	/* internal hardware sqrt, full fast-math only */
+	BI_FAST_ROOT4,	/* internal double sqrt(sqrt(x)), full fast-math only */
+	BI_COMPLEX,
 	BI_COUNT
 };
 
-enum { CV_NONE, CV_INT, CV_FLT, CV_ADDR };
+enum { CV_NONE, CV_INT, CV_FLT, CV_ADDR, CV_BIGINT };
 
 typedef struct cval {
 	int kind;
+	uint32_t big, nbig;	/* CV_BIGINT: immutable LE32 storage words in lists */
 	bool ice;		/* integer constant expression (C11 6.6p6, clang's rules) */
 	i128 i;			/* CV_INT; CV_ADDR: byte offset */
 	double f;		/* CV_FLT; with ld, the nearest double of q */
@@ -341,10 +356,31 @@ typedef struct cval {
 #define CN(c, i) (&(c)->nodes[i])
 
 bool cc_eval(cc *c, uint32_t n, cval *v);
+bool cc_init_subobject(cc *c, uint32_t n, uint32_t *init);
+/* Constant object representation, little-endian bytes plus a known-bit mask. */
+bool cc_bitcast_read(cc *c, uint32_t n, uint64_t off, unsigned len, unsigned char *data, unsigned char *known);
+bool cc_object_size(cc *c, uint32_t pointer, unsigned mode, i128 *size);
 void dr_restored(cc *c);
 bool cc_is_signed(cc *c, qty t);
+/* Kinds for library builtins that the emitter treats specially. Other
+ * builtins retain their normal call path. */
+enum { CC_LIB_OTHER, CC_LIB_MEMCPY, CC_LIB_MEMMOVE, CC_LIB_MEMSET,
+       CC_LIB_STRCMP, CC_LIB_FABSL,
+       CC_LIB_MEMCPY_CHK, CC_LIB_MEMMOVE_CHK, CC_LIB_MEMSET_CHK };	/* (the _CHK ones in that order) */
+int cc_builtin_libkind(int64_t i);
 const char *cc_builtin_name(int64_t i);
 const char *cc_lib_sig(const char *name, int *clang_enc);
 uint32_t cc_global_named(cc *c, const char *s);
+
+/* A declaration's target state overrides the translation-unit default. */
+static inline x86_features cc_x86_features(const cc *c, uint32_t fn)
+{
+	if (fn && c->syms[fn].attrs && c->attr[c->syms[fn].attrs].x86_target)
+		return c->attr[c->syms[fn].attrs].x86_features;
+	if (c->o->x86_features_set) return c->o->x86_features;
+	x86_features features = {0};
+	x86_cpu_features("x86-64", &features);
+	return features;
+}
 
 #endif

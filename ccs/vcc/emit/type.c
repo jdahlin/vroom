@@ -30,12 +30,14 @@ static const char *const fixed_names[] = {
 	"memcpy", "memset", "memmove", "__udivti3", "__divti3", "__umodti3", "__modti3", "strlen",
 	"__ashlti3", "__lshrti3", "__ashrti3", "__floattisf", "__floattidf", "__floatuntisf", "__floatuntidf",
 	"__fixsfti", "__fixdfti", "__fixunssfti", "__fixunsdfti",
-	"__addtf3", "__subtf3", "__multf3", "__divtf3", "__eqtf2", "__netf2", "__lttf2", "__letf2", "__gttf2", "__getf2",
+	"__addtf3", "__subtf3", "__multf3", "__divtf3", "__eqtf2", "__netf2", "__lttf2", "__letf2", "__gttf2", "__getf2", "__unordtf2",
 	"__extenddftf2", "__extendsftf2", "__trunctfdf2", "__trunctfsf2", "__floatsitf", "__floatditf", "__floatunsitf",
 	"__floatunditf", "__floattitf", "__floatuntitf", "__fixtfsi", "__fixtfdi", "__fixunstfsi", "__fixunstfdi",
-	"__fixtfti", "__fixunstfti",
+	"__fixtfti", "__fixunstfti", "__extendxftf2", "__trunctfxf2",
 	"__extendbfsf2", "__truncsfbf2", "__truncdfbf2", "__truncxfbf2", "__trunctfbf2",
 	"__extendhfsf2", "__truncsfhf2", "__truncdfhf2", "__truncxfhf2", "__trunctfhf2",
+	"__floattixf", "__floatuntixf", "__fixxfti", "__fixunsxfti",
+	"floorf", "ceilf", "truncf", "roundf", "rintf", "nearbyintf", "fabsf",
 };
 
 VPRIV uint32_t canon_sym(cc *c, uint32_t s)
@@ -75,7 +77,7 @@ VPRIV void sym_name(cc *c, tbuf *b, uint32_t s)
 		/* LLVM's wasm and x86 assemblers require quotes around non-ASCII names. */
 		tb_c(b, '"');
 		tb_put(b, vintern_ents[y->name].s, vintern_ents[y->name].len);
-		if (X86(c) && y->depth > 0 && y->kind == S_VAR && y->sc == SC_STATIC) {
+		if (y->depth > 0 && y->kind == S_VAR && y->sc == SC_STATIC) {
 			tb_c(b, '.');
 			tb_u(b, s);
 		}
@@ -118,6 +120,10 @@ VPRIV void ref_name(cc *c, tbuf *b, uint32_t r)
 		break;
 	case RK_LBL:
 		tb_s(b, ".Ltmp.lbl.");
+		tb_u(b, i);
+		break;
+	case RK_TABLE:
+		tb_s(b, ".Lswitch.values.");
 		tb_u(b, i);
 		break;
 	case RK_NAME:

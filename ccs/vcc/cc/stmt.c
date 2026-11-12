@@ -37,11 +37,14 @@ VPRIV void unused_result(cc *c, uint32_t e, bool last)
 {
 	if (N(e)->op == N_STMTEXPR) {
 		uint32_t b = N(e)->a, n = N(b)->c;
+		/* clang: a statement expression from a macro (drmm_mutex_init) does not warn for its
+		   value dropped */
+		bool mac = last && (N(e)->flags & NF_MACRO);
 
 		for (uint32_t i = 0; i < n; i++) {
 			uint32_t s = c->lists[N(b)->b + i];
 
-			if (N(s)->op == N_EXPR && N(s)->a && (i + 1 < n ? !last : last))
+			if (N(s)->op == N_EXPR && N(s)->a && (i + 1 < n ? !last : last && !mac))
 				unused_result(c, N(s)->a, true);
 		}
 		return;
@@ -96,12 +99,14 @@ static bool uv_warn(cc *c, uint32_t e, uvw *w)
 	case N_DEREF:
 		if (vol(c, e))
 			return false;
-		/* fallthrough */
+		__attribute__((fallthrough));
 	case N_ADDR:
 	unop:
 		w->loc = x->loc, w->r[0] = rng_np(c, x->a), w->nr = 1;
 		return true;
 	case N_COMMA: {
+		if (x->aux == N_PREINC || x->aux == N_PREDEC || x->aux == N_POSTINC || x->aux == N_POSTDEC)
+			return false; /* lowered complex increment/decrement */
 		uint32_t r = x->b;
 
 		while (N(r)->op == N_CAST && !c->span[r].e && N(r)->a)
@@ -143,6 +148,8 @@ static bool uv_warn(cc *c, uint32_t e, uvw *w)
 			return false;	/* a volatile load */
 		goto plain;
 	case N_STMTEXPR: {
+		if (x->aux == N_ASSIGN || x->aux == N_PREINC || x->aux == N_PREDEC || x->aux == N_POSTINC || x->aux == N_POSTDEC)
+			return false; /* lowered atomic complex increment/decrement */
 		uint32_t b = x->a, n = N(b)->c, ls = n ? c->lists[N(b)->b + n - 1] : 0;
 
 		while (ls && N(ls)->op == N_LABEL)
@@ -829,9 +836,9 @@ static uint32_t sub_statement(cc *c)
 {
 	uint32_t n;
 
-	scope_open(c);
+	if (c->o->std != 89) scope_open(c);
 	n = statement(c);
-	scope_close(c);
+	if (c->o->std != 89) scope_close(c);
 	return n;
 }
 
@@ -861,8 +868,11 @@ static uint32_t label_sub(cc *c, uint32_t loc)
 				 "label followed by a declaration is a C23 extension");
 		vinit(&items);
 		declaration(c, &items, false);
-		/* the declaration stays in the enclosing scope: (approximation) */
-		return mkstmt(c, N_BLOCK, loc, 0, vfreeze(c, &items), items.n);
+		/* Declaration packing does not introduce a lexical scope. */
+		uint32_t n = mkstmt(c, N_BLOCK, loc, 0, vfreeze(c, &items), items.n);
+
+		N(n)->aux = 1;
+		return n;
 	}
 	return statement(c);
 }
@@ -873,6 +883,16 @@ static bool at_label(cc *c)
 {
 	return iskw(c, KW_case) || iskw(c, KW_default) ||
 	       (is(c, T_IDENT) && !kwof(tok(c)) && peek(c, 1)->kind == T_COLON);
+}
+
+/* Wide switches currently retain case bounds in signed i128 storage.  The
+ * source signedness must be checked before that storage loses it. */
+static void case_constant(cc *c, i128 *value)
+{
+	uint32_t n;
+	if (const_expr(c, value, &n) && c->switch_ty && is_bigint(c, c->switch_ty) &&
+	    !is_signed(c, N(n)->ty) && *value < 0)
+		cc_error(c, N(n)->loc, "wide integer constant is not representable in this 128-bit constant-expression context");
 }
 
 static uint32_t label_head(cc *c)
@@ -910,14 +930,15 @@ static uint32_t label_head(cc *c)
 		vloc = tok(c)->loc;
 		if (!c->in_switch)
 			cc_error(c, loc, "'case' statement not in switch statement");
-		const_expr(c, &lo, NULL);
+		case_constant(c, &lo);
 		hi = lo;
 		if (is(c, T_ELLIPSIS)) {
 			static const char *const g[] = { "pedantic", NULL };
 
-			EXT_WARN_MS(c, "...", "c2y-extensions", g, tok(c)->loc, "case ranges are a C2y extension");
+			if (!c->o->c2y)
+				EXT_WARN_MS(c, "...", "c2y-extensions", g, tok(c)->loc, "case ranges are a C2y extension");
 			next(c);
-			const_expr(c, &hi, NULL);
+			case_constant(c, &hi);
 		}
 		expect(c, T_COLON, "':'");
 		if (c->switch_ty)
@@ -980,7 +1001,12 @@ static uint32_t labeled_statement(cc *c, bool sed)
 	} while (at_label(c));
 	c->se_direct = sed;
 	body = label_sub(c, N(last)->loc);
-	if (sed && named) {
+	if (N(body)->op == N_BLOCK && N(body)->aux == 1) {
+		/* Keep labeled declarations in the enclosing block, including all
+		 * declarators and their cleanup/stack lifetimes. */
+		for (uint32_t i = 0; i < N(body)->c; i++)
+			vpush(c, &labels, c->lists[N(body)->b + i]);
+	} else if (sed && named) {
 		/* In a statement expression the value is the final expression,
 		 * with its labels emitted immediately before it. */
 		vpush(c, &labels, body);
@@ -1029,7 +1055,7 @@ VPRIV uint32_t statement(cc *c)
 		uint32_t cnd, th, el = 0;
 
 		next(c);
-		scope_open(c);	/* C99 6.8.4p3: a selection statement is a block, and so is each substatement */
+		if (c->o->std != 89) scope_open(c);	/* C99 6.8.4p3: a selection statement is a block, and so is each substatement */
 		cnd = cond_of(c, "if");
 		{
 			/* clang: runtime-behaviour warnings only in reachable code */
@@ -1051,7 +1077,7 @@ VPRIV uint32_t statement(cc *c)
 				setspan(c, el, eb);
 			}
 			c->cnd--;
-			scope_close(c);
+			if (c->o->std != 89) scope_close(c);
 			n = mkstmt(c, N_IF, loc, cnd, th, el);
 			c->span[n] = (pp_span){ loc, rp };
 			return n;
@@ -1061,19 +1087,19 @@ VPRIV uint32_t statement(cc *c)
 		uint32_t cnd, body;
 
 		next(c);
-		scope_open(c);
+		if (c->o->std != 89) scope_open(c);
 		cnd = cond_of(c, "while");
 		c->in_loop++;
 		c->cnd++, body = sub_statement(c), c->cnd--;
 		c->in_loop--;
-		scope_close(c);
+		if (c->o->std != 89) scope_close(c);
 		return mkstmt(c, N_WHILE, loc, cnd, body, 0);
 	}
 	case KW_do: {
 		uint32_t cnd, body;
 
 		next(c);
-		scope_open(c);
+		if (c->o->std != 89) scope_open(c);
 		c->in_loop++;
 		c->cnd++, body = sub_statement(c), c->cnd--;
 		c->in_loop--;
@@ -1081,7 +1107,7 @@ VPRIV uint32_t statement(cc *c)
 			fatal(c, tok(c)->loc, "expected 'while' in do/while loop");
 		next(c);
 		cnd = cond_of(c, "while");
-		scope_close(c);
+		if (c->o->std != 89) scope_close(c);
 		expect_semi(c, "after do/while statement");
 		return mkstmt(c, N_DO, loc, cnd, body, 0);
 	}
@@ -1096,7 +1122,7 @@ VPRIV uint32_t statement(cc *c)
 		if (unlikely(!is(c, T_LPAREN)))
 			lparen_fail(c, "for");
 		next(c);
-		scope_open(c);
+		if (c->o->std != 89) scope_open(c);
 		if (REC_ARM(c, &r)) {	/* an error in the header: on with the body */
 			rec_restore(c, &r, REC_FOR);
 			init = cnd = step = 0;
@@ -1135,7 +1161,7 @@ VPRIV uint32_t statement(cc *c)
 			set_only(c, N(init)->a), unused_value(c, N(init)->a, false);
 		if (step)
 			set_only(c, step);
-		scope_close(c);
+		if (c->o->std != 89) scope_close(c);
 		vinit(&sb);
 		vpush(c, &sb, step);
 		vpush(c, &sb, body);
@@ -1148,7 +1174,7 @@ VPRIV uint32_t statement(cc *c)
 		qty saved = c->switch_ty;
 
 		next(c);
-		scope_open(c);
+		if (c->o->std != 89) scope_open(c);
 		open = tok(c)->loc;
 		if (unlikely(!is(c, T_LPAREN)))
 			lparen_fail(c, "switch");
@@ -1199,7 +1225,7 @@ VPRIV uint32_t statement(cc *c)
 		}
 		c->in_switch--;
 		c->switch_ty = saved;
-		scope_close(c);
+		if (c->o->std != 89) scope_close(c);
 		return mkstmt(c, N_SWITCH, loc, cnd, body, 0);
 	}
 	case KW_break:
