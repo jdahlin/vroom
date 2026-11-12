@@ -1587,6 +1587,8 @@ static void parse_block_header(ps *p)
 			ppos pos = { vt->line, vt->col, 0, 0, 0 };
 
 			check_value_name(p, vt);
+			if (p->pb.v[p->pb.n - 1].nparam >= VIR_MAX_BPARAM)
+				PERR(p, vt, "too many block parameters");
 			p->pos++;
 			expect_p(p, ':');
 			memset(&in, 0, sizeof(in));

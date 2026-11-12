@@ -21,7 +21,8 @@ input), **decision** (needs a design call).  Measurements are sqlite3.c at
 ## 1. Summary
 
 - Six wrong-code bugs were found and fixed, each with a regression test
-  (1.1).  Two more are open: a crash and a limit that wraps silently (1.2).
+  (1.1).  A crash and a limit that wrapped silently were fixed after the
+  review; a wasm bug it exposed is open (1.2).
 - One of the fixed bugs had flattered every sqlite number since the first
   lowering item: a compare dropped at a loop header miscompiled
   `sqlite3_str_vappendf` without changing the verification hash.  Corrected
@@ -56,19 +57,19 @@ became volatile); `fwriter`'s backward scan is bounded.  `returns_twice` and
 F1-F3 came from the lowering branch.  F4 was partly older (volatile locals
 were already dropped at the branch start).  F5 predates the lowering work.
 
-### 1.2 Open bugs
+### 1.2 Found by the review, fixed afterwards or open
 
-- **O1 (crash).** `vw_readv` and `vw_phiops` recurse once per block when a
-  variable defined at the top is read after about 50 000 sequential `if`s that
-  do not touch it: SIGSEGV on the stack guard.  The direct emitter handles
-  400 000.  `vw_entry` has the same recursion.  Fix: a worklist, or bail on
-  depth.
-- **O2 (silent corruption on a limit).** `vir_blk.nparam` is 16 bits and wraps:
-  a function with 70 000 locals updated in a loop builds "successfully" with a
-  block of 70 000 parameters counted as 4 464.  Today lowering rejects it by
-  accident (a stray `bparam`); with the verifier on it reports 70 000 unrelated
-  failures.  Fix: fail in `vir_ins_add` at 65 535 and report a limit in the
-  parser (spec section 18 states the limit).
+- **O1 (crash), fixed after the review.** `vw_readv` and `vw_phiops` recurse
+  once per block when a variable defined at the top is read after about
+  50 000 sequential `if`s that do not touch it: SIGSEGV on the stack guard.
+  `vw_readv` now bails to the direct emitter when the stack runs low
+  (`vstack_low`); `bench/vcc-stress.py` case `vir-read-60k-blocks-down`.
+- **O2 (silent corruption on a limit), fixed after the review.**
+  `vir_blk.nparam` is 16 bits and wrapped: a function with 70 000 locals
+  updated in a loop built "successfully" with a block of 70 000 parameters
+  counted as 4 464.  `vir_ins_add` fails at 65 535 (`VIR_MAX_BPARAM`), the
+  parser reports "too many block parameters"; `virtest --selftest` and the
+  stress case `vir-66k-loop-variables`.
 - **O3 (wasm, not VIR).** `(long long)(int)0x80ff0102` gives
   `i64.const 2164195586` for wasm64.  Found by `vir_byte_assembly`, which is
   `vcc-xfail-wasm`; TODO.md has the entry.

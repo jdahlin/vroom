@@ -163,6 +163,7 @@ enum { VC_NONE, VC_INT, VC_F32, VC_F64 };	/* piece classes; 0 is an unused slot 
 #define VIR_MAX_LOC	((uint32_t)1 << 26)
 #define VIR_MAX_CONST	((uint32_t)1 << 23)	/* the constant table has 2^24 entries */
 #define VIR_MAX_SWITCH	((uint32_t)1 << 20)
+#define VIR_MAX_BPARAM	65535u			/* a block's parameters (vir_blk.nparam is 16 bits) */
 
 /* ---- the opcode table: what the printer, the parser and the verifier read ---- */
 enum {	/* result type sets */

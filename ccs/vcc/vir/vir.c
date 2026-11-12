@@ -200,8 +200,13 @@ uint32_t vir_ins_add(vir_fn *f, uint32_t op, uint32_t ty, uint32_t fl, uint32_t 
 		return 0;
 	}
 	k = &f->blk[f->nblk - 1];
-	if (op == VO_BPARAM && k->nparam == k->n)
+	if (op == VO_BPARAM && k->nparam == k->n) {
+		if (k->nparam >= VIR_MAX_BPARAM) {	/* (the count would wrap: a br's list has its length) */
+			vir_ctx_get()->fail = true;
+			return 0;
+		}
 		k->nparam++;
+	}
 	v = ins_push(f, op, ty, fl, a, b, c);
 	if (!v && op == VO_BPARAM && k->nparam > k->n)
 		k->nparam--;
