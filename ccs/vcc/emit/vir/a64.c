@@ -1855,12 +1855,14 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 	L.ret32 = KIND(c, ft->base) != TY_VOID && is_integer(c, ft->base) && tsize(c, ft->base) == 4;
 	L.tail = !(ft->flags & TF_VARIADIC) && em_tail_caller_ok(e, s) && !vl_notail(&L, VLT.lo32);	/* (lo32: scratch until it is filled) */
 	vir_uses(f, L.uses);
-	/* lo32 by a fixed point: only falls; a br argument is read as its parameter is */
+	/* lo32 by a fixed point: only falls; a br argument is read as its parameter is.  Facts go
+	 * from a use to its operands: blocks and instructions last to first, so one sweep settles
+	 * all but what a back edge carries */
 	memset(L.lo32, 1, f->nins);
 	for (bool ch = true; ch;) {
 		ch = false;
-		for (uint32_t b = 0; b < f->nblk; b++)
-			for (uint32_t i = f->blk[b].first; i < f->blk[b].first + f->blk[b].n; i++) {
+		for (uint32_t b = f->nblk; b-- > 0;)
+			for (uint32_t i = f->blk[b].first + f->blk[b].n; i-- > f->blk[b].first;) {
 				vir_ins x = f->ins[i];
 				vir_oit it;
 				uint32_t *p;
