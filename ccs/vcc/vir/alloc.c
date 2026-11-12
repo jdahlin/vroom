@@ -1333,7 +1333,11 @@ static void enter(A *a, uint32_t b)
 								r = pr;
 							break;
 						}
-				} else if ((ax.vfl[q] & XCALL) && (late || (u == e && t->op == VO_BR))) {
+				} else if ((ax.vfl[q] & XCALL) && (late || (u == e && t->op == VO_BR)) &&
+					   !((a->rg->callee[c] >> VR_NUM((uint32_t)r) & 1) &&
+					     __builtin_popcountll(ax.fr[c] & a->rg->callee[c] & ~(1ull << VR_NUM((uint32_t)r))) >= 2)) {
+					/* (a callee-saved register keeps it across the call, when others are free:
+					 * otherwise the values used sooner need them) */
 					r = -1;
 				}
 			}
