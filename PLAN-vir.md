@@ -674,6 +674,25 @@ cykler mot virpol, nu +9,9 %.  Samplingar per funktion (storlek 300) varierar
   samma fyra), vir-test 119/119, vcc-volatile 32/32, sqlite TCL genom VIR
   1 fel (interrupt2, som clang).  Kvar i dekkerMul2: inlining i anroparna,
   `fmadd`, lövram utan ramrekord, `[x0, #8]` i stället för `add` + `[x1]`.
+- **`fma` (2026-11-12).**  Ny VIR-instruktion 72 `fma a, b, c` (flaggor `negp`,
+  `negc`; SPEC-vir.md), sänkt till fmadd/fmsub/fnmsub/fnmadd.  Byggaren
+  kontraherar som clangs `-ffp-contract=on`: en produkt som uttrycket självt
+  just räknade (namnet håller den fortfarande; också negerad) adderas eller
+  subtraheras, vänster operand först; inte en produkt i en variabel, värdet av
+  en tilldelning, en konverterad produkt, en via `?:` eller en konstantprodukt.
+  Negerade faktorer och addender blir flaggor.  `-ffp-contract=off` stänger av
+  (`cc_opts.no_fp_contract`); `#pragma STDC FP_CONTRACT` läses inte, och den
+  direkta emittern kontraherar inte.  Döda flyttalsoperationer tas nu bort i
+  byggaren (statusflaggor bevaras inte, som clang utan FENV_ACCESS).
+  39 provuttryck mot clang -O2: samma operationer utom där värdet ändå är
+  lika.  sqlite3.o: 13 fmadd-familjen (clang 46, varav 36 i de 12 inlinade
+  dekkerMul2); dekkerMul2 59 → 57 instruktioner med clangs tre fmadd;
+  speedtest1 −0,05 % instruktioner (flyttal är en liten del).  Test
+  `vir_fp_contract.c` (alla former fusionerade eller ingen; de clang inte
+  kontraherar förblir okontraherade); C-sviterna genom VIR samma tre kända
+  fel, utan VIR 2082/2082 och byte-identiskt; vir-test 119/119, vir-exposure
+  56/56, virgen 101/101, vcc-abi, vcc-driver 212/212, sqlite TCL genom VIR
+  1 fel (interrupt2).
 
 ### Underlag för V4 (2026-11-11): registerallokering, ingen kod
 

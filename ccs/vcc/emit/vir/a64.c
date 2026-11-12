@@ -1595,6 +1595,11 @@ static void vl_ins(vl *L, uint32_t b, uint32_t i, uint8_t res)
 		word(e, op[in->op - VO_FADD] | (unsigned)d << 22 | (unsigned)vl_fx(L, 1) << 16 | (unsigned)vl_fx(L, 0) << 5 | (unsigned)vd);
 		return;
 	}
+	case VO_FMA:	/* fmadd, fmsub (the product negated), fnmsub (the addend), fnmadd (both) */
+		word(e, 0x1f000000u | (unsigned)d << 22 | (unsigned)((in->fl & VIF_NEGC) != 0) << 21 | (unsigned)vl_fx(L, 1) << 16 |
+			(unsigned)(!(in->fl & VIF_NEGP) != !(in->fl & VIF_NEGC)) << 15 | (unsigned)vl_fx(L, 2) << 10 |
+			(unsigned)vl_fx(L, 0) << 5 | (unsigned)vd);
+		return;
 	case VO_FNEG: case VO_FABS: case VO_FSQRT: {
 		uint32_t op = in->op == VO_FNEG ? 0x1e214000u : in->op == VO_FABS ? 0x1e20c000u : 0x1e21c000u;
 

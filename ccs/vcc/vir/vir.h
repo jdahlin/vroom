@@ -52,7 +52,7 @@ enum {
 	VO_I2P = 53, VO_LOAD = 54, VO_STORE = 55, VO_MEMCPY = 56, VO_MEMSET = 57,
 	VO_ALOAD = 58, VO_ASTORE = 59, VO_AXCHG = 60, VO_AXADD = 61, VO_ACAS = 62, VO_AFENCE = 63,
 	VO_CALL = 64, VO_VA_START = 65, VO_VA_ARG = 66, VO_TLSADDR = 67, VO_ASM = 68,
-	VO_BARRIER = 69, VO_FRAMEADDR = 70, VO_RETADDR = 71,
+	VO_BARRIER = 69, VO_FRAMEADDR = 70, VO_RETADDR = 71, VO_FMA = 72,
 	VO_BR = 80, VO_BRIF = 81, VO_SWITCH = 82, VO_IBR = 83, VO_ASMGOTO = 84, VO_RET = 85, VO_TRAP = 86,
 	VO_TARGET0 = 128,	/* 128-255: target instructions introduced by lowering */
 	VO_N = 256
@@ -67,7 +67,8 @@ enum {
 	VIF_MS = 4,				/* load, ext: sign-extend */
 	VIF_VOL = 0x100,			/* load store atomics: volatile */
 	VIF_CALL_NORETURN = 1, VIF_CALL_PURE = 2, VIF_CALL_CONST = 4, VIF_CALL_TAIL = 8,
-	VIF_LIKELY = 1, VIF_UNLIKELY = 2	/* brif */
+	VIF_LIKELY = 1, VIF_UNLIKELY = 2,	/* brif */
+	VIF_NEGP = 1, VIF_NEGC = 2		/* fma: the product, the addend negated */
 };
 /* load store atomics: bits 0-1 log2 width, 4-7 log2 alignment */
 #define VIF_W(fl)	((fl) & 3)

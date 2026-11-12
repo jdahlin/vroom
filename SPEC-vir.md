@@ -355,6 +355,7 @@ other than to equal values, must clear its UB flags (R2).
 | 69 | `barrier` | void | - | - | - | R,W | Reads and writes all exposed memory; no code |
 | 70 | `frameaddr` | ptr | # level | - | - | R | `__builtin_frame_address(level)` |
 | 71 | `retaddr` | ptr | # level | - | - | R | `__builtin_return_address(level)` |
+| 72 | `fma` | f32 f64 | v:T | v:T | v:T | P/F | `a * b + c` rounded once (IEEE fusedMultiplyAdd). Flags: `negp` the product is negated, `negc` the addend is negated, both exact |
 | 80-86 | terminators | | | | | T | Section 8 |
 
 `U*`: only when a UB flag is set. `P/F`: pure, unless the function has

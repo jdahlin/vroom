@@ -1014,6 +1014,7 @@ static void parse_flags(ps *p, vir_ins *in)
 		{ "nsw", VIF_NSW, 1 }, { "nuw", VIF_NUW, 1 }, { "exact", VIF_EXACT, 1 }, { "nz", VIF_NZ, 1 },
 		{ "volatile", VIF_VOL, 0 }, { "noreturn", VIF_CALL_NORETURN, 1 }, { "pure", VIF_CALL_PURE, 1 },
 		{ "const", VIF_CALL_CONST, 1 }, { "likely", VIF_LIKELY, 1 }, { "unlikely", VIF_UNLIKELY, 1 },
+		{ "negp", VIF_NEGP, 1 }, { "negc", VIF_NEGC, 1 },
 	};
 	int nalign = 0;
 

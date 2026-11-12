@@ -385,6 +385,8 @@ static void vw_set(ecx *e, int r, uint32_t v)
 {
 	if (r < 0 || r >= VW_NONAME)
 		vw_fail(e, "VIR: no such register");
+	if (r >= VW_FNAME0)
+		e->vw->fprod[r - VW_FNAME0] = 0;
 	vw_write(e, (uint32_t)r, e->vw->cur, v);
 }
 
@@ -677,6 +679,8 @@ VPRIV void vw_store(ecx *e, int rs, const lval *l, int size)
 	uint32_t v = vw_getraw(e, rs), ty, slot, a;
 	int64_t rel;
 
+	if (rs >= VW_FNAME0 && rs < VW_NONAME)
+		V->fprod[rs - VW_FNAME0] = 0;	/* (an assignment's value is not the product any more, as clang) */
 	if (l->bf)
 		vw_fail(e, "VIR: a bit-field lvalue");
 	if (l->k == L_VAR) {
@@ -1041,13 +1045,59 @@ VPRIV val vw_fconst(ecx *e, uint64_t bits, int size)
 	return (val){ .k = V_REG, .r = (uint8_t)r };
 }
 
+/* a is the product an expression just made (in its name still), or that negated: the fmul, else 0.
+ * *fl: VIF_NEGP when negated. */
+static uint32_t vw_fprod(ecx *e, const val *a, uint32_t x, uint32_t ty, uint32_t *fl)
+{
+	vwst *V = e->vw;
+	uint32_t m = x;
+
+	*fl = 0;
+	/* (arm64 only: the one lowering with fmadd) */
+	if (e->c->o->no_fp_contract || e->c->o->target > PP_DARWIN || a->k != V_REG || a->r < VW_FNAME0 ||
+	    V->fprod[a->r - VW_FNAME0] != x || !x)
+		return 0;
+	if (V->p[m].in.op == VO_FNEG)
+		*fl |= VIF_NEGP, m = V->p[m].in.a;
+	if (V->p[m].in.op != VO_FMUL || V->p[m].in.ty != ty)
+		return 0;
+	if (V->p[V->p[m].in.a].in.op == VO_FCONST && V->p[V->p[m].in.b].in.op == VO_FCONST)
+		return 0;	/* (a constant product is rounded on its own) */
+	return m;
+}
+
 VPRIV val vw_fbin(ecx *e, int op, qty t, val a, val b)
 {
 	uint32_t ty = vw_fty(e, t), x = vw_val(e, &a, ty), y = vw_val(e, &b, ty);
 	int r = vw_fres(e, &a, &b);
 	uint32_t vop = op == T_PLUS ? VO_FADD : op == T_MINUS ? VO_FSUB : op == T_STAR ? VO_FMUL : VO_FDIV;
+	uint32_t v, m = 0, fl = 0;
+	bool left = true;
 
-	vw_set(e, r, vw_ins(e, vop, ty, 0, x, y, 0));
+	if (vop <= VO_FSUB && !(m = vw_fprod(e, &a, x, ty, &fl)))
+		left = false, m = vw_fprod(e, &b, y, ty, &fl);
+	if (m) {
+		/* a product this expression made, added or subtracted: one fused operation, as clang's
+		 * -ffp-contract=on (the left operand first; the product itself goes when nothing else reads it) */
+		const vwp *P = e->vw->p;
+		uint32_t pa = P[m].in.a, pb = P[m].in.b, c = left ? y : x;
+
+		if (vop == VO_FSUB)
+			fl ^= left ? VIF_NEGC : VIF_NEGP;
+		/* a negated factor or addend is a flag (exact) */
+		if (P[pa].in.op == VO_FNEG)
+			fl ^= VIF_NEGP, pa = P[pa].in.a;
+		if (P[pb].in.op == VO_FNEG)
+			fl ^= VIF_NEGP, pb = P[pb].in.a;
+		if (P[c].in.op == VO_FNEG)
+			fl ^= VIF_NEGC, c = P[c].in.a;
+		v = vw_ins(e, VO_FMA, ty, fl, pa, pb, c);
+	} else {
+		v = vw_ins(e, vop, ty, 0, x, y, 0);
+	}
+	vw_set(e, r, v);
+	if (vop == VO_FMUL)
+		e->vw->fprod[r - VW_FNAME0] = v;
 	return (val){ .k = V_REG, .r = (uint8_t)r };
 }
 
@@ -1056,7 +1106,12 @@ VPRIV val vw_fneg(ecx *e, qty t, val a)
 	uint32_t ty = vw_fty(e, t), x = vw_val(e, &a, ty);
 	int r = vw_fres(e, &a, NULL);
 
-	vw_set(e, r, vw_ins(e, VO_FNEG, ty, 0, x, 0, 0));
+	bool prod = a.k == V_REG && a.r >= VW_FNAME0 && x && e->vw->fprod[a.r - VW_FNAME0] == x && e->vw->p[x].in.op == VO_FMUL;
+	uint32_t v = vw_ins(e, VO_FNEG, ty, 0, x, 0, 0);
+
+	vw_set(e, r, v);
+	if (prod)
+		e->vw->fprod[r - VW_FNAME0] = v;
 	return (val){ .k = V_REG, .r = (uint8_t)r };
 }
 
@@ -1612,6 +1667,7 @@ VPRIV void vw_begin(ecx *e, uint32_t s)
 	V->nb = V->nx = V->nsl = V->nact = V->nst = V->nloc = V->nprom = 0;
 	V->live[0] = V->live[1] = V->live[2] = 0;
 	V->flive = 0;
+	memset(V->fprod, 0, sizeof V->fprod);
 	V->hn = 0;
 	if (V->hcap)
 		memset(V->h, 0, V->hcap * sizeof *V->h);
@@ -2788,7 +2844,7 @@ static void vw_simplify(ecx *e)
 		if (vw_find(V, q) != q || S.cnt[q] || V->p[q].blk == VW_NOBLK)
 			continue;
 		if (op == VO_LOAD ? (V->p[q].in.fl & VIF_VOL) != 0 :
-		    ((eff & ~EF_UF) != EF_P || op == VO_BPARAM || op == VO_PARAM))
+		    ((eff & ~(EF_UF | EF_F)) != EF_P || op == VO_BPARAM || op == VO_PARAM))	/* (FP status flags are not kept: no FENV_ACCESS) */
 			continue;
 		VW_EACHOP(V, q, o, {
 			uint32_t x = vw_find(V, *o);
