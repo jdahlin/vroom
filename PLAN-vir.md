@@ -156,7 +156,8 @@ De följer `LO()`-gränssnittet, så att byggaren är en tunn översättning:
    av värdet vars nästa användning ligger längst bort (SPEC-vir.md 15.5–15.11;
    heltals- och flyttalsklass, parallella flyttar per kant, fasta register för
    `div`, skift och argument, tips i stället för sammanslagningsfas).  Inget
-   LICM i 1.0.
+   LICM i 1.0, med ett undantag (beslut 2026-11-12): loopkonstanter i raka
+   innerloopar utan anrop lyfts ut (`vv_pin`, `emit/vir/vec.inc`).
 5. **Sänk** genom den riktiga CPU:ns `LO`.
 
 Passlistan är fast: vanliga funktionsanrop, ingen passhanterare, inga
@@ -325,8 +326,9 @@ tre), utan VIR 2083/2083; ASan/UBSan rent.
   en gång framför de raka innerloopar vektoriseraren ändå tittar på (högst 6,
   inga loopar med anrop).  **Det här är ett avsteg från "Inget LICM i 1.0"**
   ovan, begränsat till konstanter; `VCC_VIR_VEC=n` stänger av det.  Effekt på
-  TSVC: −19 % instruktioner, −7 % cykler.  Behöver ett beslut: behålla,
-  bredda eller ta bort.
+  TSVC: −19 % instruktioner, −7 % cykler.  **Beslut (Johan, 2026-11-12):
+  behålls**, som undantag i passlistan ovan; bredare LICM är fortfarande
+  utanför 1.0.
 - `bench/vcc-tsvc.py` skriver cykler (`/usr/bin/time -l`): maskinen är delad
   och sekunderna varierar.
 
