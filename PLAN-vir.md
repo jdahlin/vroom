@@ -1451,6 +1451,42 @@ loopar, färre återanvända över block, inlining), `mov` (allokeraren:
 blockparametrar och argumentkopior), villkorliga hopp (inlining, färre
 `csel`), `b` (blockplacering).
 
+### Flyttar: tre regler prövade utan mätbar vinst; main efter #125 (2026-11-12)
+
+Gren `claude/vir-moves` på main efter #126.  sqlite speedtest1 `--size 100`,
+instruktioner; bruset mellan körningar är ca ±0,005 G.
+
+- **Main efter #125 är 25,71 G, grenen före var 25,52 G.**  #124 ändrar inget
+  (26,178 mot 26,181 på d0cbdcc7); #125 ger +0,19 G (+0,7 %): if-konverteringen
+  i byggaren gör nu upp till åtta `select` per sammanflöde i stället för en,
+  så båda armarna räknas oftare.  Cyklerna är oförändrade (sex parade
+  körningar: −0,1 % [−0,5 .. +0,9]).  Vektoriseraren är det inte
+  (`VCC_VIR_VEC=0`: 25,70 G).  Jämförelser i instruktioner mot clang utgår
+  alltså från 1,084x nu, inte 1,077x.
+- **Prövat mot `mov` (+0,38 G mot clang), inget av det behållet:**
+  1. En blockparameter som bara returneras tar returregistret, och dess
+     argument hintas dit: −0,003 G, statiskt +85 instruktioner.  Fallet som
+     motiverade det (sqlite3DbMallocRawNN: `mov x2, x0; mov x0, x2`) var redan
+     löst av syskonanropen.
+  2. Kopian i argumentregistret behålls när ett värde flyttas till
+     callee-saved vid sparpunkten: −0,006 G.
+  3. Ett registers reservation: registret för en parameter vars argument
+     blocket definierar längre ned hålls ledigt till dess: −88 `mov`
+     statiskt, dynamiskt inget.
+- **Kantflyttarna per slag av värde** (nop-prob, G körningar; totalt ca 0,52):
+  framåtkant: argument definierat i föregångaren 0,14 (därav 0,09 där
+  parameterns register var känt men upptaget, 0,06 där argumentet satte det
+  tentativa registret och parametern ändå hamnade annorstädes), argument som
+  är en blockparameter 0,06, definierat tidigare 0,06, från anrop eller
+  parameter 0,05, vanligt värde 0,09; bakkant: argument definierat före
+  latchen 0,10, vanligt värde 0,05.  "Upptaget" är alltså ett värde som redan
+  låg där vid blockets början (typiskt variabelns gamla värde som ännu
+  används), inte ett som tog registret under tiden: det löser ingen hint.
+- **Var resten av `mov`-gapet troligen ligger:** anropen.  Vi kör 0,40 G
+  anrop mot clangs 0,34 G, och varje anrop kostar argumentkopior av levande
+  värden (0,73 G när det mättes) och flyttar till callee-saved: 0,06 G fler
+  anrop à ca tre flyttar är ungefär hälften av gapet.  Det följer inliningen.
+
 ### Underlag för V4 (2026-11-11): registerallokering, ingen kod
 
 - `RESEARCH-regalloc.md`: vad GCC (IRA, LRA) och LLVM (Greedy, Fast, PBQP,
