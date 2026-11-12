@@ -30,6 +30,10 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
   `RESEARCH-vir.md` (LLVM IR's problems): VIR, an SSA IR used only at `-O2`,
   built by compiling the shared walker a second time against a virtual
   lowering target.  Update the status of a step in `PLAN-vir.md`.
+- `RESEARCH-vectors.md`: vector values in VIR (how Cranelift, Wasm SIMD, B3,
+  LLVM and GCC represent them; ABI and spill slots), loop vectorizers (LLVM,
+  GCC, dependence rules, TSVC results here and published), the traps, and the
+  proposal: lane-typed 128-bit types, a first loop vectorizer, prerequisites.
 - `RESEARCH-regalloc.md`: register allocation (GCC, LLVM, SSA-based, linear
   scan and its descendants, optimal and learned methods) and the allocator
   `SPEC-vir.md` section 15 specifies for VIR, with its fallback.
