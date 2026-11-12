@@ -40,6 +40,21 @@ NI U logicx(U x) { return (x & 0xffffffff00000000ull) ^ (x | 0x5555555555555555u
 NI int tst(U x) { return (x & 0x00ff000000000000ull) != 0; }
 NI S shared(S x, S *o) { S k = 77; *o = x + k; return x * k; }
 
+/* multipliers the fold turns into shifts and adds, in a loop and across a call: the
+   constant gets no register (it is materialized at the multiply, where the fold
+   sees it); one that stays a mul (11) alongside */
+NI S mulk(const int *p, int n)
+{
+	S t = 0;
+
+	for (int i = 0; i < n; i++) {
+		sink = i;
+		t += (S)p[i] * 5 + (int)((unsigned)p[i] * 7u) + (S)p[i] * -1 + (unsigned)p[i] * 24u + (S)p[i] * 11 +
+		     (int)((unsigned)p[i] * 0x7fffffffu);
+	}
+	return t;
+}
+
 int main(void)
 {
 	struct T t = { 1, 2, 3, 4, { 5, 6, 7, 8 } };
@@ -71,5 +86,14 @@ int main(void)
 	}
 	if (!tst(0x0001000000000000ull) || tst(0x0100000000000000ull)) return 11;
 	if (shared(3, o) != 231 || o[0] != 80) return 12;
+	{
+		static const int v[4] = { 3, -9, 0x7fffffff, -0x7fffffff - 1 };
+		S want = 0;
+
+		for (int i = 0; i < 4; i++)
+			want += (S)v[i] * 5 + (int)((unsigned)v[i] * 7u) - (S)v[i] + (unsigned)v[i] * 24u + (S)v[i] * 11 +
+				(int)((unsigned)v[i] * 0x7fffffffu);
+		if (mulk(v, 4) != want) return 13;
+	}
 	return 0;
 }

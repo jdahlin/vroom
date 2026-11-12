@@ -606,6 +606,13 @@ cykler mot virpol, nu +9,9 %.  Samplingar per funktion (storlek 300) varierar
   `I_ADD`/`I_SUB` med cond 8 + option (som skiftsorterna).  Parvis, storlek
   100: mot eab5ebd0 −6,8 % instr., −2,7 % cykler; mot virpol +6,8 % cykler;
   mot clang -O2 +10,3 % (virpol mot clang -O2 +3,9 %).
+- Efter ombasering på 5ae88996 (allokerarens över-anrop-test): låg halva
+  (32-bitars retur, int-argument, genom blockparametrar) ger ingen
+  `mov wN, wN` (724 → 56 i sqlite3.s), switch indexerar tabellen med
+  väljaren själv (2e4ad9d8: −0,7 % instr., −0,1 % cykler); multiplikatorer
+  som `fmulk` viker får inget register (`vl_fix`: −0,4 % instr., cykler inom
+  bruset).  Mot virpol +5,5 % [+5,1 .. +5,7], mot clang -O2 ca +10 %.
+  Kvar här: `x * -1 + a` blir madd med −1 i stället för sub.
 - Tester: `vir_branch_bits.c`, `vir_flags_reuse.c`, `vir_layout_exits.c`,
   `vir_operand_fold.c`, `vir_byte_assembly.c`, `vir_constants.c` (.o och .s).
 

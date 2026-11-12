@@ -95,6 +95,20 @@ static inline int vl_pow2(const vir_ins *k)	/* log2 of a positive power of two, 
 
 	return v && !(v & (v - 1)) ? __builtin_ctzll(v) : -1;
 }
+/* a multiplier opt.c's fmulk turns into neg, add or sub with a shift (then a shift): -1,
+ * (2^n + 1) << s, 2^n - 1; the constant is materialized next to the madd, where it sees it */
+static inline bool vl_mulk(const vir_ins *k)
+{
+	int w = k->ty == VT_I32 ? 32 : 64;
+	uint64_t m = w == 64 ? ~0ull : 0xffffffffull, c = (k->ty == VT_I32 ? (uint64_t)k->b : (uint64_t)vl_k64(k)) & m;
+	int sh;
+
+	if (!c || c == m)
+		return c != 0;
+	sh = __builtin_ctzll(c);
+	c >>= sh;
+	return (c > 1 && !((c - 1) & (c - 2)) && sh < w) || (!sh && c > 3 && !(c & (c + 1)) && 64 - __builtin_clzll(c) < w);
+}
 static inline bool vl_iconst(const vir_fn *f, uint32_t v) { return vl_isconst(f, v) && f->ins[v].op == VO_ICONST; }
 static inline bool vl_zero(const vir_fn *f, uint32_t v)
 {
@@ -240,8 +254,8 @@ static void vl_fixed(const vir_fn *f, uint32_t v, vir_fix *x, void *ctx)
 		if (vl_iconst(f, in->b))
 			x->mem |= 2;
 		return;
-	case VO_MUL:	/* by a power of two: a shift */
-		if (vl_iconst(f, in->b) && vl_pow2(&f->ins[in->b]) >= 0)
+	case VO_MUL:	/* by a power of two: a shift; by a constant fmulk folds: next to the madd */
+		if (vl_iconst(f, in->b) && (vl_pow2(&f->ins[in->b]) >= 0 || vl_mulk(&f->ins[in->b])))
 			x->mem |= 2;
 		return;
 	case VO_I2P: case VO_P2I: case VO_TRUNC: case VO_EXT:
