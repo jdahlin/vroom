@@ -2070,6 +2070,13 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 
 			if (i < np)
 				a = convert(c, a, c->params[f->aux + i]);
+			else if (b->id == BI_LIB) {
+				/* the variable part of __builtin_printf and the _chk
+				   forms: default argument promotions, as a call */
+				a = rvalue(c, a);
+				if (KIND(c, N(a)->ty) == TY_FLOAT)
+					a = cast_node(c, a, prim(TY_DOUBLE), CK_F2F);
+			}
 			args.v[i] = a;
 		}
 		if (args.n < np || (args.n > np && !(f->flags & TF_VARIADIC)))
