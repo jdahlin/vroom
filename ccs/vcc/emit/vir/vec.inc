@@ -43,7 +43,7 @@ typedef struct vvi {
 	int64_t c;		/* what one iteration adds */
 	uint32_t objv, bv;	/* the object addressed (a symbol ref, a pointer value); an invariant term */
 	int64_t bs, k;		/* ... its factor; the constant term */
-	uint32_t sce, scb, vec;	/* its value at entry (in VPRE), in the vector body or VPH, its lanes */
+	uint32_t sce, scb, sc0, vec;	/* its value at entry (in VPRE), in the vector body or VPH, at t = 0 (in VPH), its lanes */
 } vvi;
 
 typedef struct vvacc { uint32_t q, pos; bool store; } vvacc;
@@ -62,6 +62,8 @@ typedef struct vvs {
 	vvred red[8]; uint32_t nred;
 	uint32_t ind[32], indb[32], indn[32], nind;	/* H's inductions; VB's parameter and its next value */
 	uint32_t stepv[4]; int64_t stepc[4]; uint32_t nstep;	/* lanes 0, c, 2c, 3c (in VPH) */
+	struct { uint32_t a, b; } chk[8]; uint32_t nchk;	/* pairs whose ranges must not meet (run time): an access's index, or 64 + an invariant load's */
+	struct { uint32_t a, par; bool rev; } pin[32]; uint32_t npin;	/* per address: VB's pointer to its four elements */
 	uint32_t pos;
 	const char *why;			/* why not (NULL: so far, yes) */
 } vvs;
@@ -238,7 +240,19 @@ static bool vv_classify(vvs *S, uint32_t q)
 	case VO_EXT:
 		if (VIF_W(in.fl) == 2 && (in.fl & VIF_MS) && in.ty == VT_I64 && V->p[w[0]].in.ty == VT_I32 && vv_lin(o[0]) && o[0]->exact) {
 			r = *o[0];
-			r.nuse = 0, r.sce = r.scb = r.vec = 0;
+			r.nuse = 0, r.sce = r.scb = r.sc0 = r.vec = 0;
+		} else if (allinv) {
+			vv_opaque(S, q, &r);
+		} else {
+			r.kind = VK_BAD;
+		}
+		break;
+	case VO_I2P:	/* an address computed as an integer: its invariant term is the object */
+		if (vv_lin(o[0]) && o[0]->exact && (o[0]->objk || (o[0]->bv && o[0]->bs == 1))) {
+			r = *o[0];
+			r.nuse = 0, r.sce = r.scb = r.sc0 = r.vec = 0;
+			if (!r.objk)
+				r.objk = VJ_PTR, r.objv = r.bv, r.bv = 0, r.bs = 0;
 		} else if (allinv) {
 			vv_opaque(S, q, &r);
 		} else {
@@ -285,7 +299,7 @@ static bool vv_classify(vvs *S, uint32_t q)
 		break;
 	case VO_SDIV: case VO_UDIV: case VO_SREM: case VO_UREM: case VO_LSHR: case VO_ASHR: case VO_UMULHI: case VO_SMULHI:
 	case VO_CLZ: case VO_CTZ: case VO_POPCNT: case VO_BSWAP: case VO_U2F: case VO_F2S: case VO_F2U: case VO_FEXT:
-	case VO_FTRUNC: case VO_BITCAST: case VO_PSUB:
+	case VO_FTRUNC: case VO_BITCAST: case VO_PSUB: case VO_P2I:
 		if (allinv)
 			vv_opaque(S, q, &r);
 		else
@@ -315,8 +329,8 @@ static bool vv_classify(vvs *S, uint32_t q)
 
 		if (in.fl & VIF_VOL)
 			return vv_no(S, "a volatile store");
-		if (!vv_lin(o[0]) || !o[0]->exact || o[0]->objk != VJ_SYM)
-			return vv_no(S, "a store whose address is not symbol + linear");
+		if (!vv_lin(o[0]) || !o[0]->exact || !o[0]->objk)
+			return vv_no(S, "a store whose address is not base + linear");
 		if (o[0]->c != 4 && o[0]->c != -4)
 			return vv_no(S, o[0]->c ? "a store with a stride other than its size" : "a store to one address");
 		if (VIF_W(in.fl) != 2 || (vt != VT_F32 && vt != VT_I32))
@@ -344,7 +358,21 @@ done:
 	return true;
 }
 
-/* 6.3: every store against every other access */
+/* the ranges of x and y must be checked apart when the loop is entered (at most 8 pairs, as LLVM) */
+static bool vv_chk(vvs *S, uint32_t x, uint32_t y)
+{
+	for (uint32_t i = 0; i < S->nchk; i++)
+		if (S->chk[i].a == x && S->chk[i].b == y)
+			return true;
+	if (S->nchk == 8)
+		return vv_no(S, "more than 8 pairs of accesses to tell apart at run time");
+	S->chk[S->nchk].a = x, S->chk[S->nchk++].b = y;
+	return true;
+}
+
+/* 6.3: every store against every other access.  Two different symbols never meet; one object
+ * (a symbol, or one pointer value) is decided here by the distance; anything else by a range
+ * check when the loop is entered */
 static bool vv_depend(vvs *S)
 {
 	vwst *V = S->e->vw;
@@ -355,8 +383,10 @@ static bool vv_depend(vvs *S)
 		for (uint32_t j = 0; j < S->nacc; j++) {
 			const vvi *s = vv_get(S, vw_find(V, V->p[S->acc[j].q].in.a));
 
-			if (S->acc[j].store && (a->objk != VJ_SYM || s->objv == a->objv))
-				return vv_no(S, "an invariant load that a store of the loop may change");
+			if (!S->acc[j].store || (a->objk == VJ_SYM && s->objk == VJ_SYM && s->objv != a->objv))
+				continue;
+			if (!vv_chk(S, j, 64 + i))
+				return false;
 		}
 	}
 	for (uint32_t i = 0; i < S->nacc; i++) {
@@ -371,10 +401,13 @@ static bool vv_depend(vvs *S)
 
 			if (j == i || (S->acc[j].store && j < i))
 				continue;
-			if (a->objk != VJ_SYM)
-				return vv_no(S, "a load through a pointer in a loop that stores");
-			if (a->objv != s->objv)
+			if (a->objk != s->objk || a->objv != s->objv) {
+				if (a->objk == VJ_SYM && s->objk == VJ_SYM)
+					continue;
+				if (!vv_chk(S, i, j))
+					return false;
 				continue;
+			}
 			if (a->c != s->c || a->bv != s->bv || (a->bv && a->bs != s->bs))
 				return vv_no(S, "two accesses of one array whose distance is not constant");
 			if ((s->k - a->k) % 4)
@@ -400,10 +433,11 @@ static uint32_t vv_ins(vvs *S, uint32_t b, uint32_t op, uint32_t ty, uint32_t fl
 	return vw_ins_in(S->e, b, op, ty, fl, a, bb, c);
 }
 
-static uint32_t vv_scalar(vvs *S, uint32_t v, bool entry);
+enum { VM_ENTRY, VM_BODY, VM_T0 };
+static uint32_t vv_scalar(vvs *S, uint32_t v, int mode);
 
 /* a copy of pure instruction or load v in block b, its operands through vv_scalar */
-static uint32_t vv_clone(vvs *S, uint32_t v, uint32_t b, bool entry)
+static uint32_t vv_clone(vvs *S, uint32_t v, uint32_t b, int mode)
 {
 	vwst *V = S->e->vw;
 	vir_ins in = V->p[v].in;
@@ -411,14 +445,15 @@ static uint32_t vv_clone(vvs *S, uint32_t v, uint32_t b, bool entry)
 	uint32_t w[3] = { in.a, in.b, in.c };
 
 	for (int k = 0; k < 3; k++)
-		if (vw_isval(oi->k[k]) && !(w[k] = vv_scalar(S, w[k], entry)))
+		if (vw_isval(oi->k[k]) && !(w[k] = vv_scalar(S, w[k], mode)))
 			return 0;
 	return vv_ins(S, b, in.op, in.ty, in.fl, w[0], w[1], w[2]);
 }
 
-/* v as a scalar: at the loop's entry (in VPRE: only what the header computes), or in the vector
- * body for its first lane (an invariant of the loop: once, in VPH) */
-static uint32_t vv_scalar(vvs *S, uint32_t v, bool entry)
+/* v as a scalar.  VM_ENTRY: at the loop's entry, in VPRE (only what the header computes: VPRE
+ * runs whatever the trip count).  VM_BODY: in the vector body, for its first lane.  VM_T0: in
+ * VPH, at the first iteration.  An invariant of the loop is made once, in VPH */
+static uint32_t vv_scalar(vvs *S, uint32_t v, int mode)
 {
 	vwst *V = S->e->vw;
 	vvi *x;
@@ -434,25 +469,29 @@ static uint32_t vv_scalar(vvs *S, uint32_t v, bool entry)
 		return v;
 	if (x->sce)
 		return x->sce;	/* (VPRE dominates the rest) */
-	if (!entry && x->scb)
+	if (mode != VM_ENTRY && x->scb && (mode == VM_BODY || x->kind == VK_INV))
 		return x->scb;
+	if (mode == VM_T0 && x->sc0)
+		return x->sc0;
 	if (V->p[v].in.op == VO_BPARAM) {	/* an induction */
 		for (uint32_t i = 0; i < S->nind; i++)
 			if (S->ind[i] == v)
-				return entry ? vw_find(V, V->x[V->p[v].in.b + S->jP]) : S->indb[i];
+				return mode == VM_BODY ? S->indb[i] : vw_find(V, V->x[V->p[v].in.b + S->jP]);
 		vv_no(S, "a parameter that is not an induction");
 		return 0;
 	}
-	if (entry && V->p[v].blk != S->H) {
+	if (mode == VM_ENTRY && V->p[v].blk != S->H) {
 		vv_no(S, "the trip count needs a value of the body");
 		return 0;
 	}
-	r = vv_clone(S, v, entry ? S->VPRE : x->kind == VK_INV ? S->VPH : S->VB, entry);
+	r = vv_clone(S, v, mode == VM_ENTRY ? S->VPRE : x->kind == VK_INV || mode == VM_T0 ? S->VPH : S->VB, mode);
 	x = &S->I[v];
-	if (entry)
+	if (mode == VM_ENTRY)
 		x->sce = r;
-	else
+	else if (x->kind == VK_INV || mode == VM_BODY)
 		x->scb = r;
+	else
+		x->sc0 = r;
 	return r;
 }
 
@@ -521,14 +560,14 @@ static uint32_t vv_vec(vvs *S, uint32_t v)
 	in = V->p[v].in;
 	switch (x->kind) {
 	case VK_INV:
-		if (!(a = vv_scalar(S, v, false)))
+		if (!(a = vv_scalar(S, v, VM_BODY)))
 			return 0;
 		r = vv_ins(S, S->VPH, VO_VSPLAT, vt, 0, a, 0, 0);
 		break;
 	case VK_LIN: {
 		int64_t cc = x->c;
 
-		if (ty != VT_I32 || !(a = vv_scalar(S, v, false)))
+		if (ty != VT_I32 || !(a = vv_scalar(S, v, VM_BODY)))
 			return vv_no(S, "a linear value that is not an i32, as lanes"), 0;
 		a = vv_ins(S, S->VB, VO_VSPLAT, VT_I32X4, 0, a, 0, 0);
 		r = vv_ins(S, S->VB, VO_ADD, VT_I32X4, 0, a, vv_step(S, cc), 0);
@@ -568,23 +607,54 @@ static uint32_t vv_vec(vvs *S, uint32_t v)
 	return r;
 }
 
-/* the address of the four elements load or store q touches in one go, and whether they are reversed */
+static uint32_t vv_param(vvs *S, uint32_t b, uint32_t ty, uint32_t x0, uint32_t x1, uint32_t x2);
+
+/* the address of the four elements load or store q touches in one go, and whether they are
+ * reversed: a pointer of the vector body that steps 16 bytes (the lowest of the four addresses) */
 static uint32_t vv_addr(vvs *S, uint32_t q, bool *rev)
 {
 	vwst *V = S->e->vw;
-	uint32_t a = vw_find(V, V->p[q].in.a), s = vv_scalar(S, a, false);
+	uint32_t a = vw_find(V, V->p[q].in.a), s;
 
 	*rev = vv_get(S, a)->c < 0;
-	if (s && *rev)
-		s = vv_ins(S, S->VB, VO_PTRADD, VT_PTR, 0, s, vw_iconst(S->e, VT_I64, -12), 0);
-	return s;
+	for (uint32_t i = 0; i < S->npin; i++)
+		if (S->pin[i].a == a)
+			return S->pin[i].par;
+	if (S->npin == 32)
+		return vv_no(S, "too many addresses"), 0;
+	if (!(s = vv_scalar(S, a, VM_T0)))
+		return 0;
+	if (*rev)
+		s = vv_ins(S, S->VPH, VO_PTRADD, VT_PTR, 0, s, vw_iconst(S->e, VT_I64, -12), 0);
+	S->pin[S->npin].a = a, S->pin[S->npin].rev = *rev;
+	return S->pin[S->npin++].par = vv_param(S, S->VB, VT_PTR, s, 0, 0);
 }
 
-static uint32_t vv_param(vvs *S, uint32_t b, uint32_t ty, uint32_t x0, uint32_t x1)
+/* [lo, hi): the bytes access x (vv_chk's index) touches in the vector iterations; span = 4 * nv */
+static bool vv_range(vvs *S, uint32_t x, uint32_t span, uint32_t *lo, uint32_t *hi)
 {
-	uint32_t p = vw_newphi(S->e, b, 0, ty), w[2] = { x0, x1 };
+	vwst *V = S->e->vw;
+	uint32_t q = x >= 64 ? S->invld[x - 64] : S->acc[x].q, a = vw_find(V, V->p[q].in.a), s = vv_scalar(S, a, VM_T0);
 
-	S->e->vw->p[p].in.b = vw_xput(S->e, w, 2);
+	if (!s)
+		return false;
+	if (x >= 64) {
+		*lo = s, *hi = vv_ins(S, S->VPH, VO_PTRADD, VT_PTR, 0, s, vw_iconst(S->e, VT_I64, 1 << VIF_W(V->p[q].in.fl)), 0);
+	} else if (vv_get(S, a)->c > 0) {
+		*lo = s, *hi = vv_ins(S, S->VPH, VO_PTRADD, VT_PTR, 0, s, span, 0);
+	} else {
+		*hi = vv_ins(S, S->VPH, VO_PTRADD, VT_PTR, 0, s, vw_iconst(S->e, VT_I64, 4), 0);
+		*lo = vv_ins(S, S->VPH, VO_PTRADD, VT_PTR, 0, *hi, vv_ins(S, S->VPH, VO_NEG, VT_I64, 0, span, 0, 0), 0);
+	}
+	return true;
+}
+
+/* a parameter of b with its operands per predecessor (b's first two or three) */
+static uint32_t vv_param(vvs *S, uint32_t b, uint32_t ty, uint32_t x0, uint32_t x1, uint32_t x2)
+{
+	uint32_t p = vw_newphi(S->e, b, 0, ty), w[3] = { x0, x1, x2 };
+
+	S->e->vw->p[p].in.b = vw_xput(S->e, w, 3);
 	return p;
 }
 
@@ -621,7 +691,7 @@ static bool vv_loop(vvs *S)
 	vvi *ui, *ni;
 	uint32_t jp[40], njp = 0;	/* J's parameter per live parameter of H, in H's order */
 
-	S->nacc = S->ninvld = S->nred = S->nind = S->nstep = 0, S->pos = 0, S->why = NULL;
+	S->nacc = S->ninvld = S->nred = S->nind = S->nstep = S->nchk = S->npin = 0, S->pos = 0, S->why = NULL;
 	/* H's parameters */
 	for (uint32_t p = V->b[H].phead; p; p = V->p[p].next) {
 		uint32_t init, nx, ty = V->p[p].in.ty;
@@ -728,9 +798,13 @@ static bool vv_loop(vvs *S)
 	GROW(V->pr, V->npr, V->cpr, 1);
 	S->VX = vv_blk(S, S->VB, VW_NOBLK);
 	S->J = vv_blk(S, S->VPRE, S->VX);
+	if (S->nchk) {	/* (J's predecessors are the last in V->pr) */
+		GROW(V->pr, V->npr, V->cpr, 1);
+		V->pr[V->npr++] = S->VPH, V->b[S->J].npred = 3;
+	}
 	/* VPRE: the span */
 	{
-		uint32_t u0 = vv_scalar(S, u, true), n0 = vv_scalar(S, n, true);
+		uint32_t u0 = vv_scalar(S, u, VM_ENTRY), n0 = vv_scalar(S, n, VM_ENTRY);
 
 		if (!u0 || !n0)
 			return false;
@@ -752,16 +826,16 @@ static bool vv_loop(vvs *S)
 	}
 	nv = vv_ins(S, S->VPH, VO_AND, VT_I64, 0, nv, vw_iconst(e, VT_I64, -4), 0);
 	/* VB's parameters: operand 0 from VPH, 1 from VB (filled at the end) */
-	cnt = vv_param(S, S->VB, VT_I64, nv, 0);
+	cnt = vv_param(S, S->VB, VT_I64, nv, 0, 0);
 	for (uint32_t i = 0; i < S->nind; i++) {
 		uint32_t p = S->ind[i];
 
-		S->indb[i] = vv_param(S, S->VB, V->p[p].in.ty, vw_find(V, V->x[V->p[p].in.b + S->jP]), 0);
+		S->indb[i] = vv_param(S, S->VB, V->p[p].in.ty, vw_find(V, V->x[V->p[p].in.b + S->jP]), 0, 0);
 	}
 	for (uint32_t i = 0; i < S->nred; i++) {
 		if (!z)
 			z = vv_ins(S, S->VPH, VO_VSPLAT, VT_I32X4, 0, vw_iconst(e, VT_I32, 0), 0, 0);
-		S->red[i].acc = vv_param(S, S->VB, VT_I32X4, z, 0);
+		S->red[i].acc = vv_param(S, S->VB, VT_I32X4, z, 0, 0);
 	}
 	/* the body */
 	for (uint32_t i = 0; i < S->nlb && !S->why; i++)
@@ -809,6 +883,8 @@ static bool vv_loop(vvs *S)
 	}
 	for (uint32_t i = 0; i < S->nred; i++)
 		V->x[V->p[S->red[i].acc].in.b + 1] = S->red[i].accnext;
+	for (uint32_t i = 0; i < S->npin; i++)
+		V->x[V->p[S->pin[i].par].in.b + 1] = vv_ins(S, S->VB, VO_PTRADD, VT_PTR, 0, S->pin[i].par, vw_iconst(e, VT_I64, S->pin[i].rev ? -16 : 16), 0);
 	cntn = vv_ins(S, S->VB, VO_ADD, VT_I64, 0, cnt, vw_iconst(e, VT_I64, -4), 0);
 	V->x[V->p[cnt].in.b + 1] = cntn;
 	guard = vv_ins(S, S->VB, VO_ICMP, VT_I32, 1, cntn, vw_iconst(e, VT_I64, 0), 0);
@@ -830,11 +906,26 @@ static bool vv_loop(vvs *S)
 			}
 		if (!fin || njp == 40)
 			return vv_no(S, "a parameter without a final value");
-		jp[njp++] = vv_param(S, S->J, V->p[p].in.ty, init, fin);
+		jp[njp++] = vv_param(S, S->J, V->p[p].in.ty, init, fin, init);
 	}
 	vv_term(S, S->VX, VO_BR, S->J, 0, 0);
 	vv_term(S, S->J, VO_BR, H, 0, 0);
-	vv_term(S, S->VPH, VO_BR, S->VB, 0, 0);
+	if (S->nchk) {	/* the pairs that may be one memory: any two ranges that meet, and the loop stays scalar */
+		uint32_t span = vv_ins(S, S->VPH, VO_SHL, VT_I64, 0, nv, vw_iconst(e, VT_I64, 2), 0), any = 0;
+
+		for (uint32_t i = 0; i < S->nchk; i++) {
+			uint32_t l0, h0, l1, h1, m;
+
+			if (!vv_range(S, S->chk[i].a, span, &l0, &h0) || !vv_range(S, S->chk[i].b, span, &l1, &h1))
+				return false;
+			m = vv_ins(S, S->VPH, VO_AND, VT_I32, 0, vv_ins(S, S->VPH, VO_ICMP, VT_I32, 6, l0, h1, 0),
+				   vv_ins(S, S->VPH, VO_ICMP, VT_I32, 6, l1, h0, 0), 0);
+			any = any ? vv_ins(S, S->VPH, VO_OR, VT_I32, 0, any, m, 0) : m;
+		}
+		vv_term(S, S->VPH, VO_BRIF, any, S->J, S->VB);
+	} else {
+		vv_term(S, S->VPH, VO_BR, S->VB, 0, 0);
+	}
 	/* commit: P enters at VPRE; H's entry is J */
 	{
 		uint32_t ns = vw_nsucc(V, S->P), k = 0;

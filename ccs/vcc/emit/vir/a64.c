@@ -383,12 +383,21 @@ static void vl_rmov(vl *L, uint8_t dst, uint8_t src)
 		mov(L->e, 1, vl_gx(dst), vl_gx(src));
 }
 
+/* a vector register and its 16-byte spill slot: the slot's address in t, then ldr/str q */
+static void vl_qslot(vl *L, bool load, int v, uint32_t s, int t)
+{
+	opi(L->e, I_ADDI, 1, t, FRAME, L->spoff[s]);
+	word(L->e, (load ? 0x3dc00000u : 0x3d800000u) | (unsigned)t << 5 | (unsigned)v);
+}
+
 /* register dst <- spill slot s, through general register t for a float */
 static void vl_reload(vl *L, uint8_t dst, uint32_t s, int t)
 {
 	int sz = vl_ssz(L, s);
 
-	if (vl_fcls(dst)) {
+	if (L->o->ssz[s] == 16) {
+		vl_qslot(L, true, vl_gv(dst), s, t);
+	} else if (vl_fcls(dst)) {
 		mem(L->e, I_LD, sz, 0, t, FRAME, L->spoff[s]);
 		word(L->e, f_in(sz == 3, vl_gv(dst), t));
 	} else {
@@ -400,7 +409,9 @@ static void vl_spill(vl *L, uint8_t src, uint32_t s, int t)
 {
 	int sz = vl_ssz(L, s);
 
-	if (vl_fcls(src)) {
+	if (L->o->ssz[s] == 16) {
+		vl_qslot(L, false, vl_gv(src), s, t);
+	} else if (vl_fcls(src)) {
 		word(L->e, f_out(sz == 3, t, vl_gv(src)));
 		mem(L->e, I_ST, sz, 0, t, FRAME, L->spoff[s]);
 	} else {
@@ -473,7 +484,16 @@ static void vl_emoves(vl *L, uint32_t g)
 			}
 			break;
 		case VE_MOVE:
-			if (ds && ss) {
+			if (ds && ss && L->o->ssz[sn] == 16) {	/* (through v31: no move of this edge may hold it) */
+				for (uint32_t k = 0; k < ed->n; k++) {
+					const vir_emove *o2 = &o->move[ed->first + k];
+
+					if ((!(o2->dst & VL_SLOT) && o2->dst == VR_SCR1) || (o2->kind != VE_REMAT && !(o2->src & VL_SLOT) && o2->src == VR_SCR1))
+						vl_fail(L, "VIR lowering: a vector moved between spill slots while the scratch register is taken");
+				}
+				vl_qslot(L, true, 31, sn, t);
+				vl_qslot(L, false, 31, dn, t);
+			} else if (ds && ss) {
 				mem(L->e, I_LD, vl_ssz(L, sn), 0, t, FRAME, L->spoff[sn]);
 				mem(L->e, I_ST, vl_ssz(L, dn), 0, t, FRAME, L->spoff[dn]);
 			} else if (ds) {
@@ -2095,11 +2115,8 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 			vl_fail(&L, "VIR lowering: an over-aligned slot");
 		L.soff[k] = slot(e, f->slot[k].size ? f->slot[k].size : 1, f->slot[k].align);
 	}
-	for (uint32_t k = 0; k < V->ao.nspill; k++) {
-		if (V->ao.ssz[k] > 8)	/* (reloads and spills go through a general register: 8 bytes) */
-			vl_fail(&L, "VIR lowering: a vector in a spill slot");
+	for (uint32_t k = 0; k < V->ao.nspill; k++)
 		L.spoff[k] = slot(e, V->ao.ssz[k], V->ao.ssz[k]);
-	}
 	for (uint32_t b = 0; b < f->nblk; b++)
 		L.lbl[b] = newlabel(e);
 	L.retlbl = newlabel(e);

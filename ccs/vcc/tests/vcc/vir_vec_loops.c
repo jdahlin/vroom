@@ -86,6 +86,20 @@ NI long l_scal(int n) { float t = 0; for (int i = 0; i < n; i++) { t = b[i + 8] 
 /* the index wraps (unsigned arithmetic is defined): 0xfffffffe + i reaches 0 */
 NI long l_wrap(int n) { for (unsigned i = 0; i < (unsigned)n; i++) a[(unsigned char)(250 + i) & 31] = b[i + 8]; return 0; }
 
+/* more vectors live across the loop than there are v registers: some are kept in 16-byte spill slots */
+float gv[28] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28 };
+NI long l_spill(int n)
+{
+	for (int i = 0; i < n; i++) {
+		float x = b[i + 8], y = c[i + 8];
+
+		a[i + 8] = ((x * gv[0] + y * gv[1]) * gv[2] + (x * gv[3] - y * gv[4]) * gv[5] + (x * gv[6] + y * gv[7]) * gv[8] +
+			    (x * gv[9] - y * gv[10]) * gv[11] + (x * gv[12] + y * gv[13]) * gv[14] + (x * gv[15] - y * gv[16]) * gv[17] +
+			    (x * gv[18] + y * gv[19]) * gv[20] + (x * gv[21] - y * gv[22]) * gv[23] + (x * gv[24] + y * gv[25]) * gv[26]) * gv[27];
+	}
+	return 0;
+}
+
 static long r_param(int n) { return l_param(a + 8, b + 8, n); }
 static long r_param2(int n) { return l_param(a + 9, a + 8, n); }	/* the two overlap: the scalar order shows */
 static long r_param3(int n) { return l_param(a + 8, a + 9, n); }
@@ -100,7 +114,7 @@ int main(void)
 		T(l_dm5), T(l_dm4), T(l_dm3), T(l_dm2), T(l_dm1), T(l_dp1), T(l_dp2), T(l_dp3), T(l_dp4), T(l_dp5),
 		T(l_ddm2), T(l_ddm1), T(l_ddp1), T(l_ddp3), T(l_ddp4), T(l_stld), T(l_stld2), T(l_stst), T(l_stst2),
 		T(l_int), T(l_iota), T(l_iotaf), T(l_sum), T(l_sum2), T(l_fsum), T(l_sel), T(l_isel), T(l_inv), T(l_invsame),
-		T(l_2d), T(r_param), T(r_param2), T(r_param3), T(r_psum), T(r_lim), T(l_cond), T(l_scal), T(l_wrap),
+		T(l_2d), T(l_spill), T(r_param), T(r_param2), T(r_param3), T(r_psum), T(r_lim), T(l_cond), T(l_scal), T(l_wrap),
 	};
 	static const int ns[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 37 };
 
