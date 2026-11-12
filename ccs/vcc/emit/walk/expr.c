@@ -750,8 +750,10 @@ static val wk_load(ecx *e, lval l, qty t)
 		return wk_vreg(LO(laddr)(e, &tmp));
 	}
 	if (l.bf) {
+		e->novtag += vol;
 		val v = wk_bf_load(e, &l, t);
 
+		e->novtag -= vol;
 		wk_lfree(e, &l);
 		return v;
 	}
@@ -1575,8 +1577,13 @@ VPRIV val wk_reload(ecx *e, const lval *l, qty t)
 {
 	int r;
 
-	if (l->bf)
-		return wk_bf_load(e, l, t);
+	if (l->bf) {
+		e->novtag += (QQ(t) & Q_VOLATILE) != 0;
+		val v = wk_bf_load(e, l, t);
+
+		e->novtag -= (QQ(t) & Q_VOLATILE) != 0;
+		return v;
+	}
 	if (wk_mem(e, t)) {
 		/* the object's address in a new register (l keeps its own) */
 		lval t2 = *l;
@@ -1588,7 +1595,9 @@ VPRIV val wk_reload(ecx *e, const lval *l, qty t)
 		return wk_vreg(LO(laddr)(e, &t2));
 	}
 	r = wk_treg(e, t);
+	e->novtag += (QQ(t) & Q_VOLATILE) != 0;
 	LO(load)(e, r, l, wk_size(e->c, t), wk_signed(e->c, t));
+	e->novtag -= (QQ(t) & Q_VOLATILE) != 0;
 	return wk_vreg(r);
 }
 

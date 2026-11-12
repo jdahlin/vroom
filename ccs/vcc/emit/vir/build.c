@@ -3189,7 +3189,8 @@ VPRIV bool vw_emit(ecx *e)
 			if (vw_find(V, q) != q)
 				continue;
 			if (vw_promdead(V, q) || (x->in.op == VO_MEMSET && (x->in.fl & VW_LIFETIME)) ||
-			    (x->in.op == VO_STORE && x->slot && !V->sl[x->slot - 1].exposed && !V->sl[x->slot - 1].used))
+			    (x->in.op == VO_STORE && x->slot && !(x->in.fl & VIF_VOL) && !V->sl[x->slot - 1].exposed &&
+			     !V->sl[x->slot - 1].used))
 				continue;	/* (a dead store) */
 			if (x->loc != lastloc) {
 				vir_loc_add(f, x->loc);

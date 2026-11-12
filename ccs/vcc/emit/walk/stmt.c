@@ -292,6 +292,7 @@ VPRIV void wk_init(ecx *e, const lval *d, qty t, uint32_t init)
 {
 	cc *c = e->c;
 	const node *x = N(init);
+	int vol = (QQ(t) & Q_VOLATILE) != 0;
 
 	if (!init)
 		return;
@@ -300,11 +301,15 @@ VPRIV void wk_init(ecx *e, const lval *d, qty t, uint32_t init)
 
 		LO(zero)(e, rd, tsize(c, t));
 		LO(tfree)(e, rd);
+		e->novtag += vol;	/* (a volatile object's initializing stores are volatile accesses too) */
 		wk_elems(e, d, t, init);
+		e->novtag -= vol;
 		return;
 	}
 	if (wk_mem(e, t)) {
+		e->novtag += vol;
 		wk_elems(e, d, t, init);	/* another object's bytes */
+		e->novtag -= vol;
 		return;
 	}
 	{
@@ -312,7 +317,9 @@ VPRIV void wk_init(ecx *e, const lval *d, qty t, uint32_t init)
 		val v = wk_gen(e, init);
 		int r = wk_reg(e, &v, t);
 
+		e->novtag += vol;
 		LO(store)(e, r, d, wk_size(c, t));
+		e->novtag -= vol;
 		LO(tfree)(e, r);
 	}
 }

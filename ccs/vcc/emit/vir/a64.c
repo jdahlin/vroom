@@ -733,6 +733,7 @@ static void vl_load(vl *L, uint32_t i, const vir_ins *in, uint8_t res)
 		return;
 	}
 	l = vl_addr(L, in->fl, R_X16);
+	e->novtag += (in->fl & VIF_VOL) != 0;	/* (a volatile slot is no slot to the record clean-up) */
 	if (l.k == L_SYM && ext != 2) {
 		load_n(e, rd, &l, 1 << w, ext);
 	} else if (l.k == L_SYM) {
@@ -743,6 +744,7 @@ static void vl_load(vl *L, uint32_t i, const vir_ins *in, uint8_t res)
 		if ((in->fl & VIF_VOL) && l.k != L_FRAME && e->reach && e->in[e->nin - 1].op == I_LD)
 			e->in[e->nin - 1].ra = LD_VOLATILE;	/* (not merged with its neighbours: opt.c's fold) */
 	}
+	e->novtag -= (in->fl & VIF_VOL) != 0;
 	if (fl && res != VR_NONE)
 		word(e, f_in(in->ty == VT_F64, vl_gv(res), R_X16));
 }
@@ -774,7 +776,9 @@ static void vl_store(vl *L, const vir_ins *in)
 	} else if (l.k == L_SYM) {
 		store_n(e, rs, &l, 0, 1 << w);
 	} else {
+		e->novtag += (in->fl & VIF_VOL) != 0;
 		mem(e, I_ST, w, 0, rs, l.k == L_FRAME ? FRAME : l.r, l.off);
+		e->novtag -= (in->fl & VIF_VOL) != 0;
 	}
 }
 
