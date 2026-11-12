@@ -1386,9 +1386,31 @@ static bool instr(A *a, uint32_t b, uint32_t i, bool term)
 			continue;
 		R = fx.opnd[j];
 		if (ax.regval[R] != v) {
-			av[0] = lock[0] | fixm[0] | fx.clob[0];
-			av[1] = lock[1] | fixm[1] | fx.clob[1];
+			uint32_t w = ax.regval[R];
+			bool dies = w && ax.dmark[w] == i;	/* (an operand here, read before the clobbers) */
+
+			/* a value that dies here, with its every operand already placed (copied to an
+			   earlier fixed register): nothing reads it in R any more */
+			for (uint32_t k = j + 1; dies && k < n; k++)
+				dies = ops[k] != w;
+			for (uint32_t k = 0; dies && k < j; k++)
+				if (ops[k] == w && (k >= fx.nopnd || fx.opnd[k] == VR_NONE))
+					dies = false;
+			if (dies && ax.reg[w] == R) {
+				bool placed = false;
+
+				for (uint32_t k = 0; k < j; k++)
+					placed |= ops[k] == w;
+				if (placed) {
+					clearreg(a, R);
+					goto free;
+				}
+			}
+			dies = w && ax.dmark[w] == i;
+			av[0] = lock[0] | fixm[0] | (dies ? 0 : fx.clob[0]);
+			av[1] = lock[1] | fixm[1] | (dies ? 0 : fx.clob[1]);
 			displace(a, R, av, i);
+		free:
 			if (inreg(a, v)) {
 				edit(a, i, VE_MOVE, R, ax.reg[v], v);
 				ax.regval[R] = v;	/* a copy: v's register stays where it is */
