@@ -2097,9 +2097,19 @@ static val wk_call(ecx *e, uint32_t n)
 					return vconst(r < 0 ? -1 : r > 0);
 				}
 			}
+			/* the fortified forms (Darwin's string.h, _FORTIFY_SOURCE) with an object size that
+			   cannot be exceeded: the plain ones, as clang */
+			if (kind >= CC_LIB_MEMCPY_CHK && kind <= CC_LIB_MEMSET_CHK && x->c == 4 &&
+			    cc_eval(c, c->lists[x->b + 3], &cv) && cv.kind == CV_INT) {
+				uint64_t os = (uint64_t)cv.i;
+
+				if (os == UINT64_MAX || (cc_eval(c, c->lists[x->b + 2], &cv) && cv.kind == CV_INT && (uint64_t)cv.i <= os))
+					kind = kind - CC_LIB_MEMCPY_CHK + CC_LIB_MEMCPY;
+			}
 			/* memcpy/memmove/memset of a constant size up to 64 bytes: inline, as clang (8 stores
 			   of 8 bytes; a freestanding vDSO has no memcpy) */
-			if (x->c == 3 && (kind >= CC_LIB_MEMCPY && kind <= CC_LIB_MEMSET) &&
+			if ((x->c == 3 || (x->c == 4 && cc_builtin_libkind(c->syms[s].val) >= CC_LIB_MEMCPY_CHK)) &&
+			    (kind >= CC_LIB_MEMCPY && kind <= CC_LIB_MEMSET) &&
 			    cc_eval(c, c->lists[x->b + 2], &cv) && cv.kind == CV_INT && cv.i >= 0 && cv.i <= 64 &&
 			    (kind != CC_LIB_MEMSET || (cc_eval(c, c->lists[x->b + 1], &cv) && cv.kind == CV_INT && cv.i == 0))) {
 				uint64_t len;

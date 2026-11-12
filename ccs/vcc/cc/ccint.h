@@ -365,7 +365,8 @@ bool cc_is_signed(cc *c, qty t);
 /* Kinds for library builtins that the emitter treats specially. Other
  * builtins retain their normal call path. */
 enum { CC_LIB_OTHER, CC_LIB_MEMCPY, CC_LIB_MEMMOVE, CC_LIB_MEMSET,
-       CC_LIB_STRCMP, CC_LIB_FABSL };
+       CC_LIB_STRCMP, CC_LIB_FABSL,
+       CC_LIB_MEMCPY_CHK, CC_LIB_MEMMOVE_CHK, CC_LIB_MEMSET_CHK };	/* (the _CHK ones in that order) */
 int cc_builtin_libkind(int64_t i);
 const char *cc_builtin_name(int64_t i);
 const char *cc_lib_sig(const char *name, int *clang_enc);
