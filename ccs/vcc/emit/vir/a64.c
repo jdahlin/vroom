@@ -401,8 +401,8 @@ static void vl_reload(vl *L, uint8_t dst, uint32_t s, int t)
 	if (L->o->ssz[s] == 16) {
 		vl_qslot(L, true, vl_gv(dst), s, t);
 	} else if (vl_fcls(dst)) {
-		mem(L->e, I_LD, sz, 0, t, FRAME, L->spoff[s]);
-		word(L->e, f_in(sz == 3, vl_gv(dst), t));
+		opi(L->e, I_ADDI, 1, t, FRAME, L->spoff[s]);	/* (no general register in between: as vl_qslot) */
+		word(L->e, 0xbd400000u | (unsigned)(sz == 3) << 30 | (unsigned)t << 5 | (unsigned)vl_gv(dst));
 	} else {
 		mem(L->e, I_LD, sz, 0, vl_gx(dst), FRAME, L->spoff[s]);
 	}
@@ -415,8 +415,8 @@ static void vl_spill(vl *L, uint8_t src, uint32_t s, int t)
 	if (L->o->ssz[s] == 16) {
 		vl_qslot(L, false, vl_gv(src), s, t);
 	} else if (vl_fcls(src)) {
-		word(L->e, f_out(sz == 3, t, vl_gv(src)));
-		mem(L->e, I_ST, sz, 0, t, FRAME, L->spoff[s]);
+		opi(L->e, I_ADDI, 1, t, FRAME, L->spoff[s]);
+		word(L->e, 0xbd000000u | (unsigned)(sz == 3) << 30 | (unsigned)t << 5 | (unsigned)vl_gv(src));
 	} else {
 		mem(L->e, I_ST, sz, 0, vl_gx(src), FRAME, L->spoff[s]);
 	}
@@ -787,8 +787,15 @@ static void vl_load(vl *L, uint32_t i, const vir_ins *in, uint8_t res)
 		return;
 	}
 	l = vl_addr(L, in->fl, R_X16);
-	if (fl && res != VR_NONE && !(in->fl & VIF_VOL) && l.k == L_REG && vl_fmem(L, true, w == 3, vl_gv(res), l.r, l.off))
-		return;	/* (straight into the v register) */
+	if (fl && res != VR_NONE && l.k == L_REG && vl_fmem(L, true, w == 3, vl_gv(res), l.r, l.off))
+		return;	/* (straight into the v register; a raw word, so a volatile one stays as it is) */
+	if (fl && res != VR_NONE && l.k == L_FRAME) {	/* a slot: its address, then the same */
+		e->novtag += (in->fl & VIF_VOL) != 0;
+		opi(e, I_ADDI, 1, R_X16, FRAME, l.off);
+		e->novtag -= (in->fl & VIF_VOL) != 0;
+		word(e, 0xbd400000u | (unsigned)(w == 3) << 30 | (unsigned)R_X16 << 5 | (unsigned)vl_gv(res));
+		return;
+	}
 	e->novtag += (in->fl & VIF_VOL) != 0;	/* (a volatile slot is no slot to the record clean-up) */
 	if (l.k == L_SYM && ext != 2) {
 		load_n(e, rd, &l, 1 << w, ext);
@@ -815,7 +822,7 @@ static void vl_store(vl *L, const vir_ins *in)
 	int base_t = l.k == L_SYM || (l.k == L_REG && l.r == R_X16);	/* the address needs x16 */
 	int rs;
 
-	if (L->opr[1] != VR_NONE && vl_fcls(L->opr[1]) && !(in->fl & VIF_VOL)) {	/* straight from the v register */
+	if (L->opr[1] != VR_NONE && vl_fcls(L->opr[1])) {	/* straight from the v register (volatile too: a raw word) */
 		if (xa) {
 			word(e, 0xbc200800u | (unsigned)(w == 3) << 30 | (unsigned)L->xreg << 16 | (unsigned)L->xopt << 13 |
 				(unsigned)(L->xsh != 0) << 12 | (unsigned)L->xbase << 5 | (unsigned)vl_gv(L->opr[1]));
@@ -824,6 +831,13 @@ static void vl_store(vl *L, const vir_ins *in)
 		}
 		if (l.k == L_REG && vl_fmem(L, false, w == 3, vl_gv(L->opr[1]), l.r, l.off))
 			return;
+		if (l.k == L_FRAME) {
+			e->novtag += (in->fl & VIF_VOL) != 0;
+			opi(e, I_ADDI, 1, R_X16, FRAME, l.off);
+			e->novtag -= (in->fl & VIF_VOL) != 0;
+			word(e, 0xbd000000u | (unsigned)(w == 3) << 30 | (unsigned)R_X16 << 5 | (unsigned)vl_gv(L->opr[1]));
+			return;
+		}
 	}
 	if (L->opr[1] == VR_NONE && vl_zero(L->f, v))
 		rs = ZR;
