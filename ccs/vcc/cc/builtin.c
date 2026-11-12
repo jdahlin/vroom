@@ -712,7 +712,9 @@ VPRIV bool eval_builtin(cc *c, const node *x, cval *v)
 		if (N(s)->op != N_STR)
 			return false;
 		v->i = (i128)strlen(c->strs[N(s)->a].s);
-		v->ice = false;
+		v->ice = true;	/* clang: an integer constant expression (the kernel's __is_constexpr
+				   picks __builtin_strlen over __fortify_strlen in static initializers);
+				   the library strlen("...") only folds (const.c) */
 		return true;
 	}
 	case BI_HUGE_VAL: case BI_HUGE_VALF: case BI_INF: case BI_INFF:

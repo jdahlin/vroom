@@ -199,12 +199,27 @@ static bool constexpr_subobject(cc *c, uint32_t n, const_object *out, bool *ice,
 
 	*out = (const_object){ .ty = x->ty };
 	switch (x->op) {
-	case N_VAR:
-		if (!(c->syms[x->a].flags & SF_CONSTEXPR) || !c->syms[x->a].body ||
-		    (c->syms[x->a].flags & SF_INVALID))
+	case N_VAR: {
+		const sym *s = &c->syms[x->a];
+
+		if (!s->body || (s->flags & SF_INVALID) || s->kind != S_VAR)
 			return false;
-		out->init = c->syms[x->a].body;
+		if (!(s->flags & SF_CONSTEXPR)) {
+			/* clang, static data only: a read of a const, non-volatile object with an
+			   initializer (clk_main[0], ca[1].index), not an ICE (int e[ci[0]] is a
+			   folded VLA), not for a constexpr definition (constexpr_init_ok) */
+			qty t = s->ty;
+			unsigned q = QQ(t);
+
+			while (is_array(c, t))
+				t = T(c, t)->base, q |= QQ(t);
+			if (!static_fold || (q & (Q_CONST | Q_VOLATILE)) != Q_CONST)
+				return false;
+			*ice = false;
+		}
+		out->init = s->body;
 		return true;
+	}
 	case N_CPLX:
 		out->init = n;
 		*ice = false;
