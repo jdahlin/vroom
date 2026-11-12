@@ -127,6 +127,7 @@ static const builtin builtins[] = {
 	{ "__builtin_isless", BI_ISLESS, 1, "i." }, { "__builtin_islessequal", BI_ISLESSEQUAL, 1, "i." },
 	{ "__builtin_islessgreater", BI_ISLESSGREATER, 1, "i." }, { "__builtin_isunordered", BI_ISUNORDERED, 1, "i." },
 	{ "__builtin_arm_rsr64", BI_ARM_RSR, 0, "WS" },
+	{ "__builtin_flt_rounds", BI_FLT_ROUNDS, 0, "i" },
 	{ "__builtin_rotateleft8", BI_ROTL8, 0, "CCC" }, { "__builtin_rotateleft16", BI_ROTL16, 0, "hhh" },
 	{ "__builtin_rotateleft32", BI_ROTL32, 0, "uuu" }, { "__builtin_rotateleft64", BI_ROTL64, 0, "WWW" },
 	{ "__builtin_rotateright8", BI_ROTR8, 0, "CCC" }, { "__builtin_rotateright16", BI_ROTR16, 0, "hhh" },
