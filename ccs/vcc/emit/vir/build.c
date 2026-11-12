@@ -1791,6 +1791,7 @@ VPRIV void vw_ecx_free(ecx *e)
 		return;
 	free(V->p), free(V->b), free(V->x), free(V->h), free(V->lh), free(V->fwd), free(V->lab), free(V->sl), free(V->act);
 	free(V->st), free(V->loc), free(V->vty), free(V->vsgn), free(V->pr), free(V->map), free(V->order), free(V->bmap);
+	free(V->xslot), free(V->xspill), free(V->xlabel);
 	free(V);
 	e->vw = NULL;
 }
@@ -3528,7 +3529,7 @@ static bool vw_condmerge(ecx *e)
 					 * value, not control flow).  Joining a plain branch pair costs the second compare
 					 * whenever the first decided alone, and pays only when the branches mispredict:
 					 * measured on sqlite, all: +0.4 % instructions, cycles unchanged (PLAN-vir.md). */
-					static int mode = -1;
+					static _Thread_local int mode = -1;
 					uint32_t dn = 0;
 
 					if (mode < 0) {
@@ -3860,7 +3861,7 @@ VPRIV bool vw_emit(ecx *e)
 			if (V->p[q].in.op == VO_LOAD && V->p[q].slot)
 				V->sl[V->p[q].slot - 1].used = 1;
 	/* emission */
-	vir_begin(f, DARWIN(c) ? VTG_A64_DARWIN : VTG_A64_LINUX, REF(RK_SYM, e->wk->fsym),
+	vir_begin(f, X86(c) ? VTG_X86_64_LINUX : DARWIN(c) ? VTG_A64_DARWIN : VTG_A64_LINUX, REF(RK_SYM, e->wk->fsym),
 		  (T(c, c->syms[e->wk->fsym].ty)->flags & TF_VARIADIC) ? VF_VARIADIC : 0);
 	GROW(V->map, 0, V->cmap, V->np + 1);
 	memset(V->map, 0, (size_t)V->np * sizeof *V->map);

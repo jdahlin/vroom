@@ -58,6 +58,7 @@ arm64)
 	build vcc
 	if [ "$(uname -s)/$(uname -m)" = Linux/x86_64 ]; then
 		step interrupt python3 bench/vcc-interrupt.py
+		step vir-x86 python3 bench/vcc-vir-x86.py --bin-dir "$BUILD"
 	fi
 	step runtime-exceptions python3 bench/test-runtime-exceptions.py
 	step pg-cc-contract python3 bench/pg/test-cc.py
@@ -149,6 +150,9 @@ asan)
 tsan)
 	build vcc-tsan
 	B=$(dirname "$BUILD")/ccs-tsan
+	if [ "$(uname -s)/$(uname -m)" = Linux/x86_64 ]; then
+		step vir-x86-tsan python3 bench/vcc-vir-x86.py --bin-dir "$B"
+	fi
 	# a test's vcc-timeout bounds the normal build; TSan's is 15-20x slower
 	# (init_large: 10 s was not enough on the x86-64 runner)
 	step ctests-vcc   env VCC_BIN="$B" VCC_TIMEOUT_SCALE=6 python3 bench/vcc-ctests.py -j "$J" --suite vcc

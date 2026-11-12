@@ -749,3 +749,13 @@ fyrmålsprov och kompilatorkostnader finns i PLAN-fas2.md. G5/G7 återstår.
 VIR:s verifiering av slot-exponering har en säker linjär analys för långa
 grafer; test och kostnad redovisas i PLAN-vir.md. Ett separat parserfynd och
 VIR:s återstående V1–V7 samt G5/G7 återstår.
+
+### Status 2026-11-12: G4-underlag, x86-64 genom VIR
+
+Den opt-in SSA-vägen har en första x86-64-sänkning av SysV-bladfunktioner
+och SSE2-loopar. `bench/vcc-vir-x86.py` kräver verklig sänkning, verifierar
+allokeringen och kör assembler- och egna objektvägen; unity/nonunity och
+ASan/UBSan/TSan gröna. GCC 1615/1615, TCC 105/105 och egna 282/282 går med VIR;
+inline har samma fem fel med SSA av och på. Detta är nytt plattformsunderlag
+för G4, inte en stängd grind: anrop och bredare ABI-/korpustäckning återstår.
+Mätningar och återstående arbete ägs av `PLAN-vir.md` V2/V4.

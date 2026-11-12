@@ -7,7 +7,7 @@
  *   v  ... and run the verifier on it (failures to stderr)
  *   d  ... and print it to stderr
  *   s  one line per function to stderr: built, or why not
- *   l  lower what was built to arm64 records (emit/vir/a64.c) and use them;
+ *   l  lower what was built to target records (arm64 or x86-64) and use them;
  *      VCC_VIR_CHECK=1 also runs the allocation checker; VCC_VIR_LIST=FILE lowers
  *      only the functions named in FILE, one per line (bisecting)
  * Only at -O2 and above.
@@ -20,7 +20,7 @@
 
 static int vw_mode(void)
 {
-	static int mode = -1;
+	static _Thread_local int mode = -1;
 
 	if (mode < 0) {
 		const char *s = getenv("VCC_VIR");
@@ -93,7 +93,7 @@ VPRIV bool vw_try(ecx *e, uint32_t s)
 	int m = vw_mode();
 	char nm[128] = "";
 
-	if (!m || e->E->o->opt < 2 || WASM(e->c) || X86(e->c))
+	if (!m || e->E->o->opt < 2 || WASM(e->c))
 		return false;
 	e->vtry = true;
 	e->vfail = NULL;
@@ -134,7 +134,7 @@ VPRIV bool vw_try(ecx *e, uint32_t s)
 		if ((m & 16) && !nerr) {
 			const char *why;
 
-			if (vw_a64(e, s, &why)) {
+			if (X86(e->c) ? vw_x64(e, s, &why) : vw_a64(e, s, &why)) {
 				if (m & 8)
 					fprintf(stderr, "vir: %s: lowered, %u spills\n", nm, V->ao.st.spills);
 				return true;

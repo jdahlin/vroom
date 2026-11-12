@@ -1215,7 +1215,7 @@ static void vv_pin(vvs *S, uint32_t pre)
 
 static int vv_env(void)
 {
-	static int m = -1;
+	static _Thread_local int m = -1;
 
 	if (m < 0) {
 		const char *s = getenv("VCC_VIR_VEC");	/* 0: off; r: report each loop to stderr; n: no constants hoisted */

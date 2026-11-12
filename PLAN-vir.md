@@ -237,6 +237,52 @@ ekvivalenstestning återstår. Genererade program använder inga externa anrop.
 
 ## Status
 
+### V2/V4 x86-64 (2026-11-12): första allokerade bladfunktioner och SSE2
+
+`VCC_VIR=bl` på x86-64 går nu genom samma byggare och loopvektoriserare som
+arm64; funktionen märks `x86_64-linux`. `arch/x64/emit/vir.c` sänker skalära
+bladfunktioner med SysV:s heltals-/FP-register och stackparametrar, fasta
+`cl`, callee-sparade register, spill och sekvenserade kantflyttar. Ram- och
+spilltabeller återanvänds per `ecx`. `VCC_VIR_CHECK=1` kontrollerar den riktiga
+målallokeringen. Lägescacherna för VIR, vektorisering och jämförelsesammanslagning är trådlokala;
+sextrådsprovet hittade och avlägsnade den sistas kapplöpning.
+
+SSE2-skivan omfattar 128-bitars laddningar/lagringar, float/double-aritmetik,
+heltalsaddition/subtraktion och bitoperationer, splat, indexföljd, omvända
+banor och heltalsreduktion. Den delade vektoriseraren behåller sina alias-
+och restloopskontroller. En räknare i `cl` måste överleva även när resultatet
+får `rcx`; regressionen testar detta särskilt. SIMD skrivs tills vidare som
+opaka `X_RAW`-poster: korrekt men konservativt för postoptimeraren.
+
+`bench/vcc-vir-x86.py` kräver nio faktiskt sänkta funktioner och fem loopar
+med SSE2-instruktioner; de körs både med och utan vektorisering, via clangs
+assembler och vår egen objektväg. Provet jämför en och sex emittertrådar och
+kräver identisk `-O0/-O1`-text med VIR av/på. Unity, separatfilbygge och
+ASan/UBSan går grönt (också hela egna x86-sviten: 282/282). Linux x86-körsviter utan cache med VIR + allokerarkontroll:
+**1615/1615 GCC, 105/105 TCC, 282/282 egna**. Inline-sviten är **83/88**:
+samma fem fel och 22 undantag med VIR av som på; inga nya fel.
+Det nya egna provet kör också på arm64/QEMU. De 22 egna `vir_`-proven
+går även med `-fPIC`. Det riktade provet är grönt under TSan med sex
+emittertrådar och körs i det befintliga x86-värdade TSan-CI-jobbet.
+
+Kort mikromätning på denna delade x86-värd: 4096 float-element,
+`a[i]=b[i]*c[i]+1.5f`, 10000 anrop, strikt `-ffp-contract=off`, median av sju
+växelvisa körningar (CPU-tid): direkt **26,931 ms**, VIR **7,709 ms**,
+clang -O2 **2,427 ms**, samma kontrollsumma. VIR är 3,49 gånger snabbare än
+direktvägen men fortfarande 3,18 gånger långsammare än clang på just detta
+prov; ingen allmän kvalitetsgrind är uppnådd. Varm processkompilering av den
+lilla TU:n, median av elva: direkt **2,86 ms**, VIR **3,27 ms**, clang
+**18,12 ms** (processstart ingår). Källor, assembler och alla sampel finns i
+`build/linux/vir-x86-results/measurements.json` och dess katalog.
+
+**Kvar för V2/V3/V4:** anrop, fler ABI-grupper, varargs, division, fler
+skaläroperationer, vektormultiplikation/-jämförelser/-konverteringar och
+maskval. Ostödda funktioner använder den tidigare vägen. VIR är fortsatt
+uttryckligen påslaget och bara för `-O2`; varken x86-täckningsgrinden eller
+V4:s kodkvalitetsgrind är stängd. Nästa kodkvalitetssteg: egna SIMD-poster,
+konstanta skift utan `cl`, adressvikning och effektivare loopgrenar.
+
+
 ### Vektorer och loopvektorisering (2026-11-12): första skivan, TSVC_2 151/151
 
 Underlag och design: `RESEARCH-vectors.md` (ändrar SPEC 1.3/1.4: VIR har egna

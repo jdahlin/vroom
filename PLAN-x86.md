@@ -978,3 +978,10 @@ ramfri policy gäller uttryckligen bara vanliga funktioner. Unity -j1,
 bladens flagg-/cache-/hårdningsprov inklusive interrupt-undantaget,
 riktig signal-unwind genom ett ramfritt blad, befintlig vanlig/64-alignad
 unwind O1/O2 samt debugrader O0–O3 passerar. CI för integrationshuvudet återstår.
+
+### 2026-11-12: VIR:s första x86-64-sänkning
+
+`VCC_VIR=bl -O2`: allokerade SysV-bladfunktioner och den gemensamma
+loopvektoriserarens SSE2-del fungerar nu också på x86-64. Detaljer,
+kvarvarande reträtter, riktade prov och mätningar finns i `PLAN-vir.md`,
+V2/V4-status 2026-11-12. Ingen ändring av standardvalet eller -O0/-O1.

@@ -902,6 +902,7 @@ VPRIV void wasm_emit_function(ecx *e, uint32_t s);
 VPRIV void wasm_ecx_free(ecx *e);
 VPRIV void wk_function(ecx *e, uint32_t s);
 VPRIV void wk_ecx_free(ecx *e);
+VPRIV bool vw_x64(ecx *e, uint32_t s, const char **why);
 VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why);	/* emit/vir/a64.c: the built VIR as arm64 records */
 VPRIV bool vw_try(ecx *e, uint32_t s);	/* emit/vir/: s through VIR (VCC_VIR); false: emit it as before */
 VPRIV bool vw_enabled(const cc_opts *o);	/* VIR lowers functions (VCC_VIR with l, -O2) */
