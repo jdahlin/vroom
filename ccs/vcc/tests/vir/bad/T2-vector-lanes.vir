@@ -1,0 +1,15 @@
+; an f32x4 added to an i32x4
+vir 1
+target arm64-darwin
+sig %s = (int) -> none
+func @f %s {
+b0:
+  v0:ptr = param 0.0
+  v1:f32x4 = load.4 v0 align 4
+  v2:i32x4 = vseries
+  v3:f32x4 = fadd v1, v2
+  store.4 v0, v3 align 4
+  ret
+}
+; ---
+@f b0.3: T2: fadd: operand b has type i32x4
