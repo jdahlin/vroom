@@ -21,7 +21,9 @@
 #define NOPOS	0xffffffffu
 #define FAR	((uint64_t)1 << 40)
 
-enum { XCALL = 1, XLOOP = 2, NEEDSLOT = 4, DEAD = 8 };
+enum { XCALL = 1, XLOOP = 2, NEEDSLOT = 4, DEAD = 8, CALLFIRST = 16 };	/* CALLFIRST: a block parameter whose block calls before its first use */
+#define NOWEB	0xffffffffu
+#define WEBMAX	4096	/* a web with more members is not shared (the loop check walks them) */
 
 typedef struct pmv { uint32_t dst, src, v; uint8_t kind; } pmv;
 
@@ -33,11 +35,19 @@ static _Thread_local struct actx {
 	uint32_t *nu, *lend, *endp, *hint, *lastpos, *slot, *mark, *estamp, *dmark, *wi, *wd;
 	uint8_t *reg, *vfl, *treg, *eloc, *sdef, *epst;
 	uint32_t *sst, *tmk;	/* sst: stored on the current path when == bgen; tmk: conform's mark */
+	/* webs (15.8): a block parameter and its `br` arguments, by union-find; per root: valid,
+	 * one spill slot, one preferred register, live members during sweep 5 */
+	uint32_t *wpar, *wslot, *wlive, *wlst, *wnext, *whead, *wcnt;
+	uint8_t *wbad, *wreg, *wout;	/* wout: a member left out of its web (it interferes) */
+	uint32_t wgen;
+	/* per value: the loops it is live round (sweep 5's back-edge targets), as instruction
+	 * ranges: rhead[v] -> rlo/rhi/rnext; livein, dmark and the webs take it as live there */
+	uint32_t *rhead, *rnext, *rlo, *rhi, nrng;
 	uint16_t *nop;	/* per instruction: its operands in ostk (sweep 5 -> 6) */
 	/* sweep 5 */
 	uint32_t *stk, *ostk, *pool, *lin_off, *lin_n, *soff, *succ, *bmark;
 	/* per loop */
-	uint32_t *maxp, *lendpos, *lhead, *tend, *tendb, *tbeg, *apre;
+	uint32_t *maxp, *lendpos, *lhead, *tend, *tendb, *tbeg, *apre, *tendi, *tendib;
 	/* sweep 6 */
 	uint32_t *ent_off, *ent_n, *end_off, *end_n, *pv;
 	uint8_t *pr, *ps;	/* ps: the value is in its slot too (stored on that path) */
@@ -83,7 +93,7 @@ static void ax_init(void)
 	R(ax_tls.stk, (size_t)1 << 30, 4); R(ax_tls.ostk, (size_t)1 << 30, 4); R(ax_tls.nop, nv, 2); R(ax_tls.pool, nv, 4);
 	R(ax_tls.lin_off, VIR_MAX_BLK, 4); R(ax_tls.lin_n, VIR_MAX_BLK, 4); R(ax_tls.soff, VIR_MAX_BLK + 1, 4);
 	R(ax_tls.succ, VIR_MAX_EXTRA, 4); R(ax_tls.bmark, VIR_MAX_BLK, 4);
-	R(ax_tls.maxp, 2 * (size_t)VIR_MAX_BLK, 4); R(ax_tls.lendpos, VIR_MAX_BLK, 4); R(ax_tls.lhead, VIR_MAX_BLK, 4); R(ax_tls.tend, VIR_MAX_BLK, 4); R(ax_tls.tendb, VIR_MAX_BLK, 4); R(ax_tls.tbeg, VIR_MAX_BLK, 4); R(ax_tls.apre, VIR_MAX_BLK + 1, 4);
+	R(ax_tls.maxp, 2 * (size_t)VIR_MAX_BLK, 4); R(ax_tls.lendpos, VIR_MAX_BLK, 4); R(ax_tls.lhead, VIR_MAX_BLK, 4); R(ax_tls.tend, VIR_MAX_BLK, 4); R(ax_tls.tendb, VIR_MAX_BLK, 4); R(ax_tls.tbeg, VIR_MAX_BLK, 4); R(ax_tls.tendi, VIR_MAX_BLK, 4); R(ax_tls.tendib, VIR_MAX_BLK, 4); R(ax_tls.apre, VIR_MAX_BLK + 1, 4);
 	R(ax_tls.ent_off, VIR_MAX_BLK, 4); R(ax_tls.ent_n, VIR_MAX_BLK, 4); R(ax_tls.end_off, VIR_MAX_BLK, 4); R(ax_tls.end_n, VIR_MAX_BLK, 4);
 	R(ax_tls.pv, (size_t)VIR_MAX_BLK * 256, 4); R(ax_tls.pr, (size_t)VIR_MAX_BLK * 256, 1); R(ax_tls.ps, (size_t)VIR_MAX_BLK * 256, 1);
 	R(ax_tls.opr, (size_t)1 << 32, 1); R(ax_tls.ssz, nv, 1);
@@ -91,6 +101,8 @@ static void ax_init(void)
 	R(ax_tls.edit, (size_t)1 << 30, sizeof(vir_edit)); R(ax_tls.edge, VIR_MAX_EXTRA, sizeof(vir_aedge));
 	R(ax_tls.move, (size_t)1 << 30, sizeof(vir_emove));
 	R(ax_tls.pm, (size_t)VIR_MAX_EXTRA, sizeof(pmv));
+	R(ax_tls.wpar, nv, 4); R(ax_tls.wslot, nv, 4); R(ax_tls.wlive, nv, 4); R(ax_tls.wlst, nv, 4); R(ax_tls.wnext, nv, 4); R(ax_tls.whead, nv, 4); R(ax_tls.wcnt, nv, 4);
+	R(ax_tls.wbad, nv, 1); R(ax_tls.rhead, nv, 4); R(ax_tls.rnext, (size_t)1 << 27, 4); R(ax_tls.rlo, (size_t)1 << 27, 4); R(ax_tls.rhi, (size_t)1 << 27, 4); R(ax_tls.wout, nv, 1); R(ax_tls.wreg, nv, 1);
 	R(ax_tls.lcnt, 256 + nv, 4); R(ax_tls.lcs, 256 + nv, 4); R(ax_tls.ldm, 256 + nv, 4); R(ax_tls.lds, 256 + nv, 4); R(ax_tls.rq, VIR_MAX_EXTRA, 4);
 	ax_tls.init = true;
 }
@@ -118,6 +130,227 @@ typedef struct A {
 static inline bool is_const(const vir_fn *f, uint32_t v) { return v < f->nconst; }
 static inline uint32_t vcls(const vir_fn *f, uint32_t v) { return vir_rclass(f->ins[v].ty); }
 static inline uint32_t blk_last(const vir_fn *f, uint32_t b) { return f->blk[b].first + f->blk[b].n - 1; }
+
+static uint32_t blk_of(const vir_fn *f, uint32_t v)	/* the block holding instruction v */
+{
+	uint32_t lo = 0, hi = f->nblk;
+
+	while (lo < hi) {
+		uint32_t m = lo + (hi - lo) / 2;
+
+		if (f->blk[m].first + f->blk[m].n <= v)
+			lo = m + 1;
+		else
+			hi = m;
+	}
+	return lo < f->nblk && f->blk[lo].first <= v ? lo : VIR_NOBLK;
+}
+
+/* ---------------- webs ---------------- */
+
+static inline bool w_has(const A *a, uint32_t n, uint32_t v) { return ax.wi[v] < n && ax.wd[ax.wi[v]] == v; }
+
+static uint32_t wroot(const A *a, uint32_t v)
+{
+	uint32_t r = ax.wpar[v];
+
+	if (r == NOWEB)
+		return NOWEB;
+	while (ax.wpar[r] != r)
+		r = ax.wpar[r] = ax.wpar[ax.wpar[r]];
+	return r;
+}
+
+/* v's web when v shares it (no other member left in it is live where v is): NOWEB otherwise */
+static inline uint32_t wvalid(const A *a, uint32_t v)
+{
+	uint32_t r = wroot(a, v);
+
+	return r != NOWEB && !ax.wbad[r] && !ax.wout[v] ? r : NOWEB;
+}
+
+static void wsingle(A *a, uint32_t v)	/* while joining: whead/wlst/wnext list a web's parameters */
+{
+	const vir_fn *f = a->f;
+	uint32_t d;
+
+	if (ax.wpar[v] != NOWEB)
+		return;
+	d = blk_of(f, v);
+	ax.wpar[v] = v;
+	ax.wnext[v] = NOWEB;
+	ax.wcnt[v] = d != VIR_NOBLK && v - f->blk[d].first < f->blk[d].nparam;
+	ax.whead[v] = ax.wlst[v] = ax.wcnt[v] ? v : NOWEB;
+}
+
+/* join x's and y's webs unless both hold a parameter of the same block (those are live
+ * together at its top: one of them would leave the web anyway) */
+static void wunion(A *a, uint32_t x, uint32_t y, uint32_t *gen)
+{
+	const vir_fn *f = a->f;
+
+	wsingle(a, x);
+	wsingle(a, y);
+	x = wroot(a, x);
+	y = wroot(a, y);
+	if (x == y)
+		return;
+	if (ax.wcnt[x] && ax.wcnt[y] && ax.wcnt[x] + ax.wcnt[y] <= 512) {
+		++*gen;
+		for (uint32_t p = ax.whead[x]; p != NOWEB; p = ax.wnext[p])
+			ax.wlive[blk_of(f, p)] = *gen;
+		for (uint32_t p = ax.whead[y]; p != NOWEB; p = ax.wnext[p])
+			if (ax.wlive[blk_of(f, p)] == *gen)
+				return;
+	}
+	if (x > y) {
+		uint32_t t = x;
+
+		x = y;
+		y = t;
+	}
+	ax.wpar[y] = x;
+	if (ax.whead[y] != NOWEB) {
+		if (ax.whead[x] == NOWEB)
+			ax.whead[x] = ax.whead[y];
+		else
+			ax.wnext[ax.wlst[x]] = ax.whead[y];
+		ax.wlst[x] = ax.wlst[y];
+	}
+	ax.wcnt[x] += ax.wcnt[y];
+}
+
+/* the webs of f: each `br` argument joins its parameter (constants do not) */
+static void webs(A *a)
+{
+	vir_fn *f = a->f;
+	uint32_t gen = 0;
+
+	memset(ax.wpar, 0xff, (size_t)f->nins * 4);
+	memset(ax.wout, 0, f->nins);
+	memset(ax.wlive, 0, (size_t)f->nblk * 4);
+	for (uint32_t b = 0; b < f->nblk; b++) {
+		const vir_ins *t = &f->ins[blk_last(f, b)];
+
+		if (t->op != VO_BR)
+			continue;
+		for (uint32_t j = 0; j < f->blk[t->a].nparam; j++) {
+			uint32_t x = f->extra[t->c + j];
+
+			if (!is_const(f, x))
+				wunion(a, x, f->blk[t->a].first + j, &gen);
+		}
+	}
+	for (uint32_t v = 0; v < f->nins; v++)
+		if (ax.wpar[v] == v) {
+			ax.wbad[v] = 0;
+			ax.wslot[v] = VIR_NOBLK;
+			ax.wreg[v] = VR_NONE;
+			ax.wlst[v] = 0;
+			ax.whead[v] = NOWEB;
+			ax.wcnt[v] = 0;
+		}
+	for (uint32_t v = f->nins; v-- > 0;) {	/* the members of each web, in order */
+		uint32_t r = wroot(a, v);
+
+		if (r == NOWEB)
+			continue;
+		ax.wnext[v] = ax.whead[r];
+		ax.whead[r] = v;
+		if (++ax.wcnt[r] > WEBMAX)
+			ax.wbad[r] = 1;
+	}
+	ax.wgen = 0;
+}
+
+/* v is live round a loop that contains instruction position pos */
+static bool inrange(const A *a, uint32_t v, uint32_t pos)
+{
+	for (uint32_t k = ax.rhead[v]; k != NOWEB; k = ax.rnext[k])
+		if (ax.rlo[k] <= pos && pos <= ax.rhi[k])
+			return true;
+	return false;
+}
+
+/* after sweep 5: a member z live round loops (its ranges, where livein and dmark take
+ * it as live) interferes with a member defined there: z leaves, or, when z is a block
+ * parameter (the web's meeting point), the members defined there leave */
+static void webs_loops(A *a)
+{
+	vir_fn *f = a->f;
+
+	for (uint32_t z = 0; z < f->nins; z++) {
+		uint32_t r = wroot(a, z);
+
+		if (r == NOWEB || ax.wbad[r] || ax.wout[z] || !ax.lend[z])
+			continue;
+		for (uint32_t m = ax.whead[r]; m != NOWEB; m = ax.wnext[m]) {
+			if (m == z || ax.wout[m] || !(a->linear ? m > z && m <= ax.lend[z] : inrange(a, z, m)))
+				continue;
+			if (f->ins[z].op != VO_BPARAM) {
+				ax.wout[z] = 1;
+				break;
+			}
+			ax.wout[m] = 1;
+		}
+	}
+	/* a web lives across calls (in a loop) when a member does: every member prefers a
+	 * callee-saved register then, so the web keeps one register */
+	for (uint32_t v = 0; v < f->nins; v++)
+		if (ax.wpar[v] == v)
+			ax.wlive[v] = 0;
+	for (uint32_t v = 0; v < f->nins; v++) {
+		uint32_t r = wvalid(a, v);
+
+		if (r != NOWEB)
+			ax.wlive[r] |= ax.vfl[v] & (XCALL | XLOOP);
+	}
+	for (uint32_t v = 0; v < f->nins; v++) {
+		uint32_t r = wvalid(a, v);
+
+		if (r != NOWEB && !(ax.vfl[v] & DEAD))
+			ax.vfl[v] |= (uint8_t)ax.wlive[r];
+	}
+}
+
+/* sweep 5: member v enters the live set; or leaves it at its definition, where another
+ * live member means the two interfere */
+static inline void wenter(A *a, uint32_t v)
+{
+	uint32_t r = wroot(a, v);
+
+	if (r == NOWEB || ax.wout[v])
+		return;
+	if (ax.wlst[r] != ax.wgen) {
+		ax.wlst[r] = ax.wgen;
+		ax.wlive[r] = 0;
+	}
+	ax.wlive[r]++;
+}
+
+static inline void wleave(A *a, uint32_t v, uint32_t wn)
+{
+	uint32_t r = wroot(a, v);
+
+	if (r == NOWEB || ax.wout[v] || ax.wlst[r] != ax.wgen)
+		return;
+	if (!--ax.wlive[r])
+		return;
+	/* defined where another member is live: a block parameter (the web's meeting point)
+	 * stays and the live members leave; any other definition leaves */
+	if (a->f->ins[v].op != VO_BPARAM) {
+		ax.wout[v] = 1;
+		return;
+	}
+	for (uint32_t j = 0; j < wn; j++) {
+		uint32_t u = ax.wd[j];
+
+		if (!ax.wout[u] && wroot(a, u) == r) {
+			ax.wout[u] = 1;
+			ax.wlive[r]--;
+		}
+	}
+}
 
 static inline void get_fix(const A *a, uint32_t i, vir_fix *x)
 {
@@ -163,7 +396,15 @@ static uint32_t operands(A *a, uint32_t i)
 
 /* ---------------- sweep 5 ---------------- */
 
-static inline bool w_has(const A *a, uint32_t n, uint32_t v) { return ax.wi[v] < n && ax.wd[ax.wi[v]] == v; }
+/* v's definition dominates block b, or either is unreachable: only then can v be live at b's
+ * end (strict SSA: a path from the entry to b and on to a use would miss the definition) */
+static bool defdom(A *a, uint32_t v, uint32_t b)
+{
+	const vir_fn *f = a->f;
+	uint32_t d = blk_of(f, v);
+
+	return d == VIR_NOBLK || f->blk[d].idom == VIR_NOBLK || f->blk[b].idom == VIR_NOBLK || vir_dominates(f, d, b);
+}
 
 static bool sweep5(A *a)
 {
@@ -174,12 +415,15 @@ static bool sweep5(A *a)
 
 	memset(ax.nu, 0, (size_t)f->nins * 4);
 	memset(ax.lend, 0, (size_t)f->nins * 4);
+	memset(ax.rhead, 0xff, (size_t)f->nins * 4);
+	ax.nrng = 0;
 	memset(ax.endp, 0, (size_t)f->nins * 4);
 	memset(ax.hint, 0, (size_t)f->nins * 4);
 	memset(ax.vfl, 0, f->nins);
 	memset(ax.maxp, 0, (size_t)lp->n * 8);
 	a->sp = a->osp = 0;
 	a->npool = 0;
+	ax.wgen++;
 	for (uint32_t b = nb; b-- > 0;) {
 		const vir_blk *k = &f->blk[b];
 		uint32_t li = lp->inner[b];
@@ -187,6 +431,7 @@ static bool sweep5(A *a)
 
 		if (!a->linear) {
 			wn = cnt[0] = cnt[1] = 0;
+			ax.wgen++;
 			for (uint32_t s = ax.soff[b]; s < ax.soff[b + 1]; s++) {
 				uint32_t t = ax.succ[s];
 
@@ -199,26 +444,29 @@ static bool sweep5(A *a)
 						ax.wi[v] = wn;
 						ax.wd[wn++] = v;
 						cnt[vcls(f, v)]++;
+						wenter(a, v);
 					}
 				}
-				/* an edge into the middle of a loop (irreducible): the values live around the
-				 * loop are live at t without being in its W; they are the W of its back-edge
-				 * targets, defined before t */
+				/* an edge into a loop: the values live around the loop are live at t without
+				 * being in its W when they are used only past a back edge (into the middle of
+				 * a loop, or at its head when the loop is irreducible); they are the W of its
+				 * back-edge targets, defined before t (and dominating b: live at b at all) */
 				uint32_t lo = VIR_NOBLK;
 
 				for (uint32_t l = lp->inner[t]; l != VIR_NOBLK && lp->l[l].head > b; l = lp->l[l].parent)
 					lo = l;
-				if (lo != VIR_NOBLK && lp->l[lo].head != t)
+				if (lo != VIR_NOBLK)
 					for (uint32_t x = lp->l[lo].head; x <= lp->l[lo].end; x++) {
 						if (!ax.tend[x])
 							continue;
 						for (uint32_t j = 0; j < ax.lin_n[x]; j++) {
 							uint32_t v = ax.pool[ax.lin_off[x] + j];
 
-							if (v < f->blk[t].first && !w_has(a, wn, v)) {
+							if (v < f->blk[t].first && !w_has(a, wn, v) && defdom(a, v, b)) {
 								ax.wi[v] = wn;
 								ax.wd[wn++] = v;
 								cnt[vcls(f, v)]++;
+								wenter(a, v);
 							}
 						}
 					}
@@ -241,6 +489,7 @@ static bool sweep5(A *a)
 					ax.wd[ax.wi[i]] = x;
 					ax.wi[x] = ax.wi[i];
 					cnt[vcls(f, i)]--;
+					wleave(a, i, wn);
 				}
 				ax.endp[i] = e;
 				if (lastcall && lastcall < e)
@@ -281,6 +530,7 @@ static bool sweep5(A *a)
 					ax.wi[v] = wn;
 					ax.wd[wn++] = v;
 					cnt[vcls(f, v)]++;
+					wenter(a, v);
 				}
 				if (j < fx.nopnd && fx.opnd[j] != VR_NONE && (in->op != VO_CALL || !live))
 					ax.hint[v] = HREG | fx.opnd[j];
@@ -303,12 +553,15 @@ static bool sweep5(A *a)
 				ax.wd[ax.wi[q]] = x;
 				ax.wi[x] = ax.wi[q];
 				cnt[vcls(f, q)]--;
+				wleave(a, q, wn);
 			}
 			ax.endp[q] = e;
 			if (lastcall && lastcall < e)
 				ax.vfl[q] |= XCALL | (callloop ? XLOOP : 0);
 			if (!ax.nu[q] && !ax.lend[q])
 				ax.vfl[q] |= DEAD;
+			else if (lastcall && lastcall <= blk_last(f, b) && (!ax.nu[q] || ax.nu[q] > lastcall))
+				ax.vfl[q] |= CALLFIRST;
 		}
 		/* a block entered with every value in its slot: an `ibr` target, or one with no earlier predecessor */
 		if (b && (k->fl & VB_ADDR || ax.bmark[b])) {
@@ -324,15 +577,35 @@ static bool sweep5(A *a)
 			a->npool += wn;
 		}
 		if (ax.tend[b]) {	/* the target of a back edge (a loop header, or an entry of an irreducible one) */
-			uint32_t e = ax.tend[b];
+			uint32_t h = ax.tbeg[b];
 			/* a block of the loop that is entered with everything in slots (before b too: the
 			 * values are live around the whole loop) holds them without having them in its W */
 			uint8_t ns = ax.apre[ax.tendb[b] + 1] > ax.apre[ax.tbeg[b]] ? NEEDSLOT : 0;
+			uint8_t nsi = ax.apre[ax.tendib[b] + 1] > ax.apre[ax.tbeg[b]] ? NEEDSLOT : 0;
 
 			for (uint32_t j = 0; j < wn; j++) {
-				if (ax.lend[ax.wd[j]] < e)
-					ax.lend[ax.wd[j]] = e;
-				ax.vfl[ax.wd[j]] |= ns;
+				uint32_t v = ax.wd[j];
+				/* one whose definition does not dominate the loop's head (one defined in the
+				 * loop): a path from the head to b passes the definition, so it is live only to
+				 * the end of the back edges that reach b without passing the head */
+				uint32_t d = blk_of(f, v);
+				bool in = d != VIR_NOBLK && f->blk[h].idom != VIR_NOBLK && f->blk[d].idom != VIR_NOBLK &&
+					  (d == h || !vir_dominates(f, d, h));
+				uint32_t e = in ? ax.tendi[b] : ax.tend[b];
+
+				if (ax.lend[v] < e)
+					ax.lend[v] = e;
+				ax.vfl[v] |= in ? nsi : ns;
+				if (ax.nrng < (1u << 27)) {
+					ax.rlo[ax.nrng] = f->blk[ax.tbeg[b]].first;
+					ax.rhi[ax.nrng] = e;
+					ax.rnext[ax.nrng] = ax.rhead[v];
+					ax.rhead[v] = ax.nrng++;
+				} else {
+					a->failed = true;
+					snprintf(a->o->err, sizeof(a->o->err), "too many loop ranges");
+					return false;
+				}
 			}
 		}
 	}
@@ -354,9 +627,13 @@ static inline bool inreg(const A *a, uint32_t v) { return ax.reg[v] != VR_NONE &
 
 static inline void setreg(A *a, uint32_t v, uint32_t r)
 {
+	uint32_t w = wvalid(a, v);
+
 	ax.regval[r] = v;
 	ax.reg[v] = (uint8_t)r;
 	ax.fr[VR_CLASS(r)] &= ~(1ull << VR_NUM(r));
+	if (w != NOWEB && ax.wreg[w] == VR_NONE && a->f->ins[v].op == VO_BPARAM)
+		ax.wreg[w] = (uint8_t)r;	/* the web's register: its first parameter's */
 	if (a->rg->callee[VR_CLASS(r)] >> VR_NUM(r) & 1)
 		a->used_callee[VR_CLASS(r)] |= 1ull << VR_NUM(r);
 }
@@ -409,6 +686,19 @@ static void need_slot(A *a, uint32_t v)
 	if (ax.slot[v] != VIR_NOBLK || is_const(f, v))
 		return;
 	c = vir_tysize(f->ins[v].ty) == 4 ? 0 : 1;
+	{
+		uint32_t w = wvalid(a, v);
+
+		if (w != NOWEB) {	/* one slot for the web, its own (outside the ring) */
+			if (ax.wslot[w] == VIR_NOBLK) {
+				ax.wslot[w] = a->nspill++;
+				ax.ssz[ax.wslot[w]] = c ? 8 : 4;
+			}
+			ax.slot[v] = ax.wslot[w];
+			a->o->st.spills++;
+			return;
+		}
+	}
 	for (uint32_t j = 0; j < ax.nring[c]; j++) {
 		uint32_t t = ax.ring[c][j];
 
@@ -502,6 +792,13 @@ static int choose(A *a, uint32_t v, uint32_t c, uint64_t avoid)
 		else if (h < a->f->nins)
 			r = inreg(a, h) ? ax.reg[h] : (a->f->ins[h].op == VO_BPARAM ? ax.treg[h] : VR_NONE);
 		if (r < 128 && VR_CLASS(r) == c && (m >> VR_NUM(r) & 1) && !caller_for_call(a, v, c, m, r))
+			return (int)r;
+	}
+	{
+		uint32_t w = wvalid(a, v), r;
+
+		if (w != NOWEB && (r = ax.wreg[w]) != VR_NONE && VR_CLASS(r) == c && (m >> VR_NUM(r) & 1) &&
+		    !caller_for_call(a, v, c, m, r))
 			return (int)r;
 	}
 	if ((ax.vfl[v] & XCALL) && ((ax.vfl[v] & XLOOP) || (a->used_callee[c] & m)) && (m & cs)) {
@@ -823,6 +1120,8 @@ static void conform(A *a, uint32_t p, uint32_t k, uint32_t b)
 				n++;
 				continue;
 			}
+			if (ax.estamp[x] == g && ax.epst[x] && (dst & VL_SLOT) && ax.slot[x] == (dst & ~VL_SLOT))
+				continue;	/* stored there already (a web's slot) */
 			if (ax.estamp[x] == g)
 				src = ax.eloc[x];
 			else if (ax.slot[x] != VIR_NOBLK)
@@ -881,7 +1180,8 @@ static bool livein(A *a, uint32_t v, uint32_t b)
 		return false;
 	if (a->linear)
 		return ax.endp[v] >= first;
-	return ax.mark[v] == a->mbase + b || ax.lend[v] >= first;
+	/* (live round a loop: in each of its blocks) */
+	return ax.mark[v] == a->mbase + b || inrange(a, v, first);
 }
 
 static void enter(A *a, uint32_t b)
@@ -982,6 +1282,31 @@ static void enter(A *a, uint32_t b)
 				r = (int)h;
 			else
 				r = choose(a, q, c, 0);
+			/* a web's parameter that lives across a call and is not used soon (not in b, or
+			 * after a call, or only passed on by b's br) enters in the web's slot: the edges
+			 * then move nothing for an argument already there */
+			if (r >= 0 && wvalid(a, q) != NOWEB) {
+				uint32_t u = ax.nu[q], e = blk_last(f, b);
+				const vir_ins *t = &f->ins[e];
+				bool late = !u || u > e || (ax.vfl[q] & CALLFIRST);
+
+				if (u == e && t->op == VO_BR && t->a <= b) {
+					/* only passed on, to a parameter placed already (a loop's header): where
+					 * that one is */
+					for (uint32_t x = 0; x < f->blk[t->a].nparam; x++)
+						if (f->extra[t->c + x] == q) {
+							uint8_t pr = ax.opr[ax.boff[t->a] + x];
+
+							if (pr == VR_NONE)
+								r = -1;
+							else if (VR_CLASS(pr) == c && (ax.fr[c] >> VR_NUM(pr) & 1))
+								r = pr;
+							break;
+						}
+				} else if ((ax.vfl[q] & XCALL) && (late || (u == e && t->op == VO_BR))) {
+					r = -1;
+				}
+			}
 		}
 		ax.sdef[q] = 0;
 		if (r >= 0) {
@@ -1035,7 +1360,7 @@ static bool instr(A *a, uint32_t b, uint32_t i, bool term)
 		ax.nu[v] = w & ~KILL;
 		ax.lastpos[v] = i;
 		/* dies here: the kill bit is on its last occurrence, which is assigned last */
-		ax.dmark[v] = (is_const(f, v) ? !ax.nu[v] : (w & KILL) && ax.lend[v] <= i) ? i : 0;
+		ax.dmark[v] = (is_const(f, v) ? !ax.nu[v] : (w & KILL) && (a->linear ? ax.lend[v] <= i : !inrange(a, v, i))) ? i : 0;
 	}
 	if (in->op == VO_BR) {
 		for (uint32_t j = 0; j < n; j++)
@@ -1265,7 +1590,7 @@ bool vir_alloc(vir_fn *f, const vir_loops *lp, const vir_regs *rg, const vir_aop
 	a->poolmax = opt && opt->pool ? opt->pool : VIR_MAX_INS;
 	if (!nb || !precond(a))
 		return false;
-	if (!vir_cfg(f))
+	if (!vir_cfg(f) || !vir_dom(f))
 		return fail(a, "bad control-flow graph%s", 0);
 	/* successors (CSR), loop end positions, blocks with no earlier predecessor */
 	for (uint32_t b = 0; b < nb; b++) {
@@ -1314,15 +1639,54 @@ bool vir_alloc(vir_fn *f, const vir_loops *lp, const vir_regs *rg, const vir_aop
 				ax.tbeg[b] = lp->l[l].head;
 			}
 		}
+		ax.tendi[b] = ax.tend[b];
+		ax.tendib[b] = ax.tendb[b];
 	}
+	/* tendi: per loop, its back edges to other blocks than its head, merged where they
+	 * overlap; a value live into such a target t whose definition does not dominate the head
+	 * is live to the end of t's group, not round the loop (15.5) */
+	for (uint32_t l = 0; l < lp->n; l++) {
+		uint32_t h = lp->l[l].head, e = lp->l[l].end, gs = VIR_NOBLK, ge = 0;
+
+		for (uint32_t x = h + 1; x <= e + 1; x++) {
+			uint32_t sm = 0;
+
+			if (x <= e)
+				for (uint32_t j = 0; j < f->blk[x].npred; j++) {
+					uint32_t p = f->extra[f->blk[x].pred + j];
+
+					if (p >= x && p > sm)
+						sm = p;
+				}
+			if (x <= e && !sm)
+				continue;
+			if (gs != VIR_NOBLK && x <= ge && x <= e) {
+				if (sm > ge)
+					ge = sm;
+				continue;
+			}
+			/* a group [gs, ge] ends: its targets of this loop take ge */
+			if (gs != VIR_NOBLK)
+				for (uint32_t t = gs; t <= ge; t++)
+					if (ax.tend[t] == ax.lendpos[l] && ax.tbeg[t] == h) {
+						ax.tendi[t] = blk_last(f, ge);
+						ax.tendib[t] = ge;
+					}
+			gs = x;
+			ge = sm;
+		}
+	}
+	webs(a);
 	if (!sweep5(a)) {
 		if (a->failed)
 			return false;
 		a->linear = true;
 		out->st.linear = 1;
+		webs(a);
 		if (!sweep5(a))
 			return false;
 	}
+	webs_loops(a);
 	out->st.pool = a->npool;
 	/* sweep 6 */
 	for (uint32_t b = 0; b < nb; b++)

@@ -851,17 +851,29 @@ a sparse set (a list and a per-value index that validate each other).
 - At the bottom of a block `W` is the union of the live-in lists of its
   forward successors; at the top `W` is appended to the **live-in pool**.
 - At the top of the target `t` of a back edge `s -> t` (`s >= t`) every `v` in
-  `W` gets `lend[v]`, the end of the innermost loop that contains both `s` and
-  `t`, if larger than what it has. In reducible flow `t` is a loop header and
-  that is its loop's end; in irreducible flow `t` can be any entry of a merged
-  range, and applying it only at the head loses a value that is live into `t`
-  but not into the head. The forward sweep takes `v` as live up to `lend[v]`
-  and ignores kill bits there. This replaces iteration.
-- An edge `b -> t` into the middle of a loop (irreducible: `t` is in loop `L`,
-  `b` is before `L`'s head, `t` is not the head of the outermost such `L`)
-  also brings into `W` the live-in lists of `L`'s back-edge targets, for the
-  values defined before `t`: they are live around `L` without being in `t`'s
-  list, and without this rule a loop around `b` would not keep them.
+  `W` gets a **loop range**: from the first instruction of the head `H` of the
+  innermost loop `L` that contains both `s` and `t`, to an end that depends on
+  `v`. If `v`'s definition strictly dominates `H` (it is defined before the
+  loop), the end is `L`'s end: `v` is live round the loop. Otherwise every path
+  from `H` to `t` passes the definition again, so the edges into `H` do not
+  carry `v`: the end is that of `t`'s group, the back edges of `L` to other
+  blocks than `H` merged where their target..source ranges overlap. In a
+  dispatch loop whose body has backward `goto`s, this keeps a value of one
+  case from being live at the latch. `lend[v]` is the largest end, for linear
+  mode. A value is live in a block when its live-in list has it or a range of
+  its covers the block's first instruction; a use inside a range is not a kill
+  (15.6). In irreducible flow `t` can be any entry of a merged range, and
+  applying the rule only at the head loses a value that is live into `t` but
+  not into the head. This replaces iteration.
+- An edge `b -> t` into a loop `L` from before its head (the outermost such
+  `L`) also brings into `W` the live-in lists of `L`'s back-edge targets, for
+  the values defined before `t` whose definition dominates `b`. They are live
+  around `L` without being in `t`'s list when their use is reached only past a
+  back edge: an edge into the middle (irreducible), or into the head of a loop
+  whose use is behind an irreducible entry. Without this rule a loop around
+  `b` would not keep them. The dominance test drops values defined inside `L`
+  (strict SSA: such a value cannot be live at `b`); taking them in made a value
+  of one inner loop live across the whole enclosing loop.
 - A value live at the top of a block that starts with everything in its slot
   (`VB_ADDR`, or a block with no earlier predecessor, 15.8) gets a slot when
   it is defined. That includes a value live around a loop that contains such
@@ -950,6 +962,30 @@ block starts with every live-in value in its slot and none in a register. A
 cycle is broken with a free register (one the target's entry state does not
 use), else an exchange of two registers, else the scratch register (a cycle
 through a slot); a move an exchange already did is dropped.
+
+**Webs.** A block parameter and its `br` arguments (not constants) are one
+variable, a web (union-find). Two webs are not joined when both have a
+parameter of the same block, since those are live together at its top. A member
+leaves its web when another member is live at its definition. At a parameter,
+the members live there leave instead of the parameter. After sweep 5, the
+members a member's loop ranges cover leave too. The members that stay share:
+- one spill slot, given the first time one of them needs a slot and never
+  returned to the free list, so an edge moves nothing for an argument that is
+  already stored there;
+- one register: the first register a parameter of the web takes, which
+  `choose` returns after the hint when it is free and the value is not about
+  to cross a call;
+- the parameter's entry: a web parameter that crosses a call and is not used
+  before one (`CALLFIRST`), or is only passed on to the block's `br`, enters in
+  the web's slot. One that is only passed on to a loop header's parameter
+  already placed takes that parameter's place, register or slot.
+On the edge, an argument stored in the web's slot needs no move to a parameter
+that enters in it. Effect on `sqlite3VdbeExec` (1664 functions of sqlite3.c
+through VIR): stack accesses fell from 5197 to 2587. The dispatch latch is
+`add x25, x25, #24` in place. Each of its predecessors used to reload three
+values and copy `pOp`; now they store only a changed `rc` in its web slot.
+Cycles of speedtest1 did not change measurably (9.00 G before, 9.05 G after;
+instructions 33.78 G to 32.51 G).
 
 15.9 **Constants** (`iconst`, `fconst`, `symaddr`, `slotaddr`, `labeladdr`)
 are never stored: they are materialized into a register at a use that needs

@@ -1,0 +1,82 @@
+; the loop b3..b5 (merged from b4 -> b3 and b5 -> b4) is entered at its head b3
+; from b2 and in its middle at b4 from b1 (irreducible); v2 is used only in b4,
+; which b3 reaches only past the back edge b5 -> b4, so v2 is in neither b3's
+; nor b2's live-in set, yet it is live on b2 -> b3 -> b5 -> b4: an edge into a
+; loop's head also carries the values live around it (15.5); b2 must keep v2
+; through its own pressure
+; REGS: 4,2,0,0
+; SWEEP: yes
+vir 1
+target x86_64-linux
+sig %s = (int, int) -> int
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  v1:i64 = param 1.0
+  v2:i64 = mul v0, v1
+  v3:i32 = icmp.slt v0, v1
+  brif v3, b1, b2
+b1:
+  br b4
+b2:
+  v4:i64 = add v0, v1
+  v5:i64 = mul v4, v0
+  v6:i64 = sub v5, v1
+  v7:i64 = xor v6, v4
+  v8:i64 = or v7, v5
+  v9:i32 = icmp.slt v8, 5
+  brif v9, b3, b6
+b3:
+  v10:i32 = icmp.slt v1, 3
+  br b5
+b4:
+  v11:i64 = add v2, v0
+  v12:i32 = icmp.slt v11, 9
+  brif v12, b3, b6
+b5:
+  v13:i32 = icmp.slt v0, 7
+  brif v13, b4, b5
+b6:
+  ret v1
+}
+; ---
+; alloc @f regs 4,2,0,0
+func @f %s0 {
+b0:
+  v0:i64 = param 0.0                    ; -> r0 [ss0 later]
+  v1:i64 = param 1.0                    ; -> r1
+  v2:i64 = mul v0, v1                   ; r0, r1 -> r2 [ss1 later]
+  v3:i32 = icmp.slt v0, v1              ; r0, r1 -> r3
+  brif v3, b1, b2                       ; r3
+b1:
+  br b4                                 ;
+b2:
+  v4:i64 = add v0, v1                   ; r0, r1 -> r3
+  ; store ss0 <- r0 (v0)
+  v5:i64 = mul v4, v0                   ; r3, r0 -> r0
+  ; store ss1 <- r2 (v2)
+  v6:i64 = sub v5, v1                   ; r0, r1 -> r2
+  v7:i64 = xor v6, v4                   ; r2, r3 -> r2
+  v8:i64 = or v7, v5                    ; r2, r0 -> r0
+  v9:i32 = icmp.slt v8, 5               ; r0, - -> r0
+  brif v9, b3, b6                       ; r0
+b3:                                     ; loop to b5 depth 1
+  v10:i32 = icmp.slt v1, 3              ; r1, - -> r0
+  br b5                                 ;
+b4:
+  v11:i64 = add v2, v0                  ; r2, r0 -> r3
+  v12:i32 = icmp.slt v11, 9             ; r3, - -> r3
+  brif v12, b3, b6                      ; r3
+b5:                                     ; loop to b5 depth 2
+  ; reload r0 <- v0 (ss0)
+  v13:i32 = icmp.slt v0, 7              ; r0, - -> r2
+  brif v13, b4, b5                      ; r2
+b6:
+  ; move r0 <- r1 (v1)
+  ret v1                                ; r0
+}
+; edge b4.0 -> b3: ss0 <- r0 (v0); ss1 <- r2 (v2)
+; edge b5.0 -> b4: r2 <- ss1 (v2)
+; spill slots: ss0(8): v0 ss1(8): v2
+; spills 2 reloads 1 remats 0 moves 1 swaps 0 stores 2; edges 2: moves 0 reloads 1 remats 0 stores 2 xchg 0; slots 2 callee 0
+; sweep @f: 24 configurations, 0 failed

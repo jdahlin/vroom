@@ -373,6 +373,41 @@ ingen kod i V1 ändrad.
   osammanfogade grenarna under den här, inte från den.  `bench/vir-test.py`
   118/118.
 
+### V4, webbar (2026-11-12): blockparameter och argument som en variabel
+
+Steg 1 i arbetsordningen för sqlite (SPEC 15.5 och 15.8, "Webs").
+- **Gjort:** en blockparameter och dess `br`-argument är en webb
+  (union-find).  Två webbar med parametrar i samma block slås inte ihop.  En
+  medlem som är levande där en annan definieras lämnar webben; vid en
+  parameter lämnar de levande i stället.  Webben har en gemensam spillplats
+  utanför ringen och ett föredraget register (den första parameterns).  En
+  parameter som korsar ett anrop innan den används, eller bara skickas vidare,
+  startar i webbens plats.  Livslängden runt loopar är nu exakta intervall per
+  värde i stället för `lend` som linjär gräns, och `livein`, `dmark` och
+  webbarnas interferens läser samma intervall.  Två precisionsregler: ett värde
+  vars definition inte dominerar loophuvudet lever bara till slutet av sin
+  grupp av bakkanter, inte runt hela loopen; och regeln för en kant in i en
+  loop tar bara värden vars definition dominerar källblocket (strikt SSA).
+  Den regeln gäller nu också en kant till huvudet (irreducibel loop där
+  användningen ligger bakom en inre bakkant; `irr-head.vir`, hittad av
+  slumpfrö 61, faller utan regeln).
+- **sqlite3VdbeExec:** stackåtkomster 5197 → 2587 (målet var under 1500).
+  Spärren är `add x25, x25, #24` på plats; dess föregångare laddade förut om
+  tre värden och kopierade `pOp`.  Den största källan var regeln för kant in i
+  loop: ett värde från ett fall i tolken räknades som levande runt hela
+  tolkslingan.
+- **Tid:** speedtest1 (storlek 100): 33,75 G → 32,48 G instruktioner, cykler
+  8,83 G → 8,95 G (inom bruset; ssa-llc2 8,39 G).  Profil vid storlek 300:
+  sqlite3VdbeExec 2094 sampel (före 2115; LLVM-bakdelen ssa-llc2 2228; målet
+  1900 motsvarar bygget med bara inlining, 1818: kräver steg 2).
+  Stackåtkomsterna kostade alltså lite: lagring och laddning på stacken
+  vidarebefordras.
+- **Tester:** vir-alloc 17/17, slump 1300 enheter (frö 1–1000, 1000–1299)
+  gröna, `mutate` fångar 2871 av 2980; vir-test 118/118; C-sviterna 2064/2064, genom VIR med kontrollen
+  2058/2064 (samma sex kända fel), inline genom VIR 85/85, `VCC_UNITY=`
+  bygger, TCL genom VIR 1 fel (interrupt2, som clang); sqlite
+  genom VIR med kontrollen: 1664 funktioner, hash oförändrad.
+
 ### Underlag för V4 (2026-11-11): registerallokering, ingen kod
 
 - `RESEARCH-regalloc.md`: vad GCC (IRA, LRA) och LLVM (Greedy, Fast, PBQP,
