@@ -280,11 +280,47 @@ laddning, summor, val, invariant ur minnet); `vcc-ctests.py` med `VCC_VIR=bl`
 2079/2082 (de tre `.Lswitch.values`-felen fanns före), utan VIR oförändrat;
 ASan/UBSan rent på TSVC och testet; `vir-test.py` 124/124.
 
-Kvar (RESEARCH 6.6 och 5): spill av vektorer; skalärloopar genom VIR lika
-snabba som den direkta emittern (invarianter ut ur loopen, flyttal direkt i
-v-register: resten och alla ovektoriserade loopar); körtidskontroll för
-pekare; steg ≠ elementstorlek; interleaving; övriga fyra bantyper; x86-64
-och wasm; tolken och `virgen` känner inte vektorer.
+**Andra omgången (samma dag): 43 av 120 loopar, VIR 2,6 s.**
+
+- **Körtidskontroll av överlapp.**  Två åtkomster som varken är ett objekt
+  eller två symboler (pekare mot vad som helst, invariant laddning mot en
+  lagring, en array på okänt avstånd `a[i]`/`a[i+k]`) jämförs som byteintervall
+  i VPH; möts två går loopen skalärt.  Högst 8 par (som LLVM).
+- **Pekare** som bas: parametrar, och adresser räknade som heltal (`i2p` av
+  laddad global pekare + index).
+- **Pekarinduktioner** i vektorkroppen i stället för omräknat index.
+- **Induktioner**: flera steg per varv (`j++` två gånger), steg som är ett
+  värde (versioneras på steg = 1), teckenlös `i32`-räknare med steg 1 under
+  teckenlös gräns, `size_t`.
+- **Vektorspill sänks** (`ldr/str q` genom x16, plats till plats genom v31):
+  ingen återgång till den direkta emittern längre.
+- **d8–d15 för skalära flyttal över anrop** (`emit/vir/a64.c`): erbjuds
+  allokatorn som anropsbevarade, sparas vid ingången och återställs före
+  varje retur och syskonanrop.  Inte när en vektor lever över ett anrop
+  (`vl_vcross`; ingen gör det i dag) och inte med
+  `-fasynchronous-unwind-tables` (CFI för platserna saknas).  En
+  flyttalsackumulator i en loop inuti en loop med anrop gick genom minnet
+  varje varv: s311, vsumr, vdotr 0,45 s → 0,08 s (clangs tid).
+
+Mätt: direkt emitter 7,5 s, VIR 2,65 s, clang -O3 1,49 s; 151/151.  Skäl för
+de 77 looparna som är kvar: steg ≠ element 17, flyttalsreduktion/rekurrens 17,
+värde som inte kan bli banor 10, lagrat värde läst 1–3 varv senare 10, adress
+inte bas + linjär 6, anrop 6, ordning i kroppen 6.  Av de 66 funktioner clang
+vektoriserar tar vi 36; störst skillnad: 9 med villkorlig lagring (clang
+skalariserar lagringen per bana), 7 flyttalsreduktioner (clang: ordnade), 6
+med steg som bara är känt i körtid i en multiplikation.
+
+Tester: `tests/vcc/vir_vec_loops.c` (nu även överlappande pekare, 10
+spillda vektorer, steg 1 och 3, okänt avstånd, teckenlösa räknare),
+`tests/vcc/vir_fp_callee.c`.  `vcc-ctests.py` med `VCC_VIR=bl` 2080/2083 (samma
+tre), utan VIR 2083/2083; ASan/UBSan rent.
+
+Kvar (RESEARCH 6.6 och 5): skalärloopar genom VIR (invarianter ut ur loopen,
+flyttal direkt i v-register: resten och alla ovektoriserade loopar, som nu är
+större delen av avståndet till clang); CFI för d8–d15; steg ≠ elementstorlek;
+interleaving; ordnade flyttalsreduktioner; övriga fyra bantyper; x86-64 och
+wasm; tolken och `virgen` känner inte vektorer; kärnan, PostgreSQL och SQLite
+är inte körda med VIR efter detta.
 
 ### V0 (2026-11-11): klar för granskning
 

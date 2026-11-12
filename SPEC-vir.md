@@ -408,7 +408,9 @@ mean anything on a vector: lanes wrap.
 | 79 | `vreduce` | `i32` | `i32x4` | - | - | P | The lanes' wrapping sum |
 
 7.5.4 Register allocation: vectors are in the float class; a vector's spill
-slot is 16 bytes (15.2), and no v register keeps a vector across a call.
+slot is 16 bytes (15.2), and no v register keeps a vector across a call. A
+target may still report float registers as callee-saved (arm64's v8-v15, low
+halves only) for a function in which no vector is live across a call.
 
 ## 8. Control flow
 

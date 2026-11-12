@@ -155,6 +155,8 @@ Nobody who removed boolean vectors put them back.
   (and specifically only the lower 8 bytes of these regs)" [LLDB].
 - x86-64 SysV: every xmm register is caller-saved [SYSV].
 - So a 128-bit value live across a call is spilled on every 1.0 target.
+  (What was built: v8-v15 are callee-saved for the allocator only in a
+  function where no vector lives across a call; scalars then use them.)
 - regalloc2 has three classes (Int, Float, Vector) and one spill size per
   class [RA2]. Cranelift's arm64 backend nevertheless puts scalar floats and
   vectors in one class with 16-byte slots, so an `f32` spill takes 16 bytes,
@@ -462,9 +464,11 @@ than scalar.
    VIR takes the function.
 4. Types, table rows, verifier, parser, printer, allocator slot sizes (5.1
    to 5.4), with `tests/vir/` units; then lowering (5.5); then 6.2 to 6.4.
-   Done for `f32x4` and `i32x4` on arm64, without vector spills, runtime
-   checks or interleaving: 28 of TSVC's 120 innermost loops, 151/151
-   checksums (`PLAN-vir.md`, status of 2026-11-12). Item 3 is not done.
+   Done for `f32x4` and `i32x4` on arm64, with vector spills and the runtime
+   range checks of 6.3, without interleaving: 43 of TSVC's 120 innermost
+   loops, 151/151 checksums, 2.65 s against clang's 1.49 s (`PLAN-vir.md`,
+   status of 2026-11-12). Of item 3 one part is done: scalar floats stay in
+   d8-d15 across calls.
 
 ## 7. What this changes in the plans
 
