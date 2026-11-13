@@ -1,4 +1,12 @@
-/* vcc code generator: bit facts about constants and expressions */
+/*
+ * known-bits.c: which bits of an integer expression are known (kbits), and whether a constant fits
+ * an inline-asm immediate constraint letter (imm_fits: arm64's I, J, K, L, M, N).
+ *
+ * kbits fills a known-mask and the values of those bits; it looks through casts, constants, comma,
+ * conditional, bitwise operators and shifts, and is conservative: a bit not proven is not known.  Its
+ * only user is arm64's inline-asm operand selection (arch/a64/codegen/asm.c), which also calls
+ * imm_fits; imm_fits is the arm64 meaning of the letters (logimm_ok for the logical-immediate ones).
+ */
 #include "emitimpl.h"
 
 VPRIV bool imm_fits(int ch, i128 v)

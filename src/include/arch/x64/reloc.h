@@ -1,5 +1,11 @@
-/* x86-64 ELF relocation types (included by include/obj/obj.h; fixups carry them when
-   the object's machine is EM_X86_64) */
+/*
+ * reloc.h (x86-64): ELF relocation types for x86-64, the ones fixups carry when the object's machine
+ * is EM_X86_64.
+ *
+ * Included by include/obj/obj.h, next to arm64's.  The values are the ELF numbers (the x86-64 psABI);
+ * a type added here needs its encoding in arch/x64/obj/fixup.c and, for vlink, a case in the
+ * relocation scan and apply (ld/).
+ */
 #ifndef VCC_X64_RELOC_H
 #define VCC_X64_RELOC_H
 

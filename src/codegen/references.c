@@ -1,4 +1,14 @@
-/* vcc code generator: the reference log, which symbols and strings a function needs emitted */
+/*
+ * references.c: the reference log: which symbols and strings a function needs emitted.
+ *
+ * note_ref is called by the walker, the lowering and the data emitter whenever generated code or data
+ * mentions a symbol; claim_ref logs it (rlog, so a later round can reuse the function) and, for a
+ * static function, a static object, a string or a weak reference, queues it once for emission
+ * (E->claimed, strdone and extref are atomic exchange flags: the first thread to claim queues it).
+ * This is how lazily emitted statics work: a static function nobody references is never generated.
+ * A referenced function whose body was never parsed is an internal error.  Nothing is noted when
+ * the code is unreachable (e->reach false) or a dry run (e->dry).
+ */
 #include "emitimpl.h"
 
 VPRIV void note_ref(ecx *e, uint32_t ref)

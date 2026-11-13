@@ -1,8 +1,13 @@
 /*
- * The text form, printing (SPEC-vir.md 11): constants inline with a `:type`
- * suffix exactly where the position does not fix the type (11.5); values
- * and blocks named v0.. and b0.. in order of appearance (11.6); instruction
- * flags in the order of 11.3.
+ * print.c: VIR's text form, printing (SPEC-vir.md 11).
+ *
+ * The text is the reference everyone reads and the tests compare (src/test/vir): constants inline
+ * with a `:type` suffix exactly where the position does not fix the type (11.5), values and blocks
+ * named v0.. and b0.. in order of appearance (11.6), instruction flags in the order of 11.3.
+ * Printing and parsing are inverses: printing the parse of a text gives the text back
+ * (`virtest` and bench/vir-test.py check the round trip), so a change here is a change of the
+ * format and goes with parse.c and the spec.  Printing reads the opcode table (table.c) and never
+ * changes the function.
  */
 #include "virimpl.h"
 

@@ -1,5 +1,11 @@
-/* A power-of-two low product is a machine shift, including signed products
- * whenever the original multiplication is defined. No C shift AST is made. */
+/*
+ * mulshift.c: a multiplication by a power of two is a left shift.
+ *
+ * em_mulshift(c, ty, &op, &rhs) rewrites the operator and the constant in place for 4- and 8-byte
+ * integers, signed included: the low bits of the product are the same whenever the multiplication is
+ * defined, and no shift node is built, so the caller's evaluation order and diagnostics are
+ * unchanged.  Used by the shared walker and wasm's emitter.
+ */
 #include "../emitimpl.h"
 
 VPRIV bool em_mulshift(cc *c, qty ty, int *op, i128 *rhs)

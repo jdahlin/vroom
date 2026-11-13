@@ -1,7 +1,20 @@
 /*
- * VIR: the thread's memory, construction, the analyses (cfg, dominators,
- * use counts), the canonical form, and the unit's tables (SPEC-vir.md 2-3,
- * 22).
+ * vir.c: VIR's construction and analyses: the thread's reservations, building a function, operand
+ * iteration, the CFG (vir_cfg), dominators, use counts, the canonical form (vir_canon) and the unit's
+ * tables (SPEC-vir.md 2-3, 22).
+ *
+ * A function's arrays live in the thread's vir_ctx (vir_ctx_get: reserved once per thread, reused by
+ * every function), so vir_begin invalidates the previous function on that thread: two functions of one
+ * thread are never alive at once, and a vir_fn is not passed to another thread.  Nothing is
+ * allocated or cleared per function; constants are hash-consed in a table stamped with a generation
+ * (22.3), which is what keeps vir_begin cheap.  Analyses are cached in the function with a validity
+ * bit and recomputed by the getter only when something invalidated them; a pass that changes control
+ * flow or operands must say so (vir_cfg's and vir_dom's callers rely on it).  vir_canon is the form
+ * every pass receives (the verifier rejects a builder-form function whose constants are not yet
+ * in the constant region).
+ * Running past a limit (VIR_MAX_INS, the
+ * constant or extra tables) sets the thread's fail flag and the builder call returns 0; the caller
+ * checks vir_failed() before using the function.
  */
 #include "virimpl.h"
 

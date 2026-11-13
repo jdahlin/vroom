@@ -1,4 +1,14 @@
-/* Register-local eligibility and bounded weighted selection, without an AST walk. */
+/*
+ * locals.c: which locals may live in registers, and the choice of the most used ones, without
+ * another walk of the AST.
+ *
+ * em_local_eligible lists the reasons a local must stay in memory (address taken, volatile, atomic, a
+ * VLA, a cleanup, static or extern, a register variable bound to an asm name).  em_select_locals
+ * takes the prepass's weighted reference counts (E->lspan, the per-symbol weights) and picks at most
+ * `max` candidates that the target accepts (target_ok); equal weights keep symbol order, so the
+ * choice is deterministic.  The caller owns the candidate array.  Used by arm64's function
+ * generator, x86-64's locals pass, wasm and VIR's memory lowering.
+ */
 #include "../emitimpl.h"
 
 /* Target-independent reasons a local must retain an addressable memory object. */

@@ -1,5 +1,11 @@
-/* Unsigned division/remainder by a power of two. Callers preserve operand
-   evaluation; this helper only rewrites the operation and constant RHS. */
+/*
+ * divpow2.c: unsigned division and remainder by a power of two become a shift and a mask.
+ *
+ * em_divpow2(c, ty, &op, &rhs) rewrites the operator and the constant in place (x / 8 to x >> 3,
+ * x % 8 to x & 7) and returns true; it does not touch operands, so the caller keeps its evaluation
+ * order.  Unsigned types of up to 8 bytes only (signed division needs a bias: sdivpow2.c).  Called by
+ * the shared walker, arm64's arithmetic and wasm's emitter.
+ */
 #include "../emitimpl.h"
 
 VPRIV bool em_divpow2(cc *c, qty ty, int *op, i128 *rhs)

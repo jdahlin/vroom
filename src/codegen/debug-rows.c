@@ -1,4 +1,14 @@
-/* vcc code generator: debug line rows of a function and the .file numbers of the unit */
+/*
+ * debug-rows.c: the line table of a function (-g): which source line, column and file each
+ * instruction record belongs to.
+ *
+ * dbg_row is called by the lowering at each statement it wants a row for and attaches the current
+ * record index to the source location; rows for nothing emitted are dropped.  A pass that deletes or
+ * moves records must call dbg_remap so the rows follow (the printers and optimisers do).  File
+ * numbers are unit-wide and handed out under E->dmu, so the threads agree on them; the main file is
+ * number 0, as in clang (MC maps `.file N` of the main file to 0).  Users: arm64's and x86-64's
+ * direct emitters; VIR does not call it.
+ */
 #include "emitimpl.h"
 
 /* the .file number of a presumed file name (1-based; under dmu, shared by the threads) */

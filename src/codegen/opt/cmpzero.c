@@ -1,4 +1,11 @@
-/* Recognize comparisons that are true precisely when an integer is zero. */
+/*
+ * cmpzero.c: recognise comparisons that are true exactly when an integer is zero (x == 0,
+ * x <= 0 for unsigned x, 0 >= x), so the backend can use its compare-with-zero form.
+ *
+ * em_cmpzero(e, n, &operand) sets operand to the other side and returns true.  Only 4- and 8-byte
+ * integers of one type, only at -O1 and up.  Only wasm's emitter calls it today; it uses
+ * em_bound_constant from cmpbounds.c to see the constant 0.
+ */
 #include "../emitimpl.h"
 
 VPRIV bool em_cmpzero(ecx *e, uint32_t n, uint32_t *operand)
