@@ -1,11 +1,11 @@
 /* vcc front end: #pragma pack, weak, visibility and ms_struct */
-#include "ccimpl.h"
+#include "cc-internal.h"
 
-/* #pragma pack as clang: pack(N), pack(), push[, id][, N], pop[, id][, N],
+/* #pragma pack as clang: pack(AST_NODE), pack(), push[, id][, AST_NODE], pop[, id][, AST_NODE],
    show.  pack[npack-1] is the current value (bytes, 0: default), the entries
    below are saved ones, packid[i] the label of pack[i] (0: none).  A
    malformed pragma or a value other than 0/1/2/4/8/16 is ignored whole. */
-static int pack_word(const char **ps, const char *e, const char **w)
+static int cc_pragma_pack_word_parse(const char **ps, const char *e, const char **w)
 {
 	const char *s = *ps;
 	int n = 0;
@@ -19,14 +19,14 @@ static int pack_word(const char **ps, const char *e, const char **w)
 	return n;
 }
 
-static void pack_set(cc *c, uint32_t v)
+static void cc_pragma_pack_set(cc *c, uint32_t v)
 {
 	if (!c->npack)
 		c->pack[0] = 0, c->packid[0] = 0, c->npack = 1;
 	c->pack[c->npack - 1] = v;
 }
 
-static void pragma_pack(cc *c, const char *s, const char *e)
+static void cc_pragma_pack_parse(cc *c, const char *s, const char *e)
 {
 	const char *w, *it[3];
 	int n, len[3], ni = 0, push = 0, pop = 0;
@@ -38,7 +38,7 @@ static void pragma_pack(cc *c, const char *s, const char *e)
 	if (s == e || *s++ != '(')
 		return;
 	for (;;) {
-		n = pack_word(&s, e, &w);
+		n = cc_pragma_pack_word_parse(&s, e, &w);
 		while (s < e && (*s == ' ' || *s == '\t'))
 			s++;
 		if (n) {
@@ -79,7 +79,7 @@ static void pragma_pack(cc *c, const char *s, const char *e)
 	if (!push && !pop) {
 		if (ni > 1)
 			return;
-		pack_set(c, v < 0 ? 0 : (uint32_t)v);
+		cc_pragma_pack_set(c, v < 0 ? 0 : (uint32_t)v);
 		return;
 	}
 	if (push) {
@@ -103,11 +103,11 @@ static void pragma_pack(cc *c, const char *s, const char *e)
 		c->packid[c->npack - 1] = 0;
 	}
 	if (v >= 0)
-		pack_set(c, (uint32_t)v);
+		cc_pragma_pack_set(c, (uint32_t)v);
 }
 
 /* #pragma: pack and weak change semantics; the rest is ignored here */
-VPRIV void pragma(cc *c, const ptok *t)
+CC_PRIVATE void cc_pragma_parse(cc *c, const ptok *t)
 {
 	const char *s = t->s, *e = t->s + t->len;
 
@@ -118,8 +118,8 @@ VPRIV void pragma(cc *c, const ptok *t)
 		s++;
 	if (e - s >= 4 && !memcmp(s, "weak", 4) && (e - s == 4 || s[4] == ' ' || s[4] == '\t')) {
 		if (unlikely(c->dr_on))
-			dr_pragma(c, 1);
-		pragma_weak(c, s + 4, e, t->s, t->loc);
+			cc_replay_pragma_log(c, 1);
+		cc_pragma_weak_parse(c, s + 4, e, t->s, t->loc);
 		return;
 	}
 	if (e - s > 14 && !memcmp(s, "GCC visibility", 14)) {
@@ -143,7 +143,7 @@ VPRIV void pragma(cc *c, const ptok *t)
 				while (b > a && (b[-1] == ' ' || b[-1] == '\t'))
 					b--;
 				n = (size_t)(b - a);
-				keep = halloc(c, n + 1);
+				keep = cc_heap_allocate(c, n + 1);
 				memcpy(keep, a, n);
 				keep[n] = 0;
 				c->strs[c->nstr] = (cstr){ keep, (uint32_t)(n + 1), 1, LEX_TOKEN_STRING };
@@ -154,7 +154,7 @@ VPRIV void pragma(cc *c, const ptok *t)
 	}
 	if (e - s >= 9 && !memcmp(s, "ms_struct", 9) && (e - s == 9 || s[9] == ' ' || s[9] == '\t')) {
 		if (unlikely(c->dr_on))
-			dr_pragma(c, 2);
+			cc_replay_pragma_log(c, 2);
 		s += 9;
 		while (s < e && (*s == ' ' || *s == '\t')) s++;
 		c->ms_struct = e - s >= 2 && !memcmp(s, "on", 2);
@@ -163,6 +163,6 @@ VPRIV void pragma(cc *c, const ptok *t)
 	if ((size_t)(e - s) < 4 || memcmp(s, "pack", 4))
 		return;
 	if (unlikely(c->dr_on))
-		dr_pragma(c, 2);
-	pragma_pack(c, s + 4, e);
+		cc_replay_pragma_log(c, 2);
+	cc_pragma_pack_parse(c, s + 4, e);
 }

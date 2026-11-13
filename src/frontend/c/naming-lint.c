@@ -12,7 +12,7 @@
  * [-Wvcc-lint-naming] whose text names the expected prefix; no fix-it, since the new name is
  * not unambiguous.
  */
-#include "ccimpl.h"
+#include "cc-internal.h"
 
 typedef struct lint_module {
 	const char *dir;	/* after src/, with the trailing slash */
@@ -81,7 +81,7 @@ static bool lint_name_ok(const lint_module *m, const char *name, uint32_t len)
 	return false;
 }
 
-VPRIV void cc_lint_naming_report(cc *c)
+CC_PRIVATE void cc_lint_naming_report(cc *c)
 {
 	static const char *const g[] = { "vcc-lint", NULL };
 
@@ -92,7 +92,7 @@ VPRIV void cc_lint_naming_report(cc *c)
 		uint32_t flen, line, col, nlen, at;
 		bool fn = y->kind == S_FUNC, defined = false;
 
-		if ((y->kind != S_VAR && !fn) || y->depth || !y->name || lookup(c, y->name) != i || (y->flags & SF_OVERLOAD))
+		if ((y->kind != S_VAR && !fn) || y->depth || !y->name || cc_symbol_lookup(c, y->name) != i || (y->flags & SF_OVERLOAD))
 			continue;
 		for (uint32_t s = i; s; s = c->syms[s].next)
 			defined |= (c->syms[s].flags & (fn ? SF_DEFINED : (SF_DEFINED | SF_TENTATIVE))) != 0;
@@ -101,8 +101,8 @@ VPRIV void cc_lint_naming_report(cc *c)
 			continue;
 		pp_location_describe(c->p, at, &file, &flen, &line, &col);
 		m = lint_module_of(file, flen);
-		name = idstr_(y->name);
-		nlen = (uint32_t)idlen_(y->name);
+		name = cc_identifier_string(y->name);
+		nlen = (uint32_t)cc_identifier_length(y->name);
 		if (!m || lint_name_ok(m, name, nlen))
 			continue;
 		{
