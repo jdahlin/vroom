@@ -30,15 +30,15 @@
 
 /* ---------------- fixdep's hash sets (per job) ---------------- */
 
-typedef struct item {
-	struct item *next;
+typedef struct fixdep_item {
+	struct fixdep_item *next;
 	unsigned int len, hash;
 	char name[];
-} item;
+} fixdep_item;
 
 #define FIXDEP_HASH_SIZE 256
 
-static unsigned int strhash(const char *str, unsigned int sz)
+static unsigned int fixdep_string_hash(const char *str, unsigned int sz)
 {
 	unsigned int hash = 2166136261U;
 
@@ -48,10 +48,10 @@ static unsigned int strhash(const char *str, unsigned int sz)
 }
 
 /* true if name was there; otherwise added */
-static bool fixdep_table_contains(const char *name, unsigned int len, item *tab[])
+static bool fixdep_table_contains(const char *name, unsigned int len, fixdep_item *tab[])
 {
-	unsigned int hash = strhash(name, len);
-	item *a;
+	unsigned int hash = fixdep_string_hash(name, len);
+	fixdep_item *a;
 
 	for (a = tab[hash % FIXDEP_HASH_SIZE]; a; a = a->next)
 		if (a->hash == hash && a->len == len && !memcmp(a->name, name, len))
@@ -67,10 +67,10 @@ static bool fixdep_table_contains(const char *name, unsigned int len, item *tab[
 	return false;
 }
 
-static void fixdep_table_free(item *tab[])
+static void fixdep_table_free(fixdep_item *tab[])
 {
 	for (int i = 0; i < FIXDEP_HASH_SIZE; i++)
-		for (item *a = tab[i], *n; a; a = n) {
+		for (fixdep_item *a = tab[i], *n; a; a = n) {
 			n = a->next;
 			free(a);
 		}
@@ -91,7 +91,7 @@ static int fixdep_string_ends_with(const char *s, size_t slen, const char *sub)
  */
 static char *fixdep_configs_scan(const char *text)
 {
-	item *seen[FIXDEP_HASH_SIZE] = { 0 };
+	fixdep_item *seen[FIXDEP_HASH_SIZE] = { 0 };
 	vbuffer b = { 0 };
 	const char *p = text, *q, *r;
 
@@ -144,14 +144,14 @@ static int fixdep_file_is_unparsed(const char *s, size_t len)
 	return fixdep_string_ends_with(s, len, ".rlib") || fixdep_string_ends_with(s, len, ".rmeta") || fixdep_string_ends_with(s, len, ".so");
 }
 
-typedef struct job {
+typedef struct fixdep_job {
 	const char *cwd;
 	vbuffer *o;
-	item **configs;
+	fixdep_item **configs;
 	char err[512];
-} job;
+} fixdep_job;
 
-static int fixdep_file_use(job *j, const char *path)
+static int fixdep_file_use(fixdep_job *j, const char *path)
 {
 	char abs[4096];
 	const lex_file *f;
@@ -179,9 +179,9 @@ static int fixdep_file_use(job *j, const char *path)
 	return 0;
 }
 
-static int fixdep_depfile_parse(job *j, char *p, const char *target)
+static int fixdep_depfile_parse(fixdep_job *j, char *p, const char *target)
 {
-	item *files[FIXDEP_HASH_SIZE] = { 0 };
+	fixdep_item *files[FIXDEP_HASH_SIZE] = { 0 };
 	bool saw_any_target = false, is_target = true, is_source = false, need_parse;
 	char *q, saved_c;
 	int rc = 0;
@@ -313,9 +313,9 @@ int fixdep_run(const char *cwd, const char *depfile, const char *target, const c
 	    int errfd)
 {
 	char dabs[4096], oabs[4096];
-	item *configs[FIXDEP_HASH_SIZE] = { 0 };
+	fixdep_item *configs[FIXDEP_HASH_SIZE] = { 0 };
 	vbuffer o = { 0 };
-	job j = { .cwd = cwd, .o = &o, .configs = configs };
+	fixdep_job j = { .cwd = cwd, .o = &o, .configs = configs };
 
 	vintern_init();	/* the token cache interns; vsh may run fixdep before any compile */
 	char *d = fixdep_file_read(cwd, depfile, dabs, sizeof(dabs));

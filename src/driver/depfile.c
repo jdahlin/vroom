@@ -6,7 +6,7 @@
  * without system headers, -MP phony targets for every file but the main one.  `first` is a file that
  * comes before the rest (Darwin's SDKSettings.json, which clang reads).  driver_depfile_names sets
  * the target (-MT, -o, or the source's object name) and the file's name (-MF, or the target's with
- * .d) in the job.  The text is built in a job buffer and written with write_file/write_out; a failure
+ * .d) in the job.  The text is built in a job buffer and written with driver_output_file_write/driver_output_write; a failure
  * is reported on the job's error fd and returned as 1.
  */
 #include "driver-internal.h"
@@ -28,11 +28,11 @@ VPRIV int driver_depfile_write(const pp *p, const char *cwd, const char *depfile
 		cap = cap ? 2 * cap : 4096;
 		names = malloc(cap * sizeof(*names));
 	}
-	buf d = { .r = &driver_buffer_region[3] };
+	driver_buffer d = { .r = &driver_buffer_region[3] };
 	int r;
 
-	bstr(&d, target);
-	bstr(&d, ":");
+	driver_buffer_append_string(&d, target);
+	driver_buffer_append_string(&d, ":");
 	col = strlen(target) + 1;
 	for (size_t i = first ? (size_t)-1 : 0; i + 1 < n + 1; i++) {	/* first: Darwin's SDKSettings.json */
 		const char *f = i == (size_t)-1 ? first : names[i];
@@ -44,24 +44,24 @@ VPRIV int driver_depfile_write(const pp *p, const char *cwd, const char *depfile
 			f += 2;
 		l = strlen(f);
 		if (col + l + 3 > 75) {	/* room for a trailing " \\" */
-			bstr(&d, " \\\n ");
+			driver_buffer_append_string(&d, " \\\n ");
 			col = 2;
 		}
-		bstr(&d, " ");
-		bstr(&d, f);
+		driver_buffer_append_string(&d, " ");
+		driver_buffer_append_string(&d, f);
 		col += l + 1;
 	}
-	bstr(&d, "\n");
+	driver_buffer_append_string(&d, "\n");
 	if (phony)
 		for (size_t i = first ? (size_t)-1 : 1; i + 1 < n + 1; i += i == (size_t)-1 ? 2 : 1) {	/* not names[0], the main file */
 			const char *f = i == (size_t)-1 ? first : names[i];
 
 			while (f[0] == '.' && f[1] == '/')
 				f += 2;
-			bstr(&d, f);
-			bstr(&d, ":\n");
+			driver_buffer_append_string(&d, f);
+			driver_buffer_append_string(&d, ":\n");
 		}
-	r = depfile ? write_file(cwd, depfile, d.p, d.n, errfd) : write_out(cwd, out, outfd, d.p, d.n, errfd);
+	r = depfile ? driver_output_file_write(cwd, depfile, d.p, d.n, errfd) : driver_output_write(cwd, out, outfd, d.p, d.n, errfd);
 	driver_buffer_free(&d);
 	return r;
 }

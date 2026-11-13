@@ -42,11 +42,11 @@
 #endif
 #endif
 
-typedef struct buf {
+typedef struct driver_buffer {
 	char *p;
 	size_t n, cap;
 	vjob_region *r;	/* the first 16 MB come from this per-thread region (driver_buffer_free puts it back) */
-} buf;
+} driver_buffer;
 
 /* job-buffer.c */
 extern vjob_region_pool driver_buffer_pool;
@@ -67,7 +67,7 @@ struct driver_job {
 	const char *badval;	/* an option with a value clang would reject */
 	const char **wargs;
 	char pmapbuf[4096];
-	buf pre, cmdl, incl, imac;
+	driver_buffer pre, cmdl, incl, imac;
 	/* no --target: the host's own userland (Darwin on a Mac, glibc aarch64 or x86-64 on Linux) */
 	int darwin;
 	int x86;	/* x86_64-linux-gnu (PLAN-x86.md) */
@@ -108,20 +108,20 @@ extern _Thread_local uint8_t *driver_object_buffer;
 extern _Thread_local vbuffer driver_wasm_object;
 
 /* job-buffer.c */
-VPRIV void bput(buf *b, const char *s, size_t n);
-VPRIV void bstr(buf *b, const char *s);
-VPRIV void driver_buffer_free(buf *b);
-VPRIV void driver_buffer_append_define(buf *b, const char *d);
+VPRIV void driver_buffer_append(driver_buffer *b, const char *s, size_t n);
+VPRIV void driver_buffer_append_string(driver_buffer *b, const char *s);
+VPRIV void driver_buffer_free(driver_buffer *b);
+VPRIV void driver_buffer_append_define(driver_buffer *b, const char *d);
 /* output.c */
-VPRIV const char *at(const char *cwd, const char *path, char *buf, size_t cap);
-VPRIV int write_all(int fd, const char *p, size_t n);
+VPRIV const char *driver_path_resolve(const char *cwd, const char *path, char *buf, size_t cap);
+VPRIV int driver_output_write_all(int fd, const char *p, size_t n);
 VPRIV bool driver_client_is_gone(void);
 VPRIV void driver_output_mode_set(int fd);
 VPRIV bool driver_output_temporary_name(char *t, size_t cap, const char *f);
-VPRIV int write_file(const char *cwd, const char *path, const char *s, size_t n, int errfd);
-VPRIV int write_out(const char *cwd, const char *out, int outfd, const char *s, size_t n, int errfd);
+VPRIV int driver_output_file_write(const char *cwd, const char *path, const char *s, size_t n, int errfd);
+VPRIV int driver_output_write(const char *cwd, const char *out, int outfd, const char *s, size_t n, int errfd);
 VPRIV unsigned long long driver_clock_nanoseconds(void);
-VPRIV void obj_state(void);
+VPRIV void driver_object_state_acquire(void);
 VPRIV void driver_object_state_release(void);
 VPRIV int driver_object_write(const char *cwd, const char *out, int outfd, int errfd, int macho);
 VPRIV const char *driver_object_name(const char *main_file, char *buf, size_t cap);
@@ -144,7 +144,7 @@ VPRIV int driver_target_features_check(struct driver_job *job, int argc, char **
 /* input.c */
 VPRIV int driver_input_read(struct driver_job *job, const driver_environment *env);
 /* explain.c */
-VPRIV int explain(int argc, char **argv, const driver_environment *env);
+VPRIV int driver_explain_run(int argc, char **argv, const driver_environment *env);
 /* cmdline.c: 0 to go on, 1 to end the job (status set), 2 to return 1 at once (the -ftls-model= error) */
 VPRIV int driver_cmdline_parse(struct driver_job *job, int argc, char **argv);
 VPRIV int driver_cmdline_check(struct driver_job *job);

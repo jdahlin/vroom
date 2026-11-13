@@ -9,14 +9,14 @@
  */
 #include "vccd-internal.h"
 
-atomic_ulong vccd_probe_count, vccd_probe_compile_count, vccd_forward_count, vccd_spawn_count, vccd_preprocess_count, n_cc, vccd_failure_count, vccd_fallback_count, vccd_archive_count, vccd_link_count, vccd_host_count,
+atomic_ulong vccd_probe_count, vccd_probe_compile_count, vccd_forward_count, vccd_spawn_count, vccd_preprocess_count, vccd_compile_count, vccd_failure_count, vccd_fallback_count, vccd_archive_count, vccd_link_count, vccd_host_count,
 	vccd_objcopy_count, vccd_recipe_count, vccd_recipe_declined_count;
 VPRIV void vccd_counters_print(void)
 {
 	fprintf(stderr, "vccd: %lu probes (%lu compiled), %lu -E, %lu compiled by vcc, %lu failed, %lu fell back to clang, %lu host, "
 		"%lu forwarded in all, %lu spawned, %lu ar, %lu links, %lu nm/objcopy, %lu recipes run, %lu passed to sh; "
 		"%lu builds (cache flushes)\n",
-		atomic_load(&vccd_probe_count), atomic_load(&vccd_probe_compile_count), atomic_load(&vccd_preprocess_count), atomic_load(&n_cc), atomic_load(&vccd_failure_count),
+		atomic_load(&vccd_probe_count), atomic_load(&vccd_probe_compile_count), atomic_load(&vccd_preprocess_count), atomic_load(&vccd_compile_count), atomic_load(&vccd_failure_count),
 		atomic_load(&vccd_fallback_count), atomic_load(&vccd_host_count), atomic_load(&vccd_forward_count), atomic_load(&vccd_spawn_count),
 		atomic_load(&vccd_archive_count), atomic_load(&vccd_link_count), atomic_load(&vccd_objcopy_count),
 		atomic_load(&vccd_recipe_count), atomic_load(&vccd_recipe_declined_count), atomic_load(&vccd_flush_count));

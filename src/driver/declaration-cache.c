@@ -63,7 +63,7 @@ static struct driver_snapshot_root {
 	uint64_t sig;
 	driver_snapshot_node node;
 	struct driver_snapshot_root *next;
-} *_Atomic roots;
+} *_Atomic driver_snapshot_roots;
 
 static _Atomic uint64_t driver_snapshot_memory_used, driver_snapshot_memory_limit;
 static _Atomic unsigned long driver_snapshot_take_count, driver_snapshot_restore_count, driver_snapshot_region_count;
@@ -226,7 +226,7 @@ static bool driver_snapshot_memory_reserve(size_t n)
 	return m + n <= atomic_load_explicit(&driver_snapshot_memory_limit, memory_order_relaxed);
 }
 
-static void *dalloc(size_t n)
+static void *driver_snapshot_allocate(size_t n)
 {
 	void *p = malloc(n);
 
@@ -286,7 +286,7 @@ static driver_snapshot *driver_snapshot_take(const cc *c, const driver_snapshot_
 #undef ENC
 	if (k.bad)
 		return NULL;
-	s = dalloc(sizeof(*s));
+	s = driver_snapshot_allocate(sizeof(*s));
 	s->c = *c;
 	driver_snapshot_state_translate(&k, &s->c, true);
 	s->c.prevloc = driver_snapshot_location_encode(&k, c->prevloc);
@@ -301,7 +301,7 @@ static driver_snapshot *driver_snapshot_take(const cc *c, const driver_snapshot_
 			size_t np = (sz[a] + DRIVER_SNAPSHOT_PAGE_SIZE - 1) / DRIVER_SNAPSHOT_PAGE_SIZE;
 
 			s->a[a].n = sz[a];
-			s->a[a].pg = dalloc((np ? np : 1) * sizeof(char *));
+			s->a[a].pg = driver_snapshot_allocate((np ? np : 1) * sizeof(char *));
 			own += np * sizeof(char *);
 			for (size_t i = 0; i < np; i++) {
 				size_t len = sz[a] - i * DRIVER_SNAPSHOT_PAGE_SIZE < DRIVER_SNAPSHOT_PAGE_SIZE ? sz[a] - i * DRIVER_SNAPSHOT_PAGE_SIZE : DRIVER_SNAPSHOT_PAGE_SIZE;
@@ -312,7 +312,7 @@ static driver_snapshot *driver_snapshot_take(const cc *c, const driver_snapshot_
 					s->a[a].pg[i] = par->a[a].pg[i];
 					continue;
 				}
-				pg = dalloc(DRIVER_SNAPSHOT_PAGE_SIZE);
+				pg = driver_snapshot_allocate(DRIVER_SNAPSHOT_PAGE_SIZE);
 				memcpy(pg, src, len);
 				s->a[a].pg[i] = pg;
 				own += DRIVER_SNAPSHOT_PAGE_SIZE;
@@ -377,7 +377,7 @@ static void driver_snapshot_restore(cc *c, const driver_snapshot *s, uint32_t ba
 
 /* every option before outfd can change what a header parses to (cc.h), so all
    of them key the trie, plus emit (code generation keeps more per decl) */
-static uint64_t opt_sig(const cc_opts *o)
+static uint64_t driver_snapshot_options_signature(const cc_opts *o)
 {
 	const unsigned char *p = (const unsigned char *)o;
 	uint64_t h = 1469598103934665603ull;
@@ -392,20 +392,20 @@ static driver_snapshot_node *driver_snapshot_root_get(uint64_t sig)
 	struct driver_snapshot_root *r, *h;
 
 	for (;;) {
-		h = atomic_load_explicit(&roots, memory_order_acquire);
+		h = atomic_load_explicit(&driver_snapshot_roots, memory_order_acquire);
 		for (r = h; r; r = r->next)
 			if (r->sig == sig)
 				return &r->node;
 		r = calloc(1, sizeof(*r));
 		r->sig = sig;
 		r->next = h;
-		if (atomic_compare_exchange_strong_explicit(&roots, &h, r, memory_order_acq_rel, memory_order_acquire))
+		if (atomic_compare_exchange_strong_explicit(&driver_snapshot_roots, &h, r, memory_order_acq_rel, memory_order_acquire))
 			return &r->node;
 		free(r);
 	}
 }
 
-static driver_snapshot_node *child(driver_snapshot_node *n, const void *e, unsigned ctr, bool make)
+static driver_snapshot_node *driver_snapshot_node_child(driver_snapshot_node *n, const void *e, unsigned ctr, bool make)
 {
 	driver_snapshot_node *h, *x;
 
@@ -446,7 +446,7 @@ void driver_declaration_cache_begin(cc *c)
 	if (driver_snapshot_disabled)
 		return;
 	c->dc = calloc(1, sizeof(struct driver_declaration_cache_state));
-	c->dc->node = driver_snapshot_root_get(opt_sig(c->o));
+	c->dc->node = driver_snapshot_root_get(driver_snapshot_options_signature(c->o));
 }
 
 void driver_declaration_cache_end(cc *c)
@@ -467,7 +467,7 @@ void driver_declaration_cache_materialize(cc *c)
 	atomic_fetch_add_explicit(&driver_snapshot_restore_count, 1, memory_order_relaxed);
 }
 
-static void die(cc *c)
+static void driver_snapshot_mark_dead(cc *c)
 {
 	if (c->dc->stale)
 		driver_declaration_cache_materialize(c);
@@ -478,7 +478,7 @@ static void die(cc *c)
 void driver_declaration_cache_kill(cc *c)
 {
 	if (c->dc && !c->dc->dead)
-		die(c);
+		driver_snapshot_mark_dead(c);
 }
 
 void driver_declaration_cache_boundary_slow(cc *c)
@@ -491,7 +491,7 @@ void driver_declaration_cache_boundary_slow(cc *c)
 		uint64_t N = pp_token_count(c->p);
 
 		if (!ev || c->ntk != 1) {
-			die(c);
+			driver_snapshot_mark_dead(c);
 			return;
 		}
 		for (; d->ev < n; d->ev++) {
@@ -499,7 +499,7 @@ void driver_declaration_cache_boundary_slow(cc *c)
 
 			if (!E->end) {
 				if (d->is_open || E->pos != d->pos) {
-					die(c);
+					driver_snapshot_mark_dead(c);
 					return;
 				}
 				if (!d->node->parent)
@@ -510,12 +510,12 @@ void driver_declaration_cache_boundary_slow(cc *c)
 			}
 			/* a region ended: right before tk[0], or the chain is over */
 			if (!d->is_open || !E->e || E->pos + 1 != N) {
-				die(c);
+				driver_snapshot_mark_dead(c);
 				return;
 			}
 			d->is_open = false;
 			d->pos = E->pos;
-			d->node = child(d->node, E->e, d->open.ctr, true);
+			d->node = driver_snapshot_node_child(d->node, E->e, d->open.ctr, true);
 			atomic_fetch_add_explicit(&d->node->visits, 1, memory_order_relaxed);
 			if (!d->stale && !c->dr_on && atomic_load_explicit(&d->node->visits, memory_order_relaxed) >= 2 &&
 			    !atomic_load_explicit(&d->node->snap, memory_order_acquire) && !c->errors && !c->ndiag &&
@@ -530,7 +530,7 @@ void driver_declaration_cache_boundary_slow(cc *c)
 		}
 		/* tk[0] is the first token of a replayed region whose state is known: skip it */
 		if (d->is_open && d->open.hit && d->open.pos + 1 == N) {
-			driver_snapshot_node *x = child(d->node, d->open.e, d->open.ctr, false);
+			driver_snapshot_node *x = driver_snapshot_node_child(d->node, d->open.e, d->open.ctr, false);
 
 			if (x && atomic_load_explicit(&x->snap, memory_order_acquire) && pp_top_region_skip(c->p)) {
 				d->stale = true;

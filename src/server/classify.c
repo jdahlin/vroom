@@ -12,7 +12,7 @@
 #include "vccd-internal.h"
 
 /* -E on a named file or stdin: vcc's preprocessor handles it */
-VPRIV bool vccd_request_is_preprocess(const struct req *r)
+VPRIV bool vccd_request_is_preprocess(const struct vccd_request *r)
 {
 	bool e = false;
 	const char *last = r->argv[r->argc - 1];
@@ -24,7 +24,7 @@ VPRIV bool vccd_request_is_preprocess(const struct req *r)
 }
 /*
  * -c or -S of a named .c or .S file or of stdin (`-`) for aarch64 Linux: vcc
- * compiles it; on an arm64 Mac also a -c without --target (HOST_CC).  Not:
+ * compiles it; on an arm64 Mac also a -c without --target (VCCD_HOST_PROGRAMS_ENABLED).  Not:
  * -shared, anything with -x other than c/assembler-with-cpp.  The vDSO's
  * -mcmodel=tiny is vcc's too: its ADRP pairs are PC-relative as tiny's ADR
  * (larger code, no dynamic relocation).  stdin is read by the driver from the
@@ -46,7 +46,7 @@ static bool vccd_option_takes_value(const char *a)
 }
 
 /* the one input of a compile: a .c or .S file anywhere on the line or "-", NULL if none or several */
-VPRIV const char *vccd_request_input_find(const struct req *r)
+VPRIV const char *vccd_request_input_find(const struct vccd_request *r)
 {
 	const char *in = NULL;
 
@@ -74,12 +74,12 @@ VPRIV const char *vccd_request_input_find(const struct req *r)
 
 /* a host program's compile (no --target) is vcc's on an arm64 Mac, the target it defaults to */
 #if defined(__APPLE__) && defined(__aarch64__)
-#define HOST_CC 1
+#define VCCD_HOST_PROGRAMS_ENABLED 1
 #else
-#define HOST_CC 0
+#define VCCD_HOST_PROGRAMS_ENABLED 0
 #endif
 
-VPRIV bool vccd_request_is_compile(const struct req *r)
+VPRIV bool vccd_request_is_compile(const struct vccd_request *r)
 {
 	bool c = false, linux_target = false, target = false;
 
@@ -107,7 +107,7 @@ VPRIV bool vccd_request_is_compile(const struct req *r)
 		else if (vccd_option_takes_value(a))
 			i++;
 	}
-	return c && (linux_target || (HOST_CC && !target));
+	return c && (linux_target || (VCCD_HOST_PROGRAMS_ENABLED && !target));
 }
 
 /*
@@ -115,13 +115,13 @@ VPRIV bool vccd_request_is_compile(const struct req *r)
  * mk_elfconfig, ...): no -c, -S, -E, no target, an -o.  vcc compiles it to a
  * temporary object and the backend links that with the same options.
  */
-VPRIV bool vccd_request_is_host_link(const struct req *r)
+VPRIV bool vccd_request_is_host_link(const struct vccd_request *r)
 {
 	const char *in = vccd_request_input_find(r);
 	size_t n;
 	bool out = false;
 
-	if (!HOST_CC || !vccd_own_compiler || !in || !strcmp(in, "-") || (n = strlen(in)) < 3 || strcmp(in + n - 2, ".c"))
+	if (!VCCD_HOST_PROGRAMS_ENABLED || !vccd_own_compiler || !in || !strcmp(in, "-") || (n = strlen(in)) < 3 || strcmp(in + n - 2, ".c"))
 		return false;
 	for (int i = 1; i < r->argc; i++) {
 		const char *a = r->argv[i];
@@ -140,7 +140,7 @@ VPRIV bool vccd_request_is_host_link(const struct req *r)
 }
 
 /* VCC_DELEGATE: -c of a named .c file (the last argument), nothing vcc's driver would not do */
-VPRIV bool vccd_request_is_delegated_compile(const struct req *r, const char *skip)
+VPRIV bool vccd_request_is_delegated_compile(const struct vccd_request *r, const char *skip)
 {
 	const char *last = r->argv[r->argc - 1];
 	size_t n = strlen(last);

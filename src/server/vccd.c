@@ -61,7 +61,7 @@ const char *vccd_linker_backend;		/* links run this (vroom-ld), only if given */
 bool vccd_log_requests, vccd_own_preprocessor = true, vccd_own_compiler = true;
 char vccd_self_executable[4096];	/* our own binary (realpath), for a restart */
 uint64_t vccd_self_build_id;	/* vccd_build_id of our own binary */
-char tool_dir[4096];	/* where vccd and its shims live (realpath) */
+char vccd_tool_directory[4096];	/* where vccd and its shims live (realpath) */
 static bool vccd_peer_is_us(int c)
 {
 #ifdef __APPLE__
@@ -122,7 +122,7 @@ int main(int argc, char **argv)
 			vccd_self_build_id = vccd_build_id(self);
 			snprintf(vccd_self_executable, sizeof(vccd_self_executable), "%s", self);
 			*sl = 0;
-			snprintf(tool_dir, sizeof(tool_dir), "%s", self);
+			snprintf(vccd_tool_directory, sizeof(vccd_tool_directory), "%s", self);
 		}
 	}
 	/* without a backend vcc does all of it */
@@ -137,7 +137,7 @@ int main(int argc, char **argv)
 		}
 		sock = dsock;
 	}
-	vccd_restart_argc = argc, g_argv = argv, vccd_socket_path = sock;
+	vccd_restart_argc = argc, vccd_restart_argv = argv, vccd_socket_path = sock;
 	if (listen_fd >= 0) {	/* re-exec'ed after a memory restart: the same socket */
 		ls = vccd_listen_fd = listen_fd;
 		fcntl(ls, F_SETFD, FD_CLOEXEC);

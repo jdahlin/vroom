@@ -1,5 +1,5 @@
 /*
- * dispatch.c: which kind of request goes where.  handle() is the single entry every request passes,
+ * dispatch.c: which kind of request goes where.  vccd_request_handle() is the single entry every request passes,
  * both from a connection (worker.c) and from a recipe's tool call (recipe.c).
  *
  * The order of the tests in vccd_request_dispatch is the specification: the tool name first (sh, var/ar, nm,
@@ -7,15 +7,15 @@
  * --fix, --vccd-diagnostics), toolchain probes answered from capabilities.c, -E, host programs, and last the compiles, which vcc takes itself and, when a
  * backend is configured, falls back to it for a TU vcc fails on.  Each branch names its kind in
  * *kind (the log and the counters use it) and returns the exit status to send back; a branch that
- * needs the client's umask relies on handle() setting driver_client_umask from VCC_UMASK first.  Without
+ * needs the client's umask relies on vccd_request_handle() setting driver_client_umask from VCC_UMASK first.  Without
  * --backend-sock nothing is forwarded: a request vcc cannot do fails, with vcc's diagnostics.  A
- * compile that succeeded gets the fixdep step (vccd_compile_fixdep_after) in handle().
+ * compile that succeeded gets the fixdep step (vccd_compile_fixdep_after) in vccd_request_handle().
  */
 #include "vccd-internal.h"
 
-static int vccd_request_dispatch(const struct req *r, const char **kind);
+static int vccd_request_dispatch(const struct vccd_request *r, const char **kind);
 
-VPRIV int handle(const struct req *r, const char **kind)
+VPRIV int vccd_request_handle(const struct vccd_request *r, const char **kind)
 {
 	int status;
 
@@ -30,9 +30,9 @@ VPRIV int handle(const struct req *r, const char **kind)
 	return status;
 }
 
-VPRIV int vccd_recipe_run(const struct req *r);
+VPRIV int vccd_recipe_run(const struct vccd_request *r);
 
-static int vccd_request_dispatch(const struct req *r, const char **kind)
+static int vccd_request_dispatch(const struct vccd_request *r, const char **kind)
 {
 	int probe;
 
@@ -48,7 +48,7 @@ static int vccd_request_dispatch(const struct req *r, const char **kind)
 		const char *dg = vccd_request_environment_get(r, "VCC_DELEGATE");
 
 		if (dg && *dg)
-			return delegate(r, dg, kind);
+			return vccd_compile_delegate(r, dg, kind);
 	}
 	if (!strcmp(r->tool, "var") || !strcmp(r->tool, "ar") || !strcmp(r->tool, "llvm-ar")) {
 		/* the archiver: thin archives written here (ar.c), never llvm-ar */
@@ -77,14 +77,14 @@ static int vccd_request_dispatch(const struct req *r, const char **kind)
 			if (vccd_capabilities_ld_option_is_rejected(r->argv[i], i + 1 < r->argc ? r->argv[i + 1] : NULL)) {
 				*kind = "ld-reject";
 				atomic_fetch_add(&vccd_probe_count, 1);
-				say(r, "%s: error: unsupported option '%s'\n",
+				vccd_request_message_write(r, "%s: error: unsupported option '%s'\n",
 				    strcmp(r->argv[i], "-z") ? r->argv[i] : r->argv[i + 1]);
 				return 1;
 			}
 		if (vccd_linker_backend) {	/* --ld PROG */
 			atomic_fetch_add(&vccd_spawn_count, 1);
 			*kind = "ld-spawn";
-			return spawn(r, vccd_linker_backend);
+			return vccd_program_spawn(r, vccd_linker_backend);
 		}
 		/* links: vld (ld/ld.c) in this thread */
 		*kind = "ld";
@@ -127,7 +127,7 @@ static int vccd_request_dispatch(const struct req *r, const char **kind)
 			driver_environment e = { .cwd = r->cwd, .outfd = r->fds[1], .errfd = r->fds[2], .envp = r->envp, .infd = r->fds[0] };
 
 			*kind = r->argv[i][2] == 'e' ? "cc-explain" : "cc-fix";
-			atomic_fetch_add(&n_cc, 1);
+			atomic_fetch_add(&vccd_compile_count, 1);
 			return driver_job_run(r->argc, r->argv, &e);
 		}
 	if (r->argc == 2 && !strncmp(r->argv[1], "--vccd-diagnostics", 18) && (!r->argv[1][18] || r->argv[1][18] == '=')) {
@@ -200,7 +200,7 @@ static int vccd_request_dispatch(const struct req *r, const char **kind)
 				lv[ln++] = a == in ? tmp : r->argv[i];
 			}
 			lv[ln] = NULL;
-			atomic_fetch_add(&n_cc, 1);
+			atomic_fetch_add(&vccd_compile_count, 1);
 			atomic_fetch_add(&vccd_forward_count, 1);
 			*kind = "cc-link";
 			st = vccd_backend_forward_argv(r, ln, lv);
@@ -217,7 +217,7 @@ static int vccd_request_dispatch(const struct req *r, const char **kind)
 			fprintf(stderr, "vccd fallback to clang: %s\n", in);
 		*kind = "cc-fallbk";
 		atomic_fetch_add(&vccd_forward_count, 1);
-		return forward(r, vccd_backend_socket);
+		return vccd_backend_forward(r, vccd_backend_socket);
 	}
 plain:
 	if (vccd_request_is_compile(r) && !vccd_backend_socket) {
@@ -225,7 +225,7 @@ plain:
 		int status = vccd_compile_in_process(r, NULL, 0, true);
 
 		*kind = "cc-own";
-		atomic_fetch_add(status ? &vccd_failure_count : &n_cc, 1);
+		atomic_fetch_add(status ? &vccd_failure_count : &vccd_compile_count, 1);
 		return status;
 	}
 	if (vccd_request_is_compile(r)) {
@@ -238,14 +238,14 @@ plain:
 			/* read here: a fallback to clang needs the same bytes */
 			if (vccd_fd_read_all(r->fds[0], &src, &len)) {
 				free(src);
-				say(r, "%s: error: %s\n", "cannot read stdin");
+				vccd_request_message_write(r, "%s: error: %s\n", "cannot read stdin");
 				return 1;
 			}
 		}
 		if ((st = vccd_compile_in_process(r, src, len, false)) == 0) {
 			free(src);
 			*kind = "cc-own";
-			atomic_fetch_add(&n_cc, 1);
+			atomic_fetch_add(&vccd_compile_count, 1);
 			return 0;
 		}
 		atomic_fetch_add(&vccd_fallback_count, 1);
@@ -278,5 +278,5 @@ plain:
 		}
 	}
 	atomic_fetch_add(&vccd_forward_count, 1);
-	return forward(r, vccd_backend_socket);
+	return vccd_backend_forward(r, vccd_backend_socket);
 }

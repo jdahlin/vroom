@@ -18,7 +18,7 @@
 
 #include "capabilities.h"
 
-static bool in(const char *s, const char *const *list)
+static bool vccd_capabilities_list_contains(const char *s, const char *const *list)
 {
 	for (; *list; list++)
 		if (!strcmp(s, *list))
@@ -26,7 +26,7 @@ static bool in(const char *s, const char *const *list)
 	return false;
 }
 
-static bool prefix(const char *s, const char *p)
+static bool vccd_capabilities_has_prefix(const char *s, const char *p)
 {
 	return !strncmp(s, p, strlen(p));
 }
@@ -85,14 +85,14 @@ static bool vccd_capabilities_as_option_is_ok(const char *o, size_t n)
 		return false;
 	memcpy(tmp, o, n);
 	tmp[n] = 0;
-	return in(tmp, ok) || prefix(tmp, "-march=armv8") || prefix(tmp, "-march=armv9");
+	return vccd_capabilities_list_contains(tmp, ok) || vccd_capabilities_has_prefix(tmp, "-march=armv8") || vccd_capabilities_has_prefix(tmp, "-march=armv9");
 }
 
 static const char *const vccd_capabilities_warning_groups[] = {
 #include "warnings.inc"
 };
 
-static int cmp_str(const void *k, const void *e)
+static int vccd_capabilities_string_compare(const void *k, const void *e)
 {
 	return strcmp(k, *(const char *const *)e);
 }
@@ -119,20 +119,20 @@ static bool vccd_capabilities_warning_is_ok(const char *a)
 	memcpy(name, s, n);
 	name[n] = 0;
 	return bsearch(name, vccd_capabilities_warning_groups, sizeof(vccd_capabilities_warning_groups) / sizeof(vccd_capabilities_warning_groups[0]),
-		       sizeof(vccd_capabilities_warning_groups[0]), cmp_str) != NULL;
+		       sizeof(vccd_capabilities_warning_groups[0]), vccd_capabilities_string_compare) != NULL;
 }
 
 int vccd_capabilities_cc_option_arity(const char *a, const char *next, const char **why)
 {
 	*why = a;
-	if (in(a, vccd_capabilities_cc_with_argument))
+	if (vccd_capabilities_list_contains(a, vccd_capabilities_cc_with_argument))
 		return next ? 2 : 0;
-	if (in(a, vccd_capabilities_cc_exact))
+	if (vccd_capabilities_list_contains(a, vccd_capabilities_cc_exact))
 		return 1;
 	for (const char *const *p = vccd_capabilities_cc_prefix; *p; p++)
-		if (prefix(a, *p))
+		if (vccd_capabilities_has_prefix(a, *p))
 			return 1;
-	if (prefix(a, "-Wa,")) {
+	if (vccd_capabilities_has_prefix(a, "-Wa,")) {
 		const char *s = a + 4;
 
 		while (*s) {
@@ -146,7 +146,7 @@ int vccd_capabilities_cc_option_arity(const char *a, const char *next, const cha
 		return 1;
 	}
 	/* warning options: diagnostics only, but must name a known group */
-	if (a[0] == '-' && a[1] == 'W' && !prefix(a, "-Wl,") && !prefix(a, "-Wp,"))
+	if (a[0] == '-' && a[1] == 'W' && !vccd_capabilities_has_prefix(a, "-Wl,") && !vccd_capabilities_has_prefix(a, "-Wp,"))
 		return vccd_capabilities_warning_is_ok(a);
 	return 0;
 }
@@ -162,7 +162,7 @@ static const char *const vccd_capabilities_ld_exact[] = {
 int vccd_capabilities_ld_option_is_accepted(const char *a, const char **why)
 {
 	*why = a;
-	return in(a, vccd_capabilities_ld_exact);
+	return vccd_capabilities_list_contains(a, vccd_capabilities_ld_exact);
 }
 
 /*
@@ -190,7 +190,7 @@ const bool vccd_capabilities_can_link = false;
  */
 bool vccd_capabilities_ld_option_is_rejected(const char *a, const char *next)
 {
-	return prefix(a, "--pack-dyn-relocs=") || !strcmp(a, "-zpack-relative-relocs") ||
+	return vccd_capabilities_has_prefix(a, "--pack-dyn-relocs=") || !strcmp(a, "-zpack-relative-relocs") ||
 	       (!strcmp(a, "-z") && next && !strcmp(next, "pack-relative-relocs"));
 }
 
@@ -228,7 +228,7 @@ static const struct vccd_capabilities_probe_source vccd_capabilities_c_sources[]
 	{ NULL, false }
 };
 
-static int lookup(const struct vccd_capabilities_probe_source *t, const char *src, size_t n)
+static int vccd_capabilities_probe_lookup(const struct vccd_capabilities_probe_source *t, const char *src, size_t n)
 {
 	while (n && src[n - 1] == '\n')
 		n--;
@@ -240,12 +240,12 @@ static int lookup(const struct vccd_capabilities_probe_source *t, const char *sr
 
 int vccd_capabilities_as_source_probe(const char *src, size_t n)
 {
-	return lookup(vccd_capabilities_as_sources, src, n);
+	return vccd_capabilities_probe_lookup(vccd_capabilities_as_sources, src, n);
 }
 
 int vccd_capabilities_c_source_probe(const char *src, size_t n)
 {
-	return lookup(vccd_capabilities_c_sources, src, n);
+	return vccd_capabilities_probe_lookup(vccd_capabilities_c_sources, src, n);
 }
 
 /* macros vcc predefines (with a value of its own) */

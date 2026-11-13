@@ -19,7 +19,7 @@
  */
 #include "driver-internal.h"
 
-static double now(void)
+static double driver_clock_seconds(void)
 {
 	struct timespec ts;
 
@@ -47,7 +47,7 @@ static void driver_source_assemble(struct driver_job *job, const driver_environm
 		char path[4096];
 		const char *msg;
 
-		obj_state();
+		driver_object_state_acquire();
 		if (!job->out)
 			job->out = driver_object_name(job->main_file, job->objbuf, sizeof(job->objbuf));
 		snprintf(path, sizeof(path), "%s%s%s", job->main_file[0] == '/' || !env->cwd ? "" : env->cwd,
@@ -118,12 +118,12 @@ static void driver_job_pp_options_finish(struct driver_job *job, const driver_en
 {
 	job->po.markers = job->nomarkers || job->cmp || !job->po.fatal_continue || job->dmacros ? 0 : job->undef ? 2 : 1;
 	job->po.predef_cmdl = (unsigned)job->pre.n;
-	if (job->cmdl.n) bput(&job->pre, job->cmdl.p, job->cmdl.n);
+	if (job->cmdl.n) driver_buffer_append(&job->pre, job->cmdl.p, job->cmdl.n);
 	job->po.predef_incl = (unsigned)job->pre.n;
-	if (job->imac.n) bput(&job->pre, job->imac.p, job->imac.n);
-	if (job->incl.n) bput(&job->pre, job->incl.p, job->incl.n);
+	if (job->imac.n) driver_buffer_append(&job->pre, job->imac.p, job->imac.n);
+	if (job->incl.n) driver_buffer_append(&job->pre, job->incl.p, job->incl.n);
 	job->po.imacros = job->imac.n != 0;
-	bput(&job->pre, "", 1);
+	driver_buffer_append(&job->pre, "", 1);
 	job->po.predef = job->pre.p;
 	job->po.main = job->stdin_src ? "<stdin>" : job->main_file;
 	job->po.main_src = job->stdin_src, job->po.main_len = job->stdin_len;
@@ -236,20 +236,20 @@ static void driver_job_compile(struct driver_job *job, pp *p, const driver_envir
 				unlink(outtmp);
 		}
 		if (!job->status && job->emit == 2 && PP_IS_WASM(job->po.target))
-			job->status = write_out(env->cwd, job->out, env->outfd, driver_wasm_object.p, driver_wasm_object.n, job->errfd);
+			job->status = driver_output_write(env->cwd, job->out, env->outfd, driver_wasm_object.p, driver_wasm_object.n, job->errfd);
 		else if (!job->status && job->emit == 2)
 			job->status = driver_object_write(env->cwd, job->out, env->outfd, job->errfd, job->darwin);
 		if (!job->status && job->emit && job->depfile)	/* -S and -c */
 			job->status = driver_depfile_write(p, env->cwd, job->depfile, job->dtarget, job->dnosys, job->mphony, job->dfirst, NULL, -1, job->errfd);
 		if (getenv("VPP_TIME"))
-			dprintf(job->errfd, "vcc: %.1f ms\n", (now() - job->t0) * 1e3);
+			dprintf(job->errfd, "vcc: %.1f ms\n", (driver_clock_seconds() - job->t0) * 1e3);
 		return;
 }
 
 /* -E, -dM, -M, and -c of preprocessed assembler */
 static void driver_job_preprocess(struct driver_job *job, pp *p, const driver_environment *env)
 {
-	buf o = { 0 };
+	driver_buffer o = { 0 };
 
 	{
 		const char *s;
@@ -270,13 +270,13 @@ static void driver_job_preprocess(struct driver_job *job, pp *p, const driver_en
 		extern _Atomic unsigned long pp_include_lookup_count, pp_include_guard_skip_count, pp_directory_probe_count;
 
 		dprintf(job->errfd, "vpp: %.1f ms, %zu bytes out; include candidates %lu, %lu ruled out by the directory cache (%lu dirs probed)\n",
-			(now() - job->t0) * 1e3, o.n, atomic_load(&pp_include_lookup_count), atomic_load(&pp_include_guard_skip_count),
+			(driver_clock_seconds() - job->t0) * 1e3, o.n, atomic_load(&pp_include_lookup_count), atomic_load(&pp_include_guard_skip_count),
 			atomic_load(&pp_directory_probe_count));
 	}
 	if (pp_error_count(p)) {
 		/* clang: -E to stdout still prints the text; with -o it writes no file */
 		if (!job->cmp && !job->objmode && !job->mdeps && (!job->out || !strcmp(job->out, "-")))	/* -M: nothing */
-			write_out(env->cwd, job->out, env->outfd, o.p, o.n, job->errfd);
+			driver_output_write(env->cwd, job->out, env->outfd, o.p, o.n, job->errfd);
 		job->status = 1;
 	} else if (job->cmp) {
 		job->status = driver_tokens_compare(o.p, o.n, job->cmp);
@@ -303,7 +303,7 @@ static void driver_job_preprocess(struct driver_job *job, pp *p, const driver_en
 		if (job->mdeps)
 			job->status = driver_depfile_write(p, env->cwd, job->depfile, job->dtarget, job->dnosys, job->mphony, job->dfirst, job->out, env->outfd, job->errfd);
 		else
-			job->status = write_out(env->cwd, job->out, env->outfd, o.p, o.n, job->errfd);
+			job->status = driver_output_write(env->cwd, job->out, env->outfd, o.p, o.n, job->errfd);
 		if (!job->status && job->depfile && !job->mdeps)
 			job->status = driver_depfile_write(p, env->cwd, job->depfile, job->dtarget, job->dnosys, job->mphony, job->dfirst, NULL, -1, job->errfd);
 	}
@@ -314,7 +314,7 @@ static __attribute__((noinline)) int driver_job_run_one(int argc, char **argv, c
 /* (--explain apart: a call at the top of driver_job_run_one costs its token loop registers) */
 int driver_job_run(int argc, char **argv, const driver_environment *env)
 {
-	int x = explain(argc, argv, env);
+	int x = driver_explain_run(argc, argv, env);
 
 	return x >= 0 ? x : driver_job_run_one(argc, argv, env);
 }
@@ -368,7 +368,7 @@ static __attribute__((noinline)) int driver_job_run_one(int argc, char **argv, c
 		goto out;
 	}
 	if (job->objmode) {
-		obj_state();
+		driver_object_state_acquire();
 		if (!job->out)
 			job->out = driver_object_name(job->main_file, job->objbuf, sizeof(job->objbuf));
 		if (!job->asm_mode) {
@@ -391,7 +391,7 @@ static __attribute__((noinline)) int driver_job_run_one(int argc, char **argv, c
 	driver_predef_build(job);
 	driver_job_pp_options_finish(job, env, argc, argv);
 
-	job->t0 = now();
+	job->t0 = driver_clock_seconds();
 	{	/* pp_open lexes the main file: a full identifier table there ends the job too
 		   (the pp it was opening is lost: a leak, as rare as the table filling) */
 		static _Thread_local jmp_buf jo;

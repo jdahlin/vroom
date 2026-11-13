@@ -41,19 +41,19 @@
 #include "driver/driver.h"
 #include "port/task.h"
 
-typedef struct job {
+typedef struct vpp_job {
 	char **av;
 	int ac;
 	int status;
 	double ms;
 	vperf all, ph[DRIVER_PHASE_COUNT];
-} job;
+} vpp_job;
 
-static job *jobs;
-static int njobs, vpp_compare_mode, vpp_warmup;
-static const char *bdir;
+static vpp_job *vpp_jobs;
+static int vpp_job_count, vpp_compare_mode, vpp_warmup;
+static const char *vpp_batch_directory;
 
-static double now(void)
+static double vpp_clock_seconds(void)
 {
 	struct timespec ts;
 
@@ -61,23 +61,23 @@ static double now(void)
 	return ts.tv_sec + ts.tv_nsec * 1e-9;
 }
 
-static int nul = -1;	/* /dev/null: the jobs' output and (without VPP_BATCH_ERR) diagnostics */
+static int vpp_null_fd = -1;	/* /dev/null: the jobs' output and (without VPP_BATCH_ERR) diagnostics */
 
 /* one TU of the batch, on whichever thread of the pool takes it */
 static void vpp_job_run(void *arg, size_t k)
 {
-	job *j = &jobs[k];
-	driver_environment e = { .cwd = bdir, .outfd = nul, .errfd = getenv("VPP_BATCH_ERR") ? 2 : nul };
+	vpp_job *j = &vpp_jobs[k];
+	driver_environment e = { .cwd = vpp_batch_directory, .outfd = vpp_null_fd, .errfd = getenv("VPP_BATCH_ERR") ? 2 : vpp_null_fd };
 	vperf v0, ph0[DRIVER_PHASE_COUNT];
 	double t0;
 
 	(void)arg;
 	memcpy(ph0, driver_phase_counters, sizeof(ph0));	/* (per thread: the job's own work is the delta) */
-	t0 = now();
+	t0 = vpp_clock_seconds();
 	v0 = vperformance_now();
 	j->status = driver_job_run(j->ac, j->av, &e);
 	j->all = vperformance_subtract(vperformance_now(), v0);
-	j->ms = (now() - t0) * 1e3;
+	j->ms = (vpp_clock_seconds() - t0) * 1e3;
 	for (int i = 0; i < DRIVER_PHASE_COUNT; i++)
 		j->ph[i] = vperformance_subtract(driver_phase_counters[i], ph0[i]);
 }
@@ -88,10 +88,10 @@ static void vpp_job_run(void *arg, size_t k)
    budget, so they only run when TUs leave threads idle */
 static void vpp_pass_run(int nthr)
 {
-	vtask_parallel_for((size_t)njobs, nthr, vpp_job_run, NULL, 0);
+	vtask_parallel_for((size_t)vpp_job_count, nthr, vpp_job_run, NULL, 0);
 }
 
-static int batch(const char *file, int nthr, const char *statsf)
+static int vpp_batch_run(const char *file, int nthr, const char *statsf)
 {
 	int fd = open(file, O_RDONLY);
 	struct stat st;
@@ -110,13 +110,13 @@ static int batch(const char *file, int nthr, const char *statsf)
 	s[st.st_size] = 0;
 	close(fd);
 	for (char *c = s; *c; c++)
-		njobs += *c == '\n';
-	jobs = calloc((size_t)njobs, sizeof(*jobs));
-	njobs = 0;
+		vpp_job_count += *c == '\n';
+	vpp_jobs = calloc((size_t)vpp_job_count, sizeof(*vpp_jobs));
+	vpp_job_count = 0;
 	for (char *l = s; *l; l = e + 1) {
 		int n = 1;
 		char *ref, *c;
-		job *j;
+		vpp_job *j;
 
 		e = strchr(l, '\n');
 		if (!e)
@@ -124,7 +124,7 @@ static int batch(const char *file, int nthr, const char *statsf)
 		*e = 0;
 		for (c = l; *c; c++)
 			n += *c == 0x1f;
-		j = &jobs[njobs++];
+		j = &vpp_jobs[vpp_job_count++];
 		j->av = calloc((size_t)n + 5, sizeof(char *));
 		ref = strsep(&l, "\x1f");
 		j->av[j->ac++] = "vpp";
@@ -143,23 +143,23 @@ static int batch(const char *file, int nthr, const char *statsf)
 	if (nthr < 1)
 		nthr = 1;
 	vtask_budget_set(nthr);
-	nul = open("/dev/null", O_WRONLY);
+	vpp_null_fd = open("/dev/null", O_WRONLY);
 	for (int w = 0; w < vpp_warmup; w++)
 		vpp_pass_run(nthr);
-	t0 = now();
+	t0 = vpp_clock_seconds();
 	vpp_pass_run(nthr);
-	wall = now() - t0;
-	for (int i = 0; i < njobs; i++) {
-		sum += jobs[i].ms;
-		tot.ins += jobs[i].all.ins;
-		tot.cyc += jobs[i].all.cyc;
+	wall = vpp_clock_seconds() - t0;
+	for (int i = 0; i < vpp_job_count; i++) {
+		sum += vpp_jobs[i].ms;
+		tot.ins += vpp_jobs[i].all.ins;
+		tot.cyc += vpp_jobs[i].all.cyc;
 		for (int k = 0; k < DRIVER_PHASE_COUNT; k++) {
-			ph[k].ins += jobs[i].ph[k].ins;
-			ph[k].cyc += jobs[i].ph[k].cyc;
+			ph[k].ins += vpp_jobs[i].ph[k].ins;
+			ph[k].cyc += vpp_jobs[i].ph[k].cyc;
 		}
-		if (jobs[i].status) {
+		if (vpp_jobs[i].status) {
 			if (bad++ < 10)
-				fprintf(stderr, "failed: %s\n", jobs[i].av[jobs[i].ac - 1]);
+				fprintf(stderr, "failed: %s\n", vpp_jobs[i].av[vpp_jobs[i].ac - 1]);
 		}
 	}
 	{
@@ -186,7 +186,7 @@ static int batch(const char *file, int nthr, const char *statsf)
 		struct rusage ru;
 
 		getrusage(RUSAGE_SELF, &ru);
-		printf("%d/%d ok; wall %.0f ms on %d threads, job sum %.0f ms; cpu user %.2f s sys %.2f s\n", njobs - bad, njobs,
+		printf("%d/%d ok; wall %.0f ms on %d threads, job sum %.0f ms; cpu user %.2f s sys %.2f s\n", vpp_job_count - bad, vpp_job_count,
 		       wall * 1e3, nthr, sum, ru.ru_utime.tv_sec + ru.ru_utime.tv_usec * 1e-6, ru.ru_stime.tv_sec + ru.ru_stime.tv_usec * 1e-6);
 		printf("perf: %llu instructions, %llu cycles (jobs); cc_run %llu, emit %llu, obj %llu instructions; emit %llu cycles\n",
 		       (unsigned long long)tot.ins, (unsigned long long)tot.cyc, (unsigned long long)ph[DRIVER_PHASE_COMPILE].ins,
@@ -206,8 +206,8 @@ static int batch(const char *file, int nthr, const char *statsf)
 			perror(statsf);
 			return 2;
 		}
-		for (int i = 0; i < njobs; i++) {
-			job *j = &jobs[i];
+		for (int i = 0; i < vpp_job_count; i++) {
+			vpp_job *j = &vpp_jobs[i];
 			const char *mf = j->av[j->ac - 1];
 
 			for (int k = j->ac - 1; k > 0; k--)
@@ -246,7 +246,7 @@ int main(int argc, char **argv)
 			if (!strcmp(argv[i], "-j") && i + 1 < argc)
 				nthr = atoi(argv[++i]);
 			else if (!strcmp(argv[i], "-C") && i + 1 < argc)
-				bdir = argv[++i];
+				vpp_batch_directory = argv[++i];
 			else if (!strcmp(argv[i], "--cmp"))
 				vpp_compare_mode = 1;
 			else if (!strcmp(argv[i], "--warm") && i + 1 < argc)
@@ -254,7 +254,7 @@ int main(int argc, char **argv)
 			else if (!strcmp(argv[i], "--stats") && i + 1 < argc)
 				statsf = argv[++i];
 		}
-		return batch(argv[2], nthr, statsf);
+		return vpp_batch_run(argv[2], nthr, statsf);
 	}
 
 	for (int r = w ? atoi(w) : 0; r > 0; r--) {

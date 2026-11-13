@@ -6,14 +6,14 @@
  * file gets the client's umask (driver_client_umask, set by the vccd dispatcher) and a job whose client has
  * gone (driver_client_connection closed) writes nothing.  The object state (assembler, ElfObj, 4 GB reserved output
  * buffer) is expensive to build, so a thread takes one from a locked free list at the start of a -c
- * job (obj_state) and returns it at the end (driver_object_state_release); driver_assembler, driver_object and driver_object_buffer are valid in
+ * job (driver_object_state_acquire) and returns it at the end (driver_object_state_release); driver_assembler, driver_object and driver_object_buffer are valid in
  * between only.  driver_object_write lays out the object (ELF, or Mach-O for Darwin targets) and writes it
  * with one write.  Failures are reported on the job's error fd and returned as 1.
  */
 #include "driver-internal.h"
 
 /* path relative to cwd (if set) */
-VPRIV const char *at(const char *cwd, const char *path, char *buf, size_t cap)
+VPRIV const char *driver_path_resolve(const char *cwd, const char *path, char *buf, size_t cap)
 {
 	if (!cwd || path[0] == '/')
 		return path;
@@ -21,7 +21,7 @@ VPRIV const char *at(const char *cwd, const char *path, char *buf, size_t cap)
 	return buf;
 }
 
-VPRIV int write_all(int fd, const char *p, size_t n)
+VPRIV int driver_output_write_all(int fd, const char *p, size_t n)
 {
 	while (n) {
 		ssize_t w = write(fd, p, n);
@@ -72,10 +72,10 @@ VPRIV bool driver_output_temporary_name(char *t, size_t cap, const char *f)
 	return true;
 }
 
-VPRIV int write_file(const char *cwd, const char *path, const char *s, size_t n, int errfd)
+VPRIV int driver_output_file_write(const char *cwd, const char *path, const char *s, size_t n, int errfd)
 {
 	char b[8192], t[8300];
-	const char *f = at(cwd, path, b, sizeof(b));
+	const char *f = driver_path_resolve(cwd, path, b, sizeof(b));
 	int fd;
 
 	bool tmp = driver_output_temporary_name(t, sizeof(t), f);
@@ -88,7 +88,7 @@ VPRIV int write_file(const char *cwd, const char *path, const char *s, size_t n,
 	fd = open(t, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0666);
 	if (fd >= 0 && tmp)
 		driver_output_mode_set(fd);
-	if (fd < 0 || write_all(fd, s, n) || close(fd) || (tmp && rename(t, f))) {
+	if (fd < 0 || driver_output_write_all(fd, s, n) || close(fd) || (tmp && rename(t, f))) {
 		int e = errno;
 
 		dprintf(errfd, "vcc: error: cannot write %s: %s\n", path, strerror(e));
@@ -99,11 +99,11 @@ VPRIV int write_file(const char *cwd, const char *path, const char *s, size_t n,
 	return 0;
 }
 
-VPRIV int write_out(const char *cwd, const char *out, int outfd, const char *s, size_t n, int errfd)
+VPRIV int driver_output_write(const char *cwd, const char *out, int outfd, const char *s, size_t n, int errfd)
 {
 	if (out && strcmp(out, "-"))
-		return write_file(cwd, out, s, n, errfd);
-	return write_all(outfd, s, n) ? 1 : 0;
+		return driver_output_file_write(cwd, out, s, n, errfd);
+	return driver_output_write_all(outfd, s, n) ? 1 : 0;
 }
 
 /* phase times over all -c jobs (ns): front end + codegen, assembler, finish + write */
@@ -135,7 +135,7 @@ static _Thread_local struct driver_object_state *driver_object_state_current;
 static pthread_mutex_t driver_object_state_lock = PTHREAD_MUTEX_INITIALIZER;
 
 
-VPRIV void obj_state(void)
+VPRIV void driver_object_state_acquire(void)
 {
 	struct driver_object_state *s;
 
@@ -200,7 +200,7 @@ VPRIV int driver_object_write(const char *cwd, const char *out, int outfd, int e
 		macho_emit(driver_object, driver_object_buffer);
 	else
 		elf_emit(driver_object, driver_object_buffer);
-	r = write_out(cwd, out, outfd, (const char *)driver_object_buffer, n, errfd);
+	r = driver_output_write(cwd, out, outfd, (const char *)driver_object_buffer, n, errfd);
 	driver_object_nanoseconds += driver_clock_nanoseconds() - t0;
 	driver_phase_add(DRIVER_PHASE_OBJECT, v0);
 	driver_object_bytes += n;

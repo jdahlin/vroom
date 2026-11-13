@@ -42,10 +42,10 @@
 
 extern char **environ;
 
-static char buf[sizeof(struct vccd_request_header) + VCCD_PROTOCOL_PAYLOAD_MAX];
+static char shim_request_buffer[sizeof(struct vccd_request_header) + VCCD_PROTOCOL_PAYLOAD_MAX];
 
 #ifdef VSH
-static char **g_argv;
+static char **shim_argv;
 
 /* the real shell, in this process: nothing has been written or run yet */
 static void shim_real_shell_exec(void)
@@ -54,25 +54,25 @@ static void shim_real_shell_exec(void)
 
 	if (!sh)
 		sh = "/bin/sh";
-	g_argv[0] = (char *)sh;
-	execv(sh, g_argv);
+	shim_argv[0] = (char *)sh;
+	execv(sh, shim_argv);
 	(void)!write(2, "vsh: cannot run the real shell\n", 31);
 	_exit(127);
 }
 #endif
 
-static void die(const char *msg)
+static void shim_die(const char *msg)
 {
 	(void)!write(2, msg, strlen(msg));
 	_exit(127);
 }
 
-static char *put(char *p, const char *s)
+static char *shim_string_append(char *p, const char *s)
 {
 	size_t n = strlen(s) + 1;
 
-	if (p + n > buf + sizeof(buf))
-		die("vcc: request too large\n");
+	if (p + n > shim_request_buffer + sizeof(shim_request_buffer))
+		shim_die("vcc: request too large\n");
 	memcpy(p, s, n);
 	return p + n;
 }
@@ -103,7 +103,7 @@ static int shim_vccd_path_find(char *v, size_t cap)
 #ifndef VSH
 /* no server on the default socket: start one (under a lock, detached, its
  * log in the socket's directory) and wait up to 5 s for it to listen */
-static int autostart(const char *dir, const struct sockaddr_un *sa)
+static int shim_vccd_start(const char *dir, const struct sockaddr_un *sa)
 {
 	char v[4200], lk[1200], lg[1200];
 	char *av[4];
@@ -154,8 +154,8 @@ int main(int argc, char **argv)
 {
 	const char *path = getenv("VCC_SOCK");
 	struct sockaddr_un sa = { .sun_family = AF_UNIX };
-	struct vccd_request_header *h = (struct vccd_request_header *)buf;
-	char *p = buf + sizeof(*h);
+	struct vccd_request_header *h = (struct vccd_request_header *)shim_request_buffer;
+	char *p = shim_request_buffer + sizeof(*h);
 	int fds[3] = { 0, 1, 2 };
 	char cbuf[CMSG_SPACE(sizeof(fds))];
 	struct iovec iov;
@@ -168,7 +168,7 @@ int main(int argc, char **argv)
 	int s, i;
 
 #ifdef VSH
-	g_argv = argv;
+	shim_argv = argv;
 	if (argc != 3 || (strcmp(argv[1], "-c") && strcmp(argv[1], "-ec")))
 		shim_real_shell_exec();
 #endif
@@ -187,7 +187,7 @@ int main(int argc, char **argv)
 #ifdef VSH
 			shim_real_shell_exec();
 #endif
-			die("vcc: no private vccd directory (set VCC_SOCK or start vccd)\n");
+			shim_die("vcc: no private vccd directory (set VCC_SOCK or start vccd)\n");
 		}
 		path = dsock;
 	}
@@ -199,25 +199,25 @@ int main(int argc, char **argv)
 #else
 		if (s >= 0)
 			close(s);
-		if (!deflt || (s = autostart(ddir, &sa)) < 0)
-			die("vcc: cannot connect to vccd (VCC_SOCK)\n");
+		if (!deflt || (s = shim_vccd_start(ddir, &sa)) < 0)
+			shim_die("vcc: cannot connect to vccd (VCC_SOCK)\n");
 #endif
 	}
 
 	if (!getcwd(p, VCCD_PROTOCOL_PAYLOAD_MAX))
-		die("vcc: getcwd failed\n");
+		shim_die("vcc: getcwd failed\n");
 	p += strlen(p) + 1;
 	for (i = 0; i < argc; i++)
-		p = put(p, argv[i]);
+		p = shim_string_append(p, argv[i]);
 	for (e = environ; *e; e++)
-		p = put(p, *e);
+		p = shim_string_append(p, *e);
 	{	/* the client's umask, for files the server creates (last: it wins) */
 		char um[16] = "VCC_UMASK=";
 		mode_t m = umask(0);
 
 		umask(m);
 		um[10] = (char)('0' + (m >> 6 & 7)), um[11] = (char)('0' + (m >> 3 & 7)), um[12] = (char)('0' + (m & 7));
-		p = put(p, um);
+		p = shim_string_append(p, um);
 	}
 
 	{	/* the vccd next to this binary gives the build id */
@@ -230,14 +230,14 @@ int main(int argc, char **argv)
 	h->magic = VCCD_PROTOCOL_MAGIC;
 	h->argc = argc;
 	h->envc = e - environ + 1;
-	h->payload_len = p - (buf + sizeof(*h));
+	h->payload_len = p - (shim_request_buffer + sizeof(*h));
 
 	/* VCCD_STATUS_RETRY: the server restarts itself (memory) and has not run
 	   the request; it listens again on the same socket in a moment */
 	for (int tries = 0;; tries++) {
 		memset(cbuf, 0, sizeof(cbuf));
-		iov.iov_base = buf;
-		iov.iov_len = p - buf;
+		iov.iov_base = shim_request_buffer;
+		iov.iov_len = p - shim_request_buffer;
 		m.msg_iov = &iov;
 		m.msg_iovlen = 1;
 		m.msg_control = cbuf;
@@ -266,9 +266,9 @@ int main(int argc, char **argv)
 			n = sendmsg(s, &m, SHIM_SEND_NOSIGNAL);
 		while (n < 0 && errno == EINTR);
 		if (n < 0 && errno != EPIPE && errno != ECONNRESET)
-			die("vcc: sendmsg failed\n");
+			shim_die("vcc: sendmsg failed\n");
 		for (off = n < 0 ? iov.iov_len : (size_t)n; off < iov.iov_len; off += n) {
-			n = send(s, buf + off, iov.iov_len - off, SHIM_SEND_NOSIGNAL);
+			n = send(s, shim_request_buffer + off, iov.iov_len - off, SHIM_SEND_NOSIGNAL);
 			if (n < 0 && errno == EINTR) {
 				n = 0;
 				continue;
@@ -276,7 +276,7 @@ int main(int argc, char **argv)
 			if (n < 0 && (errno == EPIPE || errno == ECONNRESET))
 				break;	/* the status says whether to retry */
 			if (n <= 0)
-				die("vcc: write failed\n");
+				shim_die("vcc: write failed\n");
 		}
 
 		for (got = 0; got < sizeof(status); got += n) {
@@ -286,7 +286,7 @@ int main(int argc, char **argv)
 				continue;
 			}
 			if (n <= 0)
-				die("vcc: server closed the connection\n");
+				shim_die("vcc: server closed the connection\n");
 		}
 		if (status != (int32_t)VCCD_STATUS_RETRY || tries == 20)
 			break;
@@ -301,10 +301,10 @@ int main(int argc, char **argv)
 			usleep(10000);
 		}
 		if (s < 0)
-			die("vcc: vccd did not come back after restarting\n");
+			shim_die("vcc: vccd did not come back after restarting\n");
 	}
 	if (status == (int32_t)VCCD_STATUS_MISMATCH)
-		die("vcc: vccd runs another build of vcc than this shim; restart it\n");
+		shim_die("vcc: vccd runs another build of vcc than this shim; restart it\n");
 #ifdef VSH
 	if (status == (int32_t)VCCD_STATUS_DECLINE) {
 		close(s);

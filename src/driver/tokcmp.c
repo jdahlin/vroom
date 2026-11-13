@@ -44,7 +44,7 @@ static void driver_tokens_lex_free(lex_file *f)
 	munmap((void *)f->tok, (f->size + 2) * sizeof(lex_token));
 }
 
-static size_t clean(const lex_file *f, const lex_token *t, char *b)
+static size_t driver_tokens_spelling_get(const lex_file *f, const lex_token *t, char *b)
 {
 	if (t->flags & LEX_TOKEN_FLAG_SPLICED)
 		return lex_token_spell(f->src, t, b);
@@ -52,7 +52,7 @@ static size_t clean(const lex_file *f, const lex_token *t, char *b)
 	return t->len;
 }
 
-static unsigned line_of(const lex_file *f, uint32_t off)
+static unsigned driver_tokens_line_number(const lex_file *f, uint32_t off)
 {
 	unsigned l = 1;
 
@@ -61,14 +61,14 @@ static unsigned line_of(const lex_file *f, uint32_t off)
 	return l;
 }
 
-static void show(const char *what, const lex_file *f, uint32_t i)
+static void driver_tokens_context_print(const char *what, const lex_file *f, uint32_t i)
 {
 	uint32_t a = i > 12 ? i - 12 : 0, e = i + 12 < f->ntok ? i + 12 : f->ntok;
 	char b[1 << 16];
 
-	fprintf(stderr, "%s (line %u):", what, i < f->ntok ? line_of(f, f->tok[i].off) : 0);
+	fprintf(stderr, "%s (line %u):", what, i < f->ntok ? driver_tokens_line_number(f, f->tok[i].off) : 0);
 	for (uint32_t k = a; k < e; k++) {
-		size_t n = clean(f, &f->tok[k], b);
+		size_t n = driver_tokens_spelling_get(f, &f->tok[k], b);
 
 		fprintf(stderr, k == i ? " >>>%.*s<<<" : " %.*s", (int)(n > 200 ? 200 : n), b);
 	}
@@ -92,7 +92,7 @@ static uint64_t driver_tokens_hash(const lex_file *f)
 		if (n + 5 + t->len + 64 > cap)	/* a clean spelling is never longer than the raw one */
 			break;
 		b[n] = (unsigned char)t->kind;
-		l = clean(f, t, (char *)b + n + 5);
+		l = driver_tokens_spelling_get(f, t, (char *)b + n + 5);
 		memcpy(b + n + 1, &(uint32_t){ (uint32_t)l }, 4);
 		n += 5 + l;
 	}
@@ -201,16 +201,16 @@ static int driver_tokens_compare_buffers(const lex_file *pa, const lex_file *pb,
 				return 0;
 			}
 			printf("length differs: ours %u, clang %u tokens\n", A.ntok, B.ntok);
-			show("ours ", &A, i);
-			show("clang", &B, i);
+			driver_tokens_context_print("ours ", &A, i);
+			driver_tokens_context_print("clang", &B, i);
 			return 1;
 		}
-		nx = clean(&A, x, ba);
-		ny = clean(&B, y, bb);
+		nx = driver_tokens_spelling_get(&A, x, ba);
+		ny = driver_tokens_spelling_get(&B, y, bb);
 		if (x->kind != y->kind || nx != ny || memcmp(ba, bb, nx)) {
 			printf("token %u differs\n", i);
-			show("ours ", &A, i);
-			show("clang", &B, i);
+			driver_tokens_context_print("ours ", &A, i);
+			driver_tokens_context_print("clang", &B, i);
 			return 1;
 		}
 	}
@@ -229,7 +229,7 @@ VPRIV void driver_tokens_hash_run(struct driver_job *job, pp *p, const driver_en
 		ptok t;
 		const int count_only = getenv("VPP_TOKCOUNT") != NULL;
 
-#define HB(ptr, len) do { const unsigned char *q_ = (const unsigned char *)(ptr); \
+#define DRIVER_TOKENS_HASH_BYTES(ptr, len) do { const unsigned char *q_ = (const unsigned char *)(ptr); \
 		for (size_t k_ = 0; k_ < (size_t)(len); k_++) h = (h ^ q_[k_]) * 1099511628211ull; } while (0)
 		for (;;) {
 			const char *sp;
@@ -243,19 +243,19 @@ VPRIV void driver_tokens_hash_run(struct driver_job *job, pp *p, const driver_en
 			if (count_only)
 				continue;
 			kf[0] = t.kind, kf[1] = t.flags & (LEX_TOKEN_FLAG_LINE_START | LEX_TOKEN_FLAG_SPACE_BEFORE);
-			HB(kf, 2);
-			HB(&t.loc, 4);	/* the same in every run: file bases are assigned in order */
+			DRIVER_TOKENS_HASH_BYTES(kf, 2);
+			DRIVER_TOKENS_HASH_BYTES(&t.loc, 4);	/* the same in every run: file bases are assigned in order */
 			sp = t.len < sizeof(tmp) ? pp_token_spell(&t, tmp, &sl) : (sl = 0, "");
-			HB(sp, sl);
+			DRIVER_TOKENS_HASH_BYTES(sp, sl);
 			if (t.kind == LEX_TOKEN_IDENTIFIER)
-				HB(vintern_ents[t.id].s, vintern_ents[t.id].len);
+				DRIVER_TOKENS_HASH_BYTES(vintern_ents[t.id].s, vintern_ents[t.id].len);
 		}
 		nf = pp_file_names(p, fn, 4096, 0);
 		for (size_t i = 0; i < nf; i++)
-			HB(fn[i], strlen(fn[i]) + 1);
-#undef HB
+			DRIVER_TOKENS_HASH_BYTES(fn[i], strlen(fn[i]) + 1);
+#undef DRIVER_TOKENS_HASH_BYTES
 		snprintf(line, sizeof(line), "%016llx %lu\n", (unsigned long long)h, n);
-		job->status = pp_error_count(p) ? 1 : write_out(env->cwd, job->out, env->outfd, line, strlen(line), job->errfd);
+		job->status = pp_error_count(p) ? 1 : driver_output_write(env->cwd, job->out, env->outfd, line, strlen(line), job->errfd);
 		return;
 	}
 }

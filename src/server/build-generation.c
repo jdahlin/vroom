@@ -38,7 +38,7 @@ static int vccd_generation_group_count, vccd_generation_running_count;
 _Atomic unsigned long vccd_flush_count;
 
 int vccd_restart_argc, vccd_listen_fd = -1;
-char **g_argv;
+char **vccd_restart_argv;
 const char *vccd_socket_path;
 _Atomic int vccd_generation_restart_pending;
 
@@ -102,7 +102,7 @@ VPRIV void vccd_generation_restart(void)
 		pthread_mutex_lock(&vccd_queue_lock);
 		if (atomic_load(&vccd_active_count) == 1) {
 			while (vccd_queue_head != vccd_queue_tail) {	/* still queued: never read */
-				int c = queue[vccd_queue_head++ % VCCD_QUEUE_SIZE];
+				int c = vccd_queue_fds[vccd_queue_head++ % VCCD_QUEUE_SIZE];
 				int32_t st = (int32_t)VCCD_STATUS_RETRY;
 
 				(void)!write(c, &st, sizeof(st));
@@ -118,11 +118,11 @@ VPRIV void vccd_generation_restart(void)
 		int k = 0;
 
 		for (int i = 0; i < vccd_restart_argc; i++) {
-			if (!strcmp(g_argv[i], "--listen-fd")) {
+			if (!strcmp(vccd_restart_argv[i], "--listen-fd")) {
 				i++;
 				continue;
 			}
-			av[k++] = g_argv[i];
+			av[k++] = vccd_restart_argv[i];
 		}
 		snprintf(fd, sizeof(fd), "%d", vccd_listen_fd);
 		av[k++] = "--listen-fd", av[k++] = fd, av[k] = NULL;
@@ -153,7 +153,7 @@ VPRIV int vccd_generation_enter(uint32_t pgrp)
 		return 2;
 	}
 	if (pgrp) {
-		double t = now_ms();
+		double t = vccd_clock_milliseconds();
 		int i, k = 0;
 
 		for (i = 0; i < vccd_generation_group_count; i++)

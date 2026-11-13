@@ -22,31 +22,31 @@
 
 /* ---------------- tokens ---------------- */
 
-enum { SHELL_TOKEN_WORD, T_SEMI, T_PIPE, SHELL_TOKEN_REDIRECT };
+enum { SHELL_TOKEN_WORD, SHELL_TOKEN_SEMICOLON, SHELL_TOKEN_PIPE, SHELL_TOKEN_REDIRECT };
 
-struct tok {
+struct shell_token {
 	int kind;
 	bool assign;	/* NAME= before any quote */
 	char *s;	/* SHELL_TOKEN_WORD: the word, quotes removed (malloc'ed) */
 };
 
-struct toks {
-	struct tok *t;
+struct shell_token_list {
+	struct shell_token *t;
 	int n, cap;
 };
 
-static bool shell_token_push(struct toks *v, int kind, bool assign, char *s)
+static bool shell_token_push(struct shell_token_list *v, int kind, bool assign, char *s)
 {
 	if (v->n == v->cap) {
 		int cap = v->cap ? 2 * v->cap : 64;
-		struct tok *t = realloc(v->t, cap * sizeof(*t));
+		struct shell_token *t = realloc(v->t, cap * sizeof(*t));
 
 		if (!t)
 			return false;
 		v->t = t;
 		v->cap = cap;
 	}
-	v->t[v->n++] = (struct tok){ kind, assign, s };
+	v->t[v->n++] = (struct shell_token){ kind, assign, s };
 	return true;
 }
 
@@ -62,7 +62,7 @@ static bool shell_char_is_unsupported(char c)
 	return strchr("$`&()<{}*?[]~#!\n\r", c) != NULL;
 }
 
-static bool shell_tokenize(const char *s, struct toks *v)
+static bool shell_tokenize(const char *s, struct shell_token_list *v)
 {
 	vbuffer w = VBUFFER_STICKY_INIT;
 
@@ -75,7 +75,7 @@ static bool shell_tokenize(const char *s, struct toks *v)
 		if (!*s)
 			break;
 		if (*s == ';' || *s == '|' || *s == '>') {
-			int k = *s == ';' ? T_SEMI : *s == '|' ? T_PIPE : SHELL_TOKEN_REDIRECT;
+			int k = *s == ';' ? SHELL_TOKEN_SEMICOLON : *s == '|' ? SHELL_TOKEN_PIPE : SHELL_TOKEN_REDIRECT;
 
 			/* ;; || >> >| are other operators */
 			if (s[1] == ';' || s[1] == '|' || s[1] == '>' || s[1] == '&')
@@ -160,7 +160,7 @@ fail:
 
 enum { SHELL_COMMAND_NOP, SHELL_COMMAND_SET_E, SHELL_COMMAND_TEXT, SHELL_COMMAND_RM, SHELL_COMMAND_MKDIR, SHELL_COMMAND_TOOL, SHELL_COMMAND_FIXDEP };
 
-struct cmd {
+struct shell_command {
 	int kind;
 	char **argv;		/* SHELL_COMMAND_RM, SHELL_COMMAND_MKDIR: the paths; SHELL_COMMAND_TOOL: the tool's argv (owned array) */
 	char **assign;		/* SHELL_COMMAND_TOOL: NAME=VALUE (owned array) */
@@ -170,16 +170,16 @@ struct cmd {
 	bool xargs;		/* SHELL_COMMAND_TOOL run as printf | xargs: map the status */
 };
 
-struct script {
-	struct cmd *c;
+struct shell_script {
+	struct shell_command *c;
 	int n, cap;
 };
 
-static struct cmd *shell_script_command_add(struct script *sc)
+static struct shell_command *shell_script_command_add(struct shell_script *sc)
 {
 	if (sc->n == sc->cap) {
 		int cap = sc->cap ? 2 * sc->cap : 16;
-		struct cmd *c = realloc(sc->c, cap * sizeof(*c));
+		struct shell_command *c = realloc(sc->c, cap * sizeof(*c));
 
 		if (!c)
 			return NULL;
@@ -191,7 +191,7 @@ static struct cmd *shell_script_command_add(struct script *sc)
 }
 
 /* NULL-terminated copy of n token words (the strings stay owned by the tokens) */
-static char **shell_words_to_argv(struct tok *t, int n, vbuffer *extra)
+static char **shell_words_to_argv(struct shell_token *t, int n, vbuffer *extra)
 {
 	int nx = 0, i;
 	char **v, *p;
@@ -227,7 +227,7 @@ static char **shell_words_to_argv(struct tok *t, int n, vbuffer *extra)
 }
 
 /* POSIX printf with %s and %% and \n \t \\: the format is reused while arguments remain */
-static bool shell_printf_format(struct tok *a, int n, vbuffer *out)
+static bool shell_printf_format(struct shell_token *a, int n, vbuffer *out)
 {
 	const char *fmt = a[0].s;
 	int ai = 1;
@@ -273,13 +273,13 @@ static bool shell_printf_format(struct tok *a, int n, vbuffer *out)
  * One simple command, tokens t[0..n): leading assignments, words, at most
  * one > FILE.  pipe_in: printf's output for the xargs side of a pipe.
  */
-static bool shell_command_parse(struct tok *t, int n, struct script *sc, const struct shell_callbacks *ops,
+static bool shell_command_parse(struct shell_token *t, int n, struct shell_script *sc, const struct shell_callbacks *ops,
 			 vbuffer *pipe_in, vbuffer *pipe_out)
 {
-	struct tok w[n > 0 ? n : 1];
+	struct shell_token w[n > 0 ? n : 1];
 	const char *redir = NULL, *name;
 	int nw = 0, nasg = 0, i;
-	struct cmd *c;
+	struct shell_command *c;
 
 	for (i = 0; i < n; i++) {
 		if (t[i].kind == SHELL_TOKEN_REDIRECT) {
@@ -415,15 +415,15 @@ static bool shell_command_parse(struct tok *t, int n, struct script *sc, const s
 	return true;
 }
 
-static bool parse(struct toks *v, struct script *sc, const struct shell_callbacks *ops)
+static bool shell_script_parse(struct shell_token_list *v, struct shell_script *sc, const struct shell_callbacks *ops)
 {
 	int i = 0;
 
 	while (i < v->n) {
 		int a = i, p = -1;
 
-		while (i < v->n && v->t[i].kind != T_SEMI) {
-			if (v->t[i].kind == T_PIPE) {
+		while (i < v->n && v->t[i].kind != SHELL_TOKEN_SEMICOLON) {
+			if (v->t[i].kind == SHELL_TOKEN_PIPE) {
 				if (p >= 0)
 					return false;	/* only two-stage pipes */
 				p = i;
@@ -451,7 +451,7 @@ static bool parse(struct toks *v, struct script *sc, const struct shell_callback
 
 /* ---------------- running ---------------- */
 
-static bool write_all(int fd, const char *p, size_t n)
+static bool shell_fd_write_all(int fd, const char *p, size_t n)
 {
 	while (n) {
 		ssize_t r = write(fd, p, n);
@@ -466,13 +466,13 @@ static bool write_all(int fd, const char *p, size_t n)
 	return true;
 }
 
-static void err(int fd, const char *a, const char *b, const char *c)
+static void shell_error_report(int fd, const char *a, const char *b, const char *c)
 {
 	char line[1024];
 	int n = snprintf(line, sizeof(line), "%s%s%s\n", a, b, c);
 
 	if (n > 0)
-		(void)write_all(fd, line, n < (int)sizeof(line) ? n : (int)sizeof(line) - 1);
+		(void)shell_fd_write_all(fd, line, n < (int)sizeof(line) ? n : (int)sizeof(line) - 1);
 }
 
 /* "<a><b>': <strerror>" as coreutils (EPERM on a directory: unlink's answer on macOS) */
@@ -483,10 +483,10 @@ static void shell_rm_error_report(int fd, const char *a, const char *b, int e)
 	if (e == EPERM && a[0] == 'r')
 		e = EISDIR;
 	strlcat(m, strerror(e), sizeof m);
-	err(fd, a, b, m);
+	shell_error_report(fd, a, b, m);
 }
 
-static bool is_dir(int dir, const char *p)
+static bool shell_path_is_directory(int dir, const char *p)
 {
 	struct stat st;
 
@@ -499,7 +499,7 @@ static bool shell_directories_create(int dir, const char *path)
 	char buf[4096];
 	size_t n = strlen(path), i;
 
-	if (mkdirat(dir, path, 0777) == 0 || (errno == EEXIST && is_dir(dir, path)))
+	if (mkdirat(dir, path, 0777) == 0 || (errno == EEXIST && shell_path_is_directory(dir, path)))
 		return true;
 	if (errno != ENOENT || n >= sizeof(buf))
 		return false;
@@ -510,24 +510,24 @@ static bool shell_directories_create(int dir, const char *path)
 		if (buf[i - 1] == '/')
 			continue;	/* a//b */
 		buf[i] = 0;
-		if (mkdirat(dir, buf, 0777) < 0 && !(errno == EEXIST && is_dir(dir, buf)))
+		if (mkdirat(dir, buf, 0777) < 0 && !(errno == EEXIST && shell_path_is_directory(dir, buf)))
 			return false;
 		buf[i] = path[i];
 	}
 	return true;
 }
 
-static int run(const char *cwd, struct script *sc, bool errexit, const int fds[3],
+static int shell_script_run(const char *cwd, struct shell_script *sc, bool errexit, const int fds[3],
 	       const struct shell_callbacks *ops)
 {
 	int dir = -1, st = 0, i;
 
 	for (i = 0; i < sc->n; i++) {
-		struct cmd *c = &sc->c[i];
+		struct shell_command *c = &sc->c[i];
 
 		if ((c->kind == SHELL_COMMAND_RM || c->kind == SHELL_COMMAND_MKDIR || (c->redir && c->kind != SHELL_COMMAND_FIXDEP)) && dir < 0 &&
 		    (dir = open(cwd, O_RDONLY | O_DIRECTORY | O_CLOEXEC)) < 0) {
-			err(fds[2], "sh: cannot open ", cwd, "");
+			shell_error_report(fds[2], "sh: cannot open ", cwd, "");
 			return 2;
 		}
 		switch (c->kind) {
@@ -543,15 +543,15 @@ static int run(const char *cwd, struct script *sc, bool errexit, const int fds[3
 				int fd = openat(dir, c->redir, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0666);
 
 				if (fd < 0) {
-					err(fds[2], "sh: cannot create ", c->redir, errno == ENOENT ? ": Directory nonexistent" : ": Permission denied");
+					shell_error_report(fds[2], "sh: cannot create ", c->redir, errno == ENOENT ? ": Directory nonexistent" : ": Permission denied");
 					st = 2;
 					break;
 				}
-				st = write_all(fd, c->text, c->textlen) ? 0 : 1;
+				st = shell_fd_write_all(fd, c->text, c->textlen) ? 0 : 1;
 				if (close(fd) < 0)
 					st = 1;
 			} else {
-				st = write_all(fds[1], c->text, c->textlen) ? 0 : 1;
+				st = shell_fd_write_all(fds[1], c->text, c->textlen) ? 0 : 1;
 			}
 			break;
 		case SHELL_COMMAND_RM:
@@ -590,12 +590,12 @@ static int run(const char *cwd, struct script *sc, bool errexit, const int fds[3
 int shell_run(const char *cwd, const char *script, bool errexit, const int fds[3],
 	    const struct shell_callbacks *ops)
 {
-	struct toks v = { 0 };
-	struct script sc = { 0 };
+	struct shell_token_list v = { 0 };
+	struct shell_script sc = { 0 };
 	int st = SHELL_DECLINE, i;
 
-	if (shell_tokenize(script, &v) && parse(&v, &sc, ops))
-		st = run(cwd, &sc, errexit, fds, ops);
+	if (shell_tokenize(script, &v) && shell_script_parse(&v, &sc, ops))
+		st = shell_script_run(cwd, &sc, errexit, fds, ops);
 	for (i = 0; i < sc.n; i++) {
 		free(sc.c[i].argv);
 		free(sc.c[i].assign);

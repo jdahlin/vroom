@@ -11,7 +11,7 @@
 
 
 /* argv[0] plus extra, then argv[1..]: a NULL-terminated copy (free it) */
-static char **vccd_argv_with_extra(const struct req *r, const char *extra)
+static char **vccd_argv_with_extra(const struct vccd_request *r, const char *extra)
 {
 	char **av = malloc(((size_t)r->argc + 2) * sizeof(char *));
 	int n = 0;
@@ -28,13 +28,13 @@ static char **vccd_argv_with_extra(const struct req *r, const char *extra)
 }
 
 /* ld_main (ELF, or Mach-O by the first input) with the request's cwd and stderr */
-VPRIV int vccd_linker_run_in_process(const struct req *r, int argc, char **argv)
+VPRIV int vccd_linker_run_in_process(const struct vccd_request *r, int argc, char **argv)
 {
 	int dfd = open(r->cwd, O_RDONLY | O_DIRECTORY | O_CLOEXEC), efd = dup(r->fds[2]), status = 1;
 	FILE *err = efd >= 0 ? fdopen(efd, "w") : NULL;
 
 	if (dfd < 0 || !err) {
-		say(r, "%s: error: %s\n", "cannot set up the link");
+		vccd_request_message_write(r, "%s: error: %s\n", "cannot set up the link");
 		if (efd >= 0 && !err)
 			close(efd);
 	} else {
@@ -53,7 +53,7 @@ VPRIV int vccd_linker_run_in_process(const struct req *r, int argc, char **argv)
  * exist; vld defines them as trapping stubs (listed in OUT.vroom-stubs).
  * A clean link has none.  -v/--version without inputs: the version line.
  */
-VPRIV int vccd_linker_run(const struct req *r)
+VPRIV int vccd_linker_run(const struct vccd_request *r)
 {
 	bool version = false, input = false;
 	char **av;
@@ -74,7 +74,7 @@ VPRIV int vccd_linker_run(const struct req *r)
 		       vccd_fd_write_full(r->fds[1], vccd_capabilities_ld_version_text, strlen(vccd_capabilities_ld_version_text)) ? 0 : 1;
 	}
 	if (!(av = vccd_argv_with_extra(r, "--vroom-stubs"))) {
-		say(r, "%s: error: %s\n", "out of memory");
+		vccd_request_message_write(r, "%s: error: %s\n", "out of memory");
 		return 1;
 	}
 	status = vccd_linker_run_in_process(r, r->argc + 1, av);
@@ -83,7 +83,7 @@ VPRIV int vccd_linker_run(const struct req *r)
 }
 
 /* vcc-nm / vcc-objcopy: ld/objcopy.c keeps per-run state in globals, so one at a time */
-VPRIV int vccd_objcopy_run(const struct req *r, bool nm)
+VPRIV int vccd_objcopy_run(const struct vccd_request *r, bool nm)
 {
 	static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 	int dfd = open(r->cwd, O_RDONLY | O_DIRECTORY | O_CLOEXEC), efd = dup(r->fds[2]), ofd = nm ? dup(r->fds[1]) : -1;
@@ -91,7 +91,7 @@ VPRIV int vccd_objcopy_run(const struct req *r, bool nm)
 	int status = 1;
 
 	if (dfd < 0 || !err || (nm && !out)) {
-		say(r, "%s: error: %s\n", "cannot set up nm/objcopy");
+		vccd_request_message_write(r, "%s: error: %s\n", "cannot set up nm/objcopy");
 		if (efd >= 0 && !err)
 			close(efd);
 		if (ofd >= 0 && !out)

@@ -10,7 +10,7 @@
  */
 #include "vccd-internal.h"
 
-int queue[VCCD_QUEUE_SIZE];
+int vccd_queue_fds[VCCD_QUEUE_SIZE];
 unsigned vccd_queue_head, vccd_queue_tail;
 pthread_mutex_t vccd_queue_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t vccd_queue_condition = PTHREAD_COND_INITIALIZER;
@@ -21,7 +21,7 @@ VPRIV bool vccd_queue_push(int fd)
 	{
 		VLOCK(vccd_queue_lock);
 		if (vccd_queue_tail - vccd_queue_head < VCCD_QUEUE_SIZE) {
-			queue[vccd_queue_tail++ % VCCD_QUEUE_SIZE] = fd;
+			vccd_queue_fds[vccd_queue_tail++ % VCCD_QUEUE_SIZE] = fd;
 			pthread_cond_signal(&vccd_queue_condition);
 			return true;
 		}
@@ -37,7 +37,7 @@ VPRIV int vccd_queue_pop(void)
 	VLOCK(vccd_queue_lock);
 	while (vccd_queue_head == vccd_queue_tail)
 		pthread_cond_wait(&vccd_queue_condition, &vccd_queue_lock);
-	fd = queue[vccd_queue_head++ % VCCD_QUEUE_SIZE];
+	fd = vccd_queue_fds[vccd_queue_head++ % VCCD_QUEUE_SIZE];
 	atomic_fetch_add(&vccd_active_count, 1);	/* under the lock: vccd_server_drain_exit never sees it in neither place */
 	return fd;
 }
@@ -50,5 +50,5 @@ VPRIV int vccd_queue_pop_try(void)
 	if (vccd_queue_head == vccd_queue_tail)
 		return -1;
 	atomic_fetch_add(&vccd_active_count, 1);
-	return queue[vccd_queue_head++ % VCCD_QUEUE_SIZE];
+	return vccd_queue_fds[vccd_queue_head++ % VCCD_QUEUE_SIZE];
 }

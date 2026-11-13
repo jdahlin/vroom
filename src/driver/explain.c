@@ -15,7 +15,7 @@ static const struct { const char *id, *text; } driver_explain_pages[] = {
 #include "explain.inc"
 };
 
-VPRIV __attribute__((noinline, cold)) int explain(int argc, char **argv, const driver_environment *env)
+VPRIV __attribute__((noinline, cold)) int driver_explain_run(int argc, char **argv, const driver_environment *env)
 {
 	const char *id = NULL;
 	bool any = false;
@@ -37,7 +37,7 @@ VPRIV __attribute__((noinline, cold)) int explain(int argc, char **argv, const d
 		size_t l = strlen(driver_explain_pages[i].id);
 
 		if (!strncmp(id, driver_explain_pages[i].id, l) && (!id[l] || id[l] == ']'))
-			return write_all(outfd, driver_explain_pages[i].text, strlen(driver_explain_pages[i].text)) ? 1 : 0;
+			return driver_output_write_all(outfd, driver_explain_pages[i].text, strlen(driver_explain_pages[i].text)) ? 1 : 0;
 	}
 	if (id)
 		dprintf(env->errfd >= 0 ? env->errfd : 2, "vcc: error: no explanation for '%s' (vcc --explain lists the ids)\n", id);

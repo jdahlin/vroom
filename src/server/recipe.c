@@ -3,9 +3,9 @@
  * shim, argv[0] sh).
  *
  * rsh interprets the subset of sh that kbuild recipes use; every tool call in a recipe that names one
- * of our shims (vcc, vas, vld, var, vcc-nm, vcc-objcopy in tool_dir) is turned into a request
+ * of our shims (vcc, vas, vld, var, vcc-nm, vcc-objcopy in vccd_tool_directory) is turned into a request
  * (vccd_recipe_tool_run builds the raw bytes in per-thread buffers, with the recipe's NAME=VALUE assignments
- * first in the environment) and run through handle() in this thread, with the recipe's fds.  Anything
+ * first in the environment) and run through vccd_request_handle() in this thread, with the recipe's fds.  Anything
  * rsh does not know makes vccd_recipe_run return SHELL_DECLINE and the shim runs the real shell.  A tool call
  * too large for VCCD_PROTOCOL_PAYLOAD_MAX fails the recipe with 127.
  */
@@ -19,21 +19,21 @@ static bool vccd_recipe_is_tool(void *ctx, const char *argv0)
 	size_t n;
 
 	(void)ctx;
-	if (!b || !*tool_dir || (strcmp(b + 1, "vcc") && strcmp(b + 1, "vas") && strcmp(b + 1, "vld") &&
+	if (!b || !*vccd_tool_directory || (strcmp(b + 1, "vcc") && strcmp(b + 1, "vas") && strcmp(b + 1, "vld") &&
 				 strcmp(b + 1, "var") && strcmp(b + 1, "vcc-nm") && strcmp(b + 1, "vcc-objcopy")))
 		return false;
 	n = b - argv0;
-	if (n == strlen(tool_dir) && !memcmp(argv0, tool_dir, n))
+	if (n == strlen(vccd_tool_directory) && !memcmp(argv0, vccd_tool_directory, n))
 		return true;
 	if (n >= sizeof(dir))
 		return false;
 	memcpy(dir, argv0, n);
 	dir[n] = 0;
-	return realpath(dir, real) && !strcmp(real, tool_dir);
+	return realpath(dir, real) && !strcmp(real, vccd_tool_directory);
 }
 
 struct vccd_recipe_context {
-	const struct req *r;	/* the vsh request: cwd and env */
+	const struct vccd_request *r;	/* the vsh request: cwd and env */
 };
 
 /* per thread: the request a recipe's tool call is turned into */
@@ -42,11 +42,11 @@ static _Thread_local char **vccd_recipe_request_strings;
 
 static int vccd_recipe_tool_run(void *ctx, char **argv, char **assign, const int fds[3])
 {
-	const struct req *r = ((struct vccd_recipe_context *)ctx)->r;
+	const struct vccd_request *r = ((struct vccd_recipe_context *)ctx)->r;
 	struct vccd_request_header *h;
-	struct req q;
+	struct vccd_request q;
 	const char *kind = "bad";
-	double t0 = now_ms();
+	double t0 = vccd_clock_milliseconds();
 	char *p, *end;
 	int st, argc = 0, envc = 0;
 
@@ -57,7 +57,7 @@ static int vccd_recipe_tool_run(void *ctx, char **argv, char **assign, const int
 			       MAP_PRIVATE | MAP_ANON, -1, 0);
 		if (vccd_recipe_request_buffer == MAP_FAILED || vccd_recipe_request_strings == MAP_FAILED) {
 			vccd_recipe_request_buffer = NULL;
-			say(r, "%s: error: %s\n", "out of memory");
+			vccd_request_message_write(r, "%s: error: %s\n", "out of memory");
 			return 127;
 		}
 	}
@@ -90,15 +90,15 @@ static int vccd_recipe_tool_run(void *ctx, char **argv, char **assign, const int
 	h->envc = envc;
 	h->payload_len = p - (vccd_recipe_request_buffer + sizeof(*h));
 	if (!vccd_request_split(vccd_recipe_request_buffer, vccd_recipe_request_strings, &q)) {
-		say(r, "%s: error: %s\n", "bad tool call in recipe");
+		vccd_request_message_write(r, "%s: error: %s\n", "bad tool call in recipe");
 		return 127;
 	}
 	memcpy(q.fds, fds, sizeof(q.fds));
-	st = handle(&q, &kind);
+	st = vccd_request_handle(&q, &kind);
 	vccd_request_log(&q, kind, st, t0);
 	return st;
 big:
-	say(r, "%s: error: %s\n", "recipe tool call too large");
+	vccd_request_message_write(r, "%s: error: %s\n", "recipe tool call too large");
 	return 127;
 }
 
@@ -109,7 +109,7 @@ static int vccd_recipe_fixdep_run(void *ctx, const char *dep, const char *target
 }
 
 /* argv: sh -c SCRIPT or sh -ec SCRIPT (make's .SHELLFLAGS); anything else is the shell's */
-VPRIV int vccd_recipe_run(const struct req *r)
+VPRIV int vccd_recipe_run(const struct vccd_request *r)
 {
 	struct vccd_recipe_context ctx = { r };
 	struct shell_callbacks ops = { &ctx, vccd_recipe_is_tool, vccd_recipe_tool_run, vccd_recipe_fixdep_run };

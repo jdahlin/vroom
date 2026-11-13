@@ -11,11 +11,11 @@
  */
 #include "vccd-internal.h"
 
-static int vccd_backend_relay(const struct req *r, const char *sock);
+static int vccd_backend_relay(const struct vccd_request *r, const char *sock);
 
 /* relay the request unchanged to another vroom-protocol server; the wait
    for its answer is a blocking region (the backend uses the core) */
-VPRIV int forward(const struct req *r, const char *sock)
+VPRIV int vccd_backend_forward(const struct vccd_request *r, const char *sock)
 {
 	int status;
 
@@ -25,7 +25,7 @@ VPRIV int forward(const struct req *r, const char *sock)
 	return status;
 }
 
-static int vccd_backend_relay(const struct req *r, const char *sock)
+static int vccd_backend_relay(const struct vccd_request *r, const char *sock)
 {
 	struct sockaddr_un sa = { .sun_family = AF_UNIX };
 	char cbuf[CMSG_SPACE(3 * sizeof(int))];
@@ -39,7 +39,7 @@ static int vccd_backend_relay(const struct req *r, const char *sock)
 	strncpy(sa.sun_path, sock, sizeof(sa.sun_path) - 1);
 	s = socket(AF_UNIX, SOCK_STREAM, 0);
 	if (s < 0 || connect(s, (struct sockaddr *)&sa, sizeof(sa)) < 0) {
-		say(r, "%s: error: backend %s not reachable\n", sock);
+		vccd_request_message_write(r, "%s: error: backend %s not reachable\n", sock);
 		if (s >= 0)
 			close(s);
 		return 127;
@@ -65,11 +65,11 @@ static int vccd_backend_relay(const struct req *r, const char *sock)
 }
 
 /* forward r with argv[0..argc) in place of its own (the same cwd, env and fds) */
-VPRIV int vccd_backend_forward_argv(const struct req *r, int argc, char **argv)
+VPRIV int vccd_backend_forward_argv(const struct vccd_request *r, int argc, char **argv)
 {
 	const struct vccd_request_header *h = (const struct vccd_request_header *)r->raw;
 	struct vccd_request_header *nh;
-	struct req r2 = *r;
+	struct vccd_request r2 = *r;
 	size_t len = strlen(r->cwd) + 1, envc = 0;
 	char *raw, *p;
 	int st;
@@ -93,7 +93,7 @@ VPRIV int vccd_backend_forward_argv(const struct req *r, int argc, char **argv)
 		p = stpcpy(p, *e) + 1;
 	r2.raw = raw;
 	r2.rawlen = sizeof(*nh) + len;
-	st = forward(&r2, vccd_backend_socket);
+	st = vccd_backend_forward(&r2, vccd_backend_socket);
 	free(raw);
 	return st;
 }

@@ -17,9 +17,9 @@
 #include "vccd-internal.h"
 
 /* the request buffers of this thread: mmap'ed once, kept for its life */
-static struct worker *vccd_worker_buffers_get(void)
+static struct vccd_worker *vccd_worker_buffers_get(void)
 {
-	static _Thread_local struct worker w;
+	static _Thread_local struct vccd_worker w;
 
 	if (!w.raw) {
 		w.raw = mmap(NULL, sizeof(struct vccd_request_header) + VCCD_PROTOCOL_PAYLOAD_MAX,
@@ -36,12 +36,12 @@ static struct worker *vccd_worker_buffers_get(void)
 
 /* one connection, taken from the queue (counted in vccd_active_count): receive the
    request, run it, answer, close */
-static void serve(struct worker *w, int conn)
+static void vccd_worker_connection_serve(struct vccd_worker *w, int conn)
 {
-	struct req r;
+	struct vccd_request r;
 	int32_t status = 127;
 	const char *kind = "bad";
-	double t0 = now_ms();
+	double t0 = vccd_clock_milliseconds();
 	bool got;
 	int i;
 
@@ -74,7 +74,7 @@ static void serve(struct worker *w, int conn)
 				}
 			} else {
 				driver_client_connection = conn;
-				status = handle(&r, &kind);
+				status = vccd_request_handle(&r, &kind);
 				driver_client_connection = -1;
 				vccd_generation_leave();
 			}
@@ -93,11 +93,11 @@ static void serve(struct worker *w, int conn)
 
 VPRIV void *vccd_worker_main(void *arg)
 {
-	struct worker *w = vccd_worker_buffers_get();
+	struct vccd_worker *w = vccd_worker_buffers_get();
 
 	(void)arg;
 	for (;;)
-		serve(w, vccd_queue_pop());	/* (counts itself in vccd_active_count) */
+		vccd_worker_connection_serve(w, vccd_queue_pop());	/* (counts itself in vccd_active_count) */
 	return NULL;
 }
 
@@ -110,7 +110,7 @@ VPRIV void vccd_worker_pool_job(void *arg)
 
 	(void)arg;
 	if (conn >= 0)
-		serve(vccd_worker_buffers_get(), conn);
+		vccd_worker_connection_serve(vccd_worker_buffers_get(), conn);
 }
 
 /* SIGTERM: no new connections; the queued and running jobs finish, then exit */

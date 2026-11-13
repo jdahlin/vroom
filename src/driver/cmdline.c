@@ -34,7 +34,7 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
 {
 	for (int i = 1; i < argc; i++) {
 		const char *a = argv[i];
-#define ARG(flag) (!strcmp(a, flag) ? (i + 1 < argc ? argv[++i] : "") : !strncmp(a, flag, strlen(flag)) ? a + strlen(flag) : NULL)
+#define DRIVER_OPTION_VALUE(flag) (!strcmp(a, flag) ? (i + 1 < argc ? argv[++i] : "") : !strncmp(a, flag, strlen(flag)) ? a + strlen(flag) : NULL)
 		const char *v;
 
 		if (!strcmp(a, "--cmp") && i + 1 < argc) { job->cmp = argv[++i]; continue; }
@@ -230,31 +230,31 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
 			job->deptarget = q;
 			continue;
 		}
-		if ((v = ARG("-iquote"))) { job->dirs_q[job->nq++] = v; continue; }
-		if ((v = ARG("-isystem"))) { job->dirs_s[job->ns++] = v; continue; }
-		if ((v = ARG("-idirafter"))) { job->dirs_a[job->na++] = v; continue; }
-		if ((v = ARG("--embed-dir="))) { if (job->ne < 64) job->dirs_e[job->ne++] = v; continue; }
-		if ((v = ARG("-imacros"))) {
+		if ((v = DRIVER_OPTION_VALUE("-iquote"))) { job->dirs_q[job->nq++] = v; continue; }
+		if ((v = DRIVER_OPTION_VALUE("-isystem"))) { job->dirs_s[job->ns++] = v; continue; }
+		if ((v = DRIVER_OPTION_VALUE("-idirafter"))) { job->dirs_a[job->na++] = v; continue; }
+		if ((v = DRIVER_OPTION_VALUE("--embed-dir="))) { if (job->ne < 64) job->dirs_e[job->ne++] = v; continue; }
+		if ((v = DRIVER_OPTION_VALUE("-imacros"))) {
 			/* clang's: the file's macros, its tokens dropped up to the ## (before every -include) */
-			bstr(&job->imac, "#__include_macros \"");
-			bstr(&job->imac, v);
-			bstr(&job->imac, "\"\n##\n");
+			driver_buffer_append_string(&job->imac, "#__include_macros \"");
+			driver_buffer_append_string(&job->imac, v);
+			driver_buffer_append_string(&job->imac, "\"\n##\n");
 			continue;
 		}
-		if ((v = ARG("-include"))) {
-			bstr(&job->incl, "#include \"");
-			bstr(&job->incl, v);
-			bstr(&job->incl, "\"\n");
+		if ((v = DRIVER_OPTION_VALUE("-include"))) {
+			driver_buffer_append_string(&job->incl, "#include \"");
+			driver_buffer_append_string(&job->incl, v);
+			driver_buffer_append_string(&job->incl, "\"\n");
 			continue;
 		}
-		if ((v = ARG("-I"))) { job->dirs_i[job->ni++] = v; continue; }
-		if ((v = ARG("-D"))) {
+		if ((v = DRIVER_OPTION_VALUE("-I"))) { job->dirs_i[job->ni++] = v; continue; }
+		if ((v = DRIVER_OPTION_VALUE("-D"))) {
 			if (!strncmp(v, "__KERNEL__", 10) && (!v[10] || v[10] == '='))
 				job->vcc_kernel = 1;	/* the kernel: its error() calls rely on clang -O2 folding */
 			driver_buffer_append_define(&job->cmdl, v);
 			continue;
 		}
-		if ((v = ARG("-U"))) { bstr(&job->cmdl, "#undef "); bstr(&job->cmdl, v); bstr(&job->cmdl, "\n"); continue; }
+		if ((v = DRIVER_OPTION_VALUE("-U"))) { driver_buffer_append_string(&job->cmdl, "#undef "); driver_buffer_append_string(&job->cmdl, v); driver_buffer_append_string(&job->cmdl, "\n"); continue; }
 		if (!strncmp(a, "-fmacro-prefix-map=", 19)) {
 			snprintf(job->pmapbuf, sizeof(job->pmapbuf), "%s", a + 19);
 			job->pmap = job->pmapbuf;
@@ -373,7 +373,7 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
 				job->raw_asm = 1;	/* clang: .s is assembled without the preprocessor */
 		}
 	}
-#undef ARG
+#undef DRIVER_OPTION_VALUE
 	return 0;
 }
 

@@ -35,21 +35,21 @@ static bool vccd_host_is_source(const char *a)
  * temporary object next to the output, then vld (macho-linker.c) links the
  * objects; -l maps to libSystem.  -fuse-ld= is ignored: vld is the linker.
  */
-VPRIV int vccd_host_program_compile(const struct req *r)
+VPRIV int vccd_host_program_compile(const struct vccd_request *r)
 {
 	bool compile_only = false;
 	const char *out = "a.out";
 	int nsrc = 0;
 
 #ifndef __APPLE__
-	say(r, "%s: error: %s\n", "host programs need --backend-sock on this system");
+	vccd_request_message_write(r, "%s: error: %s\n", "host programs need --backend-sock on this system");
 	return 1;
 #endif
 	for (int i = 1; i < r->argc; i++) {
 		const char *a = r->argv[i];
 		if (!strncmp(a, "--target=", 9) || !strcmp(a, "-target")) {
 			/* a target job vcc does not take (vccd_request_is_compile, vccd_request_is_preprocess): no fallback */
-			say(r, "%s: error: unsupported job for target '%s'\n", a[1] == '-' ? a + 9 : "?");
+			vccd_request_message_write(r, "%s: error: unsupported job for target '%s'\n", a[1] == '-' ? a + 9 : "?");
 			return 1;
 		}
 		if (!strcmp(a, "-c") || !strcmp(a, "-S") || !strcmp(a, "-E"))
@@ -97,7 +97,7 @@ VPRIV int vccd_host_program_compile(const struct req *r)
 		if (!strncmp(a, "-fuse-ld=", 9) || !strcmp(a, "-pie") || !strcmp(a, "-no-pie"))
 			continue;
 		if (!strncmp(a, "-Wl,", 4)) {
-			say(r, "%s: error: host link option '%s' is not supported\n", a);
+			vccd_request_message_write(r, "%s: error: host link option '%s' is not supported\n", a);
 			status = 1;
 			goto done;
 		}

@@ -8,7 +8,7 @@
  * diagnostics store (diagnostics-store.c) gets the job's records in either case and drops them again if the TU
  * fell back.  The capture file is per thread and reused.  delegate is the VCC_DELEGATE mode for
  * builds that are not the kernel: a plain -c of a .c file is compiled here, everything else runs as
- * PROG.  vccd_compile_fixdep_after is called by handle() for the compile kinds only, and only when the request
+ * PROG.  vccd_compile_fixdep_after is called by vccd_request_handle() for the compile kinds only, and only when the request
  * carries the VCC_FIXDEP_* variables.
  */
 #include "vccd-internal.h"
@@ -21,7 +21,7 @@
    already (NULL: fd 0). */
 static _Thread_local int vccd_compile_capture_fd = -1;
 
-VPRIV int vccd_compile_in_process(const struct req *r, const char *src, size_t len, bool final)
+VPRIV int vccd_compile_in_process(const struct vccd_request *r, const char *src, size_t len, bool final)
 {
 	const char *dd = vccd_request_environment_get(r, "VCC_DIAG_DEDUP");
 	vccd_diagnostics_job j;
@@ -58,12 +58,12 @@ VPRIV int vccd_compile_in_process(const struct req *r, const char *src, size_t l
 	return st;
 }
 
-VPRIV int delegate(const struct req *r, const char *prog, const char **kind)
+VPRIV int vccd_compile_delegate(const struct vccd_request *r, const char *prog, const char **kind)
 {
 	if (vccd_request_is_delegated_compile(r, vccd_request_environment_get(r, "VCC_DELEGATE_SKIP"))) {
 		if (vccd_compile_in_process(r, NULL, 0, false) == 0) {
 			*kind = "cc-own";
-			atomic_fetch_add(&n_cc, 1);
+			atomic_fetch_add(&vccd_compile_count, 1);
 			return 0;
 		}
 		atomic_fetch_add(&vccd_fallback_count, 1);
@@ -74,7 +74,7 @@ VPRIV int delegate(const struct req *r, const char *prog, const char **kind)
 		*kind = "dg";
 	}
 	atomic_fetch_add(&vccd_spawn_count, 1);
-	return spawn(r, prog);
+	return vccd_program_spawn(r, prog);
 }
 /*
  * Kbuild's cmd_and_fixdep done here (patches/0008): a compile whose request
@@ -82,7 +82,7 @@ VPRIV int delegate(const struct req *r, const char *prog, const char **kind)
  * line) gets fixdep's .cmd written and its dep file removed once it has
  * succeeded, so the recipe runs no fixdep and no rm.
  */
-VPRIV int vccd_compile_fixdep_after(const struct req *r, int status)
+VPRIV int vccd_compile_fixdep_after(const struct vccd_request *r, int status)
 {
 	const char *d = vccd_request_environment_get(r, "VCC_FIXDEP_D"), *t, *o, *c;
 
@@ -92,7 +92,7 @@ VPRIV int vccd_compile_fixdep_after(const struct req *r, int status)
 	o = vccd_request_environment_get(r, "VCC_FIXDEP_O");
 	c = vccd_request_environment_get(r, "VCC_FIXDEP_CMD");
 	if (!t || !o || !c) {
-		say(r, "vccd: %s without VCC_FIXDEP_T/O/CMD\n", "VCC_FIXDEP_D");
+		vccd_request_message_write(r, "vccd: %s without VCC_FIXDEP_T/O/CMD\n", "VCC_FIXDEP_D");
 		return 2;
 	}
 	return fixdep_run(r->cwd, d, t, c, o, r->fds[2]);

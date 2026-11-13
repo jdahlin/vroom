@@ -13,7 +13,7 @@
 vjob_region_pool driver_buffer_pool = VJOB_REGION_POOL_INIT(4);
 _Thread_local vjob_region *driver_buffer_region;	/* this job's (driver_job_run) */
 
-VPRIV void bput(buf *b, const char *s, size_t n)
+VPRIV void driver_buffer_append(driver_buffer *b, const char *s, size_t n)
 {
 	if (b->n + n + 256 > b->cap) {
 		size_t nc = b->cap ? b->cap * 2 : DRIVER_BUFFER_REGION_SIZE;
@@ -45,25 +45,25 @@ put:
 	b->n += n;
 }
 
-VPRIV void bstr(buf *b, const char *s) { bput(b, s, strlen(s)); }
+VPRIV void driver_buffer_append_string(driver_buffer *b, const char *s) { driver_buffer_append(b, s, strlen(s)); }
 
-VPRIV void driver_buffer_append_define(buf *b, const char *d)
+VPRIV void driver_buffer_append_define(driver_buffer *b, const char *d)
 {
 	const char *eq = strchr(d, '=');
 
-	bstr(b, "#define ");
+	driver_buffer_append_string(b, "#define ");
 	if (eq) {
-		bput(b, d, (size_t)(eq - d));
-		bstr(b, " ");
-		bstr(b, eq + 1);
+		driver_buffer_append(b, d, (size_t)(eq - d));
+		driver_buffer_append_string(b, " ");
+		driver_buffer_append_string(b, eq + 1);
 	} else {
-		bstr(b, d);
-		bstr(b, " 1");
+		driver_buffer_append_string(b, d);
+		driver_buffer_append_string(b, " 1");
 	}
-	bstr(b, "\n");
+	driver_buffer_append_string(b, "\n");
 }
 
-VPRIV void driver_buffer_free(buf *b)
+VPRIV void driver_buffer_free(driver_buffer *b)
 {
 	if (b->p && b->r)
 		vjob_region_release(b->r, b->n + 256);

@@ -43,7 +43,7 @@ VPRIV bool vccd_fd_write_full(int fd, const char *p, size_t n)
 }
 
 
-VPRIV bool vccd_request_receive(struct worker *w, int conn, struct req *r)
+VPRIV bool vccd_request_receive(struct vccd_worker *w, int conn, struct vccd_request *r)
 {
 	struct vccd_request_header *h = (struct vccd_request_header *)w->raw;
 	char cbuf[CMSG_SPACE(16 * sizeof(int))] = { 0 };
@@ -101,7 +101,7 @@ VPRIV bool vccd_request_receive(struct worker *w, int conn, struct req *r)
 }
 
 /* the strings of a request in raw (header + payload): cwd, argv..., envp... */
-VPRIV bool vccd_request_split(char *raw, char **strs, struct req *r)
+VPRIV bool vccd_request_split(char *raw, char **strs, struct vccd_request *r)
 {
 	struct vccd_request_header *h = (struct vccd_request_header *)raw;
 	size_t off, i, n;
@@ -128,7 +128,7 @@ VPRIV bool vccd_request_split(char *raw, char **strs, struct req *r)
 	return true;
 }
 
-VPRIV void say(const struct req *r, const char *fmt, const char *arg)
+VPRIV void vccd_request_message_write(const struct vccd_request *r, const char *fmt, const char *arg)
 {
 	char line[512];
 	int n = snprintf(line, sizeof(line), fmt, r->tool, arg);
@@ -136,7 +136,7 @@ VPRIV void say(const struct req *r, const char *fmt, const char *arg)
 	if (n > 0)
 		(void)!write(r->fds[2], line, n < (int)sizeof(line) ? n : (int)sizeof(line) - 1);
 }
-VPRIV double now_ms(void)
+VPRIV double vccd_clock_milliseconds(void)
 {
 	struct timespec ts;
 
@@ -144,7 +144,7 @@ VPRIV double now_ms(void)
 	return ts.tv_sec * 1e3 + ts.tv_nsec / 1e6;
 }
 
-VPRIV const char *vccd_request_environment_get(const struct req *r, const char *name)
+VPRIV const char *vccd_request_environment_get(const struct vccd_request *r, const char *name)
 {
 	size_t n = strlen(name);
 
@@ -153,10 +153,10 @@ VPRIV const char *vccd_request_environment_get(const struct req *r, const char *
 			return *e + n + 1;
 	return NULL;
 }
-VPRIV void vccd_request_log(const struct req *r, const char *kind, int status, double t0)
+VPRIV void vccd_request_log(const struct vccd_request *r, const char *kind, int status, double t0)
 {
 	if (vccd_log_requests) {
-		double t1 = now_ms();
+		double t1 = vccd_clock_milliseconds();
 
 		/* @: start time (monotonic ms), for concurrency timelines; last: the input */
 		fprintf(stderr, "vccd %-10s %7.2f ms rc=%d @%.2f %s %.200s\n", kind, t1 - t0, status, t0,

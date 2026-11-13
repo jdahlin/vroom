@@ -32,7 +32,7 @@ static bool vccd_probe_output_is_discard(const char *out)
 	return out && (!strcmp(out, "/dev/null") || strstr(out, ".tmp_"));
 }
 
-VPRIV int vccd_probe_kind_classify(const struct req *r)
+VPRIV int vccd_probe_kind_classify(const struct vccd_request *r)
 {
 	bool compile = false, devnull = false, in_stdin = false;
 	const char *lang = "c", *out = NULL;
@@ -90,7 +90,7 @@ VPRIV int vccd_probe_kind_classify(const struct req *r)
 }
 
 /* the probe's stdin, up to sizeof(buf); -1 if it is larger or unreadable */
-static ssize_t vccd_probe_stdin_read(const struct req *r, char *buf, size_t size)
+static ssize_t vccd_probe_stdin_read(const struct vccd_request *r, char *buf, size_t size)
 {
 	size_t n = 0;
 
@@ -109,7 +109,7 @@ static ssize_t vccd_probe_stdin_read(const struct req *r, char *buf, size_t size
 	}
 }
 
-VPRIV int forward(const struct req *r, const char *sock);
+VPRIV int vccd_backend_forward(const struct vccd_request *r, const char *sock);
 
 /* all of fd into a malloc'ed *buf (*len bytes); nonzero on a read error */
 VPRIV int vccd_fd_read_all(int fd, char **buf, size_t *len)
@@ -142,9 +142,9 @@ VPRIV int vccd_fd_read_all(int fd, char **buf, size_t *len)
 
 /* compile r for real with src[0..n) (already read from its stdin) as stdin:
    vcc, or the backend if there is one */
-VPRIV int vccd_probe_stdin_compile(const struct req *r, const char *src, size_t n)
+VPRIV int vccd_probe_stdin_compile(const struct vccd_request *r, const char *src, size_t n)
 {
-	struct req r2 = *r;
+	struct vccd_request r2 = *r;
 	driver_environment e = { .cwd = r->cwd, .outfd = r->fds[1], .errfd = r->fds[2], .envp = r->envp, .infd = -1 };
 	int fd, status;
 
@@ -177,7 +177,7 @@ VPRIV int vccd_probe_stdin_compile(const struct req *r, const char *src, size_t 
 	}
 	if (vccd_backend_socket) {
 		r2.fds[0] = fd;
-		status = forward(&r2, vccd_backend_socket);
+		status = vccd_backend_forward(&r2, vccd_backend_socket);
 	} else {
 		e.infd = fd;
 		status = driver_job_run(r->argc, r->argv, &e);
@@ -186,7 +186,7 @@ VPRIV int vccd_probe_stdin_compile(const struct req *r, const char *src, size_t 
 	return status;
 }
 
-VPRIV int vccd_probe_cc_answer(const struct req *r, int kind)
+VPRIV int vccd_probe_cc_answer(const struct vccd_request *r, int kind)
 {
 	const char *out = NULL, *why;
 	bool werror = false;
@@ -194,7 +194,7 @@ VPRIV int vccd_probe_cc_answer(const struct req *r, int kind)
 
 	if (kind == VCCD_PROBE_LINK) {
 		if (!vccd_capabilities_can_link) {
-			say(r, "%s: error: %s\n", "cannot link user-space programs");
+			vccd_request_message_write(r, "%s: error: %s\n", "cannot link user-space programs");
 			return 1;
 		}
 	}
@@ -209,12 +209,12 @@ VPRIV int vccd_probe_cc_answer(const struct req *r, int kind)
 			continue;	/* the input: /dev/null or - */
 		n = vccd_capabilities_cc_option_arity(a, i + 1 < r->argc ? r->argv[i + 1] : NULL, &why);
 		if (!n) {
-			say(r, "%s: error: unsupported option '%s'\n", why);
+			vccd_request_message_write(r, "%s: error: unsupported option '%s'\n", why);
 			return 1;
 		}
 		/* -D of a macro vcc predefines: -Wmacro-redefined, an error with -Werror */
 		if (werror && !strncmp(a, "-D", 2) && vccd_capabilities_macro_is_predefined(a + 2)) {
-			say(r, "%s: error: '%s' macro redefined\n", a + 2);
+			vccd_request_message_write(r, "%s: error: '%s' macro redefined\n", a + 2);
 			return 1;
 		}
 		if (n == 2) {
@@ -229,7 +229,7 @@ VPRIV int vccd_probe_cc_answer(const struct req *r, int kind)
 		int ok;
 
 		if (len < 0) {
-			say(r, "%s: error: %s\n", "probe input too large");
+			vccd_request_message_write(r, "%s: error: %s\n", "probe input too large");
 			return 1;
 		}
 		ok = kind == VCCD_PROBE_AS ? vccd_capabilities_as_source_probe(src, len) : vccd_capabilities_c_source_probe(src, len);
@@ -238,7 +238,7 @@ VPRIV int vccd_probe_cc_answer(const struct req *r, int kind)
 			return vccd_probe_stdin_compile(r, src, len);
 		}
 		if (!ok) {
-			say(r, "%s: error: %s\n", "probe source rejected");
+			vccd_request_message_write(r, "%s: error: %s\n", "probe source rejected");
 			return 1;
 		}
 	}
@@ -253,7 +253,7 @@ VPRIV int vccd_probe_cc_answer(const struct req *r, int kind)
 			snprintf(path, sizeof(path), "%s/%s", r->cwd, out);
 		fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
 		if (fd < 0) {
-			say(r, "%s: error: cannot open output '%s'\n", out);
+			vccd_request_message_write(r, "%s: error: cannot open output '%s'\n", out);
 			return 1;
 		}
 		close(fd);
@@ -262,19 +262,19 @@ VPRIV int vccd_probe_cc_answer(const struct req *r, int kind)
 }
 
 /* `ld -v <opt>...`: version query plus options; answered from the table */
-VPRIV bool vccd_probe_ld_is_query(const struct req *r)
+VPRIV bool vccd_probe_ld_is_query(const struct vccd_request *r)
 {
 	return r->argc >= 3 && !strcmp(r->argv[1], "-v");
 }
 
-VPRIV int vccd_probe_ld_answer(const struct req *r)
+VPRIV int vccd_probe_ld_answer(const struct vccd_request *r)
 {
 	const char *why;
 	int i;
 
 	for (i = 2; i < r->argc; i++)
 		if (!vccd_capabilities_ld_option_is_accepted(r->argv[i], &why)) {
-			say(r, "%s: error: unknown argument '%s'\n", why);
+			vccd_request_message_write(r, "%s: error: unknown argument '%s'\n", why);
 			return 1;
 		}
 	return 0;
