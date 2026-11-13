@@ -1,3 +1,13 @@
+/* Vcc's own text style and its flush. */
+#include "../frontend/pp/ppimpl.h"
+#include "common/buf.h"
+#include <ctype.h>
+#include <dlfcn.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
 /*
  * vcc's text diagnostics (PLAN-diag.md D4): the default look.  The first line of
  * each record (and of each note) is clang's, for the tools that parse it; below it:
@@ -18,16 +28,11 @@
  * -fdiagnostics-style=narrated says the same in words, one fact per line
  * (miette's narratable mode, for screen readers); =clang is clang's text.
  */
-#include "../pp/ppimpl.h"
-#include "common/buf.h"
-#include <ctype.h>
 
 #define DC_RESET "\033[0m"
 #define DC_MARK "\033[0;1;32m"	/* bold green, clang's caret */
 #define DC_NOTE "\033[0;1;34m"	/* bold blue: a note's mark and label */
 #define DC_FIXIT "\033[0;32m"	/* green */
-#define DC_OLD "\033[0;1;32m"	/* type diff: the part only the first type has */
-#define DC_NEW "\033[0;1;35m"	/* ... and the second */
 
 enum { MAXLINES = 12, MAXMARKS = 32, CONTEXT = 5 };
 
@@ -39,14 +44,14 @@ typedef struct mark {
 	uint8_t pri;		/* who wins a column: '^' 3, '~' 2, '-' 1 */
 } mark;
 
-static uint32_t lstart(const char *s, uint32_t off)
+VPRIV uint32_t lstart(const char *s, uint32_t off)
 {
 	while (off > 0 && s[off - 1] != '\n')
 		off--;
 	return off;
 }
 
-static uint32_t lend(const char *s, uint32_t size, uint32_t ls)
+VPRIV uint32_t lend(const char *s, uint32_t size, uint32_t ls)
 {
 	uint32_t le = ls;
 
@@ -489,60 +494,6 @@ static void render_vcc(pp *p, vbuf *b, vdiag *top)
 
 /* ---------------- narrated: the same facts in words ---------------- */
 
-static void say_place(pp *p, vbuf *b, const char *what, uint32_t loc)
-{
-	const char *name;
-	uint32_t nl, line, col;
-
-	if (diag_where(p, loc, &name, &nl, &line, &col))
-		vbuf_f(b, "%s line %u, column %u", what, line, col);
-}
-
-static void render_narr(pp *p, vbuf *b, const vdiag *d)
-{
-	const fent *e;
-
-	if (render_head(p, b, d, &e)) {
-		const char *s = e->f->src;
-		uint32_t ls = lstart(s, d->loc - e->base), le = lend(s, e->f->size, ls);
-
-		vbuf_f(b, "  the source line is: ");
-		while (ls < le && (s[ls] == ' ' || s[ls] == '\t'))
-			ls++;
-		for (uint32_t i = ls; i < le; i++)
-			vbuf_put(b, s[i] == '\t' ? " " : s + i, 1);
-		vbuf_s(b, "\n");
-		for (uint32_t i = 0; i < d->nspan; i++) {
-			if (!d->span[i].label)
-				continue;
-			vbuf_s(b, "  ");
-			say_place(p, b, "at", d->span[i].b);
-			vbuf_f(b, ": %s\n", d->span[i].label);
-		}
-		if (d->label) {
-			vbuf_s(b, "  ");
-			say_place(p, b, "at", d->loc);
-			vbuf_f(b, ": %s\n", d->label);
-		}
-	}
-	for (uint32_t i = 0; i < d->nfix; i++) {
-		const vdfix *f = &d->fix[i];
-
-		vbuf_s(b, "  fix: ");
-		if (f->b == f->e)
-			vbuf_f(b, "insert '%s' ", f->s);
-		else if (!*f->s)
-			vbuf_s(b, "remove the text ");
-		else
-			vbuf_f(b, "replace the text with '%s' ", f->s);
-		say_place(p, b, "at", f->b);
-		vbuf_s(b, "\n");
-	}
-	if (d->help)
-		vbuf_f(b, "  help: %s\n", d->help);
-}
-
-/* the pending record (and its notes) to the error stream */
 VPRIV void diag_text_flush(pp *p)
 {
 	int fd = p->o->errfd ? p->o->errfd : 2;
@@ -592,57 +543,3 @@ VPRIV void diag_render_color(pp *p, vbuf *b, vdiag *d)
 }
 
 /* the narrated style renders at once (no folding) */
-VPRIV void diag_narrate(pp *p, vbuf *b, vdiag *d)
-{
-	render_narr(p, b, d);
-}
-
-/* ---------------- type diff (colour only) ---------------- */
-
-/* the message with the parts in which its two quoted types differ highlighted
-   (GCC 15's contrasting colours): the tokens of the first that are not in the
-   second, and the other way round, after their common prefix and suffix */
-VPRIV void diag_typediff(vbuf *b, const vdiag *d, const char *plain)
-{
-	const char *m = d->msg, *q[4];
-	int nq = 0;
-
-	for (const char *x = m; *x && nq < 5; x++)
-		if (*x == '\'') {
-			if (nq == 4) {
-				nq = 5;
-				break;
-			}
-			q[nq++] = x;
-		}
-	if (nq != 4 || !d->fmt || !strstr(d->fmt, "'%s'") || (!strstr(d->fmt, "type") && !strstr(d->fmt, "incompatible"))) {
-		vbuf_s(b, m);
-		return;
-	}
-	{
-		const char *a = q[0] + 1, *ae = q[1], *c = q[2] + 1, *ce = q[3];
-		size_t pre = 0, suf = 0, na = (size_t)(ae - a), nc = (size_t)(ce - c);
-
-		if (na == nc && !memcmp(a, c, na)) {
-			vbuf_s(b, m);
-			return;
-		}
-		while (pre < na && pre < nc && a[pre] == c[pre])
-			pre++;
-		while (pre && (isalnum((unsigned char)a[pre - 1]) || a[pre - 1] == '_'))	/* whole words */
-			pre--;
-		while (suf < na - pre && suf < nc - pre && a[na - 1 - suf] == c[nc - 1 - suf])
-			suf++;
-		while (suf && (isalnum((unsigned char)a[na - suf]) || a[na - suf] == '_'))
-			suf--;
-		vbuf_put(b, m, (size_t)(a - m) + pre);
-		vbuf_s(b, DC_OLD);
-		vbuf_put(b, a + pre, na - pre - suf);
-		vbuf_s(b, plain);
-		vbuf_put(b, a + na - suf, (size_t)(c - (a + na - suf)) + pre);
-		vbuf_s(b, DC_NEW);
-		vbuf_put(b, c + pre, nc - pre - suf);
-		vbuf_s(b, plain);
-		vbuf_s(b, c + nc - suf);
-	}
-}
