@@ -1,4 +1,5 @@
 /* vcc preprocessor: include search, entering files, #include */
+#include <errno.h>
 #include "ppimpl.h"
 #include "../lib/mapfile.h"
 
