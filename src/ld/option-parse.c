@@ -1,5 +1,7 @@
 /* Command-line parsing (ld_arguments_parse) and library search. */
 
+#include "ld-internal.h"
+
 /* ---------------- main link ---------------- */
 
 static void ld_usage_error_report(struct ld_context *ctx, const char *a)
@@ -26,7 +28,7 @@ static const char *ld_library_find(struct ld_context *ctx, const char *name)
 	return NULL;
 }
 
-static bool ld_arguments_parse(struct ld_context *ctx, int argc, char **argv)
+VPRIV bool ld_arguments_parse(struct ld_context *ctx, int argc, char **argv)
 {
 	bool whole = false;
 	ctx->options.max_page_size = 0;	/* (default by machine once the inputs are read: arm64 64 KB, x86-64 4 KB, as lld) */

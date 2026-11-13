@@ -306,7 +306,7 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
 		else if (!strcmp(a, "-fdata-sections")) job->function_data_sections |= 2;
 		else if (!strcmp(a, "-fno-data-sections")) job->function_data_sections &= ~2;
 		else if (!strncmp(a, "-ftls-model=", 12)) {
-			if (!(job->tls_model = vcc_tls_model(a + 12))) {
+			if (!(job->tls_model = cc_tls_model_parse(a + 12))) {
 				fprintf(stderr, "vcc: error: invalid value '%s' in '%s'\n", a + 12, a);
 				return 2;	/* (Q-drv-07: the one exit that skips the job's cleanup) */
 			}
@@ -317,7 +317,7 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
 		else if (!strcmp(a, "-fno-builtin")) job->no_builtin = 1;
 		else if (!strcmp(a, "-fno-jump-tables")) job->no_jump_tables = 1;
 		else if (!strcmp(a, "-fjump-tables")) job->no_jump_tables = 0;
-		else if (!strncmp(a, "-fno-builtin-", 13)) cc_disable_builtin(job->disabled_builtins, a + 13);
+		else if (!strncmp(a, "-fno-builtin-", 13)) cc_builtin_disable(job->disabled_builtins, a + 13);
 		else if (!strcmp(a, "-mllvm") && i + 1 < argc) {
 			/* emcc -sSUPPORT_LONGJMP=wasm: setjmp/longjmp through wasm exceptions */
 			if (!strcmp(argv[++i], "-wasm-enable-sjlj"))

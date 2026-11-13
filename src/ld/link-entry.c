@@ -1,5 +1,10 @@
 /* ld_main: the entry point vccd and vlink call for one link. */
 
+#include "ld-internal.h"
+
+/* one ELF link at a time in the process */
+static pthread_mutex_t ld_link_lock = PTHREAD_MUTEX_INITIALIZER;
+
 int ld_main(int argc, char **argv, int dirfd, FILE *err)
 {
 	struct ld_response_memory *rsp = NULL;

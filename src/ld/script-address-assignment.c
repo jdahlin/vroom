@@ -1,5 +1,7 @@
 /* Script symbol assignments and the address-assignment passes over output sections. */
 
+#include "ld-internal.h"
+
 /* ================= script symbols and address assignment ================= */
 
 /* op= of a symbol assignment (lld readSymbolAssignment) */
@@ -62,7 +64,7 @@ static bool ld_script_symbol_assign(struct ld_context *ctx, ld_assignment *a, bo
 }
 
 /* assignOffsets(); returns true if the section address changed */
-static bool ld_output_section_offsets_assign(struct ld_context *ctx, uint32_t oi, bool *symchg)
+VPRIV bool ld_output_section_offsets_assign(struct ld_context *ctx, uint32_t oi, bool *symchg)
 {
 	ld_output_section *os = &ctx->script.sections.v[oi];
 	uint64_t saved = ctx->layout.dot;
@@ -102,7 +104,7 @@ static bool ld_output_section_offsets_assign(struct ld_context *ctx, uint32_t oi
 	return changed;
 }
 
-static bool ld_addresses_assign(struct ld_context *ctx)
+VPRIV bool ld_addresses_assign(struct ld_context *ctx)
 {
 	bool changed = false, symchg = false;
 	ctx->layout.dot = 0;
@@ -144,7 +146,7 @@ static void ld_script_symbol_add(struct ld_context *ctx, ld_assignment *a)
 		s->expression_value = (ld_expression_value){.kind = v.kind, .index = v.index, .value = 0, .alignment = 1};
 }
 
-static void ld_symbol_assignments_process(struct ld_context *ctx)
+VPRIV void ld_symbol_assignments_process(struct ld_context *ctx)
 {
 	ctx->layout.dot = 0;
 	ctx->layout.current_output_section = LD_OUTPUT_SECTION_AETHER;

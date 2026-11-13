@@ -72,7 +72,7 @@ static val popcount(ecx *e, val v, int x)
 static void overflow_wide_operand(ecx *e, uint32_t n, int64_t sl)
 {
 	cc *c = e->c;
-	qty t = N(n)->ty;
+	ast_qualified_type t = N(n)->ty;
 	unsigned bits = em_bitint(c, t) ? T(c, t)->n : (unsigned)tsize(c, t) * 8;
 	bool sign = is_signed(c, t);
 	val v = gen(e, n);
@@ -102,7 +102,7 @@ static void overflow_wide_operand(ecx *e, uint32_t n, int64_t sl)
 static val gen_overflow_wide(ecx *e, const node *x, const uint32_t *arg)
 {
 	cc *c = e->c;
-	qty tr = T(c, N(arg[2])->ty)->base;
+	ast_qualified_type tr = T(c, N(arg[2])->ty)->base;
 	unsigned bits = em_bitint(c, tr) ? T(c, tr)->n : (unsigned)tsize(c, tr) * 8;
 	bool sign = is_signed(c, tr);
 	int64_t as = slot(e, 32, 8), bs = slot(e, 32, 8), rs = slot(e, 32, 8), ps = slot(e, 8, 8);
@@ -115,8 +115,8 @@ static val gen_overflow_wide(ecx *e, const node *x, const uint32_t *arg)
 	mem(e, I_ST, 3, 0, toreg(e, &p), FRAME, ps);
 	val_free(e, &p);
 	a = treg(e), b = treg(e), lo = treg(e), hi = treg(e), acc = treg(e);
-	if (x->aux != BI_MUL_OVERFLOW) {
-		bool add = x->aux == BI_ADD_OVERFLOW;
+	if (x->aux != CC_BUILTIN_MUL_OVERFLOW) {
+		bool add = x->aux == CC_BUILTIN_ADD_OVERFLOW;
 		for (unsigned i = 0; i < 4; i++) {
 			mem(e, I_LD, 3, 0, a, FRAME, as + i * 8);
 			mem(e, I_LD, 3, 0, b, FRAME, bs + i * 8);
@@ -198,7 +198,7 @@ static val gen_overflow_wide(ecx *e, const node *x, const uint32_t *arg)
 static val gen_overflow(ecx *e, const node *x, const uint32_t *arg)
 {
 	cc *c = e->c;
-	qty ta = N(arg[0])->ty, tb = N(arg[1])->ty, tr = T(c, N(arg[2])->ty)->base;
+	ast_qualified_type ta = N(arg[0])->ty, tb = N(arg[1])->ty, tr = T(c, N(arg[2])->ty)->base;
 	if (tsize(c, ta) > 8 || tsize(c, tb) > 8 || (em_bitint(c, tr) && T(c, tr)->n > 64))
 		return gen_overflow_wide(e, x, arg);
 	val a = gen(e, arg[0]), b = gen(e, arg[1]), p = gen(e, arg[2]);
@@ -218,11 +218,11 @@ static val gen_overflow(ecx *e, const node *x, const uint32_t *arg)
 	}
 	lo = a.r, hi = a.r2;
 	switch (x->aux) {
-	case BI_ADD_OVERFLOW:
+	case CC_BUILTIN_ADD_OVERFLOW:
 		op3(e, I_ADDS, 1, lo, lo, b.r);
 		op3(e, I_ADC, 1, hi, hi, b.r2);
 		break;
-	case BI_SUB_OVERFLOW:
+	case CC_BUILTIN_SUB_OVERFLOW:
 		op3(e, I_SUBS, 1, lo, lo, b.r);
 		op3(e, I_SBC, 1, hi, hi, b.r2);
 		break;
@@ -240,7 +240,7 @@ static val gen_overflow(ecx *e, const node *x, const uint32_t *arg)
 		 * signed 128-bit range.  Addition and subtraction fit signed 128,
 		 * even for unsigned operands (subtraction can be negative).
 		 */
-		bool uu = x->aux == BI_MUL_OVERFLOW && !is_signed(c, ta) && !is_signed(c, tb);
+		bool uu = x->aux == CC_BUILTIN_MUL_OVERFLOW && !is_signed(c, ta) && !is_signed(c, tb);
 		val r = { .k = V_REG2, .r = (uint8_t)lo, .r2 = (uint8_t)hi };
 
 		ok = treg(e);
@@ -291,9 +291,9 @@ static val gen_overflow(ecx *e, const node *x, const uint32_t *arg)
 static val gen_carry(ecx *e, const node *x, const uint32_t *arg)
 {
 	cc *c = e->c;
-	qty ty = x->ty, tc = T(c, N(arg[3])->ty)->base;
+	ast_qualified_type ty = x->ty, tc = T(c, N(arg[3])->ty)->base;
 	int sz = (int)tsize(c, ty), bits = sz * 8;
-	bool add = x->aux == BI_ADDC;
+	bool add = x->aux == CC_BUILTIN_ADDC;
 	val a = gen(e, arg[0]), b = gen(e, arg[1]), ci = gen(e, arg[2]), p = gen(e, arg[3]);
 	int ra = toreg(e, &a), rb = toreg(e, &b), rc = toreg(e, &ci), co = treg(e);
 	lval l;
@@ -367,7 +367,7 @@ static void va_start_(ecx *e, uint32_t apn)
 VPRIV val va_arg_(ecx *e, const node *x)
 {
 	cc *c = e->c;
-	qty t = x->ty;
+	ast_qualified_type t = x->ty;
 	if (!DARWIN(c) && is_bvec(c, t) && (T(c, t)->n == 64 || T(c, t)->n == 128))
 		efatal(e, e->curloc, "arm64: variadic transport of 64/128-lane packed boolean vectors is not supported");
 	uint64_t size = tsize(c, t);
@@ -596,12 +596,12 @@ static val gen_atomic(ecx *e, const node *x, const uint32_t *arg)
 {
 	cc *c = e->c;
 	int id = x->aux;
-	qty t = QUNQ(T(c, N(arg[0])->ty)->base);
+	ast_qualified_type t = AST_QUALIFIED_TYPE_UNQUALIFIED(T(c, N(arg[0])->ty)->base);
 	uint64_t n = tsize(c, t);
 	unsigned sz = (unsigned)log2sz(n), xs = n == 8;
 	bool sg = is_integer(c, t) && is_signed(c, t);
 	val p = gen(e, arg[0]), v1 = vnone(), v2 = vnone(), res = vnone();
-	int rp, nmo = id == BI_ATOMIC_CMPXCHG_N || id == BI_ATOMIC_CMPXCHG ? 2 : 1, nargs = (int)x->c;
+	int rp, nmo = id == CC_BUILTIN_ATOMIC_CMPXCHG_N || id == CC_BUILTIN_ATOMIC_CMPXCHG ? 2 : 1, nargs = (int)x->c;
 
 	if (n == 16)
 		efatal(e, x->loc, "16-byte atomics are not supported");
@@ -622,11 +622,11 @@ static val gen_atomic(ecx *e, const node *x, const uint32_t *arg)
 		val_free(e, &w);
 	}
 	switch (id) {
-	case BI_ATOMIC_LOAD_N: case BI_ATOMIC_LOAD: {
+	case CC_BUILTIN_ATOMIC_LOAD_N: case CC_BUILTIN_ATOMIC_LOAD: {
 		int r = treg(e);
 
 		word(e, sz << 30 | 0x08dffc00u | (unsigned)rp << 5 | (unsigned)r);	/* ldar */
-		if (id == BI_ATOMIC_LOAD) {
+		if (id == CC_BUILTIN_ATOMIC_LOAD) {
 			int rr = toreg(e, &v1);
 
 			mem(e, I_ST, (int)sz, 0, r, rr, 0);
@@ -638,24 +638,24 @@ static val gen_atomic(ecx *e, const node *x, const uint32_t *arg)
 		res = vreg(r);
 		break;
 	}
-	case BI_ATOMIC_STORE_N: case BI_ATOMIC_STORE: {
+	case CC_BUILTIN_ATOMIC_STORE_N: case CC_BUILTIN_ATOMIC_STORE: {
 		int r;
 
-		if (id == BI_ATOMIC_STORE) {
+		if (id == CC_BUILTIN_ATOMIC_STORE) {
 			int rv = toreg(e, &v1);
 
 			r = treg(e);
 			mem(e, I_LD, (int)sz, 0, r, rv, 0);
 			tfree(e, r);
 		}
-		r = id == BI_ATOMIC_STORE ? r : toreg(e, &v1);
+		r = id == CC_BUILTIN_ATOMIC_STORE ? r : toreg(e, &v1);
 		word(e, sz << 30 | 0x089ffc00u | (unsigned)rp << 5 | (unsigned)r);	/* stlr */
 		break;
 	}
-	case BI_ATOMIC_EXCHANGE_N: case BI_ATOMIC_EXCHANGE: {
+	case CC_BUILTIN_ATOMIC_EXCHANGE_N: case CC_BUILTIN_ATOMIC_EXCHANGE: {
 		int rs, r = treg(e);
 
-		if (id == BI_ATOMIC_EXCHANGE) {
+		if (id == CC_BUILTIN_ATOMIC_EXCHANGE) {
 			int rv = toreg(e, &v1);
 
 			rs = treg(e);
@@ -664,7 +664,7 @@ static val gen_atomic(ecx *e, const node *x, const uint32_t *arg)
 			rs = toreg(e, &v1);
 		}
 		at_swp(e, sz, rs, r, rp);	/* swpal */
-		if (id == BI_ATOMIC_EXCHANGE) {
+		if (id == CC_BUILTIN_ATOMIC_EXCHANGE) {
 			int rr = toreg(e, &v2);
 
 			mem(e, I_ST, (int)sz, 0, r, rr, 0);
@@ -677,12 +677,12 @@ static val gen_atomic(ecx *e, const node *x, const uint32_t *arg)
 		res = vreg(r);
 		break;
 	}
-	case BI_ATOMIC_CMPXCHG_N: case BI_ATOMIC_CMPXCHG: {
+	case CC_BUILTIN_ATOMIC_CMPXCHG_N: case CC_BUILTIN_ATOMIC_CMPXCHG: {
 		/* old = *expected; casal old, desired, [p]; ok = old == *expected; if !ok *expected = old */
 		int re = toreg(e, &v1), rd, old = treg(e), cmpv = treg(e), ok;
 		uint32_t l = newlabel(e);
 
-		if (id == BI_ATOMIC_CMPXCHG) {
+		if (id == CC_BUILTIN_ATOMIC_CMPXCHG) {
 			int rv = toreg(e, &v2);
 
 			rd = treg(e);
@@ -703,18 +703,18 @@ static val gen_atomic(ecx *e, const node *x, const uint32_t *arg)
 		deflabel(e, l);
 		tfree(e, old);
 		tfree(e, cmpv);
-		if (id == BI_ATOMIC_CMPXCHG)
+		if (id == CC_BUILTIN_ATOMIC_CMPXCHG)
 			tfree(e, rd);
 		res = vreg(ok);
 		break;
 	}
-	case BI_SYNC_VAL_CAS: case BI_SYNC_BOOL_CAS: {
+	case CC_BUILTIN_SYNC_VAL_CAS: case CC_BUILTIN_SYNC_BOOL_CAS: {
 		/* old = expected; casal old, desired, [p]; val: old; bool: old == expected (low n bytes) */
 		int re = toreg(e, &v1), rd = toreg(e, &v2), old = treg(e);
 
 		mov(e, 1, old, re);
 		at_cas(e, sz, old, rd, rp);	/* casal */
-		if (id == BI_SYNC_VAL_CAS) {
+		if (id == CC_BUILTIN_SYNC_VAL_CAS) {
 			if (sg && n < 8)
 				extend(e, old, old, (int)n, true);
 			res = vreg(old);
@@ -736,7 +736,7 @@ static val gen_atomic(ecx *e, const node *x, const uint32_t *arg)
 	}
 	default: {
 		/* ld<op>al: add 000, clr 001, eor 010, set 011, smax 100, smin 101, umax 110, umin 111 */
-		int base = id >= BI_ATOMIC_ADD_FETCH ? id - BI_ATOMIC_ADD_FETCH : id - BI_ATOMIC_FETCH_ADD;	/* add sub and or xor nand max min */
+		int base = id >= CC_BUILTIN_ATOMIC_ADD_FETCH ? id - CC_BUILTIN_ATOMIC_ADD_FETCH : id - CC_BUILTIN_ATOMIC_FETCH_ADD;	/* add sub and or xor nand max min */
 		static const unsigned opc[] = { 0, 0, 1, 3, 2, 8, 4, 5 };
 		unsigned o = opc[base] + (base >= 6 && !sg ? 2 : 0);
 		int rv = toreg(e, &v1), rs = treg(e), r = treg(e);
@@ -749,7 +749,7 @@ static val gen_atomic(ecx *e, const node *x, const uint32_t *arg)
 			mov(e, 1, rs, rv);
 		at_ldop(e, sz, o, rs, r, rp);
 		tfree(e, rs);
-		if (id >= BI_ATOMIC_ADD_FETCH) {
+		if (id >= CC_BUILTIN_ATOMIC_ADD_FETCH) {
 			static const int bop[] = { I_ADD, I_SUB, I_AND, I_ORR, I_EOR };
 
 			if (base < 5) {
@@ -786,27 +786,27 @@ VPRIV int a64_constant_p(ecx *e, uint32_t arg)
 	 * not arithmetic; else whatever the optimizer folds, which here is
 	 * the operand after inlining (dry).
 	 */
-	cval cv;
-	qty at = N(arg)->ty;
+	cc_value cv;
+	ast_qualified_type at = N(arg)->ty;
 
-	if (cc_eval(c, arg, &cv) && (cv.kind == CV_INT || cv.kind == CV_FLT ||
-					 (cv.kind == CV_ADDR && cv.str && cv.i == 0 && !cv.sym && !cv.label)))
+	if (cc_eval(c, arg, &cv) && (cv.kind == CC_VALUE_INTEGER || cv.kind == CC_VALUE_FLOAT ||
+					 (cv.kind == CC_VALUE_ADDRESS && cv.str && cv.i == 0 && !cv.sym && !cv.label)))
 		return 1;
 	if (side_effects(c, arg) || !(is_integer(c, at) || is_flt(c, at)))
 		return 0;
 	{
 		/* "hi"[0]: the optimizer reads a character of a literal */
 		uint32_t r = arg;
-		cval ix;
+		cc_value ix;
 
-		while (N(r)->op == N_CAST && (N(r)->aux == CK_INT || N(r)->aux == CK_NOP))
+		while (N(r)->op == AST_NODE_CAST && (N(r)->aux == AST_CAST_INTEGER || N(r)->aux == AST_CAST_NOP))
 			r = N(r)->a;
-		if (N(r)->op == N_INDEX && cc_eval(c, N(r)->b, &ix) && ix.kind == CV_INT) {
+		if (N(r)->op == AST_NODE_INDEX && cc_eval(c, N(r)->b, &ix) && ix.kind == CC_VALUE_INTEGER) {
 			uint32_t s = N(r)->a;
 
-			while (N(s)->op == N_CAST && (N(s)->aux == CK_DECAY || N(s)->aux == CK_NOP))
+			while (N(s)->op == AST_NODE_CAST && (N(s)->aux == AST_CAST_ARRAY_DECAY || N(s)->aux == AST_CAST_NOP))
 				s = N(s)->a;
-			if (N(s)->op == N_STR && ix.i >= 0 && (uint64_t)ix.i < c->strs[N(s)->a].n)
+			if (N(s)->op == AST_NODE_STRING && ix.i >= 0 && (uint64_t)ix.i < c->strs[N(s)->a].n)
 				return 1;
 		}
 	}
@@ -822,12 +822,12 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 	val v;
 
 	switch (x->aux) {
-	case BI_SHUFFLEVECTOR: case BI_CONVERTVECTOR: {
+	case CC_BUILTIN_SHUFFLEVECTOR: case CC_BUILTIN_CONVERTVECTOR: {
 		/* lane by lane through a frame slot (vectors are addresses here) */
-		qty at = N(arg[0])->ty, ae = T(c, at)->base, re = T(c, x->ty)->base;
+		ast_qualified_type at = N(arg[0])->ty, ae = T(c, at)->base, re = T(c, x->ty)->base;
 		unsigned na = T(c, at)->ext ?: T(c, at)->n, nr = T(c, x->ty)->ext ?: T(c, x->ty)->n;
-		val a = gen(e, arg[0]), b = x->aux == BI_SHUFFLEVECTOR ? gen(e, arg[1]) : vconst(0);
-		int ra = toreg(e, &a), rb = x->aux == BI_SHUFFLEVECTOR ? toreg(e, &b) : -1;
+		val a = gen(e, arg[0]), b = x->aux == CC_BUILTIN_SHUFFLEVECTOR ? gen(e, arg[1]) : vconst(0);
+		int ra = toreg(e, &a), rb = x->aux == CC_BUILTIN_SHUFFLEVECTOR ? toreg(e, &b) : -1;
 		int64_t sl = slot(e, tsize(c, x->ty), 16);
 		int rd = treg(e);
 
@@ -836,7 +836,7 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 			lval d = { .k = L_REG, .r = (uint8_t)rd, .off = (int64_t)i * (int64_t)tsize(c, re), .align = talign(c, re) };
 			val v;
 
-			if (x->aux == BI_SHUFFLEVECTOR) {
+			if (x->aux == CC_BUILTIN_SHUFFLEVECTOR) {
 				int64_t k = (int64_t)c->ipool[N(arg[2 + i])->a];
 				lval s = { .k = L_REG, .r = (uint8_t)(k < (int64_t)na ? ra : rb),
 					   .off = (k < (int64_t)na ? k : k - (int64_t)na) * (int64_t)tsize(c, ae), .align = talign(c, ae) };
@@ -845,10 +845,10 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 				v = k < 0 ? vconst(0) : load(e, &s, ae);
 			} else {
 				lval s = { .k = L_REG, .r = (uint8_t)ra, .off = (int64_t)i * (int64_t)tsize(c, ae), .align = talign(c, ae) };
-				int ck = is_flt(c, ae) ? (is_flt(c, re) ? CK_F2F : CK_F2I) : is_flt(c, re) ? CK_I2F : CK_INT;
+				int ck = is_flt(c, ae) ? (is_flt(c, re) ? AST_CAST_FLOAT_TO_FLOAT : AST_CAST_FLOAT_TO_INTEGER) : is_flt(c, re) ? AST_CAST_INTEGER_TO_FLOAT : AST_CAST_INTEGER;
 
 				if (is_bvec(c, at)) s.off = i / 8, s.bf = 1, s.width = 1, s.bitoff = i % 8;
-				v = cast(e, load(e, &s, ae), ae, re, KIND(c, re) == TY_BOOL ? CK_BOOL : ck);
+				v = cast(e, load(e, &s, ae), ae, re, KIND(c, re) == AST_TYPE_BOOL ? AST_CAST_BOOL : ck);
 			}
 			if (is_bvec(c, x->ty)) d.off = i / 8, d.bf = 1, d.width = 1, d.bitoff = i % 8;
 			store(e, &d, re, &v);
@@ -859,21 +859,21 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 			tfree(e, rb);
 		return vreg(rd);
 	}
-	case BI_CONSTANT_P:
+	case CC_BUILTIN_CONSTANT_P:
 		return vconst(a64_constant_p(e, arg[0]));
-	case BI_FAST_ROOT4: case BI_FAST_SQRT: {
-		int d = KIND(c, x->ty) == TY_DOUBLE;
+	case CC_BUILTIN_FAST_ROOT4: case CC_BUILTIN_FAST_SQRT: {
+		int d = KIND(c, x->ty) == AST_TYPE_DOUBLE;
 		v = gen(e, arg[0]);
 		toreg(e, &v);
 		word(e, f_in(d, 16, v.r));
 		word(e, 0x1e21c000u | (uint32_t)d << 22 | 16u << 5 | 16u);
-		if (x->aux == BI_FAST_ROOT4)
+		if (x->aux == CC_BUILTIN_FAST_ROOT4)
 			word(e, 0x1e21c000u | (uint32_t)d << 22 | 16u << 5 | 16u);
 		word(e, f_out(d, v.r, 16));
 		return v;
 	}
-	case BI_EXPECT:
-	case BI_EXPECT_PROB:
+	case CC_BUILTIN_EXPECT:
+	case CC_BUILTIN_EXPECT_PROB:
 		/* the hint is still evaluated (argument order is unspecified: first, so that
 		 * nothing is live across it) */
 		for (uint32_t i = 1; i < x->c; i++)
@@ -883,22 +883,22 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 			}
 		v = gen(e, arg[0]);
 		return v;
-	case BI_ASSUME_ALIGNED:
-	case BI_EXTRACT_RETURN_ADDR:
+	case CC_BUILTIN_ASSUME_ALIGNED:
+	case CC_BUILTIN_EXTRACT_RETURN_ADDRESS:
 		return gen(e, arg[0]);
-	case BI_ASSUME:
+	case CC_BUILTIN_ASSUME:
 		return vnone();
-	case BI_VA_END: {	/* nothing to do, but the argument's side effects happen */
+	case CC_BUILTIN_VA_END: {	/* nothing to do, but the argument's side effects happen */
 		lval l = gen_lval(e, arg[0]);
 		val a = laddr(e, &l);
 
 		val_free(e, &a);
 		return vnone();
 	}
-	case BI_VA_START:
+	case CC_BUILTIN_VA_START:
 		va_start_(e, arg[0]);
 		return vnone();
-	case BI_VA_COPY: {
+	case CC_BUILTIN_VA_COPY: {
 		lval d = gen_lval(e, arg[0]), s = gen_lval(e, arg[1]);
 		val dv = laddr(e, &d), sv = laddr(e, &s);
 		int rd = toreg(e, &dv), rs = toreg(e, &sv);
@@ -908,42 +908,42 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 		val_free(e, &sv);
 		return vnone();
 	}
-	case BI_UNREACHABLE:
+	case CC_BUILTIN_UNREACHABLE:
 		e->reach = false;
 		return vnone();
-	case BI_TRAP:
+	case CC_BUILTIN_TRAP:
 		if (e->reach)
 			put(e, I_BRK)->imm = 0x3e8;
 		e->reach = false;
 		return vnone();
-	case BI_ARM_NOP: case BI_ARM_YIELD: case BI_ARM_WFE: case BI_ARM_WFI: case BI_ARM_SEV: case BI_ARM_SEVL:
-	case BI_ARM_CLREX: case BI_ARM_ISB: case BI_ARM_DMB: case BI_ARM_DSB: case BI_ARM_TRAP: {
+	case CC_BUILTIN_ARM_NOP: case CC_BUILTIN_ARM_YIELD: case CC_BUILTIN_ARM_WFE: case CC_BUILTIN_ARM_WFI: case CC_BUILTIN_ARM_SEV: case CC_BUILTIN_ARM_SEVL:
+	case CC_BUILTIN_ARM_CLREX: case CC_BUILTIN_ARM_ISB: case CC_BUILTIN_ARM_DMB: case CC_BUILTIN_ARM_DSB: case CC_BUILTIN_ARM_TRAP: {
 		/* the instruction word: hints (op2 in bits 5-7), barriers (CRm, the operand, in 8-11) */
 		static const uint32_t w[] = {
-			[BI_ARM_NOP - BI_ARM_NOP] = 0xd503201f, [BI_ARM_YIELD - BI_ARM_NOP] = 0xd503203f,
-			[BI_ARM_WFE - BI_ARM_NOP] = 0xd503205f, [BI_ARM_WFI - BI_ARM_NOP] = 0xd503207f,
-			[BI_ARM_SEV - BI_ARM_NOP] = 0xd503209f, [BI_ARM_SEVL - BI_ARM_NOP] = 0xd50320bf,
-			[BI_ARM_CLREX - BI_ARM_NOP] = 0xd5033f5f, [BI_ARM_ISB - BI_ARM_NOP] = 0xd50330df,
-			[BI_ARM_DMB - BI_ARM_NOP] = 0xd50330bf, [BI_ARM_DSB - BI_ARM_NOP] = 0xd503309f,
+			[CC_BUILTIN_ARM_NOP - CC_BUILTIN_ARM_NOP] = 0xd503201f, [CC_BUILTIN_ARM_YIELD - CC_BUILTIN_ARM_NOP] = 0xd503203f,
+			[CC_BUILTIN_ARM_WFE - CC_BUILTIN_ARM_NOP] = 0xd503205f, [CC_BUILTIN_ARM_WFI - CC_BUILTIN_ARM_NOP] = 0xd503207f,
+			[CC_BUILTIN_ARM_SEV - CC_BUILTIN_ARM_NOP] = 0xd503209f, [CC_BUILTIN_ARM_SEVL - CC_BUILTIN_ARM_NOP] = 0xd50320bf,
+			[CC_BUILTIN_ARM_CLREX - CC_BUILTIN_ARM_NOP] = 0xd5033f5f, [CC_BUILTIN_ARM_ISB - CC_BUILTIN_ARM_NOP] = 0xd50330df,
+			[CC_BUILTIN_ARM_DMB - CC_BUILTIN_ARM_NOP] = 0xd50330bf, [CC_BUILTIN_ARM_DSB - CC_BUILTIN_ARM_NOP] = 0xd503309f,
 		};
-		cval cv = { 0 };
+		cc_value cv = { 0 };
 
-		if (x->aux >= BI_ARM_ISB && (!cc_eval(c, arg[0], &cv) || cv.kind != CV_INT))
+		if (x->aux >= CC_BUILTIN_ARM_ISB && (!cc_eval(c, arg[0], &cv) || cv.kind != CC_VALUE_INTEGER))
 			efatal(e, x->loc, "argument to '%s' must be a constant integer",
-			       x->aux == BI_ARM_TRAP ? "__builtin_arm_trap" : "__builtin_arm_dmb");
+			       x->aux == CC_BUILTIN_ARM_TRAP ? "__builtin_arm_trap" : "__builtin_arm_dmb");
 		if (!e->reach)
 			return vnone();
-		if (x->aux == BI_ARM_TRAP)
+		if (x->aux == CC_BUILTIN_ARM_TRAP)
 			put(e, I_BRK)->imm = (int64_t)(cv.i & 0xffff);
 		else
-			put(e, I_WORD)->imm = w[x->aux - BI_ARM_NOP] | (x->aux >= BI_ARM_ISB ? (uint32_t)(cv.i & 15) << 8 : 0);
+			put(e, I_WORD)->imm = w[x->aux - CC_BUILTIN_ARM_NOP] | (x->aux >= CC_BUILTIN_ARM_ISB ? (uint32_t)(cv.i & 15) << 8 : 0);
 		return vnone();
 	}
-	case BI_ROTL8: case BI_ROTL16: case BI_ROTL32: case BI_ROTL64:
-	case BI_ROTR8: case BI_ROTR16: case BI_ROTR32: case BI_ROTR64: {
+	case CC_BUILTIN_ROTL8: case CC_BUILTIN_ROTL16: case CC_BUILTIN_ROTL32: case CC_BUILTIN_ROTL64:
+	case CC_BUILTIN_ROTR8: case CC_BUILTIN_ROTR16: case CC_BUILTIN_ROTR32: case CC_BUILTIN_ROTR64: {
 		/* LSLV/LSRV take the count mod the register width: 32/64 bits as
 		   (x << n) | (x >> -n); 8/16 bits with n & (w-1), w - n and a mask */
-		int k = (x->aux - BI_ROTL8) & 3, w = 8 << k, ax = w == 64, left = x->aux < BI_ROTR8;
+		int k = (x->aux - CC_BUILTIN_ROTL8) & 3, w = 8 << k, ax = w == 64, left = x->aux < CC_BUILTIN_ROTR8;
 		val a = gen(e, arg[0]), b = gen(e, arg[1]);
 		int ra = toreg(e, &a), rb = toreg(e, &b), t = treg(e);
 
@@ -963,11 +963,11 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 		val_free(e, &b);
 		return a;
 	}
-	case BI_DEBUGTRAP:
+	case CC_BUILTIN_DEBUGTRAP:
 		if (e->reach)
 			put(e, I_BRK)->imm = 0xf000;
 		return vnone();
-	case BI_RETURN_ADDRESS: case BI_FRAME_ADDRESS: {
+	case CC_BUILTIN_RETURN_ADDRESS: case CC_BUILTIN_FRAME_ADDRESS: {
 		val depth = gen(e, arg[0]);
 		int r = treg(e);
 		uint32_t level;
@@ -990,27 +990,27 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 			cbz(e, true, 0, count, loop);
 			tfree(e, count);
 		}
-		if (x->aux == BI_RETURN_ADDRESS)
+		if (x->aux == CC_BUILTIN_RETURN_ADDRESS)
 			mem(e, I_LD, 3, 0, r, r, 8);
 		return vreg(r);
 	}
-	case BI_OBJECT_SIZE:
-	case BI_DYNAMIC_OBJECT_SIZE: {
-		cval cv;
+	case CC_BUILTIN_OBJECT_SIZE:
+	case CC_BUILTIN_DYNAMIC_OBJECT_SIZE: {
+		cc_value cv;
 		i128 size;
 		if (e->f && e->f->inl && inline_object_size(e, e->f->fn, e->f->call, arg[0], arg[1], &size))
 			return vconst(size);
-		if (cc_eval(c, n, &cv) && cv.kind == CV_INT)
+		if (cc_eval(c, n, &cv) && cv.kind == CC_VALUE_INTEGER)
 			return vconst(cv.i);
 		return vconst((i128)(uint64_t)-1);
 	}
-	case BI_IS_CONSTANT_EVALUATED:
+	case CC_BUILTIN_IS_CONSTANT_EVALUATED:
 		return vconst(0);
-	case BI_ADD_OVERFLOW: case BI_SUB_OVERFLOW: case BI_MUL_OVERFLOW:
+	case CC_BUILTIN_ADD_OVERFLOW: case CC_BUILTIN_SUB_OVERFLOW: case CC_BUILTIN_MUL_OVERFLOW:
 		return gen_overflow(e, x, arg);
-	case BI_ADDC: case BI_SUBC:
+	case CC_BUILTIN_ADDC: case CC_BUILTIN_SUBC:
 		return gen_carry(e, x, arg);
-	case BI_PREFETCH: {
+	case CC_BUILTIN_PREFETCH: {
 		val p = gen(e, arg[0]);
 		int r = toreg(e, &p);
 
@@ -1019,8 +1019,8 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 		val_free(e, &p);
 		return vnone();
 	}
-	case BI_ALLOCA:
-	case BI_ALLOCA_UNINIT: {
+	case CC_BUILTIN_ALLOCA:
+	case CC_BUILTIN_ALLOCA_UNINITIALIZED: {
 		val s = gen(e, arg[0]);
 		int r = toreg(e, &s);
 		ins *i;
@@ -1038,7 +1038,7 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 			uint32_t sym = e->clean[k];
 			const bind *b = binding(e, sym);
 
-			if ((T(c, c->syms[sym].ty)->flags & TF_VLA) && b->kind == B_INDIRECT) {
+			if ((T(c, c->syms[sym].ty)->flags & AST_TYPE_FLAG_VLA) && b->kind == B_INDIRECT) {
 				int sp = treg(e);
 				mov(e, 1, sp, SP);
 				mem(e, I_ST, 3, 0, sp, FRAME, b->slot + 8);
@@ -1047,22 +1047,22 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 		}
 		return s;
 	}
-	case BI_ATOMIC_LOAD_N: case BI_ATOMIC_STORE_N: case BI_ATOMIC_EXCHANGE_N: case BI_ATOMIC_CMPXCHG_N:
-	case BI_ATOMIC_LOAD: case BI_ATOMIC_STORE: case BI_ATOMIC_EXCHANGE: case BI_ATOMIC_CMPXCHG:
-	case BI_ATOMIC_FETCH_ADD: case BI_ATOMIC_FETCH_SUB: case BI_ATOMIC_FETCH_AND: case BI_ATOMIC_FETCH_OR:
-	case BI_ATOMIC_FETCH_XOR: case BI_ATOMIC_ADD_FETCH: case BI_ATOMIC_SUB_FETCH: case BI_ATOMIC_AND_FETCH:
-	case BI_ATOMIC_OR_FETCH: case BI_ATOMIC_XOR_FETCH: case BI_ATOMIC_FETCH_NAND: case BI_ATOMIC_FETCH_MAX:
-	case BI_ATOMIC_FETCH_MIN: case BI_ATOMIC_NAND_FETCH: case BI_ATOMIC_MAX_FETCH: case BI_ATOMIC_MIN_FETCH: case BI_SYNC_VAL_CAS: case BI_SYNC_BOOL_CAS:
+	case CC_BUILTIN_ATOMIC_LOAD_N: case CC_BUILTIN_ATOMIC_STORE_N: case CC_BUILTIN_ATOMIC_EXCHANGE_N: case CC_BUILTIN_ATOMIC_CMPXCHG_N:
+	case CC_BUILTIN_ATOMIC_LOAD: case CC_BUILTIN_ATOMIC_STORE: case CC_BUILTIN_ATOMIC_EXCHANGE: case CC_BUILTIN_ATOMIC_CMPXCHG:
+	case CC_BUILTIN_ATOMIC_FETCH_ADD: case CC_BUILTIN_ATOMIC_FETCH_SUB: case CC_BUILTIN_ATOMIC_FETCH_AND: case CC_BUILTIN_ATOMIC_FETCH_OR:
+	case CC_BUILTIN_ATOMIC_FETCH_XOR: case CC_BUILTIN_ATOMIC_ADD_FETCH: case CC_BUILTIN_ATOMIC_SUB_FETCH: case CC_BUILTIN_ATOMIC_AND_FETCH:
+	case CC_BUILTIN_ATOMIC_OR_FETCH: case CC_BUILTIN_ATOMIC_XOR_FETCH: case CC_BUILTIN_ATOMIC_FETCH_NAND: case CC_BUILTIN_ATOMIC_FETCH_MAX:
+	case CC_BUILTIN_ATOMIC_FETCH_MIN: case CC_BUILTIN_ATOMIC_NAND_FETCH: case CC_BUILTIN_ATOMIC_MAX_FETCH: case CC_BUILTIN_ATOMIC_MIN_FETCH: case CC_BUILTIN_SYNC_VAL_CAS: case CC_BUILTIN_SYNC_BOOL_CAS:
 		return gen_atomic(e, x, arg);
-	case BI_ATOMIC_THREAD_FENCE: case BI_ATOMIC_SIGNAL_FENCE: {
+	case CC_BUILTIN_ATOMIC_THREAD_FENCE: case CC_BUILTIN_ATOMIC_SIGNAL_FENCE: {
 		val m = gen(e, arg[0]);
 
 		val_free(e, &m);
-		if (e->reach && x->aux == BI_ATOMIC_THREAD_FENCE)
+		if (e->reach && x->aux == CC_BUILTIN_ATOMIC_THREAD_FENCE)
 			put(e, I_WORD)->imm = 0xd5033bbf;	/* dmb ish */
 		return vnone();
 	}
-	case BI_ATOMIC_LOCK_FREE: {
+	case CC_BUILTIN_ATOMIC_LOCK_FREE: {
 		for (uint32_t i = 0; i < x->c; i++) {	/* (size, p); __c11_atomic_is_lock_free: (size) */
 			val a = gen(e, arg[i]);
 
@@ -1070,11 +1070,11 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 		}
 		return vconst(1);
 	}
-	case BI_ARM_RSR: {
+	case CC_BUILTIN_ARM_RSR: {
 		uint32_t sn = strip_casts(c, arg[0]);
 		int r = treg(e);
 
-		if (N(sn)->op != N_STR)
+		if (N(sn)->op != AST_NODE_STRING)
 			efatal(e, x->loc, "__builtin_arm_rsr64 needs a string literal");
 		if (e->reach) {
 			ins *i = put(e, I_MRS);
@@ -1084,7 +1084,7 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 		}
 		return vreg(r);
 	}
-	case BI_FLT_ROUNDS: {	/* FLT_ROUNDS from FPCR.RMode, as clang: mrs; add #1<<22; ubfx #22, #2 */
+	case CC_BUILTIN_FLT_ROUNDS: {	/* FLT_ROUNDS from FPCR.RMode, as clang: mrs; add #1<<22; ubfx #22, #2 */
 		int r = treg(e);
 
 		if (e->reach) {
@@ -1096,12 +1096,12 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 		opbf(e, I_UBFM, 0, r, r, 22, 23);
 		return vreg(r);
 	}
-	case BI_CLZ: case BI_CLZL: case BI_CLZLL: case BI_CTZ: case BI_CTZL: case BI_CTZLL:
-	case BI_FFS: case BI_FFSL: case BI_FFSLL: case BI_POPCOUNT: case BI_POPCOUNTL: case BI_POPCOUNTLL:
-	case BI_PARITY: case BI_PARITYL: case BI_PARITYLL: case BI_BSWAP16: case BI_BSWAP32: case BI_BSWAP64:
-	case BI_CLRSB: case BI_CLRSBL: case BI_CLRSBLL: case BI_BITREVERSE8: case BI_BITREVERSE16:
-	case BI_BITREVERSE32: case BI_BITREVERSE64: {
-		qty at = N(arg[0])->ty;
+	case CC_BUILTIN_CLZ: case CC_BUILTIN_CLZL: case CC_BUILTIN_CLZLL: case CC_BUILTIN_CTZ: case CC_BUILTIN_CTZL: case CC_BUILTIN_CTZLL:
+	case CC_BUILTIN_FFS: case CC_BUILTIN_FFSL: case CC_BUILTIN_FFSLL: case CC_BUILTIN_POPCOUNT: case CC_BUILTIN_POPCOUNTL: case CC_BUILTIN_POPCOUNTLL:
+	case CC_BUILTIN_PARITY: case CC_BUILTIN_PARITYL: case CC_BUILTIN_PARITYLL: case CC_BUILTIN_BSWAP16: case CC_BUILTIN_BSWAP32: case CC_BUILTIN_BSWAP64:
+	case CC_BUILTIN_CLRSB: case CC_BUILTIN_CLRSBL: case CC_BUILTIN_CLRSBLL: case CC_BUILTIN_BITREVERSE8: case CC_BUILTIN_BITREVERSE16:
+	case CC_BUILTIN_BITREVERSE32: case CC_BUILTIN_BITREVERSE64: {
+		ast_qualified_type at = N(arg[0])->ty;
 		int ax = tsize(c, at) == 8, r, t;
 
 		v = gen(e, arg[0]);
@@ -1113,28 +1113,28 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 			if (tsize(c, at) == 2)
 				u &= 0xffff;
 			switch (x->aux) {
-			case BI_CLZ: case BI_CLZL: case BI_CLZLL:
+			case CC_BUILTIN_CLZ: case CC_BUILTIN_CLZL: case CC_BUILTIN_CLZLL:
 				if (!u)
 					goto runtime;
 				res = __builtin_clzll((uint64_t)u) - (64 - bits);
 				break;
-			case BI_CTZ: case BI_CTZL: case BI_CTZLL:
+			case CC_BUILTIN_CTZ: case CC_BUILTIN_CTZL: case CC_BUILTIN_CTZLL:
 				if (!u)
 					goto runtime;
 				res = __builtin_ctzll((uint64_t)u);
 				break;
-			case BI_FFS: case BI_FFSL: case BI_FFSLL:
+			case CC_BUILTIN_FFS: case CC_BUILTIN_FFSL: case CC_BUILTIN_FFSLL:
 				res = u ? __builtin_ctzll((uint64_t)u) + 1 : 0;
 				break;
-			case BI_POPCOUNT: case BI_POPCOUNTL: case BI_POPCOUNTLL:
+			case CC_BUILTIN_POPCOUNT: case CC_BUILTIN_POPCOUNTL: case CC_BUILTIN_POPCOUNTLL:
 				res = __builtin_popcountll((uint64_t)u);
 				break;
-			case BI_PARITY: case BI_PARITYL: case BI_PARITYLL:
+			case CC_BUILTIN_PARITY: case CC_BUILTIN_PARITYL: case CC_BUILTIN_PARITYLL:
 				res = __builtin_popcountll((uint64_t)u) & 1;
 				break;
-			case BI_BSWAP16: res = __builtin_bswap16((uint16_t)u); break;
-			case BI_BSWAP32: res = __builtin_bswap32((uint32_t)u); break;
-			case BI_BSWAP64: res = (i128)__builtin_bswap64((uint64_t)u); break;
+			case CC_BUILTIN_BSWAP16: res = __builtin_bswap16((uint16_t)u); break;
+			case CC_BUILTIN_BSWAP32: res = __builtin_bswap32((uint32_t)u); break;
+			case CC_BUILTIN_BSWAP64: res = (i128)__builtin_bswap64((uint64_t)u); break;
 			default:
 				goto runtime;
 			}
@@ -1143,14 +1143,14 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
 runtime:
 		r = toreg(e, &v);
 		switch (x->aux) {
-		case BI_CLZ: case BI_CLZL: case BI_CLZLL:
+		case CC_BUILTIN_CLZ: case CC_BUILTIN_CLZL: case CC_BUILTIN_CLZLL:
 			op3(e, I_CLZ, ax, r, r, 0);
 			break;
-		case BI_CTZ: case BI_CTZL: case BI_CTZLL:
+		case CC_BUILTIN_CTZ: case CC_BUILTIN_CTZL: case CC_BUILTIN_CTZLL:
 			op3(e, I_RBIT, ax, r, r, 0);
 			op3(e, I_CLZ, ax, r, r, 0);
 			break;
-		case BI_FFS: case BI_FFSL: case BI_FFSLL:
+		case CC_BUILTIN_FFS: case CC_BUILTIN_FFSL: case CC_BUILTIN_FFSLL:
 			t = treg(e);
 			op3(e, I_RBIT, ax, t, r, 0);
 			op3(e, I_CLZ, ax, t, t, 0);
@@ -1158,61 +1158,61 @@ runtime:
 			op3s(e, I_CSINC, 0, r, ZR, t, C_EQ, 0);
 			tfree(e, t);
 			break;
-		case BI_POPCOUNT: case BI_POPCOUNTL: case BI_POPCOUNTLL:
+		case CC_BUILTIN_POPCOUNT: case CC_BUILTIN_POPCOUNTL: case CC_BUILTIN_POPCOUNTLL:
 			return popcount(e, v, ax);
-		case BI_PARITY: case BI_PARITYL: case BI_PARITYLL:
+		case CC_BUILTIN_PARITY: case CC_BUILTIN_PARITYL: case CC_BUILTIN_PARITYLL:
 			v = popcount(e, v, ax);
 			opi(e, I_ANDI, 0, v.r, v.r, 1);
 			return v;
-		case BI_BSWAP16:
+		case CC_BUILTIN_BSWAP16:
 			op3(e, I_REV16, 0, r, r, 0);
 			break;
-		case BI_BSWAP32:
+		case CC_BUILTIN_BSWAP32:
 			op3(e, I_REV, 0, r, r, 0);
 			break;
-		case BI_BSWAP64:
+		case CC_BUILTIN_BSWAP64:
 			op3(e, I_REV, 1, r, r, 0);
 			break;
-		case BI_CLRSB: case BI_CLRSBL: case BI_CLRSBLL:
+		case CC_BUILTIN_CLRSB: case CC_BUILTIN_CLRSBL: case CC_BUILTIN_CLRSBLL:
 			op3(e, I_CLS, ax, r, r, 0);
 			break;
-		case BI_BITREVERSE8:
+		case CC_BUILTIN_BITREVERSE8:
 			op3(e, I_RBIT, 0, r, r, 0);
 			shift_imm(e, I_LSRV, 0, r, r, 24);
 			break;
-		case BI_BITREVERSE16:
+		case CC_BUILTIN_BITREVERSE16:
 			op3(e, I_RBIT, 0, r, r, 0);
 			shift_imm(e, I_LSRV, 0, r, r, 16);
 			break;
-		case BI_BITREVERSE32:
+		case CC_BUILTIN_BITREVERSE32:
 			op3(e, I_RBIT, 0, r, r, 0);
 			break;
-		case BI_BITREVERSE64:
+		case CC_BUILTIN_BITREVERSE64:
 			op3(e, I_RBIT, 1, r, r, 0);
 			break;
 		}
 		return v;
 	}
-	case BI_ISGREATER: case BI_ISGREATEREQUAL: case BI_ISLESS: case BI_ISLESSEQUAL:
-	case BI_ISLESSGREATER: case BI_ISUNORDERED: {
-		qty at = N(arg[0])->ty, bt = N(arg[1])->ty;
-		qty ct = is_ld(c, at) ? at : is_ld(c, bt) ? bt :
+	case CC_BUILTIN_ISGREATER: case CC_BUILTIN_ISGREATEREQUAL: case CC_BUILTIN_ISLESS: case CC_BUILTIN_ISLESSEQUAL:
+	case CC_BUILTIN_ISLESSGREATER: case CC_BUILTIN_ISUNORDERED: {
+		ast_qualified_type at = N(arg[0])->ty, bt = N(arg[1])->ty;
+		ast_qualified_type ct = is_ld(c, at) ? at : is_ld(c, bt) ? bt :
 		         (is_flt(c, at) && tsize(c, at) == 8) ||
-		         (is_flt(c, bt) && tsize(c, bt) == 8) ? prim(TY_DOUBLE) : prim(TY_FLOAT);
-		val a = cast(e, gen(e, arg[0]), at, ct, CK_INT);
-		val b = cast(e, gen(e, arg[1]), bt, ct, CK_INT);
-		int op = x->aux == BI_ISGREATER ? LEX_TOKEN_GREATER :
-		         x->aux == BI_ISGREATEREQUAL ? LEX_TOKEN_GREATER_EQUAL :
-		         x->aux == BI_ISLESS ? LEX_TOKEN_LESS :
-		         x->aux == BI_ISLESSEQUAL ? LEX_TOKEN_LESS_EQUAL : LEX_TOKEN_EXCLAMATION_EQUAL;
+		         (is_flt(c, bt) && tsize(c, bt) == 8) ? prim(AST_TYPE_DOUBLE) : prim(AST_TYPE_FLOAT);
+		val a = cast(e, gen(e, arg[0]), at, ct, AST_CAST_INTEGER);
+		val b = cast(e, gen(e, arg[1]), bt, ct, AST_CAST_INTEGER);
+		int op = x->aux == CC_BUILTIN_ISGREATER ? LEX_TOKEN_GREATER :
+		         x->aux == CC_BUILTIN_ISGREATEREQUAL ? LEX_TOKEN_GREATER_EQUAL :
+		         x->aux == CC_BUILTIN_ISLESS ? LEX_TOKEN_LESS :
+		         x->aux == CC_BUILTIN_ISLESSEQUAL ? LEX_TOKEN_LESS_EQUAL : LEX_TOKEN_EXCLAMATION_EQUAL;
 
 		if (!is_ld(c, ct)) {
 			int cond = f_cmp(e, op, fpk(e, ct), &a, &b);
 			val_free(e, &b);
-			if (x->aux == BI_ISUNORDERED)
+			if (x->aux == CC_BUILTIN_ISUNORDERED)
 				cond = C_VS;
 			cset(e, a.r, cond);
-			if (x->aux == BI_ISLESSGREATER) {
+			if (x->aux == CC_BUILTIN_ISLESSGREATER) {
 				int ordered = treg(e);
 				cset(e, ordered, C_VC);
 				op3(e, I_AND, 0, a.r, a.r, ordered);
@@ -1220,7 +1220,7 @@ runtime:
 			}
 			return vreg(a.r);
 		}
-		if (x->aux != BI_ISUNORDERED && x->aux != BI_ISLESSGREATER)
+		if (x->aux != CC_BUILTIN_ISUNORDERED && x->aux != CC_BUILTIN_ISLESSGREATER)
 			return f_compare(e, op, ct, a, b);
 
 		/* Binary128 NaNs: exponent all ones and a nonzero fraction.
@@ -1230,7 +1230,7 @@ runtime:
 		val operands[2] = { a, b };
 		int nanregs[2];
 		for (int i = 0; i < 2; i++) {
-			if (x->aux == BI_ISLESSGREATER) {
+			if (x->aux == CC_BUILTIN_ISLESSGREATER) {
 				saved[i] = (lval){ .k = L_FRAME, .off = slot(e, 16, 16), .align = 16 };
 				store(e, &saved[i], ct, &operands[i]);
 			}
@@ -1247,7 +1247,7 @@ runtime:
 		}
 		op3(e, I_ORR, 0, nanregs[0], nanregs[0], nanregs[1]);
 		tfree(e, nanregs[1]);
-		if (x->aux == BI_ISUNORDERED)
+		if (x->aux == CC_BUILTIN_ISUNORDERED)
 			return vreg(nanregs[0]);
 		opi(e, I_EORI, 0, nanregs[0], nanregs[0], 1);
 		a = load(e, &saved[0], ct);
@@ -1258,13 +1258,13 @@ runtime:
 		tfree(e, nanregs[0]);
 		return ne;
 	}
-	case BI_ISINF_SIGN: {
+	case CC_BUILTIN_ISINF_SIGN: {
 		/* Inspect the representation once: return +1/-1 for infinities,
 		   zero for every other value, without quieting signaling NaNs. */
-		qty at = N(arg[0])->ty;
+		ast_qualified_type at = N(arg[0])->ty;
 		val a = gen(e, arg[0]);
-		bool ld = is_ld(c, at), half = KIND(c, at) == TY_FLOAT16 || KIND(c, at) == TY_BFLOAT16;
-		bool bf = KIND(c, at) == TY_BFLOAT16;
+		bool ld = is_ld(c, at), half = KIND(c, at) == AST_TYPE_FLOAT16 || KIND(c, at) == AST_TYPE_BFLOAT16;
+		bool bf = KIND(c, at) == AST_TYPE_BFLOAT16;
 		int d = ld || fpk(e, at), r, sign = treg(e);
 		uint64_t inf;
 		if (ld) {
@@ -1298,8 +1298,8 @@ runtime:
 		tfree(e, sign);
 		return vreg(r);
 	}
-	case BI_ISSIGNALING: {
-		qty at = N(arg[0])->ty;
+	case CC_BUILTIN_ISSIGNALING: {
+		ast_qualified_type at = N(arg[0])->ty;
 		val a = gen(e, arg[0]);
 		int r, d;
 		uint64_t inf, quiet;
@@ -1314,8 +1314,8 @@ runtime:
 			tfree(e, a.r);
 			inf = UINT64_C(0xfffe000000000000), quiet = UINT64_C(1) << 48;
 		} else {
-			bool half = KIND(c, at) == TY_FLOAT16 || KIND(c, at) == TY_BFLOAT16;
-			bool bf = KIND(c, at) == TY_BFLOAT16;
+			bool half = KIND(c, at) == AST_TYPE_FLOAT16 || KIND(c, at) == AST_TYPE_BFLOAT16;
+			bool bf = KIND(c, at) == AST_TYPE_BFLOAT16;
 			d = fpk(e, at);
 			r = toreg(e, &a);
 			opi(e, I_ANDI, d, r, r, half ? 0x7fff : d ? INT64_MAX : 0x7fffffff);
@@ -1327,13 +1327,13 @@ runtime:
 		cset(e, r, C_LO);
 		return vreg(r);
 	}
-	case BI_ISNAN: case BI_ISINF: case BI_ISFINITE: case BI_SIGNBIT: case BI_ISNORMAL: {
-		cval cv;
+	case CC_BUILTIN_ISNAN: case CC_BUILTIN_ISINF: case CC_BUILTIN_ISFINITE: case CC_BUILTIN_SIGNBIT: case CC_BUILTIN_ISNORMAL: {
+		cc_value cv;
 
-		if (cc_eval(c, n, &cv) && cv.kind == CV_INT)
+		if (cc_eval(c, n, &cv) && cv.kind == CC_VALUE_INTEGER)
 			return vconst(cv.i);
 		/* on the bit pattern: sign out (<< 1), then the exponent against all ones */
-		qty at = N(arg[0])->ty;
+		ast_qualified_type at = N(arg[0])->ty;
 		bool ld = is_ld(c, at);
 		int d = ld || fpk(e, at), bits = d ? 64 : 32, mant = ld ? 48 : d ? 52 : 23, r;
 
@@ -1342,13 +1342,13 @@ runtime:
 			/* the high word, with a nonzero low word as a sticky bit 0 (below the shift) */
 			toreg2(e, &v, false);
 			r = v.r2;
-			if (x->aux != BI_SIGNBIT) {
+			if (x->aux != CC_BUILTIN_SIGNBIT) {
 				opi(e, I_SUBSI, 1, ZR, v.r, 0);
 				cset(e, v.r, C_NE);
 				shift_imm(e, LEX_TOKEN_LESS_LESS, 1, r, r, 1);
 				op3(e, I_ORR, 1, r, r, v.r);
 				tfree(e, v.r);
-				if (x->aux == BI_ISNORMAL) {
+				if (x->aux == CC_BUILTIN_ISNORMAL) {
 					shift_imm(e, I_LSRV, 1, r, r, mant + 1);
 					opi(e, I_SUBI, 1, r, r, 1);
 					opi(e, I_SUBSI, 1, ZR, r, 0x7fff - 1);
@@ -1356,38 +1356,38 @@ runtime:
 					return vreg(r);
 				}
 				opi(e, I_SUBSI, 1, ZR, r, (int64_t)0xfffe000000000000ULL);
-				cset(e, r, x->aux == BI_ISNAN ? C_HI : x->aux == BI_ISINF ? C_EQ : C_LO);
+				cset(e, r, x->aux == CC_BUILTIN_ISNAN ? C_HI : x->aux == CC_BUILTIN_ISINF ? C_EQ : C_LO);
 				return vreg(r);
 			}
 			tfree(e, v.r);
 		} else {
 			r = toreg(e, &v);
 		}
-		if (KIND(c, at) == TY_FLOAT16 || KIND(c, at) == TY_BFLOAT16) {
-			bool bf = KIND(c, at) == TY_BFLOAT16;
-			if (x->aux == BI_SIGNBIT) {
+		if (KIND(c, at) == AST_TYPE_FLOAT16 || KIND(c, at) == AST_TYPE_BFLOAT16) {
+			bool bf = KIND(c, at) == AST_TYPE_BFLOAT16;
+			if (x->aux == CC_BUILTIN_SIGNBIT) {
 				shift_imm(e, I_LSRV, 0, r, r, 15);
 				opi(e, I_ANDI, 0, r, r, 1);
 				return vreg(r);
 			}
 			opi(e, I_ANDI, 0, r, r, 0x7fff);
-			if (x->aux == BI_ISNORMAL) {
+			if (x->aux == CC_BUILTIN_ISNORMAL) {
 				shift_imm(e, I_LSRV, 0, r, r, bf ? 7 : 10);
 				opi(e, I_SUBI, 0, r, r, 1);
 				opi(e, I_SUBSI, 0, ZR, r, bf ? 254 : 30);
 				cset(e, r, C_LO);
 			} else {
 				opi(e, I_SUBSI, 0, ZR, r, bf ? 0x7f80 : 0x7c00);
-				cset(e, r, x->aux == BI_ISNAN ? C_HI : x->aux == BI_ISINF ? C_EQ : C_LO);
+				cset(e, r, x->aux == CC_BUILTIN_ISNAN ? C_HI : x->aux == CC_BUILTIN_ISINF ? C_EQ : C_LO);
 			}
 			return vreg(r);
 		}
-		if (x->aux == BI_SIGNBIT) {
+		if (x->aux == CC_BUILTIN_SIGNBIT) {
 			shift_imm(e, I_LSRV, d, r, r, bits - 1);
 			return vreg(r);
 		}
 		shift_imm(e, LEX_TOKEN_LESS_LESS, d, r, r, 1);
-		if (x->aux == BI_ISNORMAL) {
+		if (x->aux == CC_BUILTIN_ISNORMAL) {
 			shift_imm(e, I_LSRV, d, r, r, mant + 1);
 			opi(e, I_SUBI, d, r, r, 1);
 			opi(e, I_SUBSI, d, ZR, r, (bits == 64 ? 0x7ff : 0xff) - 1);
@@ -1395,15 +1395,15 @@ runtime:
 			return vreg(r);
 		}
 		opi(e, I_SUBSI, d, ZR, r, d ? (int64_t)0xffe0000000000000ULL : 0xff000000LL);
-		cset(e, r, x->aux == BI_ISNAN ? C_HI : x->aux == BI_ISINF ? C_EQ : C_LO);
+		cset(e, r, x->aux == CC_BUILTIN_ISNAN ? C_HI : x->aux == CC_BUILTIN_ISINF ? C_EQ : C_LO);
 		return vreg(r);
 	}
 	default: {
-		cval cv;
+		cc_value cv;
 
-		if (cc_eval(c, n, &cv) && cv.kind == CV_INT)
+		if (cc_eval(c, n, &cv) && cv.kind == CC_VALUE_INTEGER)
 			return vconst(cv.i);
-		if (cc_eval(c, n, &cv) && cv.kind == CV_FLT && is_flt(c, x->ty))
+		if (cc_eval(c, n, &cv) && cv.kind == CC_VALUE_FLOAT && is_flt(c, x->ty))
 			return f_const_cv(e, x->ty, &cv);
 		efatal(e, x->loc, "unsupported builtin (%d)", x->aux);
 	}

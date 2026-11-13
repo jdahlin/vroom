@@ -84,6 +84,10 @@ VPRIV bool virbuild_insn_simplify(ecx *e, virbuild_simplify_state *S, uint32_t q
 	}
 	switch (in.op) {
 	case VIR_OP_I2P: case VIR_OP_P2I:	/* a pointer and its address as an integer are the same bits */
+		if (in.op == VIR_OP_I2P && V->insns[in.a].insn.type == VIR_TYPE_PTR) {
+			*r = in.a;
+			return false;
+		}
 		if (V->insns[in.a].insn.op == (in.op == VIR_OP_I2P ? VIR_OP_P2I : VIR_OP_I2P))
 			*r = V->insns[in.a].insn.a;
 		return false;

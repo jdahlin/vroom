@@ -10,20 +10,20 @@ VPRIV bool wlabels(cc *c, uint32_t n)
 		return false;
 	x = N(n);
 	switch (x->op) {
-	case N_LABEL: case N_CASE: case N_DEFAULT:
+	case AST_NODE_LABEL: case AST_NODE_CASE: case AST_NODE_DEFAULT:
 		return true;
-	case N_BLOCK:
+	case AST_NODE_BLOCK:
 		for (uint32_t i = 0; i < x->c; i++)
 			if (wlabels(c, c->lists[x->b + i]))
 				return true;
 		return false;
-	case N_IF:
+	case AST_NODE_IF:
 		return wlabels(c, x->b) || wlabels(c, x->c);
-	case N_WHILE: case N_DO:
+	case AST_NODE_WHILE: case AST_NODE_DO:
 		return wlabels(c, x->b);
-	case N_FOR:
+	case AST_NODE_FOR:
 		return wlabels(c, c->lists[x->c + 1]);
-	case N_SWITCH:
+	case AST_NODE_SWITCH:
 		/* its case labels are its own */
 		return false;
 	default:
@@ -40,11 +40,11 @@ VPRIV bool wterm(cc *c, uint32_t n)
 		return false;
 	x = N(n);
 	switch (x->op) {
-	case N_RETURN: case N_BREAK: case N_CONTINUE: case N_GOTO: case N_GOTO_IND:
+	case AST_NODE_RETURN: case AST_NODE_BREAK: case AST_NODE_CONTINUE: case AST_NODE_GOTO: case AST_NODE_GOTO_INDIRECT:
 		return true;
-	case N_BLOCK:
+	case AST_NODE_BLOCK:
 		return x->c && wterm(c, c->lists[x->b + x->c - 1]);
-	case N_IF:
+	case AST_NODE_IF:
 		return x->c && wterm(c, x->b) && wterm(c, x->c);
 	default:
 		return false;

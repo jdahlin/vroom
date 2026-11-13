@@ -1,4 +1,6 @@
-/* arm64 thunk pass: calls out of branch range get thunks, as lld does; part of ld/ld.c (#included there) */
+/* arm64 thunk pass: calls out of branch range get thunks, as lld does (a part of the ELF linker, ld/ld-internal.h) */
+
+#include "../../../ld/ld-internal.h"
 
 /* ---------------- thunk pass ---------------- */
 
@@ -64,7 +66,7 @@ static void a64_ld_thunk_calls_collect(struct ld_context *ctx, ld_input_section_
 	}
 }
 
-static bool a64_ld_thunks_create(struct ld_context *ctx, int pass)
+VPRIV bool a64_ld_thunks_create(struct ld_context *ctx, int pass)
 {
 	bool changed = false;
 	ld_relocation_target t;

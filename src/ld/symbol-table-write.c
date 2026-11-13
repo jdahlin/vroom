@@ -1,5 +1,7 @@
 /* The second half of the symbol table: sizing, layout of globals and locals, and filling it in parallel. */
 
+#include "ld-internal.h"
+
 /* ---------------- symbol table ---------------- */
 
 
@@ -67,13 +69,13 @@ static void ld_global_symbols_write(void *arg, size_t c)
 		ld_global_symbol_record_store(ctx, (elf_symbol *)ctx->symbol_table.symtab + ctx->symbol_table.globals[i].index, ctx->symbol_table.globals[i].string_offset, ctx->symbol_table.globals[i].global_symbol, ctx->symbol_table.globals[i].is_local);
 }
 
-static bool ld_global_symbol_is_in_symbol_table(struct ld_context *ctx, uint32_t g)
+VPRIV bool ld_global_symbol_is_in_symbol_table(struct ld_context *ctx, uint32_t g)
 {
 	ld_global_symbol *s = &ctx->symbols.globals[g];
 	/* isUsedInRegularObj: referenced by an object or the script */
 	return s->state != LD_SYMBOL_STATE_UNDEFINED || ld_key_load(&s->first_occurrence) != UINT64_MAX;
 }
-static bool ld_global_symbol_is_local(struct ld_context *ctx, uint32_t g)
+VPRIV bool ld_global_symbol_is_local(struct ld_context *ctx, uint32_t g)
 {
 	ld_global_symbol *s = &ctx->symbols.globals[g];
 	if (s->version == 0 && s->state != LD_SYMBOL_STATE_UNDEFINED && !s->demoted)	/* VERSION local: */
@@ -89,7 +91,7 @@ static bool ld_global_symbol_is_local(struct ld_context *ctx, uint32_t g)
  * table insertion order.  Strings are appended in the order symbols were
  * added: file locals, all globals, thunk symbols.
  */
-static void ld_symbol_table_build(struct ld_context *ctx)
+VPRIV void ld_symbol_table_build(struct ld_context *ctx)
 {
 	ld_parallel_for(ctx->inputs.objects.n, ld_local_symbols_count, ctx);
 	/* per-file hidden counts */
@@ -179,7 +181,7 @@ static void ld_symbol_table_build(struct ld_context *ctx)
 }
 
 /* .symtab and .strtab are written in place in the output image */
-static void ld_symbol_table_fill(struct ld_context *ctx)
+VPRIV void ld_symbol_table_fill(struct ld_context *ctx)
 {
 	ctx->symbol_table.symtab = ctx->output.image + ctx->script.sections.v[ld_input_section_output_section(ctx, ctx->output.symtab_section)].offset + ctx->inputs.sections.v[ctx->output.symtab_section].offset;
 	ctx->symbol_table.strtab = ctx->output.image + ctx->script.sections.v[ld_input_section_output_section(ctx, ctx->output.strtab_section)].offset + ctx->inputs.sections.v[ctx->output.strtab_section].offset;

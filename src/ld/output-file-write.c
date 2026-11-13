@@ -1,6 +1,8 @@
 /* Writing the output file, and the parallel build-id hash chunk. */
 
-static int ld_output_file_write(struct ld_context *ctx)
+#include "ld-internal.h"
+
+VPRIV int ld_output_file_write(struct ld_context *ctx)
 {
 	/* replace, don't truncate in place: the old file may be mmap'ed by a reader */
 	unlinkat(ctx->options.directory_fd, ctx->options.output_path, 0);
@@ -23,10 +25,7 @@ static int ld_output_file_write(struct ld_context *ctx)
 	return 0;
 }
 
-/* the image and where the chunk hashes go, for ld_build_id_chunk_hash */
-typedef struct { const uint8_t *image; uint64_t size; uint8_t *hashes; } ld_build_id_job;
-
-static void ld_build_id_chunk_hash(void *arg, size_t i)
+VPRIV void ld_build_id_chunk_hash(void *arg, size_t i)
 {
 	const ld_build_id_job *job = arg;
 	uint64_t b = (uint64_t)i << 20, n = job->size - b < (1u << 20) ? job->size - b : (1u << 20);

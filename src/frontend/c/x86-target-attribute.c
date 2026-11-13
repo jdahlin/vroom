@@ -6,7 +6,7 @@ CC_PRIVATE void cc_x86_target_attribute_parse(cc *c, attrs *a, uint32_t str, uin
 {
 	if (!str || c->o->target != PP_LINUX_X86_64) return;
 	const char *text = c->strs[str - 1].s;
-	x86_features features = c->o->x86_features_set ? c->o->x86_raw : cc_x86_features(c, 0), disabled = c->o->x86_disabled;
+	x86_features features = c->o->x86_features_set ? c->o->x86_raw : cc_x86_features_get(c, 0), disabled = c->o->x86_disabled;
 	char *copy = strdup(text), *save = NULL, *part;
 	bool valid = true;
 	for (part = strtok_r(copy, ",", &save); part; part = strtok_r(NULL, ",", &save)) {

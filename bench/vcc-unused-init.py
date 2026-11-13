@@ -10,12 +10,12 @@ from hostenv import R, llvm
 SOURCE = r'''
 #include <assert.h>
 #include "codegen/opt/unusedinit.c"
-static ctype types[TY_NKINDS+2];
+static ctype types[AST_TYPE_KIND_COUNT+2];
 static sym symbols[5];
 static attrs attributes[5];
 static node nodes[100];
 static uint8_t flags[5];
-static cc_opts options;
+static cc_options options;
 static cc context;
 static emitter emit;
 static ecx state;
@@ -23,8 +23,8 @@ static unsigned count;
 bool is_local_var(cc *c, uint32_t s)
 {
     const sym *y=&c->syms[s];
-    return y->kind==S_VAR && y->depth && (y->sc==SC_AUTO || y->sc==SC_REGISTER ||
-        (y->flags&SF_PARAM) || (y->sc==SC_NONE && !(y->flags&SF_GLOBAL)));
+    return y->kind==AST_SYMBOL_VARIABLE && y->depth && (y->sc==AST_STORAGE_AUTO || y->sc==AST_STORAGE_REGISTER ||
+        (y->flags&AST_SYMBOL_FLAG_PARAMETER) || (y->sc==AST_STORAGE_NONE && !(y->flags&AST_SYMBOL_FLAG_GLOBAL)));
 }
 const attrs *sym_attrs(cc *c, uint32_t s) { return &c->attr[c->syms[s].attrs]; }
 static void reset(void)
@@ -32,17 +32,17 @@ static void reset(void)
     memset(types,0,sizeof types); memset(symbols,0,sizeof symbols);
     memset(attributes,0,sizeof attributes); memset(nodes,0,sizeof nodes);
     memset(flags,0,sizeof flags); count=0;
-    for(unsigned k=0;k<TY_NKINDS;k++) types[k]=(ctype){.kind=k,.size=4,.canon=k};
-    types[TY_LLONG].size=8; types[TY_INT128].size=16;
-    types[TY_NKINDS]=(ctype){.kind=TY_INT,.size=4,.flags=TF_ATOMIC,.canon=TY_NKINDS};
-    types[TY_NKINDS+1]=(ctype){.kind=TY_INT,.size=4,.n=24,.canon=TY_NKINDS+1};
-    for(unsigned s=1;s<5;s++) symbols[s]=(sym){.kind=S_VAR,.sc=SC_AUTO,.depth=1,.ty=QT(TY_INT,0),.attrs=s};
-    options=(cc_opts){.opt=1};
+    for(unsigned k=0;k<AST_TYPE_KIND_COUNT;k++) types[k]=(ctype){.kind=k,.size=4,.canon=k};
+    types[AST_TYPE_LONG_LONG].size=8; types[AST_TYPE_INT128].size=16;
+    types[AST_TYPE_KIND_COUNT]=(ctype){.kind=AST_TYPE_INT,.size=4,.flags=AST_TYPE_FLAG_ATOMIC,.canon=AST_TYPE_KIND_COUNT};
+    types[AST_TYPE_KIND_COUNT+1]=(ctype){.kind=AST_TYPE_INT,.size=4,.n=24,.canon=AST_TYPE_KIND_COUNT+1};
+    for(unsigned s=1;s<5;s++) symbols[s]=(sym){.kind=AST_SYMBOL_VARIABLE,.sc=AST_STORAGE_AUTO,.depth=1,.ty=AST_QUALIFIED_TYPE(AST_TYPE_INT,0),.attrs=s};
+    options=(cc_options){.opt=1};
     context=(cc){.ty=types,.syms=symbols,.nodes=nodes,.attr=attributes,.o=&options};
     emit=(emitter){.o=&options,.sflags=flags};
     state=(ecx){.c=&context,.E=&emit};
 }
-static unsigned make(unsigned op, unsigned aux, unsigned a, unsigned b, unsigned c, qty type)
+static unsigned make(unsigned op, unsigned aux, unsigned a, unsigned b, unsigned c, ast_qualified_type type)
 {
     assert(++count<100);
     nodes[count]=(node){.op=op,.aux=aux,.a=a,.b=b,.c=c,.ty=type};
@@ -50,65 +50,65 @@ static unsigned make(unsigned op, unsigned aux, unsigned a, unsigned b, unsigned
 }
 static unsigned recipe(unsigned initializer, unsigned budget)
 {
-    node decl={.op=N_DECL,.a=1,.b=initializer};
+    node decl={.op=AST_NODE_DECLARATION,.a=1,.b=initializer};
     return em_unused_init(&state,&decl,3,budget);
 }
-#define INT QT(TY_INT,0)
+#define INT AST_QUALIFIED_TYPE(AST_TYPE_INT,0)
 int main(void)
 {
     reset();
-    unsigned literal=make(N_NUM,0,0,0,0,INT);
+    unsigned literal=make(AST_NODE_NUMBER,0,0,0,0,INT);
     assert(recipe(literal,0)==EM_UNUSED_EVAL);
     assert(recipe(literal,1)==EM_UNUSED_OMIT);
-    unsigned source=make(N_VAR,0,2,0,0,INT);
-    unsigned add=make(N_BINARY,LEX_TOKEN_PLUS,source,literal,0,INT);
+    unsigned source=make(AST_NODE_VARIABLE,0,2,0,0,INT);
+    unsigned add=make(AST_NODE_BINARY,LEX_TOKEN_PLUS,source,literal,0,INT);
     assert(recipe(add,2)==EM_UNUSED_EVAL);
     assert(recipe(add,3)==EM_UNUSED_OMIT);
     assert(recipe(0,0)==EM_UNUSED_OMIT);
-    unsigned boolean=make(N_CAST,CK_BOOL,source,0,0,INT);
+    unsigned boolean=make(AST_NODE_CAST,AST_CAST_BOOL,source,0,0,INT);
     assert(recipe(boolean,2)==EM_UNUSED_OMIT);
-    unsigned division=make(N_BINARY,LEX_TOKEN_SLASH,source,literal,0,INT);
+    unsigned division=make(AST_NODE_BINARY,LEX_TOKEN_SLASH,source,literal,0,INT);
     assert(recipe(division,64)==EM_UNUSED_EVAL);
-    unsigned shift=make(N_BINARY,LEX_TOKEN_LESS_LESS,source,literal,0,INT);
+    unsigned shift=make(AST_NODE_BINARY,LEX_TOKEN_LESS_LESS,source,literal,0,INT);
     assert(recipe(shift,64)==EM_UNUSED_EVAL);
-    unsigned load=make(N_UNARY,LEX_TOKEN_STAR,source,0,0,INT);
+    unsigned load=make(AST_NODE_UNARY,LEX_TOKEN_STAR,source,0,0,INT);
     assert(recipe(load,64)==EM_UNUSED_EVAL);
-    unsigned call=make(N_CALL,0,0,0,0,INT);
-    unsigned unknown=make(N_NKINDS,0,0,0,0,INT);
+    unsigned call=make(AST_NODE_CALL,0,0,0,0,INT);
+    unsigned unknown=make(AST_NODE_KIND_COUNT,0,0,0,0,INT);
     assert(recipe(call,64)==EM_UNUSED_EVAL && recipe(unknown,64)==EM_UNUSED_EVAL);
-    unsigned fp=make(N_FNUM,0,0,0,0,QT(TY_DOUBLE,0));
-    unsigned conversion=make(N_CAST,CK_INT,fp,0,0,INT);
+    unsigned fp=make(AST_NODE_FLOAT_NUMBER,0,0,0,0,AST_QUALIFIED_TYPE(AST_TYPE_DOUBLE,0));
+    unsigned conversion=make(AST_NODE_CAST,AST_CAST_INTEGER,fp,0,0,INT);
     assert(recipe(fp,64)==EM_UNUSED_KEEP && recipe(conversion,64)==EM_UNUSED_EVAL);
-    const unsigned initforms[]={N_INIT,N_ZERO,N_STR};
+    const unsigned initforms[]={AST_NODE_INITIALIZER,AST_NODE_ZERO,AST_NODE_STRING};
     for(unsigned k=0;k<3;k++) assert(recipe(make(initforms[k],0,0,0,0,INT),64)==EM_UNUSED_KEEP);
-    symbols[2].ty=QT(TY_INT,Q_VOLATILE); assert(recipe(source,64)==EM_UNUSED_EVAL);
-    symbols[2].ty=QT(TY_NKINDS,0); assert(recipe(source,64)==EM_UNUSED_EVAL);
+    symbols[2].ty=AST_QUALIFIED_TYPE(AST_TYPE_INT,AST_QUALIFIER_VOLATILE); assert(recipe(source,64)==EM_UNUSED_EVAL);
+    symbols[2].ty=AST_QUALIFIED_TYPE(AST_TYPE_KIND_COUNT,0); assert(recipe(source,64)==EM_UNUSED_EVAL);
     symbols[2].ty=INT; attributes[2].asmname=1; assert(recipe(source,64)==EM_UNUSED_EVAL);
-    attributes[2].asmname=0; symbols[2].sc=SC_STATIC; assert(recipe(source,64)==EM_UNUSED_EVAL);
-    symbols[2].sc=SC_AUTO;
+    attributes[2].asmname=0; symbols[2].sc=AST_STORAGE_STATIC; assert(recipe(source,64)==EM_UNUSED_EVAL);
+    symbols[2].sc=AST_STORAGE_AUTO;
     flags[1]=SA_USED; assert(recipe(literal,64)==EM_UNUSED_KEEP); flags[1]=0;
     options.opt=0; assert(recipe(literal,64)==EM_UNUSED_KEEP); options.opt=1;
     emit.noopt=true; assert(recipe(literal,64)==EM_UNUSED_KEEP); emit.noopt=false;
-    attributes[3].flags=AF_OPTNONE; assert(recipe(literal,64)==EM_UNUSED_KEEP); attributes[3].flags=0;
-    state.top=4; attributes[4].flags=AF_OPTNONE; assert(recipe(literal,64)==EM_UNUSED_KEEP);
+    attributes[3].flags=CC_ATTRIBUTE_FLAG_OPTNONE; assert(recipe(literal,64)==EM_UNUSED_KEEP); attributes[3].flags=0;
+    state.top=4; attributes[4].flags=CC_ATTRIBUTE_FLAG_OPTNONE; assert(recipe(literal,64)==EM_UNUSED_KEEP);
     state.top=0; attributes[4].flags=0;
     attributes[1].cleanup=2; assert(recipe(literal,64)==EM_UNUSED_KEEP); attributes[1].cleanup=0;
     attributes[1].used=1; assert(recipe(literal,64)==EM_UNUSED_KEEP); attributes[1].used=0;
     attributes[1].asmname=1; assert(recipe(literal,64)==EM_UNUSED_KEEP); attributes[1].asmname=0;
-    symbols[1].flags=SF_ADDR_TAKEN; assert(recipe(literal,64)==EM_UNUSED_KEEP); symbols[1].flags=0;
-    const unsigned storage[]={SC_STATIC,SC_EXTERN,SC_TYPEDEF};
+    symbols[1].flags=AST_SYMBOL_FLAG_ADDRESS_TAKEN; assert(recipe(literal,64)==EM_UNUSED_KEEP); symbols[1].flags=0;
+    const unsigned storage[]={AST_STORAGE_STATIC,AST_STORAGE_EXTERN,AST_STORAGE_TYPEDEF};
     for(unsigned k=0;k<3;k++){symbols[1].sc=storage[k];assert(recipe(literal,64)==EM_UNUSED_KEEP);}
-    symbols[1].sc=SC_AUTO;
-    const qty excluded[]={QT(TY_INT,Q_VOLATILE),QT(TY_NKINDS,0),QT(TY_NKINDS+1,0),
-        QT(TY_INT128,0),QT(TY_DOUBLE,0),QT(TY_PTR,0)};
+    symbols[1].sc=AST_STORAGE_AUTO;
+    const ast_qualified_type excluded[]={AST_QUALIFIED_TYPE(AST_TYPE_INT,AST_QUALIFIER_VOLATILE),AST_QUALIFIED_TYPE(AST_TYPE_KIND_COUNT,0),AST_QUALIFIED_TYPE(AST_TYPE_KIND_COUNT+1,0),
+        AST_QUALIFIED_TYPE(AST_TYPE_INT128,0),AST_QUALIFIED_TYPE(AST_TYPE_DOUBLE,0),AST_QUALIFIED_TYPE(AST_TYPE_POINTER,0)};
     for(unsigned k=0;k<sizeof(excluded)/sizeof(excluded[0]);k++) {
         symbols[1].ty=excluded[k]; assert(recipe(literal,64)==EM_UNUSED_KEEP);
     }
     reset();
-    unsigned chain=make(N_NUM,0,0,0,0,INT);
-    for(unsigned k=0;k<63;k++) chain=make(N_CAST,CK_INT,chain,0,0,INT);
+    unsigned chain=make(AST_NODE_NUMBER,0,0,0,0,INT);
+    for(unsigned k=0;k<63;k++) chain=make(AST_NODE_CAST,AST_CAST_INTEGER,chain,0,0,INT);
     assert(recipe(chain,63)==EM_UNUSED_EVAL && recipe(chain,64)==EM_UNUSED_OMIT);
-    chain=make(N_CAST,CK_INT,chain,0,0,INT);
+    chain=make(AST_NODE_CAST,AST_CAST_INTEGER,chain,0,0,INT);
     assert(recipe(chain,64)==EM_UNUSED_EVAL && recipe(chain,65)==EM_UNUSED_OMIT);
     return 0;
 }

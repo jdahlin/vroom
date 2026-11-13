@@ -3,7 +3,7 @@
 
 /* ---------------- nodes ---------------- */
 
-CC_PRIVATE uint32_t cc_node_new(cc *c, int op, qty ty, uint32_t loc)
+CC_PRIVATE uint32_t cc_node_new(cc *c, int op, ast_qualified_type ty, uint32_t loc)
 {
 	uint32_t i = c->nnode++;
 	node *n = &c->nodes[i];
@@ -18,7 +18,7 @@ CC_PRIVATE uint32_t cc_node_new(cc *c, int op, qty ty, uint32_t loc)
 /* the character range of n for a diagnostic (implicit conversions: their operand's) */
 CC_PRIVATE diag_span cc_node_range_bare(cc *c, uint32_t n)
 {
-	while (n && !c->span[n].e && AST_NODE(n)->op == N_CAST && AST_NODE(n)->a)
+	while (n && !c->span[n].e && AST_NODE(n)->op == AST_NODE_CAST && AST_NODE(n)->a)
 		n = AST_NODE(n)->a;
 	if (!n)
 		return (diag_span){ 0, 0 };
@@ -32,7 +32,7 @@ CC_PRIVATE diag_span cc_node_range(cc *c, uint32_t n)
 {
 	diag_span r;
 
-	while (n && !c->span[n].e && AST_NODE(n)->op == N_CAST && AST_NODE(n)->a)
+	while (n && !c->span[n].e && AST_NODE(n)->op == AST_NODE_CAST && AST_NODE(n)->a)
 		n = AST_NODE(n)->a;
 	r = cc_node_range_bare(c, n);
 	if (n && (c->paren[n].l || c->paren[n].r)) {
@@ -43,7 +43,7 @@ CC_PRIVATE diag_span cc_node_range(cc *c, uint32_t n)
 	return r;
 }
 
-CC_PRIVATE uint32_t cc_node_new_operands(cc *c, int op, qty ty, uint32_t loc, uint32_t a, uint32_t b)
+CC_PRIVATE uint32_t cc_node_new_operands(cc *c, int op, ast_qualified_type ty, uint32_t loc, uint32_t a, uint32_t b)
 {
 	uint32_t i = cc_node_new(c, op, ty, loc);
 
@@ -78,10 +78,10 @@ CC_PRIVATE uint32_t cc_id_list_freeze(cc *c, const cc_id_list *v)
 	return at;
 }
 
-CC_PRIVATE uint32_t cc_node_integer_new(cc *c, i128 v, qty ty, uint32_t loc)
+CC_PRIVATE uint32_t cc_node_integer_new(cc *c, i128 v, ast_qualified_type ty, uint32_t loc)
 {
 	if (cc_type_is_bitint(c, ty)) return cc_bitint_node_new_integer(c, v, ty, loc);
-	uint32_t n = cc_node_new(c, N_NUM, ty, loc);
+	uint32_t n = cc_node_new(c, AST_NODE_NUMBER, ty, loc);
 
 	c->ipool[c->nipool] = v;
 	c->nodes[n].a = c->nipool++;
@@ -92,16 +92,16 @@ CC_PRIVATE uint32_t cc_node_integer_new(cc *c, i128 v, qty ty, uint32_t loc)
    (clang's invalid expressions); an int 0 lvalue, so a constant and assignable */
 CC_PRIVATE uint32_t cc_node_error_new(cc *c, uint32_t loc)
 {
-	uint32_t n = cc_node_integer_new(c, 0, cc_type_basic(TY_INT), loc);
+	uint32_t n = cc_node_integer_new(c, 0, cc_type_basic(AST_TYPE_INT), loc);
 
-	c->nodes[n].flags |= NF_ERR | NF_LVALUE;
+	c->nodes[n].flags |= AST_NODE_FLAG_ERROR | AST_NODE_FLAG_LVALUE;
 	cc_report_delayed_bug(c, loc, "an error node without an error");
 	return n;
 }
 
-CC_PRIVATE uint32_t cc_node_float_new(cc *c, double v, qty ty, uint32_t loc)
+CC_PRIVATE uint32_t cc_node_float_new(cc *c, double v, ast_qualified_type ty, uint32_t loc)
 {
-	uint32_t n = cc_node_new(c, N_FNUM, ty, loc);
+	uint32_t n = cc_node_new(c, AST_NODE_FLOAT_NUMBER, ty, loc);
 
 	c->fpool[c->nfpool] = v;
 	c->nodes[n].a = c->nfpool++;
@@ -111,9 +111,9 @@ CC_PRIVATE uint32_t cc_node_float_new(cc *c, double v, qty ty, uint32_t loc)
 }
 
 /* a 16-byte long double constant from its bits */
-CC_PRIVATE uint32_t cc_node_float128_new(cc *c, u128 q, qty ty, uint32_t loc)
+CC_PRIVATE uint32_t cc_node_float128_new(cc *c, u128 q, ast_qualified_type ty, uint32_t loc)
 {
-	uint32_t n = cc_node_new(c, N_FNUM, ty, loc);
+	uint32_t n = cc_node_new(c, AST_NODE_FLOAT_NUMBER, ty, loc);
 
 	c->fpool[c->nfpool] = vsoftfloat_to_double(q);
 	c->nodes[n].a = c->nfpool++;
@@ -121,9 +121,9 @@ CC_PRIVATE uint32_t cc_node_float128_new(cc *c, u128 q, qty ty, uint32_t loc)
 	return n;
 }
 
-CC_PRIVATE uint32_t cc_node_binary_new(cc *c, int op, qty ty, uint32_t a, uint32_t b, uint32_t loc)
+CC_PRIVATE uint32_t cc_node_binary_new(cc *c, int op, ast_qualified_type ty, uint32_t a, uint32_t b, uint32_t loc)
 {
-	uint32_t r = cc_node_new_operands(c, N_BINARY, ty, loc, a, b);
+	uint32_t r = cc_node_new_operands(c, AST_NODE_BINARY, ty, loc, a, b);
 
 	AST_NODE(r)->aux = (uint16_t)op;
 	return r;

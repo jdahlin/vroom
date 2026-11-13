@@ -163,7 +163,7 @@ static bool virbuild_function_is_listed(ecx *e, uint32_t s)
 	return strstr(list, nm) != NULL;
 }
 
-VPRIV bool virbuild_is_enabled(const cc_opts *o)
+VPRIV bool virbuild_is_enabled(const cc_options *o)
 {
 	return (virbuild_mode_get() & 16) && o->opt >= 2;
 }

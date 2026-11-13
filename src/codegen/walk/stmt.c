@@ -181,12 +181,12 @@ static bool wk_zero_init(cc *c, uint32_t v)
 {
 	const node *x = N(v);
 
-	if (!v || x->op == N_ZERO)
+	if (!v || x->op == AST_NODE_ZERO)
 		return true;
-	if (x->op == N_NUM)
+	if (x->op == AST_NODE_NUMBER)
 		return c->ipool[x->a] == 0;
-	if (x->op == N_CAST && (x->aux == CK_INT || x->aux == CK_NOP || x->aux == CK_NULL || x->aux == CK_I2P))
-		return x->aux == CK_NULL || wk_zero_init(c, x->a);
+	if (x->op == AST_NODE_CAST && (x->aux == AST_CAST_INTEGER || x->aux == AST_CAST_NOP || x->aux == AST_CAST_NULL_POINTER || x->aux == AST_CAST_INTEGER_TO_POINTER))
+		return x->aux == AST_CAST_NULL_POINTER || wk_zero_init(c, x->a);
 	return false;
 }
 
@@ -199,18 +199,18 @@ static int wk_addr(ecx *e, const lval *d)
 }
 
 /* the elements of init stored into the (already zeroed) object at d */
-static void wk_elems(ecx *e, const lval *d, qty ty, uint32_t init)
+static void wk_elems(ecx *e, const lval *d, ast_qualified_type ty, uint32_t init)
 {
 	cc *c = e->c;
 	const node *x = N(init);
 
-	if (!init || x->op == N_ZERO)
+	if (!init || x->op == AST_NODE_ZERO)
 		return;
-	if (x->op == N_INIT) {
+	if (x->op == AST_NODE_INITIALIZER) {
 		const uint32_t *v = &c->lists[x->b];
 
 		if (x->aux == 1) {
-			qty et = T(c, ty)->base;
+			ast_qualified_type et = T(c, ty)->base;
 			uint64_t es = tsize(c, et);
 
 			for (uint32_t i = 0; i < x->c; i++) {
@@ -256,7 +256,7 @@ static void wk_elems(ecx *e, const lval *d, qty ty, uint32_t init)
 		}
 		return;
 	}
-	if (x->op == N_STR && is_array(c, ty)) {
+	if (x->op == AST_NODE_STRING && is_array(c, ty)) {
 		/* the literal's bytes (up to the array's size; the rest is zero) */
 		const cstr *s = &c->strs[x->a];
 		uint64_t n = (uint64_t)s->n * s->esz, cap = tsize(c, ty);
@@ -278,14 +278,14 @@ static void wk_elems(ecx *e, const lval *d, qty ty, uint32_t init)
 	if (wk_mem(e, ty)) {
 		/* another object's bytes (a struct variable, a call's result ...) */
 		val v = wk_gen(e, init);
-		int rs = wk_reg(e, &v, prim(TY_ULONG)), rd = wk_addr(e, d);
+		int rs = wk_reg(e, &v, prim(AST_TYPE_UNSIGNED_LONG)), rd = wk_addr(e, d);
 
 		uint64_t bytes = tsize(c, ty);
-		if (is_record(c, ty) && (T(c, ty)->flags & TF_ATOMIC)) {
+		if (is_record(c, ty) && (T(c, ty)->flags & AST_TYPE_FLAG_ATOMIC)) {
 			/* Initialization is not a concurrent store; copy only the source
 			   payload and initialize any padding added by _Atomic. */
 			LO(zero)(e, rd, bytes);
-			bytes = tsize(c, QT(T(c, ty)->n, 0));
+			bytes = tsize(c, AST_QUALIFIED_TYPE(T(c, ty)->n, 0));
 		}
 		LO(copy)(e, rd, rs, bytes);
 		LO(tfree)(e, rs);
@@ -301,15 +301,15 @@ static void wk_elems(ecx *e, const lval *d, qty ty, uint32_t init)
 	}
 }
 
-VPRIV void wk_init(ecx *e, const lval *d, qty t, uint32_t init)
+VPRIV void wk_init(ecx *e, const lval *d, ast_qualified_type t, uint32_t init)
 {
 	cc *c = e->c;
 	const node *x = N(init);
-	int vol = (QQ(t) & Q_VOLATILE) != 0;
+	int vol = (AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_VOLATILE) != 0;
 
 	if (!init)
 		return;
-	if (x->op == N_INIT || x->op == N_ZERO || (x->op == N_STR && is_array(c, t))) {
+	if (x->op == AST_NODE_INITIALIZER || x->op == AST_NODE_ZERO || (x->op == AST_NODE_STRING && is_array(c, t))) {
 		int rd = wk_addr(e, d);
 
 		LO(zero)(e, rd, tsize(c, t));
@@ -351,7 +351,7 @@ VPRIV void wk_cleanups(ecx *e, int to)
 		wkarg a;
 		val r;
 
-		LO(classify)(e, prim(TY_ULONG), &a, false);
+		LO(classify)(e, prim(AST_TYPE_UNSIGNED_LONG), &a, false);
 		a.slot = wk_slot(e, 8, 8);
 		{
 			int ra = LO(laddr)(e, &l);
@@ -362,7 +362,7 @@ VPRIV void wk_cleanups(ecx *e, int to)
 		}
 		note_ref(e, REF(RK_SYM, fn));
 		e->calls = true;
-		r = LO(call)(e, REF(RK_SYM, fn), NULL, &a, 1, false, NULL, prim(TY_VOID));
+		r = LO(call)(e, REF(RK_SYM, fn), NULL, &a, 1, false, NULL, prim(AST_TYPE_VOID));
 		wk_free(e, &r);
 	}
 }
@@ -377,9 +377,9 @@ static void wk_decl(ecx *e, const node *x)
 
 	if (!x->aux && unlikely(vm_type(c, y->ty)))
 		wk_vla_fix(e, y->ty, false);
-	if (y->kind != S_VAR || y->sc == SC_STATIC || y->sc == SC_EXTERN || y->sc == SC_TYPEDEF)
+	if (y->kind != AST_SYMBOL_VARIABLE || y->sc == AST_STORAGE_STATIC || y->sc == AST_STORAGE_EXTERN || y->sc == AST_STORAGE_TYPEDEF)
 		return;
-	if (T(c, y->ty)->flags & TF_VLA) {
+	if (T(c, y->ty)->flags & AST_TYPE_FLAG_VLA) {
 		wk_vla_decl(e, s, x->b != 0);
 		return;
 	}
@@ -400,19 +400,19 @@ static void wk_decl(ecx *e, const node *x)
 	   value. Choose zero without allocating or reading a stack slot. */
 	if (e->E->o->opt && !x->b && is_integer(c, y->ty) && !wk_mem(e, y->ty) &&
 	    !(e->E->sflags[s] & (SA_WRITTEN | SA_CWRITE | SA_CMULTI)) && !e->E->lnoreg[s] &&
-	    !(QQ(y->ty) & Q_VOLATILE) && !(T(c, y->ty)->flags & TF_ATOMIC) &&
-	    !(y->flags & SF_ADDR_TAKEN) && y->sc != SC_REGISTER && !sym_attrs(c, s)->cleanup) {
+	    !(AST_QUALIFIED_TYPE_QUALIFIERS(y->ty) & AST_QUALIFIER_VOLATILE) && !(T(c, y->ty)->flags & AST_TYPE_FLAG_ATOMIC) &&
+	    !(y->flags & AST_SYMBOL_FLAG_ADDRESS_TAKEN) && y->sc != AST_STORAGE_REGISTER && !sym_attrs(c, s)->cleanup) {
 		e->wk->kgen[s] = e->wk->gen;
 		e->wk->kval[s] = vconst(0);
 		return;
 	}
 	if (e->E->o->opt && x->b && !side_effects(c, x->b) && !sym_attrs(c, s)->cleanup) {
 		/* A side-effect-free constant initializer for a local never written. */
-		cval cv;
+		cc_value cv;
 		uint8_t f = e->E->sflags[s];
 
-		if (!(f & (SA_WRITTEN | SA_CMULTI)) && !(QQ(y->ty) & Q_VOLATILE) && y->sc != SC_REGISTER &&
-		    (is_integer(c, y->ty) || is_ptr(c, y->ty)) && !wk_mem(e, y->ty) && cc_eval(c, x->b, &cv) && cv.kind == CV_INT &&
+		if (!(f & (SA_WRITTEN | SA_CMULTI)) && !(AST_QUALIFIED_TYPE_QUALIFIERS(y->ty) & AST_QUALIFIER_VOLATILE) && y->sc != AST_STORAGE_REGISTER &&
+		    (is_integer(c, y->ty) || is_ptr(c, y->ty)) && !wk_mem(e, y->ty) && cc_eval(c, x->b, &cv) && cv.kind == CC_VALUE_INTEGER &&
 		    (!(f & SA_CWRITE) || (is_integer(c, y->ty) && e->E->cwval[s] == em_trunc_to(c, cv.i, y->ty)))) {
 			/* (SA_CWRITE: every assignment stores this same constant, as set_uncached = IS_ENABLED(...)) */
 			e->wk->kgen[s] = e->wk->gen;
@@ -425,7 +425,7 @@ static void wk_decl(ecx *e, const node *x)
 
 		if (!LO(local)(e, s, &l))
 			l.off = wk_local(e, s);
-		if (!x->b && e->E->o->autozero && tsize(c, y->ty) && !(y->sc == SC_REGISTER && sym_attrs(c, s)->asmname)) {
+		if (!x->b && e->E->o->autozero && tsize(c, y->ty) && !(y->sc == AST_STORAGE_REGISTER && sym_attrs(c, s)->asmname)) {
 			/* -ftrivial-auto-var-init=zero: a local without an initializer starts as zeros
 			   (a scalar by a store: it may live in a register) */
 			if (wk_mem(e, y->ty) || is_array(c, y->ty)) {
@@ -434,7 +434,7 @@ static void wk_decl(ecx *e, const node *x)
 				LO(zero)(e, rd, tsize(c, y->ty));
 				LO(tfree)(e, rd);
 			} else {
-				val z = wk_conv(e, vconst(0), prim(TY_INT), y->ty);
+				val z = wk_conv(e, vconst(0), prim(AST_TYPE_INT), y->ty);
 
 				wk_store(e, &l, y->ty, &z);
 			}
@@ -468,11 +468,11 @@ static void wk_vla_scan(ecx *e, uint32_t n, uint32_t *top)
 		return;
 	x = N(n);
 	switch (x->op) {
-	case N_DECL: {
+	case AST_NODE_DECLARATION: {
 		const sym *y = &c->syms[x->a];
 
-		if (y->kind == S_VAR && y->sc != SC_TYPEDEF && y->sc != SC_STATIC && y->sc != SC_EXTERN &&
-		    (T(c, y->ty)->flags & TF_VLA)) {
+		if (y->kind == AST_SYMBOL_VARIABLE && y->sc != AST_STORAGE_TYPEDEF && y->sc != AST_STORAGE_STATIC && y->sc != AST_STORAGE_EXTERN &&
+		    (T(c, y->ty)->flags & AST_TYPE_FLAG_VLA)) {
 			lval l = { .k = L_FRAME, .off = wk_local(e, x->a) + 8, .align = 8 };
 			val z = vconst(0);
 			int r = LO(toreg)(e, &z, 8);
@@ -481,7 +481,7 @@ static void wk_vla_scan(ecx *e, uint32_t n, uint32_t *top)
 			LO(tfree)(e, r);
 			W->zgen[x->a] = W->gen;
 		}
-		if (y->kind == S_VAR && sym_attrs(c, x->a)->cleanup && W->ncn + 1 < WK_MAXCLEAN) {
+		if (y->kind == AST_SYMBOL_VARIABLE && sym_attrs(c, x->a)->cleanup && W->ncn + 1 < WK_MAXCLEAN) {
 			W->ncn++;
 			W->cn[W->ncn].sym = x->a;
 			W->cn[W->ncn].parent = *top;
@@ -491,32 +491,32 @@ static void wk_vla_scan(ecx *e, uint32_t n, uint32_t *top)
 		}
 		return;
 	}
-	case N_BLOCK: {
+	case AST_NODE_BLOCK: {
 		uint32_t t = *top;
 
 		for (uint32_t i = 0; i < x->c; i++)
 			wk_vla_scan(e, c->lists[x->b + i], &t);
 		return;
 	}
-	case N_IF: {
+	case AST_NODE_IF: {
 		uint32_t t = *top, u = *top;
 
 		wk_vla_scan(e, x->b, &t);
 		wk_vla_scan(e, x->c, &u);
 		return;
 	}
-	case N_WHILE: case N_DO: case N_SWITCH: {
+	case AST_NODE_WHILE: case AST_NODE_DO: case AST_NODE_SWITCH: {
 		uint32_t t = *top;
 
 		wk_vla_scan(e, x->b, &t);
 		return;
 	}
-	case N_FOR: {
+	case AST_NODE_FOR: {
 		uint32_t t = *top;
 
 		/* a cleanup variable of the first clause is around the body's labels
 		   (scoped_guard: the step's goto into the body runs no cleanup) */
-		if (x->a && N(x->a)->op == N_BLOCK)
+		if (x->a && N(x->a)->op == AST_NODE_BLOCK)
 			for (uint32_t i = 0; i < N(x->a)->c; i++)
 				wk_vla_scan(e, c->lists[N(x->a)->b + i], &t);
 		else
@@ -524,12 +524,12 @@ static void wk_vla_scan(ecx *e, uint32_t n, uint32_t *top)
 		wk_vla_scan(e, c->lists[x->c + 1], &t);
 		return;
 	}
-	case N_LABEL:
+	case AST_NODE_LABEL:
 		W->lcn[x->a] = *top;
 		W->lcg[x->a] = W->gen;
 		wk_vla_scan(e, x->c, top);
 		return;
-	case N_CASE: case N_DEFAULT:
+	case AST_NODE_CASE: case AST_NODE_DEFAULT:
 		wk_vla_scan(e, x->c, top);
 		return;
 	default:
@@ -545,48 +545,48 @@ VPRIV bool wk_branch_entry(cc *c, uint32_t n)
 	if (!n) return false;
 	const node *x = N(n);
 	switch (x->op) {
-	case N_NONE: case N_NUM: case N_BIGNUM: case N_FNUM: case N_STR: case N_VAR:
-	case N_LABELADDR: case N_ZERO: case N_GOTO: case N_BREAK: case N_CONTINUE:
+	case AST_NODE_NONE: case AST_NODE_NUMBER: case AST_NODE_BITINT_NUMBER: case AST_NODE_FLOAT_NUMBER: case AST_NODE_STRING: case AST_NODE_VARIABLE:
+	case AST_NODE_LABEL_ADDRESS: case AST_NODE_ZERO: case AST_NODE_GOTO: case AST_NODE_BREAK: case AST_NODE_CONTINUE:
 		return false;
-	case N_LABEL: case N_CASE: case N_DEFAULT:
+	case AST_NODE_LABEL: case AST_NODE_CASE: case AST_NODE_DEFAULT:
 		return true;
-	case N_BLOCK: case N_BUILTIN:
+	case AST_NODE_BLOCK: case AST_NODE_BUILTIN:
 		for (uint32_t i = 0; i < x->c; i++)
 			if (wk_branch_entry(c, c->lists[x->b + i])) return true;
 		return false;
-	case N_CALL:
+	case AST_NODE_CALL:
 		if (wk_branch_entry(c, x->a)) return true;
 		for (uint32_t i = 0; i < x->c; i++)
 			if (wk_branch_entry(c, c->lists[x->b + i])) return true;
 		return false;
-	case N_MEMBER: case N_UNARY: case N_ADDR: case N_DEREF:
-	case N_PREINC: case N_PREDEC: case N_POSTINC: case N_POSTDEC:
-	case N_STMTEXPR: case N_VAARG: case N_EXPR: case N_RETURN: case N_GOTO_IND:
+	case AST_NODE_MEMBER: case AST_NODE_UNARY: case AST_NODE_ADDRESS: case AST_NODE_DEREFERENCE:
+	case AST_NODE_PRE_INCREMENT: case AST_NODE_PRE_DECREMENT: case AST_NODE_POST_INCREMENT: case AST_NODE_POST_DECREMENT:
+	case AST_NODE_STATEMENT_EXPRESSION: case AST_NODE_VA_ARG: case AST_NODE_EXPRESSION: case AST_NODE_RETURN: case AST_NODE_GOTO_INDIRECT:
 		return wk_branch_entry(c, x->a);
-	case N_CAST:
-		return (T(c, x->ty)->flags & TF_VLA) || wk_branch_entry(c, x->a);
-	case N_INDEX: case N_BINARY: case N_LOGAND: case N_LOGOR:
-	case N_ASSIGN: case N_COMMA: case N_CPLX:
-	case N_WHILE: case N_DO: case N_SWITCH:
+	case AST_NODE_CAST:
+		return (T(c, x->ty)->flags & AST_TYPE_FLAG_VLA) || wk_branch_entry(c, x->a);
+	case AST_NODE_INDEX: case AST_NODE_BINARY: case AST_NODE_LOGICAL_AND: case AST_NODE_LOGICAL_OR:
+	case AST_NODE_ASSIGN: case AST_NODE_COMMA: case AST_NODE_COMPLEX:
+	case AST_NODE_WHILE: case AST_NODE_DO: case AST_NODE_SWITCH:
 		return wk_branch_entry(c, x->a) || wk_branch_entry(c, x->b);
-	case N_COND: case N_IF:
+	case AST_NODE_CONDITIONAL: case AST_NODE_IF:
 		return wk_branch_entry(c, x->a) || wk_branch_entry(c, x->b) || wk_branch_entry(c, x->c);
-	case N_FOR:
+	case AST_NODE_FOR:
 		return wk_branch_entry(c, x->a) || wk_branch_entry(c, x->b) ||
 		       wk_branch_entry(c, c->lists[x->c]) || wk_branch_entry(c, c->lists[x->c + 1]);
-	case N_ASM: {
-		const casm *a = &c->asms[x->a];
+	case AST_NODE_ASM: {
+		const ast_asm_statement *a = &c->asms[x->a];
 		for (uint32_t i = 0; i < a->nout + a->nin; i++)
 			if (wk_branch_entry(c, a->ops[i].expr)) return true;
 		return false;
 	}
-	case N_DECL: {
+	case AST_NODE_DECLARATION: {
 		/* (a VLA or a cleanup variable needs its scope walked; else only its initializer) */
 		const sym *y = &c->syms[x->a];
 
-		if (y->kind == S_VAR && ((T(c, y->ty)->flags & TF_VLA) || sym_attrs(c, x->a)->cleanup))
+		if (y->kind == AST_SYMBOL_VARIABLE && ((T(c, y->ty)->flags & AST_TYPE_FLAG_VLA) || sym_attrs(c, x->a)->cleanup))
 			return true;
-		return y->kind == S_VAR && y->sc != SC_STATIC && y->sc != SC_EXTERN && wk_branch_entry(c, x->b);
+		return y->kind == AST_SYMBOL_VARIABLE && y->sc != AST_STORAGE_STATIC && y->sc != AST_STORAGE_EXTERN && wk_branch_entry(c, x->b);
 	}
 	default:
 		return true;
@@ -605,27 +605,27 @@ static void wk_cases(ecx *e, uint32_t n)
 		return;
 	x = N(n);
 	switch (x->op) {
-	case N_CASE: case N_DEFAULT:
+	case AST_NODE_CASE: case AST_NODE_DEFAULT:
 		if (W->ncases == WK_MAXCASE)
 			efatal(e, x->loc, "too many case labels");
-		W->cases[W->ncases++] = (wkcase){ x->op == N_CASE ? c->ipool[x->a] : 0, x->op == N_CASE ? c->ipool[x->b] : 0, n };
+		W->cases[W->ncases++] = (wkcase){ x->op == AST_NODE_CASE ? c->ipool[x->a] : 0, x->op == AST_NODE_CASE ? c->ipool[x->b] : 0, n };
 		wk_cases(e, x->c);
 		return;
-	case N_BLOCK:
+	case AST_NODE_BLOCK:
 		for (uint32_t i = 0; i < x->c; i++)
 			wk_cases(e, c->lists[x->b + i]);
 		return;
-	case N_IF:
+	case AST_NODE_IF:
 		wk_cases(e, x->b);
 		wk_cases(e, x->c);
 		return;
-	case N_WHILE: case N_DO:
+	case AST_NODE_WHILE: case AST_NODE_DO:
 		wk_cases(e, x->b);
 		return;
-	case N_FOR:
+	case AST_NODE_FOR:
 		wk_cases(e, c->lists[x->c + 1]);
 		return;
-	case N_LABEL:
+	case AST_NODE_LABEL:
 		wk_cases(e, x->c);
 		return;
 	default:
@@ -670,7 +670,7 @@ static void wk_switch(ecx *e, uint32_t n)
 	cc *c = e->c;
 	wkst *W = e->wk;
 	const node *x = N(n);
-	qty ct = N(x->a)->ty;
+	ast_qualified_type ct = N(x->a)->ty;
 	int w = wk_size(c, ct) > 4 ? 8 : 4;
 	bool sg = wk_signed(c, ct);
 	uint32_t c0 = W->ncases, lbrk = wk_newlabel(e), ldef = lbrk;
@@ -689,10 +689,10 @@ static void wk_switch(ecx *e, uint32_t n)
 			k = em_trunc_to(c, v.i, ct);
 			wk_cases(e, x->b);
 			for (uint32_t i = c0; i < W->ncases && !sel; i++)
-				if (N(W->cases[i].node)->op == N_CASE && W->cases[i].lo <= k && k <= W->cases[i].hi)
+				if (N(W->cases[i].node)->op == AST_NODE_CASE && W->cases[i].lo <= k && k <= W->cases[i].hi)
 					sel = W->cases[i].node;
 			for (uint32_t i = c0; i < W->ncases && !sel; i++)
-				if (N(W->cases[i].node)->op == N_DEFAULT)
+				if (N(W->cases[i].node)->op == AST_NODE_DEFAULT)
 					sel = W->cases[i].node;
 			W->ncases = c0;
 			if (W->nloop == WK_MAXLOOP)
@@ -722,7 +722,7 @@ static void wk_switch(ecx *e, uint32_t n)
 		if (bitset) {
 			/* Discover the default only after the bounded proof succeeds. */
 			for (uint32_t i = c0; i < W->ncases; i++)
-				if (N(W->cases[i].node)->op == N_DEFAULT)
+				if (N(W->cases[i].node)->op == AST_NODE_DEFAULT)
 					ldef = wk_caselabel(e, W->cases[i].node);
 			LO(switch_bitset)(e, r, w, &recipe, wk_caselabel(e, recipe.node), ldef);
 		}
@@ -732,14 +732,14 @@ static void wk_switch(ecx *e, uint32_t n)
 	    !em_bitint(c, ct) && count >= 4) {
 		uint32_t nc = 0;
 		for (uint32_t i = c0; i < W->ncases; i++)
-			nc += N(W->cases[i].node)->op != N_DEFAULT;
+			nc += N(W->cases[i].node)->op != AST_NODE_DEFAULT;
 		em_switch_case *cases = nc >= 4 ? malloc(nc * sizeof *cases) : NULL;
 		uint32_t j = 0;
 		bool ranges = false;
 		for (uint32_t i = c0; cases && i < W->ncases; i++) {
 			wkcase *k = &W->cases[i];
 			uint32_t l = wk_caselabel(e, k->node);
-			if (N(k->node)->op == N_DEFAULT)
+			if (N(k->node)->op == AST_NODE_DEFAULT)
 				ldef = l;
 			else {
 				cases[j++] = (em_switch_case){ k->lo, k->hi, l };
@@ -756,7 +756,7 @@ static void wk_switch(ecx *e, uint32_t n)
 	}
 	if (e->E->o->opt && !e->E->noopt && count >= 8)
 		for (uint32_t i = c0; i < W->ncases; i++)
-			count -= N(W->cases[i].node)->op == N_DEFAULT;
+			count -= N(W->cases[i].node)->op == AST_NODE_DEFAULT;
 	bool tree = !bitset && !table && e->E->o->opt >= 1 && !e->E->noopt &&
 		em_switch_strategy(count, 0, 0, false, false) == EM_SWITCH_TREE && !wk_mem(e, ct);
 	if (tree) {
@@ -765,7 +765,7 @@ static void wk_switch(ecx *e, uint32_t n)
 		for (uint32_t i = c0; cases && i < W->ncases; i++) {
 			wkcase *k = &W->cases[i];
 			uint32_t l = wk_caselabel(e, k->node);
-			if (N(k->node)->op == N_DEFAULT)
+			if (N(k->node)->op == AST_NODE_DEFAULT)
 				ldef = l;
 			else
 				cases[j++] = (em_switch_case){ k->lo, k->hi, l };
@@ -780,7 +780,7 @@ static void wk_switch(ecx *e, uint32_t n)
 		wkcase *k = &W->cases[i];
 		uint32_t l = wk_caselabel(e, k->node);
 
-		if (N(k->node)->op == N_DEFAULT) {
+		if (N(k->node)->op == AST_NODE_DEFAULT) {
 			ldef = l;
 			continue;
 		}
@@ -874,11 +874,11 @@ static bool wk_stmt_entries(ecx *e, uint32_t n)
 	cc *c = e->c;
 	if (!wk_branch_entry(c, n)) return false;
 	const node *x = N(n);
-	if (x->op == N_BLOCK) {
+	if (x->op == AST_NODE_BLOCK) {
 		/* Declarations carry cleanup/VLA scope bookkeeping even when their
 		   initialization is bypassed; retain the normal block traversal. */
 		for (uint32_t i = 0; i < x->c; i++)
-			if (N(c->lists[x->b + i])->op == N_DECL) {
+			if (N(c->lists[x->b + i])->op == AST_NODE_DECLARATION) {
 				wk_stmt(e, n);
 				return true;
 			}
@@ -890,7 +890,7 @@ static bool wk_stmt_entries(ecx *e, uint32_t n)
 		}
 		return live;
 	}
-	if (x->op == N_IF && !wk_branch_entry(c, x->a)) {
+	if (x->op == AST_NODE_IF && !wk_branch_entry(c, x->a)) {
 		uint32_t end = wk_newlabel(e);
 		bool left = wk_stmt_entries(e, x->b);
 		if (left) LO(jump)(e, end);
@@ -950,21 +950,21 @@ static void wk_stmt1(ecx *e, uint32_t n)
 	if (!n)
 		return;
 	x = N(n);
-	if (!e->reach && !(e->E->nflags[n] & NA_LABEL) && x->op != N_BLOCK)
+	if (!e->reach && !(e->E->nflags[n] & NA_LABEL) && x->op != AST_NODE_BLOCK)
 		return;	/* unreachable and no label or case in it: nothing to generate */
 	e->curloc = x->loc;
-	if (unlikely(e->E->o->debug) && x->op != N_BLOCK)
+	if (unlikely(e->E->o->debug) && x->op != AST_NODE_BLOCK)
 		LO(dbgrow)(e, x->loc);
 	switch (x->op) {
-	case N_BLOCK: {
+	case AST_NODE_BLOCK: {
 		uint32_t vs = 0;	/* the block's first VLA: its saved sp is restored at the end */
 		int cmark = W->nclean, vmark = W->nvla;
 
 		for (uint32_t i = 0; i < x->c; i++) {
 			const node *d = N(c->lists[x->b + i]);
 
-			if (!vs && d->op == N_DECL && c->syms[d->a].kind == S_VAR && c->syms[d->a].sc != SC_TYPEDEF &&
-			    c->syms[d->a].sc != SC_STATIC && c->syms[d->a].sc != SC_EXTERN && (T(c, c->syms[d->a].ty)->flags & TF_VLA))
+			if (!vs && d->op == AST_NODE_DECLARATION && c->syms[d->a].kind == AST_SYMBOL_VARIABLE && c->syms[d->a].sc != AST_STORAGE_TYPEDEF &&
+			    c->syms[d->a].sc != AST_STORAGE_STATIC && c->syms[d->a].sc != AST_STORAGE_EXTERN && (T(c, c->syms[d->a].ty)->flags & AST_TYPE_FLAG_VLA))
 				vs = d->a;
 			uint32_t from, to;
 			if (i && em_block_value_reuse(e, x, 0, i, &from, &to)) {
@@ -975,8 +975,8 @@ static void wk_stmt1(ecx *e, uint32_t n)
 			} else {
 				wk_stmt(e, c->lists[x->b + i]);
 			}
-			if (d->op == N_DECL && c->syms[d->a].kind == S_VAR && c->syms[d->a].sc != SC_TYPEDEF &&
-			    c->syms[d->a].sc != SC_STATIC && c->syms[d->a].sc != SC_EXTERN && (T(c, c->syms[d->a].ty)->flags & TF_VLA)) {
+			if (d->op == AST_NODE_DECLARATION && c->syms[d->a].kind == AST_SYMBOL_VARIABLE && c->syms[d->a].sc != AST_STORAGE_TYPEDEF &&
+			    c->syms[d->a].sc != AST_STORAGE_STATIC && c->syms[d->a].sc != AST_STORAGE_EXTERN && (T(c, c->syms[d->a].ty)->flags & AST_TYPE_FLAG_VLA)) {
 				if (W->nvla == WK_MAXCLEAN) efatal(e, d->loc, "too many cleanup variables in scope");
 				W->vla[W->nvla++] = d->a;
 			}
@@ -995,14 +995,14 @@ static void wk_stmt1(ecx *e, uint32_t n)
 		}
 		return;
 	}
-	case N_EXPR:
+	case AST_NODE_EXPRESSION:
 		if (x->a && e->E->o->opt && !side_effects(c, x->a)) {
 			/* a plain load whose value is dropped: not even made, as clang -O2 ((void)RCU) */
 			uint32_t t = x->a;
 
-			while (N(t)->op == N_CAST && N(t)->a)
+			while (N(t)->op == AST_NODE_CAST && N(t)->a)
 				t = N(t)->a;
-			if (N(t)->op == N_VAR || N(t)->op == N_NUM)
+			if (N(t)->op == AST_NODE_VARIABLE || N(t)->op == AST_NODE_NUMBER)
 				return;
 		}
 		if (x->a) {
@@ -1011,11 +1011,11 @@ static void wk_stmt1(ecx *e, uint32_t n)
 			wk_free(e, &v);
 		}
 		return;
-	case N_DECL:
+	case AST_NODE_DECLARATION:
 		wk_decl(e, x);
 		return;
-	case N_IF: {
-		cval cv;
+	case AST_NODE_IF: {
+		cc_value cv;
 		int known = wk_condfold(e, x->a);
 		if (known >= 0) {
 			wk_const_if(e, x, known);
@@ -1024,12 +1024,12 @@ static void wk_stmt1(ecx *e, uint32_t n)
 		val test = vnone();
 		uint32_t tc = x->a;
 
-		while ((N(tc)->op == N_CAST && N(tc)->a) || (N(tc)->op == N_UNARY && N(tc)->aux == LEX_TOKEN_EXCLAMATION))
+		while ((N(tc)->op == AST_NODE_CAST && N(tc)->a) || (N(tc)->op == AST_NODE_UNARY && N(tc)->aux == LEX_TOKEN_EXCLAMATION))
 			tc = N(tc)->a;
 		/* (a call too: an inlined function or a folded builtin may give a constant,
 		   if (!__builtin_strcmp(op, "<")), if (dax_mapping(m))) */
-		if ((cc_eval(c, x->a, &cv) && cv.kind == CV_INT) || wk_isconst(e, x->a) || N(tc)->op == N_CALL ||
-		    (N(tc)->op == N_STMTEXPR && !(e->E->nflags[tc] & NA_LABEL))) {	/* (WARN_ON_ONCE(1): a constant from a statement expression) */
+		if ((cc_eval(c, x->a, &cv) && cv.kind == CC_VALUE_INTEGER) || wk_isconst(e, x->a) || N(tc)->op == AST_NODE_CALL ||
+		    (N(tc)->op == AST_NODE_STATEMENT_EXPRESSION && !(e->E->nflags[tc] & NA_LABEL))) {	/* (WARN_ON_ONCE(1): a constant from a statement expression) */
 			/* Front-end constant_p can change after binding inline arguments.
 			   Trust the generated value and retain condition effects exactly once. */
 			test = wk_gen(e, x->a);
@@ -1053,7 +1053,7 @@ static void wk_stmt1(ecx *e, uint32_t n)
 				return;
 			}
 		} else {
-			LO(brz)(e, wk_conv(e, test, N(x->a)->ty, prim(TY_BOOL)), 4, false, lelse);
+			LO(brz)(e, wk_conv(e, test, N(x->a)->ty, prim(AST_TYPE_BOOL)), 4, false, lelse);
 		}
 		wk_stmt(e, x->b);
 		if (x->c) {
@@ -1066,7 +1066,7 @@ static void wk_stmt1(ecx *e, uint32_t n)
 		}
 		return;
 	}
-	case N_WHILE: {
+	case AST_NODE_WHILE: {
 		uint32_t lhead = wk_newlabel(e), lbrk = wk_newlabel(e);
 
 		wk_label(e, lhead);
@@ -1078,7 +1078,7 @@ static void wk_stmt1(ecx *e, uint32_t n)
 		wk_label(e, lbrk);
 		return;
 	}
-	case N_DO: {
+	case AST_NODE_DO: {
 		uint32_t lhead = wk_newlabel(e), lcont = wk_newlabel(e), lbrk = wk_newlabel(e);
 
 		wk_label(e, lhead);
@@ -1090,12 +1090,12 @@ static void wk_stmt1(ecx *e, uint32_t n)
 		wk_label(e, lbrk);
 		return;
 	}
-	case N_FOR: {
+	case AST_NODE_FOR: {
 		uint32_t lhead = wk_newlabel(e), lcont = wk_newlabel(e), lbrk = wk_newlabel(e);
 		uint32_t step = c->lists[x->c], body = c->lists[x->c + 1];
 		int cmark = W->nclean;	/* a cleanup variable declared in the first clause: the loop's scope */
 
-		if (x->a && N(x->a)->op == N_BLOCK)	/* declarations: in scope until the loop ends */
+		if (x->a && N(x->a)->op == AST_NODE_BLOCK)	/* declarations: in scope until the loop ends */
 			for (uint32_t i = 0; i < N(x->a)->c; i++)
 				wk_stmt(e, c->lists[N(x->a)->b + i]);
 		else
@@ -1120,37 +1120,37 @@ static void wk_stmt1(ecx *e, uint32_t n)
 		}
 		return;
 	}
-	case N_SWITCH:
+	case AST_NODE_SWITCH:
 		wk_switch(e, n);
 		return;
-	case N_CASE: case N_DEFAULT:
+	case AST_NODE_CASE: case AST_NODE_DEFAULT:
 		if (!W->swon || n == W->swsel)
 			wk_label(e, wk_caselabel(e, n));	/* (a constant switch: the selected case only) */
 		wk_stmt(e, x->c);
 		return;
-	case N_LABEL:
+	case AST_NODE_LABEL:
 		wk_label(e, wk_ulabel(e, x->a));
 		if (c->labels[x->a].addr_taken)
 			LO(named)(e, REF(RK_LBL, x->a));	/* &&label: .Ltmp.lbl.N, as data initializers name it */
 		wk_stmt(e, x->c);
 		return;
-	case N_GOTO:
+	case AST_NODE_GOTO:
 		wk_goto(e, x->a);
 		e->reach = false;	/* (what follows is dead until a label: not emitted) */
 		return;
-	case N_BREAK: case N_CONTINUE: {
+	case AST_NODE_BREAK: case AST_NODE_CONTINUE: {
 		int i = W->nloop - 1;
 
-		while (i >= 0 && x->op == N_CONTINUE && !W->loop[i].cont)
+		while (i >= 0 && x->op == AST_NODE_CONTINUE && !W->loop[i].cont)
 			i--;
 		if (i < 0)
 			efatal(e, x->loc, "break/continue outside a loop");
 		wk_cleanups(e, W->loop[i].cdepth);
-		LO(jump)(e, x->op == N_BREAK ? W->loop[i].brk : W->loop[i].cont);
+		LO(jump)(e, x->op == AST_NODE_BREAK ? W->loop[i].brk : W->loop[i].cont);
 		e->reach = false;
 		return;
 	}
-	case N_RETURN:
+	case AST_NODE_RETURN:
 		if (LO(tail_return)(e, x->a)) {
 			e->reach = false;
 			return;
@@ -1159,7 +1159,7 @@ static void wk_stmt1(ecx *e, uint32_t n)
 			/* an inlined call's return: the value to its slot, then past the body */
 			wkinl *I = W->inl;
 
-			if (x->a && KIND(c, I->rty) != TY_VOID) {
+			if (x->a && KIND(c, I->rty) != AST_TYPE_VOID) {
 				val v = wk_gen(e, x->a);
 				lval t = { .k = L_FRAME, .off = I->rslot, .align = 16 };
 
@@ -1191,12 +1191,12 @@ static void wk_stmt1(ecx *e, uint32_t n)
 		if (x->a && wk_mem(e, W->rty)) {
 			/* the object's address; a size not a multiple of 8 through a slot of whole words */
 			val v = wk_gen(e, x->a);
-			int r = wk_reg(e, &v, prim(TY_ULONG));
+			int r = wk_reg(e, &v, prim(AST_TYPE_UNSIGNED_LONG));
 
 			if (W->nclean) {
 				/* the cleanups run after the value is taken: a copy, except of a local
 				   itself (clang returns it in place: the cleanups' changes are seen) */
-				if (!(N(x->a)->op == N_VAR && is_local_var(c, N(x->a)->a))) {
+				if (!(N(x->a)->op == AST_NODE_VARIABLE && is_local_var(c, N(x->a)->a))) {
 					lval t = { .k = L_FRAME, .off = wk_slot(e, tsize(c, W->rty), 16), .align = 16 };
 					int rt = LO(laddr)(e, &t);
 
@@ -1216,7 +1216,7 @@ static void wk_stmt1(ecx *e, uint32_t n)
 				r = rt;
 			}
 			LO(retrec)(e, r, &W->rrec, W->retlbl);
-		} else if (x->a && KIND(c, W->rty) != TY_VOID) {
+		} else if (x->a && KIND(c, W->rty) != AST_TYPE_VOID) {
 			val v = wk_gen(e, x->a);
 
 			if (W->nclean) {
@@ -1238,13 +1238,13 @@ static void wk_stmt1(ecx *e, uint32_t n)
 				wk_free(e, &v);
 			}
 			wk_cleanups(e, 0);
-			LO(ret)(e, NULL, prim(TY_VOID), W->retlbl);
+			LO(ret)(e, NULL, prim(AST_TYPE_VOID), W->retlbl);
 		}
 		e->reach = false;
 		return;
-	case N_ASM: {
+	case AST_NODE_ASM: {
 		e->kvalid = 0;
-		const casm *a = &c->asms[x->a];
+		const ast_asm_statement *a = &c->asms[x->a];
 		bool empty = a->tmpl && !*c->strs[a->tmpl - 1].s && !a->nout && !a->nin && !a->go;
 
 		for (uint32_t i = 0; empty && i < a->nclob; i++) {
@@ -1261,10 +1261,10 @@ static void wk_stmt1(ecx *e, uint32_t n)
 		LO(asm)(e, n);
 		return;
 	}
-	case N_GOTO_IND: {
+	case AST_NODE_GOTO_INDIRECT: {
 		val v = wk_gen(e, x->a);
 
-		LO(jumpr)(e, wk_reg(e, &v, prim(TY_ULONG)));
+		LO(jumpr)(e, wk_reg(e, &v, prim(AST_TYPE_UNSIGNED_LONG)));
 		return;
 	}
 	default:
@@ -1302,20 +1302,20 @@ static bool wk_tiny_ok(cc *c, uint32_t n)
 		return true;
 	x = N(n);
 	switch (x->op) {
-	case N_ASM:
+	case AST_NODE_ASM:
 		return false;
-	case N_DECL:
-		return c->syms[x->a].kind != S_VAR || sym_align(c, x->a) <= 16;
-	case N_BLOCK:
+	case AST_NODE_DECLARATION:
+		return c->syms[x->a].kind != AST_SYMBOL_VARIABLE || sym_align(c, x->a) <= 16;
+	case AST_NODE_BLOCK:
 		for (uint32_t i = 0; i < x->c; i++)
 			if (!wk_tiny_ok(c, c->lists[x->b + i]))
 				return false;
 		return true;
-	case N_IF:
+	case AST_NODE_IF:
 		return wk_tiny_ok(c, x->b) && wk_tiny_ok(c, x->c);
-	case N_WHILE: case N_DO: case N_SWITCH: case N_LABEL: case N_CASE: case N_DEFAULT:
-		return wk_tiny_ok(c, x->op == N_LABEL || x->op == N_CASE || x->op == N_DEFAULT ? x->c : x->b);
-	case N_FOR:
+	case AST_NODE_WHILE: case AST_NODE_DO: case AST_NODE_SWITCH: case AST_NODE_LABEL: case AST_NODE_CASE: case AST_NODE_DEFAULT:
+		return wk_tiny_ok(c, x->op == AST_NODE_LABEL || x->op == AST_NODE_CASE || x->op == AST_NODE_DEFAULT ? x->c : x->b);
+	case AST_NODE_FOR:
 		return wk_tiny_ok(c, c->lists[x->c + 1]);
 	default:
 		return true;
@@ -1328,13 +1328,13 @@ VPRIV bool wk_can_inline(ecx *e, uint32_t s, uint32_t call)
 	const sym *y = &c->syms[s];
 	const ctype *ft = T(c, y->ty);
 
-	if (!(y->flags & SF_DEFINED) || !y->body || (ft->flags & (TF_VARIADIC | TF_NOPROTO)) || N(y->body)->aux > 64)
+	if (!(y->flags & AST_SYMBOL_FLAG_DEFINED) || !y->body || (ft->flags & (AST_TYPE_FLAG_VARIADIC | AST_TYPE_FLAG_NO_PROTOTYPE)) || N(y->body)->aux > 64)
 		return false;
 	if (X86(c)) {
 		uint32_t caller = e->wk->inl ? e->wk->inl->fn : e->wk->fsym;
-		x86_features need = cc_x86_features(c, s), have = cc_x86_features(c, caller);
+		x86_features need = cc_x86_features_get(c, s), have = cc_x86_features_get(c, caller);
 		if (!x86_features_subset(need, have)) {
-			if (y->flags & SF_ALWAYS_INLINE)
+			if (y->flags & AST_SYMBOL_FLAG_ALWAYS_INLINE)
 				for (unsigned bit = 0; bit < X86_FEATURE_COUNT; bit++)
 					if (x86_feature_has(need, bit) && !x86_feature_has(have, bit))
 						efatal(e, e->curloc, "always_inline function requires target feature '%s', but the caller is compiled without it", x86_feature_names[bit]);
@@ -1344,12 +1344,12 @@ VPRIV bool wk_can_inline(ecx *e, uint32_t s, uint32_t call)
 	for (uint32_t i = 0; i < N(y->body)->aux; i++)
 		if (vm_type(c, c->syms[c->lists[N(y->body)->a + i]].ty))
 			return false;	/* (a parameter's VLA sizes) */
-	if (!(y->flags & SF_ALWAYS_INLINE)) {
+	if (!(y->flags & AST_SYMBOL_FLAG_ALWAYS_INLINE)) {
 		uint32_t lim = WK_INLINE_NODES;
 
 		if (!e->E->o->opt)
 			return false;
-		if ((y->flags & SF_NOINLINE) || (!(y->flags & SF_INLINE) && y->sc != SC_STATIC))
+		if ((y->flags & AST_SYMBOL_FLAG_NOINLINE) || (!(y->flags & AST_SYMBOL_FLAG_INLINE) && y->sc != AST_STORAGE_STATIC))
 			return false;
 #ifdef WK_PREFIX
 		/* VIR: per call site by the callee's size with the callees it inlines itself
@@ -1361,7 +1361,7 @@ VPRIV bool wk_can_inline(ecx *e, uint32_t s, uint32_t call)
 			/* Keep the ordinary/context budget when the caller already
 			 * exceeds the large-copy budget: even one copy can grow its
 			 * allocation unit and register pressure substantially. */
-			bool once = (e->E->once[s] & 1) && y->sc == SC_STATIC && !sym_attrs(c, s)->used &&
+			bool once = (e->E->once[s] & 1) && y->sc == AST_STORAGE_STATIC && !sym_attrs(c, s)->used &&
 			            e->E->fnsize[caller]<=WK_INLINE_ONCE;
 
 			lim = once ? WK_INLINE_ONCE : WK_INLINE_VIR;
@@ -1378,7 +1378,7 @@ VPRIV bool wk_can_inline(ecx *e, uint32_t s, uint32_t call)
 		walk_fn(e, s);
 		if (e->E->fnsize[s] > lim)
 			return false;	/* (a tiny static function too, as clang: an empty stub drops its arguments) */
-		if (!(y->flags & SF_INLINE) && !wk_tiny_ok(c, y->body))
+		if (!(y->flags & AST_SYMBOL_FLAG_INLINE) && !wk_tiny_ok(c, y->body))
 			return false;
 	}
 	ensure_walked(e->E, c, s);
@@ -1415,7 +1415,7 @@ VPRIV val wk_inline(ecx *e, uint32_t n, uint32_t s)
 
 	memcpy(I.ael0, W->ael, sizeof I.ael0), I.nael0 = W->nael;
 	walk_fn(e, s);
-	if (KIND(c, I.rty) != TY_VOID)
+	if (KIND(c, I.rty) != AST_TYPE_VOID)
 		I.rslot = wk_slot(e, tsize(c, I.rty) ? tsize(c, I.rty) : 8, talign(c, I.rty) < 8 ? 8 : talign(c, I.rty));
 	/* the arguments in order, each parked (a constant kept), then bound to the parameters: an
 	   argument that inlines the same function again cannot overwrite them */
@@ -1425,7 +1425,7 @@ VPRIV val wk_inline(ecx *e, uint32_t n, uint32_t s)
 
 		for (uint32_t i = 0; i < body->aux; i++) {
 			uint32_t p = c->lists[body->a + i];
-			qty pt = c->syms[p].ty;
+			ast_qualified_type pt = c->syms[p].ty;
 			/* an argument the copy never reads, without side effects: not evaluated, as clang
 			   (the kernel's __acquire_shared_ctx_lock(RCU): RCU is an extern never defined) */
 			val v = i < x->c && ((e->E->sflags[p] & SA_USED) || side_effects(c, c->lists[x->b + i]) ||
@@ -1455,11 +1455,11 @@ VPRIV val wk_inline(ecx *e, uint32_t n, uint32_t s)
 		W->inlocal++;
 		for (uint32_t i = 0; i < body->aux; i++) {
 			uint32_t p = c->lists[body->a + i];
-			qty pt = c->syms[p].ty;
+			ast_qualified_type pt = c->syms[p].ty;
 			lval l, t = { .k = L_FRAME, .off = as[i], .align = 8 };
 			val v;
 
-			if (!as[i] && !(e->E->sflags[p] & (SA_WRITTEN | SA_CWRITE)) && !(QQ(pt) & Q_VOLATILE) &&
+			if (!as[i] && !(e->E->sflags[p] & (SA_WRITTEN | SA_CWRITE)) && !(AST_QUALIFIED_TYPE_QUALIFIERS(pt) & AST_QUALIFIER_VOLATILE) &&
 			    !sym_attrs(c, p)->cleanup) {
 				W->kgen[p] = W->gen;
 				W->kval[p] = av[i].k == V_ADDR ? av[i] : vconst(em_trunc_to(c, av[i].i, pt));
@@ -1538,7 +1538,7 @@ VPRIV val wk_inline(ecx *e, uint32_t n, uint32_t s)
 	/* the callee cannot touch the caller's non-escaping local arrays: their known
 	   elements (the snapshot at the call) hold past the copy's labels */
 	memcpy(W->ael, I.ael0, sizeof I.ael0), W->nael = I.nael0;
-	if (KIND(c, I.rty) == TY_VOID)
+	if (KIND(c, I.rty) == AST_TYPE_VOID)
 		return vconst(0);
 	if (I.any && I.cst_ok)
 		return I.cst;
@@ -1559,7 +1559,7 @@ static bool wk_is_main(cc *c, uint32_t s)
 {
 	const sym *y = &c->syms[s];
 
-	return y->depth == 0 && y->sc != SC_STATIC && EM_IDENT_IS(y->name, "main");
+	return y->depth == 0 && y->sc != AST_STORAGE_STATIC && EM_IDENT_IS(y->name, "main");
 }
 
 VPRIV void wk_function(ecx *e, uint32_t s)
@@ -1603,10 +1603,10 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 		efatal(e, y->loc, "out of memory");
 	W->canary = e->E->o->sprot ? wk_slot(e, 8, 8) : 0;
 	W->spneed = e->E->o->sprot == 3;
-	if (KIND(c, W->rty) != TY_VOID) {
+	if (KIND(c, W->rty) != AST_TYPE_VOID) {
 		int k = KIND(c, W->rty);
 
-		if (((k == TY_INT128 || k == TY_UINT128) && !LO(i128mem)()))
+		if (((k == AST_TYPE_INT128 || k == AST_TYPE_UINT128) && !LO(i128mem)()))
 			efatal(e, y->loc, "x86-64: this return type is not supported yet (PLAN-x86.md X3)");
 	}
 	W->retlbl = wk_newlabel(e);
@@ -1618,39 +1618,39 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 	/* Parameters: slots unless the lowering selected a persistent register home. */
 	for (uint32_t i = 0; i < body->aux; i++) {
 		uint32_t p = c->lists[body->a + i];
-		qty pt = c->syms[p].ty;
+		ast_qualified_type pt = c->syms[p].ty;
 		int k = KIND(c, pt);
 
-		if (((k == TY_INT128 || k == TY_UINT128) && !LO(i128mem)()))
+		if (((k == AST_TYPE_INT128 || k == AST_TYPE_UINT128) && !LO(i128mem)()))
 			efatal(e, c->syms[p].loc, "x86-64: this parameter type is not supported yet (PLAN-x86.md X3)");
-		if ((ft->flags & TF_NOPROTO) && k == TY_FLOAT)
-			pt = prim(TY_DOUBLE);	/* K&R: received as the caller promoted it */
+		if ((ft->flags & AST_TYPE_FLAG_NO_PROTOTYPE) && k == AST_TYPE_FLOAT)
+			pt = prim(AST_TYPE_DOUBLE);	/* K&R: received as the caller promoted it */
 		LO(classify)(e, pt, &pa[i], false);
 		lval home;
 		pa[i].slot = LO(local)(e, p, &home) ? 0 :
 			wk_pslot_kind(e, pa[i].size > 8 ? (pa[i].size + 7) & ~(uint64_t)7 : 8, pa[i].align, WK_SLOT_PARAM);	/* (sdepth is 0: wk_slot was wk_pslot) */
 	}
-	LO(params)(e, pa, (int)body->aux, wk_mem(e, W->rty) ? &W->rrec : NULL, (ft->flags & TF_VARIADIC) != 0);
+	LO(params)(e, pa, (int)body->aux, wk_mem(e, W->rty) ? &W->rrec : NULL, (ft->flags & AST_TYPE_FLAG_VARIADIC) != 0);
 	for (uint32_t i = 0; i < body->aux; i++) {
 		uint32_t p = c->lists[body->a + i];
 
 		W->sgen[p] = W->gen;
 		W->soff[p] = pa[i].slot;
-		if ((ft->flags & TF_NOPROTO) && KIND(c, c->syms[p].ty) == TY_FLOAT) {
+		if ((ft->flags & AST_TYPE_FLAG_NO_PROTOTYPE) && KIND(c, c->syms[p].ty) == AST_TYPE_FLOAT) {
 			/* the double narrowed to the float the parameter is, in place */
 			lval l = { .k = L_FRAME, .off = pa[i].slot, .align = 8 };
 			val v = { .k = V_REG, .r = (uint8_t)LO(ftreg)(e) };
 			int r;
 
 			LO(load)(e, v.r, &l, 8, false);
-			v = LO(cvt)(e, v, prim(TY_DOUBLE), prim(TY_FLOAT));
+			v = LO(cvt)(e, v, prim(AST_TYPE_DOUBLE), prim(AST_TYPE_FLOAT));
 			r = v.r;
 			LO(store)(e, r, &l, 4);
 			LO(tfree)(e, r);
 		}
 	}
 	for (uint32_t i = 0; i < body->aux; i++) {	/* int (*a)[n]: n as on entry */
-		qty pt = c->syms[c->lists[body->a + i]].ty;
+		ast_qualified_type pt = c->syms[c->lists[body->a + i]].ty;
 
 		if (unlikely(vm_type(c, pt)))
 			wk_vla_fix(e, pt, true);
@@ -1662,10 +1662,10 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 		wk_vla_scan(e, y->body, &top);
 	}
 	wk_stmt(e, y->body);
-	if (wk_is_main(c, s) && KIND(c, W->rty) == TY_INT) {
+	if (wk_is_main(c, s) && KIND(c, W->rty) == AST_TYPE_INT) {
 		val z = vconst(0);
 
-		LO(ret)(e, &z, prim(TY_INT), W->retlbl);	/* falling off the end of main returns 0 */
+		LO(ret)(e, &z, prim(AST_TYPE_INT), W->retlbl);	/* falling off the end of main returns 0 */
 	}
 	wk_label(e, W->retlbl);
 	LO(finish)(e, s);

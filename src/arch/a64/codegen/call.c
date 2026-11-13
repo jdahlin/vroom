@@ -104,14 +104,14 @@ static void need_fold(ecx *e)
 	while (f->up)
 		f = f->up;
 	s = f->fn;
-	if (e->c->syms[s].sc == SC_STATIC && !e->E->mf[s]) {
+	if (e->c->syms[s].sc == AST_STORAGE_STATIC && !e->E->mf[s]) {
 		e->E->mf[s] = 1;
 		e->E->newmf++;
 	}
 }
 
 /* nfix: the callee's named parameters if it is variadic, else -1 */
-VPRIV val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, bool noret, int nfix)
+VPRIV val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, ast_qualified_type rty, bool noret, int nfix)
 {
 	cc *c = e->c;
 	int ngrn = 0, nsaa = 0;
@@ -335,7 +335,7 @@ VPRIV val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, bo
 	return res;
 }
 
-VPRIV val call_named(ecx *e, uint32_t ref, val *vals, qty *tys, int n, qty rty, bool noret)
+VPRIV val call_named(ecx *e, uint32_t ref, val *vals, ast_qualified_type *tys, int n, ast_qualified_type rty, bool noret)
 {
 	carg a[8];
 
@@ -366,7 +366,7 @@ VPRIV void kv_track(ecx *e, uint32_t s, const val *v)
 	int k;
 
 	if ((e->E->sflags[s] & (SA_WRITTEN | SA_CWRITE)) != SA_CWRITE || !is_integer(c, y->ty) || is_wide(c, y->ty) ||
-	    (QQ(y->ty) & Q_VOLATILE) || (T(c, y->ty)->flags & TF_ATOMIC) || sym_attrs(c, s)->cleanup || e->nkv == NKV)
+	    (AST_QUALIFIED_TYPE_QUALIFIERS(y->ty) & AST_QUALIFIER_VOLATILE) || (T(c, y->ty)->flags & AST_TYPE_FLAG_ATOMIC) || sym_attrs(c, s)->cleanup || e->nkv == NKV)
 		return;
 	k = e->nkv++;
 	b->kv = (uint8_t)(k + 1);
@@ -382,7 +382,7 @@ VPRIV bool const_var(ecx *e, uint32_t s, const val *v)
 {
 	uint8_t f = e->E->sflags[s];
 
-	if ((T(e->c, e->c->syms[s].ty)->flags & TF_ATOMIC) || (f & (SA_WRITTEN | SA_CMULTI)))
+	if ((T(e->c, e->c->syms[s].ty)->flags & AST_TYPE_FLAG_ATOMIC) || (f & (SA_WRITTEN | SA_CMULTI)))
 		return false;
 	if (f & SA_CWRITE)
 		return v->k == V_CONST && em_trunc_to(e->c, v->i, e->c->syms[s].ty) == e->E->cwval[s];
@@ -403,20 +403,20 @@ static bool tiny_ok(cc *c, uint32_t n)
 		return true;
 	x = N(n);
 	switch (x->op) {
-	case N_ASM:
+	case AST_NODE_ASM:
 		return false;
-	case N_DECL:
-		return c->syms[x->a].kind != S_VAR || sym_align(c, x->a) <= 16;
-	case N_BLOCK:
+	case AST_NODE_DECLARATION:
+		return c->syms[x->a].kind != AST_SYMBOL_VARIABLE || sym_align(c, x->a) <= 16;
+	case AST_NODE_BLOCK:
 		for (uint32_t i = 0; i < x->c; i++)
 			if (!tiny_ok(c, c->lists[x->b + i]))
 				return false;
 		return true;
-	case N_IF:
+	case AST_NODE_IF:
 		return tiny_ok(c, x->b) && tiny_ok(c, x->c);
-	case N_WHILE: case N_DO: case N_SWITCH: case N_LABEL: case N_CASE: case N_DEFAULT:
-		return tiny_ok(c, x->op == N_LABEL || x->op == N_CASE || x->op == N_DEFAULT ? x->c : x->b);
-	case N_FOR:
+	case AST_NODE_WHILE: case AST_NODE_DO: case AST_NODE_SWITCH: case AST_NODE_LABEL: case AST_NODE_CASE: case AST_NODE_DEFAULT:
+		return tiny_ok(c, x->op == AST_NODE_LABEL || x->op == AST_NODE_CASE || x->op == AST_NODE_DEFAULT ? x->c : x->b);
+	case AST_NODE_FOR:
 		return tiny_ok(c, c->lists[x->c + 1]);
 	default:
 		return true;
@@ -428,23 +428,23 @@ VPRIV bool can_inline(ecx *e, uint32_t s)
 	cc *c = e->c;
 	const sym *y = &c->syms[s];
 
-	if (!(y->flags & SF_DEFINED) || !y->body)
+	if (!(y->flags & AST_SYMBOL_FLAG_DEFINED) || !y->body)
 		return false;
-	if (!(y->flags & SF_ALWAYS_INLINE)) {
+	if (!(y->flags & AST_SYMBOL_FLAG_ALWAYS_INLINE)) {
 		/*
 		 * A plain inline function that calls an error() function (the
 		 * kernel's BUILD_BUG_ON) only compiles when an optimizing compiler
 		 * inlines it and folds the call away: inline it too.
 		 */
-		if (y->flags & SF_NOINLINE)
+		if (y->flags & AST_SYMBOL_FLAG_NOINLINE)
 			return false;
 		if (!e->E->mf[s]) {
-			if (y->sc == SC_STATIC)
+			if (y->sc == AST_STORAGE_STATIC)
 				rlog(e, RL_DEP, s);
-			if (!(y->flags & SF_INLINE) && (y->sc != SC_STATIC || !e->E->o->opt))
+			if (!(y->flags & AST_SYMBOL_FLAG_INLINE) && (y->sc != AST_STORAGE_STATIC || !e->E->o->opt))
 				return false;
 			walk_fn(e, s);
-			if (!(y->flags & SF_INLINE)) {
+			if (!(y->flags & AST_SYMBOL_FLAG_INLINE)) {
 				/* a plain static function: small, no inline asm or over-aligned locals */
 				if (e->E->fnsize[s] > INLINE_STATIC_NODES || !tiny_ok(c, y->body))
 					return false;
@@ -458,7 +458,7 @@ VPRIV bool can_inline(ecx *e, uint32_t s)
 				return false;
 		}
 	}
-	if (T(c, y->ty)->flags & TF_VARIADIC)
+	if (T(c, y->ty)->flags & AST_TYPE_FLAG_VARIADIC)
 		return false;
 	ensure_walked(e->E, c, s);
 	if (e->E->sflags[s] & SA_NOINL)
@@ -473,11 +473,11 @@ VPRIV bool can_inline(ecx *e, uint32_t s)
 #define INLINE_FREE (e->inlfree ? e->inlfree : INLINE_FREE_SAFE)
 
 /* an integer or pointer that fits one register (what B_REG and retreg hold) */
-static bool reg_scalar(ecx *e, qty t)
+static bool reg_scalar(ecx *e, ast_qualified_type t)
 {
 	cc *c = e->c;
 
-	return (is_integer(c, t) || is_ptr(c, t)) && !is_wide(c, t) && !(QQ(t) & Q_VOLATILE) && !(T(c, t)->flags & TF_ATOMIC) && tsize(c, t) - 1 < 8;
+	return (is_integer(c, t) || is_ptr(c, t)) && !is_wide(c, t) && !(AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_VOLATILE) && !(T(c, t)->flags & AST_TYPE_FLAG_ATOMIC) && tsize(c, t) - 1 < 8;
 }
 
 static bool is_temp(int r)
@@ -494,7 +494,7 @@ VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n, uint32_t call)
 	const sym *y = &c->syms[s];
 	const node *body = N(y->body);
 	fnctx F;
-	qty rty = T(c, y->ty)->base;
+	ast_qualified_type rty = T(c, y->ty)->base;
 	int64_t saved_sp = 0;
 	val res;
 
@@ -525,7 +525,7 @@ VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n, uint32_t call)
 		val v = i < n ? args[i].v : vconst(0);
 
 		if (const_var(e, p, &v) && !is_agg(c, ps->ty) &&
-		    !(QQ(ps->ty) & Q_VOLATILE) && !is_wide(c, ps->ty)) {
+		    !(AST_QUALIFIED_TYPE_QUALIFIERS(ps->ty) & AST_QUALIFIER_VOLATILE) && !is_wide(c, ps->ty)) {
 			b->inst = F.inst;
 			b->kind = B_CONST;
 			b->kv = 0;
@@ -538,7 +538,7 @@ VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n, uint32_t call)
 		 * Extended as a load from its slot would be, so it is the same value.
 		 */
 		if (e->E->o->opt >= 1 && i < n && v.k == V_REG && is_temp(v.r) && !(e->E->sflags[p] & (SA_WRITTEN | SA_CWRITE)) &&
-		    reg_scalar(e, ps->ty) && !sym_attrs(c, p)->cleanup && ps->sc != SC_REGISTER &&
+		    reg_scalar(e, ps->ty) && !sym_attrs(c, p)->cleanup && ps->sc != AST_STORAGE_REGISTER &&
 		    NTEMP - __builtin_popcount(e->live) > INLINE_FREE) {
 			uint64_t sz = tsize(c, ps->ty);
 
@@ -617,8 +617,8 @@ static val fold_strcmp(ecx *e, const node *x)
 	uint32_t f = strip_casts(c, x->a), a = strip_casts(c, c->lists[x->b]), b = strip_casts(c, c->lists[x->b + 1]);
 	int r;
 
-	if (N(f)->op != N_VAR || c->syms[N(f)->a].kind != S_BUILTIN || N(a)->op != N_STR || N(b)->op != N_STR ||
-	    cc_builtin_libkind(c->syms[N(f)->a].val) != CC_LIB_STRCMP)
+	if (N(f)->op != AST_NODE_VARIABLE || c->syms[N(f)->a].kind != AST_SYMBOL_BUILTIN || N(a)->op != AST_NODE_STRING || N(b)->op != AST_NODE_STRING ||
+	    cc_builtin_library_kind(c->syms[N(f)->a].val) != CC_LIBRARY_KIND_STRCMP)
 		return vnone();
 	r = strcmp(c->strs[N(a)->a].s, c->strs[N(b)->a].s);
 	return vconst(r < 0 ? -1 : r > 0);
@@ -666,7 +666,7 @@ static bool mem_inline(ecx *e, int kind, carg *args, val *res)
 	uint64_t n;
 	int d;
 
-	if (kind < CC_LIB_MEMCPY || kind > CC_LIB_MEMSET || args[2].v.k != V_CONST)
+	if (kind < CC_LIBRARY_KIND_MEMCPY || kind > CC_LIBRARY_KIND_MEMSET || args[2].v.k != V_CONST)
 		return false;
 	n = (uint64_t)args[2].v.i;
 	if (n > 128 || (kind == 2 && n & (n - 1)) || (kind == 2 && n > 8) || (kind == 3 && args[1].v.k != V_CONST))
@@ -679,7 +679,7 @@ static bool mem_inline(ecx *e, int kind, carg *args, val *res)
 	if (kind < 3) {
 		int sr = toreg(e, &args[1].v);
 
-		if (kind == CC_LIB_MEMCPY && n >= 16 && e->E->o->opt >= 1)
+		if (kind == CC_LIBRARY_KIND_MEMCPY && n >= 16 && e->E->o->opt >= 1)
 			copy_pairs(e, d, sr, n);
 		else
 			copy_mem(e, d, sr, n);
@@ -706,7 +706,7 @@ static int64_t chk_plain(const carg *args, int na, int64_t bi)
 {
 	const val *o = &args[na - 1].v, *l = &args[na >= 2 ? na - 2 : 0].v;
 
-	return cc_chk_simplify(bi, na, o->k == V_CONST, (uint64_t)o->i, l->k == V_CONST, (uint64_t)l->i);
+	return cc_builtin_checked_simplify(bi, na, o->k == V_CONST, (uint64_t)o->i, l->k == V_CONST, (uint64_t)l->i);
 }
 
 /* Keep the argument scratch buffer out of gen_inner's recursive frame.
@@ -727,7 +727,7 @@ __attribute__((noinline)) VPRIV val gen_call(ecx *e, uint32_t n)
 	if (s) {
 		const sym *y = &c->syms[s];
 
-		noret = (y->flags & SF_NORETURN) != 0;
+		noret = (y->flags & AST_SYMBOL_FLAG_NORETURN) != 0;
 		/* use the definition's flags (always_inline may be on a later declaration) */
 	}
 	if (!s && ref && na == 2) {
@@ -761,7 +761,7 @@ __attribute__((noinline)) VPRIV val gen_call(ecx *e, uint32_t n)
 		    (args[i].v.k == V_REG || args[i].v.k == V_REG2))
 			park(e, &args[i]);
 	}
-	if (!s && RKIND(ref) == RK_NAME && RIDX(ref) < 0x8000000u && na >= 3 && cc_builtin_libkind(RIDX(ref)) == CC_LIB_CHK) {
+	if (!s && RKIND(ref) == RK_NAME && RIDX(ref) < 0x8000000u && na >= 3 && cc_builtin_library_kind(RIDX(ref)) == CC_LIBRARY_KIND_CHECKED) {
 		int64_t p = chk_plain(args, na, RIDX(ref));
 
 		if (p >= 0) {
@@ -770,7 +770,7 @@ __attribute__((noinline)) VPRIV val gen_call(ecx *e, uint32_t n)
 		}
 	}
 	if (!s && RKIND(ref) == RK_NAME && RIDX(ref) < 0x8000000u && na == 1 &&
-	    is_ld(c, x->ty) && cc_builtin_libkind(RIDX(ref)) == CC_LIB_FABSL) {
+	    is_ld(c, x->ty) && cc_builtin_library_kind(RIDX(ref)) == CC_LIBRARY_KIND_FABSL) {
 		/* Clear binary128's sign without touching a signaling NaN payload. */
 		unpark(e, &args[0]);
 		r = args[0].v;
@@ -783,18 +783,18 @@ __attribute__((noinline)) VPRIV val gen_call(ecx *e, uint32_t n)
 	} else if (inl) {
 		r = inline_call(e, s, args, na, n);
 	} else if (!s && ref && na == 3 && RKIND(ref) == RK_NAME && RIDX(ref) < 0x8000000u &&
-		   mem_inline(e, cc_builtin_libkind(RIDX(ref)), args, &r)) {
+		   mem_inline(e, cc_builtin_library_kind(RIDX(ref)), args, &r)) {
 		/* inlined */
 	} else if (s && em_plain_mem_kind(e, s, na) && args[2].v.k == V_CONST && (uint64_t)args[2].v.i <= 64 &&
 		   mem_inline(e, em_plain_mem_kind(e, s, na), args, &r)) {
 		/* inlined */
 	} else {
-		qty ft = N(x->a)->ty;
+		ast_qualified_type ft = N(x->a)->ty;
 		int nfix = -1;
 
 		if (is_ptr(c, ft))
 			ft = T(c, ft)->base;
-		if (is_func(c, ft) && (T(c, ft)->flags & TF_VARIADIC))
+		if (is_func(c, ft) && (T(c, ft)->flags & AST_TYPE_FLAG_VARIADIC))
 			nfix = (int)T(c, ft)->n;
 		r = s || ref ? do_call(e, ref, NULL, args, na, x->ty, noret, nfix)
 			     : do_call(e, 0, &fnv, args, na, x->ty, false, nfix);

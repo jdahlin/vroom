@@ -17,7 +17,7 @@ VPRIV bool wk_sdivconst_ok(ecx *e, val a, const em_sdivconst_recipe *r)
 	return LO(nfree)(e) >= extra;
 }
 
-VPRIV val wk_sdivconst(ecx *e, qty ty, val a, const em_sdivconst_recipe *r)
+VPRIV val wk_sdivconst(ecx *e, ast_qualified_type ty, val a, const em_sdivconst_recipe *r)
 {
 	int size = r->bits / 8, input = wk_reg(e, &a, ty), saved = -1;
 	val q;

@@ -1,5 +1,7 @@
 /* Turning an object's section headers into input sections, and dropping .note.gnu.property. */
 
+#include "ld-internal.h"
+
 static bool ld_section_header_is_content(const elf_section_header *s)
 {
 	switch (s->sh_type) {
@@ -12,7 +14,7 @@ static bool ld_section_header_is_content(const elf_section_header *s)
 	}
 }
 
-static void ld_input_sections_fill(void *arg, size_t i)
+VPRIV void ld_input_sections_fill(void *arg, size_t i)
 {
 	struct ld_context *ctx = arg;
 	ld_object *o = ctx->inputs.objects.v[i];
@@ -64,7 +66,7 @@ static void ld_input_sections_fill(void *arg, size_t i)
  * input's FEATURE_1_AND (an input without the note counts as 0).  Only the
  * common case is done: when the AND is 0 every input note is dropped, as lld
  * emits none; otherwise the inputs stay as they are (TODO: the merged note) */
-static void ld_gnu_property_drop(struct ld_context *ctx)
+VPRIV void ld_gnu_property_drop(struct ld_context *ctx)
 {
 	const uint32_t want = ctx->inputs.x86 ? 0xc0000002u : 0xc0000000u;	/* X86 / AARCH64 FEATURE_1_AND */
 	uint32_t and = ~0u;

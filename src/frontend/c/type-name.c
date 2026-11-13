@@ -5,20 +5,20 @@
 CC_PRIVATE const char *cc_type_integer_name(int k)
 {
 	switch (k) {
-	case TY_BOOL: return "_Bool";
-	case TY_CHAR: return "char";
-	case TY_SCHAR: return "signed char";
-	case TY_UCHAR: return "unsigned char";
-	case TY_SHORT: return "short";
-	case TY_USHORT: return "unsigned short";
-	case TY_INT: return "int";
-	case TY_UINT: return "unsigned int";
-	case TY_LONG: return "long";
-	case TY_ULONG: return "unsigned long";
-	case TY_LLONG: return "long long";
-	case TY_ULLONG: return "unsigned long long";
-	case TY_INT128: return "__int128";
-	case TY_UINT128: return "unsigned __int128";
+	case AST_TYPE_BOOL: return "_Bool";
+	case AST_TYPE_CHAR: return "char";
+	case AST_TYPE_SIGNED_CHAR: return "signed char";
+	case AST_TYPE_UNSIGNED_CHAR: return "unsigned char";
+	case AST_TYPE_SHORT: return "short";
+	case AST_TYPE_UNSIGNED_SHORT: return "unsigned short";
+	case AST_TYPE_INT: return "int";
+	case AST_TYPE_UNSIGNED_INT: return "unsigned int";
+	case AST_TYPE_LONG: return "long";
+	case AST_TYPE_UNSIGNED_LONG: return "unsigned long";
+	case AST_TYPE_LONG_LONG: return "long long";
+	case AST_TYPE_UNSIGNED_LONG_LONG: return "unsigned long long";
+	case AST_TYPE_INT128: return "__int128";
+	case AST_TYPE_UINT128: return "unsigned __int128";
 	default: return NULL;
 	}
 }
@@ -29,20 +29,20 @@ CC_PRIVATE const char *cc_type_integer_name(int k)
 
 static void cc_type_qualifiers_spell(vbuffer *b, int q)
 {
-	if (q & Q_CONST) vbuffer_string_append(b, "const ");
-	if (q & Q_VOLATILE) vbuffer_string_append(b, "volatile ");
-	if (q & Q_RESTRICT) vbuffer_string_append(b, "restrict ");
+	if (q & AST_QUALIFIER_CONST) vbuffer_string_append(b, "const ");
+	if (q & AST_QUALIFIER_VOLATILE) vbuffer_string_append(b, "volatile ");
+	if (q & AST_QUALIFIER_RESTRICT) vbuffer_string_append(b, "restrict ");
 }
 
 /* out = spelling of t around the declarator text inner */
-CC_PRIVATE void cc_type_spell(cc *c, qty t, const char *inner, vbuffer *out, bool *ok)
+CC_PRIVATE void cc_type_spell(cc *c, ast_qualified_type t, const char *inner, vbuffer *out, bool *ok)
 {
 	const ctype *x = AST_TYPE(c, t);
 	SPELLING(b);
 
-	if (x->kind == TY_ARRAY && c->valist_tag && AST_TYPE(c, c->t_valist)->canon == x->canon) {
+	if (x->kind == AST_TYPE_ARRAY && c->valist_tag && AST_TYPE(c, c->t_valist)->canon == x->canon) {
 		/* x86-64's __va_list_tag[1] is spelled by its typedef, the struct as itself */
-		cc_type_qualifiers_spell(&b, QQ(t));
+		cc_type_qualifiers_spell(&b, AST_QUALIFIED_TYPE_QUALIFIERS(t));
 		vbuffer_string_append(&b, "__builtin_va_list");
 		if (inner[0]) {
 			vbuffer_string_append(&b, " ");
@@ -52,8 +52,8 @@ CC_PRIVATE void cc_type_spell(cc *c, qty t, const char *inner, vbuffer *out, boo
 		return;
 	}
 	switch (x->kind) {
-	case TY_SVE:
-		cc_type_qualifiers_spell(&b, QQ(t));
+	case AST_TYPE_SVE_BUILTIN:
+		cc_type_qualifiers_spell(&b, AST_QUALIFIED_TYPE_QUALIFIERS(t));
 		vbuffer_append(&b, cc_identifier_string(x->aux), cc_identifier_length(x->aux));
 		if (inner[0]) {
 			vbuffer_string_append(&b, " ");
@@ -61,18 +61,18 @@ CC_PRIVATE void cc_type_spell(cc *c, qty t, const char *inner, vbuffer *out, boo
 		}
 		vbuffer_append(out, b.p, b.n);
 		return;
-	case TY_PTR: {
+	case AST_TYPE_POINTER: {
 		SPELLING(in);
 		const ctype *bt = AST_TYPE(c, x->base);
 		/* __builtin_va_list * (x86-64: an array spelled by its typedef) */
-		bool wrap = (bt->kind == TY_ARRAY && !(c->valist_tag && AST_TYPE(c, c->t_valist)->canon == bt->canon)) || bt->kind == TY_FUNC;
+		bool wrap = (bt->kind == AST_TYPE_ARRAY && !(c->valist_tag && AST_TYPE(c, c->t_valist)->canon == bt->canon)) || bt->kind == AST_TYPE_FUNCTION;
 
 		if (wrap)
-			vbuffer_string_append(&in, x->flags & TF_BLOCK ? "(^" : "(*");
+			vbuffer_string_append(&in, x->flags & AST_TYPE_FLAG_BLOCK ? "(^" : "(*");
 		else
-			vbuffer_string_append(&in, x->flags & TF_BLOCK ? "^" : "*");
-		if (QQ(t)) {	/* clang: "int *const", "int *const *", "int *const p" */
-			cc_type_qualifiers_spell(&in, QQ(t));
+			vbuffer_string_append(&in, x->flags & AST_TYPE_FLAG_BLOCK ? "^" : "*");
+		if (AST_QUALIFIED_TYPE_QUALIFIERS(t)) {	/* clang: "int *const", "int *const *", "int *const p" */
+			cc_type_qualifiers_spell(&in, AST_QUALIFIED_TYPE_QUALIFIERS(t));
 			if (!inner[0] && in.n && in.p[in.n - 1] == ' ')
 				in.p[--in.n] = 0;
 		}
@@ -82,27 +82,27 @@ CC_PRIVATE void cc_type_spell(cc *c, qty t, const char *inner, vbuffer *out, boo
 		cc_type_spell(c, x->base, in.p, out, ok);
 		return;
 	}
-	case TY_ARRAY: {
+	case AST_TYPE_ARRAY: {
 		SPELLING(in);
 		char n[32];
 
 		vbuffer_string_append(&in, inner);
-		if (x->flags & (TF_INCOMPLETE | TF_VLA))
+		if (x->flags & (AST_TYPE_FLAG_INCOMPLETE | AST_TYPE_FLAG_VLA))
 			vbuffer_string_append(&in, "[]");
 		else {
 			snprintf(n, sizeof(n), "[%llu]", (unsigned long long)cc_type_array_length(c, t));
 			vbuffer_string_append(&in, n);
 		}
-		cc_type_spell(c, QT(QI(x->base), QQ(x->base) | QQ(t)), in.p, out, ok);
+		cc_type_spell(c, AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(x->base), AST_QUALIFIED_TYPE_QUALIFIERS(x->base) | AST_QUALIFIED_TYPE_QUALIFIERS(t)), in.p, out, ok);
 		return;
 	}
-	case TY_FUNC: {
+	case AST_TYPE_FUNCTION: {
 		SPELLING(in);
 
 		vbuffer_string_append(&in, inner);
 		vbuffer_string_append(&in, "(");
-		if (x->flags & TF_NOPROTO) {
-		} else if (!x->n && !(x->flags & TF_VARIADIC)) {
+		if (x->flags & AST_TYPE_FLAG_NO_PROTOTYPE) {
+		} else if (!x->n && !(x->flags & AST_TYPE_FLAG_VARIADIC)) {
 			vbuffer_string_append(&in, "void");
 		} else {
 			for (uint32_t i = 0; i < x->n; i++) {
@@ -113,7 +113,7 @@ CC_PRIVATE void cc_type_spell(cc *c, qty t, const char *inner, vbuffer *out, boo
 				cc_type_spell(c, c->params[x->aux + i], "", &p, ok);
 				vbuffer_append(&in, p.p, p.n);
 			}
-			if (x->flags & TF_VARIADIC)
+			if (x->flags & AST_TYPE_FLAG_VARIADIC)
 				vbuffer_string_append(&in, ", ...");
 		}
 		vbuffer_string_append(&in, ")");
@@ -121,7 +121,7 @@ CC_PRIVATE void cc_type_spell(cc *c, qty t, const char *inner, vbuffer *out, boo
 		cc_type_spell(c, x->base, in.p, out, ok);
 		return;
 	}
-	case TY_VECTOR: {
+	case AST_TYPE_VECTOR: {
 		/* clang without the typedef: __attribute__((__vector_size__(4 * sizeof(int)))) int */
 		SPELLING(el);
 		char n[96];
@@ -130,9 +130,9 @@ CC_PRIVATE void cc_type_spell(cc *c, qty t, const char *inner, vbuffer *out, boo
 		cc_type_spell(c, x->base, "", &el, ok);
 		/* clang keeps the typedef name (vcc: the first typedef of this vector type) */
 		for (uint32_t i = 1; i < c->nsym && !td; i++)
-			if (c->syms[i].kind == S_TYPEDEF && c->syms[i].name && QI(c->syms[i].ty) == QI(t) && !QQ(c->syms[i].ty))
+			if (c->syms[i].kind == AST_SYMBOL_TYPEDEF && c->syms[i].name && AST_QUALIFIED_TYPE_INDEX(c->syms[i].ty) == AST_QUALIFIED_TYPE_INDEX(t) && !AST_QUALIFIED_TYPE_QUALIFIERS(c->syms[i].ty))
 				td = i;
-		cc_type_qualifiers_spell(&b, QQ(t));
+		cc_type_qualifiers_spell(&b, AST_QUALIFIED_TYPE_QUALIFIERS(t));
 		if (td) {
 			vbuffer_append(&b, cc_identifier_string(c->syms[td].name), cc_identifier_length(c->syms[td].name));
 			if (inner[0]) {
@@ -165,33 +165,33 @@ CC_PRIVATE void cc_type_spell(cc *c, qty t, const char *inner, vbuffer *out, boo
 	default:
 		break;
 	}
-	cc_type_qualifiers_spell(&b, QQ(t));
+	cc_type_qualifiers_spell(&b, AST_QUALIFIED_TYPE_QUALIFIERS(t));
 	switch (x->kind) {
-	case TY_VOID: vbuffer_string_append(&b, "void"); break;
-	case TY_BFLOAT16: vbuffer_string_append(&b, "__bf16"); break;
-	case TY_FLOAT16: vbuffer_string_append(&b, "_Float16"); break;
-	case TY_FLOAT: vbuffer_string_append(&b, "float"); break;
-	case TY_DOUBLE: vbuffer_string_append(&b, "double"); break;
-	case TY_LDOUBLE: vbuffer_string_append(&b, "long double"); break;
-	case TY_FLOAT128: vbuffer_string_append(&b, "__float128"); break;
-	case TY_STRUCT: case TY_UNION: case TY_ENUM: {
+	case AST_TYPE_VOID: vbuffer_string_append(&b, "void"); break;
+	case AST_TYPE_BFLOAT16: vbuffer_string_append(&b, "__bf16"); break;
+	case AST_TYPE_FLOAT16: vbuffer_string_append(&b, "_Float16"); break;
+	case AST_TYPE_FLOAT: vbuffer_string_append(&b, "float"); break;
+	case AST_TYPE_DOUBLE: vbuffer_string_append(&b, "double"); break;
+	case AST_TYPE_LONG_DOUBLE: vbuffer_string_append(&b, "long double"); break;
+	case AST_TYPE_FLOAT128: vbuffer_string_append(&b, "__float128"); break;
+	case AST_TYPE_STRUCT: case AST_TYPE_UNION: case AST_TYPE_ENUM: {
 		const tag *r = &c->tags[x->aux];
 		char nb[256];
 
 		if (x->aux == c->valist_tag && c->valist_tag) {
-			vbuffer_string_append(&b, AST_TYPE_KIND(c, c->t_valist) == TY_ARRAY ? "struct __va_list_tag" : "__builtin_va_list");
+			vbuffer_string_append(&b, AST_TYPE_KIND(c, c->t_valist) == AST_TYPE_ARRAY ? "struct __va_list_tag" : "__builtin_va_list");
 		} else if (r->name) {
 			uint32_t s = cc_tag_lookup(c, r->name);
 
 			if (!s || (uint32_t)c->syms[s].val != x->aux)
 				*ok = false;
-			snprintf(nb, sizeof(nb), "%s %.*s", x->kind == TY_STRUCT ? "struct" : x->kind == TY_UNION ? "union" : "enum",
+			snprintf(nb, sizeof(nb), "%s %.*s", x->kind == AST_TYPE_STRUCT ? "struct" : x->kind == AST_TYPE_UNION ? "union" : "enum",
 				 CC_IDENTIFIER(r->name));
 			vbuffer_string_append(&b, nb);
 		} else if (r->typedef_name) {
 			uint32_t s = cc_symbol_lookup(c, r->typedef_name);
 
-			if (!s || c->syms[s].kind != S_TYPEDEF || AST_TYPE(c, c->syms[s].ty)->canon != AST_TYPE(c, t)->canon)
+			if (!s || c->syms[s].kind != AST_SYMBOL_TYPEDEF || AST_TYPE(c, c->syms[s].ty)->canon != AST_TYPE(c, t)->canon)
 				*ok = false;
 			snprintf(nb, sizeof(nb), "%.*s", CC_IDENTIFIER(r->typedef_name));
 			vbuffer_string_append(&b, nb);
@@ -203,7 +203,7 @@ CC_PRIVATE void cc_type_spell(cc *c, qty t, const char *inner, vbuffer *out, boo
 	default: {
 		const char *n = cc_type_integer_name(x->kind);
 
-		if (cc_type_kind_is_integer(x->kind) && x->n && !(x->flags & TF_ATOMIC)) {
+		if (cc_type_kind_is_integer(x->kind) && x->n && !(x->flags & AST_TYPE_FLAG_ATOMIC)) {
 			char bn[64];
 
 			snprintf(bn, sizeof(bn), "%s_BitInt(%u)", cc_type_is_signed(c, t) ? "" : "unsigned ", x->n);
@@ -243,7 +243,7 @@ static vbuffer *cc_type_name_buffer(cc *c)
 }
 
 /* t as clang spells it in diagnostics (buffers in rotation: tybuf) */
-CC_PRIVATE const char *tyname(cc *c, qty t)
+CC_PRIVATE const char *tyname(cc *c, ast_qualified_type t)
 {
 	bool ok = true;
 	vbuffer *o = cc_type_name_buffer(c);

@@ -24,6 +24,7 @@
 #include "ld/ld.h"
 #include "common/hash.h"
 #include "common/scoped-cleanup.h"
+#include "port/file.h"
 #include "common/checked-arithmetic.h"
 #include "elf-definitions.h"
 
@@ -165,19 +166,21 @@ static int objcopy_elf_open(objcopy_elf *e, int dirfd, const char *path)
 		objcopy_error_report("'%s': %s", path, strerror(errno));
 		return -1;
 	}
+	vfile_mapping m;
 	struct stat st;
-	fstat(fd, &st);
-	e->size = st.st_size;
-	e->file_bytes = e->size ? mmap(NULL, e->size, PROT_READ, MAP_PRIVATE, fd, 0) : NULL;
-	if (e->file_bytes == MAP_FAILED || e->size < sizeof(elf_file_header) || memcmp(e->file_bytes, "\177ELF\2\1", 6)) {
+	bool mapped = vfile_map_fd(fd, &m, &st);
+	e->size = m.n;
+	e->file_bytes = m.p;
+	if (!mapped || e->size < sizeof(elf_file_header) || memcmp(e->file_bytes, "\177ELF\2\1", 6)) {
 		objcopy_error_report("'%s': not an ELF64 little-endian file", path);
+		vfile_unmap(&m);
 		e->file_bytes = NULL;
 		return -1;
 	}
 	e->file_header = (const elf_file_header *)e->file_bytes;
 	if (!objcopy_elf_is_valid(e)) {
 		objcopy_error_report("'%s': invalid ELF file", path);
-		munmap((void *)e->file_bytes, e->size);
+		vfile_unmap(&m);
 		e->file_bytes = NULL;
 		return -1;
 	}
@@ -1355,17 +1358,18 @@ static void nm_inputs_collect(int dirfd, const char *path, nm_input **v, int *n)
 		return;
 	}
 	bool thin = magic[2] == 't';
-	size_t sz = (size_t)st.st_size;
-	const uint8_t *b = mmap(NULL, sz, PROT_READ, MAP_PRIVATE, fd, 0);
+	VAUTOUNMAP vfile_mapping m;
+	if (!vfile_map_fd(fd, &m, &st)) {
+		objcopy_error_report("'%s': %s", path, strerror(errno));
+		return;
+	}
+	size_t sz = m.n;
+	const uint8_t *b = m.p;
 	const char *longn = NULL;
 	size_t longsz = 0;
 	const char *slash = strrchr(path, '/');
 
 	VCLOSE(fd);	/* (the mapping outlives the descriptor) */
-	if (b == MAP_FAILED) {
-		objcopy_error_report("'%s': %s", path, strerror(errno));
-		return;
-	}
 	for (size_t o = 8; o + 60 <= sz;) {
 		const char *h = (const char *)b + o;
 		char num[11] = { 0 }, name[4096];
@@ -1423,7 +1427,6 @@ static void nm_inputs_collect(int dirfd, const char *path, nm_input **v, int *n)
 		}
 		o += 60 + (data ? msz + (msz & 1) : 0);
 	}
-	munmap((void *)b, sz);
 }
 
 int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)

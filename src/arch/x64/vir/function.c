@@ -13,7 +13,7 @@ static void vx_target_block_begin(void *ctx, uint32_t b)
 {
 	x64_vir_context *L = ctx;
 
-	(void)b;
+	L->map_block = b;
 	L->compare_condition = UINT32_MAX;
 	L->memory_value = L->memory_skip = L->scaled_value = L->scaled_skip = L->big_endian_value = L->test_value = L->compare_memory_value = 0;
 }
@@ -28,12 +28,21 @@ static void vx_target_block_enter(void *ctx, uint32_t b)
 
 static void vx_target_instruction(void *ctx, uint32_t b, uint32_t i, const uint8_t *opr, uint32_t nopr, uint8_t res)
 {
-	x64_vir_insn_lower(ctx, b, i, opr, nopr, res);
+	x64_vir_context *L = ctx;
+	vx_mark(L,true,9,b,i,i,res,VIR_REGISTER_NONE,VIR_BLOCK_NONE);
+	x64_vir_insn_lower(L, b, i, opr, nopr, res);
+	vx_mark(L,false,9,0,0,0,0,0,0);
+	L->map_block = b;
+	L->map_value = i;
 }
 
 static void vx_target_result_spill(void *ctx, uint8_t res, uint32_t slot)
 {
-	x64_vir_slot_access(ctx, false, res, slot);
+	x64_vir_context *L = ctx;
+	vx_mark(L,true,8,L->map_block,L->map_value,L->map_value,VIR_REGISTER_NONE,res,VIR_BLOCK_NONE);
+	x64_vir_slot_access(L, false, res, slot);
+	vx_probe(L,8);
+	vx_mark(L,false,8,0,0,0,0,0,0);
 }
 
 static void vx_target_edit(void *ctx, const vir_edit *x)
@@ -83,6 +92,23 @@ static const virbuild_lowering_target vx_lowering_target = {
 	.rotation_cached = false,
 };
 
+static void vx_entry(void *ctx,uint32_t b,uint32_t pred,uint32_t v,
+		     uint8_t reg,bool stored,const char *decision)
+{
+	vbuffer_format_append(ctx,"vl-entry b=%u pred=%u v=%u reg=%u stored=%u decision=%s\n",
+		b,pred,v,reg,stored,decision);
+}
+
+/* The diagnostics' environment variables, read once per process */
+static struct { const char *filter, *mapping, *probe; } vx_diag_env;
+static pthread_once_t vx_diag_once = PTHREAD_ONCE_INIT;
+static void vx_diag_init(void)
+{
+	vx_diag_env.filter = getenv("VCC_VL_FILTER");
+	vx_diag_env.mapping = getenv("VCC_VL_MAP");
+	vx_diag_env.probe = getenv("VCC_VL_PROBE");
+}
+
 VPRIV bool x64_vir_function_lower(ecx *e, uint32_t sym, const char **why)
 {
 	virbuild_context *V = e->vw;
@@ -126,7 +152,15 @@ VPRIV bool x64_vir_function_lower(ecx *e, uint32_t sym, const char **why)
 	vir_uses_count(f,L.uses);L.scratch_register10=r10;
 	if(r10)regs.alloc[0]|=1u<<R10;
 	if(!vir_loops_build(f,&V->loops)){*why=VIRBUILD_FAILURE(x64_loop_analysis);return false;}
-	bool allocated=vir_alloc(f,&V->loops,&regs,NULL,&V->allocation),scratch=false;
+	pthread_once(&vx_diag_once,vx_diag_init);
+	const vident *name=&vintern_ents[e->c->syms[sym].name];
+	bool selected=!vx_diag_env.filter || (strlen(vx_diag_env.filter)==name->len && !memcmp(vx_diag_env.filter,name->s,name->len));
+	L.map=selected && vx_diag_env.mapping && *vx_diag_env.mapping && *vx_diag_env.mapping!='0';
+	L.probe=selected && vx_diag_env.probe?(unsigned)strtoul(vx_diag_env.probe,NULL,0):0;
+	vbuffer entries={0};
+	vir_alloc_options diagnostic={.entry=vx_entry,.entry_context=&entries};
+	const vir_alloc_options *dopt=L.map?&diagnostic:NULL;
+	bool allocated=vir_alloc(f,&V->loops,&regs,dopt,&V->allocation),scratch=false;
 	if(allocated && r10)for(uint32_t k=0;k<V->allocation.move_count;k++) {
 		const vir_edge_move *m=&V->allocation.move[k];
 		if(m->src==VIR_REGISTER_SCRATCH0 || m->dst==VIR_REGISTER_SCRATCH0){scratch=true;break;}
@@ -135,8 +169,18 @@ VPRIV bool x64_vir_function_lower(ecx *e, uint32_t sym, const char **why)
 		/* A cycle may need the allocator's GP scratch at the same time as
 		 * a slot-to-slot copy. Keep the second reserve for those functions. */
 		r10=L.scratch_register10=false;regs.alloc[0]&=~(UINT64_C(1)<<R10);
-		allocated=vir_alloc(f,&V->loops,&regs,NULL,&V->allocation);
+		entries.n=0;
+		allocated=vir_alloc(f,&V->loops,&regs,dopt,&V->allocation);
 	}
+	if(L.map && allocated) {
+		const vir_alloc_statistics *s=&V->allocation.statistics;
+		fprintf(stderr,"vl-function %.*s reloads=%u remats=%u moves=%u stores=%u swaps=%u ereloads=%u eremats=%u emoves=%u estores=%u edges=%u xchg=%u spills=%u slots=%u callee=%u linear=%u pool=%u\n",
+			(int)name->len,name->s,s->reloads,s->remats,s->moves,s->stores,s->swaps,s->edge_reloads,s->edge_rematerializations,s->edge_moves,s->edge_stores,s->edges,s->exchanges,s->spills,s->slots,s->callee,s->linear,s->pool);
+		if (entries.n) fwrite(entries.p,1,entries.n,stderr);
+		for(uint32_t v=1;v<f->insn_count;v++)if(V->allocation.slot[v]!=VIR_BLOCK_NONE)
+			fprintf(stderr,"vl-slot v=%u slot=%u sdef=%u\n",v,V->allocation.slot[v],V->allocation.spill_defined[v]);
+	}
+	free(entries.p);
 	L.general_temporary=r10?R11:R10;
 	if (!allocated) {
 		*why = VIRBUILD_FAILURE(x64_allocation_failed); snprintf(V->failure_detail, sizeof V->failure_detail, "%s", V->allocation.error_message); return false;

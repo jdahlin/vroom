@@ -1,8 +1,10 @@
-/* arm64 range-extension thunks: their records and the (isec, reloc) -> thunk map; part of ld/ld.c (#included there) */
+/* arm64 range-extension thunks: their records and the (isec, reloc) -> thunk map (a part of the ELF linker, ld/ld-internal.h) */
+
+#include "../../../ld/ld-internal.h"
 
 /* ---------------- thunks ---------------- */
 
-static void a64_ld_thunk_relocation_record(struct ld_context *ctx, uint32_t isec, uint32_t ri, uint32_t th)
+VPRIV void a64_ld_thunk_relocation_record(struct ld_context *ctx, uint32_t isec, uint32_t ri, uint32_t th)
 {
 	if (!ctx->relocations.thunk_redirect_keys || ctx->relocations.thunk_redirect_count * 2 >= ctx->relocations.thunk_redirect_mask) {
 		uint32_t nm = ctx->relocations.thunk_redirect_keys ? ctx->relocations.thunk_redirect_mask * 2 + 1 : 1023;
@@ -31,7 +33,7 @@ static void a64_ld_thunk_relocation_record(struct ld_context *ctx, uint32_t isec
 	ctx->relocations.thunk_redirect_keys[j] = k;
 	ctx->relocations.thunk_redirect_values[j] = th;
 }
-static uint32_t a64_ld_thunk_relocation_find(struct ld_context *ctx, uint32_t isec, uint32_t ri)
+VPRIV uint32_t a64_ld_thunk_relocation_find(struct ld_context *ctx, uint32_t isec, uint32_t ri)
 {
 	if (!ctx->relocations.thunk_redirect_keys)
 		return LD_NONE;
@@ -45,13 +47,12 @@ static uint32_t a64_ld_thunk_relocation_find(struct ld_context *ctx, uint32_t is
 	return LD_NONE;
 }
 
-static bool ld_value_fits_signed(int64_t v, int bits);
-static uint64_t a64_ld_thunk_address(struct ld_context *ctx, uint32_t t)
+VPRIV uint64_t a64_ld_thunk_address(struct ld_context *ctx, uint32_t t)
 {
 	a64_ld_thunk *th = &ctx->relocations.thunks.v[t];
 	return ld_input_section_address(ctx, th->thunk_section, th->offset);
 }
-static uint64_t a64_ld_thunk_destination(struct ld_context *ctx, uint32_t t)
+VPRIV uint64_t a64_ld_thunk_destination(struct ld_context *ctx, uint32_t t)
 {
 	a64_ld_thunk *th = &ctx->relocations.thunks.v[t];
 	if (th->global_symbol != LD_NONE)
@@ -59,7 +60,7 @@ static uint64_t a64_ld_thunk_destination(struct ld_context *ctx, uint32_t t)
 	return ld_input_section_address(ctx, th->input_section, th->value) + th->addend;
 }
 
-static bool a64_ld_branch_is_in_range(uint64_t src, uint64_t dst)
+VPRIV bool a64_ld_branch_is_in_range(uint64_t src, uint64_t dst)
 {
 	uint64_t range = 128 * 1024 * 1024;
 	if (dst > src)

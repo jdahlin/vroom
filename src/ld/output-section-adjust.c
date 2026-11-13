@@ -1,5 +1,7 @@
 /* lld's adjustOutputSections: which output sections survive. */
 
+#include "ld-internal.h"
+
 /* ---------------- adjustOutputSections ---------------- */
 
 static bool ld_output_section_is_discardable(ld_output_section *os)
@@ -19,7 +21,7 @@ static bool ld_output_section_is_discardable(ld_output_section *os)
 	return true;
 }
 
-static void ld_output_sections_adjust(struct ld_context *ctx)
+VPRIV void ld_output_sections_adjust(struct ld_context *ctx)
 {
 	uint64_t flags = SHF_ALLOC;
 	for (uint32_t c = 0; c < ctx->script.commands.n; c++) {

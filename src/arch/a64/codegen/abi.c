@@ -13,11 +13,11 @@
  */
 enum { HV = 0x100 };
 
-static int hfa_walk(cc *c, qty t, int *base, uint64_t *n)
+static int hfa_walk(cc *c, ast_qualified_type t, int *base, uint64_t *n)
 {
 	const ctype *y = T(c, t);
 
-	if (y->kind == TY_VECTOR) {
+	if (y->kind == AST_TYPE_VECTOR) {
 		int b = (int)y->size | HV;
 
 		if ((y->size != 8 && y->size != 16) || (*base && *base != b))
@@ -26,7 +26,7 @@ static int hfa_walk(cc *c, qty t, int *base, uint64_t *n)
 		*n = 1;
 		return 1;
 	}
-	if (y->kind == TY_BFLOAT16 || y->kind == TY_FLOAT16 || y->kind == TY_FLOAT || y->kind == TY_DOUBLE || y->kind == TY_LDOUBLE) {	/* Apple: long double is 8 bytes */
+	if (y->kind == AST_TYPE_BFLOAT16 || y->kind == AST_TYPE_FLOAT16 || y->kind == AST_TYPE_FLOAT || y->kind == AST_TYPE_DOUBLE || y->kind == AST_TYPE_LONG_DOUBLE) {	/* Apple: long double is 8 bytes */
 		int b = (int)y->size;
 
 		if (*base && *base != b)
@@ -35,15 +35,15 @@ static int hfa_walk(cc *c, qty t, int *base, uint64_t *n)
 		*n = 1;
 		return 1;
 	}
-	if (y->kind == TY_ARRAY) {
+	if (y->kind == AST_TYPE_ARRAY) {
 		uint64_t m;
 
-		if (y->flags & (TF_VLA | TF_INCOMPLETE) || !hfa_walk(c, y->base, base, &m))
+		if (y->flags & (AST_TYPE_FLAG_VLA | AST_TYPE_FLAG_INCOMPLETE) || !hfa_walk(c, y->base, base, &m))
 			return 0;
 		*n = m * y->n;
 		return y->n > 0;
 	}
-	if (y->kind == TY_STRUCT || y->kind == TY_UNION) {
+	if (y->kind == AST_TYPE_STRUCT || y->kind == AST_TYPE_UNION) {
 		const tag *g = &c->tags[y->aux];
 		uint64_t tot = 0;
 
@@ -58,7 +58,7 @@ static int hfa_walk(cc *c, qty t, int *base, uint64_t *n)
 				continue;
 			if (g->f[k].bitfield || !hfa_walk(c, g->f[k].ty, base, &m))
 				return 0;
-			if (y->kind == TY_UNION)
+			if (y->kind == AST_TYPE_UNION)
 				tot = m > tot ? m : tot;
 			else
 				tot += m;
@@ -69,7 +69,7 @@ static int hfa_walk(cc *c, qty t, int *base, uint64_t *n)
 	return 0;
 }
 
-VPRIV int hfa(cc *c, qty t, int *n)
+VPRIV int hfa(cc *c, ast_qualified_type t, int *n)
 {
 	int base = 0;
 	uint64_t m = 0;
@@ -87,10 +87,10 @@ VPRIV int hfa(cc *c, qty t, int *n)
  * widened to 8/n bytes (v4qi as 4h, v2hi and v2qi as 2s), one lane as it
  * is.  As an argument it goes in a GPR as its bytes (classify).
  */
-VPRIV bool vec_small(cc *c, qty t) { return is_vec(c, t) && !is_bvec(c, t) && tsize(c, t) < 8; }
+VPRIV bool vec_small(cc *c, ast_qualified_type t) { return is_vec(c, t) && !is_bvec(c, t) && tsize(c, t) < 8; }
 
 /* the vector at [rs] into v0 */
-VPRIV void vec_small_ret(ecx *e, qty t, int rs)
+VPRIV void vec_small_ret(ecx *e, ast_qualified_type t, int rs)
 {
 	cc *c = e->c;
 	uint32_t n = T(c, t)->n, size = (uint32_t)tsize(c, t), es = n ? size / n : size, w = n > 1 ? 8 / n : 0;
@@ -112,7 +112,7 @@ VPRIV void vec_small_ret(ecx *e, qty t, int rs)
 }
 
 /* v0 (a call's result) into the slot at sl */
-VPRIV void vec_small_res(ecx *e, qty t, int64_t sl)
+VPRIV void vec_small_res(ecx *e, ast_qualified_type t, int64_t sl)
 {
 	cc *c = e->c;
 	uint32_t n = T(c, t)->n, size = (uint32_t)tsize(c, t), es = n ? size / n : size, w = n > 1 ? 8 / n : 0;
@@ -135,7 +135,7 @@ VPRIV void vec_small_res(ecx *e, qty t, int64_t sl)
 /* LLVM legalizes small boolean-vector results independently of packed storage.
  * Power-of-two lane counts 2/4/8/16 use one SIMD register; other counts
  * through eight use one integer register per lane. Larger results use x8. */
-VPRIV void bvec_ret(ecx *e, qty t, int rs)
+VPRIV void bvec_ret(ecx *e, ast_qualified_type t, int rs)
 {
 	unsigned n = T(e->c, t)->n;
 	bool simd = n == 2 || n == 4 || n == 8 || n == 16;
@@ -152,7 +152,7 @@ VPRIV void bvec_ret(ecx *e, qty t, int rs)
 	tfree(e, r);
 }
 
-VPRIV void bvec_res(ecx *e, qty t, int64_t sl)
+VPRIV void bvec_res(ecx *e, ast_qualified_type t, int64_t sl)
 {
 	unsigned n = T(e->c, t)->n;
 	bool simd = n == 2 || n == 4 || n == 8 || n == 16;
@@ -173,7 +173,7 @@ VPRIV void bvec_res(ecx *e, qty t, int64_t sl)
 }
 
 /* a record result returned through x8 */
-VPRIV bool is_sret(cc *c, qty t)
+VPRIV bool is_sret(cc *c, ast_qualified_type t)
 {
 	int n;
 
@@ -182,7 +182,7 @@ VPRIV bool is_sret(cc *c, qty t)
 }
 
 /* Apple: an anonymous (variadic) argument always goes on the stack in 8-byte slots */
-VPRIV void classify_va(ecx *e, qty t, int *nsaa, abiarg *a)
+VPRIV void classify_va(ecx *e, ast_qualified_type t, int *nsaa, abiarg *a)
 {
 	cc *c = e->c;
 	uint64_t size = tsize(c, t);
@@ -206,7 +206,7 @@ VPRIV void classify_va(ecx *e, qty t, int *nsaa, abiarg *a)
 /* the alignment AAPCS64 passes t by: clang's unadjusted alignment (a
  * record's fields without its own aligned(), a scalar's without a typedef's);
  * Apple's ABI takes the type's alignment */
-VPRIV uint32_t abi_align(cc *c, qty t)
+VPRIV uint32_t abi_align(cc *c, ast_qualified_type t)
 {
 	const ctype *ct = T(c, t);
 
@@ -217,7 +217,7 @@ VPRIV uint32_t abi_align(cc *c, qty t)
 	return c->ty[ct->canon].align;
 }
 
-VPRIV void classify(ecx *e, qty t, int *ngrn, int *nsaa, abiarg *a)
+VPRIV void classify(ecx *e, ast_qualified_type t, int *ngrn, int *nsaa, abiarg *a)
 {
 	cc *c = e->c;
 	uint64_t size = tsize(c, t);

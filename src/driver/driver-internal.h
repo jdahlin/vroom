@@ -83,7 +83,7 @@ struct driver_job {
 	int omit_frame_pointer;	/* unspecified: x86 enables omission above -O0 */
 	int sibling_calls;	/* explicit sibling-call flags are ordered independently of -O */
 	int x64_hardening_flags, patchable_entry_count, patchable_entry_before, stack_protector, stack_protector_guard_gs, auto_variables_zero;
-	const char *stack_protector_guard_symbol;	/* x86-64 hardening (cc_opts.xcf ...) */
+	const char *stack_protector_guard_symbol;	/* x86-64 hardening (cc_options.xcf ...) */
 	pp_opts pp_options;
 	char *prefix_map;
 	double start_time;

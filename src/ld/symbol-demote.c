@@ -1,6 +1,8 @@
 /* Demoting symbols to local, and the __start_X/__stop_X symbols. */
 
-static void ld_symbols_demote(void *arg, size_t i)
+#include "ld-internal.h"
+
+VPRIV void ld_symbols_demote(void *arg, size_t i)
 {
 	struct ld_context *ctx = arg;
 	ld_global_symbol *s = &ctx->symbols.globals[ctx->symbols.order.v[i]];
@@ -11,12 +13,12 @@ static void ld_symbols_demote(void *arg, size_t i)
 	}
 }
 
-static void ld_global_symbol_finish_task(void *arg, size_t i) { ld_global_symbol_finish(arg, i); }
+VPRIV void ld_global_symbol_finish_task(void *arg, size_t i) { ld_global_symbol_finish(arg, i); }
 
 
 /* lld addStartStopSymbols: a referenced, undefined __start_X/__stop_X is the
  * start/end of output section X (X a C identifier), protected, global */
-static void ld_start_stop_symbols_define(struct ld_context *ctx)
+VPRIV void ld_start_stop_symbols_define(struct ld_context *ctx)
 {
 	for (uint32_t i = 0; i < ctx->symbols.order.n; i++) {
 		ld_global_symbol *s = &ctx->symbols.globals[ctx->symbols.order.v[i]];

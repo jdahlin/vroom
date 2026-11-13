@@ -10,10 +10,10 @@
  */
 #include "../emitimpl.h"
 
-static bool em_unused_int(cc *c, qty t)
+static bool em_unused_int(cc *c, ast_qualified_type t)
 {
 	return is_integer(c, t) && !em_bitint(c, t) && !is_wide(c, t) && tsize(c, t) - 1 < 8 &&
-	       !(QQ(t) & Q_VOLATILE) && !(T(c, t)->flags & TF_ATOMIC);
+	       !(AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_VOLATILE) && !(T(c, t)->flags & AST_TYPE_FLAG_ATOMIC);
 }
 
 /* Deliberately excludes loads through addresses, division, shifts, FP and
@@ -29,21 +29,21 @@ static bool em_unused_pure(cc *c, uint32_t n, unsigned *left)
 	if (!em_unused_int(c, x->ty))
 		return false;
 	switch (x->op) {
-	case N_NUM:
+	case AST_NODE_NUMBER:
 		return true;
-	case N_VAR:
+	case AST_NODE_VARIABLE:
 		return is_local_var(c, x->a) && em_unused_int(c, c->syms[x->a].ty) &&
-		       c->syms[x->a].sc != SC_STATIC && c->syms[x->a].sc != SC_EXTERN &&
+		       c->syms[x->a].sc != AST_STORAGE_STATIC && c->syms[x->a].sc != AST_STORAGE_EXTERN &&
 		       !sym_attrs(c, x->a)->asmname;
-	case N_CAST:
-		if (x->aux != CK_NOP && x->aux != CK_INT && x->aux != CK_BOOL)
+	case AST_NODE_CAST:
+		if (x->aux != AST_CAST_NOP && x->aux != AST_CAST_INTEGER && x->aux != AST_CAST_BOOL)
 			return false;
 		return em_unused_pure(c, x->a, left);
-	case N_UNARY:
+	case AST_NODE_UNARY:
 		if (x->aux != LEX_TOKEN_PLUS && x->aux != LEX_TOKEN_MINUS && x->aux != LEX_TOKEN_TILDE && x->aux != LEX_TOKEN_EXCLAMATION)
 			return false;
 		return em_unused_pure(c, x->a, left);
-	case N_BINARY:
+	case AST_NODE_BINARY:
 		switch (x->aux) {
 		case LEX_TOKEN_PLUS: case LEX_TOKEN_MINUS: case LEX_TOKEN_STAR: case LEX_TOKEN_AMPERSAND: case LEX_TOKEN_PIPE: case LEX_TOKEN_CARET:
 		case LEX_TOKEN_LESS: case LEX_TOKEN_LESS_EQUAL: case LEX_TOKEN_GREATER: case LEX_TOKEN_GREATER_EQUAL:
@@ -53,9 +53,9 @@ static bool em_unused_pure(cc *c, uint32_t n, unsigned *left)
 			return false;
 		}
 		__attribute__((fallthrough));
-	case N_LOGAND: case N_LOGOR: case N_COMMA:
+	case AST_NODE_LOGICAL_AND: case AST_NODE_LOGICAL_OR: case AST_NODE_COMMA:
 		return em_unused_pure(c, x->a, left) && em_unused_pure(c, x->b, left);
-	case N_COND:
+	case AST_NODE_CONDITIONAL:
 		return em_unused_pure(c, x->a, left) && em_unused_pure(c, x->b, left) &&
 		       em_unused_pure(c, x->c, left);
 	default:
@@ -73,13 +73,13 @@ VPRIV bool em_unused_local(ecx *e, uint32_t s, uint32_t fn)
 		return false;
 	/* fn is supplied by the backend/selector; top also protects an optnone
 	 * caller while a different function body is being inlined. */
-	if ((fn && (sym_attrs(c, fn)->flags & AF_OPTNONE)) ||
-	    (e->top && (sym_attrs(c, e->top)->flags & AF_OPTNONE)))
+	if ((fn && (sym_attrs(c, fn)->flags & CC_ATTRIBUTE_FLAG_OPTNONE)) ||
+	    (e->top && (sym_attrs(c, e->top)->flags & CC_ATTRIBUTE_FLAG_OPTNONE)))
 		return false;
 	y = &c->syms[s];
 	a = sym_attrs(c, s);
-	return is_local_var(c, s) && y->kind == S_VAR && y->sc != SC_STATIC &&
-	       y->sc != SC_EXTERN && y->sc != SC_TYPEDEF && !(y->flags & SF_ADDR_TAKEN) &&
+	return is_local_var(c, s) && y->kind == AST_SYMBOL_VARIABLE && y->sc != AST_STORAGE_STATIC &&
+	       y->sc != AST_STORAGE_EXTERN && y->sc != AST_STORAGE_TYPEDEF && !(y->flags & AST_SYMBOL_FLAG_ADDRESS_TAKEN) &&
 	       em_unused_int(c, y->ty) && !vm_type(c, y->ty) && !a->cleanup &&
 	       !a->used && !a->asmname;
 }
@@ -94,7 +94,7 @@ VPRIV unsigned em_unused_init(ecx *e, const node *decl, uint32_t fn, unsigned bu
 		return EM_UNUSED_OMIT;
 	/* Brace/zero initializer records belong to the initializer walker, not
 	 * the value emitter. Keep that path rather than treating them as values. */
-	if (N(decl->b)->op == N_INIT || N(decl->b)->op == N_ZERO || N(decl->b)->op == N_STR)
+	if (N(decl->b)->op == AST_NODE_INITIALIZER || N(decl->b)->op == AST_NODE_ZERO || N(decl->b)->op == AST_NODE_STRING)
 		return EM_UNUSED_KEEP;
 	/* Evaluating a value rather than an effects-only expression preserves
 	 * internal conversions and traps. The final integer conversion is unused. */

@@ -33,31 +33,31 @@ static bool is_zero_init(cc *c, uint32_t v)
 {
 	const node *x = N(v);
 
-	if (!v || x->op == N_ZERO)
+	if (!v || x->op == AST_NODE_ZERO)
 		return true;
-	if (x->op == N_NUM)
+	if (x->op == AST_NODE_NUMBER)
 		return c->ipool[x->a] == 0;
-	if (x->op == N_CAST && (x->aux == CK_INT || x->aux == CK_NOP || x->aux == CK_NULL || x->aux == CK_I2P))
-		return x->aux == CK_NULL || is_zero_init(c, x->a);
+	if (x->op == AST_NODE_CAST && (x->aux == AST_CAST_INTEGER || x->aux == AST_CAST_NOP || x->aux == AST_CAST_NULL_POINTER || x->aux == AST_CAST_INTEGER_TO_POINTER))
+		return x->aux == AST_CAST_NULL_POINTER || is_zero_init(c, x->a);
 	return false;
 }
 
 /* store the elements of init into the (already zeroed) object at d */
-static void init_elems(ecx *e, const lval *d, qty ty, uint32_t init)
+static void init_elems(ecx *e, const lval *d, ast_qualified_type ty, uint32_t init)
 {
 	cc *c = e->c;
 	const node *x = N(init);
 
 	/* Initialization precedes publication and copies the plain payload. */
-	ty = (T(c, ty)->flags & TF_ATOMIC) ? QT(T(c, ty)->n, 0) : ty;
+	ty = (T(c, ty)->flags & AST_TYPE_FLAG_ATOMIC) ? AST_QUALIFIED_TYPE(T(c, ty)->n, 0) : ty;
 
-	if (!init || x->op == N_ZERO)
+	if (!init || x->op == AST_NODE_ZERO)
 		return;
-	if (x->op == N_INIT) {
+	if (x->op == AST_NODE_INITIALIZER) {
 		const uint32_t *v = &c->lists[x->b];
 
 		if (x->aux == 1) {
-			qty et = T(c, ty)->base;
+			ast_qualified_type et = T(c, ty)->base;
 			uint64_t es = tsize(c, et);
 
 			for (uint32_t i = 0; i < x->c; i++) {
@@ -113,7 +113,7 @@ static void init_elems(ecx *e, const lval *d, qty ty, uint32_t init)
 		}
 		return;
 	}
-	if (x->op == N_STR && is_array(c, ty)) {
+	if (x->op == AST_NODE_STRING && is_array(c, ty)) {
 		const cstr *s = &c->strs[x->a];
 		uint64_t n = (uint64_t)s->n * s->esz, cap = tsize(c, ty);
 		int64_t off;
@@ -145,18 +145,18 @@ static void init_elems(ecx *e, const lval *d, qty ty, uint32_t init)
 	}
 }
 
-VPRIV void gen_init_local(ecx *e, const lval *dst, qty ty, uint32_t init)
+VPRIV void gen_init_local(ecx *e, const lval *dst, ast_qualified_type ty, uint32_t init)
 {
 	cc *c = e->c;
 	const node *x = N(init);
 
 	if (!init)
 		return;
-	if (T(c, ty)->flags & TF_ATOMIC) {
+	if (T(c, ty)->flags & AST_TYPE_FLAG_ATOMIC) {
 		zero_lval(e, dst, tsize(c, ty));
-		ty = (T(c, ty)->flags & TF_ATOMIC) ? QT(T(c, ty)->n, 0) : ty;
+		ty = (T(c, ty)->flags & AST_TYPE_FLAG_ATOMIC) ? AST_QUALIFIED_TYPE(T(c, ty)->n, 0) : ty;
 	}
-	if (x->op == N_INIT || x->op == N_ZERO || (x->op == N_STR && is_array(c, ty))) {
+	if (x->op == AST_NODE_INITIALIZER || x->op == AST_NODE_ZERO || (x->op == AST_NODE_STRING && is_array(c, ty))) {
 		zero_lval(e, dst, tsize(c, ty));
 		init_elems(e, dst, ty, init);
 		return;
@@ -179,7 +179,7 @@ static void run_cleanup(ecx *e, uint32_t s)
 	carg a;
 	lval l;
 
-	if (T(c, c->syms[s].ty)->flags & TF_VLA) {
+	if (T(c, c->syms[s].ty)->flags & AST_TYPE_FLAG_VLA) {
 		const bind *b = binding(e, s);
 		int r;
 
@@ -199,7 +199,7 @@ static void run_cleanup(ecx *e, uint32_t s)
 		return;
 	l = local_lval(e, s);
 	a.v = laddr(e, &l);
-	a.t = prim(TY_LONG);
+	a.t = prim(AST_TYPE_LONG);
 	a.slot = 1;
 	fn = canon_sym(c, fn);
 	if (can_inline(e, fn)) {
@@ -209,7 +209,7 @@ static void run_cleanup(ecx *e, uint32_t s)
 		return;
 	}
 	{
-		val r = do_call(e, REF(RK_SYM, fn), NULL, &a, 1, prim(TY_VOID), false, -1);
+		val r = do_call(e, REF(RK_SYM, fn), NULL, &a, 1, prim(AST_TYPE_VOID), false, -1);
 
 		val_free(e, &r);
 	}
@@ -243,14 +243,14 @@ VPRIV val gen_block(ecx *e, uint32_t n, bool want)
 	int cmark = e->nclean;
 	val v = vnone();
 	uint32_t vstmt = 0;
-	qty vt = 0;
+	ast_qualified_type vt = 0;
 
 	if (want && x->c) {
 		uint32_t ls = c->lists[x->b + x->c - 1];
 
-		while (ls && N(ls)->op == N_LABEL)
+		while (ls && N(ls)->op == AST_NODE_LABEL)
 			ls = N(ls)->c;
-		if (ls && N(ls)->op == N_EXPR && N(ls)->a) {
+		if (ls && N(ls)->op == AST_NODE_EXPRESSION && N(ls)->a) {
 			vstmt = ls;
 			vt = N(N(ls)->a)->ty;
 		}
@@ -268,7 +268,7 @@ VPRIV val gen_block(ecx *e, uint32_t n, bool want)
 			uint32_t t = s;
 
 			/* labels in front of the value */
-			while (N(t)->op == N_LABEL) {
+			while (N(t)->op == AST_NODE_LABEL) {
 				uint32_t l = user_label(e, N(t)->a);
 
 				if (e->E->lref[N(t)->a] & LR_BACK)
@@ -318,26 +318,26 @@ static void collect_cases(ecx *e, uint32_t n)
 		return;
 	x = N(n);
 	switch (x->op) {
-	case N_CASE:
-	case N_DEFAULT:
+	case AST_NODE_CASE:
+	case AST_NODE_DEFAULT:
 		e->cases[e->ncases++] = n;
 		collect_cases(e, x->c);
 		return;
-	case N_BLOCK:
+	case AST_NODE_BLOCK:
 		for (uint32_t i = 0; i < x->c; i++)
 			collect_cases(e, c->lists[x->b + i]);
 		return;
-	case N_IF:
+	case AST_NODE_IF:
 		collect_cases(e, x->b);
 		collect_cases(e, x->c);
 		return;
-	case N_WHILE: case N_DO:
+	case AST_NODE_WHILE: case AST_NODE_DO:
 		collect_cases(e, x->b);
 		return;
-	case N_FOR:
+	case AST_NODE_FOR:
 		collect_cases(e, c->lists[x->c + 1]);
 		return;
-	case N_LABEL:
+	case AST_NODE_LABEL:
 		collect_cases(e, x->c);
 		return;
 	default:
@@ -442,7 +442,7 @@ static bool a64_switch_dispatch(ecx *e, uint32_t base, int r, int cx,
 	cc *c = e->c;
 	uint32_t count = 0;
 	for (uint32_t k = base; k < e->ncases; k++)
-		count += N(e->cases[k])->op == N_CASE;
+		count += N(e->cases[k])->op == AST_NODE_CASE;
 	if (count < 4)
 		return false;
 	em_switch_case *cases = malloc((size_t)count * sizeof *cases);
@@ -452,7 +452,7 @@ static bool a64_switch_dispatch(ecx *e, uint32_t base, int r, int cx,
 	bool ranges = false;
 	for (uint32_t k = base; k < e->ncases; k++) {
 		uint32_t cn = e->cases[k];
-		if (N(cn)->op == N_CASE) {
+		if (N(cn)->op == AST_NODE_CASE) {
 			cases[j++] = (em_switch_case){c->ipool[N(cn)->a],
 				c->ipool[N(cn)->b], e->caselbl[cn]};
 			ranges |= c->ipool[N(cn)->a] != c->ipool[N(cn)->b];
@@ -476,7 +476,7 @@ static void gen_switch(ecx *e, uint32_t n)
 	if (a64_switch_values(e,n)) return;
 	cc *c = e->c;
 	const node *x = N(n);
-	qty ct = N(x->a)->ty;
+	ast_qualified_type ct = N(x->a)->ty;
 	int cx = X(c, ct);
 	val v = gen(e, x->a);
 	uint32_t base = e->ncases, dflt = 0, lbrk = newlabel(e);
@@ -486,7 +486,7 @@ static void gen_switch(ecx *e, uint32_t n)
 		uint32_t cn = e->cases[k];
 
 		e->caselbl[cn] = newlabel(e);
-		if (N(cn)->op == N_DEFAULT)
+		if (N(cn)->op == AST_NODE_DEFAULT)
 			dflt = e->caselbl[cn];
 	}
 	if (!dflt)
@@ -498,7 +498,7 @@ static void gen_switch(ecx *e, uint32_t n)
 		for (uint32_t k = base; k < e->ncases; k++) {
 			const node *cn = N(e->cases[k]);
 
-			if (cn->op == N_CASE && c->ipool[cn->a] <= cv && cv <= c->ipool[cn->b]) {
+			if (cn->op == AST_NODE_CASE && c->ipool[cn->a] <= cv && cv <= c->ipool[cn->b]) {
 				target = e->caselbl[e->cases[k]];
 				break;
 			}
@@ -508,7 +508,7 @@ static void gen_switch(ecx *e, uint32_t n)
 		int source = toreg(e, &v);
 		for (uint32_t k = base; k < e->ncases; k++) {
 			const node *cn = N(e->cases[k]);
-			if (cn->op != N_CASE) continue;
+			if (cn->op != AST_NODE_CASE) continue;
 			i128 lo = c->ipool[cn->a], hi = c->ipool[cn->b];
 			uint32_t next = newlabel(e);
 			int copy = treg(e);
@@ -538,7 +538,7 @@ static void gen_switch(ecx *e, uint32_t n)
 			const node *cn = N(e->cases[k]);
 			u128 lo, d;
 
-			if (cn->op != N_CASE)
+			if (cn->op != AST_NODE_CASE)
 				continue;
 			lo = (u128)c->ipool[cn->a], d = (u128)c->ipool[cn->b] - lo;
 			movi(e, 1, t0, (int64_t)(uint64_t)lo);
@@ -566,7 +566,7 @@ static void gen_switch(ecx *e, uint32_t n)
 				const node *cn = N(e->cases[k]);
 				i128 lo, hi;
 
-				if (cn->op != N_CASE)
+				if (cn->op != AST_NODE_CASE)
 					continue;
 				lo = c->ipool[cn->a], hi = c->ipool[cn->b];
 				if (lo == hi) {
@@ -604,7 +604,7 @@ static void gen_return(ecx *e, const node *x)
 {
 	cc *c = e->c;
 	fnctx *f = e->f;
-	qty rt = f->rty;
+	ast_qualified_type rt = f->rty;
 	val v;
 
 	if (x->a && a64_tail_return(e, x->a))
@@ -655,8 +655,8 @@ static void gen_return(ecx *e, const node *x)
 	if (!is_void(c, rt) && x->a && v.k != V_NONE) {
 		if (e->nclean > f->cbase) {
 			/* park the value while the cleanups run */
-			if (is_agg(c, rt) && N(x->a)->op == N_VAR && is_local_var(c, N(x->a)->a) &&
-			    c->syms[N(x->a)->a].sc != SC_STATIC) {
+			if (is_agg(c, rt) && N(x->a)->op == AST_NODE_VARIABLE && is_local_var(c, N(x->a)->a) &&
+			    c->syms[N(x->a)->a].sc != AST_STORAGE_STATIC) {
 				/* clang returns the local itself (NRVO): its cleanups' changes are seen */
 				run_cleanups(e, f->cbase);
 			} else if (is_agg(c, rt)) {
@@ -748,7 +748,7 @@ static val vla_len(ecx *e, uint32_t sn)
 			mem(e, I_LD, 3, 0, r, FRAME, e->vsz[k].slot);
 			return vreg(r);
 		}
-	return cast(e, gen(e, sn), N(sn)->ty, c->t_size, CK_INT);
+	return cast(e, gen(e, sn), N(sn)->ty, c->t_size, AST_CAST_INTEGER);
 }
 
 /*
@@ -758,20 +758,20 @@ static val vla_len(ecx *e, uint32_t sn)
  * pure: only sizes without side effects (parameters: function_def already
  * evaluated the others on entry).
  */
-VPRIV void vla_fix(ecx *e, qty t, bool pure)
+VPRIV void vla_fix(ecx *e, ast_qualified_type t, bool pure)
 {
 	cc *c = e->c;
 
 	for (;;) {
 		const ctype *a = T(c, t);
 
-		if (a->kind == TY_PTR) {
+		if (a->kind == AST_TYPE_POINTER) {
 			t = a->base;
 			continue;
 		}
-		if (a->kind != TY_ARRAY)
+		if (a->kind != AST_TYPE_ARRAY)
 			return;
-		if ((a->flags & TF_VLA) && a->n && N(a->n)->op != N_NUM && !(pure && side_effects(c, a->n))) {
+		if ((a->flags & AST_TYPE_FLAG_VLA) && a->n && N(a->n)->op != AST_NODE_NUMBER && !(pure && side_effects(c, a->n))) {
 			bool captured = false;
 
 			for (uint32_t k = e->nvsz; k-- > 0;)
@@ -783,7 +783,7 @@ VPRIV void vla_fix(ecx *e, qty t, bool pure)
 				t = a->base;
 				continue;
 			}
-			val v = cast(e, gen(e, a->n), N(a->n)->ty, c->t_size, CK_INT);
+			val v = cast(e, gen(e, a->n), N(a->n)->ty, c->t_size, AST_CAST_INTEGER);
 			int r = toreg(e, &v);
 			int64_t sl = slot(e, 8, 8);
 
@@ -799,14 +799,14 @@ VPRIV void vla_fix(ecx *e, qty t, bool pure)
 	}
 }
 
-VPRIV val vla_bytes(ecx *e, qty t)
+VPRIV val vla_bytes(ecx *e, ast_qualified_type t)
 {
 	cc *c = e->c;
 	const ctype *a = T(c, t);
 	val n, b;
 	int r;
 
-	if (a->kind != TY_ARRAY || !(a->flags & TF_VLA))
+	if (a->kind != AST_TYPE_ARRAY || !(a->flags & AST_TYPE_FLAG_VLA))
 		return vconst(tsize(c, t));
 	n = vla_len(e, a->n);
 	b = vla_bytes(e, a->base);
@@ -898,8 +898,8 @@ static void dead_decl(ecx *e, const node *x)
 	const sym *y = &c->syms[s];
 	int rr;
 
-	if (y->kind != S_VAR || y->sc == SC_STATIC || y->sc == SC_EXTERN || y->sc == SC_TYPEDEF ||
-	    (T(c, y->ty)->flags & TF_VLA))
+	if (y->kind != AST_SYMBOL_VARIABLE || y->sc == AST_STORAGE_STATIC || y->sc == AST_STORAGE_EXTERN || y->sc == AST_STORAGE_TYPEDEF ||
+	    (T(c, y->ty)->flags & AST_TYPE_FLAG_VLA))
 		return;
 	bind_slot(e, s);
 	if ((rr = regvar_reg(c, s)) >= 0)
@@ -915,9 +915,9 @@ static void gen_decl(ecx *e, const node *x)
 
 	if (!x->aux && unlikely(vm_type(c, y->ty)))
 		vla_fix(e, y->ty, false);
-	if (y->kind != S_VAR || y->sc == SC_STATIC || y->sc == SC_EXTERN || y->sc == SC_TYPEDEF)
+	if (y->kind != AST_SYMBOL_VARIABLE || y->sc == AST_STORAGE_STATIC || y->sc == AST_STORAGE_EXTERN || y->sc == AST_STORAGE_TYPEDEF)
 		return;
-	if (T(c, y->ty)->flags & TF_VLA) {
+	if (T(c, y->ty)->flags & AST_TYPE_FLAG_VLA) {
 		gen_vla_decl(e, x, s);
 		return;
 	}
@@ -933,8 +933,8 @@ static void gen_decl(ecx *e, const node *x)
 			return;
 		}
 	}
-	if (x->b && !(e->E->sflags[s] & SA_WRITTEN) && !is_agg(c, y->ty) && !(QQ(y->ty) & Q_VOLATILE) &&
-	    !is_wide(c, y->ty) && y->sc != SC_REGISTER && !sym_attrs(c, s)->cleanup) {
+	if (x->b && !(e->E->sflags[s] & SA_WRITTEN) && !is_agg(c, y->ty) && !(AST_QUALIFIED_TYPE_QUALIFIERS(y->ty) & AST_QUALIFIER_VOLATILE) &&
+	    !is_wide(c, y->ty) && y->sc != AST_STORAGE_REGISTER && !sym_attrs(c, s)->cleanup) {
 		val v = gen(e, x->b);
 
 		if (const_var(e, s, &v)) {
@@ -968,7 +968,7 @@ static void gen_decl(ecx *e, const node *x)
 			binding(e, s)->reg = (uint8_t)rr;
 		if (x->b)
 			gen_init_local(e, &l, y->ty, x->b);
-		else if (rr < 0 && y->sc != SC_REGISTER)
+		else if (rr < 0 && y->sc != AST_STORAGE_REGISTER)
 			kv_track(e, s, NULL);
 	}
 	if (sym_attrs(c, s)->cleanup) {
@@ -995,8 +995,8 @@ VPRIV void gen_stmt(ecx *e, uint32_t n)
 
 	if (n)
 		e->curloc = N(n)->loc;
-	if (unlikely(e->E->o->debug) && n && N(n)->op != N_BLOCK && N(n)->op != N_CASE &&
-	    N(n)->op != N_DEFAULT && N(n)->op != N_LABEL)
+	if (unlikely(e->E->o->debug) && n && N(n)->op != AST_NODE_BLOCK && N(n)->op != AST_NODE_CASE &&
+	    N(n)->op != AST_NODE_DEFAULT && N(n)->op != AST_NODE_LABEL)
 		dbg_row(e, N(n)->loc);
 	gen_stmt1(e, n);
 	e->curloc = loc;
@@ -1017,17 +1017,17 @@ static void gen_stmt1(ecx *e, uint32_t n)
 	if (!n)
 		return;
 	if (!e->reach && !(e->E->nflags[n] & NA_LABEL)) {
-		if (N(n)->op == N_DECL)
+		if (N(n)->op == AST_NODE_DECLARATION)
 			dead_decl(e, N(n));
 		return;
 	}
 	x = N(n);
 	mark = e->foff;
 	switch (x->op) {
-	case N_BLOCK:
+	case AST_NODE_BLOCK:
 		gen_block(e, n, false);
 		return;
-	case N_EXPR:
+	case AST_NODE_EXPRESSION:
 		/* a value thrown away: (void)(RCU) loads nothing (and refers to nothing) */
 		if (x->a && side_effects(c, x->a)) {
 			val v = gen(e, x->a);
@@ -1035,10 +1035,10 @@ static void gen_stmt1(ecx *e, uint32_t n)
 			val_free(e, &v);
 		}
 		break;
-	case N_DECL:
+	case AST_NODE_DECLARATION:
 		gen_decl(e, x);
 		return;
-	case N_IF: {
+	case AST_NODE_IF: {
 		uint32_t lelse = newlabel(e), lend = newlabel(e);
 
 		gen_cond(e, x->a, false, lelse);
@@ -1054,7 +1054,7 @@ static void gen_stmt1(ecx *e, uint32_t n)
 		}
 		return;
 	}
-	case N_WHILE: {
+	case AST_NODE_WHILE: {
 		uint32_t lhead = newlabel(e), lbrk = newlabel(e);
 
 		deflabel_loop(e, lhead, e->E->nflags[n] & NA_LABEL);
@@ -1067,7 +1067,7 @@ static void gen_stmt1(ecx *e, uint32_t n)
 		deflabel(e, lbrk);
 		return;
 	}
-	case N_DO: {
+	case AST_NODE_DO: {
 		uint32_t lhead = newlabel(e), lcont = newlabel(e), lbrk = newlabel(e);
 
 		deflabel_loop(e, lhead, e->E->nflags[n] & NA_LABEL);
@@ -1080,7 +1080,7 @@ static void gen_stmt1(ecx *e, uint32_t n)
 		deflabel(e, lbrk);
 		return;
 	}
-	case N_FOR: {
+	case AST_NODE_FOR: {
 		uint32_t lhead = newlabel(e), lcont = newlabel(e), lbrk = newlabel(e);
 		uint32_t step = c->lists[x->c], body = c->lists[x->c + 1];
 		int cmark = e->nclean;
@@ -1088,7 +1088,7 @@ static void gen_stmt1(ecx *e, uint32_t n)
 		if (x->a) {
 			const node *in = N(x->a);
 
-			if (in->op == N_BLOCK) {
+			if (in->op == AST_NODE_BLOCK) {
 				for (uint32_t i = 0; i < in->c; i++)
 					gen_stmt(e, c->lists[in->b + i]);
 			} else {
@@ -1121,15 +1121,15 @@ static void gen_stmt1(ecx *e, uint32_t n)
 		}
 		break;
 	}
-	case N_SWITCH:
+	case AST_NODE_SWITCH:
 		gen_switch(e, n);
 		break;
-	case N_CASE:
-	case N_DEFAULT:
+	case AST_NODE_CASE:
+	case AST_NODE_DEFAULT:
 		deflabel(e, e->caselbl[n]);
 		gen_stmt(e, x->c);
 		return;
-	case N_LABEL: {
+	case AST_NODE_LABEL: {
 		uint32_t l = user_label(e, x->a);
 
 		if (e->E->lref[x->a] & LR_BACK)
@@ -1148,13 +1148,13 @@ static void gen_stmt1(ecx *e, uint32_t n)
 		gen_stmt(e, x->c);
 		return;
 	}
-	case N_GOTO:
+	case AST_NODE_GOTO:
 		if (e->reach) {
 			run_cleanups(e, e->f->cbase + e->E->lcdepth[x->a] < e->nclean ? e->f->cbase + e->E->lcdepth[x->a] : e->nclean);
 			jump(e, user_label(e, x->a));
 		}
 		return;
-	case N_GOTO_IND: {
+	case AST_NODE_GOTO_INDIRECT: {
 		val v = gen(e, x->a);
 		int r = toreg(e, &v);
 
@@ -1164,20 +1164,20 @@ static void gen_stmt1(ecx *e, uint32_t n)
 		e->reach = false;
 		break;
 	}
-	case N_BREAK:
-	case N_CONTINUE: {
-		int i = find_loop(e, x->op == N_CONTINUE);
+	case AST_NODE_BREAK:
+	case AST_NODE_CONTINUE: {
+		int i = find_loop(e, x->op == AST_NODE_CONTINUE);
 
 		if (i < 0)
 			efatal(e, x->loc, "break/continue outside a loop");
 		run_cleanups(e, e->loops[i].cdepth);
-		jump(e, x->op == N_BREAK ? e->loops[i].brk : e->loops[i].cont);
+		jump(e, x->op == AST_NODE_BREAK ? e->loops[i].brk : e->loops[i].cont);
 		return;
 	}
-	case N_RETURN:
+	case AST_NODE_RETURN:
 		gen_return(e, x);
 		break;
-	case N_ASM:
+	case AST_NODE_ASM:
 		gen_asm(e, n);
 		break;
 	default:

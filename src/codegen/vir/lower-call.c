@@ -8,7 +8,7 @@
 /* ---------------- calls ---------------- */
 
 /* the classification for arm64 (the signature's groups): scalars only for now */
-VPRIV void virbuild_classify(ecx *e, qty t, wkarg *a, bool unnamed)
+VPRIV void virbuild_classify(ecx *e, ast_qualified_type t, wkarg *a, bool unnamed)
 {
 	cc *c = e->c;
 	uint64_t size = tsize(c, t);
@@ -18,8 +18,8 @@ VPRIV void virbuild_classify(ecx *e, qty t, wkarg *a, bool unnamed)
 	a->size = size;
 	a->align = talign(c, t) > 8 ? talign(c, t) : 8;
 	a->unnamed = unnamed;
-	if (is_record(c, t) || is_array(c, t) || is_vec(c, t) || is_wide(c, t) || k == TY_LDOUBLE || k == TY_FLOAT128 ||
-	    k == TY_FLOAT16 || k == TY_BFLOAT16 || size > 8)
+	if (is_record(c, t) || is_array(c, t) || is_vec(c, t) || is_wide(c, t) || k == AST_TYPE_LONG_DOUBLE || k == AST_TYPE_FLOAT128 ||
+	    k == AST_TYPE_FLOAT16 || k == AST_TYPE_BFLOAT16 || size > 8)
 		virbuild_fail(e, VIRBUILD_FAILURE(record_argument_or_result));
 	a->n = 1;
 	a->cls[0] = a->cls[1] = is_flt(c, t) ? WA_SSE : WA_INT;
@@ -59,7 +59,7 @@ static uint32_t virbuild_call_word_load(ecx *e, int64_t off, uint32_t ty)
 	}
 }
 
-static uint32_t virbuild_call_signature_make(ecx *e, const wkarg *a, int n, bool variadic, qty rt, uint32_t *rpc)
+static uint32_t virbuild_call_signature_make(ecx *e, const wkarg *a, int n, bool variadic, ast_qualified_type rt, uint32_t *rpc)
 {
 	virbuild_context *V = e->vw;
 	cc *c = e->c;
@@ -67,7 +67,7 @@ static uint32_t virbuild_call_signature_make(ecx *e, const wkarg *a, int n, bool
 
 	VIRBUILD_ARRAY_GROW(V->extra, V->extra_count, V->extra_capacity, 3 + 2 * (uint32_t)n);
 	V->extra[o] = VIR_SIGNATURE_HEADER((uint32_t)n, variadic);
-	if (KIND(c, rt) == TY_VOID) {
+	if (KIND(c, rt) == AST_TYPE_VOID) {
 		V->extra[o + 1] = VIR_GROUP_WORD0(VIR_GROUP_NONE, 0, 0, 0, 0, 0, 0), V->extra[o + 2] = 0;
 		*rpc = 0;
 	} else {
@@ -82,7 +82,7 @@ static uint32_t virbuild_call_signature_make(ecx *e, const wkarg *a, int n, bool
 	return o;
 }
 
-VPRIV val virbuild_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool variadic, const wkarg *r, qty rt)
+VPRIV val virbuild_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool variadic, const wkarg *r, ast_qualified_type rt)
 {
 	virbuild_context *V = e->vw;
 	cc *c = e->c;
@@ -152,7 +152,7 @@ VPRIV void virbuild_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadi
 
 	for (int k = 0; k < n; k++) {
 		uint32_t sym = c->lists[body->a + (uint32_t)k];
-		qty ty = c->syms[sym].ty;
+		ast_qualified_type ty = c->syms[sym].ty;
 		uint32_t pc = a[k].cls[0] == WA_SSE ? (a[k].size == 4 ? VIR_CLASS_F32 : VIR_CLASS_F64) : VIR_CLASS_INT;
 
 		if (a[k].mem || a[k].n != 1)
@@ -162,7 +162,7 @@ VPRIV void virbuild_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadi
 	}
 	for (int k = 0; k < n; k++) {
 		uint32_t sym = c->lists[body->a + (uint32_t)k];
-		qty ty = c->syms[sym].ty;
+		ast_qualified_type ty = c->syms[sym].ty;
 		uint32_t pc = a[k].cls[0] == WA_SSE ? (a[k].size == 4 ? VIR_CLASS_F32 : VIR_CLASS_F64) : VIR_CLASS_INT;
 		uint32_t v = pv0 + (uint32_t)k;
 		lval home;
@@ -191,7 +191,7 @@ VPRIV void virbuild_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadi
 	}
 }
 
-VPRIV void virbuild_ret(ecx *e, val *v, qty t, uint32_t lbl)
+VPRIV void virbuild_ret(ecx *e, val *v, ast_qualified_type t, uint32_t lbl)
 {
 	virbuild_context *V = e->vw;
 	cc *c = e->c;

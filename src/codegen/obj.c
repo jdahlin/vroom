@@ -1,6 +1,6 @@
 /*
  * obj.c: the object-item stream: write a chunk's items while generating, and replay them into the
- * assembler and ElfObj to make the object (cc_opts.emit == 2, `-c`).
+ * assembler and ElfObj to make the object (cc_options.emit == 2, `-c`).
  *
  * During generation a chunk is not text but a sequence of items (emitimpl.h "object backend": IT_TEXT,
  * IT_CODE, IT_X64, IT_DATA, IT_LABEL, IT_BYTES, IT_SYMHDR, IT_FEND, IT_OSIZE), each a kind, a length

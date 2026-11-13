@@ -1,5 +1,7 @@
 /* The undefined-symbol diagnostics: spelling suggestions, reference locations, the report. */
 
+#include "ld-internal.h"
+
 /* lld's getAlternativeSpelling: a defined global (or a local of the referencing object) one edit
    away, tried in lld's order: substitute, transpose, insert, delete (characters '0'..'z') */
 static const char *ld_spelling_suggestion_try(struct ld_context *ctx, const char *cand, ld_object *ref, const char **where)
@@ -140,7 +142,7 @@ static void ld_undefined_references_report(struct ld_context *ctx, uint32_t gid,
 	free(b.p);
 }
 
-static void ld_undefined_symbols_report(struct ld_context *ctx)
+VPRIV void ld_undefined_symbols_report(struct ld_context *ctx)
 {
 	uint32_t n = 0;
 	for (uint32_t i = 0; i < ctx->symbols.order.n; i++) {

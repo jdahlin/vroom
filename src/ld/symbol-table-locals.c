@@ -1,5 +1,7 @@
 /* The first half of the symbol table: which locals are kept, counting them, and writing a symbol record. */
 
+#include "ld-internal.h"
+
 /* ---------------- symbol table ---------------- */
 
 static bool ld_local_symbol_is_kept(struct ld_context *ctx, const ld_object *o, const elf_symbol *y)
@@ -27,7 +29,7 @@ static bool ld_local_symbol_is_kept(struct ld_context *ctx, const ld_object *o, 
 }
 
 /* which locals go to .symtab, remembered (index, name length) for ld_local_symbols_write */
-static void ld_local_symbols_count(void *arg, size_t i)
+VPRIV void ld_local_symbols_count(void *arg, size_t i)
 {
 	struct ld_context *ctx = arg;
 	static __thread uint32_t (*ld_local_symbols_scratch)[2];
@@ -56,7 +58,7 @@ static void ld_local_symbols_count(void *arg, size_t i)
 	o->local_string_bytes = str;
 }
 
-static uint16_t ld_symbol_section_index_of_input_section(struct ld_context *ctx, uint32_t sec)
+VPRIV uint16_t ld_symbol_section_index_of_input_section(struct ld_context *ctx, uint32_t sec)
 {
 	uint32_t os = ld_input_section_output_section(ctx, sec);
 	if (os == LD_NONE || os == LD_OUTPUT_SECTION_DISCARD)
@@ -64,7 +66,7 @@ static uint16_t ld_symbol_section_index_of_input_section(struct ld_context *ctx,
 	return ctx->script.sections.v[os].section_header_index;
 }
 
-static void ld_symbol_record_store(elf_symbol *d, uint8_t *strbuf, uint64_t *stroff, const char *name, uint8_t info,
+VPRIV void ld_symbol_record_store(elf_symbol *d, uint8_t *strbuf, uint64_t *stroff, const char *name, uint8_t info,
 		    uint8_t other, uint16_t shndx, uint64_t val, uint64_t size)
 {
 	size_t n = strlen(name);

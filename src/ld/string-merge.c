@@ -1,5 +1,7 @@
 /* SHF_MERGE sections: splitting into pieces and deduplicating them in 32 parallel shards. */
 
+#include "ld-internal.h"
+
 /* ---------------- merge pieces ---------------- */
 
 static void ld_merge_pieces_split(void *arg, size_t i)
@@ -71,11 +73,6 @@ static void ld_merge_pieces_split(void *arg, size_t i)
 	m->piece_count = cnt;
 }
 
-static inline uint64_t ld_merge_piece_length(struct ld_context *ctx, const ld_merge_input *m, uint32_t p)
-{
-	uint64_t end = p + 1 < m->piece_count ? m->input_offsets[p + 1] : ctx->inputs.sections.v[m->input_section].size;
-	return end - m->input_offsets[p];
-}
 
 /* one shard of one merge section: dedup in insertion order */
 static void ld_merge_shard_deduplicate(void *arg, size_t job_i)
@@ -159,7 +156,7 @@ static void ld_merge_input_fix(void *arg, size_t i)
 		m->output_offsets[p] += (uint32_t)mg->shard_offsets[m->hash[p] >> 26];
 }
 
-static void ld_merges_finalize(struct ld_context *ctx)
+VPRIV void ld_merges_finalize(struct ld_context *ctx)
 {
 	ld_parallel_for(ctx->inputs.merge_inputs.n, ld_merge_pieces_split, ctx);
 	ld_parallel_for((size_t)ctx->inputs.merge_sections.n * 32, ld_merge_shard_deduplicate, ctx);

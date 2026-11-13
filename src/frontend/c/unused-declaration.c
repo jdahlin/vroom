@@ -21,10 +21,10 @@ CC_PRIVATE void cc_unused_variables_report(cc *c, uint32_t m)
 		const attrs *a = y->attrs ? &c->attr[y->attrs] : NULL;
 		diag_span r;
 
-		if (y->kind != S_VAR || !y->name || (y->flags & (SF_PARAM | SF_ATTR_USED)) ||
-		    y->sc == SC_EXTERN || (a && (a->unused || a->cleanup || a->used)))
+		if (y->kind != AST_SYMBOL_VARIABLE || !y->name || (y->flags & (AST_SYMBOL_FLAG_PARAMETER | AST_SYMBOL_FLAG_ATTRIBUTE_USED)) ||
+		    y->sc == AST_STORAGE_EXTERN || (a && (a->unused || a->cleanup || a->used)))
 			continue;
-		if (y->flags & SF_REF) {	/* -Wunused-but-set-variable: only assigned */
+		if (y->flags & AST_SYMBOL_FLAG_REFERENCED) {	/* -Wunused-but-set-variable: only assigned */
 			if (!y->nref) {
 				diag_info d = { "warning", y->loc, NULL, 0, NULL, 0, cc_identifier_string(y->name), (uint32_t)cc_identifier_length(y->name) };
 				static const char *const gb[] = { "unused-but-set", "unused", "all", "most", NULL };
@@ -53,40 +53,40 @@ CC_PRIVATE void cc_unused_statics_report(cc *c)
 		return;
 	for (uint32_t i = 1; i < c->nsym; i++)	/* alias("f") uses f */
 		if (c->syms[i].attrs && c->attr[c->syms[i].attrs].alias) {
-			uint32_t t = cc_global_named(c, c->strs[c->attr[c->syms[i].attrs].alias - 1].s);
+			uint32_t t = cc_symbol_global_find(c, c->strs[c->attr[c->syms[i].attrs].alias - 1].s);
 
 			if (t)
-				c->syms[t].flags |= SF_USED;
+				c->syms[t].flags |= AST_SYMBOL_FLAG_USED;
 		}
 	for (uint32_t i = 1; i < c->nsym; i++) {
 		const sym *y = &c->syms[i];
 		uint32_t at;
-		bool ref = false, used = false, skip = false, fn = y->kind == S_FUNC;
+		bool ref = false, used = false, skip = false, fn = y->kind == AST_SYMBOL_FUNCTION;
 
-		if ((y->kind != S_VAR && !fn) || y->depth || y->sc != SC_STATIC || !y->name || cc_symbol_lookup(c, y->name) != i ||
-		    (y->flags & SF_OVERLOAD))
+		if ((y->kind != AST_SYMBOL_VARIABLE && !fn) || y->depth || y->sc != AST_STORAGE_STATIC || !y->name || cc_symbol_lookup(c, y->name) != i ||
+		    (y->flags & AST_SYMBOL_FLAG_OVERLOAD))
 			continue;
 		for (uint32_t s = i; s; s = c->syms[s].next) {
 			const sym *z = &c->syms[s];
 			const attrs *a = z->attrs ? &c->attr[z->attrs] : NULL;
 
-			ref |= (z->flags & SF_REF) != 0;
-			used |= (z->flags & (SF_ATTR_USED | SF_USED | SF_ADDR_TAKEN)) != 0;
+			ref |= (z->flags & AST_SYMBOL_FLAG_REFERENCED) != 0;
+			used |= (z->flags & (AST_SYMBOL_FLAG_ATTRIBUTE_USED | AST_SYMBOL_FLAG_USED | AST_SYMBOL_FLAG_ADDRESS_TAKEN)) != 0;
 			skip |= a && (a->unused || a->used || a->alias || a->constructor || a->destructor);
 		}
 		at = y->defloc ? y->defloc : y->loc;
 		if (used || skip || !pp_location_is_in_main_file(c->p, at)	/* clang: also a non-inline header function (vcc: its references from unparsed lazy bodies are unknown) */)
 			continue;
 		{
-			qty t = y->ty;
+			ast_qualified_type t = y->ty;
 			bool k = false;
 			diag_span r = { at, pp_token_end_find(c->p, at) };
 			diag_info d = { "warning", at, &r, 1, NULL, 0, cc_identifier_string(y->name), (uint32_t)cc_identifier_length(y->name) };
 
 			if (!fn) {
-				while (AST_TYPE_KIND(c, t) == TY_ARRAY)
-					t = QT(QI(AST_TYPE(c, t)->base), QQ(AST_TYPE(c, t)->base) | QQ(t));
-				k = (QQ(t) & Q_CONST) != 0;
+				while (AST_TYPE_KIND(c, t) == AST_TYPE_ARRAY)
+					t = AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(AST_TYPE(c, t)->base), AST_QUALIFIED_TYPE_QUALIFIERS(AST_TYPE(c, t)->base) | AST_QUALIFIED_TYPE_QUALIFIERS(t));
+				k = (AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_CONST) != 0;
 			}
 			if (ref) {	/* named only where it is not evaluated (sizeof, typeof) */
 				static const char *const gu[] = { "unused-function", "unused", "all", "most", NULL };
@@ -113,7 +113,7 @@ CC_PRIVATE void cc_unused_typedefs_report(cc *c)
 		const sym *y = &c->syms[i];
 		const attrs *a = y->attrs ? &c->attr[y->attrs] : NULL;
 
-		if (y->kind != S_TYPEDEF || !y->depth || !y->name || (y->flags & SF_REF) || (a && (a->unused || a->used)))
+		if (y->kind != AST_SYMBOL_TYPEDEF || !y->depth || !y->name || (y->flags & AST_SYMBOL_FLAG_REFERENCED) || (a && (a->unused || a->used)))
 			continue;
 		{
 			diag_info d = { "warning", y->loc, NULL, 0, NULL, 0, cc_identifier_string(y->name), (uint32_t)cc_identifier_length(y->name) };

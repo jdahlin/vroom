@@ -48,7 +48,7 @@ VPRIV bool virbuild_function_to_vir(ecx *e)
 	uint32_t lastloc = UINT32_MAX;
 
 	vir_function_begin(f, X86(c) ? VIR_TARGET_X86_64_LINUX : DARWIN(c) ? VIR_TARGET_A64_DARWIN : VIR_TARGET_A64_LINUX, REF(RK_SYM, e->wk->fsym),
-		  (T(c, c->syms[e->wk->fsym].ty)->flags & TF_VARIADIC) ? VIR_FUNCTION_FLAG_VARIADIC : 0);
+		  (T(c, c->syms[e->wk->fsym].ty)->flags & AST_TYPE_FLAG_VARIADIC) ? VIR_FUNCTION_FLAG_VARIADIC : 0);
 	VIRBUILD_ARRAY_GROW(V->value_map, 0, V->value_map_capacity, V->insn_count + 1);
 	memset(V->value_map, 0, (size_t)V->insn_count * sizeof *V->value_map);
 	for (uint32_t i = 0; i < V->block_order_count; i++)

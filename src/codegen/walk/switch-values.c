@@ -16,7 +16,7 @@ VPRIV bool wk_switch_values(ecx *e, uint32_t n)
      DARWIN(c) || LO(nfree)(e)<3) return false;
  em_switch_values_recipe p;
  if (!em_switch_values_plan(c,n,&p) || !em_switch_values_queue(e,n,&p)) return false;
- qty ct=N(N(n)->a)->ty;
+ ast_qualified_type ct=N(N(n)->a)->ty;
  val v=wk_gen(e,N(n)->a);
  int r=wk_reg(e,&v,ct), w=p.selector_bits/8;
  if (p.lo) v=LO(bin)(e,LEX_TOKEN_MINUS,w,false,v,vconst(p.lo));

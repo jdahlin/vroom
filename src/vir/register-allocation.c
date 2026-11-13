@@ -114,6 +114,7 @@ typedef struct vir_allocator {
 	vir_function *function;
 	const vir_loops *loops;
 	const vir_target_registers *registers;
+	const vir_alloc_options *options;
 	vir_alloc_out *out;
 	uint64_t pool_maximum;
 	uint32_t stack_count, operand_stack_count, pool_count, operand_register_count, edit_count, move_count, edge_count, pair_count, spill_count, successor_count;
@@ -1362,6 +1363,30 @@ static void vir_alloc_loop_values_preload(vir_allocator *a, uint32_t b, uint32_t
 	}
 }
 
+/* A block parameter that is used late and lives across a call enters in the
+ * web's slot unless a callee-saved register keeps it.  Whether it keeps one
+ * depends on how many the target has:
+ *  - few (x86-64: rbx, r12-r15): the register it already holds is kept
+ *    whenever it is callee-saved, since a caller-saved one only delays the
+ *    spill.  The PR's authors measured +1.3 to +2.0 % on SQLite speedtest1
+ *    (x86-64 Linux, their numbers; not reproducible on this arm64 machine).
+ *  - many (arm64: x19-x28, d8-d15): only when at least two other callee-saved
+ *    registers of the class stay free, since the values used sooner need
+ *    them.  Measured on arm64 (SQLite speedtest1 --size 100, instructions
+ *    retired): the few-registers rule makes it 0.84 % slower.
+ * The target says which it is through its register description. */
+enum { VIR_ALLOC_MANY_CALLEE_SAVED = 8 };
+static bool vir_alloc_late_parameter_keeps_callee_saved(const vir_allocator *a, uint32_t c, uint32_t r)
+{
+	uint64_t callee = a->registers->callee[c];
+
+	if (!(callee >> VIR_REGISTER_NUMBER(r) & 1))
+		return false;
+	if (__builtin_popcountll(callee & a->registers->alloc[c]) < VIR_ALLOC_MANY_CALLEE_SAVED)
+		return true;
+	return __builtin_popcountll(ax.fr[c] & callee & ~(1ull << VIR_REGISTER_NUMBER(r))) >= 2;
+}
+
 static void vir_alloc_block_enter(vir_allocator *a, uint32_t b)
 {
 	vir_function *f = a->function;
@@ -1428,6 +1453,8 @@ static void vir_alloc_block_enter(vir_allocator *a, uint32_t b)
 			}
 		}
 	}
+	if (a->options && a->options->entry)
+		a->options->entry(a->options->entry_context, b, best, 0, VIR_REGISTER_NONE, false, "predecessor");
 	/* the loop-header rule: drop values live through the loop without a use in it */
 	if (l != VIR_BLOCK_NONE && a->loops->loops[l].head == b)
 		for (int c = 0; c < 2; c++) {
@@ -1449,6 +1476,7 @@ static void vir_alloc_block_enter(vir_allocator *a, uint32_t b)
 	for (uint32_t j = 0; j < k->parameter_count; j++) {
 		uint32_t q = k->first + j, c = vir_alloc_value_class(f, q);
 		int r = -1;
+		const char *decision = "dead-or-address";
 
 		ax.slot[q] = VIR_BLOCK_NONE;
 		ax.reg[q] = VIR_REGISTER_NONE;
@@ -1466,6 +1494,7 @@ static void vir_alloc_block_enter(vir_allocator *a, uint32_t b)
 				r = (int)h;
 			else
 				r = vir_alloc_register_choose(a, q, c, 0);
+			decision = r < 0 ? "pressure-slot" : r == (int)h ? "hint-register" : "chosen-register";
 			/* a web's parameter that lives across a call and is not used soon (not in b nor
 			 * at the top of each successor, or after a call, or only passed on by b's br)
 			 * enters in the web's slot: the edges then move nothing for an argument already
@@ -1483,18 +1512,19 @@ static void vir_alloc_block_enter(vir_allocator *a, uint32_t b)
 						if (f->extra[t->c + x] == q) {
 							uint8_t pr = ax.opr[ax.boff[t->a] + x];
 
-							if (pr == VIR_REGISTER_NONE)
+							if (pr == VIR_REGISTER_NONE) {
 								r = -1;
-							else if (VIR_REGISTER_CLASS(pr) == c && (ax.fr[c] >> VIR_REGISTER_NUMBER(pr) & 1))
+								decision = "match-header-slot";
+							} else if (VIR_REGISTER_CLASS(pr) == c && (ax.fr[c] >> VIR_REGISTER_NUMBER(pr) & 1)) {
 								r = pr;
+								decision = "match-header-register";
+							}
 							break;
 						}
 				} else if ((ax.vfl[q] & VIR_ALLOC_FLAG_CROSSES_CALL) && (late || (u == e && t->op == VIR_OP_BR)) &&
-					   !((a->registers->callee[c] >> VIR_REGISTER_NUMBER((uint32_t)r) & 1) &&
-					     __builtin_popcountll(ax.fr[c] & a->registers->callee[c] & ~(1ull << VIR_REGISTER_NUMBER((uint32_t)r))) >= 2)) {
-					/* (a callee-saved register keeps it across the call, when others are free:
-					 * otherwise the values used sooner need them) */
+					   !vir_alloc_late_parameter_keeps_callee_saved(a, c, (uint32_t)r)) {
 					r = -1;
+					decision = "late-call-web-slot";
 				}
 			}
 		}
@@ -1512,10 +1542,18 @@ static void vir_alloc_block_enter(vir_allocator *a, uint32_t b)
 			vir_alloc_value_stored_mark(a, q);
 		}
 		ax.opr[a->operand_register_count++] = r >= 0 ? (uint8_t)r : VIR_REGISTER_NONE;
+		if (a->options && a->options->entry)
+			a->options->entry(a->options->entry_context, b, best, q, r >= 0 ? (uint8_t)r : VIR_REGISTER_NONE,
+					  ax.sst[q] == ax.bgen, decision);
 	}
 	if (l != VIR_BLOCK_NONE && a->loops->loops[l].head == b && best != VIR_BLOCK_NONE && !a->linear)
 		vir_alloc_loop_values_preload(a, b, l, best);
 	vir_alloc_state_save(a, ax.ent_off, ax.ent_n, b);
+	if (a->options && a->options->entry)
+		for (uint32_t j = 0; j < ax.ent_n[b]; j++) {
+			uint32_t x = ax.ent_off[b] + j;
+			a->options->entry(a->options->entry_context, b, best, ax.pv[x], ax.pr[x], ax.ps[x], "entry-register");
+		}
 	relocate = b == a->save_point;
 	/* forward edges into b */
 	{
@@ -1955,6 +1993,7 @@ bool vir_alloc(vir_function *f, const vir_loops *lp, const vir_target_registers 
 	a->function = f;
 	a->loops = lp;
 	a->registers = rg;
+	a->options = opt;
 	a->out = out;
 	a->pool_maximum = opt && opt->pool ? opt->pool : VIR_MAX_INS;
 	if (!nb || !vir_alloc_preconditions_check(a))

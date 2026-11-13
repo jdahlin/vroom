@@ -89,36 +89,36 @@ CC_PRIVATE void cc_return_stack_address_check(cc *c, uint32_t e, bool addr)
 		const node *x = AST_NODE(e);
 
 		switch (x->op) {
-		case N_CAST:
-			if (x->aux == CK_DECAY) {
+		case AST_NODE_CAST:
+			if (x->aux == AST_CAST_ARRAY_DECAY) {
 				e = x->a, addr = true;	/* an array's address */
 				continue;
 			}
-			if (addr && x->aux != CK_NOP)
+			if (addr && x->aux != AST_CAST_NOP)
 				return;
 			e = x->a;
 			continue;
-		case N_COND:
+		case AST_NODE_CONDITIONAL:
 			if (x->b)
 				cc_return_stack_address_check(c, x->b, addr);
 			e = x->c;
 			continue;
-		case N_ADDR:
+		case AST_NODE_ADDRESS:
 			if (addr)
 				return;
 			e = x->a, addr = true;
 			continue;
-		case N_MEMBER:
+		case AST_NODE_MEMBER:
 			if (!addr)
 				return;
 			e = x->a;	/* s.m: s's storage */
 			continue;
-		case N_INDEX:
+		case AST_NODE_INDEX:
 			if (!addr)
 				return;
 			e = x->a, addr = false;	/* x[i]: the address x is */
 			continue;
-		case N_COMPLIT: {
+		case AST_NODE_COMPOUND_LITERAL: {
 			const sym *y = &c->syms[x->b];
 			diag_span r = cc_node_range(c, e);
 			size_t len = 0;
@@ -126,7 +126,7 @@ CC_PRIVATE void cc_return_stack_address_check(cc *c, uint32_t e, bool addr)
 			char buf[256];
 			size_t k = 0;
 
-			if (!addr || !x->b || y->depth == 0 || y->sc == SC_STATIC)
+			if (!addr || !x->b || y->depth == 0 || y->sc == AST_STORAGE_STATIC)
 				return;
 			t = pp_source_text(c->p, r.b, r.e, &len);
 			k = cc_return_stack_address_compound_literal_text(t, len, buf, sizeof buf);
@@ -134,16 +134,16 @@ CC_PRIVATE void cc_return_stack_address_check(cc *c, uint32_t e, bool addr)
 				 "address of stack memory associated with compound literal '%.*s' returned", (int)k, buf);
 			return;
 		}
-		case N_VAR: {
+		case AST_NODE_VARIABLE: {
 			const sym *y = &c->syms[x->a];
 			diag_span r = cc_node_range(c, e);
 
-			if (!addr || y->kind != S_VAR || y->depth == 0 || y->sc == SC_STATIC || y->sc == SC_EXTERN ||
-			    (y->flags & SF_GLOBAL))
+			if (!addr || y->kind != AST_SYMBOL_VARIABLE || y->depth == 0 || y->sc == AST_STORAGE_STATIC || y->sc == AST_STORAGE_EXTERN ||
+			    (y->flags & AST_SYMBOL_FLAG_GLOBAL))
 				return;
 			cc_report_warning(c, "return-stack-address", true, NULL, r.b, &r, 1, NULL, 0,
 				 "address of stack memory associated with %s '%.*s' returned",
-				 y->flags & SF_PARAM ? "parameter" : "local variable", CC_IDENTIFIER(y->name));
+				 y->flags & AST_SYMBOL_FLAG_PARAMETER ? "parameter" : "local variable", CC_IDENTIFIER(y->name));
 			return;
 		}
 		default:

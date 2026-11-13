@@ -1,6 +1,8 @@
 /* The linker script's statements: assignments, PROVIDE, ASSERT, input and output section descriptions, SECTIONS, PHDRS, VERSION, and ld_script_parse. */
 
-static uint32_t ld_output_section_find(struct ld_context *ctx, const char *name)
+#include "ld-internal.h"
+
+VPRIV uint32_t ld_output_section_find(struct ld_context *ctx, const char *name)
 {
 	if (strcmp(name, "/DISCARD/"))
 		for (uint32_t i = 0; i < ctx->script.sections.n; i++)
@@ -237,38 +239,48 @@ static void ld_script_output_section_parse(struct ld_context *ctx, const char *n
 	VVEC_PUSH(ctx->script.commands, c, ld_region_alloc);
 }
 
+/* a command that is an assignment, at the top level or in SECTIONS: ASSERT,
+   PROVIDE, PROVIDE_HIDDEN or HIDDEN, or `name op expression;`.  True when it
+   was one (appended to the commands); else *name is the name read ("" if
+   none) and *start where it began */
+static bool ld_script_assignment_statement_parse(struct ld_context *ctx, char **name, const char **start)
+{
+	ld_assignment *a;
+	*name = NULL;
+	*start = ctx->script.cursor;
+	if (ld_script_word_consume(ctx, "ASSERT")) {
+		a = ld_script_assert_parse(ctx);
+		VVEC_PUSH(ctx->script.commands, ((ld_command){.kind = LD_COMMAND_ASSIGNMENT, .assignment = a}), ld_region_alloc);
+		ld_script_character_consume(ctx, ';');
+		return true;
+	}
+	if (ld_script_word_consume(ctx, "PROVIDE_HIDDEN") || ld_script_word_consume(ctx, "HIDDEN"))
+		a = ld_script_provide_parse(ctx, true);
+	else if (ld_script_word_consume(ctx, "PROVIDE"))
+		a = ld_script_provide_parse(ctx, false);
+	else {
+		*start = ctx->script.cursor;
+		*name = ld_script_name_parse(ctx);
+		a = ld_script_assignment_rest_parse(ctx, *name);
+		if (!a)
+			return false;
+	}
+	if (a)
+		VVEC_PUSH(ctx->script.commands, ((ld_command){.kind = LD_COMMAND_ASSIGNMENT, .assignment = a}), ld_region_alloc);
+	ld_script_character_expect(ctx, ';');
+	return true;
+}
+
 static void ld_script_sections_parse(struct ld_context *ctx)
 {
 	ld_script_character_expect(ctx, '{');
 	while (!ld_script_is_at_end(ctx) && !ld_script_character_peek(ctx, '}')) {
 		if (ld_script_character_consume(ctx, ';'))
 			continue;
-		if (ld_script_word_consume(ctx, "ASSERT")) {
-			ld_assignment *a = ld_script_assert_parse(ctx);
-			VVEC_PUSH(ctx->script.commands, ((ld_command){.kind = LD_COMMAND_ASSIGNMENT, .assignment = a}), ld_region_alloc);
-			ld_script_character_consume(ctx, ';');
+		const char *save;
+		char *w;
+		if (ld_script_assignment_statement_parse(ctx, &w, &save))
 			continue;
-		}
-		if (ld_script_word_consume(ctx, "PROVIDE_HIDDEN") || ld_script_word_consume(ctx, "HIDDEN")) {
-			ld_assignment *a = ld_script_provide_parse(ctx, true);
-			if (a) VVEC_PUSH(ctx->script.commands, ((ld_command){.kind = LD_COMMAND_ASSIGNMENT, .assignment = a}), ld_region_alloc);
-			ld_script_character_expect(ctx, ';');
-			continue;
-		}
-		if (ld_script_word_consume(ctx, "PROVIDE")) {
-			ld_assignment *a = ld_script_provide_parse(ctx, false);
-			if (a) VVEC_PUSH(ctx->script.commands, ((ld_command){.kind = LD_COMMAND_ASSIGNMENT, .assignment = a}), ld_region_alloc);
-			ld_script_character_expect(ctx, ';');
-			continue;
-		}
-		const char *save = ctx->script.cursor;
-		char *w = ld_script_name_parse(ctx);
-		ld_assignment *a = ld_script_assignment_rest_parse(ctx, w);
-		if (a) {
-			VVEC_PUSH(ctx->script.commands, ((ld_command){.kind = LD_COMMAND_ASSIGNMENT, .assignment = a}), ld_region_alloc);
-			ld_script_character_expect(ctx, ';');
-			continue;
-		}
 		if (!*w) {
 			ctx->script.cursor = save;
 			ld_script_error_report(ctx, "unexpected token in SECTIONS");
@@ -360,7 +372,7 @@ static void ld_script_version_parse(struct ld_context *ctx)
 	ld_script_character_expect(ctx, '}');
 }
 
-static void ld_script_parse(struct ld_context *ctx, const char *text, size_t len)
+VPRIV void ld_script_parse(struct ld_context *ctx, const char *text, size_t len)
 {
 	ctx->script.cursor = ctx->script.file = text;
 	ctx->script.end = text + len;
@@ -383,32 +395,10 @@ static void ld_script_parse(struct ld_context *ctx, const char *text, size_t len
 			ld_script_character_expect(ctx, ')');
 			continue;
 		}
-		if (ld_script_word_consume(ctx, "ASSERT")) {
-			ld_assignment *a = ld_script_assert_parse(ctx);
-			VVEC_PUSH(ctx->script.commands, ((ld_command){.kind = LD_COMMAND_ASSIGNMENT, .assignment = a}), ld_region_alloc);
-			ld_script_character_consume(ctx, ';');
+		const char *save;
+		char *w;
+		if (ld_script_assignment_statement_parse(ctx, &w, &save))
 			continue;
-		}
-		if (ld_script_word_consume(ctx, "PROVIDE_HIDDEN") || ld_script_word_consume(ctx, "HIDDEN")) {
-			ld_assignment *a = ld_script_provide_parse(ctx, true);
-			if (a) VVEC_PUSH(ctx->script.commands, ((ld_command){.kind = LD_COMMAND_ASSIGNMENT, .assignment = a}), ld_region_alloc);
-			ld_script_character_expect(ctx, ';');
-			continue;
-		}
-		if (ld_script_word_consume(ctx, "PROVIDE")) {
-			ld_assignment *a = ld_script_provide_parse(ctx, false);
-			if (a) VVEC_PUSH(ctx->script.commands, ((ld_command){.kind = LD_COMMAND_ASSIGNMENT, .assignment = a}), ld_region_alloc);
-			ld_script_character_expect(ctx, ';');
-			continue;
-		}
-		const char *save = ctx->script.cursor;
-		char *w = ld_script_name_parse(ctx);
-		ld_assignment *a = ld_script_assignment_rest_parse(ctx, w);
-		if (a) {
-			VVEC_PUSH(ctx->script.commands, ((ld_command){.kind = LD_COMMAND_ASSIGNMENT, .assignment = a}), ld_region_alloc);
-			ld_script_character_expect(ctx, ';');
-			continue;
-		}
 		ctx->script.cursor = save;
 		ld_script_error_report(ctx, "unsupported linker script command");
 		return;

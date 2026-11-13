@@ -8,17 +8,17 @@ static uint32_t wcallee(cc *c, uint32_t fn)
 	for (;;) {
 		const node *x = N(fn);
 
-		if (x->op == N_CAST && (x->aux == CK_FDECAY || x->aux == CK_NOP)) {
+		if (x->op == AST_NODE_CAST && (x->aux == AST_CAST_FUNCTION_DECAY || x->aux == AST_CAST_NOP)) {
 			fn = x->a;
 			continue;
 		}
-		if (x->op == N_ADDR && is_func(c, N(x->a)->ty)) {
+		if (x->op == AST_NODE_ADDRESS && is_func(c, N(x->a)->ty)) {
 			fn = x->a;
 			continue;
 		}
-		if (x->op == N_VAR && c->syms[x->a].kind == S_FUNC)
+		if (x->op == AST_NODE_VARIABLE && c->syms[x->a].kind == AST_SYMBOL_FUNCTION)
 			return REF(RK_SYM, canon_sym(c, x->a));
-		if (x->op == N_VAR && c->syms[x->a].kind == S_BUILTIN)
+		if (x->op == AST_NODE_VARIABLE && c->syms[x->a].kind == AST_SYMBOL_BUILTIN)
 			return REF(RK_NAME, (uint32_t)c->syms[x->a].val);
 		return 0;
 	}
@@ -97,13 +97,13 @@ static bool wlib(cc *c, uint32_t ref, wlsig *g)
 	return wlib_named(c, nm, g);
 }
 
-/* the library function nm's prototype (cc_lib_sig) as wasm types */
+/* the library function nm's prototype (cc_builtin_library_signature) as wasm types */
 static bool wlib_named(cc *c, const char *nm, wlsig *g)
 {
 	const char *p;
 	int enc;
 
-	p = cc_lib_sig(nm, &enc);
+	p = cc_builtin_library_signature(nm, &enc);
 	if (!p || !wlib_type(c, &p, enc, &g->r))
 		return false;
 	g->np = 0;
@@ -147,7 +147,7 @@ static void wretype(ecx *e, int a, int b, bool sgn)
 }
 
 /* a variadic argument's place in the buffer: size and alignment (clang's emitVoidPtrVAArg) */
-static void wva_slot(cc *c, qty t, uint64_t *size, uint32_t *align, bool *ind)
+static void wva_slot(cc *c, ast_qualified_type t, uint64_t *size, uint32_t *align, bool *ind)
 {
 	wabi a = wclassify(c, t);
 
@@ -162,7 +162,7 @@ static void wva_slot(cc *c, qty t, uint64_t *size, uint32_t *align, bool *ind)
 }
 
 /* push an argument of type t passed as a (the value of node n) */
-static void warg(ecx *e, uint32_t n, qty t, wabi a)
+static void warg(ecx *e, uint32_t n, ast_qualified_type t, wabi a)
 {
 	cc *c = e->c;
 
@@ -180,7 +180,7 @@ static void warg(ecx *e, uint32_t n, qty t, wabi a)
 		return;
 	case WA_PAIR: {
 		uint32_t ta = wtmp(e, WPT(c));
-		qty pt = wpart_ty(c, a);
+		ast_qualified_type pt = wpart_ty(c, a);
 		uint64_t es = tsize(c, pt);
 
 		wexpr(e, n, true);
@@ -218,7 +218,7 @@ static int walloca(ecx *e, uint32_t a)
 	e->w->dyn = true;
 	wi(e, "global.get\t__stack_pointer");
 	wexpr(e, a, true);
-	wconv(e, N(a)->ty, prim(TY_ULONG));
+	wconv(e, N(a)->ty, prim(AST_TYPE_UNSIGNED_LONG));
 	wpconst(e, 15);
 	wpop(e, "add");
 	wpconst(e, -16);
@@ -237,10 +237,10 @@ VPRIV int wsjlj_kind(cc *c, uint32_t n)
 	uint32_t ref;
 	const sym *y;
 
-	if (!c->o->wasm_sjlj || N(n)->op != N_CALL || !(ref = wcallee(c, N(n)->a)) || RKIND(ref) != RK_SYM)
+	if (!c->o->wasm_sjlj || N(n)->op != AST_NODE_CALL || !(ref = wcallee(c, N(n)->a)) || RKIND(ref) != RK_SYM)
 		return 0;
 	y = &c->syms[RIDX(ref)];
-	if (!y->name || y->sc == SC_STATIC)
+	if (!y->name || y->sc == AST_STORAGE_STATIC)
 		return 0;
 	return EM_IDENT_IS(y->name, "setjmp") || EM_IDENT_IS(y->name, "_setjmp") ? 1 :
 	       EM_IDENT_IS(y->name, "longjmp") || EM_IDENT_IS(y->name, "_longjmp") ? 2 : 0;
@@ -292,7 +292,7 @@ static int wlongjmp(ecx *e, uint32_t n)
 	wexpr(e, c->lists[x->b], true);
 	wexpr(e, a1, true);
 	if (wty(c, N(a1)->ty) != WT_I32)
-		wconv(e, N(a1)->ty, prim(TY_INT));
+		wconv(e, N(a1)->ty, prim(AST_TYPE_INT));
 	vtext_string_append(&e->w->decl, WASM32(c) ? "__wasm_longjmp\t(i32, i32) -> ()\n" : "__wasm_longjmp\t(i64, i32) -> ()\n");
 	wi(e, "call\t__wasm_longjmp");
 	wflow_reject(e);
@@ -323,25 +323,25 @@ static const char *wmath_insn(cc *c, uint32_t ref, const ctype *f)
 	if (c->o->no_builtin || !ref || RKIND(ref) != RK_SYM)
 		return NULL;
 	y = &c->syms[RIDX(ref)];
-	if (!y->name || y->sc == SC_STATIC || sym_attrs(c, RIDX(ref))->asmname ||
-	    (f->flags & (TF_NOPROTO | TF_VARIADIC)))
+	if (!y->name || y->sc == AST_STORAGE_STATIC || sym_attrs(c, RIDX(ref))->asmname ||
+	    (f->flags & (AST_TYPE_FLAG_NO_PROTOTYPE | AST_TYPE_FLAG_VARIADIC)))
 		return NULL;
 	nm = vintern_ents[y->name].s;
 	len = vintern_ents[y->name].len;
 	fk = KIND(c, f->base);
-	if (fk != TY_DOUBLE && fk != TY_FLOAT)
+	if (fk != AST_TYPE_DOUBLE && fk != AST_TYPE_FLOAT)
 		return NULL;
 	for (uint32_t i = 0; i < sizeof tab / sizeof *tab; i++) {
 		size_t tl = strlen(tab[i].name);
 
-		if (len != tl + (fk == TY_FLOAT) || memcmp(nm, tab[i].name, tl) || (fk == TY_FLOAT && nm[tl] != 'f'))
+		if (len != tl + (fk == AST_TYPE_FLOAT) || memcmp(nm, tab[i].name, tl) || (fk == AST_TYPE_FLOAT && nm[tl] != 'f'))
 			continue;
 		if (f->n != tab[i].ar)
 			return NULL;
 		for (uint32_t j = 0; j < f->n; j++)
 			if (KIND(c, c->params[f->aux + j]) != fk)
 				return NULL;
-		return tab[i].op[fk == TY_FLOAT];
+		return tab[i].op[fk == AST_TYPE_FLOAT];
 	}
 	return NULL;
 }
@@ -355,32 +355,32 @@ static const char *wmath_insn(cc *c, uint32_t ref, const ctype *f)
 VPRIV int wconstant_p(ecx *e, uint32_t a)
 {
 	cc *c = e->c;
-	cval cv;
-	qty at = N(a)->ty;
+	cc_value cv;
+	ast_qualified_type at = N(a)->ty;
 	uint32_t r = a;
 
-	if (cc_eval(c, a, &cv) && (cv.kind == CV_INT || cv.kind == CV_FLT ||
-				   (cv.kind == CV_ADDR && cv.str && cv.i == 0 && !cv.sym && !cv.label)))
+	if (cc_eval(c, a, &cv) && (cv.kind == CC_VALUE_INTEGER || cv.kind == CC_VALUE_FLOAT ||
+				   (cv.kind == CC_VALUE_ADDRESS && cv.str && cv.i == 0 && !cv.sym && !cv.label)))
 		return 1;
 	if (side_effects(c, a) || !(is_integer(c, at) || is_flt(c, at)))
 		return 0;
-	while (N(r)->op == N_CAST && (N(r)->aux == CK_INT || N(r)->aux == CK_NOP))
+	while (N(r)->op == AST_NODE_CAST && (N(r)->aux == AST_CAST_INTEGER || N(r)->aux == AST_CAST_NOP))
 		r = N(r)->a;
-	if (N(r)->op == N_INDEX && cc_eval(c, N(r)->b, &cv) && cv.kind == CV_INT) {
+	if (N(r)->op == AST_NODE_INDEX && cc_eval(c, N(r)->b, &cv) && cv.kind == CC_VALUE_INTEGER) {
 		uint32_t s = N(r)->a;
 
-		while (N(s)->op == N_CAST && (N(s)->aux == CK_DECAY || N(s)->aux == CK_NOP))
+		while (N(s)->op == AST_NODE_CAST && (N(s)->aux == AST_CAST_ARRAY_DECAY || N(s)->aux == AST_CAST_NOP))
 			s = N(s)->a;
-		if (N(s)->op == N_STR && cv.i >= 0 && (uint64_t)cv.i < c->strs[N(s)->a].n)
+		if (N(s)->op == AST_NODE_STRING && cv.i >= 0 && (uint64_t)cv.i < c->strs[N(s)->a].n)
 			return 1;
 	}
-	if (c->o->opt && N(r)->op == N_VAR) {
+	if (c->o->opt && N(r)->op == AST_NODE_VARIABLE) {
 		uint32_t s = N(r)->a;
 		const sym *y = &c->syms[s];
 
-		if (is_local_var(c, s) && y->sc != SC_STATIC && !(QQ(y->ty) & Q_VOLATILE) &&
-		    !(y->flags & SF_ADDR_TAKEN) && !(e->E->sflags[s] & (SA_WRITTEN | SA_CWRITE)) &&
-		    y->body && cc_eval(c, y->body, &cv) && cv.kind == CV_INT)
+		if (is_local_var(c, s) && y->sc != AST_STORAGE_STATIC && !(AST_QUALIFIED_TYPE_QUALIFIERS(y->ty) & AST_QUALIFIER_VOLATILE) &&
+		    !(y->flags & AST_SYMBOL_FLAG_ADDRESS_TAKEN) && !(e->E->sflags[s] & (SA_WRITTEN | SA_CWRITE)) &&
+		    y->body && cc_eval(c, y->body, &cv) && cv.kind == CC_VALUE_INTEGER)
 			return 1;
 	}
 	return 0;
@@ -390,11 +390,11 @@ VPRIV int wcall(ecx *e, uint32_t n, bool want)
 {
 	cc *c = e->c;
 	const node *x = N(n);
-	qty ct = N(x->a)->ty, ft = is_ptr(c, ct) ? T(c, ct)->base : ct;
+	ast_qualified_type ct = N(x->a)->ty, ft = is_ptr(c, ct) ? T(c, ct)->base : ct;
 	const ctype *f = T(c, ft);
 	uint32_t ref = wcallee(c, x->a);
 	wabi r = wclassify_ret(c, f->base);
-	bool va = (f->flags & TF_VARIADIC) != 0, noproto = (f->flags & TF_NOPROTO) != 0;
+	bool va = (f->flags & AST_TYPE_FLAG_VARIADIC) != 0, noproto = (f->flags & AST_TYPE_FLAG_NO_PROTOTYPE) != 0;
 	uint64_t rsl = 0, vbuf_slot = 0, vsize = 0;
 	tbuf *sig = &e->w->sig;
 	const char *sp;
@@ -413,27 +413,27 @@ VPRIV int wcall(ecx *e, uint32_t n, bool want)
 		return want ? WT_I32 : WT_NONE;
 	}
 
-	if (ref && RKIND(ref) == RK_NAME && na >= 3 && cc_builtin_libkind(RIDX(ref)) == CC_LIB_CHK) {
+	if (ref && RKIND(ref) == RK_NAME && na >= 3 && cc_builtin_library_kind(RIDX(ref)) == CC_LIBRARY_KIND_CHECKED) {
 		/* __builtin___X_chk whose check cannot fail: the plain X, as clang */
-		cval ov, lv;
-		bool oc = cc_eval(c, c->lists[x->b + na - 1], &ov) && ov.kind == CV_INT;
-		bool lc = na >= 4 && cc_eval(c, c->lists[x->b + na - 2], &lv) && lv.kind == CV_INT;
+		cc_value ov, lv;
+		bool oc = cc_eval(c, c->lists[x->b + na - 1], &ov) && ov.kind == CC_VALUE_INTEGER;
+		bool lc = na >= 4 && cc_eval(c, c->lists[x->b + na - 2], &lv) && lv.kind == CC_VALUE_INTEGER;
 		uint64_t osz = oc ? (uint64_t)ov.i : 0;
 		int64_t p;
 
 		if (WASM32(c) && osz == 0xffffffffu)
 			osz = ~(uint64_t)0;	/* (size_t)-1: the unknown object size */
-		p = cc_chk_simplify(RIDX(ref), (int)na, oc, osz, lc, lc ? (uint64_t)lv.i : 0);
+		p = cc_builtin_checked_simplify(RIDX(ref), (int)na, oc, osz, lc, lc ? (uint64_t)lv.i : 0);
 
 		/* (called with the plain function's prototype: the builtin's type has the object size) */
 		if (p >= 0 && !side_effects(c, c->lists[x->b + na - 1]) &&
-		    wlib_named(c, cc_builtin_name(p) + 10, &lg) && !lg.va && lg.np == na - 1) {
+		    wlib_named(c, cc_builtin_name_get(p) + 10, &lg) && !lg.va && lg.np == na - 1) {
 			ref = REF(RK_NAME, (uint32_t)p);
 			na--;
 			chk = true;
 		}
 	}
-	if (ref && RKIND(ref) == RK_SYM && na == 1 && !(c->syms[RIDX(ref)].flags & SF_DEFINED) &&
+	if (ref && RKIND(ref) == RK_SYM && na == 1 && !(c->syms[RIDX(ref)].flags & AST_SYMBOL_FLAG_DEFINED) &&
 	    EM_IDENT_IS(c->syms[RIDX(ref)].name, "alloca"))
 		return walloca(e, c->lists[x->b]);	/* clang: alloca is a builtin, declared or not */
 	switch (wsjlj_kind(c, n)) {
@@ -451,7 +451,7 @@ VPRIV int wcall(ecx *e, uint32_t n, bool want)
 				uint32_t a = c->lists[x->b + i];
 
 				wexpr(e, a, true);
-				if (QUNQ(N(a)->ty) != QUNQ(f->base))
+				if (AST_QUALIFIED_TYPE_UNQUALIFIED(N(a)->ty) != AST_QUALIFIED_TYPE_UNQUALIFIED(f->base))
 					wconv(e, N(a)->ty, f->base);
 			}
 			wi(e, mi);
@@ -463,7 +463,7 @@ VPRIV int wcall(ecx *e, uint32_t n, bool want)
 		}
 	}
 	if (noproto && ref && RKIND(ref) == RK_SYM && c->syms[RIDX(ref)].body &&
-	    N(c->syms[RIDX(ref)].body)->op == N_BLOCK && c->syms[RIDX(ref)].kind == S_FUNC)
+	    N(c->syms[RIDX(ref)].body)->op == AST_NODE_BLOCK && c->syms[RIDX(ref)].kind == AST_SYMBOL_FUNCTION)
 		def = RIDX(ref);	/* a K&R definition here: its parameters, extra arguments dropped */
 	if (chk || (!def && noproto && ref && wlib(c, ref, &lg) && (lg.va ? na >= lg.np : na == lg.np))) {
 		/* clang: an implicitly declared library function has its library prototype */
@@ -509,7 +509,7 @@ VPRIV int wcall(ecx *e, uint32_t n, bool want)
 
 		for (uint32_t i = 0; i < na; i++) {
 			uint32_t an = c->lists[x->b + i];
-			qty at = N(an)->ty;
+			ast_qualified_type at = N(an)->ty;
 
 			if (va && i >= nfix) {
 				uint64_t sz;
@@ -538,7 +538,7 @@ VPRIV int wcall(ecx *e, uint32_t n, bool want)
 					continue;
 				}
 				{
-					qty pt = wpromote(c, c->syms[c->lists[bd->a + i]].ty);
+					ast_qualified_type pt = wpromote(c, c->syms[c->lists[bd->a + i]].ty);
 					wabi pa = wclassify(c, pt), aa = wclassify(c, at);
 
 					warg(e, an, at, aa);
@@ -672,7 +672,7 @@ static int wvaarg(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
 	const node *x = N(n);
-	qty t = x->ty, vt = N(x->a)->ty;
+	ast_qualified_type t = x->ty, vt = N(x->a)->ty;
 	uint64_t sz;
 	uint32_t al;
 	bool ind;
@@ -758,10 +758,10 @@ static int wbi_overflow(ecx *e, uint32_t n)
 	cc *c = e->c;
 	const node *x = N(n);
 	uint32_t a = warg_n(c, n, 0), b = warg_n(c, n, 1), p = warg_n(c, n, 2);
-	qty ta = N(a)->ty, tb = N(b)->ty, rt = T(c, N(p)->ty)->base;
-	int op = x->aux == BI_ADD_OVERFLOW ? LEX_TOKEN_PLUS : x->aux == BI_SUB_OVERFLOW ? LEX_TOKEN_MINUS : LEX_TOKEN_STAR;
+	ast_qualified_type ta = N(a)->ty, tb = N(b)->ty, rt = T(c, N(p)->ty)->base;
+	int op = x->aux == CC_BUILTIN_ADD_OVERFLOW ? LEX_TOKEN_PLUS : x->aux == CC_BUILTIN_SUB_OVERFLOW ? LEX_TOKEN_MINUS : LEX_TOKEN_STAR;
 	/* u64 * u64 needs all 128 bits unsigned; every other case fits signed */
-	qty v = op == LEX_TOKEN_STAR && !is_signed(c, ta) && !is_signed(c, tb) ? prim(TY_UINT128) : prim(TY_INT128);
+	ast_qualified_type v = op == LEX_TOKEN_STAR && !is_signed(c, ta) && !is_signed(c, tb) ? prim(AST_TYPE_UINT128) : prim(AST_TYPE_INT128);
 	uint32_t tr = wtmp(e, WPT(c)), tp = wtmp(e, WPT(c));
 	wlv l = { .k = WL_MEM };
 
@@ -798,13 +798,13 @@ static int wbi_overflow(ecx *e, uint32_t n)
 }
 
 /* the unsigned integer type of n bytes */
-static qty wuint_n(ecx *e, uint64_t n)
+static ast_qualified_type wuint_n(ecx *e, uint64_t n)
 {
 	switch (n) {
-	case 1: return prim(TY_UCHAR);
-	case 2: return prim(TY_USHORT);
-	case 4: return prim(TY_UINT);
-	case 8: return prim(TY_ULLONG);
+	case 1: return prim(AST_TYPE_UNSIGNED_CHAR);
+	case 2: return prim(AST_TYPE_UNSIGNED_SHORT);
+	case 4: return prim(AST_TYPE_UNSIGNED_INT);
+	case 8: return prim(AST_TYPE_UNSIGNED_LONG_LONG);
 	default: efatal(e, e->curloc, "wasm: %llu-byte atomics are not supported", (unsigned long long)n);
 	}
 }
@@ -818,11 +818,11 @@ static int wbi_atomic(ecx *e, uint32_t n, bool want)
 	cc *c = e->c;
 	const node *x = N(n);
 	int id = x->aux;
-	qty t = QUNQ(T(c, N(warg_n(c, n, 0))->ty)->base);
+	ast_qualified_type t = AST_QUALIFIED_TYPE_UNQUALIFIED(T(c, N(warg_n(c, n, 0))->ty)->base);
 	uint64_t sz = tsize(c, t);
-	bool gen = id == BI_ATOMIC_LOAD || id == BI_ATOMIC_STORE || id == BI_ATOMIC_EXCHANGE || id == BI_ATOMIC_CMPXCHG;
-	qty vt = gen || !(is_integer(c, t) || is_ptr(c, t)) ? wuint_n(e, sz) : t;	/* the type moved */
-	int nmo = id == BI_ATOMIC_CMPXCHG_N || id == BI_ATOMIC_CMPXCHG ? 2 : id == BI_SYNC_VAL_CAS || id == BI_SYNC_BOOL_CAS || id == BI_SYNC_LOCK_RELEASE ? 0 : 1;
+	bool gen = id == CC_BUILTIN_ATOMIC_LOAD || id == CC_BUILTIN_ATOMIC_STORE || id == CC_BUILTIN_ATOMIC_EXCHANGE || id == CC_BUILTIN_ATOMIC_CMPXCHG;
+	ast_qualified_type vt = gen || !(is_integer(c, t) || is_ptr(c, t)) ? wuint_n(e, sz) : t;	/* the type moved */
+	int nmo = id == CC_BUILTIN_ATOMIC_CMPXCHG_N || id == CC_BUILTIN_ATOMIC_CMPXCHG ? 2 : id == CC_BUILTIN_SYNC_VAL_CAS || id == CC_BUILTIN_SYNC_BOOL_CAS || id == CC_BUILTIN_SYNC_LOCK_RELEASE ? 0 : 1;
 	int nargs = (int)x->c, k = wty(c, vt);
 	uint32_t tp = wtmp(e, WPT(c)), v1 = UINT32_MAX, v2 = UINT32_MAX, cur;
 	wlv l = { .k = WL_MEM };
@@ -834,7 +834,7 @@ static int wbi_atomic(ecx *e, uint32_t n, bool want)
 		uint32_t a = warg_n(c, n, (uint32_t)i);
 		bool opnd = i < nargs - nmo && i <= 2;
 
-		if (id == BI_ATOMIC_CMPXCHG_N || id == BI_ATOMIC_CMPXCHG)
+		if (id == CC_BUILTIN_ATOMIC_CMPXCHG_N || id == CC_BUILTIN_ATOMIC_CMPXCHG)
 			opnd = i <= 2;
 		if (!opnd) {
 			wexpr(e, a, false);
@@ -842,11 +842,11 @@ static int wbi_atomic(ecx *e, uint32_t n, bool want)
 		}
 		{
 			/* the generic forms and cmpxchg's expected: pointers */
-			bool ptr = gen || ((id == BI_ATOMIC_CMPXCHG_N) && i == 1);
+			bool ptr = gen || ((id == CC_BUILTIN_ATOMIC_CMPXCHG_N) && i == 1);
 			uint32_t tv = wtmp(e, ptr ? WPT(c) : k);
 
 			wexpr(e, a, true);
-			if (!ptr && QUNQ(N(a)->ty) != QUNQ(vt))
+			if (!ptr && AST_QUALIFIED_TYPE_UNQUALIFIED(N(a)->ty) != AST_QUALIFIED_TYPE_UNQUALIFIED(vt))
 				wconv(e, N(a)->ty, vt);
 			wset(e, tv);
 			if (i == 1)
@@ -857,31 +857,31 @@ static int wbi_atomic(ecx *e, uint32_t n, bool want)
 	}
 	cur = wtmp(e, k);
 	switch (id) {
-	case BI_ATOMIC_LOAD_N:
+	case CC_BUILTIN_ATOMIC_LOAD_N:
 		wget(e, tp);
 		wload(e, &l, vt);
 		break;
-	case BI_ATOMIC_LOAD:
+	case CC_BUILTIN_ATOMIC_LOAD:
 		wget(e, v1);
 		wget(e, tp);
 		wcopy(e, sz);
 		break;
-	case BI_ATOMIC_STORE_N:
-	case BI_SYNC_LOCK_RELEASE:
+	case CC_BUILTIN_ATOMIC_STORE_N:
+	case CC_BUILTIN_SYNC_LOCK_RELEASE:
 		wget(e, tp);
-		if (id == BI_SYNC_LOCK_RELEASE)
+		if (id == CC_BUILTIN_SYNC_LOCK_RELEASE)
 			wconst(e, k, 0);
 		else
 			wget(e, v1);
 		wstore(e, &l, vt);
 		break;
-	case BI_ATOMIC_STORE:
+	case CC_BUILTIN_ATOMIC_STORE:
 		wget(e, tp);
 		wget(e, v1);
 		wcopy(e, sz);
 		break;
-	case BI_ATOMIC_EXCHANGE_N:
-	case BI_ATOMIC_EXCHANGE:
+	case CC_BUILTIN_ATOMIC_EXCHANGE_N:
+	case CC_BUILTIN_ATOMIC_EXCHANGE:
 		wget(e, tp);
 		wload(e, &l, vt);
 		wset(e, cur);
@@ -898,11 +898,11 @@ static int wbi_atomic(ecx *e, uint32_t n, bool want)
 			wget(e, cur);
 		}
 		break;
-	case BI_ATOMIC_CMPXCHG_N:
-	case BI_ATOMIC_CMPXCHG:
-	case BI_SYNC_VAL_CAS:
-	case BI_SYNC_BOOL_CAS: {
-		bool sync = id == BI_SYNC_VAL_CAS || id == BI_SYNC_BOOL_CAS;
+	case CC_BUILTIN_ATOMIC_CMPXCHG_N:
+	case CC_BUILTIN_ATOMIC_CMPXCHG:
+	case CC_BUILTIN_SYNC_VAL_CAS:
+	case CC_BUILTIN_SYNC_BOOL_CAS: {
+		bool sync = id == CC_BUILTIN_SYNC_VAL_CAS || id == CC_BUILTIN_SYNC_BOOL_CAS;
 
 		wget(e, tp);
 		wload(e, &l, vt);
@@ -926,7 +926,7 @@ static int wbi_atomic(ecx *e, uint32_t n, bool want)
 		}
 		wconst(e, WT_I32, 0);
 		wend(e, "end_if");
-		if (id == BI_SYNC_VAL_CAS) {
+		if (id == CC_BUILTIN_SYNC_VAL_CAS) {
 			wi(e, "drop");
 			wget(e, cur);
 		}
@@ -934,9 +934,9 @@ static int wbi_atomic(ecx *e, uint32_t n, bool want)
 	}
 	default: {
 		/* fetch_op / op_fetch: add sub and or xor nand max min */
-		int base = id >= BI_ATOMIC_ADD_FETCH ? id - BI_ATOMIC_ADD_FETCH : id - BI_ATOMIC_FETCH_ADD;
+		int base = id >= CC_BUILTIN_ATOMIC_ADD_FETCH ? id - CC_BUILTIN_ATOMIC_ADD_FETCH : id - CC_BUILTIN_ATOMIC_FETCH_ADD;
 		static const int bop[] = { LEX_TOKEN_PLUS, LEX_TOKEN_MINUS, LEX_TOKEN_AMPERSAND, LEX_TOKEN_PIPE, LEX_TOKEN_CARET };
-		qty at = is_ptr(c, vt) ? prim(TY_ULONG) : k == WT_I32 ? prim(TY_INT) : vt;
+		ast_qualified_type at = is_ptr(c, vt) ? prim(AST_TYPE_UNSIGNED_LONG) : k == WT_I32 ? prim(AST_TYPE_INT) : vt;
 		uint32_t nv = wtmp(e, k);
 
 		wget(e, tp);
@@ -963,7 +963,7 @@ static int wbi_atomic(ecx *e, uint32_t n, bool want)
 		wget(e, tp);
 		wget(e, nv);
 		wstore(e, &l, vt);
-		wget(e, id >= BI_ATOMIC_ADD_FETCH ? nv : cur);
+		wget(e, id >= CC_BUILTIN_ATOMIC_ADD_FETCH ? nv : cur);
 		wfree(e, nv);
 		break;
 	}
@@ -979,9 +979,9 @@ static int wbi_atomic(ecx *e, uint32_t n, bool want)
 
 		if (rk == WT_NONE)
 			return WT_NONE;
-		if (id == BI_ATOMIC_CMPXCHG_N || id == BI_ATOMIC_CMPXCHG || id == BI_SYNC_BOOL_CAS)
+		if (id == CC_BUILTIN_ATOMIC_CMPXCHG_N || id == CC_BUILTIN_ATOMIC_CMPXCHG || id == CC_BUILTIN_SYNC_BOOL_CAS)
 			return WT_I32;
-		if (QUNQ(vt) != QUNQ(x->ty))
+		if (AST_QUALIFIED_TYPE_UNQUALIFIED(vt) != AST_QUALIFIED_TYPE_UNQUALIFIED(x->ty))
 			wconv(e, vt, x->ty);
 		(void)want;
 		return rk;
@@ -994,9 +994,9 @@ static int wbi_vector(ecx *e, uint32_t n)
 	cc *c = e->c;
 	const node *x = N(n);
 	uint32_t a0 = warg_n(c, n, 0);
-	qty at = N(a0)->ty, ae = T(c, at)->base, re = T(c, x->ty)->base;
+	ast_qualified_type at = N(a0)->ty, ae = T(c, at)->base, re = T(c, x->ty)->base;
 	uint32_t na = T(c, at)->ext ?: T(c, at)->n, nr = T(c, x->ty)->ext ?: T(c, x->ty)->n;
-	bool sh = x->aux == BI_SHUFFLEVECTOR;
+	bool sh = x->aux == CC_BUILTIN_SHUFFLEVECTOR;
 	uint32_t ta = wtmp(e, WPT(c)), tb = wtmp(e, WPT(c));
 	uint64_t sl = wslot(e, tsize(c, x->ty), 16);
 
@@ -1051,12 +1051,12 @@ VPRIV int wbuiltin(ecx *e, uint32_t n, bool want)
 	cc *c = e->c;
 	const node *x = N(n);
 	int k = wty(c, x->ty);
-	cval cv;
+	cc_value cv;
 
-	if (x->op == N_VAARG)
+	if (x->op == AST_NODE_VA_ARG)
 		return wvaarg(e, n);
 	switch (x->aux) {
-	case BI_VA_START: {
+	case CC_BUILTIN_VA_START: {
 		wlv l;
 
 		if (e->w->vap == UINT32_MAX)
@@ -1066,10 +1066,10 @@ VPRIV int wbuiltin(ecx *e, uint32_t n, bool want)
 		wstore(e, &l, c->t_valist);
 		return WT_NONE;
 	}
-	case BI_VA_END:
+	case CC_BUILTIN_VA_END:
 		wexpr(e, warg_n(c, n, 0), false);
 		return WT_NONE;
-	case BI_VA_COPY: {
+	case CC_BUILTIN_VA_COPY: {
 		wlv l;
 
 		wlval(e, warg_n(c, n, 0), &l, c->t_valist);
@@ -1077,34 +1077,34 @@ VPRIV int wbuiltin(ecx *e, uint32_t n, bool want)
 		wstore(e, &l, c->t_valist);
 		return WT_NONE;
 	}
-	case BI_EXPECT:
-	case BI_EXPECT_PROB:
+	case CC_BUILTIN_EXPECT:
+	case CC_BUILTIN_EXPECT_PROB:
 		for (uint32_t i = 1; i < x->c; i++)
 			wexpr(e, warg_n(c, n, i), false);
 		return wexpr(e, warg_n(c, n, 0), want);
-	case BI_ASSUME_ALIGNED:
-	case BI_EXTRACT_RETURN_ADDR:
+	case CC_BUILTIN_ASSUME_ALIGNED:
+	case CC_BUILTIN_EXTRACT_RETURN_ADDRESS:
 		for (uint32_t i = 1; i < x->c; i++)
 			wexpr(e, warg_n(c, n, i), false);
 		return wexpr(e, warg_n(c, n, 0), want);
-	case BI_ASSUME:
+	case CC_BUILTIN_ASSUME:
 		return WT_NONE;
-	case BI_PREFETCH:
+	case CC_BUILTIN_PREFETCH:
 		for (uint32_t i = 0; i < x->c; i++)
 			wexpr(e, warg_n(c, n, i), false);
 		return WT_NONE;
-	case BI_UNREACHABLE:
-	case BI_TRAP:
-	case BI_DEBUGTRAP:
+	case CC_BUILTIN_UNREACHABLE:
+	case CC_BUILTIN_TRAP:
+	case CC_BUILTIN_DEBUGTRAP:
 		wflow_reject(e);
 		wi(e, "unreachable");
 		return WT_NONE;
-	case BI_RETURN_ADDRESS:
-	case BI_FRAME_ADDRESS: {
+	case CC_BUILTIN_RETURN_ADDRESS:
+	case CC_BUILTIN_FRAME_ADDRESS: {
 		/* level 0: the frame (on the shadow stack, below the caller's); others: 0 */
-		cval lv;
+		cc_value lv;
 
-		if (cc_eval(c, warg_n(c, n, 0), &lv) && lv.kind == CV_INT && lv.i == 0) {
+		if (cc_eval(c, warg_n(c, n, 0), &lv) && lv.kind == CC_VALUE_INTEGER && lv.i == 0) {
 			wget(e, wfp(e));
 			return WPT(c);
 		}
@@ -1112,8 +1112,8 @@ VPRIV int wbuiltin(ecx *e, uint32_t n, bool want)
 		wpconst(e, 0);
 		return WPT(c);
 	}
-	case BI_ALLOCA:
-	case BI_ALLOCA_UNINIT: {
+	case CC_BUILTIN_ALLOCA:
+	case CC_BUILTIN_ALLOCA_UNINITIALIZED: {
 		int kind = walloca(e, warg_n(c, n, 0));
 
 		for (uint32_t i = 0; i < e->w->nvb; ++i) {
@@ -1122,22 +1122,22 @@ VPRIV int wbuiltin(ecx *e, uint32_t n, bool want)
 		}
 		return kind;
 	}
-	case BI_CLZ: case BI_CLZL: case BI_CLZLL:
-	case BI_CTZ: case BI_CTZL: case BI_CTZLL:
-	case BI_POPCOUNT: case BI_POPCOUNTL: case BI_POPCOUNTLL:
-	case BI_PARITY: case BI_PARITYL: case BI_PARITYLL: {
+	case CC_BUILTIN_CLZ: case CC_BUILTIN_CLZL: case CC_BUILTIN_CLZLL:
+	case CC_BUILTIN_CTZ: case CC_BUILTIN_CTZL: case CC_BUILTIN_CTZLL:
+	case CC_BUILTIN_POPCOUNT: case CC_BUILTIN_POPCOUNTL: case CC_BUILTIN_POPCOUNTLL:
+	case CC_BUILTIN_PARITY: case CC_BUILTIN_PARITYL: case CC_BUILTIN_PARITYLL: {
 		uint32_t a = warg_n(c, n, 0);
-		qty at = N(a)->ty;
+		ast_qualified_type at = N(a)->ty;
 		int ak = wty(c, at);
 		int b = x->aux;
-		const char *op = (b == BI_CLZ || b == BI_CLZL || b == BI_CLZLL) ? "clz" :
-				 (b == BI_CTZ || b == BI_CTZL || b == BI_CTZLL) ? "ctz" : "popcnt";
+		const char *op = (b == CC_BUILTIN_CLZ || b == CC_BUILTIN_CLZL || b == CC_BUILTIN_CLZLL) ? "clz" :
+				 (b == CC_BUILTIN_CTZ || b == CC_BUILTIN_CTZL || b == CC_BUILTIN_CTZLL) ? "ctz" : "popcnt";
 
 		wexpr(e, a, true);
 		if (ak == WT_MEM)
 			efatal(e, x->loc, "wasm: 128-bit bit counting is not supported yet");
 		wop(e, ak, op);
-		if (b == BI_PARITY || b == BI_PARITYL || b == BI_PARITYLL) {
+		if (b == CC_BUILTIN_PARITY || b == CC_BUILTIN_PARITYL || b == CC_BUILTIN_PARITYLL) {
 			wconst(e, ak, 1);
 			wop(e, ak, "and");
 		}
@@ -1145,7 +1145,7 @@ VPRIV int wbuiltin(ecx *e, uint32_t n, bool want)
 			wi(e, "i32.wrap_i64");
 		return k;
 	}
-	case BI_FFS: case BI_FFSL: case BI_FFSLL: {
+	case CC_BUILTIN_FFS: case CC_BUILTIN_FFSL: case CC_BUILTIN_FFSLL: {
 		uint32_t a = warg_n(c, n, 0);
 		int ak = wty(c, N(a)->ty);
 		uint32_t t = wtmp(e, ak);
@@ -1166,7 +1166,7 @@ VPRIV int wbuiltin(ecx *e, uint32_t n, bool want)
 		wfree(e, t);
 		return WT_I32;
 	}
-	case BI_CLRSB: case BI_CLRSBL: case BI_CLRSBLL: {
+	case CC_BUILTIN_CLRSB: case CC_BUILTIN_CLRSBL: case CC_BUILTIN_CLRSBLL: {
 		uint32_t a = warg_n(c, n, 0);
 		int ak = wty(c, N(a)->ty);
 		uint32_t t = wtmp(e, ak);
@@ -1186,16 +1186,16 @@ VPRIV int wbuiltin(ecx *e, uint32_t n, bool want)
 		wfree(e, t);
 		return WT_I32;
 	}
-	case BI_BSWAP16: case BI_BSWAP32: case BI_BSWAP64: {
-		int bytes = x->aux == BI_BSWAP16 ? 2 : x->aux == BI_BSWAP32 ? 4 : 8;
+	case CC_BUILTIN_BSWAP16: case CC_BUILTIN_BSWAP32: case CC_BUILTIN_BSWAP64: {
+		int bytes = x->aux == CC_BUILTIN_BSWAP16 ? 2 : x->aux == CC_BUILTIN_BSWAP32 ? 4 : 8;
 
 		wexpr(e, warg_n(c, n, 0), true);
 		wbswap(e, bytes == 8 ? WT_I64 : WT_I32, bytes);
 		return k;
 	}
-	case BI_BITREVERSE8: case BI_BITREVERSE16: case BI_BITREVERSE32: case BI_BITREVERSE64: {
+	case CC_BUILTIN_BITREVERSE8: case CC_BUILTIN_BITREVERSE16: case CC_BUILTIN_BITREVERSE32: case CC_BUILTIN_BITREVERSE64: {
 		/* the bytes reversed, then the nibbles, bit pairs and bits in each byte */
-		int bytes = x->aux == BI_BITREVERSE8 ? 1 : x->aux == BI_BITREVERSE16 ? 2 : x->aux == BI_BITREVERSE32 ? 4 : 8;
+		int bytes = x->aux == CC_BUILTIN_BITREVERSE8 ? 1 : x->aux == CC_BUILTIN_BITREVERSE16 ? 2 : x->aux == CC_BUILTIN_BITREVERSE32 ? 4 : 8;
 		int ak = bytes == 8 ? WT_I64 : WT_I32;
 		static const uint64_t mask[3] = { 0x0f0f0f0f0f0f0f0full, 0x3333333333333333ull, 0x5555555555555555ull };
 		uint32_t t = wtmp(e, ak);
@@ -1227,38 +1227,38 @@ VPRIV int wbuiltin(ecx *e, uint32_t n, bool want)
 		wfree(e, t);
 		return k;
 	}
-	case BI_ROTL32: case BI_ROTR32: case BI_ROTL64: case BI_ROTR64: {
-		int ak = x->aux == BI_ROTL32 || x->aux == BI_ROTR32 ? WT_I32 : WT_I64;
+	case CC_BUILTIN_ROTL32: case CC_BUILTIN_ROTR32: case CC_BUILTIN_ROTL64: case CC_BUILTIN_ROTR64: {
+		int ak = x->aux == CC_BUILTIN_ROTL32 || x->aux == CC_BUILTIN_ROTR32 ? WT_I32 : WT_I64;
 		uint32_t b = warg_n(c, n, 1);
 
 		wexpr(e, warg_n(c, n, 0), true);
 		wexpr(e, b, true);
 		if (wrep(c, wty(c, N(b)->ty)) != ak)
 			wi(e, ak == WT_I64 ? "i64.extend_i32_u" : "i32.wrap_i64");
-		wop(e, ak, x->aux == BI_ROTL32 || x->aux == BI_ROTL64 ? "rotl" : "rotr");
+		wop(e, ak, x->aux == CC_BUILTIN_ROTL32 || x->aux == CC_BUILTIN_ROTL64 ? "rotl" : "rotr");
 		return k;
 	}
-	case BI_ISGREATER: case BI_ISGREATEREQUAL: case BI_ISLESS: case BI_ISLESSEQUAL:
-	case BI_ISLESSGREATER: case BI_ISUNORDERED: {
+	case CC_BUILTIN_ISGREATER: case CC_BUILTIN_ISGREATEREQUAL: case CC_BUILTIN_ISLESS: case CC_BUILTIN_ISLESSEQUAL:
+	case CC_BUILTIN_ISLESSGREATER: case CC_BUILTIN_ISUNORDERED: {
 		uint32_t a = warg_n(c, n, 0), b = warg_n(c, n, 1);
-		qty at = N(a)->ty, bt = N(b)->ty;
+		ast_qualified_type at = N(a)->ty, bt = N(b)->ty;
 		int ak = wty(c, at), bk = wty(c, bt);
 		if (ak == WT_MEM || bk == WT_MEM) break;
-		qty ty = prim(ak == WT_F64 || bk == WT_F64 ? TY_DOUBLE : TY_FLOAT);
+		ast_qualified_type ty = prim(ak == WT_F64 || bk == WT_F64 ? AST_TYPE_DOUBLE : AST_TYPE_FLOAT);
 		int k = wty(c, ty);
 		uint32_t left = wtmp(e, k), right = wtmp(e, k);
 		wexpr(e, a, true); wconv(e, at, ty); wset(e, left);
 		wexpr(e, b, true); wconv(e, bt, ty); wset(e, right);
-		if (x->aux == BI_ISUNORDERED) {
+		if (x->aux == CC_BUILTIN_ISUNORDERED) {
 			wget(e, left); wget(e, left); wop(e, k, "ne");
 			wget(e, right); wget(e, right); wop(e, k, "ne");
 			wi(e, "i32.or");
 		} else {
 			wget(e, left); wget(e, right);
-			const char *op = x->aux == BI_ISGREATER ? "gt" : x->aux == BI_ISGREATEREQUAL ? "ge" :
-			                 x->aux == BI_ISLESSEQUAL ? "le" : "lt";
+			const char *op = x->aux == CC_BUILTIN_ISGREATER ? "gt" : x->aux == CC_BUILTIN_ISGREATEREQUAL ? "ge" :
+			                 x->aux == CC_BUILTIN_ISLESSEQUAL ? "le" : "lt";
 			wop(e, k, op);
-			if (x->aux == BI_ISLESSGREATER) {
+			if (x->aux == CC_BUILTIN_ISLESSGREATER) {
 				wget(e, left); wget(e, right); wop(e, k, "gt");
 				wi(e, "i32.or");
 			}
@@ -1266,7 +1266,7 @@ VPRIV int wbuiltin(ecx *e, uint32_t n, bool want)
 		wfree(e, left); wfree(e, right);
 		return WT_I32;
 	}
-	case BI_ISNAN: {
+	case CC_BUILTIN_ISNAN: {
 		uint32_t a = warg_n(c, n, 0);
 		int ak = wty(c, N(a)->ty);
 		uint32_t t = wtmp(e, ak);
@@ -1280,20 +1280,20 @@ VPRIV int wbuiltin(ecx *e, uint32_t n, bool want)
 		wfree(e, t);
 		return WT_I32;
 	}
-	case BI_ISINF: case BI_ISINF_SIGN: case BI_ISFINITE: {
+	case CC_BUILTIN_ISINF: case CC_BUILTIN_ISINF_SIGN: case CC_BUILTIN_ISFINITE: {
 		/* |x| == inf, |x| < inf (false for a NaN) */
 		uint32_t a = warg_n(c, n, 0);
 		int ak = wty(c, N(a)->ty);
 
 		if (ak != WT_F32 && ak != WT_F64)
 			break;
-		uint32_t t = x->aux == BI_ISINF_SIGN ? wtmp(e, ak) : 0;
+		uint32_t t = x->aux == CC_BUILTIN_ISINF_SIGN ? wtmp(e, ak) : 0;
 		wexpr(e, a, true);
-		if (x->aux == BI_ISINF_SIGN) wtee(e, t);
+		if (x->aux == CC_BUILTIN_ISINF_SIGN) wtee(e, t);
 		wop(e, ak, "abs");
 		wfconst(e, ak, __builtin_inf());
-		wop(e, ak, x->aux == BI_ISFINITE ? "lt" : "eq");
-		if (x->aux == BI_ISINF_SIGN) {
+		wop(e, ak, x->aux == CC_BUILTIN_ISFINITE ? "lt" : "eq");
+		if (x->aux == CC_BUILTIN_ISINF_SIGN) {
 			/* isinf(x) * (1 - 2 * (x < 0)), with one argument evaluation. */
 			wconst(e, WT_I32, 1);
 			wget(e, t);
@@ -1307,27 +1307,27 @@ VPRIV int wbuiltin(ecx *e, uint32_t n, bool want)
 		}
 		return WT_I32;
 	}
-	case BI_ADD_OVERFLOW: case BI_SUB_OVERFLOW: case BI_MUL_OVERFLOW:
+	case CC_BUILTIN_ADD_OVERFLOW: case CC_BUILTIN_SUB_OVERFLOW: case CC_BUILTIN_MUL_OVERFLOW:
 		return wbi_overflow(e, n);
-	case BI_ATOMIC_LOAD_N: case BI_ATOMIC_STORE_N: case BI_ATOMIC_EXCHANGE_N: case BI_ATOMIC_CMPXCHG_N:
-	case BI_ATOMIC_LOAD: case BI_ATOMIC_STORE: case BI_ATOMIC_EXCHANGE: case BI_ATOMIC_CMPXCHG:
-	case BI_ATOMIC_FETCH_ADD: case BI_ATOMIC_FETCH_SUB: case BI_ATOMIC_FETCH_AND: case BI_ATOMIC_FETCH_OR:
-	case BI_ATOMIC_FETCH_XOR: case BI_ATOMIC_ADD_FETCH: case BI_ATOMIC_SUB_FETCH: case BI_ATOMIC_AND_FETCH:
-	case BI_ATOMIC_OR_FETCH: case BI_ATOMIC_XOR_FETCH: case BI_ATOMIC_FETCH_NAND: case BI_ATOMIC_FETCH_MAX:
-	case BI_ATOMIC_FETCH_MIN: case BI_ATOMIC_NAND_FETCH: case BI_ATOMIC_MAX_FETCH: case BI_ATOMIC_MIN_FETCH: case BI_SYNC_VAL_CAS: case BI_SYNC_BOOL_CAS:
-	case BI_SYNC_LOCK_RELEASE:
+	case CC_BUILTIN_ATOMIC_LOAD_N: case CC_BUILTIN_ATOMIC_STORE_N: case CC_BUILTIN_ATOMIC_EXCHANGE_N: case CC_BUILTIN_ATOMIC_CMPXCHG_N:
+	case CC_BUILTIN_ATOMIC_LOAD: case CC_BUILTIN_ATOMIC_STORE: case CC_BUILTIN_ATOMIC_EXCHANGE: case CC_BUILTIN_ATOMIC_CMPXCHG:
+	case CC_BUILTIN_ATOMIC_FETCH_ADD: case CC_BUILTIN_ATOMIC_FETCH_SUB: case CC_BUILTIN_ATOMIC_FETCH_AND: case CC_BUILTIN_ATOMIC_FETCH_OR:
+	case CC_BUILTIN_ATOMIC_FETCH_XOR: case CC_BUILTIN_ATOMIC_ADD_FETCH: case CC_BUILTIN_ATOMIC_SUB_FETCH: case CC_BUILTIN_ATOMIC_AND_FETCH:
+	case CC_BUILTIN_ATOMIC_OR_FETCH: case CC_BUILTIN_ATOMIC_XOR_FETCH: case CC_BUILTIN_ATOMIC_FETCH_NAND: case CC_BUILTIN_ATOMIC_FETCH_MAX:
+	case CC_BUILTIN_ATOMIC_FETCH_MIN: case CC_BUILTIN_ATOMIC_NAND_FETCH: case CC_BUILTIN_ATOMIC_MAX_FETCH: case CC_BUILTIN_ATOMIC_MIN_FETCH: case CC_BUILTIN_SYNC_VAL_CAS: case CC_BUILTIN_SYNC_BOOL_CAS:
+	case CC_BUILTIN_SYNC_LOCK_RELEASE:
 		return wbi_atomic(e, n, want);
-	case BI_FLT_ROUNDS:	/* wasm rounds to nearest only, as clang: 1 */
+	case CC_BUILTIN_FLT_ROUNDS:	/* wasm rounds to nearest only, as clang: 1 */
 		wconst(e, WT_I32, 1);
 		return WT_I32;
-	case BI_ATOMIC_LOCK_FREE:
+	case CC_BUILTIN_ATOMIC_LOCK_FREE:
 		for (uint32_t i = 0; i < x->c; i++)
 			wexpr(e, warg_n(c, n, i), false);
 		wconst(e, WT_I32, 1);
 		return WT_I32;
-	case BI_SHUFFLEVECTOR: case BI_CONVERTVECTOR:
+	case CC_BUILTIN_SHUFFLEVECTOR: case CC_BUILTIN_CONVERTVECTOR:
 		return wbi_vector(e, n);
-	case BI_SIGNBIT: {
+	case CC_BUILTIN_SIGNBIT: {
 		uint32_t a = warg_n(c, n, 0);
 		int ak = wty(c, N(a)->ty);
 
@@ -1349,22 +1349,22 @@ VPRIV int wbuiltin(ecx *e, uint32_t n, bool want)
 			wi(e, "i64.extend_i32_u");
 		return k;
 	}
-	case BI_ATOMIC_THREAD_FENCE:
-	case BI_ATOMIC_SIGNAL_FENCE:
-	case BI_SYNC_SYNCHRONIZE:
+	case CC_BUILTIN_ATOMIC_THREAD_FENCE:
+	case CC_BUILTIN_ATOMIC_SIGNAL_FENCE:
+	case CC_BUILTIN_SYNC_SYNCHRONIZE:
 		for (uint32_t i = 0; i < x->c; i++)
 			wexpr(e, warg_n(c, n, i), false);
 		return WT_NONE;
-	case BI_CONSTANT_P:
+	case CC_BUILTIN_CONSTANT_P:
 		/* before the front end's fold, which says 0 for what the optimizer folds */
 		if (want)
 			wconst(e, WT_I32, wconstant_p(e, warg_n(c, n, 0)));
 		return want ? WT_I32 : WT_NONE;
 	}
-	if (cc_eval(c, n, &cv) && (cv.kind == CV_INT || cv.kind == CV_FLT)) {
-		if (cv.kind == CV_FLT && k == WT_MEM) {
+	if (cc_eval(c, n, &cv) && (cv.kind == CC_VALUE_INTEGER || cv.kind == CC_VALUE_FLOAT)) {
+		if (cv.kind == CC_VALUE_FLOAT && k == WT_MEM) {
 			/* Binary128 builtins use the same address-valued representation
-			   as N_FNUM, including infinities and exact NaN payloads. */
+			   as AST_NODE_FLOAT_NUMBER, including infinities and exact NaN payloads. */
 			u128 q = cv.ld ? cv.q : vsoftfloat_of_double(cv.f);
 			uint64_t sl = wslot(e, 16, 16);
 			wslot_addr(e, sl);
@@ -1376,13 +1376,13 @@ VPRIV int wbuiltin(ecx *e, uint32_t n, bool want)
 			wslot_addr(e, sl);
 			return WPT(c);
 		}
-		if (cv.kind == CV_FLT && cv.ld && vsoftfloat_is_nan(cv.q) && (k == WT_F32 || k == WT_F64)) {
+		if (cv.kind == CC_VALUE_FLOAT && cv.ld && vsoftfloat_is_nan(cv.q) && (k == WT_F32 || k == WT_F64)) {
 			/* Host floating conversions can quiet a signaling NaN. */
 			wconst(e, k == WT_F32 ? WT_I32 : WT_I64,
 			       (int64_t)vsoftfloat_nan_storage(cv.q, k == WT_F32 ? 23 : 52, k == WT_F32 ? 8 : 11));
 			wi(e, k == WT_F32 ? "f32.reinterpret_i32" : "f64.reinterpret_i64");
 		} else if (k == WT_F32 || k == WT_F64)
-			wfconst(e, k, cv.kind == CV_FLT ? cv.ld ? vsoftfloat_to_double(cv.q) : cv.f : (double)cv.i);
+			wfconst(e, k, cv.kind == CC_VALUE_FLOAT ? cv.ld ? vsoftfloat_to_double(cv.q) : cv.f : (double)cv.i);
 		else if (k == WT_I32 || k == WT_I64)
 			wconst(e, k, (int64_t)em_trunc_to(c, cv.i, x->ty));
 		else if (k == WT_NONE)
@@ -1391,10 +1391,10 @@ VPRIV int wbuiltin(ecx *e, uint32_t n, bool want)
 			efatal(e, x->loc, "wasm: 128-bit builtin constant");
 		return k;
 	}
-	if (x->aux == BI_OBJECT_SIZE || x->aux == BI_DYNAMIC_OBJECT_SIZE) {
+	if (x->aux == CC_BUILTIN_OBJECT_SIZE || x->aux == CC_BUILTIN_DYNAMIC_OBJECT_SIZE) {
 		int64_t ty = 0;
 
-		if (x->c > 1 && cc_eval(c, warg_n(c, n, 1), &cv) && cv.kind == CV_INT)
+		if (x->c > 1 && cc_eval(c, warg_n(c, n, 1), &cv) && cv.kind == CC_VALUE_INTEGER)
 			ty = (int64_t)cv.i;
 		wexpr(e, warg_n(c, n, 0), false);
 		wpconst(e, ty & 2 ? 0 : -1);

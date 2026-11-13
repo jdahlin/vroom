@@ -1,7 +1,9 @@
 /* Segments declared by the script's PHDRS command. */
 
+#include "ld-internal.h"
+
 /* PHDRS: segments from the script, sections assigned by their :phdr lists */
-static void ld_script_program_headers_create(struct ld_context *ctx)
+VPRIV void ld_script_program_headers_create(struct ld_context *ctx)
 {
 	ctx->layout.program_headers.n = ctx->layout.program_header_sections.n = 0;
 	for (uint32_t i = 0; i < ctx->script.segments.n; i++) {

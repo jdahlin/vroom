@@ -1,6 +1,8 @@
 /* Loading all inputs, allocating their sections, and setting up and freeing the global table. */
 
-static void ld_inputs_load(struct ld_context *ctx)
+#include "ld-internal.h"
+
+VPRIV void ld_inputs_load(struct ld_context *ctx)
 {
 	bool lazy = false;
 
@@ -57,7 +59,7 @@ static void ld_inputs_load(struct ld_context *ctx)
 		ctx->options.max_page_size = ctx->inputs.x86 ? 4096 : 65536;
 }
 
-static void ld_input_sections_alloc(struct ld_context *ctx, uint32_t from)
+VPRIV void ld_input_sections_alloc(struct ld_context *ctx, uint32_t from)
 {
 	uint32_t total = ctx->inputs.sections.n;
 	for (uint32_t i = from; i < ctx->inputs.objects.n; i++) {
@@ -78,7 +80,7 @@ static void ld_input_sections_alloc(struct ld_context *ctx, uint32_t from)
 	ctx->inputs.sections.n = total;
 }
 
-static void ld_global_table_init(struct ld_context *ctx)
+VPRIV void ld_global_table_init(struct ld_context *ctx)
 {
 	uint64_t total = 1024;
 	for (uint32_t i = 0; i < ctx->inputs.objects.n; i++)
@@ -95,7 +97,7 @@ static void ld_global_table_init(struct ld_context *ctx)
 	atomic_store(&ctx->symbols.count, 0);
 }
 
-static void ld_global_table_free(struct ld_context *ctx)
+VPRIV void ld_global_table_free(struct ld_context *ctx)
 {
 	ld_region_unmap((void *)ctx->symbols.slot_names, (size_t)(ctx->symbols.slot_mask + 1) * sizeof(*ctx->symbols.slot_names));
 	ld_region_unmap((void *)ctx->symbols.slot_words, (size_t)(ctx->symbols.slot_mask + 1) * sizeof(*ctx->symbols.slot_words));

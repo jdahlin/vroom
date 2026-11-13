@@ -1,18 +1,11 @@
 /* Where a relocation points: the target symbol or section, merge-aware, before and after final addresses. */
 
+#include "ld-internal.h"
+
 /* ---------------- relocation targets ---------------- */
 
-typedef struct {
-	uint64_t address;			/* S + A, merge-aware */
-	uint64_t symbol_address;			/* S (without addend; for relaxation) */
-	bool is_absolute;			/* target is absolute (no dynamic relocation) */
-	bool is_undefined;
-	bool discarded;
-	uint32_t key;			/* identity for ADRP relaxation */
-	bool is_global;
-} ld_relocation_target;
 
-static void ld_relocation_target_find(struct ld_context *ctx, const ld_object *o, uint32_t symidx, int64_t addend, ld_relocation_target *t)
+VPRIV void ld_relocation_target_find(struct ld_context *ctx, const ld_object *o, uint32_t symidx, int64_t addend, ld_relocation_target *t)
 {
 	t->is_undefined = t->discarded = false;
 	if (symidx >= o->first_global_index) {
@@ -102,41 +95,10 @@ static void ld_global_symbol_final_address_set(void *arg, size_t g)
 		s->final_address = ld_global_symbol_address(ctx, (uint32_t)g);
 	}
 }
-static void ld_final_addresses_compute(struct ld_context *ctx)
+VPRIV void ld_final_addresses_compute(struct ld_context *ctx)
 {
 	ctx->relocations.final_section_addresses = ld_region_alloc((size_t)ctx->inputs.sections.n * sizeof(uint64_t));
 	ld_parallel_for(ctx->inputs.sections.n, ld_input_section_final_address_set, ctx);
 	ld_parallel_for(atomic_load(&ctx->symbols.count), ld_global_symbol_final_address_set, ctx);
 }
 
-static inline void ld_relocation_target_final_find(struct ld_context *ctx, const ld_object *o, uint32_t symidx, int64_t addend, ld_relocation_target *t)
-{
-	if (symidx >= o->first_global_index) {
-		uint32_t g = o->global_slots[symidx - o->first_global_index];
-		const ld_global_symbol *s = &ctx->symbols.globals[g];
-		if (!s->is_undefined) {
-			t->is_undefined = t->discarded = false;
-			t->key = g;
-			t->is_global = true;
-			t->is_absolute = s->is_absolute;
-			t->symbol_address = s->final_address;
-			t->address = s->final_address + addend;
-			return;
-		}
-	} else {
-		const elf_symbol *y = &o->symbols[symidx];
-		if (y->st_shndx != SHN_UNDEF && y->st_shndx < 0xff00) {
-			uint64_t b = ctx->relocations.final_section_addresses[o->first_input_section + y->st_shndx];
-			if (b != UINT64_MAX) {
-				t->is_undefined = t->discarded = false;
-				t->key = symidx;
-				t->is_global = false;
-				t->is_absolute = false;
-				t->symbol_address = b + ((y->st_info & 15) == STT_SECTION ? 0 : y->st_value);
-				t->address = t->symbol_address + addend;
-				return;
-			}
-		}
-	}
-	ld_relocation_target_find(ctx, o, symidx, addend, t);
-}

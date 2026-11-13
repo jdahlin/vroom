@@ -7,28 +7,28 @@ static bool wzero_init(cc *c, uint32_t v)
 {
 	const node *x = N(v);
 
-	if (!v || x->op == N_ZERO)
+	if (!v || x->op == AST_NODE_ZERO)
 		return true;
-	if (x->op == N_NUM)
+	if (x->op == AST_NODE_NUMBER)
 		return c->ipool[x->a] == 0;
-	if (x->op == N_CAST && (x->aux == CK_INT || x->aux == CK_NOP || x->aux == CK_NULL || x->aux == CK_I2P))
-		return x->aux == CK_NULL || wzero_init(c, x->a);
+	if (x->op == AST_NODE_CAST && (x->aux == AST_CAST_INTEGER || x->aux == AST_CAST_NOP || x->aux == AST_CAST_NULL_POINTER || x->aux == AST_CAST_INTEGER_TO_POINTER))
+		return x->aux == AST_CAST_NULL_POINTER || wzero_init(c, x->a);
 	return false;
 }
 
 /* store the elements of init into the (zeroed) frame object at off */
-static void welems(ecx *e, uint64_t off, qty ty, uint32_t init)
+static void welems(ecx *e, uint64_t off, ast_qualified_type ty, uint32_t init)
 {
 	cc *c = e->c;
 	const node *x = N(init);
 
-	if (!init || x->op == N_ZERO)
+	if (!init || x->op == AST_NODE_ZERO)
 		return;
-	if (x->op == N_INIT) {
+	if (x->op == AST_NODE_INITIALIZER) {
 		const uint32_t *v = &c->lists[x->b];
 
 		if (x->aux == 1) {
-			qty et = T(c, ty)->base;
+			ast_qualified_type et = T(c, ty)->base;
 			uint64_t es = tsize(c, et);
 
 			for (uint32_t i = 0; i < x->c; i++)
@@ -68,7 +68,7 @@ static void welems(ecx *e, uint64_t off, qty ty, uint32_t init)
 		}
 		return;
 	}
-	if (x->op == N_STR && is_array(c, ty)) {
+	if (x->op == AST_NODE_STRING && is_array(c, ty)) {
 		const cstr *s = &c->strs[x->a];
 		uint64_t nb = (uint64_t)s->n * s->esz, cap = tsize(c, ty);
 
@@ -95,14 +95,14 @@ static void welems(ecx *e, uint64_t off, qty ty, uint32_t init)
 }
 
 /* initialise the frame object at off (zeroed: already zero) */
-static void winit_impl(ecx *e, uint64_t off, qty ty, uint32_t init, bool zeroed)
+static void winit_impl(ecx *e, uint64_t off, ast_qualified_type ty, uint32_t init, bool zeroed)
 {
 	cc *c = e->c;
 	const node *x = N(init);
 
 	if (!init)
 		return;
-	if (x->op == N_INIT || x->op == N_ZERO || (x->op == N_STR && is_array(c, ty))) {
+	if (x->op == AST_NODE_INITIALIZER || x->op == AST_NODE_ZERO || (x->op == AST_NODE_STRING && is_array(c, ty))) {
 		if (!zeroed) {
 			wslot_addr(e, off);
 			wconst(e, WT_I32, 0);
@@ -126,9 +126,9 @@ static void winit_impl(ecx *e, uint64_t off, qty ty, uint32_t init, bool zeroed)
 	}
 }
 
-VPRIV void winit(ecx *e, uint64_t off, qty ty, uint32_t init, bool zeroed)
+VPRIV void winit(ecx *e, uint64_t off, ast_qualified_type ty, uint32_t init, bool zeroed)
 {
-	bool observable = (QQ(ty) & Q_VOLATILE) || (T(e->c, ty)->flags & TF_ATOMIC);
+	bool observable = (AST_QUALIFIED_TYPE_QUALIFIERS(ty) & AST_QUALIFIER_VOLATILE) || (T(e->c, ty)->flags & AST_TYPE_FLAG_ATOMIC);
 
 	e->w->memopaque += observable;
 	winit_impl(e, off, ty, init, zeroed);
@@ -147,7 +147,7 @@ static void wasm_asm(ecx *e, const node *x)
 	wflow_reject(e);
 	wmem_fence(e);
 	cc *c = e->c;
-	const casm *a = &c->asms[x->a];
+	const ast_asm_statement *a = &c->asms[x->a];
 	const char *t = c->strs[a->tmpl - 1].s;
 
 	for (; *t; t++)
@@ -155,7 +155,7 @@ static void wasm_asm(ecx *e, const node *x)
 			efatal(e, x->loc, "wasm: inline assembly is not supported (only an empty template)");
 	/* asm goto with an empty template never jumps: it falls through */
 	for (uint32_t i = 0; i < a->nin; i++) {
-		const asmop *in = &a->ops[a->nout + i];
+		const ast_asm_operand *in = &a->ops[a->nout + i];
 		const char *cs = c->strs[in->constraint - 1].s;
 		int tie = -1;
 
@@ -169,13 +169,13 @@ static void wasm_asm(ecx *e, const node *x)
 		}
 		if (tie >= 0 && (uint32_t)tie < a->nout) {
 			uint32_t on = a->ops[tie].expr;
-			qty ot = N(on)->ty, it = N(in->expr)->ty;
+			ast_qualified_type ot = N(on)->ty, it = N(in->expr)->ty;
 			wlv l;
 
 			wlval(e, on, &l, ot);
 			wexpr(e, in->expr, true);
 			if (wty(c, ot) != WT_MEM)
-				wconv(e, is_array(c, it) ? prim(TY_ULONG) : it, ot);
+				wconv(e, is_array(c, it) ? prim(AST_TYPE_UNSIGNED_LONG) : it, ot);
 			wstore(e, &l, ot);
 			continue;
 		}
@@ -185,7 +185,7 @@ static void wasm_asm(ecx *e, const node *x)
 		/* the output's address is computed (side effects); its value stays */
 		wlv l;
 
-		wlval(e, a->ops[k].expr, &l, prim(TY_VOID));
+		wlval(e, a->ops[k].expr, &l, prim(AST_TYPE_VOID));
 		if (l.k == WL_MEM)
 			wi(e, "drop");
 	}
@@ -277,12 +277,12 @@ static uint32_t wvla_block(cc *c, const node *x)
 	for (uint32_t i = 0; i < x->c; i++) {
 		uint32_t s = c->lists[x->b + i];
 
-		while (s && (N(s)->op == N_LABEL || N(s)->op == N_CASE || N(s)->op == N_DEFAULT))
+		while (s && (N(s)->op == AST_NODE_LABEL || N(s)->op == AST_NODE_CASE || N(s)->op == AST_NODE_DEFAULT))
 			s = N(s)->c;
-		if (s && N(s)->op == N_DECL) {
+		if (s && N(s)->op == AST_NODE_DECLARATION) {
 			const ctype *t = T(c, c->syms[N(s)->a].ty);
 
-			if (c->syms[N(s)->a].kind == S_VAR && t->kind == TY_ARRAY && (t->flags & TF_VLA))
+			if (c->syms[N(s)->a].kind == AST_SYMBOL_VARIABLE && t->kind == AST_TYPE_ARRAY && (t->flags & AST_TYPE_FLAG_VLA))
 				return i;
 		}
 	}
@@ -359,7 +359,7 @@ static void wgneed(ecx *e, uint32_t r)
 	if (!W->gd[r].need || pd < 0)
 		return;
 	W->gd[pd].need = true;
-	if (W->gd[pd].op == N_BLOCK || W->gd[pd].op == N_SWITCH)
+	if (W->gd[pd].op == AST_NODE_BLOCK || W->gd[pd].op == AST_NODE_SWITCH)
 		wgadd(e, 0, (uint32_t)pd, W->gd[r].pidx);
 }
 
@@ -369,11 +369,11 @@ static void wgsub(ecx *e, uint32_t s, uint32_t r, uint32_t i)
 	cc *c = e->c;
 	wst *W = e->w;
 
-	for (; s && (N(s)->op == N_LABEL || N(s)->op == N_CASE || N(s)->op == N_DEFAULT); s = N(s)->c)
-		if (N(s)->op == N_LABEL) {
+	for (; s && (N(s)->op == AST_NODE_LABEL || N(s)->op == AST_NODE_CASE || N(s)->op == AST_NODE_DEFAULT); s = N(s)->c)
+		if (N(s)->op == AST_NODE_LABEL) {
 			W->gd[r].need = true;
 			wgadd(e, N(s)->a, r, i);
-		} else if (W->gd[r].op != N_SWITCH) {
+		} else if (W->gd[r].op != AST_NODE_SWITCH) {
 			/* a case label in a nested statement: its switch goes there as a goto */
 			W->gd[r].need = true;
 			wgadd(e, WG_CASE | s, r, i);
@@ -390,7 +390,7 @@ static void wgexpr(ecx *e, uint32_t n)
 	for (; n; n = x->a) {
 		x = N(n);
 		switch (x->op) {
-		case N_STMTEXPR: {
+		case AST_NODE_STATEMENT_EXPRESSION: {
 			wst *W = e->w;
 			int sr = W->sjr;
 			uint32_t si = W->sji;
@@ -399,20 +399,20 @@ static void wgexpr(ecx *e, uint32_t n)
 			W->sjr = sr, W->sji = si;
 			return;
 		}
-		case N_MEMBER: case N_CAST: case N_UNARY: case N_ADDR: case N_DEREF:
-		case N_PREINC: case N_PREDEC: case N_POSTINC: case N_POSTDEC:
-		case N_VAARG: case N_COMPLIT:
+		case AST_NODE_MEMBER: case AST_NODE_CAST: case AST_NODE_UNARY: case AST_NODE_ADDRESS: case AST_NODE_DEREFERENCE:
+		case AST_NODE_PRE_INCREMENT: case AST_NODE_PRE_DECREMENT: case AST_NODE_POST_INCREMENT: case AST_NODE_POST_DECREMENT:
+		case AST_NODE_VA_ARG: case AST_NODE_COMPOUND_LITERAL:
 			continue;
-		case N_INDEX: case N_BINARY: case N_LOGAND: case N_LOGOR: case N_ASSIGN:
-		case N_COMMA: case N_CPLX:
+		case AST_NODE_INDEX: case AST_NODE_BINARY: case AST_NODE_LOGICAL_AND: case AST_NODE_LOGICAL_OR: case AST_NODE_ASSIGN:
+		case AST_NODE_COMMA: case AST_NODE_COMPLEX:
 			wgexpr(e, x->b);
 			continue;
-		case N_COND:
+		case AST_NODE_CONDITIONAL:
 			wgexpr(e, x->b);
 			wgexpr(e, x->c);
 			continue;
-		case N_CALL: case N_BUILTIN:
-			if (x->op == N_CALL && wsjlj_kind(c, n) == 1) {
+		case AST_NODE_CALL: case AST_NODE_BUILTIN:
+			if (x->op == AST_NODE_CALL && wsjlj_kind(c, n) == 1) {
 				/* a setjmp: its statement is where a longjmp resumes (wsj_begin) */
 				wst *W = e->w;
 
@@ -427,10 +427,10 @@ static void wgexpr(ecx *e, uint32_t n)
 			}
 			for (uint32_t i = 0; i < x->c; i++)
 				wgexpr(e, c->lists[x->b + i]);
-			if (x->op == N_CALL)
+			if (x->op == AST_NODE_CALL)
 				continue;
 			return;
-		case N_INIT:
+		case AST_NODE_INITIALIZER:
 			for (uint32_t i = 0; i < x->c; i++)
 				wgexpr(e, c->lists[x->b + (x->aux == 1 ? 3 * i + 2 : i)]);
 			return;
@@ -451,34 +451,34 @@ static void wgscan(ecx *e, uint32_t n, int pd, uint32_t pidx)
 	x = N(n);
 	e->w->sjr = pd, e->w->sji = pidx;
 	switch (x->op) {
-	case N_EXPR: case N_RETURN: case N_GOTO_IND:
+	case AST_NODE_EXPRESSION: case AST_NODE_RETURN: case AST_NODE_GOTO_INDIRECT:
 		wgexpr(e, x->a);
 		break;
-	case N_DECL:
+	case AST_NODE_DECLARATION:
 		wgexpr(e, x->b);
 		break;
-	case N_BLOCK:
+	case AST_NODE_BLOCK:
 		r = wgrec(e, n, pd, pidx);
 		for (uint32_t i = 0; i < x->c; i++)
 			wgsub(e, c->lists[x->b + i], r, i);
 		wgneed(e, r);
 		break;
-	case N_IF:
+	case AST_NODE_IF:
 		wgexpr(e, x->a);
 		r = wgrec(e, n, pd, pidx);
 		wgsub(e, x->b, r, 1);
 		wgsub(e, x->c, r, 2);
 		wgneed(e, r);
 		break;
-	case N_WHILE:
-	case N_DO:
+	case AST_NODE_WHILE:
+	case AST_NODE_DO:
 		e->w->sjr = -2;
 		wgexpr(e, x->a);
 		r = wgrec(e, n, pd, pidx);
 		wgsub(e, x->b, r, 0);
 		wgneed(e, r);
 		break;
-	case N_FOR:
+	case AST_NODE_FOR:
 		wgscan(e, x->a, -1, 0);
 		e->w->sjr = -2;
 		wgexpr(e, x->b);
@@ -487,12 +487,12 @@ static void wgscan(ecx *e, uint32_t n, int pd, uint32_t pidx)
 		wgsub(e, c->lists[x->c + 1], r, 0);
 		wgneed(e, r);
 		break;
-	case N_SWITCH: {
+	case AST_NODE_SWITCH: {
 		/* its body's segments: the case labels and these */
 		const node *b = N(x->b);
 
 		wgexpr(e, x->a);
-		if (b->op != N_BLOCK) {
+		if (b->op != AST_NODE_BLOCK) {
 			wgscan(e, x->b, -1, 0);
 			break;
 		}
@@ -502,9 +502,9 @@ static void wgscan(ecx *e, uint32_t n, int pd, uint32_t pidx)
 		wgneed(e, r);
 		break;
 	}
-	case N_LABEL:
-	case N_CASE:
-	case N_DEFAULT:
+	case AST_NODE_LABEL:
+	case AST_NODE_CASE:
+	case AST_NODE_DEFAULT:
 		wgscan(e, x->c, -1, 0);
 		break;
 	default:
@@ -547,7 +547,7 @@ VPRIV void wgoto_scan(ecx *e, uint32_t body)
 		return;
 	/* segment starts per compound: statement 0 and every labelled one */
 	for (uint32_t r = 0; r < W->ngd; r++)
-		if (W->gd[r].need && W->gd[r].op == N_BLOCK)
+		if (W->gd[r].need && W->gd[r].op == AST_NODE_BLOCK)
 			wgadd(e, 0, r, 0);
 	qsort(W->gp, W->ngp, sizeof(wgp), wgp_cmp);
 	/* labels move behind the segment starts (gp[ngp ..]), starts are deduplicated */
@@ -579,7 +579,7 @@ VPRIV void wgoto_scan(ecx *e, uint32_t body)
 		if (W->gd[r].need) {
 			int op = W->gd[r].op;
 
-			W->gd[r].st = (op == N_BLOCK ? W->gd[r].nseg > 1 : op != N_DO) ? wnewloc(e, WT_I32) : UINT32_MAX;
+			W->gd[r].st = (op == AST_NODE_BLOCK ? W->gd[r].nseg > 1 : op != AST_NODE_DO) ? wnewloc(e, WT_I32) : UINT32_MAX;
 			W->gdx[W->ngdx++] = (uint64_t)W->gd[r].node << 32 | r;
 		}
 	qsort(W->gdx, W->ngdx, sizeof(uint64_t), wgdx_cmp);
@@ -624,11 +624,11 @@ static int wgfind(wst *W, uint32_t node)
 static uint32_t wgstate(wst *W, const wgd *d, uint32_t i)
 {
 	switch (d->op) {
-	case N_BLOCK:
+	case AST_NODE_BLOCK:
 		return wgseg(W, d, i);
-	case N_IF:
+	case AST_NODE_IF:
 		return i;
-	case N_SWITCH:
+	case AST_NODE_SWITCH:
 		return i + 1;
 	default:
 		return 1;
@@ -846,15 +846,15 @@ static void wdecl_stmt(ecx *e, const node *x)
 	const sym *y = &c->syms[s];
 	wbind *b;
 
-	if (y->sc == SC_TYPEDEF && vm_type(c, y->ty)) {
+	if (y->sc == AST_STORAGE_TYPEDEF && vm_type(c, y->ty)) {
 		wvla_fix(e, y->ty, false);
 		return;
 	}
-	if (y->kind != S_VAR || y->sc == SC_STATIC || y->sc == SC_EXTERN || y->sc == SC_TYPEDEF)
+	if (y->kind != AST_SYMBOL_VARIABLE || y->sc == AST_STORAGE_STATIC || y->sc == AST_STORAGE_EXTERN || y->sc == AST_STORAGE_TYPEDEF)
 		return;
 	if (!x->aux && vm_type(c, y->ty))
 		wvla_fix(e, y->ty, false);
-	if (T(c, y->ty)->kind == TY_ARRAY && (T(c, y->ty)->flags & TF_VLA)) {
+	if (T(c, y->ty)->kind == AST_TYPE_ARRAY && (T(c, y->ty)->flags & AST_TYPE_FLAG_VLA)) {
 		/* below the stack pointer, as alloca; the block gives it back (wvla_block) */
 		wst *W = e->w;
 		uint32_t al = sym_align(c, s) > 16 ? sym_align(c, s) : 16;
@@ -916,8 +916,8 @@ static void wdecl_stmt(ecx *e, const node *x)
 /* the statement under a chain of case/default/ordinary labels */
 static uint32_t wunlabel(cc *c, uint32_t s)
 {
-	while (s && (N(s)->op == N_CASE || N(s)->op == N_DEFAULT || N(s)->op == N_LABEL)) {
-		if (N(s)->op == N_LABEL && (c->labels[N(s)->a].addr_taken))
+	while (s && (N(s)->op == AST_NODE_CASE || N(s)->op == AST_NODE_DEFAULT || N(s)->op == AST_NODE_LABEL)) {
+		if (N(s)->op == AST_NODE_LABEL && (c->labels[N(s)->a].addr_taken))
 			break;
 		s = N(s)->c;
 	}
@@ -932,27 +932,27 @@ static void wnested_cases(cc *c, uint32_t n, uint32_t **v, uint32_t *nv, uint32_
 	for (; n; n = x->c) {
 		x = N(n);
 		switch (x->op) {
-		case N_CASE: case N_DEFAULT:
+		case AST_NODE_CASE: case AST_NODE_DEFAULT:
 			if (*nv == *cap) {
 				*cap = *cap ? 2 * *cap : 16;
 				*v = realloc(*v, *cap * sizeof **v);
 			}
 			(*v)[(*nv)++] = n;
 			continue;
-		case N_LABEL:
+		case AST_NODE_LABEL:
 			continue;
-		case N_BLOCK:
+		case AST_NODE_BLOCK:
 			for (uint32_t i = 0; i < x->c; i++)
 				wnested_cases(c, c->lists[x->b + i], v, nv, cap);
 			return;
-		case N_IF:
+		case AST_NODE_IF:
 			wnested_cases(c, x->b, v, nv, cap);
 			wnested_cases(c, x->c, v, nv, cap);
 			return;
-		case N_WHILE: case N_DO:
+		case AST_NODE_WHILE: case AST_NODE_DO:
 			wnested_cases(c, x->b, v, nv, cap);
 			return;
-		case N_FOR:
+		case AST_NODE_FOR:
 			wnested_cases(c, c->lists[x->c + 1], v, nv, cap);
 			return;
 		default:
@@ -1008,16 +1008,16 @@ static void wswitch(ecx *e, uint32_t n)
 	cc *c = e->c;
 	wst *W = e->w;
 	const node *x = N(n);
-	qty ct = N(x->a)->ty;
+	ast_qualified_type ct = N(x->a)->ty;
 	int k = wty(c, ct);
 	const node *body = N(x->b);
-	uint32_t nst = body->op == N_BLOCK ? body->c : 1;
-	const uint32_t *st = body->op == N_BLOCK ? &c->lists[body->b] : &x->b;
+	uint32_t nst = body->op == AST_NODE_BLOCK ? body->c : 1;
+	const uint32_t *st = body->op == AST_NODE_BLOCK ? &c->lists[body->b] : &x->b;
 	uint32_t sw0 = W->nsw, seg0 = W->nseg, m, ncase, t, dseg = UINT32_MAX;
 	int brk, obrk = W->brk, *sb;
 	i128 lo = 0, hi = 0;
 	bool ranges = false;
-	int r = W->ngdx && body->op == N_BLOCK ? wgfind(W, n) : -1;
+	int r = W->ngdx && body->op == AST_NODE_BLOCK ? wgfind(W, n) : -1;
 	wgd *g = r >= 0 ? &W->gd[r] : NULL;
 	uint32_t gj = 0;	/* goto: the next segment start of g */
 	uint32_t *nc = NULL, nnc = 0, cnc = 0;	/* nested case labels */
@@ -1039,8 +1039,8 @@ static void wswitch(ecx *e, uint32_t n)
 			W->seg[W->nseg++] = i;
 			head = true;
 		}
-		for (; s && (N(s)->op == N_CASE || N(s)->op == N_DEFAULT || N(s)->op == N_LABEL); s = N(s)->c) {
-			if (N(s)->op == N_LABEL)
+		for (; s && (N(s)->op == AST_NODE_CASE || N(s)->op == AST_NODE_DEFAULT || N(s)->op == AST_NODE_LABEL); s = N(s)->c) {
+			if (N(s)->op == AST_NODE_LABEL)
 				continue;
 			if (!head) {
 				if (W->nseg >= WMAXSW)
@@ -1048,7 +1048,7 @@ static void wswitch(ecx *e, uint32_t n)
 				W->seg[W->nseg++] = i;
 				head = true;
 			}
-			if (N(s)->op == N_DEFAULT) {
+			if (N(s)->op == AST_NODE_DEFAULT) {
 				dseg = W->nseg - 1 - seg0;
 				continue;
 			}
@@ -1063,7 +1063,7 @@ static void wswitch(ecx *e, uint32_t n)
 	for (uint32_t i = 0; i < nst; i++) {
 		uint32_t s = st[i];
 
-		while (s && (N(s)->op == N_CASE || N(s)->op == N_DEFAULT || N(s)->op == N_LABEL))
+		while (s && (N(s)->op == AST_NODE_CASE || N(s)->op == AST_NODE_DEFAULT || N(s)->op == AST_NODE_LABEL))
 			s = N(s)->c;
 		wnested_cases(c, s, &nc, &nnc, &cnc);
 	}
@@ -1072,7 +1072,7 @@ static void wswitch(ecx *e, uint32_t n)
 	for (uint32_t j = 0; j < nnc; j++) {
 		const node *y = N(nc[j]);
 
-		if (y->op == N_DEFAULT) {
+		if (y->op == AST_NODE_DEFAULT) {
 			dseg = m + j;
 			continue;
 		}
@@ -1299,7 +1299,7 @@ static void wfor_init(ecx *e, uint32_t n)
 	cc *c = e->c;
 	const node *x = N(n);
 
-	if (x->op == N_BLOCK && wvla_block(c, x) == UINT32_MAX)
+	if (x->op == AST_NODE_BLOCK && wvla_block(c, x) == UINT32_MAX)
 		wstmts(e, x, 0, x->c);
 	else
 		wstmt(e, n);
@@ -1311,7 +1311,7 @@ static void wreturn(ecx *e, const node *x)
 	wst *W = e->w;
 
 	if (x->a) {
-		qty t = N(x->a)->ty;
+		ast_qualified_type t = N(x->a)->ty;
 		wabi r = wclassify_ret(c, W->rty);
 
 		if (r.k == WA_IND) {
@@ -1319,8 +1319,8 @@ static void wreturn(ecx *e, const node *x)
 
 			/* clang builds a returned local in the sret slot (NRVO): its
 			   cleanup sees, and changes, what the caller gets */
-			if (v->op == N_VAR && W->ncl && sym_attrs(c, v->a)->cleanup &&
-			    QUNQ(t) == QUNQ(W->rty)) {
+			if (v->op == AST_NODE_VARIABLE && W->ncl && sym_attrs(c, v->a)->cleanup &&
+			    AST_QUALIFIED_TYPE_UNQUALIFIED(t) == AST_QUALIFIED_TYPE_UNQUALIFIED(W->rty)) {
 				wcleanups(e, 0, false);
 				wget(e, W->sret);
 				wexpr(e, x->a, true);
@@ -1339,7 +1339,7 @@ static void wreturn(ecx *e, const node *x)
 			wset(e, W->rv);
 		} else if (W->rt != WT_NONE) {
 			wexpr(e, x->a, true);
-			if (QUNQ(t) != QUNQ(W->rty))
+			if (AST_QUALIFIED_TYPE_UNQUALIFIED(t) != AST_QUALIFIED_TYPE_UNQUALIFIED(W->rty))
 				wconv(e, t, W->rty);
 			wset(e, W->rv);
 		} else {
@@ -1362,7 +1362,7 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 	x = N(n);
 	e->curloc = x->loc;
 	switch (x->op) {
-	case N_BLOCK: {
+	case AST_NODE_BLOCK: {
 		int r = W->ngdx ? wgfind(W, n) : -1;
 		uint32_t first = wvla_block(c, x), cl0 = W->ncl;
 		bool vla = first != UINT32_MAX;
@@ -1394,7 +1394,7 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 		}
 		break;
 	}
-	case N_EXPR:
+	case AST_NODE_EXPRESSION:
 		if (n == W->sxv && n) {
 			/* the value of the statement expression being emitted */
 			wst_sxval(e, x->a);
@@ -1403,10 +1403,10 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 		if (x->a)
 			wexpr(e, x->a, false);
 		break;
-	case N_DECL:
+	case AST_NODE_DECLARATION:
 		wdecl_stmt(e, x);
 		break;
-	case N_IF: {
+	case AST_NODE_IF: {
 		int r = W->ngdx ? wgfind(W, n) : -1, kn = wknown(e, x->a);
 
 		if (r < 0 && kn >= 0 && !wlabels(c, kn ? x->c : x->b)) {
@@ -1447,7 +1447,7 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 		wend(e, "end_if");
 		break;
 	}
-	case N_WHILE: {
+	case AST_NODE_WHILE: {
 		int ob = W->brk, oc = W->cont, b = wblock(e, "block", WF_BLOCK), l = wblock(e, "loop", WF_LOOP);
 		int r = W->ngdx ? wgfind(W, n) : -1;
 
@@ -1468,7 +1468,7 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 		wend(e, "end_block");
 		break;
 	}
-	case N_DO: {
+	case AST_NODE_DO: {
 		int ob = W->brk, oc = W->cont, b = wblock(e, "block", WF_BLOCK), l = wblock(e, "loop", WF_LOOP), k = wblock(e, "block", WF_BLOCK);
 
 		W->brk = b, W->cont = k;
@@ -1481,7 +1481,7 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 		wend(e, "end_block");
 		break;
 	}
-	case N_FOR: {
+	case AST_NODE_FOR: {
 		uint32_t step = c->lists[x->c], body = c->lists[x->c + 1];
 		int ob = W->brk, oc = W->cont, b, l, k;
 		int r = W->ngdx ? wgfind(W, n) : -1;
@@ -1522,23 +1522,23 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 			wcleanups(e, cl0, true);
 		break;
 	}
-	case N_SWITCH:
+	case AST_NODE_SWITCH:
 		wswitch(e, n);
 		break;
-	case N_CASE:
-	case N_DEFAULT:
+	case AST_NODE_CASE:
+	case AST_NODE_DEFAULT:
 		/* nested: its switch reaches it as a goto target (wswitch) */
 		if (!W->ngl || !wglabel(W, WG_CASE | n))
 			efatal(e, x->loc, "wasm: a case label in a nested statement of a switch whose body is not a compound statement");
 		__attribute__((fallthrough));
-	case N_LABEL:
+	case AST_NODE_LABEL:
 		wmem_fence(e);
 		wstmt(e, x->c);
 		break;
-	case N_GOTO:
+	case AST_NODE_GOTO:
 		wgoto(e, x->a, x->loc);
 		break;
-	case N_GOTO_IND: {
+	case AST_NODE_GOTO_INDIRECT: {
 		/* compare with the number of every label whose address is taken */
 		uint32_t t = wtmp(e, WPT(c));
 		const wgp *L = W->gp + W->ngp;
@@ -1561,9 +1561,9 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 		wi(e, "unreachable");
 		break;
 	}
-	case N_BREAK:
-	case N_CONTINUE: {
-		int t = x->op == N_BREAK ? W->brk : W->cont;
+	case AST_NODE_BREAK:
+	case AST_NODE_CONTINUE: {
+		int t = x->op == AST_NODE_BREAK ? W->brk : W->cont;
 
 		if (t < 0)
 			efatal(e, x->loc, "break/continue outside a loop");
@@ -1572,10 +1572,10 @@ VPRIV void wstmt(ecx *e, uint32_t n)
 		wbr(e, "br", t, false);
 		break;
 	}
-	case N_RETURN:
+	case AST_NODE_RETURN:
 		wreturn(e, x);
 		break;
-	case N_ASM:
+	case AST_NODE_ASM:
 		wasm_asm(e, x);
 		break;
 	default:

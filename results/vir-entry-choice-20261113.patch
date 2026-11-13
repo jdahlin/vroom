@@ -1,0 +1,199 @@
+--- a/ccs/vcc/vir/alloc.c
++++ b/ccs/vcc/vir/alloc.c
+@@ -1363,12 +1363,142 @@
+ 	}
+ }
+ 
++/* Bounded experiment: compare inherited live-in register contracts, not
++ * speculative execution frequencies. Parameter placement, parallel-copy cycles
++ * and states of later predecessors are not predicted here. Validation measures
++ * the complete resulting reconciliation, including those omitted costs. */
++#define ENTRY_CANDIDATES 4
++#define ENTRY_HASH 512
++static bool entry_estimate(A *a, uint32_t b, uint32_t pred, vir_astats cost[2])
++{
++	uint32_t key[ENTRY_HASH] = {0}, seen[ENTRY_HASH] = {0}, used[256], n = 0;
++	bool held[ENTRY_HASH] = {0};
++	uint8_t reg[ENTRY_HASH];
++	const vir_blk *k = &a->f->blk[b];
++	memset(cost, 0, 2 * sizeof *cost);
++	for (uint32_t j = 0; j < ax.end_n[pred]; j++) {
++		uint32_t v = ax.pv[ax.end_off[pred] + j];
++		if (!livein(a, v, b)) continue;
++		uint32_t h = v * 2654435761u & (ENTRY_HASH - 1);
++		while (key[h]) h = (h + 1) & (ENTRY_HASH - 1);
++		key[h] = v; held[h] = true; reg[h] = ax.pr[ax.end_off[pred] + j]; used[n++] = h;
++	}
++	/* An omitted cached live-in has a deferred fetch obligation even if its
++	 * first use is in a descendant. Count one projected fetch per incoming
++	 * edge, not a measured frequency. Bound the union instead of scanning all
++	 * function values for every predecessor. */
++	for (uint32_t j = 0; j < k->npred; j++) {
++		uint32_t p = a->f->extra[k->pred + j];
++		if (p >= b) continue;
++		for (uint32_t x = 0; x < ax.end_n[p]; x++) {
++			uint32_t v = ax.pv[ax.end_off[p] + x];
++			if (is_const(a->f,v) || !livein(a,v,b)) continue;
++			uint32_t h = v * 2654435761u & (ENTRY_HASH - 1);
++			while (key[h] && key[h] != v) h = (h + 1) & (ENTRY_HASH - 1);
++			if (!key[h]) {
++				if (n == 256) return false;
++				key[h] = v; used[n++] = h;
++			}
++		}
++	}
++	/* Charge a projected body fetch for an uncached nonconstant needed before
++	 * the first call. Avoid counting an edge saving that just moves a reload
++	 * into the block. Constants may be immediates; do not invent body remats.
++	 * More than 256 distinct inputs falls back to the original choice. */
++	for (uint32_t i = k->first; i < k->first + k->n; i++) {
++		vir_oit it; uint32_t *v;
++		vir_oit_init(&it,a->f,&a->f->ins[i],false);
++		while ((v = vir_oit_next(&it))) {
++			if (is_const(a->f,*v) || !livein(a,*v,b)) continue;
++			uint32_t h = *v * 2654435761u & (ENTRY_HASH - 1);
++			while (key[h] && key[h] != *v) h = (h + 1) & (ENTRY_HASH - 1);
++			if (!key[h]) {
++				if (n == 256) return false;
++				key[h] = *v; used[n++] = h;
++			}
++		}
++		if (a->f->ins[i].op == VO_CALL) break;
++	}
++	for (uint32_t j = 0; j < k->npred; j++) {
++		uint32_t p = a->f->extra[k->pred + j];
++		if (p >= b) continue; /* unavailable; explicitly reported and validated later */
++		vir_astats *c = &cost[!!(a->f->blk[p].fl & VB_COLD)];
++		for (uint32_t x = 0; x < ax.end_n[p]; x++) {
++			uint32_t off = ax.end_off[p] + x, v = ax.pv[off];
++			if (!livein(a, v, b)) continue;
++			uint32_t h = v * 2654435761u & (ENTRY_HASH - 1);
++			while (key[h] && key[h] != v) h = (h + 1) & (ENTRY_HASH - 1);
++			if (key[h] && held[h]) {
++				seen[h] = j + 1;
++				c->emoves += reg[h] != ax.pr[off];
++			} else if (!is_const(a->f, v) && !ax.ps[off]) {
++				c->estores++; /* a live value omitted from the register contract */
++			}
++		}
++		for (uint32_t x = 0; x < n; x++) {
++			uint32_t h = used[x];
++			if (!held[h]) { c->reloads++; continue; }
++			if (seen[h] == j + 1) continue;
++			if (is_const(a->f, key[h])) c->eremats++;
++			else c->ereloads++;
++		}
++	}
++	return true;
++}
++/* Ordinal preference: noncold before cold, memory traffic before total edits.
++ * These are neither cycle costs nor learned reward weights. Existing loop-depth
++ * ranking bounds the candidates and breaks ties; the current choice wins ties. */
++static bool entry_cheaper(const vir_astats a[2], const vir_astats b[2])
++{
++	for (uint32_t k = 0; k < 2; k++) {
++		uint32_t am = a[k].ereloads + a[k].estores + a[k].reloads;
++		uint32_t bm = b[k].ereloads + b[k].estores + b[k].reloads;
++		if (am != bm) return am < bm;
++		uint32_t at = am + a[k].emoves + a[k].eremats;
++		uint32_t bt = bm + b[k].emoves + b[k].eremats;
++		if (at != bt) return at < bt;
++	}
++	return false;
++}
++static uint32_t entry_choice(A *a, uint32_t b, uint32_t current,
++			     const uint32_t candidates[ENTRY_CANDIDATES], uint32_t n, uint32_t later)
++{
++	if (current == VIR_NOBLK) return current;
++	vir_astats original[2], bestcost[2], costs[ENTRY_CANDIDATES][2];
++	if (!entry_estimate(a, b, current, original)) return current;
++	memcpy(bestcost, original, sizeof bestcost);
++	uint32_t best = current;
++	for (uint32_t j = 0; j < n; j++) {
++		uint32_t p = candidates[j];
++		if (p == current) memcpy(costs[j], original, sizeof original);
++		else if (!entry_estimate(a, b, p, costs[j])) return current;
++		if (entry_cheaper(costs[j], bestcost)) {
++			best = p;
++			memcpy(bestcost, costs[j], sizeof bestcost);
++		}
++	}
++	if (a->opt && a->opt->entry) for (uint32_t j = 0; j <= n; j++) {
++		const vir_astats *c = j ? costs[j - 1] : original;
++		uint32_t p = j ? candidates[j - 1] : current;
++		char why[384];
++		snprintf(why, sizeof why,
++			"entry-estimate:base=%u:selected=%u:later=%u:noncold=%u,%u,%u,%u:fetch=%u:cold=%u,%u,%u,%u:cold-fetch=%u:scope=inherited",
++			current, p == best, later,
++			c[0].emoves,c[0].ereloads,c[0].estores,c[0].eremats,c[0].reloads,
++			c[1].emoves,c[1].ereloads,c[1].estores,c[1].eremats,c[1].reloads);
++		a->opt->entry(a->opt->entry_ctx,b,p,0,VR_NONE,false,why);
++	}
++	return best;
++}
++
+ static void enter(A *a, uint32_t b)
+ {
+ 	vir_fn *f = a->f;
+ 	const vir_blk *k = &f->blk[b];
+ 	uint32_t best = VIR_NOBLK, bs = 0, l = a->lp->inner[b];
+ 	bool relocate;
++	uint32_t candidates[ENTRY_CANDIDATES], ranks[ENTRY_CANDIDATES], nc = 0, later = 0;
++	uint64_t signatures[ENTRY_CANDIDATES];
+ 
+ 	if (!++ax.bgen) {	/* a new path state: nothing stored (the stamps wrapped: clear) */
+ 		memset(ax.sst, 0, (size_t)VIR_MAX_INS * 4);
+@@ -1386,14 +1516,19 @@
+ 		for (uint32_t j = 0; j < k->npred; j++) {
+ 			uint32_t p = f->extra[k->pred + j], s = 0;
+ 
+-			if (p >= b)
+-				continue;
++			if (p >= b) { later++; continue; }
+ 			if (k->npred == 1) {	/* nothing to choose */
+ 				best = p;
+ 				break;
+ 			}
+-			for (uint32_t x = 0; x < ax.end_n[p]; x++)
+-				s += livein(a, ax.pv[ax.end_off[p] + x], b);
++			uint64_t signature = 0;
++			for (uint32_t x = 0; x < ax.end_n[p]; x++) {
++				uint32_t off = ax.end_off[p] + x, v = ax.pv[off];
++				if (!livein(a, v, b)) continue;
++				s++;
++				signature += ((uint64_t)v * UINT64_C(0x9e3779b97f4a7c15)) ^
++					((uint64_t)ax.pr[off] << 40) ^ ((uint64_t)ax.ps[off] << 48);
++			}
+ 			/* most live-in values in registers, then the deeper loop, not cold, the block before */
+ 			s = s * 4 + (f->blk[p].fl & VB_COLD ? 0 : 2) + (p == b - 1);
+ 			{
+@@ -1405,7 +1540,28 @@
+ 				best = p;
+ 				bs = s;
+ 			}
+-		}
++			/* Four distinct state fingerprints, ranked by the existing policy.
++			 * O(preds * register-count), never a predecessor-pair search. */
++			uint32_t at = 0;
++			for (; at < nc; at++) if (signatures[at] == signature) break;
++			if (at < nc && (ranks[at] > s || (ranks[at] == s && candidates[at] < p))) continue;
++			if (at < nc) {
++				for (uint32_t x = at + 1; x < nc; x++) {
++					candidates[x-1]=candidates[x];ranks[x-1]=ranks[x];signatures[x-1]=signatures[x];
++				}
++				nc--;
++			}
++			for (at = 0; at < nc && (ranks[at] > s || (ranks[at] == s && candidates[at] < p)); at++);
++			if (at < ENTRY_CANDIDATES) {
++				uint32_t count = nc < ENTRY_CANDIDATES ? nc++ : ENTRY_CANDIDATES - 1;
++				for (uint32_t x = count; x > at; x--) {
++					candidates[x]=candidates[x-1];ranks[x]=ranks[x-1];signatures[x]=signatures[x-1];
++				}
++				candidates[at]=p;ranks[at]=s;signatures[at]=signature;
++			}
++		}
++		if (nc > 1 || (nc && a->opt && a->opt->entry))
++			best = entry_choice(a,b,best,candidates,nc,later);
+ 		if (best != VIR_NOBLK) {
+ 			for (uint32_t x = 0; x < ax.end_n[best]; x++) {
+ 				uint32_t v = ax.pv[ax.end_off[best] + x];
