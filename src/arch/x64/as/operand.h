@@ -25,4 +25,8 @@ typedef struct {
 /* Encode already parsed operands using the assembler's instruction families.
  * The mnemonic and operands may be modified; no text parsing is performed. */
 int as_x64_insn(as_context *a, char *mn, XOp *o, int nops);
+/* ALU values are the x86 encoding's group digits. */
+enum X64Op { X64O_ADD, X64O_OR, X64O_ADC, X64O_SBB, X64O_AND,
+	X64O_SUB, X64O_XOR, X64O_CMP, X64O_MOV };
+int as_x64_op(as_context *a, enum X64Op op, int size, XOp *o);
 #endif
