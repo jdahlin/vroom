@@ -99,7 +99,7 @@ def main():
     p.add_argument('-j', type=int, default=6); p.add_argument('-r', type=int, default=2)
     p.add_argument('--build-dir', type=pathlib.Path, default=pathlib.Path(os.environ.get('VCC_PG_BUILD', WORK/'build-pg-clang')))
     p.add_argument('--output', type=pathlib.Path, default=None)
-    default_bin = ROOT/'build'/('linux/ccs' if platform.system() == 'Linux' else 'ccs')
+    default_bin = ROOT/'build'/('linux/src' if platform.system() == 'Linux' else 'src')
     p.add_argument('--vpp', default=os.environ.get('VPP', str(pathlib.Path(os.environ.get('VCC_BIN', default_bin))/'vpp')))
     p.add_argument('--clang', default=os.environ.get('VCC_PG_CLANG') or (os.environ['LLVM']+'/bin/clang' if os.environ.get('LLVM') else '/opt/homebrew/opt/llvm/bin/clang' if platform.system() == 'Darwin' else shutil.which('clang')))
     p.add_argument('modes', nargs='*', choices=DEFAULT_MODES)

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Check the `vcc --explain` pages (ccs/vcc/docs/diag/ID.md, PLAN-diag.md D6).
+"""Check the `vcc --explain` pages (doc/diag/ID.md, PLAN-diag.md D6).
 
   bench/vcc-explain.py [-v] [PATTERN]
 
-For every page: ID is a diagnostic id vcc has (pp/diagids.inc); the page has one `c wrong`
+For every page: ID is a diagnostic id vcc has (frontend/diag/diagids.inc); the page has one `c wrong`
 and one `c fixed` example; vpp gives the wrong one a diagnostic with that id
 (-fdiagnostics-show-id) and the fixed one none with it, and no error; `vpp --explain ID`
 prints the page (the compiled-in table is up to date).  Both examples use the page's
@@ -15,20 +15,20 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from hostenv import BUILD
 
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DOCS = f'{R}/ccs/vcc/docs/diag'
+DOCS = f'{R}/doc/diag'
 VPP = os.path.join(os.environ.get('VCC_BIN') or BUILD, 'vpp')
 FL = ['--target=aarch64-linux-gnu', '-fsyntax-only', '-fno-color-diagnostics', '-fdiagnostics-show-id']
 
 
 def known_ids():
-    """pp/diagids.inc's ids and the ones the code sets itself (gen-diagids.py explicit_ids)"""
+    """frontend/diag/diagids.inc's ids and the ones the code sets itself (gen-diagids.py explicit_ids)"""
     import importlib.util
-    spec = importlib.util.spec_from_file_location('gendiagids', f'{R}/bench/gen-diagids.py')
+    spec = importlib.util.spec_from_file_location('gendiagids', f'{R}/src/tools/gen-diagids.py')
     g = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(g)
-    s = open(f'{R}/ccs/vcc/pp/diagids.inc').read()
+    s = open(f'{R}/src/frontend/diag/diagids.inc').read()
     got = set(re.findall(r'^DID\((\w+),', s, re.M)) | g.explicit_ids()
-    for root, _, files in os.walk(f'{R}/ccs/vcc/cc'):	# ids passed as strings ("ext_...")
+    for root, _, files in os.walk(f'{R}/src/frontend/c'):	# ids passed as strings ("ext_...")
         for f in files:
             if f.endswith('.c'):
                 got |= set(re.findall(r'"((?:err|ext|warn|note)_\w+)"', open(os.path.join(root, f), errors='replace').read()))
@@ -66,7 +66,7 @@ def check(name, text, ids, verbose):
                 errs.append('the fixed example has an error')
     p = subprocess.run([VPP, '--explain', i], capture_output=True, text=True)
     if p.returncode or p.stdout != text:
-        errs.append('vpp --explain does not print it (run bench/gen-explain.py)')
+        errs.append('vpp --explain does not print it (run src/tools/gen-explain.py)')
     return errs
 
 

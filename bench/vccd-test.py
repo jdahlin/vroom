@@ -7,7 +7,7 @@ Each test starts its own private vccd (socket in a fresh temporary
 directory, no backend) and checks one property of the service: access to the
 socket, malformed requests, idle connections, cache invalidation between
 builds, the client's umask.  Requests are sent either through the real shim
-(build/ccs/vcc) or by a raw client in this file that speaks protocol.h
+(build/src/vcc) or by a raw client in this file that speaks protocol.h
 directly, to send what the shim never would.
 
 Known failures are marked xfail with their TODO.md item: a failure is
@@ -15,7 +15,7 @@ counted as xfail, a pass is XPASS (an error: remove the marker in the commit
 that fixes it).  Tests that cannot run here (a second user is needed) are
 skipped.  Exit status 1 on any FAIL or XPASS.
 
---bin-dir build/ccs-asan or build/ccs-tsan runs the sanitizer builds of
+--bin-dir build/src-asan or build/src-tsan runs the sanitizer builds of
 vccd; then also check the vccd log each test prints with -v.
 """
 import array, os, re, shutil, signal, socket, stat, struct, subprocess, sys, tempfile, time, importlib.util
@@ -112,8 +112,8 @@ def socket_mode_ignores_umask(v=None):
 @test()
 def default_socket_not_in_tmp():
     """the default socket path (shim and server) is in a per-user directory, not /tmp"""
-    for f in ('shim.c', 'vccd.c'):
-        src = open(f'{vd.R}/ccs/vcc/vccd/{f}').read()
+    for f in ('bin/vcc/shim.c', 'server/vccd.c'):
+        src = open(f'{vd.R}/src/{f}').read()
         check('"/tmp/vccd.sock"' not in src, f'{f}: default socket /tmp/vccd.sock')
 
 @test()

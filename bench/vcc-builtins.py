@@ -16,7 +16,7 @@ clang's build does not); the rest is a report.
 import os, re, subprocess, sys, tempfile
 
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-VPP = os.environ.get('VCC_BIN', f'{R}/build/ccs') + '/vpp'
+VPP = os.environ.get('VCC_BIN', f'{R}/build/src') + '/vpp'
 CLANG = '/opt/homebrew/opt/llvm/bin/clang'
 INC = '/opt/homebrew/opt/llvm/include/clang/Basic'
 

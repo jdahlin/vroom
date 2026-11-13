@@ -1,0 +1,1075 @@
+# Test plan: external test suites for vcc
+
+**Goal:** vcc is validated against a large collection of C tests, not only
+against what we wrote ourselves.  There is no free counterpart to
+JavaScript's test262 for C.  The commercial conformance suites (Solid Sands
+SuperTest, Plum Hall, Perennial CVSA) cost a license.  The free collection
+still covers most of it: clang's `-verify` tests for the front end and
+diagnostics, gcc's test suite for code generation, random programs for what
+nobody has written tests for, and real programs with their own test suites.
+
+Everything is fetched with `bench/fetch-testsuites.sh` into
+`work/testsuites/`.  There it is git-ignored and pinned to the commits named
+in the script.  It is about 320 MB and takes half a minute.  What is there is
+listed in `src/test/README.md`.  Each step below must yield a script
+with a green/red result (PLAN-release G0) and move G1 (correctness) or G2
+(corpus).
+
+Principle for all steps: **clang is oracle and filter.**  A test counts only
+if clang (Homebrew, same rewritten command line) passes it.  If clang rejects
+a test, it is not vcc's fault.  If the harness interprets a test differently
+from the suite itself, the test does not count either.
+
+## Current priority
+
+Front-end and back-end bugs come first: crashes, valid C that is rejected,
+invalid C that is accepted, wrong constant values, miscompiled code and ABI
+deviations.  Each fix must get a minimal regression test; execution is
+validated first on Linux x86 and then on ARM/QEMU.  The wording and
+presentation of diagnostics have lower priority.  A deviation in external
+expected notes, counts or source lines is not in itself evidence of a
+semantic compiler bug.  Such contract errors are reported separately in the
+investigation and must not be described as that many compiler bugs.
+
+## Steps
+
+### S1 Fetching — done (2026-11-10, c1098d5)
+`bench/fetch-testsuites.sh [NAME...]`: shallow and sparse clones at pinned
+commits, `work/testsuites/MANIFEST`.
+
+| suite | contents (C files) | license |
+|---|---|---|
+| llvm | clang `test/C` (150), `Sema` (1195), `Preprocessor` (325), `Lexer` (84), `Parser` (118), `utils/ABITest` | Apache-2.0 + LLVM exception |
+| gcc | `gcc.c-torture` (compile 2016, execute 1926), `gcc.dg` (19 792), `c-c++-common` (3436), `gcc.target/aarch64` (9681) | GPL-3.0+ |
+| c-testsuite | 220 small programs with expected output | per test |
+| llvm-test-suite | `SingleSource` with reference output (2520) | Apache-2.0 + LLVM exception |
+| csmith, yarpgen | random program generators (source code) | BSD-2 / Apache-2.0 |
+| libc-test | musl's libc tests (466) | MIT |
+| chibicc, cproc | the compilers' own tests (50, 213) | MIT / ISC |
+| kefir | 875 end2end runtime pairs, 231 internal snapshot directories inventoried separately | GPL-3.0-only; runtime header BSD-3-Clause |
+
+### S2 clang's -verify tests — started (62ea29a, TODO T20)
+`bench/vcc-verify.py -j 6 [-v] [PAT]`.  Each `%clang_cc1 … -verify` line in
+`test/{C,Sema,Preprocessor,Lexer,Parser}` is a test.  The expected
+diagnostics are in the file (`// expected-error {{...}}`).  `test/C` is
+organized by standard, WG14 paper and Defect Report (`drs/`), and is what
+comes closest to test262.  The harness reads the directives from raw source
+with `#line`; skipped `#if` branches it finds out via clang.  The matching
+checks the diagnostic's level, file, line and count.  Vcc's wording may
+differ from clang's; our own snapshots verify vcc's full messages.
+`--match-messages` is an optional comparison with clang's text.  Clang's side
+is cached and its original contract is still checked.  Separate
+`results.locations.json` and `results.messages.json` show changes within the
+same comparison policy.
+
+**Linux x86-64 2026-11-11:** `bench/vcc-verify.py --target
+x86_64-linux-gnu -j 6` now gives **443/1640 passed, 1197 failures and no
+crashes** with independent message text.  The ARM target's front-end check
+gives **450/1805 passed, 1355 failures, no crashes**; the test sources are
+not run as programs in this suite.  This frees 34 tests per target from pure
+text requirements, without any semantic compiler change.  The previous strict
+text comparison gave 409 and 416 passed respectively.  Results and references
+are kept apart per target; arm64 is selected with `--target
+aarch64-linux-gnu`.  The remaining failures require investigation of
+semantics, diagnostic level, line, count and recovery.
+
+**Status 2026-11-10:** 412/1841 valid tests passed (22 %), 1 crash.
+
+| directory | passed / valid |
+|---|---|
+| C/drs | 29 / 70 |
+| C/C99 | 18 / 32 |
+| C/C11 | 3 / 15 |
+| C/C23 | 9 / 49 |
+| C/C2y | 32 / 95 |
+| Preprocessor | 49 / 124 |
+| Lexer | 15 / 72 |
+| Parser | 21 / 108 |
+| Sema | 236 / 1276 |
+
+Not counted: 570 that clang 23 itself rejects (newer tests), 443
+C++/ObjC/OpenCL/OpenMP lines, 66 that the harness does not interpret as
+clang does, 59 with lit substitutions (`%t`, `%{...}`).
+
+Remaining:
+1. The two known crashes are fixed with regression tests; keep runs
+   crash-free as coverage is extended.
+2. The biggest gaps, in order of how many tests they block:
+   - SVE/SME types (`__SVInt8_t` …) and the checks of streaming functions.
+   - `__bf16`, `__mfp8`.
+   - `_Countof`, `__scoped_atomic_*`; a separate `nullptr_t` identity for
+     constexpr bit casts remains.
+   - `_Static_assert` in a struct.
+   - `//` comments under `-std=c89`.
+3. The harness's own gaps: `%t` tests (`split-file`),
+   `-verify-ignore-unexpected`.
+
+**Done when:** no crash; C/ and drs/ fully green; the number passed only goes
+up.  Each fixed gap is committed with the new number here.
+
+Representation step 2026-11-11: `__builtin_bit_cast` now has byte-based
+constant interpretation with known value bits and unknown padding.  Scalars,
+records, arrays, ordinary vectors and pointers are handled at run time;
+constant expressions keep the restrictions for pointers, unions, volatility
+and active union member.  Packed bool vectors use logical elements and bit
+storage, including indexing, operators and the Linux/Wasm ABI.  A direct
+bit-field operand is read as its declared scalar value; this deviates
+deliberately from clang's copying of the surrounding storage (see
+`src/test/bitcast/README.md`).  This also applies to a packed bool
+vector element.
+
+New isolated base at `1f4c8d2`: unity and file-by-file builds pass our own
+run suite **164/164 x86** (five existing reference exceptions) and
+**169/169 ARM**, the whole ABI suite **32/32 per Linux target** and
+diagnostics **219/219**.  The kernel's sema is **887/887** both per process
+and in batch.  TSan passes **252/252** compilations with identical assembler
+between one and six threads.  The guard-page field test passes **648**
+calls; the memo stress has over 1 200 separate proofs followed by 40 nested
+throws, without a fixed cache size.  Wasm32 and Wasm64 pass **5/5** focused
+run tests and **6/6** packed ABI tests each; three explicit Linux contracts
+count as exceptions on Wasm, not as passes.  G1/G2 remain open; among other
+things a separate `nullptr_t` type identity is missing.
+
+### S2b Diagnostics for new C programmers — test corpus done
+`bench/vcc-onboarding.py` runs 25 concrete mistakes, with repaired code and
+intentionally valid neighbouring code for each case (25 case files with 75 C
+examples).  The contracts check content, location and level as well as ID,
+JSON/text and SARIF.  A link case explicitly shows the external linker's
+error, not vcc's own linker output.  Both Linux targets verified: x86 10
+covered/15 diagnostic gaps, arm64 11/14.  All 50 repairs/valid neighbours
+compile cleanly with both clang and vcc.  The default run fails on the gaps;
+`--baseline` is used in fast CI and keeps them as explicit XFAIL, with XPASS
+errors when coverage improves.  No faulty programs are run.  Remaining:
+implement the explanations/warnings that the gaps describe and measure
+whether they help beginners repair the code.
+
+### S3 gcc c-torture, the rest — started
+`bench/vcc-ctests.py` already runs `execute/` (1701 files, vendored).
+Extend:
+- `execute/ieee/` and `execute/builtins/`: run like the others
+  (`builtins/` needs its `-lib.c` files).
+- `compile/` (2016): `-c` only.  vcc must neither crash nor reject what
+  clang accepts.
+
+**Linux x86-64 2026-11-11:** `bench/vcc-torture-compile.py -j 6`
+gives 1561 passed, 54 failures, one vcc crash and 398 skipped; clang
+crashes on two more.  The assembly of vcc's output is checked.
+Conditional or unknown DejaGNU directives are skipped.  The run suites
+remain.
+
+After the fix of void lvalues: 1562 passed, 54 failures, **no vcc
+crashes**, the same 398 skipped and two clang crashes.
+
+`bench/vcc-torture-execute.py -j 6 --target x86_64-linux-gnu` now runs
+IEEE and builtins, with the companion files and suite main.  `--target
+aarch64-linux-gnu` runs under QEMU.  IEEE: 49 passed, no failures and
+30 filtered on both targets.  Conditional directives that the rig does not
+yet interpret count as skipped; this is not full coverage.  Builtins run
+at -O0; optimized variants need counterparts to GCC's disabled
+optimization passes.  Sprintf and strncmp are fixed.
+
+Extended DejaGNU interpretation (target conditions, requirements and known
+`.x` scripts) gives 1801 passed/57 failures/156 skipped in compile, without
+vcc crashes (two clang failures).  Run after generic `-fno-builtin-NAME`:
+x86 101 passed/19 failures/18 skipped, arm64 101/3/34.  The remaining
+failures are complex division, signaling NaN and x86 inline asm.  Later
+targeted fixes are verified separately before the next full run.
+
+Latest full run of IEEE/builtins: x86 **120 passed, 0 failures,
+18 filtered**; ARM/QEMU **104 passed, 0 failures, 34 filtered**.
+ARM's additional 16 filterings are clang's lack of nonlocal builtins.
+Vendored runtime suites with the combined working copy: x86
+**1807/1815 passed, 8 failures, 134 filtered**; ARM/QEMU
+**1822/1822 passed, 0 failures, 127 filtered**.  The eight x86 failures are
+optimization cases in progress; this is not an approval of all of S3.
+The kernel's front-end checks pass 887/887 in both separate
+processes and batch at the same time.
+
+New compile run with isolated committed `1009175` gives
+**1843 passed, 16 failures, 0 crashes, 155 filtered and 2 reference
+failures** on x86.  What remains is large static stack frames (4), vector
+declarators/attributes (4), two array/scope cases, one large argument
+copying case, two return-mismatch flag cases, two parser limits and one
+missing SIMD builtin.  Targeted fixes count only after isolated validation;
+this is the latest full baseline.
+
+**Compile milestone 2026-11-11, frozen commit `5e17f47`:** the whole 2016
+files have now been checked on both Linux targets.  X86: **1859 passed,
+0 vcc failures, 0 vcc crashes, 155 filtered and 2 reference failures**.
+ARM/QEMU's compile target: **1855 passed, 0 vcc failures, 0 vcc crashes, 159
+filtered and 2 reference failures**.  This is compilation/assembly, not
+running these files.  The reference failures are clang SIGSEGV in
+`limits-exprparen.c` and `limits-structnest.c` on both targets; the harness
+therefore still exits with a failure status.  Vcc's own deep record crash
+is fixed with a separate stress test that also verifies the daemon's
+survival.  ARM's last register pressure failure (`20121107-1.c`) is fixed
+and the whole ARM suite rerun.  Logs: `/tmp/vroom-milestone-compile-{x86,arm}.log`.
+The compiler's SHA-256:
+`d08f33e9ea2e0f61e7203d246fdd398b71cebca4e3b1a69d21589ebbea2a0de0`.
+Combined verification on the same commit is now also done: vendored
+runtime suites **1839/1839 x86** (134 filtered) and **1846/1846 ARM/QEMU**
+(127 filtered).  ASan/UBSan: **124 x86 regressions** and **129 ARM** without
+findings; x86's large `branch_far` was checked separately after a 60-second
+timeout in the clang reference.  An exact reference rerun took 39.2 s and its
+programs gave the expected output; after that the ASan case passed.  Five
+persistent x86 reference gaps are still reported explicitly.  Stress: **29/29**
+standalone and **30/30** with daemon survival.  Normal and sanitizer runs
+have separate `VCC_BUILD` directories; x86 runtime was rerun in isolation
+after a shared reference directory was discovered.  This does not mean that
+all of S3 or the test plan is done.  Upstream integration requires its own
+runs.
+
+**Done when:** no crashes in `compile/`; `ieee/` and `builtins/` as green
+as `execute/`.
+
+**Upstream-integrated check, tree `4ef4ea8`:** [PR #28](https://github.com/jdahlin/vroom/pull/28)
+is a draft while integration failures are fixed.  ARM compile gives 1855/0/0
+with 159 filtered and two known clang crashes.  X86 gives 1858/1/0 with the
+same 155 filtered and two clang crashes: a new register pressure regression
+in `asmgoto-3.c` is fixed separately and a full rerun remains.  The fixed
+asm engine passes 18/18 GCC asm tests at -O0/-O2, asm runtime and
+unity/nonunity.  Runtime on the frozen tree: **1847/1847 x86**, **1852/1852
+ARM**; ASan/UBSan **130/130 x86**, **135/135 ARM**, stress 29/29 and daemon
+30/30 respectively.  The ABI generators again pass 777+1000 on x86 and
+778+1000 on ARM with the same reference exceptions as above.  Kernel sema
+passes 887/887 in both modes and PP 920/920; diagnostics 215/215.
+Unity/nonunity and targeted CFI/debug/direct-object checks pass.  These
+numbers apply to the frozen tree before the asm fix; they are not a claim of
+finished premerge.  Wasm CI has 22 newly covered failures that are
+investigated separately against upstream's compiler.
+
+**CI follow-up:** the asm fix at `837cc15` now has full x86 compile
+evidence: again **1859 passed, no vcc failures/crashes**, 155 filtered and
+two known clang crashes.  The Wasm comparison against `2339f69` separates a
+real FP constant regression from earlier gaps.  NaN payload/signaling bits
+and binary128 constants are fixed and get a new unmarked regression test;
+the names of Unicode local static symbols are also fixed.  The remaining 20
+Wasm cases are documented individually in TODO.md and run as explicit
+XFAIL, not skip.  A future fix gives an XPASS error until the marker is
+removed.  This is not a claim that these 20 Wasm bugs are fixed.
+Full local Wasm run after the CI fixes: **1809 passed**, 31 explicit XFAIL
+(20 newly covered plus 11 earlier), 141 filtered, no unexpected failures or
+XPASS.  TSan's daemon stress also revealed that `gen_call` was inlined into
+recursive ARM expressions: its 8 KiB argument buffer was reserved for every
+arithmetic node.  A separate function boundary reduces the AArch64 TSan
+frame in `gen_inner` from 8608 to 432 bytes.  The unchanged 250-level test
+and the subsequent valid TU now pass with the same 2 MiB worker stack; stack
+limits, tests and sanitizer checks have not been changed.
+
+### S4 gcc.dg — started (2026-11-11)
+**Combined semantic follow-up milestone at `74f6ec4`:** C90, nested
+GNU range initializations, declaration lifetime after labels and wide
+rotations have been validated together.  Four affected unchanged GCC cases
+pass on both Linux targets and both builds; five focused runtime tests also
+pass at O2/O3.  Full gates, explicit reference exceptions and Wasm/ASan
+results are in PLAN-release.md and `work/results/semantic-stack-74/`.  No
+full S4 pass sweep is claimed.
+
+**C90 digraphs and statement scope (2026-11-11):** the unchanged
+`c90-digraph-1.c` and `c90-scope-1.c` now go from runtime abort to passing
+on Linux x86-64 and arm64, both unity and nonunity.  Strict C89/C90 does not
+read digraphs; C94 and GNU89 do.  Selection statements/loops get their own
+implicit scopes only in C99, while explicit blocks always keep their scope.
+`bench/vcc-c90.py` checks seven modes against clang, token pasting,
+stdin/-D and 21 mixed header-cache jobs per target/build.  Full PP parity
+is 920/920 in both cmp and batch before and after the lexer change; sema run
++ batch is 887/887 afterwards.  No upstream flag has been removed.
+
+`bench/vcc-gcc-dg.py -j 6 --target x86_64-linux-gnu` runs direct
+`gcc.dg/*.c` with `dg-do run` (1276 files) and direct
+`gcc.dg/torture/*.c` (2208 files).  `--target aarch64-linux-gnu` uses
+QEMU and a Linux sysroot.  The harness reads target filters, options and
+companion files; clang is oracle and filter.  The root's default flags
+follow `dg.exp` (`-ansi -pedantic-errors`, replaced by `dg-options`).
+Torture runs at -O0 by default; `--matrix` selects the six non-LTO
+configurations of `gcc-dg.exp`.  Unknown directives/selectors are skipped
+explicitly; successful exit follows `dg-do run`, while not yet supported
+`dg-output`/`dg-final` are not counted.
+
+**Bounded baseline:** `--suite torture --limit 400 '^torture/pr'`
+gives x86 270 passed/11 failures/119 filtered and arm64 273/8/119,
+no compiler crashes.  This is 400 of 1563 matching PR files at -O0,
+not the whole suite.  A runtime segfault that was found (`pr116454-1`) is
+fixed: returning a scalar to `_Complex` is now converted before code
+generation.  Both upstream cases `pr116454-{1,2}` and a regression with
+scalar and complex return conversions pass on both targets.
+
+`--suite errors` now compares all error lines against clang for the 1214
+direct `gcc.dg/*.c` that have `dg-error`.  Relative lines, `dg-line` and
+target selectors are supported; each missing or extra error line is a
+failure.  Clang errors outside active annotations and unknown contracts are
+filtered explicitly.  This measures error-line parity, not GCC's message text
+or warnings/notes.  Baseline: x86 359 passed/369 failures/1 crash/482
+filtered/3 reference failures; arm64 353/373/0/485/3.  The crash
+(`cwsc0.c`) came from an incomplete `void` argument in an unprototyped call
+and is fixed with its own regression.  The targeted check no longer
+crashes, but the static-chain builtin is still missing and the upstream case
+is therefore not green.  Full reruns after the fix remain.
+The array type check is now at the declarator itself, also for fields,
+typedefs and parameters: `array-9.c` and `array-15.c` pass in targeted
+checks on both Linux targets.  The regression checks both invalid element
+types and valid incomplete outer dimensions/VLA prototypes.
+Subscripting of function pointers and pointers to incomplete types is also
+rejected now: `array-8.c` and `pointer-arith-{1,2,3}.c` pass on both
+targets.  The isolated package's array/incomplete/subscript diagnostic tests
+pass 10/10, both with a unity-built and a file-by-file-built compiler.
+
+**Extended frozen baseline `5e17f47`:** all 1563 matching
+`torture/pr` files at -O0 have now been checked, without `--limit`.
+X86: **1189 passed, 18 failures, 356 filtered, no compiler crashes
+or reference crashes**.  ARM/QEMU: **1184 passed, 6 failures, 373
+filtered, no crashes**.  This is still a subset of S4,
+not the whole gcc.dg or the optimization matrix.  The x86 failures include
+interrupt ABI, inline asm, missing builtins and a reproduced failure in
+128-bit shifts (`pr69909`); ARM has, among others, the same front-end gaps
+and one assembly failure.  The `pow`/`fabsl` link failures are real
+differences in lowering/optimization, not reasons to add `-lm` to the rig
+when upstream does not ask for it.  Result:
+`work/results/vroom-milestone-s4-pr-{x86,arm}.json`.
+
+After the baseline two front-end gaps are fixed: `__builtin_c23_va_start`
+(also ellipsis without a named parameter and an ignored optional second
+operand) and generic `__builtin_stdc_rotate_left/right` with type-preserving
+modulo rotation and single evaluation.  `pr48731` and `pr117492-1` compile
+and assemble on both Linux targets.  Two runtime regressions per target and
+invalid operand types are checked; unity/nonunity and the kernel's sema
+887/887 in both modes pass.  This is targeted evidence; S4's full baseline
+numbers above have not been recomputed after the fix.
+
+Same bit width for a signed scalar to an unsigned vector lane is now accepted
+as in clang: `pr103181` and `pr127379` compile and assemble on both Linux
+targets; the first also runs and matches clang.  Regressions keep the
+rejection of unsigned to signed and wider scalars.  Unity/nonunity,
+positive/negative tests and kernel sema 887/887 in run/batch pass.  This is
+a separate front-end fix after the CI milestone's frozen tree; PR #28's
+green CI applies to its own tree and does not verify this later change.
+
+**Full direct S4 baseline, frozen `aa584e2` (2026-11-11):** now all
+**3484 files per target** are run, 1276 direct `dg-do run` and 2208 direct
+torture files at -O0, without `--limit` or a PR name filter.  X86:
+**1803 passed, 83 failures, 1596 filtered, 2 reference failures**.  ARM/QEMU:
+**1783 passed, 74 failures, 1625 filtered, 2 reference failures**.  No
+compiler crash.  The x86 failures are 36 runtime, 29 compile and 18
+link failures; ARM has 31 runtime, 24 compile, 17 link and 2
+assembly failures.  Both targets have a clang timeout in `float-exact-1.c`
+and a clang SIGSEGV in `vla-tert-1.c`.  The failure count is test cases, not
+unique bugs.  The 83 x86 failures are grouped into 32 signatures, among
+others VLA side effects, wide bit-fields, interrupt ABI, intrinsics support
+and optimization contracts.  `fwrapv-2.c` and two tag-alias tests require a
+separate UB/optimization analysis; their aborts are not in themselves
+evidence of miscompilation of well-defined C.  Reports:
+`work/results/s4-all-{x86,arm}.json`, `s4-all-summary.json` and
+`s4-all-classification.txt`.  Compiler SHA-256:
+`21aba03551f35a89d577a36a268051fee25dc757f296161981261a1d2b91bdbb`.
+The earlier PR subset does not replace this full baseline.  The whole
+optimization matrix and nested suites still remain.
+
+The same frozen compiler's own runtime regressions pass **135/135 x86**
+(five explicit reference/target exceptions) and **140/140 ARM** (no
+exceptions).  C23 va_start and signed vector scalars also pass on Wasm;
+the rotation test's `_BitInt` part hits a verified older Wasm gap and
+must be kept visible at the next premerge.  The three `pr84682` asm cases
+are now green in a targeted run on both Linux targets without new code
+changes; asm runtime passes 7/7 x86 with two earlier exceptions and 9/9 ARM.
+
+128-bit bit-fields are fixed on both Linux targets: ARM's invalid
+`UBFM #64` and x86's raw object read are replaced by word-wise extraction
+and insertion with signed extension.  `pr89091` passes in five GCC
+configurations per target (one explicit upstream filtering).  Regressions
+cover 63-128 bit fields, packed offsets, high words, truncated assignment
+results, increments and neighbouring fields, including objects against a
+guard page.  Unity/nonunity and targeted runtime tests at -O0/-O2 pass on
+both targets.  The full baseline numbers above still apply before this fix.
+
+VLA `sizeof` no longer loses the operand's side effects: all three
+emitter paths evaluate the array address operand, and the prepass visits it
+and the VLA bounds so that constant local optimization does not use old
+values.  `typename-vla-{1,2}` and `vla-stexp-9` now pass on both Linux
+targets.  The regression covers comma, pointer increment and statement
+expressions, including that a fixed `sizeof` remains unevaluated.
+Unity/nonunity and -O0/-O2 run tests pass; six other cases in the VLA
+cluster remain.
+
+`vla-24` is also fixed: explicit `alloca` moves the saved stack pointers of
+already active VLA scopes, so function-lifetime storage survives the end of
+the scope.  Later VLA scopes still reclaim storage, verified with 16384
+iterations after an older alloca (no general disabling of stack reclaim).
+A frozen combination of `5e6f247` and the fix builds in unity/nonunity; the
+whole own runtime suite gives **143/143 x86** (five existing reference
+exceptions) and **148/148 ARM/QEMU**, without cache.  Four targeted VLA
+regressions per target pass at -O0 and in the nonunity build; the original
+GCC test passes 1/1 per target.  Result:
+`s4-vla-lifetime-integrated-{x86,arm}.json`.  Wasm is checked separately for
+assembly, not runtime-verified here.  Side effects of the remaining VLA
+bounds and inline alloca are not fixed.
+
+With full `-ffast-math`, a correctly identified external
+`pow(double, 0.25)` is now lowered to two hardware square roots on Linux
+x86/ARM.  Local/asm-named functions, disabled builtins and stricter FP flags
+keep their calls; `-mgeneral-regs-only` rejects the operation before any FP
+output is written.  `pr41094` passes in the x86 harness; the ARM oracle at
+-O0 itself requires libm and is filtered, while a separate -O2 oracle and
+both vcc output paths run the original test without libm.  Unity/nonunity,
+four runtime regressions per target, 84 flag checks, 28 strict IEEE tests,
+24 no-FP checks and separation in both declaration cache paths pass.
+Existing driver/predefine failures are exactly unchanged against the base
+(137/212, the same 75 failures); twelve targeted macro/order tests pass.
+
+Full rerun at `ad4cf9a`, all 3484 configurations per target:
+**x86 1811 passed, 75 failures, 1596 filtered, two oracle failures**;
+**ARM 1792 passed, 65 failures, 1625 filtered, two oracle failures**.
+That is eight and nine fixed cases respectively from the frozen baseline, no
+earlier passing case regresses, no compiler crashes and unchanged
+filterings/oracle failures.  Full comparison: `work/results/s4-integrated-summary.json`.
+The numbers apply to the direct selection at the default configuration, not
+the whole optimization matrix or nested sub-suites.
+
+Static initialization of wide bit-fields now keeps all 128 constant bits
+before the field width's truncation, without undefined shifts of a 64-bit
+value.  The remaining `pr89037` thereby passes on both targets; three other
+bit-field cases were already green.  The new regression covers signed 66-bit
+fields, packed 119-bit fields, 128-bit fields and neighbouring bits.  Four
+GCC tests and six targeted runtime tests pass per target, unity/nonunity and
+the new regression at -O0.
+
+File-scope C23 `constexpr` objects get internal linkage also after an
+earlier `extern` declaration.  `c23-constexpr-2a` now links and runs on both
+Linux targets.  A new two-file test checks separate scalar, array and
+struct objects with the same name in all four clang/vcc combinations,
+unity/nonunity on x86 and ARM/QEMU.  The ABI rig supports the existing
+`vcc-flags` format per source file for the language version.  Kernel sema is
+887/887 in both per-process and batch mode.  Other storage class diagnostics
+are not changed by this link fix.
+
+`__builtin_powi/powif/powil` use the compiler runtime symbols
+`__powidf2`, `__powisf2` and the target's `__powixf2`/`__powitf2`
+respectively.  This stops recursion into the user's own wrapper functions in
+`pr19402-2`, without changing ordinary function calls.  An isolated fix
+against `ad4cf9a` passes the original test and regression on both Linux
+targets, unity/nonunity; the regression covers the helper ABI, one evaluation
+of each operand, negative exponents, INT_MIN, signed zero and NaN/inf raised
+to zero.  Kernel sema 887/887 in both modes.  The combined full totals above
+apply before this fix and the following integration is verified separately.
+
+Scalar float/double `fabs` and `copysign`, both explicit builtin and a
+correctly identified library declaration, are lowered to integer masks.
+This preserves signaling NaN bits and signed zero without unnecessary libm
+calls.  Each operand is evaluated once; local/asm-renamed or disabled
+library functions remain calls.  The four GCC cases
+`builtins-{48,49,50}` and `pr56125` pass on both Linux targets in both
+build modes.  A bitwise regression, flag/name tests and kernel sema
+887/887 in both modes are verified on an isolated fix against `ad4cf9a`.
+Integration with the upcoming x86 function-specific target policy requires
+a separate effective-feature check; this is not claimed fully verified here.
+
+VLA bounds in new cast/compound-literal/`va_arg` type names are now
+evaluated and saved where the type is created.  Earlier typedef bounds are
+reused; `__auto_type` lets the initializer drive the order without double
+evaluation.  The prepass sees the declaration bounds and replay moves the VLA
+type operand as a type, not an integer.  `vla-{12,13,14}` and `vla-stexp-7`
+thereby pass on both Linux targets (the latter crashed earlier on ARM).  The
+isolated fix passes unity/nonunity, -O0/-O2 regressions and kernel sema
+887/887 in both modes.  The new regression also runs green in wasm64 via
+emsdk/node.  Two `typeof` cases, `pr114831-2` and `vla-15`, and inline alloca
+remain.
+
+The following `typeof` fix evaluates the VM operand once and saves new
+dimensions from the original cached dimensions, even if the operand changes
+the bound variables.  Thereby `pr114831-2` and `vla-15` also pass: six
+targeted upstream tests per Linux target, no exceptions.  A new
+multi-dimensional regression passes with clang/vcc at -O0/-O2 in both build
+modes, and actual wasm64 runtime (two VLA tests).  Kernel sema is 887/887 in
+both modes.  A separate remaining failure: a later variable declaration with
+a VM typedef can still re-evaluate its already saved bound; general typedef
+reuse and inline alloca are not done.
+
+The following emitter fix now reuses the VM typedef's saved bounds also at
+later variable declarations.  The cache distinguishes function and inline
+instance; the same declaration's code still runs on each loop iteration.  A
+new regression checks changed bound variables, nested typedefs, nineteen
+loop iterations and two inline instances.  Seven relevant runtime tests per
+Linux target/build mode, -O0/-O2 and three actual wasm64 tests pass.  A
+larger VLA selection still has one failure (`vla-16`, compound-literal
+lvalue), ten unchanged reference/contract filterings and Clang's existing
+front-end crash in `vla-tert-1`; these are not hidden.
+
+VM compound literals now keep the lvalue category through an internal
+address sequence, and prefix increment can parse compound-literal operands.
+Wasm reserves the dimension cache entry before recursive bound emission.
+Thereby `vla-16` also passes: the whole direct VLA selection's clang-valid
+configurations are **11/11 per Linux target**, ten unchanged explicit
+reference/contract filterings and one Clang crash are reported separately.
+Eight own VLA tests per target/build mode, -O0/-O2, four actual wasm64
+tests, kernel sema 887/887 in both modes and diagnostics 217/217 pass.
+
+`__builtin_complex` constructs complex numbers without losing signed zero,
+NaN bits or argument side effects.  Complex `++`/`--` update only the real
+part with one read, one computation and one write; the imaginary part is
+preserved.  C2y mode is separated from C23 also in the replay cache's key,
+and case ranges are accepted correctly in C2y.  Four original complex tests
+and new regressions pass on both Linux targets, unity/nonunity; kernel sema
+887/887 in both modes.  Sixteen mixed C23/C2y cache batches check both warm
+orders and the cache paths.  Atomic complex updates are still rejected
+explicitly and tracked separately in TODO.md.
+
+x87 to unsigned64 now uses both value halves around 2^63 instead of
+only signed `fistp`.  The regression checks boundaries, truncation, one
+operand evaluation and restored x87 control word.  The original
+`fp-int-convert-long-double` and the new regression pass on both Linux
+targets in unity/nonunity; ARM's existing binary128 path is kept separate.
+
+x87 to/from 128-bit integers use XF runtime helpers with the ordinary
+call classifier (stack/x87 and integer registers respectively), not TF's
+binary128 ABI.  A new regression covers signed/unsigned boundaries,
+truncation and one operand evaluation on both Linux targets and build modes.
+The corresponding unchanged GCC timode tests now pass on x86.
+
+ARM's constant integer to float is rounded directly to float and does not
+lose the sticky bit through an intermediate double.  Integer to binary128
+uses the existing nearest-even helper instead of truncation.  New 64/128-bit
+boundary tests pass on both targets/build modes.  The unchanged applicable
+GCC conversion matrix is now **35 passing x86 configurations** and **30 ARM
+configurations**, zero failures; existing upstream/oracle filterings are
+unchanged.
+
+The Wasm precheck keeps generic rotation tests mandatory and puts the
+BitInt sub-tests in a separate runnable regression.  Constant
+`fabs`/`copysign` are folded target-independently; the powi test compares negative infinity
+directly instead of requiring a separate, still unsupported long-double
+builtin.  These three full regressions run green in wasm64 and on both Linux
+targets.  Two wide bit-field tests and a separate BitInt rotation are
+explicit Wasm XFAILs that are still run, with TODO references: the same
+sources already fail with the byte-verified upstream base `2339f69`.  The
+Linux tests remain mandatory.  The Wasm failures are not hidden as passed or
+skipped tests.
+
+TSan found a real race when parallel emitter threads evaluated constant
+initializers: a shared recursion chain pointed into other threads' stacks,
+and implicit zero/string elements created new AST nodes during emission.
+The recursion chain is now thread-local and keyed per frontend/c/symbol;
+allocation-free subobject descriptions replace the AST mutations.  The
+original reproducer goes from TSan exit66 to green with six threads.
+Normal/nonunity/TSan pass three constexpr runtime tests on both Linux
+targets, cycle diagnostics and kernel sema 887/887 in both modes.  A new
+permanent 500-global regression uses the rig's `vcc-threads-same` marker for
+repeated parallel emissions also in TSan CI.
+
+A separate TSan race in the prepass's write/constant metadata is also
+fixed: function-local facts are owned by the respective lazy walk; global
+facts are initialized conservatively before the worker threads.  The emitter
+threads remain parallel, and local constant propagation is kept.  **8036/8036**
+O0/O2 outputs on both Linux targets are byte-identical against `6cda644`; the
+real kernel object `map_kernel.o` is unchanged.  A new 200-function
+regression with shared global writes passes in normal/nonunity/TSan on both
+targets, the six-thread reproducer is clean and the permanent test requires
+repeated threaded emission.
+
+Full rerun on frozen `573f23b`, 3484 configurations per target:
+**x86 1831 passed, 55 failures, 1596 filtered, two oracle failures**;
+**ARM 1812 passed, 45 failures, 1625 filtered, two oracle failures**.
+Twenty earlier failures per target are fixed compared with `ad4cf9a`, no
+earlier passing case regresses and filterings/oracle failures are unchanged.
+Unity/nonunity pass own applicable runtime tests (155 x86, 160 ARM),
+diagnostics 217/217, sixteen cache batches and kernel sema 887/887 run/batch.
+A cold Clang reference for `branch_far` timed out; the same source's kept,
+byte-verified reference verifies its separate build mode.  Artifacts:
+`work/results/candidate-573f23b-validation.json`, `s4-573f23b-summary.json`.
+The numbers apply before the last two VLA follow-up fixes and the prepass fix.
+Final code `0757803` is also verified with 15/15 affected runtime tests
+per Linux target, diagnostics 217/217, the actual wasm64 suite 126/126 plus
+27 documented XFAIL/10 reference exceptions, and two repeated TSan
+threading regressions.  The whole test plan still remains to be completed.
+
+**CI follow-up fixes, frozen `b97022e` (2026-11-11):** the sanitizer run
+revealed signed host overflow when valid unsigned128 arithmetic was
+evaluated in the front end and ARM emitter.  Addition, subtraction and
+negation now use unsigned modularity before the target type's truncation.  A
+separate regression in `20020720-1` came from the fabs sign-mask lowering
+losing the result's non-negative fact; the fact is now kept without changing
+the arguments' side effects or NaN behavior.  Combined Linux run passes
+**160/160 own x86 tests** (five existing reference/target exceptions) and
+**1882/1882 ARM tests**: 1612 GCC, 105 TCC and 165 own, with 127 unchanged
+external filterings.  Each fix passes unity/nonunity and kernel sema
+**887/887** individually and in batch; the unsigned fix also ASan sema.
+Combined ASan/UBSan run passes **165/165 own ARM tests**, without
+filterings.  The test rig now always writes the name of each failing case.
+These numbers apply to the vendored run suite, not the larger external S4
+corpus above.
+
+Combined frozen checkpoint `7afcdea`, before the sign-mask/type-name fixes,
+is verified in both build modes: **145/145 x86** (five reference exceptions),
+**150/150 ARM/QEMU**, two-file constexpr ABI and three original GCC cases
+per target.  Full binary hashes/logs: `work/results/checkpoint-7afcdea-validation.json`.
+
+The runtime rigs now separate the reference compiler's signal/timeout/tool
+failure from ordinary source rejections.  Oracle failures give a failure
+status, are included in the summary and are not cached as permanent
+exceptions.  Old misleading cache entries are invalidated.  The large
+`branch_far` has an explicit limited reference time of 300 seconds; other
+tests keep 60.  Fourteen offline groups inject failures into all three rigs,
+and a full CLI injection gives 0 passed, 0 skipped, one oracle failure and
+exit1.  Real `branch_far` and `signaling_nan` pass 2/2 on x86 and ARM/QEMU
+with the new classification.
+
+The CI follow-up check restored braced `dg-options`, among others the
+`-fwrapv` that `930529-1` requires; the same Wasm reference goes from a 20 s
+timeout to exit0 in 0.020 s.  The ARM guest's exception vector now gives
+exit125 with diagnostics on a real guest failure, while an infinite loop is
+still an oracle failure.  The native reference program's signal is reported
+as a rejected runtime contract with signal and stderr; compiler/linker/QEMU/
+Node failures and timeouts remain oracle failures.  Missing
+`freopen`/`fscanf` prototypes in the rig's stdio header were fixed: two
+failing native references now pass.  Full GCC run: **1615/1615 x86**, 86
+explicit exceptions; ARM's complete vendored run suite **1883/1883**, 126
+exceptions.  Wasm64 passes **1825/1825**, 34 XFAIL and 150 exceptions; 19 of
+these follow the suite's explicit `label_values` requirement that Wasm
+lacks.  No test name is used for that filter, and identical backend failures
+without the directive remain failures.  All unexpected Wasm outcomes now
+write the test name even without verbose mode.
+
+After merging `main` (`9d022c3`) the same rig passes `62390af`
+**1895/1895 ARM** (177 own tests, 126 explicit exceptions) and
+**1839/1839 Wasm64** (140 own tests, 34 run XFAIL, 148 exceptions).
+No unexpected failure, XPASS or oracle failure is reported.  The 35
+checkout groups as well as real ARM exception probes and native stdio
+also pass.  Logs: `work/results/pr37-merged-{arm,wasm}.log`.
+
+Remaining:
+- All remaining matching files and optimization configurations; nested
+  directories with their own `.exp` drivers and LTO have no counterpart yet.
+- More verified effective targets and conditional directives; unknown
+  contracts must not become silent passes.
+- The nested `dg-error` cases and remaining unsupported diagnostic contracts
+  (among others source line mapping, line 0 and multiline directives).
+
+**Done when:** the run tests as green as clang's; no file that clang accepts
+is rejected by vcc.
+
+### S5 Small run suites — started
+c-testsuite (220, `.expected`), chibicc (50), cproc (213), llvm-test-suite
+`SingleSource/UnitTests` and `Regression/C` (with `reference_output`).
+The same rig as `vcc-ctests.py`: build with clang and vcc, run under qemu,
+compare output.
+
+**Linux x86-64 2026-11-11:** `bench/vcc-small.py -j 6` passes all
+220 c-testsuite cases.  `--target aarch64` runs the same rig under QEMU.
+After the fix of unknown escape sequences chibicc is green among the
+clang-valid cases: x86 12 passed/29 filtered, arm64 11/30.
+`--suite llvm` covers direct C files in UnitTests and Regression/C:
+x86 128 passed/1 failure, arm64 121/1 and 7 upstream architecture
+exclusions after bit-field, Microsoft layout and sizeless SVE declaration
+support.  The remaining failure in this subset is `_Float16`.  C-testsuite
+is now 220/220 on both targets.
+The next extension follows the subdirectories' CMake flags and exclusions.
+A full run in upstream's `--small` mode now gives **165 passed, 0 failures**
+on x86 and **156 passed, 0 failures** on ARM/QEMU.  Skipped files are
+2252 and 2261 respectively: mainly the separate GCC-torture subdirectory
+(1708), directories that upstream does not enable for the base target and a
+few architecture exclusions.  This does not mean that all 2417 discovered
+C files have been run.  Default size on x86 gave 164 passed and a
+20-second timeout in `Vector/build2.c`; the time limit remains a visible
+limitation.
+
+`bench/vcc-cproc.py --target x86_64|aarch64` gives compilation/assembly
+for the QBE cases, token parity for `.pp`, and rejection for `.err`, with
+clang as filter.  It does not compare QBE IR or runtime semantics.
+Baseline: x86 166 passed/17 failures/13 filtered, arm64 168/15/13.
+After fixes: 183 passed/0 failures/13 filtered on both targets.
+This is still not runtime or QBE equivalence.
+
+**Done when:** everything clang passes, vcc passes too.
+
+### S5b Kefir — imported, Linux baseline measured
+
+**Declaration directly after a label (2026-11-11, base `a41361e`):**
+The front end's synthetic declaration packages are now flattened into the
+enclosing block.  The package is not a new lexical scope: ARM must not reuse
+its stack slots while the variables live, and cleanup must not run early on
+any target.  Unchanged Kefir `std_attributes18` passes all four Clang/vcc
+combinations on x86 and ARM, both unity and file-by-file build.  The minimal
+baseline gives ARM failures for two live volatile locals; a separate cleanup
+regression reveals the same scope failure on x86 too.  The new regression and
+switch/statement-expression probes pass 36/36 combinations
+(Clang/unity/file-by-file x O0/O2/O3 x two targets x two sources).  Own
+suites: x86 233/233 with six existing reference exceptions, ARM 238/238 with
+one existing xfail; sema run/batch 887/887 on both builds, diagnostics
+225/225.  Evidence: `work/arm-computed-goto/`.  No new full Kefir baseline
+is claimed.
+
+**Legacy `_ExtInt` (2026-11-11):** the keyword goes through the same parser
+and type path as `_BitInt`, with `-Wdeprecated-type` as in Clang.  Unchanged
+`extint1` passes all four Clang/vcc combinations on x86-64.  ARM's Clang
+reference rejects 310 bits and remains filtered; separately its unchanged
+Clang host is run against vcc callee under QEMU.  `bench/vcc-extint.py`
+checks type identity, C89/C11/C23 and warning flags, 24 call combinations on
+x86 and 20 on ARM up to 120 bits.  ARM 310 bits is checked separately
+against Python-generated bytes, not against a nonexistent Clang reference.
+Unity and file-by-file builds give the same result.  PP parity:
+920/920 before and after, in both per-process and batch runs.  Artifacts:
+`work/results/extint-alias/`, `work/results/extint-{before,after}-{cmp,batch}.log`.
+
+**Combined front-end milestone (2026-11-11, base 2dc4ea3):** Three bounded
+fixes: the whole sequence of string literals determines the encoding before
+decoding (also late `u`/`U`/`L` and hex escapes); quoted `#embed` searches
+the working directory after the includer's directory and before
+`--embed-dir`; constant-foldable VLA bounds keep evaluated side effects.
+Portable runtime tests, diagnostic tests and a new CI oracle for embed search
+are included.
+
+Unity and file-by-file builds pass together.  Kernel sema: 887/887 both
+per process and batch; full PP parity including host: 920/920 in both
+modes.  Both compiler builds: own x86 tests 224 passed + 6 explicit
+reference skips; ARM/QEMU 229 passed + 1 existing xfail, no skips;
+diagnostics 224/224; embed oracle 40 comparisons across both Linux targets.
+Runtime was also run without the result cache for the file-by-file build.
+
+Unchanged Kefir `string_literals1`, `wide_string_literals2`,
+`preprocessor_embed7` and `vla1` pass on x86-64 in all four
+Clang/vcc combinations with both builds.  On ARM, embed/VLA pass;
+Clang rejects the two string cases' assumptions about signed `wchar_t`,
+which are reported as `reference-compile-fail`, never as passed.
+The portable string regression passes on ARM/QEMU.  This is a
+targeted selection, not a green full Kefir suite.  Frozen patch, bundle,
+source/binary manifest and run logs: `work/results/frontend-milestone-2dc`.
+
+The official repo is now `https://git.protopopov.lv/kefir.git`, pinned to
+`7c59547068eaa0723b4db83d3fb70f448b0f0cb1`; the old sr.ht HEAD contains
+only the move notice.  Source/license metadata is in `bench/kefir-source.json`.
+`bench/vcc-kefir.py` inventories 1106 end2end directories: 875 runtime pairs
+(875 host files, 889 test files) and 231 compiler-internal snapshot directories.
+Each runtime pair keeps all companion files, upstream's profile flags,
+active host assertions and Linux linking with pthread/atomic/m.
+Clang/Clang must first pass the exit status contract; then
+Clang/vcc, vcc/Clang and vcc/vcc are run.  No output comparison is invented.
+
+Raw profiles, base flags, final/mapped flags, environment, exact commands,
+source tree hash and file hashes are saved.  The snapshot comes from `git archive` of
+the right clean pin.  Unknown profile/make/run contracts are explicitly unsupported.
+Decimal capability guards must never become empty passing tests; on ARM
+x86 guards/intrinsics/inline asm are also separated.  Internal AST/IR/asmgen
+snapshots and upstream's copying of expected output are not run as tests.
+Clang rejection is filtered separately; signals, timeouts, missing tools
+and silent compiler failures are visible failures with exit status 1, even
+when other cases pass.
+Ten checkout-only rig tests are included in CI.  This is a new failure
+baseline, not a green suite or full coverage of Kefir's internal tests.
+
+**Baseline 2026-11-11**, vcc `0757803` (binary SHA256
+`40ff9fbbde546e93bd306f6511219719dd27a644b08d9456e7d88571531741bb`),
+Clang 23.1.6, 6 workers, 30 s compile / 5 s run:
+
+| target | all four combinations passed | vcc failures | vcc signal/timeout | reference compile rejected | reference link rejected | reference signal/timeout | unsupported |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| x86-64 Linux | 448 | 129 | 14 | 161 | 6 | 51 | 66 |
+| ARM64 Linux/QEMU | 414 | 38 | 9 | 249 | 6 | 55 | 104 |
+
+Both runs end with status 1.  Clang/Clang passes 591 and 461 runtime
+contracts respectively.  Unsupported is 46 decimal guards, 19 unknown profile
+flags and one extension case on both targets; ARM also has 38 x86/asm contracts.
+Reference failures must not be counted as passed vcc tests.  All six
+reference link failures per target have real, non-empty linker diagnostic files.
+Artifacts: `/tmp/kefir-final-x86`,
+`work/results/kefir-final-arm`, common `work/results/kefir-evidence.json`.
+An earlier partial ARM run was stopped by running out of tmpfs inodes and
+is kept separately; the final run above was written to the workspace filesystem.
+
+Separate time limit probe: `compound_assign_simplify1` on x86, one worker and
+30 s run limit, passes all four combinations.  The full baseline's V/C timeout
+at 5 s is not changed; this is time limit evidence, not a semantic fix.
+Artifacts: `work/results/kefir-slow-probe-x86`.
+
+**New full baseline 2026-11-11, committed `2dc4ea3`:** the same
+875 unchanged runtime pairs, Clang 23.1.6, six workers and the time limits
+30 s compile / 5 s run.  Binary SHA256:
+`c4eeb51f8c14f3718fedb17322663386155788d723ade6b06aef2a3c55aa2206`.
+X86 was run first, then ARM64 under QEMU.
+| target | all four combinations passed | vcc failures | vcc signal/timeout | reference compile rejected | reference link rejected | reference signal/timeout | unsupported |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| x86-64 Linux | 481 | 99 | 10 | 161 | 6 | 52 | 66 |
+| ARM64 Linux/QEMU | 455 | 3 | 7 | 249 | 6 | 51 | 104 |
+
+No previously passing case row loses its pass on any target.  X86 gets
+33 new passing cases, all earlier vcc failures.  ARM gets 41, of which 37
+were earlier vcc failures and four earlier reference failures.
+Reference/timing variation is not compiler fixes.  Signal/timeout also
+includes the run program's assertion failures; the counts are not the number
+of unique bugs or compiler crashes.  Both full runs still end with status 1.
+Wide BitInt types over 128 bits block most of the remaining x86 compile
+cases; several `int128_*` and `constexpr*` cases also contain such types.
+The next fixes are verified against these unchanged contracts.
+
+Artifacts: `work/results/kefir-main2dc-{x86,arm}/results.json`,
+`work/results/linux-baseline-2dc4ea3/{manifest,comparison}.json`.
+The manifest ties source commit, tree, binary and harness hashes to the runs.
+The older x86 baseline has been moved from tmpfs to
+`work/results/kefir-archives/kefir-final-x86`; the original
+`/tmp/kefir-final-x86` path is kept with a symbolic link.
+S5b and release gate G1/G2 remain open.
+
+**Wide BitInt, frozen implementation `b0b6107` on `2dc4ea3`:** the whole
+875-pair run is repeated with the same contract and time limits.  X86 gets
+572 passed, 8 vcc failures and 10 vcc signal/timeout: **91 earlier vcc
+failures now pass**, without lost passes.  ARM keeps 455 passed,
+3 vcc failures and 7 vcc signal/timeout, also without lost passes.
+The reference/unsupported categories are unchanged on both targets.  ARM's
+Clang reference rejects widths over 128; wide ARM arithmetic is verified
+separately against Python and its ABI against documented aggregate proxies.
+The unchanged full runtime corpus outside Kefir passes at the same time
+1942/1942 on x86 (130 exceptions) and 1945/1945 on ARM/QEMU
+(126 exceptions and one existing run XFAIL), with new separate cache directories.
+Binary SHA256:
+`f2a6f04804de1393357a2b4341059f8bc9cbc30c8b5361808df43f203d6e0b74`.
+Kefir logs: `work/results/kefir-wide-main2dc-{x86,arm}/`;
+manifest/comparison/full gates: `work/results/bitint-main2dc/`.
+Run-time conversion between wide integers and floating point remains
+separate.  S5b and G1/G2 are still open.
+
+**Bit-field fix on `2dc4ea3`:** the result of assignment, comma and
+prefix increment now keeps the field width at integer promotion, separate
+from the expression's declared type for `sizeof`/`typeof`.  The unchanged
+Kefir cases `assign_bitfield1` and `comma_operator_bitfield1` pass all four
+compiler combinations on x86 and ARM/QEMU.  The regression also checks
+single evaluation, postfix and explicit casts.  Both build modes pass the
+new test on both targets; sema run/batch 887/887, own x86 tests 223/223 with
+six reference exceptions and ARM 228/228 with one existing run XFAIL.
+This is targeted evidence, not a new full Kefir run.
+Artifacts: `work/agents/kefir-bitfield/results/`.
+
+**Floating-point follow-up on the wide milestone:** the unchanged
+`bitint_cast_fix2` and `bitint_typeconv6` now both pass on x86 in all four
+compiler combinations.  ARM's Clang rejects their wide callee types;
+the standard harness reports two reference compile failures, not two passes.
+Separate unchanged calls of `bitint_cast_fix2` with a vcc callee pass
+with both Clang and vcc callers on ARM/QEMU.  The independent IEEE matrix
+passes 6871 x86 and 5667 ARM values over widths 129-7001, both normally
+and with `-O3`, with unity and separate files.  Snapshot/replay is also
+ASan/UBSan-green after a separate zero-length copy fix.
+Dynamic rounding mode and FP exception flags explicitly remain;
+the default mode uses round to nearest even.  These focused
+results are not a new full 875-pair run.
+Evidence: `work/results/bitint-float-main-reviewed/` and
+`work/results/kefir-float-final-{x86,arm}/`.
+
+**Combined native milestone on top of the stack tip `1c5b5d1` (2026-11-11):**
+Seven separate fixes combine x86 array object alignment, stepwise
+binding of parked ARM inline arguments, atomic lock-free queries,
+memory alternatives for scalar FP asm inputs, correct ELF storage of wide
+strings with embedded zeros, `_ExtInt` alias and inlined alloca lifetime.
+Explicit variable alignment and type alignment are preserved; dynamic Linux
+atomics queries use libatomic and evaluate unresolved arguments once.
+Statically decided queries do not evaluate the pointer expression.  Alloca
+restores the callee stack lifetime after cleanup/return value without
+erasing the arguments' or the caller's live allocations.
+
+Final combined unity and file-by-file build: own tests x86 232/232 with
+six existing reference exceptions; ARM 237/237 with one existing xfail.
+ABI 33/33, hosted atomics 3/3 and seven focused regressions pass on
+both targets and builds.  PP cmp 920/920 before the alias change; after all
+changes cmp and batch 920/920.  Sema run/batch 887/887 on both builds,
+diagnostics 225/225.  Independent alloca edge cases pass 18/18 (Clang/unity/
+file-by-file x O0/O2/O3 x Linux x86/ARM).  GCC's unchanged `pr113596` with its
+`-O2` directives passes on both targets and builds; all of S4 was not rerun.
+
+Six unchanged Kefir cases (`atomic_builtins7`, `int128_function_call3`,
+`pointer_subscr_const1`, `wide_string_literals1`, `extint1`,
+`inline_assembly_fp3`) pass all four compiler combinations on x86
+for both builds.  ARM passes the first three; the wide string case is rejected
+by Clang because of upstream's signed-wchar typedef, `extint1` is rejected
+because of the 310-bit reference type.  The FP asm case has an x86 guard and
+does not count as ARM coverage.  A separate ExtInt oracle passes 24 combinations on x86
+and 20 on ARM; ARM310 is checked against Python bytes in a further
+bridge case.  No new full 875-case baseline is claimed.  Reproducible
+commands, exact source/binary hashes and symlinks are in
+`work/native-stack64/{run-gates.py,manifest.json,final-evidence.json,logs/}`.
+
+**Combined Linux stack, frozen `a41361e` on top of `1c5b5d1`:**
+all of Kefir's 875 runtime pairs are run first on x86, then ARM/QEMU,
+with six workers, 30 s compile and 5 s run.  X86: **585 passed,
+0 vcc compile failures, 6 run failures/timeouts**, 161 reference compile
+failures, 6 reference link failures, 51 reference signal/timeout and 66
+unsupported.  ARM: **461 passed, 0 vcc compile failures, 4 run failures**,
+249/6/51 reference failures in the same categories and 104 unsupported.
+Both runs end with status 1; neither exceptions nor remaining failures count
+as passes.
+
+The fixes cover atomic lock-free queries, ARM's parked inline
+arguments, x86 array alignment, allowed memory operands for FP asm,
+embedded zeros in wide strings, legacy `_ExtInt` and the lifetime of
+inline `alloca` allocations.  The last also fixes GCC's `pr113596.c` on both
+targets.  Both builds pass own Linux tests **232 x86 / 237 ARM**, ABI 33 per
+target, PP parity 920, sema 887 in both modes and diagnostics 225.  ASan/UBSan
+passes the same own Linux tests.  Wasm64: 189 passed, 38 run known XFAIL and
+eleven reference exceptions.  The new `_ExtInt` test's XFAIL follows the
+existing BitInt ABI gap: a corresponding `_BitInt` version is rejected
+identically by the parent compiler on Wasm32 and Wasm64; no new native
+failure is hidden.
+
+Remaining x86 cases have grounds for unspecified padding/incompatible
+function signatures, undefined shifts, an invalid asm contract,
+`__builtin_unreachable` and a time limit.  ARM's `std_attributes18` has a
+remaining actual runtime failure under investigation.  Other ARM cases
+require separate classification of negative float-to-unsigned conversions
+and pointers after object lifetime; they remain failures.  All of
+S5b/G1/G2 are open.
+
+Evidence: `work/results/kefir-native-stack-{x86,arm}/`,
+`work/native-stack64/{manifest,final-evidence}.json` and
+`work/results/native-stack64-ci-preflight/`.  Frozen compiler SHA256:
+`9eeab468752c45bfec75b211fc822eddaa926343d498b35d20c3114cc86b64cf`.
+
+### S6 ABI generators — rig done, failures being fixed
+`gcc.dg/compat/struct-layout-1_generate.c` and clang's `utils/ABITest`
+generate thousands of calls between two compilers.  Connected into
+`bench/vcc-abi.py`: clang/vcc x caller/callee, Linux under qemu and
+Apple natively.
+
+`bench/vcc-abi.py --generated --target x86_64|aarch64` runs all four
+combinations of clang/vcc as caller/callee.  Sources, commands and
+output are saved.  Baseline with 1000 cases per generator: x86 GCC 654 passed,
+122 failures, 1 vcc crash, 222 clang-filtered and 1 clang crash; LLVM
+857/143.  ARM GCC 673/105/222 filtered and LLVM 987/13.
+Fixes of vector calls, packed return values, union initialization,
+field alignment and homogeneous ARM aggregates are now verified against the same cases.
+The numbers are baselines, not a claim of final green runs.
+
+New isolated run of the committed compiler `1009175`: x86 GCC
+**777 passed, 0 vcc failures, 222 clang-filtered and 1 clang crash**;
+LLVM **1000/1000**.  ARM GCC **769 passed, 9 failures, 222 filtered**;
+LLVM **1000/1000**.  The nine ARM cases are verified against not yet
+committed fixes for empty aggregates/HFA and varargs.  That the combined
+working copy went green earlier does not replace isolated verification of
+committed changes.  Sources/commands are in
+`work/abi-generated/committed-{x86,arm}/`.
+
+After the isolated fix of empty HFA members and empty variadic
+arguments (`8461ee2`) the full ARM rerun gives **778 GCC cases and
+1000 LLVM cases without vcc failures** (222 clang-filtered).  All four
+caller combinations are run per case.  Together with the x86 run above,
+the chosen set of 1000 generated cases per generator is now green on
+both Linux targets among clang-valid cases.  ARM evidence:
+`work/abi-generated/empty-fixed-arm/results.json`.  Extending seeds/counts
+and later ABI changes require new runs.
+
+**Combined rerun `5e17f47`:** after the later frame, atomic
+and copy fixes, all clang-valid cases in all four caller combinations
+pass again.  X86: **777 GCC + 1000 LLVM passed**, 222
+filtered decimal cases and one clang crash (GCC 466).  ARM/QEMU: **778
+GCC + 1000 LLVM passed**, 222 filtered decimal cases, no reference failures.
+No vcc failures or vcc crashes on either target.  Reports:
+`work/abi-generated/milestone-{x86,arm}/results.json`; both store the same
+compiler hash as S3's compile milestone.  The kernel checks for the same
+commit are also green: sema run/batch **887/887** each and PP parity
+**920/920**.  The test harness for the compile milestone is separate in
+[PR #27](https://github.com/jdahlin/vroom/pull/27); the upstream integration
+of the compiler fixes is validated for a following PR.
+
+**Done when:** N generated cases per platform without difference.
+
+### S7 Random programs (TODO T10) — rig done, long runs remain
+csmith and yarpgen are built from `work/testsuites/`.  `bench/vcc-csmith.py`
+builds the programs with clang -O0 and vcc, runs them and compares checksums.
+Deviations are reduced with creduce to tests in `test/vcc`.
+
+Status 2026-11-11: both pinned generators built with CMake.
+`LLVM=/usr/lib/llvm-23 bench/vcc-csmith.py --count 3 -j 2` saves sources,
+seeds, commands, output and compiler hash in `work/random-tests/`.
+Clang -O0, -O2 and UBSan with trap must give the same checksum before the
+comparison; failures in the oracle are reported as skip, never as pass.  The
+run uses its own copy of vpp so that concurrent rebuilds do not change the
+compiler in the middle of a test.
+YARPGen is limited in the smoke test to two array dimensions (`--max-array-dims=0`
+restores the generator's default); the default seed 1 gave over 14 GB of
+global arrays and clang could not link it with the small code model.
+Seeds 1-3: x86 Csmith 3/3, YARPGen 2/3 (seed 3 hits X3's limit of
+64 call arguments); ARM/QEMU Csmith 3/3, YARPGen 3/3.  The limits of
+64 call arguments and 256 parameters have since been removed; a separate
+rerun of seed 3 matches clang on both targets, and an ABI test with
+291 parameters passes in all four compiler combinations.  No 24h run
+or reduction is claimed to be done; S2-S6 must be verified first.
+
+A bounded x86 Csmith run with four workers, `--duration 1800
+--max-failures 100`, gave **1159 passed, 0 vcc failures and 200 filtered**.
+151 were filtered at clang -O0's run (timeout), 49 at UBSan (trap).
+Sources, commands and summary are in
+`work/random-tests/20261111-083106-752654-x86_64-linux-gnu/`.
+The rig saves intermediate results and stops scheduling when the time or
+failure limit is reached; tests already running finish.  The failure limit
+counts failing tests, not unique compiler bugs.  This does not replace the
+24h gate.
+
+A subsequent ARM/QEMU smoke test with Csmith seeds 3000000-3000019
+(`52261ef`, two workers) gives **16 passed, 0 vcc failures and 4 filtered**
+because of the clang -O0 run's timeout.  Evidence:
+`work/random-tests/20261111-100225-3305520-aarch64-linux-gnu/`.
+This is 20 generated tests, not a long run.
+
+**Done when:** 24 h per generator without deviation, on both targets
+(PLAN-release G1).
+
+### S8 libc-test (TODO T13) — started
+The first run of the 343 dynamic functional/math/regression tests
+against glibc gives **303 clang-valid/vcc-passed on x86**, three reference
+build failures and 37 reference run failures.  ARM's common test library was
+blocked by `__builtin_isinf_sign` for long double.  The fix supports all FP
+formats on ARM and also corrects x86's half/BF16 test and sign byte; both
+build modes, five FP regressions per target and all 65536 half/BF16 patterns
+pass.  With the isolated fix and vcc-built support objects, **309 ARM tests**
+pass, three reference build failures and 31 reference run failures.  These
+are targeted/isolated results.  The frozen PR combination `511d091` is then
+rebuilt and fully rerun: **303/303 clang-valid x86 tests** followed by
+**309/309 ARM/QEMU tests**, the same reference exceptions, zero candidate
+failures or infrastructure failures and correct final status.  The
+compiler's SHA256 is
+`249d770ac3e0cb73c669637a9e20c284bc1018aee674cad547cc66c21f32cfef`;
+full artifacts are in `/tmp/libc-pr-{x86,arm}`.  All 343 dynamic
+configurations per target are accounted for, also those where the glibc
+oracle fails.
+
+`bench/vcc-libc-test.py` now follows upstream's Makefile/.mk graph for all
+343 dynamic functional/math/regression binaries.  Each compiler builds
+its own support objects and DSOs; clang assembles/links.  The rig keeps
+flags, sources, commands, binaries, status and compiler hash in a new
+artifact directory.  ARM uses QEMU and an explicit private libcrypt overlay
+with verified glibc symbol requirements; `-lcrypt` is not removed.  The full
+results above are verified; eleven checkout-only harness tests run in premerge.
+Ordinary clang rejections/libc deviations are filtered separately, while
+compiler crashes, timeouts, missing tools/rules and unexplained make failures
+must give a failure status even if other tests pass.  An injected clang SIGSEGV
+is verified red; a normal pow10 rejection together with valid tests
+and the whole x86 run ends correctly.
+
+The rig also maps the whole pinned graph with `--suite full --linkage both`:
+**565 contracts** (345 dynamic targets, 141 static targets and 79 API objects).
+The API's full link aggregates are kept unchanged; the generated API header
+is preprocessed with the respective compiler.  `--linkage static` follows
+upstream's dependencies on dynamic tests and reports their side results
+separately.
+Full separate verification against `7afcdea` gives **424 passing x86
+contracts**, 83 reference build failures, 57 reference run failures and one
+upstream-disabled test; ARM/QEMU gives **430 passed**, 83/51 reference
+failures and the same disabled test.  Zero vcc failures and zero
+infrastructure failures.  Eleven offline tests check graph, status,
+preprocessing choice and that a disabled recipe actually matches
+upstream.  Artifacts: `/tmp/libc-expanded-full-{x86,arm}` and
+`/tmp/libc-expanded-evidence.json`.
+
+The API's strict unchanged flags make Clang reject 79 of 80 contracts
+in this glibc environment; these are not claimed to verify vcc.  Musl's
+dynamic `pleval` is explicitly disabled by upstream, and the static test
+needs a private libc function (Clang already rejects the source here).
+A static ARM reference test gave SIGBUS in an earlier separate run
+and passed in the full run; both artifacts are preserved.  Full
+S8 conformance or musl validation is still not claimed.
+
+musl's libc-test requires a real libc.  That is done when vcc builds musl, or
+against glibc in the Linux container.  The functional tests and the math tests
+(floating-point edge cases) are the interesting ones.
+
+### S9 Commercial suite — decision
+SuperTest (or Plum Hall) is needed only if 1.0 is to claim conformance
+formally.  The decision is made when S2-S7 are green.
+
+## Order
+S2 (the crash, then the gaps by size) -> S3 -> S5 -> S4 -> S6 -> S7.  S3
+and S5 are almost free with the existing rig.  S7 finds the most faulty
+code per hour, but requires that S3-S5 first have taken the known failures.

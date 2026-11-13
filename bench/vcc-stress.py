@@ -27,7 +27,7 @@ Known failures are marked xfail with their TODO.md item; a failure there is
 counted as xfail, a pass is XPASS, which is an error (remove the marker in
 the commit that fixes it).  Exit status 1 on any FAIL or XPASS.
 
---bin-dir build/ccs-asan runs the sanitizer build (then an ASan report is a
+--bin-dir build/src-asan runs the sanitizer build (then an ASan report is a
 crash too: ASan exits with status 1 but prints "ERROR: AddressSanitizer").
 With a sanitizer build the timeout is 240 s and time budgets are not checked.
 """
@@ -35,9 +35,9 @@ import os, re, shutil, signal, subprocess, sys, tempfile, time, importlib.util
 spec = importlib.util.spec_from_file_location('vd', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'vcc-diff.py'))
 vd = importlib.util.module_from_spec(spec); spec.loader.exec_module(vd)
 
-# a sanitizer build (build/ccs-asan, ccs-tsan) is 2-20x slower: a longer timeout, and no
+# a sanitizer build (build/src-asan, src-tsan) is 2-20x slower: a longer timeout, and no
 # time budgets (they check that vcc stays linear; the normal build checks that)
-SAN = bool(re.search(r'ccs-[a-z]*san\b', vd.BIN))
+SAN = bool(re.search(r'src-[a-z]*san\b', vd.BIN))
 TIMEOUT = 240 if SAN else 60
 TARGET = ['--target=aarch64-linux-gnu', '-nostdinc', '-ffreestanding']
 
@@ -137,7 +137,7 @@ def cases(d):
     case('decl-cache-error-after-restore', 'batch', files, [f for f in files if f.endswith('.c')])
     # batch workers have the main thread's stack: deep nesting and long flat sequences
     # compile in a batch as alone (a 512 KB thread stack failed at ~2 300 parentheses)
-    flat = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'ccs', 'vcc', 'tests', 'vcc',
+    flat = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src', 'test', 'vcc',
                              'flat_declarators_labels.c')).read()
     case('batch-stack', 'batch-ok', {'p.c': 'int x = ' + nest('(', ')', 50000, '1') + ';\n', 'f.c': flat},
          ['p.c', 'f.c'])

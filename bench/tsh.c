@@ -7,7 +7,7 @@
  *
  * Times are CLOCK_MONOTONIC in ms (the clock vccd's VCC_LOG uses), user/sys
  * are the shell's and its children's rusage.  Used by bench/kprof.py.
- *   cc -O2 -o build/ccs/tsh bench/tsh.c
+ *   cc -O2 -o build/src/tsh bench/tsh.c
  */
 #include <errno.h>
 #include <fcntl.h>

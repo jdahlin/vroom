@@ -75,7 +75,7 @@ def multiple_slots(claims):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('--bin-dir', type=Path, default=Path(__file__).resolve().parent.parent / 'build/ccs')
+    ap.add_argument('--bin-dir', type=Path, default=Path(__file__).resolve().parent.parent / 'build/src')
     args = ap.parse_args()
     exe = (args.bin_dir / 'virtest').resolve()
     cases = [(5, True, False), (1003, True, False), (1003, True, True),

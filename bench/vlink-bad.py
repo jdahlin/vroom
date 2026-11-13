@@ -2,7 +2,7 @@
 """vlink-bad.py: corrupt ELF inputs and archives fail cleanly (TODO.md "ELF input
 parsing unchecked").
 
-  bench/vlink-bad.py [--bin-dir DIR]     (default build/ccs-asan: ASan+UBSan)
+  bench/vlink-bad.py [--bin-dir DIR]     (default build/src-asan: ASan+UBSan)
 
 A good object (two functions, data, relocations) and an archive holding it are
 corrupted one field at a time; vlink must exit 1 with an "error:" line, no
@@ -190,7 +190,7 @@ def wasm_cases(o):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--bin-dir', default=f'{R}/build/ccs-asan')
+    ap.add_argument('--bin-dir', default=f'{R}/build/src-asan')
     a = ap.parse_args()
     vlink, vpp = f'{a.bin_dir}/vlink', f'{a.bin_dir}/vpp'
     vobjcopy, vnm = f'{a.bin_dir}/vobjcopy', f'{a.bin_dir}/vnm'

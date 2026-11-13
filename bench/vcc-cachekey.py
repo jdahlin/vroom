@@ -15,7 +15,7 @@ import importlib.util
 spec = importlib.util.spec_from_file_location('vd', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'vcc-diff.py'))
 vd = importlib.util.module_from_spec(spec); spec.loader.exec_module(vd)
 
-# (-W/-Werror in the header cache key, pp/hcache.c sig_of, is not testable here: --batch prints no diagnostics)
+# (-W/-Werror in the header cache key, frontend/pp/hcache.c sig_of, is not testable here: --batch prints no diagnostics)
 T = ['--target=aarch64-linux-gnu', '-O2', '-nostdinc']
 SDIRS = {'inc/a.h': '#ifndef A_H\n#define A_H\n#include <x.h>\n#if __has_include(<y.h>)\n#define Y 100\n#else\n#define Y 0\n#endif\n#endif\n',
          'inc/x.h': '#define X 1\n', 'p1/.keep': '', 'p2/x.h': '#define X 22222\n', 'p3/y.h': '\n', 'p4/.keep': '',

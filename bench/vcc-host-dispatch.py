@@ -14,8 +14,8 @@ import hostenv
 
 ROOT = Path(__file__).resolve().parent.parent
 PROBE = r'''
-#include "vcc/lib/hostcrc.h"
-#include "vcc/lib/intern.h"
+#include "port/hostcrc.h"
+#include "common/intern.h"
 #include <assert.h>
 #include <stdio.h>
 static unsigned ref(unsigned h, unsigned long long w, int n) {
@@ -56,8 +56,8 @@ def main():
         d = Path(tmp)
         (d/'crc.c').write_text(PROBE)
         subprocess.run([hostenv.llvm('clang'), '-O2', '-march=x86-64', '-D_GNU_SOURCE',
-                        '-I'+str(ROOT/'ccs'), str(d/'crc.c'),
-                        str(ROOT/'ccs/vcc/lib/intern.c'), '-pthread', '-o', str(d/'crc')], check=True)
+                        '-I'+str(ROOT/'src/include'), str(d/'crc.c'),
+                        str(ROOT/'src/common/intern.c'), '-pthread', '-o', str(d/'crc')], check=True)
         src = d/'input.c'
         src.write_text(''.join('/*'+'x'*n+'*/\nconst char *s%d="%s\\\"";\n' % (n,'y'*n)
                                for n in (15,16,17,31,32,33,63,64,65,127,128,129)) +

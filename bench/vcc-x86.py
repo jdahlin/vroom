@@ -8,7 +8,7 @@ x86_64-linux-gnu twice: by clang (the oracle) and by vcc, each linked by
 clang against this host's glibc and run natively (an x86-64 Linux host).
 vcc passes when its program prints what clang's prints and exits the same
 way. By default vcc's side uses `vpp -S`, assembled by clang; --obj uses
-the direct `vpp -c` path, and --objcmp compares both with clang's assembler.  The test runtime headers (ccs/vcc/tests/rt/include) are used on
+the direct `vpp -c` path, and --objcmp compares both with clang's assembler.  The test runtime headers (src/test/rt/include) are used on
 both sides, glibc behind them, with rt/wasm.c's __rt_assert.
 
 Failures by stage: emit (vpp fails; "not supported yet" names the plan
@@ -100,7 +100,8 @@ def native_reference_failure(rc, err):
 def reference(suite, name, path, flags, wd):
     with open(path, 'rb') as source:
         src = source.read().decode('latin-1')
-    key = hashlib.sha1(('oracle-status-v3-native-runtime ' + src + ' '.join(flags) + ' '.join(ct.CLFL) + ' '.join(BASE + LINK) + 'rt1 ' + HEADER_HASH).encode()).hexdigest()[:16]
+    # the path too: a test that prints __FILE__ changes when its file moves
+    key = hashlib.sha1(('oracle-status-v3-native-runtime ' + os.path.relpath(path, ct.R) + ' ' + src + ' '.join(flags) + ' '.join(ct.CLFL) + ' '.join(BASE + LINK) + 'rt1 ' + HEADER_HASH).encode()).hexdigest()[:16]
     cf = f'{OUT}/ref/{suite}/{name}.json'
     try:
         with open(cf) as cache:
