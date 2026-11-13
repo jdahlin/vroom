@@ -78,6 +78,8 @@ int cxx_run(pp *p, const cc_opts *co, const cxx_options *o)
 		const struct cxx_stats *st = &c.stats;
 
 		dprintf(o->errfd, "cxx: parsed %u/%u tokens\n", status ? c.error_pos : c.ntok, c.ntok);
+		dprintf(o->errfd, "cxx: skipped also: attribute %u, empty base %u\n", st->classes_skipped[CXX_SKIP_ATTRIBUTE],
+			st->classes_skipped[CXX_SKIP_EMPTY_BASE]);
 		dprintf(o->errfd, "cxx: declarations %u, typed %u; classes %u, laid out %u, skipped: template %u, bases %u, "
 			"virtual %u, member %u, bit-field %u, specialization %u; symbols %u\n",
 			st->declarations, st->declarations_typed, st->classes, st->classes_laid_out, st->classes_skipped[CXX_SKIP_TEMPLATE],

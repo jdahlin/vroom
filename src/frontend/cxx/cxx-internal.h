@@ -183,8 +183,11 @@ typedef struct cxx {
 	struct cxx_class_build *build;	/* the innermost class being defined (types.c) */
 	qty anonymous_class;		/* the type of the last unnamed class defined (an anonymous member's) */
 	uint8_t defined_unnamed_class;	/* the last decl-specifiers defined an unnamed class */
+	uint32_t layout_attributes;	/* attributes seen that change a layout (aligned, packed, no_unique_address) */
+	void *class_info;		/* per AST tag: a laid-out class's data size, POD-ness, emptiness (types.c) */
+	uint32_t nclass_info;
 	struct cxx_stats {
-		uint32_t classes, classes_laid_out, classes_skipped[8];
+		uint32_t classes, classes_laid_out, classes_skipped[16];	/* (by CXX_SKIP_*) */
 		uint32_t declarations, declarations_typed, symbols;
 	} stats;
 	/* instantiation (instantiate.c) */
@@ -256,7 +259,7 @@ enum { CXX_BUILTIN_NONE, CXX_BUILTIN_TRAIT, CXX_BUILTIN_TYPE_TRANSFORM, CXX_BUIL
 
 /* types (types.c) */
 enum { CXX_SKIP_TEMPLATE, CXX_SKIP_BASES, CXX_SKIP_VIRTUAL, CXX_SKIP_UNKNOWN_MEMBER, CXX_SKIP_BITFIELD, CXX_SKIP_SPECIALIZATION,
-       CXX_SKIP_COUNT };
+       CXX_SKIP_ATTRIBUTE, CXX_SKIP_EMPTY_BASE, CXX_SKIP_COUNT };
 typedef struct cxx_spec {
 	uint8_t v_void, v_bool, v_char, v_char8, v_char16, v_char32, v_wchar, v_int, v_float, v_double;
 	uint8_t v_short, v_long, v_signed, v_unsigned, v_int128, v_float128, v_float16, v_bf16, v_unknown, quals;
@@ -269,10 +272,14 @@ VPRIV qty cxx_type_reference(cxx *c, qty base, bool rvalue);
 VPRIV qty cxx_type_array(cxx *c, qty elem, int64_t n);	/* n < 0: unknown bound */
 VPRIV qty cxx_type_function(cxx *c, qty ret, const qty *params, uint32_t n, bool variadic);
 VPRIV qty cxx_type_parameter_adjust(cxx *c, qty t);
-VPRIV void cxx_class_begin(cxx *c, cxx_entity *e, uint32_t name, uint32_t loc, bool is_union, int skip);
+VPRIV void cxx_class_begin(cxx *c, cxx_entity *e, uint32_t name, uint32_t loc, bool is_union, int skip, bool is_class);
 VPRIV void cxx_class_skip(cxx *c, int reason);
 VPRIV void cxx_class_field(cxx *c, uint32_t name, qty t, uint32_t loc, int bitfield_width);
 VPRIV void cxx_class_end(cxx *c);
+VPRIV void cxx_class_base(cxx *c, qty t, bool is_virtual);
+VPRIV void cxx_class_access(cxx *c, int non_public);
+VPRIV void cxx_class_member_traits(cxx *c, int what);	/* CXX_MEMBER_*: what makes a class non-POD */
+enum { CXX_MEMBER_USER_SPECIAL = 1, CXX_MEMBER_INITIALIZER, CXX_MEMBER_VIRTUAL };
 VPRIV void cxx_enum_type(cxx *c, cxx_entity *e, uint32_t name, uint32_t loc, qty underlying);
 VPRIV uint32_t cxx_symbol(cxx *c, int kind, uint32_t name, qty t, uint32_t loc);
 VPRIV void cxx_name_path_push(cxx *c, uint32_t name, uint32_t *saved_len, uint8_t *saved_valid);

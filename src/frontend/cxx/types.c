@@ -106,14 +106,48 @@ typedef struct cxx_class_build {
 	int skip;			/* -1: lay it out; else CXX_SKIP_* */
 	uint32_t path_len;		/* the name path before this class (layout dump) */
 	uint8_t path_valid;
+	/* the Itanium ABI's inputs: base subobjects, and whether the class is POD for layout (a non-POD
+	   base's tail padding is reused by the derived class's members) */
+	uint32_t bases[16], nbases;
+	uint8_t pod, access_private, public_data, private_data;
 } cxx_class_build;
 
-VPRIV void cxx_class_begin(cxx *c, cxx_entity *e, uint32_t name, uint32_t loc, bool is_union, int skip)
+/* per AST tag: what a derived class's layout needs of this class */
+typedef struct cxx_class_info {
+	uint64_t dsize;			/* data size: bytes up to the end of its last data, before tail padding */
+	uint8_t valid, pod, empty, has_empty_base;
+} cxx_class_info;
+
+static cxx_class_info *cxx_info_of(cxx *c, uint32_t tag)
+{
+	static __thread cxx_class_info none;
+
+	if (tag >= c->nclass_info) {
+		uint32_t nn = tag + 1024;
+
+		c->class_info = realloc(c->class_info, nn * sizeof(cxx_class_info));
+		memset((cxx_class_info *)c->class_info + c->nclass_info, 0, (nn - c->nclass_info) * sizeof(cxx_class_info));
+		c->nclass_info = nn;
+	}
+	memset(&none, 0, sizeof none);
+	return c->class_info ? (cxx_class_info *)c->class_info + tag : &none;
+}
+
+static uint32_t cxx_record_tag(cxx *c, qty t)
+{
+	while (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_ARRAY)
+		t = AST_TYPE(c->ast, t)->base;
+	return t != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, t) ? AST_TYPE(c->ast, t)->aux : 0;
+}
+
+VPRIV void cxx_class_begin(cxx *c, cxx_entity *e, uint32_t name, uint32_t loc, bool is_union, int skip, bool is_class)
 {
 	cxx_class_build *b = calloc(1, sizeof *b);
 
 	b->outer = c->build;
 	b->skip = skip;
+	b->pod = 1;
+	b->access_private = is_class;
 	c->build = b;
 	if (c->tentative)
 		return;
@@ -134,6 +168,41 @@ VPRIV void cxx_class_begin(cxx *c, cxx_entity *e, uint32_t name, uint32_t loc, b
 	b->tag = cc_tag_new(c->ast, is_union ? TY_UNION : TY_STRUCT, name, loc);
 	if (e)
 		e->ty = QT(c->ast->tags[b->tag].ty, 0);
+}
+
+VPRIV void cxx_class_access(cxx *c, int non_public)
+{
+	if (c->build)
+		c->build->access_private = (uint8_t)non_public;
+}
+
+VPRIV void cxx_class_member_traits(cxx *c, int what)
+{
+	if (c->build && (what == CXX_MEMBER_USER_SPECIAL || what == CXX_MEMBER_INITIALIZER))
+		c->build->pod = 0;
+}
+
+/* a base class: complete, non-virtual (a virtual base: a vtable layout, not built yet) */
+VPRIV void cxx_class_base(cxx *c, qty t, bool is_virtual)
+{
+	cxx_class_build *b = c->build;
+	uint32_t tag;
+
+	if (!b || b->skip >= 0 || c->tentative)
+		return;
+	if (is_virtual) {
+		b->skip = CXX_SKIP_VIRTUAL;
+		return;
+	}
+	if (t != CXX_TY_UNKNOWN)
+		cxx_type_require_complete(c, t);
+	tag = cxx_record_tag(c, t);
+	if (!tag || AST_TYPE_KIND(c->ast, t) == TY_ARRAY || !(c->ast->tags[tag].flags & RF_COMPLETE) || !cxx_info_of(c, tag)->valid ||
+	    b->nbases == 16) {
+		b->skip = CXX_SKIP_BASES;	/* (a base vcc did not lay out) */
+		return;
+	}
+	b->bases[b->nbases++] = tag;
 }
 
 VPRIV void cxx_class_skip(cxx *c, int reason)
@@ -179,6 +248,18 @@ VPRIV void cxx_class_field(cxx *c, uint32_t name, qty t, uint32_t loc, int bitfi
 	f = &b->f[b->nf++];
 	memset(f, 0, sizeof *f);
 	f->name = name, f->ty = t, f->loc = loc;
+	if (b->access_private)
+		b->private_data = 1;
+	else
+		b->public_data = 1;
+	if (AST_TYPE_KIND(c->ast, t) == TY_PTR && AST_TYPE(c->ast, t)->ext)
+		b->pod = 0;	/* a reference member */
+	{
+		uint32_t mt = cxx_record_tag(c, t);
+
+		if (mt && !cxx_info_of(c, mt)->pod)
+			b->pod = 0;	/* a member of a non-POD class */
+	}
 	if (bitfield_width >= 0)
 		f->bitfield = 1, f->width = (uint16_t)bitfield_width;
 }
@@ -202,15 +283,80 @@ VPRIV void cxx_class_end(cxx *c)
 			;	/* (a member of this type makes the enclosing class skip in its turn) */
 	} else {
 		tag *r = &c->ast->tags[b->tag];
+		cxx_class_info *bi;
+		uint64_t off = 0, data_end = 0;
+		uint32_t balign = 1, nonempty = 0, empty_tags[16], nempty = 0;
+		bool all_bases_pod = true, ok = true, any_empty_base = false;
+		field *f;
+		uint32_t nf;
 
-		r->nfield = b->nf;
-		r->f = cc_heap_allocate(c->ast, (b->nf ? b->nf : 1) * sizeof(field));
+		/* base subobjects (Itanium ABI, no virtual functions): in order; an empty one takes no
+		   space at offset 0; a non-POD one's tail padding goes to what follows (its data size) */
+		for (uint32_t i = 0; i < b->nbases; i++) {
+			const tag *br = &c->ast->tags[b->bases[i]];
+			cxx_class_info *ib = cxx_info_of(c, b->bases[i]);
+
+			all_bases_pod &= ib->pod;
+			if (br->align > balign)
+				balign = br->align;
+			if (ib->empty) {
+				for (uint32_t k = 0; k < nempty; k++)
+					ok &= empty_tags[k] != b->bases[i];	/* two of a type at one address: not here */
+				if (nempty < 16)
+					empty_tags[nempty++] = b->bases[i];
+				any_empty_base = true;
+				continue;
+			}
+			if (any_empty_base && (nonempty == 0 && (ib->has_empty_base || ib->empty)))
+				ok = false;	/* (an empty base and a subobject at 0 that may hold the same type) */
+			off = (off + br->align - 1) / br->align * br->align;
+			off += ib->pod ? br->size : ib->dsize;
+			nonempty++;
+		}
+		if (any_empty_base && !nonempty && b->nf) {
+			uint32_t ft = cxx_record_tag(c, b->f[0].ty);
+
+			for (uint32_t k = 0; k < nempty && ft; k++)
+				ok &= empty_tags[k] != ft;	/* the first member of an empty base's type: displaced */
+			if (ft && (cxx_info_of(c, ft)->has_empty_base || cxx_info_of(c, ft)->empty))
+				ok = false;
+		}
+		if (!ok) {
+			c->stats.classes_skipped[CXX_SKIP_EMPTY_BASE]++;
+			goto done;
+		}
+		/* the members after them: a char[off] stands for the bases' bytes */
+		nf = b->nf + (off ? 1 : 0);
+		f = cc_heap_allocate(c->ast, (nf ? nf : 1) * sizeof(field));
+		if (off) {
+			memset(&f[0], 0, sizeof *f);
+			f[0].ty = cc_type_array(c->ast, cc_type_basic(TY_CHAR), off, 0);
+		}
 		if (b->nf)
-			memcpy(r->f, b->f, b->nf * sizeof(field));
+			memcpy(f + (off ? 1 : 0), b->f, b->nf * sizeof(field));
+		r->nfield = nf;
+		r->f = f;
+		if (balign > 1 && balign > r->maxalign)
+			r->maxalign = balign;	/* (the bases' alignment) */
 		cc_layout_record(c->ast, r, NULL, NULL);
-		if (!b->nf) {	/* C++: an empty class has size 1 */
+		for (uint32_t i = 0; i < nf; i++) {
+			uint64_t end = f[i].bitfield ? f[i].off + f[i].width : f[i].off + AST_TYPE(c->ast, f[i].ty)->size * 8;
+
+			if (end > data_end)
+				data_end = end;
+		}
+		bi = cxx_info_of(c, b->tag);
+		bi->valid = 1;
+		bi->empty = !b->nf && !nonempty;
+		bi->has_empty_base = any_empty_base;
+		bi->dsize = (data_end + 7) / 8;
+		/* POD for layout: trivial and standard-layout, as far as the parser sees it */
+		bi->pod = b->pod && all_bases_pod && !(b->public_data && b->private_data) && nonempty <= 1 && !(b->nf && nonempty) &&
+			  !(r->flags & RF_UNION ? 0 : 0);
+		if (bi->empty) {	/* C++: an empty class has size 1 */
 			r->size = 1, r->align = 1;
 			c->ast->ty[r->ty].size = 1, c->ast->ty[r->ty].align = 1;
+			bi->dsize = 0;
 		}
 		r->flags |= RF_COMPLETE;
 		c->stats.classes_laid_out++;
@@ -225,6 +371,7 @@ VPRIV void cxx_class_end(cxx *c)
 				c->name_path, r->align);
 		}
 	}
+done:
 	free(b->f);
 	free(b);
 }

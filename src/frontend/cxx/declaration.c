@@ -31,19 +31,48 @@ static bool cxx_lookahead(cxx *c, void (*fn)(cxx *))
 
 /* ---- attributes -------------------------------------------------------------------------- */
 
+/* an attribute's tokens [b, e): one that changes a layout? (counted: a class with one is not laid out yet) */
+static void cxx_attribute_scan(cxx *c, uint32_t b, uint32_t e)
+{
+	static const char *const names[] = { "no_unique_address", "__no_unique_address__", "aligned", "__aligned__", "packed",
+					     "__packed__", "ms_struct", "__ms_struct__" };
+
+	for (uint32_t i = b; i < e; i++) {
+		const cxx_token *t = &c->tok[i];
+
+		if (t->kind != LEX_TOKEN_IDENTIFIER)
+			continue;
+		for (size_t k = 0; k < sizeof names / sizeof *names; k++)
+			if (t->len == strlen(names[k]) && !memcmp(t->s, names[k], t->len)) {
+				c->layout_attributes++;
+				return;
+			}
+	}
+}
+
 VPRIV void cxx_attributes_skip(cxx *c)
 {
 	for (;;) {
 		if (cxx_is(c, LEX_TOKEN_LEFT_SQUARE) && cxx_peek(c, 1)->kind == LEX_TOKEN_LEFT_SQUARE) {
+			uint32_t b = c->pos;
+
 			cxx_skip_balanced(c);
+			cxx_attribute_scan(c, b, c->pos);
 			continue;
 		}
 		if (cxx_is_kw(c, CXX_KW___attribute__) || cxx_is_kw(c, CXX_KW___attribute) || cxx_is_kw(c, CXX_KW___declspec) ||
 		    cxx_is_kw(c, CXX_KW_alignas) || cxx_is_kw(c, CXX_KW__Alignas)) {
+			uint32_t b = c->pos;
+			bool align = cxx_is_kw(c, CXX_KW_alignas) || cxx_is_kw(c, CXX_KW__Alignas);
+
 			cxx_advance(c);
 			if (!cxx_is(c, LEX_TOKEN_LEFT_PAREN))
 				cxx_fail(c, "expected '(' after attribute");
 			cxx_skip_balanced(c);
+			if (align)
+				c->layout_attributes++;
+			else
+				cxx_attribute_scan(c, b, c->pos);
 			continue;
 		}
 		if (cxx_is_kw(c, CXX_KW___extension__) || cxx_is_kw(c, CXX_KW__Nullable) || cxx_is_kw(c, CXX_KW__Nonnull) ||
@@ -1724,11 +1753,15 @@ static void cxx_base_clause_parse(cxx *c, cxx_scope *cs)
 		cxx_scope *q;
 		bool dep;
 		cxx_entity *base = NULL;
+		qty base_ty = CXX_TY_UNKNOWN;
+		bool is_virtual = false;
 
 		cxx_attributes_skip(c);
 		while (cxx_is_kw(c, CXX_KW_virtual) || cxx_is_kw(c, CXX_KW_public) || cxx_is_kw(c, CXX_KW_protected) ||
-		       cxx_is_kw(c, CXX_KW_private))
+		       cxx_is_kw(c, CXX_KW_private)) {
+			is_virtual |= cxx_is_kw(c, CXX_KW_virtual);
 			cxx_advance(c);
+		}
 		if (cxx_is_kw(c, CXX_KW_decltype)) {
 			cxx_advance(c);
 			cxx_skip_balanced(c);
@@ -1742,12 +1775,21 @@ static void cxx_base_clause_parse(cxx *c, cxx_scope *cs)
 			base = cxx_name_lookup(c, q, dep, cxx_peek(c, 0)->id);
 			cxx_advance(c);
 			if (cxx_is(c, LEX_TOKEN_LESS)) {
-				cxx_template_arguments_parse(c);
-				/* a template-id base: inside a template it may depend on its parameters; elsewhere its
-				   members are those of the primary template (and its specializations) */
-				cxx_entity *te = base ? cxx_entity_template(base) : NULL;
+				uint8_t seen = c->dependent_seen;
 
-				if (c->template_depth || !te || !te->members)
+				c->dependent_seen = 0;
+				cxx_template_arguments_parse(c);
+				/* a template-id base: inside a template it may depend on its parameters; elsewhere an
+				   instance (completed: a base must be complete), else the primary's members */
+				cxx_entity *te = base ? cxx_entity_template(base) : NULL;
+				cxx_entity *inst = te && !c->template_depth && !c->dependent_seen && !dep ?
+						   cxx_instantiate(c, te, c->targs, c->ntargs, true) : NULL;
+
+				c->dependent_seen |= seen;
+				base_ty = inst ? inst->ty : CXX_TY_UNKNOWN;
+				if (inst && inst->members)
+					cxx_scope_use(c, cs, inst->members);
+				else if (c->template_depth || !te || !te->members)
 					cs->has_dependent_base = 1;
 				else {
 					cxx_scope_use(c, cs, te->members);
@@ -1756,13 +1798,22 @@ static void cxx_base_clause_parse(cxx *c, cxx_scope *cs)
 				}
 			} else {
 				base = base ? cxx_entity_prefer(base, CXX_ENTITY_TYPE) : NULL;
+				if (base && base->kind == CXX_ENTITY_TYPE && !base->dependent && base->ty != CXX_TY_UNKNOWN && !c->tentative) {
+					cxx_scope *bs = cxx_type_class_scope(c, base->ty);	/* (an instance's typedef: completed) */
+
+					base_ty = base->ty;
+					if (bs && !base->members)
+						base->members = bs;
+				}
 				if (dep || !base || base->kind == CXX_ENTITY_DEPENDENT || base->dependent || !base->members)
 					cs->has_dependent_base = 1;
 				else
 					cxx_scope_use(c, cs, base->members);
 			}
 		}
-		cxx_accept(c, LEX_TOKEN_ELLIPSIS);
+		if (cxx_accept(c, LEX_TOKEN_ELLIPSIS))
+			base_ty = CXX_TY_UNKNOWN;	/* (a pack of bases) */
+		cxx_class_base(c, base_ty, is_virtual);
 	} while (cxx_accept(c, LEX_TOKEN_COMMA));
 }
 
@@ -1772,8 +1823,8 @@ static void cxx_class_specifier_parse(cxx *c, bool is_template)
 	bool dep = false, specialization = false;
 	uint32_t name = 0;
 	cxx_entity *e = NULL;
-	bool is_union = cxx_is_kw(c, CXX_KW_union);
-	uint32_t key_loc = cxx_peek(c, 0)->loc, key_pos = c->pos;
+	bool is_union = cxx_is_kw(c, CXX_KW_union), is_class = cxx_is_kw(c, CXX_KW_class);
+	uint32_t key_loc = cxx_peek(c, 0)->loc, key_pos = c->pos, attrs = c->layout_attributes;
 	/* an instantiation re-parsing this class's tokens (instantiate.c): it defines that instance */
 	cxx_entity *instance = c->instantiation_target, *instance_of = c->instantiation_template;
 	cxx_targ spec_args[32];
@@ -1880,7 +1931,7 @@ static void cxx_class_specifier_parse(cxx *c, bool is_template)
 		/* the AST record: built and laid out when C's rules are C++'s for it (types.c) */
 		cxx_class_begin(c, specialization ? explicit_instance : e, name, key_loc, is_union,
 				is_template || c->template_depth ? CXX_SKIP_TEMPLATE : specialization && !explicit_instance ? CXX_SKIP_SPECIALIZATION :
-				cxx_is(c, LEX_TOKEN_COLON) ? CXX_SKIP_BASES : -1);
+				c->layout_attributes != attrs ? CXX_SKIP_ATTRIBUTE : -1, is_class);
 		if (explicit_instance)
 			cxx_instance_register(c, e, spec_args, nspec_args, explicit_instance);
 		{
@@ -2042,6 +2093,15 @@ static bool cxx_is_function_body_start(cxx *c)
 	return cxx_is(c, LEX_TOKEN_LEFT_BRACE) || cxx_is(c, LEX_TOKEN_COLON) || cxx_is_kw(c, CXX_KW_try);
 }
 
+/* does the declarator at [start, pos) name operator= ? */
+static bool cxx_declarator_is_assignment(cxx *c, uint32_t start)
+{
+	for (uint32_t i = start; i + 1 < c->pos; i++)
+		if (c->tok[i].kw == CXX_KW_operator)
+			return c->tok[i + 1].kind == LEX_TOKEN_EQUAL;
+	return false;
+}
+
 /* the declarators after decl-specifiers, to the ; (or a function body) */
 static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope *cs)
 {
@@ -2078,6 +2138,16 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 		}
 		if (f && (flags & DS_VIRTUAL) && context == CXX_CONTEXT_CLASS)
 			cxx_class_skip(c, CXX_SKIP_VIRTUAL);	/* (a vptr: C++'s layout, not built yet) */
+		/* a user-provided constructor, destructor or assignment (not = default): the class is not POD */
+		if (f && context == CXX_CONTEXT_CLASS && c->build && !(flags & DS_FRIEND)) {
+			bool special = (cs && cs->owner && name == cs->owner->name) ||	/* constructor, destructor */
+				       (c->tok[start].kind == LEX_TOKEN_TILDE) ||
+				       (name == 1 && c->pos > start && cxx_declarator_is_assignment(c, start));
+			bool defaulted = cxx_is(c, LEX_TOKEN_EQUAL) && cxx_peek(c, 1)->kw == CXX_KW_default;
+
+			if (special && !defaulted)
+				cxx_class_member_traits(c, CXX_MEMBER_USER_SPECIAL);
+		}
 		/* a variable's definition needs its type complete (an instance: its body now) */
 		if (!f && !(flags & (DS_TYPEDEF | DS_FRIEND)) && context != CXX_CONTEXT_CLASS && t != CXX_TY_UNKNOWN && !c->tentative) {
 			qty et = t;
@@ -2125,6 +2195,8 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				cxx_constant_expression_parse(c);
 			}
 			cxx_class_field(c, name, t, name_loc, w);
+			if (cxx_is(c, LEX_TOKEN_EQUAL) || cxx_is(c, LEX_TOKEN_LEFT_BRACE))
+				cxx_class_member_traits(c, CXX_MEMBER_INITIALIZER);	/* (a default member initializer) */
 		}
 		if (context == CXX_CONTEXT_CLASS) {
 			/* pure, = default, = delete, bit-field width, override/final */
@@ -2269,10 +2341,12 @@ static void cxx_simple_declaration_parse(cxx *c, int context, cxx_scope *cs)
 static void cxx_member_declaration_parse(cxx *c, cxx_scope *cs)
 {
 	int kw;
+	uint32_t member_attrs = c->layout_attributes;	/* (leading [[no_unique_address]] counts too) */
 
 	cxx_attributes_skip(c);
 	kw = cxx_kw(c);
 	if ((kw == CXX_KW_public || kw == CXX_KW_private || kw == CXX_KW_protected) && cxx_peek(c, 1)->kind == LEX_TOKEN_COLON) {
+		cxx_class_access(c, kw != CXX_KW_public);
 		cxx_advance(c);
 		cxx_advance(c);
 		return;
@@ -2296,7 +2370,13 @@ static void cxx_member_declaration_parse(cxx *c, cxx_scope *cs)
 		cxx_template_declaration_parse(c, CXX_CONTEXT_CLASS);
 		return;
 	}
-	cxx_simple_declaration_parse(c, CXX_CONTEXT_CLASS, cs);
+	{
+		struct cxx_class_build *b = c->build;
+
+		cxx_simple_declaration_parse(c, CXX_CONTEXT_CLASS, cs);
+		if (c->layout_attributes != member_attrs && c->build == b)
+			cxx_class_skip(c, CXX_SKIP_ATTRIBUTE);	/* (aligned, packed, no_unique_address: not built yet) */
+	}
 }
 
 VPRIV bool cxx_starts_declaration(cxx *c)
