@@ -950,6 +950,13 @@ static val gen_assign(ecx *e, uint32_t n)
 	old = assign_op(e, x, lt, old, v);
 	store(e, &l, lt, &old);
 	lfree(e, &l);
+	if (l.bf && l.width < 64 && old.k != V_REG2) {
+		/* the value of a bit-field compound assignment is the truncated value */
+		int r = toreg(e, &old);
+
+		opbf(e, l.sgn ? I_SBFM : I_UBFM, 1, r, r, 0, l.width - 1);
+		old = vreg(r);
+	}
 	return old;
 }
 
@@ -1070,6 +1077,13 @@ static val gen_incdec(ecx *e, uint32_t n)
 	}
 	if (KIND(c, t) == TY_BOOL)
 		val_free(e, &old);
+	else if (l.bf && l.width < 64 && nv.k != V_REG2) {
+		/* the value of ++/-- on a bit-field is the truncated value */
+		int r = toreg(e, &nv);
+
+		opbf(e, l.sgn ? I_SBFM : I_UBFM, 1, r, r, 0, l.width - 1);
+		nv = vreg(r);
+	}
 	return nv;
 }
 

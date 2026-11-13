@@ -79,7 +79,7 @@
 #include "codegen/emit.h"
 #include "as/as.h"
 #include "obj/obj.h"
-#include "driver/ppdriver.h"
+#include "driver/driver.h"
 #include "port/job-regions.h"
 #include "common/text-buffer.h"
 

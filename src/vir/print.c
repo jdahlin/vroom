@@ -6,26 +6,26 @@
  * named v0.. and b0.. in order of appearance (11.6), instruction flags in the order of 11.3.
  * Printing and parsing are inverses: printing the parse of a text gives the text back
  * (`virtest` and bench/vir-test.py check the round trip), so a change here is a change of the
- * format and goes with parse.c and the spec.  Printing reads the opcode table (table.c) and never
+ * format and goes with parse.c and the spec.  Printing reads the opcode table (opcode-table.c) and never
  * changes the function.
  */
-#include "virimpl.h"
+#include "vir-internal.h"
 
-typedef struct pctx {
-	vbuffer *b;
-	const vir_unit *u;
-	const vir_fn *f;
-	const uint32_t *nm;	/* value index -> N of vN (VIR_NOBLK: none) */
-} pctx;
+typedef struct vir_print_state {
+	vbuffer *buffer;
+	const vir_unit *unit;
+	const vir_function *function;
+	const uint32_t *names;	/* value index -> N of vN (VIR_BLOCK_NONE: none) */
+} vir_print_state;
 
-static const char *const target_name[VTG_N] = { "none", "x86_64-linux", "arm64-linux", "arm64-darwin" };
+static const char *const vir_target_names[VIR_TARGET_COUNT] = { "none", "x86_64-linux", "arm64-linux", "arm64-darwin" };
 
-const char *vir_target_name(uint32_t t) { return t < VTG_N ? target_name[t] : "none"; }
+const char *vir_target_name(uint32_t t) { return t < VIR_TARGET_COUNT ? vir_target_names[t] : "none"; }
 
-static void put(pctx *p, const char *s) { vbuffer_string_append(p->b, s); }
+static void vir_print_append(vir_print_state *p, const char *s) { vbuffer_string_append(p->buffer, s); }
 
 __attribute__((format(printf, 2, 3)))
-static void putf(pctx *p, const char *fmt, ...)
+static void vir_print_append_format(vir_print_state *p, const char *fmt, ...)
 {
 	char t[512];
 	va_list ap;
@@ -34,12 +34,12 @@ static void putf(pctx *p, const char *fmt, ...)
 	va_start(ap, fmt);
 	n = vsnprintf(t, sizeof(t), fmt, ap);
 	va_end(ap);
-	vbuffer_append(p->b, t, n < (int)sizeof(t) ? (size_t)n : sizeof(t) - 1);
+	vbuffer_append(p->buffer, t, n < (int)sizeof(t) ? (size_t)n : sizeof(t) - 1);
 }
 
 /* ---------------- numbers and strings ---------------- */
 
-static void fmt_hexfloat(char *o, uint64_t bits, int ebits, int mbits)
+static void vir_print_hexfloat_format(char *o, uint64_t bits, int ebits, int mbits)
 {
 	uint64_t mant = bits & (((uint64_t)1 << mbits) - 1);
 	int e = (int)((bits >> mbits) & (((uint64_t)1 << ebits) - 1)), sign = (int)(bits >> (mbits + ebits)) & 1;
@@ -63,65 +63,65 @@ static void fmt_hexfloat(char *o, uint64_t bits, int ebits, int mbits)
 	}
 }
 
-static void put_str(pctx *p, const char *s)
+static void vir_print_string_append(vir_print_state *p, const char *s)
 {
-	vbuffer_append(p->b, "\"", 1);
+	vbuffer_append(p->buffer, "\"", 1);
 	for (const unsigned char *c = (const unsigned char *)s; *c; c++) {
 		if (*c == '"' || *c == '\\')
-			putf(p, "\\%c", *c);
+			vir_print_append_format(p, "\\%c", *c);
 		else if (*c == '\n')
-			put(p, "\\n");
+			vir_print_append(p, "\\n");
 		else if (*c == '\t')
-			put(p, "\\t");
+			vir_print_append(p, "\\t");
 		else if (*c >= 32 && *c < 127)
-			vbuffer_append(p->b, c, 1);
+			vbuffer_append(p->buffer, c, 1);
 		else
-			putf(p, "\\%03o", *c);
+			vir_print_append_format(p, "\\%03o", *c);
 	}
-	vbuffer_append(p->b, "\"", 1);
+	vbuffer_append(p->buffer, "\"", 1);
 }
 
-static void put_bytes(pctx *p, const char *s, uint64_t n)
+static void vir_print_bytes_append(vir_print_state *p, const char *s, uint64_t n)
 {
-	vbuffer_append(p->b, "\"", 1);
+	vbuffer_append(p->buffer, "\"", 1);
 	for (uint64_t i = 0; i < n; i++) {
 		unsigned char c = (unsigned char)s[i];
 
 		if (c == '"' || c == '\\')
-			putf(p, "\\%c", c);
+			vir_print_append_format(p, "\\%c", c);
 		else if (c == '\n')
-			put(p, "\\n");
+			vir_print_append(p, "\\n");
 		else if (c == '\t')
-			put(p, "\\t");
+			vir_print_append(p, "\\t");
 		else if (c >= 32 && c < 127)
-			vbuffer_append(p->b, &c, 1);
+			vbuffer_append(p->buffer, &c, 1);
 		else
-			putf(p, "\\%03o", c);
+			vir_print_append_format(p, "\\%03o", c);
 	}
-	vbuffer_append(p->b, "\"", 1);
+	vbuffer_append(p->buffer, "\"", 1);
 }
 
 /* ---------------- signatures and groups ---------------- */
 
 void vir_print_group(vbuffer *b, uint32_t w0, uint32_t w1)
 {
-	switch (VG_KIND(w0)) {
-	case VG_NONE: vbuffer_string_append(b, "none"); break;
-	case VG_SRET: vbuffer_string_append(b, "sret"); break;
-	case VG_MEM: vbuffer_format_append(b, "mem %u align %u", VG_SIZE(w1), 1u << VG_LALIGN(w1)); break;
+	switch (VIR_GROUP_KIND(w0)) {
+	case VIR_GROUP_NONE: vbuffer_string_append(b, "none"); break;
+	case VIR_GROUP_SRET: vbuffer_string_append(b, "sret"); break;
+	case VIR_GROUP_MEM: vbuffer_format_append(b, "mem %u align %u", VIR_GROUP_SIZE(w1), 1u << VIR_GROUP_ALIGN_LOG2(w1)); break;
 	default:
-		for (uint32_t i = 0; i < VG_NPIECE(w0) && i < 4; i++) {
-			uint32_t c = VG_CLASS(w0, i);
+		for (uint32_t i = 0; i < VIR_GROUP_PIECE_COUNT(w0) && i < 4; i++) {
+			uint32_t c = VIR_GROUP_CLASS(w0, i);
 
-			vbuffer_format_append(b, "%s%s", i ? ":" : "", c == VC_INT ? "int" : c == VC_F32 ? "f32" : c == VC_F64 ? "f64" : "?");
+			vbuffer_format_append(b, "%s%s", i ? ":" : "", c == VIR_CLASS_INT ? "int" : c == VIR_CLASS_F32 ? "f32" : c == VIR_CLASS_F64 ? "f64" : "?");
 		}
 		break;
 	}
 }
 
-void vir_print_sig(vbuffer *b, const uint32_t *w)
+void vir_print_signature(vbuffer *b, const uint32_t *w)
 {
-	uint32_t ng = VSIG_NGROUPS(w[0]);
+	uint32_t ng = VIR_SIGNATURE_GROUP_COUNT(w[0]);
 
 	vbuffer_string_append(b, "(");
 	for (uint32_t i = 0; i < ng; i++) {
@@ -129,282 +129,282 @@ void vir_print_sig(vbuffer *b, const uint32_t *w)
 			vbuffer_string_append(b, ", ");
 		vir_print_group(b, w[3 + 2 * i], w[4 + 2 * i]);
 	}
-	if (VSIG_VARIADIC(w[0]))
+	if (VIR_SIGNATURE_IS_VARIADIC(w[0]))
 		vbuffer_string_append(b, ng ? ", ..." : "...");
 	vbuffer_string_append(b, ") -> ");
 	vir_print_group(b, w[1], w[2]);
 }
 
-static uint32_t sig_words(const uint32_t *w) { return 3 + 2 * VSIG_NGROUPS(w[0]); }
+static uint32_t vir_print_signature_words(const uint32_t *w) { return 3 + 2 * VIR_SIGNATURE_GROUP_COUNT(w[0]); }
 
 /* the unit's index of the signature at extra offset off, or ~0 */
-static uint32_t sig_index(const pctx *p, uint32_t off)
+static uint32_t vir_print_signature_index(const vir_print_state *p, uint32_t off)
 {
-	const vir_fn *f = p->f;
-	const vir_unit *u = p->u;
+	const vir_function *f = p->function;
+	const vir_unit *u = p->unit;
 
-	if (!u || off == 0 || off >= f->nextra || (uint64_t)off + sig_words(&f->extra[off]) > f->nextra)
-		return VIR_NOBLK;
-	for (uint32_t i = 0; i < u->nsig; i++)
-		if (u->sig[i].n == sig_words(&f->extra[off]) &&
-		    !memcmp(&u->sigw[u->sig[i].off], &f->extra[off], (size_t)u->sig[i].n * 4))
+	if (!u || off == 0 || off >= f->extra_count || (uint64_t)off + vir_print_signature_words(&f->extra[off]) > f->extra_count)
+		return VIR_BLOCK_NONE;
+	for (uint32_t i = 0; i < u->signature_count; i++)
+		if (u->signatures[i].count == vir_print_signature_words(&f->extra[off]) &&
+		    !memcmp(&u->signature_words[u->signatures[i].offset], &f->extra[off], (size_t)u->signatures[i].count * 4))
 			return i;
-	return VIR_NOBLK;
+	return VIR_BLOCK_NONE;
 }
 
 /* ---------------- operands ---------------- */
 
-static void put_sym(pctx *p, uint32_t s, int64_t add)
+static void vir_print_symbol_append(vir_print_state *p, uint32_t s, int64_t add)
 {
-	if (p->u && s < p->u->nsym)
-		putf(p, "@%s", p->u->sym[s].name);
+	if (p->unit && s < p->unit->symbol_count)
+		vir_print_append_format(p, "@%s", p->unit->symbols[s].name);
 	else
-		putf(p, "@s%u", s);
+		vir_print_append_format(p, "@s%u", s);
 	if (add)
-		putf(p, "%+lld", (long long)add);
+		vir_print_append_format(p, "%+lld", (long long)add);
 }
 
-static void put_const(pctx *p, const vir_ins *c)
+static void vir_print_constant_append(vir_print_state *p, const vir_insn *c)
 {
 	uint64_t v = (uint64_t)c->b | (uint64_t)c->c << 32;
 	char t[48];
 
 	switch (c->op) {
-	case VO_ICONST:
-		if (c->ty == VT_I32)
-			putf(p, "%d", (int32_t)c->b);
-		else if (c->ty == VT_PTR)
-			putf(p, "0x%llx", (unsigned long long)v);
+	case VIR_OP_ICONST:
+		if (c->type == VIR_TYPE_I32)
+			vir_print_append_format(p, "%d", (int32_t)c->b);
+		else if (c->type == VIR_TYPE_PTR)
+			vir_print_append_format(p, "0x%llx", (unsigned long long)v);
 		else
-			putf(p, "%lld", (long long)v);
+			vir_print_append_format(p, "%lld", (long long)v);
 		break;
-	case VO_FCONST:
-		if (c->ty == VT_F32)
-			fmt_hexfloat(t, c->b, 8, 23);
+	case VIR_OP_FCONST:
+		if (c->type == VIR_TYPE_F32)
+			vir_print_hexfloat_format(t, c->b, 8, 23);
 		else
-			fmt_hexfloat(t, v, 11, 52);
-		put(p, t);
+			vir_print_hexfloat_format(t, v, 11, 52);
+		vir_print_append(p, t);
 		break;
-	case VO_SYMADDR: put_sym(p, c->a, (int64_t)v); break;
-	case VO_SLOTADDR:
-		putf(p, "$%u", c->a);
+	case VIR_OP_SYMADDR: vir_print_symbol_append(p, c->a, (int64_t)v); break;
+	case VIR_OP_SLOTADDR:
+		vir_print_append_format(p, "$%u", c->a);
 		if (v)
-			putf(p, "%+lld", (long long)v);
+			vir_print_append_format(p, "%+lld", (long long)v);
 		break;
-	case VO_LABELADDR: putf(p, "&b%u", c->a); break;
+	case VIR_OP_LABELADDR: vir_print_append_format(p, "&b%u", c->a); break;
 	}
 }
 
 /* an operand: a value name or an inline constant; typed: the suffix is required */
-static void put_val(pctx *p, uint32_t v, bool typed)
+static void vir_print_value_append(vir_print_state *p, uint32_t v, bool typed)
 {
-	const vir_fn *f = p->f;
+	const vir_function *f = p->function;
 
-	if (v >= f->nins) {
-		putf(p, "v?%u", v);
-	} else if (vir_is_const_op(f->ins[v].op)) {
-		put_const(p, &f->ins[v]);
+	if (v >= f->insn_count) {
+		vir_print_append_format(p, "v?%u", v);
+	} else if (vir_opcode_is_constant(f->insns[v].op)) {
+		vir_print_constant_append(p, &f->insns[v]);
 		if (typed)
-			putf(p, ":%s", f->ins[v].ty < VT_N ? vir_tyname[f->ins[v].ty] : "?");
-	} else if (p->nm[v] == VIR_NOBLK) {
-		putf(p, "v?%u", v);
+			vir_print_append_format(p, ":%s", f->insns[v].type < VIR_TYPE_COUNT ? vir_type_names[f->insns[v].type] : "?");
+	} else if (p->names[v] == VIR_BLOCK_NONE) {
+		vir_print_append_format(p, "v?%u", v);
 	} else {
-		putf(p, "v%u", p->nm[v]);
+		vir_print_append_format(p, "v%u", p->names[v]);
 	}
 }
 
-static bool is_const(const pctx *p, uint32_t v) { return v < p->f->nins && vir_is_const_op(p->f->ins[v].op); }
+static bool vir_print_value_is_constant(const vir_print_state *p, uint32_t v) { return v < p->function->insn_count && vir_opcode_is_constant(p->function->insns[v].op); }
 
 /* operand k (0 a, 1 b, 2 c) of in: does the text need the type suffix? */
-static bool need_ty(const pctx *p, const vir_ins *in, uint32_t k)
+static bool vir_print_type_is_needed(const vir_print_state *p, const vir_insn *in, uint32_t k)
 {
 	uint32_t other = k == 0 ? in->b : in->a;
 
-	if (vir_opnd_fixed(in->op, in->ty, k) != VT_VOID)
+	if (vir_operand_type_fixed(in->op, in->type, k) != VIR_TYPE_VOID)
 		return false;
-	if ((in->op == VO_ICMP || in->op == VO_FCMP) && !is_const(p, other))
+	if ((in->op == VIR_OP_ICMP || in->op == VIR_OP_FCMP) && !vir_print_value_is_constant(p, other))
 		return false;
 	return true;
 }
 
-static void put_opnd(pctx *p, const vir_ins *in, uint32_t k)
+static void vir_print_operand_append(vir_print_state *p, const vir_insn *in, uint32_t k)
 {
 	uint32_t v = k == 0 ? in->a : k == 1 ? in->b : in->c;
 
-	put_val(p, v, is_const(p, v) && need_ty(p, in, k));
+	vir_print_value_append(p, v, vir_print_value_is_constant(p, v) && vir_print_type_is_needed(p, in, k));
 }
 
 /* ---------------- instructions ---------------- */
 
-static void put_flags(pctx *p, const vir_ins *in)
+static void vir_print_flags_append(vir_print_state *p, const vir_insn *in)
 {
-	uint32_t fl = in->fl, op = in->op;
+	uint32_t fl = in->flags, op = in->op;
 
 	switch (op) {
-	case VO_ADD: case VO_SUB: case VO_MUL: case VO_SHL: case VO_NEG:
-		if (fl & VIF_NSW) put(p, " nsw");
-		if (fl & VIF_NUW) put(p, " nuw");
+	case VIR_OP_ADD: case VIR_OP_SUB: case VIR_OP_MUL: case VIR_OP_SHL: case VIR_OP_NEG:
+		if (fl & VIR_INSN_FLAG_NSW) vir_print_append(p, " nsw");
+		if (fl & VIR_INSN_FLAG_NUW) vir_print_append(p, " nuw");
 		break;
-	case VO_SDIV: case VO_UDIV: case VO_LSHR: case VO_ASHR:
-		if (fl & VIF_EXACT) put(p, " exact");
+	case VIR_OP_SDIV: case VIR_OP_UDIV: case VIR_OP_LSHR: case VIR_OP_ASHR:
+		if (fl & VIR_INSN_FLAG_EXACT) vir_print_append(p, " exact");
 		break;
-	case VO_CLZ: case VO_CTZ:
-		if (fl & VIF_NZ) put(p, " nz");
+	case VIR_OP_CLZ: case VIR_OP_CTZ:
+		if (fl & VIR_INSN_FLAG_NZ) vir_print_append(p, " nz");
 		break;
-	case VO_FMA:
-		if (fl & VIF_NEGP) put(p, " negp");
-		if (fl & VIF_NEGC) put(p, " negc");
+	case VIR_OP_FMA:
+		if (fl & VIR_INSN_FLAG_NEGP) vir_print_append(p, " negp");
+		if (fl & VIR_INSN_FLAG_NEGC) vir_print_append(p, " negc");
 		break;
-	case VO_LOAD: case VO_STORE: case VO_ALOAD: case VO_ASTORE: case VO_AXCHG: case VO_AXADD: case VO_ACAS:
-		if (fl & VIF_VOL) put(p, " volatile");
-		if (VIF_AL(fl)) putf(p, " align %u", 1u << VIF_AL(fl));
-		if (op == VO_LOAD && in->b) putf(p, " tag %u", in->b);
-		if (op == VO_STORE && in->c) putf(p, " tag %u", in->c);
+	case VIR_OP_LOAD: case VIR_OP_STORE: case VIR_OP_ALOAD: case VIR_OP_ASTORE: case VIR_OP_AXCHG: case VIR_OP_AXADD: case VIR_OP_ACAS:
+		if (fl & VIR_INSN_FLAG_VOL) vir_print_append(p, " volatile");
+		if (VIR_INSN_FLAG_ALIGN_LOG2(fl)) vir_print_append_format(p, " align %u", 1u << VIR_INSN_FLAG_ALIGN_LOG2(fl));
+		if (op == VIR_OP_LOAD && in->b) vir_print_append_format(p, " tag %u", in->b);
+		if (op == VIR_OP_STORE && in->c) vir_print_append_format(p, " tag %u", in->c);
 		break;
-	case VO_MEMCPY: case VO_MEMSET:
-		if (VIF_AL(fl)) putf(p, " align %u", 1u << VIF_AL(fl));
-		if (op == VO_MEMCPY && VIF_AL2(fl) != VIF_AL(fl)) putf(p, " align %u", 1u << VIF_AL2(fl));
+	case VIR_OP_MEMCPY: case VIR_OP_MEMSET:
+		if (VIR_INSN_FLAG_ALIGN_LOG2(fl)) vir_print_append_format(p, " align %u", 1u << VIR_INSN_FLAG_ALIGN_LOG2(fl));
+		if (op == VIR_OP_MEMCPY && VIR_INSN_FLAG_SOURCE_ALIGN_LOG2(fl) != VIR_INSN_FLAG_ALIGN_LOG2(fl)) vir_print_append_format(p, " align %u", 1u << VIR_INSN_FLAG_SOURCE_ALIGN_LOG2(fl));
 		break;
-	case VO_CALL:
-		if (fl & VIF_CALL_NORETURN) put(p, " noreturn");
-		if (fl & VIF_CALL_PURE) put(p, " pure");
-		if (fl & VIF_CALL_CONST) put(p, " const");
+	case VIR_OP_CALL:
+		if (fl & VIR_INSN_FLAG_CALL_NORETURN) vir_print_append(p, " noreturn");
+		if (fl & VIR_INSN_FLAG_CALL_PURE) vir_print_append(p, " pure");
+		if (fl & VIR_INSN_FLAG_CALL_CONST) vir_print_append(p, " const");
 		break;
-	case VO_BRIF:
-		if (fl & VIF_LIKELY) put(p, " likely");
-		if (fl & VIF_UNLIKELY) put(p, " unlikely");
+	case VIR_OP_BRIF:
+		if (fl & VIR_INSN_FLAG_LIKELY) vir_print_append(p, " likely");
+		if (fl & VIR_INSN_FLAG_UNLIKELY) vir_print_append(p, " unlikely");
 		break;
 	}
 }
 
-static const char *cc_name(uint32_t op, uint32_t cc, char *t)
+static const char *vir_print_condition_name(uint32_t op, uint32_t cc, char *t)
 {
-	if ((op == VO_ICMP || op == VO_VICMP) && cc < 10)
-		return vir_icc[cc];
-	if ((op == VO_FCMP || op == VO_VFCMP) && cc < 8)
-		return vir_fcc[cc];
+	if ((op == VIR_OP_ICMP || op == VIR_OP_VICMP) && cc < 10)
+		return vir_integer_condition_names[cc];
+	if ((op == VIR_OP_FCMP || op == VIR_OP_VFCMP) && cc < 8)
+		return vir_float_condition_names[cc];
 	sprintf(t, "cc%u", cc);
 	return t;
 }
 
-static void put_group_at(pctx *p, uint32_t off)
+static void vir_print_group_append(vir_print_state *p, uint32_t off)
 {
-	const vir_fn *f = p->f;
+	const vir_function *f = p->function;
 
-	if (off && (uint64_t)off + 2 <= f->nextra)
-		vir_print_group(p->b, f->extra[off], f->extra[off + 1]);
+	if (off && (uint64_t)off + 2 <= f->extra_count)
+		vir_print_group(p->buffer, f->extra[off], f->extra[off + 1]);
 	else
-		put(p, "?");
+		vir_print_append(p, "?");
 }
 
-static void put_list_vals(pctx *p, uint32_t base, uint32_t n, const uint32_t *tys)
+static void vir_print_list_values_append(vir_print_state *p, uint32_t base, uint32_t n, const uint32_t *tys)
 {
-	const vir_fn *f = p->f;
+	const vir_function *f = p->function;
 
 	for (uint32_t i = 0; i < n; i++) {
-		uint32_t v = (uint64_t)base + i < f->nextra ? f->extra[base + i] : 0;
+		uint32_t v = (uint64_t)base + i < f->extra_count ? f->extra[base + i] : 0;
 
 		if (i)
-			put(p, ", ");
-		put_val(p, v, is_const(p, v) && !(tys && tys[i]));
+			vir_print_append(p, ", ");
+		vir_print_value_append(p, v, vir_print_value_is_constant(p, v) && !(tys && tys[i]));
 	}
 }
 
-static void put_ins(pctx *p, const vir_ins *in, uint32_t idx)
+static void vir_print_insn_append(vir_print_state *p, const vir_insn *in, uint32_t idx)
 {
-	const vir_opinfo *oi = &vir_optab[in->op];
-	const vir_fn *f = p->f;
+	const vir_opcode_info *oi = &vir_opcode_table[in->op];
+	const vir_function *f = p->function;
 	char t[16];
-	uint32_t ne = f->nextra, nop = 0;
+	uint32_t ne = f->extra_count, nop = 0;
 
-	put(p, "  ");
+	vir_print_append(p, "  ");
 	if (!oi->name) {
-		putf(p, "op%u", in->op);
+		vir_print_append_format(p, "op%u", in->op);
 		return;
 	}
-	if (in->ty != VT_VOID && p->nm[idx] != VIR_NOBLK)
-		putf(p, "v%u:%s = ", p->nm[idx], in->ty < VT_N ? vir_tyname[in->ty] : "?");
+	if (in->type != VIR_TYPE_VOID && p->names[idx] != VIR_BLOCK_NONE)
+		vir_print_append_format(p, "v%u:%s = ", p->names[idx], in->type < VIR_TYPE_COUNT ? vir_type_names[in->type] : "?");
 	switch (oi->form) {
-	case FM_CC:
-		putf(p, "%s.%s ", oi->name, cc_name(in->op, in->fl & 15, t));
-		put_opnd(p, in, 0);
-		put(p, ", ");
-		put_opnd(p, in, 1);
+	case VIR_FORM_CC:
+		vir_print_append_format(p, "%s.%s ", oi->name, vir_print_condition_name(in->op, in->flags & 15, t));
+		vir_print_operand_append(p, in, 0);
+		vir_print_append(p, ", ");
+		vir_print_operand_append(p, in, 1);
 		return;
-	case FM_EXT:
-		putf(p, "ext.%u%c ", 1u << VIF_W(in->fl), in->fl & VIF_MS ? 's' : 'u');
-		put_opnd(p, in, 0);
+	case VIR_FORM_EXT:
+		vir_print_append_format(p, "ext.%u%c ", 1u << VIR_INSN_FLAG_WIDTH_LOG2(in->flags), in->flags & VIR_INSN_FLAG_MS ? 's' : 'u');
+		vir_print_operand_append(p, in, 0);
 		return;
-	case FM_LOAD:
-		putf(p, "load.%u", 1u << VIF_W(in->fl));
-		if (in->ty == VT_I32 || in->ty == VT_I64 || (in->fl & VIF_MS))
-			putf(p, "%c", in->fl & VIF_MS ? 's' : 'u');
-		put(p, " ");
-		put_opnd(p, in, 0);
-		put_flags(p, in);
+	case VIR_FORM_LOAD:
+		vir_print_append_format(p, "load.%u", 1u << VIR_INSN_FLAG_WIDTH_LOG2(in->flags));
+		if (in->type == VIR_TYPE_I32 || in->type == VIR_TYPE_I64 || (in->flags & VIR_INSN_FLAG_MS))
+			vir_print_append_format(p, "%c", in->flags & VIR_INSN_FLAG_MS ? 's' : 'u');
+		vir_print_append(p, " ");
+		vir_print_operand_append(p, in, 0);
+		vir_print_flags_append(p, in);
 		return;
-	case FM_STORE:
-		putf(p, "store.%u ", 1u << VIF_W(in->fl));
-		put_opnd(p, in, 0);
-		put(p, ", ");
-		put_opnd(p, in, 1);
-		put_flags(p, in);
+	case VIR_FORM_STORE:
+		vir_print_append_format(p, "store.%u ", 1u << VIR_INSN_FLAG_WIDTH_LOG2(in->flags));
+		vir_print_operand_append(p, in, 0);
+		vir_print_append(p, ", ");
+		vir_print_operand_append(p, in, 1);
+		vir_print_flags_append(p, in);
 		return;
-	case FM_ATOM:
-		putf(p, "%s.%u ", oi->name, 1u << VIF_W(in->fl));
-		for (uint32_t k = 0; k < 3 && oi->k[k] != OK_NONE; k++) {
+	case VIR_FORM_ATOM:
+		vir_print_append_format(p, "%s.%u ", oi->name, 1u << VIR_INSN_FLAG_WIDTH_LOG2(in->flags));
+		for (uint32_t k = 0; k < 3 && oi->operand_kinds[k] != VIR_OPERAND_KIND_NONE; k++) {
 			if (k)
-				put(p, ", ");
-			put_opnd(p, in, k);
+				vir_print_append(p, ", ");
+			vir_print_operand_append(p, in, k);
 		}
-		put_flags(p, in);
+		vir_print_flags_append(p, in);
 		return;
-	case FM_MEMCPY:
-		putf(p, "%s ", oi->name);
-		put_opnd(p, in, 0);
-		put(p, ", ");
-		put_opnd(p, in, 1);
-		put(p, ", ");
-		put_opnd(p, in, 2);
-		put_flags(p, in);
+	case VIR_FORM_MEMCPY:
+		vir_print_append_format(p, "%s ", oi->name);
+		vir_print_operand_append(p, in, 0);
+		vir_print_append(p, ", ");
+		vir_print_operand_append(p, in, 1);
+		vir_print_append(p, ", ");
+		vir_print_operand_append(p, in, 2);
+		vir_print_flags_append(p, in);
 		return;
-	case FM_PARAM:
-		if (in->a == VG_RESULT)
-			putf(p, "param 0xffff.%u", in->b);
+	case VIR_FORM_PARAM:
+		if (in->a == VIR_GROUP_RESULT)
+			vir_print_append_format(p, "param 0xffff.%u", in->b);
 		else
-			putf(p, "param %u.%u", in->a, in->b);
+			vir_print_append_format(p, "param %u.%u", in->a, in->b);
 		return;
-	case FM_TLS:
-		putf(p, "tlsaddr ");
-		put_sym(p, in->a, 0);
-		putf(p, ", %u", in->b);
+	case VIR_FORM_TLS:
+		vir_print_append_format(p, "tlsaddr ");
+		vir_print_symbol_append(p, in->a, 0);
+		vir_print_append_format(p, ", %u", in->b);
 		return;
-	case FM_VAARG:
-		put(p, "va_arg ");
-		put_opnd(p, in, 0);
-		put(p, ", ");
-		put_group_at(p, in->b);
+	case VIR_FORM_VAARG:
+		vir_print_append(p, "va_arg ");
+		vir_print_operand_append(p, in, 0);
+		vir_print_append(p, ", ");
+		vir_print_group_append(p, in->b);
 		return;
-	case FM_CALL: {
-		uint32_t si = sig_index(p, in->b), n = in->c < ne ? f->extra[in->c] : 0;
+	case VIR_FORM_CALL: {
+		uint32_t si = vir_print_signature_index(p, in->b), n = in->c < ne ? f->extra[in->c] : 0;
 
-		put(p, "call ");
-		put_opnd(p, in, 0);
-		if (si != VIR_NOBLK)
-			putf(p, " %%s%u (", si);
+		vir_print_append(p, "call ");
+		vir_print_operand_append(p, in, 0);
+		if (si != VIR_BLOCK_NONE)
+			vir_print_append_format(p, " %%s%u (", si);
 		else
-			put(p, " %?? (");
+			vir_print_append(p, " %?? (");
 		if ((uint64_t)in->c + 1 + n > ne)
 			n = 0;
-		put_list_vals(p, in->c + 1, n, NULL);
-		put(p, ")");
-		put_flags(p, in);
+		vir_print_list_values_append(p, in->c + 1, n, NULL);
+		vir_print_append(p, ")");
+		vir_print_flags_append(p, in);
 		return;
 	}
-	case FM_ASM: case FM_ASMGOTO: {
+	case VIR_FORM_ASM: case VIR_FORM_ASMGOTO: {
 		uint32_t no = 0, ni = 0, b = in->b;
 
-		putf(p, "%s !%u outs(", oi->name, in->a);
+		vir_print_append_format(p, "%s !%u outs(", oi->name, in->a);
 		if ((uint64_t)b + 2 <= ne) {
 			no = f->extra[b];
 			ni = f->extra[b + 1];
@@ -412,293 +412,293 @@ static void put_ins(pctx *p, const vir_ins *in, uint32_t idx)
 		if ((uint64_t)b + 2 + no + 2 * (uint64_t)ni > ne)
 			no = ni = 0;
 		for (uint32_t i = 0; i < no; i++)
-			putf(p, "%s%u", i ? ", " : "", f->extra[b + 2 + i]);
-		put(p, ") ins(");
+			vir_print_append_format(p, "%s%u", i ? ", " : "", f->extra[b + 2 + i]);
+		vir_print_append(p, ") ins(");
 		for (uint32_t i = 0; i < ni; i++) {
 			uint32_t d = f->extra[b + 2 + no + 2 * i], v = f->extra[b + 3 + no + 2 * i];
 
-			putf(p, "%s%u ", i ? ", " : "", d);
-			put_val(p, v, is_const(p, v));
+			vir_print_append_format(p, "%s%u ", i ? ", " : "", d);
+			vir_print_value_append(p, v, vir_print_value_is_constant(p, v));
 		}
-		put(p, ")");
-		if (oi->form == FM_ASMGOTO) {
+		vir_print_append(p, ")");
+		if (oi->form == VIR_FORM_ASMGOTO) {
 			uint32_t n = in->c < ne ? f->extra[in->c] : 0;
 
 			if ((uint64_t)in->c + 2 + n > ne)
 				n = 0, nop = 1;
-			putf(p, " -> b%u [", nop ? 0 : f->extra[in->c + 1]);
+			vir_print_append_format(p, " -> b%u [", nop ? 0 : f->extra[in->c + 1]);
 			for (uint32_t i = 0; i < n; i++)
-				putf(p, "%sb%u", i ? ", " : "", f->extra[in->c + 2 + i]);
-			put(p, "]");
+				vir_print_append_format(p, "%sb%u", i ? ", " : "", f->extra[in->c + 2 + i]);
+			vir_print_append(p, "]");
 		}
 		return;
 	}
-	case FM_BR: {
-		uint32_t n = in->a < f->nblk ? f->blk[in->a].nparam : 0;
+	case VIR_FORM_BR: {
+		uint32_t n = in->a < f->block_count ? f->blocks[in->a].parameter_count : 0;
 
-		putf(p, "br b%u", in->a);
+		vir_print_append_format(p, "br b%u", in->a);
 		if (n && (uint64_t)in->c + n <= ne) {
-			put(p, "(");
+			vir_print_append(p, "(");
 			for (uint32_t i = 0; i < n; i++) {
-				uint32_t v = f->extra[in->c + i], want = f->blk[in->a].first + i < f->nins ?
-					f->ins[f->blk[in->a].first + i].ty : 0;
-				bool typed = is_const(p, v) && (!want || want >= VT_N || f->ins[v].ty != want);
+				uint32_t v = f->extra[in->c + i], want = f->blocks[in->a].first + i < f->insn_count ?
+					f->insns[f->blocks[in->a].first + i].type : 0;
+				bool typed = vir_print_value_is_constant(p, v) && (!want || want >= VIR_TYPE_COUNT || f->insns[v].type != want);
 
 				if (i)
-					put(p, ", ");
-				put_val(p, v, typed);
+					vir_print_append(p, ", ");
+				vir_print_value_append(p, v, typed);
 			}
-			put(p, ")");
+			vir_print_append(p, ")");
 		}
 		return;
 	}
-	case FM_SWITCH: {
-		uint32_t n = in->c < ne ? f->extra[in->c] : 0, ty = in->a < f->nins ? f->ins[in->a].ty : 0;
-		uint32_t st = ty == VT_I64 ? 5 : 3;
+	case VIR_FORM_SWITCH: {
+		uint32_t n = in->c < ne ? f->extra[in->c] : 0, ty = in->a < f->insn_count ? f->insns[in->a].type : 0;
+		uint32_t st = ty == VIR_TYPE_I64 ? 5 : 3;
 
 		if ((uint64_t)in->c + 1 + (uint64_t)n * st > ne)
 			n = 0;
-		put(p, "switch ");
-		put_opnd(p, in, 0);
-		putf(p, ", b%u [", in->b);
+		vir_print_append(p, "switch ");
+		vir_print_operand_append(p, in, 0);
+		vir_print_append_format(p, ", b%u [", in->b);
 		for (uint32_t i = 0; i < n; i++) {
 			const uint32_t *w = &f->extra[in->c + 1 + i * st];
 			uint64_t lo, hi;
-			bool wide = ty == VT_I64;
+			bool wide = ty == VIR_TYPE_I64;
 
 			lo = wide ? (uint64_t)w[0] | (uint64_t)w[1] << 32 : w[0];
 			hi = wide ? (uint64_t)w[2] | (uint64_t)w[3] << 32 : w[1];
 			if (i)
-				put(p, ", ");
+				vir_print_append(p, ", ");
 			if (wide)
-				putf(p, "%lld", (long long)lo);
+				vir_print_append_format(p, "%lld", (long long)lo);
 			else
-				putf(p, "%d", (int32_t)lo);
+				vir_print_append_format(p, "%d", (int32_t)lo);
 			if (hi != lo) {
 				if (wide)
-					putf(p, "..%lld", (long long)hi);
+					vir_print_append_format(p, "..%lld", (long long)hi);
 				else
-					putf(p, "..%d", (int32_t)hi);
+					vir_print_append_format(p, "..%d", (int32_t)hi);
 			}
-			putf(p, ": b%u", w[st - 1]);
+			vir_print_append_format(p, ": b%u", w[st - 1]);
 		}
-		put(p, "]");
+		vir_print_append(p, "]");
 		return;
 	}
-	case FM_IBR: {
+	case VIR_FORM_IBR: {
 		uint32_t n = in->c < ne ? f->extra[in->c] : 0;
 
 		if ((uint64_t)in->c + 1 + n > ne)
 			n = 0;
-		put(p, "ibr ");
-		put_opnd(p, in, 0);
-		put(p, " [");
+		vir_print_append(p, "ibr ");
+		vir_print_operand_append(p, in, 0);
+		vir_print_append(p, " [");
 		for (uint32_t i = 0; i < n; i++)
-			putf(p, "%sb%u", i ? ", " : "", f->extra[in->c + 1 + i]);
-		put(p, "]");
+			vir_print_append_format(p, "%sb%u", i ? ", " : "", f->extra[in->c + 1 + i]);
+		vir_print_append(p, "]");
 		return;
 	}
-	case FM_RET: {
+	case VIR_FORM_RET: {
 		uint32_t n = in->c < ne ? f->extra[in->c] : 0;
 
 		if ((uint64_t)in->c + 1 + n > ne)
 			n = 0;
-		put(p, "ret");
+		vir_print_append(p, "ret");
 		if (n)
-			put(p, " ");
-		put_list_vals(p, in->c + 1, n, NULL);
+			vir_print_append(p, " ");
+		vir_print_list_values_append(p, in->c + 1, n, NULL);
 		return;
 	}
-	case FM_NONE:
-		put(p, oi->name);
+	case VIR_FORM_NONE:
+		vir_print_append(p, oi->name);
 		return;
 	default:
 		break;
 	}
-	/* FM_STD: the operands the table lists, in order */
-	put(p, oi->name);
+	/* VIR_FORM_STD: the operands the table lists, in order */
+	vir_print_append(p, oi->name);
 	for (uint32_t k = 0; k < 3; k++) {
-		uint32_t kd = oi->k[k], v = k == 0 ? in->a : k == 1 ? in->b : in->c;
+		uint32_t kd = oi->operand_kinds[k], v = k == 0 ? in->a : k == 1 ? in->b : in->c;
 
-		if (kd == OK_NONE)
+		if (kd == VIR_OPERAND_KIND_NONE)
 			continue;
-		put(p, nop++ ? ", " : " ");
-		if (kd == OK_IMM)
-			putf(p, "%u", v);
-		else if (kd == OK_BLK)
-			putf(p, "b%u", v);
+		vir_print_append(p, nop++ ? ", " : " ");
+		if (kd == VIR_OPERAND_KIND_IMM)
+			vir_print_append_format(p, "%u", v);
+		else if (kd == VIR_OPERAND_KIND_BLK)
+			vir_print_append_format(p, "b%u", v);
 		else
-			put_opnd(p, in, k);
+			vir_print_operand_append(p, in, k);
 	}
-	put_flags(p, in);
+	vir_print_flags_append(p, in);
 }
 
 /* ---------------- functions and units ---------------- */
 
-static void put_fn(pctx *p, const vir_fn *f)
+static void vir_print_function_append(vir_print_state *p, const vir_function *f)
 {
-	const vir_unit *u = p->u;
-	uint32_t si = sig_index(p, f->sig);
+	const vir_unit *u = p->unit;
+	uint32_t si = vir_print_signature_index(p, f->signature);
 
-	putf(p, "func ");
-	put_sym(p, f->sym, 0);
-	if (si != VIR_NOBLK)
-		putf(p, " %%s%u", si);
+	vir_print_append_format(p, "func ");
+	vir_print_symbol_append(p, f->symbol, 0);
+	if (si != VIR_BLOCK_NONE)
+		vir_print_append_format(p, " %%s%u", si);
 	else
-		put(p, " %??");
-	if (f->fl & VF_NOFP) put(p, " nofp");
-	if (f->fl & VF_FENV) put(p, " fenv");
-	if (f->fl & VF_NULLINVALID) put(p, " nullinvalid");
-	if (f->fl & VF_NORETURN) put(p, " noreturn");
-	if (f->fl & VF_LOCAL) put(p, " local");
-	if (f->fl & VF_EXPOSURE) put(p, " exposure");
-	put(p, " {\n");
+		vir_print_append(p, " %??");
+	if (f->flags & VIR_FUNCTION_FLAG_NOFP) vir_print_append(p, " nofp");
+	if (f->flags & VIR_FUNCTION_FLAG_FENV) vir_print_append(p, " fenv");
+	if (f->flags & VIR_FUNCTION_FLAG_NULLINVALID) vir_print_append(p, " nullinvalid");
+	if (f->flags & VIR_FUNCTION_FLAG_NORETURN) vir_print_append(p, " noreturn");
+	if (f->flags & VIR_FUNCTION_FLAG_LOCAL) vir_print_append(p, " local");
+	if (f->flags & VIR_FUNCTION_FLAG_EXPOSURE) vir_print_append(p, " exposure");
+	vir_print_append(p, " {\n");
 	(void)u;
-	for (uint32_t i = 0; i < f->nslot; i++) {
+	for (uint32_t i = 0; i < f->slot_count; i++) {
 		const vir_slot *s = &f->slot[i];
 
-		putf(p, "  slot $%u size %llu align %u", i, (unsigned long long)s->size, s->align);
+		vir_print_append_format(p, "  slot $%u size %llu align %u", i, (unsigned long long)s->size, s->align);
 		if (s->hint != INT64_MIN)
-			putf(p, " hint %lld", (long long)s->hint);
-		if (s->fl & VS_PARAM)
-			put(p, " param");
-		if (s->fl & VS_EXPOSED)
-			put(p, " exposed");
-		put(p, "\n");
+			vir_print_append_format(p, " hint %lld", (long long)s->hint);
+		if (s->flags & VIR_SLOT_FLAG_PARAM)
+			vir_print_append(p, " param");
+		if (s->flags & VIR_SLOT_FLAG_EXPOSED)
+			vir_print_append(p, " exposed");
+		vir_print_append(p, "\n");
 	}
-	for (uint32_t b = 0; b < f->nblk; b++) {
-		const vir_blk *k = &f->blk[b];
+	for (uint32_t b = 0; b < f->block_count; b++) {
+		const vir_block *k = &f->blocks[b];
 		uint32_t np = 0;
 
-		putf(p, "b%u", b);
-		for (uint32_t i = k->first; i < k->first + k->n && i < f->nins; i++) {
-			if (vir_is_const_op(f->ins[i].op))
+		vir_print_append_format(p, "b%u", b);
+		for (uint32_t i = k->first; i < k->first + k->insn_count && i < f->insn_count; i++) {
+			if (vir_opcode_is_constant(f->insns[i].op))
 				continue;
-			if (f->ins[i].op != VO_BPARAM || np >= k->nparam)
+			if (f->insns[i].op != VIR_OP_BPARAM || np >= k->parameter_count)
 				break;
-			put(p, np++ ? ", " : "(");
-			putf(p, "v%u:%s", p->nm[i], f->ins[i].ty < VT_N ? vir_tyname[f->ins[i].ty] : "?");
+			vir_print_append(p, np++ ? ", " : "(");
+			vir_print_append_format(p, "v%u:%s", p->names[i], f->insns[i].type < VIR_TYPE_COUNT ? vir_type_names[f->insns[i].type] : "?");
 		}
 		if (np)
-			put(p, ")");
-		if (k->fl & VB_LOOP) put(p, " loop");
-		if (k->fl & VB_ADDR) put(p, " addr");
-		if (k->fl & VB_COLD) put(p, " cold");
-		put(p, ":\n");
+			vir_print_append(p, ")");
+		if (k->flags & VIR_BLOCK_FLAG_LOOP) vir_print_append(p, " loop");
+		if (k->flags & VIR_BLOCK_FLAG_ADDR) vir_print_append(p, " addr");
+		if (k->flags & VIR_BLOCK_FLAG_COLD) vir_print_append(p, " cold");
+		vir_print_append(p, ":\n");
 		{
 			uint32_t skip = np;
 
-			for (uint32_t i = k->first; i < k->first + k->n && i < f->nins; i++) {
-				if (vir_is_const_op(f->ins[i].op))
+			for (uint32_t i = k->first; i < k->first + k->insn_count && i < f->insn_count; i++) {
+				if (vir_opcode_is_constant(f->insns[i].op))
 					continue;
 				if (skip) {
 					skip--;
 					continue;
 				}
-				put_ins(p, &f->ins[i], i);
-				put(p, "\n");
+				vir_print_insn_append(p, &f->insns[i], i);
+				vir_print_append(p, "\n");
 			}
 		}
 	}
-	put(p, "}\n");
+	vir_print_append(p, "}\n");
 }
 
-void vir_print_fn(vbuffer *b, const vir_unit *u, const vir_fn *f)
+void vir_print_function(vbuffer *b, const vir_unit *u, const vir_function *f)
 {
-	pctx p = { b, u, f, f->tmp };
-	uint32_t *nm = f->tmp, n = 0;
+	vir_print_state p = { b, u, f, f->scratch };
+	uint32_t *nm = f->scratch, n = 0;
 
 	/* names: v0.. in order of appearance */
-	for (uint32_t i = 0; i < f->nins; i++)
-		nm[i] = VIR_NOBLK;
-	for (uint32_t k = 0; k < f->nblk; k++)
-		for (uint32_t i = f->blk[k].first; i < f->blk[k].first + f->blk[k].n && i < f->nins; i++)
-			if (!vir_is_const_op(f->ins[i].op) && f->ins[i].ty != VT_VOID)
+	for (uint32_t i = 0; i < f->insn_count; i++)
+		nm[i] = VIR_BLOCK_NONE;
+	for (uint32_t k = 0; k < f->block_count; k++)
+		for (uint32_t i = f->blocks[k].first; i < f->blocks[k].first + f->blocks[k].insn_count && i < f->insn_count; i++)
+			if (!vir_opcode_is_constant(f->insns[i].op) && f->insns[i].type != VIR_TYPE_VOID)
 				nm[i] = n++;
-	put_fn(&p, f);
+	vir_print_function_append(&p, f);
 }
 
-static void put_items(pctx *p, const vir_unit *u, const vir_usym *s)
+static void vir_print_items_append(vir_print_state *p, const vir_unit *u, const vir_unit_symbol *s)
 {
-	for (uint32_t i = 0; i < s->nitem; i++) {
-		const vir_item *it = &u->item[s->item0 + i];
+	for (uint32_t i = 0; i < s->item_count; i++) {
+		const vir_item *it = &u->item[s->item_first + i];
 
-		put(p, i ? ", " : " ");
-		if (it->ty == 0xff) {
-			putf(p, "zero %llu", (unsigned long long)it->v);
-		} else if (it->ty == 0xfe) {
-			put(p, "bytes ");
-			put_bytes(p, it->bytes, it->v);
-		} else if (it->ty == VT_I32) {
-			putf(p, "i32 %d", (int32_t)it->v);
-		} else if (it->ty == VT_I64) {
-			putf(p, "i64 %lld", (long long)it->v);
-		} else if (it->ty == VT_F32 || it->ty == VT_F64) {
+		vir_print_append(p, i ? ", " : " ");
+		if (it->type == 0xff) {
+			vir_print_append_format(p, "zero %llu", (unsigned long long)it->value);
+		} else if (it->type == 0xfe) {
+			vir_print_append(p, "bytes ");
+			vir_print_bytes_append(p, it->bytes, it->value);
+		} else if (it->type == VIR_TYPE_I32) {
+			vir_print_append_format(p, "i32 %d", (int32_t)it->value);
+		} else if (it->type == VIR_TYPE_I64) {
+			vir_print_append_format(p, "i64 %lld", (long long)it->value);
+		} else if (it->type == VIR_TYPE_F32 || it->type == VIR_TYPE_F64) {
 			char t[48];
 
-			fmt_hexfloat(t, it->v, it->ty == VT_F32 ? 8 : 11, it->ty == VT_F32 ? 23 : 52);
-			putf(p, "%s %s", vir_tyname[it->ty], t);
-		} else if (it->sym) {
-			put(p, "ptr ");
-			put_sym(p, it->sym - 1, (int64_t)it->v);
+			vir_print_hexfloat_format(t, it->value, it->type == VIR_TYPE_F32 ? 8 : 11, it->type == VIR_TYPE_F32 ? 23 : 52);
+			vir_print_append_format(p, "%s %s", vir_type_names[it->type], t);
+		} else if (it->symbol) {
+			vir_print_append(p, "ptr ");
+			vir_print_symbol_append(p, it->symbol - 1, (int64_t)it->value);
 		} else {
-			putf(p, "ptr 0x%llx", (unsigned long long)it->v);
+			vir_print_append_format(p, "ptr 0x%llx", (unsigned long long)it->value);
 		}
 	}
 }
 
 void vir_print_unit(vbuffer *b, const vir_unit *u)
 {
-	pctx p = { b, u, NULL, NULL };
+	vir_print_state p = { b, u, NULL, NULL };
 
-	putf(&p, "vir %u\ntarget %s\n", u->version, vir_target_name(u->target));
-	for (uint32_t i = 0; i < u->nsym; i++)
-		if (u->sym[i].kind == VU_EXTERN)
-			putf(&p, "extern @%s\n", u->sym[i].name);
-	for (uint32_t i = 0; i < u->nsym; i++) {
-		const vir_usym *s = &u->sym[i];
+	vir_print_append_format(&p, "vir %u\ntarget %s\n", u->version, vir_target_name(u->target));
+	for (uint32_t i = 0; i < u->symbol_count; i++)
+		if (u->symbols[i].kind == VIR_UNIT_ITEM_EXTERN)
+			vir_print_append_format(&p, "extern @%s\n", u->symbols[i].name);
+	for (uint32_t i = 0; i < u->symbol_count; i++) {
+		const vir_unit_symbol *s = &u->symbols[i];
 
-		if (s->kind != VU_DATA && s->kind != VU_TDATA)
+		if (s->kind != VIR_UNIT_ITEM_DATA && s->kind != VIR_UNIT_ITEM_TDATA)
 			continue;
-		putf(&p, "%s @%s align %u = {", s->kind == VU_TDATA ? "tdata" : "data", s->name, s->align);
-		put_items(&p, u, s);
-		put(&p, " }\n");
+		vir_print_append_format(&p, "%s @%s align %u = {", s->kind == VIR_UNIT_ITEM_TDATA ? "tdata" : "data", s->name, s->align);
+		vir_print_items_append(&p, u, s);
+		vir_print_append(&p, " }\n");
 	}
-	for (uint32_t i = 0; i < u->nsig; i++) {
-		putf(&p, "sig %%s%u = ", i);
-		vir_print_sig(b, &u->sigw[u->sig[i].off]);
-		put(&p, "\n");
+	for (uint32_t i = 0; i < u->signature_count; i++) {
+		vir_print_append_format(&p, "sig %%s%u = ", i);
+		vir_print_signature(b, &u->signature_words[u->signatures[i].offset]);
+		vir_print_append(&p, "\n");
 	}
-	for (uint32_t i = 0; i < u->nas; i++) {
-		const vir_uasm *a = &u->as[i];
+	for (uint32_t i = 0; i < u->asm_count; i++) {
+		const vir_unit_asm *a = &u->asms[i];
 
-		putf(&p, "asm !%u ", i);
-		put_str(&p, a->tmpl);
-		put(&p, " outs(");
-		for (uint32_t k = 0; k < a->nout; k++) {
-			put(&p, k ? ", " : "");
-			put_str(&p, a->outs[k]);
+		vir_print_append_format(&p, "asm !%u ", i);
+		vir_print_string_append(&p, a->template);
+		vir_print_append(&p, " outs(");
+		for (uint32_t k = 0; k < a->output_count; k++) {
+			vir_print_append(&p, k ? ", " : "");
+			vir_print_string_append(&p, a->outputs[k]);
 		}
-		put(&p, ") ins(");
-		for (uint32_t k = 0; k < a->nin; k++) {
-			put(&p, k ? ", " : "");
-			put_str(&p, a->ins[k]);
+		vir_print_append(&p, ") ins(");
+		for (uint32_t k = 0; k < a->input_count; k++) {
+			vir_print_append(&p, k ? ", " : "");
+			vir_print_string_append(&p, a->inputs[k]);
 		}
-		put(&p, ") clobber(");
-		for (uint32_t k = 0; k < a->nclob; k++) {
-			put(&p, k ? ", " : "");
-			put_str(&p, a->clob[k]);
+		vir_print_append(&p, ") clobber(");
+		for (uint32_t k = 0; k < a->clobber_count; k++) {
+			vir_print_append(&p, k ? ", " : "");
+			vir_print_string_append(&p, a->clobbers[k]);
 		}
-		put(&p, ")");
+		vir_print_append(&p, ")");
 		if (a->labels)
-			putf(&p, " labels %u", a->labels);
-		put(&p, "\n");
+			vir_print_append_format(&p, " labels %u", a->labels);
+		vir_print_append(&p, "\n");
 	}
-	for (uint32_t i = 0; i < u->nfn; i++) {
-		vir_fn f;
+	for (uint32_t i = 0; i < u->function_count; i++) {
+		vir_function f;
 
-		vir_fn_load(&f, u, i);
-		put(&p, "\n");
-		vir_print_fn(b, u, &f);
+		vir_function_load(&f, u, i);
+		vir_print_append(&p, "\n");
+		vir_print_function(b, u, &f);
 	}
 }

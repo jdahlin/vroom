@@ -1,65 +1,65 @@
 /* vcc front end: scopes, binding and lookup of symbols and tags */
-#include "ccimpl.h"
+#include "cc-internal.h"
 
 /* ---------------- scopes and symbols ---------------- */
 
-VPRIV uint32_t *dslot(cc *c, uint32_t **dir, uint32_t id)
+CC_PRIVATE uint32_t *cc_scope_slot(cc *c, uint32_t **dir, uint32_t id)
 {
 	uint32_t **pg = &dir[id >> DIR_BITS];
 
 	if (unlikely(!*pg)) {
-		*pg = halloc(c, DIR_PAGE * sizeof(uint32_t));
+		*pg = cc_heap_allocate(c, DIR_PAGE * sizeof(uint32_t));
 		memset(*pg, 0, DIR_PAGE * sizeof(uint32_t));
 	}
 	return &(*pg)[id & (DIR_PAGE - 1)];
 }
 
-VPRIV void scope_open(cc *c)
+CC_PRIVATE void cc_scope_open(cc *c)
 {
 	if (c->depth >= 4095)
-		fatal(c, tok(c)->loc, "scopes nested too deeply");
+		cc_report_fatal(c, tok(c)->loc, "scopes nested too deeply");
 	c->smark[++c->depth] = c->nsstack;
 }
 
 /* the scope's bindings undone; chk: warn of its unused variables */
-static inline __attribute__((always_inline)) void scope_pop(cc *c, bool chk)
+static inline __attribute__((always_inline)) void cc_scope_pop(cc *c, bool chk)
 {
 	uint32_t m = c->smark[c->depth];
 
 	/* (clang: none after an uncompilable error in the function, DefaultError warnings aside) */
 	if (chk && c->depth > 0 && c->nsstack > m &&
 	    (uint32_t)(c->errors - c->fnerr) <= c->nconv - c->fnconv)
-		unused_vars(c, m);
+		cc_unused_variables_report(c, m);
 
 	while (c->nsstack > m) {
 		uint32_t s = c->sstack[--c->nsstack];
 		sym *y = &c->syms[s];
 
 		/* (bind allocated the page) */
-		(y->kind == S_TAG ? c->tdir : c->odir)[y->name >> DIR_BITS][y->name & (DIR_PAGE - 1)] = y->shadow;
+		(y->kind == CC_SYMBOL_NAMESPACE_TAG ? c->tdir : c->odir)[y->name >> DIR_BITS][y->name & (DIR_PAGE - 1)] = y->shadow;
 	}
 	c->depth--;
 }
 
-VPRIV void scope_close(cc *c)
+CC_PRIVATE void cc_scope_close(cc *c)
 {
-	scope_pop(c, true);
+	cc_scope_pop(c, true);
 }
 
 /* a prototype's scope: parameters and tags, nothing to warn of */
-VPRIV void scope_close_proto(cc *c)
+CC_PRIVATE void cc_scope_close_prototype(cc *c)
 {
-	scope_pop(c, false);
+	cc_scope_pop(c, false);
 }
 
 /* Save bindings from the defining parameter list for its function body. */
-VPRIV void proto_binding(cc *c, uint32_t s)
+CC_PRIVATE void cc_scope_prototype_bindings_save(cc *c, uint32_t s)
 {
 	if (c->in_proto != 1)
 		return;
 	if (c->nptag == c->cptag) {
 		uint32_t cap = c->cptag ? c->cptag * 2 : 16;
-		uint32_t *p = halloc(c, (size_t)cap * sizeof(*p));
+		uint32_t *p = cc_heap_allocate(c, (size_t)cap * sizeof(*p));
 
 		if (c->nptag)
 			memcpy(p, c->ptag, (size_t)c->nptag * sizeof(*p));
@@ -69,7 +69,7 @@ VPRIV void proto_binding(cc *c, uint32_t s)
 	c->ptag[c->nptag++] = s;
 }
 
-VPRIV uint32_t sym_new(cc *c, int kind, uint32_t name, qty ty, uint32_t loc)
+CC_PRIVATE uint32_t cc_symbol_new(cc *c, int kind, uint32_t name, qty ty, uint32_t loc)
 {
 	uint32_t i = c->nsym++;
 	sym *s = &c->syms[i];
@@ -84,14 +84,14 @@ VPRIV uint32_t sym_new(cc *c, int kind, uint32_t name, qty ty, uint32_t loc)
 }
 
 /* bind s in the current scope */
-VPRIV void sym_bind(cc *c, uint32_t s)
+CC_PRIVATE void cc_symbol_bind(cc *c, uint32_t s)
 {
 	sym *y = &c->syms[s];
 	uint32_t *slot;
 
 	if (!y->name)
 		return;
-	slot = dslot(c, y->kind == S_TAG ? c->tdir : c->odir, y->name);
+	slot = cc_scope_slot(c, y->kind == CC_SYMBOL_NAMESPACE_TAG ? c->tdir : c->odir, y->name);
 	y->shadow = *slot;
 	y->depth = c->depth;
 	*slot = s;
@@ -99,7 +99,7 @@ VPRIV void sym_bind(cc *c, uint32_t s)
 }
 
 /* in a lazy body (lazy.c): the file-scope binding visible at its definition */
-static __attribute__((noinline)) uint32_t lz_visible(cc *c, uint32_t s)
+static __attribute__((noinline)) uint32_t cc_lazy_body_visible_symbol(cc *c, uint32_t s)
 {
 	while (s >= c->lz_wm && c->syms[s].depth == 0)
 		s = c->syms[s].shadow;
@@ -107,23 +107,23 @@ static __attribute__((noinline)) uint32_t lz_visible(cc *c, uint32_t s)
 }
 
 /* a lookup in a lazy body or while recording a region (frontend/c/replay.c) */
-static __attribute__((noinline)) uint32_t lookup_slow(cc *c, int ns, uint32_t id, uint32_t s)
+static __attribute__((noinline)) uint32_t cc_symbol_lookup_slow(cc *c, int ns, uint32_t id, uint32_t s)
 {
 	if (c->dr_on)
-		dr_read(c, ns, id, s);
-	return c->lz_wm && s >= c->lz_wm ? lz_visible(c, s) : s;
+		cc_replay_symbol_read(c, ns, id, s);
+	return c->lz_wm && s >= c->lz_wm ? cc_lazy_body_visible_symbol(c, s) : s;
 }
 
-VPRIV uint32_t lookup(cc *c, uint32_t id)
+CC_PRIVATE uint32_t cc_symbol_lookup(cc *c, uint32_t id)
 {
-	uint32_t s = dget(c->odir, id);
+	uint32_t s = cc_scope_get(c->odir, id);
 
-	return unlikely(c->lz_wm | c->dr_on) ? lookup_slow(c, 0, id, s) : s;
+	return unlikely(c->lz_wm | c->dr_on) ? cc_symbol_lookup_slow(c, 0, id, s) : s;
 }
 
-VPRIV uint32_t lookup_tag(cc *c, uint32_t id)
+CC_PRIVATE uint32_t cc_tag_lookup(cc *c, uint32_t id)
 {
-	uint32_t s = dget(c->tdir, id);
+	uint32_t s = cc_scope_get(c->tdir, id);
 
-	return unlikely(c->lz_wm | c->dr_on) ? lookup_slow(c, 1, id, s) : s;
+	return unlikely(c->lz_wm | c->dr_on) ? cc_symbol_lookup_slow(c, 1, id, s) : s;
 }

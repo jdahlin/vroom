@@ -30,15 +30,15 @@
 
 /* ---------------- fixdep's hash sets (per job) ---------------- */
 
-typedef struct item {
-	struct item *next;
+typedef struct fixdep_item {
+	struct fixdep_item *next;
 	unsigned int len, hash;
 	char name[];
-} item;
+} fixdep_item;
 
-#define HASHSZ 256
+#define FIXDEP_HASH_SIZE 256
 
-static unsigned int strhash(const char *str, unsigned int sz)
+static unsigned int fixdep_string_hash(const char *str, unsigned int sz)
 {
 	unsigned int hash = 2166136261U;
 
@@ -48,12 +48,12 @@ static unsigned int strhash(const char *str, unsigned int sz)
 }
 
 /* true if name was there; otherwise added */
-static bool in_hashtable(const char *name, unsigned int len, item *tab[])
+static bool fixdep_table_contains(const char *name, unsigned int len, fixdep_item *tab[])
 {
-	unsigned int hash = strhash(name, len);
-	item *a;
+	unsigned int hash = fixdep_string_hash(name, len);
+	fixdep_item *a;
 
-	for (a = tab[hash % HASHSZ]; a; a = a->next)
+	for (a = tab[hash % FIXDEP_HASH_SIZE]; a; a = a->next)
 		if (a->hash == hash && a->len == len && !memcmp(a->name, name, len))
 			return true;
 	a = malloc(sizeof(*a) + len);
@@ -62,15 +62,15 @@ static bool in_hashtable(const char *name, unsigned int len, item *tab[])
 	memcpy(a->name, name, len);
 	a->len = len;
 	a->hash = hash;
-	a->next = tab[hash % HASHSZ];
-	tab[hash % HASHSZ] = a;
+	a->next = tab[hash % FIXDEP_HASH_SIZE];
+	tab[hash % FIXDEP_HASH_SIZE] = a;
 	return false;
 }
 
-static void free_tab(item *tab[])
+static void fixdep_table_free(fixdep_item *tab[])
 {
-	for (int i = 0; i < HASHSZ; i++)
-		for (item *a = tab[i], *n; a; a = n) {
+	for (int i = 0; i < FIXDEP_HASH_SIZE; i++)
+		for (fixdep_item *a = tab[i], *n; a; a = n) {
 			n = a->next;
 			free(a);
 		}
@@ -78,7 +78,7 @@ static void free_tab(item *tab[])
 
 /* ---------------- CONFIG_ names per file, cached ---------------- */
 
-static int str_ends_with(const char *s, size_t slen, const char *sub)
+static int fixdep_string_ends_with(const char *s, size_t slen, const char *sub)
 {
 	size_t sublen = strlen(sub);
 
@@ -89,9 +89,9 @@ static int str_ends_with(const char *s, size_t slen, const char *sub)
  * fixdep's parse_config_file on NUL-terminated text: the names in order of
  * first occurrence, deduplicated within the file, as "NAME\n" lines.
  */
-static char *scan_configs(const char *text)
+static char *fixdep_configs_scan(const char *text)
 {
-	item *seen[HASHSZ] = { 0 };
+	fixdep_item *seen[FIXDEP_HASH_SIZE] = { 0 };
 	vbuffer b = { 0 };
 	const char *p = text, *q, *r;
 
@@ -104,27 +104,27 @@ static char *scan_configs(const char *text)
 		q = p;
 		while (isalnum((unsigned char)*q) || *q == '_')
 			q++;
-		r = str_ends_with(p, (size_t)(q - p), "_MODULE") ? q - 7 : q;
-		if (r > p && !in_hashtable(p, (unsigned int)(r - p), seen)) {
+		r = fixdep_string_ends_with(p, (size_t)(q - p), "_MODULE") ? q - 7 : q;
+		if (r > p && !fixdep_table_contains(p, (unsigned int)(r - p), seen)) {
 			vbuffer_append(&b, p, (size_t)(r - p));
 			vbuffer_append(&b, "\n", 1);
 		}
 		p = q;
 	}
 	vbuffer_append(&b, "", 1);
-	free_tab(seen);
+	fixdep_table_free(seen);
 	return b.p;
 }
 
 /* f's names, computed once per file (the cache entry is immortal); a racing thread may scan too */
-static const char *file_configs(const lex_file *f)
+static const char *fixdep_file_configs(const lex_file *f)
 {
 	lex_file *w = (lex_file *)f;
 	char *names = __atomic_load_n(&w->fixdep, __ATOMIC_ACQUIRE), *exp = NULL;
 
 	if (names)
 		return names;
-	names = scan_configs(f->src);
+	names = fixdep_configs_scan(f->src);
 	if (!__atomic_compare_exchange_n(&w->fixdep, &exp, names, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
 		free(names);
 		names = exp;
@@ -132,26 +132,26 @@ static const char *file_configs(const lex_file *f)
 	return names;
 }
 
-/* ---------------- fixdep's parse_dep_file ---------------- */
+/* ---------------- fixdep's fixdep_depfile_parse ---------------- */
 
-static int is_ignored_file(const char *s, size_t len)
+static int fixdep_file_is_ignored(const char *s, size_t len)
 {
-	return str_ends_with(s, len, "include/generated/autoconf.h");
+	return fixdep_string_ends_with(s, len, "include/generated/autoconf.h");
 }
 
-static int is_no_parse_file(const char *s, size_t len)
+static int fixdep_file_is_unparsed(const char *s, size_t len)
 {
-	return str_ends_with(s, len, ".rlib") || str_ends_with(s, len, ".rmeta") || str_ends_with(s, len, ".so");
+	return fixdep_string_ends_with(s, len, ".rlib") || fixdep_string_ends_with(s, len, ".rmeta") || fixdep_string_ends_with(s, len, ".so");
 }
 
-typedef struct job {
+typedef struct fixdep_job {
 	const char *cwd;
-	vbuffer *o;
-	item **configs;
-	char err[512];
-} job;
+	vbuffer *output;
+	fixdep_item **configs;
+	char error_message[512];
+} fixdep_job;
 
-static int use_file(job *j, const char *path)
+static int fixdep_file_use(fixdep_job *j, const char *path)
 {
 	char abs[4096];
 	const lex_file *f;
@@ -163,25 +163,25 @@ static int use_file(job *j, const char *path)
 		snprintf(abs, sizeof(abs), "%s", path);
 	f = lex_file_get(abs, strlen(abs));
 	if (!f) {
-		snprintf(j->err, sizeof(j->err), "fixdep: error opening file: %s: %s\n", path, strerror(ENOENT));
+		snprintf(j->error_message, sizeof(j->error_message), "fixdep: error opening file: %s: %s\n", path, strerror(ENOENT));
 		return -1;
 	}
-	for (names = file_configs(f); *names;) {
+	for (names = fixdep_file_configs(f); *names;) {
 		const char *e = strchr(names, '\n');
 
-		if (!in_hashtable(names, (unsigned int)(e - names), j->configs)) {
-			vbuffer_string_append(j->o, "    $(wildcard include/config/");
-			vbuffer_append(j->o, names, (size_t)(e - names));
-			vbuffer_string_append(j->o, ") \\\n");
+		if (!fixdep_table_contains(names, (unsigned int)(e - names), j->configs)) {
+			vbuffer_string_append(j->output, "    $(wildcard include/config/");
+			vbuffer_append(j->output, names, (size_t)(e - names));
+			vbuffer_string_append(j->output, ") \\\n");
 		}
 		names = e + 1;
 	}
 	return 0;
 }
 
-static int parse_dep_file(job *j, char *p, const char *target)
+static int fixdep_depfile_parse(fixdep_job *j, char *p, const char *target)
 {
-	item *files[HASHSZ] = { 0 };
+	fixdep_item *files[FIXDEP_HASH_SIZE] = { 0 };
 	bool saw_any_target = false, is_target = true, is_source = false, need_parse;
 	char *q, saved_c;
 	int rc = 0;
@@ -241,48 +241,48 @@ static int parse_dep_file(job *j, char *p, const char *target)
 		if (is_source) {
 			if (!saw_any_target) {
 				saw_any_target = true;
-				vbuffer_string_append(j->o, "source_");
-				vbuffer_string_append(j->o, target);
-				vbuffer_string_append(j->o, " := ");
-				vbuffer_string_append(j->o, p);
-				vbuffer_string_append(j->o, "\n\n");
-				vbuffer_string_append(j->o, "deps_");
-				vbuffer_string_append(j->o, target);
-				vbuffer_string_append(j->o, " := \\\n");
+				vbuffer_string_append(j->output, "source_");
+				vbuffer_string_append(j->output, target);
+				vbuffer_string_append(j->output, " := ");
+				vbuffer_string_append(j->output, p);
+				vbuffer_string_append(j->output, "\n\n");
+				vbuffer_string_append(j->output, "deps_");
+				vbuffer_string_append(j->output, target);
+				vbuffer_string_append(j->output, " := \\\n");
 				need_parse = true;
 			}
-		} else if (!is_ignored_file(p, (size_t)(q - p)) && !in_hashtable(p, (unsigned int)(q - p), files)) {
-			vbuffer_string_append(j->o, "  ");
-			vbuffer_string_append(j->o, p);
-			vbuffer_string_append(j->o, " \\\n");
+		} else if (!fixdep_file_is_ignored(p, (size_t)(q - p)) && !fixdep_table_contains(p, (unsigned int)(q - p), files)) {
+			vbuffer_string_append(j->output, "  ");
+			vbuffer_string_append(j->output, p);
+			vbuffer_string_append(j->output, " \\\n");
 			need_parse = true;
 		}
-		if (need_parse && !is_no_parse_file(p, (size_t)(q - p)))
-			rc = use_file(j, p);
+		if (need_parse && !fixdep_file_is_unparsed(p, (size_t)(q - p)))
+			rc = fixdep_file_use(j, p);
 		is_source = false;
 		*q = saved_c;
 		p = q;
 	}
-	free_tab(files);
+	fixdep_table_free(files);
 	if (rc)
 		return rc;
 	if (!saw_any_target) {
-		snprintf(j->err, sizeof(j->err), "fixdep: parse error; no targets found\n");
+		snprintf(j->error_message, sizeof(j->error_message), "fixdep: parse error; no targets found\n");
 		return -1;
 	}
-	vbuffer_string_append(j->o, "\n");
-	vbuffer_string_append(j->o, target);
-	vbuffer_string_append(j->o, ": $(deps_");
-	vbuffer_string_append(j->o, target);
-	vbuffer_string_append(j->o, ")\n\n$(deps_");
-	vbuffer_string_append(j->o, target);
-	vbuffer_string_append(j->o, "):\n");
+	vbuffer_string_append(j->output, "\n");
+	vbuffer_string_append(j->output, target);
+	vbuffer_string_append(j->output, ": $(deps_");
+	vbuffer_string_append(j->output, target);
+	vbuffer_string_append(j->output, ")\n\n$(deps_");
+	vbuffer_string_append(j->output, target);
+	vbuffer_string_append(j->output, "):\n");
 	return 0;
 }
 
 /* ---------------- entry ---------------- */
 
-static char *read_at(const char *cwd, const char *path, char *abs, size_t cap)
+static char *fixdep_file_read(const char *cwd, const char *path, char *abs, size_t cap)
 {
 	struct stat st;
 	char *buf;
@@ -309,16 +309,16 @@ static char *read_at(const char *cwd, const char *path, char *abs, size_t cap)
 	return buf;
 }
 
-int vfixdep(const char *cwd, const char *depfile, const char *target, const char *cmdline, const char *cmdfile,
+int fixdep_run(const char *cwd, const char *depfile, const char *target, const char *cmdline, const char *cmdfile,
 	    int errfd)
 {
 	char dabs[4096], oabs[4096];
-	item *configs[HASHSZ] = { 0 };
+	fixdep_item *configs[FIXDEP_HASH_SIZE] = { 0 };
 	vbuffer o = { 0 };
-	job j = { .cwd = cwd, .o = &o, .configs = configs };
+	fixdep_job j = { .cwd = cwd, .output = &o, .configs = configs };
 
 	vintern_init();	/* the token cache interns; vsh may run fixdep before any compile */
-	char *d = read_at(cwd, depfile, dabs, sizeof(dabs));
+	char *d = fixdep_file_read(cwd, depfile, dabs, sizeof(dabs));
 	int fd, rc;
 
 	if (!d) {
@@ -330,11 +330,11 @@ int vfixdep(const char *cwd, const char *depfile, const char *target, const char
 	vbuffer_string_append(&o, " := ");
 	vbuffer_string_append(&o, cmdline);
 	vbuffer_string_append(&o, "\n\n");
-	rc = parse_dep_file(&j, d, target);
+	rc = fixdep_depfile_parse(&j, d, target);
 	free(d);
-	free_tab(configs);
+	fixdep_table_free(configs);
 	if (rc) {
-		dprintf(errfd, "%s", j.err);
+		dprintf(errfd, "%s", j.error_message);
 		free(o.p);
 		return 2;
 	}

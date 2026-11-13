@@ -8,15 +8,15 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-int pp_option_error_limit(const pp *p) { return p->o->error_limit; }
-int pp_option_spell_limit(const pp *p) { return p->o->spell_limit; }
+int pp_option_error_limit(const pp *p) { return p->options->error_limit; }
+int pp_option_spell_limit(const pp *p) { return p->options->spell_limit; }
 
 uint32_t pp_main_file_end(const pp *p)
 {
-	const pp_file_entry *e = &p->fe[0];
-	uint32_t n = e->f->size;
+	const pp_file_entry *e = &p->files[0];
+	uint32_t n = e->lex_file->size;
 
-	return e->base + (n && e->f->src[n - 1] == '\n' ? n - 1 : n);
+	return e->location_base + (n && e->lex_file->src[n - 1] == '\n' ? n - 1 : n);
 }
 
 void pp_macro_text_keep(pp *p) { p->keep_macro_text = true; }
@@ -29,8 +29,8 @@ int pp_token_spelling_find(const pp *p, const ptok *t, const lex_file **file, ui
 
 	if (t->flags & LEX_TOKEN_FLAG_SPLICED)
 		return PP_SPELLING_DIRTY;
-	for (uint32_t i = p->nfe; i-- > 0 && !f;) {	/* (the newest file first: uses cluster) */
-		const lex_file *g = p->fe[i].f;
+	for (uint32_t i = p->file_count; i-- > 0 && !f;) {	/* (the newest file first: uses cluster) */
+		const lex_file *g = p->files[i].lex_file;
 
 		if (g && t->s >= g->src && t->s < g->src + g->size)
 			f = g;
@@ -39,7 +39,7 @@ int pp_token_spelling_find(const pp *p, const ptok *t, const lex_file **file, ui
 		return PP_SPELLING_NONE;
 	*file = f;
 	*offset = (uint32_t)(t->s - f->src);
-	return pp_location_is_valid(p, t->loc, &e) && e->f == f && t->loc - e->base == *offset ? PP_SPELLING_FILE : PP_SPELLING_MACRO;
+	return pp_location_is_valid(p, t->loc, &e) && e->lex_file == f && t->loc - e->location_base == *offset ? PP_SPELLING_FILE : PP_SPELLING_MACRO;
 }
 
 /* where an #include for a diagnostic at loc goes: the start of the line after the last
@@ -52,8 +52,8 @@ uint32_t pp_include_point_find(const pp *p, uint32_t loc)
 
 	if (!pp_location_is_valid(p, loc, &e))
 		return UINT32_MAX;
-	s = e->f->src;
-	end = loc - e->base;
+	s = e->lex_file->src;
+	end = loc - e->location_base;
 	while (i < end) {
 		uint32_t j = i;
 
@@ -79,17 +79,17 @@ uint32_t pp_include_point_find(const pp *p, uint32_t loc)
 			i = (uint32_t)(nl - s) + 1;
 		}
 	}
-	return e->base + at;
+	return e->location_base + at;
 }
 
 const char *pp_source_text(const pp *p, uint32_t b, uint32_t e, size_t *len)
 {
 	const pp_file_entry *f;
 
-	if (e < b || !pp_location_is_valid(p, b, &f) || e - f->base > f->f->size)
+	if (e < b || !pp_location_is_valid(p, b, &f) || e - f->location_base > f->lex_file->size)
 		return NULL;
 	*len = e - b;
-	return f->f->src + (b - f->base);
+	return f->lex_file->src + (b - f->location_base);
 }
 
 /* -Winvalid-pp-token: an unknown token that is an unterminated character constant or string */
@@ -115,7 +115,7 @@ int pp_location_spells(const pp *p, uint32_t loc, const char *s, uint32_t n)
 {
 	const pp_file_entry *e;
 
-	if (!pp_location_is_valid(p, loc, &e) || loc - e->base + n > e->f->size || memcmp(e->f->src + (loc - e->base), s, n))
+	if (!pp_location_is_valid(p, loc, &e) || loc - e->location_base + n > e->lex_file->size || memcmp(e->lex_file->src + (loc - e->location_base), s, n))
 		return 0;
 	return pp_token_end_find(p, loc) == loc + n;
 }
@@ -125,9 +125,9 @@ int pp_location_char(const pp *p, uint32_t loc)
 {
 	const pp_file_entry *e;
 
-	if (!pp_location_is_valid(p, loc, &e) || loc - e->base >= e->f->size)
+	if (!pp_location_is_valid(p, loc, &e) || loc - e->location_base >= e->lex_file->size)
 		return -1;
-	return (unsigned char)e->f->src[loc - e->base];
+	return (unsigned char)e->lex_file->src[loc - e->location_base];
 }
 
 const char *pp_source_rest(const pp *p, uint32_t b, size_t *len)
@@ -136,8 +136,8 @@ const char *pp_source_rest(const pp *p, uint32_t b, size_t *len)
 
 	if (!pp_location_is_valid(p, b, &f))
 		return NULL;
-	*len = f->f->size - (b - f->base);
-	return f->f->src + (b - f->base);
+	*len = f->lex_file->size - (b - f->location_base);
+	return f->lex_file->src + (b - f->location_base);
 }
 
 uint32_t pp_token_end_find(const pp *p, uint32_t loc)
@@ -148,7 +148,7 @@ uint32_t pp_token_end_find(const pp *p, uint32_t loc)
 
 	if (!pp_location_is_valid(p, loc, &e))
 		return loc + 1;
-	s = e->f->src, off = loc - e->base, end = s + e->f->size;
+	s = e->lex_file->src, off = loc - e->location_base, end = s + e->lex_file->size;
 	if (s + off >= end)
 		return loc + 1;
 	{

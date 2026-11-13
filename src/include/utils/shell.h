@@ -2,8 +2,8 @@
  * rsh: the subset of sh that kbuild's object and archive recipes use, run
  * inside vccd so such a recipe costs no shell and no tool processes.
  *
- * A script is parsed whole before anything runs; rsh_run returns
- * RSH_DECLINE (and has done nothing) when it uses anything outside the
+ * A script is parsed whole before anything runs; shell_run returns
+ * SHELL_DECLINE (and has done nothing) when it uses anything outside the
  * subset, and the caller runs it with a real shell instead.  The subset:
  *
  *   list      cmd { ';' cmd } [';']
@@ -24,9 +24,9 @@
 #define VCC_RSH_H
 #include <stdbool.h>
 
-#define RSH_DECLINE (-1)
+#define SHELL_DECLINE (-1)
 
-struct rsh_ops {
+struct shell_callbacks {
 	void *ctx;
 	bool (*is_tool)(void *ctx, const char *argv0);
 	/* argv and assign are NULL-terminated; fds are the tool's 0, 1, 2 */
@@ -37,7 +37,7 @@ struct rsh_ops {
 };
 
 /* errexit: started as sh -ec */
-int rsh_run(const char *cwd, const char *script, bool errexit, const int fds[3],
-	    const struct rsh_ops *ops);
+int shell_run(const char *cwd, const char *script, bool errexit, const int fds[3],
+	    const struct shell_callbacks *ops);
 
 #endif

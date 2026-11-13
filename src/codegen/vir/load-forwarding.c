@@ -33,14 +33,14 @@ VPRIV void vw_baseoff(vwst *V, uint32_t a, vwaddr *A)
 
 	a = vw_find(V, a);
 	for (int hop = 0; hop < 16; hop++) {
-		const vir_ins *in = &V->p[a].in;
+		const vir_insn *in = &V->p[a].in;
 
-		if (in->op != VO_PTRADD || V->p[a].blk == VW_NOBLK || !vw_kint(V, vw_find(V, in->b), &k))
+		if (in->op != VIR_OP_PTRADD || V->p[a].blk == VW_NOBLK || !vw_kint(V, vw_find(V, in->b), &k))
 			break;
 		off += (uint64_t)k;
 		a = vw_find(V, in->a);
 	}
-	A->slot = V->p[a].in.op == VO_SLOTADDR && V->p[a].blk == VW_NOBLK;
+	A->slot = V->p[a].in.op == VIR_OP_SLOTADDR && V->p[a].blk == VW_NOBLK;
 	if (A->slot) {
 		off += (uint64_t)V->p[a].in.b | (uint64_t)V->p[a].in.c << 32;
 		a = V->p[a].in.a;
@@ -63,14 +63,14 @@ static bool vw_unwritten(vwst *V, vwsimp *S, uint32_t lo, uint32_t hi, const vwa
 			n = m;
 	}
 	for (n = 0; i < S->nwr && S->seq[S->wr[i]] <= hi; i++, n++) {
-		const vir_ins *in = &V->p[S->wr[i]].in;
+		const vir_insn *in = &V->p[S->wr[i]].in;
 		vwaddr B;
 		int64_t sw;
 
-		if (n == VW_FARMAX || in->op != VO_STORE)
+		if (n == VW_FARMAX || in->op != VIR_OP_STORE)
 			return false;
 		vw_baseoff(V, in->a, &B);
-		sw = (int64_t)1 << VIF_W(in->fl);
+		sw = (int64_t)1 << VIR_INSN_FLAG_WIDTH_LOG2(in->flags);
 		if (B.base != A->base || B.slot != A->slot || B.off <= -VW_FAROFF || B.off >= VW_FAROFF ||
 		    !(B.off + sw <= A->off || A->off + w <= B.off))
 			return false;
@@ -111,10 +111,10 @@ VPRIV void vw_far_init(ecx *e, vwsimp *S)
 			if (!x)
 				break;
 			op = V->p[x].in.op;
-			eff = vir_optab[op].eff;
+			eff = vir_opcode_table[op].effects;
 			if (x < S->n0 && vw_find(V, x) == x && !vw_promdead(V, x)) {
 				S->seq[x] = ++pos;
-				if (eff & (EF_W | EF_C | EF_A) || op == VO_BARRIER || op == VO_VA_ARG || op == VO_VA_START)
+				if (eff & (VIR_EFFECT_W | VIR_EFFECT_C | VIR_EFFECT_A) || op == VIR_OP_BARRIER || op == VIR_OP_VA_ARG || op == VIR_OP_VA_START)
 					S->wr[S->nwr++] = x;
 			}
 			if (!q)
@@ -153,8 +153,8 @@ VPRIV void vw_far_init(ecx *e, vwsimp *S)
  * one in a dominating block) still holds at q */
 VPRIV vwhe *vw_far(vwst *V, vwsimp *S, uint32_t q, const vwaddr *A, bool *ok)
 {
-	const vir_ins *in = &V->p[q].in;
-	vwhe key = { VO_LOAD | 0x100, in->ty, (in->fl & (3 | VIF_MS)) | (A->slot ? 0x100 : 0), A->base,
+	const vir_insn *in = &V->p[q].in;
+	vwhe key = { VIR_OP_LOAD | 0x100, in->type, (in->flags & (3 | VIR_INSN_FLAG_MS)) | (A->slot ? 0x100 : 0), A->base,
 		     (uint32_t)(uint64_t)A->off, (uint32_t)((uint64_t)A->off >> 32), 0, 0 };
 	vwhe *t = vw_hlook(S, &key);
 	uint32_t l1 = t->v, hi = S->seq[q], ia;
@@ -164,7 +164,7 @@ VPRIV vwhe *vw_far(vwst *V, vwsimp *S, uint32_t q, const vwaddr *A, bool *ok)
 		*t = key;	/* (the caller sets v and logs it) */
 		return t;
 	}
-	if (!S->seq[l1] || S->seq[l1] >= S->seq[q] || vw_find(V, l1) != l1 || V->p[l1].in.op != VO_LOAD)
+	if (!S->seq[l1] || S->seq[l1] >= S->seq[q] || vw_find(V, l1) != l1 || V->p[l1].in.op != VIR_OP_LOAD)
 		return t;
 	ia = S->ri[V->p[l1].blk];
 	for (uint32_t l = S->linner[S->ri[V->p[q].blk]]; l != VW_NOBLK; l = S->lpar[l]) {
@@ -173,6 +173,6 @@ VPRIV vwhe *vw_far(vwst *V, vwsimp *S, uint32_t q, const vwaddr *A, bool *ok)
 		if (S->bend[V->order[S->lend[l]]] > hi)
 			hi = S->bend[V->order[S->lend[l]]];
 	}
-	*ok = vw_unwritten(V, S, S->seq[l1], hi, A, (int64_t)1 << VIF_W(in->fl));
+	*ok = vw_unwritten(V, S, S->seq[l1], hi, A, (int64_t)1 << VIR_INSN_FLAG_WIDTH_LOG2(in->flags));
 	return t;
 }

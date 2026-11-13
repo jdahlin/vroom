@@ -3,7 +3,7 @@
  * instructions into nops calls before it returns (DESIGN-vir-optimizer.md 3).
  * Two sweeps in place instead of a second vir_canon (which costs a dominator
  * tree and a copy): mark the constants still used, then shift the block
- * region over the nops, renumbering operands through f->tmp.  The order of
+ * region over the nops, renumbering operands through f->scratch.  The order of
  * constants (by first use) and of instructions stays, so the result is
  * canonical again, and no block, edge or terminator moves: f->valid stays
  * (predecessor lists hold block ids; idom, pre and post do not change).
@@ -12,33 +12,33 @@
  * nops (block parameters are never nops).  Block ranges are contiguous and in
  * block order, as vir_canon makes them.
  */
-#include "virimpl.h"
+#include "vir-internal.h"
 #include "vir/pass.h"
 
 #define VIR_COMPACT_NONE 0xffffffffu
 
-uint32_t vir_function_compact(vir_fn *f)
+uint32_t vir_function_compact(vir_function *f)
 {
-	uint32_t *tmp = f->tmp, nins = f->nins, nconst = f->nconst, nc = 1, k;
+	uint32_t *tmp = f->scratch, nins = f->insn_count, nconst = f->constant_count, nc = 1, k;
 	uint32_t q;
 
-	if (!nconst || nconst > nins || !f->nblk)
+	if (!nconst || nconst > nins || !f->block_count)
 		return 0;
 	for (uint32_t i = 0; i < nins; i++)
 		tmp[i] = VIR_COMPACT_NONE;
 	/* 1. the constants an instruction still uses (tmp = 0) */
-	for (uint32_t b = 0; b < f->nblk; b++) {
-		const vir_blk *kb = &f->blk[b];
+	for (uint32_t b = 0; b < f->block_count; b++) {
+		const vir_block *kb = &f->blocks[b];
 
-		for (uint32_t i = kb->first; i < kb->first + kb->n && i < nins; i++) {
-			vir_ins y = f->ins[i];
-			vir_oit it;
+		for (uint32_t i = kb->first; i < kb->first + kb->insn_count && i < nins; i++) {
+			vir_insn y = f->insns[i];
+			vir_operand_iterator it;
 			uint32_t *p;
 
-			if (y.op == VO_NOP)
+			if (y.op == VIR_OP_NOP)
 				continue;
-			vir_oit_init(&it, f, &y, false);
-			while ((p = vir_oit_next(&it)))
+			vir_operand_iterator_init(&it, f, &y, false);
+			while ((p = vir_operand_iterator_next(&it)))
 				if (*p >= 1 && *p < nconst)
 					tmp[*p] = 0;
 		}
@@ -49,22 +49,22 @@ uint32_t vir_function_compact(vir_fn *f)
 		if (tmp[i] == 0)
 			tmp[i] = nc++;
 	k = nc;
-	for (uint32_t b = 0; b < f->nblk; b++) {
-		const vir_blk *kb = &f->blk[b];
+	for (uint32_t b = 0; b < f->block_count; b++) {
+		const vir_block *kb = &f->blocks[b];
 
-		for (uint32_t i = kb->first; i < kb->first + kb->n && i < nins; i++)
-			if (f->ins[i].op != VO_NOP)
+		for (uint32_t i = kb->first; i < kb->first + kb->insn_count && i < nins; i++)
+			if (f->insns[i].op != VIR_OP_NOP)
 				tmp[i] = k++;
 	}
 	if (k == nins)	/* nothing to drop */
 		return 0;
 	/* 3. the source locations: a run starts at its first instruction that is kept */
-	if (f->nloc) {
+	if (f->location_count) {
 		uint32_t nl = 0;
 
 		q = nconst;
-		for (uint32_t j = 0; j < f->nloc; j++) {
-			vir_loc r = f->loc[j];
+		for (uint32_t j = 0; j < f->location_count; j++) {
+			vir_location r = f->locations[j];
 
 			if (q < r.first)
 				q = r.first;
@@ -72,51 +72,51 @@ uint32_t vir_function_compact(vir_fn *f)
 				q++;
 			if (q >= nins)
 				break;
-			if (nl && f->loc[nl - 1].first == tmp[q])
+			if (nl && f->locations[nl - 1].first == tmp[q])
 				nl--;	/* the earlier run lost all its instructions */
-			if (nl && f->loc[nl - 1].loc == r.loc)
+			if (nl && f->locations[nl - 1].source_location == r.source_location)
 				continue;
-			f->loc[nl].first = tmp[q];
-			f->loc[nl].loc = r.loc;
+			f->locations[nl].first = tmp[q];
+			f->locations[nl].source_location = r.source_location;
 			nl++;
 		}
-		f->nloc = nl;
+		f->location_count = nl;
 	}
 	/* 4. move the constants, then the block instructions, renumbering operands (never reading ins[] of a
 	      value, so that overwriting an old slot is safe: kept values only move down) */
 	for (uint32_t i = 1; i < nconst; i++)
 		if (tmp[i] != VIR_COMPACT_NONE && tmp[i] != i)
-			f->ins[tmp[i]] = f->ins[i];
-	for (uint32_t b = 0; b < f->nblk; b++) {
-		vir_blk *kb = &f->blk[b];
-		uint32_t o = 0, end = kb->first + kb->n;
+			f->insns[tmp[i]] = f->insns[i];
+	for (uint32_t b = 0; b < f->block_count; b++) {
+		vir_block *kb = &f->blocks[b];
+		uint32_t o = 0, end = kb->first + kb->insn_count;
 
 		for (uint32_t i = kb->first; i < end && i < nins; i++) {
-			vir_ins y = f->ins[i];
-			vir_oit it;
+			vir_insn y = f->insns[i];
+			vir_operand_iterator it;
 			uint32_t *p;
 
-			if (y.op == VO_NOP)
+			if (y.op == VIR_OP_NOP)
 				continue;
-			vir_oit_init(&it, f, &y, false);
-			while ((p = vir_oit_next(&it)))
+			vir_operand_iterator_init(&it, f, &y, false);
+			while ((p = vir_operand_iterator_next(&it)))
 				*p = *p < nins && tmp[*p] != VIR_COMPACT_NONE ? tmp[*p] : 0;
-			f->ins[tmp[i]] = y;
+			f->insns[tmp[i]] = y;
 			o++;
 		}
-		kb->n = o;
+		kb->insn_count = o;
 	}
 	/* block starts: the first kept instruction's new index (an empty range cannot occur: a block ends in a terminator) */
 	{
 		uint32_t at = nc;
 
-		for (uint32_t b = 0; b < f->nblk; b++) {
-			f->blk[b].first = at;
-			at += f->blk[b].n;
+		for (uint32_t b = 0; b < f->block_count; b++) {
+			f->blocks[b].first = at;
+			at += f->blocks[b].insn_count;
 		}
 	}
-	f->nins = k;
-	f->nconst = nc;
-	vir_ctab_rebuild(f);
+	f->insn_count = k;
+	f->constant_count = nc;
+	vir_constant_table_rebuild(f);
 	return nins - k;
 }
