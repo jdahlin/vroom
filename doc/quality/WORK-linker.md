@@ -151,8 +151,10 @@ alone.  Names the owner may revisit: `macho-linker.c` and `macho_link`,
 
 The link context (the other half): the design is decided and its first step
 is applied (`link-context.md`, "Design (decided)": the diagnostics and layout
-groups are fields of `struct ld_context`); the remaining groups and the
-parameter series are listed there, one PR each.
+groups are fields of `struct ld_context`, #183); step 2 of the context moves
+the output side (relocation scan, `ld -r`, output, symbol table, dynamic
+sections); the input side and the parameter series follow (`link-context.md`
+section 5).
 
 ### 3. The shared layer
 

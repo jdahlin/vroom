@@ -18,14 +18,13 @@ static bool ld_value_fits_signed(int64_t v, int bits)
 /* checkIntUInt: representable as either signed or unsigned */
 static bool ld_value_fits_signed_or_unsigned(int64_t v, int bits) { return ld_value_fits_signed(v, bits) || (uint64_t)v < (UINT64_C(1) << bits); }
 
-static elf_rela *reladyn_buf;
 
 static void a64_ld_input_section_relocate(uint32_t si, uint8_t *buf)
 {
 	ld_input_section *is = &isecs.v[si];
 	ld_object *o = objs.v[is->obj];
 	uint64_t secva = ld_input_section_address(si, 0);
-	elf_rela *dyn = reladyn_buf ? reladyn_buf + is->dyn0 : NULL;
+	elf_rela *dyn = ctx->relocations.rela_dyn_buffer ? ctx->relocations.rela_dyn_buffer + is->dyn0 : NULL;
 	uint32_t nd = 0;
 	bool alloc_ = is->flags & SHF_ALLOC;
 	ld_relocation_target t, t2;
@@ -65,7 +64,7 @@ static void a64_ld_input_section_relocate(uint32_t si, uint8_t *buf)
 		case R_AARCH64_NONE:
 			break;
 		case R_AARCH64_ABS64:
-			if (pic && alloc_ && !t.abs) {
+			if (ctx->relocations.pic && alloc_ && !t.abs) {
 				dyn[nd].r_offset = P;
 				dyn[nd].r_info = R_AARCH64_RELATIVE;
 				dyn[nd].r_addend = (int64_t)t.va;
@@ -181,7 +180,7 @@ static void a64_ld_input_section_relocate(uint32_t si, uint8_t *buf)
 			}
 			__attribute__((fallthrough));
 		case R_AARCH64_LD64_GOT_LO12_NC: {
-			uint64_t slot = ld_input_section_address(got_isec, 8 * (uint64_t)(symi < o->firstg ? o->lgotidx[symi] :
+			uint64_t slot = ld_input_section_address(ctx->output.got_section, 8 * (uint64_t)(symi < o->firstg ? o->lgotidx[symi] :
 									  gsyms[o->gs[symi - o->firstg]].gotidx));
 			if (type == R_AARCH64_LD64_GOT_LO12_NC) {
 				a64_ld_instruction_immediate_store(loc, 0xfffu << 10, (uint32_t)((slot & 0xfff) >> 3) << 10);

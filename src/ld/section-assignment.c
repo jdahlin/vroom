@@ -190,8 +190,8 @@ static void ld_input_sections_assign(void)
 			isecs.v[merges.v[m].isec].align = merges.v[m].align;
 	}
 	ld_eh_frame_merge();
-	if (ehhdr_isec != LD_NONE)	/* lld EhFrameHeader::getSize: 12 + 8 per FDE */
-		isecs.v[ehhdr_isec].size = 12 + 8 * (uint64_t)ctx->layout.eh_frame_fdes.n;
+	if (ctx->output.eh_frame_header_section != LD_NONE)	/* lld EhFrameHeader::getSize: 12 + 8 per FDE */
+		isecs.v[ctx->output.eh_frame_header_section].size = 12 + 8 * (uint64_t)ctx->layout.eh_frame_fdes.n;
 	/* output section ownership */
 	for (uint32_t i = 0; i < isds.n; i++)
 		for (uint32_t s = 0; s < isds.v[i].secs.n; s++)

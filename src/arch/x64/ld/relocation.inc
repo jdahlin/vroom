@@ -33,7 +33,7 @@ static int x64_ld_got_relaxation_kind(const ld_object *o, const ld_input_section
 			return 1;
 		if (type == R_X86_64_GOTPCRELX || rl->r_offset < 3)
 			return 0;	/* (the immediate form rewrites the REX byte too) */
-		return pic ? 0 : 2;
+		return ctx->relocations.pic ? 0 : 2;
 	}
 }
 
@@ -56,11 +56,11 @@ static void x64_ld_got_find(void *arg, size_t i)
 	(void)arg;
 	const ld_input_section *is = &isecs.v[i];
 
-	if (is->kind == LD_SECTION_KIND_NONE || is->obj == LD_NONE || atomic_load_explicit(&got_seen, memory_order_relaxed))
+	if (is->kind == LD_SECTION_KIND_NONE || is->obj == LD_NONE || atomic_load_explicit(&ctx->relocations.got_seen, memory_order_relaxed))
 		return;
 	for (uint32_t r = 0; r < is->nrela; r++)
 		if (x64_ld_relocation_needs_got(objs.v[is->obj], is, &is->rela[r])) {
-			atomic_store(&got_seen, true);
+			atomic_store(&ctx->relocations.got_seen, true);
 			return;
 		}
 }
@@ -208,7 +208,7 @@ static void x64_ld_input_section_relocate(uint32_t si, uint8_t *buf)
 				loc[-3] = (uint8_t)((rex & ~0x4) | (rex & 0x4) >> 2);
 				ld_u32_store(loc, (uint32_t)a);
 			} else {
-				uint64_t slot = ld_input_section_address(got_isec, 8 * (uint64_t)(symi < o->firstg ? o->lgotidx[symi] :
+				uint64_t slot = ld_input_section_address(ctx->output.got_section, 8 * (uint64_t)(symi < o->firstg ? o->lgotidx[symi] :
 										  gsyms[o->gs[symi - o->firstg]].gotidx));
 
 				v = (int64_t)(slot + (uint64_t)rl->r_addend - P);

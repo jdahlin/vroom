@@ -79,9 +79,121 @@ struct ld_layout {
 	uint64_t tls_thread_pointer;
 };
 
+/* an arm64 range-extension thunk (arch/a64/ld/thunk-creation.inc) */
+typedef struct {
+	uint32_t g;			/* destination global (or LD_NONE) */
+	uint32_t sec;			/* destination ISec for local/section targets */
+	uint64_t val;
+	int64_t addend;
+	uint32_t tsec;			/* thunk ISec */
+	uint32_t off;			/* offset in thunk section */
+	uint32_t size;			/* 4 (b) or 12 (adrp/add/br) */
+	bool lng;			/* long form; sticky once chosen (lld) */
+	const char *name;
+} a64_ld_thunk;
+typedef struct { VVEC(uint32_t) list; } a64_ld_thunk_section;
+
+/* a .got slot of a local symbol: object and symbol index */
+typedef struct { uint32_t obj, sym; } ld_got_location;
+
+/* a global symbol's place in .symtab */
+typedef struct { uint32_t g; uint32_t idx; uint64_t str; bool local; } ld_global_symbol_output;
+
+/* an output section of ld -r, grouped by name */
+typedef struct {
+	const char *name;
+	uint32_t h;
+	uint32_t type, align, entsize;
+	uint64_t flags, size, off;
+	VVEC(uint32_t) secs;
+	uint64_t nrela, relaoff;
+	uint32_t shidx, relaidx, nameoff, relanameoff;
+	uint32_t secsym;
+	uint32_t grp;			/* a .group: its input SHT_GROUP ISec + 1 */
+	bool member;			/* a group member: its own output section, SHF_GROUP */
+} ld_relocatable_section;
+
+/* the relocation scan, thunks and the final addresses relocations read */
+struct ld_relocations {
+	bool pic;			/* -shared or -pie: absolute relocations become RELATIVE */
+	_Atomic bool got_seen;		/* some relocation needs a .got slot (the GOT probe) */
+	uint64_t *final_section_addresses; /* ld_input_section_address(s, 0), or UINT64_MAX: take ld_relocation_target_find */
+	elf_rela *rela_dyn_buffer;	/* .rela.dyn in the output image */
+
+	/* arm64 range-extension thunks */
+	VVEC(a64_ld_thunk) thunks;
+	VVEC(a64_ld_thunk_section) thunk_sections;
+	/* thunk redirection: (input section, relocation index) -> thunk; open hash in the arena */
+	uint64_t *thunk_redirect_keys;
+	uint32_t *thunk_redirect_values;
+	uint32_t thunk_redirect_mask, thunk_redirect_count;
+};
+
+/* ld -r: the relocatable output (relocatable-link.c) */
+struct ld_relocatable {
+	VVEC(ld_relocatable_section) sections;
+	uint32_t *section_map;		/* name hash table -> sections */
+	uint32_t section_map_mask;
+	uint32_t **local_symbol_map;	/* per object: local symbol -> output index */
+	uint8_t *image;			/* the output file */
+	uint64_t symtab_offset, strtab_offset, shstrtab_offset, shstrtab_size;
+	uint64_t symbol_count, local_count;
+	uint32_t symtab_index, strtab_index, shstrtab_index, section_header_count;
+	uint64_t *local_string_offsets;	/* per object: string offset of its locals */
+	uint64_t *local_first_index;	/* per object: symbol index of its first local */
+};
+
+/* the output image, the ids of the synthetic input sections and the .got */
+struct ld_output {
+	uint8_t *image;			/* the output file */
+	uint8_t *shstrtab;		/* .shstrtab's contents */
+	uint64_t relative_count;	/* RELATIVE relocations */
+	VVEC(uint32_t) write_jobs;	/* input sections to write */
+
+	/* synthetic input sections: LD_NONE until created (ld_context_init) */
+	uint32_t rela_dyn_section, build_id_section, comment_section, got_section;
+	uint32_t eh_frame_header_section;	/* --eh-frame-hdr */
+	uint32_t symtab_section, strtab_section, shstrtab_section;
+	/* -shared: dynamic sections (lld's, for the vDSO; vmlinux discards them) */
+	uint32_t dynsym_section, dynstr_section, hash_section, gnu_hash_section;
+	uint32_t versym_section, verdef_section, dynamic_section;
+	bool dynamic_live;		/* .dynamic survived the script */
+
+	VVEC(uint32_t) got_symbols;	/* .got slot -> ld_global_symbol id (the globals, first) */
+	VVEC(ld_got_location) got_locals;	/* then the locals: slot got_symbols.n + i */
+};
+
+/* .symtab and .strtab (symbol-table-write.c) */
+struct ld_symbol_table {
+	ld_global_symbol_output *globals;
+	uint32_t global_count;
+	uint8_t *symtab, *strtab;	/* in the output image (ld_symbol_table_fill) */
+	uint64_t first_thunk_symbol, first_thunk_string;
+	uint64_t symbol_count, string_size;
+	uint32_t local_count;
+};
+
+/* -shared: .dynsym, .dynstr, the hash tables and .dynamic (dynamic-sections.c) */
+struct ld_dynamic {
+	VVEC(uint32_t) symbols;		/* exported globals in .dynsym order (index i + 1) */
+	uint32_t first_hashed_symbol;	/* first symbol in .gnu.hash */
+	uint32_t gnu_hash_buckets, gnu_hash_mask_words;
+	uint32_t *symbol_hashes;	/* GNU hash per symbols entry */
+	VVEC(char) strings;		/* .dynstr */
+	VVEC(uint32_t) string_offsets;	/* offsets of added strings (lld dedups) */
+	uint32_t *symbol_names;		/* .dynstr offset per symbols entry */
+	uint32_t soname_offset, *version_name_offsets;
+	uint32_t entry_count;
+};
+
 struct ld_context {
 	struct ld_diagnostics diagnostics;
 	struct ld_layout layout;
+	struct ld_relocations relocations;
+	struct ld_relocatable relocatable;
+	struct ld_output output;
+	struct ld_symbol_table symbol_table;
+	struct ld_dynamic dynamic;
 };
 
 #endif
