@@ -424,6 +424,32 @@ and never in the build. A TU test (`bench/vcc-diff.py`) runs over all kernel fil
 - **Time:** self-compilation 1.5 s (one thread, sequential). Stage 2 `vpp` is ~2.6× slower than the clang `-O3` build (kernel batch `-j 6`: 4.1 → 10.6 s wall) — vcc has no optimizer.
 - **Remaining:** HFA arguments (fatal error), `long double` only as double; optimization in the emitter if stage 2 is to replace the clang build.
 
+### Status 2.11 (2026-11-13) — native Linux x86-64 bootstrap
+
+`make -C src -j6 self-check` builds the normal tools in parallel at each
+stage, using vpp for every C object and the system compiler driver for linking.
+Stage 2 and stage 3 produced 46 byte-identical objects and identical vpp
+executables. The stage 2 compiler passed the native x86 suite (319/319, eight
+reference skips), the x86 VIR execution harness and the 20 allocator fixtures.
+
+Clean output directories, six make jobs, ccache disabled, warm filesystem,
+one wall-time sample per configuration on x86-64 Linux with clang 23:
+
+| Build of the tool suite | Seconds |
+| --- | ---: |
+| clang, default optimized build | 10.86 |
+| clang, VCC_OPT=-O0 | 1.47 |
+| clang-built vpp compiling stage 2 | 0.50 |
+| self-built vpp compiling stage 3, including object comparison | 1.06 |
+
+Before reusing the regular x86 objects for lextest and caching the clang
+resource path, the corresponding optimized clang, stage 2 and stage 3 times
+were 10.91, 0.79 and 1.24 seconds (57 objects). These timings cover compilation
+and linking from existing compilers. The x86 self-built compiler currently
+uses the scalar byte classifier and software CRC32C because vcc lacks the
+x86 intrinsics used for runtime SIMD dispatch. Native arm64 and Darwin still
+need verification with the shared build rules.
+
 ### Status 2.12 (2026-11-10): kernel build without clang, vroomd and lld
 Ported from the branch `claude/parallel-compiler-optimization-2bb32f` (2026-11-08) to main's layout.
 - **vld, shared objects (vDSO):** `PHDRS` (FILEHDR/PHDRS), `VERSION` script (version-local → STB_LOCAL), `.dynsym`/`.dynstr`/`.hash`/`.gnu.hash`/`.gnu.version{,_d}`/`.dynamic` in lld's order, `=fill`, `-n`; only for `-shared` with a script. The vDSO byte-identical with ld.lld 23 (except the `$d` locals, known). Without `PHDRS`, `SIZEOF_HEADERS` is 64.

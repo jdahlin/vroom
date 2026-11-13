@@ -34,6 +34,7 @@ clean:
 # from -MMD.  ccache is used when installed; disable with `make CCACHE=`.
 # Host: macOS (Apple clang, M1) or Linux aarch64 (clang from the distro).
 CCACHE    ?= $(shell command -v ccache 2>/dev/null)
+HOST_ARCH := $(shell uname -m)
 HOST_OS   := $(shell uname -s)
 ifeq ($(HOST_OS),Darwin)
 HOST_CC    = /usr/bin/clang
@@ -42,12 +43,13 @@ HOST_LIBS  =
 HOST_CPU   = -mcpu=apple-m1
 else
 HOST_CC    = clang
-HOST_DEFS  = -D_GNU_SOURCE -DVCC_RESDIR='"$(shell $(HOST_CC) -print-resource-dir)/include"' $(TOOL_DEFS)
+HOST_RESOURCE := $(shell $(HOST_CC) -print-resource-dir)/include
+HOST_DEFS  = -D_GNU_SOURCE -DVCC_RESDIR='"$(HOST_RESOURCE)"' $(TOOL_DEFS)
 HOST_LIBS  = -lm
 # Apple cores (implementer 0x61: Docker Desktop, Asahi, a VM on a Mac) report no
 # CPU part, so -mcpu=native falls back to generic; name the core instead.
 HOST_CPU_A64 =  $(if $(shell grep -qm1 'implementer.*0x61' /proc/cpuinfo && echo y),-mcpu=apple-m1,-mcpu=native)
-ifeq ($(shell uname -m),x86_64)
+ifeq ($(HOST_ARCH),x86_64)
 # CRC32C and AVX lexer paths dispatch at runtime.
 # Override HOST_CPU=-march=native only for a machine-local build.
 HOST_CPU  ?= -march=x86-64 -mtune=generic
@@ -56,6 +58,7 @@ HOST_CPU  ?= $(HOST_CPU_A64)
 endif
 endif
 VCC_CC     = $(CCACHE) $(HOST_CC)
+VCC_LINK   = $(VCC_CC)
 # VCC_SAN/VCC_OPT: set by the sanitizer variants (vcc-asan, vcc-tsan below)
 VCC_SAN   ?=
 VCC_SANLD ?=
@@ -127,7 +130,7 @@ AS_SRC  = $(AS_FILES) $(as_SRC) $(obj_SRC)
 AS_OBJ  = $(call o,$(AS_FILES)) $(call mod,as) $(call mod,obj)
 LD_SRC  = ld/ld.c $(LIB_SRC) ld/objcopy.c $(if $(VCC_WASM),ld/wasmld.c) platform/darwin/macho-linker.c
 
-$(OBJ)/%.o: %.c Makefile | $(OBJ)
+$(OBJ)/%.o: %.c Makefile $(BOOTSTRAP_COMPILER) | $(OBJ)
 	@mkdir -p $(dir $@)
 	$(VCC_CC) $(VCC_FAST) $(VCC_LTO) $(XFLAGS) -MMD -MP -c $< -o $@
 
@@ -138,7 +141,7 @@ $(UNITY_C): $(OBJ)/unity/%.c: FORCE
 	@(echo '#define VCC_UNITY 1'; for f in $(abspath $($*_SRC)); do echo "#include \"$$f\""; done) > $@.tmp
 	@if cmp -s $@.tmp $@; then rm $@.tmp; else mv $@.tmp $@; fi
 
-$(UNITY_C:.c=.o): %.o: %.c Makefile
+$(UNITY_C:.c=.o): %.o: %.c Makefile $(BOOTSTRAP_COMPILER)
 	$(VCC_CC) $(VCC_FAST) $(VCC_LTO) -MMD -MP -c $< -o $@
 
 FORCE:
@@ -147,58 +150,69 @@ FORCE:
 
 # lextest is built with -mno-outline (stable code layout for PMC runs); no LTO,
 # since -mno-outline is a code generator option the bitcode does not keep
-$(OBJ)/no/%.o: %.c Makefile | $(OBJ)
+$(OBJ)/no/%.o: %.c Makefile $(BOOTSTRAP_COMPILER) | $(OBJ)
 	@mkdir -p $(dir $@)
-	$(VCC_CC) $(VCC_FAST) -mno-outline -MMD -MP -c $< -o $@
+	$(VCC_CC) $(VCC_FAST) $(if $(filter-out x86_64,$(HOST_ARCH)),-mno-outline) -MMD -MP -c $< -o $@
 
 $(OBJ)/ld/ld.o: XFLAGS = -DVLD_MAIN
 
 # the linker without main(), for vccd (links, nm and objcopy run in its worker threads)
 VCCD_LD_OBJ = $(OBJ)/ld/ldlib.o $(call o,ld/objcopy.c platform/darwin/macho-linker.c)
-$(OBJ)/ld/ldlib.o: ld/ld.c Makefile | $(OBJ)
+$(OBJ)/ld/ldlib.o: ld/ld.c Makefile $(BOOTSTRAP_COMPILER) | $(OBJ)
 	@mkdir -p $(dir $@)
 	$(VCC_CC) $(VCC_FAST) $(VCC_LTO) -MMD -MP -c $< -o $@
 
 $(OUT)/vpp: $(call o,bin/vpp/vpp.c $(LEX_SRC) $(LIB_SRC)) $(AS_OBJ) $(PP_OBJ)
-	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@ $(HOST_LIBS)
+	$(VCC_LINK) $(VCC_LDFLAGS) -pthread $^ -o $@ $(HOST_LIBS)
 
 $(OUT)/vccd: $(call o,$(VCCD_SRC) $(LEX_SRC) $(LIB_SRC)) $(call mod,server) $(AS_OBJ) $(PP_OBJ) $(VCCD_LD_OBJ)
-	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@ $(HOST_LIBS)
+	$(VCC_LINK) $(VCC_LDFLAGS) -pthread $^ -o $@ $(HOST_LIBS)
 
-$(OUT)/lextest: $(patsubst %.c,$(OBJ)/no/%.o,bin/lextest/lextest.c port/darwin/pmc.c $(LEX_SRC) $(LIB_SRC))
-	$(VCC_CC) -O3 $(VCC_SAN) $(VCC_SANLD) -pthread $^ -o $@
+LEXTEST_SRC = bin/lextest/lextest.c port/darwin/pmc.c $(LEX_SRC) $(LIB_SRC)
+ifeq ($(HOST_ARCH),x86_64)
+# x86 has no machine outliner. Reuse the normal objects in non-LTO builds.
+LEXTEST_OBJ = $(if $(VCC_LTO),$(patsubst %.c,$(OBJ)/no/%.o,$(LEXTEST_SRC)),$(call o,$(LEXTEST_SRC)))
+else
+LEXTEST_OBJ = $(patsubst %.c,$(OBJ)/no/%.o,$(LEXTEST_SRC))
+endif
+$(OUT)/lextest: $(LEXTEST_OBJ)
+	$(VCC_LINK) -O3 $(VCC_SAN) $(VCC_SANLD) -pthread $^ -o $@
 
 $(OUT)/vasm: $(call o,bin/vasm/vasm.c $(LIB_SRC)) $(AS_OBJ)
-	$(VCC_CC) $(VCC_LDFLAGS) $^ -o $@
+	$(VCC_LINK) $(VCC_LDFLAGS) $^ -o $@
 
 # virtest: VIR's parser, verifier and printer (SPEC-vir.md 16); depends on nothing else
 $(OUT)/virtest: $(call o,bin/virtest/virtest.c $(LIB_SRC)) $(call mod,vir)
-	$(VCC_CC) $(VCC_LDFLAGS) $^ -o $@
+	$(VCC_LINK) $(VCC_LDFLAGS) $^ -o $@
 
 # viralloc: VIR register allocation with a synthetic target (PLAN-vir.md V4)
 VIRALLOC_SRC = $(VIRA_SRC) vir/synth.c
 $(OUT)/viralloc: $(call o,bin/viralloc/viralloc.c $(VIRALLOC_SRC) $(LIB_SRC)) $(call mod,vir)
-	$(VCC_CC) $(VCC_LDFLAGS) $^ -o $@
+	$(VCC_LINK) $(VCC_LDFLAGS) $^ -o $@
 
 # vlink: the linker (ld.c) as a standalone tool; vobjcopy/vnm by argv[0]
 $(OUT)/vlink: $(call o,$(LD_SRC))
-	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@
+	$(VCC_LINK) $(VCC_LDFLAGS) -pthread $^ -o $@
 	ln -sf vlink $(OUT)/vobjcopy
 	ln -sf vlink $(OUT)/vnm
 
 # task-test: the unit test of port/task.c (vtask.h)
 $(OUT)/task-test: $(call o,test/port/task-test.c port/task.c)
-	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@
+	$(VCC_LINK) $(VCC_LDFLAGS) -pthread $^ -o $@
 task-test: $(OUT)/task-test
 .PHONY: task-test
 
-$(OUT)/vcc: bin/vcc/shim.c include/protocol.h | $(OUT)
-	$(VCC_CC) $(VCC_CFLAGS) $< -o $@
+$(OUT)/vcc: $(OBJ)/bin/vcc/shim.o | $(OUT)
+	$(VCC_LINK) $(VCC_LDFLAGS) $< -o $@
 
 # vsh: make's SHELL; named sh so make still execs simple commands directly
-$(OUT)/vsh/sh: bin/vcc/shim.c include/protocol.h | $(OUT)
+$(OBJ)/bin/vcc/vsh.o: bin/vcc/shim.c Makefile $(BOOTSTRAP_COMPILER) | $(OBJ)
+	@mkdir -p $(dir $@)
+	$(VCC_CC) $(VCC_CFLAGS) -DVSH -MMD -MP -c $< -o $@
+
+$(OUT)/vsh/sh: $(OBJ)/bin/vcc/vsh.o | $(OUT)
 	mkdir -p $(OUT)/vsh
-	$(VCC_CC) $(VCC_CFLAGS) -DVSH $< -o $@
+	$(VCC_LINK) $(VCC_LDFLAGS) $< -o $@
 
 $(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vcc-nm $(OUT)/vcc-objcopy: $(OUT)/vcc
 	ln -sf vcc $@
@@ -224,34 +238,24 @@ vcc-tsan:
 
 .PHONY: vcc-asan vcc-tsan
 
-# self: vcc compiles its own sources (Mach-O) and ld64 links stage 2 into
-# $(SELF); self-check builds stage 3 with stage 2 and requires identical objects.
-SELF ?= ../build/self
-SELF_CC = $(OUT)/vpp
-SELF_FLAGS = -c -std=c11 -O2 -D_DARWIN_C_SOURCE $(VCC_INC) -DVCC_INCDIR='"$(abspath headers)"'
-SELF_LD = ld -arch arm64 -platform_version macos 14.0 14.0 -syslibroot $$(xcrun --show-sdk-path) -lSystem
-SELF_SRC = $(filter-out test/% test/fuzz/%,$(wildcard */*.c */*/*.c */*/*/*.c))
-SO = $(SELF)
-# objects are named after the path below src/, / -> - (frontend/c/expr.c -> frontend-c-expr.o)
-so = $(addprefix $(SO)/,$(subst /,-,$(patsubst %.c,%.o,$(1))))
-SELF_AS = $(call so,$(AS_SRC))
-SELF_LEX = $(call so,$(LEX_SRC) $(LIB_SRC))
-SELF_PP = $(call so,$(PP_SRC) $(SPLIT_SRC))
+# Reuse the normal target graph so each stage gets the same objects and make
+# can schedule independent compilation jobs across the recursive invocation.
+SELF ?= $(if $(filter Darwin,$(HOST_OS)),../build/self,$(OUT)-self)
+SELF_CC ?= $(abspath $(OUT))/vpp
+SELF_TARGET = $(if $(filter Darwin,$(HOST_OS)),arm64-apple-darwin,$(HOST_ARCH)-linux-gnu)
+# The bootstrap currently uses the portable x86 lexer and CRC implementations.
+SELF_FLAGS ?= -DVCC_BOOTSTRAP_PORTABLE --target=$(SELF_TARGET) -I$(abspath headers)
+ifeq ($(HOST_OS),Linux)
+SELF_FLAGS += -isystem $(HOST_RESOURCE) -isystem /usr/include/$(SELF_TARGET) -isystem /usr/include
+endif
+SELF_LINK ?= $(HOST_CC) $(if $(filter Linux,$(HOST_OS)),-no-pie)
 
 self: $(OUT)/vpp
-	mkdir -p $(SELF)
-	for f in $(SELF_SRC); do o=$$(echo $$f | sed 's,/,-,g'); $(SELF_CC) $(SELF_FLAGS) $$f -o $(SELF)/$${o%.c}.o || exit 1; done
-	$(SELF_CC) $(SELF_FLAGS) -DVLD_MAIN ld/ld.c -o $(SELF)/ld-main.o
-	$(SELF_LD) $(call so,bin/vpp/vpp.c) $(SELF_PP) $(SELF_LEX) $(SELF_AS) -o $(SO)/vpp
-	$(SELF_LD) $(call so,$(VCCD_SRC) $(server_SRC) ld/ld.c ld/objcopy.c platform/darwin/macho-linker.c) $(SELF_PP) $(SELF_LEX) $(SELF_AS) -o $(SO)/vccd
-	$(SELF_LD) $(call so,bin/vasm/vasm.c $(LIB_SRC)) $(SELF_AS) -o $(SO)/vasm
-	$(SELF_LD) $(call so,bin/lextest/lextest.c port/darwin/pmc.c) $(SELF_LEX) -o $(SO)/lextest
-	$(SELF_LD) $(SO)/ld-main.o $(call so,$(LIB_SRC)) $(SO)/ld-objcopy.o $(SO)/platform-darwin-macho-linker.o -o $(SO)/vlink
-	$(SELF_LD) $(call so,bin/vcc/shim.c) -o $(SO)/vcc
+	$(MAKE) vcc OUT=$(SELF) VCC_CC="$(SELF_CC) $(SELF_FLAGS)" VCC_LINK="$(SELF_LINK)" BOOTSTRAP_COMPILER="$(SELF_CC)"
 
 self-check: self
 	$(MAKE) self SELF=$(SELF)3 SELF_CC=$(abspath $(SELF))/vpp
-	for o in $(SELF)/*.o; do cmp $$o $(SELF)3/$$(basename $$o) || exit 1; done
+	@cd $(SELF) && find obj -name '*.o' -exec sh -ec 'for o do cmp "$$o" "$(abspath $(SELF)3)/$$o"; done' sh {} +
 	@echo "self-check: stage 2 and stage 3 objects identical"
 
 .PHONY: self self-check
