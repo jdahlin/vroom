@@ -234,14 +234,14 @@ typedef struct emitter {
 	_Atomic uint32_t nerrcall;	/* error() calls dropped (not folded) */	/* VCC_EMIT_STATS: time in finish_function */
 	const keep *K;			/* the previous round's functions, or NULL */
 	bool stats;
-	/* VCC_VIR_STATS: functions through VIR and the reasons it gave up on one (codegen/vir/try.c) */
+	/* VCC_VIR_STATS: functions through VIR and the reasons it gave up on one (codegen/vir/build-attempt.c) */
 	bool vstats;
 	_Atomic uint64_t vattempted, vlowered, vbuilt;	/* vbuilt: built but not lowered (VCC_VIR without l) */
 	struct {
 		_Atomic uint32_t count;
 		uint32_t sym;		/* the first function that failed so (under emu) */
 		char detail[96];	/* ... and what the reason leaves out */
-	} vfailed[VIRFAIL_COUNT];
+	} vfailed[VIRBUILD_FAILURE_COUNT];
 	/* VCC_REC_STATS: what each record clean-up pass did, [0 direct, 1 VIR][pass][runs, changed, removed, added] (func.c) */
 	bool rstats;
 	_Atomic uint64_t rpass[2][REC_PASS_MAX][4];
@@ -430,7 +430,7 @@ typedef struct ecx {
 	struct wst *w;		/* WASM: arch/wasm/codegen/ state (wimpl.h) */
 	struct wkst *wk;	/* X86: the walker's state (codegen/walk/walk.h) */
 	struct xst *x64;	/* X86: arch/x64/codegen/ state (x64impl.h) */
-	struct vwst *vw;	/* the VIR builder's state (codegen/vir/, PLAN-vir.md) */
+	struct virbuild_context *vw;	/* the VIR builder's state (codegen/vir/, PLAN-vir.md) */
 	bool vtry;		/* the VIR walker runs: an error is not reported, it makes the function fall back */
 	bool vlow;		/* the records are VIR's lowering (finish_function's clean-ups for it) */
 	const char *vfail;	/* ... and why (NULL: it did not fail) */
@@ -965,13 +965,13 @@ VPRIV void wasm_emit_function(ecx *e, uint32_t s);
 VPRIV void wasm_ecx_free(ecx *e);
 VPRIV void wk_function(ecx *e, uint32_t s);
 VPRIV void wk_ecx_free(ecx *e);
-VPRIV bool vw_x64(ecx *e, uint32_t s, const char **why);
-VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why);	/* codegen/vir/a64.c: the built VIR as arm64 records */
-VPRIV const vir_failure_info vir_failure_table[VIRFAIL_COUNT];
-VPRIV void vw_stats_print(emitter *E);	/* VCC_VIR_STATS: one line of totals, one per reason (stderr) */
-VPRIV bool vw_try(ecx *e, uint32_t s);	/* codegen/vir/: s through VIR (VCC_VIR); false: emit it as before */
-VPRIV bool vw_enabled(const cc_opts *o);	/* VIR lowers functions (VCC_VIR with l, -O2) */
-VPRIV void vw_wk_ecx_free(ecx *e);
+VPRIV bool x64_vir_function_lower(ecx *e, uint32_t s, const char **why);
+VPRIV bool a64_vir_function_lower(ecx *e, uint32_t s, const char **why);	/* codegen/vir/a64.c: the built VIR as arm64 records */
+VPRIV const virbuild_failure_info virbuild_failure_table[VIRBUILD_FAILURE_COUNT];
+VPRIV void virbuild_statistics_print(emitter *E);	/* VCC_VIR_STATS: one line of totals, one per reason (stderr) */
+VPRIV bool virbuild_function_try(ecx *e, uint32_t s);	/* codegen/vir/: s through VIR (VCC_VIR); false: emit it as before */
+VPRIV bool virbuild_is_enabled(const cc_opts *o);	/* VIR lowers functions (VCC_VIR with l, -O2) */
+VPRIV void virbuild_wk_ecx_free(ecx *e);
 VPRIV void wasm_data_ref(ecx *e, uint32_t ref);
 VPRIV void wasm_header(cc *c, tbuf *hdr, ecx *ctx, int nthr);
 VPRIV void wasm_tail(cc *c, tbuf *t, _Atomic uint8_t *claimed);

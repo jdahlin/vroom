@@ -6,7 +6,7 @@
 Compiles TUs with `vpp -S` at -O2 and VCC_VIR=bl VCC_VIR_STATS=1: every
 function the VIR builder or lowering cannot handle is compiled by the direct
 emitter, and vcc prints per TU how many and why (src/codegen/vir/failure.h,
-try.c).  This sums that over a set of TUs and prints the reasons, most
+build-attempt.c).  This sums that over a set of TUs and prints the reasons, most
 frequent first, with one example function and what the reason leaves out.
 
 Sets (--sets, comma separated; default all that exist on this machine):

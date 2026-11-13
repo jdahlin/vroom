@@ -65,7 +65,7 @@ VPRIV void virbuild_lower_block(const virbuild_lowering *d, uint32_t b)
 				if (f->insns[*p].type == VIR_TYPE_MULTI)
 					continue;
 				if (n == d->max_operands)
-					t->fail(ctx, VIRFAIL(too_many_operands));
+					t->fail(ctx, VIRBUILD_FAILURE(too_many_operands));
 				d->operand_value[n] = *p;
 				d->operand_reg[n++] = o->operand_registers[pos++];
 			}
