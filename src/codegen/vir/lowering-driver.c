@@ -39,6 +39,21 @@ VPRIV void virbuild_lower_block(const virbuild_lowering *d, uint32_t b)
 	const vir_blk *k = &f->blk[b];
 	uint32_t pos = o->boff[b], ei = o->boff[f->nblk + 1 + b], eend = o->boff[f->nblk + 2 + b];
 	uint32_t first = k->first + (t->params_in_loop ? 0 : k->nparam), last = k->first + k->n;
+	uint32_t run = 0;	/* -g: the run of f->loc of instruction i (the last that starts at or before it) */
+
+	if (d->row && f->nloc) {
+		uint32_t lo = 0, hi = f->nloc;
+
+		while (hi - lo > 1) {
+			uint32_t m = lo + (hi - lo) / 2;
+
+			if (f->loc[m].first <= first)
+				lo = m;
+			else
+				hi = m;
+		}
+		run = lo;
+	}
 
 	t->block_begin(ctx, b);
 	if (!t->params_in_loop)
@@ -58,6 +73,14 @@ VPRIV void virbuild_lower_block(const virbuild_lowering *d, uint32_t b)
 
 		if (d->skip_at && i == *d->skip_at)
 			break;
+		if (d->row && f->nloc) {	/* (before the edits: they are this instruction's) */
+			bool start = i == first;
+
+			while (run + 1 < f->nloc && f->loc[run + 1].first <= i)
+				run++, start = true;
+			if (start && f->loc[run].first <= i)
+				d->row(d->row_e, f->loc[run].loc);
+		}
 		virbuild_edits(d, &ei, eend, i);
 		vir_oit_init(&it, f, &x, false);
 		if (t->skip_multi_operands) {

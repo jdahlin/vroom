@@ -288,10 +288,6 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 	const ctype *ft = T(c, c->syms[s].ty);
 
 	*why = NULL;
-	if (e->E->o->debug) {
-		*why = VIRFAIL(debug_info);
-		return false;
-	}
 	/* (unwind tables would have to describe the d registers' slots: not written) */
 	vl_regs(&regs, DARWIN(c), !e->E->o->cfi && !vl_vcross(f));
 	if (!vir_loops_build(f, &V->lp)) {
@@ -371,6 +367,7 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 		.order = L.ord, .position = L.opos, .rotation = VLT.hl, .chase = L.chs, .path = VLT.path,
 		.block_label = L.lbl, .optimize = !e->E->noopt, .rotate = e->E->o->optimize.rotate_loops,
 		.operand_value = L.ov, .operand_reg = L.opr, .max_operands = VL_MAXOP, .skip_at = &L.skip,
+		.row = e->E->o->debug ? dbg_row : NULL, .row_e = e,
 	};
 	L.ret32 = KIND(c, ft->base) != TY_VOID && is_integer(c, ft->base) && tsize(c, ft->base) == 4;
 	L.tail = !(ft->flags & TF_VARIADIC) && em_tail_caller_ok(e, s) && !vl_notail(&L, VLT.lo32);	/* (lo32: scratch until it is filled) */

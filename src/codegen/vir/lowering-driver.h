@@ -66,6 +66,9 @@ typedef struct virbuild_lowering {
 	uint32_t max_operands;
 	/* an instruction at which the block's lowering stops (a sibling call left the ret: arm64), none when *skip_at is 0; NULL: never */
 	const uint32_t *skip_at;
+	/* -g: a line-table row at the next record, called at each block and wherever f->loc starts a run; NULL: none */
+	void (*row)(ecx *e, uint32_t loc);
+	ecx *row_e;
 } virbuild_lowering;
 
 /* the chases, the layout, then each block in it that is not chased away, then after_blocks */

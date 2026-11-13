@@ -19,8 +19,8 @@ A set whose files are not on this machine is named as missing, not an error.
 
 -n N   TUs per sample for kernel and postgres (default 150; 0: all)
 -j N   parallel vpp processes (default 3)
---keep-g       keep -g in postgres' flags (it builds with -g, and VIR lowers nothing under
-               -g: every function would be one debug_info failure; default: -g removed)
+--keep-g       keep -g in postgres' flags (it builds with -g; VIR lowers the same functions
+               with or without it, so -g is removed by default: line tables cost time)
 --bin-dir DIR  tools from DIR (default build/src, or $VCC_BIN)
 --level L      the level, -O2 (default) or -O3 (with the vectorizer); x86-64 lowers the same way
 Counts are functions, not TUs.  A TU vpp rejects (exit status != 0) is listed

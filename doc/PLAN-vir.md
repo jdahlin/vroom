@@ -292,6 +292,21 @@ The pass switch is read per TU, not per process; a bad value fails the job.
 - Not run: `vcc-vir-x86.py` and the x86-64 CI job need an x86-64 host; its
   compile side was checked here (the same functions lowered, packed
   instructions only at `-O3`, `-O0`/`-O1` unchanged by VIR's options).
+- What CI found once `-O2` was VIR, fixed in the same branch:
+  - `vw_trivial` swept every block parameter to a fixed point, one nesting
+    level per sweep: `test/vcc/limits.c` (1000 nested loops) took 14 s
+    (20.7 G instructions in that pass) and timed out under ASan.  It is a
+    worklist now (Braun et al.'s tryRemoveTrivialPhi): 0.81 s, the same
+    assembly.
+  - `-g` made every function fall back (VIR wrote no line table), so `-g`
+    changed the code at `-O2`.  The lowering driver now calls `dbg_row` at
+    each block and wherever `f->loc` starts a run, and arm64's printer
+    shrink-wraps under `-g` too.  `vcc-dwarf.py` passes 1591/1591 at `-O0`
+    to `-O3` (`.text` unchanged by `-g`, dwarfdump verifies, `-g -c` equals
+    clang's assembly of `-g -S`), and `vcc-opt-debug.py` passes for x86-64.
+  - `vcc-x86-leaf-frame.py` required a frame in `fl_parameter`, `fl_stack`
+    and `fl_call`, the direct emitter's policy; VIR omits it there, as
+    clang -O2 does, and the harness now expects that at `-O2` and up.
 
 ### V4 x86-64 against clang -O2 (2026-11-12), goal at most 5 % slower
 

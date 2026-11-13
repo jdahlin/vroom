@@ -94,7 +94,7 @@ VPRIV bool vw_x64(ecx *e, uint32_t sym, const char **why)
 	vir_regs regs = { .alloc = { (X_TEMPS & ~(1u << R10)) | cs, (1u << 14) - 1 },
 		.callee = { cs, 0 }, .fixed = vx_fixed, .ctx=&L };
 	*why = VIRFAIL(x64_unsupported_target_option);
-	if (e->E->o->debug || e->E->o->sprot || x64_nosimd(e)) return false;
+	if (e->E->o->sprot || x64_nosimd(e)) return false;
 	const attrs *attrs = sym_attrs(e->c, sym);
 	if (attrs && attrs->interrupt) { *why = VIRFAIL(x64_interrupt_function); return false; }
 	for (uint32_t i = 1; i < f->nconst; i++)
@@ -174,7 +174,8 @@ VPRIV bool vw_x64(ecx *e, uint32_t sym, const char **why)
 	L.order=layout;L.position=layout+f->nblk;L.rotation=layout+2*f->nblk;L.chase=layout+3*f->nblk;L.lp=&V->lp;
 	L.drv=(virbuild_lowering){ .target=&vx_lowering_target, .ctx=&L, .f=f, .o=&V->ao, .lp=&V->lp,
 		.order=L.order, .position=L.position, .rotation=L.rotation, .chase=L.chase, .path=layout+4*f->nblk,
-		.block_label=L.label, .optimize=!e->E->noopt, .rotate=e->E->o->optimize.rotate_loops };
+		.block_label=L.label, .optimize=!e->E->noopt, .rotate=e->E->o->optimize.rotate_loops,
+		.row=e->E->o->debug?x64_dbgrow:NULL, .row_e=e };
 
 	for (int r = 0; r < 16; r++)
 		if (V->ao.callee[0] >> r & 1) x64_csused(e, r);

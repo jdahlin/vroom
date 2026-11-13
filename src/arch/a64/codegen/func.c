@@ -437,7 +437,7 @@ VPRIV void finish_function(ecx *e, uint32_t s)
 	RP_BEGIN(e);
 	for (uint32_t k = 0; k < e->nin; k++)
 		if (e->in[k].op == I_NOP && e->in[k].cond == NOP_PROLOG) {
-			if (!leaf && !bp && !e->dyn && e->falign <= 16 && !e->E->o->debug && !(e->E->o->cfi && !DARWIN(c)) &&
+			if (!leaf && !bp && !e->dyn && e->falign <= 16 && !(e->E->o->cfi && !DARWIN(c)) &&
 			    opt_noframe(e, k))
 				kpro = k;
 			else
@@ -549,14 +549,14 @@ VPRIV void finish_function(ecx *e, uint32_t s)
 		}
 		if (k == e->nin)
 			break;
-		if (k == kpro)
-			continue;	/* (the marker) */
 		const ins *i = &e->in[k];
 
-		for (; dj < e->ndl && e->dl[dj].k == k; dj++)
+		for (; dj < e->ndl && e->dl[dj].k == k; dj++)	/* (at the save point's marker too: after the prologue) */
 			if (dj + 1 == e->ndl || e->dl[dj + 1].k != k)	/* the last of several at one place */
 				vtext_format_append(b, dj ? "\t.loc\t%u %u %u\n" : "\t.loc\t%u %u %u prologue_end\n",
 				     e->dl[dj].file, e->dl[dj].line, e->dl[dj].col);
+		if (k == kpro)
+			continue;	/* (the marker) */
 		if (far && ((i->op == I_BC && i->cond < 14) || i->op == I_CBZ || i->op == I_CBNZ)) {
 			ins n = *i;
 

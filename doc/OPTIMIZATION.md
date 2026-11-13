@@ -65,9 +65,10 @@ cannot build or lower is compiled by `-O1`'s direct emitter, so `-O2` code is
 never worse than "correct".  The reasons are in `codegen/vir/failure.h`;
 `bench/vir-failures.py` counts them over the suites, a kernel sample,
 PostgreSQL and SQLite.  The main ones today: inline assembly, records passed
-or returned by value, variadic functions, `__int128`, and, on arm64 Linux,
-`-g` (the lowering writes no debug lines yet: with `-g` every function falls
-back).
+or returned by value, variadic functions and `__int128`.  `-g` changes no
+code: both lowerings write a line-table row at each block and wherever the
+source location of VIR's instructions changes (`vir_loc`, SPEC-vir.md 22.7;
+`bench/vcc-dwarf.py -O 2`, `bench/vcc-opt-debug.py`).
 
 What a function gets, in order (the rows of `codegen/vir/pass-table.c`):
 

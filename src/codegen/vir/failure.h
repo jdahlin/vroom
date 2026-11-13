@@ -59,7 +59,6 @@
 	X(build_failed, "VIR: the function could not be built") \
 	X(emitter_error, "VIR: the walker reported an error") \
 	X(verifier_rejected, "VIR: the verifier rejected the function") \
-	X(debug_info, "VIR lowering: -g") \
 	X(loop_analysis, "VIR: loops") \
 	X(allocation_failed, "VIR: allocation failed") \
 	X(allocation_check_failed, "VIR: the allocation check failed") \
@@ -92,7 +91,7 @@
 	X(over_aligned_slot, "VIR lowering: an over-aligned slot") \
 	X(large_frame_scratch, "VIR lowering: x17 across a large frame") \
 	X(unsupported_instruction, "VIR lowering: an instruction it does not lower") \
-	X(x64_unsupported_target_option, "VIR x86-64: -g, stack protector or no SIMD") \
+	X(x64_unsupported_target_option, "VIR x86-64: stack protector or no SIMD") \
 	X(x64_interrupt_function, "VIR x86-64: an interrupt function") \
 	X(x64_constant_kind, "VIR x86-64: a constant of a kind it cannot place") \
 	X(x64_constant_range, "VIR x86-64: a symbol or slot address beyond the 32-bit range") \
