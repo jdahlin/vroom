@@ -47,7 +47,8 @@ static inline VNONNULL(1) void vbuf_put(vbuf *b, const void *s, size_t n)
 			abort();
 		b->cap = c;
 	}
-	memcpy(b->p + b->n, s, n);
+	if (n)	/* (an empty append to an empty buffer: b->p is NULL, which memcpy must not get) */
+		memcpy(b->p + b->n, s, n);
 	b->n += n;
 }
 
