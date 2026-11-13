@@ -427,7 +427,7 @@ static __attribute__((noinline)) int driver_job_run_one(int argc, char **argv, c
 	driver_job_preprocess(job, p, env);
 done:
 	vjob_jb = NULL;
-	pp_diag_summary(p);
+	diag_summary_print(p);
 	pp_close(p);	/* frees the text in o */
 out:
 	vjob_fail_fd = 2;

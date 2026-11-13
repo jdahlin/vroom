@@ -150,12 +150,12 @@ VPRIV void weak_declared(cc *c, uint32_t s)
 /* the end of the TU: never declared, or an alias of nothing */
 VPRIV void weak_finish(cc *c)
 {
-	int st = pp_wstate(c->p, "", true, NULL);
+	int st = diag_warning_state(c->p, "", true, NULL);
 
 	for (uint32_t i = 0; i < c->npweak; i++) {
 		const struct pweak *w = &c->pweak[i];
 
-		if (!w->sym && st && !pp_in_system_header(c->p, w->loc))
+		if (!w->sym && st && !pp_location_is_in_system_header(c->p, w->loc))
 			report(c, st == 2 ? "error" : "warning", w->loc, NULL, 0, NULL, 0, "weak identifier '%.*s' never declared%s",
 			       IDF(w->key), st == 2 ? " [-Werror]" : "");
 	}

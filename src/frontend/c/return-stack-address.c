@@ -120,7 +120,7 @@ VPRIV void return_stack_addr(cc *c, uint32_t e, bool addr)
 			continue;
 		case N_COMPLIT: {
 			const sym *y = &c->syms[x->b];
-			pp_span r = rng(c, e);
+			diag_span r = rng(c, e);
 			size_t len = 0;
 			const char *t;
 			char buf[256];
@@ -128,7 +128,7 @@ VPRIV void return_stack_addr(cc *c, uint32_t e, bool addr)
 
 			if (!addr || !x->b || y->depth == 0 || y->sc == SC_STATIC)
 				return;
-			t = pp_src(c->p, r.b, r.e, &len);
+			t = pp_source_text(c->p, r.b, r.e, &len);
 			k = complit_text(t, len, buf, sizeof buf);
 			cc_warnx(c, "return-stack-address", true, NULL, r.b, &r, 1, NULL, 0,
 				 "address of stack memory associated with compound literal '%.*s' returned", (int)k, buf);
@@ -136,7 +136,7 @@ VPRIV void return_stack_addr(cc *c, uint32_t e, bool addr)
 		}
 		case N_VAR: {
 			const sym *y = &c->syms[x->a];
-			pp_span r = rng(c, e);
+			diag_span r = rng(c, e);
 
 			if (!addr || y->kind != S_VAR || y->depth == 0 || y->sc == SC_STATIC || y->sc == SC_EXTERN ||
 			    (y->flags & SF_GLOBAL))

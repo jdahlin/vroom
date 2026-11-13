@@ -13,7 +13,7 @@
 
 /* one compile job: its sink (dedup when the client's VCC_DIAG_DEDUP is set) */
 typedef struct vccd_diagnostics_job {
-	pp_dsink sink;
+	diag_sink sink;
 	char *unit_path;		/* the source file, absolute */
 	char *json;		/* this TU's records, one per line, each with "tu" */
 	size_t json_length, json_capacity;

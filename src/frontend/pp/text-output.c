@@ -218,7 +218,7 @@ VPRIV void pp_output_file_change(pp *p, const pp_context *from, int enter)
 			if (!p->lm_blk)
 				pp_line_marker_builtin_block_write(p);
 			/* clang's <built-in> after the command line: a line per -include, 2 per -imacros */
-			l = loc_line(p, from->loc + from->vt[from->i - 1].off) - p->marker_builtin_line + 1 + !enter;
+			l = pp_location_line(p, from->loc + from->vt[from->i - 1].off) - p->marker_builtin_line + 1 + !enter;
 			if (enter)
 				pp_output_line_move(p, l, false);
 			if (!enter) {
@@ -231,7 +231,7 @@ VPRIV void pp_output_file_change(pp *p, const pp_context *from, int enter)
 		if (!enter && !p->lm_blk)
 			pp_line_marker_builtin_block_write(p);	/* <built-in> ends */
 		if (from && from->type == PP_CONTEXT_FILE && from->i)
-			l = loc_line(p, from->loc + from->vt[from->i - 1].off);
+			l = pp_location_line(p, from->loc + from->vt[from->i - 1].off);
 		if (enter) {
 			pp_output_line_move(p, l, false);
 			return;	/* the marker when the file is known (pp_line_marker_file_enter) */
@@ -240,7 +240,7 @@ VPRIV void pp_output_file_change(pp *p, const pp_context *from, int enter)
 		pp_line_marker_file_set(p, e->spath, e->sys);
 		if (from->i) {
 			uint32_t pl;
-			const char *pn = presumed_name(p, from->fe, from->loc + from->vt[from->i - 1].off, &pl);
+			const char *pn = pp_location_presumed_name(p, from->fe, from->loc + from->vt[from->i - 1].off, &pl);
 
 			if (pn != e->name)
 				p->marker_file_name = pn, p->marker_file_name_length = pl;
@@ -251,7 +251,7 @@ VPRIV void pp_output_file_change(pp *p, const pp_context *from, int enter)
 		return;
 	}
 	if (from && from->type == PP_CONTEXT_FILE && from->i)
-		l = loc_line(p, from->loc + from->vt[from->i - 1].off);
+		l = pp_location_line(p, from->loc + from->vt[from->i - 1].off);
 	else if (enter)
 		return;
 	if (enter) {
@@ -309,7 +309,7 @@ static void pp_comment_print(pp *p, const pp_context *c, const char *s, const ch
 	for (col = 1; s - col >= c->src && s[-(ptrdiff_t)col] != '\n'; col++)
 		;
 	if (sol || p->edir) {
-		uint32_t line = loc_line(p, c->loc + (uint32_t)(s - c->src));
+		uint32_t line = pp_location_line(p, c->loc + (uint32_t)(s - c->src));
 
 		if (pp_output_line_move(p, line, p->edir) || (sol && line == 1)) {
 			pp_output_reserve(p, col);
@@ -474,7 +474,7 @@ static inline void pp_token_render(pp *p, const ptok *t)
 		/* an assembler line passed through: tokens, so indented as clang does */
 		unsigned c = pp_token_column(p, t->loc);
 
-		pp_output_line_move(p, loc_line(p, t->loc), p->edir);
+		pp_output_line_move(p, pp_location_line(p, t->loc), p->edir);
 		pp_output_reserve(p, t->len + c + 2);
 		if (!p->col)
 			for (p->out[p->nout++] = ' '; c > 2; c--)
@@ -489,7 +489,7 @@ static inline void pp_token_render(pp *p, const ptok *t)
 		return;
 	}
 	if (t->kind == PP_TOKEN_KIND_DIRECTIVE_LINE) {
-		uint32_t line = loc_line(p, t->loc);
+		uint32_t line = pp_location_line(p, t->loc);
 
 		/* clang prints "assume_nonnull end" at the line of what it printed last */
 		if (t->len == 31 && !memcmp(t->s, "pragma clang assume_nonnull end", 31))
@@ -517,7 +517,7 @@ static inline void pp_token_render(pp *p, const ptok *t)
 	if (sol || p->edir) {
 		/* HandleWhitespaceBeforeTok: indented to its column if it starts a new line */
 		uint32_t loc = p->sol_on ? p->line_start_location : p->cx[p->depth - 1].type != PP_CONTEXT_FILE ? p->expansion_location : t->loc;
-		uint32_t line = loc_line(p, loc);
+		uint32_t line = pp_location_line(p, loc);
 		unsigned c = pp_token_column(p, loc);
 		/* clang's leading space: not the line break before a token in column 1 */
 		bool space = (t->flags & LEX_TOKEN_FLAG_SPACE_BEFORE) && (p->sol_on || c > 1) && p->previous_end != t->s;

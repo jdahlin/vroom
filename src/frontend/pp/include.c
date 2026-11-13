@@ -407,7 +407,7 @@ static void pp_file_entry_add(pp *p, pp_context *c, const lex_file *f, const cha
 
 /* a file skipped by its include guard or #pragma once: still a dependency,
  * under this spelling (clang's FileSkipped).  An entry with no file and a
- * one-byte span holds no location (loc_fent passes over it). */
+ * one-byte span holds no location (pp_location_file_entry passes over it). */
 /* would clang skip f by its guard: it learns a guard at the end of the file,
  * so f must have been read to its end in this TU (not open now).  Otherwise
  * clang enters f, and -H shows it. */
@@ -718,10 +718,10 @@ VPRIV void pp_include_run(pp *p, pp_context *c, uint32_t b, uint32_t e, int kind
 	pp_context_pop_to(p, d);
 	f = pp_include_find(p, c, buf, n, angled, kind == PP_DIRECTIVE_INCLUDE_NEXT, &sd, &path, &ie);
 	if (!f) {
-		pp_span r = { floc, floc + (uint32_t)n + 2 };
-		pp_dinfo di = { "fatal error", floc, &r, 1, NULL, 0, NULL, 0 };
+		diag_span r = { floc, floc + (uint32_t)n + 2 };
+		diag_info di = { "fatal error", floc, &r, 1, NULL, 0, NULL, 0 };
 
-		pp_diagx(p, &di, "'%.*s' file not found", (int)n, buf);
+		diag_report_extended(p, &di, "'%.*s' file not found", (int)n, buf);
 		if (p->fatal_jump && !p->o->fatal_continue)
 			longjmp(*p->fatal_jump, 1);
 		return;

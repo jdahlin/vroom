@@ -191,7 +191,7 @@ VPRIV void error_limit(cc *c);
 VPRIV void diag(cc *c, uint32_t loc, const char *what, const char *fmt, va_list ap);
 VPRIV __attribute__((format(printf, 3, 4))) void cc_error(cc *c, uint32_t loc, const char *fmt, ...);
 VPRIV __attribute__((format(printf, 3, 4), noreturn)) void fatal(cc *c, uint32_t loc, const char *fmt, ...);
-VPRIV __attribute__((format(printf, 8, 9))) void report(cc *c, const char *what, uint32_t loc, const pp_span *r, int nr, const pp_fixit *fx, int nfx, const char *fmt, ...);
+VPRIV __attribute__((format(printf, 8, 9))) void report(cc *c, const char *what, uint32_t loc, const diag_span *r, int nr, const diag_fixit *fx, int nfx, const char *fmt, ...);
 VPRIV __attribute__((format(printf, 3, 4))) void note(cc *c, uint32_t loc, const char *fmt, ...);
 extern const char *const w_all[];
 VPRIV bool ext_on_slow(cc *c, const char *flag, const char *const *groups);
@@ -215,21 +215,21 @@ extern const char *const w_ped[];	/* { "pedantic" } */
 /* ... the token at loc (from the source, not a macro: tf its flags) with a fix-it removing it */
 #define EXT_WARN_DEL(c, ms, tf, flag, groups, loc, ...) \
 	do { if (unlikely(ext_on((c), (flag), (groups)))) { (c)->dms = (ms); \
-		if (!((tf) & PP_TOKEN_FLAG_FROM_MACRO)) (c)->dfx = (pp_fixit){ (loc), (loc) + (uint32_t)strlen(ms), "", VDA_MACHINE }; \
+		if (!((tf) & PP_TOKEN_FLAG_FROM_MACRO)) (c)->dfx = (diag_fixit){ (loc), (loc) + (uint32_t)strlen(ms), "", DIAG_APPLICABILITY_MACHINE }; \
 		ext_warn((c), (flag), (groups), (loc), __VA_ARGS__); } } while (0)
 VPRIV void cc_errorx(cc *c, const char *flag, const char *const *groups, uint32_t loc,
-                     const pp_span *r, int nr, const char *fmt, ...) __attribute__((format(printf, 7, 8)));
-VPRIV __attribute__((format(printf, 6, 7))) vdiag *cc_warn_begin(cc *c, const char *flag, bool on, const char *const *groups, uint32_t loc, const char *fmt, ...);
+                     const diag_span *r, int nr, const char *fmt, ...) __attribute__((format(printf, 7, 8)));
+VPRIV __attribute__((format(printf, 6, 7))) diag_record *cc_warn_begin(cc *c, const char *flag, bool on, const char *const *groups, uint32_t loc, const char *fmt, ...);
 extern const char *const w_conv[];
 extern const char *const w_selfassign[];
-VPRIV void rt_defer(cc *c, const char *flag, const char *const *groups, uint32_t loc, const pp_span *r, int nr,
+VPRIV void rt_defer(cc *c, const char *flag, const char *const *groups, uint32_t loc, const diag_span *r, int nr,
 		    const char *ms, uint32_t mlen, const char *fmt, ...) __attribute__((format(printf, 9, 10)));
 VPRIV void rt_flush(cc *c);
-VPRIV void rt_emit(cc *c, vdiag *d);
+VPRIV void rt_emit(cc *c, diag_record *d);
 VPRIV void unused_value(cc *c, uint32_t e, bool comma);
 VPRIV bool unused_cmp(cc *c, uint32_t e);
 VPRIV void set_only(cc *c, uint32_t e);
-VPRIV __attribute__((format(printf, 10, 11))) bool cc_warnx(cc *c, const char *flag, bool on, const char *const *groups, uint32_t loc, const pp_span *r, int nr, const pp_fixit *fx, int nfx, const char *fmt, ...);
+VPRIV __attribute__((format(printf, 10, 11))) bool cc_warnx(cc *c, const char *flag, bool on, const char *const *groups, uint32_t loc, const diag_span *r, int nr, const diag_fixit *fx, int nfx, const char *fmt, ...);
 /* field-uses.c: the VCC_FIELD_USES test aid */
 enum { FU_DECL, FU_MEMBER, FU_DESIGNATOR, FU_OFFSETOF };
 VPRIV void cc_field_uses_begin(cc *c, const char *selection_path);
@@ -377,8 +377,8 @@ VPRIV uint32_t typo_keyword(cc *c, uint32_t id, int kws);
 VPRIV bool is_typedef_name(cc *c, const ptok *t);
 VPRIV uint32_t mk(cc *c, int op, qty ty, uint32_t loc);
 static inline void setspan(cc *c, uint32_t n, uint32_t b);
-VPRIV pp_span rng(cc *c, uint32_t n);
-VPRIV pp_span rng_np(cc *c, uint32_t n);	/* without the parentheses */
+VPRIV diag_span rng(cc *c, uint32_t n);
+VPRIV diag_span rng_np(cc *c, uint32_t n);	/* without the parentheses */
 VPRIV void fwd_note(cc *c, qty t);
 VPRIV uint32_t mk2(cc *c, int op, qty ty, uint32_t loc, uint32_t a, uint32_t b);
 VPRIV void vinit(vec *v);
@@ -550,7 +550,7 @@ VPRIV void uninit_check(cc *c, uint32_t body, uint32_t first_label);
 VPRIV uint32_t fmt_attr(cc *c, uint32_t fs);
 VPRIV uint32_t expr_tdef(cc *c, uint32_t n);
 VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty, const uint32_t *atd, uint32_t nargs);
-VPRIV void c23_word_help(cc *c, vdiag *d, uint32_t id);
+VPRIV void c23_word_help(cc *c, diag_record *d, uint32_t id);
 VPRIV void asm_label(cc *c, attrs *a);
 VPRIV void target_attr(cc *c, attrs *a, uint32_t str, uint32_t loc);
 /* declspec.c */
@@ -588,7 +588,7 @@ VPRIV void weak_finish(cc *c);
 VPRIV uint32_t implicit_func(cc *c, uint32_t id, uint32_t loc);
 VPRIV uint32_t lib_func(cc *c, uint32_t id, uint32_t loc);
 VPRIV const char *lib_header(cc *c, uint32_t id);
-VPRIV void include_fix(cc *c, vdiag *d, uint32_t loc, const char *hdr);
+VPRIV void include_fix(cc *c, diag_record *d, uint32_t loc, const char *hdr);
 VPRIV qty implicit_lib_type(cc *c, uint32_t id);
 VPRIV uint32_t implicit_lib_func(cc *c, uint32_t id, uint32_t loc, qty t);
 VPRIV qty sig_func_type(cc *c, const char *sig);
@@ -747,7 +747,7 @@ static inline bool typedef_id(cc *c, uint32_t id)
 static inline void setspan(cc *c, uint32_t n, uint32_t b)
 {
 	if (n && !c->span[n].e)
-		c->span[n] = (pp_span){ b, c->prevloc };
+		c->span[n] = (diag_span){ b, c->prevloc };
 }
 
 /* the tracked variable s is assigned inside an if/loop/switch nested deeper than its declaration */

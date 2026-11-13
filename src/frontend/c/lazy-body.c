@@ -43,7 +43,7 @@ VPRIV bool lazy_ok(cc *c, uint32_t s, const declr *d)
 		return false;
 	if (c->npack || c->lz_on || c->ntk != 1)
 		return false;	/* (lookahead past the '{': never at a definition) */	/* (#pragma pack: the body's local structs would see the TU's end) */
-	return !pp_in_main_file(c->p, d->loc);
+	return !pp_location_is_in_main_file(c->p, d->loc);
 }
 
 static void lz_tok(cc *c, const ptok *t)

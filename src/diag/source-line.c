@@ -9,7 +9,7 @@
 #include <unistd.h>
 
 /* the display width of code point c: 2 for East Asian wide and emoji, 0 for combining marks */
-static uint32_t cp_width(uint32_t c)
+static uint32_t diag_codepoint_width(uint32_t c)
 {
 	if ((c >= 0x300 && c <= 0x36f) || (c >= 0x200b && c <= 0x200f) || (c >= 0xfe00 && c <= 0xfe0f))
 		return 0;
@@ -23,7 +23,7 @@ static uint32_t cp_width(uint32_t c)
 
 /* display columns of src[b, e) from col: tabs to the next multiple of 8, UTF-8 by its
    code point's width (a malformed byte is one column) */
-VPRIV uint32_t dcols(const char *s, uint32_t b, uint32_t e, uint32_t col)
+VPRIV uint32_t diag_columns_width(const char *s, uint32_t b, uint32_t e, uint32_t col)
 {
 	for (uint32_t i = b; i < e; i++) {
 		unsigned char ch = (unsigned char)s[i];
@@ -39,7 +39,7 @@ VPRIV uint32_t dcols(const char *s, uint32_t b, uint32_t e, uint32_t col)
 
 			for (k = 0; k < n && i + 1 + k < e && ((unsigned char)s[i + 1 + k] & 0xc0) == 0x80; k++)
 				c = c << 6 | ((unsigned char)s[i + 1 + k] & 0x3f);
-			col += k == n ? cp_width(c) : 1;
+			col += k == n ? diag_codepoint_width(c) : 1;
 			i += (uint32_t)k;
 		}
 	}

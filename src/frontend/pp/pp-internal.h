@@ -235,11 +235,11 @@ struct pp {
 	uint32_t diagnostic_last_location;	/* the last diagnostic's location + 1, and whether it was a note */
 	bool diagnostic_last_is_note;
 	uint32_t diagnostic_last_file;	/* the file of the last diagnostic + 1 (for "In file included from") */
-	vdiag *dhead, *diagnostic_tail;	/* the TU's diagnostic records (in perm) */
+	diag_record *dhead, *diagnostic_tail;	/* the TU's diagnostic records (in perm) */
 	bool diagnostic_track;		/* VCC_TRACK_DIAG: vcc's call site after each diagnostic */
-	bool diagnostic_finished;		/* pp_diag_finish ran (JSON flushed, SARIF written) */
-	vdiag *diagnostic_pending_structured;		/* -fdiagnostics-format=json: the record not yet written */
-	vdiag *diagnostic_pending_text;		/* vcc's text style: the record not yet rendered (its notes may follow) */
+	bool diagnostic_finished;		/* diag_finish ran (JSON flushed, SARIF written) */
+	diag_record *diagnostic_pending_structured;		/* -fdiagnostics-format=json: the record not yet written */
+	diag_record *diagnostic_pending_text;		/* vcc's text style: the record not yet rendered (its notes may follow) */
 	uint32_t diagnostic_previous_location;	/* clang's LastLoc + 1 (0: none) and LastLevel: the previous record's */
 	uint8_t diagnostic_previous_level;
 	struct pp_line_mark {		/* #line / GNU line markers */
@@ -319,24 +319,24 @@ struct pp {
 	const pp_header_cache_chunk *chunk_cache_by_ids[4096];	/* recent chunks, by (first id, last id, length) */	/* recent chunks, by hash (most repeats are a child's) */
 };
 
-#define PP_ERROR(p, loc, ...) pp_diag(p, loc, "error", __VA_ARGS__)
-#define PP_FATAL(p, loc, ...) pp_diag(p, loc, "fatal error", __VA_ARGS__)
-#define PP_WARN(p, loc, ...) pp_diag(p, loc, "warning", __VA_ARGS__)
+#define PP_ERROR(p, loc, ...) diag_report(p, loc, "error", __VA_ARGS__)
+#define PP_FATAL(p, loc, ...) diag_report(p, loc, "fatal error", __VA_ARGS__)
+#define PP_WARN(p, loc, ...) diag_report(p, loc, "warning", __VA_ARGS__)
 
 /* ---------------- header cache: recording reads and writes ---------------- */
 
 /* the open regions are not cacheable (something in them depends on more than we record) */
-VPRIV void diag_pragma(pp *p, const char *q, const char *e, uint32_t loc);
-VPRIV void diag_file_end(pp *p, uint32_t fe);
+VPRIV void diag_pragma_handle(pp *p, const char *q, const char *e, uint32_t loc);
+VPRIV void diag_pragma_file_end(pp *p, uint32_t fe);
 #define PP_HEADER_CACHE_REGION_REJECT(p) do { if ((p)->rec.n) { (p)->rec.nbad = (p)->rec.n; (p)->rec.uncacheable_line = __LINE__; } } while (0)
 
-VPRIV void pp_wc_fill(pp *p);
+VPRIV void diag_warning_cache_fill(pp *p);
 
 /* false: warning k cannot be reported in this TU (off on the command line, no pragmas) */
 static inline bool pp_warning_is_possible(pp *p, int k)
 {
 	if (p->warning_cache_options != p->o)
-		pp_wc_fill(p);
+		diag_warning_cache_fill(p);
 	return p->wc[k] || p->diagnostic_enabling_count;
 }
 
@@ -380,50 +380,50 @@ VPRIV void pp_output_reserve(pp *p, size_t n);
 static inline void pp_output_append(pp *p, const char *s, size_t n);
 static inline void pp_output_append_character(pp *p, char ch);
 /* diag/: locations, diagnostics and their rendering; pp_directive_extra_token_warn is directive.c's */
-VPRIV uint32_t loc_line(const pp *p, uint32_t loc);
-VPRIV const char *presumed_name(const pp *p, uint32_t fe, uint32_t loc, uint32_t *len);
-VPRIV __attribute__((format(printf, 4, 5))) void pp_diag(pp *p, uint32_t loc, const char *what, const char *fmt, ...);
-void pp_diagx(pp *p, const pp_dinfo *d, const char *fmt, ...);
-bool pp_warnx(pp *p, const char *flag, bool on, const char *const *groups, pp_dinfo *d, const char *fmt, ...);
-VPRIV bool obj_macro_at(pp *p, uint32_t loc);
+VPRIV uint32_t pp_location_line(const pp *p, uint32_t loc);
+VPRIV const char *pp_location_presumed_name(const pp *p, uint32_t fe, uint32_t loc, uint32_t *len);
+VPRIV __attribute__((format(printf, 4, 5))) void diag_report(pp *p, uint32_t loc, const char *what, const char *fmt, ...);
+void diag_report_extended(pp *p, const diag_info *d, const char *fmt, ...);
+bool diag_warning_report(pp *p, const char *flag, bool on, const char *const *groups, diag_info *d, const char *fmt, ...);
+VPRIV bool pp_location_is_object_macro(pp *p, uint32_t loc);
 VPRIV void pp_directive_extra_token_warn(pp *p, const pp_context *c, uint32_t name, uint32_t i);
-void pp_diag_summary(pp *p);
-VPRIV const pp_file_entry *loc_fent(const pp *p, uint32_t loc);
-VPRIV bool loc_ok(const pp *p, uint32_t loc, const pp_file_entry **e);
-VPRIV int diag_where(const pp *p, uint32_t loc, const char **name, uint32_t *nl, uint32_t *line, uint32_t *col);
+void diag_summary_print(pp *p);
+VPRIV const pp_file_entry *pp_location_file_entry(const pp *p, uint32_t loc);
+VPRIV bool pp_location_is_valid(const pp *p, uint32_t loc, const pp_file_entry **e);
+VPRIV int diag_location_presumed(const pp *p, uint32_t loc, const char **name, uint32_t *nl, uint32_t *line, uint32_t *col);
 struct vbuffer;
-VPRIV void render_text(pp *p, struct vbuffer *b, const vdiag *d);
-VPRIV bool render_head(pp *p, struct vbuffer *b, const vdiag *d, const pp_file_entry **ep);
-VPRIV void parseable_fixits(pp *p, struct vbuffer *b, const vdiag *d);
-VPRIV uint32_t dcols(const char *s, uint32_t b, uint32_t e, uint32_t col);
-VPRIV void db_c(struct vbuffer *b, char c, int n);
-VPRIV void include_stack(pp *p, struct vbuffer *b, const pp_file_entry *e);
+VPRIV void diag_clang_record_render(pp *p, struct vbuffer *b, const diag_record *d);
+VPRIV bool diag_head_render(pp *p, struct vbuffer *b, const diag_record *d, const pp_file_entry **ep);
+VPRIV void diag_fixits_parseable_render(pp *p, struct vbuffer *b, const diag_record *d);
+VPRIV uint32_t diag_columns_width(const char *s, uint32_t b, uint32_t e, uint32_t col);
+VPRIV void diag_text_char_repeat(struct vbuffer *b, char c, int n);
+VPRIV void diag_include_stack_render(pp *p, struct vbuffer *b, const pp_file_entry *e);
 /* diagtext.c: vcc's text style (records rendered when the next one starts, so that
    their notes can fold into the snippet), the narrated style, the type diff */
-VPRIV void diag_text_flush(pp *p);
-VPRIV void diag_narrate(pp *p, struct vbuffer *b, vdiag *d);
-VPRIV void diag_render_rec(pp *p, struct vbuffer *b, vdiag *d);
-VPRIV void diag_render_color(pp *p, struct vbuffer *b, vdiag *d);
-VPRIV void diag_typediff(struct vbuffer *b, const vdiag *d, const char *plain);
+VPRIV void diag_vcc_flush(pp *p);
+VPRIV void diag_narrated_render(pp *p, struct vbuffer *b, diag_record *d);
+VPRIV void diag_record_render_plain(pp *p, struct vbuffer *b, diag_record *d);
+VPRIV void diag_record_render_color(pp *p, struct vbuffer *b, diag_record *d);
+VPRIV void diag_type_diff_render(struct vbuffer *b, const diag_record *d, const char *plain);
 /* moved apart by the split of the diagnostics engine, still one unity TU */
-VPRIV __attribute__((noinline, cold)) void dsink_records(pp *p);
-VPRIV void jstr(struct vbuffer *b, const char *s, size_t n);
-VPRIV void jcstr(struct vbuffer *b, const char *s);
-VPRIV void html_page(pp *p, struct vbuffer *b);
-VPRIV void sarif_log(pp *p, struct vbuffer *b);
-VPRIV int level_of(const char *what);
-VPRIV void kid_add(vdiag *d, vdiag *k);
-VPRIV void kid_after(vdiag *top, vdiag *after, vdiag *n);
-VPRIV void render_clang(pp *p, struct vbuffer *b, vdiag *d);
-VPRIV void track_str(struct vbuffer *b, const void *pc);
-VPRIV void render_narr(pp *p, struct vbuffer *b, const vdiag *d);
+VPRIV __attribute__((noinline, cold)) void diag_sink_records_send(pp *p);
+VPRIV void diag_json_string_append(struct vbuffer *b, const char *s, size_t n);
+VPRIV void diag_json_cstring_append(struct vbuffer *b, const char *s);
+VPRIV void diag_html_page_write(pp *p, struct vbuffer *b);
+VPRIV void diag_sarif_log_write(pp *p, struct vbuffer *b);
+VPRIV int diag_level_from_name(const char *what);
+VPRIV void diag_record_note_append(diag_record *d, diag_record *k);
+VPRIV void diag_record_note_insert(diag_record *top, diag_record *after, diag_record *n);
+VPRIV void diag_clang_render(pp *p, struct vbuffer *b, diag_record *d);
+VPRIV void diag_report_site_text(struct vbuffer *b, const void *pc);
+VPRIV void diag_narrated_record_render(pp *p, struct vbuffer *b, const diag_record *d);
 VPRIV uint32_t lstart(const char *s, uint32_t off);
 VPRIV uint32_t lend(const char *s, uint32_t size, uint32_t ls);
-VPRIV bool fix_in_macro(const pp *p, uint32_t b, uint32_t e);
-VPRIV void macro_adjust(pp *p, vdiag *top, vdiag *d);
+VPRIV bool pp_fixit_is_in_macro(const pp *p, uint32_t b, uint32_t e);
+VPRIV void pp_expansion_notes_adjust(pp *p, diag_record *top, diag_record *d);
 /* diagout.c: JSON lines and SARIF */
-VPRIV void diag_json_flush(pp *p);
-VPRIV void diag_fixits_out(pp *p);
+VPRIV void diag_json_record_flush(pp *p);
+VPRIV void diag_fixit_output(pp *p);
 /* include.c: dependencies */
 VPRIV uint8_t pp_include_system_kind(pp *p, int32_t sdir);
 VPRIV void pp_dependency_add(pp *p, const char *path, uint8_t sys);
@@ -536,7 +536,7 @@ VPRIV void pp_include_run(pp *p, pp_context *c, uint32_t b, uint32_t e, int kind
 /* directive.c */
 VPRIV int pp_pragma_run(pp *p, const char *s, size_t n, uint32_t loc, ptok *out, uint32_t sloc);
 VPRIV int pp_directive_run(pp *p, pp_context *c, ptok *out);
-VPRIV bool pp_pad_at(const char *s, uint32_t ls, uint32_t le, uint32_t x);
+VPRIV bool diag_snippet_is_padded_at(const char *s, uint32_t ls, uint32_t le, uint32_t x);
 
 /* decimal digits of v at b (no terminator); returns the length */
 static inline int pp_unsigned_format(char *b, unsigned long long v)

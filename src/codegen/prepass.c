@@ -70,7 +70,7 @@ VPRIV bool sve_codegen_ok(cc *c)
 	}
 	if (!loc)
 		return true;
-	pp_diag_emit(c->p, pp_diag_begin(c->p, VDL_ERROR, loc, "code generation for %s is not supported yet", what));
+	diag_record_emit(c->p, diag_record_begin(c->p, DIAG_LEVEL_ERROR, loc, "code generation for %s is not supported yet", what));
 	return false;
 }
 
@@ -91,7 +91,7 @@ VPRIV bool bitint_codegen_ok(cc *c)
 		for (uint32_t j = 0; j < t->n && !bad; j++)
 			bad = em_bitint(c, c->params[t->aux + j]);
 		if (bad) {
-			pp_diag_emit(c->p, pp_diag_begin(c->p, VDL_ERROR, s->loc, "_BitInt runtime ABI is not supported on this target yet"));
+			diag_record_emit(c->p, diag_record_begin(c->p, DIAG_LEVEL_ERROR, s->loc, "_BitInt runtime ABI is not supported on this target yet"));
 			return false;
 		}
 	}

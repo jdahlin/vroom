@@ -91,7 +91,7 @@ static char *driver_snapshot_array_base(const cc *c, int k, size_t *n)
 	case DRIVER_SNAPSHOT_ARRAY_SCOPE_STACK: *n = c->nsstack * sizeof(uint32_t); return (char *)c->sstack;
 	case DRIVER_SNAPSHOT_ARRAY_TOP_LEVEL: *n = c->ntoplevel * sizeof(uint32_t); return (char *)c->toplevel;
 	case DRIVER_SNAPSHOT_ARRAY_TOP_LEVEL_ASM: *n = c->ntlasm * sizeof(uint32_t); return (char *)c->tlasm;
-	case DRIVER_SNAPSHOT_ARRAY_SPANS: *n = c->nnode * sizeof(pp_span); return (char *)c->span;
+	case DRIVER_SNAPSHOT_ARRAY_SPANS: *n = c->nnode * sizeof(diag_span); return (char *)c->span;
 	case DRIVER_SNAPSHOT_ARRAY_LAZY_TYPES: *n = c->nlzt * sizeof(lztok); return (char *)c->lzt;
 	case DRIVER_SNAPSHOT_ARRAY_LAZY_FUNCTIONS: *n = c->nlzf * sizeof(lzfn); return (char *)c->lzf;
 	case DRIVER_SNAPSHOT_ARRAY_LAZY_SYMBOLS: *n = c->nlzs; return c->lzs;
@@ -147,7 +147,7 @@ static inline uint32_t driver_snapshot_location_decode(const driver_snapshot_cod
 		node *nd_ = (node *)(img)[DRIVER_SNAPSHOT_ARRAY_NODES];                                              \
 		tag *tg_ = (tag *)(img)[DRIVER_SNAPSHOT_ARRAY_TAGS];                                                 \
 		label *lb_ = (label *)(img)[DRIVER_SNAPSHOT_ARRAY_LABELS];                                           \
-		pp_span *sp_ = (pp_span *)(img)[DRIVER_SNAPSHOT_ARRAY_SPANS];                                         \
+		diag_span *sp_ = (diag_span *)(img)[DRIVER_SNAPSHOT_ARRAY_SPANS];                                         \
 		lztok *lt_ = (lztok *)(img)[DRIVER_SNAPSHOT_ARRAY_LAZY_TYPES];                                              \
 		lzfn *lf_ = (lzfn *)(img)[DRIVER_SNAPSHOT_ARRAY_LAZY_FUNCTIONS];                                                \
 		for (uint32_t i_ = 0; i_ < (c)->nlzt; i_++)                                      \
