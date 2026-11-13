@@ -19,7 +19,6 @@
 #include <string.h>
 
 #include "common/intern.h"
-#include "frontend/c/keywords.h"
 #include "frontend/lex/lex.h"
 #include "fuzz.h"
 

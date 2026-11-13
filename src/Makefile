@@ -89,7 +89,7 @@ AS_FILES = arch/a64/as/enc.c platform/darwin/macho.c $(if $(VCC_WASM),arch/wasm/
 as_SRC   = as/as.c arch/a64/as/parse.c arch/x64/as/asm.c arch/x64/as/sys.c arch/x64/as/gpr.c \
            arch/x64/as/x87.c arch/x64/as/sse.c arch/x64/as/avx.c
 DIGEST_SRC = common/digest-xxh3.c common/digest-blake3.c common/digest-sha256.c
-LEX_SRC = frontend/lex/lex.c common/intern.c common/fail.c port/crc32c.c port/stack-guard.c port/job-regions.c
+LEX_SRC = frontend/lex/lex.c common/intern.c frontend/c/keywords.c common/fail.c port/crc32c.c port/stack-guard.c port/job-regions.c
 PP_SRC  = frontend/pp/dircache.c driver/ppdriver.c driver/ccsnap.c $(DIGEST_SRC)
 VCCD_SRC = server/vccd.c server/dstore.c server/caps.c utils/fixdep.c utils/ar.c utils/rsh.c
 # Split modules: a list of files each (MOD_SRC, in this order).  By default
