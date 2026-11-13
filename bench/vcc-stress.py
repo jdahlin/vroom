@@ -12,6 +12,7 @@ including explicit x86-64 targets). What a case expects:
   any    either of the two, as long as nothing crashes
   batch  several files in one `vpp --batch -j 4` (under --vccd: concurrent
          clients); some are invalid: exit 1 and nothing crashes
+  batch-ok  the same, all valid: exit 0 (a worker thread compiles what vpp does)
 A signal (SIGSEGV from a stack overflow, SIGABRT from an abort()), a
 timeout, or an exit status other than these is a failure.
 
@@ -134,6 +135,12 @@ def cases(d):
     files.update({f'g{i}.c': f'#include "h.h"\nint g{i}(void) {{ return f{i}(0); }}\n' for i in range(12)})
     files.update({f'b{i}.c': '#include "h.h"\nint x = ;\n' for i in range(6)})
     case('decl-cache-error-after-restore', 'batch', files, [f for f in files if f.endswith('.c')])
+    # batch workers have the main thread's stack: deep nesting and long flat sequences
+    # compile in a batch as alone (a 512 KB thread stack failed at ~2 300 parentheses)
+    flat = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'ccs', 'vcc', 'tests', 'vcc',
+                             'flat_declarators_labels.c')).read()
+    case('batch-stack', 'batch-ok', {'p.c': 'int x = ' + nest('(', ')', 50000, '1') + ';\n', 'f.c': flat},
+         ['p.c', 'f.c'])
     # control: a normal TU
     case('normal', 'ok', {'a.c': 'int f(int a) { return a * 2 + 1; }\n'}, 'a.c')
     return C
@@ -173,7 +180,7 @@ def run_batch(c, d, vccd):
     t0 = time.time()
     if vccd:
         env = dict(os.environ, VCC_SOCK=vccd.sock)
-        ps = [subprocess.Popen([f'{vd.BIN}/vcc'] + TARGET + ['-fsyntax-only', m], cwd=d, env=env,
+        ps = [subprocess.Popen([f'{vd.BIN}/vcc'] + TARGET + ['-fsyntax-only', '-S', '-o', m + '.s', m], cwd=d, env=env,
                                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE) for m in c['main']]
         errs = [p.communicate(timeout=TIMEOUT)[1].decode(errors='replace') for p in ps]
         rcs = [p.returncode for p in ps]
@@ -187,7 +194,7 @@ def run_batch(c, d, vccd):
     return p.returncode, time.time() - t0, p.stderr.decode(errors='replace') + p.stdout.decode(errors='replace')
 
 def run(c, d, vccd):
-    if c['expect'] == 'batch':
+    if c['expect'] in ('batch', 'batch-ok'):
         return run_batch(c, d, vccd)
     out = f'{d}/out.o'
     # -S also routes front-end-only jobs through vccd's compile path, and
@@ -212,6 +219,8 @@ def verdict(c, rc, err, server_ok):
     if crashed(rc, err): return False, f'crash: rc {rc}' + (' (sanitizer report)' if 'Sanitizer' in err else '')
     if c['expect'] == 'batch':
         return (rc == 1, 'some jobs failed' if rc == 1 else f'rc {rc}, want 1')
+    if c['expect'] == 'batch-ok':
+        return (rc == 0, 'all jobs ok' if rc == 0 else f'rc {rc}, want 0')
     if c['expect'] == 'ok':
         return (rc == 0, 'ok' if rc == 0 else f'rejected valid input: rc {rc}: {first(err)}')
     has_diag = 'error' in err
