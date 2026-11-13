@@ -348,6 +348,12 @@ VIR-formatprov 130/130. Befintliga ARM-prov `vir_loop_rotate.c` och
 `vir_join_dup.c` ingår även i den fokuserade x86-riggen (assembly, egen
 objektväg, ett/sex emittertrådar). ASan/UBSan och filvist bygge är gröna.
 
+Ett efterföljande x86-försök att undvika returblockskopior och vika tomma
+returblock direkt till den gemensamma epilogen behålls inte: första serien
+1285,08 → 1274,34 ms upprepades inte (1275,09 → 1275,76 ms). Underlag i
+`work/vir-x86-perf/returnfold`; patch sparad utanför checkouten. Det delade
+layoutsteget ovan är den behållna versionen.
+
 Nästa port av syskonanrop ska på samma sätt börja med gemensamma IR-bevis
 för frame escape och returvidarebefordran, med målspecifik epilog/emission.
 
