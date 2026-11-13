@@ -3,7 +3,8 @@
 #define VCC_ASIMPL_H
 
 #include "as/as.h"
-#include "common/arena.h"
+#include "port/job-regions.h"
+#include "common/region.h"
 #include "arch/a64/a64.h"
 #include <fcntl.h>
 #include <stdarg.h>

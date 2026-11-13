@@ -26,6 +26,7 @@
 #include <unistd.h>
 
 #include "common/intern.h"
+#include "frontend/c/keywords.h"
 #include "frontend/lex/lex.h"
 #include "frontend/pp/pp.h"
 #include "fuzz.h"

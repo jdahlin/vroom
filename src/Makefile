@@ -88,8 +88,9 @@ VCC_WASM ?=
 AS_FILES = arch/a64/as/enc.c platform/darwin/macho.c $(if $(VCC_WASM),arch/wasm/as/as.c platform/wasm/wasm.c)
 as_SRC   = as/as.c arch/a64/as/parse.c arch/x64/as/asm.c arch/x64/as/sys.c arch/x64/as/gpr.c \
            arch/x64/as/x87.c arch/x64/as/sse.c arch/x64/as/avx.c
-LEX_SRC = frontend/lex/lex.c common/intern.c
-PP_SRC  = frontend/pp/dircache.c driver/ppdriver.c driver/ccsnap.c common/ldhash.c
+DIGEST_SRC = common/digest-xxh3.c common/digest-blake3.c common/digest-sha256.c
+LEX_SRC = frontend/lex/lex.c common/intern.c common/fail.c port/crc32c.c port/stack-guard.c port/job-regions.c
+PP_SRC  = frontend/pp/dircache.c driver/ppdriver.c driver/ccsnap.c $(DIGEST_SRC)
 VCCD_SRC = server/vccd.c server/dstore.c server/caps.c utils/fixdep.c utils/ar.c utils/rsh.c
 # Split modules: a list of files each (MOD_SRC, in this order).  By default
 # each module is compiled as one TU (obj/unity/MOD.c #includes its files, as
@@ -115,7 +116,7 @@ PP_OBJ  = $(call o,$(PP_SRC)) $(SPLIT_OBJ) $(call mod,vir) $(call o,$(VIRA_SRC))
 mod = $(if $(VCC_UNITY),$(OBJ)/unity/$(1).o,$(call o,$($(1)_SRC)))
 AS_SRC  = $(AS_FILES) $(as_SRC) $(obj_SRC)
 AS_OBJ  = $(call o,$(AS_FILES)) $(call mod,as) $(call mod,obj)
-LD_SRC  = ld/ld.c common/ldhash.c ld/objcopy.c $(if $(VCC_WASM),ld/wasmld.c) platform/darwin/ldmacho.c
+LD_SRC  = ld/ld.c $(DIGEST_SRC) ld/objcopy.c $(if $(VCC_WASM),ld/wasmld.c) platform/darwin/ldmacho.c
 
 $(OBJ)/%.o: %.c Makefile | $(OBJ)
 	@mkdir -p $(dir $@)
@@ -230,7 +231,7 @@ self: $(OUT)/vpp
 	$(SELF_LD) $(call so,$(VCCD_SRC) ld/ld.c ld/objcopy.c platform/darwin/ldmacho.c) $(SELF_PP) $(SELF_LEX) $(SELF_AS) -o $(SO)/vccd
 	$(SELF_LD) $(call so,bin/vasm/vasm.c) $(SELF_AS) -o $(SO)/vasm
 	$(SELF_LD) $(call so,bin/lextest/lextest.c port/darwin/pmc.c) $(SELF_LEX) -o $(SO)/lextest
-	$(SELF_LD) $(SO)/ld-main.o $(call so,common/ldhash.c) $(SO)/ld-objcopy.o $(SO)/platform-darwin-ldmacho.o -o $(SO)/vlink
+	$(SELF_LD) $(SO)/ld-main.o $(call so,$(DIGEST_SRC)) $(SO)/ld-objcopy.o $(SO)/platform-darwin-ldmacho.o -o $(SO)/vlink
 	$(SELF_LD) $(call so,bin/vcc/shim.c) -o $(SO)/vcc
 
 self-check: self

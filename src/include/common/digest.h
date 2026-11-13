@@ -1,6 +1,6 @@
-/* Hashes used by the linkers: XXH3-64 and BLAKE3 (lld's), SHA-256 (Mach-O code signatures). */
-#ifndef VCC_LDHASH_H
-#define VCC_LDHASH_H
+/* Digests used by the linkers and the header cache (digest-xxh3.c, digest-blake3.c, digest-sha256.c): XXH3-64 and BLAKE3 (lld's), SHA-256 (Mach-O code signatures). */
+#ifndef VCC_DIGEST_H
+#define VCC_DIGEST_H
 #include <stddef.h>
 #include <stdint.h>
 

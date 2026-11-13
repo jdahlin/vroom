@@ -7,61 +7,8 @@
 #include <sys/mman.h>
 
 #include "common/intern.h"
-#include "common/arena.h"
-
-#if defined(__x86_64__)
-#include <nmmintrin.h>
-
-static uint32_t crc_byte_soft(uint32_t h, uint8_t b)
-{
-	static const uint32_t nibble[16] = {
-		0x00000000, 0x105ec76f, 0x20bd8ede, 0x30e349b1,
-		0x417b1dbc, 0x5125dad3, 0x61c69362, 0x7198540d,
-		0x82f63b78, 0x92a8fc17, 0xa24bb5a6, 0xb21572c9,
-		0xc38d26c4, 0xd3d3e1ab, 0xe330a81a, 0xf36e6f75,
-	};
-	h ^= b;
-	h = (h >> 4) ^ nibble[h & 15];
-	return (h >> 4) ^ nibble[h & 15];
-}
-
-static uint32_t crc_word_soft(uint32_t h, uint64_t w)
-{
-	for (int i = 0; i < 8; i++, w >>= 8) h = crc_byte_soft(h, (uint8_t)w);
-	return h;
-}
-
-static uint32_t crc_pair_soft(uint32_t h, uint64_t a, uint64_t b)
-{
-	return crc_word_soft(crc_word_soft(h, a), b);
-}
-
-__attribute__((target("sse4.2")))
-static uint32_t crc_byte_hw(uint32_t h, uint8_t b) { return _mm_crc32_u8(h, b); }
-__attribute__((target("sse4.2")))
-static uint32_t crc_word_hw(uint32_t h, uint64_t w) { return (uint32_t)_mm_crc32_u64(h, w); }
-__attribute__((target("sse4.2")))
-static uint32_t crc_pair_hw(uint32_t h, uint64_t a, uint64_t b)
-{
-	return (uint32_t)_mm_crc32_u64(_mm_crc32_u64(h, a), b);
-}
-
-/* Safe even if another constructor hashes before our dispatch runs. */
-uint32_t (*vcrc32cb)(uint32_t, uint8_t) = crc_byte_soft;
-uint32_t (*vcrc32cd)(uint32_t, uint64_t) = crc_word_soft;
-uint32_t (*vcrc32c_pair)(uint32_t, uint64_t, uint64_t) = crc_pair_soft;
-
-__attribute__((constructor)) static void init_host_crc(void)
-{
-	const char *cap = getenv("VCC_CRC");
-	__builtin_cpu_init();
-	if (cap && !strcmp(cap, "software")) return;
-	if (!__builtin_cpu_supports("sse4.2")) return;
-	vcrc32cb = crc_byte_hw;
-	vcrc32cd = crc_word_hw;
-	vcrc32c_pair = crc_pair_hw;
-}
-#endif
+#include "common/fail.h"
+#include "port/job-regions.h"
 
 #define SLOT_BITS 23	/* 64 MB of slots, touched as ids arrive */
 #define NSLOT (1u << SLOT_BITS)
@@ -127,28 +74,6 @@ static inline int same(const char *a, const char *b, size_t len)
 			return 0;
 	}
 	return tail(a + i, len - i) == tail(b + i, len - i);
-}
-
-/* table full: the job's hook (the driver: an error for this TU, longjmp) or abort */
-void (*vintern_full_hook)(void);
-_Atomic int vtables_full;
-
-
-/* a server-wide table or region is full: an error for this job (and vccd
-   restarts when idle, vtables_full), abort without a job to end */
-_Thread_local int vjob_escape_fd = 2;
-
-void vjob_escape(const char *msg)
-{
-	atomic_store(&vtables_full, 1);
-	void (*hook)(void) = __atomic_load_n(&vintern_full_hook, __ATOMIC_RELAXED);
-
-	dprintf(vjob_escape_fd, "vcc: error: %s\n", msg);
-	if (vjob_escape_fd != 2)	/* (the server's log too) */
-		fprintf(stderr, "vcc: error: %s\n", msg);
-	if (hook)
-		hook();
-	abort();
 }
 
 static __attribute__((noreturn, noinline)) void vintern_full(void)
@@ -293,24 +218,26 @@ uint32_t vintern_count(void)
 	return atomic_load(&nent) - 1;
 }
 
+static const char *const *preset;	/* the names that take ids 1..npreset (a language's keywords) */
+static size_t npreset;
+
+void vintern_preset(const char *const *names, size_t n)
+{
+	preset = names;
+	npreset = n;
+}
+
 static void init_once(void)
 {
-	static const char *const kw[] = {
-#define X(k) #k,
-		KEYWORDS(X)
-#undef X
-		"__VA_ARGS__", "__VA_OPT__",
-	};
-
 	/* lazily backed: only touched pages cost anything */
 	slots = reserve(NSLOT * sizeof(*slots));
 	vintern_ents = reserve(MAX_ENT * sizeof(*vintern_ents));
 	copy_buf = reserve(COPY_MAX);
-	for (size_t i = 0; i < sizeof(kw) / sizeof(kw[0]); i++) {
-		uint32_t id = vintern_cstr(kw[i]);
+	for (size_t i = 0; i < npreset; i++) {
+		uint32_t id = vintern_cstr(preset[i]);
 
 		if (id != i + 1) {
-			fprintf(stderr, "vcc: duplicate keyword %s\n", kw[i]);
+			fprintf(stderr, "vcc: duplicate keyword %s\n", preset[i]);
 			abort();
 		}
 	}
@@ -330,32 +257,4 @@ vintern_cache *vintern_local(void)
 	if (!c)
 		c = reserve(sizeof(*c));
 	return c;
-}
-
-
-/* ---------------- stack guard (vstack.h) ---------------- */
-#include "port/vstack.h"
-
-_Thread_local uintptr_t vstack_lim;
-
-void vstack_init(void)
-{
-	pthread_t t = pthread_self();
-	uintptr_t lo;
-#ifdef __APPLE__
-	lo = (uintptr_t)pthread_get_stackaddr_np(t) - pthread_get_stacksize_np(t);
-#else
-	pthread_attr_t a;
-	void *addr;
-	size_t sz;
-
-	if (pthread_getattr_np(t, &a)) {
-		vstack_lim = 1;	/* unknown: never low */
-		return;
-	}
-	pthread_attr_getstack(&a, &addr, &sz);
-	pthread_attr_destroy(&a);
-	lo = (uintptr_t)addr;
-#endif
-	vstack_lim = lo + VSTACK_RESERVE;
 }

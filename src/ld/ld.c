@@ -36,7 +36,7 @@
 #include "common/defer.h"
 #include "common/ckd.h"
 #include "common/vec.h"
-#include "common/ldhash.h"
+#include "common/digest.h"
 #include "port/vperf.h"
 
 #include <ctype.h>

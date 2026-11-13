@@ -5,7 +5,7 @@
  *
  *   VAUTOFREE char *p = malloc(n);      free(p) at the end of the block
  *   VAUTOCLOSE int fd = open(...);      close(fd) unless fd < 0
- *   VAUTOUNMAP vmapped m;               vunmap_file(&m) (mapfile.h)
+ *   (VAUTOUNMAP, for a mapped file, is in port/mapfile.h)
  *   VLOCK(mu);                          pthread_mutex_unlock(&mu) at the end
  *   VLOCK_AS(g, mu);                    ... with a name, to drop it early:
  *   VUNLOCK(g);                         unlocks now (and not again)
@@ -30,8 +30,6 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-#include "port/mapfile.h"
-
 #define VCLEANUP(f) __attribute__((cleanup(f)))
 
 static inline void vdefer_free(void *pp)
@@ -51,14 +49,6 @@ static inline void vdefer_close(int *fd)
 }
 #define VAUTOCLOSE VCLEANUP(vdefer_close)
 #define VCLOSE(fd) vdefer_close(&(fd))	/* close now, early: the cleanup then finds -1 */
-
-static inline void vdefer_unmap(vmapped *m)
-{
-	vunmap_file(m);
-	m->p = NULL;
-	m->n = 0;
-}
-#define VAUTOUNMAP VCLEANUP(vdefer_unmap)
 
 static inline void vdefer_unlock(pthread_mutex_t **m)
 {

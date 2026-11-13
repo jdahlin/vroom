@@ -68,7 +68,7 @@
 #include "as/as.h"
 #include "obj/obj.h"
 #include "driver/ppdriver.h"
-#include "common/arena.h"
+#include "port/job-regions.h"
 #include "common/tbuf.h"
 
 #include "name.h"
