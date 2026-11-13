@@ -242,8 +242,15 @@ done: `struct macho_context` holds the Mach-O linker's 24 per-link
 variables, `macho_link_locked` creates it and `macho_context_destroy` frees
 it (`macho_state_reset` is gone); the name sort that read the table from a
 qsort comparator sorts (name, id) pairs.  Left at file scope in
-`macho-linker.c`: the libSystem export table (process-wide, read once) and
-the link lock (PR 2).
+`macho-linker.c`: the libSystem export table (process-wide, read once).
+
+PR 2 (one entry), done differently from the design: with the state in its
+context, a Mach-O link needs no lock at all, so instead of taking the ELF
+link lock for both formats (which would serialise host-program links with
+ELF links), Mach-O's own lock is gone and Mach-O links run concurrently;
+the libSystem table is read once under a lock of its own
+(`macho_libsystem_load`).  `ld_main` stays the one entry; the ELF lock is
+unchanged.
 
 ## Decisions (coordinator, on the owner's behalf, 2026-11-13)
 

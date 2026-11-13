@@ -7,8 +7,9 @@
  * heavy phases are parallel, the output is assembled in one buffer and
  * written with a single write.
  *
- * ld_main() is reentrant across calls but runs one link at a time (it takes
- * a lock); vccd can call it directly.  Relative paths are resolved against
+ * ld_main() is reentrant across calls; it runs one ELF link at a time (it
+ * takes a lock), while Mach-O links, whose state is their own, run
+ * concurrently; vccd can call it directly.  Relative paths are resolved against
  * dirfd.  Diagnostics go to err.
  */
 #ifndef VCC_LD_H
