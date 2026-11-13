@@ -137,40 +137,40 @@ VPRIV void a64_vir_call_lower(a64_vir_context *L, uint32_t b, uint32_t i, const 
 			continue;
 		}
 		{
-			int sz = log2sz(a[k].size), rs;
+			int sz = a64_size_log2(a[k].size), rs;
 
 			if (r != VIR_REGISTER_NONE && a64_vir_register_is_float(r) && sz >= 2) {
-				mem(e, I_STF, sz, 0, a64_vir_vector_register(r), SP, a[k].stack_offset);
+				a64_record_emit_memory(e, A64_OP_STF, sz, 0, a64_vir_vector_register(r), SP, a[k].stack_offset);
 				continue;
 			}
 			if (r != VIR_REGISTER_NONE && a64_vir_register_is_float(r)) {
-				word(e, f_out(a[k].size == 8, R_X16, a64_vir_vector_register(r)));
+				a64_record_emit_word(e, a64_word_fmov_from_vector(a[k].size == 8, R_X16, a64_vir_vector_register(r)));
 				rs = R_X16;
 			} else {
 				rs = a64_vir_operand_general_register(L, 1 + k, R_X16);
 			}
-			mem(e, I_ST, sz, 0, rs, SP, a[k].stack_offset);
+			a64_record_emit_memory(e, A64_OP_ST, sz, 0, rs, SP, a[k].stack_offset);
 		}
 	}
 	if (!stk && a64_vir_call_is_sibling(L, b, i)) {
-		ins *t;
+		a64_record *t;
 
 		if (L->allocation->callee[1] && L->operand_registers[0] != VIR_REGISTER_NONE)	/* (the callee's address may be in x16: through x17) */
 			L->frame_is_at_risk = true;
 		a64_vir_callee_saved_float_save(L, true, L->operand_registers[0] != VIR_REGISTER_NONE ? R_X17 : R_X16);
-		t = put(e, I_TAIL);
-		t->sh = L->is_before_save_point;
+		t = a64_record_emit(e, A64_OP_TAIL);
+		t->shift = L->is_before_save_point;
 
 		if (L->operand_registers[0] == VIR_REGISTER_NONE) {
 			const vir_insn *k = &f->insns[in->a];
 
 			if (k->op != VIR_OP_SYMADDR || k->b || k->c)
 				a64_vir_fail(L, VIRBUILD_FAILURE(indirect_callee_without_register));
-			t->cond = 2;
-			t->ref = f->insns[in->a].a;
-			codegen_reference_note(e, t->ref);
+			t->condition = 2;
+			t->reference = f->insns[in->a].a;
+			codegen_reference_note(e, t->reference);
 		} else {
-			t->cond = 3;
+			t->condition = 3;
 			t->rn = (uint8_t)a64_vir_general_register(L->operand_registers[0]);
 		}
 		e->is_reachable = false;
@@ -186,15 +186,15 @@ VPRIV void a64_vir_call_lower(a64_vir_context *L, uint32_t b, uint32_t i, const 
 		if (k->op != VIR_OP_SYMADDR || k->b || k->c)
 			a64_vir_fail(L, VIRBUILD_FAILURE(indirect_callee_without_register));
 		codegen_reference_note(e, k->a);
-		ins *c = put(e, I_BL);
+		a64_record *c = a64_record_emit(e, A64_OP_BL);
 
-		c->ref = k->a;
-		c->cond = CALL_ARGS, c->sh = gm;
+		c->reference = k->a;
+		c->condition = A64_CALL_ARGUMENT_REGISTERS, c->shift = gm;
 	} else {
-		ins *c = put(e, I_BLR);
+		a64_record *c = a64_record_emit(e, A64_OP_BLR);
 
 		c->rn = (uint8_t)a64_vir_general_register(L->operand_registers[0]);
-		c->cond = CALL_ARGS, c->sh = gm;
+		c->condition = A64_CALL_ARGUMENT_REGISTERS, c->shift = gm;
 	}
 }
 
@@ -218,8 +218,8 @@ VPRIV void a64_vir_parameter_lower(a64_vir_context *L, const vir_insn *in, uint8
 	if (res == VIR_REGISTER_NONE)
 		return;
 	if (a64_vir_register_is_float(res)) {
-		mem(e, I_LDF, in->type == VIR_TYPE_F64 ? 3 : 2, 0, a64_vir_vector_register(res), R_FP, 16 + a[in->a].stack_offset);
+		a64_record_emit_memory(e, A64_OP_LDF, in->type == VIR_TYPE_F64 ? 3 : 2, 0, a64_vir_vector_register(res), R_FP, 16 + a[in->a].stack_offset);
 	} else {
-		mem(e, I_LD, log2sz(a[in->a].size), 0, a64_vir_general_register(res), R_FP, 16 + a[in->a].stack_offset);
+		a64_record_emit_memory(e, A64_OP_LD, a64_size_log2(a[in->a].size), 0, a64_vir_general_register(res), R_FP, 16 + a[in->a].stack_offset);
 	}
 }

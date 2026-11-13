@@ -24,35 +24,35 @@ VPRIV codegen_value a64_udivconst(codegen_context *e, codegen_value a, const em_
 	if (!x)
 		extend(e, n, n, 4, false);
 	if (r->compare) {
-		movi(e, x, m, (int64_t)r->divisor);
-		op3(e, I_SUBS, x, ZR, n, m);
-		cset(e, q, C_HS);
+		a64_record_emit_move_immediate(e, x, m, (int64_t)r->divisor);
+		a64_record_emit_three_registers(e, A64_OP_SUBS, x, ZR, n, m);
+		a64_record_emit_condition_set(e, q, A64_CONDITION_HS);
 	} else {
-		movi(e, x, m, (int64_t)r->magic);
+		a64_record_emit_move_immediate(e, x, m, (int64_t)r->magic);
 		if (x)
-			op3(e, I_UMULH, 1, q, n, m);
+			a64_record_emit_three_registers(e, A64_OP_UMULH, 1, q, n, m);
 		else
-			op4(e, I_MADD, 1, q, n, m, ZR);
+			a64_record_emit_four_registers(e, A64_OP_MADD, 1, q, n, m, ZR);
 		if (!r->add) {
 			if (!x || r->shift)
-				shift_imm(e, I_LSRV, 1, r->remainder ? q : n, q,
+				shift_imm(e, A64_OP_LSRV, 1, r->remainder ? q : n, q,
 				          (x ? 0 : 32) + r->shift);
 		} else {
 			if (!x)
-				shift_imm(e, I_LSRV, 1, q, q, 32);
-			op3(e, I_SUB, x, m, n, q);
-			shift_imm(e, I_LSRV, x, m, m, 1);
-			op3(e, I_ADD, x, q, m, q);
+				shift_imm(e, A64_OP_LSRV, 1, q, q, 32);
+			a64_record_emit_three_registers(e, A64_OP_SUB, x, m, n, q);
+			shift_imm(e, A64_OP_LSRV, x, m, m, 1);
+			a64_record_emit_three_registers(e, A64_OP_ADD, x, q, m, q);
 			if (r->shift)
-				shift_imm(e, I_LSRV, x, r->remainder ? q : n, q, r->shift);
+				shift_imm(e, A64_OP_LSRV, x, r->remainder ? q : n, q, r->shift);
 			else if (!r->remainder)
-				mov(e, x, n, q);
+				a64_record_emit_move(e, x, n, q);
 		}
 	}
 	if (r->remainder) {
 		if (!r->compare)
-			movi(e, x, m, (int64_t)r->divisor);
-		op4(e, I_MSUB, x, n, q, m, n);
+			a64_record_emit_move_immediate(e, x, m, (int64_t)r->divisor);
+		a64_record_emit_four_registers(e, A64_OP_MSUB, x, n, q, m, n);
 	}
 	if (q != n)
 		tfree(e, q);

@@ -1,12 +1,12 @@
 /* vcc code generator: instruction records, byte buffers, immediates, register names */
 #include "../../../codegen/codegen-internal.h"
 
-const char cond_name[][8] = { "eq", "ne", "hs", "lo", "mi", "pl", "vs", "vc", "hi", "ls", "ge", "lt", "gt", "le", "al" };
+const char a64_condition_names[][8] = { "eq", "ne", "hs", "lo", "mi", "pl", "vs", "vc", "hi", "ls", "ge", "lt", "gt", "le", "al" };
 
 /* ---------------- immediates ---------------- */
 
 /* AArch64 logical immediate: is v encodable for this width? */
-VPRIV bool logimm_ok(uint64_t v, int x)
+VPRIV bool a64_logical_immediate_is_encodable(uint64_t v, int x)
 {
 	unsigned size = 64;
 

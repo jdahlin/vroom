@@ -42,9 +42,9 @@ static bool a64_vir_float_memory_access(a64_vir_context *L, bool load, bool d, i
 	if (base == SP)
 		base = 31;
 	if (off >= 0 && off % sz == 0 && off / sz < 4096)
-		word(L->context, (load ? 0xbd400000u : 0xbd000000u) | (unsigned)d << 30 | (unsigned)(off / sz) << 10 | (unsigned)base << 5 | (unsigned)v);
+		a64_record_emit_word(L->context, (load ? 0xbd400000u : 0xbd000000u) | (unsigned)d << 30 | (unsigned)(off / sz) << 10 | (unsigned)base << 5 | (unsigned)v);
 	else if (off >= -256 && off <= 255)
-		word(L->context, (load ? 0xbc400000u : 0xbc000000u) | (unsigned)d << 30 | ((unsigned)off & 0x1ffu) << 12 | (unsigned)base << 5 | (unsigned)v);
+		a64_record_emit_word(L->context, (load ? 0xbc400000u : 0xbc000000u) | (unsigned)d << 30 | ((unsigned)off & 0x1ffu) << 12 | (unsigned)base << 5 | (unsigned)v);
 	else
 		return false;
 	return true;
@@ -59,19 +59,19 @@ VPRIV void a64_vir_load_lower(a64_vir_context *L, uint32_t i, const vir_insn *in
 	codegen_lvalue l;
 
 	if (L->index_value && L->index_value == L->operand_values[0] && fl && res != VIR_REGISTER_NONE && !(in->flags & VIR_INSN_FLAG_VOL)) {
-		word(e, 0xbc600800u | (unsigned)(w == 3) << 30 | (unsigned)L->index_register << 16 | (unsigned)L->index_extension << 13 |
+		a64_record_emit_word(e, 0xbc600800u | (unsigned)(w == 3) << 30 | (unsigned)L->index_register << 16 | (unsigned)L->index_extension << 13 |
 			(unsigned)(L->index_shift != 0) << 12 | (unsigned)L->index_base << 5 | (unsigned)a64_vir_vector_register(res));	/* ldr s/d, [x, index] */
 		L->index_value = 0;
 		return;
 	}
 	if (L->index_value && L->index_value == L->operand_values[0]) {
-		ins *x = put(e, I_LDX);
+		a64_record *x = a64_record_emit(e, A64_OP_LDX);
 
-		x->sz = (uint8_t)w, x->cond = (uint8_t)ext, x->rd = (uint8_t)rd, x->rn = (uint8_t)L->index_base;
-		x->rm = (uint8_t)L->index_register, x->ra = L->index_extension, x->sh = L->index_shift;
+		x->size = (uint8_t)w, x->condition = (uint8_t)ext, x->rd = (uint8_t)rd, x->rn = (uint8_t)L->index_base;
+		x->rm = (uint8_t)L->index_register, x->ra = L->index_extension, x->shift = L->index_shift;
 		L->index_value = 0;
 		if (fl && res != VIR_REGISTER_NONE)
-			word(e, f_in(in->type == VIR_TYPE_F64, a64_vir_vector_register(res), R_X16));
+			a64_record_emit_word(e, a64_word_fmov_to_vector(in->type == VIR_TYPE_F64, a64_vir_vector_register(res), R_X16));
 		return;
 	}
 	l = a64_vir_address_get(L, in->flags, R_X16);
@@ -79,22 +79,22 @@ VPRIV void a64_vir_load_lower(a64_vir_context *L, uint32_t i, const vir_insn *in
 		return;	/* (straight into the v register) */
 	e->volatile_untag_depth += (in->flags & VIR_INSN_FLAG_VOL) != 0;	/* (a volatile slot is no slot to the record clean-up) */
 	if (l.kind == CODEGEN_LVALUE_SYMBOL && ext != 2) {
-		load_n(e, rd, &l, 1 << w, ext);
+		a64_lvalue_load(e, rd, &l, 1 << w, ext);
 	} else if (l.kind == CODEGEN_LVALUE_SYMBOL) {
-		addr_of_ref(e, R_X16, l.reference, l.offset);
-		mem(e, I_LD, w, ext, rd, R_X16, 0);
+		a64_reference_address_emit(e, R_X16, l.reference, l.offset);
+		a64_record_emit_memory(e, A64_OP_LD, w, ext, rd, R_X16, 0);
 	} else if (fl) {	/* straight into the FP register (a result nobody reads: v31, never allocated) */
-		mem(e, I_LDF, w, 0, res == VIR_REGISTER_NONE ? 31 : a64_vir_vector_register(res), l.kind == CODEGEN_LVALUE_FRAME ? FRAME : l.register_number, l.offset);
+		a64_record_emit_memory(e, A64_OP_LDF, w, 0, res == VIR_REGISTER_NONE ? 31 : a64_vir_vector_register(res), l.kind == CODEGEN_LVALUE_FRAME ? A64_REGISTER_FRAME : l.register_number, l.offset);
 		e->volatile_untag_depth -= (in->flags & VIR_INSN_FLAG_VOL) != 0;
 		return;
 	} else {
-		mem(e, I_LD, w, ext, rd, l.kind == CODEGEN_LVALUE_FRAME ? FRAME : l.register_number, l.offset);
-		if ((in->flags & VIR_INSN_FLAG_VOL) && l.kind != CODEGEN_LVALUE_FRAME && e->is_reachable && e->records[e->record_count - 1].op == I_LD)
-			e->records[e->record_count - 1].ra = LD_VOLATILE;	/* (not merged with its neighbours: opt.c's fold) */
+		a64_record_emit_memory(e, A64_OP_LD, w, ext, rd, l.kind == CODEGEN_LVALUE_FRAME ? A64_REGISTER_FRAME : l.register_number, l.offset);
+		if ((in->flags & VIR_INSN_FLAG_VOL) && l.kind != CODEGEN_LVALUE_FRAME && e->is_reachable && e->records[e->record_count - 1].opcode == A64_OP_LD)
+			e->records[e->record_count - 1].ra = A64_LOAD_VOLATILE;	/* (not merged with its neighbours: opt.c's fold) */
 	}
 	e->volatile_untag_depth -= (in->flags & VIR_INSN_FLAG_VOL) != 0;
 	if (fl && res != VIR_REGISTER_NONE)
-		word(e, f_in(in->type == VIR_TYPE_F64, a64_vir_vector_register(res), R_X16));
+		a64_record_emit_word(e, a64_word_fmov_to_vector(in->type == VIR_TYPE_F64, a64_vir_vector_register(res), R_X16));
 }
 
 VPRIV void a64_vir_store_lower(a64_vir_context *L, const vir_insn *in)
@@ -109,7 +109,7 @@ VPRIV void a64_vir_store_lower(a64_vir_context *L, const vir_insn *in)
 
 	if (L->operand_registers[1] != VIR_REGISTER_NONE && a64_vir_register_is_float(L->operand_registers[1]) && !(in->flags & VIR_INSN_FLAG_VOL)) {	/* straight from the v register */
 		if (xa) {
-			word(e, 0xbc200800u | (unsigned)(w == 3) << 30 | (unsigned)L->index_register << 16 | (unsigned)L->index_extension << 13 |
+			a64_record_emit_word(e, 0xbc200800u | (unsigned)(w == 3) << 30 | (unsigned)L->index_register << 16 | (unsigned)L->index_extension << 13 |
 				(unsigned)(L->index_shift != 0) << 12 | (unsigned)L->index_base << 5 | (unsigned)a64_vir_vector_register(L->operand_registers[1]));
 			L->index_value = 0;
 			return;
@@ -119,7 +119,7 @@ VPRIV void a64_vir_store_lower(a64_vir_context *L, const vir_insn *in)
 	}
 	if (!xa && l.kind != CODEGEN_LVALUE_SYMBOL && L->operand_registers[1] != VIR_REGISTER_NONE && a64_vir_register_is_float(L->operand_registers[1])) {	/* ... a frame slot, a volatile one, a far offset: the record */
 		e->volatile_untag_depth += (in->flags & VIR_INSN_FLAG_VOL) != 0;
-		mem(e, I_STF, w, 0, a64_vir_vector_register(L->operand_registers[1]), l.kind == CODEGEN_LVALUE_FRAME ? FRAME : l.register_number, l.offset);
+		a64_record_emit_memory(e, A64_OP_STF, w, 0, a64_vir_vector_register(L->operand_registers[1]), l.kind == CODEGEN_LVALUE_FRAME ? A64_REGISTER_FRAME : l.register_number, l.offset);
 		e->volatile_untag_depth -= (in->flags & VIR_INSN_FLAG_VOL) != 0;
 		return;
 	}
@@ -127,21 +127,21 @@ VPRIV void a64_vir_store_lower(a64_vir_context *L, const vir_insn *in)
 		rs = ZR;
 	else if (L->operand_registers[1] != VIR_REGISTER_NONE && a64_vir_register_is_float(L->operand_registers[1])) {
 		rs = base_t ? R_X17 : R_X16;
-		word(e, f_out(w == 3, rs, a64_vir_vector_register(L->operand_registers[1])));
+		a64_record_emit_word(e, a64_word_fmov_from_vector(w == 3, rs, a64_vir_vector_register(L->operand_registers[1])));
 	} else {
 		rs = a64_vir_operand_general_register(L, 1, base_t ? R_X17 : R_X16);
 	}
 	if (xa) {
-		ins *x = put(e, I_STX);
+		a64_record *x = a64_record_emit(e, A64_OP_STX);
 
-		x->sz = (uint8_t)w, x->rd = (uint8_t)rs, x->rn = (uint8_t)L->index_base, x->rm = (uint8_t)L->index_register;
-		x->ra = L->index_extension, x->sh = L->index_shift;
+		x->size = (uint8_t)w, x->rd = (uint8_t)rs, x->rn = (uint8_t)L->index_base, x->rm = (uint8_t)L->index_register;
+		x->ra = L->index_extension, x->shift = L->index_shift;
 		L->index_value = 0;
 	} else if (l.kind == CODEGEN_LVALUE_SYMBOL) {
-		store_n(e, rs, &l, 0, 1 << w);
+		a64_lvalue_store(e, rs, &l, 0, 1 << w);
 	} else {
 		e->volatile_untag_depth += (in->flags & VIR_INSN_FLAG_VOL) != 0;
-		mem(e, I_ST, w, 0, rs, l.kind == CODEGEN_LVALUE_FRAME ? FRAME : l.register_number, l.offset);
+		a64_record_emit_memory(e, A64_OP_ST, w, 0, rs, l.kind == CODEGEN_LVALUE_FRAME ? A64_REGISTER_FRAME : l.register_number, l.offset);
 		e->volatile_untag_depth -= (in->flags & VIR_INSN_FLAG_VOL) != 0;
 	}
 }
@@ -154,7 +154,7 @@ static int a64_vir_memory_block_address_get(a64_vir_context *L, uint32_t k, int 
 	*off = 0;
 	if (L->operand_registers[k] == VIR_REGISTER_NONE && a64_vir_value_is_constant(L->function, v) && L->function->insns[v].op == VIR_OP_SLOTADDR) {
 		*off = L->slot_offsets[L->function->insns[v].a] + a64_vir_constant_bits(&(vir_insn){ .b = L->function->insns[v].b, .c = L->function->insns[v].c });
-		return FRAME;
+		return A64_REGISTER_FRAME;
 	}
 	return a64_vir_operand_general_register(L, k, t);
 }
@@ -166,7 +166,7 @@ VPRIV void a64_vir_memory_block_lower(a64_vir_context *L, const vir_insn *in)
 
 	if (a64_vir_insn_is_big_memory(L->function, in)) {
 		e->has_calls = true;
-		put(e, I_BL)->ref = CODEGEN_FIXED_REFERENCE(in->op == VIR_OP_MEMCPY ? CODEGEN_LIBRARY_MEMCPY : CODEGEN_LIBRARY_MEMSET);
+		a64_record_emit(e, A64_OP_BL)->reference = CODEGEN_FIXED_REFERENCE(in->op == VIR_OP_MEMCPY ? CODEGEN_LIBRARY_MEMCPY : CODEGEN_LIBRARY_MEMSET);
 		return;
 	}
 	if (in->op == VIR_OP_MEMSET && !a64_vir_value_is_zero(L->function, in->b))
@@ -181,10 +181,10 @@ VPRIV void a64_vir_memory_block_lower(a64_vir_context *L, const vir_insn *in)
 			uint64_t k = n - o >= 8 ? 8 : n - o >= 4 ? 4 : n - o >= 2 ? 2 : 1;
 
 			if (in->op == VIR_OP_MEMCPY) {
-				mem(e, I_LD, log2sz(k), 0, R_X16, s, soff + (int64_t)o);
-				mem(e, I_ST, log2sz(k), 0, R_X16, d, doff + (int64_t)o);
+				a64_record_emit_memory(e, A64_OP_LD, a64_size_log2(k), 0, R_X16, s, soff + (int64_t)o);
+				a64_record_emit_memory(e, A64_OP_ST, a64_size_log2(k), 0, R_X16, d, doff + (int64_t)o);
 			} else {
-				mem(e, I_ST, log2sz(k), 0, ZR, d, doff + (int64_t)o);
+				a64_record_emit_memory(e, A64_OP_ST, a64_size_log2(k), 0, ZR, d, doff + (int64_t)o);
 			}
 			o += k;
 		}

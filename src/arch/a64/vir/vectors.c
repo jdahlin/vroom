@@ -2,9 +2,9 @@
 
 #include "lowering-internal.h"
 
-#define A64_VIR_VECTOR_WORD3(op, m, n, d)	word(e, (op) | (unsigned)(m) << 16 | (unsigned)(n) << 5 | (unsigned)(d))
+#define A64_VIR_VECTOR_WORD3(op, m, n, d)	a64_record_emit_word(e, (op) | (unsigned)(m) << 16 | (unsigned)(n) << 5 | (unsigned)(d))
 
-#define A64_VIR_VECTOR_WORD2(op, n, d)		word(e, (op) | (unsigned)(n) << 5 | (unsigned)(d))
+#define A64_VIR_VECTOR_WORD2(op, n, d)		a64_record_emit_word(e, (op) | (unsigned)(n) << 5 | (unsigned)(d))
 
 /* instruction i if it makes or consumes a vector: true when it was lowered here.  v31 is the
  * scratch of the two compares that need one */
@@ -83,10 +83,10 @@ VPRIV bool a64_vir_vector_lower(a64_vir_context *L, const vir_insn *in, uint8_t 
 			A64_VIR_VECTOR_WORD2(D ? 0x4e080c00u : 0x4e040c00u, a64_vir_operand_general_register(L, 0, R_X16), vd);	/* dup v.4s, w (.2d, x) */
 		return true;
 	case VIR_OP_VSERIES:
-		movi(e, 1, R_X16, D ? 0 : 0x0000000100000000ll);
-		word(e, f_in(1, vd, R_X16));
-		movi(e, 1, R_X16, D ? 1 : 0x0000000300000002ll);
-		word(e, q_in_hi(vd, R_X16));
+		a64_record_emit_move_immediate(e, 1, R_X16, D ? 0 : 0x0000000100000000ll);
+		a64_record_emit_word(e, a64_word_fmov_to_vector(1, vd, R_X16));
+		a64_record_emit_move_immediate(e, 1, R_X16, D ? 1 : 0x0000000300000002ll);
+		a64_record_emit_word(e, a64_word_fmov_high_to_vector(vd, R_X16));
 		return true;
 	case VIR_OP_VICMP: {
 		/* eq ne slt sle sgt sge ult ule ugt uge: the instruction, operands swapped, inverted */
@@ -173,15 +173,15 @@ VPRIV bool a64_vir_vector_lower(a64_vir_context *L, const vir_insn *in, uint8_t 
 		if (D) {	/* (two lanes: the halves swapped) */
 			int a = a64_vir_operand_float_register(L, 0);
 
-			word(e, 0x6e004000u | (unsigned)a << 16 | (unsigned)a << 5 | (unsigned)vd);
+			a64_record_emit_word(e, 0x6e004000u | (unsigned)a << 16 | (unsigned)a << 5 | (unsigned)vd);
 			return true;
 		}
 		A64_VIR_VECTOR_WORD2(0x4ea00800u, a64_vir_operand_float_register(L, 0), vd);	/* rev64 .4s, then the halves swapped: ext #8 */
-		word(e, 0x6e004000u | (unsigned)vd << 16 | (unsigned)vd << 5 | (unsigned)vd);
+		a64_record_emit_word(e, 0x6e004000u | (unsigned)vd << 16 | (unsigned)vd << 5 | (unsigned)vd);
 		return true;
 	case VIR_OP_VREDUCE:
 		A64_VIR_VECTOR_WORD2(D ? 0x5ef1b800u : 0x4eb1b800u, a64_vir_operand_float_register(L, 0), 31);	/* addv s31, v.4s (addp d31, v.2d) */
-		word(e, f_out(D != 0, res == VIR_REGISTER_NONE ? R_X16 : a64_vir_general_register(res), 31));
+		a64_record_emit_word(e, a64_word_fmov_from_vector(D != 0, res == VIR_REGISTER_NONE ? R_X16 : a64_vir_general_register(res), 31));
 		return true;
 	default:
 		return false;

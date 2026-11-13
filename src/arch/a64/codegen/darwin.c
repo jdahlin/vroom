@@ -14,13 +14,13 @@
  */
 #include "../../../codegen/codegen-internal.h"
 
-static bool idch(char ch)
+static bool a64_darwin_is_identifier_character(char ch)
 {
 	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') ||
 	       ch == '_' || ch == '.' || ch == '$';
 }
 
-static bool starts(const char *p, const char *e, const char *w)
+static bool a64_darwin_text_starts_with(const char *p, const char *e, const char *w)
 {
 	size_t n = strlen(w);
 
@@ -28,7 +28,7 @@ static bool starts(const char *p, const char *e, const char *w)
 }
 
 /* a label "name:" at the start of some line of the text */
-static bool defined(const char *t, size_t tn, const char *s, size_t n)
+static bool a64_darwin_label_is_defined(const char *t, size_t tn, const char *s, size_t n)
 {
 	for (const char *p = t, *e = t + tn; p < e;) {
 		const char *nl = memchr(p, '\n', (size_t)(e - p));
@@ -42,7 +42,7 @@ static bool defined(const char *t, size_t tn, const char *s, size_t n)
 }
 
 /* a symbol expression x, x+k or x-k with a relocation specifier: x@SPEC+k */
-static const char *reloc(tbuf *o, const char *p, const char *e, const char *spec)
+static const char *a64_darwin_relocation_translate(tbuf *o, const char *p, const char *e, const char *spec)
 {
 	const char *s = p, *k;
 
@@ -59,40 +59,40 @@ static const char *reloc(tbuf *o, const char *p, const char *e, const char *spec
 }
 
 /* a .xword/.word of a symbol before the next section directive */
-static bool relocs(const char *p, const char *end)
+static bool a64_darwin_data_has_relocations(const char *p, const char *end)
 {
 	while (p < end) {
 		const char *nl = memchr(p, '\n', (size_t)(end - p));
 		const char *le = nl ? nl : end;
 
-		if (starts(p, le, "\t.section") || starts(p, le, "\t.data") || starts(p, le, "\t.text") ||
-		    starts(p, le, "\t.bss"))
+		if (a64_darwin_text_starts_with(p, le, "\t.section") || a64_darwin_text_starts_with(p, le, "\t.data") || a64_darwin_text_starts_with(p, le, "\t.text") ||
+		    a64_darwin_text_starts_with(p, le, "\t.bss"))
 			return false;
-		if ((starts(p, le, "\t.xword\t") && !(p[8] >= '0' && p[8] <= '9') && p[8] != '-') ||
-		    (starts(p, le, "\t.word\t") && !(p[7] >= '0' && p[7] <= '9') && p[7] != '-'))
+		if ((a64_darwin_text_starts_with(p, le, "\t.xword\t") && !(p[8] >= '0' && p[8] <= '9') && p[8] != '-') ||
+		    (a64_darwin_text_starts_with(p, le, "\t.word\t") && !(p[7] >= '0' && p[7] <= '9') && p[7] != '-'))
 			return true;
 		p = le + 1;
 	}
 	return false;
 }
 
-static void section(tbuf *o, const char *p, const char *e, const char *end)
+static void a64_darwin_section_translate(tbuf *o, const char *p, const char *e, const char *end)
 {
 	/* p: after "\t.section\t" */
-	if (starts(p, e, ".rodata.str1.")) {
+	if (a64_darwin_text_starts_with(p, e, ".rodata.str1.")) {
 		vtext_string_append(o, "\t.section\t__TEXT,__cstring,cstring_literals\n");
-	} else if (starts(p, e, ".rodata") || starts(p, e, "\".rodata")) {
+	} else if (a64_darwin_text_starts_with(p, e, ".rodata") || a64_darwin_text_starts_with(p, e, "\".rodata")) {
 		/* const data holding addresses is __DATA,__const (no text relocations), as clang */
-		vtext_string_append(o, relocs(e + 1, end) ? "\t.section\t__DATA,__const\n" : "\t.section\t__TEXT,__const\n");
-	} else if (starts(p, e, ".tdata")) {
+		vtext_string_append(o, a64_darwin_data_has_relocations(e + 1, end) ? "\t.section\t__DATA,__const\n" : "\t.section\t__TEXT,__const\n");
+	} else if (a64_darwin_text_starts_with(p, e, ".tdata")) {
 		vtext_string_append(o, "\t.section\t__DATA,__thread_data,thread_local_regular\n");
-	} else if (starts(p, e, ".tbss")) {
+	} else if (a64_darwin_text_starts_with(p, e, ".tbss")) {
 		vtext_string_append(o, "\t.section\t__DATA,__thread_bss,thread_local_zerofill\n");
-	} else if (starts(p, e, ".tlv")) {
+	} else if (a64_darwin_text_starts_with(p, e, ".tlv")) {
 		vtext_string_append(o, "\t.section\t__DATA,__thread_vars,thread_local_variables\n");
-	} else if (starts(p, e, ".init_array")) {
+	} else if (a64_darwin_text_starts_with(p, e, ".init_array")) {
 		vtext_string_append(o, "\t.section\t__DATA,__mod_init_func,mod_init_funcs\n");
-	} else if (starts(p, e, ".fini_array")) {
+	} else if (a64_darwin_text_starts_with(p, e, ".fini_array")) {
 		vtext_string_append(o, "\t.section\t__DATA,__mod_term_func,mod_term_funcs\n");
 	} else if (*p == '"') {
 		/* section("seg,sect") as the attribute gave it */
@@ -108,7 +108,7 @@ static void section(tbuf *o, const char *p, const char *e, const char *end)
 	}
 }
 
-VPRIV void darwin_text(tbuf *o, const char *t, size_t tn)
+VPRIV void a64_darwin_text_translate(tbuf *o, const char *t, size_t tn)
 {
 	static const struct { const char *from, *to; } dirs[] = {
 		{ "\t.xword\t", "\t.quad\t" }, { "\t.word\t", "\t.long\t" }, { "\t.hword\t", "\t.short\t" },
@@ -119,49 +119,49 @@ VPRIV void darwin_text(tbuf *o, const char *t, size_t tn)
 		const char *nl = memchr(p, '\n', (size_t)(e - p));
 		const char *le = nl ? nl : e;
 
-		if (starts(p, le, "\t.type\t") || starts(p, le, "\t.size\t") || starts(p, le, "\t.protected\t") ||
-		    starts(p, le, "\t.section\t\".note.GNU-stack\""))
+		if (a64_darwin_text_starts_with(p, le, "\t.type\t") || a64_darwin_text_starts_with(p, le, "\t.size\t") || a64_darwin_text_starts_with(p, le, "\t.protected\t") ||
+		    a64_darwin_text_starts_with(p, le, "\t.section\t\".note.GNU-stack\""))
 			goto next;
-		if (starts(p, le, "\t.section\t")) {
-			section(o, p + 10, le, e);
+		if (a64_darwin_text_starts_with(p, le, "\t.section\t")) {
+			a64_darwin_section_translate(o, p + 10, le, e);
 			goto next;
 		}
-		if (starts(p, le, "\t.bss")) {
+		if (a64_darwin_text_starts_with(p, le, "\t.bss")) {
 			vtext_string_append(o, "\t.section\t__DATA,__bss\n");
 			goto next;
 		}
-		if (starts(p, le, "\t.weak\t")) {
-			vtext_string_append(o, defined(t, tn, p + 7, (size_t)(le - p - 7)) ? "\t.weak_definition\t" : "\t.weak_reference\t");
+		if (a64_darwin_text_starts_with(p, le, "\t.weak\t")) {
+			vtext_string_append(o, a64_darwin_label_is_defined(t, tn, p + 7, (size_t)(le - p - 7)) ? "\t.weak_definition\t" : "\t.weak_reference\t");
 			vtext_append(o, p + 7, (size_t)(le - p - 7));
 			vtext_char_append(o, '\n');
 			goto next;
 		}
 		for (size_t i = 0; i < sizeof(dirs) / sizeof(dirs[0]); i++)
-			if (starts(p, le, dirs[i].from)) {
+			if (a64_darwin_text_starts_with(p, le, dirs[i].from)) {
 				vtext_string_append(o, dirs[i].to);
 				p += strlen(dirs[i].from);
 				break;
 			}
 		{
-			bool adrp = starts(p, le, "\tadrp\t");
+			bool adrp = a64_darwin_text_starts_with(p, le, "\tadrp\t");
 			bool ins = p < le && p[0] == '\t' && p + 1 < le && p[1] != '.';
 
 			for (const char *q = p; q < le;) {
-				if (ins && *q == ':' && starts(q, le, ":lo12:")) {
-					q = reloc(o, q + 6, le, "@PAGEOFF");
-				} else if (ins && starts(q, le, ":vcc_tlvp_lo12:")) {
-					q = reloc(o, q + 15, le, "@TLVPPAGEOFF");
-				} else if (ins && starts(q, le, ":vcc_tlvp:")) {
-					q = reloc(o, q + 10, le, "@TLVPPAGE");
-				} else if (ins && starts(q, le, ":got_lo12:")) {
-					q = reloc(o, q + 10, le, "@GOTPAGEOFF");
-				} else if (ins && starts(q, le, ":got:")) {
-					q = reloc(o, q + 5, le, "@GOTPAGE");
+				if (ins && *q == ':' && a64_darwin_text_starts_with(q, le, ":lo12:")) {
+					q = a64_darwin_relocation_translate(o, q + 6, le, "@PAGEOFF");
+				} else if (ins && a64_darwin_text_starts_with(q, le, ":vcc_tlvp_lo12:")) {
+					q = a64_darwin_relocation_translate(o, q + 15, le, "@TLVPPAGEOFF");
+				} else if (ins && a64_darwin_text_starts_with(q, le, ":vcc_tlvp:")) {
+					q = a64_darwin_relocation_translate(o, q + 10, le, "@TLVPPAGE");
+				} else if (ins && a64_darwin_text_starts_with(q, le, ":got_lo12:")) {
+					q = a64_darwin_relocation_translate(o, q + 10, le, "@GOTPAGEOFF");
+				} else if (ins && a64_darwin_text_starts_with(q, le, ":got:")) {
+					q = a64_darwin_relocation_translate(o, q + 5, le, "@GOTPAGE");
 				} else if (adrp && *q == ',' && q + 2 < le && q[2] != ':') {
 					vtext_string_append(o, ", ");
 					q += 2;
-					q = reloc(o, q, le, "@PAGE");
-				} else if (*q == '.' && q + 1 < le && q[1] == 'L' && (q == p || !idch(q[-1]))) {
+					q = a64_darwin_relocation_translate(o, q, le, "@PAGE");
+				} else if (*q == '.' && q + 1 < le && q[1] == 'L' && (q == p || !a64_darwin_is_identifier_character(q[-1]))) {
 					q++;	/* .Lx: Mach-O's local labels are Lx */
 				} else {
 					vtext_char_append(o, *q++);

@@ -109,18 +109,18 @@ static void a64_vir_chain_consumer_act(a64_vir_context *L, uint32_t c, uint8_t r
 		L->index_value = c, L->index_base = a, L->index_extension = x->opt, L->index_shift = x->sh;
 		return;
 	case A64_VIR_CHAIN_EXT: {
-		ins *n = put(e, op == VIR_OP_SUB ? I_SUB : I_ADD);	/* (extended register: cond 8 + option) */
+		a64_record *n = a64_record_emit(e, op == VIR_OP_SUB ? A64_OP_SUB : A64_OP_ADD);	/* (extended register: cond 8 + option) */
 
-		n->sz = 1, n->rd = (uint8_t)rd, n->rn = (uint8_t)a, n->rm = (uint8_t)L->index_register, n->cond = (uint8_t)(8 + x->opt), n->sh = x->sh;
+		n->size = 1, n->rd = (uint8_t)rd, n->rn = (uint8_t)a, n->rm = (uint8_t)L->index_register, n->condition = (uint8_t)(8 + x->opt), n->shift = x->sh;
 		return;
 	}
 	case A64_VIR_CHAIN_LSL:
-		op3s(e, op == VIR_OP_SUB ? I_SUB : I_ADD, 1, rd, a, L->index_register, 0, x->sh);
+		a64_record_emit_three_registers_shifted(e, op == VIR_OP_SUB ? A64_OP_SUB : A64_OP_ADD, 1, rd, a, L->index_register, 0, x->sh);
 		return;
 	default:	/* A64_VIR_CHAIN_MADDL */
 		t = L->index_register == R_X17 || a == R_X17 ? R_X16 : R_X17;
-		movi(e, 1, t, x->k);
-		op4(e, x->opt == 6 ? I_SMADDL : I_UMADDL, 1, rd, L->index_register, t, a);
+		a64_record_emit_move_immediate(e, 1, t, x->k);
+		a64_record_emit_four_registers(e, x->opt == 6 ? A64_OP_SMADDL : A64_OP_UMADDL, 1, rd, L->index_register, t, a);
 		return;
 	}
 }
