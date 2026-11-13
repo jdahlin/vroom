@@ -346,6 +346,7 @@ static void snap_restore(cc *c, const dcsnap *s, uint32_t base)
 	c->p = keep.p;
 	c->o = keep.o;
 	memcpy(c->bail, keep.bail, sizeof(c->bail));
+	c->rec = keep.rec;	/* (the snapshot's points into the recording TU's stack, maybe another thread's) */
 	memcpy(c->tk, keep.tk, sizeof(c->tk));
 	c->ntk = keep.ntk;
 	c->ty = keep.ty, c->params = keep.params, c->tags = keep.tags, c->syms = keep.syms;

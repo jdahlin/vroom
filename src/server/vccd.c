@@ -403,11 +403,13 @@ static bool recv_req(struct worker *w, int conn, struct req *r)
 				close(r->fds[i]), r->fds[i] = -1;
 		return false;
 	}
-	if (h->magic != VROOM_MAGIC || h->payload_len > VROOM_MAX_PAYLOAD ||
-	    1 + h->argc + h->envc > MAX_STRS)
+	if (h->magic != VROOM_MAGIC || h->payload_len > VROOM_MAX_PAYLOAD || h->payload_len == 0 || h->pad ||
+	    1 + (uint64_t)h->argc + h->envc > MAX_STRS)	/* (64 bits: argc 0xffffffff wraps to a small count) */
 		return false;
 	if (!read_full(conn, w->raw + sizeof(*h), h->payload_len))
 		return false;
+	if (w->raw[sizeof(*h) + h->payload_len - 1])
+		return false;	/* the last string's NUL: split_req's strlen stays in the payload */
 	return split_req(w->raw, w->strs, r);
 }
 
