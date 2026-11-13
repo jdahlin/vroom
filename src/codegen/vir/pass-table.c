@@ -326,7 +326,7 @@ VPRIV bool vir_pass_step_instrumented(ecx *e, uint32_t i, uint32_t *valid)
 		const char *bad;
 
 		if (p->flags & PASS_ON_VIR) {
-			vbuf b = { 0 };
+			vbuffer b = { 0 };
 			uint32_t nerr = vir_verify(&e->vw->f, NULL, &b, 1);
 			size_t k = 0;
 

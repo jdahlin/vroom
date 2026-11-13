@@ -52,7 +52,7 @@ VPRIV uint32_t vir_cfind(vir_ctx *x, const vir_fn *f, uint32_t op, uint32_t ty, 
 VPRIV const char *vir_unit_str(vir_unit *u, const char *s, size_t n);	/* a copy owned by the unit */
 VPRIV void *vir_unit_alloc(vir_unit *u, size_t n);
 
-/* a printf into a vbuf, and a one-line error for the verifier and the parser */
+/* a printf into a vbuffer, and a one-line error for the verifier and the parser */
 #define VIR_FMT __attribute__((format(printf, 2, 3)))
 
 #endif

@@ -99,7 +99,7 @@ VPRIV bool vw_x64(ecx *e, uint32_t sym, const char **why)
 		*why = VIRFAIL(x64_allocation_failed); snprintf(V->detail, sizeof V->detail, "%s", V->ao.err); return false;
 	}
 	if (getenv("VCC_VIR_CHECK")) {
-		vbuf msg = { 0 };
+		vbuffer msg = { 0 };
 		uint32_t n = vir_alloc_check(f, &regs, &V->ao, &msg);
 		if (n) fprintf(stderr, "vir x86-64: allocation check: %.*s", (int)msg.n, msg.p ? (char *)msg.p : "");
 		free(msg.p);

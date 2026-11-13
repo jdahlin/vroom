@@ -611,8 +611,8 @@ VPRIV bool enum_covered(cc *c, const node *sw);
 VPRIV const char *tyname(cc *c, qty t);
 VPRIV void layout_checks(cc *c);
 VPRIV const char *int_name(int k);
-struct vfixbuf;
-VPRIV void type_str(cc *c, qty t, const char *inner, struct vfixbuf *out, bool *ok);
+struct vbuffer;
+VPRIV void type_str(cc *c, qty t, const char *inner, struct vbuffer *out, bool *ok);
 
 static inline bool is_int_kind(int k) { return (k >= TY_BOOL && k <= TY_UINT128) || k == TY_BITINT || k == TY_UBITINT; }
 static inline bool is_flt_kind(int k) { return k >= TY_BFLOAT16 && k <= TY_FLOAT128; }

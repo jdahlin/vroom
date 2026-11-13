@@ -42,9 +42,9 @@ int was_error(wmod *m, const char *fmt, ...)
 		} \
 	} while (0)
 
-static void put8(vbuf *b, uint8_t v) { vbuf_put(b, &v, 1); }
+static void put8(vbuffer *b, uint8_t v) { vbuffer_append(b, &v, 1); }
 
-static void uleb(vbuf *b, uint64_t v)
+static void uleb(vbuffer *b, uint64_t v)
 {
 	do {
 		uint8_t c = v & 0x7f;
@@ -54,7 +54,7 @@ static void uleb(vbuf *b, uint64_t v)
 	} while (v);
 }
 
-static void sleb(vbuf *b, int64_t v)
+static void sleb(vbuffer *b, int64_t v)
 {
 	for (;;) {
 		uint8_t c = v & 0x7f;
@@ -69,11 +69,11 @@ static void sleb(vbuf *b, int64_t v)
 }
 
 /* n zero bytes of a padded LEB, filled in when laid out */
-static void hole(vbuf *b, int n)
+static void hole(vbuffer *b, int n)
 {
 	static const uint8_t z[10];
 
-	vbuf_put(b, z, n);
+	vbuffer_append(b, z, n);
 }
 
 /* ---------------- symbols, signatures ---------------- */
@@ -462,7 +462,7 @@ static int instruction(was *a, const winsn *w, lx *l)
 {
 	wmod *m = a->m;
 	wfunc *f = &m->fn[a->fn];
-	vbuf *b = &f->body;
+	vbuffer *b = &f->body;
 	int64_t v;
 	int32_t s;
 	const char *t;
@@ -503,7 +503,7 @@ static int instruction(was *a, const winsn *w, lx *l)
 	case I_BRTABLE: {
 		/* {a, b, ..., default} */
 		int64_t d[1024];
-		vbuf tmp = { 0 };
+		vbuffer tmp = { 0 };
 		uint32_t k = 0;
 
 		if (!accept(l, '{'))
@@ -523,7 +523,7 @@ static int instruction(was *a, const winsn *w, lx *l)
 		for (uint32_t i = 0; i < k && i < 1024; i++)
 			uleb(b, (uint64_t)d[i]);
 		if (k > 1024) {
-			vbuf_put(b, tmp.p, tmp.n);
+			vbuffer_append(b, tmp.p, tmp.n);
 			free(tmp.p);
 		}
 		break;
@@ -618,9 +618,9 @@ static int instruction(was *a, const winsn *w, lx *l)
 		if (w->imm == I_F32) {
 			float x = (float)d;
 
-			vbuf_put(b, &x, 4);
+			vbuffer_append(b, &x, 4);
 		} else {
-			vbuf_put(b, &d, 8);
+			vbuffer_append(b, &d, 8);
 		}
 		break;
 	}
@@ -690,7 +690,7 @@ static int data_value(was *a, lx *l, int size)
 				(uint32_t)s, v);
 			v = 0;
 		}
-		vbuf_put(&g->data, &v, (size_t)size);	/* (little-endian host) */
+		vbuffer_append(&g->data, &v, (size_t)size);	/* (little-endian host) */
 	} while (accept(l, ','));
 	return 0;
 }
@@ -698,7 +698,7 @@ static int data_value(was *a, lx *l, int size)
 static int data_string(was *a, lx *l, bool nul)
 {
 	wmod *m = a->m;
-	vbuf *b = &curseg(a)->data;
+	vbuffer *b = &curseg(a)->data;
 
 	do {
 		if (!accept(l, '"'))
@@ -1071,7 +1071,7 @@ static int directive(was *a, const char *d, size_t dn, lx *l)
 		return data_value(a, l, 8);
 	if (IS(".zero") || IS(".skip") || IS(".space")) {
 		int64_t fill = 0;
-		vbuf *b = &curseg(a)->data;
+		vbuffer *b = &curseg(a)->data;
 
 		if (!number(l, &v) || v < 0)
 			return was_error(m, "%.*s: expected a size", (int)dn, d);
@@ -1199,7 +1199,7 @@ int wasm_assemble(const char *text, size_t len, int w32, uint8_t **out, size_t *
 	wmod m = { .err = err, .errcap = errcap, .w32 = w32 != 0 };
 	was a = { .m = &m, .seg = -1, .fn = -1, .label = -1 };
 	const char *p = text, *e = text + len;
-	vbuf o = { 0 };
+	vbuffer o = { 0 };
 	int r = 0;
 
 	err[0] = 0;

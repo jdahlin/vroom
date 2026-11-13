@@ -80,7 +80,7 @@ static int selftest(void)
 	int bad = 0;
 	vir_unit u;
 	vir_fn f;
-	vbuf out = { 0 }, ver = { 0 };
+	vbuffer out = { 0 }, ver = { 0 };
 	uint32_t sg[5] = { VSIG_HDR(1, 0), VG_WORD0(VG_REG, 1, VC_INT, 0, 0, 0, 0), 0, VG_WORD0(VG_REG, 1, VC_INT, 0, 0, 0, 0), 0 };
 	uint32_t sym, p, c5, c9, c7, a, b, cond, l[2];
 	uint8_t cnt[64];
@@ -268,7 +268,7 @@ int main(int argc, char **argv)
 	size_t n, sep;
 	vir_unit u = { 0 }, u2;
 	vir_perr err;
-	vbuf out = { 0 }, out2 = { 0 }, ver = { 0 };	/* the unit printed, again, and what is reported instead */
+	vbuffer out = { 0 }, out2 = { 0 }, ver = { 0 };	/* the unit printed, again, and what is reported instead */
 	uint32_t nbad = 0;
 	int rc = 1;
 
@@ -324,7 +324,7 @@ int main(int argc, char **argv)
 				if (!strcmp(tk, "canon")) {
 					canon = true;
 				} else {
-					vbuf_f(&ver, "%s: unknown pass `%s` (only `canon` exists until the passes are written)\n", path, tk);
+					vbuffer_format_append(&ver, "%s: unknown pass `%s` (only `canon` exists until the passes are written)\n", path, tk);
 					free(v);
 					goto done;
 				}
@@ -335,7 +335,7 @@ int main(int argc, char **argv)
 		} else if (e - i >= 6 && !memcmp(l, "; DOM:", 6)) {
 			dom = true;	/* append the dominator tree of each function as comments */
 		} else if (!strncmp(l, "; EQUIV:", 8) || !strncmp(l, "; EXPECT-UB:", 12)) {
-			vbuf_f(&ver, "%s: %.*s needs the interpreter (virrun), which is not implemented yet\n", path,
+			vbuffer_format_append(&ver, "%s: %.*s needs the interpreter (virrun), which is not implemented yet\n", path,
 			       (int)(e - i > 12 ? 8 : e - i), l + 2);
 			goto done;
 		}
@@ -343,7 +343,7 @@ int main(int argc, char **argv)
 	}
 	vir_unit_init(&u);
 	if (!vir_parse(&u, src, sep, &err)) {
-		vbuf_f(&ver, "%s:%u:%u: %s\n", path, err.line, err.col, err.msg);
+		vbuffer_format_append(&ver, "%s:%u:%u: %s\n", path, err.line, err.col, err.msg);
 		goto done;
 	}
 	for (uint32_t i = 0; i < u.nfn; i++) {
@@ -352,7 +352,7 @@ int main(int argc, char **argv)
 		vir_fn_load(&f, &u, i);
 		if (canon) {
 			if (!vir_canon(&f)) {
-				vbuf_f(&ver, "%s: @%s: the function cannot be put in canonical form\n", path, vir_fname(&u, &f));
+				vbuffer_format_append(&ver, "%s: @%s: the function cannot be put in canonical form\n", path, vir_fname(&u, &f));
 				nbad++;
 				continue;
 			}
@@ -367,18 +367,18 @@ int main(int argc, char **argv)
 	/* print, parse, print */
 	vir_unit_init(&u2);
 	if (!vir_parse(&u2, out.p, out.n, &err)) {
-		vbuf_f(&ver, "%s: the printed text does not parse: %u:%u: %s\n", path, err.line, err.col, err.msg);
-		vbuf_put(&ver, out.p, out.n);
+		vbuffer_format_append(&ver, "%s: the printed text does not parse: %u:%u: %s\n", path, err.line, err.col, err.msg);
+		vbuffer_append(&ver, out.p, out.n);
 		vir_unit_free(&u2);
 		goto done;
 	}
 	vir_print_unit(&out2, &u2);
 	vir_unit_free(&u2);
 	if (out.n != out2.n || memcmp(out.p, out2.p, out.n)) {
-		vbuf_f(&ver, "%s: print-parse-print is not identical\n--- first\n", path);
-		vbuf_put(&ver, out.p, out.n);
-		vbuf_s(&ver, "--- second\n");
-		vbuf_put(&ver, out2.p, out2.n);
+		vbuffer_format_append(&ver, "%s: print-parse-print is not identical\n--- first\n", path);
+		vbuffer_append(&ver, out.p, out.n);
+		vbuffer_string_append(&ver, "--- second\n");
+		vbuffer_append(&ver, out2.p, out2.n);
 		goto done;
 	}
 	rc = 0;
@@ -388,14 +388,14 @@ int main(int argc, char **argv)
 
 			vir_fn_load(&f, &u, i);
 			if (!vir_dom(&f)) {
-				vbuf_f(&out, "; dom @%s: no graph\n", vir_fname(&u, &f));
+				vbuffer_format_append(&out, "; dom @%s: no graph\n", vir_fname(&u, &f));
 				continue;
 			}
 			for (uint32_t b = 0; b < f.nblk; b++)
 				if (f.blk[b].idom == VIR_NOBLK)
-					vbuf_f(&out, "; dom @%s b%u unreachable\n", vir_fname(&u, &f), b);
+					vbuffer_format_append(&out, "; dom @%s b%u unreachable\n", vir_fname(&u, &f), b);
 				else
-					vbuf_f(&out, "; dom @%s b%u idom b%u pre %u post %u\n", vir_fname(&u, &f), b, f.blk[b].idom,
+					vbuffer_format_append(&out, "; dom @%s b%u idom b%u pre %u post %u\n", vir_fname(&u, &f), b, f.blk[b].idom,
 					       f.blk[b].pre, f.blk[b].post);
 		}
 done:

@@ -116,9 +116,9 @@ static void ml_free(mlist *l)
 /* ---------------- paths ---------------- */
 
 /* base + path, absolute and lexically normalized ("." and ".." resolved) */
-/* scoped: the members of a list, the bytes of a vsbuf, an arq's directory */
+/* scoped: the members of a list, the bytes of a vbuffer, an arq's directory */
 #define MLIST VCLEANUP(ml_free)
-static void sbuf_done(vsbuf *b)
+static void sbuf_done(vbuffer *b)
 {
 	free(b->p);
 	b->p = NULL;
@@ -320,7 +320,7 @@ static uint64_t r64(const unsigned char *p) { return r32(p) | (uint64_t)r32(p + 
  * local, section or file symbols.  Other files have no symbols, and an
  * archive without any object file gets no symbol table (*is_obj).
  */
-static bool elf_syms(const vfile_mapping *d, vsbuf *names, uint32_t *count, bool *is_obj)
+static bool elf_syms(const vfile_mapping *d, vbuffer *names, uint32_t *count, bool *is_obj)
 {
 	const unsigned char *p = d->p;
 	uint64_t shoff, shnum, i;
@@ -371,7 +371,7 @@ static bool elf_syms(const vfile_mapping *d, vsbuf *names, uint32_t *count, bool
 			len = strnlen((const char *)str + nm, ssize - nm);
 			if (nm + len >= ssize)
 				return false;
-			vsbuf_put(names, str + nm, len + 1);
+			vbuffer_append(names, str + nm, len + 1);
 			(*count)++;
 		}
 		return true;	/* one symbol table per object */
@@ -400,21 +400,21 @@ static void mput(const member *m, vfile_mapping *d)
 		vfile_unmap(d);
 }
 
-static void header(vsbuf *b, const char *name, const char *date, const char *uid, const char *gid,
+static void header(vbuffer *b, const char *name, const char *date, const char *uid, const char *gid,
 		   const char *mode, uint64_t size)
 {
 	char h[61];
 
 	snprintf(h, sizeof(h), "%-16s%-12s%-6s%-6s%-8s%-10llu`\n", name, date, uid, gid, mode,
 		 (unsigned long long)size);
-	vsbuf_put(b, h, 60);
+	vbuffer_append(b, h, 60);
 }
 
-static void be32(vsbuf *b, uint32_t v)
+static void be32(vbuffer *b, uint32_t v)
 {
 	unsigned char c[4] = { v >> 24, v >> 16, v >> 8, v };
 
-	vsbuf_put(b, c, 4);
+	vbuffer_append(b, c, 4);
 }
 
 static const char *base_of(const char *p)
@@ -424,11 +424,11 @@ static const char *base_of(const char *p)
 	return s ? s + 1 : p;
 }
 
-static void le32(vsbuf *b, uint32_t v)
+static void le32(vbuffer *b, uint32_t v)
 {
 	unsigned char c[4] = { v, v >> 8, v >> 16, v >> 24 };
 
-	vsbuf_put(b, c, 4);
+	vbuffer_append(b, c, 4);
 }
 
 static const char zeros8[8];
@@ -441,9 +441,9 @@ static const char zeros8[8];
  * of the (name offset, member offset) pairs, the pairs, the string table's
  * size and the strings, zero-padded; all little-endian.
  */
-static bool build_bsd(arq *q, vsbuf *out, const mlist *l, bool symtab)
+static bool build_bsd(arq *q, vbuffer *out, const mlist *l, bool symtab)
 {
-	SBUF vsbuf syms = { 0 };
+	SBUF vbuffer syms = VBUFFER_STICKY_INIT;
 	VAUTOFREE uint32_t *nsym = calloc(l->n + 1, sizeof *nsym);
 	VAUTOFREE uint64_t *mpos = calloc(l->n + 1, sizeof *mpos);
 	uint32_t total = 0;
@@ -487,14 +487,14 @@ static bool build_bsd(arq *q, vsbuf *out, const mlist *l, bool symtab)
 			break;
 		w = 8;
 	}
-	vsbuf_put(out, "!<arch>\n", 8);
+	vbuffer_append(out, "!<arch>\n", 8);
 	if (symtab) {
 		uint64_t start = out->n;
 		uint32_t so = 0;
 		const char *sp = (const char *)syms.p;
 
 		header(out, "#1/12", "0", "0", "0", "0", symsize);
-		vsbuf_put(out, w == 8 ? "__.SYMDEF_64" : "__.SYMDEF\0\0\0", 12);
+		vbuffer_append(out, w == 8 ? "__.SYMDEF_64" : "__.SYMDEF\0\0\0", 12);
 #define LEW(v) do { le32(out, (uint32_t)(v)); if (w == 8) le32(out, (uint32_t)((uint64_t)(v) >> 32)); } while (0)
 		LEW(2 * w * total);
 		for (size_t i = 0; i < l->n; i++)
@@ -505,8 +505,8 @@ static bool build_bsd(arq *q, vsbuf *out, const mlist *l, bool symtab)
 			}
 		LEW(syms.n);
 #undef LEW
-		vsbuf_put(out, syms.p, syms.n);
-		vsbuf_put(out, zeros8, 60 + symsize - (out->n - start));
+		vbuffer_append(out, syms.p, syms.n);
+		vbuffer_append(out, zeros8, 60 + symsize - (out->n - start));
 	}
 	for (size_t i = 0; i < l->n; i++) {
 		const char *bn = base_of(l->m[i].name);
@@ -516,17 +516,17 @@ static bool build_bsd(arq *q, vsbuf *out, const mlist *l, bool symtab)
 
 		snprintf(nm, sizeof nm, "#1/%zu", nl + npad);
 		header(out, nm, "0", "0", "0", "644", body + tail);
-		vsbuf_put(out, bn, nl);
-		vsbuf_put(out, zeros8, npad);
+		vbuffer_append(out, bn, nl);
+		vbuffer_append(out, zeros8, npad);
 		if (!mget(&l->m[i], &d)) {
 			err(q, "ar: error: %s: %s\n", l->m[i].name, strerror(errno));
 			return false;
 		}
-		vsbuf_put(out, d.p, l->m[i].size < d.n ? l->m[i].size : d.n);
+		vbuffer_append(out, d.p, l->m[i].size < d.n ? l->m[i].size : d.n);
 		mput(&l->m[i], &d);
-		vsbuf_put(out, "\n\n\n\n\n\n\n\n", tail);
+		vbuffer_append(out, "\n\n\n\n\n\n\n\n", tail);
 	}
-	return !out->oom && !syms.oom;
+	return !out->failed && !syms.failed;
 }
 
 static void arq_done(arq *q)
@@ -538,7 +538,7 @@ static void arq_done(arq *q)
 static bool write_archive(arq *q, const char *archive_abs, const char *shown, const mlist *l, bool symtab, bool thin,
 			  bool bsd)
 {
-	SBUF vsbuf out = { 0 }, names = { 0 }, syms = { 0 };
+	SBUF vbuffer out = VBUFFER_STICKY_INIT, names = VBUFFER_STICKY_INIT, syms = VBUFFER_STICKY_INIT;
 	VAUTOFREE uint32_t *nsym = NULL;
 	VAUTOFREE char *tmp = NULL;
 	uint32_t total = 0;
@@ -558,11 +558,11 @@ static bool write_archive(arq *q, const char *archive_abs, const char *shown, co
 
 		if (!thin && strlen(nm) < 16)
 			continue;	/* regular: "name/" in the header */
-		vsbuf_str(&names, nm);
-		vsbuf_put(&names, "/\n", 2);
+		vbuffer_string_append(&names, nm);
+		vbuffer_append(&names, "/\n", 2);
 	}
 	if (names.n & 1)
-		vsbuf_put(&names, "\n", 1);	/* (a regular archive's names never pad: each entry is even) */
+		vbuffer_append(&names, "\n", 1);	/* (a regular archive's names never pad: each entry is even) */
 	if (symtab && l->n) {
 		if (!(nsym = calloc(l->n, sizeof(*nsym))))
 			return false;
@@ -588,7 +588,7 @@ static bool write_archive(arq *q, const char *archive_abs, const char *shown, co
 			symsize = 8;	/* llvm-ar: count 0 and four zero bytes */
 	}
 
-	vsbuf_put(&out, thin ? "!<thin>\n" : "!<arch>\n", 8);
+	vbuffer_append(&out, thin ? "!<thin>\n" : "!<arch>\n", 8);
 	if (l->n) {
 		VAUTOFREE uint64_t *mpos = calloc(l->n, sizeof *mpos);
 
@@ -627,12 +627,12 @@ static bool write_archive(arq *q, const char *archive_abs, const char *shown, co
 						be32(&out, (uint32_t)(mpos[i] >> 32));
 					be32(&out, (uint32_t)mpos[i]);
 				}
-			vsbuf_put(&out, syms.p, syms.n);
-			vsbuf_put(&out, "\0\0\0\0\0\0\0\0", symsize - (w + w * (uint64_t)total + syms.n));	/* (<= 4) */
+			vbuffer_append(&out, syms.p, syms.n);
+			vbuffer_append(&out, "\0\0\0\0\0\0\0\0", symsize - (w + w * (uint64_t)total + syms.n));	/* (<= 4) */
 		}
 		if (names.n || thin) {
 			header(&out, "//", "", "", "", "", names.n);
-			vsbuf_put(&out, names.p, names.n);
+			vbuffer_append(&out, names.p, names.n);
 		}
 		for (i = 0, pos = 0; i < l->n; i++) {
 			const char *bn = thin ? l->m[i].name : base_of(l->m[i].name);
@@ -653,15 +653,15 @@ static bool write_archive(arq *q, const char *archive_abs, const char *shown, co
 					err(q, "ar: error: %s: %s\n", l->m[i].name, strerror(errno));
 					return false;
 				}
-				vsbuf_put(&out, d.p, l->m[i].size < d.n ? l->m[i].size : d.n);
+				vbuffer_append(&out, d.p, l->m[i].size < d.n ? l->m[i].size : d.n);
 				mput(&l->m[i], &d);
 				if (l->m[i].size & 1)
-					vsbuf_put(&out, "\n", 1);
+					vbuffer_append(&out, "\n", 1);
 			}
 		}
 	}
 write:
-	if (out.oom || names.oom || syms.oom) {
+	if (out.failed || names.failed || syms.failed) {
 		err(q, "ar: error: %s%s\n", "out of memory", "");
 		return false;
 	}
@@ -789,7 +789,7 @@ static int regular_read(arq *q, const vfile_mapping *d, const char *shown, char 
 {
 	MLIST mlist l = { 0 };
 	VAUTOFREE bool *found = calloc((size_t)nfiles + 1, 1);
-	SBUF vsbuf out = { 0 };
+	SBUF vbuffer out = VBUFFER_STICKY_INIT;
 	int rc = 0;
 
 	bool bsd = false;
@@ -808,10 +808,10 @@ static int regular_read(arq *q, const vfile_mapping *d, const char *shown, char 
 		if (!want)
 			continue;
 		if (op == 't') {
-			vsbuf_str(&out, name);
-			vsbuf_put(&out, "\n", 1);
+			vbuffer_string_append(&out, name);
+			vbuffer_append(&out, "\n", 1);
 		} else if (op == 'p') {
-			vsbuf_put(&out, l.m[k].data, l.m[k].size);
+			vbuffer_append(&out, l.m[k].data, l.m[k].size);
 		} else if (strchr(name, '/') || !strcmp(name, "..") || !strcmp(name, ".")) {
 			err(q, "ar: error: %s: %s\n", name, "unsafe member name");
 			rc = 1;
@@ -834,7 +834,7 @@ static int regular_read(arq *q, const vfile_mapping *d, const char *shown, char 
 			err(q, "ar: error: '%s'%s was not found\n", files[i], "");
 			rc = 1;
 		}
-	return rc || out.oom;
+	return rc || out.failed;
 }
 
 /* ---------------- operations ---------------- */
@@ -926,16 +926,16 @@ int ar_run(const char *cwd, int argc, char **argv, int outfd, int errfd)
 		/* the archive argument's directory, then the stored name */
 		const char *s = strrchr(archive, '/');
 		size_t dl = s ? (size_t)(s - archive) : 0;
-		SBUF vsbuf b = { 0 };
+		SBUF vbuffer b = VBUFFER_STICKY_INIT;
 
 		for (size_t k = 0; k < old.n; k++) {
 			if (s) {
-				vsbuf_put(&b, archive, dl ? dl : 1);
+				vbuffer_append(&b, archive, dl ? dl : 1);
 				if (dl)
-					vsbuf_put(&b, "/", 1);
+					vbuffer_append(&b, "/", 1);
 			}
-			vsbuf_str(&b, old.m[k].name);
-			vsbuf_put(&b, "\n", 1);
+			vbuffer_string_append(&b, old.m[k].name);
+			vbuffer_append(&b, "\n", 1);
 		}
 		rc = 0;
 		for (size_t off = 0; off < b.n;) {
@@ -949,7 +949,7 @@ int ar_run(const char *cwd, int argc, char **argv, int outfd, int errfd)
 			}
 			off += w;
 		}
-		if (b.oom)
+		if (b.failed)
 			rc = 1;
 		return rc;
 	}

@@ -230,7 +230,7 @@ static void st_reserve(StrTab *t, uint32_t n)
 }
 static uint32_t st_add(StrTab *t, const char *s)
 {
-	uint32_t len = strlen(s), h = vhash_strtab(s, len);
+	uint32_t len = strlen(s), h = vhash_string(s, len);
 	if (!t->tab || (t->n + 1) * 2 > t->tmask)
 		st_grow(t);
 	uint32_t j = h & t->tmask;
@@ -250,7 +250,7 @@ static uint32_t st_add(StrTab *t, const char *s)
 }
 static uint64_t st_find(const StrTab *t, const char *s)
 {
-	uint32_t len = strlen(s), h = vhash_strtab(s, len);
+	uint32_t len = strlen(s), h = vhash_string(s, len);
 	if (!len)
 		return 0;
 	uint32_t j = h & t->tmask;
