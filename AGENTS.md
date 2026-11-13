@@ -169,7 +169,7 @@ relative to it); `TODO.md` stays at the top.
   - `arch/x64/as/`: the x86-64 assembler, AT&T syntax with MC's encodings:
     operands, the encoder (REX and VEX) and the dispatcher in `asm.c`
     (shared header `x64as.h`), one file per instruction family (`sys.c`,
-    `gpr.c`, `x87.c`, `sse.c`, `avx.c`); `vas-obj.py` checks `x86-*.s`.  The
+    `gpr.c`, `x87.c`, `sse.c`, `avx.c`); `vas-obj.py` checks `x86-*.s` (ELF) and `win64-*.s` (COFF).  The
     x86-64 target's feature table is `include/arch/x64/x86features.h`.
   - `arch/wasm/codegen/`: the WebAssembly (wasm64) code generator, AST to
     LLVM's wasm `.s` (`wimpl.h`; `wasm.c` functions, ABI, header; `wexpr.c`,
@@ -183,6 +183,11 @@ relative to it); `TODO.md` stays at the top.
   - `platform/darwin/`: the Mach-O writer; vld's Mach-O executables
     (`macho-linker.c`: libSystem only, chained fixups, ad-hoc signature, chosen
     when the first input is Mach-O; the kernel's host programs).
+  - `platform/win/`: COFF for x86_64-w64-mingw32 (`coff.c`: the writer, as
+    MC's WinCOFFObjectWriter; `unwind.c`: `.xdata`/`.pdata` from the SEH
+    frames, as Win64EH), in the obj module; `obj_set_format(o, OBJ_COFF)`
+    selects it (obj.h, "COFF").  The assembler's COFF directives (`.def`,
+    `.section` flags and COMDAT, `.seh_*`, ...) are `as/coff-directives.c`.
   - `platform/wasm/`: the wasm object writer (`wasm.c`: layout, symbol table,
     relocations as LLVM's WasmObjectWriter, byte for byte).
   - `frontend/pp/`, `frontend/c/` and `codegen/` (with `arch/<cpu>/codegen/`) are directories of
@@ -306,6 +311,7 @@ bench/vcc-x86.py -j 6               # the C suites for x86-64 on an x86-64 host:
 bench/fetch-testsuites.sh llvm-mingw # the pinned MinGW-w64 sysroot (UCRT) -> work/llvm-mingw (SHA-256 checked; no-op when there)
 bench/vcc-win64.py -j 6 --ref-only  # the C suites for x86_64-w64-mingw32: clang + lld + llvm-mingw sysroot, run under Wine (~60 s cold, <1 s cached)
 bench/vcc-win64.py -j 6 [--obj|--objcmp]   # ... and vcc's side (vpp -S, clang -c, lld, Wine) vs those references (doc/PLAN-win64.md)
+bench/vcc-win64.py -j 6 --vasm-ref  # clang -S, vasm's COFF object (= clang -c's), lld, Wine vs the references (~70 s, cached after)
 bench/vcc-wasm.py -j 6 --objcmp     # [VCC_WASM=1] ... and vpp -c's object byte-identical to clang's for the same .s
 bench/vcc-wasm.py -j 6 --obj --vlink  # [VCC_WASM=1] ... vcc's side through vpp -c and vlink as emcc's wasm-ld (~9 min)
 bench/vcc-same.py --base DIR -j 6    # test-suite outputs byte-identical with DIR/vpp (vbench.py mkbase REV), ~80 s
@@ -313,6 +319,8 @@ python3 bench/virgen-test.py --bin-dir build/linux/src  # generated VIR integer/
 bench/vas-enc.py $PWD/src/test/vas   # vas encodings vs llvm-mc
 bench/vas-obj.py                    # vasm objects vs clang -c byte for byte (src/test/vas-obj, <1 s)
 bench/vas-corpus.py -j 6 [-O2] [PAT] # clang -S of the test C files: clang -c vs vasm (~6 min for -O0 -O2)
+bench/vas-corpus.py -j 6 --target x86_64-w64-mingw32   # ... COFF objects (test runtime headers, no sysroot; ~2 min)
+bench/vas-mutate.py -n 20000 --bin-dir build/linux/src-asan   # mutated win64-*.s: vasm (ASan) never crashes (~1 min)
 bench/pg/build.sh clang && bench/pg/build.sh vcc   # PostgreSQL (macOS, meson+ninja): build + meson test (~2 min each)
 bench/pg/build.sh vccd             # ... CC = vcc shim + private vccd (VCC_DELEGATE=bench/pg/cc for the rest)
                                    # build: "warnings: N, not from clang: M" (M must be 0; logs in work/build-pg-*.build.log)
