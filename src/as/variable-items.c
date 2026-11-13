@@ -1,4 +1,13 @@
-/* variable-items.c: variable-size items (.prefalign, alignment after one, LEB128 of a label difference, .skip, x86-64 jumps) and their relaxation at the end of assembly. */
+/* variable-items.c: items whose size the layout decides (.prefalign, alignment after one, a LEB128 of a
+ * label difference, .skip with a layout-dependent count, x86-64 jmp/jcc) and their relaxation at the
+ * end of assembly, MC's relaxOnce loop.
+ *
+ * During assembly each such item is a record that ends a frag; as_variable_items_finish (called by
+ * as_end before CFI and DWARF are encoded) lays all frags out, then repeats passes until no size
+ * changes, and fails if 64 passes do not converge.  Jumps are judged against the previous pass's
+ * layout (the stale offsets MC uses), alignments and LEBs against the live one: this difference is
+ * what makes the output byte-identical to clang's, so do not "simplify" it.  The size tree and ranks
+ * live in the context's definitions region for the duration of the run. */
 #include "as-internal.h"
 
 /* After relaxation, debug encoders only read the layout until they append
@@ -29,8 +38,8 @@ VPRIV struct as_variable_item *as_variable_item_add(as_context *a, int kind)
 	}
 	struct as_variable_item *v = &a->variable_items[a->variable_item_count++];
 	memset(v, 0, sizeof *v);
-	v->kind = (uint8_t)kind; v->frag = a->cur;
-	a->cur = elf_split(a->o, a->cur);
+	v->kind = (uint8_t)kind; v->fragment = a->fragment_current;
+	a->fragment_current = elf_split(a->object, a->fragment_current);
 	return v;
 }
 
@@ -41,13 +50,13 @@ VPRIV int as_variable_item_branch_add(as_context *a, int cc, as_value v, int mod
 	struct as_variable_item *it;
 
 	(void)mod;
-	elf_code(a->o, a->cur);
+	elf_code(a->object, a->fragment_current);
 	as_value_fold(a, &v);
-	elf_reg(a->o, v.add);	/* (the symbol table's order: where the fixup would be made, MC) */
-	elf_reg(a->o, v.sub);
+	elf_reg(a->object, v.add);	/* (the symbol table's order: where the fixup would be made, MC) */
+	elf_reg(a->object, v.sub);
 	it = as_variable_item_add(a, AS_VARIABLE_ITEM_X64_BRANCH);
 	it->code = (uint8_t)cc;
-	it->v = v;
+	it->value = v;
 	it->size = 2;
 	return 0;
 }
@@ -62,9 +71,9 @@ VPRIV int as_directive_prefalign(as_context *a, const char *p, const char *e)
 	p = as_whitespace_skip(p, e);
 	if (p >= e || *p != ',') return as_error_report(a, "expected a comma");
 	as_text nm = as_text_first_word(as_whitespace_skip(p + 1, e), e);
-	if (!nm.n) return as_error_report(a, "expected symbol name");
-	uint32_t y = as_symbol_intern(a, nm.s, nm.n);
-	p = as_whitespace_skip(nm.s + nm.n, e);
+	if (!nm.length) return as_error_report(a, "expected symbol name");
+	uint32_t y = as_symbol_intern(a, nm.text, nm.length);
+	p = as_whitespace_skip(nm.text + nm.length, e);
 	int nop = 0;
 	if (p < e && *p == ',') {
 		p = as_whitespace_skip(p + 1, e);
@@ -72,7 +81,7 @@ VPRIV int as_directive_prefalign(as_context *a, const char *p, const char *e)
 		else if (as_expression_absolute_parse(a, &p, e, &fill)) return -1;
 	}
 	struct as_variable_item *v = as_variable_item_add(a, AS_VARIABLE_ITEM_PREFALIGN);
-	v->end = y; v->p2 = (uint8_t)p2; v->code = (uint8_t)nop; v->fill = (uint8_t)fill;
+	v->end_symbol = y; v->log2_alignment = (uint8_t)p2; v->code = (uint8_t)nop; v->fill = (uint8_t)fill;
 	return 0;
 }
 
@@ -101,7 +110,7 @@ static void as_variable_offset_add(as_context *a, uint32_t i, uint64_t delta)
 
 static uint64_t as_fragment_base(as_context *a, uint32_t frag)
 {
-	ElfObj *o = a->o;
+	ElfObj *o = a->object;
 	if (a->variable_rank) {
 		uint32_t rank = a->variable_rank[as_variable_item_index(o, frag)];
 		if (as_variable_sizes_previous) return a->variable_offsets_previous[rank];
@@ -121,9 +130,9 @@ static uint64_t as_fragment_base(as_context *a, uint32_t frag)
 
 static int as_symbol_section_offset(as_context *a, uint32_t y, uint32_t *sec, int64_t *off)
 {
-	ElfSym *s = elf_symp(a->o, y);
+	ElfSym *s = elf_symp(a->object, y);
 	if (!(s->flags & ESYM_DEFINED) || (s->flags & ESYM_ABS)) return -1;
-	*sec = elf_frag(a->o, s->frag)->sec;
+	*sec = elf_frag(a->object, s->frag)->sec;
 	*off = (int64_t)(as_fragment_base(a, s->frag) + s->value);
 	return 0;
 }
@@ -146,10 +155,10 @@ static int as_value_evaluate_in_layout(as_context *a, as_value v, int64_t *out, 
 	if (depth > 64) return -1;
 	for (int i = 0; i < 2; i++) {
 		if (!y[i]) continue;
-		ElfSym *s = elf_symp(a->o, y[i]);
+		ElfSym *s = elf_symp(a->object, y[i]);
 		int op; ElfVal ex, ey;
 		if (s->flags & ESYM_ABS) k[i] = (int64_t)s->value;
-		else if (elf_expr_get(a->o, y[i], &op, &ex, &ey)) {
+		else if (elf_expr_get(a->object, y[i], &op, &ex, &ey)) {
 			int64_t p, q;
 			if (as_value_evaluate_in_layout(a, ex, &p, depth + 1) || as_value_evaluate_in_layout(a, ey, &q, depth + 1) || !elf_expr_op(op, p, q, &k[i])) return -1;
 		} else if (!as_symbol_section_offset(a, y[i], &sc[i], &k[i])) rel[i] = 1;
@@ -162,13 +171,13 @@ static int as_value_evaluate_in_layout(as_context *a, as_value v, int64_t *out, 
 
 static int as_variable_item_evaluate(as_context *a, struct as_variable_item *v, int64_t *val)
 {
-	int64_t x = v->v.c, o1, o2;
+	int64_t x = v->value.c, o1, o2;
 	uint32_t s1 = 0, s2 = 0;
-	if (v->v.add && as_symbol_section_offset(a, v->v.add, &s1, &o1)) return -1;
-	if (v->v.sub && as_symbol_section_offset(a, v->v.sub, &s2, &o2)) return -1;
-	if (v->v.add && v->v.sub && s1 != s2) return -1;
-	if (v->v.add && !v->v.sub) return -1;
-	if (v->v.add) x += o1 - o2;
+	if (v->value.add && as_symbol_section_offset(a, v->value.add, &s1, &o1)) return -1;
+	if (v->value.sub && as_symbol_section_offset(a, v->value.sub, &s2, &o2)) return -1;
+	if (v->value.add && v->value.sub && s1 != s2) return -1;
+	if (v->value.add && !v->value.sub) return -1;
+	if (v->value.add) x += o1 - o2;
 	*val = x;
 	return 0;
 }
@@ -176,8 +185,8 @@ static int as_variable_item_evaluate(as_context *a, struct as_variable_item *v, 
 /* MC's relaxation: recompute every size until none changes, then emit */
 VPRIV void as_variable_items_finish(as_context *a)
 {
-	ElfObj *o = a->o;
-	for (uint32_t i = 0; i < a->variable_item_count; i++) elf_frag(o, a->variable_items[i].frag)->aux = i + 1;
+	ElfObj *o = a->object;
+	for (uint32_t i = 0; i < a->variable_item_count; i++) elf_frag(o, a->variable_items[i].fragment)->aux = i + 1;
 	uint32_t count = o->nsec + (uint32_t)(o->frags.cap / sizeof(ElfFrag)) - 1 - o->nfrag;
 	a->variable_rank = as_region_alloc(&a->definitions, sizeof(uint32_t) * count);
 	a->variable_size_tree = as_region_alloc(&a->definitions, sizeof(uint64_t) * count);
@@ -209,38 +218,38 @@ VPRIV void as_variable_items_finish(as_context *a)
 		}
 		for (uint32_t i = 0; i < a->variable_item_count; i++) {
 			struct as_variable_item *v = &a->variable_items[i];
-			uint64_t end = as_fragment_base(a, v->frag) + elf_frag(o, v->frag)->size, ns = 0;
+			uint64_t end = as_fragment_base(a, v->fragment) + elf_frag(o, v->fragment)->size, ns = 0;
 			if (v->kind == AS_VARIABLE_ITEM_PREFALIGN || v->kind == AS_VARIABLE_ITEM_ALIGN) {
-				uint64_t al = (uint64_t)1 << v->p2;
+				uint64_t al = (uint64_t)1 << v->log2_alignment;
 				if (v->kind == AS_VARIABLE_ITEM_PREFALIGN) {
-					uint32_t nf = elf_frag(o, v->frag)->cont, sc; int64_t eo;
-					if (as_symbol_section_offset(a, v->end, &sc, &eo) || sc != elf_frag(o, v->frag)->sec) { as_error_report(a, ".prefalign: the end symbol must follow in the same section"); return; }
+					uint32_t nf = elf_frag(o, v->fragment)->cont, sc; int64_t eo;
+					if (as_symbol_section_offset(a, v->end_symbol, &sc, &eo) || sc != elf_frag(o, v->fragment)->sec) { as_error_report(a, ".prefalign: the end symbol must follow in the same section"); return; }
 					uint64_t size = (uint64_t)eo - as_fragment_base(a, nf);
 					al = 1;
-					while (al < size && al < ((uint64_t)1 << v->p2)) al <<= 1;
+					while (al < size && al < ((uint64_t)1 << v->log2_alignment)) al <<= 1;
 					if (o->machine == EM_X86_64) {	/* x86: never lowered (a size and an alignment inside can oscillate) */
-						if (al < (uint64_t)v->v.c) al = (uint64_t)v->v.c;
-						v->v.c = (int64_t)al;
+						if (al < (uint64_t)v->value.c) al = (uint64_t)v->value.c;
+						v->value.c = (int64_t)al;
 					}
 				}
 				ns = (al - (end & (al - 1))) & (al - 1);
 				if (v->max && ns > v->max) ns = 0;
 				if (v->kind == AS_VARIABLE_ITEM_PREFALIGN) {
-					ElfSec *s = elf_sec(o, elf_frag(o, v->frag)->sec);
+					ElfSec *s = elf_sec(o, elf_frag(o, v->fragment)->sec);
 					unsigned lg = (unsigned)__builtin_ctzll(al);
 					if (lg > s->align) s->align = lg;
 				}
 			} else if (v->kind == AS_VARIABLE_ITEM_SKIP) {
 				int64_t x;
 				as_variable_sizes_previous = prev;
-				int r = as_value_evaluate_in_layout(a, v->v, &x, 0);
+				int r = as_value_evaluate_in_layout(a, v->value, &x, 0);
 				as_variable_sizes_previous = NULL;
 				if (r) { as_error_report(a, "expected absolute expression"); return; }
 				ns = x > 0 ? (uint64_t)x : 0;
 			} else if (v->kind == AS_VARIABLE_ITEM_X64_BRANCH) {
 				/* the short form while the target is a local label of this section within reach */
 				uint64_t big = v->code == 16 ? 5 : 6;
-				as_value t = v->v;
+				as_value t = v->value;
 				uint32_t sc; int64_t to;
 
 				as_value_fold(a, &t);
@@ -254,8 +263,8 @@ VPRIV void as_variable_items_finish(as_context *a)
 					/* every jump against the previous pass's layout, its own place too (MC's
 					   relaxOnce relaxes a section's fragments, then lays it out again) */
 					as_variable_sizes_previous = prev;
-					pend = as_fragment_base(a, v->frag) + elf_frag(o, v->frag)->size;
-					r = !y || t.sub || y->bind != STB_LOCAL || as_symbol_section_offset(a, t.add, &sc, &to) || sc != elf_frag(o, v->frag)->sec;
+					pend = as_fragment_base(a, v->fragment) + elf_frag(o, v->fragment)->size;
+					r = !y || t.sub || y->bind != STB_LOCAL || as_symbol_section_offset(a, t.add, &sc, &to) || sc != elf_frag(o, v->fragment)->sec;
 					as_variable_sizes_previous = NULL;
 					if (r || !as_value_fits_int8(to + t.c - (int64_t)(pend + 2)))
 						ns = big;
@@ -267,8 +276,8 @@ VPRIV void as_variable_items_finish(as_context *a)
 				if (ns < v->size) ns = v->size;	/* never shrink: converges */
 			}
 			if (ns != v->size) {
-				if (elf_frag(o, v->frag)->cont)
-					as_variable_offset_add(a, a->variable_rank[as_variable_item_index(o, v->frag)], ns - v->size);
+				if (elf_frag(o, v->fragment)->cont)
+					as_variable_offset_add(a, a->variable_rank[as_variable_item_index(o, v->fragment)], ns - v->size);
 				v->size = ns; changed = 1;
 			}
 		}
@@ -278,12 +287,12 @@ VPRIV void as_variable_items_finish(as_context *a)
 	for (uint32_t i = 0; i < a->variable_item_count; i++) {
 		struct as_variable_item *v = &a->variable_items[i];
 		uint64_t pad = v->size;
-		elf_frag(o, v->frag)->aux = 0;
+		elf_frag(o, v->fragment)->aux = 0;
 		if (!pad) continue;
-		uint64_t qoff = elf_frag(o, v->frag)->size;
-		uint8_t *q = elf_grow(o, v->frag, pad);
+		uint64_t qoff = elf_frag(o, v->fragment)->size;
+		uint8_t *q = elf_grow(o, v->fragment, pad);
 		if (v->kind == AS_VARIABLE_ITEM_X64_BRANCH) {
-			as_value t = v->v;
+			as_value t = v->value;
 
 			as_value_fold(a, &t);
 			if (pad == 2) {
@@ -291,14 +300,14 @@ VPRIV void as_variable_items_finish(as_context *a)
 
 				as_symbol_section_offset(a, t.add, &sc, &to);
 				q[0] = (uint8_t)(v->code == 16 ? 0xeb : 0x70 + v->code);
-				q[1] = (uint8_t)(to + t.c - (int64_t)(as_fragment_base(a, v->frag) + qoff + 2));
+				q[1] = (uint8_t)(to + t.c - (int64_t)(as_fragment_base(a, v->fragment) + qoff + 2));
 				continue;
 			}
 			if (v->code == 16) { q[0] = 0xe9; }
 			else { q[0] = 0x0f; q[1] = (uint8_t)(0x80 + v->code); }
 			memset(q + pad - 4, 0, 4);
 			t.c -= 4;
-			elf_fixup(o, v->frag, qoff + pad - 4, q + pad - 4, R_X86_64_PLT32, t);	/* (MC: every branch) */
+			elf_fixup(o, v->fragment, qoff + pad - 4, q + pad - 4, R_X86_64_PLT32, t);	/* (MC: every branch) */
 			continue;
 		}
 		if (v->kind == AS_VARIABLE_ITEM_ULEB || v->kind == AS_VARIABLE_ITEM_SLEB) {

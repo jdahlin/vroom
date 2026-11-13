@@ -1,4 +1,12 @@
-/* section.c: .section, .text, .data and the standard sections, and the parsing of section and symbol names. */
+/* section.c: .section and .pushsection (as_directive_section), the standard sections by name, switching
+ * the current frag, and the parsing of section and symbol names (quoted or plain).  .text, .data, .bss,
+ * .popsection and .previous are dispatched in as.c and use the helpers here.
+ *
+ * A section is a frag chain in the ElfObj; the context's cur is the frag appended to and prev the one
+ * .previous returns to, with a bounded stack for .pushsection (AS_SECTION_STACK_MAX).  A frag that
+ * .prefalign split goes on in its continuation, so a frag taken from cur or prev goes through
+ * as_fragment_latest first.  .section flags and types are checked against ELF's
+ * (SHF_MERGE needs an entry size, SHF_GROUP a group) and fail the assembly when wrong. */
 #include "as-internal.h"
 
 /* ---------------------------------------------------------------- sections */
@@ -6,20 +14,20 @@
 static int as_text_has_prefix(as_text n, const char *pre)
 {
 	size_t k = strlen(pre);
-	return n.n >= k && !memcmp(n.s, pre, k) && (n.n == k || n.s[k] == '.');
+	return n.length >= k && !memcmp(n.text, pre, k) && (n.length == k || n.text[k] == '.');
 }
 
 VPRIV uint32_t as_fragment_latest(as_context *a, uint32_t frag)	/* a frag split by .prefalign goes on in its continuation */
 {
-	while (elf_frag(a->o, frag)->cont) frag = elf_frag(a->o, frag)->cont;
+	while (elf_frag(a->object, frag)->cont) frag = elf_frag(a->object, frag)->cont;
 	return frag;
 }
 
 VPRIV void as_fragment_switch(as_context *a, uint32_t frag)
 {
 	frag = as_fragment_latest(a, frag);
-	if (frag != a->cur) { a->prev = a->cur; a->dwarf_row_is_pending = 0; }	/* MC drops a pending .loc */
-	a->cur = frag;
+	if (frag != a->fragment_current) { a->fragment_previous = a->fragment_current; a->dwarf_row_is_pending = 0; }	/* MC drops a pending .loc */
+	a->fragment_current = frag;
 }
 
 VPRIV uint32_t as_section_standard_find(as_context *a, const char *name)
@@ -31,7 +39,7 @@ VPRIV uint32_t as_section_standard_find(as_context *a, const char *name)
 	else if (as_text_equals(n, ".data")) flags = SHF_ALLOC | SHF_WRITE;
 	else if (as_text_equals(n, ".bss")) { flags = SHF_ALLOC | SHF_WRITE; type = SHT_NOBITS; }
 	else if (as_text_equals(n, ".rodata")) flags = SHF_ALLOC;
-	return elf_section(a->o, n.s, n.n, type, flags, 0, 0);
+	return elf_section(a->object, n.text, n.length, type, flags, 0, 0);
 }
 
 VPRIV int as_name_parse(as_context *a, const char **pp, const char *e, as_text *out)
@@ -116,16 +124,16 @@ VPRIV int as_directive_section(as_context *a, const char *p, const char *e, int 
 						p++;
 						as_text ls;
 						if (as_name_parse(a, &p, e, &ls)) return -1;
-						uint32_t ly = elf_sym_lookup(a->o, ls.s, (uint32_t)ls.n);
-						if (ly && (elf_symp(a->o, ly)->flags & ESYM_DEFINED) && !(elf_symp(a->o, ly)->flags & ESYM_ABS))
-							linksec = elf_frag(a->o, elf_symp(a->o, ly)->frag)->sec, linksym = ly;
+						uint32_t ly = elf_sym_lookup(a->object, ls.text, (uint32_t)ls.length);
+						if (ly && (elf_symp(a->object, ly)->flags & ESYM_DEFINED) && !(elf_symp(a->object, ly)->flags & ESYM_ABS))
+							linksec = elf_frag(a->object, elf_symp(a->object, ly)->frag)->sec, linksym = ly;
 						p = as_whitespace_skip(p, e);
 					}
 					if ((flags & SHF_GROUP) && p < e && *p == ',') {
 						p++;
 						as_text g;
 						if (as_name_parse(a, &p, e, &g)) return -1;
-						group = as_symbol_intern(a, g.s, g.n);
+						group = as_symbol_intern(a, g.text, g.length);
 						p = as_whitespace_skip(p, e);
 						if (p < e && *p == ',') {
 							as_text c = as_text_trim(p + 1, e);
@@ -139,7 +147,7 @@ VPRIV int as_directive_section(as_context *a, const char *p, const char *e, int 
 	}
 	if ((flags & SHF_MERGE) && !entsize) return as_error_report(a, "entry size not specified");
 	if (!type) {
-		if (name.n >= 5 && !memcmp(name.s, ".note", 5)) type = SHT_NOTE;
+		if (name.length >= 5 && !memcmp(name.text, ".note", 5)) type = SHT_NOTE;
 		else if (as_text_has_prefix(name, ".init_array")) type = SHT_INIT_ARRAY;
 		else if (as_text_has_prefix(name, ".bss") || as_text_has_prefix(name, ".tbss")) type = SHT_NOBITS;
 		else if (as_text_has_prefix(name, ".fini_array")) type = SHT_FINI_ARRAY;
@@ -156,16 +164,16 @@ VPRIV int as_directive_section(as_context *a, const char *p, const char *e, int 
 	}
 	if (push) {
 		if (a->section_stack_count >= AS_SECTION_STACK_MAX) return as_error_report(a, "section stack overflow");
-		a->section_stack[a->section_stack_count].cur = a->cur; a->section_stack[a->section_stack_count].prev = a->prev; a->section_stack_count++;
+		a->section_stack[a->section_stack_count].cur = a->fragment_current; a->section_stack[a->section_stack_count].prev = a->fragment_previous; a->section_stack_count++;
 	}
 	if ((flags & SHF_GROUP) && !group) return as_error_report(a, "expected group name");
-	uint32_t s = linksec ? elf_section_lo(a->o, name.s, name.n, type, flags, entsize, group, linksec, linksym)
-			     : elf_section(a->o, name.s, name.n, type, flags, entsize, group);
-	if (group) { elf_reg(a->o, group); elf_sec(a->o, s)->comdat = (uint8_t)comdat; }
+	uint32_t s = linksec ? elf_section_lo(a->object, name.text, name.length, type, flags, entsize, group, linksec, linksym)
+			     : elf_section(a->object, name.text, name.length, type, flags, entsize, group);
+	if (group) { elf_reg(a->object, group); elf_sec(a->object, s)->comdat = (uint8_t)comdat; }
 	{	/* MC: a code section is at least 4-aligned once switched to */
-		ElfSec *se = elf_sec(a->o, s);
-		if ((se->flags & SHF_EXECINSTR) && se->align < 2 && a->o->machine != EM_X86_64) se->align = 2;
+		ElfSec *se = elf_sec(a->object, s);
+		if ((se->flags & SHF_EXECINSTR) && se->align < 2 && a->object->machine != EM_X86_64) se->align = 2;
 	}
-	as_fragment_switch(a, elf_subsection(a->o, s, (int32_t)sub));
+	as_fragment_switch(a, elf_subsection(a->object, s, (int32_t)sub));
 	return 0;
 }

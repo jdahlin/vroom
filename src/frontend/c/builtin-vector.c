@@ -14,13 +14,13 @@ VPRIV uint32_t vector_builtin(cc *c, bool shuffle, uint32_t loc)
 	qty at, rt;
 
 	vinit(&args);
-	expect(c, T_LPAREN, "'('");
+	expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
 	a = rvalue(c, assign_expr(c));
 	at = QUNQ(N(a)->ty);
-	expect(c, T_COMMA, "','");
+	expect(c, LEX_TOKEN_COMMA, "','");
 	if (!shuffle) {
 		rt = type_name(c);
-		expect_here(c, T_RPAREN, "')'");
+		expect_here(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 		if (!is_vector(c, at) || !is_vector(c, rt) ||
 		    (T(c, at)->ext ?: T(c, at)->n) != (T(c, rt)->ext ?: T(c, rt)->n)) {
 			cc_error(c, loc, "first two arguments to __builtin_convertvector must have the same number of elements");
@@ -34,16 +34,16 @@ VPRIV uint32_t vector_builtin(cc *c, bool shuffle, uint32_t loc)
 	vpush(c, &args, b);
 	if (!is_vector(c, at) || !compatible(c, at, QUNQ(N(b)->ty))) {
 		cc_error(c, loc, "first two arguments to '__builtin_shufflevector' must have the same type");
-		while (accept(c, T_COMMA))
+		while (accept(c, LEX_TOKEN_COMMA))
 			assign_expr(c);
-		expect_here(c, T_RPAREN, "')'");
+		expect_here(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 		return mk_int(c, 0, prim(TY_INT), loc);
 	}
 	{
 		qty et = T(c, at)->base;
 		uint64_t n = T(c, at)->ext ?: T(c, at)->n, k = 0;
 
-		while (accept(c, T_COMMA)) {
+		while (accept(c, LEX_TOKEN_COMMA)) {
 			uint32_t ix = assign_expr(c);
 			i128 v = 0;
 
@@ -52,7 +52,7 @@ VPRIV uint32_t vector_builtin(cc *c, bool shuffle, uint32_t loc)
 			vpush(c, &args, mk_int(c, v, prim(TY_INT), N(ix)->loc));
 			k++;
 		}
-		expect_here(c, T_RPAREN, "')'");
+		expect_here(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 		if (k == 0 || (is_bool_vector(c, at) ? k > 4096 : ((k & (k - 1)) || k * ty_size(c, et) > 64))) {
 			cc_error(c, loc, "__builtin_shufflevector: the number of indices must be a power of two");
 			return mk_int(c, 0, prim(TY_INT), loc);
@@ -86,8 +86,8 @@ static uint32_t elementwise_abs_lane(cc *c, uint32_t a, qty et, uint32_t loc)
 {
 	if (is_integer(c, et)) {
 		qty u = unsigned_of(c, et);
-		uint32_t neg = convert(c, mk_bin(c, T_MINUS, u, mk_int(c, 0, u, loc), convert(c, a, u), loc), et);
-		uint32_t cond = mk_bin(c, T_LESS, prim(TY_INT), a, mk_int(c, 0, et, loc), loc);
+		uint32_t neg = convert(c, mk_bin(c, LEX_TOKEN_MINUS, u, mk_int(c, 0, u, loc), convert(c, a, u), loc), et);
+		uint32_t cond = mk_bin(c, LEX_TOKEN_LESS, prim(TY_INT), a, mk_int(c, 0, et, loc), loc);
 		return convert(c, conditional(c, cond, neg, a, loc), et);
 	}
 	if (ty_size(c, et) == 2) {
@@ -98,7 +98,7 @@ static uint32_t elementwise_abs_lane(cc *c, uint32_t a, qty et, uint32_t loc)
 		uint32_t tmp = mk(c, N_VAR, et, loc); N(tmp)->a = sym; N(tmp)->flags = NF_LVALUE;
 		uint32_t p = cast_node(c, addr_of(c, tmp, loc), ty_ptr(c, prim(TY_USHORT)), CK_P2P);
 		uint32_t bits = mk(c, N_DEREF, prim(TY_USHORT), loc); N(bits)->a = p; N(bits)->flags = NF_LVALUE;
-		uint32_t masked = mk_bin(c, T_AMP, prim(TY_USHORT), rvalue(c, bits), mk_int(c, 0x7fff, prim(TY_USHORT), loc), loc);
+		uint32_t masked = mk_bin(c, LEX_TOKEN_AMPERSAND, prim(TY_USHORT), rvalue(c, bits), mk_int(c, 0x7fff, prim(TY_USHORT), loc), loc);
 		uint32_t write = mk2(c, N_ASSIGN, prim(TY_USHORT), loc, bits, masked);
 		return with_pre(c, mk2(c, N_ASSIGN, et, loc, tmp, a), with_pre(c, write, rvalue(c, tmp)));
 	}

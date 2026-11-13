@@ -1,8 +1,14 @@
 /*
- * VIR: internal declarations shared by the files of the module (table.c,
- * vir.c, print.c, parse.c, verify.c).  A shared function is VPRIV, static in
- * the unity build (`make VCC_UNITY=` compiles the files one by one and every
- * file compiles alone).
+ * virimpl.h: VIR's internal declarations, shared by the files of the unity module (table.c, vir.c,
+ * print.c, parse.c, verify.c, facts.c, layout.c).  Another module includes include/vir/vir.h, not this.
+ *
+ * It holds the thread's context (struct vir_ctx: the arrays every function of the thread lives in,
+ * and the constant table with its generation), and the few functions that cross a file (the
+ * terminator of a block, successor lists, the constant table, unit allocation).  A shared function
+ * is VPRIV, static in the unity build (`make VCC_UNITY=` compiles the files one by one and every
+ * file compiles alone).  vir_ctx is per thread and not locked: a function and its context are
+ * used by one thread.  loops.c, alloc.c, allocchk.c and allocdump.c are separate translation units
+ * (own statics) and include this too.
  */
 #ifndef VCC_VIRIMPL_H
 #define VCC_VIRIMPL_H
@@ -52,7 +58,7 @@ VPRIV uint32_t vir_cfind(vir_ctx *x, const vir_fn *f, uint32_t op, uint32_t ty, 
 VPRIV const char *vir_unit_str(vir_unit *u, const char *s, size_t n);	/* a copy owned by the unit */
 VPRIV void *vir_unit_alloc(vir_unit *u, size_t n);
 
-/* a printf into a vbuf, and a one-line error for the verifier and the parser */
+/* a printf into a vbuffer, and a one-line error for the verifier and the parser */
 #define VIR_FMT __attribute__((format(printf, 2, 3)))
 
 #endif

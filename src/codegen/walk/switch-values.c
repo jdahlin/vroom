@@ -1,4 +1,12 @@
-/* Scalar result-table adapter; the shared proof owns all eligibility. */
+/*
+ * switch-values.c: the walker's adapter for the result-table switch: emit a switch that only
+ * produces constants as a table lookup when opt/switch-values.c has proved it.
+ *
+ * wk_switch_values returns false, and the caller emits the switch normally, unless -O1 or more, a
+ * real (not dry) function body without cleanups and not inside an inlined copy, not Darwin, and at
+ * least three free temporaries.  The eligibility itself is the shared proof's, in
+ * em_switch_values_plan.
+ */
 #include "walk.h"
 
 VPRIV bool wk_switch_values(ecx *e, uint32_t n)
@@ -11,17 +19,17 @@ VPRIV bool wk_switch_values(ecx *e, uint32_t n)
  qty ct=N(N(n)->a)->ty;
  val v=wk_gen(e,N(n)->a);
  int r=wk_reg(e,&v,ct), w=p.selector_bits/8;
- if (p.lo) v=LO(bin)(e,T_MINUS,w,false,v,vconst(p.lo));
+ if (p.lo) v=LO(bin)(e,LEX_TOKEN_MINUS,w,false,v,vconst(p.lo));
  r=v.r;
  uint32_t fallback=wk_newlabel(e), done=wk_newlabel(e);
- LO(cmpbr)(e,T_GREATER,w,false,v,vconst(p.slots-1),fallback);
+ LO(cmpbr)(e,LEX_TOKEN_GREATER,w,false,v,vconst(p.slots-1),fallback);
  LO(tkeep)(e,r);
  if (w==4) LO(ext)(e,r,4,false);
  unsigned shift=p.element_bytes==8?3:p.element_bytes==4?2:p.element_bytes==2?1:0;
- if (shift) v=LO(bin)(e,T_LESSLESS,8,false,v,vconst(shift));
+ if (shift) v=LO(bin)(e,LEX_TOKEN_LESS_LESS,8,false,v,vconst(shift));
  lval table={.k=L_SYM,.ref=REF(RK_TABLE,n),.align=p.element_bytes};
  int base=LO(laddr)(e,&table);
- v=LO(bin)(e,T_PLUS,8,false,v,(val){.k=V_REG,.r=(uint8_t)base});
+ v=LO(bin)(e,LEX_TOKEN_PLUS,8,false,v,(val){.k=V_REG,.r=(uint8_t)base});
  lval at={.k=L_REG,.r=v.r,.align=p.element_bytes};
  LO(load)(e,v.r,&at,p.element_bytes,wk_signed(c,p.ty));
  r=v.r;

@@ -1,11 +1,19 @@
-/* vccd's diagnostics across a build (PLAN-diag.md D7): see dstore.c */
+/*
+ * dstore.h: vccd's diagnostics store, which keeps every TU's diagnostics across a build; dstore.c
+ * has the model.
+ *
+ * dstore_begin/dstore_end bracket one compile job (the job's sink goes into ppd_env.dsink), so a job
+ * that is repeated or fails has its records replaced or removed.  The store is shared by all worker
+ * threads and one mutex.  dstore_new_build is called by gen_enter when a new make starts, and
+ * dstore_query answers `vcc --vccd-diagnostics[=summary|json]`.
+ */
 #ifndef VCCD_DSTORE_H
 #define VCCD_DSTORE_H
 #include "frontend/pp/pp.h"
 
 /* one compile job: its sink (dedup when the client's VCC_DIAG_DEDUP is set) */
 typedef struct dstore_job {
-	pp_dsink sink;
+	diag_sink sink;
 	char *tu;		/* the source file, absolute */
 	char *json;		/* this TU's records, one per line, each with "tu" */
 	size_t njson, cjson;

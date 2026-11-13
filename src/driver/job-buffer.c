@@ -1,4 +1,12 @@
-/* The job's growing text buffer (predefines, depfile text): the first 16 MB come from a per-thread region. */
+/*
+ * job-buffer.c: the growing text buffer (struct buf) the job builds its predefines, command-line and
+ * include lists and dependency text in.
+ *
+ * A buffer starts in the job's per-thread region (4 slots in bufpool, taken by ppd_run1, 16 MB each,
+ * bufr[0..3]) and moves to an anonymous mapping when it outgrows it; bfree gives back whichever it
+ * holds.  A buffer is only ever used by the job's own thread.  Allocation failure aborts: a job has
+ * no way to go on without its text.
+ */
 #include "driver-internal.h"
 
 #define BUF_REG (1u << 24)

@@ -134,10 +134,10 @@ VPRIV bool big_read_eval(cc*c,uint32_t n,cval*v) {
   if(x->aux==CK_BOOL){*v=(cval){.kind=CV_INT,.ice=a.ice,.i=big_nonzero(c,&a)};return true;}
   if(is_integer(c,x->ty)&&!is_bigint(c,x->ty)){*v=(cval){.kind=CV_INT,.ice=a.ice,.i=trunc_to(c,a.i,x->ty)};return true;}
  }
- if(x->op==N_UNARY&&x->aux==T_EXCLAIM&&eval(c,x->a,&a)&&a.kind==CV_BIGINT){*v=(cval){.kind=CV_INT,.ice=a.ice,.i=!big_nonzero(c,&a)};return true;}
+ if(x->op==N_UNARY&&x->aux==LEX_TOKEN_EXCLAMATION&&eval(c,x->a,&a)&&a.kind==CV_BIGINT){*v=(cval){.kind=CV_INT,.ice=a.ice,.i=!big_nonzero(c,&a)};return true;}
  if(x->op==N_BINARY&&!is_bigint(c,x->ty)&&eval(c,x->a,&a)&&eval(c,x->b,&b)&&a.kind==CV_BIGINT&&b.kind==CV_BIGINT&&a.nbig==b.nbig){
   bool sa=is_signed(c,N(x->a)->ty),na=sa&&(c->lists[a.big+a.nbig-1]>>31),nb=sa&&(c->lists[b.big+b.nbig-1]>>31);int cmp=na!=nb?(na?-1:1):vbi_cmp(c->lists+a.big,c->lists+b.big,a.nbig);i128 out;
-  switch(x->aux){case T_EQUALEQUAL:out=cmp==0;break;case T_EXCLAIMEQ:out=cmp!=0;break;case T_LESS:out=cmp<0;break;case T_LESSEQ:out=cmp<=0;break;case T_GREATER:out=cmp>0;break;case T_GREATEREQ:out=cmp>=0;break;default:return false;}
+  switch(x->aux){case LEX_TOKEN_EQUAL_EQUAL:out=cmp==0;break;case LEX_TOKEN_EXCLAMATION_EQUAL:out=cmp!=0;break;case LEX_TOKEN_LESS:out=cmp<0;break;case LEX_TOKEN_LESS_EQUAL:out=cmp<=0;break;case LEX_TOKEN_GREATER:out=cmp>0;break;case LEX_TOKEN_GREATER_EQUAL:out=cmp>=0;break;default:return false;}
   *v=(cval){.kind=CV_INT,.ice=a.ice&&b.ice,.i=out};return true;
  }
  return false;
@@ -153,26 +153,26 @@ VPRIV uint32_t big_fold_node(cc*c,uint32_t node_index) {
  if(a.kind!=CV_FLT)big_operand(c,l,n,&a,N(x->a)->ty);bool ok=true,ice=a.ice;
  if(x->op==N_CAST&&a.kind==CV_FLT){bool valid=big_from_float(out,n,int_bits(c,to),is_signed(c,to),a.ld?a.q:vsoftfloat_of_double(a.f));ice=N(x->a)->op==N_FNUM&&valid;grammar&=valid;}
  else if(x->op==N_CAST)memcpy(out,l,n*4);
- else if(x->op==N_UNARY){switch(x->aux){case T_PLUS:memcpy(out,l,n*4);break;case T_MINUS:vbi_neg(out,l,n);break;case T_TILDE:for(size_t i=0;i<n;i++)out[i]=~l[i];break;default:ok=false;}}
+ else if(x->op==N_UNARY){switch(x->aux){case LEX_TOKEN_PLUS:memcpy(out,l,n*4);break;case LEX_TOKEN_MINUS:vbi_neg(out,l,n);break;case LEX_TOKEN_TILDE:for(size_t i=0;i<n;i++)out[i]=~l[i];break;default:ok=false;}}
  else if(!eval(c,x->b,&b)||(b.kind!=CV_INT&&b.kind!=CV_BIGINT))ok=false;
  else {big_operand(c,r,n,&b,N(x->b)->ty);ice&=b.ice;switch(x->aux){
-  case T_PLUS:vbi_add(out,l,r,n);break;case T_MINUS:vbi_sub(out,l,r,n);break;case T_STAR:vbi_mul(out,l,r,n);break;
-  case T_AMP:case T_PIPE:case T_CARET:for(size_t i=0;i<n;i++)out[i]=x->aux==T_AMP?l[i]&r[i]:x->aux==T_PIPE?l[i]|r[i]:l[i]^r[i];break;
-  case T_LESSLESS:case T_GREATERGREATER:{bool high=false;for(size_t i=2;i<n;i++)high|=r[i]!=0;uint64_t shift=r[0]|(n>1?(uint64_t)r[1]<<32:0);if(high||shift>=int_bits(c,to)){ok=false;break;}vbi_shift(out,l,n,shift,x->aux==T_GREATERGREATER,is_signed(c,to)&&(l[n-1]>>31));break;}
-  case T_SLASH:case T_PERCENT:{bool neg=is_signed(c,to)&&(l[n-1]>>31),neg2=is_signed(c,to)&&(r[n-1]>>31);if(!vbi_nz(r,n)){ok=false;break;}if(neg)vbi_neg(l,l,n);if(neg2)vbi_neg(r,r,n);uint32_t*division=calloc(n*2+2,4);if(!division)fatal(c,x->loc,"out of memory");vbi_div(out,division,l,r,n,division+n+1);if(x->aux==T_PERCENT)memcpy(out,division,n*4);if(x->aux==T_SLASH?neg!=neg2:neg)vbi_neg(out,out,n);free(division);break;}
+  case LEX_TOKEN_PLUS:vbi_add(out,l,r,n);break;case LEX_TOKEN_MINUS:vbi_sub(out,l,r,n);break;case LEX_TOKEN_STAR:vbi_mul(out,l,r,n);break;
+  case LEX_TOKEN_AMPERSAND:case LEX_TOKEN_PIPE:case LEX_TOKEN_CARET:for(size_t i=0;i<n;i++)out[i]=x->aux==LEX_TOKEN_AMPERSAND?l[i]&r[i]:x->aux==LEX_TOKEN_PIPE?l[i]|r[i]:l[i]^r[i];break;
+  case LEX_TOKEN_LESS_LESS:case LEX_TOKEN_GREATER_GREATER:{bool high=false;for(size_t i=2;i<n;i++)high|=r[i]!=0;uint64_t shift=r[0]|(n>1?(uint64_t)r[1]<<32:0);if(high||shift>=int_bits(c,to)){ok=false;break;}vbi_shift(out,l,n,shift,x->aux==LEX_TOKEN_GREATER_GREATER,is_signed(c,to)&&(l[n-1]>>31));break;}
+  case LEX_TOKEN_SLASH:case LEX_TOKEN_PERCENT:{bool neg=is_signed(c,to)&&(l[n-1]>>31),neg2=is_signed(c,to)&&(r[n-1]>>31);if(!vbi_nz(r,n)){ok=false;break;}if(neg)vbi_neg(l,l,n);if(neg2)vbi_neg(r,r,n);uint32_t*division=calloc(n*2+2,4);if(!division)fatal(c,x->loc,"out of memory");vbi_div(out,division,l,r,n,division+n+1);if(x->aux==LEX_TOKEN_PERCENT)memcpy(out,division,n*4);if(x->aux==LEX_TOKEN_SLASH?neg!=neg2:neg)vbi_neg(out,out,n);free(division);break;}
   default:ok=false;
  }}
  bool overflow=false;
  if(ok&&is_signed(c,to)&&x->op!=N_CAST){
   unsigned bits=int_bits(c,to),at=bits-1;bool sa=(l[at/32]>>(at%32))&1,sb=(r[at/32]>>(at%32))&1,so=(out[at/32]>>(at%32))&1;
-  if(x->op==N_UNARY&&x->aux==T_MINUS)overflow=sa&&so;
-  else if(x->op==N_BINARY&&x->aux==T_PLUS)overflow=sa==sb&&so!=sa;
-  else if(x->op==N_BINARY&&x->aux==T_MINUS)overflow=sa!=sb&&so!=sa;
-  else if(x->op==N_BINARY&&x->aux==T_STAR){
+  if(x->op==N_UNARY&&x->aux==LEX_TOKEN_MINUS)overflow=sa&&so;
+  else if(x->op==N_BINARY&&x->aux==LEX_TOKEN_PLUS)overflow=sa==sb&&so!=sa;
+  else if(x->op==N_BINARY&&x->aux==LEX_TOKEN_MINUS)overflow=sa!=sb&&so!=sa;
+  else if(x->op==N_BINARY&&x->aux==LEX_TOKEN_STAR){
    uint32_t *full=calloc(n*6,4);if(!full)fatal(c,x->loc,"out of memory");
    vbi_copy(full,n*2,l,n,sa);vbi_copy(full+n*2,n*2,r,n,sb);vbi_mul(full+n*4,full,full+n*2,n*2);
    vbi_copy(full,n*2,out,n,so);vbi_norm(full,n*2,bits,true);overflow=memcmp(full,full+n*4,n*8)!=0;free(full);
-  }else if(x->op==N_BINARY&&x->aux==T_SLASH){
+  }else if(x->op==N_BINARY&&x->aux==LEX_TOKEN_SLASH){
    /* Division above uses magnitudes; a positive result with the sign bit
       set is the signed-minimum / -1 overflow. */
    overflow=is_signed(c,N(x->a)->ty)&&a.kind==CV_BIGINT&&(c->lists[a.big+a.nbig-1]>>31)&&b.kind==CV_BIGINT&&(c->lists[b.big+b.nbig-1]>>31)&&so;

@@ -27,7 +27,7 @@ static uint32_t id_string(cc *c, uint32_t id)
 
 	memcpy(k, s, (size_t)l);
 	k[l] = 0;
-	c->strs[c->nstr++] = (cstr){ k, (uint32_t)l + 1, 1, T_STRING };
+	c->strs[c->nstr++] = (cstr){ k, (uint32_t)l + 1, 1, LEX_TOKEN_STRING };
 	return c->nstr;		/* (attrs hold index + 1) */
 }
 
@@ -150,12 +150,12 @@ VPRIV void weak_declared(cc *c, uint32_t s)
 /* the end of the TU: never declared, or an alias of nothing */
 VPRIV void weak_finish(cc *c)
 {
-	int st = pp_wstate(c->p, "", true, NULL);
+	int st = diag_warning_state(c->p, "", true, NULL);
 
 	for (uint32_t i = 0; i < c->npweak; i++) {
 		const struct pweak *w = &c->pweak[i];
 
-		if (!w->sym && st && !pp_in_system_header(c->p, w->loc))
+		if (!w->sym && st && !pp_location_is_in_system_header(c->p, w->loc))
 			report(c, st == 2 ? "error" : "warning", w->loc, NULL, 0, NULL, 0, "weak identifier '%.*s' never declared%s",
 			       IDF(w->key), st == 2 ? " [-Werror]" : "");
 	}

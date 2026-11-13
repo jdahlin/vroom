@@ -1,4 +1,17 @@
-/* Bounded pure expression value numbering for sibling operands. */
+/*
+ * sibling-values.c: bounded value numbering of pure expressions, to find an operation whose value an
+ * operand or a nearby earlier statement already holds.
+ *
+ * em_sibling_values(e, n) asks it of the operands of one expression; em_block_value_reuse(e, block,
+ * first, i, &from, &to) asks, for statement i of a block, whether a pure expression in it repeats the
+ * value of an earlier local (reported as the node `from` that can be replaced by the symbol node
+ * `to`); em_decl_reuse_values is its declaration case.  The value table is the fixed 32-entry one of
+ * flow/values.c.  Everything is bounded and fails closed: at most eight preceding declarations or
+ * pure local assignments are scanned, with a node budget; an effect, a write to a dependency, an
+ * unknown form or a spent budget means "no reuse".  Only plain automatic integers whose address is
+ * never taken take part.  -O1 and up.  Called by the shared walker and by arm64's and wasm's
+ * emitters.
+ */
 #include "../emitimpl.h"
 
 typedef struct em_sibling_state {
@@ -42,12 +55,12 @@ static uint32_t em_sibling_value(cc *c, em_sibling_state *s, uint32_t n)
   if (!left) return 0;
   key.operation = UINT32_C(0x80000000) | x->aux;
   key.left = left;
- } else if (x->op == N_BINARY && (x->aux == T_PLUS || x->aux == T_MINUS || x->aux == T_STAR ||
-                                  x->aux == T_AMP || x->aux == T_PIPE || x->aux == T_CARET)) {
+ } else if (x->op == N_BINARY && (x->aux == LEX_TOKEN_PLUS || x->aux == LEX_TOKEN_MINUS || x->aux == LEX_TOKEN_STAR ||
+                                  x->aux == LEX_TOKEN_AMPERSAND || x->aux == LEX_TOKEN_PIPE || x->aux == LEX_TOKEN_CARET)) {
   left = em_sibling_value(c, s, x->a);
   right = em_sibling_value(c, s, x->b);
   if (!left || !right) return 0;
-  if (x->aux != T_MINUS && left > right) { value = left; left = right; right = value; }
+  if (x->aux != LEX_TOKEN_MINUS && left > right) { value = left; left = right; right = value; }
   key.operation = 2 + x->aux;
   key.left = left; key.right = right;
  } else return 0;
@@ -86,8 +99,8 @@ VPRIV bool em_sibling_values(ecx *e, uint32_t n)
  cc *c = e->c;
  const node *x = N(n), *a, *b;
  if (!e->E->o->opt || e->E->noopt || x->op != N_BINARY ||
-     (x->aux != T_PLUS && x->aux != T_MINUS && x->aux != T_STAR &&
-      x->aux != T_AMP && x->aux != T_PIPE && x->aux != T_CARET)) return false;
+     (x->aux != LEX_TOKEN_PLUS && x->aux != LEX_TOKEN_MINUS && x->aux != LEX_TOKEN_STAR &&
+      x->aux != LEX_TOKEN_AMPERSAND && x->aux != LEX_TOKEN_PIPE && x->aux != LEX_TOKEN_CARET)) return false;
  a = N(x->a); b = N(x->b);
  if (a->op != N_BINARY || b->op != N_BINARY || QUNQ(a->ty) != QUNQ(x->ty) ||
      QUNQ(b->ty) != QUNQ(x->ty) || c->nsym >= UINT32_MAX - 32) return false;
@@ -145,8 +158,8 @@ VPRIV bool em_decl_reuse_values(ecx *e, uint32_t decl, uint32_t consumer,
   const node *assign = N(r->a), *lhs;
   const sym *out;
   if (assign->op != N_ASSIGN || !assign->a || !assign->b ||
-      (assign->aux && assign->aux != T_PLUS && assign->aux != T_MINUS && assign->aux != T_STAR &&
-       assign->aux != T_AMP && assign->aux != T_PIPE && assign->aux != T_CARET)) return false;
+      (assign->aux && assign->aux != LEX_TOKEN_PLUS && assign->aux != LEX_TOKEN_MINUS && assign->aux != LEX_TOKEN_STAR &&
+       assign->aux != LEX_TOKEN_AMPERSAND && assign->aux != LEX_TOKEN_PIPE && assign->aux != LEX_TOKEN_CARET)) return false;
   lhs = N(assign->a);
   if (lhs->op != N_VAR) return false;
   out = &c->syms[lhs->a];
@@ -198,8 +211,8 @@ static bool em_value_local_write(ecx *e, uint32_t n, uint32_t *written)
  a = N(stmt->a);
  increment = a->op == N_PREINC || a->op == N_PREDEC || a->op == N_POSTINC || a->op == N_POSTDEC;
  if (!increment && (a->op != N_ASSIGN || !a->b ||
-     (a->aux && a->aux != T_PLUS && a->aux != T_MINUS && a->aux != T_STAR &&
-      a->aux != T_AMP && a->aux != T_PIPE && a->aux != T_CARET))) return false;
+     (a->aux && a->aux != LEX_TOKEN_PLUS && a->aux != LEX_TOKEN_MINUS && a->aux != LEX_TOKEN_STAR &&
+      a->aux != LEX_TOKEN_AMPERSAND && a->aux != LEX_TOKEN_PIPE && a->aux != LEX_TOKEN_CARET))) return false;
  if (!a->a) return false;
  lhs = N(a->a);
  if (lhs->op != N_VAR) return false;

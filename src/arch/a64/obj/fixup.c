@@ -1,5 +1,13 @@
-/* arm64 fixups: which are pc-relative, how a value is stored into its field,
- * and whether a fixup resolves in place or becomes a relocation (as LLVM MC) */
+/* fixup.c: the arm64 half of the object's fixup resolution: which relocation types are pc-relative,
+ * elf_patch (store a resolved value into its instruction or data field, range-checked), and
+ * elf_resolve (decide per fixup: patch in place, or record a relocation through elf_reloc), as
+ * LLVM MC's ELF writer decides.
+ *
+ * elf_resolve runs from elf_finish for every fixup in layout order and sends x86-64 objects to
+ * arch/x64/obj/fixup.c; elf_patch is also used by the Mach-O writer, so the field encodings live in
+ * one place.  A value that does not fit its field, a difference across sections, or an undefined
+ * symbol in a subtraction is an error recorded in o->err (first one wins), never an abort.  The
+ * rules mirror MC byte for byte: bench/vas-obj.py compares objects with clang's. */
 #include "../../../obj/objimpl.h"
 
 static int is_pcrel(uint32_t t)

@@ -202,7 +202,7 @@ VPRIV uint32_t os_log_call(cc *c, int id, uint32_t loc)
 		return err_node(c, loc);
 	}
 	uint32_t p = bitcount_local(c, &body, u8p, cast_node(c, buf, u8p, CK_NOP), loc);
-#define OSL_AT(OFF) deref(c, binop(c, T_PLUS, rvalue(c, p), mk_int(c, (OFF), prim(TY_LONG), loc), loc), loc)
+#define OSL_AT(OFF) deref(c, binop(c, LEX_TOKEN_PLUS, rvalue(c, p), mk_int(c, (OFF), prim(TY_LONG), loc), loc), loc)
 #define OSL_BYTE(OFF, V) bitcount_statement(c, &body, assign(c, 0, OSL_AT(OFF), mk_int(c, (V), prim(TY_UCHAR), loc), loc), loc)
 	OSL_BYTE(0, summary);
 	OSL_BYTE(1, (unsigned)n);
@@ -215,7 +215,7 @@ VPRIV uint32_t os_log_call(cc *c, int id, uint32_t loc)
 			uint32_t v = it[i].arg >= 0 ? va[it[i].arg]
 			           : mk_int(c, (i128)it[i].imm, it[i].size == 8 ? prim(TY_ULLONG) : prim(TY_UINT), loc);
 			qty t = N(v)->ty;
-			uint32_t at = binop(c, T_PLUS, rvalue(c, p), mk_int(c, (i128)off, prim(TY_LONG), loc), loc);
+			uint32_t at = binop(c, LEX_TOKEN_PLUS, rvalue(c, p), mk_int(c, (i128)off, prim(TY_LONG), loc), loc);
 			uint32_t dst = deref(c, cast_node(c, at, ty_ptr(c, QUNQ(t)), CK_NOP), loc);
 			bitcount_statement(c, &body, assign(c, 0, dst, v, loc), loc);
 			off += it[i].size;

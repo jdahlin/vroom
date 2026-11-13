@@ -160,7 +160,7 @@ static uint32_t mangle_overload(cc *c, uint32_t s)
 	memcpy(keep, m.b, m.n);
 	keep[m.n] = 0;
 	si = c->nstr++;
-	c->strs[si] = (cstr){ keep, m.n + 1, 1, T_STRING };
+	c->strs[si] = (cstr){ keep, m.n + 1, 1, LEX_TOKEN_STRING };
 	return si + 1;
 }
 

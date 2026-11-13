@@ -1,4 +1,12 @@
-/* arm64 instructions in GNU as syntax: registers and .req aliases, operands, literal pools, the statement */
+/* parse.c: arm64 instructions in GNU as syntax, the front half of the assembler's arm64 side: registers
+ * and .req aliases, operands (registers with arrangements, immediates, memory, shifts and extends),
+ * literal pools for ldr =value, and a64_as_instruction_assemble, which parses one statement into
+ * A64Op records and hands them to the encoder in enc.c.
+ *
+ * Called by as.c's statement loop for every non-directive statement when the object's machine is arm64.
+ * A symbol or label operand becomes a fixup recorded in the ElfObj (never a number here), so
+ * relaxation and relocation stay in the object.  Pending literal pools live in the context
+ * (a->literal_pools) and are written by .ltorg (a64_as_pools_ltorg) or at as_end (a64_as_pools_flush).  A malformed statement fails the assembly through as_error_report. */
 #include "../../../as/as-internal.h"
 
 /* ---------------------------------------------------------------- instructions */
@@ -7,18 +15,18 @@ VPRIV void as_alias_rehash(as_context *a)
 {
 	memset(a->alias_buckets, 0, sizeof a->alias_buckets);
 	for (uint32_t i = 0; i < a->alias_count; i++) {
-		uint32_t h = as_alias_hash(a->al[i].name.s, a->al[i].name.n);
-		a->al[i].next = a->alias_buckets[h]; a->alias_buckets[h] = i + 1;
+		uint32_t h = as_alias_hash(a->aliases[i].name.text, a->aliases[i].name.length);
+		a->aliases[i].older = a->alias_buckets[h]; a->alias_buckets[h] = i + 1;
 	}
 }
 
 static int reg_alias(as_context *a, const char *s, size_t n, as_text *out)
 {
 	if (!a->alias_count) return 0;
-	for (uint32_t i = a->alias_buckets[as_alias_hash(s, n)]; i; i = a->al[i - 1].next) {
-		const as_register_alias *x = &a->al[i - 1];
-		if (x->name.n == n && as_char_to_lower((unsigned char)x->name.s[0]) == as_char_to_lower((unsigned char)s[0]) &&
-		    !strncasecmp(x->name.s, s, n)) { *out = x->reg; return 1; }
+	for (uint32_t i = a->alias_buckets[as_alias_hash(s, n)]; i; i = a->aliases[i - 1].older) {
+		const as_register_alias *x = &a->aliases[i - 1];
+		if (x->name.length == n && as_char_to_lower((unsigned char)x->name.text[0]) == as_char_to_lower((unsigned char)s[0]) &&
+		    !strncasecmp(x->name.text, s, n)) { *out = x->register_name; return 1; }
 	}
 	return 0;
 }
@@ -52,9 +60,9 @@ static int parse_reg(as_context *a, const char *s, size_t n, A64Op *op, int dept
 	size_t bn = dot ? (size_t)(dot - s) : n;
 	if (depth < 4 && reg_alias(a, s, bn, &al)) {
 		char buf[64];
-		if (al.n + (n - bn) >= sizeof buf) return 0;
-		memcpy(buf, al.s, al.n); memcpy(buf + al.n, s + bn, n - bn);
-		return parse_reg(a, buf, al.n + (n - bn), op, depth + 1);
+		if (al.length + (n - bn) >= sizeof buf) return 0;
+		memcpy(buf, al.text, al.length); memcpy(buf + al.length, s + bn, n - bn);
+		return parse_reg(a, buf, al.length + (n - bn), op, depth + 1);
 	}
 	char c = (char)as_char_to_lower((unsigned char)s[0]);
 	memset(op, 0, sizeof *op);
@@ -321,20 +329,20 @@ typedef struct PoolS { uint32_t sec, label; as_value v; uint32_t size; } Pool;
 
 static uint32_t pool_entry(as_context *a, as_value v, uint32_t size)
 {
-	uint32_t sec = elf_frag(a->o, a->cur)->sec;
+	uint32_t sec = elf_frag(a->object, a->fragment_current)->sec;
 	int plain = (v.add && !v.sub && !v.c) || (!v.add && !v.sub);
 	if (plain)
 		for (uint32_t i = 0; i < a->literal_pool_count; i++) {
-			Pool *q = &a->pool[i];
+			Pool *q = &a->literal_pools[i];
 			if (q->sec == sec && q->size == size && q->v.add == v.add && q->v.sub == v.sub && q->v.c == v.c) return q->label;
 		}
 	if (a->literal_pool_count == a->literal_pool_capacity) {
 		uint32_t nc = a->literal_pool_capacity ? a->literal_pool_capacity * 2 : 64;
 		Pool *t = as_region_alloc(&a->definitions, sizeof *t * nc);
-		if (a->literal_pool_count) memcpy(t, a->pool, sizeof *t * a->literal_pool_count);
-		a->pool = t; a->literal_pool_capacity = nc;
+		if (a->literal_pool_count) memcpy(t, a->literal_pools, sizeof *t * a->literal_pool_count);
+		a->literal_pools = t; a->literal_pool_capacity = nc;
 	}
-	Pool *q = &a->pool[a->literal_pool_count++];
+	Pool *q = &a->literal_pools[a->literal_pool_count++];
 	q->sec = sec; q->label = as_symbol_temporary(a); q->v = v; q->size = size;
 	return q->label;
 }
@@ -343,16 +351,16 @@ static uint32_t pool_entry(as_context *a, as_value v, uint32_t size)
 VPRIV int a64_as_pools_flush(as_context *a)
 {
 	for (uint32_t i = 0; i < a->literal_pool_count; i++) {
-		uint32_t sec = a->pool[i].sec;
+		uint32_t sec = a->literal_pools[i].sec;
 		int seen = 0;
-		for (uint32_t j = 0; j < i; j++) if (a->pool[j].sec == sec) seen = 1;
+		for (uint32_t j = 0; j < i; j++) if (a->literal_pools[j].sec == sec) seen = 1;
 		if (seen) continue;
-		a->cur = sec;
+		a->fragment_current = sec;
 		for (uint32_t j = i; j < a->literal_pool_count; j++) {
-			Pool *q = &a->pool[j];
+			Pool *q = &a->literal_pools[j];
 			if (q->sec != sec) continue;
-			elf_align(a->o, sec, q->size == 8 ? 3 : 2, 0, 0, 0);
-			elf_define(a->o, q->label, sec, elf_frag(a->o, sec)->size);
+			elf_align(a->object, sec, q->size == 8 ? 3 : 2, 0, 0, 0);
+			elf_define(a->object, q->label, sec, elf_frag(a->object, sec)->size);
 			as_value v = q->v;
 			if (as_value_emit(a, (int)q->size, &v)) return -1;
 		}
@@ -364,12 +372,12 @@ VPRIV int a64_as_pools_flush(as_context *a)
 /* .ltorg: the current section's literal pool, here */
 VPRIV int a64_as_pools_ltorg(as_context *a)
 {
-	uint32_t sec = elf_frag(a->o, a->cur)->sec, k = 0;
+	uint32_t sec = elf_frag(a->object, a->fragment_current)->sec, k = 0;
 	for (uint32_t j = 0; j < a->literal_pool_count; j++) {
-		Pool *q = &a->pool[j];
-		if (q->sec != sec) { a->pool[k++] = *q; continue; }
-		elf_align(a->o, a->cur, q->size == 8 ? 3 : 2, 0, 0, 0);
-		elf_define(a->o, q->label, a->cur, elf_frag(a->o, a->cur)->size);
+		Pool *q = &a->literal_pools[j];
+		if (q->sec != sec) { a->literal_pools[k++] = *q; continue; }
+		elf_align(a->object, a->fragment_current, q->size == 8 ? 3 : 2, 0, 0, 0);
+		elf_define(a->object, q->label, a->fragment_current, elf_frag(a->object, a->fragment_current)->size);
 		as_value v = q->v;
 		if (as_value_emit(a, (int)q->size, &v)) return -1;
 	}
@@ -549,12 +557,12 @@ enc:;
 		w = 0, fx.type = 0;
 	}
 put:;
-	ElfObj *o = a->o;
-	elf_code(o, a->cur);
-	uint64_t off = elf_frag(o, a->cur)->size;
-	uint8_t *q = elf_grow(o, a->cur, 4);
+	ElfObj *o = a->object;
+	elf_code(o, a->fragment_current);
+	uint64_t off = elf_frag(o, a->fragment_current)->size;
+	uint8_t *q = elf_grow(o, a->fragment_current, 4);
 	q[0] = (uint8_t)w; q[1] = (uint8_t)(w >> 8); q[2] = (uint8_t)(w >> 16); q[3] = (uint8_t)(w >> 24);
-	if (fx.type) elf_fixup(o, a->cur, off, q, fx.type, fx.v);
+	if (fx.type) elf_fixup(o, a->fragment_current, off, q, fx.type, fx.v);
 	if (as_trace_level) printf("%08x %d\t%.*s\n", w, fx.type != 0, (int)(e - p0), p0);
 	return 0;
 }

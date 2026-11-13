@@ -212,24 +212,24 @@ VPRIV val vw_bin(ecx *e, int op, int size, bool sgn, val a, val b)
 	int r;
 
 	at = vw_vty(e, &a), bt = vw_vty(e, &b);
-	if (size == 8 && (op == T_PLUS || op == T_MINUS) && (at == VT_PTR || bt == VT_PTR)) {
+	if (size == 8 && (op == LEX_TOKEN_PLUS || op == LEX_TOKEN_MINUS) && (at == VT_PTR || bt == VT_PTR)) {
 		/* pointer arithmetic */
-		if (op == T_PLUS && at != VT_PTR) {
+		if (op == LEX_TOKEN_PLUS && at != VT_PTR) {
 			val t = a;
 
 			a = b, b = t;
 			at = VT_PTR, bt = vw_vty(e, &b);
 		}
-		if (at == VT_PTR && !(op == T_MINUS && bt == VT_PTR)) {
+		if (at == VT_PTR && !(op == LEX_TOKEN_MINUS && bt == VT_PTR)) {
 			x = vw_val(e, &a, VT_PTR);
 			y = vw_val(e, &b, VT_I64);
-			if (op == T_MINUS)
+			if (op == LEX_TOKEN_MINUS)
 				y = b.k == V_CONST ? vw_iconst(e, VT_I64, -(int64_t)b.i) : vw_ins(e, VO_NEG, VT_I64, 0, y, 0, 0);
 			r = vw_resname(e, &a, &b);
 			vw_set(e, r, vw_ins(e, VO_PTRADD, VT_PTR, 0, x, y, 0));
 			return (val){ .k = V_REG, .r = (uint8_t)r };
 		}
-		if (op == T_MINUS && at == VT_PTR && bt == VT_PTR) {
+		if (op == LEX_TOKEN_MINUS && at == VT_PTR && bt == VT_PTR) {
 			x = vw_val(e, &a, VT_PTR);
 			y = vw_val(e, &b, VT_PTR);
 			r = vw_resname(e, &a, &b);
@@ -238,16 +238,16 @@ VPRIV val vw_bin(ecx *e, int op, int size, bool sgn, val a, val b)
 		}
 	}
 	switch (op) {
-	case T_PLUS: vop = VO_ADD; break;
-	case T_MINUS: vop = VO_SUB; break;
-	case T_STAR: vop = VO_MUL; break;
-	case T_SLASH: vop = sgn ? VO_SDIV : VO_UDIV; break;
-	case T_PERCENT: vop = sgn ? VO_SREM : VO_UREM; break;
-	case T_AMP: vop = VO_AND; break;
-	case T_PIPE: vop = VO_OR; break;
-	case T_CARET: vop = VO_XOR; break;
-	case T_LESSLESS: vop = VO_SHL; break;
-	case T_GREATERGREATER: vop = sgn ? VO_ASHR : VO_LSHR; break;
+	case LEX_TOKEN_PLUS: vop = VO_ADD; break;
+	case LEX_TOKEN_MINUS: vop = VO_SUB; break;
+	case LEX_TOKEN_STAR: vop = VO_MUL; break;
+	case LEX_TOKEN_SLASH: vop = sgn ? VO_SDIV : VO_UDIV; break;
+	case LEX_TOKEN_PERCENT: vop = sgn ? VO_SREM : VO_UREM; break;
+	case LEX_TOKEN_AMPERSAND: vop = VO_AND; break;
+	case LEX_TOKEN_PIPE: vop = VO_OR; break;
+	case LEX_TOKEN_CARET: vop = VO_XOR; break;
+	case LEX_TOKEN_LESS_LESS: vop = VO_SHL; break;
+	case LEX_TOKEN_GREATER_GREATER: vop = sgn ? VO_ASHR : VO_LSHR; break;
 	default: vw_fail(e, VIRFAIL(unsupported_operator));
 	}
 	uint8_t fl=sgn && !e->E->o->wrapv && (vop==VO_ADD || vop==VO_SUB || vop==VO_MUL)?VIF_NSW:0;
@@ -274,7 +274,7 @@ VPRIV val vw_un(ecx *e, int op, int size, val a)
 	uint32_t ty = vw_ity(size), x = vw_val(e, &a, ty);
 	int r = vw_resname(e, &a, NULL);
 
-	vw_set(e, r, vw_ins(e, op == T_MINUS ? VO_NEG : VO_NOT, ty, 0, x, 0, 0));
+	vw_set(e, r, vw_ins(e, op == LEX_TOKEN_MINUS ? VO_NEG : VO_NOT, ty, 0, x, 0, 0));
 	return (val){ .k = V_REG, .r = (uint8_t)r };
 }
 
@@ -314,11 +314,11 @@ VPRIV void vw_ext(ecx *e, int r, int from, bool sgn)
 static uint32_t vw_icc(int op, bool sgn)
 {
 	switch (op) {
-	case T_EQUALEQUAL: return 0;
-	case T_EXCLAIMEQ: return 1;
-	case T_LESS: return sgn ? 2 : 6;
-	case T_LESSEQ: return sgn ? 3 : 7;
-	case T_GREATER: return sgn ? 4 : 8;
+	case LEX_TOKEN_EQUAL_EQUAL: return 0;
+	case LEX_TOKEN_EXCLAMATION_EQUAL: return 1;
+	case LEX_TOKEN_LESS: return sgn ? 2 : 6;
+	case LEX_TOKEN_LESS_EQUAL: return sgn ? 3 : 7;
+	case LEX_TOKEN_GREATER: return sgn ? 4 : 8;
 	default: return sgn ? 5 : 9;
 	}
 }
@@ -498,7 +498,7 @@ VPRIV val vw_fbin(ecx *e, int op, qty t, val a, val b)
 {
 	uint32_t ty = vw_fty(e, t), x = vw_val(e, &a, ty), y = vw_val(e, &b, ty);
 	int r = vw_fres(e, &a, &b);
-	uint32_t vop = op == T_PLUS ? VO_FADD : op == T_MINUS ? VO_FSUB : op == T_STAR ? VO_FMUL : VO_FDIV;
+	uint32_t vop = op == LEX_TOKEN_PLUS ? VO_FADD : op == LEX_TOKEN_MINUS ? VO_FSUB : op == LEX_TOKEN_STAR ? VO_FMUL : VO_FDIV;
 	uint32_t v, m = 0, fl = 0;
 	bool left = true;
 
@@ -561,12 +561,12 @@ VPRIV val vw_fcmp(ecx *e, int op, qty t, val a, val b)
 	int r;
 
 	switch (op) {
-	case T_EQUALEQUAL: cc = 0; break;
-	case T_EXCLAIMEQ: cc = 1; break;
-	case T_LESS: cc = 2; break;
-	case T_LESSEQ: cc = 3; break;
-	case T_GREATER: cc = 4; break;
-	case T_GREATEREQ: cc = 5; break;
+	case LEX_TOKEN_EQUAL_EQUAL: cc = 0; break;
+	case LEX_TOKEN_EXCLAMATION_EQUAL: cc = 1; break;
+	case LEX_TOKEN_LESS: cc = 2; break;
+	case LEX_TOKEN_LESS_EQUAL: cc = 3; break;
+	case LEX_TOKEN_GREATER: cc = 4; break;
+	case LEX_TOKEN_GREATER_EQUAL: cc = 5; break;
 	case WK_FCMP_UNORDERED: cc = 6; break;
 	case WK_FCMP_ORDERED_NE: cc = 7; break;
 	default: vw_fail(e, VIRFAIL(unsupported_float_comparison));

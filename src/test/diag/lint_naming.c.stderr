@@ -1,0 +1,7 @@
+src/as/lint_naming.c:2:12: warning: function 'helper' should be named 'as_...' (module src/as/) [-Wvcc-lint-naming]
+    2 | static int helper(int x) { return x; }
+      |            ^~~~~~
+src/as/lint_naming.c:3:5: warning: global variable 'counter' should be named 'as_...' (module src/as/) [-Wvcc-lint-naming]
+    3 | int counter;
+      |     ^~~~~~~
+2 warnings generated.

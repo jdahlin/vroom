@@ -14,7 +14,7 @@
 typedef struct vctx {
 	vir_fn *f;
 	const vir_unit *u;
-	vbuf *out;
+	vbuffer *out;
 	uint32_t max, nerr;
 	uint32_t *vb;		/* value -> its block (VIR_NOBLK: a constant) */
 	bool stop;		/* phase 1 found what makes the graph unusable */
@@ -29,17 +29,17 @@ static void vfail(vctx *v, const char *rule, uint32_t blk, uint32_t ins, const c
 
 	if (v->nerr++ >= v->max)
 		return;
-	vbuf_f(v->out, "@%s", vir_fname(v->u, v->f));
+	vbuffer_format_append(v->out, "@%s", vir_fname(v->u, v->f));
 	if (blk != VIR_NOBLK && ins != VIR_NOBLK)
-		vbuf_f(v->out, " b%u.%u", blk, ins);
+		vbuffer_format_append(v->out, " b%u.%u", blk, ins);
 	else if (blk != VIR_NOBLK)
-		vbuf_f(v->out, " b%u", blk);
-	vbuf_f(v->out, ": %s: ", rule);
+		vbuffer_format_append(v->out, " b%u", blk);
+	vbuffer_format_append(v->out, ": %s: ", rule);
 	va_start(ap, fmt);
 	vsnprintf(t, sizeof(t), fmt, ap);
 	va_end(ap);
-	vbuf_s(v->out, t);
-	vbuf_s(v->out, "\n");
+	vbuffer_string_append(v->out, t);
+	vbuffer_string_append(v->out, "\n");
 }
 
 const char *vir_fname(const vir_unit *u, const vir_fn *f)
@@ -866,7 +866,7 @@ static void check_canon(vctx *v)
 		vfail(v, "N1", VIR_NOBLK, VIR_NOBLK, "%u constants are not used", f->nconst - nxt);
 }
 
-uint32_t vir_verify(vir_fn *f, const vir_unit *u, vbuf *out, uint32_t max)
+uint32_t vir_verify(vir_fn *f, const vir_unit *u, vbuffer *out, uint32_t max)
 {
 	vctx v = { f, u, out, max, 0, f->tmp, false };
 	bool tiled = true;

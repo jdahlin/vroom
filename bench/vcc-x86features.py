@@ -40,8 +40,8 @@ with tempfile.TemporaryDirectory() as td:
   src=pathlib.Path(td)/'probe.c'
   src.write_text(r'''
 #include "common/buffer.h"
-typedef vbuf buf;
-#define bstr vbuf_s
+typedef vbuffer buf;
+#define bstr vbuffer_string_append
 #include "src/driver/x86predefines.h"
 #include "port/x86native.h"
 static void apply(x86_features *f,x86_features *disabled,const char *s) {

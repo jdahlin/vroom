@@ -2,7 +2,7 @@
 
 /* ---------------- glob matching ---------------- */
 
-static bool glob(const char *p, const char *s)
+static bool ld_glob_match(const char *p, const char *s)
 {
 	const char *star_p = NULL, *star_s = NULL;
 	while (*s) {
@@ -48,10 +48,10 @@ static bool glob(const char *p, const char *s)
 	return !*p;
 }
 
-static bool pat_match(const Pat *p, const char *name)
+static bool ld_pattern_match(const ld_pattern *p, const char *name)
 {
 	for (uint32_t i = 0; i < p->nglobs; i++)
-		if (glob(p->globs[i], name))
+		if (ld_glob_match(p->globs[i], name))
 			return true;
 	return false;
 }

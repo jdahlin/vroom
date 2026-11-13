@@ -31,7 +31,7 @@ int main(int argc, char **argv)
 	for (int i = rep ? atoi(rep) : 1; i > 1; i--)
 		if (ld_main(argc, argv, AT_FDCWD, stderr))
 			return 1;
-	keep_maps = true;
+	ld_keep_mappings = true;
 	return ld_main(argc, argv, AT_FDCWD, stderr);
 }
 #endif

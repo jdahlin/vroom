@@ -1,5 +1,15 @@
-/* Initial sibling-call eligibility: an exact forwarding wrapper, bounded by
-   the target's register-argument capacity. No extra walk of a function body. */
+/*
+ * tail.c: may a function end in a sibling call (a tail call) to its callee?  Only the conservative
+ * case: a body that is exactly `return f(args);` forwarding to a direct call.
+ *
+ * em_tail_caller_ok and em_tail_target_ok are the option and attribute rules (-O1 or more, sibling
+ * calls not disabled, not instrumented, no interrupt, error or ifunc function, no attribute that
+ * disables tail calls or returns twice, and no setjmp-family target), and em_tail_candidate adds the
+ * shape: no variadics, the arguments fit the target's register arguments (maxargs), word-sized
+ * integer or pointer types.  The target must separately reject ABI and frame states it cannot do;
+ * default WebAssembly has no tail call and does not use this.  Called by arm64's and x86-64's tail
+ * passes and, for the two rules, by arm64's VIR lowering (arch/a64/vir).
+ */
 #include "../emitimpl.h"
 
 static bool em_tail_word(cc *c, qty t)
@@ -87,7 +97,7 @@ VPRIV bool em_tail_candidate(ecx *e, uint32_t fn, uint32_t expr, uint32_t maxarg
 
 		if (!em_tail_word(c, pt) || QUNQ(a->ty) != QUNQ(pt))
 			return false;
-		if (a->op == N_NUM || (a->op == N_UNARY && a->aux == T_MINUS && N(a->a)->op == N_NUM))
+		if (a->op == N_NUM || (a->op == N_UNARY && a->aux == LEX_TOKEN_MINUS && N(a->a)->op == N_NUM))
 			continue;
 		if (a->op != N_VAR)
 			return false;

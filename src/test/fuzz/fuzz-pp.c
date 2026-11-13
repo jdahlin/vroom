@@ -9,7 +9,7 @@
  * /fuzz/sys is the only search directory (a system one), so "a.h", "b.h"
  * resolve next to the includer and <c.h>, "sys/c.h" through the path.  A
  * leading \x02 byte selects assembler-with-cpp mode.  Nothing touches the
- * file system: vlex_get_hook serves the files, the header cache is off.
+ * file system: lex_file_get_hook serves the files, the header cache is off.
  *
  * Oracles: ASan/UBSan, the fuzzer's timeout (hangs), and a few invariants
  * on every delivered token (spelling, location).  Output is cut off after
@@ -32,7 +32,7 @@
 
 enum { NFILE = 4 };
 static const char *const names[NFILE] = { "/fuzz/main.c", "/fuzz/a.h", "/fuzz/b.h", "/fuzz/sys/c.h" };
-static vlex_file files[NFILE];
+static lex_file files[NFILE];
 static bool present[NFILE];
 static int devnull, print;	/* FUZZ_PP_PRINT=1: tokens and diagnostics to stderr */
 
@@ -48,7 +48,7 @@ static const char predef[] =
 	"#define __ARM_ACLE_VERSION(year,quarter,patch) (100 * (year) + 10 * (quarter) + (patch))\n"
 	"#define __has_include_fuzz(x) __has_include(x)\n";
 
-static const vlex_file *hook(const char *path, size_t len)
+static const lex_file *hook(const char *path, size_t len)
 {
 	for (int i = 0; i < NFILE; i++)
 		if (present[i] && strlen(names[i]) == len && !memcmp(names[i], path, len))
@@ -64,7 +64,7 @@ int LLVMFuzzerInitialize(int *argc, char ***argv)
 	print = getenv("FUZZ_PP_PRINT") != NULL;
 	devnull = print ? 2 : open("/dev/null", O_WRONLY);
 	vintern_init();
-	vlex_get_hook = hook;
+	lex_file_get_hook = hook;
 	return 0;
 }
 
@@ -72,12 +72,12 @@ int LLVMFuzzerInitialize(int *argc, char ***argv)
 static char *load(int i, const uint8_t *d, size_t n, void *scr)
 {
 	char *s = malloc(n + 128);
-	vtok *t = malloc((n + 2) * sizeof(vtok));
+	lex_token *t = malloc((n + 2) * sizeof(lex_token));
 
 	memcpy(s, d, n);
 	memset(s + n, 0, 128);
-	files[i] = (vlex_file){ .path = names[i], .src = s, .size = (uint32_t)n };
-	files[i].ntok = vlex(s, n, t, scr);
+	files[i] = (lex_file){ .path = names[i], .src = s, .size = (uint32_t)n };
+	files[i].ntok = lex_tokenize(s, n, t, scr);
 	files[i].tok = t;
 	present[i] = true;
 	return s;
@@ -100,7 +100,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *d, size_t n)
 		o.asm_mode = 1;
 		d++, n--;
 	}
-	scr = malloc(vlex_scratch_size(n));
+	scr = malloc(lex_scratch_size(n));
 	for (int i = 0; i < NFILE; i++) {
 		const uint8_t *e = i < NFILE - 1 ? memchr(d, 1, n) : NULL;
 		size_t l = e ? (size_t)(e - d) : n;
@@ -126,7 +126,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *d, size_t n)
 	if (!p)
 		goto out;	/* a fatal error in the main file */
 	sp = malloc(MAXIN + 64);
-	pp_set_fatal(p, &jb);
+	pp_fatal_jump_set(p, &jb);
 	if (!setjmp(jb)) {
 		ptok t;
 
@@ -135,26 +135,26 @@ int LLVMFuzzerTestOneInput(const uint8_t *d, size_t n)
 			uint32_t nl, line, col;
 			size_t l;
 
-			pp_next(p, &t);
-			if (t.kind == T_EOF)
+			pp_token_next(p, &t);
+			if (t.kind == LEX_TOKEN_EOF)
 				break;
-			FUZZ_CHECK(t.kind <= P_DIRECTIVE, "kind %u", t.kind);
-			FUZZ_CHECK(t.kind == T_IDENT ? t.id != 0 : 1, "identifier without id");
+			FUZZ_CHECK(t.kind <= PP_TOKEN_KIND_DIRECTIVE_LINE, "kind %u", t.kind);
+			FUZZ_CHECK(t.kind == LEX_TOKEN_IDENTIFIER ? t.id != 0 : 1, "identifier without id");
 			if (t.len <= MAXIN) {
-				const char *s = pp_spell(&t, sp, &l);
+				const char *s = pp_token_spell(&t, sp, &l);
 
 				FUZZ_CHECK(l <= t.len, "spelling %zu > %u", l, t.len);
 				if (print)
-					fprintf(stderr, "%s%.*s", t.flags & TF_SOL ? "\n" : t.flags & TF_SPACE ? " " : "", (int)l, s);
-				if (t.kind == T_IDENT)
+					fprintf(stderr, "%s%.*s", t.flags & LEX_TOKEN_FLAG_LINE_START ? "\n" : t.flags & LEX_TOKEN_FLAG_SPACE_BEFORE ? " " : "", (int)l, s);
+				if (t.kind == LEX_TOKEN_IDENTIFIER)
 					FUZZ_CHECK(vintern_ents[t.id].len == l && !memcmp(vintern_ents[t.id].s, s, l),
 						   "identifier spelling vs id %u", t.id);
 			}
-			(void)pp_where(p, t.loc, &name, &nl, &line, &col);	/* line may be 0: #line 0 */
+			(void)pp_location_describe(p, t.loc, &name, &nl, &line, &col);	/* line may be 0: #line 0 */
 		}
 	}
 	if (print)
-		fprintf(stderr, "\n[%d errors]\n", pp_errors(p));
+		fprintf(stderr, "\n[%d errors]\n", pp_error_count(p));
 	pp_close(p);
 	free(sp);
 out:

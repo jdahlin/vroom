@@ -92,7 +92,7 @@ static void hgrow(ElfObj *o)
 
 uint32_t elf_sym_lookup(ElfObj *o, const char *name, uint32_t len)
 {
-	uint32_t h = vhash_obj(name, len);
+	uint32_t h = vhash_string(name, len);
 	for (uint32_t i = h & o->hmask;; i = (i + 1) & o->hmask) {
 		uint32_t s = o->htab[i];
 		if (!s) return 0;
@@ -103,7 +103,7 @@ uint32_t elf_sym_lookup(ElfObj *o, const char *name, uint32_t len)
 
 uint32_t elf_sym(ElfObj *o, const char *name, uint32_t len)
 {
-	uint32_t h = vhash_obj(name, len), i;
+	uint32_t h = vhash_string(name, len), i;
 	for (i = h & o->hmask;; i = (i + 1) & o->hmask) {
 		uint32_t s = o->htab[i];
 		if (!s) break;

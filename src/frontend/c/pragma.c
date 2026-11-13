@@ -146,7 +146,7 @@ VPRIV void pragma(cc *c, const ptok *t)
 				keep = halloc(c, n + 1);
 				memcpy(keep, a, n);
 				keep[n] = 0;
-				c->strs[c->nstr] = (cstr){ keep, (uint32_t)(n + 1), 1, T_STRING };
+				c->strs[c->nstr] = (cstr){ keep, (uint32_t)(n + 1), 1, LEX_TOKEN_STRING };
 				c->visstk[c->nvis++] = ++c->nstr;	/* (string index + 1, as attrs.visibility) */
 			}
 		}

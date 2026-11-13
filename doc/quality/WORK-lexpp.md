@@ -168,3 +168,44 @@ purpose:
 - `header-cache-internal.h` keeps the inline `htok_get` with the types (hot
   path, used by `pp_next`); the prototypes of the header cache's functions
   stay in `ppimpl.h` because they take `pp *`.
+
+Step 5 done for everything but the struct fields that need the field-use mode
+(PR "lex, pp, diag: names per STYLE.md, by table").  `rename-table.py` got a
+scoped mode for it (`--scoped src/frontend/pp,src/frontend/lex,src/diag
+--users-of ...`, see its docstring): a row that is not `public` applies only
+under those directories (`in:FILE` narrows it, `also:PATH` adds a bench script),
+a `public` row only to files that include `pp.h`, `lex.h` or `dircache.h`
+directly or through another header (so `T_*` of the assembler's or the VIR
+parser's own enums stay), no row renames a word after `#` (directives named
+`include`, `define`, `error`) or after `->`/`.` unless it is a field row, and
+comments get only names that cannot be English words (underscore, upper case,
+`name(`).  The table:
+
+- applied: 284 + 31 functions, 61 + 3 variables, 142 + 73 constants, 39 + 3
+  types, 7 macros, the file row (`ppimpl.h` is `pp-internal.h`, moved by hand:
+  it is not under `include/`), and 84 fields whose old name is used only as
+  that field in the whole tree (checked by script: every other occurrence is a
+  member access or the one declaration);
+- corrected: `struct`/`enum` rows keep their keyword; `vlex`, `pp_stat_try`,
+  `pp_stat_skip` are `public` (used by the driver, the fuzzers and `lextest`);
+  `builtin` (a function and a `struct pp` field), `base`, `used`, `bi` and
+  `pidx` (struct members of the same name elsewhere) are narrowed with `in:`;
+  identity rows (`counter_delta`, `text_started`) are gone;
+- deferred, collected at the end of `rename-lexpp.tsv` with kind
+  `field,deferred` (229 rows): struct fields with short or shared names (`n`,
+  `len`, `fe`, `off`, `src`, ...) that a whole-word run cannot tell from
+  locals, parameters and other structs' fields.  They wait for the front end's
+  field-use mode; the script skips them under `--scoped`.  The `struct pp`
+  sub-struct grouping of `rename-lexpp-groups.md` goes with them.
+
+Names still to decide are as listed in step 5 (`hent.span`, `rst`, `hm`,
+`pend`, ...): they are in the table with the review's draft word.  By hand
+afterwards: `builtin`'s prototype in `pp-internal.h`, `bench/vcc-diagcov.py`'s
+`PP_ERROR`/`PP_WARN`/`PP_FATAL`, the `T_*` lists in comments of
+`codegen/walk/proto.h`.  Not renamed (history): `TODO.md` lines that tell what
+was done under the old names, and `doc/` other than the plans' own text.
+Proof: both builds, `vcc-ctests` 2129/2129, `vcc-diag` 226/226,
+`vcc-same.py` 15203/15211 outputs identical (the 8 are `-E` of files that
+include vcc's own headers: the absolute path of the checkout is in their line
+markers; equal once it is normalised), parity 873/873 and sema 878/879
+(modpost.c), `vcc-diagcov.py` unchanged, `gen-diagids --check`.

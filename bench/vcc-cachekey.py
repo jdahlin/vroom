@@ -15,7 +15,7 @@ import importlib.util
 spec = importlib.util.spec_from_file_location('vd', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'vcc-diff.py'))
 vd = importlib.util.module_from_spec(spec); spec.loader.exec_module(vd)
 
-# (-W/-Werror in the header cache key, frontend/pp/header-cache-key.c sig_of, is not testable here: --batch prints no diagnostics)
+# (-W/-Werror in the header cache key, frontend/pp/header-cache-key.c pp_header_cache_signatures_get, is not testable here: --batch prints no diagnostics)
 T = ['--target=aarch64-linux-gnu', '-O2', '-nostdinc']
 SDIRS = {'inc/a.h': '#ifndef A_H\n#define A_H\n#include <x.h>\n#if __has_include(<y.h>)\n#define Y 100\n#else\n#define Y 0\n#endif\n#endif\n',
          'inc/x.h': '#define X 1\n', 'p1/.keep': '', 'p2/x.h': '#define X 22222\n', 'p3/y.h': '\n', 'p4/.keep': '',
@@ -36,7 +36,7 @@ ROWS = [
     ('unsigned-char', 'static char c = -1;\nstatic inline int g(void) { return c; }\n',
      '#include "h.h"\nint f(void) { return g(); }\n', [], ['-funsigned-char']),
     # pp: a header reached through other first directories (PostgreSQL's per-target -I): its entry
-    # is reused only where its own lookups find the same files (header-cache-validate.c dirs_differ, include.c hc_looks_ok)
+    # is reused only where its own lookups find the same files (header-cache-validate.c pp_header_cache_search_directories_differ, include.c pp_header_cache_lookups_match)
     ('search-dir-shadow', SDIRS, '#include <a.h>\nint v = X + Y;\n', ['-Ip1', '-Iinc'], ['-Ip2', '-Iinc']),
     ('search-dir-has-include', SDIRS, '#include <a.h>\nint v = X + Y;\n', ['-Ip1', '-Iinc'], ['-Ip3', '-Iinc']),
     ('search-dir-same-answers', SDIRS, '#include <a.h>\nint v = X + Y;\n', ['-Ip1', '-Iinc'], ['-Ip4', '-Iinc']),

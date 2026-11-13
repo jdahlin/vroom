@@ -73,11 +73,11 @@ VPRIV uint32_t skip_balanced(cc *c)
 		int k = tok(c)->kind;
 
 		last = tok(c)->loc;
-		if (k == T_LPAREN || k == T_LSQUARE || k == T_LBRACE)
+		if (k == LEX_TOKEN_LEFT_PAREN || k == LEX_TOKEN_LEFT_SQUARE || k == LEX_TOKEN_LEFT_BRACE)
 			depth++;
-		else if (k == T_RPAREN || k == T_RSQUARE || k == T_RBRACE)
+		else if (k == LEX_TOKEN_RIGHT_PAREN || k == LEX_TOKEN_RIGHT_SQUARE || k == LEX_TOKEN_RIGHT_BRACE)
 			depth--;
-		else if (is(c, T_EOF))
+		else if (is(c, LEX_TOKEN_EOF))
 			fatal(c, tok(c)->loc, "unexpected end of file in attribute");
 		next(c);
 	} while (depth > 0);
@@ -96,8 +96,8 @@ VPRIV uint32_t string_index(cc *c, uint32_t attr)
 			const char *s = idname(attr, &l);	/* as written: clang keeps '__alias__' */
 
 			cc_error(c, tok(c)->loc, "expected string literal as argument of '%.*s' attribute", l, s);
-			for (int d = 0; !is(c, T_EOF) && !is(c, T_SEMI) && (d || !is(c, T_RPAREN)); next(c))
-				d += is(c, T_LPAREN) - is(c, T_RPAREN);
+			for (int d = 0; !is(c, LEX_TOKEN_EOF) && !is(c, LEX_TOKEN_SEMICOLON) && (d || !is(c, LEX_TOKEN_RIGHT_PAREN)); next(c))
+				d += is(c, LEX_TOKEN_LEFT_PAREN) - is(c, LEX_TOKEN_RIGHT_PAREN);
 		} else {
 			cc_error(c, tok(c)->loc, "expected string literal");
 		}
@@ -272,42 +272,42 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 {
 	for (;;) {
 		bool std = at_std_attr(c);
-		int close = std ? T_RSQUARE : T_RPAREN;
+		int close = std ? LEX_TOKEN_RIGHT_SQUARE : LEX_TOKEN_RIGHT_PAREN;
 		const char *cs = std ? "']'" : "')'";
 
 		if (!std && !iskw(c, KW___attribute__) && !iskw(c, KW___attribute))
 			break;
-		bool srcbr = std && !(tok(c)->flags & PF_MACRO);	/* [[ written in the source */
+		bool srcbr = std && !(tok(c)->flags & PP_TOKEN_FLAG_FROM_MACRO);	/* [[ written in the source */
 
 		next(c);
 		if (std) {
 			next(c);
 		} else {
-			expect(c, T_LPAREN, "'('");
-			expect(c, T_LPAREN, "'('");
+			expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
+			expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
 		}
 		while (!is(c, close)) {
 			ptok *t = tok(c);
 			int an, scope = std ? 0 : -1;	/* attr_scopes index; -1: GNU syntax */
 			uint32_t loc = t->loc, sloc = t->loc, sid = 0, aid;
 
-			if (accept(c, T_COMMA))
+			if (accept(c, LEX_TOKEN_COMMA))
 				continue;
-			if (std && t->kind == T_NUMBER && t->len == 1 && t->s[0] == '1' && (t->flags & PF_MACRO) &&
-			    peek(c, 1)->kind == T_COLONCOLON && srcbr && pp_spells(c->p, loc, "__clang__", 9)) {
+			if (std && t->kind == LEX_TOKEN_NUMBER && t->len == 1 && t->s[0] == '1' && (t->flags & PP_TOKEN_FLAG_FROM_MACRO) &&
+			    peek(c, 1)->kind == LEX_TOKEN_COLON_COLON && srcbr && pp_location_spells(c->p, loc, "__clang__", 9)) {
 				/* [[__clang__::x]] as written (not through a macro): clang warns and takes it as clang:: */
-				pp_span r = { loc, pp_tok_end(c->p, loc) };
-				pp_fixit fx = { loc, pp_tok_end(c->p, loc), "_Clang", VDA_NAME };	/* (__clang__ itself) */
+				diag_span r = { loc, pp_token_end_find(c->p, loc) };
+				diag_fixit fx = { loc, pp_token_end_find(c->p, loc), "_Clang", DIAG_APPLICABILITY_NAME };	/* (__clang__ itself) */
 
-				pp_dinfo d = { "warning", loc, &r, 1, &fx, 1, "1", 1 };	/* the note at the macro's body */
+				diag_info d = { "warning", loc, &r, 1, &fx, 1, "1", 1 };	/* the note at the macro's body */
 
-				pp_warnx(c->p, "ignored-attributes", true, NULL, &d,
+				diag_warning_report(c->p, "ignored-attributes", true, NULL, &d,
 					 "'__clang__' is a predefined macro name, not an attribute scope specifier; did you mean '_Clang' instead?");
-				t->kind = T_IDENT, t->id = vintern_cstr("_Clang");
+				t->kind = LEX_TOKEN_IDENTIFIER, t->id = vintern_cstr("_Clang");
 			}
-			if (t->kind != T_IDENT && !(std && kwof(t)))
+			if (t->kind != LEX_TOKEN_IDENTIFIER && !(std && kwof(t)))
 				expect(c, close, cs);	/* clang: expected ']' or ')' */
-			if (std && peek(c, 1)->kind == T_COLONCOLON) {
+			if (std && peek(c, 1)->kind == LEX_TOKEN_COLON_COLON) {
 				/* vendor::name: gnu and clang name GNU attributes, others are ignored */
 				const vident *ns = &vintern_ents[t->id];
 				bool cl = (ns->len == 5 && !memcmp(ns->s, "clang", 5)) || (ns->len == 6 && !memcmp(ns->s, "_Clang", 6));
@@ -320,17 +320,17 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 				next(c);
 				t = tok(c);
 				loc = t->loc;
-				if (t->kind != T_IDENT && !kwof(t))
+				if (t->kind != LEX_TOKEN_IDENTIFIER && !kwof(t))
 					fatal(c, loc, "expected attribute name");
 				if (!gnu) {	/* other vendors: ignored, with clang's warning */
 					uint32_t end = t->loc;
 					const vident *sn = &vintern_ents[sid], *nm = &vintern_ents[t->id];
 
 					next(c);
-					if (is(c, T_LPAREN))
+					if (is(c, LEX_TOKEN_LEFT_PAREN))
 						end = skip_balanced(c);
 					{
-						pp_span r = { sloc, pp_tok_end(c->p, end) };
+						diag_span r = { sloc, pp_token_end_find(c->p, end) };
 
 						cc_warnx(c, "unknown-attributes", true, NULL, sloc, &r, 1, NULL, 0,
 							 "unknown attribute '%.*s::%.*s' ignored", (int)sn->len, sn->s, (int)nm->len, nm->s);
@@ -347,11 +347,11 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 			next(c);
 			switch (an) {
 			case A_ALIGNED:
-				if (accept(c, T_LPAREN)) {
+				if (accept(c, LEX_TOKEN_LEFT_PAREN)) {
 					i128 v;
 
 					const_expr(c, &v, NULL);
-					expect(c, T_RPAREN, "')'");
+					expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 					if (v <= 0 || (v & (v - 1)))
 						cc_error(c, loc, "requested alignment is not a power of 2");
 					else if ((uint32_t)v > a->aligned)
@@ -361,9 +361,9 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 				}
 				continue;
 			case A_TARGET: {
-				expect(c, T_LPAREN, "'('");
+				expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
 				uint32_t ts = string_index(c, aid);
-				expect(c, T_RPAREN, "')'");
+				expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 				target_attr(c, a, ts, loc);
 				continue;
 			}
@@ -374,7 +374,7 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 			case A_SECTION:
 			case A_ALIAS:
 			case A_VISIBILITY:
-				expect(c, T_LPAREN, "'('");
+				expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
 				{
 					uint32_t sloc = tok(c)->loc;
 					uint32_t s = string_index(c, aid);
@@ -389,22 +389,22 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 					else
 						a->visibility = s;
 				}
-				expect(c, T_RPAREN, "')'");
+				expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 				continue;
 			case A_TLS_MODEL: {
-				if (!accept(c, T_LPAREN)) {
+				if (!accept(c, LEX_TOKEN_LEFT_PAREN)) {
 					cc_error(c, loc, "'tls_model' attribute takes one argument");
 					continue;
 				}
 				uint32_t argloc = tok(c)->loc, si = 0;
-				bool empty = is(c, T_RPAREN);
+				bool empty = is(c, LEX_TOKEN_RIGHT_PAREN);
 
 				if (!empty)
 					si = string_index(c, aid);
-				if (empty || is(c, T_COMMA)) {
+				if (empty || is(c, LEX_TOKEN_COMMA)) {
 					cc_error(c, loc, "'tls_model' attribute takes one argument");
-					while (!is(c, T_RPAREN) && !is(c, T_EOF) && !is(c, T_SEMI)) {
-						if (is(c, T_LPAREN)) skip_balanced(c);
+					while (!is(c, LEX_TOKEN_RIGHT_PAREN) && !is(c, LEX_TOKEN_EOF) && !is(c, LEX_TOKEN_SEMICOLON)) {
+						if (is(c, LEX_TOKEN_LEFT_PAREN)) skip_balanced(c);
 						else next(c);
 					}
 				} else if (si) {
@@ -415,19 +415,19 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 					else
 						a->tlsmodel = model, a->tlsloc = loc;
 				}
-				expect(c, T_RPAREN, "')'");
+				expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 				continue;
 			}
 			case A_MODE:
-				expect(c, T_LPAREN, "'('");
-				if (is(c, T_IDENT))
+				expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
+				if (is(c, LEX_TOKEN_IDENTIFIER))
 					a->mode = tok(c)->id;
 				next(c);
-				expect(c, T_RPAREN, "')'");
+				expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 				continue;
 			case A_CLEANUP:
-				expect(c, T_LPAREN, "'('");
-				if (is(c, T_IDENT)) {
+				expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
+				if (is(c, LEX_TOKEN_IDENTIFIER)) {
 					uint32_t s = lookup(c, tok(c)->id);
 
 					if (!s || c->syms[s].kind != S_FUNC)
@@ -437,14 +437,14 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 						c->syms[s].flags |= SF_REF | SF_USED;
 				}
 				next(c);
-				expect(c, T_RPAREN, "')'");
+				expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 				continue;
 			case A_COUNTED_BY:
-				expect(c, T_LPAREN, "'('");
-				if (is(c, T_IDENT))
+				expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
+				if (is(c, LEX_TOKEN_IDENTIFIER))
 					a->counted_by = tok(c)->id;
 				next(c);
-				expect(c, T_RPAREN, "')'");
+				expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 				continue;
 			case A_PURE:
 			case A_CONST:	/* (-Wunused-value: a discarded call) */
@@ -453,9 +453,9 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 			case A_VECTOR_SIZE: {
 				i128 v;
 
-				expect(c, T_LPAREN, "'('");
+				expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
 				const_expr(c, &v, NULL);
-				expect(c, T_RPAREN, "')'");
+				expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 				if (v <= 0 || (v & (v - 1)) || v > 1024)
 					cc_error(c, loc, "invalid vector size");
 				else
@@ -465,21 +465,21 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 			case A_DEPRECATED:	/* deprecated or deprecated("msg"[, "replacement"]) */
 			case A_UNAVAILABLE:	/* unavailable or unavailable("msg") */
 				a->depr = loc, a->deprmsg = 0, a->unavail = an == A_UNAVAILABLE;
-				if (is(c, T_LPAREN) && is_strtok(peek(c, 1)->kind)) {
+				if (is(c, LEX_TOKEN_LEFT_PAREN) && is_strtok(peek(c, 1)->kind)) {
 					next(c);
 					a->deprmsg = string_index(c, aid);
-					if (accept(c, T_COMMA) && is_strtok(tok(c)->kind))
+					if (accept(c, LEX_TOKEN_COMMA) && is_strtok(tok(c)->kind))
 						string_index(c, aid);	/* (the replacement, for a fix-it) */
-					expect(c, T_RPAREN, "')'");
+					expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 				}
 				break;
 			case A_WUR: a->wur = 1; break;
 			case A_NONNULL:	/* nonnull or nonnull(i, ...) */
-				if (!accept(c, T_LPAREN)) {
+				if (!accept(c, LEX_TOKEN_LEFT_PAREN)) {
 					a->nonnull |= 1;
 					continue;
 				}
-				if (accept(c, T_RPAREN)) {
+				if (accept(c, LEX_TOKEN_RIGHT_PAREN)) {
 					a->nonnull |= 1;
 					continue;
 				}
@@ -489,17 +489,17 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 					const_expr(c, &v, NULL);
 					if (v >= 1 && v <= 31)
 						a->nonnull |= 1u << v;
-					if (!accept(c, T_COMMA))
+					if (!accept(c, LEX_TOKEN_COMMA))
 						break;
 				}
-				expect(c, T_RPAREN, "')'");
+				expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 				continue;
 			case A_FORMAT_ARG: {	/* format_arg(i): the call returns its i-th argument's format */
 				i128 v = 0;
 
-				expect(c, T_LPAREN, "'('");
+				expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
 				const_expr(c, &v, NULL);
-				expect(c, T_RPAREN, "')'");
+				expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 				a->fmtarg = v >= 1 && v <= 255 ? (uint8_t)v : 0;
 				continue;
 			}
@@ -507,8 +507,8 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 				uint32_t arch = 0;
 				i128 fi = 0, fa = 0;
 
-				expect(c, T_LPAREN, "'('");
-				if (is(c, T_IDENT)) {
+				expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
+				if (is(c, LEX_TOKEN_IDENTIFIER)) {
 					size_t l = idlen_(tok(c)->id);
 					const char *n = idstr_(tok(c)->id);
 
@@ -517,12 +517,12 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 						arch = 1;
 					next(c);
 				}
-				if (accept(c, T_COMMA)) {
+				if (accept(c, LEX_TOKEN_COMMA)) {
 					const_expr(c, &fi, NULL);
-					if (accept(c, T_COMMA))
+					if (accept(c, LEX_TOKEN_COMMA))
 						const_expr(c, &fa, NULL);
 				}
-				expect(c, T_RPAREN, "')'");
+				expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 				a->fmt = arch && fi >= 1 && fi <= 255 && fa >= 0 && fa <= 255 ? arch << 16 | (uint32_t)fi << 8 | (uint32_t)fa : 0;
 				continue;
 			}
@@ -530,9 +530,9 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 			case A_EXT_VECTOR: {	/* ext_vector_type(N): N elements (typedefs only) */
 				i128 v;
 
-				expect(c, T_LPAREN, "'('");
+				expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
 				const_expr(c, &v, NULL);
-				expect(c, T_RPAREN, "')'");
+				expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 				if (v <= 0 || v > 4096)
 					cc_error(c, loc, "invalid vector size");
 				else
@@ -562,13 +562,13 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 					a->constructor = 1;
 				else
 					a->destructor = 1;
-				if (is(c, T_LPAREN)) {
+				if (is(c, LEX_TOKEN_LEFT_PAREN)) {
 					/* the priority: lower runs first */
 					i128 v;
 
 					next(c);
 					const_expr(c, &v, NULL);
-					expect(c, T_RPAREN, "')'");
+					expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 					if (v < 0 || v > 65535)
 						cc_error(c, loc, "'%s' priority out of range", an == A_CONSTRUCTOR ? "constructor" : "destructor");
 					else
@@ -580,10 +580,10 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 			case A_MAY_ALIAS: a->may_alias = 1; break;
 			case A_ERROR:	/* a call left after folding is a build error */
 				a->error_fn = 1;
-				if (is(c, T_LPAREN) && is_strtok(peek(c, 1)->kind)) {
+				if (is(c, LEX_TOKEN_LEFT_PAREN) && is_strtok(peek(c, 1)->kind)) {
 					next(c);
 					a->errmsg = string_index(c, aid);
-					expect(c, T_RPAREN, "')'");
+					expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 				}
 				break;
 			default: break;
@@ -592,12 +592,12 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 				uint32_t end = loc;
 				const vident *nm = &vintern_ents[tid];
 
-				if (is(c, T_LPAREN))
+				if (is(c, LEX_TOKEN_LEFT_PAREN))
 					end = skip_balanced(c);
 				if (an == A_NONE && !attr_known(c, scope, nm->s, nm->len)) {
 					/* [[gnu::x]]: from the scope, printed as gnu:: (also for __gnu__::) */
 					const char *sp = scope > 0 ? attr_scopes[scope] : "";
-					pp_span r = { sloc, pp_tok_end(c->p, end) };
+					diag_span r = { sloc, pp_token_end_find(c->p, end) };
 					const char *fix = attr_correction(c, scope, nm->s, nm->len);
 					const char *ns = nm->s;
 					size_t nn = nm->len;
@@ -607,7 +607,7 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 
 					if (fix) {
 						char fb[160];
-						pp_fixit fx = { sloc, pp_tok_end(c->p, loc), fb, 0 };
+						diag_fixit fx = { sloc, pp_token_end_find(c->p, loc), fb, 0 };
 
 						snprintf(fb, sizeof(fb), "%s%s", sp, fix);
 						cc_warnx(c, "unknown-attributes", true, NULL, sloc, &r, 1, &fx, 1,
@@ -680,7 +680,7 @@ VPRIV void asm_label(cc *c, attrs *a)
 	if (kw == KW_asm)
 		EXT_WARN_MS(c, "asm", "language-extension-token", w_ped, tok(c)->loc, "extension used");
 	next(c);
-	expect(c, T_LPAREN, "'('");
+	expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
 	a->asmname = string_index(c, 0);
-	expect(c, T_RPAREN, "')'");
+	expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 }

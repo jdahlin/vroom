@@ -38,7 +38,7 @@ VPRIV int fl_const(flw *f, uint32_t n)
 		return b == 0 ? 0 : a == 1 && b == 1 ? 1 : -1;
 	}
 	case N_UNARY:
-		if (N(n)->aux == T_EXCLAIM) {
+		if (N(n)->aux == LEX_TOKEN_EXCLAMATION) {
 			int a = fl_const(f, N(n)->a);
 
 			return a < 0 ? -1 : !a;

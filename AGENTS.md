@@ -55,28 +55,35 @@ relative to it); `TODO.md` stays at the top.
   one target OS in `platform/<os>/` (target, not host: host-specific code is
   in `port/`, host SIMD `#ifdef`s stay with their code).
   - `include/`: the headers another module includes, at the path of the
-    module (`include/common/arena.h`, `include/frontend/pp/pp.h`,
+    module (`include/common/region.h`, `include/frontend/pp/pp.h`,
     `include/arch/a64/a64.h`, `include/protocol.h`); code in `src/` includes
     them by that name with `-Isrc/include`.  A header only its own module uses
     stays next to its files, and a module's files include each other by
     relative path.
-  - `common/`: shared data structures and helpers, header-only unless noted
-    (headers in `include/common/`): reservations, regions and arenas
-    (`arena.h`), byte buffers (`buf.h`), the emitter's text buffer (`tbuf.h`),
-    growable arrays (`vec.h`), string hashes (`hash.h`; XXH3/BLAKE3 in
-    `ldhash.c`), interning (`intern.c`), binary128 (`f128.h`), scoped
-    resources through `cleanup` (`defer.h`: VAUTOFREE, VAUTOCLOSE, VLOCK; not
-    across a longjmp), attributes for our own declarations (`attr.h`: VUSE,
-    VNONNULL) and overflow-checked bounds for sizes read from input files
-    (`ckd.h`: vchecked_range, vchecked_add, vchecked_multiply).  Variants not yet merged are
-    listed in TODO.md.
-  - `port/`: what depends on the host (headers in `include/port/`): file
-    mapping (`mapfile.h`), thread counters (`vperf.h`), the stack guard
-    (`vstack.h`), CRC32C (`hostcrc.h`), `-march=native` on x86 (`x86native.h`),
-    the shared thread pool and CPU budget (`task.h`, `vtask_*`: parallel-for,
-    jobs, blocking regions; doc/quality/WORK-scheduler.md; `-j`/`VCC_JOBS`),
-    Apple PMU counters (`darwin/pmc.c`), and the wasm build's `wasm/mman.c`
-    (the big reservations as small sbrk stretches) and `wasm/compat/` (ACLE CRC
+  - `common/`: the shared library, portable C (headers in `include/common/`;
+    `include/common/common.h` is its overview and invariants; unit tests in
+    `test/common/`, `bench/common-test.py`).  One failure path (`fail.h`:
+    `vjob_fail`, `vout_of_memory`, `VBUG`); regions (`region.h`), the byte
+    buffer `vbuffer` (`buffer.h`) and the emitter's text buffer
+    (`text-buffer.h`), growable arrays (`vector.h`), `string-index.h` and the
+    string hash (`hash.h`), the identifier table (`intern.c`), `bytes.h`,
+    `leb128.h`, `format.h`, digests (`digest-xxh3.c`, `digest-blake3.c`,
+    `digest-sha256.c`), binary128 and x87 soft float (`softfloat.h`),
+    `bigint.h`, scoped resources through `cleanup` (`scoped-cleanup.h`:
+    VAUTOFREE, VAUTOCLOSE, VLOCK; not across a longjmp), attributes
+    (`attributes.h`: VUSE, VNONNULL) and overflow-checked bounds for sizes
+    read from input files (`checked-arithmetic.h`).  `common_SRC` in the
+    Makefile; every tool links it.
+  - `port/`: what depends on the host (headers in `include/port/`; `port_SRC`,
+    linked by every tool): job regions kept from one job to the next
+    (`job-regions.h`), file mapping, reading and writing (`file.h`), clocks
+    (`clock.h`), thread counters (`performance-counters.h`), the stack guard
+    (`stack-guard.h`), CRC32C (`crc32c.h`), `-march=native` on x86
+    (`x86native.h`), the shared thread pool and CPU budget (`task.h`,
+    `vtask_*`: parallel-for, jobs, blocking regions;
+    doc/quality/WORK-scheduler.md; `-j`/`VCC_JOBS`), Apple PMU counters
+    (`darwin/pmc.c`), and the wasm build's `wasm/mman.c` (the big
+    reservations as small sbrk stretches) and `wasm/compat/` (ACLE CRC
     through SIMDe).
   - `headers/`: vcc's own `<arm_neon.h>`, `<arm_acle.h>`, `<arm_sve.h>`,
     `<stdatomic.h>`, the compiled program's resource headers (`VCC_INCDIR`).
@@ -87,7 +94,7 @@ relative to it); `TODO.md` stays at the top.
       include-directory cache.
     - `diag/`: the diagnostics engine (records, text styles, JSON, SARIF,
       HTML; ids in `diagids.inc`).  Compiled in the pp module for now: it
-      uses `ppimpl.h`.
+      uses `pp-internal.h`.
     - `c/`: parser + sema (GNU C11, clang's layout and constant rules).  C++
       and Objective-C go next to it.
   - `codegen/`: code generator (straight from the AST): the shared part, state
@@ -107,6 +114,9 @@ relative to it); `TODO.md` stays at the top.
     `vir_dom`, `vir_uses`, `vir_canon`, and the unit tables of the text form;
     `print.c`, `parse.c` (arbitrary bytes fail as `file:line:col`, never crash)
     and `verify.c` (every rule of SPEC section 12); `virimpl.h` is internal.
+    Passes on VIR: `include/vir/pass.h` (interface, registry, `vir_pass_run`'s check of
+    `keeps`), `pass-list.c` (the registry), `compact.c` (`vir_function_compact`), one pass
+    per file in `pass/`; `virtest --passes` runs them (`doc/quality/DESIGN-vir-optimizer.md`).
     Depends on nothing in `frontend/`, `codegen/` or `arch/`.
     `bin/virtest/` is the tool
     (`virtest FILE`; `--no-verify`, `--bless`, `--selftest` for the builder API).
@@ -123,7 +133,7 @@ relative to it); `TODO.md` stays at the top.
     (`warnings.inc`).  Without `--backend-sock` vccd runs the whole kernel
     build itself: probes, `-E`/`-c`/`-S` (stdin too), links (vld in-process;
     `--ld PROG` spawns one), nm/objcopy behind the `vcc-nm`/`vcc-objcopy`
-    shims, and the host programs (vcc + `ldmacho.c`, macOS only); nothing
+    shims, and the host programs (vcc + `macho-linker.c`, macOS only); nothing
     falls back to clang.
   - `utils/`: what runs inside vccd for kbuild: fixdep, the archiver (`ar.c`:
     thin archives, llvm-ar-identical, so the build uses no llvm-ar) and
@@ -170,12 +180,12 @@ relative to it); `TODO.md` stays at the top.
   - `platform/linux/`: the ELF writer (`elf.c`: relocations, string table,
     file layout as LLVM MC).
   - `platform/darwin/`: the Mach-O writer; vld's Mach-O executables
-    (`ldmacho.c`: libSystem only, chained fixups, ad-hoc signature, chosen
+    (`macho-linker.c`: libSystem only, chained fixups, ad-hoc signature, chosen
     when the first input is Mach-O; the kernel's host programs).
   - `platform/wasm/`: the wasm object writer (`wasm.c`: layout, symbol table,
     relocations as LLVM's WasmObjectWriter, byte for byte).
   - `frontend/pp/`, `frontend/c/` and `codegen/` (with `arch/<cpu>/codegen/`) are directories of
-    files by topic, one internal header each (`ppimpl.h`, `ccimpl.h`, `emitimpl.h`) with the types, macros
+    files by topic, one internal header each (`pp-internal.h`, `ccimpl.h`, `emitimpl.h`) with the types, macros
     and prototypes the files share; a shared function is `VPRIV` (static in
     the unity build).  Each such module is compiled as one TU by default
     (`obj/unity/MOD.c` #includes the files in `MOD_SRC`, SQLite style); `make
@@ -234,6 +244,7 @@ build/src/task-test                 # port/task.c: the pool and budget (also und
 bench/sched-measure.py batch|emit|link|vccd|kbuild-log   # scheduling measurements A-F of doc/review/quality-scheduling.md
 bench/vcc-pic.py                    # GOT and TLS relocations per -fno-pic/-fPIE/-fPIC vs clang (<1 s)
 bench/vcc-volatile.py               # volatile loads/stores kept one for one, direct emitter and VIR (test/volatile, <1 s)
+bench/common-test.py                # src/common and src/port unit tests (src/test/common), host compiler, ASan+UBSan (~5 s)
 bench/vir-test.py -j 6              # VIR: parser/printer round trip, verifier rules, canon, dominators (src/test/vir, ~1 s)
 bench/vir-exposure.py               # VIR: generated long, cyclic and multi-slot exposure checks (<1 s)
 bench/vir-test.py --mutate 3000 --bin-dir build/src-asan   # random mutants of those units: virtest never crashes (~1 min)
@@ -249,6 +260,8 @@ bench/vcc-abi.py --target wasm64    # [needs VCC_WASM=1; not maintained] ... for
 bench/vcc-self.py -j 6              # [needs VCC_WASM=1; not maintained] vcc.wasm built by vcc itself vs the emcc build: -S byte for byte (W6, ~40 s)
 bench/vcc-darwin-s.py -j 6           # Darwin -S assembled by Apple's as, runs as the direct object (~2 min)
 bench/vcc-diag.py -j 6             # test/diag: vcc's .stderr snapshots, clang's locations/levels/flags (~2 s)
+bench/vcc-field-uses.py -j 6       # VCC_FIELD_USES: every use of selected struct fields with its bytes, snapshots (src/test/field-uses, <1 s)
+bench/vcc-diag.py lint_naming       # vpp --lint (style checks, off elsewhere; frontend/c/naming-lint.c): cases with /* diag-vpp-flags: --lint */
 bench/vcc-diag.py --bin-dir build/src-asan   # ... with a sanitizer build (also vcc-mutate.py, VCC_BIN=$PWD/build/src-asan)
 bench/vcc-diag.py --bless PATTERN   # ... rewrite the snapshots of a changed message (review the diff)
 src/tools/gen-diagids.py [--check]      # diag/diagnostic-ids.inc: each diagnostic format's id (clang's name or vcc_*)
@@ -285,7 +298,7 @@ VCC_DIAG_DEDUP=1 make ...           # under vccd: a header warning another TU of
 bench/vccd-kbuild.sh work/build-X -j 6   # cold kernel build, vccd only (no clang/vroomd/lld; ~10 s)
 python3 bench/boot-test.py --kernel work/build-X/arch/arm64/boot/Image --timeout 60   # boots Debian
 bench/vbench.py gate                # performance gate: instructions vs the merge-base, budget 1 % (~1 min)
-bench/quality.py [--clones N]       # source quality numbers: duplication, private copies of lib/, threads, state, module includes (PLAN-quality.md, 3 s)
+bench/quality.py [--clones N]       # source quality numbers: duplication, private copies of what common/ offers; common/ and port/ gated apart, threads, state, module includes (PLAN-quality.md, 3 s)
 bench/quality.py --check            # ... none above bench/quality-baseline.json (--bless rewrites it)
 bench/vcc-wasm.py -j 6              # [needs VCC_WASM=1; not maintained] the C suites for wasm64: vcc -S, clang -c, emcc, node vs clang's build (~2 min)
 bench/vcc-x86.py -j 6               # the C suites for x86-64 on an x86-64 host: vcc -S, clang -c, glibc, native (~10 s; first run ~10 min for the references)
@@ -362,7 +375,7 @@ default there; vcc exits with its arenas mapped) and the default 8 MB stack
 65-100 s (15-20x the normal build), an ASan suite 12-25 s.  Limits: ASan does
 not see over-reads inside our own mmap'ed arenas (they are never poisoned),
 only in malloc, globals and the stack.  Contract that ASan checks: strings
-handed to `vintern*`/`vlex_get` must be readable 16 (or 8) bytes past their
+handed to `vintern*`/`lex_file_get` must be readable 16 (or 8) bytes past their
 length (`vintern_cstr` pads a literal).  No suppressions are needed today;
 put any in `src/tsan.supp`, one reason per entry, and run with
 `TSAN_OPTIONS=suppressions=$PWD/src/tsan.supp`.
@@ -371,12 +384,12 @@ put any in `src/tsan.supp`, one reason per entry, and run with
 Targets build with Homebrew LLVM's libFuzzer and ASan+UBSan into
 `build/src/fuzz/` (without libFuzzer, `driver.c` gives the same command line
 minus coverage feedback).
-- `fuzz-lex`: vlex on raw bytes; checks token-array invariants, spelling,
+- `fuzz-lex`: lex_tokenize on raw bytes; checks token-array invariants, spelling,
   interning, NEON vs a scalar build of lex.c (`lexref.c`), buffer alignment.
 - `fuzz-diag`: control bytes \x01 a source file; random records (spans,
   labels, fix-its, notes, help) through every style and output.
   `FUZZ_DIAG_PRINT=1` prints them.
-- `fuzz-pp`: one in-memory TU served by `vlex_get_hook`: main `\x01` a.h
+- `fuzz-pp`: one in-memory TU served by `lex_file_get_hook`: main `\x01` a.h
   `\x01` b.h `\x01` sys/c.h, leading `\x02` for asm mode.
   `FUZZ_PP_PRINT=1` prints output and diagnostics.
 ```

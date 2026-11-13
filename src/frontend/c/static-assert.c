@@ -12,11 +12,11 @@ static __attribute__((cold)) void layout_note(cc *c, qty t)
 	int npad = 0;
 	uint64_t end = 0, sorted = 0;
 	bool flex = false, bits = false;
-	vdiag *d;
+	diag_record *d;
 
 	if (!g->nfield || !complete(c, t))
 		return;
-	d = pp_diag_begin(c->p, VDL_NOTE, g->loc, "'%s' is %llu bytes (alignment %u)", tyname(c, t),
+	d = diag_record_begin(c->p, DIAG_LEVEL_NOTE, g->loc, "'%s' is %llu bytes (alignment %u)", tyname(c, t),
 			  (unsigned long long)g->size, g->align);
 	d->id = "vcc_record_layout";
 	for (uint32_t i = 0; i < g->nfield; i++) {
@@ -30,7 +30,7 @@ static __attribute__((cold)) void layout_note(cc *c, qty t)
 
 			npad++;
 			snprintf(b, sizeof b, "%llu bytes of padding after this", (unsigned long long)(f->off / 8 - end));
-			pp_diag_label(c->p, d, pf->loc, pp_tok_end(c->p, pf->loc), b);
+			diag_record_label_add(c->p, d, pf->loc, pp_token_end_find(c->p, pf->loc), b);
 		}
 		if (f->bitfield) {
 			uint64_t e = (f->off + f->width + 7) / 8;
@@ -43,7 +43,7 @@ static __attribute__((cold)) void layout_note(cc *c, qty t)
 	if (!(g->flags & RF_UNION) && g->size > end) {
 		npad++;
 		snprintf(b, sizeof b, "%llu bytes of padding at the end", (unsigned long long)(g->size - end));
-		pp_diag_label(c->p, d, g->f[g->nfield - 1].loc, pp_tok_end(c->p, g->f[g->nfield - 1].loc), b);
+		diag_record_label_add(c->p, d, g->f[g->nfield - 1].loc, pp_token_end_find(c->p, g->f[g->nfield - 1].loc), b);
 	}
 	/* the members in decreasing alignment (no bit-fields, no flexible array) */
 	if (npad && !bits && !flex && !(g->flags & RF_UNION) && !g->maxalign) {
@@ -57,17 +57,17 @@ static __attribute__((cold)) void layout_note(cc *c, qty t)
 					sorted = (sorted + a - 1) / a * a + ty_size(c, g->f[i].ty);
 		sorted = (sorted + g->align - 1) / g->align * g->align;
 		if (n && sorted < g->size)
-			pp_diag_help(c->p, d, "ordering its members by decreasing alignment makes it %llu bytes",
+			diag_record_help_set(c->p, d, "ordering its members by decreasing alignment makes it %llu bytes",
 				     (unsigned long long)sorted);
 	}
-	pp_diag_emit(c->p, d);
+	diag_record_emit(c->p, d);
 }
 
 /* the records named by "sizeof(struct X)" / "sizeof(T)" in the source text of r */
-static __attribute__((cold)) void sizeof_layouts(cc *c, pp_span r)
+static __attribute__((cold)) void sizeof_layouts(cc *c, diag_span r)
 {
 	size_t len = 0;
-	const char *t = pp_src(c->p, r.b, r.e, &len), *e;
+	const char *t = pp_source_text(c->p, r.b, r.e, &len), *e;
 	int shown = 0;
 
 	if (!t)
@@ -106,9 +106,9 @@ static __attribute__((cold)) void sizeof_layouts(cc *c, pp_span r)
 /* an integer literal as written (clang's IntegerLiteral), not a folded constant */
 static bool int_literal(cc *c, uint32_t e)
 {
-	pp_span r = rng(c, e);
+	diag_span r = rng(c, e);
 	size_t len = 0;
-	const char *t = pp_src(c->p, r.b, r.e, &len);
+	const char *t = pp_source_text(c->p, r.b, r.e, &len);
 
 	return N(e)->op == N_NUM && t && len && *t >= '0' && *t <= '9';
 }
@@ -131,13 +131,13 @@ static uint32_t failed_term(cc *c, uint32_t e)
    the layout of the records whose sizes it compares */
 static __attribute__((cold, noinline)) void static_assert_failed(cc *c, uint32_t e, const char *msg)
 {
-	pp_span r;
+	diag_span r;
 	size_t len = 0;
 	const char *t;
 
 	e = failed_term(c, e);
 	r = rng(c, e);
-	t = pp_src(c->p, r.b, r.e, &len);
+	t = pp_source_text(c->p, r.b, r.e, &len);
 	if (!t)
 		t = "", len = 0;
 	if (int_literal(c, e)) {	/* clang: a literal is no requirement */
@@ -145,17 +145,17 @@ static __attribute__((cold, noinline)) void static_assert_failed(cc *c, uint32_t
 		return;
 	}
 	{
-		vdiag *d;
+		diag_record *d;
 
-		pp_diag_pc = __builtin_return_address(0);
+		diag_report_site_pc = __builtin_return_address(0);
 		error_limit(c), c->errors++, c->ndiag++;
-		d = pp_diag_begin(c->p, VDL_ERROR, r.b, "static assertion failed due to requirement '%.*s'%s%s",
+		d = diag_record_begin(c->p, DIAG_LEVEL_ERROR, r.b, "static assertion failed due to requirement '%.*s'%s%s",
 				  (int)len, t, msg[0] ? ": " : "", msg);
-		pp_diag_label(c->p, d, r.b, r.e, NULL);
+		diag_record_label_add(c->p, d, r.b, r.e, NULL);
 		/* a size that is the target's: say what it is on the other one */
 		if (memmem(t, len, "long double", 11))
-			pp_diag_help(c->p, d, "'long double' has 8 bytes on Apple (it is 'double') and 16 on Arm Linux (binary128)");
-		pp_diag_emit(c->p, d);
+			diag_record_help_set(c->p, d, "'long double' has 8 bytes on Apple (it is 'double') and 16 on Arm Linux (binary128)");
+		diag_record_emit(c->p, d);
 	}
 	while (N(e)->op == N_CAST && !c->span[e].e)
 		e = N(e)->a;
@@ -164,9 +164,9 @@ static __attribute__((cold, noinline)) void static_assert_failed(cc *c, uint32_t
 
 		if (const_int(c, N(e)->a, &a) && const_int(c, N(e)->b, &b) &&
 		    !(int_literal(c, N(e)->a) && int_literal(c, N(e)->b))) {	/* clang: nothing to evaluate */
-			pp_span rr[2] = { r, r };
+			diag_span rr[2] = { r, r };
 			size_t ol;
-			const char *op = pp_src(c->p, N(e)->loc, pp_tok_end(c->p, N(e)->loc), &ol);
+			const char *op = pp_source_text(c->p, N(e)->loc, pp_token_end_find(c->p, N(e)->loc), &ol);
 
 			if (op)
 				report(c, "note", N(e)->loc, rr, 2, NULL, 0, "expression evaluates to '%lld %.*s %lld'",
@@ -190,7 +190,7 @@ VPRIV void static_assert_decl(cc *c)
 		cc_error(c, loc, "static assertion expression is not an integral constant expression");
 		v = 1;
 	}
-	if (accept(c, T_COMMA)) {
+	if (accept(c, LEX_TOKEN_COMMA)) {
 		size_t k = 0;
 
 		while (is_strtok(tok(c)->kind)) {
@@ -213,6 +213,6 @@ VPRIV void static_assert_decl(cc *c)
 	}
 	if (!v && !ISERR(e))	/* (clang: nothing for an invalid condition) */
 		static_assert_failed(c, e, msg);
-	expect_match(c, T_RPAREN, open);
+	expect_match(c, LEX_TOKEN_RIGHT_PAREN, open);
 	expect_semi(c, "after static_assert");
 }

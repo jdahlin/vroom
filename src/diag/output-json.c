@@ -1,5 +1,5 @@
 /* JSON lines, and the record sink vccd reads. */
-#include "../frontend/pp/ppimpl.h"
+#include "../frontend/pp/pp-internal.h"
 #include "common/buffer.h"
 #include <ctype.h>
 #include <dlfcn.h>
@@ -31,188 +31,188 @@
  * error path runs any of this.
  */
 
-VPRIV void jstr(vbuf *b, const char *s, size_t n)
+VPRIV void diag_json_string_append(vbuffer *b, const char *s, size_t n)
 {
 	static const char hex[] = "0123456789abcdef";
 
-	vbuf_s(b, "\"");
+	vbuffer_string_append(b, "\"");
 	for (size_t i = 0; i < n; i++) {
 		unsigned char c = (unsigned char)s[i];
 
 		if (c == '"' || c == '\\') {
 			char e[2] = { '\\', (char)c };
 
-			vbuf_put(b, e, 2);
+			vbuffer_append(b, e, 2);
 		} else if (c == '\n')
-			vbuf_s(b, "\\n");
+			vbuffer_string_append(b, "\\n");
 		else if (c == '\t')
-			vbuf_s(b, "\\t");
+			vbuffer_string_append(b, "\\t");
 		else if (c < 0x20 || c == 0x7f) {
 			char e[6] = { '\\', 'u', '0', '0', hex[c >> 4], hex[c & 15] };
 
-			vbuf_put(b, e, 6);
+			vbuffer_append(b, e, 6);
 		} else
-			vbuf_put(b, &s[i], 1);
+			vbuffer_append(b, &s[i], 1);
 	}
-	vbuf_s(b, "\"");
+	vbuffer_string_append(b, "\"");
 }
 
-VPRIV void jcstr(vbuf *b, const char *s)
+VPRIV void diag_json_cstring_append(vbuffer *b, const char *s)
 {
 	if (s)
-		jstr(b, s, strlen(s));
+		diag_json_string_append(b, s, strlen(s));
 	else
-		vbuf_s(b, "null");
+		vbuffer_string_append(b, "null");
 }
 
-static const char *const lvjson[] = { "note", "remark", "warning", "error", "fatal error" };
-static const char *const appname[] = { "unspecified", "machine", "maybe", "placeholder" };
+static const char *const diag_json_level_names[] = { "note", "remark", "warning", "error", "fatal error" };
+static const char *const diag_json_applicability_names[] = { "unspecified", "machine", "maybe", "placeholder" };
 
 /* {"file", "line", "column", "path", "offset"}, {"file": null} outside any file, null for none */
-static void jloc(pp *p, vbuf *b, uint32_t loc)
+static void diag_json_location_append(pp *p, vbuffer *b, uint32_t loc)
 {
-	const fent *e;
+	const pp_file_entry *e;
 	const char *name;
 	uint32_t nl, line, col;
 
 	if (loc == UINT32_MAX) {
-		vbuf_s(b, "null");
+		vbuffer_string_append(b, "null");
 		return;
 	}
-	if (!loc_ok(p, loc, &e) || !diag_where(p, loc, &name, &nl, &line, &col)) {
-		vbuf_s(b, "{\"file\":null}");
+	if (!pp_location_is_valid(p, loc, &e) || !diag_location_presumed(p, loc, &name, &nl, &line, &col)) {
+		vbuffer_string_append(b, "{\"file\":null}");
 		return;
 	}
-	vbuf_s(b, "{\"file\":");
-	jstr(b, name, nl);
-	vbuf_f(b, ",\"line\":%u,\"column\":%u,\"path\":", line, col);
-	jcstr(b, e->f->path);
-	vbuf_f(b, ",\"offset\":%u}", loc - e->base);
+	vbuffer_string_append(b, "{\"file\":");
+	diag_json_string_append(b, name, nl);
+	vbuffer_format_append(b, ",\"line\":%u,\"column\":%u,\"path\":", line, col);
+	diag_json_cstring_append(b, e->f->path);
+	vbuffer_format_append(b, ",\"offset\":%u}", loc - e->base);
 }
 
 /* the include stack of loc, outermost first: [{"file", "line"}] */
-static void jincludes(pp *p, vbuf *b, uint32_t loc)
+static void diag_json_include_stack_append(pp *p, vbuffer *b, uint32_t loc)
 {
-	const fent *chain[64], *e;
+	const pp_file_entry *chain[64], *e;
 	int n = 0;
 
-	vbuf_s(b, "[");
-	if (loc != UINT32_MAX && loc_ok(p, loc, &e))
-		for (const fent *x = e; x && x->from && n < 64; x = loc_fent(p, x->from))
+	vbuffer_string_append(b, "[");
+	if (loc != UINT32_MAX && pp_location_is_valid(p, loc, &e))
+		for (const pp_file_entry *x = e; x && x->from && n < 64; x = pp_location_file_entry(p, x->from))
 			chain[n++] = x;
 	for (int i = n, first = 1; i-- > 0;) {
 		const char *name;
 		uint32_t nl, line, col;
 
-		if (!diag_where(p, chain[i]->from, &name, &nl, &line, &col))
+		if (!diag_location_presumed(p, chain[i]->from, &name, &nl, &line, &col))
 			continue;
-		vbuf_s(b, first ? "{\"file\":" : ",{\"file\":");
-		jstr(b, name, nl);
-		vbuf_f(b, ",\"line\":%u}", line);
+		vbuffer_string_append(b, first ? "{\"file\":" : ",{\"file\":");
+		diag_json_string_append(b, name, nl);
+		vbuffer_format_append(b, ",\"line\":%u}", line);
 		first = 0;
 	}
-	vbuf_s(b, "]");
+	vbuffer_string_append(b, "]");
 }
 
 /* top: 0 a child, 1 a record, 2 a record without "rendered" (vccd's store) */
-static void json_rec(pp *p, vbuf *b, const vdiag *d, int top)
+static void diag_json_record_append(pp *p, vbuffer *b, const diag_record *d, int top)
 {
-	vbuf_s(b, "{\"id\":");
-	jcstr(b, d->id);
-	vbuf_f(b, ",\"level\":\"%s\",\"flag\":", lvjson[d->level]);
-	jcstr(b, d->flag);
-	vbuf_f(b, ",\"werror\":%s,\"message\":", d->werror ? "true" : "false");
-	jcstr(b, d->msg);
-	vbuf_s(b, ",\"location\":");
-	jloc(p, b, d->loc);
-	vbuf_s(b, ",\"label\":");
-	jcstr(b, d->label);
-	vbuf_s(b, ",\"help\":");
-	jcstr(b, d->help);
+	vbuffer_string_append(b, "{\"id\":");
+	diag_json_cstring_append(b, d->id);
+	vbuffer_format_append(b, ",\"level\":\"%s\",\"flag\":", diag_json_level_names[d->level]);
+	diag_json_cstring_append(b, d->flag);
+	vbuffer_format_append(b, ",\"werror\":%s,\"message\":", d->werror ? "true" : "false");
+	diag_json_cstring_append(b, d->msg);
+	vbuffer_string_append(b, ",\"location\":");
+	diag_json_location_append(p, b, d->loc);
+	vbuffer_string_append(b, ",\"label\":");
+	diag_json_cstring_append(b, d->label);
+	vbuffer_string_append(b, ",\"help\":");
+	diag_json_cstring_append(b, d->help);
 	if (d->art) {
-		vbuf_s(b, ",\"art\":");
-		jcstr(b, d->art);
+		vbuffer_string_append(b, ",\"art\":");
+		diag_json_cstring_append(b, d->art);
 	}
-	vbuf_s(b, ",\"spans\":[");
+	vbuffer_string_append(b, ",\"spans\":[");
 	for (uint32_t i = 0; i < d->nspan; i++) {
-		vbuf_s(b, i ? ",{\"start\":" : "{\"start\":");
-		jloc(p, b, d->span[i].b);
-		vbuf_s(b, ",\"end\":");
-		jloc(p, b, d->span[i].e);
-		vbuf_s(b, ",\"label\":");
-		jcstr(b, d->span[i].label);
-		vbuf_s(b, "}");
+		vbuffer_string_append(b, i ? ",{\"start\":" : "{\"start\":");
+		diag_json_location_append(p, b, d->span[i].b);
+		vbuffer_string_append(b, ",\"end\":");
+		diag_json_location_append(p, b, d->span[i].e);
+		vbuffer_string_append(b, ",\"label\":");
+		diag_json_cstring_append(b, d->span[i].label);
+		vbuffer_string_append(b, "}");
 	}
-	vbuf_s(b, "],\"fixits\":[");
+	vbuffer_string_append(b, "],\"fixits\":[");
 	for (uint32_t i = 0; i < d->nfix; i++) {
-		vbuf_s(b, i ? ",{\"start\":" : "{\"start\":");
-		jloc(p, b, d->fix[i].b);
-		vbuf_s(b, ",\"end\":");
-		jloc(p, b, d->fix[i].e);
-		vbuf_s(b, ",\"text\":");
-		jcstr(b, d->fix[i].s);
-		vbuf_f(b, ",\"applicability\":\"%s\"}", appname[d->fix[i].app & 3]);
+		vbuffer_string_append(b, i ? ",{\"start\":" : "{\"start\":");
+		diag_json_location_append(p, b, d->fix[i].b);
+		vbuffer_string_append(b, ",\"end\":");
+		diag_json_location_append(p, b, d->fix[i].e);
+		vbuffer_string_append(b, ",\"text\":");
+		diag_json_cstring_append(b, d->fix[i].s);
+		vbuffer_format_append(b, ",\"applicability\":\"%s\"}", diag_json_applicability_names[d->fix[i].app & 3]);
 	}
-	vbuf_s(b, "],\"include_stack\":");
-	jincludes(p, b, d->loc);
+	vbuffer_string_append(b, "],\"include_stack\":");
+	diag_json_include_stack_append(p, b, d->loc);
 	if (top) {
-		vbuf r = { 0 };
-		uint32_t fe = p->diag_fe;
+		vbuffer r = { 0 };
+		uint32_t fe = p->diagnostic_last_file;
 
-		vbuf_s(b, ",\"children\":[");
-		for (const vdiag *k = d->kids; k; k = k->next) {
-			json_rec(p, b, k, false);
+		vbuffer_string_append(b, ",\"children\":[");
+		for (const diag_record *k = d->kids; k; k = k->next) {
+			diag_json_record_append(p, b, k, false);
 			if (k->next)
-				vbuf_s(b, ",");
+				vbuffer_string_append(b, ",");
 		}
 		if (top == 2) {
-			vbuf_s(b, "]}");
+			vbuffer_string_append(b, "]}");
 			return;
 		}
-		vbuf_s(b, "],\"rendered\":");
+		vbuffer_string_append(b, "],\"rendered\":");
 		/* the text as the text output prints it (in its style), with its include stack */
-		p->diag_fe = 0;
+		p->diagnostic_last_file = 0;
 		bool color = p->color;
 		p->color = 0;
-		diag_render_rec(p, &r, (vdiag *)d);
+		diag_record_render_plain(p, &r, (diag_record *)d);
 		p->color = color;
-		p->diag_fe = fe;
-		jstr(b, r.p ? r.p : "", r.n);
+		p->diagnostic_last_file = fe;
+		diag_json_string_append(b, r.p ? r.p : "", r.n);
 		free(r.p);
 	}
-	vbuf_s(b, "}");
+	vbuffer_string_append(b, "}");
 }
 
 /* write the pending JSON record */
-VPRIV void diag_json_flush(pp *p)
+VPRIV void diag_json_record_flush(pp *p)
 {
 	int fd = p->o->errfd ? p->o->errfd : 2;
-	vbuf b = { 0 };
+	vbuffer b = { 0 };
 
-	if (!p->dpend)
+	if (!p->diagnostic_pending_structured)
 		return;
-	json_rec(p, &b, p->dpend, true);
-	vbuf_s(&b, "\n");
+	diag_json_record_append(p, &b, p->diagnostic_pending_structured, true);
+	vbuffer_string_append(&b, "\n");
 	(void)!write(fd, b.p, b.n);
 	free(b.p);
-	p->dpend = NULL;
+	p->diagnostic_pending_structured = NULL;
 }
 
 /* ---------------- SARIF ---------------- */
 
-VPRIV __attribute__((noinline, cold)) void dsink_records(pp *p)
+VPRIV __attribute__((noinline, cold)) void diag_sink_records_send(pp *p)
 {
-	for (const vdiag *d = p->dhead; d; d = d->next) {
-		pp_drec r = { .level = d->level, .flag = d->flag };
-		const fent *e;
+	for (const diag_record *d = p->dhead; d; d = d->next) {
+		diag_sink_record r = { .level = d->level, .flag = d->flag };
+		const pp_file_entry *e;
 		const char *name;
 		uint32_t nl;
-		vbuf b = { 0 };
+		vbuffer b = { 0 };
 
-		if (d->loc != UINT32_MAX && loc_ok(p, d->loc, &e) && diag_where(p, d->loc, &name, &nl, &r.line, &r.col))
+		if (d->loc != UINT32_MAX && pp_location_is_valid(p, d->loc, &e) && diag_location_presumed(p, d->loc, &name, &nl, &r.line, &r.col))
 			r.path = e->f->path;
 		if (!p->o->dsink->nojson) {
-			json_rec(p, &b, d, 2);
+			diag_json_record_append(p, &b, d, 2);
 			r.json = b.p ? b.p : "";
 			r.jlen = b.n;
 		}

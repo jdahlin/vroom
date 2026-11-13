@@ -12,12 +12,12 @@ VPRIV void parse_jump(cc *c)
 /* clang's "expected ')'" with "to match this '('" at open */
 VPRIV void expect_match_fail(cc *c, int kind, uint32_t open)
 {
-	const char *cl = kind == T_RPAREN ? ")" : kind == T_RSQUARE ? "]" : "}";
-	const char *op = kind == T_RPAREN ? "(" : kind == T_RSQUARE ? "[" : "{";
+	const char *cl = kind == LEX_TOKEN_RIGHT_PAREN ? ")" : kind == LEX_TOKEN_RIGHT_SQUARE ? "]" : "}";
+	const char *op = kind == LEX_TOKEN_RIGHT_PAREN ? "(" : kind == LEX_TOKEN_RIGHT_SQUARE ? "[" : "{";
 
 	if (c->miss_loc != tok(c)->loc) {	/* nested ones missing at the same token: once */
 		c->miss_loc = tok(c)->loc;
-		report(c, "error", tok(c)->kind == T_EOF ? pp_main_eof(c->p) : tok(c)->loc, NULL, 0, NULL, 0, "expected '%s'", cl);
+		report(c, "error", tok(c)->kind == LEX_TOKEN_EOF ? pp_main_file_end(c->p) : tok(c)->loc, NULL, 0, NULL, 0, "expected '%s'", cl);
 		note(c, open, "to match this '%s'", op);
 	}
 	skip_close(c, kind);
@@ -31,11 +31,11 @@ VPRIV void skip_close(cc *c, int kind)
 
 	for (;; next(c)) {
 		k = tok(c)->kind;
-		if (k == T_EOF || (!depth && k == T_SEMI))
+		if (k == LEX_TOKEN_EOF || (!depth && k == LEX_TOKEN_SEMICOLON))
 			return;
-		if (k == T_LPAREN || k == T_LSQUARE || k == T_LBRACE) {
+		if (k == LEX_TOKEN_LEFT_PAREN || k == LEX_TOKEN_LEFT_SQUARE || k == LEX_TOKEN_LEFT_BRACE) {
 			depth++;
-		} else if (k == T_RPAREN || k == T_RSQUARE || k == T_RBRACE) {
+		} else if (k == LEX_TOKEN_RIGHT_PAREN || k == LEX_TOKEN_RIGHT_SQUARE || k == LEX_TOKEN_RIGHT_BRACE) {
 			if (depth--)
 				continue;
 			if (k == kind)
@@ -56,15 +56,15 @@ VPRIV void delayed_bug(cc *c, uint32_t loc, const char *what)
 /* at the end of the TU: a delayed bug with no error reported is vcc's bug */
 VPRIV void delayed_bug_check(cc *c)
 {
-	vdiag *d;
+	diag_record *d;
 
-	if (!c->dbug || c->errors || pp_errors(c->p))
+	if (!c->dbug || c->errors || pp_error_count(c->p))
 		return;
-	d = pp_diag_begin(c->p, VDL_ERROR, c->dbug_loc, "internal error: %s (vcc stopped short here, expecting an error)",
+	d = diag_record_begin(c->p, DIAG_LEVEL_ERROR, c->dbug_loc, "internal error: %s (vcc stopped short here, expecting an error)",
 			  c->dbug);
 	d->id = "vcc_internal_delayed_bug";
-	pp_diag_help(c->p, d, "this is a bug in vcc, not in your code: please report it with this file (vcc -E output)");
-	pp_diag_emit(c->p, d);
+	diag_record_help_set(c->p, d, "this is a bug in vcc, not in your code: please report it with this file (vcc -E output)");
+	diag_record_emit(c->p, d);
 	c->errors++;
 }
 
@@ -93,26 +93,26 @@ static void skip_nest(cc *c, bool top, int nest, bool blk)
 
 	for (;;) {
 		switch (tok(c)->kind) {
-		case T_EOF:
+		case LEX_TOKEN_EOF:
 			return;
-		case T_LPAREN:
-		case T_LSQUARE:
+		case LEX_TOKEN_LEFT_PAREN:
+		case LEX_TOKEN_LEFT_SQUARE:
 			par++;
 			break;
-		case T_RPAREN:
-		case T_RSQUARE:
+		case LEX_TOKEN_RIGHT_PAREN:
+		case LEX_TOKEN_RIGHT_SQUARE:
 			par -= par > 0;
 			break;
-		case T_SEMI:
+		case LEX_TOKEN_SEMICOLON:
 			if (!nest && !par) {
 				next(c);
 				return;
 			}
 			break;
-		case T_LBRACE:
+		case LEX_TOKEN_LEFT_BRACE:
 			nest++;
 			break;
-		case T_RBRACE:
+		case LEX_TOKEN_RIGHT_BRACE:
 			if (!nest) {
 				if (top)
 					next(c);
@@ -142,11 +142,11 @@ static void skip_for_head(cc *c)
 	for (;; next(c)) {
 		int k = tok(c)->kind;
 
-		if (k == T_EOF || k == T_LBRACE || k == T_RBRACE)
+		if (k == LEX_TOKEN_EOF || k == LEX_TOKEN_LEFT_BRACE || k == LEX_TOKEN_RIGHT_BRACE)
 			return;
-		if (k == T_LPAREN || k == T_LSQUARE)
+		if (k == LEX_TOKEN_LEFT_PAREN || k == LEX_TOKEN_LEFT_SQUARE)
 			depth++;
-		else if ((k == T_RPAREN || k == T_RSQUARE) && !depth--) {
+		else if ((k == LEX_TOKEN_RIGHT_PAREN || k == LEX_TOKEN_RIGHT_SQUARE) && !depth--) {
 			next(c);
 			return;
 		}
@@ -158,7 +158,7 @@ static void skip_for_head(cc *c)
 static bool stray_rbrace(cc *c)
 {
 	size_t n;
-	const char *s = pp_src(c->p, c->prevloc, c->prevloc + 1, &n);
+	const char *s = pp_source_text(c->p, c->prevloc, c->prevloc + 1, &n);
 
 	return s && n == 1 && !strchr(";{}:,", *s);
 }
@@ -177,7 +177,7 @@ VPRIV void rec_restore(cc *c, recov *r, int mode)
 	c->dead = r->dead, c->fn = r->fn, c->constexpr_init = r->constexpr_init;
 	c->in_loop = r->in_loop, c->in_switch = r->in_switch, c->in_stmtexpr = r->in_stmtexpr;
 	c->unevaluated = r->unevaluated, c->in_struct = r->in_struct, c->in_tyname = r->in_tyname;
-	int open = is(c, T_SEMI) ? 0 : c->ibr - r->ibr;	/* initializer braces left open, unless a ';' ends them */
+	int open = is(c, LEX_TOKEN_SEMICOLON) ? 0 : c->ibr - r->ibr;	/* initializer braces left open, unless a ';' ends them */
 
 	c->ibr = r->ibr;
 	c->switch_cases = r->switch_cases, c->switch_ty = r->switch_ty;
@@ -198,14 +198,14 @@ VPRIV void rec_restore(cc *c, recov *r, int mode)
 	c->decl_name = 0;
 	dc_kill(c);	/* no declaration snapshots after an error */
 	if (tok(c)->loc == r->again) {	/* no progress since the last one: past this token */
-		if (is(c, T_EOF))
+		if (is(c, LEX_TOKEN_EOF))
 			longjmp(c->bail, 1);
 		next(c);
 	}
 	if (mode == REC_FOR)
 		skip_for_head(c);
 	else {
-		if (is(c, T_RBRACE) && !top && stray_rbrace(c))
+		if (is(c, LEX_TOKEN_RIGHT_BRACE) && !top && stray_rbrace(c))
 			next(c);
 		skip_nest(c, top, open, true);
 		if (!top && iskw(c, KW_else))

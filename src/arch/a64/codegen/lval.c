@@ -174,11 +174,11 @@ VPRIV lval gen_lval(ecx *e, uint32_t n)
 			}
 			int ri = toreg(e, &i), rb = treg(e);
 			mov(e, 1, rb, ri);
-			val bit = arith(e, T_AMP, prim(TY_ULONG), vreg(rb), vconst(7));
+			val bit = arith(e, LEX_TOKEN_AMPERSAND, prim(TY_ULONG), vreg(rb), vconst(7));
 			lval bs = { .k = L_FRAME, .off = slot(e, 8, 8), .align = 8 };
 			store(e, &bs, prim(TY_ULONG), &bit);
 			val_free(e, &bit);
-			i = arith(e, T_GREATERGREATER, prim(TY_ULONG), vreg(ri), vconst(3));
+			i = arith(e, LEX_TOKEN_GREATER_GREATER, prim(TY_ULONG), vreg(ri), vconst(3));
 			l = lfromval(e, ptr_add(e, p, i, 1, false), 1);
 			l.bf = 1, l.width = 1, l.dynbit_slot = bs.off;
 			return l;
@@ -474,8 +474,8 @@ static val load1(ecx *e, lval *l, qty t)
 		lval bs = { .k = L_FRAME, .off = l->dynbit_slot, .align = 8 };
 		r = treg(e);
 		load_n(e, r, l, 1, 0);
-		val v = arith(e, T_GREATERGREATER, prim(TY_ULONG), vreg(r), load(e, &bs, prim(TY_ULONG)));
-		return arith(e, T_AMP, prim(TY_ULONG), v, vconst(1));
+		val v = arith(e, LEX_TOKEN_GREATER_GREATER, prim(TY_ULONG), vreg(r), load(e, &bs, prim(TY_ULONG)));
+		return arith(e, LEX_TOKEN_AMPERSAND, prim(TY_ULONG), v, vconst(1));
 	}
 
 	if (l->bf && size == 16)
@@ -604,15 +604,15 @@ static void store1(ecx *e, lval *l, qty t, val *v)
 	}
 	if (l->dynbit_slot) {
 		lval bs = { .k = L_FRAME, .off = l->dynbit_slot, .align = 8 };
-		val mask = arith(e, T_LESSLESS, prim(TY_ULONG), vconst(1), load(e, &bs, prim(TY_ULONG)));
+		val mask = arith(e, LEX_TOKEN_LESS_LESS, prim(TY_ULONG), vconst(1), load(e, &bs, prim(TY_ULONG)));
 		int rm = treg(e), rv = toreg(e, v), ro = treg(e), rn = treg(e);
 		mov(e, 1, rm, mask.r);
 		load_n(e, ro, l, 1, 0);
-		val old = arith(e, T_AMP, prim(TY_ULONG), vreg(ro), arith(e, T_CARET, prim(TY_ULONG), mask, vconst(-1)));
+		val old = arith(e, LEX_TOKEN_AMPERSAND, prim(TY_ULONG), vreg(ro), arith(e, LEX_TOKEN_CARET, prim(TY_ULONG), mask, vconst(-1)));
 		mov(e, 1, rn, rv);
-		val nv = arith(e, T_MINUS, prim(TY_ULONG), vconst(0), vreg(rn));
-		nv = arith(e, T_AMP, prim(TY_ULONG), nv, vreg(rm));
-		old = arith(e, T_PIPE, prim(TY_ULONG), old, nv);
+		val nv = arith(e, LEX_TOKEN_MINUS, prim(TY_ULONG), vconst(0), vreg(rn));
+		nv = arith(e, LEX_TOKEN_AMPERSAND, prim(TY_ULONG), nv, vreg(rm));
+		old = arith(e, LEX_TOKEN_PIPE, prim(TY_ULONG), old, nv);
 		lval byte = *l;
 		byte.bf = 0, byte.dynbit_slot = 0;
 		store(e, &byte, prim(TY_UCHAR), &old);

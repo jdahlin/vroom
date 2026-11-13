@@ -2,7 +2,7 @@
  * x86-64 instructions in AT&T syntax: the parser and the encoder, choosing
  * the encodings LLVM MC chooses (clang -c), so an object is byte-identical
  * with clang's for the same text.  Jumps to labels are variable items the
- * assembler relaxes (as.c: as_variable_item_branch_add).
+ * assembler relaxes (as/variable-items.c: as_variable_item_branch_add).
  */
 #include "x64as.h"
 
@@ -431,18 +431,18 @@ VPRIV int x64_emit(as_context *a, XForm *f)
 		}
 	}
 	{
-		uint32_t fr = a->cur;
+		uint32_t fr = a->fragment_current;
 		uint64_t off;
 		uint8_t *p;
 
-		elf_code(a->o, fr);
-		off = elf_frag(a->o, fr)->size;
-		p = elf_grow(a->o, fr, (size_t)x.n);
+		elf_code(a->object, fr);
+		off = elf_frag(a->object, fr)->size;
+		p = elf_grow(a->object, fr, (size_t)x.n);
 		memcpy(p, x.b, (size_t)x.n);
 		if (x.fixtype)
-			elf_fixup(a->o, fr, off + (uint64_t)x.fixat, p + x.fixat, (uint32_t)x.fixtype, x.fixv);
+			elf_fixup(a->object, fr, off + (uint64_t)x.fixat, p + x.fixat, (uint32_t)x.fixtype, x.fixv);
 		if (x.fix2type)
-			elf_fixup(a->o, fr, off + (uint64_t)x.fix2at, p + x.fix2at, (uint32_t)x.fix2type, x.fix2v);
+			elf_fixup(a->object, fr, off + (uint64_t)x.fix2at, p + x.fix2at, (uint32_t)x.fix2type, x.fix2v);
 	}
 	return 0;
 }
@@ -450,10 +450,10 @@ VPRIV int x64_emit(as_context *a, XForm *f)
 /* raw bytes (no operands) */
 VPRIV int x64_raw(as_context *a, const uint8_t *b, int n)
 {
-	uint32_t fr = a->cur;
+	uint32_t fr = a->fragment_current;
 
-	elf_code(a->o, fr);
-	memcpy(elf_grow(a->o, fr, (size_t)n), b, (size_t)n);
+	elf_code(a->object, fr);
+	memcpy(elf_grow(a->object, fr, (size_t)n), b, (size_t)n);
 	return 0;
 }
 
@@ -573,21 +573,21 @@ VPRIV int x64_branch(as_context *a, int cc, XOp *t, int call)
 {
 	if (call) {
 		XEnc x = { 0 };
-		uint32_t fr = a->cur;
+		uint32_t fr = a->fragment_current;
 		uint64_t off;
 		uint8_t *p;
 		as_value v = t->v;
 
 		eb(&x, 0xe8);
 		ew(&x, 0, 4);
-		elf_code(a->o, fr);
-		off = elf_frag(a->o, fr)->size;
-		p = elf_grow(a->o, fr, 5);
+		elf_code(a->object, fr);
+		off = elf_frag(a->object, fr)->size;
+		p = elf_grow(a->object, fr, 5);
 		memcpy(p, x.b, 5);
 		v.c -= 4;
-		elf_fixup(a->o, fr, off + 1, p + 1, R_X86_64_PLT32, v);
+		elf_fixup(a->object, fr, off + 1, p + 1, R_X86_64_PLT32, v);
 		if (t->mod == XM_PLT)
-			((ElfFix *)a->o->fixes.base)[a->o->nfix - 1].pad = 1;	/* sym@PLT: never resolved in place (MC) */
+			((ElfFix *)a->object->fixes.base)[a->object->nfix - 1].pad = 1;	/* sym@PLT: never resolved in place (MC) */
 		return 0;
 	}
 	return as_variable_item_branch_add(a, cc, t->v, t->mod);
@@ -674,7 +674,7 @@ VPRIV int x64_as_instruction_assemble(as_context *a, const char *p, const char *
 
 				while (t < e && as_char_is_identifier((unsigned char)*t))
 					t++;
-				rn = as_register_alias_find(a, elf_sym_lookup(a->o, q, (uint32_t)(t - q)));
+				rn = as_register_alias_find(a, elf_sym_lookup(a->object, q, (uint32_t)(t - q)));
 				if (rn && n + 10 < sizeof rb) {
 					rb[n++] = '%';
 					for (; *rn; rn++)

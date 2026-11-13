@@ -54,8 +54,8 @@ VPRIV uint32_t x86_simd_call(cc *c, const builtin *b, vec *args, qty rt, uint32_
 			vpush(c, &one, rvalue(c, builtin_vector_lane(c, saved, prim(TY_FLOAT), i, loc)));
 			uint32_t sign = mk_builtin(c, BI_SIGNBIT, prim(TY_INT), loc, &one);
 			sign = convert(c, convert(c, sign, prim(TY_BOOL)), prim(TY_INT));
-			sign = mk_bin(c, T_LESSLESS, prim(TY_INT), sign, mk_int(c, i, prim(TY_INT), loc), loc);
-			result = mk_bin(c, T_PIPE, prim(TY_INT), result, sign, loc);
+			sign = mk_bin(c, LEX_TOKEN_LESS_LESS, prim(TY_INT), sign, mk_int(c, i, prim(TY_INT), loc), loc);
+			result = mk_bin(c, LEX_TOKEN_PIPE, prim(TY_INT), result, sign, loc);
 		}
 		return with_pre(c, mk2(c, N_ASSIGN, vt, loc, saved, args->v[0]), result);
 	}
@@ -80,13 +80,13 @@ VPRIV uint32_t x86_simd_call(cc *c, const builtin *b, vec *args, qty rt, uint32_
 		uint32_t value;
 		if (shift) {
 			uint32_t count = convert(c, rvalue(c, saved[1]), prim(TY_UINT));
-			uint32_t valid = mk_bin(c, T_LESS, prim(TY_INT), count, mk_int(c, 16, prim(TY_UINT), loc), loc);
-			value = mk_bin(c, name[2] == 'l' ? T_LESSLESS : T_GREATERGREATER, prim(TY_UINT), convert(c, a, prim(TY_UINT)), count, loc);
+			uint32_t valid = mk_bin(c, LEX_TOKEN_LESS, prim(TY_INT), count, mk_int(c, 16, prim(TY_UINT), loc), loc);
+			value = mk_bin(c, name[2] == 'l' ? LEX_TOKEN_LESS_LESS : LEX_TOKEN_GREATER_GREATER, prim(TY_UINT), convert(c, a, prim(TY_UINT)), count, loc);
 			value = conditional(c, valid, value, mk_int(c, 0, prim(TY_UINT), loc), loc);
 			value = convert(c, value, et);
 		} else {
 			uint32_t rhs = rvalue(c, builtin_vector_lane(c, saved[1], prim(TY_FLOAT), i, loc));
-			uint32_t cond = mk_bin(c, cmp ? T_LESSEQ : !strcmp(name, "maxps") ? T_GREATER : T_LESS, prim(TY_INT), a, rhs, loc);
+			uint32_t cond = mk_bin(c, cmp ? LEX_TOKEN_LESS_EQUAL : !strcmp(name, "maxps") ? LEX_TOKEN_GREATER : LEX_TOKEN_LESS, prim(TY_INT), a, rhs, loc);
 			value = cmp ? conditional(c, cond, mk_int(c, 0, et, loc), mk_int(c, -1, et, loc), loc) : conditional(c, cond, a, rhs, loc);
 		}
 		uint32_t dst = builtin_vector_lane(c, out, et, i, loc);

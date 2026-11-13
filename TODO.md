@@ -790,7 +790,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* test/diag case with each form; `vcc-sema.py warn` stays 879/879.
 - [ ] **C23 / per-TU `-std`** [P] (partly done: per-TU keyword map `kwmap` (C23 spellings ->
   GNU keywords; true/false/nullptr/constexpr), `#if true`, digit separators through a
-  translated copy (vlex_digitsep: `-E` and `#x` print them without the `'`, clang keeps them),
+  translated copy (lex_file_digit_separators_remove: `-E` and `#x` print them without the `'`, clang keeps them),
   test/vcc/c23_keywords.c, c99_ids.c; C23 `auto` type inference and strict `-std=c11` without
   `typeof`/`asm` keywords (D5.5, test/diag/c23_auto.c).  Left: `u8'a'` (one token only in C23: the lexer
   cache needs a per-mode entry, which would also give exact separators), nullptr_t,
@@ -978,13 +978,13 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   extended with a directory fixture (symlink, hardlink, `a/../a/x.h`),
   compared with `clang -E -P`.
 - [x] **UTF-8 BOM not skipped** [P].  *Done:* read_file blanks a leading BOM
-  (columns kept); test/vcc/bom.c with bom_inc.h.  (vlex_get_hook inputs,
+  (columns kept); test/vcc/bom.c with bom_inc.h.  (lex_file_get_hook inputs,
   fuzz-pp, are not filtered.)
 - [x] **Trigraphs** under strict `-std=c89/c99/c11/c17` or `-trigraphs` [P].  (Done:
-  `vlex_trigraphs` lexes a translated copy; `-ftrigraphs`/`-fno-trigraphs` too; test/vcc/trigraphs.c.
+  `lex_file_trigraphs_replace` lexes a translated copy; `-ftrigraphs`/`-fno-trigraphs` too; test/vcc/trigraphs.c.
   No `-Wtrigraphs` warnings yet.)
 - [x] **No `//` comments in C89** (`-ansi`, `-std=c89`): clang lexes `//` as two `/` there [P].
-  (Done: `vlex_c89` copy, strict c89 only as clang; test/vcc/c89_comments.c.)
+  (Done: `lex_file_c89_convert` copy, strict c89 only as clang; test/vcc/c89_comments.c.)
   *Validate:* pp-diff fixtures with each `-std`.
 - [x] **`SOURCE_DATE_EPOCH`; `__TIMESTAMP__` from file mtime** [P].  (Both done:
   __TIMESTAMP__ is the current file's mtime, `??? ...` when stat fails, as clang.)
@@ -1445,7 +1445,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `int-conversion`, `incompatible-pointer-types` (its subgroup
   `incompatible-function-pointer-types` follows) and the function pointer
   flag; `-Werror=` of one again is clang's plain error (no `-Werror,`:
-  `pp_werror_named`).  Done: diag `conv_flags*.c` (`diag-flags:` in
+  `diag_warning_error_named`).  Done: diag `conv_flags*.c` (`diag-flags:` in
   vcc-diag.py), 12 flag combinations identical to clang.
 - [x] **-Winteger-overflow**: signed `+ - *` and unary `-` of constants
   whose exact value does not fit (innermost only, `NF_OVF`), value with
@@ -1490,7 +1490,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   name, #else, #endif, #undef's name, #include's header name and #line's
   file name, with clang's "//" fix-it; conditionals at the active level
   also when a skip lands on them.  With it: a #line file name now reaches
-  the diagnostics (`diag_where` replaced it by the file's path).  Done:
+  the diagnostics (`diag_location_presumed` replaced it by the file's path).  Done:
   diag `extra_tokens.c`; parity cmp/lines green.  Not modelled: a
   macro-expanded #include name.
 - [x] **pp `#pragma GCC warning`/`error`** ("msg" or ("msg"), else
@@ -1669,10 +1669,10 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   same pass set as clang.
 - [ ] **One set of data structures in `lib/`** (restructure 2026-11-09).
   Merged so far: `vreserve` (4 copies), `vregion` (as + object writer),
-  `vbuf` (pp diagnostics + fixdep).  Still side by side in `lib/`: the
-  buffers `vbuf`/`vsbuf`/`vzbuf`/`vfixbuf`/`vfdbuf` (they differ in OOM
+  `vbuffer` (pp diagnostics + fixdep).  Still side by side in `lib/`: the
+  buffers `vbuffer`/`vbuffer`/`vbuffer`/`vbuffer`/`vbuffer` (they differ in OOM
   behaviour: abort, sticky flag, bool) and `tbuf.h`; the arenas `vregion`
-  (offsets) and `varena` (pointers); the hashes `vhash_obj`/`vhash_strtab`.
+  (offsets) and `varena` (pointers); the hashes `vhash_string`/`vhash_string`.
   Still in their component, tied to its state: ppdriver's `buf` (first
   16 MB from a per-job vjob_region), cc's `vec` (inline storage, frozen into
   `c->lists`), ld's block arena (process-wide list, generations), as's

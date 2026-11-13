@@ -1,4 +1,12 @@
-/* macro.c: .macro, its arguments and templates, .rept, .irp and .exitm: expansion as text, as MC does. */
+/* macro.c: .macro, .purgem, .rept, .irp/.irpc and .exitm: macros are expanded as text, as MC does,
+ * and the expansion is parsed again as a new frame.
+ *
+ * A macro's body points into the source text, so the text passed to as_snippet_assemble must stay valid
+ * until as_end.  A call compiles the body once into a template (pieces and argument slots, as_template)
+ * and then appends each expansion to the context's expansion_text stack, which as_frame_pop unwinds to
+ * the frame's mark.  Nesting is limited by AS_FRAMES_MAX and reported as an error, and so is a
+ * missing .endm or .endr.  \@ counts instantiations through a->macro_instance_count; .altmacro changes the argument
+ * syntax (a->altmacro_mode). */
 #include "as-internal.h"
 
 /* ---------------------------------------------------------------- macros */
@@ -7,7 +15,7 @@ VPRIV as_macro *as_macro_find(as_context *a, const char *s, size_t n)
 {
 	uint32_t h = as_text_hash(s, n) & a->macro_mask;
 	for (as_macro *m = a->macro_table[h]; m; m = m->next)
-		if (m->name.n == n && !memcmp(m->name.s, s, n)) return m;
+		if (m->name.length == n && !memcmp(m->name.text, s, n)) return m;
 	return 0;
 }
 
@@ -30,9 +38,9 @@ static int as_directive_is_loop(as_text w)
 static int as_macro_body_collect(as_context *a, int macro, as_text *body)
 {
 	as_frame *f = &a->frames[a->frame_count - 1];
-	const char *start = f->p;
+	const char *start = f->cursor;
 	int depth = 0;
-	while (f->p < f->e) {
+	while (f->cursor < f->end) {
 		const char *raw, *s;
 		size_t n = as_statement_next(a, f, &raw, &s);
 		const char *t = as_whitespace_skip(s, s + n);
@@ -190,8 +198,8 @@ static int as_macro_argument_parse(as_context *a, const char **pp, const char *e
  * expansion is copies. */
 static as_template as_template_compile(as_context *a, vregion *r, as_text body, const as_macro_parameter *ps, uint32_t np, int at)
 {
-	const char *b = body.s;
-	size_t n = body.n, nbs = 0;
+	const char *b = body.text;
+	size_t n = body.length, nbs = 0;
 	for (const char *q = b; (q = memchr(q, '\\', (size_t)(b + n - q))); q++) nbs++;
 	as_template t = { as_region_alloc(r, sizeof(as_template_piece) * (nbs + 1)), 0 };
 	size_t lit = 0, i = 0;
@@ -209,15 +217,15 @@ static as_template as_template_compile(as_context *a, vregion *r, as_text body, 
 			size_t pos = i + 1, j = pos;
 			while (j < n && as_char_is_identifier((unsigned char)b[j])) j++;
 			uint32_t m;
-			for (m = 0; m < np; m++) if (ps[m].name.n == j - pos && !memcmp(ps[m].name.s, b + pos, j - pos)) break;
+			for (m = 0; m < np; m++) if (ps[m].name.length == j - pos && !memcmp(ps[m].name.text, b + pos, j - pos)) break;
 			if (m == np) { i = pos; continue; }	/* '\' and the name stay as they are */
 			k = (int32_t)m, skip = j - i;
 		}
-		t.p[t.n++] = (as_template_piece){ (uint32_t)lit, (uint32_t)(i - lit), k };
+		t.pieces[t.count++] = (as_template_piece){ (uint32_t)lit, (uint32_t)(i - lit), k };
 		i += skip;
 		lit = i;
 	}
-	if (lit < n) t.p[t.n++] = (as_template_piece){ (uint32_t)lit, (uint32_t)(n - lit), -1 };
+	if (lit < n) t.pieces[t.count++] = (as_template_piece){ (uint32_t)lit, (uint32_t)(n - lit), -1 };
 	(void)a;
 	return t;
 }
@@ -226,8 +234,8 @@ static as_template as_template_compile(as_context *a, vregion *r, as_text body, 
  * identifier, with or without the backslash */
 static as_template as_template_compile_altmacro(vregion *r, as_text body, const as_macro_parameter *ps, uint32_t np)
 {
-	const char *b = body.s;
-	size_t n = body.n;
+	const char *b = body.text;
+	size_t n = body.length;
 	as_template t = { as_region_alloc(r, sizeof(as_template_piece) * (n / 2 + 2)), 0 };
 	size_t lit = 0, i = 0;
 	while (i < n) {
@@ -238,9 +246,9 @@ static as_template as_template_compile_altmacro(vregion *r, as_text body, const 
 			size_t j = i;
 			while (j < n && as_char_is_identifier((unsigned char)b[j])) j++;
 			uint32_t m;
-			for (m = 0; m < np; m++) if (ps[m].name.n == j - i && !memcmp(ps[m].name.s, b + i, j - i)) break;
+			for (m = 0; m < np; m++) if (ps[m].name.length == j - i && !memcmp(ps[m].name.text, b + i, j - i)) break;
 			if (m < np) {
-				t.p[t.n++] = (as_template_piece){ (uint32_t)lit, (uint32_t)(st - lit), (int32_t)m };
+				t.pieces[t.count++] = (as_template_piece){ (uint32_t)lit, (uint32_t)(st - lit), (int32_t)m };
 				lit = j;
 			}
 			i = j;
@@ -248,7 +256,7 @@ static as_template as_template_compile_altmacro(vregion *r, as_text body, const 
 		}
 		if (!bs) i++;
 	}
-	if (lit < n) t.p[t.n++] = (as_template_piece){ (uint32_t)lit, (uint32_t)(n - lit), -1 };
+	if (lit < n) t.pieces[t.count++] = (as_template_piece){ (uint32_t)lit, (uint32_t)(n - lit), -1 };
 	return t;
 }
 
@@ -301,12 +309,12 @@ static inline void as_text_copy_overrun(char *o, const char *s, size_t n)
 static size_t as_template_expand(as_context *a, char *o, const char *b, as_template t, const as_text *args, uint32_t count)
 {
 	char *o0 = o;
-	for (uint32_t i = 0; i < t.n; i++) {
-		const as_template_piece *p = &t.p[i];
-		as_text_copy_overrun(o, b + p->off, p->len); o += p->len;
-		if (p->k >= 0) { as_text_copy_overrun(o, args[p->k].s, args[p->k].n); o += args[p->k].n; }
-		else if (p->k == -2) o = as_unsigned_format(o, a->ninst);
-		else if (p->k == -3) o = as_unsigned_format(o, count);
+	for (uint32_t i = 0; i < t.count; i++) {
+		const as_template_piece *p = &t.pieces[i];
+		as_text_copy_overrun(o, b + p->offset, p->length); o += p->length;
+		if (p->argument_index >= 0) { as_text_copy_overrun(o, args[p->argument_index].text, args[p->argument_index].length); o += args[p->argument_index].length; }
+		else if (p->argument_index == -2) o = as_unsigned_format(o, a->macro_instance_count);
+		else if (p->argument_index == -3) o = as_unsigned_format(o, count);
 	}
 	return (size_t)(o - o0);
 }
@@ -314,15 +322,15 @@ static size_t as_template_expand(as_context *a, char *o, const char *b, as_templ
 static size_t as_template_expand_bound(as_text body, const as_text *args, uint32_t np)
 {
 	size_t m = 0;
-	for (uint32_t k = 0; k < np; k++) if (args[k].n > m) m = args[k].n;
-	return body.n * (m + 12) + 16;
+	for (uint32_t k = 0; k < np; k++) if (args[k].length > m) m = args[k].length;
+	return body.length * (m + 12) + 16;
 }
 
 VPRIV int as_directive_macro(as_context *a, const char *p, const char *e)
 {
 	as_text name;
-	/* names from file text (not a->sb) stay valid; others are copied */
-	int keep = a->frames[a->frame_count - 1].kind == AS_FRAME_FILE && !((const uint8_t *)p >= a->sb.base && (const uint8_t *)p < a->sb.base + a->sb.cap);
+	/* names from file text (not a->statement_buffer) stay valid; others are copied */
+	int keep = a->frames[a->frame_count - 1].kind == AS_FRAME_FILE && !((const uint8_t *)p >= a->statement_buffer.base && (const uint8_t *)p < a->statement_buffer.base + a->statement_buffer.cap);
 	p = as_whitespace_skip(p, e);
 	const char *s = p;
 	while (p < e && as_char_is_identifier((unsigned char)*p)) p++;
@@ -346,7 +354,7 @@ VPRIV int as_directive_macro(as_context *a, const char *p, const char *e)
 			while (p < e && as_char_is_identifier((unsigned char)*p)) p++;
 			as_text qq = { s, (uint32_t)(p - s) };
 			if (as_text_equals(qq, "req")) q->is_required = 1;
-			else if (as_text_equals(qq, "vararg")) q->vararg = 1;
+			else if (as_text_equals(qq, "vararg")) q->is_variadic = 1;
 			else return as_error_report(a, "invalid macro parameter qualifier");
 			p = as_whitespace_skip(p, e);
 		}
@@ -355,7 +363,7 @@ VPRIV int as_directive_macro(as_context *a, const char *p, const char *e)
 			as_text d;
 			size_t mark = a->expansion_text.used;
 			if (as_macro_argument_parse(a, &p, e, 0, &d)) return -1;
-			q->def = as_text_duplicate(a, d.s, d.n);
+			q->default_value = as_text_duplicate(a, d.text, d.length);
 			a->expansion_text.used = mark;
 			p = as_whitespace_skip(p, e);
 		}
@@ -367,22 +375,22 @@ VPRIV int as_directive_macro(as_context *a, const char *p, const char *e)
 	m->name = name;
 	m->params = as_region_alloc(&a->definitions, sizeof(as_macro_parameter) * (np ? np : 1));
 	memcpy(m->params, ps, sizeof(as_macro_parameter) * np);
-	m->np = np;
+	m->parameter_count = np;
 	/* file text outlives the macro (as_snippet_assemble's contract); expansions do not */
-	m->body = a->frames[a->frame_count - 1].kind == AS_FRAME_FILE ? body : as_text_duplicate(a, body.s, body.n);
-	m->count = 0;
-	m->t = (as_template){ 0, 0 };
+	m->body = a->frames[a->frame_count - 1].kind == AS_FRAME_FILE ? body : as_text_duplicate(a, body.text, body.length);
+	m->invocation_count = 0;
+	m->template = (as_template){ 0, 0 };
 	if (a->macro_count * 2 >= a->macro_mask) {
 		uint32_t nm = a->macro_mask * 2 + 1;
 		as_macro **t = as_region_alloc(&a->definitions, sizeof *t * (nm + 1));
 		memset(t, 0, sizeof *t * (nm + 1));
 		for (uint32_t i = 0; i <= a->macro_mask; i++)
-			for (as_macro *x = a->macro_table[i], *nx; x; x = nx) { nx = x->next; uint32_t h = as_text_hash(x->name.s, x->name.n) & nm; x->next = t[h]; t[h] = x; }
+			for (as_macro *x = a->macro_table[i], *nx; x; x = nx) { nx = x->next; uint32_t h = as_text_hash(x->name.text, x->name.length) & nm; x->next = t[h]; t[h] = x; }
 		a->macro_table = t; a->macro_mask = nm;
 	}
-	uint32_t h = as_text_hash(name.s, name.n) & a->macro_mask;
+	uint32_t h = as_text_hash(name.text, name.length) & a->macro_mask;
 	for (as_macro *x = a->macro_table[h]; x; x = x->next)
-		if (x->name.n == name.n && !memcmp(x->name.s, name.s, name.n)) return as_error_report(a, "macro '%.*s' is already defined", (int)name.n, name.s);
+		if (x->name.length == name.length && !memcmp(x->name.text, name.text, name.length)) return as_error_report(a, "macro '%.*s' is already defined", (int)name.length, name.text);
 	m->next = a->macro_table[h]; a->macro_table[h] = m; a->macro_count++;
 	return 0;
 }
@@ -390,10 +398,10 @@ VPRIV int as_directive_macro(as_context *a, const char *p, const char *e)
 VPRIV int as_directive_purgem(as_context *a, const char *p, const char *e)
 {
 	as_text n = as_text_first_word(p, e);
-	uint32_t h = as_text_hash(n.s, n.n) & a->macro_mask;
+	uint32_t h = as_text_hash(n.text, n.length) & a->macro_mask;
 	for (as_macro **pm = &a->macro_table[h]; *pm; pm = &(*pm)->next)
-		if ((*pm)->name.n == n.n && !memcmp((*pm)->name.s, n.s, n.n)) { *pm = (*pm)->next; a->macro_count--; return 0; }
-	return as_error_report(a, "macro '%.*s' is not defined", (int)n.n, n.s);
+		if ((*pm)->name.length == n.length && !memcmp((*pm)->name.text, n.text, n.length)) { *pm = (*pm)->next; a->macro_count--; return 0; }
+	return as_error_report(a, "macro '%.*s' is not defined", (int)n.length, n.text);
 }
 
 VPRIV int as_macro_invoke(as_context *a, as_macro *m, const char *p, const char *e)
@@ -401,9 +409,9 @@ VPRIV int as_macro_invoke(as_context *a, as_macro *m, const char *p, const char 
 	size_t mark = a->expansion_text.used;
 	as_text args[64];
 	uint8_t set[64] = { 0 };
-	uint32_t np = m->np, pi = 0;
+	uint32_t np = m->parameter_count, pi = 0;
 	p = as_whitespace_skip(p, e);
-	int hasvararg = np && m->params[np - 1].vararg;
+	int hasvararg = np && m->params[np - 1].is_variadic;
 	for (uint32_t k = 0; k < np; k++) args[k] = (as_text){ "", 0 };
 	if (p < e) {
 		for (;;) {
@@ -414,8 +422,8 @@ VPRIV int as_macro_invoke(as_context *a, as_macro *m, const char *p, const char 
 			int kw = q > p && r < e && *r == '=' && !(r + 1 < e && r[1] == '=');
 			uint32_t k;
 			if (kw) {
-				for (k = 0; k < np; k++) if (m->params[k].name.n == (uint32_t)(q - p) && !memcmp(m->params[k].name.s, p, (size_t)(q - p))) break;
-				if (k == np) return as_error_report(a, "parameter named '%.*s' does not exist for macro '%.*s'", (int)(q - p), p, (int)m->name.n, m->name.s);
+				for (k = 0; k < np; k++) if (m->params[k].name.length == (uint32_t)(q - p) && !memcmp(m->params[k].name.text, p, (size_t)(q - p))) break;
+				if (k == np) return as_error_report(a, "parameter named '%.*s' does not exist for macro '%.*s'", (int)(q - p), p, (int)m->name.length, m->name.text);
 				p = as_whitespace_skip(r + 1, e);
 			} else {
 				if (pi >= np) {
@@ -435,24 +443,24 @@ VPRIV int as_macro_invoke(as_context *a, as_macro *m, const char *p, const char 
 		}
 	}
 	for (uint32_t k = 0; k < np; k++) {
-		if (set[k] && args[k].n) continue;
-		if (!set[k] || !args[k].n) {
-			if (m->params[k].def.n && !(set[k] && args[k].n)) args[k] = m->params[k].def;
-			else if (m->params[k].is_required && !set[k]) return as_error_report(a, "missing value for required parameter '%.*s' in macro '%.*s'", (int)m->params[k].name.n, m->params[k].name.s, (int)m->name.n, m->name.s);
-			else if (m->params[k].is_required && !args[k].n) return as_error_report(a, "missing value for required parameter '%.*s' in macro '%.*s'", (int)m->params[k].name.n, m->params[k].name.s, (int)m->name.n, m->name.s);
+		if (set[k] && args[k].length) continue;
+		if (!set[k] || !args[k].length) {
+			if (m->params[k].default_value.length && !(set[k] && args[k].length)) args[k] = m->params[k].default_value;
+			else if (m->params[k].is_required && !set[k]) return as_error_report(a, "missing value for required parameter '%.*s' in macro '%.*s'", (int)m->params[k].name.length, m->params[k].name.text, (int)m->name.length, m->name.text);
+			else if (m->params[k].is_required && !args[k].length) return as_error_report(a, "missing value for required parameter '%.*s' in macro '%.*s'", (int)m->params[k].name.length, m->params[k].name.text, (int)m->name.length, m->name.text);
 		}
 	}
 	as_template tt;
 	if (a->altmacro_mode) tt = as_template_compile_altmacro(&a->definitions, m->body, m->params, np);
 	else {
-		if (!m->t.p) m->t = as_template_compile(a, &a->definitions, m->body, m->params, np, 1);
-		tt = m->t;
+		if (!m->template.pieces) m->template = as_template_compile(a, &a->definitions, m->body, m->params, np, 1);
+		tt = m->template;
 	}
 	char *o = (char *)as_region_alloc(&a->expansion_text, as_template_expand_bound(m->body, args, np));
-	size_t n = as_template_expand(a, o, m->body.s, tt, args, m->count);
+	size_t n = as_template_expand(a, o, m->body.text, tt, args, m->invocation_count);
 	a->expansion_text.used = (size_t)((uint8_t *)o - a->expansion_text.base) + n;
-	a->ninst++;
-	m->count++;
+	a->macro_instance_count++;
+	m->invocation_count++;
 	return as_frame_push(a, o, n, AS_FRAME_MACRO, mark);
 }
 
@@ -468,7 +476,7 @@ VPRIV int as_directive_rept(as_context *a, const char *p, const char *e)
 	as_template t = as_template_compile(a, &a->expansion_text, body, 0, 0, 0);
 	char *o = (char *)as_region_alloc(&a->expansion_text, as_template_expand_bound(body, 0, 0) * (size_t)(cnt ? cnt : 1));
 	size_t n = 0;
-	for (int64_t i = 0; i < cnt; i++) n += as_template_expand(a, o + n, body.s, t, 0, 0);
+	for (int64_t i = 0; i < cnt; i++) n += as_template_expand(a, o + n, body.text, t, 0, 0);
 	a->expansion_text.used = (size_t)((uint8_t *)o - a->expansion_text.base) + n;
 	if (as_frame_push(a, o, n, AS_FRAME_LOOP, mark)) return -1;
 	a->frames[a->frame_count - 1].caller_line = at;
@@ -496,15 +504,15 @@ VPRIV int as_directive_irp(as_context *a, const char *p, const char *e, int char
 		if (*p == ',') p = as_whitespace_skip(p + 1, e);
 	}
 	as_text body;
-	/* the param name lives in a->sb, which as_macro_body_collect overwrites */
-	par.name = as_text_duplicate(a, par.name.s, par.name.n);
+	/* the param name lives in a->statement_buffer, which as_macro_body_collect overwrites */
+	par.name = as_text_duplicate(a, par.name.text, par.name.length);
 	uint32_t at = a->frame_count ? a->frames[a->frame_count - 1].statement_line : 0;
 	if (as_macro_body_collect(a, 0, &body)) return -1;
 	if (chars) {
 		as_text v = vals[0];
 		nv = 0;
 		as_text cv[1024];
-		for (uint32_t i = 0; i < v.n && i < 1024; i++) cv[nv++] = (as_text){ v.s + i, 1 };
+		for (uint32_t i = 0; i < v.length && i < 1024; i++) cv[nv++] = (as_text){ v.text + i, 1 };
 		memcpy(vals, cv, sizeof(as_text) * nv);
 	}
 	size_t tot = 0;
@@ -512,7 +520,7 @@ VPRIV int as_directive_irp(as_context *a, const char *p, const char *e, int char
 	as_template t = as_template_compile(a, &a->expansion_text, body, &par, 1, 1);
 	char *o = (char *)as_region_alloc(&a->expansion_text, tot + 1);
 	size_t n = 0;
-	for (uint32_t i = 0; i < nv; i++) n += as_template_expand(a, o + n, body.s, t, &vals[i], 0);
+	for (uint32_t i = 0; i < nv; i++) n += as_template_expand(a, o + n, body.text, t, &vals[i], 0);
 	a->expansion_text.used = (size_t)((uint8_t *)o - a->expansion_text.base) + n;
 	if (as_frame_push(a, o, n, AS_FRAME_LOOP, mark)) return -1;
 	a->frames[a->frame_count - 1].caller_line = at;

@@ -14,9 +14,9 @@
 enum { SEC_CUSTOM = 0, SEC_TYPE = 1, SEC_IMPORT = 2, SEC_FUNCTION = 3, SEC_ELEM = 9, SEC_CODE = 10, SEC_DATA = 11,
        SEC_DATACOUNT = 12 };
 
-static void put8(vbuf *b, uint8_t v) { vbuf_put(b, &v, 1); }
+static void put8(vbuffer *b, uint8_t v) { vbuffer_append(b, &v, 1); }
 
-static void uleb(vbuf *b, uint64_t v)
+static void uleb(vbuffer *b, uint64_t v)
 {
 	do {
 		uint8_t c = v & 0x7f;
@@ -26,7 +26,7 @@ static void uleb(vbuf *b, uint64_t v)
 	} while (v);
 }
 
-static void sleb(vbuf *b, int64_t v)
+static void sleb(vbuffer *b, int64_t v)
 {
 	for (;;) {
 		uint8_t c = v & 0x7f;
@@ -40,12 +40,12 @@ static void sleb(vbuf *b, int64_t v)
 	}
 }
 
-static void str(vbuf *b, const char *s)
+static void str(vbuffer *b, const char *s)
 {
 	size_t n = strlen(s);
 
 	uleb(b, n);
-	vbuf_put(b, s, n);
+	vbuffer_append(b, s, n);
 }
 
 /* a padded LEB in place: n bytes */
@@ -66,31 +66,31 @@ static void pad_sleb(uint8_t *p, int64_t v, int n)
 }
 
 /* a section: id and a 5-byte size patched by sec_end */
-static size_t sec_begin(vbuf *b, uint8_t id, const char *name)
+static size_t sec_begin(vbuffer *b, uint8_t id, const char *name)
 {
 	static const uint8_t z[5];
 	size_t at;
 
 	put8(b, id);
 	at = b->n;
-	vbuf_put(b, z, 5);
+	vbuffer_append(b, z, 5);
 	if (name)
 		str(b, name);
 	return at;
 }
 
-static void sec_end(vbuf *b, size_t at)
+static void sec_end(vbuffer *b, size_t at)
 {
 	pad_uleb((uint8_t *)b->p + at, b->n - at - 5, 5);
 }
 
 /* a linking subsection's size: a padded LEB, as LLVM writes it */
-static void sub_size(vbuf *b, size_t n)
+static void sub_size(vbuffer *b, size_t n)
 {
 	uint8_t p[5];
 
 	pad_uleb(p, n, 5);
-	vbuf_put(b, p, 5);
+	vbuffer_append(b, p, 5);
 }
 
 /* follow aliases */
@@ -221,7 +221,7 @@ static int patch(lay *L, wrel *r, uint8_t *p)
 	return 0;
 }
 
-static void reloc_section(vbuf *o, lay *L, const char *name, uint32_t secidx, wrel **rels, uint32_t *nrels,
+static void reloc_section(vbuffer *o, lay *L, const char *name, uint32_t secidx, wrel **rels, uint32_t *nrels,
 			  uint64_t *bases, uint32_t ngroups)
 {
 	uint32_t n = 0;
@@ -247,7 +247,7 @@ static void reloc_section(vbuf *o, lay *L, const char *name, uint32_t secidx, wr
 	sec_end(o, at);
 }
 
-int wasm_write(wmod *m, vbuf *o)
+int wasm_write(wmod *m, vbuffer *o)
 {
 	lay L = { .m = m };
 	uint64_t vaddr = 0;
@@ -256,7 +256,7 @@ int wasm_write(wmod *m, vbuf *o)
 	uint64_t *cbase = NULL, *dbase = NULL;
 	wrel **crel = NULL, **drel = NULL;
 	uint32_t *cn = NULL, *dn = NULL;
-	vbuf lb = { 0 };
+	vbuffer lb = { 0 };
 
 	/* a function's address is a table slot: the table is imported (its symbol last, as LLVM adds it) */
 	for (uint32_t pass = 0, need = 0; pass < 2 && !need; pass++)
@@ -413,7 +413,7 @@ int wasm_write(wmod *m, vbuf *o)
 				goto out;
 
 	/* ---- the object ---- */
-	vbuf_put(o, "\0asm\1\0\0\0", 8);
+	vbuffer_append(o, "\0asm\1\0\0\0", 8);
 	if (L.ntypes) {
 		size_t at = sec_begin(o, SEC_TYPE, NULL);
 
@@ -423,9 +423,9 @@ int wasm_write(wmod *m, vbuf *o)
 
 			put8(o, 0x60);
 			uleb(o, g->np);
-			vbuf_put(o, g->t, g->np);
+			vbuffer_append(o, g->t, g->np);
 			uleb(o, g->nr);
-			vbuf_put(o, g->t + g->np, g->nr);
+			vbuffer_append(o, g->t + g->np, g->nr);
 		}
 		sec_end(o, at);
 		secidx++;
@@ -522,11 +522,11 @@ int wasm_write(wmod *m, vbuf *o)
 				i = j;
 			}
 			uleb(o, lb.n + f->body.n);
-			vbuf_put(o, lb.p, lb.n);
+			vbuffer_append(o, lb.p, lb.n);
 			cbase[k] = o->n - p0;
 			crel[k] = f->rel;
 			cn[k] = f->nrel;
-			vbuf_put(o, f->body.p, f->body.n);
+			vbuffer_append(o, f->body.p, f->body.n);
 		}
 		sec_end(o, at);
 		code_idx = secidx++;
@@ -549,7 +549,7 @@ int wasm_write(wmod *m, vbuf *o)
 			dbase[k] = o->n - p0;
 			drel[k] = g->rel;
 			dn[k] = g->nrel;
-			vbuf_put(o, g->data.p, g->data.n);
+			vbuffer_append(o, g->data.p, g->data.n);
 		}
 		sec_end(o, at);
 		data_idx = secidx++;
@@ -559,14 +559,14 @@ int wasm_write(wmod *m, vbuf *o)
 		if (strcmp(m->cust[k].name, "producers") && strcmp(m->cust[k].name, "target_features")) {
 			size_t at = sec_begin(o, SEC_CUSTOM, m->cust[k].name);
 
-			vbuf_put(o, m->cust[k].data.p, m->cust[k].data.n);
+			vbuffer_append(o, m->cust[k].data.p, m->cust[k].data.n);
 			sec_end(o, at);
 			secidx++;
 		}
 	/* linking: the symbol table, then the segments */
 	{
 		size_t at = sec_begin(o, SEC_CUSTOM, "linking"), sub;
-		vbuf b = { 0 };
+		vbuffer b = { 0 };
 
 		uleb(o, 2);
 		if (L.nsymtab) {
@@ -605,7 +605,7 @@ int wasm_write(wmod *m, vbuf *o)
 				}
 			}
 			sub_size(o, b.n);
-			vbuf_put(o, b.p, b.n);
+			vbuffer_append(o, b.p, b.n);
 			b.n = 0;
 		}
 		if (m->nseg) {
@@ -617,7 +617,7 @@ int wasm_write(wmod *m, vbuf *o)
 				uleb(&b, m->seg[k].flags);
 			}
 			sub_size(o, b.n);
-			vbuf_put(o, b.p, b.n);
+			vbuffer_append(o, b.p, b.n);
 			b.n = 0;
 		}
 		if (m->ninit) {
@@ -639,7 +639,7 @@ int wasm_write(wmod *m, vbuf *o)
 					}
 			}
 			sub_size(o, b.n);
-			vbuf_put(o, b.p, b.n);
+			vbuffer_append(o, b.p, b.n);
 		}
 		free(b.p);
 		(void)sub;
@@ -654,7 +654,7 @@ int wasm_write(wmod *m, vbuf *o)
 			if (!strcmp(m->cust[k].name, last ? "target_features" : "producers")) {
 				size_t at = sec_begin(o, SEC_CUSTOM, m->cust[k].name);
 
-				vbuf_put(o, m->cust[k].data.p, m->cust[k].data.n);
+				vbuffer_append(o, m->cust[k].data.p, m->cust[k].data.n);
 				sec_end(o, at);
 			}
 	r = 0;

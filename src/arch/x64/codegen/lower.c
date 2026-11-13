@@ -396,7 +396,7 @@ static val x64_div(ecx *e, int op, int size, bool sgn, val a, val b)
 		z->imm = 0;
 	}
 	x64_op3(e, sgn ? X_IDIV : X_DIV, size, XNOREG, d, XNOREG);
-	x64_mov(e, ra, op == T_SLASH ? RAX : RDX);
+	x64_mov(e, ra, op == LEX_TOKEN_SLASH ? RAX : RDX);
 	for (int k = 1; k >= 0; k--)
 		if (sv[k]) {
 			x64_op3(e, X_POP, 8, fx[k], XNOREG, XNOREG);
@@ -440,35 +440,35 @@ VPRIV val x64_bin(ecx *e, int op, int size, bool sgn, val a, val b)
 	int ra, rb, xop, xopi;
 
 	switch (op) {
-	case T_PLUS: xop = X_ADD, xopi = X_ADDI; break;
-	case T_MINUS: xop = X_SUB, xopi = X_SUBI; break;
-	case T_AMP: xop = X_AND, xopi = X_ANDI; break;
-	case T_PIPE: xop = X_OR, xopi = X_ORI; break;
-	case T_CARET: xop = X_XOR, xopi = X_XORI; break;
-	case T_STAR: xop = X_IMUL, xopi = X_IMULI; break;
-	case T_SLASH: case T_PERCENT:
+	case LEX_TOKEN_PLUS: xop = X_ADD, xopi = X_ADDI; break;
+	case LEX_TOKEN_MINUS: xop = X_SUB, xopi = X_SUBI; break;
+	case LEX_TOKEN_AMPERSAND: xop = X_AND, xopi = X_ANDI; break;
+	case LEX_TOKEN_PIPE: xop = X_OR, xopi = X_ORI; break;
+	case LEX_TOKEN_CARET: xop = X_XOR, xopi = X_XORI; break;
+	case LEX_TOKEN_STAR: xop = X_IMUL, xopi = X_IMULI; break;
+	case LEX_TOKEN_SLASH: case LEX_TOKEN_PERCENT:
 		return x64_div(e, op, size, sgn, a, b);
-	case T_LESSLESS: case T_GREATERGREATER:
+	case LEX_TOKEN_LESS_LESS: case LEX_TOKEN_GREATER_GREATER:
 		if (b.k == V_CONST) {
 			rec *i;
 
 			ra = x64_toreg(e, &a, size);
-			i = x64_op3(e, op == T_LESSLESS ? X_SHLI : sgn ? X_SARI : X_SHRI, size, ra, ra, XNOREG);
+			i = x64_op3(e, op == LEX_TOKEN_LESS_LESS ? X_SHLI : sgn ? X_SARI : X_SHRI, size, ra, ra, XNOREG);
 			i->imm = (int64_t)(b.i & (size * 8 - 1));
 			return a;
 		}
-		return x64_shift(e, op == T_LESSLESS ? X_SHL : sgn ? X_SAR : X_SHR, size, a, b);
+		return x64_shift(e, op == LEX_TOKEN_LESS_LESS ? X_SHL : sgn ? X_SAR : X_SHR, size, a, b);
 	default:
 		efatal(e, e->curloc, "x86-64: operator %d", op);
 	}
 	/* a constant on the left of a commutative operation goes right */
-	if (a.k != V_REG && b.k == V_REG && op != T_MINUS) {
+	if (a.k != V_REG && b.k == V_REG && op != LEX_TOKEN_MINUS) {
 		val t = a;
 
 		a = b, b = t;
 	}
 	ra = x64_toreg(e, &a, size);
-	if (op == T_STAR && b.k == V_CONST && x64_mulconst(e, size, ra, b.i))
+	if (op == LEX_TOKEN_STAR && b.k == V_CONST && x64_mulconst(e, size, ra, b.i))
 		return a;
 	if (x64_imm32(b)) {
 		rec *i = x64_op3(e, xopi, size, ra, ra, XNOREG);
@@ -487,7 +487,7 @@ VPRIV val x64_un(ecx *e, int op, int size, val a)
 {
 	int ra = x64_toreg(e, &a, size);
 
-	x64_op3(e, op == T_MINUS ? X_NEG : X_NOT, size, ra, ra, XNOREG);
+	x64_op3(e, op == LEX_TOKEN_MINUS ? X_NEG : X_NOT, size, ra, ra, XNOREG);
 	return a;
 }
 
@@ -496,18 +496,18 @@ VPRIV val x64_un(ecx *e, int op, int size, val a)
 static int x64_cc(int op, bool sgn)
 {
 	switch (op) {
-	case T_LESS: return sgn ? CC_L : CC_B;
-	case T_LESSEQ: return sgn ? CC_LE : CC_BE;
-	case T_GREATER: return sgn ? CC_G : CC_A;
-	case T_GREATEREQ: return sgn ? CC_GE : CC_AE;
-	case T_EQUALEQUAL: return CC_E;
+	case LEX_TOKEN_LESS: return sgn ? CC_L : CC_B;
+	case LEX_TOKEN_LESS_EQUAL: return sgn ? CC_LE : CC_BE;
+	case LEX_TOKEN_GREATER: return sgn ? CC_G : CC_A;
+	case LEX_TOKEN_GREATER_EQUAL: return sgn ? CC_GE : CC_AE;
+	case LEX_TOKEN_EQUAL_EQUAL: return CC_E;
 	default: return CC_NE;
 	}
 }
 
 static int x64_swapop(int op)
 {
-	return op == T_LESS ? T_GREATER : op == T_LESSEQ ? T_GREATEREQ : op == T_GREATER ? T_LESS : op == T_GREATEREQ ? T_LESSEQ : op;
+	return op == LEX_TOKEN_LESS ? LEX_TOKEN_GREATER : op == LEX_TOKEN_LESS_EQUAL ? LEX_TOKEN_GREATER_EQUAL : op == LEX_TOKEN_GREATER ? LEX_TOKEN_LESS : op == LEX_TOKEN_GREATER_EQUAL ? LEX_TOKEN_LESS_EQUAL : op;
 }
 
 /* flags for a op b; the condition code, and a's register (still live) */
@@ -520,7 +520,7 @@ static int x64_flags(ecx *e, int op, int size, bool sgn, val *a, val *b, int *ra
 		op = x64_swapop(op);
 	}
 	*ra = x64_toreg(e, a, size);
-	if (x64_imm32(*b) && b->i == 0 && (op == T_EQUALEQUAL || op == T_EXCLAIMEQ)) {
+	if (x64_imm32(*b) && b->i == 0 && (op == LEX_TOKEN_EQUAL_EQUAL || op == LEX_TOKEN_EXCLAMATION_EQUAL)) {
 		x64_op3(e, X_TEST, size, XNOREG, *ra, XNOREG);
 	} else if (x64_imm32(*b)) {
 		rec *i = x64_op3(e, X_CMPI, size, XNOREG, *ra, XNOREG);

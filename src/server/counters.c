@@ -1,4 +1,12 @@
-/* The request counters and their printout. */
+/*
+ * counters.c: the request counters (one per kind of request) and what vccd prints about itself.
+ *
+ * The counters are atomics bumped by every worker and printed by print_counts on SIGUSR1, at a
+ * restart and at exit: what the benchmarks read to see how many TUs vcc compiled
+ * itself and how many fell back to clang.
+ * Also prints the shared caches' statistics and the process's CPU time and peak RSS.  Adding a
+ * counter means adding it to the format and to the extern list in vccd-internal.h.
+ */
 #include "vccd-internal.h"
 
 atomic_ulong n_probe, n_probe_cc, n_fwd, n_spawn, n_pp, n_cc, n_fail, n_fallback, n_ar, n_ld, n_host,
@@ -16,7 +24,7 @@ VPRIV void print_counts(void)
 		char hs[512];
 		struct rusage ru;
 
-		pp_hc_stats(hs, sizeof(hs));
+		pp_header_cache_statistics_format(hs, sizeof(hs));
 		fprintf(stderr, "vccd: %s\n", hs);
 		dc_stats(hs, sizeof(hs));
 		fprintf(stderr, "vccd: %s\n", hs);

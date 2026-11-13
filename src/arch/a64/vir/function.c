@@ -23,60 +23,75 @@
 
 VPRIV _Thread_local struct vlt VLT;
 
-/* block b's code (its label defined by the caller), with the edge moves of its branches after it */
-VPRIV void vl_block(vl *L, uint32_t b)
+/* The callbacks of the shared driver (codegen/vir/lowering-driver.h) */
+
+static void vl_target_block_begin(void *ctx, uint32_t b)
 {
-	ecx *e = L->e;
-	vir_fn *f = L->f;
+	vl *L = ctx;
 	const vir_alloc_out *o = L->o;
-	const vir_blk *k = &f->blk[b];
-	uint32_t pos = o->boff[b], ei = o->boff[f->nblk + 1 + b], eend = o->boff[f->nblk + 2 + b];
 
 	L->fcc = -1, L->fzr = -1, L->fbit = -1;
 	L->cchi = 0;
 	L->tlo = L->thi = 0;
 	L->pval = 0, L->xval = 0, L->xc = VIR_NOBLK;
-	L->eb = ei, L->eend = eend;
+	L->eb = o->boff[L->f->nblk + 1 + b], L->eend = o->boff[L->f->nblk + 2 + b];
+	L->ei = L->eb;
 	L->ntr = 0;
 	L->skip = 0;
-	for (uint32_t q = 0; q < k->nparam; q++) {
-		uint8_t r = o->opr[pos++];
-		uint32_t v = k->first + q;
+}
 
-		if (o->slot[v] != VIR_NOBLK && o->sdef[v] && r != VR_NONE)
-			vl_spill(L, r, o->slot[v], R_X16);
-	}
-	for (uint32_t i = k->first + k->nparam; i < k->first + k->n; i++) {
-		vir_ins x = f->ins[i];
-		vir_oit it;
-		uint32_t *p;
-		uint8_t res = VR_NONE;
+/* the label defined by the layout loop: the prologue's nop, and what the code at it may do */
+static void vl_target_block_enter(void *ctx, uint32_t b)
+{
+	vl *L = ctx;
 
-		if (i == L->skip)
-			break;	/* (the block's ret: its sibling call left) */
-		vl_edits(L, &ei, eend, i);
-		L->ei = ei, L->eend = eend;
-		L->nop = 0;
-		vir_oit_init(&it, f, &x, false);
-		while ((p = vir_oit_next(&it))) {
-			if (f->ins[*p].ty == VT_MULTI)
-				continue;
-			if (L->nop == VL_MAXOP)
-				vl_fail(L, VIRFAIL(too_many_operands));
-			L->ov[L->nop] = *p;
-			L->opr[L->nop++] = o->opr[pos++];
-		}
-		if (x.ty != VT_VOID && x.ty != VT_MULTI)
-			res = o->opr[pos++];
-		if (L->fcc >= 0 && L->fval != x.a && !(i > L->tlo && i < L->thi))
-			L->fcc = -1;
-		if (!e->reach)
-			deflabel_forced(e, newlabel(e));	/* (code after a trap: never reached) */
-		vl_ins(L, b, i, res);
-		if (x.ty != VT_VOID && x.ty != VT_MULTI && o->slot[i] != VIR_NOBLK && o->sdef[i] && res != VR_NONE)
-			vl_spill(L, res, o->slot[i], R_X16);
-	}
-	if (e->reach)
+	if (b == L->sp)
+		put(L->e, I_NOP)->cond = NOP_PROLOG;
+	L->bare = L->sp != VIR_NOBLK && !vir_dominates(L->f, L->sp, b);
+	L->at = b;
+	L->fallok = true;
+}
+
+static void vl_target_instruction(void *ctx, uint32_t b, uint32_t i, const uint8_t *opr, uint32_t nopr, uint8_t res)
+{
+	vl *L = ctx;
+	ecx *e = L->e;
+
+	(void)opr;	/* (the driver filled L->ov and L->opr) */
+	L->nop = nopr;
+	if (L->fcc >= 0 && L->fval != L->f->ins[i].a && !(i > L->tlo && i < L->thi))
+		L->fcc = -1;
+	if (!e->reach)
+		deflabel_forced(e, newlabel(e));	/* (code after a trap: never reached) */
+	vl_ins(L, b, i, res);
+}
+
+static void vl_target_result_spill(void *ctx, uint8_t res, uint32_t slot)
+{
+	vl_spill(ctx, res, slot, R_X16);
+}
+
+static void vl_target_edit(void *ctx, const vir_edit *x)
+{
+	vl_edit(ctx, x);
+}
+
+static void vl_target_edge_moves(void *ctx, uint32_t g)
+{
+	vl_emoves(ctx, g);
+}
+
+static void vl_target_label(void *ctx, uint32_t label)
+{
+	deflabel_forced(((vl *)ctx)->e, label);
+}
+
+/* the block's branches' edges with moves: a small block each after it (a label, the moves, a jump) */
+static void vl_target_block_end(void *ctx, uint32_t b)
+{
+	vl *L = ctx;
+
+	if (L->e->reach)
 		vl_fail(L, VIRFAIL(lowering_block_without_terminator));
 	if (L->ntr) {	/* (a copy in vl_goto reuses L->tr) */
 		uint32_t n = L->ntr;
@@ -87,8 +102,7 @@ VPRIV void vl_block(vl *L, uint32_t b)
 		bool fo = L->fallok;
 
 		for (uint32_t t = 0; t < n; t++) {
-			deflabel_forced(e, tr[t].l);
-			vl_emoves(L, tr[t].e);
+			virbuild_lower_edge_block(&L->drv, tr[t].l, tr[t].e);
 			L->fallok = fo && t == n - 1;
 			vl_goto(L, b, vl_chase(L, tr[t].to));
 		}
@@ -97,6 +111,52 @@ VPRIV void vl_block(vl *L, uint32_t b)
 	L->ntr = 0;
 }
 
+static void vl_target_body_begin(void *ctx)
+{
+	vl_fcsave(ctx, false, R_X16);
+}
+
+static void vl_target_after_blocks(void *ctx)
+{
+	vl *L = ctx;
+
+	for (uint32_t b = 0; b < L->f->nblk && L->sp != VIR_NOBLK; b++)
+		if (VLT.lbf[b]) {	/* a return in front of the save point, for the code behind it */
+			deflabel_forced(L->e, VLT.lbf[b]);
+			L->bare = false;
+			L->at = b;
+			L->fallok = false;
+			virbuild_lower_block(&L->drv, b);
+		}
+}
+
+static void vl_target_fail(void *ctx, const char *why)
+{
+	vl_fail(ctx, why);
+}
+
+static void vl_target_order_adjust(void *ctx);
+
+static const virbuild_lowering_target vl_lowering_target = {
+	.block_begin = vl_target_block_begin,
+	.block_enter = vl_target_block_enter,
+	.instruction = vl_target_instruction,
+	.result_spill = vl_target_result_spill,
+	.edit = vl_target_edit,
+	.edge_moves = vl_target_edge_moves,
+	.label = vl_target_label,
+	.block_end = vl_target_block_end,
+	.order_adjust = vl_target_order_adjust,
+	.body_begin = vl_target_body_begin,
+	.after_blocks = vl_target_after_blocks,
+	.fail = vl_target_fail,
+	/* unresolved differences from x86-64 (Q-VIRB-02) */
+	.params_in_loop = false,
+	.edits_at_block_end = false,
+	.skip_multi_operands = true,
+	.rotation_cached = true,
+};
+
 /*
  * The layout (L->ord): VIR's block order, except that a loop whose header is a test (a
  * `brif` after a few plain instructions: a while or for loop) has the header after its
@@ -104,22 +164,15 @@ VPRIV void vl_block(vl *L, uint32_t b)
  * the test's branch goes back to the body: one branch a round instead of two.  The edges
  * into the loop get a copy of the test (vl_goto), not a jump to it: with the jump,
  * speedtest1 ran more instructions than without the rotation (short loops).  VLT.hl[b] is
- * the loop of a header placed so, else VIR_NOBLK.  VCC_VIR_ROT=0: VIR's order.
+ * the loop of a header placed so, else VIR_NOBLK.  VCC_VIR_ROT=0: VIR's order.  The driver
+ * makes that layout; this puts the blocks in front of the save point first.
  */
-
-VPRIV void vl_order(vl *L)
+static void vl_target_order_adjust(void *ctx)
 {
+	vl *L = ctx;
 	const vir_fn *f = L->f;
-	static int rot = -1;
-	uint32_t n = 0;
+	uint32_t n = f->nblk;
 
-	if (rot < 0) {
-		const char *s = getenv("VCC_VIR_ROT");
-
-		rot = !(s && *s == '0');
-	}
-	vir_layout_order(f, L->lp, L->chs, rot && !L->e->E->noopt, L->ord, L->opos, VLT.hl);
-	n = f->nblk;
 	if (L->sp != VIR_NOBLK) {
 		/* the blocks in front of the save point first, then it and what it dominates:
 		 * the prologue stands between them (VLT.path: scratch here) */
@@ -155,32 +208,7 @@ VPRIV void vl_order(vl *L)
 
 VPRIV void vl_body(vl *L)
 {
-	ecx *e = L->e;
-	vir_fn *f = L->f;
-
-	vl_order(L);
-	vl_fcsave(L, false, R_X16);
-	for (uint32_t p = 0; p < f->nblk; p++) {
-		uint32_t b = L->ord[p];
-
-		if (vl_skip(L, b))
-			continue;
-		deflabel_forced(e, L->lbl[b]);
-		if (b == L->sp)
-			put(e, I_NOP)->cond = NOP_PROLOG;
-		L->bare = L->sp != VIR_NOBLK && !vir_dominates(f, L->sp, b);
-		L->at = b;
-		L->fallok = true;
-		vl_block(L, b);
-	}
-	for (uint32_t b = 0; b < f->nblk && L->sp != VIR_NOBLK; b++)
-		if (VLT.lbf[b]) {	/* a return in front of the save point, for the code behind it */
-			deflabel_forced(e, VLT.lbf[b]);
-			L->bare = false;
-			L->at = b;
-			L->fallok = false;
-			vl_block(L, b);
-		}
+	virbuild_lower_body(&L->drv);
 }
 
 /* does a vector live across a call?  (A call keeps only the low half of v8-v15: such a function
@@ -318,7 +346,7 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 		L.sp = ao.shrink ? V->ao.spoint : VIR_NOBLK;
 	}
 	if (getenv("VCC_VIR_CHECK")) {
-		vbuf msg = { 0 };
+		vbuffer msg = { 0 };
 		uint32_t n = vir_alloc_check(f, &regs, &V->ao, &msg);
 
 		if (n) {
@@ -345,7 +373,12 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 	VLT.lbf = vl_grow(VLT.lbf, &VLT.clf, f->nblk + 1, sizeof(uint32_t));
 	memset(VLT.lbf, 0, (size_t)(f->nblk + 1) * sizeof(uint32_t));
 	L.ord = VLT.ord, L.opos = VLT.opos, L.lp = &V->lp;
-	vir_layout_chases(f, L.o, L.chs, VLT.path);
+	L.drv = (virbuild_lowering){
+		.target = &vl_lowering_target, .ctx = &L, .f = f, .o = L.o, .lp = L.lp,
+		.order = L.ord, .position = L.opos, .rotation = VLT.hl, .chase = L.chs, .path = VLT.path,
+		.block_label = L.lbl, .optimize = !e->E->noopt,
+		.operand_value = L.ov, .operand_reg = L.opr, .max_operands = VL_MAXOP, .skip_at = &L.skip,
+	};
 	L.ret32 = KIND(c, ft->base) != TY_VOID && is_integer(c, ft->base) && tsize(c, ft->base) == 4;
 	L.tail = !(ft->flags & TF_VARIADIC) && em_tail_caller_ok(e, s) && !vl_notail(&L, VLT.lo32);	/* (lo32: scratch until it is filled) */
 	vir_uses(f, L.uses);

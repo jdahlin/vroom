@@ -27,10 +27,10 @@ static void art_rep(artb *a, const char *s, int k)
 		art_put(a, s);
 }
 
-static __attribute__((cold, noinline)) void bounds_art(cc *c, vdiag *d, const char *nm, int nml, long long n,
+static __attribute__((cold, noinline)) void bounds_art(cc *c, diag_record *d, const char *nm, int nml, long long n,
 						       long long i, long long esz, const char *ety)
 {
-	bool u = pp_diag_art_on(c->p) == 2;
+	bool u = diag_art_style(c->p) == 2;
 	const char *h = u ? "\xe2\x94\x80" : "-", *v = u ? "\xe2\x94\x82" : "|";
 	const char *cn[2][3] = { { u ? "\xe2\x94\x8c" : "+", u ? "\xe2\x94\xac" : "+", u ? "\xe2\x94\x90" : "+" },
 				 { u ? "\xe2\x94\x94" : "+", u ? "\xe2\x94\xb4" : "+", u ? "\xe2\x94\x98" : "+" } };
@@ -116,7 +116,7 @@ static __attribute__((cold, noinline)) void bounds_art(cc *c, vdiag *d, const ch
 		snprintf(t, sizeof t, "^ index %lld: bytes %lld..%lld, %lld byte%s before the start", i, i * esz,
 			 i * esz + esz - 1, -i * esz, -i * esz == 1 ? "" : "s");
 	art_put(&a, t);
-	pp_diag_art(c->p, d, a.s, a.n);
+	diag_record_art_set(c->p, d, a.s, a.n);
 }
 
 /* -Warray-bounds: a[CONST] outside a's array type (addr: &a[n] may point one past the end) */
@@ -147,8 +147,8 @@ VPRIV void bounds_warn(cc *c, uint32_t n, bool addr)
 	if (i >= 0 && (i < (i128)at->n || (addr && i == (i128)at->n)))
 		return;
 	{
-		pp_span r[2] = { rng(c, a), rng(c, x->b) };
-		vdiag *d;
+		diag_span r[2] = { rng(c, a), rng(c, x->b) };
+		diag_record *d;
 
 		if (i < 0)
 			d = cc_warn_begin(c, "array-bounds", true, NULL, r[0].b,
@@ -159,10 +159,10 @@ VPRIV void bounds_warn(cc *c, uint32_t n, bool addr)
 					  arr_tyname(c, N(a)->ty));
 		if (!d)
 			return;
-		pp_diag_label(c->p, d, r[1].b, r[1].e, NULL);
-		if (pp_diag_art_on(c->p) && i > -(1LL << 40) && i < (1LL << 40)) {
+		diag_record_label_add(c->p, d, r[1].b, r[1].e, NULL);
+		if (diag_art_style(c->p) && i > -(1LL << 40) && i < (1LL << 40)) {
 			size_t len;
-			const char *src = pp_src(c->p, r[0].b, r[0].e, &len);
+			const char *src = pp_source_text(c->p, r[0].b, r[0].e, &len);
 			int m = 0;
 			const char *nm = s ? idname(c->syms[s].name, &m) : NULL;
 
@@ -176,7 +176,7 @@ VPRIV void bounds_warn(cc *c, uint32_t n, bool addr)
 			int m;
 			const char *nm = idname(c->syms[s].name, &m);
 
-			pp_diag_note(c->p, d, c->syms[s].ple ? c->syms[s].plb : c->syms[s].loc, "array '%.*s' declared here", m, nm);
+			diag_record_note_add(c->p, d, c->syms[s].ple ? c->syms[s].plb : c->syms[s].loc, "array '%.*s' declared here", m, nm);
 		} else {	/* a member */
 			const field *f = &c->tags[N(a)->b].f[N(a)->c];
 			int m;
@@ -188,7 +188,7 @@ VPRIV void bounds_warn(cc *c, uint32_t n, bool addr)
 			/* clang: at the declaration's start, after the ';', '{' or '}' before it */
 			for (uint32_t k = 256; k && !t; k /= 2)
 				if (f->loc >= k)
-					t = pp_src(c->p, f->loc - k, f->loc, &len);
+					t = pp_source_text(c->p, f->loc - k, f->loc, &len);
 			if (t) {
 				size_t j = len;
 
@@ -199,7 +199,7 @@ VPRIV void bounds_warn(cc *c, uint32_t n, bool addr)
 				if (j && j < len)
 					at0 = f->loc - (uint32_t)(len - j);
 			}
-			pp_diag_note(c->p, d, at0, "array '%.*s' declared here", m, nm);
+			diag_record_note_add(c->p, d, at0, "array '%.*s' declared here", m, nm);
 		}
 		rt_emit(c, d);	/* (clang: DiagRuntimeBehavior) */
 	}

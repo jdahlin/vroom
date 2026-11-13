@@ -1,0 +1,2 @@
+# expect: problem keyword: len -> register
+len	register	field	Box

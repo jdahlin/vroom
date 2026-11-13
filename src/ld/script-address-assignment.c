@@ -3,27 +3,27 @@
 /* ================= script symbols and address assignment ================= */
 
 /* op= of a symbol assignment (lld readSymbolAssignment) */
-static EV apply_op(char op, EV lhs, EV v)
+static ld_expression_value ld_assignment_operator_apply(char op, ld_expression_value lhs, ld_expression_value v)
 {
 	uint64_t x, y;
 	switch (op) {
 	case '=': return v;
-	case '+': return ev_add(lhs, v);
-	case '-': return ev_sub(lhs, v);
+	case '+': return ld_expression_value_add(lhs, v);
+	case '-': return ld_expression_value_subtract(lhs, v);
 	}
-	x = ev_value(lhs);
-	y = ev_value(v);
+	x = ld_expression_value_resolve(lhs);
+	y = ld_expression_value_resolve(v);
 	switch (op) {
-	case '*': return evabs(x * y);
+	case '*': return ld_expression_value_absolute_make(x * y);
 	case '/':
 		if (!y)
-			error("division by zero");
-		return evabs(y ? x / y : 0);
-	case '<': return evabs(x << (y % 64));
-	case '>': return evabs(x >> (y % 64));
-	case '&': return evabs(x & y);
-	case '^': return evabs(x ^ y);
-	case '|': return evabs(x | y);
+			ld_error_report("division by zero");
+		return ld_expression_value_absolute_make(y ? x / y : 0);
+	case '<': return ld_expression_value_absolute_make(x << (y % 64));
+	case '>': return ld_expression_value_absolute_make(x >> (y % 64));
+	case '&': return ld_expression_value_absolute_make(x & y);
+	case '^': return ld_expression_value_absolute_make(x ^ y);
+	case '|': return ld_expression_value_absolute_make(x | y);
 	}
 	return v;
 }
@@ -31,41 +31,41 @@ static EV apply_op(char op, EV lhs, EV v)
 static VVEC(const char *) recorded;	/* errors of the current address pass */
 
 /* assignSymbol(); returns true if the symbol's (section, value) changed */
-static bool assign_symbol(Assign *a, bool insec)
+static bool ld_script_symbol_assign(ld_assignment *a, bool insec)
 {
 	if (a->assert_) {
-		eval(a->e);
+		ld_expression_eval(a->e);
 		return false;
 	}
-	if (a->sym == NONE) {
-		EV v = apply_op(a->op, dot_ev(), eval(a->e));
-		uint64_t val = ev_value(v);
+	if (a->sym == LD_NONE) {
+		ld_expression_value v = ld_assignment_operator_apply(a->op, ld_dot_expression_value(), ld_expression_eval(a->e));
+		uint64_t val = ld_expression_value_resolve(v);
 		if (insec && val < ctx->layout.dot) {
-			char *m = alloc(160);
+			char *m = ld_region_alloc(160);
 			snprintf(m, 160, "unable to move location counter (0x%llx) backward to 0x%llx for section '%s'",
 				 (unsigned long long)ctx->layout.dot, (unsigned long long)val, osecs.v[ctx->layout.current_output_section].name);
-			VVEC_PUSH(recorded, m, alloc);
+			VVEC_PUSH(recorded, m, ld_region_alloc);
 		}
 		ctx->layout.dot = val;
 		return false;
 	}
 	if (!a->defined)
 		return false;
-	G *s = &gsyms[a->sym];
-	EV v = apply_op(a->op, gsym_ev(a->sym), eval(a->e));
-	EV old = s->ev;
-	if (ev_isabs(v))
-		s->ev = (EV){.kind = EV_ABS, .val = ev_value(v), .align = 1};
+	ld_global_symbol *s = &gsyms[a->sym];
+	ld_expression_value v = ld_assignment_operator_apply(a->op, ld_global_symbol_expression_value(a->sym), ld_expression_eval(a->e));
+	ld_expression_value old = s->ev;
+	if (ld_expression_value_is_absolute(v))
+		s->ev = (ld_expression_value){.kind = LD_VALUE_KIND_ABSOLUTE, .val = ld_expression_value_resolve(v), .align = 1};
 	else
-		s->ev = (EV){.kind = v.kind, .idx = v.idx, .val = ev_secoff(v), .align = 1};
+		s->ev = (ld_expression_value){.kind = v.kind, .idx = v.idx, .val = ld_expression_value_section_offset(v), .align = 1};
 	s->type = v.type;
 	return old.kind != s->ev.kind || old.idx != s->ev.idx || old.val != s->ev.val;
 }
 
 /* assignOffsets(); returns true if the section address changed */
-static bool assign_offsets(uint32_t oi, bool *symchg)
+static bool ld_output_section_offsets_assign(uint32_t oi, bool *symchg)
 {
-	OSec *os = &osecs.v[oi];
+	ld_output_section *os = &osecs.v[oi];
 	uint64_t saved = ctx->layout.dot;
 	bool tbss = (os->flags & (SHF_ALLOC | SHF_TLS)) == (SHF_ALLOC | SHF_TLS) && os->type == SHT_NOBITS;
 	if (tbss)
@@ -73,22 +73,22 @@ static bool assign_offsets(uint32_t oi, bool *symchg)
 	if (!(os->flags & SHF_ALLOC))
 		ctx->layout.dot = 0;
 	else if (os->addr)
-		ctx->layout.dot = ev_value(eval(os->addr));
+		ctx->layout.dot = ld_expression_value_resolve(ld_expression_eval(os->addr));
 	ctx->layout.current_output_section = oi;
 	if (!os->addr)
-		ctx->layout.dot = alignup(ctx->layout.dot, os->addralign);
+		ctx->layout.dot = ld_value_align_up(ctx->layout.dot, os->addralign);
 	bool changed = os->va != ctx->layout.dot;
 	os->va = ctx->layout.dot;
 	for (uint32_t c = 0; c < os->cmds.n; c++) {
-		Cmd *cm = &os->cmds.v[c];
-		if (cm->kind == C_ASSIGN) {
-			*symchg |= assign_symbol(cm->as, true);
+		ld_command *cm = &os->cmds.v[c];
+		if (cm->kind == LD_COMMAND_ASSIGNMENT) {
+			*symchg |= ld_script_symbol_assign(cm->as, true);
 			continue;
 		}
-		ISD *d = &isds.v[cm->idx];
+		ld_input_section_description *d = &isds.v[cm->idx];
 		for (uint32_t k = 0; k < d->secs.n; k++) {
-			ISec *is = &isecs.v[d->secs.v[k]];
-			ctx->layout.dot = alignup(ctx->layout.dot, is->align);
+			ld_input_section *is = &isecs.v[d->secs.v[k]];
+			ctx->layout.dot = ld_value_align_up(ctx->layout.dot, is->align);
 			is->off = ctx->layout.dot - os->va;
 			ctx->layout.dot += is->size;
 		}
@@ -103,61 +103,61 @@ static bool assign_offsets(uint32_t oi, bool *symchg)
 	return changed;
 }
 
-static bool assign_addresses(void)
+static bool ld_addresses_assign(void)
 {
 	bool changed = false, symchg = false;
 	ctx->layout.dot = 0;
 	ctx->layout.tbss_offset = 0;
-	ctx->layout.current_output_section = AETHER;
+	ctx->layout.current_output_section = LD_OUTPUT_SECTION_AETHER;
 	recorded.n = 0;
 	assert_fail.n = 0;
 	for (uint32_t i = 0; i < topcmds.n; i++) {
-		Cmd *c = &topcmds.v[i];
-		if (c->kind == C_ASSIGN) {
-			symchg |= assign_symbol(c->as, false);
+		ld_command *c = &topcmds.v[i];
+		if (c->kind == LD_COMMAND_ASSIGNMENT) {
+			symchg |= ld_script_symbol_assign(c->as, false);
 			continue;
 		}
 		if (!osecs.v[c->idx].live)
 			continue;
-		changed |= assign_offsets(c->idx, &symchg);
+		changed |= ld_output_section_offsets_assign(c->idx, &symchg);
 	}
 	return changed || symchg;
 }
 
 /* processSymbolAssignments(): first definition of script symbols, dot = 0
    in the aether.  A section-relative value starts at the section's start. */
-static void add_script_symbol(Assign *a)
+static void ld_script_symbol_add(ld_assignment *a)
 {
-	if (a->sym == NONE || !a->defined)
+	if (a->sym == LD_NONE || !a->defined)
 		return;
-	G *s = &gsyms[a->sym];
-	EV v = apply_op(a->op, gsym_ev(a->sym), eval(a->e));
-	s->state = GS_SCRIPT;
-	s->obj = NONE;
+	ld_global_symbol *s = &gsyms[a->sym];
+	ld_expression_value v = ld_assignment_operator_apply(a->op, ld_global_symbol_expression_value(a->sym), ld_expression_eval(a->e));
+	s->state = LD_SYMBOL_STATE_SCRIPT;
+	s->obj = LD_NONE;
 	s->bind = STB_GLOBAL;
 	s->size = 0;
 	s->type = v.type;
-	if (a->hidden && visrank(s->vis) > visrank(STV_HIDDEN))
+	if (a->hidden && ld_visibility_rank(s->vis) > ld_visibility_rank(STV_HIDDEN))
 		s->vis = STV_HIDDEN;
-	if (ev_isabs(v))
-		s->ev = (EV){.kind = EV_ABS, .val = v.kind != EV_ABS ? 0 : ev_value(v), .align = 1};
+	if (ld_expression_value_is_absolute(v))
+		s->ev = (ld_expression_value){.kind = LD_VALUE_KIND_ABSOLUTE, .val = v.kind != LD_VALUE_KIND_ABSOLUTE ? 0 : ld_expression_value_resolve(v), .align = 1};
 	else
-		s->ev = (EV){.kind = v.kind, .idx = v.idx, .val = 0, .align = 1};
+		s->ev = (ld_expression_value){.kind = v.kind, .idx = v.idx, .val = 0, .align = 1};
 }
 
-static void process_symbol_assignments(void)
+static void ld_symbol_assignments_process(void)
 {
 	ctx->layout.dot = 0;
-	ctx->layout.current_output_section = AETHER;
+	ctx->layout.current_output_section = LD_OUTPUT_SECTION_AETHER;
 	for (uint32_t i = 0; i < topcmds.n; i++) {
-		Cmd *c = &topcmds.v[i];
-		if (c->kind == C_ASSIGN) {
-			add_script_symbol(c->as);
+		ld_command *c = &topcmds.v[i];
+		if (c->kind == LD_COMMAND_ASSIGNMENT) {
+			ld_script_symbol_add(c->as);
 			continue;
 		}
-		OSec *os = &osecs.v[c->idx];
+		ld_output_section *os = &osecs.v[c->idx];
 		for (uint32_t k = 0; k < os->cmds.n; k++)
-			if (os->cmds.v[k].kind == C_ASSIGN)
-				add_script_symbol(os->cmds.v[k].as);
+			if (os->cmds.v[k].kind == LD_COMMAND_ASSIGNMENT)
+				ld_script_symbol_add(os->cmds.v[k].as);
 	}
 }

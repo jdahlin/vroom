@@ -25,7 +25,7 @@ typedef struct cstr {		/* a string literal */
 	const char *s;		/* bytes, element size each, zero terminated */
 	uint32_t n;		/* elements, terminator included */
 	uint8_t esz;		/* element size: 1, 2, 4 */
-	uint8_t kind;		/* T_STRING / T_WSTRING / ... */
+	uint8_t kind;		/* LEX_TOKEN_STRING / LEX_TOKEN_WIDE_STRING / ... */
 } cstr;
 
 typedef struct label {
@@ -100,7 +100,7 @@ typedef struct casm {
  */
 typedef struct lztok {
 	uint32_t loc;
-	uint32_t v;		/* T_IDENT: interned id; otherwise: offset of the spelling in lzs */
+	uint32_t v;		/* LEX_TOKEN_IDENTIFIER: interned id; otherwise: offset of the spelling in lzs */
 	uint32_t len;
 	uint8_t kind, flags;
 	uint16_t _pad;
@@ -120,7 +120,7 @@ typedef struct lzfn {
 struct cc {
 	pp *p;
 	const cc_opts *o;
-	struct vfixbuf *tyb;	/* tyname/tyname_sugar: 8 buffers in rotation (allocated at the first) */
+	struct cc_type_name *tyb;	/* tyname/tyname_sugar: 8 buffers in rotation (allocated at the first) */
 	unsigned tyk;
 	jmp_buf bail;
 	int errors;
@@ -131,12 +131,13 @@ struct cc {
 	uint32_t dbug_loc;
 	uint32_t ntypo;		/* typo corrections tried (clang's -fspell-checking-limit) */
 	uint32_t miss_loc;	/* where the last "expected ')'" was: one per place */
+	struct cc_field_uses *field_uses;	/* VCC_FIELD_USES (field-uses.c): NULL when off */
 	uint32_t decl_name, decl_loc, decl_depth;	/* the last declarator's name, where, at which scope depth */
 
 	/* tokens: tk[0] is the current one */
 	ptok tk[4];
 	int ntk;
-	/* the previous token's loc, kind, flags (PF_MACRO: diagnostics), as ptok lays
+	/* the previous token's loc, kind, flags (PP_TOKEN_FLAG_FROM_MACRO: diagnostics), as ptok lays
 	   them out: next() copies the 8 bytes with one load and one store */
 	union {
 		struct {
@@ -149,7 +150,7 @@ struct cc {
 	uint32_t dead;		/* inside if (0) ... (and the like): no runtime-behaviour warnings */
 	uint8_t defer_rt;	/* parsing a static initializer: -Wdivision-by-zero waits (clang's DiagRuntimeBehavior) */
 	uint8_t ndefer;
-	struct { uint32_t loc; pp_span r; uint8_t rem; } defer[8];
+	struct { uint32_t loc; diag_span r; uint8_t rem; } defer[8];
 	uint32_t unk_loc;	/* the last unknown token given -Winvalid-pp-token */
 	uint8_t se_direct;	/* the next statement is one of a statement expression's body */
 	uint8_t uv_any;		/* -Wuninitialized: 1 the body declares a tracked variable without an initializer, 2 a self-reference, 4 a read before an assignment, 8 a goto or case after a tracked declaration */
@@ -184,7 +185,7 @@ struct cc {
 	sym *syms;
 	uint32_t nsym;
 	node *nodes;
-	pp_span *span;		/* per node: first and last token (start locations), 0: unknown */
+	diag_span *span;		/* per node: first and last token (start locations), 0: unknown */
 	struct cparen { uint16_t l, r; } *paren;	/* per node: its outermost parentheses, bytes before span.b / after span.e (0: none) */
 	uint32_t nnode;
 	uint32_t *lists;
@@ -228,7 +229,7 @@ struct cc {
 	uint32_t args_rp;	/* args_list's ')' (where it was expected, if missing) */
 	uint32_t fnconv;	/* nconv when the function's body began */
 	int fnerr;		/* errors when the function's body began: none since, its unused-variable warnings */
-	vdiag **rtq;		/* clang's DiagRuntimeBehavior in a function: emitted at the body's end */
+	diag_record **rtq;		/* clang's DiagRuntimeBehavior in a function: emitted at the body's end */
 	uint32_t nrtq, rtqcap;
 	bool has_depr_tag;
 	uint32_t nnparam;	/* parameters declared nonnull so far */
@@ -236,7 +237,7 @@ struct cc {
 	bool next_v[16];
 	uint32_t next_n;
 	const char *dms;	/* the next record's diagnosed token, spelled, if a macro may hold it (set just before) */
-	pp_fixit dfx;		/* ... and a fix-it for it (s != NULL; machine-applicable), as dms */
+	diag_fixit dfx;		/* ... and a fix-it for it (s != NULL; machine-applicable), as dms */
 	int8_t ext_off;		/* 1: no extension warning is on (command line); -1: not known yet */
 	const uint32_t *nenable;	/* pp's "#pragma diagnostic warning|error" count (ext_off holds while 0) */
 	int bcp;		/* in __builtin_constant_p's argument: unevaluated, but its names are used */
@@ -276,7 +277,7 @@ struct cc {
 	uint32_t nlzf;
 	char *lzs;
 	uint32_t nlzs;
-	bool lz_on;		/* tokens come from lzt[lzc, lze) or lzz (lz_hc), then T_EOF */
+	bool lz_on;		/* tokens come from lzt[lzc, lze) or lzz (lz_hc), then LEX_TOKEN_EOF */
 	bool lz_hc;
 	uint32_t lzc, lze;
 	pp_lazy lzz;

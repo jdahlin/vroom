@@ -1,5 +1,14 @@
-/* Constant results at the extrema of a converted integer comparison.
- * The caller must evaluate and discard the returned operand. */
+/*
+ * cmpbounds.c: constant results of an integer comparison against the extreme value of its type
+ * (x < INT_MIN is 0, x <= INT_MAX is 1 ...).
+ *
+ * em_cmpbounds(e, n, &operand) returns 0 or 1 when the comparison n is constant, else -1; operand
+ * is the non-constant side, which the caller must still evaluate and discard (it may have effects).
+ * Only 4- and 8-byte integers, and only at -O1 and up (cc_opts.opt, not VCC_NOOPT).  em_bound_constant
+ * proves a small expression pure and constant within a budget before asking the constant evaluator,
+ * so enumerators and casts of them fold but nothing with a call or a volatile read is traversed.
+ * Called by the shared walker (walk/expr.c), arm64's and wasm's emitters.
+ */
 #include "../emitimpl.h"
 
 /* Prove a small integer constant expression pure before asking the existing
@@ -24,13 +33,13 @@ static bool em_bound_pure(cc *c, uint32_t n, unsigned *budget)
 		return (x->aux == CK_INT || x->aux == CK_NOP || x->aux == CK_BOOL) &&
 		       em_bound_pure(c, x->a, budget);
 	case N_UNARY:
-		return (x->aux == T_PLUS || x->aux == T_MINUS || x->aux == T_TILDE || x->aux == T_EXCLAIM) &&
+		return (x->aux == LEX_TOKEN_PLUS || x->aux == LEX_TOKEN_MINUS || x->aux == LEX_TOKEN_TILDE || x->aux == LEX_TOKEN_EXCLAMATION) &&
 		       em_bound_pure(c, x->a, budget);
 	case N_BINARY:
-		return (x->aux == T_PLUS || x->aux == T_MINUS || x->aux == T_STAR ||
-		        x->aux == T_SLASH || x->aux == T_PERCENT || x->aux == T_LESSLESS ||
-		        x->aux == T_GREATERGREATER || x->aux == T_AMP ||
-		        x->aux == T_PIPE || x->aux == T_CARET) &&
+		return (x->aux == LEX_TOKEN_PLUS || x->aux == LEX_TOKEN_MINUS || x->aux == LEX_TOKEN_STAR ||
+		        x->aux == LEX_TOKEN_SLASH || x->aux == LEX_TOKEN_PERCENT || x->aux == LEX_TOKEN_LESS_LESS ||
+		        x->aux == LEX_TOKEN_GREATER_GREATER || x->aux == LEX_TOKEN_AMPERSAND ||
+		        x->aux == LEX_TOKEN_PIPE || x->aux == LEX_TOKEN_CARET) &&
 		       em_bound_pure(c, x->a, budget) && em_bound_pure(c, x->b, budget);
 	default:
 		return false;
@@ -69,7 +78,7 @@ VPRIV int em_cmpbounds(ecx *e, uint32_t n, uint32_t *operand)
 	if (!e->E->o->opt || e->E->noopt || x->op != N_BINARY)
 		return -1;
 	op = x->aux;
-	if (op != T_LESS && op != T_LESSEQ && op != T_GREATER && op != T_GREATEREQ)
+	if (op != LEX_TOKEN_LESS && op != LEX_TOKEN_LESS_EQUAL && op != LEX_TOKEN_GREATER && op != LEX_TOKEN_GREATER_EQUAL)
 		return -1;
 	a = N(x->a); b = N(x->b);
 	if (QUNQ(a->ty) != QUNQ(b->ty) || !is_integer(c, a->ty) || em_bitint(c, a->ty))
@@ -81,8 +90,8 @@ VPRIV int em_cmpbounds(ecx *e, uint32_t n, uint32_t *operand)
 		*operand = x->a;
 	} else if (em_bound_constant(c, x->a, &v)) {
 		*operand = x->b;
-		op = op == T_LESS ? T_GREATER : op == T_LESSEQ ? T_GREATEREQ :
-		     op == T_GREATER ? T_LESS : T_LESSEQ;
+		op = op == LEX_TOKEN_LESS ? LEX_TOKEN_GREATER : op == LEX_TOKEN_LESS_EQUAL ? LEX_TOKEN_GREATER_EQUAL :
+		     op == LEX_TOKEN_GREATER ? LEX_TOKEN_LESS : LEX_TOKEN_LESS_EQUAL;
 	} else {
 		return -1;
 	}
@@ -94,9 +103,9 @@ VPRIV int em_cmpbounds(ecx *e, uint32_t n, uint32_t *operand)
 		min = 0;
 		max = (i128)(((u128)1 << (sz * 8)) - 1);
 	}
-	if (v == min && (op == T_LESS || op == T_GREATEREQ))
-		return op == T_GREATEREQ;
-	if (v == max && (op == T_GREATER || op == T_LESSEQ))
-		return op == T_LESSEQ;
+	if (v == min && (op == LEX_TOKEN_LESS || op == LEX_TOKEN_GREATER_EQUAL))
+		return op == LEX_TOKEN_GREATER_EQUAL;
+	if (v == max && (op == LEX_TOKEN_GREATER || op == LEX_TOKEN_LESS_EQUAL))
+		return op == LEX_TOKEN_LESS_EQUAL;
 	return -1;
 }

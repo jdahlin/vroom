@@ -33,43 +33,43 @@ VPRIV val fold_int_bin(ecx *e, int op, qty ot, qty rt, i128 l, i128 r, bool *ok)
 	}
 	*ok = true;
 	switch (op) {
-	case T_PLUS: v = (i128)((u128)l + (u128)r); break;
-	case T_MINUS: v = (i128)((u128)l - (u128)r); break;
-	case T_STAR: v = (i128)((u128)l * (u128)r); break;
-	case T_SLASH:
-	case T_PERCENT:
+	case LEX_TOKEN_PLUS: v = (i128)((u128)l + (u128)r); break;
+	case LEX_TOKEN_MINUS: v = (i128)((u128)l - (u128)r); break;
+	case LEX_TOKEN_STAR: v = (i128)((u128)l * (u128)r); break;
+	case LEX_TOKEN_SLASH:
+	case LEX_TOKEN_PERCENT:
 		if (r == 0 || (sg && r == -1)) {
 			*ok = false;
 			return vnone();
 		}
 		if (sg)
-			v = op == T_SLASH ? l / r : l % r;
+			v = op == LEX_TOKEN_SLASH ? l / r : l % r;
 		else
-			v = (i128)(op == T_SLASH ? ul / ur : ul % ur);
+			v = (i128)(op == LEX_TOKEN_SLASH ? ul / ur : ul % ur);
 		break;
-	case T_LESSLESS:
+	case LEX_TOKEN_LESS_LESS:
 		if (r < 0 || (uint64_t)r >= tsize(c, rt) * 8) {
 			*ok = false;
 			return vnone();
 		}
 		v = (i128)((u128)l << r);
 		break;
-	case T_GREATERGREATER:
+	case LEX_TOKEN_GREATER_GREATER:
 		if (r < 0 || (uint64_t)r >= tsize(c, rt) * 8) {
 			*ok = false;
 			return vnone();
 		}
 		v = is_signed(c, rt) ? em_trunc_to(c, l, rt) >> r : (i128)(ul >> r);
 		break;
-	case T_AMP: v = l & r; break;
-	case T_PIPE: v = l | r; break;
-	case T_CARET: v = l ^ r; break;
-	case T_LESS: v = sg ? em_trunc_to(c, l, ot) < em_trunc_to(c, r, ot) : ul < ur; break;
-	case T_LESSEQ: v = sg ? em_trunc_to(c, l, ot) <= em_trunc_to(c, r, ot) : ul <= ur; break;
-	case T_GREATER: v = sg ? em_trunc_to(c, l, ot) > em_trunc_to(c, r, ot) : ul > ur; break;
-	case T_GREATEREQ: v = sg ? em_trunc_to(c, l, ot) >= em_trunc_to(c, r, ot) : ul >= ur; break;
-	case T_EQUALEQUAL: v = ul == ur; break;
-	case T_EXCLAIMEQ: v = ul != ur; break;
+	case LEX_TOKEN_AMPERSAND: v = l & r; break;
+	case LEX_TOKEN_PIPE: v = l | r; break;
+	case LEX_TOKEN_CARET: v = l ^ r; break;
+	case LEX_TOKEN_LESS: v = sg ? em_trunc_to(c, l, ot) < em_trunc_to(c, r, ot) : ul < ur; break;
+	case LEX_TOKEN_LESS_EQUAL: v = sg ? em_trunc_to(c, l, ot) <= em_trunc_to(c, r, ot) : ul <= ur; break;
+	case LEX_TOKEN_GREATER: v = sg ? em_trunc_to(c, l, ot) > em_trunc_to(c, r, ot) : ul > ur; break;
+	case LEX_TOKEN_GREATER_EQUAL: v = sg ? em_trunc_to(c, l, ot) >= em_trunc_to(c, r, ot) : ul >= ur; break;
+	case LEX_TOKEN_EQUAL_EQUAL: v = ul == ur; break;
+	case LEX_TOKEN_EXCLAMATION_EQUAL: v = ul != ur; break;
 	default:
 		*ok = false;
 		return vnone();
@@ -80,11 +80,11 @@ VPRIV val fold_int_bin(ecx *e, int op, qty ot, qty rt, i128 l, i128 r, bool *ok)
 static int cmp_cond(int op, bool sg)
 {
 	switch (op) {
-	case T_EQUALEQUAL: return C_EQ;
-	case T_EXCLAIMEQ: return C_NE;
-	case T_LESS: return sg ? C_LT : C_LO;
-	case T_LESSEQ: return sg ? C_LE : C_LS;
-	case T_GREATER: return sg ? C_GT : C_HI;
+	case LEX_TOKEN_EQUAL_EQUAL: return C_EQ;
+	case LEX_TOKEN_EXCLAMATION_EQUAL: return C_NE;
+	case LEX_TOKEN_LESS: return sg ? C_LT : C_LO;
+	case LEX_TOKEN_LESS_EQUAL: return sg ? C_LE : C_LS;
+	case LEX_TOKEN_GREATER: return sg ? C_GT : C_HI;
 	default: return sg ? C_GE : C_HS;
 	}
 }
@@ -112,19 +112,19 @@ VPRIV int emit_cmp2(ecx *e, int op, bool sg, val *a, val *b)
 {
 	toreg2(e, a, sg);
 	toreg2(e, b, sg);
-	if (op == T_EQUALEQUAL || op == T_EXCLAIMEQ) {
+	if (op == LEX_TOKEN_EQUAL_EQUAL || op == LEX_TOKEN_EXCLAMATION_EQUAL) {
 		op3(e, I_EOR, 1, a->r, a->r, b->r);
 		op3(e, I_EOR, 1, a->r2, a->r2, b->r2);
 		op3(e, I_ORR, 1, a->r, a->r, a->r2);
 		op3(e, I_SUBS, 1, ZR, a->r, ZR);
-		return op == T_EQUALEQUAL ? C_EQ : C_NE;
+		return op == LEX_TOKEN_EQUAL_EQUAL ? C_EQ : C_NE;
 	}
-	if (op == T_GREATER || op == T_LESSEQ) {
+	if (op == LEX_TOKEN_GREATER || op == LEX_TOKEN_LESS_EQUAL) {
 		val t = *a;
 
 		*a = *b;
 		*b = t;
-		op = op == T_GREATER ? T_LESS : T_GREATEREQ;
+		op = op == LEX_TOKEN_GREATER ? LEX_TOKEN_LESS : LEX_TOKEN_GREATER_EQUAL;
 	}
 	op3(e, I_SUBS, 1, ZR, a->r, b->r);
 	op3(e, I_SBCS, 1, ZR, a->r2, b->r2);
@@ -159,12 +159,12 @@ VPRIV int test_zero(ecx *e, val *v, qty t, uint32_t l, bool nz)
 	if (v->k == V_NONE)
 		return -1;
 	if (is_ld(c, t)) {
-		*v = ld_compare(e, T_EXCLAIMEQ, t, *v, vconst(0));
+		*v = ld_compare(e, LEX_TOKEN_EXCLAMATION_EQUAL, t, *v, vconst(0));
 		t = prim(TY_INT);
 		sz = 4;
 	}
 	if (is_flt(c, t)) {
-		int d = fpk(e, t), cond = f_cmp(e, T_EXCLAIMEQ, d, v, NULL);
+		int d = fpk(e, t), cond = f_cmp(e, LEX_TOKEN_EXCLAMATION_EQUAL, d, v, NULL);
 
 		bcond(e, nz ? cond : C_EQ, l);
 		val_free(e, v);
@@ -309,7 +309,7 @@ VPRIV void shift_imm(ecx *e, int op, int x, int rd, int rn, int k)
 	int w = x ? 64 : 32;
 
 	k &= w - 1;
-	if (op == T_LESSLESS)
+	if (op == LEX_TOKEN_LESS_LESS)
 		opbf(e, I_UBFM, x, rd, rn, (w - k) % w, w - 1 - k);
 	else if (op == I_ASRV)
 		opbf(e, I_SBFM, x, rd, rn, k, w - 1);
@@ -324,7 +324,7 @@ VPRIV val arith(ecx *e, int op, qty ty, val a, val b)
 	bool sg = is_signed(c, ty);
 
 	/* commutative: constant on the right */
-	if (a.k == V_CONST && b.k != V_CONST && (op == T_PLUS || op == T_STAR || op == T_AMP || op == T_PIPE || op == T_CARET)) {
+	if (a.k == V_CONST && b.k != V_CONST && (op == LEX_TOKEN_PLUS || op == LEX_TOKEN_STAR || op == LEX_TOKEN_AMPERSAND || op == LEX_TOKEN_PIPE || op == LEX_TOKEN_CARET)) {
 		val t = a;
 
 		a = b;
@@ -353,7 +353,7 @@ VPRIV val arith(ecx *e, int op, qty ty, val a, val b)
 			return a;
 		}
 
-		if (e->E->o->opt && !e->E->noopt && (op == T_SLASH || op == T_PERCENT)) {
+		if (e->E->o->opt && !e->E->noopt && (op == LEX_TOKEN_SLASH || op == LEX_TOKEN_PERCENT)) {
 			em_udivconst_recipe recipe;
 			em_sdivconst_recipe signed_recipe;
 
@@ -378,55 +378,55 @@ VPRIV val arith(ecx *e, int op, qty ty, val a, val b)
 		uint64_t m = x ? (uint64_t)k : (uint32_t)k;
 
 		switch (op) {
-		case T_PLUS:
+		case LEX_TOKEN_PLUS:
 			opi(e, I_ADDI, x, ra, ra, x ? k : (int32_t)k);
 			return a;
-		case T_MINUS:
+		case LEX_TOKEN_MINUS:
 			opi(e, I_SUBI, x, ra, ra, x ? k : (int32_t)k);
 			return a;
-		case T_STAR:
+		case LEX_TOKEN_STAR:
 			if (a64_mulconst(e, ty, ra, b.i))
 				return a;
 			if (m && !(m & (m - 1))) {
-				shift_imm(e, T_LESSLESS, x, ra, ra, __builtin_ctzll(m));
+				shift_imm(e, LEX_TOKEN_LESS_LESS, x, ra, ra, __builtin_ctzll(m));
 				return a;
 			}
 			break;
-		case T_AMP: case T_PIPE: case T_CARET:
+		case LEX_TOKEN_AMPERSAND: case LEX_TOKEN_PIPE: case LEX_TOKEN_CARET:
 			if (logimm_ok(m, x)) {
-				opi(e, op == T_AMP ? I_ANDI : op == T_PIPE ? I_ORRI : I_EORI, x, ra, ra, (int64_t)m);
+				opi(e, op == LEX_TOKEN_AMPERSAND ? I_ANDI : op == LEX_TOKEN_PIPE ? I_ORRI : I_EORI, x, ra, ra, (int64_t)m);
 				return a;
 			}
-			if (op == T_AMP && m == 0) {
+			if (op == LEX_TOKEN_AMPERSAND && m == 0) {
 				movi(e, x, ra, 0);
 				return a;
 			}
-			if ((op == T_PIPE || op == T_CARET) && m == 0)
+			if ((op == LEX_TOKEN_PIPE || op == LEX_TOKEN_CARET) && m == 0)
 				return a;
 			break;
-		case T_LESSLESS:
-			shift_imm(e, T_LESSLESS, x, ra, ra, (int)k);
+		case LEX_TOKEN_LESS_LESS:
+			shift_imm(e, LEX_TOKEN_LESS_LESS, x, ra, ra, (int)k);
 			return a;
-		case T_GREATERGREATER:
+		case LEX_TOKEN_GREATER_GREATER:
 			shift_imm(e, sg ? I_ASRV : I_LSRV, x, ra, ra, (int)k);
 			return a;
 		}
 	}
 	rb = toreg(e, &b);
 	switch (op) {
-	case T_PLUS: op3(e, I_ADD, x, ra, ra, rb); break;
-	case T_MINUS: op3(e, I_SUB, x, ra, ra, rb); break;
-	case T_STAR: op4(e, I_MADD, x, ra, ra, rb, ZR); break;
-	case T_SLASH: op3(e, sg ? I_SDIV : I_UDIV, x, ra, ra, rb); break;
-	case T_PERCENT:
+	case LEX_TOKEN_PLUS: op3(e, I_ADD, x, ra, ra, rb); break;
+	case LEX_TOKEN_MINUS: op3(e, I_SUB, x, ra, ra, rb); break;
+	case LEX_TOKEN_STAR: op4(e, I_MADD, x, ra, ra, rb, ZR); break;
+	case LEX_TOKEN_SLASH: op3(e, sg ? I_SDIV : I_UDIV, x, ra, ra, rb); break;
+	case LEX_TOKEN_PERCENT:
 		op3(e, sg ? I_SDIV : I_UDIV, x, R_X16, ra, rb);
 		op4(e, I_MSUB, x, ra, R_X16, rb, ra);
 		break;
-	case T_AMP: op3(e, I_AND, x, ra, ra, rb); break;
-	case T_PIPE: op3(e, I_ORR, x, ra, ra, rb); break;
-	case T_CARET: op3(e, I_EOR, x, ra, ra, rb); break;
-	case T_LESSLESS: op3(e, I_LSLV, x, ra, ra, rb); break;
-	case T_GREATERGREATER: op3(e, sg ? I_ASRV : I_LSRV, x, ra, ra, rb); break;
+	case LEX_TOKEN_AMPERSAND: op3(e, I_AND, x, ra, ra, rb); break;
+	case LEX_TOKEN_PIPE: op3(e, I_ORR, x, ra, ra, rb); break;
+	case LEX_TOKEN_CARET: op3(e, I_EOR, x, ra, ra, rb); break;
+	case LEX_TOKEN_LESS_LESS: op3(e, I_LSLV, x, ra, ra, rb); break;
+	case LEX_TOKEN_GREATER_GREATER: op3(e, sg ? I_ASRV : I_LSRV, x, ra, ra, rb); break;
 	default:
 		efatal(e, 0, "unsupported operator %d", op);
 	}
@@ -440,22 +440,22 @@ VPRIV val arith2(ecx *e, int op, qty ty, val a, val b)
 	cc *c = e->c;
 	bool sg = is_signed(c, ty);
 
-	if (op == T_LESSLESS || op == T_GREATERGREATER) {
+	if (op == LEX_TOKEN_LESS_LESS || op == LEX_TOKEN_GREATER_GREATER) {
 		if (b.k == V_CONST) {
 			int k = (int)(b.i & 127);
 
 			toreg2(e, &a, sg);
 			if (k == 0)
 				return a;
-			if (op == T_LESSLESS) {
+			if (op == LEX_TOKEN_LESS_LESS) {
 				if (k >= 64) {
-					shift_imm(e, T_LESSLESS, 1, a.r2, a.r, k - 64);
+					shift_imm(e, LEX_TOKEN_LESS_LESS, 1, a.r2, a.r, k - 64);
 					movi(e, 1, a.r, 0);
 				} else {
-					shift_imm(e, T_LESSLESS, 1, a.r2, a.r2, k);
+					shift_imm(e, LEX_TOKEN_LESS_LESS, 1, a.r2, a.r2, k);
 					shift_imm(e, I_LSRV, 1, R_X16, a.r, 64 - k);
 					op3(e, I_ORR, 1, a.r2, a.r2, R_X16);
-					shift_imm(e, T_LESSLESS, 1, a.r, a.r, k);
+					shift_imm(e, LEX_TOKEN_LESS_LESS, 1, a.r, a.r, k);
 				}
 			} else {
 				if (k >= 64) {
@@ -466,7 +466,7 @@ VPRIV val arith2(ecx *e, int op, qty ty, val a, val b)
 						movi(e, 1, a.r2, 0);
 				} else {
 					shift_imm(e, I_LSRV, 1, a.r, a.r, k);
-					shift_imm(e, T_LESSLESS, 1, R_X16, a.r2, 64 - k);
+					shift_imm(e, LEX_TOKEN_LESS_LESS, 1, R_X16, a.r2, 64 - k);
 					op3(e, I_ORR, 1, a.r, a.r, R_X16);
 					shift_imm(e, sg ? I_ASRV : I_LSRV, 1, a.r2, a.r2, k);
 				}
@@ -480,7 +480,7 @@ VPRIV val arith2(ecx *e, int op, qty ty, val a, val b)
 			toreg2(e, &a, sg);
 			n = toreg(e, &b);
 			t1 = treg(e), t2 = treg(e), t3 = treg(e);
-			if (op == T_LESSLESS) {
+			if (op == LEX_TOKEN_LESS_LESS) {
 				shift_imm(e, I_LSRV, 1, t1, a.r, 1);
 				op3(e, I_ORN, 0, t2, ZR, n);
 				op3(e, I_LSLV, 1, t3, a.r2, n);
@@ -491,7 +491,7 @@ VPRIV val arith2(ecx *e, int op, qty ty, val a, val b)
 				op3s(e, I_CSEL, 1, a.r2, t2, t1, C_NE, 0);
 				op3s(e, I_CSEL, 1, a.r, ZR, t2, C_NE, 0);
 			} else {
-				shift_imm(e, T_LESSLESS, 1, t1, a.r2, 1);
+				shift_imm(e, LEX_TOKEN_LESS_LESS, 1, t1, a.r2, 1);
 				op3(e, I_ORN, 0, t2, ZR, n);
 				op3(e, I_LSRV, 1, t3, a.r, n);
 				op3(e, I_LSLV, 1, t1, t1, t2);
@@ -508,28 +508,28 @@ VPRIV val arith2(ecx *e, int op, qty ty, val a, val b)
 			return a;
 		}
 	}
-	if (op == T_SLASH || op == T_PERCENT) {
+	if (op == LEX_TOKEN_SLASH || op == LEX_TOKEN_PERCENT) {
 		val args[2] = { a, b };
 		qty tys[2] = { ty, ty };
-		int fn = op == T_SLASH ? (sg ? FN_DIVTI3 : FN_UDIVTI3) : (sg ? FN_MODTI3 : FN_UMODTI3);
+		int fn = op == LEX_TOKEN_SLASH ? (sg ? FN_DIVTI3 : FN_UDIVTI3) : (sg ? FN_MODTI3 : FN_UMODTI3);
 
 		return call_named(e, FIXED(fn), args, tys, 2, ty, false);
 	}
 	toreg2(e, &a, sg);
 	toreg2(e, &b, sg);
 	switch (op) {
-	case T_PLUS:
+	case LEX_TOKEN_PLUS:
 		op3(e, I_ADDS, 1, a.r, a.r, b.r);
 		op3(e, I_ADC, 1, a.r2, a.r2, b.r2);
 		break;
-	case T_MINUS:
+	case LEX_TOKEN_MINUS:
 		op3(e, I_SUBS, 1, a.r, a.r, b.r);
 		op3(e, I_SBC, 1, a.r2, a.r2, b.r2);
 		break;
-	case T_AMP: op3(e, I_AND, 1, a.r, a.r, b.r); op3(e, I_AND, 1, a.r2, a.r2, b.r2); break;
-	case T_PIPE: op3(e, I_ORR, 1, a.r, a.r, b.r); op3(e, I_ORR, 1, a.r2, a.r2, b.r2); break;
-	case T_CARET: op3(e, I_EOR, 1, a.r, a.r, b.r); op3(e, I_EOR, 1, a.r2, a.r2, b.r2); break;
-	case T_STAR:
+	case LEX_TOKEN_AMPERSAND: op3(e, I_AND, 1, a.r, a.r, b.r); op3(e, I_AND, 1, a.r2, a.r2, b.r2); break;
+	case LEX_TOKEN_PIPE: op3(e, I_ORR, 1, a.r, a.r, b.r); op3(e, I_ORR, 1, a.r2, a.r2, b.r2); break;
+	case LEX_TOKEN_CARET: op3(e, I_EOR, 1, a.r, a.r, b.r); op3(e, I_EOR, 1, a.r2, a.r2, b.r2); break;
+	case LEX_TOKEN_STAR:
 		/* hi = umulh(alo, blo) + alo * bhi + ahi * blo; lo = alo * blo */
 		op3(e, I_UMULH, 1, R_X16, a.r, b.r);
 		op4(e, I_MADD, 1, R_X16, a.r, b.r2, R_X16);
@@ -679,7 +679,7 @@ static void a64_bigword(ecx *e, int rd, int ptr, unsigned n, int index, bool sig
 	opi(e, I_SUBSI, 1, ZR, index, n);
 	bcond(e, C_HS, done);
 	int addr = treg(e);
-	shift_imm(e, T_LESSLESS, 1, addr, index, 3);
+	shift_imm(e, LEX_TOKEN_LESS_LESS, 1, addr, index, 3);
 	op3(e, I_ADD, 1, addr, ptr, addr);
 	mem(e, I_LD, 3, 0, rd, addr, 0);
 	tfree(e, addr);
@@ -689,7 +689,7 @@ static void a64_bigword(ecx *e, int rd, int ptr, unsigned n, int index, bool sig
 static val a64_bigshift(ecx *e, int op, qty t, val a, val b)
 {
 	unsigned n = (unsigned)tsize(e->c, t)/8;
-	bool right = op == T_GREATERGREATER, sign = right && is_signed(e->c, t);
+	bool right = op == LEX_TOKEN_GREATER_GREATER, sign = right && is_signed(e->c, t);
 	int64_t sl = slot(e, n*8, 8);
 	int pa = toreg(e, &a), count = toreg(e, &b);
 	int whole = treg(e), bits = treg(e), complement = treg(e);
@@ -789,15 +789,15 @@ static val a64_bigdiv(ecx *e, int op, qty t, val a, val b)
 	deflabel(e, less);
 	opi(e, I_SUBSI, 1, count, count, 1);
 	bcond(e, C_NE, loop);
-	int result = op == T_SLASH ? q : rem;
+	int result = op == LEX_TOKEN_SLASH ? q : rem;
 	if (is_signed(e->c, t)) {
-		if (op == T_SLASH) op3(e, I_EOR, 1, sa, sa, sb);
+		if (op == LEX_TOKEN_SLASH) op3(e, I_EOR, 1, sa, sa, sb);
 		a64_bigneg_if(e, result, n, sa);
 	}
 	mem(e, I_LD, 3, 0, r, result, 8*(n-1));
 	a64_bignorm(e, t, r);
 	mem(e, I_ST, 3, 0, r, result, 8*(n-1));
-	tfree(e, op == T_SLASH ? rem : q); tfree(e, d);
+	tfree(e, op == LEX_TOKEN_SLASH ? rem : q); tfree(e, d);
 	tfree(e, r); tfree(e, divisor); tfree(e, count); tfree(e, sa); tfree(e, sb);
 	return vreg(result);
 }
@@ -805,14 +805,14 @@ static val a64_bigdiv(ecx *e, int op, qty t, val a, val b)
 VPRIV val a64_bigbin(ecx *e, int op, qty t, val a, val b)
 {
 	if (a.k == V_CONST) a = a64_bigconst(e, t, NULL, a.i);
-	if (op == T_LESSLESS || op == T_GREATERGREATER)
+	if (op == LEX_TOKEN_LESS_LESS || op == LEX_TOKEN_GREATER_GREATER)
 		return a64_bigshift(e, op, t, a, b);
 	if (b.k == V_CONST) b = a64_bigconst(e, t, NULL, b.i);
-	if (op == T_SLASH || op == T_PERCENT) return a64_bigdiv(e, op, t, a, b);
+	if (op == LEX_TOKEN_SLASH || op == LEX_TOKEN_PERCENT) return a64_bigdiv(e, op, t, a, b);
 	unsigned count = (unsigned)(tsize(e->c, t) / 8);
 	int64_t sl = slot(e, count * 8, 8);
 	int pa = toreg(e, &a), pb = toreg(e, &b), left = treg(e), right = treg(e);
-	if (op == T_STAR) {
+	if (op == LEX_TOKEN_STAR) {
 		/* Base 2^32 schoolbook multiplication: product + destination + carry
 			* fits exactly in 64 bits. Discard terms above the result precision. */
 		int carry = treg(e), acc = treg(e);
@@ -836,8 +836,8 @@ VPRIV val a64_bigbin(ecx *e, int op, qty t, val a, val b)
 	} else for (unsigned i = 0; i < count; i++) {
 		mem(e, I_LD, 3, 0, left, pa, 8*i);
 		mem(e, I_LD, 3, 0, right, pb, 8*i);
-		int insn = op == T_PLUS ? (i ? I_ADCS : I_ADDS) : op == T_MINUS ? (i ? I_SBCS : I_SUBS) :
-      op == T_AMP ? I_AND : op == T_PIPE ? I_ORR : op == T_CARET ? I_EOR : 0;
+		int insn = op == LEX_TOKEN_PLUS ? (i ? I_ADCS : I_ADDS) : op == LEX_TOKEN_MINUS ? (i ? I_SBCS : I_SUBS) :
+      op == LEX_TOKEN_AMPERSAND ? I_AND : op == LEX_TOKEN_PIPE ? I_ORR : op == LEX_TOKEN_CARET ? I_EOR : 0;
 		if (!insn) efatal(e, 0, "arbitrary-width ARM integer operator is not supported yet");
 		op3(e, insn, 1, left, left, right);
 		if (i + 1 == count) a64_bignorm(e, t, left);

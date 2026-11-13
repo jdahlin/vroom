@@ -1,21 +1,19 @@
-/* One compile job from a clang command line: parse, classify, run one of the four modes, write. */
 /*
- * (formerly ppdriver.c) one preprocessing job (-E) from a clang command line.  Used by
- * vpp (parity tests) and by vccd (kbuild's -E commands: linker scripts,
- * device trees).  Thread safe; no process state (cwd, fds) is touched.
+ * job.c: one compile job from a clang command line (ppd_run): parse the options, then run one of
+ * four modes (--cmp token comparison, -S/-c compile, assembler source, plain -E) and write the output.
  *
- * Takes the options kbuild passes (-I, -iquote, -isystem, -idirafter,
- * -include, -D, -U, -undef, -nostdinc, -x, --target, -O, the -f/-m flags
- * that change predefined macros, -fmacro-prefix-map, -o, -Wp,-MMD,FILE /
- * -MD -MF -MT) and prints what clang -E -P prints.  With --cmp REF.i the
- * output is compared with REF.i token by token instead (vcc's lexer: kind
- * and spelling); the first difference is shown, status 1.  The reference's
- * token-stream hash is kept in REF.i.th (keyed by its size and mtime): when
- * ours hashes the same, the reference is not read again.
+ * Callers: vpp (parity tests) and vccd (server/dispatch.c, compile.c, probe.c, host-programs.c), one
+ * job per call and per thread.  The job is thread safe and touches no process state: the working
+ * directory, environment and file descriptors come in through ppd_env (ppdriver.h), so under vccd
+ * they are the client's.  The only per-thread state is the buffer regions (job-buffer.c) and the
+ * object state (output.c: one assembler, one ElfObj, one output buffer per thread).
  *
- * With -c the TU is compiled (C: frontend/c/ + codegen/, .S: as.c) into an ELF
- * object, written with one write(); the dependency file is written as for -E.
- * Each thread keeps one assembler, one ElfObj and one output buffer.
+ * The order in ppd_run1 matters: the option loop (cmdline.c) and its checks come first, defaults
+ * that depend on the target (PIE, CFI) are fixed after them, and the search paths and predefined
+ * macros are built before pp_open lexes the main file.  A job ends by setting job->status
+ * (0 ok, 1 failed, 2 usage error) and jumping to `out`; a full table or an overflow in the
+ * preprocessor, assembler or ELF writer longjmps to the job's jmp_buf, so a failed job returns
+ * status 1 and the thread goes on with the next.
  *
  *   VPP_TIME=1   report the preprocessing time on the error fd
  */
@@ -160,7 +158,21 @@ static void job_pp_opts_second(struct driver_job *job, const ppd_env *env, int a
 /* -fsyntax-only, -S, -c of C: the front end and code generator, then the output files */
 static void job_compile(struct driver_job *job, pp *p, const ppd_env *env)
 {
-		cc_opts co = { .target = job->po.target, .unsigned_char = job->po.unsigned_char, .dump_layouts = job->layout, .ms_anon = job->ms_anon, .short_wchar = job->short_wchar, .strict_flex_arrays = job->strict_flex_arrays,
+		const char *field_uses = ppd_getenv(env, "VCC_FIELD_USES");	/* test aid: frontend/c/field-uses.c */
+
+		if (__builtin_expect(field_uses != NULL, 0)) {
+			if (!job->syntax || job->emit || job->layout) {
+				dprintf(job->errfd, "vcc: error: VCC_FIELD_USES needs -fsyntax-only\n");
+				job->status = 1;
+				return;
+			}
+			if (!getenv("VCC_EAGER") || !getenv("VCC_NODC") || !getenv("VPP_NOHC")) {
+				dprintf(job->errfd, "vcc: error: VCC_FIELD_USES needs VCC_EAGER=1 VCC_NODC=1 VPP_NOHC=1\n");
+				job->status = 1;
+				return;
+			}
+		}
+		cc_opts co = { .target = job->po.target, .unsigned_char = job->po.unsigned_char, .dump_layouts = job->layout, .lint = job->lint, .ms_anon = job->ms_anon, .short_wchar = job->short_wchar, .strict_flex_arrays = job->strict_flex_arrays,
 				.std = job->std, .c2y = job->std == 23 && job->stdver && !strcmp(job->stdver, "202400L"), .implicit_int = job->std == 89 || job->wimpl_int, .implicit_fn = job->std == 89 || job->wimpl_fn, .conv_warn = job->conv_warn,
 				.strict_std = job->strict,
 				.fast_math = job->fast_root4 && (job->fmath & 7) == 7, .no_fp_contract = job->nocontract, .gnu89_inline = job->gnu89_inline, .no_builtin = job->freestanding || job->nobuiltin, .no_jump_tables = job->nojt, .instrument = job->instr, .wasm_sjlj = job->sjlj,
@@ -176,6 +188,7 @@ static void job_compile(struct driver_job *job, pp *p, const ppd_env *env)
 
 		memcpy(co.disabled_builtins, job->disabled_builtins, sizeof job->disabled_builtins);
 		co.emit = job->emit;
+		co.field_uses = field_uses;
 		char dbgdir[4096];
 		if (job->debug)
 			co.dbg_dir = env->cwd ? env->cwd : getcwd(dbgdir, sizeof dbgdir);
@@ -206,11 +219,11 @@ static void job_compile(struct driver_job *job, pp *p, const ppd_env *env)
 			unsigned long long t1 = nsnow();
 			vperf v1 = vperformance_now();
 
-			job->status = cc_run(p, &co) || pp_errors(p) ? 1 : 0;
+			job->status = cc_run(p, &co) || pp_error_count(p) ? 1 : 0;
 			ppd_ns_cc += nsnow() - t1;
 			ppd_ph_add(PPD_PH_CC, v1);
-			ppd_tok_out += pp_ntok(p);
-			ppd_tok_skip += pp_skipped(p);
+			ppd_tok_out += pp_token_count(p);
+			ppd_tok_skip += pp_skipped_token_count(p);
 		}
 		if (fd >= 0) {
 			if (!job->status && client_gone())
@@ -242,25 +255,25 @@ static void job_preprocess(struct driver_job *job, pp *p, const ppd_env *env)
 		const char *s;
 		size_t l;
 
-		pp_text(p, &s, &l);
+		pp_text_render(p, &s, &l);
 		o.p = (char *)s;
 		o.n = l;
 		if (job->dmacros) {
 			char *m;
 
-			pp_macros(p, &m, &l);
+			pp_macros_dump(p, &m, &l);
 			o.p = m;	/* freed with the process or the next job: small */
 			o.n = l;
 		}
 	}
 	if (getenv("VPP_TIME")) {
-		extern _Atomic unsigned long pp_stat_try, pp_stat_skip, vdir_probes;
+		extern _Atomic unsigned long pp_include_lookup_count, pp_include_guard_skip_count, pp_directory_probe_count;
 
 		dprintf(job->errfd, "vpp: %.1f ms, %zu bytes out; include candidates %lu, %lu ruled out by the directory cache (%lu dirs probed)\n",
-			(now() - job->t0) * 1e3, o.n, atomic_load(&pp_stat_try), atomic_load(&pp_stat_skip),
-			atomic_load(&vdir_probes));
+			(now() - job->t0) * 1e3, o.n, atomic_load(&pp_include_lookup_count), atomic_load(&pp_include_guard_skip_count),
+			atomic_load(&pp_directory_probe_count));
 	}
-	if (pp_errors(p)) {
+	if (pp_error_count(p)) {
 		/* clang: -E to stdout still prints the text; with -o it writes no file */
 		if (!job->cmp && !job->objmode && !job->mdeps && (!job->out || !strcmp(job->out, "-")))	/* -M: nothing */
 			write_out(env->cwd, job->out, env->outfd, o.p, o.n, job->errfd);
@@ -396,7 +409,7 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 		job->status = 1;
 		goto out;
 	}
-	pp_set_fatal(p, &jb);
+	pp_fatal_jump_set(p, &jb);
 	if (setjmp(jb)) {
 		vjob_jb = NULL;
 		job->status = 1;
@@ -414,7 +427,7 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 	job_preprocess(job, p, env);
 done:
 	vjob_jb = NULL;
-	pp_diag_summary(p);
+	diag_summary_print(p);
 	pp_close(p);	/* frees the text in o */
 out:
 	vjob_fail_fd = 2;

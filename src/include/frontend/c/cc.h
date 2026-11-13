@@ -194,7 +194,7 @@ enum {
 	N_PREINC, N_PREDEC, N_POSTINC, N_POSTDEC,
 	N_BINARY,	/* aux: op (T_* kind), a, b */
 	N_LOGAND, N_LOGOR,
-	N_ASSIGN,	/* aux: 0 or the compound op (T_PLUS, ...), a, b */
+	N_ASSIGN,	/* aux: 0 or the compound op (LEX_TOKEN_PLUS, ...), a, b */
 	N_COND,		/* a ? b : c (b == 0: GNU a ?: c) */
 	N_COMMA,
 	N_SIZEOF_VLA,	/* a: expression, b: VLA type; aux=1 captures a new type-name bound */
@@ -300,6 +300,8 @@ typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl 
 	int omit_frame_pointer; /* x86: permit frame-free leaf omission; explicit flags win */
 	int sibling_calls; /* 0: optimization-level default, 1: explicit enable, -1: explicit disable */
 	int outfd;
+	const char *field_uses;	/* VCC_FIELD_USES: the selection file (test aid; after outfd: not in the cache key) */
+	int lint;		/* vpp --lint: the style checks (frontend/c/naming-lint.c); not in the decl cache key */
 	int emit;		/* generate code (codegen/): 1 = assembly text to outfd, 2 = object into obj */
 	int opt;		/* -O level for code generation: 0 (default, -O0), 1 (-O1, -Og), 2 (-O2, -O3, -Os, -Oz, -O) */
 	int wrapv;		/* -fwrapv, -fno-strict-overflow: signed overflow wraps (VIR sets no nsw) */
@@ -319,7 +321,7 @@ typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl 
 	int nthreads;		/* emitter threads (0: 1) */
 	struct ElfObj *obj;	/* emit == 2: the object (reset first; the caller finishes it) */
 	struct as_context *as;		/* emit == 2: the assembler bound to obj (one per thread) */
-	struct vbuf *wasm_obj;	/* emit == 2 for wasm64: the object's bytes (arch/wasm/as) */
+	struct vbuffer *wasm_obj;	/* emit == 2 for wasm64: the object's bytes (arch/wasm/as) */
 } cc_opts;
 
 void cc_disable_builtin(uint64_t *bits, const char *name);

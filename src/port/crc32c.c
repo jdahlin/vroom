@@ -1,5 +1,5 @@
 /*
- * CRC32C for host string hashes on x86-64 (hostcrc.h): the software and the
+ * CRC32C for host string hashes on x86-64 (crc32c.h): the software and the
  * SSE4.2 implementation, chosen once at start-up.  arm64 uses ACLE's
  * instructions and needs no file.
  */

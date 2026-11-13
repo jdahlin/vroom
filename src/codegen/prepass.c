@@ -1,4 +1,18 @@
-/* vcc code generator: prepass: what the emitter needs to know before it starts */
+/*
+ * prepass.c: what the emitter must know about a function before it generates it: which locals are
+ * written and how often (register choice, constant propagation), labels, the function's size, whether
+ * inlining may take it, and a few per-symbol and per-target answers.
+ *
+ * ensure_walked (called by references.c, the walker and arm64's call lowering) walks one function's
+ * body once, the first time it is emitted or inlined, and publishes the result with a release store
+ * (E->walked: 0 not started, 1 being walked, 2 done); a second thread spins until it is 2, so the
+ * facts are immutable once visible.  Facts about non-local variables are installed before the
+ * workers start and no lazy walk may update them.  fn_once and fn_isize run before the workers: they
+ * decide, for the whole unit, which static functions are inlined (clang's rule for one-use static
+ * functions; VIR's size model, with a recursion group never inlined into itself, so the result does
+ * not depend on thread order).  The facts must stay conservative: a variable wrongly called
+ * unwritten becomes a constant in the generated code.
+ */
 #include "emitimpl.h"
 
 /* Object alignment can exceed the C type alignment. The x86-64 SysV ABI
@@ -56,7 +70,7 @@ VPRIV bool sve_codegen_ok(cc *c)
 	}
 	if (!loc)
 		return true;
-	pp_diag_emit(c->p, pp_diag_begin(c->p, VDL_ERROR, loc, "code generation for %s is not supported yet", what));
+	diag_record_emit(c->p, diag_record_begin(c->p, DIAG_LEVEL_ERROR, loc, "code generation for %s is not supported yet", what));
 	return false;
 }
 
@@ -77,7 +91,7 @@ VPRIV bool bitint_codegen_ok(cc *c)
 		for (uint32_t j = 0; j < t->n && !bad; j++)
 			bad = em_bitint(c, c->params[t->aux + j]);
 		if (bad) {
-			pp_diag_emit(c->p, pp_diag_begin(c->p, VDL_ERROR, s->loc, "_BitInt runtime ABI is not supported on this target yet"));
+			diag_record_emit(c->p, diag_record_begin(c->p, DIAG_LEVEL_ERROR, s->loc, "_BitInt runtime ABI is not supported on this target yet"));
 			return false;
 		}
 	}

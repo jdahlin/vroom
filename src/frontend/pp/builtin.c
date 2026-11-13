@@ -1,5 +1,5 @@
 /* vcc preprocessor: builtin macros and the __has_* queries */
-#include "ppimpl.h"
+#include "pp-internal.h"
 #include <sys/stat.h>
 #include "ppdata.inc"
 #define PPDATA_X86_HAS
@@ -7,29 +7,29 @@
 
 /* ---------------- builtin macros ---------------- */
 
-VPRIV const ctx *cur_file(const pp *p)
+VPRIV const pp_context *pp_file_context_current(const pp *p)
 {
 	for (int d = p->depth - 1; d >= 0; d--)
-		if (p->cx[d].type == C_FILE)
+		if (p->cx[d].type == PP_CONTEXT_FILE)
 			return &p->cx[d];
 	return NULL;
 }
 
-static void mknum(pp *p, ptok *t, unsigned long long v)
+static void pp_token_number_make(pp *p, ptok *t, unsigned long long v)
 {
 	char *b = varena_alloc(&p->tmp, 40);
-	int n = utoa(b, v);
+	int n = pp_unsigned_format(b, v);
 
 	memset(b + n, 0, 16);
 	t->s = b;
 	t->len = (uint32_t)n;
-	t->kind = T_NUMBER;
+	t->kind = LEX_TOKEN_NUMBER;
 	t->id = 0;
 	t->ctr = 0;
-	t->flags &= ~(TF_DIRTY | TF_RAW | PF_NOEXP);
+	t->flags &= ~(LEX_TOKEN_FLAG_SPLICED | LEX_TOKEN_FLAG_RAW_STRING | PP_TOKEN_FLAG_NO_EXPAND);
 }
 
-static void mkstr(pp *p, ptok *t, const char *s, size_t n)
+static void pp_token_string_make(pp *p, ptok *t, const char *s, size_t n)
 {
 	char *b = varena_alloc(&p->tmp, 2 * n + 24), *w = b;
 
@@ -43,38 +43,38 @@ static void mkstr(pp *p, ptok *t, const char *s, size_t n)
 	memset(w, 0, 16);
 	t->s = b;
 	t->len = (uint32_t)(w - b);
-	t->kind = T_STRING;
+	t->kind = LEX_TOKEN_STRING;
 	t->id = 0;
 	t->ctr = 0;
-	t->flags &= ~(TF_DIRTY | TF_RAW | PF_NOEXP);
+	t->flags &= ~(LEX_TOKEN_FLAG_SPLICED | LEX_TOKEN_FLAG_RAW_STRING | PP_TOKEN_FLAG_NO_EXPAND);
 }
 
 /* put t back: it is read again next */
-static void unread(pp *p, const ptok *t)
+static void pp_token_unread(pp *p, const ptok *t)
 {
 	ptok *c = varena_alloc(&p->tmp, sizeof(*c));
 
 	*c = *t;
-	push_ptok(p, c, 1, 0, 0, 0);
+	pp_context_tokens_push(p, c, 1, 0, 0, 0);
 }
 
 /*
  * A header name after '(' (has_include) or in #include: "x" or <x> as
  * written, or else from macro-expanded tokens.  Returns false if malformed.
  */
-VPRIV bool header_name(pp *p, char *buf, size_t cap, size_t *len, bool *angled, ptok *t)
+VPRIV bool pp_header_name_read(pp *p, char *buf, size_t cap, size_t *len, bool *angled, ptok *t)
 {
 	size_t n = 0;
 	bool expanded = false;
 
-	if (t->kind == T_IDENT) {
-		unread(p, t);
-		next_exp(p, t);
+	if (t->kind == LEX_TOKEN_IDENTIFIER) {
+		pp_token_unread(p, t);
+		pp_token_expanded_next(p, t);
 		expanded = true;
 	}
-	if (t->kind == T_STRING) {
+	if (t->kind == LEX_TOKEN_STRING) {
 		size_t l;
-		const char *s = pp_spell(t, buf, &l);
+		const char *s = pp_token_spell(t, buf, &l);
 
 		if (l < 2 || l - 2 >= cap)
 			return false;
@@ -83,7 +83,7 @@ VPRIV bool header_name(pp *p, char *buf, size_t cap, size_t *len, bool *angled, 
 		*angled = false;
 		return true;
 	}
-	if (t->kind != T_LESS)
+	if (t->kind != LEX_TOKEN_LESS)
 		return false;
 	{
 		const ptok lt = *t;
@@ -93,21 +93,21 @@ VPRIV bool header_name(pp *p, char *buf, size_t cap, size_t *len, bool *angled, 
 		/* <...> written out is one header-name token: no expansion inside */
 		for (;;) {
 			if (expanded)
-				next_exp(p, t);
+				pp_token_expanded_next(p, t);
 			else
-				raw(p, t);
-			if (t->kind == T_EOF)
+				pp_token_raw_next(p, t);
+			if (t->kind == LEX_TOKEN_EOF)
 				return false;
-			if (t->kind == T_GREATER)
+			if (t->kind == LEX_TOKEN_GREATER)
 				break;
-			if (n && (t->flags & (TF_SPACE | TF_SOL)) && n < cap)
+			if (n && (t->flags & (LEX_TOKEN_FLAG_SPACE_BEFORE | LEX_TOKEN_FLAG_LINE_START)) && n < cap)
 				buf[n++] = ' ';
 			if (t->s < prev_end || t->s > prev_end + 256)
 				contiguous = false;
 			prev_end = t->s + t->len;
 			if (n + t->len >= cap)
 				return false;
-			n = (size_t)(spell_to(buf + n, t) - buf);
+			n = (size_t)(pp_token_spell_to(buf + n, t) - buf);
 		}
 		/* written in one piece in a file: take the text as is */
 		if (contiguous && t->s > lt.s && (size_t)(t->s - lt.s - 1) < cap) {
@@ -121,52 +121,52 @@ VPRIV bool header_name(pp *p, char *buf, size_t cap, size_t *len, bool *angled, 
 }
 
 /* "(" ... ")" as one spelling, for the feature tests */
-static bool feature_arg(pp *p, char *buf, size_t cap, uint32_t loc)
+static bool pp_feature_argument_read(pp *p, char *buf, size_t cap, uint32_t loc)
 {
 	size_t n = 0;
 	int depth = 0;
 	ptok t;
 
-	raw(p, &t);
-	if (t.kind != T_LPAREN) {
-		error(p, loc, "missing '(' after feature-test macro");
+	pp_token_raw_next(p, &t);
+	if (t.kind != LEX_TOKEN_LEFT_PAREN) {
+		PP_ERROR(p, loc, "missing '(' after feature-test macro");
 		return false;
 	}
 	for (;;) {
-		raw(p, &t);
-		if (t.kind == T_EOF)
+		pp_token_raw_next(p, &t);
+		if (t.kind == LEX_TOKEN_EOF)
 			return false;
-		if (t.kind == T_LPAREN)
+		if (t.kind == LEX_TOKEN_LEFT_PAREN)
 			depth++;
-		if (t.kind == T_RPAREN && !depth--)
+		if (t.kind == LEX_TOKEN_RIGHT_PAREN && !depth--)
 			break;
 		if (n + t.len + 1 >= cap)
 			return false;
-		n = (size_t)(spell_to(buf + n, &t) - buf);
+		n = (size_t)(pp_token_spell_to(buf + n, &t) - buf);
 	}
 	buf[n] = 0;
 	return true;
 }
 
-static int has_query(pp *p, int b, const char *name, uint32_t loc)
+static int pp_feature_query_answer(pp *p, int b, const char *name, uint32_t loc)
 {
 	static const char *const q[] = {
-		[B_HAS_ATTRIBUTE] = "__has_attribute", [B_HAS_BUILTIN] = "__has_builtin",
-		[B_HAS_FEATURE] = "__has_feature", [B_HAS_EXTENSION] = "__has_extension",
-		[B_HAS_C_ATTRIBUTE] = "__has_c_attribute", [B_HAS_CPP_ATTRIBUTE] = "__has_cpp_attribute",
-		[B_HAS_DECLSPEC] = "__has_declspec_attribute", [B_HAS_WARNING] = "__has_warning",
-		[B_HAS_CONSTEXPR_BUILTIN] = "__has_constexpr_builtin",
-		[B_IS_TARGET_ARCH] = "__is_target_arch", [B_IS_TARGET_OS] = "__is_target_os",
-		[B_IS_TARGET_VENDOR] = "__is_target_vendor",
-		[B_IS_TARGET_ENVIRONMENT] = "__is_target_environment",
-		[B_IS_TARGET_VARIANT_OS] = "__is_target_variant_os",
-		[B_IS_TARGET_VARIANT_ENVIRONMENT] = "__is_target_variant_environment",
-		[B_BUILDING_MODULE] = "__building_module",
+		[PP_BUILTIN_HAS_ATTRIBUTE] = "__has_attribute", [PP_BUILTIN_HAS_BUILTIN] = "__has_builtin",
+		[PP_BUILTIN_HAS_FEATURE] = "__has_feature", [PP_BUILTIN_HAS_EXTENSION] = "__has_extension",
+		[PP_BUILTIN_HAS_C_ATTRIBUTE] = "__has_c_attribute", [PP_BUILTIN_HAS_CPP_ATTRIBUTE] = "__has_cpp_attribute",
+		[PP_BUILTIN_HAS_DECLSPEC_ATTRIBUTE] = "__has_declspec_attribute", [PP_BUILTIN_HAS_WARNING] = "__has_warning",
+		[PP_BUILTIN_HAS_CONSTEXPR_BUILTIN] = "__has_constexpr_builtin",
+		[PP_BUILTIN_IS_TARGET_ARCHITECTURE] = "__is_target_arch", [PP_BUILTIN_IS_TARGET_OS] = "__is_target_os",
+		[PP_BUILTIN_IS_TARGET_VENDOR] = "__is_target_vendor",
+		[PP_BUILTIN_IS_TARGET_ENVIRONMENT] = "__is_target_environment",
+		[PP_BUILTIN_IS_TARGET_VARIANT_OS] = "__is_target_variant_os",
+		[PP_BUILTIN_IS_TARGET_VARIANT_ENVIRONMENT] = "__is_target_variant_environment",
+		[PP_BUILTIN_BUILDING_MODULE] = "__building_module",
 	};
 
 	size_t lo = 0, hi = sizeof(has_tab) / sizeof(has_tab[0]);
 
-	if (b == B_BUILDING_MODULE)
+	if (b == PP_BUILTIN_BUILDING_MODULE)
 		return 0;	/* no modules */
 	if (p->o->target == PP_LINUX_X86_64) {	/* its own table (gen-x86data.sh) */
 		size_t xl = 0, xh = sizeof(has_tab_x86) / sizeof(has_tab_x86[0]);
@@ -201,90 +201,90 @@ static int has_query(pp *p, int b, const char *name, uint32_t loc)
 			hi = mid;
 	}
 	/* clang: the __is_target_* macros answer 1 too (AvailabilityInternal.h asks) */
-	if (b == B_HAS_BUILTIN && !strncmp(name, "__is_target_", 12))
-		for (int k = B_IS_TARGET_ARCH; k <= B_IS_TARGET_VARIANT_ENVIRONMENT; k++)
+	if (b == PP_BUILTIN_HAS_BUILTIN && !strncmp(name, "__is_target_", 12))
+		for (int k = PP_BUILTIN_IS_TARGET_ARCHITECTURE; k <= PP_BUILTIN_IS_TARGET_VARIANT_ENVIRONMENT; k++)
 			if (!strcmp(name, q[k]))
 				return 1;
 	/* the table is what the kernel and SDK headers asked clang; the front end knows more */
-	if (b == B_HAS_BUILTIN && pp_builtin_known && pp_builtin_known(name))
+	if (b == PP_BUILTIN_HAS_BUILTIN && pp_builtin_known && pp_builtin_known(name))
 		return 1;
 	return 0;
 }
 
 int (*pp_builtin_known)(const char *name);
 
-/* -Wc2y-extensions (-pedantic): __COUNTER__; out of line, builtin() is hot */
-static __attribute__((noinline, cold)) void counter_ext(pp *p, uint32_t loc)
+/* -Wc2y-extensions (-pedantic): __COUNTER__; out of line, pp_builtin_macro_expand() is hot */
+static __attribute__((noinline, cold)) void pp_counter_extension_warn(pp *p, uint32_t loc)
 {
 	static const char *const g[] = { "pedantic", NULL };
-	pp_dinfo d = { "warning", loc, NULL, 0, NULL, 0, "__COUNTER__", 11 };
+	diag_info d = { "warning", loc, NULL, 0, NULL, 0, "__COUNTER__", 11 };
 
-	if (pp_warnx(p, "c2y-extensions", false, g, &d, "'__COUNTER__' is a C2y extension"))
-		HC_BAD(p);
+	if (diag_warning_report(p, "c2y-extensions", false, g, &d, "'__COUNTER__' is a C2y extension"))
+		PP_HEADER_CACHE_REGION_REJECT(p);
 }
 
-VPRIV int builtin(pp *p, const pmacro *m, ptok *t)
+VPRIV int pp_builtin_macro_expand(pp *p, const pp_macro *m, ptok *t)
 {
-	uint8_t nf = t->flags & (TF_SOL | TF_SPACE);
-	const ctx *fc = cur_file(p);
+	uint8_t nf = t->flags & (LEX_TOKEN_FLAG_LINE_START | LEX_TOKEN_FLAG_SPACE_BEFORE);
+	const pp_context *fc = pp_file_context_current(p);
 	char buf[4096];
 
 	switch (m->builtin) {
-	case B_LINE:
-		mknum(p, t, loc_line(p, t->loc));
+	case PP_BUILTIN_LINE:
+		pp_token_number_make(p, t, pp_location_line(p, t->loc));
 		break;
-	case B_FILE: {
+	case PP_BUILTIN_FILE: {
 		uint32_t l, loc = t->loc;
 		const char *s;
 
 		if (loc < p->fe[fc->fe].base || loc > p->fe[fc->fe].base + p->fe[fc->fe].f->size)
 			loc = p->fe[fc->fe].base + fc->vt[fc->i ? fc->i - 1 : 0].off;
-		s = presumed_name(p, fc->fe, loc, &l);
-		mkstr(p, t, s, l);
+		s = pp_location_presumed_name(p, fc->fe, loc, &l);
+		pp_token_string_make(p, t, s, l);
 		break;
 	}
-	case B_FILE_NAME: {
-		const fent *e = &p->fe[fc->fe];
+	case PP_BUILTIN_FILE_NAME: {
+		const pp_file_entry *e = &p->fe[fc->fe];
 		const char *s = e->name + e->namelen;
 
 		while (s > e->name && s[-1] != '/')
 			s--;
-		mkstr(p, t, s, e->namelen - (size_t)(s - e->name));
+		pp_token_string_make(p, t, s, e->namelen - (size_t)(s - e->name));
 		break;
 	}
-	case B_BASE_FILE:
-		HC_BAD(p);
-		mkstr(p, t, p->base_name, p->base_namelen);
+	case PP_BUILTIN_BASE_FILE:
+		PP_HEADER_CACHE_REGION_REJECT(p);
+		pp_token_string_make(p, t, p->base_file_name, p->base_file_name_length);
 		break;
-	case B_COUNTER:
-		if (unlikely(p->o->nwargs) && pp_wc_maybe(p, PPW_C2Y))
-			counter_ext(p, t->loc);	/* (the kernel's __UNIQUE_ID: keep the common case one test) */
+	case PP_BUILTIN_COUNTER:
+		if (unlikely(p->o->nwargs) && pp_warning_is_possible(p, PP_WARNING_C2Y))
+			pp_counter_extension_warn(p, t->loc);	/* (the kernel's __UNIQUE_ID: keep the common case one test) */
 		if (p->rec.on) {
-			if (p->in_dir)
-				HC_BAD(p);	/* the value decides something */
-			mknum(p, t, p->counter);
-			t->ctr = new_cprov(p, p->counter, 0, t->len, 0);
+			if (p->in_directive)
+				PP_HEADER_CACHE_REGION_REJECT(p);	/* the value decides something */
+			pp_token_number_make(p, t, p->counter);
+			t->ctr = pp_header_cache_counter_provenance_new(p, p->counter, 0, t->len, 0);
 			p->counter++;
 		} else {
-			mknum(p, t, p->counter++);
+			pp_token_number_make(p, t, p->counter++);
 		}
 		break;
-	case B_INCLUDE_LEVEL:
+	case PP_BUILTIN_INCLUDE_LEVEL:
 		for (int i = 0; i < p->rec.n; i++)
-			p->rec.lev[i].uses_level = 1;
-		mknum(p, t, p->nfile > 1 ? (unsigned)p->nfile - 1 : 0);
+			p->rec.levels[i].uses_level = 1;
+		pp_token_number_make(p, t, p->nfile > 1 ? (unsigned)p->nfile - 1 : 0);
 		break;
-	case B_DATE: case B_TIME: case B_TIMESTAMP: {
+	case PP_BUILTIN_DATE: case PP_BUILTIN_TIME: case PP_BUILTIN_TIMESTAMP: {
 		time_t now = p->o->has_epoch ? (time_t)p->o->epoch : time(NULL);
 
-		HC_BAD(p);
+		PP_HEADER_CACHE_REGION_REJECT(p);
 		struct tm tm;
 		struct stat st;
 
 		/* clang: __TIMESTAMP__ is the current file's mtime */
-		if (m->builtin == B_TIMESTAMP && !p->o->has_epoch && fc) {
+		if (m->builtin == PP_BUILTIN_TIMESTAMP && !p->o->has_epoch && fc) {
 			if (stat(p->fe[fc->fe].f->path, &st) != 0) {
-				mkstr(p, t, "??? ??? ?? ??:??:?? ????", 24);
+				pp_token_string_make(p, t, "??? ??? ?? ??:??:?? ????", 24);
 				break;
 			}
 			now = st.st_mtime;
@@ -294,35 +294,35 @@ VPRIV int builtin(pp *p, const pmacro *m, ptok *t)
 			gmtime_r(&now, &tm);
 		else
 			localtime_r(&now, &tm);
-		strftime(buf, sizeof(buf), m->builtin == B_DATE ? "%b %e %Y" :
-			 m->builtin == B_TIME ? "%H:%M:%S" : "%a %b %e %H:%M:%S %Y", &tm);
-		mkstr(p, t, buf, strlen(buf));
+		strftime(buf, sizeof(buf), m->builtin == PP_BUILTIN_DATE ? "%b %e %Y" :
+			 m->builtin == PP_BUILTIN_TIME ? "%H:%M:%S" : "%a %b %e %H:%M:%S %Y", &tm);
+		pp_token_string_make(p, t, buf, strlen(buf));
 		break;
 	}
-	case B_PRAGMA: {
+	case PP_BUILTIN_PRAGMA: {
 		ptok s, r;
 		size_t l;
 		const char *sp;
 		char *d;
 		size_t dn = 0;
 
-		if (p->preexp)
+		if (p->argument_preexpansion)
 			return 1;	/* runs when the result is rescanned */
-		next_exp(p, &r);
-		next_exp(p, &s);
-		if (r.kind != T_LPAREN || !is_strlit(s.kind)) {
-			error(p, t->loc, "_Pragma takes a parenthesized string literal");
+		pp_token_expanded_next(p, &r);
+		pp_token_expanded_next(p, &s);
+		if (r.kind != LEX_TOKEN_LEFT_PAREN || !pp_kind_is_string_literal(s.kind)) {
+			PP_ERROR(p, t->loc, "_Pragma takes a parenthesized string literal");
 			return 1;
 		}
 		if (s.ctr)
-			HC_BAD(p);
-		next_exp(p, &r);
-		if (r.kind != T_RPAREN)
-			error(p, t->loc, "_Pragma takes a parenthesized string literal");
+			PP_HEADER_CACHE_REGION_REJECT(p);
+		pp_token_expanded_next(p, &r);
+		if (r.kind != LEX_TOKEN_RIGHT_PAREN)
+			PP_ERROR(p, t->loc, "_Pragma takes a parenthesized string literal");
 		{
 			char tmp[s.len + 1];
 
-			sp = pp_spell(&s, tmp, &l);
+			sp = pp_token_spell(&s, tmp, &l);
 			while (l && *sp != '"') {	/* encoding prefix */
 				sp++;
 				l--;
@@ -336,61 +336,61 @@ VPRIV int builtin(pp *p, const pmacro *m, ptok *t)
 				d[dn++] = sp[i];
 			}
 		}
-		if (pragma_text(p, d, dn, t->loc, t, 0)) {
-			t->flags = TF_SOL;
+		if (pp_pragma_run(p, d, dn, t->loc, t, 0)) {
+			t->flags = LEX_TOKEN_FLAG_LINE_START;
 			return 1;
 		}
 		return 0;
 	}
-	case B_HAS_INCLUDE: case B_HAS_INCLUDE_NEXT: {
+	case PP_BUILTIN_HAS_INCLUDE: case PP_BUILTIN_HAS_INCLUDE_NEXT: {
 		ptok r;
 		size_t n;
 		bool angled;
 		int32_t sd;
 		const char *path;
 
-		raw(p, &r);
-		if (r.kind != T_LPAREN) {
-			error(p, t->loc, "missing '(' after __has_include");
+		pp_token_raw_next(p, &r);
+		if (r.kind != LEX_TOKEN_LEFT_PAREN) {
+			PP_ERROR(p, t->loc, "missing '(' after __has_include");
 			return 1;
 		}
-		raw(p, &r);
-		if (!header_name(p, buf, sizeof(buf), &n, &angled, &r)) {
-			error(p, t->loc, "invalid __has_include argument");
+		pp_token_raw_next(p, &r);
+		if (!pp_header_name_read(p, buf, sizeof(buf), &n, &angled, &r)) {
+			PP_ERROR(p, t->loc, "invalid __has_include argument");
 			return 1;
 		}
-		raw(p, &r);
-		if (r.kind != T_RPAREN)
-			error(p, t->loc, "missing ')' after __has_include");
+		pp_token_raw_next(p, &r);
+		if (r.kind != LEX_TOKEN_RIGHT_PAREN)
+			PP_ERROR(p, t->loc, "missing ')' after __has_include");
 		{
-			const vlex_file *hf = find_include(p, fc, buf, n, angled, m->builtin == B_HAS_INCLUDE_NEXT, &sd, &path, NULL);
+			const lex_file *hf = pp_include_find(p, fc, buf, n, angled, m->builtin == PP_BUILTIN_HAS_INCLUDE_NEXT, &sd, &path, NULL);
 
 			if (hf && p->o->deps)
-				dep_only(p, path, inc_sys(p, sd));	/* a dependency, as clang's */
-			mknum(p, t, hf != NULL);
+				pp_dependency_add(p, path, pp_include_system_kind(p, sd));	/* a dependency, as clang's */
+			pp_token_number_make(p, t, hf != NULL);
 		}
 		break;
 	}
-	case B_HAS_EMBED:
-		if (!p->in_dir) {
-			error(p, t->loc, "'__has_embed' must be used within a preprocessing directive");
+	case PP_BUILTIN_HAS_EMBED:
+		if (!p->in_directive) {
+			PP_ERROR(p, t->loc, "'__has_embed' must be used within a preprocessing directive");
 			return 1;
 		}
-		mknum(p, t, has_embed(p, fc, t->loc));
+		pp_token_number_make(p, t, pp_embed_has_query(p, fc, t->loc));
 		break;
-	case B_IS_IDENTIFIER:
-		if (!feature_arg(p, buf, sizeof(buf), t->loc))
+	case PP_BUILTIN_IS_IDENTIFIER:
+		if (!pp_feature_argument_read(p, buf, sizeof(buf), t->loc))
 			return 1;
-		mknum(p, t, 1);
+		pp_token_number_make(p, t, 1);
 		break;
 	default:
-		if (!feature_arg(p, buf, sizeof(buf), t->loc)) {
-			error(p, t->loc, "malformed feature test");
+		if (!pp_feature_argument_read(p, buf, sizeof(buf), t->loc)) {
+			PP_ERROR(p, t->loc, "malformed feature test");
 			return 1;
 		}
-		mknum(p, t, (unsigned long long)has_query(p, m->builtin, buf, t->loc));
+		pp_token_number_make(p, t, (unsigned long long)pp_feature_query_answer(p, m->builtin, buf, t->loc));
 		break;
 	}
-	t->flags = (t->flags & ~(TF_SOL | TF_SPACE)) | nf;
+	t->flags = (t->flags & ~(LEX_TOKEN_FLAG_LINE_START | LEX_TOKEN_FLAG_SPACE_BEFORE)) | nf;
 	return 1;
 }

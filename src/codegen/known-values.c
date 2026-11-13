@@ -1,4 +1,13 @@
-/* vcc code generator: facts the walker tracks about values */
+/*
+ * known-values.c: the walker's slots for constant array elements: `a[K]` of a local integer array
+ * used only with constant indices (ael_slot).
+ *
+ * The walker tracks the value of such an element as it does a variable, so reads after a store fold.
+ * ael_slot maps (array, index) to a numbered slot (NKV of them per function), creating it on request,
+ * and refuses every array whose address escapes (SA_AESC), that has cleanup, volatile or atomic
+ * elements, VLAs and wide types, and any index out of range.  The slots are valid only in straight-line
+ * code: a label or loop header clears them (wk_label), so nothing is guessed across a join.
+ */
 #include "emitimpl.h"
 
 /* the kv slot of a[CONST] (create: allocate one), or -1 */

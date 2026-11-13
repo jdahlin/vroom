@@ -1,13 +1,18 @@
 /*
- * The text form, printing (SPEC-vir.md 11): constants inline with a `:type`
- * suffix exactly where the position does not fix the type (11.5); values
- * and blocks named v0.. and b0.. in order of appearance (11.6); instruction
- * flags in the order of 11.3.
+ * print.c: VIR's text form, printing (SPEC-vir.md 11).
+ *
+ * The text is the reference everyone reads and the tests compare (src/test/vir): constants inline
+ * with a `:type` suffix exactly where the position does not fix the type (11.5), values and blocks
+ * named v0.. and b0.. in order of appearance (11.6), instruction flags in the order of 11.3.
+ * Printing and parsing are inverses: printing the parse of a text gives the text back
+ * (`virtest` and bench/vir-test.py check the round trip), so a change here is a change of the
+ * format and goes with parse.c and the spec.  Printing reads the opcode table (table.c) and never
+ * changes the function.
  */
 #include "virimpl.h"
 
 typedef struct pctx {
-	vbuf *b;
+	vbuffer *b;
 	const vir_unit *u;
 	const vir_fn *f;
 	const uint32_t *nm;	/* value index -> N of vN (VIR_NOBLK: none) */
@@ -17,7 +22,7 @@ static const char *const target_name[VTG_N] = { "none", "x86_64-linux", "arm64-l
 
 const char *vir_target_name(uint32_t t) { return t < VTG_N ? target_name[t] : "none"; }
 
-static void put(pctx *p, const char *s) { vbuf_s(p->b, s); }
+static void put(pctx *p, const char *s) { vbuffer_string_append(p->b, s); }
 
 __attribute__((format(printf, 2, 3)))
 static void putf(pctx *p, const char *fmt, ...)
@@ -29,7 +34,7 @@ static void putf(pctx *p, const char *fmt, ...)
 	va_start(ap, fmt);
 	n = vsnprintf(t, sizeof(t), fmt, ap);
 	va_end(ap);
-	vbuf_put(p->b, t, n < (int)sizeof(t) ? (size_t)n : sizeof(t) - 1);
+	vbuffer_append(p->b, t, n < (int)sizeof(t) ? (size_t)n : sizeof(t) - 1);
 }
 
 /* ---------------- numbers and strings ---------------- */
@@ -60,7 +65,7 @@ static void fmt_hexfloat(char *o, uint64_t bits, int ebits, int mbits)
 
 static void put_str(pctx *p, const char *s)
 {
-	vbuf_put(p->b, "\"", 1);
+	vbuffer_append(p->b, "\"", 1);
 	for (const unsigned char *c = (const unsigned char *)s; *c; c++) {
 		if (*c == '"' || *c == '\\')
 			putf(p, "\\%c", *c);
@@ -69,16 +74,16 @@ static void put_str(pctx *p, const char *s)
 		else if (*c == '\t')
 			put(p, "\\t");
 		else if (*c >= 32 && *c < 127)
-			vbuf_put(p->b, c, 1);
+			vbuffer_append(p->b, c, 1);
 		else
 			putf(p, "\\%03o", *c);
 	}
-	vbuf_put(p->b, "\"", 1);
+	vbuffer_append(p->b, "\"", 1);
 }
 
 static void put_bytes(pctx *p, const char *s, uint64_t n)
 {
-	vbuf_put(p->b, "\"", 1);
+	vbuffer_append(p->b, "\"", 1);
 	for (uint64_t i = 0; i < n; i++) {
 		unsigned char c = (unsigned char)s[i];
 
@@ -89,44 +94,44 @@ static void put_bytes(pctx *p, const char *s, uint64_t n)
 		else if (c == '\t')
 			put(p, "\\t");
 		else if (c >= 32 && c < 127)
-			vbuf_put(p->b, &c, 1);
+			vbuffer_append(p->b, &c, 1);
 		else
 			putf(p, "\\%03o", c);
 	}
-	vbuf_put(p->b, "\"", 1);
+	vbuffer_append(p->b, "\"", 1);
 }
 
 /* ---------------- signatures and groups ---------------- */
 
-void vir_print_group(vbuf *b, uint32_t w0, uint32_t w1)
+void vir_print_group(vbuffer *b, uint32_t w0, uint32_t w1)
 {
 	switch (VG_KIND(w0)) {
-	case VG_NONE: vbuf_s(b, "none"); break;
-	case VG_SRET: vbuf_s(b, "sret"); break;
-	case VG_MEM: vbuf_f(b, "mem %u align %u", VG_SIZE(w1), 1u << VG_LALIGN(w1)); break;
+	case VG_NONE: vbuffer_string_append(b, "none"); break;
+	case VG_SRET: vbuffer_string_append(b, "sret"); break;
+	case VG_MEM: vbuffer_format_append(b, "mem %u align %u", VG_SIZE(w1), 1u << VG_LALIGN(w1)); break;
 	default:
 		for (uint32_t i = 0; i < VG_NPIECE(w0) && i < 4; i++) {
 			uint32_t c = VG_CLASS(w0, i);
 
-			vbuf_f(b, "%s%s", i ? ":" : "", c == VC_INT ? "int" : c == VC_F32 ? "f32" : c == VC_F64 ? "f64" : "?");
+			vbuffer_format_append(b, "%s%s", i ? ":" : "", c == VC_INT ? "int" : c == VC_F32 ? "f32" : c == VC_F64 ? "f64" : "?");
 		}
 		break;
 	}
 }
 
-void vir_print_sig(vbuf *b, const uint32_t *w)
+void vir_print_sig(vbuffer *b, const uint32_t *w)
 {
 	uint32_t ng = VSIG_NGROUPS(w[0]);
 
-	vbuf_s(b, "(");
+	vbuffer_string_append(b, "(");
 	for (uint32_t i = 0; i < ng; i++) {
 		if (i)
-			vbuf_s(b, ", ");
+			vbuffer_string_append(b, ", ");
 		vir_print_group(b, w[3 + 2 * i], w[4 + 2 * i]);
 	}
 	if (VSIG_VARIADIC(w[0]))
-		vbuf_s(b, ng ? ", ..." : "...");
-	vbuf_s(b, ") -> ");
+		vbuffer_string_append(b, ng ? ", ..." : "...");
+	vbuffer_string_append(b, ") -> ");
 	vir_print_group(b, w[1], w[2]);
 }
 
@@ -598,7 +603,7 @@ static void put_fn(pctx *p, const vir_fn *f)
 	put(p, "}\n");
 }
 
-void vir_print_fn(vbuf *b, const vir_unit *u, const vir_fn *f)
+void vir_print_fn(vbuffer *b, const vir_unit *u, const vir_fn *f)
 {
 	pctx p = { b, u, f, f->tmp };
 	uint32_t *nm = f->tmp, n = 0;
@@ -642,7 +647,7 @@ static void put_items(pctx *p, const vir_unit *u, const vir_usym *s)
 	}
 }
 
-void vir_print_unit(vbuf *b, const vir_unit *u)
+void vir_print_unit(vbuffer *b, const vir_unit *u)
 {
 	pctx p = { b, u, NULL, NULL };
 

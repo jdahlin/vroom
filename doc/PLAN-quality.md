@@ -140,6 +140,11 @@ where the two differ.
 | Names | `module_noun_verb` in full words (`pp_macro_expand`, `ld_archive_add_member`); abbreviations only from a short list in STYLE.md |
 | Who does it | The top model writes a module's work order (file map, rename table, comment drafts) from its review; a cheaper model and scripts carry it out; the top model checks the result |
 | Delivery | Johan reads results, not previews.  Each pass must land safely on tooling alone (identical output, gates, premerge) and modules must be workable in parallel: a work order names the files it owns, and two orders never share a file |
+| Shared pool (later, same day, after wave 1) | vccd's shared pool stays off by default and uncapped; vccd joins make's jobserver later, after the cleanup.  No scheduler work in wave 2 |
+| Where VIR's optimizer lives (later, same day) | On VIR itself: new passes, and passes moved from the direct emitters, work on the documented VIR format and are testable with `virtest` on `.vir` files.  Existing pre-IR passes stay until each is ported.  A 2-3 % compile-time loss on VIR is acceptable.  Moving existing passes onto VIR is parked: see the next row |
+| Moving optimizations onto VIR (later, same day, 20:58) | Parked for later.  It is fine that some optimization stays on the AST and in the record optimizer and some is on VIR.  The row above still holds for where a new VIR pass goes; what is parked is the moves |
+| Struct field renames (later, same day) | Done with a mode of vcc's own front end that reports every use of a given struct field with its location; the rename script applies them.  No clang tooling |
+| Integrator (later, same day) | Coordinates as before: spawns workers, checks proofs, merges; the PR's agent keeps it mergeable and green |
 
 Open, each waiting for a measurement or a closer look:
 
@@ -151,6 +156,80 @@ Open, each waiting for a measurement or a closer look:
   table; the walker has one instance.)
 
 ## Status
+
+### 2026-11-13: wave 1 merged, wave 2 started
+
+Wave 1 merged PRs #134-#175 (41 PRs): the baseline script, 18 reviews and
+the work orders, file splits for common, as, ld, pp, driver/server, diag,
+cc and the VIR builder, renames for common and as only (pp and diag have
+rename tables), the shared scheduler's stages 1-3 behind `--shared-pool`
+(off), the first VIR steps (analyses computed once, lowerings under
+`arch/<cpu>/vir`) and the builder's named pass table.
+
+Wave 2's tracks:
+- pp and diag renames; rename tables, then renames, for ld, driver/server,
+  cc, vir and codegen.
+- The field-use mode of the front end and the assembler's remaining field
+  renames.
+- Opening comments; pilot steps 4-6 of WORK-common; the link context.
+- The first optimizer pass on VIR itself, then VIR-MIGRATION steps 2e and 3.
+- Diagnostics as a module and the option tables, after the renames.
+
+#### Wave 2, decided by the owner during the wave
+
+- Track G (the linker's context struct and the one linker core) is held by
+  owner, wave 2.  Draft PR #183 (branch `quality/ld-context-1`: the design in
+  `link-context.md` and step 1) stays open and unmerged.
+- Track I (diagnostics as their own module; one option table per tool) is held
+  by owner, wave 2, and not started.
+- The field-use mode (track D) stays a plain rename helper; its output is not
+  generalised for other tools.
+- New: a cheap lint mode `vpp --lint` (STYLE.md naming for declarations, front
+  end only, normal diagnostics), not wired into premerge.
+
+Merged in wave 2 so far (#176 onwards):
+- #176 wave 2 decisions and status.
+- #177, #178, #179, #180: opening comments for `src/as`, `src/obj` and
+  `src/platform`, `src/arch/*/as` and `arch/a64/obj`, `src/utils` and `src/bin`.
+- #181, #182, #186, #188, #190: rename tables for driver/server/utils/bin, the
+  linker, the C front end, VIR and the surviving code generator.
+- #184: design of the struct-field rename mode.
+- #185: VIR optimizer design (passes on VIR itself; WORK-vir decision closed).
+- #187, #191, #192: WORK-common's pilot, steps 4-6 (variants merged, the
+  missing facilities, comments and the gates).  The pilot is done.  Left open:
+  `common/` still includes `port/` in four places (`intern.c`, `intern.h`,
+  `text-buffer.h`; the gate holds the count at 4); `qbig` in `softfloat.h` is
+  not moved onto `bigint.h`; `unlikely_vi` is still in `intern.h` (a bare
+  `unlikely` collides with private defines).
+- #189: lex, pp and diag renamed by table (fields with short names deferred).
+- #194, #195, #197, #199, #200: opening comments for `src/driver`, `src/server`,
+  `src/codegen` (shared part), `src/include` and `src/vir`.
+- #196: the quality baseline blessed for the legitimate moves of waves 1 and 2.
+- #198: the linker's rename table applied (scoped), file moves, WORK-linker status.
+- #201: `vpp --lint`, the naming check against STYLE.md module prefixes.
+- #202: `VCC_FIELD_USES`, the front-end mode reporting uses of selected struct fields.
+- #203: VIR pass infrastructure (WORK-vir 4.0): `src/include/vir/pass.h`, registry,
+  `vir_function_compact`, `virtest --passes`; output identical.
+- #204: one lowering driver for arm64 and x86-64 (step 2e, Q-VIRB-02).
+- #205: `field-uses.py` and `rename-table.py --fields`: struct field renames from
+  the front end's report.
+- #206: the remaining field rows of `rename-as.tsv`, the first user of `--fields`.
+
+#### Track H (VIR optimizer) stopped, owner's decision 2026-11-13 20:58
+
+Track H stopped after what merged: #203 and #204.  Step 4.1
+`redundant-extensions` is parked: draft PR #207, branch
+`quality/vir-redundant-extensions`, not to be merged.  Measured for the
+record, with the same vpp and the pass on and off, the record clean-up `exts`
+still on: zlib 0.00 %, SQLite -0.095 % instructions executed, compile cost
++0.13 % cc.  The pass's worker measured the `exts` counter on VIR output at
+-28 % (suites and SQLite) and the pass's own cost at 0.3 % of build+lower on
+the suites but 3.0 % on SQLite.  Whether `exts` can be removed was not
+measured.  Step 3 (inline assembly, debug info on VIR) is not pushed in this
+wave: 3.0 has a local unpushed WIP branch `quality/vir-debug-rows`, blocked on
+`finish_function` in `src/arch/a64/codegen/func.c` dropping shrink-wrapping
+under `-g` (so `-g` would change `.text` with VIR).  No work on deleting the
+record optimizer's clean-ups.
 
 ### 2026-11-13: on the reorganised tree
 

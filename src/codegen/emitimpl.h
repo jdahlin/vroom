@@ -1,6 +1,18 @@
 #ifndef VCC_EMIT_EMITIMPL_H
 #define VCC_EMIT_EMITIMPL_H
-/* the files of vcc/emit/ share this header: what one of them defines and another uses */
+/*
+ * emitimpl.h: the code generator's shared header: the emitter's types (the unit-wide `emitter`, the
+ * per-function `ecx`, values, bindings, the item stream of the object backend), the helpers every
+ * backend uses (types, symbols, references, constant folding, the optimizer helpers of opt/), and the
+ * prototypes of the files in codegen/.  arm64's a64impl.h is included at its end.
+ *
+ * Every file of the code generator is compiled into one translation unit (obj/unity/codegen.c), so
+ * a shared function is VPRIV (static); every file must still compile alone (`make VCC_UNITY=`).
+ * A function here is called from many threads, one ecx each: the emitter's unit-wide tables are
+ * shared and either immutable after the prepass, atomic, or under a named mutex (emu, cmu, dmu);
+ * everything else of a function lives in its ecx.  The comment below is the design of the direct
+ * arm64 emitter; the shared walker (walk/) and VIR (codegen/vir/) reuse its helpers and tables.
+ */
 /*
  * vcc code generator: arm64 (AAPCS64, Linux ELF) straight from frontend/c/'s AST.
  *

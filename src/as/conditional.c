@@ -1,4 +1,11 @@
-/* conditional.c: conditional assembly: .if, .ifdef, .ifc, .elseif, .else, .endif and their relatives. */
+/* conditional.c: conditional assembly: .if, .ifdef, .ifc, .elseif, .else, .endif and their relatives.
+ *
+ * The conditions are one stack in the context (depth AS_CONDITIONS_MAX) shared by all frames, so an
+ * .if may be closed in another macro expansion; an .if still open at the end of the input is
+ * reported by as_end.  While the top is ignored the statement loop (as_statement_assemble) skips every
+ * statement except the conditional directives themselves, which it hands to as_directive_conditional
+ * first, so an ignored branch is never parsed and cannot report errors.  A misplaced .else or .endif
+ * fails the assembly with MC's message. */
 #include "as-internal.h"
 
 /* ---------------------------------------------------------------- conditionals */
@@ -44,7 +51,7 @@ static as_text as_condition_string_parse(const char **pp, const char *e)
 /* conditional directives; returns 1 if w was one */
 VPRIV int as_directive_conditional(as_context *a, as_text w, const char *p, const char *e, int *rc)
 {
-	if (w.n < 3 || w.s[0] != '.' || (w.s[1] != 'e' && w.s[1] != 'i')) return 0;
+	if (w.length < 3 || w.text[0] != '.' || (w.text[1] != 'e' && w.text[1] != 'i')) return 0;
 	*rc = 0;
 	if (as_text_equals(w, ".endif")) {
 		if (!a->condition_count) { *rc = as_error_report(a, "Encountered a .endif that doesn't follow an .if or .else"); return 1; }
@@ -70,10 +77,10 @@ VPRIV int as_directive_conditional(as_context *a, as_text w, const char *p, cons
 		c->is_met = v != 0; c->is_ignored = !c->is_met;
 		return 1;
 	}
-	if (memcmp(w.s, ".if", 3)) return 0;
-	as_text k = { w.s + 3, w.n - 3 };
+	if (memcmp(w.text, ".if", 3)) return 0;
+	as_text k = { w.text + 3, w.length - 3 };
 	if (as_condition_is_ignored(a)) {	/* any .if* nests */
-		if (k.n == 0 || as_text_equals(k, "ne") || as_text_equals(k, "eq") || as_text_equals(k, "gt") || as_text_equals(k, "ge") || as_text_equals(k, "lt") ||
+		if (k.length == 0 || as_text_equals(k, "ne") || as_text_equals(k, "eq") || as_text_equals(k, "gt") || as_text_equals(k, "ge") || as_text_equals(k, "lt") ||
 		    as_text_equals(k, "le") || as_text_equals(k, "def") || as_text_equals(k, "ndef") || as_text_equals(k, "notdef") || as_text_equals(k, "b") ||
 		    as_text_equals(k, "nb") || as_text_equals(k, "c") || as_text_equals(k, "nc") || as_text_equals(k, "eqs") || as_text_equals(k, "nes")) {
 			*rc = as_condition_push(a, 0);
@@ -82,10 +89,10 @@ VPRIV int as_directive_conditional(as_context *a, as_text w, const char *p, cons
 		return 0;
 	}
 	int met;
-	if (k.n == 0 || as_text_equals(k, "ne") || as_text_equals(k, "eq") || as_text_equals(k, "gt") || as_text_equals(k, "ge") || as_text_equals(k, "lt") || as_text_equals(k, "le")) {
+	if (k.length == 0 || as_text_equals(k, "ne") || as_text_equals(k, "eq") || as_text_equals(k, "gt") || as_text_equals(k, "ge") || as_text_equals(k, "lt") || as_text_equals(k, "le")) {
 		int64_t v;
 		if (as_expression_absolute_parse(a, &p, e, &v)) { *rc = -1; return 1; }
-		if (k.n == 0 || as_text_equals(k, "ne")) met = v != 0;
+		if (k.length == 0 || as_text_equals(k, "ne")) met = v != 0;
 		else if (as_text_equals(k, "eq")) met = v == 0;
 		else if (as_text_equals(k, "gt")) met = v > 0;
 		else if (as_text_equals(k, "ge")) met = v >= 0;
@@ -94,26 +101,26 @@ VPRIV int as_directive_conditional(as_context *a, as_text w, const char *p, cons
 	} else if (as_text_equals(k, "def") || as_text_equals(k, "ndef") || as_text_equals(k, "notdef")) {
 		as_text n;
 		if (as_name_parse(a, &p, e, &n)) { *rc = -1; return 1; }
-		uint32_t y = elf_sym_lookup(a->o, n.s, n.n);
-		int def = y && (elf_symp(a->o, y)->flags & ESYM_DEFINED);
+		uint32_t y = elf_sym_lookup(a->object, n.text, n.length);
+		int def = y && (elf_symp(a->object, y)->flags & ESYM_DEFINED);
 		met = as_text_equals(k, "def") ? def : !def;
 	} else if (as_text_equals(k, "b") || as_text_equals(k, "nb")) {
 		as_text t = as_text_trim(p, e);
-		met = as_text_equals(k, "b") ? t.n == 0 : t.n != 0;
+		met = as_text_equals(k, "b") ? t.length == 0 : t.length != 0;
 	} else if (as_text_equals(k, "c") || as_text_equals(k, "nc")) {
 		as_text x = as_condition_string_parse(&p, e);
 		p = as_whitespace_skip(p, e);
 		if (p >= e || *p != ',') { *rc = as_error_report(a, "expected comma after first string for '.ifc' directive"); return 1; }
 		p++;
 		as_text y = as_condition_string_parse(&p, e);
-		int eq = x.n == y.n && !memcmp(x.s, y.s, x.n);
+		int eq = x.length == y.length && !memcmp(x.text, y.text, x.length);
 		met = as_text_equals(k, "c") ? eq : !eq;
 	} else if (as_text_equals(k, "eqs") || as_text_equals(k, "nes")) {
 		as_text x = as_condition_string_parse(&p, e);
 		p = as_whitespace_skip(p, e);
 		if (p < e && *p == ',') p++;
 		as_text y = as_condition_string_parse(&p, e);
-		int eq = x.n == y.n && !memcmp(x.s, y.s, x.n);
+		int eq = x.length == y.length && !memcmp(x.text, y.text, x.length);
 		met = as_text_equals(k, "eqs") ? eq : !eq;
 	} else return 0;
 	*rc = as_condition_push(a, met);

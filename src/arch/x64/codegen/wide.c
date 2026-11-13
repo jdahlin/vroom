@@ -150,11 +150,11 @@ VPRIV val x64_wbin(ecx *e, int op, bool sgn, val a, val b)
 	int ra, rb, rd;
 	int64_t slot;
 
-	if (op == T_LESSLESS || op == T_GREATERGREATER) {
+	if (op == LEX_TOKEN_LESS_LESS || op == LEX_TOKEN_GREATER_GREATER) {
 		/* inline, as clang (a freestanding vDSO has no libgcc): the words in slots, the count
 		   masked to 0..127, three cases (0, below 64, 64 and over) */
 		int32_t w0, w1;
-		bool shl = op == T_LESSLESS;
+		bool shl = op == LEX_TOKEN_LESS_LESS;
 		uint32_t lge = wk_newlabel(e), lzero = wk_newlabel(e), ldone = wk_newlabel(e);
 		lval L0, L1, LC;
 		val v;
@@ -164,7 +164,7 @@ VPRIV val x64_wbin(ecx *e, int op, bool sgn, val a, val b)
 		w0 = x64_wword(e, ra, 0);
 		w1 = x64_wword(e, ra, 8);
 		x64_tfree(e, ra);
-		v = x64_bin(e, T_AMP, 8, false, b, vconst(127));
+		v = x64_bin(e, LEX_TOKEN_AMPERSAND, 8, false, b, vconst(127));
 		r = x64_toreg(e, &v, 8);
 		LC = (lval){ .k = L_FRAME, .off = wk_slot(e, 8, 8), .align = 8 };
 		x64_mem(e, X_ST, 8, r, &LC, false);
@@ -176,25 +176,25 @@ VPRIV val x64_wbin(ecx *e, int op, bool sgn, val a, val b)
 #define WLD(l) x64_wload(e, &(l))
 #define WST(vv, wo_) do { val t_ = (vv); int rt_ = x64_toreg(e, &t_, 8); lval d_ = { .k = L_FRAME, .off = slot + (wo_), .align = 8 }; \
 		x64_mem(e, X_ST, 8, rt_, &d_, false); x64_tfree(e, rt_); } while (0)
-		x64_cmpbr(e, T_EQUALEQUAL, 8, false, WLD(LC), vconst(0), lzero);
-		x64_cmpbr(e, T_GREATEREQ, 8, false, WLD(LC), vconst(64), lge);
+		x64_cmpbr(e, LEX_TOKEN_EQUAL_EQUAL, 8, false, WLD(LC), vconst(0), lzero);
+		x64_cmpbr(e, LEX_TOKEN_GREATER_EQUAL, 8, false, WLD(LC), vconst(64), lge);
 		if (shl) {	/* lo << c, hi << c | lo >> (64 - c) */
-			WST(x64_bin(e, T_LESSLESS, 8, false, WLD(L0), WLD(LC)), 0);
-			WST(x64_bin(e, T_PIPE, 8, false, x64_bin(e, T_LESSLESS, 8, false, WLD(L1), WLD(LC)),
-				    x64_bin(e, T_GREATERGREATER, 8, false, WLD(L0), x64_bin(e, T_MINUS, 8, false, vconst(64), WLD(LC)))), 8);
+			WST(x64_bin(e, LEX_TOKEN_LESS_LESS, 8, false, WLD(L0), WLD(LC)), 0);
+			WST(x64_bin(e, LEX_TOKEN_PIPE, 8, false, x64_bin(e, LEX_TOKEN_LESS_LESS, 8, false, WLD(L1), WLD(LC)),
+				    x64_bin(e, LEX_TOKEN_GREATER_GREATER, 8, false, WLD(L0), x64_bin(e, LEX_TOKEN_MINUS, 8, false, vconst(64), WLD(LC)))), 8);
 		} else {	/* lo >> c | hi << (64 - c), hi >> c */
-			WST(x64_bin(e, T_PIPE, 8, false, x64_bin(e, T_GREATERGREATER, 8, false, WLD(L0), WLD(LC)),
-				    x64_bin(e, T_LESSLESS, 8, false, WLD(L1), x64_bin(e, T_MINUS, 8, false, vconst(64), WLD(LC)))), 0);
-			WST(x64_bin(e, T_GREATERGREATER, 8, sgn, WLD(L1), WLD(LC)), 8);
+			WST(x64_bin(e, LEX_TOKEN_PIPE, 8, false, x64_bin(e, LEX_TOKEN_GREATER_GREATER, 8, false, WLD(L0), WLD(LC)),
+				    x64_bin(e, LEX_TOKEN_LESS_LESS, 8, false, WLD(L1), x64_bin(e, LEX_TOKEN_MINUS, 8, false, vconst(64), WLD(LC)))), 0);
+			WST(x64_bin(e, LEX_TOKEN_GREATER_GREATER, 8, sgn, WLD(L1), WLD(LC)), 8);
 		}
 		x64_jump(e, ldone);
 		x64_label(e, lge);
 		if (shl) {
 			WST(vconst(0), 0);
-			WST(x64_bin(e, T_LESSLESS, 8, false, WLD(L0), x64_bin(e, T_MINUS, 8, false, WLD(LC), vconst(64))), 8);
+			WST(x64_bin(e, LEX_TOKEN_LESS_LESS, 8, false, WLD(L0), x64_bin(e, LEX_TOKEN_MINUS, 8, false, WLD(LC), vconst(64))), 8);
 		} else {
-			WST(x64_bin(e, T_GREATERGREATER, 8, sgn, WLD(L1), x64_bin(e, T_MINUS, 8, false, WLD(LC), vconst(64))), 0);
-			WST(sgn ? x64_bin(e, T_GREATERGREATER, 8, true, WLD(L1), vconst(63)) : vconst(0), 8);
+			WST(x64_bin(e, LEX_TOKEN_GREATER_GREATER, 8, sgn, WLD(L1), x64_bin(e, LEX_TOKEN_MINUS, 8, false, WLD(LC), vconst(64))), 0);
+			WST(sgn ? x64_bin(e, LEX_TOKEN_GREATER_GREATER, 8, true, WLD(L1), vconst(63)) : vconst(0), 8);
 		}
 		x64_jump(e, ldone);
 		x64_label(e, lzero);
@@ -227,18 +227,18 @@ VPRIV val x64_wbin(ecx *e, int op, bool sgn, val a, val b)
 		x64_tfree(e, ra);
 		x64_tfree(e, rc);
 		rd = x64_wnew(e, &slot);
-		x64_lcall(e, op == T_LESSLESS ? FN_ASHLTI3 : sgn ? FN_ASHRTI3 : FN_LSHRTI3, w, 3, -1, slot, 2, false);
+		x64_lcall(e, op == LEX_TOKEN_LESS_LESS ? FN_ASHLTI3 : sgn ? FN_ASHRTI3 : FN_LSHRTI3, w, 3, -1, slot, 2, false);
 		return x64_wv(rd);
 	}
 	ra = x64_waddr(e, &a);
 	rb = x64_waddr(e, &b);
-	if (op == T_SLASH || op == T_PERCENT) {
+	if (op == LEX_TOKEN_SLASH || op == LEX_TOKEN_PERCENT) {
 		int64_t w[4] = { x64_wword(e, ra, 0), x64_wword(e, ra, 8), x64_wword(e, rb, 0), x64_wword(e, rb, 8) };
 
 		x64_tfree(e, ra);
 		x64_tfree(e, rb);
 		rd = x64_wnew(e, &slot);
-		x64_lcall(e, op == T_SLASH ? (sgn ? FN_DIVTI3 : FN_UDIVTI3) : (sgn ? FN_MODTI3 : FN_UMODTI3), w, 4, -1, slot, 2, false);
+		x64_lcall(e, op == LEX_TOKEN_SLASH ? (sgn ? FN_DIVTI3 : FN_UDIVTI3) : (sgn ? FN_MODTI3 : FN_UMODTI3), w, 4, -1, slot, 2, false);
 		return x64_wv(rd);
 	}
 	rd = x64_wnew(e, NULL);
@@ -247,7 +247,7 @@ VPRIV val x64_wbin(ecx *e, int op, bool sgn, val a, val b)
 		lval dlo = x64_wat(rd, 0), dhi = x64_wat(rd, 8);
 		int t = x64_treg(e);
 
-		if (op == T_STAR) {
+		if (op == LEX_TOKEN_STAR) {
 			/*
 			 * hi = alo * bhi + ahi * blo + high(alo * blo), lo = low(alo * blo).  Everything
 			 * through frame slots: mul writes rdx:rax, and any operand register may be one
@@ -283,13 +283,13 @@ VPRIV val x64_wbin(ecx *e, int op, bool sgn, val a, val b)
 			x64_mem(e, X_ST, 8, R11, &fhi, false);
 			x64_restore(e, sv);
 		} else {
-			static const int lo_op[] = { [T_PLUS] = X_ADD, [T_MINUS] = X_SUB, [T_AMP] = X_AND, [T_PIPE] = X_OR, [T_CARET] = X_XOR };
+			static const int lo_op[] = { [LEX_TOKEN_PLUS] = X_ADD, [LEX_TOKEN_MINUS] = X_SUB, [LEX_TOKEN_AMPERSAND] = X_AND, [LEX_TOKEN_PIPE] = X_OR, [LEX_TOKEN_CARET] = X_XOR };
 			int xo, xhi;
 
-			if (op != T_PLUS && op != T_MINUS && op != T_AMP && op != T_PIPE && op != T_CARET)
+			if (op != LEX_TOKEN_PLUS && op != LEX_TOKEN_MINUS && op != LEX_TOKEN_AMPERSAND && op != LEX_TOKEN_PIPE && op != LEX_TOKEN_CARET)
 				efatal(e, e->curloc, "x86-64: __int128 operator %d", op);
 			xo = lo_op[op];
-			xhi = op == T_PLUS ? X_ADC : op == T_MINUS ? X_SBB : xo;
+			xhi = op == LEX_TOKEN_PLUS ? X_ADC : op == LEX_TOKEN_MINUS ? X_SBB : xo;
 			x64_mem(e, X_LD, 8, t, &alo, false);
 			x64_mem(e, X_LD, 8, R11, &blo, false);
 			x64_op3(e, xo, 8, t, t, R11);
@@ -311,7 +311,7 @@ VPRIV val x64_wun(ecx *e, int op, val a)
 	int ra = x64_waddr(e, &a), rd = x64_wnew(e, NULL), t = x64_treg(e);
 	lval alo = x64_wat(ra, 0), ahi = x64_wat(ra, 8), dlo = x64_wat(rd, 0), dhi = x64_wat(rd, 8);
 
-	if (op == T_TILDE) {
+	if (op == LEX_TOKEN_TILDE) {
 		x64_mem(e, X_LD, 8, t, &alo, false);
 		x64_op3(e, X_NOT, 8, t, t, XNOREG);
 		x64_mem(e, X_ST, 8, t, &dlo, false);
@@ -338,11 +338,11 @@ VPRIV val x64_wun(ecx *e, int op, val a)
 VPRIV val x64_wcmp(ecx *e, int op, bool sgn, val a, val b)
 {
 	int ra = x64_waddr(e, &a), rb = x64_waddr(e, &b), t = x64_treg(e);
-	bool swap = op == T_GREATER || op == T_LESSEQ;
+	bool swap = op == LEX_TOKEN_GREATER || op == LEX_TOKEN_LESS_EQUAL;
 	int pa = swap ? rb : ra, pb = swap ? ra : rb, cc;
 	lval alo = x64_wat(pa, 0), ahi = x64_wat(pa, 8), blo = x64_wat(pb, 0), bhi = x64_wat(pb, 8);
 
-	if (op == T_EQUALEQUAL || op == T_EXCLAIMEQ) {
+	if (op == LEX_TOKEN_EQUAL_EQUAL || op == LEX_TOKEN_EXCLAMATION_EQUAL) {
 		int u = x64_treg(e);
 
 		x64_mem(e, X_LD, 8, t, &alo, false);
@@ -353,7 +353,7 @@ VPRIV val x64_wcmp(ecx *e, int op, bool sgn, val a, val b)
 		x64_op3(e, X_XOR, 8, u, u, R11);
 		x64_op3(e, X_OR, 8, t, t, u);
 		x64_tfree(e, u);
-		cc = op == T_EQUALEQUAL ? CC_E : CC_NE;
+		cc = op == LEX_TOKEN_EQUAL_EQUAL ? CC_E : CC_NE;
 	} else {
 		/* x < y as the flags of the 128-bit x - y: cmp the low words, sbb the high ones */
 		x64_mem(e, X_LD, 8, t, &alo, false);
@@ -363,7 +363,7 @@ VPRIV val x64_wcmp(ecx *e, int op, bool sgn, val a, val b)
 		x64_mem(e, X_LD, 8, R11, &bhi, false);
 		x64_op3(e, X_SBB, 8, t, t, R11);
 		/* <: x=a, y=b; >: x=b, y=a; >=: !(a < b); <=: !(b < a) */
-		cc = op == T_LESS || op == T_GREATER ? (sgn ? CC_L : CC_B) : (sgn ? CC_GE : CC_AE);
+		cc = op == LEX_TOKEN_LESS || op == LEX_TOKEN_GREATER ? (sgn ? CC_L : CC_B) : (sgn ? CC_GE : CC_AE);
 	}
 	x64_tfree(e, ra);
 	x64_tfree(e, rb);
@@ -527,7 +527,7 @@ static val x64_bigslot(ecx *e, int64_t slot)
  * forming an out-of-bounds load.  A negative index fails the unsigned bound. */
 static val x64_bigword(ecx *e, int ra, unsigned n, int i, bool right, bool sgn, int64_t whole)
 {
-	val index = x64_bin(e, right ? T_PLUS : T_MINUS, 8, false, vconst(i), x64_bigslot(e, whole));
+	val index = x64_bin(e, right ? LEX_TOKEN_PLUS : LEX_TOKEN_MINUS, 8, false, vconst(i), x64_bigslot(e, whole));
 	int ri = x64_toreg(e, &index, 8), r = x64_treg(e), cmp = x64_treg(e);
 	uint32_t done = wk_newlabel(e);
 	if (right && sgn) {
@@ -536,7 +536,7 @@ static val x64_bigword(ecx *e, int ra, unsigned n, int i, bool right, bool sgn, 
 		x64_op3(e, X_SARI, 8, r, r, XNOREG)->imm = 63;
 	} else x64_movi(e, r, 0);
 	x64_mov(e, cmp, ri);
-	x64_cmpbr(e, T_GREATEREQ, 8, false, x64_wv(cmp), vconst(n), done);
+	x64_cmpbr(e, LEX_TOKEN_GREATER_EQUAL, 8, false, x64_wv(cmp), vconst(n), done);
 	x64_op3(e, X_SHLI, 8, ri, ri, XNOREG)->imm = 3;
 	x64_op3(e, X_ADD, 8, ri, ri, ra);
 	lval src = x64_wat(ri, 0);
@@ -548,7 +548,7 @@ static val x64_bigword(ecx *e, int ra, unsigned n, int i, bool right, bool sgn, 
 
 static val x64_bigshift(ecx *e, int op, qty t, val a, val b)
 {
-	bool right = op == T_GREATERGREATER;
+	bool right = op == LEX_TOKEN_GREATER_GREATER;
 	unsigned n = (unsigned)tsize(e->c, t)/8;
 	int ra = x64_toreg(e, &a, 8), rd = x64_bignew(e, t);
 	int64_t whole = wk_slot(e, 8, 8), bits = wk_slot(e, 8, 8);
@@ -558,7 +558,7 @@ static val x64_bigshift(ecx *e, int op, qty t, val a, val b)
 	x64_op3(e, X_SHRI, 8, r, rb, XNOREG)->imm = 6;
 	x64_mem(e, X_ST, 8, r, &wl, false);
 	x64_tfree(e, r);
-	b = x64_bin(e, T_AMP, 8, false, b, vconst(63));
+	b = x64_bin(e, LEX_TOKEN_AMPERSAND, 8, false, b, vconst(63));
 	x64_mem(e, X_ST, 8, b.r, &bl, false);
 	x64_tfree(e, b.r);
 	for (unsigned i = 0; i < n; i++) {
@@ -570,8 +570,8 @@ static val x64_bigshift(ecx *e, int op, qty t, val a, val b)
 		x64_tfree(e, v.r);
 		x64_brz(e, x64_bigslot(e, bits), 8, false, done);
 		v = x64_bigword(e, ra, n, (int)i + (right ? 1 : -1), right, right && wk_signed(e->c, t), whole);
-		val count = x64_bin(e, T_MINUS, 8, false, vconst(64), x64_bigslot(e, bits));
-		v = x64_bin(e, right ? T_LESSLESS : T_GREATERGREATER, 8, false, v, count);
+		val count = x64_bin(e, LEX_TOKEN_MINUS, 8, false, vconst(64), x64_bigslot(e, bits));
+		v = x64_bin(e, right ? LEX_TOKEN_LESS_LESS : LEX_TOKEN_GREATER_GREATER, 8, false, v, count);
 		x64_mem(e, X_LD, 8, R11, &out, false);
 		x64_op3(e, X_OR, 8, v.r, v.r, R11);
 		x64_mem(e, X_ST, 8, v.r, &out, false);
@@ -675,11 +675,11 @@ static val x64_bigdiv(ecx *e, int op, qty t, val a, val b)
 	x64_tfree(e, count);
 	x64_tfree(e, r);
 	x64_tfree(e, d);
-	int result = op == T_SLASH ? q : rem;
-	x64_tfree(e, op == T_SLASH ? rem : q);
+	int result = op == LEX_TOKEN_SLASH ? q : rem;
+	x64_tfree(e, op == LEX_TOKEN_SLASH ? rem : q);
 	if (wk_signed(e->c, t)) {
 		val sign = x64_bigslot(e, sa);
-		if (op == T_SLASH) sign = x64_bin(e, T_CARET, 8, false, sign, x64_bigslot(e, sb));
+		if (op == LEX_TOKEN_SLASH) sign = x64_bin(e, LEX_TOKEN_CARET, 8, false, sign, x64_bigslot(e, sb));
 		x64_bigneg_if(e, result, n, sign);
 	}
 	x64_bignorm(e, result, t);
@@ -689,17 +689,17 @@ static val x64_bigdiv(ecx *e, int op, qty t, val a, val b)
 VPRIV val x64_bigbin(ecx *e, int op, qty t, val a, val b)
 {
 	if (a.k == V_CONST) a = x64_bigconst(e, t, NULL, a.i);
-	if (b.k == V_CONST && op != T_LESSLESS && op != T_GREATERGREATER)
+	if (b.k == V_CONST && op != LEX_TOKEN_LESS_LESS && op != LEX_TOKEN_GREATER_GREATER)
 		b = x64_bigconst(e, t, NULL, b.i);
-	if (op == T_SLASH || op == T_PERCENT)
+	if (op == LEX_TOKEN_SLASH || op == LEX_TOKEN_PERCENT)
 		return x64_bigdiv(e, op, t, a, b);
-	if (op == T_LESSLESS || op == T_GREATERGREATER)
+	if (op == LEX_TOKEN_LESS_LESS || op == LEX_TOKEN_GREATER_GREATER)
 		return x64_bigshift(e, op, t, a, b);
 	cc *c = e->c;
 	unsigned n = (unsigned)tsize(c, t) / 8;
 	int ra = x64_toreg(e, &a, 8), rb = x64_toreg(e, &b, 8);
 	int rd = x64_bignew(e, t), r = x64_treg(e);
-	if (op == T_STAR) {
+	if (op == LEX_TOKEN_STAR) {
 		int carry = x64_treg(e);
 		x64_zero(e, rd, tsize(c, t));
 		for (unsigned i = 0; i < 2*n; i++) {
@@ -719,9 +719,9 @@ VPRIV val x64_bigbin(ecx *e, int op, qty t, val a, val b)
 		}
 		x64_tfree(e, carry);
 	} else {
-		int first = op == T_PLUS ? X_ADD : op == T_MINUS ? X_SUB :
-			op == T_AMP ? X_AND : op == T_PIPE ? X_OR : op == T_CARET ? X_XOR : 0;
-		int next = op == T_PLUS ? X_ADC : op == T_MINUS ? X_SBB : first;
+		int first = op == LEX_TOKEN_PLUS ? X_ADD : op == LEX_TOKEN_MINUS ? X_SUB :
+			op == LEX_TOKEN_AMPERSAND ? X_AND : op == LEX_TOKEN_PIPE ? X_OR : op == LEX_TOKEN_CARET ? X_XOR : 0;
+		int next = op == LEX_TOKEN_PLUS ? X_ADC : op == LEX_TOKEN_MINUS ? X_SBB : first;
 		if (!first) efatal(e, 0, "wide _BitInt operation not implemented");
 		for (unsigned i = 0; i < n; i++) {
 			lval al = x64_wat(ra, (int)i * 8), bl = x64_wat(rb, (int)i * 8), dl = x64_wat(rd, (int)i * 8);
@@ -744,8 +744,8 @@ VPRIV val x64_bigcmp(ecx *e, int op, qty t, val a, val b)
 	if (b.k == V_CONST) b = x64_bigconst(e, t, NULL, b.i);
 	unsigned n = (unsigned)tsize(e->c, t) / 8;
 	int ra = x64_toreg(e, &a, 8), rb = x64_toreg(e, &b, 8), r = x64_treg(e), cc;
-	bool eq = op == T_EQUALEQUAL || op == T_EXCLAIMEQ;
-	bool swap = op == T_GREATER || op == T_LESSEQ;
+	bool eq = op == LEX_TOKEN_EQUAL_EQUAL || op == LEX_TOKEN_EXCLAMATION_EQUAL;
+	bool swap = op == LEX_TOKEN_GREATER || op == LEX_TOKEN_LESS_EQUAL;
 	int u = eq ? x64_treg(e) : -1;
 	if (eq) x64_movi(e, r, 0);
 	for (unsigned i = 0; i < n; i++) {
@@ -757,10 +757,10 @@ VPRIV val x64_bigcmp(ecx *e, int op, qty t, val a, val b)
 	}
 	if (eq) {
 		x64_tfree(e, u);
-		cc = op == T_EQUALEQUAL ? CC_E : CC_NE;
+		cc = op == LEX_TOKEN_EQUAL_EQUAL ? CC_E : CC_NE;
 	} else {
 		bool s = wk_signed(e->c, t);
-		cc = op == T_LESS || op == T_GREATER ? (s ? CC_L : CC_B) : (s ? CC_GE : CC_AE);
+		cc = op == LEX_TOKEN_LESS || op == LEX_TOKEN_GREATER ? (s ? CC_L : CC_B) : (s ? CC_GE : CC_AE);
 	}
 	x64_tfree(e, ra);
 	x64_tfree(e, rb);

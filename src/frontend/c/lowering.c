@@ -77,7 +77,7 @@ VPRIV uint32_t neg(cc *c, uint32_t n)
 {
 	uint32_t r = mk(c, N_UNARY, N(n)->ty, N(n)->loc);
 
-	N(r)->aux = T_MINUS;
+	N(r)->aux = LEX_TOKEN_MINUS;
 	N(r)->a = n;
 	return r;
 }
@@ -85,7 +85,7 @@ VPRIV uint32_t neg(cc *c, uint32_t n)
 /* "invalid operands to binary expression ('L' and 'R')", ranges on both */
 VPRIV void bad_operands(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 {
-	pp_span s[2] = { rng(c, l), rng(c, r) };
+	diag_span s[2] = { rng(c, l), rng(c, r) };
 
 	if ((N(l)->flags | N(r)->flags) & NF_ERR)
 		return;

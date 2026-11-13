@@ -1,8 +1,14 @@
 /*
- * vpp: the preprocessor alone (see ppdriver.c), for parity tests.
+ * vpp: the preprocessor alone (the driver is ppd_run in driver/job.c), for parity tests.
  *
  *   vpp [--cmp REF.i] [-o OUT] CLANG-ARGS...
  *   vpp --cmp-files OURS REF      compare two -E outputs
+ *   vpp --lint [-fsyntax-only] CLANG-ARGS...
+ *                                 the front end alone plus the style checks: each
+ *                                 file-scope function and object defined in the
+ *                                 main file must carry its module's prefix
+ *                                 (frontend/c/naming-lint.c; the option is parsed
+ *                                 in driver/cmdline.c, off in every other run)
  *   vpp --batch JOBS [-j N] [-C DIR] [--cmp]
  *                                 many TUs in one process on N threads (-j,
  *                                 else VCC_JOBS, else 6: the budget of the
@@ -159,7 +165,7 @@ static int batch(const char *file, int nthr, const char *statsf)
 	{
 		char hs[512];
 
-		pp_hc_stats(hs, sizeof(hs));
+		pp_header_cache_statistics_format(hs, sizeof(hs));
 		printf("%s\n", hs);
 		dc_stats(hs, sizeof(hs));
 		printf("%s\n", hs);

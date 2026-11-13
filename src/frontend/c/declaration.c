@@ -7,11 +7,11 @@ static void skip_vla_init(cc *c)
 	int depth = 0;
 
 	do {
-		if (is(c, T_LBRACE))
+		if (is(c, LEX_TOKEN_LEFT_BRACE))
 			depth++;
-		else if (is(c, T_RBRACE))
+		else if (is(c, LEX_TOKEN_RIGHT_BRACE))
 			depth--;
-		else if (is(c, T_EOF))
+		else if (is(c, LEX_TOKEN_EOF))
 			fatal(c, tok(c)->loc, "expected '}'");
 		next(c);
 	} while (depth > 0);
@@ -323,11 +323,11 @@ static void kr_params(cc *c, const declr *fd)
 	/* tags declared here belong to the function, not the file (approximation: not seen by the body) */
 	scope_open(c);
 	c->in_proto++;
-	while (!is(c, T_LBRACE)) {
+	while (!is(c, LEX_TOKEN_LEFT_BRACE)) {
 		dspec ds;
 
 		if (!decl_specs(c, &ds, true)) {
-			if (!is(c, T_IDENT) || kwof(tok(c)))
+			if (!is(c, LEX_TOKEN_IDENTIFIER) || kwof(tok(c)))
 				fatal(c, tok(c)->loc, "expected ';' after top level declarator");
 			unknown_type(c, &ds, true);
 		}
@@ -359,7 +359,7 @@ static void kr_params(cc *c, const declr *fd)
 				if (ds.sc == SC_REGISTER)
 					y->sc = SC_REGISTER;
 			}
-			if (!accept(c, T_COMMA))
+			if (!accept(c, LEX_TOKEN_COMMA))
 				break;
 		}
 		expect_semi(c, "at end of declaration");
@@ -380,7 +380,7 @@ static void kr_params(cc *c, const declr *fd)
    declaration starts here, the rest is skipped through the next ';' */
 static void decl_semi(cc *c, bool file)
 {
-	if (likely(accept(c, T_SEMI)))
+	if (likely(accept(c, LEX_TOKEN_SEMICOLON)))
 		return;
 	if (expect_semi(c, file ? "after top level declarator" : "at end of declaration") && !is_decl_start(c, tok(c)))
 		skip_stmt(c, false);
@@ -390,20 +390,20 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 {
 	dspec ds;
 	uint32_t dbeg = tok(c)->loc;
-	bool attr_decl = is(c, T_LSQUARE) && peek(c, 1)->kind == T_LSQUARE;
+	bool attr_decl = is(c, LEX_TOKEN_LEFT_SQUARE) && peek(c, 1)->kind == LEX_TOKEN_LEFT_SQUARE;
 
 	if (iskw(c, KW__Static_assert)) {
 		static_assert_decl(c);
 		return;
 	}
 	if (!decl_specs(c, &ds, true)) {
-		if (attr_decl && accept(c, T_SEMI))
+		if (attr_decl && accept(c, LEX_TOKEN_SEMICOLON))
 			return;
 		int k = peek(c, 1)->kind;
 
-		if (file && ((is(c, T_IDENT) && !kwof(tok(c)) &&
-			      (k == T_LPAREN || k == T_SEMI || k == T_COMMA || k == T_EQUAL || k == T_LSQUARE)) ||
-			     is(c, T_STAR))) {
+		if (file && ((is(c, LEX_TOKEN_IDENTIFIER) && !kwof(tok(c)) &&
+			      (k == LEX_TOKEN_LEFT_PAREN || k == LEX_TOKEN_SEMICOLON || k == LEX_TOKEN_COMMA || k == LEX_TOKEN_EQUAL || k == LEX_TOKEN_LEFT_SQUARE)) ||
+			     is(c, LEX_TOKEN_STAR))) {
 			/* C89 implicit int: "f(x) { ... }", "x;" at file scope */
 			memset(&ds, 0, sizeof(ds));
 			ds.ty = prim(TY_INT);
@@ -411,18 +411,18 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 			if (!c->o->implicit_int) {
 				uint32_t i = 0;
 
-				while (peek(c, i)->kind == T_STAR)	/* clang: at the name in "*p = 1;" */
+				while (peek(c, i)->kind == LEX_TOKEN_STAR)	/* clang: at the name in "*p = 1;" */
 					i++;
-				cc_error(c, peek(c, i)->kind == T_IDENT ? peek(c, i)->loc : ds.loc,
+				cc_error(c, peek(c, i)->kind == LEX_TOKEN_IDENTIFIER ? peek(c, i)->loc : ds.loc,
 					 "type specifier missing, defaults to 'int'; ISO C99 and later do not support implicit int [-Wimplicit-int]");
 			}
-		} else if (is(c, T_IDENT) && !kwof(tok(c))) {
+		} else if (is(c, LEX_TOKEN_IDENTIFIER) && !kwof(tok(c))) {
 			unknown_type(c, &ds, true);
 		} else {
 			fatal(c, tok(c)->loc, "expected identifier or '('");
 		}
 	}
-	if (accept(c, T_SEMI)) {
+	if (accept(c, LEX_TOKEN_SEMICOLON)) {
 		if (ds.constexpr_)
 			cc_error(c, ds.loc, "constexpr can only be used in variable declarations");
 		return;
@@ -463,7 +463,7 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 		if (ds.auto_type) {
 			uint32_t v;
 
-			if (!is(c, T_EQUAL) && c->o->std == 23 && d.name) {
+			if (!is(c, LEX_TOKEN_EQUAL) && c->o->std == 23 && d.name) {
 				/* clang's text for C23 'auto' (vcc cannot tell it from __auto_type here) */
 				dspec d2 = ds;
 
@@ -471,12 +471,12 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 					 IDF(d.name));
 				d2.auto_type = false, d2.invalid = true, d2.ty = prim(TY_INT);
 				declare(c, &d2, &d, d2.ty, file);	/* (invalid: its uses say nothing more) */
-				if (accept(c, T_COMMA))
+				if (accept(c, LEX_TOKEN_COMMA))
 					continue;
 				decl_semi(c, file);
 				return;
 			}
-			expect(c, T_EQUAL, "'=' (__auto_type requires an initializer)");
+			expect(c, LEX_TOKEN_EQUAL, "'=' (__auto_type requires an initializer)");
 			v = decay(c, assign_expr(c));
 			t = QT(QI(QUNQ(N(v)->ty)), QQ(ds.ty) | (ds.constexpr_ ? Q_CONST : 0));
 			{
@@ -503,12 +503,12 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 			}
 			if (decl_comma_typo(c))
 				return;
-			if (accept(c, T_COMMA))
+			if (accept(c, LEX_TOKEN_COMMA))
 				continue;
 			decl_semi(c, file);
 			return;
 		}
-		if (file && d.kr && is_func(c, t) && !is(c, T_SEMI) && !is(c, T_COMMA) && !is(c, T_EQUAL))
+		if (file && d.kr && is_func(c, t) && !is(c, LEX_TOKEN_SEMICOLON) && !is(c, LEX_TOKEN_COMMA) && !is(c, LEX_TOKEN_EQUAL))
 			kr_params(c, &d);
 		else if (d.kr)
 			cc_error(c, d.plb, "a parameter list without types is only allowed in a function definition");
@@ -545,7 +545,7 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 		}
 		if (d.at.vecsize || ds.at.vecsize || d.at.mode || ds.at.mode)
 			t = c->syms[s].ty;	/* declare made it a vector / applied mode: initialize that */
-		if (is_func(c, t) && is(c, T_LBRACE)) {
+		if (is_func(c, t) && is(c, LEX_TOKEN_LEFT_BRACE)) {
 			if (!file)
 				fatal(c, tok(c)->loc, "function definition is not allowed here");
 			if (lazy_ok(c, s, &d))
@@ -554,15 +554,15 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 				function_def(c, s, &d);
 			return;
 		}
-		if (unlikely(file && d.has_func) && is_func(c, t) && !is(c, T_SEMI) && !is(c, T_COMMA) &&
-		    !is(c, T_EQUAL) && !at_asm(c) && !iskw(c, KW___attribute__) && !iskw(c, KW___attribute) &&
+		if (unlikely(file && d.has_func) && is_func(c, t) && !is(c, LEX_TOKEN_SEMICOLON) && !is(c, LEX_TOKEN_COMMA) &&
+		    !is(c, LEX_TOKEN_EQUAL) && !at_asm(c) && !iskw(c, KW___attribute__) && !iskw(c, KW___attribute) &&
 		    !is_decl_start(c, tok(c))) {	/* a declaration next: the ';' is missing (decl_semi) */
 			/* clang: "int f(int x) return x; }": the '{' is missing */
 			cc_error(c, tok(c)->loc, "expected function body after function declarator");
 			skip_stmt(c, true);
 			return;
 		}
-		if (accept(c, T_EQUAL)) {
+		if (accept(c, LEX_TOKEN_EQUAL)) {
 			sym *y = &c->syms[s];
 			/* int a[]: the size of an earlier declaration (the composite type), if it had one */
 			qty it = is_array(c, t) && (T(c, t)->flags & TF_INCOMPLETE) && is_array(c, y->ty) &&
@@ -578,17 +578,17 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 				cc_error(c, d.loc, "declaration of block scope identifier with linkage cannot have an initializer");
 			if (unlikely(T(c, t)->flags & TF_VLA)) {
 				/* only = {} (C23, a GNU extension before): zero it at run time (emit gen_vla_decl) */
-				if (is(c, T_LBRACE) && peek(c, 1)->kind == T_RBRACE) {
+				if (is(c, LEX_TOKEN_LEFT_BRACE) && peek(c, 1)->kind == LEX_TOKEN_RIGHT_BRACE) {
 					next(c), next(c);
 					v = mk(c, N_ZERO, t, d.loc);
-				} else if (is(c, T_LBRACE)) {
+				} else if (is(c, LEX_TOKEN_LEFT_BRACE)) {
 					/* clang: at the outermost size, no range */
 					cc_error(c, N(T(c, t)->n)->loc, "variable-sized object may not be initialized");
 					skip_vla_init(c);
 					v = 0;
 				} else {
 					/* clang: at the name, the initializer underlined */
-					pp_span r = rng(c, assign_expr(c));
+					diag_span r = rng(c, assign_expr(c));
 
 					report(c, "error", d.loc, &r, 1, NULL, 0, "variable-sized object may not be initialized");
 					v = 0;
@@ -600,7 +600,7 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 				c->syms[s].flags |= SF_INVALID;
 				if (is_record(c, t) || KIND(c, t) == TY_ENUM)
 					note(c, c->tags[T(c, t)->aux].loc, "forward declaration of '%s'", tyname(c, t));
-				if (is(c, T_LBRACE))
+				if (is(c, LEX_TOKEN_LEFT_BRACE))
 					skip_vla_init(c);
 				else
 					(void)assign_expr(c);
@@ -654,7 +654,7 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 					c->sie = false;
 				}
 				if (!ok) {
-					pp_span r = rng(c, bad);
+					diag_span r = rng(c, bad);
 
 					report(c, "error", expr_loc(c, bad), &r, 1, NULL, 0, "initializer element is not a compile-time constant");
 					/* the runtime-behaviour warnings only for an initializer that runs (not a constant) */
@@ -711,7 +711,7 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 			c->syms[s].plb = dbeg, c->syms[s].ple = c->prevloc;
 		if (decl_comma_typo(c))
 			return;
-		if (accept(c, T_COMMA))
+		if (accept(c, LEX_TOKEN_COMMA))
 			continue;
 		decl_semi(c, file);
 		return;

@@ -1,6 +1,6 @@
 /* Turning an object's section headers into input sections, and dropping .note.gnu.property. */
 
-static bool is_content(const Shdr *s)
+static bool ld_section_header_is_content(const elf_section_header *s)
 {
 	switch (s->sh_type) {
 	case SHT_PROGBITS: case SHT_NOBITS: case SHT_NOTE: case SHT_INIT_ARRAY:
@@ -12,38 +12,38 @@ static bool is_content(const Shdr *s)
 	}
 }
 
-static void fill_isecs(void *arg, size_t i)
+static void ld_input_sections_fill(void *arg, size_t i)
 {
 	(void)arg;
-	Obj *o = objs.v[i];
+	ld_object *o = objs.v[i];
 	if (!o->buf)
 		return;
 	for (uint32_t s = 0; s < o->nsh; s++) {
-		const Shdr *h = &o->sh[s];
-		ISec *is = &isecs.v[o->isec0 + s];
+		const elf_section_header *h = &o->sh[s];
+		ld_input_section *is = &isecs.v[o->isec0 + s];
 		is->obj = o->idx;
 		is->shndx = s;
-		is->osec = NONE;
-		is->isd = NONE;
-		is->aux = NONE;
+		is->osec = LD_NONE;
+		is->isd = LD_NONE;
+		is->aux = LD_NONE;
 		is->name = o->shstr + h->sh_name;
 		if (h->sh_type == SHT_RELA) {
 			if (h->sh_info < o->nsh) {
-				ISec *t = &isecs.v[o->isec0 + h->sh_info];
-				t->rela = (const Rela *)(o->buf + h->sh_offset);
-				t->nrela = h->sh_size / sizeof(Rela);
+				ld_input_section *t = &isecs.v[o->isec0 + h->sh_info];
+				t->rela = (const elf_rela *)(o->buf + h->sh_offset);
+				t->nrela = h->sh_size / sizeof(elf_rela);
 			}
 			continue;
 		}
 		if (h->sh_type == SHT_REL) {
-			error("%s: SHT_REL not supported", o->path);
+			ld_error_report("%s: SHT_REL not supported", o->path);
 			continue;
 		}
-		if (!is_content(h) || (h->sh_flags & SHF_EXCLUDE && !opt.relocatable))
+		if (!ld_section_header_is_content(h) || (h->sh_flags & SHF_EXCLUDE && !opt.relocatable))
 			continue;
 		if (opt.strip_debug && !(h->sh_flags & SHF_ALLOC) && !strncmp(is->name, ".debug", 6))
 			continue;
-		is->kind = K_NORMAL;
+		is->kind = LD_SECTION_KIND_NORMAL;
 		is->data = h->sh_type == SHT_NOBITS ? NULL : o->buf + h->sh_offset;
 		is->size = h->sh_size;
 		is->flags = h->sh_flags & ~(uint64_t)SHF_GROUP;
@@ -52,10 +52,10 @@ static void fill_isecs(void *arg, size_t i)
 		is->entsize = h->sh_entsize;
 		if (!opt.relocatable && (h->sh_flags & SHF_MERGE) && h->sh_size && h->sh_entsize) {
 			if (h->sh_size % h->sh_entsize)
-				error("%s:(%s): SHF_MERGE section size must be a multiple of sh_entsize", o->path, is->name);
+				ld_error_report("%s:(%s): SHF_MERGE section size must be a multiple of sh_entsize", o->path, is->name);
 			if (h->sh_flags & SHF_WRITE)
-				error("%s:(%s): writable SHF_MERGE section is not supported", o->path, is->name);
-			is->kind = K_MERGE_IN;
+				ld_error_report("%s:(%s): writable SHF_MERGE section is not supported", o->path, is->name);
+			is->kind = LD_SECTION_KIND_MERGE_INPUT;
 		}
 	}
 }
@@ -64,7 +64,7 @@ static void fill_isecs(void *arg, size_t i)
  * input's FEATURE_1_AND (an input without the note counts as 0).  Only the
  * common case is done: when the AND is 0 every input note is dropped, as lld
  * emits none; otherwise the inputs stay as they are (TODO: the merged note) */
-static void drop_gnu_property(void)
+static void ld_gnu_property_drop(void)
 {
 	const uint32_t want = x86_ld ? 0xc0000002u : 0xc0000000u;	/* X86 / AARCH64 FEATURE_1_AND */
 	uint32_t and = ~0u;
@@ -72,11 +72,11 @@ static void drop_gnu_property(void)
 	if (opt.relocatable)
 		return;
 	for (uint32_t i = 0; i < objs.n && and; i++) {
-		Obj *o = objs.v[i];
+		ld_object *o = objs.v[i];
 		uint32_t f = 0;
 
 		for (uint32_t s = 0; o->buf && s < o->nsh; s++) {
-			const Shdr *h = &o->sh[s];
+			const elf_section_header *h = &o->sh[s];
 
 			if (h->sh_type != SHT_NOTE || strcmp(isecs.v[o->isec0 + s].name, ".note.gnu.property"))
 				continue;
@@ -102,10 +102,10 @@ static void drop_gnu_property(void)
 	if (and)
 		return;
 	for (uint32_t i = 0; i < objs.n; i++) {
-		Obj *o = objs.v[i];
+		ld_object *o = objs.v[i];
 
 		for (uint32_t s = 0; o->buf && s < o->nsh; s++)
 			if (o->sh[s].sh_type == SHT_NOTE && !strcmp(isecs.v[o->isec0 + s].name, ".note.gnu.property"))
-				isecs.v[o->isec0 + s].kind = K_NONE;
+				isecs.v[o->isec0 + s].kind = LD_SECTION_KIND_NONE;
 	}
 }

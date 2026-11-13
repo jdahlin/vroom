@@ -1,12 +1,17 @@
 /*
- * virtest: parse a VIR unit, run the passes the file names (only `canon`
- * exists), verify, print (SPEC-vir.md 16, 17.1).
+ * virtest: parse a VIR unit, run the passes the file names (`canon` and the
+ * registry's, vir/pass.h), verify after each, print (SPEC-vir.md 16, 17.1).
  *
- *   virtest [--no-verify] [--bless] FILE
- *   virtest --selftest		the builder API (construction, canon, uses), not a file
+ *   virtest [--no-verify] [--bless] [--passes A,B,...] FILE
+ *   virtest --selftest		the builder API (construction, canon, uses, compact), not a file
  *
  * A test file is a unit with directives in comments at the top
- * (`; PASSES: canon`), a line `; ---`, and the expected printed output.
+ * (`; PASSES: canon,compact`), a line `; ---`, and the expected printed output.
+ * --passes overrides the file's list (ad hoc runs, not for the suite).  After each pass the
+ * function is verified (`@f bN.I: after PASS: RULE: message`) and the analyses its `keeps`
+ * names are checked against a fresh computation; the first failure stops the function.
+ * `; CHANGES: yes` appends `; pass NAME @f: changed, N instructions` (or `unchanged`) for each
+ * pass of the registry and function, so that a test can state that nothing changed.
  * The unit is the text before that line.  Prints the unit (or the errors:
  * `file:line:col: message` for syntax, `@f bN.I: RULE: message` for the
  * verifier) on standard output and exits 0, or 1 on any error.  The printed
@@ -21,6 +26,7 @@
 
 #include "vir/vir.h"
 #include "vir/layout.h"
+#include "vir/pass.h"
 
 static char *slurp(const char *path, size_t *n)
 {
@@ -80,7 +86,7 @@ static int selftest(void)
 	int bad = 0;
 	vir_unit u;
 	vir_fn f;
-	vbuf out = { 0 }, ver = { 0 };
+	vbuffer out = { 0 }, ver = { 0 };
 	uint32_t sg[5] = { VSIG_HDR(1, 0), VG_WORD0(VG_REG, 1, VC_INT, 0, 0, 0, 0), 0, VG_WORD0(VG_REG, 1, VC_INT, 0, 0, 0, 0), 0 };
 	uint32_t sym, p, c5, c9, c7, a, b, cond, l[2];
 	uint8_t cnt[64];
@@ -234,6 +240,68 @@ static int selftest(void)
 	 CHECK(vir_sext_shift(&g,2,&shift) && !shift);
 	 CHECK(!vir_sext_shift(&g,3,&shift) && !vir_sext_shift(&g,VIR_NOBLK,&shift));
 	}
+	/* vir_function_compact: an instruction a pass made a nop and the constant only it used are dropped, the rest keeps its
+	 * order and is renumbered (operands in a list too), the source location runs follow, the analyses stay valid */
+	{
+	 static const char cwant[] =
+		"func @f %s0 {\n"
+		"b0:\n  v0:i64 = param 0.0\n  v1:i64 = add v0, 5\n  v2:i64 = add v1, 5\n  ret v2\n"
+		"}\n";
+	 uint32_t k5, k9, pp, a1, b1, c1, dropped;
+	 vir_pass_context pc = { .budget = VIR_PASS_BUDGET, .checked = true };
+	 char perr[200];
+	 const vir_pass_info *cp = vir_pass_find("compact", 7);
+
+	 vir_begin(&f, VTG_X86_64_LINUX, sym, 0);
+	 f.sig = vir_extra(&f, sg, 5);
+	 vir_blk_add(&f, 0);
+	 pp = vir_ins_add(&f, VO_PARAM, VT_I64, 0, 0, 0, 0);
+	 k5 = vir_const(&f, VO_ICONST, VT_I64, 0, 5, 0);
+	 k9 = vir_const(&f, VO_ICONST, VT_I64, 0, 9, 0);
+	 vir_loc_add(&f, 10);
+	 a1 = vir_ins_add(&f, VO_ADD, VT_I64, 0, pp, k5, 0);
+	 vir_loc_add(&f, 20);
+	 b1 = vir_ins_add(&f, VO_ADD, VT_I64, 0, a1, k9, 0);
+	 vir_loc_add(&f, 30);
+	 c1 = vir_ins_add(&f, VO_ADD, VT_I64, 0, b1, k5, 0);
+	 l[0] = 1;
+	 l[1] = c1;
+	 vir_ins_add(&f, VO_RET, VT_VOID, 0, 0, 0, vir_extra(&f, l, 2));
+	 CHECK(vir_canon(&f) && f.nconst == 3 && f.nins == 8 && f.nloc == 3);
+	 CHECK(vir_function_compact(&f) == 0);	/* nothing to drop */
+	 CHECK(f.nins == 8 && f.nconst == 3 && f.nloc == 3);
+	 CHECK(vir_dom(&f) && f.valid == (VIR_VALID_CFG | VIR_VALID_DOM));
+	 /* a pass rewrites c to use a, and b becomes a nop */
+	 f.ins[6].a = 4;
+	 memset(&f.ins[5], 0, sizeof(vir_ins));
+	 dropped = vir_function_compact(&f);
+	 CHECK(dropped == 2 && f.nins == 6 && f.nconst == 2);	/* the nop and the constant 9 */
+	 CHECK(f.valid == (VIR_VALID_CFG | VIR_VALID_DOM) && f.blk[0].first == 2 && f.blk[0].n == 4);
+	 CHECK(f.ins[1].b == 5 && f.ins[3].a == 2 && f.ins[3].b == 1 && f.ins[4].a == 3 && f.ins[4].b == 1);
+	 CHECK(f.extra[f.ins[5].c + 1] == 4);	/* the return list names the renumbered value */
+	 CHECK(f.nloc == 2 && f.loc[0].first == 3 && f.loc[0].loc == 10 && f.loc[1].first == 4 && f.loc[1].loc == 30);	/* the run of b went with it */
+	 ver.n = 0;
+	 CHECK(vir_verify(&f, &u, &ver, 5) == 0);
+	 if (ver.n)
+		fwrite(ver.p, 1, ver.n, stdout);
+	 out.n = 0;
+	 vir_print_fn(&out, &u, &f);
+	 CHECK(out.n >= sizeof(cwant) - 1 && !memcmp((char *)out.p + out.n - (sizeof(cwant) - 1), cwant, sizeof(cwant) - 1));
+	 CHECK(vir_function_compact(&f) == 0);
+	 /* the registry's row, with the check of `keeps` */
+	 CHECK(cp && cp->run && vir_pass_run(&f, cp, &pc, perr, sizeof perr) == false && !perr[0]);
+	 CHECK(vir_pass_find("no-such-pass", 12) == NULL);
+	 /* a pass that claims it keeps the dominators and changes them is reported by name */
+	 {
+	  vir_pass_info lie = { "lie", cp->run, 0, VIR_VALID_CFG | VIR_VALID_DOM, 0 };
+
+	  f.blk[0].post += 1;	/* what a pass that moved a block without invalidating would leave */
+	  CHECK(vir_dom(&f) && f.valid == (VIR_VALID_CFG | VIR_VALID_DOM));
+	  vir_pass_run(&f, &lie, &pc, perr, sizeof perr);
+	  CHECK(perr[0] && strstr(perr, "dom"));
+	  f.blk[0].post -= 1;
+	 }
+	}
 	/* the limit of the constant table: the 2^23+1st constant fails, and the next function starts clean */
 	vir_begin(&f, VTG_X86_64_LINUX, sym, 0);
 	for (uint32_t i = 0; i <= VIR_MAX_CONST; i++)
@@ -260,15 +328,84 @@ static int selftest(void)
 	return bad ? 1 : 0;
 }
 
+/* the passes of a run, in order: canon, or a pass of the registry */
+#define MAX_STEPS 32
+typedef struct step {
+	const vir_pass_info *pass;	/* NULL: canon */
+} step;
+
+/* the names in s[0..n) (separated by commas, spaces or tabs) appended to steps; false (and a message in err) for an unknown one */
+static bool add_steps(step *steps, uint32_t *ns, const char *s, size_t n, const char *path, vbuffer *err)
+{
+	for (size_t i = 0; i < n;) {
+		size_t e;
+
+		while (i < n && (s[i] == ',' || s[i] == ' ' || s[i] == '\t' || s[i] == '\r'))
+			i++;
+		for (e = i; e < n && s[e] != ',' && s[e] != ' ' && s[e] != '\t' && s[e] != '\r'; e++)
+			;
+		if (e == i)
+			break;
+		if (*ns >= MAX_STEPS) {
+			vbuffer_format_append(err, "%s: more than %d passes\n", path, MAX_STEPS);
+			return false;
+		}
+		if (e - i == 5 && !memcmp(s + i, "canon", 5)) {
+			steps[(*ns)++].pass = NULL;
+		} else {
+			const vir_pass_info *p = vir_pass_find(s + i, e - i);
+			uint32_t np;
+			const vir_pass_info *all = vir_pass_list(&np);
+
+			if (!p) {
+				vbuffer_format_append(err, "%s: unknown pass `%.*s` (passes: canon", path, (int)(e - i), s + i);
+				for (uint32_t k = 0; k < np; k++)
+					vbuffer_format_append(err, " %s", all[k].name);
+				vbuffer_string_append(err, ")\n");
+				return false;
+			}
+			steps[(*ns)++].pass = p;
+		}
+		i = e;
+	}
+	return true;
+}
+
+/* the lines of a verifier report, each with `after PASS: ` inserted after its location (`@f bN.I: `) */
+static void report_after(vbuffer *dst, const char *pass, const vbuffer *rep)
+{
+	for (size_t i = 0; i < rep->n;) {
+		size_t e = i, c;
+
+		while (e < rep->n && ((const char *)rep->p)[e] != '\n')
+			e++;
+		/* the location ends at the first ": " */
+		for (c = i; c + 1 < e && !(((const char *)rep->p)[c] == ':' && ((const char *)rep->p)[c + 1] == ' '); c++)
+			;
+		if (c + 1 < e) {
+			vbuffer_append(dst, rep->p, c + 2 - i);
+			vbuffer_format_append(dst, "after %s: ", pass);
+			vbuffer_append(dst, (const char *)rep->p + c + 2, e - c - 2);
+		} else {
+			vbuffer_append(dst, (const char *)rep->p + i, e - i);
+		}
+		vbuffer_string_append(dst, "\n");
+		i = e + 1;
+	}
+}
+
 int main(int argc, char **argv)
 {
-	bool verify = true, bless = false, canon = false, dom = false;
-	const char *path = NULL;
+	bool verify = true, bless = false, dom = false, changes = false;
+	const char *path = NULL, *cli_passes = NULL;
+	step steps[MAX_STEPS];
+	uint32_t nsteps = 0;
+	vbuffer chg = { 0 };	/* the `; pass ...` lines of CHANGES: yes */
 	char *src;
 	size_t n, sep;
 	vir_unit u = { 0 }, u2;
 	vir_perr err;
-	vbuf out = { 0 }, out2 = { 0 }, ver = { 0 };	/* the unit printed, again, and what is reported instead */
+	vbuffer out = { 0 }, out2 = { 0 }, ver = { 0 };	/* the unit printed, again, and what is reported instead */
 	uint32_t nbad = 0;
 	int rc = 1;
 
@@ -279,21 +416,23 @@ int main(int argc, char **argv)
 			bless = true;
 		else if (!strcmp(argv[i], "--selftest"))
 			return selftest();
+		else if (!strcmp(argv[i], "--passes") && i + 1 < argc)
+			cli_passes = argv[++i];
 		else if (!strcmp(argv[i], "--equiv")) {
 			fprintf(stderr, "virtest: --equiv needs the interpreter (virrun), which is not implemented yet\n");
 			return 2;
 		} else if (argv[i][0] == '-' && argv[i][1]) {
-			fprintf(stderr, "usage: virtest [--no-verify] [--bless] FILE\n");
+			fprintf(stderr, "usage: virtest [--no-verify] [--bless] [--passes A,B,...] FILE\n");
 			return 2;
 		} else if (path) {
-			fprintf(stderr, "usage: virtest [--no-verify] [--bless] FILE\n");
+			fprintf(stderr, "usage: virtest [--no-verify] [--bless] [--passes A,B,...] FILE\n");
 			return 2;
 		} else {
 			path = argv[i];
 		}
 	}
 	if (!path) {
-		fprintf(stderr, "usage: virtest [--no-verify] [--bless] FILE\n");
+		fprintf(stderr, "usage: virtest [--no-verify] [--bless] [--passes A,B,...] FILE\n");
 		return 2;
 	}
 	src = slurp(path, &n);
@@ -313,52 +452,95 @@ int main(int argc, char **argv)
 		if (e - i > 0 && l[0] != ';' && l[0] != '\r')
 			break;
 		if (e - i >= 10 && !memcmp(l, "; PASSES:", 9)) {
-			char *v = strndup(l + 9, e - i - 9), *c = v;
-			char *tk;
-
-			while (*c == ' ')
-				c++;
-			while ((tk = strsep(&c, ", \r")) != NULL) {
-				if (!*tk)
-					continue;
-				if (!strcmp(tk, "canon")) {
-					canon = true;
-				} else {
-					vbuf_f(&ver, "%s: unknown pass `%s` (only `canon` exists until the passes are written)\n", path, tk);
-					free(v);
-					goto done;
-				}
-			}
-			free(v);
+			if (!add_steps(steps, &nsteps, l + 9, e - i - 9, path, &ver))
+				goto done;
+		} else if (e - i >= 11 && !memcmp(l, "; CHANGES:", 10)) {
+			changes = strstr(l, "yes") && strstr(l, "yes") < l + (e - i);	/* a report of what each pass did, as comments */
 		} else if (e - i >= 12 && !memcmp(l, "; VERIFY: no", 12)) {
 			verify = false;	/* as --no-verify (a unit that is not valid on purpose) */
 		} else if (e - i >= 6 && !memcmp(l, "; DOM:", 6)) {
 			dom = true;	/* append the dominator tree of each function as comments */
 		} else if (!strncmp(l, "; EQUIV:", 8) || !strncmp(l, "; EXPECT-UB:", 12)) {
-			vbuf_f(&ver, "%s: %.*s needs the interpreter (virrun), which is not implemented yet\n", path,
+			vbuffer_format_append(&ver, "%s: %.*s needs the interpreter (virrun), which is not implemented yet\n", path,
 			       (int)(e - i > 12 ? 8 : e - i), l + 2);
 			goto done;
 		}
 		i = e + 1;
 	}
+	if (cli_passes) {	/* overrides the file's list */
+		nsteps = 0;
+		if (!add_steps(steps, &nsteps, cli_passes, strlen(cli_passes), "--passes", &ver))
+			goto done;
+	}
 	vir_unit_init(&u);
 	if (!vir_parse(&u, src, sep, &err)) {
-		vbuf_f(&ver, "%s:%u:%u: %s\n", path, err.line, err.col, err.msg);
+		vbuffer_format_append(&ver, "%s:%u:%u: %s\n", path, err.line, err.col, err.msg);
 		goto done;
 	}
 	for (uint32_t i = 0; i < u.nfn; i++) {
 		vir_fn f;
+		bool known = false;	/* f has been verified as it is now */
+		uint32_t before = nbad;
 
 		vir_fn_load(&f, &u, i);
-		if (canon) {
-			if (!vir_canon(&f)) {
-				vbuf_f(&ver, "%s: @%s: the function cannot be put in canonical form\n", path, vir_fname(&u, &f));
-				nbad++;
-				continue;
+		for (uint32_t k = 0; k < nsteps; k++) {
+			const vir_pass_info *p = steps[k].pass;
+
+			if (!p) {
+				if (!vir_canon(&f)) {
+					vbuffer_format_append(&ver, "%s: @%s: the function cannot be put in canonical form\n", path, vir_fname(&u, &f));
+					nbad++;
+					break;
+				}
+				vir_fn_store(&u, i, &f);
+				known = false;
+			} else {
+				vir_pass_context ctx = { .unit = &u, .budget = VIR_PASS_BUDGET, .checked = true };
+				char msg[200];
+				bool changed;
+				vbuffer rep = { 0 };
+				uint32_t nv = 0;
+
+				if (verify && !known) {	/* a pass gets a verified function */
+					uint32_t nb = vir_verify(&f, &u, &ver, 20);
+
+					nbad += nb;
+					if (nb)
+						break;
+					known = true;
+				}
+				changed = vir_pass_run(&f, p, &ctx, msg, sizeof msg);
+				vir_fn_store(&u, i, &f);
+				if (changes)
+					vbuffer_format_append(&chg, changed ? "; pass %s @%s: changed, %llu instructions\n" : "; pass %s @%s: unchanged\n",
+						   p->name, vir_fname(&u, &f), (unsigned long long)ctx.changes);
+				if (msg[0]) {
+					vbuffer_format_append(&ver, "@%s: after %s: %s\n", vir_fname(&u, &f), p->name, msg);
+					nbad++;
+					free(rep.p);
+					break;
+				}
+				if (verify) {
+					nv = vir_verify(&f, &u, &rep, 20);
+					nbad += nv;
+					known = true;
+					if (nv)
+						report_after(&ver, p->name, &rep);
+				}
+				free(rep.p);
+				if (verify && nv)
+					break;
 			}
-			vir_fn_store(&u, i, &f);
+			if (verify && !p) {	/* after canon */
+				uint32_t nb = vir_verify(&f, &u, &ver, 20);
+
+				nbad += nb;
+				known = true;
+				if (nb)
+					break;
+			}
 		}
-		if (verify)
+		if (nbad == before && verify && !known)	/* no step ran (or only a failed one): the unit as it is */
 			nbad += vir_verify(&f, &u, &ver, 20);
 	}
 	if (nbad)
@@ -367,35 +549,37 @@ int main(int argc, char **argv)
 	/* print, parse, print */
 	vir_unit_init(&u2);
 	if (!vir_parse(&u2, out.p, out.n, &err)) {
-		vbuf_f(&ver, "%s: the printed text does not parse: %u:%u: %s\n", path, err.line, err.col, err.msg);
-		vbuf_put(&ver, out.p, out.n);
+		vbuffer_format_append(&ver, "%s: the printed text does not parse: %u:%u: %s\n", path, err.line, err.col, err.msg);
+		vbuffer_append(&ver, out.p, out.n);
 		vir_unit_free(&u2);
 		goto done;
 	}
 	vir_print_unit(&out2, &u2);
 	vir_unit_free(&u2);
 	if (out.n != out2.n || memcmp(out.p, out2.p, out.n)) {
-		vbuf_f(&ver, "%s: print-parse-print is not identical\n--- first\n", path);
-		vbuf_put(&ver, out.p, out.n);
-		vbuf_s(&ver, "--- second\n");
-		vbuf_put(&ver, out2.p, out2.n);
+		vbuffer_format_append(&ver, "%s: print-parse-print is not identical\n--- first\n", path);
+		vbuffer_append(&ver, out.p, out.n);
+		vbuffer_string_append(&ver, "--- second\n");
+		vbuffer_append(&ver, out2.p, out2.n);
 		goto done;
 	}
 	rc = 0;
+	if (chg.n)
+		vbuffer_append(&out, chg.p, chg.n);
 	if (dom)
 		for (uint32_t i = 0; i < u.nfn; i++) {
 			vir_fn f;
 
 			vir_fn_load(&f, &u, i);
 			if (!vir_dom(&f)) {
-				vbuf_f(&out, "; dom @%s: no graph\n", vir_fname(&u, &f));
+				vbuffer_format_append(&out, "; dom @%s: no graph\n", vir_fname(&u, &f));
 				continue;
 			}
 			for (uint32_t b = 0; b < f.nblk; b++)
 				if (f.blk[b].idom == VIR_NOBLK)
-					vbuf_f(&out, "; dom @%s b%u unreachable\n", vir_fname(&u, &f), b);
+					vbuffer_format_append(&out, "; dom @%s b%u unreachable\n", vir_fname(&u, &f), b);
 				else
-					vbuf_f(&out, "; dom @%s b%u idom b%u pre %u post %u\n", vir_fname(&u, &f), b, f.blk[b].idom,
+					vbuffer_format_append(&out, "; dom @%s b%u idom b%u pre %u post %u\n", vir_fname(&u, &f), b, f.blk[b].idom,
 					       f.blk[b].pre, f.blk[b].post);
 		}
 done:
@@ -424,6 +608,7 @@ done:
 	free(out.p);
 	free(out2.p);
 	free(ver.p);
+	free(chg.p);
 	free(src);
 	return rc;
 }

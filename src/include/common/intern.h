@@ -3,7 +3,7 @@
 /*
  * Identifier interning, shared by all threads.
  *
- * Open addressing over 2^20 64-bit slots (hash << 32 | id), inserted with a
+ * Open addressing over 2^23 64-bit slots (hash << 32 | id), inserted with a
  * single CAS; lookups take no lock.  Hashing is CRC32C over 8-byte words.
  * Entries point at the spelling in the (immortal) source mapping, so
  * interning copies nothing except for identifiers that contain splices.

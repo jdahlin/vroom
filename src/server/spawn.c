@@ -1,4 +1,13 @@
-/* Running a program with the request's cwd, environment and file descriptors. */
+/*
+ * spawn.c: run another program (a backend, `--ld PROG`, a delegate) with the request's cwd,
+ * environment and stdio, and wait for it.
+ *
+ * The request's environment is passed on minus the dynamic loader's variables (DYLD_*, LD_PRELOAD,
+ * LD_LIBRARY_PATH, LD_AUDIT) and VCC_UMASK, so a client cannot make us run its code in our children.
+ * Only fds 0-2 reach the child (other workers' request sockets are open at the same time).  The wait
+ * is a blocking region.  The result is the child's exit status, 128+signal when it was killed, 127
+ * when it could not be started.
+ */
 #include "vccd-internal.h"
 
 /* run a program with the request's cwd, env and fds */

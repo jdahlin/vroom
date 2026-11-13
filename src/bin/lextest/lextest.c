@@ -7,7 +7,7 @@
  *                                 lex every file in LIST (one path per line)
  *                                 through the token cache with N threads;
  *                                 -r: R times, uncached (for profiling)
- *                                 -p: vlex_prefetch() every file first
+ *                                 -p: lex_file_prefetch() every file first
  *   lextest idcheck LIST          every identifier's id matches its spelling
  *   lextest core LIST             single thread, files pre-mapped and
  *                                 touched: pure lexing speed of one core
@@ -60,8 +60,8 @@ static void stringify(const char *s, size_t n)
 
 static int dump(const char *arg)
 {
-	char path[4096] = { 0 };	/* padded: vlex_get reads path[len + 7] */
-	const vlex_file *f = strlen(arg) < sizeof(path) - 8 ? vlex_get(strcpy(path, arg), strlen(arg)) : NULL;
+	char path[4096] = { 0 };	/* padded: lex_file_get reads path[len + 7] */
+	const lex_file *f = strlen(arg) < sizeof(path) - 8 ? lex_file_get(strcpy(path, arg), strlen(arg)) : NULL;
 	size_t line = 1, bol = 0, pos = 0;
 	char *buf;
 
@@ -71,7 +71,7 @@ static int dump(const char *arg)
 	}
 	buf = malloc(f->size + 1);
 	for (uint32_t i = 0; i < f->ntok; i++) {
-		const vtok *t = &f->tok[i];
+		const lex_token *t = &f->tok[i];
 		size_t l;
 
 		for (; pos < t->off; pos++) {
@@ -82,10 +82,10 @@ static int dump(const char *arg)
 				bol = pos + 1;
 			}
 		}
-		l = vlex_spell(f->src, t, buf);
-		printf("%s\t", vtok_name(t->kind));
+		l = lex_token_spell(f->src, t, buf);
+		printf("%s\t", lex_token_name(t->kind));
 		stringify(buf, l);
-		printf("\t%zu:%zu\t%d\n", line, t->off - bol + 1, !!(t->flags & TF_SOL));
+		printf("\t%zu:%zu\t%d\n", line, t->off - bol + 1, !!(t->flags & LEX_TOKEN_FLAG_LINE_START));
 	}
 	free(buf);
 	return 0;
@@ -96,7 +96,7 @@ static size_t *plen;
 static size_t npaths;
 static _Atomic size_t next_file;
 static size_t reps = 1;	/* bench -r: uncached, every file reps times */
-static int prefetch;	/* bench -p: vlex_prefetch() all files first */
+static int prefetch;	/* bench -p: lex_file_prefetch() all files first */
 static _Atomic uint64_t tot_bytes, tot_toks;
 static double cpu_time[256];
 
@@ -122,7 +122,7 @@ static void read_list(const char *list)
 			plen = realloc(plen, cap * sizeof(*plen));
 		}
 		plen[npaths] = n;
-		paths[npaths] = calloc(1, n + 8);	/* vlex_get hashes by words: path[n + 7] */
+		paths[npaths] = calloc(1, n + 8);	/* lex_file_get hashes by words: path[n + 7] */
 		memcpy(paths[npaths++], line, n);
 	}
 	fclose(fp);
@@ -137,9 +137,9 @@ static void *worker(void *arg)
 	size_t i;
 
 	while ((i = atomic_fetch_add(&next_file, 1)) < npaths * reps) {
-		vlex_file u;
-		const vlex_file *f = reps > 1 ? (vlex_load_uncached(paths[i % npaths], &u) ? &u : NULL)
-					      : vlex_get(paths[i], plen[i]);
+		lex_file u;
+		const lex_file *f = reps > 1 ? (lex_file_load_uncached(paths[i % npaths], &u) ? &u : NULL)
+					      : lex_file_get(paths[i], plen[i]);
 
 		if (f) {
 			b += f->size;
@@ -161,7 +161,7 @@ static int bench(int nthr, const char *list)
 	t0 = now(CLOCK_MONOTONIC);
 	if (prefetch)
 		for (size_t i = 0; i < npaths; i++)
-			vlex_prefetch(paths[i], plen[i]);
+			lex_file_prefetch(paths[i], plen[i]);
 	for (int i = 0; i < nthr; i++)
 		pthread_create(&th[i], NULL, worker, (void *)(intptr_t)i);
 	for (int i = 0; i < nthr; i++)
@@ -182,14 +182,14 @@ static int core(const char *list, int reps)
 	const char **src;
 	size_t *sz, max = 0, bytes = 0, toks = 0;
 	void *scratch;
-	vtok *out;
+	lex_token *out;
 	double t0, best = 1e9;
 
 	read_list(list);
 	src = calloc(npaths, sizeof(*src));
 	sz = calloc(npaths, sizeof(*sz));
 	for (size_t i = 0; i < npaths; i++) {
-		const vlex_file *f = vlex_get(paths[i], plen[i]);	/* maps + warms */
+		const lex_file *f = lex_file_get(paths[i], plen[i]);	/* maps + warms */
 
 		if (!f)
 			continue;
@@ -198,9 +198,9 @@ static int core(const char *list, int reps)
 		max = sz[i] > max ? sz[i] : max;
 		bytes += sz[i];
 	}
-	scratch = malloc(vlex_scratch_size(max));
-	out = malloc((max + 2) * sizeof(vtok));
-	vlex_no_intern = getenv("NOINTERN") ? atoi(getenv("NOINTERN")) : 0;
+	scratch = malloc(lex_scratch_size(max));
+	out = malloc((max + 2) * sizeof(lex_token));
+	lex_identifiers_not_interned = getenv("NOINTERN") ? atoi(getenv("NOINTERN")) : 0;
 	int pmc = getenv("PMC") && !pmc_init(getenv("PMC"));
 	uint64_t c0[PMC_N], c1[PMC_N], cb[PMC_N] = { 0 };
 	vperf vbest = { ~0ull, ~0ull }, v0;
@@ -214,7 +214,7 @@ static int core(const char *list, int reps)
 		t0 = now(CLOCK_THREAD_CPUTIME_ID);
 		for (size_t i = 0; i < npaths; i++)
 			if (src[i])
-				toks += vlex(src[i], sz[i], out, scratch);
+				toks += lex_tokenize(src[i], sz[i], out, scratch);
 		t0 = now(CLOCK_THREAD_CPUTIME_ID) - t0;
 		v0 = vperformance_subtract(vperformance_now(), v0);
 		vbest.ins = v0.ins < vbest.ins ? v0.ins : vbest.ins;
@@ -230,10 +230,10 @@ static int core(const char *list, int reps)
 	/* untimed: a hash of every token record (bench/vbench.py's correctness check) */
 	for (size_t i = 0; i < npaths; i++)
 		if (src[i]) {
-			size_t n = vlex(src[i], sz[i], out, scratch);
+			size_t n = lex_tokenize(src[i], sz[i], out, scratch);
 			const unsigned char *q = (const unsigned char *)out;
 
-			for (size_t k = 0; k < n * sizeof(vtok); k++)
+			for (size_t k = 0; k < n * sizeof(lex_token); k++)
 				h = (h ^ q[k]) * 1099511628211ull;
 		}
 	printf("%.1f MB, %.2f M tokens: best of %d %.1f ms = %.2f GB/s, %.1f ns/token\n",
@@ -256,22 +256,22 @@ static int idcheck(const char *list)
 	read_list(list);
 	if (getenv("PREFETCH"))	/* through the I/O threads */
 		for (size_t i = 0; i < npaths; i++)
-			vlex_prefetch(paths[i], plen[i]);
+			lex_file_prefetch(paths[i], plen[i]);
 	for (size_t i = 0; i < npaths; i++) {
-		const vlex_file *f = vlex_get(paths[i], plen[i]);
+		const lex_file *f = lex_file_get(paths[i], plen[i]);
 
 		if (!f)
 			continue;
 		if (cap < f->size + 1)
 			buf = realloc(buf, cap = f->size + 1);
 		for (uint32_t j = 0; j < f->ntok; j++) {
-			const vtok *t = &f->tok[j];
+			const lex_token *t = &f->tok[j];
 			size_t l;
 
-			if (t->kind != T_IDENT)
+			if (t->kind != LEX_TOKEN_IDENTIFIER)
 				continue;
 			n++;
-			l = vlex_spell(f->src, t, buf);
+			l = lex_token_spell(f->src, t, buf);
 			if (!t->id || t->id > vintern_count() || vintern_ents[t->id].len != l ||
 			    memcmp(vintern_ents[t->id].s, buf, l)) {
 				if (bad++ < 10)

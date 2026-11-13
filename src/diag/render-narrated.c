@@ -1,5 +1,5 @@
 /* The narrated style: each record told as sentences. */
-#include "../frontend/pp/ppimpl.h"
+#include "../frontend/pp/pp-internal.h"
 #include "common/buffer.h"
 #include <ctype.h>
 #include <dlfcn.h>
@@ -8,62 +8,62 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-static void say_place(pp *p, vbuf *b, const char *what, uint32_t loc)
+static void diag_narrated_place_say(pp *p, vbuffer *b, const char *what, uint32_t loc)
 {
 	const char *name;
 	uint32_t nl, line, col;
 
-	if (diag_where(p, loc, &name, &nl, &line, &col))
-		vbuf_f(b, "%s line %u, column %u", what, line, col);
+	if (diag_location_presumed(p, loc, &name, &nl, &line, &col))
+		vbuffer_format_append(b, "%s line %u, column %u", what, line, col);
 }
 
-VPRIV void render_narr(pp *p, vbuf *b, const vdiag *d)
+VPRIV void diag_narrated_record_render(pp *p, vbuffer *b, const diag_record *d)
 {
-	const fent *e;
+	const pp_file_entry *e;
 
-	if (render_head(p, b, d, &e)) {
+	if (diag_head_render(p, b, d, &e)) {
 		const char *s = e->f->src;
 		uint32_t ls = lstart(s, d->loc - e->base), le = lend(s, e->f->size, ls);
 
-		vbuf_f(b, "  the source line is: ");
+		vbuffer_format_append(b, "  the source line is: ");
 		while (ls < le && (s[ls] == ' ' || s[ls] == '\t'))
 			ls++;
 		for (uint32_t i = ls; i < le; i++)
-			vbuf_put(b, s[i] == '\t' ? " " : s + i, 1);
-		vbuf_s(b, "\n");
+			vbuffer_append(b, s[i] == '\t' ? " " : s + i, 1);
+		vbuffer_string_append(b, "\n");
 		for (uint32_t i = 0; i < d->nspan; i++) {
 			if (!d->span[i].label)
 				continue;
-			vbuf_s(b, "  ");
-			say_place(p, b, "at", d->span[i].b);
-			vbuf_f(b, ": %s\n", d->span[i].label);
+			vbuffer_string_append(b, "  ");
+			diag_narrated_place_say(p, b, "at", d->span[i].b);
+			vbuffer_format_append(b, ": %s\n", d->span[i].label);
 		}
 		if (d->label) {
-			vbuf_s(b, "  ");
-			say_place(p, b, "at", d->loc);
-			vbuf_f(b, ": %s\n", d->label);
+			vbuffer_string_append(b, "  ");
+			diag_narrated_place_say(p, b, "at", d->loc);
+			vbuffer_format_append(b, ": %s\n", d->label);
 		}
 	}
 	for (uint32_t i = 0; i < d->nfix; i++) {
-		const vdfix *f = &d->fix[i];
+		const diag_record_fixit *f = &d->fix[i];
 
-		vbuf_s(b, "  fix: ");
+		vbuffer_string_append(b, "  fix: ");
 		if (f->b == f->e)
-			vbuf_f(b, "insert '%s' ", f->s);
+			vbuffer_format_append(b, "insert '%s' ", f->s);
 		else if (!*f->s)
-			vbuf_s(b, "remove the text ");
+			vbuffer_string_append(b, "remove the text ");
 		else
-			vbuf_f(b, "replace the text with '%s' ", f->s);
-		say_place(p, b, "at", f->b);
-		vbuf_s(b, "\n");
+			vbuffer_format_append(b, "replace the text with '%s' ", f->s);
+		diag_narrated_place_say(p, b, "at", f->b);
+		vbuffer_string_append(b, "\n");
 	}
 	if (d->help)
-		vbuf_f(b, "  help: %s\n", d->help);
+		vbuffer_format_append(b, "  help: %s\n", d->help);
 }
 
 /* the pending record (and its notes) to the error stream */
 
-VPRIV void diag_narrate(pp *p, vbuf *b, vdiag *d)
+VPRIV void diag_narrated_render(pp *p, vbuffer *b, diag_record *d)
 {
-	render_narr(p, b, d);
+	diag_narrated_record_render(p, b, d);
 }

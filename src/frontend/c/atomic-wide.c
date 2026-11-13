@@ -159,7 +159,7 @@ VPRIV uint32_t atomic_assign_expr(cc *c, uint32_t lhs, uint32_t rhs, int op, boo
 	vpush(c, &args, mk_int(c, 5, prim(TY_INT), loc));
 	vpush(c, &args, mk_int(c, 5, prim(TY_INT), loc));
 	uint32_t cas = at_memory(c, BI_ATOMIC_CMPXCHG, t, &args, loc);
-	uint32_t retry = mk_bin(c, T_EQUALEQUAL, prim(TY_INT), cas, mk_int(c, 0, prim(TY_INT), loc), loc);
+	uint32_t retry = mk_bin(c, LEX_TOKEN_EQUAL_EQUAL, prim(TY_INT), cas, mk_int(c, 0, prim(TY_INT), loc), loc);
 	vpush(c, &body, mkstmt(c, N_DO, loc, retry, mkstmt(c, N_EXPR, loc, update, 0, 0), 0));
 	return at_finish(c, &body, plain, rvalue(c, post ? expected : desired), loc);
 }
@@ -189,7 +189,7 @@ VPRIV uint32_t atomic_builtin_expr(cc *c, int id, qty t, const vec *input, uint3
 	if (id >= BI_ATOMIC_FETCH_ADD && id <= BI_ATOMIC_MIN_FETCH) {
 		bool post = id < BI_ATOMIC_ADD_FETCH;
 		int k = id - (post ? BI_ATOMIC_FETCH_ADD : BI_ATOMIC_ADD_FETCH);
-		static const int ops[] = { T_PLUS, T_MINUS, T_AMP, T_PIPE, T_CARET, T_AMP };
+		static const int ops[] = { LEX_TOKEN_PLUS, LEX_TOKEN_MINUS, LEX_TOKEN_AMPERSAND, LEX_TOKEN_PIPE, LEX_TOKEN_CARET, LEX_TOKEN_AMPERSAND };
 		uint32_t old = at_buffer(c, &body, t, loc), desired = at_buffer(c, &body, t, loc);
 		vpush(c, &args, a[0]); vpush(c, &args, at_address(c, old, loc));
 		vpush(c, &args, mk_int(c, 5, prim(TY_INT), loc));
@@ -197,9 +197,9 @@ VPRIV uint32_t atomic_builtin_expr(cc *c, int id, qty t, const vec *input, uint3
 		uint32_t value;
 		if (k < 6) {
 			value = binop(c, ops[k], rvalue(c, old), rvalue(c, a[1]), loc);
-			if (k == 5) value = binop(c, T_CARET, value, mk_int(c, -1, t, loc), loc);
+			if (k == 5) value = binop(c, LEX_TOKEN_CARET, value, mk_int(c, -1, t, loc), loc);
 		} else {
-			uint32_t cond = binop(c, k == 6 ? T_GREATER : T_LESS, rvalue(c, old), rvalue(c, a[1]), loc);
+			uint32_t cond = binop(c, k == 6 ? LEX_TOKEN_GREATER : LEX_TOKEN_LESS, rvalue(c, old), rvalue(c, a[1]), loc);
 			value = mk(c, N_COND, t, loc);
 			N(value)->a = cond; N(value)->b = rvalue(c, old); N(value)->c = rvalue(c, a[1]);
 		}
@@ -211,7 +211,7 @@ VPRIV uint32_t atomic_builtin_expr(cc *c, int id, qty t, const vec *input, uint3
 		vpush(c, &args, mk_int(c, 5, prim(TY_INT), loc));
 		vpush(c, &args, mk_int(c, 5, prim(TY_INT), loc));
 		uint32_t cas = at_memory(c, BI_ATOMIC_CMPXCHG, t, &args, loc);
-		uint32_t retry = mk_bin(c, T_EQUALEQUAL, prim(TY_INT), cas, mk_int(c, 0, prim(TY_INT), loc), loc);
+		uint32_t retry = mk_bin(c, LEX_TOKEN_EQUAL_EQUAL, prim(TY_INT), cas, mk_int(c, 0, prim(TY_INT), loc), loc);
 		vpush(c, &body, mkstmt(c, N_DO, loc, retry, mkstmt(c, N_EXPR, loc, update, 0, 0), 0));
 		return at_finish(c, &body, QUNQ(ty_unatomic(c, t)), rvalue(c, post ? old : desired), loc);
 	}
@@ -246,7 +246,7 @@ VPRIV uint32_t atomic_builtin_expr(cc *c, int id, qty t, const vec *input, uint3
 	uint32_t call = at_memory(c, normalized, t, &args, loc);
 	if (expected) {
 		uint32_t ok = at_save(c, &body, call, loc);
-		uint32_t failed = mk_bin(c, T_EQUALEQUAL, prim(TY_INT), rvalue(c, ok), mk_int(c, 0, prim(TY_INT), loc), loc);
+		uint32_t failed = mk_bin(c, LEX_TOKEN_EQUAL_EQUAL, prim(TY_INT), rvalue(c, ok), mk_int(c, 0, prim(TY_INT), loc), loc);
 		uint32_t copy = assign(c, 0, expected_lvalue, rvalue(c, expected), loc);
 		vpush(c, &body, mkstmt(c, N_IF, loc, failed, mkstmt(c, N_EXPR, loc, copy, 0, 0), 0));
 		return at_finish(c, &body, prim(TY_BOOL), rvalue(c, ok), loc);

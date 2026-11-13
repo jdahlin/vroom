@@ -1,7 +1,7 @@
 /* The start of one link's context: all zero but the fields named here. */
 
 /* every field of the context starts at zero but these; ld_main calls it
-   under ldlock before the link, so nothing survives from the last link */
+   under ld_link_lock before the link, so nothing survives from the last link */
 static void ld_context_init(struct ld_context *ctx, FILE *error_stream)
 {
 	memset(ctx, 0, sizeof *ctx);

@@ -1,4 +1,13 @@
-/* Identities for two reads of the same ordinary automatic integer. */
+/*
+ * repeated.c: identities for two reads of the same plain local integer: x - x, x ^ x, x == x,
+ * x < x and the like.
+ *
+ * em_repeated_integer(e, n) returns an EM_ID_* recipe (the result is zero, true, or unknown).  Only
+ * for an ordinary automatic variable of 1 to 8 bytes: not static or extern, address never taken, not
+ * volatile or atomic, no asm name.  Anything that another thread or a signal handler could change
+ * is excluded by those rules.  -O1 and up.  Used by the shared walker, arm64's expression code and
+ * wasm's emitter.
+ */
 #include "../emitimpl.h"
 
 VPRIV int em_repeated_integer(ecx *e, uint32_t n)
@@ -10,9 +19,9 @@ VPRIV int em_repeated_integer(ecx *e, uint32_t n)
 	uint64_t size;
 
 	if (!e->E->o->opt || e->E->noopt || x->op != N_BINARY ||
-	    (x->aux != T_MINUS && x->aux != T_CARET && x->aux != T_AMP && x->aux != T_PIPE &&
-	     x->aux != T_EQUALEQUAL && x->aux != T_EXCLAIMEQ && x->aux != T_LESS &&
-	     x->aux != T_GREATER && x->aux != T_LESSEQ && x->aux != T_GREATEREQ))
+	    (x->aux != LEX_TOKEN_MINUS && x->aux != LEX_TOKEN_CARET && x->aux != LEX_TOKEN_AMPERSAND && x->aux != LEX_TOKEN_PIPE &&
+	     x->aux != LEX_TOKEN_EQUAL_EQUAL && x->aux != LEX_TOKEN_EXCLAMATION_EQUAL && x->aux != LEX_TOKEN_LESS &&
+	     x->aux != LEX_TOKEN_GREATER && x->aux != LEX_TOKEN_LESS_EQUAL && x->aux != LEX_TOKEN_GREATER_EQUAL))
 		return EM_ID_NONE;
 	a = N(x->a); b = N(x->b);
 	if (a->op != N_VAR || b->op != N_VAR || a->a != b->a || QUNQ(a->ty) != QUNQ(b->ty) ||
@@ -26,9 +35,9 @@ VPRIV int em_repeated_integer(ecx *e, uint32_t n)
 	    !size || size > 8 || sym_attrs(c, a->a)->asmname)
 		return EM_ID_NONE;
 	switch (x->aux) {
-	case T_MINUS: case T_CARET: case T_EXCLAIMEQ: case T_LESS: case T_GREATER:
+	case LEX_TOKEN_MINUS: case LEX_TOKEN_CARET: case LEX_TOKEN_EXCLAMATION_EQUAL: case LEX_TOKEN_LESS: case LEX_TOKEN_GREATER:
 		return EM_ID_ZERO;
-	case T_EQUALEQUAL: case T_LESSEQ: case T_GREATEREQ:
+	case LEX_TOKEN_EQUAL_EQUAL: case LEX_TOKEN_LESS_EQUAL: case LEX_TOKEN_GREATER_EQUAL:
 		return EM_ID_TRUE;
 	default:
 		return EM_ID_LEFT;

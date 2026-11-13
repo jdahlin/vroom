@@ -1,4 +1,19 @@
-/* vcc code generator: emitter state, the work queue and threads, emit_tu */
+/*
+ * tu.c: generate code for one translation unit (emit_tu): the emitter state, the work queue and
+ * worker threads, and putting the chunks together.
+ *
+ * emit_tu is called by the front end (frontend/c/translation-unit.c) once the AST is complete.  It
+ * runs emit_tu1 up to 8 rounds: a round that finds a function that must be inlined to fold an
+ * error() call (need_fold) marks it and the unit is generated again, reusing the functions whose
+ * inputs did not change (keep_make, reuse).  In a round the roots (non-static functions and objects)
+ * are queued; workers (or vtask_parallel_for slots) take items, generate each into its own ecx
+ * (buffers from pools: nothing is allocated per function), and note_ref queues what they reference.
+ * At the end chunks are sorted by key (chunk_cmp) so the output never depends on thread timing, and
+ * either written as text or replayed into the object (replay, obj.c).  Diagnostics from workers are
+ * serialised with E->emu.  Errors that cannot continue longjmp to the item's e->bail and fail that
+ * function only.  Called per TU on the job's thread, which may itself be one of the shared pool's.
+ * Environment: VCC_EMIT_REPEAT=N generates N times for profiling.
+ */
 #include "emitimpl.h"
 #ifdef VCC_WASM
 #include "arch/wasm/as/wasmas.h"
@@ -22,19 +37,19 @@ const uint8_t tempregs[NTEMP] = { 9, 10, 11, 12, 13, 14, 15, 19, 20, 21, 22, 23,
 __attribute__((format(printf, 3, 4)))
 VPRIV void ediag(ecx *e, uint32_t loc, const char *fmt, ...)
 {
-	pp_diag_pc = __builtin_return_address(0);
+	diag_report_site_pc = __builtin_return_address(0);
 	va_list ap;
 
 	VLOCK(e->E->emu);
 	va_start(ap, fmt);
-	pp_vdiag(e->c->p, loc, "note", fmt, ap);
+	diag_report_va(e->c->p, loc, "note", fmt, ap);
 	va_end(ap);
 }
 
 __attribute__((format(printf, 3, 4)))
 VPRIV void eerror(ecx *e, uint32_t loc, const char *fmt, ...)
 {
-	pp_diag_pc = __builtin_return_address(0);
+	diag_report_site_pc = __builtin_return_address(0);
 	va_list ap;
 
 	if (e->vtry) {	/* the VIR walker: the function falls back (codegen/vir/) */
@@ -45,7 +60,7 @@ VPRIV void eerror(ecx *e, uint32_t loc, const char *fmt, ...)
 	{
 		VLOCK(e->E->emu);
 		va_start(ap, fmt);
-		pp_vdiag(e->c->p, loc, "error", fmt, ap);
+		diag_report_va(e->c->p, loc, "error", fmt, ap);
 		va_end(ap);
 	}
 	e->E->errors++;
@@ -54,7 +69,7 @@ VPRIV void eerror(ecx *e, uint32_t loc, const char *fmt, ...)
 __attribute__((format(printf, 3, 4), noreturn))
 VPRIV void efatal(ecx *e, uint32_t loc, const char *fmt, ...)
 {
-	pp_diag_pc = __builtin_return_address(0);
+	diag_report_site_pc = __builtin_return_address(0);
 	va_list ap;
 
 	if (e->vtry) {	/* the VIR walker: no diagnostic, the function falls back (codegen/vir/) */
@@ -65,7 +80,7 @@ VPRIV void efatal(ecx *e, uint32_t loc, const char *fmt, ...)
 	{	/* (the lock is dropped before the longjmp: cleanups do not run on it) */
 		VLOCK(e->E->emu);
 		va_start(ap, fmt);
-		pp_vdiag(e->c->p, loc, "error", fmt, ap);
+		diag_report_va(e->c->p, loc, "error", fmt, ap);
 		va_end(ap);
 	}
 	e->E->errors++;
@@ -288,7 +303,7 @@ static void as_error(cc *c, const char *fmt, ...)
 	va_list ap;
 
 	va_start(ap, fmt);
-	pp_vdiag(c->p, 0, "error", fmt, ap);
+	diag_report_va(c->p, 0, "error", fmt, ap);
 	va_end(ap);
 }
 
@@ -655,7 +670,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 						E.errors++;
 					} else {
 						o->wasm_obj->n = 0;
-						vbuf_put(o->wasm_obj, ob, on);
+						vbuffer_append(o->wasm_obj, ob, on);
 						free(ob);
 					}
 				} else

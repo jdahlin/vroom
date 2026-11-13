@@ -1,5 +1,5 @@
 /*
- * a64.c: A64 encoder for the assembler, over parsed operands (a64.h).
+ * enc.c: A64 encoder for the assembler, over the operands parse.c produced (include/arch/a64/a64.h).
  *
  * A sorted mnemonic table maps each mnemonic to an encoder class and its
  * base opcode; the class function checks the operand shapes and fills the

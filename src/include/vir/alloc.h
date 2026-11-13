@@ -148,9 +148,9 @@ typedef struct vir_aopt {
 bool vir_alloc(vir_fn *f, const vir_loops *lp, const vir_regs *regs, const vir_aopt *opt, vir_alloc_out *out);
 /* 15.11: 0 when every operand reads its own value on every path; else the number of
  * failures, the first few described in msg */
-uint32_t vir_alloc_check(vir_fn *f, const vir_regs *regs, const vir_alloc_out *out, vbuf *msg);
+uint32_t vir_alloc_check(vir_fn *f, const vir_regs *regs, const vir_alloc_out *out, vbuffer *msg);
 /* the function with the allocation as comments, and a counter line */
-void vir_alloc_print(vbuf *b, const vir_unit *u, vir_fn *f, const vir_loops *lp, const vir_alloc_out *out);
+void vir_alloc_print(vbuffer *b, const vir_unit *u, vir_fn *f, const vir_loops *lp, const vir_alloc_out *out);
 void vir_reg_name(char *o, uint32_t r);	/* r3, f1, s0/s1 (scratch), - */
 
 #endif

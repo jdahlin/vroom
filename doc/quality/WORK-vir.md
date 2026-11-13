@@ -3,8 +3,10 @@
 The module pass for VIR, its builder and its two lowerings, written to be
 carried out by a cheaper model and scripts.  It covers steps 1 to 3 of the
 "Order" in `doc/quality/VIR-MIGRATION.md`, which is binding: **VIR becomes the
-only code generation path**.  Steps 4 and 5 (moving passes, deleting the
-direct emitters) are later orders.  Evidence: `doc/review/quality-vir-build.md`
+only code generation path**, and the first two PRs of step 4 (the pass
+infrastructure on VIR and its first pass, steps 4.0 and 4.1 below, designed
+in `doc/quality/DESIGN-vir-optimizer.md`).  The rest of step 4 and step 5
+(deleting the direct emitters) are later orders.  Evidence: `doc/review/quality-vir-build.md`
 (`Q-VIRB-NN`), `quality-vir-ir.md` (`Q-vir-ir-NN`), `quality-passes.md`
 (`Q-passes-NN`), `doc/PLAN-vir.md`, `doc/SPEC-vir.md`.  Names follow
 `doc/STYLE.md`.
@@ -14,7 +16,7 @@ moved, and PR #141 shifts `build.c` and `a64.c` again: find code **by the
 function name** given here, never by line.  Line numbers below are hints
 from main at d602dfa2.
 
-**Starts when** step 1 is on main: PR #140 is merged; PR #141 (open) merges.
+**Starts when** step 1 is on main: PR #140 is merged; PR #141 is merged (both done).
 Step 2 needs nothing else.  `WORK-common.md` step 2 rewrites every file of
 `src/` by script; whichever of the two lands second merges `origin/main`
 (a merge commit) and reruns `src/tools/rename-table.py` with
@@ -58,6 +60,8 @@ order for a one-row PR to its op table and waits.
   `src/vir/` records which analyses are valid, so dominators and the CFG are
   computed once per function; both lowerings live under `src/arch/<cpu>/vir/`,
   split by job, and share one block driver.
+- Steps 4.0 and 4.1: the pass interface of `DESIGN-vir-optimizer.md` on
+  main, and `redundant-extensions` running after `canon` with its tests.
 - Step 3: `bench/vir-failures.py` reports zero fallbacks on the suites,
   the kernel sample, PostgreSQL and SQLite (gate G1), including with `-g`
   (G4), with the instruction cost inside the budget of VIR-MIGRATION.md.
@@ -89,7 +93,7 @@ runs it.
 | PR | What | State |
 |---|---|---|
 | #140 | `VCC_REC_STATS=1`, `bench/record-passes.py`: records each arm64 clean-up pass changes, direct path against VIR | merged |
-| #141 | `src/codegen/vir/failure.h` (one X-macro table of reasons), `VCC_VIR_STATS=1`, `bench/vir-failures.py` | open; this step is its merge |
+| #141 | `src/codegen/vir/failure.h` (one X-macro table of reasons), `VCC_VIR_STATS=1`, `bench/vir-failures.py` | merged |
 
 Starting numbers, from the PR bodies (arm64, `-O2`).
 
@@ -142,7 +146,7 @@ kernel column for contrast):
 | `spill_pairs`, `liveness`, `opt_regs`, `unreachable` | 0 | 0 | 0 | 31 896 (`spill_pairs`) |
 
 Functions through the clean-ups: suites 17 908 VIR / 19 444 direct, kernel
-4 026 / 7 342, SQLite 1 464 / 1 916.  These feed step 4 (not this order).
+4 026 / 7 342, SQLite 1 464 / 1 916.  These feed step 4 (4.1 starts on `exts`).
 
 Proof of step 1: #141's own (in its body); after the merge,
 `bench/vir-failures.py -j 3` and `bench/record-passes.py -j 3 -n 200` print
@@ -160,9 +164,15 @@ Five sub-steps, one PR each.  Order and parallelism:
 | 2d lowerings to `arch/<cpu>/vir/` | `codegen/vir/a64.c`, `arch/x64/codegen/vir.c`, the new directories, `src/Makefile` `codegen_SRC` | 2a | 2b, 2c |
 | 2e one lowering driver | `arch/a64/vir/*`, `arch/x64/vir/*`, new `codegen/vir/lower-driver.c` | 2d | 2b, 2c |
 
-2c is in progress on branch `quality/vir-analysis-validity` (a worktree
-exists, no commits on it yet as of d602dfa2).  If that branch's PR merges
-with the content below, 2c is done; otherwise this section is its brief.
+**Status (main at ddbb6413):** 2a merged (#167), 2b merged (#175), 2c
+merged (#154) without the debug check `VCC_VIR_CHECK_ANALYSES=1` (it now
+comes with step 4.0), 2d merged (#172).  2e done in `src/codegen/vir/lowering-driver.[ch]`
+(branch `quality/vir-lowering-driver`): the table differs from the sketch below in
+these ways, all forced by what the two targets share: `block_enter` (the code after a
+block's label from the layout loop), `body_begin`, `block_end` (arm64's edge blocks), `fail`,
+`edge_blocks_at_end` is not a field (each target's own `block_end`/`after_blocks` places
+them, both through `virbuild_lower_edge_block`), and the driver's input struct also holds the
+operand buffers arm64 fills (`skip_multi_operands`) and `skip_at`.  `vl_grow`/`vx_grow` untouched.
 
 #### 2a. One pass per file in the builder (moves only)
 
@@ -218,13 +228,13 @@ switch.
 The table (`src/codegen/vir/pass-table.c`, type in `pass-table.h`):
 
 ```c
-typedef struct vir_pass {
+typedef struct virbuild_pass {
 	const char *name;          /* stable; VCC_VIR_PASSES and the statistics use it */
 	bool (*run)(ecx *e);       /* returns whether it changed anything */
 	uint8_t needs;             /* PIR_ORDER, PIR_PREDS, PIR_DOMS: facts it reads */
 	uint8_t keeps;             /* the facts still valid after it; the others are cleared */
 	uint8_t flags;             /* PASS_REQUIRED, PASS_THEN_TRIVIAL, PASS_IF_PREVIOUS_CHANGED, PASS_VECTOR_GATE */
-} vir_pass;
+} virbuild_pass;
 ```
 
 One row per step of `vw_emit` today, in its order (Q-VIRB 3.1):
@@ -371,23 +381,62 @@ Proof adds: `bench/vcc-vir-x86.py`, and CI's x86-64 job (`bench/vcc-x86.py
 
 #### 2e. One lowering driver (Q-VIRB-02)
 
-`src/codegen/vir/lower-driver.c`: the block driver, the allocator-edit
-walk, edge moves, the set-up and the allocation check, written once and
-calling a table of target callbacks (`vir_lowering_target`: emit one
-instruction, one move, one edit, one edge block, label, jump, finish).
-`vl_block`/`vx_block`, `vl_edits`/`vx_edits`, `vl_emoves`/`vx_edge`,
-`vl_twice`/`vx_twice`, `vl_grow`/`vx_grow` and the set-up of `vw_a64`/
-`vw_x64` become callers of it.  Identical output is the rule: where the two
-copies differ today (Q-VIRB-02: the dense-switch count, `noopt` in the
-switch test, the trailing edits of a block, `VT_MULTI` operands, the
-`VCC_VIR_ROT` caching) the difference becomes a field of the callback table
-with today's value per target, and a comment saying it is unresolved.  The
-dense-switch difference is already a reported bug (PLAN-quality "Bugs from
-the reviews"): fixing it is that bug's PR, not this step.
+**Status: done (#204).**
 
-Proof: as for 2d.
+`src/codegen/vir/lowering-driver.c` (STYLE: the job in full words; it
+needs no walker, so it does not start with the `WK_PREFIX` lines of 2a):
+the block loop, the allocator-edit walk, the edge blocks, the labels and
+the layout call, written once and calling a table of target callbacks.
+Checked against main at ddbb6413; find code by these function names:
+
+| Job | arm64 today (`src/arch/a64/vir/`) | x86-64 today (`src/arch/x64/vir/`) | In the driver |
+|---|---|---|---|
+| block loop | `vl_block` (`function.c`) | `vx_block` (`function.c`) | `virbuild_lower_block`, calling `instruction` per instruction |
+| one allocator edit | the `switch` in `vl_edits` (`moves.c`) | the `switch` in `vx_edits` (`moves.c`) | the walk over `o->edit[]` by `pos`; callback `edit(ctx, const vir_edit *)` |
+| one edge's moves | `vl_emoves(L, g)` (`moves.c`) | `vx_edge(L, b, k)` (`moves.c`, edge `g` from `o->eidx[o->soff[b] + k]`) | callback `edge_moves(ctx, g)`; x86-64's wrapper looks `g` up as today |
+| layout | `vl_order` (`function.c`) over `vir_layout_order` | `vir_layout_order` directly | the shared calls in `src/vir/layout.c` (`vir_layout_chases`, `vir_layout_order`, `vir_layout_duplicate`) are already common: the driver calls them; arm64's save-point reordering stays in an `order_adjust` callback |
+| returns-twice test | `vl_twice` (`calls.c`, static) | `vx_twice` (`function.c`, static) | one predicate, the same code twice today: `virbuild_call_returns_twice(e, callee)` in the driver file |
+| set-up | `vw_a64` (`function.c`) | `vw_x64` (`function.c`) | stay per target (registers, the second allocation without `r10` on x86-64, frames); they call `virbuild_lower_function` for the body |
+
+The callback table:
+
+```c
+typedef struct virbuild_lowering_target {
+	void (*block_begin)(void *ctx, uint32_t b);	/* arm64: reset fcc/cchi/tlo/...; spill parameters defined in a slot */
+	void (*instruction)(void *ctx, uint32_t b, uint32_t i, const uint8_t *opr, uint32_t nopr, uint8_t res);
+	void (*result_spill)(void *ctx, uint8_t res, uint32_t slot);
+	void (*edit)(void *ctx, const vir_edit *x);
+	void (*edge_moves)(void *ctx, uint32_t g);
+	void (*label)(void *ctx, uint32_t label);
+	void (*order_adjust)(void *ctx);		/* arm64: blocks in front of the save point first; NULL on x86-64 */
+	void (*after_blocks)(void *ctx);		/* arm64: VLT.lbf returns in front of the save point; NULL on x86-64 */
+	/* differences kept as they are (unresolved, Q-VIRB-02): today's value per target */
+	bool params_in_loop;		/* x86-64: block parameters go through instruction(); arm64: block_begin handles them */
+	bool edits_at_block_end;	/* x86-64: the edits at pos = first + n run after the last instruction; arm64: none */
+	bool edge_blocks_at_end;	/* x86-64: all edge blocks after the last block (edgelab); arm64: after each block (L->tr) */
+	bool skip_multi_operands;	/* arm64: a VT_MULTI operand has no opr entry; x86-64 rejects such functions */
+	bool rotation_cached;		/* arm64 reads VCC_VIR_ROT once (static); x86-64 per function */
+} virbuild_lowering_target;
+```
+
+Identical output is the rule: each difference above is a field with
+today's value per target and a comment saying it is unresolved.  Also
+unresolved and left in the target code: the dense-switch count and `noopt`
+in the switch test (`vl_switch` against `vx_dense_switch`, Q-VIRB-02).  The
+dense-switch difference is a reported bug (PLAN-quality, "Bugs from the
+reviews"), and fixing it is that bug's PR, not this step.  `vl_grow` and
+`vx_grow` are **not** part of this step: they belong to "Adoption of common/
+facilities" below (`VVECTOR_NEED`), and the driver keeps calling each
+target's own until then.
+
+Proof: as for 2d (`bench/vcc-same.py` with and without `VCC_VIR=bl`,
+`bench/vcc-vir-x86.py`, CI's x86-64 job), and `VCC_VIR_ROT=0` and
+`VCC_VIR_SHRINK=0` each once with `VCC_VIR=bl bench/vcc-same.py` against the
+base run with the same variable.
 
 ### 3. Close the failure reasons, most frequent first
+
+**Status: not pushed in wave 2** (3.0 has a local WIP branch, blocked on shrink-wrapping under `-g`).
 
 One PR per sub-step.  These change generated code, so `vcc-same.py` cannot
 prove them.  **Proof for every sub-step** is VIR-MIGRATION's "Validation":
@@ -432,8 +481,8 @@ one after another.
 
 | # | Reason (all sets) | Files it touches (after step 2) | Depends on |
 |---|---|---|---|
-| 3.0 | `debug_info`: every function with `-g` (G4) | `arch/a64/vir/function.c` (the refusal in `vw_a64`), `arch/a64/vir/instructions.c` (a line row per location change: call `dbg_row`, owned by WORK-codegen-surviving), `codegen/vir/try.c` (Q-VIRB-11: refusals that need no VIR tested before the build) | |
-| 3.1 | `inline_assembly` 1 867 (kernel 1 686 of 1 926) | `codegen/vir/lower-control.c` (`vw_asm`: a `VO_ASM`/`VO_ASMGOTO` with the `casm` record as template id), `codegen/vir/to-vir.c`, `codegen/vir/cfg.c` (asm goto targets), `arch/a64/vir/calling-convention.c` (`vl_fixed`: operands in fixed registers, clobbers), `arch/a64/vir/instructions.c` | WORK-codegen-surviving step 9 (the template scanner `codegen/asm-template.c` and arm64's operand printer) |
+| 3.0 | `debug_info`: every function with `-g` (G4) | `arch/a64/vir/function.c` (the refusal in `vw_a64`), `codegen/vir/lowering-driver.c` (2e: a line row per location run; before 2e, `vl_block` in `arch/a64/vir/function.c`).  Details below | 2e (preferred, so x86-64 gets the rows from the same code) |
+| 3.1 | `inline_assembly` 1 867 (kernel 1 686 of 1 926) | `codegen/vir/lower-control.c` (`vw_asm`), `codegen/vir/to-vir.c`, `codegen/vir/cfg.c` (asm goto targets), `src/vir/alloc.c` (15.10: today it refuses any asm with operands), `test/vir-alloc/`, `arch/a64/vir/calling-convention.c` (`vl_fixed`), `arch/a64/vir/instructions.c`.  Details below | WORK-codegen-surviving step 9 (`codegen/asm-template.c`, `gen_asm` split by phase; not on main at ddbb6413) |
 | 3.2 | `record_argument_or_result` 1 127, with `record_argument`, `record_parameter`, `record_result` | `codegen/vir/lower-call.c` (`vw_classify`, `vw_sig`, `vw_group`, `vw_call`, `vw_params`, `vw_ret`), `codegen/vir/lower-control.c` (`vw_retrec`), `arch/a64/vir/calling-convention.c`, `arch/a64/vir/calls.c`, `arch/a64/vir/function.c`; `src/vir/verify.c` only if a signature group needs a new rule | WORK-codegen-surviving step 8 (AAPCS64 classification as a function of the type, no records) |
 | 3.3 | `variadic_function` 212, with `variadic_start`, `variadic_argument` | `codegen/vir/lower-call.c` (`vw_params`), `codegen/vir/lower-control.c` (`vw_va_start`, `vw_va_arg`), `arch/a64/vir/calls.c`, `arch/a64/vir/function.c` (register save areas in the frame) | |
 | 3.4 | `wide_integer` 209 (`__int128`), with `bit_precise_integer` | `codegen/vir/lower-value.c` (the stubs `vw_wconst`, `vw_wbin`, `vw_wun`, `vw_wcmp`, `vw_wcvt`, `vw_bigconst` .. `vw_bigcvt`: pairs of i64 operations on the pre-IR), `codegen/vir/lower-memory.c` (`vw_i128mem`, `vw_ldmem`) | |
@@ -446,12 +495,88 @@ one after another.
 | 3.11 | `computed_goto` 9 and `label_address` | `codegen/vir/lower-control.c` (`vw_jumpr` to `VO_IBR`, `vw_named` to `VO_LABELADDR`), `codegen/vir/cfg.c`, `arch/a64/vir/returns-and-jumps.c` | |
 | 3.12 | the rest, one PR per reason, most frequent first, from a fresh `bench/vir-failures.py -j 3 --top 40` (today: `over_aligned_slot` in `arch/a64/vir/function.c`, `unsupported_builtin` in `lower-value.c`/`lower-control.c`, eleven reasons at most 8 each in the suites) | as the reason's `VIRFAIL` site says | |
 
+**3.0 in detail** (checked against main at ddbb6413):
+
+- vcc's `-g` is line tables only: nothing in `src/` writes variable
+  locations (no `DW_TAG_variable`), so G4 on VIR means "the same line rows
+  as the direct path's kind, and `.text` unchanged by `-g`".
+- The rows already exist in VIR: the walker sets `e->curloc` per statement
+  (`walk/stmt.c`; with `-g`, `LO(dbgrow)` is `vw_dbgrow`, which only sets
+  `curloc`), every pre-IR instruction records it (`preir.c`), `to-vir` turns
+  them into `f->loc` runs, and `vir_canon` remaps them.  VIR passes keep
+  them (`DESIGN-vir-optimizer.md`, section 2).
+- Remove the refusal `if (e->E->o->debug) { *why = VIRFAIL(debug_info); ... }`
+  at the top of `vw_a64`.
+- In the block loop (the driver after 2e, `vl_block` before it), before
+  lowering instruction `i`: if a run of `f->loc` starts at `i`, call
+  `dbg_row(e, run.loc)` (`codegen/debug-rows.c`, owned by
+  WORK-codegen-surviving: called, not edited).  The layout does not emit
+  blocks in index order (rotation, `vir_layout_duplicate` copies), so do not
+  use a running cursor over `f->loc`: find the run that contains each
+  block's `first` by binary search and walk forward inside the block.  A
+  duplicated block gets its rows again.
+- `dbg_row` emits no record, and `finish_function`'s clean-ups already
+  remap rows (`dbg_remap` in `arch/a64/codegen/opt.c`), so `.text` must not
+  change: `vcc-dwarf.py` checks exactly that.
+- `-g` stays out of `VIRFAIL` only once the rows are right.  The reason
+  `debug_info` is deleted from `failure.h` when no site uses it.
+- x86-64 twin: `vw_x64` folds `-g`, `-fstack-protector` and no-SIMD into one
+  reason (`x64_unsupported_target_option`).  The twin first splits out
+  `debug_info` (so the counter shows it), then removes it the same way.
+- Q-VIRB-11 (refusals tested before the build) is not part of 3.0 any more:
+  with `-g` accepted, arm64 has no refusal left that needs no VIR.  It goes
+  to the x86-64 twin (stack protector, no SIMD, `interrupt`), in
+  `codegen/vir/try.c`.
+- Proof adds `VCC_VIR=bl bench/vcc-dwarf.py -j 3 -O 2` (dwarfdump
+  `--verify`, `.text` identical with and without `-g`, rows against clang)
+  and `bench/vir-failures.py -j 3 --keep-g` (PostgreSQL with its own `-g`:
+  `debug_info` 0 of 2 697).
+
+**3.1 in detail** (checked against main at ddbb6413):
+
+- Today `vw_asm` (`lower-control.c`) is a stub that fails every function
+  with `inline_assembly`.  The walker calls `LO(asm)(e, n)` with the AST
+  node (`walk/stmt.c`); SPEC-vir X6 describes the plan/evaluate/emit split.
+  On VIR the builder must: choose the constraint alternative and classify
+  the operands (arm64's phase of `gen_asm` after WORK-codegen-surviving
+  step 9 splits it by phase: called, not copied), evaluate the operand
+  expressions through the walker's VIR instance, and append `VO_ASM` (or
+  `VO_ASMGOTO`, a terminator) with the operand list of SPEC-vir 8.6 and the
+  `casm` record as the template id.  Outputs to registers come back as the
+  instruction's results (`proj` when there are several), and memory outputs
+  are stores through the address input.
+- `codegen/vir/cfg.c`: `asmgoto` targets are successors (`vw_nsucc`,
+  `vw_succp`), and the critical-edge split (`vw_split`) must leave every
+  target with the `asmgoto` block as its only predecessor (verifier rule
+  C7).
+- `src/vir/alloc.c` (`instr()`): it returns "inline assembly with operands
+  (15.10) ... is not supported" today.  Implement SPEC-vir 15.10 (operand
+  classes, fixed registers, tied outputs, early clobbers, the clobber mask
+  through the `fixed` callback, register-or-memory operands), with a case
+  per rule in `src/test/vir-alloc/` and `bench/vir-alloc.py --bless`.  This
+  is the largest part of the sub-step; if it grows past one PR, it is its
+  own PR first (`src/vir/` only, proof: `bench/vir-alloc.py`,
+  `bench/vir-test.py`).
+- `arch/a64/vir/calling-convention.c` (`vl_fixed`): add `VO_ASM` and
+  `VO_ASMGOTO` to `vl_opfix`, and describe each operand's fixed register
+  (register variables, `"r"`/`"w"` classes) and the clobbers.
+  `arch/a64/vir/instructions.c`: print the template with the allocated
+  registers through step 9's scanner and arm64's operand printer (a raw
+  record, as the direct path emits).  `vl_notail` already refuses sibling
+  calls in functions with asm.
+- The kernel's asm is mostly `ALTERNATIVE` and `.pushsection` templates;
+  the 1 686 kernel functions are the measure.
+- Proof adds the `asm*` tests of `test/vcc` (`VCC_VIR=bl
+  bench/vcc-ctests.py -j 3 --suite vcc asm`), and, when `work/` exists, the
+  kernel with `VCC_VIR=bl bench/vccd-kbuild.sh` and a boot.
+
 Parallel: two sub-steps run at the same time when their file lists do not
 overlap.  First wave: 3.0, 3.2 (once its dependency is in), 3.4, 3.5, 3.9
 (`lower-control.c` is shared by 3.1, 3.2, 3.3, 3.7, 3.9, 3.11: one of those
 at a time per wave; `lower-value.c` by 3.4, 3.6, 3.8; `instructions.c` by
-3.0, 3.1, 3.5, 3.7, 3.9).  The integrator picks the next sub-step from this
-table by count and free files.
+3.1, 3.5, 3.7, 3.9; the lowering driver by 3.0 and 2e).  The integrator
+picks the next sub-step from this table by count and free files, in the
+order of "Order of the steps that follow" below.
 
 Each sub-step removes the `VIRFAIL(...)` sites it closes and keeps the
 reason in `failure.h` until no site uses it (then deletes it, so a
@@ -459,70 +584,92 @@ reappearance is a compile error).  A sub-step that finds the reason hides
 another (the function now fails later for a new reason) reports the new
 reason and its count in the PR body; that is progress, not a failure.
 
-## Owner's decision: where the optimizer lives
+## Owner's decision: where the optimizer lives (closed)
 
-This order does not decide it.  VIR-MIGRATION.md item 4 asks for it
-"before step 2"; step 2 above is written so that neither answer is
-presumed, which moves the deadline to step 4 (the first pass moved into
-VIR).  If the owner wants it before 2a, 2a waits; nothing else does.
+**Decided (Johan, 2026-11-13):** "VIR's optimizer lives on VIR itself: new
+passes and passes moved from the direct emitters work on the documented VIR
+format and are testable with `virtest` on `.vir` files.  Existing pre-IR
+passes stay until each is ported.  A 2-3 % compile-time loss on VIR is
+acceptable."  Of the three options this order listed, (b) is chosen, with
+the pre-IR passes kept until ported: (a)'s importer (VIR -> pre-IR) is not
+built, and SPEC-vir 14 is rewritten to describe passes on VIR (step 4.0).
 
-**(a) The pre-IR is VIR's mutable form** (Q-VIRB decision 1, the review's
-recommendation).  The pre-IR exists because Braun's construction and the
-passes need what VIR lacks: insertion into any block (`vw_conv_in` appends
-to a predecessor), replacement without rewriting users (`fwd`), deletion.
-Under (a) the pre-IR gets a declared header (2a's `preir.h`), the pass
-table (2b), a checker (2b's `preir-check.c`), and later an importer VIR ->
-pre-IR so that `virtest --pass NAME` runs one pass on a `.vir` file.
-Passes moved in step 4 are written on the pre-IR.  SPEC-vir 14 is
-rewritten to say so.  Cost: an importer; two forms to know; the copy into
-VIR (`to-vir`) and `vir_canon` stay (3.5 % and 5.2 % of a VIR compile of
-SQLite, `quality-passes.md` 3.5).
+The design is `doc/quality/DESIGN-vir-optimizer.md`: where passes live
+(`src/vir/pass/`, one per file, `vir_` names), the pass interface (canonical
+in and out, analyses through the getters and `f->valid`, no allocation, no
+dependency on `frontend/`, `codegen/` or `arch/`), one user-visible pass
+table (the builder's rows, then the VIR rows, through an adapter),
+`virtest --passes` and `src/test/vir/pass/NAME/`, checked runs, the budget,
+and the first two passes.  Its section 8 lists the questions that are still
+the owner's.
 
-**(b) VIR becomes editable and the passes move onto it** (SPEC-vir 14's
-original design).  VIR is dense and append-only (blocks are ranges, values
-numbered in block order); it is what is printed, parsed, verified and
-allocated.  Under (b) VIR gains an editing layer (insertion, replace all
-uses, deletion, then re-canonicalization) and each pass is ported, one row
-of the pass table at a time.  Cost: the editing layer and the port; gain:
-one form, every pass testable on `.vir` files with no importer, and
-possibly no `to-vir` copy.
+Constraints repeated from the design: the direct emitters are not deleted
+in this wave; nothing changes at `-O0` or on the direct path (each PR proves
+it with `bench/vcc-same.py` in the default environment); a pass on VIR
+depends on nothing in `frontend/`, `codegen/` or `arch/`.
 
-**(c) Only the CFG passes move to VIR** (`condition-merge`,
-`if-conversion`, `split`, block merging), the value passes stay on the
-pre-IR.
+### 4.0 The pass infrastructure (identical output)
 
-What step 2 keeps open: one pass per file (2a) is the unit either answer
-works on: under (a) the files stay, under (b) or (c) each file is ported
-alone and its row in the table switches implementation, with
-`VCC_VIR_PASSES` giving the A/B.  The table's `needs`/`keeps` name facts,
-not arrays, so it serves both forms.  Analysis validity is recorded on both
-sides (2b for the pre-IR, 2c for VIR), so either form reuses its analyses.
-Step 3 closes reasons in the builder's `LO()` interface and the lowerings,
-not in passes, and depends on neither answer.  What step 2 must not do:
-build the importer (only (a) needs it) or an editing API on VIR (only (b)).
+**Status: done (#203).**
 
-Evidence that would decide, all obtainable after 2b:
+One PR, `src/vir/`, `src/include/vir/`, `src/bin/virtest/`,
+`src/codegen/vir/pass-table.[ch]`, `src/Makefile` (`vir_SRC`),
+`doc/SPEC-vir.md` (14, 16, 17.1), as the design's sections 1-4 say:
 
-1. `bench/vir-passes.py` per-pass instructions on SQLite and the kernel
-   sample: the share of `to-vir` + `canon` (what (b) could remove) against
-   the passes' own share.
-2. For each candidate of step 4 (slot forwarding, extensions, compare
-   reuse, the division and switch recipes, constant propagation), whether
-   it inserts into a block other than the one being built: that is the
-   capability only the pre-IR has today.
-3. A prototype: port one small pass (`split` or `condition-merge`) to VIR
-   behind its table row; compare lines of code, instructions and the
-   effort, with `VCC_VIR_PASSES` selecting either.
-4. Whether `virtest --pass NAME` on `.vir` files is wanted for every pass
-   (it needs the importer under (a), nothing under (b)).
+1. rename `virbuild_pass*` in `codegen/vir/` to `virbuild_pass*` (STYLE);
+2. `src/include/vir/pass.h`, `src/vir/pass-list.c` (empty registry),
+   `src/vir/compact.c` (`vir_function_compact`, tested from
+   `virtest --selftest`), the `VCC_VIR_CHECK_ANALYSES=1` check 2c left out;
+3. the builder table's `vir` field, the adapter, 64-bit row masks,
+   `PASS_OFF_BY_DEFAULT` and `+NAME` in `VCC_VIR_PASSES`;
+4. `virtest` runs registered passes (`; PASSES:`, `--passes`,
+   `; CHANGES: yes`, `vir_verify` after each).
+
+Proof: step 2's list (identical output with and without `VCC_VIR=bl`), plus
+`bench/vir-test.py -j 3` and `--mutate 3000` under ASan.
+
+### 4.1 The first pass: `redundant-extensions`
+
+**Status: parked by owner, 2026-11-13 (draft PR #207, not to be merged).**
+
+`src/vir/known-bits.c`, `src/vir/pass/redundant-extensions.c`, its tests in
+`src/test/vir/pass/redundant-extensions/`, one row after `canon` in the
+builder's table.  Algorithm, tests, expected counters and the kill criterion
+are in the design's section 6.  It **changes output** at `-O2` with VIR on
+both targets: the proof is the design's section 5 (the C suites with
+`VCC_VIR=bl VCC_VIR_PASSES=verify`, `--cpu cortex-a53`, ABI, x86-64's VIR
+lowering, TSVC, zlib, SQLite, the counters of `bench/record-passes.py` and
+`bench/vir-passes.py`), plus byte identity in the default environment and
+with `VCC_VIR=bl VCC_VIR_PASSES=-redundant-extensions`.  It adds its row to
+VIR-MIGRATION.md's "Budget used".
+
+The second pass is `if-conversion` ported to VIR (design section 7); it
+needs its own short design of the editing layer first.
+
+## Order of the steps that follow
+
+1. **4.0, then 4.1**: the pass infrastructure and `redundant-extensions`.
+2. **2e**, one lowering driver.  Its files (`arch/*/vir/`, the new
+   `codegen/vir/lowering-driver.c`) do not overlap 4.0/4.1's, so it may run
+   in parallel with them; when only one worker is free, 4.0/4.1 goes first.
+3. **Step 3**, most frequent reason first, starting with the two sections
+   above that are written in detail:
+   - **3.1 `inline_assembly`** (1 867, the kernel's main reason).  It waits
+     for WORK-codegen-surviving step 9, which is not on main.
+   - **3.0 `debug_info`** (every function with `-g`).  It goes after 2e so
+     that both targets get the rows from the driver.  It goes **first** if
+     step 9 is still open when 2e merges.
+   - Then 3.2, 3.3, ... by count and free files, as the table above says.
 
 ## Not in this order
 
-- **Step 4 of VIR-MIGRATION** (moving passes: the record clean-ups by the
-  counters of step 1, then slots, exts and flags, then the walker's recipes
-  in `src/codegen/opt/`) and **step 5** (deleting arm64's walker and record
-  optimizer, then x86-64's direct lowering): later orders, after the
-  owner's decision above.
+- **Step 4 of VIR-MIGRATION beyond 4.0 and 4.1** (the second pass,
+  `if-conversion` on VIR; slots, flags, the walker's recipes in
+  `src/codegen/opt/`) and **step 5** (deleting arm64's walker and record
+  optimizer, then x86-64's direct lowering): later orders, each pass
+  designed as `DESIGN-vir-optimizer.md` says.  The arm64 lowering rule for
+  the other ~60 % of `exts` (design Q5) is an instruction-selection change
+  in `arch/a64/vir/`, not a VIR pass.
 - The rest of the module pass on `src/vir/` and `src/codegen/vir/`:
   `vir.c` split into nine files (Q-vir-ir-04), the allocator's split
   (Q-vir-ir-07), `parse.c` split (Q-vir-ir-08), per-opcode facts into

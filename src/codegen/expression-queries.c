@@ -1,4 +1,12 @@
-/* vcc code generator: queries about the shape of an expression */
+/*
+ * expression-queries.c: small questions about the shape of an expression that more than one
+ * backend asks.
+ *
+ * direct_callee finds the callee symbol of a call through casts, and returns 0 for builtins (setting
+ * *ref to their name reference) and for calls through a cast to a different function type, which
+ * must stay indirect.  Both functions are used by the walker, arm64's call lowering and the
+ * prepass; they read the AST only.
+ */
 #include "emitimpl.h"
 
 VPRIV bool ptr_to_vla(cc *c, qty ptr)

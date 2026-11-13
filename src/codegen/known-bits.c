@@ -1,4 +1,12 @@
-/* vcc code generator: bit facts about constants and expressions */
+/*
+ * known-bits.c: which bits of an integer expression are known (kbits), and whether a constant fits
+ * an inline-asm immediate constraint letter (imm_fits: arm64's I, J, K, L, M, N).
+ *
+ * kbits fills a known-mask and the values of those bits; it looks through casts, constants, comma,
+ * conditional, bitwise operators and shifts, and is conservative: a bit not proven is not known.  Its
+ * only user is arm64's inline-asm operand selection (arch/a64/codegen/asm.c), which also calls
+ * imm_fits; imm_fits is the arm64 meaning of the letters (logimm_ok for the logical-immediate ones).
+ */
 #include "emitimpl.h"
 
 VPRIV bool imm_fits(int ch, i128 v)
@@ -67,7 +75,7 @@ VPRIV void kbits(ecx *e, uint32_t n, uint64_t *k, uint64_t *v)
 		break;
 	}
 	case N_UNARY:
-		if (x->aux != T_TILDE)
+		if (x->aux != LEX_TOKEN_TILDE)
 			return;
 		kbits(e, x->a, &ka, &va);
 		*k = ka, *v = ~va & ka;
@@ -76,20 +84,20 @@ VPRIV void kbits(ecx *e, uint32_t n, uint64_t *k, uint64_t *v)
 		kbits(e, x->a, &ka, &va);
 		kbits(e, x->b, &kb, &vb);
 		switch (x->aux) {
-		case T_AMP:	/* known where both are known or either is a known 0 */
+		case LEX_TOKEN_AMPERSAND:	/* known where both are known or either is a known 0 */
 			*k = (ka & kb) | (ka & ~va) | (kb & ~vb);
 			*v = va & vb;
 			break;
-		case T_PIPE:	/* known where both are known or either is a known 1 */
+		case LEX_TOKEN_PIPE:	/* known where both are known or either is a known 1 */
 			*k = (ka & kb) | (ka & va) | (kb & vb);
 			*v = va | vb;
 			break;
-		case T_CARET:
+		case LEX_TOKEN_CARET:
 			*k = ka & kb;
 			*v = (va ^ vb) & *k;
 			break;
-		case T_LESSLESS:
-		case T_GREATERGREATER: {
+		case LEX_TOKEN_LESS_LESS:
+		case LEX_TOKEN_GREATER_GREATER: {
 			int bw = (int)tsize(c, N(x->b)->ty) * 8;
 			uint64_t s = vb;
 
@@ -99,7 +107,7 @@ VPRIV void kbits(ecx *e, uint32_t n, uint64_t *k, uint64_t *v)
 				return;	/* negative */
 			if (s >= (uint64_t)w)
 				return;
-			if (x->aux == T_LESSLESS) {
+			if (x->aux == LEX_TOKEN_LESS_LESS) {
 				*k = ka << s | ((1ull << s) - 1);
 				*v = va << s;
 			} else {
@@ -121,13 +129,13 @@ VPRIV void kbits(ecx *e, uint32_t n, uint64_t *k, uint64_t *v)
 			}
 			break;
 		}
-		case T_PLUS:
-		case T_MINUS:
-		case T_STAR:
+		case LEX_TOKEN_PLUS:
+		case LEX_TOKEN_MINUS:
+		case LEX_TOKEN_STAR:
 			if ((ka & wm) != wm || (kb & wm) != wm)
 				return;
 			*k = ~0ull;
-			*v = x->aux == T_PLUS ? va + vb : x->aux == T_MINUS ? va - vb : va * vb;
+			*v = x->aux == LEX_TOKEN_PLUS ? va + vb : x->aux == LEX_TOKEN_MINUS ? va - vb : va * vb;
 			break;
 		default:
 			return;

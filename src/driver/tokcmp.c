@@ -1,4 +1,17 @@
-/* The token-stream comparison of --cmp (with its hash cache) and the token hash of --vcc-tokhash: test aids, not product. */
+/*
+ * tokcmp.c: --cmp, comparing our -E output with clang's token by token, and --vcc-tokhash, a hash of
+ * the token stream the parser sees.  Test aids for bench/vcc-diff.py and the parity runs, not part of
+ * the product.
+ *
+ * The comparison lexes both sides with vcc's own lexer and compares kind and spelling, so spacing and
+ * line markers do not count; the first difference is shown and the status is 1 (2 when the reference
+ * cannot be opened).  The reference's token-stream hash is kept in REF.i.th, keyed by the reference's
+ * size and mtime: when ours hashes the same, the reference is not read again (VPP_CMP_NOCACHE=1
+ * compares in full).  The cache file is written through a temporary name and renamed, so parallel
+ * runs are safe.  Lexing here turns identifier interning off (lex_identifiers_not_interned) because
+ * the token copies are freed: do not keep pointers into them.  The token hash covers kind, spacing
+ * flags, location, spelling and the file names (VPP_TOKCOUNT=1 only counts).
+ */
 #include "driver-internal.h"
 
 #ifdef __APPLE__
@@ -8,38 +21,38 @@
 #endif
 
 /* the tokens of a file (whole, zero padded), lexed */
-static vlex_file lexbuf(const char *s, size_t n)
+static lex_file lexbuf(const char *s, size_t n)
 {
-	vlex_file f = { 0 };
+	lex_file f = { 0 };
 	char *src = mmap(NULL, n + 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
-	vtok *tok = mmap(NULL, (n + 2) * sizeof(vtok), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
-	size_t sn = vlex_scratch_size(n) + 4096;
+	lex_token *tok = mmap(NULL, (n + 2) * sizeof(lex_token), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+	size_t sn = lex_scratch_size(n) + 4096;
 	void *scr = mmap(NULL, sn, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
 
 	memcpy(src, s, n);
 	f.src = src;
 	f.size = (uint32_t)n;
-	f.ntok = vlex(src, n, tok, scr);
+	f.ntok = lex_tokenize(src, n, tok, scr);
 	f.tok = tok;
 	munmap(scr, sn);
 	return f;
 }
 
-static void lexfree(vlex_file *f)
+static void lexfree(lex_file *f)
 {
 	munmap((void *)f->src, f->size + 4096);
-	munmap((void *)f->tok, (f->size + 2) * sizeof(vtok));
+	munmap((void *)f->tok, (f->size + 2) * sizeof(lex_token));
 }
 
-static size_t clean(const vlex_file *f, const vtok *t, char *b)
+static size_t clean(const lex_file *f, const lex_token *t, char *b)
 {
-	if (t->flags & TF_DIRTY)
-		return vlex_spell(f->src, t, b);
+	if (t->flags & LEX_TOKEN_FLAG_SPLICED)
+		return lex_token_spell(f->src, t, b);
 	memcpy(b, f->src + t->off, t->len);
 	return t->len;
 }
 
-static unsigned line_of(const vlex_file *f, uint32_t off)
+static unsigned line_of(const lex_file *f, uint32_t off)
 {
 	unsigned l = 1;
 
@@ -48,7 +61,7 @@ static unsigned line_of(const vlex_file *f, uint32_t off)
 	return l;
 }
 
-static void show(const char *what, const vlex_file *f, uint32_t i)
+static void show(const char *what, const lex_file *f, uint32_t i)
 {
 	uint32_t a = i > 12 ? i - 12 : 0, e = i + 12 < f->ntok ? i + 12 : f->ntok;
 	char b[1 << 16];
@@ -62,18 +75,18 @@ static void show(const char *what, const vlex_file *f, uint32_t i)
 	fputc('\n', stderr);
 }
 
-static int cmp_toks(const vlex_file *pa, const vlex_file *pb, char *ba, char *bb);
+static int cmp_toks(const lex_file *pa, const lex_file *pb, char *ba, char *bb);
 
 /* XXH3 of a token stream: per token the kind, the clean spelling's length and
  * the spelling (what cmp_toks compares) */
-static uint64_t tokstream_hash(const vlex_file *f)
+static uint64_t tokstream_hash(const lex_file *f)
 {
 	size_t cap = (size_t)f->size + (size_t)f->ntok * 5 + 64, n = 0;
 	unsigned char *b = mmap(NULL, cap, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
 	uint64_t h;
 
 	for (uint32_t i = 0; i < f->ntok; i++) {
-		const vtok *t = &f->tok[i];
+		const lex_token *t = &f->tok[i];
 		size_t l;
 
 		if (n + 5 + t->len + 64 > cap)	/* a clean spelling is never longer than the raw one */
@@ -135,7 +148,7 @@ int ppd_compare(const char *ours, size_t on, const char *refpath)
 	vintern_init();
 	VAUTOCLOSE int fd = open(refpath, O_RDONLY);
 	struct stat st;
-	vlex_file A, B;
+	lex_file A, B;
 	static _Thread_local char *ba, *bb;
 	uint64_t rh;
 	int r, cached;
@@ -148,12 +161,12 @@ int ppd_compare(const char *ours, size_t on, const char *refpath)
 		ba = malloc(1 << 20);
 		bb = malloc(1 << 20);
 	}
-	vlex_no_intern = 1;	/* the copies are freed: nothing may point into them */
+	lex_identifiers_not_interned = 1;	/* the copies are freed: nothing may point into them */
 	A = lexbuf(ours, on);
 	/* VPP_CMP_NOCACHE=1: always lex and compare the reference */
 	cached = !getenv("VPP_CMP_NOCACHE") && refhash_read(refpath, &st, &rh);
 	if (cached && tokstream_hash(&A) == rh) {
-		vlex_no_intern = 0;
+		lex_identifiers_not_interned = 0;
 		printf("same: %u tokens\n", A.ntok);
 		lexfree(&A);
 		return 0;
@@ -163,7 +176,7 @@ int ppd_compare(const char *ours, size_t on, const char *refpath)
 
 		VCLOSE(fd);
 		B = lexbuf(m, (size_t)st.st_size);
-		vlex_no_intern = 0;
+		lex_identifiers_not_interned = 0;
 		munmap(m, (size_t)st.st_size + 1);
 	}
 	if (!cached)
@@ -174,12 +187,12 @@ int ppd_compare(const char *ours, size_t on, const char *refpath)
 	return r;
 }
 
-static int cmp_toks(const vlex_file *pa, const vlex_file *pb, char *ba, char *bb)
+static int cmp_toks(const lex_file *pa, const lex_file *pb, char *ba, char *bb)
 {
-	const vlex_file A = *pa, B = *pb;
+	const lex_file A = *pa, B = *pb;
 
 	for (uint32_t i = 0;; i++) {
-		const vtok *x = &A.tok[i], *y = &B.tok[i];
+		const lex_token *x = &A.tok[i], *y = &B.tok[i];
 		size_t nx, ny;
 
 		if (i == A.ntok || i == B.ntok) {
@@ -203,11 +216,11 @@ static int cmp_toks(const vlex_file *pa, const vlex_file *pb, char *ba, char *bb
 	}
 }
 
-/* --vcc-tokhash: a hash of what pp_next hands the parser */
+/* --vcc-tokhash: a hash of what pp_token_next hands the parser */
 VPRIV void driver_tokhash_run(struct driver_job *job, pp *p, const ppd_env *env)
 {
 	{
-		/* a hash of what pp_next hands the parser: kind, SOL/SPACE, spelling, id, file:line:col, sys */
+		/* a hash of what pp_token_next hands the parser: kind, SOL/SPACE, spelling, id, file:line:col, sys */
 		uint64_t h = 1469598103934665603ull;
 		unsigned long n = 0;
 		char tmp[1 << 16], line[64];
@@ -223,26 +236,26 @@ VPRIV void driver_tokhash_run(struct driver_job *job, pp *p, const ppd_env *env)
 			size_t sl;
 			unsigned char kf[2];
 
-			pp_next(p, &t);
-			if (t.kind == T_EOF)
+			pp_token_next(p, &t);
+			if (t.kind == LEX_TOKEN_EOF)
 				break;
 			n++;
 			if (count_only)
 				continue;
-			kf[0] = t.kind, kf[1] = t.flags & (TF_SOL | TF_SPACE);
+			kf[0] = t.kind, kf[1] = t.flags & (LEX_TOKEN_FLAG_LINE_START | LEX_TOKEN_FLAG_SPACE_BEFORE);
 			HB(kf, 2);
 			HB(&t.loc, 4);	/* the same in every run: file bases are assigned in order */
-			sp = t.len < sizeof(tmp) ? pp_spell(&t, tmp, &sl) : (sl = 0, "");
+			sp = t.len < sizeof(tmp) ? pp_token_spell(&t, tmp, &sl) : (sl = 0, "");
 			HB(sp, sl);
-			if (t.kind == T_IDENT)
+			if (t.kind == LEX_TOKEN_IDENTIFIER)
 				HB(vintern_ents[t.id].s, vintern_ents[t.id].len);
 		}
-		nf = pp_files(p, fn, 4096, 0);
+		nf = pp_file_names(p, fn, 4096, 0);
 		for (size_t i = 0; i < nf; i++)
 			HB(fn[i], strlen(fn[i]) + 1);
 #undef HB
 		snprintf(line, sizeof(line), "%016llx %lu\n", (unsigned long long)h, n);
-		job->status = pp_errors(p) ? 1 : write_out(env->cwd, job->out, env->outfd, line, strlen(line), job->errfd);
+		job->status = pp_error_count(p) ? 1 : write_out(env->cwd, job->out, env->outfd, line, strlen(line), job->errfd);
 		return;
 	}
 }

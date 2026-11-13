@@ -105,7 +105,7 @@ VPRIV int cond_value(cc *c, uint32_t n)
 		return a == !d && b == !d ? !d : -1;
 	}
 	case N_UNARY: {
-		int a = x->aux == T_EXCLAIM ? cond_value(c, x->a) : -1;
+		int a = x->aux == LEX_TOKEN_EXCLAMATION ? cond_value(c, x->a) : -1;
 
 		return a < 0 ? -1 : !a;
 	}
@@ -367,7 +367,7 @@ static void rp_step(cc *c, rpath *P, uint32_t b, uint32_t e, const char *what, u
 	s = &P->st[P->n++];
 	s->b = b, s->e = e, s->what = what, s->tb = s->te = 0;
 	if (q) {
-		pp_span r = rng(c, q);
+		diag_span r = rng(c, q);
 
 		s->tb = r.b, s->te = r.e;
 	}
@@ -460,13 +460,13 @@ static bool rp_walk(cc *c, uint32_t n, bool reach, bool brk, rpath *P)
 		return rp_walk(c, x->c, true, brk, P);
 	case N_CASE: case N_DEFAULT:
 		if (!reach && P->f->sw)
-			rp_step(c, P, x->loc, pp_tok_end(c->p, x->loc), x->op == N_CASE ? "the switch jumps to this case"
+			rp_step(c, P, x->loc, pp_token_end_find(c->p, x->loc), x->op == N_CASE ? "the switch jumps to this case"
 					      : "the switch jumps to 'default'", 0);
 		return rp_walk(c, x->c, true, brk, P);
 	case N_BREAK:
 		if (!reach || !brk)
 			return false;
-		rp_step(c, P, x->loc, pp_tok_end(c->p, x->loc), P->brk && P->brk[0] == 's' ? "this 'break' leaves the switch"
+		rp_step(c, P, x->loc, pp_token_end_find(c->p, x->loc), P->brk && P->brk[0] == 's' ? "this 'break' leaves the switch"
 				      : "this 'break' leaves the loop", 0);
 		return true;
 	case N_IF: {
@@ -564,7 +564,7 @@ static int rstep_cmp(const void *a, const void *b)
 }
 
 /* the steps as labels "(1) 'x > 0' is false", ..., the last at the closing brace */
-static void return_path(cc *c, uint32_t body, flow *f, vdiag *d, uint32_t rbrace, const sym *y)
+static void return_path(cc *c, uint32_t body, flow *f, diag_record *d, uint32_t rbrace, const sym *y)
 {
 	rpath P = { .f = f };
 	char buf[160];
@@ -579,20 +579,20 @@ static void return_path(cc *c, uint32_t body, flow *f, vdiag *d, uint32_t rbrace
 
 		if (s->te > s->tb) {
 			size_t len;
-			const char *t = pp_src(c->p, s->tb, s->te, &len);
+			const char *t = pp_source_text(c->p, s->tb, s->te, &len);
 
 			if (t && len <= 48 && !memchr(t, '\n', len))
 				snprintf(buf, sizeof buf, "(%d) '%.*s' %s", i + 1, (int)len, t, s->what);
 			else
 				snprintf(buf, sizeof buf, "(%d) the condition %s", i + 1, s->what);
-			pp_diag_label(c->p, d, s->tb, s->te, buf);
+			diag_record_label_add(c->p, d, s->tb, s->te, buf);
 		} else {
 			snprintf(buf, sizeof buf, "(%d) %s", i + 1, s->what);
-			pp_diag_label(c->p, d, s->b, s->e, buf);
+			diag_record_label_add(c->p, d, s->b, s->e, buf);
 		}
 	}
 	snprintf(buf, sizeof buf, "(%d) '%.*s' ends here without a return", i + 1, IDF(y->name));
-	pp_diag_label(c->p, d, rbrace, rbrace + 1, buf);
+	diag_record_label_add(c->p, d, rbrace, rbrace + 1, buf);
 }
 
 /* clang's -Wreturn-type at the body's closing brace (flow.c decides: k 1 "in all control
@@ -605,7 +605,7 @@ VPRIV __attribute__((noinline)) void return_type_warn(cc *c, uint32_t s, uint32_
 	uint8_t small[64];
 	flow f = { 0 };
 	bool end = false;
-	vdiag *d;
+	diag_record *d;
 
 	d = cc_warn_begin(c, "return-type", true, NULL, rbrace, k == 1 ? "non-void function does not return a value in all control paths"
 			  : "non-void function does not return a value");
@@ -622,9 +622,9 @@ VPRIV __attribute__((noinline)) void return_type_warn(cc *c, uint32_t s, uint32_
 		if (end && !f.unsure && f.ret)	/* some paths return: show one that does not */
 			return_path(c, body, &f, d, rbrace, y);
 	}
-	pp_diag_help(c->p, d, "'%.*s' returns '%s': end it with a return statement", IDF(y->name),
+	diag_record_help_set(c->p, d, "'%.*s' returns '%s': end it with a return statement", IDF(y->name),
 		     tyname(c, T(c, y->ty)->base));
-	pp_diag_emit(c->p, d);
+	diag_record_emit(c->p, d);
 	if (f.lab != small)
 		free(f.lab);
 }

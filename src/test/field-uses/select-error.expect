@@ -1,0 +1,4 @@
+tu	select-error.c	errors
+exit 1
+stderr:
+vcc: error: VCC_FIELD_USES: bad line 'noseparator' (want OWNER.FIELD [NEW])

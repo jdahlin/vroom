@@ -5,7 +5,7 @@
  * the CONFIG_ scan is the same raw-text scan (comments and strings count).
  *
  * The difference is where the text comes from: every listed file goes
- * through the token cache (vlex_get), where the compile has usually just
+ * through the token cache (lex_file_get), where the compile has usually just
  * read it, and each file's CONFIG_ names are found once per process and
  * kept (files never change under vccd, as for the token cache).  fixdep
  * opens and reads all ~900 headers of a TU every time (~29 ms CPU per TU).
@@ -92,7 +92,7 @@ static int str_ends_with(const char *s, size_t slen, const char *sub)
 static char *scan_configs(const char *text)
 {
 	item *seen[HASHSZ] = { 0 };
-	vbuf b = { 0 };
+	vbuffer b = { 0 };
 	const char *p = text, *q, *r;
 
 	while ((p = strstr(p, "CONFIG_"))) {
@@ -106,20 +106,20 @@ static char *scan_configs(const char *text)
 			q++;
 		r = str_ends_with(p, (size_t)(q - p), "_MODULE") ? q - 7 : q;
 		if (r > p && !in_hashtable(p, (unsigned int)(r - p), seen)) {
-			vbuf_put(&b, p, (size_t)(r - p));
-			vbuf_put(&b, "\n", 1);
+			vbuffer_append(&b, p, (size_t)(r - p));
+			vbuffer_append(&b, "\n", 1);
 		}
 		p = q;
 	}
-	vbuf_put(&b, "", 1);
+	vbuffer_append(&b, "", 1);
 	free_tab(seen);
 	return b.p;
 }
 
 /* f's names, computed once per file (the cache entry is immortal); a racing thread may scan too */
-static const char *file_configs(const vlex_file *f)
+static const char *file_configs(const lex_file *f)
 {
-	vlex_file *w = (vlex_file *)f;
+	lex_file *w = (lex_file *)f;
 	char *names = __atomic_load_n(&w->fixdep, __ATOMIC_ACQUIRE), *exp = NULL;
 
 	if (names)
@@ -146,7 +146,7 @@ static int is_no_parse_file(const char *s, size_t len)
 
 typedef struct job {
 	const char *cwd;
-	vbuf *o;
+	vbuffer *o;
 	item **configs;
 	char err[512];
 } job;
@@ -154,14 +154,14 @@ typedef struct job {
 static int use_file(job *j, const char *path)
 {
 	char abs[4096];
-	const vlex_file *f;
+	const lex_file *f;
 	const char *names;
 
 	if (path[0] != '/' && j->cwd)
 		snprintf(abs, sizeof(abs), "%s/%s", j->cwd, path);
 	else
 		snprintf(abs, sizeof(abs), "%s", path);
-	f = vlex_get(abs, strlen(abs));
+	f = lex_file_get(abs, strlen(abs));
 	if (!f) {
 		snprintf(j->err, sizeof(j->err), "fixdep: error opening file: %s: %s\n", path, strerror(ENOENT));
 		return -1;
@@ -170,9 +170,9 @@ static int use_file(job *j, const char *path)
 		const char *e = strchr(names, '\n');
 
 		if (!in_hashtable(names, (unsigned int)(e - names), j->configs)) {
-			vbuf_s(j->o, "    $(wildcard include/config/");
-			vbuf_put(j->o, names, (size_t)(e - names));
-			vbuf_s(j->o, ") \\\n");
+			vbuffer_string_append(j->o, "    $(wildcard include/config/");
+			vbuffer_append(j->o, names, (size_t)(e - names));
+			vbuffer_string_append(j->o, ") \\\n");
 		}
 		names = e + 1;
 	}
@@ -241,20 +241,20 @@ static int parse_dep_file(job *j, char *p, const char *target)
 		if (is_source) {
 			if (!saw_any_target) {
 				saw_any_target = true;
-				vbuf_s(j->o, "source_");
-				vbuf_s(j->o, target);
-				vbuf_s(j->o, " := ");
-				vbuf_s(j->o, p);
-				vbuf_s(j->o, "\n\n");
-				vbuf_s(j->o, "deps_");
-				vbuf_s(j->o, target);
-				vbuf_s(j->o, " := \\\n");
+				vbuffer_string_append(j->o, "source_");
+				vbuffer_string_append(j->o, target);
+				vbuffer_string_append(j->o, " := ");
+				vbuffer_string_append(j->o, p);
+				vbuffer_string_append(j->o, "\n\n");
+				vbuffer_string_append(j->o, "deps_");
+				vbuffer_string_append(j->o, target);
+				vbuffer_string_append(j->o, " := \\\n");
 				need_parse = true;
 			}
 		} else if (!is_ignored_file(p, (size_t)(q - p)) && !in_hashtable(p, (unsigned int)(q - p), files)) {
-			vbuf_s(j->o, "  ");
-			vbuf_s(j->o, p);
-			vbuf_s(j->o, " \\\n");
+			vbuffer_string_append(j->o, "  ");
+			vbuffer_string_append(j->o, p);
+			vbuffer_string_append(j->o, " \\\n");
 			need_parse = true;
 		}
 		if (need_parse && !is_no_parse_file(p, (size_t)(q - p)))
@@ -270,13 +270,13 @@ static int parse_dep_file(job *j, char *p, const char *target)
 		snprintf(j->err, sizeof(j->err), "fixdep: parse error; no targets found\n");
 		return -1;
 	}
-	vbuf_s(j->o, "\n");
-	vbuf_s(j->o, target);
-	vbuf_s(j->o, ": $(deps_");
-	vbuf_s(j->o, target);
-	vbuf_s(j->o, ")\n\n$(deps_");
-	vbuf_s(j->o, target);
-	vbuf_s(j->o, "):\n");
+	vbuffer_string_append(j->o, "\n");
+	vbuffer_string_append(j->o, target);
+	vbuffer_string_append(j->o, ": $(deps_");
+	vbuffer_string_append(j->o, target);
+	vbuffer_string_append(j->o, ")\n\n$(deps_");
+	vbuffer_string_append(j->o, target);
+	vbuffer_string_append(j->o, "):\n");
 	return 0;
 }
 
@@ -314,7 +314,7 @@ int vfixdep(const char *cwd, const char *depfile, const char *target, const char
 {
 	char dabs[4096], oabs[4096];
 	item *configs[HASHSZ] = { 0 };
-	vbuf o = { 0 };
+	vbuffer o = { 0 };
 	job j = { .cwd = cwd, .o = &o, .configs = configs };
 
 	vintern_init();	/* the token cache interns; vsh may run fixdep before any compile */
@@ -325,11 +325,11 @@ int vfixdep(const char *cwd, const char *depfile, const char *target, const char
 		dprintf(errfd, "fixdep: error opening file: %s: %s\n", depfile, strerror(errno));
 		return 2;
 	}
-	vbuf_s(&o, "savedcmd_");
-	vbuf_s(&o, target);
-	vbuf_s(&o, " := ");
-	vbuf_s(&o, cmdline);
-	vbuf_s(&o, "\n\n");
+	vbuffer_string_append(&o, "savedcmd_");
+	vbuffer_string_append(&o, target);
+	vbuffer_string_append(&o, " := ");
+	vbuffer_string_append(&o, cmdline);
+	vbuffer_string_append(&o, "\n\n");
 	rc = parse_dep_file(&j, d, target);
 	free(d);
 	free_tab(configs);

@@ -6,7 +6,7 @@ static void param_note(cc *c);
 /* clang's message for a value of type from that cannot become to */
 VPRIV void bad_conversion(cc *c, uint32_t n, qty to)
 {
-	pp_span r = rng(c, n);
+	diag_span r = rng(c, n);
 	const char *f = tyname(c, N(n)->ty), *t = tyname(c, to);
 
 	if (N(n)->flags & NF_ERR)
@@ -60,7 +60,7 @@ static qty conv_from(cc *c, uint32_t n)
 /* "... initializing 'T' with an expression of type 'F'" and the like, per context */
 static void conv_error(cc *c, uint32_t n, qty to, const char *what, const char *flag, const char *id)
 {
-	pp_span r = rng(c, n);
+	diag_span r = rng(c, n);
 	const char *f = arr_tyname(c, conv_from(c, n)), *t = tyname(c, to);
 	uint32_t loc = c->cv_what == CX_PASS || c->cv_what == CX_RETURN ? r.b : c->cv_loc;
 	int bit = !strcmp(flag, "-Wint-conversion") ? 1 : !strcmp(flag, "-Wincompatible-pointer-types") ? 2 : 4;
@@ -76,7 +76,7 @@ static void conv_error(cc *c, uint32_t n, qty to, const char *what, const char *
 	bool ad = !dr && bit != 4 && is_ptr(c, to) && compatible(c, QUNQ(ft), QUNQ(T(c, to)->base)) &&
 		  (op == N_VAR || op == N_MEMBER || op == N_INDEX) && (N(n)->flags & NF_LVALUE) &&
 		  !(N(n)->flags & NF_BITFIELD) && !(op == N_VAR && c->syms[N(n)->a].sc == SC_REGISTER);
-	pp_fixit fx[2] = { { r.b, r.b, wrap ? "*(" : dr ? "*" : "&", VDA_MAYBE }, { r.e, r.e, ")", VDA_MAYBE } };
+	diag_fixit fx[2] = { { r.b, r.b, wrap ? "*(" : dr ? "*" : "&", DIAG_APPLICABILITY_MAYBE }, { r.e, r.e, ")", DIAG_APPLICABILITY_MAYBE } };
 	const char *h = dr ? "; dereference with *" : ad ? "; take the address with &" : "";
 	int nfx = wrap ? 2 : dr || ad;
 	char fl[64];
@@ -87,7 +87,7 @@ static void conv_error(cc *c, uint32_t n, qty to, const char *what, const char *
 		while (N(m)->op == N_CAST && !c->span[m].e)
 			m = N(m)->a;
 		if (!is_ptr(c, to) && N(m)->op == N_ADDR && compatible(c, QUNQ(N(N(m)->a)->ty), QUNQ(to)))
-			h = "; remove &", fx[0] = (pp_fixit){ rng_np(c, m).b, rng_np(c, m).b + 1, "", VDA_MAYBE }, nfx = 1;
+			h = "; remove &", fx[0] = (diag_fixit){ rng_np(c, m).b, rng_np(c, m).b + 1, "", DIAG_APPLICABILITY_MAYBE }, nfx = 1;
 	}
 	snprintf(fl, sizeof fl, "%s [%s", h, flag);
 
@@ -107,23 +107,23 @@ static void conv_error(cc *c, uint32_t n, qty to, const char *what, const char *
 	static const char *const ipt[] = { "incompatible-pointer-types", NULL };
 
 	if (c->o->conv_warn & bit) {
-		/* -Wno-error=...: clang's warning (the message without its flag, which pp_warnx adds) */
+		/* -Wno-error=...: clang's warning (the message without its flag, which diag_warning_report adds) */
 		char *b = strrchr(msg, '[');
 
-		if (pp_werror_named(c->p, flag + 2, bit == 4 ? ipt : NULL) == 1)
+		if (diag_warning_error_named(c->p, flag + 2, bit == 4 ? ipt : NULL) == 1)
 			goto err;	/* -Werror= again: clang's own error (no "-Werror,") */
 		if (b && b > msg)
 			b[-1] = 0;
-		pp_diag_next_id = id;
+		diag_next_id = id;
 		if (cc_warnx(c, flag + 2, true, bit == 4 ? ipt : NULL, loc, &r, 1, fx, nfx, "%s", msg) && c->cv_what == CX_PASS)
 			param_note(c);
-		pp_diag_next_id = NULL;
+		diag_next_id = NULL;
 		return;
 	}
 err:
-	pp_diag_next_id = id;
+	diag_next_id = id;
 	report(c, "error", loc, &r, 1, fx, nfx, "%s", msg);
-	pp_diag_next_id = NULL;
+	diag_next_id = NULL;
 	c->nconv++;
 	if (c->cv_what == CX_PASS)
 		param_note(c);
@@ -169,7 +169,7 @@ static bool nested_quals(cc *c, qty a, qty b)
 /* a warning about the implicit conversion of n to to, in clang's words for the context */
 static void conv_warn(cc *c, uint32_t n, qty to, const char *flag, const char *const *g, const char *what)
 {
-	pp_span r = rng(c, n);
+	diag_span r = rng(c, n);
 	const char *f = arr_tyname(c, conv_from(c, n)), *t = tyname(c, to);
 	uint32_t loc = c->cv_what == CX_PASS || c->cv_what == CX_RETURN ? r.b : c->cv_loc;
 	bool on;
@@ -310,7 +310,7 @@ static void literal_conv(cc *c, uint32_t n, qty to)
 
 	while (N(e)->op == N_CAST && !c->span[e].e && N(e)->a)
 		e = N(e)->a;
-	lit = N(e)->op == N_UNARY && N(e)->aux == T_MINUS ? N(e)->a : e;
+	lit = N(e)->op == N_UNARY && N(e)->aux == LEX_TOKEN_MINUS ? N(e)->a : e;
 	if (N(lit)->op != N_FNUM || is_q(c, N(lit)->ty) || ty_size(c, N(lit)->ty) > 8)
 		return;
 	v = c->fpool[N(lit)->a];
@@ -334,10 +334,10 @@ static void literal_conv(cc *c, uint32_t n, qty to)
 			snprintf(ts, sizeof ts, "%.0f", t == 0 ? 0.0 : t);
 	}
 	{
-		pp_span r[2] = { { c->cv_what == CX_PASS ? c->cv_callee : c->cv_loc, 0 },
-				 { N(e)->loc, pp_tok_end(c->p, N(lit)->loc) } };
+		diag_span r[2] = { { c->cv_what == CX_PASS ? c->cv_callee : c->cv_loc, 0 },
+				 { N(e)->loc, pp_token_end_find(c->p, N(lit)->loc) } };
 
-		r[0].e = pp_tok_end(c->p, r[0].b);
+		r[0].e = pp_token_end_find(c->p, r[0].b);
 		if (what) {
 			cc_warnx(c, "literal-conversion", true, w_conv, r[1].b, r, 2, NULL, 0,
 				 "implicit conversion of out of range value from '%s' to '%s' is undefined",
@@ -447,10 +447,10 @@ VPRIV void const_conv(cc *c, uint32_t n, qty to)
 		uint32_t b = rng(c, e).b;
 		int ch;
 
-		while ((ch = pp_loc_char(c->p, b)) == '(' || ch == ' ' || ch == '\t')
+		while ((ch = pp_location_char(c->p, b)) == '(' || ch == ' ' || ch == '\t')
 			b++;
 		if ((N(e)->op == N_NUM ? (N(e)->aux & NUM_RADIX) : ch == '0') ||
-		    ((KIND(c, to) == TY_CHAR || KIND(c, to) == TY_SCHAR) && pp_loc_char(c->p, c->cv_loc) == '{'))
+		    ((KIND(c, to) == TY_CHAR || KIND(c, to) == TY_SCHAR) && pp_location_char(c->p, c->cv_loc) == '{'))
 			return;
 		deferred = false;
 	}
@@ -463,11 +463,11 @@ VPRIV void const_conv(cc *c, uint32_t n, qty to)
 		return;
 	{
 		uint32_t cl = c->cv_what == CX_PASS ? c->cv_callee : c->cv_loc;
-		pp_span r[2] = { { cl, pp_tok_end(c->p, cl) }, rng_np(c, n) };
+		diag_span r[2] = { { cl, pp_token_end_find(c->p, cl) }, rng_np(c, n) };
 		uint32_t at = r[1].b;
 		char msg[112];
 
-		while (pp_loc_char(c->p, at) == '(' || pp_loc_char(c->p, at) == ' ')	/* clang: (v) at v */
+		while (pp_location_char(c->p, at) == '(' || pp_location_char(c->p, at) == ' ')	/* clang: (v) at v */
 			at++;
 
 		snprintf(msg, sizeof msg, "implicit conversion from '%s' to '%s' changes value from %lld to %lld",
@@ -476,23 +476,23 @@ VPRIV void const_conv(cc *c, uint32_t n, qty to)
 
 		snprintf(vs, sizeof vs, "%lld", (long long)v);	/* (clang: "expanded from macro" at the constant) */
 		if (deferred && c->fn && !c->defer_rt) {
-			pp_diag_next_id = "warn_impcast_integer_precision_constant";
+			diag_next_id = "warn_impcast_integer_precision_constant";
 			rt_defer(c, "constant-conversion", w_conv, at, r, 2, vs, (uint32_t)strlen(vs), "%s", msg);
-			pp_diag_next_id = NULL;
+			diag_next_id = NULL;
 			return;
 		}
 		{
-			vdiag *d;
+			diag_record *d;
 
-			pp_diag_next_id = "warn_impcast_integer_precision_constant";
+			diag_next_id = "warn_impcast_integer_precision_constant";
 			d = cc_warn_begin(c, "constant-conversion", true, w_conv, at, "%s", msg);
-			pp_diag_next_id = NULL;
+			diag_next_id = NULL;
 
 			if (d) {
-				pp_diag_label(c->p, d, r[0].b, r[0].e, NULL);
-				pp_diag_label(c->p, d, r[1].b, r[1].e, NULL);
-				pp_diag_macro(d, vs, (uint32_t)strlen(vs));
-				pp_diag_emit(c->p, d);
+				diag_record_label_add(c->p, d, r[0].b, r[0].e, NULL);
+				diag_record_label_add(c->p, d, r[1].b, r[1].e, NULL);
+				diag_record_macro_set(d, vs, (uint32_t)strlen(vs));
+				diag_record_emit(c->p, d);
 			}
 		}
 	}
@@ -520,13 +520,13 @@ VPRIV void bitfield_const(cc *c, const field *f, uint32_t v, uint32_t op)
 	if (t == x || (!sg && x < 0 && x >= -((i128)1 << (w - 1))))
 		return;
 	{
-		pp_span r[1] = { rng(c, v) };
+		diag_span r[1] = { rng(c, v) };
 		uint32_t at = op ? op : r[0].b;
 		bool one = sg && w == 1 && x == 1;
 
-		pp_dinfo d = { "warning", at, op ? r : NULL, op ? 1 : 0, NULL, 0, op ? "=" : NULL, op ? 1 : 0 };
+		diag_info d = { "warning", at, op ? r : NULL, op ? 1 : 0, NULL, 0, op ? "=" : NULL, op ? 1 : 0 };
 
-		pp_warnx(c->p, one ? "single-bit-bitfield-constant-conversion" : "bitfield-constant-conversion", true,
+		diag_warning_report(c->p, one ? "single-bit-bitfield-constant-conversion" : "bitfield-constant-conversion", true,
 			 one ? g : g + 1, &d, "implicit truncation from '%s' to %s changes value from %lld to %lld",
 			 tyname(c, N(v)->ty), one ? "a one-bit wide bit-field" : "bit-field", (long long)x, (long long)t);
 	}

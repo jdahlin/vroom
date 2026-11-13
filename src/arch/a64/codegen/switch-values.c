@@ -13,7 +13,7 @@ VPRIV bool a64_switch_values(ecx *e, uint32_t n)
  if (p.lo) opi(e,I_SUBI,cx,r,r,(int64_t)p.lo);
  uint32_t fallback=newlabel(e), done=newlabel(e);
  val a=vreg(r), b=vconst(p.slots-1);
- int cond=emit_cmp(e,T_GREATER,cx,false,&a,&b);
+ int cond=emit_cmp(e,LEX_TOKEN_GREATER,cx,false,&a,&b);
  val_free(e,&b);
  bcond(e,cond,fallback);
  if (!cx) extend(e,r,r,4,false);

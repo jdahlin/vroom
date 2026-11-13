@@ -1,0 +1,23 @@
+tu	anon.c	ok
+use	decl	Outer	a	anon.c:6	file	anon.c	149	6	44	1	-
+use	decl	S.pos	x	anon.c:7	file	anon.c	200	7	25	1	-
+other	decl	S	x	anon.c:7	file	anon.c	217	7	42	1	-
+use	decl	fd	v	anon.c:8	file	anon.c	244	8	22	1	-
+use	decl	Tagged	t	anon.c:9	file	anon.c	273	9	21	1	-
+use	decl	Dup	k	anon.c:10	file	anon.c	296	10	18	1	-
+use	decl	Dup	k	anon.c:13	file	anon.c	383	13	19	1	-
+other	decl	(anonymous at anon.c:14:9)	v	anon.c:14	file	anon.c	423	14	15	1	-
+other	member	(anonymous at anon.c:14:9)	v	anon.c:14	file	anon.c	443	16	8	1	-
+use	member	Outer	a	anon.c:6	file	anon.c	461	17	12	1	-
+use	member	S.pos	x	anon.c:7	file	anon.c	472	17	23	1	-
+other	member	S	x	anon.c:7	file	anon.c	479	17	30	1	-
+use	member	fd	v	anon.c:8	file	anon.c	486	17	37	1	-
+use	member	Tagged	t	anon.c:9	file	anon.c	493	17	44	1	-
+use	member	Dup	k	anon.c:13	file	anon.c	499	17	50	1	-
+other	member	(anonymous at anon.c:14:9)	v	anon.c:14	file	anon.c	509	17	60	1	-
+members	Outer	anon.c:6	z,a,b,c
+members	S.pos	anon.c:7	x,y
+members	fd	anon.c:8	v
+members	Tagged	anon.c:9	t
+members	Dup	anon.c:10	k
+members	Dup	anon.c:13	k,j

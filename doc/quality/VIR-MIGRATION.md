@@ -50,6 +50,10 @@ of VIR failures by reason over the kernel, PostgreSQL and SQLite.
 
 ## Passes on the direct path, and their fate
 
+**Parked by owner, 2026-11-13.**  Moving these passes onto VIR is not scheduled:
+some optimization may stay on the AST and in the record optimizer and some be on
+VIR.  The gates and the table below stay as the record of the analysis.
+
 ### arm64 record clean-ups (`arch/a64/codegen/opt.c`, `func.c:474`)
 
 | Pass | What it does | On VIR | How to decide |
@@ -111,14 +115,18 @@ pass moves:
 2. **One pass per file**, the pre-IR in its own header (`Q-VIRB-01`).
 3. **Analysis validity recorded**, so dominators (3 runs per function today)
    and the CFG (5) are computed once (`Q-vir-ir-01`, `Q-passes-03`).
-4. **Where the optimizer lives**: the builder's pre-IR, or VIR itself
-   (`Q-VIRB` decision 1).  With VIR as the only path this must be settled
-   before step 2, since it fixes the form every moved pass is written on.
+4. **Where the optimizer lives**: decided, on VIR itself, not on the
+   builder's pre-IR (`Q-VIRB` decision 1; `DESIGN-vir-optimizer.md`,
+   WORK-vir.md).  Every moved pass is written on VIR.
 5. **arm64's lowering out of the generic directory** (`codegen/vir/a64.c` to
    `arch/a64/`), and one lowering driver with per-CPU callbacks: the two
    lowerings share only two helper files today (`Q-VIRB-02`, `Q-VIRB-03`).
 
 ## Order
+
+**Items 3-5 (closing the failure reasons for deletion, moving passes, deleting
+the walker and record optimizer) are parked by owner, 2026-11-13: nothing is
+scheduled; the list stays as the record of the analysis.**
 
 1. The failure counter (G1) and the per-pass counters on the record
    clean-ups.  Small, no behaviour change, gives every later step its numbers.

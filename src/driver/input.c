@@ -1,4 +1,14 @@
-/* The job's main file: `-`, a device or a pipe read whole into memory. */
+/*
+ * input.c: read the main file whole into memory when it is `-`, a device or a pipe.
+ *
+ * Regular files are mapped by the preprocessor itself; this covers what cannot be (stdin, kbuild's
+ * probes that compile /dev/null).  The lexer wants one padded piece, so the input is read to the end
+ * into a per-thread buffer that is reused by the next job on the thread (the result points into it:
+ * valid until the thread's next read_stdin_all).  Under vccd the client's stdin comes from env->infd,
+ * or already read (env->in_src, which vccd keeps for a retry).  Fails the job (status 1, message on
+ * the job's error fd) on a read error or input of 2 GB or more; assembler input from stdin is a usage
+ * error (status 2).
+ */
 #include "driver-internal.h"
 
 /* the input `-`, whole (the lexer wants it padded in one piece); nonzero after an error (reported) */

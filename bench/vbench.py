@@ -20,7 +20,7 @@ are printed too but are only trustworthy in an A/B run (`ab`, alternating).
 
 Modes (default: all; one thread each):
   lex   lextest core: lexing + interning of the 3 225 build files, pre-mapped
-  pp    corpus, tokens only (pp_next), token cache warm, no header cache
+  pp    corpus, tokens only (pp_token_next), token cache warm, no header cache
   pphc  corpus, tokens only, header cache on, cold (record + replay)
   fe    corpus, -fsyntax-only (pp + parse + sema), warm, no header/decl cache
   cc    corpus, -c, warm, no caches; also reports the emit and obj phases

@@ -6,19 +6,19 @@ VPRIV uint32_t args_list(cc *c, vec *args)
 	uint32_t open = tok(c)->loc;
 
 	vinit(args);
-	expect(c, T_LPAREN, "'('");
-	if (!is(c, T_RPAREN)) {
+	expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
+	if (!is(c, LEX_TOKEN_RIGHT_PAREN)) {
 		do
 			vpush(c, args, assign_expr(c));
-		while (accept(c, T_COMMA));
+		while (accept(c, LEX_TOKEN_COMMA));
 	}
 	c->args_rp = tok(c)->loc;
-	if (unlikely(!is(c, T_RPAREN))) {
+	if (unlikely(!is(c, LEX_TOKEN_RIGHT_PAREN))) {
 		/* clang: a call without its ')' is invalid; the last argument says so */
 		if (args->n && ISERR(args->v[args->n - 1]))
-			skip_close(c, T_RPAREN);
+			skip_close(c, LEX_TOKEN_RIGHT_PAREN);
 		else
-			expect_match_fail(c, T_RPAREN, open);
+			expect_match_fail(c, LEX_TOKEN_RIGHT_PAREN, open);
 		if (args->n)
 			args->v[args->n - 1] = err_node(c, open);
 		else
@@ -71,7 +71,7 @@ VPRIV uint32_t mk_builtin(cc *c, int id, qty ty, uint32_t loc, const vec *args)
 				uint64_t size = ty_size(c, T(c, N(m)->ty)->base);
 				if (!size) break;
 				uint32_t cnt = convert(c, rvalue(c, member(c, base, count, loc)), c->t_size);
-				return mk_bin(c, T_STAR, c->t_size, cnt, mk_int(c, size, c->t_size, loc), loc);
+				return mk_bin(c, LEX_TOKEN_STAR, c->t_size, cnt, mk_int(c, size, c->t_size, loc), loc);
 			}
 		}
 	}
@@ -92,15 +92,15 @@ VPRIV uint32_t offsetof_expr(cc *c, uint32_t loc)
 	i128 off = 0;
 	uint32_t dyn = 0;	/* non-constant part (node), 0 if none */
 
-	expect(c, T_LPAREN, "'('");
+	expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
 	t = type_name(c);
-	expect(c, T_COMMA, "','");
+	expect(c, LEX_TOKEN_COMMA, "','");
 	for (bool first = true;; first = false) {
-		if (first || accept(c, T_PERIOD)) {
+		if (first || accept(c, LEX_TOKEN_PERIOD)) {
 			uint32_t path[FM_DEPTH], ti;
 			int d;
 
-			if (!is(c, T_IDENT))
+			if (!is(c, LEX_TOKEN_IDENTIFIER))
 				fatal(c, tok(c)->loc, "expected identifier");
 			if (!is_record(c, t)) {
 				cc_error(c, tok(c)->loc, "offsetof requires struct, union, or class type, '%s' invalid", tyname(c, t));
@@ -114,6 +114,8 @@ VPRIV uint32_t offsetof_expr(cc *c, uint32_t loc)
 				next(c);
 				break;
 			}
+			if (unlikely(c->field_uses))
+				cc_field_uses_path_record(c, FU_OFFSETOF, ti, path, d);
 			for (int i = 0; i < d; i++) {
 				const field *f = &c->tags[ti].f[path[i]];
 
@@ -123,11 +125,11 @@ VPRIV uint32_t offsetof_expr(cc *c, uint32_t loc)
 					ti = T(c, t)->aux;
 			}
 			next(c);
-		} else if (accept(c, T_LSQUARE)) {
+		} else if (accept(c, LEX_TOKEN_LEFT_SQUARE)) {
 			uint32_t ix = expr(c);
 			i128 k;
 
-			expect(c, T_RSQUARE, "']'");
+			expect(c, LEX_TOKEN_RIGHT_SQUARE, "']'");
 			if (!is_array(c, t)) {
 				cc_error(c, loc, "subscripted value is not an array ('%s' invalid)", tyname(c, t));
 				break;
@@ -137,18 +139,18 @@ VPRIV uint32_t offsetof_expr(cc *c, uint32_t loc)
 				off += k * (i128)ty_size(c, t);
 			} else {
 				uint32_t sz = mk_int(c, (i128)ty_size(c, t), c->t_size, loc);
-				uint32_t term = mk_bin(c, T_STAR, c->t_size, convert(c, rvalue(c, ix), c->t_size), sz, loc);
+				uint32_t term = mk_bin(c, LEX_TOKEN_STAR, c->t_size, convert(c, rvalue(c, ix), c->t_size), sz, loc);
 
-				dyn = dyn ? mk_bin(c, T_PLUS, c->t_size, dyn, term, loc) : term;
+				dyn = dyn ? mk_bin(c, LEX_TOKEN_PLUS, c->t_size, dyn, term, loc) : term;
 			}
 		} else {
 			break;
 		}
 	}
-	expect_here(c, T_RPAREN, "')'");
+	expect_here(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 	res = mk_int(c, off, c->t_size, loc);
 	if (dyn)
-		res = mk_bin(c, T_PLUS, c->t_size, res, dyn, loc);
+		res = mk_bin(c, LEX_TOKEN_PLUS, c->t_size, res, dyn, loc);
 	return res;
 }
 
@@ -247,13 +249,13 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 		uint32_t cond, x, y;
 		i128 v = 0;
 
-		expect(c, T_LPAREN, "'('");
+		expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
 		cond = assign_expr(c);
-		expect(c, T_COMMA, "','");
+		expect(c, LEX_TOKEN_COMMA, "','");
 		x = assign_expr(c);
-		expect(c, T_COMMA, "','");
+		expect(c, LEX_TOKEN_COMMA, "','");
 		y = assign_expr(c);
-		expect_here(c, T_RPAREN, "')'");
+		expect_here(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 		if (!const_int(c, decay(c, cond), &v))
 			cc_error(c, N(cond)->loc, "'__builtin_choose_expr' requires a constant expression");
 		return v ? x : y;
@@ -261,11 +263,11 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 	case BI_TYPES_COMPAT: {
 		qty a, t;
 
-		expect(c, T_LPAREN, "'('");
+		expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
 		a = type_name(c);
-		expect(c, T_COMMA, "','");
+		expect(c, LEX_TOKEN_COMMA, "','");
 		t = type_name(c);
-		expect_here(c, T_RPAREN, "')'");
+		expect_here(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 		return mk_int(c, compatible(c, unqual_array(c, a), unqual_array(c, t)), prim(TY_INT), loc);
 	}
 	case BI_OFFSETOF:
@@ -274,12 +276,12 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 		uint32_t ap, n, first_bound;
 		qty t;
 
-		expect(c, T_LPAREN, "'('");
+		expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
 		ap = assign_expr(c);
-		expect(c, T_COMMA, "','");
+		expect(c, LEX_TOKEN_COMMA, "','");
 		first_bound = c->nnode;
 		t = type_name(c);
-		expect_here(c, T_RPAREN, "')'");
+		expect_here(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 		n = mk(c, N_VAARG, t, loc);
 		N(n)->a = ap;
 		return capture_vla_bounds(c, t, first_bound, n, loc);
@@ -341,7 +343,7 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 		}
 		a = convert(c, rvalue(c, args.v[0]), ct);
 		if (b->id == BI_CONJ)
-			return cplx_unary(c, T_TILDE, a, loc);
+			return cplx_unary(c, LEX_TOKEN_TILDE, a, loc);
 		return rvalue(c, cplx_part(c, a, b->id == BI_CIMAG));
 	}
 	case BI_CLZG: case BI_CTZG: case BI_POPCOUNTG:

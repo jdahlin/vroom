@@ -1,4 +1,13 @@
-/* Never-referenced automatic integer declarations: no CFG or new function walk. */
+/*
+ * unusedinit.c: do not generate the initializer of an automatic integer that is never referenced.
+ *
+ * em_unused_init(e, decl, fn, budget) says EM_UNUSED_OMIT (no code at all), EM_UNUSED_EVAL (the
+ * initializer has effects: evaluate it, drop the store) or EM_UNUSED_KEEP.  Omission needs a proof:
+ * the local is a plain automatic integer with no cleanup, never named, address not taken, and the
+ * initializer is pure within the budget (loads through addresses, division, shifts, floating point
+ * and builtins are deliberately not accepted).  Brace and string initializers belong to the
+ * initializer walker and are kept.  Called by the shared walker, arm64's and wasm's statement code.
+ */
 #include "../emitimpl.h"
 
 static bool em_unused_int(cc *c, qty t)
@@ -31,14 +40,14 @@ static bool em_unused_pure(cc *c, uint32_t n, unsigned *left)
 			return false;
 		return em_unused_pure(c, x->a, left);
 	case N_UNARY:
-		if (x->aux != T_PLUS && x->aux != T_MINUS && x->aux != T_TILDE && x->aux != T_EXCLAIM)
+		if (x->aux != LEX_TOKEN_PLUS && x->aux != LEX_TOKEN_MINUS && x->aux != LEX_TOKEN_TILDE && x->aux != LEX_TOKEN_EXCLAMATION)
 			return false;
 		return em_unused_pure(c, x->a, left);
 	case N_BINARY:
 		switch (x->aux) {
-		case T_PLUS: case T_MINUS: case T_STAR: case T_AMP: case T_PIPE: case T_CARET:
-		case T_LESS: case T_LESSEQ: case T_GREATER: case T_GREATEREQ:
-		case T_EQUALEQUAL: case T_EXCLAIMEQ:
+		case LEX_TOKEN_PLUS: case LEX_TOKEN_MINUS: case LEX_TOKEN_STAR: case LEX_TOKEN_AMPERSAND: case LEX_TOKEN_PIPE: case LEX_TOKEN_CARET:
+		case LEX_TOKEN_LESS: case LEX_TOKEN_LESS_EQUAL: case LEX_TOKEN_GREATER: case LEX_TOKEN_GREATER_EQUAL:
+		case LEX_TOKEN_EQUAL_EQUAL: case LEX_TOKEN_EXCLAMATION_EQUAL:
 			break;
 		default:
 			return false;

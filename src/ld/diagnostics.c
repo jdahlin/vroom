@@ -2,10 +2,10 @@
 
 /* ---------------- diagnostics ---------------- */
 
-static pthread_mutex_t errlock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t ld_diagnostics_lock = PTHREAD_MUTEX_INITIALIZER;
 static const char *argv0 = "vld";
 
-static void diag(const char *kind, const char *fmt, va_list ap)
+static void ld_diagnostic_print(const char *kind, const char *fmt, va_list ap)
 {
 	va_list aq;
 	char small[512], *m = small;
@@ -19,7 +19,7 @@ static void diag(const char *kind, const char *fmt, va_list ap)
 	if (!m)
 		m = small;
 	{
-		VLOCK(errlock);
+		VLOCK(ld_diagnostics_lock);
 		if (ctx->diagnostics.last_was_multiline)
 			fputc('\n', ctx->diagnostics.error_stream);
 		ctx->diagnostics.last_was_multiline = strchr(m, '\n') != NULL;
@@ -28,25 +28,25 @@ static void diag(const char *kind, const char *fmt, va_list ap)
 	if (m != small)
 		free(m);
 }
-static void error(const char *fmt, ...)
+static void ld_error_report(const char *fmt, ...)
 {
 	int n = atomic_fetch_add(&ctx->diagnostics.error_count, 1);
 	if (ctx->diagnostics.error_limit && n >= ctx->diagnostics.error_limit) {
 		if (n == ctx->diagnostics.error_limit) {
-			VLOCK(errlock);
+			VLOCK(ld_diagnostics_lock);
 			fprintf(ctx->diagnostics.error_stream, "%s: error: too many errors emitted, stopping now\n", argv0);
 		}
 		return;
 	}
 	va_list ap;
 	va_start(ap, fmt);
-	diag("error", fmt, ap);
+	ld_diagnostic_print("error", fmt, ap);
 	va_end(ap);
 }
-static void warn(const char *fmt, ...)
+static void ld_warning_report(const char *fmt, ...)
 {
 	va_list ap;
 	va_start(ap, fmt);
-	diag("warning", fmt, ap);
+	ld_diagnostic_print("warning", fmt, ap);
 	va_end(ap);
 }

@@ -203,7 +203,7 @@ VPRIV uint32_t lib_builtin(cc *c, uint32_t id, uint32_t loc)
 			memcpy(keep + pre, lib, ll + 1);
 			memset(&a, 0, sizeof(a));
 			a.asmname = c->nstr + 1;
-			c->strs[c->nstr++] = (cstr){ keep, (uint32_t)(ll + pre + 1), 1, T_STRING };
+			c->strs[c->nstr++] = (cstr){ keep, (uint32_t)(ll + pre + 1), 1, LEX_TOKEN_STRING };
 			apply_sym_attrs(c, &c->syms[s], &a);
 			return s;
 		}
@@ -308,15 +308,15 @@ VPRIV const char *lib_header(cc *c, uint32_t id)
 }
 
 /* "#include <hdr>" as a fix-it on d, where the file's includes are (or at its top) */
-VPRIV void include_fix(cc *c, vdiag *d, uint32_t loc, const char *hdr)
+VPRIV void include_fix(cc *c, diag_record *d, uint32_t loc, const char *hdr)
 {
-	uint32_t at = pp_include_point(c->p, loc);
+	uint32_t at = pp_include_point_find(c->p, loc);
 	char b[96];
 
 	if (at == UINT32_MAX)
 		return;
 	snprintf(b, sizeof b, "#include <%s>\n", hdr);
-	pp_diag_fix(c->p, d, at, at, b, VDA_MAYBE);
+	diag_record_fixit_add(c->p, d, at, at, b, DIAG_APPLICABILITY_MAYBE);
 }
 
 /*
@@ -336,25 +336,25 @@ VPRIV uint32_t lib_func(cc *c, uint32_t id, uint32_t loc)
 	if (!f || strchr(f->sig, 'P') || !lb_functype(c, f->sig, &fty, &ret) || !strcmp(f->name, "alloca"))
 		return 0;	/* FILE * parameters: vcc has no FILE; alloca is the builtin */
 	/* C89, or -Wno-error=implicit-function-declaration: clang's warning; else an error */
-	lv = c->o->std == 89 || c->o->implicit_fn ? pp_diag_wlevel(c->p, "implicit-function-declaration", true, none, loc)
-		: VDL_ERROR;
+	lv = c->o->std == 89 || c->o->implicit_fn ? diag_warning_level(c->p, "implicit-function-declaration", true, none, loc)
+		: DIAG_LEVEL_ERROR;
 	if (lv >= 0) {
 		const char *t = tyname(c, fty);
-		vdiag *d;
+		diag_record *d;
 
-		pp_diag_pc = __builtin_return_address(0);
-		if (lv == VDL_ERROR)
+		diag_report_site_pc = __builtin_return_address(0);
+		if (lv == DIAG_LEVEL_ERROR)
 			error_limit(c), c->errors++;
 		c->ndiag++;
 		if (c->o->std == 89)
-			d = pp_diag_begin(c->p, lv, loc, "implicitly declaring library function '%.*s' with type '%s'", IDF(id), t);
+			d = diag_record_begin(c->p, lv, loc, "implicitly declaring library function '%.*s' with type '%s'", IDF(id), t);
 		else
-			d = pp_diag_begin(c->p, lv, loc, "call to undeclared library function '%.*s' with type '%s'; ISO C99 and "
+			d = diag_record_begin(c->p, lv, loc, "call to undeclared library function '%.*s' with type '%s'; ISO C99 and "
 					  "later do not support implicit function declarations", IDF(id), t);
-		pp_diag_flag(d, "implicit-function-declaration");
-		d->werror = lv == VDL_ERROR && (c->o->std == 89 || c->o->implicit_fn);
+		diag_record_flag_set(d, "implicit-function-declaration");
+		d->werror = lv == DIAG_LEVEL_ERROR && (c->o->std == 89 || c->o->implicit_fn);
 		include_fix(c, d, loc, f->hdr);
-		pp_diag_emit(c->p, d);
+		diag_record_emit(c->p, d);
 		note(c, loc, "include the header <%s> or explicitly provide a declaration for '%.*s'", f->hdr, IDF(id));
 	}
 	{

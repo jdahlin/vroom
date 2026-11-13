@@ -1,4 +1,14 @@
-/* What a request is: -E, a compile, a host link, a delegate candidate. */
+/*
+ * classify.c: decide what kind of request a command line is: -E, a compile vcc does itself, a host
+ * program's link, a candidate for VCC_DELEGATE.
+ *
+ * These are pure functions of the request, called by dispatch.c in its order of precedence; they
+ * only look at argv.  Being conservative is the rule: a command line that vcc's driver might handle
+ * differently from clang (-shared, -x with another language, several inputs, an input that is not a
+ * .c or .S) is not ours and goes to the backend or fails, so every option that takes a value is
+ * listed in takes_value (a value taken for an input would misclassify the job).  own_pp and own_cc
+ * (VCC_PP=0, VCC_CC=0) switch whole kinds off.
+ */
 #include "vccd-internal.h"
 
 /* -E on a named file or stdin: vcc's preprocessor handles it */

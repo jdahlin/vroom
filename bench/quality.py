@@ -440,7 +440,8 @@ def measure(sc, N):
     notlib = lambda f: not inlib(f)
     m['realloc_calls'] = len(calls('realloc', notlib))
     m['mmap_calls'] = len(calls('mmap', notlib))
-    leb = sorted({(fn, f.rel) for f in files for fn, *_ in f.funcs if 'leb' in fn.lower()})
+    # (the library's own, common/leb128.h, is the one the others are counted against)
+    leb = sorted({(fn, f.rel) for f in files for fn, *_ in f.funcs if 'leb' in fn.lower() and not f.rel.endswith('include/common/leb128.h')})
     m['leb128_functions'] = len(leb)
     lists['leb128_functions'] = [f'{r}: {fn}' for fn, r in leb]
     where = defaultdict(set)
@@ -512,6 +513,17 @@ def measure(sc, N):
                     break
     m['includes_across_modules'] = sum(edges.values())
     m['includes_of_another_modules_internal_header'] = len(internal)
+    # the shared library (doc/quality/WORK-common.md): its own copies, sizes and comments are gated apart
+    lib = [f for f in files if inlib(f)]
+    m['library_redundant_tokens'] = sum(sum(f.dup) for f in lib)
+    m['library_files_without_header_comment'] = sum(1 for f in lib if f.head is None)
+    m['library_files_with_label_only'] = sum(1 for f in lib if f.head is not None and f.head <= 2)
+    m['library_files_over_%d_lines' % BIG_FILE] = sum(1 for f in lib if f.lines >= BIG_FILE)
+    m['library_functions_over_%d_lines' % LONG_FN] = sum(
+        1 for f in lib for fn, s, e, st in f.funcs if e - s + 1 >= LONG_FN)
+    m['common_includes_of_port'] = edges[('common', 'port')]	# common/ includes nothing from port/
+    lists['common_includes_of_port'] = sorted(
+        f'{f.rel} -> {inc}' for f in files if module(f.rel) == 'common' for inc in f.includes if inc.startswith('port/'))
     mutual = sorted({tuple(sorted(e)) for e in edges if (e[1], e[0]) in edges})
     m['module_pairs_including_each_other'] = len(mutual)
     lists['internal_header_includes'] = sorted(internal)
@@ -538,7 +550,10 @@ RATCHET = ['redundant_tokens', 'duplicate_runs_across_files', 'fnv_hash_files',
            'files_without_header_comment', 'functions_over_%d_lines' % LONG_FN,
            'files_over_%d_lines' % BIG_FILE,
            'includes_of_another_modules_internal_header',
-           'module_pairs_including_each_other']
+           'module_pairs_including_each_other',
+           'library_redundant_tokens', 'library_files_without_header_comment',
+           'library_files_with_label_only', 'library_files_over_%d_lines' % BIG_FILE,
+           'library_functions_over_%d_lines' % LONG_FN, 'common_includes_of_port']
 
 
 # -------------------------------------------------------------------- output
@@ -614,6 +629,10 @@ def report(root, m, lists, nclones, N, only):
     print('\nDependencies')
     print(f'  includes across modules: {m["includes_across_modules"]}; of another module\'s '
           f'internal header: {m["includes_of_another_modules_internal_header"]}')
+    print(f'  the library (common/, port/): {m["library_redundant_tokens"]} redundant tokens, '
+          f'{m["library_files_without_header_comment"]} files without an opening comment, '
+          f'{m["library_files_with_label_only"]} with a label only; common/ includes port/: '
+          f'{m["common_includes_of_port"]}  ' + ' '.join(lists['common_includes_of_port']))
     print(f'  module pairs that include each other: {m["module_pairs_including_each_other"]}  '
           + ', '.join(lists['mutual_modules']))
 

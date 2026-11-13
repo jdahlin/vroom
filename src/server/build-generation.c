@@ -1,4 +1,18 @@
-/* Build generations (the caches are flushed when a new make starts) and the memory restart of the server. */
+/*
+ * build-generation.c: tell one make invocation from the next, flush the caches between them, and
+ * restart the server when it has grown too large.
+ *
+ * The caches (files, directories, includes, diagnostics store) answer "what is at this path" for the
+ * server's life, and files change between builds, so gen_enter runs at the start of every request
+ * under gen_mu: a process group not seen lately is a new build (the details are below).  gen_leave
+ * ends the request.  gen_enter returns 1 (answer VROOM_STATUS_RETRY: a restart is under way) or 2 (the
+ * same, and this worker then calls do_restart); the shim sends the request again.  The restart is
+ * the only way to free memory, since every cache and the identifier table only grow: it happens at a
+ * build boundary with no job running, or when the identifier table is full (every later TU would
+ * fail).  The restart execs the server on the same listening socket, so clients wait in the backlog.
+ * Everything here is called from worker threads (or shared-pool jobs) and the accept loop
+ * (park_accept); the group table and gen_running are under gen_mu, the queue under qlock.
+ */
 #include "vccd-internal.h"
 
 /*
@@ -151,10 +165,10 @@ VPRIV int gen_enter(uint32_t pgrp)
 					atomic_store(&gen_restart, 1);
 					return 2;
 				}
-				vlex_cache_flush();
-				vdir_flush();
+				lex_cache_flush();
+				pp_directory_cache_flush();
 				dstore_new_build();
-				pp_include_flush();
+				pp_include_cache_flush();
 				atomic_fetch_add(&n_flush, 1);
 			} else if (gen_ngrp) {	/* jobs are running: keep the caches, but check each answer once before it is reused */
 				vcache_new_epoch();

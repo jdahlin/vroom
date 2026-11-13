@@ -26,7 +26,7 @@ VPRIV void drcov_boundary(cc *c)
 		c->drb = realloc(c->drb, c->cdrb * sizeof(uint64_t));
 	}
 	if (c->ntk == 1)
-		c->drb[c->ndrb++] = pp_ntok(c->p) - 1;
+		c->drb[c->ndrb++] = pp_token_count(c->p) - 1;
 }
 
 static bool drb_has(const cc *c, uint64_t x)
@@ -62,7 +62,7 @@ VPRIV void drcov_finish(cc *c)
 		else
 			sb += len;
 	}
-	atomic_fetch_add(&dr_tok, pp_ntok(c->p));
+	atomic_fetch_add(&dr_tok, pp_token_count(c->p));
 	atomic_fetch_add(&dr_hits, n);
 	atomic_fetch_add(&dr_htok, htok);
 	atomic_fetch_add(&dr_ok, ok);
@@ -70,7 +70,7 @@ VPRIV void drcov_finish(cc *c)
 	atomic_fetch_add(&dr_oktop, oktop);
 	atomic_fetch_add(&dr_endbad, eb);
 	atomic_fetch_add(&dr_startbad, sb);
-	atomic_fetch_add(&dr_dc, pp_skipped(c->p));
+	atomic_fetch_add(&dr_dc, pp_skipped_token_count(c->p));
 	free(c->drb);
 	c->drb = NULL;
 }

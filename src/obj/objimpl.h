@@ -1,4 +1,11 @@
-/* the files of the object writer (obj/, arch/<cpu>/obj/, platform/<os>/) share this header */
+/* objimpl.h: what the object writer's files share: obj/obj.c, arch/<cpu>/obj/fixup.c and
+ * platform/linux/elf.c (one module, obj_SRC; the Mach-O writer includes only obj/obj.h).
+ *
+ * The region helpers (reserve, rpush) fail the job through vjob_fail when a region is full, so
+ * writers need not check.  Out is the ELF writer's private output state (a pointer here only):
+ * elf_finish creates it, runs the per-CPU elf_resolve (a64) or x64_resolve for every fixup in layout
+ * order, and the per-CPU code calls back elf_reloc to record a relocation.  Nothing here is
+ * thread-safe: an ElfObj and its Out belong to one thread. */
 #ifndef VCC_OBJIMPL_H
 #define VCC_OBJIMPL_H
 

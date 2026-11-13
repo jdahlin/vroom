@@ -1,5 +1,5 @@
 /*
- * The thread pool and the CPU budget behind vtask.h; the design and its
+ * The thread pool and the CPU budget behind task.h; the design and its
  * reasons are doc/quality/WORK-scheduler.md.
  *
  * One mutex guards everything that decides who runs: the open loops that

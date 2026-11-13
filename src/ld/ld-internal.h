@@ -13,16 +13,16 @@
  * one context of the process and a constant file-scope pointer `ctx` to
  * it; code reads fields as `ctx->group.field` whether `ctx` is that
  * pointer or a parameter that shadows it, so passing the context down is a
- * change of signatures only.  One link runs at a time (ldlock) until then.
+ * change of signatures only.  One link runs at a time (ld_link_lock) until then.
  *
- * Process-wide state (the thread pool, the arena's block list, errlock,
- * keep_maps) and per-thread state (the arena's cursor, the symbol-table
+ * Process-wide state (the thread pool, the region block list, ld_diagnostics_lock,
+ * ld_keep_mappings) and per-thread state (the region cursor, the symbol-table
  * scratch) are not part of the context.
  */
 #ifndef VCC_LD_INTERNAL_H
 #define VCC_LD_INTERNAL_H
 
-#include "ldelf.h"
+#include "elf-definitions.h"
 #include "common/vector.h"
 #include "port/performance-counters.h"
 
@@ -32,14 +32,14 @@
 #include <stdio.h>
 
 /* the first and last output section of a program header; hdr: FILEHDR/PHDRS */
-typedef struct { int first, last; bool lma_set, hdr; } PhdrSecs;
+typedef struct { int first, last; bool lma_set, hdr; } ld_segment_sections;
 
-/* an entry of the input-section-name cache: name -> its ISD or NONE */
-typedef struct { const char *name; uint32_t h; uint32_t isd; } NameEnt;
+/* an entry of the input-section-name cache: name -> its ld_input_section_description or LD_NONE */
+typedef struct { const char *name; uint32_t h; uint32_t isd; } ld_name_cache_entry;
 
 /* error output, the error count and limit, and the VLD_TIME=1 phase timer */
 struct ld_diagnostics {
-	FILE *error_stream;		/* ld_main's stream; written under errlock */
+	FILE *error_stream;		/* ld_main's stream; written under ld_diagnostics_lock */
 	atomic_int error_count;		/* errors reported, also past the limit */
 	int error_limit;		/* --error-limit; 0: none */
 	bool last_was_multiline;	/* lld: a blank line after a multi-line diagnostic */
@@ -53,18 +53,18 @@ struct ld_diagnostics {
 struct ld_layout {
 	/* the address-assignment pass (lld's ExprValue state) */
 	uint64_t dot;			/* the script's location counter */
-	uint32_t current_output_section; /* AETHER or an output section */
+	uint32_t current_output_section; /* LD_OUTPUT_SECTION_AETHER or an output section */
 	bool in_layout;			/* undefined symbols in expressions are errors */
 	uint64_t tbss_offset;		/* lld: .tbss takes no address space; consecutive ones stack from here */
 
 	/* matching input section names to the script */
-	NameEnt *name_cache;		/* open addressing, grown at half full; in the arena */
+	ld_name_cache_entry *name_cache;		/* open addressing, grown at half full; in the arena */
 	uint32_t name_cache_mask, name_cache_count;
 	VVEC(uint32_t) orphans;		/* input sections no script rule placed */
 
 	/* program headers and file offsets */
-	VVEC(Phdr) program_headers;
-	VVEC(PhdrSecs) program_header_sections;	/* parallel to program_headers */
+	VVEC(elf_program_header) program_headers;
+	VVEC(ld_segment_sections) program_header_sections;	/* parallel to program_headers */
 	VVEC(uint32_t) output_sections;	/* live output sections in header order */
 	VVEC(uint32_t) eh_frame_fdes;	/* the FDE pieces in the output, for .eh_frame_hdr */
 	uint64_t file_header_address;	/* PHDRS FILEHDR: address of the ELF header */

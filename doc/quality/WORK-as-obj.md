@@ -130,11 +130,11 @@ assembler's files, plus the users of its public API in `driver/` and
 strings and member accesses (`a->err`, `o->err`) alone: a function row matches a
 call or declaration only, a type, constant or global row a whole word.
 
-Left for a type-aware step (a clang AST rewrite): the 53 field rows whose name
-is declared in several structs or also in other headers (`o`, `dir`, `cur`,
-`prev`, `err`, `off`, `p`, `n`, `e`, `v`, `k`, `t`, `reg`, `op`, `sym`, `frag`,
-`end`, `next`, `s`, `a`, `sb`, `al`, `pool`, `ninst`, `cfi`, `msg`, `mlen`,
-`def`, `vararg`, `np`, `len`, `count`, `fwd`, `lab`, `esc`, `first`, `ra`,
-`sig`, `col`, `p2`) and `pool_dummy` (to delete).  They keep their old names
-until then.  Names inside comments that are plain English words (`sym`,
+Fields, second step (PR "as: remaining field rows", doc/quality/DESIGN-field-uses.md): the
+other 53 field rows (`o`, `dir`, `cur`, `prev`, `err`, `off`, `p`, `n`, `e`, `v`, `k`,
+`t`, `s`, `a`, ...) and `Sv`'s `s` and `n` were applied by `rename-table.py
+doc/quality/rename-as.tsv --fields`, which edits the bytes where vcc's own front
+end reports each use (macOS arm64 and Linux arm64 reports merged).  `pool_dummy`
+was deleted by hand.  The comments that named the old members (`a->sb`, `a->err`,
+...) were edited by hand.  Names inside comments that are plain English words (`sym`,
 `expr`, ...) were left as they were.

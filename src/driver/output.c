@@ -1,4 +1,15 @@
-/* Writing a job's outputs: atomic files in the client's umask, the object state pool, laying out and writing the object. */
+/*
+ * output.c: everything a job writes: files, the per-thread object state, and the object itself.
+ *
+ * Files are written to a temporary next to the target and renamed over it, so an interrupted or failed
+ * job leaves the old file or none, never a torn one (a device or fifo is written in place).  A new
+ * file gets the client's umask (ppd_umask, set by the vccd dispatcher) and a job whose client has
+ * gone (ppd_conn closed) writes nothing.  The object state (assembler, ElfObj, 4 GB reserved output
+ * buffer) is expensive to build, so a thread takes one from a locked free list at the start of a -c
+ * job (obj_state) and returns it at the end (obj_release); tl_as, tl_obj and tl_objbuf are valid in
+ * between only.  write_obj lays out the object (ELF, or Mach-O for Darwin targets) and writes it
+ * with one write.  Failures are reported on the job's error fd and returned as 1.
+ */
 #include "driver-internal.h"
 
 /* path relative to cwd (if set) */
@@ -164,7 +175,7 @@ VPRIV void obj_release(void)
 
 /* -c for wasm64: the object's bytes (arch/wasm/as, platform/wasm) */
 
-_Thread_local vbuf tl_wasm_obj;
+_Thread_local vbuffer tl_wasm_obj;
 
 
 

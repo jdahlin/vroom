@@ -5,6 +5,7 @@
 
 #include "../../../codegen/emitimpl.h"
 #include "../../../codegen/vir/preir.h"
+#include "../../../codegen/vir/lowering-driver.h"
 #include "vir/layout.h"
 
 /* data several files read: static in the unity TU, defined once (compares.c, function.c) otherwise */
@@ -63,6 +64,7 @@ typedef struct vl {
 	bool fallok;		/* the code may fall through to the block after at (no edge moves follow) */
 	struct { uint32_t l, e, to; } tr[1024];	/* moves of a branch's edges, after the block */
 	uint32_t ntr;
+	virbuild_lowering drv;	/* the shared driver's inputs (codegen/vir/lowering-driver.h) */
 } vl;
 
 struct vlt { int64_t *soff, *spoff; uint32_t *lbl, *chs, *path, *ord, *opos, *hl, *lbf; uint8_t *nf; uint32_t co, cop, chl, cnf, clf; uint8_t *uses, *lo32; uint32_t cs, csp, cl, cch, cpa, cu, c32; };
@@ -148,7 +150,7 @@ VPRIV void vl_regs(vir_regs *r, bool darwin, bool fcs);
 VPRIV int vl_ix(vl *L, uint32_t k, int t);
 VPRIV int vl_fx(vl *L, uint32_t k);
 VPRIV void vl_spill(vl *L, uint8_t src, uint32_t s, int t);
-VPRIV void vl_edits(vl *L, uint32_t *ei, uint32_t end, uint32_t pos);
+VPRIV void vl_edit(vl *L, const vir_edit *x);
 VPRIV void vl_emoves(vl *L, uint32_t g);
 VPRIV uint32_t vl_lbl(vl *L, uint32_t t);
 VPRIV bool vl_skip(vl *L, uint32_t b);
@@ -183,7 +185,6 @@ VPRIV void vl_goto(vl *L, uint32_t b, uint32_t t);
 VPRIV bool vl_sibcand(vl *L, uint32_t b, uint32_t i);
 VPRIV bool vl_vec(vl *L, const vir_ins *in, uint8_t res);
 VPRIV void vl_ins(vl *L, uint32_t b, uint32_t i, uint8_t res);
-VPRIV void vl_block(vl *L, uint32_t b);
 VPRIV void vl_order(vl *L);
 VPRIV void vl_body(vl *L);
 

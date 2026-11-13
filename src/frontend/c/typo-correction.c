@@ -65,7 +65,7 @@ static uint32_t typo_sym(cc *c, uint32_t id, bool types, int kws, uint32_t *kw)
 	int n, max, best;
 	const char *s = idname(id, &n);
 	uint32_t pick = 0, kpick = 0;
-	int lim = pp_spell_limit(c->p);
+	int lim = pp_option_spell_limit(c->p);
 
 	if (kw)
 		*kw = 0;
@@ -120,7 +120,7 @@ VPRIV uint32_t typo_keyword(cc *c, uint32_t id, int kws)
 {
 	uint32_t kw;
 
-	if (tok(c)->flags & PF_MACRO)
+	if (tok(c)->flags & PP_TOKEN_FLAG_FROM_MACRO)
 		return 0;
 	typo_sym(c, id, kws == KWS_TYPE, kws, &kw);
 	return kw;
@@ -154,12 +154,12 @@ static const char *c23_word(cc *c, uint32_t id)
 	return NULL;
 }
 
-VPRIV void c23_word_help(cc *c, vdiag *d, uint32_t id)
+VPRIV void c23_word_help(cc *c, diag_record *d, uint32_t id)
 {
 	const char *h = c23_word(c, id);
 
 	if (h)
-		pp_diag_help(c->p, d, "%s", h);
+		diag_record_help_set(c->p, d, "%s", h);
 }
 
 /* "<msg> 'id'; did you mean 'x'?" with the fix-it and the "declared here" note,
@@ -168,9 +168,9 @@ VPRIV void c23_word_help(cc *c, vdiag *d, uint32_t id)
 VPRIV uint32_t undeclared(cc *c, const char *msg, uint32_t id, uint32_t loc, bool types, int kws, uint32_t *kw)
 {
 	/* clang does not correct a name from a macro expansion (and says where it was spelled) */
-	bool mac = (tok(c)->loc == loc ? tok(c)->flags : c->prevflags) & PF_MACRO;
+	bool mac = (tok(c)->loc == loc ? tok(c)->flags : c->prevflags) & PP_TOKEN_FLAG_FROM_MACRO;
 	uint32_t k = 0, s = mac ? 0 : typo_sym(c, id, types, kw ? kws : 0, &k);
-	pp_span r = { loc, pp_tok_end(c->p, loc) };
+	diag_span r = { loc, pp_token_end_find(c->p, loc) };
 	bool tn = msg[1] == 'n';	/* "unknown type name", else "use of undeclared identifier" */
 
 	if (kw)
@@ -178,10 +178,10 @@ VPRIV uint32_t undeclared(cc *c, const char *msg, uint32_t id, uint32_t loc, boo
 	if (mac) {
 		int m;
 		const char *t = idname(id, &m);
-		pp_dinfo d = { "error", loc, &r, 1, NULL, 0, t, (uint32_t)m };
+		diag_info d = { "error", loc, &r, 1, NULL, 0, t, (uint32_t)m };
 
 		error_limit(c), c->errors++, c->ndiag++;
-		pp_diagx(c->p, &d, tn ? "unknown type name '%.*s'" : "use of undeclared identifier '%.*s'", IDF(id));
+		diag_report_extended(c->p, &d, tn ? "unknown type name '%.*s'" : "use of undeclared identifier '%.*s'", IDF(id));
 		return 0;
 	}
 
@@ -189,10 +189,10 @@ VPRIV uint32_t undeclared(cc *c, const char *msg, uint32_t id, uint32_t loc, boo
 		int m;
 		const char *t = idname(s ? c->syms[s].name : k, &m);
 		char *fs = halloc(c, (size_t)m + 1);
-		pp_fixit fx;
+		diag_fixit fx;
 
 		memcpy(fs, t, m), fs[m] = 0;
-		fx = (pp_fixit){ r.b, r.e, fs, VDA_MAYBE };
+		fx = (diag_fixit){ r.b, r.e, fs, DIAG_APPLICABILITY_MAYBE };
 		report(c, "error", loc, &r, 1, &fx, 1, tn ? "unknown type name '%.*s'; did you mean '%s'?"
 		       : "use of undeclared identifier '%.*s'; did you mean '%s'?", IDF(id), fs);
 		if (s)
@@ -202,20 +202,20 @@ VPRIV uint32_t undeclared(cc *c, const char *msg, uint32_t id, uint32_t loc, boo
 		const char *h = lib_header(c, id), *w = c23_word(c, id);
 
 		if (h || w) {
-			vdiag *d;
+			diag_record *d;
 
 			error_limit(c), c->errors++, c->ndiag++;
-			d = pp_diag_begin(c->p, VDL_ERROR, loc, tn ? "unknown type name '%.*s'" : "use of undeclared identifier '%.*s'",
+			d = diag_record_begin(c->p, DIAG_LEVEL_ERROR, loc, tn ? "unknown type name '%.*s'" : "use of undeclared identifier '%.*s'",
 					  IDF(id));
 			if (!tn)
-				pp_diag_label(c->p, d, r.b, r.e, NULL);
+				diag_record_label_add(c->p, d, r.b, r.e, NULL);
 			if (w)
-				pp_diag_help(c->p, d, "%s", w);
+				diag_record_help_set(c->p, d, "%s", w);
 			else
-				pp_diag_help(c->p, d, "'%.*s' is declared in <%s>", IDF(id), h);
+				diag_record_help_set(c->p, d, "'%.*s' is declared in <%s>", IDF(id), h);
 			if (h)
 				include_fix(c, d, loc, h);
-			pp_diag_emit(c->p, d);
+			diag_record_emit(c->p, d);
 		} else
 			report(c, "error", loc, &r, tn ? 0 : 1, NULL, 0, tn ? "unknown type name '%.*s'"
 			       : "use of undeclared identifier '%.*s'", IDF(id));
@@ -225,7 +225,7 @@ VPRIV uint32_t undeclared(cc *c, const char *msg, uint32_t id, uint32_t loc, boo
 
 VPRIV bool is_typedef_name(cc *c, const ptok *t)
 {
-	if (t->kind != T_IDENT || kwof(t))
+	if (t->kind != LEX_TOKEN_IDENTIFIER || kwof(t))
 		return false;
 	return typedef_id(c, t->id);
 }
