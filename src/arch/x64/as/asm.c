@@ -438,7 +438,7 @@ VPRIV int x64_emit(as_context *a, XForm *f)
 			if (ripfix && !dsym && !rm->hasv)
 				x.fixv = (as_value){ 0, 0, 0 };
 			if (ripfix)
-				x.fixv.c -= 4 + f->isz;	/* from the end of the instruction */
+				x.fixv.c = (int64_t)((uint64_t)x.fixv.c - (uint64_t)(4 + f->isz));	/* from the end of the instruction */
 			if (ripfix && !dsym) {
 				/* a constant rip displacement: no fixup */
 				x.fixtype = 0;

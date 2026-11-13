@@ -264,12 +264,12 @@ VPRIV void as_cfi_frame_emit(as_context *a)
 			switch (c->operation) {
 			case AS_CFI_DEF_CFA: b.p[b.n++] = 0x0c; as_leb128_unsigned_append(&b, c->register_first); cfa = c->offset; as_leb128_unsigned_append(&b, (uint64_t)cfa); break;
 			case AS_CFI_DEF_CFA_OFFSET: case AS_CFI_ADJUST:
-				cfa = c->operation == AS_CFI_ADJUST ? cfa + c->offset : c->offset;
+				cfa = c->operation == AS_CFI_ADJUST ? (int64_t)((uint64_t)cfa + (uint64_t)c->offset) : c->offset;
 				b.p[b.n++] = 0x0e; as_leb128_unsigned_append(&b, (uint64_t)cfa); break;
 			case AS_CFI_DEF_CFA_REGISTER: b.p[b.n++] = 0x0d; as_leb128_unsigned_append(&b, c->register_first); break;
 			case AS_CFI_OFFSET: case AS_CFI_REL_OFFSET: {
 				int64_t v = c->offset;
-				if (c->operation == AS_CFI_REL_OFFSET) v -= cfa;
+				if (c->operation == AS_CFI_REL_OFFSET) v = (int64_t)((uint64_t)v - (uint64_t)cfa);	/* (wraps on absurd input) */
 				v /= daf;
 				if (v < 0) { b.p[b.n++] = 0x11; as_leb128_unsigned_append(&b, c->register_first); as_leb128_signed_append(&b, v); }
 				else if (c->register_first < 64) { b.p[b.n++] = (uint8_t)(0x80 | c->register_first); as_leb128_unsigned_append(&b, (uint64_t)v); }
