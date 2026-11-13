@@ -7,7 +7,8 @@ Every src/test/field-uses/NAME.c starts with `/* select: OWNER.FIELD [NEW] */`
 lines (the selection file); vpp -fsyntax-only runs on it from that directory
 with VCC_FIELD_USES, VCC_EAGER=1, VCC_NODC=1, VPP_NOHC=1, and its stdout must be
 NAME.expect (then `exit N` when the status is not 0 and the diagnostics after `stderr:`).  A case can say
-`/* flags: ... */` for extra vpp flags.  Also checked: the refusals (not
+`/* flags: ... */` for extra vpp flags.  Also checked: `src/tools/rename-table.py --selftest` (the driver and the rename
+script on src/test/field-uses/rename), the refusals (not
 -fsyntax-only, one of the three variables missing) and that the mode off
 prints nothing.
 
@@ -87,6 +88,11 @@ def checks():
     rc, out, err = run('basic.c', None)
     if rc or out or err:
         bad.append(f'mode off prints something: rc={rc} out={out!r} err={err!r}')
+    e = dict(os.environ, VCC_BUILD=_BIN)
+    p = subprocess.run([sys.executable, f'{R}/src/tools/rename-table.py', '--selftest'], capture_output=True, text=True, env=e)
+    print(p.stdout.strip().splitlines()[-1] if p.stdout.strip() else 'rename-table --selftest: no output')
+    if p.returncode:
+        bad.append('rename-table.py --selftest:\n' + p.stdout[-2000:] + p.stderr[-500:])
     return bad
 
 

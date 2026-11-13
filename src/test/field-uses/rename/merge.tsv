@@ -1,0 +1,3 @@
+# expect: problem merge: len -> same
+len	same	field	Box
+cur	same	field	Box

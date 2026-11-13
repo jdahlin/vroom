@@ -1,0 +1,3 @@
+# expect: ok
+len	cur	field	Box
+cur	len	field	Box
