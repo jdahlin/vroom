@@ -1,4 +1,12 @@
-/* expression.c: expressions, GNU as's operators and precedence, folded to a constant or a symbol plus offset, or deferred. */
+/* expression.c: assembler expressions, GNU as's operators and precedence, evaluated to an as_value:
+ * a constant, or symbol + constant, or a difference of two symbols; anything the layout must settle is
+ * deferred as a temporary symbol that the object resolves (elf_expr_sym).
+ *
+ * Callers choose between as_expression_absolute_parse (the result must be a constant, else an error)
+ * and as_expression_value_parse (a relocatable value is fine).  Folding (as_value_fold) only merges
+ * what is known now: absolute symbols, equal symbols and two symbols defined in the same frag; a
+ * difference across frags stays a value for the fixup or variable-item code.  Parsing never allocates
+ * outside the context and reports through as_error_report. */
 #include "as-internal.h"
 
 /* ---------------------------------------------------------------- expressions */

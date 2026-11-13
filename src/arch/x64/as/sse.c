@@ -1,4 +1,12 @@
-/* x86-64 assembler: SSE through SSE4.2, AES-NI, PCLMUL, SHA, CRC32, FS/GS base */
+/* sse.c: x86-64 assembler, the SSE families: x64_i_sse (SSE and SSE2 scalar and packed floating
+ * point and conversions), x64_i_sse4 (SSSE3 through SSE4, AES-NI, PCLMUL, SHA, CRC32, FS/GS base:
+ * the 0f 38 and 0f 3a opcode maps) and x64_i_ssepk (SSE2 packed integer forms and more SSE).
+ *
+ * Each returns X64_NEXT for a mnemonic that is not theirs; the order in which asm.c tries the
+ * families is in x64as.h (AVX sits between x64_i_sse and x64_i_sse4).  Most instructions are table
+ * rows of mnemonic, mandatory prefix, opcode and operand shape, encoded through x64_emit.  The
+ * bytes equal LLVM MC's (bench/vas-enc.py); a bad operand shape fails the assembly through
+ * as_error_report. */
 #include "x64as.h"
 
 VPRIV int x64_i_sse(as_context *a, char *mn, XOp *o, int nops)

@@ -1,4 +1,11 @@
-/* dwarf-line-table.c: the DWARF line table: .file N, .loc and the .debug_line section (MC's MCDwarfLineTable, version 5). */
+/* dwarf-line-table.c: the DWARF line table: .file N and .loc directives and the .debug_line (and
+ * .debug_line_str) sections they produce, MC's MCDwarfLineTable, DWARF version 5.
+ *
+ * A .loc does not emit anything: it sets a pending row, which the statement loop turns into a row
+ * (as_dwarf_row_emit) at the position of the next instruction.  The section is encoded once, from
+ * as_end (as_dwarf_line_finish) after relaxation, because row addresses are frag offsets.  File 0 is the root file; when the source has no
+ * explicit .file 0 the first .file's entry stands in, as MC does.  The output must stay byte for byte
+ * equal to clang's: bench/vcc-dwarf.py compares the rows. */
 #include "as-internal.h"
 
 /* ---------------------------------------------------------------- DWARF lines */

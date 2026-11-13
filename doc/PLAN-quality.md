@@ -140,6 +140,10 @@ where the two differ.
 | Names | `module_noun_verb` in full words (`pp_macro_expand`, `ld_archive_add_member`); abbreviations only from a short list in STYLE.md |
 | Who does it | The top model writes a module's work order (file map, rename table, comment drafts) from its review; a cheaper model and scripts carry it out; the top model checks the result |
 | Delivery | Johan reads results, not previews.  Each pass must land safely on tooling alone (identical output, gates, premerge) and modules must be workable in parallel: a work order names the files it owns, and two orders never share a file |
+| Shared pool (later, same day, after wave 1) | vccd's shared pool stays off by default and uncapped; vccd joins make's jobserver later, after the cleanup.  No scheduler work in wave 2 |
+| Where VIR's optimizer lives (later, same day) | On VIR itself: new passes, and passes moved from the direct emitters, work on the documented VIR format and are testable with `virtest` on `.vir` files.  Existing pre-IR passes stay until each is ported.  A 2-3 % compile-time loss on VIR is acceptable |
+| Struct field renames (later, same day) | Done with a mode of vcc's own front end that reports every use of a given struct field with its location; the rename script applies them.  No clang tooling |
+| Integrator (later, same day) | Coordinates as before: spawns workers, checks proofs, merges; the PR's agent keeps it mergeable and green |
 
 Open, each waiting for a measurement or a closer look:
 
@@ -151,6 +155,24 @@ Open, each waiting for a measurement or a closer look:
   table; the walker has one instance.)
 
 ## Status
+
+### 2026-11-13: wave 1 merged, wave 2 started
+
+Wave 1 merged PRs #134-#175 (41 PRs): the baseline script, 18 reviews and
+the work orders, file splits for common, as, ld, pp, driver/server, diag,
+cc and the VIR builder, renames for common and as only (pp and diag have
+rename tables), the shared scheduler's stages 1-3 behind `--shared-pool`
+(off), the first VIR steps (analyses computed once, lowerings under
+`arch/<cpu>/vir`) and the builder's named pass table.
+
+Wave 2's tracks:
+- pp and diag renames; rename tables, then renames, for ld, driver/server,
+  cc, vir and codegen.
+- The field-use mode of the front end and the assembler's remaining field
+  renames.
+- Opening comments; pilot steps 4-6 of WORK-common; the link context.
+- The first optimizer pass on VIR itself, then VIR-MIGRATION steps 2e and 3.
+- Diagnostics as a module and the option tables, after the renames.
 
 ### 2026-11-13: on the reorganised tree
 
