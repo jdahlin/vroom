@@ -52,6 +52,9 @@ relative to it); `TODO.md` stays at the top.
 - `RESEARCH-cplusplus.md`: whether vroom's architecture (vccd, prefix
   snapshots, direct -O0 emitter) carries to C++, prior compile-server work on
   the LLVM/GCC/kernel lists, and the inputs where it stops paying.
+- `PLAN-cxx.md`: the first C++ plan (steps X0-X7): a minimal front end to
+  test the instantiation cache and per-symbol codegen on libc++'s tests and
+  nlohmann/json.  Update a step's status there.
 - `src/`: the toolchain; `src/Makefile` builds into `build/src/`.  The tree
   follows PostgreSQL's (`PLAN-tree.md`): generic code in the component
   directories, code for one target CPU in `arch/<cpu>/<component>/`, code for
