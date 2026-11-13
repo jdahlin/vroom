@@ -58,6 +58,7 @@ typedef struct pp_opts {
 	const char *cwd;		/* relative paths are relative to this (NULL: process cwd) */
 	int errfd;			/* diagnostics (0: stderr) */
 	int asm_mode;			/* assembler-with-cpp: unknown directives pass, # need not stringify */
+	int cxx;			/* C++ (its standard's year): true/false in #if, __has_cpp_attribute */
 	int target;			/* PP_LINUX_AARCH64, PP_DARWIN, PP_WASM64, PP_WASM32 or PP_LINUX_X86_64 (column of the feature table; x86-64: has_tab_x86) */
 	int diag_color;			/* diagnostics: 1 colors, -1 none, 0 when errfd is a terminal */
 	int diag_nocaret;		/* -fno-caret-diagnostics: no source lines */

@@ -92,6 +92,8 @@ struct driver_job {
 	const char *standard_version, *macos_minimum_version;
 	int fast_math, no_fp_contract;
 	int macos_minimum_source, unsigned_char, math_flags;	/* fmath: 1 finite-only, 2 no errno, 4 __FAST_MATH__, 8 -pthread, 16 errno, 32 __ARM_FP_FAST */
+	/* C++ (PLAN-cxx.md X2): cxx is the standard's year (98 .. 26), 0 for C; cxx_given: -std=c++NN seen */
+	int cxx, cxx_given, cxx_libcxx, no_exceptions, no_rtti, no_standard_cxx_includes;
 	int trigraphs, standard, strict_standard, allow_implicit_int, allow_implicit_function, gnu89_inline, vcc_kernel, conversion_warning_flags;
 	char object_name_buffer[1024];
 	/* dependency rules (depfile.c) */

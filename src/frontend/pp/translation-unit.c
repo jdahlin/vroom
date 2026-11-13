@@ -23,7 +23,7 @@ static const struct { const char *n; int b; } pp_builtin_macro_names[] = {
 	{ "__INCLUDE_LEVEL__", PP_BUILTIN_INCLUDE_LEVEL }, { "_Pragma", PP_BUILTIN_PRAGMA },
 	{ "__has_attribute", PP_BUILTIN_HAS_ATTRIBUTE }, { "__has_builtin", PP_BUILTIN_HAS_BUILTIN },
 	{ "__has_feature", PP_BUILTIN_HAS_FEATURE }, { "__has_extension", PP_BUILTIN_HAS_EXTENSION },
-	{ "__has_c_attribute", PP_BUILTIN_HAS_C_ATTRIBUTE },	/* __has_cpp_attribute: not defined in C (clang) */
+	{ "__has_c_attribute", PP_BUILTIN_HAS_C_ATTRIBUTE }, { "__has_cpp_attribute", PP_BUILTIN_HAS_CPP_ATTRIBUTE },	/* one per language, as clang */
 	{ "__has_declspec_attribute", PP_BUILTIN_HAS_DECLSPEC_ATTRIBUTE }, { "__has_warning", PP_BUILTIN_HAS_WARNING },
 	{ "__is_identifier", PP_BUILTIN_IS_IDENTIFIER }, { "__has_include", PP_BUILTIN_HAS_INCLUDE },
 	{ "__has_include_next", PP_BUILTIN_HAS_INCLUDE_NEXT }, { "__has_embed", PP_BUILTIN_HAS_EMBED },
@@ -117,7 +117,8 @@ pp *pp_open(const pp_opts *o)
 
 		pthread_once(&once, pp_builtin_macros_init);
 		for (size_t i = 0; i < sizeof(pp_builtin_macro_names) / sizeof(pp_builtin_macro_names[0]); i++)
-			pp_macro_table_set(p, pp_builtin_macros[i]->name, pp_builtin_macros[i]);
+			if (pp_builtin_macro_names[i].b != (o->cxx ? PP_BUILTIN_HAS_C_ATTRIBUTE : PP_BUILTIN_HAS_CPP_ATTRIBUTE))
+				pp_macro_table_set(p, pp_builtin_macros[i]->name, pp_builtin_macros[i]);
 	}
 
 	if (o->main_src) {

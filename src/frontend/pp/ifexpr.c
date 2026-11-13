@@ -228,8 +228,8 @@ static pp_if_value pp_if_primary_parse_inner(pp_if_evaluation *e, bool live)
 			pp_if_token_advance(e);
 			return r;
 		}
-		if (p->options->c23 && e->lookahead.id == KW_true)
-			r.v = 1;	/* C23: true is 1 in #if (false is 0 anyway) */
+		if ((p->options->c23 || p->options->cxx) && e->lookahead.id == KW_true)
+			r.v = 1;	/* C23 and C++: true is 1 in #if (false is 0 anyway) */
 		{
 			uint32_t id = e->lookahead.id, loc = e->lookahead.loc;
 

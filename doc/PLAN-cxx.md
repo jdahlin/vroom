@@ -12,6 +12,26 @@ that would make it fast, each with a verification mode.  If the gates in X6
 fail, the result is still worth having: we know C++ needs something else
 before anyone writes a full front end.
 
+## Proof of concept goal (decided 2026-11-13)
+
+**nlohmann/json's full test suite (all 71 TUs) built by vcc at -O2 through
+VIR, every test passing, 30 times faster than clang++ -O2.**  Baseline,
+measured on this machine (x86-64 Linux, clang 23.1.6, libc++, `-g0`, compile
+only, `-j 6`): clang -O2 takes **243 s CPU, 41.5 s wall**; -O0 127 s CPU,
+21.6 s wall.  30x is **8.1 s CPU** for all 71 TUs (1.4 s wall at `-j 6`).
+Measured cold (vccd started for the build) and warm (one TU edited, vccd
+kept), and reported apart; the goal is the cold number.
+
+What that needs, from X0's numbers: the caches of X5 (json repeats 85 % of
+its instantiations), VIR's -O2 on the remaining unique code with a budget of
+roughly 4 s of CPU for the build, and an instantiator several times faster
+than clang's.  The comparison is honest only if vcc's code is in the same
+class as clang's -O2: the gate includes json's tests running within 1.5x of
+clang -O2's run time.
+
+Progress is measured by `bench/cxx-json.py`: per TU, how far vcc gets (the
+first unsupported construct), then which tests pass, then time.
+
 ## Targets
 
 Two targets, the first a stepping stone to the second.  Both have test
@@ -175,11 +195,20 @@ in `vbench.py gate`.
 
 ### X2 Lexer and driver mode
 
-- `frontend/lex/` with a C++ mode: `::`, `.*`, `->*`, raw strings,
-  digit separators, C++ keywords, alternative tokens.  Tables per mode, not
-  a second lexer (`PLAN-tree.md`).
+- The lexer needs no C++ mode, which keeps one lexed file shareable between
+  C and C++ TUs in vccd: `::` and raw strings are already lexed, digit
+  separators go through C23's `lex_file_digit_separators_remove`, keywords
+  are identifiers to the lexer.  `.*`, `->*` and `<=>` come out as two
+  tokens, and `<::` as `<:` `:`; the C++ parser joins (or splits) them when
+  they are adjacent in the same file (`off + len == next.off`), which is
+  maximal munch and, like clang, never joins across a macro boundary.
 - pp: `__cplusplus`, `__has_cpp_attribute`, C++ predefines taken from clang
-  once (`gen-ppdata.sh` for `-x c++`), libc++'s include paths.
+  once (`gen-ppdata.sh` for `-x c++`), libc++'s include paths.  The C++
+  predefines are the C base plus a table per standard: about 75 `__cpp_*`
+  lines, `__GNUG__`, `__GXX_*`, `__EXCEPTIONS`, `_GNU_SOURCE`,
+  `__STDCPP_*`, minus `__STDC_VERSION__` and `__GNUC_STDC_INLINE__` (and
+  `linux`/`unix` in strict modes); `-fno-exceptions` and `-fno-rtti` remove
+  their four.  `true`/`false` evaluate in `#if`.
 - Driver: `-x c++`, `.cpp`/`.cc`, `-std=c++20`, `-fno-exceptions`,
   `-fno-rtti`.
 
@@ -279,4 +308,17 @@ own.
 ## Status
 
 - X0: done (2026-11-13), gate passed for json; results above.
-- X1-X7: not started.
+- X2 (pp and driver part): done for json (2026-11-13).  `-x c++`, the C++
+  suffixes, `-std=c++NN`/`gnu++NN` (default gnu++17), `-fno-exceptions`,
+  `-fno-rtti`, `-stdlib=libc++` (its `include/c++/v1` first, spelled as
+  clang++ does), `-nostdinc++`.  Predefines and the `__has_*` answers in C++
+  are generated from clang++ once (`src/tools/gen-cxxpredef.py` ->
+  `frontend/pp/ppdata-cxx.inc`, `ppdata-cxx-has.inc`; corpus: libc++, json,
+  doctest, and the queries in glibc's and clang's headers, wrapped ones
+  too); `__has_cpp_attribute` replaces `__has_c_attribute`; `true` is 1 in
+  `#if`; `#pragma clang deprecated/restrict_expansion/final` are dropped by
+  `-E` as clang does (this also fixes C).  `bench/cxx-json.py --stage pp`:
+  all 71 json TUs give clang++'s `-E -P` token stream.  The parser joins of
+  `.*`, `->*`, `<=>` are for X3/X4.  libc++ is reused as is; a library of
+  our own may come later.
+- X1, X3-X7: not started.  Next: `bench/cxx-json.py --stage syntax`.

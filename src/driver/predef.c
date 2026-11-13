@@ -16,6 +16,7 @@
 #define PPDATA_X86_PREDEF
 #include "../frontend/pp/ppdata-x86.inc"
 #include "x86-predefines.h"
+#include "../frontend/pp/ppdata-cxx.inc"
 
 /* -f[un]signed-char against the target's default, the math flags, -pthread */
 static __attribute__((noinline, cold)) void driver_predef_flags_append(driver_buffer *pre, int darwin, int uchar_def, int uchar, int fmath)
@@ -88,7 +89,22 @@ VPRIV void driver_predef_build(struct driver_job *job)
 	else
 		driver_buffer_append_string(&job->predefines, job->darwin ? predef_darwin : job->wasm_bits == 64 ? predef_wasm64 : job->wasm_bits ? predef_wasm32
 			 : job->target_x64 ? predef_x86_64_linux : predef_aarch64_linux);
-	if (job->asm_mode && !job->undefine_predefined)
+	if (job->cxx && !job->undefine_predefined) {
+		/* C++: the C base plus clang++'s difference for the target and standard (gen-cxxpredef.py);
+		   the C base is clang's gnu17, so __STDC_VERSION__ is replaced, not appended */
+		int t = job->darwin ? PP_DARWIN : job->target_x64 ? PP_LINUX_X86_64 : PP_LINUX_AARCH64;
+
+		driver_buffer_append_string(&job->predefines, "#undef __STDC_VERSION__\n#define __STDC_VERSION__ 201710L\n");
+		for (size_t k = 0; k < sizeof predef_cxx / sizeof *predef_cxx; k++)
+			if (predef_cxx[k].target == t && predef_cxx[k].standard == job->cxx && predef_cxx[k].gnu == !job->strict_standard) {
+				driver_buffer_append_string(&job->predefines, predef_cxx[k].delta);
+				if (job->no_exceptions)
+					driver_buffer_append_string(&job->predefines, predef_cxx[k].no_exceptions);
+				if (job->no_rtti)
+					driver_buffer_append_string(&job->predefines, predef_cxx[k].no_rtti);
+				break;
+			}
+	} else if (job->asm_mode && !job->undefine_predefined)
 		driver_buffer_append_string(&job->predefines, "#define __ASSEMBLER__ 1\n#undef __STDC_VERSION__\n#define __STDC_VERSION__ 201710L\n");
 	else if (!job->undefine_predefined && job->standard) {
 		/* the tables are for -std=gnu11 (the kernel's); other standards as clang predefines them */
@@ -125,7 +141,7 @@ VPRIV void driver_predef_build(struct driver_job *job)
 	}
 	if (job->gnu89_inline < 0)
 		job->gnu89_inline = job->standard == 89;
-	else if (!job->undefine_predefined && !job->asm_mode)
+	else if (!job->undefine_predefined && !job->asm_mode && !job->cxx)
 		driver_buffer_append_string(&job->predefines, job->gnu89_inline ? "#undef __GNUC_STDC_INLINE__\n#undef __GNUC_GNU_INLINE__\n#define __GNUC_GNU_INLINE__ 1\n"
 					: "#undef __GNUC_GNU_INLINE__\n#undef __GNUC_STDC_INLINE__\n#define __GNUC_STDC_INLINE__ 1\n");
 	if (job->freestanding) driver_buffer_append_string(&job->predefines, "#undef __STDC_HOSTED__\n#define __STDC_HOSTED__ 0\n");
