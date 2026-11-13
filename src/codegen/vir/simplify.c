@@ -56,7 +56,7 @@ VPRIV void virbuild_function_simplify(ecx *e)
 	uint32_t *stk, ns = 0;
 
 	S.constant_start = V->insn_count;
-	S.use_counts = calloc((size_t)S.constant_start + 1, sizeof *S.use_counts);
+	S.use_counts = calloc(2 * ((size_t)S.constant_start + 1), sizeof *S.use_counts);
 	stk = malloc(((size_t)S.constant_start + 1) * sizeof *stk);
 	{
 		uint32_t kc = 16;
@@ -70,6 +70,7 @@ VPRIV void virbuild_function_simplify(ecx *e)
 	}
 	if (!S.use_counts || !stk || !S.constant_table)
 		virbuild_fail(e, VIRBUILD_FAILURE(out_of_memory));
+	uint32_t *pointer_copies = S.use_counts + S.constant_start + 1;
 	/* uses */
 	for (uint32_t i = 0; i < V->block_order_count; i++) {
 		uint32_t b = V->block_order[i];
@@ -83,11 +84,19 @@ VPRIV void virbuild_function_simplify(ecx *e)
 			if (!x)
 				break;
 			if (virbuild_value_resolve(V, x) == x &&
-			    !virbuild_promote_store_is_dead(V, x))
+			    !virbuild_promote_store_is_dead(V, x)) {
 				VIRBUILD_FOR_EACH_OPERAND(V, x, o, virbuild_use_count_increment(V, &S, virbuild_value_resolve(V, *o)));
+				if (V->insns[x].insn.op == VIR_OP_I2P) pointer_copies[virbuild_value_resolve(V, V->insns[x].insn.a)]++;
+			}
 			if (!q)
 				break;
 		}
+	}
+	/* Pointer-only views need no separately allocated integer carrier. */
+	for (uint32_t q = 0; q < S.constant_start; q++) {
+		vir_insn *in = &V->insns[q].insn;
+		if (in->op == VIR_OP_LOAD && in->type == VIR_TYPE_I64 && !(in->flags & (VIR_INSN_FLAG_VOL | VIR_INSN_FLAG_MS)) &&
+		    VIR_INSN_FLAG_WIDTH_LOG2(in->flags) == 3 && pointer_copies[q] && pointer_copies[q] == S.use_counts[q]) in->type = VIR_TYPE_PTR;
 	}
 	/* rewriting and numbering over the dominator tree */
 	virbuild_block_dominators_compute(e, &S);

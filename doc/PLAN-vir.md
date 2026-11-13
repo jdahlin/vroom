@@ -2749,3 +2749,19 @@ clang (the same `config.h`); vcc compiles all 2019 C files, clang links.
   taken later): in total VIR 1.70× clang, the direct emitter 2.88×.  Worst
   through VIR: mpeg4/mpeg2 encoding 3.15×, convolution 3.4×, gblur 2.7×, aac
   encoding 2.3×, unsharp 2.3×, ffv1 1.8–1.9×; the decoders 1.1–1.3×.
+
+### SQLite register allocation (2026-11-13)
+
+A nonvolatile 64-bit load used exclusively as a pointer now yields a pointer
+directly. A late block parameter crossing a call can keep the last available
+callee-saved register. On the original x86 branch (7e166718), the mapped SQLite
+aMem reload count fell from 92.28M to 14.54M and three alternating native
+speedtest1 series improved by 1.27–2.00%. Those timings predate the tree
+reorganization. The current x86 lowering supports the same VCC_VL_MAP,
+VCC_VL_FILTER and VCC_VL_PROBE measurements through bench/sqlite/vir-edits.py.
+
+The bounded predecessor-choice experiment had inconsistent runtime results.
+Its patch and measurements in results/vir-entry-choice-20261113.* refer to
+7e166718. The compiler continues to use its existing predecessor policy.
+See [the optimizer policy inventory](RESEARCH-optimizer-limits.md) for the
+GCC and LLVM comparisons used in the investigation.

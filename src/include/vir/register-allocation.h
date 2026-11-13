@@ -143,6 +143,12 @@ typedef struct vir_alloc_options {
 	uint64_t pool;		/* live-in pool limit in words (0: the reservation) */
 	bool shrink;		/* look for a save point (15.12) */
 	const uint8_t *no_frame;	/* with shrink, per instruction: a call that needs no frame (a sibling call); or NULL */
+	/* Optional diagnostic observer, never consulted by allocation policy. v=0 is
+	 * the block's selected predecessor; other records describe entry values.
+	 * Slots are reported by the final output, after slot sharing. */
+	void (*entry)(void *context, uint32_t block, uint32_t predecessor, uint32_t v,
+		      uint8_t reg, bool stored, const char *decision);
+	void *entry_context;
 } vir_alloc_options;
 
 bool vir_alloc(vir_function *f, const vir_loops *lp, const vir_target_registers *regs, const vir_alloc_options *opt, vir_alloc_out *out);
