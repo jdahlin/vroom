@@ -4,7 +4,7 @@
 /* callee k (a symbol's address) returns twice: setjmp headers do not universally attach returns_twice to their declaration */
 VPRIV bool virbuild_call_returns_twice(codegen_context *e, const vir_insn *callee)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	uint32_t s;
 
 	if (callee->op != VIR_OP_SYMADDR || CODEGEN_REFERENCE_KIND(callee->a) != CODEGEN_REFERENCE_SYMBOL)

@@ -13,22 +13,22 @@
 
 VPRIV void codegen_reference_note(codegen_context *e, uint32_t ref)
 {
-	if (!e->reach || e->dry)
+	if (!e->is_reachable || e->dry_run_depth)
 		return;
 	codegen_reference_claim(e, ref);
 }
 
 VPRIV void codegen_reference_claim(codegen_context *e, uint32_t ref)
 {
-	codegen_unit *E = e->E;
-	cc *c = e->c;
+	codegen_unit *E = e->unit;
+	cc *c = e->compile_context;
 
 	codegen_log_append(e, CODEGEN_LOG_REFERENCE, ref);
 	if (CODEGEN_REFERENCE_KIND(ref) == CODEGEN_REFERENCE_STRING) {
 		uint32_t i = CODEGEN_REFERENCE_INDEX(ref);
 
-		if (!atomic_load_explicit(&E->strdone[i], memory_order_relaxed) &&
-		    !atomic_exchange(&E->strdone[i], 1))
+		if (!atomic_load_explicit(&E->strings_done[i], memory_order_relaxed) &&
+		    !atomic_exchange(&E->strings_done[i], 1))
 			codegen_work_enqueue(E, 0x80000000u | i);
 		return;
 	}
@@ -39,9 +39,9 @@ VPRIV void codegen_reference_claim(codegen_context *e, uint32_t ref)
 		const sym *y = &c->syms[s];
 
 		if (unlikely((y->flags & AST_SYMBOL_FLAG_WEAK) && !(y->flags & AST_SYMBOL_FLAG_DEFINED)) &&
-		    !atomic_load_explicit(&E->extref[s], memory_order_relaxed) &&
-		    !atomic_exchange(&E->extref[s], 1))
-			e->weakref[e->nweakref++] = s;
+		    !atomic_load_explicit(&E->symbol_referenced[s], memory_order_relaxed) &&
+		    !atomic_exchange(&E->symbol_referenced[s], 1))
+			e->weak_references[e->weak_reference_count++] = s;
 		if (atomic_load_explicit(&E->claimed[s], memory_order_relaxed))
 			return;
 		if (y->kind == AST_SYMBOL_FUNCTION) {
@@ -71,5 +71,5 @@ VPRIV void codegen_reference_claim(codegen_context *e, uint32_t ref)
 VPRIV void codegen_function_prepass_request(codegen_context *e, uint32_t s)
 {
 	codegen_log_append(e, CODEGEN_LOG_WALK, s);
-	codegen_function_walk_ensure(e->E, e->c, s);
+	codegen_function_walk_ensure(e->unit, e->compile_context, s);
 }

@@ -196,7 +196,7 @@ VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i, uint8_
 		} else {	/* one: less or greater */
 			cset(e, rd, C_MI);
 			op3s(e, I_CSINC, 0, rd, rd, ZR, 0, 0);
-			e->in[e->nin - 1].cond = C_LE;
+			e->records[e->record_count - 1].cond = C_LE;
 		}
 		return;
 	}
@@ -207,7 +207,7 @@ VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i, uint8_
 			word(e, 0x1e200c00u | (unsigned)d << 22 | (unsigned)a64_vir_operand_float_register(L, 2) << 16 | (unsigned)cc << 12 |
 				(unsigned)a64_vir_operand_float_register(L, 1) << 5 | (unsigned)vd);
 		else
-			op3s(e, I_CSEL, x, rd, a64_vir_operand_general_register(L, 1, R_X16), a64_vir_operand_general_register(L, 2, R_X17), 0, 0), e->in[e->nin - 1].cond = (uint8_t)cc;
+			op3s(e, I_CSEL, x, rd, a64_vir_operand_general_register(L, 1, R_X16), a64_vir_operand_general_register(L, 2, R_X17), 0, 0), e->records[e->record_count - 1].cond = (uint8_t)cc;
 		return;
 	}
 	case VIR_OP_FADD: case VIR_OP_FSUB: case VIR_OP_FMUL: case VIR_OP_FDIV: {
@@ -277,17 +277,17 @@ VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i, uint8_
 		a64_vir_argument none;
 		int32_t stk;
 		codegen_lvalue l = a64_vir_address_get(L, in->flags, R_X16);
-		int t = l.k == CODEGEN_LVALUE_REGISTER && l.r == R_X16 ? R_X17 : R_X16;
+		int t = l.kind == CODEGEN_LVALUE_REGISTER && l.register_number == R_X16 ? R_X17 : R_X16;
 
-		if (!CODEGEN_IS_DARWIN(e->c))
+		if (!CODEGEN_IS_DARWIN(e->compile_context))
 			a64_vir_fail(L, VIRBUILD_FAILURE(variadic_start_lowering));
 		a64_vir_arguments_assign(true, &f->extra[f->signature], &none, 0, &stk);
-		if (l.k == CODEGEN_LVALUE_SYMBOL) {
-			addr_of_ref(e, R_X17, l.ref, l.off);
-			l = (codegen_lvalue){ .k = CODEGEN_LVALUE_REGISTER, .r = R_X17 };
+		if (l.kind == CODEGEN_LVALUE_SYMBOL) {
+			addr_of_ref(e, R_X17, l.reference, l.offset);
+			l = (codegen_lvalue){ .kind = CODEGEN_LVALUE_REGISTER, .register_number = R_X17 };
 		}
 		opi(e, I_ADDI, 1, t, R_FP, 16 + ((stk + 7) & ~7));
-		mem(e, I_ST, 3, 0, t, l.k == CODEGEN_LVALUE_FRAME ? FRAME : l.r, l.off);
+		mem(e, I_ST, 3, 0, t, l.kind == CODEGEN_LVALUE_FRAME ? FRAME : l.register_number, l.offset);
 		return;
 	}
 	case VIR_OP_BR: {
@@ -331,10 +331,10 @@ VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i, uint8_
 		return;
 	case VIR_OP_TRAP:
 		put(e, I_BRK)->imm = 1;
-		e->reach = false;
+		e->is_reachable = false;
 		return;
 	default: {
-		snprintf(L->context->vw->failure_detail, sizeof L->context->vw->failure_detail, "%s", vir_opcode_table[in->op].name ? vir_opcode_table[in->op].name : "?");
+		snprintf(L->context->vir_builder->failure_detail, sizeof L->context->vir_builder->failure_detail, "%s", vir_opcode_table[in->op].name ? vir_opcode_table[in->op].name : "?");
 		a64_vir_fail(L, VIRBUILD_FAILURE(unsupported_instruction));
 	}
 	}

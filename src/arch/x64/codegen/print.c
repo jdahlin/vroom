@@ -22,8 +22,8 @@ static bool x64_commutes(int op)
  */
 VPRIV void x64_twoaddr(codegen_context *e)
 {
-	bool copies = e->E->o->opt >= 1 && !e->E->noopt;
-	xst *X = e->x64;
+	bool copies = e->unit->options->opt >= 1 && !e->unit->cleanups_disabled;
+	xst *X = e->x64_context;
 	uint32_t n = 0;
 	record *o = X->tw;
 
@@ -33,31 +33,31 @@ VPRIV void x64_twoaddr(codegen_context *e)
 	for (uint32_t k = 0; k < X->nin; k++) {
 		record i = X->in[k];
 
-		if (e->ndl)
+		if (e->debug_row_count)
 			codegen_debug_rows_remap(e, &j, k, n);	/* (-g rows: to the first record emitted for k) */
-		if (copies && i.op == X_MOV && x64_copy_forward_at(e, k))
+		if (copies && i.opcode == X_MOV && x64_copy_forward_at(e, k))
 			continue;
 		if (X->framefree && !x64_framefree_record(e, &i))
 			X->framefree = false;
-		if (x64_tied(i.op) && i.r[0] != i.r[1]) {
-			if (i.r[2] != XNOREG && i.r[0] == i.r[2]) {
-				if (x64_commutes(i.op)) {
-					i.r[2] = i.r[1];
+		if (x64_tied(i.opcode) && i.registers[0] != i.registers[1]) {
+			if (i.registers[2] != XNOREG && i.registers[0] == i.registers[2]) {
+				if (x64_commutes(i.opcode)) {
+					i.registers[2] = i.registers[1];
 				} else {
-					int t = IS_XMM(i.r[2]) ? XMM15 : R11;
+					int t = IS_XMM(i.registers[2]) ? XMM15 : R11;
 
-					o[n++] = (record){ .op = X_MOV, .sz = 8, .r = { (uint8_t)t, i.r[2], XNOREG, XNOREG } };
-					o[n++] = (record){ .op = X_MOV, .sz = 8, .r = { i.r[0], i.r[1], XNOREG, XNOREG } };
-					i.r[2] = (uint8_t)t;
+					o[n++] = (record){ .opcode = X_MOV, .size = 8, .registers = { (uint8_t)t, i.registers[2], XNOREG, XNOREG } };
+					o[n++] = (record){ .opcode = X_MOV, .size = 8, .registers = { i.registers[0], i.registers[1], XNOREG, XNOREG } };
+					i.registers[2] = (uint8_t)t;
 				}
 			} else {
-				o[n++] = (record){ .op = X_MOV, .sz = 8, .r = { i.r[0], i.r[1], XNOREG, XNOREG } };
+				o[n++] = (record){ .opcode = X_MOV, .size = 8, .registers = { i.registers[0], i.registers[1], XNOREG, XNOREG } };
 			}
-			i.r[1] = i.r[0];
+			i.registers[1] = i.registers[0];
 		}
 		o[n++] = i;
 	}
-	if (e->ndl)
+	if (e->debug_row_count)
 		codegen_debug_rows_remap(e, &j, UINT32_MAX, n);
 	X->tw = X->in;
 	X->in = o;
@@ -99,18 +99,18 @@ VPRIV void x64_lbl(tbuf *b, uint32_t s, uint32_t l)
 
 static void x64_memop(codegen_context *e, tbuf *b, const record *i)
 {
-	cc *c = e->c;
-	int base = i->r[1];
-	int64_t off=i->off;
+	cc *c = e->compile_context;
+	int base = i->registers[1];
+	int64_t off=i->offset;
 	if(base==XFRAME) {
-		base=RSP;off+=e->x64->framesz-8-e->x64->spdelta;
+		base=RSP;off+=e->x64_context->framesz-8-e->x64_context->spdelta;
 	}
 
 	/* Incoming stack arguments retain rbp; local slots use the realigned base. */
-	if (base == RBP && i->off < 0 && e->wk->falign > 16)
+	if (base == RBP && i->offset < 0 && e->walk_state->frame_alignment > 16)
 		base = R12;
-	if (i->r[1] == RIP) {
-		codegen_reference_offset_append(c, b, i->ref, i->off);
+	if (i->registers[1] == RIP) {
+		codegen_reference_offset_append(c, b, i->reference, i->offset);
 		vtext_string_append(b, "(%rip)");
 		return;
 	}
@@ -118,9 +118,9 @@ static void x64_memop(codegen_context *e, tbuf *b, const record *i)
 		vtext_signed_append(b, off);
 	vtext_char_append(b, '(');
 	x64_reg(b, base, 8);
-	if (i->op == X_LDX || i->op == X_STX || ((i->op == X_TESTM || i->op == X_CMPM) && i->r[3] != XNOREG)) {
-		vtext_char_append(b, ','); x64_reg(b, i->r[3], 8);
-		vtext_char_append(b, ','); vtext_unsigned_append(b, 1u << i->sh);
+	if (i->opcode == X_LDX || i->opcode == X_STX || ((i->opcode == X_TESTM || i->opcode == X_CMPM) && i->registers[3] != XNOREG)) {
+		vtext_char_append(b, ','); x64_reg(b, i->registers[3], 8);
+		vtext_char_append(b, ','); vtext_unsigned_append(b, 1u << i->shift);
 	}
 	vtext_char_append(b, ')');
 }
@@ -144,7 +144,7 @@ static void x64_imm(tbuf *b, int64_t v)
 /* the stack protector's guard into r11: %fs:40 (glibc's TCB), or as -mstack-protector-guard-* say */
 static void x64_guard(codegen_context *e, tbuf *b)
 {
-	const cc_options *o = e->E->o;
+	const cc_options *o = e->unit->options;
 
 	if (o->sp_sym)
 		vtext_format_append(b, "\tmovq\t%%%s:%s(%%rip), %%r11\n", o->sp_gs ? "gs" : "fs", o->sp_sym);
@@ -155,9 +155,9 @@ static void x64_guard(codegen_context *e, tbuf *b)
 /* Prologue callee-save slots can follow a frame larger than disp32. */
 static void x64_cs_access(codegen_context *e, tbuf *b, int r, bool load)
 {
-	int64_t off = e->x64->csslot[r];
-	int base = e->wk->falign > 16 ? R12 : RBP;
-	if(e->x64->spframe) {base=RSP;off+=e->x64->framesz-8;}
+	int64_t off = e->x64_context->csslot[r];
+	int base = e->walk_state->frame_alignment > 16 ? R12 : RBP;
+	if(e->x64_context->spframe) {base=RSP;off+=e->x64_context->framesz-8;}
 	if (off < INT32_MIN || off > INT32_MAX) {
 		vtext_string_append(b, "\tmovabsq\t$"); vtext_signed_append(b, off);
 		vtext_string_append(b, ", %r11\n\taddq\t"); x64_reg(b, base, 8);
@@ -195,24 +195,24 @@ static const int interrupt_saved[14] = { R12, RAX, RCX, RDX, RBX, RSI, RDI, R8, 
 
 VPRIV void x64_print(codegen_context *e, tbuf *b, uint32_t s)
 {
-	cc *c = e->c;
-	xst *X = e->x64;
+	cc *c = e->compile_context;
+	xst *X = e->x64_context;
 	static const char *const alu[] = { [X_ADD] = "add", [X_SUB] = "sub", [X_AND] = "and", [X_OR] = "or", [X_XOR] = "xor",
 					   [X_IMUL] = "imul", [X_ADC] = "adc", [X_SBB] = "sbb", [X_ADDI] = "add", [X_SUBI] = "sub", [X_ANDI] = "and", [X_ORI] = "or",
 					   [X_XORI] = "xor", [X_SHLI] = "shl", [X_SHRI] = "shr", [X_SARI] = "sar", [X_SHL] = "shl",
 					   [X_SHR] = "shr", [X_SAR] = "sar", [X_NEG] = "neg", [X_NOT] = "not" };
-	int64_t frame = (e->wk->foff + 15) & ~(int64_t)15;
-	uint32_t A = e->wk->falign;
+	int64_t frame = (e->walk_state->frame_offset + 15) & ~(int64_t)15;
+	uint32_t A = e->walk_state->frame_alignment;
 	bool uintr = x86_feature_has(cc_x86_features_get(c, s), X86_FEATURE_UINTR);
-	bool cfi = e->E->o->cfi;	/* unwind tables: .cfi_* as clang writes them */
+	bool cfi = e->unit->options->cfi;	/* unwind tables: .cfi_* as clang writes them */
 	uint32_t dj = 0;		/* -g: the next row */
 	uint32_t tail = x64_tail_ref(e);
 	size_t objitem = codegen_item_open(e, CODEGEN_ITEM_TEXT);
 	bool objcode = false;
-	if(X->spframe && (frame || e->calls))frame+=8;
+	if(X->spframe && (frame || e->has_calls))frame+=8;
 	X->framesz=frame;X->spdelta=0;
 
-	if (unlikely(e->E->o->debug)) {
+	if (unlikely(e->unit->options->debug)) {
 		/* the function's own line (its body's '{', column 0), as clang */
 		uint32_t f, l, cl;
 
@@ -221,9 +221,9 @@ VPRIV void x64_print(codegen_context *e, tbuf *b, uint32_t s)
 	}
 	if (cfi)
 		vtext_string_append(b, "\t.cfi_startproc\n");
-	if (e->E->o->xcf & 1)
+	if (e->unit->options->xcf & 1)
 		vtext_string_append(b, "\tendbr64\n");
-	for (int k = e->E->o->pfe_m; k < e->E->o->pfe_n; k++)
+	for (int k = e->unit->options->pfe_m; k < e->unit->options->pfe_n; k++)
 		vtext_string_append(b, "\tnop\n");
 	if (X->interrupt) {
 		int cfa = X->interrupt == 2 ? 24 : 16;
@@ -277,10 +277,10 @@ VPRIV void x64_print(codegen_context *e, tbuf *b, uint32_t s)
 		vtext_string_append(b, ", %rsp\n");
 	}
 	if(cfi && X->spframe && frame)vtext_format_append(b,"\t.cfi_def_cfa_offset %lld\n",(long long)frame+8);
-	if (e->wk->spneed) {
+	if (e->walk_state->stack_pointer_needed) {
 		/* -fstack-protector: the guard into the canary slot (r11: no argument lives there) */
 		x64_guard(e, b);
-		vtext_format_append(b, "\tmovq\t%%r11, %d(%s)\n", e->wk->canary, A > 16 ? "%r12" : "%rbp");
+		vtext_format_append(b, "\tmovq\t%%r11, %d(%s)\n", e->walk_state->canary, A > 16 ? "%r12" : "%rbp");
 	}
 	for (int r = 0; r < 16; r++)
 		if (X->csslot[r]) {
@@ -292,17 +292,17 @@ VPRIV void x64_print(codegen_context *e, tbuf *b, uint32_t s)
 		}
 	for (uint32_t k = 0; k < X->nin; k++) {
 		const record *i = &X->in[k];
-		int sz = i->sz;
+		int sz = i->size;
 
-		if (objcode && dj < e->ndl && e->dl[dj].k == k) {
+		if (objcode && dj < e->debug_row_count && e->debug_rows[dj].record_index == k) {
 			codegen_item_close(e, objitem);
 			objitem = codegen_item_open(e, CODEGEN_ITEM_TEXT);
 			objcode = false;
 		}
-		for (; dj < e->ndl && e->dl[dj].k == k; dj++)
-			if (dj + 1 == e->ndl || e->dl[dj + 1].k != k)	/* the last of several at one place */
+		for (; dj < e->debug_row_count && e->debug_rows[dj].record_index == k; dj++)
+			if (dj + 1 == e->debug_row_count || e->debug_rows[dj + 1].record_index != k)	/* the last of several at one place */
 				vtext_format_append(b, dj ? "\t.loc\t%u %u %u\n" : "\t.loc\t%u %u %u prologue_end\n",
-				     e->dl[dj].file, e->dl[dj].line, e->dl[dj].col);
+				     e->debug_rows[dj].file, e->debug_rows[dj].line, e->debug_rows[dj].column);
 
 		if (codegen_context_is_direct(e)) {
 			record encoded;
@@ -322,72 +322,72 @@ VPRIV void x64_print(codegen_context *e, tbuf *b, uint32_t s)
 			}
 		}
 
-		switch (i->op) {
+		switch (i->opcode) {
 		case X_LABEL:
 			x64_lbl(b, s, i->label);
 			vtext_string_append(b, ":\n");
 			continue;
 		case X_MOV:
-			if (IS_XMM(i->r[0]) && IS_XMM(i->r[1]))
+			if (IS_XMM(i->registers[0]) && IS_XMM(i->registers[1]))
 				vtext_string_append(b, "\tmovaps\t");
-			else if (IS_XMM(i->r[0]) || IS_XMM(i->r[1]))
+			else if (IS_XMM(i->registers[0]) || IS_XMM(i->registers[1]))
 				vtext_string_append(b, sz == 4 ? "\tmovd\t" : "\tmovq\t");
 			else
 				x64_ins(b, "mov", sz);
-			x64_reg(b, i->r[1], sz);
+			x64_reg(b, i->registers[1], sz);
 			vtext_string_append(b, ", ");
-			x64_reg(b, i->r[0], sz);
+			x64_reg(b, i->registers[0], sz);
 			break;
 		case X_MOVI: {
-			int64_t v = i->imm;
+			int64_t v = i->immediate;
 
 			if (sz == 4) {
 				x64_ins(b, "mov", 4);
 				x64_imm(b, (int32_t)v);
 				vtext_string_append(b, ", ");
-				x64_reg(b, i->r[0], 4);
+				x64_reg(b, i->registers[0], 4);
 			} else if (v >= INT32_MIN && v <= INT32_MAX) {
 				x64_ins(b, "mov", 8);
 				x64_imm(b, v);
 				vtext_string_append(b, ", ");
-				x64_reg(b, i->r[0], 8);
+				x64_reg(b, i->registers[0], 8);
 			} else if ((uint64_t)v <= UINT32_MAX) {
 				x64_ins(b, "mov", 4);
 				x64_imm(b, v);
 				vtext_string_append(b, ", ");
-				x64_reg(b, i->r[0], 4);
+				x64_reg(b, i->registers[0], 4);
 			} else {
 				x64_ins(b, "movabs", 8);
 				x64_imm(b, v);
 				vtext_string_append(b, ", ");
-				x64_reg(b, i->r[0], 8);
+				x64_reg(b, i->registers[0], 8);
 			}
 			break;
 		}
 		case X_LDX: case X_LD:
-			if (IS_XMM(i->r[0])) {
+			if (IS_XMM(i->registers[0])) {
 				vtext_string_append(b, sz == 4 ? "\tmovss\t" : sz == 8 ? "\tmovsd\t" : "\tmovups\t");
 				x64_memop(e, b, i);
 				vtext_string_append(b, ", ");
-				x64_reg(b, i->r[0], 8);
+				x64_reg(b, i->registers[0], 8);
 				break;
 			}
 			{
 			static const char *const sx[] = { [1] = "\tmovsbq\t", [2] = "\tmovswq\t", [4] = "\tmovslq\t", [8] = "\tmovq\t" };
 			static const char *const zx[] = { [1] = "\tmovzbl\t", [2] = "\tmovzwl\t", [4] = "\tmovl\t", [8] = "\tmovq\t" };
 
-			vtext_string_append(b, i->cond ? sx[sz] : zx[sz]);
+			vtext_string_append(b, i->condition ? sx[sz] : zx[sz]);
 			x64_memop(e, b, i);
 			vtext_string_append(b, ", ");
-			x64_reg(b, i->r[0], i->cond || sz == 8 ? 8 : 4);
+			x64_reg(b, i->registers[0], i->condition || sz == 8 ? 8 : 4);
 			break;
 			}
 		case X_STX: case X_ST:
-			if (IS_XMM(i->r[2]))
+			if (IS_XMM(i->registers[2]))
 				vtext_string_append(b, sz == 4 ? "\tmovss\t" : sz == 8 ? "\tmovsd\t" : "\tmovups\t");
 			else
 				x64_ins(b, "mov", sz);
-			x64_reg(b, i->r[2], sz);
+			x64_reg(b, i->registers[2], sz);
 			vtext_string_append(b, ", ");
 			x64_memop(e, b, i);
 			break;
@@ -395,91 +395,91 @@ VPRIV void x64_print(codegen_context *e, tbuf *b, uint32_t s)
 			x64_ins(b, "lea", sz);
 			x64_memop(e, b, i);
 			vtext_string_append(b, ", ");
-			x64_reg(b, i->r[0], sz);
+			x64_reg(b, i->registers[0], sz);
 			break;
 		case X_LEASCALE:
 			x64_ins(b, "lea", sz);
 			vtext_char_append(b, '(');
-			x64_reg(b, i->r[1], 8);
+			x64_reg(b, i->registers[1], 8);
 			vtext_char_append(b, ',');
-			x64_reg(b, i->r[2], 8);
+			x64_reg(b, i->registers[2], 8);
 			vtext_char_append(b, ',');
-			vtext_unsigned_append(b, 1u << i->sh);
+			vtext_unsigned_append(b, 1u << i->shift);
 			vtext_string_append(b, "), ");
-			x64_reg(b, i->r[0], sz);
+			x64_reg(b, i->registers[0], sz);
 			break;
 		case X_ADD: case X_SUB: case X_AND: case X_OR: case X_XOR: case X_IMUL: case X_ADC: case X_SBB:
-			x64_ins(b, alu[i->op], sz);
-			x64_reg(b, i->r[2], sz);
+			x64_ins(b, alu[i->opcode], sz);
+			x64_reg(b, i->registers[2], sz);
 			vtext_string_append(b, ", ");
-			x64_reg(b, i->r[0], sz);
+			x64_reg(b, i->registers[0], sz);
 			break;
 		case X_ADDI: case X_SUBI: case X_ANDI: case X_ORI: case X_XORI: case X_SHLI: case X_SHRI: case X_SARI:
-			x64_ins(b, alu[i->op], sz);
-			x64_imm(b, i->imm);
+			x64_ins(b, alu[i->opcode], sz);
+			x64_imm(b, i->immediate);
 			vtext_string_append(b, ", ");
-			x64_reg(b, i->r[0], sz);
+			x64_reg(b, i->registers[0], sz);
 			break;
 		case X_IMULI:
 			x64_ins(b, "imul", sz);
-			x64_imm(b, i->imm);
+			x64_imm(b, i->immediate);
 			vtext_string_append(b, ", ");
-			x64_reg(b, i->r[1], sz);
+			x64_reg(b, i->registers[1], sz);
 			vtext_string_append(b, ", ");
-			x64_reg(b, i->r[0], sz);
+			x64_reg(b, i->registers[0], sz);
 			break;
 		case X_SHL: case X_SHR: case X_SAR:
-			x64_ins(b, alu[i->op], sz);
+			x64_ins(b, alu[i->opcode], sz);
 			vtext_string_append(b, "%cl, ");
-			x64_reg(b, i->r[0], sz);
+			x64_reg(b, i->registers[0], sz);
 			break;
 		case X_NEG: case X_NOT:
-			x64_ins(b, alu[i->op], sz);
-			x64_reg(b, i->r[0], sz);
+			x64_ins(b, alu[i->opcode], sz);
+			x64_reg(b, i->registers[0], sz);
 			break;
 		case X_CMP:
 			x64_ins(b, "cmp", sz);
-			x64_reg(b, i->r[2], sz);
+			x64_reg(b, i->registers[2], sz);
 			vtext_string_append(b, ", ");
-			x64_reg(b, i->r[1], sz);
+			x64_reg(b, i->registers[1], sz);
 			break;
 		case X_CMPI:
 			x64_ins(b, "cmp", sz);
-			x64_imm(b, i->imm);
+			x64_imm(b, i->immediate);
 			vtext_string_append(b, ", ");
-			x64_reg(b, i->r[1], sz);
+			x64_reg(b, i->registers[1], sz);
 			break;
 		case X_TEST:
 			x64_ins(b, "test", sz);
-			x64_reg(b, i->r[1], sz);
+			x64_reg(b, i->registers[1], sz);
 			vtext_string_append(b, ", ");
-			x64_reg(b, i->r[1], sz);
+			x64_reg(b, i->registers[1], sz);
 			break;
 		case X_CMOV:
-			vtext_string_append(b,"\tcmov");vtext_string_append(b,x64_ccn[i->cond]);vtext_char_append(b,x64_sfx(sz));vtext_char_append(b,'\t');
-			x64_reg(b,i->r[2],sz);vtext_string_append(b,", ");x64_reg(b,i->r[0],sz);break;
+			vtext_string_append(b,"\tcmov");vtext_string_append(b,x64_ccn[i->condition]);vtext_char_append(b,x64_sfx(sz));vtext_char_append(b,'\t');
+			x64_reg(b,i->registers[2],sz);vtext_string_append(b,", ");x64_reg(b,i->registers[0],sz);break;
 		case X_CMPM:
 			x64_ins(b,"cmp",sz);
-			if(i->cond) {x64_memop(e,b,i);vtext_string_append(b,", ");x64_reg(b,i->r[2],sz);}
+			if(i->condition) {x64_memop(e,b,i);vtext_string_append(b,", ");x64_reg(b,i->registers[2],sz);}
 			else {
-				if(i->r[2]==XNOREG)x64_imm(b,sz==1?(uint8_t)i->ref:sz==2?(uint16_t)i->ref:(int32_t)i->ref);
-				else x64_reg(b,i->r[2],sz);
+				if(i->registers[2]==XNOREG)x64_imm(b,sz==1?(uint8_t)i->reference:sz==2?(uint16_t)i->reference:(int32_t)i->reference);
+				else x64_reg(b,i->registers[2],sz);
 				vtext_string_append(b,", ");x64_memop(e,b,i);
 			}
 			break;
 		case X_TESTM:
 			x64_ins(b,"test",sz);
-			x64_imm(b,sz==1?(uint8_t)i->ref:sz==2?(uint16_t)i->ref:(int32_t)i->ref);
+			x64_imm(b,sz==1?(uint8_t)i->reference:sz==2?(uint16_t)i->reference:(int32_t)i->reference);
 			vtext_string_append(b,", ");x64_memop(e,b,i);break;
 		case X_SETCC:
 			vtext_string_append(b, "\tset");
-			vtext_string_append(b, x64_ccn[i->cond]);
+			vtext_string_append(b, x64_ccn[i->condition]);
 			vtext_char_append(b, '\t');
-			x64_reg(b, i->r[0], 1);
+			x64_reg(b, i->registers[0], 1);
 			vtext_string_append(b, "\n\tmovzbl\t");
-			x64_reg(b, i->r[0], 1);
+			x64_reg(b, i->registers[0], 1);
 			vtext_string_append(b, ", ");
-			x64_reg(b, i->r[0], 4);
+			x64_reg(b, i->registers[0], 4);
 			break;
 		case X_JMP:
 			vtext_string_append(b, "\tjmp\t");
@@ -487,7 +487,7 @@ VPRIV void x64_print(codegen_context *e, tbuf *b, uint32_t s)
 			break;
 		case X_JCC:
 			vtext_string_append(b, "\tj");
-			vtext_string_append(b, x64_ccn[i->cond]);
+			vtext_string_append(b, x64_ccn[i->condition]);
 			vtext_char_append(b, '\t');
 			x64_lbl(b, s, i->label);
 			break;
@@ -495,48 +495,48 @@ VPRIV void x64_print(codegen_context *e, tbuf *b, uint32_t s)
 			continue; /* argument uses stay in records; branch follows the epilogue */
 		case X_CALL:
 			vtext_string_append(b, "\tcallq\t");
-			codegen_reference_name_append(c, b, i->ref);
-			if (c->o->pic && (CODEGEN_REFERENCE_KIND(i->ref) == CODEGEN_REFERENCE_NAME || codegen_symbol_needs_got(c, i->ref)))
+			codegen_reference_name_append(c, b, i->reference);
+			if (c->o->pic && (CODEGEN_REFERENCE_KIND(i->reference) == CODEGEN_REFERENCE_NAME || codegen_symbol_needs_got(c, i->reference)))
 				vtext_string_append(b, "@PLT");
 			break;
 		case X_CALLR:
-			if (e->E->o->xcf & 4) {	/* -mretpoline-external-thunk */
-				vtext_string_append(b, (e->E->o->xcf & 8) && i->r[1] >= 8 ? "\tcs\n\tcallq\t__x86_indirect_thunk_" : "\tcallq\t__x86_indirect_thunk_");
-				vtext_string_append(b, x64_r64[i->r[1]]);
+			if (e->unit->options->xcf & 4) {	/* -mretpoline-external-thunk */
+				vtext_string_append(b, (e->unit->options->xcf & 8) && i->registers[1] >= 8 ? "\tcs\n\tcallq\t__x86_indirect_thunk_" : "\tcallq\t__x86_indirect_thunk_");
+				vtext_string_append(b, x64_r64[i->registers[1]]);
 				break;
 			}
 			vtext_string_append(b, "\tcallq\t*");
-			x64_reg(b, i->r[1], 8);
+			x64_reg(b, i->registers[1], 8);
 			break;
 		case X_PUSH:
 			vtext_string_append(b, "\tpushq\t");
-			x64_reg(b, i->r[1], 8);
+			x64_reg(b, i->registers[1], 8);
 			break;
 		case X_POP:
 			vtext_string_append(b, "\tpopq\t");
-			x64_reg(b, i->r[0], 8);
+			x64_reg(b, i->registers[0], 8);
 			break;
 		case X_ADJSP:
-			vtext_string_append(b, i->imm < 0 ? "\tsubq\t$" : "\taddq\t$");
-			vtext_signed_append(b, i->imm < 0 ? -i->imm : i->imm);
+			vtext_string_append(b, i->immediate < 0 ? "\tsubq\t$" : "\taddq\t$");
+			vtext_signed_append(b, i->immediate < 0 ? -i->immediate : i->immediate);
 			vtext_string_append(b, ", %rsp");
 			if(X->spframe) {
-				X->spdelta+=i->imm;
-				if(cfi)vtext_format_append(b,"\n\t.cfi_adjust_cfa_offset %lld",(long long)-i->imm);
+				X->spdelta+=i->immediate;
+				if(cfi)vtext_format_append(b,"\n\t.cfi_adjust_cfa_offset %lld",(long long)-i->immediate);
 			}
 			break;
 		case X_CQO:
 			vtext_string_append(b, sz == 8 ? "\tcqto" : "\tcltd");
 			break;
 		case X_XCHG: case X_XADD:
-			x64_ins(b, i->op == X_XCHG ? "xchg" : "lock xadd", sz);
-			x64_reg(b, i->r[0], sz);
+			x64_ins(b, i->opcode == X_XCHG ? "xchg" : "lock xadd", sz);
+			x64_reg(b, i->registers[0], sz);
 			vtext_string_append(b, ", ");
 			x64_memop(e, b, i);
 			break;
 		case X_CMPXCHG:
 			x64_ins(b, "lock cmpxchg", sz);
-			x64_reg(b, i->r[2], sz);
+			x64_reg(b, i->registers[2], sz);
 			vtext_string_append(b, ", ");
 			x64_memop(e, b, i);
 			break;
@@ -544,43 +544,43 @@ VPRIV void x64_print(codegen_context *e, tbuf *b, uint32_t s)
 			vtext_string_append(b, "\t.long\t");
 			x64_lbl(b, s, i->label);
 			vtext_char_append(b, '-');
-			x64_lbl(b, s, i->ref);
+			x64_lbl(b, s, i->reference);
 			break;
 		case X_LEAL:
 			vtext_string_append(b, "\tleaq\t");
 			x64_lbl(b, s, i->label);
 			vtext_string_append(b, "(%rip), ");
-			x64_reg(b, i->r[0], 8);
+			x64_reg(b, i->registers[0], 8);
 			break;
 		case X_BLENDVB:
 			vtext_string_append(b, "\tpblendvb\t%xmm0, %xmm2, %xmm1");
 			break;
 		case X_PCMPSTR:
-			vtext_string_append(b, i->cond & 2 ? "\tpcmpi" : "\tpcmpe");
-			vtext_string_append(b, i->cond & 1 ? "stri\t$" : "strm\t$");
-			vtext_unsigned_append(b, (uint8_t)i->imm);
+			vtext_string_append(b, i->condition & 2 ? "\tpcmpi" : "\tpcmpe");
+			vtext_string_append(b, i->condition & 1 ? "stri\t$" : "strm\t$");
+			vtext_unsigned_append(b, (uint8_t)i->immediate);
 			vtext_string_append(b, ", %xmm1, %xmm0");
 			break;
 		case X_RAW:
-			if (i->cond && e->wk->falign > 16)
-				codegen_fatal_report(e, e->curloc, "inline asm r12 operand or clobber conflicts with aligned frame base");
+			if (i->condition && e->walk_state->frame_alignment > 16)
+				codegen_fatal_report(e, e->current_location, "inline asm r12 operand or clobber conflicts with aligned frame base");
 			vtext_string_append(b, "#APP\n");
-			vtext_append(b, e->raw.p + i->off, i->ref);
+			vtext_append(b, e->raw.p + i->offset, i->reference);
 			vtext_string_append(b, "\n#NO_APP");
 			break;
 		case X_JMPR:
-			if (e->E->o->xcf & 4) {
-				vtext_string_append(b, (e->E->o->xcf & 8) && i->r[1] >= 8 ? "\tcs\n\tjmp\t__x86_indirect_thunk_" : "\tjmp\t__x86_indirect_thunk_");
-				vtext_string_append(b, x64_r64[i->r[1]]);
+			if (e->unit->options->xcf & 4) {
+				vtext_string_append(b, (e->unit->options->xcf & 8) && i->registers[1] >= 8 ? "\tcs\n\tjmp\t__x86_indirect_thunk_" : "\tjmp\t__x86_indirect_thunk_");
+				vtext_string_append(b, x64_r64[i->registers[1]]);
 				break;
 			}
 			vtext_string_append(b, "\tjmpq\t*");
-			x64_reg(b, i->r[1], 8);
+			x64_reg(b, i->registers[1], 8);
 			break;
 		case X_NAMED:
-			codegen_reference_name_append(c, b, i->ref);
+			codegen_reference_name_append(c, b, i->reference);
 			vtext_char_append(b, ':');
-			if (e->E->o->xcf & 1)
+			if (e->unit->options->xcf & 1)
 				vtext_string_append(b, "\n\tendbr64");	/* (&&label: an indirect jump's target) */
 			break;
 		case X_MFENCE:
@@ -589,9 +589,9 @@ VPRIV void x64_print(codegen_context *e, tbuf *b, uint32_t s)
 		case X_RESUME_FRAME:
 			/* Match the final prologue even if alignment was discovered after
 			   setjmp (or inside an inline body). Bypass memory operand rewriting. */
-			if (e->wk->falign > 16) {
+			if (e->walk_state->frame_alignment > 16) {
 				vtext_string_append(b, "\tleaq\t-8(%rbp), %r12\n\tandq\t$");
-				vtext_signed_append(b, -(int64_t)e->wk->falign);
+				vtext_signed_append(b, -(int64_t)e->walk_state->frame_alignment);
 				vtext_string_append(b, ", %r12");
 			}
 			break;
@@ -600,122 +600,122 @@ VPRIV void x64_print(codegen_context *e, tbuf *b, uint32_t s)
 			break;
 		case X_GOT:
 			vtext_string_append(b, "\tmovq\t");
-			codegen_reference_offset_append(c, b, i->ref, 0);
+			codegen_reference_offset_append(c, b, i->reference, 0);
 			vtext_string_append(b, "@GOTPCREL(%rip), ");
-			x64_reg(b, i->r[0], 8);
+			x64_reg(b, i->registers[0], 8);
 			break;
 		case X_TLS:
-			if (i->cond == 2) {
+			if (i->condition == 2) {
 				vtext_string_append(b, "\tdata16\n\tleaq\t");
-				codegen_reference_offset_append(c, b, i->ref, 0);
+				codegen_reference_offset_append(c, b, i->reference, 0);
 				vtext_string_append(b, "@TLSGD(%rip), %rdi\n\tdata16\n\tdata16\n\trex64\n\tcallq\t__tls_get_addr@PLT");
 				break;
 			}
 			vtext_string_append(b, "\tmovq\t%fs:0, ");
-			x64_reg(b, i->r[0], 8);
-			vtext_string_append(b, i->cond ? "\n\taddq\t" : "\n\tleaq\t");
-			codegen_reference_offset_append(c, b, i->ref, 0);
-			vtext_string_append(b, i->cond ? "@GOTTPOFF(%rip), " : "@TPOFF(");
-			if (!i->cond) {
-				x64_reg(b, i->r[0], 8);
+			x64_reg(b, i->registers[0], 8);
+			vtext_string_append(b, i->condition ? "\n\taddq\t" : "\n\tleaq\t");
+			codegen_reference_offset_append(c, b, i->reference, 0);
+			vtext_string_append(b, i->condition ? "@GOTTPOFF(%rip), " : "@TPOFF(");
+			if (!i->condition) {
+				x64_reg(b, i->registers[0], 8);
 				vtext_string_append(b, "), ");
 			}
-			x64_reg(b, i->r[0], 8);
+			x64_reg(b, i->registers[0], 8);
 			break;
 		case X_UD2:
 			vtext_string_append(b, "\tud2");
 			break;
 		case X_BSF: case X_BSR:
-			x64_ins(b, i->op == X_BSF ? "bsf" : "bsr", sz);
-			x64_reg(b, i->r[1], sz);
+			x64_ins(b, i->opcode == X_BSF ? "bsf" : "bsr", sz);
+			x64_reg(b, i->registers[1], sz);
 			vtext_string_append(b, ", ");
-			x64_reg(b, i->r[0], sz);
+			x64_reg(b, i->registers[0], sz);
 			break;
 		case X_BSWAP:
 			if(sz==2) {
-				vtext_string_append(b,"\trorw\t$8, ");x64_reg(b,i->r[0],2);break;
+				vtext_string_append(b,"\trorw\t$8, ");x64_reg(b,i->registers[0],2);break;
 			}
 			x64_ins(b, "bswap", sz);
-			x64_reg(b, i->r[0], sz);
+			x64_reg(b, i->registers[0], sz);
 			break;
 		case X_MULW: case X_SMULW:
-			x64_ins(b, i->op == X_SMULW ? "imul" : "mul", sz);
-			x64_reg(b, i->r[1], sz);
+			x64_ins(b, i->opcode == X_SMULW ? "imul" : "mul", sz);
+			x64_reg(b, i->registers[1], sz);
 			break;
 		case X_IDIV: case X_DIV:
-			x64_ins(b, i->op == X_IDIV ? "idiv" : "div", sz);
-			x64_reg(b, i->r[1], sz);
+			x64_ins(b, i->opcode == X_IDIV ? "idiv" : "div", sz);
+			x64_reg(b, i->registers[1], sz);
 			break;
 		case X_EXT: {
 			static const char *const sx[] = { [1] = "\tmovsbq\t", [2] = "\tmovswq\t", [4] = "\tmovslq\t" };
 			static const char *const zx[] = { [1] = "\tmovzbl\t", [2] = "\tmovzwl\t", [4] = "\tmovl\t" };
 
-			vtext_string_append(b, i->cond ? sx[sz] : zx[sz]);
-			x64_reg(b, i->r[1], sz);
+			vtext_string_append(b, i->condition ? sx[sz] : zx[sz]);
+			x64_reg(b, i->registers[1], sz);
 			vtext_string_append(b, ", ");
-			x64_reg(b, i->r[0], i->cond ? 8 : 4);
+			x64_reg(b, i->registers[0], i->condition ? 8 : 4);
 			break;
 		}
 		case X_FADD: case X_FSUB: case X_FMUL: case X_FDIV: {
 			static const char *const fo[] = { "add", "sub", "mul", "div" };
 
 			vtext_char_append(b, '\t');
-			vtext_string_append(b, fo[i->op - X_FADD]);
+			vtext_string_append(b, fo[i->opcode - X_FADD]);
 			vtext_string_append(b, sz == 4 ? "ss\t" : "sd\t");
-			x64_reg(b, i->r[2], 8);
+			x64_reg(b, i->registers[2], 8);
 			vtext_string_append(b, ", ");
-			x64_reg(b, i->r[0], 8);
+			x64_reg(b, i->registers[0], 8);
 			break;
 		}
 		case X_FXOR:
 			vtext_string_append(b, "\txorps\t");
-			x64_reg(b, i->r[2], 8);
+			x64_reg(b, i->registers[2], 8);
 			vtext_string_append(b, ", ");
-			x64_reg(b, i->r[0], 8);
+			x64_reg(b, i->registers[0], 8);
 			break;
 		case X_FSQRT:
 			vtext_string_append(b, sz == 4 ? "\tsqrtss\t" : "\tsqrtsd\t");
-			x64_reg(b, i->r[1], 8);
+			x64_reg(b, i->registers[1], 8);
 			vtext_string_append(b, ", ");
-			x64_reg(b, i->r[0], 8);
+			x64_reg(b, i->registers[0], 8);
 			break;
 		case X_FCMP:
 			vtext_string_append(b, sz == 4 ? "\tucomiss\t" : "\tucomisd\t");
-			x64_reg(b, i->r[2], 8);
+			x64_reg(b, i->registers[2], 8);
 			vtext_string_append(b, ", ");
-			x64_reg(b, i->r[1], 8);
+			x64_reg(b, i->registers[1], 8);
 			break;
 		case X_FSETCC:
-			vtext_string_append(b, i->cond ? "\tsetne\t" : "\tsete\t");
-			x64_reg(b, i->r[0], 1);
-			vtext_string_append(b, i->cond ? "\n\tsetp\t%r11b\n\torb\t%r11b, " : "\n\tsetnp\t%r11b\n\tandb\t%r11b, ");
-			x64_reg(b, i->r[0], 1);
+			vtext_string_append(b, i->condition ? "\tsetne\t" : "\tsete\t");
+			x64_reg(b, i->registers[0], 1);
+			vtext_string_append(b, i->condition ? "\n\tsetp\t%r11b\n\torb\t%r11b, " : "\n\tsetnp\t%r11b\n\tandb\t%r11b, ");
+			x64_reg(b, i->registers[0], 1);
 			vtext_string_append(b, "\n\tmovzbl\t");
-			x64_reg(b, i->r[0], 1);
+			x64_reg(b, i->registers[0], 1);
 			vtext_string_append(b, ", ");
-			x64_reg(b, i->r[0], 4);
+			x64_reg(b, i->registers[0], 4);
 			break;
 		case X_CVTI2F:
 			vtext_string_append(b, sz == 4 ? "\tcvtsi2ss" : "\tcvtsi2sd");
-			vtext_char_append(b, i->sh == 8 ? 'q' : 'l');
+			vtext_char_append(b, i->shift == 8 ? 'q' : 'l');
 			vtext_char_append(b, '\t');
-			x64_reg(b, i->r[1], i->sh);
+			x64_reg(b, i->registers[1], i->shift);
 			vtext_string_append(b, ", ");
-			x64_reg(b, i->r[0], 8);
+			x64_reg(b, i->registers[0], 8);
 			break;
 		case X_CVTF2I:
-			vtext_string_append(b, i->sh == 4 ? "\tcvttss2si" : "\tcvttsd2si");
+			vtext_string_append(b, i->shift == 4 ? "\tcvttss2si" : "\tcvttsd2si");
 			vtext_char_append(b, sz == 8 ? 'q' : 'l');
 			vtext_char_append(b, '\t');
-			x64_reg(b, i->r[1], 8);
+			x64_reg(b, i->registers[1], 8);
 			vtext_string_append(b, ", ");
-			x64_reg(b, i->r[0], sz);
+			x64_reg(b, i->registers[0], sz);
 			break;
 		case X_CVTF2F:
 			vtext_string_append(b, sz == 8 ? "\tcvtss2sd\t" : "\tcvtsd2ss\t");
-			x64_reg(b, i->r[1], 8);
+			x64_reg(b, i->registers[1], 8);
 			vtext_string_append(b, ", ");
-			x64_reg(b, i->r[0], 8);
+			x64_reg(b, i->registers[0], 8);
 			break;
 		case X_X87: {
 			static const char *const xn[] = { [XF_LDT] = "fldt", [XF_STPT] = "fstpt", [XF_ADD] = "faddp\t%st, %st(1)",
@@ -724,24 +724,24 @@ VPRIV void x64_print(codegen_context *e, tbuf *b, uint32_t s)
 				[XF_STCW] = "fnstcw", [XF_LDCW] = "fldcw", [XF_LDZ] = "fldz" };
 
 			vtext_char_append(b, '\t');
-			if (i->cond == XF_LD || i->cond == XF_STP)
-				vtext_string_append(b, i->cond == XF_LD ? (sz == 4 ? "flds" : "fldl") : (sz == 4 ? "fstps" : "fstpl"));
-			else if (i->cond == XF_ILD || i->cond == XF_ISTP)
-				vtext_string_append(b, i->cond == XF_ILD ? (sz == 2 ? "filds" : sz == 4 ? "fildl" : "fildll")
+			if (i->condition == XF_LD || i->condition == XF_STP)
+				vtext_string_append(b, i->condition == XF_LD ? (sz == 4 ? "flds" : "fldl") : (sz == 4 ? "fstps" : "fstpl"));
+			else if (i->condition == XF_ILD || i->condition == XF_ISTP)
+				vtext_string_append(b, i->condition == XF_ILD ? (sz == 2 ? "filds" : sz == 4 ? "fildl" : "fildll")
 							  : (sz == 2 ? "fistps" : sz == 4 ? "fistpl" : "fistpll"));
 			else
-				vtext_string_append(b, xn[i->cond]);
-			if (i->r[1] != XNOREG) {
+				vtext_string_append(b, xn[i->condition]);
+			if (i->registers[1] != XNOREG) {
 				vtext_char_append(b, '\t');
 				x64_memop(e, b, i);
 			}
 			break;
 		}
 		case X_REP:
-			vtext_string_append(b, i->cond ? "\trep\tstosb" : "\trep\tmovsb");
+			vtext_string_append(b, i->condition ? "\trep\tstosb" : "\trep\tmovsb");
 			break;
 		default:
-			codegen_fatal_report(e, e->curloc, "internal error: x86-64 record %d", i->op);
+			codegen_fatal_report(e, e->current_location, "internal error: x86-64 record %d", i->opcode);
 		}
 		vtext_char_append(b, '\n');
 	}
@@ -749,20 +749,20 @@ VPRIV void x64_print(codegen_context *e, tbuf *b, uint32_t s)
 		codegen_item_close(e, objitem);
 		objitem = codegen_item_open(e, CODEGEN_ITEM_TEXT);
 	}
-	if(X->spframe && X->spdelta)codegen_fatal_report(e,e->curloc,"internal error: unbalanced VIR outgoing arguments");
-	if (e->wk->spneed) {
+	if(X->spframe && X->spdelta)codegen_fatal_report(e,e->current_location,"internal error: unbalanced VIR outgoing arguments");
+	if (e->walk_state->stack_pointer_needed) {
 		x64_guard(e, b);
-		vtext_format_append(b, "\tcmpq\t%d(%s), %%r11\n\tjne\t.Lspfail%u\n", e->wk->canary, e->wk->falign > 16 ? "%r12" : "%rbp", s);
+		vtext_format_append(b, "\tcmpq\t%d(%s), %%r11\n\tjne\t.Lspfail%u\n", e->walk_state->canary, e->walk_state->frame_alignment > 16 ? "%r12" : "%rbp", s);
 	}
 	for (int r = 0; r < 16; r++)
 		if (X->csslot[r]) {
 			x64_cs_access(e, b, r, true);
 			if (cfi) vtext_format_append(b, "\t.cfi_same_value %%%s\n", x64_r64[r]);
 		}
-	for (; dj < e->ndl; dj++)
-		if (dj + 1 == e->ndl)
+	for (; dj < e->debug_row_count; dj++)
+		if (dj + 1 == e->debug_row_count)
 			vtext_format_append(b, dj ? "\t.loc\t%u %u %u\n" : "\t.loc\t%u %u %u prologue_end\n",
-			     e->dl[dj].file, e->dl[dj].line, e->dl[dj].col);
+			     e->debug_rows[dj].file, e->debug_rows[dj].line, e->debug_rows[dj].column);
 	if (X->interrupt) {
 		if (!x64_nosimd(e))
 			vtext_string_append(b, "\t.byte 0x49, 0x0f, 0xae, 0x0c, 0x24 # fxrstor64 (%r12)\n");
@@ -781,7 +781,7 @@ VPRIV void x64_print(codegen_context *e, tbuf *b, uint32_t s)
 		/* Encodings accepted by the integrated assembler as well as GNU as. */
 		vtext_string_append(b, uintr ? "\t.byte 0xf3, 0x0f, 0x01, 0xec # uiret\n" : "\t.byte 0x48, 0xcf # iretq\n");
 	} else {
-		if (e->wk->falign > 16) {
+		if (e->walk_state->frame_alignment > 16) {
 			vtext_string_append(b, "\tmovq\t-8(%rbp), %r12\n");
 			if (cfi) vtext_string_append(b, "\t.cfi_same_value %r12\n");
 		}
@@ -797,11 +797,11 @@ VPRIV void x64_print(codegen_context *e, tbuf *b, uint32_t s)
 			vtext_char_append(b, '\n');
 		} else {
 			/* Sibling jumps are call edges; interrupts retain their saved-frame return. */
-			vtext_string_append(b, (e->E->o->xcf & 2) ? ((e->E->o->xcf & 8) ? "\tcs\n\tjmp\t__x86_return_thunk\n" : "\tjmp\t__x86_return_thunk\n") : "\tretq\n");
+			vtext_string_append(b, (e->unit->options->xcf & 2) ? ((e->unit->options->xcf & 8) ? "\tcs\n\tjmp\t__x86_return_thunk\n" : "\tjmp\t__x86_return_thunk\n") : "\tretq\n");
 		}
 	}
-	if (e->wk->spneed)
-		vtext_format_append(b, ".Lspfail%u:\n\tcallq\t__stack_chk_fail%s\n", s, e->E->o->pic ? "@PLT" : "");
+	if (e->walk_state->stack_pointer_needed)
+		vtext_format_append(b, ".Lspfail%u:\n\tcallq\t__stack_chk_fail%s\n", s, e->unit->options->pic ? "@PLT" : "");
 	vtext_string_append(b, cfi ? "\t.cfi_endproc\n.Lfunc_end" : ".Lfunc_end");
 	vtext_unsigned_append(b, s);
 	vtext_string_append(b, ":\n\t.size\t");

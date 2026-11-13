@@ -8,11 +8,11 @@
 
 VPRIV uint32_t em_double_unary(codegen_context *e, uint32_t n)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n), *inner, *operand;
 	uint64_t size;
 
-	if (!e->E->o->opt || e->E->noopt || x->op != AST_NODE_UNARY ||
+	if (!e->unit->options->opt || e->unit->cleanups_disabled || x->op != AST_NODE_UNARY ||
 	    (x->aux != LEX_TOKEN_MINUS && x->aux != LEX_TOKEN_TILDE))
 		return 0;
 	inner = N(x->a);

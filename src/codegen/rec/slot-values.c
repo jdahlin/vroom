@@ -8,23 +8,23 @@ VPRIV bool record_slot_values_begin(record_slot_values *s, uint32_t cells)
 {
 	if (!cells || cells > UINT32_MAX / 2)
 		return false;
-	if (cells > s->cap) {
-		s->cap = cells * 2;
-		s->a = realloc(s->a, (size_t)s->cap * sizeof(*s->a));
-		if (!s->a)
+	if (cells > s->capacity) {
+		s->capacity = cells * 2;
+		s->values = realloc(s->values, (size_t)s->capacity * sizeof(*s->values));
+		if (!s->values)
 			abort();
 	}
 	s->count = cells;
-	memset(s->a, 0, (size_t)cells * sizeof(*s->a));
+	memset(s->values, 0, (size_t)cells * sizeof(*s->values));
 	return true;
 }
 
 VPRIV record_slot_value *record_slot_value_get(record_slot_values *s, uint32_t cell, uint32_t gen, bool load)
 {
-	record_slot_value *a = &s->a[cell];
+	record_slot_value *a = &s->values[cell];
 
-	if (a->gen != gen)
-		a->gen = gen, a->value = RECORD_SLOT_NO_VALUE, a->last = RECORD_SLOT_NO_STORE;
+	if (a->generation != gen)
+		a->generation = gen, a->value = RECORD_SLOT_NO_VALUE, a->last = RECORD_SLOT_NO_STORE;
 	if (load)
 		a->last = RECORD_SLOT_NO_STORE;
 	return a;
@@ -50,11 +50,11 @@ VPRIV uint32_t record_slot_value_note(record_slot_value *a, bool load, bool esca
 	a->value = value;
 	a->version = version;
 	a->memory = memory;
-	a->pos = pos;
+	a->position = pos;
 	return overwritten;
 }
 
 VPRIV bool record_slot_value_is_dead(const record_slot_values *s, uint32_t cell, bool escaped)
 {
-	return !escaped && !s->a[cell].loads;
+	return !escaped && !s->values[cell].loads;
 }

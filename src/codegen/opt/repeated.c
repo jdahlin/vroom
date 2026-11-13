@@ -12,13 +12,13 @@
 
 VPRIV int em_repeated_integer(codegen_context *e, uint32_t n)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n), *a, *b;
 	const sym *s;
 	ast_qualified_type t;
 	uint64_t size;
 
-	if (!e->E->o->opt || e->E->noopt || x->op != AST_NODE_BINARY ||
+	if (!e->unit->options->opt || e->unit->cleanups_disabled || x->op != AST_NODE_BINARY ||
 	    (x->aux != LEX_TOKEN_MINUS && x->aux != LEX_TOKEN_CARET && x->aux != LEX_TOKEN_AMPERSAND && x->aux != LEX_TOKEN_PIPE &&
 	     x->aux != LEX_TOKEN_EQUAL_EQUAL && x->aux != LEX_TOKEN_EXCLAMATION_EQUAL && x->aux != LEX_TOKEN_LESS &&
 	     x->aux != LEX_TOKEN_GREATER && x->aux != LEX_TOKEN_LESS_EQUAL && x->aux != LEX_TOKEN_GREATER_EQUAL))

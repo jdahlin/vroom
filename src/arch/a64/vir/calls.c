@@ -87,7 +87,7 @@ VPRIV bool a64_vir_call_is_sibling(a64_vir_context *L, uint32_t b, uint32_t i)
 	uint32_t res = i, j;
 
 	if (!L->tail || f->insns[i].type == VIR_TYPE_MULTI ||
-	    (t->op == VIR_OP_SYMADDR && CODEGEN_REFERENCE_KIND(t->a) == CODEGEN_REFERENCE_SYMBOL && !em_tail_target_ok(L->context, codegen_symbol_canonical(L->context->c, CODEGEN_REFERENCE_INDEX(t->a)))))
+	    (t->op == VIR_OP_SYMADDR && CODEGEN_REFERENCE_KIND(t->a) == CODEGEN_REFERENCE_SYMBOL && !em_tail_target_ok(L->context, codegen_symbol_canonical(L->context->compile_context, CODEGEN_REFERENCE_INDEX(t->a)))))
 		return false;
 	j = a64_vir_pass_through_skip(L, k, i + 1, &res);
 	for (int hop = 0;; hop++) {
@@ -123,7 +123,7 @@ VPRIV void a64_vir_call_lower(a64_vir_context *L, uint32_t b, uint32_t i, const 
 	a = __builtin_alloca(sizeof(a64_vir_argument) * (ng + 1));
 	uint8_t gm = 0;	/* the x registers the arguments are in */
 
-	a64_vir_arguments_assign(CODEGEN_IS_DARWIN(e->c), &f->extra[in->b], a, ng, &stk);
+	a64_vir_arguments_assign(CODEGEN_IS_DARWIN(e->compile_context), &f->extra[in->b], a, ng, &stk);
 	for (uint32_t k = 0; k < ng; k++) {
 		uint8_t r = L->operand_registers[1 + k];
 
@@ -173,13 +173,13 @@ VPRIV void a64_vir_call_lower(a64_vir_context *L, uint32_t b, uint32_t i, const 
 			t->cond = 3;
 			t->rn = (uint8_t)a64_vir_general_register(L->operand_registers[0]);
 		}
-		e->reach = false;
+		e->is_reachable = false;
 		L->skip = i + 1;
 		return;
 	}
-	if (stk > e->outmax)
-		e->outmax = stk;
-	e->calls = true;
+	if (stk > e->outgoing_argument_bytes_max)
+		e->outgoing_argument_bytes_max = stk;
+	e->has_calls = true;
 	if (L->operand_registers[0] == VIR_REGISTER_NONE) {
 		const vir_insn *k = &f->insns[in->a];
 
@@ -209,7 +209,7 @@ VPRIV void a64_vir_parameter_lower(a64_vir_context *L, const vir_insn *in, uint8
 	if (ng > A64_VIR_OPERAND_MAX || in->a >= ng)
 		a64_vir_fail(L, VIRBUILD_FAILURE(lowering_parameter));
 	a = __builtin_alloca(sizeof(a64_vir_argument) * ng);
-	a64_vir_arguments_assign(CODEGEN_IS_DARWIN(e->c), &f->extra[f->signature], a, ng, &stk);
+	a64_vir_arguments_assign(CODEGEN_IS_DARWIN(e->compile_context), &f->extra[f->signature], a, ng, &stk);
 	if (a[in->a].reg != VIR_REGISTER_NONE) {
 		if (res != VIR_REGISTER_NONE && res != a[in->a].reg)
 			a64_vir_fail(L, VIRBUILD_FAILURE(parameter_not_in_register));

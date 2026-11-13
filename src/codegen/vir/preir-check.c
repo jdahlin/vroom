@@ -278,7 +278,7 @@ static void virbuild_preir_check_values(virbuild_preir_checker *k, uint32_t vali
 
 VPRIV const char *virbuild_preir_check(codegen_context *e, uint32_t valid, char *buf, size_t n)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 	virbuild_preir_checker k = { .context = V, .buf = buf, .count = n };
 	uint8_t *seen;
 

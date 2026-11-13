@@ -22,7 +22,7 @@ VPRIV void virbuild_variable_table_clear(virbuild_context *V)
 
 VPRIV uint32_t *virbuild_variable_slot(codegen_context *e, uint32_t b, uint32_t var, bool add)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 	uint64_t key = virbuild_variable_key(b, var) + 1;
 
 	if (add && (V->variable_entry_count + 1) * 2 > V->variable_entry_capacity) {
@@ -79,14 +79,14 @@ VPRIV uint32_t *virbuild_variable_slot(codegen_context *e, uint32_t b, uint32_t 
 VPRIV void virbuild_variable_write(codegen_context *e, uint32_t var, uint32_t b, uint32_t v)
 {
 	*virbuild_variable_slot(e, b, var, true) = v;
-	e->vw->blocks[b].has_definition = 1;
+	e->vir_builder->blocks[b].has_definition = 1;
 }
 
 /* the type a parameter of var gets when its value has type ty */
 static uint32_t virbuild_parameter_type(codegen_context *e, uint32_t var, uint32_t ty)
 {
 	if (var >= VIRBUILD_LOCAL_VARIABLE_FIRST)
-		return e->vw->variable_types[var - VIRBUILD_LOCAL_VARIABLE_FIRST];
+		return e->vir_builder->variable_types[var - VIRBUILD_LOCAL_VARIABLE_FIRST];
 	if (ty == VIR_TYPE_I32)
 		return VIR_TYPE_I64;
 	return ty;
@@ -94,7 +94,7 @@ static uint32_t virbuild_parameter_type(codegen_context *e, uint32_t var, uint32
 
 VPRIV uint32_t virbuild_parameter_new(codegen_context *e, uint32_t b, uint32_t var, uint32_t ty)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 	uint32_t i = virbuild_preir_insn_add(e, VIR_OP_BPARAM, ty, 0, var, VIRBUILD_BLOCK_NONE, 0, b);
 	virbuild_preir_block *k = &V->blocks[b];
 
@@ -109,7 +109,7 @@ VPRIV uint32_t virbuild_parameter_new(codegen_context *e, uint32_t b, uint32_t v
 /* the operands of parameter p (block b) from b's predecessors, converted to its type */
 VPRIV void virbuild_parameter_operands_fill(codegen_context *e, uint32_t p, uint32_t b)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 	uint32_t var = V->insns[p].insn.a, ty = V->insns[p].insn.type, np = V->blocks[b].predecessor_count;
 	uint32_t o = virbuild_extra_append(e, NULL, 0);
 
@@ -134,7 +134,7 @@ VPRIV uint32_t virbuild_undefined_value(codegen_context *e, uint32_t ty)
 /* var's value at the end of block b (during the walk: at the current point of the current block) */
 VPRIV uint32_t virbuild_variable_read(codegen_context *e, uint32_t var, uint32_t b, uint32_t ty)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 	uint32_t *d = virbuild_variable_slot(e, b, var, false), v;
 
 	if (d)

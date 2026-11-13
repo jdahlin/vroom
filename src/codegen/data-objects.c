@@ -27,10 +27,10 @@ static void codegen_data_store(codegen_context *e, uint64_t off, uint64_t v, int
 	}
 	for (int i = 0; i < n; i++)
 		e->data.p[off + (uint64_t)i] = (char)(v >> (8 * i));
-	if (unlikely(n && off < e->relend))
-		for (uint32_t j = 0; j < e->nrel; j++)	/* overwritten: the relocation goes */
-			if (e->rel[j].off < off + (uint64_t)n && off < e->rel[j].off + (e->rel[j].sz ? e->rel[j].sz : 8))
-				e->rel[j].seq = UINT32_MAX;
+	if (unlikely(n && off < e->relocation_end))
+		for (uint32_t j = 0; j < e->relocation_count; j++)	/* overwritten: the relocation goes */
+			if (e->relocations[j].offset < off + (uint64_t)n && off < e->relocations[j].offset + (e->relocations[j].size_bytes ? e->relocations[j].size_bytes : 8))
+				e->relocations[j].sequence = UINT32_MAX;
 }
 
 static void codegen_data_bits_or(codegen_context *e, uint64_t off, uint8_t bits)
@@ -45,16 +45,16 @@ static void codegen_data_bits_or(codegen_context *e, uint64_t off, uint8_t bits)
 static void codegen_data_relocation_add(codegen_context *e, uint64_t off, uint32_t ref, int64_t add, int n)
 {
 	codegen_data_store(e, off, 0, n);
-	e->rel[e->nrel] = (struct codegen_data_relocation){ off, ref, e->nrel, add, 0, n == 8 ? 0 : (uint32_t)n };
-	e->nrel++;
-	if (off + (uint64_t)n > e->relend)
-		e->relend = off + (uint64_t)n;
+	e->relocations[e->relocation_count] = (struct codegen_data_relocation){ off, ref, e->relocation_count, add, 0, n == 8 ? 0 : (uint32_t)n };
+	e->relocation_count++;
+	if (off + (uint64_t)n > e->relocation_end)
+		e->relocation_end = off + (uint64_t)n;
 	codegen_reference_note(e, ref);
 }
 
 static void codegen_data_initializer_store(codegen_context *e, uint64_t off, ast_qualified_type ty, uint32_t init)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x;
 	cc_value cv;
 
@@ -264,11 +264,11 @@ static void codegen_data_initializer_store(codegen_context *e, uint64_t off, ast
 			if (cv.sublabel && (n == 4 || n == 8)) {
 				/* label difference: ref - sub, resolved by the assembler */
 				codegen_data_store(e, off, 0, n);
-				e->rel[e->nrel] = (struct codegen_data_relocation){ off, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_LABEL, cv.label - 1), e->nrel, (int64_t)cv.i,
+				e->relocations[e->relocation_count] = (struct codegen_data_relocation){ off, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_LABEL, cv.label - 1), e->relocation_count, (int64_t)cv.i,
 								  CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_LABEL, cv.sublabel - 1) + 1, (uint32_t)n };
-				e->nrel++;
-				if (off + n > e->relend)
-					e->relend = off + n;
+				e->relocation_count++;
+				if (off + n > e->relocation_end)
+					e->relocation_end = off + n;
 				codegen_reference_note(e, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_LABEL, cv.label - 1));
 				codegen_reference_note(e, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_LABEL, cv.sublabel - 1));
 				return;
@@ -295,9 +295,9 @@ static int codegen_data_relocation_compare(const void *a, const void *b)
 {
 	const struct codegen_data_relocation *x = a, *y = b;
 
-	if (x->off != y->off)
-		return x->off < y->off ? -1 : 1;
-	return x->seq < y->seq ? -1 : x->seq > y->seq;
+	if (x->offset != y->offset)
+		return x->offset < y->offset ? -1 : 1;
+	return x->sequence < y->sequence ? -1 : x->sequence > y->sequence;
 }
 
 /* sort e->rel by offset; a later initializer for the same element overrides: keep the last */
@@ -305,15 +305,15 @@ static void codegen_data_relocations_sort(codegen_context *e)
 {
 	uint32_t k = 0;
 
-	qsort(e->rel, e->nrel, sizeof(e->rel[0]), codegen_data_relocation_compare);
-	for (uint32_t j = 0; j < e->nrel; j++) {
-		if (e->rel[j].seq == UINT32_MAX)
+	qsort(e->relocations, e->relocation_count, sizeof(e->relocations[0]), codegen_data_relocation_compare);
+	for (uint32_t j = 0; j < e->relocation_count; j++) {
+		if (e->relocations[j].sequence == UINT32_MAX)
 			continue;
-		if (k && e->rel[k - 1].off == e->rel[j].off)
+		if (k && e->relocations[k - 1].offset == e->relocations[j].offset)
 			k--;
-		e->rel[k++] = e->rel[j];
+		e->relocations[k++] = e->relocations[j];
 	}
-	e->nrel = k;
+	e->relocation_count = k;
 }
 
 /* the object backend's data item: what codegen_data_directives_append / .zero would assemble to */
@@ -327,11 +327,11 @@ static void codegen_data_item_append(codegen_context *e, uint64_t size, bool zer
 		*dh = (codegen_data_header){ .size = size, .zero = 1 };
 	} else {
 		codegen_data_relocations_sort(e);
-		while (nrel < e->nrel && e->rel[nrel].off < size)
+		while (nrel < e->relocation_count && e->relocations[nrel].offset < size)
 			nrel++;
-		*dh = (codegen_data_header){ .size = size, .n = e->data.n < size ? e->data.n : size, .nrel = nrel };
-		memcpy(codegen_item_room_need(e, nrel * sizeof(codegen_item_relocation)), e->rel, nrel * sizeof(codegen_item_relocation));
-		memcpy(codegen_item_room_need(e, dh->n), e->data.p, dh->n);
+		*dh = (codegen_data_header){ .size = size, .count = e->data.n < size ? e->data.n : size, .relocation_count = nrel };
+		memcpy(codegen_item_room_need(e, nrel * sizeof(codegen_item_relocation)), e->relocations, nrel * sizeof(codegen_item_relocation));
+		memcpy(codegen_item_room_need(e, dh->count), e->data.p, dh->count);
 	}
 	codegen_item_close(e, h);
 }
@@ -345,16 +345,16 @@ static void codegen_data_directives_append(codegen_context *e, tbuf *b, uint64_t
 
 	codegen_data_relocations_sort(e);
 	while (o < size) {
-		uint64_t end = ri < e->nrel ? e->rel[ri].off : size;
+		uint64_t end = ri < e->relocation_count ? e->relocations[ri].offset : size;
 
-		if (ri < e->nrel && o == e->rel[ri].off) {
-			uint32_t sz = e->rel[ri].sz ? e->rel[ri].sz : 8;
+		if (ri < e->relocation_count && o == e->relocations[ri].offset) {
+			uint32_t sz = e->relocations[ri].size_bytes ? e->relocations[ri].size_bytes : 8;
 
-			vtext_string_append(b, sz == 4 ? (WASM(e->c) ? "\t.int32\t" : CODEGEN_IS_X64(e->c) ? "\t.long\t" : "\t.word\t") : WASM(e->c) ? "\t.int64\t" : CODEGEN_IS_X64(e->c) ? "\t.quad\t" : "\t.xword\t");
-			codegen_reference_offset_append(e->c, b, e->rel[ri].ref, e->rel[ri].add);
-			if (e->rel[ri].sub) {
+			vtext_string_append(b, sz == 4 ? (WASM(e->c) ? "\t.int32\t" : CODEGEN_IS_X64(e->compile_context) ? "\t.long\t" : "\t.word\t") : WASM(e->c) ? "\t.int64\t" : CODEGEN_IS_X64(e->compile_context) ? "\t.quad\t" : "\t.xword\t");
+			codegen_reference_offset_append(e->compile_context, b, e->relocations[ri].reference, e->relocations[ri].addend);
+			if (e->relocations[ri].subtrahend) {
 				vtext_char_append(b, '-');
-				codegen_reference_name_append(e->c, b, e->rel[ri].sub - 1);
+				codegen_reference_name_append(e->compile_context, b, e->relocations[ri].subtrahend - 1);
 			}
 			vtext_char_append(b, '\n');
 			o += sz;
@@ -380,7 +380,7 @@ static void codegen_data_directives_append(codegen_context *e, tbuf *b, uint64_t
 
 				/* o < data.n here; past it the bytes are zero, not what the buffer holds */
 				memcpy(&w, d + o, o + 8 <= e->data.n ? 8 : e->data.n - o);
-				vtext_string_append(b, WASM(e->c) ? "\t.int64\t" : CODEGEN_IS_X64(e->c) ? "\t.quad\t" : "\t.xword\t");
+				vtext_string_append(b, WASM(e->c) ? "\t.int64\t" : CODEGEN_IS_X64(e->compile_context) ? "\t.quad\t" : "\t.xword\t");
 				vtext_hex_prefixed_append(b, w);
 				vtext_char_append(b, '\n');
 				o += 8;
@@ -405,7 +405,7 @@ static bool codegen_type_is_all_const(cc *c, ast_qualified_type t)
 
 VPRIV void codegen_data_object_emit(codegen_context *e, uint32_t s)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const sym *y = &c->syms[s];
 	tbuf *b = &e->out;
 	size_t start = b->n;
@@ -414,18 +414,18 @@ VPRIV void codegen_data_object_emit(codegen_context *e, uint32_t s)
 	const attrs *a = codegen_symbol_attributes(c, s);
 	bool zero;
 
-	if (_setjmp(e->bail))
+	if (_setjmp(e->bail_jump))
 		return;
 	e->data.n = 0;
-	e->nrel = 0, e->relend = 0;
-	e->reach = true;
+	e->relocation_count = 0, e->relocation_end = 0;
+	e->is_reachable = true;
 	if (y->body)
 		codegen_data_initializer_store(e, 0, y->ty, y->body);
 	if (e->data.n > size)
 		size = e->data.n;	/* flexible array member initialised */
 	if (size == 0 && !y->body && codegen_type_is_array(c, y->ty) && (T(c, y->ty)->flags & AST_TYPE_FLAG_INCOMPLETE))
 		size = codegen_type_size(c, T(c, y->ty)->base);	/* int x[]; is one element */
-	zero = e->nrel == 0;
+	zero = e->relocation_count == 0;
 	for (uint64_t i = 0; zero && i < e->data.n; i++)
 		zero = !e->data.p[i];
 	if (WASM(c)) {
@@ -465,7 +465,7 @@ VPRIV void codegen_data_object_emit(codegen_context *e, uint32_t s)
 		vtext_string_append(b, ",@object\n");
 		codegen_symbol_name_append(c, b, s);
 		vtext_string_append(b, ":\n");
-		if (zero && !e->nrel) {
+		if (zero && !e->relocation_count) {
 			vtext_string_append(b, "\t.zero\t");
 			vtext_unsigned_append(b, size ? size : 1);
 			vtext_char_append(b, '\n');
@@ -477,13 +477,13 @@ VPRIV void codegen_data_object_emit(codegen_context *e, uint32_t s)
 		vtext_string_append(b, ", ");
 		vtext_unsigned_append(b, size ? size : 1);
 		vtext_char_append(b, '\n');
-		e->E->nobj++;
+		e->unit->object_total++;
 		codegen_chunk_add(e, ((uint64_t)s << 1) | 1, start);
 		return;
 	}
 	if (!a->section && (y->flags & AST_SYMBOL_FLAG_THREAD) && !CODEGEN_IS_DARWIN(c)) {
 		/* ELF: .tdata/.tbss; code reaches it through I_TLV (lval.c) */
-		const char *sec = zero && !e->nrel ? "\t.section\t.tbss,\"awT\",@nobits\n" : "\t.section\t.tdata,\"awT\",@progbits\n";
+		const char *sec = zero && !e->relocation_count ? "\t.section\t.tbss,\"awT\",@nobits\n" : "\t.section\t.tdata,\"awT\",@progbits\n";
 
 		if (codegen_context_is_direct(e)) {
 			size_t h;
@@ -491,16 +491,16 @@ VPRIV void codegen_data_object_emit(codegen_context *e, uint32_t s)
 			b->n = (b->n + 7) & ~(size_t)7;
 			start = b->n;
 			codegen_symbol_header_append(e, b, s, false, sec, align);
-			codegen_data_item_append(e, zero && !e->nrel ? (size ? size : 1) : size, zero && !e->nrel);
+			codegen_data_item_append(e, zero && !e->relocation_count ? (size ? size : 1) : size, zero && !e->relocation_count);
 			h = codegen_item_open(e, CODEGEN_ITEM_OBJECT_SIZE);
-			*(codegen_object_size *)codegen_item_room_need(e, sizeof(codegen_object_size)) = (codegen_object_size){ .sym = s, .size = size };
+			*(codegen_object_size *)codegen_item_room_need(e, sizeof(codegen_object_size)) = (codegen_object_size){ .symbol = s, .size = size };
 			codegen_item_close(e, h);
-			e->E->nobj++;
+			e->unit->object_total++;
 			codegen_chunk_add(e, ((uint64_t)s << 1) | 1, start);
 			return;
 		}
 		codegen_symbol_header_append(e, b, s, false, sec, align);
-		if (zero && !e->nrel) {
+		if (zero && !e->relocation_count) {
 			vtext_string_append(b, "\t.zero\t");
 			vtext_unsigned_append(b, size ? size : 1);
 			vtext_char_append(b, '\n');
@@ -512,13 +512,13 @@ VPRIV void codegen_data_object_emit(codegen_context *e, uint32_t s)
 		vtext_string_append(b, ", ");
 		vtext_unsigned_append(b, size);
 		vtext_char_append(b, '\n');
-		e->E->nobj++;
+		e->unit->object_total++;
 		codegen_chunk_add(e, ((uint64_t)s << 1) | 1, start);
 		return;
 	}
-	if (!a->section && (y->flags & AST_SYMBOL_FLAG_THREAD) && !codegen_context_is_direct(e) && !CODEGEN_IS_DARWIN(e->c))
+	if (!a->section && (y->flags & AST_SYMBOL_FLAG_THREAD) && !codegen_context_is_direct(e) && !CODEGEN_IS_DARWIN(e->compile_context))
 		codegen_fatal_report(e, y->loc, "thread-local storage is not supported");
-	if (!codegen_context_is_direct(e) && CODEGEN_IS_DARWIN(e->c) && (y->flags & AST_SYMBOL_FLAG_THREAD)) {
+	if (!codegen_context_is_direct(e) && CODEGEN_IS_DARWIN(e->compile_context) && (y->flags & AST_SYMBOL_FLAG_THREAD)) {
 		/* the same TLV layout as text; darwin_text names the sections */
 		bool global = y->sc != AST_STORAGE_STATIC && y->depth == 0 && y->name;
 
@@ -528,7 +528,7 @@ VPRIV void codegen_data_object_emit(codegen_context *e, uint32_t s)
 		vtext_char_append(b, '\n');
 		codegen_symbol_name_append(c, b, s);
 		vtext_string_append(b, "$tlv$init:\n");
-		if (zero && !e->nrel) {
+		if (zero && !e->relocation_count) {
 			vtext_string_append(b, "\t.zero\t");
 			vtext_unsigned_append(b, size ? size : 1);
 			vtext_char_append(b, '\n');
@@ -546,7 +546,7 @@ VPRIV void codegen_data_object_emit(codegen_context *e, uint32_t s)
 		vtext_string_append(b, ":\n\t.xword\t__tlv_bootstrap\n\t.xword\t0\n\t.xword\t");
 		codegen_symbol_name_append(c, b, s);
 		vtext_string_append(b, "$tlv$init\n");
-		e->E->nobj++;
+		e->unit->object_total++;
 		codegen_chunk_add(e, ((uint64_t)s << 1) | 1, start);
 		return;
 	}
@@ -569,7 +569,7 @@ VPRIV void codegen_data_object_emit(codegen_context *e, uint32_t s)
 		codegen_symbol_name_append(c, b, s);
 		vtext_string_append(b, "$tlv$init:\n");
 		codegen_item_close(e, h);
-		codegen_data_item_append(e, zero && !e->nrel ? (size ? size : 1) : size, zero && !e->nrel);
+		codegen_data_item_append(e, zero && !e->relocation_count ? (size ? size : 1) : size, zero && !e->relocation_count);
 		h = codegen_item_open(e, CODEGEN_ITEM_TEXT);
 		vtext_string_append(b, "\t.section\t.tlv,\"aw\",@progbits\n");
 		if (global) {
@@ -583,7 +583,7 @@ VPRIV void codegen_data_object_emit(codegen_context *e, uint32_t s)
 		codegen_symbol_name_append(c, b, s);
 		vtext_string_append(b, "$tlv$init\n");
 		codegen_item_close(e, h);
-		e->E->nobj++;
+		e->unit->object_total++;
 		codegen_chunk_add(e, ((uint64_t)s << 1) | 1, start);
 		return;
 	}
@@ -594,17 +594,17 @@ VPRIV void codegen_data_object_emit(codegen_context *e, uint32_t s)
 		start = b->n;
 		codegen_symbol_header_append(e, b, s, false,
 			   codegen_type_is_all_const(c, y->ty) ? "\t.section\t.rodata,\"a\",@progbits\n" : zero ? "\t.bss\n" : "\t.data\n", align);
-		codegen_data_item_append(e, zero && !e->nrel ? (size ? size : 1) : size, zero && !e->nrel);
+		codegen_data_item_append(e, zero && !e->relocation_count ? (size ? size : 1) : size, zero && !e->relocation_count);
 		h = codegen_item_open(e, CODEGEN_ITEM_OBJECT_SIZE);
-		*(codegen_object_size *)codegen_item_room_need(e, sizeof(codegen_object_size)) = (codegen_object_size){ .sym = s, .size = size };
+		*(codegen_object_size *)codegen_item_room_need(e, sizeof(codegen_object_size)) = (codegen_object_size){ .symbol = s, .size = size };
 		codegen_item_close(e, h);
-		e->E->nobj++;
+		e->unit->object_total++;
 		codegen_chunk_add(e, ((uint64_t)s << 1) | 1, start);
 		return;
 	}
 	codegen_symbol_header_append(e, b, s, false,
 		   codegen_type_is_all_const(c, y->ty) ? "\t.section\t.rodata,\"a\",@progbits\n" : zero ? "\t.bss\n" : "\t.data\n", align);
-	if (zero && !e->nrel) {
+	if (zero && !e->relocation_count) {
 		if (a->section && !strncmp(c->strs[a->section - 1].s, ".bss", 4)) {
 			vtext_string_append(b, "\t.zero\t");
 			vtext_unsigned_append(b, size ? size : 1);
@@ -622,13 +622,13 @@ VPRIV void codegen_data_object_emit(codegen_context *e, uint32_t s)
 	vtext_string_append(b, ", ");
 	vtext_unsigned_append(b, size);
 	vtext_char_append(b, '\n');
-	e->E->nobj++;
+	e->unit->object_total++;
 	codegen_chunk_add(e, ((uint64_t)s << 1) | 1, start);
 }
 
 VPRIV void codegen_string_literal_emit(codegen_context *e, uint32_t i)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const cstr *s = &c->strs[i];
 	tbuf *b = &e->out;
 	size_t start = b->n;

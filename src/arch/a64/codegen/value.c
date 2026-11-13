@@ -6,23 +6,23 @@
 VPRIV int treg(codegen_context *e)
 {
 	for (int i = 0; i < CODEGEN_TEMPORARY_COUNT; i++)
-		if (!((e->live | e->resv) & (1u << i))) {
-			e->live |= 1u << i;
+		if (!((e->temporaries_in_use | e->temporaries_reserved) & (1u << i))) {
+			e->temporaries_in_use |= 1u << i;
 			if (codegen_temporary_registers[i] >= 19)
-				e->usedcs |= 1u << codegen_temporary_registers[i];
+				e->callee_saved_used |= 1u << codegen_temporary_registers[i];
 			return codegen_temporary_registers[i];
 		}
-	if (e->nlr || (e->inlfree && e->inlfree < CODEGEN_INLINE_FREE_SAFE) || !e->spill)
-		_longjmp(e->bail, 2);	/* emit_function tries again more carefully */
+	if (e->local_register_candidate_count || (e->inline_free_temporaries && e->inline_free_temporaries < CODEGEN_INLINE_FREE_SAFE) || !e->spill)
+		_longjmp(e->bail_jump, 2);	/* emit_function tries again more carefully */
 	{
-		const codegen_function_instance *f = e->f;
+		const codegen_function_instance *f = e->function_instance;
 
-		while (f->up)
-			f = f->up;
+		while (f->outer)
+			f = f->outer;
 		if (getenv("VCC_LEAKCHK"))
-			codegen_diagnostic_report(e, e->curloc, "here");
-		codegen_fatal_report(e, e->c->syms[f->fn].loc, "expression too complex (out of registers) in '%.*s'",
-		       (int)vintern_ents[e->c->syms[f->fn].name].len, vintern_ents[e->c->syms[f->fn].name].s);
+			codegen_diagnostic_report(e, e->current_location, "here");
+		codegen_fatal_report(e, e->compile_context->syms[f->function].loc, "expression too complex (out of registers) in '%.*s'",
+		       (int)vintern_ents[e->compile_context->syms[f->function].name].len, vintern_ents[e->compile_context->syms[f->function].name].s);
 	}
 }
 
@@ -32,15 +32,15 @@ VPRIV void tfree(codegen_context *e, int r)
 	int i = codegen_temporary_index(r);
 
 	if (i >= 0)
-		e->live &= ~(1u << i);
+		e->temporaries_in_use &= ~(1u << i);
 }
 
 VPRIV void val_free(codegen_context *e, const codegen_value *v)
 {
-	if (v->k == CODEGEN_VALUE_REGISTER)
-		tfree(e, v->r);
-	else if (v->k == CODEGEN_VALUE_REGISTER_PAIR)
-		tfree(e, v->r), tfree(e, v->r2);
+	if (v->kind == CODEGEN_VALUE_REGISTER)
+		tfree(e, v->register_number);
+	else if (v->kind == CODEGEN_VALUE_REGISTER_PAIR)
+		tfree(e, v->register_number), tfree(e, v->register_high);
 }
 
 VPRIV bool codegen_symbol_needs_got(cc *c, uint32_t ref);
@@ -50,21 +50,21 @@ VPRIV int toreg(codegen_context *e, codegen_value *v)
 {
 	int r;
 
-	switch (v->k) {
+	switch (v->kind) {
 	case CODEGEN_VALUE_REGISTER:
-		return v->r;
+		return v->register_number;
 	case CODEGEN_VALUE_REGISTER_PAIR:
-		tfree(e, v->r2);
-		*v = codegen_value_register(v->r);
-		return v->r;
+		tfree(e, v->register_high);
+		*v = codegen_value_register(v->register_number);
+		return v->register_number;
 	case CODEGEN_VALUE_CONSTANT:
 		r = treg(e);
-		movi(e, 1, r, (int64_t)v->i);
+		movi(e, 1, r, (int64_t)v->integer);
 		*v = codegen_value_register(r);
 		return r;
 	case CODEGEN_VALUE_ADDRESS:
 		r = treg(e);
-		addr_of_ref(e, r, v->ref, (int64_t)v->i);
+		addr_of_ref(e, r, v->reference, (int64_t)v->integer);
 		*v = codegen_value_register(r);
 		return r;
 	default:
@@ -78,14 +78,14 @@ VPRIV int toreg(codegen_context *e, codegen_value *v)
 /* 128-bit value into a register pair */
 VPRIV void toreg2(codegen_context *e, codegen_value *v, bool sgn)
 {
-	if (v->k == CODEGEN_VALUE_REGISTER_PAIR)
+	if (v->kind == CODEGEN_VALUE_REGISTER_PAIR)
 		return;
-	if (v->k == CODEGEN_VALUE_CONSTANT) {
+	if (v->kind == CODEGEN_VALUE_CONSTANT) {
 		int lo = treg(e), hi = treg(e);
 
-		movi(e, 1, lo, (int64_t)(uint64_t)(u128)v->i);
-		movi(e, 1, hi, (int64_t)(uint64_t)((u128)v->i >> 64));
-		v->k = CODEGEN_VALUE_REGISTER_PAIR, v->r = (uint8_t)lo, v->r2 = (uint8_t)hi;
+		movi(e, 1, lo, (int64_t)(uint64_t)(u128)v->integer);
+		movi(e, 1, hi, (int64_t)(uint64_t)((u128)v->integer >> 64));
+		v->kind = CODEGEN_VALUE_REGISTER_PAIR, v->register_number = (uint8_t)lo, v->register_high = (uint8_t)hi;
 		return;
 	}
 	{
@@ -95,14 +95,14 @@ VPRIV void toreg2(codegen_context *e, codegen_value *v, bool sgn)
 			opbf(e, I_SBFM, 1, hi, lo, 63, 63);
 		else
 			movi(e, 1, hi, 0);
-		v->k = CODEGEN_VALUE_REGISTER_PAIR, v->r = (uint8_t)lo, v->r2 = (uint8_t)hi;
+		v->kind = CODEGEN_VALUE_REGISTER_PAIR, v->register_number = (uint8_t)lo, v->register_high = (uint8_t)hi;
 	}
 }
 
 VPRIV void lfree(codegen_context *e, const codegen_lvalue *l)
 {
-	if (l->k == CODEGEN_LVALUE_REGISTER)
-		tfree(e, l->r);
+	if (l->kind == CODEGEN_LVALUE_REGISTER)
+		tfree(e, l->register_number);
 }
 
 /* address of an lvalue into a new register (or a constant address) */
@@ -110,28 +110,28 @@ VPRIV codegen_value laddr(codegen_context *e, codegen_lvalue *l)
 {
 	int r;
 
-	switch (l->k) {
+	switch (l->kind) {
 	case CODEGEN_LVALUE_SYMBOL:
-		if (unlikely(codegen_reference_is_weak(e->c, l->ref))) {
+		if (unlikely(codegen_reference_is_weak(e->compile_context, l->reference))) {
 			r = treg(e);
-			addr_of_ref(e, r, l->ref, l->off);
+			addr_of_ref(e, r, l->reference, l->offset);
 			return codegen_value_register(r);
 		}
-		return codegen_value_address(l->ref, l->off);
+		return codegen_value_address(l->reference, l->offset);
 	case CODEGEN_LVALUE_FRAME:
 		r = treg(e);
-		opi(e, I_ADDI, 1, r, FRAME, l->off);
+		opi(e, I_ADDI, 1, r, FRAME, l->offset);
 		return codegen_value_register(r);
 	case CODEGEN_LVALUE_REGISTER:
-		if (l->off)
-			opi(e, I_ADDI, 1, l->r, l->r, l->off);
-		l->off = 0;
-		return codegen_value_register(l->r);
+		if (l->offset)
+			opi(e, I_ADDI, 1, l->register_number, l->register_number, l->offset);
+		l->offset = 0;
+		return codegen_value_register(l->register_number);
 	case CODEGEN_LVALUE_LOCAL_REGISTER:
-		codegen_fatal_report(e, e->curloc, "internal: address of a register variable");
+		codegen_fatal_report(e, e->current_location, "internal: address of a register variable");
 	default:
 		r = treg(e);
-		mov(e, 1, r, l->r);
+		mov(e, 1, r, l->register_number);
 		return codegen_value_register(r);
 	}
 }
@@ -142,14 +142,14 @@ VPRIV codegen_lvalue lfromval(codegen_context *e, codegen_value v, uint32_t alig
 	codegen_lvalue l = { 0 };
 
 	l.align = align;
-	if (v.k == CODEGEN_VALUE_ADDRESS) {
-		l.k = CODEGEN_LVALUE_SYMBOL;
-		l.ref = v.ref;
-		l.off = (int64_t)v.i;
+	if (v.kind == CODEGEN_VALUE_ADDRESS) {
+		l.kind = CODEGEN_LVALUE_SYMBOL;
+		l.reference = v.reference;
+		l.offset = (int64_t)v.integer;
 		return l;
 	}
-	l.k = CODEGEN_LVALUE_REGISTER;
-	l.r = (uint8_t)toreg(e, &v);
+	l.kind = CODEGEN_LVALUE_REGISTER;
+	l.register_number = (uint8_t)toreg(e, &v);
 	return l;
 }
 

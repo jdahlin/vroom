@@ -15,7 +15,7 @@
  * own input register before any of these temporaries are allocated. */
 VPRIV bool walk_division_unsigned_constant_check(codegen_context *e, codegen_value a, const em_udivconst_recipe *r)
 {
-	int extra = (a.k != CODEGEN_VALUE_REGISTER) + 1 + (r->add || r->remainder);
+	int extra = (a.kind != CODEGEN_VALUE_REGISTER) + 1 + (r->add || r->remainder);
 	return WALK_LOWER(nfree)(e) >= extra;
 }
 
@@ -49,8 +49,8 @@ VPRIV codegen_value walk_division_unsigned_constant_emit(codegen_context *e, ast
 				correction = WALK_LOWER(treg)(e);
 				WALK_LOWER(mov)(e, correction, saved);
 			}
-			codegen_value n = { .k=CODEGEN_VALUE_REGISTER, .r=(uint8_t)correction };
-			int qr = q.r;
+			codegen_value n = { .kind=CODEGEN_VALUE_REGISTER, .register_number=(uint8_t)correction };
+			int qr = q.register_number;
 			n = WALK_LOWER(bin)(e, LEX_TOKEN_MINUS, size, false, n, q);
 			WALK_LOWER(tkeep)(e, qr);
 			n = WALK_LOWER(bin)(e, LEX_TOKEN_GREATER_GREATER, size, false, n, codegen_value_constant(1));
@@ -60,7 +60,7 @@ VPRIV codegen_value walk_division_unsigned_constant_emit(codegen_context *e, ast
 	}
 	if (r->remainder) {
 		q = WALK_LOWER(bin)(e, LEX_TOKEN_STAR, size, false, q, codegen_value_constant(r->divisor));
-		q = WALK_LOWER(bin)(e, LEX_TOKEN_MINUS, size, false, (codegen_value){ .k=CODEGEN_VALUE_REGISTER, .r=(uint8_t)saved }, q);
+		q = WALK_LOWER(bin)(e, LEX_TOKEN_MINUS, size, false, (codegen_value){ .kind=CODEGEN_VALUE_REGISTER, .register_number=(uint8_t)saved }, q);
 	}
 	return q;
 }

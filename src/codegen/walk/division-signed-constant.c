@@ -13,7 +13,7 @@
  * The final sign-bit temporary reuses the magic's released allocation. */
 VPRIV bool walk_division_signed_constant_check(codegen_context *e, codegen_value a, const em_sdivconst_recipe *r)
 {
-	int extra = (a.k != CODEGEN_VALUE_REGISTER) + 1 + (r->add || r->remainder);
+	int extra = (a.kind != CODEGEN_VALUE_REGISTER) + 1 + (r->add || r->remainder);
 	return WALK_LOWER(nfree)(e) >= extra;
 }
 
@@ -35,7 +35,7 @@ VPRIV codegen_value walk_division_signed_constant_emit(codegen_context *e, ast_q
 		q = WALK_LOWER(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, true, q, codegen_value_constant(32));
 	}
 	if (r->add) {
-		codegen_value n = { .k=CODEGEN_VALUE_REGISTER, .r=(uint8_t)saved };
+		codegen_value n = { .kind=CODEGEN_VALUE_REGISTER, .register_number=(uint8_t)saved };
 
 		q = WALK_LOWER(bin)(e, LEX_TOKEN_PLUS, size, false, q, n);
 		if (r->remainder)
@@ -45,15 +45,15 @@ VPRIV codegen_value walk_division_signed_constant_emit(codegen_context *e, ast_q
 		q = WALK_LOWER(bin)(e, LEX_TOKEN_GREATER_GREATER, size, true, q, codegen_value_constant(r->shift));
 	{
 		int sign = WALK_LOWER(treg)(e);
-		codegen_value s = { .k=CODEGEN_VALUE_REGISTER, .r=(uint8_t)sign };
+		codegen_value s = { .kind=CODEGEN_VALUE_REGISTER, .register_number=(uint8_t)sign };
 
-		WALK_LOWER(mov)(e, sign, q.r);
+		WALK_LOWER(mov)(e, sign, q.register_number);
 		s = WALK_LOWER(bin)(e, LEX_TOKEN_GREATER_GREATER, size, false, s, codegen_value_constant(r->bits - 1));
 		q = WALK_LOWER(bin)(e, LEX_TOKEN_PLUS, size, false, q, s);
 	}
 	if (r->remainder) {
 		q = WALK_LOWER(bin)(e, LEX_TOKEN_STAR, size, false, q, codegen_value_constant(r->divisor));
-		return WALK_LOWER(bin)(e, LEX_TOKEN_MINUS, size, false, (codegen_value){ .k=CODEGEN_VALUE_REGISTER, .r=(uint8_t)saved }, q);
+		return WALK_LOWER(bin)(e, LEX_TOKEN_MINUS, size, false, (codegen_value){ .kind=CODEGEN_VALUE_REGISTER, .register_number=(uint8_t)saved }, q);
 	}
 	return r->negative ? WALK_LOWER(un)(e, LEX_TOKEN_MINUS, size, q) : q;
 }

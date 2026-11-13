@@ -6,7 +6,7 @@
 
 static codegen_value const_global(codegen_context *e, uint32_t s)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const sym *y = &c->syms[s];
 	cc_value cv;
 
@@ -21,7 +21,7 @@ static codegen_value const_global(codegen_context *e, uint32_t s)
 
 static codegen_value gen_var(codegen_context *e, uint32_t n)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n);
 	uint32_t s = x->a;
 	const sym *y = &c->syms[s];
@@ -45,24 +45,24 @@ static codegen_value gen_var(codegen_context *e, uint32_t n)
 	if (codegen_symbol_is_local_variable(c, s)) {
 		codegen_binding *b = codegen_symbol_binding_get(e, s);
 
-		if (b->kind == CODEGEN_BINDING_CONSTANT && b->inst)
-			return b->v;
-		if (b->kind == CODEGEN_BINDING_REGISTER && b->inst) {
+		if (b->kind == CODEGEN_BINDING_CONSTANT && b->instance)
+			return b->value;
+		if (b->kind == CODEGEN_BINDING_REGISTER && b->instance) {
 			int r = treg(e);
 
-			mov(e, 1, r, b->v.r);
+			mov(e, 1, r, b->value.register_number);
 			return codegen_value_register(r);
 		}
-		if (b->kv && (e->kvalid >> (b->kv - 1) & 1))
-			return codegen_value_constant(e->kval[b->kv - 1]);
+		if (b->known_value_index && (e->known_values_valid >> (b->known_value_index - 1) & 1))
+			return codegen_value_constant(e->known_values[b->known_value_index - 1]);
 	} else {
 		v = const_global(e, codegen_symbol_canonical(c, s));
-		if (v.k == CODEGEN_VALUE_CONSTANT)
+		if (v.kind == CODEGEN_VALUE_CONSTANT)
 			return v;
 	}
 	l = gen_lval(e, n);
 	v = load(e, &l, x->ty);
-	if (!(codegen_type_is_aggregate(c, x->ty) && l.k == CODEGEN_LVALUE_REGISTER))
+	if (!(codegen_type_is_aggregate(c, x->ty) && l.kind == CODEGEN_LVALUE_REGISTER))
 		lfree(e, &l);
 	return v;
 }
@@ -72,35 +72,35 @@ static codegen_value load_free(codegen_context *e, codegen_lvalue *l, ast_qualif
 {
 	codegen_value v = load(e, l, t);
 
-	if (l->k == CODEGEN_LVALUE_REGISTER && !(v.k == CODEGEN_VALUE_REGISTER && v.r == l->r))
-		tfree(e, l->r);
+	if (l->kind == CODEGEN_LVALUE_REGISTER && !(v.kind == CODEGEN_VALUE_REGISTER && v.register_number == l->register_number))
+		tfree(e, l->register_number);
 	return v;
 }
 
 /* move v into the fixed register r (for joins) */
 VPRIV void move_to(codegen_context *e, int r, int r2, codegen_value *v, ast_qualified_type t)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 
-	if (v->k == CODEGEN_VALUE_NONE)
+	if (v->kind == CODEGEN_VALUE_NONE)
 		return;
 	if (r2 >= 0 && codegen_type_is_wide(c, t)) {
 		toreg2(e, v, codegen_type_is_signed(c, t));
-		mov(e, 1, r, v->r);
-		mov(e, 1, r2, v->r2);
+		mov(e, 1, r, v->register_number);
+		mov(e, 1, r2, v->register_high);
 		val_free(e, v);
 		return;
 	}
-	switch (v->k) {
+	switch (v->kind) {
 	case CODEGEN_VALUE_CONSTANT:
-		movi(e, 1, r, (int64_t)v->i);
+		movi(e, 1, r, (int64_t)v->integer);
 		break;
 	case CODEGEN_VALUE_ADDRESS:
-		addr_of_ref(e, r, v->ref, (int64_t)v->i);
+		addr_of_ref(e, r, v->reference, (int64_t)v->integer);
 		break;
 	default:
 		toreg(e, v);
-		mov(e, 1, r, v->r);
+		mov(e, 1, r, v->register_number);
 		val_free(e, v);
 	}
 }
@@ -109,20 +109,20 @@ VPRIV void move_to(codegen_context *e, int r, int r2, codegen_value *v, ast_qual
  * instead of reserving temporaries across arbitrarily nested alternatives. */
 static void cond_spill_value(codegen_context *e, int64_t sl, ast_qualified_type t, codegen_value *v)
 {
-	bool wide = codegen_type_is_wide(e->c, t);
+	bool wide = codegen_type_is_wide(e->compile_context, t);
 
 	if (wide)
-		toreg2(e, v, codegen_type_is_signed(e->c, t));
+		toreg2(e, v, codegen_type_is_signed(e->compile_context, t));
 	else
 		toreg(e, v);
-	mem(e, I_ST, 3, 0, v->r, FRAME, sl);
+	mem(e, I_ST, 3, 0, v->register_number, FRAME, sl);
 	if (wide)
-		mem(e, I_ST, 3, 0, v->r2, FRAME, sl + 8);
+		mem(e, I_ST, 3, 0, v->register_high, FRAME, sl + 8);
 }
 
 static codegen_value gen_cond_spill(codegen_context *e, uint32_t n)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n);
 	ast_qualified_type t = x->ty;
 	bool wide = codegen_type_is_wide(c, t);
@@ -148,18 +148,18 @@ static codegen_value gen_cond_spill(codegen_context *e, uint32_t n)
 	val_free(e, &v);
 	deflabel(e, lend);
 	v = codegen_value_register(treg(e));
-	mem(e, I_LD, 3, 0, v.r, FRAME, sl);
+	mem(e, I_LD, 3, 0, v.register_number, FRAME, sl);
 	if (wide) {
-		v.k = CODEGEN_VALUE_REGISTER_PAIR;
-		v.r2 = treg(e);
-		mem(e, I_LD, 3, 0, v.r2, FRAME, sl + 8);
+		v.kind = CODEGEN_VALUE_REGISTER_PAIR;
+		v.register_high = treg(e);
+		mem(e, I_LD, 3, 0, v.register_high, FRAME, sl + 8);
 	}
 	return v;
 }
 
 static codegen_value gen_cond_expr(codegen_context *e, uint32_t n)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n);
 	ast_qualified_type t = x->ty;
 	bool vd = codegen_type_is_void(c, t), wide = codegen_type_is_wide(c, t);
@@ -171,30 +171,30 @@ static codegen_value gen_cond_expr(codegen_context *e, uint32_t n)
 		return gen_cond_spill(e, n);
 	if (!x->b) {		/* a ?: c */
 		v = gen(e, x->a);
-		if (!codegen_type_is_float(c, t) && (v.k == CODEGEN_VALUE_CONSTANT || v.k == CODEGEN_VALUE_ADDRESS)) {
-			if (v.k == CODEGEN_VALUE_ADDRESS || v.i)
+		if (!codegen_type_is_float(c, t) && (v.kind == CODEGEN_VALUE_CONSTANT || v.kind == CODEGEN_VALUE_ADDRESS)) {
+			if (v.kind == CODEGEN_VALUE_ADDRESS || v.integer)
 				return v;
 			return gen(e, x->c);
 		}
 		if (wide) {
 			toreg2(e, &v, codegen_type_is_signed(c, t));
-			r = v.r, r2 = v.r2;
+			r = v.register_number, r2 = v.register_high;
 		} else {
 			r = toreg(e, &v);
 		}
 		if (codegen_type_is_bitint_big(c, t)) {
 			codegen_value test = codegen_value_register(treg(e));
-			mov(e, 1, test.r, r);
+			mov(e, 1, test.register_number, r);
 			test_zero(e, &test, t, lend, true);
 		} else if (codegen_type_is_float(c, t)) {
 			/* Keep the result value intact while testing its C truth value.
 			 * Testing raw floating bits would incorrectly treat -0.0 as true. */
 			codegen_value test = codegen_value_register(treg(e));
-			mov(e, 1, test.r, r);
+			mov(e, 1, test.register_number, r);
 			if (wide) {
-				test.k = CODEGEN_VALUE_REGISTER_PAIR;
-				test.r2 = treg(e);
-				mov(e, 1, test.r2, r2);
+				test.kind = CODEGEN_VALUE_REGISTER_PAIR;
+				test.register_high = treg(e);
+				mov(e, 1, test.register_high, r2);
 			}
 			test_zero(e, &test, t, lend, true);
 		} else if (wide) {
@@ -206,14 +206,14 @@ static codegen_value gen_cond_expr(codegen_context *e, uint32_t n)
 		v = gen(e, x->c);
 		move_to(e, r, r2, &v, t);
 		deflabel(e, lend);
-		return wide ? (codegen_value){ .k = CODEGEN_VALUE_REGISTER_PAIR, .r = (uint8_t)r, .r2 = (uint8_t)r2 } : codegen_value_register(r);
+		return wide ? (codegen_value){ .kind = CODEGEN_VALUE_REGISTER_PAIR, .register_number = (uint8_t)r, .register_high = (uint8_t)r2 } : codegen_value_register(r);
 	}
 	{
 		int k = 0;
 		codegen_value ca = gen(e, x->a);
 
-		if (ca.k == CODEGEN_VALUE_CONSTANT || ca.k == CODEGEN_VALUE_ADDRESS)
-			return gen(e, (ca.k == CODEGEN_VALUE_ADDRESS || ca.i) ? x->b : x->c);
+		if (ca.kind == CODEGEN_VALUE_CONSTANT || ca.kind == CODEGEN_VALUE_ADDRESS)
+			return gen(e, (ca.kind == CODEGEN_VALUE_ADDRESS || ca.integer) ? x->b : x->c);
 		k = test_zero(e, &ca, N(x->a)->ty, lelse, false);
 		(void)k;
 	}
@@ -237,20 +237,20 @@ static codegen_value gen_cond_expr(codegen_context *e, uint32_t n)
 	deflabel(e, lend);
 	if (vd)
 		return codegen_value_none();
-	return wide ? (codegen_value){ .k = CODEGEN_VALUE_REGISTER_PAIR, .r = (uint8_t)r, .r2 = (uint8_t)r2 } : codegen_value_register(r);
+	return wide ? (codegen_value){ .kind = CODEGEN_VALUE_REGISTER_PAIR, .register_number = (uint8_t)r, .register_high = (uint8_t)r2 } : codegen_value_register(r);
 }
 
 static codegen_value gen_logical(codegen_context *e, uint32_t n)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n);
 	bool isand = x->op == AST_NODE_LOGICAL_AND;
 	codegen_value a = gen(e, x->a), b;
 	uint32_t lshort, lend;
 	int r;
 
-	if (a.k == CODEGEN_VALUE_CONSTANT || a.k == CODEGEN_VALUE_ADDRESS) {
-		bool t = a.k == CODEGEN_VALUE_ADDRESS || a.i;
+	if (a.kind == CODEGEN_VALUE_CONSTANT || a.kind == CODEGEN_VALUE_ADDRESS) {
+		bool t = a.kind == CODEGEN_VALUE_ADDRESS || a.integer;
 
 		if (isand && !t)
 			return codegen_value_constant(0);
@@ -264,7 +264,7 @@ static codegen_value gen_logical(codegen_context *e, uint32_t n)
 	r = treg(e);
 	test_zero(e, &a, N(x->a)->ty, lshort, !isand);
 	b = tobool(e, gen(e, x->b), N(x->b)->ty);
-	if ((b.k == CODEGEN_VALUE_CONSTANT && (isand ? !b.i : b.i)) || (b.k == CODEGEN_VALUE_ADDRESS && !isand)) {
+	if ((b.kind == CODEGEN_VALUE_CONSTANT && (isand ? !b.integer : b.integer)) || (b.kind == CODEGEN_VALUE_ADDRESS && !isand)) {
 		/* x && 0, x || 1: x's effects are done, the value is known (clang folds it,
 		   and code it guards, such as calls to functions that do not exist, goes) */
 		val_free(e, &b);
@@ -283,7 +283,7 @@ static codegen_value gen_logical(codegen_context *e, uint32_t n)
 /* a lane-wise vector operation on the vectors at ra and rb into a new frame temporary; returns its address */
 static codegen_value gen_vbin(codegen_context *e, int op, int ra, int rb, ast_qualified_type t, uint32_t loc)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	uint64_t size = codegen_type_size(c, t);
 	ast_qualified_type et = T(c, t)->base;
 	unsigned es = (unsigned)codegen_type_size(c, et);
@@ -342,13 +342,13 @@ static codegen_value gen_vbin(codegen_context *e, int op, int ra, int rb, ast_qu
 /* operand k of a lane-wise operation: lane i of a vector at ra, or the scalar in rs (copied) */
 static codegen_value vlane(codegen_context *e, ast_qualified_type t, int r, unsigned i)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 
 	if (codegen_type_is_vector(c, t)) {
 		ast_qualified_type et = T(c, t)->base;
-		codegen_lvalue l = { .k = CODEGEN_LVALUE_REGISTER, .r = (uint8_t)r, .off = (int64_t)i * (int64_t)codegen_type_size(c, et), .align = codegen_type_alignment(c, et) };
+		codegen_lvalue l = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = (uint8_t)r, .offset = (int64_t)i * (int64_t)codegen_type_size(c, et), .align = codegen_type_alignment(c, et) };
 
-		if (codegen_type_is_bool_vector(c, t)) l.off = i / 8, l.bf = 1, l.width = 1, l.bitoff = i % 8;
+		if (codegen_type_is_bool_vector(c, t)) l.offset = i / 8, l.is_bitfield = 1, l.width = 1, l.bit_offset = i % 8;
 		return load(e, &l, et);
 	}
 	{
@@ -366,7 +366,7 @@ static codegen_value vlane(codegen_context *e, ast_qualified_type t, int r, unsi
  */
 static codegen_value gen_vlanes(codegen_context *e, int op, ast_qualified_type at, codegen_value *a, ast_qualified_type bt, codegen_value *b, ast_qualified_type rt, bool unary)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	ast_qualified_type vt = codegen_type_is_vector(c, at) ? at : bt, et = T(c, vt)->base, rte = T(c, rt)->base;
 	unsigned n = T(c, vt)->n;
 	int ra = toreg(e, a), rb = unary ? -1 : toreg(e, b), rd;
@@ -394,8 +394,8 @@ static codegen_value gen_vlanes(codegen_context *e, int op, ast_qualified_type a
 
 				val_free(e, &y);
 				t = toreg(e, &x);
-				if (x.k == CODEGEN_VALUE_REGISTER_PAIR)
-					tfree(e, x.r2);
+				if (x.kind == CODEGEN_VALUE_REGISTER_PAIR)
+					tfree(e, x.register_high);
 				cset(e, t, cond);
 				r = codegen_value_register(t);
 			}
@@ -403,10 +403,10 @@ static codegen_value gen_vlanes(codegen_context *e, int op, ast_qualified_type a
 				/* 0 / 1 -> 0 / all ones */
 				int h = treg(e);
 
-				op3(e, I_SUB, 1, r.r, ZR, r.r);
-				mov(e, 1, h, r.r);
-				r.k = CODEGEN_VALUE_REGISTER_PAIR;
-				r.r2 = (uint8_t)h;
+				op3(e, I_SUB, 1, r.register_number, ZR, r.register_number);
+				mov(e, 1, h, r.register_number);
+				r.kind = CODEGEN_VALUE_REGISTER_PAIR;
+				r.register_high = (uint8_t)h;
 			} else {
 				r = arith(e, LEX_TOKEN_MINUS, rte, codegen_value_constant(0), r);
 			}
@@ -417,9 +417,9 @@ static codegen_value gen_vlanes(codegen_context *e, int op, ast_qualified_type a
 			r = codegen_type_is_wide(c, et) ? arith2(e, op, et, x, y) : arith(e, op, et, x, y);
 		}
 		{
-			codegen_lvalue l = { .k = CODEGEN_LVALUE_REGISTER, .r = (uint8_t)rd, .off = (int64_t)i * (int64_t)codegen_type_size(c, rte), .align = codegen_type_alignment(c, rte) };
+			codegen_lvalue l = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = (uint8_t)rd, .offset = (int64_t)i * (int64_t)codegen_type_size(c, rte), .align = codegen_type_alignment(c, rte) };
 
-			if (codegen_type_is_bool_vector(c, rt)) l.off = i / 8, l.bf = 1, l.width = 1, l.bitoff = i % 8;
+			if (codegen_type_is_bool_vector(c, rt)) l.offset = i / 8, l.is_bitfield = 1, l.width = 1, l.bit_offset = i % 8;
 			store(e, &l, rte, &r);
 			val_free(e, &r);
 		}
@@ -440,7 +440,7 @@ static bool vbin_fast(cc *c, int op, ast_qualified_type lt, ast_qualified_type r
 
 static codegen_value gen_binary(codegen_context *e, uint32_t n)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n);
 	int op = x->aux;
 	ast_qualified_type lt = N(x->a)->ty, rt = N(x->b)->ty, ty = x->ty;
@@ -467,9 +467,9 @@ static codegen_value gen_binary(codegen_context *e, uint32_t n)
 	if (em_sibling_values(e, n)) {
 		int ra, rb;
 		a = gen(e, x->a);
-		if (a.k == CODEGEN_VALUE_CONSTANT) {
+		if (a.kind == CODEGEN_VALUE_CONSTANT) {
 			bool ok;
-			codegen_value v = fold_int_bin(e, op, ty, ty, a.i, a.i, &ok);
+			codegen_value v = fold_int_bin(e, op, ty, ty, a.integer, a.integer, &ok);
 			if (ok) return v;
 		}
 		ra = toreg(e, &a);
@@ -480,22 +480,22 @@ static codegen_value gen_binary(codegen_context *e, uint32_t n)
 	if (unlikely(vstack_guard_low()))	/* nested operators recurse here: an error before the stack runs out */
 		codegen_fatal_report(e, x->loc, "expression nested too deeply");
 	a = gen(e, x->a);
-	if (unlikely(e->spill) && (a.k == CODEGEN_VALUE_REGISTER || a.k == CODEGEN_VALUE_REGISTER_PAIR) && codegen_temporary_index(a.r) >= 0 &&
+	if (unlikely(e->spill) && (a.kind == CODEGEN_VALUE_REGISTER || a.kind == CODEGEN_VALUE_REGISTER_PAIR) && codegen_temporary_index(a.register_number) >= 0 &&
 	    !codegen_type_is_vector(c, lt) && N(x->b)->op != AST_NODE_NUMBER && N(x->b)->op != AST_NODE_VARIABLE) {
 		/* out of registers before: the left value waits in the frame while the right is computed */
 		int64_t sl = slot(e, 16, 8);
-		bool two = a.k == CODEGEN_VALUE_REGISTER_PAIR;
+		bool two = a.kind == CODEGEN_VALUE_REGISTER_PAIR;
 
-		mem(e, I_ST, 3, 0, a.r, FRAME, sl);
+		mem(e, I_ST, 3, 0, a.register_number, FRAME, sl);
 		if (two)
-			mem(e, I_ST, 3, 0, a.r2, FRAME, sl + 8);
+			mem(e, I_ST, 3, 0, a.register_high, FRAME, sl + 8);
 		val_free(e, &a);
 		b = gen(e, x->b);
-		a.r = (uint8_t)treg(e);
-		mem(e, I_LD, 3, 0, a.r, FRAME, sl);
+		a.register_number = (uint8_t)treg(e);
+		mem(e, I_LD, 3, 0, a.register_number, FRAME, sl);
 		if (two) {
-			a.r2 = (uint8_t)treg(e);
-			mem(e, I_LD, 3, 0, a.r2, FRAME, sl + 8);
+			a.register_high = (uint8_t)treg(e);
+			mem(e, I_LD, 3, 0, a.register_high, FRAME, sl + 8);
 		}
 	} else {
 		b = gen(e, x->b);
@@ -535,8 +535,8 @@ static codegen_value gen_binary(codegen_context *e, uint32_t n)
 	if (op == LEX_TOKEN_MINUS && codegen_type_is_pointer(c, lt) && codegen_type_is_pointer(c, rt)) {
 		int64_t es = (int64_t)elem_size(c, lt);
 
-		if ((a.k == CODEGEN_VALUE_ADDRESS && b.k == CODEGEN_VALUE_ADDRESS && a.ref == b.ref) || (a.k == CODEGEN_VALUE_CONSTANT && b.k == CODEGEN_VALUE_CONSTANT))
-			return codegen_value_constant((a.i - b.i) / (es ? es : 1));
+		if ((a.kind == CODEGEN_VALUE_ADDRESS && b.kind == CODEGEN_VALUE_ADDRESS && a.reference == b.reference) || (a.kind == CODEGEN_VALUE_CONSTANT && b.kind == CODEGEN_VALUE_CONSTANT))
+			return codegen_value_constant((a.integer - b.integer) / (es ? es : 1));
 		{
 			int ra = toreg(e, &a), rb = toreg(e, &b);
 
@@ -555,28 +555,28 @@ static codegen_value gen_binary(codegen_context *e, uint32_t n)
 		bool sg = !codegen_type_is_pointer(c, lt) && codegen_type_is_signed(c, lt);
 		int cond, r;
 
-		if (a.k == CODEGEN_VALUE_CONSTANT && b.k == CODEGEN_VALUE_CONSTANT) {
+		if (a.kind == CODEGEN_VALUE_CONSTANT && b.kind == CODEGEN_VALUE_CONSTANT) {
 			bool ok;
-			codegen_value v = fold_int_bin(e, op, codegen_type_is_pointer(c, lt) ? codegen_type_primitive(AST_TYPE_UNSIGNED_LONG) : lt, ty, a.i, b.i, &ok);
+			codegen_value v = fold_int_bin(e, op, codegen_type_is_pointer(c, lt) ? codegen_type_primitive(AST_TYPE_UNSIGNED_LONG) : lt, ty, a.integer, b.integer, &ok);
 
 			if (ok)
 				return v;
 		}
-		if ((a.k == CODEGEN_VALUE_ADDRESS && b.k == CODEGEN_VALUE_ADDRESS && a.ref == b.ref) ||
-		    (a.k == CODEGEN_VALUE_ADDRESS && b.k == CODEGEN_VALUE_CONSTANT && b.i == 0) || (b.k == CODEGEN_VALUE_ADDRESS && a.k == CODEGEN_VALUE_CONSTANT && a.i == 0)) {
-			if (a.k == CODEGEN_VALUE_ADDRESS && b.k == CODEGEN_VALUE_ADDRESS) {
+		if ((a.kind == CODEGEN_VALUE_ADDRESS && b.kind == CODEGEN_VALUE_ADDRESS && a.reference == b.reference) ||
+		    (a.kind == CODEGEN_VALUE_ADDRESS && b.kind == CODEGEN_VALUE_CONSTANT && b.integer == 0) || (b.kind == CODEGEN_VALUE_ADDRESS && a.kind == CODEGEN_VALUE_CONSTANT && a.integer == 0)) {
+			if (a.kind == CODEGEN_VALUE_ADDRESS && b.kind == CODEGEN_VALUE_ADDRESS) {
 				bool ok;
 
-				return fold_int_bin(e, op, codegen_type_primitive(AST_TYPE_LONG), ty, a.i, b.i, &ok);
+				return fold_int_bin(e, op, codegen_type_primitive(AST_TYPE_LONG), ty, a.integer, b.integer, &ok);
 			}
 			if (op == LEX_TOKEN_EQUAL_EQUAL)
 				return codegen_value_constant(0);
 			if (op == LEX_TOKEN_EXCLAMATION_EQUAL)
 				return codegen_value_constant(1);
 		}
-		if ((op == LEX_TOKEN_EQUAL_EQUAL || op == LEX_TOKEN_EXCLAMATION_EQUAL) && b.k == CODEGEN_VALUE_CONSTANT && b.i == 0 && last_cset(e, &a) >= 0) {
+		if ((op == LEX_TOKEN_EQUAL_EQUAL || op == LEX_TOKEN_EXCLAMATION_EQUAL) && b.kind == CODEGEN_VALUE_CONSTANT && b.integer == 0 && last_cset(e, &a) >= 0) {
 			if (op == LEX_TOKEN_EQUAL_EQUAL)	/* (cond) == 0: the inverse cset */
-				e->in[e->nin - 1].cond ^= 1;
+				e->records[e->record_count - 1].cond ^= 1;
 			return a;
 		}
 		if (codegen_type_is_wide(c, lt))
@@ -585,28 +585,28 @@ static codegen_value gen_binary(codegen_context *e, uint32_t n)
 			cond = emit_cmp(e, op, X(c, lt), sg, &a, &b);
 		val_free(e, &b);
 		r = toreg(e, &a);
-		if (a.k == CODEGEN_VALUE_REGISTER_PAIR)
-			tfree(e, a.r2);
+		if (a.kind == CODEGEN_VALUE_REGISTER_PAIR)
+			tfree(e, a.register_high);
 		cset(e, r, cond);
 		return codegen_value_register(r);
 	}
-	if (a.k == CODEGEN_VALUE_CONSTANT && b.k == CODEGEN_VALUE_CONSTANT) {
+	if (a.kind == CODEGEN_VALUE_CONSTANT && b.kind == CODEGEN_VALUE_CONSTANT) {
 		bool ok;
-		codegen_value v = fold_int_bin(e, op, ty, ty, a.i, b.i, &ok);
+		codegen_value v = fold_int_bin(e, op, ty, ty, a.integer, b.integer, &ok);
 
 		if (op == LEX_TOKEN_LESS_LESS || op == LEX_TOKEN_GREATER_GREATER)
-			v = fold_int_bin(e, op, lt, ty, a.i, b.i, &ok);
+			v = fold_int_bin(e, op, lt, ty, a.integer, b.integer, &ok);
 		if (ok)
 			return v;
 	}
 	/* 0 << x, 0 >> x, -1 >> x (signed): the constant, whatever x is */
-	if ((op == LEX_TOKEN_LESS_LESS || op == LEX_TOKEN_GREATER_GREATER) && a.k == CODEGEN_VALUE_CONSTANT && b.k != CODEGEN_VALUE_CONSTANT &&
-	    (codegen_integer_truncate(c, a.i, ty) == 0 || (op == LEX_TOKEN_GREATER_GREATER && codegen_type_is_signed(c, ty) && codegen_integer_truncate(c, a.i, ty) == -1))) {
+	if ((op == LEX_TOKEN_LESS_LESS || op == LEX_TOKEN_GREATER_GREATER) && a.kind == CODEGEN_VALUE_CONSTANT && b.kind != CODEGEN_VALUE_CONSTANT &&
+	    (codegen_integer_truncate(c, a.integer, ty) == 0 || (op == LEX_TOKEN_GREATER_GREATER && codegen_type_is_signed(c, ty) && codegen_integer_truncate(c, a.integer, ty) == -1))) {
 		val_free(e, &b);
-		return codegen_value_constant(codegen_integer_truncate(c, a.i, ty));
+		return codegen_value_constant(codegen_integer_truncate(c, a.integer, ty));
 	}
-	if (a.k == CODEGEN_VALUE_ADDRESS && b.k == CODEGEN_VALUE_CONSTANT && (op == LEX_TOKEN_PLUS || op == LEX_TOKEN_MINUS) && codegen_type_size(c, ty) == 8) {
-		a.i += op == LEX_TOKEN_PLUS ? b.i : -b.i;
+	if (a.kind == CODEGEN_VALUE_ADDRESS && b.kind == CODEGEN_VALUE_CONSTANT && (op == LEX_TOKEN_PLUS || op == LEX_TOKEN_MINUS) && codegen_type_size(c, ty) == 8) {
+		a.integer += op == LEX_TOKEN_PLUS ? b.integer : -b.integer;
 		return a;
 	}
 	if (codegen_type_is_wide(c, ty))
@@ -616,7 +616,7 @@ static codegen_value gen_binary(codegen_context *e, uint32_t n)
 
 static codegen_value gen_unary(codegen_context *e, uint32_t n)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n);
 	ast_qualified_type t = N(x->a)->ty;
 	uint32_t operand = em_double_unary(e, n);
@@ -635,38 +635,38 @@ static codegen_value gen_unary(codegen_context *e, uint32_t n)
 		if (codegen_type_is_bitint_big(c, x->ty)) return a64_bigbin(e, LEX_TOKEN_MINUS, x->ty, codegen_value_constant(0), v);
 		if (codegen_type_is_float(c, x->ty))
 			return f_neg(e, v, x->ty);
-		if (v.k == CODEGEN_VALUE_CONSTANT)
-			return codegen_value_constant(codegen_integer_truncate(c, (i128)((u128)0 - (u128)v.i), x->ty));
+		if (v.kind == CODEGEN_VALUE_CONSTANT)
+			return codegen_value_constant(codegen_integer_truncate(c, (i128)((u128)0 - (u128)v.integer), x->ty));
 		if (codegen_type_is_wide(c, x->ty)) {
 			toreg2(e, &v, codegen_type_is_signed(c, x->ty));
-			op3(e, I_SUBS, 1, v.r, ZR, v.r);
-			op3(e, I_SBC, 1, v.r2, ZR, v.r2);
+			op3(e, I_SUBS, 1, v.register_number, ZR, v.register_number);
+			op3(e, I_SBC, 1, v.register_high, ZR, v.register_high);
 			return v;
 		}
 		toreg(e, &v);
-		op3(e, I_SUB, X(c, x->ty), v.r, ZR, v.r);
+		op3(e, I_SUB, X(c, x->ty), v.register_number, ZR, v.register_number);
 		return v;
 	case LEX_TOKEN_TILDE:
 		if (codegen_type_is_bitint_big(c, x->ty)) return a64_bigbin(e, LEX_TOKEN_CARET, x->ty, v, codegen_value_constant(-1));
-		if (v.k == CODEGEN_VALUE_CONSTANT)
-			return codegen_value_constant(codegen_integer_truncate(c, ~v.i, x->ty));
+		if (v.kind == CODEGEN_VALUE_CONSTANT)
+			return codegen_value_constant(codegen_integer_truncate(c, ~v.integer, x->ty));
 		if (codegen_type_is_wide(c, x->ty)) {
 			toreg2(e, &v, codegen_type_is_signed(c, x->ty));
-			op3(e, I_ORN, 1, v.r, ZR, v.r);
-			op3(e, I_ORN, 1, v.r2, ZR, v.r2);
+			op3(e, I_ORN, 1, v.register_number, ZR, v.register_number);
+			op3(e, I_ORN, 1, v.register_high, ZR, v.register_high);
 			return v;
 		}
 		toreg(e, &v);
-		op3(e, I_ORN, X(c, x->ty), v.r, ZR, v.r);
+		op3(e, I_ORN, X(c, x->ty), v.register_number, ZR, v.register_number);
 		return v;
 	case LEX_TOKEN_EXCLAMATION:
 		v = tobool(e, v, t);
-		if (v.k == CODEGEN_VALUE_CONSTANT)
-			return codegen_value_constant(!v.i);
+		if (v.kind == CODEGEN_VALUE_CONSTANT)
+			return codegen_value_constant(!v.integer);
 		if (last_cset(e, &v) >= 0)
-			e->in[e->nin - 1].cond ^= 1;
+			e->records[e->record_count - 1].cond ^= 1;
 		else
-			opi(e, I_EORI, 0, v.r, v.r, 1);
+			opi(e, I_EORI, 0, v.register_number, v.register_number, 1);
 		return v;
 	}
 	codegen_fatal_report(e, x->loc, "unsupported unary operator");
@@ -675,7 +675,7 @@ static codegen_value gen_unary(codegen_context *e, uint32_t n)
 /* convert v from type `from` to `to` the way an assignment back to an integer lvalue does */
 static codegen_value conv_back(codegen_context *e, codegen_value v, ast_qualified_type from, ast_qualified_type to)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 
 	if (KIND(c, to) == AST_TYPE_BOOL)
 		return tobool(e, v, from);
@@ -688,17 +688,17 @@ static codegen_value conv_back(codegen_context *e, codegen_value v, ast_qualifie
  * move padding into value bits or interpret it as a signed high word. */
 static codegen_value bitint_value(codegen_context *e, codegen_value v, ast_qualified_type t)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	{
 		unsigned bits = T(c, t)->n;
 		bool sgn = codegen_type_is_signed(c, t);
 
-		if (v.k == CODEGEN_VALUE_CONSTANT)
-			return codegen_value_constant(codegen_integer_truncate(c, v.i, t));
+		if (v.kind == CODEGEN_VALUE_CONSTANT)
+			return codegen_value_constant(codegen_integer_truncate(c, v.integer, t));
 		if (bits > 64) {
 			toreg2(e, &v, sgn);
 			if (bits < 128)
-				opbf(e, sgn ? I_SBFM : I_UBFM, 1, v.r2, v.r2, 0, bits - 65);
+				opbf(e, sgn ? I_SBFM : I_UBFM, 1, v.register_high, v.register_high, 0, bits - 65);
 		} else if (bits < 64) {
 			int r = toreg(e, &v);
 
@@ -712,7 +712,7 @@ static codegen_value bitint_value(codegen_context *e, codegen_value v, ast_quali
 
 static codegen_value assign_op(codegen_context *e, const node *x, ast_qualified_type lt, codegen_value old, codegen_value v)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	ast_qualified_type pt = x->c;
 	int op = x->aux;
 
@@ -736,9 +736,9 @@ static codegen_value assign_op(codegen_context *e, const node *x, ast_qualified_
 		old = cast(e, old, pt, lt, AST_CAST_INTEGER);
 	} else {
 		old = conv_back(e, old, lt, pt);
-		if (old.k == CODEGEN_VALUE_CONSTANT && v.k == CODEGEN_VALUE_CONSTANT) {
+		if (old.kind == CODEGEN_VALUE_CONSTANT && v.kind == CODEGEN_VALUE_CONSTANT) {
 			bool ok;
-			codegen_value f = fold_int_bin(e, op, (op == LEX_TOKEN_LESS_LESS || op == LEX_TOKEN_GREATER_GREATER) ? pt : pt, pt, old.i, v.i, &ok);
+			codegen_value f = fold_int_bin(e, op, (op == LEX_TOKEN_LESS_LESS || op == LEX_TOKEN_GREATER_GREATER) ? pt : pt, pt, old.integer, v.integer, &ok);
 
 			if (ok)
 				old = f;
@@ -758,7 +758,7 @@ static codegen_value incdec_op(codegen_context *e, ast_qualified_type t, bool in
 static inline bool atomic_target(codegen_context *e, uint32_t a, ast_qualified_type t)
 {
 	(void)a;
-	return unlikely(T(e->c, t)->flags & AST_TYPE_FLAG_ATOMIC);
+	return unlikely(T(e->compile_context, t)->flags & AST_TYPE_FLAG_ATOMIC);
 }
 
 /*
@@ -774,7 +774,7 @@ static inline bool atomic_target(codegen_context *e, uint32_t a, ast_qualified_t
  */
 static codegen_value atomic_rmw(codegen_context *e, uint32_t n, bool inc, bool post)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n);
 	bool asg = x->op == AST_NODE_ASSIGN;
 	ast_qualified_type t = N(x->a)->ty;
@@ -786,9 +786,9 @@ static codegen_value atomic_rmw(codegen_context *e, uint32_t n, bool inc, bool p
 
 	if (asg) {
 		v = gen(e, x->b);
-		if (v.k == CODEGEN_VALUE_REGISTER_PAIR)
+		if (v.kind == CODEGEN_VALUE_REGISTER_PAIR)
 			codegen_fatal_report(e, x->loc, "compound assignment to an _Atomic object with a 128-bit operand is not supported");
-		if (v.k != CODEGEN_VALUE_CONSTANT)
+		if (v.kind != CODEGEN_VALUE_CONSTANT)
 			toreg(e, &v);
 	}
 	l = gen_lval(e, x->a);
@@ -814,17 +814,17 @@ static codegen_value atomic_rmw(codegen_context *e, uint32_t n, bool inc, bool p
 	if (asg) {
 		codegen_value vc = v;
 
-		if (v.k == CODEGEN_VALUE_REGISTER) {
+		if (v.kind == CODEGEN_VALUE_REGISTER) {
 			int r = treg(e);
 
-			mov(e, 1, r, v.r);
+			mov(e, 1, r, v.register_number);
 			vc = codegen_value_register(r);
 		}
 		nv = assign_op(e, x, t, old, vc);
 	} else {
 		nv = incdec_op(e, t, inc, post, &old);
 	}
-	nb = nv.k == CODEGEN_VALUE_CONSTANT && nv.i == 0 ? ZR : toreg(e, &nv);
+	nb = nv.kind == CODEGEN_VALUE_CONSTANT && nv.integer == 0 ? ZR : toreg(e, &nv);
 	cmp = treg(e);
 	mov(e, 1, cmp, ob);
 	at_cas(e, (unsigned)sz, cmp, nb, ra);	/* casal */
@@ -852,17 +852,17 @@ static codegen_value atomic_rmw(codegen_context *e, uint32_t n, bool inc, bool p
 static codegen_value load_for_update(codegen_context *e, codegen_lvalue *l, ast_qualified_type t)
 {
 	codegen_value v = load(e, l, t);
-	if (codegen_type_is_bitint_big(e->c, t) && l->k == CODEGEN_LVALUE_REGISTER && v.k == CODEGEN_VALUE_REGISTER && v.r == l->r) {
+	if (codegen_type_is_bitint_big(e->compile_context, t) && l->kind == CODEGEN_LVALUE_REGISTER && v.kind == CODEGEN_VALUE_REGISTER && v.register_number == l->register_number) {
 		int r = treg(e);
-		mov(e, 1, r, v.r);
-		v.r = (uint8_t)r;
+		mov(e, 1, r, v.register_number);
+		v.register_number = (uint8_t)r;
 	}
 	return v;
 }
 
 static codegen_value gen_assign(codegen_context *e, uint32_t n)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n);
 	ast_qualified_type lt = N(x->a)->ty;
 	codegen_lvalue l;
@@ -903,32 +903,32 @@ static codegen_value gen_assign(codegen_context *e, uint32_t n)
 			l = gen_lval(e, x->a);
 			store(e, &l, lt, &v);
 			lfree(e, &l);
-			e->kvalid &= (uint16_t)~(1u << ak);
-			if (cv.k == CODEGEN_VALUE_CONSTANT) {
-				e->kval[ak] = (int64_t)codegen_integer_truncate(c, cv.i, lt);
-				e->kvalid |= (uint16_t)(1u << ak);
+			e->known_values_valid &= (uint16_t)~(1u << ak);
+			if (cv.kind == CODEGEN_VALUE_CONSTANT) {
+				e->known_values[ak] = (int64_t)codegen_integer_truncate(c, cv.integer, lt);
+				e->known_values_valid |= (uint16_t)(1u << ak);
 			}
 			return v;
 		}
-		if (N(x->a)->op == AST_NODE_VARIABLE && (e->E->sflags[N(x->a)->a] & CODEGEN_SYMBOL_CONSTANT_WRITTEN)) {
+		if (N(x->a)->op == AST_NODE_VARIABLE && (e->unit->symbol_flags[N(x->a)->a] & CODEGEN_SYMBOL_CONSTANT_WRITTEN)) {
 			codegen_binding *b = codegen_symbol_binding_get(e, N(x->a)->a);
 
-			if (b->kind == CODEGEN_BINDING_CONSTANT && b->inst) {
+			if (b->kind == CODEGEN_BINDING_CONSTANT && b->instance) {
 				/* the same constant again (codegen_prepass_assignment_note) */
 				val_free(e, &v);
-				return b->v;
+				return b->value;
 			}
-			if (b->kv) {
-				int k = b->kv - 1;
+			if (b->known_value_index) {
+				int k = b->known_value_index - 1;
 				codegen_value cv = v;	/* store() may move v into a register */
 
 				l = gen_lval(e, x->a);
 				store(e, &l, lt, &v);
 				lfree(e, &l);
-				e->kvalid &= (uint16_t)~(1u << k);
-				if (cv.k == CODEGEN_VALUE_CONSTANT) {
-					e->kval[k] = (int64_t)codegen_integer_truncate(c, cv.i, lt);
-					e->kvalid |= (uint16_t)(1u << k);
+				e->known_values_valid &= (uint16_t)~(1u << k);
+				if (cv.kind == CODEGEN_VALUE_CONSTANT) {
+					e->known_values[k] = (int64_t)codegen_integer_truncate(c, cv.integer, lt);
+					e->known_values_valid |= (uint16_t)(1u << k);
 				}
 				return v;
 			}
@@ -936,9 +936,9 @@ static codegen_value gen_assign(codegen_context *e, uint32_t n)
 		l = gen_lval(e, x->a);
 		store(e, &l, lt, &v);
 		lfree(e, &l);
-		if (l.bf && v.k == CODEGEN_VALUE_REGISTER) {
+		if (l.is_bitfield && v.kind == CODEGEN_VALUE_REGISTER) {
 			/* the value of a bit-field assignment is the truncated value */
-			opbf(e, l.sgn ? I_SBFM : I_UBFM, 1, v.r, v.r, 0, l.width - 1);
+			opbf(e, l.is_signed ? I_SBFM : I_UBFM, 1, v.register_number, v.register_number, 0, l.width - 1);
 		}
 		return v;
 	}
@@ -950,11 +950,11 @@ static codegen_value gen_assign(codegen_context *e, uint32_t n)
 	old = assign_op(e, x, lt, old, v);
 	store(e, &l, lt, &old);
 	lfree(e, &l);
-	if (l.bf && l.width < 64 && old.k != CODEGEN_VALUE_REGISTER_PAIR) {
+	if (l.is_bitfield && l.width < 64 && old.kind != CODEGEN_VALUE_REGISTER_PAIR) {
 		/* the value of a bit-field compound assignment is the truncated value */
 		int r = toreg(e, &old);
 
-		opbf(e, l.sgn ? I_SBFM : I_UBFM, 1, r, r, 0, l.width - 1);
+		opbf(e, l.is_signed ? I_SBFM : I_UBFM, 1, r, r, 0, l.width - 1);
 		old = codegen_value_register(r);
 	}
 	return old;
@@ -963,7 +963,7 @@ static codegen_value gen_assign(codegen_context *e, uint32_t n)
 /* ++/-- on *old (of type t): returns the new value; *old becomes what a postfix operator yields */
 static codegen_value incdec_op(codegen_context *e, ast_qualified_type t, bool inc, bool post, codegen_value *old)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	codegen_value nv;
 	int64_t d = codegen_type_is_pointer(c, t) ? (int64_t)elem_size(c, t) : 1;
 
@@ -971,7 +971,7 @@ static codegen_value incdec_op(codegen_context *e, ast_qualified_type t, bool in
 		if (post) {
 			*old = a64_bigbin(e, LEX_TOKEN_PLUS, t, *old, codegen_value_constant(0));
 			codegen_value copy = codegen_value_register(treg(e));
-			mov(e, 1, copy.r, old->r);
+			mov(e, 1, copy.register_number, old->register_number);
 			return a64_bigbin(e, inc ? LEX_TOKEN_PLUS : LEX_TOKEN_MINUS, t, copy, codegen_value_constant(1));
 		}
 		nv = a64_bigbin(e, inc ? LEX_TOKEN_PLUS : LEX_TOKEN_MINUS, t, *old, codegen_value_constant(1));
@@ -992,11 +992,11 @@ static codegen_value incdec_op(codegen_context *e, ast_qualified_type t, bool in
 
 		toreg2(e, &cp, false);
 		if (post) {
-			nv.k = CODEGEN_VALUE_REGISTER_PAIR;
-			nv.r = (uint8_t)treg(e);
-			nv.r2 = (uint8_t)treg(e);
-			mov(e, 1, nv.r, cp.r);
-			mov(e, 1, nv.r2, cp.r2);
+			nv.kind = CODEGEN_VALUE_REGISTER_PAIR;
+			nv.register_number = (uint8_t)treg(e);
+			nv.register_high = (uint8_t)treg(e);
+			mov(e, 1, nv.register_number, cp.register_number);
+			mov(e, 1, nv.register_high, cp.register_high);
 			nv = f_arith(e, inc ? LEX_TOKEN_PLUS : LEX_TOKEN_MINUS, t, nv, one);
 			*old = cp;
 		} else {
@@ -1007,7 +1007,7 @@ static codegen_value incdec_op(codegen_context *e, ast_qualified_type t, bool in
 		if (post) {
 			int r = treg(e);
 
-			mov(e, 1, r, old->r);
+			mov(e, 1, r, old->register_number);
 			nv = f_arith(e, inc ? LEX_TOKEN_PLUS : LEX_TOKEN_MINUS, t, codegen_value_register(r), f_const_t(e, t, 1.0));
 		} else {
 			nv = *old = f_arith(e, inc ? LEX_TOKEN_PLUS : LEX_TOKEN_MINUS, t, *old, f_const_t(e, t, 1.0));
@@ -1017,11 +1017,11 @@ static codegen_value incdec_op(codegen_context *e, ast_qualified_type t, bool in
 
 		toreg2(e, &cp, codegen_type_is_signed(c, t));
 		if (post) {
-			nv.k = CODEGEN_VALUE_REGISTER_PAIR;
-			nv.r = (uint8_t)treg(e);
-			nv.r2 = (uint8_t)treg(e);
-			mov(e, 1, nv.r, cp.r);
-			mov(e, 1, nv.r2, cp.r2);
+			nv.kind = CODEGEN_VALUE_REGISTER_PAIR;
+			nv.register_number = (uint8_t)treg(e);
+			nv.register_high = (uint8_t)treg(e);
+			mov(e, 1, nv.register_number, cp.register_number);
+			mov(e, 1, nv.register_high, cp.register_high);
 			nv = arith2(e, inc ? LEX_TOKEN_PLUS : LEX_TOKEN_MINUS, t, nv, one);
 			*old = cp;
 		} else {
@@ -1034,7 +1034,7 @@ static codegen_value incdec_op(codegen_context *e, ast_qualified_type t, bool in
 		if (post) {
 			int r = treg(e);
 
-			mov(e, 1, r, old->r);
+			mov(e, 1, r, old->register_number);
 			nv = ptr_add_vla(e, codegen_value_register(r), codegen_value_constant(1), t, !inc);
 		} else {
 			nv = *old = ptr_add_vla(e, *old, codegen_value_constant(1), t, !inc);
@@ -1057,7 +1057,7 @@ static codegen_value incdec_op(codegen_context *e, ast_qualified_type t, bool in
 
 static codegen_value gen_incdec(codegen_context *e, uint32_t n)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n);
 	ast_qualified_type t = N(x->a)->ty;
 	bool inc = x->op == AST_NODE_PRE_INCREMENT || x->op == AST_NODE_POST_INCREMENT, post = x->op == AST_NODE_POST_INCREMENT || x->op == AST_NODE_POST_DECREMENT;
@@ -1077,11 +1077,11 @@ static codegen_value gen_incdec(codegen_context *e, uint32_t n)
 	}
 	if (KIND(c, t) == AST_TYPE_BOOL)
 		val_free(e, &old);
-	else if (l.bf && l.width < 64 && nv.k != CODEGEN_VALUE_REGISTER_PAIR) {
+	else if (l.is_bitfield && l.width < 64 && nv.kind != CODEGEN_VALUE_REGISTER_PAIR) {
 		/* the value of ++/-- on a bit-field is the truncated value */
 		int r = toreg(e, &nv);
 
-		opbf(e, l.sgn ? I_SBFM : I_UBFM, 1, r, r, 0, l.width - 1);
+		opbf(e, l.is_signed ? I_SBFM : I_UBFM, 1, r, r, 0, l.width - 1);
 		nv = codegen_value_register(r);
 	}
 	return nv;
@@ -1092,7 +1092,7 @@ static codegen_value gen_inner(codegen_context *e, uint32_t n);
 VPRIV codegen_value gen(codegen_context *e, uint32_t n)
 {
 	if (n && n == e->reuse_from) n = e->reuse_to;
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	ast_qualified_type t = N(n)->ty;
 
 	if (codegen_type_is_bitint_big(c, t)) {
@@ -1112,7 +1112,7 @@ VPRIV codegen_value gen(codegen_context *e, uint32_t n)
 
 static codegen_value gen_inner(codegen_context *e, uint32_t n)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n);
 
 	switch (x->op) {
@@ -1138,8 +1138,8 @@ static codegen_value gen_inner(codegen_context *e, uint32_t n)
 	case AST_NODE_DEREFERENCE: {
 		int k = x->op == AST_NODE_INDEX ? codegen_array_element_slot(e, n, false) : -1;
 
-		if (k >= 0 && (e->kvalid >> k & 1))
-			return codegen_value_constant(e->kval[k]);
+		if (k >= 0 && (e->known_values_valid >> k & 1))
+			return codegen_value_constant(e->known_values[k]);
 		codegen_lvalue l = gen_lval(e, n);
 
 		return load_free(e, &l, x->ty);
@@ -1156,27 +1156,27 @@ static codegen_value gen_inner(codegen_context *e, uint32_t n)
 		if (a->op == AST_NODE_LABEL_ADDRESS || codegen_type_is_function(c, a->ty))
 			return gen(e, x->a);
 		l = gen_lval(e, x->a);
-		if (l.k == CODEGEN_LVALUE_SYMBOL)
-			codegen_reference_note(e, l.ref);
+		if (l.kind == CODEGEN_LVALUE_SYMBOL)
+			codegen_reference_note(e, l.reference);
 		return laddr(e, &l);
 	}
 	case AST_NODE_LABEL_ADDRESS: {
 		uint32_t l = x->a;
-		codegen_label *m = &e->lm[l];
+		codegen_label *m = &e->label_map[l];
 		int r = treg(e);
 
-		if (m->inst != e->f->inst) {
-			m->inst = e->f->inst;
+		if (m->instance != e->function_instance->instance) {
+			m->instance = e->function_instance->instance;
 			m->id = newlabel(e);
 		}
-		if (e->reach) {
+		if (e->is_reachable) {
 			ins *i = put(e, I_ADR);
 
 			i->rd = (uint8_t)r;
 			i->label = m->id;
 		}
-		e->lrefc[m->id]++;
-		e->lrefc[m->id] |= LREF_EXT;
+		e->label_reference_counts[m->id]++;
+		e->label_reference_counts[m->id] |= LREF_EXT;
 		return codegen_value_register(r);
 	}
 	case AST_NODE_CAST:
@@ -1185,8 +1185,8 @@ static codegen_value gen_inner(codegen_context *e, uint32_t n)
 		case AST_CAST_ARRAY_DECAY: {
 			codegen_lvalue l = gen_lval(e, x->a);
 
-			if (l.k == CODEGEN_LVALUE_SYMBOL)
-				codegen_reference_note(e, l.ref);
+			if (l.kind == CODEGEN_LVALUE_SYMBOL)
+				codegen_reference_note(e, l.reference);
 			return laddr(e, &l);
 		}
 		case AST_CAST_FUNCTION_DECAY:
@@ -1195,27 +1195,27 @@ static codegen_value gen_inner(codegen_context *e, uint32_t n)
 			return gen(e, x->a);	/* a vector value is its address */
 		case AST_CAST_BIT_CAST: {
 			ast_qualified_type from = N(x->a)->ty;
-			codegen_lvalue d = { .k = CODEGEN_LVALUE_FRAME, .off = slot(e, codegen_type_size(c, x->ty), codegen_type_alignment(c, x->ty)), .align = codegen_type_alignment(c, x->ty) };
+			codegen_lvalue d = { .kind = CODEGEN_LVALUE_FRAME, .offset = slot(e, codegen_type_size(c, x->ty), codegen_type_alignment(c, x->ty)), .align = codegen_type_alignment(c, x->ty) };
 			if (N(x->a)->flags & AST_NODE_FLAG_LVALUE) {
 				codegen_lvalue src = gen_lval(e, x->a);
-				if (src.dynbit_slot) {
+				if (src.dynamic_bit_slot) {
 					codegen_value v = load(e, &src, from);
 					store(e, &d, from, &v); val_free(e, &v); lfree(e, &src);
-				} else if (src.bf) {
+				} else if (src.is_bitfield) {
 					/* Bounded byte pieces cover wide values and avoid aligned
 					 * container loads beyond a packed object's final byte. */
 					for (unsigned i = 0; i < codegen_type_size(c, from); i++) {
 						unsigned bit = i * 8;
 						codegen_value v = codegen_value_constant(0);
 						codegen_lvalue byte = d;
-						byte.off += i;
-						if (bit < src.width || src.sgn) {
+						byte.offset += i;
+						if (bit < src.width || src.is_signed) {
 							codegen_lvalue part = src;
 							unsigned start = bit < src.width ? bit : src.width - 1;
-							part.off += (src.bitoff + start) / 8;
-							part.bitoff = (src.bitoff + start) % 8;
+							part.offset += (src.bit_offset + start) / 8;
+							part.bit_offset = (src.bit_offset + start) % 8;
 							part.width = bit >= src.width ? 1 : src.width - bit < 8 ? src.width - bit : 8;
-							part.sgn = src.sgn && bit + 8 >= src.width;
+							part.is_signed = src.is_signed && bit + 8 >= src.width;
 							v = load(e, &part, codegen_type_primitive(AST_TYPE_UNSIGNED_CHAR));
 						}
 						store(e, &byte, codegen_type_primitive(AST_TYPE_UNSIGNED_CHAR), &v); val_free(e, &v);
@@ -1237,9 +1237,9 @@ static codegen_value gen_inner(codegen_context *e, uint32_t n)
 		case AST_CAST_VECTOR_BITS: {
 			/* the vector's bits as a scalar: load from its address */
 			codegen_value v = gen(e, x->a);
-			codegen_lvalue l = { .k = CODEGEN_LVALUE_REGISTER, .align = codegen_type_alignment(c, N(x->a)->ty) };
+			codegen_lvalue l = { .kind = CODEGEN_LVALUE_REGISTER, .align = codegen_type_alignment(c, N(x->a)->ty) };
 
-			l.r = (uint8_t)toreg(e, &v);
+			l.register_number = (uint8_t)toreg(e, &v);
 			v = load(e, &l, x->ty);
 			lfree(e, &l);
 			return v;
@@ -1252,9 +1252,9 @@ static codegen_value gen_inner(codegen_context *e, uint32_t n)
 			int r;
 
 			for (uint64_t i = 0; i < nl; i++) {
-				codegen_lvalue l = { .k = CODEGEN_LVALUE_FRAME, .off = sl + (int64_t)(i * es), .align = codegen_type_alignment(c, et) };
+				codegen_lvalue l = { .kind = CODEGEN_LVALUE_FRAME, .offset = sl + (int64_t)(i * es), .align = codegen_type_alignment(c, et) };
 
-				if (codegen_type_is_bool_vector(c, x->ty)) l.off = sl + i / 8, l.bf = 1, l.width = 1, l.bitoff = i % 8;
+				if (codegen_type_is_bool_vector(c, x->ty)) l.offset = sl + i / 8, l.is_bitfield = 1, l.width = 1, l.bit_offset = i % 8;
 				store(e, &l, et, &v);
 			}
 			val_free(e, &v);
@@ -1264,7 +1264,7 @@ static codegen_value gen_inner(codegen_context *e, uint32_t n)
 		}
 		case AST_CAST_UNION: {
 			int64_t sl = slot(e, codegen_type_size(c, x->ty), codegen_type_alignment(c, x->ty));
-			codegen_lvalue l = { .k = CODEGEN_LVALUE_FRAME, .off = sl, .align = codegen_type_alignment(c, x->ty) };
+			codegen_lvalue l = { .kind = CODEGEN_LVALUE_FRAME, .offset = sl, .align = codegen_type_alignment(c, x->ty) };
 			codegen_value v = gen(e, x->a);
 			int r;
 
@@ -1318,14 +1318,14 @@ static codegen_value gen_inner(codegen_context *e, uint32_t n)
 		ast_qualified_type et = c->tags[T(c, x->ty)->aux].f[0].ty;
 		uint64_t es = codegen_type_size(c, et);
 		int64_t sl = slot(e, 2 * es, codegen_type_alignment(c, x->ty));
-		codegen_lvalue d = { .k = CODEGEN_LVALUE_FRAME, .off = sl, .align = codegen_type_alignment(c, et) };
+		codegen_lvalue d = { .kind = CODEGEN_LVALUE_FRAME, .offset = sl, .align = codegen_type_alignment(c, et) };
 		codegen_value v = gen(e, x->a);
 		int r;
 
 		store(e, &d, et, &v);
 		val_free(e, &v);
 		v = gen(e, x->b);
-		d.off += (int32_t)es;
+		d.offset += (int32_t)es;
 		store(e, &d, et, &v);
 		val_free(e, &v);
 		r = treg(e);
@@ -1340,7 +1340,7 @@ static codegen_value gen_inner(codegen_context *e, uint32_t n)
 		const sym *y = x->a && N(x->a)->op == AST_NODE_VARIABLE ? &c->syms[N(x->a)->a] : NULL;
 
 		if (y && y->kind == AST_SYMBOL_VARIABLE && codegen_symbol_binding_get(e, N(x->a)->a)->kind == CODEGEN_BINDING_INDIRECT &&
-		    codegen_symbol_binding_get(e, N(x->a)->a)->inst == e->f->inst && (T(c, y->ty)->flags & AST_TYPE_FLAG_VLA)) {
+		    codegen_symbol_binding_get(e, N(x->a)->a)->instance == e->function_instance->instance && (T(c, y->ty)->flags & AST_TYPE_FLAG_VLA)) {
 			int r = treg(e);
 
 			mem(e, I_LD, 3, 0, r, FRAME, codegen_symbol_binding_get(e, N(x->a)->a)->slot + 16);

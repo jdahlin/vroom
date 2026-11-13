@@ -96,9 +96,9 @@ static __attribute__((noinline)) bool em_sibling_match(cc *c, uint32_t a, uint32
 
 VPRIV bool em_sibling_values(codegen_context *e, uint32_t n)
 {
- cc *c = e->c;
+ cc *c = e->compile_context;
  const node *x = N(n), *a, *b;
- if (!e->E->o->opt || e->E->noopt || x->op != AST_NODE_BINARY ||
+ if (!e->unit->options->opt || e->unit->cleanups_disabled || x->op != AST_NODE_BINARY ||
      (x->aux != LEX_TOKEN_PLUS && x->aux != LEX_TOKEN_MINUS && x->aux != LEX_TOKEN_STAR &&
       x->aux != LEX_TOKEN_AMPERSAND && x->aux != LEX_TOKEN_PIPE && x->aux != LEX_TOKEN_CARET)) return false;
  a = N(x->a); b = N(x->b);
@@ -132,11 +132,11 @@ static __attribute__((noinline)) bool em_decl_reuse_match(cc *c, uint32_t init, 
 VPRIV bool em_decl_reuse_values(codegen_context *e, uint32_t decl, uint32_t consumer,
                                 const uint32_t *killed, uint32_t nkilled, uint32_t *from, uint32_t *to)
 {
- cc *c = e->c;
+ cc *c = e->compile_context;
  const node *d, *r;
  const sym *s;
  uint32_t expr;
- if (!e->E->o->opt || e->E->noopt || !decl || !consumer) return false;
+ if (!e->unit->options->opt || e->unit->cleanups_disabled || !decl || !consumer) return false;
  d = N(decl); r = N(consumer);
  if (d->op != AST_NODE_DECLARATION || !d->b || N(d->b)->op != AST_NODE_BINARY || c->nsym >= UINT32_MAX - 32) return false;
  s = &c->syms[d->a];
@@ -182,7 +182,7 @@ VPRIV bool em_decl_reuse_values(codegen_context *e, uint32_t decl, uint32_t cons
  * change an earlier local value. Used only while scanning a short block suffix. */
 static __attribute__((noinline)) bool em_value_pure_decl(codegen_context *e, uint32_t n)
 {
- cc *c = e->c;
+ cc *c = e->compile_context;
  const node *d = N(n);
  const sym *y;
  em_sibling_state s = {0};
@@ -203,7 +203,7 @@ static __attribute__((noinline)) bool em_value_pure_decl(codegen_context *e, uin
  * its RHS. The RHS is proved only if a later candidate survives invalidation. */
 static bool em_value_local_write(codegen_context *e, uint32_t n, uint32_t *written)
 {
- cc *c = e->c;
+ cc *c = e->compile_context;
  const node *stmt = N(n), *a, *lhs;
  const sym *y;
  bool increment;
@@ -229,7 +229,7 @@ static bool em_value_local_write(codegen_context *e, uint32_t n, uint32_t *writt
 /* Only a surviving candidate pays for the bounded purity proof. */
 static __attribute__((noinline)) bool em_value_local_assignment(codegen_context *e, uint32_t n)
 {
- cc *c = e->c;
+ cc *c = e->compile_context;
  const node *a = N(N(n)->a);
  em_sibling_state s = {0};
  if (a->op != AST_NODE_ASSIGN) return true; /* preflight accepted an increment */
@@ -243,9 +243,9 @@ static __attribute__((noinline)) bool em_value_local_assignment(codegen_context 
 VPRIV bool em_block_value_reuse(codegen_context *e, const node *block, uint32_t first, uint32_t i,
                                    uint32_t *from, uint32_t *to)
 {
- cc *c = e->c;
+ cc *c = e->compile_context;
  uint32_t consumer, count = 0, killed[8], writes[8], nkilled = 0;
- if (!e->E->o->opt || e->E->noopt || i <= first) return false;
+ if (!e->unit->options->opt || e->unit->cleanups_disabled || i <= first) return false;
  consumer = c->lists[block->b + i];
  if (N(consumer)->op == AST_NODE_EXPRESSION) {
   const node *stmt = N(consumer), *assign, *rhs;

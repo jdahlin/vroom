@@ -117,7 +117,7 @@ static void x64_asmreg(tbuf *b, int r, int size, bool h)
 static void x64_asmlabel(codegen_context *e, tbuf *b, uint32_t l)
 {
 	vtext_string_append(b, ".LBB");
-	vtext_unsigned_append(b, e->wk->fsym);
+	vtext_unsigned_append(b, e->walk_state->function_symbol);
 	vtext_char_append(b, '_');
 	vtext_unsigned_append(b, l);
 }
@@ -125,15 +125,15 @@ static void x64_asmlabel(codegen_context *e, tbuf *b, uint32_t l)
 /* a memory operand as AT&T text */
 static void x64_asmmem(cc *c, tbuf *b, const codegen_lvalue *l)
 {
-	if (l->k == CODEGEN_LVALUE_SYMBOL) {
-		codegen_reference_offset_append(c, b, l->ref, l->off);
+	if (l->kind == CODEGEN_LVALUE_SYMBOL) {
+		codegen_reference_offset_append(c, b, l->reference, l->offset);
 		vtext_string_append(b, "(%rip)");
 		return;
 	}
-	if (l->off)
-		vtext_signed_append(b, l->off);
+	if (l->offset)
+		vtext_signed_append(b, l->offset);
 	vtext_char_append(b, '(');
-	x64_asmreg(b, l->k == CODEGEN_LVALUE_FRAME ? RBP : l->r, 8, false);
+	x64_asmreg(b, l->kind == CODEGEN_LVALUE_FRAME ? RBP : l->register_number, 8, false);
 	vtext_char_append(b, ')');
 }
 
@@ -164,22 +164,22 @@ static bool x64_immok(int ch, i128 v)
 static codegen_value x64_asmbits(codegen_context *e, codegen_value v, ast_qualified_type t, int size)
 {
 	if (size != 1 && size != 2 && size != 4 && size != 8)
-		codegen_fatal_report(e, e->curloc, "x86-64: unsupported asm GPR operand size");
+		codegen_fatal_report(e, e->current_location, "x86-64: unsupported asm GPR operand size");
 	if (walk_type_is_in_memory(e, t)) {
 		int r = walk_value_to_register(e, &v, t), dst = x64_treg(e);
-		codegen_lvalue l = { .k = CODEGEN_LVALUE_REGISTER, .r = (uint8_t)r };
+		codegen_lvalue l = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = (uint8_t)r };
 		x64_load(e, dst, &l, size, false);
 		walk_value_free(e, &v);
-		return (codegen_value){ .k = CODEGEN_VALUE_REGISTER, .r = (uint8_t)dst };
+		return (codegen_value){ .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)dst };
 	}
-	if (codegen_type_is_float(e->c, t)) {
+	if (codegen_type_is_float(e->compile_context, t)) {
 		int r = walk_value_to_register(e, &v, t);
-		codegen_lvalue l = { .k = CODEGEN_LVALUE_FRAME, .off = walk_slot_temporary(e, 8, 8) };
+		codegen_lvalue l = { .kind = CODEGEN_LVALUE_FRAME, .offset = walk_slot_temporary(e, 8, 8) };
 		x64_store(e, r, &l, size);
 		walk_value_free(e, &v);
 		r = x64_treg(e);
 		x64_load(e, r, &l, size, false);
-		return (codegen_value){ .k = CODEGEN_VALUE_REGISTER, .r = (uint8_t)r };
+		return (codegen_value){ .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)r };
 	}
 	return v;
 }
@@ -191,7 +191,7 @@ static void x64_asmpark(codegen_context *e, xopnd *o)
 {
 	if (!o->flt) o->v = x64_asmbits(e, o->v, o->t, o->size);
 	int r = walk_value_to_register(e, &o->v, o->flt ? o->t : codegen_type_primitive(AST_TYPE_UNSIGNED_LONG_LONG));
-	codegen_lvalue l = { .k = CODEGEN_LVALUE_FRAME, .off = o->park = walk_slot_temporary(e, 8, 8), .align = 8 };
+	codegen_lvalue l = { .kind = CODEGEN_LVALUE_FRAME, .offset = o->park = walk_slot_temporary(e, 8, 8), .align = 8 };
 
 	x64_store(e, r, &l, o->flt ? o->size : 8);
 	walk_value_free(e, &o->v);
@@ -201,11 +201,11 @@ static void x64_asmpark(codegen_context *e, xopnd *o)
 /* a callee-saved register the asm uses: saved by the prologue */
 VPRIV void x64_csused(codegen_context *e, int r)
 {
-	xst *X = e->x64;
+	xst *X = e->x64_context;
 
 	if (r == RBX || (r == RBP && X->spframe) || (r >= R12 && r <= R15)) {
-		if (r == R12 && e->wk->falign > 16)
-			codegen_fatal_report(e, e->curloc, "x86-64: asm using r12 in a function with locals aligned above 16 is not supported");
+		if (r == R12 && e->walk_state->frame_alignment > 16)
+			codegen_fatal_report(e, e->current_location, "x86-64: asm using r12 in a function with locals aligned above 16 is not supported");
 		if (!X->csslot[r])
 			X->csslot[r] = walk_slot_permanent(e, 8, 8);
 	}
@@ -213,14 +213,14 @@ VPRIV void x64_csused(codegen_context *e, int r)
 
 VPRIV void x64_asm(codegen_context *e, uint32_t n)
 {
-	cc *c = e->c;
-	xst *X = e->x64;
+	cc *c = e->compile_context;
+	xst *X = e->x64_context;
 	const node *x = N(n);
 	const ast_asm_statement *a = &c->asms[x->a];
 	const char *tp = c->strs[a->tmpl - 1].s;
 	uint32_t nops = a->nout + a->nin;
 	bool basic = !a->extended;
-	uint32_t serial = e->asmk++, nplus = 0;
+	uint32_t serial = e->asm_statement_count++, nplus = 0;
 	uint32_t edges[64], done = 0;
 	const char *csop[64];
 	const char *ccop[64] = { 0 };	/* "=@cc<cond>": the flag the output reads (set<cond> after the template) */
@@ -339,7 +339,7 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 	for (int r = 0; r < 32; r++)
 		if (fixed & (1u << r)) {
 			if ((X->live | homes) & (1u << r)) {
-				codegen_lvalue s = { .k = CODEGEN_LVALUE_FRAME, .off = sslot[r] = walk_slot_temporary(e, r >= XMM0 ? 16 : 8, 16), .align = 8 };
+				codegen_lvalue s = { .kind = CODEGEN_LVALUE_FRAME, .offset = sslot[r] = walk_slot_temporary(e, r >= XMM0 ? 16 : 8, 16), .align = 8 };
 
 				x64_mem(e, X_ST, r >= XMM0 ? 16 : 8, r, &s, false);
 				saved |= 1u << r;
@@ -385,7 +385,7 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 		}
 		if (mem_ok && !reg_ok) {
 			o->kind = XO_MEM;
-			if (o->l.bf)
+			if (o->l.is_bitfield)
 				codegen_fatal_report(e, x->loc, "x86-64: a bit-field as an asm memory operand");
 			continue;
 		}
@@ -396,13 +396,13 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 			o->v = walk_lvalue_reload(e, &o->l, o->t);
 			if (o->fixed) x64_asmpark(e, o);
 		}
-		if (o->l.k == CODEGEN_LVALUE_REGISTER && !o->l.bf) {
+		if (o->l.kind == CODEGEN_LVALUE_REGISTER && !o->l.is_bitfield) {
 			/* the address waits in a slot: four outputs through pointers and four fixed
 			   registers (cpuid) would leave no temporaries */
-			codegen_lvalue s = { .k = CODEGEN_LVALUE_FRAME, .off = o->lpark = walk_slot_temporary(e, 8, 8), .align = 8 };
+			codegen_lvalue s = { .kind = CODEGEN_LVALUE_FRAME, .offset = o->lpark = walk_slot_temporary(e, 8, 8), .align = 8 };
 
-			x64_mem(e, X_ST, 8, o->l.r, &s, false);
-			x64_tfree(e, o->l.r);
+			x64_mem(e, X_ST, 8, o->l.register_number, &s, false);
+			x64_tfree(e, o->l.register_number);
 		}
 	}
 	/* inputs */
@@ -485,28 +485,28 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 				an = N(an)->a;
 			if (i < 64 && (pkm >> i & 1)) {
 				v = pkv[i];	/* an inlined parameter still holding its constant argument */
-			} else if (codegen_type_is_integer(e->c, N(en)->ty) && cc_eval(e->c, en, &cv) && cv.kind == CC_VALUE_INTEGER) {
+			} else if (codegen_type_is_integer(e->compile_context, N(en)->ty) && cc_eval(e->compile_context, en, &cv) && cv.kind == CC_VALUE_INTEGER) {
 				/* an integer constant expression as the front end folds it (__builtin_clzll(63), ...) */
-				v = codegen_value_constant(codegen_integer_truncate(e->c, cv.i, N(en)->ty));
-			} else if (e->c->o->pic && N(an)->op == AST_NODE_VARIABLE && (c->syms[N(an)->a].kind == AST_SYMBOL_FUNCTION ||
+				v = codegen_value_constant(codegen_integer_truncate(e->compile_context, cv.i, N(en)->ty));
+			} else if (e->compile_context->o->pic && N(an)->op == AST_NODE_VARIABLE && (c->syms[N(an)->a].kind == AST_SYMBOL_FUNCTION ||
 				   (c->syms[N(an)->a].kind == AST_SYMBOL_VARIABLE && !codegen_symbol_is_local_variable(c, N(an)->a)))) {
 				/* &sym under -fPIC: an immediate, as clang (the asm names the symbol) */
-				v = (codegen_value){ .k = CODEGEN_VALUE_ADDRESS, .ref = CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, codegen_symbol_canonical(c, N(an)->a)) };
+				v = (codegen_value){ .kind = CODEGEN_VALUE_ADDRESS, .reference = CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, codegen_symbol_canonical(c, N(an)->a)) };
 			} else {
 				v = walk_value_emit(e, en);
 			}
 		}
-		if (v.k == CODEGEN_VALUE_CONSTANT || v.k == CODEGEN_VALUE_ADDRESS) {	/* (an address is an immediate under -fPIC too, as clang) */
+		if (v.kind == CODEGEN_VALUE_CONSTANT || v.kind == CODEGEN_VALUE_ADDRESS) {	/* (an address is an immediate under -fPIC too, as clang) */
 			bool imm = false;
 
 			for (const char *p = cs; *p; p++)
-				if (v.k == CODEGEN_VALUE_ADDRESS ? (*p == 'i' || *p == 'g' || *p == 's') : x64_immok(*p, v.i))
+				if (v.kind == CODEGEN_VALUE_ADDRESS ? (*p == 'i' || *p == 'g' || *p == 's') : x64_immok(*p, v.integer))
 					imm = true;
 			if (imm) {
 				o->kind = XO_IMM;
 				o->v = v;
-				if (v.k == CODEGEN_VALUE_ADDRESS)
-					codegen_reference_note(e, v.ref);
+				if (v.kind == CODEGEN_VALUE_ADDRESS)
+					codegen_reference_note(e, v.reference);
 				continue;
 			}
 		}
@@ -515,7 +515,7 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 				codegen_fatal_report(e, x->loc, "impossible constraint in asm: '%s'", cs);
 			/* a value for a memory operand: in a slot */
 			o->kind = XO_MEM;
-			o->l = (codegen_lvalue){ .k = CODEGEN_LVALUE_FRAME, .off = walk_slot_temporary(e, o->size > 8 ? (uint64_t)o->size : 8, 16), .align = 16 };
+			o->l = (codegen_lvalue){ .kind = CODEGEN_LVALUE_FRAME, .offset = walk_slot_temporary(e, o->size > 8 ? (uint64_t)o->size : 8, 16), .align = 16 };
 			if (walk_type_is_in_memory(e, o->t)) {
 				v = walk_lvalue_store_memory(e, &o->l, o->t, v);
 				walk_value_free(e, &v);
@@ -535,14 +535,14 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 			codegen_fatal_report(e, x->loc, "x86-64: an asm register operand of this type is not supported");
 		if (o->fixed) {
 			/* parked until the fixed registers are loaded, last */
-			codegen_lvalue s = { .k = CODEGEN_LVALUE_FRAME, .off = o->park = walk_slot_temporary(e, 8, 8), .align = 8 };
+			codegen_lvalue s = { .kind = CODEGEN_LVALUE_FRAME, .offset = o->park = walk_slot_temporary(e, 8, 8), .align = 8 };
 			int r = walk_value_to_register(e, &v, o->flt ? o->t : codegen_type_primitive(AST_TYPE_UNSIGNED_LONG_LONG));
 
 			x64_mem(e, X_ST, o->flt ? o->size : 8, r, &s, false);
 			x64_tfree(e, r);
 		} else {
 			walk_value_to_register(e, &v, o->flt ? o->t : codegen_type_primitive(AST_TYPE_UNSIGNED_LONG_LONG));
-			o->reg = v.r;
+			o->reg = v.register_number;
 			o->v = v;
 		}
 	}
@@ -555,16 +555,16 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 		if (o->inout && !o->flt) o->v = x64_asmbits(e, o->v, o->t, o->size);
 		if (o->inout) {
 			walk_value_to_register(e, &o->v, o->flt ? o->t : codegen_type_primitive(AST_TYPE_UNSIGNED_LONG_LONG));
-			o->reg = o->v.r;
+			o->reg = o->v.register_number;
 		} else {
 			o->reg = (uint8_t)(o->flt ? x64_ftreg(e) : x64_treg(e));
-			o->v = (codegen_value){ .k = CODEGEN_VALUE_REGISTER, .r = o->reg };
+			o->v = (codegen_value){ .kind = CODEGEN_VALUE_REGISTER, .register_number = o->reg };
 		}
 	}
 	/* the fixed registers loaded last: nothing evaluated after can clobber them */
 	for (uint32_t i = 0; i < nops; i++)
 		if (op[i].park) {
-			codegen_lvalue s = { .k = CODEGEN_LVALUE_FRAME, .off = op[i].park, .align = 8 };
+			codegen_lvalue s = { .kind = CODEGEN_LVALUE_FRAME, .offset = op[i].park, .align = 8 };
 
 			x64_mem(e, X_LD, op[i].flt ? op[i].size : 8, op[i].reg, &s, false);
 		}
@@ -572,18 +572,18 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 	for (int st = 1; st >= 0; st--)
 		for (uint32_t i = 0; i < nops; i++)
 			if (op[i].kind == XO_X87 && (!op[i].out || op[i].inout) && op[i].reg == st) {
-				codegen_lvalue m = { .k = CODEGEN_LVALUE_REGISTER, .r = op[i].v.r };
+				codegen_lvalue m = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = op[i].v.register_number };
 
 				x64_x87(e, XF_LDT, &m, 10);
-				x64_tfree(e, op[i].v.r);
+				x64_tfree(e, op[i].v.register_number);
 				break;
 			}
 	/* Raw text cannot defer frame-base selection to the printer. Materialize
 	   frame operands through the regular address record, including realignment. */
 	for (uint32_t i = 0; i < nops; i++)
-		if (op[i].kind == XO_MEM && op[i].l.k == CODEGEN_LVALUE_FRAME) {
+		if (op[i].kind == XO_MEM && op[i].l.kind == CODEGEN_LVALUE_FRAME) {
 			int r = x64_laddr(e, &op[i].l);
-			op[i].l = (codegen_lvalue){ .k = CODEGEN_LVALUE_REGISTER, .r = (uint8_t)r };
+			op[i].l = (codegen_lvalue){ .kind = CODEGEN_LVALUE_REGISTER, .register_number = (uint8_t)r };
 		}
 	/* the template: {att|intel} alternatives keep the first */
 	start = rb->n;
@@ -616,7 +616,7 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 			p++;
 			if (*p == '%') { vtext_char_append(rb, '%'); continue; }
 			if (*p == '=') {
-				vtext_unsigned_append(rb, ((uint64_t)e->top << 32) | serial);
+				vtext_unsigned_append(rb, ((uint64_t)e->top_symbol << 32) | serial);
 				continue;
 			}
 			if (*p == '{' || *p == '|' || *p == '}') { vtext_char_append(rb, *p); continue; }
@@ -692,10 +692,10 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 				case XO_IMM:
 					if (mod != 'c' && mod != 'P' && mod != 'a' && mod != 'n')
 						vtext_char_append(rb, '$');
-					if (o->v.k == CODEGEN_VALUE_ADDRESS)
-						codegen_reference_offset_append(c, rb, o->v.ref, (int64_t)o->v.i), mod == 'a' ? vtext_string_append(rb, "(%rip)") : (void)0;	/* (clang: %a of a symbol is RIP-relative) */
+					if (o->v.kind == CODEGEN_VALUE_ADDRESS)
+						codegen_reference_offset_append(c, rb, o->v.reference, (int64_t)o->v.integer), mod == 'a' ? vtext_string_append(rb, "(%rip)") : (void)0;	/* (clang: %a of a symbol is RIP-relative) */
 					else
-						vtext_signed_append(rb, mod == 'n' ? (int64_t)(0 - (uint64_t)o->v.i) : (int64_t)o->v.i);
+						vtext_signed_append(rb, mod == 'n' ? (int64_t)(0 - (uint64_t)o->v.integer) : (int64_t)o->v.integer);
 					break;
 				}
 			}
@@ -718,9 +718,9 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 			x64_asmreg(rb, op[i].reg, 4, false);
 		}
 	ri = x64_put(e, X_RAW);
-	ri->off = (int32_t)start;
-	ri->ref = (uint32_t)(rb->n - start);
-	ri->cond = !!(fixed & (1u << R12));
+	ri->offset = (int32_t)start;
+	ri->reference = (uint32_t)(rb->n - start);
+	ri->condition = !!(fixed & (1u << R12));
 	/* the x87 stack after the asm: its outputs from st(0) up, then the inputs it did not pop
 	   (one in st(1) is popped by the asm when it clobbers st(1), as GCC's rules) */
 	{
@@ -781,13 +781,13 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 			if (o->kind != XO_REG || o->sp)
 				continue;
 			if (o->lpark) {
-				codegen_lvalue s = { .k = CODEGEN_LVALUE_FRAME, .off = o->lpark, .align = 8 };
+				codegen_lvalue s = { .kind = CODEGEN_LVALUE_FRAME, .offset = o->lpark, .align = 8 };
 
-				o->l.r = (uint8_t)x64_treg(e);
-				x64_mem(e, X_LD, 8, o->l.r, &s, false);
+				o->l.register_number = (uint8_t)x64_treg(e);
+				x64_mem(e, X_LD, 8, o->l.register_number, &s, false);
 			}
-			if (o->l.bf) {
-				codegen_value v = { .k = CODEGEN_VALUE_REGISTER, .r = o->reg };
+			if (o->l.is_bitfield) {
+				codegen_value v = { .kind = CODEGEN_VALUE_REGISTER, .register_number = o->reg };
 
 				(void)v;
 				walk_lvalue_store_register(e, &o->l, o->t, o->reg);
@@ -797,7 +797,7 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 		}
 		for (int r = 0; r < 32; r++)
 			if (saved & (1u << r)) {
-				codegen_lvalue s = { .k = CODEGEN_LVALUE_FRAME, .off = sslot[r], .align = 8 };
+				codegen_lvalue s = { .kind = CODEGEN_LVALUE_FRAME, .offset = sslot[r], .align = 8 };
 
 				x64_mem(e, X_LD, r >= XMM0 ? 16 : 8, r, &s, false);
 			}
@@ -812,14 +812,14 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 
 		if (o->kind == XO_REG && !o->fixed && o->tied < 0)
 			x64_tfree(e, o->reg);
-		if (o->kind == XO_X87 && o->out && o->l.k == CODEGEN_LVALUE_REGISTER)
-			x64_tfree(e, o->l.r);
-		if (o->out && o->l.k == CODEGEN_LVALUE_REGISTER && !o->l.bf)
-			x64_tfree(e, o->l.r);
-		if (!o->out && o->kind == XO_MEM && o->l.k == CODEGEN_LVALUE_REGISTER)
-			x64_tfree(e, o->l.r);
-		if (o->out && o->l.bf && o->l.k == CODEGEN_LVALUE_REGISTER)
-			x64_tfree(e, o->l.r);
+		if (o->kind == XO_X87 && o->out && o->l.kind == CODEGEN_LVALUE_REGISTER)
+			x64_tfree(e, o->l.register_number);
+		if (o->out && o->l.kind == CODEGEN_LVALUE_REGISTER && !o->l.is_bitfield)
+			x64_tfree(e, o->l.register_number);
+		if (!o->out && o->kind == XO_MEM && o->l.kind == CODEGEN_LVALUE_REGISTER)
+			x64_tfree(e, o->l.register_number);
+		if (o->out && o->l.is_bitfield && o->l.kind == CODEGEN_LVALUE_REGISTER)
+			x64_tfree(e, o->l.register_number);
 	}
 	X->live &= ~reserved;
 	X->asmcs = false;

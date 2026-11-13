@@ -8,8 +8,8 @@ VPRIV bool a64_switch_bitset(codegen_context *e, uint32_t body, uint32_t base, i
 {
 	em_switch_bitset_recipe recipe;
 
-	if (e->E->o->opt < 1 || e->E->noopt ||
-	    !em_switch_bitset_plan(e->c, body, e->ncases - base, cx ? 64 : 32, sg, &recipe))
+	if (e->unit->options->opt < 1 || e->unit->cleanups_disabled ||
+	    !em_switch_bitset_plan(e->compile_context, body, e->case_count - base, cx ? 64 : 32, sg, &recipe))
 		return false;
 	int index = treg(e), mask = treg(e);
 	int mx = recipe.bits == 64;
@@ -27,7 +27,7 @@ VPRIV bool a64_switch_bitset(codegen_context *e, uint32_t body, uint32_t base, i
 	movi(e, mx, mask, (int64_t)recipe.mask);
 	op3(e, I_LSRV, mx, mask, mask, index);
 	opi(e, I_ANDI, mx, mask, mask, 1);
-	cbz(e, true, mx, mask, e->caselbl[recipe.node]);
+	cbz(e, true, mx, mask, e->case_labels[recipe.node]);
 	tfree(e, index);
 	tfree(e, mask);
 	jump(e, dflt);

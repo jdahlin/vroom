@@ -34,11 +34,11 @@ static inline ins *put(codegen_context *e, int op)
 {
 	ins *i;
 
-	if (unlikely(e->nin == e->capin)) {
+	if (unlikely(e->record_count == e->record_capacity)) {
 		fputs("vcc: function too large\n", stderr);
 		abort();
 	}
-	i = &e->in[e->nin++];
+	i = &e->records[e->record_count++];
 	memset(i, 0, sizeof(*i));
 	i->op = (uint8_t)op;
 	return i;
@@ -48,7 +48,7 @@ static inline void op3(codegen_context *e, int op, int x, int rd, int rn, int rm
 {
 	ins *i;
 
-	if (!e->reach)
+	if (!e->is_reachable)
 		return;
 	i = put(e, op);
 	i->sz = (uint8_t)x, i->rd = (uint8_t)rd, i->rn = (uint8_t)rn, i->rm = (uint8_t)rm;
@@ -58,7 +58,7 @@ static inline void op3s(codegen_context *e, int op, int x, int rd, int rn, int r
 {
 	ins *i;
 
-	if (!e->reach)
+	if (!e->is_reachable)
 		return;
 	i = put(e, op);
 	i->sz = (uint8_t)x, i->rd = (uint8_t)rd, i->rn = (uint8_t)rn, i->rm = (uint8_t)rm;
@@ -69,7 +69,7 @@ static inline void op4(codegen_context *e, int op, int x, int rd, int rn, int rm
 {
 	ins *i;
 
-	if (!e->reach)
+	if (!e->is_reachable)
 		return;
 	i = put(e, op);
 	i->sz = (uint8_t)x, i->rd = (uint8_t)rd, i->rn = (uint8_t)rn, i->rm = (uint8_t)rm, i->ra = (uint8_t)ra;
@@ -79,7 +79,7 @@ static inline void opi(codegen_context *e, int op, int x, int rd, int rn, int64_
 {
 	ins *i;
 
-	if (!e->reach)
+	if (!e->is_reachable)
 		return;
 	i = put(e, op);
 	i->sz = (uint8_t)x, i->rd = (uint8_t)rd, i->rn = (uint8_t)rn;
@@ -92,7 +92,7 @@ static inline void opbf(codegen_context *e, int op, int x, int rd, int rn, int i
 {
 	ins *i;
 
-	if (!e->reach)
+	if (!e->is_reachable)
 		return;
 	i = put(e, op);
 	i->sz = (uint8_t)x, i->rd = (uint8_t)rd, i->rn = (uint8_t)rn;
@@ -106,7 +106,7 @@ static inline void cset(codegen_context *e, int rd, int cond)
 {
 	ins *i;
 
-	if (!e->reach)
+	if (!e->is_reachable)
 		return;
 	i = put(e, I_CSINC);
 	i->sz = 0, i->rd = (uint8_t)rd, i->rn = ZR, i->rm = ZR, i->cond = (uint8_t)(cond ^ 1);
@@ -118,10 +118,10 @@ static inline int last_cset(codegen_context *e, const codegen_value *v)
 {
 	const ins *i;
 
-	if (v->k != CODEGEN_VALUE_REGISTER || !e->reach || !e->nin || e->E->o->opt < 1)
+	if (v->kind != CODEGEN_VALUE_REGISTER || !e->is_reachable || !e->record_count || e->unit->options->opt < 1)
 		return -1;
-	i = &e->in[e->nin - 1];
-	if (i->op != I_CSINC || i->rn != ZR || i->rm != ZR || i->rd != v->r)
+	i = &e->records[e->record_count - 1];
+	if (i->op != I_CSINC || i->rn != ZR || i->rm != ZR || i->rd != v->register_number)
 		return -1;
 	return i->cond ^ 1;
 }
@@ -130,7 +130,7 @@ static inline void mem(codegen_context *e, int op, int sz, int ext, int rd, int 
 {
 	ins *i;
 
-	if (!e->reach)
+	if (!e->is_reachable)
 		return;
 	i = put(e, op);
 	i->sz = (uint8_t)sz, i->cond = (uint8_t)ext, i->rd = (uint8_t)rd, i->rn = (uint8_t)base;
@@ -143,7 +143,7 @@ static inline void symop(codegen_context *e, int op, int sz, int ext, int rd, in
 {
 	ins *i;
 
-	if (!e->reach)
+	if (!e->is_reachable)
 		return;
 	i = put(e, op);
 	i->sz = (uint8_t)sz, i->cond = (uint8_t)ext, i->rd = (uint8_t)rd, i->rn = (uint8_t)rn;
@@ -162,7 +162,7 @@ static inline void symop(codegen_context *e, int op, int sz, int ext, int rd, in
  */
 static inline void word(codegen_context *e, uint32_t w)
 {
-	if (e->reach)
+	if (e->is_reachable)
 		put(e, I_WORD)->imm = w;
 }
 
@@ -197,5 +197,5 @@ VPRIV void rp_snap(codegen_context *e);
 VPRIV void rp_count(codegen_context *e, int pass);
 VPRIV void rp_print(codegen_unit *E);
 /* a counter increment behind the statistics flag: without the switch, one untaken branch */
-#define RP_BEGIN(e) do { if (unlikely((e)->E->rstats)) rp_snap(e); } while (0)
-#define RP_END(e, p) do { if (unlikely((e)->E->rstats)) rp_count(e, p); } while (0)
+#define RP_BEGIN(e) do { if (unlikely((e)->unit->record_statistics)) rp_snap(e); } while (0)
+#define RP_END(e, p) do { if (unlikely((e)->unit->record_statistics)) rp_count(e, p); } while (0)

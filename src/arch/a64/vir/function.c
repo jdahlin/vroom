@@ -61,7 +61,7 @@ static void vl_target_instruction(void *ctx, uint32_t b, uint32_t i, const uint8
 	L->operand_count = nopr;
 	if (L->flag_condition >= 0 && L->flag_value != L->function->insns[i].a && !(i > L->folded_low && i < L->folded_high))
 		L->flag_condition = -1;
-	if (!e->reach)
+	if (!e->is_reachable)
 		deflabel_forced(e, newlabel(e));	/* (code after a trap: never reached) */
 	a64_vir_insn_lower(L, b, i, res);
 }
@@ -91,7 +91,7 @@ static void vl_target_block_end(void *ctx, uint32_t b)
 {
 	a64_vir_context *L = ctx;
 
-	if (L->context->reach)
+	if (L->context->is_reachable)
 		a64_vir_fail(L, VIRBUILD_FAILURE(lowering_block_without_terminator));
 	if (L->edge_branch_count) {	/* (a copy in a64_vir_goto_emit reuses L->tr) */
 		uint32_t n = L->edge_branch_count;
@@ -281,20 +281,20 @@ static bool a64_vir_vectors_cross_call(vir_function *f)
 /* lower V->f (allocated in V->ao) for function s; false: why in *why, nothing emitted */
 VPRIV bool a64_vir_function_lower(codegen_context *e, uint32_t s, const char **why)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 	vir_function *f = &V->f;
 	vir_target_registers regs;
 	a64_vir_context L = { 0 };
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const ctype *ft = T(c, c->syms[s].ty);
 
 	*why = NULL;
-	if (e->E->o->debug) {
+	if (e->unit->options->debug) {
 		*why = VIRBUILD_FAILURE(debug_info);
 		return false;
 	}
 	/* (unwind tables would have to describe the d registers' slots: not written) */
-	a64_vir_registers_describe(&regs, CODEGEN_IS_DARWIN(c), !e->E->o->cfi && !a64_vir_vectors_cross_call(f));
+	a64_vir_registers_describe(&regs, CODEGEN_IS_DARWIN(c), !e->unit->options->cfi && !a64_vir_vectors_cross_call(f));
 	if (!vir_loops_build(f, &V->loops)) {
 		*why = VIRBUILD_FAILURE(loop_analysis);
 		return false;
@@ -328,7 +328,7 @@ VPRIV bool a64_vir_function_lower(codegen_context *e, uint32_t s, const char **w
 		a64_vir_thread_state_instance.needs_fallthrough = a64_vir_array_grow(a64_vir_thread_state_instance.needs_fallthrough, &a64_vir_thread_state_instance.fallthrough_capacity, f->insn_count + 1, 1);
 		L.ret32 = KIND(c, ft->base) != AST_TYPE_VOID && codegen_type_is_integer(c, ft->base) && codegen_type_size(c, ft->base) == 4;
 		L.tail = !(ft->flags & AST_TYPE_FLAG_VARIADIC) && em_tail_caller_ok(e, s) && !a64_vir_tail_call_reason(&L, a64_vir_thread_state_instance.low32);
-		if (on && !e->E->noopt && !(e->E->o->cfi && !CODEGEN_IS_DARWIN(c))) {
+		if (on && !e->unit->cleanups_disabled && !(e->unit->options->cfi && !CODEGEN_IS_DARWIN(c))) {
 			memset(a64_vir_thread_state_instance.needs_fallthrough, 0, f->insn_count);
 			for (uint32_t b = 0; L.tail && b < f->block_count; b++)
 				for (uint32_t i = f->blocks[b].first; i < f->blocks[b].first + f->blocks[b].insn_count; i++)
@@ -376,7 +376,7 @@ VPRIV bool a64_vir_function_lower(codegen_context *e, uint32_t s, const char **w
 	L.drv = (virbuild_lowering){
 		.target = &vl_lowering_target, .ctx = &L, .f = f, .o = L.allocation, .lp = L.loops,
 		.order = L.order, .position = L.order_positions, .rotation = a64_vir_thread_state_instance.head_labels, .chase = L.chases, .path = a64_vir_thread_state_instance.path,
-		.block_label = L.labels, .optimize = !e->E->noopt,
+		.block_label = L.labels, .optimize = !e->unit->cleanups_disabled,
 		.operand_value = L.operand_values, .operand_reg = L.operand_registers, .max_operands = A64_VIR_OPERAND_MAX, .skip_at = &L.skip,
 	};
 	L.ret32 = KIND(c, ft->base) != AST_TYPE_VOID && codegen_type_is_integer(c, ft->base) && codegen_type_size(c, ft->base) == 4;
@@ -386,37 +386,37 @@ VPRIV bool a64_vir_function_lower(codegen_context *e, uint32_t s, const char **w
 
 	/* Keep result tables queued by the VIR walker: end_function emits them. */
 	/* the emitter's per-function state, as emit_function1 sets it */
-	e->nin = 0;
-	e->ndl = 0;
+	e->record_count = 0;
+	e->debug_row_count = 0;
 	e->raw.n = 0;
-	e->nlabel = 0;
-	e->nkv = 0, e->kvalid = 0, e->nkvs = 0, e->nael = 0;
-	e->foff = e->fmax = e->outmax = e->cl_top = 0;
-	e->nsla = e->nsstk = 0;
-	e->falign = 16, e->resv = 0, e->nvsz = 0;
-	e->dyn = e->calls = false;
-	e->live = 0;
-	e->usedcs = 0;
-	e->nloop = e->nclean = 0;
-	e->ncases = 0;
-	e->njt = e->njtl = 0;
-	e->reach = true;
-	e->top = s;
-	e->asmk = 0;
+	e->label_count = 0;
+	e->known_value_count = 0, e->known_values_valid = 0, e->known_value_state_count = 0, e->array_element_count = 0;
+	e->frame_offset = e->frame_maximum = e->outgoing_argument_bytes_max = e->compound_literal_top = 0;
+	e->slot_allocation_count = e->live_slot_count = 0;
+	e->frame_alignment = 16, e->temporaries_reserved = 0, e->vla_size_count = 0;
+	e->dynamic_frame = e->has_calls = false;
+	e->temporaries_in_use = 0;
+	e->callee_saved_used = 0;
+	e->loop_count = e->cleanup_count = 0;
+	e->case_count = 0;
+	e->jump_table_count = e->jump_table_label_count = 0;
+	e->is_reachable = true;
+	e->top_symbol = s;
+	e->asm_statement_count = 0;
 	e->inline_depth = 0;
-	e->vararg = (ft->flags & AST_TYPE_FLAG_VARIADIC) != 0;
-	e->nlr = 0;
-	e->f = NULL;
-	e->vfail = NULL;
-	e->vlow = true;
-	e->vtry = true;	/* efatal, eerror: back here */
-	switch (_setjmp(e->bail)) {
+	e->is_variadic = (ft->flags & AST_TYPE_FLAG_VARIADIC) != 0;
+	e->local_register_candidate_count = 0;
+	e->function_instance = NULL;
+	e->vir_failure_reason = NULL;
+	e->vir_lowering = true;
+	e->vir_try = true;	/* efatal, eerror: back here */
+	switch (_setjmp(e->bail_jump)) {
 	case 0:
 		break;
 	default:
-		*why = e->vfail ? e->vfail : VIRBUILD_FAILURE(lowering_failed);
-		e->vtry = false;
-		e->vlow = false;
+		*why = e->vir_failure_reason ? e->vir_failure_reason : VIRBUILD_FAILURE(lowering_failed);
+		e->vir_try = false;
+		e->vir_lowering = false;
 		return false;
 	}
 	for (uint32_t k = 0; k < f->slot_count; k++) {
@@ -434,13 +434,13 @@ VPRIV bool a64_vir_function_lower(codegen_context *e, uint32_t s, const char **w
 	L.return_label = newlabel(e);
 	a64_vir_function_body_lower(&L);
 	deflabel_forced(e, L.return_label);
-	if (L.frame_is_at_risk && e->fmax + e->outmax + 128 > 4000)
+	if (L.frame_is_at_risk && e->frame_maximum + e->outgoing_argument_bytes_max + 128 > 4000)
 		a64_vir_fail(&L, VIRBUILD_FAILURE(large_frame_scratch));
 	for (int r = 19; r <= 28; r++)
 		if (V->allocation.callee[0] >> r & 1)
-			e->usedcs |= 1u << r;
+			e->callee_saved_used |= 1u << r;
 	finish_function(e, s);
-	e->vtry = false;
-	e->vlow = false;
+	e->vir_try = false;
+	e->vir_lowering = false;
 	return true;
 }

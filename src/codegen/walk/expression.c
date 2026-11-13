@@ -33,14 +33,14 @@ static int walk_operation_width(cc *c, ast_qualified_type t) { return walk_type_
 
 static __attribute__((noinline, cold, noreturn)) void walk_unsupported_fail(codegen_context *e, uint32_t n, const char *what)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 
 	codegen_fatal_report(e, N(n)->loc, "x86-64: %s is not supported yet (PLAN-x86.md X3)", what);
 }
 
 static void walk_scalar_check(codegen_context *e, uint32_t n, ast_qualified_type t)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	int k = KIND(c, t);
 
 	if ((k == AST_TYPE_INT128 || k == AST_TYPE_UINT128) && !WALK_LOWER(i128mem)())
@@ -51,7 +51,7 @@ static bool walk_type_is_wide(cc *c, ast_qualified_type t) { return KIND(c, t) =
 
 VPRIV bool walk_type_is_in_memory(codegen_context *e, ast_qualified_type t)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 
 	return codegen_type_is_bitint_big(c, t) || codegen_type_is_record(c, t) || codegen_type_is_array(c, t) || codegen_type_is_vector(c, t) || codegen_type_is_sve(c, t) || KIND(c, t) == AST_TYPE_FLOAT128 || (KIND(c, t) == AST_TYPE_LONG_DOUBLE && WALK_LOWER(ldmem)()) || (walk_type_is_wide(c, t) && WALK_LOWER(i128mem)());
 }
@@ -63,32 +63,32 @@ static bool walk_type_is_quad(cc *c, ast_qualified_type t)
 }
 
 /* a float value's register (float/double: the CPU's float registers) */
-static bool walk_type_is_in_float_register(codegen_context *e, ast_qualified_type t) { return codegen_type_is_float(e->c, t) && !walk_type_is_in_memory(e, t); }
+static bool walk_type_is_in_float_register(codegen_context *e, ast_qualified_type t) { return codegen_type_is_float(e->compile_context, t) && !walk_type_is_in_memory(e, t); }
 
 /* a new temporary for a value of type t */
 static int walk_register_temporary_new(codegen_context *e, ast_qualified_type t) { return walk_type_is_in_float_register(e, t) ? WALK_LOWER(ftreg)(e) : WALK_LOWER(treg)(e); }
 
 VPRIV int walk_value_to_register(codegen_context *e, codegen_value *v, ast_qualified_type t)
 {
-	return WALK_LOWER(toreg)(e, v, walk_type_size(e->c, t) > 4 ? 8 : 4);
+	return WALK_LOWER(toreg)(e, v, walk_type_size(e->compile_context, t) > 4 ? 8 : 4);
 }
 
 VPRIV void walk_value_free(codegen_context *e, const codegen_value *v)
 {
-	if (v->k == CODEGEN_VALUE_REGISTER)
-		WALK_LOWER(tfree)(e, v->r);
+	if (v->kind == CODEGEN_VALUE_REGISTER)
+		WALK_LOWER(tfree)(e, v->register_number);
 }
 
-static codegen_value walk_value_from_register(int r) { return (codegen_value){ .k = CODEGEN_VALUE_REGISTER, .r = (uint8_t)r }; }
+static codegen_value walk_value_from_register(int r) { return (codegen_value){ .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)r }; }
 
 /* an address that may be 0 at run time: an undefined weak symbol's */
 VPRIV bool walk_symbol_address_may_be_zero(cc *c, codegen_value v)
 {
 	const sym *y;
 
-	if (v.k != CODEGEN_VALUE_ADDRESS || CODEGEN_REFERENCE_KIND(v.ref) != CODEGEN_REFERENCE_SYMBOL)
+	if (v.kind != CODEGEN_VALUE_ADDRESS || CODEGEN_REFERENCE_KIND(v.reference) != CODEGEN_REFERENCE_SYMBOL)
 		return false;
-	y = &c->syms[CODEGEN_REFERENCE_INDEX(v.ref)];
+	y = &c->syms[CODEGEN_REFERENCE_INDEX(v.reference)];
 	return (y->flags & AST_SYMBOL_FLAG_WEAK) && !(y->flags & AST_SYMBOL_FLAG_DEFINED);
 }
 
@@ -156,16 +156,16 @@ static bool walk_comparison_fold(int op, bool sg, i128 a, i128 b)
 
 static codegen_lvalue walk_lvalue_from_value(codegen_context *e, codegen_value v, ast_qualified_type t)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	codegen_lvalue l = { 0 };
 
-	if (v.k == CODEGEN_VALUE_ADDRESS) {
-		l.k = CODEGEN_LVALUE_SYMBOL;
-		l.ref = v.ref;
-		l.off = (int64_t)v.i;
+	if (v.kind == CODEGEN_VALUE_ADDRESS) {
+		l.kind = CODEGEN_LVALUE_SYMBOL;
+		l.reference = v.reference;
+		l.offset = (int64_t)v.integer;
 	} else {
-		l.k = CODEGEN_LVALUE_REGISTER;
-		l.r = (uint8_t)walk_value_to_register(e, &v, codegen_type_primitive(AST_TYPE_LONG));
+		l.kind = CODEGEN_LVALUE_REGISTER;
+		l.register_number = (uint8_t)walk_value_to_register(e, &v, codegen_type_primitive(AST_TYPE_LONG));
 	}
 	l.align = KIND(c, t) == AST_TYPE_VOID ? 1 : codegen_type_alignment(c, t);
 	return l;
@@ -179,52 +179,52 @@ static codegen_value walk_increment_value(codegen_context *e, ast_qualified_type
 
 static void walk_lvalue_free(codegen_context *e, const codegen_lvalue *l)
 {
-	if (l->k == CODEGEN_LVALUE_REGISTER)
-		WALK_LOWER(tfree)(e, l->r);
+	if (l->kind == CODEGEN_LVALUE_REGISTER)
+		WALK_LOWER(tfree)(e, l->register_number);
 }
 
 /* a local's frame slot, made on first use */
 VPRIV int64_t walk_local_slot(codegen_context *e, uint32_t s)
 {
-	walk_state *W = e->wk;
-	cc *c = e->c;
+	walk_state *W = e->walk_state;
+	cc *c = e->compile_context;
 
-	if (W->sgen[s] != W->gen) {
-		W->sgen[s] = W->gen;
-		if (W->canary && (codegen_type_is_array(c, c->syms[s].ty) || codegen_type_is_aggregate(c, c->syms[s].ty) || e->E->lnoreg[s]))
-			W->spneed = true;	/* (clang's -fstack-protector-strong, a superset) */
+	if (W->symbol_generations[s] != W->generation) {
+		W->symbol_generations[s] = W->generation;
+		if (W->canary && (codegen_type_is_array(c, c->syms[s].ty) || codegen_type_is_aggregate(c, c->syms[s].ty) || e->unit->local_needs_memory[s]))
+			W->stack_pointer_needed = true;	/* (clang's -fstack-protector-strong, a superset) */
 		if (T(c, c->syms[s].ty)->flags & AST_TYPE_FLAG_VLA)
-			W->soff[s] = walk_slot_permanent_kind(e, 24, 8, WALK_SLOT_LOCAL);	/* { address, sp before it, bytes } */
+			W->symbol_offsets[s] = walk_slot_permanent_kind(e, 24, 8, WALK_SLOT_LOCAL);	/* { address, sp before it, bytes } */
 		else {
 			uint64_t size = codegen_type_size(c, c->syms[s].ty) ? codegen_type_size(c, c->syms[s].ty) : 1;
 			uint32_t align = codegen_symbol_alignment(c, s) ? codegen_symbol_alignment(c, s) : 1;
-			uint32_t i = W->ntf;
+			uint32_t i = W->temporary_slot_free_count;
 
-			if (W->inlocal && W->nlu < WALK_TEMPORARY_SLOT_MAX && size <= UINT32_MAX) {
+			if (W->inline_local_depth && W->local_slot_count < WALK_TEMPORARY_SLOT_MAX && size <= UINT32_MAX) {
 				/* a local of an inline copy: a free slot, given back when the copy ends */
 				while (i-- > 0)
-					if (W->tf[i].size == size && W->tf[i].align == align)
+					if (W->temporary_slots_free[i].size == size && W->temporary_slots_free[i].align == align)
 						break;
 				if (i != UINT32_MAX) {
-					W->soff[s] = W->tf[i].off;
-					W->tf[i] = W->tf[--W->ntf];
-					WALK_LOWER(slot)(e, W->soff[s], size, align, WALK_SLOT_LOCAL);
+					W->symbol_offsets[s] = W->temporary_slots_free[i].offset;
+					W->temporary_slots_free[i] = W->temporary_slots_free[--W->temporary_slot_free_count];
+					WALK_LOWER(slot)(e, W->symbol_offsets[s], size, align, WALK_SLOT_LOCAL);
 				} else {
-					W->soff[s] = walk_slot_permanent_kind(e, size, align, WALK_SLOT_LOCAL);
+					W->symbol_offsets[s] = walk_slot_permanent_kind(e, size, align, WALK_SLOT_LOCAL);
 				}
-				W->lu[W->nlu++] = (struct walk_local_slot_entry){ W->soff[s], (uint32_t)size, align, s };
+				W->local_slots[W->local_slot_count++] = (struct walk_local_slot_entry){ W->symbol_offsets[s], (uint32_t)size, align, s };
 			} else {
-				W->soff[s] = walk_slot_permanent_kind(e, size, align, WALK_SLOT_LOCAL);
+				W->symbol_offsets[s] = walk_slot_permanent_kind(e, size, align, WALK_SLOT_LOCAL);
 			}
 		}
 	}
-	return W->soff[s];
+	return W->symbol_offsets[s];
 }
 
 /* n is a[K] of a local array that does not escape, an integer element: a and K */
 static bool walk_array_element_of(codegen_context *e, uint32_t n, uint32_t *s, int64_t *k)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n);
 	uint32_t a;
 	const ctype *at;
@@ -232,7 +232,7 @@ static bool walk_array_element_of(codegen_context *e, uint32_t n, uint32_t *s, i
 	if (!codegen_expression_is_constant_index(c, n) || !codegen_type_is_integer(c, x->ty) || walk_type_is_wide(c, x->ty) || (AST_QUALIFIED_TYPE_QUALIFIERS(x->ty) & AST_QUALIFIER_VOLATILE))
 		return false;
 	a = N(N(x->a)->a)->a, at = T(c, c->syms[a].ty);
-	if (!codegen_symbol_is_local_variable(c, a) || c->syms[a].sc == AST_STORAGE_STATIC || (e->E->sflags[a] & CODEGEN_SYMBOL_ARRAY_ESCAPES) ||
+	if (!codegen_symbol_is_local_variable(c, a) || c->syms[a].sc == AST_STORAGE_STATIC || (e->unit->symbol_flags[a] & CODEGEN_SYMBOL_ARRAY_ESCAPES) ||
 	    (AST_QUALIFIED_TYPE_QUALIFIERS(c->syms[a].ty) & AST_QUALIFIER_VOLATILE) || codegen_symbol_attributes(c, a)->cleanup || at->kind != AST_TYPE_ARRAY ||
 	    (at->flags & (AST_TYPE_FLAG_VLA | AST_TYPE_FLAG_INCOMPLETE)) || codegen_expression_constant_index(c, n) >= at->n)
 		return false;
@@ -242,39 +242,39 @@ static bool walk_array_element_of(codegen_context *e, uint32_t n, uint32_t *s, i
 
 static int walk_array_element_find(codegen_context *e, uint32_t s, int64_t k)
 {
-	walk_state *W = e->wk;
+	walk_state *W = e->walk_state;
 
-	for (int i = 0; i < W->nael; i++)
-		if (W->ael[i].s == s && W->ael[i].idx == k && W->ael[i].gen == W->gen && W->ael[i].inst == W->inst)
+	for (int i = 0; i < W->array_element_count; i++)
+		if (W->array_elements[i].symbol == s && W->array_elements[i].index == k && W->array_elements[i].generation == W->generation && W->array_elements[i].instance == W->instance)
 			return i;
 	return -1;
 }
 
 static void walk_array_element_drop(codegen_context *e, uint32_t s, int64_t k, bool all)
 {
-	walk_state *W = e->wk;
+	walk_state *W = e->walk_state;
 
-	for (int i = 0; i < W->nael; i++)
-		if (W->ael[i].s == s && (all || W->ael[i].idx == k))
-			W->ael[i] = W->ael[--W->nael], i--;
+	for (int i = 0; i < W->array_element_count; i++)
+		if (W->array_elements[i].symbol == s && (all || W->array_elements[i].index == k))
+			W->array_elements[i] = W->array_elements[--W->array_element_count], i--;
 }
 
 /* a local array's element values are unknown again (a label, its declaration) */
 VPRIV void walk_array_elements_clear(codegen_context *e, uint32_t s)
 {
 	if (s == UINT32_MAX)
-		e->wk->nael = 0, e->wk->npk = 0;
+		e->walk_state->array_element_count = 0, e->walk_state->parameter_constant_count = 0;
 	else
 		walk_array_element_drop(e, s, 0, true);
 }
 
 VPRIV bool walk_parameter_constant_get(codegen_context *e, uint32_t s, codegen_value *v)
 {
-	walk_state *W = e->wk;
+	walk_state *W = e->walk_state;
 
-	for (int i = 0; i < W->npk; i++)
-		if (W->pk[i].s == s && W->pk[i].gen == W->gen) {	/* (the parameters of one copy: its own syms) */
-			*v = W->pk[i].v;
+	for (int i = 0; i < W->parameter_constant_count; i++)
+		if (W->parameter_constants[i].symbol == s && W->parameter_constants[i].generation == W->generation) {	/* (the parameters of one copy: its own syms) */
+			*v = W->parameter_constants[i].value;
 			return true;
 		}
 	return false;
@@ -282,7 +282,7 @@ VPRIV bool walk_parameter_constant_get(codegen_context *e, uint32_t s, codegen_v
 
 VPRIV codegen_lvalue walk_lvalue_emit(codegen_context *e, uint32_t n)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n);
 	codegen_lvalue l = { 0 };
 	{
@@ -291,10 +291,10 @@ VPRIV codegen_lvalue walk_lvalue_emit(codegen_context *e, uint32_t n)
 
 		if (walk_array_element_of(e, n, &as, &ak))
 			walk_array_element_drop(e, as, ak, false);	/* (written, or its address used) */
-		if (x->op == AST_NODE_VARIABLE && e->wk->npk)	/* (a provisional constant ends at a write, or its address) */
-			for (int i = 0; i < e->wk->npk; i++)
-				if (e->wk->pk[i].s == x->a)
-					e->wk->pk[i] = e->wk->pk[--e->wk->npk], i--;
+		if (x->op == AST_NODE_VARIABLE && e->walk_state->parameter_constant_count)	/* (a provisional constant ends at a write, or its address) */
+			for (int i = 0; i < e->walk_state->parameter_constant_count; i++)
+				if (e->walk_state->parameter_constants[i].symbol == x->a)
+					e->walk_state->parameter_constants[i] = e->walk_state->parameter_constants[--e->walk_state->parameter_constant_count], i--;
 	}
 
 	switch (x->op) {
@@ -302,7 +302,7 @@ VPRIV codegen_lvalue walk_lvalue_emit(codegen_context *e, uint32_t n)
 		uint32_t s = x->a, cs;
 
 		if (codegen_symbol_is_local_variable(c, s) && (T(c, c->syms[s].ty)->flags & AST_TYPE_FLAG_VLA)) {
-			codegen_lvalue a = { .k = CODEGEN_LVALUE_FRAME, .off = walk_local_slot(e, s), .align = 8 };
+			codegen_lvalue a = { .kind = CODEGEN_LVALUE_FRAME, .offset = walk_local_slot(e, s), .align = 8 };
 			int r = WALK_LOWER(treg)(e);
 
 			WALK_LOWER(load)(e, r, &a, 8, false);
@@ -311,8 +311,8 @@ VPRIV codegen_lvalue walk_lvalue_emit(codegen_context *e, uint32_t n)
 		if (codegen_symbol_is_local_variable(c, s)) {
 			if (WALK_LOWER(local)(e, s, &l))
 				return l;
-			l.k = CODEGEN_LVALUE_FRAME;
-			l.off = walk_local_slot(e, s);
+			l.kind = CODEGEN_LVALUE_FRAME;
+			l.offset = walk_local_slot(e, s);
 			l.align = codegen_symbol_alignment(c, s);
 			return l;
 		}
@@ -330,19 +330,19 @@ VPRIV codegen_lvalue walk_lvalue_emit(codegen_context *e, uint32_t n)
 			if (want > def)
 				def = want;
 			if (def < CC_TLS_INITIAL_EXEC)
-				e->calls = true;	/* (local-dynamic as general dynamic) */
+				e->has_calls = true;	/* (local-dynamic as general dynamic) */
 			return walk_lvalue_from_value(e, walk_value_from_register(WALK_LOWER(tlsaddr)(e, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, cs), def == CC_TLS_LOCAL_EXEC ? 0 : def == CC_TLS_INITIAL_EXEC ? 1 : 2)),
 					  c->syms[s].ty);
 		}
-		l.k = CODEGEN_LVALUE_SYMBOL;
-		l.ref = CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, cs);
+		l.kind = CODEGEN_LVALUE_SYMBOL;
+		l.reference = CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, cs);
 		l.align = codegen_symbol_alignment(c, cs);
 		return l;
 	}
 	case AST_NODE_STRING:
 		codegen_reference_note(e, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_STRING, x->a));
-		l.k = CODEGEN_LVALUE_SYMBOL;
-		l.ref = CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_STRING, x->a);
+		l.kind = CODEGEN_LVALUE_SYMBOL;
+		l.reference = CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_STRING, x->a);
 		l.align = c->strs[x->a].esz;
 		return l;
 	case AST_NODE_DEREFERENCE:
@@ -356,12 +356,12 @@ VPRIV codegen_lvalue walk_lvalue_emit(codegen_context *e, uint32_t n)
 			l = walk_lvalue_emit(e, x->a);
 		else
 			l = walk_lvalue_from_value(e, walk_value_emit(e, x->a), b->ty);	/* a record rvalue is its address */
-		l.off += (int64_t)(f->off / 8);
+		l.offset += (int64_t)(f->off / 8);
 		if (f->bitfield) {
-			l.bf = 1;
-			l.bitoff = (uint16_t)(f->off % 8);
+			l.is_bitfield = 1;
+			l.bit_offset = (uint16_t)(f->off % 8);
 			l.width = f->width;
-			l.sgn = codegen_type_is_signed(c, f->ty);
+			l.is_signed = codegen_type_is_signed(c, f->ty);
 		}
 		return l;
 	}
@@ -371,36 +371,36 @@ VPRIV codegen_lvalue walk_lvalue_emit(codegen_context *e, uint32_t n)
 		codegen_value p = walk_value_emit(e, x->a), i = walk_value_emit(e, x->b);
 
 		if (x->aux == 1) {
-			if (i.k == CODEGEN_VALUE_CONSTANT) {
+			if (i.kind == CODEGEN_VALUE_CONSTANT) {
 				l = walk_lvalue_from_value(e, p, et);
-				l.off += (int64_t)(i.i / 8);
-				l.bf = 1, l.width = 1, l.bitoff = (uint16_t)(i.i & 7);
+				l.offset += (int64_t)(i.integer / 8);
+				l.is_bitfield = 1, l.width = 1, l.bit_offset = (uint16_t)(i.integer & 7);
 				return l;
 			}
 			int ri = walk_value_to_register(e, &i, codegen_type_primitive(AST_TYPE_LONG)), rb = WALK_LOWER(treg)(e);
 			WALK_LOWER(mov)(e, rb, ri);
 			codegen_value bit = WALK_LOWER(bin)(e, LEX_TOKEN_AMPERSAND, 8, false, walk_value_from_register(rb), codegen_value_constant(7));
-			codegen_lvalue bs = { .k = CODEGEN_LVALUE_FRAME, .off = walk_slot_temporary(e, 8, 8), .align = 8 };
-			WALK_LOWER(store)(e, bit.r, &bs, 8);
-			WALK_LOWER(tfree)(e, bit.r);
+			codegen_lvalue bs = { .kind = CODEGEN_LVALUE_FRAME, .offset = walk_slot_temporary(e, 8, 8), .align = 8 };
+			WALK_LOWER(store)(e, bit.register_number, &bs, 8);
+			WALK_LOWER(tfree)(e, bit.register_number);
 			i = WALK_LOWER(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, false, walk_value_from_register(ri), codegen_value_constant(3));
 			l = walk_lvalue_from_value(e, WALK_LOWER(bin)(e, LEX_TOKEN_PLUS, 8, false, p, i), et);
-			l.bf = 1, l.width = 1, l.dynbit_slot = bs.off;
+			l.is_bitfield = 1, l.width = 1, l.dynamic_bit_slot = bs.offset;
 			return l;
 		}
 
 		if (codegen_type_is_pointer_to_vla(c, pt))
 			return walk_lvalue_from_value(e, walk_pointer_add_vla(e, p, i, N(x->b)->ty, pt, false), et);
-		if (i.k == CODEGEN_VALUE_CONSTANT && p.k == CODEGEN_VALUE_ADDRESS) {
-			l.k = CODEGEN_LVALUE_SYMBOL;
-			l.ref = p.ref;
-			l.off = (int64_t)(p.i + i.i * es);
+		if (i.kind == CODEGEN_VALUE_CONSTANT && p.kind == CODEGEN_VALUE_ADDRESS) {
+			l.kind = CODEGEN_LVALUE_SYMBOL;
+			l.reference = p.reference;
+			l.offset = (int64_t)(p.integer + i.integer * es);
 			l.align = codegen_type_alignment(c, et);
 			return l;
 		}
-		if (i.k == CODEGEN_VALUE_CONSTANT && i.i * es >= INT32_MIN && i.i * es <= INT32_MAX) {
+		if (i.kind == CODEGEN_VALUE_CONSTANT && i.integer * es >= INT32_MIN && i.integer * es <= INT32_MAX) {
 			l = walk_lvalue_from_value(e, p, et);
-			l.off += (int64_t)(i.i * es);
+			l.offset += (int64_t)(i.integer * es);
 			return l;
 		}
 		/* p + i * es: i extended to 64 bits as its type, then scaled */
@@ -428,8 +428,8 @@ VPRIV codegen_lvalue walk_lvalue_emit(codegen_context *e, uint32_t n)
 		/* (T){ ... }: an unnamed object (b), initialized where it is reached */
 		uint32_t s = x->b;
 
-		l.k = CODEGEN_LVALUE_FRAME;
-		l.off = walk_local_slot(e, s);
+		l.kind = CODEGEN_LVALUE_FRAME;
+		l.offset = walk_local_slot(e, s);
 		l.align = codegen_symbol_alignment(c, s);
 		walk_initializer_emit(e, &l, c->syms[s].ty, x->a);
 		return l;
@@ -450,8 +450,8 @@ static int64_t walk_integer_floor_divide(int64_t a, int64_t b) { return a >= 0 ?
    for one that crosses it (packed); its offset and the field's bit in it */
 static void walk_bitfield_unit_find(codegen_context *e, const codegen_lvalue *l, ast_qualified_type t, int64_t *uoff, int *us, int *pos)
 {
-	int64_t bit = l->off * 8 + l->bitoff;
-	int s = walk_type_size(e->c, t);
+	int64_t bit = l->offset * 8 + l->bit_offset;
+	int s = walk_type_size(e->compile_context, t);
 
 	for (s = s < 1 ? 1 : s; s <= 8; s *= 2) {
 		int64_t ub = walk_integer_floor_divide(bit, s * 8);
@@ -483,10 +483,10 @@ static codegen_value walk_bitfield_split_load(codegen_context *e, codegen_lvalue
 	while (width) {
 		int size = walk_bitfield_piece_size(pos, width);
 		int bits = size * 8 - pos;
-		codegen_value v = { .k = CODEGEN_VALUE_REGISTER, .r = (uint8_t)WALK_LOWER(treg)(e) };
+		codegen_value v = { .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)WALK_LOWER(treg)(e) };
 
 		if (bits > width) bits = width;
-		WALK_LOWER(load)(e, v.r, &u, size, false);
+		WALK_LOWER(load)(e, v.register_number, &u, size, false);
 		if (pos)
 			v = WALK_LOWER(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, false, v, codegen_value_constant(pos));
 		if (bits < 64)
@@ -494,7 +494,7 @@ static codegen_value walk_bitfield_split_load(codegen_context *e, codegen_lvalue
 		if (done)
 			v = WALK_LOWER(bin)(e, LEX_TOKEN_LESS_LESS, 8, false, v, codegen_value_constant(done));
 		out = done ? WALK_LOWER(bin)(e, LEX_TOKEN_PIPE, 8, false, out, v) : v;
-		done += bits, width -= bits, pos = 0, u.off += size;
+		done += bits, width -= bits, pos = 0, u.offset += size;
 	}
 	return out;
 }
@@ -506,27 +506,27 @@ static void walk_bitfield_split_store(codegen_context *e, codegen_lvalue u, int 
 	while (width) {
 		int size = walk_bitfield_piece_size(pos, width);
 		int bits = size * 8 - pos;
-		codegen_value v = { .k = CODEGEN_VALUE_REGISTER, .r = (uint8_t)WALK_LOWER(treg)(e) };
+		codegen_value v = { .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)WALK_LOWER(treg)(e) };
 
 		if (bits > width) bits = width;
 		uint64_t mask = (bits == 64 ? UINT64_MAX : ((uint64_t)1 << bits) - 1) << pos;
 
-		WALK_LOWER(mov)(e, v.r, rv);
+		WALK_LOWER(mov)(e, v.register_number, rv);
 		if (done)
 			v = WALK_LOWER(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, false, v, codegen_value_constant(done));
 		if (pos)
 			v = WALK_LOWER(bin)(e, LEX_TOKEN_LESS_LESS, 8, false, v, codegen_value_constant(pos));
 		if (bits < size * 8) {
-			codegen_value old = { .k = CODEGEN_VALUE_REGISTER, .r = (uint8_t)WALK_LOWER(treg)(e) };
+			codegen_value old = { .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)WALK_LOWER(treg)(e) };
 
-			WALK_LOWER(load)(e, old.r, &u, size, false);
+			WALK_LOWER(load)(e, old.register_number, &u, size, false);
 			old = WALK_LOWER(bin)(e, LEX_TOKEN_AMPERSAND, 8, false, old, codegen_value_constant((i128)(int64_t)~mask));
 			v = WALK_LOWER(bin)(e, LEX_TOKEN_AMPERSAND, 8, false, v, codegen_value_constant((i128)(int64_t)mask));
 			v = WALK_LOWER(bin)(e, LEX_TOKEN_PIPE, 8, false, v, old);
 		}
-		WALK_LOWER(store)(e, v.r, &u, size);
-		WALK_LOWER(tfree)(e, v.r);
-		done += bits, width -= bits, pos = 0, u.off += size;
+		WALK_LOWER(store)(e, v.register_number, &u, size);
+		WALK_LOWER(tfree)(e, v.register_number);
+		done += bits, width -= bits, pos = 0, u.offset += size;
 	}
 }
 
@@ -535,33 +535,33 @@ static void walk_bitfield_split_store(codegen_context *e, codegen_lvalue u, int 
 static codegen_value walk_bitfield_wide_load(codegen_context *e, const codegen_lvalue *l)
 {
 	codegen_lvalue src = *l;
-	codegen_lvalue dst = { .k = CODEGEN_LVALUE_FRAME, .off = walk_slot_temporary(e, 16, 16), .align = 16 };
+	codegen_lvalue dst = { .kind = CODEGEN_LVALUE_FRAME, .offset = walk_slot_temporary(e, 16, 16), .align = 16 };
 	int low = l->width < 64 ? l->width : 64;
-	codegen_value lo = walk_bitfield_split_load(e, src, l->bitoff, low), hi;
-	if (l->sgn && low < 64) {
+	codegen_value lo = walk_bitfield_split_load(e, src, l->bit_offset, low), hi;
+	if (l->is_signed && low < 64) {
 		lo = WALK_LOWER(bin)(e, LEX_TOKEN_LESS_LESS, 8, false, lo, codegen_value_constant(64 - low));
 		lo = WALK_LOWER(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, true, lo, codegen_value_constant(64 - low));
 	}
-	WALK_LOWER(store)(e, lo.r, &dst, 8);
+	WALK_LOWER(store)(e, lo.register_number, &dst, 8);
 	if (l->width > 64) {
 		walk_value_free(e, &lo);
-		src.off += 8;
-		hi = walk_bitfield_split_load(e, src, l->bitoff, l->width - 64);
-		if (l->sgn && l->width < 128) {
+		src.offset += 8;
+		hi = walk_bitfield_split_load(e, src, l->bit_offset, l->width - 64);
+		if (l->is_signed && l->width < 128) {
 			hi = WALK_LOWER(bin)(e, LEX_TOKEN_LESS_LESS, 8, false, hi, codegen_value_constant(128 - l->width));
 			hi = WALK_LOWER(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, true, hi, codegen_value_constant(128 - l->width));
 		}
-	} else if (l->sgn) {
+	} else if (l->is_signed) {
 		hi = WALK_LOWER(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, true, lo, codegen_value_constant(63));
 	} else {
 		walk_value_free(e, &lo);
 		hi = codegen_value_constant(0);
 		WALK_LOWER(toreg)(e, &hi, 8);
 	}
-	dst.off += 8;
-	WALK_LOWER(store)(e, hi.r, &dst, 8);
+	dst.offset += 8;
+	WALK_LOWER(store)(e, hi.register_number, &dst, 8);
 	walk_value_free(e, &hi);
-	dst.off -= 8;
+	dst.offset -= 8;
 	return walk_value_from_register(WALK_LOWER(laddr)(e, &dst));
 }
 
@@ -570,23 +570,23 @@ static codegen_value walk_bitfield_wide_load(codegen_context *e, const codegen_l
 static codegen_value walk_bitfield_big_load(codegen_context *e, const codegen_lvalue *l, ast_qualified_type t)
 {
 	codegen_lvalue src = *l;
-	codegen_lvalue dst = { .k = CODEGEN_LVALUE_FRAME, .off = walk_slot_temporary(e, codegen_type_size(e->c, t), 8), .align = 8 };
+	codegen_lvalue dst = { .kind = CODEGEN_LVALUE_FRAME, .offset = walk_slot_temporary(e, codegen_type_size(e->compile_context, t), 8), .align = 8 };
 	codegen_lvalue out = dst;
 	codegen_value v = codegen_value_constant(0);
-	unsigned n = (unsigned)codegen_type_size(e->c, t)/8;
-	for (unsigned i = 0; i < n; i++, out.off += 8) {
+	unsigned n = (unsigned)codegen_type_size(e->compile_context, t)/8;
+	for (unsigned i = 0; i < n; i++, out.offset += 8) {
 		if (i*64 < l->width) {
 			unsigned bits = l->width - i*64;
 			if (bits > 64) bits = 64;
 			walk_value_free(e, &v);
-			v = walk_bitfield_split_load(e, src, l->bitoff, (int)bits);
-			if (l->sgn && bits < 64) {
+			v = walk_bitfield_split_load(e, src, l->bit_offset, (int)bits);
+			if (l->is_signed && bits < 64) {
 				v = WALK_LOWER(bin)(e, LEX_TOKEN_LESS_LESS, 8, false, v, codegen_value_constant(64-bits));
 				v = WALK_LOWER(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, true, v, codegen_value_constant(64-bits));
 			}
-			src.off += 8;
+			src.offset += 8;
 		} else if ((i-1)*64 < l->width) {
-			if (l->sgn) v = WALK_LOWER(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, true, v, codegen_value_constant(63));
+			if (l->is_signed) v = WALK_LOWER(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, true, v, codegen_value_constant(63));
 			else { walk_value_free(e, &v); v = codegen_value_constant(0); }
 		}
 		int r = walk_value_to_register(e, &v, codegen_type_primitive(AST_TYPE_UNSIGNED_LONG));
@@ -598,14 +598,14 @@ static codegen_value walk_bitfield_big_load(codegen_context *e, const codegen_lv
 
 static void walk_bitfield_wide_store(codegen_context *e, const codegen_lvalue *l, int address)
 {
-	codegen_lvalue src = { .k = CODEGEN_LVALUE_REGISTER, .r = (uint8_t)address }, dst = *l;
+	codegen_lvalue src = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = (uint8_t)address }, dst = *l;
 	int part = WALK_LOWER(treg)(e);
 	for (unsigned done = 0; done < l->width; done += 64) {
 		unsigned bits = l->width - done;
 		if (bits > 64) bits = 64;
 		WALK_LOWER(load)(e, part, &src, 8, false);
-		walk_bitfield_split_store(e, dst, l->bitoff, (int)bits, part);
-		src.off += 8, dst.off += 8;
+		walk_bitfield_split_store(e, dst, l->bit_offset, (int)bits, part);
+		src.offset += 8, dst.offset += 8;
 	}
 	WALK_LOWER(tfree)(e, part);
 }
@@ -613,33 +613,33 @@ static void walk_bitfield_wide_store(codegen_context *e, const codegen_lvalue *l
 /* a bit-field's value in a new register (l stays) */
 static codegen_value walk_bitfield_load(codegen_context *e, const codegen_lvalue *l, ast_qualified_type t)
 {
-	if (codegen_type_is_bitint_big(e->c, t)) return walk_bitfield_big_load(e, l, t);
-	if (walk_type_is_wide(e->c, t)) return walk_bitfield_wide_load(e, l);
+	if (codegen_type_is_bitint_big(e->compile_context, t)) return walk_bitfield_big_load(e, l, t);
+	if (walk_type_is_wide(e->compile_context, t)) return walk_bitfield_wide_load(e, l);
 	codegen_lvalue u = *l;
 	int us, pos, w = l->width;
 	int64_t uo;
 	codegen_value v;
 
-	if (l->dynbit_slot) {
-		codegen_lvalue bs = { .k = CODEGEN_LVALUE_FRAME, .off = l->dynbit_slot, .align = 8 };
+	if (l->dynamic_bit_slot) {
+		codegen_lvalue bs = { .kind = CODEGEN_LVALUE_FRAME, .offset = l->dynamic_bit_slot, .align = 8 };
 		codegen_value bit = walk_value_from_register(WALK_LOWER(treg)(e));
 		v = walk_value_from_register(WALK_LOWER(treg)(e));
-		WALK_LOWER(load)(e, v.r, l, 1, false);
-		WALK_LOWER(load)(e, bit.r, &bs, 8, false);
+		WALK_LOWER(load)(e, v.register_number, l, 1, false);
+		WALK_LOWER(load)(e, bit.register_number, &bs, 8, false);
 		v = WALK_LOWER(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, false, v, bit);
 		return WALK_LOWER(bin)(e, LEX_TOKEN_AMPERSAND, 8, false, v, codegen_value_constant(1));
 	}
 
 	walk_bitfield_unit_find(e, l, t, &uo, &us, &pos);
-	u.bf = 0, u.off = uo;
+	u.is_bitfield = 0, u.offset = uo;
 	if (!us) {
 		v = walk_bitfield_split_load(e, u, pos, w);
 		pos = 0;
 	} else {
-		v = (codegen_value){ .k = CODEGEN_VALUE_REGISTER, .r = (uint8_t)WALK_LOWER(treg)(e) };
-		WALK_LOWER(load)(e, v.r, &u, us, false);
+		v = (codegen_value){ .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)WALK_LOWER(treg)(e) };
+		WALK_LOWER(load)(e, v.register_number, &u, us, false);
 	}
-	if (l->sgn) {
+	if (l->is_signed) {
 		if (64 - pos - w)
 			v = WALK_LOWER(bin)(e, LEX_TOKEN_LESS_LESS, 8, false, v, codegen_value_constant(64 - pos - w));
 		if (64 - w)
@@ -656,7 +656,7 @@ static codegen_value walk_bitfield_load(codegen_context *e, const codegen_lvalue
 /* the low bits of rv into the bit-field (rv stays) */
 static void walk_bitfield_store(codegen_context *e, const codegen_lvalue *l, ast_qualified_type t, int rv)
 {
-	if (walk_type_is_wide(e->c, t) || codegen_type_is_bitint_big(e->c, t)) {
+	if (walk_type_is_wide(e->compile_context, t) || codegen_type_is_bitint_big(e->compile_context, t)) {
 		walk_bitfield_wide_store(e, l, rv);
 		return;
 	}
@@ -666,28 +666,28 @@ static void walk_bitfield_store(codegen_context *e, const codegen_lvalue *l, ast
 	uint64_t m;
 	codegen_value old, nv;
 
-	if (l->dynbit_slot) {
-		codegen_lvalue bs = { .k = CODEGEN_LVALUE_FRAME, .off = l->dynbit_slot, .align = 8 };
+	if (l->dynamic_bit_slot) {
+		codegen_lvalue bs = { .kind = CODEGEN_LVALUE_FRAME, .offset = l->dynamic_bit_slot, .align = 8 };
 		codegen_value bit = walk_value_from_register(WALK_LOWER(treg)(e));
-		WALK_LOWER(load)(e, bit.r, &bs, 8, false);
+		WALK_LOWER(load)(e, bit.register_number, &bs, 8, false);
 		codegen_value mask = WALK_LOWER(bin)(e, LEX_TOKEN_LESS_LESS, 8, false, codegen_value_constant(1), bit);
 		int rm = WALK_LOWER(treg)(e);
-		WALK_LOWER(mov)(e, rm, mask.r);
+		WALK_LOWER(mov)(e, rm, mask.register_number);
 		old = walk_value_from_register(WALK_LOWER(treg)(e));
-		WALK_LOWER(load)(e, old.r, l, 1, false);
+		WALK_LOWER(load)(e, old.register_number, l, 1, false);
 		old = WALK_LOWER(bin)(e, LEX_TOKEN_AMPERSAND, 8, false, old, WALK_LOWER(bin)(e, LEX_TOKEN_CARET, 8, false, mask, codegen_value_constant(-1)));
 		nv = walk_value_from_register(WALK_LOWER(treg)(e));
-		WALK_LOWER(mov)(e, nv.r, rv);
+		WALK_LOWER(mov)(e, nv.register_number, rv);
 		nv = WALK_LOWER(bin)(e, LEX_TOKEN_MINUS, 8, false, codegen_value_constant(0), nv);
 		nv = WALK_LOWER(bin)(e, LEX_TOKEN_AMPERSAND, 8, false, nv, walk_value_from_register(rm));
 		old = WALK_LOWER(bin)(e, LEX_TOKEN_PIPE, 8, false, old, nv);
-		WALK_LOWER(store)(e, old.r, l, 1);
-		WALK_LOWER(tfree)(e, old.r);
+		WALK_LOWER(store)(e, old.register_number, l, 1);
+		WALK_LOWER(tfree)(e, old.register_number);
 		return;
 	}
 
 	walk_bitfield_unit_find(e, l, t, &uo, &us, &pos);
-	u.bf = 0, u.off = uo;
+	u.is_bitfield = 0, u.offset = uo;
 	if (!us) {
 		walk_bitfield_split_store(e, u, pos, w, rv);
 		return;
@@ -695,17 +695,17 @@ static void walk_bitfield_store(codegen_context *e, const codegen_lvalue *l, ast
 	m = (w >= 64 ? ~(uint64_t)0 : (((uint64_t)1 << w) - 1)) << pos;
 	if (us < 8)
 		m &= ((uint64_t)1 << (us * 8)) - 1;
-	old = (codegen_value){ .k = CODEGEN_VALUE_REGISTER, .r = (uint8_t)WALK_LOWER(treg)(e) };
-	WALK_LOWER(load)(e, old.r, &u, us, false);
+	old = (codegen_value){ .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)WALK_LOWER(treg)(e) };
+	WALK_LOWER(load)(e, old.register_number, &u, us, false);
 	old = WALK_LOWER(bin)(e, LEX_TOKEN_AMPERSAND, 8, false, old, codegen_value_constant((i128)(int64_t)~m));
-	nv = (codegen_value){ .k = CODEGEN_VALUE_REGISTER, .r = (uint8_t)WALK_LOWER(treg)(e) };
-	WALK_LOWER(mov)(e, nv.r, rv);
+	nv = (codegen_value){ .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)WALK_LOWER(treg)(e) };
+	WALK_LOWER(mov)(e, nv.register_number, rv);
 	if (pos)
 		nv = WALK_LOWER(bin)(e, LEX_TOKEN_LESS_LESS, 8, false, nv, codegen_value_constant(pos));
 	nv = WALK_LOWER(bin)(e, LEX_TOKEN_AMPERSAND, 8, false, nv, codegen_value_constant((i128)(int64_t)m));
 	old = WALK_LOWER(bin)(e, LEX_TOKEN_PIPE, 8, false, old, nv);
-	WALK_LOWER(store)(e, old.r, &u, us);
-	WALK_LOWER(tfree)(e, old.r);
+	WALK_LOWER(store)(e, old.register_number, &u, us);
+	WALK_LOWER(tfree)(e, old.register_number);
 }
 
 /* r stored to l as type t (a bit-field or not); r stays */
@@ -713,12 +713,12 @@ VPRIV void walk_lvalue_store_register(codegen_context *e, const codegen_lvalue *
 {
 	int vol = (AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_VOLATILE) != 0;
 
-	e->novtag += vol;
-	if (l->bf)
+	e->volatile_untag_depth += vol;
+	if (l->is_bitfield)
 		walk_bitfield_store(e, l, t, r);
 	else
-		WALK_LOWER(store)(e, r, l, walk_type_size(e->c, t));
-	e->novtag -= vol;
+		WALK_LOWER(store)(e, r, l, walk_type_size(e->compile_context, t));
+	e->volatile_untag_depth -= vol;
 }
 
 VPRIV void walk_bitfield_initialize(codegen_context *e, const codegen_lvalue *l, ast_qualified_type t, uint32_t init)
@@ -733,17 +733,17 @@ VPRIV void walk_bitfield_initialize(codegen_context *e, const codegen_lvalue *l,
 /* Atomic records travel as immutable snapshots, never as their shared address. */
 static int walk_atomic_record_size(codegen_context *e, ast_qualified_type t)
 {
-	uint64_t size = codegen_type_size(e->c, t);
+	uint64_t size = codegen_type_size(e->compile_context, t);
 
 	if (size != 1 && size != 2 && size != 4 && size != 8)
-		codegen_fatal_report(e, e->curloc, "x86-64: atomic aggregate size %llu is not supported yet", (unsigned long long)size);
+		codegen_fatal_report(e, e->current_location, "x86-64: atomic aggregate size %llu is not supported yet", (unsigned long long)size);
 	return (int)size;
 }
 
 /* (a volatile access: e->novtag, so the lowering keeps it as it is) */
 static codegen_value walk_lvalue_load(codegen_context *e, codegen_lvalue l, ast_qualified_type t)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	int r, vol = (AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_VOLATILE) != 0;
 
 	/* GNU void lvalues evaluate their address, but have no value to load,
@@ -754,7 +754,7 @@ static codegen_value walk_lvalue_load(codegen_context *e, codegen_lvalue l, ast_
 	}
 	if (codegen_type_is_record(c, t) && (T(c, t)->flags & AST_TYPE_FLAG_ATOMIC)) {
 		int size = walk_atomic_record_size(e, t);
-		codegen_lvalue tmp = { .k = CODEGEN_LVALUE_FRAME, .off = walk_slot_temporary(e, size, size), .align = (uint32_t)size };
+		codegen_lvalue tmp = { .kind = CODEGEN_LVALUE_FRAME, .offset = walk_slot_temporary(e, size, size), .align = (uint32_t)size };
 		int rp = WALK_LOWER(laddr)(e, &l);
 		int value = WALK_LOWER(atomic)(e, WALK_ATOMIC_LOAD, size, rp, -1, -1);
 
@@ -763,32 +763,32 @@ static codegen_value walk_lvalue_load(codegen_context *e, codegen_lvalue l, ast_
 		WALK_LOWER(tfree)(e, value);
 		return walk_value_from_register(WALK_LOWER(laddr)(e, &tmp));
 	}
-	if (l.bf) {
-		e->novtag += vol;
+	if (l.is_bitfield) {
+		e->volatile_untag_depth += vol;
 		codegen_value v = walk_bitfield_load(e, &l, t);
 
-		e->novtag -= vol;
+		e->volatile_untag_depth -= vol;
 		walk_lvalue_free(e, &l);
 		return v;
 	}
 	if (codegen_type_is_function(c, t) || walk_type_is_in_memory(e, t)) {
 		/* the object itself: its address (arrays and functions decay; records, x87 long double) */
-		if (l.k == CODEGEN_LVALUE_SYMBOL)
-			return (codegen_value){ .k = CODEGEN_VALUE_ADDRESS, .ref = l.ref, .i = l.off };
+		if (l.kind == CODEGEN_LVALUE_SYMBOL)
+			return (codegen_value){ .kind = CODEGEN_VALUE_ADDRESS, .reference = l.reference, .integer = l.offset };
 		return walk_value_from_register(WALK_LOWER(laddr)(e, &l));
 	}
 	if (walk_type_is_in_float_register(e, t)) {
 		r = WALK_LOWER(ftreg)(e);
-		e->novtag += vol;
+		e->volatile_untag_depth += vol;
 		WALK_LOWER(load)(e, r, &l, walk_type_size(c, t), false);
-		e->novtag -= vol;
+		e->volatile_untag_depth -= vol;
 		walk_lvalue_free(e, &l);
 		return walk_value_from_register(r);
 	}
-	r = l.k == CODEGEN_LVALUE_REGISTER ? l.r : WALK_LOWER(treg)(e);
-	e->novtag += vol;
+	r = l.kind == CODEGEN_LVALUE_REGISTER ? l.register_number : WALK_LOWER(treg)(e);
+	e->volatile_untag_depth += vol;
 	WALK_LOWER(load)(e, r, &l, walk_type_size(c, t), walk_type_is_signed(c, t) || KIND(c, t) == AST_TYPE_BOOL ? walk_type_is_signed(c, t) : false);
-	e->novtag -= vol;
+	e->volatile_untag_depth -= vol;
 	return walk_value_from_register(r);
 }
 
@@ -797,9 +797,9 @@ VPRIV void walk_lvalue_store(codegen_context *e, const codegen_lvalue *l, ast_qu
 {
 	int r = walk_value_to_register(e, v, t), vol = (AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_VOLATILE) != 0;
 
-	e->novtag += vol;
-	WALK_LOWER(store)(e, r, l, walk_type_size(e->c, t));
-	e->novtag -= vol;
+	e->volatile_untag_depth += vol;
+	WALK_LOWER(store)(e, r, l, walk_type_size(e->compile_context, t));
+	e->volatile_untag_depth -= vol;
 	WALK_LOWER(tfree)(e, r);
 }
 
@@ -808,7 +808,7 @@ VPRIV void walk_lvalue_store(codegen_context *e, const codegen_lvalue *l, ast_qu
 /* v (of type from) as type to */
 VPRIV codegen_value walk_value_convert(codegen_context *e, codegen_value v, ast_qualified_type from, ast_qualified_type to)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	int fs = walk_type_size(c, from), ts = walk_type_size(c, to);
 
 	if (codegen_type_is_bitint_big(c, from) || codegen_type_is_bitint_big(c, to))
@@ -829,26 +829,26 @@ VPRIV codegen_value walk_value_convert(codegen_context *e, codegen_value v, ast_
 		return WALK_LOWER(cvt)(e, v, from, to);
 	}
 	if (KIND(c, to) == AST_TYPE_BOOL) {
-		if (v.k == CODEGEN_VALUE_CONSTANT)
-			return codegen_value_constant(v.i != 0);
-		if (v.k == CODEGEN_VALUE_ADDRESS && !walk_symbol_address_may_be_zero(c, v))
+		if (v.kind == CODEGEN_VALUE_CONSTANT)
+			return codegen_value_constant(v.integer != 0);
+		if (v.kind == CODEGEN_VALUE_ADDRESS && !walk_symbol_address_may_be_zero(c, v))
 			return codegen_value_constant(1);
 		return WALK_LOWER(cmp)(e, LEX_TOKEN_EXCLAMATION_EQUAL, fs > 4 ? 8 : 4, false, v, codegen_value_constant(0));
 	}
-	if (v.k == CODEGEN_VALUE_CONSTANT)
-		return walk_value_constant(c, v.i, to);
-	if (v.k == CODEGEN_VALUE_ADDRESS)
+	if (v.kind == CODEGEN_VALUE_CONSTANT)
+		return walk_value_constant(c, v.integer, to);
+	if (v.kind == CODEGEN_VALUE_ADDRESS)
 		return v;
 	if (ts > fs && fs < 8)
-		WALK_LOWER(ext)(e, v.r, fs, walk_type_is_signed(c, from));
+		WALK_LOWER(ext)(e, v.register_number, fs, walk_type_is_signed(c, from));
 	else if (ts < fs && ts < 4)
-		WALK_LOWER(ext)(e, v.r, ts, walk_type_is_signed(c, to));	/* narrowed: keep the register extended as its type */
+		WALK_LOWER(ext)(e, v.register_number, ts, walk_type_is_signed(c, to));	/* narrowed: keep the register extended as its type */
 	return v;
 }
 
 static codegen_value walk_cast_emit(codegen_context *e, uint32_t n)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n);
 	ast_qualified_type from = N(x->a)->ty;
 
@@ -856,8 +856,8 @@ static codegen_value walk_cast_emit(codegen_context *e, uint32_t n)
 	case AST_CAST_ARRAY_DECAY: {
 		codegen_lvalue l = walk_lvalue_emit(e, x->a);
 
-		if (l.k == CODEGEN_LVALUE_SYMBOL)
-			return (codegen_value){ .k = CODEGEN_VALUE_ADDRESS, .ref = l.ref, .i = l.off };
+		if (l.kind == CODEGEN_LVALUE_SYMBOL)
+			return (codegen_value){ .kind = CODEGEN_VALUE_ADDRESS, .reference = l.reference, .integer = l.offset };
 		return walk_value_from_register(WALK_LOWER(laddr)(e, &l));
 	}
 	case AST_CAST_FUNCTION_DECAY:
@@ -865,7 +865,7 @@ static codegen_value walk_cast_emit(codegen_context *e, uint32_t n)
 			uint32_t s = codegen_symbol_canonical(c, N(x->a)->a);
 
 			codegen_reference_note(e, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, s));
-			return (codegen_value){ .k = CODEGEN_VALUE_ADDRESS, .ref = CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, s) };
+			return (codegen_value){ .kind = CODEGEN_VALUE_ADDRESS, .reference = CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, s) };
 		}
 		return walk_value_emit(e, x->a);
 	case AST_CAST_VOID: {
@@ -879,32 +879,32 @@ static codegen_value walk_cast_emit(codegen_context *e, uint32_t n)
 	case AST_CAST_VECTOR_ADDRESS:
 		return walk_value_emit(e, x->a);	/* a vector value is its address */
 	case AST_CAST_BIT_CAST: {
-		codegen_lvalue d = { .k = CODEGEN_LVALUE_FRAME, .off = walk_slot_temporary(e, codegen_type_size(c, x->ty), codegen_type_alignment(c, x->ty)), .align = codegen_type_alignment(c, x->ty) };
+		codegen_lvalue d = { .kind = CODEGEN_LVALUE_FRAME, .offset = walk_slot_temporary(e, codegen_type_size(c, x->ty), codegen_type_alignment(c, x->ty)), .align = codegen_type_alignment(c, x->ty) };
 		if (N(x->a)->flags & AST_NODE_FLAG_LVALUE) {
 			codegen_lvalue src = walk_lvalue_emit(e, x->a);
-			if (src.dynbit_slot) {
+			if (src.dynamic_bit_slot) {
 				codegen_value v = walk_lvalue_reload(e, &src, from);
 				int r = walk_value_to_register(e, &v, from);
 				WALK_LOWER(store)(e, r, &d, walk_type_size(c, from)); WALK_LOWER(tfree)(e, r);
 				walk_lvalue_free(e, &src);
-			} else if (src.bf) {
+			} else if (src.is_bitfield) {
 				/* Extract only field bytes, including packed and wide fields.
 				 * An ordinary aligned container load may exceed the object. */
 				for (unsigned i = 0; i < codegen_type_size(c, from); i++) {
 					unsigned bit = i * 8;
 					codegen_value v = codegen_value_constant(0);
 					codegen_lvalue byte = d;
-					byte.off += i;
-					if (bit < src.width || src.sgn) {
+					byte.offset += i;
+					if (bit < src.width || src.is_signed) {
 						codegen_lvalue part = src;
 						unsigned start = bit < src.width ? bit : src.width - 1;
-						part.off += (src.bitoff + start) / 8;
-						part.bitoff = (src.bitoff + start) % 8;
+						part.offset += (src.bit_offset + start) / 8;
+						part.bit_offset = (src.bit_offset + start) % 8;
 						part.width = bit >= src.width ? 1 : src.width - bit < 8 ? src.width - bit : 8;
-						part.sgn = src.sgn && bit + 8 >= src.width;
-						part.bf = 0;
-						v = walk_bitfield_split_load(e, part, part.bitoff, part.width);
-						if (part.sgn) {
+						part.is_signed = src.is_signed && bit + 8 >= src.width;
+						part.is_bitfield = 0;
+						v = walk_bitfield_split_load(e, part, part.bit_offset, part.width);
+						if (part.is_signed) {
 							v = WALK_LOWER(bin)(e, LEX_TOKEN_LESS_LESS, 8, false, v, codegen_value_constant(64 - part.width));
 							v = WALK_LOWER(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, true, v, codegen_value_constant(64 - part.width));
 						}
@@ -937,14 +937,14 @@ static codegen_value walk_cast_emit(codegen_context *e, uint32_t n)
 		/* the scalar into every lane of a new vector */
 		ast_qualified_type et = T(c, x->ty)->base;
 		uint64_t es = codegen_type_size(c, et), nl = T(c, x->ty)->n;
-		codegen_lvalue d = { .k = CODEGEN_LVALUE_FRAME, .off = walk_slot_temporary(e, codegen_type_size(c, x->ty), 16), .align = codegen_type_alignment(c, et) };
+		codegen_lvalue d = { .kind = CODEGEN_LVALUE_FRAME, .offset = walk_slot_temporary(e, codegen_type_size(c, x->ty), 16), .align = codegen_type_alignment(c, et) };
 		codegen_value v = walk_value_emit(e, x->a);
 		int r = walk_value_to_register(e, &v, et);
 
 		for (uint64_t i = 0; i < nl; i++) {
 			codegen_lvalue dl = d;
-			if (codegen_type_is_bool_vector(c, x->ty)) dl.off += i / 8, dl.bf = 1, dl.width = 1, dl.bitoff = i % 8;
-			else dl.off += (int64_t)(i * es);
+			if (codegen_type_is_bool_vector(c, x->ty)) dl.offset += i / 8, dl.is_bitfield = 1, dl.width = 1, dl.bit_offset = i % 8;
+			else dl.offset += (int64_t)(i * es);
 			walk_lvalue_store_register(e, &dl, et, r);
 		}
 		WALK_LOWER(tfree)(e, r);
@@ -952,7 +952,7 @@ static codegen_value walk_cast_emit(codegen_context *e, uint32_t n)
 	}
 	case AST_CAST_UNION: {
 		/* the operand's bytes at the start of a new object (zeroed when larger) */
-		codegen_lvalue d = { .k = CODEGEN_LVALUE_FRAME, .off = walk_slot_temporary(e, codegen_type_size(c, x->ty), codegen_type_alignment(c, x->ty) > 16 ? 16 : codegen_type_alignment(c, x->ty)), .align = 8 };
+		codegen_lvalue d = { .kind = CODEGEN_LVALUE_FRAME, .offset = walk_slot_temporary(e, codegen_type_size(c, x->ty), codegen_type_alignment(c, x->ty) > 16 ? 16 : codegen_type_alignment(c, x->ty)), .align = 8 };
 		codegen_value v;
 
 		if (codegen_type_size(c, x->ty) > codegen_type_size(c, from)) {
@@ -989,7 +989,7 @@ static codegen_value walk_cast_emit(codegen_context *e, uint32_t n)
 /* a op b for integers of type t (the usual conversions are already in the tree) */
 static codegen_value walk_arithmetic_emit(codegen_context *e, int op, ast_qualified_type t, codegen_value a, codegen_value b)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	i128 r;
 
 	if (codegen_type_is_bitint_big(c, t))
@@ -998,45 +998,45 @@ static codegen_value walk_arithmetic_emit(codegen_context *e, int op, ast_qualif
 			return WALK_LOWER(fbin)(e, op, t, a, b);
 	if (walk_type_is_wide(c, t))
 		return WALK_LOWER(wbin)(e, op, walk_type_is_signed(c, t), a, b);
-	if (a.k == CODEGEN_VALUE_CONSTANT && b.k == CODEGEN_VALUE_CONSTANT && walk_integer_fold(c, op, t, a.i, b.i, &r))
+	if (a.kind == CODEGEN_VALUE_CONSTANT && b.kind == CODEGEN_VALUE_CONSTANT && walk_integer_fold(c, op, t, a.integer, b.integer, &r))
 		return codegen_value_constant(r);
-	if (e->E->o->opt && !e->E->noopt && (op == LEX_TOKEN_STAR || op == LEX_TOKEN_CARET)) {
+	if (e->unit->options->opt && !e->unit->cleanups_disabled && (op == LEX_TOKEN_STAR || op == LEX_TOKEN_CARET)) {
 		/* Constants commute here; both operands have already been evaluated. */
-		if (a.k == CODEGEN_VALUE_CONSTANT && b.k != CODEGEN_VALUE_CONSTANT) {
+		if (a.kind == CODEGEN_VALUE_CONSTANT && b.kind != CODEGEN_VALUE_CONSTANT) {
 			codegen_value tmp = a;
 			a = b, b = tmp;
 		}
-		if (b.k == CODEGEN_VALUE_CONSTANT) {
-			if (em_xor_not(c, t, op, b.i))
+		if (b.kind == CODEGEN_VALUE_CONSTANT) {
+			if (em_xor_not(c, t, op, b.integer))
 				return WALK_LOWER(un)(e, LEX_TOKEN_TILDE, walk_operation_width(c, t), a);
 			/* VIR retains signed multiplication's no-overflow fact when it
 			 * selects the shift. The direct targets select it here. */
-			if(!(e->vtry && walk_type_is_signed(c,t) && !e->E->o->wrapv))em_mulshift(c, t, &op, &b.i);
+			if(!(e->vir_try && walk_type_is_signed(c,t) && !e->unit->options->wrapv))em_mulshift(c, t, &op, &b.integer);
 		}
 	}
 
 	/* x & 0, x * 0, 0 & x, 0 * x: 0 (x evaluated already, its effects done: IS_DAX(i) = i->i_flags & 0) */
-	if ((op == LEX_TOKEN_AMPERSAND || op == LEX_TOKEN_STAR) && ((b.k == CODEGEN_VALUE_CONSTANT && b.i == 0) || (a.k == CODEGEN_VALUE_CONSTANT && a.i == 0))) {
-		e->discarded_scalar |= a.k == CODEGEN_VALUE_REGISTER || b.k == CODEGEN_VALUE_REGISTER;
+	if ((op == LEX_TOKEN_AMPERSAND || op == LEX_TOKEN_STAR) && ((b.kind == CODEGEN_VALUE_CONSTANT && b.integer == 0) || (a.kind == CODEGEN_VALUE_CONSTANT && a.integer == 0))) {
+		e->discarded_scalar |= a.kind == CODEGEN_VALUE_REGISTER || b.kind == CODEGEN_VALUE_REGISTER;
 		walk_value_free(e, &a);
 		walk_value_free(e, &b);
 		return codegen_value_constant(0);
 	}
 	/* 0 << x, 0 >> x, -1 >> x (signed): the constant, whatever x is (as arm64) */
-	if ((op == LEX_TOKEN_LESS_LESS || op == LEX_TOKEN_GREATER_GREATER) && a.k == CODEGEN_VALUE_CONSTANT && b.k != CODEGEN_VALUE_CONSTANT &&
-	    (codegen_integer_truncate(c, a.i, t) == 0 || (op == LEX_TOKEN_GREATER_GREATER && walk_type_is_signed(c, t) && codegen_integer_truncate(c, a.i, t) == -1))) {
-		e->discarded_scalar |= b.k == CODEGEN_VALUE_REGISTER;
+	if ((op == LEX_TOKEN_LESS_LESS || op == LEX_TOKEN_GREATER_GREATER) && a.kind == CODEGEN_VALUE_CONSTANT && b.kind != CODEGEN_VALUE_CONSTANT &&
+	    (codegen_integer_truncate(c, a.integer, t) == 0 || (op == LEX_TOKEN_GREATER_GREATER && walk_type_is_signed(c, t) && codegen_integer_truncate(c, a.integer, t) == -1))) {
+		e->discarded_scalar |= b.kind == CODEGEN_VALUE_REGISTER;
 		walk_value_free(e, &b);
-		return codegen_value_constant(codegen_integer_truncate(c, a.i, t));
+		return codegen_value_constant(codegen_integer_truncate(c, a.integer, t));
 	}
-	if (b.k == CODEGEN_VALUE_CONSTANT) {
-		int id = em_bin_identity(c, t, op, b.i);
+	if (b.kind == CODEGEN_VALUE_CONSTANT) {
+		int id = em_bin_identity(c, t, op, b.integer);
 
 		if (id == EM_ID_LEFT) {
 			int size = walk_type_size(c, t);
 
-			if (a.k == CODEGEN_VALUE_CONSTANT)
-				return walk_value_constant(c, a.i, t);
+			if (a.kind == CODEGEN_VALUE_CONSTANT)
+				return walk_value_constant(c, a.integer, t);
 			if (size <= 4) {
 				int ra = walk_value_to_register(e, &a, t);
 
@@ -1046,34 +1046,34 @@ static codegen_value walk_arithmetic_emit(codegen_context *e, int op, ast_qualif
 			return a;
 		}
 		if (id == EM_ID_ZERO || id == EM_ID_ONES) {
-			e->discarded_scalar |= a.k == CODEGEN_VALUE_REGISTER;
+			e->discarded_scalar |= a.kind == CODEGEN_VALUE_REGISTER;
 			walk_value_free(e, &a);
 			return walk_value_constant(c, id == EM_ID_ZERO ? 0 : -1, t);
 		}
 		{
 			em_sdivpow2_recipe recipe;
 
-			if (em_sdivpow2(c, t, op, b.i, &recipe))
+			if (em_sdivpow2(c, t, op, b.integer, &recipe))
 				return walk_division_signed_power_of_two_emit(e, t, a, &recipe);
 		}
-		if ((op == LEX_TOKEN_SLASH || op == LEX_TOKEN_PERCENT) && e->E->o->opt && !e->E->noopt) {
+		if ((op == LEX_TOKEN_SLASH || op == LEX_TOKEN_PERCENT) && e->unit->options->opt && !e->unit->cleanups_disabled) {
 			em_udivconst_recipe recipe;
 			em_sdivconst_recipe signed_recipe;
 			/* Bound the extra live temporaries; pressure retains native divide. */
-			if (em_udivconst(c, t, op, b.i, &recipe) && walk_division_unsigned_constant_check(e, a, &recipe))
+			if (em_udivconst(c, t, op, b.integer, &recipe) && walk_division_unsigned_constant_check(e, a, &recipe))
 				return walk_division_unsigned_constant_emit(e, t, a, &recipe);
-			if (em_sdivconst(c, t, op, b.i, &signed_recipe) && walk_division_signed_constant_check(e, a, &signed_recipe))
+			if (em_sdivconst(c, t, op, b.integer, &signed_recipe) && walk_division_signed_constant_check(e, a, &signed_recipe))
 				return walk_division_signed_constant_emit(e, t, a, &signed_recipe);
 		}
-		em_divpow2(c, t, &op, &b.i);
+		em_divpow2(c, t, &op, &b.integer);
 	}
-	if (a.k == CODEGEN_VALUE_ADDRESS && b.k == CODEGEN_VALUE_CONSTANT && (op == LEX_TOKEN_PLUS || op == LEX_TOKEN_MINUS))
-		return (codegen_value){ .k = CODEGEN_VALUE_ADDRESS, .ref = a.ref, .i = op == LEX_TOKEN_PLUS ? a.i + b.i : a.i - b.i };
+	if (a.kind == CODEGEN_VALUE_ADDRESS && b.kind == CODEGEN_VALUE_CONSTANT && (op == LEX_TOKEN_PLUS || op == LEX_TOKEN_MINUS))
+		return (codegen_value){ .kind = CODEGEN_VALUE_ADDRESS, .reference = a.reference, .integer = op == LEX_TOKEN_PLUS ? a.integer + b.integer : a.integer - b.integer };
 	{
 		codegen_value v = WALK_LOWER(bin)(e, op, walk_operation_width(c, t), walk_type_is_signed(c, t), a, b);
 
 		if (walk_type_size(c, t) < 4)
-			WALK_LOWER(ext)(e, v.r, walk_type_size(c, t), walk_type_is_signed(c, t));
+			WALK_LOWER(ext)(e, v.register_number, walk_type_size(c, t), walk_type_is_signed(c, t));
 		return v;
 	}
 }
@@ -1081,15 +1081,15 @@ static codegen_value walk_arithmetic_emit(codegen_context *e, int op, ast_qualif
 /* p +- i for p a pointer to elements of es bytes, i of type it */
 static codegen_value walk_pointer_add(codegen_context *e, codegen_value p, codegen_value i, ast_qualified_type it, int64_t es, bool sub)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 
 	if (codegen_type_is_bitint_big(c, it) || walk_type_is_wide(c, it)) {
 		i = walk_value_convert(e, i, it, codegen_type_primitive(AST_TYPE_LONG));
 		it = codegen_type_primitive(AST_TYPE_LONG);
 	}
 
-	if (i.k == CODEGEN_VALUE_CONSTANT)
-		return walk_arithmetic_emit(e, sub ? LEX_TOKEN_MINUS : LEX_TOKEN_PLUS, codegen_type_primitive(AST_TYPE_UNSIGNED_LONG), p, codegen_value_constant(i.i * es));
+	if (i.kind == CODEGEN_VALUE_CONSTANT)
+		return walk_arithmetic_emit(e, sub ? LEX_TOKEN_MINUS : LEX_TOKEN_PLUS, codegen_type_primitive(AST_TYPE_UNSIGNED_LONG), p, codegen_value_constant(i.integer * es));
 	{
 		int ri = walk_value_to_register(e, &i, it);
 
@@ -1110,11 +1110,11 @@ static codegen_value walk_pointer_add(codegen_context *e, codegen_value p, codeg
  */
 static codegen_value walk_vla_length(codegen_context *e, uint32_t sn)
 {
-	walk_state *W = e->wk;
-	cc *c = e->c;
+	walk_state *W = e->walk_state;
+	cc *c = e->compile_context;
 
-	if (W->vgen[sn] == W->gen && W->vinst[sn] == W->inst) {
-		codegen_lvalue l = { .k = CODEGEN_LVALUE_FRAME, .off = W->voff[sn], .align = 8 };
+	if (W->vla_generations[sn] == W->generation && W->vla_instances[sn] == W->instance) {
+		codegen_lvalue l = { .kind = CODEGEN_LVALUE_FRAME, .offset = W->vla_offsets[sn], .align = 8 };
 		int r = WALK_LOWER(treg)(e);
 
 		WALK_LOWER(load)(e, r, &l, 8, false);
@@ -1125,8 +1125,8 @@ static codegen_value walk_vla_length(codegen_context *e, uint32_t sn)
 
 VPRIV void walk_vla_sizes_evaluate(codegen_context *e, ast_qualified_type t, bool pure)
 {
-	walk_state *W = e->wk;
-	cc *c = e->c;
+	walk_state *W = e->walk_state;
+	cc *c = e->compile_context;
 
 	for (;;) {
 		const ctype *a = T(c, t);
@@ -1140,19 +1140,19 @@ VPRIV void walk_vla_sizes_evaluate(codegen_context *e, ast_qualified_type t, boo
 		if ((a->flags & AST_TYPE_FLAG_VLA) && a->n && N(a->n)->op != AST_NODE_NUMBER && !(pure && codegen_expression_has_side_effects(c, a->n))) {
 			/* Already captured by this declaration/typedef in this instance.
 			   The original store still executes on every loop iteration. */
-			if (W->vgen[a->n] == W->gen && W->vinst[a->n] == W->inst) {
+			if (W->vla_generations[a->n] == W->generation && W->vla_instances[a->n] == W->instance) {
 				t = a->base;
 				continue;
 			}
 			codegen_value v = walk_value_convert(e, walk_value_emit(e, a->n), N(a->n)->ty, c->t_size);
 			int r = walk_value_to_register(e, &v, c->t_size);
-			codegen_lvalue l = { .k = CODEGEN_LVALUE_FRAME, .off = walk_slot_permanent(e, 8, 8), .align = 8 };	/* (sizeof reads it later) */
+			codegen_lvalue l = { .kind = CODEGEN_LVALUE_FRAME, .offset = walk_slot_permanent(e, 8, 8), .align = 8 };	/* (sizeof reads it later) */
 
 			WALK_LOWER(store)(e, r, &l, 8);
 			WALK_LOWER(tfree)(e, r);
-			W->vgen[a->n] = W->gen;
-			W->vinst[a->n] = W->inst;
-			W->voff[a->n] = (int64_t)l.off;
+			W->vla_generations[a->n] = W->generation;
+			W->vla_instances[a->n] = W->instance;
+			W->vla_offsets[a->n] = (int64_t)l.offset;
 		}
 		t = a->base;
 	}
@@ -1160,7 +1160,7 @@ VPRIV void walk_vla_sizes_evaluate(codegen_context *e, ast_qualified_type t, boo
 
 VPRIV codegen_value walk_vla_bytes(codegen_context *e, ast_qualified_type t)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const ctype *a = T(c, t);
 	codegen_value n, b;
 
@@ -1174,7 +1174,7 @@ VPRIV codegen_value walk_vla_bytes(codegen_context *e, ast_qualified_type t)
 /* p +- i elements of a pointer to a VLA */
 static codegen_value walk_pointer_add_vla(codegen_context *e, codegen_value p, codegen_value i, ast_qualified_type it, ast_qualified_type pt, bool sub)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	if (codegen_type_is_bitint_big(c, it) || walk_type_is_wide(c, it)) {
 		i = walk_value_convert(e, i, it, codegen_type_primitive(AST_TYPE_LONG));
 		it = codegen_type_primitive(AST_TYPE_LONG);
@@ -1189,17 +1189,17 @@ static codegen_value walk_pointer_add_vla(codegen_context *e, codegen_value p, c
 
 VPRIV void walk_vla_declare(codegen_context *e, uint32_t s, bool zero)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	int64_t off = walk_local_slot(e, s);
-	codegen_lvalue la = { .k = CODEGEN_LVALUE_FRAME, .off = off, .align = 8 }, lsp = la, ln = la;
+	codegen_lvalue la = { .kind = CODEGEN_LVALUE_FRAME, .offset = off, .align = 8 }, lsp = la, ln = la;
 	codegen_value n = walk_vla_bytes(e, c->syms[s].ty), p;
 	int r;
 
 	uint32_t align = codegen_symbol_alignment(c, s);
-	lsp.off += 8, ln.off += 16;
+	lsp.offset += 8, ln.offset += 16;
 	r = walk_value_to_register(e, &n, codegen_type_primitive(AST_TYPE_UNSIGNED_LONG));
 	WALK_LOWER(store)(e, r, &ln, 8);
-	if (e->wk->zgen[s] == e->wk->gen) {
+	if (e->walk_state->vla_zero_generations[s] == e->walk_state->generation) {
 		/* reached again (a goto back): the previous instance freed first */
 		uint32_t fresh = walk_label_new(e);
 		int t = WALK_LOWER(treg)(e);
@@ -1223,14 +1223,14 @@ VPRIV void walk_vla_declare(codegen_context *e, uint32_t s, bool zero)
 		n = walk_arithmetic_emit(e, LEX_TOKEN_PLUS, codegen_type_primitive(AST_TYPE_UNSIGNED_LONG), walk_value_from_register(r), codegen_value_constant(align - 16));
 		r = walk_value_to_register(e, &n, codegen_type_primitive(AST_TYPE_UNSIGNED_LONG));
 	}
-	e->wk->spneed |= e->wk->canary != 0;	/* (alloca'd memory below the frame) */
+	e->walk_state->stack_pointer_needed |= e->walk_state->canary != 0;	/* (alloca'd memory below the frame) */
 	p = WALK_LOWER(alloca)(e, walk_value_from_register(r));
 	if (align > 16) {
 		p = walk_arithmetic_emit(e, LEX_TOKEN_PLUS, codegen_type_primitive(AST_TYPE_UNSIGNED_LONG), p, codegen_value_constant(align - 1));
 		p = walk_arithmetic_emit(e, LEX_TOKEN_AMPERSAND, codegen_type_primitive(AST_TYPE_UNSIGNED_LONG), p, codegen_value_constant(-(int64_t)align));
 		walk_value_to_register(e, &p, codegen_type_primitive(AST_TYPE_UNSIGNED_LONG));
 	}
-	WALK_LOWER(store)(e, p.r, &la, 8);
+	WALK_LOWER(store)(e, p.register_number, &la, 8);
 	if (zero) {
 		/* = {}: the bytes rounded up to 8 (still inside the 16-aligned allocation) */
 		uint32_t top = walk_label_new(e), done = walk_label_new(e);
@@ -1238,25 +1238,25 @@ VPRIV void walk_vla_declare(codegen_context *e, uint32_t s, bool zero)
 		codegen_value zv = codegen_value_constant(0);
 
 		WALK_LOWER(load)(e, k, &ln, 8, false);
-		k = WALK_LOWER(bin)(e, LEX_TOKEN_PLUS, 8, false, walk_value_from_register(k), codegen_value_constant(7)).r;
-		k = WALK_LOWER(bin)(e, LEX_TOKEN_AMPERSAND, 8, false, walk_value_from_register(k), codegen_value_constant(-8)).r;
+		k = WALK_LOWER(bin)(e, LEX_TOKEN_PLUS, 8, false, walk_value_from_register(k), codegen_value_constant(7)).register_number;
+		k = WALK_LOWER(bin)(e, LEX_TOKEN_AMPERSAND, 8, false, walk_value_from_register(k), codegen_value_constant(-8)).register_number;
 		walk_label_place(e, top);
 		WALK_LOWER(brz)(e, walk_value_from_register(k), 8, false, done);
 		WALK_LOWER(tkeep)(e, k);
 		z = WALK_LOWER(toreg)(e, &zv, 8);
 		{
-			codegen_lvalue d = { .k = CODEGEN_LVALUE_REGISTER, .r = (uint8_t)p.r, .align = 8 };
+			codegen_lvalue d = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = (uint8_t)p.register_number, .align = 8 };
 
 			WALK_LOWER(store)(e, z, &d, 8);
 		}
 		WALK_LOWER(tfree)(e, z);
 		p = WALK_LOWER(bin)(e, LEX_TOKEN_PLUS, 8, false, p, codegen_value_constant(8));
-		k = WALK_LOWER(bin)(e, LEX_TOKEN_MINUS, 8, false, walk_value_from_register(k), codegen_value_constant(8)).r;
+		k = WALK_LOWER(bin)(e, LEX_TOKEN_MINUS, 8, false, walk_value_from_register(k), codegen_value_constant(8)).register_number;
 		WALK_LOWER(jump)(e, top);
 		walk_label_place(e, done);
 		WALK_LOWER(tfree)(e, k);
 	}
-	WALK_LOWER(tfree)(e, p.r);
+	WALK_LOWER(tfree)(e, p.register_number);
 }
 
 /* few temporaries of the kind a value of type t is held in are left: it waits in a slot */
@@ -1265,16 +1265,16 @@ static bool walk_temporaries_are_short(codegen_context *e, ast_qualified_type t)
 /* the right operand next: if temporaries are short, the left waits in a slot */
 static codegen_value walk_right_operand_emit(codegen_context *e, codegen_value *a, uint32_t rn, ast_qualified_type at)
 {
-	if (a->k == CODEGEN_VALUE_REGISTER && walk_temporaries_are_short(e, at)) {
+	if (a->kind == CODEGEN_VALUE_REGISTER && walk_temporaries_are_short(e, at)) {
 		int64_t sl = walk_slot_temporary(e, 8, 8);
-		codegen_lvalue l = { .k = CODEGEN_LVALUE_FRAME, .off = sl, .align = 8 };
+		codegen_lvalue l = { .kind = CODEGEN_LVALUE_FRAME, .offset = sl, .align = 8 };
 		codegen_value b;
 
-		WALK_LOWER(store)(e, a->r, &l, 8);
-		WALK_LOWER(tfree)(e, a->r);
+		WALK_LOWER(store)(e, a->register_number, &l, 8);
+		WALK_LOWER(tfree)(e, a->register_number);
 		b = walk_value_emit(e, rn);
-		a->r = (uint8_t)walk_register_temporary_new(e, at);
-		WALK_LOWER(load)(e, a->r, &l, 8, false);
+		a->register_number = (uint8_t)walk_register_temporary_new(e, at);
+		WALK_LOWER(load)(e, a->register_number, &l, 8, false);
 		return b;
 	}
 	return walk_value_emit(e, rn);
@@ -1283,27 +1283,27 @@ static codegen_value walk_right_operand_emit(codegen_context *e, codegen_value *
 /* a comparison of scalars of type t: 0 or 1 */
 static codegen_value walk_comparison_value(codegen_context *e, int op, ast_qualified_type t, codegen_value a, codegen_value b)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 
 	if (codegen_type_is_float(c, t))
 		return WALK_LOWER(fcmp)(e, op, t, a, b);
 	if (walk_type_is_wide(c, t))
 		return WALK_LOWER(wcmp)(e, op, walk_type_is_signed(c, t), a, b);
-	if (a.k == CODEGEN_VALUE_CONSTANT && b.k == CODEGEN_VALUE_CONSTANT)
-		return codegen_value_constant(walk_comparison_fold(op, walk_type_is_signed(c, t), codegen_integer_truncate(c, a.i, t), codegen_integer_truncate(c, b.i, t)));
+	if (a.kind == CODEGEN_VALUE_CONSTANT && b.kind == CODEGEN_VALUE_CONSTANT)
+		return codegen_value_constant(walk_comparison_fold(op, walk_type_is_signed(c, t), codegen_integer_truncate(c, a.integer, t), codegen_integer_truncate(c, b.integer, t)));
 	return WALK_LOWER(cmp)(e, op, codegen_type_is_pointer(c, t) ? 8 : walk_operation_width(c, t), walk_type_is_signed(c, t), a, b);
 }
 
 /* lane i of the vector at r (type t), or (t a scalar) a copy of the scalar in r */
 static codegen_value walk_vector_lane(codegen_context *e, ast_qualified_type t, int r, unsigned i)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 
 	if (codegen_type_is_vector(c, t)) {
 		ast_qualified_type et = T(c, t)->base;
-		codegen_lvalue l = { .k = CODEGEN_LVALUE_REGISTER, .r = (uint8_t)r, .off = (int64_t)i * (int64_t)codegen_type_size(c, et), .align = codegen_type_alignment(c, et) };
+		codegen_lvalue l = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = (uint8_t)r, .offset = (int64_t)i * (int64_t)codegen_type_size(c, et), .align = codegen_type_alignment(c, et) };
 
-		if (codegen_type_is_bool_vector(c, t)) l.off = i / 8, l.bf = 1, l.width = 1, l.bitoff = i % 8;
+		if (codegen_type_is_bool_vector(c, t)) l.offset = i / 8, l.is_bitfield = 1, l.width = 1, l.bit_offset = i % 8;
 		return walk_lvalue_reload(e, &l, et);
 	}
 	{
@@ -1322,12 +1322,12 @@ static codegen_value walk_vector_lane(codegen_context *e, ast_qualified_type t, 
  */
 static codegen_value walk_vector_lanes_emit(codegen_context *e, int op, ast_qualified_type at, codegen_value a, ast_qualified_type bt, codegen_value b, ast_qualified_type rt, bool unary)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	ast_qualified_type vt = codegen_type_is_vector(c, at) ? at : bt, et = T(c, vt)->base, re = T(c, rt)->base;
 	uint64_t es = codegen_type_size(c, re);
 	unsigned nl = T(c, vt)->n;
 	int ra, rb = -1;
-	codegen_lvalue d = { .k = CODEGEN_LVALUE_FRAME, .off = walk_slot_temporary(e, codegen_type_size(c, rt), 16), .align = codegen_type_alignment(c, re) };
+	codegen_lvalue d = { .kind = CODEGEN_LVALUE_FRAME, .offset = walk_slot_temporary(e, codegen_type_size(c, rt), 16), .align = codegen_type_alignment(c, re) };
 	/* a constant of a lane type (__int128 and long double lanes are objects, by address) */
 #define WALK_LOWER_KIND(t, k) (walk_type_is_wide(c, t) ? WALK_LOWER(wconst)(e, (k)) : codegen_type_is_float(c, t) ? walk_value_convert(e, codegen_value_constant(k), codegen_type_primitive(AST_TYPE_INT), t) : codegen_value_constant(k))
 
@@ -1358,14 +1358,14 @@ static codegen_value walk_vector_lanes_emit(codegen_context *e, int op, ast_qual
 			codegen_lvalue l = d;
 
 			if (codegen_type_is_bool_vector(c, rt)) {
-				l.off += i / 8;
-				l.bf = 1, l.width = 1, l.bitoff = i % 8;
+				l.offset += i / 8;
+				l.is_bitfield = 1, l.width = 1, l.bit_offset = i % 8;
 				int rr = walk_value_to_register(e, &r, re);
 				walk_lvalue_store_register(e, &l, re, rr);
 				WALK_LOWER(tfree)(e, rr);
 				continue;
 			}
-			l.off += (int64_t)(i * es);
+			l.offset += (int64_t)(i * es);
 			if (walk_type_is_in_memory(e, re)) {
 				r = walk_lvalue_store_memory(e, &l, re, r);
 				walk_value_free(e, &r);
@@ -1386,7 +1386,7 @@ static codegen_value walk_vector_lanes_emit(codegen_context *e, int op, ast_qual
 
 static codegen_value walk_binary_emit(codegen_context *e, uint32_t n)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n);
 	int op = x->aux;
 	ast_qualified_type lt = N(x->a)->ty, rt = N(x->b)->ty;
@@ -1410,7 +1410,7 @@ static codegen_value walk_binary_emit(codegen_context *e, uint32_t n)
 	if (em_sibling_values(e, n)) {
 		int ra, rb;
 		a = walk_value_emit(e, x->a);
-		if (a.k == CODEGEN_VALUE_CONSTANT)
+		if (a.kind == CODEGEN_VALUE_CONSTANT)
 			return walk_arithmetic_emit(e, op, x->ty, a, a);
 		ra = walk_value_to_register(e, &a, lt);
 		rb = WALK_LOWER(treg)(e);
@@ -1433,8 +1433,8 @@ static codegen_value walk_binary_emit(codegen_context *e, uint32_t n)
 			return WALK_LOWER(bigcmp)(e, op, lt, a, b);
 		if (walk_type_is_wide(c, lt))
 			return WALK_LOWER(wcmp)(e, op, walk_type_is_signed(c, lt), a, b);
-		if (a.k == CODEGEN_VALUE_CONSTANT && b.k == CODEGEN_VALUE_CONSTANT)
-			return codegen_value_constant(walk_comparison_fold(op, walk_type_is_signed(c, lt), codegen_integer_truncate(c, a.i, lt), codegen_integer_truncate(c, b.i, lt)));
+		if (a.kind == CODEGEN_VALUE_CONSTANT && b.kind == CODEGEN_VALUE_CONSTANT)
+			return codegen_value_constant(walk_comparison_fold(op, walk_type_is_signed(c, lt), codegen_integer_truncate(c, a.integer, lt), codegen_integer_truncate(c, b.integer, lt)));
 		return WALK_LOWER(cmp)(e, op, codegen_type_is_pointer(c, lt) ? 8 : walk_operation_width(c, lt), walk_type_is_signed(c, lt), a, b);
 	}
 	walk_scalar_check(e, n, x->ty);
@@ -1471,17 +1471,17 @@ static codegen_value walk_binary_emit(codegen_context *e, uint32_t n)
 static codegen_value walk_condition_value(codegen_context *e, uint32_t n)
 {
 	int64_t sl = walk_slot_temporary(e, 4, 4);
-	codegen_lvalue l = { .k = CODEGEN_LVALUE_FRAME, .off = sl, .align = 4 };
+	codegen_lvalue l = { .kind = CODEGEN_LVALUE_FRAME, .offset = sl, .align = 4 };
 	uint32_t lf = walk_label_new(e), lj = walk_label_new(e);
 	codegen_value one = codegen_value_constant(1), zero = codegen_value_constant(0);
 	int r;
 
-	e->wk->cjump = false;
+	e->walk_state->condition_jumped = false;
 	walk_condition_emit(e, n, false, lf);
-	if (e->wk->cjump) {
+	if (e->walk_state->condition_jumped) {
 		/* false whatever it evaluated (x && 0, the operands' effects done): the constant, so an
 		   inlined function returning it (dax_mapping) folds its callers' tests */
-		e->wk->cjump = false;
+		e->walk_state->condition_jumped = false;
 		WALK_LOWER(label)(e, lf);
 		return codegen_value_constant(0);
 	}
@@ -1498,12 +1498,12 @@ static codegen_value walk_condition_value(codegen_context *e, uint32_t n)
 /* a ? b : c (b == 0: a ?: c) */
 static codegen_value walk_ternary_emit(codegen_context *e, uint32_t n)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n);
 	ast_qualified_type t = x->ty;
 	bool vd = KIND(c, t) == AST_TYPE_VOID;
 	int64_t sl = vd ? 0 : walk_slot_temporary(e, 8, 8);
-	codegen_lvalue l = { .k = CODEGEN_LVALUE_FRAME, .off = sl, .align = 8 };
+	codegen_lvalue l = { .kind = CODEGEN_LVALUE_FRAME, .offset = sl, .align = 8 };
 	uint32_t lf = walk_label_new(e), lj = walk_label_new(e);
 	codegen_value v;
 	int r;
@@ -1511,8 +1511,8 @@ static codegen_value walk_ternary_emit(codegen_context *e, uint32_t n)
 	if (x->b && walk_expression_is_constant(e, x->a) &&
 	    !walk_branch_entry_check(c, x->b) && !walk_branch_entry_check(c, x->c)) {
 		codegen_value k = walk_value_emit(e, x->a);
-		if (k.k == CODEGEN_VALUE_CONSTANT)
-			return walk_value_emit(e, k.i ? x->b : x->c);
+		if (k.kind == CODEGEN_VALUE_CONSTANT)
+			return walk_value_emit(e, k.integer ? x->b : x->c);
 		walk_value_free(e, &k);
 	}
 	if (!vd)
@@ -1530,7 +1530,7 @@ static codegen_value walk_ternary_emit(codegen_context *e, uint32_t n)
 
 		/* a condition known here (after inlining, or from its form): one arm only, as
 		   clang -O2 (an error() call or a link_error in the other is gone) */
-		if (!(e->E->nflags[x->b] & CODEGEN_NODE_HAS_LABEL) && !(e->E->nflags[x->c] & CODEGEN_NODE_HAS_LABEL)) {
+		if (!(e->unit->node_flags[x->b] & CODEGEN_NODE_HAS_LABEL) && !(e->unit->node_flags[x->c] & CODEGEN_NODE_HAS_LABEL)) {
 			cc_value kc;
 
 			k = codegen_condition_fold(e, x->a);
@@ -1539,15 +1539,15 @@ static codegen_value walk_ternary_emit(codegen_context *e, uint32_t n)
 			if (k < 0 && !codegen_expression_has_side_effects(c, x->a) && walk_expression_is_constant(e, x->a)) {
 				codegen_value kv = walk_value_convert(e, walk_value_emit(e, x->a), N(x->a)->ty, codegen_type_primitive(AST_TYPE_BOOL));
 
-				k = kv.k == CODEGEN_VALUE_CONSTANT ? kv.i != 0 : (walk_value_free(e, &kv), -1);
+				k = kv.kind == CODEGEN_VALUE_CONSTANT ? kv.integer != 0 : (walk_value_free(e, &kv), -1);
 			}
 		}
 		if (k >= 0) {
 			v = walk_value_emit(e, k ? x->b : x->c);
 			if (vd)
 				return walk_value_free(e, &v), codegen_value_constant(0);
-			if (v.k == CODEGEN_VALUE_CONSTANT && codegen_type_is_integer(c, t))	/* (stays a constant: an asm "i" operand) */
-				return codegen_value_constant(codegen_integer_truncate(c, v.i, t));
+			if (v.kind == CODEGEN_VALUE_CONSTANT && codegen_type_is_integer(c, t))	/* (stays a constant: an asm "i" operand) */
+				return codegen_value_constant(codegen_integer_truncate(c, v.integer, t));
 			r = walk_value_to_register(e, &v, t);
 			WALK_LOWER(store)(e, r, &l, 8);
 			WALK_LOWER(tfree)(e, r);
@@ -1555,10 +1555,10 @@ static codegen_value walk_ternary_emit(codegen_context *e, uint32_t n)
 			WALK_LOWER(load)(e, r, &l, 8, false);
 			return walk_value_from_register(r);
 		}
-		walk_state_get(e)->cjump = false;
+		walk_state_get(e)->condition_jumped = false;
 		walk_condition_emit(e, x->a, false, lf);
-		if (walk_state_get(e)->cjump) {	/* (false whatever its operands: b is dead) */
-			walk_state_get(e)->cjump = false;
+		if (walk_state_get(e)->condition_jumped) {	/* (false whatever its operands: b is dead) */
+			walk_state_get(e)->condition_jumped = false;
 		} else {
 			v = walk_value_emit(e, x->b);
 			if (vd) {
@@ -1593,27 +1593,27 @@ VPRIV codegen_value walk_lvalue_reload(codegen_context *e, const codegen_lvalue 
 {
 	int r;
 
-	if (l->bf) {
-		e->novtag += (AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_VOLATILE) != 0;
+	if (l->is_bitfield) {
+		e->volatile_untag_depth += (AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_VOLATILE) != 0;
 		codegen_value v = walk_bitfield_load(e, l, t);
 
-		e->novtag -= (AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_VOLATILE) != 0;
+		e->volatile_untag_depth -= (AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_VOLATILE) != 0;
 		return v;
 	}
 	if (walk_type_is_in_memory(e, t)) {
 		/* the object's address in a new register (l keeps its own) */
 		codegen_lvalue t2 = *l;
 
-		if (t2.k == CODEGEN_LVALUE_REGISTER) {
-			t2.r = (uint8_t)WALK_LOWER(treg)(e);
-			WALK_LOWER(mov)(e, t2.r, l->r);
+		if (t2.kind == CODEGEN_LVALUE_REGISTER) {
+			t2.register_number = (uint8_t)WALK_LOWER(treg)(e);
+			WALK_LOWER(mov)(e, t2.register_number, l->register_number);
 		}
 		return walk_value_from_register(WALK_LOWER(laddr)(e, &t2));
 	}
 	r = walk_register_temporary_new(e, t);
-	e->novtag += (AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_VOLATILE) != 0;
-	WALK_LOWER(load)(e, r, l, walk_type_size(e->c, t), walk_type_is_signed(e->c, t));
-	e->novtag -= (AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_VOLATILE) != 0;
+	e->volatile_untag_depth += (AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_VOLATILE) != 0;
+	WALK_LOWER(load)(e, r, l, walk_type_size(e->compile_context, t), walk_type_is_signed(e->compile_context, t));
+	e->volatile_untag_depth -= (AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_VOLATILE) != 0;
 	return walk_value_from_register(r);
 }
 
@@ -1621,7 +1621,7 @@ VPRIV codegen_value walk_lvalue_reload(codegen_context *e, const codegen_lvalue 
 VPRIV codegen_value walk_lvalue_store_memory(codegen_context *e, codegen_lvalue *l, ast_qualified_type t, codegen_value v)
 {
 	int rs = walk_value_to_register(e, &v, codegen_type_primitive(AST_TYPE_UNSIGNED_LONG));
-	if (l->bf) {
+	if (l->is_bitfield) {
 		walk_bitfield_store(e, l, t, rs);
 		WALK_LOWER(tfree)(e, rs);
 		codegen_value result = walk_bitfield_load(e, l, t);
@@ -1630,10 +1630,10 @@ VPRIV codegen_value walk_lvalue_store_memory(codegen_context *e, codegen_lvalue 
 	}
 	int rd = WALK_LOWER(laddr)(e, l);
 
-	if (codegen_type_is_record(e->c, t) && (T(e->c, t)->flags & AST_TYPE_FLAG_ATOMIC)) {
+	if (codegen_type_is_record(e->compile_context, t) && (T(e->compile_context, t)->flags & AST_TYPE_FLAG_ATOMIC)) {
 		int size = walk_atomic_record_size(e, t);
-		uint64_t payload = codegen_type_size(e->c, AST_QUALIFIED_TYPE(T(e->c, t)->n, 0));
-		codegen_lvalue tmp = { .k = CODEGEN_LVALUE_FRAME, .off = walk_slot_temporary(e, size, size), .align = (uint32_t)size };
+		uint64_t payload = codegen_type_size(e->compile_context, AST_QUALIFIED_TYPE(T(e->compile_context, t)->n, 0));
+		codegen_lvalue tmp = { .kind = CODEGEN_LVALUE_FRAME, .offset = walk_slot_temporary(e, size, size), .align = (uint32_t)size };
 		int snapshot = WALK_LOWER(laddr)(e, &tmp);
 		int value;
 
@@ -1649,7 +1649,7 @@ VPRIV codegen_value walk_lvalue_store_memory(codegen_context *e, codegen_lvalue 
 		/* Assignment yields the stored value even if another writer changes l. */
 		return walk_value_from_register(snapshot);
 	}
-	WALK_LOWER(copy)(e, rd, rs, codegen_type_size(e->c, t));
+	WALK_LOWER(copy)(e, rd, rs, codegen_type_size(e->compile_context, t));
 	WALK_LOWER(tfree)(e, rs);
 	return walk_value_from_register(rd);
 }
@@ -1679,14 +1679,14 @@ static ast_qualified_type walk_operation_type(cc *c, int op, ast_qualified_type 
  * walk_value_emit. Normalize that snapshot before arithmetic sees ABI padding. */
 static codegen_value walk_bitint_value_normalize(codegen_context *e, codegen_value v, ast_qualified_type t)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	{
 		unsigned bits = T(c, t)->n;
 
 		if (bits > 64)
 			return WALK_LOWER(wbitint)(e, v, bits, codegen_type_is_signed(c, t));
-		if (v.k == CODEGEN_VALUE_CONSTANT)
-			return walk_value_constant(c, v.i, t);
+		if (v.kind == CODEGEN_VALUE_CONSTANT)
+			return walk_value_constant(c, v.integer, t);
 		if (bits < 64) {
 			v = WALK_LOWER(bin)(e, LEX_TOKEN_LESS_LESS, 8, false, v, codegen_value_constant(64 - bits));
 			v = WALK_LOWER(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, codegen_type_is_signed(c, t), v, codegen_value_constant(64 - bits));
@@ -1700,28 +1700,28 @@ static codegen_value walk_assignment_emit_inner(codegen_context *e, uint32_t n);
 
 static codegen_value walk_assignment_emit(codegen_context *e, uint32_t n)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n);
 	uint32_t as;
 	int64_t ak;
 	bool ael = !x->aux && walk_array_element_of(e, x->a, &as, &ak);
 	codegen_value v = walk_assignment_emit_inner(e, n);
-	walk_state *W = e->wk;
+	walk_state *W = e->walk_state;
 
 	cc_value cv;
 
-	if (ael && W->nael < 16 && (v.k == CODEGEN_VALUE_CONSTANT || (cc_eval(c, x->b, &cv) && cv.kind == CC_VALUE_INTEGER))) {
-		int i = W->nael++;
+	if (ael && W->array_element_count < 16 && (v.kind == CODEGEN_VALUE_CONSTANT || (cc_eval(c, x->b, &cv) && cv.kind == CC_VALUE_INTEGER))) {
+		int i = W->array_element_count++;
 
-		W->ael[i].s = as, W->ael[i].gen = W->gen, W->ael[i].inst = W->inst;
-		W->ael[i].idx = ak, W->ael[i].v = codegen_integer_truncate(c, v.k == CODEGEN_VALUE_CONSTANT ? v.i : cv.i, N(x->a)->ty);
+		W->array_elements[i].symbol = as, W->array_elements[i].generation = W->generation, W->array_elements[i].instance = W->instance;
+		W->array_elements[i].index = ak, W->array_elements[i].value = codegen_integer_truncate(c, v.kind == CODEGEN_VALUE_CONSTANT ? v.integer : cv.i, N(x->a)->ty);
 	}
 	return v;
 }
 
 static codegen_value walk_assignment_emit_inner(codegen_context *e, uint32_t n)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n);
 	ast_qualified_type lt = N(x->a)->ty;
 	codegen_lvalue l;
@@ -1760,16 +1760,16 @@ static codegen_value walk_assignment_emit_inner(codegen_context *e, uint32_t n)
 			b = walk_value_convert(e, b, rt, codegen_type_primitive(AST_TYPE_INT));
 			rt = codegen_type_primitive(AST_TYPE_INT);
 		}
-		if (b.k == CODEGEN_VALUE_REGISTER && walk_temporaries_are_short(e, rt)) {
+		if (b.kind == CODEGEN_VALUE_REGISTER && walk_temporaries_are_short(e, rt)) {
 			int64_t sl = walk_slot_temporary(e, 8, 8);
-			codegen_lvalue t = { .k = CODEGEN_LVALUE_FRAME, .off = sl, .align = 8 };
+			codegen_lvalue t = { .kind = CODEGEN_LVALUE_FRAME, .offset = sl, .align = 8 };
 
-			WALK_LOWER(store)(e, b.r, &t, 8);
-			WALK_LOWER(tfree)(e, b.r);
+			WALK_LOWER(store)(e, b.register_number, &t, 8);
+			WALK_LOWER(tfree)(e, b.register_number);
 			l = walk_lvalue_emit(e, x->a);
 			a = walk_lvalue_reload(e, &l, lt);
-			b.r = (uint8_t)walk_register_temporary_new(e, rt);
-			WALK_LOWER(load)(e, b.r, &t, 8, false);
+			b.register_number = (uint8_t)walk_register_temporary_new(e, rt);
+			WALK_LOWER(load)(e, b.register_number, &t, 8, false);
 		} else {
 			l = walk_lvalue_emit(e, x->a);
 			a = walk_lvalue_reload(e, &l, lt);
@@ -1791,13 +1791,13 @@ static codegen_value walk_assignment_emit_inner(codegen_context *e, uint32_t n)
 	}
 	if (walk_type_is_in_memory(e, lt))
 		return walk_lvalue_store_memory(e, &l, lt, v);
-	if (e->E->o->opt && codegen_type_size(c, lt) <= 8) {
+	if (e->unit->options->opt && codegen_type_size(c, lt) <= 8) {
 		int k = codegen_array_element_slot(e, x->a, true);
 		if (k >= 0) {
-			e->kvalid &= (uint16_t)~(1u << k);
-			if (v.k == CODEGEN_VALUE_CONSTANT) {
-				e->kval[k] = (int64_t)codegen_integer_truncate(c, v.i, lt);
-				e->kvalid |= (uint16_t)(1u << k);
+			e->known_values_valid &= (uint16_t)~(1u << k);
+			if (v.kind == CODEGEN_VALUE_CONSTANT) {
+				e->known_values[k] = (int64_t)codegen_integer_truncate(c, v.integer, lt);
+				e->known_values_valid |= (uint16_t)(1u << k);
 			}
 		}
 	}
@@ -1807,7 +1807,7 @@ static codegen_value walk_assignment_emit_inner(codegen_context *e, uint32_t n)
 		walk_lvalue_store_register(e, &l, lt, r);
 		if (unlikely(T(c, lt)->flags & AST_TYPE_FLAG_ATOMIC))
 			WALK_LOWER(atomic)(e, WALK_ATOMIC_FENCE, 8, -1, -1, -1);	/* a sequentially consistent store */
-		if (l.bf) {
+		if (l.is_bitfield) {
 			/* the value is the field's (truncated to its width) */
 			WALK_LOWER(tfree)(e, r);
 			v = walk_bitfield_load(e, &l, lt);
@@ -1822,7 +1822,7 @@ static codegen_value walk_assignment_emit_inner(codegen_context *e, uint32_t n)
 /* a ++ or -- of the value a of type t: the new value */
 static codegen_value walk_increment_value(codegen_context *e, ast_qualified_type t, bool dec, codegen_value a)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	int64_t d = codegen_type_is_pointer(c, t) ? (int64_t)codegen_type_size(c, T(c, t)->base) : 1;
 
 	if (KIND(c, t) == AST_TYPE_BOOL) {
@@ -1849,13 +1849,13 @@ static codegen_value walk_increment_value(codegen_context *e, ast_qualified_type
  */
 static codegen_value walk_atomic_read_modify_write(codegen_context *e, uint32_t n)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n);
 	bool asg = x->op == AST_NODE_ASSIGN, post = x->op == AST_NODE_POST_INCREMENT || x->op == AST_NODE_POST_DECREMENT;
 	bool dec = x->op == AST_NODE_PRE_DECREMENT || x->op == AST_NODE_POST_DECREMENT;
 	ast_qualified_type lt = N(x->a)->ty, rt = asg ? N(x->b)->ty : lt;
 	int sz = walk_type_size(c, lt), ra, o, res = -1, oldr = -1;
-	codegen_lvalue l, bs = { .k = CODEGEN_LVALUE_FRAME, .align = 8 }, s = { .k = CODEGEN_LVALUE_FRAME, .align = 8 };
+	codegen_lvalue l, bs = { .kind = CODEGEN_LVALUE_FRAME, .align = 8 }, s = { .kind = CODEGEN_LVALUE_FRAME, .align = 8 };
 	uint32_t top = walk_label_new(e), done = walk_label_new(e);
 
 	if (walk_type_is_in_memory(e, lt) || (asg && walk_type_is_in_memory(e, rt)) || (sz != 1 && sz != 2 && sz != 4 && sz != 8))
@@ -1864,15 +1864,15 @@ static codegen_value walk_atomic_read_modify_write(codegen_context *e, uint32_t 
 		codegen_value b = walk_value_emit(e, x->b);
 		int rb = walk_value_to_register(e, &b, rt);
 
-		bs.off = walk_slot_temporary(e, 8, 8);
+		bs.offset = walk_slot_temporary(e, 8, 8);
 		WALK_LOWER(store)(e, rb, &bs, 8);
 		WALK_LOWER(tfree)(e, rb);
 	}
 	l = walk_lvalue_emit(e, x->a);
-	if (l.bf)
+	if (l.is_bitfield)
 		walk_unsupported_fail(e, n, "an _Atomic bit-field");
 	ra = WALK_LOWER(laddr)(e, &l);
-	s.off = walk_slot_temporary(e, 8, 8);
+	s.offset = walk_slot_temporary(e, 8, 8);
 	o = WALK_LOWER(atomic)(e, WALK_ATOMIC_LOAD, sz, ra, -1, -1);
 	walk_label_place(e, top);
 	WALK_LOWER(store)(e, o, &s, sz);
@@ -1888,7 +1888,7 @@ static codegen_value walk_atomic_read_modify_write(codegen_context *e, uint32_t 
 		if (asg) {
 			codegen_value b = walk_value_from_register(walk_register_temporary_new(e, rt));
 
-			WALK_LOWER(load)(e, b.r, &bs, 8, false);
+			WALK_LOWER(load)(e, b.register_number, &bs, 8, false);
 			if (codegen_type_is_pointer(c, lt) && codegen_type_is_pointer_to_vla(c, lt)) {
 				v = walk_pointer_add_vla(e, a, b, rt, lt, x->aux == LEX_TOKEN_MINUS);
 			} else if (codegen_type_is_pointer(c, lt)) {
@@ -1932,7 +1932,7 @@ static codegen_value walk_atomic_read_modify_write(codegen_context *e, uint32_t 
 /* ++x, x++, --x, x-- */
 static codegen_value walk_increment_emit(codegen_context *e, uint32_t n)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n);
 	ast_qualified_type t = N(x->a)->ty;
 	bool post = x->op == AST_NODE_POST_INCREMENT || x->op == AST_NODE_POST_DECREMENT, dec = x->op == AST_NODE_PRE_DECREMENT || x->op == AST_NODE_POST_DECREMENT;
@@ -1949,7 +1949,7 @@ static codegen_value walk_increment_emit(codegen_context *e, uint32_t n)
 	l = walk_lvalue_emit(e, x->a);
 	if (post && walk_type_is_in_memory(e, t)) {
 		/* the old value of an object held by address: a copy */
-		codegen_lvalue cp = { .k = CODEGEN_LVALUE_FRAME, .off = walk_slot_temporary(e, codegen_type_size(c, t), codegen_type_alignment(c, t)), .align = codegen_type_alignment(c, t) };
+		codegen_lvalue cp = { .kind = CODEGEN_LVALUE_FRAME, .offset = walk_slot_temporary(e, codegen_type_size(c, t), codegen_type_alignment(c, t)), .align = codegen_type_alignment(c, t) };
 
 		old = walk_lvalue_store_memory(e, &cp, t, walk_lvalue_reload(e, &l, t));
 		nv = walk_increment_value(e, t, dec, walk_lvalue_reload(e, &l, t));
@@ -1977,7 +1977,7 @@ static codegen_value walk_increment_emit(codegen_context *e, uint32_t n)
 	}
 	r = walk_value_to_register(e, &nv, t);
 	walk_lvalue_store_register(e, &l, t, r);
-	if (l.bf && !post) {
+	if (l.is_bitfield && !post) {
 		WALK_LOWER(tfree)(e, r);
 		nv = walk_bitfield_load(e, &l, t);
 		walk_lvalue_free(e, &l);
@@ -1993,7 +1993,7 @@ static codegen_value walk_increment_emit(codegen_context *e, uint32_t n)
 
 static codegen_value walk_unary_emit(codegen_context *e, uint32_t n)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n);
 	uint32_t operand = em_double_unary(e, n);
 	codegen_value a;
@@ -2017,9 +2017,9 @@ static codegen_value walk_unary_emit(codegen_context *e, uint32_t n)
 		    !codegen_type_is_float(c, N(x->a)->ty) && !walk_type_is_in_memory(e, N(x->a)->ty)) {
 			codegen_value v = walk_value_emit(e, x->a);
 
-			if (v.k == CODEGEN_VALUE_CONSTANT)
-				return codegen_value_constant(v.i == 0);
-			if (v.k == CODEGEN_VALUE_ADDRESS)
+			if (v.kind == CODEGEN_VALUE_CONSTANT)
+				return codegen_value_constant(v.integer == 0);
+			if (v.kind == CODEGEN_VALUE_ADDRESS)
 				return walk_value_free(e, &v), codegen_value_constant(0);
 			v = walk_value_convert(e, v, N(x->a)->ty, codegen_type_primitive(AST_TYPE_BOOL));
 			return walk_arithmetic_emit(e, LEX_TOKEN_CARET, codegen_type_primitive(AST_TYPE_INT), walk_value_convert(e, v, codegen_type_primitive(AST_TYPE_BOOL), codegen_type_primitive(AST_TYPE_INT)), codegen_value_constant(1));
@@ -2037,13 +2037,13 @@ static codegen_value walk_unary_emit(codegen_context *e, uint32_t n)
 			WALK_LOWER(bigconst)(e, x->ty, NULL, x->aux == LEX_TOKEN_MINUS ? 0 : -1), a);
 	if (walk_type_is_wide(c, x->ty))
 		return WALK_LOWER(wun)(e, x->aux, a);
-	if (a.k == CODEGEN_VALUE_CONSTANT)
-		return walk_value_constant(c, x->aux == LEX_TOKEN_MINUS ? -a.i : ~a.i, x->ty);
+	if (a.kind == CODEGEN_VALUE_CONSTANT)
+		return walk_value_constant(c, x->aux == LEX_TOKEN_MINUS ? -a.integer : ~a.integer, x->ty);
 	{
 		codegen_value v = WALK_LOWER(un)(e, x->aux, walk_operation_width(c, x->ty), a);
 
 		if (walk_type_size(c, x->ty) < 4)
-			WALK_LOWER(ext)(e, v.r, walk_type_size(c, x->ty), walk_type_is_signed(c, x->ty));
+			WALK_LOWER(ext)(e, v.register_number, walk_type_size(c, x->ty), walk_type_is_signed(c, x->ty));
 		return v;
 	}
 }
@@ -2053,11 +2053,11 @@ static codegen_value walk_unary_emit(codegen_context *e, uint32_t n)
 /* v (of type t) into the argument a's slot: a scalar extended, a record's bytes */
 static void walk_argument_slot_store(codegen_context *e, walk_argument *a, ast_qualified_type t, codegen_value v)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	codegen_lvalue l;
 
 	a->slot = walk_slot_temporary(e, a->size > 8 ? (a->size + 7) & ~(uint64_t)7 : 8, a->align);
-	l = (codegen_lvalue){ .k = CODEGEN_LVALUE_FRAME, .off = a->slot, .align = 8 };
+	l = (codegen_lvalue){ .kind = CODEGEN_LVALUE_FRAME, .offset = a->slot, .align = 8 };
 	if (walk_type_is_in_memory(e, t)) {
 		int rs = walk_value_to_register(e, &v, codegen_type_primitive(AST_TYPE_UNSIGNED_LONG)), rd = WALK_LOWER(laddr)(e, &l);
 
@@ -2081,12 +2081,12 @@ static void walk_argument_slot_store(codegen_context *e, walk_argument *a, ast_q
    (clang -O2's shrinking of library calls): FN_* + 1, 0 when not */
 static int walk_library_call_shrink(codegen_context *e, uint32_t n, uint32_t s)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n), *a;
 	uint32_t id = c->syms[s].name;
 
-	if (x->c != 1 || c->syms[s].sc == AST_STORAGE_STATIC || KIND(c, N(n)->ty) != AST_TYPE_DOUBLE || !e->E->o->opt ||
-	    codegen_symbol_attributes(c, s)->asmname || e->E->o->no_builtin)
+	if (x->c != 1 || c->syms[s].sc == AST_STORAGE_STATIC || KIND(c, N(n)->ty) != AST_TYPE_DOUBLE || !e->unit->options->opt ||
+	    codegen_symbol_attributes(c, s)->asmname || e->unit->options->no_builtin)
 		return 0;	/* (an asm-renamed floor is not the library's) */
 	a = N(c->lists[x->b]);
 	if (a->op != AST_NODE_CAST || KIND(c, a->ty) != AST_TYPE_DOUBLE || KIND(c, N(a->a)->ty) != AST_TYPE_FLOAT)
@@ -2104,7 +2104,7 @@ static int walk_library_call_shrink(codegen_context *e, uint32_t n, uint32_t s)
    has no memcpy); memset only of zero.  The value is the destination, as the call returns. */
 static bool walk_memory_call_inline(codegen_context *e, uint32_t n, int kind, codegen_value *out)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n);
 	cc_value cv;
 
@@ -2129,7 +2129,7 @@ static bool walk_memory_call_inline(codegen_context *e, uint32_t n, int kind, co
 			int rs = walk_value_to_register(e, &sv, codegen_type_primitive(AST_TYPE_UNSIGNED_LONG));
 
 			if (len && kind == CC_LIBRARY_KIND_MEMMOVE) {	/* memmove: through a slot (the two may overlap) */
-				codegen_lvalue t = { .k = CODEGEN_LVALUE_FRAME, .off = walk_slot_temporary(e, len, 8), .align = 8 };
+				codegen_lvalue t = { .kind = CODEGEN_LVALUE_FRAME, .offset = walk_slot_temporary(e, len, 8), .align = 8 };
 				int rt = WALK_LOWER(laddr)(e, &t);
 
 				WALK_LOWER(copy)(e, rt, rs, len);
@@ -2147,7 +2147,7 @@ static bool walk_memory_call_inline(codegen_context *e, uint32_t n, int kind, co
 
 static codegen_value walk_call_emit(codegen_context *e, uint32_t n)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n);
 	const node *fx = N(x->a);
 	ast_qualified_type pt = fx->ty, ft = codegen_type_is_pointer(c, pt) ? T(c, pt)->base : pt;
@@ -2208,11 +2208,11 @@ static codegen_value walk_call_emit(codegen_context *e, uint32_t n)
 		} else if (walk_call_can_inline(e, s, n)) {
 			if (args != argbuf) free(args);
 			return walk_call_inline(e, n, s);
-		} else if (unlikely(codegen_symbol_attributes(c, s)->error_fn) && e->reach) {
+		} else if (unlikely(codegen_symbol_attributes(c, s)->error_fn) && e->is_reachable) {
 			/* a call to an error() function folding did not remove (__compiletime_assert_N,
 			   __bad_copy_to): clang -O2 removed it with value ranges vcc lacks.  The kernel's
 			   own -O0 fallback drops it (arm64's call.c does the same); elsewhere an error */
-			if (!e->E->o->vcc_kernel) {
+			if (!e->unit->options->vcc_kernel) {
 				const vident *nm = &vintern_ents[c->syms[s].name];
 				const attrs *at = codegen_symbol_attributes(c, s);
 
@@ -2233,7 +2233,7 @@ static codegen_value walk_call_emit(codegen_context *e, uint32_t n)
 
 			WALK_LOWER(classify)(e, N(an)->ty, &fa, false);
 			walk_argument_slot_store(e, &fa, N(an)->ty, walk_value_emit(e, an));
-			e->calls = true;
+			e->has_calls = true;
 			v = WALK_LOWER(call)(e, CODEGEN_FIXED_REFERENCE(k), NULL, &fa, 1, false, NULL, codegen_type_primitive(AST_TYPE_FLOAT));
 			return walk_value_convert(e, v, codegen_type_primitive(AST_TYPE_FLOAT), codegen_type_primitive(AST_TYPE_DOUBLE));
 		} else {
@@ -2257,10 +2257,10 @@ static codegen_value walk_call_emit(codegen_context *e, uint32_t n)
 		fn = walk_value_emit(e, x->a);
 		walk_value_to_register(e, &fn, codegen_type_primitive(AST_TYPE_UNSIGNED_LONG));
 	}
-	e->calls = true;
+	e->has_calls = true;
 	{
 		codegen_value v = WALK_LOWER(call)(e, ref, ref ? NULL : &fn, args, (int)na, var, rec_ ? &r : NULL, f->base);
-		codegen_lvalue l = { .k = CODEGEN_LVALUE_FRAME, .off = r.slot, .align = 8 };
+		codegen_lvalue l = { .kind = CODEGEN_LVALUE_FRAME, .offset = r.slot, .align = 8 };
 
 		if (args != argbuf)
 			free(args);
@@ -2273,10 +2273,10 @@ static codegen_value walk_call_emit(codegen_context *e, uint32_t n)
 /* ({ ...; expr; }): the statements, then the last one's value */
 static codegen_value walk_statement_expression_emit(codegen_context *e, uint32_t n)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *b = N(N(n)->a);
 
-	int cmark = e->wk->nclean;
+	int cmark = e->walk_state->cleanup_count;
 	codegen_value v = codegen_value_constant(0);
 
 	for (uint32_t i = 0; i + 1 < b->c; i++)
@@ -2289,13 +2289,13 @@ static codegen_value walk_statement_expression_emit(codegen_context *e, uint32_t
 		else
 			walk_statement_emit(e, last);
 	}
-	if (e->wk->nclean > cmark) {
+	if (e->walk_state->cleanup_count > cmark) {
 		/* (a register value survives the calls: they save the live temporaries) */
-		if (v.k == CODEGEN_VALUE_REGISTER || v.k == CODEGEN_VALUE_CONSTANT)
+		if (v.kind == CODEGEN_VALUE_REGISTER || v.kind == CODEGEN_VALUE_CONSTANT)
 			walk_cleanups_run(e, cmark);
 		else
 			walk_unsupported_fail(e, n, "a statement expression's value with cleanups");
-		e->wk->nclean = cmark;
+		e->walk_state->cleanup_count = cmark;
 	}
 	return v;
 }
@@ -2305,7 +2305,7 @@ static codegen_value walk_statement_expression_emit(codegen_context *e, uint32_t
 /* n is a constant once the bound constants are known (no loads, calls or side effects) */
 VPRIV bool walk_expression_is_constant(codegen_context *e, uint32_t n)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n);
 	codegen_value k;
 
@@ -2336,7 +2336,7 @@ VPRIV bool walk_expression_is_constant(codegen_context *e, uint32_t n)
  * a char *, an lvalue like AAPCS64's record) */
 static int walk_valist_emit(codegen_context *e, uint32_t n)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 
 	if (CODEGEN_IS_X64(c) && codegen_type_is_pointer(c, N(n)->ty)) {
 		codegen_value v = walk_value_emit(e, n);
@@ -2368,7 +2368,7 @@ static int walk_register_duplicate(codegen_context *e, int r)
  */
 static codegen_value walk_atomic_emit(codegen_context *e, uint32_t n)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n);
 	const uint32_t *arg = &c->lists[x->b];
 	int id = x->aux, nmo = id == CC_BUILTIN_ATOMIC_CMPXCHG_N || id == CC_BUILTIN_ATOMIC_CMPXCHG ? 2 : 1, nargs = (int)x->c;
@@ -2395,18 +2395,18 @@ static codegen_value walk_atomic_emit(codegen_context *e, uint32_t n)
 	}
 	if (byptr) {
 		/* the generic forms: the value operands' bytes */
-		codegen_lvalue l = { .k = CODEGEN_LVALUE_REGISTER, .align = 1 };
+		codegen_lvalue l = { .kind = CODEGEN_LVALUE_REGISTER, .align = 1 };
 		int k;
 
 		if (id == CC_BUILTIN_ATOMIC_STORE || id == CC_BUILTIN_ATOMIC_EXCHANGE) {
-			l.r = (uint8_t)r1;
+			l.register_number = (uint8_t)r1;
 			k = WALK_LOWER(treg)(e);
 			WALK_LOWER(load)(e, k, &l, sz, false);
 			WALK_LOWER(tfree)(e, r1);
 			r1 = k;
 		}
 		if (id == CC_BUILTIN_ATOMIC_CMPXCHG) {
-			l.r = (uint8_t)r2;
+			l.register_number = (uint8_t)r2;
 			k = WALK_LOWER(treg)(e);
 			WALK_LOWER(load)(e, k, &l, sz, false);
 			WALK_LOWER(tfree)(e, r2);
@@ -2417,7 +2417,7 @@ static codegen_value walk_atomic_emit(codegen_context *e, uint32_t n)
 	case CC_BUILTIN_ATOMIC_LOAD_N: case CC_BUILTIN_ATOMIC_LOAD:
 		r = WALK_LOWER(atomic)(e, WALK_ATOMIC_LOAD, sz, rp, -1, -1);
 		if (id == CC_BUILTIN_ATOMIC_LOAD) {
-			codegen_lvalue d = { .k = CODEGEN_LVALUE_REGISTER, .r = (uint8_t)r1, .align = 1 };
+			codegen_lvalue d = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = (uint8_t)r1, .align = 1 };
 
 			WALK_LOWER(store)(e, r, &d, sz);
 			WALK_LOWER(tfree)(e, r);
@@ -2433,7 +2433,7 @@ static codegen_value walk_atomic_emit(codegen_context *e, uint32_t n)
 		r = WALK_LOWER(atomic)(e, WALK_ATOMIC_EXCHANGE, sz, rp, r1, -1);
 		WALK_LOWER(tfree)(e, r1);
 		if (id == CC_BUILTIN_ATOMIC_EXCHANGE) {
-			codegen_lvalue d = { .k = CODEGEN_LVALUE_REGISTER, .r = (uint8_t)r2, .align = 1 };
+			codegen_lvalue d = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = (uint8_t)r2, .align = 1 };
 
 			WALK_LOWER(store)(e, r, &d, sz);
 			WALK_LOWER(tfree)(e, r);
@@ -2443,7 +2443,7 @@ static codegen_value walk_atomic_emit(codegen_context *e, uint32_t n)
 		break;
 	case CC_BUILTIN_ATOMIC_CMPXCHG_N: case CC_BUILTIN_ATOMIC_CMPXCHG: {
 		/* ok = CAS(p, *expected, desired) == *expected; if !ok, *expected = what p held */
-		codegen_lvalue le = { .k = CODEGEN_LVALUE_REGISTER, .r = (uint8_t)r1, .align = 1 };
+		codegen_lvalue le = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = (uint8_t)r1, .align = 1 };
 		int ex = WALK_LOWER(treg)(e), old;
 		uint32_t done = walk_label_new(e);
 		codegen_value ok;
@@ -2452,14 +2452,14 @@ static codegen_value walk_atomic_emit(codegen_context *e, uint32_t n)
 		old = WALK_LOWER(atomic)(e, WALK_ATOMIC_COMPARE_EXCHANGE, sz, rp, r2, ex);
 		ok = WALK_LOWER(cmp)(e, LEX_TOKEN_EQUAL_EQUAL, 8, false, walk_value_from_register(walk_register_duplicate(e, old)), walk_value_from_register(walk_register_duplicate(e, ex)));
 		WALK_LOWER(brz)(e, ok, 4, true, done);
-		WALK_LOWER(tkeep)(e, ok.r);
+		WALK_LOWER(tkeep)(e, ok.register_number);
 		WALK_LOWER(store)(e, old, &le, sz);
 		walk_label_place(e, done);
 		WALK_LOWER(tfree)(e, old);
 		WALK_LOWER(tfree)(e, ex);
 		WALK_LOWER(tfree)(e, r1);
 		WALK_LOWER(tfree)(e, r2);
-		r = ok.r;
+		r = ok.register_number;
 		sg = false;
 		break;
 	}
@@ -2471,7 +2471,7 @@ static codegen_value walk_atomic_emit(codegen_context *e, uint32_t n)
 		WALK_LOWER(tfree)(e, r1);
 		WALK_LOWER(tfree)(e, r2);
 		if (id == CC_BUILTIN_SYNC_BOOL_CAS) {
-			r = WALK_LOWER(cmp)(e, LEX_TOKEN_EQUAL_EQUAL, 8, false, walk_value_from_register(r), walk_value_from_register(ex)).r;
+			r = WALK_LOWER(cmp)(e, LEX_TOKEN_EQUAL_EQUAL, 8, false, walk_value_from_register(r), walk_value_from_register(ex)).register_number;
 			sg = false;
 		} else {
 			WALK_LOWER(tfree)(e, ex);
@@ -2480,13 +2480,13 @@ static codegen_value walk_atomic_emit(codegen_context *e, uint32_t n)
 	}
 	case CC_BUILTIN_ATOMIC_FETCH_ADD: case CC_BUILTIN_ATOMIC_FETCH_SUB: case CC_BUILTIN_ATOMIC_ADD_FETCH: case CC_BUILTIN_ATOMIC_SUB_FETCH: {
 		bool sub = id == CC_BUILTIN_ATOMIC_FETCH_SUB || id == CC_BUILTIN_ATOMIC_SUB_FETCH;
-		int a = sub ? WALK_LOWER(un)(e, LEX_TOKEN_MINUS, 8, walk_value_from_register(walk_register_duplicate(e, r1))).r : r1;
+		int a = sub ? WALK_LOWER(un)(e, LEX_TOKEN_MINUS, 8, walk_value_from_register(walk_register_duplicate(e, r1))).register_number : r1;
 
 		r = WALK_LOWER(atomic)(e, WALK_ATOMIC_ADD, sz, rp, a, -1);
 		if (sub)
 			WALK_LOWER(tfree)(e, a);
 		if (id == CC_BUILTIN_ATOMIC_ADD_FETCH || id == CC_BUILTIN_ATOMIC_SUB_FETCH)
-			r = WALK_LOWER(bin)(e, sub ? LEX_TOKEN_MINUS : LEX_TOKEN_PLUS, 8, false, walk_value_from_register(r), walk_value_from_register(r1)).r;
+			r = WALK_LOWER(bin)(e, sub ? LEX_TOKEN_MINUS : LEX_TOKEN_PLUS, 8, false, walk_value_from_register(r), walk_value_from_register(r1)).register_number;
 		else
 			WALK_LOWER(tfree)(e, r1);
 		break;
@@ -2501,10 +2501,10 @@ static codegen_value walk_atomic_emit(codegen_context *e, uint32_t n)
 
 		walk_label_place(e, top);
 		if (base < 5) {
-			nw = WALK_LOWER(bin)(e, bop[base], 8, false, walk_value_from_register(walk_register_duplicate(e, old)), walk_value_from_register(walk_register_duplicate(e, r1))).r;
+			nw = WALK_LOWER(bin)(e, bop[base], 8, false, walk_value_from_register(walk_register_duplicate(e, old)), walk_value_from_register(walk_register_duplicate(e, r1))).register_number;
 		} else if (base == 5) {	/* nand: ~(old & v) */
-			nw = WALK_LOWER(bin)(e, LEX_TOKEN_AMPERSAND, 8, false, walk_value_from_register(walk_register_duplicate(e, old)), walk_value_from_register(walk_register_duplicate(e, r1))).r;
-			nw = WALK_LOWER(un)(e, LEX_TOKEN_TILDE, 8, walk_value_from_register(nw)).r;
+			nw = WALK_LOWER(bin)(e, LEX_TOKEN_AMPERSAND, 8, false, walk_value_from_register(walk_register_duplicate(e, old)), walk_value_from_register(walk_register_duplicate(e, r1))).register_number;
+			nw = WALK_LOWER(un)(e, LEX_TOKEN_TILDE, 8, walk_value_from_register(nw)).register_number;
 		} else {	/* max, min as the object's type compares */
 			uint32_t keep = walk_label_new(e);
 			int a = walk_register_duplicate(e, old), b = walk_register_duplicate(e, r1);
@@ -2550,14 +2550,14 @@ static codegen_value walk_atomic_emit(codegen_context *e, uint32_t n)
 /* a float value parked in the frame slot sl (16 bytes): by address, its bytes; else stored */
 static codegen_value walk_float_park(codegen_context *e, codegen_value v, ast_qualified_type t, int64_t sl)
 {
-	codegen_lvalue l = { .k = CODEGEN_LVALUE_FRAME, .off = sl, .align = 16 };
+	codegen_lvalue l = { .kind = CODEGEN_LVALUE_FRAME, .offset = sl, .align = 16 };
 
 	if (walk_type_is_in_memory(e, t))
 		return walk_lvalue_store_memory(e, &l, t, v);
 	{
 		int r = walk_value_to_register(e, &v, t);
 
-		WALK_LOWER(store)(e, r, &l, walk_type_size(e->c, t));
+		WALK_LOWER(store)(e, r, &l, walk_type_size(e->compile_context, t));
 		WALK_LOWER(tfree)(e, r);
 		return codegen_value_constant(0);
 	}
@@ -2571,12 +2571,12 @@ static codegen_value walk_float_park(codegen_context *e, codegen_value v, ast_qu
  */
 static codegen_value walk_float_pattern(codegen_context *e, ast_qualified_type t, int64_t sl, int *eb)
 {
-	cc *c = e->c;
-	codegen_lvalue l = { .k = CODEGEN_LVALUE_FRAME, .off = sl, .align = 16 }, h = l;
+	cc *c = e->compile_context;
+	codegen_lvalue l = { .kind = CODEGEN_LVALUE_FRAME, .offset = sl, .align = 16 }, h = l;
 	int k = KIND(c, t), r = WALK_LOWER(treg)(e);
 	ast_qualified_type u = codegen_type_primitive(AST_TYPE_UNSIGNED_LONG);
 
-	h.off += 8;
+	h.offset += 8;
 	if (k == AST_TYPE_FLOAT16 || k == AST_TYPE_BFLOAT16) {
 		WALK_LOWER(load)(e, r, &l, 2, false);
 		*eb = k == AST_TYPE_BFLOAT16 ? 8 : 5;
@@ -2626,7 +2626,7 @@ static codegen_value walk_float_class_test(codegen_context *e, int bi, ast_quali
 /* isnan, isinf, isfinite, isnormal, isinf_sign, fpclassify on a value */
 static codegen_value walk_float_class_emit(codegen_context *e, uint32_t n)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n);
 	const uint32_t *arg = &c->lists[x->b];
 	uint32_t vn = x->aux == CC_BUILTIN_FPCLASSIFY ? arg[5] : arg[0];
@@ -2642,10 +2642,10 @@ static codegen_value walk_float_class_emit(codegen_context *e, uint32_t n)
 		static const int test[4] = { CC_BUILTIN_ISNAN, CC_BUILTIN_ISINF, CC_BUILTIN_ISNORMAL, 0 };
 		static const int which[4] = { 0, 1, 2, 4 };
 		uint32_t done = walk_label_new(e);
-		codegen_lvalue out = { .k = CODEGEN_LVALUE_FRAME, .off = rs, .align = 4 };
+		codegen_lvalue out = { .kind = CODEGEN_LVALUE_FRAME, .offset = rs, .align = 4 };
 
 		for (int k = 0; k < 5; k++) {
-			codegen_lvalue d = { .k = CODEGEN_LVALUE_FRAME, .off = rs + 4 * k, .align = 4 };
+			codegen_lvalue d = { .kind = CODEGEN_LVALUE_FRAME, .offset = rs + 4 * k, .align = 4 };
 			codegen_value a = walk_value_convert(e, walk_value_emit(e, arg[k]), N(arg[k])->ty, codegen_type_primitive(AST_TYPE_INT));
 			int r = walk_value_to_register(e, &a, codegen_type_primitive(AST_TYPE_INT));
 
@@ -2657,10 +2657,10 @@ static codegen_value walk_float_class_emit(codegen_context *e, uint32_t n)
 		/* the result in the subnormal entry (3) unless a test picks another */
 		for (int k = 0; k < 4; k++) {
 			uint32_t skip = walk_label_new(e);
-			codegen_lvalue s = { .k = CODEGEN_LVALUE_FRAME, .off = rs + 4 * which[k], .align = 4 }, d = out;
+			codegen_lvalue s = { .kind = CODEGEN_LVALUE_FRAME, .offset = rs + 4 * which[k], .align = 4 }, d = out;
 			int r;
 
-			d.off = rs + 12;
+			d.offset = rs + 12;
 			WALK_LOWER(brz)(e, walk_float_class_test(e, test[k], t, sl), 4, false, skip);
 			r = WALK_LOWER(treg)(e);
 			WALK_LOWER(load)(e, r, &s, 4, false);
@@ -2670,7 +2670,7 @@ static codegen_value walk_float_class_emit(codegen_context *e, uint32_t n)
 			walk_label_place(e, skip);
 		}
 		walk_label_place(e, done);
-		out.off = rs + 12;
+		out.offset = rs + 12;
 		{
 			int r = WALK_LOWER(treg)(e);
 
@@ -2682,11 +2682,11 @@ static codegen_value walk_float_class_emit(codegen_context *e, uint32_t n)
 	walk_value_free(e, &v);
 	if (x->aux == CC_BUILTIN_ISINF_SIGN) {
 		/* isinf(x) ? (signbit(x) ? -1 : 1) : 0 */
-		codegen_lvalue l = { .k = CODEGEN_LVALUE_FRAME, .off = sl, .align = 16 };
+		codegen_lvalue l = { .kind = CODEGEN_LVALUE_FRAME, .offset = sl, .align = 16 };
 		int k = KIND(c, t), r;
 		codegen_value inf = walk_float_class_test(e, CC_BUILTIN_ISINF, t, sl), sg;
 
-		l.off += k == AST_TYPE_FLOAT16 || k == AST_TYPE_BFLOAT16 ? 1 : k == AST_TYPE_FLOAT ? 3 : k == AST_TYPE_DOUBLE ? 7 : walk_type_is_quad(c, t) ? 15 : 9;
+		l.offset += k == AST_TYPE_FLOAT16 || k == AST_TYPE_BFLOAT16 ? 1 : k == AST_TYPE_FLOAT ? 3 : k == AST_TYPE_DOUBLE ? 7 : walk_type_is_quad(c, t) ? 15 : 9;
 		r = WALK_LOWER(treg)(e);
 		WALK_LOWER(load)(e, r, &l, 1, false);
 		sg = WALK_LOWER(bin)(e, LEX_TOKEN_GREATER_GREATER, 4, false, walk_value_from_register(r), codegen_value_constant(7));
@@ -2699,13 +2699,13 @@ static codegen_value walk_float_class_emit(codegen_context *e, uint32_t n)
 
 static codegen_value walk_float_constant(codegen_context *e, ast_qualified_type t, double d, u128 q)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 
 	if (walk_type_is_in_memory(e, t)) {
 		/* a long double constant: its bytes stored to a new object */
 		uint8_t b[10];
 		uint64_t lo, hi;
-		codegen_lvalue l = { .k = CODEGEN_LVALUE_FRAME, .off = walk_slot_temporary(e, 16, 16), .align = 16 }, h;
+		codegen_lvalue l = { .kind = CODEGEN_LVALUE_FRAME, .offset = walk_slot_temporary(e, 16, 16), .align = 16 }, h;
 		codegen_value v;
 		int r;
 
@@ -2723,7 +2723,7 @@ static codegen_value walk_float_constant(codegen_context *e, ast_qualified_type 
 		v = codegen_value_constant((i128)hi);
 		r = WALK_LOWER(toreg)(e, &v, 8);
 		h = l;
-		h.off += 8;
+		h.offset += 8;
 		WALK_LOWER(store)(e, r, &h, 8);
 		WALK_LOWER(tfree)(e, r);
 		return walk_value_from_register(WALK_LOWER(laddr)(e, &l));
@@ -2753,7 +2753,7 @@ static codegen_value walk_float_constant(codegen_context *e, ast_qualified_type 
  * operation, including unsigned 128-bit multiplication and mixed signs. */
 static codegen_value walk_overflow_limb_load(codegen_context *e, int64_t slot, int limb)
 {
-	codegen_lvalue l = { .k = CODEGEN_LVALUE_FRAME, .off = slot + limb * 4, .align = 4 };
+	codegen_lvalue l = { .kind = CODEGEN_LVALUE_FRAME, .offset = slot + limb * 4, .align = 4 };
 	int r = WALK_LOWER(treg)(e);
 	WALK_LOWER(load)(e, r, &l, 4, false);
 	return walk_value_from_register(r);
@@ -2761,7 +2761,7 @@ static codegen_value walk_overflow_limb_load(codegen_context *e, int64_t slot, i
 
 static void walk_overflow_limb_store(codegen_context *e, int64_t slot, int limb, codegen_value v)
 {
-	codegen_lvalue l = { .k = CODEGEN_LVALUE_FRAME, .off = slot + limb * 4, .align = 4 };
+	codegen_lvalue l = { .kind = CODEGEN_LVALUE_FRAME, .offset = slot + limb * 4, .align = 4 };
 	int r = walk_value_to_register(e, &v, codegen_type_primitive(AST_TYPE_UNSIGNED_LONG));
 	WALK_LOWER(store)(e, r, &l, 4);
 	WALK_LOWER(tfree)(e, r);
@@ -2770,12 +2770,12 @@ static void walk_overflow_limb_store(codegen_context *e, int64_t slot, int limb,
 static int64_t walk_overflow_extend(codegen_context *e, codegen_value v, ast_qualified_type t)
 {
 	int64_t slot = walk_slot_temporary(e, 32, 16);
-	codegen_lvalue lo = { .k = CODEGEN_LVALUE_FRAME, .off = slot, .align = 16 };
+	codegen_lvalue lo = { .kind = CODEGEN_LVALUE_FRAME, .offset = slot, .align = 16 };
 	codegen_value wide = walk_value_convert(e, v, t, codegen_type_primitive(AST_TYPE_INT128));
 	wide = walk_lvalue_store_memory(e, &lo, codegen_type_primitive(AST_TYPE_INT128), wide);
 	walk_value_free(e, &wide);
 	for (int i = 4; i < 8; i++) {
-		codegen_value sign = walk_type_is_signed(e->c, t)
+		codegen_value sign = walk_type_is_signed(e->compile_context, t)
 			? WALK_LOWER(bin)(e, LEX_TOKEN_GREATER_GREATER, 4, true, walk_overflow_limb_load(e, slot, 3), codegen_value_constant(31)) : codegen_value_constant(0);
 		walk_overflow_limb_store(e, slot, i, sign);
 	}
@@ -2784,7 +2784,7 @@ static int64_t walk_overflow_extend(codegen_context *e, codegen_value v, ast_qua
 
 static codegen_value walk_overflow_wide_emit(codegen_context *e, const uint32_t *arg, int op)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	ast_qualified_type ta = N(arg[0])->ty, tb = N(arg[1])->ty, tr = T(c, N(arg[2])->ty)->base;
 	int64_t as = walk_overflow_extend(e, walk_value_emit(e, arg[0]), ta);
 	int64_t bs = walk_overflow_extend(e, walk_value_emit(e, arg[1]), tb);
@@ -2815,7 +2815,7 @@ static codegen_value walk_overflow_wide_emit(codegen_context *e, const uint32_t 
 			walk_overflow_limb_store(e, carry, 0, WALK_LOWER(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, false, v, codegen_value_constant(32)));
 		}
 	}
-	codegen_lvalue result = { .k = CODEGEN_LVALUE_FRAME, .off = rs, .align = 16 };
+	codegen_lvalue result = { .kind = CODEGEN_LVALUE_FRAME, .offset = rs, .align = 16 };
 	codegen_value v = walk_value_convert(e, walk_value_from_register(WALK_LOWER(laddr)(e, &result)), codegen_type_primitive(AST_TYPE_INT128), tr);
 	if (codegen_type_is_bitint(c, tr)) {
 		unsigned bits = T(c, tr)->n;
@@ -2828,7 +2828,7 @@ static codegen_value walk_overflow_wide_emit(codegen_context *e, const uint32_t 
 	/* Compare the exact value with the destination conversion, sign-extended
 	 * according to its own type.  Snapshot it before writing an aliased output. */
 	int64_t back = walk_overflow_extend(e, v, tr);
-	codegen_lvalue converted = { .k = CODEGEN_LVALUE_FRAME, .off = back, .align = 16 };
+	codegen_lvalue converted = { .kind = CODEGEN_LVALUE_FRAME, .offset = back, .align = 16 };
 	v = walk_value_convert(e, walk_value_from_register(WALK_LOWER(laddr)(e, &converted)), codegen_type_primitive(AST_TYPE_INT128), tr);
 	if (walk_type_size(c, tr) > 8) {
 		v = walk_lvalue_store_memory(e, &dst, tr, v);
@@ -2850,7 +2850,7 @@ static codegen_value walk_overflow_wide_emit(codegen_context *e, const uint32_t 
 /* The same non-emitting constant_p policy serves values and control proofs. */
 static int walk_builtin_constant_p(codegen_context *e, uint32_t arg)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	cc_value cv;
 
 	if (cc_eval(c, arg, &cv) && (cv.kind == CC_VALUE_INTEGER || cv.kind == CC_VALUE_FLOAT ||
@@ -2861,7 +2861,7 @@ static int walk_builtin_constant_p(codegen_context *e, uint32_t arg)
 
 static codegen_value walk_builtin_emit(codegen_context *e, uint32_t n)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n);
 	const uint32_t *arg = &c->lists[x->b];
 	char b[64];
@@ -2913,15 +2913,15 @@ static codegen_value walk_builtin_emit(codegen_context *e, uint32_t n)
 	case CC_BUILTIN_RETURN_ADDRESS: case CC_BUILTIN_FRAME_ADDRESS: {
 		codegen_value v = walk_value_emit(e, arg[0]);
 
-		if (v.k != CODEGEN_VALUE_CONSTANT)
+		if (v.kind != CODEGEN_VALUE_CONSTANT)
 			walk_unsupported_fail(e, n, "a return or frame address of a level not a constant");
-		return WALK_LOWER(frame)(e, x->aux == CC_BUILTIN_RETURN_ADDRESS, (uint32_t)v.i);
+		return WALK_LOWER(frame)(e, x->aux == CC_BUILTIN_RETURN_ADDRESS, (uint32_t)v.integer);
 	}
 	case CC_BUILTIN_OBJECT_SIZE: case CC_BUILTIN_DYNAMIC_OBJECT_SIZE: {
 		cc_value cv;
 		i128 size;
-		walk_inline_call *inl = e->wk->inl;
-		if (inl && codegen_inline_object_size(e, inl->fn, inl->call, arg[0], arg[1], &size))
+		walk_inline_call *inl = e->walk_state->inline_call;
+		if (inl && codegen_inline_object_size(e, inl->function, inl->call, arg[0], arg[1], &size))
 			return codegen_value_constant(size);
 		if (cc_eval(c, n, &cv) && cv.kind == CC_VALUE_INTEGER)
 			return codegen_value_constant(cv.i);
@@ -2934,28 +2934,28 @@ static codegen_value walk_builtin_emit(codegen_context *e, uint32_t n)
 		bool sh = x->aux == CC_BUILTIN_SHUFFLEVECTOR;
 		codegen_value a = walk_value_emit(e, arg[0]), bv = sh ? walk_right_operand_emit(e, &a, arg[1], codegen_type_primitive(AST_TYPE_UNSIGNED_LONG)) : codegen_value_constant(0);
 		int ra = walk_value_to_register(e, &a, codegen_type_primitive(AST_TYPE_UNSIGNED_LONG)), rb = sh ? walk_value_to_register(e, &bv, codegen_type_primitive(AST_TYPE_UNSIGNED_LONG)) : -1;
-		codegen_lvalue d = { .k = CODEGEN_LVALUE_FRAME, .off = walk_slot_temporary(e, codegen_type_size(c, x->ty), 16), .align = codegen_type_alignment(c, re) };
+		codegen_lvalue d = { .kind = CODEGEN_LVALUE_FRAME, .offset = walk_slot_temporary(e, codegen_type_size(c, x->ty), 16), .align = codegen_type_alignment(c, re) };
 
 		for (int64_t i = 0; i < nr; i++) {
-			codegen_lvalue dl = d, sl = { .k = CODEGEN_LVALUE_REGISTER, .align = codegen_type_alignment(c, ae) };
+			codegen_lvalue dl = d, sl = { .kind = CODEGEN_LVALUE_REGISTER, .align = codegen_type_alignment(c, ae) };
 			codegen_value v;
 			int r;
 
-			if (codegen_type_is_bool_vector(c, x->ty)) dl.off += i / 8, dl.bf = 1, dl.width = 1, dl.bitoff = i % 8;
-			else dl.off += i * (int64_t)codegen_type_size(c, re);
+			if (codegen_type_is_bool_vector(c, x->ty)) dl.offset += i / 8, dl.is_bitfield = 1, dl.width = 1, dl.bit_offset = i % 8;
+			else dl.offset += i * (int64_t)codegen_type_size(c, re);
 			if (sh) {
 				int64_t k = (int64_t)c->ipool[N(arg[2 + i])->a];
 
 				if (k < 0)
 					continue;	/* an undefined lane */
-				sl.r = (uint8_t)(k < na ? ra : rb);
-				sl.off = (k < na ? k : k - na) * (int64_t)codegen_type_size(c, ae);
-				if (codegen_type_is_bool_vector(c, at)) { int64_t j = k < na ? k : k - na; sl.off = j / 8, sl.bf = 1, sl.width = 1, sl.bitoff = j % 8; }
+				sl.register_number = (uint8_t)(k < na ? ra : rb);
+				sl.offset = (k < na ? k : k - na) * (int64_t)codegen_type_size(c, ae);
+				if (codegen_type_is_bool_vector(c, at)) { int64_t j = k < na ? k : k - na; sl.offset = j / 8, sl.is_bitfield = 1, sl.width = 1, sl.bit_offset = j % 8; }
 				v = walk_lvalue_reload(e, &sl, ae);
 			} else {
-				sl.r = (uint8_t)ra;
-				sl.off = i * (int64_t)codegen_type_size(c, ae);
-				if (codegen_type_is_bool_vector(c, at)) sl.off = i / 8, sl.bf = 1, sl.width = 1, sl.bitoff = i % 8;
+				sl.register_number = (uint8_t)ra;
+				sl.offset = i * (int64_t)codegen_type_size(c, ae);
+				if (codegen_type_is_bool_vector(c, at)) sl.offset = i / 8, sl.is_bitfield = 1, sl.width = 1, sl.bit_offset = i % 8;
 				v = walk_value_convert(e, walk_lvalue_reload(e, &sl, ae), ae, re);
 			}
 			r = walk_value_to_register(e, &v, re);
@@ -2993,14 +2993,14 @@ static codegen_value walk_builtin_emit(codegen_context *e, uint32_t n)
 	case CC_BUILTIN_ALLOCA: case CC_BUILTIN_ALLOCA_UNINITIALIZED: {
 		codegen_value v = walk_value_emit(e, arg[0]);
 
-		e->dyn = true;
+		e->dynamic_frame = true;
 		codegen_value p = WALK_LOWER(alloca)(e, walk_value_convert(e, v, N(arg[0])->ty, codegen_type_primitive(AST_TYPE_UNSIGNED_LONG)));
 		/* Preserve this allocation across every currently active VLA scope. */
-		if (e->wk->nvla) {
+		if (e->walk_state->vla_count) {
 			int sp = WALK_LOWER(spget)(e);
 
-			for (int i = e->wk->inl ? e->wk->inl->vbase : 0; i < e->wk->nvla; ++i) {
-				codegen_lvalue saved = { .k = CODEGEN_LVALUE_FRAME, .off = walk_local_slot(e, e->wk->vla[i]) + 8, .align = 8 };
+			for (int i = e->walk_state->inline_call ? e->walk_state->inline_call->vla_base : 0; i < e->walk_state->vla_count; ++i) {
+				codegen_lvalue saved = { .kind = CODEGEN_LVALUE_FRAME, .offset = walk_local_slot(e, e->walk_state->vla[i]) + 8, .align = 8 };
 				WALK_LOWER(store)(e, sp, &saved, 8);
 			}
 			WALK_LOWER(tfree)(e, sp);
@@ -3039,8 +3039,8 @@ static codegen_value walk_builtin_emit(codegen_context *e, uint32_t n)
 		codegen_value v = walk_value_emit(e, arg[0]);
 		int r;
 
-		if (v.k == CODEGEN_VALUE_CONSTANT) {
-			uint64_t u = (uint64_t)v.i & (bits == 64 ? ~0ull : (1ull << bits) - 1), o = 0;
+		if (v.kind == CODEGEN_VALUE_CONSTANT) {
+			uint64_t u = (uint64_t)v.integer & (bits == 64 ? ~0ull : (1ull << bits) - 1), o = 0;
 
 			for (int i = 0; i < bits; i++)
 				o |= ((u >> i) & 1) << (bits - 1 - i);
@@ -3055,7 +3055,7 @@ static codegen_value walk_builtin_emit(codegen_context *e, uint32_t n)
 
 			hi = WALK_LOWER(bin)(e, LEX_TOKEN_AMPERSAND, 8, false, hi, codegen_value_constant((i128)m[k]));
 			lo = WALK_LOWER(bin)(e, LEX_TOKEN_LESS_LESS, 8, false, lo, codegen_value_constant(1 << k));
-			r = WALK_LOWER(bin)(e, LEX_TOKEN_PIPE, 8, false, lo, hi).r;
+			r = WALK_LOWER(bin)(e, LEX_TOKEN_PIPE, 8, false, lo, hi).register_number;
 		}
 		v = WALK_LOWER(bitop)(e, CC_BUILTIN_BSWAP64, 8, walk_value_from_register(r));
 		if (bits < 64)
@@ -3089,7 +3089,7 @@ static codegen_value walk_builtin_emit(codegen_context *e, uint32_t n)
 			rr = walk_value_to_register(e, &r, codegen_type_primitive(AST_TYPE_UNSIGNED_LONG));
 			if (uu == walk_type_is_signed(c, tr)) {
 				/* unsigned x unsigned into signed, or anything else into unsigned: the sign bit */
-				hi = (codegen_lvalue){ .k = CODEGEN_LVALUE_REGISTER, .r = (uint8_t)rr, .off = 8, .align = 8 };
+				hi = (codegen_lvalue){ .kind = CODEGEN_LVALUE_REGISTER, .register_number = (uint8_t)rr, .offset = 8, .align = 8 };
 				s = WALK_LOWER(treg)(e);
 				WALK_LOWER(load)(e, s, &hi, 8, false);
 				WALK_LOWER(tfree)(e, rr);
@@ -3114,7 +3114,7 @@ static codegen_value walk_builtin_emit(codegen_context *e, uint32_t n)
 		rr = walk_value_to_register(e, &r, codegen_type_primitive(AST_TYPE_UNSIGNED_LONG));
 		cp = WALK_LOWER(treg)(e);
 		WALK_LOWER(mov)(e, cp, rr);
-		lo = walk_value_convert(e, (codegen_value){ .k = CODEGEN_VALUE_REGISTER, .r = (uint8_t)cp }, w, tr);
+		lo = walk_value_convert(e, (codegen_value){ .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)cp }, w, tr);
 		if (codegen_type_is_bitint(c, tr) && T(c, tr)->n < 64) {
 			unsigned shift = 64 - T(c, tr)->n;
 
@@ -3125,7 +3125,7 @@ static codegen_value walk_builtin_emit(codegen_context *e, uint32_t n)
 		WALK_LOWER(store)(e, rs, &l, walk_type_size(c, tr));
 		walk_lvalue_free(e, &l);
 		back = walk_value_convert(e, lo, tr, w);
-		return WALK_LOWER(wcmp)(e, LEX_TOKEN_EXCLAMATION_EQUAL, true, (codegen_value){ .k = CODEGEN_VALUE_REGISTER, .r = (uint8_t)rr }, back);
+		return WALK_LOWER(wcmp)(e, LEX_TOKEN_EXCLAMATION_EQUAL, true, (codegen_value){ .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)rr }, back);
 	}
 	case CC_BUILTIN_ISINF_SIGN: case CC_BUILTIN_FPCLASSIFY:
 		return walk_float_class_emit(e, n);
@@ -3141,7 +3141,7 @@ static codegen_value walk_builtin_emit(codegen_context *e, uint32_t n)
 			   and a clear quiet bit. Preserve the low word as sticky. */
 			codegen_lvalue l = walk_lvalue_from_value(e, v, at), h = l;
 			int lo = WALK_LOWER(treg)(e), hi = WALK_LOWER(treg)(e);
-			h.off += 8;
+			h.offset += 8;
 			WALK_LOWER(load)(e, lo, &l, 8, false);
 			WALK_LOWER(load)(e, hi, &h, 8, false);
 			walk_lvalue_free(e, &l);
@@ -3157,7 +3157,7 @@ static codegen_value walk_builtin_emit(codegen_context *e, uint32_t n)
 			int re = WALK_LOWER(treg)(e);
 			codegen_value exp, mant;
 
-			hi.off += 8;
+			hi.offset += 8;
 			WALK_LOWER(load)(e, re, &hi, 2, false);
 			exp = WALK_LOWER(bin)(e, LEX_TOKEN_AMPERSAND, 4, false, walk_value_from_register(re), codegen_value_constant(0x7fff));
 			re = WALK_LOWER(treg)(e);
@@ -3166,16 +3166,16 @@ static codegen_value walk_builtin_emit(codegen_context *e, uint32_t n)
 			codegen_value sig = walk_value_from_register(re);
 			codegen_value integer = codegen_value_constant(0);
 			if (x->aux == CC_BUILTIN_ISFINITE || x->aux == CC_BUILTIN_ISNORMAL || x->aux == CC_BUILTIN_ISNAN)
-				integer = WALK_LOWER(cmp)(e, LEX_TOKEN_GREATER_EQUAL, 8, false, walk_value_from_register(walk_register_duplicate(e, sig.r)), codegen_value_constant((i128)1 << 63));
+				integer = WALK_LOWER(cmp)(e, LEX_TOKEN_GREATER_EQUAL, 8, false, walk_value_from_register(walk_register_duplicate(e, sig.register_number)), codegen_value_constant((i128)1 << 63));
 			if (x->aux == CC_BUILTIN_ISFINITE || x->aux == CC_BUILTIN_ISNORMAL) {
 				codegen_value valid = integer;
 				if (x->aux == CC_BUILTIN_ISFINITE) {
-					codegen_value zeroexp = WALK_LOWER(cmp)(e, LEX_TOKEN_EQUAL_EQUAL, 4, false, walk_value_from_register(walk_register_duplicate(e, exp.r)), codegen_value_constant(0));
+					codegen_value zeroexp = WALK_LOWER(cmp)(e, LEX_TOKEN_EQUAL_EQUAL, 4, false, walk_value_from_register(walk_register_duplicate(e, exp.register_number)), codegen_value_constant(0));
 					valid = WALK_LOWER(bin)(e, LEX_TOKEN_PIPE, 4, false, valid, zeroexp);
 				} else
 					exp = WALK_LOWER(bin)(e, LEX_TOKEN_MINUS, 4, false, exp, codegen_value_constant(1));
 				exp = WALK_LOWER(cmp)(e, LEX_TOKEN_LESS, 4, false, exp, codegen_value_constant(x->aux == CC_BUILTIN_ISNORMAL ? 0x7ffe : 0x7fff));
-				WALK_LOWER(tfree)(e, sig.r);
+				WALK_LOWER(tfree)(e, sig.register_number);
 				return WALK_LOWER(bin)(e, LEX_TOKEN_AMPERSAND, 4, false, exp, valid);
 			}
 			if (x->aux == CC_BUILTIN_ISSIGNALING) {
@@ -3187,7 +3187,7 @@ static codegen_value walk_builtin_emit(codegen_context *e, uint32_t n)
 			}
 			codegen_value unsupported = codegen_value_constant(0);
 			if (x->aux == CC_BUILTIN_ISNAN) {
-				codegen_value nonzero = WALK_LOWER(cmp)(e, LEX_TOKEN_EXCLAMATION_EQUAL, 4, false, walk_value_from_register(walk_register_duplicate(e, exp.r)), codegen_value_constant(0));
+				codegen_value nonzero = WALK_LOWER(cmp)(e, LEX_TOKEN_EXCLAMATION_EQUAL, 4, false, walk_value_from_register(walk_register_duplicate(e, exp.register_number)), codegen_value_constant(0));
 				codegen_value nointeger = WALK_LOWER(bin)(e, LEX_TOKEN_CARET, 4, false, integer, codegen_value_constant(1));
 				unsupported = WALK_LOWER(bin)(e, LEX_TOKEN_AMPERSAND, 4, false, nonzero, nointeger);
 			}
@@ -3221,10 +3221,10 @@ static codegen_value walk_builtin_emit(codegen_context *e, uint32_t n)
 			codegen_lvalue l = walk_lvalue_from_value(e, v, at);
 			int r = WALK_LOWER(treg)(e);
 
-			l.off += walk_type_is_quad(c, at) ? 14 : 8;
+			l.offset += walk_type_is_quad(c, at) ? 14 : 8;
 			WALK_LOWER(load)(e, r, &l, 2, false);
 			walk_lvalue_free(e, &l);
-			return WALK_LOWER(bin)(e, LEX_TOKEN_GREATER_GREATER, 4, false, (codegen_value){ .k = CODEGEN_VALUE_REGISTER, .r = (uint8_t)r }, codegen_value_constant(15));
+			return WALK_LOWER(bin)(e, LEX_TOKEN_GREATER_GREATER, 4, false, (codegen_value){ .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)r }, codegen_value_constant(15));
 		}
 		v = WALK_LOWER(fbits)(e, v, walk_type_size(c, at));
 		return WALK_LOWER(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, false, v, codegen_value_constant(walk_type_size(c, at) * 8 - 1));
@@ -3286,7 +3286,7 @@ static codegen_value walk_builtin_emit(codegen_context *e, uint32_t n)
 /* a const (not volatile) global with a constant initializer: its value (arm64's const_global) */
 static bool walk_global_constant_value(codegen_context *e, uint32_t s, cc_value *cv)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const sym *y;
 
 	s = codegen_symbol_canonical(c, s);
@@ -3305,7 +3305,7 @@ static codegen_value walk_value_emit_inner(codegen_context *e, uint32_t n);
 VPRIV codegen_value walk_value_emit(codegen_context *e, uint32_t n)
 {
 	if (n && n == e->reuse_from) n = e->reuse_to;
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	ast_qualified_type t = N(n)->ty;
 
 	if (codegen_type_is_bitint_big(c, t))
@@ -3318,7 +3318,7 @@ VPRIV codegen_value walk_value_emit(codegen_context *e, uint32_t n)
 
 static codegen_value walk_value_emit_inner(codegen_context *e, uint32_t n)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n);
 
 	if (unlikely(vstack_guard_low()))
@@ -3341,7 +3341,7 @@ static codegen_value walk_value_emit_inner(codegen_context *e, uint32_t n)
 			uint32_t s = codegen_symbol_canonical(c, x->a);
 
 			codegen_reference_note(e, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, s));
-			return (codegen_value){ .k = CODEGEN_VALUE_ADDRESS, .ref = CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, s) };
+			return (codegen_value){ .kind = CODEGEN_VALUE_ADDRESS, .reference = CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, s) };
 		}
 		{
 			codegen_value k;
@@ -3372,15 +3372,15 @@ static codegen_value walk_value_emit_inner(codegen_context *e, uint32_t n)
 		return walk_lvalue_load(e, l, x->ty);
 	}
 	case AST_NODE_INDEX: {
-		int k = e->E->o->opt && codegen_type_size(c, x->ty) <= 8 ? codegen_array_element_slot(e, n, false) : -1;
+		int k = e->unit->options->opt && codegen_type_size(c, x->ty) <= 8 ? codegen_array_element_slot(e, n, false) : -1;
 		uint32_t as;
 		int64_t ak;
 		int i;
 
-		if (k >= 0 && (e->kvalid >> k & 1))
-			return walk_value_constant(c, e->kval[k], x->ty);
+		if (k >= 0 && (e->known_values_valid >> k & 1))
+			return walk_value_constant(c, e->known_values[k], x->ty);
 		if (walk_array_element_of(e, n, &as, &ak) && (i = walk_array_element_find(e, as, ak)) >= 0)
-			return codegen_value_constant(e->wk->ael[i].v);
+			return codegen_value_constant(e->walk_state->array_elements[i].value);
 		if (!codegen_type_is_array(c, x->ty) && !codegen_type_is_function(c, x->ty))
 			walk_scalar_check(e, n, x->ty);
 		return walk_lvalue_load(e, walk_lvalue_emit(e, n), x->ty);
@@ -3398,11 +3398,11 @@ static codegen_value walk_value_emit_inner(codegen_context *e, uint32_t n)
 			uint32_t s = codegen_symbol_canonical(c, N(x->a)->a);
 
 			codegen_reference_note(e, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, s));
-			return (codegen_value){ .k = CODEGEN_VALUE_ADDRESS, .ref = CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, s) };
+			return (codegen_value){ .kind = CODEGEN_VALUE_ADDRESS, .reference = CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, s) };
 		}
 		l = walk_lvalue_emit(e, x->a);
-		if (l.k == CODEGEN_LVALUE_SYMBOL)
-			return (codegen_value){ .k = CODEGEN_VALUE_ADDRESS, .ref = l.ref, .i = l.off };
+		if (l.kind == CODEGEN_LVALUE_SYMBOL)
+			return (codegen_value){ .kind = CODEGEN_VALUE_ADDRESS, .reference = l.reference, .integer = l.offset };
 		return walk_value_from_register(WALK_LOWER(laddr)(e, &l));
 	}
 	case AST_NODE_CAST: {
@@ -3444,7 +3444,7 @@ static codegen_value walk_value_emit_inner(codegen_context *e, uint32_t n)
 		return walk_statement_expression_emit(e, n);
 	case AST_NODE_LABEL_ADDRESS:
 		codegen_reference_note(e, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_LABEL, x->a));
-		return (codegen_value){ .k = CODEGEN_VALUE_ADDRESS, .ref = CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_LABEL, x->a) };
+		return (codegen_value){ .kind = CODEGEN_VALUE_ADDRESS, .reference = CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_LABEL, x->a) };
 	case AST_NODE_BUILTIN:
 		return walk_builtin_emit(e, n);
 	case AST_NODE_VA_ARG: {
@@ -3454,7 +3454,7 @@ static codegen_value walk_value_emit_inner(codegen_context *e, uint32_t n)
 		walk_scalar_check(e, n, x->ty);
 		rp = WALK_LOWER(va_arg)(e, ra, x->ty);
 		WALK_LOWER(tfree)(e, ra);
-		l = (codegen_lvalue){ .k = CODEGEN_LVALUE_REGISTER, .r = (uint8_t)rp, .align = 8 };
+		l = (codegen_lvalue){ .kind = CODEGEN_LVALUE_REGISTER, .register_number = (uint8_t)rp, .align = 8 };
 		return walk_lvalue_load(e, l, x->ty);
 	}
 	case AST_NODE_FLOAT_NUMBER: {
@@ -3471,7 +3471,7 @@ static codegen_value walk_value_emit_inner(codegen_context *e, uint32_t n)
 			return walk_vla_bytes(e, x->b);
 		}
 		if (x->a && N(x->a)->op == AST_NODE_VARIABLE && codegen_symbol_is_local_variable(c, N(x->a)->a) && (T(c, c->syms[N(x->a)->a].ty)->flags & AST_TYPE_FLAG_VLA)) {
-			codegen_lvalue l = { .k = CODEGEN_LVALUE_FRAME, .off = walk_local_slot(e, N(x->a)->a) + 16, .align = 8 };
+			codegen_lvalue l = { .kind = CODEGEN_LVALUE_FRAME, .offset = walk_local_slot(e, N(x->a)->a) + 16, .align = 8 };
 			int r = WALK_LOWER(treg)(e);
 
 			WALK_LOWER(load)(e, r, &l, 8, false);
@@ -3487,9 +3487,9 @@ static codegen_value walk_value_emit_inner(codegen_context *e, uint32_t n)
 		/* a _Complex value from its parts: both into a temporary object, its address */
 		ast_qualified_type et = c->tags[T(c, x->ty)->aux].f[0].ty;
 		int64_t es = (int64_t)codegen_type_size(c, et);
-		codegen_lvalue d = { .k = CODEGEN_LVALUE_FRAME, .off = walk_slot_temporary(e, 2 * (uint64_t)es, codegen_type_alignment(c, x->ty)), .align = codegen_type_alignment(c, et) };
+		codegen_lvalue d = { .kind = CODEGEN_LVALUE_FRAME, .offset = walk_slot_temporary(e, 2 * (uint64_t)es, codegen_type_alignment(c, x->ty)), .align = codegen_type_alignment(c, et) };
 
-		for (int k = 0; k < 2; k++, d.off += es) {
+		for (int k = 0; k < 2; k++, d.offset += es) {
 			codegen_value v = walk_value_emit(e, k ? x->b : x->a);
 
 			if (walk_type_is_in_memory(e, et)) {
@@ -3502,7 +3502,7 @@ static codegen_value walk_value_emit_inner(codegen_context *e, uint32_t n)
 				WALK_LOWER(tfree)(e, r);
 			}
 		}
-		d.off -= 2 * es;
+		d.offset -= 2 * es;
 		return walk_value_from_register(WALK_LOWER(laddr)(e, &d));
 	}
 	default: {
@@ -3521,7 +3521,7 @@ static codegen_value walk_value_emit_inner(codegen_context *e, uint32_t n)
    changing the shared AST. The caller rejects side effects and volatile reads. */
 static bool walk_integer_value_evaluate(codegen_context *e, uint32_t n, i128 *out)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n);
 	cc_value cv;
 	i128 a, b, v;
@@ -3539,13 +3539,13 @@ static bool walk_integer_value_evaluate(codegen_context *e, uint32_t n, i128 *ou
 	switch (x->op) {
 	case AST_NODE_INDEX: {
 		int slot = codegen_type_size(c, x->ty) <= 8 ? codegen_array_element_slot(e, n, false) : -1;
-		if (slot < 0 || !(e->kvalid >> slot & 1)) return false;
-		*out = codegen_integer_truncate(c, e->kval[slot], x->ty);
+		if (slot < 0 || !(e->known_values_valid >> slot & 1)) return false;
+		*out = codegen_integer_truncate(c, e->known_values[slot], x->ty);
 		return true;
 	}
 	case AST_NODE_VARIABLE:
 		if (!walk_symbol_constant_get(e, x->a, &k)) return false;
-		*out = k.i;
+		*out = k.integer;
 		return true;
 	case AST_NODE_CAST:
 		if (x->aux == AST_CAST_FLOAT_TO_INTEGER && N(x->a)->op == AST_NODE_VARIABLE) {
@@ -3612,15 +3612,15 @@ static bool walk_integer_value_evaluate(codegen_context *e, uint32_t n, i128 *ou
 VPRIV int walk_condition_fold(codegen_context *e, uint32_t n)
 {
 	i128 v;
-	if (!e->E->o->opt) return -1;
-	int known = !e->E->noopt ? em_const_truth(e, n, walk_builtin_constant_p) : -1;
+	if (!e->unit->options->opt) return -1;
+	int known = !e->unit->cleanups_disabled ? em_const_truth(e, n, walk_builtin_constant_p) : -1;
 	if (known >= 0) return known;
-	if (codegen_expression_has_side_effects(e->c, n))
+	if (codegen_expression_has_side_effects(e->compile_context, n))
 		return -1;
 	if (walk_integer_value_evaluate(e, n, &v)) return v != 0;
-	if (e->E->o->no_builtin) return -1;
+	if (e->unit->options->no_builtin) return -1;
 	for (unsigned i = 0; i < CC_DISABLED_BUILTIN_WORDS; i++)
-		if (e->E->o->disabled_builtins[i])
+		if (e->unit->options->disabled_builtins[i])
 			return -1;
 	return codegen_condition_fold(e, n);
 }
@@ -3628,13 +3628,13 @@ VPRIV int walk_condition_fold(codegen_context *e, uint32_t n)
 /* to lbl if (n != 0) == jump_if */
 VPRIV void walk_condition_emit(codegen_context *e, uint32_t n, bool jump_if, uint32_t lbl)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n);
 	int known = walk_condition_fold(e, n);
 
 	if (known >= 0) {
 		if (known == (int)jump_if)
-			WALK_LOWER(jump)(e, lbl), walk_state_get(e)->cjump = true;	/* (always: what follows is dead) */
+			WALK_LOWER(jump)(e, lbl), walk_state_get(e)->condition_jumped = true;	/* (always: what follows is dead) */
 		return;
 	}
 
@@ -3644,20 +3644,20 @@ VPRIV void walk_condition_emit(codegen_context *e, uint32_t n, bool jump_if, uin
 
 		if (and != jump_if) {
 			/* a && b falls through when false: both must hold (or one hold for ||) */
-			walk_state_get(e)->cjump = false;
+			walk_state_get(e)->condition_jumped = false;
 			walk_condition_emit(e, x->a, jump_if, lbl);
-			if (walk_state_get(e)->cjump)
+			if (walk_state_get(e)->condition_jumped)
 				return;	/* (a decided it: b is dead, __builtin_constant_p(x) && ...) */
 			walk_condition_emit(e, x->b, jump_if, lbl);
 		} else {
 			uint32_t skip = walk_label_new(e);
 
-			walk_state_get(e)->cjump = false;
+			walk_state_get(e)->condition_jumped = false;
 			walk_condition_emit(e, x->a, !jump_if, skip);
-			if (!walk_state_get(e)->cjump)	/* (else b is dead: a always goes past it) */
+			if (!walk_state_get(e)->condition_jumped)	/* (else b is dead: a always goes past it) */
 				walk_condition_emit(e, x->b, jump_if, lbl);
 			walk_label_place(e, skip);
-			walk_state_get(e)->cjump = false;	/* (skip falls through) */
+			walk_state_get(e)->condition_jumped = false;	/* (skip falls through) */
 		}
 		return;
 	}
@@ -3673,14 +3673,14 @@ VPRIV void walk_condition_emit(codegen_context *e, uint32_t n, bool jump_if, uin
 		int repeated = em_repeated_integer(e, n);
 		if (repeated == EM_ID_ZERO || repeated == EM_ID_TRUE) {
 			if ((repeated == EM_ID_TRUE) == jump_if)
-				WALK_LOWER(jump)(e, lbl), walk_state_get(e)->cjump = true;
+				WALK_LOWER(jump)(e, lbl), walk_state_get(e)->condition_jumped = true;
 			return;
 		}
 		if (bound >= 0) {
 			codegen_value v = walk_value_emit(e, operand);
 			walk_value_free(e, &v);
 			if (bound == (int)jump_if)
-				WALK_LOWER(jump)(e, lbl), walk_state_get(e)->cjump = true;
+				WALK_LOWER(jump)(e, lbl), walk_state_get(e)->condition_jumped = true;
 			return;
 		}
 		if (walk_operator_is_comparison(x->aux) && !codegen_type_is_float(c, N(x->a)->ty) && !walk_type_is_in_memory(e, N(x->a)->ty)) {
@@ -3691,9 +3691,9 @@ VPRIV void walk_condition_emit(codegen_context *e, uint32_t n, bool jump_if, uin
 			walk_scalar_check(e, x->a, lt);
 			a = walk_value_emit(e, x->a);
 			b = walk_right_operand_emit(e, &a, x->b, lt);
-			if (a.k == CODEGEN_VALUE_CONSTANT && b.k == CODEGEN_VALUE_CONSTANT) {
-				if (walk_comparison_fold(op, walk_type_is_signed(c, lt), codegen_integer_truncate(c, a.i, lt), codegen_integer_truncate(c, b.i, lt)) == jump_if)
-					WALK_LOWER(jump)(e, lbl), walk_state_get(e)->cjump = true;	/* (always: what follows is dead) */
+			if (a.kind == CODEGEN_VALUE_CONSTANT && b.kind == CODEGEN_VALUE_CONSTANT) {
+				if (walk_comparison_fold(op, walk_type_is_signed(c, lt), codegen_integer_truncate(c, a.integer, lt), codegen_integer_truncate(c, b.integer, lt)) == jump_if)
+					WALK_LOWER(jump)(e, lbl), walk_state_get(e)->condition_jumped = true;	/* (always: what follows is dead) */
 				return;
 			}
 			if (!jump_if)
@@ -3730,14 +3730,14 @@ VPRIV void walk_condition_emit(codegen_context *e, uint32_t n, bool jump_if, uin
 			WALK_LOWER(brz)(e, v, 4, jump_if, lbl);
 			return;
 		}
-		if (v.k == CODEGEN_VALUE_CONSTANT) {
-			if ((v.i != 0) == jump_if)
-				WALK_LOWER(jump)(e, lbl), walk_state_get(e)->cjump = true;	/* (always: what follows is dead) */
+		if (v.kind == CODEGEN_VALUE_CONSTANT) {
+			if ((v.integer != 0) == jump_if)
+				WALK_LOWER(jump)(e, lbl), walk_state_get(e)->condition_jumped = true;	/* (always: what follows is dead) */
 			return;
 		}
-		if (v.k == CODEGEN_VALUE_ADDRESS && !walk_symbol_address_may_be_zero(c, v)) {
+		if (v.kind == CODEGEN_VALUE_ADDRESS && !walk_symbol_address_may_be_zero(c, v)) {
 			if (jump_if)
-				WALK_LOWER(jump)(e, lbl), walk_state_get(e)->cjump = true;	/* (always: what follows is dead) */
+				WALK_LOWER(jump)(e, lbl), walk_state_get(e)->condition_jumped = true;	/* (always: what follows is dead) */
 			return;
 		}
 		WALK_LOWER(brz)(e, v, codegen_type_is_pointer(c, x->ty) ? 8 : walk_operation_width(c, x->ty), jump_if, lbl);

@@ -24,15 +24,15 @@ static bool em_tail_word(cc *c, ast_qualified_type t)
 /* the caller's options and attributes allow sibling calls */
 VPRIV bool em_tail_caller_ok(codegen_context *e, uint32_t fn)
 {
-	return e->E->o->opt && !e->E->noopt && e->E->o->sibling_calls >= 0 && !e->E->o->instrument &&
-	       !codegen_symbol_attributes(e->c, fn)->interrupt &&
-	       !(codegen_symbol_attributes(e->c, fn)->flags & (CC_ATTRIBUTE_FLAG_TAIL_DISABLE | CC_ATTRIBUTE_FLAG_TAIL_RETURNS_TWICE | CC_ATTRIBUTE_FLAG_OPTNONE));
+	return e->unit->options->opt && !e->unit->cleanups_disabled && e->unit->options->sibling_calls >= 0 && !e->unit->options->instrument &&
+	       !codegen_symbol_attributes(e->compile_context, fn)->interrupt &&
+	       !(codegen_symbol_attributes(e->compile_context, fn)->flags & (CC_ATTRIBUTE_FLAG_TAIL_DISABLE | CC_ATTRIBUTE_FLAG_TAIL_RETURNS_TWICE | CC_ATTRIBUTE_FLAG_OPTNONE));
 }
 
 /* function s may be a sibling call's target (as for its attributes) */
 VPRIV bool em_tail_target_ok(codegen_context *e, uint32_t s)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const sym *target = &c->syms[s];
 
 	if (target->kind != AST_SYMBOL_FUNCTION || (target->flags & AST_SYMBOL_FLAG_NORETURN) ||
@@ -49,7 +49,7 @@ VPRIV bool em_tail_target_ok(codegen_context *e, uint32_t s)
    is deliberately absent for default WebAssembly, whose MVP has no tail call. */
 VPRIV bool em_tail_candidate(codegen_context *e, uint32_t fn, uint32_t expr, uint32_t maxargs, uint32_t *callee)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const sym *caller = &c->syms[fn];
 	const ctype *ft = T(c, caller->ty);
 	const node *body = N(caller->body), *ret, *call, *fdec, *name;

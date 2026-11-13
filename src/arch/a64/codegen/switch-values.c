@@ -3,9 +3,9 @@
 
 VPRIV bool a64_switch_values(codegen_context *e, uint32_t n)
 {
- cc *c=e->c;
- if (!e->E->o->opt || e->E->noopt || e->dry || e->f->inl || e->nclean ||
-     CODEGEN_IS_DARWIN(c) || __builtin_popcount(e->live | e->resv)>14) return false;
+ cc *c=e->compile_context;
+ if (!e->unit->options->opt || e->unit->cleanups_disabled || e->dry_run_depth || e->function_instance->is_inlined || e->cleanup_count ||
+     CODEGEN_IS_DARWIN(c) || __builtin_popcount(e->temporaries_in_use | e->temporaries_reserved)>14) return false;
  em_switch_values_recipe p;
  if (!em_switch_values_plan(c,n,&p) || !em_switch_values_queue(e,n,&p)) return false;
  codegen_value v=gen(e,N(n)->a);
@@ -23,7 +23,7 @@ VPRIV bool a64_switch_values(codegen_context *e, uint32_t n)
  addr_of_ref(e,base,CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_TABLE,n),0);
  op3(e,I_ADD,1,r,r,base);
  tfree(e,base);
- codegen_lvalue at={.k=CODEGEN_LVALUE_REGISTER,.r=(uint8_t)r,.align=p.element_bytes};
+ codegen_lvalue at={.kind=CODEGEN_LVALUE_REGISTER,.register_number=(uint8_t)r,.align=p.element_bytes};
  codegen_value result=load(e,&at,p.ty);
  /* load owns its result; keep a single result register across both edges. */
  int rr=toreg(e,&result);
@@ -32,11 +32,11 @@ VPRIV bool a64_switch_values(codegen_context *e, uint32_t n)
  deflabel(e,fallback);
  movi(e,1,r,(int64_t)p.fallback);
  deflabel(e,done);
- v=codegen_value_register(r); e->kvalid=0;
+ v=codegen_value_register(r); e->known_values_valid=0;
  if (p.is_return) {
   move_to(e,0,-1,&v,p.ty);
   val_free(e,&v);
-  jump(e,e->f->retlbl);
+  jump(e,e->function_instance->return_label);
  } else {
   codegen_lvalue dest=gen_lval(e,p.destination);
   store(e,&dest,p.ty,&v); lfree(e,&dest); val_free(e,&v);

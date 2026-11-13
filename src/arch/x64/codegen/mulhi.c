@@ -21,7 +21,7 @@ static codegen_value x64_mulhi(codegen_context *e, codegen_value a, codegen_valu
 	/* The result retains a's register ownership, even when both inputs alias. */
 	if (rb != ra)
 		x64_tfree(e, rb);
-	return (codegen_value){ .k = CODEGEN_VALUE_REGISTER, .r = (uint8_t)ra };
+	return (codegen_value){ .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)ra };
 }
 
 VPRIV codegen_value x64_umulhi(codegen_context *e, codegen_value a, codegen_value b)

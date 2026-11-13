@@ -11,7 +11,7 @@
 /* seal: every placeholder gets its operands, then trivial ones go */
 VPRIV void virbuild_blocks_seal(codegen_context *e)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 
 	V->sealing = true;
 	VIRBUILD_ARRAY_GROW(V->forward, 0, V->forward_capacity, V->insn_count + 1);
@@ -29,7 +29,7 @@ VPRIV void virbuild_blocks_seal(codegen_context *e)
 /* stores to a slot that is not exposed and that nothing reads are dead */
 VPRIV void virbuild_slot_uses_compute(codegen_context *e)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 
 	for (uint32_t s = 0; s < V->slot_count; s++)
 		V->slots[s].used = 0, V->slots[s].final_slot = VIRBUILD_BLOCK_NONE;
@@ -42,13 +42,13 @@ VPRIV void virbuild_slot_uses_compute(codegen_context *e)
 /* emission */
 VPRIV bool virbuild_function_to_vir(codegen_context *e)
 {
-	virbuild_context *V = e->vw;
-	cc *c = e->c;
+	virbuild_context *V = e->vir_builder;
+	cc *c = e->compile_context;
 	vir_function *f = &V->f;
 	uint32_t lastloc = UINT32_MAX;
 
-	vir_function_begin(f, CODEGEN_IS_X64(c) ? VIR_TARGET_X86_64_LINUX : CODEGEN_IS_DARWIN(c) ? VIR_TARGET_A64_DARWIN : VIR_TARGET_A64_LINUX, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, e->wk->fsym),
-		  (T(c, c->syms[e->wk->fsym].ty)->flags & AST_TYPE_FLAG_VARIADIC) ? VIR_FUNCTION_FLAG_VARIADIC : 0);
+	vir_function_begin(f, CODEGEN_IS_X64(c) ? VIR_TARGET_X86_64_LINUX : CODEGEN_IS_DARWIN(c) ? VIR_TARGET_A64_DARWIN : VIR_TARGET_A64_LINUX, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, e->walk_state->function_symbol),
+		  (T(c, c->syms[e->walk_state->function_symbol].ty)->flags & AST_TYPE_FLAG_VARIADIC) ? VIR_FUNCTION_FLAG_VARIADIC : 0);
 	VIRBUILD_ARRAY_GROW(V->value_map, 0, V->value_map_capacity, V->insn_count + 1);
 	memset(V->value_map, 0, (size_t)V->insn_count * sizeof *V->value_map);
 	for (uint32_t i = 0; i < V->block_order_count; i++)

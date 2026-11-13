@@ -7,59 +7,59 @@ VPRIV int64_t slot(codegen_context *e, uint64_t size, uint32_t align)
 	if (align < 1)
 		align = 1;
 	if (align > 16) {	/* x28: the base of the realigned frame if it turns out dynamic */
-		if (e->nlr)
-			_longjmp(e->bail, 2);	/* it holds a register variable (they start at x28): again without */
-		e->resv |= 1u << codegen_temporary_index(R_BP);
+		if (e->local_register_candidate_count)
+			_longjmp(e->bail_jump, 2);	/* it holds a register variable (they start at x28): again without */
+		e->temporaries_reserved |= 1u << codegen_temporary_index(R_BP);
 	}
-	if (align > e->falign)
-		e->falign = align;	/* over 16: finish_function realigns sp to it */
+	if (align > e->frame_alignment)
+		e->frame_alignment = align;	/* over 16: finish_function realigns sp to it */
 	/* Keep the allocation and its alignment rounding within signed offsets. */
 	uint64_t limit = (uint64_t)INT64_MAX - align;
-	if ((uint64_t)e->foff > limit || size > limit - (uint64_t)e->foff)
+	if ((uint64_t)e->frame_offset > limit || size > limit - (uint64_t)e->frame_offset)
 		codegen_fatal_report(e, 0, "stack object too large");
 	/* allocations past the current top ended with their scope */
-	while (e->nsstk && e->sla[e->sstk[e->nsstk - 1]].off < -e->foff)
-		e->nsstk--;
-	e->foff = (int64_t)(((uint64_t)e->foff + size + align - 1) & ~(uint64_t)(align - 1));
-	if (e->foff > e->fmax)
-		e->fmax = e->foff;
-	if (e->nsla < CODEGEN_SLOT_ALLOCATION_CAPACITY) {
-		e->sla[e->nsla] = (codegen_slot_allocation){ -e->foff, size };
-		e->sstk[e->nsstk++] = e->nsla;
+	while (e->live_slot_count && e->slot_allocations[e->live_slots[e->live_slot_count - 1]].offset < -e->frame_offset)
+		e->live_slot_count--;
+	e->frame_offset = (int64_t)(((uint64_t)e->frame_offset + size + align - 1) & ~(uint64_t)(align - 1));
+	if (e->frame_offset > e->frame_maximum)
+		e->frame_maximum = e->frame_offset;
+	if (e->slot_allocation_count < CODEGEN_SLOT_ALLOCATION_CAPACITY) {
+		e->slot_allocations[e->slot_allocation_count] = (codegen_slot_allocation){ -e->frame_offset, size };
+		e->live_slots[e->live_slot_count++] = e->slot_allocation_count;
 	}
-	e->nsla++;
-	return -e->foff;
+	e->slot_allocation_count++;
+	return -e->frame_offset;
 }
 
 /* tag record i (frame offset off, len bytes; -1: an address) with its live allocation */
 VPRIV void slot_tag(codegen_context *e, ins *i, int64_t off, int64_t len)
 {
-	uint32_t lo = 0, hi = e->nsstk;
+	uint32_t lo = 0, hi = e->live_slot_count;
 
-	if (e->E->o->opt < 1 || e->novtag)
+	if (e->unit->options->opt < 1 || e->volatile_untag_depth)
 		return;
 	/* live allocations are disjoint, offsets decreasing with depth */
 	while (lo < hi) {
 		uint32_t mid = (lo + hi) / 2;
 
-		if (e->sla[e->sstk[mid]].off > off)
+		if (e->slot_allocations[e->live_slots[mid]].offset > off)
 			lo = mid + 1;
 		else
 			hi = mid;
 	}
-	if (lo < e->nsstk) {
-		const codegen_slot_allocation *a = &e->sla[e->sstk[lo]];
-		uint32_t id = e->sstk[lo] + 1;
+	if (lo < e->live_slot_count) {
+		const codegen_slot_allocation *a = &e->slot_allocations[e->live_slots[lo]];
+		uint32_t id = e->live_slots[lo] + 1;
 
-		if (off >= a->off && (len < 0 ? off <= a->off + (int64_t)a->size : off + len <= a->off + (int64_t)a->size) &&
+		if (off >= a->offset && (len < 0 ? off <= a->offset + (int64_t)a->size : off + len <= a->offset + (int64_t)a->size) &&
 		    id <= 0xffff)
 			i->rm = (uint8_t)id, i->ra = (uint8_t)(id >> 8);
 		/* an address at the start of one allocation is also just past the end of the one below */
-		if (len < 0 && off == a->off && lo + 1 < e->nsstk) {
-			const codegen_slot_allocation *b = &e->sla[e->sstk[lo + 1]];
-			uint32_t id2 = e->sstk[lo + 1] + 1;
+		if (len < 0 && off == a->offset && lo + 1 < e->live_slot_count) {
+			const codegen_slot_allocation *b = &e->slot_allocations[e->live_slots[lo + 1]];
+			uint32_t id2 = e->live_slots[lo + 1] + 1;
 
-			if (b->off + (int64_t)b->size == off) {
+			if (b->offset + (int64_t)b->size == off) {
 				if (id2 > 0xffff)
 					i->rm = i->ra = 0;	/* untagged */
 				else
@@ -72,7 +72,7 @@ VPRIV void slot_tag(codegen_context *e, ins *i, int64_t off, int64_t len)
 /* address of a symbol into rd */
 VPRIV void addr_of_ref(codegen_context *e, int rd, uint32_t ref, int64_t off)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 
 	codegen_reference_note(e, ref);
 	if (codegen_symbol_needs_got(c, ref)) {
@@ -94,17 +94,17 @@ VPRIV void addr_of_ref(codegen_context *e, int rd, uint32_t ref, int64_t off)
 /* base register + offset for a memory access; may load a symbol page into x16 */
 VPRIV int lbase(codegen_context *e, const codegen_lvalue *l, int64_t *off, int size)
 {
-	switch (l->k) {
+	switch (l->kind) {
 	case CODEGEN_LVALUE_FRAME:
-		*off = l->off;
+		*off = l->offset;
 		return FRAME;
 	case CODEGEN_LVALUE_REGISTER:
-		*off = l->off;
-		return l->r;
+		*off = l->offset;
+		return l->register_number;
 	case CODEGEN_LVALUE_LOCAL_REGISTER:
-		codegen_fatal_report(e, e->curloc, "internal: memory access to a register variable");
+		codegen_fatal_report(e, e->current_location, "internal: memory access to a register variable");
 	default:
-		addr_of_ref(e, R_X16, l->ref, l->off);
+		addr_of_ref(e, R_X16, l->reference, l->offset);
 		*off = 0;
 		(void)size;
 		return R_X16;
@@ -116,12 +116,12 @@ VPRIV int log2sz(uint64_t n) { return n == 1 ? 0 : n == 2 ? 1 : n == 4 ? 2 : 3; 
 /* the alignment the object a reference names is known to have */
 static uint32_t ref_align(codegen_context *e, const codegen_lvalue *l)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	uint32_t a;
 
-	switch (CODEGEN_REFERENCE_KIND(l->ref)) {
-	case CODEGEN_REFERENCE_SYMBOL: a = codegen_symbol_alignment(c, codegen_symbol_canonical(c, CODEGEN_REFERENCE_INDEX(l->ref))); break;
-	case CODEGEN_REFERENCE_STRING: a = c->strs[CODEGEN_REFERENCE_INDEX(l->ref)].esz; break;
+	switch (CODEGEN_REFERENCE_KIND(l->reference)) {
+	case CODEGEN_REFERENCE_SYMBOL: a = codegen_symbol_alignment(c, codegen_symbol_canonical(c, CODEGEN_REFERENCE_INDEX(l->reference))); break;
+	case CODEGEN_REFERENCE_STRING: a = c->strs[CODEGEN_REFERENCE_INDEX(l->reference)].esz; break;
 	case CODEGEN_REFERENCE_LABEL: a = 1; break;
 	default: return l->align;
 	}
@@ -134,11 +134,11 @@ VPRIV void load_n(codegen_context *e, int rd, const codegen_lvalue *l, int n, in
 	int64_t off;
 	int sz = log2sz((uint64_t)n);
 
-	if (l->k == CODEGEN_LVALUE_SYMBOL && !codegen_symbol_needs_got(e->c, l->ref) && ref_align(e, l) >= (uint32_t)n && (l->off & (n - 1)) == 0 &&
-	    CODEGEN_SYMBOL_OFFSET_FITS(e->c, l->off)) {
-		codegen_reference_note(e, l->ref);
-		symop(e, I_ADRP, 1, 0, R_X16, 0, l->ref, l->off);
-		symop(e, I_LDLO, sz, ext, rd, R_X16, l->ref, l->off);
+	if (l->kind == CODEGEN_LVALUE_SYMBOL && !codegen_symbol_needs_got(e->compile_context, l->reference) && ref_align(e, l) >= (uint32_t)n && (l->offset & (n - 1)) == 0 &&
+	    CODEGEN_SYMBOL_OFFSET_FITS(e->compile_context, l->offset)) {
+		codegen_reference_note(e, l->reference);
+		symop(e, I_ADRP, 1, 0, R_X16, 0, l->reference, l->offset);
+		symop(e, I_LDLO, sz, ext, rd, R_X16, l->reference, l->offset);
 		return;
 	}
 	{
@@ -153,11 +153,11 @@ VPRIV void store_n(codegen_context *e, int rs, const codegen_lvalue *l, int64_t 
 	int64_t off;
 	int sz = log2sz((uint64_t)n);
 
-	if (l->k == CODEGEN_LVALUE_SYMBOL && !codegen_symbol_needs_got(e->c, l->ref) && ref_align(e, l) >= (uint32_t)n && ((l->off + extra) & (n - 1)) == 0 &&
-	    CODEGEN_SYMBOL_OFFSET_FITS(e->c, l->off + extra)) {
-		codegen_reference_note(e, l->ref);
-		symop(e, I_ADRP, 1, 0, R_X16, 0, l->ref, l->off + extra);
-		symop(e, I_STLO, sz, 0, rs, R_X16, l->ref, l->off + extra);
+	if (l->kind == CODEGEN_LVALUE_SYMBOL && !codegen_symbol_needs_got(e->compile_context, l->reference) && ref_align(e, l) >= (uint32_t)n && ((l->offset + extra) & (n - 1)) == 0 &&
+	    CODEGEN_SYMBOL_OFFSET_FITS(e->compile_context, l->offset + extra)) {
+		codegen_reference_note(e, l->reference);
+		symop(e, I_ADRP, 1, 0, R_X16, 0, l->reference, l->offset + extra);
+		symop(e, I_STLO, sz, 0, rs, R_X16, l->reference, l->offset + extra);
 		return;
 	}
 	{

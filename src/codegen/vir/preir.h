@@ -154,7 +154,7 @@ static inline bool virbuild_operand_kind_is_value(uint8_t k)
 	return k >= VIR_OPERAND_KIND_T && k <= VIR_OPERAND_KIND_BITC ? true : k == VIR_OPERAND_KIND_CONSTV;
 }
 
-static inline uint32_t virbuild_value_type(codegen_context *e, uint32_t v) { return e->vw->insns[v].insn.type; }
+static inline uint32_t virbuild_value_type(codegen_context *e, uint32_t v) { return e->vir_builder->insns[v].insn.type; }
 
 static inline uint32_t virbuild_value_resolve(virbuild_context *V, uint32_t v)
 {

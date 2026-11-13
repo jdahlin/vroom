@@ -195,7 +195,7 @@ static void x64_check_vector_abi(codegen_context *e, uint64_t size, bool vector,
 
 	unsupported |= wide_record && x86_feature_has(features, size == 64 ? X86_FEATURE_AVX512F : X86_FEATURE_AVX);
 	if (unsupported)
-		codegen_fatal_report(e, e->curloc, "x86-64: AVX vector argument or return ABI is not supported yet (PLAN-x86.md)");
+		codegen_fatal_report(e, e->current_location, "x86-64: AVX vector argument or return ABI is not supported yet (PLAN-x86.md)");
 }
 
 /* Clang retains the i1-vector ABI through singleton aggregate wrappers. */
@@ -225,42 +225,42 @@ VPRIV void x64_classify0(codegen_context *e, ast_qualified_type t, walk_argument
 VPRIV void x64_classify(codegen_context *e, ast_qualified_type t, walk_argument *a, bool unnamed)
 {
 	x64_classify0(e, t, a);
-	a->unnamed = unnamed;
-	uint32_t fn = e->wk->inl ? e->wk->inl->fn : e->wk->fsym;
+	a->is_unnamed = unnamed;
+	uint32_t fn = e->walk_state->inline_call ? e->walk_state->inline_call->function : e->walk_state->function_symbol;
 	/* Unnamed wide vectors/records use the overflow area, never YMM/ZMM. */
 	if (!unnamed)
-		x64_check_vector_abi(e, a->size, a->vector, a->wide_record, cc_x86_features_get(e->c, fn));
-	if (x64_nosimd(e) && a->mem && a->up)
-		a->up = false;	/* a 32-byte vector: returned in memory, not xmm0:xmm1 */
-	if (x64_nosimd(e) && (a->x87 || (!a->mem && a->n && (a->cls[0] == WALK_ARGUMENT_SSE || (a->n > 1 && a->cls[1] == WALK_ARGUMENT_SSE)))))
+		x64_check_vector_abi(e, a->size, a->is_vector, a->is_wide_record, cc_x86_features_get(e->compile_context, fn));
+	if (x64_nosimd(e) && a->is_in_memory && a->is_sse_up)
+		a->is_sse_up = false;	/* a 32-byte vector: returned in memory, not xmm0:xmm1 */
+	if (x64_nosimd(e) && (a->is_x87 || (!a->is_in_memory && a->eightbyte_count && (a->classes[0] == WALK_ARGUMENT_SSE || (a->eightbyte_count > 1 && a->classes[1] == WALK_ARGUMENT_SSE)))))
 		x64_nofp(e);
 }
 
 VPRIV void x64_classify0(codegen_context *e, ast_qualified_type t, walk_argument *a)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	uint64_t size = codegen_type_size(c, t);
 	int cls[2] = { XC_NONE, XC_NONE };
 
 	memset(a, 0, sizeof *a);
 	a->size = size;
-	a->vector = codegen_type_is_vector(c, t);
-	a->wide_record = x64_wide_record(c, t);
+	a->is_vector = codegen_type_is_vector(c, t);
+	a->is_wide_record = x64_wide_record(c, t);
 	a->align = codegen_type_alignment(c, t) > 8 ? codegen_type_alignment(c, t) : 8;
 	/* SysV classifies _BitInt wider than 128 bits as MEMORY, including
 	 * unnamed variadic arguments. Returns use the ordinary hidden pointer. */
 	if (codegen_type_is_bitint_big(c, t)) {
 		a->align = 8; /* typedef alignment does not change the scalar ABI */
-		a->mem = true;
+		a->is_in_memory = true;
 		return;
 	}
 	if (!codegen_type_is_record(c, t) && !codegen_type_is_array(c, t) && !codegen_type_is_vector(c, t)) {
-		a->n = size > 8 ? 2 : 1;
-		a->cls[0] = a->cls[1] = codegen_type_is_float(c, t) ? WALK_ARGUMENT_SSE : WALK_ARGUMENT_INTEGER;
+		a->eightbyte_count = size > 8 ? 2 : 1;
+		a->classes[0] = a->classes[1] = codegen_type_is_float(c, t) ? WALK_ARGUMENT_SSE : WALK_ARGUMENT_INTEGER;
 		if (KIND(c, t) == AST_TYPE_LONG_DOUBLE)
-			a->mem = true, a->n = 0, a->x87 = true;	/* passed in memory, returned in st(0) */
+			a->is_in_memory = true, a->eightbyte_count = 0, a->is_x87 = true;	/* passed in memory, returned in st(0) */
 		if (KIND(c, t) == AST_TYPE_FLOAT128)
-			a->n = 1, a->cls[0] = WALK_ARGUMENT_SSE, a->up = true;	/* SSE + SSEUP: one xmm register */
+			a->eightbyte_count = 1, a->classes[0] = WALK_ARGUMENT_SSE, a->is_sse_up = true;	/* SSE + SSEUP: one xmm register */
 		return;
 	}
 	if (size == 0)
@@ -270,48 +270,48 @@ VPRIV void x64_classify0(codegen_context *e, ast_qualified_type t, walk_argument
 		/* LLVM scalarizes <65..128 x i1> arguments into individual integer
 		   arguments. Results use a hidden pointer; larger arguments are
 		   packed by-value memory rather than ordinary SIMD vectors. */
-		a->mem = true;
-		a->blanes = blanes <= 128 ? blanes : 0;
+		a->is_in_memory = true;
+		a->bool_lane_count = blanes <= 128 ? blanes : 0;
 		return;
 	}
 	if (codegen_type_is_vector(c, t) && (size == 32 || size == 64)) {
 		/* clang without AVX: passed in memory, returned in 2 or 4 xmm registers (-Wpsabi) */
-		a->mem = true, a->up = true;
+		a->is_in_memory = true, a->is_sse_up = true;
 		return;
 	}
 	if (codegen_type_is_record(c, t) && (c->tags[T(c, t)->aux].flags & AST_RECORD_FLAG_COMPLEX) && KIND(c, c->tags[T(c, t)->aux].f[0].ty) == AST_TYPE_LONG_DOUBLE) {
-		a->mem = true, a->x87 = true;	/* COMPLEX_X87: passed in memory, returned in st(0) (real), st(1) */
+		a->is_in_memory = true, a->is_x87 = true;	/* COMPLEX_X87: passed in memory, returned in st(0) (real), st(1) */
 		return;
 	}
 	if (size > 16 || !x64_cls(c, t, 0, cls) || cls[0] == XC_MEM || cls[1] == XC_MEM) {
-		a->mem = true;
+		a->is_in_memory = true;
 		return;
 	}
 	if (cls[0] == XC_X87 && cls[1] == XC_X87UP) {
-		a->mem = true, a->x87 = true;
+		a->is_in_memory = true, a->is_x87 = true;
 		return;
 	}
 	if (cls[0] == XC_X87 || cls[1] == XC_X87UP) {
-		a->mem = true;
+		a->is_in_memory = true;
 		return;
 	}
 	/* An orphan SSEUP eightbyte (e.g. vector/integer union) is SSE. */
 	if (cls[1] == XC_SSEUP && cls[0] != XC_SSE) cls[1] = XC_SSE;
 	if (cls[1] == XC_SSEUP) {
-		a->n = 1, a->cls[0] = WALK_ARGUMENT_SSE, a->up = true;	/* one xmm register */
+		a->eightbyte_count = 1, a->classes[0] = WALK_ARGUMENT_SSE, a->is_sse_up = true;	/* one xmm register */
 		return;
 	}
-	a->n = cls[1] != XC_NONE ? 2 : cls[0] != XC_NONE ? 1 : 0;
-	for (int i = 0; i < a->n; i++)
-		a->cls[i] = cls[i] == XC_SSE ? WALK_ARGUMENT_SSE : WALK_ARGUMENT_INTEGER;
+	a->eightbyte_count = cls[1] != XC_NONE ? 2 : cls[0] != XC_NONE ? 1 : 0;
+	for (int i = 0; i < a->eightbyte_count; i++)
+		a->classes[i] = cls[i] == XC_SSE ? WALK_ARGUMENT_SSE : WALK_ARGUMENT_INTEGER;
 }
 
 static int x64_need(const walk_argument *a, int cl)
 {
 	int k = 0;
 
-	for (int i = 0; i < a->n; i++)
-		k += a->cls[i] == cl;
+	for (int i = 0; i < a->eightbyte_count; i++)
+		k += a->classes[i] == cl;
 	return k;
 }
 
@@ -322,48 +322,48 @@ VPRIV void x64_x87st(codegen_context *e, const codegen_lvalue *l);
 
 /* ---------------- calls ---------------- */
 
-static codegen_lvalue x64_fr(int64_t off) { return (codegen_lvalue){ .k = CODEGEN_LVALUE_FRAME, .off = off, .align = 8 }; }
+static codegen_lvalue x64_fr(int64_t off) { return (codegen_lvalue){ .kind = CODEGEN_LVALUE_FRAME, .offset = off, .align = 8 }; }
 
 VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref, codegen_value *fn, const walk_argument *a, int n, bool variadic, const walk_argument *r, ast_qualified_type rt)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 
 	if (CODEGEN_REFERENCE_KIND(ref) == CODEGEN_REFERENCE_SYMBOL) {
 		x86_features features = cc_x86_features_get(c, CODEGEN_REFERENCE_INDEX(ref));
 		for (int k = 0; k < n; k++)
-			if (!a[k].unnamed) x64_check_vector_abi(e, a[k].size, a[k].vector, a[k].wide_record, features);
+			if (!a[k].is_unnamed) x64_check_vector_abi(e, a[k].size, a[k].is_vector, a[k].is_wide_record, features);
 		x64_check_vector_abi(e, codegen_type_size(c, rt), codegen_type_is_vector(c, rt), x64_wide_record(c, rt), features);
 	}
 
 	if (variadic) {
 		/* The walker knows fixed parameters for direct and indirect calls. */
 		for (int k = 0; k < n; k++)
-			if (a[k].blanes && a[k].unnamed)
-				codegen_fatal_report(e, e->curloc, "x86-64: variadic transport of 65..128-lane packed boolean vectors is not supported");
+			if (a[k].bool_lane_count && a[k].is_unnamed)
+				codegen_fatal_report(e, e->current_location, "x86-64: variadic transport of 65..128-lane packed boolean vectors is not supported");
 	}
 
 	/* An explicit builtin needs no libm symbol. Copy the x87 representation
 	 * and clear only its sign, without an FP load that could alter a NaN. */
-	if (CODEGEN_REFERENCE_KIND(ref) == CODEGEN_REFERENCE_NAME && CODEGEN_REFERENCE_INDEX(ref) < 0x8000000u && n == 1 && r && r->x87 &&
+	if (CODEGEN_REFERENCE_KIND(ref) == CODEGEN_REFERENCE_NAME && CODEGEN_REFERENCE_INDEX(ref) < 0x8000000u && n == 1 && r && r->is_x87 &&
 	    KIND(c, rt) == AST_TYPE_LONG_DOUBLE && cc_builtin_library_kind(CODEGEN_REFERENCE_INDEX(ref)) == CC_LIBRARY_KIND_FABSL) {
 		int q = x64_treg(e);
 		codegen_lvalue src = x64_fr(a[0].slot), dst = x64_fr(r->slot);
 
 		x64_mem(e, X_LD, 8, q, &src, false);
 		x64_mem(e, X_ST, 8, q, &dst, false);
-		src.off += 8;
-		dst.off += 8;
+		src.offset += 8;
+		dst.offset += 8;
 		x64_mem(e, X_LD, 2, q, &src, false);
-		x64_op3(e, X_ANDI, 8, q, q, XNOREG)->imm = 0x7fff;
+		x64_op3(e, X_ANDI, 8, q, q, XNOREG)->immediate = 0x7fff;
 		x64_mem(e, X_ST, 2, q, &dst, false);
 		x64_tfree(e, q);
 		return codegen_value_constant(0);
 	}
-	xst *X = e->x64;
+	xst *X = e->x64_context;
 	uint32_t saved = X->live & X_TEMPS, fsaved = X->live & X_FTEMPS;
 	int retsize = KIND(c, rt) == AST_TYPE_VOID ? 0 : walk_type_size(c, rt);
 	bool retsgn = walk_type_is_signed(c, rt), retf = codegen_type_is_float(c, rt) && !r;
-	int gp = r && r->mem && !r->x87 && !r->up ? 1 : 0, fp = 0;
+	int gp = r && r->is_in_memory && !r->is_x87 && !r->is_sse_up ? 1 : 0, fp = 0;
 	int64_t total = 0, pad;
 	uint32_t stackalign = 16;
 	int64_t savedsp = 0;
@@ -374,18 +374,18 @@ VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref, codegen_value *fn
 	for (int k = 0; k < n; k++) {
 		int ng = x64_need(&a[k], WALK_ARGUMENT_INTEGER), nf = x64_need(&a[k], WALK_ARGUMENT_SSE);
 
-		if (a[k].blanes) {
+		if (a[k].bool_lane_count) {
 			bregs[k] = 6 - gp;
 			gp = 6;
 			place[k] = total;
-			total += ((int64_t)a[k].blanes - bregs[k]) * 8;
+			total += ((int64_t)a[k].bool_lane_count - bregs[k]) * 8;
 			continue;
 		}
-		if (!a[k].mem && a[k].n == 0) {
+		if (!a[k].is_in_memory && a[k].eightbyte_count == 0) {
 			place[k] = -1;
 			continue;
 		}
-		if (!a[k].mem && gp + ng <= 6 && fp + nf <= 8) {
+		if (!a[k].is_in_memory && gp + ng <= 6 && fp + nf <= 8) {
 			gp += ng, fp += nf;
 			place[k] = -1;
 			continue;
@@ -403,9 +403,9 @@ VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref, codegen_value *fn
 		}
 	for (int q = XMM8; q < XMM15; q++)
 		if (fsaved & (1u << q)) {
-			codegen_lvalue d = { .k = CODEGEN_LVALUE_REGISTER, .r = RSP };
+			codegen_lvalue d = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = RSP };
 
-			x64_put(e, X_ADJSP)->imm = -8;
+			x64_put(e, X_ADJSP)->immediate = -8;
 			x64_mem(e, X_ST, 8, q, &d, false);
 			X->pushes++;
 		}
@@ -417,22 +417,22 @@ VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref, codegen_value *fn
 	total = (total + 15) & ~(int64_t)15;
 	pad = (X->pushes * 8 + total) % 16 ? 8 : 0;
 	if (total + pad) {
-		x64_put(e, X_ADJSP)->imm = -(total + pad);
+		x64_put(e, X_ADJSP)->immediate = -(total + pad);
 		X->pushes += (int)((total + pad) / 8);
 	}
 	if (stackalign > 16)
-		x64_op3(e, X_ANDI, 8, RSP, RSP, XNOREG)->imm = -(int64_t)stackalign;
+		x64_op3(e, X_ANDI, 8, RSP, RSP, XNOREG)->immediate = -(int64_t)stackalign;
 	/* stack arguments: their slots' words into the outgoing area */
 	for (int k = 0; k < n; k++) {
 		if (place[k] < 0)
 			continue;
-		if (a[k].blanes) {
-			for (uint32_t bit = (uint32_t)bregs[k]; bit < a[k].blanes; bit++) {
+		if (a[k].bool_lane_count) {
+			for (uint32_t bit = (uint32_t)bregs[k]; bit < a[k].bool_lane_count; bit++) {
 				codegen_lvalue src = x64_fr(a[k].slot + bit / 8);
-				codegen_lvalue dst = { .k = CODEGEN_LVALUE_REGISTER, .r = RSP, .off = place[k] + 8 * (bit - bregs[k]) };
+				codegen_lvalue dst = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = RSP, .offset = place[k] + 8 * (bit - bregs[k]) };
 				x64_mem(e, X_LD, 1, R11, &src, false);
-				if (bit % 8) x64_op3(e, X_SHRI, 8, R11, R11, XNOREG)->imm = bit % 8;
-				x64_op3(e, X_ANDI, 8, R11, R11, XNOREG)->imm = 1;
+				if (bit % 8) x64_op3(e, X_SHRI, 8, R11, R11, XNOREG)->immediate = bit % 8;
+				x64_op3(e, X_ANDI, 8, R11, R11, XNOREG)->immediate = 1;
 				x64_mem(e, X_ST, 8, R11, &dst, false);
 			}
 			continue;
@@ -444,60 +444,60 @@ VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref, codegen_value *fn
 			static const uint8_t regs[] = { RDI, RSI, RCX };
 			uint32_t sv = x64_save(e, regs, 3, -1, -1);
 			codegen_lvalue s = x64_fr(a[k].slot);
-			codegen_lvalue d = { .k = CODEGEN_LVALUE_REGISTER, .r = RSP, .off = place[k] + 8 * __builtin_popcount(sv) };
+			codegen_lvalue d = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = RSP, .offset = place[k] + 8 * __builtin_popcount(sv) };
 
 			x64_mem(e, X_LEA, 8, RSI, &s, false);
 			x64_mem(e, X_LEA, 8, RDI, &d, false);
 			x64_movi(e, RCX, (int64_t)a[k].size);
-			x64_put(e, X_REP)->cond = 0;
+			x64_put(e, X_REP)->condition = 0;
 			x64_restore(e, sv);
 			continue;
 		}
 		for (uint64_t o = 0; o < a[k].size; o += 8) {
-			codegen_lvalue s = x64_fr(a[k].slot + (int64_t)o), d = { .k = CODEGEN_LVALUE_REGISTER, .r = RSP, .off = place[k] + (int64_t)o };
+			codegen_lvalue s = x64_fr(a[k].slot + (int64_t)o), d = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = RSP, .offset = place[k] + (int64_t)o };
 
 			x64_mem(e, X_LD, 8, R11, &s, false);
 			x64_mem(e, X_ST, 8, R11, &d, false);
 		}
 	}
 	if (fn)
-		x64_mov(e, R11, fn->r);
+		x64_mov(e, R11, fn->register_number);
 	/* register arguments */
 	gp = 0, fp = 0;
-	if (r && r->mem && !r->x87 && !r->up) {
+	if (r && r->is_in_memory && !r->is_x87 && !r->is_sse_up) {
 		codegen_lvalue s = x64_fr(r->slot);
 
 		x64_mem(e, X_LEA, 8, x64_argreg(gp++), &s, false);
 	}
 	for (int k = 0; k < n; k++) {
-		if (a[k].blanes) {
+		if (a[k].bool_lane_count) {
 			for (int bit = 0; bit < bregs[k]; bit++) {
 				codegen_lvalue src = x64_fr(a[k].slot + bit / 8);
 				int reg = x64_argreg(gp++);
 				x64_mem(e, X_LD, 1, reg, &src, false);
-				if (bit % 8) x64_op3(e, X_SHRI, 8, reg, reg, XNOREG)->imm = bit % 8;
-				x64_op3(e, X_ANDI, 8, reg, reg, XNOREG)->imm = 1;
+				if (bit % 8) x64_op3(e, X_SHRI, 8, reg, reg, XNOREG)->immediate = bit % 8;
+				x64_op3(e, X_ANDI, 8, reg, reg, XNOREG)->immediate = 1;
 			}
 			continue;
 		}
 		if (place[k] >= 0)
 			continue;
-		for (int w = 0; w < a[k].n; w++) {
+		for (int w = 0; w < a[k].eightbyte_count; w++) {
 			codegen_lvalue s = x64_fr(a[k].slot + 8 * w);
 
-			x64_mem(e, X_LD, a[k].up ? 16 : 8, a[k].cls[w] == WALK_ARGUMENT_SSE ? XMM0 + fp++ : x64_argreg(gp++), &s, false);
+			x64_mem(e, X_LD, a[k].is_sse_up ? 16 : 8, a[k].classes[w] == WALK_ARGUMENT_SSE ? XMM0 + fp++ : x64_argreg(gp++), &s, false);
 		}
 	}
 	free(place);
 	free(bregs);
 	if (variadic)
-		x64_op3(e, X_MOVI, 4, RAX, XNOREG, XNOREG)->imm = fp;	/* al: vector registers used */
+		x64_op3(e, X_MOVI, 4, RAX, XNOREG, XNOREG)->immediate = fp;	/* al: vector registers used */
 	if (fn) {
 		x64_op3(e, X_CALLR, 8, XNOREG, R11, XNOREG);
 	} else {
 		i = x64_put(e, X_CALL);
-		i->ref = ref;
-		i->cond = variadic;
+		i->reference = ref;
+		i->condition = variadic;
 	}
 	if (savedsp) {
 		codegen_lvalue slot = x64_fr(savedsp);
@@ -505,31 +505,31 @@ VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref, codegen_value *fn
 		x64_mem(e, X_LD, 8, RSP, &slot, false);
 		X->pushes -= (int)((total + pad) / 8);
 	} else if (total + pad) {
-		x64_put(e, X_ADJSP)->imm = total + pad;
+		x64_put(e, X_ADJSP)->immediate = total + pad;
 		X->pushes -= (int)((total + pad) / 8);
 	}
-	if (r && r->x87) {
+	if (r && r->is_x87) {
 		codegen_lvalue d = x64_fr(r->slot);
 
 		x64_x87st(e, &d);
 		if (r->size == 32) {
-			d.off += 16;
+			d.offset += 16;
 			x64_x87st(e, &d);	/* _Complex long double: the imaginary part from st(1) */
 		}
-	} else if (r && r->mem && r->up) {
+	} else if (r && r->is_in_memory && r->is_sse_up) {
 		for (int w = 0; w < (int)(r->size / 16); w++) {
 			codegen_lvalue d = x64_fr(r->slot + 16 * w);
 
 			x64_mem(e, X_ST, 16, XMM0 + w, &d, false);
 		}
-	} else if (r && !r->mem && r->n) {
+	} else if (r && !r->is_in_memory && r->eightbyte_count) {
 		/* a record in rax, rdx / xmm0, xmm1 (by class, in order) into its slot */
 		int ng = 0, nf = 0;
 
-		for (int w = 0; w < r->n; w++) {
+		for (int w = 0; w < r->eightbyte_count; w++) {
 			codegen_lvalue d = x64_fr(r->slot + 8 * w);
 
-			x64_mem(e, X_ST, r->up ? 16 : 8, r->cls[w] == WALK_ARGUMENT_SSE ? XMM0 + nf++ : (ng++ ? RDX : RAX), &d, false);
+			x64_mem(e, X_ST, r->is_sse_up ? 16 : 8, r->classes[w] == WALK_ARGUMENT_SSE ? XMM0 + nf++ : (ng++ ? RDX : RAX), &d, false);
 		}
 	} else if (retsize && !retf && !r) {
 		x64_mov(e, R11, RAX);
@@ -537,10 +537,10 @@ VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref, codegen_value *fn
 	}
 	for (int q = XMM15 - 1; q >= XMM8; q--)
 		if (fsaved & (1u << q)) {
-			codegen_lvalue s = { .k = CODEGEN_LVALUE_REGISTER, .r = RSP };
+			codegen_lvalue s = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = RSP };
 
 			x64_mem(e, X_LD, 8, q, &s, false);
-			x64_put(e, X_ADJSP)->imm = 8;
+			x64_put(e, X_ADJSP)->immediate = 8;
 			X->pushes--;
 		}
 	for (int q = 15; q >= 0; q--)
@@ -548,21 +548,21 @@ VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref, codegen_value *fn
 			x64_op3(e, X_POP, 8, q, XNOREG, XNOREG);
 			X->pushes--;
 		}
-	if (fn && fn->k == CODEGEN_VALUE_REGISTER)
-		x64_tfree(e, fn->r);
+	if (fn && fn->kind == CODEGEN_VALUE_REGISTER)
+		x64_tfree(e, fn->register_number);
 	if (!retsize || r)
 		return codegen_value_constant(0);
 	if (retf) {
 		int q = x64_ftreg(e);
 
 		x64_mov(e, q, XMM0);
-		return (codegen_value){ .k = CODEGEN_VALUE_REGISTER, .r = (uint8_t)q };
+		return (codegen_value){ .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)q };
 	}
 	{
 		int q = x64_treg(e);
 
 		x64_mov(e, q, R11);
-		return (codegen_value){ .k = CODEGEN_VALUE_REGISTER, .r = (uint8_t)q };
+		return (codegen_value){ .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)q };
 	}
 }
 
@@ -570,32 +570,32 @@ VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref, codegen_value *fn
 
 VPRIV void x64_params(codegen_context *e, walk_argument *a, int n, const walk_argument *r, bool variadic)
 {
-	xst *X = e->x64;
-	cc *c = e->c;
-	const node *body = N(c->syms[e->wk->fsym].body);
+	xst *X = e->x64_context;
+	cc *c = e->compile_context;
+	const node *body = N(c->syms[e->walk_state->function_symbol].body);
 	int gp = 0, fp = 0;
 	int64_t stk = 0;
 
-	const attrs *fa = codegen_symbol_attributes(e->c, e->wk->fsym);
+	const attrs *fa = codegen_symbol_attributes(e->compile_context, e->walk_state->function_symbol);
 	X->interrupt = fa && fa->interrupt ? n : 0;
 	X->sret = 0;
 	if (X->interrupt) {
 		/* The printer saves every GPR and establishes an aligned R12 frame
 		   before these records execute; RBP retains the hardware frame. */
-		if (e->wk->falign < 32) e->wk->falign = 32;
-		codegen_lvalue frame = { .k = CODEGEN_LVALUE_REGISTER, .r = RBP, .off = n == 2 ? 16 : 8 };
+		if (e->walk_state->frame_alignment < 32) e->walk_state->frame_alignment = 32;
+		codegen_lvalue frame = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = RBP, .offset = n == 2 ? 16 : 8 };
 		codegen_lvalue dst = x64_fr(a[0].slot);
 		x64_mem(e, X_LEA, 8, R11, &frame, false);
 		x64_mem(e, X_ST, 8, R11, &dst, false);
 		if (n == 2) {
-			frame.off = 8;
+			frame.offset = 8;
 			dst = x64_fr(a[1].slot);
 			x64_mem(e, X_LD, 8, R11, &frame, false);
 			x64_mem(e, X_ST, 8, R11, &dst, false);
 		}
 		return;
 	}
-	if (r && r->mem && !r->x87 && !r->up) {
+	if (r && r->is_in_memory && !r->is_x87 && !r->is_sse_up) {
 		codegen_lvalue d = x64_fr(r->slot);
 
 		x64_mem(e, X_ST, 8, x64_argreg(gp++), &d, false);
@@ -608,8 +608,8 @@ VPRIV void x64_params(codegen_context *e, walk_argument *a, int n, const walk_ar
 		codegen_lvalue home;
 		bool local = x64_local(e, sym, &home);
 
-		if (a[k].blanes) {
-			for (uint32_t bit = 0; bit < a[k].blanes; bit++) {
+		if (a[k].bool_lane_count) {
+			for (uint32_t bit = 0; bit < a[k].bool_lane_count; bit++) {
 				if (!(bit % 8)) x64_movi(e, R10, 0);
 				if (gp < 6) x64_mov(e, R11, x64_argreg(gp++));
 				else {
@@ -617,31 +617,31 @@ VPRIV void x64_params(codegen_context *e, walk_argument *a, int n, const walk_ar
 					x64_mem(e, X_LD, 8, R11, &src, false);
 					stk += 8;
 				}
-				x64_op3(e, X_ANDI, 8, R11, R11, XNOREG)->imm = 1;
-				if (bit % 8) x64_op3(e, X_SHLI, 8, R11, R11, XNOREG)->imm = bit % 8;
+				x64_op3(e, X_ANDI, 8, R11, R11, XNOREG)->immediate = 1;
+				if (bit % 8) x64_op3(e, X_SHLI, 8, R11, R11, XNOREG)->immediate = bit % 8;
 				x64_op3(e, X_OR, 8, R10, R10, R11);
-				if (bit % 8 == 7 || bit + 1 == a[k].blanes) {
+				if (bit % 8 == 7 || bit + 1 == a[k].bool_lane_count) {
 					codegen_lvalue dst = x64_fr(a[k].slot + bit / 8);
 					x64_mem(e, X_ST, 1, R10, &dst, false);
 				}
 			}
 			continue;
 		}
-		if (!a[k].mem && a[k].n == 0)
+		if (!a[k].is_in_memory && a[k].eightbyte_count == 0)
 			continue;
-		if (!a[k].mem && gp + ng <= 6 && fp + nf <= 8) {
+		if (!a[k].is_in_memory && gp + ng <= 6 && fp + nf <= 8) {
 			if (local) {
 				/* Selected homes are scalar integer/pointer words. Bind directly
 				   without creating a stack copy; preserve the usual ABI count. */
-				codegen_lvalue from = { .k = CODEGEN_LVALUE_LOCAL_REGISTER, .r = (uint8_t)x64_argreg(gp++) };
+				codegen_lvalue from = { .kind = CODEGEN_LVALUE_LOCAL_REGISTER, .register_number = (uint8_t)x64_argreg(gp++) };
 
-				x64_load(e, home.r, &from, walk_type_size(c, ty), walk_type_is_signed(c, ty));
+				x64_load(e, home.register_number, &from, walk_type_size(c, ty), walk_type_is_signed(c, ty));
 				continue;
 			}
-			for (int w = 0; w < a[k].n; w++) {
+			for (int w = 0; w < a[k].eightbyte_count; w++) {
 				codegen_lvalue d = x64_fr(a[k].slot + 8 * w);
 
-				x64_mem(e, X_ST, a[k].up ? 16 : 8, a[k].cls[w] == WALK_ARGUMENT_SSE ? XMM0 + fp++ : x64_argreg(gp++), &d, false);
+				x64_mem(e, X_ST, a[k].is_sse_up ? 16 : 8, a[k].classes[w] == WALK_ARGUMENT_SSE ? XMM0 + fp++ : x64_argreg(gp++), &d, false);
 			}
 			continue;
 		}
@@ -663,7 +663,7 @@ VPRIV void x64_params(codegen_context *e, walk_argument *a, int n, const walk_ar
 			if (local) {
 				codegen_lvalue from = x64_fr(a[k].slot);
 
-				x64_load(e, home.r, &from, walk_type_size(c, ty), walk_type_is_signed(c, ty));
+				x64_load(e, home.register_number, &from, walk_type_size(c, ty), walk_type_is_signed(c, ty));
 			}
 		}
 		stk += (int64_t)((a[k].size + 7) & ~(uint64_t)7);
@@ -685,7 +685,7 @@ VPRIV void x64_params(codegen_context *e, walk_argument *a, int n, const walk_ar
 			return;	/* no vector registers to save (-mgeneral-regs-only, -mno-sse): as clang */
 		x64_op3(e, X_TEST, 1, XNOREG, RAX, XNOREG);
 		j = x64_put(e, X_JCC);
-		j->cond = CC_E;
+		j->condition = CC_E;
 		j->label = skip;
 		for (int k = fp; k < 8; k++) {
 			codegen_lvalue d = x64_fr(X->save + 48 + 16 * k);
@@ -700,42 +700,42 @@ VPRIV void x64_params(codegen_context *e, walk_argument *a, int n, const walk_ar
    copied to the caller's object (the hidden pointer, also the result) */
 VPRIV void x64_retrec(codegen_context *e, int raddr, const walk_argument *r, uint32_t lbl)
 {
-	if (r->x87) {
-		codegen_lvalue s = { .k = CODEGEN_LVALUE_REGISTER, .r = (uint8_t)raddr };
+	if (r->is_x87) {
+		codegen_lvalue s = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = (uint8_t)raddr };
 
 		if (r->size == 32) {
 			codegen_lvalue im = s;
 
-			im.off = 16;
+			im.offset = 16;
 			x64_x87ld(e, &im);	/* _Complex long double: the imaginary part to st(1) */
 		}
 		x64_x87ld(e, &s);	/* long double: in st(0) */
-	} else if (r->mem && r->up) {
+	} else if (r->is_in_memory && r->is_sse_up) {
 		for (int w = 0; w < (int)(r->size / 16); w++) {
-			codegen_lvalue s = { .k = CODEGEN_LVALUE_REGISTER, .r = (uint8_t)raddr, .off = 16 * w };
+			codegen_lvalue s = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = (uint8_t)raddr, .offset = 16 * w };
 
 			x64_mem(e, X_LD, 16, XMM0 + w, &s, false);
 		}
-	} else if (r->mem) {
-		codegen_lvalue s = x64_fr(e->x64->sret);
+	} else if (r->is_in_memory) {
+		codegen_lvalue s = x64_fr(e->x64_context->sret);
 		int rd = x64_treg(e);
 
 		x64_mem(e, X_LD, 8, rd, &s, false);
 		x64_copy(e, rd, raddr, r->size);
 		x64_mov(e, RAX, rd);
 		x64_tfree(e, rd);
-	} else if (r->n) {
+	} else if (r->eightbyte_count) {
 		/* the words by class: rax, rdx / xmm0, xmm1; a word for rax read last when raddr is rax */
 		int ng = 0, nf = 0, dst[2];
 
-		for (int w = 0; w < r->n; w++)
-			dst[w] = r->cls[w] == WALK_ARGUMENT_SSE ? XMM0 + nf++ : (ng++ ? RDX : RAX);
+		for (int w = 0; w < r->eightbyte_count; w++)
+			dst[w] = r->classes[w] == WALK_ARGUMENT_SSE ? XMM0 + nf++ : (ng++ ? RDX : RAX);
 		for (int pass = 0; pass < 2; pass++)
-			for (int w = 0; w < r->n; w++)
+			for (int w = 0; w < r->eightbyte_count; w++)
 				if ((dst[w] == raddr) == (pass == 1)) {
-					codegen_lvalue s = { .k = CODEGEN_LVALUE_REGISTER, .r = (uint8_t)raddr, .off = 8 * w };
+					codegen_lvalue s = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = (uint8_t)raddr, .offset = 8 * w };
 
-					x64_mem(e, X_LD, r->up ? 16 : 8, dst[w], &s, false);
+					x64_mem(e, X_LD, r->is_sse_up ? 16 : 8, dst[w], &s, false);
 				}
 	}
 	x64_tfree(e, raddr);
@@ -747,13 +747,13 @@ VPRIV void x64_retrec(codegen_context *e, int raddr, const walk_argument *r, uin
 /* va_list at rap: gp_offset, fp_offset, overflow_arg_area, reg_save_area */
 VPRIV void x64_va_start(codegen_context *e, int rap)
 {
-	xst *X = e->x64;
-	codegen_lvalue gpo = { .k = CODEGEN_LVALUE_REGISTER, .r = (uint8_t)rap, .off = 0 }, fpo = { .k = CODEGEN_LVALUE_REGISTER, .r = (uint8_t)rap, .off = 4 };
-	codegen_lvalue ov = { .k = CODEGEN_LVALUE_REGISTER, .r = (uint8_t)rap, .off = 8 }, rs = { .k = CODEGEN_LVALUE_REGISTER, .r = (uint8_t)rap, .off = 16 };
+	xst *X = e->x64_context;
+	codegen_lvalue gpo = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = (uint8_t)rap, .offset = 0 }, fpo = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = (uint8_t)rap, .offset = 4 };
+	codegen_lvalue ov = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = (uint8_t)rap, .offset = 8 }, rs = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = (uint8_t)rap, .offset = 16 };
 	codegen_lvalue sa = x64_fr(X->save), oa = x64_fr(16 + X->stk);
 
 	if (!X->save)
-		codegen_fatal_report(e, e->curloc, "va_start in a function that is not variadic");
+		codegen_fatal_report(e, e->current_location, "va_start in a function that is not variadic");
 	x64_movi(e, R11, 8 * X->ngp);
 	x64_mem(e, X_ST, 4, R11, &gpo, false);
 	x64_movi(e, R11, 48 + 16 * X->nfp);
@@ -770,16 +770,16 @@ VPRIV void x64_va_start(codegen_context *e, int rap)
 VPRIV int x64_va_arg(codegen_context *e, int rap, ast_qualified_type t)
 {
 	walk_argument a;
-	codegen_lvalue gpo = { .k = CODEGEN_LVALUE_REGISTER, .r = (uint8_t)rap, .off = 0 }, fpo = { .k = CODEGEN_LVALUE_REGISTER, .r = (uint8_t)rap, .off = 4 };
-	codegen_lvalue ov = { .k = CODEGEN_LVALUE_REGISTER, .r = (uint8_t)rap, .off = 8 }, rsa = { .k = CODEGEN_LVALUE_REGISTER, .r = (uint8_t)rap, .off = 16 };
+	codegen_lvalue gpo = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = (uint8_t)rap, .offset = 0 }, fpo = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = (uint8_t)rap, .offset = 4 };
+	codegen_lvalue ov = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = (uint8_t)rap, .offset = 8 }, rsa = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = (uint8_t)rap, .offset = 16 };
 	int ra = x64_treg(e), ng, nf;
 	uint32_t lstk = walk_label_new(e), ldone = walk_label_new(e);
 
 	x64_classify(e, t, &a, true);
-	if (a.blanes)
-		codegen_fatal_report(e, e->curloc, "x86-64: variadic transport of 65..128-lane packed boolean vectors is not supported");
+	if (a.bool_lane_count)
+		codegen_fatal_report(e, e->current_location, "x86-64: variadic transport of 65..128-lane packed boolean vectors is not supported");
 	ng = x64_need(&a, WALK_ARGUMENT_INTEGER), nf = x64_need(&a, WALK_ARGUMENT_SSE);
-	if (!a.mem && a.n) {
+	if (!a.is_in_memory && a.eightbyte_count) {
 		int rg = x64_treg(e), rf = x64_treg(e), rs = x64_treg(e);
 		codegen_lvalue tmp = x64_fr(walk_slot_temporary(e, 16, 16));
 		record *j;
@@ -787,35 +787,35 @@ VPRIV int x64_va_arg(codegen_context *e, int rap, ast_qualified_type t)
 		x64_mem(e, X_LD, 4, rg, &gpo, false);
 		x64_mem(e, X_LD, 4, rf, &fpo, false);
 		if (ng) {
-			x64_op3(e, X_CMPI, 4, XNOREG, rg, XNOREG)->imm = 48 - 8 * ng;
+			x64_op3(e, X_CMPI, 4, XNOREG, rg, XNOREG)->immediate = 48 - 8 * ng;
 			j = x64_put(e, X_JCC);
-			j->cond = CC_A;
+			j->condition = CC_A;
 			j->label = lstk;
 		}
 		if (nf) {
-			x64_op3(e, X_CMPI, 4, XNOREG, rf, XNOREG)->imm = 176 - 16 * nf;
+			x64_op3(e, X_CMPI, 4, XNOREG, rf, XNOREG)->immediate = 176 - 16 * nf;
 			j = x64_put(e, X_JCC);
-			j->cond = CC_A;
+			j->condition = CC_A;
 			j->label = lstk;
 		}
 		x64_mem(e, X_LEA, 8, ra, &tmp, false);
 		x64_mem(e, X_LD, 8, rs, &rsa, false);
-		for (int w = 0; w < a.n; w++) {
-			int ro = a.cls[w] == WALK_ARGUMENT_SSE ? rf : rg;
-			codegen_lvalue src = { .k = CODEGEN_LVALUE_REGISTER, .r = R11 }, dst = { .k = CODEGEN_LVALUE_REGISTER, .r = (uint8_t)ra, .off = 8 * w };
+		for (int w = 0; w < a.eightbyte_count; w++) {
+			int ro = a.classes[w] == WALK_ARGUMENT_SSE ? rf : rg;
+			codegen_lvalue src = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = R11 }, dst = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = (uint8_t)ra, .offset = 8 * w };
 
 			x64_mov(e, R11, rs);
 			x64_op3(e, X_ADD, 8, R11, R11, ro);
 			x64_mem(e, X_LD, 8, R11, &src, false);
 			x64_mem(e, X_ST, 8, R11, &dst, false);
-			if (a.up) {	/* a 16-byte vector: the whole register's save slot */
+			if (a.is_sse_up) {	/* a 16-byte vector: the whole register's save slot */
 				x64_mov(e, R11, rs);
 				x64_op3(e, X_ADD, 8, R11, R11, ro);
-				src.off = 8, dst.off += 8;
+				src.offset = 8, dst.offset += 8;
 				x64_mem(e, X_LD, 8, R11, &src, false);
 				x64_mem(e, X_ST, 8, R11, &dst, false);
 			}
-			x64_op3(e, X_ADDI, 4, ro, ro, XNOREG)->imm = a.cls[w] == WALK_ARGUMENT_SSE ? 16 : 8;
+			x64_op3(e, X_ADDI, 4, ro, ro, XNOREG)->immediate = a.classes[w] == WALK_ARGUMENT_SSE ? 16 : 8;
 		}
 		x64_mem(e, X_ST, 4, rg, &gpo, false);
 		x64_mem(e, X_ST, 4, rf, &fpo, false);
@@ -829,11 +829,11 @@ VPRIV int x64_va_arg(codegen_context *e, int rap, ast_qualified_type t)
 	/* An empty aggregate consumes no argument area, including alignment
 	   padding. Keep the overflow cursor unchanged for the following value. */
 	if (a.size && a.align > 8) {
-		x64_op3(e, X_ADDI, 8, ra, ra, XNOREG)->imm = (int64_t)a.align - 1;
-		x64_op3(e, X_ANDI, 8, ra, ra, XNOREG)->imm = -(int64_t)a.align;
+		x64_op3(e, X_ADDI, 8, ra, ra, XNOREG)->immediate = (int64_t)a.align - 1;
+		x64_op3(e, X_ANDI, 8, ra, ra, XNOREG)->immediate = -(int64_t)a.align;
 	}
 	{
-		codegen_lvalue nx = { .k = CODEGEN_LVALUE_REGISTER, .r = (uint8_t)ra, .off = (int64_t)((a.size + 7) & ~(uint64_t)7) };
+		codegen_lvalue nx = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = (uint8_t)ra, .offset = (int64_t)((a.size + 7) & ~(uint64_t)7) };
 
 		x64_mem(e, X_LEA, 8, R11, &nx, false);
 		x64_mem(e, X_ST, 8, R11, &ov, false);
@@ -844,13 +844,13 @@ VPRIV int x64_va_arg(codegen_context *e, int rap, ast_qualified_type t)
 
 VPRIV void x64_ret(codegen_context *e, codegen_value *v, ast_qualified_type t, uint32_t lbl)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	int size = walk_type_size(c, t);
 	bool sgn = walk_type_is_signed(c, t);
 
 	if (v && codegen_type_is_float(c, t)) {
-		x64_mov(e, XMM0, v->r);
-		x64_tfree(e, v->r);
+		x64_mov(e, XMM0, v->register_number);
+		x64_tfree(e, v->register_number);
 		v = NULL;
 	}
 	if (v) {

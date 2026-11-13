@@ -13,7 +13,7 @@
 /* the kv slot of a[CONST] (create: allocate one), or -1 */
 VPRIV int codegen_array_element_slot(codegen_context *e, uint32_t n, bool create)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	uint32_t s, idx;
 	const sym *y;
 	const ctype *at;
@@ -22,7 +22,7 @@ VPRIV int codegen_array_element_slot(codegen_context *e, uint32_t n, bool create
 	if (!codegen_expression_is_constant_index(c, n))
 		return -1;
 	s = N(N(N(n)->a)->a)->a, y = &c->syms[s];
-	if (!codegen_symbol_is_local_variable(c, s) || y->sc == AST_STORAGE_STATIC || (e->E->sflags[s] & CODEGEN_SYMBOL_ARRAY_ESCAPES) || codegen_symbol_attributes(c, s)->cleanup)
+	if (!codegen_symbol_is_local_variable(c, s) || y->sc == AST_STORAGE_STATIC || (e->unit->symbol_flags[s] & CODEGEN_SYMBOL_ARRAY_ESCAPES) || codegen_symbol_attributes(c, s)->cleanup)
 		return -1;
 	at = T(c, y->ty), et = at->base;
 	if (at->kind != AST_TYPE_ARRAY || (at->flags & (AST_TYPE_FLAG_VLA | AST_TYPE_FLAG_INCOMPLETE)) || !codegen_type_is_integer(c, et) || codegen_type_is_wide(c, et) ||
@@ -31,13 +31,13 @@ VPRIV int codegen_array_element_slot(codegen_context *e, uint32_t n, bool create
 	idx = codegen_expression_constant_index(c, n);
 	if (idx >= at->n)
 		return -1;
-	for (int i = 0; i < e->nael; i++)
-		if (e->ael[i].s == s && e->ael[i].idx == idx)
-			return e->ael[i].kv;
-	if (!create || e->nkv == CODEGEN_KNOWN_VALUE_MAX || e->nael == CODEGEN_KNOWN_VALUE_MAX)
+	for (int i = 0; i < e->array_element_count; i++)
+		if (e->array_elements[i].symbol == s && e->array_elements[i].index == idx)
+			return e->array_elements[i].known_value_index;
+	if (!create || e->known_value_count == CODEGEN_KNOWN_VALUE_MAX || e->array_element_count == CODEGEN_KNOWN_VALUE_MAX)
 		return -1;
-	e->ael[e->nael].s = s, e->ael[e->nael].idx = idx, e->ael[e->nael].kv = e->nkv;
-	e->nael++;
-	e->kvalid &= (uint16_t)~(1u << e->nkv);
-	return e->nkv++;
+	e->array_elements[e->array_element_count].symbol = s, e->array_elements[e->array_element_count].index = idx, e->array_elements[e->array_element_count].known_value_index = e->known_value_count;
+	e->array_element_count++;
+	e->known_values_valid &= (uint16_t)~(1u << e->known_value_count);
+	return e->known_value_count++;
 }

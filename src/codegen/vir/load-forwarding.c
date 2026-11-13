@@ -81,7 +81,7 @@ static bool virbuild_bytes_are_unwritten(virbuild_context *V, virbuild_simplify_
 /* positions, writers and loops for virbuild_far_load_find (the blocks in reverse postorder) */
 VPRIV void virbuild_far_load_init(codegen_context *e, virbuild_simplify_state *S)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 	uint32_t n = V->block_order_count, pos = 0, sp = 0, nl = 0, *stk, *iend;
 
 	S->positions = calloc((size_t)S->constant_start + 1, sizeof *S->positions);

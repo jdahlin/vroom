@@ -40,9 +40,9 @@ VPRIV void codegen_diagnostic_report(codegen_context *e, uint32_t loc, const cha
 	diag_report_site_pc = __builtin_return_address(0);
 	va_list ap;
 
-	VLOCK(e->E->emu);
+	VLOCK(e->unit->diagnostic_mutex);
 	va_start(ap, fmt);
-	diag_report_va(e->c->p, loc, "note", fmt, ap);
+	diag_report_va(e->compile_context->p, loc, "note", fmt, ap);
 	va_end(ap);
 }
 
@@ -52,18 +52,18 @@ VPRIV void codegen_error_report(codegen_context *e, uint32_t loc, const char *fm
 	diag_report_site_pc = __builtin_return_address(0);
 	va_list ap;
 
-	if (e->vtry) {	/* the VIR walker: the function falls back (codegen/vir/) */
-		if (!e->vfail)
-			e->vfail = fmt;
+	if (e->vir_try) {	/* the VIR walker: the function falls back (codegen/vir/) */
+		if (!e->vir_failure_reason)
+			e->vir_failure_reason = fmt;
 		return;
 	}
 	{
-		VLOCK(e->E->emu);
+		VLOCK(e->unit->diagnostic_mutex);
 		va_start(ap, fmt);
-		diag_report_va(e->c->p, loc, "error", fmt, ap);
+		diag_report_va(e->compile_context->p, loc, "error", fmt, ap);
 		va_end(ap);
 	}
-	e->E->errors++;
+	e->unit->errors++;
 }
 
 __attribute__((format(printf, 3, 4), noreturn))
@@ -72,28 +72,28 @@ VPRIV void codegen_fatal_report(codegen_context *e, uint32_t loc, const char *fm
 	diag_report_site_pc = __builtin_return_address(0);
 	va_list ap;
 
-	if (e->vtry) {	/* the VIR walker: no diagnostic, the function falls back (codegen/vir/) */
-		if (!e->vfail)
-			e->vfail = fmt;
-		_longjmp(e->bail, 1);
+	if (e->vir_try) {	/* the VIR walker: no diagnostic, the function falls back (codegen/vir/) */
+		if (!e->vir_failure_reason)
+			e->vir_failure_reason = fmt;
+		_longjmp(e->bail_jump, 1);
 	}
 	{	/* (the lock is dropped before the longjmp: cleanups do not run on it) */
-		VLOCK(e->E->emu);
+		VLOCK(e->unit->diagnostic_mutex);
 		va_start(ap, fmt);
-		diag_report_va(e->c->p, loc, "error", fmt, ap);
+		diag_report_va(e->compile_context->p, loc, "error", fmt, ap);
 		va_end(ap);
 	}
-	e->E->errors++;
-	_longjmp(e->bail, 1);
+	e->unit->errors++;
+	_longjmp(e->bail_jump, 1);
 }
 
 /* ---------------- the work queue and threads ---------------- */
 
 VPRIV void codegen_work_enqueue(codegen_unit *E, uint32_t item)
 {
-	VLOCK(E->mu);
-	E->q[E->qt++] = item;
-	pthread_cond_signal(&E->cv);
+	VLOCK(E->queue_mutex);
+	E->queue[E->queue_tail++] = item;
+	pthread_cond_signal(&E->queue_condition);
 }
 
 /* the regions of a ctx[i] (codegen_context_init takes a set, ecx_free gives it back) */
@@ -113,39 +113,39 @@ static vjob_region_pool codegen_context_pool = VJOB_REGION_POOL_INIT(16);
 
 static void codegen_context_init(codegen_context *e, codegen_unit *E, vjob_region *r)
 {
-	cc *c = E->c;
+	cc *c = E->compile_context;
 
 	memset(e, 0, sizeof(*e));
-	e->E = E;
-	e->c = c;
-	e->capin = 1u << 24;
-	e->in = vjob_region_acquire(&r[0], (size_t)e->capin * sizeof(ins), "emit.in");
+	e->unit = E;
+	e->compile_context = c;
+	e->record_capacity = 1u << 24;
+	e->records = vjob_region_acquire(&r[0], (size_t)e->record_capacity * sizeof(ins), "emit.in");
 	vtext_region_init(&e->raw, &r[1], (size_t)1 << 28, "emit.raw");
 	vtext_region_init(&e->out, &r[2], (size_t)1 << 32, "emit.out");
 	vtext_region_init(&e->data, &r[3], (size_t)1 << 28, "emit.data");
-	e->rel = vjob_region_acquire(&r[4], (size_t)1 << 26, "emit.rel");
-	e->b = vjob_region_acquire(&r[5], (size_t)c->nsym * sizeof(codegen_binding) + 4096, "emit.b");
-	e->lm = vjob_region_acquire(&r[6], (size_t)c->nlabel * sizeof(codegen_label) + 4096, "emit.lm");
-	e->caselbl = vjob_region_acquire(&r[7], (size_t)c->nnode * sizeof(uint32_t) + 4096, "emit.caselbl");
-	e->caplabel = 1u << 22;
-	e->lrefc = vjob_region_acquire(&r[8], (size_t)e->caplabel * sizeof(uint32_t), "emit.lrefc");
-	e->lkvi = vjob_region_acquire(&r[9], (size_t)e->caplabel * sizeof(uint32_t), "emit.lkvi");
-	e->kvs = vjob_region_acquire(&r[10], (size_t)CODEGEN_KNOWN_VALUES_CAPACITY * sizeof(codegen_known_values), "emit.kvs");
+	e->relocations = vjob_region_acquire(&r[4], (size_t)1 << 26, "emit.rel");
+	e->bindings = vjob_region_acquire(&r[5], (size_t)c->nsym * sizeof(codegen_binding) + 4096, "emit.b");
+	e->label_map = vjob_region_acquire(&r[6], (size_t)c->nlabel * sizeof(codegen_label) + 4096, "emit.lm");
+	e->case_labels = vjob_region_acquire(&r[7], (size_t)c->nnode * sizeof(uint32_t) + 4096, "emit.caselbl");
+	e->label_capacity = 1u << 22;
+	e->label_reference_counts = vjob_region_acquire(&r[8], (size_t)e->label_capacity * sizeof(uint32_t), "emit.lrefc");
+	e->label_known_values_index = vjob_region_acquire(&r[9], (size_t)e->label_capacity * sizeof(uint32_t), "emit.lkvi");
+	e->known_value_states = vjob_region_acquire(&r[10], (size_t)CODEGEN_KNOWN_VALUES_CAPACITY * sizeof(codegen_known_values), "emit.kvs");
 	e->cases = vjob_region_acquire(&r[11], (size_t)1 << 24, "emit.cases");
-	e->weakref = vjob_region_acquire(&r[12], (size_t)c->nsym * sizeof(uint32_t) + 4096, "emit.weakref");
-	e->rlog = vjob_region_acquire(&r[13], CODEGEN_LOG_CAPACITY * sizeof(uint32_t), "emit.rlog");
-	e->sla = vjob_region_acquire(&r[14], (size_t)CODEGEN_SLOT_ALLOCATION_CAPACITY * (sizeof(codegen_slot_allocation) + sizeof(uint32_t)), "emit.sla");
-	e->sstk = (uint32_t *)(e->sla + CODEGEN_SLOT_ALLOCATION_CAPACITY);
+	e->weak_references = vjob_region_acquire(&r[12], (size_t)c->nsym * sizeof(uint32_t) + 4096, "emit.weakref");
+	e->round_log = vjob_region_acquire(&r[13], CODEGEN_LOG_CAPACITY * sizeof(uint32_t), "emit.rlog");
+	e->slot_allocations = vjob_region_acquire(&r[14], (size_t)CODEGEN_SLOT_ALLOCATION_CAPACITY * (sizeof(codegen_slot_allocation) + sizeof(uint32_t)), "emit.sla");
+	e->live_slots = (uint32_t *)(e->slot_allocations + CODEGEN_SLOT_ALLOCATION_CAPACITY);
 	/* nesting: reserved, touched only as deep as it goes (bounded by the parser's stack guard) */
 	e->loops = vjob_region_acquire(&r[15], (size_t)CODEGEN_NESTING_CAPACITY * (sizeof(codegen_loop) + sizeof(uint32_t)), "emit.loops");
-	e->clean = (uint32_t *)(e->loops + CODEGEN_NESTING_CAPACITY);
+	e->cleanups = (uint32_t *)(e->loops + CODEGEN_NESTING_CAPACITY);
 }
 
 /* (after the stitch: the chunks point into e->out) */
 static void ecx_free(codegen_context *e, vjob_region *r)
 {
 	em_switch_values_reset(e);
-	cc *c = e->c;
+	cc *c = e->compile_context;
 
 	/* written before read (put, newlabel, the case collection, ...): handed back as is */
 	vjob_region_release(&r[0], VJOB_REGION_SCRATCH);
@@ -176,18 +176,18 @@ static void ecx_free(codegen_context *e, vjob_region *r)
 /* a function the previous round generated, if nothing it asked about has been marked since */
 static bool codegen_round_chunk_reuse(codegen_context *e, uint32_t s)
 {
-	const codegen_keep *K = e->E->previous_keep;
+	const codegen_keep *K = e->unit->previous_keep;
 	const codegen_keep_entry *k;
 	tbuf *b = &e->out;
 	size_t start;
 
-	if (!K || s >= K->nidx || !K->idx[s])
+	if (!K || s >= K->index_count || !K->indexes[s])
 		return false;
-	k = &K->ent[K->idx[s] - 1];
-	for (uint32_t j = 0; j < k->nlog; j++)
-		if (k->log[2 * j] == CODEGEN_LOG_DEPENDENCY && e->E->mf[k->log[2 * j + 1]])
+	k = &K->entries[K->indexes[s] - 1];
+	for (uint32_t j = 0; j < k->log_count; j++)
+		if (k->log[2 * j] == CODEGEN_LOG_DEPENDENCY && e->unit->inline_everywhere[k->log[2 * j + 1]])
 			return false;
-	for (uint32_t j = 0; j < k->nlog; j++) {
+	for (uint32_t j = 0; j < k->log_count; j++) {
 		uint32_t v = k->log[2 * j + 1];
 
 		switch (k->log[2 * j]) {
@@ -198,16 +198,16 @@ static bool codegen_round_chunk_reuse(codegen_context *e, uint32_t s)
 	}
 	b->n = (b->n + 7) & ~(size_t)7;
 	start = b->n;
-	memcpy(codegen_item_room_need(e, k->n), k->p, k->n);
+	memcpy(codegen_item_room_need(e, k->length), k->text, k->length);
 	codegen_chunk_add(e, k->key, start);
 	return true;
 }
 
 static void codegen_work_item_run(codegen_context *e, uint32_t it)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 
-	e->rlog0 = e->nrlog;
+	e->round_log_item_start = e->round_log_count;
 	if (it & 0x80000000u) {
 		codegen_string_literal_emit(e, it & 0x7fffffffu);
 		return;
@@ -228,27 +228,27 @@ static void codegen_work_item_run(codegen_context *e, uint32_t it)
 static void *codegen_worker_run(void *arg)
 {
 	codegen_context *e = arg;
-	codegen_unit *E = e->E;
+	codegen_unit *E = e->unit;
 
-	pthread_mutex_lock(&E->mu);
+	pthread_mutex_lock(&E->queue_mutex);
 	for (;;) {
 		uint32_t it;
 
-		while (E->qh == E->qt && E->busy > 0)
-			pthread_cond_wait(&E->cv, &E->mu);
-		if (E->qh == E->qt)
+		while (E->queue_head == E->queue_tail && E->busy_count > 0)
+			pthread_cond_wait(&E->queue_condition, &E->queue_mutex);
+		if (E->queue_head == E->queue_tail)
 			break;
-		it = E->q[E->qh++];
-		E->busy++;
-		pthread_mutex_unlock(&E->mu);
+		it = E->queue[E->queue_head++];
+		E->busy_count++;
+		pthread_mutex_unlock(&E->queue_mutex);
 		codegen_work_item_run(e, it);
-		pthread_mutex_lock(&E->mu);
-		E->busy--;
-		if (E->busy == 0 && E->qh == E->qt)
-			pthread_cond_broadcast(&E->cv);
+		pthread_mutex_lock(&E->queue_mutex);
+		E->busy_count--;
+		if (E->busy_count == 0 && E->queue_head == E->queue_tail)
+			pthread_cond_broadcast(&E->queue_condition);
 	}
-	pthread_cond_broadcast(&E->cv);
-	pthread_mutex_unlock(&E->mu);
+	pthread_cond_broadcast(&E->queue_condition);
+	pthread_mutex_unlock(&E->queue_mutex);
 	return NULL;
 }
 
@@ -318,17 +318,17 @@ static int codegen_chunks_commit(cc *c, const cc_options *o, const char *hp, siz
 	static _Thread_local codegen_commit_pending_branch *pend;
 	static _Thread_local codegen_commit_patch *pt;
 	size_t need = (size_t)c->nsym + c->nstr + c->nlabel + 192;
-	codegen_commit_context R = { .c = c, .as = o->as, .o = o->obj };
+	codegen_commit_context R = { .compile_context = c, .assembler = o->as, .object = o->obj };
 	vjob_region *rr = vjob_region_pool_take(&codegen_commit_pool);
 	uint32_t *cache;
 	int r = 0;
 
-	R.loff = vjob_region_acquire(&rr[0], (size_t)1 << 32, "emit.loff");	/* labels of one function */
-	vtext_region_init(&R.nb, &rr[1], 1 << 20, "emit.nb");
+	R.label_word_offsets = vjob_region_acquire(&rr[0], (size_t)1 << 32, "emit.loff");	/* labels of one function */
+	vtext_region_init(&R.name_buffer, &rr[1], 1 << 20, "emit.nb");
 	cache = vjob_region_acquire(&rr[2], need * sizeof(uint32_t), "emit.rcache");
-	R.symc = cache;
-	R.strc = cache + c->nsym + 64;
-	R.lblc = R.strc + c->nstr + 64;
+	R.symbol_cache = cache;
+	R.string_cache = cache + c->nsym + 64;
+	R.label_cache = R.string_cache + c->nstr + 64;
 	if (!wb) {
 		wb = codegen_memory_reserve((size_t)1 << 32);		/* words of one function (<= 6 per record) */
 		lsym = codegen_memory_reserve((size_t)1 << 32);
@@ -337,28 +337,28 @@ static int codegen_chunks_commit(cc *c, const cc_options *o, const char *hp, siz
 		pend = codegen_memory_reserve((size_t)1 << 34);	/* per branch record */
 		pt = codegen_memory_reserve((size_t)1 << 34);		/* fixups of one function (<= 1 per record) */
 	}
-	R.wb = wb;
-	R.lsym = lsym;
-	R.lser = lser;
-	R.lab = lab;
-	R.pend = pend;
-	R.ser = ser;
-	R.pt = pt;
-	elf_set_machine(R.o, CODEGEN_IS_X64(c) ? EM_X86_64 : EM_AARCH64);
-	as_begin(R.as, R.o, "<vcc>");
-	if (as_snippet_assemble(R.as, hp, hn))
+	R.word_buffer = wb;
+	R.label_symbols = lsym;
+	R.label_serials = lser;
+	R.labels = lab;
+	R.pending = pend;
+	R.serial = ser;
+	R.patches = pt;
+	elf_set_machine(R.object, CODEGEN_IS_X64(c) ? EM_X86_64 : EM_AARCH64);
+	as_begin(R.assembler, R.object, "<vcc>");
+	if (as_snippet_assemble(R.assembler, hp, hn))
 		r = -1;
 	for (uint32_t i = 0; !r && i < nch; i++)
-		r = codegen_commit_chunk(&R, ch[i].p, ch[i].n);
-	ser = R.ser;
-	if (!r && (as_snippet_assemble(R.as, tp, tn) || as_end(R.as)))
+		r = codegen_commit_chunk(&R, ch[i].text, ch[i].length);
+	ser = R.serial;
+	if (!r && (as_snippet_assemble(R.assembler, tp, tn) || as_end(R.assembler)))
 		r = -1;
 	vjob_region_release(&rr[0], VJOB_REGION_SCRATCH);
 	vjob_region_release(&rr[1], VJOB_REGION_SCRATCH);
 	vjob_region_release(&rr[2], need * sizeof(uint32_t));
 	vjob_region_pool_give(&codegen_commit_pool, rr);
-	if (r || R.o->has_err || as_is_failed(R.as)) {
-		codegen_assembler_error_report(c, "assembler: %s", as_is_failed(R.as) ? as_message_get(R.as) : R.o->err);
+	if (r || R.object->has_err || as_is_failed(R.assembler)) {
+		codegen_assembler_error_report(c, "assembler: %s", as_is_failed(R.assembler) ? as_message_get(R.assembler) : R.object->err);
 		return -1;
 	}
 	return 0;
@@ -367,11 +367,11 @@ static int codegen_chunks_commit(cc *c, const cc_options *o, const char *hp, siz
 /* what the next round may reuse: this round's functions (their chunks and logs, copied) */
 static void codegen_keep_free(codegen_keep *K)
 {
-	if (K->idx) {
-		munmap(K->idx, K->nidx * sizeof(uint32_t));
-		munmap(K->ent, K->nent * sizeof(codegen_keep_entry) + 64);
-		munmap(K->bytes, K->nbytes + 64);
-		munmap(K->logs, K->nlogs * sizeof(uint32_t) + 64);
+	if (K->indexes) {
+		munmap(K->indexes, K->index_count * sizeof(uint32_t));
+		munmap(K->entries, K->entry_count * sizeof(codegen_keep_entry) + 64);
+		munmap(K->bytes, K->byte_count + 64);
+		munmap(K->logs, K->log_count * sizeof(uint32_t) + 64);
 	}
 	memset(K, 0, sizeof(*K));
 }
@@ -382,41 +382,41 @@ static void codegen_keep_make(codegen_keep *K, cc *c, const codegen_unit *E)
 	uint32_t ne = 0;
 
 	memset(K, 0, sizeof(*K));
-	for (uint32_t i = 0; i < E->nchunk; i++) {
+	for (uint32_t i = 0; i < E->chunk_count; i++) {
 		const codegen_chunk *ch = &E->chunks[i];
 
 		if (ch->key >> 62 || (ch->key & 1))
 			continue;	/* strings, objects: generated again */
-		nb += (ch->n + 7) & ~(size_t)7;
-		nl += 2 * (size_t)ch->nlog;
+		nb += (ch->length + 7) & ~(size_t)7;
+		nl += 2 * (size_t)ch->log_count;
 		ne++;
 	}
-	K->nidx = c->nsym;
-	K->idx = codegen_memory_reserve(K->nidx * sizeof(uint32_t));
-	K->nent = ne;
-	K->ent = codegen_memory_reserve(ne * sizeof(codegen_keep_entry) + 64);
-	K->nbytes = nb;
+	K->index_count = c->nsym;
+	K->indexes = codegen_memory_reserve(K->index_count * sizeof(uint32_t));
+	K->entry_count = ne;
+	K->entries = codegen_memory_reserve(ne * sizeof(codegen_keep_entry) + 64);
+	K->byte_count = nb;
 	K->bytes = codegen_memory_reserve(nb + 64);
-	K->nlogs = nl;
+	K->log_count = nl;
 	K->logs = codegen_memory_reserve(nl * sizeof(uint32_t) + 64);
 	ne = 0;
-	for (uint32_t i = 0; i < E->nchunk; i++) {
+	for (uint32_t i = 0; i < E->chunk_count; i++) {
 		const codegen_chunk *ch = &E->chunks[i];
 		codegen_keep_entry *k;
 
 		if (ch->key >> 62 || (ch->key & 1))
 			continue;
-		k = &K->ent[ne++];
+		k = &K->entries[ne++];
 		k->key = ch->key;
-		k->p = K->bytes + ob;
-		k->n = ch->n;
-		memcpy(K->bytes + ob, ch->p, ch->n);
-		ob += (ch->n + 7) & ~(size_t)7;
+		k->text = K->bytes + ob;
+		k->length = ch->length;
+		memcpy(K->bytes + ob, ch->text, ch->length);
+		ob += (ch->length + 7) & ~(size_t)7;
 		k->log = K->logs + ol;
-		k->nlog = ch->nlog;
-		memcpy(K->logs + ol, ch->log, 2 * (size_t)ch->nlog * sizeof(uint32_t));
-		ol += 2 * (size_t)ch->nlog;
-		K->idx[ch->key >> 1] = ne;
+		k->log_count = ch->log_count;
+		memcpy(K->logs + ol, ch->log, 2 * (size_t)ch->log_count * sizeof(uint32_t));
+		ol += 2 * (size_t)ch->log_count;
+		K->indexes[ch->key >> 1] = ne;
 	}
 }
 
@@ -435,58 +435,58 @@ static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out, u
 	vjob_region *er = vjob_region_pool_take(&codegen_round_pool), *xr[64];
 
 	memset(&E, 0, sizeof(E));
-	E.c = c;
-	E.o = o;
-	E.mf = mf;
+	E.compile_context = c;
+	E.options = o;
+	E.inline_everywhere = mf;
 	E.previous_keep = K;
 	E.claimed = vjob_region_acquire(&er[0], c->nsym + 64, "emit.claimed");
-	E.extref = vjob_region_acquire(&er[1], c->nsym + 64, "emit.extref");
-	E.sflags = vjob_region_acquire(&er[2], c->nsym + 64, "emit.sflags");
-	E.ffacts = vjob_region_acquire(&er[14], c->nsym + 64, "emit.ffacts");
-	E.strdone = vjob_region_acquire(&er[3], c->nstr + 64, "emit.strdone");
-	E.nflags = vjob_region_acquire(&er[4], c->nnode + 64, "emit.nflags");
-	E.lref = vjob_region_acquire(&er[5], c->nlabel + 64, "emit.lref");
-	E.lcdepth = vjob_region_acquire(&er[6], (size_t)c->nlabel * 2 + 64, "emit.lcdepth");
-	E.q = vjob_region_acquire(&er[7], ((size_t)c->nsym + c->nstr + 64) * sizeof(uint32_t), "emit.q");
+	E.symbol_referenced = vjob_region_acquire(&er[1], c->nsym + 64, "emit.extref");
+	E.symbol_flags = vjob_region_acquire(&er[2], c->nsym + 64, "emit.sflags");
+	E.float_facts = vjob_region_acquire(&er[14], c->nsym + 64, "emit.ffacts");
+	E.strings_done = vjob_region_acquire(&er[3], c->nstr + 64, "emit.strdone");
+	E.node_flags = vjob_region_acquire(&er[4], c->nnode + 64, "emit.nflags");
+	E.label_flags = vjob_region_acquire(&er[5], c->nlabel + 64, "emit.lref");
+	E.label_cleanup_depth = vjob_region_acquire(&er[6], (size_t)c->nlabel * 2 + 64, "emit.lcdepth");
+	E.queue = vjob_region_acquire(&er[7], ((size_t)c->nsym + c->nstr + 64) * sizeof(uint32_t), "emit.q");
 	E.chunks = vjob_region_acquire(&er[8], ((size_t)c->nsym + c->nstr + c->ntlasm + 64) * sizeof(codegen_chunk), "emit.chunks");
-	pthread_mutex_init(&E.mu, NULL);
-	pthread_cond_init(&E.cv, NULL);
-	pthread_mutex_init(&E.cmu, NULL);
-	pthread_mutex_init(&E.emu, NULL);
-	pthread_mutex_init(&E.dmu, NULL);
+	pthread_mutex_init(&E.queue_mutex, NULL);
+	pthread_cond_init(&E.queue_condition, NULL);
+	pthread_mutex_init(&E.chunk_mutex, NULL);
+	pthread_mutex_init(&E.diagnostic_mutex, NULL);
+	pthread_mutex_init(&E.debug_mutex, NULL);
 	E.walked = vjob_region_acquire(&er[9], c->nsym + 64, "emit.walked");
-	E.fnsize = vjob_region_acquire(&er[10], (c->nsym + 64) * sizeof(uint16_t), "emit.fnsize");
-	E.cwval = vjob_region_acquire(&er[11], (c->nsym + 64) * sizeof(i128), "emit.cwval");
-	E.luse = vjob_region_acquire(&er[15], (c->nsym + 64) * sizeof(uint16_t), "emit.luse");
-	E.lnoreg = vjob_region_acquire(&er[16], c->nsym + 64, "emit.lnoreg");
-	E.lspan = vjob_region_acquire(&er[17], (c->nsym + 64) * 2 * sizeof(uint32_t), "emit.lspan");
+	E.function_node_counts = vjob_region_acquire(&er[10], (c->nsym + 64) * sizeof(uint16_t), "emit.fnsize");
+	E.constant_written_values = vjob_region_acquire(&er[11], (c->nsym + 64) * sizeof(i128), "emit.cwval");
+	E.local_use_weights = vjob_region_acquire(&er[15], (c->nsym + 64) * sizeof(uint16_t), "emit.luse");
+	E.local_needs_memory = vjob_region_acquire(&er[16], c->nsym + 64, "emit.lnoreg");
+	E.function_local_span = vjob_region_acquire(&er[17], (c->nsym + 64) * 2 * sizeof(uint32_t), "emit.lspan");
 	{
 		const char *k = getenv("VCC_LREGS");
 
-		E.nlreg = k ? atoi(k) : CODEGEN_LOCAL_REGISTERS_DEFAULT;
-		if (E.nlreg < 0 || E.nlreg > CODEGEN_LOCAL_REGISTER_MAX)
-			E.nlreg = CODEGEN_LOCAL_REGISTER_MAX;
+		E.local_register_count = k ? atoi(k) : CODEGEN_LOCAL_REGISTERS_DEFAULT;
+		if (E.local_register_count < 0 || E.local_register_count > CODEGEN_LOCAL_REGISTER_MAX)
+			E.local_register_count = CODEGEN_LOCAL_REGISTER_MAX;
 	}
 	E.stats = getenv("VCC_EMIT_STATS") != NULL;
-	E.vstats = getenv("VCC_VIR_STATS") != NULL;
-	E.rstats = getenv("VCC_REC_STATS") != NULL;
-	E.noopt = getenv("VCC_NOOPT") != NULL;
+	E.vir_statistics = getenv("VCC_VIR_STATS") != NULL;
+	E.record_statistics = getenv("VCC_REC_STATS") != NULL;
+	E.cleanups_disabled = getenv("VCC_NOOPT") != NULL;
 	/* wasm64: objects from the text, through arch/wasm/as */
-	E.objtext = getenv("VCC_OBJ_TEXT") != NULL || WASM(c);
+	E.object_text = getenv("VCC_OBJ_TEXT") != NULL || WASM(c);
 	/* -g: the line table is the assembler's, from the printer's .loc */
 	if (o->debug && !CODEGEN_IS_DARWIN(c) && !WASM(c) && !CODEGEN_IS_X64(c))
-		E.objtext = true;
+		E.object_text = true;
 	/* unwind tables: .eh_frame is the assembler's, from the printer's .cfi_* */
 	if (o->cfi && !CODEGEN_IS_DARWIN(c) && !WASM(c) && !CODEGEN_IS_X64(c))
-		E.objtext = true;
+		E.object_text = true;
 	/* Lazy walks own only their function's automatic variables. Globals and
 	   static objects can be modified by other functions (including ones not
 	   emitted here); publish conservative immutable facts before workers start.
 	   In particular, never infer a TU-wide constant from one function's writes. */
 	for (uint32_t s = 1; s < c->nsym; s++)
 		if (c->syms[s].kind == AST_SYMBOL_VARIABLE && !codegen_symbol_is_local_variable(c, s)) {
-			E.sflags[s] = CODEGEN_SYMBOL_WRITTEN | CODEGEN_SYMBOL_ARRAY_ESCAPES;
-			E.ffacts[s] = CODEGEN_FLOAT_FACT_BAD;
+			E.symbol_flags[s] = CODEGEN_SYMBOL_WRITTEN | CODEGEN_SYMBOL_ARRAY_ESCAPES;
+			E.float_facts[s] = CODEGEN_FLOAT_FACT_BAD;
 		}
 	/* VIR: the functions called once, which its walker inlines whatever their size */
 	if (!WASM(c) && virbuild_is_enabled(o))
@@ -499,7 +499,7 @@ static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out, u
 
 		if (codegen_symbol_is_root(c, s) && !E.claimed[s]) {
 			E.claimed[s] = 1;
-			E.q[E.qt++] = s;
+			E.queue[E.queue_tail++] = s;
 		}
 		if (unlikely(codegen_symbol_attributes(c, s)->alias)) {
 			/* an alias keeps its target, static or not */
@@ -508,7 +508,7 @@ static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out, u
 			if (t && !E.claimed[t] && (c->syms[t].flags & (AST_SYMBOL_FLAG_DEFINED | AST_SYMBOL_FLAG_TENTATIVE)) &&
 			    (c->syms[t].kind == AST_SYMBOL_FUNCTION ? c->syms[t].body != 0 : true)) {
 				E.claimed[t] = 1;
-				E.q[E.qt++] = t;
+				E.queue[E.queue_tail++] = t;
 			}
 		}
 	}
@@ -528,12 +528,12 @@ static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out, u
 	 * being leaked by a thread per round. */
 	vtask_parallel_for((size_t)nthr, nthr, codegen_drain_slot_run, ctx, 0);
 	t2 = codegen_clock_seconds();
-	free(E.once);free(E.inl_read);
-	E.once = E.inl_read = NULL;
-	free(E.cg), free(E.cgoff), free(E.cgn), free(E.scc), free(E.isz);
-	E.cg = NULL; E.cgoff = E.cgn = E.scc = NULL, E.isz = NULL;
+	free(E.once);free(E.inline_parameter_reads);
+	E.once = E.inline_parameter_reads = NULL;
+	free(E.call_edges), free(E.call_edge_offsets), free(E.call_edge_counts), free(E.recursion_groups), free(E.inline_sizes);
+	E.call_edges = NULL; E.call_edge_offsets = E.call_edge_counts = E.recursion_groups = NULL, E.inline_sizes = NULL;
 	/* stitch */
-	qsort(E.chunks, E.nchunk, sizeof(codegen_chunk), codegen_chunk_compare);
+	qsort(E.chunks, E.chunk_count, sizeof(codegen_chunk), codegen_chunk_compare);
 	vtext_region_init(&hdr, &er[12], (size_t)1 << 26, "emit.hdr");
 	if (WASM(c))
 		wasm_header(c, &hdr, ctx, nthr);
@@ -550,13 +550,13 @@ static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out, u
 		vtext_char_append(&hdr, ' ');
 		codegen_string_quote_append(&hdr, o->dbg_name ? o->dbg_name : "<stdin>");
 		vtext_char_append(&hdr, '\n');
-		for (uint32_t i = 0; i < E.ndfile; i++) {
+		for (uint32_t i = 0; i < E.debug_file_count; i++) {
 			vtext_format_append(&hdr, "\t.file\t%u ", i + 1);
-			codegen_string_quote_append(&hdr, E.dfile[i]);
+			codegen_string_quote_append(&hdr, E.debug_files[i]);
 			vtext_char_append(&hdr, '\n');
-			free(E.dfile[i]);
+			free(E.debug_files[i]);
 		}
-		free(E.dfile);
+		free(E.debug_files);
 	}
 	for (uint32_t i = 0; i < c->ntlasm; i++) {
 		const ast_asm_statement *a = &c->asms[N(c->tlasm[i])->a];
@@ -566,7 +566,7 @@ static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out, u
 	}
 	{
 		tbuf tail;
-		struct iovec *iov = malloc(((size_t)E.nchunk + 2) * sizeof(struct iovec));
+		struct iovec *iov = malloc(((size_t)E.chunk_count + 2) * sizeof(struct iovec));
 		int k = 0;
 
 		vtext_region_init(&tail, &er[13], (size_t)1 << 26, "emit.tail");
@@ -575,12 +575,12 @@ static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out, u
 			uint32_t nw = 0, *w;
 
 			for (int t = 0; t < nthr; t++)
-				nw += ctx[t].nweakref;
+				nw += ctx[t].weak_reference_count;
 			w = malloc((nw + 1) * sizeof(uint32_t));
 			nw = 0;
 			for (int t = 0; t < nthr; t++)
-				for (uint32_t j = 0; j < ctx[t].nweakref; j++)
-					w[nw++] = ctx[t].weakref[j];
+				for (uint32_t j = 0; j < ctx[t].weak_reference_count; j++)
+					w[nw++] = ctx[t].weak_references[j];
 			qsort(w, nw, sizeof(uint32_t), codegen_u32_compare);
 			for (uint32_t j = 0; j < nw; j++)
 				if (!E.claimed[w[j]] && c->syms[w[j]].name && !codegen_symbol_attributes(c, w[j])->alias) {
@@ -642,14 +642,14 @@ static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out, u
 		else
 			vtext_string_append(&tail, "\t.section\t\".note.GNU-stack\",\"\",@progbits\n");
 		iov[k++] = (struct iovec){ hdr.p, hdr.n };
-		for (uint32_t i = 0; i < E.nchunk; i++)
-			iov[k++] = (struct iovec){ (void *)E.chunks[i].p, E.chunks[i].n };
+		for (uint32_t i = 0; i < E.chunk_count; i++)
+			iov[k++] = (struct iovec){ (void *)E.chunks[i].text, E.chunks[i].length };
 		iov[k++] = (struct iovec){ tail.p, tail.n };
-		*again = E.newmf != 0 && !last;
+		*again = E.newly_marked_count != 0 && !last;
 		if (*again && next && !E.errors)
 			codegen_keep_make(next, c, &E);
 		if (!E.errors && write_out && !*again && o->emit == 2) {
-			if (E.objtext) {
+			if (E.object_text) {
 				/* the text, gathered once, through the assembler */
 				static _Thread_local tbuf all;
 				const char *msg;
@@ -680,7 +680,7 @@ static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out, u
 					codegen_assembler_error_report(c, "assembler: %s", msg);
 					E.errors++;
 				}
-			} else if (codegen_chunks_commit(c, o, hdr.p, hdr.n, tail.p, tail.n, E.chunks, E.nchunk)) {
+			} else if (codegen_chunks_commit(c, o, hdr.p, hdr.n, tail.p, tail.n, E.chunks, E.chunk_count)) {
 				/* object: the items replayed into the TU's assembler and ElfObj */
 				E.errors++;
 			}
@@ -738,19 +738,19 @@ static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out, u
 		if (getenv("VCC_EMIT_STATS")) {
 			size_t bytes = hdr.n + tail.n;
 
-			for (uint32_t i = 0; i < E.nchunk; i++)
-				bytes += E.chunks[i].n;
+			for (uint32_t i = 0; i < E.chunk_count; i++)
+				bytes += E.chunks[i].length;
 			fprintf(stderr, "vcc emit: %llu functions, %llu objects, %llu inlined, %llu instructions (%.1f KB code); "
 				"setup %.2f ms, emit %.2f ms (%d threads; %.2f ms printing, %.2f ms prepass over %llu functions), %.1f MB text; %.0f MB/s machine code\n",
-				(unsigned long long)E.nfn, (unsigned long long)E.nobj, (unsigned long long)E.ninl,
-				(unsigned long long)E.nins, E.nins * 4 / 1024.0, (t1 - t0) * 1e3, (t2 - t1) * 1e3, nthr,
-				E.print_ns / 1e6, E.walk_ns / 1e6, (unsigned long long)E.nwalk, bytes / 1e6, E.nins * 4 / 1e6 / (t2 - t1));
+				(unsigned long long)E.function_total, (unsigned long long)E.object_total, (unsigned long long)E.inline_total,
+				(unsigned long long)E.record_total, E.record_total * 4 / 1024.0, (t1 - t0) * 1e3, (t2 - t1) * 1e3, nthr,
+				E.print_nanoseconds / 1e6, E.walk_nanoseconds / 1e6, (unsigned long long)E.walk_total, bytes / 1e6, E.record_total * 4 / 1e6 / (t2 - t1));
 		}
-		if (E.vstats && write_out && !*again)	/* (the final round's: objects and text alike) */
+		if (E.vir_statistics && write_out && !*again)	/* (the final round's: objects and text alike) */
 			virbuild_statistics_print(&E);
 		vjob_region_release(&er[13], tail.n);
 	}
-	if (E.rstats)
+	if (E.record_statistics)
 		rp_print(&E);
 	vjob_region_release(&er[12], hdr.n);
 	for (int i = 0; i < nthr; i++)

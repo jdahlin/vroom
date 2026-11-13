@@ -50,7 +50,7 @@ static bool virbuild_condition_is_chainable(virbuild_context *V, uint32_t v, con
 
 VPRIV bool virbuild_conditions_merge(codegen_context *e)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 	uint32_t ncnt = V->insn_count + V->block_order_count + 1, *cnt = calloc(ncnt, sizeof *cnt);
 	bool any = false, again = true;
 

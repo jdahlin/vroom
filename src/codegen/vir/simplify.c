@@ -16,7 +16,7 @@
  */
 static void virbuild_address_offsets_fold(codegen_context *e, virbuild_simplify_state *S)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 
 	for (uint32_t i = 0; i < V->block_order_count; i++) {
 		uint32_t b = V->block_order[i];
@@ -51,7 +51,7 @@ static void virbuild_address_offsets_fold(codegen_context *e, virbuild_simplify_
 
 VPRIV void virbuild_function_simplify(codegen_context *e)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 	virbuild_simplify_state S = { 0 };
 	uint32_t *stk, ns = 0;
 

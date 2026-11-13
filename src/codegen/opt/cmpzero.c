@@ -10,13 +10,13 @@
 
 VPRIV bool em_cmpzero(codegen_context *e, uint32_t n, uint32_t *operand)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n), *a, *b;
 	int op;
 	uint64_t size;
 	i128 value;
 
-	if (!e->E->o->opt || e->E->noopt || x->op != AST_NODE_BINARY)
+	if (!e->unit->options->opt || e->unit->cleanups_disabled || x->op != AST_NODE_BINARY)
 		return false;
 	op = x->aux;
 	if (op != LEX_TOKEN_EQUAL_EQUAL && op != LEX_TOKEN_LESS_EQUAL && op != LEX_TOKEN_GREATER_EQUAL)

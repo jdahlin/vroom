@@ -20,22 +20,22 @@ VPRIV int regvar_reg(cc *c, uint32_t s)
 
 VPRIV int64_t bind_slot(codegen_context *e, uint32_t s)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	codegen_binding *b = codegen_symbol_binding_get(e, s);
 	ast_qualified_type t = c->syms[s].ty;
 	uint32_t al = codegen_type_alignment(c, t);
 
 	if (c->syms[s].align > al)
 		al = c->syms[s].align;
-	b->inst = e->f->inst;
+	b->instance = e->function_instance->instance;
 	b->kind = CODEGEN_BINDING_SLOT;
-	b->kv = 0;
-	b->reg = 0xff;
+	b->known_value_index = 0;
+	b->register_number = 0xff;
 	if (c->syms[s].sc == AST_STORAGE_REGISTER) {
 		int rr = regvar_reg(c, s);
 
 		if (rr >= 0)
-			b->reg = (uint8_t)rr;
+			b->register_number = (uint8_t)rr;
 	}
 	b->slot = slot(e, codegen_type_size(c, t) ? codegen_type_size(c, t) : 1, al);
 	return b->slot;
@@ -44,9 +44,9 @@ VPRIV int64_t bind_slot(codegen_context *e, uint32_t s)
 /* the callee-saved register local s of the emitted function lives in, or -1 */
 VPRIV int lreg_of(codegen_context *e, uint32_t s)
 {
-	for (int i = 0; i < e->nlr; i++)
-		if (e->lrsym[i] == s)
-			return e->lrreg[i];
+	for (int i = 0; i < e->local_register_candidate_count; i++)
+		if (e->local_register_symbols[i] == s)
+			return e->local_register_numbers[i];
 	return -1;
 }
 
@@ -54,53 +54,53 @@ VPRIV int lreg_of(codegen_context *e, uint32_t s)
 VPRIV codegen_lvalue bind_lreg(codegen_context *e, uint32_t s)
 {
 	codegen_binding *b = codegen_symbol_binding_get(e, s);
-	codegen_lvalue l = { .k = CODEGEN_LVALUE_LOCAL_REGISTER };
+	codegen_lvalue l = { .kind = CODEGEN_LVALUE_LOCAL_REGISTER };
 
-	b->inst = e->f->inst;
+	b->instance = e->function_instance->instance;
 	b->kind = CODEGEN_BINDING_LOCAL_REGISTER;
-	b->kv = 0;
-	b->reg = 0xff;
-	b->v = codegen_value_register(lreg_of(e, s));
-	l.r = b->v.r;
-	l.align = codegen_type_alignment(e->c, e->c->syms[s].ty);
+	b->known_value_index = 0;
+	b->register_number = 0xff;
+	b->value = codegen_value_register(lreg_of(e, s));
+	l.register_number = b->value.register_number;
+	l.align = codegen_type_alignment(e->compile_context, e->compile_context->syms[s].ty);
 	return l;
 }
 
 /* the lvalue of a local (auto/param/register) variable */
 VPRIV codegen_lvalue local_lval(codegen_context *e, uint32_t s)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	codegen_binding *b = codegen_symbol_binding_get(e, s);
 	codegen_lvalue l = { 0 };
 	ast_qualified_type t = c->syms[s].ty;
 
 	l.align = codegen_type_alignment(c, t);
-	if (b->kind == CODEGEN_BINDING_LOCAL_REGISTER && b->inst) {
-		l.k = CODEGEN_LVALUE_LOCAL_REGISTER;
-		l.r = b->v.r;
+	if (b->kind == CODEGEN_BINDING_LOCAL_REGISTER && b->instance) {
+		l.kind = CODEGEN_LVALUE_LOCAL_REGISTER;
+		l.register_number = b->value.register_number;
 		return l;
 	}
-	if ((b->kind == B_NONE || b->inst == 0) && lreg_of(e, s) >= 0)
+	if ((b->kind == B_NONE || b->instance == 0) && lreg_of(e, s) >= 0)
 		return bind_lreg(e, s);	/* declaration jumped over */
-	if (b->kind == CODEGEN_BINDING_REGISTER && b->inst) {
+	if (b->kind == CODEGEN_BINDING_REGISTER && b->instance) {
 		/* read-only, its address never taken: a copy in a fresh slot will do */
-		l.k = CODEGEN_LVALUE_FRAME;
-		l.off = slot(e, 8, 8);
-		mem(e, I_ST, 3, 0, b->v.r, FRAME, l.off);
+		l.kind = CODEGEN_LVALUE_FRAME;
+		l.offset = slot(e, 8, 8);
+		mem(e, I_ST, 3, 0, b->value.register_number, FRAME, l.offset);
 		return l;
 	}
-	if (b->kind == B_NONE || b->inst == 0) {
+	if (b->kind == B_NONE || b->instance == 0) {
 		/* declaration not executed (jumped over, or dead): give it a slot */
 		bind_slot(e, s);
 	} else if (b->kind == CODEGEN_BINDING_CONSTANT) {
-		codegen_value v = b->v;
+		codegen_value v = b->value;
 		int r;
 
 		bind_slot(e, s);
 		if (codegen_type_is_wide(c, t)) {
 			toreg2(e, &v, codegen_type_is_signed(c, t));
-			mem(e, I_ST, 3, 0, v.r, FRAME, b->slot);
-			mem(e, I_ST, 3, 0, v.r2, FRAME, b->slot + 8);
+			mem(e, I_ST, 3, 0, v.register_number, FRAME, b->slot);
+			mem(e, I_ST, 3, 0, v.register_high, FRAME, b->slot + 8);
 		} else {
 			r = toreg(e, &v);
 			mem(e, I_ST, log2sz(codegen_type_size(c, t)), 0, r, FRAME, b->slot);
@@ -111,11 +111,11 @@ VPRIV codegen_lvalue local_lval(codegen_context *e, uint32_t s)
 		int r = treg(e);
 
 		mem(e, I_LD, 3, 0, r, FRAME, b->slot);
-		l.k = CODEGEN_LVALUE_REGISTER;
-		l.r = (uint8_t)r;
+		l.kind = CODEGEN_LVALUE_REGISTER;
+		l.register_number = (uint8_t)r;
 		return l;
 	}
-	l.k = CODEGEN_LVALUE_FRAME;
-	l.off = b->slot;
+	l.kind = CODEGEN_LVALUE_FRAME;
+	l.offset = b->slot;
 	return l;
 }

@@ -8,7 +8,7 @@
 /* pre-IR value v in VIR (constants made on first use) */
 static uint32_t virbuild_to_vir_value(codegen_context *e, uint32_t v)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 	virbuild_preir_insn *q;
 
 	v = virbuild_value_resolve(V, v);
@@ -33,7 +33,7 @@ static uint32_t virbuild_to_vir_block(virbuild_context *V, uint32_t b) { return 
 
 VPRIV bool virbuild_to_vir_insn_emit(codegen_context *e, uint32_t i, uint32_t b)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 	vir_function *f = &V->f;
 	vir_insn in = V->insns[i].insn;
 	const vir_opcode_info *oi = &vir_opcode_table[in.op];

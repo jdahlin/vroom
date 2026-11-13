@@ -65,7 +65,7 @@ static int vreg_kind(cc *c, ast_qualified_type t)
 /* the register of a vector operand: v16+ (z16+), an SVE predicate p0+ (a governing predicate must be p0-p7) */
 static uint8_t sve_opreg(codegen_context *e, uint32_t loc, ast_qualified_type t, int *nv, int *np)
 {
-	if (codegen_type_is_sve_predicate(e->c, t)) {
+	if (codegen_type_is_sve_predicate(e->compile_context, t)) {
 		if (*np >= 8)
 			codegen_fatal_report(e, loc, "too many SVE predicate asm operands");
 		return (uint8_t)(*np)++;
@@ -77,7 +77,7 @@ static uint8_t sve_opreg(codegen_context *e, uint32_t loc, ast_qualified_type t,
 
 VPRIV void gen_asm(codegen_context *e, uint32_t n)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n);
 	const ast_asm_statement *a = &c->asms[x->a];
 	const char *tp = c->strs[a->tmpl - 1].s;
@@ -92,7 +92,7 @@ VPRIV void gen_asm(codegen_context *e, uint32_t n)
 	uint64_t uniq;
 	int nvreg = 0, npreg = 0;
 
-	if (!e->reach)
+	if (!e->is_reachable)
 		return;
 	if (nops > 64 || a->nlabel > 64)
 		codegen_fatal_report(e, x->loc, "too many asm operands");
@@ -105,18 +105,18 @@ VPRIV void gen_asm(codegen_context *e, uint32_t n)
 		if (r >= 0)
 			clobs |= 1u << r;
 	}
-	e->usedcs |= clobs & ((1u << 29) - (1u << 19));	/* callee-saved ones it clobbers: the prologue saves them */
+	e->callee_saved_used |= clobs & ((1u << 29) - (1u << 19));	/* callee-saved ones it clobbers: the prologue saves them */
 	for (int i = 0; i < CODEGEN_TEMPORARY_COUNT; i++)
 		if ((clobs >> codegen_temporary_registers[i]) & 1) {
-			if (e->live & (1u << i)) {
+			if (e->temporaries_in_use & (1u << i)) {
 				/* live across a clobber: save it */
 				if (!sp.mask)
 					memset(&sp, 0, sizeof(sp));
-				sp.slot[i] = slot(e, 8, 8);
-				mem(e, I_ST, 3, 0, codegen_temporary_registers[i], FRAME, sp.slot[i]);
+				sp.slots[i] = slot(e, 8, 8);
+				mem(e, I_ST, 3, 0, codegen_temporary_registers[i], FRAME, sp.slots[i]);
 				sp.mask |= 1u << i;
 			} else {
-				e->live |= 1u << i;
+				e->temporaries_in_use |= 1u << i;
 				reserved |= 1u << i;
 			}
 		}
@@ -151,10 +151,10 @@ VPRIV void gen_asm(codegen_context *e, uint32_t n)
 		}
 		o->kind = AO_REG;
 		o->l = gen_lval(e, en);
-		if (N(en)->op == AST_NODE_VARIABLE && codegen_symbol_is_local_variable(c, N(en)->a) && codegen_symbol_binding_get(e, N(en)->a)->reg != 0xff &&
+		if (N(en)->op == AST_NODE_VARIABLE && codegen_symbol_is_local_variable(c, N(en)->a) && codegen_symbol_binding_get(e, N(en)->a)->register_number != 0xff &&
 		    codegen_symbol_binding_get(e, N(en)->a)->kind == CODEGEN_BINDING_SLOT) {
 			o->fixed = 1;
-			o->reg = codegen_symbol_binding_get(e, N(en)->a)->reg;
+			o->reg = codegen_symbol_binding_get(e, N(en)->a)->register_number;
 		}
 		o->wide = codegen_type_is_wide(c, o->t);
 		if (o->inout) {
@@ -217,7 +217,7 @@ VPRIV void gen_asm(codegen_context *e, uint32_t n)
 			codegen_value v = gen(e, en);
 			bool imm = false;
 
-			if (v.k != CODEGEN_VALUE_CONSTANT && v.k != CODEGEN_VALUE_ADDRESS && !reg_ok && !mem_ok && strpbrk(cs, "iInJKLMN")) {
+			if (v.kind != CODEGEN_VALUE_CONSTANT && v.kind != CODEGEN_VALUE_ADDRESS && !reg_ok && !mem_ok && strpbrk(cs, "iInJKLMN")) {
 				/* not a constant expression, but every bit known (clang: LLVM's known bits) */
 				uint64_t k, kv;
 				int w = codegen_type_is_integer(c, N(en)->ty) ? (int)codegen_type_size(c, N(en)->ty) * 8 : 0;
@@ -228,27 +228,27 @@ VPRIV void gen_asm(codegen_context *e, uint32_t n)
 					v = codegen_value_constant(codegen_integer_truncate(c, (i128)kv, N(en)->ty));
 				}
 			}
-			if (v.k == CODEGEN_VALUE_CONSTANT || v.k == CODEGEN_VALUE_ADDRESS) {
-				if (strchr(cs, 'Z') && v.k == CODEGEN_VALUE_CONSTANT && v.i == 0) {
+			if (v.kind == CODEGEN_VALUE_CONSTANT || v.kind == CODEGEN_VALUE_ADDRESS) {
+				if (strchr(cs, 'Z') && v.kind == CODEGEN_VALUE_CONSTANT && v.integer == 0) {
 					o->kind = AO_ZERO;
 					continue;
 				}
 				for (const char *p = cs; *p; p++)
-					if (strchr("iInJKLMNsg", *p) && (v.k == CODEGEN_VALUE_ADDRESS ? (*p == 'i' || *p == 's' || *p == 'g') : *p == 'g' || codegen_constraint_immediate_fits(*p, v.i)))
+					if (strchr("iInJKLMNsg", *p) && (v.kind == CODEGEN_VALUE_ADDRESS ? (*p == 'i' || *p == 's' || *p == 'g') : *p == 'g' || codegen_constraint_immediate_fits(*p, v.integer)))
 						imm = true;
 			}
 			if (imm) {
 				o->kind = AO_IMM;
 				o->v = v;
-				if (v.k == CODEGEN_VALUE_ADDRESS)
-					codegen_reference_note(e, v.ref);
+				if (v.kind == CODEGEN_VALUE_ADDRESS)
+					codegen_reference_note(e, v.reference);
 				continue;
 			}
 			if (!reg_ok && !strchr(cs, 'Z')) {
 				if (mem_ok) {
 					/* a value for a memory operand: put it in a slot */
 					int64_t sl = slot(e, codegen_type_size(c, o->t) ? codegen_type_size(c, o->t) : 8, 16);
-					codegen_lvalue l = { .k = CODEGEN_LVALUE_FRAME, .off = sl, .align = 16 };
+					codegen_lvalue l = { .kind = CODEGEN_LVALUE_FRAME, .offset = sl, .align = 16 };
 					int r;
 
 					store(e, &l, o->t, &v);
@@ -268,12 +268,12 @@ VPRIV void gen_asm(codegen_context *e, uint32_t n)
 			else
 				toreg(e, &v);
 			o->v = v;
-			if (N(en)->op == AST_NODE_VARIABLE && codegen_symbol_is_local_variable(c, N(en)->a) && codegen_symbol_binding_get(e, N(en)->a)->reg != 0xff &&
+			if (N(en)->op == AST_NODE_VARIABLE && codegen_symbol_is_local_variable(c, N(en)->a) && codegen_symbol_binding_get(e, N(en)->a)->register_number != 0xff &&
 			    codegen_symbol_binding_get(e, N(en)->a)->kind == CODEGEN_BINDING_SLOT) {
 				o->fixed = 1;
-				o->reg = codegen_symbol_binding_get(e, N(en)->a)->reg;
+				o->reg = codegen_symbol_binding_get(e, N(en)->a)->register_number;
 			} else {
-				o->reg = v.r;
+				o->reg = v.register_number;
 			}
 		}
 	}
@@ -286,16 +286,16 @@ VPRIV void gen_asm(codegen_context *e, uint32_t n)
 		if (o->inout) {
 			if (o->wide)
 				toreg2(e, &o->v, false);
-			else if (o->v.k != CODEGEN_VALUE_REGISTER)
+			else if (o->v.kind != CODEGEN_VALUE_REGISTER)
 				toreg(e, &o->v);
 			if (!o->fixed)
-				o->reg = o->v.r;
+				o->reg = o->v.register_number;
 		} else if (!o->fixed) {
 			o->reg = (uint8_t)treg(e);
 			o->v = codegen_value_register(o->reg);
 			if (o->wide) {
-				o->v.k = CODEGEN_VALUE_REGISTER_PAIR;
-				o->v.r2 = (uint8_t)treg(e);
+				o->v.kind = CODEGEN_VALUE_REGISTER_PAIR;
+				o->v.register_high = (uint8_t)treg(e);
 			}
 		}
 	}
@@ -303,8 +303,8 @@ VPRIV void gen_asm(codegen_context *e, uint32_t n)
 	for (uint32_t i = 0; i < nops; i++) {
 		asmopnd *o = &op[i];
 
-		if (o->fixed == 1 && (o->inout || !o->out) && o->v.k != CODEGEN_VALUE_NONE)
-			mov(e, 1, o->reg, o->v.r);
+		if (o->fixed == 1 && (o->inout || !o->out) && o->v.kind != CODEGEN_VALUE_NONE)
+			mov(e, 1, o->reg, o->v.register_number);
 	}
 	/* asm goto with outputs: the labels go through trampolines that store them */
 	for (uint32_t k = 0; k < a->nlabel; k++)
@@ -317,7 +317,7 @@ VPRIV void gen_asm(codegen_context *e, uint32_t n)
 		if (o->kind != AO_VREG)
 			continue;
 		if (!o->out) {
-			vraw(e, "ldr", q, o->reg, o->v.r);
+			vraw(e, "ldr", q, o->reg, o->v.register_number);
 			val_free(e, &o->v);
 		} else if (o->inout) {
 			codegen_lvalue l2 = o->l;
@@ -349,9 +349,9 @@ VPRIV void gen_asm(codegen_context *e, uint32_t n)
 			if (*p == '%') { vtext_char_append(rb, '%'); continue; }
 			if (*p == '=') {
 				if (uniq == UINT64_MAX) {
-					if (e->asmk >= 1024)
+					if (e->asm_statement_count >= 1024)
 						codegen_fatal_report(e, x->loc, "more than 1024 inline asm statements with %%= in one function");
-					uniq = (uint64_t)e->top * 1024 + e->asmk++;
+					uniq = (uint64_t)e->top_symbol * 1024 + e->asm_statement_count++;
 				}
 				vtext_unsigned_append(rb, uniq);
 				continue;
@@ -390,7 +390,7 @@ VPRIV void gen_asm(codegen_context *e, uint32_t n)
 
 				if (k >= a->nlabel)
 					codegen_fatal_report(e, x->loc, "invalid operand number %d in inline asm string (%u operands, %u labels)", idx, nops, a->nlabel);
-				p_lbl(rb, e->top, tramp[k]);
+				p_lbl(rb, e->top_symbol, tramp[k]);
 				continue;
 			}
 			{
@@ -410,7 +410,7 @@ VPRIV void gen_asm(codegen_context *e, uint32_t n)
 					break;
 				case AO_REG:
 					if (mod == 'H' && o->wide) {
-						reg(rb, o->v.r2, 1);
+						reg(rb, o->v.register_high, 1);
 					} else if (mod == 'a') {	/* address operand: [xN] */
 						vtext_char_append(rb, '[');
 						reg(rb, o->reg, 1);
@@ -428,10 +428,10 @@ VPRIV void gen_asm(codegen_context *e, uint32_t n)
 					vtext_char_append(rb, ']');
 					break;
 				case AO_IMM:
-					if (o->v.k == CODEGEN_VALUE_ADDRESS) {
-						codegen_reference_offset_append(c, rb, o->v.ref, (int64_t)o->v.i);
+					if (o->v.kind == CODEGEN_VALUE_ADDRESS) {
+						codegen_reference_offset_append(c, rb, o->v.reference, (int64_t)o->v.integer);
 					} else {	/* clang prints a bare number, as the assembler reads it */
-						vtext_signed_append(rb, mod == 'n' ? -(int64_t)o->v.i : (int64_t)o->v.i);
+						vtext_signed_append(rb, mod == 'n' ? -(int64_t)o->v.integer : (int64_t)o->v.integer);
 					}
 					break;
 				}
@@ -464,8 +464,8 @@ VPRIV void gen_asm(codegen_context *e, uint32_t n)
 				if (o->kind != AO_REG || o->reg == 0xff)
 					continue;
 				r = 1ull << o->reg;
-				if (o->v.k == CODEGEN_VALUE_REGISTER_PAIR)
-					r |= 1ull << o->v.r2;
+				if (o->v.kind == CODEGEN_VALUE_REGISTER_PAIR)
+					r |= 1ull << o->v.register_high;
 				if (o->out)
 					m[1] |= r;
 				if (!o->out || o->inout)
@@ -492,22 +492,22 @@ VPRIV void gen_asm(codegen_context *e, uint32_t n)
 		asmopnd *o = &op[i];
 
 		if (o->kind == AO_REG && o->fixed == 1) {
-			if (o->v.k != CODEGEN_VALUE_REGISTER) {
+			if (o->v.kind != CODEGEN_VALUE_REGISTER) {
 				o->v = codegen_value_register(treg(e));
 			}
-			mov(e, 1, o->v.r, o->reg);
+			mov(e, 1, o->v.register_number, o->reg);
 		}
 	}
 	if (sp.mask)
 		unspill(e, &sp);
-	e->live &= ~reserved;
+	e->temporaries_in_use &= ~reserved;
 	/* store the outputs (on the fallthrough path and through each trampoline) */
 	{
 		uint32_t lafter = a->nlabel && a->nout ? newlabel(e) : 0;
 
 		for (int pass = 0; pass <= (int)(a->nout ? a->nlabel : 0); pass++) {
 			if (pass > 0) {
-				e->lrefc[tramp[pass - 1]] |= LREF_EXT;	/* (the asm jumps here) */
+				e->label_reference_counts[tramp[pass - 1]] |= LREF_EXT;	/* (the asm jumps here) */
 				deflabel_forced(e, tramp[pass - 1]);
 			}
 			for (uint32_t i = 0; i < a->nout; i++) {
@@ -544,7 +544,7 @@ VPRIV void gen_asm(codegen_context *e, uint32_t n)
 	if (!a->nout)
 		for (uint32_t k = 0; k < a->nlabel; k++) {
 			kv_edge(e, tramp[k]);
-			e->lrefc[tramp[k]]++;
-			e->lrefc[tramp[k]] |= LREF_EXT;
+			e->label_reference_counts[tramp[k]]++;
+			e->label_reference_counts[tramp[k]] |= LREF_EXT;
 		}
 }

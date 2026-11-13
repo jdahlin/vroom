@@ -5,14 +5,14 @@
 
 VPRIV bool a64_tail_return(codegen_context *e, uint32_t expr)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	uint32_t callee;
 	int64_t slots[8];
 	codegen_value values[8];
 
-	if (CODEGEN_IS_DARWIN(c) || e->E->o->opt < 1 || e->E->noopt || !e->f || e->f->inl || e->vararg ||
-	    e->dyn || e->nclean != e->f->cbase ||
-	    !em_tail_candidate(e, e->f->fn, expr, 8, &callee))
+	if (CODEGEN_IS_DARWIN(c) || e->unit->options->opt < 1 || e->unit->cleanups_disabled || !e->function_instance || e->function_instance->is_inlined || e->is_variadic ||
+	    e->dynamic_frame || e->cleanup_count != e->function_instance->cleanup_base ||
+	    !em_tail_candidate(e, e->function_instance->function, expr, 8, &callee))
 		return false;
 	const node *call = N(expr);
 
@@ -21,7 +21,7 @@ VPRIV bool a64_tail_return(codegen_context *e, uint32_t expr)
 
 		values[i] = gen(e, arg);
 		slots[i] = 0;
-		if (values[i].k != CODEGEN_VALUE_CONSTANT) {
+		if (values[i].kind != CODEGEN_VALUE_CONSTANT) {
 			int r = toreg(e, &values[i]);
 
 			slots[i] = slot(e, 8, 8);
@@ -36,22 +36,22 @@ VPRIV bool a64_tail_return(codegen_context *e, uint32_t expr)
 		if (slots[i])
 			mem(e, I_LD, wide ? 3 : 2, 0, (int)i, FRAME, slots[i]);
 		else
-			movi(e, wide, (int)i, (int64_t)codegen_integer_truncate(c, values[i].i, ty));
+			movi(e, wide, (int)i, (int64_t)codegen_integer_truncate(c, values[i].integer, ty));
 	}
 	uint32_t ref = CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, callee);
 
 	codegen_reference_note(e, ref);
 	put(e, I_TAIL)->ref = ref;
-	e->reach = false;
+	e->is_reachable = false;
 	return true;
 }
 
 /* Keep the zero-code terminal marker to preserve debug record indices. */
 VPRIV uint32_t a64_tail_ref(const codegen_context *e)
 {
-	uint32_t k = e->nin;
+	uint32_t k = e->record_count;
 
-	while (k && e->in[k - 1].op == I_LABEL)
+	while (k && e->records[k - 1].op == I_LABEL)
 		k--;
-	return k && e->in[k - 1].op == I_TAIL && !e->in[k - 1].cond ? e->in[k - 1].ref : 0;
+	return k && e->records[k - 1].op == I_TAIL && !e->records[k - 1].cond ? e->records[k - 1].ref : 0;
 }

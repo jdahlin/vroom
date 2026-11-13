@@ -16,7 +16,7 @@ static void zero_lval(codegen_context *e, const codegen_lvalue *d, uint64_t size
 		a = laddr(e, &t);
 		r = toreg(e, &a);
 		zero_mem(e, r, size);
-		if (d->k != CODEGEN_LVALUE_REGISTER)
+		if (d->kind != CODEGEN_LVALUE_REGISTER)
 			val_free(e, &a);
 		return;
 	}
@@ -45,7 +45,7 @@ static bool is_zero_init(cc *c, uint32_t v)
 /* store the elements of init into the (already zeroed) object at d */
 static void init_elems(codegen_context *e, const codegen_lvalue *d, ast_qualified_type ty, uint32_t init)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(init);
 
 	/* Initialization precedes publication and copies the plain payload. */
@@ -68,14 +68,14 @@ static void init_elems(codegen_context *e, const codegen_lvalue *d, ast_qualifie
 
 					if (codegen_type_is_bool_vector(c, ty)) {
 						codegen_value bv = gen(e, val_);
-						el.off += (int64_t)(k / 8);
-						el.bf = 1, el.width = 1, el.bitoff = k % 8;
+						el.offset += (int64_t)(k / 8);
+						el.is_bitfield = 1, el.width = 1, el.bit_offset = k % 8;
 						store(e, &el, et, &bv);
 						val_free(e, &bv);
 						continue;
 					}
-					el.off += (int64_t)(k * es);
-					el.align = align_at((uint64_t)el.off, d->align);
+					el.offset += (int64_t)(k * es);
+					el.align = align_at((uint64_t)el.offset, d->align);
 					init_elems(e, &el, et, val_);
 				}
 			}
@@ -92,18 +92,18 @@ static void init_elems(codegen_context *e, const codegen_lvalue *d, ast_qualifie
 					continue;
 				if (!v[i])
 					continue;
-				el.off += (int64_t)(f->off / 8);
-				el.align = align_at((uint64_t)el.off, d->align);
+				el.offset += (int64_t)(f->off / 8);
+				el.align = align_at((uint64_t)el.offset, d->align);
 				if (f->bitfield) {
 					codegen_value bv;
 
 					if (is_zero_init(c, v[i]))
 						continue;
 					bv = gen(e, v[i]);
-					el.bf = 1;
-					el.bitoff = (uint16_t)(f->off % 8);
+					el.is_bitfield = 1;
+					el.bit_offset = (uint16_t)(f->off % 8);
 					el.width = f->width;
-					el.sgn = codegen_type_is_signed(c, f->ty);
+					el.is_signed = codegen_type_is_signed(c, f->ty);
 					store(e, &el, f->ty, &bv);
 					val_free(e, &bv);
 					continue;
@@ -147,7 +147,7 @@ static void init_elems(codegen_context *e, const codegen_lvalue *d, ast_qualifie
 
 VPRIV void gen_init_local(codegen_context *e, const codegen_lvalue *dst, ast_qualified_type ty, uint32_t init)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(init);
 
 	if (!init)
@@ -174,7 +174,7 @@ VPRIV void gen_init_local(codegen_context *e, const codegen_lvalue *dst, ast_qua
 
 static void run_cleanup(codegen_context *e, uint32_t s)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	uint32_t fn = codegen_symbol_attributes(c, s)->cleanup;
 	a64_call_argument a;
 	codegen_lvalue l;
@@ -183,7 +183,7 @@ static void run_cleanup(codegen_context *e, uint32_t s)
 		const codegen_binding *b = codegen_symbol_binding_get(e, s);
 		int r;
 
-		if (!e->reach || b->kind != CODEGEN_BINDING_INDIRECT || b->inst != e->f->inst)
+		if (!e->is_reachable || b->kind != CODEGEN_BINDING_INDIRECT || b->instance != e->function_instance->instance)
 			return;
 		r = treg(e);
 		mem(e, I_LD, 3, 0, r, FRAME, b->slot + 8);
@@ -195,11 +195,11 @@ static void run_cleanup(codegen_context *e, uint32_t s)
 		}
 		return;
 	}
-	if (!fn || !e->reach)
+	if (!fn || !e->is_reachable)
 		return;
 	l = local_lval(e, s);
-	a.v = laddr(e, &l);
-	a.t = codegen_type_primitive(AST_TYPE_LONG);
+	a.value = laddr(e, &l);
+	a.type = codegen_type_primitive(AST_TYPE_LONG);
 	a.slot = 1;
 	fn = codegen_symbol_canonical(c, fn);
 	if (can_inline(e, fn)) {
@@ -218,18 +218,18 @@ static void run_cleanup(codegen_context *e, uint32_t s)
 /* run cleanups (innermost first) down to depth `to` without popping them */
 VPRIV void run_cleanups(codegen_context *e, int to)
 {
-	for (int i = e->nclean; i-- > to;)
-		run_cleanup(e, e->clean[i]);
+	for (int i = e->cleanup_count; i-- > to;)
+		run_cleanup(e, e->cleanups[i]);
 }
 
 /* ---------------- statements ---------------- */
 
 VPRIV uint32_t user_label(codegen_context *e, uint32_t l)
 {
-	codegen_label *m = &e->lm[l];
+	codegen_label *m = &e->label_map[l];
 
-	if (m->inst != e->f->inst) {
-		m->inst = e->f->inst;
+	if (m->instance != e->function_instance->instance) {
+		m->instance = e->function_instance->instance;
 		m->id = newlabel(e);
 	}
 	return m->id;
@@ -237,10 +237,10 @@ VPRIV uint32_t user_label(codegen_context *e, uint32_t l)
 
 VPRIV codegen_value gen_block(codegen_context *e, uint32_t n, bool want)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n);
-	int64_t mark = e->foff, cl_top = e->cl_top;
-	int cmark = e->nclean;
+	int64_t mark = e->frame_offset, cl_top = e->compound_literal_top;
+	int cmark = e->cleanup_count;
 	codegen_value v = codegen_value_none();
 	uint32_t vstmt = 0;
 	ast_qualified_type vt = 0;
@@ -260,7 +260,7 @@ VPRIV codegen_value gen_block(codegen_context *e, uint32_t n, bool want)
 
 	if (vstmt && codegen_type_is_aggregate(c, vt))
 		vslot = slot(e, codegen_type_size(c, vt), codegen_type_alignment(c, vt));
-	mark = e->foff;
+	mark = e->frame_offset;
 	for (uint32_t i = 0; i < x->c; i++) {
 		uint32_t s = c->lists[x->b + i];
 
@@ -271,7 +271,7 @@ VPRIV codegen_value gen_block(codegen_context *e, uint32_t n, bool want)
 			while (N(t)->op == AST_NODE_LABEL) {
 				uint32_t l = user_label(e, N(t)->a);
 
-				if (e->E->lref[N(t)->a] & CODEGEN_LABEL_BACKWARD)
+				if (e->unit->label_flags[N(t)->a] & CODEGEN_LABEL_BACKWARD)
 					deflabel_forced(e, l);
 				else
 					deflabel(e, l);
@@ -279,7 +279,7 @@ VPRIV codegen_value gen_block(codegen_context *e, uint32_t n, bool want)
 			}
 			v = gen(e, N(vstmt)->a);
 			if (vslot != 1) {
-				codegen_lvalue d = { .k = CODEGEN_LVALUE_FRAME, .off = vslot, .align = codegen_type_alignment(c, vt) };
+				codegen_lvalue d = { .kind = CODEGEN_LVALUE_FRAME, .offset = vslot, .align = codegen_type_alignment(c, vt) };
 				int r;
 
 				store(e, &d, vt, &v);
@@ -300,18 +300,18 @@ VPRIV codegen_value gen_block(codegen_context *e, uint32_t n, bool want)
 			gen_stmt(e, s);
 		}
 	}
-	if (e->nclean > cmark) {
+	if (e->cleanup_count > cmark) {
 		run_cleanups(e, cmark);
-		e->nclean = cmark;
+		e->cleanup_count = cmark;
 	}
-	e->foff = mark;
-	e->cl_top = cl_top;
+	e->frame_offset = mark;
+	e->compound_literal_top = cl_top;
 	return v;
 }
 
 static void collect_cases(codegen_context *e, uint32_t n)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x;
 
 	if (!n)
@@ -320,7 +320,7 @@ static void collect_cases(codegen_context *e, uint32_t n)
 	switch (x->op) {
 	case AST_NODE_CASE:
 	case AST_NODE_DEFAULT:
-		e->cases[e->ncases++] = n;
+		e->cases[e->case_count++] = n;
 		collect_cases(e, x->c);
 		return;
 	case AST_NODE_BLOCK:
@@ -383,9 +383,9 @@ static void a64_switch_tree(codegen_context *e, const em_switch_case *cases, uin
 static void a64_switch_table(codegen_context *e, const em_switch_case *cases, uint32_t n, int r, int cx, uint32_t dflt)
 {
 	i128 lo = cases[0].lo, span = cases[n - 1].hi - lo;
-	uint32_t tab = newlabel(e), off = e->njtl;
+	uint32_t tab = newlabel(e), off = e->jump_table_label_count;
 
-	if (!e->reach)
+	if (!e->is_reachable)
 		return;
 	int t = r, own = 0;
 	if (lo || !cx) {
@@ -403,33 +403,33 @@ static void a64_switch_table(codegen_context *e, const em_switch_case *cases, ui
 	int cond = emit_cmp(e, LEX_TOKEN_GREATER, cx, false, &a, &b);
 	val_free(e, &b);
 	bcond(e, cond, dflt);
-	if (e->njtl + (uint32_t)span + 1 > e->capjtl) {
-		e->capjtl = (e->njtl + (uint32_t)span + 1) * 2;
-		e->jtl = realloc(e->jtl, (size_t)e->capjtl * sizeof *e->jtl);
+	if (e->jump_table_label_count + (uint32_t)span + 1 > e->jump_table_label_capacity) {
+		e->jump_table_label_capacity = (e->jump_table_label_count + (uint32_t)span + 1) * 2;
+		e->jump_table_labels = realloc(e->jump_table_labels, (size_t)e->jump_table_label_capacity * sizeof *e->jump_table_labels);
 	}
-	if (e->njt == e->capjt) {
-		e->capjt = e->capjt ? e->capjt * 2 : 4;
-		e->jt = realloc(e->jt, (size_t)e->capjt * sizeof *e->jt);
+	if (e->jump_table_count == e->jump_table_capacity) {
+		e->jump_table_capacity = e->jump_table_capacity ? e->jump_table_capacity * 2 : 4;
+		e->jump_tables = realloc(e->jump_tables, (size_t)e->jump_table_capacity * sizeof *e->jump_tables);
 	}
-	if (!e->jtl || !e->jt)
+	if (!e->jump_table_labels || !e->jump_tables)
 		abort();
 	uint32_t k = 0;
 	for (i128 v = lo; v <= lo + span; v++) {
 		while (k < n && cases[k].hi < v)
 			k++;
 		uint32_t l = k < n && cases[k].lo <= v ? cases[k].target : dflt;
-		e->jtl[e->njtl++] = l;
-		if (!(e->lrefc[l] & LREF_EXT)) {
+		e->jump_table_labels[e->jump_table_label_count++] = l;
+		if (!(e->label_reference_counts[l] & LREF_EXT)) {
 			kv_edge(e, l);
-			e->lrefc[l]++;
-			e->lrefc[l] |= LREF_EXT;
+			e->label_reference_counts[l]++;
+			e->label_reference_counts[l] |= LREF_EXT;
 		}
 	}
-	e->jt[e->njt++] = (struct codegen_jump_table){ tab, off, (uint32_t)span + 1 };
+	e->jump_tables[e->jump_table_count++] = (struct codegen_jump_table){ tab, off, (uint32_t)span + 1 };
 	ins *i = put(e, I_JT);
 	i->rd = (uint8_t)t;
 	i->label = tab;
-	e->reach = false;
+	e->is_reachable = false;
 	if (own)
 		tfree(e, t);
 }
@@ -437,11 +437,11 @@ static void a64_switch_table(codegen_context *e, const em_switch_case *cases, ui
 static bool a64_switch_dispatch(codegen_context *e, uint32_t base, int r, int cx,
                                 bool sg, bool tables, uint32_t dflt)
 {
-	if (!e->E->o->opt || e->E->noopt || e->ncases - base < 4)
+	if (!e->unit->options->opt || e->unit->cleanups_disabled || e->case_count - base < 4)
 		return false;
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	uint32_t count = 0;
-	for (uint32_t k = base; k < e->ncases; k++)
+	for (uint32_t k = base; k < e->case_count; k++)
 		count += N(e->cases[k])->op == AST_NODE_CASE;
 	if (count < 4)
 		return false;
@@ -450,11 +450,11 @@ static bool a64_switch_dispatch(codegen_context *e, uint32_t base, int r, int cx
 		return false;
 	uint32_t j = 0;
 	bool ranges = false;
-	for (uint32_t k = base; k < e->ncases; k++) {
+	for (uint32_t k = base; k < e->case_count; k++) {
 		uint32_t cn = e->cases[k];
 		if (N(cn)->op == AST_NODE_CASE) {
 			cases[j++] = (em_switch_case){c->ipool[N(cn)->a],
-				c->ipool[N(cn)->b], e->caselbl[cn]};
+				c->ipool[N(cn)->b], e->case_labels[cn]};
 			ranges |= c->ipool[N(cn)->a] != c->ipool[N(cn)->b];
 		}
 	}
@@ -474,39 +474,39 @@ static bool a64_switch_dispatch(codegen_context *e, uint32_t base, int r, int cx
 static void gen_switch(codegen_context *e, uint32_t n)
 {
 	if (a64_switch_values(e,n)) return;
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n);
 	ast_qualified_type ct = N(x->a)->ty;
 	int cx = X(c, ct);
 	codegen_value v = gen(e, x->a);
-	uint32_t base = e->ncases, dflt = 0, lbrk = newlabel(e);
+	uint32_t base = e->case_count, dflt = 0, lbrk = newlabel(e);
 
 	collect_cases(e, x->b);
-	for (uint32_t k = base; k < e->ncases; k++) {
+	for (uint32_t k = base; k < e->case_count; k++) {
 		uint32_t cn = e->cases[k];
 
-		e->caselbl[cn] = newlabel(e);
+		e->case_labels[cn] = newlabel(e);
 		if (N(cn)->op == AST_NODE_DEFAULT)
-			dflt = e->caselbl[cn];
+			dflt = e->case_labels[cn];
 	}
 	if (!dflt)
 		dflt = lbrk;
-	if (v.k == CODEGEN_VALUE_CONSTANT) {
+	if (v.kind == CODEGEN_VALUE_CONSTANT) {
 		uint32_t target = dflt;
-		i128 cv = codegen_integer_truncate(c, v.i, ct);
+		i128 cv = codegen_integer_truncate(c, v.integer, ct);
 
-		for (uint32_t k = base; k < e->ncases; k++) {
+		for (uint32_t k = base; k < e->case_count; k++) {
 			const node *cn = N(e->cases[k]);
 
 			if (cn->op == AST_NODE_CASE && c->ipool[cn->a] <= cv && cv <= c->ipool[cn->b]) {
-				target = e->caselbl[e->cases[k]];
+				target = e->case_labels[e->cases[k]];
 				break;
 			}
 		}
 		jump(e, target);
 	} else if (codegen_type_is_bitint_big(c, ct)) {
 		int source = toreg(e, &v);
-		for (uint32_t k = base; k < e->ncases; k++) {
+		for (uint32_t k = base; k < e->case_count; k++) {
 			const node *cn = N(e->cases[k]);
 			if (cn->op != AST_NODE_CASE) continue;
 			i128 lo = c->ipool[cn->a], hi = c->ipool[cn->b];
@@ -524,7 +524,7 @@ static void gen_switch(codegen_context *e, uint32_t n)
 				cbz(e, false, 1, toreg(e, &test), next);
 				val_free(e, &test);
 			}
-			jump(e, e->caselbl[e->cases[k]]);
+			jump(e, e->case_labels[e->cases[k]]);
 			deflabel(e, next);
 		}
 		val_free(e, &v);
@@ -534,7 +534,7 @@ static void gen_switch(codegen_context *e, uint32_t n)
 		int t0 = treg(e), t1 = treg(e);
 
 		toreg2(e, &v, codegen_type_is_signed(c, ct));
-		for (uint32_t k = base; k < e->ncases; k++) {
+		for (uint32_t k = base; k < e->case_count; k++) {
 			const node *cn = N(e->cases[k]);
 			u128 lo, d;
 
@@ -543,13 +543,13 @@ static void gen_switch(codegen_context *e, uint32_t n)
 			lo = (u128)c->ipool[cn->a], d = (u128)c->ipool[cn->b] - lo;
 			movi(e, 1, t0, (int64_t)(uint64_t)lo);
 			movi(e, 1, t1, (int64_t)(uint64_t)(lo >> 64));
-			op3(e, I_SUBS, 1, R_X16, v.r, t0);
-			op3(e, I_SBC, 1, R_X17, v.r2, t1);
+			op3(e, I_SUBS, 1, R_X16, v.register_number, t0);
+			op3(e, I_SBC, 1, R_X17, v.register_high, t1);
 			movi(e, 1, t0, (int64_t)(uint64_t)d);
 			movi(e, 1, t1, (int64_t)(uint64_t)(d >> 64));
 			op3(e, I_SUBS, 1, ZR, t0, R_X16);
 			op3(e, I_SBCS, 1, ZR, t1, R_X17);
-			bcond(e, C_HS, e->caselbl[e->cases[k]]);
+			bcond(e, C_HS, e->case_labels[e->cases[k]]);
 		}
 		tfree(e, t0);
 		tfree(e, t1);
@@ -562,7 +562,7 @@ static void gen_switch(codegen_context *e, uint32_t n)
 		             a64_switch_bitset(e, x->b, base, r, cx, codegen_type_is_signed(c, ct), dflt)) ||
 			    a64_switch_dispatch(e, base, r, cx, codegen_type_is_signed(c, ct), !codegen_type_is_bitint(c, ct), dflt);
 		if (!tree) {
-			for (uint32_t k = base; k < e->ncases; k++) {
+			for (uint32_t k = base; k < e->case_count; k++) {
 				const node *cn = N(e->cases[k]);
 				i128 lo, hi;
 
@@ -574,7 +574,7 @@ static void gen_switch(codegen_context *e, uint32_t n)
 
 					emit_cmp(e, LEX_TOKEN_EQUAL_EQUAL, cx, false, &a, &b);
 					val_free(e, &b);
-					bcond(e, C_EQ, e->caselbl[e->cases[k]]);
+					bcond(e, C_EQ, e->case_labels[e->cases[k]]);
 				} else {
 					opi(e, I_SUBI, cx, R_X16, r, (int64_t)lo);
 					if (hi - lo <= 4095) {
@@ -583,7 +583,7 @@ static void gen_switch(codegen_context *e, uint32_t n)
 						movi(e, cx, R_X17, (int64_t)(hi - lo));
 						op3(e, I_SUBS, cx, ZR, R_X16, R_X17);
 					}
-					bcond(e, C_LS, e->caselbl[e->cases[k]]);
+					bcond(e, C_LS, e->case_labels[e->cases[k]]);
 				}
 			}
 		}
@@ -591,50 +591,50 @@ static void gen_switch(codegen_context *e, uint32_t n)
 		if (!tree)
 			jump(e, dflt);
 	}
-	e->ncases = base + (e->ncases - base);	/* keep the labels until the body is done */
-	e->loops[e->nloop++] = (codegen_loop){ lbrk, 0, e->nclean };
-	e->reach = false;
+	e->case_count = base + (e->case_count - base);	/* keep the labels until the body is done */
+	e->loops[e->loop_count++] = (codegen_loop){ lbrk, 0, e->cleanup_count };
+	e->is_reachable = false;
 	gen_stmt(e, x->b);
-	e->nloop--;
-	e->ncases = base;
+	e->loop_count--;
+	e->case_count = base;
 	deflabel(e, lbrk);
 }
 
 static void gen_return(codegen_context *e, const node *x)
 {
-	cc *c = e->c;
-	codegen_function_instance *f = e->f;
-	ast_qualified_type rt = f->rty;
+	cc *c = e->compile_context;
+	codegen_function_instance *f = e->function_instance;
+	ast_qualified_type rt = f->return_type;
 	codegen_value v;
 
 	if (x->a && a64_tail_return(e, x->a))
 		return;
 	v = x->a ? gen(e, x->a) : codegen_value_none();
 
-	if (!e->reach) {
+	if (!e->is_reachable) {
 		val_free(e, &v);
 		return;
 	}
-	if (f->inl) {
+	if (f->is_inlined) {
 		if (!codegen_type_is_void(c, rt) && x->a) {
-			codegen_lvalue l = { .k = CODEGEN_LVALUE_FRAME, .off = f->retslot, .align = codegen_type_alignment(c, rt) };
+			codegen_lvalue l = { .kind = CODEGEN_LVALUE_FRAME, .offset = f->return_slot, .align = codegen_type_alignment(c, rt) };
 
-			if (v.k == CODEGEN_VALUE_CONSTANT || v.k == CODEGEN_VALUE_ADDRESS) {
+			if (v.kind == CODEGEN_VALUE_CONSTANT || v.kind == CODEGEN_VALUE_ADDRESS) {
 				if (!f->any_ret)
-					f->cst = v;
-				else if (f->cst.k != v.k || f->cst.i != v.i || f->cst.ref != v.ref)
-					f->cst_ok = false;
+					f->constant = v;
+				else if (f->constant.kind != v.kind || f->constant.integer != v.integer || f->constant.reference != v.reference)
+					f->constant_is_ok = false;
 			} else {
-				f->cst_ok = false;
+				f->constant_is_ok = false;
 			}
 			f->any_ret = true;
-			if (f->retreg) {
+			if (f->return_register) {
 				/* what a store to and load from retslot would give */
-				int rr = f->retreg - 1;
+				int rr = f->return_register - 1;
 				uint64_t sz = codegen_type_size(c, rt);
 
-				if (v.k == CODEGEN_VALUE_CONSTANT) {
-					movi(e, 1, rr, (int64_t)codegen_integer_truncate(c, v.i, rt));
+				if (v.kind == CODEGEN_VALUE_CONSTANT) {
+					movi(e, 1, rr, (int64_t)codegen_integer_truncate(c, v.integer, rt));
 				} else {
 					int r = toreg(e, &v);
 
@@ -648,17 +648,17 @@ static void gen_return(codegen_context *e, const node *x)
 			}
 		}
 		val_free(e, &v);
-		run_cleanups(e, f->cbase);
-		jump(e, f->retlbl);
+		run_cleanups(e, f->cleanup_base);
+		jump(e, f->return_label);
 		return;
 	}
-	if (!codegen_type_is_void(c, rt) && x->a && v.k != CODEGEN_VALUE_NONE) {
-		if (e->nclean > f->cbase) {
+	if (!codegen_type_is_void(c, rt) && x->a && v.kind != CODEGEN_VALUE_NONE) {
+		if (e->cleanup_count > f->cleanup_base) {
 			/* park the value while the cleanups run */
 			if (codegen_type_is_aggregate(c, rt) && N(x->a)->op == AST_NODE_VARIABLE && codegen_symbol_is_local_variable(c, N(x->a)->a) &&
 			    c->syms[N(x->a)->a].sc != AST_STORAGE_STATIC) {
 				/* clang returns the local itself (NRVO): its cleanups' changes are seen */
-				run_cleanups(e, f->cbase);
+				run_cleanups(e, f->cleanup_base);
 			} else if (codegen_type_is_aggregate(c, rt)) {
 				int64_t sl = slot(e, codegen_type_size(c, rt), 16);
 				int rs = toreg(e, &v), rd = treg(e);
@@ -667,17 +667,17 @@ static void gen_return(codegen_context *e, const node *x)
 				copy_mem(e, rd, rs, codegen_type_size(c, rt));
 				tfree(e, rd);
 				val_free(e, &v);
-				run_cleanups(e, f->cbase);
+				run_cleanups(e, f->cleanup_base);
 				rd = treg(e);
 				opi(e, I_ADDI, 1, rd, FRAME, sl);
 				v = codegen_value_register(rd);
 			} else {
 				int64_t sl = slot(e, 16, 16);
-				codegen_lvalue l = { .k = CODEGEN_LVALUE_FRAME, .off = sl, .align = 16 };
+				codegen_lvalue l = { .kind = CODEGEN_LVALUE_FRAME, .offset = sl, .align = 16 };
 
 				store(e, &l, rt, &v);
 				val_free(e, &v);
-				run_cleanups(e, f->cbase);
+				run_cleanups(e, f->cleanup_base);
 				v = load(e, &l, rt);
 			}
 		}
@@ -698,7 +698,7 @@ static void gen_return(codegen_context *e, const node *x)
 			if (is_sret(c, rt)) {
 				int rd = treg(e);
 
-				mem(e, I_LD, 3, 0, rd, FRAME, f->retslot);	/* the caller's buffer (x8 at entry) */
+				mem(e, I_LD, 3, 0, rd, FRAME, f->return_slot);	/* the caller's buffer (x8 at entry) */
 				copy_mem(e, rd, rs, codegen_type_size(c, rt));
 				tfree(e, rd);
 			} else {
@@ -709,11 +709,11 @@ static void gen_return(codegen_context *e, const node *x)
 		} else if (codegen_type_is_wide(c, rt)) {
 			toreg2(e, &v, codegen_type_is_signed(c, rt));
 			if (codegen_type_is_long_double(c, rt)) {
-				word(e, f_in(1, 0, v.r));
-				word(e, q_in_hi(0, v.r2));
+				word(e, f_in(1, 0, v.register_number));
+				word(e, q_in_hi(0, v.register_high));
 			} else {
-				mov(e, 1, 0, v.r);
-				mov(e, 1, 1, v.r2);
+				mov(e, 1, 0, v.register_number);
+				mov(e, 1, 1, v.register_high);
 			}
 		} else {
 			move_to(e, 0, -1, &v, rt);
@@ -725,9 +725,9 @@ static void gen_return(codegen_context *e, const node *x)
 		val_free(e, &v);
 	} else {
 		val_free(e, &v);
-		run_cleanups(e, f->cbase);
+		run_cleanups(e, f->cleanup_base);
 	}
-	jump(e, f->retlbl);
+	jump(e, f->return_label);
 }
 
 /*
@@ -739,10 +739,10 @@ static void gen_return(codegen_context *e, const node *x)
 /* the value of a VLA size expression: from its slot once its declaration ran (vla_fix) */
 static codegen_value vla_len(codegen_context *e, uint32_t sn)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 
-	for (uint32_t k = e->nvsz; k-- > 0;)
-		if (e->vsz[k].node == sn && e->vsz[k].inst == e->f->inst) {
+	for (uint32_t k = e->vla_size_count; k-- > 0;)
+		if (e->vsz[k].node == sn && e->vsz[k].instance == e->function_instance->instance) {
 			int r = treg(e);
 
 			mem(e, I_LD, 3, 0, r, FRAME, e->vsz[k].slot);
@@ -760,7 +760,7 @@ static codegen_value vla_len(codegen_context *e, uint32_t sn)
  */
 VPRIV void vla_fix(codegen_context *e, ast_qualified_type t, bool pure)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 
 	for (;;) {
 		const ctype *a = T(c, t);
@@ -774,8 +774,8 @@ VPRIV void vla_fix(codegen_context *e, ast_qualified_type t, bool pure)
 		if ((a->flags & AST_TYPE_FLAG_VLA) && a->n && N(a->n)->op != AST_NODE_NUMBER && !(pure && codegen_expression_has_side_effects(c, a->n))) {
 			bool captured = false;
 
-			for (uint32_t k = e->nvsz; k-- > 0;)
-				if (e->vsz[k].node == a->n && e->vsz[k].inst == e->f->inst) {
+			for (uint32_t k = e->vla_size_count; k-- > 0;)
+				if (e->vsz[k].node == a->n && e->vsz[k].instance == e->function_instance->instance) {
 					captured = true;
 					break;
 				}
@@ -789,11 +789,11 @@ VPRIV void vla_fix(codegen_context *e, ast_qualified_type t, bool pure)
 
 			mem(e, I_ST, 3, 0, r, FRAME, sl);
 			val_free(e, &v);
-			if (e->nvsz >= CODEGEN_VLA_SIZE_MAX)
+			if (e->vla_size_count >= CODEGEN_VLA_SIZE_MAX)
 				codegen_fatal_report(e, 0, "too many variable length array sizes in one function");
-			e->vsz[e->nvsz].node = a->n;
-			e->vsz[e->nvsz].inst = e->f->inst;
-			e->vsz[e->nvsz++].slot = sl;
+			e->vsz[e->vla_size_count].node = a->n;
+			e->vsz[e->vla_size_count].instance = e->function_instance->instance;
+			e->vsz[e->vla_size_count++].slot = sl;
 		}
 		t = a->base;
 	}
@@ -801,7 +801,7 @@ VPRIV void vla_fix(codegen_context *e, ast_qualified_type t, bool pure)
 
 VPRIV codegen_value vla_bytes(codegen_context *e, ast_qualified_type t)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const ctype *a = T(c, t);
 	codegen_value n, b;
 	int r;
@@ -811,9 +811,9 @@ VPRIV codegen_value vla_bytes(codegen_context *e, ast_qualified_type t)
 	n = vla_len(e, a->n);
 	b = vla_bytes(e, a->base);
 	r = toreg(e, &n);
-	if (b.k == CODEGEN_VALUE_CONSTANT) {
-		if (b.i != 1) {
-			movi(e, 1, R_X16, (int64_t)b.i);
+	if (b.kind == CODEGEN_VALUE_CONSTANT) {
+		if (b.integer != 1) {
+			movi(e, 1, R_X16, (int64_t)b.integer);
 			op4(e, I_MADD, 1, r, r, R_X16, ZR);
 		}
 	} else {
@@ -827,7 +827,7 @@ VPRIV codegen_value vla_bytes(codegen_context *e, ast_qualified_type t)
 
 static void gen_vla_decl(codegen_context *e, const node *x, uint32_t s)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	codegen_binding *b = codegen_symbol_binding_get(e, s);
 	codegen_value n = vla_bytes(e, c->syms[s].ty);
 	int r = toreg(e, &n), t = treg(e);
@@ -837,12 +837,12 @@ static void gen_vla_decl(codegen_context *e, const node *x, uint32_t s)
 
 	if (codegen_symbol_alignment(c, s) > al)
 		al = codegen_symbol_alignment(c, s);
-	b->inst = e->f->inst;
+	b->instance = e->function_instance->instance;
 	b->kind = CODEGEN_BINDING_INDIRECT;
-	b->kv = 0;
-	b->reg = 0xff;
+	b->known_value_index = 0;
+	b->register_number = 0xff;
 	b->slot = sl;
-	e->dyn = true;
+	e->dynamic_frame = true;
 	mem(e, I_ST, 3, 0, r, FRAME, sl + 16);
 	mov(e, 1, t, SP);
 	mem(e, I_ST, 3, 0, t, FRAME, sl + 8);
@@ -850,7 +850,7 @@ static void gen_vla_decl(codegen_context *e, const node *x, uint32_t s)
 	opi(e, I_ADDI, 1, r, r, 15 + (al > 16 ? al - 16 : 0));
 	opi(e, I_ANDI, 1, r, r, -16);
 	op3(e, I_SUB, 1, SP, SP, r);
-	if (e->reach) {
+	if (e->is_reachable) {
 		i = put(e, I_ADDI);
 		i->sz = 1, i->rd = (uint8_t)t, i->rn = SP, i->imm = 0, i->cond = 0xee;	/* + outgoing area */
 	}
@@ -882,7 +882,7 @@ static void gen_vla_decl(codegen_context *e, const node *x, uint32_t s)
 
 		val_free(e, &tv);
 	}
-	e->clean[e->nclean++] = s;
+	e->cleanups[e->cleanup_count++] = s;
 }
 
 /*
@@ -893,7 +893,7 @@ static void gen_vla_decl(codegen_context *e, const node *x, uint32_t s)
  */
 static void dead_decl(codegen_context *e, const node *x)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	uint32_t s = x->a;
 	const sym *y = &c->syms[s];
 	int rr;
@@ -903,12 +903,12 @@ static void dead_decl(codegen_context *e, const node *x)
 		return;
 	bind_slot(e, s);
 	if ((rr = regvar_reg(c, s)) >= 0)
-		codegen_symbol_binding_get(e, s)->reg = (uint8_t)rr;
+		codegen_symbol_binding_get(e, s)->register_number = (uint8_t)rr;
 }
 
 static void gen_decl(codegen_context *e, const node *x)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	uint32_t s = x->a;
 	const sym *y = &c->syms[s];
 	codegen_binding *b;
@@ -922,7 +922,7 @@ static void gen_decl(codegen_context *e, const node *x)
 		return;
 	}
 	{
-		unsigned recipe = em_unused_init(e, x, e->f->fn, 64);
+		unsigned recipe = em_unused_init(e, x, e->function_instance->function, 64);
 
 		if (recipe != EM_UNUSED_KEEP) {
 			if (recipe == EM_UNUSED_EVAL) {
@@ -933,53 +933,53 @@ static void gen_decl(codegen_context *e, const node *x)
 			return;
 		}
 	}
-	if (x->b && !(e->E->sflags[s] & CODEGEN_SYMBOL_WRITTEN) && !codegen_type_is_aggregate(c, y->ty) && !(AST_QUALIFIED_TYPE_QUALIFIERS(y->ty) & AST_QUALIFIER_VOLATILE) &&
+	if (x->b && !(e->unit->symbol_flags[s] & CODEGEN_SYMBOL_WRITTEN) && !codegen_type_is_aggregate(c, y->ty) && !(AST_QUALIFIED_TYPE_QUALIFIERS(y->ty) & AST_QUALIFIER_VOLATILE) &&
 	    !codegen_type_is_wide(c, y->ty) && y->sc != AST_STORAGE_REGISTER && !codegen_symbol_attributes(c, s)->cleanup) {
 		codegen_value v = gen(e, x->b);
 
 		if (const_var(e, s, &v)) {
 			b = codegen_symbol_binding_get(e, s);
-			b->inst = e->f->inst;
+			b->instance = e->function_instance->instance;
 			b->kind = CODEGEN_BINDING_CONSTANT;
-			b->kv = 0;
-			b->v = v;
+			b->known_value_index = 0;
+			b->value = v;
 			return;
 		}
 		{
-			codegen_lvalue l = { .k = CODEGEN_LVALUE_FRAME, .align = codegen_symbol_alignment(c, s) };
+			codegen_lvalue l = { .kind = CODEGEN_LVALUE_FRAME, .align = codegen_symbol_alignment(c, s) };
 
 			if (lreg_of(e, s) >= 0)
 				l = bind_lreg(e, s);
 			else
-				l.off = bind_slot(e, s);
+				l.offset = bind_slot(e, s);
 			kv_track(e, s, &v);
 			store(e, &l, y->ty, &v);
 			val_free(e, &v);
 		}
 	} else {
-		codegen_lvalue l = { .k = CODEGEN_LVALUE_FRAME, .align = codegen_symbol_alignment(c, s) };
+		codegen_lvalue l = { .kind = CODEGEN_LVALUE_FRAME, .align = codegen_symbol_alignment(c, s) };
 		int rr = regvar_reg(c, s);
 
 		if (lreg_of(e, s) >= 0)
 			l = bind_lreg(e, s);
 		else
-			l.off = bind_slot(e, s);
+			l.offset = bind_slot(e, s);
 		if (rr >= 0)
-			codegen_symbol_binding_get(e, s)->reg = (uint8_t)rr;
+			codegen_symbol_binding_get(e, s)->register_number = (uint8_t)rr;
 		if (x->b)
 			gen_init_local(e, &l, y->ty, x->b);
 		else if (rr < 0 && y->sc != AST_STORAGE_REGISTER)
 			kv_track(e, s, NULL);
 	}
 	if (codegen_symbol_attributes(c, s)->cleanup) {
-		e->clean[e->nclean++] = s;
+		e->cleanups[e->cleanup_count++] = s;
 	}
 }
 
 static int find_loop(codegen_context *e, bool cont)
 {
-	for (int i = e->nloop; i-- > e->f->nloop;)
-		if (!cont || e->loops[i].cont)
+	for (int i = e->loop_count; i-- > e->function_instance->loop_depth;)
+		if (!cont || e->loops[i].continue_label)
 			return i;
 	return -1;
 }
@@ -990,39 +990,39 @@ static _Thread_local int leakchk = -1;	/* VCC_LEAKCHK: first leak per thread */
 /* every statement leaves the temporaries it found; VCC_LEAKCHK reports the first that does not */
 VPRIV void gen_stmt(codegen_context *e, uint32_t n)
 {
-	cc *c = e->c;
-	uint32_t live = e->live, loc = e->curloc;
+	cc *c = e->compile_context;
+	uint32_t live = e->temporaries_in_use, loc = e->current_location;
 
 	if (n)
-		e->curloc = N(n)->loc;
-	if (unlikely(e->E->o->debug) && n && N(n)->op != AST_NODE_BLOCK && N(n)->op != AST_NODE_CASE &&
+		e->current_location = N(n)->loc;
+	if (unlikely(e->unit->options->debug) && n && N(n)->op != AST_NODE_BLOCK && N(n)->op != AST_NODE_CASE &&
 	    N(n)->op != AST_NODE_DEFAULT && N(n)->op != AST_NODE_LABEL)
 		codegen_debug_row_add(e, N(n)->loc);
 	gen_stmt1(e, n);
-	e->curloc = loc;
+	e->current_location = loc;
 	if (unlikely(leakchk < 0))
 		leakchk = getenv("VCC_LEAKCHK") != NULL;
-	if (unlikely(leakchk) && n && e->live != live) {
-		codegen_diagnostic_report(e, N(n)->loc, "temporaries leaked: %#x -> %#x (op %d)", live, e->live, N(n)->op);
+	if (unlikely(leakchk) && n && e->temporaries_in_use != live) {
+		codegen_diagnostic_report(e, N(n)->loc, "temporaries leaked: %#x -> %#x (op %d)", live, e->temporaries_in_use, N(n)->op);
 		leakchk = 0;
 	}
 }
 
 static void gen_stmt1(codegen_context *e, uint32_t n)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x;
 	int64_t mark;
 
 	if (!n)
 		return;
-	if (!e->reach && !(e->E->nflags[n] & CODEGEN_NODE_HAS_LABEL)) {
+	if (!e->is_reachable && !(e->unit->node_flags[n] & CODEGEN_NODE_HAS_LABEL)) {
 		if (N(n)->op == AST_NODE_DECLARATION)
 			dead_decl(e, N(n));
 		return;
 	}
 	x = N(n);
-	mark = e->foff;
+	mark = e->frame_offset;
 	switch (x->op) {
 	case AST_NODE_BLOCK:
 		gen_block(e, n, false);
@@ -1042,7 +1042,7 @@ static void gen_stmt1(codegen_context *e, uint32_t n)
 		uint32_t lelse = newlabel(e), lend = newlabel(e);
 
 		gen_cond(e, x->a, false, lelse);
-		e->foff = codegen_compound_literal_keep(e, mark);
+		e->frame_offset = codegen_compound_literal_keep(e, mark);
 		gen_stmt(e, x->b);
 		if (x->c) {
 			jump(e, lend);
@@ -1057,12 +1057,12 @@ static void gen_stmt1(codegen_context *e, uint32_t n)
 	case AST_NODE_WHILE: {
 		uint32_t lhead = newlabel(e), lbrk = newlabel(e);
 
-		deflabel_loop(e, lhead, e->E->nflags[n] & CODEGEN_NODE_HAS_LABEL);
+		deflabel_loop(e, lhead, e->unit->node_flags[n] & CODEGEN_NODE_HAS_LABEL);
 		gen_cond(e, x->a, false, lbrk);
-		e->foff = codegen_compound_literal_keep(e, mark);
-		e->loops[e->nloop++] = (codegen_loop){ lbrk, lhead, e->nclean };
+		e->frame_offset = codegen_compound_literal_keep(e, mark);
+		e->loops[e->loop_count++] = (codegen_loop){ lbrk, lhead, e->cleanup_count };
 		gen_stmt(e, x->b);
-		e->nloop--;
+		e->loop_count--;
 		jump(e, lhead);
 		deflabel(e, lbrk);
 		return;
@@ -1070,20 +1070,20 @@ static void gen_stmt1(codegen_context *e, uint32_t n)
 	case AST_NODE_DO: {
 		uint32_t lhead = newlabel(e), lcont = newlabel(e), lbrk = newlabel(e);
 
-		deflabel_loop(e, lhead, e->E->nflags[n] & CODEGEN_NODE_HAS_LABEL);
-		e->loops[e->nloop++] = (codegen_loop){ lbrk, lcont, e->nclean };
+		deflabel_loop(e, lhead, e->unit->node_flags[n] & CODEGEN_NODE_HAS_LABEL);
+		e->loops[e->loop_count++] = (codegen_loop){ lbrk, lcont, e->cleanup_count };
 		gen_stmt(e, x->b);
-		e->nloop--;
+		e->loop_count--;
 		deflabel(e, lcont);
 		gen_cond(e, x->a, true, lhead);
-		e->foff = codegen_compound_literal_keep(e, mark);
+		e->frame_offset = codegen_compound_literal_keep(e, mark);
 		deflabel(e, lbrk);
 		return;
 	}
 	case AST_NODE_FOR: {
 		uint32_t lhead = newlabel(e), lcont = newlabel(e), lbrk = newlabel(e);
 		uint32_t step = c->lists[x->c], body = c->lists[x->c + 1];
-		int cmark = e->nclean;
+		int cmark = e->cleanup_count;
 
 		if (x->a) {
 			const node *in = N(x->a);
@@ -1095,29 +1095,29 @@ static void gen_stmt1(codegen_context *e, uint32_t n)
 				gen_stmt(e, x->a);
 			}
 		}
-		deflabel_loop(e, lhead, e->E->nflags[n] & CODEGEN_NODE_HAS_LABEL);
+		deflabel_loop(e, lhead, e->unit->node_flags[n] & CODEGEN_NODE_HAS_LABEL);
 		if (x->b) {
-			int64_t m2 = e->foff;
+			int64_t m2 = e->frame_offset;
 
 			gen_cond(e, x->b, false, lbrk);
-			e->foff = codegen_compound_literal_keep(e, m2);
+			e->frame_offset = codegen_compound_literal_keep(e, m2);
 		}
-		e->loops[e->nloop++] = (codegen_loop){ lbrk, lcont, e->nclean };
+		e->loops[e->loop_count++] = (codegen_loop){ lbrk, lcont, e->cleanup_count };
 		gen_stmt(e, body);
-		e->nloop--;
+		e->loop_count--;
 		deflabel(e, lcont);
 		if (step) {
-			int64_t m2 = e->foff;
+			int64_t m2 = e->frame_offset;
 			codegen_value v = gen(e, step);
 
 			val_free(e, &v);
-			e->foff = codegen_compound_literal_keep(e, m2);
+			e->frame_offset = codegen_compound_literal_keep(e, m2);
 		}
 		jump(e, lhead);
 		deflabel(e, lbrk);
-		if (e->nclean > cmark) {
+		if (e->cleanup_count > cmark) {
 			run_cleanups(e, cmark);
-			e->nclean = cmark;
+			e->cleanup_count = cmark;
 		}
 		break;
 	}
@@ -1126,17 +1126,17 @@ static void gen_stmt1(codegen_context *e, uint32_t n)
 		break;
 	case AST_NODE_CASE:
 	case AST_NODE_DEFAULT:
-		deflabel(e, e->caselbl[n]);
+		deflabel(e, e->case_labels[n]);
 		gen_stmt(e, x->c);
 		return;
 	case AST_NODE_LABEL: {
 		uint32_t l = user_label(e, x->a);
 
-		if (e->E->lref[x->a] & CODEGEN_LABEL_BACKWARD)
+		if (e->unit->label_flags[x->a] & CODEGEN_LABEL_BACKWARD)
 			deflabel_forced(e, l);
 		else
 			deflabel(e, l);
-		if (c->labels[x->a].addr_taken && !e->f->inl) {
+		if (c->labels[x->a].addr_taken && !e->function_instance->is_inlined) {
 			ins *i = put(e, I_RAW);
 			char b[48];
 			int k = snprintf(b, sizeof(b), ".Ltmp.lbl.%u:", x->a);
@@ -1149,8 +1149,8 @@ static void gen_stmt1(codegen_context *e, uint32_t n)
 		return;
 	}
 	case AST_NODE_GOTO:
-		if (e->reach) {
-			run_cleanups(e, e->f->cbase + e->E->lcdepth[x->a] < e->nclean ? e->f->cbase + e->E->lcdepth[x->a] : e->nclean);
+		if (e->is_reachable) {
+			run_cleanups(e, e->function_instance->cleanup_base + e->unit->label_cleanup_depth[x->a] < e->cleanup_count ? e->function_instance->cleanup_base + e->unit->label_cleanup_depth[x->a] : e->cleanup_count);
 			jump(e, user_label(e, x->a));
 		}
 		return;
@@ -1158,10 +1158,10 @@ static void gen_stmt1(codegen_context *e, uint32_t n)
 		codegen_value v = gen(e, x->a);
 		int r = toreg(e, &v);
 
-		if (e->reach)
+		if (e->is_reachable)
 			put(e, I_BR)->rn = (uint8_t)r;
 		val_free(e, &v);
-		e->reach = false;
+		e->is_reachable = false;
 		break;
 	}
 	case AST_NODE_BREAK:
@@ -1170,8 +1170,8 @@ static void gen_stmt1(codegen_context *e, uint32_t n)
 
 		if (i < 0)
 			codegen_fatal_report(e, x->loc, "break/continue outside a loop");
-		run_cleanups(e, e->loops[i].cdepth);
-		jump(e, x->op == AST_NODE_BREAK ? e->loops[i].brk : e->loops[i].cont);
+		run_cleanups(e, e->loops[i].cleanup_depth);
+		jump(e, x->op == AST_NODE_BREAK ? e->loops[i].break_label : e->loops[i].continue_label);
 		return;
 	}
 	case AST_NODE_RETURN:
@@ -1183,5 +1183,5 @@ static void gen_stmt1(codegen_context *e, uint32_t n)
 	default:
 		codegen_fatal_report(e, x->loc, "unsupported statement (node %d)", x->op);
 	}
-	e->foff = codegen_compound_literal_keep(e, mark);
+	e->frame_offset = codegen_compound_literal_keep(e, mark);
 }

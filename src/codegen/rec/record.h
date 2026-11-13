@@ -14,12 +14,12 @@
 #include <stdint.h>
 
 typedef struct record {
-	uint8_t op, sz;		/* the CPU's opcode; width or access size in bytes */
-	uint8_t r[4];		/* r[0] result, r[1..3] operands (the CPU's register numbers) */
-	uint8_t cond, sh;	/* condition, extension kind, scale */
+	uint8_t opcode, size;		/* the CPU's opcode; width or access size in bytes */
+	uint8_t registers[4];		/* r[0] result, r[1..3] operands (the CPU's register numbers) */
+	uint8_t condition, shift;	/* condition, extension kind, scale */
 	union {
-		int64_t imm;
-		struct { int32_t off; uint32_t ref; };	/* memory: displacement, symbol (CODEGEN_REFERENCE_MAKE(), 0: none) */
+		int64_t immediate;
+		struct { int32_t offset; uint32_t reference; };	/* memory: displacement, symbol (CODEGEN_REFERENCE_MAKE(), 0: none) */
 		uint32_t label;
 	};
 } record;
@@ -39,10 +39,10 @@ enum { RECORD_BRANCH_NONE, RECORD_BRANCH_JUMP, RECORD_BRANCH_CONDITIONAL, RECORD
 enum { RECORD_EFFECT_PURE = 1, RECORD_EFFECT_READS_FLAGS = 2, RECORD_EFFECT_WRITES_FLAGS = 4, RECORD_EFFECT_LOAD = 8, RECORD_EFFECT_STORE = 16, RECORD_EFFECT_CALL = 32, RECORD_EFFECT_LABEL = 64,
        RECORD_EFFECT_TRAP = 128, RECORD_EFFECT_BARRIER = 256, RECORD_EFFECT_FLOAT = 512 };
 typedef struct record_op_descriptor {
-	uint8_t regs;		/* RECORD_OPERAND_DEFINES_0 | RECORD_OPERAND_USES_1 ... */
-	uint8_t br;		/* RB_* */
-	uint16_t fl;		/* RECORD_EFFECT_PURE ... */
-	record_register_mask idef, iuse;	/* implicit registers (x86: div rax rdx, shifts rcx, calls) */
+	uint8_t registers;		/* RECORD_OPERAND_DEFINES_0 | RECORD_OPERAND_USES_1 ... */
+	uint8_t branch;		/* RB_* */
+	uint16_t flags;		/* RECORD_EFFECT_PURE ... */
+	record_register_mask implicit_defined, implicit_used;	/* implicit registers (x86: div rax rdx, shifts rcx, calls) */
 } record_op_descriptor;
 
 /* Whole physical registers. A partial write also uses the old register, so
@@ -51,9 +51,9 @@ typedef struct record_op_descriptor {
  * does not waive flag/register dependencies. BARRIER forbids propagation.
  */
 typedef struct record_effects {
-	record_register_mask def, use;
-	uint16_t fl;
-	uint8_t br;
+	record_register_mask defines, used;
+	uint16_t flags;
+	uint8_t branch;
 } record_effects;
 
 #endif

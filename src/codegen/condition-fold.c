@@ -177,12 +177,12 @@ static bool codegen_comparison_variable_range(cc *c, uint32_t n, bool t, uint32_
 /* a floating local whose every write has fact f (CODEGEN_FLOAT_FACT_NONNEGATIVE / CODEGEN_FLOAT_FACT_ZERO), or a +-0.0 constant for CODEGEN_FLOAT_FACT_ZERO */
 static bool codegen_float_local_has_fact(codegen_context *e, uint32_t n, uint8_t f)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n);
 	cc_value cv;
 
 	if (x->op == AST_NODE_VARIABLE && codegen_symbol_is_local_variable(c, x->a) && !(AST_QUALIFIED_TYPE_QUALIFIERS(x->ty) & AST_QUALIFIER_VOLATILE)) {
-		uint8_t g = e->E->ffacts[x->a];
+		uint8_t g = e->unit->float_facts[x->a];
 
 		return (g & (CODEGEN_FLOAT_FACT_SEEN | CODEGEN_FLOAT_FACT_BAD)) == CODEGEN_FLOAT_FACT_SEEN && (g & f) == f;
 	}
@@ -191,7 +191,7 @@ static bool codegen_float_local_has_fact(codegen_context *e, uint32_t n, uint8_t
 
 VPRIV int codegen_condition_fold(codegen_context *e, uint32_t n)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n);
 	uint32_t l1, r1, l2, r2, s;
 	int m1, m2, m;

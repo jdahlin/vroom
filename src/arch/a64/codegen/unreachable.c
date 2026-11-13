@@ -45,6 +45,6 @@ VPRIV void a64_unreachable(codegen_context *e)
 #undef A64_NEXT
 	a64_unreachable_debug d = { e, 0 };
 
-	e->nin = record_unreachable_remove(e->in, e->nin, sizeof(ins), offsetof(ins, op), flow, sizeof(flow),
-				    e->ndl ? a64_unreachable_remap : NULL, &d);
+	e->record_count = record_unreachable_remove(e->records, e->record_count, sizeof(ins), offsetof(ins, op), flow, sizeof(flow),
+				    e->debug_row_count ? a64_unreachable_remap : NULL, &d);
 }

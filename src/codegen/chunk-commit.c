@@ -15,7 +15,7 @@
 
 VPRIV int codegen_commit_fail(codegen_commit_context *R, const char *msg)
 {
-	elf_error(R->o, "%s", msg);
+	elf_error(R->object, "%s", msg);
 	return -1;
 }
 
@@ -40,7 +40,7 @@ VPRIV void codegen_item_close(codegen_context *e, size_t h)
 
 	if (h == SIZE_MAX)
 		return;
-	((codegen_item *)(b->p + h))->len = (uint32_t)(b->n - h - sizeof(codegen_item));
+	((codegen_item *)(b->p + h))->length = (uint32_t)(b->n - h - sizeof(codegen_item));
 	vtext_need(b, 8);
 	while (b->n & 7)
 		b->p[b->n++] = 0;
@@ -62,17 +62,17 @@ VPRIV uint32_t codegen_commit_symbol_find(codegen_commit_context *R, uint32_t re
 	uint32_t *slot = NULL, i = CODEGEN_REFERENCE_INDEX(ref), y;
 
 	switch (CODEGEN_REFERENCE_KIND(ref)) {
-	case CODEGEN_REFERENCE_SYMBOL: slot = &R->symc[codegen_symbol_canonical(R->c, i)]; break;
-	case CODEGEN_REFERENCE_STRING: slot = &R->strc[i]; break;
-	case CODEGEN_REFERENCE_LABEL: slot = &R->lblc[i]; break;
+	case CODEGEN_REFERENCE_SYMBOL: slot = &R->symbol_cache[codegen_symbol_canonical(R->compile_context, i)]; break;
+	case CODEGEN_REFERENCE_STRING: slot = &R->string_cache[i]; break;
+	case CODEGEN_REFERENCE_LABEL: slot = &R->label_cache[i]; break;
 	}
 	if (slot && *slot)
 		return *slot;
-	R->nb.n = 0;
-	codegen_reference_name_append(R->c, &R->nb, ref);
+	R->name_buffer.n = 0;
+	codegen_reference_name_append(R->compile_context, &R->name_buffer, ref);
 	/* codegen_reference_name_append quotes non-ASCII x86 symbols for the text printer. */
-	bool quoted = R->nb.n >= 2 && R->nb.p[0] == '"' && R->nb.p[R->nb.n - 1] == '"';
-	y = as_symbol_by_name(R->as, R->nb.p + quoted, R->nb.n - 2 * quoted);
+	bool quoted = R->name_buffer.n >= 2 && R->name_buffer.p[0] == '"' && R->name_buffer.p[R->name_buffer.n - 1] == '"';
+	y = as_symbol_by_name(R->assembler, R->name_buffer.p + quoted, R->name_buffer.n - 2 * quoted);
 	if (slot)
 		*slot = y;
 	return y;
@@ -87,9 +87,9 @@ static void codegen_commit_zero_append(ElfObj *o, uint32_t frag, uint64_t n)
 static int codegen_commit_data(codegen_commit_context *R, const codegen_data_header *h)
 {
 	const codegen_item_relocation *rel = (const codegen_item_relocation *)(h + 1);
-	const uint8_t *d = (const uint8_t *)(rel + h->nrel);
-	ElfObj *o = R->o;
-	uint32_t frag = as_fragment_current(R->as);
+	const uint8_t *d = (const uint8_t *)(rel + h->relocation_count);
+	ElfObj *o = R->object;
+	uint32_t frag = as_fragment_current(R->assembler);
 	uint64_t at = 0;
 
 	if (!h->size)
@@ -99,26 +99,26 @@ static int codegen_commit_data(codegen_commit_context *R, const codegen_data_hea
 		elf_fill(o, frag, h->size, 0);
 		return 0;
 	}
-	for (uint32_t k = 0; k <= h->nrel; k++) {
-		uint64_t end = k < h->nrel ? rel[k].off : h->size;
+	for (uint32_t k = 0; k <= h->relocation_count; k++) {
+		uint64_t end = k < h->relocation_count ? rel[k].offset : h->size;
 
 		if (end > at) {
 			/* bytes in [at, end): what was initialised, then zeros */
-			uint64_t have = at < h->n ? (end < h->n ? end : h->n) - at : 0;
+			uint64_t have = at < h->count ? (end < h->count ? end : h->count) - at : 0;
 
 			if (have)
 				elf_bytes(o, frag, d + at, have);
 			codegen_commit_zero_append(o, frag, end - at - have);
 			at = end;
 		}
-		if (k < h->nrel) {
-			uint32_t sz = rel[k].sz ? rel[k].sz : 8;
+		if (k < h->relocation_count) {
+			uint32_t sz = rel[k].size_bytes ? rel[k].size_bytes : 8;
 			uint64_t off = elf_frag(o, frag)->size;
 			uint8_t *p = elf_grow(o, frag, sz);
-			ElfVal v = as_symbol_value(R->as, codegen_commit_symbol_find(R, rel[k].ref), rel[k].add);
+			ElfVal v = as_symbol_value(R->assembler, codegen_commit_symbol_find(R, rel[k].reference), rel[k].addend);
 
-			if (rel[k].sub) {
-				ElfVal s = as_symbol_value(R->as, codegen_commit_symbol_find(R, rel[k].sub - 1), 0);
+			if (rel[k].subtrahend) {
+				ElfVal s = as_symbol_value(R->assembler, codegen_commit_symbol_find(R, rel[k].subtrahend - 1), 0);
 
 				v.sub = s.add, v.c -= s.c;
 			}
@@ -127,7 +127,7 @@ static int codegen_commit_data(codegen_commit_context *R, const codegen_data_hea
 					p[b] = (uint8_t)((uint64_t)v.c >> 8 * b);
 			} else {
 				memset(p, 0, sz);
-				elf_fixup(o, frag, off, p, CODEGEN_IS_X64(R->c) ? (sz == 1 ? R_X86_64_8 : sz == 2 ? R_X86_64_16 : sz == 4 ? R_X86_64_32 : R_X86_64_64) :
+				elf_fixup(o, frag, off, p, CODEGEN_IS_X64(R->compile_context) ? (sz == 1 ? R_X86_64_8 : sz == 2 ? R_X86_64_16 : sz == 4 ? R_X86_64_32 : R_X86_64_64) :
 					  (sz == 4 ? R_AARCH64_ABS32 : R_AARCH64_ABS64), v);
 			}
 			at += sz;
@@ -138,48 +138,48 @@ static int codegen_commit_data(codegen_commit_context *R, const codegen_data_hea
 
 static int codegen_commit_symbol_header(codegen_commit_context *R, const codegen_symbol_header *h)
 {
-	ElfObj *o = R->o;
-	uint32_t y = codegen_commit_symbol_find(R, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, h->sym)), frag;
+	ElfObj *o = R->object;
+	uint32_t y = codegen_commit_symbol_find(R, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, h->symbol)), frag;
 
 	if (h->bind) {
 		elf_reg(o, y);
 		elf_bind(o, y, h->bind);
 		elf_symp(o, y)->flags &= ~ESYM_TEMP;
 	}
-	if (h->vis) {
+	if (h->visibility) {
 		elf_reg(o, y);
-		elf_vis(o, y, h->vis);
+		elf_vis(o, y, h->visibility);
 		elf_symp(o, y)->flags &= ~ESYM_TEMP;
 	}
-	frag = as_fragment_current(R->as);
-	if (CODEGEN_IS_X64(R->c)) {
+	frag = as_fragment_current(R->assembler);
+	if (CODEGEN_IS_X64(R->compile_context)) {
 		/* x86 alignment participates in branch relaxation, including when
 		 * an earlier branch has split the current subsection into frags. */
-		R->nb.n = 0;
-		vtext_format_append(&R->nb, "\t.p2align %u\n", h->p2);
-		if (as_snippet_assemble(R->as, R->nb.p, R->nb.n)) return -1;
+		R->name_buffer.n = 0;
+		vtext_format_append(&R->name_buffer, "\t.p2align %u\n", h->alignment_log2);
+		if (as_snippet_assemble(R->assembler, R->name_buffer.p, R->name_buffer.n)) return -1;
 	} else
-		elf_align(o, frag, h->p2, (elf_sec(o, elf_frag(o, frag)->sec)->flags & SHF_EXECINSTR) != 0, 0, 0);
+		elf_align(o, frag, h->alignment_log2, (elf_sec(o, elf_frag(o, frag)->sec)->flags & SHF_EXECINSTR) != 0, 0, 0);
 	elf_reg(o, y);
-	elf_type(o, y, h->fn ? STT_FUNC : STT_OBJECT);
-	return as_label_define_symbol(R->as, y);
+	elf_type(o, y, h->is_function ? STT_FUNC : STT_OBJECT);
+	return as_label_define_symbol(R->assembler, y);
 }
 
 static int codegen_commit_function_end(codegen_commit_context *R, uint32_t s)
 {
-	ElfObj *o = R->o;
+	ElfObj *o = R->object;
 	uint32_t y = codegen_commit_symbol_find(R, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, s)), l;
 	ElfVal a, b;
 
-	R->nb.n = 0;
-	vtext_string_append(&R->nb, ".Lfe");
-	vtext_unsigned_append(&R->nb, s);
-	l = as_symbol_by_name(R->as, R->nb.p, R->nb.n);
-	if (as_label_define_symbol(R->as, l))
+	R->name_buffer.n = 0;
+	vtext_string_append(&R->name_buffer, ".Lfe");
+	vtext_unsigned_append(&R->name_buffer, s);
+	l = as_symbol_by_name(R->assembler, R->name_buffer.p, R->name_buffer.n);
+	if (as_label_define_symbol(R->assembler, l))
 		return -1;
 	/* .size s, .Lfe<s>-s: the operands as the expression parser sees them, then folded */
-	a = as_symbol_value(R->as, l, 0);
-	b = as_symbol_value(R->as, y, 0);
+	a = as_symbol_value(R->assembler, l, 0);
+	b = as_symbol_value(R->assembler, y, 0);
 	if (a.sub || b.sub || (!b.add && b.c))
 		return codegen_commit_fail(R, "vcc: unexpected .size operands");
 	{
@@ -214,10 +214,10 @@ VPRIV int codegen_commit_chunk(codegen_commit_context *R, const char *p, size_t 
 
 		switch (it->kind) {
 		case CODEGEN_ITEM_TEXT:
-			r = as_snippet_assemble(R->as, q, it->len);
+			r = as_snippet_assemble(R->assembler, q, it->length);
 			break;
 		case CODEGEN_ITEM_X64:
-			r = x64_replay(R, q, it->len);
+			r = x64_replay(R, q, it->length);
 			break;
 		case CODEGEN_ITEM_CODE:
 			r = a64_replay(R, (const codegen_code_header *)q);
@@ -226,7 +226,7 @@ VPRIV int codegen_commit_chunk(codegen_commit_context *R, const char *p, size_t 
 			r = codegen_commit_data(R, (const codegen_data_header *)q);
 			break;
 		case CODEGEN_ITEM_LABEL:
-			r = as_label_define_symbol(R->as, codegen_commit_symbol_find(R, *(const uint32_t *)q));
+			r = as_label_define_symbol(R->assembler, codegen_commit_symbol_find(R, *(const uint32_t *)q));
 			break;
 		case CODEGEN_ITEM_SYMBOL_HEADER:
 			r = codegen_commit_symbol_header(R, (const codegen_symbol_header *)q);
@@ -236,22 +236,22 @@ VPRIV int codegen_commit_chunk(codegen_commit_context *R, const char *p, size_t 
 			break;
 		case CODEGEN_ITEM_OBJECT_SIZE: {
 			const codegen_object_size *z = (const codegen_object_size *)q;
-			ElfSym *y = elf_symp(R->o, codegen_commit_symbol_find(R, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, z->sym)));
+			ElfSym *y = elf_symp(R->object, codegen_commit_symbol_find(R, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, z->symbol)));
 
 			y->size = z->size;
 			y->flags &= ~ESYM_SIZE_EXPR;
 			break;
 		}
 		case CODEGEN_ITEM_BYTES:
-			if (it->len) {
-				elf_data(R->o, as_fragment_current(R->as));
-				elf_bytes(R->o, as_fragment_current(R->as), q, it->len);
+			if (it->length) {
+				elf_data(R->object, as_fragment_current(R->assembler));
+				elf_bytes(R->object, as_fragment_current(R->assembler), q, it->length);
 			}
 			break;
 		}
-		if (r || R->o->has_err || as_is_failed(R->as))
+		if (r || R->object->has_err || as_is_failed(R->assembler))
 			return -1;
-		p = q + ((it->len + 7) & ~7u);
+		p = q + ((it->length + 7) & ~7u);
 	}
 	return 0;
 }

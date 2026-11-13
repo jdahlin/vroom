@@ -20,15 +20,15 @@ VPRIV codegen_value virbuild_bitop(codegen_context *e, int bi, int size, codegen
 	case CC_BUILTIN_BSWAP16:
 		x = virbuild_insn_append(e, VIR_OP_BSWAP, VIR_TYPE_I32, 0, virbuild_value_convert(e, x, VIR_TYPE_I32), 0, 0);
 		virbuild_register_write(e, r, virbuild_insn_append(e, VIR_OP_LSHR, VIR_TYPE_I32, 0, x, virbuild_constant_integer(e, VIR_TYPE_I32, 16), 0));
-		return (codegen_value){ .k = CODEGEN_VALUE_REGISTER, .r = (uint8_t)r };
+		return (codegen_value){ .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)r };
 	case CC_BUILTIN_PARITY: case CC_BUILTIN_PARITYL: case CC_BUILTIN_PARITYLL:
 		x = virbuild_insn_append(e, VIR_OP_POPCNT, ty, 0, x, 0, 0);
 		virbuild_register_write(e, r, virbuild_insn_append(e, VIR_OP_AND, ty, 0, x, virbuild_constant_integer(e, ty, 1), 0));
-		return (codegen_value){ .k = CODEGEN_VALUE_REGISTER, .r = (uint8_t)r };
+		return (codegen_value){ .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)r };
 	default: virbuild_fail(e, VIRBUILD_FAILURE(unsupported_builtin));
 	}
 	virbuild_register_write(e, r, virbuild_insn_append(e, op, ty, 0, x, 0, 0));
-	return (codegen_value){ .k = CODEGEN_VALUE_REGISTER, .r = (uint8_t)r };
+	return (codegen_value){ .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)r };
 }
 
 /* sequentially consistent; a result is zero-extended (an i32 for 4 bytes or less) */
@@ -71,7 +71,7 @@ VPRIV void virbuild_asm(codegen_context *e, uint32_t n) { (void)n; virbuild_fail
 /* the va_list at rap points at the first unnamed argument (Apple's: on the stack) */
 VPRIV void virbuild_va_start(codegen_context *e, int rap)
 {
-	if (!CODEGEN_IS_DARWIN(e->c))
+	if (!CODEGEN_IS_DARWIN(e->compile_context))
 		virbuild_fail(e, VIRBUILD_FAILURE(variadic_start));
 	virbuild_insn_append(e, VIR_OP_VA_START, VIR_TYPE_VOID, 0, virbuild_register_read(e, rap, VIR_TYPE_PTR), 0, 0);
 	virbuild_store_table_clear(e, true);
@@ -81,10 +81,10 @@ VPRIV void virbuild_va_start(codegen_context *e, int rap)
  * 8 bytes each (16-aligned ones aligned first, records over 16 bytes by reference) */
 VPRIV int virbuild_va_arg(codegen_context *e, int rap, ast_qualified_type t)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	uint64_t size = codegen_type_size(c, t);
 	bool big = codegen_type_is_record_like(c, t) && size > 16;
-	codegen_lvalue ap = { .k = CODEGEN_LVALUE_REGISTER, .r = (uint8_t)rap, .align = 8 };
+	codegen_lvalue ap = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = (uint8_t)rap, .align = 8 };
 	uint32_t p, q;
 	int r, rn;
 
@@ -106,7 +106,7 @@ VPRIV int virbuild_va_arg(codegen_context *e, int rap, ast_qualified_type t)
 	virbuild_tfree(e, rn);
 	virbuild_register_write(e, r, p);
 	if (big) {
-		codegen_lvalue m = { .k = CODEGEN_LVALUE_REGISTER, .r = (uint8_t)r, .align = 8 };
+		codegen_lvalue m = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = (uint8_t)r, .align = 8 };
 
 		virbuild_load(e, r, &m, 8, false);
 	}
@@ -126,14 +126,14 @@ VPRIV void virbuild_barrier(codegen_context *e)
 	virbuild_store_table_clear(e, true);
 }
 
-VPRIV void virbuild_dbgrow(codegen_context *e, uint32_t loc) { e->curloc = loc; }
+VPRIV void virbuild_dbgrow(codegen_context *e, uint32_t loc) { e->current_location = loc; }
 
 VPRIV void virbuild_label(codegen_context *e, uint32_t l)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 	uint32_t b = virbuild_label_block(e, l);
 
-	e->reach = true;
+	e->is_reachable = true;
 	V->blocks[V->current_block].terminator = virbuild_preir_insn_add(e, VIR_OP_BR, VIR_TYPE_VOID, 0, b, 0, 0, V->current_block);
 	V->current_block = b;
 	V->store_count = 0;

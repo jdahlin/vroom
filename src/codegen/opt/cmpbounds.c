@@ -69,13 +69,13 @@ VPRIV bool em_bound_constant(cc *c, uint32_t n, i128 *value)
 
 VPRIV int em_cmpbounds(codegen_context *e, uint32_t n, uint32_t *operand)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n), *a, *b;
 	int op;
 	i128 v, min, max;
 	uint64_t sz;
 
-	if (!e->E->o->opt || e->E->noopt || x->op != AST_NODE_BINARY)
+	if (!e->unit->options->opt || e->unit->cleanups_disabled || x->op != AST_NODE_BINARY)
 		return -1;
 	op = x->aux;
 	if (op != LEX_TOKEN_LESS && op != LEX_TOKEN_LESS_EQUAL && op != LEX_TOKEN_GREATER && op != LEX_TOKEN_GREATER_EQUAL)

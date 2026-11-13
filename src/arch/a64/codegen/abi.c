@@ -92,7 +92,7 @@ VPRIV bool vec_small(cc *c, ast_qualified_type t) { return codegen_type_is_vecto
 /* the vector at [rs] into v0 */
 VPRIV void vec_small_ret(codegen_context *e, ast_qualified_type t, int rs)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	uint32_t n = T(c, t)->n, size = (uint32_t)codegen_type_size(c, t), es = n ? size / n : size, w = n > 1 ? 8 / n : 0;
 	int acc = treg(e), x = treg(e);
 
@@ -114,7 +114,7 @@ VPRIV void vec_small_ret(codegen_context *e, ast_qualified_type t, int rs)
 /* v0 (a call's result) into the slot at sl */
 VPRIV void vec_small_res(codegen_context *e, ast_qualified_type t, int64_t sl)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	uint32_t n = T(c, t)->n, size = (uint32_t)codegen_type_size(c, t), es = n ? size / n : size, w = n > 1 ? 8 / n : 0;
 	int acc = treg(e), x = treg(e);
 
@@ -137,7 +137,7 @@ VPRIV void vec_small_res(codegen_context *e, ast_qualified_type t, int64_t sl)
  * through eight use one integer register per lane. Larger results use x8. */
 VPRIV void bvec_ret(codegen_context *e, ast_qualified_type t, int rs)
 {
-	unsigned n = T(e->c, t)->n;
+	unsigned n = T(e->compile_context, t)->n;
 	bool simd = n == 2 || n == 4 || n == 8 || n == 16;
 	unsigned stride = n == 16 ? 1 : simd ? 8 / n : 0;
 	int64_t sl = simd ? slot(e, 16, 16) : 0;
@@ -154,7 +154,7 @@ VPRIV void bvec_ret(codegen_context *e, ast_qualified_type t, int rs)
 
 VPRIV void bvec_res(codegen_context *e, ast_qualified_type t, int64_t sl)
 {
-	unsigned n = T(e->c, t)->n;
+	unsigned n = T(e->compile_context, t)->n;
 	bool simd = n == 2 || n == 4 || n == 8 || n == 16;
 	unsigned stride = n == 16 ? 1 : simd ? 8 / n : 0;
 	int64_t tmp = simd ? slot(e, 16, 16) : 0;
@@ -184,7 +184,7 @@ VPRIV bool is_sret(cc *c, ast_qualified_type t)
 /* Apple: an anonymous (variadic) argument always goes on the stack in 8-byte slots */
 VPRIV void classify_va(codegen_context *e, ast_qualified_type t, int *nsaa, a64_abi_argument *a)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	uint64_t size = codegen_type_size(c, t);
 	uint32_t al = codegen_type_alignment(c, t) > 8 ? 16 : 8;
 
@@ -192,15 +192,15 @@ VPRIV void classify_va(codegen_context *e, ast_qualified_type t, int *nsaa, a64_
 	a->size = (uint32_t)size;
 	if (codegen_type_is_record(c, t) && size > 16) {
 		a->kind = A64_ABI_ARGUMENT_REFERENCE_STACK;
-		a->stk = *nsaa;
+		a->stack_offset = *nsaa;
 		*nsaa += 8;
 		return;
 	}
 	*nsaa = (int)(((uint32_t)*nsaa + al - 1) & ~(al - 1));
 	a->kind = A64_ABI_ARGUMENT_STACK;
-	a->stk = *nsaa;
-	a->nreg = (uint8_t)(size > 8 ? 2 : 1);
-	*nsaa += a->nreg * 8;
+	a->stack_offset = *nsaa;
+	a->register_count = (uint8_t)(size > 8 ? 2 : 1);
+	*nsaa += a->register_count * 8;
 }
 
 /* the alignment AAPCS64 passes t by: clang's unadjusted alignment (a
@@ -219,7 +219,7 @@ VPRIV uint32_t abi_align(cc *c, ast_qualified_type t)
 
 VPRIV void classify(codegen_context *e, ast_qualified_type t, int *ngrn, int *nsaa, a64_abi_argument *a)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	uint64_t size = codegen_type_size(c, t);
 	int n;
 	uint32_t al = abi_align(c, t);
@@ -229,28 +229,28 @@ VPRIV void classify(codegen_context *e, ast_qualified_type t, int *ngrn, int *ns
 	if (codegen_type_is_float(c, t)) {
 		if (!codegen_type_is_long_double(c, t))
 			(void)fpk(e, t);
-		if (e->nsrn < 8) {
+		if (e->next_vector_register < 8) {
 			a->kind = A64_ABI_ARGUMENT_VECTOR_REGISTER;
-			a->reg = (uint8_t)e->nsrn++;
-			a->nreg = 1;
+			a->register_number = (uint8_t)e->next_vector_register++;
+			a->register_count = 1;
 			return;
 		}
-		e->nsrn = 8;
+		e->next_vector_register = 8;
 		n = size == 16 ? 2 : 1;
 		goto stack;
 	}
 	if (codegen_type_is_bool_vector(c, t) && (T(c, t)->n == 64 || T(c, t)->n == 128)) {
 		a->kind = A64_ABI_ARGUMENT_BOOL_LANES;
-		a->reg = (uint8_t)*ngrn;
-		a->nreg = (uint8_t)(8 - *ngrn);
-		a->stk = *nsaa;
-		*nsaa += (int)(T(c, t)->n - a->nreg) * 8;
+		a->register_number = (uint8_t)*ngrn;
+		a->register_count = (uint8_t)(8 - *ngrn);
+		a->stack_offset = *nsaa;
+		*nsaa += (int)(T(c, t)->n - a->register_count) * 8;
 		*ngrn = 8;
 		return;
 	}
 	if (codegen_type_is_bool_vector(c, t) && size >= 8 && size <= 16) {
-		if (e->nsrn < 8) {
-			a->kind = A64_ABI_ARGUMENT_HFA, a->reg = e->nsrn++, a->nreg = 1, a->fsz = size;
+		if (e->next_vector_register < 8) {
+			a->kind = A64_ABI_ARGUMENT_HFA, a->register_number = e->next_vector_register++, a->register_count = 1, a->float_member_size = size;
 			return;
 		}
 		n = size / 8;
@@ -260,22 +260,22 @@ VPRIV void classify(codegen_context *e, ast_qualified_type t, int *ngrn, int *ns
 		int hn, hb = hfa(c, t, &hn);
 
 		if (hb) {
-			if (e->nsrn + hn <= 8) {
+			if (e->next_vector_register + hn <= 8) {
 				a->kind = A64_ABI_ARGUMENT_HFA;
-				a->reg = (uint8_t)e->nsrn;
-				a->nreg = (uint8_t)hn;
-				a->fsz = (uint8_t)hb;
-				e->nsrn += hn;
+				a->register_number = (uint8_t)e->next_vector_register;
+				a->register_count = (uint8_t)hn;
+				a->float_member_size = (uint8_t)hb;
+				e->next_vector_register += hn;
 				return;
 			}
-			e->nsrn = 8;
+			e->next_vector_register = 8;
 			if (CODEGEN_IS_DARWIN(c)) {
 				/* Apple: on the stack at its element's alignment and size, as clang */
 				*nsaa = (int)(((uint32_t)*nsaa + (uint32_t)hb - 1) & ~((uint32_t)hb - 1));
 				a->kind = A64_ABI_ARGUMENT_STACK;
-				a->stk = *nsaa;
-				a->nreg = (uint8_t)((size + 7) / 8);
-				a->fsz = (uint8_t)hb;	/* the last part may be 4 bytes */
+				a->stack_offset = *nsaa;
+				a->register_count = (uint8_t)((size + 7) / 8);
+				a->float_member_size = (uint8_t)hb;	/* the last part may be 4 bytes */
 				*nsaa += (int)size;
 				return;
 			}
@@ -289,11 +289,11 @@ VPRIV void classify(codegen_context *e, ast_qualified_type t, int *ngrn, int *ns
 		if (size > 16) {
 			if (*ngrn < 8) {
 				a->kind = A64_ABI_ARGUMENT_REFERENCE_REGISTER;
-				a->reg = (uint8_t)(*ngrn)++;
-				a->nreg = 1;
+				a->register_number = (uint8_t)(*ngrn)++;
+				a->register_count = 1;
 			} else {
 				a->kind = A64_ABI_ARGUMENT_REFERENCE_STACK;
-				a->stk = *nsaa;
+				a->stack_offset = *nsaa;
 				*nsaa += 8;
 			}
 			return;
@@ -306,8 +306,8 @@ VPRIV void classify(codegen_context *e, ast_qualified_type t, int *ngrn, int *ns
 		(*ngrn)++;	/* AAPCS64: an even pair; Apple does not round */
 	if (*ngrn + n <= 8) {
 		a->kind = A64_ABI_ARGUMENT_REGISTER;
-		a->reg = (uint8_t)*ngrn;
-		a->nreg = (uint8_t)n;
+		a->register_number = (uint8_t)*ngrn;
+		a->register_count = (uint8_t)n;
 		*ngrn += n;
 		return;
 	}
@@ -317,8 +317,8 @@ stack:
 		/* Apple: scalars on the stack take their natural size and alignment */
 		*nsaa = (int)(((uint32_t)*nsaa + al - 1) & ~(al - 1));
 		a->kind = A64_ABI_ARGUMENT_STACK;
-		a->stk = *nsaa;
-		a->nreg = (uint8_t)n;
+		a->stack_offset = *nsaa;
+		a->register_count = (uint8_t)n;
 		a->size = (uint32_t)size;
 		*nsaa += (int)size;
 		return;
@@ -329,8 +329,8 @@ stack:
 		al = 16;
 	*nsaa = (int)(((uint32_t)*nsaa + al - 1) & ~(al - 1));
 	a->kind = A64_ABI_ARGUMENT_STACK;
-	a->stk = *nsaa;
-	a->nreg = (uint8_t)n;
+	a->stack_offset = *nsaa;
+	a->register_count = (uint8_t)n;
 	*nsaa += n * 8;
 }
 
@@ -338,11 +338,11 @@ VPRIV void spill_live(codegen_context *e, a64_abi_spill *s)
 {
 	s->mask = 0;
 	for (int i = 0; i < CODEGEN_TEMPORARY_COUNT; i++)
-		if ((e->live & (1u << i)) && codegen_temporary_registers[i] < 19) {
-			s->slot[i] = slot(e, 8, 8);
-			mem(e, I_ST, 3, 0, codegen_temporary_registers[i], FRAME, s->slot[i]);
-			if (e->reach)
-				e->in[e->nin - 1].sh = A64_SPILL_RECORD;
+		if ((e->temporaries_in_use & (1u << i)) && codegen_temporary_registers[i] < 19) {
+			s->slots[i] = slot(e, 8, 8);
+			mem(e, I_ST, 3, 0, codegen_temporary_registers[i], FRAME, s->slots[i]);
+			if (e->is_reachable)
+				e->records[e->record_count - 1].sh = A64_SPILL_RECORD;
 			s->mask |= 1u << i;
 		}
 }
@@ -351,9 +351,9 @@ VPRIV void unspill(codegen_context *e, const a64_abi_spill *s)
 {
 	for (int i = 0; i < CODEGEN_TEMPORARY_COUNT; i++)
 		if (s->mask & (1u << i)) {
-			mem(e, I_LD, 3, 0, codegen_temporary_registers[i], FRAME, s->slot[i]);
-			if (e->reach)
-				e->in[e->nin - 1].sh = A64_SPILL_RECORD;
+			mem(e, I_LD, 3, 0, codegen_temporary_registers[i], FRAME, s->slots[i]);
+			if (e->is_reachable)
+				e->records[e->record_count - 1].sh = A64_SPILL_RECORD;
 		}
 }
 
@@ -364,9 +364,9 @@ VPRIV void call_fixed(codegen_context *e, int fn, int a0, int a1, int a2, int64_
 	ins *i;
 
 	(void)a2;
-	if (!e->reach)
+	if (!e->is_reachable)
 		return;
-	e->calls = true;
+	e->has_calls = true;
 	spill_live(e, &sp);
 	mov(e, 1, 0, a0);
 	if (a1 == -2)

@@ -6,10 +6,10 @@ enum { FV0 = 16, FV1 = 17 };
 
 VPRIV int fpk(codegen_context *e, ast_qualified_type t)
 {
-	uint64_t sz = codegen_type_size(e->c, t);
+	uint64_t sz = codegen_type_size(e->compile_context, t);
 
 	if (sz != 2 && sz != 4 && sz != 8)
-		codegen_fatal_report(e, e->curloc, "%s floating point is not supported", sz == 2 ? "16-bit" : "128-bit");
+		codegen_fatal_report(e, e->current_location, "%s floating point is not supported", sz == 2 ? "16-bit" : "128-bit");
 	return sz == 8;
 }
 
@@ -92,11 +92,11 @@ static double ld_to_d(i128 b)
 /* a floating constant of type t */
 VPRIV codegen_value f_const_t(codegen_context *e, ast_qualified_type t, double x)
 {
-	if (KIND(e->c, t) == AST_TYPE_BFLOAT16)
+	if (KIND(e->compile_context, t) == AST_TYPE_BFLOAT16)
 		return codegen_value_constant(vsoftfloat_to_bfloat16(vsoftfloat_of_double(x)));
-	if (KIND(e->c, t) == AST_TYPE_FLOAT16)
+	if (KIND(e->compile_context, t) == AST_TYPE_FLOAT16)
 		return codegen_value_constant(vsoftfloat_to_half(vsoftfloat_of_double(x)));
-	if (codegen_type_is_long_double(e->c, t))
+	if (codegen_type_is_long_double(e->compile_context, t))
 		return codegen_value_constant(ld_of_d(x));
 	return f_const(fpk(e, t), x);
 }
@@ -104,11 +104,11 @@ VPRIV codegen_value f_const_t(codegen_context *e, ast_qualified_type t, double x
 /* a folded floating constant of type t: binary128 values keep their bits */
 VPRIV codegen_value f_const_cv(codegen_context *e, ast_qualified_type t, const cc_value *cv)
 {
-	if (codegen_type_is_long_double(e->c, t))
+	if (codegen_type_is_long_double(e->compile_context, t))
 		return codegen_value_constant(cv->ld ? (i128)cv->q : ld_of_d(cv->f));
 	if (cv->ld && vsoftfloat_is_nan(cv->q)) {
-		int sz = (int)codegen_type_size(e->c, t);
-		return codegen_value_constant(vsoftfloat_nan_storage(cv->q, KIND(e->c, t) == AST_TYPE_BFLOAT16 ? 7 : sz == 2 ? 10 : sz == 4 ? 23 : 52, KIND(e->c, t) == AST_TYPE_BFLOAT16 ? 8 : sz == 2 ? 5 : sz == 4 ? 8 : 11));
+		int sz = (int)codegen_type_size(e->compile_context, t);
+		return codegen_value_constant(vsoftfloat_nan_storage(cv->q, KIND(e->compile_context, t) == AST_TYPE_BFLOAT16 ? 7 : sz == 2 ? 10 : sz == 4 ? 23 : 52, KIND(e->compile_context, t) == AST_TYPE_BFLOAT16 ? 8 : sz == 2 ? 5 : sz == 4 ? 8 : 11));
 	}
 	return f_const_t(e, t, cv->f);
 }
@@ -132,7 +132,7 @@ VPRIV codegen_value ld_compare(codegen_context *e, int op, ast_qualified_type t,
 	case LEX_TOKEN_LESS_EQUAL: fn = CODEGEN_LIBRARY_LETF2, cond = C_LE; break;
 	case LEX_TOKEN_GREATER: fn = CODEGEN_LIBRARY_GTTF2, cond = C_GT; break;
 	case LEX_TOKEN_GREATER_EQUAL: fn = CODEGEN_LIBRARY_GETF2, cond = C_GE; break;
-	default: codegen_fatal_report(e, e->curloc, "unsupported floating point comparison");
+	default: codegen_fatal_report(e, e->current_location, "unsupported floating point comparison");
 	}
 	res = ld_call(e, fn, v, ts, 2, codegen_type_primitive(AST_TYPE_INT));
 	r = toreg(e, &res);
@@ -146,23 +146,23 @@ VPRIV codegen_value f_arith(codegen_context *e, int op, ast_qualified_type ty, c
 	int d, ra;
 	uint32_t w;
 
-	if (KIND(e->c, ty) == AST_TYPE_FLOAT16 || KIND(e->c, ty) == AST_TYPE_BFLOAT16) {
+	if (KIND(e->compile_context, ty) == AST_TYPE_FLOAT16 || KIND(e->compile_context, ty) == AST_TYPE_BFLOAT16) {
 		a = f_cast(e, a, ty, codegen_type_primitive(AST_TYPE_FLOAT));
 		b = f_cast(e, b, ty, codegen_type_primitive(AST_TYPE_FLOAT));
 		return f_cast(e, f_arith(e, op, codegen_type_primitive(AST_TYPE_FLOAT), a, b), codegen_type_primitive(AST_TYPE_FLOAT), ty);
 	}
-	if (codegen_type_is_long_double(e->c, ty)) {
+	if (codegen_type_is_long_double(e->compile_context, ty)) {
 		codegen_value v[2] = { a, b };
 		ast_qualified_type ts[2] = { ty, ty };
 		int fn = op == LEX_TOKEN_PLUS ? CODEGEN_LIBRARY_ADDTF3 : op == LEX_TOKEN_MINUS ? CODEGEN_LIBRARY_SUBTF3 : op == LEX_TOKEN_STAR ? CODEGEN_LIBRARY_MULTF3 : CODEGEN_LIBRARY_DIVTF3;
 
 		if (op != LEX_TOKEN_PLUS && op != LEX_TOKEN_MINUS && op != LEX_TOKEN_STAR && op != LEX_TOKEN_SLASH)
-			codegen_fatal_report(e, e->curloc, "unsupported floating point operator");
+			codegen_fatal_report(e, e->current_location, "unsupported floating point operator");
 		return ld_call(e, fn, v, ts, 2, ty);
 	}
 	d = fpk(e, ty);
-	if (a.k == CODEGEN_VALUE_CONSTANT && b.k == CODEGEN_VALUE_CONSTANT) {
-		double x = f_val(d, a.i), y = f_val(d, b.i);
+	if (a.kind == CODEGEN_VALUE_CONSTANT && b.kind == CODEGEN_VALUE_CONSTANT) {
+		double x = f_val(d, a.integer), y = f_val(d, b.integer);
 
 		switch (op) {
 		case LEX_TOKEN_PLUS: return f_const(d, d ? x + y : (double)((float)x + (float)y));
@@ -176,12 +176,12 @@ VPRIV codegen_value f_arith(codegen_context *e, int op, ast_qualified_type ty, c
 	case LEX_TOKEN_MINUS: w = 0x1e203800u; break;
 	case LEX_TOKEN_STAR: w = 0x1e200800u; break;
 	case LEX_TOKEN_SLASH: w = 0x1e201800u; break;
-	default: codegen_fatal_report(e, e->curloc, "unsupported floating point operator");
+	default: codegen_fatal_report(e, e->current_location, "unsupported floating point operator");
 	}
 	f_load(e, d, FV0, &a);
 	f_load(e, d, FV1, &b);
 	val_free(e, &b);
-	ra = a.r;
+	ra = a.register_number;
 	word(e, w | (unsigned)d << 22 | FV1 << 16 | FV0 << 5 | FV0);
 	word(e, f_out(d, ra, FV0));
 	return a;
@@ -205,24 +205,24 @@ VPRIV int f_cmp(codegen_context *e, int op, int d, codegen_value *a, codegen_val
 	case LEX_TOKEN_GREATER: return C_GT;
 	case LEX_TOKEN_GREATER_EQUAL: return C_GE;
 	}
-	codegen_fatal_report(e, e->curloc, "unsupported floating point comparison");
+	codegen_fatal_report(e, e->current_location, "unsupported floating point comparison");
 }
 
 VPRIV codegen_value f_compare(codegen_context *e, int op, ast_qualified_type t, codegen_value a, codegen_value b)
 {
 	int d, cond;
 
-	if (KIND(e->c, t) == AST_TYPE_FLOAT16 || KIND(e->c, t) == AST_TYPE_BFLOAT16) {
+	if (KIND(e->compile_context, t) == AST_TYPE_FLOAT16 || KIND(e->compile_context, t) == AST_TYPE_BFLOAT16) {
 		a = f_cast(e, a, t, codegen_type_primitive(AST_TYPE_FLOAT));
 		b = f_cast(e, b, t, codegen_type_primitive(AST_TYPE_FLOAT));
 		return f_compare(e, op, codegen_type_primitive(AST_TYPE_FLOAT), a, b);
 	}
-	if (codegen_type_is_long_double(e->c, t))
+	if (codegen_type_is_long_double(e->compile_context, t))
 		return ld_compare(e, op, t, a, b);
 	d = fpk(e, t);
 
-	if (a.k == CODEGEN_VALUE_CONSTANT && b.k == CODEGEN_VALUE_CONSTANT) {
-		double x = f_val(d, a.i), y = f_val(d, b.i);
+	if (a.kind == CODEGEN_VALUE_CONSTANT && b.kind == CODEGEN_VALUE_CONSTANT) {
+		double x = f_val(d, a.integer), y = f_val(d, b.integer);
 
 		switch (op) {
 		case LEX_TOKEN_EQUAL_EQUAL: return codegen_value_constant(x == y);
@@ -235,8 +235,8 @@ VPRIV codegen_value f_compare(codegen_context *e, int op, ast_qualified_type t, 
 	}
 	cond = f_cmp(e, op, d, &a, &b);
 	val_free(e, &b);
-	cset(e, a.r, cond);
-	return codegen_value_register(a.r);
+	cset(e, a.register_number, cond);
+	return codegen_value_register(a.register_number);
 }
 
 /* x != 0.0 as 0/1 (NaN is true, -0.0 false) */
@@ -244,20 +244,20 @@ VPRIV codegen_value f_tobool(codegen_context *e, codegen_value v, ast_qualified_
 {
 	int d;
 
-	if (KIND(e->c, t) == AST_TYPE_FLOAT16 || KIND(e->c, t) == AST_TYPE_BFLOAT16)
+	if (KIND(e->compile_context, t) == AST_TYPE_FLOAT16 || KIND(e->compile_context, t) == AST_TYPE_BFLOAT16)
 		return f_tobool(e, f_cast(e, v, t, codegen_type_primitive(AST_TYPE_FLOAT)), codegen_type_primitive(AST_TYPE_FLOAT));
 
-	if (codegen_type_is_long_double(e->c, t)) {
-		if (v.k == CODEGEN_VALUE_CONSTANT)
-			return codegen_value_constant(((u128)v.i << 1) != 0);
+	if (codegen_type_is_long_double(e->compile_context, t)) {
+		if (v.kind == CODEGEN_VALUE_CONSTANT)
+			return codegen_value_constant(((u128)v.integer << 1) != 0);
 		return ld_compare(e, LEX_TOKEN_EXCLAMATION_EQUAL, t, v, codegen_value_constant(0));
 	}
 	d = fpk(e, t);
 
-	if (v.k == CODEGEN_VALUE_CONSTANT)
-		return codegen_value_constant(f_val(d, v.i) != 0);
+	if (v.kind == CODEGEN_VALUE_CONSTANT)
+		return codegen_value_constant(f_val(d, v.integer) != 0);
 	f_cmp(e, LEX_TOKEN_EXCLAMATION_EQUAL, d, &v, NULL);
-	cset(e, v.r, C_NE);
+	cset(e, v.register_number, C_NE);
 	return v;
 }
 
@@ -265,47 +265,47 @@ VPRIV codegen_value f_neg(codegen_context *e, codegen_value v, ast_qualified_typ
 {
 	int d;
 
-	if (KIND(e->c, t) == AST_TYPE_FLOAT16 || KIND(e->c, t) == AST_TYPE_BFLOAT16) {
-		if (v.k == CODEGEN_VALUE_CONSTANT)
-			return codegen_value_constant(v.i ^ 0x8000);
+	if (KIND(e->compile_context, t) == AST_TYPE_FLOAT16 || KIND(e->compile_context, t) == AST_TYPE_BFLOAT16) {
+		if (v.kind == CODEGEN_VALUE_CONSTANT)
+			return codegen_value_constant(v.integer ^ 0x8000);
 		toreg(e, &v);
-		opi(e, I_EORI, 0, v.r, v.r, 0x8000);
+		opi(e, I_EORI, 0, v.register_number, v.register_number, 0x8000);
 		return v;
 	}
 
-	if (codegen_type_is_long_double(e->c, t)) {
-		if (v.k == CODEGEN_VALUE_CONSTANT)
-			return codegen_value_constant((i128)((u128)v.i ^ (u128)1 << 127));
+	if (codegen_type_is_long_double(e->compile_context, t)) {
+		if (v.kind == CODEGEN_VALUE_CONSTANT)
+			return codegen_value_constant((i128)((u128)v.integer ^ (u128)1 << 127));
 		toreg2(e, &v, false);
-		opi(e, I_EORI, 1, v.r2, v.r2, (int64_t)0x8000000000000000ULL);
+		opi(e, I_EORI, 1, v.register_high, v.register_high, (int64_t)0x8000000000000000ULL);
 		return v;
 	}
 	d = fpk(e, t);
 
-	if (v.k == CODEGEN_VALUE_CONSTANT)
-		return f_const(d, -f_val(d, v.i));
+	if (v.kind == CODEGEN_VALUE_CONSTANT)
+		return f_const(d, -f_val(d, v.integer));
 	f_load(e, d, FV0, &v);
 	word(e, 0x1e214000u | (unsigned)d << 22 | FV0 << 5 | FV0);
-	word(e, f_out(d, v.r, FV0));
+	word(e, f_out(d, v.register_number, FV0));
 	return v;
 }
 
 /* conversions to and from long double (one side is long double, the other not bool) */
 VPRIV codegen_value ld_cast(codegen_context *e, codegen_value v, ast_qualified_type from, ast_qualified_type to)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	bool ff = codegen_type_is_float(c, from), tf = codegen_type_is_float(c, to);
 
 	if (ff && tf) {
 		if (codegen_type_is_long_double(c, from) && codegen_type_is_long_double(c, to))
 			return v;
 		if (codegen_type_is_long_double(c, to)) {
-			if (v.k == CODEGEN_VALUE_CONSTANT)
-				return codegen_value_constant(ld_of_d(f_val(fpk(e, from), v.i)));
+			if (v.kind == CODEGEN_VALUE_CONSTANT)
+				return codegen_value_constant(ld_of_d(f_val(fpk(e, from), v.integer)));
 			return ld_call(e, fpk(e, from) ? CODEGEN_LIBRARY_EXTENDDFTF2 : CODEGEN_LIBRARY_EXTENDSFTF2, &v, &from, 1, to);
 		}
-		if (v.k == CODEGEN_VALUE_CONSTANT)
-			return f_const(fpk(e, to), ld_to_d(v.i));
+		if (v.kind == CODEGEN_VALUE_CONSTANT)
+			return f_const(fpk(e, to), ld_to_d(v.integer));
 		return ld_call(e, fpk(e, to) ? CODEGEN_LIBRARY_TRUNCTFDF2 : CODEGEN_LIBRARY_TRUNCTFSF2, &v, &from, 1, to);
 	}
 	if (tf) {
@@ -314,8 +314,8 @@ VPRIV codegen_value ld_cast(codegen_context *e, codegen_value v, ast_qualified_t
 		ast_qualified_type at;
 		int fn;
 
-		if (v.k == CODEGEN_VALUE_CONSTANT) {
-			i128 x = codegen_integer_truncate(c, v.i, from);
+		if (v.kind == CODEGEN_VALUE_CONSTANT) {
+			i128 x = codegen_integer_truncate(c, v.integer, from);
 
 			return codegen_value_constant(vsoftfloat_of_integer(x, sg));
 		}
@@ -326,7 +326,7 @@ VPRIV codegen_value ld_cast(codegen_context *e, codegen_value v, ast_qualified_t
 		} else {
 			toreg(e, &v);
 			if (fs < 4)
-				extend(e, v.r, v.r, (int)fs, sg);
+				extend(e, v.register_number, v.register_number, (int)fs, sg);
 			fn = sg ? CODEGEN_LIBRARY_FLOATSITF : CODEGEN_LIBRARY_FLOATUNSITF, at = sg ? codegen_type_primitive(AST_TYPE_INT) : codegen_type_primitive(AST_TYPE_UNSIGNED_INT);
 		}
 		return ld_call(e, fn, &v, &at, 1, to);
@@ -338,8 +338,8 @@ VPRIV codegen_value ld_cast(codegen_context *e, codegen_value v, ast_qualified_t
 		ast_qualified_type rt;
 		codegen_value r;
 
-		if (v.k == CODEGEN_VALUE_CONSTANT) {
-			double x = ld_to_d(v.i);
+		if (v.kind == CODEGEN_VALUE_CONSTANT) {
+			double x = ld_to_d(v.integer);
 
 			return codegen_value_constant(codegen_integer_truncate(c, sg ? (i128)x : (i128)(u128)x, to));
 		}
@@ -350,7 +350,7 @@ VPRIV codegen_value ld_cast(codegen_context *e, codegen_value v, ast_qualified_t
 		r = ld_call(e, fn, &v, &from, 1, rt);
 		if (ts < 4) {
 			toreg(e, &r);
-			extend(e, r.r, r.r, (int)ts, sg);
+			extend(e, r.register_number, r.register_number, (int)ts, sg);
 		}
 		return r;
 	}
@@ -358,10 +358,10 @@ VPRIV codegen_value ld_cast(codegen_context *e, codegen_value v, ast_qualified_t
 
 VPRIV codegen_value f_cast(codegen_context *e, codegen_value v, ast_qualified_type from, ast_qualified_type to)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	bool ff = codegen_type_is_float(c, from), tf = codegen_type_is_float(c, to);
 
-	if (v.k == CODEGEN_VALUE_NONE)
+	if (v.kind == CODEGEN_VALUE_NONE)
 		return v;
 	if (KIND(c, from) == AST_TYPE_BFLOAT16) {
 		if (KIND(c, to) == AST_TYPE_BFLOAT16) return v;
@@ -387,15 +387,15 @@ VPRIV codegen_value f_cast(codegen_context *e, codegen_value v, ast_qualified_ty
 			return call_named(e, CODEGEN_FIXED_REFERENCE(CODEGEN_LIBRARY_TRUNCTFHF2), &v, &from, 1, to, false);
 		if (!fh && !ff)
 			return f_cast(e, f_cast(e, v, from, codegen_type_primitive(AST_TYPE_DOUBLE)), codegen_type_primitive(AST_TYPE_DOUBLE), to);
-		if (v.k == CODEGEN_VALUE_CONSTANT)
-			return fh ? f_const_t(e, to, h_to_d((uint16_t)v.i)) : codegen_value_constant(vsoftfloat_to_half(vsoftfloat_of_double(f_val(fpk(e, from), v.i))));
+		if (v.kind == CODEGEN_VALUE_CONSTANT)
+			return fh ? f_const_t(e, to, h_to_d((uint16_t)v.integer)) : codegen_value_constant(vsoftfloat_to_half(vsoftfloat_of_double(f_val(fpk(e, from), v.integer))));
 		{
 			bool d = KIND(c, wide) == AST_TYPE_DOUBLE;
 			uint32_t op = fh ? (d ? 0x1ee2c000u : 0x1ee24000u) : (d ? 0x1e63c000u : 0x1e23c000u);
 
 			f_load(e, !fh && d, FV0, &v);
 			word(e, op | FV0 << 5 | FV0);
-			word(e, f_out(fh && d, v.r, FV0));
+			word(e, f_out(fh && d, v.register_number, FV0));
 			return v;
 		}
 	}
@@ -408,11 +408,11 @@ VPRIV codegen_value f_cast(codegen_context *e, codegen_value v, ast_qualified_ty
 
 		if (fd == td)
 			return v;
-		if (v.k == CODEGEN_VALUE_CONSTANT)
-			return f_const(td, f_val(fd, v.i));
+		if (v.kind == CODEGEN_VALUE_CONSTANT)
+			return f_const(td, f_val(fd, v.integer));
 		f_load(e, fd, FV0, &v);
 		word(e, (fd ? 0x1e624000u : 0x1e22c000u) | FV0 << 5 | FV0);	/* fcvt s<-d / d<-s */
-		word(e, f_out(td, v.r, FV0));
+		word(e, f_out(td, v.register_number, FV0));
 		return v;
 	}
 	if (tf) {
@@ -426,15 +426,15 @@ VPRIV codegen_value f_cast(codegen_context *e, codegen_value v, ast_qualified_ty
 			codegen_value r;
 			ast_qualified_type ft = sg ? codegen_type_primitive(AST_TYPE_INT128) : codegen_type_primitive(AST_TYPE_UINT128);
 
-			if (v.k == CODEGEN_VALUE_CONSTANT)
-				return f_const(td, td ? (sg ? (double)v.i : (double)(u128)v.i) :
-					       (sg ? (double)(float)v.i : (double)(float)(u128)v.i));
+			if (v.kind == CODEGEN_VALUE_CONSTANT)
+				return f_const(td, td ? (sg ? (double)v.integer : (double)(u128)v.integer) :
+					       (sg ? (double)(float)v.integer : (double)(float)(u128)v.integer));
 			r = call_named(e, CODEGEN_FIXED_REFERENCE(sg ? (td ? CODEGEN_LIBRARY_FLOATTIDF : CODEGEN_LIBRARY_FLOATTISF) : (td ? CODEGEN_LIBRARY_FLOATUNTIDF : CODEGEN_LIBRARY_FLOATUNTISF)),
 				       &v, &ft, 1, to, false);
 			return r;
 		}
-		if (v.k == CODEGEN_VALUE_CONSTANT) {
-			i128 x = codegen_integer_truncate(c, v.i, from);
+		if (v.kind == CODEGEN_VALUE_CONSTANT) {
+			i128 x = codegen_integer_truncate(c, v.integer, from);
 
 			/* Round directly to float: going through double loses the
 			 * sticky bit for integers just above a float midpoint. */
@@ -443,10 +443,10 @@ VPRIV codegen_value f_cast(codegen_context *e, codegen_value v, ast_qualified_ty
 		}
 		toreg(e, &v);
 		if (fs < 4)
-			extend(e, v.r, v.r, (int)fs, sg);
+			extend(e, v.register_number, v.register_number, (int)fs, sg);
 		/* scvtf/ucvtf v16, x/w */
-		word(e, (fs == 8 ? 0x9e220000u : 0x1e220000u) | (sg ? 0 : 0x10000u) | (unsigned)td << 22 | (unsigned)v.r << 5 | FV0);
-		word(e, f_out(td, v.r, FV0));
+		word(e, (fs == 8 ? 0x9e220000u : 0x1e220000u) | (sg ? 0 : 0x10000u) | (unsigned)td << 22 | (unsigned)v.register_number << 5 | FV0);
+		word(e, f_out(td, v.register_number, FV0));
 		return v;
 	}
 	{
@@ -457,23 +457,23 @@ VPRIV codegen_value f_cast(codegen_context *e, codegen_value v, ast_qualified_ty
 
 		if (ts == 16) {
 			/* __fixdfti & co. */
-			if (v.k == CODEGEN_VALUE_CONSTANT) {
-				double x = f_val(fd, v.i);
+			if (v.kind == CODEGEN_VALUE_CONSTANT) {
+				double x = f_val(fd, v.integer);
 
 				return codegen_value_constant(sg ? (i128)x : (i128)(u128)x);
 			}
 			return call_named(e, CODEGEN_FIXED_REFERENCE(sg ? (fd ? CODEGEN_LIBRARY_FIXDFTI : CODEGEN_LIBRARY_FIXSFTI) : (fd ? CODEGEN_LIBRARY_FIXUNSDFTI : CODEGEN_LIBRARY_FIXUNSSFTI)),
 					  &v, &from, 1, to, false);
 		}
-		if (v.k == CODEGEN_VALUE_CONSTANT) {
-			double x = f_val(fd, v.i);
+		if (v.kind == CODEGEN_VALUE_CONSTANT) {
+			double x = f_val(fd, v.integer);
 
 			return codegen_value_constant(codegen_integer_truncate(c, sg ? (i128)(int64_t)x : (i128)(uint64_t)x, to));
 		}
 		f_load(e, fd, FV0, &v);
-		word(e, (ts == 8 ? 0x9e380000u : 0x1e380000u) | (sg ? 0 : 0x10000u) | (unsigned)fd << 22 | FV0 << 5 | (unsigned)v.r);
+		word(e, (ts == 8 ? 0x9e380000u : 0x1e380000u) | (sg ? 0 : 0x10000u) | (unsigned)fd << 22 | FV0 << 5 | (unsigned)v.register_number);
 		if (ts < 4)
-			extend(e, v.r, v.r, (int)ts, sg);
+			extend(e, v.register_number, v.register_number, (int)ts, sg);
 		return v;
 	}
 }

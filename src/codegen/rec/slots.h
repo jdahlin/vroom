@@ -7,27 +7,27 @@
 enum { RECORD_SLOT_BAD = 1, RECORD_SLOT_ESCAPED = 2 };
 typedef struct record_slot_range {
 	uint32_t id;
-	int64_t off;
+	int64_t offset;
 	uint32_t size;
-	bool bad, esc;
+	bool bad, escaped;
 } record_slot_range;
 typedef struct record_slot_allocation {
-	int64_t off;
+	int64_t offset;
 	uint32_t size;
 	uint8_t state; /* 0: no access, 1: exact range, 2: several ranges */
-	bool esc;
-	uint32_t mb, mn;
+	bool escaped;
+	uint32_t multi_begin, multi_count;
 } record_slot_allocation;
 typedef struct record_slot_cells {
-	record_slot_allocation *a;
-	uint32_t capa, na;
-	record_slot_range *c, *w;
-	uint32_t capc, capw, nm, nw;
-	int64_t *wend;
-	uint32_t capwe;
+	record_slot_allocation *allocations;
+	uint32_t allocation_capacity, allocation_count;
+	record_slot_range *cells, *writes;
+	uint32_t cell_capacity, write_capacity, cell_count, write_count;
+	int64_t *write_ends;
+	uint32_t write_end_capacity;
 	uint8_t *flags;
-	uint32_t capflags, count;
-	bool multi, valid;
+	uint32_t flag_capacity, count;
+	bool has_multi_range, valid;
 } record_slot_cells;
 /* Reusable caller-owned scratch: begin resets facts without freeing capacity.
  * First submit all accesses and escaped allocation IDs, then submit details
@@ -54,11 +54,11 @@ VPRIV uint32_t record_slot_find(const record_slot_cells *s, uint32_t id, int64_t
 #define RECORD_SLOT_NO_VALUE UINT32_MAX
 #define RECORD_SLOT_NO_STORE UINT32_MAX
 typedef struct record_slot_value {
-	uint32_t gen, version, memory, pos, last, value, loads;
+	uint32_t generation, version, memory, position, last, value, loads;
 } record_slot_value;
 typedef struct record_slot_values {
-	record_slot_value *a;
-	uint32_t cap, count;
+	record_slot_value *values;
+	uint32_t capacity, count;
 } record_slot_values;
 VPRIV bool record_slot_values_begin(record_slot_values *s, uint32_t cells);
 /* Only classified good cells may be queried. A load clears the pending store

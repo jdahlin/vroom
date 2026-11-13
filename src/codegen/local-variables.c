@@ -11,7 +11,7 @@
 
 VPRIV codegen_binding *codegen_symbol_binding_get(codegen_context *e, uint32_t s)
 {
-	return &e->b[s];
+	return &e->bindings[s];
 }
 
 VPRIV bool codegen_symbol_is_local_variable(cc *c, uint32_t s)

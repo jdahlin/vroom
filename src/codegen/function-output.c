@@ -13,17 +13,17 @@
 
 VPRIV void codegen_chunk_add(codegen_context *e, uint64_t key, size_t start)
 {
-	codegen_unit *E = e->E;
+	codegen_unit *E = e->unit;
 
-	pthread_mutex_lock(&E->cmu);
-	E->chunks[E->nchunk++] = (codegen_chunk){ key, e->out.p + start, e->out.n - start, e->rlog + e->rlog0,
-					  (uint32_t)((e->nrlog - e->rlog0) / 2) };
-	pthread_mutex_unlock(&E->cmu);
+	pthread_mutex_lock(&E->chunk_mutex);
+	E->chunks[E->chunk_count++] = (codegen_chunk){ key, e->out.p + start, e->out.n - start, e->round_log + e->round_log_item_start,
+					  (uint32_t)((e->round_log_count - e->round_log_item_start) / 2) };
+	pthread_mutex_unlock(&E->chunk_mutex);
 }
 
 VPRIV void codegen_symbol_header_append(codegen_context *e, tbuf *b, uint32_t s, bool fn, const char *defsec, uint32_t align)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const sym *y = &c->syms[s];
 	const attrs *a = codegen_symbol_attributes(c, s);
 	bool global = y->sc != AST_STORAGE_STATIC && y->depth == 0 && y->name;
@@ -78,13 +78,13 @@ VPRIV void codegen_symbol_header_append(codegen_context *e, tbuf *b, uint32_t s,
 		codegen_item_close(e, h);
 		h = codegen_item_open(e, CODEGEN_ITEM_SYMBOL_HEADER);
 		sh = codegen_item_room_need(e, sizeof *sh);
-		*sh = (codegen_symbol_header){ .sym = s, .p2 = (uint8_t)__builtin_ctz(align ? align : 1), .fn = fn };
+		*sh = (codegen_symbol_header){ .symbol = s, .alignment_log2 = (uint8_t)__builtin_ctz(align ? align : 1), .is_function = fn };
 		if (global) {
 			sh->bind = (y->flags & AST_SYMBOL_FLAG_WEAK) ? STB_WEAK : STB_GLOBAL;
 			if (a->visibility) {
 				const char *v = c->strs[a->visibility - 1].s;
 
-				sh->vis = !strcmp(v, "hidden") ? STV_HIDDEN : !strcmp(v, "protected") ? STV_PROTECTED : 0;
+				sh->visibility = !strcmp(v, "hidden") ? STV_HIDDEN : !strcmp(v, "protected") ? STV_PROTECTED : 0;
 			}
 		}
 		codegen_item_close(e, h);

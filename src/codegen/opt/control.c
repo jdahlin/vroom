@@ -45,7 +45,7 @@ VPRIV bool em_const_strcmp(cc *c, uint32_t n, i128 *value)
 static bool em_control_int(codegen_context *e, uint32_t n, int (*constant_p)(codegen_context *, uint32_t),
 		unsigned *left, i128 *out)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n);
 	i128 a;
 

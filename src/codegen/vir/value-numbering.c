@@ -53,7 +53,7 @@ static uint32_t virbuild_constant_canonical(virbuild_context *V, virbuild_simpli
 /* the block's instructions, rewritten and numbered (S->ht holds what its dominators computed) */
 VPRIV void virbuild_block_values_number(codegen_context *e, virbuild_simplify_state *S_, uint32_t b)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 	virbuild_simplify_state *S = S_;
 
 	for (uint32_t q = V->blocks[b].first_insn; q; q = V->insns[q].next) {

@@ -14,13 +14,13 @@
 /* Target-independent reasons a local must retain an addressable memory object. */
 VPRIV bool em_local_eligible(codegen_context *e, uint32_t s)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const sym *y = &c->syms[s];
 	const attrs *a = codegen_symbol_attributes(c, s);
 	ast_qualified_type t = y->ty;
 
 	return codegen_symbol_is_local_variable(c, s) && y->sc != AST_STORAGE_STATIC && y->sc != AST_STORAGE_EXTERN &&
-	       !e->E->lnoreg[s] && !(y->flags & AST_SYMBOL_FLAG_ADDRESS_TAKEN) && !(AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_VOLATILE) &&
+	       !e->unit->local_needs_memory[s] && !(y->flags & AST_SYMBOL_FLAG_ADDRESS_TAKEN) && !(AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_VOLATILE) &&
 	       !(T(c, t)->flags & (AST_TYPE_FLAG_VLA | AST_TYPE_FLAG_ATOMIC)) && !a->cleanup &&
 	       !(y->sc == AST_STORAGE_REGISTER && a->asmname);
 }
@@ -36,8 +36,8 @@ VPRIV bool em_local_gpr_type(cc *c, ast_qualified_type t)
 VPRIV unsigned em_select_locals(codegen_context *e, uint32_t fn, uint32_t *cand, unsigned max,
 			       bool (*target_ok)(cc *, ast_qualified_type))
 {
-	codegen_unit *E = e->E;
-	uint32_t lo = E->lspan[2 * fn], hi = E->lspan[2 * fn + 1];
+	codegen_unit *E = e->unit;
+	uint32_t lo = E->function_local_span[2 * fn], hi = E->function_local_span[2 * fn + 1];
 	unsigned k = 0;
 
 	if (!max || lo > hi)
@@ -45,12 +45,12 @@ VPRIV unsigned em_select_locals(codegen_context *e, uint32_t fn, uint32_t *cand,
 	for (uint32_t s = lo; s <= hi; s++) {
 		unsigned j;
 
-		if (!E->luse[s] || em_unused_local(e, s, fn) || !em_local_eligible(e, s) || !target_ok(e->c, e->c->syms[s].ty))
+		if (!E->local_use_weights[s] || em_unused_local(e, s, fn) || !em_local_eligible(e, s) || !target_ok(e->compile_context, e->compile_context->syms[s].ty))
 			continue;
-		if (k == max && E->luse[cand[k - 1]] >= E->luse[s])
+		if (k == max && E->local_use_weights[cand[k - 1]] >= E->local_use_weights[s])
 			continue;
 		j = k < max ? k++ : k - 1;
-		while (j && E->luse[cand[j - 1]] < E->luse[s]) {
+		while (j && E->local_use_weights[cand[j - 1]] < E->local_use_weights[s]) {
 			cand[j] = cand[j - 1];
 			j--;
 		}

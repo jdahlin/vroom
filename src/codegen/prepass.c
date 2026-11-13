@@ -112,9 +112,9 @@ typedef struct codegen_prepass_state {
 /* a local is read or written here: count it for register allocation (8x per loop level) */
 static void codegen_prepass_local_note(codegen_prepass_state *P, uint32_t s)
 {
-	uint32_t w = 1u << (3 * (P->loopd < 4 ? P->loopd : 4)), u = P->E->luse[s] + w;
+	uint32_t w = 1u << (3 * (P->loopd < 4 ? P->loopd : 4)), u = P->E->local_use_weights[s] + w;
 
-	P->E->luse[s] = (uint16_t)(u > 65535 ? 65535 : u);
+	P->E->local_use_weights[s] = (uint16_t)(u > 65535 ? 65535 : u);
 	if (s < P->llo)
 		P->llo = s;
 	if (s > P->lhi)
@@ -171,12 +171,12 @@ static void codegen_prepass_written_mark(codegen_prepass_state *P, uint32_t n, b
 		}
 	}
 	if (N(n)->op == AST_NODE_VARIABLE && codegen_symbol_is_local_variable(c, N(n)->a)) {
-		P->E->sflags[N(n)->a] |= CODEGEN_SYMBOL_WRITTEN | CODEGEN_SYMBOL_ARRAY_ESCAPES, P->E->ffacts[N(n)->a] |= CODEGEN_FLOAT_FACT_BAD;
+		P->E->symbol_flags[N(n)->a] |= CODEGEN_SYMBOL_WRITTEN | CODEGEN_SYMBOL_ARRAY_ESCAPES, P->E->float_facts[N(n)->a] |= CODEGEN_FLOAT_FACT_BAD;
 		if (addr && codegen_symbol_is_local_variable(P->c, N(n)->a))
-			P->E->lnoreg[N(n)->a] = 1;
+			P->E->local_needs_memory[N(n)->a] = 1;
 	}
 	else if (N(n)->op == AST_NODE_COMPOUND_LITERAL && codegen_symbol_is_local_variable(c, N(n)->b))
-		P->E->sflags[N(n)->b] |= CODEGEN_SYMBOL_WRITTEN;
+		P->E->symbol_flags[N(n)->b] |= CODEGEN_SYMBOL_WRITTEN;
 }
 
 /*
@@ -189,7 +189,7 @@ static void codegen_prepass_written_mark(codegen_prepass_state *P, uint32_t n, b
 static void codegen_prepass_float_write_note(codegen_prepass_state *P, uint32_t s, uint32_t rhs)
 {
 	cc *c = P->c;
-	uint8_t *f = &P->E->ffacts[s], k = CODEGEN_FLOAT_FACT_BAD;
+	uint8_t *f = &P->E->float_facts[s], k = CODEGEN_FLOAT_FACT_BAD;
 	uint32_t ref, callee;
 	cc_value cv;
 
@@ -212,11 +212,11 @@ static void codegen_prepass_float_write_note(codegen_prepass_state *P, uint32_t 
 		const ctype *ft = T(c, fn->ty);
 		int want = CODEGEN_IDENTIFIER_IS(fn->name, "fabs") ? AST_TYPE_DOUBLE :
 			   CODEGEN_IDENTIFIER_IS(fn->name, "fabsf") ? AST_TYPE_FLOAT : -1;
-		bool enabled = !P->E->o->no_builtin;
+		bool enabled = !P->E->options->no_builtin;
 		/* The per-name option table belongs to the front end; conservatively
 		   avoid library facts whenever any named builtin was disabled. */
 		for (unsigned i = 0; i < CC_DISABLED_BUILTIN_WORDS; i++)
-			if (P->E->o->disabled_builtins[i]) enabled = false;
+			if (P->E->options->disabled_builtins[i]) enabled = false;
 		if (enabled && want >= 0 && (fn->flags & AST_SYMBOL_FLAG_GLOBAL) && fn->sc != AST_STORAGE_STATIC && !codegen_symbol_attributes(c, callee)->asmname &&
 		    ft->kind == AST_TYPE_FUNCTION && KIND(c, ft->base) == want && ft->n == 1 &&
 		    KIND(c, c->params[ft->aux]) == want)
@@ -232,18 +232,18 @@ static void codegen_prepass_assignment_note(codegen_prepass_state *P, uint32_t s
 	codegen_unit *E = P->E;
 	cc_value cv;
 
-	if (!codegen_symbol_is_local_variable(c, s) || (E->sflags[s] & CODEGEN_SYMBOL_WRITTEN))
+	if (!codegen_symbol_is_local_variable(c, s) || (E->symbol_flags[s] & CODEGEN_SYMBOL_WRITTEN))
 		return;
 	if (!codegen_type_is_integer(c, c->syms[s].ty) || !cc_eval(c, rhs, &cv) || cv.kind != CC_VALUE_INTEGER) {
-		E->sflags[s] |= CODEGEN_SYMBOL_WRITTEN;
+		E->symbol_flags[s] |= CODEGEN_SYMBOL_WRITTEN;
 		return;
 	}
 	cv.i = codegen_integer_truncate(c, cv.i, c->syms[s].ty);
-	if (!(E->sflags[s] & CODEGEN_SYMBOL_CONSTANT_WRITTEN)) {
-		E->sflags[s] |= CODEGEN_SYMBOL_CONSTANT_WRITTEN;
-		E->cwval[s] = cv.i;
-	} else if (E->cwval[s] != cv.i) {
-		E->sflags[s] |= CODEGEN_SYMBOL_CONSTANT_MULTIPLE;
+	if (!(E->symbol_flags[s] & CODEGEN_SYMBOL_CONSTANT_WRITTEN)) {
+		E->symbol_flags[s] |= CODEGEN_SYMBOL_CONSTANT_WRITTEN;
+		E->constant_written_values[s] = cv.i;
+	} else if (E->constant_written_values[s] != cv.i) {
+		E->symbol_flags[s] |= CODEGEN_SYMBOL_CONSTANT_MULTIPLE;
 	}
 }
 
@@ -287,7 +287,7 @@ VPRIV bool codegen_inline_has_constant_argument(const codegen_unit *E,cc *c,uint
  if(!call)return false;
  const node *site=N(call),*body=N(c->syms[callee].body);
  for(uint32_t k=0;k<site->c && k<body->aux;k++) {
-  if(!E->inl_read[c->lists[body->a+k]])continue;
+  if(!E->inline_parameter_reads[c->lists[body->a+k]])continue;
   uint32_t a=c->lists[site->b+k];cc_value cv;
   if(!cc_eval(c,a,&cv))continue;
   if(cv.kind==CC_VALUE_INTEGER && codegen_type_is_integer(c,N(a)->ty))return true;
@@ -305,7 +305,7 @@ VPRIV bool codegen_inline_is_candidate(codegen_unit *E, cc *c, uint32_t s)
 	if (y->kind != AST_SYMBOL_FUNCTION || !(y->flags & AST_SYMBOL_FLAG_DEFINED) || !y->body)
 		return false;
 	ft = T(c, y->ty);
-	if ((ft->flags & (AST_TYPE_FLAG_VARIADIC | AST_TYPE_FLAG_NO_PROTOTYPE)) || N(y->body)->aux > 64 || (E->sflags[s] & CODEGEN_SYMBOL_NO_INLINE) || (E->once[s] & 2))
+	if ((ft->flags & (AST_TYPE_FLAG_VARIADIC | AST_TYPE_FLAG_NO_PROTOTYPE)) || N(y->body)->aux > 64 || (E->symbol_flags[s] & CODEGEN_SYMBOL_NO_INLINE) || (E->once[s] & 2))
 		return false;
 	if (y->flags & AST_SYMBOL_FLAG_ALWAYS_INLINE)
 		return true;
@@ -325,23 +325,23 @@ VPRIV void codegen_function_inline_sizes(codegen_unit *E, cc *c, uint32_t lim)
 	uint32_t n = c->nsym, *idx, *low, *stk, *cs, *ci, sp = 0, csp = 0, nidx = 0;
 	uint8_t *on;
 
-	E->inl_read = calloc((size_t)n + 64, 1);
-	E->cgoff = calloc((size_t)n + 64, 4);
-	E->cgn = calloc((size_t)n + 64, 4);
-	E->scc = calloc((size_t)n + 64, 4);
-	E->isz = calloc((size_t)n + 64, 2);
+	E->inline_parameter_reads = calloc((size_t)n + 64, 1);
+	E->call_edge_offsets = calloc((size_t)n + 64, 4);
+	E->call_edge_counts = calloc((size_t)n + 64, 4);
+	E->recursion_groups = calloc((size_t)n + 64, 4);
+	E->inline_sizes = calloc((size_t)n + 64, 2);
 	idx = calloc((size_t)n + 64, 4), low = calloc((size_t)n + 64, 4), stk = malloc(((size_t)n + 64) * 4);
 	cs = malloc(((size_t)n + 64) * 4), ci = malloc(((size_t)n + 64) * 4), on = calloc((size_t)n + 64, 1);
-	if (!E->inl_read || !E->cgoff || !E->cgn || !E->scc || !E->isz || !idx || !low || !stk || !cs || !ci || !on)
+	if (!E->inline_parameter_reads || !E->call_edge_offsets || !E->call_edge_counts || !E->recursion_groups || !E->inline_sizes || !idx || !low || !stk || !cs || !ci || !on)
 		abort();
-	E->cgrec = true;
+	E->call_graph_recording = true;
 	for (uint32_t s = 1; s < n; s++)
 		if (c->syms[s].kind == AST_SYMBOL_FUNCTION && c->syms[s].body && (c->syms[s].flags & AST_SYMBOL_FLAG_DEFINED) && codegen_symbol_canonical(c, s) == s) {
-			E->cgoff[s] = E->ncg;
+			E->call_edge_offsets[s] = E->call_edge_count;
 			codegen_function_walk_ensure(E, c, s);
-			E->cgn[s] = E->ncg - E->cgoff[s];
+			E->call_edge_counts[s] = E->call_edge_count - E->call_edge_offsets[s];
 		}
-	E->cgrec = false;
+	E->call_graph_recording = false;
 	/* Tarjan, iterative; a group is finished callees first, so its isz is computed there */
 	for (uint32_t r = 1; r < n; r++) {
 		if (idx[r] || c->syms[r].kind != AST_SYMBOL_FUNCTION)
@@ -351,8 +351,8 @@ VPRIV void codegen_function_inline_sizes(codegen_unit *E, cc *c, uint32_t lim)
 		while (csp) {
 			uint32_t v = cs[csp - 1];
 
-			if (ci[csp - 1] < E->cgn[v]) {
-				uint32_t w = E->cg[E->cgoff[v] + ci[csp - 1]++].callee;
+			if (ci[csp - 1] < E->call_edge_counts[v]) {
+				uint32_t w = E->call_edges[E->call_edge_offsets[v] + ci[csp - 1]++].callee;
 
 				if (!idx[w]) {
 					cs[csp] = w, ci[csp++] = 0;
@@ -371,26 +371,26 @@ VPRIV void codegen_function_inline_sizes(codegen_unit *E, cc *c, uint32_t lim)
 			uint32_t top = sp;
 
 			do
-				E->scc[stk[--sp]] = v, on[stk[sp]] = 0;
+				E->recursion_groups[stk[--sp]] = v, on[stk[sp]] = 0;
 			while (stk[sp] != v);
 			for (uint32_t k = sp; k < top; k++) {
-				uint32_t s = stk[k], z = E->fnsize[s];
+				uint32_t s = stk[k], z = E->function_node_counts[s];
 
-				for (uint32_t j = 0; j < E->cgn[s]; j++) {
-					codegen_call_edge edge=E->cg[E->cgoff[s]+j];
+				for (uint32_t j = 0; j < E->call_edge_counts[s]; j++) {
+					codegen_call_edge edge=E->call_edges[E->call_edge_offsets[s]+j];
 					uint32_t t=edge.callee;
 
-					if(E->scc[t]==v || !codegen_inline_is_candidate(E,c,t))continue;
+					if(E->recursion_groups[t]==v || !codegen_inline_is_candidate(E,c,t))continue;
 					bool take=c->syms[t].flags&AST_SYMBOL_FLAG_ALWAYS_INLINE;
 					if(!take) {
 						bool once=(E->once[t]&1) && c->syms[t].sc==AST_STORAGE_STATIC && !codegen_symbol_attributes(c,t)->used &&
-						          E->fnsize[s]<=WALK_INLINE_ONCE_MAX;
-						take=once ? E->fnsize[t]<=WALK_INLINE_ONCE_MAX : E->isz[t]<=lim ||
-						 (E->isz[t]<=lim*WALK_INLINE_CONSTANT_FACTOR && codegen_inline_has_constant_argument(E,c,t,edge.call));
+						          E->function_node_counts[s]<=WALK_INLINE_ONCE_MAX;
+						take=once ? E->function_node_counts[t]<=WALK_INLINE_ONCE_MAX : E->inline_sizes[t]<=lim ||
+						 (E->inline_sizes[t]<=lim*WALK_INLINE_CONSTANT_FACTOR && codegen_inline_has_constant_argument(E,c,t,edge.call));
 					}
-					if(take)z=z>=65535u-E->isz[t]?65535u:z+E->isz[t];
+					if(take)z=z>=65535u-E->inline_sizes[t]?65535u:z+E->inline_sizes[t];
 				}
-				E->isz[s] = z > 65535 ? 65535 : (uint16_t)z;
+				E->inline_sizes[s] = z > 65535 ? 65535 : (uint16_t)z;
 			}
 		}
 	}
@@ -422,10 +422,10 @@ VPRIV void codegen_function_walk_ensure(codegen_unit *E, cc *c, uint32_t s)
 		for (uint32_t i = 0; i < b->aux; i++)	/* params, used or not */
 			codegen_prepass_local_note(&P, c->lists[b->a + i]);
 		codegen_prepass_node_walk(&P, c->syms[s].body);
-		E->lspan[2 * s] = P.llo, E->lspan[2 * s + 1] = P.lhi;
-		E->fnsize[s] = P.nodes > 65535 ? 65535 : (uint16_t)P.nodes;
+		E->function_local_span[2 * s] = P.llo, E->function_local_span[2 * s + 1] = P.lhi;
+		E->function_node_counts[s] = P.nodes > 65535 ? 65535 : (uint16_t)P.nodes;
 		if (E->stats)
-			E->walk_ns += (uint64_t)((codegen_clock_seconds() - t) * 1e9), E->nwalk++;
+			E->walk_nanoseconds += (uint64_t)((codegen_clock_seconds() - t) * 1e9), E->walk_total++;
 		atomic_store_explicit(&E->walked[s], 2, memory_order_release);
 		return;
 	}
@@ -471,11 +471,11 @@ static int codegen_prepass_node_walk(codegen_prepass_state *P, uint32_t n)
 	P->nodes++;
 	switch (x->op) {
 	case AST_NODE_VARIABLE:
-		if(P->E->inl_read && !P->discard_param && (c->syms[x->a].flags&AST_SYMBOL_FLAG_PARAMETER))
-			P->E->inl_read[x->a]=1;
+		if(P->E->inline_parameter_reads && !P->discard_param && (c->syms[x->a].flags&AST_SYMBOL_FLAG_PARAMETER))
+			P->E->inline_parameter_reads[x->a]=1;
 		/* locals belong to this walk alone (globals' flags are shared between threads) */
 		if (codegen_symbol_is_local_variable(c, x->a)) {
-			P->E->sflags[x->a] |= CODEGEN_SYMBOL_USED;
+			P->E->symbol_flags[x->a] |= CODEGEN_SYMBOL_USED;
 			codegen_prepass_local_note(P, x->a);
 		} else {
 			const sym *y = &c->syms[x->a];
@@ -483,7 +483,7 @@ static int codegen_prepass_node_walk(codegen_prepass_state *P, uint32_t n)
 			/* a static local holding a label address: the function has one copy */
 			if (y->kind == AST_SYMBOL_VARIABLE && y->sc == AST_STORAGE_STATIC && !(y->flags & AST_SYMBOL_FLAG_GLOBAL) && y->body &&
 			    codegen_initializer_has_label_address(c, y->body))
-				P->E->sflags[P->fn] |= CODEGEN_SYMBOL_NO_INLINE;
+				P->E->symbol_flags[P->fn] |= CODEGEN_SYMBOL_NO_INLINE;
 		}
 		return false;
 	case AST_NODE_NUMBER: case AST_NODE_BITINT_NUMBER: case AST_NODE_FLOAT_NUMBER: case AST_NODE_STRING: case AST_NODE_ZERO:
@@ -495,7 +495,7 @@ static int codegen_prepass_node_walk(codegen_prepass_state *P, uint32_t n)
 				lab |= codegen_prepass_node_walk(P, T(c, t)->n);
 		break;
 	case AST_NODE_LABEL_ADDRESS:
-		P->E->lref[x->a] |= CODEGEN_LABEL_REFERENCED | CODEGEN_LABEL_BACKWARD;
+		P->E->label_flags[x->a] |= CODEGEN_LABEL_REFERENCED | CODEGEN_LABEL_BACKWARD;
 		return false;
 	case AST_NODE_VA_ARG:	/* va_arg reads and advances a scalar va_list through its address */
 		if (codegen_valist_is_scalar(c))
@@ -532,7 +532,7 @@ static int codegen_prepass_node_walk(codegen_prepass_state *P, uint32_t n)
 			uint32_t s = N(N(N(x->a)->a)->a)->a;
 
 			if (codegen_symbol_is_local_variable(c, s))
-				P->E->sflags[s] |= CODEGEN_SYMBOL_WRITTEN;
+				P->E->symbol_flags[s] |= CODEGEN_SYMBOL_WRITTEN;
 		}
 		else
 			codegen_prepass_written_mark(P, x->a, false);
@@ -555,31 +555,31 @@ static int codegen_prepass_node_walk(codegen_prepass_state *P, uint32_t n)
 		uint32_t ref, callee = codegen_call_direct_callee(c, x->a, &ref);
 
 		if (callee && codegen_symbol_attributes(c, callee)->error_fn)
-			P->E->sflags[P->fn] |= CODEGEN_SYMBOL_MUST_FOLD;
+			P->E->symbol_flags[P->fn] |= CODEGEN_SYMBOL_MUST_FOLD;
 		/* VIR: a function calling setjmp is not inlined (as LLVM): the caller's promoted
 		   locals would take their values at the setjmp after a longjmp */
 		if (callee && P->E->once && ((codegen_symbol_attributes(c, callee)->flags & CC_ATTRIBUTE_FLAG_TAIL_RETURNS_TWICE) ||
 		    CODEGEN_IDENTIFIER_IS(c->syms[callee].name, "setjmp") || CODEGEN_IDENTIFIER_IS(c->syms[callee].name, "_setjmp") ||
 		    CODEGEN_IDENTIFIER_IS(c->syms[callee].name, "sigsetjmp") || CODEGEN_IDENTIFIER_IS(c->syms[callee].name, "__sigsetjmp")))
 			P->E->once[P->fn] |= 2;
-		if (callee && P->E->cgrec) {
+		if (callee && P->E->call_graph_recording) {
 			codegen_unit *E = P->E;
 
-			if (E->ncg == E->capcg) {
-				codegen_call_edge *g = realloc(E->cg, (size_t)(E->capcg = E->capcg ? 2 * E->capcg : 1024) * sizeof *g);
+			if (E->call_edge_count == E->call_edge_capacity) {
+				codegen_call_edge *g = realloc(E->call_edges, (size_t)(E->call_edge_capacity = E->call_edge_capacity ? 2 * E->call_edge_capacity : 1024) * sizeof *g);
 
 				if (!g)
 					abort();
-				E->cg = g;
+				E->call_edges = g;
 			}
-			E->cg[E->ncg++] = (codegen_call_edge){codegen_symbol_canonical(c,callee),n};
+			E->call_edges[E->call_edge_count++] = (codegen_call_edge){codegen_symbol_canonical(c,callee),n};
 		}
 		lab = codegen_prepass_node_walk(P, x->a);
 	}
 		__attribute__((fallthrough));
 	case AST_NODE_BUILTIN:
 		if (x->op == AST_NODE_BUILTIN && (x->aux == CC_BUILTIN_ALLOCA || x->aux == CC_BUILTIN_ALLOCA_UNINITIALIZED))
-			P->E->nflags[c->syms[P->fn].body] |= CODEGEN_NODE_HAS_ALLOCA;
+			P->E->node_flags[c->syms[P->fn].body] |= CODEGEN_NODE_HAS_ALLOCA;
 		for (uint32_t i = 0; i < x->c; i++)
 			lab |= codegen_prepass_node_walk(P, c->lists[x->b + i]);
 		/*
@@ -632,7 +632,7 @@ static int codegen_prepass_node_walk(codegen_prepass_state *P, uint32_t n)
 		if (codegen_symbol_is_local_variable(c, x->a)) {
 			codegen_prepass_local_note(P, x->a);
 			if (x->b && (N(x->b)->op == AST_NODE_INITIALIZER || N(x->b)->op == AST_NODE_ZERO || N(x->b)->op == AST_NODE_STRING))
-				P->E->lnoreg[x->a] = 1;	/* gen_init_local works on memory */
+				P->E->local_needs_memory[x->a] = 1;	/* gen_init_local works on memory */
 		}
 		if (codegen_symbol_attributes(c, x->a)->cleanup || (y->kind == AST_SYMBOL_VARIABLE && (T(c, y->ty)->flags & AST_TYPE_FLAG_VLA)))
 			P->cdepth++;
@@ -684,15 +684,15 @@ static int codegen_prepass_node_walk(codegen_prepass_state *P, uint32_t n)
 		lab = 1;
 		break;
 	case AST_NODE_LABEL:
-		P->E->lcdepth[x->a] = (uint16_t)P->cdepth;
-		P->E->lref[x->a] |= CODEGEN_LABEL_DEFINED;
+		P->E->label_cleanup_depth[x->a] = (uint16_t)P->cdepth;
+		P->E->label_flags[x->a] |= CODEGEN_LABEL_DEFINED;
 		if (c->labels[x->a].addr_taken)
-			P->E->lref[x->a] |= CODEGEN_LABEL_REFERENCED | CODEGEN_LABEL_BACKWARD;
+			P->E->label_flags[x->a] |= CODEGEN_LABEL_REFERENCED | CODEGEN_LABEL_BACKWARD;
 		codegen_prepass_node_walk(P, x->c);
 		lab = 1;
 		break;
 	case AST_NODE_GOTO:
-		P->E->lref[x->a] |= CODEGEN_LABEL_REFERENCED | (P->E->lref[x->a] & CODEGEN_LABEL_DEFINED ? CODEGEN_LABEL_BACKWARD : 0);
+		P->E->label_flags[x->a] |= CODEGEN_LABEL_REFERENCED | (P->E->label_flags[x->a] & CODEGEN_LABEL_DEFINED ? CODEGEN_LABEL_BACKWARD : 0);
 		break;
 	case AST_NODE_ASM: {
 		const ast_asm_statement *a = &c->asms[x->a];
@@ -704,18 +704,18 @@ static int codegen_prepass_node_walk(codegen_prepass_state *P, uint32_t n)
 				codegen_prepass_written_mark(P, a->ops[i].expr, true);
 			else if (strpbrk(c->strs[a->ops[i].constraint - 1].s, "gVX<>") && N(a->ops[i].expr)->op == AST_NODE_VARIABLE &&
 				 codegen_symbol_is_local_variable(c, N(a->ops[i].expr)->a))
-				P->E->lnoreg[N(a->ops[i].expr)->a] = 1;	/* may become a memory operand */
+				P->E->local_needs_memory[N(a->ops[i].expr)->a] = 1;	/* may become a memory operand */
 			lab |= codegen_prepass_node_walk(P, a->ops[i].expr);
 		}
 		for (uint32_t k = 0; k < a->nlabel; k++)
-			P->E->lref[a->labels[k]] |= CODEGEN_LABEL_REFERENCED | (P->E->lref[a->labels[k]] & CODEGEN_LABEL_DEFINED ? CODEGEN_LABEL_BACKWARD : 0);
+			P->E->label_flags[a->labels[k]] |= CODEGEN_LABEL_REFERENCED | (P->E->label_flags[a->labels[k]] & CODEGEN_LABEL_DEFINED ? CODEGEN_LABEL_BACKWARD : 0);
 		break;
 	}
 	default:
 		break;
 	}
 	if (lab)
-		P->E->nflags[n] |= CODEGEN_NODE_HAS_LABEL;
+		P->E->node_flags[n] |= CODEGEN_NODE_HAS_LABEL;
 	return lab;
 }
 
@@ -731,13 +731,13 @@ VPRIV int codegen_u32_compare(const void *a, const void *b)
    Only direct parameters and effect-free actual arguments are covered here. */
 VPRIV bool codegen_inline_object_size(codegen_context *e, uint32_t fn, uint32_t call, uint32_t pointer, uint32_t mode, i128 *size)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	if (!fn || !call) return false;
 	while (N(pointer)->op == AST_NODE_CAST) pointer = N(pointer)->a;
 	if (N(pointer)->op != AST_NODE_VARIABLE) return false;
 	uint32_t p = N(pointer)->a;
 	if (!codegen_type_is_pointer(c, c->syms[p].ty) || (c->syms[p].flags & AST_SYMBOL_FLAG_ADDRESS_TAKEN) ||
-	    (e->E->sflags[p] & (CODEGEN_SYMBOL_WRITTEN | CODEGEN_SYMBOL_CONSTANT_WRITTEN)) || (AST_QUALIFIED_TYPE_QUALIFIERS(c->syms[p].ty) & AST_QUALIFIER_VOLATILE))
+	    (e->unit->symbol_flags[p] & (CODEGEN_SYMBOL_WRITTEN | CODEGEN_SYMBOL_CONSTANT_WRITTEN)) || (AST_QUALIFIED_TYPE_QUALIFIERS(c->syms[p].ty) & AST_QUALIFIER_VOLATILE))
 		return false;
 	const node *body = N(c->syms[fn].body), *x = N(call);
 	cc_value cv;

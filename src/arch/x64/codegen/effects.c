@@ -17,7 +17,7 @@
 #define X_R RECORD_EFFECT_READS_FLAGS
 #define X_MEM (RECORD_EFFECT_LOAD | RECORD_EFFECT_STORE | RECORD_EFFECT_TRAP)
 #define X_CALL_FLAGS (X_MEM | RECORD_EFFECT_CALL | X_W | RECORD_EFFECT_FLOAT | RECORD_EFFECT_BARRIER)
-#define X_DESC(regs_, flags_) { .regs = (regs_), .fl = (flags_) }
+#define X_DESC(regs_, flags_) { .registers = (regs_), .flags = (flags_) }
 
 static const record_op_descriptor x64_desc[X_NOPS] = {
 	[X_CMOV] = X_DESC(X_D | X_U | X_V, X_P | X_R),
@@ -50,42 +50,42 @@ static const record_op_descriptor x64_desc[X_NOPS] = {
 	[X_SHLI] = X_DESC(X_D | X_U, X_P | X_R | X_W),
 	[X_SHRI] = X_DESC(X_D | X_U, X_P | X_R | X_W),
 	[X_SARI] = X_DESC(X_D | X_U, X_P | X_R | X_W),
-	[X_SHL] = { .regs = X_D | X_U | X_V, .fl = X_P | X_R | X_W, .iuse = X_BIT(RCX) },
-	[X_SHR] = { .regs = X_D | X_U | X_V, .fl = X_P | X_R | X_W, .iuse = X_BIT(RCX) },
-	[X_SAR] = { .regs = X_D | X_U | X_V, .fl = X_P | X_R | X_W, .iuse = X_BIT(RCX) },
+	[X_SHL] = { .registers = X_D | X_U | X_V, .flags = X_P | X_R | X_W, .implicit_used = X_BIT(RCX) },
+	[X_SHR] = { .registers = X_D | X_U | X_V, .flags = X_P | X_R | X_W, .implicit_used = X_BIT(RCX) },
+	[X_SAR] = { .registers = X_D | X_U | X_V, .flags = X_P | X_R | X_W, .implicit_used = X_BIT(RCX) },
 	[X_NEG] = X_DESC(X_D | X_U, X_P | X_W),
 	[X_NOT] = X_DESC(X_D | X_U, X_P),
 	[X_CMP] = X_DESC(X_U | X_V, X_P | X_W),
 	[X_CMPI] = X_DESC(X_U, X_P | X_W),
 	[X_TEST] = X_DESC(X_U, X_P | X_W),
 	[X_SETCC] = X_DESC(X_D, X_P | X_R),
-	[X_JMP] = { .br = RECORD_BRANCH_JUMP },
-	[X_JCC] = { .br = RECORD_BRANCH_CONDITIONAL, .fl = X_R },
-	[X_CALL] = { .fl = X_CALL_FLAGS, .idef = X_CALL_DEF, .iuse = X_CALL_USE },
-	[X_CALLR] = { .regs = X_U, .fl = X_CALL_FLAGS, .idef = X_CALL_DEF, .iuse = X_CALL_USE },
-	[X_TAIL] = { .br = RECORD_BRANCH_RETURN, .fl = RECORD_EFFECT_BARRIER, .iuse = X_GP_ARGS },
-	[X_PUSH] = { .regs = X_U, .fl = RECORD_EFFECT_STORE | RECORD_EFFECT_TRAP, .idef = X_BIT(RSP), .iuse = X_BIT(RSP) },
-	[X_POP] = { .regs = X_D, .fl = RECORD_EFFECT_LOAD | RECORD_EFFECT_TRAP, .idef = X_BIT(RSP), .iuse = X_BIT(RSP) },
-	[X_ADJSP] = { .fl = X_P | X_W, .idef = X_BIT(RSP), .iuse = X_BIT(RSP) },
-	[X_CQO] = { .fl = X_P, .idef = X_BIT(RDX), .iuse = X_BIT(RAX) },
-	[X_IDIV] = { .regs = X_U, .fl = RECORD_EFFECT_TRAP | X_W, .idef = X_BIT(RAX) | X_BIT(RDX), .iuse = X_BIT(RAX) | X_BIT(RDX) },
-	[X_DIV] = { .regs = X_U, .fl = RECORD_EFFECT_TRAP | X_W, .idef = X_BIT(RAX) | X_BIT(RDX), .iuse = X_BIT(RAX) | X_BIT(RDX) },
-	[X_MULW] = { .regs = X_U, .fl = X_P | X_W, .idef = X_BIT(RAX) | X_BIT(RDX), .iuse = X_BIT(RAX) },
-	[X_SMULW] = { .regs = X_U, .fl = X_P | X_W, .idef = X_BIT(RAX) | X_BIT(RDX), .iuse = X_BIT(RAX) },
+	[X_JMP] = { .branch = RECORD_BRANCH_JUMP },
+	[X_JCC] = { .branch = RECORD_BRANCH_CONDITIONAL, .flags = X_R },
+	[X_CALL] = { .flags = X_CALL_FLAGS, .implicit_defined = X_CALL_DEF, .implicit_used = X_CALL_USE },
+	[X_CALLR] = { .registers = X_U, .flags = X_CALL_FLAGS, .implicit_defined = X_CALL_DEF, .implicit_used = X_CALL_USE },
+	[X_TAIL] = { .branch = RECORD_BRANCH_RETURN, .flags = RECORD_EFFECT_BARRIER, .implicit_used = X_GP_ARGS },
+	[X_PUSH] = { .registers = X_U, .flags = RECORD_EFFECT_STORE | RECORD_EFFECT_TRAP, .implicit_defined = X_BIT(RSP), .implicit_used = X_BIT(RSP) },
+	[X_POP] = { .registers = X_D, .flags = RECORD_EFFECT_LOAD | RECORD_EFFECT_TRAP, .implicit_defined = X_BIT(RSP), .implicit_used = X_BIT(RSP) },
+	[X_ADJSP] = { .flags = X_P | X_W, .implicit_defined = X_BIT(RSP), .implicit_used = X_BIT(RSP) },
+	[X_CQO] = { .flags = X_P, .implicit_defined = X_BIT(RDX), .implicit_used = X_BIT(RAX) },
+	[X_IDIV] = { .registers = X_U, .flags = RECORD_EFFECT_TRAP | X_W, .implicit_defined = X_BIT(RAX) | X_BIT(RDX), .implicit_used = X_BIT(RAX) | X_BIT(RDX) },
+	[X_DIV] = { .registers = X_U, .flags = RECORD_EFFECT_TRAP | X_W, .implicit_defined = X_BIT(RAX) | X_BIT(RDX), .implicit_used = X_BIT(RAX) | X_BIT(RDX) },
+	[X_MULW] = { .registers = X_U, .flags = X_P | X_W, .implicit_defined = X_BIT(RAX) | X_BIT(RDX), .implicit_used = X_BIT(RAX) },
+	[X_SMULW] = { .registers = X_U, .flags = X_P | X_W, .implicit_defined = X_BIT(RAX) | X_BIT(RDX), .implicit_used = X_BIT(RAX) },
 	[X_UD2] = X_DESC(0, RECORD_EFFECT_TRAP | RECORD_EFFECT_BARRIER),
 	[X_TLS] = X_DESC(X_D, RECORD_EFFECT_LOAD | RECORD_EFFECT_TRAP), /* dynamic model below */
 	[X_GOT] = X_DESC(X_D, RECORD_EFFECT_LOAD | RECORD_EFFECT_TRAP),
 	[X_XCHG] = X_DESC(X_D | RECORD_OPERAND_USES_0 | X_U, X_MEM | RECORD_EFFECT_BARRIER),
 	[X_XADD] = X_DESC(X_D | RECORD_OPERAND_USES_0 | X_U, X_MEM | RECORD_EFFECT_BARRIER | X_W),
-	[X_CMPXCHG] = { .regs = X_U | X_V, .fl = X_MEM | RECORD_EFFECT_BARRIER | X_W, .idef = X_BIT(RAX), .iuse = X_BIT(RAX) },
+	[X_CMPXCHG] = { .registers = X_U | X_V, .flags = X_MEM | RECORD_EFFECT_BARRIER | X_W, .implicit_defined = X_BIT(RAX), .implicit_used = X_BIT(RAX) },
 	[X_MFENCE] = X_DESC(0, RECORD_EFFECT_BARRIER),
-	[X_BLENDVB] = { .fl = X_P, .idef = X_BIT(XMM0 + 1),
-		.iuse = X_BIT(XMM0) | X_BIT(XMM0 + 1) | X_BIT(XMM0 + 2) },
-	[X_PCMPSTR] = { .fl = X_P | X_W, .iuse = X_BIT(XMM0) | X_BIT(XMM0 + 1) },
-	[X_RAW] = { .br = RECORD_BRANCH_INDIRECT, .fl = X_MEM | RECORD_EFFECT_BARRIER | X_R | X_W | RECORD_EFFECT_FLOAT, .idef = X_ALL_REGS, .iuse = X_ALL_REGS },
+	[X_BLENDVB] = { .flags = X_P, .implicit_defined = X_BIT(XMM0 + 1),
+		.implicit_used = X_BIT(XMM0) | X_BIT(XMM0 + 1) | X_BIT(XMM0 + 2) },
+	[X_PCMPSTR] = { .flags = X_P | X_W, .implicit_used = X_BIT(XMM0) | X_BIT(XMM0 + 1) },
+	[X_RAW] = { .branch = RECORD_BRANCH_INDIRECT, .flags = X_MEM | RECORD_EFFECT_BARRIER | X_R | X_W | RECORD_EFFECT_FLOAT, .implicit_defined = X_ALL_REGS, .implicit_used = X_ALL_REGS },
 	[X_BARRIER] = X_DESC(0, RECORD_EFFECT_LOAD | RECORD_EFFECT_STORE | RECORD_EFFECT_BARRIER | X_R | X_W),
 	[X_LEAL] = X_DESC(X_D, X_P),
-	[X_JMPR] = { .regs = X_U, .br = RECORD_BRANCH_INDIRECT },
+	[X_JMPR] = { .registers = X_U, .branch = RECORD_BRANCH_INDIRECT },
 	[X_JTE] = X_DESC(0, RECORD_EFFECT_BARRIER),
 	[X_NAMED] = X_DESC(0, RECORD_EFFECT_LABEL | RECORD_EFFECT_BARRIER),
 	/* Undefined destination for zero input is conservatively an old value. */
@@ -94,7 +94,7 @@ static const record_op_descriptor x64_desc[X_NOPS] = {
 	[X_BSWAP] = X_DESC(X_D | RECORD_OPERAND_USES_0 | X_U, X_P),
 	[X_EXT] = X_DESC(X_D | X_U, X_P),
 	/* Direction flag is an input even though REP leaves arithmetic flags alone. */
-	[X_REP] = { .fl = X_MEM | RECORD_EFFECT_BARRIER | X_R, .idef = X_BIT(RCX) | X_BIT(RDI), .iuse = X_BIT(RCX) | X_BIT(RDI) },
+	[X_REP] = { .flags = X_MEM | RECORD_EFFECT_BARRIER | X_R, .implicit_defined = X_BIT(RCX) | X_BIT(RDI), .implicit_used = X_BIT(RCX) | X_BIT(RDI) },
 	[X_FADD] = X_DESC(X_D | RECORD_OPERAND_USES_0 | X_U | X_V, RECORD_EFFECT_FLOAT | RECORD_EFFECT_TRAP),
 	[X_FSUB] = X_DESC(X_D | RECORD_OPERAND_USES_0 | X_U | X_V, RECORD_EFFECT_FLOAT | RECORD_EFFECT_TRAP),
 	[X_FMUL] = X_DESC(X_D | RECORD_OPERAND_USES_0 | X_U | X_V, RECORD_EFFECT_FLOAT | RECORD_EFFECT_TRAP),
@@ -102,13 +102,13 @@ static const record_op_descriptor x64_desc[X_NOPS] = {
 	[X_FXOR] = X_DESC(X_D | X_U | X_V, X_P),
 	[X_FSQRT] = X_DESC(X_D | RECORD_OPERAND_USES_0 | X_U, RECORD_EFFECT_FLOAT | RECORD_EFFECT_TRAP),
 	[X_FCMP] = X_DESC(X_U | X_V, RECORD_EFFECT_FLOAT | RECORD_EFFECT_TRAP | X_W),
-	[X_FSETCC] = { .regs = X_D, .fl = X_P | X_R | X_W, .idef = X_BIT(R11), .iuse = X_BIT(R11) },
+	[X_FSETCC] = { .registers = X_D, .flags = X_P | X_R | X_W, .implicit_defined = X_BIT(R11), .implicit_used = X_BIT(R11) },
 	[X_CVTI2F] = X_DESC(X_D | RECORD_OPERAND_USES_0 | X_U, RECORD_EFFECT_FLOAT | RECORD_EFFECT_TRAP),
 	[X_CVTF2I] = X_DESC(X_D | X_U, RECORD_EFFECT_FLOAT | RECORD_EFFECT_TRAP),
 	[X_CVTF2F] = X_DESC(X_D | RECORD_OPERAND_USES_0 | X_U, RECORD_EFFECT_FLOAT | RECORD_EFFECT_TRAP),
 	/* x87 stack and control/status state are not physical GPR/XMM bits. */
 	[X_X87] = X_DESC(X_U, RECORD_EFFECT_FLOAT | RECORD_EFFECT_TRAP | RECORD_EFFECT_BARRIER),
-	[X_RESUME_FRAME] = { .fl = RECORD_EFFECT_BARRIER | X_W, .idef = X_BIT(R12), .iuse = X_BIT(RBP) },
+	[X_RESUME_FRAME] = { .flags = RECORD_EFFECT_BARRIER | X_W, .implicit_defined = X_BIT(R12), .implicit_used = X_BIT(RBP) },
 };
 
 static record_register_mask x64_effect_reg(unsigned r)
@@ -119,56 +119,56 @@ static record_register_mask x64_effect_reg(unsigned r)
 
 VPRIV record_effects x64_effects(const codegen_context *e, const record *i)
 {
-	if (i->op >= X_NOPS)
-		return (record_effects){ .def = X_ALL_REGS, .use = X_ALL_REGS,
-			.fl = X_MEM | RECORD_EFFECT_FLOAT | RECORD_EFFECT_BARRIER | X_R | X_W, .br = RECORD_BRANCH_INDIRECT };
-	const record_op_descriptor *d = &x64_desc[i->op];
+	if (i->opcode >= X_NOPS)
+		return (record_effects){ .defines = X_ALL_REGS, .used = X_ALL_REGS,
+			.flags = X_MEM | RECORD_EFFECT_FLOAT | RECORD_EFFECT_BARRIER | X_R | X_W, .branch = RECORD_BRANCH_INDIRECT };
+	const record_op_descriptor *d = &x64_desc[i->opcode];
 	/* A newly added opcode without metadata must be opaque, never a no-op. */
-	if (!d->regs && !d->br && !d->fl && !d->idef && !d->iuse)
-		return (record_effects){ .def = X_ALL_REGS, .use = X_ALL_REGS,
-			.fl = X_MEM | RECORD_EFFECT_FLOAT | RECORD_EFFECT_BARRIER | X_R | X_W, .br = RECORD_BRANCH_INDIRECT };
-	record_effects f = { .def = d->idef, .use = d->iuse, .fl = d->fl, .br = d->br };
-	if(i->op==X_BSWAP && i->sz==2)f.fl|=RECORD_EFFECT_WRITES_FLAGS; /* byte rotate */
-	if (d->regs & RECORD_OPERAND_DEFINES_0) f.def |= x64_effect_reg(i->r[0]);
-	if (d->regs & RECORD_OPERAND_USES_0) f.use |= x64_effect_reg(i->r[0]);
-	if (d->regs & RECORD_OPERAND_USES_1) f.use |= x64_effect_reg(i->r[1]);
-	if (d->regs & RECORD_OPERAND_USES_2) f.use |= x64_effect_reg(i->r[2]);
-	if (d->regs & RECORD_OPERAND_USES_3) f.use |= x64_effect_reg(i->r[3]);
+	if (!d->registers && !d->branch && !d->flags && !d->implicit_defined && !d->implicit_used)
+		return (record_effects){ .defines = X_ALL_REGS, .used = X_ALL_REGS,
+			.flags = X_MEM | RECORD_EFFECT_FLOAT | RECORD_EFFECT_BARRIER | X_R | X_W, .branch = RECORD_BRANCH_INDIRECT };
+	record_effects f = { .defines = d->implicit_defined, .used = d->implicit_used, .flags = d->flags, .branch = d->branch };
+	if(i->opcode==X_BSWAP && i->size==2)f.flags|=RECORD_EFFECT_WRITES_FLAGS; /* byte rotate */
+	if (d->registers & RECORD_OPERAND_DEFINES_0) f.defines |= x64_effect_reg(i->registers[0]);
+	if (d->registers & RECORD_OPERAND_USES_0) f.used |= x64_effect_reg(i->registers[0]);
+	if (d->registers & RECORD_OPERAND_USES_1) f.used |= x64_effect_reg(i->registers[1]);
+	if (d->registers & RECORD_OPERAND_USES_2) f.used |= x64_effect_reg(i->registers[2]);
+	if (d->registers & RECORD_OPERAND_USES_3) f.used |= x64_effect_reg(i->registers[3]);
 
 	/* Only MOV and narrow ALU/atomic operations can leave GPR high bits.
 	 * SETCC and EXT contain a widening move; LD also always widens GPRs.
 	 */
-	if ((d->regs & RECORD_OPERAND_DEFINES_0) && i->sz < 4 && i->r[0] < XMM0 &&
-	    i->op != X_LD && i->op != X_LDX && i->op != X_EXT && i->op != X_SETCC && i->op != X_FSETCC)
-		f.use |= x64_effect_reg(i->r[0]);
-	if ((i->op == X_LD || i->op == X_ST || i->op == X_LDX || i->op == X_STX || i->op == X_TESTM || i->op == X_CMPM || i->op == X_LEA ||
-	     i->op == X_XCHG || i->op == X_XADD || i->op == X_CMPXCHG || i->op == X_X87) &&
-	    i->r[1] == RBP && i->off < 0 && (!e || e->wk->falign > 16))
-		f.use |= X_BIT(R12); /* printer's realigned local-frame base */
-	if (i->op == X_RESUME_FRAME) {
-		if (e && e->wk && e->wk->falign <= 16)
-			f = (record_effects){ .fl = RECORD_EFFECT_BARRIER }; /* printer emits nothing */
-		else if (!e || !e->wk)
-			f.use |= X_BIT(R12); /* unknown alignment may preserve its old value */
-	} else if (i->op == X_PCMPSTR) {
-		f.def |= X_BIT((i->cond & 1) ? RCX : XMM0);
-		if (!(i->cond & 2)) f.use |= X_BIT(RAX) | X_BIT(RDX);
-	} else if (i->op == X_TLS) {
-		if (i->cond == 2) {
-			f.def = X_CALL_DEF;
-			f.use = X_CALL_USE & ~X_BIT(RDI); /* descriptor overwrites RDI */
-			f.fl = X_CALL_FLAGS;
-		} else if (i->cond) {
-			f.fl |= X_W; /* initial-exec uses addq, local-exec LEA does not */
+	if ((d->registers & RECORD_OPERAND_DEFINES_0) && i->size < 4 && i->registers[0] < XMM0 &&
+	    i->opcode != X_LD && i->opcode != X_LDX && i->opcode != X_EXT && i->opcode != X_SETCC && i->opcode != X_FSETCC)
+		f.used |= x64_effect_reg(i->registers[0]);
+	if ((i->opcode == X_LD || i->opcode == X_ST || i->opcode == X_LDX || i->opcode == X_STX || i->opcode == X_TESTM || i->opcode == X_CMPM || i->opcode == X_LEA ||
+	     i->opcode == X_XCHG || i->opcode == X_XADD || i->opcode == X_CMPXCHG || i->opcode == X_X87) &&
+	    i->registers[1] == RBP && i->offset < 0 && (!e || e->walk_state->frame_alignment > 16))
+		f.used |= X_BIT(R12); /* printer's realigned local-frame base */
+	if (i->opcode == X_RESUME_FRAME) {
+		if (e && e->walk_state && e->walk_state->frame_alignment <= 16)
+			f = (record_effects){ .flags = RECORD_EFFECT_BARRIER }; /* printer emits nothing */
+		else if (!e || !e->walk_state)
+			f.used |= X_BIT(R12); /* unknown alignment may preserve its old value */
+	} else if (i->opcode == X_PCMPSTR) {
+		f.defines |= X_BIT((i->condition & 1) ? RCX : XMM0);
+		if (!(i->condition & 2)) f.used |= X_BIT(RAX) | X_BIT(RDX);
+	} else if (i->opcode == X_TLS) {
+		if (i->condition == 2) {
+			f.defines = X_CALL_DEF;
+			f.used = X_CALL_USE & ~X_BIT(RDI); /* descriptor overwrites RDI */
+			f.flags = X_CALL_FLAGS;
+		} else if (i->condition) {
+			f.flags |= X_W; /* initial-exec uses addq, local-exec LEA does not */
 		}
-	} else if (i->op == X_REP) {
-		if (i->cond) f.use |= X_BIT(RAX);
-		else f.def |= X_BIT(RSI), f.use |= X_BIT(RSI);
-	} else if (i->op == X_X87) {
-		switch (i->cond) {
-		case XF_LDT: case XF_LD: case XF_ILD: case XF_LDCW: f.fl |= RECORD_EFFECT_LOAD; break;
-		case XF_STPT: case XF_STP: case XF_ISTP: case XF_STCW: f.fl |= RECORD_EFFECT_STORE; break;
-		case XF_UCOMIP: f.fl |= X_W; break;
+	} else if (i->opcode == X_REP) {
+		if (i->condition) f.used |= X_BIT(RAX);
+		else f.defines |= X_BIT(RSI), f.used |= X_BIT(RSI);
+	} else if (i->opcode == X_X87) {
+		switch (i->condition) {
+		case XF_LDT: case XF_LD: case XF_ILD: case XF_LDCW: f.flags |= RECORD_EFFECT_LOAD; break;
+		case XF_STPT: case XF_STP: case XF_ISTP: case XF_STCW: f.flags |= RECORD_EFFECT_STORE; break;
+		case XF_UCOMIP: f.flags |= X_W; break;
 		default: break;
 		}
 	}

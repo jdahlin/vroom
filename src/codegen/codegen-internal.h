@@ -147,10 +147,10 @@ enum { CODEGEN_REFERENCE_SYMBOL = 0, CODEGEN_REFERENCE_STRING = 1, CODEGEN_REFER
 
 typedef struct codegen_chunk {
 	uint64_t key;		/* output order */
-	const char *p;
-	size_t n;
+	const char *text;
+	size_t length;
 	const uint32_t *log;	/* the item's log (ecx.rlog): what a later round needs to reuse it */
-	uint32_t nlog;
+	uint32_t log_count;
 } codegen_chunk;
 
 /*
@@ -164,17 +164,17 @@ typedef struct codegen_chunk {
 enum { CODEGEN_LOG_REFERENCE, CODEGEN_LOG_DEPENDENCY, CODEGEN_LOG_WALK };
 typedef struct codegen_keep_entry {
 	uint64_t key;
-	const char *p;
-	size_t n;
+	const char *text;
+	size_t length;
 	const uint32_t *log;
-	uint32_t nlog;
+	uint32_t log_count;
 } codegen_keep_entry;
 typedef struct codegen_keep {
-	uint32_t *idx;		/* per sym: kent index + 1 */
-	codegen_keep_entry *ent;
+	uint32_t *indexes;		/* per sym: kent index + 1 */
+	codegen_keep_entry *entries;
 	char *bytes;
 	uint32_t *logs;
-	size_t nidx, nent, nbytes, nlogs;
+	size_t index_count, entry_count, byte_count, log_count;
 } codegen_keep;
 
 /* analysis bits (prepass, read-only while emitting) */
@@ -190,75 +190,75 @@ typedef struct codegen_call_edge {uint32_t callee,call;} codegen_call_edge;
 #define CODEGEN_RECORD_PASS_MAX 24
 
 typedef struct codegen_unit {
-	cc *c;
-	const cc_options *o;
+	cc *compile_context;
+	const cc_options *options;
 	_Atomic uint8_t *claimed;	/* per sym: queued for emission */
-	_Atomic uint8_t *strdone;	/* per string: emitted */
-	_Atomic uint8_t *extref;	/* per sym: referenced (for .weak of undefined syms) */
+	_Atomic uint8_t *strings_done;	/* per string: emitted */
+	_Atomic uint8_t *symbol_referenced;	/* per sym: referenced (for .weak of undefined syms) */
 	_Atomic uint8_t *walked;
-	uint16_t *fnsize;		/* per function: AST nodes (prepass) */
-	uint8_t *inl_read; /* parameter references outside a direct (void)param discard */
+	uint16_t *function_node_counts;		/* per function: AST nodes (prepass) */
+	uint8_t *inline_parameter_reads; /* parameter references outside a direct (void)param discard */
 	uint8_t *once;			/* VIR lowering on: per function, bit 0 when its one reference is a direct call (codegen_function_once_flags), bit 1 when it calls setjmp (prepass); else NULL */
 	/* VIR lowering on (with once): the direct call graph the prepass records, per
 	   function its size with the callees it inlines (codegen_function_inline_sizes) and its recursion group */
-	codegen_call_edge *cg;
-	uint32_t ncg, capcg, *cgoff, *cgn, *scc;
-	uint16_t *isz;
-	bool cgrec;			/* the prepass records calls (before the workers start) */
-	uint16_t *luse;			/* per local: uses weighted by loop depth (prepass) */
-	uint8_t *lnoreg;		/* per local: needs memory (address taken, asm operand, {} init) */
-	uint32_t *lspan;		/* per function: [2s] lowest, [2s+1] highest local sym seen */
-	int nlreg;			/* locals given callee-saved registers per function (VCC_LREGS) */
-	bool noopt;			/* VCC_NOOPT: no opt.c clean-ups (to compare) */
-	i128 *cwval;		/* per CODEGEN_SYMBOL_CONSTANT_WRITTEN variable: the one constant it is assigned */	/* per function: prepass state (0 no, 1 running, 2 done) */
-	uint8_t *sflags;		/* SA_* per sym */
-	uint8_t *ffacts;		/* FF_* per floating local: what every write stores */
-	uint8_t *nflags;		/* NA_* per node */
-	uint8_t *lref;			/* per label: LR_* */
-	uint16_t *lcdepth;		/* per label: cleanup depth at its definition */
+	codegen_call_edge *call_edges;
+	uint32_t call_edge_count, call_edge_capacity, *call_edge_offsets, *call_edge_counts, *recursion_groups;
+	uint16_t *inline_sizes;
+	bool call_graph_recording;			/* the prepass records calls (before the workers start) */
+	uint16_t *local_use_weights;			/* per local: uses weighted by loop depth (prepass) */
+	uint8_t *local_needs_memory;		/* per local: needs memory (address taken, asm operand, {} init) */
+	uint32_t *function_local_span;		/* per function: [2s] lowest, [2s+1] highest local sym seen */
+	int local_register_count;			/* locals given callee-saved registers per function (VCC_LREGS) */
+	bool cleanups_disabled;			/* VCC_NOOPT: no opt.c clean-ups (to compare) */
+	i128 *constant_written_values;		/* per CODEGEN_SYMBOL_CONSTANT_WRITTEN variable: the one constant it is assigned */	/* per function: prepass state (0 no, 1 running, 2 done) */
+	uint8_t *symbol_flags;		/* SA_* per sym */
+	uint8_t *float_facts;		/* FF_* per floating local: what every write stores */
+	uint8_t *node_flags;		/* NA_* per node */
+	uint8_t *label_flags;			/* per label: LR_* */
+	uint16_t *label_cleanup_depth;		/* per label: cleanup depth at its definition */
 	/* work queue (syms) */
-	pthread_mutex_t mu;
-	pthread_cond_t cv;
-	uint32_t *q;
-	uint32_t qh, qt;
-	int busy, nthr, done;
+	pthread_mutex_t queue_mutex;
+	pthread_cond_t queue_condition;
+	uint32_t *queue;
+	uint32_t queue_head, queue_tail;
+	int busy_count, thread_count, done;
 	/* output */
-	pthread_mutex_t cmu;
+	pthread_mutex_t chunk_mutex;
 	codegen_chunk *chunks;
-	uint32_t nchunk;
+	uint32_t chunk_count;
 	_Atomic int errors;
-	_Atomic uint64_t nins, nfn, nobj, ninl;
-	_Atomic uint64_t print_ns, walk_ns, nwalk;
-	uint8_t *mf;			/* per sym: static function to inline everywhere (kept across rounds) */
-	_Atomic uint32_t newmf;		/* marked this round */
+	_Atomic uint64_t record_total, function_total, object_total, inline_total;
+	_Atomic uint64_t print_nanoseconds, walk_nanoseconds, walk_total;
+	uint8_t *inline_everywhere;			/* per sym: static function to inline everywhere (kept across rounds) */
+	_Atomic uint32_t newly_marked_count;		/* marked this round */
 	_Atomic uint32_t nerrcall;	/* error() calls dropped (not folded) */	/* VCC_EMIT_STATS: time in finish_function */
 	const codegen_keep *previous_keep;			/* the previous round's functions, or NULL */
 	bool stats;
 	/* VCC_VIR_STATS: functions through VIR and the reasons it gave up on one (codegen/vir/build-attempt.c) */
-	bool vstats;
-	_Atomic uint64_t vattempted, vlowered, vbuilt;	/* vbuilt: built but not lowered (VCC_VIR without l) */
+	bool vir_statistics;
+	_Atomic uint64_t vir_attempted, vir_lowered, vir_built;	/* vbuilt: built but not lowered (VCC_VIR without l) */
 	struct {
 		_Atomic uint32_t count;
 		uint32_t sym;		/* the first function that failed so (under emu) */
 		char detail[96];	/* ... and what the reason leaves out */
-	} vfailed[VIRBUILD_FAILURE_COUNT];
+	} vir_failures[VIRBUILD_FAILURE_COUNT];
 	/* VCC_REC_STATS: what each record clean-up pass did, [0 direct, 1 VIR][pass][runs, changed, removed, added] (func.c) */
-	bool rstats;
-	_Atomic uint64_t rpass[2][CODEGEN_RECORD_PASS_MAX][4];
-	bool objtext;			/* VCC_OBJ_TEXT: objects through the printer and as_run (checks the object backend) */
-	pthread_mutex_t dmu;		/* -g: the file table */
-	char **dfile;			/* .file N (1-based) names */
-	uint32_t ndfile, dfcap;
-	pthread_mutex_t emu;		/* diagnostics */
+	bool record_statistics;
+	_Atomic uint64_t record_pass_counts[2][CODEGEN_RECORD_PASS_MAX][4];
+	bool object_text;			/* VCC_OBJ_TEXT: objects through the printer and as_run (checks the object backend) */
+	pthread_mutex_t debug_mutex;		/* -g: the file table */
+	char **debug_files;			/* .file N (1-based) names */
+	uint32_t debug_file_count, debug_file_capacity;
+	pthread_mutex_t diagnostic_mutex;		/* diagnostics */
 	uint32_t errcall[256];		/* error() call sites already reported (under emu) */
 	uint32_t nerrcall_loc;
 } codegen_unit;
 
 typedef struct codegen_value {
-	uint8_t k;		/* V_* */
-	uint8_t r, r2;		/* CODEGEN_VALUE_REGISTER: r; CODEGEN_VALUE_REGISTER_PAIR: r (low), r2 (high) */
-	uint32_t ref;		/* CODEGEN_VALUE_ADDRESS */
-	i128 i;			/* CODEGEN_VALUE_CONSTANT value / CODEGEN_VALUE_ADDRESS addend */
+	uint8_t kind;		/* V_* */
+	uint8_t register_number, register_high;		/* CODEGEN_VALUE_REGISTER: r; CODEGEN_VALUE_REGISTER_PAIR: r (low), r2 (high) */
+	uint32_t reference;		/* CODEGEN_VALUE_ADDRESS */
+	i128 integer;			/* CODEGEN_VALUE_CONSTANT value / CODEGEN_VALUE_ADDRESS addend */
 } codegen_value;
 
 enum { CODEGEN_VALUE_NONE, CODEGEN_VALUE_CONSTANT, CODEGEN_VALUE_ADDRESS, CODEGEN_VALUE_REGISTER, CODEGEN_VALUE_REGISTER_PAIR };
@@ -272,16 +272,16 @@ enum { B_NONE, CODEGEN_BINDING_SLOT, CODEGEN_BINDING_CONSTANT, CODEGEN_BINDING_I
 enum { CODEGEN_LABEL_REFERENCED = 1, CODEGEN_LABEL_DEFINED = 2, CODEGEN_LABEL_BACKWARD = 4 };
 
 typedef struct codegen_binding {
-	uint32_t inst;
+	uint32_t instance;
 	uint8_t kind;
-	uint8_t reg;		/* register variable: asm("xN") (0xff: none) */
-	uint8_t kv;		/* known-value tracking: index + 1 (0: untracked) */
+	uint8_t register_number;		/* register variable: asm("xN") (0xff: none) */
+	uint8_t known_value_index;		/* known-value tracking: index + 1 (0: untracked) */
 	int64_t slot;		/* CODEGEN_BINDING_SLOT, CODEGEN_BINDING_INDIRECT */
-	codegen_value v;			/* CODEGEN_BINDING_CONSTANT */
+	codegen_value value;			/* CODEGEN_BINDING_CONSTANT */
 } codegen_binding;
 
 typedef struct codegen_label {
-	uint32_t inst, id;
+	uint32_t instance, id;
 } codegen_label;
 
 #define CODEGEN_KNOWN_VALUE_MAX 16
@@ -290,27 +290,27 @@ typedef struct codegen_label {
 enum { CODEGEN_KNOWN_LABEL_PLACED = UINT32_MAX - 2, CODEGEN_KNOWN_LABEL_KNOWN = UINT32_MAX - 1, CODEGEN_KNOWN_LABEL_DROPPED = UINT32_MAX };
 typedef struct codegen_known_values {
 	uint16_t valid;
-	int64_t v[CODEGEN_KNOWN_VALUE_MAX];
+	int64_t values[CODEGEN_KNOWN_VALUE_MAX];
 } codegen_known_values;
 
 #define CODEGEN_NESTING_CAPACITY (1u << 22)	/* loops/switches and cleanups in scope */
 typedef struct codegen_loop {
-	uint32_t brk, cont;	/* local labels (cont 0: switch) */
-	int cdepth;
+	uint32_t break_label, continue_label;	/* local labels (cont 0: switch) */
+	int cleanup_depth;
 } codegen_loop;
 
 typedef struct codegen_function_instance {		/* one function instance: the emitted function or an inlined body */
-	uint32_t fn, inst, call;
-	uint32_t retlbl;
-	int64_t retslot;
-	uint8_t retreg;		/* inlined: the result's temporary + 1 (0: in retslot) */
-	ast_qualified_type rty;
-	bool inl;
-	bool cst_ok, any_ret;
-	codegen_value cst;
-	int cbase;		/* cleanup stack depth at entry */
-	int nloop;		/* loop stack depth at entry */
-	struct codegen_function_instance *up;
+	uint32_t function, instance, call;
+	uint32_t return_label;
+	int64_t return_slot;
+	uint8_t return_register;		/* inlined: the result's temporary + 1 (0: in retslot) */
+	ast_qualified_type return_type;
+	bool is_inlined;
+	bool constant_is_ok, any_ret;
+	codegen_value constant;
+	int cleanup_base;		/* cleanup stack depth at entry */
+	int loop_depth;		/* loop stack depth at entry */
+	struct codegen_function_instance *outer;
 } codegen_function_instance;
 
 #define CODEGEN_TEMPORARY_COUNT 17
@@ -321,7 +321,7 @@ typedef struct codegen_function_instance {		/* one function instance: the emitte
 
 /* a stack slot handed out by slot() (offsets are reused across scopes) */
 typedef struct codegen_slot_allocation {
-	int64_t off;
+	int64_t offset;
 	uint64_t size;
 } codegen_slot_allocation;
 #define CODEGEN_SLOT_ALLOCATION_CAPACITY (1u << 20)
@@ -340,100 +340,100 @@ typedef struct codegen_slot_allocation {
 #define CODEGEN_VLA_SIZE_MAX 64		/* VLA size expressions live at once in a function */
 
 typedef struct codegen_context {
-	codegen_unit *E;
-	cc *c;
+	codegen_unit *unit;
+	cc *compile_context;
 	/* records of the function being emitted */
-	ins *in;
-	uint32_t nin, capin;
-	codegen_slot_allocation *sla;		/* the function's slot() allocations */
-	uint32_t nsla;
-	uint32_t *sstk, nsstk;	/* the live ones (indices into sla, deepest last) */
-	int novtag;		/* inside a volatile access: its records stay untagged */
-	uint32_t curloc;	/* innermost statement being generated (diagnostics) */
+	ins *records;
+	uint32_t record_count, record_capacity;
+	codegen_slot_allocation *slot_allocations;		/* the function's slot() allocations */
+	uint32_t slot_allocation_count;
+	uint32_t *live_slots, live_slot_count;	/* the live ones (indices into sla, deepest last) */
+	int volatile_untag_depth;		/* inside a volatile access: its records stay untagged */
+	uint32_t current_location;	/* innermost statement being generated (diagnostics) */
 	uint32_t reuse_from, reuse_to; /* temporary substitution within one pure expression */
-	struct codegen_debug_row { uint32_t k, file, line, col; } *dl;	/* -g: a row at record k */
-	uint32_t ndl, dlcap;
-	const char *dlname;	/* the last file looked up, and its number */
-	uint32_t dlnlen, dlfile;
+	struct codegen_debug_row { uint32_t record_index, file, line, column; } *debug_rows;	/* -g: a row at record k */
+	uint32_t debug_row_count, debug_row_capacity;
+	const char *debug_last_file_name;	/* the last file looked up, and its number */
+	uint32_t debug_last_file_name_length, debug_last_file_number;
 	tbuf raw;		/* inline asm text */
 	tbuf out;		/* this thread's output text */
 	tbuf data;		/* scratch: data object bytes */
-	struct codegen_data_relocation { uint64_t off; uint32_t ref, seq; int64_t add; uint32_t sub, sz; } *rel;	/* sub: ref subtracted (0: none); sz 4 or 8 (0: 8) */
-	uint32_t nrel;
-	uint64_t relend;	/* end of the highest relocated word */
+	struct codegen_data_relocation { uint64_t offset; uint32_t reference, sequence; int64_t addend; uint32_t subtrahend, size_bytes; } *relocations;	/* sub: ref subtracted (0: none); sz 4 or 8 (0: 8) */
+	uint32_t relocation_count;
+	uint64_t relocation_end;	/* end of the highest relocated word */
 	/* bindings */
-	codegen_binding *b;		/* per sym */
-	codegen_label *lm;		/* per label */
-	uint32_t *caselbl;	/* per node (AST_NODE_CASE / AST_NODE_DEFAULT): local label */
-	uint32_t *lrefc;	/* per local label: branches to it; LREF_EXT: also reached from outside the records */
-	uint32_t nlabel, caplabel;
+	codegen_binding *bindings;		/* per sym */
+	codegen_label *label_map;		/* per label */
+	uint32_t *case_labels;	/* per node (AST_NODE_CASE / AST_NODE_DEFAULT): local label */
+	uint32_t *label_reference_counts;	/* per local label: branches to it; LREF_EXT: also reached from outside the records */
+	uint32_t label_count, label_capacity;
 	/*
 	 * Known values of locals only ever assigned constants (CODEGEN_SYMBOL_CONSTANT_WRITTEN):
 	 * forward edges carry them to their label, which keeps what all
 	 * incoming edges agree on; loop heads and unknown targets drop them.
 	 */
-	uint8_t nkv;
-	uint16_t kvalid;
-	int64_t kval[CODEGEN_KNOWN_VALUE_MAX];
+	uint8_t known_value_count;
+	uint16_t known_values_valid;
+	int64_t known_values[CODEGEN_KNOWN_VALUE_MAX];
 	/* elements a[CONST] of local arrays that do not escape (no CODEGEN_SYMBOL_ARRAY_ESCAPES), tracked like those locals */
-	uint8_t nael;
-	struct { uint32_t s; uint32_t idx; uint8_t kv; } ael[CODEGEN_KNOWN_VALUE_MAX];
-	uint32_t *lkvi;		/* per local label: kvst index + 1 (0: none) */
-	codegen_known_values *kvs;
-	uint32_t nkvs;
-	uint32_t inst_next;
+	uint8_t array_element_count;
+	struct { uint32_t symbol; uint32_t index; uint8_t known_value_index; } array_elements[CODEGEN_KNOWN_VALUE_MAX];
+	uint32_t *label_known_values_index;		/* per local label: kvst index + 1 (0: none) */
+	codegen_known_values *known_value_states;
+	uint32_t known_value_state_count;
+	uint32_t next_instance;
 	/* frame */
-	int64_t foff, fmax;
-	uint32_t falign;	/* largest slot alignment; over 16 the prologue realigns sp */
+	int64_t frame_offset, frame_maximum;
+	uint32_t frame_alignment;	/* largest slot alignment; over 16 the prologue realigns sp */
 	/* VLA sizes, evaluated where their declaration is reached (walk/statement.c vla_fix) */
-	struct { uint32_t node, inst; int64_t slot; } vsz[CODEGEN_VLA_SIZE_MAX];
-	uint32_t nvsz;
-	int64_t cl_top;		/* frame offset above the block's compound literals (kept past statements) */
-	int64_t outmax;		/* outgoing stack argument bytes */
-	bool dyn, calls, vararg;
+	struct { uint32_t node, instance; int64_t slot; } vsz[CODEGEN_VLA_SIZE_MAX];
+	uint32_t vla_size_count;
+	int64_t compound_literal_top;		/* frame offset above the block's compound literals (kept past statements) */
+	int64_t outgoing_argument_bytes_max;		/* outgoing stack argument bytes */
+	bool dynamic_frame, has_calls, is_variadic;
 	bool discarded_scalar;	/* lowering exposed an already-emitted unused scalar result */
-	int64_t vaslot;		/* variadic register save area */
-	int ngr_named, nstk_named;	/* variadic: named GPR args, named stack bytes */
-	int nvr_named;
-	int64_t vrslot;		/* variadic (Linux): named FP/SIMD args, the v0-v7 save area */
-	int nsrn;		/* classify: next SIMD/FP argument register */
+	int64_t variadic_register_save_slot;		/* variadic register save area */
+	int named_general_register_count, named_stack_bytes;	/* variadic: named GPR args, named stack bytes */
+	int named_vector_register_count;
+	int64_t variadic_vector_save_slot;		/* variadic (Linux): named FP/SIMD args, the v0-v7 save area */
+	int next_vector_register;		/* classify: next SIMD/FP argument register */
 	/* temporaries */
-	uint32_t live;		/* bit i: tempregs[i] in use */
-	uint32_t resv;		/* ... of those, never handed out: CODEGEN_BINDING_LOCAL_REGISTER variables', x28 once falign > 16 */
-	int inlfree;		/* free temporaries an inlined call keeps (0: CODEGEN_INLINE_FREE_SAFE) */
+	uint32_t temporaries_in_use;		/* bit i: tempregs[i] in use */
+	uint32_t temporaries_reserved;		/* ... of those, never handed out: CODEGEN_BINDING_LOCAL_REGISTER variables', x28 once falign > 16 */
+	int inline_free_temporaries;		/* free temporaries an inlined call keeps (0: CODEGEN_INLINE_FREE_SAFE) */
 	int spill;		/* last try: a binary operator's left value waits in a frame slot */
-	int nlr;		/* CODEGEN_BINDING_LOCAL_REGISTER candidates of the emitted function: sym, register */
-	uint32_t lrsym[CODEGEN_LOCAL_REGISTER_MAX];
-	uint8_t lrreg[CODEGEN_LOCAL_REGISTER_MAX];
-	uint32_t usedcs;	/* callee-saved registers used (bit = x number) */
+	int local_register_candidate_count;		/* CODEGEN_BINDING_LOCAL_REGISTER candidates of the emitted function: sym, register */
+	uint32_t local_register_symbols[CODEGEN_LOCAL_REGISTER_MAX];
+	uint8_t local_register_numbers[CODEGEN_LOCAL_REGISTER_MAX];
+	uint32_t callee_saved_used;	/* callee-saved registers used (bit = x number) */
 	/* control */
-	bool reach;
-	int dry;		/* inside dry(): code is generated and thrown away, no references */
+	bool is_reachable;
+	int dry_run_depth;		/* inside dry(): code is generated and thrown away, no references */
 	codegen_loop *loops;		/* (nesting is bounded by the node count: reserved for it) */
-	int nloop;
-	uint32_t *clean;	/* syms with cleanup, innermost last */
-	int nclean;
-	codegen_function_instance *f;
+	int loop_count;
+	uint32_t *cleanups;	/* syms with cleanup, innermost last */
+	int cleanup_count;
+	codegen_function_instance *function_instance;
 	int inline_depth;
-	uint32_t top;		/* sym being emitted */
-	uint32_t asmk;		/* inline asm statements emitted in it so far (%=) */
+	uint32_t top_symbol;		/* sym being emitted */
+	uint32_t asm_statement_count;		/* inline asm statements emitted in it so far (%=) */
 	uint32_t *cases;	/* scratch for switch case collection */
-	uint32_t *weakref;	/* weak undefined syms this thread referenced first */
-	uint32_t nweakref;
-	uint32_t ncases;
-	uint32_t *jtl, njtl, capjtl;	/* jump tables of the function: case labels, table after table */
-	struct codegen_jump_table { uint32_t tab, off, n; } *jt;	/* table label, first entry in jtl, entries */
-	uint32_t njt, capjt;
-	uint32_t *rlog;		/* this round's item logs: (RL_*, value) pairs */
-	size_t nrlog, rlog0;	/* ... and where the current item's starts */
-	jmp_buf bail;
-	struct wst *w;		/* WASM: arch/wasm/codegen/ state (wimpl.h) */
-	struct walk_state *wk;	/* X86: the walker's state (codegen/walk/walk.h) */
-	struct xst *x64;	/* X86: arch/x64/codegen/ state (x64impl.h) */
-	struct virbuild_context *vw;	/* the VIR builder's state (codegen/vir/, PLAN-vir.md) */
-	bool vtry;		/* the VIR walker runs: an error is not reported, it makes the function fall back */
-	bool vlow;		/* the records are VIR's lowering (finish_function's clean-ups for it) */
-	const char *vfail;	/* ... and why (NULL: it did not fail) */
+	uint32_t *weak_references;	/* weak undefined syms this thread referenced first */
+	uint32_t weak_reference_count;
+	uint32_t case_count;
+	uint32_t *jump_table_labels, jump_table_label_count, jump_table_label_capacity;	/* jump tables of the function: case labels, table after table */
+	struct codegen_jump_table { uint32_t table_label, first_entry, entry_count; } *jump_tables;	/* table label, first entry in jtl, entries */
+	uint32_t jump_table_count, jump_table_capacity;
+	uint32_t *round_log;		/* this round's item logs: (RL_*, value) pairs */
+	size_t round_log_count, round_log_item_start;	/* ... and where the current item's starts */
+	jmp_buf bail_jump;
+	struct wst *wasm_state;		/* WASM: arch/wasm/codegen/ state (wimpl.h) */
+	struct walk_state *walk_state;	/* X86: the walker's state (codegen/walk/walk.h) */
+	struct xst *x64_context;	/* X86: arch/x64/codegen/ state (x64impl.h) */
+	struct virbuild_context *vir_builder;	/* the VIR builder's state (codegen/vir/, PLAN-vir.md) */
+	bool vir_try;		/* the VIR walker runs: an error is not reported, it makes the function fall back */
+	bool vir_lowering;		/* the records are VIR's lowering (finish_function's clean-ups for it) */
+	const char *vir_failure_reason;	/* ... and why (NULL: it did not fail) */
 	struct em_switch_values_data *switch_values; /* accepted tables of this real function */
 } codegen_context;
 enum { CODEGEN_LIBRARY_MEMCPY, CODEGEN_LIBRARY_MEMSET, CODEGEN_LIBRARY_MEMMOVE, CODEGEN_LIBRARY_UDIVTI3, CODEGEN_LIBRARY_DIVTI3, CODEGEN_LIBRARY_UMODTI3, CODEGEN_LIBRARY_MODTI3, CODEGEN_LIBRARY_STRLEN,
@@ -470,39 +470,39 @@ enum { CODEGEN_LIBRARY_MEMCPY, CODEGEN_LIBRARY_MEMSET, CODEGEN_LIBRARY_MEMMOVE, 
  * inline asm (which may name the labels: asm goto) labels are .LBB symbols.
  */
 enum { CODEGEN_ITEM_TEXT = 1, CODEGEN_ITEM_CODE, CODEGEN_ITEM_DATA, CODEGEN_ITEM_LABEL, CODEGEN_ITEM_BYTES, CODEGEN_ITEM_SYMBOL_HEADER, CODEGEN_ITEM_FUNCTION_END, CODEGEN_ITEM_OBJECT_SIZE, CODEGEN_ITEM_X64 };
-typedef struct codegen_item { uint32_t kind, len; } codegen_item;	/* len payload bytes follow, padded to 8 */
-typedef struct codegen_code_header { uint32_t fid, nin, nraw, nlabel, sym_labels, pad; } codegen_code_header;
-typedef struct codegen_data_header { uint64_t size, n; uint32_t nrel, zero; } codegen_data_header;
-typedef struct codegen_item_relocation { uint64_t off; uint32_t ref, seq; int64_t add; uint32_t sub, sz; } codegen_item_relocation;
+typedef struct codegen_item { uint32_t kind, length; } codegen_item;	/* len payload bytes follow, padded to 8 */
+typedef struct codegen_code_header { uint32_t function_id, record_count, raw_count, label_count, symbol_labels, padding; } codegen_code_header;
+typedef struct codegen_data_header { uint64_t size, count; uint32_t relocation_count, zero; } codegen_data_header;
+typedef struct codegen_item_relocation { uint64_t offset; uint32_t reference, sequence; int64_t addend; uint32_t subtrahend, size_bytes; } codegen_item_relocation;
 /*
  * A symbol's header after its section directive, what the assembler does
  * for ".globl/.weak s; .hidden/.protected s; .p2align p2; .type s,@function
  * or @object; s:" (CODEGEN_ITEM_SYMBOL_HEADER), for ".Lfe<s>: .size s, .Lfe<s>-s" (CODEGEN_ITEM_FUNCTION_END)
  * and ".size s, n" (CODEGEN_ITEM_OBJECT_SIZE), without the text.
  */
-typedef struct codegen_symbol_header { uint32_t sym; uint8_t bind, vis, p2, fn; } codegen_symbol_header;	/* bind: 0, STB_GLOBAL, STB_WEAK */
-typedef struct codegen_object_size { uint32_t sym, pad; uint64_t size; } codegen_object_size;
+typedef struct codegen_symbol_header { uint32_t symbol; uint8_t bind, visibility, alignment_log2, is_function; } codegen_symbol_header;	/* bind: 0, STB_GLOBAL, STB_WEAK */
+typedef struct codegen_object_size { uint32_t symbol, padding; uint64_t size; } codegen_object_size;
 
 /* replay state: one per TU */
 typedef struct codegen_commit_context {
-	cc *c;
-	as_context *as;
-	ElfObj *o;
-	uint32_t *symc, *strc, *lblc;	/* ref -> ElfSym (0: not yet) */
-	uint32_t *loff;			/* direct labels: word offset in the function */
-	uint32_t *wb;			/* direct functions: the words, before they go to the frag */
-	struct codegen_commit_patch *pt;		/* ... and the records with a fixup */
-	uint32_t *lsym, *lser, ser;	/* functions with inline asm: label -> .LBB symbol (valid if lser == ser) */
-	struct codegen_commit_label *lab;		/* ... label state */
-	struct codegen_commit_pending_branch *pend;		/* ... branches waiting for their label */
-	tbuf nb;			/* name scratch */
+	cc *compile_context;
+	as_context *assembler;
+	ElfObj *object;
+	uint32_t *symbol_cache, *string_cache, *label_cache;	/* ref -> ElfSym (0: not yet) */
+	uint32_t *label_word_offsets;			/* direct labels: word offset in the function */
+	uint32_t *word_buffer;			/* direct functions: the words, before they go to the frag */
+	struct codegen_commit_patch *patches;		/* ... and the records with a fixup */
+	uint32_t *label_symbols, *label_serials, serial;	/* functions with inline asm: label -> .LBB symbol (valid if lser == ser) */
+	struct codegen_commit_label *labels;		/* ... label state */
+	struct codegen_commit_pending_branch *pending;		/* ... branches waiting for their label */
+	tbuf name_buffer;			/* name scratch */
 } codegen_commit_context;
 
 /* a pending fixup on word k of an instruction */
-typedef struct codegen_commit_fixup { uint8_t k, lbl; uint32_t type, ref; int64_t off; } codegen_commit_fixup;
-typedef struct codegen_commit_patch { uint32_t k, at; codegen_commit_fixup f; uint8_t lng; } codegen_commit_patch;	/* record k at word at; lng: relaxed (r_relax) */
-typedef struct codegen_commit_label { uint32_t ser, flags, frag, off, pend; } codegen_commit_label;
-typedef struct codegen_commit_pending_branch { uint32_t next, k, frag, off; uint8_t *p; } codegen_commit_pending_branch;	/* a branch waiting for its label */
+typedef struct codegen_commit_fixup { uint8_t word_index, label_flag; uint32_t type, reference; int64_t offset; } codegen_commit_fixup;
+typedef struct codegen_commit_patch { uint32_t record_index, word_position; codegen_commit_fixup fixup; uint8_t is_relaxed; } codegen_commit_patch;	/* record k at word at; lng: relaxed (r_relax) */
+typedef struct codegen_commit_label { uint32_t serial, flags, fragment, offset, pending; } codegen_commit_label;
+typedef struct codegen_commit_pending_branch { uint32_t next, record_index, fragment, offset; uint8_t *bytes; } codegen_commit_pending_branch;	/* a branch waiting for its label */
 
 /* ---------------- lvalues ---------------- */
 
@@ -513,22 +513,22 @@ enum { CODEGEN_LVALUE_FRAME, CODEGEN_LVALUE_SYMBOL, CODEGEN_LVALUE_REGISTER, COD
    real targets treat it as an internal error. */
 
 typedef struct codegen_lvalue {
-	uint8_t k;
-	uint8_t r;		/* CODEGEN_LVALUE_REGISTER: base register (a temp, owned); CODEGEN_LVALUE_GLOBAL_REGISTER: the register */
-	uint8_t bf;		/* bit-field */
-	uint8_t sgn;		/* bit-field signedness */
-	int64_t dynbit_slot;	/* packed vector lane: saved dynamic bit index, 0 for static */
-	uint16_t bitoff, width;	/* bit-field: bits from the byte at off */
-	uint32_t ref;		/* CODEGEN_LVALUE_SYMBOL */
-	int64_t off;		/* byte offset (CODEGEN_LVALUE_FRAME: slot offset) */
+	uint8_t kind;
+	uint8_t register_number;		/* CODEGEN_LVALUE_REGISTER: base register (a temp, owned); CODEGEN_LVALUE_GLOBAL_REGISTER: the register */
+	uint8_t is_bitfield;		/* bit-field */
+	uint8_t is_signed;		/* bit-field signedness */
+	int64_t dynamic_bit_slot;	/* packed vector lane: saved dynamic bit index, 0 for static */
+	uint16_t bit_offset, width;	/* bit-field: bits from the byte at off */
+	uint32_t reference;		/* CODEGEN_LVALUE_SYMBOL */
+	int64_t offset;		/* byte offset (CODEGEN_LVALUE_FRAME: slot offset) */
 	uint32_t align;		/* known alignment of the address */
 } codegen_lvalue;
 
 enum { A64_ABI_ARGUMENT_IGNORE, A64_ABI_ARGUMENT_REGISTER, A64_ABI_ARGUMENT_STACK, A64_ABI_ARGUMENT_REFERENCE_REGISTER, A64_ABI_ARGUMENT_REFERENCE_STACK, A64_ABI_ARGUMENT_VECTOR_REGISTER, A64_ABI_ARGUMENT_HFA, A64_ABI_ARGUMENT_BOOL_LANES };	/* A64_ABI_ARGUMENT_VECTOR_REGISTER: float/double in v<reg>; A64_ABI_ARGUMENT_HFA: nreg members of fsz bytes in v<reg>.. */
 
 typedef struct a64_abi_argument {
-	uint8_t kind, reg, nreg, fsz;
-	int32_t stk;		/* A64_ABI_ARGUMENT_STACK / A64_ABI_ARGUMENT_REFERENCE_STACK: offset in the argument area */
+	uint8_t kind, register_number, register_count, float_member_size;
+	int32_t stack_offset;		/* A64_ABI_ARGUMENT_STACK / A64_ABI_ARGUMENT_REFERENCE_STACK: offset in the argument area */
 	uint32_t size;
 } a64_abi_argument;
 
@@ -539,7 +539,7 @@ typedef struct a64_abi_argument {
 
 typedef struct a64_abi_spill {
 	uint32_t mask;
-	int64_t slot[CODEGEN_TEMPORARY_COUNT];
+	int64_t slots[CODEGEN_TEMPORARY_COUNT];
 } a64_abi_spill;
 
 #define CODEGEN_LOG_CAPACITY ((size_t)1 << 28)
@@ -547,9 +547,9 @@ typedef struct a64_abi_spill {
 /* ---------------- calls ---------------- */
 
 typedef struct a64_call_argument {
-	codegen_value v;
-	ast_qualified_type t;
-	a64_abi_argument a;
+	codegen_value value;
+	ast_qualified_type type;
+	a64_abi_argument argument;
 	int64_t slot;		/* value parked in a frame slot (-1: v is a constant/address) */
 } a64_call_argument;
 
@@ -743,14 +743,14 @@ VPRIV const attrs *codegen_symbol_attributes(cc *c, uint32_t s);
  * under -ffreestanding/-fno-builtin[-NAME]).  CC_LIBRARY_KIND_MEMCPY.., or 0 */
 static inline int codegen_memory_function_kind(codegen_context *e, uint32_t s, int na)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const sym *y = &c->syms[s];
 
-	if (na != 3 || e->E->o->opt < 1 || e->E->o->no_builtin || y->sc == AST_STORAGE_STATIC || !(y->flags & AST_SYMBOL_FLAG_GLOBAL) ||
+	if (na != 3 || e->unit->options->opt < 1 || e->unit->options->no_builtin || y->sc == AST_STORAGE_STATIC || !(y->flags & AST_SYMBOL_FLAG_GLOBAL) ||
 	    codegen_symbol_attributes(c, s)->asmname)
 		return 0;
 	for (unsigned i = 0; i < CC_DISABLED_BUILTIN_WORDS; i++)
-		if (e->E->o->disabled_builtins[i])
+		if (e->unit->options->disabled_builtins[i])
 			return 0;
 	return CODEGEN_IDENTIFIER_IS(y->name, "memcpy") ? CC_LIBRARY_KIND_MEMCPY : CODEGEN_IDENTIFIER_IS(y->name, "memmove") ? CC_LIBRARY_KIND_MEMMOVE :
 	       CODEGEN_IDENTIFIER_IS(y->name, "memset") ? CC_LIBRARY_KIND_MEMSET : 0;
@@ -1047,13 +1047,13 @@ static inline bool codegen_type_is_signed(cc *c, ast_qualified_type t) { return 
 static inline bool codegen_type_is_long_double(cc *c, ast_qualified_type t) { return codegen_type_is_float(c, t) && codegen_type_size(c, t) == 16; }
 static inline bool codegen_type_is_wide(cc *c, ast_qualified_type t) { return (codegen_type_is_integer(c, t) || codegen_type_is_float(c, t)) && codegen_type_size(c, t) == 16; }
 
-static inline bool codegen_context_is_direct(const codegen_context *e) { return e->E->o->emit == 2 && !e->E->objtext; }
+static inline bool codegen_context_is_direct(const codegen_context *e) { return e->unit->options->emit == 2 && !e->unit->object_text; }
 
 /* ---------------- values ---------------- */
 
-static inline codegen_value codegen_value_constant(i128 i) { codegen_value v = { .k = CODEGEN_VALUE_CONSTANT, .i = i }; return v; }
-static inline codegen_value codegen_value_register(int r) { codegen_value v = { .k = CODEGEN_VALUE_REGISTER, .r = (uint8_t)r }; return v; }
-static inline codegen_value codegen_value_address(uint32_t ref, i128 off) { codegen_value v = { .k = CODEGEN_VALUE_ADDRESS, .ref = ref, .i = off }; return v; }
+static inline codegen_value codegen_value_constant(i128 i) { codegen_value v = { .kind = CODEGEN_VALUE_CONSTANT, .integer = i }; return v; }
+static inline codegen_value codegen_value_register(int r) { codegen_value v = { .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)r }; return v; }
+static inline codegen_value codegen_value_address(uint32_t ref, i128 off) { codegen_value v = { .kind = CODEGEN_VALUE_ADDRESS, .reference = ref, .integer = off }; return v; }
 /* an undefined weak symbol's address may be 0: a register, never a CODEGEN_VALUE_ADDRESS (which every fold takes as nonzero) */
 static inline bool codegen_reference_is_weak(const cc *c, uint32_t ref)
 {
@@ -1062,23 +1062,23 @@ static inline bool codegen_reference_is_weak(const cc *c, uint32_t ref)
 	return CODEGEN_REFERENCE_KIND(ref) == CODEGEN_REFERENCE_SYMBOL && (y->flags & AST_SYMBOL_FLAG_WEAK) &&
 	       !(y->kind == AST_SYMBOL_FUNCTION ? (y->flags & AST_SYMBOL_FLAG_DEFINED) && y->body : (y->flags & (AST_SYMBOL_FLAG_DEFINED | AST_SYMBOL_FLAG_TENTATIVE)));
 }
-static inline codegen_value codegen_value_none(void) { codegen_value v = { .k = CODEGEN_VALUE_NONE }; return v; }
+static inline codegen_value codegen_value_none(void) { codegen_value v = { .kind = CODEGEN_VALUE_NONE }; return v; }
 
 /* a statement's temporaries end with it; compound literals live on to the end of their block */
 static inline int64_t codegen_compound_literal_keep(const codegen_context *e, int64_t mark)
 {
-	return mark > e->cl_top ? mark : e->cl_top;
+	return mark > e->compound_literal_top ? mark : e->compound_literal_top;
 }
 
 static inline int X(cc *c, ast_qualified_type t) { return codegen_type_size(c, t) == 8 || codegen_type_is_pointer(c, t) || codegen_type_is_function(c, t) ? 1 : 0; }
 static inline void codegen_log_append(codegen_context *e, uint32_t tag, uint32_t v)
 {
-	if (unlikely(e->nrlog + 2 > CODEGEN_LOG_CAPACITY)) {
+	if (unlikely(e->round_log_count + 2 > CODEGEN_LOG_CAPACITY)) {
 		fputs("vcc: emit log full\n", stderr);
 		abort();
 	}
-	e->rlog[e->nrlog++] = tag;
-	e->rlog[e->nrlog++] = v;
+	e->round_log[e->round_log_count++] = tag;
+	e->round_log[e->round_log_count++] = v;
 }
 
 #include "../arch/a64/codegen/a64impl.h"

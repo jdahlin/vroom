@@ -23,8 +23,8 @@ VPRIV int64_t x64_vir_constant_bits(const vir_insn *i) { return (int64_t)((uint6
 VPRIV void x64_vir_text_append(x64_vir_context *L, const char *s)
 {
 	record *r = x64_put(L->context, X_RAW);
-	r->off = L->context->raw.n;
-	r->ref = strlen(s);
+	r->offset = L->context->raw.n;
+	r->reference = strlen(s);
 	vtext_string_append(&L->context->raw, s);
 }
 
@@ -79,20 +79,20 @@ VPRIV void x64_vir_constant_materialize(x64_vir_context *L, uint8_t dst, uint32_
 		x64_op3(L->context, X_MOV, x64_vir_type_size(i->type), d, L->general_temporary, XNOREG);
 	} else if (i->op == VIR_OP_ICONST) {
 		x64_movi(L->context, d, x64_vir_constant_bits(i));
-	} else if (i->op == VIR_OP_SYMADDR && codegen_symbol_needs_got(L->context->c, i->a)) {
+	} else if (i->op == VIR_OP_SYMADDR && codegen_symbol_needs_got(L->context->compile_context, i->a)) {
 		record *r = x64_op3(L->context, X_GOT, 8, d, XNOREG, XNOREG);
-		r->ref = i->a;
-		if (x64_vir_constant_bits(i)) x64_op3(L->context, X_ADDI, 8, d, d, XNOREG)->imm = x64_vir_constant_bits(i);
+		r->reference = i->a;
+		if (x64_vir_constant_bits(i)) x64_op3(L->context, X_ADDI, 8, d, d, XNOREG)->immediate = x64_vir_constant_bits(i);
 	} else {
-		codegen_lvalue a = { .k = i->op == VIR_OP_SLOTADDR ? CODEGEN_LVALUE_FRAME : CODEGEN_LVALUE_SYMBOL,
-			.off = x64_vir_constant_bits(i) + (i->op == VIR_OP_SLOTADDR ? L->slot[i->a] : 0), .ref = i->a };
+		codegen_lvalue a = { .kind = i->op == VIR_OP_SLOTADDR ? CODEGEN_LVALUE_FRAME : CODEGEN_LVALUE_SYMBOL,
+			.offset = x64_vir_constant_bits(i) + (i->op == VIR_OP_SLOTADDR ? L->slot[i->a] : 0), .reference = i->a };
 		x64_mem(L->context, X_LEA, 8, d, &a, false);
 	}
 }
 
 VPRIV void x64_vir_slot_access(x64_vir_context *L, bool load, uint8_t reg, uint32_t s)
 {
-	codegen_lvalue a = { .k = CODEGEN_LVALUE_FRAME, .off = L->spill[s] };
+	codegen_lvalue a = { .kind = CODEGEN_LVALUE_FRAME, .offset = L->spill[s] };
 	x64_mem(L->context, load ? X_LD : X_ST, L->allocation->slot_sizes[s], x64_vir_register_number(reg), &a, false);
 }
 
@@ -172,7 +172,7 @@ VPRIV void x64_vir_goto_emit(x64_vir_context *L, uint32_t b, uint32_t target)
 {
 	uint32_t t = L->chase[target], next = x64_vir_block_next(L);
 
-	if (vir_layout_duplicate(L->function, L->loops, L->rotations, b, t, next, L->dup, !L->context->E->noopt)) {
+	if (vir_layout_duplicate(L->function, L->loops, L->rotations, b, t, next, L->dup, !L->context->unit->cleanups_disabled)) {
 		L->dup++;
 		virbuild_lower_block(&L->drv, t);
 		L->dup--;

@@ -8,8 +8,8 @@
  * Include materializing a lazy address; never provoke an allocator retry. */
 VPRIV bool a64_udivconst_ok(codegen_context *e, codegen_value a, const em_udivconst_recipe *r)
 {
-	unsigned available = CODEGEN_TEMPORARY_COUNT - (unsigned)__builtin_popcount((e->live | e->resv) & ((1u << CODEGEN_TEMPORARY_COUNT) - 1));
-	unsigned needed = (a.k != CODEGEN_VALUE_REGISTER) + 1 + (r->add || r->remainder);
+	unsigned available = CODEGEN_TEMPORARY_COUNT - (unsigned)__builtin_popcount((e->temporaries_in_use | e->temporaries_reserved) & ((1u << CODEGEN_TEMPORARY_COUNT) - 1));
+	unsigned needed = (a.kind != CODEGEN_VALUE_REGISTER) + 1 + (r->add || r->remainder);
 	return available >= needed;
 }
 

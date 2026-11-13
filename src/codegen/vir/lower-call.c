@@ -10,26 +10,26 @@
 /* the classification for arm64 (the signature's groups): scalars only for now */
 VPRIV void virbuild_classify(codegen_context *e, ast_qualified_type t, walk_argument *a, bool unnamed)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	uint64_t size = codegen_type_size(c, t);
 	int k = KIND(c, t);
 
 	memset(a, 0, sizeof *a);
 	a->size = size;
 	a->align = codegen_type_alignment(c, t) > 8 ? codegen_type_alignment(c, t) : 8;
-	a->unnamed = unnamed;
+	a->is_unnamed = unnamed;
 	if (codegen_type_is_record(c, t) || codegen_type_is_array(c, t) || codegen_type_is_vector(c, t) || codegen_type_is_wide(c, t) || k == AST_TYPE_LONG_DOUBLE || k == AST_TYPE_FLOAT128 ||
 	    k == AST_TYPE_FLOAT16 || k == AST_TYPE_BFLOAT16 || size > 8)
 		virbuild_fail(e, VIRBUILD_FAILURE(record_argument_or_result));
-	a->n = 1;
-	a->cls[0] = a->cls[1] = codegen_type_is_float(c, t) ? WALK_ARGUMENT_SSE : WALK_ARGUMENT_INTEGER;
+	a->eightbyte_count = 1;
+	a->classes[0] = a->classes[1] = codegen_type_is_float(c, t) ? WALK_ARGUMENT_SSE : WALK_ARGUMENT_INTEGER;
 }
 
 static uint32_t virbuild_call_group_pack(const walk_argument *a, uint32_t *w)
 {
-	uint32_t pc = a->cls[0] == WALK_ARGUMENT_SSE ? (a->size == 4 ? VIR_CLASS_F32 : VIR_CLASS_F64) : VIR_CLASS_INT;
+	uint32_t pc = a->classes[0] == WALK_ARGUMENT_SSE ? (a->size == 4 ? VIR_CLASS_F32 : VIR_CLASS_F64) : VIR_CLASS_INT;
 
-	w[0] = VIR_GROUP_WORD0(VIR_GROUP_REG, 1, pc, 0, 0, 0, a->unnamed ? VIR_GROUP_UNNAMED : 0);
+	w[0] = VIR_GROUP_WORD0(VIR_GROUP_REG, 1, pc, 0, 0, 0, a->is_unnamed ? VIR_GROUP_UNNAMED : 0);
 	w[1] = VIR_GROUP_WORD1(a->size, 0);	/* (the size: Apple packs stack arguments) */
 	return pc;
 }
@@ -39,7 +39,7 @@ static uint32_t virbuild_pass_class_type(uint32_t pc) { return pc == VIR_CLASS_F
 /* a slot word's value: the store table's, else a load */
 static uint32_t virbuild_call_word_load(codegen_context *e, int64_t off, uint32_t ty)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 	int64_t rel;
 	uint32_t slot = virbuild_slot_find(e, off, 8, &rel);
 
@@ -61,8 +61,8 @@ static uint32_t virbuild_call_word_load(codegen_context *e, int64_t off, uint32_
 
 static uint32_t virbuild_call_signature_make(codegen_context *e, const walk_argument *a, int n, bool variadic, ast_qualified_type rt, uint32_t *rpc)
 {
-	virbuild_context *V = e->vw;
-	cc *c = e->c;
+	virbuild_context *V = e->vir_builder;
+	cc *c = e->compile_context;
 	uint32_t o = V->extra_count;
 
 	VIRBUILD_ARRAY_GROW(V->extra, V->extra_count, V->extra_capacity, 3 + 2 * (uint32_t)n);
@@ -84,20 +84,20 @@ static uint32_t virbuild_call_signature_make(codegen_context *e, const walk_argu
 
 VPRIV codegen_value virbuild_call(codegen_context *e, uint32_t ref, codegen_value *fn, const walk_argument *a, int n, bool variadic, const walk_argument *r, ast_qualified_type rt)
 {
-	virbuild_context *V = e->vw;
-	cc *c = e->c;
+	virbuild_context *V = e->vir_builder;
+	cc *c = e->compile_context;
 	uint32_t callee, sig, rpc, o, v;
 	uint32_t *w;
 
 	if (r)
 		virbuild_fail(e, VIRBUILD_FAILURE(record_result));
 	for (int k = 0; k < n; k++)
-		if (a[k].mem || a[k].n != 1)
+		if (a[k].is_in_memory || a[k].eightbyte_count != 1)
 			virbuild_fail(e, VIRBUILD_FAILURE(record_argument));
 	if (fn) {
 		callee = virbuild_walker_value_get(e, fn, VIR_TYPE_PTR);
-		if (fn->k == CODEGEN_VALUE_REGISTER)
-			virbuild_tfree(e, fn->r);
+		if (fn->kind == CODEGEN_VALUE_REGISTER)
+			virbuild_tfree(e, fn->register_number);
 	} else {
 		callee = virbuild_constant_make(e, VIR_OP_SYMADDR, VIR_TYPE_PTR, ref, 0, 0);
 	}
@@ -107,7 +107,7 @@ VPRIV codegen_value virbuild_call(codegen_context *e, uint32_t ref, codegen_valu
 	V->extra_count += 1 + (uint32_t)n;
 	V->extra[o] = (uint32_t)n;
 	for (int k = 0; k < n; k++) {
-		uint32_t pc = a[k].cls[0] == WALK_ARGUMENT_SSE ? (a[k].size == 4 ? VIR_CLASS_F32 : VIR_CLASS_F64) : VIR_CLASS_INT;
+		uint32_t pc = a[k].classes[0] == WALK_ARGUMENT_SSE ? (a[k].size == 4 ? VIR_CLASS_F32 : VIR_CLASS_F64) : VIR_CLASS_INT;
 		uint32_t x = virbuild_call_word_load(e, a[k].slot, virbuild_pass_class_type(pc));
 
 		w = &V->extra[o + 1 + k];
@@ -121,7 +121,7 @@ VPRIV codegen_value virbuild_call(codegen_context *e, uint32_t ref, codegen_valu
 		int q = virbuild_ftreg(e);
 
 		virbuild_register_write(e, q, v);
-		return (codegen_value){ .k = CODEGEN_VALUE_REGISTER, .r = (uint8_t)q };
+		return (codegen_value){ .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)q };
 	}
 	{
 		int q = virbuild_treg(e), size = walk_type_size(c, rt);
@@ -134,15 +134,15 @@ VPRIV codegen_value virbuild_call(codegen_context *e, uint32_t ref, codegen_valu
 			virbuild_register_write(e, q, virbuild_value_convert(e, v, VIR_TYPE_I32));
 		else if (size < 8)
 			virbuild_ext(e, q, size, sgn);
-		return (codegen_value){ .k = CODEGEN_VALUE_REGISTER, .r = (uint8_t)q };
+		return (codegen_value){ .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)q };
 	}
 }
 
 VPRIV void virbuild_params(codegen_context *e, walk_argument *a, int n, const walk_argument *r, bool variadic)
 {
-	virbuild_context *V = e->vw;
-	cc *c = e->c;
-	const node *body = N(c->syms[e->wk->fsym].body);
+	virbuild_context *V = e->vir_builder;
+	cc *c = e->compile_context;
+	const node *body = N(c->syms[e->walk_state->function_symbol].body);
 
 	if (r)
 		virbuild_fail(e, VIRBUILD_FAILURE(record_result));
@@ -153,9 +153,9 @@ VPRIV void virbuild_params(codegen_context *e, walk_argument *a, int n, const wa
 	for (int k = 0; k < n; k++) {
 		uint32_t sym = c->lists[body->a + (uint32_t)k];
 		ast_qualified_type ty = c->syms[sym].ty;
-		uint32_t pc = a[k].cls[0] == WALK_ARGUMENT_SSE ? (a[k].size == 4 ? VIR_CLASS_F32 : VIR_CLASS_F64) : VIR_CLASS_INT;
+		uint32_t pc = a[k].classes[0] == WALK_ARGUMENT_SSE ? (a[k].size == 4 ? VIR_CLASS_F32 : VIR_CLASS_F64) : VIR_CLASS_INT;
 
-		if (a[k].mem || a[k].n != 1)
+		if (a[k].is_in_memory || a[k].eightbyte_count != 1)
 			virbuild_fail(e, VIRBUILD_FAILURE(record_parameter));
 		if (virbuild_insn_append(e, VIR_OP_PARAM, pc == VIR_CLASS_INT && codegen_type_is_pointer(c, ty) ? VIR_TYPE_PTR : virbuild_pass_class_type(pc), 0, (uint32_t)k, 0, 0) != pv0 + (uint32_t)k)
 			virbuild_fail(e, VIRBUILD_FAILURE(parameters));
@@ -163,7 +163,7 @@ VPRIV void virbuild_params(codegen_context *e, walk_argument *a, int n, const wa
 	for (int k = 0; k < n; k++) {
 		uint32_t sym = c->lists[body->a + (uint32_t)k];
 		ast_qualified_type ty = c->syms[sym].ty;
-		uint32_t pc = a[k].cls[0] == WALK_ARGUMENT_SSE ? (a[k].size == 4 ? VIR_CLASS_F32 : VIR_CLASS_F64) : VIR_CLASS_INT;
+		uint32_t pc = a[k].classes[0] == WALK_ARGUMENT_SSE ? (a[k].size == 4 ? VIR_CLASS_F32 : VIR_CLASS_F64) : VIR_CLASS_INT;
 		uint32_t v = pv0 + (uint32_t)k;
 		codegen_lvalue home;
 		int q;
@@ -177,7 +177,7 @@ VPRIV void virbuild_params(codegen_context *e, walk_argument *a, int n, const wa
 		if (virbuild_local(e, sym, &home)) {
 			virbuild_store(e, q, &home, pc == VIR_CLASS_INT ? walk_type_size(c, ty) : (int)a[k].size);
 		} else {
-			codegen_lvalue s = { .k = CODEGEN_LVALUE_FRAME, .off = a[k].slot, .align = 8 };
+			codegen_lvalue s = { .kind = CODEGEN_LVALUE_FRAME, .offset = a[k].slot, .align = 8 };
 
 			virbuild_store(e, q, &s, 8);
 		}
@@ -187,14 +187,14 @@ VPRIV void virbuild_params(codegen_context *e, walk_argument *a, int n, const wa
 	{
 		uint32_t rpc;
 
-		V->function_signature = virbuild_call_signature_make(e, a, n, variadic, e->wk->rty, &rpc);
+		V->function_signature = virbuild_call_signature_make(e, a, n, variadic, e->walk_state->return_type, &rpc);
 	}
 }
 
 VPRIV void virbuild_ret(codegen_context *e, codegen_value *v, ast_qualified_type t, uint32_t lbl)
 {
-	virbuild_context *V = e->vw;
-	cc *c = e->c;
+	virbuild_context *V = e->vir_builder;
+	cc *c = e->compile_context;
 
 	if (v) {
 		uint32_t x;
@@ -205,8 +205,8 @@ VPRIV void virbuild_ret(codegen_context *e, codegen_value *v, ast_qualified_type
 			int size = walk_type_size(c, t);
 			bool sgn = walk_type_is_signed(c, t);
 
-			if (v->k == CODEGEN_VALUE_CONSTANT) {
-				int64_t k = (int64_t)v->i;
+			if (v->kind == CODEGEN_VALUE_CONSTANT) {
+				int64_t k = (int64_t)v->integer;
 
 				if (size < 8)
 					k = sgn ? (int64_t)((uint64_t)k << (64 - 8 * size)) >> (64 - 8 * size) :
@@ -257,12 +257,12 @@ VPRIV void virbuild_begin(codegen_context *e, uint32_t s)
 	V->result_type = VIR_TYPE_VOID;
 	V->parameter_count = 0;
 	V->current_block = virbuild_block_new(e);
-	e->ndl = 0;
+	e->debug_row_count = 0;
 }
 
 VPRIV void virbuild_finish(codegen_context *e, uint32_t s)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 
 	(void)s;
 	{	/* the return block: ret, with the result if there is one */
@@ -286,7 +286,7 @@ VPRIV void virbuild_finish(codegen_context *e, uint32_t s)
 
 VPRIV void virbuild_ecx_free(codegen_context *e)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 
 	if (!V)
 		return;
@@ -294,5 +294,5 @@ VPRIV void virbuild_ecx_free(codegen_context *e)
 	free(V->stores), free(V->locations), free(V->variable_types), free(V->variable_is_signed), free(V->predecessors), free(V->value_map), free(V->block_order), free(V->block_map);
 	free(V->lowering_slots), free(V->lowering_spills), free(V->lowering_labels), free(V->lowering_uses), free(V->lowering_edge_labels);
 	free(V);
-	e->vw = NULL;
+	e->vir_builder = NULL;
 }

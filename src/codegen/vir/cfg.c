@@ -42,7 +42,7 @@ VPRIV uint32_t *virbuild_block_successor_pointer(virbuild_context *V, uint32_t b
 /* a block with nothing in it that only jumps on: its predecessors jump on directly */
 VPRIV void virbuild_empty_blocks_thread(codegen_context *e)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 
 	for (uint32_t b = 0; b < V->block_count; b++) {
 		uint32_t n = virbuild_block_successor_count(V, b);
@@ -64,7 +64,7 @@ VPRIV void virbuild_empty_blocks_thread(codegen_context *e)
 /* reachable blocks in reverse postorder (V->order) */
 VPRIV void virbuild_block_order_compute(codegen_context *e)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 	uint32_t n = 0, sp = 0;
 	uint32_t *stk, *it;
 
@@ -102,7 +102,7 @@ VPRIV void virbuild_block_order_compute(codegen_context *e)
 /* the distinct reachable predecessors of every block */
 VPRIV void virbuild_block_predecessors_compute(codegen_context *e)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 
 	for (uint32_t b = 0; b < V->block_count; b++)
 		V->blocks[b].predecessor_count = 0;
@@ -138,7 +138,7 @@ VPRIV void virbuild_block_predecessors_compute(codegen_context *e)
 /* immediate dominators (Cooper, Harvey, Kennedy) and the tree's children, in reverse postorder */
 VPRIV void virbuild_block_dominators_compute(codegen_context *e, virbuild_simplify_state *S)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 	uint32_t n = V->block_order_count, *ri = malloc(((size_t)V->block_count + 1) * sizeof *ri);
 	bool changed = true;
 
@@ -199,7 +199,7 @@ VPRIV uint32_t virbuild_block_predecessor_index(const virbuild_context *V, uint3
 /* the edge b -> t needs a block of its own: t has parameters and b does not end in br */
 VPRIV void virbuild_critical_edges_split(codegen_context *e)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 	uint32_t n0 = V->block_order_count, nb0 = V->block_count;	/* blocks from nb0 on are this pass's edge blocks */
 
 	for (uint32_t i = 0; i < n0; i++) {

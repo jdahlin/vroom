@@ -20,8 +20,8 @@ static int record_slot_compare(const void *a, const void *b)
 
 	if (x->id != y->id)
 		return x->id < y->id ? -1 : 1;
-	if (x->off != y->off)
-		return x->off < y->off ? -1 : 1;
+	if (x->offset != y->offset)
+		return x->offset < y->offset ? -1 : 1;
 	return x->size < y->size ? -1 : x->size > y->size;
 }
 
@@ -48,29 +48,29 @@ static void record_slot_sort(record_slot_range *v, uint32_t n)
 static bool record_slot_hits(const record_slot_cells *s, int64_t off, uint32_t size)
 {
 	int64_t end = off + size;
-	uint32_t lo = 0, hi = s->nw;
+	uint32_t lo = 0, hi = s->write_count;
 
 	while (lo < hi) {
 		uint32_t mid = (lo + hi) / 2;
 
-		if (s->w[mid].off < end)
+		if (s->writes[mid].offset < end)
 			lo = mid + 1;
 		else
 			hi = mid;
 	}
-	return lo > 0 && s->wend[lo - 1] > off;
+	return lo > 0 && s->write_ends[lo - 1] > off;
 }
 
 VPRIV bool record_slot_begin(record_slot_cells *s, uint32_t allocations)
 {
-	s->na = allocations;
-	s->nm = s->nw = s->count = 0;
-	s->multi = false;
+	s->allocation_count = allocations;
+	s->cell_count = s->write_count = s->count = 0;
+	s->has_multi_range = false;
 	s->valid = allocations > 0 && allocations <= 0x10000;
 	if (!s->valid)
 		return false;
-	s->a = record_slot_grow(s->a, &s->capa, allocations, sizeof(*s->a));
-	memset(s->a, 0, (size_t)allocations * sizeof(*s->a));
+	s->allocations = record_slot_grow(s->allocations, &s->allocation_capacity, allocations, sizeof(*s->allocations));
+	memset(s->allocations, 0, (size_t)allocations * sizeof(*s->allocations));
 	return true;
 }
 
@@ -78,23 +78,23 @@ VPRIV void record_slot_access(record_slot_cells *s, uint32_t id, int64_t off, ui
 {
 	if (!s->valid)
 		return;
-	if (id >= s->na || !size || off > INT64_MAX - size) {
+	if (id >= s->allocation_count || !size || off > INT64_MAX - size) {
 		s->valid = false;
 		return;
 	}
 	if (!id) {
 		/* Poison classification needs the range union, not multiplicity. */
-		if (s->nw && s->w[s->nw - 1].off == off && s->w[s->nw - 1].size == size)
+		if (s->write_count && s->writes[s->write_count - 1].offset == off && s->writes[s->write_count - 1].size == size)
 			return;
-		s->w = record_slot_grow(s->w, &s->capw, s->nw + 1, sizeof(*s->w));
-		s->w[s->nw++] = (record_slot_range){ 0, off, size, false, false };
+		s->writes = record_slot_grow(s->writes, &s->write_capacity, s->write_count + 1, sizeof(*s->writes));
+		s->writes[s->write_count++] = (record_slot_range){ 0, off, size, false, false };
 	} else {
-		record_slot_allocation *a = &s->a[id];
+		record_slot_allocation *a = &s->allocations[id];
 
 		if (!a->state)
-			a->state = 1, a->off = off, a->size = size;
-		else if (a->state == 1 && (a->off != off || a->size != size))
-			a->state = 2, s->multi = true;
+			a->state = 1, a->offset = off, a->size = size;
+		else if (a->state == 1 && (a->offset != off || a->size != size))
+			a->state = 2, s->has_multi_range = true;
 	}
 }
 
@@ -102,24 +102,24 @@ VPRIV void record_slot_escape(record_slot_cells *s, uint32_t id)
 {
 	if (!s->valid)
 		return;
-	if (id >= s->na)
+	if (id >= s->allocation_count)
 		s->valid = false;
 	else
-		s->a[id].esc = true;
+		s->allocations[id].escaped = true;
 }
 
 VPRIV void record_slot_detail(record_slot_cells *s, uint32_t id, int64_t off, uint32_t size)
 {
 	if (!s->valid)
 		return;
-	if (id >= s->na || !size || off > INT64_MAX - size) {
+	if (id >= s->allocation_count || !size || off > INT64_MAX - size) {
 		s->valid = false;
 		return;
 	}
-	if (!id || s->a[id].state != 2)
+	if (!id || s->allocations[id].state != 2)
 		return;
-	s->c = record_slot_grow(s->c, &s->capc, s->nm + 1, sizeof(*s->c));
-	s->c[s->nm++] = (record_slot_range){ id, off, size, false, false };
+	s->cells = record_slot_grow(s->cells, &s->cell_capacity, s->cell_count + 1, sizeof(*s->cells));
+	s->cells[s->cell_count++] = (record_slot_range){ id, off, size, false, false };
 }
 
 /* Retain the first exact range only when a distinct second range appears.
@@ -133,100 +133,100 @@ VPRIV void record_slot_collect(record_slot_cells *s, uint32_t id, int64_t off, u
 	}
 	if (!s->valid)
 		return;
-	if (id >= s->na || !size || off > INT64_MAX - size) {
+	if (id >= s->allocation_count || !size || off > INT64_MAX - size) {
 		s->valid = false;
 		return;
 	}
-	record_slot_allocation *a = &s->a[id];
+	record_slot_allocation *a = &s->allocations[id];
 	uint8_t before = a->state;
 
 	if (!before) {
-		a->state = 1, a->off = off, a->size = size;
+		a->state = 1, a->offset = off, a->size = size;
 		return;
 	}
-	if (before == 1 && a->off == off && a->size == size)
+	if (before == 1 && a->offset == off && a->size == size)
 		return;
-	a->state = 2, s->multi = true;
+	a->state = 2, s->has_multi_range = true;
 	if (before == 1)
-		record_slot_detail(s, id, a->off, a->size);
+		record_slot_detail(s, id, a->offset, a->size);
 	record_slot_detail(s, id, off, size);
 }
 
 VPRIV bool record_slot_finish(record_slot_cells *s)
 {
-	uint32_t na = s->na, nm = s->nm;
+	uint32_t na = s->allocation_count, nm = s->cell_count;
 	bool any = false;
 
 	if (!s->valid)
 		return false;
 	for (uint32_t id = 1; id < na && !any; id++)
-		any = s->a[id].state != 0;
+		any = s->allocations[id].state != 0;
 	if (!any)
 		return false;
 	if (nm) {
 		uint32_t u = 0;
 
-		record_slot_sort(s->c, nm);
+		record_slot_sort(s->cells, nm);
 		for (uint32_t k = 0; k < nm; k++)
-			if (!u || record_slot_compare(&s->c[k], &s->c[u - 1]))
-				s->c[u++] = s->c[k];
-		s->nm = nm = u;
+			if (!u || record_slot_compare(&s->cells[k], &s->cells[u - 1]))
+				s->cells[u++] = s->cells[k];
+		s->cell_count = nm = u;
 		for (uint32_t k = 0, g; k < nm; k = g) {
 			int64_t maxend = INT64_MIN;
 
-			for (g = k; g < nm && s->c[g].id == s->c[k].id; g++)
+			for (g = k; g < nm && s->cells[g].id == s->cells[k].id; g++)
 				;
-			s->a[s->c[k].id].mb = k, s->a[s->c[k].id].mn = g - k;
+			s->allocations[s->cells[k].id].multi_begin = k, s->allocations[s->cells[k].id].multi_count = g - k;
 			for (uint32_t q = k; q < g; q++) {
-				int64_t end = s->c[q].off + s->c[q].size;
+				int64_t end = s->cells[q].offset + s->cells[q].size;
 
-				s->c[q].bad = s->c[q].off < maxend || (q + 1 < g && s->c[q + 1].off < end);
+				s->cells[q].bad = s->cells[q].offset < maxend || (q + 1 < g && s->cells[q + 1].offset < end);
 				if (end > maxend)
 					maxend = end;
 			}
 		}
 	}
-	if (s->nw) {
-		record_slot_sort(s->w, s->nw);
-		s->wend = record_slot_grow(s->wend, &s->capwe, s->nw, sizeof(*s->wend));
-		for (uint32_t k = 0; k < s->nw; k++) {
-			int64_t end = s->w[k].off + s->w[k].size;
+	if (s->write_count) {
+		record_slot_sort(s->writes, s->write_count);
+		s->write_ends = record_slot_grow(s->write_ends, &s->write_end_capacity, s->write_count, sizeof(*s->write_ends));
+		for (uint32_t k = 0; k < s->write_count; k++) {
+			int64_t end = s->writes[k].offset + s->writes[k].size;
 
-			s->wend[k] = k && s->wend[k - 1] > end ? s->wend[k - 1] : end;
+			s->write_ends[k] = k && s->write_ends[k - 1] > end ? s->write_ends[k - 1] : end;
 		}
 	}
 	s->count = na + nm;
-	s->flags = record_slot_grow(s->flags, &s->capflags, s->count, 1);
+	s->flags = record_slot_grow(s->flags, &s->flag_capacity, s->count, 1);
 	s->flags[0] = RECORD_SLOT_BAD;
 	for (uint32_t id = 1; id < na; id++) {
-		const record_slot_allocation *a = &s->a[id];
+		const record_slot_allocation *a = &s->allocations[id];
 
 		s->flags[id] = a->state == 1 ?
-			(uint8_t)((s->nw && record_slot_hits(s, a->off, a->size)) | a->esc << 1) : RECORD_SLOT_BAD;
+			(uint8_t)((s->write_count && record_slot_hits(s, a->offset, a->size)) | a->escaped << 1) : RECORD_SLOT_BAD;
 	}
 	for (uint32_t q = 0; q < nm; q++)
-		s->flags[na + q] = (uint8_t)((s->c[q].bad || (s->nw && record_slot_hits(s, s->c[q].off, s->c[q].size))) |
-					    s->a[s->c[q].id].esc << 1);
+		s->flags[na + q] = (uint8_t)((s->cells[q].bad || (s->write_count && record_slot_hits(s, s->cells[q].offset, s->cells[q].size))) |
+					    s->allocations[s->cells[q].id].escaped << 1);
 	return true;
 }
 
 VPRIV uint32_t record_slot_find(const record_slot_cells *s, uint32_t id, int64_t off, uint32_t size)
 {
-	if (!id || id >= s->na)
+	if (!id || id >= s->allocation_count)
 		return 0;
-	const record_slot_allocation *a = &s->a[id];
+	const record_slot_allocation *a = &s->allocations[id];
 	if (a->state == 1)
-		return a->off == off && a->size == size ? id : 0;
+		return a->offset == off && a->size == size ? id : 0;
 	record_slot_range key = { id, off, size, false, false };
-	uint32_t lo = a->mb, hi = lo + a->mn;
+	uint32_t lo = a->multi_begin, hi = lo + a->multi_count;
 
 	while (lo < hi) {
 		uint32_t mid = (lo + hi) / 2;
 
-		if (record_slot_compare(&s->c[mid], &key) < 0)
+		if (record_slot_compare(&s->cells[mid], &key) < 0)
 			lo = mid + 1;
 		else
 			hi = mid;
 	}
-	return lo < a->mb + a->mn && !record_slot_compare(&s->c[lo], &key) ? s->na + lo : 0;
+	return lo < a->multi_begin + a->multi_count && !record_slot_compare(&s->cells[lo], &key) ? s->allocation_count + lo : 0;
 }

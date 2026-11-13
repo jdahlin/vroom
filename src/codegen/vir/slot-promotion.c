@@ -50,7 +50,7 @@ static void virbuild_promote_escape_mark(virbuild_context *V, uint8_t *bad, uint
 /* var's value on entry to b (b's own definitions come later in it) */
 static uint32_t virbuild_promote_variable_entry(codegen_context *e, uint32_t var, uint32_t b, uint32_t ty, bool defs)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 	uint32_t *d, p;
 
 	if (!defs)
@@ -102,7 +102,7 @@ VPRIV bool virbuild_promote_store_is_dead(const virbuild_context *V, uint32_t q)
  * (Braun, as the walker's locals), its stores go */
 VPRIV bool virbuild_slots_promote(codegen_context *e)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 	virbuild_promote_field *fd = NULL;
 	uint32_t nf = 0, cf = 0, *fof, *cur, *cst, np0 = V->insn_count, var0;
 	uint32_t *sf, *fnx = NULL, cfnx = 0;	/* a slot's fields: first + 1 per slot, next + 1 per field */

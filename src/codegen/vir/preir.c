@@ -7,26 +7,26 @@
 
 VPRIV virbuild_context *virbuild_context_get(codegen_context *e)
 {
-	if (!e->vw)
-		e->vw = calloc(1, sizeof(virbuild_context));
-	return e->vw;
+	if (!e->vir_builder)
+		e->vir_builder = calloc(1, sizeof(virbuild_context));
+	return e->vir_builder;
 }
 
 VPRIV __attribute__((noreturn, cold)) void virbuild_fail(codegen_context *e, const char *why)
 {
-	if (!e->vfail)
-		e->vfail = why;
-	_longjmp(e->bail, 1);
+	if (!e->vir_failure_reason)
+		e->vir_failure_reason = why;
+	_longjmp(e->bail_jump, 1);
 }
 
 VPRIV uint32_t virbuild_preir_insn_add(codegen_context *e, uint32_t op, uint32_t ty, uint32_t fl, uint32_t a, uint32_t b, uint32_t c, uint32_t blk)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 	uint32_t i = V->insn_count;
 
 	VIRBUILD_ARRAY_GROW(V->insns, V->insn_count, V->insn_capacity, 1);
 	V->insn_count++;
-	V->insns[i] = (virbuild_preir_insn){ { (uint8_t)op, (uint8_t)ty, (uint16_t)fl, a, b, c }, blk, 0, e->curloc, 0 };
+	V->insns[i] = (virbuild_preir_insn){ { (uint8_t)op, (uint8_t)ty, (uint16_t)fl, a, b, c }, blk, 0, e->current_location, 0 };
 	if (V->sealing) {
 		VIRBUILD_ARRAY_GROW(V->forward, i, V->forward_capacity, 1);
 		V->forward[i] = i;
@@ -37,7 +37,7 @@ VPRIV uint32_t virbuild_preir_insn_add(codegen_context *e, uint32_t op, uint32_t
 /* an instruction at the end of block b's list */
 VPRIV uint32_t virbuild_block_insn_append(codegen_context *e, uint32_t b, uint32_t op, uint32_t ty, uint32_t fl, uint32_t a, uint32_t bb, uint32_t c)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 	uint32_t i = virbuild_preir_insn_add(e, op, ty, fl, a, bb, c, b);
 	virbuild_preir_block *k = &V->blocks[b];
 
@@ -51,7 +51,7 @@ VPRIV uint32_t virbuild_block_insn_append(codegen_context *e, uint32_t b, uint32
 
 VPRIV uint32_t virbuild_insn_append(codegen_context *e, uint32_t op, uint32_t ty, uint32_t fl, uint32_t a, uint32_t b, uint32_t c)
 {
-	return virbuild_block_insn_append(e, e->vw->current_block, op, ty, fl, a, b, c);
+	return virbuild_block_insn_append(e, e->vir_builder->current_block, op, ty, fl, a, b, c);
 }
 
 VPRIV uint32_t virbuild_constant_make(codegen_context *e, uint32_t op, uint32_t ty, uint32_t a, uint32_t b, uint32_t c)
@@ -68,7 +68,7 @@ VPRIV uint32_t virbuild_constant_integer(codegen_context *e, uint32_t ty, int64_
 
 VPRIV uint32_t virbuild_extra_append(codegen_context *e, const uint32_t *w, uint32_t n)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 	uint32_t o = V->extra_count;
 
 	VIRBUILD_ARRAY_GROW(V->extra, V->extra_count, V->extra_capacity, n ? n : 1);
@@ -80,7 +80,7 @@ VPRIV uint32_t virbuild_extra_append(codegen_context *e, const uint32_t *w, uint
 
 VPRIV uint32_t virbuild_block_new(codegen_context *e)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 	uint32_t b = V->block_count;
 
 	VIRBUILD_ARRAY_GROW(V->blocks, V->block_count, V->block_capacity, 1);
@@ -92,7 +92,7 @@ VPRIV uint32_t virbuild_block_new(codegen_context *e)
 
 VPRIV uint32_t virbuild_label_block(codegen_context *e, uint32_t l)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 
 	if (l >= V->label_capacity) {
 		uint32_t nc = V->label_capacity ? V->label_capacity : 256;
@@ -115,7 +115,7 @@ VPRIV uint32_t virbuild_label_block(codegen_context *e, uint32_t l)
 /* ends the current block with terminator t; code after it goes to a block nothing reaches */
 VPRIV void virbuild_block_terminate(codegen_context *e, uint32_t op, uint32_t a, uint32_t b, uint32_t c, uint32_t fl)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 
 	V->blocks[V->current_block].terminator = virbuild_preir_insn_add(e, op, VIR_TYPE_VOID, fl, a, b, c, V->current_block);
 	V->current_block = virbuild_block_new(e);

@@ -4,8 +4,8 @@
 
 VPRIV __attribute__((noreturn, cold)) void a64_vir_fail(a64_vir_context *L, const char *why)
 {
-	L->context->vfail = why;	/* (in ecx: L is not volatile across the jump) */
-	_longjmp(L->context->bail, 3);
+	L->context->vir_failure_reason = why;	/* (in ecx: L is not volatile across the jump) */
+	_longjmp(L->context->bail_jump, 3);
 }
 
 VPRIV void *a64_vir_array_grow(void *p, uint32_t *cap, uint32_t n, size_t sz)

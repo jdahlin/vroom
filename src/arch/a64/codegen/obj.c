@@ -3,12 +3,12 @@
 
 static uint32_t r_label(codegen_commit_context *R, uint32_t fid, uint32_t l)
 {
-	if (R->lser[l] == R->ser)
-		return R->lsym[l];
-	R->nb.n = 0;
-	p_lbl(&R->nb, fid, l);
-	R->lser[l] = R->ser;
-	return R->lsym[l] = as_symbol_by_name(R->as, R->nb.p, R->nb.n);
+	if (R->label_serials[l] == R->serial)
+		return R->label_symbols[l];
+	R->name_buffer.n = 0;
+	p_lbl(&R->name_buffer, fid, l);
+	R->label_serials[l] = R->serial;
+	return R->label_symbols[l] = as_symbol_by_name(R->assembler, R->name_buffer.p, R->name_buffer.n);
 }
 
 static unsigned e_movi(uint32_t *w, int rd, int x, uint64_t v)
@@ -361,7 +361,7 @@ static void more_fixups(ElfObj *o, uint32_t frag, uint64_t off, uint8_t *p, cons
 /* emit one instruction's words at the end of frag, with its fixup(s) */
 static void r_words(codegen_commit_context *R, uint32_t frag, const uint32_t *w, unsigned n, const codegen_commit_fixup *f, uint32_t fid, const ins *i)
 {
-	ElfObj *o = R->o;
+	ElfObj *o = R->object;
 	uint64_t off;
 	uint8_t *p;
 
@@ -371,10 +371,10 @@ static void r_words(codegen_commit_context *R, uint32_t frag, const uint32_t *w,
 	for (unsigned k = 0; k < n; k++)
 		memcpy(p + 4 * k, &w[k], 4);
 	if (f->type) {
-		uint32_t y = f->lbl ? r_label(R, fid, f->ref) : codegen_commit_symbol_find(R, f->ref);
+		uint32_t y = f->label_flag ? r_label(R, fid, f->reference) : codegen_commit_symbol_find(R, f->reference);
 
-		elf_fixup(o, frag, off + 4u * f->k, p + 4 * f->k, f->type, as_symbol_value(R->as, y, f->off));
-		more_fixups(o, frag, off, p, i, y, R->as);
+		elf_fixup(o, frag, off + 4u * f->word_index, p + 4 * f->word_index, f->type, as_symbol_value(R->assembler, y, f->offset));
+		more_fixups(o, frag, off, p, i, y, R->assembler);
 	}
 }
 
@@ -388,10 +388,10 @@ enum { RL_NAMED = 1, RL_PLACED = 2, RL_DEFSYM = 4 };
 
 static inline codegen_commit_label *r_lab(codegen_commit_context *R, uint32_t l)
 {
-	codegen_commit_label *L = &R->lab[l];
+	codegen_commit_label *L = &R->labels[l];
 
-	if (L->ser != R->ser)
-		*L = (codegen_commit_label){ R->ser, 0, 0, 0, 0 };
+	if (L->serial != R->serial)
+		*L = (codegen_commit_label){ R->serial, 0, 0, 0, 0 };
 	return L;
 }
 
@@ -405,15 +405,15 @@ static bool r_branch(codegen_commit_context *R, uint32_t fid, const ins *i, code
 	uint32_t w[4];
 	codegen_commit_fixup f;
 
-	if (L->frag == frag && !(L->off & 3) && !(off & 3)) {
-		int64_t d = ((int64_t)L->off - off) / 4;
+	if (L->fragment == frag && !(L->offset & 3) && !(off & 3)) {
+		int64_t d = ((int64_t)L->offset - off) / 4;
 
 		if ((i->op == I_TBZ || i->op == I_TBNZ) && (d < -(1 << 13) || d >= 1 << 13))
 			return codegen_commit_fail(R, "function with inline asm too large: tbz beyond 32 KB") == 0;
 		if (i->op != I_B && (d < BR19_MIN || d > BR19_MAX))	/* not relaxed with inline asm in the function */
 			return codegen_commit_fail(R, "function with inline asm too large: conditional branch or adr beyond 1 MB") == 0;
-		R->loff[i->label] = L->off / 4;
-		enc(i, w, &f, R->loff, off / 4);
+		R->label_word_offsets[i->label] = L->offset / 4;
+		enc(i, w, &f, R->label_word_offsets, off / 4);
 		memcpy(p, w, 4);
 		return true;
 	}
@@ -421,14 +421,14 @@ static bool r_branch(codegen_commit_context *R, uint32_t fid, const ins *i, code
 		uint32_t y = r_label(R, fid, i->label);
 
 		if (!(L->flags & RL_DEFSYM)) {
-			if (elf_symp(R->o, y)->flags & ESYM_DEFINED)
+			if (elf_symp(R->object, y)->flags & ESYM_DEFINED)
 				return codegen_commit_fail(R, "invalid symbol redefinition") == 0;
-			elf_define(R->o, y, L->frag, L->off);
+			elf_define(R->object, y, L->fragment, L->offset);
 			L->flags |= RL_DEFSYM;
 		}
 		enc(i, w, &f, NULL, 0);
 		memcpy(p, w, 4);
-		elf_fixup(R->o, frag, off, p, f.type, as_symbol_value(R->as, y, 0));
+		elf_fixup(R->object, frag, off, p, f.type, as_symbol_value(R->assembler, y, 0));
 	}
 	return true;
 }
@@ -443,7 +443,7 @@ static uint32_t pt_lb(const codegen_commit_patch *pt, uint32_t npt, uint32_t pos
 	while (lo < hi) {
 		uint32_t m = lo + (hi - lo) / 2;
 
-		if (pt[m].at < pos)
+		if (pt[m].word_position < pos)
 			lo = m + 1;
 		else
 			hi = m;
@@ -473,18 +473,18 @@ static uint32_t r_relax(const ins *in, uint32_t nin, uint32_t *wb, uint32_t at, 
 		grew = false;
 		cum[0] = 0;
 		for (uint32_t j = 0; j < npt; j++)
-			cum[j + 1] = cum[j] + pt[j].lng;
+			cum[j + 1] = cum[j] + pt[j].is_relaxed;
 		for (uint32_t j = 0; j < npt; j++) {
-			const ins *i = &in[pt[j].k];
+			const ins *i = &in[pt[j].record_index];
 			uint32_t t;
 			int64_t d;
 
-			if (pt[j].lng || !pt[j].f.lbl || !is_cbr(i->op))
+			if (pt[j].is_relaxed || !pt[j].fixup.label_flag || !is_cbr(i->op))
 				continue;
 			t = loff[i->label];
-			d = (int64_t)t + cum[pt_lb(pt, npt, t)] - ((int64_t)pt[j].at + cum[j]);
+			d = (int64_t)t + cum[pt_lb(pt, npt, t)] - ((int64_t)pt[j].word_position + cum[j]);
 			if (d < BR19_MIN || d > BR19_MAX) {
-				pt[j].lng = 1;
+				pt[j].is_relaxed = 1;
 				grew = true;
 			}
 		}
@@ -494,9 +494,9 @@ static uint32_t r_relax(const ins *in, uint32_t nin, uint32_t *wb, uint32_t at, 
 		return 0;
 	/* spread the words: everything after a relaxed branch moves by the relaxed ones up to it */
 	for (uint32_t j = npt, end_ = at; j-- > 0; ) {
-		uint32_t b = pt[j].at;
+		uint32_t b = pt[j].word_position;
 
-		if (!pt[j].lng)
+		if (!pt[j].is_relaxed)
 			continue;
 		s = cum[j + 1];
 		memmove(wb + b + 1 + s, wb + b + 1, (size_t)(end_ - b - 1) * 4);
@@ -507,31 +507,31 @@ static uint32_t r_relax(const ins *in, uint32_t nin, uint32_t *wb, uint32_t at, 
 		if (in[k].op == I_LABEL)
 			loff[in[k].label] += cum[pt_lb(pt, npt, loff[in[k].label])];
 	for (uint32_t j = 0; j < npt; j++)
-		pt[j].at += cum[j];
+		pt[j].word_position += cum[j];
 	return nl;
 }
 
 VPRIV int a64_replay(codegen_commit_context *R, const codegen_code_header *h)
 {
 	const ins *in = (const ins *)(h + 1);
-	const char *raw = (const char *)(in + h->nin);
+	const char *raw = (const char *)(in + h->record_count);
 	uint32_t w[16];
 	codegen_commit_fixup f;
 
-	if (!h->sym_labels) {
+	if (!h->symbol_labels) {
 		/*
 		 * One block, branches resolved here: encode everything once into
 		 * R->wb, noting the records that need a label offset (patched
 		 * once the labels are known) or a fixup (applied in order after
 		 * the words are in the frag).
 		 */
-		uint32_t at = 0, frag = as_fragment_current(R->as), *loff = R->loff, *wb = R->wb, npt = 0;
-		codegen_commit_patch *pt = R->pt;
-		ElfObj *o = R->o;
+		uint32_t at = 0, frag = as_fragment_current(R->assembler), *loff = R->label_word_offsets, *wb = R->word_buffer, npt = 0;
+		codegen_commit_patch *pt = R->patches;
+		ElfObj *o = R->object;
 		uint64_t base;
 		uint8_t *p;
 
-		for (uint32_t k = 0; k < h->nin; k++) {
+		for (uint32_t k = 0; k < h->record_count; k++) {
 			const ins *i = &in[k];
 			unsigned n;
 
@@ -539,35 +539,35 @@ VPRIV int a64_replay(codegen_commit_context *R, const codegen_code_header *h)
 				loff[i->label] = at;
 				continue;
 			}
-			n = enc(i, wb + at, &pt[npt].f, NULL, 0);
+			n = enc(i, wb + at, &pt[npt].fixup, NULL, 0);
 			if (unlikely(i->op == I_MRS)) {
-				int r = a64_sysreg(R->c->strs[i->ref].s, strlen(R->c->strs[i->ref].s), 0);
+				int r = a64_sysreg(R->compile_context->strs[i->ref].s, strlen(R->compile_context->strs[i->ref].s), 0);
 
 				if (r < 0)
 					return codegen_commit_fail(R, "mrs: expected readable system register");
 				wb[at] = 0xd5200000u | ((unsigned)r & 0xffff) << 5 | R5(i->rd);
 			}
-			if (pt[npt].f.type) {
-				pt[npt].k = k;
-				pt[npt].at = at;
-				pt[npt].lng = 0;
+			if (pt[npt].fixup.type) {
+				pt[npt].record_index = k;
+				pt[npt].word_position = at;
+				pt[npt].is_relaxed = 0;
 				npt++;
 			}
 			at += n;
 		}
 		if (unlikely(at > BR19_MAX))	/* a label can be out of a conditional branch's reach */
-			at += r_relax(in, h->nin, wb, at, loff, pt, npt);
+			at += r_relax(in, h->record_count, wb, at, loff, pt, npt);
 		elf_code(o, frag);
 		base = elf_frag(o, frag)->size;
 		p = elf_grow(o, frag, (size_t)at * 4);
 		for (uint32_t j = 0; j < npt; j++) {
-			const ins *i = &in[pt[j].k];
-			uint32_t a = pt[j].at;
+			const ins *i = &in[pt[j].record_index];
+			uint32_t a = pt[j].word_position;
 			int64_t d;
 
-			if (!pt[j].f.lbl)
+			if (!pt[j].fixup.label_flag)
 				continue;
-			if (pt[j].lng) {
+			if (pt[j].is_relaxed) {
 				/* b.!cond / cbnz<->cbz over the next word (the record was encoded with offset 0) */
 				if (i->op == I_BC && i->cond >= 14)
 					return codegen_commit_fail(R, "internal: relaxing an unconditional b.al");
@@ -586,14 +586,14 @@ VPRIV int a64_replay(codegen_commit_context *R, const codegen_code_header *h)
 		}
 		memcpy(p, wb, (size_t)at * 4);
 		for (uint32_t j = 0; j < npt; j++) {
-			const codegen_commit_fixup *g = &pt[j].f;
-			uint32_t a = pt[j].at, y;
+			const codegen_commit_fixup *g = &pt[j].fixup;
+			uint32_t a = pt[j].word_position, y;
 
-			if (g->lbl)
+			if (g->label_flag)
 				continue;
-			y = codegen_commit_symbol_find(R, g->ref);
-			elf_fixup(o, frag, base + 4u * (a + g->k), p + 4 * (a + g->k), g->type, as_symbol_value(R->as, y, g->off));
-			more_fixups(o, frag, base + 4u * a, p + 4 * a, &in[pt[j].k], y, R->as);
+			y = codegen_commit_symbol_find(R, g->reference);
+			elf_fixup(o, frag, base + 4u * (a + g->word_index), p + 4 * (a + g->word_index), g->type, as_symbol_value(R->assembler, y, g->offset));
+			more_fixups(o, frag, base + 4u * a, p + 4 * a, &in[pt[j].record_index], y, R->assembler);
 		}
 		return 0;
 	}
@@ -603,52 +603,52 @@ VPRIV int a64_replay(codegen_commit_context *R, const codegen_code_header *h)
 	 * branch end up in the same frag, else through the label's symbol.
 	 */
 	{
-		ElfObj *o = R->o;
+		ElfObj *o = R->object;
 		uint32_t npend = 0;
 
-		R->ser++;
-		for (const char *q = raw, *qe = raw + h->nraw; (q = memmem(q, (size_t)(qe - q), ".LBB", 4)); ) {
+		R->serial++;
+		for (const char *q = raw, *qe = raw + h->raw_count; (q = memmem(q, (size_t)(qe - q), ".LBB", 4)); ) {
 			uint32_t fid = 0, l = 0;
 			const char *d = q += 4;
 
 			for (int v; q < qe && (v = hexval(*q)) >= 0; q++)
 				fid = fid * 16 + (uint32_t)v;
-			if (q == d || q >= qe || *q != '_' || fid != h->fid)
+			if (q == d || q >= qe || *q != '_' || fid != h->function_id)
 				continue;
 			d = ++q;
 			for (int v; q < qe && (v = hexval(*q)) >= 0; q++)
 				l = l * 16 + (uint32_t)v;
-			if (q > d && l < h->nlabel) {
+			if (q > d && l < h->label_count) {
 				codegen_commit_label *L = r_lab(R, l);
 
 				L->flags |= RL_NAMED;
 			}
 		}
-		for (uint32_t k = 0; k < h->nin; k++) {
+		for (uint32_t k = 0; k < h->record_count; k++) {
 			const ins *i = &in[k];
 			unsigned n;
 
 			if (i->op == I_RAW) {
-				if (as_snippet_assemble(R->as, raw + i->off, i->ref))
+				if (as_snippet_assemble(R->assembler, raw + i->off, i->ref))
 					return -1;
 				continue;
 			}
 			if (i->op == I_LABEL) {
 				codegen_commit_label *L = r_lab(R, i->label);
-				uint32_t frag = as_fragment_current(R->as);
+				uint32_t frag = as_fragment_current(R->assembler);
 
 				if (L->flags & RL_NAMED) {
-					if (as_label_define_symbol(R->as, r_label(R, h->fid, i->label)))
+					if (as_label_define_symbol(R->assembler, r_label(R, h->function_id, i->label)))
 						return -1;
 					continue;
 				}
 				L->flags |= RL_PLACED;
-				L->frag = frag;
-				L->off = (uint32_t)elf_frag(o, frag)->size;
-				for (uint32_t j = L->pend; j; j = R->pend[j - 1].next) {
-					const codegen_commit_pending_branch *pd = &R->pend[j - 1];
+				L->fragment = frag;
+				L->offset = (uint32_t)elf_frag(o, frag)->size;
+				for (uint32_t j = L->pending; j; j = R->pending[j - 1].next) {
+					const codegen_commit_pending_branch *pd = &R->pending[j - 1];
 
-					if (!r_branch(R, h->fid, &in[pd->k], L, pd->frag, pd->off, pd->p))
+					if (!r_branch(R, h->function_id, &in[pd->record_index], L, pd->fragment, pd->offset, pd->bytes))
 						return -1;
 				}
 				continue;
@@ -658,20 +658,20 @@ VPRIV int a64_replay(codegen_commit_context *R, const codegen_code_header *h)
 				codegen_commit_label *L = r_lab(R, i->label);
 
 				if (!(L->flags & RL_NAMED)) {
-					uint32_t frag = as_fragment_current(R->as), off;
+					uint32_t frag = as_fragment_current(R->assembler), off;
 					uint8_t *p;
 
 					elf_code(o, frag);
 					off = (uint32_t)elf_frag(o, frag)->size;
 					p = elf_grow(o, frag, 4);
 					if (L->flags & RL_PLACED) {
-						if (!r_branch(R, h->fid, i, L, frag, off, p))
+						if (!r_branch(R, h->function_id, i, L, frag, off, p))
 							return -1;
 					} else {
-						codegen_commit_pending_branch *pd = &R->pend[npend++];
+						codegen_commit_pending_branch *pd = &R->pending[npend++];
 
-						*pd = (codegen_commit_pending_branch){ L->pend, k, frag, off, p };
-						L->pend = npend;
+						*pd = (codegen_commit_pending_branch){ L->pending, k, frag, off, p };
+						L->pending = npend;
 						enc(i, w, &f, NULL, 0);
 						memcpy(p, w, 4);
 					}
@@ -680,23 +680,23 @@ VPRIV int a64_replay(codegen_commit_context *R, const codegen_code_header *h)
 			}
 			n = enc(i, w, &f, NULL, 0);
 			if (unlikely(i->op == I_MRS)) {
-				int r = a64_sysreg(R->c->strs[i->ref].s, strlen(R->c->strs[i->ref].s), 0);
+				int r = a64_sysreg(R->compile_context->strs[i->ref].s, strlen(R->compile_context->strs[i->ref].s), 0);
 
 				if (r < 0)
 					return codegen_commit_fail(R, "mrs: expected readable system register");
 				w[0] = 0xd5200000u | ((unsigned)r & 0xffff) << 5 | R5(i->rd);
 			}
 			if (n)
-				r_words(R, as_fragment_current(R->as), w, n, &f, h->fid, i);
+				r_words(R, as_fragment_current(R->assembler), w, n, &f, h->function_id, i);
 		}
 		/* branches to labels never placed: through the (undefined) symbol, as the text would */
 		for (uint32_t j = 0; j < npend; j++) {
-			const codegen_commit_pending_branch *pd = &R->pend[j];
-			const ins *i = &in[pd->k];
+			const codegen_commit_pending_branch *pd = &R->pending[j];
+			const ins *i = &in[pd->record_index];
 
 			if (!(r_lab(R, i->label)->flags & RL_PLACED)) {
 				enc(i, w, &f, NULL, 0);
-				elf_fixup(o, pd->frag, pd->off, pd->p, f.type, as_symbol_value(R->as, r_label(R, h->fid, i->label), 0));
+				elf_fixup(o, pd->fragment, pd->offset, pd->bytes, f.type, as_symbol_value(R->assembler, r_label(R, h->function_id, i->label), 0));
 			}
 		}
 	}

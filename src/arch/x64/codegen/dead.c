@@ -33,18 +33,18 @@ static uint64_t x64_dead_exit(void)
 
 static uint64_t x64_dead_use(record_effects f)
 {
-	return f.use | ((f.fl & RECORD_EFFECT_READS_FLAGS) ? X_DEAD_FLAGS : 0);
+	return f.used | ((f.flags & RECORD_EFFECT_READS_FLAGS) ? X_DEAD_FLAGS : 0);
 }
 
 static uint64_t x64_dead_def(record_effects f)
 {
-	return f.def | ((f.fl & RECORD_EFFECT_WRITES_FLAGS) ? X_DEAD_FLAGS : 0);
+	return f.defines | ((f.flags & RECORD_EFFECT_WRITES_FLAGS) ? X_DEAD_FLAGS : 0);
 }
 
 static bool x64_dead_removable(record_effects f)
 {
-	return (f.fl & RECORD_EFFECT_PURE) && !(f.fl & (RECORD_EFFECT_LOAD | RECORD_EFFECT_STORE | RECORD_EFFECT_TRAP | RECORD_EFFECT_FLOAT | RECORD_EFFECT_CALL | RECORD_EFFECT_BARRIER | RECORD_EFFECT_LABEL)) &&
-	       f.br == RECORD_BRANCH_NONE;
+	return (f.flags & RECORD_EFFECT_PURE) && !(f.flags & (RECORD_EFFECT_LOAD | RECORD_EFFECT_STORE | RECORD_EFFECT_TRAP | RECORD_EFFECT_FLOAT | RECORD_EFFECT_CALL | RECORD_EFFECT_BARRIER | RECORD_EFFECT_LABEL)) &&
+	       f.branch == RECORD_BRANCH_NONE;
 }
 
 static bool x64_dead_edge(uint32_t from, uint32_t to, uint32_t *count)
@@ -68,7 +68,7 @@ static bool x64_dead_target(uint32_t label, uint32_t labels, uint32_t *target)
 
 VPRIV void x64_dead_budget(codegen_context *e, uint32_t budget)
 {
-	xst *x = e->x64;
+	xst *x = e->x64_context;
 	uint32_t n = x->nin, blocks = 1, labels = 0, edges = 0;
 	uint32_t *start = x64_dead_work.start;
 	em_flow_transfer *transfer = x64_dead_work.transfer;
@@ -76,7 +76,7 @@ VPRIV void x64_dead_budget(codegen_context *e, uint32_t budget)
 	/* The normal epilogue contract below does not cover interrupt returns.
 	 * Opaque asm (including valid naked bodies) is rejected by the scan.
 	 */
-	if (x->interrupt || (e->c && e->wk->fsym && (e->c->syms[e->wk->fsym].flags & AST_SYMBOL_FLAG_NORETURN)) ||
+	if (x->interrupt || (e->compile_context && e->walk_state->function_symbol && (e->compile_context->syms[e->walk_state->function_symbol].flags & AST_SYMBOL_FLAG_NORETURN)) ||
 	    n < 2 || n > X_DEAD_RECORDS)
 		return;
 	start[0] = 0;
@@ -86,14 +86,14 @@ VPRIV void x64_dead_budget(codegen_context *e, uint32_t budget)
 		/* An opaque record or escaped label could add unrepresented entries
 		 * or edges. Decline the whole function without modifying any record.
 		 */
-		if (i->op >= X_NOPS || i->op == X_RAW || i->op == X_NAMED || i->op == X_JMPR || i->op == X_LEAL)
+		if (i->opcode >= X_NOPS || i->opcode == X_RAW || i->opcode == X_NAMED || i->opcode == X_JMPR || i->opcode == X_LEAL)
 			return;
-		if (k && (i->op == X_LABEL || x->in[k - 1].op == X_JMP || x->in[k - 1].op == X_JCC)) {
+		if (k && (i->opcode == X_LABEL || x->in[k - 1].opcode == X_JMP || x->in[k - 1].opcode == X_JCC)) {
 			if (blocks == X_DEAD_BLOCKS)
 				return;
 			start[blocks++] = k;
 		}
-		if (i->op == X_LABEL) {
+		if (i->opcode == X_LABEL) {
 			uint32_t previous;
 
 			if (labels == X_DEAD_BLOCKS || x64_dead_target(i->label, labels, &previous))
@@ -110,23 +110,23 @@ VPRIV void x64_dead_budget(codegen_context *e, uint32_t budget)
 			record_effects f = x64_effects(e, &x->in[k]);
 			uint64_t use = x64_dead_use(f);
 
-			if (f.br != RECORD_BRANCH_NONE && x->in[k].op != X_JMP && x->in[k].op != X_JCC)
+			if (f.branch != RECORD_BRANCH_NONE && x->in[k].opcode != X_JMP && x->in[k].opcode != X_JCC)
 				return;
 			t.use |= use & ~t.def;
 			/* RECORD_EFFECT_WRITES_FLAGS describes an output, not necessarily a complete
 			 * replacement of every condition flag. Keep the aggregate flag
 			 * token live across writers until a finer target proof exists.
 			 */
-			t.def |= f.def;
+			t.def |= f.defines;
 		}
 		const record *last = &x->in[start[b + 1] - 1];
-		if (last->op == X_JMP || last->op == X_JCC) {
+		if (last->opcode == X_JMP || last->opcode == X_JCC) {
 			uint32_t target;
 
 			if (!x64_dead_target(last->label, labels, &target) || !x64_dead_edge(b, target, &edges))
 				return;
 		}
-		if (last->op != X_JMP) {
+		if (last->opcode != X_JMP) {
 			if (b + 1 < blocks) {
 				if (!x64_dead_edge(b, b + 1, &edges))
 					return;
@@ -155,10 +155,10 @@ VPRIV void x64_dead_budget(codegen_context *e, uint32_t budget)
 			uint64_t def = x64_dead_def(f);
 
 			if (def && !(def & live) && x64_dead_removable(f)) {
-				x->in[k].op = X_DEAD_DELETED;
+				x->in[k].opcode = X_DEAD_DELETED;
 				changed = true;
 			} else {
-				live = x64_dead_use(f) | (live & ~f.def);
+				live = x64_dead_use(f) | (live & ~f.defines);
 			}
 		}
 	}
@@ -166,12 +166,12 @@ VPRIV void x64_dead_budget(codegen_context *e, uint32_t budget)
 		return;
 	uint32_t out = 0, cursor = 0;
 	for (uint32_t k = 0; k < n; k++) {
-		if (e->ndl)
+		if (e->debug_row_count)
 			codegen_debug_rows_remap(e, &cursor, k, out);
-		if (x->in[k].op != X_DEAD_DELETED)
+		if (x->in[k].opcode != X_DEAD_DELETED)
 			x->in[out++] = x->in[k];
 	}
-	if (e->ndl)
+	if (e->debug_row_count)
 		codegen_debug_rows_remap(e, &cursor, UINT32_MAX, out);
 	x->nin = out;
 }

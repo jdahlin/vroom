@@ -73,7 +73,7 @@ VPRIV uint32_t virbuild_simplify_undefined_value(codegen_context *e, virbuild_si
 /* q rewritten in place (true), or the value that replaces it in *r */
 VPRIV bool virbuild_insn_simplify(codegen_context *e, virbuild_simplify_state *S, uint32_t q, uint32_t *r)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 	vir_insn in = V->insns[q].insn;
 	int64_t k, k2;
 

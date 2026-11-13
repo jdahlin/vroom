@@ -25,7 +25,7 @@ VPRIV bool codegen_constraint_immediate_fits(int ch, i128 v)
 
 VPRIV void codegen_expression_known_bits(codegen_context *e, uint32_t n, uint64_t *k, uint64_t *v)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n);
 	int w = codegen_type_is_integer(c, x->ty) ? (int)codegen_type_size(c, x->ty) * 8 : 0;
 	uint64_t wm = w >= 64 ? ~0ull : w ? (1ull << w) - 1 : 0;

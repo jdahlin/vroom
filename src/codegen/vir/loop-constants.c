@@ -15,7 +15,7 @@
 VPRIV void virbuild_loop_constants_pin(virbuild_vectorize_state *S, uint32_t pre)
 {
 	codegen_context *e = S->context;
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 	uint32_t from[6], to[6], n = 0;
 
 	for (uint32_t i = 0; i < S->loop_block_count; i++)

@@ -65,16 +65,16 @@ static bool em_unused_pure(cc *c, uint32_t n, unsigned *left)
 
 VPRIV bool em_unused_local(codegen_context *e, uint32_t s, uint32_t fn)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const sym *y;
 	const attrs *a;
 
-	if (!e->E->o->opt || e->E->noopt || (e->E->sflags[s] & CODEGEN_SYMBOL_USED))
+	if (!e->unit->options->opt || e->unit->cleanups_disabled || (e->unit->symbol_flags[s] & CODEGEN_SYMBOL_USED))
 		return false;
 	/* fn is supplied by the backend/selector; top also protects an optnone
 	 * caller while a different function body is being inlined. */
 	if ((fn && (codegen_symbol_attributes(c, fn)->flags & CC_ATTRIBUTE_FLAG_OPTNONE)) ||
-	    (e->top && (codegen_symbol_attributes(c, e->top)->flags & CC_ATTRIBUTE_FLAG_OPTNONE)))
+	    (e->top_symbol && (codegen_symbol_attributes(c, e->top_symbol)->flags & CC_ATTRIBUTE_FLAG_OPTNONE)))
 		return false;
 	y = &c->syms[s];
 	a = codegen_symbol_attributes(c, s);
@@ -86,7 +86,7 @@ VPRIV bool em_unused_local(codegen_context *e, uint32_t s, uint32_t fn)
 
 VPRIV unsigned em_unused_init(codegen_context *e, const node *decl, uint32_t fn, unsigned budget)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 
 	if (!em_unused_local(e, decl->a, fn))
 		return EM_UNUSED_KEEP;

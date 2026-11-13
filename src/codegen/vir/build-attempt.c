@@ -45,22 +45,22 @@ static int virbuild_failure_find(const char *why)
 /* VCC_VIR_STATS: count one failed function; the first of each reason is kept as its example */
 static void virbuild_failure_note(codegen_context *e, uint32_t s, const char *why, virbuild_failure other, const char *detail)
 {
-	codegen_unit *E = e->E;
+	codegen_unit *E = e->unit;
 	int k;
 
-	if (!E->vstats)
+	if (!E->vir_statistics)
 		return;
 	k = virbuild_failure_find(why);
 	if (k < 0) {	/* a diagnostic of the shared walker or emitter: its format (a literal) is the detail */
 		k = other;
 		detail = why ? why : "";
 	}
-	pthread_mutex_lock(&E->emu);
-	if (!E->vfailed[k].count++) {
-		E->vfailed[k].sym = s;
-		snprintf(E->vfailed[k].detail, sizeof E->vfailed[k].detail, "%s", detail ? detail : "");
+	pthread_mutex_lock(&E->diagnostic_mutex);
+	if (!E->vir_failures[k].count++) {
+		E->vir_failures[k].sym = s;
+		snprintf(E->vir_failures[k].detail, sizeof E->vir_failures[k].detail, "%s", detail ? detail : "");
 	}
-	pthread_mutex_unlock(&E->emu);
+	pthread_mutex_unlock(&E->diagnostic_mutex);
 }
 
 /*
@@ -78,22 +78,22 @@ VPRIV void virbuild_statistics_print(codegen_unit *E)
 	int ord[VIRBUILD_FAILURE_COUNT], n = 0;
 
 	for (int k = 0; k < VIRBUILD_FAILURE_COUNT; k++)
-		if (E->vfailed[k].count) {
+		if (E->vir_failures[k].count) {
 			int j = n++;
 
-			fell += E->vfailed[k].count;
-			while (j > 0 && E->vfailed[ord[j - 1]].count < E->vfailed[k].count)
+			fell += E->vir_failures[k].count;
+			while (j > 0 && E->vir_failures[ord[j - 1]].count < E->vir_failures[k].count)
 				ord[j] = ord[j - 1], j--;
 			ord[j] = k;
 		}
-	fprintf(stderr, "vcc vir: attempted=%llu lowered=%llu built=%llu fallback=%llu\n", (unsigned long long)E->vattempted,
-		(unsigned long long)E->vlowered, (unsigned long long)E->vbuilt, (unsigned long long)fell);
+	fprintf(stderr, "vcc vir: attempted=%llu lowered=%llu built=%llu fallback=%llu\n", (unsigned long long)E->vir_attempted,
+		(unsigned long long)E->vir_lowered, (unsigned long long)E->vir_built, (unsigned long long)fell);
 	for (int i = 0; i < n; i++) {
 		int k = ord[i];
-		const vident *id = &vintern_ents[E->c->syms[E->vfailed[k].sym].name];
+		const vident *id = &vintern_ents[E->compile_context->syms[E->vir_failures[k].sym].name];
 
 		fprintf(stderr, "vcc vir-failure: reason=%s count=%u example=%.*s detail=%s\n", virbuild_failure_table[k].name,
-			(unsigned)E->vfailed[k].count, (int)id->len, id->s, E->vfailed[k].detail);
+			(unsigned)E->vir_failures[k].count, (int)id->len, id->s, E->vir_failures[k].detail);
 	}
 	virbuild_pass_stats_print(E);
 }
@@ -116,7 +116,7 @@ static int virbuild_mode_get(void)
 
 static void virbuild_function_name_get(codegen_context *e, uint32_t s, char *o, size_t n)
 {
-	const vident *id = &vintern_ents[e->c->syms[s].name];
+	const vident *id = &vintern_ents[e->compile_context->syms[s].name];
 
 	snprintf(o, n, "%.*s", (int)id->len, id->s);
 }
@@ -176,35 +176,35 @@ VPRIV bool virbuild_function_try(codegen_context *e, uint32_t s)
 	uint32_t npass;
 	vperf t0 = { 0, 0 };
 
-	if (!m || e->E->o->opt < 2 || WASM(e->c))
+	if (!m || e->unit->options->opt < 2 || WASM(e->c))
 		return false;
-	e->vtry = true;
-	e->vfail = NULL;
-	if (e->E->vstats)
-		e->E->vattempted++;
-	timed = e->E->vstats && virbuild_pass_switch_get()->time;
+	e->vir_try = true;
+	e->vir_failure_reason = NULL;
+	if (e->unit->vir_statistics)
+		e->unit->vir_attempted++;
+	timed = e->unit->vir_statistics && virbuild_pass_switch_get()->time;
 	virbuild_pass_list(&npass);
 	if (timed)
 		t0 = vperformance_now();
 	{
-		int novtag = e->novtag;	/* (a bail out of a volatile access leaves it raised) */
+		int novtag = e->volatile_untag_depth;	/* (a bail out of a volatile access leaves it raised) */
 
 		virbuild_walk_function_emit(e, s);
-		e->novtag = novtag;
+		e->volatile_untag_depth = novtag;
 	}
 	if (timed)
-		virbuild_pass_note(e->E, VIRBUILD_PASS_ROW_BUILD(npass), vperformance_subtract(vperformance_now(), t0).ins);
-	e->vtry = false;
+		virbuild_pass_note(e->unit, VIRBUILD_PASS_ROW_BUILD(npass), vperformance_subtract(vperformance_now(), t0).ins);
+	e->vir_try = false;
 	if (m & 8)
 		virbuild_function_name_get(e, s, nm, sizeof nm);
-	if (e->vfail) {
-		virbuild_failure_note(e, s, e->vfail, VIRBUILD_FAILURE_emitter_error, NULL);
+	if (e->vir_failure_reason) {
+		virbuild_failure_note(e, s, e->vir_failure_reason, VIRBUILD_FAILURE_emitter_error, NULL);
 		if (m & 8)
-			fprintf(stderr, "vir: %s: no: %s\n", nm, e->vfail);
+			fprintf(stderr, "vir: %s: no: %s\n", nm, e->vir_failure_reason);
 		return false;
 	}
 	{
-		virbuild_context *V = e->vw;
+		virbuild_context *V = e->vir_builder;
 		vbuffer b = { 0 };
 		uint32_t nerr = 0;
 
@@ -237,12 +237,12 @@ VPRIV bool virbuild_function_try(codegen_context *e, uint32_t s)
 			V->failure_detail[0] = 0;
 			if (timed)
 				t0 = vperformance_now();
-			ok = CODEGEN_IS_X64(e->c) ? x64_vir_function_lower(e, s, &why) : a64_vir_function_lower(e, s, &why);
+			ok = CODEGEN_IS_X64(e->compile_context) ? x64_vir_function_lower(e, s, &why) : a64_vir_function_lower(e, s, &why);
 			if (timed)
-				virbuild_pass_note(e->E, VIRBUILD_PASS_ROW_LOWER(npass), vperformance_subtract(vperformance_now(), t0).ins);
+				virbuild_pass_note(e->unit, VIRBUILD_PASS_ROW_LOWER(npass), vperformance_subtract(vperformance_now(), t0).ins);
 			if (ok) {
-				if (e->E->vstats)
-					e->E->vlowered++;
+				if (e->unit->vir_statistics)
+					e->unit->vir_lowered++;
 				if (m & 8)
 					fprintf(stderr, "vir: %s: lowered, %u spills\n", nm, V->allocation.statistics.spills);
 				return true;
@@ -250,8 +250,8 @@ VPRIV bool virbuild_function_try(codegen_context *e, uint32_t s)
 			virbuild_failure_note(e, s, why, VIRBUILD_FAILURE_lowering_failed, V->failure_detail);
 			if (m & 8)
 				fprintf(stderr, "vir: %s: not lowered: %s%s%s\n", nm, why, V->failure_detail[0] ? ": " : "", V->failure_detail);
-		} else if (!nerr && e->E->vstats)
-			e->E->vbuilt++;
+		} else if (!nerr && e->unit->vir_statistics)
+			e->unit->vir_built++;
 	}
 	return false;
 }

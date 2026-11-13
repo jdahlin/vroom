@@ -23,15 +23,15 @@ VPRIV codegen_value walk_division_signed_power_of_two_emit(codegen_context *e, a
 	}
 	rb = WALK_LOWER(treg)(e);
 	WALK_LOWER(mov)(e, rb, ra);
-	bias = WALK_LOWER(bin)(e, LEX_TOKEN_GREATER_GREATER, size, true, (codegen_value){ .k = CODEGEN_VALUE_REGISTER, .r = (uint8_t)rb }, codegen_value_constant(r->bits - 1));
+	bias = WALK_LOWER(bin)(e, LEX_TOKEN_GREATER_GREATER, size, true, (codegen_value){ .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)rb }, codegen_value_constant(r->bits - 1));
 	bias = WALK_LOWER(bin)(e, LEX_TOKEN_GREATER_GREATER, size, false, bias, codegen_value_constant(r->bits - r->shift));
 	if (r->remainder) {
 		int saved = WALK_LOWER(treg)(e);
 
-		WALK_LOWER(mov)(e, saved, bias.r);
+		WALK_LOWER(mov)(e, saved, bias.register_number);
 		a = WALK_LOWER(bin)(e, LEX_TOKEN_PLUS, size, false, a, bias);
 		a = WALK_LOWER(bin)(e, LEX_TOKEN_AMPERSAND, size, false, a, codegen_value_constant(((i128)1 << r->shift) - 1));
-		return WALK_LOWER(bin)(e, LEX_TOKEN_MINUS, size, false, a, (codegen_value){ .k = CODEGEN_VALUE_REGISTER, .r = (uint8_t)saved });
+		return WALK_LOWER(bin)(e, LEX_TOKEN_MINUS, size, false, a, (codegen_value){ .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)saved });
 	}
 	a = WALK_LOWER(bin)(e, LEX_TOKEN_PLUS, size, false, a, bias);
 	a = WALK_LOWER(bin)(e, LEX_TOKEN_GREATER_GREATER, size, true, a, codegen_value_constant(r->shift));
