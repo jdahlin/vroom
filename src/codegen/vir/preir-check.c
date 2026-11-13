@@ -20,8 +20,8 @@
  * its definition (vir_verify checks that on VIR), that every reachable block is in
  * V->order.
  */
-#define WK_PREFIX virbuild_
-#define LO_PREFIX virbuild_
+#define WALK_PREFIX virbuild_
+#define WALK_LOWER_PREFIX virbuild_
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
@@ -276,7 +276,7 @@ static void virbuild_preir_check_values(virbuild_preir_checker *k, uint32_t vali
 	}
 }
 
-VPRIV const char *virbuild_preir_check(ecx *e, uint32_t valid, char *buf, size_t n)
+VPRIV const char *virbuild_preir_check(codegen_context *e, uint32_t valid, char *buf, size_t n)
 {
 	virbuild_context *V = e->vw;
 	virbuild_preir_checker k = { .context = V, .buf = buf, .count = n };

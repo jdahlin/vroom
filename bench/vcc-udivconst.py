@@ -12,7 +12,7 @@ SOURCE = r'''
 #include <assert.h>
 #include "codegen/opt/udivconst.c"
 #include "arch/x64/codegen/x64impl.h"
-#include "codegen/walk/udivconst.c"
+#include "codegen/walk/division-unsigned-constant.c"
 #include "arch/a64/codegen/udivconst.c"
 VPRIV int x64_nfree(ecx *e) { return 8 - __builtin_popcount(e->x64->live & X_TEMPS); }
 /* The typed wrapper is unused in this arithmetic-only contract. */

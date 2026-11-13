@@ -1,25 +1,25 @@
 /* The pre-IR: instructions and blocks, constants, terminators (PLAN-vir.md V2). */
-#define WK_PREFIX virbuild_
-#define LO_PREFIX virbuild_
+#define WALK_PREFIX virbuild_
+#define WALK_LOWER_PREFIX virbuild_
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
 
-VPRIV virbuild_context *virbuild_context_get(ecx *e)
+VPRIV virbuild_context *virbuild_context_get(codegen_context *e)
 {
 	if (!e->vw)
 		e->vw = calloc(1, sizeof(virbuild_context));
 	return e->vw;
 }
 
-VPRIV __attribute__((noreturn, cold)) void virbuild_fail(ecx *e, const char *why)
+VPRIV __attribute__((noreturn, cold)) void virbuild_fail(codegen_context *e, const char *why)
 {
 	if (!e->vfail)
 		e->vfail = why;
 	_longjmp(e->bail, 1);
 }
 
-VPRIV uint32_t virbuild_preir_insn_add(ecx *e, uint32_t op, uint32_t ty, uint32_t fl, uint32_t a, uint32_t b, uint32_t c, uint32_t blk)
+VPRIV uint32_t virbuild_preir_insn_add(codegen_context *e, uint32_t op, uint32_t ty, uint32_t fl, uint32_t a, uint32_t b, uint32_t c, uint32_t blk)
 {
 	virbuild_context *V = e->vw;
 	uint32_t i = V->insn_count;
@@ -35,7 +35,7 @@ VPRIV uint32_t virbuild_preir_insn_add(ecx *e, uint32_t op, uint32_t ty, uint32_
 }
 
 /* an instruction at the end of block b's list */
-VPRIV uint32_t virbuild_block_insn_append(ecx *e, uint32_t b, uint32_t op, uint32_t ty, uint32_t fl, uint32_t a, uint32_t bb, uint32_t c)
+VPRIV uint32_t virbuild_block_insn_append(codegen_context *e, uint32_t b, uint32_t op, uint32_t ty, uint32_t fl, uint32_t a, uint32_t bb, uint32_t c)
 {
 	virbuild_context *V = e->vw;
 	uint32_t i = virbuild_preir_insn_add(e, op, ty, fl, a, bb, c, b);
@@ -49,24 +49,24 @@ VPRIV uint32_t virbuild_block_insn_append(ecx *e, uint32_t b, uint32_t op, uint3
 	return i;
 }
 
-VPRIV uint32_t virbuild_insn_append(ecx *e, uint32_t op, uint32_t ty, uint32_t fl, uint32_t a, uint32_t b, uint32_t c)
+VPRIV uint32_t virbuild_insn_append(codegen_context *e, uint32_t op, uint32_t ty, uint32_t fl, uint32_t a, uint32_t b, uint32_t c)
 {
 	return virbuild_block_insn_append(e, e->vw->current_block, op, ty, fl, a, b, c);
 }
 
-VPRIV uint32_t virbuild_constant_make(ecx *e, uint32_t op, uint32_t ty, uint32_t a, uint32_t b, uint32_t c)
+VPRIV uint32_t virbuild_constant_make(codegen_context *e, uint32_t op, uint32_t ty, uint32_t a, uint32_t b, uint32_t c)
 {
 	return virbuild_preir_insn_add(e, op, ty, 0, a, b, c, VIRBUILD_BLOCK_NONE);
 }
 
-VPRIV uint32_t virbuild_constant_integer(ecx *e, uint32_t ty, int64_t v)
+VPRIV uint32_t virbuild_constant_integer(codegen_context *e, uint32_t ty, int64_t v)
 {
 	if (ty == VIR_TYPE_I32)
 		return virbuild_constant_make(e, VIR_OP_ICONST, VIR_TYPE_I32, 0, (uint32_t)v, 0);
 	return virbuild_constant_make(e, VIR_OP_ICONST, ty, 0, (uint32_t)v, (uint32_t)((uint64_t)v >> 32));
 }
 
-VPRIV uint32_t virbuild_extra_append(ecx *e, const uint32_t *w, uint32_t n)
+VPRIV uint32_t virbuild_extra_append(codegen_context *e, const uint32_t *w, uint32_t n)
 {
 	virbuild_context *V = e->vw;
 	uint32_t o = V->extra_count;
@@ -78,7 +78,7 @@ VPRIV uint32_t virbuild_extra_append(ecx *e, const uint32_t *w, uint32_t n)
 	return o;
 }
 
-VPRIV uint32_t virbuild_block_new(ecx *e)
+VPRIV uint32_t virbuild_block_new(codegen_context *e)
 {
 	virbuild_context *V = e->vw;
 	uint32_t b = V->block_count;
@@ -90,7 +90,7 @@ VPRIV uint32_t virbuild_block_new(ecx *e)
 	return b;
 }
 
-VPRIV uint32_t virbuild_label_block(ecx *e, uint32_t l)
+VPRIV uint32_t virbuild_label_block(codegen_context *e, uint32_t l)
 {
 	virbuild_context *V = e->vw;
 
@@ -113,7 +113,7 @@ VPRIV uint32_t virbuild_label_block(ecx *e, uint32_t l)
 }
 
 /* ends the current block with terminator t; code after it goes to a block nothing reaches */
-VPRIV void virbuild_block_terminate(ecx *e, uint32_t op, uint32_t a, uint32_t b, uint32_t c, uint32_t fl)
+VPRIV void virbuild_block_terminate(codegen_context *e, uint32_t op, uint32_t a, uint32_t b, uint32_t c, uint32_t fl)
 {
 	virbuild_context *V = e->vw;
 
@@ -122,4 +122,4 @@ VPRIV void virbuild_block_terminate(ecx *e, uint32_t op, uint32_t a, uint32_t b,
 	V->store_count = 0;
 }
 
-VPRIV void virbuild_branch_emit(ecx *e, uint32_t blk) { virbuild_block_terminate(e, VIR_OP_BR, blk, 0, 0, 0); }
+VPRIV void virbuild_branch_emit(codegen_context *e, uint32_t blk) { virbuild_block_terminate(e, VIR_OP_BR, blk, 0, 0, 0); }

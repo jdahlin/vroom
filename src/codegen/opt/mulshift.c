@@ -6,13 +6,13 @@
  * defined, and no shift node is built, so the caller's evaluation order and diagnostics are
  * unchanged.  Used by the shared walker and wasm's emitter.
  */
-#include "../emitimpl.h"
+#include "../codegen-internal.h"
 
 VPRIV bool em_mulshift(cc *c, ast_qualified_type ty, int *op, i128 *rhs)
 {
-	if (*op != LEX_TOKEN_STAR || !is_integer(c, ty) || em_bitint(c, ty))
+	if (*op != LEX_TOKEN_STAR || !codegen_type_is_integer(c, ty) || codegen_type_is_bitint(c, ty))
 		return false;
-	uint64_t size = tsize(c, ty);
+	uint64_t size = codegen_type_size(c, ty);
 	if (size != 4 && size != 8)
 		return false;
 	uint64_t factor = size == 4 ? (uint32_t)*rhs : (uint64_t)*rhs;

@@ -12,7 +12,7 @@
  * never taken take part.  -O1 and up.  Called by the shared walker and by arm64's and wasm's
  * emitters.
  */
-#include "../emitimpl.h"
+#include "../codegen-internal.h"
 
 typedef struct em_sibling_state {
  em_value_table table;
@@ -33,23 +33,23 @@ static uint32_t em_sibling_value(cc *c, em_sibling_state *s, uint32_t n)
  if (!n || !s->nodes) return 0;
  --s->nodes;
  x = N(n);
- if (!is_integer(c, x->ty) || em_bitint(c, x->ty) ||
-     (tsize(c, x->ty) != 4 && tsize(c, x->ty) != 8)) return 0;
+ if (!codegen_type_is_integer(c, x->ty) || codegen_type_is_bitint(c, x->ty) ||
+     (codegen_type_size(c, x->ty) != 4 && codegen_type_size(c, x->ty) != 8)) return 0;
  if (x->op == AST_NODE_VARIABLE) {
   if (s->check_killed)
    for (uint32_t i = 0; i < s->nkilled; i++)
     if (s->killed[i] == x->a) return 0;
   sym = &c->syms[x->a];
-  if (!is_local_var(c, x->a) || sym->kind != AST_SYMBOL_VARIABLE || sym->sc == AST_STORAGE_STATIC || sym->sc == AST_STORAGE_EXTERN ||
+  if (!codegen_symbol_is_local_variable(c, x->a) || sym->kind != AST_SYMBOL_VARIABLE || sym->sc == AST_STORAGE_STATIC || sym->sc == AST_STORAGE_EXTERN ||
       (sym->flags & AST_SYMBOL_FLAG_ADDRESS_TAKEN) || (AST_QUALIFIED_TYPE_QUALIFIERS(sym->ty) & AST_QUALIFIER_VOLATILE) ||
-      (T(c, sym->ty)->flags & AST_TYPE_FLAG_ATOMIC) || sym_attrs(c, x->a)->asmname) return 0;
+      (T(c, sym->ty)->flags & AST_TYPE_FLAG_ATOMIC) || codegen_symbol_attributes(c, x->a)->asmname) return 0;
   if (s->target && x->a == s->symbol) s->symnode = n;
   return x->a + 1;
  }
  key.type = AST_QUALIFIED_TYPE_UNQUALIFIED(x->ty);
  if (x->op == AST_NODE_NUMBER) {
   key.operation = 1;
-  key.immediate = (uint64_t)em_trunc_to(c, c->ipool[x->a], x->ty);
+  key.immediate = (uint64_t)codegen_integer_truncate(c, c->ipool[x->a], x->ty);
  } else if (x->op == AST_NODE_CAST && (x->aux == AST_CAST_INTEGER || x->aux == AST_CAST_NOP || x->aux == AST_CAST_BOOL)) {
   left = em_sibling_value(c, s, x->a);
   if (!left) return 0;
@@ -94,7 +94,7 @@ static __attribute__((noinline)) bool em_sibling_match(cc *c, uint32_t a, uint32
  return left && left == right;
 }
 
-VPRIV bool em_sibling_values(ecx *e, uint32_t n)
+VPRIV bool em_sibling_values(codegen_context *e, uint32_t n)
 {
  cc *c = e->c;
  const node *x = N(n), *a, *b;
@@ -129,7 +129,7 @@ static __attribute__((noinline)) bool em_decl_reuse_match(cc *c, uint32_t init, 
  return true;
 }
 
-VPRIV bool em_decl_reuse_values(ecx *e, uint32_t decl, uint32_t consumer,
+VPRIV bool em_decl_reuse_values(codegen_context *e, uint32_t decl, uint32_t consumer,
                                 const uint32_t *killed, uint32_t nkilled, uint32_t *from, uint32_t *to)
 {
  cc *c = e->c;
@@ -141,17 +141,17 @@ VPRIV bool em_decl_reuse_values(ecx *e, uint32_t decl, uint32_t consumer,
  if (d->op != AST_NODE_DECLARATION || !d->b || N(d->b)->op != AST_NODE_BINARY || c->nsym >= UINT32_MAX - 32) return false;
  s = &c->syms[d->a];
  for (uint32_t i = 0; i < nkilled; i++) if (killed[i] == d->a) return false;
- if (!is_local_var(c, d->a) || s->kind != AST_SYMBOL_VARIABLE || s->sc == AST_STORAGE_STATIC || s->sc == AST_STORAGE_EXTERN ||
+ if (!codegen_symbol_is_local_variable(c, d->a) || s->kind != AST_SYMBOL_VARIABLE || s->sc == AST_STORAGE_STATIC || s->sc == AST_STORAGE_EXTERN ||
      (s->flags & AST_SYMBOL_FLAG_ADDRESS_TAKEN) || (AST_QUALIFIED_TYPE_QUALIFIERS(s->ty) & AST_QUALIFIER_VOLATILE) || (T(c, s->ty)->flags & AST_TYPE_FLAG_ATOMIC) ||
-     sym_attrs(c, d->a)->cleanup || sym_attrs(c, d->a)->asmname ||
+     codegen_symbol_attributes(c, d->a)->cleanup || codegen_symbol_attributes(c, d->a)->asmname ||
      AST_QUALIFIED_TYPE_UNQUALIFIED(s->ty) != AST_QUALIFIED_TYPE_UNQUALIFIED(N(d->b)->ty)) return false;
  if (r->op == AST_NODE_RETURN) {
   expr = r->a;
  } else if (r->op == AST_NODE_DECLARATION && r->a != d->a) {
   const sym *out = &c->syms[r->a];
-  if (!is_local_var(c, r->a) || out->kind != AST_SYMBOL_VARIABLE || out->sc == AST_STORAGE_STATIC || out->sc == AST_STORAGE_EXTERN ||
+  if (!codegen_symbol_is_local_variable(c, r->a) || out->kind != AST_SYMBOL_VARIABLE || out->sc == AST_STORAGE_STATIC || out->sc == AST_STORAGE_EXTERN ||
       (out->flags & AST_SYMBOL_FLAG_ADDRESS_TAKEN) || (AST_QUALIFIED_TYPE_QUALIFIERS(out->ty) & AST_QUALIFIER_VOLATILE) || (T(c, out->ty)->flags & AST_TYPE_FLAG_ATOMIC) ||
-      sym_attrs(c, r->a)->cleanup || sym_attrs(c, r->a)->asmname || !r->b ||
+      codegen_symbol_attributes(c, r->a)->cleanup || codegen_symbol_attributes(c, r->a)->asmname || !r->b ||
       AST_QUALIFIED_TYPE_UNQUALIFIED(out->ty) != AST_QUALIFIED_TYPE_UNQUALIFIED(N(r->b)->ty)) return false;
   expr = r->b;
  } else if (r->op == AST_NODE_EXPRESSION && r->a) {
@@ -163,9 +163,9 @@ VPRIV bool em_decl_reuse_values(ecx *e, uint32_t decl, uint32_t consumer,
   lhs = N(assign->a);
   if (lhs->op != AST_NODE_VARIABLE) return false;
   out = &c->syms[lhs->a];
-  if (!is_local_var(c, lhs->a) || out->kind != AST_SYMBOL_VARIABLE || out->sc == AST_STORAGE_STATIC || out->sc == AST_STORAGE_EXTERN ||
+  if (!codegen_symbol_is_local_variable(c, lhs->a) || out->kind != AST_SYMBOL_VARIABLE || out->sc == AST_STORAGE_STATIC || out->sc == AST_STORAGE_EXTERN ||
       (out->flags & AST_SYMBOL_FLAG_ADDRESS_TAKEN) || (AST_QUALIFIED_TYPE_QUALIFIERS(out->ty) & AST_QUALIFIER_VOLATILE) || (T(c, out->ty)->flags & AST_TYPE_FLAG_ATOMIC) ||
-      sym_attrs(c, lhs->a)->asmname || AST_QUALIFIED_TYPE_UNQUALIFIED(out->ty) != AST_QUALIFIED_TYPE_UNQUALIFIED(N(assign->b)->ty)) return false;
+      codegen_symbol_attributes(c, lhs->a)->asmname || AST_QUALIFIED_TYPE_UNQUALIFIED(out->ty) != AST_QUALIFIED_TYPE_UNQUALIFIED(N(assign->b)->ty)) return false;
   expr = assign->b;
  } else return false;
  if (!expr || N(expr)->op != AST_NODE_BINARY) return false;
@@ -180,7 +180,7 @@ VPRIV bool em_decl_reuse_values(ecx *e, uint32_t decl, uint32_t consumer,
 
 /* A declaration of a new, nonobservable scalar with a pure initializer cannot
  * change an earlier local value. Used only while scanning a short block suffix. */
-static __attribute__((noinline)) bool em_value_pure_decl(ecx *e, uint32_t n)
+static __attribute__((noinline)) bool em_value_pure_decl(codegen_context *e, uint32_t n)
 {
  cc *c = e->c;
  const node *d = N(n);
@@ -188,10 +188,10 @@ static __attribute__((noinline)) bool em_value_pure_decl(ecx *e, uint32_t n)
  em_sibling_state s = {0};
  if (d->op != AST_NODE_DECLARATION) return false;
  y = &c->syms[d->a];
- if (!is_local_var(c, d->a) || y->kind != AST_SYMBOL_VARIABLE || y->sc == AST_STORAGE_STATIC || y->sc == AST_STORAGE_EXTERN ||
+ if (!codegen_symbol_is_local_variable(c, d->a) || y->kind != AST_SYMBOL_VARIABLE || y->sc == AST_STORAGE_STATIC || y->sc == AST_STORAGE_EXTERN ||
      (y->flags & AST_SYMBOL_FLAG_ADDRESS_TAKEN) || (AST_QUALIFIED_TYPE_QUALIFIERS(y->ty) & AST_QUALIFIER_VOLATILE) || (T(c, y->ty)->flags & AST_TYPE_FLAG_ATOMIC) ||
-     sym_attrs(c, d->a)->cleanup || sym_attrs(c, d->a)->asmname || !is_integer(c, y->ty) ||
-     em_bitint(c, y->ty) || (tsize(c, y->ty) != 4 && tsize(c, y->ty) != 8)) return false;
+     codegen_symbol_attributes(c, d->a)->cleanup || codegen_symbol_attributes(c, d->a)->asmname || !codegen_type_is_integer(c, y->ty) ||
+     codegen_type_is_bitint(c, y->ty) || (codegen_type_size(c, y->ty) != 4 && codegen_type_size(c, y->ty) != 8)) return false;
  if (!d->b) return true;
  if (AST_QUALIFIED_TYPE_UNQUALIFIED(y->ty) != AST_QUALIFIED_TYPE_UNQUALIFIED(N(d->b)->ty) || c->nsym >= UINT32_MAX - 32) return false;
  s.next = c->nsym + 1; s.nodes = 32;
@@ -201,7 +201,7 @@ static __attribute__((noinline)) bool em_value_pure_decl(ecx *e, uint32_t n)
 
 /* Cheap preflight: identify a possible ordinary local write without walking
  * its RHS. The RHS is proved only if a later candidate survives invalidation. */
-static bool em_value_local_write(ecx *e, uint32_t n, uint32_t *written)
+static bool em_value_local_write(codegen_context *e, uint32_t n, uint32_t *written)
 {
  cc *c = e->c;
  const node *stmt = N(n), *a, *lhs;
@@ -217,17 +217,17 @@ static bool em_value_local_write(ecx *e, uint32_t n, uint32_t *written)
  lhs = N(a->a);
  if (lhs->op != AST_NODE_VARIABLE) return false;
  y = &c->syms[lhs->a];
- if (!is_local_var(c, lhs->a) || y->kind != AST_SYMBOL_VARIABLE || y->sc == AST_STORAGE_STATIC || y->sc == AST_STORAGE_EXTERN ||
+ if (!codegen_symbol_is_local_variable(c, lhs->a) || y->kind != AST_SYMBOL_VARIABLE || y->sc == AST_STORAGE_STATIC || y->sc == AST_STORAGE_EXTERN ||
      (y->flags & AST_SYMBOL_FLAG_ADDRESS_TAKEN) || (AST_QUALIFIED_TYPE_QUALIFIERS(y->ty) & AST_QUALIFIER_VOLATILE) || (T(c, y->ty)->flags & AST_TYPE_FLAG_ATOMIC) ||
-     sym_attrs(c, lhs->a)->asmname || !is_integer(c, y->ty) || em_bitint(c, y->ty) ||
-     (tsize(c, y->ty) != 4 && tsize(c, y->ty) != 8) || c->nsym >= UINT32_MAX - 32 ||
+     codegen_symbol_attributes(c, lhs->a)->asmname || !codegen_type_is_integer(c, y->ty) || codegen_type_is_bitint(c, y->ty) ||
+     (codegen_type_size(c, y->ty) != 4 && codegen_type_size(c, y->ty) != 8) || c->nsym >= UINT32_MAX - 32 ||
      (!increment && AST_QUALIFIED_TYPE_UNQUALIFIED(y->ty) != AST_QUALIFIED_TYPE_UNQUALIFIED(N(a->b)->ty))) return false;
  *written = lhs->a;
  return true;
 }
 
 /* Only a surviving candidate pays for the bounded purity proof. */
-static __attribute__((noinline)) bool em_value_local_assignment(ecx *e, uint32_t n)
+static __attribute__((noinline)) bool em_value_local_assignment(codegen_context *e, uint32_t n)
 {
  cc *c = e->c;
  const node *a = N(N(n)->a);
@@ -240,7 +240,7 @@ static __attribute__((noinline)) bool em_value_local_assignment(ecx *e, uint32_t
 
 /* Scan at most eight preceding declarations or pure local assignments.
  * A written dependency invalidates a candidate; all other effects stop. */
-VPRIV bool em_block_value_reuse(ecx *e, const node *block, uint32_t first, uint32_t i,
+VPRIV bool em_block_value_reuse(codegen_context *e, const node *block, uint32_t first, uint32_t i,
                                    uint32_t *from, uint32_t *to)
 {
  cc *c = e->c;

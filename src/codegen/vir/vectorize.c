@@ -34,8 +34,8 @@
  * need it, lanes do not.
  */
 
-#define WK_PREFIX virbuild_
-#define LO_PREFIX virbuild_
+#define WALK_PREFIX virbuild_
+#define WALK_LOWER_PREFIX virbuild_
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
@@ -51,7 +51,7 @@ static bool virbuild_vectorize_reject(virbuild_vectorize_state *S, const char *w
 
 static virbuild_vectorize_info *virbuild_vectorize_info_touch(virbuild_vectorize_state *S, uint32_t v)
 {
-	ecx *e = S->context;
+	codegen_context *e = S->context;
 
 	VIRBUILD_ARRAY_GROW(S->touched, S->touched_count, S->touched_capacity, 1);
 	S->touched[S->touched_count++] = v;
@@ -847,7 +847,7 @@ static uint32_t virbuild_vectorize_parameter_new(virbuild_vectorize_state *S, ui
 
 static uint32_t virbuild_vectorize_block_new(virbuild_vectorize_state *S, uint32_t p0, uint32_t p1)
 {
-	ecx *e = S->context;
+	codegen_context *e = S->context;
 	virbuild_context *V = e->vw;
 	uint32_t b = virbuild_block_new(e), n = (p0 != VIRBUILD_BLOCK_NONE) + (p1 != VIRBUILD_BLOCK_NONE);
 
@@ -938,7 +938,7 @@ static bool virbuild_vectorize_update_depends_on_parameter(virbuild_context *V, 
 
 static bool virbuild_vectorize_loop(virbuild_vectorize_state *S)
 {
-	ecx *e = S->context;
+	codegen_context *e = S->context;
 	virbuild_context *V = e->vw;
 	uint32_t H = S->header, t = V->blocks[H].terminator, cond = virbuild_value_resolve(V, V->insns[t].insn.a), u, n, cc, d, cnt, cntn, nv, guard, z = 0;
 	bool incl;
@@ -1042,7 +1042,7 @@ static bool virbuild_vectorize_loop(virbuild_vectorize_state *S)
 		 * scalar loop with a vector load in front.  Measured on arm64 (TSVC s314, s316: a
 		 * maximum by compare and select, nine times slower than the scalar loop); x86-64 is
 		 * left as its lowering was written. */
-		if (!st && !X86(S->context->c))
+		if (!st && !CODEGEN_IS_X64(S->context->c))
 			return virbuild_vectorize_reject(S, "only an ordered reduction: nothing to pack");
 	}
 	for (uint32_t i = 0; i < S->reduction_count; i++)
@@ -1347,7 +1347,7 @@ static bool virbuild_vectorize_loop(virbuild_vectorize_state *S)
 /* the new blocks into the layout, in front of H */
 static void virbuild_vectorize_blocks_place(virbuild_vectorize_state *S)
 {
-	ecx *e = S->context;
+	codegen_context *e = S->context;
 	virbuild_context *V = e->vw;
 	const uint32_t nb[5] = { S->preheader_block, S->vector_header_block, S->vector_body_block, S->vector_exit_block, S->join_block };
 	uint32_t at = 0;
@@ -1375,7 +1375,7 @@ static int virbuild_vectorize_environment_get(void)
 	return m;
 }
 
-VPRIV void virbuild_function_vectorize(ecx *e)
+VPRIV void virbuild_function_vectorize(codegen_context *e)
 {
 	virbuild_context *V = e->vw;
 	virbuild_vectorize_state S = { .context = e, .value_count = V->insn_count };

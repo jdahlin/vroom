@@ -1,6 +1,6 @@
 /* Variables as SSA: Braun et al.'s construction on the pre-IR (placeholder parameters, reads and writes). */
-#define WK_PREFIX virbuild_
-#define LO_PREFIX virbuild_
+#define WALK_PREFIX virbuild_
+#define WALK_LOWER_PREFIX virbuild_
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "port/stack-guard.h"
@@ -20,7 +20,7 @@ VPRIV void virbuild_variable_table_clear(virbuild_context *V)
 	}
 }
 
-VPRIV uint32_t *virbuild_variable_slot(ecx *e, uint32_t b, uint32_t var, bool add)
+VPRIV uint32_t *virbuild_variable_slot(codegen_context *e, uint32_t b, uint32_t var, bool add)
 {
 	virbuild_context *V = e->vw;
 	uint64_t key = virbuild_variable_key(b, var) + 1;
@@ -76,14 +76,14 @@ VPRIV uint32_t *virbuild_variable_slot(ecx *e, uint32_t b, uint32_t var, bool ad
 	}
 }
 
-VPRIV void virbuild_variable_write(ecx *e, uint32_t var, uint32_t b, uint32_t v)
+VPRIV void virbuild_variable_write(codegen_context *e, uint32_t var, uint32_t b, uint32_t v)
 {
 	*virbuild_variable_slot(e, b, var, true) = v;
 	e->vw->blocks[b].has_definition = 1;
 }
 
 /* the type a parameter of var gets when its value has type ty */
-static uint32_t virbuild_parameter_type(ecx *e, uint32_t var, uint32_t ty)
+static uint32_t virbuild_parameter_type(codegen_context *e, uint32_t var, uint32_t ty)
 {
 	if (var >= VIRBUILD_LOCAL_VARIABLE_FIRST)
 		return e->vw->variable_types[var - VIRBUILD_LOCAL_VARIABLE_FIRST];
@@ -92,7 +92,7 @@ static uint32_t virbuild_parameter_type(ecx *e, uint32_t var, uint32_t ty)
 	return ty;
 }
 
-VPRIV uint32_t virbuild_parameter_new(ecx *e, uint32_t b, uint32_t var, uint32_t ty)
+VPRIV uint32_t virbuild_parameter_new(codegen_context *e, uint32_t b, uint32_t var, uint32_t ty)
 {
 	virbuild_context *V = e->vw;
 	uint32_t i = virbuild_preir_insn_add(e, VIR_OP_BPARAM, ty, 0, var, VIRBUILD_BLOCK_NONE, 0, b);
@@ -107,7 +107,7 @@ VPRIV uint32_t virbuild_parameter_new(ecx *e, uint32_t b, uint32_t var, uint32_t
 }
 
 /* the operands of parameter p (block b) from b's predecessors, converted to its type */
-VPRIV void virbuild_parameter_operands_fill(ecx *e, uint32_t p, uint32_t b)
+VPRIV void virbuild_parameter_operands_fill(codegen_context *e, uint32_t p, uint32_t b)
 {
 	virbuild_context *V = e->vw;
 	uint32_t var = V->insns[p].insn.a, ty = V->insns[p].insn.type, np = V->blocks[b].predecessor_count;
@@ -124,7 +124,7 @@ VPRIV void virbuild_parameter_operands_fill(ecx *e, uint32_t p, uint32_t b)
 	}
 }
 
-VPRIV uint32_t virbuild_undefined_value(ecx *e, uint32_t ty)
+VPRIV uint32_t virbuild_undefined_value(codegen_context *e, uint32_t ty)
 {
 	if (ty == VIR_TYPE_F32 || ty == VIR_TYPE_F64)
 		return virbuild_constant_make(e, VIR_OP_FCONST, ty, 0, 0, 0);
@@ -132,7 +132,7 @@ VPRIV uint32_t virbuild_undefined_value(ecx *e, uint32_t ty)
 }
 
 /* var's value at the end of block b (during the walk: at the current point of the current block) */
-VPRIV uint32_t virbuild_variable_read(ecx *e, uint32_t var, uint32_t b, uint32_t ty)
+VPRIV uint32_t virbuild_variable_read(codegen_context *e, uint32_t var, uint32_t b, uint32_t ty)
 {
 	virbuild_context *V = e->vw;
 	uint32_t *d = virbuild_variable_slot(e, b, var, false), v;

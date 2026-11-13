@@ -2,19 +2,19 @@
  * debug-rows.c: the line table of a function (-g): which source line, column and file each
  * instruction record belongs to.
  *
- * dbg_row is called by the lowering at each statement it wants a row for and attaches the current
+ * codegen_debug_row_add is called by the lowering at each statement it wants a row for and attaches the current
  * record index to the source location; rows for nothing emitted are dropped.  A pass that deletes or
- * moves records must call dbg_remap so the rows follow (the printers and optimisers do).  File
+ * moves records must call codegen_debug_rows_remap so the rows follow (the printers and optimisers do).  File
  * numbers are unit-wide and handed out under E->dmu, so the threads agree on them; the main file is
  * number 0, as in clang (MC maps `.file N` of the main file to 0).  Users: arm64's and x86-64's
  * direct emitters; VIR does not call it.
  */
-#include "emitimpl.h"
+#include "codegen-internal.h"
 
 /* the .file number of a presumed file name (1-based; under dmu, shared by the threads) */
-static uint32_t dbg_file(ecx *e, const char *name, uint32_t len)
+static uint32_t codegen_debug_file_find(codegen_context *e, const char *name, uint32_t len)
 {
-	emitter *E = e->E;
+	codegen_unit *E = e->E;
 	uint32_t f = 0;
 
 	const char *mf = E->o->dbg_name;
@@ -40,22 +40,22 @@ static uint32_t dbg_file(ecx *e, const char *name, uint32_t len)
 	return f;
 }
 
-VPRIV bool dbg_where(ecx *e, uint32_t loc, uint32_t *file, uint32_t *line, uint32_t *col)
+VPRIV bool codegen_debug_location_get(codegen_context *e, uint32_t loc, uint32_t *file, uint32_t *line, uint32_t *col)
 {
 	const char *name;
 	uint32_t len;
 
 	if (!pp_location_describe(e->c->p, loc, &name, &len, line, col) || !*line)
 		return false;
-	*file = dbg_file(e, name, len);
+	*file = codegen_debug_file_find(e, name, len);
 	return true;
 }
 
-VPRIV void dbg_row(ecx *e, uint32_t loc)
+VPRIV void codegen_debug_row_add(codegen_context *e, uint32_t loc)
 {
 	uint32_t file, line, col;
 
-	if (!e->reach || !dbg_where(e, loc, &file, &line, &col))
+	if (!e->reach || !codegen_debug_location_get(e, loc, &file, &line, &col))
 		return;
 	if (e->ndl && e->dl[e->ndl - 1].k >= e->nin)
 		e->ndl--;	/* nothing emitted for the previous one */
@@ -66,7 +66,7 @@ VPRIV void dbg_row(ecx *e, uint32_t loc)
 	e->dl[e->ndl++] = (struct dbgrow){ e->nin, file, line, col };
 }
 
-VPRIV void dbg_remap(ecx *e, uint32_t *j, uint32_t k, uint32_t n)
+VPRIV void codegen_debug_rows_remap(codegen_context *e, uint32_t *j, uint32_t k, uint32_t n)
 {
 	/* compaction: record k (kept or dropped) is followed by new index n; rows at it move there */
 	while (*j < e->ndl && e->dl[*j].k <= k)

@@ -18,8 +18,8 @@
  * VCC_VIR_PASSES: time, leave out or check the builder's passes by name
  * (pass-table.c); its lines are printed with VCC_VIR_STATS's.
  */
-#define WK_PREFIX virbuild_
-#define LO_PREFIX virbuild_
+#define WALK_PREFIX virbuild_
+#define WALK_LOWER_PREFIX virbuild_
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
@@ -43,9 +43,9 @@ static int virbuild_failure_find(const char *why)
 }
 
 /* VCC_VIR_STATS: count one failed function; the first of each reason is kept as its example */
-static void virbuild_failure_note(ecx *e, uint32_t s, const char *why, virbuild_failure other, const char *detail)
+static void virbuild_failure_note(codegen_context *e, uint32_t s, const char *why, virbuild_failure other, const char *detail)
 {
-	emitter *E = e->E;
+	codegen_unit *E = e->E;
 	int k;
 
 	if (!E->vstats)
@@ -72,7 +72,7 @@ static void virbuild_failure_note(ecx *e, uint32_t s, const char *why, virbuild_
  * direct emitter compiled them, one reason each.  Reasons are listed most
  * frequent first.
  */
-VPRIV void virbuild_statistics_print(emitter *E)
+VPRIV void virbuild_statistics_print(codegen_unit *E)
 {
 	uint64_t fell = 0;
 	int ord[VIRBUILD_FAILURE_COUNT], n = 0;
@@ -114,7 +114,7 @@ static int virbuild_mode_get(void)
 	return mode;
 }
 
-static void virbuild_function_name_get(ecx *e, uint32_t s, char *o, size_t n)
+static void virbuild_function_name_get(codegen_context *e, uint32_t s, char *o, size_t n)
 {
 	const vident *id = &vintern_ents[e->c->syms[s].name];
 
@@ -122,7 +122,7 @@ static void virbuild_function_name_get(ecx *e, uint32_t s, char *o, size_t n)
 }
 
 /* VCC_VIR_LIST: the function is named in the file (or there is none) */
-static bool virbuild_function_is_listed(ecx *e, uint32_t s)
+static bool virbuild_function_is_listed(codegen_context *e, uint32_t s)
 {
 	static char *list;
 	static int state;	/* 0 unread, 1 no list, 2 list */
@@ -168,7 +168,7 @@ VPRIV bool virbuild_is_enabled(const cc_options *o)
 	return (virbuild_mode_get() & 16) && o->opt >= 2;
 }
 
-VPRIV bool virbuild_function_try(ecx *e, uint32_t s)
+VPRIV bool virbuild_function_try(codegen_context *e, uint32_t s)
 {
 	int m = virbuild_mode_get();
 	char nm[128] = "";
@@ -189,7 +189,7 @@ VPRIV bool virbuild_function_try(ecx *e, uint32_t s)
 	{
 		int novtag = e->novtag;	/* (a bail out of a volatile access leaves it raised) */
 
-		virbuild_wk_function(e, s);
+		virbuild_walk_function_emit(e, s);
 		e->novtag = novtag;
 	}
 	if (timed)
@@ -237,7 +237,7 @@ VPRIV bool virbuild_function_try(ecx *e, uint32_t s)
 			V->failure_detail[0] = 0;
 			if (timed)
 				t0 = vperformance_now();
-			ok = X86(e->c) ? x64_vir_function_lower(e, s, &why) : a64_vir_function_lower(e, s, &why);
+			ok = CODEGEN_IS_X64(e->c) ? x64_vir_function_lower(e, s, &why) : a64_vir_function_lower(e, s, &why);
 			if (timed)
 				virbuild_pass_note(e->E, VIRBUILD_PASS_ROW_LOWER(npass), vperformance_subtract(vperformance_now(), t0).ins);
 			if (ok) {

@@ -1,22 +1,22 @@
 /* vcc code generator: local initialisers, cleanups, statements */
-#include "../../../codegen/emitimpl.h"
+#include "../../../codegen/codegen-internal.h"
 
 /* ---------------- local initialisers ---------------- */
 
-static void zero_lval(ecx *e, const lval *d, uint64_t size)
+static void zero_lval(codegen_context *e, const codegen_lvalue *d, uint64_t size)
 {
 	int64_t off;
 	int b;
 
 	if (size > 256) {
-		val a;
-		lval t = *d;
+		codegen_value a;
+		codegen_lvalue t = *d;
 		int r;
 
 		a = laddr(e, &t);
 		r = toreg(e, &a);
 		zero_mem(e, r, size);
-		if (d->k != L_REG)
+		if (d->k != CODEGEN_LVALUE_REGISTER)
 			val_free(e, &a);
 		return;
 	}
@@ -43,7 +43,7 @@ static bool is_zero_init(cc *c, uint32_t v)
 }
 
 /* store the elements of init into the (already zeroed) object at d */
-static void init_elems(ecx *e, const lval *d, ast_qualified_type ty, uint32_t init)
+static void init_elems(codegen_context *e, const codegen_lvalue *d, ast_qualified_type ty, uint32_t init)
 {
 	cc *c = e->c;
 	const node *x = N(init);
@@ -58,16 +58,16 @@ static void init_elems(ecx *e, const lval *d, ast_qualified_type ty, uint32_t in
 
 		if (x->aux == 1) {
 			ast_qualified_type et = T(c, ty)->base;
-			uint64_t es = tsize(c, et);
+			uint64_t es = codegen_type_size(c, et);
 
 			for (uint32_t i = 0; i < x->c; i++) {
 				uint32_t lo = v[3 * i], hi = v[3 * i + 1], val_ = v[3 * i + 2];
 
 				for (uint64_t k = lo; k <= hi; k++) {
-					lval el = *d;
+					codegen_lvalue el = *d;
 
-					if (is_bvec(c, ty)) {
-						val bv = gen(e, val_);
+					if (codegen_type_is_bool_vector(c, ty)) {
+						codegen_value bv = gen(e, val_);
 						el.off += (int64_t)(k / 8);
 						el.bf = 1, el.width = 1, el.bitoff = k % 8;
 						store(e, &el, et, &bv);
@@ -86,7 +86,7 @@ static void init_elems(ecx *e, const lval *d, ast_qualified_type ty, uint32_t in
 
 			for (uint32_t i = 0; i < x->c && i < r->nfield; i++) {
 				const field *f = &r->f[i];
-				lval el = *d;
+				codegen_lvalue el = *d;
 
 				if (x->aux == 2 && i != x->a)
 					continue;
@@ -95,7 +95,7 @@ static void init_elems(ecx *e, const lval *d, ast_qualified_type ty, uint32_t in
 				el.off += (int64_t)(f->off / 8);
 				el.align = align_at((uint64_t)el.off, d->align);
 				if (f->bitfield) {
-					val bv;
+					codegen_value bv;
 
 					if (is_zero_init(c, v[i]))
 						continue;
@@ -103,7 +103,7 @@ static void init_elems(ecx *e, const lval *d, ast_qualified_type ty, uint32_t in
 					el.bf = 1;
 					el.bitoff = (uint16_t)(f->off % 8);
 					el.width = f->width;
-					el.sgn = is_signed(c, f->ty);
+					el.sgn = codegen_type_is_signed(c, f->ty);
 					store(e, &el, f->ty, &bv);
 					val_free(e, &bv);
 					continue;
@@ -113,9 +113,9 @@ static void init_elems(ecx *e, const lval *d, ast_qualified_type ty, uint32_t in
 		}
 		return;
 	}
-	if (x->op == AST_NODE_STRING && is_array(c, ty)) {
+	if (x->op == AST_NODE_STRING && codegen_type_is_array(c, ty)) {
 		const cstr *s = &c->strs[x->a];
-		uint64_t n = (uint64_t)s->n * s->esz, cap = tsize(c, ty);
+		uint64_t n = (uint64_t)s->n * s->esz, cap = codegen_type_size(c, ty);
 		int64_t off;
 		int b = lbase(e, d, &off, 8);
 
@@ -134,18 +134,18 @@ static void init_elems(ecx *e, const lval *d, ast_qualified_type ty, uint32_t in
 		}
 		return;
 	}
-	if (is_zero_init(c, init) && !is_agg(c, ty))
+	if (is_zero_init(c, init) && !codegen_type_is_aggregate(c, ty))
 		return;
 	{
-		val v = gen(e, init);
-		lval dd = *d;
+		codegen_value v = gen(e, init);
+		codegen_lvalue dd = *d;
 
 		store(e, &dd, ty, &v);
 		val_free(e, &v);
 	}
 }
 
-VPRIV void gen_init_local(ecx *e, const lval *dst, ast_qualified_type ty, uint32_t init)
+VPRIV void gen_init_local(codegen_context *e, const codegen_lvalue *dst, ast_qualified_type ty, uint32_t init)
 {
 	cc *c = e->c;
 	const node *x = N(init);
@@ -153,17 +153,17 @@ VPRIV void gen_init_local(ecx *e, const lval *dst, ast_qualified_type ty, uint32
 	if (!init)
 		return;
 	if (T(c, ty)->flags & AST_TYPE_FLAG_ATOMIC) {
-		zero_lval(e, dst, tsize(c, ty));
+		zero_lval(e, dst, codegen_type_size(c, ty));
 		ty = (T(c, ty)->flags & AST_TYPE_FLAG_ATOMIC) ? AST_QUALIFIED_TYPE(T(c, ty)->n, 0) : ty;
 	}
-	if (x->op == AST_NODE_INITIALIZER || x->op == AST_NODE_ZERO || (x->op == AST_NODE_STRING && is_array(c, ty))) {
-		zero_lval(e, dst, tsize(c, ty));
+	if (x->op == AST_NODE_INITIALIZER || x->op == AST_NODE_ZERO || (x->op == AST_NODE_STRING && codegen_type_is_array(c, ty))) {
+		zero_lval(e, dst, codegen_type_size(c, ty));
 		init_elems(e, dst, ty, init);
 		return;
 	}
 	{
-		val v = gen(e, init);
-		lval d = *dst;
+		codegen_value v = gen(e, init);
+		codegen_lvalue d = *dst;
 
 		store(e, &d, ty, &v);
 		val_free(e, &v);
@@ -172,24 +172,24 @@ VPRIV void gen_init_local(ecx *e, const lval *dst, ast_qualified_type ty, uint32
 
 /* ---------------- cleanups ---------------- */
 
-static void run_cleanup(ecx *e, uint32_t s)
+static void run_cleanup(codegen_context *e, uint32_t s)
 {
 	cc *c = e->c;
-	uint32_t fn = sym_attrs(c, s)->cleanup;
-	carg a;
-	lval l;
+	uint32_t fn = codegen_symbol_attributes(c, s)->cleanup;
+	a64_call_argument a;
+	codegen_lvalue l;
 
 	if (T(c, c->syms[s].ty)->flags & AST_TYPE_FLAG_VLA) {
-		const bind *b = binding(e, s);
+		const codegen_binding *b = codegen_symbol_binding_get(e, s);
 		int r;
 
-		if (!e->reach || b->kind != B_INDIRECT || b->inst != e->f->inst)
+		if (!e->reach || b->kind != CODEGEN_BINDING_INDIRECT || b->inst != e->f->inst)
 			return;
 		r = treg(e);
 		mem(e, I_LD, 3, 0, r, FRAME, b->slot + 8);
 		mov(e, 1, SP, r);
 		{
-			val v = vreg(r);
+			codegen_value v = codegen_value_register(r);
 
 			val_free(e, &v);
 		}
@@ -199,24 +199,24 @@ static void run_cleanup(ecx *e, uint32_t s)
 		return;
 	l = local_lval(e, s);
 	a.v = laddr(e, &l);
-	a.t = prim(AST_TYPE_LONG);
+	a.t = codegen_type_primitive(AST_TYPE_LONG);
 	a.slot = 1;
-	fn = canon_sym(c, fn);
+	fn = codegen_symbol_canonical(c, fn);
 	if (can_inline(e, fn)) {
-		val r = inline_call(e, fn, &a, 1, 0);
+		codegen_value r = inline_call(e, fn, &a, 1, 0);
 
 		val_free(e, &r);
 		return;
 	}
 	{
-		val r = do_call(e, REF(RK_SYM, fn), NULL, &a, 1, prim(AST_TYPE_VOID), false, -1);
+		codegen_value r = do_call(e, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, fn), NULL, &a, 1, codegen_type_primitive(AST_TYPE_VOID), false, -1);
 
 		val_free(e, &r);
 	}
 }
 
 /* run cleanups (innermost first) down to depth `to` without popping them */
-VPRIV void run_cleanups(ecx *e, int to)
+VPRIV void run_cleanups(codegen_context *e, int to)
 {
 	for (int i = e->nclean; i-- > to;)
 		run_cleanup(e, e->clean[i]);
@@ -224,9 +224,9 @@ VPRIV void run_cleanups(ecx *e, int to)
 
 /* ---------------- statements ---------------- */
 
-VPRIV uint32_t user_label(ecx *e, uint32_t l)
+VPRIV uint32_t user_label(codegen_context *e, uint32_t l)
 {
-	lbl *m = &e->lm[l];
+	codegen_label *m = &e->lm[l];
 
 	if (m->inst != e->f->inst) {
 		m->inst = e->f->inst;
@@ -235,13 +235,13 @@ VPRIV uint32_t user_label(ecx *e, uint32_t l)
 	return m->id;
 }
 
-VPRIV val gen_block(ecx *e, uint32_t n, bool want)
+VPRIV codegen_value gen_block(codegen_context *e, uint32_t n, bool want)
 {
 	cc *c = e->c;
 	const node *x = N(n);
 	int64_t mark = e->foff, cl_top = e->cl_top;
 	int cmark = e->nclean;
-	val v = vnone();
+	codegen_value v = codegen_value_none();
 	uint32_t vstmt = 0;
 	ast_qualified_type vt = 0;
 
@@ -258,8 +258,8 @@ VPRIV val gen_block(ecx *e, uint32_t n, bool want)
 	/* an aggregate value must outlive the block's slots */
 	int64_t vslot = 1;
 
-	if (vstmt && is_agg(c, vt))
-		vslot = slot(e, tsize(c, vt), talign(c, vt));
+	if (vstmt && codegen_type_is_aggregate(c, vt))
+		vslot = slot(e, codegen_type_size(c, vt), codegen_type_alignment(c, vt));
 	mark = e->foff;
 	for (uint32_t i = 0; i < x->c; i++) {
 		uint32_t s = c->lists[x->b + i];
@@ -271,7 +271,7 @@ VPRIV val gen_block(ecx *e, uint32_t n, bool want)
 			while (N(t)->op == AST_NODE_LABEL) {
 				uint32_t l = user_label(e, N(t)->a);
 
-				if (e->E->lref[N(t)->a] & LR_BACK)
+				if (e->E->lref[N(t)->a] & CODEGEN_LABEL_BACKWARD)
 					deflabel_forced(e, l);
 				else
 					deflabel(e, l);
@@ -279,14 +279,14 @@ VPRIV val gen_block(ecx *e, uint32_t n, bool want)
 			}
 			v = gen(e, N(vstmt)->a);
 			if (vslot != 1) {
-				lval d = { .k = L_FRAME, .off = vslot, .align = talign(c, vt) };
+				codegen_lvalue d = { .k = CODEGEN_LVALUE_FRAME, .off = vslot, .align = codegen_type_alignment(c, vt) };
 				int r;
 
 				store(e, &d, vt, &v);
 				val_free(e, &v);
 				r = treg(e);
 				opi(e, I_ADDI, 1, r, FRAME, vslot);
-				v = vreg(r);
+				v = codegen_value_register(r);
 			}
 			break;
 		}
@@ -309,7 +309,7 @@ VPRIV val gen_block(ecx *e, uint32_t n, bool want)
 	return v;
 }
 
-static void collect_cases(ecx *e, uint32_t n)
+static void collect_cases(codegen_context *e, uint32_t n)
 {
 	cc *c = e->c;
 	const node *x;
@@ -347,7 +347,7 @@ static void collect_cases(ecx *e, uint32_t n)
 
 /* The selector is borrowed from gen_switch and stays allocated across every
  * subtree. Only constants used by one comparison own temporary registers. */
-static void a64_switch_tree(ecx *e, const em_switch_case *cases, uint32_t n,
+static void a64_switch_tree(codegen_context *e, const em_switch_case *cases, uint32_t n,
                             int r, int cx, bool sg, uint32_t dflt)
 {
 	if (!n) {
@@ -357,7 +357,7 @@ static void a64_switch_tree(ecx *e, const em_switch_case *cases, uint32_t n,
 	uint32_t mid = n / 2;
 	const em_switch_case *p = &cases[mid];
 	uint32_t left = mid ? newlabel(e) : dflt;
-	val a = vreg(r), b = vconst(p->lo);
+	codegen_value a = codegen_value_register(r), b = codegen_value_constant(p->lo);
 	int cond = emit_cmp(e, LEX_TOKEN_LESS, cx, sg, &a, &b);
 
 	val_free(e, &b);
@@ -366,7 +366,7 @@ static void a64_switch_tree(ecx *e, const em_switch_case *cases, uint32_t n,
 		/* The lower-bound compare also establishes equality. */
 		bcond(e, C_EQ, p->target);
 	} else {
-		b = vconst(p->hi);
+		b = codegen_value_constant(p->hi);
 		cond = emit_cmp(e, LEX_TOKEN_LESS_EQUAL, cx, sg, &a, &b);
 		val_free(e, &b);
 		bcond(e, cond, p->target);
@@ -380,7 +380,7 @@ static void a64_switch_tree(ecx *e, const em_switch_case *cases, uint32_t n,
 
 /* A dense switch: index = v - lo, one unsigned bounds check, then I_JT (finish_function
  * expands it and appends the table of label differences after the function's code). */
-static void a64_switch_table(ecx *e, const em_switch_case *cases, uint32_t n, int r, int cx, uint32_t dflt)
+static void a64_switch_table(codegen_context *e, const em_switch_case *cases, uint32_t n, int r, int cx, uint32_t dflt)
 {
 	i128 lo = cases[0].lo, span = cases[n - 1].hi - lo;
 	uint32_t tab = newlabel(e), off = e->njtl;
@@ -399,7 +399,7 @@ static void a64_switch_table(ecx *e, const em_switch_case *cases, uint32_t n, in
 			i->sz = 0, i->rd = (uint8_t)t, i->rn = (uint8_t)r;
 		}
 	}
-	val a = vreg(t), b = vconst((i128)span);
+	codegen_value a = codegen_value_register(t), b = codegen_value_constant((i128)span);
 	int cond = emit_cmp(e, LEX_TOKEN_GREATER, cx, false, &a, &b);
 	val_free(e, &b);
 	bcond(e, cond, dflt);
@@ -425,7 +425,7 @@ static void a64_switch_table(ecx *e, const em_switch_case *cases, uint32_t n, in
 			e->lrefc[l] |= LREF_EXT;
 		}
 	}
-	e->jt[e->njt++] = (struct ejt){ tab, off, (uint32_t)span + 1 };
+	e->jt[e->njt++] = (struct codegen_jump_table){ tab, off, (uint32_t)span + 1 };
 	ins *i = put(e, I_JT);
 	i->rd = (uint8_t)t;
 	i->label = tab;
@@ -434,7 +434,7 @@ static void a64_switch_table(ecx *e, const em_switch_case *cases, uint32_t n, in
 		tfree(e, t);
 }
 
-static bool a64_switch_dispatch(ecx *e, uint32_t base, int r, int cx,
+static bool a64_switch_dispatch(codegen_context *e, uint32_t base, int r, int cx,
                                 bool sg, bool tables, uint32_t dflt)
 {
 	if (!e->E->o->opt || e->E->noopt || e->ncases - base < 4)
@@ -471,14 +471,14 @@ static bool a64_switch_dispatch(ecx *e, uint32_t base, int r, int cx,
 	return valid;
 }
 
-static void gen_switch(ecx *e, uint32_t n)
+static void gen_switch(codegen_context *e, uint32_t n)
 {
 	if (a64_switch_values(e,n)) return;
 	cc *c = e->c;
 	const node *x = N(n);
 	ast_qualified_type ct = N(x->a)->ty;
 	int cx = X(c, ct);
-	val v = gen(e, x->a);
+	codegen_value v = gen(e, x->a);
 	uint32_t base = e->ncases, dflt = 0, lbrk = newlabel(e);
 
 	collect_cases(e, x->b);
@@ -491,9 +491,9 @@ static void gen_switch(ecx *e, uint32_t n)
 	}
 	if (!dflt)
 		dflt = lbrk;
-	if (v.k == V_CONST) {
+	if (v.k == CODEGEN_VALUE_CONSTANT) {
 		uint32_t target = dflt;
-		i128 cv = em_trunc_to(c, v.i, ct);
+		i128 cv = codegen_integer_truncate(c, v.i, ct);
 
 		for (uint32_t k = base; k < e->ncases; k++) {
 			const node *cn = N(e->cases[k]);
@@ -504,7 +504,7 @@ static void gen_switch(ecx *e, uint32_t n)
 			}
 		}
 		jump(e, target);
-	} else if (em_bigint(c, ct)) {
+	} else if (codegen_type_is_bitint_big(c, ct)) {
 		int source = toreg(e, &v);
 		for (uint32_t k = base; k < e->ncases; k++) {
 			const node *cn = N(e->cases[k]);
@@ -513,14 +513,14 @@ static void gen_switch(ecx *e, uint32_t n)
 			uint32_t next = newlabel(e);
 			int copy = treg(e);
 			mov(e, 1, copy, source);
-			val test = a64_bigcmp(e, lo == hi ? LEX_TOKEN_EQUAL_EQUAL : LEX_TOKEN_GREATER_EQUAL,
-			                     ct, vreg(copy), vconst(lo));
+			codegen_value test = a64_bigcmp(e, lo == hi ? LEX_TOKEN_EQUAL_EQUAL : LEX_TOKEN_GREATER_EQUAL,
+			                     ct, codegen_value_register(copy), codegen_value_constant(lo));
 			cbz(e, false, 1, toreg(e, &test), next);
 			val_free(e, &test);
 			if (lo != hi) {
 				copy = treg(e);
 				mov(e, 1, copy, source);
-				test = a64_bigcmp(e, LEX_TOKEN_LESS_EQUAL, ct, vreg(copy), vconst(hi));
+				test = a64_bigcmp(e, LEX_TOKEN_LESS_EQUAL, ct, codegen_value_register(copy), codegen_value_constant(hi));
 				cbz(e, false, 1, toreg(e, &test), next);
 				val_free(e, &test);
 			}
@@ -529,11 +529,11 @@ static void gen_switch(ecx *e, uint32_t n)
 		}
 		val_free(e, &v);
 		jump(e, dflt);
-	} else if (is_wide(c, ct)) {
+	} else if (codegen_type_is_wide(c, ct)) {
 		/* 128-bit: v - lo <= hi - lo, unsigned, in two words (a single value: hi == lo) */
 		int t0 = treg(e), t1 = treg(e);
 
-		toreg2(e, &v, is_signed(c, ct));
+		toreg2(e, &v, codegen_type_is_signed(c, ct));
 		for (uint32_t k = base; k < e->ncases; k++) {
 			const node *cn = N(e->cases[k]);
 			u128 lo, d;
@@ -558,9 +558,9 @@ static void gen_switch(ecx *e, uint32_t n)
 	} else {
 		int r = toreg(e, &v);
 
-		bool tree = (!em_bitint(c, ct) &&
-		             a64_switch_bitset(e, x->b, base, r, cx, is_signed(c, ct), dflt)) ||
-			    a64_switch_dispatch(e, base, r, cx, is_signed(c, ct), !em_bitint(c, ct), dflt);
+		bool tree = (!codegen_type_is_bitint(c, ct) &&
+		             a64_switch_bitset(e, x->b, base, r, cx, codegen_type_is_signed(c, ct), dflt)) ||
+			    a64_switch_dispatch(e, base, r, cx, codegen_type_is_signed(c, ct), !codegen_type_is_bitint(c, ct), dflt);
 		if (!tree) {
 			for (uint32_t k = base; k < e->ncases; k++) {
 				const node *cn = N(e->cases[k]);
@@ -570,7 +570,7 @@ static void gen_switch(ecx *e, uint32_t n)
 					continue;
 				lo = c->ipool[cn->a], hi = c->ipool[cn->b];
 				if (lo == hi) {
-					val a = vreg(r), b = vconst(lo);
+					codegen_value a = codegen_value_register(r), b = codegen_value_constant(lo);
 
 					emit_cmp(e, LEX_TOKEN_EQUAL_EQUAL, cx, false, &a, &b);
 					val_free(e, &b);
@@ -592,7 +592,7 @@ static void gen_switch(ecx *e, uint32_t n)
 			jump(e, dflt);
 	}
 	e->ncases = base + (e->ncases - base);	/* keep the labels until the body is done */
-	e->loops[e->nloop++] = (loopctx){ lbrk, 0, e->nclean };
+	e->loops[e->nloop++] = (codegen_loop){ lbrk, 0, e->nclean };
 	e->reach = false;
 	gen_stmt(e, x->b);
 	e->nloop--;
@@ -600,26 +600,26 @@ static void gen_switch(ecx *e, uint32_t n)
 	deflabel(e, lbrk);
 }
 
-static void gen_return(ecx *e, const node *x)
+static void gen_return(codegen_context *e, const node *x)
 {
 	cc *c = e->c;
-	fnctx *f = e->f;
+	codegen_function_instance *f = e->f;
 	ast_qualified_type rt = f->rty;
-	val v;
+	codegen_value v;
 
 	if (x->a && a64_tail_return(e, x->a))
 		return;
-	v = x->a ? gen(e, x->a) : vnone();
+	v = x->a ? gen(e, x->a) : codegen_value_none();
 
 	if (!e->reach) {
 		val_free(e, &v);
 		return;
 	}
 	if (f->inl) {
-		if (!is_void(c, rt) && x->a) {
-			lval l = { .k = L_FRAME, .off = f->retslot, .align = talign(c, rt) };
+		if (!codegen_type_is_void(c, rt) && x->a) {
+			codegen_lvalue l = { .k = CODEGEN_LVALUE_FRAME, .off = f->retslot, .align = codegen_type_alignment(c, rt) };
 
-			if (v.k == V_CONST || v.k == V_ADDR) {
+			if (v.k == CODEGEN_VALUE_CONSTANT || v.k == CODEGEN_VALUE_ADDRESS) {
 				if (!f->any_ret)
 					f->cst = v;
 				else if (f->cst.k != v.k || f->cst.i != v.i || f->cst.ref != v.ref)
@@ -631,15 +631,15 @@ static void gen_return(ecx *e, const node *x)
 			if (f->retreg) {
 				/* what a store to and load from retslot would give */
 				int rr = f->retreg - 1;
-				uint64_t sz = tsize(c, rt);
+				uint64_t sz = codegen_type_size(c, rt);
 
-				if (v.k == V_CONST) {
-					movi(e, 1, rr, (int64_t)em_trunc_to(c, v.i, rt));
+				if (v.k == CODEGEN_VALUE_CONSTANT) {
+					movi(e, 1, rr, (int64_t)codegen_integer_truncate(c, v.i, rt));
 				} else {
 					int r = toreg(e, &v);
 
 					if (sz < 8)
-						extend(e, rr, r, (int)sz, is_signed(c, rt));
+						extend(e, rr, r, (int)sz, codegen_type_is_signed(c, rt));
 					else
 						mov(e, 1, rr, r);
 				}
@@ -652,28 +652,28 @@ static void gen_return(ecx *e, const node *x)
 		jump(e, f->retlbl);
 		return;
 	}
-	if (!is_void(c, rt) && x->a && v.k != V_NONE) {
+	if (!codegen_type_is_void(c, rt) && x->a && v.k != CODEGEN_VALUE_NONE) {
 		if (e->nclean > f->cbase) {
 			/* park the value while the cleanups run */
-			if (is_agg(c, rt) && N(x->a)->op == AST_NODE_VARIABLE && is_local_var(c, N(x->a)->a) &&
+			if (codegen_type_is_aggregate(c, rt) && N(x->a)->op == AST_NODE_VARIABLE && codegen_symbol_is_local_variable(c, N(x->a)->a) &&
 			    c->syms[N(x->a)->a].sc != AST_STORAGE_STATIC) {
 				/* clang returns the local itself (NRVO): its cleanups' changes are seen */
 				run_cleanups(e, f->cbase);
-			} else if (is_agg(c, rt)) {
-				int64_t sl = slot(e, tsize(c, rt), 16);
+			} else if (codegen_type_is_aggregate(c, rt)) {
+				int64_t sl = slot(e, codegen_type_size(c, rt), 16);
 				int rs = toreg(e, &v), rd = treg(e);
 
 				opi(e, I_ADDI, 1, rd, FRAME, sl);
-				copy_mem(e, rd, rs, tsize(c, rt));
+				copy_mem(e, rd, rs, codegen_type_size(c, rt));
 				tfree(e, rd);
 				val_free(e, &v);
 				run_cleanups(e, f->cbase);
 				rd = treg(e);
 				opi(e, I_ADDI, 1, rd, FRAME, sl);
-				v = vreg(rd);
+				v = codegen_value_register(rd);
 			} else {
 				int64_t sl = slot(e, 16, 16);
-				lval l = { .k = L_FRAME, .off = sl, .align = 16 };
+				codegen_lvalue l = { .k = CODEGEN_LVALUE_FRAME, .off = sl, .align = 16 };
 
 				store(e, &l, rt, &v);
 				val_free(e, &v);
@@ -681,9 +681,9 @@ static void gen_return(ecx *e, const node *x)
 				v = load(e, &l, rt);
 			}
 		}
-		int hn, hb = is_recabi(c, rt) && !is_sret(c, rt) ? hfa(c, rt, &hn) : 0;
+		int hn, hb = codegen_type_is_record_like(c, rt) && !is_sret(c, rt) ? hfa(c, rt, &hn) : 0;
 
-		if (is_bvec(c, rt) && !is_sret(c, rt)) {
+		if (codegen_type_is_bool_vector(c, rt) && !is_sret(c, rt)) {
 			bvec_ret(e, rt, toreg(e, &v));
 		} else if (hb) {
 			int rs = toreg(e, &v);
@@ -692,23 +692,23 @@ static void gen_return(ecx *e, const node *x)
 				vr_load(e, hb, k, rs, hb * k);
 		} else if (vec_small(c, rt)) {
 			vec_small_ret(e, rt, toreg(e, &v));
-		} else if (is_recabi(c, rt)) {
+		} else if (codegen_type_is_record_like(c, rt)) {
 			int rs = toreg(e, &v);
 
 			if (is_sret(c, rt)) {
 				int rd = treg(e);
 
 				mem(e, I_LD, 3, 0, rd, FRAME, f->retslot);	/* the caller's buffer (x8 at entry) */
-				copy_mem(e, rd, rs, tsize(c, rt));
+				copy_mem(e, rd, rs, codegen_type_size(c, rt));
 				tfree(e, rd);
 			} else {
 				mem(e, I_LD, 3, 0, 0, rs, 0);
-				if (tsize(c, rt) > 8)
+				if (codegen_type_size(c, rt) > 8)
 					mem(e, I_LD, 3, 0, 1, rs, 8);
 			}
-		} else if (is_wide(c, rt)) {
-			toreg2(e, &v, is_signed(c, rt));
-			if (is_ld(c, rt)) {
+		} else if (codegen_type_is_wide(c, rt)) {
+			toreg2(e, &v, codegen_type_is_signed(c, rt));
+			if (codegen_type_is_long_double(c, rt)) {
 				word(e, f_in(1, 0, v.r));
 				word(e, q_in_hi(0, v.r2));
 			} else {
@@ -717,10 +717,10 @@ static void gen_return(ecx *e, const node *x)
 			}
 		} else {
 			move_to(e, 0, -1, &v, rt);
-			if (is_flt(c, rt))
+			if (codegen_type_is_float(c, rt))
 				word(e, f_in(fpk(e, rt), 0, 0));	/* fmov d0/s0, x0/w0 */
-			else if (darwin_narrow(c, rt))	/* Apple: the callee extends char/short/_Bool to 32 bits */
-				extend(e, 0, 0, (int)tsize(c, rt), is_signed(c, rt));
+			else if (codegen_type_is_darwin_narrow(c, rt))	/* Apple: the callee extends char/short/_Bool to 32 bits */
+				extend(e, 0, 0, (int)codegen_type_size(c, rt), codegen_type_is_signed(c, rt));
 		}
 		val_free(e, &v);
 	} else {
@@ -737,7 +737,7 @@ static void gen_return(ecx *e, const node *x)
  * through the cleanup stack.
  */
 /* the value of a VLA size expression: from its slot once its declaration ran (vla_fix) */
-static val vla_len(ecx *e, uint32_t sn)
+static codegen_value vla_len(codegen_context *e, uint32_t sn)
 {
 	cc *c = e->c;
 
@@ -746,7 +746,7 @@ static val vla_len(ecx *e, uint32_t sn)
 			int r = treg(e);
 
 			mem(e, I_LD, 3, 0, r, FRAME, e->vsz[k].slot);
-			return vreg(r);
+			return codegen_value_register(r);
 		}
 	return cast(e, gen(e, sn), N(sn)->ty, c->t_size, AST_CAST_INTEGER);
 }
@@ -758,7 +758,7 @@ static val vla_len(ecx *e, uint32_t sn)
  * pure: only sizes without side effects (parameters: function_def already
  * evaluated the others on entry).
  */
-VPRIV void vla_fix(ecx *e, ast_qualified_type t, bool pure)
+VPRIV void vla_fix(codegen_context *e, ast_qualified_type t, bool pure)
 {
 	cc *c = e->c;
 
@@ -771,7 +771,7 @@ VPRIV void vla_fix(ecx *e, ast_qualified_type t, bool pure)
 		}
 		if (a->kind != AST_TYPE_ARRAY)
 			return;
-		if ((a->flags & AST_TYPE_FLAG_VLA) && a->n && N(a->n)->op != AST_NODE_NUMBER && !(pure && side_effects(c, a->n))) {
+		if ((a->flags & AST_TYPE_FLAG_VLA) && a->n && N(a->n)->op != AST_NODE_NUMBER && !(pure && codegen_expression_has_side_effects(c, a->n))) {
 			bool captured = false;
 
 			for (uint32_t k = e->nvsz; k-- > 0;)
@@ -783,14 +783,14 @@ VPRIV void vla_fix(ecx *e, ast_qualified_type t, bool pure)
 				t = a->base;
 				continue;
 			}
-			val v = cast(e, gen(e, a->n), N(a->n)->ty, c->t_size, AST_CAST_INTEGER);
+			codegen_value v = cast(e, gen(e, a->n), N(a->n)->ty, c->t_size, AST_CAST_INTEGER);
 			int r = toreg(e, &v);
 			int64_t sl = slot(e, 8, 8);
 
 			mem(e, I_ST, 3, 0, r, FRAME, sl);
 			val_free(e, &v);
-			if (e->nvsz >= NVSZ)
-				efatal(e, 0, "too many variable length array sizes in one function");
+			if (e->nvsz >= CODEGEN_VLA_SIZE_MAX)
+				codegen_fatal_report(e, 0, "too many variable length array sizes in one function");
 			e->vsz[e->nvsz].node = a->n;
 			e->vsz[e->nvsz].inst = e->f->inst;
 			e->vsz[e->nvsz++].slot = sl;
@@ -799,19 +799,19 @@ VPRIV void vla_fix(ecx *e, ast_qualified_type t, bool pure)
 	}
 }
 
-VPRIV val vla_bytes(ecx *e, ast_qualified_type t)
+VPRIV codegen_value vla_bytes(codegen_context *e, ast_qualified_type t)
 {
 	cc *c = e->c;
 	const ctype *a = T(c, t);
-	val n, b;
+	codegen_value n, b;
 	int r;
 
 	if (a->kind != AST_TYPE_ARRAY || !(a->flags & AST_TYPE_FLAG_VLA))
-		return vconst(tsize(c, t));
+		return codegen_value_constant(codegen_type_size(c, t));
 	n = vla_len(e, a->n);
 	b = vla_bytes(e, a->base);
 	r = toreg(e, &n);
-	if (b.k == V_CONST) {
+	if (b.k == CODEGEN_VALUE_CONSTANT) {
 		if (b.i != 1) {
 			movi(e, 1, R_X16, (int64_t)b.i);
 			op4(e, I_MADD, 1, r, r, R_X16, ZR);
@@ -822,23 +822,23 @@ VPRIV val vla_bytes(ecx *e, ast_qualified_type t)
 		op4(e, I_MADD, 1, r, r, rb, ZR);
 		val_free(e, &b);
 	}
-	return vreg(r);
+	return codegen_value_register(r);
 }
 
-static void gen_vla_decl(ecx *e, const node *x, uint32_t s)
+static void gen_vla_decl(codegen_context *e, const node *x, uint32_t s)
 {
 	cc *c = e->c;
-	bind *b = binding(e, s);
-	val n = vla_bytes(e, c->syms[s].ty);
+	codegen_binding *b = codegen_symbol_binding_get(e, s);
+	codegen_value n = vla_bytes(e, c->syms[s].ty);
 	int r = toreg(e, &n), t = treg(e);
 	int64_t sl = slot(e, 24, 8);
-	uint32_t al = talign(c, c->syms[s].ty);
+	uint32_t al = codegen_type_alignment(c, c->syms[s].ty);
 	ins *i;
 
-	if (sym_align(c, s) > al)
-		al = sym_align(c, s);
+	if (codegen_symbol_alignment(c, s) > al)
+		al = codegen_symbol_alignment(c, s);
 	b->inst = e->f->inst;
-	b->kind = B_INDIRECT;
+	b->kind = CODEGEN_BINDING_INDIRECT;
 	b->kv = 0;
 	b->reg = 0xff;
 	b->slot = sl;
@@ -878,7 +878,7 @@ static void gen_vla_decl(ecx *e, const node *x, uint32_t s)
 	}
 	val_free(e, &n);
 	{
-		val tv = vreg(t);
+		codegen_value tv = codegen_value_register(t);
 
 		val_free(e, &tv);
 	}
@@ -891,7 +891,7 @@ static void gen_vla_decl(ecx *e, const node *x, uint32_t s)
  * Bound lazily at its first use instead, it would land in that statement's
  * scratch area, which later temporaries (call arguments) reuse.
  */
-static void dead_decl(ecx *e, const node *x)
+static void dead_decl(codegen_context *e, const node *x)
 {
 	cc *c = e->c;
 	uint32_t s = x->a;
@@ -903,17 +903,17 @@ static void dead_decl(ecx *e, const node *x)
 		return;
 	bind_slot(e, s);
 	if ((rr = regvar_reg(c, s)) >= 0)
-		binding(e, s)->reg = (uint8_t)rr;
+		codegen_symbol_binding_get(e, s)->reg = (uint8_t)rr;
 }
 
-static void gen_decl(ecx *e, const node *x)
+static void gen_decl(codegen_context *e, const node *x)
 {
 	cc *c = e->c;
 	uint32_t s = x->a;
 	const sym *y = &c->syms[s];
-	bind *b;
+	codegen_binding *b;
 
-	if (!x->aux && unlikely(vm_type(c, y->ty)))
+	if (!x->aux && unlikely(codegen_type_is_variably_modified(c, y->ty)))
 		vla_fix(e, y->ty, false);
 	if (y->kind != AST_SYMBOL_VARIABLE || y->sc == AST_STORAGE_STATIC || y->sc == AST_STORAGE_EXTERN || y->sc == AST_STORAGE_TYPEDEF)
 		return;
@@ -926,27 +926,27 @@ static void gen_decl(ecx *e, const node *x)
 
 		if (recipe != EM_UNUSED_KEEP) {
 			if (recipe == EM_UNUSED_EVAL) {
-				val v = gen(e, x->b);
+				codegen_value v = gen(e, x->b);
 
 				val_free(e, &v);
 			}
 			return;
 		}
 	}
-	if (x->b && !(e->E->sflags[s] & SA_WRITTEN) && !is_agg(c, y->ty) && !(AST_QUALIFIED_TYPE_QUALIFIERS(y->ty) & AST_QUALIFIER_VOLATILE) &&
-	    !is_wide(c, y->ty) && y->sc != AST_STORAGE_REGISTER && !sym_attrs(c, s)->cleanup) {
-		val v = gen(e, x->b);
+	if (x->b && !(e->E->sflags[s] & CODEGEN_SYMBOL_WRITTEN) && !codegen_type_is_aggregate(c, y->ty) && !(AST_QUALIFIED_TYPE_QUALIFIERS(y->ty) & AST_QUALIFIER_VOLATILE) &&
+	    !codegen_type_is_wide(c, y->ty) && y->sc != AST_STORAGE_REGISTER && !codegen_symbol_attributes(c, s)->cleanup) {
+		codegen_value v = gen(e, x->b);
 
 		if (const_var(e, s, &v)) {
-			b = binding(e, s);
+			b = codegen_symbol_binding_get(e, s);
 			b->inst = e->f->inst;
-			b->kind = B_CONST;
+			b->kind = CODEGEN_BINDING_CONSTANT;
 			b->kv = 0;
 			b->v = v;
 			return;
 		}
 		{
-			lval l = { .k = L_FRAME, .align = sym_align(c, s) };
+			codegen_lvalue l = { .k = CODEGEN_LVALUE_FRAME, .align = codegen_symbol_alignment(c, s) };
 
 			if (lreg_of(e, s) >= 0)
 				l = bind_lreg(e, s);
@@ -957,7 +957,7 @@ static void gen_decl(ecx *e, const node *x)
 			val_free(e, &v);
 		}
 	} else {
-		lval l = { .k = L_FRAME, .align = sym_align(c, s) };
+		codegen_lvalue l = { .k = CODEGEN_LVALUE_FRAME, .align = codegen_symbol_alignment(c, s) };
 		int rr = regvar_reg(c, s);
 
 		if (lreg_of(e, s) >= 0)
@@ -965,18 +965,18 @@ static void gen_decl(ecx *e, const node *x)
 		else
 			l.off = bind_slot(e, s);
 		if (rr >= 0)
-			binding(e, s)->reg = (uint8_t)rr;
+			codegen_symbol_binding_get(e, s)->reg = (uint8_t)rr;
 		if (x->b)
 			gen_init_local(e, &l, y->ty, x->b);
 		else if (rr < 0 && y->sc != AST_STORAGE_REGISTER)
 			kv_track(e, s, NULL);
 	}
-	if (sym_attrs(c, s)->cleanup) {
+	if (codegen_symbol_attributes(c, s)->cleanup) {
 		e->clean[e->nclean++] = s;
 	}
 }
 
-static int find_loop(ecx *e, bool cont)
+static int find_loop(codegen_context *e, bool cont)
 {
 	for (int i = e->nloop; i-- > e->f->nloop;)
 		if (!cont || e->loops[i].cont)
@@ -984,11 +984,11 @@ static int find_loop(ecx *e, bool cont)
 	return -1;
 }
 
-static void gen_stmt1(ecx *e, uint32_t n);
+static void gen_stmt1(codegen_context *e, uint32_t n);
 static _Thread_local int leakchk = -1;	/* VCC_LEAKCHK: first leak per thread */
 
 /* every statement leaves the temporaries it found; VCC_LEAKCHK reports the first that does not */
-VPRIV void gen_stmt(ecx *e, uint32_t n)
+VPRIV void gen_stmt(codegen_context *e, uint32_t n)
 {
 	cc *c = e->c;
 	uint32_t live = e->live, loc = e->curloc;
@@ -997,18 +997,18 @@ VPRIV void gen_stmt(ecx *e, uint32_t n)
 		e->curloc = N(n)->loc;
 	if (unlikely(e->E->o->debug) && n && N(n)->op != AST_NODE_BLOCK && N(n)->op != AST_NODE_CASE &&
 	    N(n)->op != AST_NODE_DEFAULT && N(n)->op != AST_NODE_LABEL)
-		dbg_row(e, N(n)->loc);
+		codegen_debug_row_add(e, N(n)->loc);
 	gen_stmt1(e, n);
 	e->curloc = loc;
 	if (unlikely(leakchk < 0))
 		leakchk = getenv("VCC_LEAKCHK") != NULL;
 	if (unlikely(leakchk) && n && e->live != live) {
-		ediag(e, N(n)->loc, "temporaries leaked: %#x -> %#x (op %d)", live, e->live, N(n)->op);
+		codegen_diagnostic_report(e, N(n)->loc, "temporaries leaked: %#x -> %#x (op %d)", live, e->live, N(n)->op);
 		leakchk = 0;
 	}
 }
 
-static void gen_stmt1(ecx *e, uint32_t n)
+static void gen_stmt1(codegen_context *e, uint32_t n)
 {
 	cc *c = e->c;
 	const node *x;
@@ -1016,7 +1016,7 @@ static void gen_stmt1(ecx *e, uint32_t n)
 
 	if (!n)
 		return;
-	if (!e->reach && !(e->E->nflags[n] & NA_LABEL)) {
+	if (!e->reach && !(e->E->nflags[n] & CODEGEN_NODE_HAS_LABEL)) {
 		if (N(n)->op == AST_NODE_DECLARATION)
 			dead_decl(e, N(n));
 		return;
@@ -1029,8 +1029,8 @@ static void gen_stmt1(ecx *e, uint32_t n)
 		return;
 	case AST_NODE_EXPRESSION:
 		/* a value thrown away: (void)(RCU) loads nothing (and refers to nothing) */
-		if (x->a && side_effects(c, x->a)) {
-			val v = gen(e, x->a);
+		if (x->a && codegen_expression_has_side_effects(c, x->a)) {
+			codegen_value v = gen(e, x->a);
 
 			val_free(e, &v);
 		}
@@ -1042,7 +1042,7 @@ static void gen_stmt1(ecx *e, uint32_t n)
 		uint32_t lelse = newlabel(e), lend = newlabel(e);
 
 		gen_cond(e, x->a, false, lelse);
-		e->foff = keep_cl(e, mark);
+		e->foff = codegen_compound_literal_keep(e, mark);
 		gen_stmt(e, x->b);
 		if (x->c) {
 			jump(e, lend);
@@ -1057,10 +1057,10 @@ static void gen_stmt1(ecx *e, uint32_t n)
 	case AST_NODE_WHILE: {
 		uint32_t lhead = newlabel(e), lbrk = newlabel(e);
 
-		deflabel_loop(e, lhead, e->E->nflags[n] & NA_LABEL);
+		deflabel_loop(e, lhead, e->E->nflags[n] & CODEGEN_NODE_HAS_LABEL);
 		gen_cond(e, x->a, false, lbrk);
-		e->foff = keep_cl(e, mark);
-		e->loops[e->nloop++] = (loopctx){ lbrk, lhead, e->nclean };
+		e->foff = codegen_compound_literal_keep(e, mark);
+		e->loops[e->nloop++] = (codegen_loop){ lbrk, lhead, e->nclean };
 		gen_stmt(e, x->b);
 		e->nloop--;
 		jump(e, lhead);
@@ -1070,13 +1070,13 @@ static void gen_stmt1(ecx *e, uint32_t n)
 	case AST_NODE_DO: {
 		uint32_t lhead = newlabel(e), lcont = newlabel(e), lbrk = newlabel(e);
 
-		deflabel_loop(e, lhead, e->E->nflags[n] & NA_LABEL);
-		e->loops[e->nloop++] = (loopctx){ lbrk, lcont, e->nclean };
+		deflabel_loop(e, lhead, e->E->nflags[n] & CODEGEN_NODE_HAS_LABEL);
+		e->loops[e->nloop++] = (codegen_loop){ lbrk, lcont, e->nclean };
 		gen_stmt(e, x->b);
 		e->nloop--;
 		deflabel(e, lcont);
 		gen_cond(e, x->a, true, lhead);
-		e->foff = keep_cl(e, mark);
+		e->foff = codegen_compound_literal_keep(e, mark);
 		deflabel(e, lbrk);
 		return;
 	}
@@ -1095,23 +1095,23 @@ static void gen_stmt1(ecx *e, uint32_t n)
 				gen_stmt(e, x->a);
 			}
 		}
-		deflabel_loop(e, lhead, e->E->nflags[n] & NA_LABEL);
+		deflabel_loop(e, lhead, e->E->nflags[n] & CODEGEN_NODE_HAS_LABEL);
 		if (x->b) {
 			int64_t m2 = e->foff;
 
 			gen_cond(e, x->b, false, lbrk);
-			e->foff = keep_cl(e, m2);
+			e->foff = codegen_compound_literal_keep(e, m2);
 		}
-		e->loops[e->nloop++] = (loopctx){ lbrk, lcont, e->nclean };
+		e->loops[e->nloop++] = (codegen_loop){ lbrk, lcont, e->nclean };
 		gen_stmt(e, body);
 		e->nloop--;
 		deflabel(e, lcont);
 		if (step) {
 			int64_t m2 = e->foff;
-			val v = gen(e, step);
+			codegen_value v = gen(e, step);
 
 			val_free(e, &v);
-			e->foff = keep_cl(e, m2);
+			e->foff = codegen_compound_literal_keep(e, m2);
 		}
 		jump(e, lhead);
 		deflabel(e, lbrk);
@@ -1132,7 +1132,7 @@ static void gen_stmt1(ecx *e, uint32_t n)
 	case AST_NODE_LABEL: {
 		uint32_t l = user_label(e, x->a);
 
-		if (e->E->lref[x->a] & LR_BACK)
+		if (e->E->lref[x->a] & CODEGEN_LABEL_BACKWARD)
 			deflabel_forced(e, l);
 		else
 			deflabel(e, l);
@@ -1155,7 +1155,7 @@ static void gen_stmt1(ecx *e, uint32_t n)
 		}
 		return;
 	case AST_NODE_GOTO_INDIRECT: {
-		val v = gen(e, x->a);
+		codegen_value v = gen(e, x->a);
 		int r = toreg(e, &v);
 
 		if (e->reach)
@@ -1169,7 +1169,7 @@ static void gen_stmt1(ecx *e, uint32_t n)
 		int i = find_loop(e, x->op == AST_NODE_CONTINUE);
 
 		if (i < 0)
-			efatal(e, x->loc, "break/continue outside a loop");
+			codegen_fatal_report(e, x->loc, "break/continue outside a loop");
 		run_cleanups(e, e->loops[i].cdepth);
 		jump(e, x->op == AST_NODE_BREAK ? e->loops[i].brk : e->loops[i].cont);
 		return;
@@ -1181,7 +1181,7 @@ static void gen_stmt1(ecx *e, uint32_t n)
 		gen_asm(e, n);
 		break;
 	default:
-		efatal(e, x->loc, "unsupported statement (node %d)", x->op);
+		codegen_fatal_report(e, x->loc, "unsupported statement (node %d)", x->op);
 	}
-	e->foff = keep_cl(e, mark);
+	e->foff = codegen_compound_literal_keep(e, mark);
 }

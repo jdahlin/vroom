@@ -8,9 +8,9 @@
  * is excluded by those rules.  -O1 and up.  Used by the shared walker, arm64's expression code and
  * wasm's emitter.
  */
-#include "../emitimpl.h"
+#include "../codegen-internal.h"
 
-VPRIV int em_repeated_integer(ecx *e, uint32_t n)
+VPRIV int em_repeated_integer(codegen_context *e, uint32_t n)
 {
 	cc *c = e->c;
 	const node *x = N(n), *a, *b;
@@ -25,14 +25,14 @@ VPRIV int em_repeated_integer(ecx *e, uint32_t n)
 		return EM_ID_NONE;
 	a = N(x->a); b = N(x->b);
 	if (a->op != AST_NODE_VARIABLE || b->op != AST_NODE_VARIABLE || a->a != b->a || AST_QUALIFIED_TYPE_UNQUALIFIED(a->ty) != AST_QUALIFIED_TYPE_UNQUALIFIED(b->ty) ||
-	    !is_integer(c, a->ty) || em_bitint(c, a->ty))
+	    !codegen_type_is_integer(c, a->ty) || codegen_type_is_bitint(c, a->ty))
 		return EM_ID_NONE;
 	s = &c->syms[a->a];
 	t = s->ty;
-	size = tsize(c, t);
-	if (!is_local_var(c, a->a) || s->kind != AST_SYMBOL_VARIABLE || s->sc == AST_STORAGE_STATIC || s->sc == AST_STORAGE_EXTERN ||
+	size = codegen_type_size(c, t);
+	if (!codegen_symbol_is_local_variable(c, a->a) || s->kind != AST_SYMBOL_VARIABLE || s->sc == AST_STORAGE_STATIC || s->sc == AST_STORAGE_EXTERN ||
 	    (s->flags & AST_SYMBOL_FLAG_ADDRESS_TAKEN) || (AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_VOLATILE) || (T(c, t)->flags & AST_TYPE_FLAG_ATOMIC) ||
-	    !size || size > 8 || sym_attrs(c, a->a)->asmname)
+	    !size || size > 8 || codegen_symbol_attributes(c, a->a)->asmname)
 		return EM_ID_NONE;
 	switch (x->aux) {
 	case LEX_TOKEN_MINUS: case LEX_TOKEN_CARET: case LEX_TOKEN_EXCLAMATION_EQUAL: case LEX_TOKEN_LESS: case LEX_TOKEN_GREATER:

@@ -1,52 +1,52 @@
 /*
- * obj.c: the object-item stream: write a chunk's items while generating, and replay them into the
+ * chunk-commit.c: the object-item stream: write a chunk's items while generating, and replay them into the
  * assembler and ElfObj to make the object (cc_options.emit == 2, `-c`).
  *
- * During generation a chunk is not text but a sequence of items (emitimpl.h "object backend": IT_TEXT,
- * IT_CODE, IT_X64, IT_DATA, IT_LABEL, IT_BYTES, IT_SYMHDR, IT_FEND, IT_OSIZE), each a kind, a length
- * and a payload padded to 8 bytes: it_open/it_room/it_close build one in the function's text buffer
+ * During generation a chunk is not text but a sequence of items (codegen-internal.h "object backend": CODEGEN_ITEM_TEXT,
+ * CODEGEN_ITEM_CODE, CODEGEN_ITEM_X64, CODEGEN_ITEM_DATA, CODEGEN_ITEM_LABEL, CODEGEN_ITEM_BYTES, CODEGEN_ITEM_SYMBOL_HEADER, CODEGEN_ITEM_FUNCTION_END, CODEGEN_ITEM_OBJECT_SIZE), each a kind, a length
+ * and a payload padded to 8 bytes: codegen_item_open/codegen_item_room_need/codegen_item_close build one in the function's text buffer
  * (`direct(e)` says whether this is the object path; otherwise those calls do nothing).  Replay
- * (r_chunk, called by tu.c after the chunks are put in order) makes exactly the calls the assembler
+ * (codegen_commit_chunk, called by tu.c after the chunks are put in order) makes exactly the calls the assembler
  * would make for the text the printer would have produced, so the object is byte-identical to the
  * text path; bench/vcc-asdiff.py checks that.  A failure is reported through elf_error and returns -1,
  * which fails the TU.  Replay is single-threaded per TU.
  */
-#include "emitimpl.h"
+#include "codegen-internal.h"
 
-VPRIV int r_fail(rctx *R, const char *msg)
+VPRIV int codegen_commit_fail(codegen_commit_context *R, const char *msg)
 {
 	elf_error(R->o, "%s", msg);
 	return -1;
 }
 
-VPRIV size_t it_open(ecx *e, uint32_t kind)
+VPRIV size_t codegen_item_open(codegen_context *e, uint32_t kind)
 {
 	tbuf *b = &e->out;
 	size_t h;
 
-	if (!direct(e))
+	if (!codegen_context_is_direct(e))
 		return SIZE_MAX;
 	vtext_need(b, 16);
 	b->n = (b->n + 7) & ~(size_t)7;
 	h = b->n;
-	((item *)(b->p + h))->kind = kind;
-	b->n += sizeof(item);
+	((codegen_item *)(b->p + h))->kind = kind;
+	b->n += sizeof(codegen_item);
 	return h;
 }
 
-VPRIV void it_close(ecx *e, size_t h)
+VPRIV void codegen_item_close(codegen_context *e, size_t h)
 {
 	tbuf *b = &e->out;
 
 	if (h == SIZE_MAX)
 		return;
-	((item *)(b->p + h))->len = (uint32_t)(b->n - h - sizeof(item));
+	((codegen_item *)(b->p + h))->len = (uint32_t)(b->n - h - sizeof(codegen_item));
 	vtext_need(b, 8);
 	while (b->n & 7)
 		b->p[b->n++] = 0;
 }
 
-VPRIV void *it_room(ecx *e, size_t n)
+VPRIV void *codegen_item_room_need(codegen_context *e, size_t n)
 {
 	void *p;
 
@@ -57,20 +57,20 @@ VPRIV void *it_room(ecx *e, size_t n)
 }
 
 /* the assembler's symbol for a reference (named as the printer names it) */
-VPRIV uint32_t r_sym(rctx *R, uint32_t ref)
+VPRIV uint32_t codegen_commit_symbol_find(codegen_commit_context *R, uint32_t ref)
 {
-	uint32_t *slot = NULL, i = RIDX(ref), y;
+	uint32_t *slot = NULL, i = CODEGEN_REFERENCE_INDEX(ref), y;
 
-	switch (RKIND(ref)) {
-	case RK_SYM: slot = &R->symc[canon_sym(R->c, i)]; break;
-	case RK_STR: slot = &R->strc[i]; break;
-	case RK_LBL: slot = &R->lblc[i]; break;
+	switch (CODEGEN_REFERENCE_KIND(ref)) {
+	case CODEGEN_REFERENCE_SYMBOL: slot = &R->symc[codegen_symbol_canonical(R->c, i)]; break;
+	case CODEGEN_REFERENCE_STRING: slot = &R->strc[i]; break;
+	case CODEGEN_REFERENCE_LABEL: slot = &R->lblc[i]; break;
 	}
 	if (slot && *slot)
 		return *slot;
 	R->nb.n = 0;
-	ref_name(R->c, &R->nb, ref);
-	/* ref_name quotes non-ASCII x86 symbols for the text printer. */
+	codegen_reference_name_append(R->c, &R->nb, ref);
+	/* codegen_reference_name_append quotes non-ASCII x86 symbols for the text printer. */
 	bool quoted = R->nb.n >= 2 && R->nb.p[0] == '"' && R->nb.p[R->nb.n - 1] == '"';
 	y = as_symbol_by_name(R->as, R->nb.p + quoted, R->nb.n - 2 * quoted);
 	if (slot)
@@ -78,15 +78,15 @@ VPRIV uint32_t r_sym(rctx *R, uint32_t ref)
 	return y;
 }
 
-static void r_zero(ElfObj *o, uint32_t frag, uint64_t n)
+static void codegen_commit_zero_append(ElfObj *o, uint32_t frag, uint64_t n)
 {
 	if (n)
 		elf_fill(o, frag, n, 0);
 }
 
-static int r_data(rctx *R, const data_hdr *h)
+static int codegen_commit_data(codegen_commit_context *R, const codegen_data_header *h)
 {
-	const ireloc *rel = (const ireloc *)(h + 1);
+	const codegen_item_relocation *rel = (const codegen_item_relocation *)(h + 1);
 	const uint8_t *d = (const uint8_t *)(rel + h->nrel);
 	ElfObj *o = R->o;
 	uint32_t frag = as_fragment_current(R->as);
@@ -108,17 +108,17 @@ static int r_data(rctx *R, const data_hdr *h)
 
 			if (have)
 				elf_bytes(o, frag, d + at, have);
-			r_zero(o, frag, end - at - have);
+			codegen_commit_zero_append(o, frag, end - at - have);
 			at = end;
 		}
 		if (k < h->nrel) {
 			uint32_t sz = rel[k].sz ? rel[k].sz : 8;
 			uint64_t off = elf_frag(o, frag)->size;
 			uint8_t *p = elf_grow(o, frag, sz);
-			ElfVal v = as_symbol_value(R->as, r_sym(R, rel[k].ref), rel[k].add);
+			ElfVal v = as_symbol_value(R->as, codegen_commit_symbol_find(R, rel[k].ref), rel[k].add);
 
 			if (rel[k].sub) {
-				ElfVal s = as_symbol_value(R->as, r_sym(R, rel[k].sub - 1), 0);
+				ElfVal s = as_symbol_value(R->as, codegen_commit_symbol_find(R, rel[k].sub - 1), 0);
 
 				v.sub = s.add, v.c -= s.c;
 			}
@@ -127,7 +127,7 @@ static int r_data(rctx *R, const data_hdr *h)
 					p[b] = (uint8_t)((uint64_t)v.c >> 8 * b);
 			} else {
 				memset(p, 0, sz);
-				elf_fixup(o, frag, off, p, X86(R->c) ? (sz == 1 ? R_X86_64_8 : sz == 2 ? R_X86_64_16 : sz == 4 ? R_X86_64_32 : R_X86_64_64) :
+				elf_fixup(o, frag, off, p, CODEGEN_IS_X64(R->c) ? (sz == 1 ? R_X86_64_8 : sz == 2 ? R_X86_64_16 : sz == 4 ? R_X86_64_32 : R_X86_64_64) :
 					  (sz == 4 ? R_AARCH64_ABS32 : R_AARCH64_ABS64), v);
 			}
 			at += sz;
@@ -136,10 +136,10 @@ static int r_data(rctx *R, const data_hdr *h)
 	return 0;
 }
 
-static int r_symhdr(rctx *R, const symhdr *h)
+static int codegen_commit_symbol_header(codegen_commit_context *R, const codegen_symbol_header *h)
 {
 	ElfObj *o = R->o;
-	uint32_t y = r_sym(R, REF(RK_SYM, h->sym)), frag;
+	uint32_t y = codegen_commit_symbol_find(R, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, h->sym)), frag;
 
 	if (h->bind) {
 		elf_reg(o, y);
@@ -152,7 +152,7 @@ static int r_symhdr(rctx *R, const symhdr *h)
 		elf_symp(o, y)->flags &= ~ESYM_TEMP;
 	}
 	frag = as_fragment_current(R->as);
-	if (X86(R->c)) {
+	if (CODEGEN_IS_X64(R->c)) {
 		/* x86 alignment participates in branch relaxation, including when
 		 * an earlier branch has split the current subsection into frags. */
 		R->nb.n = 0;
@@ -165,10 +165,10 @@ static int r_symhdr(rctx *R, const symhdr *h)
 	return as_label_define_symbol(R->as, y);
 }
 
-static int r_fend(rctx *R, uint32_t s)
+static int codegen_commit_function_end(codegen_commit_context *R, uint32_t s)
 {
 	ElfObj *o = R->o;
-	uint32_t y = r_sym(R, REF(RK_SYM, s)), l;
+	uint32_t y = codegen_commit_symbol_find(R, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, s)), l;
 	ElfVal a, b;
 
 	R->nb.n = 0;
@@ -181,7 +181,7 @@ static int r_fend(rctx *R, uint32_t s)
 	a = as_symbol_value(R->as, l, 0);
 	b = as_symbol_value(R->as, y, 0);
 	if (a.sub || b.sub || (!b.add && b.c))
-		return r_fail(R, "vcc: unexpected .size operands");
+		return codegen_commit_fail(R, "vcc: unexpected .size operands");
 	{
 		ElfVal v = { a.add, b.add, a.c - b.c };
 		ElfSym *x = v.add ? elf_symp(o, v.add) : NULL, *z = v.sub ? elf_symp(o, v.sub) : NULL;
@@ -203,46 +203,46 @@ static int r_fend(rctx *R, uint32_t s)
 }
 
 /* replay one chunk's items */
-VPRIV int r_chunk(rctx *R, const char *p, size_t n)
+VPRIV int codegen_commit_chunk(codegen_commit_context *R, const char *p, size_t n)
 {
 	const char *e = p + n;
 
 	while (p < e) {
-		const item *it = (const item *)p;
+		const codegen_item *it = (const codegen_item *)p;
 		const char *q = (const char *)(it + 1);
 		int r = 0;
 
 		switch (it->kind) {
-		case IT_TEXT:
+		case CODEGEN_ITEM_TEXT:
 			r = as_snippet_assemble(R->as, q, it->len);
 			break;
-		case IT_X64:
+		case CODEGEN_ITEM_X64:
 			r = x64_replay(R, q, it->len);
 			break;
-		case IT_CODE:
-			r = a64_replay(R, (const code_hdr *)q);
+		case CODEGEN_ITEM_CODE:
+			r = a64_replay(R, (const codegen_code_header *)q);
 			break;
-		case IT_DATA:
-			r = r_data(R, (const data_hdr *)q);
+		case CODEGEN_ITEM_DATA:
+			r = codegen_commit_data(R, (const codegen_data_header *)q);
 			break;
-		case IT_LABEL:
-			r = as_label_define_symbol(R->as, r_sym(R, *(const uint32_t *)q));
+		case CODEGEN_ITEM_LABEL:
+			r = as_label_define_symbol(R->as, codegen_commit_symbol_find(R, *(const uint32_t *)q));
 			break;
-		case IT_SYMHDR:
-			r = r_symhdr(R, (const symhdr *)q);
+		case CODEGEN_ITEM_SYMBOL_HEADER:
+			r = codegen_commit_symbol_header(R, (const codegen_symbol_header *)q);
 			break;
-		case IT_FEND:
-			r = r_fend(R, *(const uint32_t *)q);
+		case CODEGEN_ITEM_FUNCTION_END:
+			r = codegen_commit_function_end(R, *(const uint32_t *)q);
 			break;
-		case IT_OSIZE: {
-			const osize *z = (const osize *)q;
-			ElfSym *y = elf_symp(R->o, r_sym(R, REF(RK_SYM, z->sym)));
+		case CODEGEN_ITEM_OBJECT_SIZE: {
+			const codegen_object_size *z = (const codegen_object_size *)q;
+			ElfSym *y = elf_symp(R->o, codegen_commit_symbol_find(R, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, z->sym)));
 
 			y->size = z->size;
 			y->flags &= ~ESYM_SIZE_EXPR;
 			break;
 		}
-		case IT_BYTES:
+		case CODEGEN_ITEM_BYTES:
 			if (it->len) {
 				elf_data(R->o, as_fragment_current(R->as));
 				elf_bytes(R->o, as_fragment_current(R->as), q, it->len);

@@ -7,9 +7,9 @@
  * Only 4- and 8-byte integers, and only at -O1 and up (cc_options.opt, not VCC_NOOPT).  em_bound_constant
  * proves a small expression pure and constant within a budget before asking the constant evaluator,
  * so enumerators and casts of them fold but nothing with a call or a volatile read is traversed.
- * Called by the shared walker (walk/expr.c), arm64's and wasm's emitters.
+ * Called by the shared walker (walk/expression.c), arm64's and wasm's emitters.
  */
-#include "../emitimpl.h"
+#include "../codegen-internal.h"
 
 /* Prove a small integer constant expression pure before asking the existing
  * constant evaluator to interpret it. Unknown forms and a depleted budget
@@ -22,7 +22,7 @@ static bool em_bound_pure(cc *c, uint32_t n, unsigned *budget)
 		return false;
 	--*budget;
 	x = N(n);
-	if (!is_integer(c, x->ty) || em_bitint(c, x->ty) || tsize(c, x->ty) > 8)
+	if (!codegen_type_is_integer(c, x->ty) || codegen_type_is_bitint(c, x->ty) || codegen_type_size(c, x->ty) > 8)
 		return false;
 	switch (x->op) {
 	case AST_NODE_NUMBER:
@@ -67,7 +67,7 @@ VPRIV bool em_bound_constant(cc *c, uint32_t n, i128 *value)
 	return true;
 }
 
-VPRIV int em_cmpbounds(ecx *e, uint32_t n, uint32_t *operand)
+VPRIV int em_cmpbounds(codegen_context *e, uint32_t n, uint32_t *operand)
 {
 	cc *c = e->c;
 	const node *x = N(n), *a, *b;
@@ -81,9 +81,9 @@ VPRIV int em_cmpbounds(ecx *e, uint32_t n, uint32_t *operand)
 	if (op != LEX_TOKEN_LESS && op != LEX_TOKEN_LESS_EQUAL && op != LEX_TOKEN_GREATER && op != LEX_TOKEN_GREATER_EQUAL)
 		return -1;
 	a = N(x->a); b = N(x->b);
-	if (AST_QUALIFIED_TYPE_UNQUALIFIED(a->ty) != AST_QUALIFIED_TYPE_UNQUALIFIED(b->ty) || !is_integer(c, a->ty) || em_bitint(c, a->ty))
+	if (AST_QUALIFIED_TYPE_UNQUALIFIED(a->ty) != AST_QUALIFIED_TYPE_UNQUALIFIED(b->ty) || !codegen_type_is_integer(c, a->ty) || codegen_type_is_bitint(c, a->ty))
 		return -1;
-	sz = tsize(c, a->ty);
+	sz = codegen_type_size(c, a->ty);
 	if (sz != 4 && sz != 8)
 		return -1;
 	if (em_bound_constant(c, x->b, &v)) {
@@ -95,8 +95,8 @@ VPRIV int em_cmpbounds(ecx *e, uint32_t n, uint32_t *operand)
 	} else {
 		return -1;
 	}
-	v = em_trunc_to(c, v, a->ty);
-	if (is_signed(c, a->ty)) {
+	v = codegen_integer_truncate(c, v, a->ty);
+	if (codegen_type_is_signed(c, a->ty)) {
 		min = -((i128)1 << (sz * 8 - 1));
 		max = ((i128)1 << (sz * 8 - 1)) - 1;
 	} else {

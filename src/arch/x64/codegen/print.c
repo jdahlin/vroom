@@ -20,21 +20,21 @@ static bool x64_commutes(int op)
  * a commutative op whose result is its second operand swaps instead, and
  * a non-commutative one takes the second operand through r11.
  */
-VPRIV void x64_twoaddr(ecx *e)
+VPRIV void x64_twoaddr(codegen_context *e)
 {
 	bool copies = e->E->o->opt >= 1 && !e->E->noopt;
 	xst *X = e->x64;
 	uint32_t n = 0;
-	rec *o = X->tw;
+	record *o = X->tw;
 
 	uint32_t j = 0;
 
 	X->framefree = x64_framefree_candidate(e);
 	for (uint32_t k = 0; k < X->nin; k++) {
-		rec i = X->in[k];
+		record i = X->in[k];
 
 		if (e->ndl)
-			dbg_remap(e, &j, k, n);	/* (-g rows: to the first record emitted for k) */
+			codegen_debug_rows_remap(e, &j, k, n);	/* (-g rows: to the first record emitted for k) */
 		if (copies && i.op == X_MOV && x64_copy_forward_at(e, k))
 			continue;
 		if (X->framefree && !x64_framefree_record(e, &i))
@@ -46,19 +46,19 @@ VPRIV void x64_twoaddr(ecx *e)
 				} else {
 					int t = IS_XMM(i.r[2]) ? XMM15 : R11;
 
-					o[n++] = (rec){ .op = X_MOV, .sz = 8, .r = { (uint8_t)t, i.r[2], XNOREG, XNOREG } };
-					o[n++] = (rec){ .op = X_MOV, .sz = 8, .r = { i.r[0], i.r[1], XNOREG, XNOREG } };
+					o[n++] = (record){ .op = X_MOV, .sz = 8, .r = { (uint8_t)t, i.r[2], XNOREG, XNOREG } };
+					o[n++] = (record){ .op = X_MOV, .sz = 8, .r = { i.r[0], i.r[1], XNOREG, XNOREG } };
 					i.r[2] = (uint8_t)t;
 				}
 			} else {
-				o[n++] = (rec){ .op = X_MOV, .sz = 8, .r = { i.r[0], i.r[1], XNOREG, XNOREG } };
+				o[n++] = (record){ .op = X_MOV, .sz = 8, .r = { i.r[0], i.r[1], XNOREG, XNOREG } };
 			}
 			i.r[1] = i.r[0];
 		}
 		o[n++] = i;
 	}
 	if (e->ndl)
-		dbg_remap(e, &j, UINT32_MAX, n);
+		codegen_debug_rows_remap(e, &j, UINT32_MAX, n);
 	X->tw = X->in;
 	X->in = o;
 	X->nin = n;
@@ -97,7 +97,7 @@ VPRIV void x64_lbl(tbuf *b, uint32_t s, uint32_t l)
 	vtext_unsigned_append(b, l);
 }
 
-static void x64_memop(ecx *e, tbuf *b, const rec *i)
+static void x64_memop(codegen_context *e, tbuf *b, const record *i)
 {
 	cc *c = e->c;
 	int base = i->r[1];
@@ -110,7 +110,7 @@ static void x64_memop(ecx *e, tbuf *b, const rec *i)
 	if (base == RBP && i->off < 0 && e->wk->falign > 16)
 		base = R12;
 	if (i->r[1] == RIP) {
-		ref_off(c, b, i->ref, i->off);
+		codegen_reference_offset_append(c, b, i->ref, i->off);
 		vtext_string_append(b, "(%rip)");
 		return;
 	}
@@ -142,7 +142,7 @@ static void x64_imm(tbuf *b, int64_t v)
 }
 
 /* the stack protector's guard into r11: %fs:40 (glibc's TCB), or as -mstack-protector-guard-* say */
-static void x64_guard(ecx *e, tbuf *b)
+static void x64_guard(codegen_context *e, tbuf *b)
 {
 	const cc_options *o = e->E->o;
 
@@ -153,7 +153,7 @@ static void x64_guard(ecx *e, tbuf *b)
 }
 
 /* Prologue callee-save slots can follow a frame larger than disp32. */
-static void x64_cs_access(ecx *e, tbuf *b, int r, bool load)
+static void x64_cs_access(codegen_context *e, tbuf *b, int r, bool load)
 {
 	int64_t off = e->x64->csslot[r];
 	int base = e->wk->falign > 16 ? R12 : RBP;
@@ -193,7 +193,7 @@ static void x64_cs_cfi(tbuf *b, int r, int64_t off)
 /* R12 first keeps its incoming value at -8(%rbp), as for normal realignment. */
 static const int interrupt_saved[14] = { R12, RAX, RCX, RDX, RBX, RSI, RDI, R8, R9, R10, R11, R13, R14, R15 };
 
-VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
+VPRIV void x64_print(codegen_context *e, tbuf *b, uint32_t s)
 {
 	cc *c = e->c;
 	xst *X = e->x64;
@@ -207,7 +207,7 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 	bool cfi = e->E->o->cfi;	/* unwind tables: .cfi_* as clang writes them */
 	uint32_t dj = 0;		/* -g: the next row */
 	uint32_t tail = x64_tail_ref(e);
-	size_t objitem = it_open(e, IT_TEXT);
+	size_t objitem = codegen_item_open(e, CODEGEN_ITEM_TEXT);
 	bool objcode = false;
 	if(X->spframe && (frame || e->calls))frame+=8;
 	X->framesz=frame;X->spdelta=0;
@@ -216,7 +216,7 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 		/* the function's own line (its body's '{', column 0), as clang */
 		uint32_t f, l, cl;
 
-		if (dbg_where(e, c->syms[s].body ? N(c->syms[s].body)->loc : c->syms[s].loc, &f, &l, &cl))
+		if (codegen_debug_location_get(e, c->syms[s].body ? N(c->syms[s].body)->loc : c->syms[s].loc, &f, &l, &cl))
 			vtext_format_append(b, "\t.loc\t%u %u 0\n", f, l);
 	}
 	if (cfi)
@@ -291,12 +291,12 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			}
 		}
 	for (uint32_t k = 0; k < X->nin; k++) {
-		const rec *i = &X->in[k];
+		const record *i = &X->in[k];
 		int sz = i->sz;
 
 		if (objcode && dj < e->ndl && e->dl[dj].k == k) {
-			it_close(e, objitem);
-			objitem = it_open(e, IT_TEXT);
+			codegen_item_close(e, objitem);
+			objitem = codegen_item_open(e, CODEGEN_ITEM_TEXT);
 			objcode = false;
 		}
 		for (; dj < e->ndl && e->dl[dj].k == k; dj++)
@@ -304,20 +304,20 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 				vtext_format_append(b, dj ? "\t.loc\t%u %u %u\n" : "\t.loc\t%u %u %u prologue_end\n",
 				     e->dl[dj].file, e->dl[dj].line, e->dl[dj].col);
 
-		if (direct(e)) {
-			rec encoded;
+		if (codegen_context_is_direct(e)) {
+			record encoded;
 			bool code = x64_obj_record(e, i, &encoded);
 			if (code != objcode) {
-				it_close(e, objitem);
-				objitem = it_open(e, code ? IT_X64 : IT_TEXT);
+				codegen_item_close(e, objitem);
+				objitem = codegen_item_open(e, code ? CODEGEN_ITEM_X64 : CODEGEN_ITEM_TEXT);
 				if (code) {
-					uint32_t *h = it_room(e, 8);
+					uint32_t *h = codegen_item_room_need(e, 8);
 					h[0] = s; h[1] = 0;
 				}
 				objcode = code;
 			}
 			if (code) {
-				*(rec *)it_room(e, sizeof(rec)) = encoded;
+				*(record *)codegen_item_room_need(e, sizeof(record)) = encoded;
 				continue;
 			}
 		}
@@ -495,8 +495,8 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			continue; /* argument uses stay in records; branch follows the epilogue */
 		case X_CALL:
 			vtext_string_append(b, "\tcallq\t");
-			ref_name(c, b, i->ref);
-			if (c->o->pic && (RKIND(i->ref) == RK_NAME || sym_needs_got(c, i->ref)))
+			codegen_reference_name_append(c, b, i->ref);
+			if (c->o->pic && (CODEGEN_REFERENCE_KIND(i->ref) == CODEGEN_REFERENCE_NAME || codegen_symbol_needs_got(c, i->ref)))
 				vtext_string_append(b, "@PLT");
 			break;
 		case X_CALLR:
@@ -563,7 +563,7 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			break;
 		case X_RAW:
 			if (i->cond && e->wk->falign > 16)
-				efatal(e, e->curloc, "inline asm r12 operand or clobber conflicts with aligned frame base");
+				codegen_fatal_report(e, e->curloc, "inline asm r12 operand or clobber conflicts with aligned frame base");
 			vtext_string_append(b, "#APP\n");
 			vtext_append(b, e->raw.p + i->off, i->ref);
 			vtext_string_append(b, "\n#NO_APP");
@@ -578,7 +578,7 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			x64_reg(b, i->r[1], 8);
 			break;
 		case X_NAMED:
-			ref_name(c, b, i->ref);
+			codegen_reference_name_append(c, b, i->ref);
 			vtext_char_append(b, ':');
 			if (e->E->o->xcf & 1)
 				vtext_string_append(b, "\n\tendbr64");	/* (&&label: an indirect jump's target) */
@@ -600,21 +600,21 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			break;
 		case X_GOT:
 			vtext_string_append(b, "\tmovq\t");
-			ref_off(c, b, i->ref, 0);
+			codegen_reference_offset_append(c, b, i->ref, 0);
 			vtext_string_append(b, "@GOTPCREL(%rip), ");
 			x64_reg(b, i->r[0], 8);
 			break;
 		case X_TLS:
 			if (i->cond == 2) {
 				vtext_string_append(b, "\tdata16\n\tleaq\t");
-				ref_off(c, b, i->ref, 0);
+				codegen_reference_offset_append(c, b, i->ref, 0);
 				vtext_string_append(b, "@TLSGD(%rip), %rdi\n\tdata16\n\tdata16\n\trex64\n\tcallq\t__tls_get_addr@PLT");
 				break;
 			}
 			vtext_string_append(b, "\tmovq\t%fs:0, ");
 			x64_reg(b, i->r[0], 8);
 			vtext_string_append(b, i->cond ? "\n\taddq\t" : "\n\tleaq\t");
-			ref_off(c, b, i->ref, 0);
+			codegen_reference_offset_append(c, b, i->ref, 0);
 			vtext_string_append(b, i->cond ? "@GOTTPOFF(%rip), " : "@TPOFF(");
 			if (!i->cond) {
 				x64_reg(b, i->r[0], 8);
@@ -741,15 +741,15 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			vtext_string_append(b, i->cond ? "\trep\tstosb" : "\trep\tmovsb");
 			break;
 		default:
-			efatal(e, e->curloc, "internal error: x86-64 record %d", i->op);
+			codegen_fatal_report(e, e->curloc, "internal error: x86-64 record %d", i->op);
 		}
 		vtext_char_append(b, '\n');
 	}
 	if (objcode) {
-		it_close(e, objitem);
-		objitem = it_open(e, IT_TEXT);
+		codegen_item_close(e, objitem);
+		objitem = codegen_item_open(e, CODEGEN_ITEM_TEXT);
 	}
-	if(X->spframe && X->spdelta)efatal(e,e->curloc,"internal error: unbalanced VIR outgoing arguments");
+	if(X->spframe && X->spdelta)codegen_fatal_report(e,e->curloc,"internal error: unbalanced VIR outgoing arguments");
 	if (e->wk->spneed) {
 		x64_guard(e, b);
 		vtext_format_append(b, "\tcmpq\t%d(%s), %%r11\n\tjne\t.Lspfail%u\n", e->wk->canary, e->wk->falign > 16 ? "%r12" : "%rbp", s);
@@ -792,8 +792,8 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			vtext_string_append(b, cfi ? "\tmovq\t%rbp, %rsp\n\tpopq\t%rbp\n\t.cfi_def_cfa %rsp, 8\n" : "\tmovq\t%rbp, %rsp\n\tpopq\t%rbp\n");
 		if (tail) {
 			vtext_string_append(b, "\tjmp\t");
-			ref_name(c, b, tail);
-			if (c->o->pic && sym_needs_got(c, tail)) vtext_string_append(b, "@PLT");
+			codegen_reference_name_append(c, b, tail);
+			if (c->o->pic && codegen_symbol_needs_got(c, tail)) vtext_string_append(b, "@PLT");
 			vtext_char_append(b, '\n');
 		} else {
 			/* Sibling jumps are call edges; interrupts retain their saved-frame return. */
@@ -805,11 +805,11 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 	vtext_string_append(b, cfi ? "\t.cfi_endproc\n.Lfunc_end" : ".Lfunc_end");
 	vtext_unsigned_append(b, s);
 	vtext_string_append(b, ":\n\t.size\t");
-	sym_name(c, b, s);
+	codegen_symbol_name_append(c, b, s);
 	vtext_string_append(b, ", .Lfunc_end");
 	vtext_unsigned_append(b, s);
 	vtext_char_append(b, '-');
-	sym_name(c, b, s);
+	codegen_symbol_name_append(c, b, s);
 	vtext_char_append(b, '\n');
-	it_close(e, objitem);
+	codegen_item_close(e, objitem);
 }

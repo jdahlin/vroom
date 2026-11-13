@@ -1,6 +1,6 @@
 /* Two branches to a common destination become one. */
-#define WK_PREFIX virbuild_
-#define LO_PREFIX virbuild_
+#define WALK_PREFIX virbuild_
+#define WALK_LOWER_PREFIX virbuild_
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
@@ -48,7 +48,7 @@ static bool virbuild_condition_is_chainable(virbuild_context *V, uint32_t v, con
 	}
 }
 
-VPRIV bool virbuild_conditions_merge(ecx *e)
+VPRIV bool virbuild_conditions_merge(codegen_context *e)
 {
 	virbuild_context *V = e->vw;
 	uint32_t ncnt = V->insn_count + V->block_order_count + 1, *cnt = calloc(ncnt, sizeof *cnt);

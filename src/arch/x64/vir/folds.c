@@ -146,7 +146,7 @@ VPRIV bool x64_vir_value_is_sign_extended(x64_vir_context *L,uint32_t v)
  * SSE2 handles complete 16-byte pieces; scalar tails never overread. */
 VPRIV void x64_vir_memory_block_lower(x64_vir_context *L,const vir_insn *i,int dst,int src)
 {
-	ecx *e=L->context;
+	codegen_context *e=L->context;
 	uint64_t n=(uint64_t)x64_vir_constant_bits(&L->function->insns[i->c]);
 	bool copy=i->op==VIR_OP_MEMCPY;
 	if(!copy) {
@@ -156,7 +156,7 @@ VPRIV void x64_vir_memory_block_lower(x64_vir_context *L,const vir_insn *i,int d
 	for(uint64_t off=0;off<n;) {
 		unsigned width=n-off>=16?16:n-off>=8?8:n-off>=4?4:n-off>=2?2:1;
 		int scratch=width==16?XMM0+14:L->general_temporary;
-		lval from={.k=L_REG,.r=src,.off=(int64_t)off},to={.k=L_REG,.r=dst,.off=(int64_t)off};
+		codegen_lvalue from={.k=CODEGEN_LVALUE_REGISTER,.r=src,.off=(int64_t)off},to={.k=CODEGEN_LVALUE_REGISTER,.r=dst,.off=(int64_t)off};
 		if(copy)x64_mem(e,X_LD,width,scratch,&from,false);
 		x64_mem(e,X_ST,width,scratch,&to,false);off+=width;
 	}
@@ -164,17 +164,17 @@ VPRIV void x64_vir_memory_block_lower(x64_vir_context *L,const vir_insn *i,int d
 
 VPRIV uint8_t x64_vir_condition_lower(x64_vir_context *L,uint32_t b,uint32_t v,uint32_t value,int reg)
 {
-	ecx *e=L->context;
+	codegen_context *e=L->context;
 	bool flags=L->compare_condition==value && L->compare_block==b && v==value+1;
 	uint8_t cc=CC_NE;
 	if (flags) {
 		for(uint32_t k=L->setcc_record+1;k<e->x64->nin;k++)
-			if(x64_effects(e,&e->x64->in[k]).fl & (OD_WFLAGS|OD_BARRIER|OD_CALL)) {flags=false;break;}
+			if(x64_effects(e,&e->x64->in[k]).fl & (RECORD_EFFECT_WRITES_FLAGS|RECORD_EFFECT_BARRIER|RECORD_EFFECT_CALL)) {flags=false;break;}
 	}
 	if(flags) {
 		cc=e->x64->in[L->setcc_record].cond;
 		if(L->uses[value]==1 && L->allocation->slot[value]==VIR_BLOCK_NONE) {
-			memmove(&e->x64->in[L->setcc_record],&e->x64->in[L->setcc_record+1],(e->x64->nin-L->setcc_record-1)*sizeof(rec));
+			memmove(&e->x64->in[L->setcc_record],&e->x64->in[L->setcc_record+1],(e->x64->nin-L->setcc_record-1)*sizeof(record));
 			e->x64->nin--;
 		}
 	} else x64_op3(e, X_TEST, x64_vir_type_size(L->function->insns[value].type), XNOREG, reg, reg);

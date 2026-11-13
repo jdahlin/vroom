@@ -12,7 +12,7 @@ SOURCE = r'''
 #include <assert.h>
 #include "codegen/opt/sdivconst.c"
 #include "arch/x64/codegen/x64impl.h"
-#include "codegen/walk/sdivconst.c"
+#include "codegen/walk/division-signed-constant.c"
 #include "arch/a64/codegen/sdivconst.c"
 VPRIV int x64_nfree(ecx *e) { return 8 - __builtin_popcount(e->x64->live & X_TEMPS); }
 VPRIV i128 em_trunc_to(cc *c, i128 v, ast_qualified_type t) { (void)c; (void)t; return v; }

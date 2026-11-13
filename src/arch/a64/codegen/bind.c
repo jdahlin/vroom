@@ -1,11 +1,11 @@
 /* vcc code generator: reference logging and symbol bindings */
-#include "../../../codegen/emitimpl.h"
+#include "../../../codegen/codegen-internal.h"
 
 /* ---------------- bindings ---------------- */
 
 VPRIV int regvar_reg(cc *c, uint32_t s)
 {
-	const attrs *a = sym_attrs(c, s);
+	const attrs *a = codegen_symbol_attributes(c, s);
 	const char *n;
 
 	if (c->syms[s].sc != AST_STORAGE_REGISTER || !a->asmname)
@@ -18,17 +18,17 @@ VPRIV int regvar_reg(cc *c, uint32_t s)
 	return -1;
 }
 
-VPRIV int64_t bind_slot(ecx *e, uint32_t s)
+VPRIV int64_t bind_slot(codegen_context *e, uint32_t s)
 {
 	cc *c = e->c;
-	bind *b = binding(e, s);
+	codegen_binding *b = codegen_symbol_binding_get(e, s);
 	ast_qualified_type t = c->syms[s].ty;
-	uint32_t al = talign(c, t);
+	uint32_t al = codegen_type_alignment(c, t);
 
 	if (c->syms[s].align > al)
 		al = c->syms[s].align;
 	b->inst = e->f->inst;
-	b->kind = B_SLOT;
+	b->kind = CODEGEN_BINDING_SLOT;
 	b->kv = 0;
 	b->reg = 0xff;
 	if (c->syms[s].sc == AST_STORAGE_REGISTER) {
@@ -37,12 +37,12 @@ VPRIV int64_t bind_slot(ecx *e, uint32_t s)
 		if (rr >= 0)
 			b->reg = (uint8_t)rr;
 	}
-	b->slot = slot(e, tsize(c, t) ? tsize(c, t) : 1, al);
+	b->slot = slot(e, codegen_type_size(c, t) ? codegen_type_size(c, t) : 1, al);
 	return b->slot;
 }
 
 /* the callee-saved register local s of the emitted function lives in, or -1 */
-VPRIV int lreg_of(ecx *e, uint32_t s)
+VPRIV int lreg_of(codegen_context *e, uint32_t s)
 {
 	for (int i = 0; i < e->nlr; i++)
 		if (e->lrsym[i] == s)
@@ -51,40 +51,40 @@ VPRIV int lreg_of(ecx *e, uint32_t s)
 }
 
 /* bind s to its register (lreg_of) for this instance */
-VPRIV lval bind_lreg(ecx *e, uint32_t s)
+VPRIV codegen_lvalue bind_lreg(codegen_context *e, uint32_t s)
 {
-	bind *b = binding(e, s);
-	lval l = { .k = L_VREG };
+	codegen_binding *b = codegen_symbol_binding_get(e, s);
+	codegen_lvalue l = { .k = CODEGEN_LVALUE_LOCAL_REGISTER };
 
 	b->inst = e->f->inst;
-	b->kind = B_LREG;
+	b->kind = CODEGEN_BINDING_LOCAL_REGISTER;
 	b->kv = 0;
 	b->reg = 0xff;
-	b->v = vreg(lreg_of(e, s));
+	b->v = codegen_value_register(lreg_of(e, s));
 	l.r = b->v.r;
-	l.align = talign(e->c, e->c->syms[s].ty);
+	l.align = codegen_type_alignment(e->c, e->c->syms[s].ty);
 	return l;
 }
 
 /* the lvalue of a local (auto/param/register) variable */
-VPRIV lval local_lval(ecx *e, uint32_t s)
+VPRIV codegen_lvalue local_lval(codegen_context *e, uint32_t s)
 {
 	cc *c = e->c;
-	bind *b = binding(e, s);
-	lval l = { 0 };
+	codegen_binding *b = codegen_symbol_binding_get(e, s);
+	codegen_lvalue l = { 0 };
 	ast_qualified_type t = c->syms[s].ty;
 
-	l.align = talign(c, t);
-	if (b->kind == B_LREG && b->inst) {
-		l.k = L_VREG;
+	l.align = codegen_type_alignment(c, t);
+	if (b->kind == CODEGEN_BINDING_LOCAL_REGISTER && b->inst) {
+		l.k = CODEGEN_LVALUE_LOCAL_REGISTER;
 		l.r = b->v.r;
 		return l;
 	}
 	if ((b->kind == B_NONE || b->inst == 0) && lreg_of(e, s) >= 0)
 		return bind_lreg(e, s);	/* declaration jumped over */
-	if (b->kind == B_REG && b->inst) {
+	if (b->kind == CODEGEN_BINDING_REGISTER && b->inst) {
 		/* read-only, its address never taken: a copy in a fresh slot will do */
-		l.k = L_FRAME;
+		l.k = CODEGEN_LVALUE_FRAME;
 		l.off = slot(e, 8, 8);
 		mem(e, I_ST, 3, 0, b->v.r, FRAME, l.off);
 		return l;
@@ -92,30 +92,30 @@ VPRIV lval local_lval(ecx *e, uint32_t s)
 	if (b->kind == B_NONE || b->inst == 0) {
 		/* declaration not executed (jumped over, or dead): give it a slot */
 		bind_slot(e, s);
-	} else if (b->kind == B_CONST) {
-		val v = b->v;
+	} else if (b->kind == CODEGEN_BINDING_CONSTANT) {
+		codegen_value v = b->v;
 		int r;
 
 		bind_slot(e, s);
-		if (is_wide(c, t)) {
-			toreg2(e, &v, is_signed(c, t));
+		if (codegen_type_is_wide(c, t)) {
+			toreg2(e, &v, codegen_type_is_signed(c, t));
 			mem(e, I_ST, 3, 0, v.r, FRAME, b->slot);
 			mem(e, I_ST, 3, 0, v.r2, FRAME, b->slot + 8);
 		} else {
 			r = toreg(e, &v);
-			mem(e, I_ST, log2sz(tsize(c, t)), 0, r, FRAME, b->slot);
+			mem(e, I_ST, log2sz(codegen_type_size(c, t)), 0, r, FRAME, b->slot);
 		}
 		val_free(e, &v);
 	}
-	if (b->kind == B_INDIRECT) {
+	if (b->kind == CODEGEN_BINDING_INDIRECT) {
 		int r = treg(e);
 
 		mem(e, I_LD, 3, 0, r, FRAME, b->slot);
-		l.k = L_REG;
+		l.k = CODEGEN_LVALUE_REGISTER;
 		l.r = (uint8_t)r;
 		return l;
 	}
-	l.k = L_FRAME;
+	l.k = CODEGEN_LVALUE_FRAME;
 	l.off = b->slot;
 	return l;
 }

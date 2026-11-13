@@ -1,8 +1,8 @@
 /* arm64 flow classification and debug adapter for shared unreachable-record cleanup. */
-#include "../../../codegen/emitimpl.h"
+#include "../../../codegen/codegen-internal.h"
 
 typedef struct a64_unreachable_debug {
-	ecx *e;
+	codegen_context *e;
 	uint32_t cursor;
 } a64_unreachable_debug;
 
@@ -10,18 +10,18 @@ static void a64_unreachable_remap(void *ctx, uint32_t old, uint32_t next)
 {
 	a64_unreachable_debug *d = ctx;
 
-	dbg_remap(d->e, &d->cursor, old, next);
+	codegen_debug_rows_remap(d->e, &d->cursor, old, next);
 }
 
-VPRIV void a64_unreachable(ecx *e)
+VPRIV void a64_unreachable(codegen_context *e)
 {
 	/* Every understood ordinary record is explicit. New opcodes default
 	 * to entry barriers, as do raw text and encoded instructions. BRK is
 	 * resumable (__debugtrap and __arm_trap), so it does not end a region.
 	 */
-#define A64_NEXT(op) [op] = EM_FLOW_NEXT
+#define A64_NEXT(op) [op] = RECORD_FLOW_NEXT
 	static const uint8_t flow[I_STF + 1] = {
-		[I_B] = EM_FLOW_STOP, [I_RET] = EM_FLOW_STOP, [I_TAIL] = EM_FLOW_STOP,
+		[I_B] = RECORD_FLOW_STOP, [I_RET] = RECORD_FLOW_STOP, [I_TAIL] = RECORD_FLOW_STOP,
 		A64_NEXT(I_ADD), A64_NEXT(I_SUB), A64_NEXT(I_ADDS), A64_NEXT(I_SUBS),
 		A64_NEXT(I_AND), A64_NEXT(I_ORR), A64_NEXT(I_EOR), A64_NEXT(I_ANDS),
 		A64_NEXT(I_BIC), A64_NEXT(I_ORN), A64_NEXT(I_ADC), A64_NEXT(I_SBC),
@@ -45,6 +45,6 @@ VPRIV void a64_unreachable(ecx *e)
 #undef A64_NEXT
 	a64_unreachable_debug d = { e, 0 };
 
-	e->nin = em_rec_unreachable(e->in, e->nin, sizeof(ins), offsetof(ins, op), flow, sizeof(flow),
+	e->nin = record_unreachable_remove(e->in, e->nin, sizeof(ins), offsetof(ins, op), flow, sizeof(flow),
 				    e->ndl ? a64_unreachable_remap : NULL, &d);
 }

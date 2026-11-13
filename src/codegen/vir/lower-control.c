@@ -1,13 +1,13 @@
 /* The walker's lowering interface for builtins and control: atomics, varargs, labels, jumps; what the builder does not handle. */
-#define WK_PREFIX virbuild_
-#define LO_PREFIX virbuild_
+#define WALK_PREFIX virbuild_
+#define WALK_LOWER_PREFIX virbuild_
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
 
 /* ---------------- builtins and the rest ---------------- */
 
-VPRIV val virbuild_bitop(ecx *e, int bi, int size, val a)
+VPRIV codegen_value virbuild_bitop(codegen_context *e, int bi, int size, codegen_value a)
 {
 	uint32_t ty = virbuild_integer_type(size), x = virbuild_walker_value_get(e, &a, ty), op;
 	int r = virbuild_result_register_pick(e, &a, NULL);
@@ -20,37 +20,37 @@ VPRIV val virbuild_bitop(ecx *e, int bi, int size, val a)
 	case CC_BUILTIN_BSWAP16:
 		x = virbuild_insn_append(e, VIR_OP_BSWAP, VIR_TYPE_I32, 0, virbuild_value_convert(e, x, VIR_TYPE_I32), 0, 0);
 		virbuild_register_write(e, r, virbuild_insn_append(e, VIR_OP_LSHR, VIR_TYPE_I32, 0, x, virbuild_constant_integer(e, VIR_TYPE_I32, 16), 0));
-		return (val){ .k = V_REG, .r = (uint8_t)r };
+		return (codegen_value){ .k = CODEGEN_VALUE_REGISTER, .r = (uint8_t)r };
 	case CC_BUILTIN_PARITY: case CC_BUILTIN_PARITYL: case CC_BUILTIN_PARITYLL:
 		x = virbuild_insn_append(e, VIR_OP_POPCNT, ty, 0, x, 0, 0);
 		virbuild_register_write(e, r, virbuild_insn_append(e, VIR_OP_AND, ty, 0, x, virbuild_constant_integer(e, ty, 1), 0));
-		return (val){ .k = V_REG, .r = (uint8_t)r };
+		return (codegen_value){ .k = CODEGEN_VALUE_REGISTER, .r = (uint8_t)r };
 	default: virbuild_fail(e, VIRBUILD_FAILURE(unsupported_builtin));
 	}
 	virbuild_register_write(e, r, virbuild_insn_append(e, op, ty, 0, x, 0, 0));
-	return (val){ .k = V_REG, .r = (uint8_t)r };
+	return (codegen_value){ .k = CODEGEN_VALUE_REGISTER, .r = (uint8_t)r };
 }
 
 /* sequentially consistent; a result is zero-extended (an i32 for 4 bytes or less) */
-VPRIV int virbuild_atomic(ecx *e, int op, int size, int rp, int rv, int rexp)
+VPRIV int virbuild_atomic(codegen_context *e, int op, int size, int rp, int rv, int rexp)
 {
 	uint32_t ty = virbuild_integer_type(size), fl = virbuild_memory_flags_make(size, (uint32_t)size, false), p, v = 0;
 	int r;
 
-	if (op == WK_AFENCE) {
+	if (op == WALK_ATOMIC_FENCE) {
 		virbuild_insn_append(e, VIR_OP_AFENCE, VIR_TYPE_VOID, 0, 0, 0, 0);
 		virbuild_store_table_clear(e, true);
 		return -1;
 	}
 	p = virbuild_register_read(e, rp, VIR_TYPE_PTR);
-	if (op != WK_ALOAD)
+	if (op != WALK_ATOMIC_LOAD)
 		v = virbuild_register_read(e, rv, ty);
 	virbuild_store_table_clear(e, true);
 	switch (op) {
-	case WK_ALOAD: v = virbuild_insn_append(e, VIR_OP_ALOAD, ty, fl, p, 0, 0); break;
-	case WK_ASTORE: virbuild_insn_append(e, VIR_OP_ASTORE, VIR_TYPE_VOID, fl, p, v, 0); return -1;
-	case WK_AXCHG: v = virbuild_insn_append(e, VIR_OP_AXCHG, ty, fl, p, v, 0); break;
-	case WK_AXADD: v = virbuild_insn_append(e, VIR_OP_AXADD, ty, fl, p, v, 0); break;
+	case WALK_ATOMIC_LOAD: v = virbuild_insn_append(e, VIR_OP_ALOAD, ty, fl, p, 0, 0); break;
+	case WALK_ATOMIC_STORE: virbuild_insn_append(e, VIR_OP_ASTORE, VIR_TYPE_VOID, fl, p, v, 0); return -1;
+	case WALK_ATOMIC_EXCHANGE: v = virbuild_insn_append(e, VIR_OP_AXCHG, ty, fl, p, v, 0); break;
+	case WALK_ATOMIC_ADD: v = virbuild_insn_append(e, VIR_OP_AXADD, ty, fl, p, v, 0); break;
 	default: v = virbuild_insn_append(e, VIR_OP_ACAS, ty, fl, p, virbuild_register_read(e, rexp, ty), v); break;
 	}
 	r = virbuild_treg(e);
@@ -60,18 +60,18 @@ VPRIV int virbuild_atomic(ecx *e, int op, int size, int rp, int rv, int rexp)
 	return r;
 }
 
-VPRIV int virbuild_tlsaddr(ecx *e, uint32_t ref, int model) { (void)ref, (void)model; virbuild_fail(e, VIRBUILD_FAILURE(thread_local)); }
-VPRIV val virbuild_frame(ecx *e, bool ret, uint32_t level) { (void)ret, (void)level; virbuild_fail(e, VIRBUILD_FAILURE(frame_address)); }
-VPRIV val virbuild_alloca(ecx *e, val n) { (void)n; virbuild_fail(e, VIRBUILD_FAILURE(alloca)); }
-VPRIV int virbuild_spget(ecx *e) { virbuild_fail(e, VIRBUILD_FAILURE(stack_pointer)); }
-VPRIV void virbuild_spset(ecx *e, int r) { (void)r; virbuild_fail(e, VIRBUILD_FAILURE(stack_pointer)); }
-VPRIV val virbuild_setjmp(ecx *e, int rbuf) { (void)rbuf; virbuild_fail(e, VIRBUILD_FAILURE(setjmp)); }
-VPRIV void virbuild_longjmp(ecx *e, int rbuf) { (void)rbuf; virbuild_fail(e, VIRBUILD_FAILURE(longjmp)); }
-VPRIV void virbuild_asm(ecx *e, uint32_t n) { (void)n; virbuild_fail(e, VIRBUILD_FAILURE(inline_assembly)); }
+VPRIV int virbuild_tlsaddr(codegen_context *e, uint32_t ref, int model) { (void)ref, (void)model; virbuild_fail(e, VIRBUILD_FAILURE(thread_local)); }
+VPRIV codegen_value virbuild_frame(codegen_context *e, bool ret, uint32_t level) { (void)ret, (void)level; virbuild_fail(e, VIRBUILD_FAILURE(frame_address)); }
+VPRIV codegen_value virbuild_alloca(codegen_context *e, codegen_value n) { (void)n; virbuild_fail(e, VIRBUILD_FAILURE(alloca)); }
+VPRIV int virbuild_spget(codegen_context *e) { virbuild_fail(e, VIRBUILD_FAILURE(stack_pointer)); }
+VPRIV void virbuild_spset(codegen_context *e, int r) { (void)r; virbuild_fail(e, VIRBUILD_FAILURE(stack_pointer)); }
+VPRIV codegen_value virbuild_setjmp(codegen_context *e, int rbuf) { (void)rbuf; virbuild_fail(e, VIRBUILD_FAILURE(setjmp)); }
+VPRIV void virbuild_longjmp(codegen_context *e, int rbuf) { (void)rbuf; virbuild_fail(e, VIRBUILD_FAILURE(longjmp)); }
+VPRIV void virbuild_asm(codegen_context *e, uint32_t n) { (void)n; virbuild_fail(e, VIRBUILD_FAILURE(inline_assembly)); }
 /* the va_list at rap points at the first unnamed argument (Apple's: on the stack) */
-VPRIV void virbuild_va_start(ecx *e, int rap)
+VPRIV void virbuild_va_start(codegen_context *e, int rap)
 {
-	if (!DARWIN(e->c))
+	if (!CODEGEN_IS_DARWIN(e->c))
 		virbuild_fail(e, VIRBUILD_FAILURE(variadic_start));
 	virbuild_insn_append(e, VIR_OP_VA_START, VIR_TYPE_VOID, 0, virbuild_register_read(e, rap, VIR_TYPE_PTR), 0, 0);
 	virbuild_store_table_clear(e, true);
@@ -79,16 +79,16 @@ VPRIV void virbuild_va_start(ecx *e, int rap)
 /* the address of the next argument of va_list *rap, which moves past it (as va_arg_ in
  * arch/a64/codegen/builtin.c); Apple's va_list is a pointer into the stack arguments,
  * 8 bytes each (16-aligned ones aligned first, records over 16 bytes by reference) */
-VPRIV int virbuild_va_arg(ecx *e, int rap, ast_qualified_type t)
+VPRIV int virbuild_va_arg(codegen_context *e, int rap, ast_qualified_type t)
 {
 	cc *c = e->c;
-	uint64_t size = tsize(c, t);
-	bool big = is_recabi(c, t) && size > 16;
-	lval ap = { .k = L_REG, .r = (uint8_t)rap, .align = 8 };
+	uint64_t size = codegen_type_size(c, t);
+	bool big = codegen_type_is_record_like(c, t) && size > 16;
+	codegen_lvalue ap = { .k = CODEGEN_LVALUE_REGISTER, .r = (uint8_t)rap, .align = 8 };
 	uint32_t p, q;
 	int r, rn;
 
-	if (!DARWIN(c))
+	if (!CODEGEN_IS_DARWIN(c))
 		virbuild_fail(e, VIRBUILD_FAILURE(variadic_argument));
 	r = virbuild_treg(e);
 	virbuild_load(e, r, &ap, 8, false);
@@ -106,29 +106,29 @@ VPRIV int virbuild_va_arg(ecx *e, int rap, ast_qualified_type t)
 	virbuild_tfree(e, rn);
 	virbuild_register_write(e, r, p);
 	if (big) {
-		lval m = { .k = L_REG, .r = (uint8_t)r, .align = 8 };
+		codegen_lvalue m = { .k = CODEGEN_LVALUE_REGISTER, .r = (uint8_t)r, .align = 8 };
 
 		virbuild_load(e, r, &m, 8, false);
 	}
 	return r;
 }
-VPRIV void virbuild_retrec(ecx *e, int raddr, const wkarg *r, uint32_t lbl) { (void)raddr, (void)r, (void)lbl; virbuild_fail(e, VIRBUILD_FAILURE(record_result)); }
-VPRIV bool virbuild_tail_return(ecx *e, uint32_t expr) { (void)e, (void)expr; return false; }
+VPRIV void virbuild_retrec(codegen_context *e, int raddr, const walk_argument *r, uint32_t lbl) { (void)raddr, (void)r, (void)lbl; virbuild_fail(e, VIRBUILD_FAILURE(record_result)); }
+VPRIV bool virbuild_tail_return(codegen_context *e, uint32_t expr) { (void)e, (void)expr; return false; }
 
-VPRIV void virbuild_trap(ecx *e)
+VPRIV void virbuild_trap(codegen_context *e)
 {
 	virbuild_block_terminate(e, VIR_OP_TRAP, 0, 0, 0, 0);
 }
 
-VPRIV void virbuild_barrier(ecx *e)
+VPRIV void virbuild_barrier(codegen_context *e)
 {
 	virbuild_insn_append(e, VIR_OP_BARRIER, VIR_TYPE_VOID, 0, 0, 0, 0);
 	virbuild_store_table_clear(e, true);
 }
 
-VPRIV void virbuild_dbgrow(ecx *e, uint32_t loc) { e->curloc = loc; }
+VPRIV void virbuild_dbgrow(codegen_context *e, uint32_t loc) { e->curloc = loc; }
 
-VPRIV void virbuild_label(ecx *e, uint32_t l)
+VPRIV void virbuild_label(codegen_context *e, uint32_t l)
 {
 	virbuild_context *V = e->vw;
 	uint32_t b = virbuild_label_block(e, l);
@@ -137,9 +137,9 @@ VPRIV void virbuild_label(ecx *e, uint32_t l)
 	V->blocks[V->current_block].terminator = virbuild_preir_insn_add(e, VIR_OP_BR, VIR_TYPE_VOID, 0, b, 0, 0, V->current_block);
 	V->current_block = b;
 	V->store_count = 0;
-	wk_ael_clear(e, UINT32_MAX);
+	walk_array_elements_clear(e, UINT32_MAX);
 }
 
-VPRIV void virbuild_jump(ecx *e, uint32_t l) { virbuild_branch_emit(e, virbuild_label_block(e, l)); }
-VPRIV void virbuild_jumpr(ecx *e, int r) { (void)r; virbuild_fail(e, VIRBUILD_FAILURE(computed_goto)); }
-VPRIV void virbuild_named(ecx *e, uint32_t ref) { (void)ref; virbuild_fail(e, VIRBUILD_FAILURE(label_address)); }
+VPRIV void virbuild_jump(codegen_context *e, uint32_t l) { virbuild_branch_emit(e, virbuild_label_block(e, l)); }
+VPRIV void virbuild_jumpr(codegen_context *e, int r) { (void)r; virbuild_fail(e, VIRBUILD_FAILURE(computed_goto)); }
+VPRIV void virbuild_named(codegen_context *e, uint32_t ref) { (void)ref; virbuild_fail(e, VIRBUILD_FAILURE(label_address)); }

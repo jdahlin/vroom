@@ -87,7 +87,7 @@ VPRIV bool a64_vir_call_is_sibling(a64_vir_context *L, uint32_t b, uint32_t i)
 	uint32_t res = i, j;
 
 	if (!L->tail || f->insns[i].type == VIR_TYPE_MULTI ||
-	    (t->op == VIR_OP_SYMADDR && RKIND(t->a) == RK_SYM && !em_tail_target_ok(L->context, canon_sym(L->context->c, RIDX(t->a)))))
+	    (t->op == VIR_OP_SYMADDR && CODEGEN_REFERENCE_KIND(t->a) == CODEGEN_REFERENCE_SYMBOL && !em_tail_target_ok(L->context, codegen_symbol_canonical(L->context->c, CODEGEN_REFERENCE_INDEX(t->a)))))
 		return false;
 	j = a64_vir_pass_through_skip(L, k, i + 1, &res);
 	for (int hop = 0;; hop++) {
@@ -112,7 +112,7 @@ VPRIV bool a64_vir_call_is_sibling(a64_vir_context *L, uint32_t b, uint32_t i)
 
 VPRIV void a64_vir_call_lower(a64_vir_context *L, uint32_t b, uint32_t i, const vir_insn *in)
 {
-	ecx *e = L->context;
+	codegen_context *e = L->context;
 	const vir_function *f = L->function;
 	uint32_t ng = VIR_SIGNATURE_GROUP_COUNT(f->extra[in->b]);
 	a64_vir_argument *a;
@@ -123,7 +123,7 @@ VPRIV void a64_vir_call_lower(a64_vir_context *L, uint32_t b, uint32_t i, const 
 	a = __builtin_alloca(sizeof(a64_vir_argument) * (ng + 1));
 	uint8_t gm = 0;	/* the x registers the arguments are in */
 
-	a64_vir_arguments_assign(DARWIN(e->c), &f->extra[in->b], a, ng, &stk);
+	a64_vir_arguments_assign(CODEGEN_IS_DARWIN(e->c), &f->extra[in->b], a, ng, &stk);
 	for (uint32_t k = 0; k < ng; k++) {
 		uint8_t r = L->operand_registers[1 + k];
 
@@ -168,7 +168,7 @@ VPRIV void a64_vir_call_lower(a64_vir_context *L, uint32_t b, uint32_t i, const 
 				a64_vir_fail(L, VIRBUILD_FAILURE(indirect_callee_without_register));
 			t->cond = 2;
 			t->ref = f->insns[in->a].a;
-			note_ref(e, t->ref);
+			codegen_reference_note(e, t->ref);
 		} else {
 			t->cond = 3;
 			t->rn = (uint8_t)a64_vir_general_register(L->operand_registers[0]);
@@ -185,7 +185,7 @@ VPRIV void a64_vir_call_lower(a64_vir_context *L, uint32_t b, uint32_t i, const 
 
 		if (k->op != VIR_OP_SYMADDR || k->b || k->c)
 			a64_vir_fail(L, VIRBUILD_FAILURE(indirect_callee_without_register));
-		note_ref(e, k->a);
+		codegen_reference_note(e, k->a);
 		ins *c = put(e, I_BL);
 
 		c->ref = k->a;
@@ -200,7 +200,7 @@ VPRIV void a64_vir_call_lower(a64_vir_context *L, uint32_t b, uint32_t i, const 
 
 VPRIV void a64_vir_parameter_lower(a64_vir_context *L, const vir_insn *in, uint8_t res)
 {
-	ecx *e = L->context;
+	codegen_context *e = L->context;
 	const vir_function *f = L->function;
 	uint32_t ng = VIR_SIGNATURE_GROUP_COUNT(f->extra[f->signature]);
 	a64_vir_argument *a;
@@ -209,7 +209,7 @@ VPRIV void a64_vir_parameter_lower(a64_vir_context *L, const vir_insn *in, uint8
 	if (ng > A64_VIR_OPERAND_MAX || in->a >= ng)
 		a64_vir_fail(L, VIRBUILD_FAILURE(lowering_parameter));
 	a = __builtin_alloca(sizeof(a64_vir_argument) * ng);
-	a64_vir_arguments_assign(DARWIN(e->c), &f->extra[f->signature], a, ng, &stk);
+	a64_vir_arguments_assign(CODEGEN_IS_DARWIN(e->c), &f->extra[f->signature], a, ng, &stk);
 	if (a[in->a].reg != VIR_REGISTER_NONE) {
 		if (res != VIR_REGISTER_NONE && res != a[in->a].reg)
 			a64_vir_fail(L, VIRBUILD_FAILURE(parameter_not_in_register));

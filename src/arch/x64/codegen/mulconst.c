@@ -1,7 +1,7 @@
 /* One scaled LEA for the shared 3/5/9 multiplication recipe. */
 #include "x64impl.h"
 
-VPRIV bool x64_mulconst(ecx *e, int size, int r, i128 rhs)
+VPRIV bool x64_mulconst(codegen_context *e, int size, int r, i128 rhs)
 {
 	if (e->E->o->opt < 1 || e->E->noopt || (size != 4 && size != 8))
 		return false;

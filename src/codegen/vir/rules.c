@@ -1,6 +1,6 @@
 /* The simplifier's rewrite rules: what one instruction becomes, given its operands. */
-#define WK_PREFIX virbuild_
-#define LO_PREFIX virbuild_
+#define WALK_PREFIX virbuild_
+#define WALK_LOWER_PREFIX virbuild_
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
@@ -63,7 +63,7 @@ static uint32_t virbuild_value_sign_extended_bytes(const virbuild_context *V, ui
 	return z < sz ? 2 * z : sz;	/* (zero-extended from z bytes: a signed 2z-byte value) */
 }
 
-VPRIV uint32_t virbuild_simplify_undefined_value(ecx *e, virbuild_simplify_state *S, uint32_t ty)
+VPRIV uint32_t virbuild_simplify_undefined_value(codegen_context *e, virbuild_simplify_state *S, uint32_t ty)
 {
 	if (!S->undefined_values[ty])
 		S->undefined_values[ty] = virbuild_undefined_value(e, ty);
@@ -71,7 +71,7 @@ VPRIV uint32_t virbuild_simplify_undefined_value(ecx *e, virbuild_simplify_state
 }
 
 /* q rewritten in place (true), or the value that replaces it in *r */
-VPRIV bool virbuild_insn_simplify(ecx *e, virbuild_simplify_state *S, uint32_t q, uint32_t *r)
+VPRIV bool virbuild_insn_simplify(codegen_context *e, virbuild_simplify_state *S, uint32_t q, uint32_t *r)
 {
 	virbuild_context *V = e->vw;
 	vir_insn in = V->insns[q].insn;

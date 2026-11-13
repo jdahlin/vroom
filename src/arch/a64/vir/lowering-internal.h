@@ -3,7 +3,7 @@
 #ifndef VCC_ARCH_A64_VIR_LOWERING_INTERNAL_H
 #define VCC_ARCH_A64_VIR_LOWERING_INTERNAL_H
 
-#include "../../../codegen/emitimpl.h"
+#include "../../../codegen/codegen-internal.h"
 #include "../../../codegen/vir/preir.h"
 #include "../../../codegen/vir/lowering-driver.h"
 #include "vir/layout.h"
@@ -20,7 +20,7 @@
 typedef struct a64_vir_argument { uint8_t reg; uint8_t size; int32_t stack_offset; } a64_vir_argument;	/* reg VIR_REGISTER_NONE: at stk */
 
 typedef struct a64_vir_context {
-	ecx *context;
+	codegen_context *context;
 	vir_function *function;
 	const vir_alloc_out *allocation;
 	int64_t *slot_offsets;		/* per VIR slot: its FRAME offset */
@@ -163,10 +163,10 @@ VPRIV bool a64_vir_compare_chain_lower(a64_vir_context *L, uint32_t b, uint32_t 
 VPRIV void a64_vir_compare_chained_lower(a64_vir_context *L, const vir_insn *in, bool isor);
 VPRIV int a64_vir_condition_flags_get(a64_vir_context *L, const vir_insn *in);
 VPRIV a64_vir_condition a64_vir_branch_condition_get(a64_vir_context *L, const vir_insn *in);
-VPRIV void a64_vir_branch_conditional_emit(ecx *e, a64_vir_condition c, bool inv, uint32_t l);
+VPRIV void a64_vir_branch_conditional_emit(codegen_context *e, a64_vir_condition c, bool inv, uint32_t l);
 VPRIV bool a64_vir_register_is_kept(const a64_vir_context *L, uint8_t r, uint32_t upto);
 VPRIV bool a64_vir_test_branch_fold(a64_vir_context *L, uint32_t b, uint32_t i);
-VPRIV lval a64_vir_address_get(a64_vir_context *L, uint32_t w, int t);
+VPRIV codegen_lvalue a64_vir_address_get(a64_vir_context *L, uint32_t w, int t);
 VPRIV void a64_vir_load_lower(a64_vir_context *L, uint32_t i, const vir_insn *in, uint8_t res);
 VPRIV void a64_vir_store_lower(a64_vir_context *L, const vir_insn *in);
 VPRIV void a64_vir_memory_block_lower(a64_vir_context *L, const vir_insn *in);

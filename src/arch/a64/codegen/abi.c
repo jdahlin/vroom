@@ -1,5 +1,5 @@
 /* vcc code generator: AAPCS64 classification, spilling around calls */
-#include "../../../codegen/emitimpl.h"
+#include "../../../codegen/codegen-internal.h"
 
 /* ---------------- AAPCS64 (floating point and HFAs in v0-v7) ---------------- */
 
@@ -54,7 +54,7 @@ static int hfa_walk(cc *c, ast_qualified_type t, int *base, uint64_t *n)
 			   homogeneous members. Any padding they introduce is rejected
 			   by the size check below. */
 			if ((g->f[k].bitfield && !g->f[k].width) ||
-			    (!g->f[k].bitfield && tsize(c, g->f[k].ty) == 0))
+			    (!g->f[k].bitfield && codegen_type_size(c, g->f[k].ty) == 0))
 				continue;
 			if (g->f[k].bitfield || !hfa_walk(c, g->f[k].ty, base, &m))
 				return 0;
@@ -74,8 +74,8 @@ VPRIV int hfa(cc *c, ast_qualified_type t, int *n)
 	int base = 0;
 	uint64_t m = 0;
 
-	if (is_bvec(c, t) && (T(c, t)->n == 64 || T(c, t)->n == 128)) return 0;
-	if (!is_recabi(c, t) || !hfa_walk(c, t, &base, &m) || m > 4)
+	if (codegen_type_is_bool_vector(c, t) && (T(c, t)->n == 64 || T(c, t)->n == 128)) return 0;
+	if (!codegen_type_is_record_like(c, t) || !hfa_walk(c, t, &base, &m) || m > 4)
 		return 0;
 	*n = (int)m;
 	return base & ~HV;
@@ -87,13 +87,13 @@ VPRIV int hfa(cc *c, ast_qualified_type t, int *n)
  * widened to 8/n bytes (v4qi as 4h, v2hi and v2qi as 2s), one lane as it
  * is.  As an argument it goes in a GPR as its bytes (classify).
  */
-VPRIV bool vec_small(cc *c, ast_qualified_type t) { return is_vec(c, t) && !is_bvec(c, t) && tsize(c, t) < 8; }
+VPRIV bool vec_small(cc *c, ast_qualified_type t) { return codegen_type_is_vector(c, t) && !codegen_type_is_bool_vector(c, t) && codegen_type_size(c, t) < 8; }
 
 /* the vector at [rs] into v0 */
-VPRIV void vec_small_ret(ecx *e, ast_qualified_type t, int rs)
+VPRIV void vec_small_ret(codegen_context *e, ast_qualified_type t, int rs)
 {
 	cc *c = e->c;
-	uint32_t n = T(c, t)->n, size = (uint32_t)tsize(c, t), es = n ? size / n : size, w = n > 1 ? 8 / n : 0;
+	uint32_t n = T(c, t)->n, size = (uint32_t)codegen_type_size(c, t), es = n ? size / n : size, w = n > 1 ? 8 / n : 0;
 	int acc = treg(e), x = treg(e);
 
 	if (n <= 1) {
@@ -112,10 +112,10 @@ VPRIV void vec_small_ret(ecx *e, ast_qualified_type t, int rs)
 }
 
 /* v0 (a call's result) into the slot at sl */
-VPRIV void vec_small_res(ecx *e, ast_qualified_type t, int64_t sl)
+VPRIV void vec_small_res(codegen_context *e, ast_qualified_type t, int64_t sl)
 {
 	cc *c = e->c;
-	uint32_t n = T(c, t)->n, size = (uint32_t)tsize(c, t), es = n ? size / n : size, w = n > 1 ? 8 / n : 0;
+	uint32_t n = T(c, t)->n, size = (uint32_t)codegen_type_size(c, t), es = n ? size / n : size, w = n > 1 ? 8 / n : 0;
 	int acc = treg(e), x = treg(e);
 
 	if (n <= 1) {
@@ -135,7 +135,7 @@ VPRIV void vec_small_res(ecx *e, ast_qualified_type t, int64_t sl)
 /* LLVM legalizes small boolean-vector results independently of packed storage.
  * Power-of-two lane counts 2/4/8/16 use one SIMD register; other counts
  * through eight use one integer register per lane. Larger results use x8. */
-VPRIV void bvec_ret(ecx *e, ast_qualified_type t, int rs)
+VPRIV void bvec_ret(codegen_context *e, ast_qualified_type t, int rs)
 {
 	unsigned n = T(e->c, t)->n;
 	bool simd = n == 2 || n == 4 || n == 8 || n == 16;
@@ -152,7 +152,7 @@ VPRIV void bvec_ret(ecx *e, ast_qualified_type t, int rs)
 	tfree(e, r);
 }
 
-VPRIV void bvec_res(ecx *e, ast_qualified_type t, int64_t sl)
+VPRIV void bvec_res(codegen_context *e, ast_qualified_type t, int64_t sl)
 {
 	unsigned n = T(e->c, t)->n;
 	bool simd = n == 2 || n == 4 || n == 8 || n == 16;
@@ -177,27 +177,27 @@ VPRIV bool is_sret(cc *c, ast_qualified_type t)
 {
 	int n;
 
-	if (is_bvec(c, t)) return T(c, t)->n > 8 && T(c, t)->n != 16;
-	return is_recabi(c, t) && tsize(c, t) > 16 && !hfa(c, t, &n);
+	if (codegen_type_is_bool_vector(c, t)) return T(c, t)->n > 8 && T(c, t)->n != 16;
+	return codegen_type_is_record_like(c, t) && codegen_type_size(c, t) > 16 && !hfa(c, t, &n);
 }
 
 /* Apple: an anonymous (variadic) argument always goes on the stack in 8-byte slots */
-VPRIV void classify_va(ecx *e, ast_qualified_type t, int *nsaa, abiarg *a)
+VPRIV void classify_va(codegen_context *e, ast_qualified_type t, int *nsaa, a64_abi_argument *a)
 {
 	cc *c = e->c;
-	uint64_t size = tsize(c, t);
-	uint32_t al = talign(c, t) > 8 ? 16 : 8;
+	uint64_t size = codegen_type_size(c, t);
+	uint32_t al = codegen_type_alignment(c, t) > 8 ? 16 : 8;
 
 	memset(a, 0, sizeof(*a));
 	a->size = (uint32_t)size;
-	if (is_record(c, t) && size > 16) {
-		a->kind = A_REF_STACK;
+	if (codegen_type_is_record(c, t) && size > 16) {
+		a->kind = A64_ABI_ARGUMENT_REFERENCE_STACK;
 		a->stk = *nsaa;
 		*nsaa += 8;
 		return;
 	}
 	*nsaa = (int)(((uint32_t)*nsaa + al - 1) & ~(al - 1));
-	a->kind = A_STACK;
+	a->kind = A64_ABI_ARGUMENT_STACK;
 	a->stk = *nsaa;
 	a->nreg = (uint8_t)(size > 8 ? 2 : 1);
 	*nsaa += a->nreg * 8;
@@ -210,27 +210,27 @@ VPRIV uint32_t abi_align(cc *c, ast_qualified_type t)
 {
 	const ctype *ct = T(c, t);
 
-	if (DARWIN(c))
-		return talign(c, t);
-	if (is_record(c, t))
+	if (CODEGEN_IS_DARWIN(c))
+		return codegen_type_alignment(c, t);
+	if (codegen_type_is_record(c, t))
 		return c->tags[ct->aux].ualign;
 	return c->ty[ct->canon].align;
 }
 
-VPRIV void classify(ecx *e, ast_qualified_type t, int *ngrn, int *nsaa, abiarg *a)
+VPRIV void classify(codegen_context *e, ast_qualified_type t, int *ngrn, int *nsaa, a64_abi_argument *a)
 {
 	cc *c = e->c;
-	uint64_t size = tsize(c, t);
+	uint64_t size = codegen_type_size(c, t);
 	int n;
 	uint32_t al = abi_align(c, t);
 
 	memset(a, 0, sizeof(*a));
 	a->size = (uint32_t)size;
-	if (is_flt(c, t)) {
-		if (!is_ld(c, t))
+	if (codegen_type_is_float(c, t)) {
+		if (!codegen_type_is_long_double(c, t))
 			(void)fpk(e, t);
 		if (e->nsrn < 8) {
-			a->kind = A_VREG;
+			a->kind = A64_ABI_ARGUMENT_VECTOR_REGISTER;
 			a->reg = (uint8_t)e->nsrn++;
 			a->nreg = 1;
 			return;
@@ -239,8 +239,8 @@ VPRIV void classify(ecx *e, ast_qualified_type t, int *ngrn, int *nsaa, abiarg *
 		n = size == 16 ? 2 : 1;
 		goto stack;
 	}
-	if (is_bvec(c, t) && (T(c, t)->n == 64 || T(c, t)->n == 128)) {
-		a->kind = A_BOOL_LANES;
+	if (codegen_type_is_bool_vector(c, t) && (T(c, t)->n == 64 || T(c, t)->n == 128)) {
+		a->kind = A64_ABI_ARGUMENT_BOOL_LANES;
 		a->reg = (uint8_t)*ngrn;
 		a->nreg = (uint8_t)(8 - *ngrn);
 		a->stk = *nsaa;
@@ -248,20 +248,20 @@ VPRIV void classify(ecx *e, ast_qualified_type t, int *ngrn, int *nsaa, abiarg *
 		*ngrn = 8;
 		return;
 	}
-	if (is_bvec(c, t) && size >= 8 && size <= 16) {
+	if (codegen_type_is_bool_vector(c, t) && size >= 8 && size <= 16) {
 		if (e->nsrn < 8) {
-			a->kind = A_HFA, a->reg = e->nsrn++, a->nreg = 1, a->fsz = size;
+			a->kind = A64_ABI_ARGUMENT_HFA, a->reg = e->nsrn++, a->nreg = 1, a->fsz = size;
 			return;
 		}
 		n = size / 8;
 		goto stack;
 	}
-	if (is_recabi(c, t)) {
+	if (codegen_type_is_record_like(c, t)) {
 		int hn, hb = hfa(c, t, &hn);
 
 		if (hb) {
 			if (e->nsrn + hn <= 8) {
-				a->kind = A_HFA;
+				a->kind = A64_ABI_ARGUMENT_HFA;
 				a->reg = (uint8_t)e->nsrn;
 				a->nreg = (uint8_t)hn;
 				a->fsz = (uint8_t)hb;
@@ -269,10 +269,10 @@ VPRIV void classify(ecx *e, ast_qualified_type t, int *ngrn, int *nsaa, abiarg *
 				return;
 			}
 			e->nsrn = 8;
-			if (DARWIN(c)) {
+			if (CODEGEN_IS_DARWIN(c)) {
 				/* Apple: on the stack at its element's alignment and size, as clang */
 				*nsaa = (int)(((uint32_t)*nsaa + (uint32_t)hb - 1) & ~((uint32_t)hb - 1));
-				a->kind = A_STACK;
+				a->kind = A64_ABI_ARGUMENT_STACK;
 				a->stk = *nsaa;
 				a->nreg = (uint8_t)((size + 7) / 8);
 				a->fsz = (uint8_t)hb;	/* the last part may be 4 bytes */
@@ -283,16 +283,16 @@ VPRIV void classify(ecx *e, ast_qualified_type t, int *ngrn, int *nsaa, abiarg *
 			goto stack;
 		}
 		if (size == 0) {
-			a->kind = A_IGNORE;
+			a->kind = A64_ABI_ARGUMENT_IGNORE;
 			return;
 		}
 		if (size > 16) {
 			if (*ngrn < 8) {
-				a->kind = A_REF_REG;
+				a->kind = A64_ABI_ARGUMENT_REFERENCE_REGISTER;
 				a->reg = (uint8_t)(*ngrn)++;
 				a->nreg = 1;
 			} else {
-				a->kind = A_REF_STACK;
+				a->kind = A64_ABI_ARGUMENT_REFERENCE_STACK;
 				a->stk = *nsaa;
 				*nsaa += 8;
 			}
@@ -302,10 +302,10 @@ VPRIV void classify(ecx *e, ast_qualified_type t, int *ngrn, int *nsaa, abiarg *
 	} else {
 		n = size == 16 ? 2 : 1;
 	}
-	if (n == 2 && al == 16 && (*ngrn & 1) && !DARWIN(c))
+	if (n == 2 && al == 16 && (*ngrn & 1) && !CODEGEN_IS_DARWIN(c))
 		(*ngrn)++;	/* AAPCS64: an even pair; Apple does not round */
 	if (*ngrn + n <= 8) {
-		a->kind = A_REG;
+		a->kind = A64_ABI_ARGUMENT_REGISTER;
 		a->reg = (uint8_t)*ngrn;
 		a->nreg = (uint8_t)n;
 		*ngrn += n;
@@ -313,10 +313,10 @@ VPRIV void classify(ecx *e, ast_qualified_type t, int *ngrn, int *nsaa, abiarg *
 	}
 	*ngrn = 8;
 stack:
-	if (DARWIN(c) && !is_record(c, t)) {
+	if (CODEGEN_IS_DARWIN(c) && !codegen_type_is_record(c, t)) {
 		/* Apple: scalars on the stack take their natural size and alignment */
 		*nsaa = (int)(((uint32_t)*nsaa + al - 1) & ~(al - 1));
-		a->kind = A_STACK;
+		a->kind = A64_ABI_ARGUMENT_STACK;
 		a->stk = *nsaa;
 		a->nreg = (uint8_t)n;
 		a->size = (uint32_t)size;
@@ -328,39 +328,39 @@ stack:
 	if (al > 16)
 		al = 16;
 	*nsaa = (int)(((uint32_t)*nsaa + al - 1) & ~(al - 1));
-	a->kind = A_STACK;
+	a->kind = A64_ABI_ARGUMENT_STACK;
 	a->stk = *nsaa;
 	a->nreg = (uint8_t)n;
 	*nsaa += n * 8;
 }
 
-VPRIV void spill_live(ecx *e, spill *s)
+VPRIV void spill_live(codegen_context *e, a64_abi_spill *s)
 {
 	s->mask = 0;
-	for (int i = 0; i < NTEMP; i++)
-		if ((e->live & (1u << i)) && tempregs[i] < 19) {
+	for (int i = 0; i < CODEGEN_TEMPORARY_COUNT; i++)
+		if ((e->live & (1u << i)) && codegen_temporary_registers[i] < 19) {
 			s->slot[i] = slot(e, 8, 8);
-			mem(e, I_ST, 3, 0, tempregs[i], FRAME, s->slot[i]);
+			mem(e, I_ST, 3, 0, codegen_temporary_registers[i], FRAME, s->slot[i]);
 			if (e->reach)
-				e->in[e->nin - 1].sh = SPILL_REC;
+				e->in[e->nin - 1].sh = A64_SPILL_RECORD;
 			s->mask |= 1u << i;
 		}
 }
 
-VPRIV void unspill(ecx *e, const spill *s)
+VPRIV void unspill(codegen_context *e, const a64_abi_spill *s)
 {
-	for (int i = 0; i < NTEMP; i++)
+	for (int i = 0; i < CODEGEN_TEMPORARY_COUNT; i++)
 		if (s->mask & (1u << i)) {
-			mem(e, I_LD, 3, 0, tempregs[i], FRAME, s->slot[i]);
+			mem(e, I_LD, 3, 0, codegen_temporary_registers[i], FRAME, s->slot[i]);
 			if (e->reach)
-				e->in[e->nin - 1].sh = SPILL_REC;
+				e->in[e->nin - 1].sh = A64_SPILL_RECORD;
 		}
 }
 
 /* memcpy(a0, a1, n) / memset(a0, 0, n) with a0/a1 in temporaries */
-VPRIV void call_fixed(ecx *e, int fn, int a0, int a1, int a2, int64_t n)
+VPRIV void call_fixed(codegen_context *e, int fn, int a0, int a1, int a2, int64_t n)
 {
-	spill sp;
+	a64_abi_spill sp;
 	ins *i;
 
 	(void)a2;
@@ -375,6 +375,6 @@ VPRIV void call_fixed(ecx *e, int fn, int a0, int a1, int a2, int64_t n)
 		mov(e, 1, 1, a1);
 	movi(e, 1, 2, n);
 	i = put(e, I_BL);
-	i->ref = FIXED(fn);
+	i->ref = CODEGEN_FIXED_REFERENCE(fn);
 	unspill(e, &sp);
 }

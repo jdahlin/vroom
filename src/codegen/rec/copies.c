@@ -2,9 +2,9 @@
  * belong to the caller; this bounded transaction neither allocates nor builds
  * a second effects table. Records and policy flags may have different strides.
  */
-#include "../emitimpl.h"
+#include "../codegen-internal.h"
 
-VPRIV bool em_rec_copy_forward(const em_rec_copy_scan *s, uint32_t k, uint32_t end, uint8_t t, uint8_t v)
+VPRIV bool record_copy_forward(const record_copy_scan *s, uint32_t k, uint32_t end, uint8_t t, uint8_t v)
 {
 	unsigned char *records = s->records;
 	uint64_t tb = (uint64_t)1 << t, vb = (uint64_t)1 << v;

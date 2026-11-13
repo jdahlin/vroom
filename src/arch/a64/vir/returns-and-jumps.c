@@ -23,7 +23,7 @@ VPRIV void a64_vir_callee_saved_float_save(a64_vir_context *L, bool restore, int
 
 VPRIV void a64_vir_return_lower(a64_vir_context *L)
 {
-	ecx *e = L->context;
+	codegen_context *e = L->context;
 	ins *t;
 
 	if (!e->reach)
@@ -72,7 +72,7 @@ VPRIV bool a64_vir_call_is_sibling_candidate(a64_vir_context *L, uint32_t b, uin
 	a64_vir_argument *a = __builtin_alloca(sizeof(a64_vir_argument) * (ng + 1));
 	int32_t stk;
 
-	a64_vir_arguments_assign(DARWIN(L->context->c), &f->extra[f->insns[i].b], a, ng, &stk);
+	a64_vir_arguments_assign(CODEGEN_IS_DARWIN(L->context->c), &f->extra[f->insns[i].b], a, ng, &stk);
 	return !stk && a64_vir_call_is_sibling(L, b, i);
 }
 

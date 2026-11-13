@@ -5,7 +5,7 @@
  * callbacks retain their existing policy, including A64 dry generation with
  * rollback; this helper never commits target instructions.
  */
-#include "../emitimpl.h"
+#include "../codegen-internal.h"
 
 /* Only representation-preserving string/function decay is stripped. Dropping
  * arbitrary casts could incorrectly fold a truncation or address conversion. */
@@ -15,7 +15,7 @@ static uint32_t em_control_decay(cc *c, uint32_t n)
 
 	while (left-- && N(n)->op == AST_NODE_CAST &&
 	       (N(n)->aux == AST_CAST_NOP || N(n)->aux == AST_CAST_ARRAY_DECAY || N(n)->aux == AST_CAST_FUNCTION_DECAY ||
-	        (N(n)->aux == AST_CAST_POINTER_TO_POINTER && is_ptr(c, N(n)->ty) && is_ptr(c, N(N(n)->a)->ty) &&
+	        (N(n)->aux == AST_CAST_POINTER_TO_POINTER && codegen_type_is_pointer(c, N(n)->ty) && codegen_type_is_pointer(c, N(N(n)->a)->ty) &&
 	         AST_QUALIFIED_TYPE_UNQUALIFIED(T(c, N(n)->ty)->base) == AST_QUALIFIED_TYPE_UNQUALIFIED(T(c, N(N(n)->a)->ty)->base))))
 		n = N(n)->a;
 	return n;
@@ -42,24 +42,24 @@ VPRIV bool em_const_strcmp(cc *c, uint32_t n, i128 *value)
 	return true;
 }
 
-static bool em_control_int(ecx *e, uint32_t n, int (*constant_p)(ecx *, uint32_t),
+static bool em_control_int(codegen_context *e, uint32_t n, int (*constant_p)(codegen_context *, uint32_t),
 		unsigned *left, i128 *out)
 {
 	cc *c = e->c;
 	const node *x = N(n);
 	i128 a;
 
-	if (!*left || !is_integer(c, x->ty) || em_bitint(c, x->ty))
+	if (!*left || !codegen_type_is_integer(c, x->ty) || codegen_type_is_bitint(c, x->ty))
 		return false;
 	--*left;
 	switch (x->op) {
 	case AST_NODE_NUMBER:
-		*out = em_trunc_to(c, c->ipool[x->a], x->ty);
+		*out = codegen_integer_truncate(c, c->ipool[x->a], x->ty);
 		return true;
 	case AST_NODE_VARIABLE:
 		if (c->syms[x->a].kind != AST_SYMBOL_ENUMERATOR)
 			return false;
-		*out = em_trunc_to(c, c->syms[x->a].val, x->ty);
+		*out = codegen_integer_truncate(c, c->syms[x->a].val, x->ty);
 		return true;
 	case AST_NODE_CALL:
 		return em_const_strcmp(c, n, out);
@@ -75,7 +75,7 @@ static bool em_control_int(ecx *e, uint32_t n, int (*constant_p)(ecx *, uint32_t
 			return false;
 		if (!em_control_int(e, x->a, constant_p, left, &a))
 			return false;
-		*out = x->aux == AST_CAST_BOOL ? a != 0 : em_trunc_to(c, a, x->ty);
+		*out = x->aux == AST_CAST_BOOL ? a != 0 : codegen_integer_truncate(c, a, x->ty);
 		return true;
 	case AST_NODE_UNARY:
 		if (x->aux != LEX_TOKEN_EXCLAMATION || !em_control_int(e, x->a, constant_p, left, &a))
@@ -98,7 +98,7 @@ static bool em_control_int(ecx *e, uint32_t n, int (*constant_p)(ecx *, uint32_t
 	}
 }
 
-VPRIV int em_const_truth(ecx *e, uint32_t n, int (*constant_p)(ecx *, uint32_t))
+VPRIV int em_const_truth(codegen_context *e, uint32_t n, int (*constant_p)(codegen_context *, uint32_t))
 {
 	unsigned left = 64;
 	i128 value;

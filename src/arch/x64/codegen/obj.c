@@ -3,7 +3,7 @@
 #include "x64impl.h"
 #include "../as/operand.h"
 
-VPRIV bool x64_obj_record(ecx *e, const rec *i, rec *out)
+VPRIV bool x64_obj_record(codegen_context *e, const record *i, record *out)
 {
 	switch (i->op) {
 	case X_LABEL: case X_MOV: case X_MOVI: case X_LD: case X_LDX:
@@ -49,26 +49,26 @@ static XOp xo_imm(int64_t v)
 	return (XOp){ .kind = XK_IMM, .v = { .c = v }, .hasv = 1 };
 }
 
-static uint32_t xo_label(rctx *R, uint32_t fid, uint32_t label)
+static uint32_t xo_label(codegen_commit_context *R, uint32_t fid, uint32_t label)
 {
 	R->nb.n = 0;
 	x64_lbl(&R->nb, fid, label);
 	return as_symbol_by_name(R->as, R->nb.p, R->nb.n);
 }
 
-static XOp xo_mem(rctx *R, const rec *i)
+static XOp xo_mem(codegen_commit_context *R, const record *i)
 {
 	XOp m = { .kind = XK_MEM, .base = (int8_t)(i->r[1] == RIP ? 16 : i->r[1]), .index = -1, .scale = 1,
 		.v = { .c = i->off }, .hasv = 1 };
 	if (i->r[1] == RIP)
-		m.v = as_symbol_value(R->as, r_sym(R, i->ref), i->off);
+		m.v = as_symbol_value(R->as, codegen_commit_symbol_find(R, i->ref), i->off);
 	if (i->op == X_LDX || i->op == X_STX) {
 		m.index = (int8_t)i->r[3]; m.scale = (uint8_t)(1u << i->sh);
 	}
 	return m;
 }
 
-static int xo_emit(rctx *R, const char *name, int sz, XOp *o, int n)
+static int xo_emit(codegen_commit_context *R, const char *name, int sz, XOp *o, int n)
 {
 	char mn[32];
 	size_t k = strlen(name);
@@ -78,10 +78,10 @@ static int xo_emit(rctx *R, const char *name, int sz, XOp *o, int n)
 	return as_x64_insn(R->as, mn, o, n);
 }
 
-VPRIV int x64_replay(rctx *R, const char *p, size_t n)
+VPRIV int x64_replay(codegen_commit_context *R, const char *p, size_t n)
 {
 	uint32_t fid = *(const uint32_t *)p;
-	const rec *in = (const rec *)(p + 8);
+	const record *in = (const record *)(p + 8);
 	static const char *const ccname[] = { "o", "no", "b", "ae", "e", "ne", "be", "a", "s", "ns", "p", "np", "l", "ge", "le", "g" };
 	static const char *const alu[] = {
 		[X_ADD]="add", [X_SUB]="sub", [X_AND]="and", [X_OR]="or", [X_XOR]="xor",
@@ -89,8 +89,8 @@ VPRIV int x64_replay(rctx *R, const char *p, size_t n)
 		[X_ADDI]="add", [X_SUBI]="sub", [X_ANDI]="and", [X_ORI]="or", [X_XORI]="xor",
 		[X_SHLI]="shl", [X_SHRI]="shr", [X_SARI]="sar", [X_SHL]="shl", [X_SHR]="shr", [X_SAR]="sar",
 	};
-	for (size_t k = 0; k < (n - 8) / sizeof(rec); k++) {
-		const rec *i = &in[k];
+	for (size_t k = 0; k < (n - 8) / sizeof(record); k++) {
+		const record *i = &in[k];
 		int sz = i->sz, count = 2;
 		const char *mn = NULL;
 		char name[24];
@@ -146,8 +146,8 @@ VPRIV int x64_replay(rctx *R, const char *p, size_t n)
 			if (i->op==X_LEAL) { mn="lea";sz=8;o[0].kind=XK_MEM;o[0].base=16;o[0].index=-1;o[0].scale=1; }
 			else { snprintf(name,sizeof name,"j%s",i->op==X_JMP?"mp":ccname[i->cond]);mn=name;sz=0;count=1; } break;
 		case X_CALL:
-			mn="callq";sz=0;count=1;o[0]=(XOp){ .kind=XK_EXPR,.v=as_symbol_value(R->as,r_sym(R,i->ref),0),.hasv=1 };
-			if(R->c->o->pic&&(RKIND(i->ref)==RK_NAME||sym_needs_got(R->c,i->ref)))o[0].mod=XM_PLT;
+			mn="callq";sz=0;count=1;o[0]=(XOp){ .kind=XK_EXPR,.v=as_symbol_value(R->as,codegen_commit_symbol_find(R,i->ref),0),.hasv=1 };
+			if(R->c->o->pic&&(CODEGEN_REFERENCE_KIND(i->ref)==CODEGEN_REFERENCE_NAME||codegen_symbol_needs_got(R->c,i->ref)))o[0].mod=XM_PLT;
 			break;
 		case X_CALLR: case X_JMPR: mn=i->op==X_CALLR?"callq":"jmpq";sz=0;count=1;o[0]=xo_reg(i->r[1],8);o[0].star=1;break;
 		case X_PUSH: case X_POP: mn=i->op==X_PUSH?"pushq":"popq";sz=0;count=1;o[0]=xo_reg(i->op==X_PUSH?i->r[1]:i->r[0],8);break;

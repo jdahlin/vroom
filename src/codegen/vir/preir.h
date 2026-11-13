@@ -6,7 +6,7 @@
  * a real target's lowering (codegen/vir/a64.c).
  *
  * The walker's registers are names (X9): 0-191 integer, 192-254 float, 255
- * the result.  A name, and every local the walker gives us (LO(local), X3),
+ * the result.  A name, and every local the walker gives us (WALK_LOWER(local), X3),
  * is a variable; reads and writes go through Braun et al.'s construction
  * ("Simple and Efficient Construction of SSA Form", CC 2013) on a pre-IR of
  * our own: every block is unsealed until the walk is done, a read with no
@@ -154,7 +154,7 @@ static inline bool virbuild_operand_kind_is_value(uint8_t k)
 	return k >= VIR_OPERAND_KIND_T && k <= VIR_OPERAND_KIND_BITC ? true : k == VIR_OPERAND_KIND_CONSTV;
 }
 
-static inline uint32_t virbuild_value_type(ecx *e, uint32_t v) { return e->vw->insns[v].insn.type; }
+static inline uint32_t virbuild_value_type(codegen_context *e, uint32_t v) { return e->vw->insns[v].insn.type; }
 
 static inline uint32_t virbuild_value_resolve(virbuild_context *V, uint32_t v)
 {
@@ -173,74 +173,74 @@ static inline uint32_t virbuild_value_resolve(virbuild_context *V, uint32_t v)
 
 /* what the files share (each defined in the file named) */
 /* preir.c */
-VPRIV virbuild_context *virbuild_context_get(ecx *e);
-VPRIV __attribute__((noreturn, cold)) void virbuild_fail(ecx *e, const char *why);
-VPRIV uint32_t virbuild_preir_insn_add(ecx *e, uint32_t op, uint32_t ty, uint32_t fl, uint32_t a, uint32_t b, uint32_t c, uint32_t blk);
-VPRIV uint32_t virbuild_block_insn_append(ecx *e, uint32_t b, uint32_t op, uint32_t ty, uint32_t fl, uint32_t a, uint32_t bb, uint32_t c);
-VPRIV uint32_t virbuild_insn_append(ecx *e, uint32_t op, uint32_t ty, uint32_t fl, uint32_t a, uint32_t b, uint32_t c);
-VPRIV uint32_t virbuild_constant_make(ecx *e, uint32_t op, uint32_t ty, uint32_t a, uint32_t b, uint32_t c);
-VPRIV uint32_t virbuild_constant_integer(ecx *e, uint32_t ty, int64_t v);
-VPRIV uint32_t virbuild_extra_append(ecx *e, const uint32_t *w, uint32_t n);
-VPRIV uint32_t virbuild_block_new(ecx *e);
-VPRIV uint32_t virbuild_label_block(ecx *e, uint32_t l);
-VPRIV void virbuild_block_terminate(ecx *e, uint32_t op, uint32_t a, uint32_t b, uint32_t c, uint32_t fl);
-VPRIV void virbuild_branch_emit(ecx *e, uint32_t blk);
+VPRIV virbuild_context *virbuild_context_get(codegen_context *e);
+VPRIV __attribute__((noreturn, cold)) void virbuild_fail(codegen_context *e, const char *why);
+VPRIV uint32_t virbuild_preir_insn_add(codegen_context *e, uint32_t op, uint32_t ty, uint32_t fl, uint32_t a, uint32_t b, uint32_t c, uint32_t blk);
+VPRIV uint32_t virbuild_block_insn_append(codegen_context *e, uint32_t b, uint32_t op, uint32_t ty, uint32_t fl, uint32_t a, uint32_t bb, uint32_t c);
+VPRIV uint32_t virbuild_insn_append(codegen_context *e, uint32_t op, uint32_t ty, uint32_t fl, uint32_t a, uint32_t b, uint32_t c);
+VPRIV uint32_t virbuild_constant_make(codegen_context *e, uint32_t op, uint32_t ty, uint32_t a, uint32_t b, uint32_t c);
+VPRIV uint32_t virbuild_constant_integer(codegen_context *e, uint32_t ty, int64_t v);
+VPRIV uint32_t virbuild_extra_append(codegen_context *e, const uint32_t *w, uint32_t n);
+VPRIV uint32_t virbuild_block_new(codegen_context *e);
+VPRIV uint32_t virbuild_label_block(codegen_context *e, uint32_t l);
+VPRIV void virbuild_block_terminate(codegen_context *e, uint32_t op, uint32_t a, uint32_t b, uint32_t c, uint32_t fl);
+VPRIV void virbuild_branch_emit(codegen_context *e, uint32_t blk);
 
 /* ssa-construction.c */
 VPRIV void virbuild_variable_table_clear(virbuild_context *V);
-VPRIV uint32_t *virbuild_variable_slot(ecx *e, uint32_t b, uint32_t var, bool add);
-VPRIV void virbuild_variable_write(ecx *e, uint32_t var, uint32_t b, uint32_t v);
-VPRIV uint32_t virbuild_parameter_new(ecx *e, uint32_t b, uint32_t var, uint32_t ty);
-VPRIV void virbuild_parameter_operands_fill(ecx *e, uint32_t p, uint32_t b);
-VPRIV uint32_t virbuild_undefined_value(ecx *e, uint32_t ty);
-VPRIV uint32_t virbuild_variable_read(ecx *e, uint32_t var, uint32_t b, uint32_t ty);
+VPRIV uint32_t *virbuild_variable_slot(codegen_context *e, uint32_t b, uint32_t var, bool add);
+VPRIV void virbuild_variable_write(codegen_context *e, uint32_t var, uint32_t b, uint32_t v);
+VPRIV uint32_t virbuild_parameter_new(codegen_context *e, uint32_t b, uint32_t var, uint32_t ty);
+VPRIV void virbuild_parameter_operands_fill(codegen_context *e, uint32_t p, uint32_t b);
+VPRIV uint32_t virbuild_undefined_value(codegen_context *e, uint32_t ty);
+VPRIV uint32_t virbuild_variable_read(codegen_context *e, uint32_t var, uint32_t b, uint32_t ty);
 
 /* lower-value.c */
-VPRIV uint32_t virbuild_value_convert_in_block(ecx *e, uint32_t b, uint32_t v, uint32_t to);
-VPRIV uint32_t virbuild_value_convert(ecx *e, uint32_t v, uint32_t to);
-VPRIV uint32_t virbuild_register_read(ecx *e, int r, uint32_t ty);
-VPRIV uint32_t virbuild_register_read_raw(ecx *e, int r);
-VPRIV void virbuild_register_write(ecx *e, int r, uint32_t v);
+VPRIV uint32_t virbuild_value_convert_in_block(codegen_context *e, uint32_t b, uint32_t v, uint32_t to);
+VPRIV uint32_t virbuild_value_convert(codegen_context *e, uint32_t v, uint32_t to);
+VPRIV uint32_t virbuild_register_read(codegen_context *e, int r, uint32_t ty);
+VPRIV uint32_t virbuild_register_read_raw(codegen_context *e, int r);
+VPRIV void virbuild_register_write(codegen_context *e, int r, uint32_t v);
 VPRIV uint32_t virbuild_integer_type(int size);
-VPRIV uint32_t virbuild_walker_value_get(ecx *e, const val *v, uint32_t ty);
-VPRIV int virbuild_result_register_pick(ecx *e, const val *a, const val *b);
-VPRIV uint32_t virbuild_float_type(ecx *e, ast_qualified_type t);
+VPRIV uint32_t virbuild_walker_value_get(codegen_context *e, const codegen_value *v, uint32_t ty);
+VPRIV int virbuild_result_register_pick(codegen_context *e, const codegen_value *a, const codegen_value *b);
+VPRIV uint32_t virbuild_float_type(codegen_context *e, ast_qualified_type t);
 
 /* lower-memory.c */
-VPRIV uint32_t virbuild_slot_find(ecx *e, int64_t off, uint64_t size, int64_t *rel);
-VPRIV uint32_t virbuild_slot_address(ecx *e, uint32_t s, int64_t rel);
-VPRIV void virbuild_store_table_clear(ecx *e, bool exposed_only);
+VPRIV uint32_t virbuild_slot_find(codegen_context *e, int64_t off, uint64_t size, int64_t *rel);
+VPRIV uint32_t virbuild_slot_address(codegen_context *e, uint32_t s, int64_t rel);
+VPRIV void virbuild_store_table_clear(codegen_context *e, bool exposed_only);
 VPRIV uint32_t virbuild_integer_log2(uint64_t x);
 VPRIV uint32_t virbuild_memory_flags_make(int size, uint32_t align, bool sgn);
 
 /* cfg.c */
 VPRIV uint32_t virbuild_block_successor_count(virbuild_context *V, uint32_t b);
 VPRIV uint32_t *virbuild_block_successor_pointer(virbuild_context *V, uint32_t b, uint32_t k);
-VPRIV void virbuild_empty_blocks_thread(ecx *e);
-VPRIV void virbuild_block_order_compute(ecx *e);
-VPRIV void virbuild_block_predecessors_compute(ecx *e);
+VPRIV void virbuild_empty_blocks_thread(codegen_context *e);
+VPRIV void virbuild_block_order_compute(codegen_context *e);
+VPRIV void virbuild_block_predecessors_compute(codegen_context *e);
 VPRIV uint32_t virbuild_block_predecessor_index(const virbuild_context *V, uint32_t j, uint32_t b);
-VPRIV void virbuild_critical_edges_split(ecx *e);
+VPRIV void virbuild_critical_edges_split(codegen_context *e);
 
 /* block-parameters.c */
-VPRIV bool virbuild_parameters_trivial_remove(ecx *e);
-VPRIV void virbuild_parameters_dead_remove(ecx *e);
+VPRIV bool virbuild_parameters_trivial_remove(codegen_context *e);
+VPRIV void virbuild_parameters_dead_remove(codegen_context *e);
 
 /* slot-promotion.c */
 VPRIV bool virbuild_promote_store_is_dead(const virbuild_context *V, uint32_t q);
-VPRIV bool virbuild_slots_promote(ecx *e);
+VPRIV bool virbuild_slots_promote(codegen_context *e);
 
 /* if-conversion.c */
 VPRIV bool virbuild_arm_is_hoistable(virbuild_context *V, uint32_t a, uint32_t b, uint32_t cond, uint32_t *n);
-VPRIV bool virbuild_if_convert(ecx *e);
+VPRIV bool virbuild_if_convert(codegen_context *e);
 
 /* condition-merge.c */
-VPRIV bool virbuild_conditions_merge(ecx *e);
+VPRIV bool virbuild_conditions_merge(codegen_context *e);
 
 /* to-vir.c */
-VPRIV bool virbuild_to_vir_insn_emit(ecx *e, uint32_t i, uint32_t b);
+VPRIV bool virbuild_to_vir_insn_emit(codegen_context *e, uint32_t i, uint32_t b);
 
 /* pipeline.c */
-VPRIV bool virbuild_function_emit(ecx *e);
+VPRIV bool virbuild_function_emit(codegen_context *e);
 
 #endif

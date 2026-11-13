@@ -9,51 +9,51 @@
  * its own struct ins until it moves (TODO.md "arm64 and wasm on the
  * shared walker"), so this one is called rec.
  */
-#ifndef VCC_REC_H
-#define VCC_REC_H
+#ifndef VCC_CODEGEN_RECORD_H
+#define VCC_CODEGEN_RECORD_H
 #include <stdint.h>
 
-typedef struct rec {
+typedef struct record {
 	uint8_t op, sz;		/* the CPU's opcode; width or access size in bytes */
 	uint8_t r[4];		/* r[0] result, r[1..3] operands (the CPU's register numbers) */
 	uint8_t cond, sh;	/* condition, extension kind, scale */
 	union {
 		int64_t imm;
-		struct { int32_t off; uint32_t ref; };	/* memory: displacement, symbol (REF(), 0: none) */
+		struct { int32_t off; uint32_t ref; };	/* memory: displacement, symbol (CODEGEN_REFERENCE_MAKE(), 0: none) */
 		uint32_t label;
 	};
-} rec;
-_Static_assert(sizeof(rec) == 16, "rec is 16 bytes");
+} record;
+_Static_assert(sizeof(record) == 16, "rec is 16 bytes");
 
 /* register sets for the passes: one bit per register number below 64 */
-typedef uint64_t rmask;
+typedef uint64_t record_register_mask;
 
 /* Linear reachability: an unclassified opcode is a barrier, never removable.
  * ENTRY includes labels and opaque records that may contain incoming edges.
  */
-enum { EM_FLOW_ENTRY, EM_FLOW_NEXT, EM_FLOW_STOP };
+enum { RECORD_FLOW_ENTRY, RECORD_FLOW_NEXT, RECORD_FLOW_STOP };
 
 /* what a pass needs to know about an op (a CPU's table, indexed by op) */
-enum { OD_DEF0 = 1, OD_USE1 = 2, OD_USE2 = 4, OD_USE3 = 8, OD_USE0 = 16 };	/* which r[i] */
-enum { RB_NONE, RB_JUMP, RB_COND, RB_RET, RB_INDIRECT };
-enum { OD_PURE = 1, OD_RFLAGS = 2, OD_WFLAGS = 4, OD_LOAD = 8, OD_STORE = 16, OD_CALL = 32, OD_LABEL = 64,
-       OD_TRAP = 128, OD_BARRIER = 256, OD_FP = 512 };
-typedef struct opdesc {
-	uint8_t regs;		/* OD_DEF0 | OD_USE1 ... */
+enum { RECORD_OPERAND_DEFINES_0 = 1, RECORD_OPERAND_USES_1 = 2, RECORD_OPERAND_USES_2 = 4, RECORD_OPERAND_USES_3 = 8, RECORD_OPERAND_USES_0 = 16 };	/* which r[i] */
+enum { RECORD_BRANCH_NONE, RECORD_BRANCH_JUMP, RECORD_BRANCH_CONDITIONAL, RECORD_BRANCH_RETURN, RECORD_BRANCH_INDIRECT };
+enum { RECORD_EFFECT_PURE = 1, RECORD_EFFECT_READS_FLAGS = 2, RECORD_EFFECT_WRITES_FLAGS = 4, RECORD_EFFECT_LOAD = 8, RECORD_EFFECT_STORE = 16, RECORD_EFFECT_CALL = 32, RECORD_EFFECT_LABEL = 64,
+       RECORD_EFFECT_TRAP = 128, RECORD_EFFECT_BARRIER = 256, RECORD_EFFECT_FLOAT = 512 };
+typedef struct record_op_descriptor {
+	uint8_t regs;		/* RECORD_OPERAND_DEFINES_0 | RECORD_OPERAND_USES_1 ... */
 	uint8_t br;		/* RB_* */
-	uint16_t fl;		/* OD_PURE ... */
-	rmask idef, iuse;	/* implicit registers (x86: div rax rdx, shifts rcx, calls) */
-} opdesc;
+	uint16_t fl;		/* RECORD_EFFECT_PURE ... */
+	record_register_mask idef, iuse;	/* implicit registers (x86: div rax rdx, shifts rcx, calls) */
+} record_op_descriptor;
 
 /* Whole physical registers. A partial write also uses the old register, so
  * liveness cannot discard the untouched bits. def still invalidates copies.
- * OD_PURE excludes memory, trapping and floating-environment effects; it
+ * RECORD_EFFECT_PURE excludes memory, trapping and floating-environment effects; it
  * does not waive flag/register dependencies. BARRIER forbids propagation.
  */
-typedef struct receffects {
-	rmask def, use;
+typedef struct record_effects {
+	record_register_mask def, use;
 	uint16_t fl;
 	uint8_t br;
-} receffects;
+} record_effects;
 
 #endif

@@ -1,16 +1,16 @@
 /* vcc code generator: emitting records, local labels and reachability */
-#include "../../../codegen/emitimpl.h"
+#include "../../../codegen/codegen-internal.h"
 
 /* ---------------- local labels and reachability ---------------- */
 
 /* label l is placed: what is known is what every way in agrees on */
-static void kv_join(ecx *e, uint32_t l)
+static void kv_join(codegen_context *e, uint32_t l)
 {
-	const kvst *st;
+	const codegen_known_values *st;
 
 	if (!e->nkv || !e->lrefc[l])
 		return;
-	if (!e->lkvi[l] || e->lkvi[l] >= LKV_PLACED) {
+	if (!e->lkvi[l] || e->lkvi[l] >= CODEGEN_KNOWN_LABEL_PLACED) {
 		e->kvalid = 0;
 		return;
 	}
@@ -28,20 +28,20 @@ static void kv_join(ecx *e, uint32_t l)
 	}
 }
 
-VPRIV void deflabel(ecx *e, uint32_t l)
+VPRIV void deflabel(codegen_context *e, uint32_t l)
 {
 	kv_join(e, l);
 	if (e->lrefc[l])
 		e->reach = true;
 	if (!e->dry)
-		e->lkvi[l] = !e->reach ? LKV_DROPPED : e->kvalid ? LKV_KNOWN : LKV_PLACED;
+		e->lkvi[l] = !e->reach ? CODEGEN_KNOWN_LABEL_DROPPED : e->kvalid ? CODEGEN_KNOWN_LABEL_KNOWN : CODEGEN_KNOWN_LABEL_PLACED;
 	if (!e->reach)
 		return;
 	put(e, I_LABEL)->label = l;
 }
 
 /* a loop head: the back edges come later */
-VPRIV void deflabel_loop(ecx *e, uint32_t l, bool forced)
+VPRIV void deflabel_loop(codegen_context *e, uint32_t l, bool forced)
 {
 	e->kvalid = 0;
 	if (forced)

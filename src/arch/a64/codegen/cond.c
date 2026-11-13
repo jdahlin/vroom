@@ -1,14 +1,14 @@
 /* vcc code generator: conditions and range folding */
-#include "../../../codegen/emitimpl.h"
+#include "../../../codegen/codegen-internal.h"
 
 /* ---------------- conditions ---------------- */
 
-VPRIV void gen_cond(ecx *e, uint32_t n, bool jump_if, uint32_t l)
+VPRIV void gen_cond(codegen_context *e, uint32_t n, bool jump_if, uint32_t l)
 {
 	cc *c = e->c;
 	const node *x = N(n);
 	int k = e->E->o->opt && !e->E->noopt ? em_const_truth(e, n, a64_constant_p) : -1;
-	if (k < 0) k = cond_fold(e, n);
+	if (k < 0) k = codegen_condition_fold(e, n);
 
 	if (k >= 0) {
 		if (k == (int)jump_if)
@@ -46,10 +46,10 @@ VPRIV void gen_cond(ecx *e, uint32_t n, bool jump_if, uint32_t l)
 		}
 		break;
 	case AST_NODE_BINARY:
-		if (em_is_cmp(x->aux) && !is_wide(c, N(x->a)->ty) && !is_flt(c, N(x->a)->ty)) {
-			val v = gen(e, n);
+		if (codegen_operator_is_comparison(x->aux) && !codegen_type_is_wide(c, N(x->a)->ty) && !codegen_type_is_float(c, N(x->a)->ty)) {
+			codegen_value v = gen(e, n);
 
-			if (v.k == V_CONST || v.k == V_ADDR) {
+			if (v.k == CODEGEN_VALUE_CONSTANT || v.k == CODEGEN_VALUE_ADDRESS) {
 				test_zero(e, &v, x->ty, l, jump_if);
 				return;
 			}
@@ -69,7 +69,7 @@ VPRIV void gen_cond(ecx *e, uint32_t n, bool jump_if, uint32_t l)
 		break;
 	}
 	{
-		val v = gen(e, n);
+		codegen_value v = gen(e, n);
 
 		test_zero(e, &v, x->ty, l, jump_if);
 	}

@@ -1,6 +1,6 @@
 /* The builder's pipeline: the pass table run in order (pass-table.c), sealing, the dead-slot scan and the emission into VIR. */
-#define WK_PREFIX virbuild_
-#define LO_PREFIX virbuild_
+#define WALK_PREFIX virbuild_
+#define WALK_LOWER_PREFIX virbuild_
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
@@ -9,7 +9,7 @@
 #include "pass-table.h"
 
 /* seal: every placeholder gets its operands, then trivial ones go */
-VPRIV void virbuild_blocks_seal(ecx *e)
+VPRIV void virbuild_blocks_seal(codegen_context *e)
 {
 	virbuild_context *V = e->vw;
 
@@ -27,7 +27,7 @@ VPRIV void virbuild_blocks_seal(ecx *e)
 }
 
 /* stores to a slot that is not exposed and that nothing reads are dead */
-VPRIV void virbuild_slot_uses_compute(ecx *e)
+VPRIV void virbuild_slot_uses_compute(codegen_context *e)
 {
 	virbuild_context *V = e->vw;
 
@@ -40,14 +40,14 @@ VPRIV void virbuild_slot_uses_compute(ecx *e)
 }
 
 /* emission */
-VPRIV bool virbuild_function_to_vir(ecx *e)
+VPRIV bool virbuild_function_to_vir(codegen_context *e)
 {
 	virbuild_context *V = e->vw;
 	cc *c = e->c;
 	vir_function *f = &V->f;
 	uint32_t lastloc = UINT32_MAX;
 
-	vir_function_begin(f, X86(c) ? VIR_TARGET_X86_64_LINUX : DARWIN(c) ? VIR_TARGET_A64_DARWIN : VIR_TARGET_A64_LINUX, REF(RK_SYM, e->wk->fsym),
+	vir_function_begin(f, CODEGEN_IS_X64(c) ? VIR_TARGET_X86_64_LINUX : CODEGEN_IS_DARWIN(c) ? VIR_TARGET_A64_DARWIN : VIR_TARGET_A64_LINUX, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, e->wk->fsym),
 		  (T(c, c->syms[e->wk->fsym].ty)->flags & AST_TYPE_FLAG_VARIADIC) ? VIR_FUNCTION_FLAG_VARIADIC : 0);
 	VIRBUILD_ARRAY_GROW(V->value_map, 0, V->value_map_capacity, V->insn_count + 1);
 	memset(V->value_map, 0, (size_t)V->insn_count * sizeof *V->value_map);
@@ -92,7 +92,7 @@ VPRIV bool virbuild_function_to_vir(ecx *e)
 
 /* the passes of the table (pass-table.c) in order; with VCC_VIR_PASSES set, through the instrumented
    step (timing, leaving out, checking); false: the function cannot go through VIR (V->why) */
-VPRIV bool virbuild_function_emit(ecx *e)
+VPRIV bool virbuild_function_emit(codegen_context *e)
 {
 	const virbuild_pass_switch *w = virbuild_pass_switch_get();
 	uint32_t n, valid = 0;

@@ -1,20 +1,20 @@
 /*
  * local-variables.c: the emitter's per-symbol binding table (binding) and the one definition of
- * "this symbol is a local variable" (is_local_var).
+ * "this symbol is a local variable" (codegen_symbol_is_local_variable).
  *
- * is_local_var is true for automatic and register variables, parameters, and block-scope symbols with
+ * codegen_symbol_is_local_variable is true for automatic and register variables, parameters, and block-scope symbols with
  * no storage class that are not marked global; a static or extern local is not one, because it lives
  * in the data section.  Every backend and optimizer asks it, so a change here changes what gets a
  * register or a frame slot everywhere.
  */
-#include "emitimpl.h"
+#include "codegen-internal.h"
 
-VPRIV bind *binding(ecx *e, uint32_t s)
+VPRIV codegen_binding *codegen_symbol_binding_get(codegen_context *e, uint32_t s)
 {
 	return &e->b[s];
 }
 
-VPRIV bool is_local_var(cc *c, uint32_t s)
+VPRIV bool codegen_symbol_is_local_variable(cc *c, uint32_t s)
 {
 	const sym *y = &c->syms[s];
 

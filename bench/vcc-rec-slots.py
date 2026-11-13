@@ -144,8 +144,8 @@ def main():
         subprocess.run([str(binary)], check=True, timeout=10)
         if args.check_mutation:
             implementation=(Path(R)/'src/codegen/rec/slots.c').read_text()
-            implementation=implementation.replace('#include "../emitimpl.h"',
-                '#include "'+str(Path(R)/'src/codegen/emitimpl.h')+'"')
+            implementation=implementation.replace('#include "../codegen-internal.h"',
+                '#include "'+str(Path(R)/'src/codegen/codegen-internal.h')+'"')
             mutations = [
                 ('streaming first-range', implementation.replace('if (before == 1)', 'if (false)')),
                 ('poison width', implementation.replace(' && s->w[s->nw - 1].size == size', '')),

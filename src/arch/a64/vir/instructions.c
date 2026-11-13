@@ -4,7 +4,7 @@
 
 VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i, uint8_t res)
 {
-	ecx *e = L->context;
+	codegen_context *e = L->context;
 	vir_function *f = L->function;
 	const vir_insn *in = &f->insns[i];
 	int x = in->type == VIR_TYPE_I64 || in->type == VIR_TYPE_PTR;
@@ -276,18 +276,18 @@ VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i, uint8_
 	case VIR_OP_VA_START: {	/* Apple's: the first unnamed argument, after the named ones on the stack */
 		a64_vir_argument none;
 		int32_t stk;
-		lval l = a64_vir_address_get(L, in->flags, R_X16);
-		int t = l.k == L_REG && l.r == R_X16 ? R_X17 : R_X16;
+		codegen_lvalue l = a64_vir_address_get(L, in->flags, R_X16);
+		int t = l.k == CODEGEN_LVALUE_REGISTER && l.r == R_X16 ? R_X17 : R_X16;
 
-		if (!DARWIN(e->c))
+		if (!CODEGEN_IS_DARWIN(e->c))
 			a64_vir_fail(L, VIRBUILD_FAILURE(variadic_start_lowering));
 		a64_vir_arguments_assign(true, &f->extra[f->signature], &none, 0, &stk);
-		if (l.k == L_SYM) {
+		if (l.k == CODEGEN_LVALUE_SYMBOL) {
 			addr_of_ref(e, R_X17, l.ref, l.off);
-			l = (lval){ .k = L_REG, .r = R_X17 };
+			l = (codegen_lvalue){ .k = CODEGEN_LVALUE_REGISTER, .r = R_X17 };
 		}
 		opi(e, I_ADDI, 1, t, R_FP, 16 + ((stk + 7) & ~7));
-		mem(e, I_ST, 3, 0, t, l.k == L_FRAME ? FRAME : l.r, l.off);
+		mem(e, I_ST, 3, 0, t, l.k == CODEGEN_LVALUE_FRAME ? FRAME : l.r, l.off);
 		return;
 	}
 	case VIR_OP_BR: {

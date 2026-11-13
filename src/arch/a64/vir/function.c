@@ -55,7 +55,7 @@ static void vl_target_block_enter(void *ctx, uint32_t b)
 static void vl_target_instruction(void *ctx, uint32_t b, uint32_t i, const uint8_t *opr, uint32_t nopr, uint8_t res)
 {
 	a64_vir_context *L = ctx;
-	ecx *e = L->context;
+	codegen_context *e = L->context;
 
 	(void)opr;	/* (the driver filled L->ov and L->opr) */
 	L->operand_count = nopr;
@@ -279,7 +279,7 @@ static bool a64_vir_vectors_cross_call(vir_function *f)
 }
 
 /* lower V->f (allocated in V->ao) for function s; false: why in *why, nothing emitted */
-VPRIV bool a64_vir_function_lower(ecx *e, uint32_t s, const char **why)
+VPRIV bool a64_vir_function_lower(codegen_context *e, uint32_t s, const char **why)
 {
 	virbuild_context *V = e->vw;
 	vir_function *f = &V->f;
@@ -294,7 +294,7 @@ VPRIV bool a64_vir_function_lower(ecx *e, uint32_t s, const char **why)
 		return false;
 	}
 	/* (unwind tables would have to describe the d registers' slots: not written) */
-	a64_vir_registers_describe(&regs, DARWIN(c), !e->E->o->cfi && !a64_vir_vectors_cross_call(f));
+	a64_vir_registers_describe(&regs, CODEGEN_IS_DARWIN(c), !e->E->o->cfi && !a64_vir_vectors_cross_call(f));
 	if (!vir_loops_build(f, &V->loops)) {
 		*why = VIRBUILD_FAILURE(loop_analysis);
 		return false;
@@ -326,9 +326,9 @@ VPRIV bool a64_vir_function_lower(ecx *e, uint32_t s, const char **why)
 		L.context = e, L.function = f;
 		a64_vir_thread_state_instance.low32 = a64_vir_array_grow(a64_vir_thread_state_instance.low32, &a64_vir_thread_state_instance.low32_capacity, f->insn_count + 1, 1);
 		a64_vir_thread_state_instance.needs_fallthrough = a64_vir_array_grow(a64_vir_thread_state_instance.needs_fallthrough, &a64_vir_thread_state_instance.fallthrough_capacity, f->insn_count + 1, 1);
-		L.ret32 = KIND(c, ft->base) != AST_TYPE_VOID && is_integer(c, ft->base) && tsize(c, ft->base) == 4;
+		L.ret32 = KIND(c, ft->base) != AST_TYPE_VOID && codegen_type_is_integer(c, ft->base) && codegen_type_size(c, ft->base) == 4;
 		L.tail = !(ft->flags & AST_TYPE_FLAG_VARIADIC) && em_tail_caller_ok(e, s) && !a64_vir_tail_call_reason(&L, a64_vir_thread_state_instance.low32);
-		if (on && !e->E->noopt && !(e->E->o->cfi && !DARWIN(c))) {
+		if (on && !e->E->noopt && !(e->E->o->cfi && !CODEGEN_IS_DARWIN(c))) {
 			memset(a64_vir_thread_state_instance.needs_fallthrough, 0, f->insn_count);
 			for (uint32_t b = 0; L.tail && b < f->block_count; b++)
 				for (uint32_t i = f->blocks[b].first; i < f->blocks[b].first + f->blocks[b].insn_count; i++)
@@ -379,7 +379,7 @@ VPRIV bool a64_vir_function_lower(ecx *e, uint32_t s, const char **why)
 		.block_label = L.labels, .optimize = !e->E->noopt,
 		.operand_value = L.operand_values, .operand_reg = L.operand_registers, .max_operands = A64_VIR_OPERAND_MAX, .skip_at = &L.skip,
 	};
-	L.ret32 = KIND(c, ft->base) != AST_TYPE_VOID && is_integer(c, ft->base) && tsize(c, ft->base) == 4;
+	L.ret32 = KIND(c, ft->base) != AST_TYPE_VOID && codegen_type_is_integer(c, ft->base) && codegen_type_size(c, ft->base) == 4;
 	L.tail = !(ft->flags & AST_TYPE_FLAG_VARIADIC) && em_tail_caller_ok(e, s) && !a64_vir_tail_call_reason(&L, a64_vir_thread_state_instance.low32);	/* (lo32: scratch until it is filled) */
 	vir_uses_count(f, L.uses);
 	vir_demand_low32_compute(f, L.ret32, L.low32);

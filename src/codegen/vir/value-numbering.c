@@ -1,6 +1,6 @@
 /* The simplifier's value numbering: constants, pure instructions and loads of the dominators. */
-#define WK_PREFIX virbuild_
-#define LO_PREFIX virbuild_
+#define WALK_PREFIX virbuild_
+#define WALK_LOWER_PREFIX virbuild_
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
@@ -51,7 +51,7 @@ static uint32_t virbuild_constant_canonical(virbuild_context *V, virbuild_simpli
 }
 
 /* the block's instructions, rewritten and numbered (S->ht holds what its dominators computed) */
-VPRIV void virbuild_block_values_number(ecx *e, virbuild_simplify_state *S_, uint32_t b)
+VPRIV void virbuild_block_values_number(codegen_context *e, virbuild_simplify_state *S_, uint32_t b)
 {
 	virbuild_context *V = e->vw;
 	virbuild_simplify_state *S = S_;

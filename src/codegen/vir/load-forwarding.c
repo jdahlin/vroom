@@ -1,6 +1,6 @@
 /* The simplifier's loads across blocks. */
-#define WK_PREFIX virbuild_
-#define LO_PREFIX virbuild_
+#define WALK_PREFIX virbuild_
+#define WALK_LOWER_PREFIX virbuild_
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
@@ -79,7 +79,7 @@ static bool virbuild_bytes_are_unwritten(virbuild_context *V, virbuild_simplify_
 }
 
 /* positions, writers and loops for virbuild_far_load_find (the blocks in reverse postorder) */
-VPRIV void virbuild_far_load_init(ecx *e, virbuild_simplify_state *S)
+VPRIV void virbuild_far_load_init(codegen_context *e, virbuild_simplify_state *S)
 {
 	virbuild_context *V = e->vw;
 	uint32_t n = V->block_order_count, pos = 0, sp = 0, nl = 0, *stk, *iend;

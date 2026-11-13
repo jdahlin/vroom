@@ -6,9 +6,9 @@
  * integers of one type, only at -O1 and up.  Only wasm's emitter calls it today; it uses
  * em_bound_constant from cmpbounds.c to see the constant 0.
  */
-#include "../emitimpl.h"
+#include "../codegen-internal.h"
 
-VPRIV bool em_cmpzero(ecx *e, uint32_t n, uint32_t *operand)
+VPRIV bool em_cmpzero(codegen_context *e, uint32_t n, uint32_t *operand)
 {
 	cc *c = e->c;
 	const node *x = N(n), *a, *b;
@@ -22,18 +22,18 @@ VPRIV bool em_cmpzero(ecx *e, uint32_t n, uint32_t *operand)
 	if (op != LEX_TOKEN_EQUAL_EQUAL && op != LEX_TOKEN_LESS_EQUAL && op != LEX_TOKEN_GREATER_EQUAL)
 		return false;
 	a = N(x->a); b = N(x->b);
-	if (AST_QUALIFIED_TYPE_UNQUALIFIED(a->ty) != AST_QUALIFIED_TYPE_UNQUALIFIED(b->ty) || !is_integer(c, a->ty) || em_bitint(c, a->ty))
+	if (AST_QUALIFIED_TYPE_UNQUALIFIED(a->ty) != AST_QUALIFIED_TYPE_UNQUALIFIED(b->ty) || !codegen_type_is_integer(c, a->ty) || codegen_type_is_bitint(c, a->ty))
 		return false;
-	size = tsize(c, a->ty);
+	size = codegen_type_size(c, a->ty);
 	if (size != 4 && size != 8)
 		return false;
-	if (em_bound_constant(c, x->b, &value) && em_trunc_to(c, value, b->ty) == 0 &&
-	    (op == LEX_TOKEN_EQUAL_EQUAL || (op == LEX_TOKEN_LESS_EQUAL && !is_signed(c, a->ty)))) {
+	if (em_bound_constant(c, x->b, &value) && codegen_integer_truncate(c, value, b->ty) == 0 &&
+	    (op == LEX_TOKEN_EQUAL_EQUAL || (op == LEX_TOKEN_LESS_EQUAL && !codegen_type_is_signed(c, a->ty)))) {
 		*operand = x->a;
 		return true;
 	}
-	if (em_bound_constant(c, x->a, &value) && em_trunc_to(c, value, a->ty) == 0 &&
-	    (op == LEX_TOKEN_EQUAL_EQUAL || (op == LEX_TOKEN_GREATER_EQUAL && !is_signed(c, a->ty)))) {
+	if (em_bound_constant(c, x->a, &value) && codegen_integer_truncate(c, value, a->ty) == 0 &&
+	    (op == LEX_TOKEN_EQUAL_EQUAL || (op == LEX_TOKEN_GREATER_EQUAL && !codegen_type_is_signed(c, a->ty)))) {
 		*operand = x->b;
 		return true;
 	}

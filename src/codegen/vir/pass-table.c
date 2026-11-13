@@ -23,8 +23,8 @@
  * the check of its `keeps` row runs too (VCC_VIR_CHECK_ANALYSES=1 asks for that alone).
  * An unknown pass or item prints the passes to stderr and exits 2.
  */
-#define WK_PREFIX virbuild_
-#define LO_PREFIX virbuild_
+#define WALK_PREFIX virbuild_
+#define WALK_LOWER_PREFIX virbuild_
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
@@ -34,17 +34,17 @@
 #include "port/performance-counters.h"
 
 /* the passes without a "changed" result, and the ones on VIR (failure: virbuild_fail, as virbuild_finish did) */
-static bool virbuild_pass_thread(ecx *e) { virbuild_empty_blocks_thread(e); return false; }
-static bool virbuild_pass_rpo(ecx *e) { virbuild_block_order_compute(e); return false; }
-static bool virbuild_pass_preds(ecx *e) { virbuild_block_predecessors_compute(e); return false; }
-static bool virbuild_pass_seal(ecx *e) { virbuild_blocks_seal(e); return false; }
-static bool virbuild_pass_dead_params(ecx *e) { virbuild_parameters_dead_remove(e); return false; }
-static bool virbuild_pass_simplify(ecx *e) { virbuild_function_simplify(e); return false; }
-static bool virbuild_pass_vectorize(ecx *e) { virbuild_function_vectorize(e); return false; }
-static bool virbuild_pass_split(ecx *e) { virbuild_critical_edges_split(e); return false; }
-static bool virbuild_pass_slot_uses(ecx *e) { virbuild_slot_uses_compute(e); return false; }
+static bool virbuild_pass_thread(codegen_context *e) { virbuild_empty_blocks_thread(e); return false; }
+static bool virbuild_pass_rpo(codegen_context *e) { virbuild_block_order_compute(e); return false; }
+static bool virbuild_pass_preds(codegen_context *e) { virbuild_block_predecessors_compute(e); return false; }
+static bool virbuild_pass_seal(codegen_context *e) { virbuild_blocks_seal(e); return false; }
+static bool virbuild_pass_dead_params(codegen_context *e) { virbuild_parameters_dead_remove(e); return false; }
+static bool virbuild_pass_simplify(codegen_context *e) { virbuild_function_simplify(e); return false; }
+static bool virbuild_pass_vectorize(codegen_context *e) { virbuild_function_vectorize(e); return false; }
+static bool virbuild_pass_split(codegen_context *e) { virbuild_critical_edges_split(e); return false; }
+static bool virbuild_pass_slot_uses(codegen_context *e) { virbuild_slot_uses_compute(e); return false; }
 
-static bool virbuild_pass_to_vir(ecx *e)
+static bool virbuild_pass_to_vir(codegen_context *e)
 {
 	virbuild_context *V = e->vw;
 
@@ -53,7 +53,7 @@ static bool virbuild_pass_to_vir(ecx *e)
 	return true;
 }
 
-static bool virbuild_pass_canon(ecx *e)
+static bool virbuild_pass_canon(codegen_context *e)
 {
 	virbuild_context *V = e->vw;
 
@@ -246,15 +246,15 @@ VPRIV const virbuild_pass_switch *virbuild_pass_switch_get(void)
 /* ---------------- running a row ---------------- */
 
 /* the function's name, for the messages of the check */
-static const char *virbuild_function_name(ecx *e, char *buf, size_t n);
+static const char *virbuild_function_name(codegen_context *e, char *buf, size_t n);
 
 /* per TU counters, see below: the instructions a VIR pass rewrote or removed */
-static void vir_count_changes(emitter *E, uint32_t row, uint64_t changes);
+static void vir_count_changes(codegen_unit *E, uint32_t row, uint64_t changes);
 
 /* The adapter: a VIR pass's row runs its registry entry on V->f.  A pass cannot fail the function, but
  * a limit reached while it appends is the build's failure (the function goes to the direct emitter), and so
  * is a stale analysis its `keeps` claims (checked with VCC_VIR_PASSES=verify or VCC_VIR_CHECK_ANALYSES=1). */
-static bool virbuild_pass_vir_run(ecx *e, const virbuild_pass *p)
+static bool virbuild_pass_vir_run(codegen_context *e, const virbuild_pass *p)
 {
 	vir_pass_context ctx = { .budget = VIR_PASS_BUDGET, .checked = virbuild_pass_switch_get()->verify != 0 };
 	char err[160];
@@ -274,13 +274,13 @@ static bool virbuild_pass_vir_run(ecx *e, const virbuild_pass *p)
 }
 
 /* one call of a row's pass */
-static bool virbuild_pass_call(ecx *e, const virbuild_pass *p)
+static bool virbuild_pass_call(codegen_context *e, const virbuild_pass *p)
 {
 	return p->vir ? virbuild_pass_vir_run(e, p) : p->run(e);
 }
 
 /* one row: its pass, to a fixed point if it says so, then virbuild_parameters_trivial_remove if it says so; whether it changed anything */
-VPRIV bool virbuild_pass_step(ecx *e, const virbuild_pass *p)
+VPRIV bool virbuild_pass_step(codegen_context *e, const virbuild_pass *p)
 {
 	bool changed = virbuild_pass_call(e, p);
 
@@ -293,16 +293,16 @@ VPRIV bool virbuild_pass_step(ecx *e, const virbuild_pass *p)
 	return changed;
 }
 
-/* per TU (keyed by its emitter, so emitimpl.h gains no field): counters per row, plus @build and @lower */
+/* per TU (keyed by its emitter, so codegen-internal.h gains no field): counters per row, plus @build and @lower */
 typedef struct virbuild_pass_count { uint64_t runs, changed, instructions, checked, changes; } virbuild_pass_count;
-typedef struct virbuild_pass_tu { emitter *E; virbuild_pass_count c[VIRBUILD_PASS_COUNT + 2]; } virbuild_pass_tu;
+typedef struct virbuild_pass_tu { codegen_unit *E; virbuild_pass_count c[VIRBUILD_PASS_COUNT + 2]; } virbuild_pass_tu;
 
 static pthread_mutex_t virbuild_pass_count_mutex = PTHREAD_MUTEX_INITIALIZER;
 static virbuild_pass_tu *virbuild_pass_count_units;
 static uint32_t vir_count_n, virbuild_pass_count_capacity;
 
 /* the TU's counters (made on first use); call with virbuild_pass_count_mutex held; NULL: out of memory */
-static virbuild_pass_tu *virbuild_pass_counts_find(emitter *E)
+static virbuild_pass_tu *virbuild_pass_counts_find(codegen_unit *E)
 {
 	for (uint32_t i = 0; i < vir_count_n; i++)
 		if (virbuild_pass_count_units[i].E == E)
@@ -319,7 +319,7 @@ static virbuild_pass_tu *virbuild_pass_counts_find(emitter *E)
 	return &virbuild_pass_count_units[vir_count_n++];
 }
 
-static void virbuild_pass_count_add(emitter *E, uint32_t row, bool ran, bool changed, uint64_t ins, bool checked)
+static void virbuild_pass_count_add(codegen_unit *E, uint32_t row, bool ran, bool changed, uint64_t ins, bool checked)
 {
 	virbuild_pass_tu *t;
 
@@ -334,7 +334,7 @@ static void virbuild_pass_count_add(emitter *E, uint32_t row, bool ran, bool cha
 	pthread_mutex_unlock(&virbuild_pass_count_mutex);
 }
 
-static void vir_count_changes(emitter *E, uint32_t row, uint64_t changes)
+static void vir_count_changes(codegen_unit *E, uint32_t row, uint64_t changes)
 {
 	virbuild_pass_tu *t;
 
@@ -346,7 +346,7 @@ static void vir_count_changes(emitter *E, uint32_t row, uint64_t changes)
 }
 
 /* row @build or @lower ran `instructions`, of which the timing of the passes inside it is taken off */
-VPRIV void virbuild_pass_note(emitter *E, uint32_t row, uint64_t instructions)
+VPRIV void virbuild_pass_note(codegen_unit *E, uint32_t row, uint64_t instructions)
 {
 	uint64_t o = virbuild_pass_overhead + virbuild_pass_read_cost;
 
@@ -354,7 +354,7 @@ VPRIV void virbuild_pass_note(emitter *E, uint32_t row, uint64_t instructions)
 	virbuild_pass_count_add(E, row, true, false, instructions > o ? instructions - o : 0, false);
 }
 
-static const char *virbuild_function_name(ecx *e, char *buf, size_t n)
+static const char *virbuild_function_name(codegen_context *e, char *buf, size_t n)
 {
 	const vident *id = &vintern_ents[e->c->syms[e->wk->fsym].name];
 
@@ -363,7 +363,7 @@ static const char *virbuild_function_name(ecx *e, char *buf, size_t n)
 }
 
 /* row i with what the switch asks for around it: timing, the check after it; valid: the facts (updated) */
-VPRIV bool virbuild_pass_step_instrumented(ecx *e, uint32_t i, uint32_t *valid)
+VPRIV bool virbuild_pass_step_instrumented(codegen_context *e, uint32_t i, uint32_t *valid)
 {
 	const virbuild_pass *p = &virbuild_passes[i];
 	const virbuild_pass_switch *w = &virbuild_pass_switch_current;
@@ -410,7 +410,7 @@ VPRIV bool virbuild_pass_step_instrumented(ecx *e, uint32_t i, uint32_t *valid)
 }
 
 /* VCC_VIR_PASSES=time or verify with VCC_VIR_STATS=1: the TU's lines (virbuild_statistics_print), then its counters go */
-VPRIV void virbuild_pass_stats_print(emitter *E)
+VPRIV void virbuild_pass_stats_print(codegen_unit *E)
 {
 	const virbuild_pass_switch *w = virbuild_pass_switch_get();
 	virbuild_pass_tu *t;

@@ -12,7 +12,7 @@
  *   :lo12:x+k  :got:x  :got_lo12:x  adrp x   x@PAGEOFF+k  x@GOTPAGE  ...
  *   .Lname                                   Lname (Mach-O's assembler-local)
  */
-#include "../../../codegen/emitimpl.h"
+#include "../../../codegen/codegen-internal.h"
 
 static bool idch(char ch)
 {
@@ -42,7 +42,7 @@ static bool defined(const char *t, size_t tn, const char *s, size_t n)
 }
 
 /* a symbol expression x, x+k or x-k with a relocation specifier: x@SPEC+k */
-static const char *reloc(tbuf *o, const char *p, const char *e, const char *spec)
+static const char *codegen_data_relocation(tbuf *o, const char *p, const char *e, const char *spec)
 {
 	const char *s = p, *k;
 
@@ -148,19 +148,19 @@ VPRIV void darwin_text(tbuf *o, const char *t, size_t tn)
 
 			for (const char *q = p; q < le;) {
 				if (ins && *q == ':' && starts(q, le, ":lo12:")) {
-					q = reloc(o, q + 6, le, "@PAGEOFF");
+					q = codegen_data_relocation(o, q + 6, le, "@PAGEOFF");
 				} else if (ins && starts(q, le, ":vcc_tlvp_lo12:")) {
-					q = reloc(o, q + 15, le, "@TLVPPAGEOFF");
+					q = codegen_data_relocation(o, q + 15, le, "@TLVPPAGEOFF");
 				} else if (ins && starts(q, le, ":vcc_tlvp:")) {
-					q = reloc(o, q + 10, le, "@TLVPPAGE");
+					q = codegen_data_relocation(o, q + 10, le, "@TLVPPAGE");
 				} else if (ins && starts(q, le, ":got_lo12:")) {
-					q = reloc(o, q + 10, le, "@GOTPAGEOFF");
+					q = codegen_data_relocation(o, q + 10, le, "@GOTPAGEOFF");
 				} else if (ins && starts(q, le, ":got:")) {
-					q = reloc(o, q + 5, le, "@GOTPAGE");
+					q = codegen_data_relocation(o, q + 5, le, "@GOTPAGE");
 				} else if (adrp && *q == ',' && q + 2 < le && q[2] != ':') {
 					vtext_string_append(o, ", ");
 					q += 2;
-					q = reloc(o, q, le, "@PAGE");
+					q = codegen_data_relocation(o, q, le, "@PAGE");
 				} else if (*q == '.' && q + 1 < le && q[1] == 'L' && (q == p || !idch(q[-1]))) {
 					q++;	/* .Lx: Mach-O's local labels are Lx */
 				} else {

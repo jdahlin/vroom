@@ -1,16 +1,16 @@
 /* Bounded direct sibling calls. Park arguments before assigning ABI registers
  * so permutations never overwrite another argument's incoming value.
  */
-#include "../../../codegen/emitimpl.h"
+#include "../../../codegen/codegen-internal.h"
 
-VPRIV bool a64_tail_return(ecx *e, uint32_t expr)
+VPRIV bool a64_tail_return(codegen_context *e, uint32_t expr)
 {
 	cc *c = e->c;
 	uint32_t callee;
 	int64_t slots[8];
-	val values[8];
+	codegen_value values[8];
 
-	if (DARWIN(c) || e->E->o->opt < 1 || e->E->noopt || !e->f || e->f->inl || e->vararg ||
+	if (CODEGEN_IS_DARWIN(c) || e->E->o->opt < 1 || e->E->noopt || !e->f || e->f->inl || e->vararg ||
 	    e->dyn || e->nclean != e->f->cbase ||
 	    !em_tail_candidate(e, e->f->fn, expr, 8, &callee))
 		return false;
@@ -21,7 +21,7 @@ VPRIV bool a64_tail_return(ecx *e, uint32_t expr)
 
 		values[i] = gen(e, arg);
 		slots[i] = 0;
-		if (values[i].k != V_CONST) {
+		if (values[i].k != CODEGEN_VALUE_CONSTANT) {
 			int r = toreg(e, &values[i]);
 
 			slots[i] = slot(e, 8, 8);
@@ -31,23 +31,23 @@ VPRIV bool a64_tail_return(ecx *e, uint32_t expr)
 	}
 	for (uint32_t i = 0; i < call->c; i++) {
 		ast_qualified_type ty = N(c->lists[call->b + i])->ty;
-		int wide = tsize(c, ty) == 8;
+		int wide = codegen_type_size(c, ty) == 8;
 
 		if (slots[i])
 			mem(e, I_LD, wide ? 3 : 2, 0, (int)i, FRAME, slots[i]);
 		else
-			movi(e, wide, (int)i, (int64_t)em_trunc_to(c, values[i].i, ty));
+			movi(e, wide, (int)i, (int64_t)codegen_integer_truncate(c, values[i].i, ty));
 	}
-	uint32_t ref = REF(RK_SYM, callee);
+	uint32_t ref = CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, callee);
 
-	note_ref(e, ref);
+	codegen_reference_note(e, ref);
 	put(e, I_TAIL)->ref = ref;
 	e->reach = false;
 	return true;
 }
 
 /* Keep the zero-code terminal marker to preserve debug record indices. */
-VPRIV uint32_t a64_tail_ref(const ecx *e)
+VPRIV uint32_t a64_tail_ref(const codegen_context *e)
 {
 	uint32_t k = e->nin;
 

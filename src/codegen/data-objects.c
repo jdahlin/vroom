@@ -1,27 +1,27 @@
 /*
- * data.c: emit one initialised or zero-initialised object (emit_object) or string literal
- * (emit_string) into the unit's output.
+ * data-objects.c: emit one initialised or zero-initialised object (codegen_data_object_emit) or string literal
+ * (codegen_string_literal_emit) into the unit's output.
  *
- * data_init walks a static initializer (the AST of `{ ... }`, strings, addresses, designators,
+ * codegen_data_initializer_store walks a static initializer (the AST of `{ ... }`, strings, addresses, designators,
  * bit-fields) into e->data, the bytes, and e->rel, the relocations (symbol address plus addend at an
- * offset); a later initializer of the same element wins (rel_prep).  The bytes then go out as
- * assembler directives in text mode, or as one data item of the object stream (data_item, obj.c) when
+ * offset); a later initializer of the same element wins (codegen_data_relocations_sort).  The bytes then go out as
+ * assembler directives in text mode, or as one data item of the object stream (codegen_data_item_append, obj.c) when
  * -c writes the object directly.  Targets differ in the directives and in the section (Mach-O and
  * thread-local layouts, wasm's one section per object); that is decided here, not in the arch
  * directories.  Every symbol the initializer names is recorded with note_ref so that lazily emitted
  * statics it points to get emitted too.  Errors (an object too large, a non-constant initializer)
  * longjmp to e->bail and drop this object only.
  */
-#include "emitimpl.h"
+#include "codegen-internal.h"
 #include "common/softfloat.h"
 
 /* ---------------- data ---------------- */
 
-static void data_put(ecx *e, uint64_t off, uint64_t v, int n)
+static void codegen_data_store(codegen_context *e, uint64_t off, uint64_t v, int n)
 {
 	if (off + (uint64_t)n > e->data.n) {
 		if (off + (uint64_t)n > e->data.cap)
-			efatal(e, 0, "static object too large");
+			codegen_fatal_report(e, 0, "static object too large");
 		memset(e->data.p + e->data.n, 0, off + (uint64_t)n - e->data.n);
 		e->data.n = off + (uint64_t)n;
 	}
@@ -33,26 +33,26 @@ static void data_put(ecx *e, uint64_t off, uint64_t v, int n)
 				e->rel[j].seq = UINT32_MAX;
 }
 
-static void data_or(ecx *e, uint64_t off, uint8_t bits)
+static void codegen_data_bits_or(codegen_context *e, uint64_t off, uint8_t bits)
 {
-	data_put(e, off, 0, 0);
+	codegen_data_store(e, off, 0, 0);
 	if (off >= e->data.n)
-		data_put(e, off, 0, 1);
+		codegen_data_store(e, off, 0, 1);
 	e->data.p[off] |= (char)bits;
 }
 
 /* an n-byte address (8; 4 for wasm32) */
-static void data_reloc(ecx *e, uint64_t off, uint32_t ref, int64_t add, int n)
+static void codegen_data_relocation_add(codegen_context *e, uint64_t off, uint32_t ref, int64_t add, int n)
 {
-	data_put(e, off, 0, n);
-	e->rel[e->nrel] = (struct reloc){ off, ref, e->nrel, add, 0, n == 8 ? 0 : (uint32_t)n };
+	codegen_data_store(e, off, 0, n);
+	e->rel[e->nrel] = (struct codegen_data_relocation){ off, ref, e->nrel, add, 0, n == 8 ? 0 : (uint32_t)n };
 	e->nrel++;
 	if (off + (uint64_t)n > e->relend)
 		e->relend = off + (uint64_t)n;
-	note_ref(e, ref);
+	codegen_reference_note(e, ref);
 }
 
-static void data_init(ecx *e, uint64_t off, ast_qualified_type ty, uint32_t init)
+static void codegen_data_initializer_store(codegen_context *e, uint64_t off, ast_qualified_type ty, uint32_t init)
 {
 	cc *c = e->c;
 	const node *x;
@@ -62,22 +62,22 @@ static void data_init(ecx *e, uint64_t off, ast_qualified_type ty, uint32_t init
 		return;
 	x = N(init);
 	if (x->op == AST_NODE_CAST && x->aux == AST_CAST_BIT_CAST) {
-		for (uint64_t pos = 0, size = tsize(c, ty); pos < size;) {
+		for (uint64_t pos = 0, size = codegen_type_size(c, ty); pos < size;) {
 			unsigned char bytes[16], known[16];
 			unsigned len = size - pos > 16 ? 16 : (unsigned)(size - pos);
-			if (!cc_bit_cast_object_read(c, init, pos, len, bytes, known)) efatal(e, x->loc, "initializer element is not a compile-time constant");
-			for (unsigned i = 0; i < len; i++) data_put(e, off + pos + i, bytes[i] & known[i], 1);
+			if (!cc_bit_cast_object_read(c, init, pos, len, bytes, known)) codegen_fatal_report(e, x->loc, "initializer element is not a compile-time constant");
+			for (unsigned i = 0; i < len; i++) codegen_data_store(e, off + pos + i, bytes[i] & known[i], 1);
 			pos += len;
 		}
 		return;
 	}
 	if (x->op == AST_NODE_ZERO)
 		return;
-	if (is_bvec(c, ty) && x->op == AST_NODE_CAST && x->aux == AST_CAST_SPLAT) {
+	if (codegen_type_is_bool_vector(c, ty) && x->op == AST_NODE_CAST && x->aux == AST_CAST_SPLAT) {
 		if (!cc_eval(c, x->a, &cv) || cv.kind != CC_VALUE_INTEGER)
-			efatal(e, x->loc, "initializer element is not a compile-time constant");
+			codegen_fatal_report(e, x->loc, "initializer element is not a compile-time constant");
 		for (uint64_t k = 0; k < T(c, ty)->n; k++)
-			if (cv.i) data_or(e, off + k / 8, 1u << (k % 8));
+			if (cv.i) codegen_data_bits_or(e, off + k / 8, 1u << (k % 8));
 		return;
 	}
 	if (x->op == AST_NODE_INITIALIZER) {
@@ -85,18 +85,18 @@ static void data_init(ecx *e, uint64_t off, ast_qualified_type ty, uint32_t init
 
 		if (x->aux == 1) {
 			ast_qualified_type et = T(c, ty)->base;
-			uint64_t es = tsize(c, et);
+			uint64_t es = codegen_type_size(c, et);
 
 			uint64_t n = 0;
 
-			if (is_bvec(c, ty)) {
+			if (codegen_type_is_bool_vector(c, ty)) {
 				for (uint32_t i = 0; i < x->c; i++) {
 					if (!cc_eval(c, v[3*i+2], &cv) || cv.kind != CC_VALUE_INTEGER)
-						efatal(e, x->loc, "initializer element is not a compile-time constant");
+						codegen_fatal_report(e, x->loc, "initializer element is not a compile-time constant");
 					for (uint64_t k = v[3*i]; k <= v[3*i+1]; k++) {
 						uint64_t at = off + k / 8;
 						unsigned m = 1u << (k % 8);
-						data_or(e, at, 0);
+						codegen_data_bits_or(e, at, 0);
 						e->data.p[at] = (char)((e->data.p[at] & ~m) | (cv.i ? m : 0));
 					}
 				}
@@ -104,12 +104,12 @@ static void data_init(ecx *e, uint64_t off, ast_qualified_type ty, uint32_t init
 			}
 			for (uint32_t i = 0; i < x->c; i++) {
 				for (uint64_t k = v[3 * i]; k <= v[3 * i + 1]; k++)
-					data_init(e, off + k * es, et, v[3 * i + 2]);
+					codegen_data_initializer_store(e, off + k * es, et, v[3 * i + 2]);
 				if (v[3 * i + 1] + 1 > n)
 					n = v[3 * i + 1] + 1;
 			}
 			if (T(c, ty)->flags & AST_TYPE_FLAG_INCOMPLETE)
-				data_put(e, off + n * es, 0, 0);	/* flexible array member: its initialized length counts */
+				codegen_data_store(e, off + n * es, 0, 0);	/* flexible array member: its initialized length counts */
 			return;
 		}
 		{
@@ -127,7 +127,7 @@ static void data_init(ecx *e, uint64_t off, ast_qualified_type ty, uint32_t init
 					u128 bits;
 
 					if (!cc_eval(c, v[i], &cv) || (cv.kind != CC_VALUE_INTEGER && cv.kind != CC_VALUE_BITINT))
-						efatal(e, x->loc, "initializer element is not a compile-time constant");
+						codegen_fatal_report(e, x->loc, "initializer element is not a compile-time constant");
 					/* The per-bit loop truncates to the field width. Keep the
 					   full constant so shifts through bit 127 remain defined. */
 					bits = (u128)cv.i;
@@ -135,165 +135,165 @@ static void data_init(ecx *e, uint64_t off, ast_qualified_type ty, uint32_t init
 						uint64_t at = off + (bo + k) / 8;
 						uint8_t m = (uint8_t)(1u << ((bo + k) % 8));
 
-						data_or(e, at, 0);
+						codegen_data_bits_or(e, at, 0);
 						e->data.p[at] = (char)((e->data.p[at] & ~m) | ((cv.kind == CC_VALUE_BITINT ? (k/32 < cv.nbig && ((c->lists[cv.big+k/32] >> (k%32)) & 1)) : k < 128 ? ((bits >> k) & 1) : cv.i < 0) ? m : 0));
 					}
 					continue;
 				}
-				data_init(e, off + f->off / 8, f->ty, v[i]);
+				codegen_data_initializer_store(e, off + f->off / 8, f->ty, v[i]);
 			}
 		}
 		return;
 	}
 	if (x->op == AST_NODE_COMMA) {
-		data_init(e, off, ty, x->b);
+		codegen_data_initializer_store(e, off, ty, x->b);
 		return;
 	}
 	{
 		uint32_t selected;
 
 		if (cc_initializer_subobject_find(c, init, &selected)) {
-			data_init(e, off, ty, selected);
+			codegen_data_initializer_store(e, off, ty, selected);
 			return;
 		}
 	}
-	if (x->op == AST_NODE_STRING && is_array(c, ty)) {
+	if (x->op == AST_NODE_STRING && codegen_type_is_array(c, ty)) {
 		const cstr *s = &c->strs[x->a];
-		uint64_t n = (uint64_t)s->n * s->esz, cap = tsize(c, ty);
+		uint64_t n = (uint64_t)s->n * s->esz, cap = codegen_type_size(c, ty);
 
 		if (T(c, ty)->flags & AST_TYPE_FLAG_INCOMPLETE)
 			cap = n;
 		if (n > cap)
 			n = cap;
 		for (uint64_t i = 0; i < n; i++)
-			data_put(e, off + i, (uint8_t)s->s[i], 1);
+			codegen_data_store(e, off + i, (uint8_t)s->s[i], 1);
 		return;
 	}
 	if (x->op == AST_NODE_COMPOUND_LITERAL) {
-		data_init(e, off, ty, x->a);
+		codegen_data_initializer_store(e, off, ty, x->a);
 		return;
 	}
 	if (x->op == AST_NODE_COMPLEX) {
 		ast_qualified_type et = c->tags[T(c, x->ty)->aux].f[0].ty;
 
-		data_init(e, off, et, x->a);
-		data_init(e, off + tsize(c, et), et, x->b);
+		codegen_data_initializer_store(e, off, et, x->a);
+		codegen_data_initializer_store(e, off + codegen_type_size(c, et), et, x->b);
 		return;
 	}
-	if (x->op == AST_NODE_CAST && x->aux == AST_CAST_NOP && is_agg(c, ty) && !em_bigint(c, ty)) {
-		data_init(e, off, ty, x->a);
+	if (x->op == AST_NODE_CAST && x->aux == AST_CAST_NOP && codegen_type_is_aggregate(c, ty) && !codegen_type_is_bitint_big(c, ty)) {
+		codegen_data_initializer_store(e, off, ty, x->a);
 		return;
 	}
-	if (is_agg(c, ty) && !em_bigint(c, ty)) {
+	if (codegen_type_is_aggregate(c, ty) && !codegen_type_is_bitint_big(c, ty)) {
 		/* a const aggregate object as the initializer (clang extension) */
-		uint32_t m = strip_casts(c, init);
+		uint32_t m = codegen_expression_casts_strip(c, init);
 
 		if (N(m)->op == AST_NODE_VARIABLE && c->syms[N(m)->a].body) {
-			data_init(e, off, ty, c->syms[N(m)->a].body);
+			codegen_data_initializer_store(e, off, ty, c->syms[N(m)->a].body);
 			return;
 		}
-		efatal(e, x->loc, "initializer element is not a compile-time constant");
+		codegen_fatal_report(e, x->loc, "initializer element is not a compile-time constant");
 	}
 	if (!cc_eval(c, init, &cv))
-		efatal(e, x->loc, "initializer element is not a compile-time constant");
+		codegen_fatal_report(e, x->loc, "initializer element is not a compile-time constant");
 	{
-		int n = (int)tsize(c, ty);
+		int n = (int)codegen_type_size(c, ty);
 
 		switch (cv.kind) {
 		case CC_VALUE_BITINT:
 			for (unsigned i = 0; i < cv.nbig; i++)
-				data_put(e, off + 4 * i, c->lists[cv.big + i], 4);
+				codegen_data_store(e, off + 4 * i, c->lists[cv.big + i], 4);
 			return;
 		case CC_VALUE_INTEGER:
-			if (em_bigint(c, ty)) {
+			if (codegen_type_is_bitint_big(c, ty)) {
 				for (int i = 0; i < n; i += 8)
-					data_put(e, off + i, i < 16 ? (uint64_t)((u128)cv.i >> (8*i)) : cv.i < 0 ? UINT64_MAX : 0, 8);
+					codegen_data_store(e, off + i, i < 16 ? (uint64_t)((u128)cv.i >> (8*i)) : cv.i < 0 ? UINT64_MAX : 0, 8);
 				return;
 			}
 			if (n == 16) {
-				data_put(e, off, (uint64_t)(u128)cv.i, 8);
-				data_put(e, off + 8, (uint64_t)((u128)cv.i >> 64), 8);
+				codegen_data_store(e, off, (uint64_t)(u128)cv.i, 8);
+				codegen_data_store(e, off + 8, (uint64_t)((u128)cv.i >> 64), 8);
 			} else {
-				data_put(e, off, (uint64_t)cv.i, n);
+				codegen_data_store(e, off, (uint64_t)cv.i, n);
 			}
 			return;
 		case CC_VALUE_FLOAT:
 			if (n <= 8 && cv.ld && vsoftfloat_is_nan(cv.q)) {
-				data_put(e, off, vsoftfloat_nan_storage(cv.q, KIND(c, ty) == AST_TYPE_BFLOAT16 ? 7 : n == 2 ? 10 : n == 4 ? 23 : 52, KIND(c, ty) == AST_TYPE_BFLOAT16 ? 8 : n == 2 ? 5 : n == 4 ? 8 : 11), n);
+				codegen_data_store(e, off, vsoftfloat_nan_storage(cv.q, KIND(c, ty) == AST_TYPE_BFLOAT16 ? 7 : n == 2 ? 10 : n == 4 ? 23 : 52, KIND(c, ty) == AST_TYPE_BFLOAT16 ? 8 : n == 2 ? 5 : n == 4 ? 8 : 11), n);
 				return;
 			}
 			if (n == 2) {
-				data_put(e, off, (KIND(c, ty) == AST_TYPE_BFLOAT16 ? vsoftfloat_to_bfloat16(cv.ld ? cv.q : vsoftfloat_of_double(cv.f)) : vsoftfloat_to_half(cv.ld ? cv.q : vsoftfloat_of_double(cv.f))), 2);
+				codegen_data_store(e, off, (KIND(c, ty) == AST_TYPE_BFLOAT16 ? vsoftfloat_to_bfloat16(cv.ld ? cv.q : vsoftfloat_of_double(cv.f)) : vsoftfloat_to_half(cv.ld ? cv.q : vsoftfloat_of_double(cv.f))), 2);
 			} else if (n == 4) {
 				float f = (float)cv.f;
 				uint32_t u;
 
 				memcpy(&u, &f, 4);
-				data_put(e, off, u, 4);
+				codegen_data_store(e, off, u, 4);
 			} else {
 				uint64_t u;
 
-				if (n == 16 && X86(c) && KIND(c, ty) == AST_TYPE_LONG_DOUBLE) {	/* x87: 10 bytes, 6 of padding */
+				if (n == 16 && CODEGEN_IS_X64(c) && KIND(c, ty) == AST_TYPE_LONG_DOUBLE) {	/* x87: 10 bytes, 6 of padding */
 					u128 q = cv.ld ? cv.q : (u128)ld_of_d(cv.f);
 					uint8_t xb[10];
 					uint64_t lo;
 
 					vsoftfloat_to_x87(q, xb);
 					memcpy(&lo, xb, 8);
-					data_put(e, off, lo, 8);
-					data_put(e, off + 8, (uint64_t)xb[8] | (uint64_t)xb[9] << 8, 8);
+					codegen_data_store(e, off, lo, 8);
+					codegen_data_store(e, off + 8, (uint64_t)xb[8] | (uint64_t)xb[9] << 8, 8);
 					return;
 				}
 				if (n == 16) {
 					u128 q = cv.ld ? cv.q : (u128)ld_of_d(cv.f);
 
-					data_put(e, off, (uint64_t)q, 8);
-					data_put(e, off + 8, (uint64_t)(q >> 64), 8);
+					codegen_data_store(e, off, (uint64_t)q, 8);
+					codegen_data_store(e, off + 8, (uint64_t)(q >> 64), 8);
 					return;
 				}
 				memcpy(&u, &cv.f, 8);
-				data_put(e, off, u, 8);
+				codegen_data_store(e, off, u, 8);
 			}
 			return;
 		case CC_VALUE_ADDRESS:
 			if (WASM(c) && cv.label) {
 				/* wasm: a label's address is its number (PLAN-wasm.md W4) */
-				data_put(e, off, (uint64_t)cv.label - (cv.sublabel ? (uint64_t)cv.sublabel : 0) + (uint64_t)cv.i, n);
+				codegen_data_store(e, off, (uint64_t)cv.label - (cv.sublabel ? (uint64_t)cv.sublabel : 0) + (uint64_t)cv.i, n);
 				return;
 			}
 			if (cv.sublabel && (n == 4 || n == 8)) {
 				/* label difference: ref - sub, resolved by the assembler */
-				data_put(e, off, 0, n);
-				e->rel[e->nrel] = (struct reloc){ off, REF(RK_LBL, cv.label - 1), e->nrel, (int64_t)cv.i,
-								  REF(RK_LBL, cv.sublabel - 1) + 1, (uint32_t)n };
+				codegen_data_store(e, off, 0, n);
+				e->rel[e->nrel] = (struct codegen_data_relocation){ off, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_LABEL, cv.label - 1), e->nrel, (int64_t)cv.i,
+								  CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_LABEL, cv.sublabel - 1) + 1, (uint32_t)n };
 				e->nrel++;
 				if (off + n > e->relend)
 					e->relend = off + n;
-				note_ref(e, REF(RK_LBL, cv.label - 1));
-				note_ref(e, REF(RK_LBL, cv.sublabel - 1));
+				codegen_reference_note(e, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_LABEL, cv.label - 1));
+				codegen_reference_note(e, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_LABEL, cv.sublabel - 1));
 				return;
 			}
 			if (n != 8 && !(n == 4 && WASM32(c)))
-				efatal(e, x->loc, "address initializer for a %d-byte object", n);
+				codegen_fatal_report(e, x->loc, "address initializer for a %d-byte object", n);
 			if (cv.label)
-				data_reloc(e, off, REF(RK_LBL, cv.label - 1), (int64_t)cv.i, n);
+				codegen_data_relocation_add(e, off, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_LABEL, cv.label - 1), (int64_t)cv.i, n);
 			else if (cv.str)
-				data_reloc(e, off, REF(RK_STR, cv.str - 1), (int64_t)cv.i, n);
+				codegen_data_relocation_add(e, off, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_STRING, cv.str - 1), (int64_t)cv.i, n);
 			else {
-				data_reloc(e, off, REF(RK_SYM, canon_sym(c, cv.sym)), (int64_t)cv.i, n);
+				codegen_data_relocation_add(e, off, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, codegen_symbol_canonical(c, cv.sym)), (int64_t)cv.i, n);
 				if (WASM(c))
-					wasm_data_ref(e, REF(RK_SYM, canon_sym(c, cv.sym)));
+					wasm_data_ref(e, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, codegen_symbol_canonical(c, cv.sym)));
 			}
 			return;
 		default:
-			efatal(e, x->loc, "initializer element is not a compile-time constant");
+			codegen_fatal_report(e, x->loc, "initializer element is not a compile-time constant");
 		}
 	}
 }
 
-static int rel_cmp(const void *a, const void *b)
+static int codegen_data_relocation_compare(const void *a, const void *b)
 {
-	const struct reloc *x = a, *y = b;
+	const struct codegen_data_relocation *x = a, *y = b;
 
 	if (x->off != y->off)
 		return x->off < y->off ? -1 : 1;
@@ -301,11 +301,11 @@ static int rel_cmp(const void *a, const void *b)
 }
 
 /* sort e->rel by offset; a later initializer for the same element overrides: keep the last */
-static void rel_prep(ecx *e)
+static void codegen_data_relocations_sort(codegen_context *e)
 {
 	uint32_t k = 0;
 
-	qsort(e->rel, e->nrel, sizeof(e->rel[0]), rel_cmp);
+	qsort(e->rel, e->nrel, sizeof(e->rel[0]), codegen_data_relocation_compare);
 	for (uint32_t j = 0; j < e->nrel; j++) {
 		if (e->rel[j].seq == UINT32_MAX)
 			continue;
@@ -316,45 +316,45 @@ static void rel_prep(ecx *e)
 	e->nrel = k;
 }
 
-/* the object backend's data item: what data_bytes / .zero would assemble to */
-static void data_item(ecx *e, uint64_t size, bool zero)
+/* the object backend's data item: what codegen_data_directives_append / .zero would assemble to */
+static void codegen_data_item_append(codegen_context *e, uint64_t size, bool zero)
 {
-	size_t h = it_open(e, IT_DATA);
-	data_hdr *dh = it_room(e, sizeof *dh);
+	size_t h = codegen_item_open(e, CODEGEN_ITEM_DATA);
+	codegen_data_header *dh = codegen_item_room_need(e, sizeof *dh);
 	uint32_t nrel = 0;
 
 	if (zero) {
-		*dh = (data_hdr){ .size = size, .zero = 1 };
+		*dh = (codegen_data_header){ .size = size, .zero = 1 };
 	} else {
-		rel_prep(e);
+		codegen_data_relocations_sort(e);
 		while (nrel < e->nrel && e->rel[nrel].off < size)
 			nrel++;
-		*dh = (data_hdr){ .size = size, .n = e->data.n < size ? e->data.n : size, .nrel = nrel };
-		memcpy(it_room(e, nrel * sizeof(ireloc)), e->rel, nrel * sizeof(ireloc));
-		memcpy(it_room(e, dh->n), e->data.p, dh->n);
+		*dh = (codegen_data_header){ .size = size, .n = e->data.n < size ? e->data.n : size, .nrel = nrel };
+		memcpy(codegen_item_room_need(e, nrel * sizeof(codegen_item_relocation)), e->rel, nrel * sizeof(codegen_item_relocation));
+		memcpy(codegen_item_room_need(e, dh->n), e->data.p, dh->n);
 	}
-	it_close(e, h);
+	codegen_item_close(e, h);
 }
 
 /* the bytes in e->data with e->rel, as directives */
-static void data_bytes(ecx *e, tbuf *b, uint64_t size)
+static void codegen_data_directives_append(codegen_context *e, tbuf *b, uint64_t size)
 {
 	uint64_t o = 0;
 	uint32_t ri = 0;
 	const unsigned char *d = (const unsigned char *)e->data.p;
 
-	rel_prep(e);
+	codegen_data_relocations_sort(e);
 	while (o < size) {
 		uint64_t end = ri < e->nrel ? e->rel[ri].off : size;
 
 		if (ri < e->nrel && o == e->rel[ri].off) {
 			uint32_t sz = e->rel[ri].sz ? e->rel[ri].sz : 8;
 
-			vtext_string_append(b, sz == 4 ? (WASM(e->c) ? "\t.int32\t" : X86(e->c) ? "\t.long\t" : "\t.word\t") : WASM(e->c) ? "\t.int64\t" : X86(e->c) ? "\t.quad\t" : "\t.xword\t");
-			ref_off(e->c, b, e->rel[ri].ref, e->rel[ri].add);
+			vtext_string_append(b, sz == 4 ? (WASM(e->c) ? "\t.int32\t" : CODEGEN_IS_X64(e->c) ? "\t.long\t" : "\t.word\t") : WASM(e->c) ? "\t.int64\t" : CODEGEN_IS_X64(e->c) ? "\t.quad\t" : "\t.xword\t");
+			codegen_reference_offset_append(e->c, b, e->rel[ri].ref, e->rel[ri].add);
 			if (e->rel[ri].sub) {
 				vtext_char_append(b, '-');
-				ref_name(e->c, b, e->rel[ri].sub - 1);
+				codegen_reference_name_append(e->c, b, e->rel[ri].sub - 1);
 			}
 			vtext_char_append(b, '\n');
 			o += sz;
@@ -380,7 +380,7 @@ static void data_bytes(ecx *e, tbuf *b, uint64_t size)
 
 				/* o < data.n here; past it the bytes are zero, not what the buffer holds */
 				memcpy(&w, d + o, o + 8 <= e->data.n ? 8 : e->data.n - o);
-				vtext_string_append(b, WASM(e->c) ? "\t.int64\t" : X86(e->c) ? "\t.quad\t" : "\t.xword\t");
+				vtext_string_append(b, WASM(e->c) ? "\t.int64\t" : CODEGEN_IS_X64(e->c) ? "\t.quad\t" : "\t.xword\t");
 				vtext_hex_prefixed_append(b, w);
 				vtext_char_append(b, '\n');
 				o += 8;
@@ -394,24 +394,24 @@ static void data_bytes(ecx *e, tbuf *b, uint64_t size)
 	}
 }
 
-static bool all_const(cc *c, ast_qualified_type t)
+static bool codegen_type_is_all_const(cc *c, ast_qualified_type t)
 {
 	if (AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_CONST)
 		return true;
-	if (is_array(c, t))
-		return all_const(c, T(c, t)->base);
+	if (codegen_type_is_array(c, t))
+		return codegen_type_is_all_const(c, T(c, t)->base);
 	return false;
 }
 
-VPRIV void emit_object(ecx *e, uint32_t s)
+VPRIV void codegen_data_object_emit(codegen_context *e, uint32_t s)
 {
 	cc *c = e->c;
 	const sym *y = &c->syms[s];
 	tbuf *b = &e->out;
 	size_t start = b->n;
-	uint64_t size = tsize(c, y->ty);
-	uint32_t align = sym_align(c, s);
-	const attrs *a = sym_attrs(c, s);
+	uint64_t size = codegen_type_size(c, y->ty);
+	uint32_t align = codegen_symbol_alignment(c, s);
+	const attrs *a = codegen_symbol_attributes(c, s);
 	bool zero;
 
 	if (_setjmp(e->bail))
@@ -420,11 +420,11 @@ VPRIV void emit_object(ecx *e, uint32_t s)
 	e->nrel = 0, e->relend = 0;
 	e->reach = true;
 	if (y->body)
-		data_init(e, 0, y->ty, y->body);
+		codegen_data_initializer_store(e, 0, y->ty, y->body);
 	if (e->data.n > size)
 		size = e->data.n;	/* flexible array member initialised */
-	if (size == 0 && !y->body && is_array(c, y->ty) && (T(c, y->ty)->flags & AST_TYPE_FLAG_INCOMPLETE))
-		size = tsize(c, T(c, y->ty)->base);	/* int x[]; is one element */
+	if (size == 0 && !y->body && codegen_type_is_array(c, y->ty) && (T(c, y->ty)->flags & AST_TYPE_FLAG_INCOMPLETE))
+		size = codegen_type_size(c, T(c, y->ty)->base);	/* int x[]; is one element */
 	zero = e->nrel == 0;
 	for (uint64_t i = 0; zero && i < e->data.n; i++)
 		zero = !e->data.p[i];
@@ -439,14 +439,14 @@ VPRIV void emit_object(ecx *e, uint32_t s)
 			vtext_string_append(b, c->strs[a->section - 1].s);
 		} else {
 			/* a quoted name: the whole section name in quotes, as clang */
-			bool q = sym_quoted(c, s);
+			bool q = codegen_symbol_name_is_quoted(c, s);
 			size_t at;
 
 			if (q)
 				vtext_char_append(b, '"');
-			vtext_string_append(b, all_const(c, y->ty) ? ".rodata." : zero ? ".bss." : ".data.");
+			vtext_string_append(b, codegen_type_is_all_const(c, y->ty) ? ".rodata." : zero ? ".bss." : ".data.");
 			at = b->n;
-			sym_name(c, b, s);
+			codegen_symbol_name_append(c, b, s);
 			if (q) {
 				memmove(b->p + at, b->p + at + 1, b->n - at - 1);
 				b->n--;
@@ -455,70 +455,70 @@ VPRIV void emit_object(ecx *e, uint32_t s)
 		vtext_string_append(b, ",\"\",@\n");
 		if (global) {
 			vtext_string_append(b, (y->flags & AST_SYMBOL_FLAG_WEAK) ? "\t.weak\t" : "\t.globl\t");
-			sym_name(c, b, s);
+			codegen_symbol_name_append(c, b, s);
 			vtext_char_append(b, '\n');
 		}
 		vtext_string_append(b, "\t.p2align\t");
 		vtext_unsigned_append(b, (uint64_t)__builtin_ctz(align ? align : 1));
 		vtext_string_append(b, "\n\t.type\t");
-		sym_name(c, b, s);
+		codegen_symbol_name_append(c, b, s);
 		vtext_string_append(b, ",@object\n");
-		sym_name(c, b, s);
+		codegen_symbol_name_append(c, b, s);
 		vtext_string_append(b, ":\n");
 		if (zero && !e->nrel) {
 			vtext_string_append(b, "\t.zero\t");
 			vtext_unsigned_append(b, size ? size : 1);
 			vtext_char_append(b, '\n');
 		} else {
-			data_bytes(e, b, size);
+			codegen_data_directives_append(e, b, size);
 		}
 		vtext_string_append(b, "\t.size\t");
-		sym_name(c, b, s);
+		codegen_symbol_name_append(c, b, s);
 		vtext_string_append(b, ", ");
 		vtext_unsigned_append(b, size ? size : 1);
 		vtext_char_append(b, '\n');
 		e->E->nobj++;
-		out_chunk(e, ((uint64_t)s << 1) | 1, start);
+		codegen_chunk_add(e, ((uint64_t)s << 1) | 1, start);
 		return;
 	}
-	if (!a->section && (y->flags & AST_SYMBOL_FLAG_THREAD) && !DARWIN(c)) {
+	if (!a->section && (y->flags & AST_SYMBOL_FLAG_THREAD) && !CODEGEN_IS_DARWIN(c)) {
 		/* ELF: .tdata/.tbss; code reaches it through I_TLV (lval.c) */
 		const char *sec = zero && !e->nrel ? "\t.section\t.tbss,\"awT\",@nobits\n" : "\t.section\t.tdata,\"awT\",@progbits\n";
 
-		if (direct(e)) {
+		if (codegen_context_is_direct(e)) {
 			size_t h;
 
 			b->n = (b->n + 7) & ~(size_t)7;
 			start = b->n;
-			sym_header(e, b, s, false, sec, align);
-			data_item(e, zero && !e->nrel ? (size ? size : 1) : size, zero && !e->nrel);
-			h = it_open(e, IT_OSIZE);
-			*(osize *)it_room(e, sizeof(osize)) = (osize){ .sym = s, .size = size };
-			it_close(e, h);
+			codegen_symbol_header_append(e, b, s, false, sec, align);
+			codegen_data_item_append(e, zero && !e->nrel ? (size ? size : 1) : size, zero && !e->nrel);
+			h = codegen_item_open(e, CODEGEN_ITEM_OBJECT_SIZE);
+			*(codegen_object_size *)codegen_item_room_need(e, sizeof(codegen_object_size)) = (codegen_object_size){ .sym = s, .size = size };
+			codegen_item_close(e, h);
 			e->E->nobj++;
-			out_chunk(e, ((uint64_t)s << 1) | 1, start);
+			codegen_chunk_add(e, ((uint64_t)s << 1) | 1, start);
 			return;
 		}
-		sym_header(e, b, s, false, sec, align);
+		codegen_symbol_header_append(e, b, s, false, sec, align);
 		if (zero && !e->nrel) {
 			vtext_string_append(b, "\t.zero\t");
 			vtext_unsigned_append(b, size ? size : 1);
 			vtext_char_append(b, '\n');
 		} else {
-			data_bytes(e, b, size);
+			codegen_data_directives_append(e, b, size);
 		}
 		vtext_string_append(b, "\t.size\t");
-		sym_name(c, b, s);
+		codegen_symbol_name_append(c, b, s);
 		vtext_string_append(b, ", ");
 		vtext_unsigned_append(b, size);
 		vtext_char_append(b, '\n');
 		e->E->nobj++;
-		out_chunk(e, ((uint64_t)s << 1) | 1, start);
+		codegen_chunk_add(e, ((uint64_t)s << 1) | 1, start);
 		return;
 	}
-	if (!a->section && (y->flags & AST_SYMBOL_FLAG_THREAD) && !direct(e) && !DARWIN(e->c))
-		efatal(e, y->loc, "thread-local storage is not supported");
-	if (!direct(e) && DARWIN(e->c) && (y->flags & AST_SYMBOL_FLAG_THREAD)) {
+	if (!a->section && (y->flags & AST_SYMBOL_FLAG_THREAD) && !codegen_context_is_direct(e) && !CODEGEN_IS_DARWIN(e->c))
+		codegen_fatal_report(e, y->loc, "thread-local storage is not supported");
+	if (!codegen_context_is_direct(e) && CODEGEN_IS_DARWIN(e->c) && (y->flags & AST_SYMBOL_FLAG_THREAD)) {
 		/* the same TLV layout as text; darwin_text names the sections */
 		bool global = y->sc != AST_STORAGE_STATIC && y->depth == 0 && y->name;
 
@@ -526,31 +526,31 @@ VPRIV void emit_object(ecx *e, uint32_t s)
 		vtext_string_append(b, "\t.p2align\t");
 		vtext_unsigned_append(b, (uint64_t)__builtin_ctz(align ? align : 1));
 		vtext_char_append(b, '\n');
-		sym_name(c, b, s);
+		codegen_symbol_name_append(c, b, s);
 		vtext_string_append(b, "$tlv$init:\n");
 		if (zero && !e->nrel) {
 			vtext_string_append(b, "\t.zero\t");
 			vtext_unsigned_append(b, size ? size : 1);
 			vtext_char_append(b, '\n');
 		} else {
-			data_bytes(e, b, size);
+			codegen_data_directives_append(e, b, size);
 		}
 		vtext_string_append(b, "\t.section\t.tlv,\"aw\",@progbits\n");
 		if (global) {
 			vtext_string_append(b, (y->flags & AST_SYMBOL_FLAG_WEAK) ? "\t.weak\t" : "\t.globl\t");
-			sym_name(c, b, s);
+			codegen_symbol_name_append(c, b, s);
 			vtext_char_append(b, '\n');
 		}
 		vtext_string_append(b, "\t.p2align\t3\n");
-		sym_name(c, b, s);
+		codegen_symbol_name_append(c, b, s);
 		vtext_string_append(b, ":\n\t.xword\t__tlv_bootstrap\n\t.xword\t0\n\t.xword\t");
-		sym_name(c, b, s);
+		codegen_symbol_name_append(c, b, s);
 		vtext_string_append(b, "$tlv$init\n");
 		e->E->nobj++;
-		out_chunk(e, ((uint64_t)s << 1) | 1, start);
+		codegen_chunk_add(e, ((uint64_t)s << 1) | 1, start);
 		return;
 	}
-	if (direct(e) && (y->flags & AST_SYMBOL_FLAG_THREAD)) {
+	if (codegen_context_is_direct(e) && (y->flags & AST_SYMBOL_FLAG_THREAD)) {
 		/*
 		 * Darwin TLV: the initial value in __thread_data/__thread_bss under
 		 * a local label, the symbol itself on a descriptor in
@@ -561,49 +561,49 @@ VPRIV void emit_object(ecx *e, uint32_t s)
 
 		b->n = (b->n + 7) & ~(size_t)7;
 		start = b->n;
-		h = it_open(e, IT_TEXT);
+		h = codegen_item_open(e, CODEGEN_ITEM_TEXT);
 		vtext_string_append(b, zero ? "\t.section\t.tbss,\"aw\",@nobits\n" : "\t.section\t.tdata,\"aw\",@progbits\n");
 		vtext_string_append(b, "\t.p2align\t");
 		vtext_unsigned_append(b, (uint64_t)__builtin_ctz(align ? align : 1));
 		vtext_char_append(b, '\n');
-		sym_name(c, b, s);
+		codegen_symbol_name_append(c, b, s);
 		vtext_string_append(b, "$tlv$init:\n");
-		it_close(e, h);
-		data_item(e, zero && !e->nrel ? (size ? size : 1) : size, zero && !e->nrel);
-		h = it_open(e, IT_TEXT);
+		codegen_item_close(e, h);
+		codegen_data_item_append(e, zero && !e->nrel ? (size ? size : 1) : size, zero && !e->nrel);
+		h = codegen_item_open(e, CODEGEN_ITEM_TEXT);
 		vtext_string_append(b, "\t.section\t.tlv,\"aw\",@progbits\n");
 		if (global) {
 			vtext_string_append(b, (y->flags & AST_SYMBOL_FLAG_WEAK) ? "\t.weak\t" : "\t.globl\t");
-			sym_name(c, b, s);
+			codegen_symbol_name_append(c, b, s);
 			vtext_char_append(b, '\n');
 		}
 		vtext_string_append(b, "\t.p2align\t3\n");
-		sym_name(c, b, s);
+		codegen_symbol_name_append(c, b, s);
 		vtext_string_append(b, ":\n\t.xword\t__tlv_bootstrap\n\t.xword\t0\n\t.xword\t");
-		sym_name(c, b, s);
+		codegen_symbol_name_append(c, b, s);
 		vtext_string_append(b, "$tlv$init\n");
-		it_close(e, h);
+		codegen_item_close(e, h);
 		e->E->nobj++;
-		out_chunk(e, ((uint64_t)s << 1) | 1, start);
+		codegen_chunk_add(e, ((uint64_t)s << 1) | 1, start);
 		return;
 	}
-	if (direct(e)) {
+	if (codegen_context_is_direct(e)) {
 		size_t h;
 
 		b->n = (b->n + 7) & ~(size_t)7;
 		start = b->n;
-		sym_header(e, b, s, false,
-			   all_const(c, y->ty) ? "\t.section\t.rodata,\"a\",@progbits\n" : zero ? "\t.bss\n" : "\t.data\n", align);
-		data_item(e, zero && !e->nrel ? (size ? size : 1) : size, zero && !e->nrel);
-		h = it_open(e, IT_OSIZE);
-		*(osize *)it_room(e, sizeof(osize)) = (osize){ .sym = s, .size = size };
-		it_close(e, h);
+		codegen_symbol_header_append(e, b, s, false,
+			   codegen_type_is_all_const(c, y->ty) ? "\t.section\t.rodata,\"a\",@progbits\n" : zero ? "\t.bss\n" : "\t.data\n", align);
+		codegen_data_item_append(e, zero && !e->nrel ? (size ? size : 1) : size, zero && !e->nrel);
+		h = codegen_item_open(e, CODEGEN_ITEM_OBJECT_SIZE);
+		*(codegen_object_size *)codegen_item_room_need(e, sizeof(codegen_object_size)) = (codegen_object_size){ .sym = s, .size = size };
+		codegen_item_close(e, h);
 		e->E->nobj++;
-		out_chunk(e, ((uint64_t)s << 1) | 1, start);
+		codegen_chunk_add(e, ((uint64_t)s << 1) | 1, start);
 		return;
 	}
-	sym_header(e, b, s, false,
-		   all_const(c, y->ty) ? "\t.section\t.rodata,\"a\",@progbits\n" : zero ? "\t.bss\n" : "\t.data\n", align);
+	codegen_symbol_header_append(e, b, s, false,
+		   codegen_type_is_all_const(c, y->ty) ? "\t.section\t.rodata,\"a\",@progbits\n" : zero ? "\t.bss\n" : "\t.data\n", align);
 	if (zero && !e->nrel) {
 		if (a->section && !strncmp(c->strs[a->section - 1].s, ".bss", 4)) {
 			vtext_string_append(b, "\t.zero\t");
@@ -615,18 +615,18 @@ VPRIV void emit_object(ecx *e, uint32_t s)
 			vtext_char_append(b, '\n');
 		}
 	} else {
-		data_bytes(e, b, size);
+		codegen_data_directives_append(e, b, size);
 	}
 	vtext_string_append(b, "\t.size\t");
-	sym_name(c, b, s);
+	codegen_symbol_name_append(c, b, s);
 	vtext_string_append(b, ", ");
 	vtext_unsigned_append(b, size);
 	vtext_char_append(b, '\n');
 	e->E->nobj++;
-	out_chunk(e, ((uint64_t)s << 1) | 1, start);
+	codegen_chunk_add(e, ((uint64_t)s << 1) | 1, start);
 }
 
-VPRIV void emit_string(ecx *e, uint32_t i)
+VPRIV void codegen_string_literal_emit(codegen_context *e, uint32_t i)
 {
 	cc *c = e->c;
 	const cstr *s = &c->strs[i];
@@ -646,33 +646,33 @@ VPRIV void emit_string(ecx *e, uint32_t i)
 			break;
 		}
 	}
-	if (direct(e)) {
+	if (codegen_context_is_direct(e)) {
 		size_t h;
-		uint32_t ref = REF(RK_STR, i);
+		uint32_t ref = CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_STRING, i);
 		bool asciz = s->esz == 1 && !nul;
 		uint64_t m = asciz ? (n ? n - 1 : 0) : n;
 		char *q;
 
 		b->n = (b->n + 7) & ~(size_t)7;
 		start = b->n;
-		h = it_open(e, IT_TEXT);
+		h = codegen_item_open(e, CODEGEN_ITEM_TEXT);
 		if (nul)
 			vtext_string_append(b, "\t.section\t.rodata,\"a\",@progbits\n");
 		else
 			vtext_format_append(b, "\t.section\t.rodata.str%u.%u,\"aMS\",@progbits,%u\n", s->esz, s->esz, s->esz);
 		if (s->esz > 1)
 			vtext_format_append(b, "\t.p2align\t%d\n", s->esz == 2 ? 1 : 2);
-		it_close(e, h);
-		h = it_open(e, IT_LABEL);
-		memcpy(it_room(e, 4), &ref, 4);
-		it_close(e, h);
-		h = it_open(e, IT_BYTES);
-		q = it_room(e, m + asciz);
+		codegen_item_close(e, h);
+		h = codegen_item_open(e, CODEGEN_ITEM_LABEL);
+		memcpy(codegen_item_room_need(e, 4), &ref, 4);
+		codegen_item_close(e, h);
+		h = codegen_item_open(e, CODEGEN_ITEM_BYTES);
+		q = codegen_item_room_need(e, m + asciz);
 		memcpy(q, s->s, m);
 		if (asciz)
 			q[m] = 0;
-		it_close(e, h);
-		out_chunk(e, ((uint64_t)1 << 62) | i, start);
+		codegen_item_close(e, h);
+		codegen_chunk_add(e, ((uint64_t)1 << 62) | i, start);
 		return;
 	}
 	if (WASM(c))
@@ -709,12 +709,12 @@ VPRIV void emit_string(ecx *e, uint32_t i)
 			uint32_t v = 0;
 
 			memcpy(&v, s->s + k, s->esz);
-			vtext_string_append(b, s->esz == 1 ? "\t.byte\t" : s->esz == 2 ? "\t.short\t" : WASM(c) || X86(c) ? "\t.long\t" : "\t.word\t");
+			vtext_string_append(b, s->esz == 1 ? "\t.byte\t" : s->esz == 2 ? "\t.short\t" : WASM(c) || CODEGEN_IS_X64(c) ? "\t.long\t" : "\t.word\t");
 			vtext_unsigned_append(b, v);
 			vtext_char_append(b, '\n');
 		}
 	}
 	if (WASM(c))
 		vtext_format_append(b, "\t.size\t.L.str.%u, %llu\n", i, (unsigned long long)n);
-	out_chunk(e, ((uint64_t)1 << 62) | i, start);
+	codegen_chunk_add(e, ((uint64_t)1 << 62) | i, start);
 }

@@ -22,7 +22,7 @@ VPRIV int64_t x64_vir_constant_bits(const vir_insn *i) { return (int64_t)((uint6
 
 VPRIV void x64_vir_text_append(x64_vir_context *L, const char *s)
 {
-	rec *r = x64_put(L->context, X_RAW);
+	record *r = x64_put(L->context, X_RAW);
 	r->off = L->context->raw.n;
 	r->ref = strlen(s);
 	vtext_string_append(&L->context->raw, s);
@@ -79,12 +79,12 @@ VPRIV void x64_vir_constant_materialize(x64_vir_context *L, uint8_t dst, uint32_
 		x64_op3(L->context, X_MOV, x64_vir_type_size(i->type), d, L->general_temporary, XNOREG);
 	} else if (i->op == VIR_OP_ICONST) {
 		x64_movi(L->context, d, x64_vir_constant_bits(i));
-	} else if (i->op == VIR_OP_SYMADDR && sym_needs_got(L->context->c, i->a)) {
-		rec *r = x64_op3(L->context, X_GOT, 8, d, XNOREG, XNOREG);
+	} else if (i->op == VIR_OP_SYMADDR && codegen_symbol_needs_got(L->context->c, i->a)) {
+		record *r = x64_op3(L->context, X_GOT, 8, d, XNOREG, XNOREG);
 		r->ref = i->a;
 		if (x64_vir_constant_bits(i)) x64_op3(L->context, X_ADDI, 8, d, d, XNOREG)->imm = x64_vir_constant_bits(i);
 	} else {
-		lval a = { .k = i->op == VIR_OP_SLOTADDR ? L_FRAME : L_SYM,
+		codegen_lvalue a = { .k = i->op == VIR_OP_SLOTADDR ? CODEGEN_LVALUE_FRAME : CODEGEN_LVALUE_SYMBOL,
 			.off = x64_vir_constant_bits(i) + (i->op == VIR_OP_SLOTADDR ? L->slot[i->a] : 0), .ref = i->a };
 		x64_mem(L->context, X_LEA, 8, d, &a, false);
 	}
@@ -92,7 +92,7 @@ VPRIV void x64_vir_constant_materialize(x64_vir_context *L, uint8_t dst, uint32_
 
 VPRIV void x64_vir_slot_access(x64_vir_context *L, bool load, uint8_t reg, uint32_t s)
 {
-	lval a = { .k = L_FRAME, .off = L->spill[s] };
+	codegen_lvalue a = { .k = CODEGEN_LVALUE_FRAME, .off = L->spill[s] };
 	x64_mem(L->context, load ? X_LD : X_ST, L->allocation->slot_sizes[s], x64_vir_register_number(reg), &a, false);
 }
 
@@ -153,7 +153,7 @@ VPRIV uint32_t x64_vir_edge_target(x64_vir_context *L,uint32_t b,uint32_t k,uint
 {
 	uint32_t g=L->allocation->edge_indices[L->allocation->slot_offsets[b]+k];
 	if(g==VIR_BLOCK_NONE || !L->allocation->edge[g].count)return L->label[L->chase[target]];
-	if(!L->edge_labels[g])L->edge_labels[g]=wk_newlabel(L->context);
+	if(!L->edge_labels[g])L->edge_labels[g]=walk_label_new(L->context);
 	return L->edge_labels[g];
 }
 

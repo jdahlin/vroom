@@ -1,6 +1,6 @@
 /* The simplifier's driver and the pass that gives each access its own address. */
-#define WK_PREFIX virbuild_
-#define LO_PREFIX virbuild_
+#define WALK_PREFIX virbuild_
+#define WALK_LOWER_PREFIX virbuild_
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
@@ -14,7 +14,7 @@
  * when nothing else reads it).  Only offsets every CPU here encodes: -256..255, or a
  * multiple of the access size up to 4095 of them.
  */
-static void virbuild_address_offsets_fold(ecx *e, virbuild_simplify_state *S)
+static void virbuild_address_offsets_fold(codegen_context *e, virbuild_simplify_state *S)
 {
 	virbuild_context *V = e->vw;
 
@@ -49,7 +49,7 @@ static void virbuild_address_offsets_fold(ecx *e, virbuild_simplify_state *S)
 	}
 }
 
-VPRIV void virbuild_function_simplify(ecx *e)
+VPRIV void virbuild_function_simplify(codegen_context *e)
 {
 	virbuild_context *V = e->vw;
 	virbuild_simplify_state S = { 0 };

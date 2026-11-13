@@ -4,7 +4,7 @@
 
 VPRIV void a64_vir_switch_lower(a64_vir_context *L, uint32_t b, const vir_insn *in)
 {
-	ecx *e = L->context;
+	codegen_context *e = L->context;
 	const vir_function *f = L->function;
 	int x = a64_vir_value_is_64_bit(f, in->a), r = a64_vir_operand_general_register(L, 0, R_X16);
 	uint32_t n = f->extra[in->c], stride = x ? 5 : 3;
@@ -69,7 +69,7 @@ VPRIV void a64_vir_switch_lower(a64_vir_context *L, uint32_t b, const vir_insn *
 				e->lrefc[t] |= LREF_EXT;
 			}
 		}
-		e->jt[e->njt++] = (struct ejt){ tab, off, (uint32_t)span + 1 };
+		e->jt[e->njt++] = (struct codegen_jump_table){ tab, off, (uint32_t)span + 1 };
 		ins *i = put(e, I_JT);
 		i->rd = (uint8_t)ix;
 		i->cond = ix != R_X17 && !x ? 2 : 0;

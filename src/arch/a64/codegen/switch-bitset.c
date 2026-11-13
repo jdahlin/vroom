@@ -1,9 +1,9 @@
 /* Dispatch one stacked case run with a bounded membership mask. The selector
  * remains borrowed; only the index and shifted mask own temporaries.
  */
-#include "../../../codegen/emitimpl.h"
+#include "../../../codegen/codegen-internal.h"
 
-VPRIV bool a64_switch_bitset(ecx *e, uint32_t body, uint32_t base, int r, int cx,
+VPRIV bool a64_switch_bitset(codegen_context *e, uint32_t body, uint32_t base, int r, int cx,
 			     bool sg, uint32_t dflt)
 {
 	em_switch_bitset_recipe recipe;

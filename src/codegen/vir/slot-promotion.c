@@ -1,6 +1,6 @@
 /* Frame slots to variables: a slot whose address does not escape becomes SSA values. */
-#define WK_PREFIX virbuild_
-#define LO_PREFIX virbuild_
+#define WALK_PREFIX virbuild_
+#define WALK_LOWER_PREFIX virbuild_
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
@@ -48,7 +48,7 @@ static void virbuild_promote_escape_mark(virbuild_context *V, uint8_t *bad, uint
 }
 
 /* var's value on entry to b (b's own definitions come later in it) */
-static uint32_t virbuild_promote_variable_entry(ecx *e, uint32_t var, uint32_t b, uint32_t ty, bool defs)
+static uint32_t virbuild_promote_variable_entry(codegen_context *e, uint32_t var, uint32_t b, uint32_t ty, bool defs)
 {
 	virbuild_context *V = e->vw;
 	uint32_t *d, p;
@@ -68,7 +68,7 @@ static uint32_t virbuild_promote_variable_entry(ecx *e, uint32_t var, uint32_t b
 	return virbuild_value_resolve(V, p);
 }
 
-static uint32_t virbuild_promote_zero_constant(ecx *e, uint32_t ty)
+static uint32_t virbuild_promote_zero_constant(codegen_context *e, uint32_t ty)
 {
 	return ty == VIR_TYPE_F32 || ty == VIR_TYPE_F64 ? virbuild_constant_make(e, VIR_OP_FCONST, ty, 0, 0, 0) : virbuild_constant_integer(e, ty, 0);
 }
@@ -100,7 +100,7 @@ VPRIV bool virbuild_promote_store_is_dead(const virbuild_context *V, uint32_t q)
 /* a slot whose address does not escape, read and written only as fields (offset, size) that
  * do not overlap, becomes one variable per field: its loads read the value the field holds
  * (Braun, as the walker's locals), its stores go */
-VPRIV bool virbuild_slots_promote(ecx *e)
+VPRIV bool virbuild_slots_promote(codegen_context *e)
 {
 	virbuild_context *V = e->vw;
 	virbuild_promote_field *fd = NULL;

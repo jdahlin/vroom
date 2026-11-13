@@ -109,7 +109,7 @@ static void vx_diag_init(void)
 	vx_diag_env.probe = getenv("VCC_VL_PROBE");
 }
 
-VPRIV bool x64_vir_function_lower(ecx *e, uint32_t sym, const char **why)
+VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym, const char **why)
 {
 	virbuild_context *V = e->vw;
 	vir_function *f = &V->f;
@@ -122,7 +122,7 @@ VPRIV bool x64_vir_function_lower(ecx *e, uint32_t sym, const char **why)
 		.callee = { cs, 0 }, .fixed = x64_vir_fixed_registers_get, .context=&L };
 	*why = VIRBUILD_FAILURE(x64_unsupported_target_option);
 	if (e->E->o->debug || e->E->o->sprot || x64_nosimd(e)) return false;
-	const attrs *attrs = sym_attrs(e->c, sym);
+	const attrs *attrs = codegen_symbol_attributes(e->c, sym);
 	if (attrs && attrs->interrupt) { *why = VIRBUILD_FAILURE(x64_interrupt_function); return false; }
 	for (uint32_t i = 1; i < f->constant_count; i++)
 		if (f->insns[i].op != VIR_OP_ICONST && f->insns[i].op != VIR_OP_FCONST &&
@@ -211,10 +211,10 @@ VPRIV bool x64_vir_function_lower(ecx *e, uint32_t sym, const char **why)
 	e->wk->sdepth = e->wk->ntu = e->wk->ntf = 0;
 	e->wk->foff = 0; e->wk->falign = 16; e->wk->nlabel = 0;
 	e->wk->spneed = false; e->wk->canary = 0;
-	for (uint32_t k = 0; k < f->slot_count; k++) L.slot[k] = wk_slot(e, f->slot[k].size ?: 1, f->slot[k].align);
-	for (uint32_t k = 0; k < V->allocation.spill_count; k++) L.spill[k] = wk_slot(e, V->allocation.slot_sizes[k], V->allocation.slot_sizes[k]);
-	for (uint32_t b = 0; b < f->block_count; b++) L.label[b] = wk_newlabel(e);
-	L.ret = wk_newlabel(e);
+	for (uint32_t k = 0; k < f->slot_count; k++) L.slot[k] = walk_slot_temporary(e, f->slot[k].size ?: 1, f->slot[k].align);
+	for (uint32_t k = 0; k < V->allocation.spill_count; k++) L.spill[k] = walk_slot_temporary(e, V->allocation.slot_sizes[k], V->allocation.slot_sizes[k]);
+	for (uint32_t b = 0; b < f->block_count; b++) L.label[b] = walk_label_new(e);
+	L.ret = walk_label_new(e);
 	uint32_t *layout=V->lowering_layout=x64_vir_array_grow(V->lowering_layout,&V->lowering_layout_capacity,5*f->block_count,sizeof(uint32_t));
 	L.order=layout;L.position=layout+f->block_count;L.rotations=layout+2*f->block_count;L.chase=layout+3*f->block_count;L.loops=&V->loops;
 	L.drv=(virbuild_lowering){ .target=&vx_lowering_target, .ctx=&L, .f=f, .o=&V->allocation, .lp=&V->loops,

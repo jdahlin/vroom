@@ -3,12 +3,12 @@
  */
 #include "x64impl.h"
 
-VPRIV bool x64_last_u32(const ecx *e, int r)
+VPRIV bool x64_last_u32(const codegen_context *e, int r)
 {
 	const xst *x = e->x64;
 	if (r < 0 || r >= XMM0 || !x->nin)
 		return false;
-	const rec *i = &x->in[x->nin - 1];
+	const record *i = &x->in[x->nin - 1];
 	if (i->r[0] != r)
 		return false;
 	if (i->op == X_MOVI)
