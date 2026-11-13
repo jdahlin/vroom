@@ -18,7 +18,7 @@ static int x64_ld_got_relaxation_kind(const ld_object *o, const ld_input_section
 {
 	uint32_t type = (uint32_t)rl->r_info;
 
-	if (!opt.relax || rl->r_addend != -4 || (type != R_X86_64_GOTPCRELX && type != R_X86_64_REX_GOTPCRELX))
+	if (!ctx->options.relax || rl->r_addend != -4 || (type != R_X86_64_GOTPCRELX && type != R_X86_64_REX_GOTPCRELX))
 		return 0;
 	if (t->undef || t->abs || t->discarded || rl->r_offset < 2)
 		return 0;
@@ -54,12 +54,12 @@ static bool x64_ld_relocation_needs_got(const ld_object *o, const ld_input_secti
 static void x64_ld_got_find(void *arg, size_t i)
 {
 	(void)arg;
-	const ld_input_section *is = &isecs.v[i];
+	const ld_input_section *is = &ctx->inputs.sections.v[i];
 
 	if (is->kind == LD_SECTION_KIND_NONE || is->obj == LD_NONE || atomic_load_explicit(&ctx->relocations.got_seen, memory_order_relaxed))
 		return;
 	for (uint32_t r = 0; r < is->nrela; r++)
-		if (x64_ld_relocation_needs_got(objs.v[is->obj], is, &is->rela[r])) {
+		if (x64_ld_relocation_needs_got(ctx->inputs.objects.v[is->obj], is, &is->rela[r])) {
 			atomic_store(&ctx->relocations.got_seen, true);
 			return;
 		}
@@ -68,13 +68,13 @@ static void x64_ld_got_find(void *arg, size_t i)
 static void x64_ld_relocation_scan(void *arg, size_t i)
 {
 	(void)arg;
-	ld_input_section *is = &isecs.v[i];
+	ld_input_section *is = &ctx->inputs.sections.v[i];
 	if (!is->nrela || is->kind == LD_SECTION_KIND_NONE || is->obj == LD_NONE)
 		return;
 	uint32_t os = ld_input_section_output_section(i);
 	if (os == LD_OUTPUT_SECTION_DISCARD || os == LD_NONE)
 		return;
-	ld_object *o = objs.v[is->obj];
+	ld_object *o = ctx->inputs.objects.v[is->obj];
 	ld_relocation_target t;
 
 	for (uint32_t r = 0; r < is->nrela; r++) {
@@ -94,7 +94,7 @@ static void x64_ld_relocation_scan(void *arg, size_t i)
 		case R_X86_64_32S: case R_X86_64_16: case R_X86_64_PC16: case R_X86_64_8: case R_X86_64_PC8:
 		case R_X86_64_PC64: case R_X86_64_TPOFF32: case R_X86_64_TPOFF64: case R_X86_64_DTPOFF32:
 		case R_X86_64_DTPOFF64: case R_X86_64_GOTTPOFF: case R_X86_64_TLSGD: case R_X86_64_SIZE32: case R_X86_64_SIZE64:
-			if (opt.shared && (type == R_X86_64_GOTTPOFF || type == R_X86_64_TLSGD))
+			if (ctx->options.shared && (type == R_X86_64_GOTTPOFF || type == R_X86_64_TLSGD))
 				ld_error_report("%s:(%s+0x%llx): TLS relocation %u in a shared object is not supported", o->path,
 				      is->name, (unsigned long long)rl->r_offset, type);
 			break;
@@ -103,7 +103,7 @@ static void x64_ld_relocation_scan(void *arg, size_t i)
 				if (symi < o->firstg)
 					atomic_store_explicit(&o->lgot[symi], 1, memory_order_relaxed);
 				else
-					atomic_store(&gsyms[o->gs[symi - o->firstg]].needgot, 1);
+					atomic_store(&ctx->symbols.globals[o->gs[symi - o->firstg]].needgot, 1);
 			}
 			break;
 		default:
@@ -116,8 +116,8 @@ static void x64_ld_relocation_scan(void *arg, size_t i)
 
 static void x64_ld_input_section_relocate(uint32_t si, uint8_t *buf)
 {
-	ld_input_section *is = &isecs.v[si];
-	ld_object *o = objs.v[is->obj];
+	ld_input_section *is = &ctx->inputs.sections.v[si];
+	ld_object *o = ctx->inputs.objects.v[is->obj];
 	uint64_t secva = ld_input_section_address(si, 0);
 	ld_relocation_target t;
 
@@ -168,7 +168,7 @@ static void x64_ld_input_section_relocate(uint32_t si, uint8_t *buf)
 			ld_u32_store(loc, (uint32_t)v);
 			break;
 		case R_X86_64_SIZE32: case R_X86_64_SIZE64: {
-			uint64_t sz = symi < o->firstg ? o->sym[symi].st_size : gsyms[o->gs[symi - o->firstg]].size;
+			uint64_t sz = symi < o->firstg ? o->sym[symi].st_size : ctx->symbols.globals[o->gs[symi - o->firstg]].size;
 
 			if (type == R_X86_64_SIZE32)
 				ld_u32_store(loc, (uint32_t)(sz + (uint64_t)rl->r_addend));
@@ -209,7 +209,7 @@ static void x64_ld_input_section_relocate(uint32_t si, uint8_t *buf)
 				ld_u32_store(loc, (uint32_t)a);
 			} else {
 				uint64_t slot = ld_input_section_address(ctx->output.got_section, 8 * (uint64_t)(symi < o->firstg ? o->lgotidx[symi] :
-										  gsyms[o->gs[symi - o->firstg]].gotidx));
+										  ctx->symbols.globals[o->gs[symi - o->firstg]].gotidx));
 
 				v = (int64_t)(slot + (uint64_t)rl->r_addend - P);
 				ld_u32_store(loc, (uint32_t)v);

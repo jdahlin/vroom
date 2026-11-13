@@ -28,7 +28,6 @@ static ld_expression_value ld_assignment_operator_apply(char op, ld_expression_v
 	return v;
 }
 
-static VVEC(const char *) recorded;	/* errors of the current address pass */
 
 /* assignSymbol(); returns true if the symbol's (section, value) changed */
 static bool ld_script_symbol_assign(ld_assignment *a, bool insec)
@@ -43,15 +42,15 @@ static bool ld_script_symbol_assign(ld_assignment *a, bool insec)
 		if (insec && val < ctx->layout.dot) {
 			char *m = ld_region_alloc(160);
 			snprintf(m, 160, "unable to move location counter (0x%llx) backward to 0x%llx for section '%s'",
-				 (unsigned long long)ctx->layout.dot, (unsigned long long)val, osecs.v[ctx->layout.current_output_section].name);
-			VVEC_PUSH(recorded, m, ld_region_alloc);
+				 (unsigned long long)ctx->layout.dot, (unsigned long long)val, ctx->script.sections.v[ctx->layout.current_output_section].name);
+			VVEC_PUSH(ctx->script.address_errors, m, ld_region_alloc);
 		}
 		ctx->layout.dot = val;
 		return false;
 	}
 	if (!a->defined)
 		return false;
-	ld_global_symbol *s = &gsyms[a->sym];
+	ld_global_symbol *s = &ctx->symbols.globals[a->sym];
 	ld_expression_value v = ld_assignment_operator_apply(a->op, ld_global_symbol_expression_value(a->sym), ld_expression_eval(a->e));
 	ld_expression_value old = s->ev;
 	if (ld_expression_value_is_absolute(v))
@@ -65,7 +64,7 @@ static bool ld_script_symbol_assign(ld_assignment *a, bool insec)
 /* assignOffsets(); returns true if the section address changed */
 static bool ld_output_section_offsets_assign(uint32_t oi, bool *symchg)
 {
-	ld_output_section *os = &osecs.v[oi];
+	ld_output_section *os = &ctx->script.sections.v[oi];
 	uint64_t saved = ctx->layout.dot;
 	bool tbss = (os->flags & (SHF_ALLOC | SHF_TLS)) == (SHF_ALLOC | SHF_TLS) && os->type == SHT_NOBITS;
 	if (tbss)
@@ -85,9 +84,9 @@ static bool ld_output_section_offsets_assign(uint32_t oi, bool *symchg)
 			*symchg |= ld_script_symbol_assign(cm->as, true);
 			continue;
 		}
-		ld_input_section_description *d = &isds.v[cm->idx];
+		ld_input_section_description *d = &ctx->script.input_descriptions.v[cm->idx];
 		for (uint32_t k = 0; k < d->secs.n; k++) {
-			ld_input_section *is = &isecs.v[d->secs.v[k]];
+			ld_input_section *is = &ctx->inputs.sections.v[d->secs.v[k]];
 			ctx->layout.dot = ld_value_align_up(ctx->layout.dot, is->align);
 			is->off = ctx->layout.dot - os->va;
 			ctx->layout.dot += is->size;
@@ -109,15 +108,15 @@ static bool ld_addresses_assign(void)
 	ctx->layout.dot = 0;
 	ctx->layout.tbss_offset = 0;
 	ctx->layout.current_output_section = LD_OUTPUT_SECTION_AETHER;
-	recorded.n = 0;
-	assert_fail.n = 0;
-	for (uint32_t i = 0; i < topcmds.n; i++) {
-		ld_command *c = &topcmds.v[i];
+	ctx->script.address_errors.n = 0;
+	ctx->script.assert_failures.n = 0;
+	for (uint32_t i = 0; i < ctx->script.commands.n; i++) {
+		ld_command *c = &ctx->script.commands.v[i];
 		if (c->kind == LD_COMMAND_ASSIGNMENT) {
 			symchg |= ld_script_symbol_assign(c->as, false);
 			continue;
 		}
-		if (!osecs.v[c->idx].live)
+		if (!ctx->script.sections.v[c->idx].live)
 			continue;
 		changed |= ld_output_section_offsets_assign(c->idx, &symchg);
 	}
@@ -130,7 +129,7 @@ static void ld_script_symbol_add(ld_assignment *a)
 {
 	if (a->sym == LD_NONE || !a->defined)
 		return;
-	ld_global_symbol *s = &gsyms[a->sym];
+	ld_global_symbol *s = &ctx->symbols.globals[a->sym];
 	ld_expression_value v = ld_assignment_operator_apply(a->op, ld_global_symbol_expression_value(a->sym), ld_expression_eval(a->e));
 	s->state = LD_SYMBOL_STATE_SCRIPT;
 	s->obj = LD_NONE;
@@ -149,13 +148,13 @@ static void ld_symbol_assignments_process(void)
 {
 	ctx->layout.dot = 0;
 	ctx->layout.current_output_section = LD_OUTPUT_SECTION_AETHER;
-	for (uint32_t i = 0; i < topcmds.n; i++) {
-		ld_command *c = &topcmds.v[i];
+	for (uint32_t i = 0; i < ctx->script.commands.n; i++) {
+		ld_command *c = &ctx->script.commands.v[i];
 		if (c->kind == LD_COMMAND_ASSIGNMENT) {
 			ld_script_symbol_add(c->as);
 			continue;
 		}
-		ld_output_section *os = &osecs.v[c->idx];
+		ld_output_section *os = &ctx->script.sections.v[c->idx];
 		for (uint32_t k = 0; k < os->cmds.n; k++)
 			if (os->cmds.v[k].kind == LD_COMMAND_ASSIGNMENT)
 				ld_script_symbol_add(os->cmds.v[k].as);

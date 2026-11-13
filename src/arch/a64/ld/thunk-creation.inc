@@ -11,7 +11,7 @@ static void a64_ld_thunk_calls_collect(ld_input_section_description *d)
 {
 	uint32_t n = 0;
 	for (uint32_t s = 0; s < d->secs.n; s++) {
-		ld_input_section *is = &isecs.v[d->secs.v[s]];
+		ld_input_section *is = &ctx->inputs.sections.v[d->secs.v[s]];
 		if (is->obj == LD_NONE)
 			continue;
 		for (uint32_t r = 0; r < is->nrela; r++) {
@@ -23,10 +23,10 @@ static void a64_ld_thunk_calls_collect(ld_input_section_description *d)
 	d->ncalls = 0;
 	for (uint32_t s = 0; s < d->secs.n; s++) {
 		uint32_t si = d->secs.v[s];
-		ld_input_section *is = &isecs.v[si];
+		ld_input_section *is = &ctx->inputs.sections.v[si];
 		if (is->obj == LD_NONE)
 			continue;
-		ld_object *o = objs.v[is->obj];
+		ld_object *o = ctx->inputs.objects.v[is->obj];
 		for (uint32_t r = 0; r < is->nrela; r++) {
 			const elf_rela *rl = &is->rela[r];
 			uint32_t type = (uint32_t)rl->r_info;
@@ -41,7 +41,7 @@ static void a64_ld_thunk_calls_collect(ld_input_section_description *d)
 			uint32_t sec = LD_NONE;
 			uint64_t val = 0;
 			if (symi >= o->firstg) {
-				ld_global_symbol *g = &gsyms[o->gs[symi - o->firstg]];
+				ld_global_symbol *g = &ctx->symbols.globals[o->gs[symi - o->firstg]];
 				if (g->state == LD_SYMBOL_STATE_OBJECT && !g->demoted && g->sec != LD_NONE) {
 					sec = g->sec;
 					val = g->val;
@@ -55,7 +55,7 @@ static void a64_ld_thunk_calls_collect(ld_input_section_description *d)
 			}
 			if (sec == LD_NONE)
 				continue;
-			ld_input_section *ds = &isecs.v[sec];
+			ld_input_section *ds = &ctx->inputs.sections.v[sec];
 			if (ds->kind != LD_SECTION_KIND_NORMAL || ds->osec == LD_NONE || ds->osec == LD_OUTPUT_SECTION_DISCARD)
 				continue;
 			c->dsec = sec;
@@ -68,20 +68,20 @@ static bool a64_ld_thunks_create(int pass)
 {
 	bool changed = false;
 	ld_relocation_target t;
-	for (uint32_t c = 0; c < topcmds.n; c++) {
-		if (topcmds.v[c].kind != LD_COMMAND_OUTPUT_SECTION)
+	for (uint32_t c = 0; c < ctx->script.commands.n; c++) {
+		if (ctx->script.commands.v[c].kind != LD_COMMAND_OUTPUT_SECTION)
 			continue;
-		uint32_t oi = topcmds.v[c].idx;
-		ld_output_section *os = &osecs.v[oi];
+		uint32_t oi = ctx->script.commands.v[c].idx;
+		ld_output_section *os = &ctx->script.sections.v[oi];
 		if (!os->live || (os->flags & (SHF_ALLOC | SHF_EXECINSTR)) != (SHF_ALLOC | SHF_EXECINSTR))
 			continue;
 		for (uint32_t k = 0; k < os->cmds.n; k++) {
 			if (os->cmds.v[k].kind != LD_COMMAND_INPUT_SECTION_DESCRIPTION)
 				continue;
 			uint32_t di = os->cmds.v[k].idx;
-			ld_input_section_description *d = &isds.v[di];
+			ld_input_section_description *d = &ctx->script.input_descriptions.v[di];
 			if (pass == 0 && d->secs.n) {
-				ld_input_section *last = &isecs.v[d->secs.v[d->secs.n - 1]];
+				ld_input_section *last = &ctx->inputs.sections.v[d->secs.v[d->secs.n - 1]];
 				d->thunk_off = last->off + last->size;
 			}
 			if (pass == 0)
@@ -91,8 +91,8 @@ static bool a64_ld_thunks_create(int pass)
 			for (uint32_t ci = 0; ci < d->ncalls; ci++) {
 				a64_ld_call *c = &d->calls[ci];
 				uint32_t si = c->si, r = c->r;
-				ld_input_section *is = &isecs.v[si];
-				ld_object *o = objs.v[is->obj];
+				ld_input_section *is = &ctx->inputs.sections.v[si];
+				ld_object *o = ctx->inputs.objects.v[is->obj];
 				if (si != cur) {
 					cur = si;
 					base = ld_input_section_address(si, 0);
@@ -107,8 +107,8 @@ static bool a64_ld_thunks_create(int pass)
 					}
 					if (c->dsec != LD_NONE) {
 						/* same value as ld_relocation_target_find(): a plain input section */
-						const ld_input_section *ds = &isecs.v[c->dsec];
-						t.va = osecs.v[ds->osec].va + ds->off + c->doff;
+						const ld_input_section *ds = &ctx->inputs.sections.v[c->dsec];
+						t.va = ctx->script.sections.v[ds->osec].va + ds->off + c->doff;
 					} else {
 						ld_relocation_target_find(o, rl->r_info >> 32, rl->r_addend, &t);
 						if (t.undef)
@@ -122,7 +122,7 @@ static bool a64_ld_thunks_create(int pass)
 					uint32_t symi = rl->r_info >> 32;
 					if (symi >= o->firstg) {
 						dg = o->gs[symi - o->firstg];
-						ld_global_symbol *gs = &gsyms[dg];
+						ld_global_symbol *gs = &ctx->symbols.globals[dg];
 						if (gs->state == LD_SYMBOL_STATE_OBJECT && gs->sec != LD_NONE) {
 							dsec = gs->sec;
 							dval = gs->val;
@@ -147,12 +147,12 @@ static bool a64_ld_thunks_create(int pass)
 						if (d->thunksec == LD_NONE) {
 							uint32_t ts = ld_input_section_create(".text.thunk", LD_SECTION_KIND_THUNK, SHT_PROGBITS,
 									       SHF_ALLOC | SHF_EXECINSTR, 4);
-							d = &isds.v[di];
+							d = &ctx->script.input_descriptions.v[di];
 							VVEC_PUSH(ctx->relocations.thunk_sections, ((a64_ld_thunk_section){0}), ld_region_alloc);
-							isecs.v[ts].aux = ctx->relocations.thunk_sections.n - 1;
-							isecs.v[ts].osec = oi;
-							isecs.v[ts].isd = di;
-							isecs.v[ts].off = d->thunk_off;
+							ctx->inputs.sections.v[ts].aux = ctx->relocations.thunk_sections.n - 1;
+							ctx->inputs.sections.v[ts].osec = oi;
+							ctx->inputs.sections.v[ts].isd = di;
+							ctx->inputs.sections.v[ts].off = d->thunk_off;
 							d->thunksec = ts;
 						}
 						a64_ld_thunk tn = {.g = dsec == LD_NONE ? dg : LD_NONE, .sec = dsec, .val = dval,
@@ -163,7 +163,7 @@ static bool a64_ld_thunks_create(int pass)
 						char *nm = ld_region_alloc(strlen(dn) + 20);
 						sprintf(nm, "__AArch64ADRPThunk_%s", dn);
 						tn.name = nm;
-						a64_ld_thunk_section *tsx = &ctx->relocations.thunk_sections.v[isecs.v[d->thunksec].aux];
+						a64_ld_thunk_section *tsx = &ctx->relocations.thunk_sections.v[ctx->inputs.sections.v[d->thunksec].aux];
 						tn.off = 0;
 						VVEC_PUSH(ctx->relocations.thunks, tn, ld_region_alloc);
 						VVEC_PUSH(tsx->list, ctx->relocations.thunks.n - 1, ld_region_alloc);
@@ -176,7 +176,7 @@ static bool a64_ld_thunks_create(int pass)
 			}
 			/* assign thunk offsets in this ld_input_section_description's thunk section */
 			if (d->thunksec != LD_NONE) {
-				ld_input_section *ts = &isecs.v[d->thunksec];
+				ld_input_section *ts = &ctx->inputs.sections.v[d->thunksec];
 				a64_ld_thunk_section *tsx = &ctx->relocations.thunk_sections.v[ts->aux];
 				uint64_t off = 0;
 				for (uint32_t x = 0; x < tsx->list.n; x++) {
@@ -198,8 +198,8 @@ static bool a64_ld_thunks_create(int pass)
 		}
 	}
 	/* merge newly created thunk sections into their ld_input_section_description lists */
-	for (uint32_t i = 0; i < isds.n; i++) {
-		ld_input_section_description *d = &isds.v[i];
+	for (uint32_t i = 0; i < ctx->script.input_descriptions.n; i++) {
+		ld_input_section_description *d = &ctx->script.input_descriptions.v[i];
 		if (d->thunksec == LD_NONE)
 			continue;
 		bool present = false;
@@ -212,7 +212,7 @@ static bool a64_ld_thunks_create(int pass)
 			continue;
 		/* before trailing sections that start at or after the thunk offset */
 		uint32_t pos = d->secs.n;
-		while (pos > 0 && isecs.v[d->secs.v[pos - 1]].off >= d->thunk_off)
+		while (pos > 0 && ctx->inputs.sections.v[d->secs.v[pos - 1]].off >= d->thunk_off)
 			pos--;
 		VVEC_PUSH(d->secs, 0, ld_region_alloc);
 		memmove(&d->secs.v[pos + 1], &d->secs.v[pos], (d->secs.n - 1 - pos) * sizeof(uint32_t));

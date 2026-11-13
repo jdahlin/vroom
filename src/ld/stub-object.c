@@ -26,7 +26,7 @@ static ld_object *ld_stub_object_create(const char **names, uint32_t n)
 	char *shstr = str + strsz;
 	memcpy(eh->e_ident, "\177ELF\2\1\1", 7);
 	eh->e_type = 1;
-	eh->e_machine = x86_ld ? 62 : 183;
+	eh->e_machine = ctx->inputs.x86 ? 62 : 183;
 	eh->e_shoff = sizeof(elf_file_header);
 	eh->e_shnum = 5;
 	eh->e_shstrndx = 1;

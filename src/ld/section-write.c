@@ -5,9 +5,9 @@ static void ld_input_section_write(void *arg, size_t j)
 {
 	(void)arg;
 	uint32_t si = ctx->output.write_jobs.v[j];
-	ld_input_section *is = &isecs.v[si];
+	ld_input_section *is = &ctx->inputs.sections.v[si];
 	uint32_t oi = ld_input_section_output_section(si);
-	ld_output_section *os = &osecs.v[oi];
+	ld_output_section *os = &ctx->script.sections.v[oi];
 	if (os->type == SHT_NOBITS || is->type == SHT_NOBITS)
 		return;
 	uint8_t *dst = ctx->output.image + os->offset + is->off;
@@ -16,21 +16,21 @@ static void ld_input_section_write(void *arg, size_t j)
 		memcpy(dst, is->data, is->size);
 		if (is->ehcie)	/* an FDE's CIE pointer: from the field to its CIE */
 			ld_u32_store(dst + 4, (uint32_t)(ld_input_section_address(si, 4) - ld_input_section_address(is->ehcie - 1, 0)));
-		if (is->nrela && (is->flags & SHF_ALLOC || !opt.relocatable)) {
-			if (x86_ld)
+		if (is->nrela && (is->flags & SHF_ALLOC || !ctx->options.relocatable)) {
+			if (ctx->inputs.x86)
 				x64_ld_input_section_relocate(si, dst);
 			else
 				a64_ld_input_section_relocate(si, dst);
 		}
 		break;
 	case LD_SECTION_KIND_MERGE: {
-		ld_merge_section *mg = &merges.v[is->aux];
+		ld_merge_section *mg = &ctx->inputs.merge_sections.v[is->aux];
 		for (int s = 0; s < 32; s++)
 			for (uint32_t k = 0; k < mg->uniq[s].n; k++) {
 				uint64_t u = mg->uniq[s].v[k];
-				ld_merge_input *m = &mergeins.v[u >> 32];
+				ld_merge_input *m = &ctx->inputs.merge_inputs.v[u >> 32];
 				uint32_t p = (uint32_t)u;
-				memcpy(dst + m->outoff[p], isecs.v[m->isec].data + m->inoff[p], ld_merge_piece_length(m, p));
+				memcpy(dst + m->outoff[p], ctx->inputs.sections.v[m->isec].data + m->inoff[p], ld_merge_piece_length(m, p));
 			}
 		break;
 	}
@@ -58,7 +58,7 @@ static void ld_input_section_write(void *arg, size_t j)
 		uint32_t nd = 0;
 		for (uint32_t k = 0; k < ctx->output.got_symbols.n; k++) {
 			uint32_t g = ctx->output.got_symbols.v[k];
-			bool undef = gsyms[g].state == LD_SYMBOL_STATE_UNDEFINED || gsyms[g].demoted;
+			bool undef = ctx->symbols.globals[g].state == LD_SYMBOL_STATE_UNDEFINED || ctx->symbols.globals[g].demoted;
 			uint64_t v = undef ? 0 : ld_global_symbol_address(g);
 			ld_u64_store(dst + 8 * k, v);
 			if (ctx->relocations.pic && !undef && !ld_global_symbol_is_absolute(g)) {
@@ -69,7 +69,7 @@ static void ld_input_section_write(void *arg, size_t j)
 			}
 		}
 		for (uint32_t k = 0; k < ctx->output.got_locals.n; k++) {
-			const ld_object *o = objs.v[ctx->output.got_locals.v[k].obj];
+			const ld_object *o = ctx->inputs.objects.v[ctx->output.got_locals.v[k].obj];
 			const elf_symbol *y = &o->sym[ctx->output.got_locals.v[k].sym];
 			bool abs = y->st_shndx == SHN_ABS;
 			uint64_t v = abs ? y->st_value : ld_input_section_address(o->isec0 + y->st_shndx, y->st_value);

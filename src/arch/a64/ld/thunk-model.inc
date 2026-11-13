@@ -21,7 +21,7 @@ static void a64_ld_thunk_relocation_record(uint32_t isec, uint32_t ri, uint32_t 
 		ctx->relocations.thunk_redirect_values = nv;
 		ctx->relocations.thunk_redirect_mask = nm;
 	}
-	isecs.v[isec].thunked = true;
+	ctx->inputs.sections.v[isec].thunked = true;
 	uint64_t k = (uint64_t)isec << 32 | ri;
 	uint32_t j = (uint32_t)(k * 0x9E3779B97F4A7C15ULL >> 32) & ctx->relocations.thunk_redirect_mask;
 	while (ctx->relocations.thunk_redirect_keys[j] != UINT64_MAX && ctx->relocations.thunk_redirect_keys[j] != k)

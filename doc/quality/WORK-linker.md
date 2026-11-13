@@ -153,8 +153,10 @@ The link context (the other half): the design is decided and its first step
 is applied (`link-context.md`, "Design (decided)": the diagnostics and layout
 groups are fields of `struct ld_context`, #183); step 2 of the context moves
 the output side (relocation scan, `ld -r`, output, symbol table, dynamic
-sections); the input side and the parameter series follow (`link-context.md`
-section 5).
+sections); step 3 the input side (script, symbols, inputs, options), which
+deletes `ld_state_reset` and moves the data model into `ld-internal.h`.  No
+per-link state is left at file scope; the parameter series follows
+(`link-context.md` section 5).
 
 ### 3. The shared layer
 

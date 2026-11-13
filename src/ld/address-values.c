@@ -2,8 +2,8 @@
 
 /* ---------------- address-assignment state ---------------- */
 
-static uint64_t ld_output_section_address(uint32_t o) { return o == LD_OUTPUT_SECTION_AETHER ? 0 : osecs.v[o].va; }
-static uint32_t ld_output_section_header_index(uint32_t o) { return o == LD_OUTPUT_SECTION_AETHER ? 1 : osecs.v[o].shidx; }
+static uint64_t ld_output_section_address(uint32_t o) { return o == LD_OUTPUT_SECTION_AETHER ? 0 : ctx->script.sections.v[o].va; }
+static uint32_t ld_output_section_header_index(uint32_t o) { return o == LD_OUTPUT_SECTION_AETHER ? 1 : ctx->script.sections.v[o].shidx; }
 
 /* ---------------- merge pieces ---------------- */
 
@@ -23,19 +23,19 @@ static uint32_t ld_merge_piece_find(const ld_merge_input *m, uint64_t off)
 /* offset of input offset `off` of section s within its output section */
 static uint64_t ld_input_section_output_offset(uint32_t s, uint64_t off)
 {
-	ld_input_section *is = &isecs.v[s];
+	ld_input_section *is = &ctx->inputs.sections.v[s];
 	if (is->kind == LD_SECTION_KIND_MERGE_INPUT) {
-		ld_merge_input *m = &mergeins.v[is->aux];
+		ld_merge_input *m = &ctx->inputs.merge_inputs.v[is->aux];
 		uint32_t p = ld_merge_piece_find(m, off);
-		return isecs.v[m->syn].off + m->outoff[p] + (off - m->inoff[p]);
+		return ctx->inputs.sections.v[m->syn].off + m->outoff[p] + (off - m->inoff[p]);
 	}
 	return is->off + off;
 }
 static uint32_t ld_input_section_output_section(uint32_t s)
 {
-	ld_input_section *is = &isecs.v[s];
+	ld_input_section *is = &ctx->inputs.sections.v[s];
 	if (is->kind == LD_SECTION_KIND_MERGE_INPUT && is->osec != LD_OUTPUT_SECTION_DISCARD)	/* a discarded one has no MergeIn */
-		return isecs.v[mergeins.v[is->aux].syn].osec;
+		return ctx->inputs.sections.v[ctx->inputs.merge_inputs.v[is->aux].syn].osec;
 	return is->osec;
 }
 static uint64_t ld_input_section_address(uint32_t s, uint64_t off)
@@ -43,7 +43,7 @@ static uint64_t ld_input_section_address(uint32_t s, uint64_t off)
 	uint32_t o = ld_input_section_output_section(s);
 	if (o == LD_NONE || o == LD_OUTPUT_SECTION_DISCARD)
 		return 0;
-	return osecs.v[o].va + ld_input_section_output_offset(s, off);
+	return ctx->script.sections.v[o].va + ld_input_section_output_offset(s, off);
 }
 
 static uint64_t ld_expression_value_section_address(ld_expression_value v)
@@ -75,7 +75,7 @@ static ld_expression_value ld_expression_value_in_section_make(ld_expression_val
 /* value of a global symbol as an expression value (getSymbolValue) */
 static ld_expression_value ld_global_symbol_expression_value(uint32_t g)
 {
-	ld_global_symbol *s = &gsyms[g];
+	ld_global_symbol *s = &ctx->symbols.globals[g];
 	ld_expression_value v = {.align = 1, .type = s->type};
 	if (s->state == LD_SYMBOL_STATE_SCRIPT) {
 		v.kind = s->ev.kind;
@@ -101,7 +101,7 @@ static ld_expression_value ld_global_symbol_expression_value(uint32_t g)
 
 static uint64_t ld_global_symbol_address(uint32_t g)
 {
-	ld_global_symbol *s = &gsyms[g];
+	ld_global_symbol *s = &ctx->symbols.globals[g];
 	if (s->thunk != LD_NONE && 0)
 		return 0;
 	if (s->state == LD_SYMBOL_STATE_SCRIPT)
@@ -114,7 +114,7 @@ static uint64_t ld_global_symbol_address(uint32_t g)
 }
 static bool ld_global_symbol_is_absolute(uint32_t g)
 {
-	ld_global_symbol *s = &gsyms[g];
+	ld_global_symbol *s = &ctx->symbols.globals[g];
 	if (s->state == LD_SYMBOL_STATE_SCRIPT)
 		return s->ev.kind == LD_VALUE_KIND_ABSOLUTE;
 	if (s->state == LD_SYMBOL_STATE_OBJECT && !s->demoted)

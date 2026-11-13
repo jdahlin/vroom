@@ -5,7 +5,7 @@
 /* lld isRelroSection */
 static bool ld_output_section_is_relro(uint32_t oi)
 {
-	const ld_output_section *os = &osecs.v[oi];
+	const ld_output_section *os = &ctx->script.sections.v[oi];
 	const char *n = os->name;
 
 	if (!(os->flags & SHF_ALLOC) || !(os->flags & SHF_WRITE))
@@ -32,8 +32,8 @@ static void ld_program_headers_create(void)
 	/* lld relroEnd: the first section after the relro run starts a PT_LOAD */
 	uint32_t relro_end = LD_NONE;
 
-	for (uint32_t i = 0, in = 0; i < ctx->layout.output_sections.n && !opt.norelro && !opt.relocatable && relro_end == LD_NONE; i++) {
-		if (!ld_output_section_is_in_load_segment(&osecs.v[ctx->layout.output_sections.v[i]]))
+	for (uint32_t i = 0, in = 0; i < ctx->layout.output_sections.n && !ctx->options.norelro && !ctx->options.relocatable && relro_end == LD_NONE; i++) {
+		if (!ld_output_section_is_in_load_segment(&ctx->script.sections.v[ctx->layout.output_sections.v[i]]))
 			continue;
 		if (ld_output_section_is_relro(ctx->layout.output_sections.v[i]))
 			in = 1;
@@ -42,7 +42,7 @@ static void ld_program_headers_create(void)
 	}
 	for (uint32_t i = 0; i < ctx->layout.output_sections.n; i++) {
 		uint32_t oi = ctx->layout.output_sections.v[i];
-		ld_output_section *os = &osecs.v[oi];
+		ld_output_section *os = &ctx->script.sections.v[oi];
 		os->ptload = -1;
 		if (!ld_output_section_is_in_load_segment(os))
 			continue;
@@ -63,7 +63,7 @@ static void ld_program_headers_create(void)
 		int tls = -1;
 		for (uint32_t i = 0; i < ctx->layout.output_sections.n; i++) {
 			uint32_t oi = ctx->layout.output_sections.v[i];
-			if ((osecs.v[oi].flags & (SHF_ALLOC | SHF_TLS)) != (SHF_ALLOC | SHF_TLS))
+			if ((ctx->script.sections.v[oi].flags & (SHF_ALLOC | SHF_TLS)) != (SHF_ALLOC | SHF_TLS))
 				continue;
 			if (tls < 0)
 				tls = ld_segment_create(PT_TLS, PF_R);
@@ -72,21 +72,21 @@ static void ld_program_headers_create(void)
 	}
 	/* lld: PT_DYNAMIC over .dynamic */
 	if (ctx->output.dynamic_live)
-		ld_segment_section_add(ld_segment_create(PT_DYNAMIC, ld_output_section_segment_flags(&osecs.v[ld_input_section_output_section(ctx->output.dynamic_section)])), ld_input_section_output_section(ctx->output.dynamic_section));
+		ld_segment_section_add(ld_segment_create(PT_DYNAMIC, ld_output_section_segment_flags(&ctx->script.sections.v[ld_input_section_output_section(ctx->output.dynamic_section)])), ld_input_section_output_section(ctx->output.dynamic_section));
 	/* lld: one PT_GNU_RELRO over the contiguous relro sections */
-	if (!opt.norelro && !opt.relocatable) {
+	if (!ctx->options.norelro && !ctx->options.relocatable) {
 		int rr = -1;
 		bool in = false, ended = false;
 
 		for (uint32_t i = 0; i < ctx->layout.output_sections.n; i++) {
 			uint32_t oi = ctx->layout.output_sections.v[i];
 
-			if (!ld_output_section_is_in_load_segment(&osecs.v[oi]))
+			if (!ld_output_section_is_in_load_segment(&ctx->script.sections.v[oi]))
 				continue;
 			if (ld_output_section_is_relro(oi)) {
 				in = true;
 				if (ended)
-					ld_error_report("section: %s is not contiguous with other relro sections", osecs.v[oi].name);
+					ld_error_report("section: %s is not contiguous with other relro sections", ctx->script.sections.v[oi].name);
 				else {
 					if (rr < 0)
 						rr = ld_segment_create(PT_GNU_RELRO, PF_R);
@@ -106,9 +106,9 @@ static void ld_program_headers_create(void)
 	int note = -1;
 	for (uint32_t i = 0; i < ctx->layout.output_sections.n; i++) {
 		uint32_t oi = ctx->layout.output_sections.v[i];
-		ld_output_section *os = &osecs.v[oi];
+		ld_output_section *os = &ctx->script.sections.v[oi];
 		if (os->type == SHT_NOTE && (os->flags & SHF_ALLOC)) {
-			if (note < 0 || os->lma || osecs.v[ctx->layout.program_header_sections.v[note].last].addralign != os->addralign)
+			if (note < 0 || os->lma || ctx->script.sections.v[ctx->layout.program_header_sections.v[note].last].addralign != os->addralign)
 				note = ld_segment_create(PT_NOTE, PF_R);
 			ld_segment_section_add(note, oi);
 		} else {
@@ -122,13 +122,13 @@ static void ld_program_headers_finish(void)
 {
 	uint64_t min = UINT64_MAX;
 	for (uint32_t i = 0; i < ctx->layout.output_sections.n; i++) {
-		ld_output_section *os = &osecs.v[ctx->layout.output_sections.v[i]];
+		ld_output_section *os = &ctx->script.sections.v[ctx->layout.output_sections.v[i]];
 		if ((os->flags & SHF_ALLOC) && os->va < min)
 			min = os->va;
 	}
 	uint64_t hsize = sizeof(elf_file_header) + (uint64_t)ctx->layout.program_headers.n * sizeof(elf_program_header);
-	uint64_t base = min & ~(opt.max_page - 1);
-	ctx->layout.headers_loaded = !opt.nmagic && hsize <= min - base;
+	uint64_t base = min & ~(ctx->options.max_page - 1);
+	ctx->layout.headers_loaded = !ctx->options.nmagic && hsize <= min - base;
 	if (ctx->layout.headers_loaded)
 		ld_error_report("ELF headers in the first PT_LOAD are not supported (no SECTIONS gap below the first section)");
 	int *map = ld_region_alloc(ctx->layout.program_headers.n * sizeof(int));
@@ -143,7 +143,7 @@ static void ld_program_headers_finish(void)
 			if (s->first < 0)
 				keep = false;
 			else {
-				ld_output_section *f = &osecs.v[s->first], *l = &osecs.v[s->last];
+				ld_output_section *f = &ctx->script.sections.v[s->first], *l = &ctx->script.sections.v[s->last];
 				keep = l->va + l->size - f->va != 0;
 			}
 		}
@@ -156,7 +156,7 @@ static void ld_program_headers_finish(void)
 	}
 	ctx->layout.program_headers.n = ctx->layout.program_header_sections.n = w;
 	for (uint32_t k = 0; k < ctx->layout.output_sections.n; k++) {
-		ld_output_section *os = &osecs.v[ctx->layout.output_sections.v[k]];
+		ld_output_section *os = &ctx->script.sections.v[ctx->layout.output_sections.v[k]];
 		if (os->ptload >= 0)
 			os->ptload = map[os->ptload];
 	}

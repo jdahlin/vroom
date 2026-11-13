@@ -13,8 +13,8 @@ static void ld_comdat_groups_deduplicate(void)
 	struct { const char *name; uint32_t h; } *tab = NULL;
 	uint32_t mask = 0, n = 0;
 
-	for (uint32_t i = 0; i < objs.n; i++) {
-		ld_object *o = objs.v[i];
+	for (uint32_t i = 0; i < ctx->inputs.objects.n; i++) {
+		ld_object *o = ctx->inputs.objects.v[i];
 
 		for (uint32_t s = 0; o->buf && s < o->nsh; s++) {
 			const elf_section_header *h = &o->sh[s];
@@ -24,7 +24,7 @@ static void ld_comdat_groups_deduplicate(void)
 				continue;
 			/* members in a ring, for --gc-sections (lld nextInSectionGroup) */
 			for (uint64_t k = 1; k < h->sh_size / 4; k++)
-				isecs.v[o->isec0 + w[k]].gnext = o->isec0 + w[k + 1 < h->sh_size / 4 ? k + 1 : 1] + 1;
+				ctx->inputs.sections.v[o->isec0 + w[k]].gnext = o->isec0 + w[k + 1 < h->sh_size / 4 ? k + 1 : 1] + 1;
 			if (!(w[0] & 1))	/* GRP_COMDAT */
 				continue;
 			const char *name = o->str + o->sym[h->sh_info].st_name;
@@ -61,7 +61,7 @@ static void ld_comdat_groups_deduplicate(void)
 				continue;
 			}
 			for (uint64_t k = 1; k < h->sh_size / 4; k++) {
-				ld_input_section *is = &isecs.v[o->isec0 + w[k]];
+				ld_input_section *is = &ctx->inputs.sections.v[o->isec0 + w[k]];
 
 				is->kind = LD_SECTION_KIND_NONE;
 				is->dropped = true;
@@ -74,7 +74,7 @@ static void ld_comdat_groups_deduplicate(void)
 static void ld_object_symbols_resolve(void *arg, size_t i)
 {
 	(void)arg;
-	ld_object *o = objs.v[i];
+	ld_object *o = ctx->inputs.objects.v[i];
 	if (!o->buf)
 		return;
 	for (uint32_t s = o->firstg; s < o->nsym; s++) {
@@ -86,11 +86,11 @@ static void ld_object_symbols_resolve(void *arg, size_t i)
 		}
 		uint32_t g = ld_global_name_intern(o->str + y->st_name);
 		o->gs[s - o->firstg] = g;
-		ld_global_symbol *gs = &gsyms[g];
+		ld_global_symbol *gs = &ctx->symbols.globals[g];
 		uint64_t k = ld_symbol_key(o->idx, s);
 		ld_atomic_u64_min(&gs->first, k);
 		ld_atomic_u8_min(&gs->visrank, ld_visibility_rank(y->st_other));
-		if (y->st_shndx == SHN_COMMON && opt.relocatable)
+		if (y->st_shndx == SHN_COMMON && ctx->options.relocatable)
 			ld_error_report("%s: common symbol %s not supported with -r", o->path, o->str + y->st_name);
 		else if (y->st_shndx == SHN_UNDEF) {
 			if (bind != STB_WEAK && !atomic_load_explicit(&gs->strongref, memory_order_relaxed))
@@ -104,17 +104,17 @@ static void ld_object_symbols_resolve(void *arg, size_t i)
 static void ld_duplicate_symbols_check(void *arg, size_t i)
 {
 	(void)arg;
-	ld_object *o = objs.v[i];
+	ld_object *o = ctx->inputs.objects.v[i];
 	if (!o->buf)
 		return;
 	for (uint32_t s = o->firstg; s < o->nsym; s++) {
 		const elf_symbol *y = &o->sym[s];
 		if (y->st_shndx == SHN_UNDEF || y->st_shndx == SHN_COMMON || (y->st_info >> 4) == STB_WEAK)
 			continue;
-		ld_global_symbol *g = &gsyms[o->gs[s - o->firstg]];
+		ld_global_symbol *g = &ctx->symbols.globals[o->gs[s - o->firstg]];
 		uint64_t d = ld_key_load(&g->def);
 		if ((d >> 62) == 0 && d != ld_symbol_key(o->idx, s)) {
-			ld_object *first = objs.v[(d >> 32) & 0x3fffffff];
+			ld_object *first = ctx->inputs.objects.v[(d >> 32) & 0x3fffffff];
 			ld_error_report("duplicate symbol: %s\n>>> defined in %s\n>>> defined in %s",
 			      o->str + y->st_name, first->path, o->path);
 		}
@@ -125,8 +125,8 @@ static void ld_duplicate_symbols_check(void *arg, size_t i)
 static void ld_global_symbol_finish(void *arg, size_t i)
 {
 	(void)arg;
-	uint32_t g = gorder.v[i];
-	ld_global_symbol *s = &gsyms[g];
+	uint32_t g = ctx->symbols.order.v[i];
+	ld_global_symbol *s = &ctx->symbols.globals[g];
 	s->vis = ld_visibility_from_rank(ld_visibility_load(&s->visrank));
 	s->thunk = LD_NONE;
 	uint64_t d = ld_key_load(&s->def);
@@ -138,8 +138,8 @@ static void ld_global_symbol_finish(void *arg, size_t i)
 		/* weak only if every reference is weak; type from the first one */
 		s->bind = s->strongref ? STB_GLOBAL : STB_WEAK;
 		uint64_t f = ld_key_load(&s->first);
-		if ((f >> 32) < objs.n) {
-			ld_object *o = objs.v[f >> 32];
+		if ((f >> 32) < ctx->inputs.objects.n) {
+			ld_object *o = ctx->inputs.objects.v[f >> 32];
 			const elf_symbol *y = &o->sym[(uint32_t)f];
 			s->type = y->st_info & 15;
 		} else {
@@ -148,7 +148,7 @@ static void ld_global_symbol_finish(void *arg, size_t i)
 		return;
 	}
 	uint32_t oi = (d >> 32) & 0x3fffffff, si = (uint32_t)d;
-	ld_object *o = objs.v[oi];
+	ld_object *o = ctx->inputs.objects.v[oi];
 	const elf_symbol *y = &o->sym[si];
 	s->state = LD_SYMBOL_STATE_OBJECT;
 	s->obj = oi;

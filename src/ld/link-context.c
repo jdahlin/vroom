@@ -1,10 +1,14 @@
 /* The start of one link's context: all zero but the fields named here. */
 
 /* every field of the context starts at zero but these; ld_main calls it
-   under ld_link_lock before the link, so nothing survives from the last link */
-static void ld_context_init(struct ld_context *ctx, FILE *error_stream)
+   under ld_link_lock before the link, so nothing survives from the last link
+   (the rest of the last link's memory was in the regions, which
+   ld_regions_free unmapped) */
+static void ld_context_init(struct ld_context *ctx, FILE *error_stream, int directory_fd)
 {
+	free(ctx->inputs.lazy_symbols.v);	/* the one malloc'ed field */
 	memset(ctx, 0, sizeof *ctx);
+	ctx->options.directory_fd = directory_fd;
 	ctx->diagnostics.error_stream = error_stream;
 	ctx->diagnostics.error_limit = 20;
 	ctx->diagnostics.phase_timing = getenv("VLD_TIME") != NULL;
