@@ -1,8 +1,10 @@
 /* The header size, the input-section-name cache, committing sections to output sections, and lld's orphan section ranking. */
 
+#include "ld-internal.h"
+
 /* ---------------- layout ---------------- */
 
-static uint64_t ld_headers_size(struct ld_context *ctx)
+VPRIV uint64_t ld_headers_size(struct ld_context *ctx)
 {
 	return sizeof(elf_file_header) + (uint64_t)(ctx->script.has_phdrs ? ctx->script.segments.n : ctx->layout.program_headers.n) * sizeof(elf_program_header);
 }
@@ -29,7 +31,7 @@ static void ld_name_cache_grow(struct ld_context *ctx)
 	ctx->layout.name_cache_mask = ncap - 1;
 }
 
-static uint32_t ld_input_section_description_match(struct ld_context *ctx, const char *name)
+VPRIV uint32_t ld_input_section_description_match(struct ld_context *ctx, const char *name)
 {
 	size_t n = strlen(name);
 	uint32_t h = ld_name_hash(name, n);
@@ -66,7 +68,6 @@ static uint32_t ld_input_section_description_match(struct ld_context *ctx, const
 /* input section ids sorted by a key taken from the context first, so that the
    comparator needs no context; ties by id, so the order is total (stable) */
 typedef struct { uint64_t key; const char *name; uint32_t section; } ld_section_sort_entry;
-enum { LD_SECTION_ORDER_NAME, LD_SECTION_ORDER_ALIGNMENT_DESCENDING, LD_SECTION_ORDER_ADDRESS };
 
 static int ld_section_sort_entry_cmp(const void *a, const void *b)
 {
@@ -81,7 +82,7 @@ static int ld_section_sort_entry_cmp(const void *a, const void *b)
 	return (x->section > y->section) - (x->section < y->section);
 }
 
-static void ld_section_ids_sort(struct ld_context *ctx, uint32_t *ids, uint32_t n, int order)
+VPRIV void ld_section_ids_sort(struct ld_context *ctx, uint32_t *ids, uint32_t n, int order)
 {
 	if (n < 2)
 		return;
@@ -101,7 +102,7 @@ static void ld_section_ids_sort(struct ld_context *ctx, uint32_t *ids, uint32_t 
 		ids[i] = t[i].section;
 }
 
-static void ld_section_commit(struct ld_context *ctx, ld_output_section *os, ld_input_section *is)
+VPRIV void ld_section_commit(struct ld_context *ctx, ld_output_section *os, ld_input_section *is)
 {
 	if (os->type != is->type) {
 		if (!os->has_input)	/* (lld's .eh_frame is PROGBITS, x86-64's input too) */
@@ -129,7 +130,7 @@ static void ld_section_commit(struct ld_context *ctx, ld_output_section *os, ld_
  * non-allocated.  Orphans go next to the section whose rank shares the most
  * leading bits (lld getRankProximity) */
 enum { LD_ORPHAN_RANK_WRITE = 1 << 14, LD_ORPHAN_RANK_EXECUTE = 1 << 12, LD_ORPHAN_RANK_READ_ONLY_DATA = 1 << 11, LD_ORPHAN_RANK_NOT_RELRO = 1 << 9, LD_ORPHAN_RANK_NOT_TLS = 1 << 8, LD_ORPHAN_RANK_BSS = 1 << 7 };
-static int ld_orphan_section_rank(uint64_t flags, uint32_t type, const char *name)
+VPRIV int ld_orphan_section_rank(uint64_t flags, uint32_t type, const char *name)
 {
 	int r;
 
@@ -151,7 +152,7 @@ static int ld_orphan_section_rank(uint64_t flags, uint32_t type, const char *nam
 
 /* orphans sort by rank; .eh_frame_hdr and .eh_frame are lld synthetics, after
  * the input orphans of their rank, the header first */
-static uint64_t ld_orphan_section_key(const ld_input_section *is)
+VPRIV uint64_t ld_orphan_section_key(const ld_input_section *is)
 {
 	unsigned r = (unsigned)ld_orphan_section_rank(is->flags, is->type, is->name);
 	unsigned syn = !strcmp(is->name, ".eh_frame_hdr") ? 1 : !strcmp(is->name, ".eh_frame") ? 2 : 0;
@@ -159,10 +160,10 @@ static uint64_t ld_orphan_section_key(const ld_input_section *is)
 	return (uint64_t)r << 2 | syn;
 }
 
-static int ld_rank_proximity(int a, int b) { return a == b ? 32 : __builtin_clz((unsigned)(a ^ b)); }
+VPRIV int ld_rank_proximity(int a, int b) { return a == b ? 32 : __builtin_clz((unsigned)(a ^ b)); }
 
 /* the rank of a script output section, from its first input section */
-static int ld_output_section_rank(struct ld_context *ctx, uint32_t oi)
+VPRIV int ld_output_section_rank(struct ld_context *ctx, uint32_t oi)
 {
 	ld_output_section *os = &ctx->script.sections.v[oi];
 	for (uint32_t k = 0; k < os->commands.n; k++)
@@ -173,7 +174,7 @@ static int ld_output_section_rank(struct ld_context *ctx, uint32_t oi)
 	return -1;
 }
 
-static void ld_name_cache_init(struct ld_context *ctx)
+VPRIV void ld_name_cache_init(struct ld_context *ctx)
 {
 	if (ctx->layout.name_cache)
 		return;
@@ -187,7 +188,7 @@ static void ld_name_cache_init(struct ld_context *ctx)
 }
 
 /* __start_NAME / __stop_NAME with NAME a C identifier: the NAME, else NULL */
-static const char *ld_start_stop_section_name(const char *n)
+VPRIV const char *ld_start_stop_section_name(const char *n)
 {
 	const char *s = !strncmp(n, "__start_", 8) ? n + 8 : !strncmp(n, "__stop_", 7) ? n + 7 : NULL;
 

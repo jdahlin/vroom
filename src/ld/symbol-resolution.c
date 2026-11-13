@@ -1,14 +1,15 @@
 /* Symbol resolution: COMDAT groups, each object's definitions and references into the global table, duplicate checks and symbol finalisation. */
 
+#include "ld-internal.h"
+
 /* ---------------- symbol resolution ---------------- */
 
-static inline uint64_t ld_symbol_key(uint32_t obj, uint32_t idx) { return (uint64_t)obj << 32 | idx; }
 
 /* lld: the first COMDAT group of a signature (in file order) is kept; a later
  * one's members are dropped.  Their definitions still take part in resolution
  * (lld postParse); one that wins is demoted (ld_symbols_demote), and relocations
  * against it fail as lld's "refers to a symbol in a discarded section" */
-static void ld_comdat_groups_deduplicate(struct ld_context *ctx)
+VPRIV void ld_comdat_groups_deduplicate(struct ld_context *ctx)
 {
 	struct { const char *name; uint32_t h; } *tab = NULL;
 	uint32_t mask = 0, n = 0;
@@ -71,7 +72,7 @@ static void ld_comdat_groups_deduplicate(struct ld_context *ctx)
 	free(tab);
 }
 
-static void ld_object_symbols_resolve(void *arg, size_t i)
+VPRIV void ld_object_symbols_resolve(void *arg, size_t i)
 {
 	struct ld_context *ctx = arg;
 	ld_object *o = ctx->inputs.objects.v[i];
@@ -101,7 +102,7 @@ static void ld_object_symbols_resolve(void *arg, size_t i)
 	}
 }
 
-static void ld_duplicate_symbols_check(void *arg, size_t i)
+VPRIV void ld_duplicate_symbols_check(void *arg, size_t i)
 {
 	struct ld_context *ctx = arg;
 	ld_object *o = ctx->inputs.objects.v[i];
@@ -122,7 +123,7 @@ static void ld_duplicate_symbols_check(void *arg, size_t i)
 }
 
 /* fill state/value of every global from its winning definition */
-static void ld_global_symbol_finish(void *arg, size_t i)
+VPRIV void ld_global_symbol_finish(void *arg, size_t i)
 {
 	struct ld_context *ctx = arg;
 	uint32_t g = ctx->symbols.order.v[i];

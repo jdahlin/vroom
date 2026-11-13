@@ -1,8 +1,10 @@
 /* The in-memory stub object that defines the symbols the -O0 kernel references only in dead branches. */
 
+#include "ld-internal.h"
+
 /* ---------------- stubs for unresolved symbols (-O0 dead branches) ---------------- */
 
-static int ld_string_cmp(const void *a, const void *b) { return strcmp(*(char *const *)a, *(char *const *)b); }
+VPRIV int ld_string_cmp(const void *a, const void *b) { return strcmp(*(char *const *)a, *(char *const *)b); }
 
 /*
  * The -O0 kernel references symbols that only exist in configurations
@@ -12,7 +14,7 @@ static int ld_string_cmp(const void *a, const void *b) { return strcmp(*(char *c
  * object is synthesized here, in memory, so the result is identical to
  * that retry without running anything.
  */
-static ld_object *ld_stub_object_create(struct ld_context *ctx, const char **names, uint32_t n)
+VPRIV ld_object *ld_stub_object_create(struct ld_context *ctx, const char **names, uint32_t n)
 {
 	size_t strsz = 1 + 3;
 	for (uint32_t i = 0; i < n; i++)

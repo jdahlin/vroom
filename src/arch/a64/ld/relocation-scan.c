@@ -1,10 +1,12 @@
-/* arm64 relocation scan: which relocations are supported, which need a dynamic relocation; part of ld/ld.c (#included there) */
+/* arm64 relocation scan: which relocations are supported, which need a dynamic relocation (a part of the ELF linker, ld/ld-internal.h) */
+
+#include "../../../ld/ld-internal.h"
 
 /* ---------------- relocation scan ---------------- */
 
 
 /* ld_relocation_target_find()'s abs/undef/discarded without computing the address */
-static void a64_ld_relocation_target_classify(struct ld_context *ctx, const ld_object *o, uint32_t symidx, ld_relocation_target *t)
+VPRIV void a64_ld_relocation_target_classify(struct ld_context *ctx, const ld_object *o, uint32_t symidx, ld_relocation_target *t)
 {
 	t->is_undefined = t->discarded = false;
 	if (symidx >= o->first_global_index) {
@@ -32,7 +34,7 @@ static void a64_ld_relocation_target_classify(struct ld_context *ctx, const ld_o
 	t->discarded = ctx->inputs.sections.v[sec].kind == LD_SECTION_KIND_NONE || os == LD_OUTPUT_SECTION_DISCARD || os == LD_NONE;
 }
 
-static void a64_ld_relocation_scan(void *arg, size_t i)
+VPRIV void a64_ld_relocation_scan(void *arg, size_t i)
 {
 	struct ld_context *ctx = arg;
 	ld_input_section *is = &ctx->inputs.sections.v[i];

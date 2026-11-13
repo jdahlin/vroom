@@ -1,5 +1,7 @@
 /* The script's =fill patterns between and after input sections. */
 
+#include "ld-internal.h"
+
 /* =fill: lld fills before, between and after the input sections, restarting the pattern per gap */
 static void ld_gap_fill(uint8_t *b, uint64_t n, const uint8_t f[4])
 {
@@ -8,7 +10,7 @@ static void ld_gap_fill(uint8_t *b, uint64_t n, const uint8_t f[4])
 		memcpy(b + i, f, 4);
 	memcpy(b + i, f, n - i);
 }
-static void ld_gap_fills_write(struct ld_context *ctx)
+VPRIV void ld_gap_fills_write(struct ld_context *ctx)
 {
 	for (uint32_t c = 0; c < ctx->script.commands.n; c++) {
 		if (ctx->script.commands.v[c].kind != LD_COMMAND_OUTPUT_SECTION)

@@ -1,6 +1,8 @@
 /* Declaring the symbols a script defines or references (lld's addScriptReferencedSymbolsToSymTable and declareSymbols). */
 
-static void ld_script_assignments_for_each(struct ld_context *ctx, void (*fn)(struct ld_context *, ld_assignment *))
+#include "ld-internal.h"
+
+VPRIV void ld_script_assignments_for_each(struct ld_context *ctx, void (*fn)(struct ld_context *, ld_assignment *))
 {
 	for (uint32_t c = 0; c < ctx->script.commands.n; c++) {
 		ld_command *cm = &ctx->script.commands.v[c];
@@ -15,8 +17,8 @@ static void ld_script_assignments_for_each(struct ld_context *ctx, void (*fn)(st
 	}
 }
 
-static bool ld_global_symbol_is_referenced(struct ld_context *ctx, uint32_t g) { return ld_key_load(&ctx->symbols.globals[g].first_occurrence) != UINT64_MAX; }
-static bool ld_global_symbol_is_defined_by_object(struct ld_context *ctx, uint32_t g) { return ld_key_load(&ctx->symbols.globals[g].definition) != UINT64_MAX; }
+VPRIV bool ld_global_symbol_is_referenced(struct ld_context *ctx, uint32_t g) { return ld_key_load(&ctx->symbols.globals[g].first_occurrence) != UINT64_MAX; }
+VPRIV bool ld_global_symbol_is_defined_by_object(struct ld_context *ctx, uint32_t g) { return ld_key_load(&ctx->symbols.globals[g].definition) != UINT64_MAX; }
 
 static void ld_script_symbol_insert(struct ld_context *ctx, uint32_t g)
 {
@@ -43,7 +45,7 @@ static void ld_script_symbol_declare(struct ld_context *ctx, ld_assignment *a)
 }
 
 /* addScriptReferencedSymbolsToSymTable() + declareSymbols() */
-static void ld_script_symbols_declare(struct ld_context *ctx)
+VPRIV void ld_script_symbols_declare(struct ld_context *ctx)
 {
 	ctx->symbols.script_order = (uint64_t)(ctx->inputs.objects.n + 1) << 32;
 	for (uint32_t i = 0; i < ctx->script.referenced_symbols.n; i++)

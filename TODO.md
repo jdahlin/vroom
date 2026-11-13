@@ -1680,7 +1680,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   OOM policy for code inside vccd (fail the request, never abort) decides
   the buffer.  *Validate:* outputs byte-identical (objects, `-S`, `-E`),
   `bench/vbench.py gate`.
-- [ ] **The linker as a split module** (restructure 2026-11-09).  `ld/ld.c`
+- [x] **The linker as a split module** (restructure 2026-11-09; done 2026-11-13:
+  `ld-internal.h`, the link context, the fragments as `arch/*/ld/*.c`, each part
+  compiles alone with `make VCC_UNITY=`; doc/quality/WORK-linker.md step 2).  `ld/ld.c`
   is one TU of ~4400 lines over process-wide globals (`objs`, `isecs`,
   `gsyms`, ... of anonymous `VVEC` types); its arm64 parts are fragments
   (`arch/a64/ld/*.inc`) it #includes.  Make it files by topic with an

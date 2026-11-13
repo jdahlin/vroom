@@ -1,5 +1,7 @@
 /* main() of the standalone tools (VLD_MAIN): vlink, vobjcopy, vnm, wasm-ld by argv[0]. */
 
+#include "ld-internal.h"
+
 #ifdef VLD_MAIN
 #ifdef VCC_WASM
 int wasm_ld_main(int argc, char **argv);
@@ -26,6 +28,7 @@ int main(int argc, char **argv)
 		return objcopy_main(argc, argv, AT_FDCWD, stderr);
 	if (strstr(b, "nm") && !strstr(b, "link"))
 		return nm_main(argc, argv, AT_FDCWD, stdout, stderr);
+	ld_standalone = true;
 	/* VLD_REPEAT=N: link N times in one process (for profilers) */
 	const char *rep = getenv("VLD_REPEAT");
 	for (int i = rep ? atoi(rep) : 1; i > 1; i--)

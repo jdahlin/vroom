@@ -1,6 +1,8 @@
 /* ld_input_sections_assign: matching input sections to the script's output sections, orphans, and the order within each. */
 
-static void ld_input_sections_assign(struct ld_context *ctx)
+#include "ld-internal.h"
+
+VPRIV void ld_input_sections_assign(struct ld_context *ctx)
 {
 	ld_name_cache_init(ctx);
 	for (uint32_t i = 0; i < ctx->inputs.sections.n; i++) {

@@ -1,18 +1,17 @@
 /* Merging .eh_frame input into one output section as lld's EhFrameSection does: CIE/FDE splitting, deduplication and pieces. */
 
+#include "ld-internal.h"
+
 /* ---------------- .eh_frame (lld's EhFrameSection) ---------------- */
 
-/* an input .eh_frame split into CIE and FDE records (lld EhInputSection::split) */
-typedef struct { uint32_t offset, size, first_relocation, end_relocation, cie_offset; bool is_cie; } ld_eh_frame_record;
-
-static bool ld_eh_frame_is_input(struct ld_context *ctx, const ld_input_section *is)
+VPRIV bool ld_eh_frame_is_input(struct ld_context *ctx, const ld_input_section *is)
 {
 	return is->kind == LD_SECTION_KIND_NORMAL && is->object != LD_NONE && (is->flags & SHF_ALLOC) && !strcmp(is->name, ".eh_frame") &&
 	       !ctx->options.relocatable;
 }
 
 /* the records of input section si, relocations given to the record holding them; NULL on error */
-static ld_eh_frame_record *ld_eh_frame_records_split(struct ld_context *ctx, uint32_t si, uint32_t *nrec)
+VPRIV ld_eh_frame_record *ld_eh_frame_records_split(struct ld_context *ctx, uint32_t si, uint32_t *nrec)
 {
 	const ld_input_section *is = &ctx->inputs.sections.v[si];
 	const char *path = ctx->inputs.objects.v[is->object]->path;
@@ -69,7 +68,7 @@ static ld_eh_frame_record *ld_eh_frame_records_split(struct ld_context *ctx, uin
 }
 
 /* the input section relocation symbol y of object o is in, or LD_NONE */
-static uint32_t ld_relocation_symbol_input_section(struct ld_context *ctx, const ld_object *o, uint32_t y)
+VPRIV uint32_t ld_relocation_symbol_input_section(struct ld_context *ctx, const ld_object *o, uint32_t y)
 {
 	if (y >= o->first_global_index) {
 		const ld_global_symbol *g = &ctx->symbols.globals[o->global_slots[y - o->first_global_index]];
@@ -138,7 +137,7 @@ static uint32_t ld_eh_frame_record_section_make(struct ld_context *ctx, uint32_t
  * the section its first relocation names is live (lld's isFdeLive), and a
  * CIE without FDEs is dropped (lld's EhFrameSection::addRecords/finalize).
  */
-static void ld_eh_frame_merge(struct ld_context *ctx)
+VPRIV void ld_eh_frame_merge(struct ld_context *ctx)
 {
 	for (uint32_t d = 0; d < ctx->script.input_descriptions.n; d++) {
 		ld_input_section_description *id = &ctx->script.input_descriptions.v[d];

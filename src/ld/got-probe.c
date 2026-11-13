@@ -1,5 +1,7 @@
 /* Finding out whether any relocation needs a GOT slot. */
 
+#include "ld-internal.h"
+
 /* ---------------- the final link ---------------- */
 
 static void ld_got_find(void *arg, size_t i)
@@ -16,7 +18,7 @@ static void ld_got_find(void *arg, size_t i)
 		}
 	}
 }
-static bool ld_got_is_needed(struct ld_context *ctx)
+VPRIV bool ld_got_is_needed(struct ld_context *ctx)
 {
 	atomic_store(&ctx->relocations.got_seen, false);
 	if (!ctx->options.relocatable)

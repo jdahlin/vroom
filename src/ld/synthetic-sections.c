@@ -1,6 +1,8 @@
 /* Appending the synthetic input sections (.rela.dyn, .symtab, .strtab and the like) after all files. */
 
-static void ld_synthetic_sections_add(struct ld_context *ctx)
+#include "ld-internal.h"
+
+VPRIV void ld_synthetic_sections_add(struct ld_context *ctx)
 {
 	/* lld appends synthetic input sections after all files, in this order */
 	ctx->output.comment_section = ld_input_section_create(ctx, ".comment", LD_SECTION_KIND_MERGE_INPUT, SHT_PROGBITS, SHF_MERGE | SHF_STRINGS, 1);

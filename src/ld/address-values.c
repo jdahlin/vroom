@@ -1,9 +1,11 @@
 /* The address-assignment state and the functions that turn a section or symbol into an address (lld's ExprValue). */
 
+#include "ld-internal.h"
+
 /* ---------------- address-assignment state ---------------- */
 
-static uint64_t ld_output_section_address(struct ld_context *ctx, uint32_t o) { return o == LD_OUTPUT_SECTION_AETHER ? 0 : ctx->script.sections.v[o].address; }
-static uint32_t ld_output_section_header_index(struct ld_context *ctx, uint32_t o) { return o == LD_OUTPUT_SECTION_AETHER ? 1 : ctx->script.sections.v[o].section_header_index; }
+VPRIV uint64_t ld_output_section_address(struct ld_context *ctx, uint32_t o) { return o == LD_OUTPUT_SECTION_AETHER ? 0 : ctx->script.sections.v[o].address; }
+VPRIV uint32_t ld_output_section_header_index(struct ld_context *ctx, uint32_t o) { return o == LD_OUTPUT_SECTION_AETHER ? 1 : ctx->script.sections.v[o].section_header_index; }
 
 /* ---------------- merge pieces ---------------- */
 
@@ -31,14 +33,14 @@ static uint64_t ld_input_section_output_offset(struct ld_context *ctx, uint32_t 
 	}
 	return is->offset + off;
 }
-static uint32_t ld_input_section_output_section(struct ld_context *ctx, uint32_t s)
+VPRIV uint32_t ld_input_section_output_section(struct ld_context *ctx, uint32_t s)
 {
 	ld_input_section *is = &ctx->inputs.sections.v[s];
 	if (is->kind == LD_SECTION_KIND_MERGE_INPUT && is->output_section != LD_OUTPUT_SECTION_DISCARD)	/* a discarded one has no MergeIn */
 		return ctx->inputs.sections.v[ctx->inputs.merge_inputs.v[is->auxiliary_index].synthetic_section].output_section;
 	return is->output_section;
 }
-static uint64_t ld_input_section_address(struct ld_context *ctx, uint32_t s, uint64_t off)
+VPRIV uint64_t ld_input_section_address(struct ld_context *ctx, uint32_t s, uint64_t off)
 {
 	uint32_t o = ld_input_section_output_section(ctx, s);
 	if (o == LD_NONE || o == LD_OUTPUT_SECTION_DISCARD)
@@ -46,7 +48,7 @@ static uint64_t ld_input_section_address(struct ld_context *ctx, uint32_t s, uin
 	return ctx->script.sections.v[o].address + ld_input_section_output_offset(ctx, s, off);
 }
 
-static uint64_t ld_expression_value_section_address(struct ld_context *ctx, ld_expression_value v)
+VPRIV uint64_t ld_expression_value_section_address(struct ld_context *ctx, ld_expression_value v)
 {
 	switch (v.kind) {
 	case LD_VALUE_KIND_OUTPUT_SECTION: return ld_output_section_address(ctx, v.index);
@@ -54,7 +56,7 @@ static uint64_t ld_expression_value_section_address(struct ld_context *ctx, ld_e
 	default: return 0;
 	}
 }
-static uint64_t ld_expression_value_resolve(struct ld_context *ctx, ld_expression_value v)
+VPRIV uint64_t ld_expression_value_resolve(struct ld_context *ctx, ld_expression_value v)
 {
 	uint64_t x;
 	switch (v.kind) {
@@ -64,16 +66,16 @@ static uint64_t ld_expression_value_resolve(struct ld_context *ctx, ld_expressio
 	}
 	return ld_value_align_up(x, v.alignment);
 }
-static uint64_t ld_expression_value_section_offset(struct ld_context *ctx, ld_expression_value v) { return ld_expression_value_resolve(ctx, v) - ld_expression_value_section_address(ctx, v); }
-static bool ld_expression_value_is_absolute(ld_expression_value v) { return v.force_absolute || v.kind == LD_VALUE_KIND_ABSOLUTE; }
-static ld_expression_value ld_expression_value_absolute_make(uint64_t x) { return (ld_expression_value){.kind = LD_VALUE_KIND_ABSOLUTE, .value = x, .alignment = 1}; }
-static ld_expression_value ld_expression_value_in_section_make(ld_expression_value a, bool fabs, uint64_t off)
+VPRIV uint64_t ld_expression_value_section_offset(struct ld_context *ctx, ld_expression_value v) { return ld_expression_value_resolve(ctx, v) - ld_expression_value_section_address(ctx, v); }
+VPRIV bool ld_expression_value_is_absolute(ld_expression_value v) { return v.force_absolute || v.kind == LD_VALUE_KIND_ABSOLUTE; }
+VPRIV ld_expression_value ld_expression_value_absolute_make(uint64_t x) { return (ld_expression_value){.kind = LD_VALUE_KIND_ABSOLUTE, .value = x, .alignment = 1}; }
+VPRIV ld_expression_value ld_expression_value_in_section_make(ld_expression_value a, bool fabs, uint64_t off)
 {
 	return (ld_expression_value){.kind = a.kind, .index = a.index, .force_absolute = fabs, .value = off, .alignment = 1};
 }
 
 /* value of a global symbol as an expression value (getSymbolValue) */
-static ld_expression_value ld_global_symbol_expression_value(struct ld_context *ctx, uint32_t g)
+VPRIV ld_expression_value ld_global_symbol_expression_value(struct ld_context *ctx, uint32_t g)
 {
 	ld_global_symbol *s = &ctx->symbols.globals[g];
 	ld_expression_value v = {.alignment = 1, .type = s->type};
@@ -99,7 +101,7 @@ static ld_expression_value ld_global_symbol_expression_value(struct ld_context *
 	return ld_expression_value_absolute_make(0);
 }
 
-static uint64_t ld_global_symbol_address(struct ld_context *ctx, uint32_t g)
+VPRIV uint64_t ld_global_symbol_address(struct ld_context *ctx, uint32_t g)
 {
 	ld_global_symbol *s = &ctx->symbols.globals[g];
 	if (s->thunk != LD_NONE && 0)
@@ -112,7 +114,7 @@ static uint64_t ld_global_symbol_address(struct ld_context *ctx, uint32_t g)
 		return s->input_section == LD_NONE ? s->value : ld_input_section_address(ctx, s->input_section, s->value);
 	return 0;
 }
-static bool ld_global_symbol_is_absolute(struct ld_context *ctx, uint32_t g)
+VPRIV bool ld_global_symbol_is_absolute(struct ld_context *ctx, uint32_t g)
 {
 	ld_global_symbol *s = &ctx->symbols.globals[g];
 	if (s->state == LD_SYMBOL_STATE_SCRIPT)

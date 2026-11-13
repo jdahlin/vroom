@@ -1,5 +1,7 @@
 /* Writing .eh_frame_hdr (lld's EhFrameHeader::write). */
 
+#include "ld-internal.h"
+
 /* .eh_frame_hdr (lld EhFrameHeader::write): version 1, eh_frame_ptr pcrel
  * sdata4, fde_count udata4, a table datarel sdata4 of (initial location,
  * FDE) sorted by location, duplicate locations dropped; read from the
@@ -9,7 +11,7 @@ static int ld_eh_frame_header_pair_cmp(const void *a, const void *b)
 	const uint64_t *x = a, *y = b;
 	return x[0] != y[0] ? (x[0] < y[0] ? -1 : 1) : x[1] < y[1] ? -1 : x[1] > y[1];	/* lld stable_sort: output order */
 }
-static void ld_eh_frame_header_write(struct ld_context *ctx)
+VPRIV void ld_eh_frame_header_write(struct ld_context *ctx)
 {
 	if (ctx->output.eh_frame_header_section == LD_NONE)
 		return;

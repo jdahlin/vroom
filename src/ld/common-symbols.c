@@ -1,10 +1,12 @@
 /* lld's replaceCommonSymbols: a NOBITS section per common symbol. */
 
+#include "ld-internal.h"
+
 /* lld replaceCommonSymbols: each common symbol one NOBITS "COMMON" section
  * (after every file's sections), of the largest size and alignment among its
  * commons, in the first file with that size; placed in the order of the files
  * that have commons, each file's globals in order, at the first mention */
-static void ld_common_symbols_replace(struct ld_context *ctx)
+VPRIV void ld_common_symbols_replace(struct ld_context *ctx)
 {
 	bool any = false;
 

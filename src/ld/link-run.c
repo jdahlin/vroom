@@ -1,19 +1,18 @@
 /* ld_link_run(): the passes of one ELF link, in order. */
 
-static int ld_relocatable_link(struct ld_context *ctx);
+#include "ld-internal.h"
 
-static int ld_link_run(struct ld_context *ctx, int argc, char **argv)
+
+VPRIV int ld_link_run(struct ld_context *ctx, int argc, char **argv)
 {
 	ld_thread_count = ld_parallel_default_width();
 	ld_arguments_parse(ctx, argc, argv);
 	if (atomic_load(&ctx->diagnostics.error_count))
 		return 1;
-#ifdef VLD_MAIN
 	/* the standalone tool: the process is this link, so --threads is the budget
 	   (inside vccd the server's budget stays, and nthreads only caps the width) */
-	if (ld_thread_count > vtask_budget())
+	if (ld_standalone && ld_thread_count > vtask_budget())
 		vtask_budget_set(ld_thread_count);
-#endif
 	double t0 = ld_clock_now();
 	ctx->diagnostics.phase_start_time = t0;
 	ctx->diagnostics.phase_start_counters = vperformance_now();
