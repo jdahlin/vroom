@@ -128,7 +128,12 @@ PP_OBJ  = $(call o,$(PP_SRC)) $(SPLIT_OBJ) $(call mod,vir) $(call o,$(VIRA_SRC))
 mod = $(if $(VCC_UNITY),$(OBJ)/unity/$(1).o,$(call o,$($(1)_SRC)))
 AS_SRC  = $(AS_FILES) $(as_SRC) $(obj_SRC)
 AS_OBJ  = $(call o,$(AS_FILES)) $(call mod,as) $(call mod,obj)
-LD_SRC  = ld/ld.c $(LIB_SRC) ld/objcopy.c $(if $(VCC_WASM),ld/wasmld.c) platform/darwin/macho-linker.c
+# the ELF linker's parts, in the order ld/ld.c includes them (one TU, VCC_UNITY;
+# ld-internal.h is what they share); with `make VCC_UNITY=` each part is compiled
+# on its own, and vlink-main.c (main, under VLD_MAIN) only for vlink
+ld_SRC  = $(shell sed -n 's|^\#include "\.\./\(.*\.c\)"$$|\1|p; s|^\#include "\([a-z][^"/]*\.c\)"$$|ld/\1|p' ld/ld.c)
+LD_PARTS = $(filter-out ld/vlink-main.c,$(ld_SRC))
+LD_SRC  = $(LIB_SRC) ld/objcopy.c $(if $(VCC_WASM),ld/wasmld.c) platform/darwin/macho-linker.c
 
 $(OBJ)/%.o: %.c Makefile $(BOOTSTRAP_COMPILER) | $(OBJ)
 	@mkdir -p $(dir $@)
@@ -154,10 +159,12 @@ $(OBJ)/no/%.o: %.c Makefile $(BOOTSTRAP_COMPILER) | $(OBJ)
 	@mkdir -p $(dir $@)
 	$(VCC_CC) $(VCC_FAST) $(if $(filter-out x86_64,$(HOST_ARCH)),-mno-outline) -MMD -MP -c $< -o $@
 
-$(OBJ)/ld/ld.o: XFLAGS = -DVLD_MAIN
+$(OBJ)/ld/ld.o $(OBJ)/ld/vlink-main.o: XFLAGS = -DVLD_MAIN
 
-# the linker without main(), for vccd (links, nm and objcopy run in its worker threads)
-VCCD_LD_OBJ = $(OBJ)/ld/ldlib.o $(call o,ld/objcopy.c platform/darwin/macho-linker.c)
+# the ELF linker with main() for vlink, and without it for vccd (links, nm and
+# objcopy run in its worker threads)
+VLINK_LD_OBJ = $(if $(VCC_UNITY),$(OBJ)/ld/ld.o,$(call o,$(LD_PARTS) ld/vlink-main.c))
+VCCD_LD_OBJ = $(if $(VCC_UNITY),$(OBJ)/ld/ldlib.o,$(call o,$(LD_PARTS))) $(call o,ld/objcopy.c platform/darwin/macho-linker.c)
 $(OBJ)/ld/ldlib.o: ld/ld.c Makefile $(BOOTSTRAP_COMPILER) | $(OBJ)
 	@mkdir -p $(dir $@)
 	$(VCC_CC) $(VCC_FAST) $(VCC_LTO) -MMD -MP -c $< -o $@
@@ -191,7 +198,7 @@ $(OUT)/viralloc: $(call o,bin/viralloc/viralloc.c $(VIRALLOC_SRC) $(LIB_SRC)) $(
 	$(VCC_LINK) $(VCC_LDFLAGS) $^ -o $@
 
 # vlink: the linker (ld.c) as a standalone tool; vobjcopy/vnm by argv[0]
-$(OUT)/vlink: $(call o,$(LD_SRC))
+$(OUT)/vlink: $(VLINK_LD_OBJ) $(call o,$(LD_SRC))
 	$(VCC_LINK) $(VCC_LDFLAGS) -pthread $^ -o $@
 	ln -sf vlink $(OUT)/vobjcopy
 	ln -sf vlink $(OUT)/vnm

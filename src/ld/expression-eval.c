@@ -1,5 +1,7 @@
 /* Evaluation of linker-script expressions with lld's ExprValue rules. */
 
+#include "ld-internal.h"
+
 /* ---------------- expressions: evaluation (lld ExprValue rules) ---------------- */
 
 static uint64_t ld_integer_log2_ceil(uint64_t x)
@@ -20,8 +22,6 @@ static uint64_t ld_alignment_check(struct ld_context *ctx, uint64_t a)
 	return a;
 }
 
-static uint64_t ld_headers_size(struct ld_context *ctx);
-static ld_expression_value ld_expression_eval(struct ld_context *ctx, ld_expression *e);
 
 static void ld_expression_values_move_absolute_right(struct ld_context *ctx, ld_expression_value *a, ld_expression_value *b)
 {
@@ -33,12 +33,12 @@ static void ld_expression_values_move_absolute_right(struct ld_context *ctx, ld_
 	if (!ld_expression_value_is_absolute(*b) && ctx->layout.in_layout)
 		ld_error_report(ctx, "at least one side of the expression must be absolute");
 }
-static ld_expression_value ld_expression_value_add(struct ld_context *ctx, ld_expression_value a, ld_expression_value b)
+VPRIV ld_expression_value ld_expression_value_add(struct ld_context *ctx, ld_expression_value a, ld_expression_value b)
 {
 	ld_expression_values_move_absolute_right(ctx, &a, &b);
 	return ld_expression_value_in_section_make(a, a.force_absolute, ld_expression_value_section_offset(ctx, a) + ld_expression_value_resolve(ctx, b));
 }
-static ld_expression_value ld_expression_value_subtract(struct ld_context *ctx, ld_expression_value a, ld_expression_value b)
+VPRIV ld_expression_value ld_expression_value_subtract(struct ld_context *ctx, ld_expression_value a, ld_expression_value b)
 {
 	if (!ld_expression_value_is_absolute(a) && !ld_expression_value_is_absolute(b))
 		return ld_expression_value_absolute_make(ld_expression_value_resolve(ctx, a) - ld_expression_value_resolve(ctx, b));
@@ -82,14 +82,14 @@ static ld_expression_value ld_expression_binary_eval(struct ld_context *ctx, con
 	return ld_expression_value_absolute_make(0);
 }
 
-static ld_expression_value ld_dot_expression_value(struct ld_context *ctx)
+VPRIV ld_expression_value ld_dot_expression_value(struct ld_context *ctx)
 {
 	ld_expression_value v = {.kind = LD_VALUE_KIND_OUTPUT_SECTION, .index = ctx->layout.current_output_section, .value = ctx->layout.dot - ld_output_section_address(ctx, ctx->layout.current_output_section), .alignment = 1};
 	return v;
 }
 
 
-static ld_expression_value ld_expression_eval(struct ld_context *ctx, ld_expression *e)
+VPRIV ld_expression_value ld_expression_eval(struct ld_context *ctx, ld_expression *e)
 {
 	ld_expression_value v;
 	switch (e->operation) {

@@ -12,6 +12,8 @@
  *     (variant 2): tpoff = va - tls_thread_pointer, dtpoff = va - the block's start.
  */
 
+#include "../../../ld/ld-internal.h"
+
 
 /* a [REX_]GOTPCRELX that relaxes, as lld's adjustGotPcExpr (0: no, 1: rip form, 2: immediate form) */
 static int x64_ld_got_relaxation_kind(struct ld_context *ctx, const ld_object *o, const ld_input_section *is, const elf_rela *rl, const ld_relocation_target *t)
@@ -51,7 +53,7 @@ static bool x64_ld_relocation_needs_got(struct ld_context *ctx, const ld_object 
 	return !x64_ld_got_relaxation_kind(ctx, o, is, rl, &t);
 }
 
-static void x64_ld_got_find(void *arg, size_t i)
+VPRIV void x64_ld_got_find(void *arg, size_t i)
 {
 	struct ld_context *ctx = arg;
 	const ld_input_section *is = &ctx->inputs.sections.v[i];
@@ -65,7 +67,7 @@ static void x64_ld_got_find(void *arg, size_t i)
 		}
 }
 
-static void x64_ld_relocation_scan(void *arg, size_t i)
+VPRIV void x64_ld_relocation_scan(void *arg, size_t i)
 {
 	struct ld_context *ctx = arg;
 	ld_input_section *is = &ctx->inputs.sections.v[i];
@@ -114,7 +116,7 @@ static void x64_ld_relocation_scan(void *arg, size_t i)
 	is->dynamic_relocation_count = 0;
 }
 
-static void x64_ld_input_section_relocate(struct ld_context *ctx, uint32_t si, uint8_t *buf)
+VPRIV void x64_ld_input_section_relocate(struct ld_context *ctx, uint32_t si, uint8_t *buf)
 {
 	ld_input_section *is = &ctx->inputs.sections.v[si];
 	ld_object *o = ctx->inputs.objects.v[is->object];

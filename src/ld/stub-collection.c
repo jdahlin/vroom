@@ -1,5 +1,7 @@
 /* Collecting the undefined symbols the stub object is to define. */
 
+#include "ld-internal.h"
+
 /* names of undefined symbols that the -O0 stub object defines */
 static void ld_stub_target_mark(struct ld_context *ctx, ld_assignment *a)
 {
@@ -7,7 +9,7 @@ static void ld_stub_target_mark(struct ld_context *ctx, ld_assignment *a)
 		ctx->symbols.globals[a->symbol].hidden_by_script = 1;	/* reused as "assigned by the script" */
 }
 
-static void ld_stubs_collect(struct ld_context *ctx)
+VPRIV void ld_stubs_collect(struct ld_context *ctx)
 {
 	ld_script_assignments_for_each(ctx, ld_stub_target_mark);
 	VVEC(const char *) names = {0};
@@ -35,7 +37,7 @@ static void ld_stubs_collect(struct ld_context *ctx)
 		ctx->symbols.globals[ld_global_name_find(ctx, ctx->symbols.stub_names[i])].duplicate = 0;
 }
 
-static void ld_stub_list_write(struct ld_context *ctx)
+VPRIV void ld_stub_list_write(struct ld_context *ctx)
 {
 	char *p = ld_region_alloc(strlen(ctx->options.output_path) + 16);
 	sprintf(p, "%s.vroom-stubs", ctx->options.output_path);

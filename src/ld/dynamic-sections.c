@@ -1,20 +1,10 @@
 /* -shared output: symbol versions, .dynsym, .dynstr, hash tables, .dynamic. */
 
+#include "ld-internal.h"
+
 /* ---------------- -shared: versions, dynamic sections, PHDRS ---------------- */
 
-#define SHT_GNU_HASH 0x6ffffff6u
-#define SHT_GNU_VERDEF 0x6ffffffdu
-#define SHT_GNU_VERSYM 0x6fffffffu
-enum {
-	DT_NULL = 0, DT_HASH = 4, DT_STRTAB = 5, DT_SYMTAB = 6, DT_STRSZ = 10, DT_SYMENT = 11,
-	DT_SONAME = 14, DT_FLAGS = 30, DF_SYMBOLIC = 2,
-};
-#define DT_GNU_HASH 0x6ffffef5u
-#define DT_VERSYM 0x6ffffff0u
-#define DT_VERDEF 0x6ffffffcu
-#define DT_VERDEFNUM 0x6ffffffdu
 
-static bool ld_global_symbol_is_referenced(struct ld_context *ctx, uint32_t g);
 
 static uint32_t ld_symbol_name_elf_hash(const char *n)
 {
@@ -50,7 +40,7 @@ static uint32_t ld_dynamic_string_add(struct ld_context *ctx, const char *str)
 }
 
 /* VERSION: local patterns first, then each node's globals override (lld scanVersionScript) */
-static void ld_symbol_versions_assign(struct ld_context *ctx)
+VPRIV void ld_symbol_versions_assign(struct ld_context *ctx)
 {
 	for (uint32_t i = 0; i < ctx->symbols.order.n; i++) {
 		ld_global_symbol *s = &ctx->symbols.globals[ctx->symbols.order.v[i]];
@@ -77,14 +67,14 @@ static void ld_symbol_versions_assign(struct ld_context *ctx)
 	}
 }
 
-static bool ld_input_section_is_live(struct ld_context *ctx, uint32_t isec)
+VPRIV bool ld_input_section_is_live(struct ld_context *ctx, uint32_t isec)
 {
 	uint32_t o = isec == LD_NONE ? LD_NONE : ctx->inputs.sections.v[isec].output_section;
 	return o != LD_NONE && o != LD_OUTPUT_SECTION_DISCARD;
 }
 
 /* _DYNAMIC: lld defines it (weak, hidden) after the script's symbols */
-static void ld_dynamic_symbol_define(struct ld_context *ctx)
+VPRIV void ld_dynamic_symbol_define(struct ld_context *ctx)
 {
 	ctx->output.dynamic_live = ctx->options.shared && ld_input_section_is_live(ctx, ctx->output.dynamic_section);
 	if (!ctx->output.dynamic_live)
@@ -105,7 +95,7 @@ static void ld_dynamic_symbol_define(struct ld_context *ctx)
 }
 
 /* contents and sizes of the dynamic sections (addresses are filled in later) */
-static void ld_dynamic_sections_build(struct ld_context *ctx)
+VPRIV void ld_dynamic_sections_build(struct ld_context *ctx)
 {
 	if (!ctx->output.dynamic_live)
 		return;
@@ -179,7 +169,7 @@ static void ld_dynamic_sections_build(struct ld_context *ctx)
 }
 
 /* sh_link / sh_info of the dynamic sections */
-static void ld_dynamic_section_links_set(struct ld_context *ctx)
+VPRIV void ld_dynamic_section_links_set(struct ld_context *ctx)
 {
 	if (!ctx->output.dynamic_live)
 		return;
@@ -201,7 +191,7 @@ static uint8_t *ld_input_section_image_pointer(struct ld_context *ctx, uint32_t 
 	return ctx->output.image + ctx->script.sections.v[ld_input_section_output_section(ctx, isec)].offset + ctx->inputs.sections.v[isec].offset;
 }
 
-static void ld_dynamic_sections_write(struct ld_context *ctx)
+VPRIV void ld_dynamic_sections_write(struct ld_context *ctx)
 {
 	if (!ctx->output.dynamic_live)
 		return;

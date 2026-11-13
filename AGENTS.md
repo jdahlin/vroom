@@ -121,8 +121,10 @@ relative to it); `TODO.md` stays at the top.
     `bin/virtest/` is the tool
     (`virtest FILE`; `--no-verify`, `--bless`, `--selftest` for the builder API).
     Tests: `test/vir/` (`bad/RULE-name.vir`, `canon/`, `dom/`).
-  - `ld/`: the linker `vlink` (`ld.c`, one TU with its main; also linked into
-    vccd, which calls `ld_main` per link) and `vobjcopy`/`vnm`;
+  - `ld/`: the linker `vlink` (`ld.c` includes its parts, files by topic
+    sharing `ld-internal.h`, as one TU, a split module like `as`; `ld_SRC`,
+    main in `vlink-main.c`; also linked into vccd, which calls `ld_main` per
+    link, each link with its own `struct ld_context`) and `vobjcopy`/`vnm`;
     `wasmld.c` is vlink for WebAssembly (as `wasm-ld` or with `-mwasm64`).
   - `driver/`: one compile job from a clang command line (`job.c` calls the
     pieces: `cmdline.c`, `searchpath.c`, `predef.c`, `depfile.c`, `output.c`, ...;
@@ -149,8 +151,8 @@ relative to it); `TODO.md` stays at the top.
     `include/arch/a64/a64.h`), system registers (`a64sysreg.inc`),
     relocation types (`include/arch/a64/reloc.h`), fixups (`obj/fixup.c`: in place or a
     relocation, as LLVM MC), the linker's relocation scan, relocation
-    application and range-extension thunks (`ld/*.inc`, #included by
-    `ld/ld.c` where they were: the linker is not a split module yet);
+    application and range-extension thunks (`ld/*.c`, parts of the
+    linker's module);
     `codegen/`: instruction records and register names (`ins.h`, `a64impl.h`,
     included by `codegen/emitimpl.h`), expressions, statements, calls (AAPCS64
     and Apple's), builtins, inline asm, the record optimizer (`opt.c`), the

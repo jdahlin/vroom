@@ -1,5 +1,7 @@
 /* ld -r: relocatable output. */
 
+#include "ld-internal.h"
+
 /* ================= ld -r ================= */
 
 /*
@@ -157,7 +159,7 @@ static void ld_relocatable_input_section_write(void *arg, size_t j)
 	}
 }
 
-static int ld_relocatable_link(struct ld_context *ctx)
+VPRIV int ld_relocatable_link(struct ld_context *ctx)
 {
 	/* global order and final binding */
 	ld_global_order_build(ctx);

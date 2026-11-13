@@ -1,20 +1,21 @@
 /* ld_parallel_for(), the parallel loop the linker's passes run on: the process' shared
    pool (port/task.c) with the small-items rule, at most nthreads wide. */
 
-#include "port/task.h"
+#include "ld-internal.h"
 
-typedef void (*ld_parallel_function)(void *arg, size_t i);
-static int ld_thread_count = 1;	/* this link's width: --threads, else the P cores */
+VPRIV int ld_thread_count = 1;	/* this link's width: --threads, else the P cores */
+/* the process is one link at a time (vlink, not vccd): --threads is its task budget */
+VPRIV bool ld_standalone;
 
 /* fn(arg, i) for i in [0, n), dynamically scheduled; a call whose items are
    all tiny (a link of four small objects) stays on the caller */
-static void ld_parallel_for(size_t n, ld_parallel_function fn, void *arg)
+VPRIV void ld_parallel_for(size_t n, ld_parallel_function fn, void *arg)
 {
 	vtask_parallel_for(n, ld_thread_count, fn, arg, VTASK_SMALL_ITEMS);
 }
 
 /* the width of a link without --threads */
-static int ld_parallel_default_width(void)
+VPRIV int ld_parallel_default_width(void)
 {
 	int n = vtask_cpus_probe().performance;
 

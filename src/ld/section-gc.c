@@ -1,11 +1,13 @@
 /* --gc-sections as lld's MarkLive. */
 
+#include "ld-internal.h"
+
 /* --gc-sections as lld's MarkLive: roots are the entry symbol, KEEP, SHF_GNU_RETAIN,
  * non-allocated sections, init/fini/preinit arrays, notes outside groups,
  * .ctors/.dtors/.init/.fini/.jcr, and under -shared the exported definitions;
  * relocations, SHF_LINK_ORDER and section groups propagate liveness; a
  * __start_X/__stop_X reference keeps nothing (lld's default -z start-stop-gc) */
-static void ld_sections_garbage_collect(struct ld_context *ctx, const char *entry)
+VPRIV void ld_sections_garbage_collect(struct ld_context *ctx, const char *entry)
 {
 	uint8_t *live = calloc(ctx->inputs.sections.n, 1);
 	uint32_t *work = malloc(ctx->inputs.sections.n * sizeof(uint32_t)), nw = 0;

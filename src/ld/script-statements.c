@@ -1,6 +1,8 @@
 /* The linker script's statements: assignments, PROVIDE, ASSERT, input and output section descriptions, SECTIONS, PHDRS, VERSION, and ld_script_parse. */
 
-static uint32_t ld_output_section_find(struct ld_context *ctx, const char *name)
+#include "ld-internal.h"
+
+VPRIV uint32_t ld_output_section_find(struct ld_context *ctx, const char *name)
 {
 	if (strcmp(name, "/DISCARD/"))
 		for (uint32_t i = 0; i < ctx->script.sections.n; i++)
@@ -360,7 +362,7 @@ static void ld_script_version_parse(struct ld_context *ctx)
 	ld_script_character_expect(ctx, '}');
 }
 
-static void ld_script_parse(struct ld_context *ctx, const char *text, size_t len)
+VPRIV void ld_script_parse(struct ld_context *ctx, const char *text, size_t len)
 {
 	ctx->script.cursor = ctx->script.file = text;
 	ctx->script.end = text + len;

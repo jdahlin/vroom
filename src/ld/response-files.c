@@ -1,11 +1,12 @@
 /* @FILE response files as GNU ld and lld read them. */
 
+#include "ld-internal.h"
+
 /* Response files as GNU ld and lld read them: @FILE is replaced by FILE's
  * words (blanks separate them; '...', "..." and \ quote), recursively; an
  * @FILE that cannot be read stays as it is.  kbuild links a module of
  * several objects with `ld -r -o m.o @m.mod`.  The new vector and its words
  * live in one malloc'ed block list, *keep, freed by the caller. */
-struct ld_response_memory { struct ld_response_memory *next; };
 
 static void *ld_response_alloc(struct ld_response_memory **keep, size_t n)
 {
@@ -19,7 +20,7 @@ static void *ld_response_alloc(struct ld_response_memory **keep, size_t n)
 	return m + 1;
 }
 
-static bool ld_response_files_expand(int *pargc, char ***pargv, int dirfd, struct ld_response_memory **keep)
+VPRIV bool ld_response_files_expand(int *pargc, char ***pargv, int dirfd, struct ld_response_memory **keep)
 {
 	bool any = false;
 	for (int i = 1; i < *pargc; i++)

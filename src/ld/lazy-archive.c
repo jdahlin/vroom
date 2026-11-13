@@ -1,5 +1,7 @@
 /* Lazy archive members: which are extracted and in which order, as lld. */
 
+#include "ld-internal.h"
+
 /* ---- lazy archives: which members, in which order (as lld) ----
  * lld reads the inputs in order; an object's undefined (non-weak) reference to
  * a symbol a lazy member defines extracts that member at once (depth first,
@@ -78,7 +80,7 @@ static const elf_symbol *ld_lazy_object_globals(struct ld_context *ctx, ld_pendi
 
 static void ld_lazy_member_extract(struct ld_context *ctx, uint32_t c);
 
-static void ld_lazy_object_add(struct ld_context *ctx, ld_pending_member p)
+VPRIV void ld_lazy_object_add(struct ld_context *ctx, ld_pending_member p)
 {
 	uint32_t n = 0;
 	const char *str;
@@ -108,7 +110,7 @@ static void ld_lazy_member_extract(struct ld_context *ctx, uint32_t c)
 	ld_lazy_object_add(ctx, ctx->inputs.lazy_candidates.v[c]);
 }
 
-static void ld_lazy_archive_process(struct ld_context *ctx, uint32_t c0, uint32_t c1)
+VPRIV void ld_lazy_archive_process(struct ld_context *ctx, uint32_t c0, uint32_t c1)
 {
 	for (uint32_t c = c0; c < c1; c++) {
 		uint32_t n = 0;

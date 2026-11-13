@@ -1,8 +1,10 @@
 /* Mapping input files and reading archives into the list of pending members. */
 
+#include "ld-internal.h"
+
 /* ---------------- loading ---------------- */
 
-static uint8_t *ld_file_map(struct ld_context *ctx, const char *path, size_t *size)
+VPRIV uint8_t *ld_file_map(struct ld_context *ctx, const char *path, size_t *size)
 {
 	int fd = openat(ctx->options.directory_fd, path, O_RDONLY);
 	if (fd < 0) {
@@ -22,7 +24,7 @@ static uint8_t *ld_file_map(struct ld_context *ctx, const char *path, size_t *si
 }
 
 
-static void ld_archive_add(struct ld_context *ctx, const char *path, const uint8_t *b, size_t n)
+VPRIV void ld_archive_add(struct ld_context *ctx, const char *path, const uint8_t *b, size_t n)
 {
 	bool thin = !memcmp(b, "!<thin>\n", 8);
 	const char *dir = "";

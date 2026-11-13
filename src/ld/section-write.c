@@ -1,7 +1,9 @@
 /* Copying each input section into the output image and applying its relocations, in parallel. */
 
+#include "ld-internal.h"
 
-static void ld_input_section_write(void *arg, size_t j)
+
+VPRIV void ld_input_section_write(void *arg, size_t j)
 {
 	struct ld_context *ctx = arg;
 	uint32_t si = ctx->output.write_jobs.v[j];
