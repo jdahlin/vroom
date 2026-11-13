@@ -2,7 +2,6 @@
 
 /* ---------------- relocation scan ---------------- */
 
-static bool pic;
 
 /* ld_relocation_target_find()'s abs/undef/discarded without computing the address */
 static void a64_ld_relocation_target_classify(const ld_object *o, uint32_t symidx, ld_relocation_target *t)
@@ -62,11 +61,11 @@ static void a64_ld_relocation_scan(void *arg, size_t i)
 			      (unsigned long long)rl->r_offset);
 		switch (type) {
 		case R_AARCH64_ABS64:
-			if (pic && (is->flags & SHF_ALLOC) && !t.abs)
+			if (ctx->relocations.pic && (is->flags & SHF_ALLOC) && !t.abs)
 				n++;
 			break;
 		case R_AARCH64_ABS32: case R_AARCH64_ABS16:
-			if (pic && (is->flags & SHF_ALLOC) && !t.abs && !t.undef)
+			if (ctx->relocations.pic && (is->flags & SHF_ALLOC) && !t.abs && !t.undef)
 				ld_error_report("%s:(%s+0x%llx): relocation R_AARCH64_ABS32/16 cannot be used against "
 				      "a non-absolute symbol; recompile with -fPIC", o->path, is->name,
 				      (unsigned long long)rl->r_offset);

@@ -54,7 +54,7 @@ VPRIV uint32_t vw_slotat(ecx *e, int64_t off, uint64_t size, int64_t *rel)
 
 VPRIV uint32_t vw_slotaddr(ecx *e, uint32_t s, int64_t rel)
 {
-	return vw_k(e, VO_SLOTADDR, VT_PTR, s, (uint32_t)rel, (uint32_t)((uint64_t)rel >> 32));
+	return vw_k(e, VIR_OP_SLOTADDR, VIR_TYPE_PTR, s, (uint32_t)rel, (uint32_t)((uint64_t)rel >> 32));
 }
 
 /*
@@ -80,13 +80,13 @@ static uint32_t vw_addr(ecx *e, const lval *l, uint64_t size, uint32_t *slot, in
 		return vw_slotaddr(e, *slot, *rel);
 	case L_SYM:
 		note_ref(e, l->ref);
-		return vw_k(e, VO_SYMADDR, VT_PTR, l->ref, (uint32_t)l->off, (uint32_t)((uint64_t)l->off >> 32));
+		return vw_k(e, VIR_OP_SYMADDR, VIR_TYPE_PTR, l->ref, (uint32_t)l->off, (uint32_t)((uint64_t)l->off >> 32));
 	case L_REG: {
-		uint32_t b = vw_get(e, l->r, VT_PTR);
+		uint32_t b = vw_get(e, l->r, VIR_TYPE_PTR);
 
 		if (!l->off)
 			return b;
-		return vw_ins(e, VO_PTRADD, VT_PTR, 0, b, vw_iconst(e, VT_I64, l->off), 0);
+		return vw_ins(e, VIR_OP_PTRADD, VIR_TYPE_PTR, 0, b, vw_iconst(e, VIR_TYPE_I64, l->off), 0);
 	}
 	default:
 		vw_fail(e, VIRFAIL(unsupported_lvalue_kind));
@@ -101,7 +101,7 @@ VPRIV uint32_t vw_mfl(int size, uint32_t align, bool sgn)
 
 	if (a > 15)
 		a = 15;
-	return w | (sgn ? VIF_MS : 0) | a << 4;
+	return w | (sgn ? VIR_INSN_FLAG_MS : 0) | a << 4;
 }
 
 /* the variable of a local (L_VAR): its type */
@@ -119,20 +119,20 @@ VPRIV void vw_load(ecx *e, int rd, const lval *l, int size, bool sgn)
 	if (l->k == L_VAR) {
 		v = vw_readv(e, l->ref, V->cur, vw_lvty(e, l));
 		if (f)
-			v = vw_conv(e, v, size == 4 ? VT_F32 : VT_F64);
+			v = vw_conv(e, v, size == 4 ? VIR_TYPE_F32 : VIR_TYPE_F64);
 		vw_set(e, rd, v);
 		return;
 	}
 	if (f)
-		ty = size == 4 ? VT_F32 : size == 8 ? VT_F64 : 0;
+		ty = size == 4 ? VIR_TYPE_F32 : size == 8 ? VIR_TYPE_F64 : 0;
 	else
-		ty = size == 8 ? VT_I64 : sgn ? VT_I64 : VT_I32;
+		ty = size == 8 ? VIR_TYPE_I64 : sgn ? VIR_TYPE_I64 : VIR_TYPE_I32;
 	if (!ty)
 		vw_fail(e, VIRFAIL(float_load_size));
 	a = vw_addr(e, l, (uint64_t)size, &slot, &rel);
 	if (f && size == 8 && slot != VW_NOBLK && V->sl[slot].size == 8 && V->sl[slot].f32w) {
 		/* the word of a float temporary (a conditional expression's value): the f32 stored in it */
-		size = 4, ty = VT_F32;
+		size = 4, ty = VIR_TYPE_F32;
 		a = vw_addr(e, l, 4, &slot, &rel);
 	}
 	if (slot != VW_NOBLK && !e->novtag) {	/* the value last stored here, in this block (not volatile) */
@@ -142,10 +142,10 @@ VPRIV void vw_load(ecx *e, int rd, const lval *l, int size, bool sgn)
 			if (s->slot == slot && s->off == l->off && s->size == size) {
 				uint32_t x = s->v, xt = vw_ty(e, x);
 
-				if (!f && size < 8 && xt != VT_F32 && xt != VT_F64) {	/* the low bytes, extended as a load would */
-					x = vw_conv(e, x, size == 4 && !sgn ? VT_I32 : VT_I64);
+				if (!f && size < 8 && xt != VIR_TYPE_F32 && xt != VIR_TYPE_F64) {	/* the low bytes, extended as a load would */
+					x = vw_conv(e, x, size == 4 && !sgn ? VIR_TYPE_I32 : VIR_TYPE_I64);
 					if (size < 4 || sgn)
-						x = vw_ins(e, VO_EXT, vw_ty(e, x), vw_log2((uint64_t)size) | (sgn ? VIF_MS : 0), x, 0, 0);
+						x = vw_ins(e, VIR_OP_EXT, vw_ty(e, x), vw_log2((uint64_t)size) | (sgn ? VIR_INSN_FLAG_MS : 0), x, 0, 0);
 				} else {
 					x = vw_conv(e, x, ty);
 				}
@@ -155,7 +155,7 @@ VPRIV void vw_load(ecx *e, int rd, const lval *l, int size, bool sgn)
 		}
 		V->sl[slot].loads++;
 	}
-	v = vw_ins(e, VO_LOAD, ty, vw_mfl(size, l->align, !f && sgn && size < 8) | (e->novtag ? VIF_VOL : 0), a, 0, 0);
+	v = vw_ins(e, VIR_OP_LOAD, ty, vw_mfl(size, l->align, !f && sgn && size < 8) | (e->novtag ? VIR_INSN_FLAG_VOL : 0), a, 0, 0);
 	if (slot != VW_NOBLK)
 		V->p[v].slot = slot + 1;	/* (which slot: for the dead-store pass) */
 	vw_set(e, rd, v);
@@ -166,11 +166,11 @@ static uint32_t vw_stty(ecx *e, uint32_t v, int size)
 {
 	uint32_t t = vw_ty(e, v);
 
-	if (t == VT_F32 || t == VT_F64)
-		return size == 4 ? VT_F32 : size == 8 ? VT_F64 : 0;
+	if (t == VIR_TYPE_F32 || t == VIR_TYPE_F64)
+		return size == 4 ? VIR_TYPE_F32 : size == 8 ? VIR_TYPE_F64 : 0;
 	if (size == 8)
-		return t == VT_PTR ? VT_PTR : VT_I64;
-	return VT_I32;
+		return t == VIR_TYPE_PTR ? VIR_TYPE_PTR : VIR_TYPE_I64;
+	return VIR_TYPE_I32;
 }
 
 VPRIV void vw_store(ecx *e, int rs, const lval *l, int size)
@@ -186,19 +186,19 @@ VPRIV void vw_store(ecx *e, int rs, const lval *l, int size)
 	if (l->k == L_VAR) {
 		uint32_t lt = vw_lvty(e, l);
 
-		if (lt == VT_F32 || lt == VT_F64)
+		if (lt == VIR_TYPE_F32 || lt == VIR_TYPE_F64)
 			v = vw_conv(e, v, lt);
 		else {
-			v = vw_conv(e, v, size == 8 ? (lt == VT_PTR ? VT_PTR : VT_I64) : VT_I32);
+			v = vw_conv(e, v, size == 8 ? (lt == VIR_TYPE_PTR ? VIR_TYPE_PTR : VIR_TYPE_I64) : VIR_TYPE_I32);
 			if (size < 4)	/* the local's value is always its type's (normalized) */
-				v = vw_ins(e, VO_EXT, VT_I32, vw_log2((uint64_t)size) | (V->vsgn[l->ref - VW_VAR0] ? VIF_MS : 0), v, 0, 0);
+				v = vw_ins(e, VIR_OP_EXT, VIR_TYPE_I32, vw_log2((uint64_t)size) | (V->vsgn[l->ref - VW_VAR0] ? VIR_INSN_FLAG_MS : 0), v, 0, 0);
 			v = vw_conv(e, v, lt);
 		}
 		vw_write(e, l->ref, V->cur, v);
 		return;
 	}
 	{
-		bool fw = size == 8 && vw_ty(e, v) == VT_F32;
+		bool fw = size == 8 && vw_ty(e, v) == VIR_TYPE_F32;
 
 		if (fw)
 			size = 4;	/* (a float's word in an argument or temporary slot: its low 4 bytes) */
@@ -211,7 +211,7 @@ VPRIV void vw_store(ecx *e, int rs, const lval *l, int size)
 	}
 	v = vw_conv(e, v, ty);
 	{
-		uint32_t s = vw_ins(e, VO_STORE, VT_VOID, vw_mfl(size, l->align, false) | (e->novtag ? VIF_VOL : 0), a, v, 0);
+		uint32_t s = vw_ins(e, VIR_OP_STORE, VIR_TYPE_VOID, vw_mfl(size, l->align, false) | (e->novtag ? VIR_INSN_FLAG_VOL : 0), a, v, 0);
 
 		if (slot != VW_NOBLK)
 			V->p[s].slot = slot + 1;
@@ -249,23 +249,23 @@ VPRIV int vw_laddr(ecx *e, const lval *l)
 
 VPRIV void vw_copy(ecx *e, int rdst, int rsrc, uint64_t n)
 {
-	uint32_t d = vw_get(e, rdst, VT_PTR), s = vw_get(e, rsrc, VT_PTR);
+	uint32_t d = vw_get(e, rdst, VIR_TYPE_PTR), s = vw_get(e, rsrc, VIR_TYPE_PTR);
 
 	if (n == 1 || n == 2 || n == 4 || n == 8) {	/* one load and store (memcpy(&u, &d, 8)): promotable */
 		uint32_t fl = vw_mfl((int)n, 1, false);
 
-		vw_ins(e, VO_STORE, VT_VOID, fl, d, vw_ins(e, VO_LOAD, n == 8 ? VT_I64 : VT_I32, fl, s, 0, 0), 0);
+		vw_ins(e, VIR_OP_STORE, VIR_TYPE_VOID, fl, d, vw_ins(e, VIR_OP_LOAD, n == 8 ? VIR_TYPE_I64 : VIR_TYPE_I32, fl, s, 0, 0), 0);
 	} else {
-		vw_ins(e, VO_MEMCPY, VT_VOID, 0, d, s, vw_iconst(e, VT_I64, (int64_t)n));
+		vw_ins(e, VIR_OP_MEMCPY, VIR_TYPE_VOID, 0, d, s, vw_iconst(e, VIR_TYPE_I64, (int64_t)n));
 	}
 	vw_st_clear(e, true);
 }
 
 VPRIV void vw_zero(ecx *e, int rdst, uint64_t n)
 {
-	uint32_t d = vw_get(e, rdst, VT_PTR);
+	uint32_t d = vw_get(e, rdst, VIR_TYPE_PTR);
 
-	vw_ins(e, VO_MEMSET, VT_VOID, 0, d, vw_iconst(e, VT_I32, 0), vw_iconst(e, VT_I64, (int64_t)n));
+	vw_ins(e, VIR_OP_MEMSET, VIR_TYPE_VOID, 0, d, vw_iconst(e, VIR_TYPE_I32, 0), vw_iconst(e, VIR_TYPE_I64, (int64_t)n));
 	vw_st_clear(e, true);
 }
 
@@ -289,13 +289,13 @@ VPRIV bool vw_local(ecx *e, uint32_t s, lval *l)
 	if (!em_local_eligible(e, s))
 		return false;
 	if (is_ptr(c, t))
-		ty = VT_PTR;
+		ty = VIR_TYPE_PTR;
 	else if (is_integer(c, t) && !is_wide(c, t) && tsize(c, t) - 1 < 8)
-		ty = tsize(c, t) == 8 ? VT_I64 : VT_I32;
+		ty = tsize(c, t) == 8 ? VIR_TYPE_I64 : VIR_TYPE_I32;
 	else if (KIND(c, t) == TY_FLOAT)
-		ty = VT_F32;
+		ty = VIR_TYPE_F32;
 	else if (KIND(c, t) == TY_DOUBLE)
-		ty = VT_F64;
+		ty = VIR_TYPE_F64;
 	else
 		return false;
 	if ((V->nloc + 1) * 2 > V->lhcap) {	/* (a function with everything inlined has thousands) */
@@ -360,7 +360,7 @@ VPRIV void vw_undecl(ecx *e, const lval *l, uint64_t size)
 	a = vw_addr(e, l, size, &slot, &rel);
 	if (slot == VW_NOBLK)
 		return;
-	m = vw_ins(e, VO_MEMSET, VT_VOID, VW_LIFETIME, a, vw_iconst(e, VT_I32, 0), vw_iconst(e, VT_I64, (int64_t)size));
+	m = vw_ins(e, VIR_OP_MEMSET, VIR_TYPE_VOID, VW_LIFETIME, a, vw_iconst(e, VIR_TYPE_I32, 0), vw_iconst(e, VIR_TYPE_I64, (int64_t)size));
 	V->p[m].slot = slot + 1;
 	for (uint32_t i = 0; i < V->nst; i++)	/* (what store forwarding knew of these bytes) */
 		if (V->st[i].slot == slot && V->st[i].off < l->off + (int64_t)size && l->off < V->st[i].off + V->st[i].size)

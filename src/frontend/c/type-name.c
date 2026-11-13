@@ -1,8 +1,8 @@
 /* vcc front end: types spelled as clang does in diagnostics, and as C for the layout checks */
-#include "ccimpl.h"
+#include "cc-internal.h"
 #include "common/buffer.h"
 
-VPRIV const char *int_name(int k)
+CC_PRIVATE const char *cc_type_integer_name(int k)
 {
 	switch (k) {
 	case TY_BOOL: return "_Bool";
@@ -27,7 +27,7 @@ VPRIV const char *int_name(int k)
 /* a type spelling: 4096 bytes on the stack; a longer one fails the job */
 #define SPELLING(name) char name##_bytes[4096]; vbuffer name; vbuffer_fixed(&name, name##_bytes, sizeof(name##_bytes))
 
-static void quals(vbuffer *b, int q)
+static void cc_type_qualifiers_spell(vbuffer *b, int q)
 {
 	if (q & Q_CONST) vbuffer_string_append(b, "const ");
 	if (q & Q_VOLATILE) vbuffer_string_append(b, "volatile ");
@@ -35,14 +35,14 @@ static void quals(vbuffer *b, int q)
 }
 
 /* out = spelling of t around the declarator text inner */
-VPRIV void type_str(cc *c, qty t, const char *inner, vbuffer *out, bool *ok)
+CC_PRIVATE void cc_type_spell(cc *c, qty t, const char *inner, vbuffer *out, bool *ok)
 {
-	const ctype *x = T(c, t);
+	const ctype *x = AST_TYPE(c, t);
 	SPELLING(b);
 
-	if (x->kind == TY_ARRAY && c->valist_tag && T(c, c->t_valist)->canon == x->canon) {
+	if (x->kind == TY_ARRAY && c->valist_tag && AST_TYPE(c, c->t_valist)->canon == x->canon) {
 		/* x86-64's __va_list_tag[1] is spelled by its typedef, the struct as itself */
-		quals(&b, QQ(t));
+		cc_type_qualifiers_spell(&b, QQ(t));
 		vbuffer_string_append(&b, "__builtin_va_list");
 		if (inner[0]) {
 			vbuffer_string_append(&b, " ");
@@ -53,8 +53,8 @@ VPRIV void type_str(cc *c, qty t, const char *inner, vbuffer *out, bool *ok)
 	}
 	switch (x->kind) {
 	case TY_SVE:
-		quals(&b, QQ(t));
-		vbuffer_append(&b, idstr_(x->aux), idlen_(x->aux));
+		cc_type_qualifiers_spell(&b, QQ(t));
+		vbuffer_append(&b, cc_identifier_string(x->aux), cc_identifier_length(x->aux));
 		if (inner[0]) {
 			vbuffer_string_append(&b, " ");
 			vbuffer_string_append(&b, inner);
@@ -63,23 +63,23 @@ VPRIV void type_str(cc *c, qty t, const char *inner, vbuffer *out, bool *ok)
 		return;
 	case TY_PTR: {
 		SPELLING(in);
-		const ctype *bt = T(c, x->base);
+		const ctype *bt = AST_TYPE(c, x->base);
 		/* __builtin_va_list * (x86-64: an array spelled by its typedef) */
-		bool wrap = (bt->kind == TY_ARRAY && !(c->valist_tag && T(c, c->t_valist)->canon == bt->canon)) || bt->kind == TY_FUNC;
+		bool wrap = (bt->kind == TY_ARRAY && !(c->valist_tag && AST_TYPE(c, c->t_valist)->canon == bt->canon)) || bt->kind == TY_FUNC;
 
 		if (wrap)
 			vbuffer_string_append(&in, x->flags & TF_BLOCK ? "(^" : "(*");
 		else
 			vbuffer_string_append(&in, x->flags & TF_BLOCK ? "^" : "*");
 		if (QQ(t)) {	/* clang: "int *const", "int *const *", "int *const p" */
-			quals(&in, QQ(t));
+			cc_type_qualifiers_spell(&in, QQ(t));
 			if (!inner[0] && in.n && in.p[in.n - 1] == ' ')
 				in.p[--in.n] = 0;
 		}
 		vbuffer_string_append(&in, inner);
 		if (wrap)
 			vbuffer_string_append(&in, ")");
-		type_str(c, x->base, in.p, out, ok);
+		cc_type_spell(c, x->base, in.p, out, ok);
 		return;
 	}
 	case TY_ARRAY: {
@@ -90,10 +90,10 @@ VPRIV void type_str(cc *c, qty t, const char *inner, vbuffer *out, bool *ok)
 		if (x->flags & (TF_INCOMPLETE | TF_VLA))
 			vbuffer_string_append(&in, "[]");
 		else {
-			snprintf(n, sizeof(n), "[%llu]", (unsigned long long)arr_len(c, t));
+			snprintf(n, sizeof(n), "[%llu]", (unsigned long long)cc_type_array_length(c, t));
 			vbuffer_string_append(&in, n);
 		}
-		type_str(c, QT(QI(x->base), QQ(x->base) | QQ(t)), in.p, out, ok);
+		cc_type_spell(c, QT(QI(x->base), QQ(x->base) | QQ(t)), in.p, out, ok);
 		return;
 	}
 	case TY_FUNC: {
@@ -110,15 +110,15 @@ VPRIV void type_str(cc *c, qty t, const char *inner, vbuffer *out, bool *ok)
 
 				if (i)
 					vbuffer_string_append(&in, ", ");
-				type_str(c, c->params[x->aux + i], "", &p, ok);
+				cc_type_spell(c, c->params[x->aux + i], "", &p, ok);
 				vbuffer_append(&in, p.p, p.n);
 			}
 			if (x->flags & TF_VARIADIC)
 				vbuffer_string_append(&in, ", ...");
 		}
 		vbuffer_string_append(&in, ")");
-		x = T(c, t);
-		type_str(c, x->base, in.p, out, ok);
+		x = AST_TYPE(c, t);
+		cc_type_spell(c, x->base, in.p, out, ok);
 		return;
 	}
 	case TY_VECTOR: {
@@ -127,14 +127,14 @@ VPRIV void type_str(cc *c, qty t, const char *inner, vbuffer *out, bool *ok)
 		char n[96];
 		uint32_t td = 0;
 
-		type_str(c, x->base, "", &el, ok);
+		cc_type_spell(c, x->base, "", &el, ok);
 		/* clang keeps the typedef name (vcc: the first typedef of this vector type) */
 		for (uint32_t i = 1; i < c->nsym && !td; i++)
 			if (c->syms[i].kind == S_TYPEDEF && c->syms[i].name && QI(c->syms[i].ty) == QI(t) && !QQ(c->syms[i].ty))
 				td = i;
-		quals(&b, QQ(t));
+		cc_type_qualifiers_spell(&b, QQ(t));
 		if (td) {
-			vbuffer_append(&b, idstr_(c->syms[td].name), idlen_(c->syms[td].name));
+			vbuffer_append(&b, cc_identifier_string(c->syms[td].name), cc_identifier_length(c->syms[td].name));
 			if (inner[0]) {
 				vbuffer_string_append(&b, " ");
 				vbuffer_string_append(&b, inner);
@@ -149,7 +149,7 @@ VPRIV void type_str(cc *c, qty t, const char *inner, vbuffer *out, bool *ok)
 			return;
 		}
 		snprintf(n, sizeof(n), "__attribute__((__vector_size__(%llu * sizeof(",
-			 (unsigned long long)(ty_size(c, t) / ty_size(c, x->base)));
+			 (unsigned long long)(cc_type_size(c, t) / cc_type_size(c, x->base)));
 		vbuffer_string_append(&b, n);
 		vbuffer_append(&b, el.p, el.n);
 		vbuffer_string_append(&b, ")))) ");
@@ -165,7 +165,7 @@ VPRIV void type_str(cc *c, qty t, const char *inner, vbuffer *out, bool *ok)
 	default:
 		break;
 	}
-	quals(&b, QQ(t));
+	cc_type_qualifiers_spell(&b, QQ(t));
 	switch (x->kind) {
 	case TY_VOID: vbuffer_string_append(&b, "void"); break;
 	case TY_BFLOAT16: vbuffer_string_append(&b, "__bf16"); break;
@@ -179,21 +179,21 @@ VPRIV void type_str(cc *c, qty t, const char *inner, vbuffer *out, bool *ok)
 		char nb[256];
 
 		if (x->aux == c->valist_tag && c->valist_tag) {
-			vbuffer_string_append(&b, KIND(c, c->t_valist) == TY_ARRAY ? "struct __va_list_tag" : "__builtin_va_list");
+			vbuffer_string_append(&b, AST_TYPE_KIND(c, c->t_valist) == TY_ARRAY ? "struct __va_list_tag" : "__builtin_va_list");
 		} else if (r->name) {
-			uint32_t s = lookup_tag(c, r->name);
+			uint32_t s = cc_tag_lookup(c, r->name);
 
 			if (!s || (uint32_t)c->syms[s].val != x->aux)
 				*ok = false;
 			snprintf(nb, sizeof(nb), "%s %.*s", x->kind == TY_STRUCT ? "struct" : x->kind == TY_UNION ? "union" : "enum",
-				 IDF(r->name));
+				 CC_IDENTIFIER(r->name));
 			vbuffer_string_append(&b, nb);
 		} else if (r->typedef_name) {
-			uint32_t s = lookup(c, r->typedef_name);
+			uint32_t s = cc_symbol_lookup(c, r->typedef_name);
 
-			if (!s || c->syms[s].kind != S_TYPEDEF || T(c, c->syms[s].ty)->canon != T(c, t)->canon)
+			if (!s || c->syms[s].kind != S_TYPEDEF || AST_TYPE(c, c->syms[s].ty)->canon != AST_TYPE(c, t)->canon)
 				*ok = false;
-			snprintf(nb, sizeof(nb), "%.*s", IDF(r->typedef_name));
+			snprintf(nb, sizeof(nb), "%.*s", CC_IDENTIFIER(r->typedef_name));
 			vbuffer_string_append(&b, nb);
 		} else {
 			*ok = false;
@@ -201,12 +201,12 @@ VPRIV void type_str(cc *c, qty t, const char *inner, vbuffer *out, bool *ok)
 		break;
 	}
 	default: {
-		const char *n = int_name(x->kind);
+		const char *n = cc_type_integer_name(x->kind);
 
-		if (is_int_kind(x->kind) && x->n && !(x->flags & TF_ATOMIC)) {
+		if (cc_type_kind_is_integer(x->kind) && x->n && !(x->flags & TF_ATOMIC)) {
 			char bn[64];
 
-			snprintf(bn, sizeof(bn), "%s_BitInt(%u)", is_signed(c, t) ? "" : "unsigned ", x->n);
+			snprintf(bn, sizeof(bn), "%s_BitInt(%u)", cc_type_is_signed(c, t) ? "" : "unsigned ", x->n);
 			vbuffer_string_append(&b, bn);
 			break;
 		}
@@ -231,7 +231,7 @@ struct cc_type_name {
 	char bytes[4096];
 };
 
-static vbuffer *tybuf(cc *c)
+static vbuffer *cc_type_name_buffer(cc *c)
 {
 	struct cc_type_name *s;
 
@@ -243,11 +243,11 @@ static vbuffer *tybuf(cc *c)
 }
 
 /* t as clang spells it in diagnostics (buffers in rotation: tybuf) */
-VPRIV const char *tyname(cc *c, qty t)
+CC_PRIVATE const char *tyname(cc *c, qty t)
 {
 	bool ok = true;
-	vbuffer *o = tybuf(c);
+	vbuffer *o = cc_type_name_buffer(c);
 
-	type_str(c, t, "", o, &ok);
+	cc_type_spell(c, t, "", o, &ok);
 	return o->p;
 }

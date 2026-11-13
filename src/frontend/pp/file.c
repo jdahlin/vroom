@@ -103,31 +103,31 @@ static pp_skeleton *pp_skeleton_build(const lex_file *f)
 			stk[sp++] = nd;
 			break;
 		case PP_DIRECTIVE_ELIF: case PP_DIRECTIVE_ELIFDEF: case PP_DIRECTIVE_ELIFNDEF: case PP_DIRECTIVE_ELSE:
-			if (!sp) { if (!fi->bad) fi->bad = 1, fi->unbalanced_token = i + 1; break; }
-			d[stk[sp - 1]].next = nd;
+			if (!sp) { if (!fi->unbalanced) fi->unbalanced = 1, fi->unbalanced_token = i + 1; break; }
+			d[stk[sp - 1]].next_in_group = nd;
 			stk[sp - 1] = nd;
 			break;
 		case PP_DIRECTIVE_ENDIF:
-			if (!sp) { if (!fi->bad) fi->bad = 1, fi->unbalanced_token = i + 1; break; }
-			d[stk[--sp]].next = nd;
+			if (!sp) { if (!fi->unbalanced) fi->unbalanced = 1, fi->unbalanced_token = i + 1; break; }
+			d[stk[--sp]].next_in_group = nd;
 			break;
 		}
 		nd++;
 		i = e - 1;
 	}
-	if (sp && !fi->bad)
-		fi->bad = 2, fi->unbalanced_token = d[stk[sp - 1]].tok + 1;
+	if (sp && !fi->unbalanced)
+		fi->unbalanced = 2, fi->unbalanced_token = d[stk[sp - 1]].hash_token + 1;
 	free(stk);
-	fi->dir = d;
-	fi->mac = pp_shared_allocate((nd + 1) * sizeof(*fi->mac));	/* fresh: zero */
-	fi->inc = pp_shared_allocate((nd + 1) * sizeof(*fi->inc));
+	fi->directives = d;
+	fi->macros = pp_shared_allocate((nd + 1) * sizeof(*fi->macros));	/* fresh: zero */
+	fi->include_answers = pp_shared_allocate((nd + 1) * sizeof(*fi->include_answers));
 	fi->directive_count = nd;
 	/*
 	 * Include guard: the file is one #ifndef X / #if !defined(X) group
 	 * (no #else/#elif) with nothing before or after it.
 	 */
-	if (!fi->bad && nd >= 2 && d[0].tok == 0) {
-		uint32_t g = 0, e = d[0].end;
+	if (!fi->unbalanced && nd >= 2 && d[0].hash_token == 0) {
+		uint32_t g = 0, e = d[0].end_token;
 
 		if (d[0].kind == PP_DIRECTIVE_IFNDEF && e == 3 && t[2].kind == LEX_TOKEN_IDENTIFIER)
 			g = t[2].id;
@@ -140,10 +140,10 @@ static pp_skeleton *pp_skeleton_build(const lex_file *f)
 				g = t[5].id;
 		}
 		if (g) {
-			uint32_t k = d[0].next;
+			uint32_t k = d[0].next_in_group;
 
-			if (d[k].kind == PP_DIRECTIVE_ENDIF && d[k].end == n)
-				fi->guard = g;
+			if (d[k].kind == PP_DIRECTIVE_ENDIF && d[k].end_token == n)
+				fi->guard_macro = g;
 		}
 	}
 	return fi;
@@ -169,7 +169,7 @@ VPRIV const pp_skeleton *pp_skeleton_get(const lex_file *f, bool *fresh)
 VPRIV uint32_t pp_file_line_of_offset(const lex_file *f, const pp_skeleton *cfi, uint32_t off)
 {
 	pp_skeleton *fi = (pp_skeleton *)cfi;
-	uint32_t *l = __atomic_load_n(&fi->lines, __ATOMIC_ACQUIRE), n, lo, hi;
+	uint32_t *l = __atomic_load_n(&fi->line_offsets, __ATOMIC_ACQUIRE), n, lo, hi;
 
 	if (!l) {
 		uint32_t *z = NULL, c = 0;
@@ -181,11 +181,11 @@ VPRIV uint32_t pp_file_line_of_offset(const lex_file *f, const pp_skeleton *cfi,
 		for (uint32_t i = 0; i < f->size; i++)
 			if (f->src[i] == '\n')
 				l[c++] = i;
-		__atomic_store_n(&fi->nlines, c, __ATOMIC_RELAXED);	/* a loser writes it too */
-		if (!__atomic_compare_exchange_n(&fi->lines, &z, l, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+		__atomic_store_n(&fi->line_count, c, __ATOMIC_RELAXED);	/* a loser writes it too */
+		if (!__atomic_compare_exchange_n(&fi->line_offsets, &z, l, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
 			l = z;
 	}
-	n = __atomic_load_n(&fi->nlines, __ATOMIC_ACQUIRE);
+	n = __atomic_load_n(&fi->line_count, __ATOMIC_ACQUIRE);
 	/* number of newlines before off */
 	lo = 0, hi = n;
 	while (lo < hi) {

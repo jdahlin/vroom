@@ -108,12 +108,12 @@ relative to it); `TODO.md` stays at the top.
     one module (`obj_SRC`, internal header `objimpl.h`).
   - `vir/`: VIR, the SSA IR of `-O2` (SPEC-vir.md; one module `vir_SRC`, a unity
     TU like `as`): `vir.h` the public format
-    (instruction, block, slot, function, the opcode table `table.c` that the
+    (instruction, block, slot, function, the opcode table `opcode-table.c` that the
     printer, parser and verifier all read), `vir.c` the thread's reservations
-    and construction (hash-consed constants, `extra` lists), `vir_cfg`,
-    `vir_dom`, `vir_uses`, `vir_canon`, and the unit tables of the text form;
+    and construction (hash-consed constants, `extra` lists), `vir_cfg_build`,
+    `vir_dominators_build`, `vir_uses_count`, `vir_canon`, and the unit tables of the text form;
     `print.c`, `parse.c` (arbitrary bytes fail as `file:line:col`, never crash)
-    and `verify.c` (every rule of SPEC section 12); `virimpl.h` is internal.
+    and `verify.c` (every rule of SPEC section 12); `vir-internal.h` is internal.
     Passes on VIR: `include/vir/pass.h` (interface, registry, `vir_pass_run`'s check of
     `keeps`), `pass-list.c` (the registry), `compact.c` (`vir_function_compact`), one pass
     per file in `pass/`; `virtest --passes` runs them (`doc/quality/DESIGN-vir-optimizer.md`).
@@ -185,7 +185,7 @@ relative to it); `TODO.md` stays at the top.
   - `platform/wasm/`: the wasm object writer (`wasm.c`: layout, symbol table,
     relocations as LLVM's WasmObjectWriter, byte for byte).
   - `frontend/pp/`, `frontend/c/` and `codegen/` (with `arch/<cpu>/codegen/`) are directories of
-    files by topic, one internal header each (`pp-internal.h`, `ccimpl.h`, `emitimpl.h`) with the types, macros
+    files by topic, one internal header each (`pp-internal.h`, `cc-internal.h`, `emitimpl.h`) with the types, macros
     and prototypes the files share; a shared function is `VPRIV` (static in
     the unity build).  Each such module is compiled as one TU by default
     (`obj/unity/MOD.c` #includes the files in `MOD_SRC`, SQLite style); `make
@@ -283,7 +283,7 @@ bench/vcc-mutate.py -j 6 --fix       # ... vcc --fix on every rejected mutant: n
 bench/vcc-explain.py                # doc/diag pages: the wrong example gives the id, the fixed one nothing
 src/tools/gen-explain.py [--check]      # driver/explain.inc from doc/diag/*.md (vcc --explain ID)
 src/tools/gen-walkprefix.py [--check]   # codegen/walk/prefix.h: the walker's function names, WK_PREFIX compiles it under another name (VIR)
-build/src/viralloc --sweep F.vir     # VIR register allocation (vir/alloc.c) on a synthetic target: dump + counters, checker at every register count
+build/src/viralloc --sweep F.vir     # VIR register allocation (vir/register-allocation.c) on a synthetic target: dump + counters, checker at every register count
 bench/vir-alloc.py [--bless]        # src/test/vir-alloc: expected dumps and sweeps (<1 s); `random -n N`: generated functions (~1 s/unit)
 bench/vir-alloc.py mutate|time      # the checker catches corrupted allocations; ns per VIR instruction (budget 200 for now, target 60: SPEC 22.1)
 bench/vir-failures.py [-n N]        # why VIR gives up on functions (VCC_VIR_STATS=1; reasons: codegen/vir/failure.h): suites, kernel, PostgreSQL, SQLite, most frequent first (~1 min)

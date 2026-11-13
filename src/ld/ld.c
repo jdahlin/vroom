@@ -140,7 +140,6 @@ static struct ld_context *const ctx = &ld_link_context;
 /* ---------------- writing sections ---------------- */
 
 #include "../arch/a64/ld/relocation-apply.inc"
-static _Atomic bool got_seen;
 #include "../arch/x64/ld/relocation.inc"
 
 #include "section-write.c"

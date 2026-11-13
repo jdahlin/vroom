@@ -1,0 +1,898 @@
+art_put	cc_array_bounds_art_append	function	frontend/c/array-bounds.c	
+art_rep	cc_array_bounds_art_repeat	function	frontend/c/array-bounds.c	
+bounds_art	cc_array_bounds_art_draw	function	frontend/c/array-bounds.c	
+bounds_warn	cc_array_bounds_warn	function	frontend/c/array-bounds.c	
+at_call	cc_atomic_wide_call_new	function	frontend/c/atomic-wide.c	
+atomic_lock_free_runtime	cc_atomic_wide_lock_free_runtime_build	function	frontend/c/atomic-wide.c	
+at_statement	cc_atomic_wide_statement_append	function	frontend/c/atomic-wide.c	
+at_finish	cc_atomic_wide_statement_expression_finish	function	frontend/c/atomic-wide.c	
+at_save	cc_atomic_wide_value_save	function	frontend/c/atomic-wide.c	
+at_buffer	cc_atomic_wide_buffer_new	function	frontend/c/atomic-wide.c	
+at_memory	cc_atomic_wide_memory_build	function	frontend/c/atomic-wide.c	
+atomic_load_expr	cc_atomic_wide_load_build	function	frontend/c/atomic-wide.c	
+atomic_assign_expr	cc_atomic_wide_assignment_build	function	frontend/c/atomic-wide.c	
+atomic_wide	cc_atomic_wide_type_is_wide	function	frontend/c/atomic-wide.c	
+at_address	cc_atomic_wide_address_build	function	frontend/c/atomic-wide.c	
+atomic_builtin_expr	cc_atomic_wide_builtin_build	function	frontend/c/atomic-wide.c	
+init_attrs	cc_attribute_table_init	function	frontend/c/attribute.c	
+attr_of	cc_attribute_lookup	function	frontend/c/attribute.c	
+skip_balanced	cc_token_skip_balanced	function	frontend/c/attribute.c	
+string_index	cc_attribute_string_parse	function	frontend/c/attribute.c	
+mode_kind	cc_attribute_mode_kind	function	frontend/c/attribute.c	
+attr_x86	cc_attribute_x86_is_known	function	frontend/c/attribute.c	
+attr_norm	cc_attribute_name_normalize	function	frontend/c/attribute.c	
+attr_known	cc_attribute_is_known	function	frontend/c/attribute.c	
+edit_distance	cc_attribute_edit_distance	function	frontend/c/attribute.c	
+attr_correction	cc_attribute_name_correction	function	frontend/c/attribute.c	
+attribute_list_	cc_attribute_list_parse_slow	function	frontend/c/attribute.c	
+merge_attrs	cc_attribute_merge	function	frontend/c/attribute.c	
+asm_label	cc_asm_label_parse	function	frontend/c/attribute.c	
+bfu	cc_bitint_cast_u128_node	function	frontend/c/bitint-float-cast.c	
+bfr	cc_bitint_cast_rvalue	function	frontend/c/bitint-float-cast.c	
+bfo	cc_bitint_cast_binary	function	frontend/c/bitint-float-cast.c	
+bft	cc_bitint_cast_conditional	function	frontend/c/bitint-float-cast.c	
+bfl	cc_bitint_cast_local_new	function	frontend/c/bitint-float-cast.c	
+bfa	cc_bitint_cast_assignment_append	function	frontend/c/bitint-float-cast.c	
+bfcvt	cc_bitint_cast_convert	function	frontend/c/bitint-float-cast.c	
+bfview	cc_bitint_cast_view	function	frontend/c/bitint-float-cast.c	
+bfdone	cc_bitint_cast_finish	function	frontend/c/bitint-float-cast.c	
+big_float_cast	cc_bitint_float_cast_build	function	frontend/c/bitint-float-cast.c	
+big_valid	cc_bitint_value_is_valid	function	frontend/c/bitint.c	
+mk_big_words	cc_bitint_node_new_words	function	frontend/c/bitint.c	
+big_int_node	cc_bitint_node_new_integer	function	frontend/c/bitint.c	
+big_literal	cc_bitint_literal_parse	function	frontend/c/bitint.c	
+big_operand	cc_bitint_operand_load	function	frontend/c/bitint.c	
+big_result	cc_bitint_result_store	function	frontend/c/bitint.c	
+big_to_float	cc_bitint_to_float	function	frontend/c/bitint.c	
+big_from_float	cc_bitint_from_float	function	frontend/c/bitint.c	
+big_value_string	cc_bitint_value_format	function	frontend/c/bitint.c	
+big_fold_node	cc_bitint_node_fold	function	frontend/c/bitint.c	
+big_read_eval	cc_bitint_read_eval	function	frontend/c/bitint.c	
+big_nonzero	cc_bitint_value_is_nonzero	function	frontend/c/bitint.c	
+big_words	cc_bitint_words_store	function	frontend/c/bitint.c	
+big_conversion_exact	cc_bitint_conversion_is_exact	function	frontend/c/bitint.c	
+atomic_call	cc_builtin_atomic_build	function	frontend/c/builtin-atomic.c	
+atomic_lock_free_call	cc_builtin_atomic_lock_free_build	function	frontend/c/builtin-atomic.c	
+fixed_bitcount	cc_builtin_bit_count_fixed	function	frontend/c/builtin-bit-count.c	
+bitcount_local	cc_lowering_local_new	function	frontend/c/builtin-bit-count.c	
+bitcount_statement	cc_lowering_statement_append	function	frontend/c/builtin-bit-count.c	
+big_bitcount	cc_builtin_bit_count_bitint	function	frontend/c/builtin-bit-count.c	
+generic_bitcount	cc_builtin_bit_count_generic	function	frontend/c/builtin-bit-count.c	also named in bench/ or tools/ scripts; also named in TODO.md/AGENTS.md prose
+stdc_rotate	cc_builtin_rotate_build	function	frontend/c/builtin-bit-count.c	
+args_list	cc_builtin_arguments_parse	function	frontend/c/builtin-call.c	
+unqual_array	cc_type_unqualified_array	function	frontend/c/builtin-call.c	
+mk_builtin	cc_builtin_node_new	function	frontend/c/builtin-call.c	
+offsetof_expr	cc_builtin_offsetof_build	function	frontend/c/builtin-call.c	
+builtin_call	cc_builtin_call_build	function	frontend/c/builtin-call.c	
+classify_type	cc_builtin_classify_type	function	frontend/c/builtin-fold.c	
+eval_builtin	cc_builtin_fold	function	frontend/c/builtin-fold.c	
+fold_strncmp_zero	cc_builtin_strncmp_zero_fold	function	frontend/c/builtin-library-call.c	
+narrow_math_call	cc_builtin_narrow_math_build	function	frontend/c/builtin-library-call.c	
+fp_sign_call	cc_builtin_fp_sign_build	function	frontend/c/builtin-library-call.c	
+fast_math_call	cc_builtin_fast_math_build	function	frontend/c/builtin-library-call.c	
+object_init_extent	cc_builtin_object_size_initializer_extent	function	frontend/c/builtin-object-size.c	
+object_element_size	cc_builtin_object_size_element_size	function	frontend/c/builtin-object-size.c	
+object_flexible_member	cc_builtin_object_size_is_flexible_member	function	frontend/c/builtin-object-size.c	
+object_lvalue_bound	cc_builtin_object_size_lvalue_bound	function	frontend/c/builtin-object-size.c	
+object_pointer_bound	cc_builtin_object_size_pointer_bound	function	frontend/c/builtin-object-size.c	
+oslog_layout	cc_builtin_os_log_layout	function	frontend/c/builtin-os-log.c	
+oslog_arg	cc_builtin_os_log_argument	function	frontend/c/builtin-os-log.c	
+os_log_call	cc_builtin_os_log_build	function	frontend/c/builtin-os-log.c	
+builtin_all	cc_builtin_table_get	function	frontend/c/builtin-table.c	
+sigtype	cc_builtin_signature_type	function	frontend/c/builtin-table.c	
+sig_func_type	cc_builtin_signature_function_type	function	frontend/c/builtin-table.c	
+builtin_type	cc_builtin_type	function	frontend/c/builtin-table.c	
+builtin_known	cc_builtin_is_known	function	frontend/c/builtin-table.c	
+builtin_hook	cc_builtin_hook_register	function	frontend/c/builtin-table.c	
+init_builtins	cc_builtin_table_init	function	frontend/c/builtin-table.c	
+builtin_of	cc_builtin_lookup	function	frontend/c/builtin-table.c	
+vector_builtin	cc_builtin_vector_build	function	frontend/c/builtin-vector.c	
+builtin_vector_lane	cc_builtin_vector_lane	function	frontend/c/builtin-vector.c	
+elementwise_abs_lane	cc_builtin_elementwise_abs_lane	function	frontend/c/builtin-vector.c	
+elementwise_abs_effects	cc_builtin_has_effects	function	frontend/c/builtin-vector.c	
+elementwise_abs_call	cc_builtin_elementwise_abs_build	function	frontend/c/builtin-vector.c	
+x86_pcmpstr_call	cc_builtin_x86_pcmpstr_build	function	frontend/c/builtin-x86.c	
+x86_simd_call	cc_builtin_x86_simd_build	function	frontend/c/builtin-x86.c	
+nonnull_args	cc_call_nonnull_check	function	frontend/c/call.c	
+attribute_list	cc_attribute_list_parse	function	frontend/c/ccimpl.h	
+attrs_empty	cc_attribute_is_empty	function	frontend/c/ccimpl.h	
+at_attribute	cc_token_at_attribute	function	frontend/c/ccimpl.h	
+at_std_attr	cc_token_at_standard_attribute	function	frontend/c/ccimpl.h	
+decl_tdef	cc_typedef_sugar_declared	function	frontend/c/ccimpl.h	
+rng_np	cc_node_range_bare	function	frontend/c/ccimpl.h	also named in TODO.md/AGENTS.md prose
+dget	cc_scope_get	function	frontend/c/ccimpl.h	also used in replay.c (2): the script edits it
+typedef_id	cc_symbol_is_typedef_identifier	function	frontend/c/ccimpl.h	
+is_int_kind	cc_type_kind_is_integer	function	frontend/c/ccimpl.h	
+is_flt_kind	cc_type_kind_is_float	function	frontend/c/ccimpl.h	
+is_q	cc_type_is_float128	function	frontend/c/ccimpl.h	
+q_prec	cc_float_precision_bits	function	frontend/c/ccimpl.h	
+fpool_q	cc_float_pool_append_float128	function	frontend/c/ccimpl.h	
+fnum_q	cc_float_pool_float128	function	frontend/c/ccimpl.h	
+kwof	cc_token_keyword	function	frontend/c/ccimpl.h	
+is_nullability	cc_token_is_nullability	function	frontend/c/ccimpl.h	
+iskw	cc_token_is_keyword	function	frontend/c/ccimpl.h	
+expect_lparen	cc_token_expect_left_paren	function	frontend/c/ccimpl.h	
+expect_here	cc_token_expect_here	function	frontend/c/ccimpl.h	
+expect_match	cc_token_expect_match	function	frontend/c/ccimpl.h	
+expect_close	cc_token_expect_close	function	frontend/c/ccimpl.h	
+setspan	cc_node_span_set	function	frontend/c/ccimpl.h	
+uv_deeper	cc_uninitialized_is_assigned_deeper	function	frontend/c/ccimpl.h	public (declared in include/frontend/c/)
+uv_tracked	cc_uninitialized_is_tracked	function	frontend/c/ccimpl.h	
+ty_unatomic	cc_type_unatomic	function	frontend/c/ccimpl.h	
+cplx_elem	cc_complex_element_type	function	frontend/c/complex.c	
+ty_complex	cc_type_complex	function	frontend/c/complex.c	
+mk_cplx	cc_complex_node_new	function	frontend/c/complex.c	
+cplx_part	cc_complex_part	function	frontend/c/complex.c	
+cplx_parts	cc_complex_parts	function	frontend/c/complex.c	
+to_complex	cc_complex_convert	function	frontend/c/complex.c	
+cplx_bool	cc_complex_to_bool	function	frontend/c/complex.c	
+cplx_scale	cc_complex_float128_scale	function	frontend/c/complex.c	
+cplx_round	cc_complex_float_round	function	frontend/c/complex.c	
+cplx_divconst	cc_complex_divide_constant	function	frontend/c/complex.c	
+cplx_divcall	cc_complex_divide_call	function	frontend/c/complex.c	
+cplx_binop	cc_complex_binary	function	frontend/c/complex.c	
+cplx_unary	cc_complex_unary	function	frontend/c/complex.c	
+cplx_atomic_incdec	cc_complex_atomic_increment	function	frontend/c/complex.c	
+cplx_incdec	cc_complex_increment	function	frontend/c/complex.c	
+trunc_to	cc_constant_truncate	function	frontend/c/constant-eval.c	
+node_field	cc_node_member_field	function	frontend/c/constant-eval.c	
+eval_addr	cc_constant_eval_address	function	frontend/c/constant-eval.c	
+is_flt_lit	cc_constant_is_float_literal	function	frontend/c/constant-eval.c	
+set_q	cc_constant_float128_set	function	frontend/c/constant-eval.c	
+get_q	cc_constant_float128_get	function	frontend/c/constant-eval.c	
+constexpr_object_unwrap	cc_constexpr_object_unwrap	function	frontend/c/constant-eval.c	
+constexpr_subobject	cc_constexpr_subobject	function	frontend/c/constant-eval.c	
+constexpr_value	cc_constexpr_value	function	frontend/c/constant-eval.c	
+constexpr_variably_modified	cc_constexpr_type_is_variably_modified	function	frontend/c/constant-eval.c	
+constexpr_type_ok	cc_constexpr_type_is_valid	function	frontend/c/constant-eval.c	
+constexpr_conversion	cc_constexpr_conversion_check	function	frontend/c/constant-eval.c	
+is_npc	cc_expression_is_null_pointer_constant	function	frontend/c/constant-eval.c	
+cv_nz	cc_value_is_nonzero	function	frontend/c/constant-eval.c	
+cv_weak	cc_value_is_weak	function	frontend/c/constant-eval.c	
+clz128	cc_count_leading_zeros_128	function	frontend/c/constant-eval.c	
+constexpr_unwrap	cc_constexpr_unwrap	function	frontend/c/constant-eval.c	
+constexpr_init_ok	cc_constexpr_initializer_is_ok	function	frontend/c/constant-eval.c	
+bad_conversion	cc_conversion_invalid_report	function	frontend/c/conversion-warnings.c	
+param_note	cc_conversion_parameter_note	function	frontend/c/conversion-warnings.c	
+conv_from	cc_conversion_source_type	function	frontend/c/conversion-warnings.c	
+conv_error	cc_conversion_error_report	function	frontend/c/conversion-warnings.c	
+ptr_ok_	cc_conversion_pointer_target_is_ok_nested	function	frontend/c/conversion-warnings.c	
+ptr_ok	cc_conversion_pointer_target_is_ok	function	frontend/c/conversion-warnings.c	
+nested_quals	cc_conversion_nested_qualifiers_differ	function	frontend/c/conversion-warnings.c	
+conv_check	cc_conversion_check	function	frontend/c/conversion-warnings.c	
+crange	cc_conversion_integer_range	function	frontend/c/conversion-warnings.c	
+apf_str	cc_conversion_float_format	function	frontend/c/conversion-warnings.c	
+literal_conv	cc_conversion_literal_check	function	frontend/c/conversion-warnings.c	also named in TODO.md/AGENTS.md prose
+objsize_unknown	cc_conversion_object_size_is_unknown	function	frontend/c/conversion-warnings.c	
+const_conv	cc_conversion_constant_check	function	frontend/c/conversion-warnings.c	also named in TODO.md/AGENTS.md prose
+bitfield_const	cc_conversion_bitfield_constant_check	function	frontend/c/conversion-warnings.c	also named in TODO.md/AGENTS.md prose
+arr_tyname	cc_type_array_name	function	frontend/c/conversion-warnings.c	
+quiet_rt	cc_report_runtime_is_quiet	function	frontend/c/conversion-warnings.c	
+i128s_	cc_format_i128	function	frontend/c/conversion-warnings.c	
+char_sign	cc_conversion_char_signedness	function	frontend/c/conversion-warnings.c	
+fold_f2i	cc_conversion_float_to_integer_fold	function	frontend/c/conversion.c	
+cast_node	cc_cast_insert	function	frontend/c/conversion.c	
+decay_slow	cc_conversion_decay_slow	function	frontend/c/conversion.c	also named in TODO.md/AGENTS.md prose
+bitfield_of	cc_node_bitfield	function	frontend/c/conversion.c	
+promotion_bitfield	cc_conversion_promotion_bitfield	function	frontend/c/conversion.c	
+conv_kind	cc_conversion_cast_kind	function	frontend/c/conversion.c	
+union_member_for	cc_conversion_is_union_target	function	frontend/c/conversion.c	
+has_side_effects	cc_expression_has_side_effects	function	frontend/c/conversion.c	
+convert_as	cc_conversion_apply_as	function	frontend/c/conversion.c	
+convert_slow	cc_conversion_apply_slow	function	frontend/c/conversion.c	
+rvalue_promote	cc_node_rvalue_promote	function	frontend/c/conversion.c	
+need_scalar	cc_node_require_scalar	function	frontend/c/conversion.c	
+need_lvalue	cc_node_require_lvalue	function	frontend/c/conversion.c	
+drcov_init	cc_replay_coverage_init	function	frontend/c/declaration-coverage.c	
+drcov_active	cc_replay_coverage_is_active	function	frontend/c/declaration-coverage.c	
+drcov_boundary	cc_replay_coverage_boundary	function	frontend/c/declaration-coverage.c	
+drb_has	cc_replay_coverage_has_boundary	function	frontend/c/declaration-coverage.c	
+drcov_finish	cc_replay_coverage_finish	function	frontend/c/declaration-coverage.c	
+is_cvr	cc_token_kind_is_qualifier	function	frontend/c/declaration-specifiers.c	
+unknown_type	cc_declaration_specifiers_unknown_type_report	function	frontend/c/declaration-specifiers.c	
+is_type_start	cc_token_is_type_start	function	frontend/c/declaration-specifiers.c	
+is_decl_start	cc_token_is_declaration_start	function	frontend/c/declaration-specifiers.c	
+tag_new	cc_tag_new	function	frontend/c/declaration-specifiers.c	
+tag_lookup_or_new	cc_tag_lookup_or_new	function	frontend/c/declaration-specifiers.c	
+int_type	cc_declaration_specifiers_integer_type	function	frontend/c/declaration-specifiers.c	
+typeof_evaluated	cc_declaration_specifiers_typeof_evaluated	function	frontend/c/declaration-specifiers.c	
+typeof_spec	cc_declaration_specifiers_typeof_parse	function	frontend/c/declaration-specifiers.c	
+after_declarator_id	cc_token_is_valid_after_declarator_identifier	function	frontend/c/declaration-specifiers.c	
+bad_width_sign	cc_declaration_specifiers_width_sign_report	function	frontend/c/declaration-specifiers.c	
+late_width_sign	cc_declaration_specifiers_late_width_sign	function	frontend/c/declaration-specifiers.c	
+tag_line_end	cc_declaration_specifiers_tag_ends_line	function	frontend/c/declaration-specifiers.c	
+tag_width	cc_declaration_specifiers_tag_width_report	function	frontend/c/declaration-specifiers.c	
+base_clash	cc_declaration_specifiers_base_clash	function	frontend/c/declaration-specifiers.c	
+valid_after_tag	cc_declaration_specifiers_is_valid_after_tag	function	frontend/c/declaration-specifiers.c	
+tag_semi	cc_declaration_specifiers_tag_semicolon_recover	function	frontend/c/declaration-specifiers.c	
+tag_body_end	cc_declaration_specifiers_tag_body_end	function	frontend/c/declaration-specifiers.c	
+spec_clash	cc_declaration_specifiers_clash_report	function	frontend/c/declaration-specifiers.c	
+implicit_int_name	cc_declaration_specifiers_implicit_int_name	function	frontend/c/declaration-specifiers.c	
+implicit_int_error	cc_declaration_specifiers_implicit_int_error	function	frontend/c/declaration-specifiers.c	
+decl_specs	cc_declaration_specifiers_parse	function	frontend/c/declaration-specifiers.c	
+new_attrs	cc_attribute_new	function	frontend/c/declaration.c	
+apply_sym_attrs	cc_attribute_apply_symbol	function	frontend/c/declaration.c	
+deprecated_use	cc_deprecated_use_report	function	frontend/c/declaration.c	
+tag_deprecate	cc_tag_deprecate	function	frontend/c/declaration.c	
+skip_vla_init	cc_declaration_vla_initializer_skip	function	frontend/c/declaration.c	
+file_scope_sym	cc_symbol_file_scope_find	function	frontend/c/declaration.c	
+kr_params	cc_declaration_kr_parameters_parse	function	frontend/c/declaration.c	
+decl_semi	cc_declaration_semicolon_expect	function	frontend/c/declaration.c	
+vector_attribute	cc_declarator_vector_attribute_apply	function	frontend/c/declarator.c	
+param_list	cc_declarator_parameter_list_parse	function	frontend/c/declarator.c	
+array_suffix	cc_declarator_array_suffix_parse	function	frontend/c/declarator.c	
+nested_declarator	cc_declarator_nested_parse	function	frontend/c/declarator.c	
+dop_grow	cc_declarator_operations_grow	function	frontend/c/declarator.c	
+apply_declarator	cc_declarator_apply	function	frontend/c/declarator.c	
+type_name	cc_type_name_parse	function	frontend/c/declarator.c	
+sizeof_type	cc_sizeof_type_build	function	frontend/c/expression-parse.c	
+align_of_expr	cc_alignof_expression_build	function	frontend/c/expression-parse.c	
+sizeof_operand	cc_sizeof_operand_parse	function	frontend/c/expression-parse.c	
+unary_op	cc_unary_operator_parse	function	frontend/c/expression-parse.c	
+explicit_cast	cc_explicit_cast_build	function	frontend/c/expression-parse.c	
+capture_vla_bounds	cc_vla_bounds_capture	function	frontend/c/expression-parse.c	
+cast_paren	cc_cast_parenthesized_parse	function	frontend/c/expression-parse.c	
+paren_type_typo	cc_cast_is_parenthesized_type_typo	function	frontend/c/expression-parse.c	
+cast_expr	cc_cast_expression_parse	function	frontend/c/expression-parse.c	also named in TODO.md/AGENTS.md prose
+binprec	cc_binary_precedence	function	frontend/c/expression-parse.c	
+self_cmp	cc_binary_self_compare_check	function	frontend/c/expression-parse.c	
+ptr_cmp	cc_binary_pointer_compare_check	function	frontend/c/expression-parse.c	
+range_cmp	cc_binary_range_compare_check	function	frontend/c/expression-parse.c	
+binary_ops	cc_binary_operators_parse	function	frontend/c/expression-parse.c	
+cond_rest	cc_conditional_rest_parse	function	frontend/c/expression-parse.c	
+cond_expr	cc_conditional_parse	function	frontend/c/expression-parse.c	
+assign_rest	cc_assignment_rest_parse	function	frontend/c/expression-parse.c	
+assign_expr	cc_assignment_parse	function	frontend/c/expression-parse.c	
+comma_rest	cc_comma_rest_parse	function	frontend/c/expression-parse.c	
+const_expr	cc_constant_expression_parse	function	frontend/c/expression-parse.c	
+runtime_warn	cc_expression_runtime_warn	function	frontend/c/expression-warnings.c	
+logic_const_warn	cc_expression_logical_constant_warn	function	frontend/c/expression-warnings.c	
+no_implicit	cc_node_without_implicit	function	frontend/c/expression-warnings.c	
+same_ref	cc_expression_is_same_reference	function	frontend/c/expression-warnings.c	
+self_compare	cc_expression_self_compare_warn	function	frontend/c/expression-warnings.c	also named in TODO.md/AGENTS.md prose
+operand_name	cc_expression_operand_name	function	frontend/c/expression-warnings.c	
+null_compare	cc_expression_null_compare_warn	function	frontend/c/expression-warnings.c	
+range_compare	cc_expression_range_compare_warn	function	frontend/c/expression-warnings.c	
+logic_const	cc_expression_logical_constant_check	function	frontend/c/expression-warnings.c	
+ovf_warn	cc_expression_overflow_warn	function	frontend/c/expression-warnings.c	
+self_assign	cc_expression_self_assign_warn	function	frontend/c/expression-warnings.c	also named in TODO.md/AGENTS.md prose
+is_cmp	cc_operator_is_comparison	function	frontend/c/expression.c	
+void_ptr_arith	cc_pointer_void_arithmetic_check	function	frontend/c/expression.c	
+vec_scalar_ok	cc_vector_scalar_is_ok	function	frontend/c/expression.c	
+vec_scalar_check	cc_vector_scalar_check	function	frontend/c/expression.c	
+swz_idx	cc_swizzle_index	function	frontend/c/expression.c	
+swz_range_error	cc_swizzle_range_error	function	frontend/c/expression.c	
+find_member	cc_member_find	function	frontend/c/expression.c	also named in TODO.md/AGENTS.md prose
+member_slow	cc_member_build_slow	function	frontend/c/expression.c	
+mark_addr_taken	cc_symbol_mark_address_taken	function	frontend/c/expression.c	
+addr_of	cc_address_of_build	function	frontend/c/expression.c	
+generic_sel	cc_generic_selection_parse	function	frontend/c/expression.c	
+bad_primary	cc_primary_invalid_report	function	frontend/c/expression.c	
+primary_sym	cc_primary_symbol_build	function	frontend/c/expression.c	
+primary_kw	cc_primary_keyword_parse	function	frontend/c/expression.c	
+implicit_call_error	cc_primary_implicit_call_report	function	frontend/c/expression.c	
+primary_unbound	cc_primary_unbound_parse	function	frontend/c/expression.c	
+stmt_expr	cc_statement_expression_parse	function	frontend/c/expression.c	
+paren_expr	cc_parenthesized_parse	function	frontend/c/expression.c	
+primary_	cc_primary_parse_slow	function	frontend/c/expression.c	
+ovl_rank	cc_overload_rank	function	frontend/c/expression.c	
+ovl_pick	cc_overload_pick	function	frontend/c/expression.c	
+postfix_err	cc_postfix_error_parse	function	frontend/c/expression.c	
+postfix_ops	cc_postfix_operators_parse	function	frontend/c/expression.c	
+fmt_class	cc_format_check_class	function	frontend/c/format-check.c	
+fmt_loc	cc_format_check_location	function	frontend/c/format-check.c	
+fmt_loc2	cc_format_check_location_end	function	frontend/c/format-check.c	
+fmt_report	cc_format_check_report	function	frontend/c/format-check.c	also named in bench/ or tools/ scripts
+fmt_span	cc_format_check_span	function	frontend/c/format-check.c	
+fmt_fixtext	cc_format_check_fix_text	function	frontend/c/format-check.c	
+expr_tdef_raw	cc_typedef_sugar_expression_walk	function	frontend/c/format-check.c	
+expr_tdef	cc_typedef_sugar_expression	function	frontend/c/format-check.c	
+fmt_attr	cc_format_check_attribute	function	frontend/c/format-check.c	
+format_check	cc_format_check	function	frontend/c/format-check.c	
+object_size_locals	cc_function_object_size_locals	function	frontend/c/function-body-fold.c	
+local_constant	cc_function_local_is_constant	function	frontend/c/function-body-fold.c	
+fold_local_builtins	cc_function_body_fold	function	frontend/c/function-body-fold.c	
+idname	cc_identifier_name	function	frontend/c/identifier.c	
+idlen_	cc_identifier_length	function	frontend/c/identifier.c	
+idstr_	cc_identifier_string	function	frontend/c/identifier.c	
+empty_init_ext	cc_initializer_empty_extension_check	function	frontend/c/initializer.c	
+il_new	cc_initializer_list_new	function	frontend/c/initializer.c	
+il_copy	cc_initializer_list_copy	function	frontend/c/initializer.c	
+il_elem_type	cc_initializer_list_element_type	function	frontend/c/initializer.c	
+il_set	cc_initializer_list_set	function	frontend/c/initializer.c	
+il_put	cc_initializer_list_put	function	frontend/c/initializer.c	
+il_expand	cc_initializer_list_expand	function	frontend/c/initializer.c	
+il_child	cc_initializer_list_child	function	frontend/c/initializer.c	
+il_full	cc_initializer_list_is_full	function	frontend/c/initializer.c	
+il_next_pos	cc_initializer_list_next_position	function	frontend/c/initializer.c	
+skip_braces	cc_initializer_braces_skip	function	frontend/c/initializer.c	
+str_fit	cc_initializer_string_fit_check	function	frontend/c/initializer.c	
+excess_warn	cc_initializer_excess_warn	function	frontend/c/initializer.c	
+is_char_array	cc_type_is_char_array	function	frontend/c/initializer.c	
+string_initializes	cc_initializer_string_initializes	function	frontend/c/initializer.c	
+brace_string	cc_initializer_is_braced_string	function	frontend/c/initializer.c	
+il_elem	cc_initializer_list_element_parse	function	frontend/c/initializer.c	
+at_designator	cc_token_at_designator	function	frontend/c/initializer.c	
+il_continue	cc_initializer_list_continue	function	frontend/c/initializer.c	
+il_designation_path	cc_initializer_list_designation_path	function	frontend/c/initializer.c	
+il_designation	cc_initializer_list_designation	function	frontend/c/initializer.c	
+il_excess	cc_initializer_list_excess	function	frontend/c/initializer.c	
+il_fill	cc_initializer_list_fill	function	frontend/c/initializer.c	
+il_finish	cc_initializer_list_finish	function	frontend/c/initializer.c	
+init_braced	cc_initializer_braced_scalar_parse	function	frontend/c/initializer.c	
+array_copy_effects	cc_initializer_array_copy_has_effects	function	frontend/c/initializer.c	
+expr_loc	cc_expression_location	function	frontend/c/initializer.c	
+static_init_ok	cc_initializer_static_is_ok	function	frontend/c/initializer.c	also named in TODO.md/AGENTS.md prose
+profile_call	cc_instrument_call_new	function	frontend/c/instrument-functions.c	
+instrument_returns	cc_instrument_returns	function	frontend/c/instrument-functions.c	
+field_checks	cc_layout_check_fields	function	frontend/c/layout-check.c	
+layout_checks	cc_layout_check	function	frontend/c/layout-check.c	
+lazy_replayed	cc_lazy_body_replayed	function	frontend/c/lazy-body.c	also used in replay.c (1): the script edits it
+lazy_ok	cc_lazy_body_eligible	function	frontend/c/lazy-body.c	also named in TODO.md/AGENTS.md prose
+lz_tok	cc_lazy_body_token_append	function	frontend/c/lazy-body.c	
+lazy_capture	cc_lazy_body_capture	function	frontend/c/lazy-body.c	
+lazy_parse	cc_lazy_body_parse	function	frontend/c/lazy-body.c	public (declared in include/frontend/c/)
+lazy_closure	cc_lazy_body_closure	function	frontend/c/lazy-body.c	public (declared in include/frontend/c/)
+lb_type	cc_library_signature_type	function	frontend/c/library-function.c	
+lb_functype	cc_library_signature_function_type	function	frontend/c/library-function.c	
+libbi_find	cc_library_builtin_find	function	frontend/c/library-function.c	
+disabled_lib_find	cc_library_disabled_find	function	frontend/c/library-function.c	
+lib_builtin_disabled	cc_library_builtin_is_disabled	function	frontend/c/library-function.c	
+lib_builtin_known	cc_library_builtin_is_known	function	frontend/c/library-function.c	also named in bench/ or tools/ scripts
+lib_builtin_sig	cc_library_builtin_signature	function	frontend/c/library-function.c	
+lib_builtin	cc_library_builtin_declare	function	frontend/c/library-function.c	
+implicit_lib_type	cc_library_implicit_type	function	frontend/c/library-function.c	
+implicit_lib_func	cc_library_implicit_declare	function	frontend/c/library-function.c	
+implicit_func	cc_implicit_function_declare	function	frontend/c/library-function.c	
+libfn_find	cc_library_function_find	function	frontend/c/library-function.c	
+lib_header	cc_library_header	function	frontend/c/library-function.c	
+include_fix	cc_library_include_fixit	function	frontend/c/library-function.c	
+lib_func	cc_library_function_declare	function	frontend/c/library-function.c	
+int_lit_type	cc_literal_integer_type	function	frontend/c/literal.c	
+number_slow	cc_literal_number_parse_slow	function	frontend/c/literal.c	
+literal_range	cc_literal_range_warn	function	frontend/c/literal.c	
+number_s	cc_literal_number_parse_text	function	frontend/c/literal.c	also named in TODO.md/AGENTS.md prose
+lit_char	cc_literal_character_parse	function	frontend/c/literal.c	
+lit_esz	cc_literal_element_size	function	frontend/c/literal.c	
+utf8_enc	cc_literal_utf8_encode	function	frontend/c/literal.c	
+is_strtok	cc_token_kind_is_string	function	frontend/c/literal.c	
+string_lit	cc_literal_string_parse	function	frontend/c/literal.c	
+char_lit	cc_literal_character_build	function	frontend/c/literal.c	
+zero_of	cc_lowering_zero	function	frontend/c/lowering.c	
+cplx_pure	cc_lowering_is_pure	function	frontend/c/lowering.c	
+cplx_reuse	cc_lowering_once	function	frontend/c/lowering.c	
+with_pre	cc_lowering_sequence	function	frontend/c/lowering.c	
+scalar_cond	cc_condition_scalar	function	frontend/c/lowering.c	
+bad_operands	cc_operands_invalid_report	function	frontend/c/lowering.c	
+mg_put	cc_mangle_append	function	frontend/c/mangle.c	
+mg_s	cc_mangle_append_text	function	frontend/c/mangle.c	
+mg_u	cc_mangle_append_number	function	frontend/c/mangle.c	
+mg_src	cc_mangle_append_source_name	function	frontend/c/mangle.c	
+mg_subst	cc_mangle_substitution_find	function	frontend/c/mangle.c	
+mg_add	cc_mangle_substitution_add	function	frontend/c/mangle.c	
+mg_type	cc_mangle_type	function	frontend/c/mangle.c	
+mangle_overload	cc_mangle_overload	function	frontend/c/mangle.c	
+name_overload	cc_mangle_overload_name_set	function	frontend/c/mangle.c	
+mk2	cc_node_new_operands	function	frontend/c/node.c	
+vinit	cc_id_list_init	function	frontend/c/node.c	
+vpush	cc_id_list_append	function	frontend/c/node.c	
+vfreeze	cc_id_list_freeze	function	frontend/c/node.c	
+mk_int	cc_node_integer_new	function	frontend/c/node.c	
+err_node	cc_node_error_new	function	frontend/c/node.c	
+mk_flt	cc_node_float_new	function	frontend/c/node.c	
+mk_fltq	cc_node_float128_new	function	frontend/c/node.c	
+mk_bin	cc_node_binary_new	function	frontend/c/node.c	
+bc_mask	cc_bit_cast_mask	function	frontend/c/object-representation.c	
+bitcast_expr	cc_bit_cast_build	function	frontend/c/object-representation.c	
+bc_type	cc_bit_cast_type_is_eligible	function	frontend/c/object-representation.c	
+bc_index_base	cc_bit_cast_index_base	function	frontend/c/object-representation.c	
+bc_initializer	cc_bit_cast_initializer_find	function	frontend/c/object-representation.c	
+bc_active_member	cc_bit_cast_active_member	function	frontend/c/object-representation.c	
+bc_grammar	cc_bit_cast_grammar_check	function	frontend/c/object-representation.c	
+bc_source_ok	cc_bit_cast_source_is_ok	function	frontend/c/object-representation.c	
+bc_memo_has	cc_bit_cast_memo_has	function	frontend/c/object-representation.c	
+bc_memo_add	cc_bit_cast_memo_add	function	frontend/c/object-representation.c	
+bc_part	cc_bit_cast_part_copy	function	frontend/c/object-representation.c	
+bc_encode	cc_bit_cast_encode	function	frontend/c/object-representation.c	
+bc_scalar	cc_bit_cast_scalar_read	function	frontend/c/object-representation.c	
+bc_read	cc_bit_cast_read	function	frontend/c/object-representation.c	
+bc_bytes_read	cc_bit_cast_bytes_read	function	frontend/c/object-representation.c	
+bc_decode	cc_bit_cast_decode	function	frontend/c/object-representation.c	
+bitcast_value_read	cc_bit_cast_value_read	function	frontend/c/object-representation.c	
+bc_check	cc_bit_cast_check	function	frontend/c/object-representation.c	
+bitcast_constant_read	cc_bit_cast_constant_read	function	frontend/c/object-representation.c	
+bc_q	cc_bit_cast_float128_bits	function	frontend/c/object-representation.c	
+bc_convert_value	cc_bit_cast_value_convert	function	frontend/c/object-representation.c	
+bc_lane	cc_bit_cast_lane_read	function	frontend/c/object-representation.c	
+vector_constant_read	cc_bit_cast_vector_constant_read	function	frontend/c/object-representation.c	
+bitcast_value	cc_bit_cast_value	function	frontend/c/object-representation.c	
+bitcast_constant	cc_bit_cast_is_constant	function	frontend/c/object-representation.c	
+vector_constant	cc_bit_cast_vector_is_constant	function	frontend/c/object-representation.c	
+weak_push	cc_pragma_weak_push	function	frontend/c/pragma-weak.c	
+id_string	cc_pragma_weak_identifier_string	function	frontend/c/pragma-weak.c	
+weak_alias	cc_pragma_weak_alias	function	frontend/c/pragma-weak.c	
+weak_idc	cc_pragma_weak_is_identifier_character	function	frontend/c/pragma-weak.c	
+weak_skip	cc_pragma_weak_space_skip	function	frontend/c/pragma-weak.c	
+weak_ident	cc_pragma_weak_identifier_parse	function	frontend/c/pragma-weak.c	
+fn_or_var	cc_pragma_weak_is_function_or_variable	function	frontend/c/pragma-weak.c	
+weak_declared	cc_pragma_weak_declared	function	frontend/c/pragma-weak.c	
+weak_finish	cc_pragma_weak_finish	function	frontend/c/pragma-weak.c	
+pack_word	cc_pragma_pack_word_parse	function	frontend/c/pragma.c	
+pack_set	cc_pragma_pack_set	function	frontend/c/pragma.c	
+pragma_pack	cc_pragma_pack_parse	function	frontend/c/pragma.c	also named in TODO.md/AGENTS.md prose
+fl_const	cc_reach_condition_constant	function	frontend/c/reach.c	
+fl_noreturn	cc_reach_is_noreturn	function	frontend/c/reach.c	
+fl_has_noreturn	cc_reach_has_noreturn	function	frontend/c/reach.c	
+fl_reach_label	cc_reach_label_mark	function	frontend/c/reach.c	
+fl_case_match	cc_reach_case_matches	function	frontend/c/reach.c	
+fl_has_default	cc_reach_has_default	function	frontend/c/reach.c	
+fl_loop_body	cc_reach_loop_body	function	frontend/c/reach.c	
+fl_stmt	cc_reach_statement	function	frontend/c/reach.c	
+body_falls_off	cc_reach_body_falls_off	function	frontend/c/reach.c	
+align_to	cc_layout_align_to	function	frontend/c/record-layout.c	
+lay_update	cc_layout_update	function	frontend/c/record-layout.c	
+lay_bitfield	cc_layout_bitfield_place	function	frontend/c/record-layout.c	
+lay_field	cc_layout_field_place	function	frontend/c/record-layout.c	
+lay_record	cc_layout_record	function	frontend/c/record-layout.c	
+fscr_grow	cc_record_scratch_grow	function	frontend/c/record-parse.c	
+member_semi	cc_record_member_semicolon_expect	function	frontend/c/record-parse.c	
+struct_body	cc_record_body_parse	function	frontend/c/record-parse.c	
+enum_body	cc_enum_body_parse	function	frontend/c/record-parse.c	
+parse_jump	cc_recovery_jump	function	frontend/c/recovery.c	
+expect_match_fail	cc_recovery_expect_match_fail	function	frontend/c/recovery.c	
+skip_close	cc_recovery_skip_close	function	frontend/c/recovery.c	
+delayed_bug	cc_report_delayed_bug	function	frontend/c/recovery.c	
+delayed_bug_check	cc_report_delayed_bug_check	function	frontend/c/recovery.c	
+rec_save	cc_recovery_save	function	frontend/c/recovery.c	
+skip_nest	cc_recovery_skip_nested	function	frontend/c/recovery.c	
+skip_stmt	cc_recovery_skip_statement	function	frontend/c/recovery.c	
+skip_semi	cc_recovery_skip_semicolon	function	frontend/c/recovery.c	
+skip_for_head	cc_recovery_skip_for_head	function	frontend/c/recovery.c	
+stray_rbrace	cc_recovery_is_stray_right_brace	function	frontend/c/recovery.c	
+rec_restore	cc_recovery_restore	function	frontend/c/recovery.c	public (declared in include/frontend/c/)
+dr_read	cc_replay_symbol_read	function	frontend/c/replay.c	also used in replay.c (1): the script edits it
+dr_intern	cc_replay_type_intern	function	frontend/c/replay.c	also used in replay.c (2): the script edits it
+dr_pragma	cc_replay_pragma_log	function	frontend/c/replay.c	also used in replay.c (1): the script edits it
+dr_boundary	cc_replay_boundary	function	frontend/c/replay.c	also used in replay.c (1): the script edits it
+dr_close	cc_replay_region_close	function	frontend/c/replay.c	also used in replay.c (1): the script edits it
+dr_func	cc_replay_type_function	function	frontend/c/replay.c	also used in replay.c (2): the script edits it
+dr_new	cc_replay_type_new_log	function	frontend/c/replay.c	also used in replay.c (1): the script edits it
+dr_tagwrite	cc_replay_tag_write_log	function	frontend/c/replay.c	also used in replay.c (1): the script edits it
+dr_begin	cc_replay_region_begin	function	frontend/c/replay.c	also used in replay.c (1): the script edits it
+dr_end	cc_replay_region_end	function	frontend/c/replay.c	also used in replay.c (1): the script edits it
+unknown_toks	cc_report_unknown_tokens	function	frontend/c/report.c	
+cc_error	cc_report_error	function	frontend/c/report.c	also named in a comment of include/frontend/pp/pp.h; also named in bench/ or tools/ scripts
+take_dms	cc_report_macro_notes_take	function	frontend/c/report.c	
+punct_spell	cc_punctuator_spelling	function	frontend/c/report.c	
+fwd_note	cc_report_forward_note	function	frontend/c/report.c	
+rt_emit	cc_report_runtime	function	frontend/c/report.c	
+rt_flush	cc_report_runtime_flush	function	frontend/c/report.c	
+cc_warnx	cc_report_warning	function	frontend/c/report.c	also named in bench/ or tools/ scripts
+cc_errorx	cc_report_flag_error	function	frontend/c/report.c	also named in bench/ or tools/ scripts
+cc_warn_begin	cc_report_warning_begin	function	frontend/c/report.c	also named in bench/ or tools/ scripts
+ext_on_slow	cc_extension_enabled_slow	function	frontend/c/report.c	
+ext_warn	cc_report_extension	function	frontend/c/report.c	also named in bench/ or tools/ scripts
+rt_defer	cc_report_runtime_defer	function	frontend/c/report.c	also named in bench/ or tools/ scripts; also named in TODO.md/AGENTS.md prose
+goto_label	cc_return_path_goto_label	function	frontend/c/return-path.c	
+label_reached	cc_return_path_label_is_reached	function	frontend/c/return-path.c	
+stmtexpr_flow	cc_return_path_statement_expression	function	frontend/c/return-path.c	
+expr_noreturn	cc_expression_is_noreturn	function	frontend/c/return-path.c	
+cond_value	cc_condition_value	function	frontend/c/return-path.c	
+case_values	cc_switch_case_values	function	frontend/c/return-path.c	
+has_default	cc_switch_has_default	function	frontend/c/return-path.c	
+enum_covered	cc_switch_is_enum_covered	function	frontend/c/return-path.c	
+loop_body	cc_return_path_loop_body	function	frontend/c/return-path.c	
+stmt_flow	cc_return_path_reach	function	frontend/c/return-path.c	
+rp_step	cc_return_path_step_add	function	frontend/c/return-path.c	
+end_of	cc_return_path_end_of	function	frontend/c/return-path.c	
+self_entry	cc_return_path_self_entry	function	frontend/c/return-path.c	
+rp_seq	cc_return_path_sequence	function	frontend/c/return-path.c	
+rp_walk	cc_return_path_walk	function	frontend/c/return-path.c	
+rstep_cmp	cc_return_path_step_compare	function	frontend/c/return-path.c	
+return_path	cc_return_path_report	function	frontend/c/return-path.c	
+return_type_warn	cc_return_type_check	function	frontend/c/return-path.c	
+complit_text	cc_return_stack_address_compound_literal_text	function	frontend/c/return-stack-address.c	
+lz_visible	cc_lazy_body_visible_symbol	function	frontend/c/scope.c	
+dslot	cc_scope_slot	function	frontend/c/scope.c	
+scope_open	cc_scope_open	function	frontend/c/scope.c	
+scope_pop	cc_scope_pop	function	frontend/c/scope.c	
+scope_close	cc_scope_close	function	frontend/c/scope.c	
+scope_close_proto	cc_scope_close_prototype	function	frontend/c/scope.c	
+proto_binding	cc_scope_prototype_bindings_save	function	frontend/c/scope.c	
+sym_new	cc_symbol_new	function	frontend/c/scope.c	
+sym_bind	cc_symbol_bind	function	frontend/c/scope.c	also used in replay.c (2): the script edits it
+lookup_slow	cc_symbol_lookup_slow	function	frontend/c/scope.c	
+lookup_tag	cc_tag_lookup	function	frontend/c/scope.c	
+label_ref	cc_label_reference	function	frontend/c/statement.c	
+mkstmt	cc_statement_new	function	frontend/c/statement.c	
+assign_cond_warn	cc_statement_assignment_condition_warn	function	frontend/c/statement.c	
+case_compare	cc_statement_case_compare	function	frontend/c/statement.c	
+switch_duplicates	cc_statement_switch_duplicates_check	function	frontend/c/statement.c	
+switch_enum_warn	cc_statement_switch_enum_warn	function	frontend/c/statement.c	
+cond_of	cc_statement_condition_parse	function	frontend/c/statement.c	
+asm_string	cc_asm_string_parse	function	frontend/c/statement.c	
+asm_operands	cc_asm_operands_parse	function	frontend/c/statement.c	
+asm_colons	cc_asm_colons_parse	function	frontend/c/statement.c	
+asm_stmt	cc_asm_statement_parse	function	frontend/c/statement.c	
+at_asm	cc_token_at_asm	function	frontend/c/statement.c	
+stmt_kw_typo	cc_statement_keyword_typo	function	frontend/c/statement.c	
+undeclared_type_decl	cc_statement_undeclared_type_declaration	function	frontend/c/statement.c	
+for_semi	cc_statement_for_semicolon_expect	function	frontend/c/statement.c	
+block_item	cc_compound_statement_item_parse	function	frontend/c/statement.c	
+compound_stmt	cc_compound_statement_parse	function	frontend/c/statement.c	
+sub_statement	cc_statement_sub_parse	function	frontend/c/statement.c	
+label_sub	cc_labeled_statement_body_parse	function	frontend/c/statement.c	
+at_label	cc_token_at_label	function	frontend/c/statement.c	
+case_constant	cc_statement_case_constant	function	frontend/c/statement.c	
+label_head	cc_labeled_statement_head_parse	function	frontend/c/statement.c	
+labeled_statement	cc_labeled_statement_parse	function	frontend/c/statement.c	
+layout_note	cc_static_assert_layout_note	function	frontend/c/static-assert.c	
+sizeof_layouts	cc_static_assert_sizeof_layouts	function	frontend/c/static-assert.c	
+int_literal	cc_static_assert_is_integer_literal	function	frontend/c/static-assert.c	
+failed_term	cc_static_assert_failed_term	function	frontend/c/static-assert.c	
+static_assert_failed	cc_static_assert_failure_report	function	frontend/c/static-assert.c	
+static_assert_decl	cc_static_assert_parse	function	frontend/c/static-assert.c	
+init_keywords	cc_keyword_table_init	function	frontend/c/token.c	
+fetch_directive	cc_token_fetch_directive	function	frontend/c/token.c	
+lz_fetch	cc_token_fetch_lazy	function	frontend/c/token.c	
+next_shift	cc_token_next_shift	function	frontend/c/token.c	
+tokspell	cc_token_spelling	function	frontend/c/token.c	
+expect_fail	cc_token_expect_fail	function	frontend/c/token.c	
+expect_here_fail	cc_token_expect_here_fail	function	frontend/c/token.c	
+lparen_fail	cc_token_expect_left_paren_fail	function	frontend/c/token.c	
+semi_app	cc_token_semicolon_approximate	function	frontend/c/token.c	
+expect_semi	cc_token_expect_semicolon	function	frontend/c/token.c	
+not_expr_start	cc_token_is_not_expression_start	function	frontend/c/token.c	
+might_be_declarator	cc_token_might_be_declarator	function	frontend/c/token.c	
+decl_comma_typo	cc_declaration_comma_typo	function	frontend/c/token.c	
+cc_init	cc_translation_unit_init	function	frontend/c/translation-unit.c	public (declared in include/frontend/c/)
+cc_free	cc_translation_unit_free	function	frontend/c/translation-unit.c	
+translation_unit	cc_translation_unit_parse	function	frontend/c/translation-unit.c	
+int_name	cc_type_integer_name	function	frontend/c/type-name.c	
+quals	cc_type_qualifiers_spell	function	frontend/c/type-name.c	
+type_str	cc_type_spell	function	frontend/c/type-name.c	
+tybuf	cc_type_name_buffer	function	frontend/c/type-name.c	
+is_bigint	cc_type_is_bitint	function	frontend/c/type.c	
+is_float	cc_type_is_float	function	frontend/c/type.c	
+is_arith	cc_type_is_arithmetic	function	frontend/c/type.c	
+is_scalar	cc_type_is_scalar	function	frontend/c/type.c	
+is_vector	cc_type_is_vector	function	frontend/c/type.c	
+is_bool_vector	cc_type_is_bool_vector	function	frontend/c/type.c	
+is_complex	cc_type_is_complex	function	frontend/c/type.c	
+is_ilagg	cc_type_is_initializer_aggregate	function	frontend/c/type.c	
+ty_hash	cc_type_hash	function	frontend/c/type.c	also used in replay.c (2): the script edits it
+ty_eq	cc_type_equal	function	frontend/c/type.c	
+ty_intern	cc_type_intern	function	frontend/c/type.c	also used in replay.c (4): the script edits it
+ty_new	cc_type_new	function	frontend/c/type.c	also used in replay.c (2): the script edits it
+ty_bitint	cc_type_bitint	function	frontend/c/type.c	
+int_bits	cc_type_integer_bits	function	frontend/c/type.c	
+ty_ptr	cc_type_pointer	function	frontend/c/type.c	also used in replay.c (1): the script edits it
+ty_array	cc_type_array	function	frontend/c/type.c	
+arr_len	cc_type_array_length	function	frontend/c/type.c	
+ty_vla	cc_type_vla	function	frontend/c/type.c	
+fn_hash	cc_type_function_hash	function	frontend/c/type.c	also used in replay.c (2): the script edits it
+ty_func	cc_type_function	function	frontend/c/type.c	also used in replay.c (5): the script edits it
+ty_vector	cc_type_vector	function	frontend/c/type.c	
+ty_aligned	cc_type_aligned	function	frontend/c/type.c	
+ty_atomic	cc_type_atomic	function	frontend/c/type.c	also named in TODO.md/AGENTS.md prose
+ty_size	cc_type_size	function	frontend/c/type.c	
+ty_align	cc_type_alignment	function	frontend/c/type.c	
+unsigned_of	cc_type_unsigned	function	frontend/c/type.c	
+vec_mask_type	cc_type_vector_mask	function	frontend/c/type.c	
+arith_conv	cc_type_arithmetic_conversion	function	frontend/c/type.c	
+compatible_q	cc_type_is_compatible_qualified	function	frontend/c/type.c	
+compatible_param	cc_type_is_compatible_parameter	function	frontend/c/type.c	
+edit_dist	cc_typo_edit_distance	function	frontend/c/typo-correction.c	
+kw_offered	cc_typo_keyword_is_offered	function	frontend/c/typo-correction.c	
+typo_sym	cc_typo_symbol_find	function	frontend/c/typo-correction.c	
+typo_keyword	cc_typo_keyword_find	function	frontend/c/typo-correction.c	
+c23_word	cc_typo_c23_word	function	frontend/c/typo-correction.c	
+c23_word_help	cc_typo_c23_word_help	function	frontend/c/typo-correction.c	
+is_typedef_name	cc_token_is_typedef_name	function	frontend/c/typo-correction.c	
+uv_maycon	cc_uninitialized_condition_may_be_constant	function	frontend/c/uninitialized.c	
+uv_const	cc_uninitialized_condition_constant	function	frontend/c/uninitialized.c	
+uv_haslogic	cc_uninitialized_condition_has_logic	function	frontend/c/uninitialized.c	
+uv_pend	cc_uninitialized_pending_add	function	frontend/c/uninitialized.c	
+uv_swarm	cc_uninitialized_switch_arm	function	frontend/c/uninitialized.c	
+uv_caserange	cc_uninitialized_case_range	function	frontend/c/uninitialized.c	
+uv_drop	cc_uninitialized_pending_drop	function	frontend/c/uninitialized.c	
+uv_idx	cc_uninitialized_variable_index	function	frontend/c/uninitialized.c	
+uv_add	cc_uninitialized_variable_add	function	frontend/c/uninitialized.c	
+uv_read	cc_uninitialized_read	function	frontend/c/uninitialized.c	
+uv_write	cc_uninitialized_write	function	frontend/c/uninitialized.c	
+uv_lv	cc_uninitialized_lvalue	function	frontend/c/uninitialized.c	
+uv_ex	cc_uninitialized_expression	function	frontend/c/uninitialized.c	
+uv_goto	cc_uninitialized_goto	function	frontend/c/uninitialized.c	
+uv_loop	cc_uninitialized_loop	function	frontend/c/uninitialized.c	
+uv_stmt	cc_uninitialized_statement	function	frontend/c/uninitialized.c	
+uv_send	cc_uninitialized_statement_end	function	frontend/c/uninitialized.c	
+uv_sometimes	cc_uninitialized_sometimes_report	function	frontend/c/uninitialized.c	
+uv_zero	cc_uninitialized_zero_initializer_text	function	frontend/c/uninitialized.c	
+uninit_check	cc_uninitialized_check	function	frontend/c/uninitialized.c	
+hard_errors	cc_report_hard_error_count	function	frontend/c/unused-declaration.c	
+unused_vars	cc_unused_variables_report	function	frontend/c/unused-declaration.c	
+unused_statics	cc_unused_statics_report	function	frontend/c/unused-declaration.c	
+unused_typedefs	cc_unused_typedefs_report	function	frontend/c/unused-declaration.c	
+unused_result	cc_unused_result_check	function	frontend/c/unused-value.c	
+uv_warn	cc_unused_value_walk	function	frontend/c/unused-value.c	
+set_only	cc_unused_set_only_check	function	frontend/c/unused-value.c	
+target_attr	cc_x86_target_attribute_parse	function	frontend/c/x86-target-attribute.c	
+basic_ty	cc_basic_type_layout	type	frontend/c/ccimpl.h	
+object_bound	cc_object_bound	type	frontend/c/ccimpl.h	
+dspec	cc_declaration_specifiers	type	frontend/c/ccimpl.h	
+declr	cc_declarator	type	frontend/c/ccimpl.h	
+fscratch	cc_record_scratch	type	frontend/c/ccimpl.h	
+flw	cc_reach_state	type	frontend/c/ccimpl.h	
+artb	cc_array_bounds_art	type	frontend/c/array-bounds.c	
+oslog_item	cc_builtin_os_log_item	type	frontend/c/builtin-os-log.c	
+const_eval	cc_constant_eval_guard	type	frontend/c/constant-eval.c	
+const_object	cc_constexpr_object	type	frontend/c/constant-eval.c	
+fmtx	cc_format_check_state	type	frontend/c/format-check.c	
+fspec	cc_format_specification	type	frontend/c/format-check.c	
+irun	cc_initializer_run	type	frontend/c/initializer.c	
+ilist	cc_initializer_list	type	frontend/c/initializer.c	
+libbi	cc_library_builtin_entry	type	frontend/c/library-function.c	
+libfn	cc_library_function_entry	type	frontend/c/library-function.c	
+libname	cc_library_name_entry	type	frontend/c/library-function.c	
+mangler	cc_mangler	type	frontend/c/mangle.c	
+bc_state	cc_bit_cast_state	type	frontend/c/object-representation.c	
+rstep	cc_return_path_step	type	frontend/c/return-path.c	
+case_order	cc_switch_case_order	type	frontend/c/statement.c	
+ust	cc_uninitialized_state	type	frontend/c/uninitialized.c	
+uwk	cc_uninitialized_walk	type	frontend/c/uninitialized.c	
+uvw	cc_unused_value_state	type	frontend/c/unused-value.c	
+w_all	cc_warning_group_all	global	frontend/c/ccimpl.h	
+w_gnu	cc_warning_group_gnu	global	frontend/c/ccimpl.h	
+w_ped	cc_warning_group_pedantic	global	frontend/c/ccimpl.h	
+w_conv	cc_warning_group_conversion	global	frontend/c/ccimpl.h	
+w_selfassign	cc_warning_group_self_assign	global	frontend/c/ccimpl.h	
+kwclass	cc_keyword_class	global	frontend/c/ccimpl.h	also named in TODO.md/AGENTS.md prose
+kwmap	cc_keyword_map	global	frontend/c/ccimpl.h	also named in TODO.md/AGENTS.md prose
+kwmap_gnu	cc_keyword_map_gnu	global	frontend/c/ccimpl.h	
+kwmap_c23	cc_keyword_map_c23	global	frontend/c/ccimpl.h	
+kwmap_iso	cc_keyword_map_iso	global	frontend/c/ccimpl.h	
+tl_fscr	cc_record_scratch_thread	global	frontend/c/ccimpl.h	
+attr_names	cc_attribute_names	global	frontend/c/attribute.c	
+attr_dir	cc_attribute_directory	global	frontend/c/attribute.c	
+gnu_attrs	cc_attribute_gnu_names	global	frontend/c/attrnames.inc	
+attr_spellings	cc_attribute_spellings	global	frontend/c/attrnames.inc	
+c_attrs	cc_attribute_c_names	global	frontend/c/attrnames.inc	
+gnu_attrs_x86	cc_attribute_gnu_x86_names	global	frontend/c/attrnames-x86.inc	
+c_attrs_x86	cc_attribute_c_x86_names	global	frontend/c/attrnames-x86.inc	
+attr_scopes	cc_attribute_scopes	global	frontend/c/attribute.c	
+bi_dir	cc_builtin_directory	global	frontend/c/builtin-table.c	
+const_eval_path	cc_constant_eval_path	global	frontend/c/constant-eval.c	
+drcov_on	cc_replay_coverage_on	global	frontend/c/declaration-coverage.c	
+dr_tok	cc_replay_coverage_tokens	global	frontend/c/declaration-coverage.c	
+dr_hits	cc_replay_coverage_hits	global	frontend/c/declaration-coverage.c	
+dr_htok	cc_replay_coverage_hit_tokens	global	frontend/c/declaration-coverage.c	
+dr_ok	cc_replay_coverage_ok	global	frontend/c/declaration-coverage.c	
+dr_oktok	cc_replay_coverage_ok_tokens	global	frontend/c/declaration-coverage.c	
+dr_oktop	cc_replay_coverage_ok_top_level	global	frontend/c/declaration-coverage.c	
+dr_endbad	cc_replay_coverage_end_bad	global	frontend/c/declaration-coverage.c	
+dr_startbad	cc_replay_coverage_start_bad	global	frontend/c/declaration-coverage.c	
+dr_dc	cc_replay_coverage_declarations	global	frontend/c/declaration-coverage.c	
+fmt_fix	cc_format_table_fix	global	frontend/c/fmttab.inc	
+fmt_linux	cc_format_table_linux	global	frontend/c/fmttab.inc	
+fmt_darwin	cc_format_table_darwin	global	frontend/c/fmttab.inc	
+fmt_valid_flags	cc_format_valid_flags	global	frontend/c/format-check.c	
+lz_st_fn	cc_lazy_body_kept_functions	global	frontend/c/lazy-body.c	
+lz_st_tok	cc_lazy_body_kept_tokens	global	frontend/c/lazy-body.c	
+lz_st_pfn	cc_lazy_body_parsed_functions	global	frontend/c/lazy-body.c	
+lz_st_ptok	cc_lazy_body_parsed_tokens	global	frontend/c/lazy-body.c	
+lz_st_hc	cc_lazy_body_header_cache_functions	global	frontend/c/lazy-body.c	
+lz_off	cc_lazy_body_disabled	global	frontend/c/lazy-body.c	
+libbis	cc_library_builtins	global	frontend/c/library-function.c	
+libfns	cc_library_functions	global	frontend/c/library-function.c	
+libnames	cc_library_names	global	frontend/c/library-function.c	
+ext_flags	cc_extension_flags	global	frontend/c/report.c	
+ext_groups	cc_extension_groups	global	frontend/c/report.c	
+ccpool	cc_region_pool	global	frontend/c/translation-unit.c	
+ccr	cc_regions	global	frontend/c/translation-unit.c	
+kw_types	cc_typo_keywords_type	global	frontend/c/typo-correction.c	
+kw_stmts	cc_typo_keywords_statement	global	frontend/c/typo-correction.c	
+IDF	CC_IDENTIFIER	macro	frontend/c/ccimpl.h	
+ISERR	AST_NODE_IS_ERROR	macro	frontend/c/ccimpl.h	
+DOPS_MAX	CC_DECLARATOR_OPERATIONS_MAX	macro	frontend/c/ccimpl.h	
+FM_DEPTH	CC_MEMBER_FIND_DEPTH_MAX	macro	frontend/c/ccimpl.h	
+EXT_WARN	CC_REPORT_EXTENSION	macro	frontend/c/ccimpl.h	also named in bench/ or tools/ scripts
+EXT_WARN_MS	CC_REPORT_EXTENSION_MICROSOFT	macro	frontend/c/ccimpl.h	also named in bench/ or tools/ scripts
+EXT_WARN_DEL	CC_REPORT_EXTENSION_DELETE	macro	frontend/c/ccimpl.h	also named in bench/ or tools/ scripts
+REC_ARM	CC_RECOVERY_ARM	macro	frontend/c/ccimpl.h	
+REC_POP	CC_RECOVERY_POP	macro	frontend/c/ccimpl.h	
+OSL_ADD	CC_BUILTIN_OS_LOG_ADD	macro	frontend/c/builtin-os-log.c	
+OSL_AT	CC_BUILTIN_OS_LOG_AT	macro	frontend/c/builtin-os-log.c	
+OSL_BYTE	CC_BUILTIN_OS_LOG_BYTE	macro	frontend/c/builtin-os-log.c	
+SYNC_N	CC_BUILTIN_SYNC_SIZES	macro	frontend/c/builtin-table.c	
+QTY_KW	CC_DECLARATION_SPECIFIERS_KEYWORD_ONLY	macro	frontend/c/declaration-specifiers.c	
+FMT_NTY	CC_FORMAT_TABLE_TYPE_COUNT	macro	frontend/c/fmttab.inc	
+BSEARCH	CC_LIBRARY_BSEARCH	macro	frontend/c/library-function.c	
+WLOC	CC_PRAGMA_WEAK_LOCATION	macro	frontend/c/pragma-weak.c	
+DR_TAGWRITE	CC_REPLAY_TAG_WRITE_LOG	macro	frontend/c/ccimpl.h	also used in replay.c (2): the script edits it
+VCC_CC_CCIMPL_H	VCC_FRONTEND_C_CC_INTERNAL_H	macro	frontend/c/ccimpl.h	
+S_TAG	CC_SYMBOL_NAMESPACE_TAG	constant	frontend/c/ccimpl.h	also used in replay.c (7): the script edits it
+A_NONE	CC_ATTRIBUTE_NONE	constant	frontend/c/attribute.c	
+A_INTERRUPT	CC_ATTRIBUTE_INTERRUPT	constant	frontend/c/attribute.c	
+A_MS_STRUCT	CC_ATTRIBUTE_MS_STRUCT	constant	frontend/c/attribute.c	
+A_ALIGNED	CC_ATTRIBUTE_ALIGNED	constant	frontend/c/attribute.c	
+A_PACKED	CC_ATTRIBUTE_PACKED	constant	frontend/c/attribute.c	
+A_SECTION	CC_ATTRIBUTE_SECTION	constant	frontend/c/attribute.c	
+A_MODE	CC_ATTRIBUTE_MODE	constant	frontend/c/attribute.c	
+A_CLEANUP	CC_ATTRIBUTE_CLEANUP	constant	frontend/c/attribute.c	
+A_ALIAS	CC_ATTRIBUTE_ALIAS	constant	frontend/c/attribute.c	
+A_WEAK	CC_ATTRIBUTE_WEAK	constant	frontend/c/attribute.c	
+A_USED	CC_ATTRIBUTE_USED	constant	frontend/c/attribute.c	
+A_UNUSED	CC_ATTRIBUTE_UNUSED	constant	frontend/c/attribute.c	
+A_NORETURN	CC_ATTRIBUTE_NORETURN	constant	frontend/c/attribute.c	
+A_ALWAYS_INLINE	CC_ATTRIBUTE_ALWAYS_INLINE	constant	frontend/c/attribute.c	
+A_NOINLINE	CC_ATTRIBUTE_NOINLINE	constant	frontend/c/attribute.c	
+A_GNU_INLINE	CC_ATTRIBUTE_GNU_INLINE	constant	frontend/c/attribute.c	
+A_TRANSPARENT_UNION	CC_ATTRIBUTE_TRANSPARENT_UNION	constant	frontend/c/attribute.c	
+A_VISIBILITY	CC_ATTRIBUTE_VISIBILITY	constant	frontend/c/attribute.c	
+A_CONSTRUCTOR	CC_ATTRIBUTE_CONSTRUCTOR	constant	frontend/c/attribute.c	
+A_DESTRUCTOR	CC_ATTRIBUTE_DESTRUCTOR	constant	frontend/c/attribute.c	
+A_COUNTED_BY	CC_ATTRIBUTE_COUNTED_BY	constant	frontend/c/attribute.c	
+A_VECTOR_SIZE	CC_ATTRIBUTE_VECTOR_SIZE	constant	frontend/c/attribute.c	
+A_COLD	CC_ATTRIBUTE_COLD	constant	frontend/c/attribute.c	
+A_NONSTRING	CC_ATTRIBUTE_NONSTRING	constant	frontend/c/attribute.c	
+A_MAY_ALIAS	CC_ATTRIBUTE_MAY_ALIAS	constant	frontend/c/attribute.c	
+A_WEAKREF	CC_ATTRIBUTE_WEAKREF	constant	frontend/c/attribute.c	
+A_NAKED	CC_ATTRIBUTE_NAKED	constant	frontend/c/attribute.c	
+A_NOCF	CC_ATTRIBUTE_NOCF	constant	frontend/c/attribute.c	
+A_ERROR	CC_ATTRIBUTE_ERROR	constant	frontend/c/attribute.c	
+A_OVERLOADABLE	CC_ATTRIBUTE_OVERLOADABLE	constant	frontend/c/attribute.c	
+A_NOINSTR	CC_ATTRIBUTE_NOINSTR	constant	frontend/c/attribute.c	
+A_TLS_MODEL	CC_ATTRIBUTE_TLS_MODEL	constant	frontend/c/attribute.c	
+A_EXT_VECTOR	CC_ATTRIBUTE_EXT_VECTOR	constant	frontend/c/attribute.c	
+A_DEPRECATED	CC_ATTRIBUTE_DEPRECATED	constant	frontend/c/attribute.c	
+A_WUR	CC_ATTRIBUTE_WUR	constant	frontend/c/attribute.c	
+A_NODISCARD	CC_ATTRIBUTE_NODISCARD	constant	frontend/c/attribute.c	
+A_IFUNC	CC_ATTRIBUTE_IFUNC	constant	frontend/c/attribute.c	
+A_NONNULL	CC_ATTRIBUTE_NONNULL	constant	frontend/c/attribute.c	
+A_FORMAT	CC_ATTRIBUTE_FORMAT	constant	frontend/c/attribute.c	
+A_FORMAT_ARG	CC_ATTRIBUTE_FORMAT_ARG	constant	frontend/c/attribute.c	
+A_PURE	CC_ATTRIBUTE_PURE	constant	frontend/c/attribute.c	
+A_CONST	CC_ATTRIBUTE_CONST	constant	frontend/c/attribute.c	
+A_UNAVAILABLE	CC_ATTRIBUTE_UNAVAILABLE	constant	frontend/c/attribute.c	
+A_TARGET	CC_ATTRIBUTE_TARGET	constant	frontend/c/attribute.c	
+A_RETURNS_TWICE	CC_ATTRIBUTE_RETURNS_TWICE	constant	frontend/c/attribute.c	
+A_DISABLE_TAIL_CALLS	CC_ATTRIBUTE_DISABLE_TAIL_CALLS	constant	frontend/c/attribute.c	
+A_NOT_TAIL_CALLED	CC_ATTRIBUTE_NOT_TAIL_CALLED	constant	frontend/c/attribute.c	
+A_OPTNONE	CC_ATTRIBUTE_OPTNONE	constant	frontend/c/attribute.c	
+A_COUNT	CC_ATTRIBUTE_COUNT	constant	frontend/c/attribute.c	
+FT_CHAR	CC_FORMAT_TYPE_CHAR	constant	frontend/c/format-check.c	
+FT_SCHAR	CC_FORMAT_TYPE_SCHAR	constant	frontend/c/format-check.c	
+FT_UCHAR	CC_FORMAT_TYPE_UCHAR	constant	frontend/c/format-check.c	
+FT_SHORT	CC_FORMAT_TYPE_SHORT	constant	frontend/c/format-check.c	
+FT_USHORT	CC_FORMAT_TYPE_USHORT	constant	frontend/c/format-check.c	
+FT_INT	CC_FORMAT_TYPE_INT	constant	frontend/c/format-check.c	
+FT_UINT	CC_FORMAT_TYPE_UINT	constant	frontend/c/format-check.c	
+FT_LONG	CC_FORMAT_TYPE_LONG	constant	frontend/c/format-check.c	
+FT_ULONG	CC_FORMAT_TYPE_ULONG	constant	frontend/c/format-check.c	
+FT_LLONG	CC_FORMAT_TYPE_LLONG	constant	frontend/c/format-check.c	
+FT_ULLONG	CC_FORMAT_TYPE_ULLONG	constant	frontend/c/format-check.c	
+FT_FLOAT	CC_FORMAT_TYPE_FLOAT	constant	frontend/c/format-check.c	
+FT_DOUBLE	CC_FORMAT_TYPE_DOUBLE	constant	frontend/c/format-check.c	
+FT_LDOUBLE	CC_FORMAT_TYPE_LDOUBLE	constant	frontend/c/format-check.c	
+FT_PCHAR	CC_FORMAT_TYPE_POINTER_CHAR	constant	frontend/c/format-check.c	
+FT_PCCHAR	CC_FORMAT_TYPE_POINTER_CONST_CHAR	constant	frontend/c/format-check.c	
+FT_PSCHAR	CC_FORMAT_TYPE_POINTER_SIGNED_CHAR	constant	frontend/c/format-check.c	
+FT_PUCHAR	CC_FORMAT_TYPE_POINTER_UNSIGNED_CHAR	constant	frontend/c/format-check.c	
+FT_PVOID	CC_FORMAT_TYPE_POINTER_VOID	constant	frontend/c/format-check.c	
+FT_PCVOID	CC_FORMAT_TYPE_POINTER_CONST_VOID	constant	frontend/c/format-check.c	
+FT_PINT	CC_FORMAT_TYPE_POINTER_INT	constant	frontend/c/format-check.c	
+FT_PLONG	CC_FORMAT_TYPE_POINTER_LONG	constant	frontend/c/format-check.c	
+FT_BOOL	CC_FORMAT_TYPE_BOOL	constant	frontend/c/format-check.c	
+FT_I128	CC_FORMAT_TYPE_I128	constant	frontend/c/format-check.c	
+FT_PSHORT	CC_FORMAT_TYPE_POINTER_SHORT	constant	frontend/c/format-check.c	
+FT_PUINT	CC_FORMAT_TYPE_POINTER_UNSIGNED_INT	constant	frontend/c/format-check.c	
+FT_POBJ	CC_FORMAT_TYPE_POINTER_OBJECT	constant	frontend/c/format-check.c	
+FT_ENUMU	CC_FORMAT_TYPE_ENUM_UNSIGNED	constant	frontend/c/format-check.c	
+FT_ENUMI	CC_FORMAT_TYPE_ENUM_INT	constant	frontend/c/format-check.c	
+FT_U128	CC_FORMAT_TYPE_U128	constant	frontend/c/format-check.c	
+FT_PLLONG	CC_FORMAT_TYPE_POINTER_LONG_LONG	constant	frontend/c/format-check.c	
+FT_PPTR	CC_FORMAT_TYPE_POINTER_POINTER	constant	frontend/c/format-check.c	
+KC_KW	CC_KEYWORD_CLASS_KEYWORD	constant	frontend/c/ccimpl.h	
+KC_TYPE	CC_KEYWORD_CLASS_STARTS_TYPE	constant	frontend/c/ccimpl.h	
+KC_DECL	CC_KEYWORD_CLASS_STARTS_DECLARATION	constant	frontend/c/ccimpl.h	
+CX_NONE	CC_CONVERSION_CONTEXT_NONE	constant	frontend/c/ccimpl.h	
+CX_INIT	CC_CONVERSION_CONTEXT_INITIALIZER	constant	frontend/c/ccimpl.h	
+CX_PASS	CC_CONVERSION_CONTEXT_ARGUMENT	constant	frontend/c/ccimpl.h	
+CX_RETURN	CC_CONVERSION_CONTEXT_RETURN	constant	frontend/c/ccimpl.h	
+CX_ASSIGN	CC_CONVERSION_CONTEXT_ASSIGNMENT	constant	frontend/c/ccimpl.h	
+REC_BLOCK	CC_RECOVERY_BLOCK	constant	frontend/c/ccimpl.h	
+REC_TOP	CC_RECOVERY_TOP_LEVEL	constant	frontend/c/ccimpl.h	
+REC_FOR	CC_RECOVERY_FOR_HEAD	constant	frontend/c/ccimpl.h	
+KWS_TYPE	CC_TYPO_KEYWORDS_TYPE	constant	frontend/c/ccimpl.h	
+KWS_STMT	CC_TYPO_KEYWORDS_STATEMENT	constant	frontend/c/ccimpl.h	
+WS_SGN	CC_WIDTH_SIGN_DROP_SIGN	constant	frontend/c/declaration-specifiers.c	
+WS_LONG	CC_WIDTH_SIGN_DROP_LONG	constant	frontend/c/declaration-specifiers.c	
+OSL_MAX	CC_BUILTIN_OS_LOG_MAX	constant	frontend/c/builtin-os-log.c	
+DQ_ATOMIC	CC_DECLARATOR_QUALIFIER_ATOMIC	constant	frontend/c/declarator.c	
+bfi	cc_bitint_cast_int_node	function	frontend/c/bitint-float-cast.c	also a different thing in arch/a64; was function
+bfs	cc_bitint_cast_statement_append	function	frontend/c/bitint-float-cast.c	test inputs use the word; was function
+elem_size	cc_pointer_element_size	function	frontend/c/constant-eval.c	also a different thing in arch/a64, codegen/emitimpl.h; was function
+const_int	cc_constant_integer	function	frontend/c/constant-eval.c	test inputs use the word; was function
+eval	cc_constant_eval	function	frontend/c/constant-eval.c	also a different thing in ld/expression-eval.c, ld/gap-fill.c, ld/ld.c, ld/output-section-adjust.c; test inputs use the word; bench/ci scripts use the word; was function
+discards	cc_conversion_qualifiers_discarded_report	function	frontend/c/conversion-warnings.c	also a different thing in ld/output-state.c, ld/synthetic-sections.c, server/warnings.inc; test inputs use the word; bench/ci scripts use the word; was function
+decay	cc_conversion_decay	function	frontend/c/ccimpl.h	also a different thing in codegen/opt, codegen/walk, server/warnings.inc, tools/gen-memory-cells.py; test inputs use the word; an English word used in comments or prose; was function
+promoted	cc_node_promoted_type	function	frontend/c/conversion.c	also a different thing in arch/wasm, codegen/opt, codegen/prepass.c, codegen/vir; test inputs use the word; bench/ci scripts use the word; was function
+convert	cc_conversion_apply	function	frontend/c/ccimpl.h	also a different thing in arch/a64, diag/diagnostic-ids.inc, driver/explain.inc; test inputs use the word; an English word used in comments or prose; was function
+rvalue	cc_node_rvalue	function	frontend/c/conversion.c	also a different thing in arch/wasm, codegen/walk, diag/diagnostic-ids.inc; bench/ci scripts use the word; was function
+declare	cc_declaration_bind	function	frontend/c/declaration.c	also a different thing in ld/script-symbols.c; test inputs use the word; an English word used in comments or prose; was function
+declaration	cc_declaration_parse	function	frontend/c/declaration.c	also a different thing in arch/a64, arch/wasm, arch/x64, bin/vpp; test inputs use the word; bench/ci scripts use the word; an English word used in comments or prose; was function; also used in replay.c (6): the script edits it
+declarator	cc_declarator_parse	function	frontend/c/declarator.c	also a different thing in diag/diagnostic-ids.inc; test inputs use the word; bench/ci scripts use the word; an English word used in comments or prose; was function; also used in replay.c (1): the script edits it
+binary	cc_binary_parse	function	frontend/c/expression-parse.c	also a different thing in bin/lextest, bin/vcc, codegen/emitimpl.h, diag/diagnostic-ids.inc; test inputs use the word; bench/ci scripts use the word; an English word used in comments or prose; was function
+assign_op	cc_assignment_operator	function	frontend/c/expression-parse.c	also a different thing in arch/a64; was function
+swizzle	cc_vector_swizzle_build	function	frontend/c/expression.c	test inputs use the word; an English word used in comments or prose; was function
+binop	cc_binary_build	function	frontend/c/expression.c	also a different thing in arch/x64, ld/expression-eval.c; was function
+assign	cc_assignment_build	function	frontend/c/expression.c	also a different thing in arch/a64, codegen/opt, diag/diagnostic-ids.inc, include/utils; test inputs use the word; bench/ci scripts use the word; an English word used in comments or prose; was function
+conditional	cc_conditional_build	function	frontend/c/expression.c	also a different thing in Makefile, arch/a64, arch/wasm, as/as-internal.h; test inputs use the word; bench/ci scripts use the word; an English word used in comments or prose; was function
+deref	cc_dereference_build	function	frontend/c/expression.c	test inputs use the word; was function
+func_name	cc_function_name_build	function	frontend/c/expression.c	test inputs use the word; was function
+primary	cc_primary_parse	function	frontend/c/expression.c	also a different thing in diag/output-sarif.c, frontend/pp, include/frontend, ld/script-statements.c; test inputs use the word; an English word used in comments or prose; was function
+postfix	cc_postfix_parse	function	frontend/c/ccimpl.h	also a different thing in arch/a64; test inputs use the word; bench/ci scripts use the word; an English word used in comments or prose; was function
+function_def	cc_function_definition_parse	function	frontend/c/function-definition.c	also a different thing in arch/a64; was function
+il_run	cc_initializer_list_run_set	function	frontend/c/initializer.c	test inputs use the word; was function
+initializer	cc_initializer_parse	function	frontend/c/initializer.c	also a different thing in arch/a64, arch/wasm, bin/lextest, codegen/data.c; test inputs use the word; bench/ci scripts use the word; was function
+number	cc_literal_number_parse	function	frontend/c/literal.c	also a different thing in arch/a64, arch/wasm, arch/x64, as/as-internal.h; test inputs use the word; bench/ci scripts use the word; an English word used in comments or prose; was function
+mk	cc_node_new	function	frontend/c/node.c	one- or two-letter name; also a different thing in arch/a64, bin/vcc, diag/render-vcc.c, frontend/pp; test inputs use the word; bench/ci scripts use the word; was function
+rng	cc_node_range	function	frontend/c/node.c	also a different thing in frontend/pp, vir/loops.c; test inputs use the word; bench/ci scripts use the word; was function
+pragma_weak	cc_pragma_weak_parse	function	frontend/c/pragma-weak.c	test inputs use the word; was function
+return_stack_addr	cc_return_stack_address_check	function	frontend/c/return-stack-address.c	test inputs use the word; was function
+error_limit	cc_report_error_limit	function	frontend/c/report.c	also a different thing in driver/job.c, frontend/pp, include/frontend, ld/diagnostics.c; was function
+fatal	cc_report_fatal	function	frontend/c/report.c	also a different thing in arch/a64, arch/x64, diag/output-json.c, diag/record.c; test inputs use the word; bench/ci scripts use the word; an English word used in comments or prose; was function
+note	cc_report_note	function	frontend/c/report.c	also a different thing in arch/a64, as/as.c, as/section.c, codegen/tu.c; test inputs use the word; bench/ci scripts use the word; an English word used in comments or prose; was function
+lookup	cc_symbol_lookup	function	frontend/c/scope.c	also a different thing in arch/a64, as/symbol.c, common/intern.c, frontend/lex; test inputs use the word; bench/ci scripts use the word; an English word used in comments or prose; was function; also used in replay.c (1): the script edits it
+statement	cc_statement_parse	function	frontend/c/statement.c	also a different thing in arch/a64, arch/wasm, as/as-internal.h, as/as.c; test inputs use the word; bench/ci scripts use the word; an English word used in comments or prose; was function
+peek	cc_token_peek	function	frontend/c/token.c	also a different thing in ld/script-expression-parser.c, vir/parse.c; an English word used in comments or prose; was function
+halloc	cc_heap_allocate	function	frontend/c/translation-unit.c	also a different thing in codegen/vir; was function; also used in replay.c (1): the script edits it
+init_tables	cc_tables_init	function	frontend/c/translation-unit.c	also a different thing in frontend/lex; was function
+ext_on	cc_extension_is_enabled	function	frontend/c/ccimpl.h	also a different thing in driver/ccsnap.c; was function
+fetch	cc_token_fetch	function	frontend/c/ccimpl.h	also a different thing in diag/diagnostic-ids.inc, server/warnings.inc, vir/alloc.c; test inputs use the word; bench/ci scripts use the word; an English word used in comments or prose; was function
+is	cc_token_is	function	frontend/c/ccimpl.h	one- or two-letter name; also a different thing in Makefile, arch/a64, arch/wasm, arch/x64; test inputs use the word; bench/ci scripts use the word; was function; also used in replay.c (22): the script edits it
+accept	cc_token_accept	function	frontend/c/ccimpl.h	also a different thing in arch/wasm, server/build-generation.c, server/caps.c, server/vccd.c; test inputs use the word; bench/ci scripts use the word; an English word used in comments or prose; was function
+expect	cc_token_expect	function	frontend/c/ccimpl.h	also a different thing in tools/rename-table.py, vir/verify.c; test inputs use the word; bench/ci scripts use the word; an English word used in comments or prose; was function
+is_integer	cc_type_is_integer	function	frontend/c/type.c	also a different thing in arch/a64, arch/wasm, arch/x64, codegen/condition-fold.c; was function
+is_ptr	cc_type_is_pointer	function	frontend/c/type.c	also a different thing in arch/a64, arch/wasm, codegen/condition-fold.c, codegen/emitimpl.h; was function
+is_void	cc_type_is_void	function	frontend/c/type.c	also a different thing in arch/a64, arch/wasm, codegen/emitimpl.h; was function
+is_array	cc_type_is_array	function	frontend/c/type.c	also a different thing in arch/a64, arch/wasm, arch/x64, codegen/data.c; was function
+is_func	cc_type_is_function	function	frontend/c/type.c	also a different thing in arch/a64, arch/wasm, codegen/emitimpl.h, codegen/walk; was function
+is_record	cc_type_is_record	function	frontend/c/type.c	also a different thing in arch/a64, arch/wasm, arch/x64, codegen/emitimpl.h; was function
+is_signed	cc_type_is_signed	function	frontend/c/type.c	also a different thing in arch/a64, arch/wasm, codegen/condition-fold.c, codegen/emitimpl.h; was function
+qualify	cc_type_qualify	function	frontend/c/type.c	test inputs use the word; was function
+complete	cc_type_complete	function	frontend/c/type.c	also a different thing in arch/wasm, arch/x64, codegen/rec, codegen/walk; test inputs use the word; bench/ci scripts use the word; an English word used in comments or prose; was function; also used in replay.c (1): the script edits it
+rank	cc_type_rank	function	frontend/c/type.c	also a different thing in as/variable-items.c, ld/global-symbols.c, ld/section-assignment.c, ld/section-placement.c; test inputs use the word; bench/ci scripts use the word; an English word used in comments or prose; was function
+prim	cc_type_basic	function	frontend/c/type.c	also a different thing in arch/a64, arch/wasm, arch/x64, codegen/emitimpl.h; was function
+promote	cc_type_promote	function	frontend/c/type.c	also a different thing in arch/x64, codegen/vir, include/port; test inputs use the word; an English word used in comments or prose; was function
+compatible	cc_type_is_compatible	function	frontend/c/type.c	also a different thing in arch/a64, arch/x64, diag/diagnostic-ids.inc, include/as; test inputs use the word; an English word used in comments or prose; was function
+composite	cc_type_composite	function	frontend/c/type.c	test inputs use the word; an English word used in comments or prose; was function
+undeclared	cc_undeclared_report	function	frontend/c/typo-correction.c	also a different thing in diag/diagnostic-ids.inc, driver/explain.inc, server/warnings.inc, tools/gen-libbuiltins.py; test inputs use the word; bench/ci scripts use the word; an English word used in comments or prose; was function
+uj	cc_uninitialized_join	function	frontend/c/uninitialized.c	one- or two-letter name; was function
+unused_cmp	cc_unused_comparison_check	function	frontend/c/unused-value.c	test inputs use the word; was function
+unused_value	cc_unused_value_check	function	frontend/c/unused-value.c	test inputs use the word; was function
+arity	cc_builtin_arity_check	function	frontend/c/builtin-table.c	also a different thing in codegen/walk; was function
+vec	cc_id_list	function	frontend/c/ccimpl.h	also a different thing in arch/x64, codegen/vir, port/job-regions.c, server/warnings.inc; test inputs use the word; bench/ci scripts use the word; was type
+builtin	cc_builtin	function	frontend/c/ccimpl.h	also a different thing in arch/a64, arch/wasm, arch/x64, codegen/emitimpl.h; test inputs use the word; bench/ci scripts use the word; was type; also used in replay.c (3): the script edits it
+bfc	cc_bitint_cast_builder	function	frontend/c/bitint-float-cast.c	also a different thing in arch/a64; test inputs use the word; was type
+fmtspec	cc_format_table_entry	function	frontend/c/format-check.c	also a different thing in tools/gen-fmttab.py; was type
+layout	cc_record_layout	function	frontend/c/record-layout.c	also a different thing in Makefile, arch/a64, arch/wasm, arch/x64; test inputs use the word; bench/ci scripts use the word; an English word used in comments or prose; was type
+flow	cc_return_path_reach_state	function	frontend/c/return-path.c	also a different thing in Makefile, arch/a64, arch/wasm, arch/x64; test inputs use the word; bench/ci scripts use the word; an English word used in comments or prose; was type
+rpath	cc_return_path	function	frontend/c/return-path.c	also a different thing in Makefile; test inputs use the word; bench/ci scripts use the word; was type
+basic	cc_basic_types	function	frontend/c/ccimpl.h	also a different thing in arch/a64, arch/x64, include/utils, utils/fixdep.c; test inputs use the word; bench/ci scripts use the word; an English word used in comments or prose; was global
+builtins	cc_builtin_table	function	frontend/c/builtin-table.c	also a different thing in arch/a64, arch/wasm, arch/x64, codegen/opt; test inputs use the word; bench/ci scripts use the word; was global
+T	AST_TYPE	function	frontend/c/ccimpl.h	one- or two-letter name; also a different thing in arch/a64, arch/wasm, arch/x64, as/as.c; test inputs use the word; bench/ci scripts use the word; was macro; also used in replay.c (13): the script edits it
+KIND	AST_TYPE_KIND	function	frontend/c/ccimpl.h	also a different thing in arch/a64, arch/wasm, arch/x64, codegen/condition-fold.c; test inputs use the word; bench/ci scripts use the word; was macro
+N	AST_NODE	function	frontend/c/ccimpl.h	one- or two-letter name; also a different thing in arch/a64, arch/wasm, arch/x64, as/as-internal.h; test inputs use the word; bench/ci scripts use the word; was macro
+CR	CC_COMPLEX_ROUND	function	frontend/c/complex.c	one- or two-letter name; was macro
+CM	CC_COMPLEX_MULTIPLY	function	frontend/c/complex.c	one- or two-letter name; was macro
+CA	CC_COMPLEX_ADD	function	frontend/c/complex.c	one- or two-letter name; was macro
+CS	CC_COMPLEX_SUBTRACT	function	frontend/c/complex.c	one- or two-letter name; test inputs use the word; was macro
+CD	CC_COMPLEX_DIVIDE	function	frontend/c/complex.c	one- or two-letter name; was macro
+B	CC_COMPLEX_BINARY	function	frontend/c/complex.c	one- or two-letter name; also a different thing in arch/x64, as/call-frame-information.c, as/expression.c, bin/vasm; test inputs use the word; bench/ci scripts use the word; was macro; also used in replay.c (17): the script edits it
+PUT	CC_EXPRESSION_OPERAND_NAME_APPEND	function	frontend/c/expression-warnings.c	also a different thing in arch/a64, server/recipe.c; test inputs use the word; was macro; also used in replay.c (3): the script edits it
+USED	CC_TRANSLATION_UNIT_USED_BYTES	function	frontend/c/translation-unit.c	also a different thing in codegen/emitimpl.h; was macro
+VPRIV	CC_PRIVATE	function	frontend/c/ccimpl.h	also a different thing in Makefile, arch/a64, arch/wasm, arch/x64; bench/ci scripts use the word; was macro; also used in replay.c (10): the script edits it
+instrument	cc_instrument_functions	function	frontend/c/instrument-functions.c	also a different thing in codegen/opt, driver/job.c; bench/ci scripts use the word; was function; also used in replay.c (1): the script edits it
+pragma	cc_pragma_parse	function	frontend/c/pragma.c	also a different thing in codegen/tu.c, diag/diagnostic-ids.inc, diag/warning-state.c, driver/ccsnap.c; test inputs use the word; bench/ci scripts use the word; was function; also used in replay.c (5): the script edits it
+ccimpl.h	cc-internal.h	file

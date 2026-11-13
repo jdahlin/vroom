@@ -13,17 +13,17 @@ VPRIV val vw_bitop(ecx *e, int bi, int size, val a)
 	int r = vw_resname(e, &a, NULL);
 
 	switch (bi) {
-	case BI_CLZ: case BI_CLZL: case BI_CLZLL: op = VO_CLZ; break;
-	case BI_CTZ: case BI_CTZL: case BI_CTZLL: op = VO_CTZ; break;
-	case BI_POPCOUNT: case BI_POPCOUNTL: case BI_POPCOUNTLL: op = VO_POPCNT; break;
-	case BI_BSWAP32: case BI_BSWAP64: op = VO_BSWAP; break;
+	case BI_CLZ: case BI_CLZL: case BI_CLZLL: op = VIR_OP_CLZ; break;
+	case BI_CTZ: case BI_CTZL: case BI_CTZLL: op = VIR_OP_CTZ; break;
+	case BI_POPCOUNT: case BI_POPCOUNTL: case BI_POPCOUNTLL: op = VIR_OP_POPCNT; break;
+	case BI_BSWAP32: case BI_BSWAP64: op = VIR_OP_BSWAP; break;
 	case BI_BSWAP16:
-		x = vw_ins(e, VO_BSWAP, VT_I32, 0, vw_conv(e, x, VT_I32), 0, 0);
-		vw_set(e, r, vw_ins(e, VO_LSHR, VT_I32, 0, x, vw_iconst(e, VT_I32, 16), 0));
+		x = vw_ins(e, VIR_OP_BSWAP, VIR_TYPE_I32, 0, vw_conv(e, x, VIR_TYPE_I32), 0, 0);
+		vw_set(e, r, vw_ins(e, VIR_OP_LSHR, VIR_TYPE_I32, 0, x, vw_iconst(e, VIR_TYPE_I32, 16), 0));
 		return (val){ .k = V_REG, .r = (uint8_t)r };
 	case BI_PARITY: case BI_PARITYL: case BI_PARITYLL:
-		x = vw_ins(e, VO_POPCNT, ty, 0, x, 0, 0);
-		vw_set(e, r, vw_ins(e, VO_AND, ty, 0, x, vw_iconst(e, ty, 1), 0));
+		x = vw_ins(e, VIR_OP_POPCNT, ty, 0, x, 0, 0);
+		vw_set(e, r, vw_ins(e, VIR_OP_AND, ty, 0, x, vw_iconst(e, ty, 1), 0));
 		return (val){ .k = V_REG, .r = (uint8_t)r };
 	default: vw_fail(e, VIRFAIL(unsupported_builtin));
 	}
@@ -38,20 +38,20 @@ VPRIV int vw_atomic(ecx *e, int op, int size, int rp, int rv, int rexp)
 	int r;
 
 	if (op == WK_AFENCE) {
-		vw_ins(e, VO_AFENCE, VT_VOID, 0, 0, 0, 0);
+		vw_ins(e, VIR_OP_AFENCE, VIR_TYPE_VOID, 0, 0, 0, 0);
 		vw_st_clear(e, true);
 		return -1;
 	}
-	p = vw_get(e, rp, VT_PTR);
+	p = vw_get(e, rp, VIR_TYPE_PTR);
 	if (op != WK_ALOAD)
 		v = vw_get(e, rv, ty);
 	vw_st_clear(e, true);
 	switch (op) {
-	case WK_ALOAD: v = vw_ins(e, VO_ALOAD, ty, fl, p, 0, 0); break;
-	case WK_ASTORE: vw_ins(e, VO_ASTORE, VT_VOID, fl, p, v, 0); return -1;
-	case WK_AXCHG: v = vw_ins(e, VO_AXCHG, ty, fl, p, v, 0); break;
-	case WK_AXADD: v = vw_ins(e, VO_AXADD, ty, fl, p, v, 0); break;
-	default: v = vw_ins(e, VO_ACAS, ty, fl, p, vw_get(e, rexp, ty), v); break;
+	case WK_ALOAD: v = vw_ins(e, VIR_OP_ALOAD, ty, fl, p, 0, 0); break;
+	case WK_ASTORE: vw_ins(e, VIR_OP_ASTORE, VIR_TYPE_VOID, fl, p, v, 0); return -1;
+	case WK_AXCHG: v = vw_ins(e, VIR_OP_AXCHG, ty, fl, p, v, 0); break;
+	case WK_AXADD: v = vw_ins(e, VIR_OP_AXADD, ty, fl, p, v, 0); break;
+	default: v = vw_ins(e, VIR_OP_ACAS, ty, fl, p, vw_get(e, rexp, ty), v); break;
 	}
 	r = vw_treg(e);
 	vw_set(e, r, v);
@@ -73,7 +73,7 @@ VPRIV void vw_va_start(ecx *e, int rap)
 {
 	if (!DARWIN(e->c))
 		vw_fail(e, VIRFAIL(variadic_start));
-	vw_ins(e, VO_VA_START, VT_VOID, 0, vw_get(e, rap, VT_PTR), 0, 0);
+	vw_ins(e, VIR_OP_VA_START, VIR_TYPE_VOID, 0, vw_get(e, rap, VIR_TYPE_PTR), 0, 0);
 	vw_st_clear(e, true);
 }
 /* the address of the next argument of va_list *rap, which moves past it (as va_arg_ in
@@ -92,14 +92,14 @@ VPRIV int vw_va_arg(ecx *e, int rap, qty t)
 		vw_fail(e, VIRFAIL(variadic_argument));
 	r = vw_treg(e);
 	vw_load(e, r, &ap, 8, false);
-	p = vw_get(e, r, VT_PTR);
+	p = vw_get(e, r, VIR_TYPE_PTR);
 	if (size && !big && abi_align(c, t) == 16) {
-		q = vw_ins(e, VO_P2I, VT_I64, 0, p, 0, 0);
-		q = vw_ins(e, VO_ADD, VT_I64, 0, q, vw_iconst(e, VT_I64, 15), 0);
-		q = vw_ins(e, VO_AND, VT_I64, 0, q, vw_iconst(e, VT_I64, -16), 0);
-		p = vw_ins(e, VO_I2P, VT_PTR, 0, q, 0, 0);
+		q = vw_ins(e, VIR_OP_P2I, VIR_TYPE_I64, 0, p, 0, 0);
+		q = vw_ins(e, VIR_OP_ADD, VIR_TYPE_I64, 0, q, vw_iconst(e, VIR_TYPE_I64, 15), 0);
+		q = vw_ins(e, VIR_OP_AND, VIR_TYPE_I64, 0, q, vw_iconst(e, VIR_TYPE_I64, -16), 0);
+		p = vw_ins(e, VIR_OP_I2P, VIR_TYPE_PTR, 0, q, 0, 0);
 	}
-	q = vw_ins(e, VO_PTRADD, VT_PTR, 0, p, vw_iconst(e, VT_I64, big ? 8 : (int64_t)((size + 7) & ~(uint64_t)7)), 0);
+	q = vw_ins(e, VIR_OP_PTRADD, VIR_TYPE_PTR, 0, p, vw_iconst(e, VIR_TYPE_I64, big ? 8 : (int64_t)((size + 7) & ~(uint64_t)7)), 0);
 	rn = vw_treg(e);
 	vw_set(e, rn, q);
 	vw_store(e, rn, &ap, 8);
@@ -117,12 +117,12 @@ VPRIV bool vw_tail_return(ecx *e, uint32_t expr) { (void)e, (void)expr; return f
 
 VPRIV void vw_trap(ecx *e)
 {
-	vw_term(e, VO_TRAP, 0, 0, 0, 0);
+	vw_term(e, VIR_OP_TRAP, 0, 0, 0, 0);
 }
 
 VPRIV void vw_barrier(ecx *e)
 {
-	vw_ins(e, VO_BARRIER, VT_VOID, 0, 0, 0, 0);
+	vw_ins(e, VIR_OP_BARRIER, VIR_TYPE_VOID, 0, 0, 0, 0);
 	vw_st_clear(e, true);
 }
 
@@ -134,7 +134,7 @@ VPRIV void vw_label(ecx *e, uint32_t l)
 	uint32_t b = vw_lblk(e, l);
 
 	e->reach = true;
-	V->b[V->cur].term = vw_put(e, VO_BR, VT_VOID, 0, b, 0, 0, V->cur);
+	V->b[V->cur].term = vw_put(e, VIR_OP_BR, VIR_TYPE_VOID, 0, b, 0, 0, V->cur);
 	V->cur = b;
 	V->nst = 0;
 	wk_ael_clear(e, UINT32_MAX);

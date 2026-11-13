@@ -4,9 +4,9 @@
 #ifdef __ARM_NEON
 #include <arm_neon.h>
 #endif
-#if defined(__x86_64__) && !defined(VLEX_SCALAR) && !defined(VCC_BOOTSTRAP_PORTABLE)
+#if defined(__x86_64__) && !defined(VLEX_SCALAR)
 #define LEX_X86_SIMD 1
-#include <immintrin.h>
+#include "port/x86native.h"
 #endif
 #include <errno.h>
 #include <fcntl.h>
@@ -66,11 +66,16 @@ const char *lex_token_name(int kind)
  *   bit 6  hi 0    lo 9,b,c tab vt ff
  *   bit 7  hi 0    lo a,d   newline, carriage return
  */
-static const uint8_t lex_low_nibble_table[16] = {
+#ifdef LEX_X86_SIMD
+#define LEX_TABLE __attribute__((visibility("hidden")))
+#else
+#define LEX_TABLE static
+#endif
+LEX_TABLE const uint8_t lex_low_nibble_table[16] = {
 	0x26, 0x07, 0x07, 0x07, 0x17, 0x07, 0x07, 0x07,
 	0x07, 0x47, 0x83, 0x41, 0x41, 0x81, 0x11, 0x09,
 };
-static const uint8_t lex_high_nibble_table[16] = {
+LEX_TABLE const uint8_t lex_high_nibble_table[16] = {
 	0xc0, 0x00, 0x30, 0x04, 0x01, 0x0a, 0x01, 0x02,
 };
 
@@ -89,7 +94,8 @@ static const uint8_t lex_high_nibble_table[16] = {
  *            '%' or '.', bit 7 '+' or '-'
  * Masks whose property is in bit 7 go to lex_mask_pack() as they are.
  */
-static uint8_t lex_structure_table[128], lex_group_table[64], lex_class_table[128];	/* cltab: the byte classes above */
+LEX_TABLE uint8_t lex_structure_table[128], lex_group_table[64];
+static uint8_t lex_class_table[128];	/* cltab: the byte classes above */
 
 static void lex_structure_tables_init(void)
 {
@@ -122,7 +128,7 @@ static void lex_structure_tables_init(void)
 	lex_group_table['+'] = lex_group_table['-'] = 128;
 }
 
-enum { LEX_MASK_IDENTIFIER, LEX_MASK_WHITESPACE, LEX_MASK_NEWLINE, LEX_MASK_DIGIT, LEX_MASK_PREFIX, LEX_MASK_PAIR, LEX_MASK_HANDLER, LEX_MASK_SIGN_NEXT, LEX_MASK_COUNT };
+#include "masks.h"
 
 #ifdef __ARM_NEON
 /*
@@ -265,127 +271,6 @@ static inline size_t lex_quote_find(const char *s, size_t p, uint8_t q)
 #else /* !__ARM_NEON */
 
 #ifdef LEX_X86_SIMD
-#define LEX_AVX2 __attribute__((target("avx2")))
-#define LEX_AVX512 __attribute__((target("avx2,avx512f,avx512bw,avx512vbmi")))
-
-static LEX_AVX512 void lex_bytes_classify_avx512(const uint8_t *s, size_t from, size_t to, uint64_t *m[LEX_MASK_COUNT])
-{
-	const __m512i lo = _mm512_broadcast_i32x4(_mm_loadu_si128((const __m128i *)lex_low_nibble_table));
-	const __m512i hi = _mm512_broadcast_i32x4(_mm_loadu_si128((const __m128i *)lex_high_nibble_table));
-	const __m512i t0 = _mm512_loadu_si512(lex_structure_table), t1 = _mm512_loadu_si512(lex_structure_table + 64);
-	const __m512i g = _mm512_loadu_si512(lex_group_table), nib = _mm512_set1_epi8(15);
-
-	for (size_t b = from; b < to; b++) {
-		const uint8_t *q = s + 64 * b;
-		__m512i v = _mm512_loadu_si512(q), vn = _mm512_loadu_si512(q + 1);
-		__m512i t = _mm512_maskz_mov_epi8(~_mm512_movepi8_mask(v), _mm512_permutex2var_epi8(t0, v, t1));
-		__m512i gn = _mm512_maskz_mov_epi8(_mm512_cmplt_epu8_mask(vn, _mm512_set1_epi8(64)), _mm512_permutexvar_epi8(vn, g));
-		__m512i tg = _mm512_and_si512(t, gn);
-		__m512i c = _mm512_and_si512(_mm512_shuffle_epi8(lo, _mm512_and_si512(v, nib)),
-			_mm512_shuffle_epi8(hi, _mm512_and_si512(_mm512_srli_epi16(v, 4), nib)));
-
-		m[LEX_MASK_PREFIX][b] = _mm512_test_epi8_mask(t, _mm512_set1_epi8(16));
-		m[LEX_MASK_PAIR][b] = _mm512_test_epi8_mask(tg, _mm512_set1_epi8(14)) |
-			(_mm512_test_epi8_mask(t, _mm512_set1_epi8(1)) & _mm512_cmpeq_epi8_mask(v, vn));
-		m[LEX_MASK_HANDLER][b] = _mm512_movepi8_mask(_mm512_or_si512(t, v)) | _mm512_test_epi8_mask(tg, _mm512_set1_epi8(64));
-		m[LEX_MASK_IDENTIFIER][b] = _mm512_test_epi8_mask(c, _mm512_set1_epi8(31));
-		m[LEX_MASK_WHITESPACE][b] = _mm512_test_epi8_mask(c, _mm512_set1_epi8((char)0xe0));
-		m[LEX_MASK_NEWLINE][b] = _mm512_movepi8_mask(c);
-		m[LEX_MASK_DIGIT][b] = _mm512_test_epi8_mask(c, _mm512_set1_epi8(4));
-		m[LEX_MASK_SIGN_NEXT][b] = _mm512_movepi8_mask(gn);
-	}
-}
-/* PSHUFB looks up sixteen bytes within each lane. Select the ASCII row
- * by the high nibble; bytes outside the table produce zero, as on ARM. */
-static inline LEX_AVX2 __m256i lex_table_ascii_lookup(const uint8_t *table, int rows, __m256i v)
-{
-	__m256i low = _mm256_and_si256(v, _mm256_set1_epi8(15));
-	__m256i high = _mm256_and_si256(_mm256_srli_epi16(v, 4), _mm256_set1_epi8(15));
-	__m256i result = _mm256_setzero_si256();
-
-	for (int i = 0; i < rows; i++) {
-		__m256i row = _mm256_broadcastsi128_si256(_mm_loadu_si128((const __m128i *)(table + 16 * i)));
-		result = _mm256_or_si256(result, _mm256_and_si256(_mm256_shuffle_epi8(row, low),
-			_mm256_cmpeq_epi8(high, _mm256_set1_epi8((char)i))));
-	}
-	return result;
-}
-
-static inline LEX_AVX2 uint32_t lex_avx2_bits_test(__m256i v, int bits)
-{
-	return ~(uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(
-		_mm256_and_si256(v, _mm256_set1_epi8((char)bits)), _mm256_setzero_si256()));
-}
-
-static LEX_AVX2 void lex_bytes_classify_avx2(const uint8_t *s, size_t from, size_t to, uint64_t *m[LEX_MASK_COUNT])
-{
-	const __m256i lo = _mm256_broadcastsi128_si256(_mm_loadu_si128((const __m128i *)lex_low_nibble_table));
-	const __m256i hi = _mm256_broadcastsi128_si256(_mm_loadu_si128((const __m128i *)lex_high_nibble_table));
-	const __m256i nib = _mm256_set1_epi8(15);
-
-	for (size_t b = from; b < to; b++) {
-		uint64_t masks[LEX_MASK_COUNT] = { 0 };
-		for (int k = 0; k < 2; k++) {
-			const uint8_t *q = s + 64 * b + 32 * k;
-			__m256i v = _mm256_loadu_si256((const __m256i *)q), vn = _mm256_loadu_si256((const __m256i *)(q + 1));
-			__m256i t = lex_table_ascii_lookup(lex_structure_table, 8, v), gn = lex_table_ascii_lookup(lex_group_table, 4, vn);
-			__m256i tg = _mm256_and_si256(t, gn);
-			__m256i c = _mm256_and_si256(_mm256_shuffle_epi8(lo, _mm256_and_si256(v, nib)),
-				_mm256_shuffle_epi8(hi, _mm256_and_si256(_mm256_srli_epi16(v, 4), nib)));
-#define MASK(j, expr) masks[j] |= (uint64_t)(uint32_t)(expr) << (32 * k)
-			MASK(LEX_MASK_PREFIX, lex_avx2_bits_test(t, 16));
-			MASK(LEX_MASK_PAIR, lex_avx2_bits_test(tg, 14) | (lex_avx2_bits_test(t, 1) & (uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(v, vn))));
-			MASK(LEX_MASK_HANDLER, (uint32_t)_mm256_movemask_epi8(_mm256_or_si256(t, v)) | lex_avx2_bits_test(tg, 64));
-			MASK(LEX_MASK_IDENTIFIER, lex_avx2_bits_test(c, 31));
-			MASK(LEX_MASK_WHITESPACE, lex_avx2_bits_test(c, 0xe0));
-			MASK(LEX_MASK_NEWLINE, _mm256_movemask_epi8(c));
-			MASK(LEX_MASK_DIGIT, lex_avx2_bits_test(c, 4));
-			MASK(LEX_MASK_SIGN_NEXT, _mm256_movemask_epi8(gn));
-#undef MASK
-		}
-		for (int j = 0; j < LEX_MASK_COUNT; j++) m[j][b] = masks[j];
-	}
-}
-
-static LEX_AVX2 size_t lex_comment_end_find_avx2(const char *s, size_t p)
-{
-	for (;; p += 32) {
-		__m256i v = _mm256_loadu_si256((const __m256i *)(s + p));
-		__m256i vn = _mm256_loadu_si256((const __m256i *)(s + p + 1));
-		__m256i hit = _mm256_or_si256(_mm256_and_si256(_mm256_cmpeq_epi8(v, _mm256_set1_epi8('*')),
-			_mm256_cmpeq_epi8(vn, _mm256_set1_epi8('/'))), _mm256_or_si256(
-			_mm256_cmpeq_epi8(v, _mm256_set1_epi8('\\')), _mm256_cmpeq_epi8(v, _mm256_setzero_si256())));
-		uint32_t mask = (uint32_t)_mm256_movemask_epi8(hit);
-		if (mask) return p + (unsigned)__builtin_ctz(mask);
-	}
-}
-
-static LEX_AVX2 size_t lex_line_end_find_avx2(const char *s, size_t p)
-{
-	for (;; p += 32) {
-		__m256i v = _mm256_loadu_si256((const __m256i *)(s + p));
-		__m256i hit = _mm256_or_si256(_mm256_cmpeq_epi8(v, _mm256_set1_epi8('\n')),
-			_mm256_or_si256(_mm256_cmpeq_epi8(v, _mm256_set1_epi8('\r')), _mm256_cmpeq_epi8(v, _mm256_setzero_si256())));
-		uint32_t mask = (uint32_t)_mm256_movemask_epi8(hit);
-		if (mask) return p + (unsigned)__builtin_ctz(mask);
-	}
-}
-
-static LEX_AVX2 size_t lex_quote_find_avx2(const char *s, size_t p, uint8_t q)
-{
-	for (;; p += 32) {
-		__m256i v = _mm256_loadu_si256((const __m256i *)(s + p));
-		__m256i hit = _mm256_or_si256(_mm256_cmpeq_epi8(v, _mm256_set1_epi8((char)q)),
-			_mm256_or_si256(_mm256_cmpeq_epi8(v, _mm256_set1_epi8('\\')),
-			_mm256_cmpeq_epi8(_mm256_min_epu8(v, _mm256_set1_epi8('\r')), v)));
-		uint32_t mask = (uint32_t)_mm256_movemask_epi8(hit);
-		if (mask) return p + (unsigned)__builtin_ctz(mask);
-	}
-}
-
-#endif /* x86 SIMD implementations */
-
-#ifdef LEX_X86_SIMD
 #define pp_paste_result_classify classify_scalar
 #define lex_comment_end_find find_cend_scalar
 #define lex_line_end_find find_nl_scalar
@@ -464,6 +349,12 @@ static size_t (*lex_comment_end_find)(const char *, size_t) = find_cend_scalar;
 static size_t (*lex_line_end_find)(const char *, size_t) = find_nl_scalar;
 static size_t (*lex_quote_find)(const char *, size_t, uint8_t) = find_quote_scalar;
 
+void lex_bytes_classify_avx512(const uint8_t *, size_t, size_t, uint64_t **);
+void lex_bytes_classify_avx2(const uint8_t *, size_t, size_t, uint64_t **);
+size_t lex_comment_end_find_avx2(const char *, size_t);
+size_t lex_line_end_find_avx2(const char *, size_t);
+size_t lex_quote_find_avx2(const char *, size_t, uint8_t);
+
 /* Called under lex_tables_once, before the lexer publishes its dispatch table.
  * The compiler's CPU detector checks OSXSAVE/XCR0 as well as CPUID, so a
  * CPU feature is usable only when the OS preserves the required registers.
@@ -471,16 +362,17 @@ static size_t (*lex_quote_find)(const char *, size_t, uint8_t) = find_quote_scal
 static void lex_simd_init_x86(void)
 {
 	const char *cap = getenv("VCC_LEX_SIMD");
-	__builtin_cpu_init();
+	x86_features features, disabled;
+	const char *cpu;
 	if (cap && !strcmp(cap, "scalar")) return;
-	if (!__builtin_cpu_supports("avx2")) return;
+	if (!x86_native_features(&features, &disabled, &cpu) || !x86_feature_has(features, X86_FEATURE_AVX2)) return;
 	pp_paste_result_classify = lex_bytes_classify_avx2;
 	lex_comment_end_find = lex_comment_end_find_avx2;
 	lex_line_end_find = lex_line_end_find_avx2;
 	lex_quote_find = lex_quote_find_avx2;
 	if (cap && !strcmp(cap, "avx2")) return;
-	if (__builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512bw") &&
-	    __builtin_cpu_supports("avx512vbmi"))
+	if (x86_feature_has(features, X86_FEATURE_AVX512F) && x86_feature_has(features, X86_FEATURE_AVX512BW) &&
+	    x86_feature_has(features, X86_FEATURE_AVX512VBMI))
 		pp_paste_result_classify = lex_bytes_classify_avx512;
 }
 #endif

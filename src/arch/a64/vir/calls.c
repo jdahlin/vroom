@@ -9,32 +9,32 @@
  */
 VPRIV const char *vl_notail(vl *L, uint8_t *d)
 {
-	const vir_fn *f = L->f;
+	const vir_function *f = L->f;
 	bool ch = true;
 
-	memset(d, 0, f->nins);
+	memset(d, 0, f->insn_count);
 	while (ch) {
 		ch = false;
-		for (uint32_t b = 0; b < f->nblk; b++)
-			for (uint32_t i = f->blk[b].first; i < f->blk[b].first + f->blk[b].n; i++) {
-				vir_ins x = f->ins[i];
-				vir_oit it;
+		for (uint32_t b = 0; b < f->block_count; b++)
+			for (uint32_t i = f->blocks[b].first; i < f->blocks[b].first + f->blocks[b].insn_count; i++) {
+				vir_insn x = f->insns[i];
+				vir_operand_iterator it;
 				uint32_t *p;
 
-				if (x.op == VO_ASM || x.op == VO_ASMGOTO || x.op == VO_FRAMEADDR || x.op == VO_RETADDR ||
-				    x.op == VO_VA_START)
+				if (x.op == VIR_OP_ASM || x.op == VIR_OP_ASMGOTO || x.op == VIR_OP_FRAMEADDR || x.op == VIR_OP_RETADDR ||
+				    x.op == VIR_OP_VA_START)
 					return "asm or the frame's address";
-				if (x.op == VO_CALL && virbuild_call_returns_twice(L->e, &f->ins[x.a]))
+				if (x.op == VIR_OP_CALL && virbuild_call_returns_twice(L->e, &f->insns[x.a]))
 					return "a call that returns twice";
-				vir_oit_init(&it, (vir_fn *)f, &x, false);
-				while ((p = vir_oit_next(&it))) {
-					if (f->ins[*p].op != VO_SLOTADDR && !d[*p])
+				vir_operand_iterator_init(&it, (vir_function *)f, &x, false);
+				while ((p = vir_operand_iterator_next(&it))) {
+					if (f->insns[*p].op != VIR_OP_SLOTADDR && !d[*p])
 						continue;
-					if (x.op == VO_PTRADD && it.pos == 0) {
+					if (x.op == VIR_OP_PTRADD && it.pos == 0) {
 						ch |= !d[i];
 						d[i] = 1;
-					} else if (!(((x.op == VO_LOAD || x.op == VO_STORE || x.op == VO_MEMSET) && it.pos == 0) ||
-						     (x.op == VO_MEMCPY && it.pos <= 1))) {
+					} else if (!(((x.op == VIR_OP_LOAD || x.op == VIR_OP_STORE || x.op == VIR_OP_MEMSET) && it.pos == 0) ||
+						     (x.op == VIR_OP_MEMCPY && it.pos <= 1))) {
 						return "a slot's address escapes";
 					}
 				}
@@ -46,15 +46,15 @@ VPRIV const char *vl_notail(vl *L, uint8_t *d)
 /* from j in block k: past the instructions that only pass *res on (i2p, p2i; under ret32
  * trunc to i32 and ext.4: the low half is the result, the upper half unspecified), *res
  * following them; the first other instruction */
-static uint32_t vl_pass(const vl *L, const vir_blk *k, uint32_t j, uint32_t *res)
+static uint32_t vl_pass(const vl *L, const vir_block *k, uint32_t j, uint32_t *res)
 {
-	const vir_fn *f = L->f;
+	const vir_function *f = L->f;
 
-	for (; j < k->first + k->n && f->ins[j].a == *res; j++) {
-		const vir_ins *x = &f->ins[j];
+	for (; j < k->first + k->insn_count && f->insns[j].a == *res; j++) {
+		const vir_insn *x = &f->insns[j];
 
-		if (!(x->op == VO_I2P || x->op == VO_P2I ||
-		      (L->ret32 && ((x->op == VO_TRUNC && x->ty == VT_I32) || (x->op == VO_EXT && VIF_W(x->fl) == 2)))))
+		if (!(x->op == VIR_OP_I2P || x->op == VIR_OP_P2I ||
+		      (L->ret32 && ((x->op == VIR_OP_TRUNC && x->type == VIR_TYPE_I32) || (x->op == VIR_OP_EXT && VIR_INSN_FLAG_WIDTH_LOG2(x->flags) == 2)))))
 			break;
 		*res = j;
 	}
@@ -65,13 +65,13 @@ static uint32_t vl_pass(const vl *L, const vir_blk *k, uint32_t j, uint32_t *res
  * value under them, since the lowering reads through i2p and p2i */
 static uint32_t vl_under(const vl *L, uint32_t v)
 {
-	const vir_fn *f = L->f;
+	const vir_function *f = L->f;
 
 	for (;;) {
-		const vir_ins *x = &f->ins[v];
+		const vir_insn *x = &f->insns[v];
 
-		if (!(x->op == VO_I2P || x->op == VO_P2I ||
-		      (L->ret32 && ((x->op == VO_TRUNC && x->ty == VT_I32) || (x->op == VO_EXT && VIF_W(x->fl) == 2)))))
+		if (!(x->op == VIR_OP_I2P || x->op == VIR_OP_P2I ||
+		      (L->ret32 && ((x->op == VIR_OP_TRUNC && x->type == VIR_TYPE_I32) || (x->op == VIR_OP_EXT && VIR_INSN_FLAG_WIDTH_LOG2(x->flags) == 2)))))
 			return v;
 		v = x->a;
 	}
@@ -81,40 +81,40 @@ static uint32_t vl_under(const vl *L, uint32_t v)
  * nothing), also through brs to blocks of only what passes the result on */
 VPRIV bool vl_sibling(vl *L, uint32_t b, uint32_t i)
 {
-	const vir_fn *f = L->f;
-	const vir_blk *k = &f->blk[b];
-	const vir_ins *r, *t = &f->ins[f->ins[i].a];
+	const vir_function *f = L->f;
+	const vir_block *k = &f->blocks[b];
+	const vir_insn *r, *t = &f->insns[f->insns[i].a];
 	uint32_t res = i, j;
 
-	if (!L->tail || f->ins[i].ty == VT_MULTI ||
-	    (t->op == VO_SYMADDR && RKIND(t->a) == RK_SYM && !em_tail_target_ok(L->e, canon_sym(L->e->c, RIDX(t->a)))))
+	if (!L->tail || f->insns[i].type == VIR_TYPE_MULTI ||
+	    (t->op == VIR_OP_SYMADDR && RKIND(t->a) == RK_SYM && !em_tail_target_ok(L->e, canon_sym(L->e->c, RIDX(t->a)))))
 		return false;
 	j = vl_pass(L, k, i + 1, &res);
 	for (int hop = 0;; hop++) {
 		uint32_t q;
 
-		if (j >= k->first + k->n)
+		if (j >= k->first + k->insn_count)
 			return false;
-		r = &f->ins[j];
-		if (r->op != VO_BR || hop == 4)
+		r = &f->insns[j];
+		if (r->op != VIR_OP_BR || hop == 4)
 			break;
-		k = &f->blk[r->a];
-		for (q = 0; q < k->nparam && vl_under(L, f->extra[r->c + q]) != vl_under(L, res); q++)
+		k = &f->blocks[r->a];
+		for (q = 0; q < k->parameter_count && vl_under(L, f->extra[r->c + q]) != vl_under(L, res); q++)
 			;
-		if (q < k->nparam)
+		if (q < k->parameter_count)
 			res = k->first + q;	/* (else the ret may name the value itself) */
-		j = vl_pass(L, k, k->first + k->nparam, &res);
+		j = vl_pass(L, k, k->first + k->parameter_count, &res);
 	}
-	if (r->op != VO_RET)
+	if (r->op != VIR_OP_RET)
 		return false;
 	return !f->extra[r->c] || (f->extra[r->c] == 1 && vl_under(L, f->extra[r->c + 1]) == vl_under(L, res));
 }
 
-VPRIV void vl_call(vl *L, uint32_t b, uint32_t i, const vir_ins *in)
+VPRIV void vl_call(vl *L, uint32_t b, uint32_t i, const vir_insn *in)
 {
 	ecx *e = L->e;
-	const vir_fn *f = L->f;
-	uint32_t ng = VSIG_NGROUPS(f->extra[in->b]);
+	const vir_function *f = L->f;
+	uint32_t ng = VIR_SIGNATURE_GROUP_COUNT(f->extra[in->b]);
 	vlarg *a;
 	int32_t stk;
 
@@ -127,7 +127,7 @@ VPRIV void vl_call(vl *L, uint32_t b, uint32_t i, const vir_ins *in)
 	for (uint32_t k = 0; k < ng; k++) {
 		uint8_t r = L->opr[1 + k];
 
-		if (a[k].reg != VR_NONE) {
+		if (a[k].reg != VIR_REGISTER_NONE) {
 			if (r != a[k].reg)
 				vl_fail(L, VIRFAIL(argument_not_in_register));
 			if (!vl_fcls(r) && vl_gx(r) < 8)
@@ -139,11 +139,11 @@ VPRIV void vl_call(vl *L, uint32_t b, uint32_t i, const vir_ins *in)
 		{
 			int sz = log2sz(a[k].size), rs;
 
-			if (r != VR_NONE && vl_fcls(r) && sz >= 2) {
+			if (r != VIR_REGISTER_NONE && vl_fcls(r) && sz >= 2) {
 				mem(e, I_STF, sz, 0, vl_gv(r), SP, a[k].stk);
 				continue;
 			}
-			if (r != VR_NONE && vl_fcls(r)) {
+			if (r != VIR_REGISTER_NONE && vl_fcls(r)) {
 				word(e, f_out(a[k].size == 8, R_X16, vl_gv(r)));
 				rs = R_X16;
 			} else {
@@ -155,19 +155,19 @@ VPRIV void vl_call(vl *L, uint32_t b, uint32_t i, const vir_ins *in)
 	if (!stk && vl_sibling(L, b, i)) {
 		ins *t;
 
-		if (L->o->callee[1] && L->opr[0] != VR_NONE)	/* (the callee's address may be in x16: through x17) */
+		if (L->o->callee[1] && L->opr[0] != VIR_REGISTER_NONE)	/* (the callee's address may be in x16: through x17) */
 			L->risk = true;
-		vl_fcsave(L, true, L->opr[0] != VR_NONE ? R_X17 : R_X16);
+		vl_fcsave(L, true, L->opr[0] != VIR_REGISTER_NONE ? R_X17 : R_X16);
 		t = put(e, I_TAIL);
 		t->sh = L->bare;
 
-		if (L->opr[0] == VR_NONE) {
-			const vir_ins *k = &f->ins[in->a];
+		if (L->opr[0] == VIR_REGISTER_NONE) {
+			const vir_insn *k = &f->insns[in->a];
 
-			if (k->op != VO_SYMADDR || k->b || k->c)
+			if (k->op != VIR_OP_SYMADDR || k->b || k->c)
 				vl_fail(L, VIRFAIL(indirect_callee_without_register));
 			t->cond = 2;
-			t->ref = f->ins[in->a].a;
+			t->ref = f->insns[in->a].a;
 			note_ref(e, t->ref);
 		} else {
 			t->cond = 3;
@@ -180,10 +180,10 @@ VPRIV void vl_call(vl *L, uint32_t b, uint32_t i, const vir_ins *in)
 	if (stk > e->outmax)
 		e->outmax = stk;
 	e->calls = true;
-	if (L->opr[0] == VR_NONE) {
-		const vir_ins *k = &f->ins[in->a];
+	if (L->opr[0] == VIR_REGISTER_NONE) {
+		const vir_insn *k = &f->insns[in->a];
 
-		if (k->op != VO_SYMADDR || k->b || k->c)
+		if (k->op != VIR_OP_SYMADDR || k->b || k->c)
 			vl_fail(L, VIRFAIL(indirect_callee_without_register));
 		note_ref(e, k->a);
 		ins *c = put(e, I_BL);
@@ -198,27 +198,27 @@ VPRIV void vl_call(vl *L, uint32_t b, uint32_t i, const vir_ins *in)
 	}
 }
 
-VPRIV void vl_param(vl *L, const vir_ins *in, uint8_t res)
+VPRIV void vl_param(vl *L, const vir_insn *in, uint8_t res)
 {
 	ecx *e = L->e;
-	const vir_fn *f = L->f;
-	uint32_t ng = VSIG_NGROUPS(f->extra[f->sig]);
+	const vir_function *f = L->f;
+	uint32_t ng = VIR_SIGNATURE_GROUP_COUNT(f->extra[f->signature]);
 	vlarg *a;
 	int32_t stk;
 
 	if (ng > VL_MAXOP || in->a >= ng)
 		vl_fail(L, VIRFAIL(lowering_parameter));
 	a = __builtin_alloca(sizeof(vlarg) * ng);
-	vl_assign(DARWIN(e->c), &f->extra[f->sig], a, ng, &stk);
-	if (a[in->a].reg != VR_NONE) {
-		if (res != VR_NONE && res != a[in->a].reg)
+	vl_assign(DARWIN(e->c), &f->extra[f->signature], a, ng, &stk);
+	if (a[in->a].reg != VIR_REGISTER_NONE) {
+		if (res != VIR_REGISTER_NONE && res != a[in->a].reg)
 			vl_fail(L, VIRFAIL(parameter_not_in_register));
 		return;
 	}
-	if (res == VR_NONE)
+	if (res == VIR_REGISTER_NONE)
 		return;
 	if (vl_fcls(res)) {
-		mem(e, I_LDF, in->ty == VT_F64 ? 3 : 2, 0, vl_gv(res), R_FP, 16 + a[in->a].stk);
+		mem(e, I_LDF, in->type == VIR_TYPE_F64 ? 3 : 2, 0, vl_gv(res), R_FP, 16 + a[in->a].stk);
 	} else {
 		mem(e, I_LD, log2sz(a[in->a].size), 0, vl_gx(res), R_FP, 16 + a[in->a].stk);
 	}

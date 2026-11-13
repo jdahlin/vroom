@@ -23,7 +23,7 @@ static void ld_gap_fills_write(void)
 		if (!v)
 			continue;
 		uint8_t f[4] = {v >> 24, v >> 16, v >> 8, v};	/* big-endian (lld readFill) */
-		uint8_t *b = out + os->offset;
+		uint8_t *b = ctx->output.image + os->offset;
 		uint64_t at = 0;
 		for (uint32_t k = 0; k < os->cmds.n; k++) {
 			if (os->cmds.v[k].kind != LD_COMMAND_INPUT_SECTION_DESCRIPTION)
