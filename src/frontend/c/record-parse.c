@@ -93,9 +93,10 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 			}
 		}
 		if (is(c, LEX_TOKEN_SEMICOLON)) {
-			/* anonymous struct/union member; with -fms-anonymous-structs also a
+			/* anonymous struct/union member (written as one: a typedef name of an unnamed
+			 * record declares nothing, as in clang); with -fms-anonymous-structs also a
 			 * tagged or typedef'd complete record */
-			if (is_record(c, ds.ty) && (!c->tags[T(c, ds.ty)->aux].name ||
+			if (is_record(c, ds.ty) && ((!c->tags[T(c, ds.ty)->aux].name && !ds.tdef) ||
 						    (c->o->ms_anon && complete(c, ds.ty)))) {
 				if (nf >= (1u << 20))
 					fatal(c, ds.loc, "too many members");
@@ -216,6 +217,8 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 	r = &c->tags[ti];
 	if (post.ms_struct)
 		r->flags |= RF_MS_STRUCT;
+	if (post.gcc_struct)
+		r->flags |= RF_GCC_STRUCT;
 	if (post.packed)
 		r->flags |= RF_PACKED;
 	if (post.aligned > r->maxalign)

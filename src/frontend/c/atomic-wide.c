@@ -6,7 +6,7 @@
 VPRIV bool atomic_wide(cc *c, qty t)
 {
 	uint64_t n = ty_size(c, t);
-	return (c->o->target == PP_LINUX_AARCH64 || c->o->target == PP_LINUX_X86_64) &&
+	return (c->o->target == PP_LINUX_AARCH64 || CC_X86_64(c)) &&
 	       n && (n != 1 && n != 2 && n != 4 && n != 8);
 }
 

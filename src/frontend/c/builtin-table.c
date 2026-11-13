@@ -47,6 +47,15 @@ static const builtin builtins[] = {
 	{ "__builtin_stdc_rotate_right", BI_STDC_ROTR, 0, "u.." },
 	{ "__builtin_va_end", BI_VA_END, 0, "vV" },
 	{ "__builtin_va_copy", BI_VA_COPY, 0, "vVV" },
+	/* x86-64: the Microsoft va_list (a char *) in any function, as clang; the same nodes as the
+	   target's own, told apart by the type of the va_list argument (cc_valist_is_ms) */
+	{ "__builtin_ms_va_start", BI_VA_START, 0, "vM." },
+	{ "__builtin_ms_va_end", BI_VA_END, 0, "vM" },
+	{ "__builtin_ms_va_copy", BI_VA_COPY, 0, "vMM" },
+	/* x86 fences (MinGW-w64's intrin-impl.h): a full barrier, as __sync_synchronize */
+	{ "__builtin_ia32_sfence", BI_SYNC_SYNCHRONIZE, 0, "v" },
+	{ "__builtin_ia32_lfence", BI_SYNC_SYNCHRONIZE, 0, "v" },
+	{ "__builtin_ia32_mfence", BI_SYNC_SYNCHRONIZE, 0, "v" },
 	{ "__builtin_clz", BI_CLZ, 1, "iu" }, { "__builtin_clzl", BI_CLZL, 1, "iL" }, { "__builtin_clzll", BI_CLZLL, 1, "iW" },
 	{ "__builtin_ctz", BI_CTZ, 1, "iu" }, { "__builtin_ctzl", BI_CTZL, 1, "iL" }, { "__builtin_ctzll", BI_CTZLL, 1, "iW" },
 	{ "__builtin_ffs", BI_FFS, 1, "ii" }, { "__builtin_ffsl", BI_FFSL, 1, "il" }, { "__builtin_ffsll", BI_FFSLL, 1, "iw" },
@@ -350,6 +359,8 @@ VPRIV qty sigtype(cc *c, char ch)
 	case 'P': return ty_ptr(c, QT(TY_VOID, Q_CONST));
 	case 's': return ty_ptr(c, prim(TY_CHAR));
 	case 'S': return ty_ptr(c, QT(TY_CHAR, Q_CONST));
+	case 'M':	/* x86-64: __builtin_ms_va_list, a char * (as Darwin's va_list: the emitter takes the operand's address) */
+		return ty_ptr(c, prim(TY_CHAR));
 	case 'V':	/* a parameter: x86-64's array type is adjusted to the element pointer */
 		return KIND(c, c->t_valist) == TY_ARRAY ? ty_ptr(c, T(c, c->t_valist)->base) : c->t_valist;
 	default: abort();
@@ -385,6 +396,10 @@ static uint32_t *bi_dir[NDIR];
 /* __has_builtin for the names the front end implements (the pp asks through pp_builtin_known) */
 static int builtin_known(const char *n)
 {
+	/* x86-64 only: answered by the x86 tables (ppdata-x86.inc, ppdata-win64.inc), not for other targets */
+	if (!strncmp(n, "__builtin_ms_va_", 16) || !strcmp(n, "__builtin_ia32_sfence") || !strcmp(n, "__builtin_ia32_lfence") ||
+	    !strcmp(n, "__builtin_ia32_mfence"))
+		return 0;
 	for (uint32_t i = 0; builtins[i].name; i++)
 		if (!strcmp(builtins[i].name, n))
 			return builtins[i].id != BI_IS_CONSTANT_EVALUATED;	/* clang: C++ only */

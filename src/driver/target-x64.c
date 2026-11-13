@@ -66,6 +66,9 @@ static const char *driver_target_features_parse(int argc, char **argv,
 	!strcmp(name, "stackrealign") || !strcmp(name, "omit-leaf-frame-pointer") ||
 	!strcmp(name, "stack-arg-probe") || !strcmp(name, "accumulate-outgoing-args") ||
 	!strcmp(name, "outline-atomics") || !strcmp(name, "strict-align") ||
+	/* Windows (MinGW): record layout and the driver's (link) switches */
+	!strcmp(name, "ms-bitfields") || !strcmp(name, "unicode") || !strcmp(name, "windows") ||
+	!strcmp(name, "console") || !strcmp(name, "threads") || !strcmp(name, "dll") ||
 	/* the kernel's: no instructions vcc emits (3DNow!, x87 returns, al before varargs, regparm) */
 	!strcmp(name, "3dnow") || !strcmp(name, "3dnowa") || !strcmp(name, "fp-ret-in-387") ||
 	!strcmp(name, "skip-rax-setup") || !strncmp(name, "regparm=", 8) || !strcmp(name, "retpoline")) continue;

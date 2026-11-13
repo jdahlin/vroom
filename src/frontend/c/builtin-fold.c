@@ -79,7 +79,7 @@ VPRIV bool eval_builtin(cc *c, const node *x, cval *v)
 			return false;
 		const char *text = c->strs[N(n)->a].s;
 		int p = KIND(c, x->ty) == TY_FLOAT16 ? 10 : KIND(c, x->ty) == TY_FLOAT ? 23 : KIND(c, x->ty) == TY_DOUBLE ? 52 :
-		        c->o->target == PP_DARWIN ? 52 : c->o->target == PP_LINUX_X86_64 ? 63 : 112;
+		        c->o->target == PP_DARWIN ? 52 : CC_X86_64(c) ? 63 : 112;
 		u128 payload = 0;
 		unsigned base = 10;
 		bool valid = true;

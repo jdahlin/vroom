@@ -118,6 +118,8 @@ static void driver_job_pp_options_finish(struct driver_job *job, const driver_en
 {
 	job->pp_options.markers = job->no_line_markers || job->compare_file || !job->pp_options.fatal_continue || job->dump_macros ? 0 : job->undefine_predefined ? 2 : 1;
 	job->pp_options.predef_cmdl = (unsigned)job->predefines.length;
+	if (job->target_win64 && job->unicode)	/* clang's driver: -municode is -DUNICODE, before the user's -D */
+		driver_buffer_append_string(&job->predefines, "#define UNICODE 1\n");
 	if (job->command_line_defines.length) driver_buffer_append(&job->predefines, job->command_line_defines.data, job->command_line_defines.length);
 	job->pp_options.predef_incl = (unsigned)job->predefines.length;
 	if (job->include_macros_text.length) driver_buffer_append(&job->predefines, job->include_macros_text.data, job->include_macros_text.length);
@@ -172,7 +174,8 @@ static void driver_job_compile(struct driver_job *job, pp *p, const driver_envir
 				return;
 			}
 		}
-		cc_opts co = { .target = job->pp_options.target, .unsigned_char = job->pp_options.unsigned_char, .dump_layouts = job->layout_checks, .lint = job->lint, .ms_anon = job->ms_anonymous_structs, .short_wchar = job->short_wchar, .strict_flex_arrays = job->strict_flex_arrays,
+		cc_opts co = { .target = job->pp_options.target, .unsigned_char = job->pp_options.unsigned_char, .dump_layouts = job->layout_checks, .lint = job->lint, .ms_anon = job->ms_anonymous_structs, .short_wchar = job->short_wchar || job->target_win64,
+				.ms_bitfields = job->ms_bitfields >= 0 ? job->ms_bitfields : job->target_win64, .strict_flex_arrays = job->strict_flex_arrays,
 				.std = job->standard, .c2y = job->standard == 23 && job->standard_version && !strcmp(job->standard_version, "202400L"), .implicit_int = job->standard == 89 || job->allow_implicit_int, .implicit_fn = job->standard == 89 || job->allow_implicit_function, .conv_warn = job->conversion_warning_flags,
 				.strict_std = job->strict_standard,
 				.fast_math = job->fast_math && (job->math_flags & 7) == 7, .no_fp_contract = job->no_fp_contract, .gnu89_inline = job->gnu89_inline, .no_builtin = job->freestanding || job->no_builtin, .no_jump_tables = job->no_jump_tables, .instrument = job->instrument_functions, .wasm_sjlj = job->sjlj,
@@ -323,7 +326,7 @@ static __attribute__((noinline)) int driver_job_run_one(int argc, char **argv, c
 {
 	vjob_region *br = driver_buffer_region = vjob_region_pool_take(&driver_buffer_pool);
 	struct driver_job jobstore = {
-		.errfd = env->errfd, .hosted = 1, .raw_assembler = -1, .march_has_lse = -1, .mcpu_has_lse = -1, .pie = -1, .cfi = -1,
+		.errfd = env->errfd, .hosted = 1, .ms_bitfields = -1, .raw_assembler = -1, .march_has_lse = -1, .mcpu_has_lse = -1, .pie = -1, .cfi = -1,
 		.x64_cpu = "x86-64", .omit_frame_pointer = -1, .unsigned_char = -1, .trigraphs = -1, .gnu89_inline = -1,
 		.predefines = { .region = &br[0] }, .command_line_defines = { .region = &br[1] }, .include_text = { .region = &br[2] }, .include_macros_text = { .region = &br[3] },
 	/* no --target: the host's own userland (Darwin on a Mac, glibc aarch64 or x86-64 on Linux) */
@@ -377,9 +380,10 @@ static __attribute__((noinline)) int driver_job_run_one(int argc, char **argv, c
 		}
 	}
 	driver_depfile_names(job);
-	/* Linux defaults as clang's: PIE, asynchronous unwind tables (CFI) */
+	/* Linux defaults as clang's: PIE, asynchronous unwind tables (CFI); Windows has neither (its
+	   unwind tables are SEH's, PLAN-win64.md WIN3) */
 	{
-		int hl = !job->darwin;
+		int hl = !job->darwin && !job->target_win64;
 
 		if (job->pie < 0)
 			job->pie = hl && !job->pic ? 2 : 0;

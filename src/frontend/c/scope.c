@@ -127,3 +127,22 @@ VPRIV uint32_t lookup_tag(cc *c, uint32_t id)
 
 	return unlikely(c->lz_wm | c->dr_on) ? lookup_slow(c, 1, id, s) : s;
 }
+
+/*
+ * x86-64 Linux: __builtin_ms_va_list, the Microsoft va_list (char *) of ms_abi functions, declared
+ * where it is first named (typedef_id) rather than with the TU's other builtin types, so that the
+ * symbol numbers of a TU without it, and with them the code generator's local names, stay as they
+ * were.  Windows declares it with __builtin_va_list (translation-unit.c).
+ */
+VPRIV __attribute__((noinline, cold)) bool ms_valist_typedef(cc *c, uint32_t id)
+{
+	uint32_t s;
+
+	if (c->o->target != PP_LINUX_X86_64 || memcmp(vintern_ents[id].s, "__builtin_ms_va_list", 20))
+		return false;
+	if (unlikely(c->dr_on))
+		dr_pragma(c, 2);	/* (a declaration-cache region does not replay this) */
+	s = sym_new(c, S_TYPEDEF, id, ty_ptr(c, prim(TY_CHAR)), 0);
+	sym_bind(c, s);
+	return true;
+}

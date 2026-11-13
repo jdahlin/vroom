@@ -333,7 +333,7 @@ static bool bc_encode(cc *c, qty t, cval cv, u128 *v, unsigned *valid)
 		uint64_t bits;
 		memcpy(&bits, &cv.f, 8);
 		*v = bits;
-	} else if (c->o->target == PP_LINUX_X86_64 && KIND(c, t) == TY_LDOUBLE) {
+	} else if (CC_X86_64(c) && KIND(c, t) == TY_LDOUBLE) {
 		uint8_t b[10];
 		vsoftfloat_to_x87(q, b);
 		*v = 0;
@@ -546,7 +546,7 @@ static bool bc_bytes_read(bc_state *state, cc *c, uint32_t n, uint64_t off, unsi
 static bool bc_decode(cc *c, qty t, u128 raw, cval *v)
 {
 	unsigned bits = (unsigned)(ty_size(c, t) * 8), valid = is_integer(c, t) ? int_bits(c, t) : bits;
-	if (c->o->target == PP_LINUX_X86_64 && KIND(c, t) == TY_LDOUBLE)
+	if (CC_X86_64(c) && KIND(c, t) == TY_LDOUBLE)
 		valid = 80;
 	memset(v, 0, sizeof(*v));
 	v->ice = true;
@@ -625,7 +625,7 @@ static bool bitcast_value_read(bc_state *state, cc *c, uint32_t n, cval *v)
 		return false;
 	if (KIND(c, t) == TY_BOOL)
 		valid = 8;
-	if (c->o->target == PP_LINUX_X86_64 && KIND(c, t) == TY_LDOUBLE)
+	if (CC_X86_64(c) && KIND(c, t) == TY_LDOUBLE)
 		valid = 80;
 	u128 raw, known;
 	if (!bc_read(state, c, n, t, 0, bits, &raw, &known, 0) || (known & bc_mask(valid)) != bc_mask(valid))
@@ -673,14 +673,14 @@ static bool bc_check(bc_state *state, cc *c, uint32_t n, qty t, uint64_t off, un
 	unsigned bits = (unsigned)ty_size(c, t) * 8;
 	if (is_integer(c, t) && KIND(c, t) != TY_BOOL)
 		bits = int_bits(c, t);
-	if (c->o->target == PP_LINUX_X86_64 && k == TY_LDOUBLE)
+	if (CC_X86_64(c) && k == TY_LDOUBLE)
 		bits = 80;
 	u128 v, known;
 	if (bits > 128 || !bc_read(state, c, n, N(n)->ty, off, bits, &v, &known, 0))
 		return false;
 	if (known != bc_mask(bits))
 		return carry && (k == TY_UCHAR || (k == TY_CHAR && !is_signed(c, t)));
-	if (c->o->target == PP_LINUX_X86_64 && k == TY_LDOUBLE) {
+	if (CC_X86_64(c) && k == TY_LDOUBLE) {
 		unsigned exp = (unsigned)(v >> 64) & 0x7fff;
 		if ((exp != 0) != (((uint64_t)v >> 63) != 0))
 			return false;

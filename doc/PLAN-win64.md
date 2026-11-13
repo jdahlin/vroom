@@ -223,6 +223,88 @@ can move to `long long`), sjlj 4 (`__builtin_setjmp`), ub-trap 3 (clang makes
 abi 1.  60 s cold at `-j 6` on this host, 0.3 s from the cache.  vcc's side
 is wired (`vpp -S`, `--obj`, `--objcmp`) and fails at `as` until WIN1-WIN3.
 
+### WIN1 (2026-11-13): front end done
+
+- **Target.** `PP_WIN64` (`--target=x86_64-w64-mingw32`, `x86_64-w64-windows-gnu`,
+  `x86_64-pc-windows-gnu`; `*-windows-msvc` is an error).  `PP_IS_X86_64(t)`,
+  `X86(c)` and `CC_X86_64(c)` mean the CPU (builtins, target attributes, x87,
+  feature macros, the x86 code generator); `WIN64(c)` (codegen), `CC_WIN64(c)`,
+  `CC_LLP64(c)`, `CC_LONG32(c)` the OS and data model.  The driver sets
+  `target_x64` and `target_win64`; no PIE and no DWARF CFI by default.
+- **Clang's data** from `src/tools/gen-win64data.sh` (clang 23.1.6, the
+  llvm-mingw headers as query candidates): `frontend/pp/ppdata-win64.inc`
+  (predefines, `-dD` order, `__has_*`) and `frontend/c/attrnames-win64.inc`.
+  The driver's deltas for Windows: `__PIC__ 2` always (no `-fpic`/`-fpie`
+  macros), no `_REENTRANT` (`-pthread`), no `__GCC_HAVE_DWARF2_CFI_ASM`, no
+  `-fshort-wchar` change, strict modes drop `WIN32 WIN64 WINNT`, C23's `%b`
+  formats with `ll`, `-municode` as clang's driver `-DUNICODE` (first on the
+  command line).  `-march`/`-m` feature macros as for x86-64 Linux.
+- **LLP64.** `long` 4 bytes; `size_t`/`ptrdiff_t` (`c->t_size`, `c->t_ptrdiff`)
+  `unsigned long long`/`long long`; `wchar_t` `unsigned short` (cc's
+  `short_wchar`); `__builtin_va_list` `char *`; integer literal types and
+  `mode(DI/word/pointer)` with a 32-bit `long` (`CC_I64`, `CC_INTPTR`).  Shared
+  code that took `long` as the pointer-sized type now takes `c->t_ptrdiff` /
+  `c->t_size` (pointer arithmetic indices, array subscripts, VLA bounds,
+  library signatures `z`/`Y`).  The code generator's own `prim(TY_ULONG)` as a
+  pointer-sized type is for WIN2/WIN3.
+- **Attributes.** `ms_abi`/`sysv_abi` on the function type (`ctype.ext`:
+  `CC_FNABI_MS`/`CC_FNABI_SYSV` for the convention that is not the target's
+  own; part of type compatibility; inherited by a redeclaration without one,
+  clang's error for one added later; `cc_func_abi(c, t)`).  `dllimport`/
+  `dllexport` in `attrs.dll` (`CC_DLLIMPORT`/`CC_DLLEXPORT`): a dllimport
+  variable without initializer is an extern declaration, clang's errors for
+  dllimport data definitions, non-inline function definitions and static.
+  `cdecl stdcall fastcall thiscall vectorcall regcall pascal` accepted and
+  ignored with clang's warnings (Windows: only `pascal` warns).  Where clang
+  does not know them for the target (dllimport on Linux, ms_abi on arm64):
+  "unknown attribute" as before.  `__builtin_ms_va_list` (`char *`, every
+  x86-64 OS; on Linux declared where first named, so other TUs keep their
+  symbol numbers) and `__builtin_ms_va_start/end/copy` (the `BI_VA_*` nodes;
+  `cc_valist_is_ms(c, type)` tells the kinds apart); `__builtin_ia32_sfence/
+  lfence/mfence` as a full barrier (MinGW-w64's `intrin-impl.h`).
+- **Bit-fields.** clang's `isMsStruct`: `ms_struct`, `#pragma ms_struct on` or
+  `-mms-bitfields` (Windows' default, `-mno-ms-bitfields`), unless
+  `gcc_struct` (`RF_GCC_STRUCT`); both on one record is clang's error.
+- **Search paths** as clang's MinGW toolchain: the resource headers, then
+  `SYSROOT/x86_64-w64-mingw32/include`, `.../usr/include` if it exists,
+  `SYSROOT/include` (`--sysroot`).
+- **Shared fixes found on these headers:** lazy bodies under `#pragma pack`
+  (MinGW-w64's headers are all inside one: the bodies keep the pack value of
+  their definition, so unused intrinsics are not parsed); a typedef name of an
+  unnamed record as a member declares nothing without -fms-extensions (clang);
+  layout claims skip the x86 header builtins clang does not let be named
+  (`_mm_sfence`, `__rdtsc`, ...); the pp fixes of the previous commit
+  (`#pragma message` text, spliced `-dM` strings, `-dD` undefs, include-guard
+  knowledge for `-H`/markers, `#pragma GCC system_header` markers).
+- **Verified** (this host, clang 23.1.6, llvm-mingw 20261104):
+  `-dM -E` byte-identical for 29 flag sets x 3 triples (87/87);
+  `bench/vcc-driver.py` 76 new rows (`-E` and `-dM`) all pass (229/304
+  overall, the 75 others are the arm64 tables' clang 23.1.4 version macros,
+  as before); `bench/vcc-diff.py --win64` (982 of the 1547 top-level headers
+  clang accepts + 8 flag variants = 990 TUs): cmp, text, textc, dm, deps, hdr
+  990/990, lines 989/990, dd 988/990; `bench/vcc-sema.py --win64` run
+  990/990, batch 990/990, layout 990/990 (21.1 M claims checked by clang);
+  `vcc-bflayout.py` x86_64-w64-mingw32 (MS layout) and `-mno-ms-bitfields`
+  6467 claims each, x86-64 Linux with `-mms-bitfields` 6449, 0 rejected (also
+  seeds 2-4 at -n 5000); `vcc-ldconst.py --target x86_64-w64-mingw32` 6000/6000
+  (from `-S` text: no COFF yet), `--target x86_64-linux-gnu` 6000/6000.
+  Existing targets: `vcc-same.py` 23914/23914 identical (new modes x0 x2 xc
+  xe for x86-64 Linux), `vcc-diag.py` 229/229, `vcc-x86.py --suite vcc`
+  320/320, `vcc-stress.py` 36/36, the file-by-file build compiles (its link
+  fails on `vir_failure_table`, as before this step); ASan: the sema run on
+  135 header TUs and the attribute probes clean.
+- **Not done / deviations:** `-fms-extensions` on Windows (clang then makes
+  `__declspec` a keyword: its predefines differ); MS intrinsics as builtins
+  (`_InterlockedExchange` etc. are only builtins under -fms-extensions); the
+  rest of the x86 builtins the intrinsic headers use (`__builtin_ia32_*`,
+  `__builtin_elementwise_*`), as on x86-64 Linux: an intrinsic that is called
+  fails; `vectorcall`/`regcall` are not separate conventions; `-dD` order of
+  `__FAST_MATH__` and of `-march`'s CPU macros, and the marker clang prints
+  for `_Pragma` in a macro argument (`ompx.h`), differ as on x86-64 Linux;
+  clang prints `ms_abi` pointer types as `void ((*))(void) __attribute__((ms_abi))`,
+  vcc without the inner parentheses; `#pragma message(MACRO)` is printed as
+  written (clang expands it); `-nostdlibinc`/`-nobuiltininc` are not handled.
+
 ### WIN1-WIN10 (2026-11-13): planned
 
 Nothing implemented.  The reference chain was checked by hand (clang 23 ->

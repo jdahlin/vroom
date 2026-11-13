@@ -9,6 +9,9 @@ enum {
 	A_CONSTRUCTOR, A_DESTRUCTOR, A_COUNTED_BY, A_VECTOR_SIZE, A_COLD, A_NONSTRING, A_MAY_ALIAS,
 	A_WEAKREF, A_NAKED, A_NOCF, A_ERROR, A_OVERLOADABLE, A_NOINSTR, A_TLS_MODEL, A_EXT_VECTOR, A_DEPRECATED, A_WUR, A_NODISCARD, A_IFUNC, A_NONNULL, A_FORMAT, A_FORMAT_ARG,
 	A_PURE, A_CONST, A_UNAVAILABLE, A_TARGET, A_RETURNS_TWICE, A_DISABLE_TAIL_CALLS, A_NOT_TAIL_CALLED, A_OPTNONE,
+	/* from here on only where clang knows them for the target (attr_known): else "unknown attribute" */
+	A_GCC_STRUCT, A_MS_ABI, A_SYSV_ABI, A_DLLIMPORT, A_DLLEXPORT,
+	A_CDECL, A_STDCALL, A_FASTCALL, A_THISCALL, A_VECTORCALL, A_PASCAL, A_REGCALL,
 	A_COUNT
 };
 
@@ -26,6 +29,9 @@ static const char *const attr_names[A_COUNT] = {
 	[A_TARGET] = "target", [A_PURE] = "pure", [A_CONST] = "const", [A_UNAVAILABLE] = "unavailable",
 	[A_RETURNS_TWICE] = "returns_twice", [A_DISABLE_TAIL_CALLS] = "disable_tail_calls",
 	[A_NOT_TAIL_CALLED] = "not_tail_called", [A_OPTNONE] = "optnone",
+	[A_GCC_STRUCT] = "gcc_struct", [A_MS_ABI] = "ms_abi", [A_SYSV_ABI] = "sysv_abi", [A_DLLIMPORT] = "dllimport",
+	[A_DLLEXPORT] = "dllexport", [A_CDECL] = "cdecl", [A_STDCALL] = "stdcall", [A_FASTCALL] = "fastcall",
+	[A_THISCALL] = "thiscall", [A_VECTORCALL] = "vectorcall", [A_PASCAL] = "pascal", [A_REGCALL] = "regcall",
 	[A_DEPRECATED] = "deprecated", [A_WUR] = "warn_unused_result", [A_NODISCARD] = "nodiscard", [A_IFUNC] = "ifunc", [A_NONNULL] = "nonnull", [A_FORMAT] = "format", [A_FORMAT_ARG] = "format_arg",
 };
 
@@ -125,15 +131,16 @@ VPRIV int mode_kind(cc *c, uint32_t id, bool sgn)
 	if (!strcmp(b, "HI")) return sgn ? TY_SHORT : TY_USHORT;
 	if (!strcmp(b, "SI")) return sgn ? TY_INT : TY_UINT;
 	if (!strcmp(b, "DI")) return CC_I64(c, !sgn);
-	if (!strcmp(b, "word") || !strcmp(b, "pointer")) return sgn ? TY_LONG : TY_ULONG;	/* the pointer's width */
+	if (!strcmp(b, "word") || !strcmp(b, "pointer")) return CC_INTPTR(c, !sgn);	/* the pointer's width */
 	if (!strcmp(b, "TI")) return sgn ? TY_INT128 : TY_UINT128;
 	return 0;
 }
 
 #include "attrnames.inc"
 #include "attrnames-x86.inc"
+#include "attrnames-win64.inc"
 
-/* x86-64: name in one of its sorted lists (gen-x86data.sh) */
+/* x86-64: name in one of its sorted lists (gen-x86data.sh, gen-win64data.sh) */
 static bool attr_x86(const char *const *tab, size_t n, const char *k, size_t kn)
 {
 	size_t lo = 0, hi = n;
@@ -180,7 +187,9 @@ static bool attr_known(cc *c, int scope, const char *s, size_t n)
 
 		if (l < 0 || (size_t)l >= sizeof(k))
 			return false;
-		if (c->o->target == PP_LINUX_X86_64)
+		if (CC_WIN64(c))
+			return attr_x86(c_attrs_win64, sizeof(c_attrs_win64) / sizeof(*c_attrs_win64), k, (size_t)l);
+		if (CC_X86_64(c))
 			return attr_x86(c_attrs_x86, sizeof(c_attrs_x86) / sizeof(*c_attrs_x86), k, (size_t)l);
 		while (lo < hi) {
 			size_t mid = (lo + hi) / 2;
@@ -195,7 +204,9 @@ static bool attr_known(cc *c, int scope, const char *s, size_t n)
 		}
 		return false;
 	}
-	if (c->o->target == PP_LINUX_X86_64)
+	if (CC_WIN64(c))
+		return attr_x86(gnu_attrs_win64, sizeof(gnu_attrs_win64) / sizeof(*gnu_attrs_win64), s, n);
+	if (CC_X86_64(c))
 		return attr_x86(gnu_attrs_x86, sizeof(gnu_attrs_x86) / sizeof(*gnu_attrs_x86), s, n);
 	while (lo < hi) {
 		size_t mid = (lo + hi) / 2;
@@ -344,6 +355,8 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 				an = A_NONE;
 			const uint32_t tid = t->id;	/* t is the queue head: stale after next() */
 
+			if (an >= A_GCC_STRUCT && !attr_known(c, scope, vintern_ents[tid].s, vintern_ents[tid].len))
+				an = A_NONE;	/* (dllimport on Linux, ms_abi on arm64: clang's unknown attribute) */
 			next(c);
 			switch (an) {
 			case A_ALIGNED:
@@ -539,7 +552,35 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 					a->extvec = (uint32_t)v;
 				continue;
 			}
-			case A_MS_STRUCT: a->ms_struct = 1; break;
+			case A_MS_STRUCT:
+			case A_GCC_STRUCT:
+				if (an == A_MS_STRUCT ? a->gcc_struct : a->ms_struct) {
+					cc_error(c, loc, "'%s' and '%s' attributes are not compatible", an == A_MS_STRUCT ? "ms_struct" : "gcc_struct",
+						 an == A_MS_STRUCT ? "gcc_struct" : "ms_struct");
+					note(c, an == A_MS_STRUCT ? a->gcc_struct : a->ms_struct, "conflicting attribute is here");
+				} else if (an == A_MS_STRUCT) {
+					a->ms_struct = loc;
+				} else {
+					a->gcc_struct = loc;
+				}
+				break;
+			case A_MS_ABI:
+			case A_SYSV_ABI:
+				a->fnabi = an == A_MS_ABI ? CC_FNABI_MS : CC_FNABI_SYSV, a->fnabi_loc = loc;
+				break;
+			case A_DLLIMPORT: if (a->dll != CC_DLLEXPORT) a->dll = CC_DLLIMPORT; break;	/* (dllexport wins, as clang) */
+			case A_DLLEXPORT: a->dll = CC_DLLEXPORT; break;
+			case A_STDCALL: case A_FASTCALL: case A_THISCALL: case A_PASCAL:
+				/* x86-64: 32-bit conventions; Windows ignores all but pascal silently (clang) */
+				if (an == A_PASCAL || !CC_WIN64(c)) {
+					const vident *nm = &vintern_ents[tid];
+					diag_span r = { loc, pp_token_end_find(c->p, loc) };
+
+					cc_warnx(c, "ignored-attributes", true, NULL, loc, &r, 1, NULL, 0,
+						 "'%.*s' calling convention is not supported for this target", (int)nm->len, nm->s);
+				}
+				break;
+			case A_CDECL: case A_VECTORCALL: case A_REGCALL: break;	/* x86-64: the target's own convention */
 			case A_PACKED: a->packed = 1; break;
 			case A_WEAK: a->weak = 1; break;
 			case A_USED: a->used = 1; break;
@@ -638,6 +679,9 @@ VPRIV void merge_attrs(attrs *to, const attrs *from)
 		to->aligned = from->aligned;
 	if (from->interrupt) to->interrupt = from->interrupt;
 	if (from->ms_struct) to->ms_struct = from->ms_struct;
+	if (from->gcc_struct) to->gcc_struct = from->gcc_struct;
+	if (from->fnabi) to->fnabi = from->fnabi, to->fnabi_loc = from->fnabi_loc;
+	if (from->dll > to->dll) to->dll = from->dll;
 	if (from->section) to->section = from->section;
 	if (from->alias) to->alias = from->alias;
 	if (from->asmname) to->asmname = from->asmname;

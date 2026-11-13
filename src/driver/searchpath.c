@@ -9,7 +9,8 @@
  * markers).  The order is observable in `-H`, `-M` and in which header is found, and is checked
  * against clang by vcc-diff.py hdr and deps: change it only against clang.  vcc's own headers
  * (VCC_INCDIR) go before clang's resource directory, so arm_neon.h and stdatomic.h are ours.  On
- * Darwin this also finds SDKSettings.json, which clang lists first among the dependencies.
+ * Darwin this also finds SDKSettings.json, which clang lists first among the dependencies.  Windows
+ * (MinGW-w64) takes its system directories from --sysroot, as clang's MinGW toolchain does.
  */
 #include "driver-internal.h"
 
@@ -123,6 +124,23 @@ VPRIV void driver_searchpath_build(struct driver_job *job, const driver_environm
 	}
 	(void)job->hosted;
 #ifdef VCC_RESDIR
+	/* Windows (MinGW-w64), as clang's MinGW toolchain: the resource headers, then the sysroot's
+	   <triple>/include, <triple>/usr/include (if it exists) and include; no sysroot: only the
+	   resource headers.  None of them is an extern "C" directory. */
+	if (job->target_win64 && !job->no_standard_includes) {
+		static _Thread_local char win[3][4200];
+
+		ADD(VCC_RESDIR);
+		if (job->sysroot && *job->sysroot) {
+			snprintf(win[0], sizeof(win[0]), "%s/x86_64-w64-mingw32/include", job->sysroot);
+			snprintf(win[1], sizeof(win[1]), "%s/x86_64-w64-mingw32/usr/include", job->sysroot);
+			snprintf(win[2], sizeof(win[2]), "%s/include", job->sysroot);
+			ADD(win[0]);
+			if (!access(win[1], F_OK))
+				ADD(win[1]);
+			ADD(win[2]);
+		}
+	} else
 	/* hosted Linux: clang's resource headers, then glibc's (multiarch first) */
 	if (job->hosted && !job->darwin && !job->no_standard_includes) {
 		ADD(VCC_RESDIR);

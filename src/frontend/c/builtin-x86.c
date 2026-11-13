@@ -8,7 +8,7 @@ VPRIV uint32_t x86_pcmpstr_call(cc *c, const builtin *b, vec *args, qty rt, uint
 	bool explicit = strstr(b->name, "pcmpestr") != NULL;
 	unsigned count = explicit ? 5 : 3;
 	i128 imm;
-	if (c->o->target != PP_LINUX_X86_64) {
+	if (!CC_X86_64(c)) {
 		cc_error(c, loc, "'%s' requires an x86-64 target", b->name);
 		return err_node(c, loc);
 	}

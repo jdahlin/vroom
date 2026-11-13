@@ -74,7 +74,7 @@ VPRIV uint32_t vector_builtin(cc *c, bool shuffle, uint32_t loc)
 VPRIV uint32_t builtin_vector_lane(cc *c, uint32_t v, qty et, unsigned i, uint32_t loc)
 {
 	uint32_t p = cast_node(c, rvalue(c, v), ty_ptr(c, et), CK_VADDR);
-	uint32_t n = mk2(c, N_INDEX, et, loc, p, mk_int(c, i, prim(TY_LONG), loc));
+	uint32_t n = mk2(c, N_INDEX, et, loc, p, mk_int(c, i, c->t_ptrdiff, loc));
 	N(n)->flags = NF_LVALUE;
 	return n;
 }

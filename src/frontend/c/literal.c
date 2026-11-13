@@ -6,8 +6,8 @@
 /* the type of an integer literal (C11 6.4.4.1p5) */
 static inline qty int_lit_type(cc *c, u128 v, int l, bool u, bool dec)
 {
-	/* long: 64 bits, or 32 under ILP32 */
-	u128 lmax = CC_ILP32(c) ? INT32_MAX : INT64_MAX, ulmax = CC_ILP32(c) ? UINT32_MAX : UINT64_MAX;
+	/* long: 64 bits, or 32 under ILP32 and LLP64 */
+	u128 lmax = CC_LONG32(c) ? INT32_MAX : INT64_MAX, ulmax = CC_LONG32(c) ? UINT32_MAX : UINT64_MAX;
 
 	if (l == 0 && !u && v <= INT32_MAX)
 		return prim(TY_INT);
@@ -19,7 +19,7 @@ static inline qty int_lit_type(cc *c, u128 v, int l, bool u, bool dec)
 		return prim(TY_ULONG);
 	if (!u && v <= INT64_MAX)
 		return prim(TY_LLONG);
-	return l <= 1 && !CC_ILP32(c) ? prim(TY_ULONG) : prim(TY_ULLONG);
+	return l <= 1 && !CC_LONG32(c) ? prim(TY_ULONG) : prim(TY_ULLONG);
 }
 
 static uint32_t number_s(cc *c, const ptok *t, const char *s, size_t n);
@@ -125,7 +125,7 @@ static uint32_t number_s(cc *c, const ptok *t, const char *s, size_t n)
 		if (k < n && (s[k] == 'f' || s[k] == 'F'))
 			ty = prim(TY_FLOAT);
 		else if (k < n && (s[k] == 'q' || s[k] == 'Q'))	/* __float128 (x86-64; binary128 long double elsewhere) */
-			ty = prim(c->o->target == PP_LINUX_X86_64 ? TY_FLOAT128 : TY_LDOUBLE);
+			ty = prim(CC_X86_64(c) ? TY_FLOAT128 : TY_LDOUBLE);
 		else if (k < n)
 			ty = prim(TY_LDOUBLE);
 		if (k >= sizeof(buf))

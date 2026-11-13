@@ -122,7 +122,7 @@ VPRIV qty ty_bitint(cc *c, unsigned bits, bool unsign)
 	}
 	unsigned size = bits <= 8 ? 1 : bits <= 16 ? 2 : bits <= 32 ? 4 : bits <= 64 ? 8 : 16;
 	int kind = size == 1 ? TY_SCHAR : size == 2 ? TY_SHORT : size == 4 ? TY_INT : size == 8 ? TY_LLONG : TY_INT128;
-	ctype t = { .kind = (uint8_t)(kind + unsign), .size = size, .align = size > 8 && (c->o->target == PP_LINUX_X86_64 || PP_IS_WASM(c->o->target)) ? 8 : size, .n = bits };
+	ctype t = { .kind = (uint8_t)(kind + unsign), .size = size, .align = size > 8 && (CC_X86_64(c) || PP_IS_WASM(c->o->target)) ? 8 : size, .n = bits };
 
 	return QT(ty_intern(c, &t), 0);
 }
@@ -225,7 +225,7 @@ VPRIV qty ty_func(cc *c, qty ret, const qty *par, uint32_t n, int flags)
 			idx = ty_new(c, TY_FUNC);
 			ctype *t = &c->ty[idx];
 
-			t->flags = (uint8_t)flags, t->base = ret, t->n = n, t->size = 1, t->align = 4;
+			t->flags = (uint8_t)flags, t->ext = (uint16_t)(flags >> 8), t->base = ret, t->n = n, t->size = 1, t->align = 4;
 			t->aux = c->nparams;
 			if (n)	/* par is NULL for an implicit or unprototyped function: memcpy(_, NULL, 0) is UB */
 				memcpy(&c->params[c->nparams], par, n * sizeof(qty));
@@ -241,7 +241,7 @@ VPRIV qty ty_func(cc *c, qty ret, const qty *par, uint32_t n, int flags)
 
 					if (!x)
 						continue;
-					for (k = fn_hash(f->base, &c->params[f->aux], f->n, f->flags) & (ncap - 1); nh[k];
+					for (k = fn_hash(f->base, &c->params[f->aux], f->n, f->flags | f->ext << 8) & (ncap - 1); nh[k];
 					     k = (k + 1) & (ncap - 1))
 						;
 					nh[k] = x;
@@ -254,7 +254,7 @@ VPRIV qty ty_func(cc *c, qty ret, const qty *par, uint32_t n, int flags)
 		{
 			const ctype *x = &c->ty[e];
 
-			if (x->base == ret && x->n == n && x->flags == flags) {
+			if (x->base == ret && x->n == n && (x->flags | x->ext << 8) == flags) {
 				const qty *xp = &c->params[x->aux];	/* (short lists: no memcmp call) */
 				uint32_t k = 0;
 
@@ -267,13 +267,31 @@ VPRIV qty ty_func(cc *c, qty ret, const qty *par, uint32_t n, int flags)
 	}
 }
 
+/*
+ * t with the function type in it (t itself, or what a pointer points to, through pointers) given
+ * x86-64 calling convention conv (CC_FNABI_*, 0: the target's own); 0 if t has no function type
+ */
+VPRIV qty ty_fnabi(cc *c, qty t, int conv)
+{
+	const ctype *x = T(c, t);
+
+	if (x->kind == TY_FUNC)
+		return QT(QI(ty_func(c, x->base, &c->params[x->aux], x->n, (x->flags & 0xff) | conv << 8)), QQ(t));
+	if (x->kind == TY_PTR && !(x->flags & TF_BLOCK)) {
+		qty b = ty_fnabi(c, x->base, conv);
+
+		return b ? QT(QI(ty_ptr(c, b)), QQ(t)) : 0;
+	}
+	return 0;
+}
+
 /* GNU vector of total size bytes with elements elem */
 VPRIV qty ty_vector(cc *c, qty elem, uint32_t size)
 {
 	const ctype *e = T(c, elem);
 	/* ARM64 caps vector alignment at 16; x86 and wasm use its full size. */
 	ctype t = { .kind = TY_VECTOR, .base = QUNQ(elem), .size = size,
-		    .align = size > 16 && !PP_IS_WASM(c->o->target) && c->o->target != PP_LINUX_X86_64 ? 16 : size };
+		    .align = size > 16 && !PP_IS_WASM(c->o->target) && !CC_X86_64(c) ? 16 : size };
 
 	t.n = e->size ? (uint32_t)(size / e->size) : 0;
 	return QT(ty_intern(c, &t), 0);
@@ -528,8 +546,8 @@ VPRIV bool compatible(cc *c, qty a, qty b)
 		}
 		return x->n == y->n && x->aux == y->aux;
 	case TY_FUNC:
-		if (!compatible(c, x->base, y->base) || QQ(x->base) != QQ(y->base))
-			return false;
+		if (!compatible(c, x->base, y->base) || QQ(x->base) != QQ(y->base) || x->ext != y->ext)
+			return false;	/* (ext: the x86-64 calling convention, ms_abi/sysv_abi) */
 		if ((x->flags | y->flags) & TF_NOPROTO)
 			return true;
 		if (x->n != y->n || (x->flags & TF_VARIADIC) != (y->flags & TF_VARIADIC))

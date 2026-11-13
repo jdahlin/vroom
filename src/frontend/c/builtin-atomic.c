@@ -201,7 +201,7 @@ VPRIV uint32_t atomic_lock_free_call(cc *c, const builtin *b, uint32_t loc)
 		return mk_int(c, 1, prim(TY_BOOL), loc);
 	args.n = 0;
 	vpush(c, &args, size); vpush(c, &args, pointer);
-	if (c->o->target == PP_LINUX_AARCH64 || c->o->target == PP_LINUX_X86_64)
+	if (c->o->target == PP_LINUX_AARCH64 || CC_X86_64(c))
 		return atomic_lock_free_runtime(c, &args, loc);
 	return mk_builtin(c, BI_ATOMIC_LOCK_FREE, prim(TY_BOOL), loc, &args);
 }

@@ -184,7 +184,7 @@ static void il_expand(cc *c, ilist *s, uint32_t v)
 			return;
 		}
 		for (uint64_t k = 0; k < s->n; k++) {
-			uint32_t e = mk2(c, N_INDEX, et, loc, rvalue(c, v), mk_int(c, (i128)k, prim(TY_LONG), loc));
+			uint32_t e = mk2(c, N_INDEX, et, loc, rvalue(c, v), mk_int(c, (i128)k, c->t_ptrdiff, loc));
 
 			N(e)->flags = NF_LVALUE;
 			il_put(c, s, k, e);

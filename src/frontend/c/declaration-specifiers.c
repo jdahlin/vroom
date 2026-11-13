@@ -710,7 +710,8 @@ again:
 					tag_body_end(c, kind);
 				} else {
 					DR_TAGWRITE(c, ti);
-					c->tags[ti].flags |= (pre.packed ? RF_PACKED : 0) | ((pre.ms_struct || c->ms_struct) ? RF_MS_STRUCT : 0);
+					c->tags[ti].flags |= (pre.packed ? RF_PACKED : 0) | ((pre.ms_struct || c->ms_struct) ? RF_MS_STRUCT : 0) |
+						      (pre.gcc_struct ? RF_GCC_STRUCT : 0);
 					c->tags[ti].maxalign = pre.aligned;
 					struct_body(c, ti);
 					if (kind == TY_UNION && pre.transparent)
@@ -789,9 +790,9 @@ done:
 	} else if (base == KW_double) {
 		ds->ty = prim(nlong ? TY_LDOUBLE : TY_DOUBLE);
 	} else if (base == KW___float128) {
-		if (c->o->target != PP_LINUX_X86_64)
+		if (!CC_X86_64(c))
 			cc_error(c, ds->loc, "__float128 is not supported on this target");
-		ds->ty = prim(c->o->target == PP_LINUX_X86_64 ? TY_FLOAT128 : TY_LDOUBLE);
+		ds->ty = prim(CC_X86_64(c) ? TY_FLOAT128 : TY_LDOUBLE);
 	} else {
 		if (unlikely(!any)) {
 			if (c23auto && !nlong && !sgn && !cplx) {

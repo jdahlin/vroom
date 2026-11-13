@@ -75,6 +75,17 @@ typedef struct ctype {
 	uint32_t canon;		/* canonical type index (itself unless an aligned variant) */
 } ctype;
 
+/*
+ * x86-64 calling conventions.  A function type's `ext` is 0 for the target's own convention (System V
+ * on Linux, Microsoft x64 on Windows) or the other one, written as ms_abi or sysv_abi; it is part of
+ * the type (clang: incompatible function pointer types).  cc_func_abi (ccint.h) gives the effective
+ * one.  The va_list kinds: __builtin_va_list (System V: struct __va_list_tag[1]; Windows: char *) and
+ * __builtin_ms_va_list (char *, every x86-64 OS); cc_valist_is_ms tells them apart.
+ */
+enum { CC_FNABI_DEFAULT, CC_FNABI_MS, CC_FNABI_SYSV };
+/* dllimport / dllexport on a declaration (attrs.dll) */
+enum { CC_DLLIMPORT = 1, CC_DLLEXPORT = 2 };
+
 /* ---------------- records and enums ---------------- */
 
 typedef struct field {
@@ -97,6 +108,7 @@ enum {
 	RF_ENUM_FIXED = 256, RF_ENUM_DEFINED = 512, RF_ENUM_DECLARED = 1024,
 	RF_MS_STRUCT = 128,	/* Microsoft allocation units for bit-fields */
 	RF_COMPLEX = 64,	/* _Complex T: struct { T re, im; } (AAPCS64 passes it like that) */
+	RF_GCC_STRUCT = 2048,	/* gcc_struct: not the Microsoft layout, whatever -mms-bitfields and #pragma ms_struct say */
 };
 
 typedef struct tag {
@@ -270,11 +282,12 @@ static inline int vcc_tls_model(const char *m)
 enum { CC_DISABLED_BUILTIN_WORDS = 6 };	/* generated libbuiltins.inc indices */
 
 typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl cache key */
-	int target;		/* PP_LINUX_AARCH64 / PP_DARWIN / PP_WASM64 */
+	int target;		/* PP_LINUX_AARCH64 / PP_DARWIN / PP_WASM64 / PP_WASM32 / PP_LINUX_X86_64 / PP_WIN64 */
 	int unsigned_char;
 	int ms_anon;		/* -fms-anonymous-structs / -fms-extensions: "struct S;" members */
 	int strict_flex_arrays; /* -fstrict-flex-arrays=0..3 */
-	int short_wchar;	/* -fshort-wchar */
+	int short_wchar;	/* -fshort-wchar (always on for Windows: wchar_t is unsigned short) */
+	int ms_bitfields;	/* -mms-bitfields (the default for Windows): records without gcc_struct get the MS layout */
 	int std;		/* -std=: 89, 99, 11, 17, 23 (0: gnu17) */
 	int implicit_int;	/* implicit int allowed (-std=gnu89, -Wno-error=implicit-int) */
 	int gnu89_inline;	/* -std=gnu89 or -fgnu89-inline: plain inline is gnu_inline */

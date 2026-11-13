@@ -109,8 +109,12 @@
 #define WASM(c) 0	/* wasm is not built (make VCC_WASM=1): the branches vanish */
 #endif
 #define WASM32(c) ((c)->o->target == PP_WASM32)
-/* x86-64 Linux: codegen/walk/ and arch/x64/codegen/ generate the functions (PLAN-x86.md) */
-#define X86(c) ((c)->o->target == PP_LINUX_X86_64)
+/* the x86-64 CPU: codegen/walk/ and arch/x64/codegen/ generate the functions (PLAN-x86.md), for
+ * x86-64 Linux and Windows x64 */
+#define X86(c) PP_IS_X86_64((c)->o->target)
+/* Windows x64 (MinGW-w64, PLAN-win64.md): the OS branches (COFF, the Microsoft calling convention,
+ * LLP64); the code generator does not implement them yet (WIN2-WIN5) */
+#define WIN64(c) ((c)->o->target == PP_WIN64)
 
 /*
  * A C99 inline definition or GNU extern inline: not emitted (another TU

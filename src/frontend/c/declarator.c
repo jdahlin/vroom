@@ -477,7 +477,7 @@ VPRIV qty apply_declarator(cc *c, qty t, uint32_t first, uint32_t nops)
 				t = ty_vla(c, t, o->a);
 			else if ((T(c, t)->flags & TF_VLA) && !(o->fl & TF_INCOMPLETE))
 				/* int a[6][n]: an array of VLAs is one too (its size is known only at run time) */
-				t = ty_vla(c, t, mk_int(c, (i128)((uint64_t)o->a | (uint64_t)o->b << 32), prim(TY_ULONG), o->np));
+				t = ty_vla(c, t, mk_int(c, (i128)((uint64_t)o->a | (uint64_t)o->b << 32), c->t_size, o->np));
 			else
 				t = ty_array(c, t, (uint64_t)o->a | (uint64_t)o->b << 32, o->fl);
 			break;

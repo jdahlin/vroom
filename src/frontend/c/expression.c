@@ -144,7 +144,7 @@ static uint32_t swizzle(cc *c, uint32_t n, uint32_t id, uint32_t loc)
 			b = cast_node(c, addr_of(c, n, loc), ty_ptr(c, QT(QI(et), QQ(N(n)->ty))), CK_P2P);
 		else
 			b = cast_node(c, rvalue(c, n), ty_ptr(c, et), CK_VADDR);
-		b = mk2(c, N_INDEX, T(c, N(b)->ty)->base, loc, rvalue(c, b), mk_int(c, ix[0], prim(TY_LONG), loc));
+		b = mk2(c, N_INDEX, T(c, N(b)->ty)->base, loc, rvalue(c, b), mk_int(c, ix[0], c->t_ptrdiff, loc));
 		N(b)->flags = NF_LVALUE;
 		N(b)->c = vt;
 		return b;
@@ -235,7 +235,7 @@ VPRIV uint32_t binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 	}
 	if ((op == LEX_TOKEN_PLUS || op == LEX_TOKEN_MINUS) && is_ptr(c, lt) && is_integer(c, rt)) {
 		void_ptr_arith(c, lt, loc, false);
-		r = convert(c, r, prim(TY_LONG));
+		r = convert(c, r, c->t_ptrdiff);
 		return mk_bin(c, op, lt, l, r, loc);
 	}
 	if (op == LEX_TOKEN_MINUS && is_ptr(c, lt) && is_ptr(c, rt)) {
@@ -289,7 +289,7 @@ VPRIV uint32_t assign(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 		rt = N(r)->ty;
 		if (is_ptr(c, lt) && (op == LEX_TOKEN_PLUS || op == LEX_TOKEN_MINUS)) {
 			void_ptr_arith(c, lt, loc, false);
-			r = convert(c, r, prim(TY_LONG));
+			r = convert(c, r, c->t_ptrdiff);
 			pt = lt;
 		} else if (is_vector(c, lt)) {
 			if (is_bool_vector(c, lt) && op != LEX_TOKEN_AMPERSAND && op != LEX_TOKEN_PIPE && op != LEX_TOKEN_CARET)
@@ -1096,7 +1096,7 @@ VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 			}
 			if (KIND(c, T(c, at)->base) == TY_SVE)
 				void_ptr_arith(c, at, loc, false);
-			r = mk2(c, N_INDEX, T(c, at)->base, loc, n, convert(c, ix, prim(TY_LONG)));
+			r = mk2(c, N_INDEX, T(c, at)->base, loc, n, convert(c, ix, c->t_ptrdiff));
 			N(r)->flags = NF_LVALUE;
 			N(r)->c = vector_type;
 			if (vector_type && is_bool_vector(c, vector_type)) N(r)->aux = 1;

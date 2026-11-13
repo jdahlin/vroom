@@ -284,7 +284,8 @@ VPRIV qty ty_array(cc *c, qty elem, uint64_t n, int flags);
 VPRIV uint64_t arr_len(cc *c, qty t);
 VPRIV qty ty_vla(cc *c, qty elem, uint32_t sizenode);
 VPRIV qty qualify(cc *c, qty t, int q);
-VPRIV qty ty_func(cc *c, qty ret, const qty *par, uint32_t n, int flags);
+VPRIV qty ty_func(cc *c, qty ret, const qty *par, uint32_t n, int flags);	/* flags: TF_*, | CC_FNABI_* << 8 */
+VPRIV qty ty_fnabi(cc *c, qty t, int conv);
 VPRIV qty ty_vector(cc *c, qty elem, uint32_t size);
 VPRIV qty ty_aligned(cc *c, qty t, uint32_t align);
 VPRIV qty ty_atomic(cc *c, qty t, uint32_t loc);
@@ -521,11 +522,20 @@ static inline bool at_std_attr(cc *c);
 VPRIV __attribute__((noinline)) void attribute_list_(cc *c, attrs *a);
 static inline void attribute_list(cc *c, attrs *a);
 static inline bool attrs_empty(const attrs *a);
-/* the data model: LP64, but ILP32 for wasm32 (long and pointers 4 bytes) */
+/* the data model: LP64, but ILP32 for wasm32 (long and pointers 4 bytes) and
+   LLP64 for Windows x64 (long 4 bytes, pointers 8: size_t is unsigned long long) */
 #define CC_ILP32(c) ((c)->o->target == PP_WASM32)
+#define CC_LLP64(c) ((c)->o->target == PP_WIN64)
+#define CC_LONG32(c) (CC_ILP32(c) || CC_LLP64(c))	/* long is 4 bytes */
 #define CC_PTRSIZE(c) (CC_ILP32(c) ? 4u : 8u)
-/* the 64-bit integer type: long, or long long under ILP32 */
-#define CC_I64(c, uns) (CC_ILP32(c) ? ((uns) ? TY_ULLONG : TY_LLONG) : ((uns) ? TY_ULONG : TY_LONG))
+/* the 64-bit integer type: long, or long long where long is 32 bits */
+#define CC_I64(c, uns) (CC_LONG32(c) ? ((uns) ? TY_ULLONG : TY_LLONG) : ((uns) ? TY_ULONG : TY_LONG))
+/* the integer type as wide as a pointer (intptr_t; size_t and ptrdiff_t are c->t_size, c->t_ptrdiff) */
+#define CC_INTPTR(c, uns) (CC_LLP64(c) ? ((uns) ? TY_ULLONG : TY_LLONG) : ((uns) ? TY_ULONG : TY_LONG))
+/* the x86-64 CPU (x86-64 Linux or Windows x64): builtins, target attributes, x87 long double */
+#define CC_X86_64(c) PP_IS_X86_64((c)->o->target)
+/* Windows x64 (MinGW-w64): the OS and its ABI defaults (ms_abi, MS bit-fields, va_list char *) */
+#define CC_WIN64(c) ((c)->o->target == PP_WIN64)
 VPRIV void merge_attrs(attrs *to, const attrs *from);
 /* flow.c: reach.c */
 typedef struct flw {
@@ -630,7 +640,7 @@ static inline bool is_flt_kind(int k) { return k >= TY_BFLOAT16 && k <= TY_FLOAT
    binary128's layout (include/common/softfloat.h) */
 static inline bool is_q(cc *c, qty t) { return (KIND(c, t) == TY_LDOUBLE && c->ty[QI(t)].size == 16) || KIND(c, t) == TY_FLOAT128; }
 /* the fraction bits a wide constant of type t is rounded to: 112, or x87's 63 */
-static inline int q_prec(cc *c, qty t) { return c->o->target == PP_LINUX_X86_64 && KIND(c, t) == TY_LDOUBLE ? VSOFTFLOAT_X87_80 : 112; }
+static inline int q_prec(cc *c, qty t) { return CC_X86_64(c) && KIND(c, t) == TY_LDOUBLE ? VSOFTFLOAT_X87_80 : 112; }
 /* the binary128 bits of a 16-byte long double constant: the two pool slots after its double */
 static inline void fpool_q(cc *c, u128 q) { memcpy(&c->fpool[c->nfpool], &q, 16); c->nfpool += 2; }
 static inline u128 fnum_q(const cc *c, uint32_t a) { u128 q; memcpy(&q, &c->fpool[a + 1], 16); return q; }
@@ -735,12 +745,14 @@ static inline uint32_t dget(uint32_t **dir, uint32_t id)
 	return pg ? pg[id & (DIR_PAGE - 1)] : 0;
 }
 
+VPRIV bool ms_valist_typedef(cc *c, uint32_t id);
+
 /* an identifier (not a keyword) */
 static inline bool typedef_id(cc *c, uint32_t id)
 {
 	uint32_t s = lookup(c, id);
 
-	return s && c->syms[s].kind == S_TYPEDEF;
+	return s ? c->syms[s].kind == S_TYPEDEF : unlikely(vintern_ents[id].len == 20) && ms_valist_typedef(c, id);
 }
 
 /* the source range of node n began at token loc b and ends at the previous token */

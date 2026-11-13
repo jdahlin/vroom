@@ -61,7 +61,7 @@ VPRIV void apply_sym_attrs(cc *c, sym *s, const attrs *a)
 		return;		/* (no record: sym_attrs() in emit.c reads attrs 0 as none) */
 	if (a->interrupt) {
 		const ctype *ft = T(c, s->ty);
-		if (c->o->target != PP_LINUX_X86_64)
+		if (!CC_X86_64(c))
 			cc_error(c, s->loc, "interrupt calling convention is supported only for x86-64 Linux");
 		else if (s->kind != S_FUNC || ft->kind != TY_FUNC)
 			cc_error(c, s->loc, "'interrupt' attribute only applies to functions");
@@ -74,6 +74,8 @@ VPRIV void apply_sym_attrs(cc *c, sym *s, const attrs *a)
 	}
 	if (a->tlsmodel && (s->kind != S_VAR || !(s->flags & SF_THREAD)))
 		cc_error(c, a->tlsloc, "'tls_model' attribute only applies to thread-local variables");
+	if (unlikely(a->dll == CC_DLLIMPORT) && s->sc == SC_STATIC)
+		cc_error(c, s->loc, "'%.*s' must have external linkage when declared 'dllimport'", IDF(s->name));
 	if (s->attrs)
 		merge_attrs(&c->attr[s->attrs], a);
 	else
@@ -129,6 +131,17 @@ VPRIV uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 			t = QT(k, QQ(t));
 	}
 	if (at.vecsize) t = vector_attribute(c, t, at.vecsize, d->loc);
+	if (unlikely(at.fnabi)) {
+		/* ms_abi / sysv_abi: on the function type (through pointers), the target's own as 0 */
+		int conv = at.fnabi == (CC_WIN64(c) ? CC_FNABI_MS : CC_FNABI_SYSV) ? CC_FNABI_DEFAULT : (int)at.fnabi;
+		qty ft = ty_fnabi(c, t, conv);
+
+		if (ft)
+			t = ft;
+		else
+			cc_warnx(c, "ignored-attributes", true, NULL, at.fnabi_loc, NULL, 0, NULL, 0,
+				 "'%s' only applies to function types; type here is '%s'", at.fnabi == CC_FNABI_MS ? "ms_abi" : "sysv_abi", tyname(c, t));
+	}
 	if (at.extvec && ds->sc == SC_TYPEDEF && is_bigint(c, t))
 		cc_error(c, d->loc, "vector integer elements wider than 128 bits are not supported");
 	else if (at.extvec && ds->sc == SC_TYPEDEF && is_arith(c, t) && !is_complex(c, t)) {
@@ -143,7 +156,7 @@ VPRIV uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 			v.ext = (uint16_t)at.extvec;
 			if (KIND(c, t) == TY_BOOL) {
 				v.n = at.extvec;
-				if (c->o->target == PP_LINUX_X86_64) v.align = (uint32_t)p;
+				if (CC_X86_64(c)) v.align = (uint32_t)p;
 			}
 			t = QT(ty_intern(c, &v), QQ(t));
 		}
@@ -245,6 +258,18 @@ VPRIV uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file)
 	}
 	if (prev && unlikely(c->syms[prev].flags & SF_INVALID) && c->syms[prev].kind != kind)
 		prev = 0;	/* a placeholder left by parser recovery (rec_restore): replaced */
+	if (unlikely(prev && kind == S_FUNC && is_func(c, c->syms[prev].ty) && is_func(c, t)) &&
+	    T(c, c->syms[prev].ty)->ext != T(c, t)->ext) {
+		/* x86-64 ms_abi / sysv_abi: a redeclaration without one keeps the earlier's (clang) */
+		if (!T(c, t)->ext)
+			t = ty_fnabi(c, t, T(c, c->syms[prev].ty)->ext);
+		else if (!T(c, c->syms[prev].ty)->ext) {
+			cc_error(c, d->loc, "function declared '%s' here was previously declared without calling convention",
+				 T(c, t)->ext == CC_FNABI_MS ? "ms_abi" : "sysv_abi");
+			note(c, c->syms[prev].loc, "previous declaration is here");
+			t = ty_fnabi(c, t, 0);
+		}
+	}
 	if (prev) {
 		sym *y = &c->syms[prev];
 
@@ -543,11 +568,13 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 				if (c->syms[c->lists[d.psyms + i]].flags & SF_NONNULL)
 					c->syms[s].flags |= SF_NONNULL;
 		}
-		if (d.at.vecsize || ds.at.vecsize || d.at.mode || ds.at.mode)
-			t = c->syms[s].ty;	/* declare made it a vector / applied mode: initialize that */
+		if (d.at.vecsize || ds.at.vecsize || d.at.mode || ds.at.mode || d.at.fnabi || ds.at.fnabi)
+			t = c->syms[s].ty;	/* declare made it a vector / applied mode or ms_abi/sysv_abi: initialize that */
 		if (is_func(c, t) && is(c, LEX_TOKEN_LEFT_BRACE)) {
 			if (!file)
 				fatal(c, tok(c)->loc, "function definition is not allowed here");
+			if (unlikely(c->syms[s].attrs && c->attr[c->syms[s].attrs].dll == CC_DLLIMPORT) && !ds.inline_)
+				cc_error(c, d.loc, "dllimport cannot be applied to non-inline function definition");
 			if (lazy_ok(c, s, &d))
 				lazy_capture(c, s, &d);
 			else
@@ -574,6 +601,8 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 
 			if (ds.sc == SC_TYPEDEF || is_func(c, t))
 				cc_error(c, d.loc, "illegal initializer");
+			else if (unlikely(y->attrs && c->attr[y->attrs].dll == CC_DLLIMPORT))
+				cc_error(c, d.loc, "definition of dllimport data");
 			if (!file && ds.sc == SC_EXTERN)
 				cc_error(c, d.loc, "declaration of block scope identifier with linkage cannot have an initializer");
 			if (unlikely(T(c, t)->flags & TF_VLA)) {
@@ -676,7 +705,9 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 			if (ds.constexpr_ && y->kind == S_VAR)
 				cc_error(c, d.loc, "constexpr variable '%.*s' must be initialized by a constant expression", IDF(d.name));
 			if (y->kind == S_VAR && ds.sc != SC_EXTERN && ds.sc != SC_TYPEDEF) {
-				if (file)
+				if (file && unlikely(y->attrs && c->attr[y->attrs].dll == CC_DLLIMPORT && !(y->flags & SF_DEFINED)))
+					y->sc = y->sc == SC_NONE ? SC_EXTERN : y->sc;	/* Windows: dllimport int x; declares, as extern */
+				else if (file)
 					y->flags |= SF_TENTATIVE;
 				else if (!complete(c, y->ty) && ds.sc != SC_STATIC) {
 					if (is_array(c, y->ty))

@@ -273,6 +273,13 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
 #endif
 			job->darwin = !job->wasm_bits && (strstr(a, "darwin") || strstr(a, "apple"));
 			job->target_x64 = !job->wasm_bits && !job->darwin && strstr(a, "x86_64");
+			/* Windows x64, the MinGW-w64 flavour: x86_64-w64-mingw32, x86_64-w64-windows-gnu, x86_64-pc-windows-gnu */
+			job->target_win64 = job->target_x64 && (strstr(a, "mingw32") || strstr(a, "windows") || strstr(a, "win32"));
+			if (job->target_win64 && strstr(a, "msvc")) {
+				dprintf(job->errfd, "vcc: error: unsupported target '%s' (MSVC environment; use x86_64-w64-mingw32)\n", a + 9);
+				job->status = 1;
+				return 1;
+			}
 			job->hosted = 0;
 			if (m && m[6] >= '0' && m[6] <= '9')
 				job->macos_minimum_version = m + 6, job->macos_minimum_source = 2;	/* arm64-apple-macos14.2: wins over the flag */
@@ -282,6 +289,11 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
 				job->macos_minimum_version = strchr(a, '=') + 1, job->macos_minimum_source = 1;
 		}
 		else if (!strcmp(a, "-nostdinc")) job->no_standard_includes = 1;
+		else if (!strncmp(a, "--sysroot=", 10)) job->sysroot = a + 10;
+		else if (!strcmp(a, "--sysroot") && i + 1 < argc) job->sysroot = argv[++i];
+		else if (!strcmp(a, "-mms-bitfields")) job->ms_bitfields = 1;
+		else if (!strcmp(a, "-mno-ms-bitfields")) job->ms_bitfields = 0;
+		else if (!strcmp(a, "-municode")) job->unicode = 1;
 		else if (!strcmp(a, "-undef")) job->undefine_predefined = 1;
 		else if (!strcmp(a, "-x") && i + 1 < argc) {
 			i++;

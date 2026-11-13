@@ -29,7 +29,7 @@ static uint32_t bfdone(bfc*b,uint32_t result,qty t) {
 VPRIV uint32_t big_float_cast(cc*c,uint32_t input,qty to)
 {
  qty from=QUNQ(N(input)->ty),fp=is_float(c,to)?to:from;
- bool into=is_float(c,to),x87=KIND(c,fp)==TY_LDOUBLE&&c->o->target==PP_LINUX_X86_64;
+ bool into=is_float(c,to),x87=KIND(c,fp)==TY_LDOUBLE&&CC_X86_64(c);
  int k=KIND(c,fp),p=k==TY_FLOAT16?10:k==TY_BFLOAT16?7:k==TY_FLOAT?23:k==TY_DOUBLE?52:x87?63:112;
  int bias=k==TY_FLOAT16?15:k==TY_BFLOAT16||k==TY_FLOAT?127:k==TY_DOUBLE?1023:16383;
  int eb=k==TY_FLOAT16?5:k==TY_BFLOAT16||k==TY_FLOAT?8:k==TY_DOUBLE?11:15;

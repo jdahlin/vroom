@@ -154,8 +154,11 @@ static void lay_field(cc *c, layout *l, field *f, uint32_t fattr_align, bool fpa
 /* fa[i]/fp[i]: per-field aligned() and packed attributes */
 VPRIV void lay_record(cc *c, tag *r, const uint32_t *fa, const uint8_t *fp)
 {
+	/* clang's RecordDecl::isMsStruct: ms_struct, #pragma ms_struct on or -mms-bitfields (Windows'
+	   default), unless gcc_struct */
+	bool ms = !(r->flags & RF_GCC_STRUCT) && ((r->flags & RF_MS_STRUCT) || c->o->ms_bitfields);
 	layout l = { .is_union = (r->flags & RF_UNION) != 0, .packed = (r->flags & RF_PACKED) != 0,
-		     .ms_struct = (r->flags & RF_MS_STRUCT) != 0, .align = 8, .unpacked_align = 8 };
+		     .ms_struct = ms, .align = 8, .unpacked_align = 8 };
 
 	if (c->npack && c->pack[c->npack - 1])
 		l.max_field_align = (uint64_t)c->pack[c->npack - 1] * 8;

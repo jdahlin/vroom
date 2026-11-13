@@ -39,8 +39,8 @@ static bool lb_type(cc *c, const char **p, qty *out)
 		t = prim(lng ? TY_LDOUBLE : TY_DOUBLE);
 		lng = 0;
 		break;
-	case 'z': t = prim(TY_ULONG); break;	/* size_t */
-	case 'Y': t = prim(TY_LONG); break;	/* ptrdiff_t */
+	case 'z': t = c->t_size; break;	/* size_t */
+	case 'Y': t = c->t_ptrdiff; break;	/* ptrdiff_t */
 	case 'w': t = c->t_wchar; break;
 	case 'P': t = prim(TY_VOID); break;	/* FILE: only ever as P*, a void * */
 	case 'W': t = prim(CC_I64(c, false)); break;	/* int64_t */
@@ -193,7 +193,7 @@ VPRIV uint32_t lib_builtin(cc *c, uint32_t id, uint32_t loc)
 			if (!strcmp(b->name, "__builtin_powi")) lib = "__powidf2";
 			else if (!strcmp(b->name, "__builtin_powif")) lib = "__powisf2";
 			else if (!strcmp(b->name, "__builtin_powil"))
-				lib = c->o->target == PP_LINUX_X86_64 ? "__powixf2" :
+				lib = CC_X86_64(c) ? "__powixf2" :
 				      ty_size(c, ret) == 8 ? "__powidf2" : "__powitf2";
 			size_t ll = strlen(lib), pre = c->o->target == PP_DARWIN ? 1 : 0;
 			char *keep = halloc(c, ll + pre + 1);

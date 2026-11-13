@@ -290,8 +290,11 @@ bench/vir-alloc.py mutate|time      # the checker catches corrupted allocations;
 bench/vir-failures.py [-n N]        # why VIR gives up on functions (VCC_VIR_STATS=1; reasons: codegen/vir/failure.h): suites, kernel, PostgreSQL, SQLite, most frequent first (~1 min)
 bench/record-passes.py -j 3 [-n 200]  # arm64 record clean-ups: records each pass changes, default path vs VCC_VIR=bl (VCC_REC_STATS=1); suites, kernel sample, SQLite (~1 min)
 bench/vir-passes.py -j 3 [-n 200]   # VIR builder: runs, changed, instructions and share of the build per pass (VCC_VIR_PASSES=time: codegen/vir/pass-table.c; -NAME, only=, verify); --bisect PAT leaves passes out one by one
-bench/vcc-bflayout.py               # generated bit-field records, layouts checked by clang, Linux + Apple (~1 s)
-bench/vcc-ldconst.py                # generated long double literals and folds, bits vs clang (~2 s)
+bench/vcc-bflayout.py               # generated bit-field records, layouts checked by clang, Linux + Apple + x86-64 + Windows (MS layout, ms_struct/gcc_struct) (~2 s)
+bench/vcc-ldconst.py [--target T]   # generated long double literals and folds, bits vs clang (~2 s; T x86_64-linux-gnu / x86_64-w64-mingw32: x87)
+bench/vcc-diff.py MODE -j 6 --win64 # any mode on one TU per MinGW-w64 header (+ flag variants) for x86_64-w64-mingw32 (cmp ~15 s; ref once ~1 min)
+bench/vcc-sema.py run|layout -j 6 --win64   # the same TUs: -fsyntax-only, layout claims checked by clang (layout ~5 min)
+src/tools/gen-win64data.sh          # Windows x64's predefines, -dD order, __has_* and attribute names from clang (ppdata-win64.inc, attrnames-win64.inc)
 bench/vcc-f80.sh [N]                # x87 long double folding (include/common/softfloat.h) vs this x86-64 host's FPU (~3 s)
 bench/vccd-test.py                  # vccd as a service: socket, bad requests, cache invalidation (~11 s)
 vcc --vccd-diagnostics[=json]       # vccd's diagnostics store: summary by flag/file, or every TU's records (JSON lines)
@@ -308,7 +311,7 @@ bench/vcc-win64.py -j 6 --ref-only  # the C suites for x86_64-w64-mingw32: clang
 bench/vcc-win64.py -j 6 [--obj|--objcmp]   # ... and vcc's side (vpp -S, clang -c, lld, Wine) vs those references (doc/PLAN-win64.md)
 bench/vcc-wasm.py -j 6 --objcmp     # [VCC_WASM=1] ... and vpp -c's object byte-identical to clang's for the same .s
 bench/vcc-wasm.py -j 6 --obj --vlink  # [VCC_WASM=1] ... vcc's side through vpp -c and vlink as emcc's wasm-ld (~9 min)
-bench/vcc-same.py --base DIR -j 6    # test-suite outputs byte-identical with DIR/vpp (vbench.py mkbase REV), ~80 s
+bench/vcc-same.py --base DIR -j 6    # test-suite outputs byte-identical with DIR/vpp (vbench.py mkbase REV; arm64, Darwin and x86-64 Linux modes), ~80 s
 python3 bench/virgen-test.py --bin-dir build/linux/src  # generated VIR integer/control-flow units verify and round-trip
 bench/vas-enc.py $PWD/src/test/vas   # vas encodings vs llvm-mc
 bench/vas-obj.py                    # vasm objects vs clang -c byte for byte (src/test/vas-obj, <1 s)

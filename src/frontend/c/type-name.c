@@ -117,6 +117,8 @@ VPRIV void type_str(cc *c, qty t, const char *inner, vbuffer *out, bool *ok)
 				vbuffer_string_append(&in, ", ...");
 		}
 		vbuffer_string_append(&in, ")");
+		if (x->ext)	/* x86-64: the other calling convention, as clang prints it */
+			vbuffer_string_append(&in, x->ext == CC_FNABI_MS ? " __attribute__((ms_abi))" : " __attribute__((sysv_abi))");
 		x = T(c, t);
 		type_str(c, x->base, in.p, out, ok);
 		return;

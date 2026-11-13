@@ -4,7 +4,7 @@
 /* Preserve effective function features; parse arch before feature overrides. */
 VPRIV void target_attr(cc *c, attrs *a, uint32_t str, uint32_t loc)
 {
-	if (!str || c->o->target != PP_LINUX_X86_64) return;
+	if (!str || !CC_X86_64(c)) return;
 	const char *text = c->strs[str - 1].s;
 	x86_features features = c->o->x86_features_set ? c->o->x86_raw : cc_x86_features(c, 0), disabled = c->o->x86_disabled;
 	char *copy = strdup(text), *save = NULL, *part;

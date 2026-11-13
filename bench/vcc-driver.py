@@ -187,6 +187,16 @@ MARK_ROWS = [(t, f) for t in TARGETS for f in
 MARK_ROWS += [('--target=arm64-apple-macos' + v, f) for v, f in
               [('', '-mmacosx-version-min=13.0'), ('14', ''), ('15.2', ''), ('10.15', ''), ('10.9', ''),
                ('11', '-mmacosx-version-min=12.3.1')]]
+# Windows x64 (MinGW-w64, PLAN-win64.md WIN1): the same flags, the triple's spellings and its own switches
+WIN64 = '--target=x86_64-w64-mingw32'
+MARK_ROWS += [(WIN64, f) for f in
+              ['', '-undef', '-include a.h -DQ=2 -UQ', '-std=c23', '-std=c89', '-ansi', '-std=gnu99', '-ffreestanding -std=c89',
+               '-x assembler-with-cpp', '-mgeneral-regs-only -fshort-wchar -fPIC', '-fno-PIE -fno-asynchronous-unwind-tables',
+               '-fpie', '-fno-pic', '-fasynchronous-unwind-tables', '-imacros im.h', '-funsigned-char', '-fsigned-char',
+               '-ffast-math', '-ffast-math -fmath-errno -pthread', '-pthread', '-municode', '-municode -DUNICODE=2 -DX',
+               '-mms-bitfields', '-mno-ms-bitfields', '-march=haswell', '-march=znver4 -mno-avx512f', '-mavx2 -mno-sse4.2',
+               '-mno-sse2', '-O0', '-O2', '-Os', '-Og']]
+MARK_ROWS += [(t, f) for t in ('--target=x86_64-pc-windows-gnu', '--target=x86_64-w64-windows-gnu') for f in ['', '-std=c23', '-municode']]
 
 def mark_rows(verbose):
     bad = 0

@@ -15,6 +15,8 @@
 #include "../frontend/pp/ppdata-predef.inc"
 #define PPDATA_X86_PREDEF
 #include "../frontend/pp/ppdata-x86.inc"
+#define PPDATA_WIN64_PREDEF
+#include "../frontend/pp/ppdata-win64.inc"
 #include "x86-predefines.h"
 
 /* -f[un]signed-char against the target's default, the math flags, -pthread */
@@ -36,8 +38,9 @@ static __attribute__((noinline, cold)) void driver_predef_flags_append(driver_bu
 		driver_buffer_append_string(pre, "#define _REENTRANT 1\n");
 }
 
-/* C23: char8_t and the %B/%b formats (out of line: the caller's loops stay as compiled) */
-static __attribute__((noinline, cold)) void driver_predef_c23_append(driver_buffer *pre, int darwin)
+/* C23: char8_t and the %B/%b formats (out of line: the caller's loops stay as compiled); llp64:
+   Windows, where every 64-bit type is long long */
+static __attribute__((noinline, cold)) void driver_predef_c23_append(driver_buffer *pre, int darwin, int llp64)
 {
 	/* char8_t and the %B/%b formats */
 	static const char *const fmt[][2] = {
@@ -52,7 +55,7 @@ static __attribute__((noinline, cold)) void driver_predef_c23_append(driver_buff
 		   "#define __GCC_ATOMIC_CHAR8_T_LOCK_FREE 2\n");
 	for (size_t k = 0; k < sizeof(fmt) / sizeof(*fmt); k++) {
 		/* Darwin's 64-bit types are long long */
-		const char *l = darwin && strstr(fmt[k][0], "64") ? "ll" : fmt[k][1];
+		const char *l = (darwin && strstr(fmt[k][0], "64")) || (llp64 && !strcmp(fmt[k][1], "l")) ? "ll" : fmt[k][1];
 
 		snprintf(b, sizeof(b), "#define __%s_FMTB__ \"%sB\"\n#define __%s_FMTb__ \"%sb\"\n",
 			 fmt[k][0], l, fmt[k][0], l);
@@ -76,8 +79,9 @@ VPRIV const char *const *driver_predef_darwin_framework_directories(size_t *n)
 VPRIV void driver_predef_build(struct driver_job *job)
 {
 	job->pp_options.dd_order = job->darwin ? predef_order_darwin : job->wasm_bits == 64 ? predef_order_wasm64 : job->wasm_bits ? predef_order_wasm32
-		    : job->target_x64 ? predef_order_x86_64 : predef_order_linux;
-	job->pp_options.ndd_order = job->target_x64 ? (int)(sizeof(predef_order_x86_64) / sizeof(*predef_order_x86_64))
+		    : job->target_win64 ? predef_order_win64 : job->target_x64 ? predef_order_x86_64 : predef_order_linux;
+	job->pp_options.ndd_order = job->target_win64 ? (int)(sizeof(predef_order_win64) / sizeof(*predef_order_win64))
+		     : job->target_x64 ? (int)(sizeof(predef_order_x86_64) / sizeof(*predef_order_x86_64))
 		     : job->darwin ? (int)(sizeof(predef_order_darwin) / sizeof(*predef_order_darwin))
 		     : job->wasm_bits == 64 ? (int)(sizeof(predef_order_wasm64) / sizeof(*predef_order_wasm64))
 		     : job->wasm_bits ? (int)(sizeof(predef_order_wasm32) / sizeof(*predef_order_wasm32))
@@ -87,7 +91,7 @@ VPRIV void driver_predef_build(struct driver_job *job)
 		driver_buffer_append_string(&job->predefines, job->asm_mode ? predef_undef_asm : predef_undef_c);
 	else
 		driver_buffer_append_string(&job->predefines, job->darwin ? predef_darwin : job->wasm_bits == 64 ? predef_wasm64 : job->wasm_bits ? predef_wasm32
-			 : job->target_x64 ? predef_x86_64_linux : predef_aarch64_linux);
+			 : job->target_win64 ? predef_x86_64_win64 : job->target_x64 ? predef_x86_64_linux : predef_aarch64_linux);
 	if (job->asm_mode && !job->undefine_predefined)
 		driver_buffer_append_string(&job->predefines, "#define __ASSEMBLER__ 1\n#undef __STDC_VERSION__\n#define __STDC_VERSION__ 201710L\n");
 	else if (!job->undefine_predefined && job->standard) {
@@ -103,16 +107,18 @@ VPRIV void driver_predef_build(struct driver_job *job)
 		if (job->standard == 89)
 			driver_buffer_append_string(&job->predefines, "#undef __GNUC_STDC_INLINE__\n#define __GNUC_GNU_INLINE__ 1\n");
 		if (job->strict_standard)
-			driver_buffer_append_string(&job->predefines, "#define __STRICT_ANSI__ 1\n#undef linux\n#undef unix\n");
+			driver_buffer_append_string(&job->predefines, job->target_win64 ? "#define __STRICT_ANSI__ 1\n#undef WIN32\n#undef WIN64\n#undef WINNT\n"
+						    : "#define __STRICT_ANSI__ 1\n#undef linux\n#undef unix\n");
 		if (job->standard == 23)
-			driver_predef_c23_append(&job->predefines, job->darwin);
+			driver_predef_c23_append(&job->predefines, job->darwin, job->target_win64);
 	} else if (!job->undefine_predefined && !job->asm_mode) {
 		driver_buffer_append_string(&job->predefines, "#undef __STDC_VERSION__\n#define __STDC_VERSION__ 201710L\n");
 	}
-	job->pp_options.target = job->darwin ? PP_DARWIN : job->wasm_bits == 64 ? PP_WASM64 : job->wasm_bits ? PP_WASM32 : job->target_x64 ? PP_LINUX_X86_64 : PP_LINUX_AARCH64;
+	job->pp_options.target = job->darwin ? PP_DARWIN : job->wasm_bits == 64 ? PP_WASM64 : job->wasm_bits ? PP_WASM32
+				 : job->target_win64 ? PP_WIN64 : job->target_x64 ? PP_LINUX_X86_64 : PP_LINUX_AARCH64;
 	if (job->optimize == 0 && !job->undefine_predefined) driver_buffer_append_string(&job->predefines, "#undef __OPTIMIZE__\n#define __NO_INLINE__ 1\n");
 	if (job->optimize_size && !job->undefine_predefined) driver_buffer_append_string(&job->predefines, "#define __OPTIMIZE_SIZE__ 1\n");
-	if ((job->pie || job->pic) && !job->undefine_predefined) {
+	if ((job->pie || job->pic) && !job->undefine_predefined && !job->target_win64) {	/* Windows: always __PIC__ 2 (the table) */
 		char b[160];
 		int l = job->pie ? job->pie : job->pic;
 
@@ -138,7 +144,8 @@ VPRIV void driver_predef_build(struct driver_job *job)
 			   "#undef __WCHAR_WIDTH__\n#define __WCHAR_WIDTH__ 32\n"
 			   "#undef __clang_wide_literal_encoding__\n#define __clang_wide_literal_encoding__ \"UTF-32\"\n");
 	if (!job->undefine_predefined && (job->math_flags || (job->unsigned_char >= 0 && job->unsigned_char != job->target_linux)))	/* char is unsigned by default on aarch64 Linux only */
-		driver_predef_flags_append(&job->predefines, job->darwin, job->target_linux, job->unsigned_char, job->target_x64 ? job->math_flags & ~32 : job->math_flags);	/* no __ARM_FP_FAST on x86 */
+		driver_predef_flags_append(&job->predefines, job->darwin, job->target_linux, job->unsigned_char,
+					   job->target_x64 ? job->math_flags & ~(job->target_win64 ? 32 | 8 : 32) : job->math_flags);	/* no __ARM_FP_FAST on x86, no _REENTRANT on Windows */
 	if (job->darwin && job->macos_minimum_version && !job->undefine_predefined) {
 		/* clang: MMmmpp (10.x before 10.10: 10mp) */
 		unsigned maj = 0, min = 0, pat = 0, vv;
@@ -152,7 +159,7 @@ VPRIV void driver_predef_build(struct driver_job *job)
 			 vv, vv);
 		driver_buffer_append_string(&job->predefines, b);
 	}
-	if (job->target_x64 && job->short_wchar && !job->undefine_predefined)
+	if (job->target_x64 && !job->target_win64 && job->short_wchar && !job->undefine_predefined)	/* (Windows' wchar_t is 2 bytes already) */
 		driver_buffer_append_string(&job->predefines, "#undef __SIZEOF_WCHAR_T__\n#define __SIZEOF_WCHAR_T__ 2\n"
 			   "#undef __WCHAR_MAX__\n#define __WCHAR_MAX__ 65535\n"
 			   "#undef __WCHAR_MIN__\n#define __WCHAR_MIN__ 0\n"
@@ -189,7 +196,7 @@ VPRIV void driver_predef_build(struct driver_job *job)
 		if (job->general_regs_only || job->no_mmx)
 			driver_buffer_append_string(&job->predefines, "#undef __MMX__\n");
 	}
-	if (job->cfi && !job->undefine_predefined) driver_buffer_append_string(&job->predefines, "#define __GCC_HAVE_DWARF2_CFI_ASM 1\n");
+	if (job->cfi && !job->undefine_predefined && !job->target_win64) driver_buffer_append_string(&job->predefines, "#define __GCC_HAVE_DWARF2_CFI_ASM 1\n");	/* Windows: SEH, not CFI */
 	if (job->darwin && job->freestanding && !job->undefine_predefined) driver_buffer_append_string(&job->predefines, "#undef __GCC_HAVE_DWARF2_CFI_ASM\n");
 	/* the Linux table is for the kernel's -mgeneral-regs-only */
 	if (job->target_linux && !job->general_regs_only && !job->undefine_predefined)

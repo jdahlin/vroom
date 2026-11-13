@@ -38,7 +38,7 @@ VPRIV uint32_t cast_node(cc *c, uint32_t n, qty to, int kind)
 			 * The emitter uses its already rounded floating value. */
 			N(r)->c = v.ld ? mk_fltq(c, v.q, to, N(n)->loc) : mk_flt(c, v.f, to, N(n)->loc);
 		} else {
-			if (c->o->target == PP_LINUX_X86_64 || c->o->target == PP_LINUX_AARCH64)
+			if (CC_X86_64(c) || c->o->target == PP_LINUX_AARCH64)
 				return big_float_cast(c, n, to);
 		}
 	}

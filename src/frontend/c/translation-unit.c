@@ -74,8 +74,8 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 			t.size = 8, t.align = 8;
 		if (k == TY_LDOUBLE && PP_IS_WASM(o->target))
 			t.align = 8;	/* emscripten: binary128, 8-byte aligned */
-		if ((k == TY_LONG || k == TY_ULONG) && o->target == PP_WASM32)
-			t.size = 4, t.align = 4;	/* ILP32 */
+		if ((k == TY_LONG || k == TY_ULONG) && (o->target == PP_WASM32 || o->target == PP_WIN64))
+			t.size = 4, t.align = 4;	/* ILP32, LLP64 */
 		c->ty[k] = t;
 		c->ty[k].canon = (uint32_t)k;
 		c->nty++;
@@ -88,9 +88,9 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 		if (k)
 			c->tyhash[i] = (uint32_t)k;
 	}
-	c->t_size = prim(TY_ULONG);
-	c->t_ptrdiff = prim(TY_LONG);
-	c->t_wchar = o->short_wchar ? prim(TY_USHORT) : o->target != PP_LINUX_AARCH64 ? prim(TY_INT) : prim(TY_UINT);
+	c->t_size = prim(o->target == PP_WIN64 ? TY_ULLONG : TY_ULONG);	/* LLP64: unsigned long long */
+	c->t_ptrdiff = prim(o->target == PP_WIN64 ? TY_LLONG : TY_LONG);
+	c->t_wchar = o->short_wchar || o->target == PP_WIN64 ? prim(TY_USHORT) : o->target != PP_LINUX_AARCH64 ? prim(TY_INT) : prim(TY_UINT);
 	c->t_char16 = prim(TY_USHORT);
 	c->t_char32 = prim(TY_UINT);
 	c->id_func = vintern_copy("__func__\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 8);
@@ -106,8 +106,8 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 		uint32_t s;
 		qty vl;
 
-		if (o->target == PP_DARWIN) {
-			vl = ty_ptr(c, prim(TY_CHAR));
+		if (o->target == PP_DARWIN || o->target == PP_WIN64) {
+			vl = ty_ptr(c, prim(TY_CHAR));	/* Windows x64: the Microsoft va_list */
 		} else if (PP_IS_WASM(o->target)) {
 			vl = ty_ptr(c, prim(TY_VOID));
 		} else if (o->target == PP_LINUX_X86_64) {
@@ -145,6 +145,10 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 		c->t_valist = vl;
 		s = sym_new(c, S_TYPEDEF, vintern_copy("__builtin_va_list\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 17), vl, 0);
 		sym_bind(c, s);
+		if (o->target == PP_WIN64) {	/* clang: the Microsoft va_list on every x86-64 OS (Linux: ms_valist_typedef) */
+			s = sym_new(c, S_TYPEDEF, vintern_copy("__builtin_ms_va_list\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 20), ty_ptr(c, prim(TY_CHAR)), 0);
+			sym_bind(c, s);
+		}
 		s = sym_new(c, S_TYPEDEF, vintern_copy("__int128_t\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 10), prim(TY_INT128), 0);
 		sym_bind(c, s);
 		s = sym_new(c, S_TYPEDEF, vintern_copy("__uint128_t\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 11), prim(TY_UINT128), 0);
