@@ -19,6 +19,7 @@
 #ifndef VCC_COMMON_BUFFER_H
 #define VCC_COMMON_BUFFER_H
 
+#include <errno.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -173,8 +174,10 @@ static inline void vfdbuf_flush(vfdbuf *o)
 	while (off < o->n) {
 		ssize_t w = write(o->fd, o->p + off, o->n - off);
 
+		if (w < 0 && errno == EINTR)
+			continue;
 		if (w <= 0)
-			break;
+			vjob_fail_errno("write error");
 		off += (size_t)w;
 	}
 	o->n = 0;
