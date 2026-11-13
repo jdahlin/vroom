@@ -351,7 +351,7 @@ typedef struct codegen_context {
 	int novtag;		/* inside a volatile access: its records stay untagged */
 	uint32_t curloc;	/* innermost statement being generated (diagnostics) */
 	uint32_t reuse_from, reuse_to; /* temporary substitution within one pure expression */
-	struct dbgrow { uint32_t k, file, line, col; } *dl;	/* -g: a row at record k */
+	struct codegen_debug_row { uint32_t k, file, line, col; } *dl;	/* -g: a row at record k */
 	uint32_t ndl, dlcap;
 	const char *dlname;	/* the last file looked up, and its number */
 	uint32_t dlnlen, dlfile;

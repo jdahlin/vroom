@@ -63,7 +63,7 @@ VPRIV void codegen_debug_row_add(codegen_context *e, uint32_t loc)
 		e->dlcap = e->dlcap ? 2 * e->dlcap : 256;
 		e->dl = realloc(e->dl, e->dlcap * sizeof *e->dl);
 	}
-	e->dl[e->ndl++] = (struct dbgrow){ e->nin, file, line, col };
+	e->dl[e->ndl++] = (struct codegen_debug_row){ e->nin, file, line, col };
 }
 
 VPRIV void codegen_debug_rows_remap(codegen_context *e, uint32_t *j, uint32_t k, uint32_t n)

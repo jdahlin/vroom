@@ -582,7 +582,7 @@ VPRIV void x64_dbgrow(codegen_context *e, uint32_t loc)
 		e->dlcap = e->dlcap ? 2 * e->dlcap : 256;
 		e->dl = realloc(e->dl, e->dlcap * sizeof *e->dl);
 	}
-	e->dl[e->ndl++] = (struct dbgrow){ nin, file, line, col };
+	e->dl[e->ndl++] = (struct codegen_debug_row){ nin, file, line, col };
 }
 
 VPRIV void x64_label(codegen_context *e, uint32_t l)
