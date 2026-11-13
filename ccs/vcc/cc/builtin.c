@@ -53,6 +53,8 @@ static const builtin builtins[] = {
 	{ "__builtin_popcount", BI_POPCOUNT, 1, "iu" }, { "__builtin_popcountl", BI_POPCOUNTL, 1, "iL" },
 	{ "__builtin_popcountll", BI_POPCOUNTLL, 1, "iW" },
 	{ "__builtin_clzg", BI_CLZG, 1, "i." }, { "__builtin_ctzg", BI_CTZG, 1, "i." },
+	{ "__builtin_stdc_count_ones", BI_STDC_COUNT_ONES, 1, "u." },
+	{ "__builtin_stdc_trailing_zeros", BI_STDC_TRAILING_ZEROS, 1, "u." },
 	{ "__builtin_popcountg", BI_POPCOUNTG, 1, "i." },
 	{ "__builtin_parity", BI_PARITY, 1, "iu" }, { "__builtin_parityl", BI_PARITYL, 1, "iL" },
 	{ "__builtin_parityll", BI_PARITYLL, 1, "iW" },
@@ -1279,14 +1281,19 @@ static uint32_t generic_bitcount(cc *c, int id, uint32_t loc)
 	qty xt;
 	unsigned bits, width;
 
+	bool stdc = id == BI_STDC_COUNT_ONES || id == BI_STDC_TRAILING_ZEROS;
+	if (stdc)
+		id = id == BI_STDC_COUNT_ONES ? BI_POPCOUNTG : BI_CTZG;
+	unsigned maxargs = stdc || id == BI_POPCOUNTG ? 1 : 2;
 	args_list(c, &args);
-	if (args.n < 1 || args.n > (id == BI_POPCOUNTG ? 1u : 2u)) {
-		arity(c, loc, id == BI_POPCOUNTG ? 1u : args.n ? 2u : 1u, &args);
+	if (!args.n || args.n > maxargs) {
+		arity(c, loc, args.n ? maxargs : 1, &args);
 		return mk_int(c, 0, prim(TY_INT), loc);
 	}
 	x = decay(c, args.v[0]);
 	xt = QUNQ(N(x)->ty);
-	if (!is_integer(c, xt) || is_signed(c, xt)) {
+	if (!is_integer(c, xt) || is_signed(c, xt) ||
+	    (stdc && (KIND(c, xt) == TY_BOOL || KIND(c, xt) == TY_ENUM))) {
 		cc_error(c, N(x)->loc, "1st argument must be a scalar unsigned integer type");
 		return mk_int(c, 0, prim(TY_INT), loc);
 	}
@@ -1301,8 +1308,11 @@ static uint32_t generic_bitcount(cc *c, int id, uint32_t loc)
 		}
 		fb = convert(c, y, prim(TY_INT));
 	}
-	if (bits > 128)
-		return big_bitcount(c, id, x, fb, bits, loc);
+	if (stdc && id == BI_CTZG) fb = mk_int(c, bits, prim(TY_INT), loc);
+	if (bits > 128) {
+		r = big_bitcount(c, id, x, fb, bits, loc);
+		return stdc ? convert(c, r, prim(TY_UINT)) : r;
+	}
 	x = cplx_reuse(c, x, &pre);
 	if (fb) fb = cplx_reuse(c, fb, &fbpre);
 	if (width == 128) {
@@ -1328,9 +1338,9 @@ static uint32_t generic_bitcount(cc *c, int id, uint32_t loc)
 	}
 	if (id == BI_CLZG && bits < width)
 		r = binop(c, T_MINUS, r, mk_int(c, width - bits, prim(TY_INT), loc), loc);
-	if (args.n == 2)
+	if (fb)
 		r = conditional(c, binop(c, T_EXCLAIMEQ, x, mk_int(c, 0, xt, loc), loc), r, fb, loc);
-	return with_pre(c, pre, with_pre(c, fbpre, r));
+	return with_pre(c, pre, with_pre(c, fbpre, stdc ? convert(c, r, prim(TY_UINT)) : r));
 }
 
 /*
@@ -2308,6 +2318,7 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 			return cplx_unary(c, T_TILDE, a, loc);
 		return rvalue(c, cplx_part(c, a, b->id == BI_CIMAG));
 	}
+	case BI_STDC_COUNT_ONES: case BI_STDC_TRAILING_ZEROS:
 	case BI_CLZG: case BI_CTZG: case BI_POPCOUNTG:
 		return generic_bitcount(c, b->id, loc);
 	case BI_COUNTED_BY_REF: {
