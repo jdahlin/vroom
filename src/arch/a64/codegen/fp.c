@@ -1,6 +1,6 @@
 /* vcc code generator: floating point (long double through libcalls) */
 #include "../../../codegen/emitimpl.h"
-#include "common/f128.h"
+#include "common/softfloat.h"
 
 enum { FV0 = 16, FV1 = 17 };
 
@@ -112,9 +112,9 @@ static double ld_to_d(i128 b)
 VPRIV val f_const_t(ecx *e, qty t, double x)
 {
 	if (KIND(e->c, t) == TY_BFLOAT16)
-		return vconst(q_to_bf(q_of_d(x)));
+		return vconst(vsoftfloat_to_bfloat16(vsoftfloat_of_double(x)));
 	if (KIND(e->c, t) == TY_FLOAT16)
-		return vconst(q_to_h(q_of_d(x)));
+		return vconst(vsoftfloat_to_half(vsoftfloat_of_double(x)));
 	if (is_ld(e->c, t))
 		return vconst(ld_of_d(x));
 	return f_const(fpk(e, t), x);
@@ -125,9 +125,9 @@ VPRIV val f_const_cv(ecx *e, qty t, const cval *cv)
 {
 	if (is_ld(e->c, t))
 		return vconst(cv->ld ? (i128)cv->q : ld_of_d(cv->f));
-	if (cv->ld && q_isnan(cv->q)) {
+	if (cv->ld && vsoftfloat_is_nan(cv->q)) {
 		int sz = (int)tsize(e->c, t);
-		return vconst(q_nan_storage(cv->q, KIND(e->c, t) == TY_BFLOAT16 ? 7 : sz == 2 ? 10 : sz == 4 ? 23 : 52, KIND(e->c, t) == TY_BFLOAT16 ? 8 : sz == 2 ? 5 : sz == 4 ? 8 : 11));
+		return vconst(vsoftfloat_nan_storage(cv->q, KIND(e->c, t) == TY_BFLOAT16 ? 7 : sz == 2 ? 10 : sz == 4 ? 23 : 52, KIND(e->c, t) == TY_BFLOAT16 ? 8 : sz == 2 ? 5 : sz == 4 ? 8 : 11));
 	}
 	return f_const_t(e, t, cv->f);
 }
@@ -336,7 +336,7 @@ VPRIV val ld_cast(ecx *e, val v, qty from, qty to)
 		if (v.k == V_CONST) {
 			i128 x = em_trunc_to(c, v.i, from);
 
-			return vconst(q_of_i(x, sg));
+			return vconst(vsoftfloat_of_integer(x, sg));
 		}
 		if (fs == 16) {
 			fn = sg ? FN_FLOATTITF : FN_FLOATUNTITF, at = sg ? prim(TY_INT128) : prim(TY_UINT128);
@@ -407,7 +407,7 @@ VPRIV val f_cast(ecx *e, val v, qty from, qty to)
 		if (!fh && !ff)
 			return f_cast(e, f_cast(e, v, from, prim(TY_DOUBLE)), prim(TY_DOUBLE), to);
 		if (v.k == V_CONST)
-			return fh ? f_const_t(e, to, h_to_d((uint16_t)v.i)) : vconst(q_to_h(q_of_d(f_val(fpk(e, from), v.i))));
+			return fh ? f_const_t(e, to, h_to_d((uint16_t)v.i)) : vconst(vsoftfloat_to_half(vsoftfloat_of_double(f_val(fpk(e, from), v.i))));
 		{
 			bool d = KIND(c, wide) == TY_DOUBLE;
 			uint32_t op = fh ? (d ? 0x1ee2c000u : 0x1ee24000u) : (d ? 0x1e63c000u : 0x1e23c000u);

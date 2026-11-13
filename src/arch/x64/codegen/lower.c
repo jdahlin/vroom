@@ -654,16 +654,16 @@ VPRIV void x64_finish(ecx *e, uint32_t s)
 	size_t text = it_open(e, IT_TEXT);
 	if (e->E->o->pfe_n) {
 		/* the patchable entry's address (the M nops before it, else the entry itself) */
-		tb_s(b, "\t.pushsection\t__patchable_function_entries,\"awo\",@progbits,");
+		vtext_string_append(b, "\t.pushsection\t__patchable_function_entries,\"awo\",@progbits,");
 		sym_name(e->c, b, s);
-		tb_s(b, "\n\t.p2align\t3\n\t.quad\t");
+		vtext_string_append(b, "\n\t.p2align\t3\n\t.quad\t");
 		if (e->E->o->pfe_m) {
-			tb_s(b, ".Lpfe");
-			tb_u(b, s);
+			vtext_string_append(b, ".Lpfe");
+			vtext_unsigned_append(b, s);
 		} else {
 			sym_name(e->c, b, s);
 		}
-		tb_s(b, "\n\t.popsection\n");
+		vtext_string_append(b, "\n\t.popsection\n");
 	}
 	{
 		const attrs *a = sym_attrs(e->c, s);

@@ -23,7 +23,7 @@ static void phase(const char *name)
 	if (!timing)
 		return;
 	double t = now();
-	vperf p = vperf_now(), d = vperf_sub(p, p_last);
+	vperf p = vperformance_now(), d = vperformance_subtract(p, p_last);
 	long f = minflt();
 	fprintf(errf, "  %-28s %7.2f ms %8.1f M ins (main thread) %6ld faults\n", name, (t - t_last) * 1e3,
 		d.ins / 1e6, f - flt_last);

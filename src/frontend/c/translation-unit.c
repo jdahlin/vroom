@@ -4,8 +4,8 @@
 #include "ccimpl.h"
 
 /* the per-TU tables, mapped once and reused (cc_init takes a set, cc_free gives it back) */
-static vmpool ccpool = VMPOOL_INIT(22);
-static _Thread_local vmreg *ccr;
+static vjob_region_pool ccpool = VJOB_REGION_POOL_INIT(22);
+static _Thread_local vjob_region *ccr;
 
 VPRIV void *halloc(cc *c, size_t n)
 {
@@ -28,29 +28,29 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 	c->p = p;
 	c->ext_off = -1;	/* (ext_on: computed at its first use) */
 	c->o = o;
-	ccr = vmpool_take(&ccpool);
-	c->ty = vmreg_get(&ccr[0], (size_t)1 << 30, "cc.ty");
-	c->params = vmreg_get(&ccr[1], (size_t)1 << 28, "cc.params");
-	c->tags = vmreg_get(&ccr[2], (size_t)1 << 28, "cc.tags");
-	c->syms = vmreg_get(&ccr[3], (size_t)1 << 30, "cc.syms");
-	c->nodes = vmreg_get(&ccr[4], (size_t)1 << 32, "cc.nodes");
-	c->lists = vmreg_get(&ccr[5], (size_t)1 << 30, "cc.lists");
-	c->ipool = vmreg_get(&ccr[6], (size_t)1 << 30, "cc.ipool");
-	c->fpool = vmreg_get(&ccr[7], (size_t)1 << 26, "cc.fpool");
-	c->strs = vmreg_get(&ccr[8], (size_t)1 << 28, "cc.strs");
-	c->labels = vmreg_get(&ccr[9], (size_t)1 << 26, "cc.labels");
-	c->attr = vmreg_get(&ccr[10], (size_t)1 << 28, "cc.attr");
-	c->asms = vmreg_get(&ccr[11], (size_t)1 << 28, "cc.asms");
-	c->sstack = vmreg_get(&ccr[12], (size_t)1 << 28, "cc.sstack");
-	c->toplevel = vmreg_get(&ccr[13], (size_t)1 << 26, "cc.toplevel");
-	c->tlasm = vmreg_get(&ccr[14], (size_t)1 << 24, "cc.tlasm");
-	c->heap = c->hp = vmreg_get(&ccr[15], (size_t)1 << 32, "cc.heap");
-	c->ptrc = vmreg_get(&ccr[16], (size_t)1 << 30, "cc.ptrc");
-	c->span = vmreg_get(&ccr[17], (size_t)1 << 31, "cc.span");
-	c->lzt = vmreg_get(&ccr[18], (size_t)1 << 32, "cc.lzt");
-	c->lzf = vmreg_get(&ccr[19], (size_t)1 << 28, "cc.lzf");
-	c->lzs = vmreg_get(&ccr[20], (size_t)1 << 31, "cc.lzs");
-	c->paren = vmreg_get(&ccr[21], (size_t)1 << 30, "cc.paren");
+	ccr = vjob_region_pool_take(&ccpool);
+	c->ty = vjob_region_acquire(&ccr[0], (size_t)1 << 30, "cc.ty");
+	c->params = vjob_region_acquire(&ccr[1], (size_t)1 << 28, "cc.params");
+	c->tags = vjob_region_acquire(&ccr[2], (size_t)1 << 28, "cc.tags");
+	c->syms = vjob_region_acquire(&ccr[3], (size_t)1 << 30, "cc.syms");
+	c->nodes = vjob_region_acquire(&ccr[4], (size_t)1 << 32, "cc.nodes");
+	c->lists = vjob_region_acquire(&ccr[5], (size_t)1 << 30, "cc.lists");
+	c->ipool = vjob_region_acquire(&ccr[6], (size_t)1 << 30, "cc.ipool");
+	c->fpool = vjob_region_acquire(&ccr[7], (size_t)1 << 26, "cc.fpool");
+	c->strs = vjob_region_acquire(&ccr[8], (size_t)1 << 28, "cc.strs");
+	c->labels = vjob_region_acquire(&ccr[9], (size_t)1 << 26, "cc.labels");
+	c->attr = vjob_region_acquire(&ccr[10], (size_t)1 << 28, "cc.attr");
+	c->asms = vjob_region_acquire(&ccr[11], (size_t)1 << 28, "cc.asms");
+	c->sstack = vjob_region_acquire(&ccr[12], (size_t)1 << 28, "cc.sstack");
+	c->toplevel = vjob_region_acquire(&ccr[13], (size_t)1 << 26, "cc.toplevel");
+	c->tlasm = vjob_region_acquire(&ccr[14], (size_t)1 << 24, "cc.tlasm");
+	c->heap = c->hp = vjob_region_acquire(&ccr[15], (size_t)1 << 32, "cc.heap");
+	c->ptrc = vjob_region_acquire(&ccr[16], (size_t)1 << 30, "cc.ptrc");
+	c->span = vjob_region_acquire(&ccr[17], (size_t)1 << 31, "cc.span");
+	c->lzt = vjob_region_acquire(&ccr[18], (size_t)1 << 32, "cc.lzt");
+	c->lzf = vjob_region_acquire(&ccr[19], (size_t)1 << 28, "cc.lzf");
+	c->lzs = vjob_region_acquire(&ccr[20], (size_t)1 << 31, "cc.lzs");
+	c->paren = vjob_region_acquire(&ccr[21], (size_t)1 << 30, "cc.paren");
 	c->hend = c->heap + ((size_t)1 << 32);
 	c->capdops = 4096;
 	c->dops = halloc(c, c->capdops * sizeof(dop));
@@ -178,34 +178,34 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 static void cc_free(cc *c)
 {
 #define USED(n, a) (((size_t)(n) + 2) * sizeof(*(a)))
-	vmreg_put(&ccr[0], USED(c->nty, c->ty));
-	vmreg_put(&ccr[1], USED(c->nparams, c->params));
-	vmreg_put(&ccr[2], USED(c->ntag, c->tags));
-	vmreg_put(&ccr[3], USED(c->nsym, c->syms));
-	vmreg_put(&ccr[4], USED(c->nnode, c->nodes));
-	vmreg_put(&ccr[5], USED(c->nlist, c->lists));
-	vmreg_put(&ccr[6], USED(c->nipool, c->ipool));
-	vmreg_put(&ccr[7], USED(c->nfpool, c->fpool));
-	vmreg_put(&ccr[8], USED(c->nstr, c->strs));
-	vmreg_put(&ccr[9], USED(c->nlabel, c->labels));
-	vmreg_put(&ccr[10], USED(c->nattr, c->attr));
-	vmreg_put(&ccr[11], USED(c->nasm, c->asms));
-	vmreg_put(&ccr[12], VMREG_SCRATCH);	/* a stack: written before read */
-	vmreg_put(&ccr[13], USED(c->ntoplevel, c->toplevel));
-	vmreg_put(&ccr[14], USED(c->ntlasm, c->tlasm));
-	vmreg_put(&ccr[15], (size_t)(c->hp - c->heap) + 64);
-	vmreg_put(&ccr[16], ((size_t)c->nty + 2) * 8 * sizeof(*c->ptrc));	/* indexed by qty */
-	vmreg_put(&ccr[17], USED(c->nnode, c->span));	/* indexed by node */
-	vmreg_put(&ccr[18], USED(c->nlzt, c->lzt));
-	vmreg_put(&ccr[19], USED(c->nlzf, c->lzf));
-	vmreg_put(&ccr[20], (size_t)c->nlzs + 64);
-	vmreg_put(&ccr[21], USED(c->nnode, c->paren));	/* indexed by node */
+	vjob_region_release(&ccr[0], USED(c->nty, c->ty));
+	vjob_region_release(&ccr[1], USED(c->nparams, c->params));
+	vjob_region_release(&ccr[2], USED(c->ntag, c->tags));
+	vjob_region_release(&ccr[3], USED(c->nsym, c->syms));
+	vjob_region_release(&ccr[4], USED(c->nnode, c->nodes));
+	vjob_region_release(&ccr[5], USED(c->nlist, c->lists));
+	vjob_region_release(&ccr[6], USED(c->nipool, c->ipool));
+	vjob_region_release(&ccr[7], USED(c->nfpool, c->fpool));
+	vjob_region_release(&ccr[8], USED(c->nstr, c->strs));
+	vjob_region_release(&ccr[9], USED(c->nlabel, c->labels));
+	vjob_region_release(&ccr[10], USED(c->nattr, c->attr));
+	vjob_region_release(&ccr[11], USED(c->nasm, c->asms));
+	vjob_region_release(&ccr[12], VJOB_REGION_SCRATCH);	/* a stack: written before read */
+	vjob_region_release(&ccr[13], USED(c->ntoplevel, c->toplevel));
+	vjob_region_release(&ccr[14], USED(c->ntlasm, c->tlasm));
+	vjob_region_release(&ccr[15], (size_t)(c->hp - c->heap) + 64);
+	vjob_region_release(&ccr[16], ((size_t)c->nty + 2) * 8 * sizeof(*c->ptrc));	/* indexed by qty */
+	vjob_region_release(&ccr[17], USED(c->nnode, c->span));	/* indexed by node */
+	vjob_region_release(&ccr[18], USED(c->nlzt, c->lzt));
+	vjob_region_release(&ccr[19], USED(c->nlzf, c->lzf));
+	vjob_region_release(&ccr[20], (size_t)c->nlzs + 64);
+	vjob_region_release(&ccr[21], USED(c->nnode, c->paren));	/* indexed by node */
 	free(c->cases);
 	free(c->pweak);
 	free(c->utd);
 	free(c->rtq);
 #undef USED
-	vmpool_give(&ccpool, ccr);
+	vjob_region_pool_give(&ccpool, ccr);
 	ccr = NULL;
 }
 

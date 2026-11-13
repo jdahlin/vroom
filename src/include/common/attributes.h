@@ -10,8 +10,8 @@
  * counted_by is not used: it is for flexible array members, and the code has
  * none (buffers are a pointer, a length and a capacity).
  */
-#ifndef VCC_ATTR_H
-#define VCC_ATTR_H
+#ifndef VCC_COMMON_ATTRIBUTES_H
+#define VCC_COMMON_ATTRIBUTES_H
 
 #define VUSE __attribute__((warn_unused_result))
 #define VNONNULL(...) __attribute__((nonnull(__VA_ARGS__)))

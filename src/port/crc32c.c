@@ -7,7 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "port/hostcrc.h"
+#include "port/crc32c.h"
 
 #if defined(__x86_64__)
 #include <nmmintrin.h>

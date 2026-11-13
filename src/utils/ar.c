@@ -49,9 +49,9 @@
 #include <unistd.h>
 
 #include "utils/ar.h"
-#include "common/buf.h"
-#include "port/mapfile.h"
-#include "common/defer.h"
+#include "common/buffer.h"
+#include "port/file.h"
+#include "common/scoped-cleanup.h"
 
 /* ---------------- growable buffer ---------------- */
 
@@ -221,11 +221,11 @@ static uint64_t num(const unsigned char *s, size_t n, int base)
 }
 
 /*
- * Append the members of the thin archive at abs (vmapped as d) to l: names
+ * Append the members of the thin archive at abs (vfile_mapping as d) to l: names
  * are made relative to q->dir, mode and size come from the headers.
  * shown is the path the user gave, for messages.
  */
-static bool read_thin(arq *q, const char *abs, const char *shown, const vmapped *d, mlist *l)
+static bool read_thin(arq *q, const char *abs, const char *shown, const vfile_mapping *d, mlist *l)
 {
 	VAUTOFREE char *adir = dirof(abs);
 	const unsigned char *names = NULL;
@@ -282,12 +282,12 @@ static bool add_file(arq *q, const char *path, mlist *l)
 {
 	VAUTOFREE char *abs = norm(q->cwd, path);
 	struct stat st;
-	VAUTOUNMAP vmapped d = { 0 };
+	VAUTOUNMAP vfile_mapping d = { 0 };
 	bool ok;
 
 	if (!abs)
 		return false;
-	if (!vmap_file(abs, &d, &st)) {
+	if (!vfile_map(abs, &d, &st)) {
 		err(q, "ar: error: %s: %s\n", path, strerror(errno));
 		return false;
 	}
@@ -320,7 +320,7 @@ static uint64_t r64(const unsigned char *p) { return r32(p) | (uint64_t)r32(p + 
  * local, section or file symbols.  Other files have no symbols, and an
  * archive without any object file gets no symbol table (*is_obj).
  */
-static bool elf_syms(const vmapped *d, vsbuf *names, uint32_t *count, bool *is_obj)
+static bool elf_syms(const vfile_mapping *d, vsbuf *names, uint32_t *count, bool *is_obj)
 {
 	const unsigned char *p = d->p;
 	uint64_t shoff, shnum, i;
@@ -382,7 +382,7 @@ static bool elf_syms(const vmapped *d, vsbuf *names, uint32_t *count, bool *is_o
 /* ---------------- writing ---------------- */
 
 /* a member's bytes: the old archive's, or the file mapped */
-static bool mget(const member *m, vmapped *d)
+static bool mget(const member *m, vfile_mapping *d)
 {
 	struct stat st;
 
@@ -391,13 +391,13 @@ static bool mget(const member *m, vmapped *d)
 		d->n = m->size;
 		return true;
 	}
-	return vmap_file(m->abs, d, &st);
+	return vfile_map(m->abs, d, &st);
 }
 
-static void mput(const member *m, vmapped *d)
+static void mput(const member *m, vfile_mapping *d)
 {
 	if (!m->data)
-		vunmap_file(d);
+		vfile_unmap(d);
 }
 
 static void header(vsbuf *b, const char *name, const char *date, const char *uid, const char *gid,
@@ -449,7 +449,7 @@ static bool build_bsd(arq *q, vsbuf *out, const mlist *l, bool symtab)
 	uint32_t total = 0;
 	uint64_t pos, symsize = 0;
 	bool any = false;
-	vmapped d;
+	vfile_mapping d;
 
 	if (!nsym || !mpos)
 		return false;
@@ -567,7 +567,7 @@ static bool write_archive(arq *q, const char *archive_abs, const char *shown, co
 		if (!(nsym = calloc(l->n, sizeof(*nsym))))
 			return false;
 		for (i = 0; i < l->n; i++) {
-			vmapped d;
+			vfile_mapping d;
 
 			if (!mget(&l->m[i], &d)) {
 				err(q, "ar: error: %s: %s\n", l->m[i].name, strerror(errno));
@@ -647,7 +647,7 @@ static bool write_archive(arq *q, const char *archive_abs, const char *shown, co
 			snprintf(mode, sizeof(mode), "%o", 0644u);	/* (llvm-ar, deterministic: 644 for every member) */
 			header(&out, nm, "0", "0", "0", mode, l->m[i].size);
 			if (!thin) {
-				vmapped d;
+				vfile_mapping d;
 
 				if (!mget(&l->m[i], &d)) {
 					err(q, "ar: error: %s: %s\n", l->m[i].name, strerror(errno));
@@ -717,7 +717,7 @@ static bool write_all_fd(int fd, const void *p, size_t n)
 }
 
 /* the members of the regular archive d, in order: names as stored, data in d */
-static bool read_regular(arq *q, const vmapped *d, const char *shown, mlist *l, bool *bsd)
+static bool read_regular(arq *q, const vfile_mapping *d, const char *shown, mlist *l, bool *bsd)
 {
 	const char *b = (const char *)d->p, *longn = NULL;
 	size_t sz = d->n, longsz = 0;
@@ -785,7 +785,7 @@ bad:
 
 /* t lists the names, p writes the data, x extracts into cwd (mode 644, as llvm-ar's D);
    named members only when given, each one that is not found an error */
-static int regular_read(arq *q, const vmapped *d, const char *shown, char op, char **files, int nfiles)
+static int regular_read(arq *q, const vfile_mapping *d, const char *shown, char op, char **files, int nfiles)
 {
 	MLIST mlist l = { 0 };
 	VAUTOFREE bool *found = calloc((size_t)nfiles + 1, 1);
@@ -850,7 +850,7 @@ int ar_run(const char *cwd, int argc, char **argv, int outfd, int errfd)
 	int nfiles = 0, i, rc = 1;
 	MLIST mlist old = { 0 }, res = { 0 }, moved = { 0 };
 	struct stat st;
-	VAUTOUNMAP vmapped d = { 0 };
+	VAUTOUNMAP vfile_mapping d = { 0 };
 	bool have_old = false, regular_old = false, bsd = false;
 
 	if (!(files = calloc(argc, sizeof(*files))))
@@ -902,7 +902,7 @@ int ar_run(const char *cwd, int argc, char **argv, int outfd, int errfd)
 	if (!(archive_abs = norm(cwd, archive)) || !(q.dir = dirof(archive_abs)))
 		return rc;
 
-	if (vmap_file(archive_abs, &d, &st)) {
+	if (vfile_map(archive_abs, &d, &st)) {
 		have_old = true;
 		if (d.n >= 8 && !memcmp(d.p, "!<arch>\n", 8)) {
 			if (op == 't' || op == 'p' || op == 'x') {
@@ -1055,7 +1055,7 @@ int ar_run(const char *cwd, int argc, char **argv, int outfd, int errfd)
 	}
 	if (!thin && !regular_old && res.n) {
 		/* a new regular archive: llvm-ar's format from its first member (GNU for ELF, else BSD on macOS) */
-		vmapped fm;
+		vfile_mapping fm;
 
 		if (!mget(&res.m[0], &fm)) {
 			err(&q, "ar: error: %s: %s\n", res.m[0].name, strerror(errno));

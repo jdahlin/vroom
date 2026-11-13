@@ -210,7 +210,7 @@ static void job_compile(struct driver_job *job, pp *p, const ppd_env *env)
 		}
 		{
 			unsigned long long t1 = nsnow();
-			vperf v1 = vperf_now();
+			vperf v1 = vperformance_now();
 
 			job->status = cc_run(p, &co) || pp_errors(p) ? 1 : 0;
 			ppd_ns_cc += nsnow() - t1;
@@ -314,7 +314,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 
 static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_env *env)
 {
-	vmreg *br = bufr = vmpool_take(&bufpool);
+	vjob_region *br = bufr = vjob_region_pool_take(&bufpool);
 	struct driver_job jobstore = {
 		.errfd = env->errfd, .hosted = 1, .raw_asm = -1, .march_lse = -1, .mcpu_lse = -1, .pie = -1, .cfi = -1,
 		.x86_cpu = "x86-64", .omit_frame_pointer = -1, .uchar = -1, .tri = -1, .gnu89_inline = -1,
@@ -430,7 +430,7 @@ out:
 	bfree(&job->cmdl);
 	bfree(&job->incl);
 	bfree(&job->imac);
-	vmpool_give(&bufpool, br);
+	vjob_region_pool_give(&bufpool, br);
 	bufr = NULL;
 	obj_release();
 	return job->status;
