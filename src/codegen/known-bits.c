@@ -1,7 +1,7 @@
 /* vcc code generator: bit facts about constants and expressions */
 #include "emitimpl.h"
 
-static bool imm_fits(int ch, i128 v)
+VPRIV bool imm_fits(int ch, i128 v)
 {
 	switch (ch) {
 	case 'I': return v >= 0 && v <= 4095;
@@ -15,7 +15,7 @@ static bool imm_fits(int ch, i128 v)
 	}
 }
 
-static void kbits(ecx *e, uint32_t n, uint64_t *k, uint64_t *v)
+VPRIV void kbits(ecx *e, uint32_t n, uint64_t *k, uint64_t *v)
 {
 	cc *c = e->c;
 	const node *x = N(n);

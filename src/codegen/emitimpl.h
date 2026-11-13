@@ -923,6 +923,9 @@ VPRIV void move_to(ecx *e, int r, int r2, val *v, qty t);
 VPRIV val gen(ecx *e, uint32_t n);
 /* cond.c */
 VPRIV int cond_fold(ecx *e, uint32_t n);
+/* known-bits.c */
+VPRIV bool imm_fits(int ch, i128 v);
+VPRIV void kbits(ecx *e, uint32_t n, uint64_t *k, uint64_t *v);
 VPRIV void gen_cond(ecx *e, uint32_t n, bool jump_if, uint32_t l);
 /* stmt.c */
 VPRIV void gen_init_local(ecx *e, const lval *dst, qty ty, uint32_t init);
@@ -940,6 +943,7 @@ VPRIV void gen_asm(ecx *e, uint32_t n);
 /* func.c */
 VPRIV void out_chunk(ecx *e, uint64_t key, size_t start);
 VPRIV void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec, uint32_t align);
+VPRIV void ctor_entry(cc *c, tbuf *b, uint32_t s, bool fini);
 VPRIV void emit_function(ecx *e, uint32_t s);
 /* data.c */
 VPRIV void emit_object(ecx *e, uint32_t s);
