@@ -38,7 +38,7 @@ intern_list	lex_identifiers_intern	function	lex.c
 classify_upto	lex_blocks_classify	function	lex.c	
 stat_dump	lex_statistics_dump	function	lex.c	
 lex_mode	lex_tokenize_mode	function	lex.c	
-vlex	lex_tokenize	function	lex.c	
+vlex	lex_tokenize	function,public	lex.c	
 vlex_spell	lex_token_spell	function,public	lex.c	
 arena	lex_region_allocate	function	lex.c	
 arena_trim	lex_region_trim	function	lex.c	
@@ -51,7 +51,7 @@ load	lex_file_load	function	lex.c
 vlex_load_uncached	lex_file_load_uncached	function,public	lex.c	
 centry_get	lex_cache_entry_get	function	lex.c	
 claim	lex_cache_entry_claim	function	lex.c	
-publish	lex_cache_entry_publish	function	lex.c	
+publish	lex_cache_entry_publish	function,also:bench/vccd-sample.py	lex.c	
 vlex_trigraphs	lex_file_trigraphs_replace	function,public	lex.c	
 lx_alnum	lex_character_is_alphanumeric	function	lex.c	
 lx_skip	lex_literal_or_comment_skip	function	lex.c	
@@ -59,7 +59,7 @@ vlex_digitsep	lex_file_digit_separators_remove	function,public	lex.c
 vlex_c89	lex_file_c89_convert	function,public	lex.c	
 vlex_cache_flush	lex_cache_flush	function,public	lex.c	
 vlex_get	lex_file_get	function,public	lex.c	
-io_thread	lex_prefetch_thread_run	function	lex.c	
+io_thread	lex_prefetch_thread_run	function,also:bench/vccd-sample.py	lex.c	
 start_io	lex_prefetch_threads_start	function	lex.c	
 vlex_prefetch	lex_file_prefetch	function,public	lex.c	
 cur_file	pp_file_context_current	function	builtin.c	
@@ -70,7 +70,7 @@ header_name	pp_header_name_read	function	builtin.c
 feature_arg	pp_feature_argument_read	function	builtin.c	
 has_query	pp_feature_query_answer	function	builtin.c	
 counter_ext	pp_counter_extension_warn	function	builtin.c	
-builtin	pp_builtin_macro_expand	function	builtin.c	
+builtin	pp_builtin_macro_expand	function,in:builtin.c,in:expand.c	builtin.c	
 vdir_flush	pp_directory_cache_flush	function,public	dircache.c	
 dalloc	pp_directory_cache_allocate	function	dircache.c	
 node_get	pp_directory_cache_node_get	function	dircache.c	
@@ -92,7 +92,7 @@ pragma_text	pp_pragma_run	function	directive.c
 pragma_macro_name	pp_pragma_macro_name_read	function	directive.c	
 line_directive	pp_line_directive_run	function	directive.c	
 imacros	pp_imacros_run	function	directive.c	
-directive	pp_directive_run	function	directive.c	
+directive	pp_directive_run	function,also:bench/vccd-sample.py	directive.c	
 emb_init	pp_embed_digits_init	function	embed.c	
 emb_list	pp_embed_tokens_read	function	embed.c	
 emb_int	pp_embed_integer_read	function	embed.c	
@@ -103,7 +103,7 @@ emb_map	pp_embed_file_map	function	embed.c
 emb_range	pp_embed_range_compute	function	embed.c	
 embed	pp_embed_run	function	embed.c	
 has_embed	pp_embed_has_query	function	embed.c	
-macro_note_	pp_macro_note_at	function	expand.c	
+macro_note_	pp_macro_note_at	function,also:bench/vcc-diagcov.py	expand.c	
 macro_note	pp_macro_note	function	expand.c	
 collect_	pp_macro_arguments_collect_inner	function	expand.c	
 collect	pp_macro_arguments_collect	function	expand.c	
@@ -123,7 +123,7 @@ append	pp_tokens_append_unpasted	function	expand.c
 subst_range	pp_macro_body_substitute_range	function	expand.c	
 va_opt	pp_va_opt_expand	function	expand.c	
 subst_simple	pp_macro_body_substitute_simple	function	expand.c	
-subst	pp_macro_body_substitute	function	expand.c	
+subst	pp_macro_body_substitute	function,also:bench/vccd-sample.py	expand.c	
 trivial	pp_macro_is_trivial	function	expand.c	
 single	pp_macro_single_token_expand	function	expand.c	
 expand_text	pp_macro_text_position_note	function	expand.c	
@@ -137,7 +137,7 @@ pfile_get	pp_skeleton_get	function	file.c
 file_line	pp_file_line_of_offset	function	file.c	
 htok_get	pp_header_cache_token_load	function	header-cache-internal.h	
 sig_intern	pp_header_cache_signature_intern	function	header-cache-key.c	
-sig_of	pp_header_cache_signatures_get	function	header-cache-key.c	
+sig_of	pp_header_cache_signatures_get	function,also:bench/vcc-cachekey.py	header-cache-key.c	
 hkey_get	pp_header_cache_key_get	function	header-cache-key.c	
 once_index	pp_once_file_find	function	header-cache-key.c	
 once_add	pp_once_file_add	function	header-cache-key.c	
@@ -146,17 +146,17 @@ hstrdup	pp_header_cache_string_share	function	header-cache-publish.c
 spell_blob	pp_header_cache_spelling_blob	function	header-cache-publish.c	
 publish_tok	pp_header_cache_tokens_collect	function	header-cache-publish.c	
 hc_account	pp_header_cache_bytes_account	function	header-cache-publish.c	
-publish	pp_header_cache_entry_publish	function	header-cache-publish.c	
+publish	pp_header_cache_entry_publish	function,also:bench/vccd-sample.py	header-cache-publish.c	
 hc_end	pp_header_cache_region_end	function	header-cache-publish.c	
 touch_write_kid	pp_header_cache_touch_write_child	function	header-cache-record.c	
 rslot	pp_header_cache_stamp_slot	function	header-cache-record.c	
-rec_read	pp_header_cache_read_record	function	header-cache-record.c	
+rec_read	pp_header_cache_read_record	function,also:bench/vccd-sample.py	header-cache-record.c	
 new_cprov	pp_header_cache_counter_provenance_new	function	header-cache-record.c	
 cp_chain	pp_header_cache_counter_provenance_chain	function	header-cache-record.c	
 rec_ctr_read	pp_header_cache_counter_read_record	function	header-cache-record.c	
 mdef	pp_macro_define_record	function	header-cache-record.c	
 tu_mem	pp_memory_is_translation_unit	function	header-cache-record.c	
-rec_tok	pp_header_cache_token_record	function	header-cache-record.c	
+rec_tok	pp_header_cache_token_record	function,also:bench/vccd-sample.py	header-cache-record.c	
 kex_has	pp_header_cache_child_exclusion_has	function	header-cache-record.c	
 lev_wrote	pp_header_cache_level_wrote	function	header-cache-record.c	
 kid_ex	pp_header_cache_child_exclusions_collect	function	header-cache-record.c	
@@ -184,12 +184,12 @@ hc_blob	pp_header_cache_blob_get	function	header-cache-store.c
 hc_vec	pp_header_cache_vector_store	function	header-cache-store.c	
 hc_top	pp_header_cache_region_is_allowed	function	header-cache-validate.c	
 hex_has	pp_header_cache_exclusion_set_has	function	header-cache-validate.c	
-dirs_differ	pp_header_cache_search_directories_differ	function	header-cache-validate.c	
+dirs_differ	pp_header_cache_search_directories_differ	function,also:bench/vcc-cachekey.py	header-cache-validate.c	
 own_reads_ok	pp_header_cache_own_reads_valid	function	header-cache-validate.c	
 kids_ok	pp_header_cache_children_valid	function	header-cache-validate.c	
 tree_ok	pp_header_cache_tree_valid	function	header-cache-validate.c	
 hc_valid	pp_header_cache_entry_is_valid	function	header-cache-validate.c	
-hc_looks_ok	pp_header_cache_lookups_match	function	include.c	
+hc_looks_ok	pp_header_cache_lookups_match	function,also:bench/vcc-cachekey.py	include.c	
 hc_env	pp_header_cache_environment_read	function	next-token.c	
 hc_mode	pp_header_cache_mode_set	function	next-token.c	
 pp_ntok	pp_token_count	function,public	header-skip.c	
@@ -214,7 +214,7 @@ eval_ptoks	pp_if_tokens_evaluate	function	ifexpr.c
 pstrdup	pp_string_copy	function	include.c	
 try_path_	pp_path_try_inner	function	include.c	
 try_path	pp_path_try	function	include.c	
-find_include_	pp_include_find_inner	function	include.c	
+find_include_	pp_include_find_inner	function,also:bench/vccd-sample.py	include.c	
 pp_include_flush	pp_include_cache_flush	function,public	include.c	
 inc_same	pp_include_answer_matches	function	include.c	
 inc_valid	pp_include_answer_is_valid	function	include.c	
@@ -222,7 +222,7 @@ inc_used	pp_include_search_prefix_record	function	include.c
 inc_mode	pp_include_lookup_mode	function	include.c	
 dir_sys	pp_include_directory_is_system	function	include.c	
 rec_lookup	pp_include_lookup_record	function	include.c	
-find_include	pp_include_find	function	include.c	
+find_include	pp_include_find	function,also:bench/vccd-sample.py	include.c	
 find_include_at	pp_include_find_at	function	include.c	
 add_fent	pp_file_entry_add	function	include.c	
 guard_known	pp_include_guard_is_known	function	include.c	
@@ -230,7 +230,7 @@ show_include	pp_include_show	function	include.c
 inc_sys	pp_include_system_kind	function	include.c	
 dep_only	pp_dependency_add	function	include.c	
 prefetch_includes	pp_include_prefetch	function	include.c	
-enter_file	pp_file_enter	function	include.c	
+enter_file	pp_file_enter	function,also:bench/vccd-sample.py	include.c	
 include	pp_include_run	function	include.c	
 mname_cmp	pp_macro_name_compare	function	macro-dump.c	
 dm_put	pp_macro_dump_append	function	macro-dump.c	
@@ -306,7 +306,7 @@ top_event	pp_top_event_record	function	token.c
 raw	pp_token_raw_next	function	token.c	
 raw_pop	pp_token_raw_pop	function	token.c	
 peek_lparen	pp_next_is_left_paren	function	token.c	
-next_exp_slow	pp_token_expanded_next_slow	function	token.c	
+next_exp_slow	pp_token_expanded_next_slow	function,also:bench/vccd-sample.py	token.c	
 dollar_split	pp_dollar_split	function	token.c	
 vm	pp_address_space_reserve	function	translation-unit.c	
 bi_init	pp_builtin_macros_init	function	translation-unit.c	
@@ -319,7 +319,7 @@ ar_end	lex_region_end	variable	lex.c	per-thread bump region: end of the mapped s
 cls	lex_byte_class_table	variable	lex.c	byte to class (LEX_CLASS_*), built once
 isid	lex_identifier_byte_table	variable	lex.c	byte is an identifier character
 fcls	lex_fast_class_table	variable	lex.c	byte to fast-path class (LEX_FAST_*)
-pidx	lex_punctuator_row_table	variable	lex.c	byte to row in lex_punctuator_table, 0: not a punctuator
+pidx	lex_punctuator_row_table	variable,in:lex.c	lex.c	byte to row in lex_punctuator_table, 0: not a punctuator
 ptab	lex_punctuator_table	variable	lex.c	per row and next byte: kind | length << 8 | LEX_PUNCTUATOR_* flags
 ptab_alt	lex_punctuator_alternative_table	variable	lex.c	digraph alternatives by kind
 ktab	lex_punctuator_kind_table	variable	lex.c	punctuator kind by its first two bytes (little endian)
@@ -341,11 +341,11 @@ scratch_size	lex_scratch_bytes	variable	lex.c	bytes in lex_scratch
 tables_once	lex_tables_once	variable	lex.c	
 vlex_get_hook	lex_file_get_hook	variable,public	lex.h	fuzzing and tests: replaces the file cache
 vlex_no_intern	lex_identifiers_not_interned	variable,public	lex.h	this thread: ids stay 0
-base	pp_directory_cache_base	variable	dircache.c	base of the cache's bump region (lazily mapped)
-used	pp_directory_cache_used	variable	dircache.c	bytes handed out from pp_directory_cache_base
+base	pp_directory_cache_base	variable,in:dircache.c	dircache.c	base of the cache's bump region (lazily mapped)
+used	pp_directory_cache_used	variable,in:dircache.c	dircache.c	bytes handed out from pp_directory_cache_base
 dtab	pp_directory_cache_table	variable	dircache.c	chained buckets of pp_directory_node
 vdir_probes	pp_directory_probe_count	variable,public	dircache.h	VPP_TIME counter
-bi	pp_builtin_macro_names	variable	translation-unit.c	builtin macro names with their PP_BUILTIN_* ids
+bi	pp_builtin_macro_names	variable,in:translation-unit.c	translation-unit.c	builtin macro names with their PP_BUILTIN_* ids
 bi_macro	pp_builtin_macros	variable	translation-unit.c	the process-wide builtin macro definitions, parallel to the names
 pppool	pp_translation_unit_pool	variable	translation-unit.c	region sets reused from one TU to the next
 ppr	pp_translation_unit_regions	variable	translation-unit.c	this thread's region set while a TU is open
@@ -369,8 +369,8 @@ puncts	pp_punctuator_table	variable	expand.c	spellings of punctuators for the ##
 inc_tab	pp_include_answer_table	variable	include.c	include lookups, insert only, stops at 3/4 full
 inc_n	pp_include_answer_count	variable	include.c	
 pf_on	pp_prefetch_enabled	variable	include.c	-1: not read yet; VPP_NOPREFETCH
-pp_stat_try	pp_include_lookup_count	variable	include.c	VPP_TIME: include lookups
-pp_stat_skip	pp_include_guard_skip_count	variable	include.c	VPP_TIME: lookups answered by a known guard
+pp_stat_try	pp_include_lookup_count	variable,public	include.c	VPP_TIME: include lookups
+pp_stat_skip	pp_include_guard_skip_count	variable,public	include.c	VPP_TIME: lookups answered by a known guard
 shared_base	pp_shared_region_base	variable	file.c	the process-wide bump region (16 GB reserved)
 shared_used	pp_shared_region_used	variable	file.c	bytes handed out
 out_spare	pp_output_spare	variable	text-output.c	this thread's last -E buffer, kept for the next TU
@@ -379,62 +379,34 @@ tk_spare	pp_recording_spare_tokens	variable	header-cache-record.c	this thread's 
 sb_spare	pp_recording_spare_spellings	variable	header-cache-record.c	its spelling buffer
 rec_spare	pp_recording_spare_buffers	variable	header-cache-record.c	the other recording arrays (Q-lexpp-07: kid and kex are not unmapped by pp_close)
 mdir	macro_directory	field	struct pp	pages of macro entries by identifier id (two-level); bit 0 of an entry: disabled while expanding
-o	options	field	struct pp	
-cx	contexts	field	struct pp	the context stack (token sources pp_next reads from)
-depth	context_depth	field	struct pp	number of contexts on the stack
-nfile	file_context_count	field	struct pp	contexts on the stack that are files; equal to context_depth when only files are left
-perm	permanent_region	field	struct pp	definitions and file names; lives until pp_close
-tmp	temporary_region	field	struct pp	expansion results; reset whenever only file contexts are left
 hold_tmp	temporary_held	field	struct pp	the consumer still holds earlier tokens: temporary_region is not reset (pp_hold_tmp)
-sv	scratch_tokens	field	struct pp	scratch token stack used while collecting and substituting
 svn	scratch_token_count	field	struct pp	
-fe	files	field	struct pp	the files entered, in order (their location bases)
-nfe	file_count	field	struct pp	
 next_base	next_location_base	field	struct pp	location base of the next file entered
 ntok_out	tokens_delivered	field	struct pp	tokens pp_token_next has returned
 skipped_tok	tokens_skipped	field	struct pp	tokens of regions pp_top_region_skip dropped
 drh	hit_regions	field	struct pp	VCC_DRCOV: header-cache hits by delivered position (pp_hit_regions)
-ndrh	hit_region_count	field	struct pp	
 ndrs	open_hit_count	field	struct pp	
 drs	open_hits	field	struct pp	VCC_DRCOV: hits whose replay is still open
 tev	top_events	field	struct pp	top-level region events (pp_top_events)
 ntev	top_event_count	field	struct pp	
-tev_full	top_events_full	field	struct pp	too many events: the list is dropped
 top_rec	top_region_recording	field	struct pp	a top-level region is being recorded: its end is reported as an event
 hc_last	header_cache_last_entry	field	struct pp	the entry applied last
-pend	owed_spacing	field	struct pp	TF_SOL / TF_SPACE owed to the next token (empty expansions leave it)
 rep_norec	token_unrecorded	field	struct pp	the token raw() just gave came from a replay whose positions are reserved, not copied
 preexp	argument_preexpansion	field	struct pp	inside argument pre-expansion
-errors	error_count	field	struct pp	
-counter	counter_value	field	struct pp	__COUNTER__
-once	once_files	field	struct pp	files marked #pragma once in this TU
-nonce	once_file_count	field	struct pp	
 oncecap	once_file_capacity	field	struct pp	
-pushed	pushed_macros	field	struct pp	#pragma push_macro stack
 npushed	pushed_macro_count	field	struct pp	
-dn	diagnostic_nodes	field	struct pp	#pragma diagnostic states as a persistent list; node: one flag's mapping (0: the command line's)
 dtr	diagnostic_transitions	field	struct pp	state changes by location
-ndn	diagnostic_node_count	field	struct pp	
-ndtr	diagnostic_transition_count	field	struct pp	
-dcur	diagnostic_current	field	struct pp	the current state node
-ndstk	diagnostic_stack_depth	field	struct pp	
 dstk	diagnostic_stack	field	struct pp	#pragma push/pop
 nden	diagnostic_enabling_count	field	struct pp	"warning"/"error" nodes: only they turn a warning on
 mdx	macro_definition_sites	field	struct pp	every #define's site by name, built when a macro note is needed (diag)
-nmdx	macro_definition_site_count	field	struct pp	
-cmdx	macro_definition_site_capacity	field	struct pp	
 mdx_nfe	macro_definition_site_files	field	struct pp	files already scanned for sites
 wc_o	warning_cache_options	field	struct pp	the options warning_cache was computed for
-wc	warning_cache	field	struct pp	-pedantic warnings on hot paths: on on the command line
-builtin	builtin_file	field	struct pp	the <built-in> file (predefines, -D/-U, -include)
 base_name	base_file_name	field	struct pp	__BASE_FILE__
 base_namelen	base_file_name_length	field	struct pp	
 fatal_jb	fatal_jump	field	struct pp	fatal errors end the TU here
-color	diagnostic_color	field	struct pp	
 diag_last	diagnostic_last_location	field	struct pp	last diagnostic's location + 1
 diag_lastnote	diagnostic_last_is_note	field	struct pp	
 diag_fe	diagnostic_last_file	field	struct pp	file of the last diagnostic + 1 (for "In file included from")
-dhead	diagnostic_head	field	struct pp	the TU's diagnostic records (in permanent_region)
 dtail	diagnostic_tail	field	struct pp	
 dtrack	diagnostic_track	field	struct pp	VCC_TRACK_DIAG: vcc's call site after each diagnostic
 dfinished	diagnostic_finished	field	struct pp	pp_diag_finish ran
@@ -442,269 +414,54 @@ dpend	diagnostic_pending_structured	field	struct pp	-fdiagnostics-format=json: t
 tpend	diagnostic_pending_text	field	struct pp	vcc's text style: the record not yet rendered (its notes may follow)
 dlast1	diagnostic_previous_location	field	struct pp	clang's LastLoc + 1 (0: none)
 dlastlv	diagnostic_previous_level	field	struct pp	clang's LastLevel
-lm	line_marks	field	struct pp	#line / GNU line markers
-nlm	line_mark_count	field	struct pp	
-warns	warning_count	field	struct pp	
 in_dir	in_directive	field	struct pp	evaluating a directive's tokens (#if, #include, #line)
-collecting	collecting_arguments	field	struct pp	inside collect: directives are inside macro arguments
-coll_loc	collecting_location	field	struct pp	the outermost macro collecting: its name token
 coll_name	collecting_name	field	struct pp	and its id
-out	output	field	struct pp	-E text
-nout	output_length	field	struct pp	
 capout	output_capacity	field	struct pp	
-col	output_column	field	struct pp	
-pk	previous_kind	field	struct pp	the last token printed, for clang's AvoidConcat
-pk_L	previous_is_wide_prefix	field	struct pp	it was the identifier L
-pk_pp	previous_after_period	field	struct pp	a '.' came before it
 pk_end	previous_end	field	struct pp	where its spelling ends in the source (NULL: dirty)
-sol_on	line_start_name_active	field	struct pp	a source macro name starts the line: expanded tokens' column is its column
-edir	directive_on_line	field	struct pp	a directive was printed on this line (clang's EmittedDirectiveOnThisLine)
-cmt_sol	comment_starts_line	field	struct pp	-C: an empty expansion began the line, so a comment next starts it
-cur_line	output_line	field	struct pp	clang's CurLine: the presumed line the output is on
-emb_sp	embed_space_pending	field	struct pp	-E after #embed: a space is owed
 emb_tail	embed_tail	field	struct pp	-E: tokens left that were suffix() / if_empty()
 out_text	output_text_mode	field	struct pp	0: pp_next, 1: -E, 2: -E -C
 sol_depth	line_start_context_depth	field	struct pp	context depth where line_start_name_active was set
 exp_loc	expansion_location	field	struct pp	clang's expansion location: where the outermost macro name is
 sol_loc	line_start_location	field	struct pp	the source macro name a line starts with
-lmark	markers_on	field	struct pp	-E without -P: GNU line markers
-lm_blk	marker_builtin_printed	field	struct pp	<built-in>'s block was printed
 lm_sys	marker_is_system	field	struct pp	the current file is a system header
-lm_n	marker_predefine_count	field	struct pp	predefined macros before the command line, plus 1
 lm_bline	marker_builtin_line	field	struct pp	<built-in>'s line
 lm_name	marker_file_name	field	struct pp	the current file's presumed name
 lm_nlen	marker_file_name_length	field	struct pp	
 dd_ev	define_events	field	struct pp	-dD: <built-in>'s #define/#undef until printed
-ndd	define_event_count	field	struct pp	
 capdd	define_event_capacity	field	struct pp	
 dd_done	define_events_printed	field	struct pp	
-hc	header_cache_on	field	struct pp	the header cache is used (-E or pp_next, not disabled)
 tokmode	output_mode	field	struct pp	0 unset, 1 text (pp_text), 2 tokens (pp_next)
-sig	options_signature	field	struct pp	base signature of the options (HNONE: no cache)
-psig	search_path_signatures	field	struct pp	ids of the search-path prefixes, [0, ndirs]
-rec	recording	field	struct pp	what open regions have read and written so far
-rst	recording_stamps	field	struct pp	per id: serial << 32 | index in recording.touches
-hm	child_verdicts	field	struct pp	child entry verdicts within one pp_header_cache_entry_serve
-hgen	child_verdict_generation	field	struct pp	
 hc_bytes	entry_bytes	field	struct pp	what the entry being published allocated
 bcache	blob_cache	field	struct pp	recent spelling blobs by hash
 kspell	punctuator_blobs	field	struct pp	punctuator spelling blobs by kind
 ckc	chunk_cache_by_hash	field	struct pp	recent chunks by hash (most repeats are a child's)
 vkc	chunk_cache_by_ids	field	struct pp	recent chunks by (first id, last id, length)
-on	on	field	struct hrec	n > 0
-n	level_count	field	struct hrec	open levels
-nbad	uncacheable_levels	field	struct hrec	levels [0, this) are not cacheable
 badline	uncacheable_line	field	struct hrec	source line of the HC_BAD that made them so (debugging)
-serial	serial	field	struct hrec	
 lev	levels	field	struct hrec	
-t	touches	field	struct hrec	a level's first touch of each id
-nt	touch_count	field	struct hrec	
-ord	once_marks	field	struct hrec	
-nord	once_mark_count	field	struct hrec	
-ctr	counter_positions	field	struct hrec	__COUNTER__ digits in the output
-nctr	counter_position_count	field	struct hrec	
-crd	counter_reads	field	struct hrec	
-ncrd	counter_read_count	field	struct hrec	
-seg	segments	field	struct hrec	child entries' text in the output
-nseg	segment_count	field	struct hrec	
-kid	children	field	struct hrec	child entries in order
-nkid	child_count	field	struct hrec	
-kex	child_exclusions	field	struct hrec	ids a level wrote before a child, per child
 nkex	child_exclusion_count	field	struct hrec	
-lk	lookups	field	struct hrec	the levels' own include lookups
-nlk	lookup_count	field	struct hrec	
-cp	counter_provenance	field	struct hrec	indexed by ptok.ctr
 ncp	counter_provenance_count	field	struct hrec	
-tk	tokens	field	struct hrec	tokens handed out (token mode)
-ntk	token_count	field	struct hrec	
-sb	spellings	field	struct hrec	spellings that live in per-TU memory
 nsb	spelling_bytes	field	struct hrec	
-next	next_variant	field	struct hent	the next entry of the same key
-rg	guard_reads	field	struct hent	inputs: include guards (value HDEF or 0), checked first
-ru	undefined_reads	field	struct hent	inputs: ids read while undefined
-rv	value_reads	field	struct hent	inputs: other reads with the value seen
-dl	writes	field	struct hent	effects: (id, new value) for every macro written
-ord	once_marks	field	struct hent	files marked #pragma once, with whether already marked at entry
 oadd	once_additions	field	struct hent	
-fe	files	field	struct hent	files entered (dependencies, locations)
-text	own_text	field	struct hent	
-tk	own_tokens	field	struct hent	token entries: own tokens (htok)
-xtk	escape_tokens	field	struct hent	full ptoks of own tokens flagged HF_X: spliced identifiers, long spellings, odd ids
-ctr	counter_runs	field	struct hent	__COUNTER__ digits in own text or tokens
-crd	counter_name_reads	field	struct hent	lookups of identifiers pasted from __COUNTER__ (must be undefined)
-seg	segments	field	struct hent	where child entries go in own text or tokens
-kid	children	field	struct hent	child entries in order; their reads are inputs except ids this entry wrote first
-nkid	child_count	field	struct hent	
-lk	lookups	field	struct hent	own include lookups that depended on the search directories
-nlk	lookup_count	field	struct hent	
-ntext	own_length	field	struct hent	own text bytes, or own tokens
-total	total_length	field	struct hent	with the children
-level	include_level	field	struct hent	__INCLUDE_LEVEL__ used: the depth it ran at (-1: not used)
-ndirs	search_directory_count	field	struct hent	leading search directories its lookups depended on
-psig	search_path_signature	field	struct hent	and their signature id
-br	brace_pairs	field	struct hent	outermost { } pairs of own tokens with no child inside, by open (pp_lazy_body_skip)
 nbr	brace_pair_count	field	struct hent	
-nord	once_mark_count	field	struct hent	
-noadd	once_addition_count	field	struct hent	
-nfe	file_count	field	struct hent	
-nctr	counter_run_count	field	struct hent	
-ncrd	counter_name_read_count	field	struct hent	
-nseg	segment_count	field	struct hent	
-span	token_span	field	struct hent	tokens in the entry's own range, for the front end's declaration cache
-counter_delta	counter_delta	field	struct hent	
-has_text	has_content	field	struct hent	
-first_sol	first_at_line_start	field	struct hent	
-col_end	end_column	field	struct hent	
-pend_out	owed_spacing_at_end	field	struct hent	
 edir_end	directive_on_line_at_end	field	struct hent	
-pk	previous_kind	field	struct hent	the printer's last token at the end
-pk_L	previous_is_wide_prefix	field	struct hent	
-pk_pp	previous_after_period	field	struct hent	
-type	type	field	struct ctx	PP_CONTEXT_* kind
-barrier	barrier	field	struct ctx	yields EOF when exhausted instead of popping
-first	first_flags	field	struct ctx	0x80 | SOL/SPACE for the first token (macro contexts)
-offloc	location_per_token	field	struct ctx	PP_CONTEXT_LEXED: location = location + token offset (a directive line)
 trail	trailing_space	field	struct ctx	PP_CONTEXT_TOKENS: ended in an empty argument after a space
-i	index	field	struct ctx	next token
-n	count	field	struct ctx	
-loc	location	field	struct ctx	
-mid	macro_to_enable	field	struct ctx	macro id to re-enable when popped
-vt	lexed_tokens	field	struct ctx	
-pt	tokens	field	struct ctx	
-ht	stored_tokens	field	struct ctx	PP_CONTEXT_SERVED: the entry's own tokens
-src	source	field	struct ctx	
-f	lex_file	field	struct ctx	
-fi	skeleton	field	struct ctx	
-di	next_directive	field	struct ctx	
-sdir	search_directory	field	struct ctx	-1 if none
-fe	file_index	field	struct ctx	index in struct pp files
-spath	spelled_path	field	struct ctx	the path as clang spells it (the lex file's path is the cache key)
 sdl	spelled_directory_length	field	struct ctx	
-he	entry	field	struct ctx	
-si	next_segment	field	struct ctx	
-ci	next_counter_run	field	struct ctx	
-cbase	counter_base	field	struct ctx	__COUNTER__ at the entry's start
-top	top_level	field	struct ctx	outermost: owes the entry's owed spacing when done (2: a top-level region)
-norec	unrecorded	field	struct ctx	served while recording: token positions are reserved, not copied
-base	location_base	field	struct fent	
-f	lex_file	field	struct fent	
-fi	skeleton	field	struct fent	
-name	name	field	struct fent	for __FILE__ (prefix map applied)
-namelen	name_length	field	struct fent	
-spath	spelled_path	field	struct fent	as spelled, for dependency files
-sys	is_system	field	struct fent	
-from	included_from	field	struct fent	the #include's location (0: main file, <built-in>, or a served entry)
 dstate	diagnostic_state	field	struct fent	the #pragma diagnostic state where it was entered
 cpos	comment_position	field	struct fent	-C: comments before here are printed or dropped (NULL: none yet)
-dir	directives	field	struct pfile	
-mac	macros	field	struct pfile	per directive: the #define's macro, built once
-inc	include_answers	field	struct pfile	per directive: #include's last answer
 ndir	directive_count	field	struct pfile	
-guard	guard_macro	field	struct pfile	controlling macro id, 0 if none
-bad	unbalanced	field	struct pfile	unbalanced conditionals
 badtok	unbalanced_token	field	struct pfile	the directive name's token
-lines	line_offsets	field	struct pfile	offsets of '\n', built on first __LINE__
-nlines	line_count	field	struct pfile	
-tok	hash_token	field	struct pdir	the '#'
-end	end_token	field	struct pdir	first token after the line
-next	next_in_group	field	struct pdir	conditionals: next #elif/#else/#endif of the group
-body	body	field	struct pmacro	
-plist	parameter_list	field	struct pmacro	function-like: "(" ... ")" tokens, for -dM
-src	source	field	struct pmacro	
-pidx	parameter_indices	field	struct pmacro	per body token: parameter index + 1, or 0
-nbody	body_count	field	struct pmacro	
-nparam	parameter_count	field	struct pmacro	
-nplist	parameter_list_count	field	struct pmacro	
-flags	flags	field	struct pmacro	PP_MACRO_FLAG_*
-v	value	field	struct hread	value at entry (enabled), or HDEF
-present	was_present	field	struct honce	
 rbase	record_base	field	struct hfent	
-val	value	field	struct cprov	
-off	offset	field	struct cprov	
-len	length	field	struct cprov	
-next	next_run	field	struct cprov	next run in the same token (a chain, increasing offset)
-rel	relative	field	struct hctr	value - counter at entry
-rel	relative	field	struct hcread	
-dlen	digit_length	field	struct hcread	
-sp	spelling	field	struct htok	identifier: its id; others: offset / 16 in the shared region + 1; HF_X: index of the escape
 cdelta	counter_delta	field	struct hseg	child's counter at entry - ours
-lbase	location_base_delta	field	struct hseg	tokens: child's location base - ours
-child	child	field	struct hseg	
-esz	element_size	field	struct hck	1: a blob of n bytes
-c	chunks	field	struct hvec	
-nc	chunk_count	field	struct hvec	
-from_sdir	from_search_directory	field	struct hlook	
 from_sdl	from_directory_length	field	struct hlook	
-from_bi	from_builtin	field	struct hlook	
-sdir	search_directory	field	struct hlook	
-nlen	name_length	field	struct hlook	
-sys	is_system	field	struct hlook	
-sig	signature	field	struct hkey	
-nfile	file_depth	field	struct hkey	
-sdir	search_directory	field	struct hkey	
-sys	is_system	field	struct hkey	
-n	variant_count	field	struct hkey	
-k	key	field	struct hlev	
-serial	serial	field	struct hlev	
-errors0	errors_at_start	field	struct hlev	
-warns0	warnings_at_start	field	struct hlev	
-text_started	text_started	field	struct hlev	
-t0	touches_at_start	field	struct hlev	
-o0	once_marks_at_start	field	struct hlev	
-c0	counter_positions_at_start	field	struct hlev	
-r0	counter_reads_at_start	field	struct hlev	
-s0	segments_at_start	field	struct hlev	
-fe0	files_at_start	field	struct hlev	
-base0	location_base_at_start	field	struct hlev	
-nonce0	once_files_at_start	field	struct hlev	
-nlm0	line_marks_at_start	field	struct hlev	
 npushed0	pushed_macros_at_start	field	struct hlev	
-counter0	counter_at_start	field	struct hlev	
 text0	text_at_start	field	struct hlev	
-k0	children_at_start	field	struct hlev	
-x0	child_exclusions_at_start	field	struct hlev	
-l0	lookups_at_start	field	struct hlev	
-prev	previous_stamp	field	struct htouch	the id's stamp before (the enclosing levels')
-pos	position	field	struct hcpos	
-counter0	counter_at_start	field	struct hsegr	
-base0	location_base_at_start	field	struct hsegr	
-ex0	exclusions_start	field	struct hkidr	
-nex	exclusion_count	field	struct hkidr	
-ex	exclusions	field	struct hkid	sorted ids written before this child
-nex	exclusion_count	field	struct hkid	
-lm.fe	file	field	struct lmark	in file index file, from byte offset offset on
-lm.off	offset	field	struct lmark	
-lm.pline	physical_line	field	struct lmark	physical line physical_line is line line
-lm.line	line	field	struct lmark	
-lm.name	name	field	struct lmark	presumed file name or NULL
-lm.namelen	name_length	field	struct lmark	
-hash	hash	field	struct incent	
-sig	signature	field	struct incent	options signature
-fsig	search_path_signature	field	struct incent	the whole search path's id
 klen	key_length	field	struct incent	
 usig	used_signature	field	struct incent	psig[used]
-sdir	search_directory	field	struct incent	
-tok	tokens	field	struct margs	
-st	starts	field	struct margs	per parameter: start in tokens
-ln	lengths	field	struct margs	per parameter: length in tokens
-pre	preexpanded	field	struct margs	pre-expanded arguments, lazily
 preln	preexpanded_lengths	field	struct margs	
 prest	preexpanded_state	field	struct margs	0: not computed, 1: done
-base	base	field	struct margs	tokens is scratch_tokens + base
 elided	variadic_elided	field	struct margs	the variadic argument was left out (clang's isVarargsElidedUse)
-t	lookahead	field	struct ev	
-prev	previous_location	field	struct ev	the last token consumed
-lb	primary_first	field	struct ev	the last primary expression: first token
-le	primary_last	field	struct ev	and last token
-bad	failed	field	struct ev	
-limit	limit	field	struct embprm	
-pre	prefix	field	struct embprm	
-suf	suffix	field	struct embprm	
 emp	if_empty	field	struct embprm	
-npre	prefix_count	field	struct embprm	
-nsuf	suffix_count	field	struct embprm	
 nemp	if_empty_count	field	struct embprm	
-plen	path_length	field	struct dnode	
 pdir	pp_directive_span	type	ppimpl.h	a directive's token range in a file's skeleton
 pmacro	pp_macro	type	ppimpl.h	
 pfile	pp_skeleton	type	ppimpl.h	per-file directive skeleton shared by all TUs
@@ -734,9 +491,9 @@ hlev	pp_header_cache_level	type	header-cache-internal.h
 hkidr	pp_header_cache_recorded_child	type	header-cache-internal.h	
 hstat_t	pp_header_cache_statistics_counters	type	header-cache-internal.h	
 rec_spare_t	pp_recording_spare_buffer_set	type	header-cache-internal.h	
-struct hrec	pp_recording	type	ppimpl.h	struct pp.rec
-struct lmark	pp_line_mark	type	ppimpl.h	
-struct pdnode	pp_diagnostic_node	type	ppimpl.h	
+struct hrec	struct pp_recording	type	ppimpl.h	struct pp.rec
+struct lmark	struct pp_line_mark	type	ppimpl.h	
+struct pdnode	struct pp_diagnostic_node	type	ppimpl.h	
 hexf	pp_header_cache_exclusion_set	type	header-cache-validate.c	
 kexf	pp_header_cache_exclusion_run	type	header-cache-record.c	
 margs	pp_macro_arguments	type	expand.c	
@@ -746,7 +503,7 @@ dnode	pp_directory_node	type	dircache.c
 centry	lex_cache_entry	type	lex.c	
 vtok	lex_token	type,public	lex.h	
 vlex_file	lex_file	type,public	lex.h	
-enum vtok_kind	lex_token_kind	type,public	lex.h	
+enum vtok_kind	enum lex_token_kind	type,public	lex.h	
 D_OTHER	PP_DIRECTIVE_OTHER	constant	ppimpl.h	
 D_NULL	PP_DIRECTIVE_NULL	constant	ppimpl.h	
 D_IF	PP_DIRECTIVE_IF	constant	ppimpl.h	
@@ -969,3 +726,240 @@ T_COMMA	LEX_TOKEN_COMMA	constant,public	lex.h
 T_HASH	LEX_TOKEN_HASH	constant,public	lex.h	
 T_HASHHASH	LEX_TOKEN_HASH_HASH	constant,public	lex.h	
 T_NKINDS	LEX_TOKEN_KIND_COUNT	constant,public	lex.h	
+
+ppimpl.h	pp-internal.h	file,public	src/frontend/pp/	the preprocessor's internal header (git mv by hand: not under include/)
+
+# ---- deferred: fields, need the field-use mode ----
+# Struct fields whose old name is short or shared with other structs, locals or
+# parameters: a whole-word script cannot tell the uses apart.  They wait for vcc's
+# field-use mode (the front end reports each use of one struct's field).  The script
+# skips rows whose kind has `deferred` when run with --scoped.
+o	options	field,deferred	struct pp	
+cx	contexts	field,deferred	struct pp	the context stack (token sources pp_next reads from)
+depth	context_depth	field,deferred	struct pp	number of contexts on the stack
+nfile	file_context_count	field,deferred	struct pp	contexts on the stack that are files; equal to context_depth when only files are left
+perm	permanent_region	field,deferred	struct pp	definitions and file names; lives until pp_close
+tmp	temporary_region	field,deferred	struct pp	expansion results; reset whenever only file contexts are left
+sv	scratch_tokens	field,deferred	struct pp	scratch token stack used while collecting and substituting
+fe	files	field,deferred	struct pp	the files entered, in order (their location bases)
+nfe	file_count	field,deferred	struct pp	
+ndrh	hit_region_count	field,deferred	struct pp	
+tev_full	top_events_full	field,deferred	struct pp	too many events: the list is dropped
+pend	owed_spacing	field,deferred	struct pp	TF_SOL / TF_SPACE owed to the next token (empty expansions leave it)
+errors	error_count	field,deferred	struct pp	
+counter	counter_value	field,deferred	struct pp	__COUNTER__
+once	once_files	field,deferred	struct pp	files marked #pragma once in this TU
+nonce	once_file_count	field,deferred	struct pp	
+pushed	pushed_macros	field,deferred	struct pp	#pragma push_macro stack
+dn	diagnostic_nodes	field,deferred	struct pp	#pragma diagnostic states as a persistent list; node: one flag's mapping (0: the command line's)
+ndn	diagnostic_node_count	field,deferred	struct pp	
+ndtr	diagnostic_transition_count	field,deferred	struct pp	
+dcur	diagnostic_current	field,deferred	struct pp	the current state node
+ndstk	diagnostic_stack_depth	field,deferred	struct pp	
+nmdx	macro_definition_site_count	field,deferred	struct pp	
+cmdx	macro_definition_site_capacity	field,deferred	struct pp	
+wc	warning_cache	field,deferred	struct pp	-pedantic warnings on hot paths: on on the command line
+builtin	builtin_file	field,deferred	struct pp	the <built-in> file (predefines, -D/-U, -include)
+color	diagnostic_color	field,deferred	struct pp	
+dhead	diagnostic_head	field,deferred	struct pp	the TU's diagnostic records (in permanent_region)
+lm	line_marks	field,deferred	struct pp	#line / GNU line markers
+nlm	line_mark_count	field,deferred	struct pp	
+warns	warning_count	field,deferred	struct pp	
+collecting	collecting_arguments	field,deferred	struct pp	inside collect: directives are inside macro arguments
+coll_loc	collecting_location	field,deferred	struct pp	the outermost macro collecting: its name token
+out	output	field,deferred	struct pp	-E text
+nout	output_length	field,deferred	struct pp	
+col	output_column	field,deferred	struct pp	
+pk	previous_kind	field,deferred	struct pp	the last token printed, for clang's AvoidConcat
+pk_L	previous_is_wide_prefix	field,deferred	struct pp	it was the identifier L
+pk_pp	previous_after_period	field,deferred	struct pp	a '.' came before it
+sol_on	line_start_name_active	field,deferred	struct pp	a source macro name starts the line: expanded tokens' column is its column
+edir	directive_on_line	field,deferred	struct pp	a directive was printed on this line (clang's EmittedDirectiveOnThisLine)
+cmt_sol	comment_starts_line	field,deferred	struct pp	-C: an empty expansion began the line, so a comment next starts it
+cur_line	output_line	field,deferred	struct pp	clang's CurLine: the presumed line the output is on
+emb_sp	embed_space_pending	field,deferred	struct pp	-E after #embed: a space is owed
+lmark	markers_on	field,deferred	struct pp	-E without -P: GNU line markers
+lm_blk	marker_builtin_printed	field,deferred	struct pp	<built-in>'s block was printed
+lm_n	marker_predefine_count	field,deferred	struct pp	predefined macros before the command line, plus 1
+ndd	define_event_count	field,deferred	struct pp	
+hc	header_cache_on	field,deferred	struct pp	the header cache is used (-E or pp_next, not disabled)
+sig	options_signature	field,deferred	struct pp	base signature of the options (HNONE: no cache)
+psig	search_path_signatures	field,deferred	struct pp	ids of the search-path prefixes, [0, ndirs]
+rec	recording	field,deferred	struct pp	what open regions have read and written so far
+rst	recording_stamps	field,deferred	struct pp	per id: serial << 32 | index in recording.touches
+hm	child_verdicts	field,deferred	struct pp	child entry verdicts within one pp_header_cache_entry_serve
+hgen	child_verdict_generation	field,deferred	struct pp	
+n	level_count	field,deferred	struct hrec	open levels
+nbad	uncacheable_levels	field,deferred	struct hrec	levels [0, this) are not cacheable
+t	touches	field,deferred	struct hrec	a level's first touch of each id
+nt	touch_count	field,deferred	struct hrec	
+ord	once_marks	field,deferred	struct hrec	
+nord	once_mark_count	field,deferred	struct hrec	
+ctr	counter_positions	field,deferred	struct hrec	__COUNTER__ digits in the output
+nctr	counter_position_count	field,deferred	struct hrec	
+crd	counter_reads	field,deferred	struct hrec	
+ncrd	counter_read_count	field,deferred	struct hrec	
+seg	segments	field,deferred	struct hrec	child entries' text in the output
+nseg	segment_count	field,deferred	struct hrec	
+kid	children	field,deferred	struct hrec	child entries in order
+nkid	child_count	field,deferred	struct hrec	
+kex	child_exclusions	field,deferred	struct hrec	ids a level wrote before a child, per child
+lk	lookups	field,deferred	struct hrec	the levels' own include lookups
+nlk	lookup_count	field,deferred	struct hrec	
+cp	counter_provenance	field,deferred	struct hrec	indexed by ptok.ctr
+tk	tokens	field,deferred	struct hrec	tokens handed out (token mode)
+ntk	token_count	field,deferred	struct hrec	
+sb	spellings	field,deferred	struct hrec	spellings that live in per-TU memory
+next	next_variant	field,deferred	struct hent	the next entry of the same key
+rg	guard_reads	field,deferred	struct hent	inputs: include guards (value HDEF or 0), checked first
+ru	undefined_reads	field,deferred	struct hent	inputs: ids read while undefined
+rv	value_reads	field,deferred	struct hent	inputs: other reads with the value seen
+dl	writes	field,deferred	struct hent	effects: (id, new value) for every macro written
+ord	once_marks	field,deferred	struct hent	files marked #pragma once, with whether already marked at entry
+fe	files	field,deferred	struct hent	files entered (dependencies, locations)
+text	own_text	field,deferred	struct hent	
+tk	own_tokens	field,deferred	struct hent	token entries: own tokens (htok)
+xtk	escape_tokens	field,deferred	struct hent	full ptoks of own tokens flagged HF_X: spliced identifiers, long spellings, odd ids
+ctr	counter_runs	field,deferred	struct hent	__COUNTER__ digits in own text or tokens
+crd	counter_name_reads	field,deferred	struct hent	lookups of identifiers pasted from __COUNTER__ (must be undefined)
+seg	segments	field,deferred	struct hent	where child entries go in own text or tokens
+kid	children	field,deferred	struct hent	child entries in order; their reads are inputs except ids this entry wrote first
+nkid	child_count	field,deferred	struct hent	
+lk	lookups	field,deferred	struct hent	own include lookups that depended on the search directories
+nlk	lookup_count	field,deferred	struct hent	
+ntext	own_length	field,deferred	struct hent	own text bytes, or own tokens
+total	total_length	field,deferred	struct hent	with the children
+level	include_level	field,deferred	struct hent	__INCLUDE_LEVEL__ used: the depth it ran at (-1: not used)
+ndirs	search_directory_count	field,deferred	struct hent	leading search directories its lookups depended on
+psig	search_path_signature	field,deferred	struct hent	and their signature id
+br	brace_pairs	field,deferred	struct hent	outermost { } pairs of own tokens with no child inside, by open (pp_lazy_body_skip)
+nord	once_mark_count	field,deferred	struct hent	
+noadd	once_addition_count	field,deferred	struct hent	
+nfe	file_count	field,deferred	struct hent	
+nctr	counter_run_count	field,deferred	struct hent	
+ncrd	counter_name_read_count	field,deferred	struct hent	
+nseg	segment_count	field,deferred	struct hent	
+span	token_span	field,deferred	struct hent	tokens in the entry's own range, for the front end's declaration cache
+has_text	has_content	field,deferred	struct hent	
+first_sol	first_at_line_start	field,deferred	struct hent	
+col_end	end_column	field,deferred	struct hent	
+pend_out	owed_spacing_at_end	field,deferred	struct hent	
+pk	previous_kind	field,deferred	struct hent	the printer's last token at the end
+pk_L	previous_is_wide_prefix	field,deferred	struct hent	
+pk_pp	previous_after_period	field,deferred	struct hent	
+first	first_flags	field,deferred	struct ctx	0x80 | SOL/SPACE for the first token (macro contexts)
+offloc	location_per_token	field,deferred	struct ctx	PP_CONTEXT_LEXED: location = location + token offset (a directive line)
+i	index	field,deferred	struct ctx	next token
+n	count	field,deferred	struct ctx	
+loc	location	field,deferred	struct ctx	
+mid	macro_to_enable	field,deferred	struct ctx	macro id to re-enable when popped
+vt	lexed_tokens	field,deferred	struct ctx	
+pt	tokens	field,deferred	struct ctx	
+ht	stored_tokens	field,deferred	struct ctx	PP_CONTEXT_SERVED: the entry's own tokens
+src	source	field,deferred	struct ctx	
+f	lex_file	field,deferred	struct ctx	
+fi	skeleton	field,deferred	struct ctx	
+di	next_directive	field,deferred	struct ctx	
+sdir	search_directory	field,deferred	struct ctx	-1 if none
+fe	file_index	field,deferred	struct ctx	index in struct pp files
+spath	spelled_path	field,deferred	struct ctx	the path as clang spells it (the lex file's path is the cache key)
+he	entry	field,deferred	struct ctx	
+si	next_segment	field,deferred	struct ctx	
+ci	next_counter_run	field,deferred	struct ctx	
+cbase	counter_base	field,deferred	struct ctx	__COUNTER__ at the entry's start
+top	top_level	field,deferred	struct ctx	outermost: owes the entry's owed spacing when done (2: a top-level region)
+norec	unrecorded	field,deferred	struct ctx	served while recording: token positions are reserved, not copied
+base	location_base	field,deferred	struct fent	
+f	lex_file	field,deferred	struct fent	
+fi	skeleton	field,deferred	struct fent	
+namelen	name_length	field,deferred	struct fent	
+spath	spelled_path	field,deferred	struct fent	as spelled, for dependency files
+sys	is_system	field,deferred	struct fent	
+from	included_from	field,deferred	struct fent	the #include's location (0: main file, <built-in>, or a served entry)
+dir	directives	field,deferred	struct pfile	
+mac	macros	field,deferred	struct pfile	per directive: the #define's macro, built once
+inc	include_answers	field,deferred	struct pfile	per directive: #include's last answer
+guard	guard_macro	field,deferred	struct pfile	controlling macro id, 0 if none
+bad	unbalanced	field,deferred	struct pfile	unbalanced conditionals
+lines	line_offsets	field,deferred	struct pfile	offsets of '\n', built on first __LINE__
+nlines	line_count	field,deferred	struct pfile	
+tok	hash_token	field,deferred	struct pdir	the '#'
+end	end_token	field,deferred	struct pdir	first token after the line
+next	next_in_group	field,deferred	struct pdir	conditionals: next #elif/#else/#endif of the group
+plist	parameter_list	field,deferred	struct pmacro	function-like: "(" ... ")" tokens, for -dM
+src	source	field,deferred	struct pmacro	
+pidx	parameter_indices	field,deferred	struct pmacro	per body token: parameter index + 1, or 0
+nbody	body_count	field,deferred	struct pmacro	
+nparam	parameter_count	field,deferred	struct pmacro	
+nplist	parameter_list_count	field,deferred	struct pmacro	
+v	value	field,deferred	struct hread	value at entry (enabled), or HDEF
+present	was_present	field,deferred	struct honce	
+val	value	field,deferred	struct cprov	
+off	offset	field,deferred	struct cprov	
+len	length	field,deferred	struct cprov	
+next	next_run	field,deferred	struct cprov	next run in the same token (a chain, increasing offset)
+rel	relative	field,deferred	struct hctr	value - counter at entry
+rel	relative	field,deferred	struct hcread	
+dlen	digit_length	field,deferred	struct hcread	
+sp	spelling	field,deferred	struct htok	identifier: its id; others: offset / 16 in the shared region + 1; HF_X: index of the escape
+lbase	location_base_delta	field,deferred	struct hseg	tokens: child's location base - ours
+esz	element_size	field,deferred	struct hck	1: a blob of n bytes
+c	chunks	field,deferred	struct hvec	
+nc	chunk_count	field,deferred	struct hvec	
+from_sdir	from_search_directory	field,deferred	struct hlook	
+from_bi	from_builtin	field,deferred	struct hlook	
+sdir	search_directory	field,deferred	struct hlook	
+nlen	name_length	field,deferred	struct hlook	
+sys	is_system	field,deferred	struct hlook	
+sig	signature	field,deferred	struct hkey	
+nfile	file_depth	field,deferred	struct hkey	
+sdir	search_directory	field,deferred	struct hkey	
+sys	is_system	field,deferred	struct hkey	
+n	variant_count	field,deferred	struct hkey	
+k	key	field,deferred	struct hlev	
+errors0	errors_at_start	field,deferred	struct hlev	
+warns0	warnings_at_start	field,deferred	struct hlev	
+t0	touches_at_start	field,deferred	struct hlev	
+o0	once_marks_at_start	field,deferred	struct hlev	
+c0	counter_positions_at_start	field,deferred	struct hlev	
+r0	counter_reads_at_start	field,deferred	struct hlev	
+s0	segments_at_start	field,deferred	struct hlev	
+fe0	files_at_start	field,deferred	struct hlev	
+base0	location_base_at_start	field,deferred	struct hlev	
+nonce0	once_files_at_start	field,deferred	struct hlev	
+nlm0	line_marks_at_start	field,deferred	struct hlev	
+counter0	counter_at_start	field,deferred	struct hlev	
+k0	children_at_start	field,deferred	struct hlev	
+x0	child_exclusions_at_start	field,deferred	struct hlev	
+l0	lookups_at_start	field,deferred	struct hlev	
+prev	previous_stamp	field,deferred	struct htouch	the id's stamp before (the enclosing levels')
+pos	position	field,deferred	struct hcpos	
+counter0	counter_at_start	field,deferred	struct hsegr	
+base0	location_base_at_start	field,deferred	struct hsegr	
+ex0	exclusions_start	field,deferred	struct hkidr	
+nex	exclusion_count	field,deferred	struct hkidr	
+ex	exclusions	field,deferred	struct hkid	sorted ids written before this child
+nex	exclusion_count	field,deferred	struct hkid	
+lm.fe	file	field,deferred	struct lmark	in file index file, from byte offset offset on
+lm.off	offset	field,deferred	struct lmark	
+lm.pline	physical_line	field,deferred	struct lmark	physical line physical_line is line line
+lm.line	line	field,deferred	struct lmark	
+lm.name	name	field,deferred	struct lmark	presumed file name or NULL
+lm.namelen	name_length	field,deferred	struct lmark	
+sig	signature	field,deferred	struct incent	options signature
+fsig	search_path_signature	field,deferred	struct incent	the whole search path's id
+sdir	search_directory	field,deferred	struct incent	
+tok	tokens	field,deferred	struct margs	
+st	starts	field,deferred	struct margs	per parameter: start in tokens
+ln	lengths	field,deferred	struct margs	per parameter: length in tokens
+pre	preexpanded	field,deferred	struct margs	pre-expanded arguments, lazily
+t	lookahead	field,deferred	struct ev	
+prev	previous_location	field,deferred	struct ev	the last token consumed
+lb	primary_first	field,deferred	struct ev	the last primary expression: first token
+le	primary_last	field,deferred	struct ev	and last token
+bad	failed	field,deferred	struct ev	
+pre	prefix	field,deferred	struct embprm	
+suf	suffix	field,deferred	struct embprm	
+npre	prefix_count	field,deferred	struct embprm	
+nsuf	suffix_count	field,deferred	struct embprm	
+plen	path_length	field,deferred	struct dnode	
