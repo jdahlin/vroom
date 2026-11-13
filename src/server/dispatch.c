@@ -1,4 +1,16 @@
-/* The dispatch order of the server: which kind of request goes where. */
+/*
+ * dispatch.c: which kind of request goes where.  handle() is the single entry every request passes,
+ * both from a connection (worker.c) and from a recipe's tool call (recipe.c).
+ *
+ * The order of the tests in handle1 is the specification: the tool name first (sh, var/ar, nm,
+ * objcopy, vld/ld), then vcc's own queries (--version, -dumpmachine, -print-file-name, --explain,
+ * --fix, --vccd-diagnostics), toolchain probes answered from caps.c, -E, host programs, and last the compiles, which vcc takes itself and, when a
+ * backend is configured, falls back to it for a TU vcc fails on.  Each branch names its kind in
+ * *kind (the log and the counters use it) and returns the exit status to send back; a branch that
+ * needs the client's umask relies on handle() setting ppd_umask from VCC_UMASK first.  Without
+ * --backend-sock nothing is forwarded: a request vcc cannot do fails, with vcc's diagnostics.  A
+ * compile that succeeded gets the fixdep step (fixdep_after) in handle().
+ */
 #include "vccd-internal.h"
 
 static int handle1(const struct req *r, const char **kind);
