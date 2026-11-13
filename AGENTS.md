@@ -334,7 +334,8 @@ Locally, as CI: `env/linux/run.sh ci/premerge.sh arm64`.  main is not
 protected (private repo, free plan), so the gate is the workflow: push to
 main through `ci/premerge-push [--watch]` (pushes to `premerge`; job `gate`
 fast-forwards main when everything is green).  A new harness belongs in
-`ci/premerge.sh` when it is fast and needs only the checkout.
+`ci/premerge.sh` when it is fast and needs only the checkout.  The asan job also
+builds the fuzz targets and replays `test/fuzz/regress` (`make -C src fuzz-regress`).
 
 ## Sanitizers
 ```
