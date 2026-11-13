@@ -19,13 +19,13 @@ katalogomflyttningen (PLAN-fas2.md, "Status katalogstruktur").
 
 ## Utgångsläge (2026-11-09)
 
-- Emittern genererar direkt från AST:t utan IR. Den generiska delen `emit/` är
-  2 462 rader (kö, trådar, data, förpass, typer), arm64-delen `arch/a64/emit/` är
+- Emittern genererar direkt från AST:t utan IR. Den generiska delen `codegen/` är
+  2 462 rader (kö, trådar, data, förpass, typer), arm64-delen `arch/a64/codegen/` är
   10 292 rader. arm64-delen innehåller också sådant som inte är arm64-specifikt:
   konstantvikning under genereringen, nåbarhetsflaggan, inlining av
   `__always_inline`, `__builtin_constant_p`-regler och `need_fold`-omgenereringen.
-- Typstorlekarna är en statisk LP64-tabell (`cc/type.c:6`), `__builtin_va_list` är
-  AAPCS64-structen eller Apples `char *` (`cc/tu.c:94`).
+- Typstorlekarna är en statisk LP64-tabell (`frontend/c/type.c:6`), `__builtin_va_list` är
+  AAPCS64-structen eller Apples `char *` (`frontend/c/tu.c:94`).
 - Predefines finns för två mål (`ppdata-predef.inc`: aarch64-linux, Darwin).
 - Objektskrivarna är ELF (`platform/linux/elf.c`) och Mach-O
   (`platform/darwin/macho.c`) ovanpå den gemensamma objektmodellen `obj/obj.h`
@@ -53,12 +53,12 @@ hela emittern, så det kommer sist (W6).
 
 | Del | Fil(er) | Innehåll |
 |---|---|---|
-| Målval | `driver/ppdriver.c`, `cc/`, `emit/` | Ett `target`-värde (cpu, os, pekarbredd) i stället för `darwin`-flaggan; `--target=wasm64-*`/`wasm32-*` |
-| Predefines, `__has_*` | `pp/ppdata-predef.inc` via `gen-ppdata.sh` | En tabell till per mål, tagen från clang en gång |
-| Layout | `cc/type.c`, `cc/layout.c` | `char` signed, `va_list` som `char *`; senare tabell per mål |
-| Generisk kodgenerering | `emit/` | Det som lyfts ut ur `arch/a64/emit/`: vikning, nåbarhet, inlining, `__builtin_constant_p` |
-| Kodgenerator | `arch/wasm/emit/` | AST → wasm-instruktioner: stackmaskin, locals, strukturerad kontrollflöde, skuggstack |
-| Textutdata | `arch/wasm/emit/print.c` | `-S` i LLVM:s syntax (`.functype`, `.local`, `local.get`, `block`/`loop`/`end_block`) |
+| Målval | `driver/ppdriver.c`, `frontend/c/`, `codegen/` | Ett `target`-värde (cpu, os, pekarbredd) i stället för `darwin`-flaggan; `--target=wasm64-*`/`wasm32-*` |
+| Predefines, `__has_*` | `frontend/pp/ppdata-predef.inc` via `gen-ppdata.sh` | En tabell till per mål, tagen från clang en gång |
+| Layout | `frontend/c/type.c`, `frontend/c/layout.c` | `char` signed, `va_list` som `char *`; senare tabell per mål |
+| Generisk kodgenerering | `codegen/` | Det som lyfts ut ur `arch/a64/codegen/`: vikning, nåbarhet, inlining, `__builtin_constant_p` |
+| Kodgenerator | `arch/wasm/codegen/` | AST → wasm-instruktioner: stackmaskin, locals, strukturerad kontrollflöde, skuggstack |
+| Textutdata | `arch/wasm/codegen/print.c` | `-S` i LLVM:s syntax (`.functype`, `.local`, `local.get`, `block`/`loop`/`end_block`) |
 | Kodare | `arch/wasm/as/enc.c` | Opkoder, LEB128 (5/10 byte med utfyllnad där en relokering ska in) |
 | Assembler | `arch/wasm/as/parse.c` | wasm-`.s` som `vas` läser: `-S` → `-c` går runt, och `.s`-tester mot llvm-mc |
 | Fixups | `arch/wasm/obj/fixup.c`, `reloc.h` | `R_WASM_FUNCTION_INDEX_LEB`, `R_WASM_MEMORY_ADDR_LEB64`/`SLEB64`/`I64`, `R_WASM_TABLE_INDEX_*`, `R_WASM_GLOBAL_INDEX_LEB`, `R_WASM_TYPE_INDEX_LEB` |
@@ -101,8 +101,8 @@ satser blir wasm:s strukturerade kontrollflöde rakt av:
 | # | Leverans | Kriterium |
 |---|----------|-----------|
 | W0 | **Målval och front end.** `target` i stället för `darwin`; `--target=wasm64-unknown-emscripten`; predefines från clang; `char` signed och `va_list` som `void *` för wasm | `vpp -dM -E` = `clang -dM -E` för målet; `vcc-sema.py layout` med wasm64 som mål (layouter, konstanter, typer kontrollerade av clang); arm64-utdata byte-identiska |
-| W1 | **Arch-krokar i `emit/`.** `do_item`, huvudet och svansen i `tu.c` och data-direktiven i `data.c` väljer per mål; wasm-generatorn viker själv med `cc_eval` (omplanerat: vikning och inlining lyfts inte ut ur `arch/a64/emit/` förrän wasm behöver dem) | arm64-utdata byte-identiska (`vcc-same.py`), `vbench.py check` |
-| W2 | **Första wasm-utdata.** `arch/wasm/emit/` för heltalsaritmetik, locals, parametrar, `return`, direkta anrop, `if`/loopar/`break`/`continue`; `-S`. Explorern får målet "wasm64" | Utdata assembleras av `clang --target=wasm64-unknown-emscripten -c`, länkas av emcc och körs i node med samma resultat som clangs; nytt harness `bench/vcc-wasm.py` |
+| W1 | **Arch-krokar i `codegen/`.** `do_item`, huvudet och svansen i `tu.c` och data-direktiven i `data.c` väljer per mål; wasm-generatorn viker själv med `cc_eval` (omplanerat: vikning och inlining lyfts inte ut ur `arch/a64/codegen/` förrän wasm behöver dem) | arm64-utdata byte-identiska (`vcc-same.py`), `vbench.py check` |
+| W2 | **Första wasm-utdata.** `arch/wasm/codegen/` för heltalsaritmetik, locals, parametrar, `return`, direkta anrop, `if`/loopar/`break`/`continue`; `-S`. Explorern får målet "wasm64" | Utdata assembleras av `clang --target=wasm64-unknown-emscripten -c`, länkas av emcc och körs i node med samma resultat som clangs; nytt harness `bench/vcc-wasm.py` |
 | W3 | **Minne och data.** Globala variabler, strängar, initierare, pekararitmetik, skuggstack för adresstagna lokala variabler, arrayer och structs, `memcpy`/`memset` för aggregat | `vcc-ctests.py --suite vcc` med `--target wasm64` i node |
 | W4 | **Hela C.** Structs som värden (ABI ovan), varargs, `switch` med `br_table`, `goto` med stackifier, flyttal, bit-fält, VLA/`alloca`, `__int128` och `long double` via compiler-rt, atomics, `setjmp`/`longjmp` | gcc-torture och tcc-tests2 i node via emcc: samma godkända som clang; `bench/vcc-abi.py --target wasm64` (clang/vcc × anropare/anropad) |
 | W5 | **Objektfiler.** `arch/wasm/as/enc.c`, `arch/wasm/obj/fixup.c`, `platform/wasm/wasm.c`; `-c` direkt utan text; `vas` läser wasm-`.s` | Länkas av `wasm-ld` och körs: allt från W4 med `-c`; kodare mot `llvm-mc` (`bench/vas-enc.py`); `wasm-objdump -x` jämförs mot clangs objekt för samma `.s` |
@@ -359,13 +359,13 @@ felet till en varning som clang.
 
 ### W1, W2 (2026-11-09): klara
 - W1 omplanerat: i stället för att lyfta ut vikning och inlining ur
-  `arch/a64/emit/` (riskabelt, se Risker) väljer `emit/` generator per mål:
+  `arch/a64/codegen/` (riskabelt, se Risker) väljer `codegen/` generator per mål:
   `do_item` (funktioner till `wasm_emit_function`), huvudet (`wasm_header`:
   `.globaltype __stack_pointer`, `.tabletype`, en `.functype` per refererad
   funktion, sorterad och unik, ur varje tråds lista), svansen (ingen
   `.note.GNU-stack`) och `data.c` (en sektion per objekt, `.long`/`.quad`,
   strängar i `.rodata..L.str.N`). `ecx.w` håller wasm-tillståndet (en pool).
-- W2: `arch/wasm/emit/` (`wimpl.h`, `wasm.c` funktioner/ABI/huvud, `wexpr.c`
+- W2: `arch/wasm/codegen/` (`wimpl.h`, `wasm.c` funktioner/ABI/huvud, `wexpr.c`
   uttryck/lvärden, `wcall.c` anrop/varargs/inbyggda, `wstmt.c` satser/initierare).
   Ett värde per C-uttryck på operandstacken; skalära lokala variabler utan tagen
   adress (prepassets `lnoreg`) i wasm-locals, resten i en ram på skuggstacken
@@ -436,9 +436,9 @@ Oväntade `fail` och `error` skriver alltid svit/testnamn även utan `-v`.
 
 ### OPT5: typade ramcellsoperationer (pågående)
 
-Wasm delar nu den exakta cell-/överlappsanalysen (`emit/rec/slots.c`) och
-värdetillgängligheten (`emit/rec/slot-values.c`) med arm64. Den separata
-adaptern `arch/wasm/emit/slots.c` registrerar typade load/store-, överlapps-
+Wasm delar nu den exakta cell-/överlappsanalysen (`codegen/rec/slots.c`) och
+värdetillgängligheten (`codegen/rec/slot-values.c`) med arm64. Den separata
+adaptern `arch/wasm/codegen/slots.c` registrerar typade load/store-, överlapps-
 och kontrollhändelser när kroppen produceras. Optimeraren väljer handlingar
 före renderingen; ingen assemblertext läses eller mönstermatchas. Stabila
 allokerings-ID:n följer direkta ramobjekt och deras structfält. Endast utvalda
@@ -525,7 +525,7 @@ wasm64-sviten är grön. Ny CI och bredare prestandagrind återstår.
 
 ### OPT6: kortslutna konstanta kontrollbeslut (delsteg)
 
-Den målgemensamma hjälparen `emit/opt/control.c` används nu också i wasm:
+Den målgemensamma hjälparen `codegen/opt/control.c` används nu också i wasm:
 rena kombinationer av `__builtin_constant_p`, `!`, `&&`/`||` och literal
 `__builtin_strcmp` väljer bara den levande grenen vid O1–O3. Befintlig
 constant_p-policy och O0-utdata bevaras; okända eller effektfulla uttryck
@@ -540,7 +540,7 @@ Se OPT6-status i `PLAN-fas2.md` för bevis, kostnader och avgränsning.
 ### OPT5 fortsättning: privata stores genom strukturerade joins
 
 På `1d8e29a` (flödesförälder `7691f6c`) använder den separata wasm-adaptern
-`arch/wasm/emit/flow.c` den gemensamma `emit/flow`-grafen och budgeterade
+`arch/wasm/codegen/flow.c` den gemensamma `codegen/flow`-grafen och budgeterade
 masklösaren. Typade kontrollhändelser fångas från funktionsinträdet under
 ordinarie emission; unika öppningstoken skiljer branchmål även när lexikalt
 djup återanvänds. Ingen ny AST-vandring, SSA eller assemblertextparsning.

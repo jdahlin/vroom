@@ -12,15 +12,15 @@ W=../contrib/wasm
 OUT=${OUT:-../build/wasm}
 mkdir -p $OUT/obj
 CFLAGS="-Iport/wasm/compat -std=c11 -O2 -sMEMORY64=1 -msimd128 -mfpu=neon -D_GNU_SOURCE -DVCC_INCDIR=\"/vcc/include\" -Wno-unused-parameter ${WFLAGS}"
-SRC="driver/vpp.c lex/lex.c common/intern.c arch/a64/as/enc.c platform/darwin/macho.c arch/wasm/as/as.c platform/wasm/wasm.c
- pp/dircache.c driver/ppdriver.c driver/ccsnap.c common/ldhash.c"
+SRC="bin/vpp/vpp.c frontend/lex/lex.c common/intern.c arch/a64/as/enc.c platform/darwin/macho.c arch/wasm/as/as.c platform/wasm/wasm.c
+ frontend/pp/dircache.c driver/ppdriver.c driver/ccsnap.c common/ldhash.c"
 for m in as obj cc pp emit; do
 	case $m in
 	as) f="as/as.c arch/a64/as/parse.c";;
 	obj) f="obj/obj.c arch/a64/obj/fixup.c platform/linux/elf.c";;
-	cc) f=$(ls cc/*.c);;
-	pp) f=$(ls pp/*.c | grep -v dircache);;
-	emit) f=$(ls emit/*.c emit/opt/*.c emit/rec/*.c emit/flow/*.c arch/a64/emit/*.c arch/wasm/emit/*.c);;
+	cc) f=$(ls frontend/c/*.c);;
+	pp) f="$(ls frontend/pp/*.c | grep -v dircache) $(ls frontend/diag/*.c)";;
+	emit) f=$(ls codegen/*.c codegen/opt/*.c codegen/rec/*.c codegen/flow/*.c arch/a64/codegen/*.c arch/wasm/codegen/*.c);;
 	esac
 	{ echo '#define VCC_UNITY 1'; for x in $f; do echo "#include \"$PWD/$x\""; done; } > $OUT/obj/u-$m.c
 	SRC="$SRC $OUT/obj/u-$m.c"

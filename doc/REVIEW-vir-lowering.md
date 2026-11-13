@@ -5,13 +5,13 @@ Scope: everything VIR that PR 116 brings to main except the register allocator
 read-throughs, each with differential tests against clang and the direct
 emitter:
 
-1. the arm64 record layer (`arch/a64/emit/`: `ins.h`, `opt.c`, `func.c`,
+1. the arm64 record layer (`arch/a64/codegen/`: `ins.h`, `opt.c`, `func.c`,
    `print.c`, `obj.c`), the diff of the lowering branch;
-2. the builder changes and the lowering (`emit/vir/build.c` `vw_ifconv`,
-   `emit/vir/a64.c`) against `SPEC-vir.md`;
+2. the builder changes and the lowering (`codegen/vir/build.c` `vw_ifconv`,
+   `codegen/vir/a64.c`) against `SPEC-vir.md`;
 3. the VIR format: `SPEC-vir.md` against `vir/` (table, printer, parser,
    verifier, canon, dominators);
-4. the builder as a whole (`emit/vir/build.c`).
+4. the builder as a whole (`codegen/vir/build.c`).
 
 Status words: **fixed** (commit named, with a test that fails without it),
 **open** (reproduced, not fixed), **latent** (traced in the code, no failing

@@ -112,8 +112,8 @@ def socket_mode_ignores_umask(v=None):
 @test()
 def default_socket_not_in_tmp():
     """the default socket path (shim and server) is in a per-user directory, not /tmp"""
-    for f in ('shim.c', 'vccd.c'):
-        src = open(f'{vd.R}/src/vccd/{f}').read()
+    for f in ('bin/vcc/shim.c', 'server/vccd.c'):
+        src = open(f'{vd.R}/src/{f}').read()
         check('"/tmp/vccd.sock"' not in src, f'{f}: default socket /tmp/vccd.sock')
 
 @test()

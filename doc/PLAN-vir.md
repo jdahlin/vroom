@@ -19,12 +19,12 @@ har ett eget underlag, `RESEARCH-regalloc.md`.
 
 ## Utgångsläge (2026-11-11, `main` 8bdc940-serien + x86)
 
-- Tre kodgeneratorer väljs i `emit/tu.c`: arm64 (`arch/a64/emit/`, egen
-  AST-generator), x86-64 (den delade vandraren `emit/walk/` + sänkningen
-  `arch/x64/emit/` genom `LO()`), wasm (`arch/wasm/emit/`, egen).
+- Tre kodgeneratorer väljs i `codegen/tu.c`: arm64 (`arch/a64/codegen/`, egen
+  AST-generator), x86-64 (den delade vandraren `codegen/walk/` + sänkningen
+  `arch/x64/codegen/` genom `LO()`), wasm (`arch/wasm/codegen/`, egen).
 - `PLAN-fas2.md`, **Gemensam optimerare utan SSA** (OPT0–OPT8), äger de
-  optimeringar som går utan IR: algebraregler i `emit/opt/`, postpass i
-  `emit/rec/`, blockgraf och liveness i `emit/flow/`.  TODO.md säger
+  optimeringar som går utan IR: algebraregler i `codegen/opt/`, postpass i
+  `codegen/rec/`, blockgraf och liveness i `codegen/flow/`.  TODO.md säger
   uttryckligen "No new IR/SSA".
 - `PLAN-x86.md`, "Vad som inte går utan SSA", pekar ut vägen om mer behövs:
   ett valfritt SSA-pass med virtuella register, bara för `-O2`.  **VIR är det
@@ -42,7 +42,7 @@ har ett eget underlag, `RESEARCH-regalloc.md`.
 ### Var VIR sitter
 
 ```
-cc/:s AST ──▶ vandraren (emit/walk/) ──LO()──▶ x64_* / a64_*  ──▶ poster (emit/rec/) ──▶ kod
+frontend/c/:s AST ──▶ vandraren (codegen/walk/) ──LO()──▶ x64_* / a64_*  ──▶ poster (codegen/rec/) ──▶ kod
                      │                              ▲
                      └──LO()──▶ vir_*  ──▶ VIR ──▶ pass ──▶ registerallokering ─┘
 ```
@@ -50,7 +50,7 @@ cc/:s AST ──▶ vandraren (emit/walk/) ──LO()──▶ x64_* / a64_*  �
 - **VIR är ett virtuellt mål för `LO()`.**  Vandraren kompileras en gång till
   med `LO(name)` → `vir_##name` (mallen PLAN-x86 redan förbereder för en andra
   CPU).  Alla beslut på C-nivå (vikning, nåbarhet, inlining,
-  `__builtin_constant_p`, switch-strategi, cleanups, `emit/opt/`-reglerna) görs
+  `__builtin_constant_p`, switch-strategi, cleanups, `codegen/opt/`-reglerna) görs
   då av samma kod som i dag.  Det blir ingen fjärde kopia av C-reglerna.
 - `vir_treg` lämnar ut ett nytt variabelnummer och tar aldrig slut;
   `vir_tfree` gör ingenting.  Varje `LO`-operation läser sina variabler som
@@ -63,7 +63,7 @@ cc/:s AST ──▶ vandraren (emit/walk/) ──LO()──▶ x64_* / a64_*  �
   måloberoende, lika lite som LLVM IR efter clang.
 - **Sänkning:** efter passen och registerallokeringen anropas den riktiga
   CPU:ns `LO`-operationer med de tilldelade registren.  Därefter gäller dagens
-  väg oförändrad: `emit/rec/`-passen, `twoaddr.c`, ram och prolog, skrivare och
+  väg oförändrad: `codegen/rec/`-passen, `twoaddr.c`, ram och prolog, skrivare och
   kodare.
 - **Reträtt per funktion:** kan VIR inte bygga en funktion genereras den med
   den vanliga vägen (samma vandrare, riktiga `LO`).  I 1.0 gäller det:
@@ -81,7 +81,7 @@ cc/:s AST ──▶ vandraren (emit/walk/) ──LO()──▶ x64_* / a64_*  �
   `slotaddr`, `labeladdr`), unika per funktion och utan plats i något block.
 - Block är sammanhängande intervall i omvänd postordning, med
   blockparametrar (inga phi-noder), loopdjup och flaggor.  Grafen byggs med
-  `emit/flow/graph.c`.
+  `codegen/flow/graph.c`.
 - Inga användarlistor.  Ett pass ändrar på plats (`nop`, aliastabell) eller
   skriver en ny array i ett svep framåt.
 - Sidotabeller per värde: källposition (`LO(dbgrow)`), en arbetscell för
@@ -157,11 +157,11 @@ De följer `LO()`-gränssnittet, så att byggaren är en tunn översättning:
    heltals- och flyttalsklass, parallella flyttar per kant, fasta register för
    `div`, skift och argument, tips i stället för sammanslagningsfas).  Inget
    LICM i 1.0, med ett undantag (beslut 2026-11-12): loopkonstanter i raka
-   innerloopar utan anrop lyfts ut (`vv_pin`, `emit/vir/vec.inc`).
+   innerloopar utan anrop lyfts ut (`vv_pin`, `codegen/vir/vec.inc`).
 5. **Sänk** genom den riktiga CPU:ns `LO`.
 
 Passlistan är fast: vanliga funktionsanrop, ingen passhanterare, inga
-fixpunkter utan budget (samma regel som `emit/flow/`).
+fixpunkter utan budget (samma regel som `codegen/flow/`).
 
 ### Textform, kontroll och tolk
 
@@ -178,7 +178,7 @@ fixpunkter utan budget (samma regel som `emit/flow/`).
 - `src/vir/`: `vir.h`, `virimpl.h`, `print.c`, `parse.c`, `verify.c`,
   `interp.c`, `simplify.c`, `gvn.c`, `mem.c`, `regalloc.c`.  Egen modul
   `vir_SRC`.
-- `src/emit/vir/`: `build.c` (`vir_*`-implementationen av `LO`) och
+- `src/codegen/vir/`: `build.c` (`vir_*`-implementationen av `LO`) och
   `lower.c` (VIR → riktiga `LO`), i `emit`-unity-TU:n.
 - Namn: `vir_*`, `VO_*`, `VT_*` (`V_CONST`/`V_REG` är upptagna).
 
@@ -1324,7 +1324,7 @@ projektbyggena.
 ### V2/V4 x86-64 (2026-11-12): första allokerade bladfunktioner och SSE2
 
 `VCC_VIR=bl` på x86-64 går nu genom samma byggare och loopvektoriserare som
-arm64; funktionen märks `x86_64-linux`. `arch/x64/emit/vir.c` sänker skalära
+arm64; funktionen märks `x86_64-linux`. `arch/x64/codegen/vir.c` sänker skalära
 bladfunktioner med SysV:s heltals-/FP-register och stackparametrar, fasta
 `cl`, callee-sparade register, spill och sekvenserade kantflyttar. Ram- och
 spilltabeller återanvänds per `ecx`. `VCC_VIR_CHECK=1` kontrollerar den riktiga
@@ -1383,13 +1383,13 @@ vektorvärden, och en looptransformation).  Gjort, i den ordningen:
   operationerna tar dem genom `OK_T`; `vsplat vseries vicmp vfcmp vbitsel vs2f
   vrev vreduce`.  Mask = `i32x4` med 0/-1.  Vektorer i flyttalsklassen,
   spillplats 16 byte (`4 << klass`).
-- **arm64-sänkning** (`emit/vir/a64.c`, `vl_vec`): NEON som kodade ord, mot
+- **arm64-sänkning** (`codegen/vir/a64.c`, `vl_vec`): NEON som kodade ord, mot
   clangs assembler; registerflytt och byte är `mov`/`eor v.16b`.  **En vektor
   i en spillplats sänks inte** (funktionen tar då den vanliga vägen): saknar
   en post för `ldr/str q` mot ramen.
 - **`nsw`** på tecknad `+ - *` från vandraren; `-fwrapv`/`-fno-strict-overflow`
   (`cc_opts.wrapv`) stänger av det.  Bara vektoriseraren läser flaggan.
-- **Vektoriseraren** (`emit/vir/vec.inc`, i pre-IR:en efter if-konvertering):
+- **Vektoriseraren** (`codegen/vir/vec.inc`, i pre-IR:en efter if-konvertering):
   innersta loopar med test i huvudet och rak kropp; induktioner och
   `i32`-summor; laddningar/lagringar `symbol ± 4·t`; beroenderegeln i
   RESEARCH 6.3; skalärloopen blir kvar som rest.  Av under
@@ -1425,7 +1425,7 @@ ASan/UBSan rent på TSVC och testet; `vir-test.py` 124/124.
   teckenlös gräns, `size_t`.
 - **Vektorspill sänks** (`ldr/str q` genom x16, plats till plats genom v31):
   ingen återgång till den direkta emittern längre.
-- **d8–d15 för skalära flyttal över anrop** (`emit/vir/a64.c`): erbjuds
+- **d8–d15 för skalära flyttal över anrop** (`codegen/vir/a64.c`): erbjuds
   allokatorn som anropsbevarade, sparas vid ingången och återställs före
   varje retur och syskonanrop.  Inte när en vektor lever över ett anrop
   (`vl_vcross`; ingen gör det i dag) och inte med
@@ -1529,7 +1529,7 @@ gjorda (SPEC-vir.md avsnitt 19, X1–X3); inget under `src/vir/`.
 - **X3:** `L_VAR` i `lval`-uppräkningen; `x64_load`/`x64_store`/`x64_laddr`
   ger internt fel.  Ingen producerar den än.
 - **X1:** `bench/gen-walkprefix.py [--check]` genererar
-  `emit/walk/prefix.h` (130 namn); `WK_PREFIX`/`LO_PREFIX` ger en andra
+  `codegen/walk/prefix.h` (130 namn); `WK_PREFIX`/`LO_PREFIX` ger en andra
   instans.  Bevisat med ett engångsbygge (inte incheckat): `walk/*.c` med och
   utan `-DWK_PREFIX=vw_ -DLO_PREFIX=vw_` ger 46 globala symboler vardera utan
   överlapp, inga oprefixade `wk_`/`x64_`-referenser kvar, 74 `vw_`-operationer
@@ -1551,7 +1551,7 @@ VIR-sviten passerar under ASan/UBSan (119/119); mutationsprov med seed 42
 passerar 1 000/1 000. Övriga V1-grindar och VIR-stegen återstår.
 
 Klart: `src/vir/` (modul `vir_SRC`, egen unity-TU, länkad bara in i
-`virtest`; inget i `vpp`, `vccd` eller `emit/` ändrat).  `vir.h` (format,
+`virtest`; inget i `vpp`, `vccd` eller `codegen/` ändrat).  `vir.h` (format,
 opkodstabell som skrivare, parser och verifierare delar), konstruktion med
 hash-consade konstanter, `vir_cfg`, `vir_dom` (Cooper–Harvey–Kennedy, pre/post
 per block), `vir_uses`, `vir_canon`, `print.c`, `parse.c`, `verify.c` (alla
@@ -2173,7 +2173,7 @@ de är stabila till ca 0,05 % också med last 10–20 på maskinen, vilket cykle
 inte är.  Bas efter sammanfogningen: 26,18 G (virpol 24,49 G, clang 23,70 G),
 8,5–8,6 G cykler (virpol 8,24 G, clang 7,86 G).
 
-- **Vad som faktiskt körs** (`VCC_VL_PROBE=MASK` i `emit/vir/a64.c`: en `nop`
+- **Vad som faktiskt körs** (`VCC_VL_PROBE=MASK` i `codegen/vir/a64.c`: en `nop`
   efter varje redigering av ett slag; skillnaden i instruktioner är antalet
   körningar, en övre gräns eftersom `nop` också stoppar postvikningarna):
 
@@ -2268,7 +2268,7 @@ inte är.  Bas efter sammanfogningen: 26,18 G (virpol 24,49 G, clang 23,70 G),
 
 ### Looprotation i sänkningen (2026-11-12)
 
-- **Gjort (`emit/vir/a64.c`, `vl_order`):** blocken sänks i en egen ordning
+- **Gjort (`codegen/vir/a64.c`, `vl_order`):** blocken sänks i en egen ordning
   (`L->ord`; `vl_next` och `vl_body` var de enda ställena som antog VIR:s
   ordning).  En loop vars huvud är ett test (`brif` efter högst sju enkla
   instruktioner, inga anrop) får huvudet efter sitt sista block när det
@@ -2325,7 +2325,7 @@ inte är.  Bas efter sammanfogningen: 26,18 G (virpol 24,49 G, clang 23,70 G),
   inlining), sedan hopp och flyttar.  Per funktion sticker
   sqlite3BtreeIndexMoveto ut (`b` 0,08 mot 0,01, `mov` 0,13 mot 0,07) och
   sqlite3VdbeExec i `b` (0,39 mot 0,27); VdbeExec har färre `mov` än clang.
-- **Gjort (`vl_small` i `emit/vir/a64.c`):** ett hopp framåt till ett block
+- **Gjort (`vl_small` i `codegen/vir/a64.c`):** ett hopp framåt till ett block
   som bara testar (`brif` med högst en instruktion före, t.ex. `if (c<0)` efter
   tre grenar som räknar ut `c`) ersätts av en kopia av blocket, som LLVM:s
   svansduplicering vid sin standardstorlek.  Vägen till testets hoppsida
@@ -2381,7 +2381,7 @@ inte är.  Bas efter sammanfogningen: 26,18 G (virpol 24,49 G, clang 23,70 G),
      parameter flyttas inte dit vid sin definition.  Vid S flyttas de värden
      som lever över anrop till callee-saved (redigeringar före S:s första
      instruktion).  `vir_alloc_out.spoint`.
-  2. *Sänkningen* (`emit/vir/a64.c`): blocken framför S läggs först, S får
+  2. *Sänkningen* (`codegen/vir/a64.c`): blocken framför S läggs först, S får
      markören `NOP_PROLOG` efter sin etikett, returer och syskonanrop framför S
      märks (`I_TAIL.sh`).  Kod bakom S som går till ett returblock framför S
      får en egen kopia av det (`vl_lbl`, `VLT.lbf`).  Sänkningen säger före

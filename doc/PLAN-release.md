@@ -300,7 +300,7 @@ Manifest och slutgrind: `work/validate-kefir-7eca264/validation.json` och
 
 ### Status 2026-11-11: G5/G7, registerlokaler på x86
 
-Gemensamt behörighetsurval i `emit/opt/locals.c` används av alla tre
+Gemensamt behörighetsurval i `codegen/opt/locals.c` används av alla tre
 bakändar; x86 håller nu lönsamma skalärer i fyra callee-save-register.
 Cold-prober är oförändrade; ett native loopprov går 7,830→6,345 ms men
 divisionsfritt loopkorpus kostar cirka 11 % mer kompilator-CPU. Det är
@@ -312,13 +312,13 @@ hashar, mätmetod och återstående arbete. G5/G7/O2-målet fortsatt öppna.
 
 ### Status 2026-11-11: G5/G7, delad stackcellanalys
 
-Nästa del delar nu värde-/storefakta i `emit/rec/slot-values.c`. 6108
+Nästa del delar nu värde-/storefakta i `codegen/rec/slot-values.c`. 6108
 byte-identiska arm64-resultat och separata sanitiserade kontrakt verifierar
 flytten. X86-/wasm-anslutning och kombinerad kostnadsgrind pågår; G5/G7
 är fortsatt öppna.
 
 Arm64 använder nu en gemensam analys av exakta allokeringsceller,
-överlapp och adressflykt i `emit/rec/slots.c`. 6069 byte-identiska
+överlapp och adressflykt i `codegen/rec/slots.c`. 6069 byte-identiska
 objekt-/textjämförelser, 177 egna arm64-körtester och ett sanitiserat
 intervallkontrakt verifierar flytten. Två begränsade instruktionsprofiler
 visar +0,655/+0,303 % kompilatorarbete; metod och baser i OPT5 i
@@ -345,7 +345,7 @@ G5/G7 och hela O2-målet är fortsatt öppna.
 
 ### Status 2026-11-11: G5/G7, delad grenstädning
 
-Arm64 och x86 använder nu `emit/rec/fallthrough.c`; arm64:s extraktion
+Arm64 och x86 använder nu `codegen/rec/fallthrough.c`; arm64:s extraktion
 är byte-identisk för 131 befintliga testfiler med O1 och -g. Wasm
 utelämnar redundanta while-grenar med separat nåbarhetsbevis. Båda
 byggsätten klarar 64 fokuserade kod-/körkombinationer; egensviter x86
@@ -354,7 +354,7 @@ vid OPT2 i `PLAN-fas2.md`. G5/G7 och O2-målet är fortsatt öppna.
 
 ### Status 2026-11-11: G5/G7, delade heltalsidentiteter
 
-`emit/opt/identity.c` delar nu typkorrekta heltalsidentiteter mellan alla
+`codegen/opt/identity.c` delar nu typkorrekta heltalsidentiteter mellan alla
 bakändar; tvåpotensregeln ligger separat i `divpow2.c`. Unity och
 fil-för-fil klarar 32 kod-/körkontroller vid O0–O3. Egna sviter: x86
 131/131, arm64 136/136. Effekter och smala/höga registerbitar täcks av

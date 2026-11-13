@@ -696,7 +696,7 @@ On the parser side:
   compare per tag. Expect tens to a few hundred per region, against ~350 instructions
   per token parsed today.
 
-**Replay** (`dr_apply`, in a new `cc/replay.c`):
+**Replay** (`dr_apply`, in a new `frontend/c/replay.c`):
 1. Validate the reads, as above. On failure, parse the region as today.
 2. Re-intern the types in order. This builds the region-local → consumer type map.
 3. Bulk-copy the own records into the arrays and the heap, with one relocation pass
@@ -773,7 +773,7 @@ pp at a region start, at any depth, as `pp_top_events` gives for the top level.
      each later step.
 1. Record-only mode with stats (reads, types and records per entry, bytes). Nothing is
    replayed yet.
-   - *Done (2026-11-09), `cc/replay.c`, `VCC_DRREC=1`.*
+   - *Done (2026-11-09), `frontend/c/replay.c`, `VCC_DRREC=1`.*
      - **Where.** Unlike the plan, entries are recorded on a header-cache *hit*, not
        on a miss. Hits never nest: children are spliced into the parent's replay, so a
        hit is one disjoint region with no composition. A region parsed at a hit is
@@ -838,7 +838,7 @@ pp at a region start, at any depth, as `pp_top_events` gives for the top level.
    of PG's 46 M.
    - *2a done (2026-11-09): exact replay, validated structurally; no provenance yet.
      Opt-in, `VCC_DR=1`; off by default.*
-     - **Entry** (`cc/replay.c`, recorded at a hit as in step 1, published to a
+     - **Entry** (`frontend/c/replay.c`, recorded at a hit as in step 1, published to a
        process-wide table keyed by (`hent`, counter, pack depth and top, option
        signature), up to 8 variants per key). It holds:
        - the reads: (namespace, id, A's sym or 0);

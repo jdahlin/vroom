@@ -94,14 +94,14 @@ find.
 
 | Capability found in this checkout | Evidence | Remaining onboarding question |
 |---|---|---|
-| Structured records: ID, severity, warning flag, labels, children, help, edits and applicability | [`pp.h`](../src/pp/pp.h), `vdiag`, `VDA_*` | Do common beginner errors populate these fields with the cause, not just the location? |
-| Default vcc source display, clang-compatible display, narrated display; ASCII/Unicode choices | [`diagtext.c`](../src/pp/diagtext.c), driver flag parser | Are all three understandable without color, and does help remain useful when read aloud? |
-| JSON records, SARIF and standalone HTML; text reconstruction from JSON | [`diagout.c`](../src/pp/diagout.c), [`diag-render.py`](../bench/diag-render.py) | Do installation, driver and linker failures have comparable structured evidence? Do not assume frontend coverage proves this. |
-| Parser recovery and invalid nodes/declarations to suppress dependent errors | [`cc/diag.c`](../src/cc/diag.c), diagnostic plan D2 | Does one beginner mistake still expose the next independent mistake? Fewer diagnostics alone can mean premature termination. |
+| Structured records: ID, severity, warning flag, labels, children, help, edits and applicability | [`pp.h`](../src/frontend/pp/pp.h), `vdiag`, `VDA_*` | Do common beginner errors populate these fields with the cause, not just the location? |
+| Default vcc source display, clang-compatible display, narrated display; ASCII/Unicode choices | [`diagtext.c`](../src/frontend/diag/diagtext.c), driver flag parser | Are all three understandable without color, and does help remain useful when read aloud? |
+| JSON records, SARIF and standalone HTML; text reconstruction from JSON | [`diagout.c`](../src/frontend/diag/diagout.c), [`diag-render.py`](../bench/diag-render.py) | Do installation, driver and linker failures have comparable structured evidence? Do not assume frontend coverage proves this. |
+| Parser recovery and invalid nodes/declarations to suppress dependent errors | [`frontend/c/diag.c`](../src/frontend/c/diag.c), diagnostic plan D2 | Does one beginner mistake still expose the next independent mistake? Fewer diagnostics alone can mean premature termination. |
 | Known library-header suggestions, typo suggestions, conversion help and format checks | Existing diagnostic tests; plan D5 | Can the hint distinguish an absent declaration from an unavailable header/sysroot? |
 | `--fix`, parseable edits and unified patches; only machine-applicable edits are written by `--fix` | Driver parser and `diagout.c:fix_collect`/`fix_write` | Make the preview/write distinction explicit. A patch can contain speculative suggestions; it is not equivalent to safe automatic repair. |
 | Twelve explain pages, compiled into the executable, each with wrong/fixed examples | [`doc/diag/README.md`](../doc/diag/README.md), [`vcc-explain.py`](../bench/vcc-explain.py) | IDs exist beyond these pages. Teach discovery and grow pages where they add conceptual value. |
-| Per-TU diagnostic store and build-level deduplication | `vccd/dstore.c`, plan D7 | A diagnostic query socket is not a complete language server. Unsaved-buffer handling, versioned edits, cancellation and compile context still need a contract. |
+| Per-TU diagnostic store and build-level deduplication | `server/dstore.c`, plan D7 | A diagnostic query socket is not a complete language server. Unsaved-buffer handling, versioned edits, cancellation and compile context still need a contract. |
 | Snapshots, mutation tests, fuzzing, catalog and fix round trips | `bench/vcc-diag.py`, `vcc-mutate.py`, `vcc-diag-catalog.py`, `src/fuzz/fuzz-diag.c` | Add task outcomes and novice review; snapshots establish consistency rather than comprehension. |
 
 Two concrete audit findings deserve follow-up:

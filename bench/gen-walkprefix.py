@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-src/emit/walk/prefix.h: the walker's function names, for compiling emit/walk/*.c
+src/codegen/walk/prefix.h: the walker's function names, for compiling codegen/walk/*.c
 a second time under other names (PLAN-vir.md V2, SPEC-vir.md X1).
 
 The walker is one source for every CPU: its own functions are wk_*, the target
@@ -16,13 +16,13 @@ silently: --check fails if the checked-in header differs, if a wk_* function
 declared in walk.h is not defined in walk/*.c (it would be renamed but not
 found), or if walk/*.c calls a name that LO() should have made (x64_*).
 
-  bench/gen-walkprefix.py           regenerate src/emit/walk/prefix.h
+  bench/gen-walkprefix.py           regenerate src/codegen/walk/prefix.h
   bench/gen-walkprefix.py --check   exit 1 if it is out of date or inconsistent
 """
 import glob, os, re, sys
 
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-D = f'{R}/src/emit/walk'
+D = f'{R}/src/codegen/walk'
 OUT = f'{D}/prefix.h'
 UNOUT = f'{D}/unprefix.h'
 

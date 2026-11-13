@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-src/pp/diagids.inc: the id of every vcc diagnostic (PLAN-diag.md D1.1, D1.3).
+src/frontend/diag/diagids.inc: the id of every vcc diagnostic (PLAN-diag.md D1.1, D1.3).
 
 Each format string a diagnostic call in vcc passes (found as in
 bench/vcc-diagcov.py) gets an id: the name of the clang diagnostic it
 matches (clang's .td files, bench/clangdiag.py), or, when clang has none,
 `vcc_` and the format's words.  The table is checked in, like ppdata*.inc:
-the build needs no clang and no .td files.  pp/diag.c looks a record's
+the build needs no clang and no .td files.  frontend/diag/diag.c looks a record's
 format up in it (binary search, only on the error path) and keeps the id.
 
-  bench/gen-diagids.py           regenerate src/pp/diagids.inc
+  bench/gen-diagids.py           regenerate src/frontend/diag/diagids.inc
   bench/gen-diagids.py --check   exit 1 if it is out of date (lager 2: every
                                  format has an id, every clang id exists)
   bench/gen-diagids.py --list    format -> id, with the call sites
@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import clangdiag
 
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OUT = f'{R}/src/pp/diagids.inc'
+OUT = f'{R}/src/frontend/diag/diagids.inc'
 spec = importlib.util.spec_from_file_location('diagcov', f'{R}/bench/vcc-diagcov.py')
 cov = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(cov)
@@ -152,7 +152,7 @@ def main():
             print(f'gen-diagids: ids not in clang\'s table: {", ".join(sorted(bad))}')
             return 1
         if cur != text:
-            print('gen-diagids: src/pp/diagids.inc is out of date: run bench/gen-diagids.py')
+            print('gen-diagids: src/frontend/diag/diagids.inc is out of date: run bench/gen-diagids.py')
             return 1
         nv = sum(1 for i in set(ids.values()) if i and i.startswith('vcc_'))
         print(f'gen-diagids: {len(ids)} formats, {len(set(ids.values()))} ids ({nv} vcc_*), up to date')

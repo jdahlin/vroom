@@ -13,8 +13,8 @@ from hostenv import R, llvm
 
 SOURCE = r'''
 #include <assert.h>
-#include "arch/x64/emit/effects.c"
-#include "arch/x64/emit/extensions.c"
+#include "arch/x64/codegen/effects.c"
+#include "arch/x64/codegen/extensions.c"
 
 static rec instruction(int op, int size)
 {

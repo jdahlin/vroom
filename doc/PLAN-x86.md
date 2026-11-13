@@ -7,7 +7,7 @@ Debian i `qemu-system-x86_64 -enable-kvm`, och samma kalla byggtid som på arm64
 
 **Varför:** Maskinen är nu en x86-64 Linux-värd. Med x86-64 som mål kör testerna
 nativt (ingen qemu-user), och vcc får ett andra registermaskin-mål. Det avgör vad
-i `arch/a64/emit/` som egentligen är generiskt och vad i Linux-koden som är per OS
+i `arch/a64/codegen/` som egentligen är generiskt och vad i Linux-koden som är per OS
 och vad som är per CPU (TODO.md: "Target-OS code out of the generic files").
 
 **Regler:** samma som fas 2 och PLAN-wasm.md. Clang är referensen
@@ -21,16 +21,16 @@ x86_64-apple-darwin ingår inte.
 
 - Värden: x86_64, Linux 7.0, gcc och GNU binutils 2.46. **clang, lld och llvm-mc
   saknas**, liksom qemu. De behövs som referens (se Risker: installation).
-- **vcc bygger inte på x86-64**: lexern är NEON (`lex/lex.c:4`, med en skalär väg
+- **vcc bygger inte på x86-64**: lexern är NEON (`frontend/lex/lex.c:4`, med en skalär väg
   bakom `VLEX_SCALAR`), interneringen använder ACLE-CRC32C (`common/intern.c:1`,
   `common/intern.h:86`), `common/ldhash.c:184` har aarch64-grenar och Makefile väljer
   `-mcpu=…` (TODO.md: "x86-64 host build"). `src/port/wasm/compat/` visar redan hur
   ACLE-CRC och NEON mappas när vcc byggs för ett annat mål.
-- Målvalet är `po.target` (`pp/pp.h:82`: `PP_LINUX_AARCH64, PP_DARWIN, PP_WASM64,
-  PP_WASM32`), med makron `DARWIN(c)`/`WASM(c)` i `emit/emitimpl.h` och
-  `CC_ILP32(c)` i cc. Emittern väljer generator per funktion i `emit/tu.c:178`
-  (`wasm_emit_function` eller `emit_function`), data-direktiv i `emit/data.c`.
-- arm64-generatorn (`arch/a64/emit/`, ~10 300 rader) bygger instruktionsposter
+- Målvalet är `po.target` (`frontend/pp/pp.h:82`: `PP_LINUX_AARCH64, PP_DARWIN, PP_WASM64,
+  PP_WASM32`), med makron `DARWIN(c)`/`WASM(c)` i `codegen/emitimpl.h` och
+  `CC_ILP32(c)` i cc. Emittern väljer generator per funktion i `codegen/tu.c:178`
+  (`wasm_emit_function` eller `emit_function`), data-direktiv i `codegen/data.c`.
+- arm64-generatorn (`arch/a64/codegen/`, ~10 300 rader) bygger instruktionsposter
   (`ins.h`) direkt från AST:t, med temporärer ur en pool (`treg`/`tfree`),
   lokala variabler i register (`B_LREG`) eller stackplatser (`B_SLOT`), en
   postoptimerare (`opt.c`), en skrivare (`print.c`) och en kodare direkt till
@@ -62,15 +62,15 @@ en `lib/f80.h` bredvid `common/f128.h`, och `__float128` blir en egen typ.
 
 | Del | Fil(er) | Innehåll |
 |---|---|---|
-| Värdbygge | `lex/lex.c`, `common/intern.*`, `common/ldhash.c`, `src/Makefile` | SSE2/AVX2-lexer (skalär först), CRC32C via SSE4.2 (`_mm_crc32_u64`: samma polynom, samma hashar), `pause` i stället för `yield`, `-march=native` |
-| Målval | `pp/pp.h`, `driver/ppdriver.c`, `vccd/caps.c` | `PP_LINUX_X86_64`; `--target=x86_64-*-linux-gnu`, `-m64`; utan `--target` på en x86-64-värd: x86-64 (som arm64-värden ger aarch64) |
-| Predefines, `__has_*` | `pp/ppdata-predef.inc`, `gen-ppdata.sh` | En kolumn till ur clang; `-march=`/`-msse4.2`/`-mavx2`/`-mno-sse`/`-mgeneral-regs-only`-deltan som tabell |
-| Layout | `cc/type.c`, `cc/tu.c`, `cc/layout.c` | `char` signed, `wchar_t` int, x87 `long double`, `__float128`, `va_list` |
-| AST-vandrare | `emit/walk/` | Lager 1 nedan: vikning, nåbarhet, inlining, `__builtin_constant_p`, switch-strategi, stackplatser, `val`/`lval`, anropssekvensen; sänkningsgränssnittet `walk/lower.h` |
-| Poster och pass | `emit/rec/` | Lager 3: gemensamt posthuvud, op-tabell per CPU, liveness, kopiepropagering, döda resultat, stackplatser, hopp |
-| Måltabell | `emit/tu.c`, `emit/data.c` | Funktion, huvud, svans och data-direktiv per mål; x86-64 läggs till bredvid `WASM(c)`-grenarna, som städas när arm64 och wasm flyttas |
-| Sänkning | `arch/x64/emit/` | Lager 2: `lower.c` (heltal, minne), `fp.c` (SSE), `x87.c`, `abi.c` (SysV), `builtin.c`, `atomic.c`, `asm.c`; op-tabellen i `x64impl.h`; `peep.c`, `twoaddr.c`, `func.c` (ram, prolog) |
-| Textutdata | `arch/x64/emit/print.c` | `-S` i clangs AT&T-syntax (`.p2align 4, 0x90`, `.type`, `.size`, `#APP`) |
+| Värdbygge | `frontend/lex/lex.c`, `common/intern.*`, `common/ldhash.c`, `src/Makefile` | SSE2/AVX2-lexer (skalär först), CRC32C via SSE4.2 (`_mm_crc32_u64`: samma polynom, samma hashar), `pause` i stället för `yield`, `-march=native` |
+| Målval | `frontend/pp/pp.h`, `driver/ppdriver.c`, `server/caps.c` | `PP_LINUX_X86_64`; `--target=x86_64-*-linux-gnu`, `-m64`; utan `--target` på en x86-64-värd: x86-64 (som arm64-värden ger aarch64) |
+| Predefines, `__has_*` | `frontend/pp/ppdata-predef.inc`, `gen-ppdata.sh` | En kolumn till ur clang; `-march=`/`-msse4.2`/`-mavx2`/`-mno-sse`/`-mgeneral-regs-only`-deltan som tabell |
+| Layout | `frontend/c/type.c`, `frontend/c/tu.c`, `frontend/c/layout.c` | `char` signed, `wchar_t` int, x87 `long double`, `__float128`, `va_list` |
+| AST-vandrare | `codegen/walk/` | Lager 1 nedan: vikning, nåbarhet, inlining, `__builtin_constant_p`, switch-strategi, stackplatser, `val`/`lval`, anropssekvensen; sänkningsgränssnittet `walk/lower.h` |
+| Poster och pass | `codegen/rec/` | Lager 3: gemensamt posthuvud, op-tabell per CPU, liveness, kopiepropagering, döda resultat, stackplatser, hopp |
+| Måltabell | `codegen/tu.c`, `codegen/data.c` | Funktion, huvud, svans och data-direktiv per mål; x86-64 läggs till bredvid `WASM(c)`-grenarna, som städas när arm64 och wasm flyttas |
+| Sänkning | `arch/x64/codegen/` | Lager 2: `lower.c` (heltal, minne), `fp.c` (SSE), `x87.c`, `abi.c` (SysV), `builtin.c`, `atomic.c`, `asm.c`; op-tabellen i `x64impl.h`; `peep.c`, `twoaddr.c`, `func.c` (ram, prolog) |
+| Textutdata | `arch/x64/codegen/print.c` | `-S` i clangs AT&T-syntax (`.p2align 4, 0x90`, `.type`, `.size`, `#APP`) |
 | Kodare | `arch/x64/as/enc.c`, `x64.h` | REX/ModRM/SIB/disp/imm, VEX/EVEX senare; tabelldriven, tabellen genererad en gång ur LLVM:s X86-tabeller |
 | Assembler | `arch/x64/as/parse.c` | AT&T-syntax för `vas`, inline asm och kärnans `.S` |
 | Fixups | `arch/x64/reloc.h`, `arch/x64/obj/fixup.c` | `R_X86_64_PC32/PLT32/32/32S/64/PC64/GOTPCRELX/REX_GOTPCRELX/TPOFF32/GOTTPOFF/TLSGD/TLSLD/DTPOFF32`; hoppavslappning rel8↔rel32 som MC |
@@ -85,12 +85,12 @@ maskin, och SSA-konstruktion. vcc undviker alla tre men skriver ändå varje
 optimering en gång. Det sker genom tre lager:
 
 ```
-cc/:s AST ──▶ 1. AST-vandrare (emit/walk/) ──LO()-anrop──▶ 2. sänkning (arch/x64/emit/)
+frontend/c/:s AST ──▶ 1. AST-vandrare (codegen/walk/) ──LO()-anrop──▶ 2. sänkning (arch/x64/codegen/)
                                                                 │ maskinposter, 3-adress
                                                                 ▼
-                         3. gemensamma pass (emit/rec/) ◀── op-tabell per CPU
+                         3. gemensamma pass (codegen/rec/) ◀── op-tabell per CPU
                                                                 │
-                                         tvåadress, titthål, skrivare/kodare (arch/x64/emit/)
+                                         tvåadress, titthål, skrivare/kodare (arch/x64/codegen/)
 ```
 
 **Gemensam implementationsplan (2026-11-11):** se
@@ -109,10 +109,10 @@ wasm on the shared walker"). Gränssnitten ritas för det x86-64 behöver. Två 
 görs redan nu, eftersom flytten annars blir dyrare: anropen går genom `LO()`, och
 posthuvudet har arm64:s layout. Inget annat byggs i förväg.
 
-#### Lager 1: AST-vandraren, `emit/walk/`
+#### Lager 1: AST-vandraren, `codegen/walk/`
 
 Här fattas alla beslut på C-nivå, en gång för alla mål. Filerna följer
-`arch/a64/emit/`:s ämnen, och reglerna kopieras därifrån (vikning,
+`arch/a64/codegen/`:s ämnen, och reglerna kopieras därifrån (vikning,
 `__builtin_constant_p`, inlining). Det ger dem en gemensam form som arm64 senare
 kan gå över till:
 
@@ -132,9 +132,9 @@ arm64: runt anrop (`spill_live`) och ett nytt försök för funktionen med
 alla mål. Laddningar sammanfogas inte med operationer i vandraren (inga
 `V_MEM`-värden). Det gör titthålspasset efteråt, och då hålls vandraren enkel.
 
-#### Lager 2: sänkningsgränssnittet, `emit/walk/lower.h`
+#### Lager 2: sänkningsgränssnittet, `codegen/walk/lower.h`
 
-Ett trettiotal operationer som `arch/x64/emit/` definierar. Det är instruktionsval
+Ett trettiotal operationer som `arch/x64/codegen/` definierar. Det är instruktionsval
 och ingenting annat:
 
 | Grupp | Operationer |
@@ -154,10 +154,10 @@ blir en andra användare kompileras vandraren en gång per mål (`#include
 "walk/*.c"` med ett annat prefix i `LO`, som en mall). Det kräver att anropen
 redan går genom `LO()`, och det är allt som behövs nu.
 
-#### Lager 3: maskinposter och gemensamma pass, `emit/rec/`
+#### Lager 3: maskinposter och gemensamma pass, `codegen/rec/`
 
 Posterna är en platt array per funktion, som i dag, med ett gemensamt huvud i
-`emit/rec/rec.h`:
+`codegen/rec/rec.h`:
 
 ```c
 typedef struct ins {
@@ -178,7 +178,7 @@ anrop → de anroparsparade), hoppslag, `PURE`, läser/skriver minne, läser/skr
 `rmask` är 64 bitar: 16 GPR, 16 XMM, `FLAGS` och `FRAME` ryms.
 
 Gemensamma pass, generiska över tabellen och flyttade i form från
-`arch/a64/emit/opt.c`:
+`arch/a64/codegen/opt.c`:
 
 | Pass | Fil |
 |---|---|
@@ -189,12 +189,12 @@ Gemensamma pass, generiska över tabellen och flyttade i form från
 | Hopp till nästa post, hopp till hopp | `rec/branch.c` |
 
 Posterna är **treadress** (`rd = a op b`) ända fram till ett sent x86-pass,
-`arch/x64/emit/twoaddr.c`, som skriver om till tvåadress. Där sätts `mov` in bara
+`arch/x64/codegen/twoaddr.c`, som skriver om till tvåadress. Där sätts `mov` in bara
 när `rd ≠ a` och `a` lever efteråt, och kommutativa operationer byts för att slippa
 en `mov`. Kopiepropageringen kan därför vara densamma som arm64:s, utan regler för
 bundna operander. Det är LLVM:s TwoAddressInstructionPass i ett linjärt pass.
 
-Målspecifikt efter de gemensamma passen: `arch/x64/emit/peep.c` (laddning in i
+Målspecifikt efter de gemensamma passen: `arch/x64/codegen/peep.c` (laddning in i
 operationen när temporären dör: `add 8(%rbp), %eax`; `lea` för add/skift;
 `test r,r` mot 0; `xor r,r` för 0; kortaste `mov $imm`; `cmov`), sedan
 `twoaddr.c`, ram och prolog (`func.c`), skrivare (`print.c`) och kodare (`obj.c`).
@@ -216,7 +216,7 @@ kärnbygget använder, behåller dagens kostnad.
 #### Två kopior av reglerna under övergången
 
 Tills arm64 är flyttad finns vikning, inlining och `constant_p`-reglerna både i
-`arch/a64/emit/` och i `emit/walk/`. Att de inte glider isär kontrolleras av
+`arch/a64/codegen/` och i `codegen/walk/`. Att de inte glider isär kontrolleras av
 `VCC_WALKLOG=1`. Den skriver per funktion vad generatorn beslutade: inlinade
 anrop, vikta villkor, kvarvarande error()-anrop, värdet av `__builtin_constant_p`
 per anrop. Ett nytt harness, `bench/vcc-walkcmp.py`, jämför x86-64 med arm64 på
@@ -275,9 +275,9 @@ Det som skiljer x86-64 och som lager 2 och de x86-specifika passen tar hand om:
 |---|----------|-----------|
 | X0 | **vcc bygger och kör på x86-64 Linux** (fortfarande aarch64 som mål). Skalär lexer via `VLEX_SCALAR`, CRC32C med SSE4.2, värd-`#ifdef`s i `ldhash.c`, Makefile per värd-CPU. SSE/AVX2-lexer efteråt som prestandasteg | `make -C src vcc` och `fuzz-regress` gröna; `vcc-same.py` mot utdata gjorda på Mac:en (arm64-utdata från x86-värd byte-identiska); paritet `vcc-diff.py cmp`; stänger TODO "x86-64 host build" |
 | X1 | **Målval och front end.** `PP_LINUX_X86_64`, predefines ur clang, layout (tabellen ovan), `lib/f80.h` för x87-konstanter, `__float128` | `vpp -dM -E` = `clang -dM -E` (även `-march`-deltan, `bench/vcc-predef.py`); `vcc-sema.py layout` med x86-64 som mål; `vcc-ldconst.py` för x87; `vcc-bflayout.py` för x86-64; arm64/wasm byte-identiska |
-| X2 | **Lagren på plats, heltals-`-S`.** `emit/rec/rec.h` och x86:s op-tabell; `emit/walk/` med `lower.h` och `LO()`; x86-64 i måltabellen (`emit/tu.c` väljer vandraren för x86-64); `arch/x64/emit/` för heltal, locals i stackplatser, parametrar, direkta anrop, `if`/loopar/`break`/`continue`/`switch` (kedja), `return`; prolog/epilog med `rbp`; `twoaddr.c` (behövs på alla nivåer: posterna är treadress), `print.c`. Bara `-O0`, inga optimeringspass | `-S` assembleras av `clang -c`, länkas mot glibc och körs nativt med samma resultat som clangs; nytt `bench/vcc-x86.py` (som `vcc-wasm.py`: testhuvudena mot glibc, nativ körning, cache); arm64/wasm byte-identiska (`vcc-same.py`) |
+| X2 | **Lagren på plats, heltals-`-S`.** `codegen/rec/rec.h` och x86:s op-tabell; `codegen/walk/` med `lower.h` och `LO()`; x86-64 i måltabellen (`codegen/tu.c` väljer vandraren för x86-64); `arch/x64/codegen/` för heltal, locals i stackplatser, parametrar, direkta anrop, `if`/loopar/`break`/`continue`/`switch` (kedja), `return`; prolog/epilog med `rbp`; `twoaddr.c` (behövs på alla nivåer: posterna är treadress), `print.c`. Bara `-O0`, inga optimeringspass | `-S` assembleras av `clang -c`, länkas mot glibc och körs nativt med samma resultat som clangs; nytt `bench/vcc-x86.py` (som `vcc-wasm.py`: testhuvudena mot glibc, nativ körning, cache); arm64/wasm byte-identiska (`vcc-same.py`) |
 | X3 | **Hela C i vandraren och sänkningen.** Aggregat och initierare, SysV-klassning (`abi.c`), varargs, hopptabeller, flyttal (SSE, x87), `__int128`, `__float128` via `FN_*`, bit-fält, VLA/`alloca`, atomics, TLS, PIC/PIE, inbyggda, inlining och `need_fold`, kända värden, spill; `VCC_WALKLOG` | gcc-torture och tcc-tests2 vid `-O0`: samma godkända som clang; `vcc-abi.py --target x86_64` (clang/vcc × anropare/anropad, gcc som tredje part); `vcc-pic.py`, `vcc-fpcheck.py` för x86-64; `bench/vcc-walkcmp.py` mot arm64 grönt |
-| X4 | **Inkoppling av gemensam optimerare och `-O1`.** `PLAN-fas2.md` OPT0–OPT8 äger regler/algoritmer; x86 fyller op-/effekttabeller och ansluter `emit/rec/`, lokala register och måloperationer. SIB/LEA, SSE2, målfeatures, prolog och tvåadress förblir x86. Ingen egen kopia av generisk optimeringspolicy. | C-regressioner på alla tre backends, x86-kodkrav och ABI vid O0–O3; ren extraktion byte-identisk på arm64. Mät kompilatorns kostnad och genererad kod enligt OPT-planen; bekräfta x86-stöd innan `vbench.py` anges som x86-grind. |
+| X4 | **Inkoppling av gemensam optimerare och `-O1`.** `PLAN-fas2.md` OPT0–OPT8 äger regler/algoritmer; x86 fyller op-/effekttabeller och ansluter `codegen/rec/`, lokala register och måloperationer. SIB/LEA, SSE2, målfeatures, prolog och tvåadress förblir x86. Ingen egen kopia av generisk optimeringspolicy. | C-regressioner på alla tre backends, x86-kodkrav och ABI vid O0–O3; ren extraktion byte-identisk på arm64. Mät kompilatorns kostnad och genererad kod enligt OPT-planen; bekräfta x86-stöd innan `vbench.py` anges som x86-grind. |
 | X5 | **Objektfiler.** Kodare för det generatorn skriver, fixups, ELF-maskin 62, hoppavslappning; `-c` direkt från posterna utan text; CFI och DWARF med x86-registernummer | `vas-obj.py`: vcc:s `-c` byte-identiskt med `clang -c` av samma `.s`; `vas-enc.py` mot llvm-mc; X4:s sviter med `-c`; `vcc-cfi.py` och `vcc-dwarf.py` för x86-64 |
 | X6 | **Inline asm och `vas` för x86-64.** AT&T-parser, begränsningar och modifierare, flaggutdata, `asm goto`; hela ISA:n inklusive SSE/AVX/AVX-512 (kärnans krypto-`.S`) | `vas-corpus.py` för x86-64 (`clang -S` av testfilerna, `clang -c` mot `vas`); kärnans `.S` byte-identiska med clangs objekt |
 | X7 | **vlink för x86-64.** Relokeringar, GOT/PLT, TLS-avslappning (GD/IE→LE), GOTPCRELX-avslappning | `bench/vcc-x86.py` med vlink: laddad bild byte-identisk med lld:s; `vlink-opts.py` |
@@ -298,7 +298,7 @@ kärnan och kan vänta.
 - **Körning:** nativt på värden, ingen emulering. Samma cache som
   `vcc-ctests.py`: ett objekt byte-identiskt med ett som gått igenom körs inte igen.
 - **arm64 och wasm oförändrade:** `vcc-same.py` med en bas från `vbench.py mkbase`
-  i varje commit (x86-64-koden ligger bredvid, men `emit/tu.c`, `emit/data.c`, `cc/`
+  i varje commit (x86-64-koden ligger bredvid, men `codegen/tu.c`, `codegen/data.c`, `frontend/c/`
   och `obj/` delas); `vbench.py gate`.
   arm64-körningarna (ctests med qemu-aarch64, `vcc-abi.py`) görs på Mac:en eller i
   `env/linux/`-containern tills qemu-user finns här.
@@ -322,7 +322,7 @@ kärnan och kan vänta.
   för `jmp`/`jcc` rel8/rel32, samma flerbyte-`nop` för `.p2align`, samma val mellan
   likvärdiga kodningar (t.ex. `mov` med `89` eller `8b`). Kodartabellen tas ur LLVM
   en gång, så valen följer med.
-- **Reglerna glider isär** mellan `emit/walk/` och `arch/a64/emit/` under
+- **Reglerna glider isär** mellan `codegen/walk/` och `arch/a64/codegen/` under
   övergången: `vcc-walkcmp.py` i X3 och X4. En regeländring görs i båda till
   arm64 är flyttad.
 - **Gränssnittet passar inte arm64 senare:** det ritas bara för x86-64. Risken
@@ -794,29 +794,29 @@ villkorsuttryck. x86:s egna tester: 47/56 godkända, mot 46/56 före
 >   `-mgeneral-regs-only`/`-mno-sse`, `VCC_WALKLOG`.
 
 ### X2 (2026-11-10): påbörjat, i gren `claude/x86-x2-walker`
-- Lagren finns i minsta form: `emit/rec/rec.h` (posthuvudet, `opdesc`),
-  `emit/walk/` (vandraren: uttryck med vikning av konstanter, lvärden, villkor
+- Lagren finns i minsta form: `codegen/rec/rec.h` (posthuvudet, `opdesc`),
+  `codegen/walk/` (vandraren: uttryck med vikning av konstanter, lvärden, villkor
   som hopp, satser, switch som jämförelsekedja, anropssekvensen; `walk.h` med
-  `LO()`-gränssnittet), `arch/x64/emit/` (`lower.c`: fysiska register, `div` och
+  `LO()`-gränssnittet), `arch/x64/codegen/` (`lower.c`: fysiska register, `div` och
   skift sparar sina fasta register, anrop sparar levande temporärer;
-  `print.c`: `twoaddr` och AT&T-skrivaren). `emit/tu.c` väljer vandraren för
+  `print.c`: `twoaddr` och AT&T-skrivaren). `codegen/tu.c` väljer vandraren för
   x86-64, `data.c` skriver `.long`/`.quad` och x87-byte. `-c` för x86-64 är ett fel
   tills X5.
 - `bench/vcc-x86.py`: 777/1768 godkända (gcc 696, tcc 62, vcc 19), inga
   körfel; resten avvisas med "not supported yet (PLAN-x86.md X3)" (inbyggda,
   aggregat, flyttal, bit-fält, varargs ...) och 5 `link_error`-tester som kräver
   clangs -O2-vikning. Under ASan/UBSan 774: de tre skillnaderna är fel i
-  front end som finns för arm64 också (`cc/record.c:136`, `cc/expr.c:36`,
-  `cc/func.c:7`).
+  front end som finns för arm64 också (`frontend/c/record.c:136`, `frontend/c/expr.c:36`,
+  `frontend/c/func.c:7`).
 - Kvar i X2: op-tabellen fylld för x86 och `VCC_WALKLOG`/`vcc-walkcmp.py`
   (behövs först när passen och inliningen kommer, X3/X4).
 
 ### X1 (2026-11-10): front end klar, x86-data och vcc-ldconst väntar på kodgeneratorn
 - `PP_LINUX_X86_64`: `--target=x86_64-*`, och standard utan `--target` på en
   x86-64-värd (glibcs `x86_64-linux-gnu`). Clang-data i egna filer från
-  `pp/gen-x86data.sh` (clang 23.1.6): predefines och `-dD`-ordning
-  (`pp/ppdata-x86.inc`), `__has_*` (`has_tab_x86`) och attributnamn
-  (`cc/attrnames-x86.inc`). De andra målens tabeller (23.1.4) rörs inte.
+  `frontend/pp/gen-x86data.sh` (clang 23.1.6): predefines och `-dD`-ordning
+  (`frontend/pp/ppdata-x86.inc`), `__has_*` (`has_tab_x86`) och attributnamn
+  (`frontend/c/attrnames-x86.inc`). De andra målens tabeller (23.1.4) rörs inte.
 - `va_list` som `struct __va_list_tag[1]`; `long double` som x87 i konstanter och
   vikning (`common/f128.h`: binary128-layout avrundad till 63 bitar, `q_*p`);
   `__float128` som egen typ (`TY_FLOAT128`, suffix `q`). `char` signed, `wchar_t`
@@ -833,7 +833,7 @@ villkorsuttryck. x86:s egna tester: 47/56 godkända, mot 46/56 före
 
 ### X0 (2026-11-10): bygger och kör, SIMD-lexer och kärnparitet kvar
 - `make -C src vcc` på x86-64 Linux med clang 22: `classify`, `find_cend`,
-  `find_nl` och `find_quote` i `lex/lex.c` har en skalär version utan NEON
+  `find_nl` och `find_quote` i `frontend/lex/lex.c` har en skalär version utan NEON
   (samma masker bit för bit), CRC32C via SSE4.2 (`port/hostcrc.h`, samma polynom),
   `pause` i spinnslingan, `-march=native -msse4.2`. Fuzz-målen tar värdens clang
   och libFuzzer (LeakSanitizer är på som standard på Linux: `ASAN_OPTIONS=detect_leaks=0`
@@ -925,7 +925,7 @@ prestandaprofil och dess begränsningar finns vid OPT4 i PLAN-fas2.md.
 
 ### OPT4 blad utan ram (2026-11-11)
 
-`arch/x64/emit/frame.c` avgör nu om en verkligt ramfri bladfunktion kan
+`arch/x64/codegen/frame.c` avgör nu om en verkligt ramfri bladfunktion kan
 utelämna rbp-prolog/epilog. Beslutet följer den befintliga tvåadressvandringen:
 inga nya fulla pass, allokeringar eller AST-vandringar. Noll frame-bytes och
 ingen justering, canary eller anropsmarkering krävs först; effektbeskrivningen

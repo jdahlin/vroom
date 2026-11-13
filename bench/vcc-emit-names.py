@@ -11,7 +11,7 @@ from hostenv import R, llvm
 SOURCE = r'''
 #include <assert.h>
 #include <stdio.h>
-#include "arch/x64/emit/asm.c"
+#include "arch/x64/codegen/asm.c"
 
 vident *vintern_ents;
 static vident names[2];
@@ -72,7 +72,7 @@ int main(void)
 
 BUILTINS = r'''
 #include <assert.h>
-#include "cc/builtin.c"
+#include "frontend/c/builtin.c"
 int (*pp_builtin_known)(const char *);
 bool lib_builtin_known(const char *name) { (void)name; return false; }
 int main(void) {

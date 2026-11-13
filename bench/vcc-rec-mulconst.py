@@ -9,7 +9,7 @@ from hostenv import R, llvm
 
 SOURCE = r'''
 #include <assert.h>
-#include "emit/opt/mulconst.c"
+#include "codegen/opt/mulconst.c"
 static uint64_t state = UINT64_C(0x948e612f6c010757);
 static uint64_t next(void) { state ^= state << 13; state ^= state >> 7; state ^= state << 17; return state; }
 int main(void)
@@ -57,12 +57,12 @@ def main():
                 raise RuntimeError(result.stderr.decode())
         compile_run(SOURCE)
         if args.check_mutation:
-            implementation = (Path(R) / 'src/emit/opt/mulconst.c').read_text()
+            implementation = (Path(R) / 'src/codegen/opt/mulconst.c').read_text()
             implementation = implementation.replace('#include "../emitimpl.h"',
-                '#include "' + str(Path(R) / 'src/emit/emitimpl.h') + '"')
+                '#include "' + str(Path(R) / 'src/codegen/emitimpl.h') + '"')
             changed = implementation.replace('case 3: return 1;', 'case 3: return 2;')
             assert changed != implementation
-            compile_run(SOURCE.replace('#include "emit/opt/mulconst.c"', changed), True)
+            compile_run(SOURCE.replace('#include "codegen/opt/mulconst.c"', changed), True)
     print('shared constant-multiply recipe contracts: PASS')
 
 

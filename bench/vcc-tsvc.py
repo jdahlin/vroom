@@ -7,7 +7,7 @@ helpers and the reference by clang.  Every loop's checksum must equal clang -O3'
 
 `iterations` (100000 upstream) is lowered to N (default 256, the least at which every outer loop runs; s176's is run once): seconds, and the
 checksums still cover every loop.  -v lists each loop's times, --why the vectorizer's reasons
-for the loops it left (emit/vir/vec.inc).  RESEARCH-vectors.md."""
+for the loops it left (codegen/vir/vec.inc).  RESEARCH-vectors.md."""
 import os, re, shutil, subprocess, sys
 
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

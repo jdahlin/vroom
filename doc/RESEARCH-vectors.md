@@ -2,7 +2,7 @@
 
 Research of 2026-11-12 for `PLAN-vir.md`. Sources: two web research passes
 (IR documentation and source trees, ABI documents, vectorizer documentation
-and papers) and one pass over `src/vir/`, `src/emit/vir/` and TSVC_2
+and papers) and one pass over `src/vir/`, `src/codegen/vir/` and TSVC_2
 built on this machine. A claim carries the tag of the page it was read on; a
 point the research could not confirm on the page is marked *(unverified)*.
 Local numbers are from the M1 Pro, Homebrew clang 23.1.4, TSVC_2 at commit
@@ -166,7 +166,7 @@ Nobody who removed boolean vectors put them back.
   spill size follows the value's class [LL-RI].
 
 **VIR takes:** one float class, as now. `vir_alloc` already treats every v
-register as caller-saved (`emit/vir/a64.c`: "v0-v7 and v16-v30, all
+register as caller-saved (`codegen/vir/a64.c`: "v0-v7 and v16-v30, all
 caller-saved"; the lowering refuses a callee-saved float register), so the
 partial-register problem does not arise. The slot size comes from the value's
 type (`vir_tysize`), which is what LLVM's classes achieve, without Cranelift's
@@ -407,7 +407,7 @@ any order.
 
 ## 6. Proposal: the loop vectorizer
 
-6.1 **Where.** On the builder's pre-IR in `emit/vir/` (linked instruction
+6.1 **Where.** On the builder's pre-IR in `codegen/vir/` (linked instruction
 lists, parameters with one operand per predecessor), after `vw_ifconv` and
 before `vw_split`: blocks and instructions can still be inserted there, and
 `vir_canon` has not fixed the layout. One walk over the innermost loops, no

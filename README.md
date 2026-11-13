@@ -62,7 +62,7 @@ make ──► vcc (shim, ~100 µs) ──unix socket + SCM_RIGHTS──► vccd
 
 | Path | What |
 |---|---|
-| [src/](src/) | the toolchain: `lex/`, `pp/`, `cc/` (parser + sema), `emit/`, `vir/`, `as/`, `obj/`, `ld/`, `driver/`, `vccd/`, `lib/` |
+| [src/](src/) | the toolchain: `frontend/lex/`, `frontend/pp/`, `frontend/c/` (parser + sema), `codegen/`, `vir/`, `as/`, `obj/`, `ld/`, `driver/`, `vccd/`, `lib/` |
 | `src/arch/<cpu>/` | per-CPU code: `a64`, `x64`, `wasm` |
 | `src/platform/<os>/` | per-OS object formats: `linux` (ELF), `darwin` (Mach-O), `wasm` |
 | [src/tests/](src/tests/) | test suites (own, plus vendored gcc c-torture, tcc tests2 and others) |

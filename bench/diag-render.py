@@ -6,7 +6,7 @@ text shows.  Reads `-fdiagnostics-format=json` lines and the source files
 they name (physical "path", relative to --cwd), never "rendered", and
 prints what vcc's text output prints, byte for byte, including the
 "In file included from" lines and the "N errors generated." summary.
-Two styles, as vcc's: "vcc" (the default, src/pp/diagtext.c: several
+Two styles, as vcc's: "vcc" (the default, src/frontend/diag/diagtext.c: several
 lines, labels, folded notes, help) and "clang" (-fdiagnostics-style=clang).
 A change to either renderer in C changes this file too.
 
@@ -17,7 +17,7 @@ import re, json, os, sys
 
 
 def cp_width(c):
-    """pp/diag.c cp_width: 2 for East Asian wide and emoji, 0 for combining marks"""
+    """frontend/diag/diag.c cp_width: 2 for East Asian wide and emoji, 0 for combining marks"""
     if 0x300 <= c <= 0x36f or 0x200b <= c <= 0x200f or 0xfe00 <= c <= 0xfe0f:
         return 0
     if (0x1100 <= c <= 0x115f or (0x2e80 <= c <= 0xa4cf and c != 0x303f) or 0xac00 <= c <= 0xd7a3 or
@@ -36,7 +36,7 @@ def pad_at(s, ls, le, f):
 
 
 def dcols(s, b, e, col=0):
-    """display columns of s[b:e] from col (pp/diag.c dcols): tabs to the next multiple of 8,
+    """display columns of s[b:e] from col (frontend/diag/diag.c dcols): tabs to the next multiple of 8,
     UTF-8 by its code point's width, a malformed byte one column"""
     i = b
     while i < e:
@@ -195,7 +195,7 @@ class Renderer:
         if fixes:
             out += b' ' * (width + 2) + b'| ' + bytes(fl) + b'\n'
 
-    # ---- vcc's style (src/pp/diagtext.c) ----
+    # ---- vcc's style (src/frontend/diag/diagtext.c) ----
 
     def head(self, d, out):
         """the first line (and include stack); the source and the location's offset, or None"""

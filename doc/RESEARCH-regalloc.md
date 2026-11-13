@@ -3,7 +3,7 @@
 Research of 2026-11-11 for `PLAN-vir.md` step V4 and `SPEC-vir.md` section 15.
 Sources: five web research passes (papers, source trees and their header
 comments, design documents, maintainers' posts, mailing lists) and one pass
-over `SPEC-vir.md` and `src/arch/x64/emit/`. A claim carries the tag of
+over `SPEC-vir.md` and `src/arch/x64/codegen/`. A claim carries the tag of
 the page it was read on; a point that was only seen in a search snippet, or
 that rests on a second-hand description, is marked *(unverified)*. Numbers are
 the sources' own and were measured on their machines and corpora, not ours.

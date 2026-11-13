@@ -13,7 +13,7 @@ from hostenv import R, llvm
 
 SOURCE = r'''
 #include <assert.h>
-#include "arch/x64/emit/mulhi.c"
+#include "arch/x64/codegen/mulhi.c"
 static uint64_t regs[16], snapshot[16];
 static uint32_t mask;
 static int expected_op;

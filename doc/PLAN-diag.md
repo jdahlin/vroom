@@ -27,7 +27,7 @@ källor: `RESEARCH-diagnostics.md`.
 | täckning (`bench/vcc-diagcov.py`) | 105 clang-diagnoser (70 err, 11 warn, 5 ext, 16 note i C); 47 vcc-format säger mindre än clangs (typen eller detaljen saknas); 78 finns bara i vcc (gränser, "unsupported", interna fel) |
 | `tests/diag/` | 66 fall, exakt lika med clang (blir snapshots av vcc:s egen text, D1.2) |
 | felåterhämtning | varje `expect()`-miss och 46 `fatal()` avslutar TU:n |
-| utskrift | `pp/diag.c` formaterar med printf och skriver direkt till fd; ingen post sparas |
+| utskrift | `frontend/diag/diag.c` formaterar med printf och skriver direkt till fd; ingen post sparas |
 
 ## Teststrategin (gäller alla steg)
 
@@ -201,7 +201,7 @@ Tio lager; varje steg nedan säger vilka det berör.
   anropsställena kan flyttas över ett i taget.  `diagids.inc` genereras ur `.td`-filerna
   (bara C-hinken och de id vcc använder), som `ppdata*.inc`.
   *Validera:* lager 1 (66/66), 6, 7.
-  *Klart 2026-11-09.*  `vdiag` i `pp/pp.h`: id, format, flagga, meddelande, primär plats och
+  *Klart 2026-11-09.*  `vdiag` i `frontend/pp/pp.h`: id, format, flagga, meddelande, primär plats och
   etikett, spann med etiketter, fix-its med tillämplighet (`VDA_MACHINE/MAYBE/PLACEHOLDER`),
   makrots token, barn (noter) och `track` (för D1.3).  Byggs i TU:ns `perm`-arena med
   `pp_diag_begin/label/fix/note/emit`; `pp_diag_records()` ger TU:ns poster i ordning.  En
@@ -352,7 +352,7 @@ Tio lager; varje steg nedan säger vilka det berör.
 - **D3.3 OSC 8-länkar** på `[-Wflagga]` och id till dokumentationen (D6) när färg är på.
   *Validera:* lager 4 (snapshots), 5a; SARIF valideras mot det officiella schemat
   (vendrat i `bench/`); `vcc-driver.py` för de nya flaggorna.
-  *Klart 2026-11-09.*  `pp/diagout.c`.  **JSON** (`-fdiagnostics-format=json`): en post per
+  *Klart 2026-11-09.*  `frontend/diag/diagout.c`.  **JSON** (`-fdiagnostics-format=json`): en post per
   rad när den är komplett (vid nästa post eller TU:ns slut), med id, nivå, flagga, `werror`,
   meddelande, plats, etikett, spann, fix-its med tillämplighet, include-stack, barn och
   `rendered` (texten med sin include-stack).  En plats har det som texten visar (fil, rad,
@@ -393,7 +393,7 @@ Det här blir standardutseendet, inte ett eget läge; första raden behåller fo
 **Status (2026-11-09): klart.**  `-fdiagnostics-style=vcc` (standard) | `clang` | `narrated`,
 `-fdiagnostics-text-art-charset=ascii|unicode|emoji|none` (okänt värde: fel, som clang).
 Varje huvudrad är clangs i alla stilar (vcc-driver kontrollerar att de är identiska).
-vcc-stilen (`pp/diagtext.c`): flera rader per kodutdrag, etiketter (`^` platsen, `~` spann,
+vcc-stilen (`frontend/diag/diagtext.c`): flera rader per kodutdrag, etiketter (`^` platsen, `~` spann,
 `-` en invikt nots plats), den högraste etiketten på raden, övriga på `|`-rader under;
 en not på en rad som redan visas (inom 5 rader, samma fil, utan fix-its/help) viks in i
 utdraget och behåller sin huvudrad; en rad mellan visas, större glapp blir `...`;
@@ -458,7 +458,7 @@ Varje delsteg: nya fall i `tests/diag/` (snapshots, och clang som mätpunkt), la
    clang rapporterar out-of-range-varningar i omvänd ordning inom ett fullt uttryck (efter
    uttrycket), vcc i källordning.  `vcc-sema.py warn` 879/879, PostgreSQL 0, grinden ok
    (fe +0.54 % mot merge-basen; konstantjämförelsen provar bara när en operand är smalare).
-   **`-Wformat` klart (2026-11-10):** cc/format.c.  `format(printf|scanf, i, j)` (även
+   **`-Wformat` klart (2026-11-10):** frontend/c/format.c.  `format(printf|scanf, i, j)` (även
    `__printf__`, `gnu_printf`) och C-bibliotekets funktioner enligt clangs Builtins.inc (inte
    under `-fno-builtin`, som kärnan använder).  Formatsträngen kontrolleras när den är en
    literal (även en const-variabel med literal som initierare, båda grenarna av ett `?:` med
@@ -502,13 +502,13 @@ Varje delsteg: nya fall i `tests/diag/` (snapshots, och clang som mätpunkt), la
    paritet 873/873 (batch) och 911/912 (modpost), vccd-test, PostgreSQL 0 varningar som clang
    inte ger, grinden ok (pp +0.12 %, fe +0.81 %).  fuzz-pp hittade en use-after-free i
    `raw` (token.c:149) som finns redan i 96a2f5f: källan från förra körningen, troligen via
-   den delade filcachen (pp/file.c) när samma sökväg får nytt innehåll.
+   den delade filcachen (frontend/pp/file.c) när samma sökväg får nytt innehåll.
 2. **Makron**: expanderad text med caret i, ramar från systemheaders vikta,
    flernivå-"expanded from" (TODO.md "Diagnostic details").
    **Status (2026-11-10): klart.**  En diagnos vid en token från en makroexpansion får
    caret vid anropet (objektmakrots namn, inte `)`) och noter "expanded from macro" i flera
    nivåer, som clangs: cc skickar den diagnostiserade tokenens stavning (`c->dms`,
-   `EXT_WARN_MS`; `bad_operands` operatorn), och pp/diag.c följer den genom kropparna
+   `EXT_WARN_MS`; `bad_operands` operatorn), och frontend/diag/diag.c följer den genom kropparna
    (`xchain`: en direkt träff, annars nästlade anrop; sista förekomsten först).  Kroppar är
    kanoniska kopior utan fil, så ett latent index över `#define`-platser (`mdef_body`) hittar
    definitionen vars token stämmer.  Varje ram får ett spann (ett funktionsmakros till och
@@ -539,11 +539,11 @@ Varje delsteg: nya fall i `tests/diag/` (snapshots, och clang som mätpunkt), la
    `help: ordering its members by decreasing alignment makes it 16 bytes`
    (`tests/diag/static_assert_layout.c`).
 4. **Include-tips**: `memcpy` → `<string.h>` som fix-it, från en genererad libc/POSIX-tabell.
-   **Status (2026-11-09): klart.**  `cc/libfuncs.inc` (genererad av `gen-libbuiltins.py` ur
+   **Status (2026-11-09): klart.**  `frontend/c/libfuncs.inc` (genererad av `gen-libbuiltins.py` ur
    clangs Builtins.inc: 354 biblioteksfunktioner med header) — ett anrop till en odeklarerad
    deklareras med bibliotekets typ som clang, med clangs text ("call to undeclared library
    function 'memcpy' with type ...", i C89 varningen "implicitly declaring library function")
-   och noten "include the header <string.h> ...".  `cc/libnames.inc` (för hand, 173 namn:
+   och noten "include the header <string.h> ...".  `frontend/c/libnames.inc` (för hand, 173 namn:
    typer, makron, POSIX-funktioner som clang saknar) ger `= help: 'size_t' is declared in
    <stddef.h>`.  Båda får `#include <h>` som fix-it efter filens sista `#include`
    (`pp_include_point`), i vcc-stilen ritad som patchrad `8 + #include <stddef.h>`.
@@ -635,9 +635,9 @@ Varje delsteg: nya fall i `tests/diag/` (snapshots, och clang som mätpunkt), la
    av konstanter, billigt grindat (`small_const`), med `help:` om typens intervall; skift får
    `help: 'int' is 32 bits wide ...`.  `vcc-sema.py warn` 879/879 (inga falska på kärnan).
    Kvar (TODO.md "Invalid code accepted"): `-fsyntax-only` saknar "initializer element is not
-   a compile-time constant" (kontrollen görs i emit/data.c).
+   a compile-time constant" (kontrollen görs i codegen/data.c).
 8. **Attribut**: `format`, `nonnull`, `warn_unused_result`, `deprecated("...")`.
-   **Status (2026-11-10): klart.**  cc/attrcheck.c.  `nonnull` (utan index: varje
+   **Status (2026-11-10): klart.**  frontend/c/attrcheck.c.  `nonnull` (utan index: varje
    pekarparameter; med index; på en parameter) ger `-Wnonnull` för ett null-argument (clangs
    CheckNonNullExpr: en konstant som är falsk som villkor), på clangs plats (anropets `)` för
    funktionens rena `nonnull`, annars argumentet).  `warn_unused_result` och `nodiscard`
@@ -712,7 +712,7 @@ runtom (`ppd_run1`): pp +0,26 % mot merge-basen.
 ingenting (fd −1, eller sin logg med `VCC_LOG`), så vcc:s varningar syntes aldrig under vccd.
 Nu går de till en tillfällig fil per tråd (`cc_own`) och till klientens stderr när TU:n lyckas
 (en TU vcc fallerar på går som förut till clang, som rapporterar); färger som för klientens
-terminal (`ppd_env.errtty`).  `vccd/dstore.c`: pp ger varje post i TU:ns slut till en
+terminal (`ppd_env.errtty`).  `server/dstore.c`: pp ger varje post i TU:ns slut till en
 `pp_dsink` (`pp_drec`: nivå, flagga, fil, JSON-raden utan `rendered`), och lagret håller dem
 per källfil, så en omkompilering ersätter exakt den TU:ns mängd (en TU som går till clang tar
 bort sin).  `vcc --vccd-diagnostics` (sammanfattning per flagga och per fil) och `=json`
@@ -799,7 +799,7 @@ som SARIF.  *Validerat:* `vcc-mutate.py --formats` kontrollerar varje mutants si
 välformad, en sektion per post och samma text som textutdata.
 
 Status D8.5 (2026-11-10): `-Wuninitialized` och `-Wsometimes-uninitialized` gjorda här
-(`cc/uninit.c`), med clangs regler: skalära lokala variabler (heltal, enum, flyttal,
+(`frontend/c/uninit.c`), med clangs regler: skalära lokala variabler (heltal, enum, flyttal,
 pekare) som aldrig får sin adress tagen, en varning per variabel, efter `-Wreturn-type`.
 Ett tillstånd per variabel (oinitierad, kanske, initierad) längs satsträdet; varje kant
 som lämnar en variabel oinitierad märks (`if`, `&&`, `||`, `?:`, en loops utgång, `case`,
@@ -808,7 +808,7 @@ två gånger (först tyst), en bakåt-`goto` eller `asm goto` tystar funktionen.
 och fix-its (` = 0`, ` = 0.0`, ` = '\0'`, ` = NULL`, ta bort villkoret) ges; vcc-stilen
 ritar kanten och användningen i samma utdrag.  `(void)x`, `va_start`/`va_copy`/`va_end`
 och sammansatta literaler läses som clang (tre falsklarm på kärnan rättade).  Grenen
-`claude/review-remaining-errors-acd5c5` har en egen `cc/flow.c` för samma varningar och
+`claude/review-remaining-errors-acd5c5` har en egen `frontend/c/flow.c` för samma varningar och
 överlappar D8.1/D8.2: en sammanslagning väljer en av dem.  *Validerat:* diag-fallen
 `uninit.c` (37 fall, samma rubriker och fix-its som clang), `uninit_flow.c` och
 `uninit_pragma.c`; `vcc-sema.py warn` 879/879; PostgreSQL utan varningar som clang inte ger.

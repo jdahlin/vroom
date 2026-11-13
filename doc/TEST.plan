@@ -528,7 +528,7 @@ obligatoriska. Wasm-felen döljs inte som godkända eller överhoppade prov.
 TSan hittade en verklig kapplöpning när parallella emittertrådar värderade
 konstanta initialiserare: delad rekursionskedja pekade in i andra trådars
 stackar, och implicita noll-/strängelement skapade nya AST-noder under
-emissionen. Rekursionskedjan är nu trådlokal och nycklad per cc/symbol;
+emissionen. Rekursionskedjan är nu trådlokal och nycklad per frontend/c/symbol;
 allokeringsfria delobjektsbeskrivningar ersätter AST-mutationerna.
 Ursprungsreproduceraren går från TSan exit66 till grönt med sex trådar.
 Normal/nonunity/TSan klarar tre constexpr-runtimeprov på båda Linux-målen,

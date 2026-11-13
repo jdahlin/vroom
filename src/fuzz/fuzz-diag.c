@@ -26,8 +26,8 @@
 #include <unistd.h>
 
 #include "../common/intern.h"
-#include "../lex/lex.h"
-#include "../pp/pp.h"
+#include "../frontend/lex/lex.h"
+#include "../frontend/pp/pp.h"
 #include "fuzz.h"
 
 #define MAXIN (64u << 10)

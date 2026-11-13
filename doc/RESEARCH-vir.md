@@ -2,7 +2,7 @@
 
 Research of 2026-11-11 for `PLAN-vir.md`. Sources: three web research passes
 (papers, LLVM issues and RFCs, ClangBuiltLinux, LKML, engineering blogs) and
-one pass over `src/emit/`. Points the research could not confirm on the
+one pass over `src/codegen/`. Points the research could not confirm on the
 page are marked *(unverified)*. Each item ends with the rule VIR takes from it;
 the rules are collected in section 5.
 
@@ -201,7 +201,7 @@ about ten years old and no target that started on SelectionDAG has fully moved
 legaliser by a single backward lowering sweep into a flat array [CL20].
 
 **VIR:** two levels: VIR, then the existing 16-byte machine records
-(`emit/rec/`).
+(`codegen/rec/`).
 Legalisation is part of the lowering sweep.
 
 ### 2.4 Things to avoid
@@ -336,19 +336,19 @@ headers marked, which that algorithm needs.
 
 - AST nodes are 24 bytes, 32-bit indices into per-TU arrays; conversions are
   explicit `N_CAST` nodes; constants are evaluated on demand by `cc_eval`.
-- `emit/prepass.c` computes per function: weighted use counts (`luse`), locals
+- `codegen/prepass.c` computes per function: weighted use counts (`luse`), locals
   that need memory (`lnoreg`), single-constant variables, label flags.
-- Three generators: arm64 (`arch/a64/emit/`, its own AST generator), x86-64
-  (the shared walker `emit/walk/` calling `arch/x64/emit/` through `LO()`),
-  wasm (`arch/wasm/emit/`, its own).
+- Three generators: arm64 (`arch/a64/codegen/`, its own AST generator), x86-64
+  (the shared walker `codegen/walk/` calling `arch/x64/codegen/` through `LO()`),
+  wasm (`arch/wasm/codegen/`, its own).
 - `LO()` is about 70 operations on `val`/`lval` with physical registers the
   CPU hands out (`treg`/`tfree`). No target has a register allocator: values
   are spilled around calls, and a function is generated again when temporaries
   run out.
-- Machine records are 16 bytes (`emit/rec/rec.h`, arm64's `ins.h`) with a
+- Machine records are 16 bytes (`codegen/rec/rec.h`, arm64's `ins.h`) with a
   per-CPU op table (`opdesc`). Shared pieces without SSA: algebra rules in
-  `emit/opt/`, record passes in `emit/rec/`, block graph and bounded liveness
-  in `emit/flow/` (`PLAN-fas2.md`, OPT0-OPT8).
+  `codegen/opt/`, record passes in `codegen/rec/`, block graph and bounded liveness
+  in `codegen/flow/` (`PLAN-fas2.md`, OPT0-OPT8).
 - `PLAN-x86.md` ("Vad som inte går utan SSA") names what this leaves out:
   GVN, LICM and real register allocation, to be done by an optional SSA pass
   with virtual registers at `-O2`. VIR is that pass.

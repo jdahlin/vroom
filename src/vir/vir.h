@@ -5,7 +5,7 @@
  * encoding (9), the opcode table every tool reads, and the operations on a
  * function: construction, vir_cfg, vir_dom, vir_uses and vir_canon.
  *
- * The module depends on nothing in cc/, emit/ or arch/.  Symbols, signatures
+ * The module depends on nothing in frontend/c/, codegen/ or arch/.  Symbols, signatures
  * and asm templates of a text unit are in unit-local tables (vir_unit).
  *
  * Building a function (the builder form; the parser and the compiler's

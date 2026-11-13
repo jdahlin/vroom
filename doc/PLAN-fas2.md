@@ -187,7 +187,7 @@ förprocessas 121 gånger.
 | | **2.1a klar** (`patches/0002-kconfig-parallel-shell.patch`): spekulativ parallell `$(shell)` i Kconfig, byte-identisk config. conf 4,1 s → 1,0 s; första CC 7,2 s → 4,3 s. Resten är processkostnad (97 `cc-probe` à ~35 ms, 7 `as-instr` à ~156 ms via riktig clang `-cc1as`) och försvinner när vcc/vas svarar själva | |
 | | **2.1b klar** (`src/`): `vcc`/`vld`/`vas`-shim (en binär, ingen stdio/malloc) + `vccd` (kqueue-accept, trådpool, mmap-buffertar per tråd). Prober besvaras från kapabilitetstabellen `caps.c` på ~0,05 ms (hela anropet 3,2 ms ≈ processgolvet 2,3 ms), resten vidarebefordras till vroomd/vroom-ld. Tabellen är minimal: inga sanitizers, stack-protector, PAC/BTI, SCS, auto-var-init; varningsgrupper ⊆ clang (`gen-warnings.sh`) så länge clang är backend. Första CC 4,3 s → 3,4 s, kallt bygge 22,2 s, bootar till `running` | |
 | | **2.1c profil före första CC** (dash som `SHELL`/`CONFIG_SHELL`, `patches/0003`): ~3,5 s på belastad maskin. Kritiska vägen är seriell: make-parse + SYNC ~0,5 s → fixdep ~0,3 s → conf-objekt + bison + ld64 ~0,4 s → **conf ~0,7–1,3 s** (≈240 skalkommandon, ~700 processer à 2–3 ms; nära processgolvet) → dtc/kallsyms/sorttable ~0,6 s (Kbuild låter `archprepare` vänta på hela `scripts`) → bounds.s. Hostverktyg med -O0 gav ingen vinst (conf blev långsammare). **Slutsats:** med make + Kconfig + hostverktyg byggda av clang/ld64 ligger golvet runt 1,5–2 s före första CC, så < 2 s totalt kräver (a) att vcc även kan bygga hostverktygen (Apple Silicon är AArch64: Mach-O-utdata + libSystem-ABI i samma emitter), (b) att `archprepare` bara väntar på `scripts_basic`, (c) färre processer per probe (`cc-probe` utan mkdir/rm) | |
-| | **2.1d klar** (b) och (c) från 2.1c, plus prober som låg på kritiska vägen. Kärnpatchar `patches/0004`–`0007` (gren `vroom-pf` i `work/linux-pf`, ännu inte i `work/linux`): (1) `archprepare` väntar bara på `scripts_basic`; nedstigningen i trädet och `modules_prepare` väntar på `scripts` (GCC-plugins/recordmcount/Rust: som förut); arm64:s kapi-headers (`cpucap-defs.h` m.fl.) genereras som förutsättning till `archprepare` i stället för i dess recept, parallellt med asm-generic (0007). (2) `filechk` hoppar över `mkdir -p` och `rm -f` när de inte behövs (4 → 2 processer per genererad header); config-instansen expanderar `CC_VERSION_TEXT`/`RUSTC_VERSION_TEXT`/`PAHOLE_VERSION` en gång i stället för vid varje kommando (~20 × `vcc --version \| head` + pahole + rustc). (3) Kconfig skapar en scratch-katalog (`$KCONFIG_TMPDIR`, tas bort vid exit) och `cc-probe` gör `-Wno-`-omskrivningen med parameterexpansion: 7 → 2 processer per `cc-option`, ingen nästlad `$(shell)`. syncconfig: 241 → 143 kommandon, 9–11 → 4–6 rundor. vccd/caps.c: `as-instr` och `echo … \| $(CC) -x c -` slås upp i en tabell med clangs svar (okänd källa kompileras på riktigt med samma stdin); länkprov (`cc-can-link.sh`) → nej; `--version`, `-print-file-name=`, `vld --version` ur caps.c; vld vägrar `--pack-dyn-relocs=`/`-z pack-relative-relocs` direkt (relr-skriptet 187 → 32 ms). `.config` byte-identisk och alla 1 387 `.cmd`-filer identiska mot A. **A/B** (alternerande, samma privata vroomd/vccd, `VCC_PP=0` p.g.a. -E-regressionen i main): första CC från make-start 3,5/3,5/3,4 s → 2,3/2,3/2,3 s (0004–0006, last 4 → 50) och 3,5/3,5/3,9 → **2,2/2,2/2,3 s** (med 0007, last 19 → 58); kallt bygge 22,4/23,5/23,9 → 21,2/22,5/23,4 s resp. 24,4/23,8/24,5 → 22,7/24,4/23,5 s (kompileringsfasen dominerar och är brusig under last); bootar till `running`, 0 fel. conf själv ~0,4 s tyst (yyparse inkl. `$(shell)` 0,23 s, `menu_finalize` 0,17 s ren CPU i `expr_transform`). Shimmen ligger på golvet: `vcc --version` 3,4–4,1 ms = ett tomt `int main` (3,5–3,9 ms) mot `/usr/bin/true` 2,6 ms (systembinärer startar snabbare); vccd-rundresan ~0,1 ms. **Kvar före första CC (~2,3 s):** fyra parsningar av toppnivåns Makefile (yttre+inre ~0,2 s, config-instansen ~0,2 s, omstarten efter `auto.conf`) med ~50 processer var, varav try-run-prober à 4 processer; fixdep 0,2 s och conf-objekt 0,3 s (vroom-cc + ld64); `menu_finalize`; `cc-version.sh` (`-E` av stdin) | |
+| | **2.1d klar** (b) och (c) från 2.1c, plus prober som låg på kritiska vägen. Kärnpatchar `patches/0004`–`0007` (gren `vroom-pf` i `work/linux-pf`, ännu inte i `work/linux`): (1) `archprepare` väntar bara på `scripts_basic`; nedstigningen i trädet och `modules_prepare` väntar på `scripts` (GCC-plugins/recordmcount/Rust: som förut); arm64:s kapi-headers (`cpucap-defs.h` m.fl.) genereras som förutsättning till `archprepare` i stället för i dess recept, parallellt med asm-generic (0007). (2) `filechk` hoppar över `mkdir -p` och `rm -f` när de inte behövs (4 → 2 processer per genererad header); config-instansen expanderar `CC_VERSION_TEXT`/`RUSTC_VERSION_TEXT`/`PAHOLE_VERSION` en gång i stället för vid varje kommando (~20 × `vcc --version \| head` + pahole + rustc). (3) Kconfig skapar en scratch-katalog (`$KCONFIG_TMPDIR`, tas bort vid exit) och `cc-probe` gör `-Wno-`-omskrivningen med parameterexpansion: 7 → 2 processer per `cc-option`, ingen nästlad `$(shell)`. syncconfig: 241 → 143 kommandon, 9–11 → 4–6 rundor. server/caps.c: `as-instr` och `echo … \| $(CC) -x c -` slås upp i en tabell med clangs svar (okänd källa kompileras på riktigt med samma stdin); länkprov (`cc-can-link.sh`) → nej; `--version`, `-print-file-name=`, `vld --version` ur caps.c; vld vägrar `--pack-dyn-relocs=`/`-z pack-relative-relocs` direkt (relr-skriptet 187 → 32 ms). `.config` byte-identisk och alla 1 387 `.cmd`-filer identiska mot A. **A/B** (alternerande, samma privata vroomd/vccd, `VCC_PP=0` p.g.a. -E-regressionen i main): första CC från make-start 3,5/3,5/3,4 s → 2,3/2,3/2,3 s (0004–0006, last 4 → 50) och 3,5/3,5/3,9 → **2,2/2,2/2,3 s** (med 0007, last 19 → 58); kallt bygge 22,4/23,5/23,9 → 21,2/22,5/23,4 s resp. 24,4/23,8/24,5 → 22,7/24,4/23,5 s (kompileringsfasen dominerar och är brusig under last); bootar till `running`, 0 fel. conf själv ~0,4 s tyst (yyparse inkl. `$(shell)` 0,23 s, `menu_finalize` 0,17 s ren CPU i `expr_transform`). Shimmen ligger på golvet: `vcc --version` 3,4–4,1 ms = ett tomt `int main` (3,5–3,9 ms) mot `/usr/bin/true` 2,6 ms (systembinärer startar snabbare); vccd-rundresan ~0,1 ms. **Kvar före första CC (~2,3 s):** fyra parsningar av toppnivåns Makefile (yttre+inre ~0,2 s, config-instansen ~0,2 s, omstarten efter `auto.conf`) med ~50 processer var, varav try-run-prober à 4 processer; fixdep 0,2 s och conf-objekt 0,3 s (vroom-cc + ld64); `menu_finalize`; `cc-version.sh` (`-E` av stdin) | |
 | 2.2 | SIMD-lexer + tokencache | lexar alla 3 114 kärnfiler; > 1 GB/s/kärna; tokens identiska med clang `-dump-tokens` |
 | 2.3 | Preprocessor | `vcc -E` ger samma tokenström som `clang -E` för alla 840 TU:er (normaliserad jämförelse) |
 | 2.4 | Header-cache/prefixträd | `-E` för alla TU:er < 0,5 s väggtid totalt |
@@ -357,7 +357,7 @@ aldrig i bygget. Ett TU-test (`bench/vcc-diff.py`) körs över alla kärnfiler.
 - **Död kod som -O2 tar bort (2026-11-08):** för att länka och boota behövs mer av det clang -O2 gör: små `static inline`-funktioner (≤ 40 AST-noder) inlinas (`scs_is_enabled()`); lokala variabler som bara tilldelas heltalskonstanter följs längs framåtkanter (värdet följer med hoppet till etiketten, sammanflöden behåller det alla vägar är överens om, loophuvuden och okända mål glömmer; t.ex. `alternative_has_cap_unlikely` och `enable_scs` i `map_kernel`); `__builtin_strcmp` av två strängliteraler viks (`vruntime_cmp`); kastade uttryck utan sidoeffekter genereras inte (`(void)(RCU)`); oanvända skalära argument till inlinade funktioner genereras inte. Användaretiketter är bara tvingat nåbara om de är mål för bakåthopp eller `&&`. Ett internt fel fångar hopp bakåt till en etikett som släppts eller placerats med kända värden. `bench/vcc-obj.py` listar symboler vcc lämnar odefinierade som inte finns i vmlinux.
 - **Boot (2026-11-08):** `bench/vcc-kbuild.py DST` (ny) kopierar build-o0, ersätter alla 838 kärn-TU:ers objekt med vcc-objekt (`vpp -S`, clang assemblerar), länkar med `kmake ... LD=ccs/vroom-ld Image`. vDSO byggs av clang (kräver PIC, saknas). vroom-ld stubbar 28 symboler som bara död kod refererar (clang -O0: 94, vcc:s är en delmängd). **Debian 13 bootar till `running` utan fel** (`bench/boot-test.py`, `results/boot-20261108-001340.log`). Fel som hittades på vägen (bisektion per objekt mot clang-objekt, ~17 s per steg): `for`-initierarens cleanup-djup i förpasset (`scoped_guard` låste upp två gånger → preempt-räknaren fel), en oanvänd `va_list` (32-byte post) kopierad från adress 0.
 - **Kodkvalitet, första steg (2026-11-08):** mätt mot clangs -O2-pipeline (kärnans flaggor) på 80 slumpvisa kärn-TU:er, statiskt (instruktioner i objekten): vcc 2,86× clang -O2, clang -O0 2,78×; med clangs -O2-bakände ensam 1,46×, + mem2reg/SROA 1,15×, + InstCombine/SimplifyCFG/EarlyCSE 1,10×, + inliner 0,88×, + GVN/LICM/DSE 0,86× (full -O2 1,00×: unrolling och mer inlining kostar storlek). Klassning av vcc:s sp/fp-laddningar och -lagringar: vanliga lokala variabler 31 % av instruktionerna, omladdning direkt efter lagring 6,6 %, kopior slot→slot 6,2 % (inlinade anrop band parametrar och resultat till slotar), `b` till nästa etikett 6,5 %, spill runt anrop 0,2 %. Två åtgärder: (1) `b` till en etikett direkt efter tas bort i `finish_function`; (2) en inlinad funktions parametrar som kroppen aldrig skriver (adresstagning räknas som skrivning) behåller argumentets register (`B_REG`, läsning = `mov`, smala typer utvidgas en gång som en laddning skulle), och resultatet kommer i ett register (`fnctx.retreg`), så länge minst 8 temporärer är lediga. Resultat på samma 80 TU:er: instruktioner 370 852 → 339 546 (−8,4 %, 2,62× -O2), sp/fp-operationer 174 156 → 135 005 (−22 %), `b` till nästa 24 060 → 6, omladdningar 24 313 → 11 102, kopior 22 845 → 8 533; spill runt anrop 608 → 5 360 (parametrar i x9–x15 över anrop i kroppen: nästa steg är callee-saved register för dem). Kompileringstid oförändrad (fair.c 0,10 s). Verifierat: körtester t1–t6, `bench/vcc-obj.py` 840/840 (samma 31 odefinierade symboler som före), `bench/vcc-fpcheck.py` 840/840, alla 840 kärn-TU:er från vcc bootar Debian 13 till `running` (`results/boot-20261108-231928.log`). Nästa: lokala variabler i register (31 % av instruktionerna). **Rättelse:** bootloggen ovan (`boot-20261108-231928.log`) var en clang-kärna: kbuild byggde om det nykopierade trädet med clang (854 CC-rader), se nästa punkt; ändringarna är bootverifierade där.
-- **Lokala variabler i register (2026-11-08):** förpasset räknar varje lokal variabels användningar viktade med loopdjup (8× per nivå, `luse`) och markerar dem som behöver minne (`lnoreg`: adresstagning, asm-operander som utdata eller m/g/X, va_start, `{}`-initierare; skilt från vanlig skrivning). Den emitterade funktionens (inte inlinade kroppars) mest använda skalära lokala variabler och parametrar får callee-saved register x28 nedåt för hela funktionen (`B_LREG`, lvärde `L_VREG`: läsning `mov`, skrivning `mov`/utvidgning som en laddning från slot skulle ge; adress eller minnesåtkomst är internt fel). Registren tas ur temporärpoolen. Tar temporärerna slut genereras funktionen om utan registervariabler och med fler lediga temporärer i inlinade anrop (`INLINE_FREE_FAST` 5 → `INLINE_FREE_SAFE` 8). Ny `emit/opt.c`: livenessanalys över funktionens poster (block vid etiketter och efter hopp; inline asm, `I_WORD`, brk läser alla register; funktioner med `br` lämnas), framåt kopiepropagering (`mov t, v` → läsningar av t läser v), bakåt (`op t; mov v, t` → `op v`), döda `mov` bort. Mätt (80 TU:er, statiskt): `VCC_LREGS`=0/4/6/8/10 ger 311 794/292 299/291 677/291 417/… instruktioner; utan opt.c ökade antalet (varje läsning en kopia, `mov` 39 k → 76 k). Med 6: instruktioner 339 546 → 291 677 (−14 %; sedan sessionens start 370 852, −21 %; 2,25× clang -O2, färre än clang -O0:s 361 076), sp/fp-operationer 135 005 → 100 715 (−25 %; från start −42 %). Kvar: lagringar 11 %, laddningar 8,7 % (lokala i inlinade kroppar och icke valda), spill runt anrop 3,5 % (upp från 1,6 %: färre callee-saved temporärer), sparade callee-saved 5,9 %. Kompileringstid oförändrad (840 TU:er `--batch -S` 7,6–7,7 s mot 8,0–8,1 s). Verifierat: körtester t1–t6 (även `VCC_LREGS=10`), `bench/vcc-obj.py` 840/840 (samma odefinierade symboler), `bench/vcc-fpcheck.py` 840/840, även med ASan/UBSan och TSan (TSan: två rapporter i `pp/include.c:428` och `arena.h:84`, inte i emit/), 838/838 kärn-TU:er från vcc bootar Debian 13 till `running` (`results/boot-20261108-235047.log`, 28 stubbade symboler). `bench/vcc-kbuild.py` bygger inte längre vDSO:n med vcc (kräver PIC; ett återanvänt träd fick annars vcc:s `memcpy`-anrop i vDSO:n) och avbryter om kbuild byggt om något vcc-objekt med clang.
+- **Lokala variabler i register (2026-11-08):** förpasset räknar varje lokal variabels användningar viktade med loopdjup (8× per nivå, `luse`) och markerar dem som behöver minne (`lnoreg`: adresstagning, asm-operander som utdata eller m/g/X, va_start, `{}`-initierare; skilt från vanlig skrivning). Den emitterade funktionens (inte inlinade kroppars) mest använda skalära lokala variabler och parametrar får callee-saved register x28 nedåt för hela funktionen (`B_LREG`, lvärde `L_VREG`: läsning `mov`, skrivning `mov`/utvidgning som en laddning från slot skulle ge; adress eller minnesåtkomst är internt fel). Registren tas ur temporärpoolen. Tar temporärerna slut genereras funktionen om utan registervariabler och med fler lediga temporärer i inlinade anrop (`INLINE_FREE_FAST` 5 → `INLINE_FREE_SAFE` 8). Ny `codegen/opt.c`: livenessanalys över funktionens poster (block vid etiketter och efter hopp; inline asm, `I_WORD`, brk läser alla register; funktioner med `br` lämnas), framåt kopiepropagering (`mov t, v` → läsningar av t läser v), bakåt (`op t; mov v, t` → `op v`), döda `mov` bort. Mätt (80 TU:er, statiskt): `VCC_LREGS`=0/4/6/8/10 ger 311 794/292 299/291 677/291 417/… instruktioner; utan opt.c ökade antalet (varje läsning en kopia, `mov` 39 k → 76 k). Med 6: instruktioner 339 546 → 291 677 (−14 %; sedan sessionens start 370 852, −21 %; 2,25× clang -O2, färre än clang -O0:s 361 076), sp/fp-operationer 135 005 → 100 715 (−25 %; från start −42 %). Kvar: lagringar 11 %, laddningar 8,7 % (lokala i inlinade kroppar och icke valda), spill runt anrop 3,5 % (upp från 1,6 %: färre callee-saved temporärer), sparade callee-saved 5,9 %. Kompileringstid oförändrad (840 TU:er `--batch -S` 7,6–7,7 s mot 8,0–8,1 s). Verifierat: körtester t1–t6 (även `VCC_LREGS=10`), `bench/vcc-obj.py` 840/840 (samma odefinierade symboler), `bench/vcc-fpcheck.py` 840/840, även med ASan/UBSan och TSan (TSan: två rapporter i `frontend/pp/include.c:428` och `arena.h:84`, inte i codegen/), 838/838 kärn-TU:er från vcc bootar Debian 13 till `running` (`results/boot-20261108-235047.log`, 28 stubbade symboler). `bench/vcc-kbuild.py` bygger inte längre vDSO:n med vcc (kräver PIC; ett återanvänt träd fick annars vcc:s `memcpy`-anrop i vDSO:n) och avbryter om kbuild byggt om något vcc-objekt med clang.
 - **Prestanda (2026-11-08, laddad maskin, load ~4):** emittern på alla 840 TU:er: 459 ms CPU (0,55 ms/TU, varav utskrift 122 ms), 4,48 M instruktioner = 17,9 MB maskinkod, 39 MB/s, 103 ns/instruktion, en tråd per TU (`bench/vcc-emit-stats.py`). `kernel/sched/core.c` ensam: 2,9 ms med 1 tråd, 1,26 ms med 2, 1,04 ms med 4. Roofline (`bench/emit-roofline.c`, 29 755 instruktioner): maskinkod 0,10 ns/instruktion (~40 GB/s), text 0,74 ns/instruktion; vi ligger två storleksordningar över, det mesta i generering och utskrift, inte i minnesbandbredd.
 - **Optimeringsnivåer (2026-11-09):** `cc_opts.opt` får `-O`-nivån (0: ingen/`-O0`, 1: `-O1`/`-Og`, 2: `-O2`/`-O3`/`-Os`/`-Oz`/`-O`). Från `-O1`: registervariabler, inlinade parametrar och resultat i register, borttagna hopp till nästa etikett och `opt.c`; `-O0` är den enkla kodgeneratorn. Målet är att resten av clangs `-O2`-pass hamnar på samma nivåer. `tests/emit/run.sh` väljer nivå med `VCC_O` (standard `-O2`). Verifierat: t1–t6 vid `-O0`/`-O1`/`-O2`, `-O2`-utdata identiskt med 74b2d82 (80/80 TU:er), `bench/vcc-obj.py` 840/840, 838/838 kärn-TU:er från vcc bootar (`results/boot-20261109-000308.log`).
 - **Villkor på en cset (2026-11-09, från `-O1`):** är senaste posten `cset r, villkor` för värdet (`last_cset`) används flaggorna i stället för värdet: test i hopp blir `b.villkor` (`test_zero`), omvandling till bool och utvidgande heltalscast blir ingenting, `!` och `== 0` vänder villkoret, `!= 0` behåller det. Täcker `likely`/`unlikely` (`__builtin_expect(!!(x), …)` gav `cmp; cset; eor; cmp; cset; eor; sxtw; cbz`, nu `cmp; b.cc`). Mätt (80 TU:er): instruktioner 291 677 → 268 502 (−7,9 %; 2,07× clang -O2), `cset` 11,6 k → 3,5 k, `eor` 7,5 k → 0,8 k; emit-fasen 76 → 74 ms. Jämförelse med clang per klass och mönster: `ophist.py`/`ngram.py` (scratch). Nästa i ordning: argument direkt i x0–x7 (11,7 k `str` + 12,9 k `ldr`), spill bara av levande temporärer, lagring→laddning-vidarebefordran på slotar utan adress, redundanta utvidgningar. Verifierat: t1–t7 (ny `t7_cond.c`; fångar en mutation av `== 0`-vändningen) vid `-O0`/`-O1`/`-O2`, `bench/vcc-obj.py` 840/840, `bench/vcc-fpcheck.py` 840/840, 838/838 kärn-TU:er från vcc bootar (`results/boot-20261109-001905.log`).
@@ -553,7 +553,7 @@ klarar inte runtimen 34, tcc-specifika 32, kompilatorspecifikt 1).
 - **Kvar:** SVE (`arm_sve.h`-typer, `target("+sve")`); `__has_builtin` svarar 0 för namn som inte finns i kärnan/SDK:n (ppdata.inc, t.ex. `__sync_lock_release`): generera med `EXTRA_INC=work/postgres/src/include`; diagnostiker skriver vektortyper som `''`; TAP-testerna (`-Dtap_tests=enabled`, IPC::Run); Mach-O-länkning (ld64 i svansen).
 
 ### Status katalogstruktur (2026-11-09): inför x86-64
-- `src/` i komponentkataloger (`lib/`, `lex/`, `pp/`, `cc/`, `emit/`, `as/`, `obj/`, `ld/`, `driver/`, `vccd/`), allt CPU-specifikt i `arch/a64/` (emitterns 18 filer, as-parsern, kodaren, fixups, länkarens relokeringar och thunks), OS-specifikt i `platform/{linux,darwin}/` (ELF- och Mach-O-skrivarna), fas 1-verktygen i `contrib/phase1/`. Datastrukturer i `lib/`: identiska kopior sammanslagna (`vreserve` ×4, `vregion` ×2, `vbuf` ×2), övriga varianter sida vid sida (TODO.md). Moduler över flera kataloger: Makefile-listor `MOD_SRC`, fortfarande en unity-TU per modul (cc, pp, emit, as, obj). AGENTS.md "Layout" beskriver strukturen.
+- `src/` i komponentkataloger (`lib/`, `frontend/lex/`, `frontend/pp/`, `frontend/c/`, `codegen/`, `as/`, `obj/`, `ld/`, `driver/`, `vccd/`), allt CPU-specifikt i `arch/a64/` (emitterns 18 filer, as-parsern, kodaren, fixups, länkarens relokeringar och thunks), OS-specifikt i `platform/{linux,darwin}/` (ELF- och Mach-O-skrivarna), fas 1-verktygen i `contrib/phase1/`. Datastrukturer i `lib/`: identiska kopior sammanslagna (`vreserve` ×4, `vregion` ×2, `vbuf` ×2), övriga varianter sida vid sida (TODO.md). Moduler över flera kataloger: Makefile-listor `MOD_SRC`, fortfarande en unity-TU per modul (cc, pp, emit, as, obj). AGENTS.md "Layout" beskriver strukturen.
 - **Acceptans, varje commit:** 1 326 utdata (`-c` -O0/-O1/-O2, `-S`, `-E`; kärn-TU:er, gcc-torture, tcc, vcc-tester; Linux- och Darwin-mål) byte-identiska med bygget före; `vbench.py check --base` 171/171 (även vmlinux-länkningen); vcc-ctests 1729/1729, paritet 873/873, sema 878/879; gate inom ±0,1 % i alla steg.
 - **Kvar:** länkaren som delad modul (dess arm64-delar är `.inc`-fragment), Darwin-grenarna inne i emittern (`DARWIN(c)`) till `platform/`, gemensamma datastrukturer. Redan före: steg 3 av `make self-check` kraschar (steg 2-`vpp` segfaultar), vasm saknar `ldursh` (vcc-asdiff 839/840).
 
@@ -639,15 +639,15 @@ Kodgranskningen är gjord efter rebase på main `4daebd9`; auditens siffror
 gäller uttryckligen dess äldre bas `52261ef`. Nästa kodsteg bygger och mäter
 en ny bas innan någon prestandajämförelse. De gamla resultaten skrivs inte om.
 
-- `emit/tu.c` väljer tre generatorer. `emit/walk/` används bara av x86;
+- `codegen/tu.c` väljer tre generatorer. `codegen/walk/` används bara av x86;
   `walk.h` har hårdkodat `LO(name) x64_##name`. `wkarg` och dess
   SSE/eightbyte-klasser är också SysV-specifika. Katalogens namn betyder
   därför inte att arm64/wasm redan använder den.
-- `emit/prepass.c` har redan `luse`, `lnoreg`, `lspan`, `sflags`,
+- `codegen/prepass.c` har redan `luse`, `lnoreg`, `lspan`, `sflags`,
   `fnsize`, skrivnings- och adressflyktsfakta. Återanvänd dem, med
   konservativ komplettering där de inte bevisar vad en ny regel behöver.
 - arm64:s `choose_lregs`/`bind_lreg` håller utvalda skalärer i register.
-  `arch/a64/emit/opt.c` har block/liveness, kopior, stackceller, kända
+  `arch/a64/codegen/opt.c` har block/liveness, kopior, stackceller, kända
   utvidgningar och döda resultat. `finish_function` väljer ram och sparade
   register efter städningen. Det är befintlig funktionalitet att extrahera,
   inte en ny optimerare att skriva en gång till för x86.
@@ -668,17 +668,17 @@ en ny bas innan någon prestandajämförelse. De gamla resultaten skrivs inte om
 
 | Gemensamt ansvar | Föreslagen plats | Målets ansvar |
 | --- | --- | --- |
-| Typkorrekta algebraregler, konstantdivisionens parametrar | `emit/opt/identity.c`, `divpow2.c` och separata regelfiler | Shift/mask/mulhi/div, immediatgränser och kostnad för en sekvens |
-| Nåbarhet, bevarade sidoeffekter, lokala fakta | `emit/opt/flow.c`, befintligt `prepass.c` | Hur gren/etikett/retur emitteras |
-| Inliningens behörighet och budget | `emit/opt/inline.c` | Argument/resultat, register, ABI och målbegränsningar |
-| Urval av lokaler som kan bo utanför minnet | `emit/opt/locals.c` | Fysiska register eller wasm-lokaler, callee-save, prolog och spill |
-| Switchens sortering, densitet och strategival | `emit/opt/switch.c` | Trädgrenar, kod-/värdetabeller, relokeringar eller wasm `br_table` |
-| Blockgränser, kopior, döda resultat, stackceller, utvidgningsfakta | `emit/rec/` | Op-beskrivningar, faktaöverföring för målinstruktioner, säkra omskrivningar |
+| Typkorrekta algebraregler, konstantdivisionens parametrar | `codegen/opt/identity.c`, `divpow2.c` och separata regelfiler | Shift/mask/mulhi/div, immediatgränser och kostnad för en sekvens |
+| Nåbarhet, bevarade sidoeffekter, lokala fakta | `codegen/opt/flow.c`, befintligt `prepass.c` | Hur gren/etikett/retur emitteras |
+| Inliningens behörighet och budget | `codegen/opt/inline.c` | Argument/resultat, register, ABI och målbegränsningar |
+| Urval av lokaler som kan bo utanför minnet | `codegen/opt/locals.c` | Fysiska register eller wasm-lokaler, callee-save, prolog och spill |
+| Switchens sortering, densitet och strategival | `codegen/opt/switch.c` | Trädgrenar, kod-/värdetabeller, relokeringar eller wasm `br_table` |
+| Blockgränser, kopior, döda resultat, stackceller, utvidgningsfakta | `codegen/rec/` | Op-beskrivningar, faktaöverföring för målinstruktioner, säkra omskrivningar |
 | Adressens bas/index/skala/displacement och typbredd | Gemensam adressbeskrivning vid `lval`/walk | x86 SIB/LEA, arm64:s index-/offsetformer, wasm-adressberäkning |
 | Explicit vektoroperations semantik och fallback | Gemensam regel vid vektoruttrycket | SSE2/NEON/wasm SIMD, målfeatures, alignment och ABI |
 | Tail calls: semantisk tillåtlighet | Gemensamt retur-/anropsbeslut | Stacklayout, ABI-kompatibilitet och epilog + jump |
 
-`emit/opt/` är rena emitterhjälpare, inte en ny graf/IR eller ett nytt
+`codegen/opt/` är rena emitterhjälpare, inte en ny graf/IR eller ett nytt
 optimeringssteg över hela AST:t. Små beslut/sekvensbeskrivningar får
 returneras utan allokering. De tar typer, flaggor och explicit anropskontext;
 ingen modifiering av delat AST, `ccsnap` eller funktionskroppar som flera
@@ -697,7 +697,7 @@ fältpositioner men olika betydelse: arm64:s `sz` är inte x86:s bytebredd,
 och stores använder olika registerfält. Använd uttryckliga adaptrar; gör
 ingen aliasande cast mellan struct-typer och anta inte samma semantik av
 att båda är 16 byte. `emit_SRC` i `src/Makefile` behöver ta med nya
-`emit/opt/*.c` och `emit/rec/*.c`; varje fil skall fungera även utan unity.
+`codegen/opt/*.c` och `codegen/rec/*.c`; varje fil skall fungera även utan unity.
 
 ### Ordning, leveranser och verifiering
 
@@ -713,7 +713,7 @@ Fortsätt med små separata commits och uppdaterad status/mätning här.
 | OPT1 | Extrahera och koppla in gemensamma heltalsregler i alla tre generatorerna: `+0`, `-0`, `*1`, bitidentiteter, unsigned `/1`, `/2^k`, `%2^k`. Återanvänd befintlig vikning och normalisering. Kräver OPT0. | Semantiska tester på x86/arm64/wasm; riktade shift/mask-krav där målet stödjer dem, negativa tester för volatile och sidoeffekter. Oförändrad kod för exempel utan regeln. |
 | OPT2 | Gemensamma effekt- och postkontrakt, komplett op-tabell för x86 och adapter för arm64. Extrahera blockidentifiering/kompaktering ur arm64; första generiska städning tar bara säkra fallthrough-hopp och död kod efter terminator. Kräver OPT0. | Arm64:s extraktion byte-identisk; x86:s onödiga hopp/döda arm försvinner; asm goto, `&&label`, switch/case i if(0), noreturn, VLA/cleanup och debug-remapping korrekta. |
 | OPT3 | Flytta kandidaturvalet ur `choose_lregs` till gemensam `locals.c`, koppla till x86:s bindningar. Begränsad top-K efter befintliga loopviktade `luse`; målet anger K/register. Wasm återanvänder behörighetsreglerna, inte en artificiell registergräns. Kräver OPT0 och effektkontraktet i OPT2. | Parametrar/lokaler slutar gå genom stacken i proberna; blandade anrop, rekursion, fasta asm-register, varargs, returns_twice, överjusterad ram, VLA och registertryck. Arm64:s ursprungliga val och utdata identiska i extraktionscommitten. |
-| OPT4 | Återanvänd arm64:s kopie-/dead-result-/utvidgningsalgoritmer i `emit/rec/`, först per block på x86. Måltabeller beskriver registeröverlapp, flaggor och omskrivningar. OPT2 krävs; OPT3 ger större kodvinst men är inte ett krav. | Positiva och negativa kodkrav; inga fel över anrop/asm/blockgränser. 32-bitars självmove på x86 tas bara bort om övre halvan redan är noll. FP- och implicita register/flags bevaras. |
+| OPT4 | Återanvänd arm64:s kopie-/dead-result-/utvidgningsalgoritmer i `codegen/rec/`, först per block på x86. Måltabeller beskriver registeröverlapp, flaggor och omskrivningar. OPT2 krävs; OPT3 ger större kodvinst men är inte ett krav. | Positiva och negativa kodkrav; inga fel över anrop/asm/blockgränser. 32-bitars självmove på x86 tas bara bort om övre halvan redan är noll. FP- och implicita register/flags bevaras. |
 | OPT5 | **Pågår: gemensam cell-/värdekärna; wasm4/8-byte forwarding/överskriven-store-DSE implementerad, x86 kostnadsoptimeras.** Extrahera arm64:s stackcellsalgoritm och anslut x86 via explicit allokerings-/accessmetadata. Återanvänd samma algoritm för load forwarding och DSE. Kräver OPT2/OPT4; välj exakta icke-flydda frame-celler först. | Arm64:s t8/t10-egenskaper portade till C-regressioner: scope-återanvändning, överlapp/union, smala typer, adressflykt, pekare precis efter objekt, anrop/asm/atomics. Volatila läsningar/skrivningar kvar. |
 | OPT6 | Gemensamt switchval och utökad inliningbehörighet. Separata commits: först balanserade switchträd och värdetabeller; sedan små vanliga statiska funktioner och oanvända lokala initierare. Kräver OPT1/OPT2; inliningens stacktrafik motiverar OPT3/OPT5 först. | Täta/glesa/signed/range-case, overflow vid densitetsräkning och computed goto. Inlining: recursion, labels, VLA, cleanup, asm-immediater och sidoeffekter. Oanvänd init tas bara bort när både objektet och init saknar observerbar effekt. |
 | OPT7 | Gemensam beskrivning för skalade adresser, direkt explicit vektoroperation och store-constant-hook med scalar/register-fallback. Därefter små målspecifika regler för LEA/SIB, NEON/SSE2 och instruktionsfeatures. Kräver OPT1; metadata från OPT2 följer med. | Samma C-resultat på målen; målkrav visar indexerad load/packed add/store-immediate. Negativa alignment-, bredd-, alias-, lane- och featurefall; baseline får aldrig native-instruktioner av misstag. |
@@ -728,7 +728,7 @@ för att börja dela regler eller postpass.
 
 ### OPT5 status: gemensam cellanalys (2026-11-11)
 
-`emit/rec/slots.c` och `slots.h` innehåller nu arm64:s analys av exakta
+`codegen/rec/slots.c` och `slots.h` innehåller nu arm64:s analys av exakta
 allokeringsceller, överlapp och adressflykt. Arm64 använder den direkt;
 registerversioner, liveness och själva load/DSE-omskrivningen ligger än
 så länge kvar i dess adapter. Ingen ny funktionsvandring eller separat
@@ -769,7 +769,7 @@ textemission. OPT5, G5/G7 och hela O2-målet är fortsatt öppna.
 
 ### OPT5 status: gemensamma värde- och storefakta (2026-11-11)
 
-`emit/rec/slot-values.c` delar nu arm64:s värdetillgänglighet och
+`codegen/rec/slot-values.c` delar nu arm64:s värdetillgänglighet och
 besluten för överskrivna/olästa lagringar. Målet äger värde-ID och
 skrivversioner: ett native-register eller en stabil wasm-lokal ryms i
 samma uint32-kontrakt. Blockgenerationer hindrar vidarebefordran över
@@ -883,8 +883,8 @@ X86:s metadatakostnad och wasm:s typade händelser ingår inte i denna mätning.
 ### Filstruktur för optimeringar
 
 Varje avgränsad optimering eller tätt sammanhängande regelfamilj får en
-namngiven fil: nu `emit/opt/identity.c` och `emit/opt/divpow2.c`.
-Gemensamma postpass får motsvarande filer under `emit/rec/`. Lägg inte
+namngiven fil: nu `codegen/opt/identity.c` och `codegen/opt/divpow2.c`.
+Gemensamma postpass får motsvarande filer under `codegen/rec/`. Lägg inte
 algoritmerna i en växande `walk.c` eller uttrycksvandrare. Vandrarna och
 bakändarna behåller små anrop/adaptrar för operandutvärdering, typer,
 register och wasm-stack. Undvik att dela upp en liten sammanhängande
@@ -935,7 +935,7 @@ Ny bas byggd på `990c9fe` (main-kod från `4daebd9`); vpp SHA256
 Basens x86-egensvit går 130/130, fem filtrerade fall. Basen sparades som
 `build/linux/opt-baseline/vpp` före ändringen.
 
-`emit/opt/divpow2.c:em_divpow2` äger nu en gemensam regel för unsigned
+`codegen/opt/divpow2.c:em_divpow2` äger nu en gemensam regel för unsigned
 vanliga heltal upp till 64 bitar: division med konstant 2^k blir logiskt
 högerskift och rest blir AND med 2^k−1. Divisorn normaliseras till
 operationens promoverade typ före testet; noll, signed, pekare, FP,
@@ -998,8 +998,8 @@ från ersättningen av full runtime/explorer. G5/G7 är fortsatt öppna.
 
 ### Status OPT1 (2026-11-11): separata filer och heltalsidentiteter
 
-Tvåpotensregeln har flyttats oförändrad till `emit/opt/divpow2.c`.
-`emit/opt/identity.c` äger nu typkontrollerade RHS-regler för +0, −0,
+Tvåpotensregeln har flyttats oförändrad till `codegen/opt/divpow2.c`.
+`codegen/opt/identity.c` äger nu typkontrollerade RHS-regler för +0, −0,
 *0/*1, /1, %1, &0/&alla-ettor, |0/|alla-ettor, ^0 och skift med noll.
 Alla tre generatorer använder samma recept. Operandeffekter behålls;
 32-bitars registerresultat normaliseras även efter lat trunkering.
@@ -1029,7 +1029,7 @@ fallthrough-städning med bevarad debug-remapping.
 
 ### Status OPT2 (2026-11-11): delad fallthrough-städning
 
-`emit/rec/fallthrough.c` delar nu arm64:s befintliga borttagning av
+`codegen/rec/fallthrough.c` delar nu arm64:s befintliga borttagning av
 ovillkorliga hopp till den direkt följande följden av lokala etiketter.
 X86 kör samma pass vid O1 och uppåt före tvåadresskonverteringen.
 Postlayouten beskrivs med stride/fältoffset; label läses med memcpy så
@@ -1039,7 +1039,7 @@ fixpunkt. Senare borttagningar kan exponera tidigare hopp; kaskadfallen
 är fortsatt körtestade men utlovas inte borttagna i detta steg.
 
 Wasm:s befintliga konservativa `wlabels`/`wterm` har fått egen fil,
-`arch/wasm/emit/reachability.c`. While emitterar inte längre en extra
+`arch/wasm/codegen/reachability.c`. While emitterar inte längre en extra
 loopgren efter en kropp som bevisligen inte kan falla igenom. Explicit
 continue har kvar sin gren och cleanup; do-villkor och for-inkrement
 bevaras. Detta är strukturerad målsänkning, inte ett artificiellt
@@ -1081,11 +1081,11 @@ OPT-steg/O2-målet är fortsatt öppna.
 
 ### Status OPT2 (2026-11-11): onåbara poster och x86-effekter
 
-`emit/rec/unreachable.c` tar i en linjär, allokeringsfri svepning bort
+`codegen/rec/unreachable.c` tar i en linjär, allokeringsfri svepning bort
 posterna efter en säker ovillkorlig transfer fram till nästa möjlig
 inträdespunkt. Arm64:s adapter ligger separat i
-`arch/a64/emit/unreachable.c`; x86 har en billig enbyte-flödestabell i
-`arch/x64/emit/effects.c`. O1 och uppåt, med befintlig noopt-spärr.
+`arch/a64/codegen/unreachable.c`; x86 har en billig enbyte-flödestabell i
+`arch/x64/codegen/effects.c`. O1 och uppåt, med befintlig noopt-spärr.
 Alla etiketter, raw asm, namngivna etiketter, okända instruktioner och
 indirekta transfers är konservativa barriärer. Debug-remapping körs för
 varje gammalt postindex och slutmarkören. Wasm:s strukturerade dödkod
@@ -1120,7 +1120,7 @@ SimplifyCFG. Nästa större steg är registerlokaler med gemensam behörighet
 
 ### Status OPT8 (2026-11-11): signed tvåpotenser med målkostnad
 
-`emit/opt/sdivpow2.c` beskriver en gemensam regel för signed division och
+`codegen/opt/sdivpow2.c` beskriver en gemensam regel för signed division och
 rest med positiva/negativa konstanta tvåpotenser upp till 64 bitar,
 inklusive minsta divisorn och −1. Bias före aritmetiskt skift ger C:s
 avrundning mot noll. Rester beräknas från lågbitmask och samma bias.
@@ -1193,7 +1193,7 @@ Detta och asm-clobbers/inline-instansgränser är krav före aktivering.
 
 ### Status OPT3 (2026-11-11): gemensamt urval och x86-registerlokaler
 
-`emit/opt/locals.c` äger nu gemensam behörighet och stabilt viktat top-K
+`codegen/opt/locals.c` äger nu gemensam behörighet och stabilt viktat top-K
 med befintliga lspan/luse/lnoreg. Ingen ny AST-vandring, graf eller
 allokering. Arm64 behåller sitt fysiska registerval och wasm sina
 representationskrav, inklusive FP/i128/SIMD-lokaler. Gemensamma undantag
@@ -1201,7 +1201,7 @@ representationskrav, inklusive FP/i128/SIMD-lokaler. Gemensamma undantag
 Prepassens adressmarkering följer nu även comma-RHS som emitterarnas
 lvalue-sänkning. Parser och preprocessor är inte ändrade.
 
-X86:s målbindning ligger i separat `arch/x64/emit/locals.c`: högst fyra
+X86:s målbindning ligger i separat `arch/x64/codegen/locals.c`: högst fyra
 hem i RBX/R13/R14/R15, O1+, !noopt, med VCC_LREGS-budgeten (0 stänger av).
 R12 tillhör justerade ramar. L_VREG läses till en ägd temporär; smal
 läsning använder en direkt X_EXT från hemmet, så högbitar normaliseras
@@ -1225,7 +1225,7 @@ före output-skrivningar. Fyra samtidigt levande hem testas mot verkliga
 clobbers och både tagen/fallthrough asm-goto. Inga upprepade asm-skanningar
 eller globala avstängningar av orelaterade funktioner införs.
 
-**Nonlocal jumps:** separat `arch/x64/emit/setjmp.c` sparar alltid alla
+**Nonlocal jumps:** separat `arch/x64/codegen/setjmp.c` sparar alltid alla
 icke-frame callee-save-register RBX/R12/R13/R14/R15, även ärvda värden från
 anroparen när destinationen själv saknar promoverade lokaler. Publik
 builtin-bufferlayout oförändrad. En X_RESUME_FRAME-post återskapar R12
@@ -1324,12 +1324,12 @@ minnesoptimeringar och full O2-täckning återstår; ingen SSA införd.
 
 ### Status OPT4 (2026-11-11): delad framåtriktad kopiestädning
 
-`emit/rec/copies.c` innehåller nu den gemensamma framåtsökningen från
+`codegen/rec/copies.c` innehåller nu den gemensamma framåtsökningen från
 arm64:s kopiepass. Postlayout, effekter, livslängd och tillåtna operander
 kommer från målet; omskrivningen förhandskontrolleras innan något ändras.
 Högst 256 användarposter sparas i trådlokal arbetsyta. Ingen ny AST-vandring
 eller SSA byggs. Arm64 återanvänder befintliga block-/livslängdsdata och
-debugmappning. X86:s adapter i `arch/x64/emit/copies.c` gör ett effektpass,
+debugmappning. X86:s adapter i `arch/x64/codegen/copies.c` gör ett effektpass,
 lokal bakåtlivslängd och kompaktering med återanvänd trådlokal arbetsyta.
 Den aktiveras från O1 för 64-bitars GPR-kopior till temporärer, inom ett
 rakt block och med bevisad lokal överskrivning. Anrop, asm, atomics,
@@ -1548,7 +1548,7 @@ minnesoptimeringar, full O2-täckning och G5/G7 återstår.
     hur många deklarationscachen hoppade över.
   4. Småsaker: `VCC_LOG`:s `fprintf` tar `flockfile`-lås (bara profilering); `open()` vid
      skrivning 1 %.
-- **Lata kroppar, steg 1: på parsernivå (klart, 2026-11-08).** `cc/lazy.c`: en `static`
+- **Lata kroppar, steg 1: på parsernivå (klart, 2026-11-08).** `frontend/c/lazy.c`: en `static`
   funktion som definieras i en header (inte huvudfilen; utan used/constructor/destructor/alias,
   inte overloadable, ingen `#pragma pack` aktiv) får sin kropp sparad som tokens (`lztok`,
   16 byte; identifierare som internerat id, övrigas stavning i `lzs`), `SF_DEFINED | SF_LAZY`,
@@ -1730,7 +1730,7 @@ fortsatt separat från integrations-PR38; ingen ny PR för det ännu.
 ### OPT5 konkret genomförandeordning
 
 1. Flytta arm64:s befintliga cell-/överlapps-/escapeanalys och slots-pass
-   till `emit/rec/slots.c`, återanvänd befintliga rr/ww/live/blocktabeller.
+   till `codegen/rec/slots.c`, återanvänd befintliga rr/ww/live/blocktabeller.
 2. Beskriv åtkomster med stabilt allokerings-ID (även andra ID:t vid
    one-past), offset/bredd/värderegister och explicit observable-markör.
    X86:s nuvarande LD/ST saknar volatile/atomic-fakta: dessa måste följa
@@ -1755,7 +1755,7 @@ separat lokal gren och är ännu inte publicerat på grund av kostnadsfrågan.
 
 ### OPT4: direkt känd nollutvidgning och instruktionsprofil (2026-11-11)
 
-`arch/x64/emit/extensions.c` bevisar nu från endast föregående post att ett
+`arch/x64/codegen/extensions.c` bevisar nu från endast föregående post att ett
 GPR-resultat redan är nollutvidgat från 32 bitar. `x64_ext` utelämnar då
 sin redundanta unsigned 32→64-normalisering vid O1+, !noopt. Inga nya
 vandringar, tabeller eller allokeringar. Regeln gäller explicita fulla
@@ -1820,7 +1820,7 @@ Värdetabeller och bitset-kluster med flera destinationer återstår.
 ### OPT6 status: balanserad switchdispatch (2026-11-11)
 
 Gemensam policy, 32/64-bitars normalisering och sortering finns i
-`emit/opt/switch.c`; arm64, den delade x86-walkern och wasm använder den för
+`codegen/opt/switch.c`; arm64, den delade x86-walkern och wasm använder den för
 verkliga balanserade jämförelseträd vid O1–O3 och minst åtta case-intervall.
 Små switchar behåller den billiga kedjan; wasm behåller sin täta `br_table`.
 O0, `VCC_NOOPT` och 128-bitars fallback är oförändrade. Selektorn utvärderas
@@ -1874,7 +1874,7 @@ inte main-uppdateringens separata ändringar.
 
 ### OPT8 status: unsigned32 konstantdivision (2026-11-11)
 
-`emit/opt/udivconst.c` bygger en typad 32-bitars reciprok med fast
+`codegen/opt/udivconst.c` bygger en typad 32-bitars reciprok med fast
 multiplikation/shift och vid behov add-korrektion. Konstruktionen har
 kontrollerats mot Hacker's Delight kapitel 10 och
 [libdivides referensgenerator](https://github.com/ridiculousfish/libdivide/blob/master/libdivide.h),
@@ -1882,8 +1882,8 @@ med separata clang23-prober. Divisorer större än 2^31 behöver bara en unsigne
 jämförelse. Noll, tvåpotenser, signed, 64/128 bitar och `_BitInt` behåller sina
 befintliga vägar. Detta är ett avgränsat u32-delsteg, inte hela OPT8/O2.
 
-Separata adaptrar i `arch/a64/emit/udivconst.c`, `emit/walk/udivconst.c` och
-`arch/wasm/emit/udivconst.c` använder befintlig 32→64-multiplikation; ingen
+Separata adaptrar i `arch/a64/codegen/udivconst.c`, `codegen/walk/udivconst.c` och
+`arch/wasm/codegen/udivconst.c` använder befintlig 32→64-multiplikation; ingen
 SSA/IR, allocator eller ny funktionsgenomgång. O1–O3 använder regeln; O0 och
 `VCC_NOOPT` är byte-identiska mot basen för alla fyra mål. Native normaliserar
 lata smala värden före 64-bitars produkten och behåller originalet för rest
@@ -1958,7 +1958,7 @@ bredare G5/G7-grindar och full O2-täckning är fortsatt öppna.
 
 ### OPT6: gemensamma rena kontrollbeslut (delsteg)
 
-`emit/opt/control.c` bevisar konstanta heltalsvillkor, logisk negation,
+`codegen/opt/control.c` bevisar konstanta heltalsvillkor, logisk negation,
 kortslutning och `__builtin_strcmp` mellan rena smala strängliteraler. Den
 gemensamma besökaren stannar efter högst 64 noder och besöker aldrig en död
 högeroperand. Okända anrop, volatile/atomic, satser och inlining lämnas till
@@ -2086,7 +2086,7 @@ det är inte en full grind för denna arm64-/wasm-ändring. Ingen emissionsändr
 
 ### OPT4 fortsättning: budgeterad flödeskärna och första x86-konsument (2026-11-11)
 
-`emit/flow/{graph,maskflow}.c` bygger validerad blockadjacens med valfria
+`codegen/flow/{graph,maskflow}.c` bygger validerad blockadjacens med valfria
 föregångare och löser bakåtriktad 64-bitars may-liveness. Källpositioner,
 register/effekter och omskrivningar tillhör adaptern; kärnan antar varken
 maskinposter, fysisk registermodell, wasm-stack eller SSA. Arrayer återanvänds
@@ -2094,7 +2094,7 @@ per worker. Varje block-/kantbesök belastar en uttrycklig arbetsbudget;
 resultatet är giltigt först efter full konvergens. Felaktiga kanter,
 allokeringsfel eller budgetslut ger inga beroende omskrivningar.
 
-Första nyttan finns i `arch/x64/emit/dead.c`: en absorberande heltalsregel
+Första nyttan finns i `arch/x64/codegen/dead.c`: en absorberande heltalsregel
 som lämnar ett redan emitterat registerresultat oanvänt sätter en billig
 kandidatflagga. Utan den byggs ingen graf. Konsumenten tar bara bort rena,
 icke-trappande registeroperationer vars samtliga utdata är döda. Läsningar,
@@ -2190,7 +2190,7 @@ Fjärr-CI och nästa wasm-konsument återstår. OPT4/O2 och G5/G7 är fortsatt
 ### OPT5 fortsättning: wasm-DSE över strukturerade joins (2026-11-11)
 
 På `1d8e29a`, med flödesföräldern `7691f6c`, använder nu även wasm32/64
-den gemensamma graf-/masklösaren. `arch/wasm/emit/flow.c` registrerar typade
+den gemensamma graf-/masklösaren. `arch/wasm/codegen/flow.c` registrerar typade
 block-, if/else-, slut- och branchhändelser från funktionens början under
 ordinarie emission. Varje öppning får en unik token; wasm:s återanvända
 lexikala branch-depth översätts till token när grenen emitteras. Ingen
@@ -2331,11 +2331,11 @@ ett påstående om stöd eller avsaknad görs.
 | Maskinkombinering/adresser: peephole, compare elim, REE | **Delvis.** A64 aritmetik/ext-fakta, x64 `lower.c` och sista-post-u32-faktum i `extensions.c`; wasm stack-/uttryckssänkning. Delade adress-/konstantrecept kan hjälpa, men SIB/NEON/SSE/flags är målmekanik. Generell compare-/combine-paritet är overifierad. |
 | Layout/schemaläggning: align/reorder/sched, CGProfile | **Overifierad policy; generell scheduler saknas i granskningen.** `tu.c` och målens printers har ordning/alignment; detta bevisar inte profilbaserad placering eller latensschemaläggning. Börja med sannolika grenar och mät code-size/fetch. Wasm behöver egen strukturerad policy. |
 | ABI/ram/debug/säkerhet: omit-frame, shrink-wrap, unwind | **Delvis policy.** X64 `frame.c` bevisar ramfri leaf; målens prolog/CFI har egna kontrakt. Inte generell shrink wrapping. Stack-clash, assignment tracking, instrumentering, PLT/interposition är separata användar-/korrekthetskrav; GCC-default i inventariet bevisar inte vcc-flaggstöd. |
-| FP-semantik: signed-zero, errno, trapping | **Policy, exakt flaggparitet overifierad.** `cc/const.c`, `common/f128.h`, native `fp.c` och wasm FP-sänkning finns. Dessa flaggor är främst begränsningar för tillåtna omskrivningar, inte bevis på fast-math eller tillstånd att återassociera FP. |
+| FP-semantik: signed-zero, errno, trapping | **Policy, exakt flaggparitet overifierad.** `frontend/c/const.c`, `common/f128.h`, native `fp.c` och wasm FP-sänkning finns. Dessa flaggor är främst begränsningar för tillåtna omskrivningar, inte bevis på fast-math eller tillstånd att återassociera FP. |
 | Alias/alignment/assumptions: PTA, strict-alias, InferAlignment | **Delvis exakta objekt.** Förpass/escape/cellöverlapp finns på målen, inte generell TBAA/points-to/global-AA. Utöka objekt-/disjunkthetsfakta före minnesmotion; språkpolicy och char/union/overlap måste testas separat. Analysinvalidering är infrastruktur. |
 | Pipeline/metadata: annotations, intrinsic lowering, remarks | **Ingen ett-till-ett-lucka.** LLVM:s passmanager, metadata och representationssänkning kräver inte samma vcc-pass. AllocToken/MemProf och intrinsicer måste kopplas till verklig källsemantik före eventuell implementation. |
 | Andra språk: Coro*, OpenMP* | **Utanför den här C-probens transformbevis.** Att passnamnen körts säger inget om coroutine-/OpenMP-optimering i provet. Eventuellt språkstöd planeras separat. |
-| Atomics/unreachable-policy | **Delvis sänkning; flaggparitet overifierad.** `cc/builtin.c` och måladaptrar har atomic-vägar. Inline/libcall-val, ordering, featurefallback och unreachable-trap-policy behöver egna konkreta kontrakt; de är relevanta C-krav. |
+| Atomics/unreachable-policy | **Delvis sänkning; flaggparitet overifierad.** `frontend/c/builtin.c` och måladaptrar har atomic-vägar. Inline/libcall-val, ordering, featurefallback och unreachable-trap-policy behöver egna konkreta kontrakt; de är relevanta C-krav. |
 
 **Nästa implementationer, i kostnadsordning:**
 
@@ -2447,7 +2447,7 @@ sanitiserade reciprok-/tryckkontrakten passerar på kombinationen, liksom
 
 ### Status OPT8 (2026-11-11): första begränsade native-tail-calls, integration pågår
 
-`emit/opt/tail.c` bevisar samma enkla wrapperform för båda registermålen:
+`codegen/opt/tail.c` bevisar samma enkla wrapperform för båda registermålen:
 hela kroppen är en direkt return-call, identiska 32/64-bitars heltals-/pekartyper,
 argument är egna formaler eller typade literaler, fasta prototyper och högst
 målets registerkapacitet. Ingen ny hel AST-vandring eller SSA. Målens egna
@@ -2505,7 +2505,7 @@ main-integreringen är inte en ny kostnadsmätning.
 
 ### OPT8 status: unsigned64 reciprokdivision (2026-11-11)
 
-Delsteget från exakt 046c6dc utökar `emit/opt/udivconst.c` med separat u64-
+Delsteget från exakt 046c6dc utökar `codegen/opt/udivconst.c` med separat u64-
 konstruktion i host-u128, kontrollerad mot libdivides u64-generator ovan.
 U32 behåller sin egen billigare konstruktion. Native använder befintlig
 UMULH/MULW via en separat walker-hook, med sparning av levande implicita
@@ -2583,7 +2583,7 @@ eller generella fartpåståenden görs för denna integration av bladramar.
 
 ### OPT8 status: signed32/64 reciprokdivision (2026-11-11)
 
-Delsteget ovanpå exakt `f585591` använder `emit/opt/sdivconst.c` för en
+Delsteget ovanpå exakt `f585591` använder `codegen/opt/sdivconst.c` för en
 gemensam reciprok för signed32 och signed64. Separata native-adaptrar
 använder signed högprodukt, eventuell addition av täljaren, aritmetiskt
 skift och en teckenbitskorrektion för C:s avrundning mot noll. Negativ
@@ -2653,7 +2653,7 @@ sina exakta angivna versioner; integrationen är ingen ny kostnadsmätning.
 
 ### OPT6: oanvända skalära lokala initierare (avgränsat delsteg)
 
-Implementerat: `emit/opt/unusedinit.c` delar behörighet och
+Implementerat: `codegen/opt/unusedinit.c` delar behörighet och
 recept mellan a64, x64 och wasm32/64. Befintlig `SA_USED` från prepasset avvisar
 refererade objekt direkt; ingen ny funktionsgenomgång, CFG eller SSA tillkommer.
 Endast aldrig refererade automatiska heltalsobjekt på högst 64 bitar omfattas.
@@ -2743,7 +2743,7 @@ inte nya hela svitkörningar. Den kombinerade stackens kostnadsgrind återstår.
 ### Gemensam walker: en värdeläsning för skalär postfix (2026-11-11)
 
 Status: implementerat och lokalt verifierat i `opt/postfix-eval`, före
-integreringscommit. `wk_incdec` i `emit/walk/expr.c` läser ett ordinärt
+integreringscommit. `wk_incdec` i `codegen/walk/expr.c` läser ett ordinärt
 registerrepresenterat värde en gång, behåller det gamla värdet och gör en
 registerkopia i rätt registerklass före den destruktiva aritmetiken. Detta är
 en evalueringsrättning vid O0–O3, utan optimeringspass, SSA eller kostsam analys.
@@ -2807,7 +2807,7 @@ registerrepresenterad postfix och ligger kvar ovanpå multiplikationsföräldern
 ### Emitter: namn- och registerjämförelser (2026-11-11)
 
 På bas `12957dc` används internade identifierares redan lagrade ord för korta
-namn (`emit/name.h`), heltalstaggar från den befintliga builtintabellen för
+namn (`codegen/name.h`), heltalstaggar från den befintliga builtintabellen för
 särbehandlade bibliotekskall och direkt avkodning av x86:s asm-registernamn.
 Den oanvända parallella registertabellsökningen har tagits bort. Antalet
 källrader med `strcmp`/`strncmp`/`memcmp` i emitter och tre backender minskar
@@ -2869,7 +2869,7 @@ prestandagrind. Jämförelseregler för heltalsgränser och bred O2-täckning å
 
 ### OPT1: heltalsjämförelser vid gränsvärden (2026-11-11)
 
-Ett gemensamt recept i `emit/opt/cmpbounds.c` känner igen relationer med
+Ett gemensamt recept i `codegen/opt/cmpbounds.c` känner igen relationer med
 konstant resultat vid lägsta/högsta värdet för konverterade 32-/64-bitars
 heltal. Operanden evalueras fortfarande: anrop och volatila/atomiska läsningar
 bevaras. Endast numeriska AST-litteraler med identisk konverterad typ ingår;
@@ -2954,7 +2954,7 @@ korpus med kompilatorinstruktioner, inte en gräns för vägg- eller CPU-tid.
 
 ### Typgränser skrivna som konstantuttryck (2026-11-11)
 
-`emit/opt/cmpbounds.c` känner nu även igen rena, begränsade heltalsuttryck
+`codegen/opt/cmpbounds.c` känner nu även igen rena, begränsade heltalsuttryck
 som typgränser, exempelvis `x < (-2147483647-1)` och `x <= (unsigned)-1`.
 Ett högst 16 noder stort uttryck kontrolleras före den befintliga
 konstantevaluatorn; anrop, variabelläsningar och okända uttryck faller tillbaka
@@ -2975,7 +2975,7 @@ Generell O2-täckning och G5/G7 återstår.
 
 ### Identiska heltalsoperander (2026-11-11)
 
-Ett gemensamt recept i `emit/opt/repeated.c` förenklar `x-x` och `x^x` till
+Ett gemensamt recept i `codegen/opt/repeated.c` förenklar `x-x` och `x^x` till
 noll och `x&x`/`x|x` till en läsning för samma ordinära automatiska
 heltalsvariabel. Adresstagna, volatile, atomiska, statiska och externa värden
 avvisas; inga godtyckliga uttryck jämförs. Alla tre emitterfamiljer använder
@@ -2993,7 +2993,7 @@ med instruktionstal, inte CPU-tid; generell O2-täckning och G5/G7 återstår.
 
 ### Wasm: heltalsjämförelse med noll (2026-11-11)
 
-Ett gemensamt, begränsat recept i `emit/opt/cmpzero.c` känner igen
+Ett gemensamt, begränsat recept i `codegen/opt/cmpzero.c` känner igen
 heltalslikhet med noll och osignerad `x <= 0` (även med omvända operander).
 Wasm sänker dessa direkt till `i32.eqz`/`i64.eqz` i stället för en konstant
 och en jämförelse. Konstantuttryck kontrolleras med den befintliga begränsade
@@ -3051,7 +3051,7 @@ helt kärnbygge eller wasm. Exakta flaggor, käll-/binärhashar och sampel finns
 
 ### Dubbla unära heltalsoperationer (2026-11-11)
 
-`emit/opt/double-unary.c` identifierar `-(-x)` och `~(~x)` för likatypade
+`codegen/opt/double-unary.c` identifierar `-(-x)` och `~(~x)` för likatypade
 32-/64-bitars heltal; varje emitter evaluerar då `x` en gång. Flyttal,
 BitInt och mellanliggande typkonverteringar lämnas till vanlig sänkning.
 Fokuserade körnings-/kodgenereringsprov O0–O3 passerar på fyra mål i båda
@@ -3096,7 +3096,7 @@ O0/noopt-paritet. Mät faktiskt kompilerings-CPU och instruktioner för både
 kontroller och uttrycksmättade filer samt den sammansatta stacken. Ingen av
 punkterna är implementerad eller godkänd ännu; hela O2 och G5/G7 återstår.
 
-Första byggstenen finns lokalt i `emit/flow/values.{h,c}`: en fast 32-platsers
+Första byggstenen finns lokalt i `codegen/flow/values.{h,c}`: en fast 32-platsers
 tabell utan allokering med explicita budgetsteg. Kollision kan bara kasta bort
 möjligheter; vid budgetslut publiceras inga fler fakta före reset. Adaptern
 måste själv skapa nya värde-ID vid definition, nollställa vid barriär och
@@ -3107,7 +3107,7 @@ Ingen backend använder tabellen ännu; den optimerar alltså ingen kod och är
 inte en genomförd CSE-lösning. Nästa arbete är en faktisk konsument med säker
 platshantering och dokumenterad kandidat-/kostnadsgräns.
 
-Första konsumenten finns nu i `emit/opt/sibling-values.c`: när båda
+Första konsumenten finns nu i `codegen/opt/sibling-values.c`: när båda
 operanderna till en heltalsoperation är rena, strukturellt identiska uttryck
 av ordinära lokala värden, beräknas uttrycket en gång. Begränsningen är 32
 AST-noder och 64 tabelloperationer per kandidat; billig rotkontroll föregår

@@ -1,7 +1,7 @@
 #ifndef VCC_CCSNAP_H
 #define VCC_CCSNAP_H
 /* the declaration cache (ccsnap.c): parser snapshots after leading top-level headers */
-#include "../cc/ccint.h"
+#include "../frontend/c/ccint.h"
 
 struct dcnode;
 
@@ -21,7 +21,7 @@ void dc_boundary_slow(cc *c);
 void dc_materialize(cc *c);
 void dc_kill(cc *c);
 void dc_stats(char *buf, size_t n);
-/* cc/token.c: the next token, pragmas applied */
+/* frontend/c/token.c: the next token, pragmas applied */
 void cc_fetch(cc *c, ptok *t);
 
 /* at a file-scope declaration boundary (tk[0] fetched, nothing parsed of it) */

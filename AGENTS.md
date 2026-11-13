@@ -10,7 +10,7 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
   parallel, minimal allocation, mmap, separate I/O and CPU threads).
 - No clang dependency at run time.  Data taken from clang once (capability
   tables, predefined macros, `__has_*` answers) lives in generated files
-  (`src/vccd/caps.c`, `src/pp/ppdata*.inc` via `gen-ppdata.sh`).
+  (`src/server/caps.c`, `src/frontend/pp/ppdata*.inc` via `gen-ppdata.sh`).
 - Do not replace make.
 - The machine is shared: keep benchmarks short and use `-j 6` for
   parallel diff runs.
@@ -34,10 +34,10 @@ relative to it); `TODO.md` stays at the top.
   `RESEARCH-vir.md` (LLVM IR's problems): VIR, an SSA IR used only at `-O2`,
   built by compiling the shared walker a second time against a virtual
   lowering target.  Update the status of a step in `PLAN-vir.md`.
-- `src/emit/vir/vec.inc` (#included by `build.c`): the loop vectorizer, on
+- `src/codegen/vir/vec.inc` (#included by `build.c`): the loop vectorizer, on
   the builder's pre-IR; `VCC_VIR_VEC=0` turns it off, `r` reports each
   innermost loop to stderr, `n` keeps loop constants unhoisted (`vv_pin`).  VIR's vectors: `SPEC-vir.md` 7.5.
-- `src/emit/vir/a64.c`: VIR's arm64 lowering.  `VCC_VIR_ROT=0` keeps VIR's block order (no loop
+- `src/codegen/vir/a64.c`: VIR's arm64 lowering.  `VCC_VIR_ROT=0` keeps VIR's block order (no loop
   rotation), `VCC_VIR_SHRINK=0` the prologue at the function's entry (no shrink-wrapping); `VCC_VL_PROBE=MASK` puts a nop after each allocator edit of the kinds in MASK, so that
   instructions retired count how often that kind runs.
 - `RESEARCH-vectors.md`: vector values in VIR (how Cranelift, Wasm SIMD, B3,
@@ -61,13 +61,13 @@ relative to it); `TODO.md` stays at the top.
     declarations (`attr.h`: VUSE, VNONNULL) and overflow-checked bounds for
     sizes read from input files (`ckd.h`: vckd_range, vckd_add, vckd_mul).
     Variants not yet merged are listed in TODO.md.
-  - `lex/`: SIMD lexer and token cache; `lextest.c` drives it.
-  - `pp/`: preprocessor (pull model, clang-exact expansion), its generated
+  - `frontend/lex/`: SIMD lexer and token cache; `lextest.c` drives it.
+  - `frontend/pp/`: preprocessor (pull model, clang-exact expansion), its generated
     tables (`ppdata*.inc` via `gen-ppdata.sh`) and the include-directory cache.
-  - `cc/`: parser + sema (GNU C11, clang's layout and constant rules).
-  - `emit/`: code generator (straight from the AST): the shared part, state
+  - `frontend/c/`: parser + sema (GNU C11, clang's layout and constant rules).
+  - `codegen/`: code generator (straight from the AST): the shared part, state
     and types (`emitimpl.h`), the work queue and threads (`tu.c`), data
-    objects, the prepass; the arm64 part is `arch/a64/emit/`.
+    objects, the prepass; the arm64 part is `arch/a64/codegen/`.
   - `as/`: GNU as syntax (`as.c`: statements, directives, macros,
     conditionals, expressions; internal header `asimpl.h`; one module with
     `arch/<cpu>/as/parse.c`, `as_SRC`) and the standalone `vasm` driver.
@@ -82,7 +82,7 @@ relative to it); `TODO.md` stays at the top.
     `vir_dom`, `vir_uses`, `vir_canon`, and the unit tables of the text form;
     `print.c`, `parse.c` (arbitrary bytes fail as `file:line:col`, never crash)
     and `verify.c` (every rule of SPEC section 12); `virimpl.h` is internal.
-    Depends on nothing in `cc/`, `emit/` or `arch/`.  `virtest.c` is the tool
+    Depends on nothing in `frontend/c/`, `codegen/` or `arch/`.  `virtest.c` is the tool
     (`virtest FILE`; `--no-verify`, `--bless`, `--selftest` for the builder API).
     The interpreter, `virgen` and the fuzz target (the rest of step V1) are not
     written yet.  Tests: `tests/vir/` (`bad/RULE-name.vir`, `canon/`, `dom/`).
@@ -108,15 +108,15 @@ relative to it); `TODO.md` stays at the top.
     relocation, as LLVM MC), the linker's relocation scan, relocation
     application and range-extension thunks (`ld/*.inc`, #included by
     `ld/ld.c` where they were: the linker is not a split module yet);
-    `emit/`: instruction records and register names (`ins.h`, `a64impl.h`,
-    included by `emit/emitimpl.h`), expressions, statements, calls (AAPCS64
+    `codegen/`: instruction records and register names (`ins.h`, `a64impl.h`,
+    included by `codegen/emitimpl.h`), expressions, statements, calls (AAPCS64
     and Apple's), builtins, inline asm, the record optimizer (`opt.c`), the
     printer (`print.c`) and the encoder of records (`obj.c`).  It is compiled
-    in the `emit` unity TU (`emit_SRC`), so VPRIV stays static.
-  - `emit/walk/` and `emit/rec/`: the shared AST walker (`walk.h`: folding,
+    in the `codegen` unity TU (`codegen_SRC`), so VPRIV stays static.
+  - `codegen/walk/` and `codegen/rec/`: the shared AST walker (`walk.h`: folding,
     frame slots, labels, the call sequence; it calls a CPU only through
     `LO()`) and the machine records with their per-CPU op table (`rec.h`),
-    PLAN-x86.md's layers 1 and 3; `arch/x64/emit/`: x86-64's lowering
+    PLAN-x86.md's layers 1 and 3; `arch/x64/codegen/`: x86-64's lowering
     (`x64impl.h`, `lower.c`), two-address pass and AT&T printer (`print.c`).
     x86-64 is their only user; arm64 moves to them later (TODO.md).
     `walk/prefix.h` is generated from the walker's definitions: with
@@ -126,10 +126,10 @@ relative to it); `TODO.md` stays at the top.
     operands, the encoder (REX and VEX) and the dispatcher in `asm.c`
     (shared header `x64as.h`), one file per instruction family (`sys.c`,
     `gpr.c`, `x87.c`, `sse.c`, `avx.c`); `vas-obj.py` checks `x86-*.s`.
-  - `arch/wasm/emit/`: the WebAssembly (wasm64) code generator, AST to
+  - `arch/wasm/codegen/`: the WebAssembly (wasm64) code generator, AST to
     LLVM's wasm `.s` (`wimpl.h`; `wasm.c` functions, ABI, header; `wexpr.c`,
-    `wcall.c`, `wstmt.c`), also in the `emit` unity TU: every name starts
-    with `w`.  `emit/` picks it per target (`WASM(c)`); PLAN-wasm.md.
+    `wcall.c`, `wstmt.c`), also in the `codegen` unity TU: every name starts
+    with `w`.  `codegen/` picks it per target (`WASM(c)`); PLAN-wasm.md.
   - `arch/wasm/as/`: the wasm assembler (`as.c`, model in `was.h`, interface
     `wasmas.h`): LLVM's wasm `.s` to a relocatable object; `-c` for wasm64
     and `vasm --target=wasm64-...` go through it.
@@ -141,7 +141,7 @@ relative to it); `TODO.md` stays at the top.
     counters (`pmc.c`).
   - `platform/wasm/`: the wasm object writer (`wasm.c`: layout, symbol table,
     relocations as LLVM's WasmObjectWriter, byte for byte).
-  - `pp/`, `cc/` and `emit/` (with `arch/<cpu>/emit/`) are directories of
+  - `frontend/pp/`, `frontend/c/` and `codegen/` (with `arch/<cpu>/emit/`) are directories of
     files by topic, one internal header each (`ppimpl.h`, `ccimpl.h`, `emitimpl.h`) with the types, macros
     and prototypes the files share; a shared function is `VPRIV` (static in
     the unity build).  Each such module is compiled as one TU by default
@@ -161,7 +161,7 @@ relative to it); `TODO.md` stays at the top.
 
 ## Build and test
 ```
-make -C src -j 6 vcc                # all vcc tools (pp/ cc/ emit/ one TU each, ccache if installed)
+make -C src -j 6 vcc                # all vcc tools (frontend/pp/ frontend/c/ codegen/ one TU each, ccache if installed)
 make -C src -j 6 vcc VCC_UNITY= OUT=../build/src-parts   # file by file: each file compiles alone
 bench/vcc-diff.py ref -j 6          # clang -E references (once, ~1 min)
 bench/vcc-diff.py cmp -j 6 --kernel # preprocessor parity, kernel TUs
@@ -205,7 +205,7 @@ bench/vcc-darwin-s.py -j 6           # Darwin -S assembled by Apple's as, runs a
 bench/vcc-diag.py -j 6             # tests/diag: vcc's .stderr snapshots, clang's locations/levels/flags (~2 s)
 bench/vcc-diag.py --bin-dir build/src-asan   # ... with a sanitizer build (also vcc-mutate.py, VCC_BIN=$PWD/build/src-asan)
 bench/vcc-diag.py --bless PATTERN   # ... rewrite the snapshots of a changed message (review the diff)
-bench/gen-diagids.py [--check]      # pp/diagids.inc: each diagnostic format's id (clang's name or vcc_*)
+bench/gen-diagids.py [--check]      # frontend/diag/diagids.inc: each diagnostic format's id (clang's name or vcc_*)
 VCC_TRACK_DIAG=1 vpp ... -fdiagnostics-show-id   # each diagnostic's id and where vcc reported it
 bench/vcc-mutate.py -j 6 --formats  # ... and every mutant's JSON rebuilds its text (diag-render.py), SARIF checked, HTML page has the text
 vpp ... -fdiagnostics-add-output=html:file=F   # a standalone page of the TU's diagnostics, vcc style in colour
@@ -223,7 +223,7 @@ bench/vcc-mutate.py show firstloc     # ... the mutants of one category with bot
 bench/vcc-mutate.py -j 6 --fix       # ... vcc --fix on every rejected mutant: never worse for clang
 bench/vcc-explain.py                # doc/diag pages: the wrong example gives the id, the fixed one nothing
 bench/gen-explain.py [--check]      # driver/explain.inc from doc/diag/*.md (vcc --explain ID)
-bench/gen-walkprefix.py [--check]   # emit/walk/prefix.h: the walker's function names, WK_PREFIX compiles it under another name (VIR)
+bench/gen-walkprefix.py [--check]   # codegen/walk/prefix.h: the walker's function names, WK_PREFIX compiles it under another name (VIR)
 build/src/viralloc --sweep F.vir     # VIR register allocation (vir/alloc.c) on a synthetic target: dump + counters, checker at every register count
 bench/vir-alloc.py [--bless]        # src/tests/vir-alloc: expected dumps and sweeps (<1 s); `random -n N`: generated functions (~1 s/unit)
 bench/vir-alloc.py mutate|time      # the checker catches corrupted allocations; ns per VIR instruction (budget 200 for now, target 60: SPEC 22.1)
@@ -272,8 +272,8 @@ with how it is validated.  The vcc suite, stress and vccd tests mark known bugs
 `xfail` with their TODO.md item; a fix that makes one pass turns it into an
 XPASS error, so the same commit removes the marker.
 Parity is a token-stream comparison (kind and spelling) of `clang -E -P`
-against `vpp`, both lexed by vcc's lexer.  A change to `pp/` or `lex.c` is
-only done when the parity run is fully green; a change to `cc/` when both
+against `vpp`, both lexed by vcc's lexer.  A change to `frontend/pp/` or `lex.c` is
+only done when the parity run is fully green; a change to `frontend/c/` when both
 vcc-sema.py runs are green (878/879: modpost.c lacks a generated header).
 
 ## CI and the premerge gate

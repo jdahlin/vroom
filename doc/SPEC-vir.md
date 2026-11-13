@@ -35,7 +35,7 @@ constants, 6 memory model, 7 instructions, 8 control flow, 9 ABI signatures,
 ## 1. Scope
 
 1.1 VIR is a per-function SSA representation between the shared AST walker
-(`emit/walk/`) and a CPU's lowering (`LO()`), used at `-O2` only.
+(`codegen/walk/`) and a CPU's lowering (`LO()`), used at `-O2` only.
 
 1.2 A VIR function is built **for one target**: the ABI classification, the
 data model and the choice of what is held in memory are the target's and are
@@ -881,7 +881,7 @@ the same block, may be folded into that instruction by the target (an
 immediate, an addressing mode, a compare into a branch). The target then runs
 its existing record passes, frame layout and output.
 
-15.4 `switch` is lowered by the shared strategy in `emit/opt/switch.c` (the
+15.4 `switch` is lowered by the shared strategy in `codegen/opt/switch.c` (the
 1.0 builder does not produce it, X5).
 `trap` is the target's trapping instruction. A block that consists of one `br`
 without moves produces no code.
@@ -1159,8 +1159,8 @@ requires that `virtest` never crashes.
 
 ## 19. Integration with the walker
 
-Read against `origin/main` on 2026-11-11 (`emit/walk/walk.h`, `expr.c`,
-`stmt.c`; `arch/x64/emit/lower.c`, `locals.c`, `abi.c`, `asm.c`). File and
+Read against `origin/main` on 2026-11-11 (`codegen/walk/walk.h`, `expr.c`,
+`stmt.c`; `arch/x64/codegen/lower.c`, `locals.c`, `abi.c`, `asm.c`). File and
 function names below are from that tree. Each item states what the code does
 today, what VIR needs, and the smallest change that gives it.
 
@@ -1168,7 +1168,7 @@ Summary:
 
 | # | Subject | Change outside `vir/` | First needed |
 |---|---|---|---|
-| X1 | A second instantiation of the walker | A symbol-prefix mechanism for `emit/walk/` | V2 |
+| X1 | A second instantiation of the walker | A symbol-prefix mechanism for `codegen/walk/` | V2 |
 | X2 | Slot identity | One notification per frame allocation | V2 |
 | X3 | Locals as variables | A new `lval` kind | V2 |
 | X4 | Calls and parameters | None for building; two new target operations for good code | V4 |
@@ -1182,14 +1182,14 @@ Summary:
 
 **Today.** `walk.h` has `#define LO(name) x64_##name`. The walker's own
 functions are `wk_*`, `VPRIV` (static in the unity TU, external with
-`make VCC_UNITY=`). `emit/tu.c:do_item` picks `wk_function` for x86. Apart
+`make VCC_UNITY=`). `codegen/tu.c:do_item` picks `wk_function` for x86. Apart
 from `x64_ecx_free` (`stmt.c:48`) the walker names no x86 function.
 
 **Needed.** The same source compiled twice in one program: once with `LO` as
 `x64_`, once as `vir_`, with distinct `wk_*` names, in both the unity and the
 file-by-file build.
 
-**Change (landed).** A generated header `emit/walk/prefix.h` that, when
+**Change (landed).** A generated header `codegen/walk/prefix.h` that, when
 `WK_PREFIX` is defined, maps every `wk_*` function the walker defines (130
 names) to `WK_PREFIX` followed by the name, and `LO(name)` to `LO_PREFIX`
 followed by the name. The paste needs two macro levels (`WK_PASTE`,
@@ -1198,7 +1198,7 @@ followed by the name. The paste needs two macro levels (`WK_PASTE`,
 `wk_switch_values`. `stmt.c` named `x64_ecx_free` outside `LO()`; it is
 `LO(ecx_free)` now. `bench/gen-walkprefix.py [--check]` regenerates the header
 from the definitions (as `gen-diagids.py` does for diagnostics). The VIR
-instantiation is one more file, `emit/vir/walk.c`, that sets the two prefixes
+instantiation is one more file, `codegen/vir/walk.c`, that sets the two prefixes
 and includes `walk/*.c`. It must be its own translation unit, not part of the
 `emit` unity TU: the walker files share types, macros and file-scope names
 that a second inclusion in one TU would redefine (the mechanism was checked
@@ -1215,7 +1215,7 @@ copies. The target only ever sees `lval{L_FRAME, off}`. So the same offset
 means different objects at different times, and nothing tells the target when.
 
 **Needed.** Section 6 treats slots as objects (3.3, 6.8). The shared cell
-analysis has the same requirement: `emit/rec/slots.h` says allocation
+analysis has the same requirement: `codegen/rec/slots.h` says allocation
 identities "must survive stack-offset reuse".
 
 **Change.** One call each time an offset is handed out, fresh or reused:
@@ -1224,7 +1224,7 @@ identities "must survive stack-offset reuse".
 whole-function (`WK_SLOT_TEMP`, `_LOCAL`, `_PARAM`, `_FUNC` in `walk.h`).
 `wk_pslot_kind` is `wk_pslot` with a kind, so a hand-out through
 `wk_slot` or `wk_local` is notified once. The static helper `x64_slot` in
-`arch/x64/emit/fp.c` was renamed `x64_tmpslot` to free the name. `x64_slot`
+`arch/x64/codegen/fp.c` was renamed `x64_tmpslot` to free the name. `x64_slot`
 does nothing today (landed) (and can feed `em_slot_*` ids
 when OPT5 wants them). `vir_slot` creates a `vir_slot` with `hint = off` and
 makes it the current object for that offset range; a later `L_FRAME` access is
@@ -1250,7 +1250,7 @@ gets separate variables. `vir_load`/`vir_store` on `L_VAR` read and write the
 variable (Braun: per-block current definition, block parameters at joins).
 `LO(laddr)` on `L_VAR` is an internal error, as it is for `L_VREG` today;
 `lnoreg` guarantees it does not happen. Eligibility is the existing shared
-rule (`em_select_locals`' type and escape tests in `emit/opt/locals.c`)
+rule (`em_select_locals`' type and escape tests in `codegen/opt/locals.c`)
 without the top-K limit. No walker source changes beyond the enum.
 
 ### X4. Calls and parameters
@@ -1295,7 +1295,7 @@ target never sees a switch.
 recipe into `sub`, `lshr`, `and`, `brif`. The `switch` instruction stays in
 the format, verifier, interpreter and `virtest` so that a later walker hook
 (`LO(switch)` with the sorted case list) needs no format change. 15.4's
-reference to `emit/opt/switch.c` applies from then.
+reference to `codegen/opt/switch.c` applies from then.
 
 ### X6. Inline assembly
 
@@ -1363,7 +1363,7 @@ registers must not hold a live value.
    `LO(prefer)(e, r)` first: the next `treg`/`ftreg` returns `r` if it is
    free.
 4. If the returned register is still not the assigned one, lowering emits
-   `LO(mov)` and frees the other. `emit/rec/copies.c` removes what remains.
+   `LO(mov)` and frees the other. `codegen/rec/copies.c` removes what remains.
 
 **Changes.** `LO(prefer)` (a few lines per target), and a table the allocator
 reads through `vir_regs.fixed` (15.1): per operation and width, the registers
@@ -1483,7 +1483,7 @@ in V1 and V2 with `bench/vbench.py`, not results.
   `wk_function` does with `pabuf[256]`: argument lists, a `switch`'s cases, the
   parallel-move worklist.
 - **Per-thread reservations for everything else,** the emitter's existing
-  idiom (`reserve()` in `emit/tu.c`: `mmap` with `MAP_NORESERVE`, made once per
+  idiom (`reserve()` in `codegen/tu.c`: `mmap` with `MAP_NORESERVE`, made once per
   thread). VIR adds, per thread: two instruction arrays (source and
   destination of a copying sweep), `blk`, `slot`, `extra`, the location table,
   `tmp`, and the builder's tables below. Starting a function sets counts to

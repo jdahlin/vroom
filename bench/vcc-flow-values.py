@@ -8,7 +8,7 @@ from hostenv import R, llvm
 
 SOURCE = r'''
 #include <assert.h>
-#include "emit/flow/values.c"
+#include "codegen/flow/values.c"
 int main(void)
 {
  em_value_table t = {0};

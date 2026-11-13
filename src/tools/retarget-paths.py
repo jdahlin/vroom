@@ -50,6 +50,31 @@ STEPS = {
            ('src/platform/darwin/pmc.c', 'src/port/darwin/pmc.c'),
            ('contrib/wasm/mman.c', 'src/port/wasm/mman.c'),
            ('contrib/wasm/compat/', 'src/port/wasm/compat/')],
+    # the language side under frontend/, code generation as codegen/, vccd's parts
+    # apart, one directory per program's main under bin/
+    'T3': [('src/pp/diag.c', 'src/frontend/diag/diag.c'),
+           ('src/pp/diagout.c', 'src/frontend/diag/diagout.c'),
+           ('src/pp/diagtext.c', 'src/frontend/diag/diagtext.c'),
+           ('src/pp/diagids.inc', 'src/frontend/diag/diagids.inc'),
+           ('src/lex/lextest.c', 'src/bin/lextest/lextest.c'),
+           ('src/lex/lexdiff.py', 'src/bin/lextest/lexdiff.py'),
+           ('src/lex/lexpmc.sh', 'src/bin/lextest/lexpmc.sh'),
+           ('src/lex/', 'src/frontend/lex/'),
+           ('src/pp/', 'src/frontend/pp/'),
+           ('src/cc/', 'src/frontend/c/'),
+           ('src/emit/', 'src/codegen/'),
+           ('src/arch/a64/emit/', 'src/arch/a64/codegen/'),
+           ('src/arch/x64/emit/', 'src/arch/x64/codegen/'),
+           ('src/arch/wasm/emit/', 'src/arch/wasm/codegen/'),
+           ('src/vccd/shim.c', 'src/bin/vcc/shim.c'),
+           *[(f'src/vccd/{f}', f'src/server/{f}') for f in (
+               'vccd.c', 'dstore.c', 'dstore.h', 'caps.c', 'caps.h', 'warnings.inc', 'gen-warnings.sh')],
+           *[(f'src/vccd/{f}', f'src/utils/{f}') for f in (
+               'ar.c', 'ar.h', 'rsh.c', 'rsh.h', 'fixdep.c', 'fixdep.h')],
+           ('src/as/vasm.c', 'src/bin/vasm/vasm.c'),
+           ('src/driver/vpp.c', 'src/bin/vpp/vpp.c'),
+           ('src/vir/virtest.c', 'src/bin/virtest/virtest.c'),
+           ('src/vir/viralloc.c', 'src/bin/viralloc/viralloc.c')],
 }
 TEXT = {'T1': T1_TEXT}
 
@@ -127,7 +152,9 @@ def text_pairs(step):
 
 
 def in_relative_scope(path):
-    return path.startswith('src/') or path in ('AGENTS.md', 'TODO.md') or path.startswith('doc/')
+    # not the test inputs and snapshots: their text is data
+    return ((path.startswith('src/') and not path.startswith(('src/tests/', 'src/test/')))
+            or path in ('AGENTS.md', 'TODO.md', 'README.md') or path.startswith('doc/'))
 
 
 def rewrite_text(files, steps):

@@ -12,7 +12,7 @@
  * token-stream hash is kept in REF.i.th (keyed by its size and mtime): when
  * ours hashes the same, the reference is not read again.
  *
- * With -c the TU is compiled (C: cc/ + emit/, .S: as.c) into an ELF
+ * With -c the TU is compiled (C: frontend/c/ + codegen/, .S: as.c) into an ELF
  * object, written with one write(); the dependency file is written as for -E.
  * Each thread keeps one assembler, one ElfObj and one output buffer.
  *
@@ -33,14 +33,14 @@
 #include <unistd.h>
 
 #include "../common/intern.h"
-#include "../pp/pp.h"
-#include "../cc/cc.h"
+#include "../frontend/pp/pp.h"
+#include "../frontend/c/cc.h"
 #include "ppdriver.h"
 #include "../as/as.h"
 #include "../obj/obj.h"
-#include "../pp/ppdata-predef.inc"
+#include "../frontend/pp/ppdata-predef.inc"
 #define PPDATA_X86_PREDEF
-#include "../pp/ppdata-x86.inc"
+#include "../frontend/pp/ppdata-x86.inc"
 #include "../common/arena.h"
 #include "../common/ldhash.h"
 #include "../common/buf.h"
@@ -1349,7 +1349,7 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 		/* clang: a -W option naming no warning group is -Wunknown-warning-option, which kbuild's
 		   cc-option probes make an error: gcc-only flags must fail as with clang */
 		static const char *const wgroups[] = {
-#include "../vccd/warnings.inc"
+#include "../server/warnings.inc"
 		};
 		bool strict = false;
 

@@ -29,7 +29,7 @@
 #include <string.h>
 #include <sys/mman.h>
 
-#include "../cc/ccint.h"
+#include "../frontend/c/ccint.h"
 #include "ccsnap.h"
 
 #define DC_PAGE ((size_t)16384)
