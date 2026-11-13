@@ -16,10 +16,10 @@ enum { DIAG_PRAGMA_IGNORED = 1, DIAG_PRAGMA_WARNING, DIAG_PRAGMA_ERROR };
 static void diag_pragma_state_push(pp *p, uint32_t st, uint32_t loc)
 {
 	if (!p->diagnostic_transitions)
-		p->diagnostic_transitions = varena_alloc(&p->perm, 4096 * sizeof(*p->diagnostic_transitions));
-	if (p->ndtr < 4096)
-		p->diagnostic_transitions[p->ndtr].loc = loc, p->diagnostic_transitions[p->ndtr++].st = st;
-	p->dcur = st;
+		p->diagnostic_transitions = varena_alloc(&p->permanent_region, 4096 * sizeof(*p->diagnostic_transitions));
+	if (p->diagnostic_transition_count < 4096)
+		p->diagnostic_transitions[p->diagnostic_transition_count].loc = loc, p->diagnostic_transitions[p->diagnostic_transition_count++].st = st;
+	p->diagnostic_current = st;
 }
 
 /* "push", "pop", "ignored|warning|error|fatal \"-Wflag\"" (after "clang diagnostic") */
@@ -34,13 +34,13 @@ VPRIV void diag_pragma_handle(pp *p, const char *q, const char *e, uint32_t loc)
 	for (n = 0; q + n < e && ((q[n] >= 'a' && q[n] <= 'z') || q[n] == '_'); n++)
 		;
 	if (n == 4 && !memcmp(q, "push", 4)) {
-		if (p->ndstk < 64)
-			p->diagnostic_stack[p->ndstk++] = p->dcur;
+		if (p->diagnostic_stack_depth < 64)
+			p->diagnostic_stack[p->diagnostic_stack_depth++] = p->diagnostic_current;
 		return;
 	}
 	if (n == 3 && !memcmp(q, "pop", 3)) {
-		if (p->ndstk)	/* (clang: "pragma diagnostic pop could not pop, no matching push") */
-			diag_pragma_state_push(p, p->diagnostic_stack[--p->ndstk], loc);
+		if (p->diagnostic_stack_depth)	/* (clang: "pragma diagnostic pop could not pop, no matching push") */
+			diag_pragma_state_push(p, p->diagnostic_stack[--p->diagnostic_stack_depth], loc);
 		return;
 	}
 	for (int i = 0; i < 4; i++)
@@ -56,21 +56,21 @@ VPRIV void diag_pragma_handle(pp *p, const char *q, const char *e, uint32_t loc)
 	q += 3;
 	for (n = 0; q + n < e && q[n] != '"'; n++)
 		;
-	if (n >= sizeof(p->dn->name) || (n > 3 && !memcmp(q, "no-", 3)))
+	if (n >= sizeof(p->diagnostic_nodes->name) || (n > 3 && !memcmp(q, "no-", 3)))
 		return;
-	if (!p->dn) {
-		p->dn = varena_alloc(&p->perm, 4096 * sizeof(*p->dn));
-		memset(&p->dn[0], 0, sizeof(*p->dn));
-		p->ndn = 1;
+	if (!p->diagnostic_nodes) {
+		p->diagnostic_nodes = varena_alloc(&p->permanent_region, 4096 * sizeof(*p->diagnostic_nodes));
+		memset(&p->diagnostic_nodes[0], 0, sizeof(*p->diagnostic_nodes));
+		p->diagnostic_node_count = 1;
 	}
-	if (p->ndn == 4096)
+	if (p->diagnostic_node_count == 4096)
 		return;
-	p->dn[p->ndn].prev = p->dcur;
-	p->dn[p->ndn].act = (uint8_t)act;
-	memcpy(p->dn[p->ndn].name, q, n);
-	p->dn[p->ndn].name[n] = 0;
+	p->diagnostic_nodes[p->diagnostic_node_count].prev = p->diagnostic_current;
+	p->diagnostic_nodes[p->diagnostic_node_count].act = (uint8_t)act;
+	memcpy(p->diagnostic_nodes[p->diagnostic_node_count].name, q, n);
+	p->diagnostic_nodes[p->diagnostic_node_count].name[n] = 0;
 	p->diagnostic_enabling_count += act != DIAG_PRAGMA_IGNORED;
-	diag_pragma_state_push(p, p->ndn++, loc);
+	diag_pragma_state_push(p, p->diagnostic_node_count++, loc);
 }
 
 /* the state at loc: the last transition before it in its file, else the one its file was
@@ -79,10 +79,10 @@ static uint32_t diag_pragma_state_at(const pp *p, uint32_t loc)
 {
 	const pp_file_entry *e = pp_location_file_entry(p, loc);
 
-	if (!e || loc - e->base > e->f->size)
-		return p->dcur;
-	for (uint32_t i = p->ndtr; i-- > 0;)
-		if (p->diagnostic_transitions[i].loc >= e->base && p->diagnostic_transitions[i].loc < loc)
+	if (!e || loc - e->location_base > e->lex_file->size)
+		return p->diagnostic_current;
+	for (uint32_t i = p->diagnostic_transition_count; i-- > 0;)
+		if (p->diagnostic_transitions[i].loc >= e->location_base && p->diagnostic_transitions[i].loc < loc)
 			return p->diagnostic_transitions[i].st;
 	return e->diagnostic_state;
 }
@@ -90,37 +90,37 @@ static uint32_t diag_pragma_state_at(const pp *p, uint32_t loc)
 /* leaving file fe: a state it changed holds in the includer from the #include on (clang) */
 VPRIV void diag_pragma_file_end(pp *p, uint32_t fe)
 {
-	const pp_file_entry *e = &p->fe[fe];
+	const pp_file_entry *e = &p->files[fe];
 
-	if (e->from && p->dcur != diag_pragma_state_at(p, e->from + 1))
-		diag_pragma_state_push(p, p->dcur, e->from + 1);
+	if (e->included_from && p->diagnostic_current != diag_pragma_state_at(p, e->included_from + 1))
+		diag_pragma_state_push(p, p->diagnostic_current, e->included_from + 1);
 }
 
 /* the command line's st (0 off, 1 warning, 2 error) under the pragmas in force at loc;
    clang: "warning" is a warning, also under -Werror and -Werror=flag */
 static int diag_pragma_level(const pp *p, int st, const char *flag, const char *const *groups, uint32_t loc)
 {
-	for (uint32_t s = diag_pragma_state_at(p, loc); s; s = p->dn[s].prev) {
-		const char *n = p->dn[s].name;
+	for (uint32_t s = diag_pragma_state_at(p, loc); s; s = p->diagnostic_nodes[s].prev) {
+		const char *n = p->diagnostic_nodes[s].name;
 		bool hit = !strcmp(n, flag) || !strcmp(n, "everything");
 
 		for (int g = 0; !hit && groups && groups[g]; g++)
 			hit = !strcmp(n, groups[g]);
 		if (hit)
-			return p->dn[s].act == DIAG_PRAGMA_IGNORED ? 0 : p->dn[s].act == DIAG_PRAGMA_ERROR ? 2 : 1;
+			return p->diagnostic_nodes[s].act == DIAG_PRAGMA_IGNORED ? 0 : p->diagnostic_nodes[s].act == DIAG_PRAGMA_ERROR ? 2 : 1;
 	}
 	return st;
 }
 
 int diag_pragma_count(const pp *p)
 {
-	return (int)p->ndtr;
+	return (int)p->diagnostic_transition_count;
 }
 
 const char *const *diag_warning_arguments(const pp *p, int *n)
 {
-	*n = p->o->nwargs;
-	return p->o->wargs;
+	*n = p->options->nwargs;
+	return p->options->wargs;
 }
 
 const uint32_t *diag_warning_enabled_count_reference(const pp *p)
@@ -135,8 +135,8 @@ static int diag_warning_state_compute(const pp *p, const char *flag, bool on, co
 
 	*w = false;
 
-	for (int i = 0; i < p->o->nwargs; i++) {
-		const char *a = p->o->wargs[i];
+	for (int i = 0; i < p->options->nwargs; i++) {
+		const char *a = p->options->wargs[i];
 		bool no = !strncmp(a, "-Wno-", 5);
 		const char *n = a + (no ? 5 : 2);
 		bool hit;
@@ -168,8 +168,8 @@ static int diag_warning_state_compute(const pp *p, const char *flag, bool on, co
 			if (deferr && no) err = false;
 		}
 	}
-	for (int i = 0; i < p->o->nwargs; i++)
-		if (!strcmp(p->o->wargs[i], "-w")) {
+	for (int i = 0; i < p->options->nwargs; i++)
+		if (!strcmp(p->options->wargs[i], "-w")) {
 			*w = true;
 			if (!deferr || !(err || (allerr && !noerr))) return 0;
 		}
@@ -189,9 +189,9 @@ VPRIV void diag_warning_cache_fill(pp *p)
 {
 	static const char *const g[] = { "pedantic", NULL };
 
-	p->warning_cache_options = p->o;
-	p->wc[PP_WARNING_C2Y] = diag_warning_state(p, "c2y-extensions", false, g) != 0;
-	p->wc[PP_WARNING_VARIADIC_MACRO] = diag_warning_state(p, "variadic-macros", false, g) != 0;
+	p->warning_cache_options = p->options;
+	p->warning_cache[PP_WARNING_C2Y] = diag_warning_state(p, "c2y-extensions", false, g) != 0;
+	p->warning_cache[PP_WARNING_VARIADIC_MACRO] = diag_warning_state(p, "variadic-macros", false, g) != 0;
 }
 
 /* the level a warning of flag is reported at at loc: DIAG_LEVEL_WARNING, DIAG_LEVEL_ERROR (-Werror), or -1 (off) */
@@ -200,7 +200,7 @@ int diag_warning_level(pp *p, const char *flag, bool on, const char *const *grou
 	bool w;
 	int st = diag_warning_state_compute(p, flag, on, groups, &w, false);
 
-	if (unlikely(p->ndtr) && loc != UINT32_MAX && !w)
+	if (unlikely(p->diagnostic_transition_count) && loc != UINT32_MAX && !w)
 		st = diag_pragma_level(p, st, flag, groups, loc);
 	if (!st || (loc != UINT32_MAX && pp_location_is_in_system_header(p, loc)))
 		return -1;
@@ -214,7 +214,7 @@ int diag_error_level(pp *p, const char *flag, const char *const *groups, uint32_
 	bool w;
 	int st = diag_warning_state_compute(p, flag, true, groups, &w, true);
 
-	if (unlikely(p->ndtr) && loc != UINT32_MAX)
+	if (unlikely(p->diagnostic_transition_count) && loc != UINT32_MAX)
 		st = diag_pragma_level(p, st, flag, groups, loc);
 	if (!st || (st != 2 && (w || (loc != UINT32_MAX && pp_location_is_in_system_header(p, loc)))))
 		return -1;
@@ -224,15 +224,15 @@ int diag_error_level(pp *p, const char *flag, const char *const *groups, uint32_
 /* any #pragma clang diagnostic changed a flag's state: per-location answers can differ */
 int diag_pragma_active(const pp *p)
 {
-	return p->ndtr != 0;
+	return p->diagnostic_transition_count != 0;
 }
 
 int diag_warning_error_named(const pp *p, const char *flag, const char *const *groups)
 {
 	int r = 0;
 
-	for (int i = 0; i < p->o->nwargs; i++) {
-		const char *a = p->o->wargs[i], *n;
+	for (int i = 0; i < p->options->nwargs; i++) {
+		const char *a = p->options->wargs[i], *n;
 		bool hit;
 
 		if (!strncmp(a, "-Werror=", 8))

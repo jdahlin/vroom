@@ -7,7 +7,7 @@
  * differ).  The thread receives the request (argv, env, cwd, fds 0-2) into a
  * per-thread buffer, then
  *
- *   - answers toolchain probes from the capability table in caps.c,
+ *   - answers toolchain probes from the capability table in capabilities.c,
  *     without running anything: cc-option/ld-option, as-instr (the source
  *     on stdin is looked up), user-space link tests, --version,
  *     -print-file-name, and links with options vld refuses;
@@ -32,9 +32,9 @@
  *     a vcc request is either -c of a .c file, compiled here, or run as
  *     PROG with the same arguments (probes, links, --version, and any TU
  *     vcc fails on); sources containing $VCC_DELEGATE_SKIP go to PROG too;
- *   - runs make's recipes for vsh (argv[0] sh): utils/rsh.c interprets kbuild's
+ *   - runs make's recipes for vsh (argv[0] sh): utils/shell.c interprets kbuild's
  *     subset of sh and runs the tools in it as requests here; anything else
- *     is answered VROOM_STATUS_DECLINE and vsh runs the real shell.
+ *     is answered VCCD_STATUS_DECLINE and vsh runs the real shell.
  *
  * No allocation per request: buffers are mmap'ed once per worker.
  *
@@ -56,13 +56,13 @@
 
 #include "vccd-internal.h"
 
-const char *backend_sock;	/* vroomd (clang), only if given */
-const char *ld_backend;		/* links run this (vroom-ld), only if given */
-bool log_requests, own_pp = true, own_cc = true;
-char self_exe[4096];	/* our own binary (realpath), for a restart */
-uint64_t self_build;	/* vroom_build_id of our own binary */
-char tool_dir[4096];	/* where vccd and its shims live (realpath) */
-static bool peer_is_us(int c)
+const char *vccd_backend_socket;	/* vroomd (clang), only if given */
+const char *vccd_linker_backend;		/* links run this (vroom-ld), only if given */
+bool vccd_log_requests, vccd_own_preprocessor = true, vccd_own_compiler = true;
+char vccd_self_executable[4096];	/* our own binary (realpath), for a restart */
+uint64_t vccd_self_build_id;	/* vccd_build_id of our own binary */
+char vccd_tool_directory[4096];	/* where vccd and its shims live (realpath) */
+static bool vccd_peer_is_us(int c)
 {
 #ifdef __APPLE__
 	uid_t u;
@@ -97,11 +97,11 @@ int main(int argc, char **argv)
 		else if (!strcmp(argv[i], "--listen-fd") && i + 1 < argc)
 			listen_fd = atoi(argv[++i]);
 		else if (!strcmp(argv[i], "--backend-sock") && i + 1 < argc)
-			backend_sock = argv[++i];
+			vccd_backend_socket = argv[++i];
 		else if (!strcmp(argv[i], "--ld") && i + 1 < argc)
-			ld_backend = argv[++i];
+			vccd_linker_backend = argv[++i];
 		else if (!strcmp(argv[i], "--lld") && i + 1 < argc)
-			ld_backend = argv[++i];	/* (old name of --ld) */
+			vccd_linker_backend = argv[++i];	/* (old name of --ld) */
 		else if (!strcmp(argv[i], "-j") && i + 1 < argc)
 			nworkers = jobs = atoi(argv[++i]);
 		else if (!strcmp(argv[i], "--shared-pool"))
@@ -113,40 +113,40 @@ int main(int argc, char **argv)
 	}
 	/* the shared pool's threads (emit helpers, link phases) run compiler code
 	   as the workers do: the same stack, so input nests as deep on either */
-	vtask_stack_size_set(WORKER_STACK);
-	log_requests = getenv("VCC_LOG");
+	vtask_stack_size_set(VCCD_WORKER_STACK_SIZE);
+	vccd_log_requests = getenv("VCC_LOG");
 	{	/* the shims next to vccd: recipes may run them here (rsh) */
 		char self[4096], *sl;
 
 		if (realpath(argv[0], self) && (sl = strrchr(self, '/'))) {
-			self_build = vroom_build_id(self);
-			snprintf(self_exe, sizeof(self_exe), "%s", self);
+			vccd_self_build_id = vccd_build_id(self);
+			snprintf(vccd_self_executable, sizeof(vccd_self_executable), "%s", self);
 			*sl = 0;
-			snprintf(tool_dir, sizeof(tool_dir), "%s", self);
+			snprintf(vccd_tool_directory, sizeof(vccd_tool_directory), "%s", self);
 		}
 	}
 	/* without a backend vcc does all of it */
-	own_pp = !backend_sock || !getenv("VCC_PP") || strcmp(getenv("VCC_PP"), "0");
-	own_cc = !backend_sock || !getenv("VCC_CC") || strcmp(getenv("VCC_CC"), "0");
+	vccd_own_preprocessor = !vccd_backend_socket || !getenv("VCC_PP") || strcmp(getenv("VCC_PP"), "0");
+	vccd_own_compiler = !vccd_backend_socket || !getenv("VCC_CC") || strcmp(getenv("VCC_CC"), "0");
 	signal(SIGPIPE, SIG_IGN);
 
 	if (!sock) {
-		if (vroom_default_sock(ddir, sizeof(ddir), dsock, sizeof(dsock), 1)) {
+		if (vccd_socket_default(ddir, sizeof(ddir), dsock, sizeof(dsock), 1)) {
 			fprintf(stderr, "vccd: %s is not a private directory of ours\n", ddir);
 			return 1;
 		}
 		sock = dsock;
 	}
-	g_argc = argc, g_argv = argv, g_sock = sock;
+	vccd_restart_argc = argc, vccd_restart_argv = argv, vccd_socket_path = sock;
 	if (listen_fd >= 0) {	/* re-exec'ed after a memory restart: the same socket */
-		ls = g_ls = listen_fd;
+		ls = vccd_listen_fd = listen_fd;
 		fcntl(ls, F_SETFD, FD_CLOEXEC);
 		goto listening;
 	}
 	unlink(sock);
 	strncpy(sa.sun_path, sock, sizeof(sa.sun_path) - 1);
 	ls = socket(AF_UNIX, SOCK_STREAM, 0);
-	g_ls = ls;
+	vccd_listen_fd = ls;
 	{	/* the socket is 0600 whatever the umask: the peer check below is the real gate */
 		mode_t um = umask(077);
 		int bad = ls < 0 || bind(ls, (struct sockaddr *)&sa, sizeof(sa));
@@ -172,7 +172,7 @@ listening:
 
 	if (shared_pool) {
 		vtask_budget_set(jobs > 0 ? jobs : vtask_jobs_from_environment(0));
-		if (log_requests)
+		if (vccd_log_requests)
 			fprintf(stderr, "vccd: shared pool, budget %d\n", vtask_budget());
 	}
 	for (i = 0; i < (shared_pool ? 0 : nworkers); i++) {
@@ -180,8 +180,8 @@ listening:
 		pthread_attr_t at;
 
 		pthread_attr_init(&at);
-		pthread_attr_setstacksize(&at, WORKER_STACK);
-		pthread_create(&t, &at, worker_main, NULL);
+		pthread_attr_setstacksize(&at, VCCD_WORKER_STACK_SIZE);
+		pthread_create(&t, &at, vccd_worker_main, NULL);
 		pthread_attr_destroy(&at);
 	}
 
@@ -201,10 +201,10 @@ listening:
 	kevent(kq, &ev, 1, NULL, 0, NULL);
 	for (;;) {
 		struct kevent out;
-		struct timespec tick = { 0, 50000000 };	/* (a restart waits for park_accept) */
+		struct timespec tick = { 0, 50000000 };	/* (a restart waits for vccd_accept_park) */
 		int nev;
 
-		park_accept();
+		vccd_accept_park();
 		if ((nev = kevent(kq, NULL, 0, &out, 1, &tick)) == 0)
 			continue;
 		if (nev < 0) {
@@ -214,9 +214,9 @@ listening:
 			return 1;
 		}
 		if (out.filter == EVFILT_SIGNAL) {
-			print_counts();
+			vccd_counters_print();
 			if (out.ident == SIGTERM)
-				drain_exit(ls, sock);
+				vccd_server_drain_exit(ls, sock);
 			continue;
 		}
 #else
@@ -242,7 +242,7 @@ listening:
 			struct epoll_event out;
 			int nev;
 
-			park_accept();
+			vccd_accept_park();
 			if ((nev = epoll_wait(kq, &out, 1, 50)) == 0)
 				continue;
 			if (nev < 0) {
@@ -256,22 +256,22 @@ listening:
 
 				if (read(sfd, &si, sizeof si) != sizeof si)
 					continue;
-				print_counts();
+				vccd_counters_print();
 				if (si.ssi_signo == SIGTERM)
-					drain_exit(ls, sock);
+					vccd_server_drain_exit(ls, sock);
 				continue;
 			}
 #endif
 		for (;;) {
 			int c;
 
-			if (atomic_load(&gen_restart))
+			if (atomic_load(&vccd_generation_restart_pending))
 				break;	/* (parks at the loop's top) */
 			c = accept(ls, NULL, NULL);
 
 			if (c < 0)
 				break;
-			if (!peer_is_us(c)) {	/* another user: refused before reading anything */
+			if (!vccd_peer_is_us(c)) {	/* another user: refused before reading anything */
 				close(c);
 				continue;
 			}
@@ -283,8 +283,8 @@ listening:
 
 				setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 			}
-			if (queue_push(c) && shared_pool)
-				vtask_spawn(pool_job, NULL);
+			if (vccd_queue_push(c) && shared_pool)
+				vtask_spawn(vccd_worker_pool_job, NULL);
 		}
 	}
 #ifndef __APPLE__

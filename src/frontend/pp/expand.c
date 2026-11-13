@@ -5,9 +5,9 @@
 /* ---------------- arguments ---------------- */
 
 typedef struct pp_macro_arguments {
-	const ptok *tok;
-	uint32_t *st, *ln;	/* per parameter: start, length in tok */
-	const ptok **pre;	/* pre-expanded, lazily */
+	const ptok *tokens;
+	uint32_t *starts, *lengths;	/* per parameter: start, length in tok */
+	const ptok **preexpanded;	/* pre-expanded, lazily */
 	uint32_t *preexpanded_lengths;
 	uint8_t *preexpanded_state;		/* 0: not computed, 1: done */
 	size_t base;		/* tok is sv + base */
@@ -21,8 +21,8 @@ VPRIV void pp_macro_note_at(pp *p, const pp_macro *m, uint32_t before, const cha
 	const char *src = NULL;
 
 	/* the last "#define NAME" seen (a redefinition replaces the earlier one) */
-	for (uint32_t i = 0; i < p->nfe; i++) {
-		const lex_file *f = p->fe[i].f;
+	for (uint32_t i = 0; i < p->file_count; i++) {
+		const lex_file *f = p->files[i].lex_file;
 		const lex_token *q;
 
 		if (!f || !f->tok)
@@ -30,8 +30,8 @@ VPRIV void pp_macro_note_at(pp *p, const pp_macro *m, uint32_t before, const cha
 		q = f->tok;
 		for (uint32_t k = 2; k < f->ntok; k++)
 			if (q[k].kind == LEX_TOKEN_IDENTIFIER && q[k].id == m->name && q[k - 1].id == KW_define &&
-			    q[k - 2].kind == LEX_TOKEN_HASH && (q[k - 2].flags & LEX_TOKEN_FLAG_LINE_START) && p->fe[i].base + q[k].off < before)
-				loc = p->fe[i].base + q[k].off, len = q[k].len, src = f->src + q[k].off;
+			    q[k - 2].kind == LEX_TOKEN_HASH && (q[k - 2].flags & LEX_TOKEN_FLAG_LINE_START) && p->files[i].location_base + q[k].off < before)
+				loc = p->files[i].location_base + q[k].off, len = q[k].len, src = f->src + q[k].off;
 	}
 	if (src) {
 		diag_info d = { "note", loc, NULL, 0, NULL, 0, NULL, 0 };
@@ -47,7 +47,7 @@ static void pp_macro_note(pp *p, const pp_macro *m)
 
 static bool pp_macro_arguments_collect_inner(pp *p, const pp_macro *m, const ptok *name, pp_macro_arguments *a, ptok *rp)
 {
-	uint32_t np = m->nparam, slots = np ? np : 1, k = 0, depth = 0, end;
+	uint32_t np = m->parameter_count, slots = np ? np : 1, k = 0, depth = 0, end;
 	size_t base = p->scratch_token_count;
 	bool va = m->flags & PP_MACRO_FLAG_VARIADIC;
 	const ptok *tok;
@@ -56,27 +56,27 @@ static bool pp_macro_arguments_collect_inner(pp *p, const pp_macro *m, const pto
 	a->variadic_elided = false;
 	/* pre, then st, ln, preln, then prest: one allocation */
 	{
-		char *b = varena_alloc(&p->tmp, slots * (sizeof(*a->pre) + 3 * sizeof(uint32_t) + 1));
+		char *b = varena_alloc(&p->temporary_region, slots * (sizeof(*a->preexpanded) + 3 * sizeof(uint32_t) + 1));
 
-		a->pre = (const ptok **)b;
-		a->st = (uint32_t *)(b + slots * sizeof(*a->pre));
-		a->ln = a->st + slots;
-		a->preexpanded_lengths = a->ln + slots;
+		a->preexpanded = (const ptok **)b;
+		a->starts = (uint32_t *)(b + slots * sizeof(*a->preexpanded));
+		a->lengths = a->starts + slots;
+		a->preexpanded_lengths = a->lengths + slots;
 		a->preexpanded_state = (uint8_t *)(a->preexpanded_lengths + slots);
 	}
 	pp_token_raw_next(p, &t);		/* '(' */
-	a->st[0] = 0;
+	a->starts[0] = 0;
 	/*
 	 * The whole invocation in the top expansion context (nested macros):
 	 * the arguments are slices of its tokens, which outlive the expansion
 	 * (tmp) and are not written; nothing is copied.
 	 */
 	{
-		pp_context *c = &p->cx[p->depth - 1];
+		pp_context *c = &p->contexts[p->context_depth - 1];
 
-		if (c->type == PP_CONTEXT_TOKENS && !(c->first | p->pend)) {
-			const ptok *pt = c->pt + c->i;
-			uint32_t e = c->n - c->i;
+		if (c->type == PP_CONTEXT_TOKENS && !(c->first_flags | p->owed_spacing)) {
+			const ptok *pt = c->tokens + c->index;
+			uint32_t e = c->count - c->index;
 
 			for (uint32_t i = 0; i < e; i++) {
 				uint8_t kd = pt[i].kind;
@@ -88,7 +88,7 @@ static bool pp_macro_arguments_collect_inner(pp *p, const pp_macro *m, const pto
 						depth--;
 						continue;
 					}
-					c->i += i + 1;
+					c->index += i + 1;
 					*rp = pt[i];
 					tok = pt;
 					end = i;
@@ -98,24 +98,24 @@ static bool pp_macro_arguments_collect_inner(pp *p, const pp_macro *m, const pto
 						k++;	/* too many: counted, reported below */
 						continue;
 					}
-					a->ln[k] = i - a->st[k];
-					a->st[++k] = i + 1;
+					a->lengths[k] = i - a->starts[k];
+					a->starts[++k] = i + 1;
 				}
 			}
 			k = depth = 0;	/* not all there: collect into sv */
 		}
 	}
 	for (;;) {
-		pp_context *c = &p->cx[p->depth - 1];
+		pp_context *c = &p->contexts[p->context_depth - 1];
 
 		/* runs of plain tokens straight into sv */
-		if (likely(c->i < c->n && !(c->first | p->pend)) && c->type != PP_CONTEXT_SERVED) {
+		if (likely(c->index < c->count && !(c->first_flags | p->owed_spacing)) && c->type != PP_CONTEXT_SERVED) {
 			bool stop_comma = !(va && k + 1 >= np);
-			uint32_t i = c->i, e = c->n;
+			uint32_t i = c->index, e = c->count;
 
 			if (c->type == PP_CONTEXT_TOKENS) {
-				const ptok *pt = c->pt;
-				ptok *w = p->sv + p->scratch_token_count;
+				const ptok *pt = c->tokens;
+				ptok *w = p->scratch_tokens + p->scratch_token_count;
 
 				/* (no room for the rest of the context: token by token below) */
 				if (unlikely(p->scratch_token_count + (e - i) > PP_SCRATCH_TOKENS_MAX))
@@ -134,12 +134,12 @@ static bool pp_macro_arguments_collect_inner(pp *p, const pp_macro *m, const pto
 					}
 					*w++ = pt[i];
 				}
-				p->scratch_token_count = (size_t)(w - p->sv);
-				e = c->n;
+				p->scratch_token_count = (size_t)(w - p->scratch_tokens);
+				e = c->count;
 			} else {
-				const lex_token *vt = c->vt;
+				const lex_token *vt = c->lexed_tokens;
 				bool file = c->type == PP_CONTEXT_FILE;
-				uint32_t loc = c->loc, offloc = file || c->offloc;
+				uint32_t loc = c->location, offloc = file || c->location_per_token;
 
 				for (; i < e; i++) {
 					const lex_token *v = &vt[i];
@@ -159,10 +159,10 @@ static bool pp_macro_arguments_collect_inner(pp *p, const pp_macro *m, const pto
 					if (unlikely(p->scratch_token_count == PP_SCRATCH_TOKENS_MAX)) {
 						PP_FATAL(p, 0, "macro expansion too large");
 					}
-					pp_token_fill_from_lexer(&p->sv[p->scratch_token_count++], v, c->src, offloc ? loc + v->off : loc);
+					pp_token_fill_from_lexer(&p->scratch_tokens[p->scratch_token_count++], v, c->source, offloc ? loc + v->off : loc);
 				}
 			}
-			c->i = i;
+			c->index = i;
 			if (i == e)
 				continue;
 		}
@@ -184,8 +184,8 @@ static bool pp_macro_arguments_collect_inner(pp *p, const pp_macro *m, const pto
 				k++;
 				continue;	/* too many: counted, reported below */
 			}
-			a->ln[k] = (uint32_t)(p->scratch_token_count - base) - a->st[k];
-			a->st[++k] = (uint32_t)(p->scratch_token_count - base);
+			a->lengths[k] = (uint32_t)(p->scratch_token_count - base) - a->starts[k];
+			a->starts[++k] = (uint32_t)(p->scratch_token_count - base);
 			continue;
 		} else if (unlikely(t.kind == PP_TOKEN_KIND_DIRECTIVE_LINE)) {
 			PP_WARN(p, t.loc, "directive in macro arguments ignored");
@@ -195,7 +195,7 @@ static bool pp_macro_arguments_collect_inner(pp *p, const pp_macro *m, const pto
 	}
 	*rp = t;
 	/* the arguments stay in sv[base, svn) until pp_macro_expand() is done with them */
-	tok = p->sv + base;
+	tok = p->scratch_tokens + base;
 	end = (uint32_t)(p->scratch_token_count - base);
 done:
 	if (k >= slots) {
@@ -203,12 +203,12 @@ done:
 		p->scratch_token_count = base;
 		return false;
 	}
-	a->ln[k] = end - a->st[k];
+	a->lengths[k] = end - a->starts[k];
 	if (k + 1 < np) {
 		if (va && k + 2 == np) {
 			/* GNU: the variadic argument left out entirely */
-			a->st[k + 1] = end;
-			a->ln[k + 1] = 0;
+			a->starts[k + 1] = end;
+			a->lengths[k + 1] = 0;
 			a->variadic_elided = true;
 		} else {
 			PP_ERROR(p, t.loc, "too few arguments provided to function-like macro invocation");
@@ -216,21 +216,21 @@ done:
 			p->scratch_token_count = base;
 			return false;
 		}
-	} else if (np == 1 && va && !a->ln[0]) {
+	} else if (np == 1 && va && !a->lengths[0]) {
 		a->variadic_elided = true;	/* F() for F(...): no arguments at all */
-	} else if (np == 0 && a->ln[0]) {
+	} else if (np == 0 && a->lengths[0]) {
 		PP_ERROR(p, name->loc, "too many arguments provided to function-like macro invocation");
 		p->scratch_token_count = base;
 		return false;
 	}
 	if (unlikely(p->output_text_mode))
-		for (ptok *q = p->sv + base, *qe = q + end; q < qe; q++) {	/* clang -E prints an argument on its invocation's line */
+		for (ptok *q = p->scratch_tokens + base, *qe = q + end; q < qe; q++) {	/* clang -E prints an argument on its invocation's line */
 			if (q->flags & LEX_TOKEN_FLAG_LINE_START)	/* the line break is no space, the indentation is */
 				q->flags = (q->flags & ~(LEX_TOKEN_FLAG_LINE_START | LEX_TOKEN_FLAG_SPACE_BEFORE)) | (pp_token_column(p, q->loc) > 1 ? LEX_TOKEN_FLAG_SPACE_BEFORE : 0);
 			if (unlikely(p->output_text_mode > 1) && (q->flags & LEX_TOKEN_FLAG_SPACE_BEFORE) && !(q->flags & PP_TOKEN_FLAG_FROM_MACRO) && q->s[-1] == '/')
 				q->flags &= ~LEX_TOKEN_FLAG_SPACE_BEFORE;	/* -C: right after a comment (which is dropped) */
 		}
-	a->tok = tok;
+	a->tokens = tok;
 	a->base = base;
 	memset(a->preexpanded_state, 0, slots);
 	return true;
@@ -248,11 +248,11 @@ static bool pp_macro_arguments_collect(pp *p, const pp_macro *m, const ptok *nam
 {
 	bool r;
 
-	if (!p->collecting)
-		p->coll_loc = name->loc, p->collecting_name = m->name;
-	p->collecting++;
+	if (!p->collecting_arguments)
+		p->collecting_location = name->loc, p->collecting_name = m->name;
+	p->collecting_arguments++;
 	r = pp_macro_arguments_collect_inner(p, m, name, a, rp);
-	p->collecting--;
+	p->collecting_arguments--;
 	return r;
 }
 
@@ -272,25 +272,25 @@ static bool pp_macro_argument_needs_preexpansion(pp *p, const ptok *t, uint32_t 
 static __attribute__((noinline)) void pp_macro_argument_preexpand_run(pp *p, pp_macro_arguments *a, uint32_t k, bool keep,
 						       const ptok *at, uint32_t n)
 {
-	uint8_t pend = p->pend;
-	int d = p->depth;
+	uint8_t pend = p->owed_spacing;
+	int d = p->context_depth;
 	size_t base = p->scratch_token_count;
 	ptok t;
 
 	if (vstack_guard_low())
 		PP_FATAL(p, at->loc, "macro arguments nested too deeply");
 	pp_context_tokens_push(p, at, n, 0, 0, 1);
-	p->pend = 0;
+	p->owed_spacing = 0;
 	p->argument_preexpansion++;
 	for (;;) {
-		pp_context *c = &p->cx[p->depth - 1];
+		pp_context *c = &p->contexts[p->context_depth - 1];
 
 		/* runs of tokens that are not macros: as pp_token_expanded_next() returns them, straight into sv */
-		if (c->type == PP_CONTEXT_TOKENS && c->i < c->n && !(c->first | p->pend) && !p->rec.on &&
-		    likely(p->scratch_token_count + (c->n - c->i) <= PP_SCRATCH_TOKENS_MAX)) {
-			const ptok *pt = c->pt;
-			ptok *w = p->sv + p->scratch_token_count;
-			uint32_t i = c->i, e = c->n;
+		if (c->type == PP_CONTEXT_TOKENS && c->index < c->count && !(c->first_flags | p->owed_spacing) && !p->recording.on &&
+		    likely(p->scratch_token_count + (c->count - c->index) <= PP_SCRATCH_TOKENS_MAX)) {
+			const ptok *pt = c->tokens;
+			ptok *w = p->scratch_tokens + p->scratch_token_count;
+			uint32_t i = c->index, e = c->count;
 
 			for (; i < e; i++) {
 				uintptr_t me;
@@ -303,8 +303,8 @@ static __attribute__((noinline)) void pp_macro_argument_preexpand_run(pp *p, pp_
 				}
 				w++;
 			}
-			p->scratch_token_count = (size_t)(w - p->sv);
-			c->i = i;
+			p->scratch_token_count = (size_t)(w - p->scratch_tokens);
+			c->index = i;
 		}
 		pp_token_expanded_next(p, &t);
 		if (t.kind == LEX_TOKEN_EOF)
@@ -313,24 +313,24 @@ static __attribute__((noinline)) void pp_macro_argument_preexpand_run(pp *p, pp_
 	}
 	p->argument_preexpansion--;
 	pp_context_pop_to(p, d);
-	p->pend = pend;
+	p->owed_spacing = pend;
 	if (keep) {
-		a->pre[k] = p->sv + base;
+		a->preexpanded[k] = p->scratch_tokens + base;
 		a->preexpanded_lengths[k] = (uint32_t)(p->scratch_token_count - base);
 	} else {
-		a->pre[k] = pp_scratch_tokens_take(p, base, &a->preexpanded_lengths[k]);
+		a->preexpanded[k] = pp_scratch_tokens_take(p, base, &a->preexpanded_lengths[k]);
 	}
 }
 
 /* most arguments need no pre-expansion: that check inline, the rest in pp_macro_argument_preexpand_run */
 static inline void pp_macro_argument_preexpand(pp *p, pp_macro_arguments *a, uint32_t k, bool keep)
 {
-	const ptok *at = a->tok + a->st[k];
-	uint32_t n = a->ln[k];
+	const ptok *at = a->tokens + a->starts[k];
+	uint32_t n = a->lengths[k];
 
 	a->preexpanded_state[k] = 1;
 	if (!pp_macro_argument_needs_preexpansion(p, at, n)) {
-		a->pre[k] = at;
+		a->preexpanded[k] = at;
 		a->preexpanded_lengths[k] = n;
 		return;
 	}
@@ -354,10 +354,10 @@ static void pp_macro_argument_stringify(pp *p, const ptok *t, uint32_t n, ptok *
 	uint16_t runs[64];
 	uint32_t roff[64], nr = 0;
 
-	b = w = varena_alloc(&p->tmp, cap + 16);
+	b = w = varena_alloc(&p->temporary_region, cap + 16);
 	*w++ = '"';
 	for (uint32_t i = 0; i < n; i++) {
-		uint16_t rc = unlikely(t[i].ctr) && p->rec.on ? t[i].ctr : 0;
+		uint16_t rc = unlikely(t[i].ctr) && p->recording.on ? t[i].ctr : 0;
 
 		if (i && (t[i].flags & (LEX_TOKEN_FLAG_SPACE_BEFORE | LEX_TOKEN_FLAG_LINE_START)))
 			*w++ = ' ';
@@ -368,14 +368,14 @@ static void pp_macro_argument_stringify(pp *p, const ptok *t, uint32_t n, ptok *
 
 			for (size_t j = 0; j < l; j++) {
 				/* digits are never escaped: a run starts where its first digit lands */
-				while (rc && p->rec.cp[rc].off == j) {
+				while (rc && p->recording.counter_provenance[rc].offset == j) {
 					if (nr < 64) {
 						runs[nr] = rc;
 						roff[nr++] = (uint32_t)(w - b);
 					} else {
 						PP_HEADER_CACHE_REGION_REJECT(p);
 					}
-					rc = p->rec.cp[rc].next;
+					rc = p->recording.counter_provenance[rc].next_run;
 				}
 				if (s[j] == '\\' || s[j] == '"')
 					*w++ = '\\';
@@ -389,10 +389,10 @@ static void pp_macro_argument_stringify(pp *p, const ptok *t, uint32_t n, ptok *
 			if (rc)
 				PP_HEADER_CACHE_REGION_REJECT(p);
 		} else {
-			for (; rc; rc = p->rec.cp[rc].next) {
+			for (; rc; rc = p->recording.counter_provenance[rc].next_run) {
 				if (nr < 64) {
 					runs[nr] = rc;
-					roff[nr++] = (uint32_t)(w - b) + p->rec.cp[rc].off;
+					roff[nr++] = (uint32_t)(w - b) + p->recording.counter_provenance[rc].offset;
 				} else {
 					PP_HEADER_CACHE_REGION_REJECT(p);
 				}
@@ -417,9 +417,9 @@ static void pp_macro_argument_stringify(pp *p, const ptok *t, uint32_t n, ptok *
 	out->kind = LEX_TOKEN_STRING;
 	out->loc = n ? t[0].loc : 0;
 	for (uint32_t k = nr; k-- > 0;) {
-		const pp_header_cache_counter_provenance c = p->rec.cp[runs[k]];
+		const pp_header_cache_counter_provenance c = p->recording.counter_provenance[runs[k]];
 
-		out->ctr = pp_header_cache_counter_provenance_new(p, c.val, roff[k], c.len, out->ctr);
+		out->ctr = pp_header_cache_counter_provenance_new(p, c.value, roff[k], c.length, out->ctr);
 	}
 }
 
@@ -533,7 +533,7 @@ static bool pp_paste_is_valid(const ptok *l, const ptok *r)
 
 static ptok pp_paste_tokens(pp *p, const ptok *l, const ptok *r)
 {
-	char *b = varena_alloc(&p->tmp, l->len + r->len + 24), *w;
+	char *b = varena_alloc(&p->temporary_region, l->len + r->len + 24), *w;
 	ptok t = *l;
 	int k;
 	uint32_t ll;
@@ -543,7 +543,7 @@ static ptok pp_paste_tokens(pp *p, const ptok *l, const ptok *r)
 	w = pp_token_spell_to_padded(w, r);
 	memset(w, 0, 17);
 	k = pp_paste_result_classify(b, (size_t)(w - b), r->kind);
-	if (p->o->no_digraphs && ((w - b == 2 &&
+	if (p->options->no_digraphs && ((w - b == 2 &&
 	    ((b[0] == '<' && (b[1] == ':' || b[1] == '%')) ||
 	     (b[0] == ':' && b[1] == '>') ||
 	     (b[0] == '%' && (b[1] == '>' || b[1] == ':')))) ||
@@ -558,7 +558,7 @@ static ptok pp_paste_tokens(pp *p, const ptok *l, const ptok *r)
 	t.kind = (uint8_t)k;
 	t.flags = l->flags & (LEX_TOKEN_FLAG_LINE_START | LEX_TOKEN_FLAG_SPACE_BEFORE | PP_TOKEN_FLAG_FROM_MACRO);	/* (PP_TOKEN_FLAG_FROM_MACRO: diagnostics) */
 	t.id = k == LEX_TOKEN_IDENTIFIER ? vintern_copy(b, t.len) : 0;
-	if (unlikely(r->ctr) && p->rec.on)
+	if (unlikely(r->ctr) && p->recording.on)
 		t.ctr = pp_header_cache_counter_provenance_chain(p, l->ctr, 0, pp_header_cache_counter_provenance_chain(p, r->ctr, ll, 0));
 	return t;
 }
@@ -573,10 +573,10 @@ static inline bool pp_paste_operator_is(const ptok *t)
 /* clang's maybeRemoveCommaBeforeVaArgs (gnu mode), only if the argument was elided */
 static void pp_variadic_comma_remove(pp *p, size_t base, bool *ngs)
 {
-	if (p->scratch_token_count == base || p->sv[p->scratch_token_count - 1].kind != LEX_TOKEN_COMMA)
+	if (p->scratch_token_count == base || p->scratch_tokens[p->scratch_token_count - 1].kind != LEX_TOKEN_COMMA)
 		return;
 	p->scratch_token_count--;
-	if (p->scratch_token_count > base && pp_paste_operator_is(&p->sv[p->scratch_token_count - 1]))
+	if (p->scratch_token_count > base && pp_paste_operator_is(&p->scratch_tokens[p->scratch_token_count - 1]))
 		p->scratch_token_count--;
 	*ngs = false;
 }
@@ -585,7 +585,7 @@ static void pp_variadic_comma_remove(pp *p, size_t base, bool *ngs)
 static size_t pp_tokens_append_unpasted(pp *p, const ptok *t, uint32_t n)
 {
 	size_t first = p->scratch_token_count;
-	ptok *w = p->sv + first;
+	ptok *w = p->scratch_tokens + first;
 
 	if (unlikely(n > PP_SCRATCH_TOKENS_MAX - p->scratch_token_count)) {
 		PP_FATAL(p, 0, "macro expansion too large");
@@ -608,8 +608,8 @@ static void pp_macro_body_substitute_range(pp *p, const pp_macro *m, pp_macro_ar
 			uint32_t eloc, bool *ngsp)
 {
 	const lex_token *body = m->body;
-	const uint8_t *pidx = m->pidx;
-	uint32_t np = m->nparam;
+	const uint8_t *pidx = m->parameter_indices;
+	uint32_t np = m->parameter_count;
 	bool ngs = *ngsp, va = m->flags & PP_MACRO_FLAG_VARIADIC;
 	ptok t;
 
@@ -636,7 +636,7 @@ static void pp_macro_body_substitute_range(pp *p, const pp_macro *m, pp_macro_ar
 		if (cur->kind == LEX_TOKEN_HASH && m->kind == PP_MACRO_FUNCTION_LIKE && i + 1 < to && pidx && pidx[i + 1]) {
 			uint32_t j = pidx[i + 1] - 1;
 
-			pp_macro_argument_stringify(p, a->tok + a->st[j], a->ln[j], &t);
+			pp_macro_argument_stringify(p, a->tokens + a->starts[j], a->lengths[j], &t);
 			t.loc = eloc;
 			if (ngs)
 				t.flags |= LEX_TOKEN_FLAG_SPACE_BEFORE;
@@ -652,45 +652,45 @@ plain:
 			if (unlikely(p->scratch_token_count == PP_SCRATCH_TOKENS_MAX)) {
 				PP_FATAL(p, 0, "macro expansion too large");
 			}
-			w = &p->sv[p->scratch_token_count++];
-			pp_token_fill_from_lexer(w, cur, m->src, eloc);
+			w = &p->scratch_tokens[p->scratch_token_count++];
+			pp_token_fill_from_lexer(w, cur, m->source, eloc);
 			w->flags = (w->flags & ~(LEX_TOKEN_FLAG_LINE_START | LEX_TOKEN_FLAG_SPACE_BEFORE)) | (ngs ? LEX_TOKEN_FLAG_SPACE_BEFORE : 0) | PP_TOKEN_FLAG_FROM_MACRO;
 			ngs = false;
 			continue;
 		}
-		before_nonempty = p->scratch_token_count > base && pp_paste_operator_is(&p->sv[p->scratch_token_count - 1]);
+		before_nonempty = p->scratch_token_count > base && pp_paste_operator_is(&p->scratch_tokens[p->scratch_token_count - 1]);
 		before = i && body[i - 1].kind == LEX_TOKEN_HASH_HASH;
 		after = i + 1 < to && body[i + 1].kind == LEX_TOKEN_HASH_HASH;
 		k--;
 		if (!before && !after) {
-			const ptok *at = a->pre[k];
+			const ptok *at = a->preexpanded[k];
 			uint32_t an = a->preexpanded_lengths[k];
 
 			if (an) {
 				size_t f = pp_tokens_append_unpasted(p, at, an);
 
-				p->sv[f].flags = (p->sv[f].flags & ~(LEX_TOKEN_FLAG_LINE_START | LEX_TOKEN_FLAG_SPACE_BEFORE)) | (ngs ? LEX_TOKEN_FLAG_SPACE_BEFORE : 0);
+				p->scratch_tokens[f].flags = (p->scratch_tokens[f].flags & ~(LEX_TOKEN_FLAG_LINE_START | LEX_TOKEN_FLAG_SPACE_BEFORE)) | (ngs ? LEX_TOKEN_FLAG_SPACE_BEFORE : 0);
 				ngs = false;
 			}
 			continue;
 		}
 		/* operand of ##: the unexpanded argument */
-		if (a->ln[k]) {
+		if (a->lengths[k]) {
 			bool pseudo = false;
 			size_t f;
 
-			if (before_nonempty && p->scratch_token_count - base >= 2 && p->sv[p->scratch_token_count - 2].kind == LEX_TOKEN_COMMA &&
+			if (before_nonempty && p->scratch_token_count - base >= 2 && p->scratch_tokens[p->scratch_token_count - 2].kind == LEX_TOKEN_COMMA &&
 			    va && k == np - 1) {
 				pseudo = true;	/* GNU ", ## __VA_ARGS__" with arguments */
 				p->scratch_token_count--;
 			}
-			f = pp_tokens_append_unpasted(p, a->tok + a->st[k], a->ln[k]);
+			f = pp_tokens_append_unpasted(p, a->tokens + a->starts[k], a->lengths[k]);
 			/* clang: unexpanded argument tokens take the expansion's location */
 			for (size_t j = f; j < p->scratch_token_count; j++)
-				p->sv[j].loc = eloc, p->sv[j].flags |= PP_TOKEN_FLAG_FROM_MACRO;
+				p->scratch_tokens[j].loc = eloc, p->scratch_tokens[j].flags |= PP_TOKEN_FLAG_FROM_MACRO;
 			/* clang: no space after a ## ("A ## ARG"): an assembler's invalid paste stays ". ## foo" -> ".foo" */
 			if (!pseudo)
-				p->sv[f].flags = (p->sv[f].flags & ~(LEX_TOKEN_FLAG_LINE_START | LEX_TOKEN_FLAG_SPACE_BEFORE)) | (ngs && !before ? LEX_TOKEN_FLAG_SPACE_BEFORE : 0);
+				p->scratch_tokens[f].flags = (p->scratch_tokens[f].flags & ~(LEX_TOKEN_FLAG_LINE_START | LEX_TOKEN_FLAG_SPACE_BEFORE)) | (ngs && !before ? LEX_TOKEN_FLAG_SPACE_BEFORE : 0);
 			ngs = false;
 			continue;
 		}
@@ -718,7 +718,7 @@ static uint32_t pp_va_opt_expand(pp *p, const pp_macro *m, pp_macro_arguments *a
 		       uint32_t eloc, bool *ngsp, bool str)
 {
 	const lex_token *body = m->body;
-	uint32_t k = m->nparam - 1, b = i + 2, e = b, depth = 0;
+	uint32_t k = m->parameter_count - 1, b = i + 2, e = b, depth = 0;
 	size_t start = p->scratch_token_count;
 	bool before = i && body[i - 1].kind == LEX_TOKEN_HASH_HASH && !str;
 
@@ -753,10 +753,10 @@ static uint32_t pp_va_opt_expand(pp *p, const pp_macro *m, pp_macro_arguments *a
 		/* placemarker: a ## pm ## d is a ## d; pm ## d is d; a ## pm is a */
 		if (e + 1 < to && body[e + 1].kind == LEX_TOKEN_HASH_HASH)
 			e++;
-		else if (before && p->scratch_token_count > base && pp_paste_operator_is(&p->sv[p->scratch_token_count - 1]))
+		else if (before && p->scratch_token_count > base && pp_paste_operator_is(&p->scratch_tokens[p->scratch_token_count - 1]))
 			p->scratch_token_count--;
 	} else {
-		p->sv[start].flags = (p->sv[start].flags & ~(LEX_TOKEN_FLAG_LINE_START | LEX_TOKEN_FLAG_SPACE_BEFORE)) | (*ngsp ? LEX_TOKEN_FLAG_SPACE_BEFORE : 0);
+		p->scratch_tokens[start].flags = (p->scratch_tokens[start].flags & ~(LEX_TOKEN_FLAG_LINE_START | LEX_TOKEN_FLAG_SPACE_BEFORE)) | (*ngsp ? LEX_TOKEN_FLAG_SPACE_BEFORE : 0);
 	}
 	*ngsp = false;
 	return e;
@@ -770,9 +770,9 @@ static uint32_t pp_va_opt_expand(pp *p, const pp_macro *m, pp_macro_arguments *a
 static void pp_macro_body_substitute_simple(pp *p, const pp_macro *m, pp_macro_arguments *a, uint8_t nf, uint32_t eloc)
 {
 	const lex_token *body = m->body;
-	const uint8_t *pidx = m->pidx;
-	const char *src = m->src;
-	uint32_t nb = m->nbody, n = 0;
+	const uint8_t *pidx = m->parameter_indices;
+	const char *src = m->source;
+	uint32_t nb = m->body_count, n = 0;
 	bool ngs = false;
 	ptok *r, *w;
 
@@ -792,10 +792,10 @@ static void pp_macro_body_substitute_simple(pp *p, const pp_macro *m, pp_macro_a
 		n = nb;
 	}
 	if (!n) {
-		p->pend |= nf, p->cmt_sol |= nf & LEX_TOKEN_FLAG_LINE_START, p->sol_on = p->sol_on && p->line_start_context_depth != p->depth;
+		p->owed_spacing |= nf, p->comment_starts_line |= nf & LEX_TOKEN_FLAG_LINE_START, p->line_start_name_active = p->line_start_name_active && p->line_start_context_depth != p->context_depth;
 		return;
 	}
-	r = w = varena_alloc(&p->tmp, n * sizeof(ptok));
+	r = w = varena_alloc(&p->temporary_region, n * sizeof(ptok));
 	for (uint32_t i = 0; i < nb; i++) {
 		const lex_token *cur = &body[i];
 		uint32_t k = pidx ? pidx[i] : 0;
@@ -810,7 +810,7 @@ static void pp_macro_body_substitute_simple(pp *p, const pp_macro *m, pp_macro_a
 			continue;
 		}
 		{
-			const ptok *at = a->pre[k - 1];
+			const ptok *at = a->preexpanded[k - 1];
 			uint32_t an = a->preexpanded_lengths[k - 1];
 
 			if (!an)
@@ -826,15 +826,15 @@ static void pp_macro_body_substitute_simple(pp *p, const pp_macro *m, pp_macro_a
 		}
 	}
 	pp_context_tokens_push(p, r, n, m->name, 0, 0);	/* r[0] took the name's SOL/SPACE (the context's "first") */
-	p->cx[p->depth - 1].trailing_space = ngs;
+	p->contexts[p->context_depth - 1].trailing_space = ngs;
 	pp_macro_table_disable(p, m->name);
 }
 
 static int pp_macro_body_substitute(pp *p, const pp_macro *m, const ptok *name, pp_macro_arguments *a, uint32_t eloc)
 {
 	const lex_token *body = m->body;
-	const uint8_t *pidx = m->pidx;
-	uint32_t nb = m->nbody, n;
+	const uint8_t *pidx = m->parameter_indices;
+	uint32_t nb = m->body_count, n;
 	uint8_t nf = name->flags & (LEX_TOKEN_FLAG_LINE_START | LEX_TOKEN_FLAG_SPACE_BEFORE);
 	bool ngs = false;
 	size_t base;
@@ -867,42 +867,42 @@ static int pp_macro_body_substitute(pp *p, const pp_macro *m, const ptok *name, 
 		for (size_t i = base; i < e;) {
 			ptok cur;
 
-			if (!(i + 2 < e && pp_paste_operator_is(&p->sv[i + 1]))) {
+			if (!(i + 2 < e && pp_paste_operator_is(&p->scratch_tokens[i + 1]))) {
 				/* not pasted: stays (moves down once something was) */
 				if (w != i)
-					p->sv[w] = p->sv[i];
+					p->scratch_tokens[w] = p->scratch_tokens[i];
 				w++, i++;
 				continue;
 			}
-			cur = p->sv[i++];
+			cur = p->scratch_tokens[i++];
 
-			while (i + 1 < e && pp_paste_operator_is(&p->sv[i])) {
+			while (i + 1 < e && pp_paste_operator_is(&p->scratch_tokens[i])) {
 				ptok r;
 
-				if (p->o->asm_mode && !pp_paste_is_valid(&cur, &p->sv[i + 1])) {
+				if (p->options->asm_mode && !pp_paste_is_valid(&cur, &p->scratch_tokens[i + 1])) {
 					/* assembler: an invalid paste leaves both tokens */
-					p->sv[w++] = cur;
-					cur = p->sv[i + 1];
+					p->scratch_tokens[w++] = cur;
+					cur = p->scratch_tokens[i + 1];
 					i += 2;
 					continue;
 				}
-				r = pp_paste_tokens(p, &cur, &p->sv[i + 1]);
+				r = pp_paste_tokens(p, &cur, &p->scratch_tokens[i + 1]);
 				cur = r;
 				i += 2;
 			}
-			p->sv[w++] = cur;
+			p->scratch_tokens[w++] = cur;
 		}
 		p->scratch_token_count = w;
 	}
 	r = pp_scratch_tokens_take(p, base, &n);
 	if (!n) {
-		p->pend |= nf, p->cmt_sol |= nf & LEX_TOKEN_FLAG_LINE_START, p->sol_on = p->sol_on && p->line_start_context_depth != p->depth;
+		p->owed_spacing |= nf, p->comment_starts_line |= nf & LEX_TOKEN_FLAG_LINE_START, p->line_start_name_active = p->line_start_name_active && p->line_start_context_depth != p->context_depth;
 		return 0;
 	}
 	/* the context's "first" (the name's SOL/SPACE), applied now: r is ours */
 	r[0].flags = (r[0].flags & ~(LEX_TOKEN_FLAG_LINE_START | LEX_TOKEN_FLAG_SPACE_BEFORE)) | nf;
 	pp_context_tokens_push(p, r, n, m->name, 0, 0);
-	p->cx[p->depth - 1].trailing_space = ngs;
+	p->contexts[p->context_depth - 1].trailing_space = ngs;
 	pp_macro_table_disable(p, m->name);
 	return 0;
 }
@@ -920,14 +920,14 @@ static bool pp_macro_is_trivial(pp *p, const pp_macro *m)
 		return false;
 	if (m->kind == PP_MACRO_OBJECT_LIKE)
 		return true;
-	return !m->pidx || !m->pidx[0];
+	return !m->parameter_indices || !m->parameter_indices[0];
 }
 
 static void pp_macro_single_token_expand(pp *p, const pp_macro *m, ptok *t, uint8_t nf, uint32_t eloc)
 {
 	uintptr_t e;
 
-	pp_token_fill_from_lexer(t, &m->body[0], m->src, eloc);
+	pp_token_fill_from_lexer(t, &m->body[0], m->source, eloc);
 	t->flags |= PP_TOKEN_FLAG_FROM_MACRO;
 	t->flags = (t->flags & ~(LEX_TOKEN_FLAG_LINE_START | LEX_TOKEN_FLAG_SPACE_BEFORE)) | nf;
 	if (t->kind == LEX_TOKEN_IDENTIFIER && (e = pp_macro_read(p, t->id)) && ((e & 1) || (const pp_macro *)(e & ~(uintptr_t)1) == m))
@@ -937,15 +937,15 @@ static void pp_macro_single_token_expand(pp *p, const pp_macro *m, ptok *t, uint
 /* -E text: before a macro name read from a file is expanded (its column, -C's comments) */
 static __attribute__((noinline, cold)) void pp_macro_text_position_note(pp *p, ptok *t)
 {
-	pp_context *fc = &p->cx[p->depth - 1];
+	pp_context *fc = &p->contexts[p->context_depth - 1];
 
 	p->expansion_location = t->loc;	/* clang's expansion location: where the outermost name is */
-	if ((t->flags & (LEX_TOKEN_FLAG_LINE_START | LEX_TOKEN_FLAG_SPACE_BEFORE)) == (LEX_TOKEN_FLAG_LINE_START | LEX_TOKEN_FLAG_SPACE_BEFORE) && !p->sol_on && pp_token_column(p, t->loc) == 1)
+	if ((t->flags & (LEX_TOKEN_FLAG_LINE_START | LEX_TOKEN_FLAG_SPACE_BEFORE)) == (LEX_TOKEN_FLAG_LINE_START | LEX_TOKEN_FLAG_SPACE_BEFORE) && !p->line_start_name_active && pp_token_column(p, t->loc) == 1)
 		t->flags &= ~LEX_TOKEN_FLAG_SPACE_BEFORE;	/* clang: a line break is no leading space */
-	if (unlikely(p->output_text_mode > 1) && !(t->flags & PP_TOKEN_FLAG_FROM_MACRO) && p->fe[fc->fe].comment_position && t->s >= p->fe[fc->fe].comment_position &&
-	    t->s < fc->src + fc->f->size) {
+	if (unlikely(p->output_text_mode > 1) && !(t->flags & PP_TOKEN_FLAG_FROM_MACRO) && p->files[fc->file_index].comment_position && t->s >= p->files[fc->file_index].comment_position &&
+	    t->s < fc->source + fc->lex_file->size) {
 		pp_comments_flush(p, fc, t->s);	/* -C: the comments before it, not those in its arguments */
-		p->fe[fc->fe].comment_position = t->s + t->len;
+		p->files[fc->file_index].comment_position = t->s + t->len;
 		if (p->previous_end == t->s)
 			t->flags &= ~LEX_TOKEN_FLAG_SPACE_BEFORE;	/* right after a comment */
 	}
@@ -957,23 +957,23 @@ VPRIV int pp_macro_expand(pp *p, const pp_macro *m, ptok *t)
 	pp_macro_arguments a;
 	ptok rp;
 
-	if (unlikely(p->output_text_mode) && !p->in_directive && p->cx[p->depth - 1].type == PP_CONTEXT_FILE)
+	if (unlikely(p->output_text_mode) && !p->in_directive && p->contexts[p->context_depth - 1].type == PP_CONTEXT_FILE)
 		pp_macro_text_position_note(p, t);
 	uint8_t nf = t->flags & (LEX_TOKEN_FLAG_LINE_START | LEX_TOKEN_FLAG_SPACE_BEFORE);
 
-	if ((nf & LEX_TOKEN_FLAG_LINE_START) && !p->sol_on && !p->in_directive && p->cx[p->depth - 1].type == PP_CONTEXT_FILE)
-		p->line_start_location = t->loc, p->sol_on = 1, p->line_start_context_depth = p->depth;
+	if ((nf & LEX_TOKEN_FLAG_LINE_START) && !p->line_start_name_active && !p->in_directive && p->contexts[p->context_depth - 1].type == PP_CONTEXT_FILE)
+		p->line_start_location = t->loc, p->line_start_name_active = 1, p->line_start_context_depth = p->context_depth;
 
 	if (m->kind == PP_MACRO_BUILTIN)
 		return pp_builtin_macro_expand(p, m, t);
 	if (m->kind == PP_MACRO_OBJECT_LIKE) {
 		pp_context *c;
 
-		if (!m->nbody) {
-			p->pend |= nf, p->cmt_sol |= nf & LEX_TOKEN_FLAG_LINE_START, p->sol_on = p->sol_on && p->line_start_context_depth != p->depth;
+		if (!m->body_count) {
+			p->owed_spacing |= nf, p->comment_starts_line |= nf & LEX_TOKEN_FLAG_LINE_START, p->line_start_name_active = p->line_start_name_active && p->line_start_context_depth != p->context_depth;
 			return 0;
 		}
-		if (m->nbody == 1 && pp_macro_is_trivial(p, m)) {
+		if (m->body_count == 1 && pp_macro_is_trivial(p, m)) {
 			pp_macro_single_token_expand(p, m, t, nf, t->loc);
 			return 1;
 		}
@@ -981,29 +981,29 @@ VPRIV int pp_macro_expand(pp *p, const pp_macro *m, ptok *t)
 			return pp_macro_body_substitute(p, m, t, NULL, t->loc);
 		c = pp_context_push(p);
 		c->type = PP_CONTEXT_LEXED;
-		c->vt = m->body;
-		c->n = m->nbody;
-		c->src = m->src;
-		c->loc = t->loc;
-		c->mid = m->name;
+		c->lexed_tokens = m->body;
+		c->count = m->body_count;
+		c->source = m->source;
+		c->location = t->loc;
+		c->macro_to_enable = m->name;
 		pp_macro_table_disable(p, m->name);
 		/* its first token, as pp_token_raw_next() would read it next (the context's "first" applied) */
-		c->i = 1;
-		pp_token_fill_from_lexer(t, &m->body[0], m->src, c->loc);
-		t->flags = (t->flags & ~(LEX_TOKEN_FLAG_LINE_START | LEX_TOKEN_FLAG_SPACE_BEFORE)) | nf | p->pend;
-		p->pend = 0;
+		c->index = 1;
+		pp_token_fill_from_lexer(t, &m->body[0], m->source, c->location);
+		t->flags = (t->flags & ~(LEX_TOKEN_FLAG_LINE_START | LEX_TOKEN_FLAG_SPACE_BEFORE)) | nf | p->owed_spacing;
+		p->owed_spacing = 0;
 		return 2;
 	}
 	if (!pp_macro_arguments_collect(p, m, t, &a, &rp))
 		return pp_macro_arguments_collect_fail(t, &rp);
 	if (unlikely(p->output_text_mode > 1))
 		pp_comments_skip_to(p, &rp);	/* -C: comments in macro arguments are dropped */
-	if (!m->nbody) {
+	if (!m->body_count) {
 		p->scratch_token_count = a.base;
-		p->pend |= nf, p->cmt_sol |= nf & LEX_TOKEN_FLAG_LINE_START, p->sol_on = p->sol_on && p->line_start_context_depth != p->depth;
+		p->owed_spacing |= nf, p->comment_starts_line |= nf & LEX_TOKEN_FLAG_LINE_START, p->line_start_name_active = p->line_start_name_active && p->line_start_context_depth != p->context_depth;
 		return 0;
 	}
-	if (m->nbody == 1 && pp_macro_is_trivial(p, m)) {
+	if (m->body_count == 1 && pp_macro_is_trivial(p, m)) {
 		p->scratch_token_count = a.base;
 		pp_macro_single_token_expand(p, m, t, nf, rp.loc);
 		return 1;

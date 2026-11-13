@@ -31,7 +31,7 @@ enum { PP_DIRECTORY_UNKNOWN, PP_DIRECTORY_PROBING, PP_DIRECTORY_EXISTS, PP_DIREC
 
 typedef struct pp_directory_node {
 	struct pp_directory_node *next;	/* the bucket's chain (see lex.c's lex_cache_entry_get) */
-	uint32_t hash, plen;
+	uint32_t hash, path_length;
 	_Atomic int state;
 	_Atomic uint32_t epoch;	/* the cache epoch (lex.h) a PP_DIRECTORY_MISSING answer was last checked in */
 	char path[];
@@ -81,12 +81,12 @@ static pp_directory_node *pp_directory_cache_node_get(const char *path, size_t p
 
 	for (;;) {
 		for (pp_directory_node *e = head; e != seen; e = e->next)
-			if (e->hash == h && e->plen == plen && !memcmp(e->path, path, plen))
+			if (e->hash == h && e->path_length == plen && !memcmp(e->path, path, plen))
 				return e;
 		if (!mine) {
 			mine = pp_directory_cache_allocate(sizeof(*mine) + plen + 17);
 			mine->hash = h;
-			mine->plen = (uint32_t)plen;
+			mine->path_length = (uint32_t)plen;
 			memcpy(mine->path, path, plen);
 			memset(mine->path + plen, 0, 17);
 		}
@@ -110,7 +110,7 @@ static int pp_directory_state_probe(pp_directory_node *n)
 	if (s == PP_DIRECTORY_MISSING) {	/* a directory that was missing may have been made since */
 		if (atomic_load_explicit(&n->epoch, memory_order_relaxed) == cur)
 			return s;
-		if (!stat(n->plen ? n->path : ".", &st) && S_ISDIR(st.st_mode)) {
+		if (!stat(n->path_length ? n->path : ".", &st) && S_ISDIR(st.st_mode)) {
 			atomic_store_explicit(&n->state, PP_DIRECTORY_EXISTS, memory_order_release);
 			return PP_DIRECTORY_EXISTS;
 		}
@@ -119,7 +119,7 @@ static int pp_directory_state_probe(pp_directory_node *n)
 	}
 	if (s == PP_DIRECTORY_UNKNOWN && atomic_compare_exchange_strong(&n->state, &s, PP_DIRECTORY_PROBING)) {
 		atomic_fetch_add_explicit(&pp_directory_probe_count, 1, memory_order_relaxed);
-		s = !stat(n->plen ? n->path : ".", &st) && S_ISDIR(st.st_mode) ? PP_DIRECTORY_EXISTS : PP_DIRECTORY_MISSING;
+		s = !stat(n->path_length ? n->path : ".", &st) && S_ISDIR(st.st_mode) ? PP_DIRECTORY_EXISTS : PP_DIRECTORY_MISSING;
 		atomic_store_explicit(&n->epoch, cur, memory_order_relaxed);
 		atomic_store_explicit(&n->state, s, memory_order_release);
 		return s;

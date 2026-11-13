@@ -1,11 +1,11 @@
 /* vcc front end: record layout (clang's ItaniumRecordLayoutBuilder, AArch64) */
-#include "ccimpl.h"
+#include "cc-internal.h"
 
 /* ---------------- record layout (clang ItaniumRecordLayoutBuilder, AArch64) ---------------- */
 
-static uint64_t align_to(uint64_t v, uint64_t a) { return a ? (v + a - 1) / a * a : v; }
+static uint64_t cc_layout_align_to(uint64_t v, uint64_t a) { return a ? (v + a - 1) / a * a : v; }
 
-typedef struct layout {
+typedef struct cc_record_layout {
 	bool is_union, packed, ms_struct;
 	uint64_t last_unit;	/* Microsoft bit-field storage-unit size, or zero */
 	uint64_t max_field_align;	/* bits; #pragma pack */
@@ -13,9 +13,9 @@ typedef struct layout {
 	uint64_t unfilled;		/* bits unfilled in the last bit-field unit */
 	uint64_t align, unpacked_align;	/* bits */
 	uint64_t padded_field_size;
-} layout;
+} cc_record_layout;
 
-static void lay_update(layout *l, uint64_t a, uint64_t ua)
+static void cc_layout_update(cc_record_layout *l, uint64_t a, uint64_t ua)
 {
 	if (a > l->align)
 		l->align = a;
@@ -24,12 +24,12 @@ static void lay_update(layout *l, uint64_t a, uint64_t ua)
 }
 
 /* field attrs: aligned (bytes), packed */
-static void lay_bitfield(cc *c, layout *l, field *f, uint32_t fattr_align, bool fpacked)
+static void cc_layout_bitfield_place(cc *c, cc_record_layout *l, field *f, uint32_t fattr_align, bool fpacked)
 {
 	bool packed = l->packed || fpacked;
 	uint64_t fsize = f->width;
-	uint64_t unit = ty_size(c, f->ty) * 8;
-	uint64_t falign = (uint64_t)ty_align(c, f->ty) * 8;
+	uint64_t unit = cc_type_size(c, f->ty) * 8;
+	uint64_t falign = (uint64_t)cc_type_alignment(c, f->ty) * 8;
 	uint64_t off, ufalign, explicit_align = (uint64_t)fattr_align * 8;
 	uint64_t ufoff;
 	uint64_t mfa = l->max_field_align;
@@ -64,7 +64,7 @@ static void lay_bitfield(cc *c, layout *l, field *f, uint32_t fattr_align, bool 
 	ufoff = off;
 	if (l->ms_struct) {
 		if (!fsize || fsize > l->unfilled) {
-			off = align_to(off, falign);
+			off = cc_layout_align_to(off, falign);
 			l->unfilled = 0;
 		}
 	} else {
@@ -73,18 +73,18 @@ static void lay_bitfield(cc *c, layout *l, field *f, uint32_t fattr_align, bool 
 		bool exp = explicit_align && (mfa == 0 || explicit_align <= mfa);	/* useExplicitBitFieldAlignment */
 
 		if (fsize == 0 || (allow_pad && (off & (falign - 1)) + fsize > unit))
-			off = align_to(off, falign);
+			off = cc_layout_align_to(off, falign);
 		else if (exp)
-			off = align_to(off, explicit_align);
+			off = cc_layout_align_to(off, explicit_align);
 		if (fsize == 0 || (allow_pad && (ufoff & (ufalign - 1)) + fsize > unit))
-			ufoff = align_to(ufoff, ufalign);
+			ufoff = cc_layout_align_to(ufoff, ufalign);
 		else if (exp)
-			ufoff = align_to(ufoff, explicit_align);
+			ufoff = cc_layout_align_to(ufoff, explicit_align);
 	}
 	f->off = off;
 	f->align = (uint32_t)((falign + 7) / 8);
 	if (l->is_union) {
-		uint64_t rs = l->ms_struct ? (fsize ? unit : 8) : align_to(fsize, 8);
+		uint64_t rs = l->ms_struct ? (fsize ? unit : 8) : cc_layout_align_to(fsize, 8);
 
 		if (rs > l->data_size)
 			l->data_size = rs;
@@ -98,30 +98,30 @@ static void lay_bitfield(cc *c, layout *l, field *f, uint32_t fattr_align, bool 
 
 		l->last_unit = 0;
 
-		l->data_size = align_to(ns, 8);
+		l->data_size = cc_layout_align_to(ns, 8);
 		l->unfilled = l->data_size - ns;
 	}
 	if (l->data_size > l->size)
 		l->size = l->data_size;
 	if (!l->ms_struct && c->o->target != PP_LINUX_AARCH64 && !f->name)
 		falign = ufalign = 8;	/* Apple, wasm (no useZeroLengthBitfieldAlignment): unnamed bit-fields leave the record's alignment */
-	lay_update(l, falign, ufalign);
+	cc_layout_update(l, falign, ufalign);
 }
 
-static void lay_field(cc *c, layout *l, field *f, uint32_t fattr_align, bool fpacked)
+static void cc_layout_field_place(cc *c, cc_record_layout *l, field *f, uint32_t fattr_align, bool fpacked)
 {
 	uint64_t off, fsize, falign, ualign, palign = 8;
 	bool packed;
 
 	if (f->bitfield) {
-		lay_bitfield(c, l, f, fattr_align, fpacked);
+		cc_layout_bitfield_place(c, l, f, fattr_align, fpacked);
 		return;
 	}
 	off = l->is_union ? 0 : l->data_size;
 	l->unfilled = 0;
 	l->last_unit = 0;
-	falign = (uint64_t)ty_align(c, f->ty) * 8;
-	fsize = is_array(c, f->ty) && (T(c, f->ty)->flags & TF_INCOMPLETE) ? 0 : ty_size(c, f->ty) * 8;
+	falign = (uint64_t)cc_type_alignment(c, f->ty) * 8;
+	fsize = cc_type_is_array(c, f->ty) && (AST_TYPE(c, f->ty)->flags & TF_INCOMPLETE) ? 0 : cc_type_size(c, f->ty) * 8;
 	packed = l->packed || fpacked;
 	ualign = falign;
 	if (fattr_align) {
@@ -135,7 +135,7 @@ static void lay_field(cc *c, layout *l, field *f, uint32_t fattr_align, bool fpa
 		ualign = ualign < l->max_field_align ? ualign : l->max_field_align;
 	}
 	falign = packed ? palign : ualign;
-	off = align_to(off, falign);
+	off = cc_layout_align_to(off, falign);
 	f->off = off;
 	f->align = (uint32_t)((falign + 7) / 8);
 	if (l->is_union) {
@@ -148,25 +148,25 @@ static void lay_field(cc *c, layout *l, field *f, uint32_t fattr_align, bool fpa
 		l->padded_field_size = off + fsize;
 	if (l->data_size > l->size)
 		l->size = l->data_size;
-	lay_update(l, falign, ualign);
+	cc_layout_update(l, falign, ualign);
 }
 
 /* fa[i]/fp[i]: per-field aligned() and packed attributes */
-VPRIV void lay_record(cc *c, tag *r, const uint32_t *fa, const uint8_t *fp)
+CC_PRIVATE void cc_layout_record(cc *c, tag *r, const uint32_t *fa, const uint8_t *fp)
 {
-	layout l = { .is_union = (r->flags & RF_UNION) != 0, .packed = (r->flags & RF_PACKED) != 0,
+	cc_record_layout l = { .is_union = (r->flags & RF_UNION) != 0, .packed = (r->flags & RF_PACKED) != 0,
 		     .ms_struct = (r->flags & RF_MS_STRUCT) != 0, .align = 8, .unpacked_align = 8 };
 
 	if (c->npack && c->pack[c->npack - 1])
 		l.max_field_align = (uint64_t)c->pack[c->npack - 1] * 8;
 	for (uint32_t i = 0; i < r->nfield; i++)
-		lay_field(c, &l, &r->f[i], fa ? fa[i] : 0, fp ? fp[i] : 0);
+		cc_layout_field_place(c, &l, &r->f[i], fa ? fa[i] : 0, fp ? fp[i] : 0);
 	r->ualign = (uint32_t)(l.align / 8);
 	if (r->maxalign)
-		lay_update(&l, (uint64_t)r->maxalign * 8, (uint64_t)r->maxalign * 8);
+		cc_layout_update(&l, (uint64_t)r->maxalign * 8, (uint64_t)r->maxalign * 8);
 	if (l.padded_field_size > l.size)
 		l.size = l.padded_field_size;
-	l.size = align_to(l.size, l.align);
+	l.size = cc_layout_align_to(l.size, l.align);
 	r->size = l.size / 8;
 	r->align = (uint32_t)(l.align / 8);
 	c->ty[r->ty].size = r->size;

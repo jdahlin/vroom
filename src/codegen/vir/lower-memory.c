@@ -1,60 +1,60 @@
 /* The walker's lowering interface for memory: frame slots, loads and stores, locals. */
-#define WK_PREFIX vw_
-#define LO_PREFIX vw_
+#define WK_PREFIX virbuild_
+#define LO_PREFIX virbuild_
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
 
 /* ---------------- slots and memory ---------------- */
 
-VPRIV void vw_slot(ecx *e, int64_t off, uint64_t size, uint32_t align, int kind)
+VPRIV void virbuild_slot(ecx *e, int64_t off, uint64_t size, uint32_t align, int kind)
 {
-	vwst *V = e->vw;
+	virbuild_context *V = e->vw;
 	uint32_t n = 0;
 
 	(void)kind;
 	if (!size)
 		size = 1;
 	/* the new slot owns [off, off+size): earlier owners of an overlapping range are no longer current */
-	for (uint32_t i = 0; i < V->nact; i++) {
-		vwslot *s = &V->sl[V->act[i]];
+	for (uint32_t i = 0; i < V->active_slot_count; i++) {
+		virbuild_preir_slot *s = &V->slots[V->active_slots[i]];
 
 		if (s->off < off + (int64_t)size && off < s->off + (int64_t)s->size)
 			continue;
-		V->act[n++] = V->act[i];
+		V->active_slots[n++] = V->active_slots[i];
 	}
-	V->nact = n;
-	GROW(V->sl, V->nsl, V->csl, 1);
-	V->sl[V->nsl] = (vwslot){ off, size, align ? align : 1, 0, 0, 0, VW_NOBLK, 0 };
-	GROW(V->act, V->nact, V->cact, 1);
-	V->act[V->nact++] = V->nsl++;
+	V->active_slot_count = n;
+	VIRBUILD_ARRAY_GROW(V->slots, V->slot_count, V->slot_capacity, 1);
+	V->slots[V->slot_count] = (virbuild_preir_slot){ off, size, align ? align : 1, 0, 0, 0, VIRBUILD_BLOCK_NONE, 0 };
+	VIRBUILD_ARRAY_GROW(V->active_slots, V->active_slot_count, V->active_slot_capacity, 1);
+	V->active_slots[V->active_slot_count++] = V->slot_count++;
 	/* a fresh object: what the store table knew about these bytes is gone */
-	for (uint32_t i = 0; i < V->nst; i++)
-		if (V->st[i].off < off + (int64_t)size && off < V->st[i].off + V->st[i].size)
-			V->st[i--] = V->st[--V->nst];
+	for (uint32_t i = 0; i < V->store_count; i++)
+		if (V->stores[i].offset < off + (int64_t)size && off < V->stores[i].offset + V->stores[i].size)
+			V->stores[i--] = V->stores[--V->store_count];
 }
 
 /* the slot that owns frame offset off now, and off's offset in it */
-VPRIV uint32_t vw_slotat(ecx *e, int64_t off, uint64_t size, int64_t *rel)
+VPRIV uint32_t virbuild_slot_find(ecx *e, int64_t off, uint64_t size, int64_t *rel)
 {
-	vwst *V = e->vw;
+	virbuild_context *V = e->vw;
 
-	for (uint32_t i = V->nact; i-- > 0;) {
-		vwslot *s = &V->sl[V->act[i]];
+	for (uint32_t i = V->active_slot_count; i-- > 0;) {
+		virbuild_preir_slot *s = &V->slots[V->active_slots[i]];
 
 		if (s->off <= off && off < s->off + (int64_t)s->size) {
 			if (off + (int64_t)size > s->off + (int64_t)s->size)
-				vw_fail(e, VIRFAIL(access_across_slots));
+				virbuild_fail(e, VIRBUILD_FAILURE(access_across_slots));
 			*rel = off - s->off;
-			return V->act[i];
+			return V->active_slots[i];
 		}
 	}
-	vw_fail(e, VIRFAIL(access_outside_slots));
+	virbuild_fail(e, VIRBUILD_FAILURE(access_outside_slots));
 }
 
-VPRIV uint32_t vw_slotaddr(ecx *e, uint32_t s, int64_t rel)
+VPRIV uint32_t virbuild_slot_address(ecx *e, uint32_t s, int64_t rel)
 {
-	return vw_k(e, VO_SLOTADDR, VT_PTR, s, (uint32_t)rel, (uint32_t)((uint64_t)rel >> 32));
+	return virbuild_constant_make(e, VIR_OP_SLOTADDR, VIR_TYPE_PTR, s, (uint32_t)rel, (uint32_t)((uint64_t)rel >> 32));
 }
 
 /*
@@ -62,226 +62,226 @@ VPRIV uint32_t vw_slotaddr(ecx *e, uint32_t s, int64_t rel)
  * frame is gone.  Not only of slots whose address has been taken so far: the walk is
  * in text order, and a loop can run this code after an address taken further down
  * (x = i; *p = 1; s += x; p = &x;).  A slot whose address is never taken is promoted
- * afterwards (vw_promote, with the whole function's uses), so its loads go anyway.
+ * afterwards (virbuild_slots_promote, with the whole function's uses), so its loads go anyway.
  */
-VPRIV void vw_st_clear(ecx *e, bool exposed_only)
+VPRIV void virbuild_store_table_clear(ecx *e, bool exposed_only)
 {
 	(void)exposed_only;
-	e->vw->nst = 0;
+	e->vw->store_count = 0;
 }
 
-/* the address of l (a ptr value); *slot: the slot (VW_NOBLK: not a frame access), *rel its offset */
-static uint32_t vw_addr(ecx *e, const lval *l, uint64_t size, uint32_t *slot, int64_t *rel)
+/* the address of l (a ptr value); *slot: the slot (VIRBUILD_BLOCK_NONE: not a frame access), *rel its offset */
+static uint32_t virbuild_address_make(ecx *e, const lval *l, uint64_t size, uint32_t *slot, int64_t *rel)
 {
-	*slot = VW_NOBLK;
+	*slot = VIRBUILD_BLOCK_NONE;
 	switch (l->k) {
 	case L_FRAME:
-		*slot = vw_slotat(e, l->off, size, rel);
-		return vw_slotaddr(e, *slot, *rel);
+		*slot = virbuild_slot_find(e, l->off, size, rel);
+		return virbuild_slot_address(e, *slot, *rel);
 	case L_SYM:
 		note_ref(e, l->ref);
-		return vw_k(e, VO_SYMADDR, VT_PTR, l->ref, (uint32_t)l->off, (uint32_t)((uint64_t)l->off >> 32));
+		return virbuild_constant_make(e, VIR_OP_SYMADDR, VIR_TYPE_PTR, l->ref, (uint32_t)l->off, (uint32_t)((uint64_t)l->off >> 32));
 	case L_REG: {
-		uint32_t b = vw_get(e, l->r, VT_PTR);
+		uint32_t b = virbuild_register_read(e, l->r, VIR_TYPE_PTR);
 
 		if (!l->off)
 			return b;
-		return vw_ins(e, VO_PTRADD, VT_PTR, 0, b, vw_iconst(e, VT_I64, l->off), 0);
+		return virbuild_insn_append(e, VIR_OP_PTRADD, VIR_TYPE_PTR, 0, b, virbuild_constant_integer(e, VIR_TYPE_I64, l->off), 0);
 	}
 	default:
-		vw_fail(e, VIRFAIL(unsupported_lvalue_kind));
+		virbuild_fail(e, VIRBUILD_FAILURE(unsupported_lvalue_kind));
 	}
 }
 
-VPRIV uint32_t vw_log2(uint64_t x) { uint32_t k = 0; while (x > 1) x >>= 1, k++; return k; }
+VPRIV uint32_t virbuild_integer_log2(uint64_t x) { uint32_t k = 0; while (x > 1) x >>= 1, k++; return k; }
 
-VPRIV uint32_t vw_mfl(int size, uint32_t align, bool sgn)
+VPRIV uint32_t virbuild_memory_flags_make(int size, uint32_t align, bool sgn)
 {
-	uint32_t w = vw_log2((uint64_t)size), a = align ? vw_log2(align & -align) : 0;
+	uint32_t w = virbuild_integer_log2((uint64_t)size), a = align ? virbuild_integer_log2(align & -align) : 0;
 
 	if (a > 15)
 		a = 15;
-	return w | (sgn ? VIF_MS : 0) | a << 4;
+	return w | (sgn ? VIR_INSN_FLAG_MS : 0) | a << 4;
 }
 
 /* the variable of a local (L_VAR): its type */
-static uint32_t vw_lvty(ecx *e, const lval *l) { return e->vw->vty[l->ref - VW_VAR0]; }
+static uint32_t virbuild_lvalue_type(ecx *e, const lval *l) { return e->vw->variable_types[l->ref - VIRBUILD_LOCAL_VARIABLE_FIRST]; }
 
-VPRIV void vw_load(ecx *e, int rd, const lval *l, int size, bool sgn)
+VPRIV void virbuild_load(ecx *e, int rd, const lval *l, int size, bool sgn)
 {
-	vwst *V = e->vw;
-	bool f = rd >= VW_FNAME0;
+	virbuild_context *V = e->vw;
+	bool f = rd >= VIRBUILD_FLOAT_REGISTER_FIRST;
 	uint32_t ty, slot, a, v;
 	int64_t rel;
 
 	if (l->bf)
-		vw_fail(e, VIRFAIL(bit_field_lvalue));
+		virbuild_fail(e, VIRBUILD_FAILURE(bit_field_lvalue));
 	if (l->k == L_VAR) {
-		v = vw_readv(e, l->ref, V->cur, vw_lvty(e, l));
+		v = virbuild_variable_read(e, l->ref, V->current_block, virbuild_lvalue_type(e, l));
 		if (f)
-			v = vw_conv(e, v, size == 4 ? VT_F32 : VT_F64);
-		vw_set(e, rd, v);
+			v = virbuild_value_convert(e, v, size == 4 ? VIR_TYPE_F32 : VIR_TYPE_F64);
+		virbuild_register_write(e, rd, v);
 		return;
 	}
 	if (f)
-		ty = size == 4 ? VT_F32 : size == 8 ? VT_F64 : 0;
+		ty = size == 4 ? VIR_TYPE_F32 : size == 8 ? VIR_TYPE_F64 : 0;
 	else
-		ty = size == 8 ? VT_I64 : sgn ? VT_I64 : VT_I32;
+		ty = size == 8 ? VIR_TYPE_I64 : sgn ? VIR_TYPE_I64 : VIR_TYPE_I32;
 	if (!ty)
-		vw_fail(e, VIRFAIL(float_load_size));
-	a = vw_addr(e, l, (uint64_t)size, &slot, &rel);
-	if (f && size == 8 && slot != VW_NOBLK && V->sl[slot].size == 8 && V->sl[slot].f32w) {
+		virbuild_fail(e, VIRBUILD_FAILURE(float_load_size));
+	a = virbuild_address_make(e, l, (uint64_t)size, &slot, &rel);
+	if (f && size == 8 && slot != VIRBUILD_BLOCK_NONE && V->slots[slot].size == 8 && V->slots[slot].float32_written) {
 		/* the word of a float temporary (a conditional expression's value): the f32 stored in it */
-		size = 4, ty = VT_F32;
-		a = vw_addr(e, l, 4, &slot, &rel);
+		size = 4, ty = VIR_TYPE_F32;
+		a = virbuild_address_make(e, l, 4, &slot, &rel);
 	}
-	if (slot != VW_NOBLK && !e->novtag) {	/* the value last stored here, in this block (not volatile) */
-		for (uint32_t i = V->nst; i-- > 0;) {
-			vwstent *s = &V->st[i];
+	if (slot != VIRBUILD_BLOCK_NONE && !e->novtag) {	/* the value last stored here, in this block (not volatile) */
+		for (uint32_t i = V->store_count; i-- > 0;) {
+			virbuild_store_entry *s = &V->stores[i];
 
-			if (s->slot == slot && s->off == l->off && s->size == size) {
-				uint32_t x = s->v, xt = vw_ty(e, x);
+			if (s->slot == slot && s->offset == l->off && s->size == size) {
+				uint32_t x = s->v, xt = virbuild_value_type(e, x);
 
-				if (!f && size < 8 && xt != VT_F32 && xt != VT_F64) {	/* the low bytes, extended as a load would */
-					x = vw_conv(e, x, size == 4 && !sgn ? VT_I32 : VT_I64);
+				if (!f && size < 8 && xt != VIR_TYPE_F32 && xt != VIR_TYPE_F64) {	/* the low bytes, extended as a load would */
+					x = virbuild_value_convert(e, x, size == 4 && !sgn ? VIR_TYPE_I32 : VIR_TYPE_I64);
 					if (size < 4 || sgn)
-						x = vw_ins(e, VO_EXT, vw_ty(e, x), vw_log2((uint64_t)size) | (sgn ? VIF_MS : 0), x, 0, 0);
+						x = virbuild_insn_append(e, VIR_OP_EXT, virbuild_value_type(e, x), virbuild_integer_log2((uint64_t)size) | (sgn ? VIR_INSN_FLAG_MS : 0), x, 0, 0);
 				} else {
-					x = vw_conv(e, x, ty);
+					x = virbuild_value_convert(e, x, ty);
 				}
-				vw_set(e, rd, x);
+				virbuild_register_write(e, rd, x);
 				return;
 			}
 		}
-		V->sl[slot].loads++;
+		V->slots[slot].loads++;
 	}
-	v = vw_ins(e, VO_LOAD, ty, vw_mfl(size, l->align, !f && sgn && size < 8) | (e->novtag ? VIF_VOL : 0), a, 0, 0);
-	if (slot != VW_NOBLK)
-		V->p[v].slot = slot + 1;	/* (which slot: for the dead-store pass) */
-	vw_set(e, rd, v);
+	v = virbuild_insn_append(e, VIR_OP_LOAD, ty, virbuild_memory_flags_make(size, l->align, !f && sgn && size < 8) | (e->novtag ? VIR_INSN_FLAG_VOL : 0), a, 0, 0);
+	if (slot != VIRBUILD_BLOCK_NONE)
+		V->insns[v].slot_plus_one = slot + 1;	/* (which slot: for the dead-store pass) */
+	virbuild_register_write(e, rd, v);
 }
 
 /* value v stored as size bytes: the type a store of it has */
-static uint32_t vw_stty(ecx *e, uint32_t v, int size)
+static uint32_t virbuild_store_type(ecx *e, uint32_t v, int size)
 {
-	uint32_t t = vw_ty(e, v);
+	uint32_t t = virbuild_value_type(e, v);
 
-	if (t == VT_F32 || t == VT_F64)
-		return size == 4 ? VT_F32 : size == 8 ? VT_F64 : 0;
+	if (t == VIR_TYPE_F32 || t == VIR_TYPE_F64)
+		return size == 4 ? VIR_TYPE_F32 : size == 8 ? VIR_TYPE_F64 : 0;
 	if (size == 8)
-		return t == VT_PTR ? VT_PTR : VT_I64;
-	return VT_I32;
+		return t == VIR_TYPE_PTR ? VIR_TYPE_PTR : VIR_TYPE_I64;
+	return VIR_TYPE_I32;
 }
 
-VPRIV void vw_store(ecx *e, int rs, const lval *l, int size)
+VPRIV void virbuild_store(ecx *e, int rs, const lval *l, int size)
 {
-	vwst *V = e->vw;
-	uint32_t v = vw_getraw(e, rs), ty, slot, a;
+	virbuild_context *V = e->vw;
+	uint32_t v = virbuild_register_read_raw(e, rs), ty, slot, a;
 	int64_t rel;
 
-	if (rs >= VW_FNAME0 && rs < VW_NONAME)
-		V->fprod[rs - VW_FNAME0] = 0;	/* (an assignment's value is not the product any more, as clang) */
+	if (rs >= VIRBUILD_FLOAT_REGISTER_FIRST && rs < VIRBUILD_REGISTER_NONE)
+		V->float_products[rs - VIRBUILD_FLOAT_REGISTER_FIRST] = 0;	/* (an assignment's value is not the product any more, as clang) */
 	if (l->bf)
-		vw_fail(e, VIRFAIL(bit_field_lvalue));
+		virbuild_fail(e, VIRBUILD_FAILURE(bit_field_lvalue));
 	if (l->k == L_VAR) {
-		uint32_t lt = vw_lvty(e, l);
+		uint32_t lt = virbuild_lvalue_type(e, l);
 
-		if (lt == VT_F32 || lt == VT_F64)
-			v = vw_conv(e, v, lt);
+		if (lt == VIR_TYPE_F32 || lt == VIR_TYPE_F64)
+			v = virbuild_value_convert(e, v, lt);
 		else {
-			v = vw_conv(e, v, size == 8 ? (lt == VT_PTR ? VT_PTR : VT_I64) : VT_I32);
+			v = virbuild_value_convert(e, v, size == 8 ? (lt == VIR_TYPE_PTR ? VIR_TYPE_PTR : VIR_TYPE_I64) : VIR_TYPE_I32);
 			if (size < 4)	/* the local's value is always its type's (normalized) */
-				v = vw_ins(e, VO_EXT, VT_I32, vw_log2((uint64_t)size) | (V->vsgn[l->ref - VW_VAR0] ? VIF_MS : 0), v, 0, 0);
-			v = vw_conv(e, v, lt);
+				v = virbuild_insn_append(e, VIR_OP_EXT, VIR_TYPE_I32, virbuild_integer_log2((uint64_t)size) | (V->variable_is_signed[l->ref - VIRBUILD_LOCAL_VARIABLE_FIRST] ? VIR_INSN_FLAG_MS : 0), v, 0, 0);
+			v = virbuild_value_convert(e, v, lt);
 		}
-		vw_write(e, l->ref, V->cur, v);
+		virbuild_variable_write(e, l->ref, V->current_block, v);
 		return;
 	}
 	{
-		bool fw = size == 8 && vw_ty(e, v) == VT_F32;
+		bool fw = size == 8 && virbuild_value_type(e, v) == VIR_TYPE_F32;
 
 		if (fw)
 			size = 4;	/* (a float's word in an argument or temporary slot: its low 4 bytes) */
-		ty = vw_stty(e, v, size);
+		ty = virbuild_store_type(e, v, size);
 		if (!ty)
-			vw_fail(e, VIRFAIL(float_store_size));
-		a = vw_addr(e, l, (uint64_t)size, &slot, &rel);
-		if (slot != VW_NOBLK && V->sl[slot].size == 8 && (fw || size == 8))
-			V->sl[slot].f32w = fw;	/* (what a load of the word into a float name reads back) */
+			virbuild_fail(e, VIRBUILD_FAILURE(float_store_size));
+		a = virbuild_address_make(e, l, (uint64_t)size, &slot, &rel);
+		if (slot != VIRBUILD_BLOCK_NONE && V->slots[slot].size == 8 && (fw || size == 8))
+			V->slots[slot].float32_written = fw;	/* (what a load of the word into a float name reads back) */
 	}
-	v = vw_conv(e, v, ty);
+	v = virbuild_value_convert(e, v, ty);
 	{
-		uint32_t s = vw_ins(e, VO_STORE, VT_VOID, vw_mfl(size, l->align, false) | (e->novtag ? VIF_VOL : 0), a, v, 0);
+		uint32_t s = virbuild_insn_append(e, VIR_OP_STORE, VIR_TYPE_VOID, virbuild_memory_flags_make(size, l->align, false) | (e->novtag ? VIR_INSN_FLAG_VOL : 0), a, v, 0);
 
-		if (slot != VW_NOBLK)
-			V->p[s].slot = slot + 1;
+		if (slot != VIRBUILD_BLOCK_NONE)
+			V->insns[s].slot_plus_one = slot + 1;
 	}
-	if (slot != VW_NOBLK) {
+	if (slot != VIRBUILD_BLOCK_NONE) {
 		/* the bytes it covers are this value now */
-		for (uint32_t i = 0; i < V->nst; i++)
-			if (V->st[i].slot == slot && V->st[i].off < l->off + size && l->off < V->st[i].off + V->st[i].size)
-				V->st[i--] = V->st[--V->nst];
-		GROW(V->st, V->nst, V->cst, 1);
-		V->st[V->nst++] = (vwstent){ slot, l->off, size, v };
+		for (uint32_t i = 0; i < V->store_count; i++)
+			if (V->stores[i].slot == slot && V->stores[i].offset < l->off + size && l->off < V->stores[i].offset + V->stores[i].size)
+				V->stores[i--] = V->stores[--V->store_count];
+		VIRBUILD_ARRAY_GROW(V->stores, V->store_count, V->store_capacity, 1);
+		V->stores[V->store_count++] = (virbuild_store_entry){ slot, l->off, size, v };
 	} else {
-		vw_st_clear(e, true);	/* through a pointer: any exposed slot */
+		virbuild_store_table_clear(e, true);	/* through a pointer: any exposed slot */
 	}
 }
 
-VPRIV int vw_laddr(ecx *e, const lval *l)
+VPRIV int virbuild_laddr(ecx *e, const lval *l)
 {
-	vwst *V = e->vw;
+	virbuild_context *V = e->vw;
 	uint32_t slot, a;
 	int64_t rel;
 	int r;
 
 	if (l->k == L_VAR || l->k == L_VREG)
-		vw_fail(e, VIRFAIL(register_variable_address));
-	a = vw_addr(e, l, 1, &slot, &rel);
-	if (slot != VW_NOBLK) {
-		V->sl[slot].exposed = 1;
-		vw_st_clear(e, true);
+		virbuild_fail(e, VIRBUILD_FAILURE(register_variable_address));
+	a = virbuild_address_make(e, l, 1, &slot, &rel);
+	if (slot != VIRBUILD_BLOCK_NONE) {
+		V->slots[slot].exposed = 1;
+		virbuild_store_table_clear(e, true);
 	}
-	r = l->k == L_REG ? l->r : vw_treg(e);
-	vw_set(e, r, a);
+	r = l->k == L_REG ? l->r : virbuild_treg(e);
+	virbuild_register_write(e, r, a);
 	return r;
 }
 
-VPRIV void vw_copy(ecx *e, int rdst, int rsrc, uint64_t n)
+VPRIV void virbuild_copy(ecx *e, int rdst, int rsrc, uint64_t n)
 {
-	uint32_t d = vw_get(e, rdst, VT_PTR), s = vw_get(e, rsrc, VT_PTR);
+	uint32_t d = virbuild_register_read(e, rdst, VIR_TYPE_PTR), s = virbuild_register_read(e, rsrc, VIR_TYPE_PTR);
 
 	if (n == 1 || n == 2 || n == 4 || n == 8) {	/* one load and store (memcpy(&u, &d, 8)): promotable */
-		uint32_t fl = vw_mfl((int)n, 1, false);
+		uint32_t fl = virbuild_memory_flags_make((int)n, 1, false);
 
-		vw_ins(e, VO_STORE, VT_VOID, fl, d, vw_ins(e, VO_LOAD, n == 8 ? VT_I64 : VT_I32, fl, s, 0, 0), 0);
+		virbuild_insn_append(e, VIR_OP_STORE, VIR_TYPE_VOID, fl, d, virbuild_insn_append(e, VIR_OP_LOAD, n == 8 ? VIR_TYPE_I64 : VIR_TYPE_I32, fl, s, 0, 0), 0);
 	} else {
-		vw_ins(e, VO_MEMCPY, VT_VOID, 0, d, s, vw_iconst(e, VT_I64, (int64_t)n));
+		virbuild_insn_append(e, VIR_OP_MEMCPY, VIR_TYPE_VOID, 0, d, s, virbuild_constant_integer(e, VIR_TYPE_I64, (int64_t)n));
 	}
-	vw_st_clear(e, true);
+	virbuild_store_table_clear(e, true);
 }
 
-VPRIV void vw_zero(ecx *e, int rdst, uint64_t n)
+VPRIV void virbuild_zero(ecx *e, int rdst, uint64_t n)
 {
-	uint32_t d = vw_get(e, rdst, VT_PTR);
+	uint32_t d = virbuild_register_read(e, rdst, VIR_TYPE_PTR);
 
-	vw_ins(e, VO_MEMSET, VT_VOID, 0, d, vw_iconst(e, VT_I32, 0), vw_iconst(e, VT_I64, (int64_t)n));
-	vw_st_clear(e, true);
+	virbuild_insn_append(e, VIR_OP_MEMSET, VIR_TYPE_VOID, 0, d, virbuild_constant_integer(e, VIR_TYPE_I32, 0), virbuild_constant_integer(e, VIR_TYPE_I64, (int64_t)n));
+	virbuild_store_table_clear(e, true);
 }
 
 /* ---------------- locals ---------------- */
 
-VPRIV void vw_locals_begin(ecx *e, uint32_t s) { (void)e, (void)s; }
+VPRIV void virbuild_locals_begin(ecx *e, uint32_t s) { (void)e, (void)s; }
 
-static uint32_t vw_lhash(uint32_t sym, uint32_t inst)
+static uint32_t virbuild_local_hash(uint32_t sym, uint32_t inst)
 {
 	return (uint32_t)(((uint64_t)sym << 32 | inst) * 0x9e3779b97f4a7c15ull >> 40);
 }
 
 /* every eligible scalar local is a variable, keyed by (symbol, inline copy) */
-VPRIV bool vw_local(ecx *e, uint32_t s, lval *l)
+VPRIV bool virbuild_local(ecx *e, uint32_t s, lval *l)
 {
-	vwst *V = e->vw;
+	virbuild_context *V = e->vw;
 	cc *c = e->c;
 	qty t = c->syms[s].ty;
 	uint32_t ty, inst = e->wk->inst, lj;
@@ -289,80 +289,80 @@ VPRIV bool vw_local(ecx *e, uint32_t s, lval *l)
 	if (!em_local_eligible(e, s))
 		return false;
 	if (is_ptr(c, t))
-		ty = VT_PTR;
+		ty = VIR_TYPE_PTR;
 	else if (is_integer(c, t) && !is_wide(c, t) && tsize(c, t) - 1 < 8)
-		ty = tsize(c, t) == 8 ? VT_I64 : VT_I32;
+		ty = tsize(c, t) == 8 ? VIR_TYPE_I64 : VIR_TYPE_I32;
 	else if (KIND(c, t) == TY_FLOAT)
-		ty = VT_F32;
+		ty = VIR_TYPE_F32;
 	else if (KIND(c, t) == TY_DOUBLE)
-		ty = VT_F64;
+		ty = VIR_TYPE_F64;
 	else
 		return false;
-	if ((V->nloc + 1) * 2 > V->lhcap) {	/* (a function with everything inlined has thousands) */
-		uint32_t nc = V->lhcap ? V->lhcap * 2 : 256;
+	if ((V->location_count + 1) * 2 > V->local_hash_capacity) {	/* (a function with everything inlined has thousands) */
+		uint32_t nc = V->local_hash_capacity ? V->local_hash_capacity * 2 : 256;
 
-		if (nc > V->lhalloc) {
-			free(V->lh);
-			V->lh = malloc(nc * sizeof *V->lh);
-			if (!V->lh) {
-				V->lhcap = V->lhalloc = 0;
-				vw_fail(e, VIRFAIL(out_of_memory));
+		if (nc > V->local_hash_allocated) {
+			free(V->local_hash);
+			V->local_hash = malloc(nc * sizeof *V->local_hash);
+			if (!V->local_hash) {
+				V->local_hash_capacity = V->local_hash_allocated = 0;
+				virbuild_fail(e, VIRBUILD_FAILURE(out_of_memory));
 			}
-			V->lhalloc = nc;
+			V->local_hash_allocated = nc;
 		}
-		memset(V->lh, 0, nc * sizeof *V->lh);
-		V->lhcap = nc;
-		for (uint32_t i = 0; i < V->nloc; i++) {
-			uint32_t j = vw_lhash(V->loc[i].sym, V->loc[i].inst) & (nc - 1);
+		memset(V->local_hash, 0, nc * sizeof *V->local_hash);
+		V->local_hash_capacity = nc;
+		for (uint32_t i = 0; i < V->location_count; i++) {
+			uint32_t j = virbuild_local_hash(V->locations[i].symbol, V->locations[i].instance) & (nc - 1);
 
-			while (V->lh[j])
+			while (V->local_hash[j])
 				j = (j + 1) & (nc - 1);
-			V->lh[j] = i + 1;
+			V->local_hash[j] = i + 1;
 		}
 	}
-	lj = vw_lhash(s, inst) & (V->lhcap - 1);
-	for (; V->lh[lj]; lj = (lj + 1) & (V->lhcap - 1)) {
-		uint32_t i = V->lh[lj] - 1;
+	lj = virbuild_local_hash(s, inst) & (V->local_hash_capacity - 1);
+	for (; V->local_hash[lj]; lj = (lj + 1) & (V->local_hash_capacity - 1)) {
+		uint32_t i = V->local_hash[lj] - 1;
 
-		if (V->loc[i].sym == s && V->loc[i].inst == inst) {
-			*l = (lval){ .k = L_VAR, .ref = VW_VAR0 + i, .align = sym_align(c, s) };
+		if (V->locations[i].symbol == s && V->locations[i].instance == inst) {
+			*l = (lval){ .k = L_VAR, .ref = VIRBUILD_LOCAL_VARIABLE_FIRST + i, .align = sym_align(c, s) };
 			return true;
 		}
 	}
-	V->lh[lj] = V->nloc + 1;
-	GROW(V->loc, V->nloc, V->cloc, 1);
-	GROW(V->vty, V->nloc, V->cvty, 1);
-	GROW(V->vsgn, V->nloc, V->cvsgn, 1);
-	V->loc[V->nloc] = (vwloc){ s, inst };
-	V->vty[V->nloc] = (uint8_t)ty;
-	V->vsgn[V->nloc] = is_integer(c, t) && is_signed(c, t);
-	*l = (lval){ .k = L_VAR, .ref = VW_VAR0 + V->nloc, .align = sym_align(c, s) };
-	V->nloc++;
+	V->local_hash[lj] = V->location_count + 1;
+	VIRBUILD_ARRAY_GROW(V->locations, V->location_count, V->location_capacity, 1);
+	VIRBUILD_ARRAY_GROW(V->variable_types, V->location_count, V->variable_type_capacity, 1);
+	VIRBUILD_ARRAY_GROW(V->variable_is_signed, V->location_count, V->variable_is_signed_capacity, 1);
+	V->locations[V->location_count] = (virbuild_location){ s, inst };
+	V->variable_types[V->location_count] = (uint8_t)ty;
+	V->variable_is_signed[V->location_count] = is_integer(c, t) && is_signed(c, t);
+	*l = (lval){ .k = L_VAR, .ref = VIRBUILD_LOCAL_VARIABLE_FIRST + V->location_count, .align = sym_align(c, s) };
+	V->location_count++;
 	return true;
 }
 
 /* a local declared without an initializer: a value from an earlier pass through its scope
  * (a loop's) is not its value, so its variable or slot gets a definition here and a promoted
- * local is not carried around the loop.  (The value is 0: vw_undef.)  In a slot, a memset
- * marked VW_LIFETIME: promotion takes it as zero stores, emission drops it. */
-VPRIV void vw_undecl(ecx *e, const lval *l, uint64_t size)
+ * local is not carried around the loop.  (The value is 0: virbuild_undefined_value.)  In a slot, a memset
+ * marked VIRBUILD_MEMSET_LIFETIME_FLAG: promotion takes it as zero stores, emission drops it. */
+VPRIV void virbuild_undecl(ecx *e, const lval *l, uint64_t size)
 {
-	vwst *V = e->vw;
+	virbuild_context *V = e->vw;
 	uint32_t slot, a, m;
 	int64_t rel;
 
 	if (l->k == L_VAR) {
-		vw_write(e, l->ref, V->cur, vw_undef(e, vw_lvty(e, l)));
+		virbuild_variable_write(e, l->ref, V->current_block, virbuild_undefined_value(e, virbuild_lvalue_type(e, l)));
 		return;
 	}
 	if (l->k != L_FRAME || !size || size > INT32_MAX)
 		return;
-	a = vw_addr(e, l, size, &slot, &rel);
-	if (slot == VW_NOBLK)
+	a = virbuild_address_make(e, l, size, &slot, &rel);
+	if (slot == VIRBUILD_BLOCK_NONE)
 		return;
-	m = vw_ins(e, VO_MEMSET, VT_VOID, VW_LIFETIME, a, vw_iconst(e, VT_I32, 0), vw_iconst(e, VT_I64, (int64_t)size));
-	V->p[m].slot = slot + 1;
-	for (uint32_t i = 0; i < V->nst; i++)	/* (what store forwarding knew of these bytes) */
-		if (V->st[i].slot == slot && V->st[i].off < l->off + (int64_t)size && l->off < V->st[i].off + V->st[i].size)
-			V->st[i--] = V->st[--V->nst];
+	m = virbuild_insn_append(e, VIR_OP_MEMSET, VIR_TYPE_VOID, VIRBUILD_MEMSET_LIFETIME_FLAG, a, virbuild_constant_integer(e, VIR_TYPE_I32, 0), virbuild_constant_integer(e, VIR_TYPE_I64, (int64_t)size));
+	V->insns[m].slot_plus_one = slot + 1;
+	for (uint32_t i = 0; i < V->store_count; i++)	/* (what store forwarding knew of these bytes) */
+		if (V->stores[i].slot == slot && V->stores[i].offset < l->off + (int64_t)size && l->off < V->stores[i].offset + V->stores[i].size)
+			V->stores[i--] = V->stores[--V->store_count];
 }

@@ -62,11 +62,9 @@
 
 #define LD_NONE 0xffffffffu
 
-static bool x86_ld;		/* the inputs are x86-64 (arch/x64/ld/relocation.inc) */
-static _Atomic uint16_t ld_machine;	/* e_machine of the first object loaded (ld_object_parse) */
-static uint64_t tls_start;	/* x86: the PT_TLS start (dtpoff) */
+#include "ld-internal.h"
 
-#include "elf-definitions.h"
+#include "link-context.c"
 
 
 #include "word-access.c"
@@ -79,13 +77,7 @@ static uint64_t tls_start;	/* x86: the PT_TLS start (dtpoff) */
 
 #include "thread-pool.c"
 
-#include "option-state.c"
-
-#include "input-model.c"
-
 #include "global-symbols.c"
-
-#include "script-model.c"
 
 #include "address-values.c"
 
@@ -135,7 +127,6 @@ static uint64_t tls_start;	/* x86: the PT_TLS start (dtpoff) */
 /* ---------------- writing sections ---------------- */
 
 #include "../arch/a64/ld/relocation-apply.inc"
-static _Atomic bool got_seen;
 #include "../arch/x64/ld/relocation.inc"
 
 #include "section-write.c"
@@ -187,8 +178,6 @@ static _Atomic bool got_seen;
 #include "link-run.c"
 
 #include "relocatable-link.c"
-
-#include "state-reset.c"
 
 #include "macho-probe.c"
 

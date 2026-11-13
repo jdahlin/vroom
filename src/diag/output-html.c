@@ -80,9 +80,9 @@ static void diag_html_text_escape(vbuffer *b, const char *s, size_t n)
 VPRIV void diag_html_page_write(pp *p, vbuffer *b)
 {
 	unsigned ne = 0, nw = 0;
-	const char *main = p->o->main ? p->o->main : "";
+	const char *main = p->options->main ? p->options->main : "";
 
-	for (const diag_record *d = p->dhead; d; d = d->next)
+	for (const diag_record *d = p->diagnostic_head; d; d = d->next)
 		if (!d->dup)
 			ne += d->level >= DIAG_LEVEL_ERROR, nw += d->level == DIAG_LEVEL_WARNING;
 	vbuffer_string_append(b, "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">\n"
@@ -108,7 +108,7 @@ VPRIV void diag_html_page_write(pp *p, vbuffer *b)
 	diag_html_text_escape(b, main, strlen(main));
 	vbuffer_format_append(b, "</h1>\n<p class=\"sum\">%u error%s, %u warning%s</p>\n", ne, ne == 1 ? "" : "s", nw,
 	       nw == 1 ? "" : "s");
-	for (diag_record *d = p->dhead; d; d = d->next) {
+	for (diag_record *d = p->diagnostic_head; d; d = d->next) {
 		vbuffer r = { 0 };
 
 		if (d->dup)
@@ -119,7 +119,7 @@ VPRIV void diag_html_page_write(pp *p, vbuffer *b)
 		vbuffer_string_append(b, "</pre></section>\n");
 		free(r.p);
 	}
-	if (!p->dhead)
+	if (!p->diagnostic_head)
 		vbuffer_string_append(b, "<p>No diagnostics.</p>\n");
 	vbuffer_string_append(b, "</main></body></html>\n");
 }

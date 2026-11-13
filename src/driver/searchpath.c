@@ -4,7 +4,7 @@
  *
  * driver_searchpath_alloc sizes one per-thread array for the longest command line seen (each list
  * holds at most argc entries); the option loop fills the lists and driver_searchpath_build merges
- * them into job->all, dropping exact duplicates from -I on and recording the boundaries the
+ * them into job->search_directories, dropping exact duplicates from -I on and recording the boundaries the
  * preprocessor needs (po.nquote, nsys1, the extern "C" range xc0..xc1 that shows as flags in line
  * markers).  The order is observable in `-H`, `-M` and in which header is found, and is checked
  * against clang by vcc-diff.py hdr and deps: change it only against clang.  vcc's own headers
@@ -13,9 +13,9 @@
  */
 #include "driver-internal.h"
 
-/* CPATH-style lists (kept out of ppd_run: its size decides how clang
+/* CPATH-style lists (kept out of driver_job_run: its size decides how clang
    compiles the argument loop; vbench pp +3.7 % instructions inline) */
-static __attribute__((noinline)) size_t env_ndirs(const char *v)
+static __attribute__((noinline)) size_t driver_searchpath_environment_count(const char *v)
 {
 	size_t k = v && *v ? 1 : 0;
 
@@ -26,7 +26,7 @@ static __attribute__((noinline)) size_t env_ndirs(const char *v)
 
 /* the elements of v appended to all[n..] (not repeating one from nquote on); an
    empty element is the current directory.  slot: which per-thread copy holds them */
-static __attribute__((noinline)) int env_dirs(const char *v, const char **all, int n, int nquote, int slot)
+static __attribute__((noinline)) int driver_searchpath_environment_split(const char *v, const char **all, int n, int nquote, int slot)
 {
 	static _Thread_local char *copy[2];
 	char *s, *t;
@@ -52,12 +52,12 @@ static __attribute__((noinline)) int env_dirs(const char *v, const char **all, i
 
 /* each list holds at most argc entries, all of them plus the defaults: one
    per-thread allocation, grown to the longest command line seen */
-VPRIV void driver_searchpath_alloc(struct driver_job *job, int argc, const ppd_env *env)
+VPRIV void driver_searchpath_alloc(struct driver_job *job, int argc, const driver_environment *env)
 {
 	static _Thread_local const char **dirv;
 	static _Thread_local size_t dircap;
-	job->cpath = ppd_getenv(env, "CPATH"), job->cipath = ppd_getenv(env, "C_INCLUDE_PATH");
-	size_t nenvd = env_ndirs(job->cpath) + env_ndirs(job->cipath);
+	job->cpath_value = driver_environment_get(env, "CPATH"), job->c_include_path_value = driver_environment_get(env, "C_INCLUDE_PATH");
+	size_t nenvd = driver_searchpath_environment_count(job->cpath_value) + driver_searchpath_environment_count(job->c_include_path_value);
 	size_t per = (size_t)argc + 64 + nenvd;
 
 	if (5 * per > dircap) {
@@ -65,81 +65,81 @@ VPRIV void driver_searchpath_alloc(struct driver_job *job, int argc, const ppd_e
 		dircap = 5 * per;
 		dirv = malloc(dircap * sizeof(*dirv));
 	}
-	job->dirs_q = dirv, job->dirs_i = dirv + per, job->dirs_s = dirv + 2 * per, job->dirs_a = dirv + 3 * per,
-	job->all = dirv + 4 * per;
+	job->quote_directories = dirv, job->include_directories = dirv + per, job->system_directories = dirv + 2 * per, job->after_directories = dirv + 3 * per,
+	job->search_directories = dirv + 4 * per;
 }
 
-VPRIV void driver_searchpath_build(struct driver_job *job, const ppd_env *env)
+VPRIV void driver_searchpath_build(struct driver_job *job, const driver_environment *env)
 {
 	size_t nsys, nfwdirs;
-	const char *const *sysdirs_darwin = driver_predef_darwin_sysdirs(&nsys);
-	const char *const *fwdirs_darwin = driver_predef_darwin_fwdirs(&nfwdirs);
+	const char *const *sysdirs_darwin = driver_predef_darwin_system_directories(&nsys);
+	const char *const *fwdirs_darwin = driver_predef_darwin_framework_directories(&nfwdirs);
 
 	/* search path: -iquote, -I, -isystem, -idirafter; exact duplicates dropped */
-	for (int k = 0; k < job->nq; k++) job->all[job->n++] = job->dirs_q[k];
-	job->po.nquote = job->n;
-#define ADD(d) do { int dup_ = 0; for (int j = job->po.nquote; j < job->n; j++) dup_ |= !strcmp(job->all[j], d); if (!dup_) job->all[job->n++] = d; } while (0)
-	for (int k = 0; k < job->ni; k++) ADD(job->dirs_i[k]);
-	job->n = env_dirs(job->cpath, job->all, job->n, job->po.nquote, 0);	/* CPATH: after -I, as clang */
-	job->po.nsys1 = job->n + 1;
-	for (int k = 0; k < job->ns; k++) {
+	for (int k = 0; k < job->quote_count; k++) job->search_directories[job->search_count++] = job->quote_directories[k];
+	job->pp_options.nquote = job->search_count;
+#define ADD(d) do { int dup_ = 0; for (int j = job->pp_options.nquote; j < job->search_count; j++) dup_ |= !strcmp(job->search_directories[j], d); if (!dup_) job->search_directories[job->search_count++] = d; } while (0)
+	for (int k = 0; k < job->include_count; k++) ADD(job->include_directories[k]);
+	job->search_count = driver_searchpath_environment_split(job->cpath_value, job->search_directories, job->search_count, job->pp_options.nquote, 0);	/* CPATH: after -I, as clang */
+	job->pp_options.nsys1 = job->search_count + 1;
+	for (int k = 0; k < job->system_count; k++) {
 		/* vcc's own headers (arm_neon.h) go before the clang resource directory */
-		if (strstr(job->dirs_s[k], "/lib/clang/") && strlen(job->dirs_s[k]) > 8 &&
-		    !strcmp(job->dirs_s[k] + strlen(job->dirs_s[k]) - 8, "/include"))
+		if (strstr(job->system_directories[k], "/lib/clang/") && strlen(job->system_directories[k]) > 8 &&
+		    !strcmp(job->system_directories[k] + strlen(job->system_directories[k]) - 8, "/include"))
 			ADD(VCC_INCDIR);
-		ADD(job->dirs_s[k]);
+		ADD(job->system_directories[k]);
 	}
-	job->n = env_dirs(job->cipath, job->all, job->n, job->po.nquote, 1);	/* C_INCLUDE_PATH: after -isystem */
+	job->search_count = driver_searchpath_environment_split(job->c_include_path_value, job->search_directories, job->search_count, job->pp_options.nquote, 1);	/* C_INCLUDE_PATH: after -isystem */
 	/* Darwin: vcc's own <stdatomic.h>, <arm_neon.h>, <arm_acle.h> ahead of the SDK's */
-	if (job->darwin && !job->nostdinc)
+	if (job->darwin && !job->no_standard_includes)
 		ADD(VCC_INCDIR);
-	if (job->darwin && !job->nostdinc)
+	if (job->darwin && !job->no_standard_includes)
 		for (size_t k = 0; k < nsys; k++) {
 			size_t l = strlen(sysdirs_darwin[k]);
 			int xc = l > 12 && !strcmp(sysdirs_darwin[k] + l - 12, "/usr/include");
 
 			if (xc)
-				job->po.xc0 = job->n;
+				job->pp_options.xc0 = job->search_count;
 			ADD(sysdirs_darwin[k]);
 			if (xc)
-				job->po.xc1 = job->n;
+				job->pp_options.xc1 = job->search_count;
 		}
-	if (job->darwin && (job->mdeps || job->depfile || job->showinc)) {
+	if (job->darwin && (job->dependency_print_mode || job->depfile || job->show_includes)) {
 		/* clang reads the SDK's SDKSettings.json (the default sysroot: the SDK
 		   of the system directories), and it is the first dependency */
 		static __thread char sdk[1024];
 
-		for (size_t k = 0; k < nsys && !job->dfirst; k++) {
+		for (size_t k = 0; k < nsys && !job->depfile_first_input; k++) {
 			const char *d = sysdirs_darwin[k], *u = strstr(d, ".sdk/usr/include");
 
 			if (u && snprintf(sdk, sizeof(sdk), "%.*s/SDKSettings.json", (int)(u + 4 - d), d) < (int)sizeof(sdk) &&
 			    !access(sdk, F_OK))
-				job->dfirst = sdk;
+				job->depfile_first_input = sdk;
 		}
-		if (job->dfirst && job->showinc)
-			dprintf(job->errfd, ". %s\n", job->dfirst);	/* -H: clang's first line too */
-		if (!job->mdeps && !job->depfile)
-			job->dfirst = NULL;
+		if (job->depfile_first_input && job->show_includes)
+			dprintf(job->errfd, ". %s\n", job->depfile_first_input);	/* -H: clang's first line too */
+		if (!job->dependency_print_mode && !job->depfile)
+			job->depfile_first_input = NULL;
 	}
 	(void)job->hosted;
 #ifdef VCC_RESDIR
 	/* hosted Linux: clang's resource headers, then glibc's (multiarch first) */
-	if (job->hosted && !job->darwin && !job->nostdinc) {
+	if (job->hosted && !job->darwin && !job->no_standard_includes) {
 		ADD(VCC_RESDIR);
 		ADD("/usr/local/include");
-		job->po.xc0 = job->n;	/* clang: extern "C" system directories (" 3 4" in line markers) */
-		ADD(job->x86 ? "/usr/include/x86_64-linux-gnu" : "/usr/include/aarch64-linux-gnu");
+		job->pp_options.xc0 = job->search_count;	/* clang: extern "C" system directories (" 3 4" in line markers) */
+		ADD(job->target_x64 ? "/usr/include/x86_64-linux-gnu" : "/usr/include/aarch64-linux-gnu");
 		ADD("/usr/include");
-		job->po.xc1 = job->n;
+		job->pp_options.xc1 = job->search_count;
 	}
 #endif
-	for (int k = 0; k < job->na; k++) ADD(job->dirs_a[k]);
-	if (job->darwin && !job->nostdinc) {
-		job->po.fwdirs = fwdirs_darwin;
-		job->po.nfwdirs = (int)(nfwdirs);
+	for (int k = 0; k < job->after_count; k++) ADD(job->after_directories[k]);
+	if (job->darwin && !job->no_standard_includes) {
+		job->pp_options.fwdirs = fwdirs_darwin;
+		job->pp_options.nfwdirs = (int)(nfwdirs);
 	}
-	job->po.dirs = job->all;
-	job->po.ndirs = job->n;
-	job->po.edirs = job->dirs_e, job->po.nedirs = job->ne;
+	job->pp_options.dirs = job->search_directories;
+	job->pp_options.ndirs = job->search_count;
+	job->pp_options.edirs = job->embed_directories, job->pp_options.nedirs = job->embed_count;
 #undef ADD
 }

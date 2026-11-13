@@ -8,10 +8,17 @@ int ld_main(int argc, char **argv, int dirfd, FILE *err)
 	if (ld_first_input_is_macho(argc, argv, dirfd)) {
 		rc = macho_link(argc, argv, dirfd, err);
 	} else {
+		FILE *error_stream = err ? err : stderr;
+
 		vtask_mutex_lock(&ld_link_lock);	/* (a second link waits off the CPU budget) */
-		errf = err ? err : stderr;
-		dirfd_base = dirfd;
-		rc = ld_link_run(argc, argv);
+		struct ld_context *ctx = ld_context_create(error_stream, dirfd);
+		if (ctx) {
+			rc = ld_link_run(ctx, argc, argv);
+			ld_context_destroy(ctx);
+		} else {
+			fprintf(error_stream, "vld: error: out of memory\n");
+			rc = 1;
+		}
 		ld_regions_free();
 		pthread_mutex_unlock(&ld_link_lock);
 	}

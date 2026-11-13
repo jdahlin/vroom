@@ -1,20 +1,20 @@
 /* vcc front end: the builtin table (name, id, signature), its name directory and the library-signature decoder. A new builtin's other facts: its BI_ id in ccint.h, its row in builtin-table.c, its typing in builtin-call.c, its folding in builtin-fold.c, and its code in the three generator switches (gen_builtin in arch/a64/codegen/builtin.c, wk_builtin in codegen/walk/expr.c, wbuiltin in arch/wasm/codegen/wcall.c) */
-#include "ccimpl.h"
+#include "cc-internal.h"
 
 /* "too few/many arguments", as clang: the caret after the arguments, the callee's name underlined */
-VPRIV void arity(cc *c, uint32_t loc, unsigned want, const vec *args)
+CC_PRIVATE void cc_builtin_arity_check(cc *c, uint32_t loc, unsigned want, const cc_id_list *args)
 {
 	diag_span r = { loc, pp_token_end_find(c->p, loc) };
 	unsigned have = args->n;
 
-	if (have && ISERR(args->v[have - 1]))	/* the ')' was missing (args_list): said */
+	if (have && AST_NODE_IS_ERROR(args->v[have - 1]))	/* the ')' was missing (cc_builtin_arguments_parse): said */
 		return;
 
 	report(c, "error", c->prevloc, &r, 1, NULL, 0, "too %s arguments to function call, expected %u, have %u",
 	       have < want ? "few" : "many", want, have);
 }
 
-static const builtin builtins[] = {
+static const cc_builtin cc_builtin_table[] = {
 	{ "__builtin_ia32_pblendvb128", BI_X86_BLENDVB, 1, "BBBB" },
 	{ "__builtin_elementwise_abs", BI_ELEMENTWISE_ABS, 1, "i." },
 	{ "__builtin_ia32_movmskps", BI_X86_SIMD, 1, "iF" },
@@ -162,7 +162,7 @@ static const builtin builtins[] = {
 	{ "__atomic_fetch_max", BI_ATOMIC_FETCH_MAX, 0, "v." }, { "__atomic_max_fetch", BI_ATOMIC_MAX_FETCH, 0, "v." },
 	{ "__atomic_fetch_min", BI_ATOMIC_FETCH_MIN, 0, "v." }, { "__atomic_min_fetch", BI_ATOMIC_MIN_FETCH, 0, "v." },
 	{ "__atomic_test_and_set", BI_ATOMIC_TEST_AND_SET, 0, "v." }, { "__atomic_clear", BI_ATOMIC_CLEAR, 0, "v." },
-	/* legacy __sync_*: the __atomic_* forms with seq_cst (sig "s.": atomic_call appends the order) */
+	/* legacy __sync_*: the __atomic_* forms with seq_cst (sig "s.": cc_builtin_atomic_build appends the order) */
 	{ "__sync_fetch_and_add", BI_ATOMIC_FETCH_ADD, 0, "s." }, { "__sync_fetch_and_sub", BI_ATOMIC_FETCH_SUB, 0, "s." },
 	{ "__sync_fetch_and_and", BI_ATOMIC_FETCH_AND, 0, "s." }, { "__sync_fetch_and_or", BI_ATOMIC_FETCH_OR, 0, "s." },
 	{ "__sync_fetch_and_xor", BI_ATOMIC_FETCH_XOR, 0, "s." },
@@ -179,26 +179,26 @@ static const builtin builtins[] = {
 	{ "__sync_lock_release", BI_SYNC_LOCK_RELEASE, 0, "s." },
 	{ "__sync_synchronize", BI_SYNC_SYNCHRONIZE, 0, "s." },
 	/* the sized forms (clang: the size is the operand's; the generic form checks it) and __sync_swap */
-#define SYNC_N(n, bi) { n "_1", bi, 0, "s." }, { n "_2", bi, 0, "s." }, { n "_4", bi, 0, "s." }, { n "_8", bi, 0, "s." }, \
+#define CC_BUILTIN_SYNC_SIZES(n, bi) { n "_1", bi, 0, "s." }, { n "_2", bi, 0, "s." }, { n "_4", bi, 0, "s." }, { n "_8", bi, 0, "s." }, \
 	{ n "_16", bi, 0, "s." }
-	SYNC_N("__sync_fetch_and_add", BI_ATOMIC_FETCH_ADD),
-	SYNC_N("__sync_fetch_and_sub", BI_ATOMIC_FETCH_SUB),
-	SYNC_N("__sync_fetch_and_and", BI_ATOMIC_FETCH_AND),
-	SYNC_N("__sync_fetch_and_or", BI_ATOMIC_FETCH_OR),
-	SYNC_N("__sync_fetch_and_xor", BI_ATOMIC_FETCH_XOR),
-	SYNC_N("__sync_add_and_fetch", BI_ATOMIC_ADD_FETCH),
-	SYNC_N("__sync_sub_and_fetch", BI_ATOMIC_SUB_FETCH),
-	SYNC_N("__sync_and_and_fetch", BI_ATOMIC_AND_FETCH),
-	SYNC_N("__sync_or_and_fetch", BI_ATOMIC_OR_FETCH),
-	SYNC_N("__sync_xor_and_fetch", BI_ATOMIC_XOR_FETCH),
-	SYNC_N("__sync_fetch_and_nand", BI_ATOMIC_FETCH_NAND),
-	SYNC_N("__sync_nand_and_fetch", BI_ATOMIC_NAND_FETCH),
-	SYNC_N("__sync_lock_test_and_set", BI_ATOMIC_EXCHANGE_N),
-	SYNC_N("__sync_val_compare_and_swap", BI_SYNC_VAL_CAS),
-	SYNC_N("__sync_bool_compare_and_swap", BI_SYNC_BOOL_CAS),
-	SYNC_N("__sync_lock_release", BI_SYNC_LOCK_RELEASE),
-	SYNC_N("__sync_swap", BI_ATOMIC_EXCHANGE_N),
-#undef SYNC_N
+	CC_BUILTIN_SYNC_SIZES("__sync_fetch_and_add", BI_ATOMIC_FETCH_ADD),
+	CC_BUILTIN_SYNC_SIZES("__sync_fetch_and_sub", BI_ATOMIC_FETCH_SUB),
+	CC_BUILTIN_SYNC_SIZES("__sync_fetch_and_and", BI_ATOMIC_FETCH_AND),
+	CC_BUILTIN_SYNC_SIZES("__sync_fetch_and_or", BI_ATOMIC_FETCH_OR),
+	CC_BUILTIN_SYNC_SIZES("__sync_fetch_and_xor", BI_ATOMIC_FETCH_XOR),
+	CC_BUILTIN_SYNC_SIZES("__sync_add_and_fetch", BI_ATOMIC_ADD_FETCH),
+	CC_BUILTIN_SYNC_SIZES("__sync_sub_and_fetch", BI_ATOMIC_SUB_FETCH),
+	CC_BUILTIN_SYNC_SIZES("__sync_and_and_fetch", BI_ATOMIC_AND_FETCH),
+	CC_BUILTIN_SYNC_SIZES("__sync_or_and_fetch", BI_ATOMIC_OR_FETCH),
+	CC_BUILTIN_SYNC_SIZES("__sync_xor_and_fetch", BI_ATOMIC_XOR_FETCH),
+	CC_BUILTIN_SYNC_SIZES("__sync_fetch_and_nand", BI_ATOMIC_FETCH_NAND),
+	CC_BUILTIN_SYNC_SIZES("__sync_nand_and_fetch", BI_ATOMIC_NAND_FETCH),
+	CC_BUILTIN_SYNC_SIZES("__sync_lock_test_and_set", BI_ATOMIC_EXCHANGE_N),
+	CC_BUILTIN_SYNC_SIZES("__sync_val_compare_and_swap", BI_SYNC_VAL_CAS),
+	CC_BUILTIN_SYNC_SIZES("__sync_bool_compare_and_swap", BI_SYNC_BOOL_CAS),
+	CC_BUILTIN_SYNC_SIZES("__sync_lock_release", BI_SYNC_LOCK_RELEASE),
+	CC_BUILTIN_SYNC_SIZES("__sync_swap", BI_ATOMIC_EXCHANGE_N),
+#undef CC_BUILTIN_SYNC_SIZES
 	{ "__sync_swap", BI_ATOMIC_EXCHANGE_N, 0, "s." },
 	/* C11 _Atomic builtins (stdatomic.h): the __atomic_* forms, orders explicit */
 	{ "__c11_atomic_load", BI_ATOMIC_LOAD_N, 0, "v." },
@@ -269,9 +269,9 @@ static const builtin builtins[] = {
 };
 
 /* name of a library builtin (sym val of an S_BUILTIN) */
-VPRIV const builtin *builtin_all(void) { return builtins; }
-const char *cc_builtin_name(int64_t i) { return builtins[i].name; }
-int cc_builtin_libkind(int64_t i) { return builtins[i].flags >> 1; }
+CC_PRIVATE const cc_builtin *cc_builtin_table_get(void) { return cc_builtin_table; }
+const char *cc_builtin_name(int64_t i) { return cc_builtin_table[i].name; }
+int cc_builtin_libkind(int64_t i) { return cc_builtin_table[i].flags >> 1; }
 
 /* A fortified call (CC_LIB_CHK builtin bi, na arguments, the object size last, the length before it) whose
  * check cannot fail: the object size is unknown ((size_t)-1) or a constant length is within a constant
@@ -291,7 +291,7 @@ int64_t cc_chk_simplify(int64_t bi, int na, bool osz_const, uint64_t osz, bool l
 /* __builtin___X_chk -> __builtin_X (fortified call with the object size dropped), -1: none */
 int64_t cc_builtin_plain(int64_t i)
 {
-	const char *n = builtins[i].name;
+	const char *n = cc_builtin_table[i].name;
 	size_t len = strlen(n);
 	char b[64];
 
@@ -300,8 +300,8 @@ int64_t cc_builtin_plain(int64_t i)
 	memcpy(b, "__builtin_", 10);
 	memcpy(b + 10, n + 12, len - 16);
 	b[len - 6] = 0;
-	for (int64_t j = 0; builtins[j].name; j++)
-		if (builtins[j].id == BI_LIB && !strcmp(builtins[j].name, b))
+	for (int64_t j = 0; cc_builtin_table[j].name; j++)
+		if (cc_builtin_table[j].id == BI_LIB && !strcmp(cc_builtin_table[j].name, b))
 			return j;
 	return -1;
 }
@@ -318,48 +318,48 @@ const char *cc_lib_sig(const char *name, int *clang_enc)
 		return NULL;
 	memcpy(b, "__builtin_", 10);
 	memcpy(b + 10, name, n + 1);
-	for (uint32_t i = 0; builtins[i].name; i++)
-		if (builtins[i].id == BI_LIB && !strcmp(builtins[i].name, b)) {
+	for (uint32_t i = 0; cc_builtin_table[i].name; i++)
+		if (cc_builtin_table[i].id == BI_LIB && !strcmp(cc_builtin_table[i].name, b)) {
 			*clang_enc = 0;
-			return builtins[i].sig;
+			return cc_builtin_table[i].sig;
 		}
 	*clang_enc = 1;
-	return lib_builtin_sig(b);
+	return cc_library_builtin_signature(b);
 }
 
-VPRIV qty sigtype(cc *c, char ch)
+CC_PRIVATE qty cc_builtin_signature_type(cc *c, char ch)
 {
 	switch (ch) {
-	case 'v': return prim(TY_VOID);
-	case 'b': return prim(TY_BOOL);
-	case 'C': return prim(TY_UCHAR);
-	case 'h': return prim(TY_USHORT);
-	case 'i': return prim(TY_INT);
-	case 'u': return prim(TY_UINT);
-	case 'l': return prim(TY_LONG);
-	case 'L': return prim(TY_ULONG);
-	case 'w': return prim(TY_LLONG);
-	case 'W': return prim(TY_ULLONG);
+	case 'v': return cc_type_basic(TY_VOID);
+	case 'b': return cc_type_basic(TY_BOOL);
+	case 'C': return cc_type_basic(TY_UCHAR);
+	case 'h': return cc_type_basic(TY_USHORT);
+	case 'i': return cc_type_basic(TY_INT);
+	case 'u': return cc_type_basic(TY_UINT);
+	case 'l': return cc_type_basic(TY_LONG);
+	case 'L': return cc_type_basic(TY_ULONG);
+	case 'w': return cc_type_basic(TY_LLONG);
+	case 'W': return cc_type_basic(TY_ULLONG);
 	case 'z': return c->t_size;
-	case 'd': return prim(TY_DOUBLE);
-	case 'f': return prim(TY_FLOAT);
-	case 'F': return ty_vector(c, prim(TY_FLOAT), 16);
-	case 'c': return prim(TY_CHAR);
-	case 'B': return ty_vector(c, prim(TY_CHAR), 16);
-	case 'H': return ty_vector(c, prim(TY_SHORT), 16);
-	case 'D': return prim(TY_LDOUBLE);
-	case 'p': return ty_ptr(c, prim(TY_VOID));
-	case 'P': return ty_ptr(c, QT(TY_VOID, Q_CONST));
-	case 's': return ty_ptr(c, prim(TY_CHAR));
-	case 'S': return ty_ptr(c, QT(TY_CHAR, Q_CONST));
+	case 'd': return cc_type_basic(TY_DOUBLE);
+	case 'f': return cc_type_basic(TY_FLOAT);
+	case 'F': return cc_type_vector(c, cc_type_basic(TY_FLOAT), 16);
+	case 'c': return cc_type_basic(TY_CHAR);
+	case 'B': return cc_type_vector(c, cc_type_basic(TY_CHAR), 16);
+	case 'H': return cc_type_vector(c, cc_type_basic(TY_SHORT), 16);
+	case 'D': return cc_type_basic(TY_LDOUBLE);
+	case 'p': return cc_type_pointer(c, cc_type_basic(TY_VOID));
+	case 'P': return cc_type_pointer(c, QT(TY_VOID, Q_CONST));
+	case 's': return cc_type_pointer(c, cc_type_basic(TY_CHAR));
+	case 'S': return cc_type_pointer(c, QT(TY_CHAR, Q_CONST));
 	case 'V':	/* a parameter: x86-64's array type is adjusted to the element pointer */
-		return KIND(c, c->t_valist) == TY_ARRAY ? ty_ptr(c, T(c, c->t_valist)->base) : c->t_valist;
+		return AST_TYPE_KIND(c, c->t_valist) == TY_ARRAY ? cc_type_pointer(c, AST_TYPE(c, c->t_valist)->base) : c->t_valist;
 	default: abort();
 	}
 }
 
 /* the function type of a signature in vcc's letters (sigtype) */
-VPRIV qty sig_func_type(cc *c, const char *sig)
+CC_PRIVATE qty cc_builtin_signature_function_type(cc *c, const char *sig)
 {
 	qty par[16];
 	uint32_t n = 0;
@@ -370,67 +370,67 @@ VPRIV qty sig_func_type(cc *c, const char *sig)
 			fl |= TF_VARIADIC;
 			break;
 		}
-		par[n++] = sigtype(c, *s);
+		par[n++] = cc_builtin_signature_type(c, *s);
 	}
-	return ty_func(c, sigtype(c, sig[0]), par, n, fl);
+	return cc_type_function(c, cc_builtin_signature_type(c, sig[0]), par, n, fl);
 }
 
-VPRIV qty builtin_type(cc *c, const builtin *b)
+CC_PRIVATE qty cc_builtin_type(cc *c, const cc_builtin *b)
 {
-	return sig_func_type(c, b->sig);
+	return cc_builtin_signature_function_type(c, b->sig);
 }
 
 /* ---------------- expressions: builtins ---------------- */
 
-static uint32_t *bi_dir[NDIR];
+static uint32_t *cc_builtin_directory[NDIR];
 
 /* __has_builtin for the names the front end implements (the pp asks through pp_builtin_known) */
-static int builtin_known(const char *n)
+static int cc_builtin_is_known(const char *n)
 {
-	for (uint32_t i = 0; builtins[i].name; i++)
-		if (!strcmp(builtins[i].name, n))
-			return builtins[i].id != BI_IS_CONSTANT_EVALUATED;	/* clang: C++ only */
-	return lib_builtin_known(n);
+	for (uint32_t i = 0; cc_builtin_table[i].name; i++)
+		if (!strcmp(cc_builtin_table[i].name, n))
+			return cc_builtin_table[i].id != BI_IS_CONSTANT_EVALUATED;	/* clang: C++ only */
+	return cc_library_builtin_is_known(n);
 }
 
-__attribute__((constructor)) static void builtin_hook(void)
+__attribute__((constructor)) static void cc_builtin_hook_register(void)
 {
-	pp_builtin_known = builtin_known;
+	pp_builtin_known = cc_builtin_is_known;
 }
 
-VPRIV void init_builtins(void)
+CC_PRIVATE void cc_builtin_table_init(void)
 {
 	static bool done;
 
 	if (__atomic_load_n(&done, __ATOMIC_ACQUIRE))
 		return;
 	/* the table is shared by all TUs; building it twice is harmless */
-	for (uint32_t i = 0; builtins[i].name; i++) {
-		size_t l = strlen(builtins[i].name);
+	for (uint32_t i = 0; cc_builtin_table[i].name; i++) {
+		size_t l = strlen(cc_builtin_table[i].name);
 		char *s = malloc(l + 17);
 		uint32_t id;
 
-		memcpy(s, builtins[i].name, l);
+		memcpy(s, cc_builtin_table[i].name, l);
 		memset(s + l, 0, 17);
 		id = vintern_copy(s, l);
-		if (!bi_dir[id >> DIR_BITS]) {
+		if (!cc_builtin_directory[id >> DIR_BITS]) {
 			uint32_t *pg = calloc(DIR_PAGE, sizeof(uint32_t));
 
-			bi_dir[id >> DIR_BITS] = pg;
+			cc_builtin_directory[id >> DIR_BITS] = pg;
 		}
-		bi_dir[id >> DIR_BITS][id & (DIR_PAGE - 1)] = i + 1;
+		cc_builtin_directory[id >> DIR_BITS][id & (DIR_PAGE - 1)] = i + 1;
 		free(s);
 	}
 	__atomic_store_n(&done, true, __ATOMIC_RELEASE);
 }
 
-VPRIV const builtin *builtin_of(uint32_t id)
+CC_PRIVATE const cc_builtin *cc_builtin_lookup(uint32_t id)
 {
-	uint32_t *pg = bi_dir[id >> DIR_BITS];
+	uint32_t *pg = cc_builtin_directory[id >> DIR_BITS];
 	uint32_t i = pg ? pg[id & (DIR_PAGE - 1)] : 0;
 
-	return i ? &builtins[i - 1] : NULL;
+	return i ? &cc_builtin_table[i - 1] : NULL;
 }
 
-bool cc_eval(cc *c, uint32_t n, cval *v) { return eval(c, n, v); }
-bool cc_is_signed(cc *c, qty t) { return is_signed(c, t); }
+bool cc_eval(cc *c, uint32_t n, cval *v) { return cc_constant_eval(c, n, v); }
+bool cc_is_signed(cc *c, qty t) { return cc_type_is_signed(c, t); }

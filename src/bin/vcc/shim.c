@@ -7,12 +7,12 @@
  * No stdio, no malloc: the request is assembled in a static buffer (BSS
  * pages are only touched as far as the request reaches).
  *
- *   VCC_SOCK   server socket (default: protocol.h vroom_default_sock)
+ *   VCC_SOCK   server socket (default: protocol.h vccd_socket_default)
  *
  * Built with -DVSH it is vsh, a SHELL for make (installed as .../vsh/sh, so
  * make keeps its no-shell fast path for simple commands): `sh -c SCRIPT`
  * goes to vccd, which runs kbuild's object and archive recipes itself
- * (rsh.c); anything vccd declines, any other argv, and a missing vccd run
+ * (shell.c); anything vccd declines, any other argv, and a missing vccd run
  * the real shell, $VSH_REAL (default /bin/sh), with the same arguments.
  */
 #include <sys/stat.h>
@@ -35,50 +35,50 @@
 #include "protocol.h"
 
 #ifdef MSG_NOSIGNAL
-#define SHIM_NOSIG MSG_NOSIGNAL	/* Linux: no SIGPIPE from a send to a closed peer */
+#define SHIM_SEND_NOSIGNAL MSG_NOSIGNAL	/* Linux: no SIGPIPE from a send to a closed peer */
 #else
-#define SHIM_NOSIG 0		/* Darwin: SO_NOSIGPIPE on the socket */
+#define SHIM_SEND_NOSIGNAL 0		/* Darwin: SO_NOSIGPIPE on the socket */
 #endif
 
 extern char **environ;
 
-static char buf[sizeof(struct vroom_req_hdr) + VROOM_MAX_PAYLOAD];
+static char shim_request_buffer[sizeof(struct vccd_request_header) + VCCD_PROTOCOL_PAYLOAD_MAX];
 
 #ifdef VSH
-static char **g_argv;
+static char **shim_argv;
 
 /* the real shell, in this process: nothing has been written or run yet */
-static void real_shell(void)
+static void shim_real_shell_exec(void)
 {
 	const char *sh = getenv("VSH_REAL");
 
 	if (!sh)
 		sh = "/bin/sh";
-	g_argv[0] = (char *)sh;
-	execv(sh, g_argv);
+	shim_argv[0] = (char *)sh;
+	execv(sh, shim_argv);
 	(void)!write(2, "vsh: cannot run the real shell\n", 31);
 	_exit(127);
 }
 #endif
 
-static void die(const char *msg)
+static void shim_die(const char *msg)
 {
 	(void)!write(2, msg, strlen(msg));
 	_exit(127);
 }
 
-static char *put(char *p, const char *s)
+static char *shim_string_append(char *p, const char *s)
 {
 	size_t n = strlen(s) + 1;
 
-	if (p + n > buf + sizeof(buf))
-		die("vcc: request too large\n");
+	if (p + n > shim_request_buffer + sizeof(shim_request_buffer))
+		shim_die("vcc: request too large\n");
 	memcpy(p, s, n);
 	return p + n;
 }
 
 /* the vccd next to this binary (vsh/sh: one directory up); 0 when found */
-static int vccd_path(char *v, size_t cap)
+static int shim_vccd_path_find(char *v, size_t cap)
 {
 	char exe[4096], rp[4096], *sl;
 	uint32_t el = sizeof(exe);
@@ -103,7 +103,7 @@ static int vccd_path(char *v, size_t cap)
 #ifndef VSH
 /* no server on the default socket: start one (under a lock, detached, its
  * log in the socket's directory) and wait up to 5 s for it to listen */
-static int autostart(const char *dir, const struct sockaddr_un *sa)
+static int shim_vccd_start(const char *dir, const struct sockaddr_un *sa)
 {
 	char v[4200], lk[1200], lg[1200];
 	char *av[4];
@@ -112,7 +112,7 @@ static int autostart(const char *dir, const struct sockaddr_un *sa)
 	posix_spawnattr_t at;
 	pid_t pid;
 
-	if (getenv("VCC_NO_AUTOSTART") || vccd_path(v, sizeof(v)))
+	if (getenv("VCC_NO_AUTOSTART") || shim_vccd_path_find(v, sizeof(v)))
 		return -1;
 	snprintf(lk, sizeof(lk), "%s/lock", dir);
 	snprintf(lg, sizeof(lg), "%s/vccd.log", dir);
@@ -154,8 +154,8 @@ int main(int argc, char **argv)
 {
 	const char *path = getenv("VCC_SOCK");
 	struct sockaddr_un sa = { .sun_family = AF_UNIX };
-	struct vroom_req_hdr *h = (struct vroom_req_hdr *)buf;
-	char *p = buf + sizeof(*h);
+	struct vccd_request_header *h = (struct vccd_request_header *)shim_request_buffer;
+	char *p = shim_request_buffer + sizeof(*h);
 	int fds[3] = { 0, 1, 2 };
 	char cbuf[CMSG_SPACE(sizeof(fds))];
 	struct iovec iov;
@@ -168,9 +168,9 @@ int main(int argc, char **argv)
 	int s, i;
 
 #ifdef VSH
-	g_argv = argv;
+	shim_argv = argv;
 	if (argc != 3 || (strcmp(argv[1], "-c") && strcmp(argv[1], "-ec")))
-		real_shell();
+		shim_real_shell_exec();
 #endif
 	char ddir[1024], dsock[1100];
 
@@ -183,11 +183,11 @@ int main(int argc, char **argv)
 #else
 		int mk = 1;
 #endif
-		if (vroom_default_sock(ddir, sizeof(ddir), dsock, sizeof(dsock), mk)) {
+		if (vccd_socket_default(ddir, sizeof(ddir), dsock, sizeof(dsock), mk)) {
 #ifdef VSH
-			real_shell();
+			shim_real_shell_exec();
 #endif
-			die("vcc: no private vccd directory (set VCC_SOCK or start vccd)\n");
+			shim_die("vcc: no private vccd directory (set VCC_SOCK or start vccd)\n");
 		}
 		path = dsock;
 	}
@@ -195,49 +195,49 @@ int main(int argc, char **argv)
 	s = socket(AF_UNIX, SOCK_STREAM, 0);
 	if (s < 0 || connect(s, (struct sockaddr *)&sa, sizeof(sa)) < 0) {
 #ifdef VSH
-		real_shell();
+		shim_real_shell_exec();
 #else
 		if (s >= 0)
 			close(s);
-		if (!deflt || (s = autostart(ddir, &sa)) < 0)
-			die("vcc: cannot connect to vccd (VCC_SOCK)\n");
+		if (!deflt || (s = shim_vccd_start(ddir, &sa)) < 0)
+			shim_die("vcc: cannot connect to vccd (VCC_SOCK)\n");
 #endif
 	}
 
-	if (!getcwd(p, VROOM_MAX_PAYLOAD))
-		die("vcc: getcwd failed\n");
+	if (!getcwd(p, VCCD_PROTOCOL_PAYLOAD_MAX))
+		shim_die("vcc: getcwd failed\n");
 	p += strlen(p) + 1;
 	for (i = 0; i < argc; i++)
-		p = put(p, argv[i]);
+		p = shim_string_append(p, argv[i]);
 	for (e = environ; *e; e++)
-		p = put(p, *e);
+		p = shim_string_append(p, *e);
 	{	/* the client's umask, for files the server creates (last: it wins) */
 		char um[16] = "VCC_UMASK=";
 		mode_t m = umask(0);
 
 		umask(m);
 		um[10] = (char)('0' + (m >> 6 & 7)), um[11] = (char)('0' + (m >> 3 & 7)), um[12] = (char)('0' + (m & 7));
-		p = put(p, um);
+		p = shim_string_append(p, um);
 	}
 
 	{	/* the vccd next to this binary gives the build id */
 		char v[4200];
 
-		if (!vccd_path(v, sizeof(v)))
-			h->build = vroom_build_id(v);
+		if (!shim_vccd_path_find(v, sizeof(v)))
+			h->build_id = vccd_build_id(v);
 	}
-	h->pgrp = (uint32_t)getpgrp();
-	h->magic = VROOM_MAGIC;
+	h->process_group = (uint32_t)getpgrp();
+	h->magic = VCCD_PROTOCOL_MAGIC;
 	h->argc = argc;
 	h->envc = e - environ + 1;
-	h->payload_len = p - (buf + sizeof(*h));
+	h->payload_len = p - (shim_request_buffer + sizeof(*h));
 
-	/* VROOM_STATUS_RETRY: the server restarts itself (memory) and has not run
+	/* VCCD_STATUS_RETRY: the server restarts itself (memory) and has not run
 	   the request; it listens again on the same socket in a moment */
 	for (int tries = 0;; tries++) {
 		memset(cbuf, 0, sizeof(cbuf));
-		iov.iov_base = buf;
-		iov.iov_len = p - buf;
+		iov.iov_base = shim_request_buffer;
+		iov.iov_len = p - shim_request_buffer;
 		m.msg_iov = &iov;
 		m.msg_iovlen = 1;
 		m.msg_control = cbuf;
@@ -263,12 +263,12 @@ int main(int argc, char **argv)
 		}
 #endif
 		do
-			n = sendmsg(s, &m, SHIM_NOSIG);
+			n = sendmsg(s, &m, SHIM_SEND_NOSIGNAL);
 		while (n < 0 && errno == EINTR);
 		if (n < 0 && errno != EPIPE && errno != ECONNRESET)
-			die("vcc: sendmsg failed\n");
+			shim_die("vcc: sendmsg failed\n");
 		for (off = n < 0 ? iov.iov_len : (size_t)n; off < iov.iov_len; off += n) {
-			n = send(s, buf + off, iov.iov_len - off, SHIM_NOSIG);
+			n = send(s, shim_request_buffer + off, iov.iov_len - off, SHIM_SEND_NOSIGNAL);
 			if (n < 0 && errno == EINTR) {
 				n = 0;
 				continue;
@@ -276,7 +276,7 @@ int main(int argc, char **argv)
 			if (n < 0 && (errno == EPIPE || errno == ECONNRESET))
 				break;	/* the status says whether to retry */
 			if (n <= 0)
-				die("vcc: write failed\n");
+				shim_die("vcc: write failed\n");
 		}
 
 		for (got = 0; got < sizeof(status); got += n) {
@@ -286,9 +286,9 @@ int main(int argc, char **argv)
 				continue;
 			}
 			if (n <= 0)
-				die("vcc: server closed the connection\n");
+				shim_die("vcc: server closed the connection\n");
 		}
-		if (status != (int32_t)VROOM_STATUS_RETRY || tries == 20)
+		if (status != (int32_t)VCCD_STATUS_RETRY || tries == 20)
 			break;
 		close(s);
 		for (int t = 0; t < 500; t++) {
@@ -301,14 +301,14 @@ int main(int argc, char **argv)
 			usleep(10000);
 		}
 		if (s < 0)
-			die("vcc: vccd did not come back after restarting\n");
+			shim_die("vcc: vccd did not come back after restarting\n");
 	}
-	if (status == (int32_t)VROOM_STATUS_MISMATCH)
-		die("vcc: vccd runs another build of vcc than this shim; restart it\n");
+	if (status == (int32_t)VCCD_STATUS_MISMATCH)
+		shim_die("vcc: vccd runs another build of vcc than this shim; restart it\n");
 #ifdef VSH
-	if (status == (int32_t)VROOM_STATUS_DECLINE) {
+	if (status == (int32_t)VCCD_STATUS_DECLINE) {
 		close(s);
-		real_shell();
+		shim_real_shell_exec();
 	}
 #endif
 	return status;

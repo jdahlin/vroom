@@ -7,8 +7,8 @@
  * slots for locals, labels and the loop stack, the call sequence, switch
  * strategy.  What an operation becomes is the target's: every call into it
  * goes through LO(name), x64_name (arch/x64/codegen/) in the first
- * instantiation and vw_name, the VIR builder, in the second, which
- * codegen/vir/walk.c compiles with WK_PREFIX and LO_PREFIX defined.
+ * instantiation and virbuild_function_name_get, the VIR builder, in the second, which
+ * codegen/vir/walker-instance.c compiles with WK_PREFIX and LO_PREFIX defined.
  *
  * Values are the emitter's val (constant, address, physical register);
  * lvalues its lval (frame slot, symbol, register base).  Frame slots are

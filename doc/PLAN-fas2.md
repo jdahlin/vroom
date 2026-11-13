@@ -424,6 +424,61 @@ and never in the build. A TU test (`bench/vcc-diff.py`) runs over all kernel fil
 - **Time:** self-compilation 1.5 s (one thread, sequential). Stage 2 `vpp` is ~2.6× slower than the clang `-O3` build (kernel batch `-j 6`: 4.1 → 10.6 s wall) — vcc has no optimizer.
 - **Remaining:** HFA arguments (fatal error), `long double` only as double; optimization in the emitter if stage 2 is to replace the clang build.
 
+### Status 2.11 (2026-11-13) — native Linux x86-64 bootstrap
+
+`make -C src -j6 self-check` builds the normal tools in parallel at each
+stage, using vpp for every C object and the system compiler driver for linking.
+Stage 2 and stage 3 produced 46 byte-identical objects and identical vpp
+executables. The stage 2 compiler passed the native x86 suite (319/319, eight
+reference skips), the x86 VIR execution harness and the 20 allocator fixtures.
+
+Clean output directories, six make jobs, ccache disabled, warm filesystem,
+one wall-time sample per configuration on x86-64 Linux with clang 23:
+
+| Build of the tool suite | Seconds |
+| --- | ---: |
+| clang, default optimized build | 10.86 |
+| clang, VCC_OPT=-O0 | 1.47 |
+| clang-built vpp compiling stage 2 | 0.50 |
+| self-built vpp compiling stage 3, including object comparison | 1.06 |
+
+Before reusing the regular x86 objects for lextest and caching the clang
+resource path, the corresponding optimized clang, stage 2 and stage 3 times
+were 10.91, 0.79 and 1.24 seconds (57 objects). These timings cover compilation
+and linking from existing compilers. That bootstrap used the scalar lexer and software CRC32C.
+Native arm64 and Darwin still need verification with the shared build rules.
+
+**x86 host SIMD and CRC32C (2026-11-13).** Both builds now assemble the same
+AVX2 search routines and AVX2/AVX-512 VBMI byte classifiers, with byte-identical
+machine code. The self-built binary selected AVX-512 and SSE4.2 CRC32C on a
+Ryzen 7 9700X. Stage 2 and stage 3 matched across all 47 objects and vpp.
+Dispatch parity passed under QEMU on Conroe, Nehalem and Haswell with and without
+XSAVE. The x86 tiny-kernel preprocessor comparison passed all 494 C jobs. The
+same seven assembly jobs failed before and after this change (four i386 jobs
+and three SHA-256 assembly files).
+
+SQLite 3.50.4 amalgamation (9,282,866 bytes, SHA256
+`e3f5d6901e7492af4a1fc8c4d745cae84c264942524c3fbfc02b82a5ca8818c8`).
+Median milliseconds across seven warm-cache runs, reversing order each round
+after one warmup, pinned to CPU 7 with `VCC_THREADS=1`. Lexing uses
+`lextest core LIST 3` with interning enabled (best thread CPU time of three
+passes per invocation). Compilation times a fresh vpp process from launch
+through object write, with `--target=x86_64-linux-gnu -O2 -c`, clang 23
+resource headers and the host glibc headers.
+
+| Executable and selected host paths | Lexer (ms) | Compile (ms) |
+| --- | ---: | ---: |
+| Self-built, scalar and software CRC | 82.1 | 536.5 |
+| Self-built, AVX-512 and software CRC | 39.4 | 497.5 |
+| Self-built, AVX2 and hardware CRC | 15.1 | 464.8 |
+| Self-built, AVX-512 and hardware CRC | 14.4 | 465.6 |
+| Clang 23 -O3-built, AVX-512 and hardware CRC | 6.4 | 238.3 |
+
+All configurations produced token hash `fc9fb9fabfbd44b5` and object SHA256
+`7766fa6e549b19c987d563f3c4f8f1217f6b6f1115659cdc646df2e1ccd97f54`.
+The pre-change clang-built binary measured 6.2 and 235.7 ms in this series.
+The self-built compiler still takes 1.95 times as long on the full compile.
+
 ### Status 2.12 (2026-11-10): kernel build without clang, vroomd and lld
 Ported from the branch `claude/parallel-compiler-optimization-2bb32f` (2026-11-08) to main's layout.
 - **vld, shared objects (vDSO):** `PHDRS` (FILEHDR/PHDRS), `VERSION` script (version-local → STB_LOCAL), `.dynsym`/`.dynstr`/`.hash`/`.gnu.hash`/`.gnu.version{,_d}`/`.dynamic` in lld's order, `=fill`, `-n`; only for `-shared` with a script. The vDSO byte-identical with ld.lld 23 (except the `$d` locals, known). Without `PHDRS`, `SIZEOF_HEADERS` is 64.
