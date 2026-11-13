@@ -122,7 +122,7 @@ where the two differ.
 | Rename depth | Files, a module prefix on every file-scope function, long-lived state (struct fields, globals).  Short locals stay |
 | Open branches | Ignored: no aliases, no windows |
 | Pilot | The shared library (`lib/` to `common/`) |
-| Order after it | Bottom-up by layer: lex and pp, diagnostics, C front end, shared codegen, arm64, x86-64, VIR, assembler and object, linker, driver and server |
+| Order after it | Bottom-up by layer: lex and pp, diagnostics, C front end, shared codegen, arm64, x86-64, VIR, assembler and object, linker, driver and server.  Modules that do not include each other run in parallel once `common/` has landed (for example linker, assembler, driver and server next to the front end) |
 | arm64 walker | The safe moves (target-independent code out of `arch/a64`, verbatim helpers shared), then a pilot of one statement family on the shared walker with -O0 speed measured |
 | Passes | One pass per file and a named pass table (time, disable, verify by name), identical output.  Fusing walks comes later, from the per-pass timings |
 | Linker | One linker core with output formats, not three linkers.  (Not the recommendation; it fits the one-binary requirement) |
@@ -132,6 +132,13 @@ where the two differ.
 | Environment switches | Product knobs become options that travel with the job; test aids go in one registry read from the job's environment; finished experiments are deleted |
 | Ratchet | `bench/quality.py --check` gates a module once it has had its pass; other modules are reported only |
 | Bugs from the reviews | Fixed now, each with a test, in their own PR |
+| Done, for a module | One job per file (exceptions allowed where they make sense, with the reason in the file's comment); every name follows STYLE.md; an opening comment on every file.  Hitting a number is not required |
+| Diagnostics | Its own module below pp, behind a small source-map interface; assembler, linker and driver report through it and keep their lld and llvm-mc wording |
+| Options | One option table per tool, read by the parser, the capability list and `--help`; an unknown option is an error, as clang's.  This changes behaviour for options ignored today |
+| Target tables | One op table per CPU (operands read and written, flags, branch kind, text, encoding) that passes, printer and encoder read; done in each back end's pass |
+| Names | `module_noun_verb` in full words (`pp_macro_expand`, `ld_archive_add_member`); abbreviations only from a short list in STYLE.md |
+| Who does it | The top model writes a module's work order (file map, rename table, comment drafts) from its review; a cheaper model and scripts carry it out; the top model checks the result |
+| Delivery | Johan reads results, not previews.  Each pass must land safely on tooling alone (identical output, gates, premerge) and modules must be workable in parallel: a work order names the files it owns, and two orders never share a file |
 
 Open, each waiting for a measurement or a closer look:
 
