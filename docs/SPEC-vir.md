@@ -970,6 +970,10 @@ the next use after this one), then in order:
    register, and lowering copies; and if every register holds an operand, the
    first operand is evicted and the result is computed in place.
 
+For a conditional terminator or `switch`, step 4 runs before saving the
+outgoing register state. Its operands remain readable until the machine
+instruction executes; a live clobbered value must survive on every edge.
+
 **Eviction** takes the value with the largest next-use distance among the
 registers of the class that the instruction does not use. The distance is
 `nu[v] - p`, except: when `nu[v]` is 0 or beyond the innermost loop around `p`

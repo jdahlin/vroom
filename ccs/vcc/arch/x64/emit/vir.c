@@ -79,9 +79,9 @@ static void vx_fixed(const vir_fn *f, uint32_t v, vir_fix *x, void *ctx)
 		int stack;
 		x->res = vx_arg(f, f->sig, i->a, &stack);
 	} else if(i->op==VO_SWITCH && r10) {
-		/* Dense dispatch destroys its selector. Only a sole-use selector
-		 * qualifies; fixing it here evacuates every other live r10 value. */
-		x->nopnd=1;x->opnd[0]=R10;
+		/* The selector must survive range comparisons; r10 is a temporary
+		 * only for the dispatch itself, not reserved throughout the function. */
+		x->eclob[0]=UINT64_C(1)<<R10;
 	} else if (i->op == VO_MEMCPY || i->op == VO_MEMSET) {
 		x->nopnd = 3;
 		if(vx_smallmem(f,i)) {x->mem=i->op==VO_MEMSET?6:4;return;}
@@ -914,22 +914,6 @@ static bool vx_twice(ecx *e, const vir_ins *callee)
 		EM_IDENT_IS(c->syms[sym].name, "sigsetjmp") || EM_IDENT_IS(c->syms[sym].name, "__sigsetjmp");
 }
 
-/* A dense singleton table can consume its sole-use selector in r10. Sparse
- * ranges still need r10 as an independent temporary, so retain that reserve. */
-static bool vx_r10dispatch(const vir_fn *f,const vir_ins *i)
-{
-	uint32_t n=f->extra[i->c];bool wide=f->ins[i->a].ty==VT_I64;
-	uint32_t st=wide?5:3;const uint32_t *p=&f->extra[i->c+1];
-	if(n<6)return false;
-	uint64_t lo=wide?(uint64_t)p[1]<<32|p[0]:p[0],hi=lo;
-	for(uint32_t k=0;k<n;k++) {
-		uint64_t a=wide?(uint64_t)p[st*k+1]<<32|p[st*k]:p[st*k];
-		hi=wide?(uint64_t)p[st*k+3]<<32|p[st*k+2]:p[st*k+1];
-		if(a!=hi)return false;
-	}
-	return hi-lo<4096 && hi-lo+1<=4*(uint64_t)n;
-}
-
 VPRIV bool vw_x64(ecx *e, uint32_t sym, const char **why)
 {
 	vwst *V = e->vw;
@@ -973,8 +957,6 @@ VPRIV bool vw_x64(ecx *e, uint32_t sym, const char **why)
 	if (framesz > INT32_MAX / 2) return false;
 	L.uses=V->xuses=vx_grow(V->xuses,&V->cxuses,f->nins+1,1);
 	vir_uses(f,L.uses);
-	for(uint32_t i=f->nconst;i<f->nins;i++)if(f->ins[i].op==VO_SWITCH &&
-	   (L.uses[f->ins[i].a]!=1 || !vx_r10dispatch(f,&f->ins[i])))r10=false;
 	if(r10)regs.alloc[0]|=1u<<R10;
 	if(!vir_loops_build(f,&V->lp)){*why="VIR x86-64: loop analysis failed";return false;}
 	bool allocated=vir_alloc(f,&V->lp,&regs,NULL,&V->ao),scratch=false;

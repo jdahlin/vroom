@@ -240,6 +240,18 @@ ekvivalenstestning återstår. Genererade program använder inga externa anrop.
 ### V4 x86-64 mot clang -O2 (2026-11-12), mål högst 5 % långsammare
 
 
+2026-11-13, allokering vid switch: gemensamma allokatorn flyttar nu levande
+värden ur sena/tidiga clobbers även före villkorliga terminatorers utgående
+tillstånd. Tidigare hoppades fasen över. x86 kan därför använda r10 mellan
+alla switchar och ange det som tidig clobber vid dispatch. Två femprovserier
+av speedtest1 storlek 100: 1276,10 → 1268,37 ms och 1273,99 → 1268,01 ms;
+senaste då 1,141× clang. Instruktioner/clang 1,364× → 1,358×. Ett syntetiskt
+switch-/loopprov fallerar med den gamla allokatorn och passerar med fixen,
+även över 48 registerkonfigurationer per funktion och med linjär fallback.
+Allokatorprov 20/20 och 30 slumpgenererade enheter gröna.
+
+
+
 **2026-11-13: ARM-jämförelse och omprövade x86-försök.** Det aktuella
 användarmålet är högst **1,05× clang -O2** för speedtest1; det är fortfarande
 öppet. Samma SQLite 3.50.4-källa, `-O2`, `SQLITE_THREADSAFE=0` och

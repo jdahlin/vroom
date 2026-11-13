@@ -1033,3 +1033,13 @@ instruktioner 1,382× → 1,364×. Målet högst 1,05× är fortfarande öppet.
 VIR 130/130, egna x86 307/307, GCC/TCC gröna, samma fem kända inlinefel;
 TSVC 151/151 och 82 vektoriseringar. Fokusprov kör även ARM:s befintliga
 rotations-/joinfall, ASan/UBSan och filvist bygge. Detaljer i PLAN-vir.md.
+
+
+### 2026-11-13: r10 mellan switchar
+
+Gemensamma VIR-allokatorn bevarar nu levande clobber-register även vid
+villkorliga terminatorer. x86 anger switchens r10 som tidig clobber och
+behöver inte reservera det genom hela funktioner med gles/multianvänd switch.
+Två korta femprovserier gav cirka 0,5–0,6 % lägre CPU-tid för SQLite main;
+1,141× clang i den andra serien. Syntetiskt prov reproducerar det gamla
+allokatorfelet och sveper 48 registerkonfigurationer. Se V4 i PLAN-vir.md.
