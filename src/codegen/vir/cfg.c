@@ -1,6 +1,6 @@
 /* The pre-IR's control flow graph: successors, block order, predecessors, dominators, edge splitting. */
-#define WK_PREFIX vw_
-#define LO_PREFIX vw_
+#define WK_PREFIX virbuild_
+#define LO_PREFIX virbuild_
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
@@ -10,256 +10,256 @@
 
 
 /* the successors of pre-block b, in operand order, through its terminator (n words at *out) */
-VPRIV uint32_t vw_nsucc(vwst *V, uint32_t b)
+VPRIV uint32_t virbuild_block_successor_count(virbuild_context *V, uint32_t b)
 {
-	uint32_t t = V->b[b].term;
+	uint32_t t = V->blocks[b].terminator;
 
 	if (!t)
 		return 0;
-	switch (V->p[t].in.op) {
+	switch (V->insns[t].insn.op) {
 	case VIR_OP_BR: return 1;
 	case VIR_OP_BRIF: return 2;
-	case VIR_OP_SWITCH: return 1 + V->x[V->p[t].in.c];
+	case VIR_OP_SWITCH: return 1 + V->extra[V->insns[t].insn.c];
 	default: return 0;
 	}
 }
 
-VPRIV uint32_t *vw_succp(vwst *V, uint32_t b, uint32_t k)
+VPRIV uint32_t *virbuild_block_successor_pointer(virbuild_context *V, uint32_t b, uint32_t k)
 {
-	vir_insn *in = &V->p[V->b[b].term].in;
+	vir_insn *in = &V->insns[V->blocks[b].terminator].insn;
 
 	switch (in->op) {
 	case VIR_OP_BR: return &in->a;
 	case VIR_OP_BRIF: return k ? &in->c : &in->b;
 	default: {
-		uint32_t st = V->p[in->a].in.type == VIR_TYPE_I64 ? 5 : 3;
+		uint32_t st = V->insns[in->a].insn.type == VIR_TYPE_I64 ? 5 : 3;
 
-		return k ? &V->x[in->c + 1 + (k - 1) * st + st - 1] : &in->b;
+		return k ? &V->extra[in->c + 1 + (k - 1) * st + st - 1] : &in->b;
 	}
 	}
 }
 
 /* a block with nothing in it that only jumps on: its predecessors jump on directly */
-VPRIV void vw_thread(ecx *e)
+VPRIV void virbuild_empty_blocks_thread(ecx *e)
 {
-	vwst *V = e->vw;
+	virbuild_context *V = e->vw;
 
-	for (uint32_t b = 0; b < V->nb; b++) {
-		uint32_t n = vw_nsucc(V, b);
+	for (uint32_t b = 0; b < V->block_count; b++) {
+		uint32_t n = virbuild_block_successor_count(V, b);
 
 		for (uint32_t k = 0; k < n; k++) {
-			uint32_t *t = vw_succp(V, b, k);
+			uint32_t *t = virbuild_block_successor_pointer(V, b, k);
 
 			for (int hop = 0; hop < 64; hop++) {
-				vwb *q = &V->b[*t];
+				virbuild_preir_block *q = &V->blocks[*t];
 
-				if (*t == 0 || q->head || q->phead || q->def || !q->term || V->p[q->term].in.op != VIR_OP_BR || V->p[q->term].in.a == *t)
+				if (*t == 0 || q->first_insn || q->first_parameter || q->has_definition || !q->terminator || V->insns[q->terminator].insn.op != VIR_OP_BR || V->insns[q->terminator].insn.a == *t)
 					break;
-				*t = V->p[q->term].in.a;
+				*t = V->insns[q->terminator].insn.a;
 			}
 		}
 	}
 }
 
 /* reachable blocks in reverse postorder (V->order) */
-VPRIV void vw_rpo(ecx *e)
+VPRIV void virbuild_block_order_compute(ecx *e)
 {
-	vwst *V = e->vw;
+	virbuild_context *V = e->vw;
 	uint32_t n = 0, sp = 0;
 	uint32_t *stk, *it;
 
-	GROW(V->bmap, 0, V->cbmap, 2 * V->nb + 2);
-	stk = V->bmap, it = V->bmap + V->nb + 1;
-	GROW(V->order, 0, V->corder, V->nb + 1);
-	for (uint32_t b = 0; b < V->nb; b++)
-		V->b[b].reach = 0;
-	V->b[0].reach = 1;
+	VIRBUILD_ARRAY_GROW(V->block_map, 0, V->block_map_capacity, 2 * V->block_count + 2);
+	stk = V->block_map, it = V->block_map + V->block_count + 1;
+	VIRBUILD_ARRAY_GROW(V->block_order, 0, V->block_order_capacity, V->block_count + 1);
+	for (uint32_t b = 0; b < V->block_count; b++)
+		V->blocks[b].is_reachable = 0;
+	V->blocks[0].is_reachable = 1;
 	stk[sp] = 0, it[sp++] = 0;
 	while (sp) {
 		uint32_t b = stk[sp - 1], k = it[sp - 1];
 
-		if (k < vw_nsucc(V, b)) {
-			uint32_t t = *vw_succp(V, b, k);
+		if (k < virbuild_block_successor_count(V, b)) {
+			uint32_t t = *virbuild_block_successor_pointer(V, b, k);
 
 			it[sp - 1]++;
-			if (!V->b[t].reach) {
-				V->b[t].reach = 1;
+			if (!V->blocks[t].is_reachable) {
+				V->blocks[t].is_reachable = 1;
 				stk[sp] = t, it[sp++] = 0;
 			}
 			continue;
 		}
-		V->order[n++] = b;	/* postorder */
+		V->block_order[n++] = b;	/* postorder */
 		sp--;
 	}
 	for (uint32_t i = 0; i < n / 2; i++) {
-		uint32_t t = V->order[i];
+		uint32_t t = V->block_order[i];
 
-		V->order[i] = V->order[n - 1 - i], V->order[n - 1 - i] = t;
+		V->block_order[i] = V->block_order[n - 1 - i], V->block_order[n - 1 - i] = t;
 	}
-	V->norder = n;
+	V->block_order_count = n;
 }
 
 /* the distinct reachable predecessors of every block */
-VPRIV void vw_preds(ecx *e)
+VPRIV void virbuild_block_predecessors_compute(ecx *e)
 {
-	vwst *V = e->vw;
+	virbuild_context *V = e->vw;
 
-	for (uint32_t b = 0; b < V->nb; b++)
-		V->b[b].npred = 0;
-	V->npr = 0;
+	for (uint32_t b = 0; b < V->block_count; b++)
+		V->blocks[b].predecessor_count = 0;
+	V->predecessor_count = 0;
 	/* count (with repeats), then fill and drop repeats */
-	for (uint32_t i = 0; i < V->norder; i++) {
-		uint32_t b = V->order[i], n = vw_nsucc(V, b);
+	for (uint32_t i = 0; i < V->block_order_count; i++) {
+		uint32_t b = V->block_order[i], n = virbuild_block_successor_count(V, b);
 
 		for (uint32_t k = 0; k < n; k++)
-			V->b[*vw_succp(V, b, k)].npred++;
+			V->blocks[*virbuild_block_successor_pointer(V, b, k)].predecessor_count++;
 	}
-	for (uint32_t b = 0; b < V->nb; b++) {
-		V->b[b].pred = V->npr;
-		V->npr += V->b[b].npred;
-		V->b[b].npred = 0;
+	for (uint32_t b = 0; b < V->block_count; b++) {
+		V->blocks[b].predecessor_first = V->predecessor_count;
+		V->predecessor_count += V->blocks[b].predecessor_count;
+		V->blocks[b].predecessor_count = 0;
 	}
-	GROW(V->pr, 0, V->cpr, V->npr + 1);
-	for (uint32_t i = 0; i < V->norder; i++) {
-		uint32_t b = V->order[i], n = vw_nsucc(V, b);
+	VIRBUILD_ARRAY_GROW(V->predecessors, 0, V->predecessor_capacity, V->predecessor_count + 1);
+	for (uint32_t i = 0; i < V->block_order_count; i++) {
+		uint32_t b = V->block_order[i], n = virbuild_block_successor_count(V, b);
 
 		for (uint32_t k = 0; k < n; k++) {
-			vwb *t = &V->b[*vw_succp(V, b, k)];
+			virbuild_preir_block *t = &V->blocks[*virbuild_block_successor_pointer(V, b, k)];
 			bool dup = false;
 
-			for (uint32_t j = 0; j < t->npred; j++)
-				dup |= V->pr[t->pred + j] == b;
+			for (uint32_t j = 0; j < t->predecessor_count; j++)
+				dup |= V->predecessors[t->predecessor_first + j] == b;
 			if (!dup)
-				V->pr[t->pred + t->npred++] = b;
+				V->predecessors[t->predecessor_first + t->predecessor_count++] = b;
 		}
 	}
 }
 
 /* immediate dominators (Cooper, Harvey, Kennedy) and the tree's children, in reverse postorder */
-VPRIV void vw_doms(ecx *e, vwsimp *S)
+VPRIV void virbuild_block_dominators_compute(ecx *e, virbuild_simplify_state *S)
 {
-	vwst *V = e->vw;
-	uint32_t n = V->norder, *ri = malloc(((size_t)V->nb + 1) * sizeof *ri);
+	virbuild_context *V = e->vw;
+	uint32_t n = V->block_order_count, *ri = malloc(((size_t)V->block_count + 1) * sizeof *ri);
 	bool changed = true;
 
-	S->idom = malloc(((size_t)V->nb + 1) * sizeof *S->idom);
-	S->dkid = malloc(((size_t)V->nb + 1) * sizeof *S->dkid);
-	S->dnext = malloc(((size_t)V->nb + 1) * sizeof *S->dnext);
-	if (!ri || !S->idom || !S->dkid || !S->dnext)
-		vw_fail(e, VIRFAIL(out_of_memory));
-	for (uint32_t b = 0; b < V->nb; b++)
-		ri[b] = VW_NOBLK, S->idom[b] = VW_NOBLK, S->dkid[b] = VW_NOBLK, S->dnext[b] = VW_NOBLK;
+	S->immediate_dominators = malloc(((size_t)V->block_count + 1) * sizeof *S->immediate_dominators);
+	S->dominator_first_child = malloc(((size_t)V->block_count + 1) * sizeof *S->dominator_first_child);
+	S->dominator_next_sibling = malloc(((size_t)V->block_count + 1) * sizeof *S->dominator_next_sibling);
+	if (!ri || !S->immediate_dominators || !S->dominator_first_child || !S->dominator_next_sibling)
+		virbuild_fail(e, VIRBUILD_FAILURE(out_of_memory));
+	for (uint32_t b = 0; b < V->block_count; b++)
+		ri[b] = VIRBUILD_BLOCK_NONE, S->immediate_dominators[b] = VIRBUILD_BLOCK_NONE, S->dominator_first_child[b] = VIRBUILD_BLOCK_NONE, S->dominator_next_sibling[b] = VIRBUILD_BLOCK_NONE;
 	for (uint32_t i = 0; i < n; i++)
-		ri[V->order[i]] = i;
-	S->idom[V->order[0]] = V->order[0];
+		ri[V->block_order[i]] = i;
+	S->immediate_dominators[V->block_order[0]] = V->block_order[0];
 	while (changed) {
 		changed = false;
 		for (uint32_t i = 1; i < n; i++) {
-			uint32_t b = V->order[i], d = VW_NOBLK;
+			uint32_t b = V->block_order[i], d = VIRBUILD_BLOCK_NONE;
 
-			for (uint32_t j = 0; j < V->b[b].npred; j++) {
-				uint32_t p = V->pr[V->b[b].pred + j];
+			for (uint32_t j = 0; j < V->blocks[b].predecessor_count; j++) {
+				uint32_t p = V->predecessors[V->blocks[b].predecessor_first + j];
 
-				if (ri[p] == VW_NOBLK || S->idom[p] == VW_NOBLK)
+				if (ri[p] == VIRBUILD_BLOCK_NONE || S->immediate_dominators[p] == VIRBUILD_BLOCK_NONE)
 					continue;
-				if (d == VW_NOBLK) {
+				if (d == VIRBUILD_BLOCK_NONE) {
 					d = p;
 					continue;
 				}
 				while (p != d) {
 					while (ri[p] > ri[d])
-						p = S->idom[p];
+						p = S->immediate_dominators[p];
 					while (ri[d] > ri[p])
-						d = S->idom[d];
+						d = S->immediate_dominators[d];
 				}
 			}
-			if (d != S->idom[b]) {
-				S->idom[b] = d;
+			if (d != S->immediate_dominators[b]) {
+				S->immediate_dominators[b] = d;
 				changed = true;
 			}
 		}
 	}
 	for (uint32_t i = n; i-- > 1;) {	/* (pushed in reverse: kept in order) */
-		uint32_t b = V->order[i], d = S->idom[b];
+		uint32_t b = V->block_order[i], d = S->immediate_dominators[b];
 
-		S->dnext[b] = S->dkid[d];
-		S->dkid[d] = b;
+		S->dominator_next_sibling[b] = S->dominator_first_child[d];
+		S->dominator_first_child[d] = b;
 	}
 	free(ri);
 }
 
-VPRIV uint32_t vw_predix(const vwst *V, uint32_t j, uint32_t b)
+VPRIV uint32_t virbuild_block_predecessor_index(const virbuild_context *V, uint32_t j, uint32_t b)
 {
-	for (uint32_t i = 0; i < V->b[j].npred; i++)
-		if (V->pr[V->b[j].pred + i] == b)
+	for (uint32_t i = 0; i < V->blocks[j].predecessor_count; i++)
+		if (V->predecessors[V->blocks[j].predecessor_first + i] == b)
 			return i;
-	return VW_NOBLK;
+	return VIRBUILD_BLOCK_NONE;
 }
 
 /* the edge b -> t needs a block of its own: t has parameters and b does not end in br */
-VPRIV void vw_split(ecx *e)
+VPRIV void virbuild_critical_edges_split(ecx *e)
 {
-	vwst *V = e->vw;
-	uint32_t n0 = V->norder, nb0 = V->nb;	/* blocks from nb0 on are this pass's edge blocks */
+	virbuild_context *V = e->vw;
+	uint32_t n0 = V->block_order_count, nb0 = V->block_count;	/* blocks from nb0 on are this pass's edge blocks */
 
 	for (uint32_t i = 0; i < n0; i++) {
-		uint32_t b = V->order[i], ns = vw_nsucc(V, b);
+		uint32_t b = V->block_order[i], ns = virbuild_block_successor_count(V, b);
 
-		if (V->p[V->b[b].term].in.op == VIR_OP_BR)
+		if (V->insns[V->blocks[b].terminator].insn.op == VIR_OP_BR)
 			continue;
 		for (uint32_t k = 0; k < ns; k++) {
-			uint32_t t = *vw_succp(V, b, k), live = 0, eb = VW_NOBLK;
+			uint32_t t = *virbuild_block_successor_pointer(V, b, k), live = 0, eb = VIRBUILD_BLOCK_NONE;
 
-			for (uint32_t p = V->b[t].phead; p; p = V->p[p].next)
-				live += V->fwd[p] == p;
+			for (uint32_t p = V->blocks[t].first_parameter; p; p = V->insns[p].next)
+				live += V->forward[p] == p;
 			if (!live)
 				continue;
 			/* one edge block per (b, t): t's predecessor b becomes it */
-			for (uint32_t j = 0; j < V->b[t].npred; j++)
-				if (V->pr[V->b[t].pred + j] == b) {
-					eb = vw_newblk(e);
-					V->b[eb].term = vw_put(e, VIR_OP_BR, VIR_TYPE_VOID, 0, t, 0, 0, eb);
-					V->b[eb].reach = 1;
-					GROW(V->pr, V->npr, V->cpr, 1);
-					V->b[eb].pred = V->npr;
-					V->pr[V->npr++] = b;
-					V->b[eb].npred = 1;
-					V->pr[V->b[t].pred + j] = eb;
-					GROW(V->order, V->norder, V->corder, 1);
-					V->order[V->norder++] = eb;
+			for (uint32_t j = 0; j < V->blocks[t].predecessor_count; j++)
+				if (V->predecessors[V->blocks[t].predecessor_first + j] == b) {
+					eb = virbuild_block_new(e);
+					V->blocks[eb].terminator = virbuild_preir_insn_add(e, VIR_OP_BR, VIR_TYPE_VOID, 0, t, 0, 0, eb);
+					V->blocks[eb].is_reachable = 1;
+					VIRBUILD_ARRAY_GROW(V->predecessors, V->predecessor_count, V->predecessor_capacity, 1);
+					V->blocks[eb].predecessor_first = V->predecessor_count;
+					V->predecessors[V->predecessor_count++] = b;
+					V->blocks[eb].predecessor_count = 1;
+					V->predecessors[V->blocks[t].predecessor_first + j] = eb;
+					VIRBUILD_ARRAY_GROW(V->block_order, V->block_order_count, V->block_order_capacity, 1);
+					V->block_order[V->block_order_count++] = eb;
 					break;
 				}
-			if (eb == VW_NOBLK) {	/* already split: the edge block whose br goes to t
+			if (eb == VIRBUILD_BLOCK_NONE) {	/* already split: the edge block whose br goes to t
 						 * (not a block of the function that only branches there:
 						 * switch cases 8, 9 -> t and 12 -> { op = 10; br t }) */
-				for (uint32_t j = 0; j < V->b[t].npred; j++) {
-					uint32_t q = V->pr[V->b[t].pred + j];
+				for (uint32_t j = 0; j < V->blocks[t].predecessor_count; j++) {
+					uint32_t q = V->predecessors[V->blocks[t].predecessor_first + j];
 
-					if (q >= nb0 && V->b[q].npred == 1 && V->pr[V->b[q].pred] == b && !V->b[q].head &&
-					    V->p[V->b[q].term].in.op == VIR_OP_BR && V->p[V->b[q].term].in.a == t)
+					if (q >= nb0 && V->blocks[q].predecessor_count == 1 && V->predecessors[V->blocks[q].predecessor_first] == b && !V->blocks[q].first_insn &&
+					    V->insns[V->blocks[q].terminator].insn.op == VIR_OP_BR && V->insns[V->blocks[q].terminator].insn.a == t)
 						eb = q;
 				}
 			}
-			*vw_succp(V, b, k) = eb;
+			*virbuild_block_successor_pointer(V, b, k) = eb;
 		}
 	}
-	if (V->norder == n0)
+	if (V->block_order_count == n0)
 		return;
 	/* the edge blocks right after the block they leave (layout: a fall-through, not a jump back) */
 	{
-		uint32_t *o = malloc((size_t)V->norder * sizeof *o), m = 0;
+		uint32_t *o = malloc((size_t)V->block_order_count * sizeof *o), m = 0;
 
 		if (!o)
-			vw_fail(e, VIRFAIL(out_of_memory));
+			virbuild_fail(e, VIRBUILD_FAILURE(out_of_memory));
 		for (uint32_t i = 0; i < n0; i++) {
-			uint32_t b = V->order[i];
+			uint32_t b = V->block_order[i];
 
 			o[m++] = b;
-			for (uint32_t j = n0; j < V->norder; j++)
-				if (V->pr[V->b[V->order[j]].pred] == b)
-					o[m++] = V->order[j];
+			for (uint32_t j = n0; j < V->block_order_count; j++)
+				if (V->predecessors[V->blocks[V->block_order[j]].predecessor_first] == b)
+					o[m++] = V->block_order[j];
 		}
-		memcpy(V->order, o, (size_t)m * sizeof *o);
+		memcpy(V->block_order, o, (size_t)m * sizeof *o);
 		free(o);
 	}
 }

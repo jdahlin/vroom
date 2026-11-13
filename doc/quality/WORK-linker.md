@@ -143,18 +143,25 @@ mode of `rename-table.py`): 521 whole-word rows (functions, types,
 enumerators, macros, per-link and process-wide globals) in `src/ld/*.c`
 without `wasmld.c`, `src/arch/*/ld/*.inc` and the Mach-O linker, plus the
 file moves (`elf-definitions.h`, `region.c`, `macho-linker.c`, the five arch
-fragments).  Not done: the 290 field rows (`field,deferred`, they wait for the
-front-end field-use tool) and the link context itself, so the file-scope
-per-link variables keep their names and the part files still do not compile
-alone.  Names the owner may revisit: `macho-linker.c` and `macho_link`,
+fragments).  The 290 field rows followed with `rename-table.py --fields`
+(front-end field uses; the rows name each record by its new type, since the
+short names `Obj`, `G`, `OSec` were shared by ELF, Mach-O and objcopy records;
+objcopy's options struct got the tag `objcopy_option_set` so that it has a
+name): the four objects (`ld.o`, `ldlib.o`, `objcopy.o`, `macho-linker.o`) are
+byte-identical.  Names the owner may revisit: `macho-linker.c` and `macho_link`,
 `elf-definitions.h` with `elf_*` types, `region.c`.
 
 The link context (the other half): the design is decided and its first step
 is applied (`link-context.md`, "Design (decided)": the diagnostics and layout
 groups are fields of `struct ld_context`, #183); step 2 of the context moves
 the output side (relocation scan, `ld -r`, output, symbol table, dynamic
-sections); the input side and the parameter series follow (`link-context.md`
-section 5).
+sections); step 3 the input side (script, symbols, inputs, options), which
+deletes `ld_state_reset` and moves the data model into `ld-internal.h`.  No
+per-link state is left at file scope; step 4 passes the context as a
+parameter to every function that uses it and `ld_main` creates one per link
+(`link-context.md` section 5).  Left of step 2: prototypes for the part files
+(so that each compiles alone), and the refreshed opening comments and `ld.c`
+header.
 
 ### 3. The shared layer
 

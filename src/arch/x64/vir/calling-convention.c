@@ -3,7 +3,7 @@
 #include "lowering-internal.h"
 
 /* Only one-piece scalar ABI groups reach this target. */
-VPRIV uint8_t vx_arg(const vir_function *f, uint32_t sig, uint32_t g, int *stack)
+VPRIV uint8_t x64_vir_argument_register(const vir_function *f, uint32_t sig, uint32_t g, int *stack)
 {
 	uint32_t ni = 0, nf = 0;
 	int off = 16;
@@ -17,23 +17,23 @@ VPRIV uint8_t vx_arg(const vir_function *f, uint32_t sig, uint32_t g, int *stack
 	return r;
 }
 
-VPRIV void vx_fixed(const vir_function *f, uint32_t v, vir_register_constraint *x, void *ctx)
+VPRIV void x64_vir_fixed_registers_get(const vir_function *f, uint32_t v, vir_register_constraint *x, void *ctx)
 {
 	const vir_insn *i = &f->insns[v];
-	const vx *target=ctx;
-	bool r10=target && target->r10;
+	const x64_vir_context *target=ctx;
+	bool r10=target && target->scratch_register10;
 	if (i->op == VIR_OP_PARAM) {
 		int stack;
-		x->result = vx_arg(f, f->signature, i->a, &stack);
+		x->result = x64_vir_argument_register(f, f->signature, i->a, &stack);
 	} else if(i->op==VIR_OP_SWITCH && r10) {
 		/* A private dense selector can be produced directly in the dispatch
 		 * register. Range chains and shared selectors keep their original. */
-		if(target->uses[i->a]==1 && vx_dense_switch(f,i,NULL,NULL)) {
+		if(target->uses[i->a]==1 && x64_vir_switch_is_dense(f,i,NULL,NULL)) {
 			x->operand_count=1;x->operands[0]=R10;x->clobbered[0]=UINT64_C(1)<<R10;
 		} else x->edge_clobbered[0]=UINT64_C(1)<<R10;
 	} else if (i->op == VIR_OP_MEMCPY || i->op == VIR_OP_MEMSET) {
 		x->operand_count = 3;
-		if(vx_smallmem(f,i)) {x->mem=i->op==VIR_OP_MEMSET?6:4;return;}
+		if(x64_vir_memory_block_is_small(f,i)) {x->mem=i->op==VIR_OP_MEMSET?6:4;return;}
 		x->operands[0] = RDI;
 		x->operands[1] = i->op == VIR_OP_MEMSET ? RAX : RSI;
 		x->operands[2] = RCX;
@@ -43,7 +43,7 @@ VPRIV void vx_fixed(const vir_function *f, uint32_t v, vir_register_constraint *
 		x->operand_count = n + 1;
 		for (uint32_t k = 0; k < n; k++) {
 			int stack;
-			x->operands[k + 1] = vx_arg(f, i->b, k, &stack);
+			x->operands[k + 1] = x64_vir_argument_register(f, i->b, k, &stack);
 			if (x->operands[k + 1] == VIR_REGISTER_NONE) x->mem |= 1u << (k + 1);
 		}
 		const vir_insn *callee = &f->insns[i->a];
@@ -62,12 +62,12 @@ VPRIV void vx_fixed(const vir_function *f, uint32_t v, vir_register_constraint *
 	} else if (i->op == VIR_OP_SHL || i->op == VIR_OP_LSHR || i->op == VIR_OP_ASHR) {
 		x->operand_count = 2;
 		int64_t k;
-		if (vx_imm(f,i->b,&k) && k>=0 && k<(i->type==VIR_TYPE_I32?32:64)) x->mem=2;
+		if (x64_vir_value_immediate(f,i->b,&k) && k>=0 && k<(i->type==VIR_TYPE_I32?32:64)) x->mem=2;
 		else x->operands[1] = RCX;
 	}
 	int64_t k;
 	if (!vir_register_class(i->type) && (i->op==VIR_OP_ADD || i->op==VIR_OP_SUB || i->op==VIR_OP_PTRADD || i->op==VIR_OP_PSUB ||
-	    i->op==VIR_OP_AND || i->op==VIR_OP_OR || i->op==VIR_OP_XOR || i->op==VIR_OP_MUL || i->op==VIR_OP_ICMP) && vx_imm(f,i->b,&k)) {
+	    i->op==VIR_OP_AND || i->op==VIR_OP_OR || i->op==VIR_OP_XOR || i->op==VIR_OP_MUL || i->op==VIR_OP_ICMP) && x64_vir_value_immediate(f,i->b,&k)) {
 		x->operand_count=2;x->mem|=2;
 	}
 	/* Prefer the dying first input for x86's destructive operations. */

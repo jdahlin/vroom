@@ -62,14 +62,7 @@
 
 #define LD_NONE 0xffffffffu
 
-static bool x86_ld;		/* the inputs are x86-64 (arch/x64/ld/relocation.inc) */
-static _Atomic uint16_t ld_machine;	/* e_machine of the first object loaded (ld_object_parse) */
-
 #include "ld-internal.h"
-
-/* the context of the one link that runs at a time (ld_link_lock); ld-internal.h */
-static struct ld_context ld_link_context;
-static struct ld_context *const ctx = &ld_link_context;
 
 #include "link-context.c"
 
@@ -84,13 +77,7 @@ static struct ld_context *const ctx = &ld_link_context;
 
 #include "thread-pool.c"
 
-#include "option-state.c"
-
-#include "input-model.c"
-
 #include "global-symbols.c"
-
-#include "script-model.c"
 
 #include "address-values.c"
 
@@ -191,8 +178,6 @@ static struct ld_context *const ctx = &ld_link_context;
 #include "link-run.c"
 
 #include "relocatable-link.c"
-
-#include "state-reset.c"
 
 #include "macho-probe.c"
 

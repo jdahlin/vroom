@@ -2,16 +2,16 @@
 
 /* ---------------- layout ---------------- */
 
-static uint64_t ld_headers_size(void)
+static uint64_t ld_headers_size(struct ld_context *ctx)
 {
-	return sizeof(elf_file_header) + (uint64_t)(have_phdrs ? sphdrs.n : ctx->layout.program_headers.n) * sizeof(elf_program_header);
+	return sizeof(elf_file_header) + (uint64_t)(ctx->script.has_phdrs ? ctx->script.segments.n : ctx->layout.program_headers.n) * sizeof(elf_program_header);
 }
 
 /* ---------------- section assignment ---------------- */
 
 /* the input-section-name cache (ld_layout.name_cache): grown at half full, an
    -ffunction-sections link has about as many names as sections */
-static void ld_name_cache_grow(void)
+static void ld_name_cache_grow(struct ld_context *ctx)
 {
 	uint32_t ncap = (ctx->layout.name_cache_mask + 1) * 2;
 	ld_name_cache_entry *nc = ld_region_alloc(ncap * sizeof *nc);
@@ -19,7 +19,7 @@ static void ld_name_cache_grow(void)
 	memset(nc, 0, ncap * sizeof *nc);
 	for (uint32_t i = 0; i <= ctx->layout.name_cache_mask; i++)
 		if (ctx->layout.name_cache[i].name) {
-			uint32_t j = ctx->layout.name_cache[i].h & (ncap - 1);
+			uint32_t j = ctx->layout.name_cache[i].hash & (ncap - 1);
 
 			while (nc[j].name)
 				j = (j + 1) & (ncap - 1);
@@ -29,76 +29,99 @@ static void ld_name_cache_grow(void)
 	ctx->layout.name_cache_mask = ncap - 1;
 }
 
-static uint32_t ld_input_section_description_match(const char *name)
+static uint32_t ld_input_section_description_match(struct ld_context *ctx, const char *name)
 {
 	size_t n = strlen(name);
 	uint32_t h = ld_name_hash(name, n);
 	uint32_t j = h & ctx->layout.name_cache_mask;
 	while (ctx->layout.name_cache[j].name) {
-		if (ctx->layout.name_cache[j].h == h && !strcmp(ctx->layout.name_cache[j].name, name))
-			return ctx->layout.name_cache[j].isd;
+		if (ctx->layout.name_cache[j].hash == h && !strcmp(ctx->layout.name_cache[j].name, name))
+			return ctx->layout.name_cache[j].input_description;
 		j = (j + 1) & ctx->layout.name_cache_mask;
 	}
 	uint32_t res = LD_NONE;
-	for (uint32_t i = 0; i < topcmds.n && res == LD_NONE; i++) {
-		ld_command *c = &topcmds.v[i];
+	for (uint32_t i = 0; i < ctx->script.commands.n && res == LD_NONE; i++) {
+		ld_command *c = &ctx->script.commands.v[i];
 		if (c->kind != LD_COMMAND_OUTPUT_SECTION)
 			continue;
-		ld_output_section *os = &osecs.v[c->idx];
-		for (uint32_t k = 0; k < os->cmds.n && res == LD_NONE; k++) {
-			ld_command *cc = &os->cmds.v[k];
+		ld_output_section *os = &ctx->script.sections.v[c->index];
+		for (uint32_t k = 0; k < os->commands.n && res == LD_NONE; k++) {
+			ld_command *cc = &os->commands.v[k];
 			if (cc->kind != LD_COMMAND_INPUT_SECTION_DESCRIPTION)
 				continue;
-			ld_input_section_description *d = &isds.v[cc->idx];
-			for (uint32_t p = 0; p < d->npats; p++)
-				if (ld_pattern_match(&d->pats[p], name)) {
-					res = cc->idx;
+			ld_input_section_description *d = &ctx->script.input_descriptions.v[cc->index];
+			for (uint32_t p = 0; p < d->pattern_count; p++)
+				if (ld_pattern_match(&d->patterns[p], name)) {
+					res = cc->index;
 					break;
 				}
 		}
 	}
-	ctx->layout.name_cache[j] = (ld_name_cache_entry){.name = name, .h = h, .isd = res};
+	ctx->layout.name_cache[j] = (ld_name_cache_entry){.name = name, .hash = h, .input_description = res};
 	if (++ctx->layout.name_cache_count * 2 > ctx->layout.name_cache_mask + 1)
-		ld_name_cache_grow();
+		ld_name_cache_grow(ctx);
 	return res;
 }
 
-static int ld_section_name_stable_cmp(const void *a, const void *b)
+/* input section ids sorted by a key taken from the context first, so that the
+   comparator needs no context; ties by id, so the order is total (stable) */
+typedef struct { uint64_t key; const char *name; uint32_t section; } ld_section_sort_entry;
+enum { LD_SECTION_ORDER_NAME, LD_SECTION_ORDER_ALIGNMENT_DESCENDING, LD_SECTION_ORDER_ADDRESS };
+
+static int ld_section_sort_entry_cmp(const void *a, const void *b)
 {
-	uint32_t x = *(const uint32_t *)a, y = *(const uint32_t *)b;
-	int c = strcmp(isecs.v[x].name, isecs.v[y].name);
-	return c ? c : (x > y) - (x < y);
-}
-static int ld_section_alignment_stable_cmp(const void *a, const void *b)
-{
-	uint32_t x = *(const uint32_t *)a, y = *(const uint32_t *)b;
-	uint32_t ax = isecs.v[x].align, ay = isecs.v[y].align;
-	if (ax != ay)
-		return ax > ay ? -1 : 1;
-	return (x > y) - (x < y);
+	const ld_section_sort_entry *x = a, *y = b;
+	if (x->name || y->name) {
+		int c = strcmp(x->name, y->name);
+		if (c)
+			return c;
+	}
+	if (x->key != y->key)
+		return x->key < y->key ? -1 : 1;
+	return (x->section > y->section) - (x->section < y->section);
 }
 
-static void ld_section_commit(ld_output_section *os, ld_input_section *is)
+static void ld_section_ids_sort(struct ld_context *ctx, uint32_t *ids, uint32_t n, int order)
+{
+	if (n < 2)
+		return;
+	ld_section_sort_entry *t = ld_region_alloc((uint64_t)n * sizeof *t);
+	for (uint32_t i = 0; i < n; i++) {
+		const ld_input_section *is = &ctx->inputs.sections.v[ids[i]];
+		t[i] = (ld_section_sort_entry){.section = ids[i]};
+		if (order == LD_SECTION_ORDER_NAME)
+			t[i].name = is->name;
+		else if (order == LD_SECTION_ORDER_ALIGNMENT_DESCENDING)
+			t[i].key = UINT32_MAX - is->alignment;
+		else
+			t[i].key = ld_input_section_address(ctx, ids[i], 0);
+	}
+	qsort(t, n, sizeof *t, ld_section_sort_entry_cmp);
+	for (uint32_t i = 0; i < n; i++)
+		ids[i] = t[i].section;
+}
+
+static void ld_section_commit(struct ld_context *ctx, ld_output_section *os, ld_input_section *is)
 {
 	if (os->type != is->type) {
 		if (!os->has_input)	/* (lld's .eh_frame is PROGBITS, x86-64's input too) */
-			os->type = is->type == 0x70000001 && !opt.relocatable ? SHT_PROGBITS : is->type;
+			os->type = is->type == 0x70000001 && !ctx->options.relocatable ? SHT_PROGBITS : is->type;
 		else if (os->type != SHT_NOBITS || is->type != SHT_NOBITS)
 			os->type = SHT_PROGBITS;
 	}
 	if (!os->has_input) {
 		os->has_input = true;
-		os->entsize = is->entsize;
+		os->entry_size = is->entry_size;
 		os->flags = is->flags;
 	} else {
-		if (os->entsize != is->entsize)
-			os->entsize = 0;
+		if (os->entry_size != is->entry_size)
+			os->entry_size = 0;
 		os->flags |= is->flags;
 	}
-	if (os->nonalloc)
+	if (os->not_allocated)
 		os->flags &= ~(uint64_t)SHF_ALLOC;
-	if (is->align > os->addralign)
-		os->addralign = is->align;
+	if (is->alignment > os->address_alignment)
+		os->address_alignment = is->alignment;
 }
 
 /* lld's getSectionRank bits that order allocated sections: read-only, code,
@@ -139,23 +162,23 @@ static uint64_t ld_orphan_section_key(const ld_input_section *is)
 static int ld_rank_proximity(int a, int b) { return a == b ? 32 : __builtin_clz((unsigned)(a ^ b)); }
 
 /* the rank of a script output section, from its first input section */
-static int ld_output_section_rank(uint32_t oi)
+static int ld_output_section_rank(struct ld_context *ctx, uint32_t oi)
 {
-	ld_output_section *os = &osecs.v[oi];
-	for (uint32_t k = 0; k < os->cmds.n; k++)
-		if (os->cmds.v[k].kind == LD_COMMAND_INPUT_SECTION_DESCRIPTION && isds.v[os->cmds.v[k].idx].secs.n) {
-			ld_input_section *is = &isecs.v[isds.v[os->cmds.v[k].idx].secs.v[0]];
+	ld_output_section *os = &ctx->script.sections.v[oi];
+	for (uint32_t k = 0; k < os->commands.n; k++)
+		if (os->commands.v[k].kind == LD_COMMAND_INPUT_SECTION_DESCRIPTION && ctx->script.input_descriptions.v[os->commands.v[k].index].sections.n) {
+			ld_input_section *is = &ctx->inputs.sections.v[ctx->script.input_descriptions.v[os->commands.v[k].index].sections.v[0]];
 			return ld_orphan_section_rank(is->flags, is->type, is->name);
 		}
 	return -1;
 }
 
-static void ld_name_cache_init(void)
+static void ld_name_cache_init(struct ld_context *ctx)
 {
 	if (ctx->layout.name_cache)
 		return;
 	uint32_t ncap = 1024;
-	while (ncap < isecs.n / 4)
+	while (ncap < ctx->inputs.sections.n / 4)
 		ncap *= 2;
 	ctx->layout.name_cache = ld_region_alloc(ncap * sizeof *ctx->layout.name_cache);
 	memset(ctx->layout.name_cache, 0, ncap * sizeof *ctx->layout.name_cache);

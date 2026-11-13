@@ -3,79 +3,79 @@
 /* ---------------- relocation targets ---------------- */
 
 typedef struct {
-	uint64_t va;			/* S + A, merge-aware */
-	uint64_t s;			/* S (without addend; for relaxation) */
-	bool abs;			/* target is absolute (no dynamic relocation) */
-	bool undef;
+	uint64_t address;			/* S + A, merge-aware */
+	uint64_t symbol_address;			/* S (without addend; for relaxation) */
+	bool is_absolute;			/* target is absolute (no dynamic relocation) */
+	bool is_undefined;
 	bool discarded;
 	uint32_t key;			/* identity for ADRP relaxation */
-	bool global;
+	bool is_global;
 } ld_relocation_target;
 
-static void ld_relocation_target_find(const ld_object *o, uint32_t symidx, int64_t addend, ld_relocation_target *t)
+static void ld_relocation_target_find(struct ld_context *ctx, const ld_object *o, uint32_t symidx, int64_t addend, ld_relocation_target *t)
 {
-	t->undef = t->discarded = false;
-	if (symidx >= o->firstg) {
-		uint32_t g = o->gs[symidx - o->firstg];
-		ld_global_symbol *s = &gsyms[g];
+	t->is_undefined = t->discarded = false;
+	if (symidx >= o->first_global_index) {
+		uint32_t g = o->global_slots[symidx - o->first_global_index];
+		ld_global_symbol *s = &ctx->symbols.globals[g];
 		t->key = g;
-		t->global = true;
+		t->is_global = true;
 		if (s->state == LD_SYMBOL_STATE_UNDEFINED || s->demoted) {
-			t->undef = true;
-			t->abs = true;
-			t->s = 0;
-			t->va = addend;
+			t->is_undefined = true;
+			t->is_absolute = true;
+			t->symbol_address = 0;
+			t->address = addend;
 			return;
 		}
-		t->abs = ld_global_symbol_is_absolute(g);
-		t->s = ld_global_symbol_address(g);
-		if (s->state == LD_SYMBOL_STATE_OBJECT && s->sec != LD_NONE) {
-			ld_input_section *is = &isecs.v[s->sec];
+		t->is_absolute = ld_global_symbol_is_absolute(ctx, g);
+		t->symbol_address = ld_global_symbol_address(ctx, g);
+		if (s->state == LD_SYMBOL_STATE_OBJECT && s->input_section != LD_NONE) {
+			ld_input_section *is = &ctx->inputs.sections.v[s->input_section];
 			if (is->kind == LD_SECTION_KIND_MERGE_INPUT) {
-				t->va = ld_input_section_address(s->sec, s->val + addend) ;
+				t->address = ld_input_section_address(ctx, s->input_section, s->value + addend) ;
 				/* non-section symbol: piece of value, then + addend */
-				t->va = ld_input_section_address(s->sec, s->val) + addend;
+				t->address = ld_input_section_address(ctx, s->input_section, s->value) + addend;
 				return;
 			}
 		}
-		t->va = t->s + addend;
+		t->address = t->symbol_address + addend;
 		return;
 	}
-	const elf_symbol *y = &o->sym[symidx];
+	const elf_symbol *y = &o->symbols[symidx];
 	t->key = symidx;
-	t->global = false;
+	t->is_global = false;
 	if (y->st_shndx == SHN_ABS) {
-		t->abs = true;
-		t->s = y->st_value;
-		t->va = t->s + addend;
+		t->is_absolute = true;
+		t->symbol_address = y->st_value;
+		t->address = t->symbol_address + addend;
 		return;
 	}
 	if (y->st_shndx == SHN_UNDEF || y->st_shndx >= 0xff00) {
-		t->undef = true;
-		t->abs = true;
-		t->s = 0;
-		t->va = addend;
+		t->is_undefined = true;
+		t->is_absolute = true;
+		t->symbol_address = 0;
+		t->address = addend;
 		return;
 	}
-	uint32_t sec = o->isec0 + y->st_shndx;
-	ld_input_section *is = &isecs.v[sec];
-	t->abs = false;
-	uint32_t os = ld_input_section_output_section(sec);
+	uint32_t sec = o->first_input_section + y->st_shndx;
+	ld_input_section *is = &ctx->inputs.sections.v[sec];
+	t->is_absolute = false;
+	uint32_t os = ld_input_section_output_section(ctx, sec);
 	if (is->kind == LD_SECTION_KIND_NONE || os == LD_OUTPUT_SECTION_DISCARD || os == LD_NONE) {
 		t->discarded = true;
-		t->s = 0;
-		t->va = addend;
+		t->symbol_address = 0;
+		t->address = addend;
 		return;
 	}
 	if ((y->st_info & 15) == STT_SECTION) {
-		t->s = ld_input_section_address(sec, 0);
-		t->va = ld_input_section_address(sec, (uint64_t)addend);
+		t->symbol_address = ld_input_section_address(ctx, sec, 0);
+		t->address = ld_input_section_address(ctx, sec, (uint64_t)addend);
 		if (is->kind != LD_SECTION_KIND_MERGE_INPUT)
-			t->va = t->s + addend;
+			t->address = t->symbol_address + addend;
 		return;
 	}
-	t->s = ld_input_section_address(sec, y->st_value);
-	t->va = t->s + addend;
+	t->symbol_address = ld_input_section_address(ctx, sec, y->st_value);
+	t->address = t->symbol_address + addend;
 }
 
 /*
@@ -86,57 +86,57 @@ static void ld_relocation_target_find(const ld_object *o, uint32_t symidx, int64
 
 static void ld_input_section_final_address_set(void *arg, size_t i)
 {
-	(void)arg;
-	ld_input_section *is = &isecs.v[i];
-	uint32_t os = ld_input_section_output_section(i);
+	struct ld_context *ctx = arg;
+	ld_input_section *is = &ctx->inputs.sections.v[i];
+	uint32_t os = ld_input_section_output_section(ctx, i);
 	ctx->relocations.final_section_addresses[i] = is->kind == LD_SECTION_KIND_NONE || is->kind == LD_SECTION_KIND_MERGE_INPUT || os == LD_NONE || os == LD_OUTPUT_SECTION_DISCARD
-			      ? UINT64_MAX : osecs.v[os].va + is->off;
+			      ? UINT64_MAX : ctx->script.sections.v[os].address + is->offset;
 }
 static void ld_global_symbol_final_address_set(void *arg, size_t g)
 {
-	(void)arg;
-	ld_global_symbol *s = &gsyms[g];
-	s->fundef = s->state == LD_SYMBOL_STATE_UNDEFINED || s->demoted;
-	if (!s->fundef) {
-		s->fabs = ld_global_symbol_is_absolute((uint32_t)g);
-		s->fva = ld_global_symbol_address((uint32_t)g);
+	struct ld_context *ctx = arg;
+	ld_global_symbol *s = &ctx->symbols.globals[g];
+	s->is_undefined = s->state == LD_SYMBOL_STATE_UNDEFINED || s->demoted;
+	if (!s->is_undefined) {
+		s->is_absolute = ld_global_symbol_is_absolute(ctx, (uint32_t)g);
+		s->final_address = ld_global_symbol_address(ctx, (uint32_t)g);
 	}
 }
-static void ld_final_addresses_compute(void)
+static void ld_final_addresses_compute(struct ld_context *ctx)
 {
-	ctx->relocations.final_section_addresses = ld_region_alloc((size_t)isecs.n * sizeof(uint64_t));
-	ld_parallel_for(isecs.n, ld_input_section_final_address_set, NULL);
-	ld_parallel_for(atomic_load(&ngsyms), ld_global_symbol_final_address_set, NULL);
+	ctx->relocations.final_section_addresses = ld_region_alloc((size_t)ctx->inputs.sections.n * sizeof(uint64_t));
+	ld_parallel_for(ctx->inputs.sections.n, ld_input_section_final_address_set, ctx);
+	ld_parallel_for(atomic_load(&ctx->symbols.count), ld_global_symbol_final_address_set, ctx);
 }
 
-static inline void ld_relocation_target_final_find(const ld_object *o, uint32_t symidx, int64_t addend, ld_relocation_target *t)
+static inline void ld_relocation_target_final_find(struct ld_context *ctx, const ld_object *o, uint32_t symidx, int64_t addend, ld_relocation_target *t)
 {
-	if (symidx >= o->firstg) {
-		uint32_t g = o->gs[symidx - o->firstg];
-		const ld_global_symbol *s = &gsyms[g];
-		if (!s->fundef) {
-			t->undef = t->discarded = false;
+	if (symidx >= o->first_global_index) {
+		uint32_t g = o->global_slots[symidx - o->first_global_index];
+		const ld_global_symbol *s = &ctx->symbols.globals[g];
+		if (!s->is_undefined) {
+			t->is_undefined = t->discarded = false;
 			t->key = g;
-			t->global = true;
-			t->abs = s->fabs;
-			t->s = s->fva;
-			t->va = s->fva + addend;
+			t->is_global = true;
+			t->is_absolute = s->is_absolute;
+			t->symbol_address = s->final_address;
+			t->address = s->final_address + addend;
 			return;
 		}
 	} else {
-		const elf_symbol *y = &o->sym[symidx];
+		const elf_symbol *y = &o->symbols[symidx];
 		if (y->st_shndx != SHN_UNDEF && y->st_shndx < 0xff00) {
-			uint64_t b = ctx->relocations.final_section_addresses[o->isec0 + y->st_shndx];
+			uint64_t b = ctx->relocations.final_section_addresses[o->first_input_section + y->st_shndx];
 			if (b != UINT64_MAX) {
-				t->undef = t->discarded = false;
+				t->is_undefined = t->discarded = false;
 				t->key = symidx;
-				t->global = false;
-				t->abs = false;
-				t->s = b + ((y->st_info & 15) == STT_SECTION ? 0 : y->st_value);
-				t->va = t->s + addend;
+				t->is_global = false;
+				t->is_absolute = false;
+				t->symbol_address = b + ((y->st_info & 15) == STT_SECTION ? 0 : y->st_value);
+				t->address = t->symbol_address + addend;
 				return;
 			}
 		}
 	}
-	ld_relocation_target_find(o, symidx, addend, t);
+	ld_relocation_target_find(ctx, o, symidx, addend, t);
 }

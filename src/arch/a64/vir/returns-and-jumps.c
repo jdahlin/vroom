@@ -3,37 +3,37 @@
 #include "lowering-internal.h"
 
 /* the block a branch to t ends up in: past blocks that are a lone br without moves */
-VPRIV uint32_t vl_chase(vl *L, uint32_t t) { return L->chs[t]; }
+VPRIV uint32_t a64_vir_block_chase(a64_vir_context *L, uint32_t t) { return L->chases[t]; }
 
 /* a return: the epilogue and ret, or a jump to the shared one (finish_function decides) */
 /* d8-d15 as the caller had them: at the entry into their slots, before every way out back */
-VPRIV void vl_fcsave(vl *L, bool restore, int t)
+VPRIV void a64_vir_callee_saved_float_save(a64_vir_context *L, bool restore, int t)
 {
 	for (int r = 8; r < 16; r++)
-		if (L->o->callee[1] >> r & 1) {
+		if (L->allocation->callee[1] >> r & 1) {
 			if (restore) {
-				mem(L->e, I_LD, 3, 0, t, FRAME, L->fcs[r - 8]);
-				word(L->e, f_in(1, r, t));
+				mem(L->context, I_LD, 3, 0, t, FRAME, L->callee_saved_float_offsets[r - 8]);
+				word(L->context, f_in(1, r, t));
 			} else {
-				word(L->e, f_out(1, t, r));
-				mem(L->e, I_ST, 3, 0, t, FRAME, L->fcs[r - 8]);
+				word(L->context, f_out(1, t, r));
+				mem(L->context, I_ST, 3, 0, t, FRAME, L->callee_saved_float_offsets[r - 8]);
 			}
 		}
 }
 
-VPRIV void vl_ret(vl *L)
+VPRIV void a64_vir_return_lower(a64_vir_context *L)
 {
-	ecx *e = L->e;
+	ecx *e = L->context;
 	ins *t;
 
 	if (!e->reach)
 		return;
-	vl_fcsave(L, true, R_X16);
+	a64_vir_callee_saved_float_save(L, true, R_X16);
 	t = put(e, I_TAIL);
 	t->cond = 4;
-	t->sh = L->bare;
-	t->label = L->retlbl;
-	e->lrefc[L->retlbl]++;
+	t->sh = L->is_before_save_point;
+	t->label = L->return_label;
+	e->lrefc[L->return_label]++;
 	e->reach = false;
 }
 
@@ -45,35 +45,35 @@ VPRIV void vl_ret(vl *L)
  * more instructions on speedtest1: their constants and edge moves are lowered again.
  */
 /* from block b's code, on to block t (an edge without moves left): a jump, or a copy of t */
-VPRIV void vl_goto(vl *L, uint32_t b, uint32_t t)
+VPRIV void a64_vir_goto_emit(a64_vir_context *L, uint32_t b, uint32_t t)
 {
-	/* into a loop whose test is at its bottom (vl_order): a copy of the test here, so that
+	/* into a loop whose test is at its bottom (a64_vir_blocks_order): a copy of the test here, so that
 	 * the way in costs no jump (loop rotation with the guard, as LLVM's) */
 
-	if (L->bare && vir_block_dominates(L->f, L->sp, t)) {	/* to the save point: its code runs behind the prologue */
-		jump(L->e, L->lbl[t]);
+	if (L->is_before_save_point && vir_block_dominates(L->function, L->save_point, t)) {	/* to the save point: its code runs behind the prologue */
+		jump(L->context, L->labels[t]);
 		return;
 	}
-	if (vir_layout_duplicate(L->f, L->lp, VLT.hl, b, t, vl_fnext(L), L->dup, !L->e->E->noopt)) {
+	if (vir_layout_duplicate(L->function, L->loops, a64_vir_thread_state_instance.head_labels, b, t, a64_vir_block_fallthrough(L), L->dup, !L->context->E->noopt)) {
 		int d = L->dup++;
 
 		virbuild_lower_block(&L->drv, t);
 		L->dup = d;
 		return;
 	}
-	jump(L->e, vl_lbl(L, t));
+	jump(L->context, a64_vir_block_label(L, t));
 }
 
-/* the call at i will be a sibling call (vl_call's test, before the registers are known) */
-VPRIV bool vl_sibcand(vl *L, uint32_t b, uint32_t i)
+/* the call at i will be a sibling call (a64_vir_call_lower's test, before the registers are known) */
+VPRIV bool a64_vir_call_is_sibling_candidate(a64_vir_context *L, uint32_t b, uint32_t i)
 {
-	const vir_function *f = L->f;
+	const vir_function *f = L->function;
 	uint32_t ng = VIR_SIGNATURE_GROUP_COUNT(f->extra[f->insns[i].b]);
-	vlarg *a = __builtin_alloca(sizeof(vlarg) * (ng + 1));
+	a64_vir_argument *a = __builtin_alloca(sizeof(a64_vir_argument) * (ng + 1));
 	int32_t stk;
 
-	vl_assign(DARWIN(L->e->c), &f->extra[f->insns[i].b], a, ng, &stk);
-	return !stk && vl_sibling(L, b, i);
+	a64_vir_arguments_assign(DARWIN(L->context->c), &f->extra[f->insns[i].b], a, ng, &stk);
+	return !stk && a64_vir_call_is_sibling(L, b, i);
 }
 
 /* instruction i of block b, its operands collected; res its result's register */
