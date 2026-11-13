@@ -13,7 +13,7 @@
 
 /* one compile job: its sink (dedup when the client's VCC_DIAG_DEDUP is set) */
 typedef struct dstore_job {
-	pp_dsink sink;
+	diag_sink sink;
 	char *tu;		/* the source file, absolute */
 	char *json;		/* this TU's records, one per line, each with "tu" */
 	size_t njson, cjson;

@@ -52,7 +52,7 @@ static __attribute__((noinline, cold)) void literal_range(cc *c, const ptok *t, 
 	int kd = KIND(c, ty);
 	bool q = is_q(c, ty);
 	const char *lim;
-	vdiag *d;
+	diag_record *d;
 
 	if (!big) {
 		size_t i = hex ? 2 : 0;
@@ -75,16 +75,16 @@ static __attribute__((noinline, cold)) void literal_range(cc *c, const ptok *t, 
 			  big ? "large" : "small", tyname(c, ty), big ? "maximum" : "minimum", lim);
 	if (!d)
 		return;
-	pp_diag_label(c->p, d, t->loc, pp_tok_end(c->p, t->loc), NULL);
+	diag_record_label_add(c->p, d, t->loc, pp_token_end_find(c->p, t->loc), NULL);
 	if (kd == TY_LDOUBLE && !q) {	/* a constant binary128 holds: written for Arm Linux */
 		u128 v = vsoftfloat_parse(s, k);
 		unsigned ex = (unsigned)(v >> 112) & 0x7fff;
 
 		if (ex != 0x7fff && v << 1)
-			pp_diag_help(c->p, d, "'long double' is 'double' on Apple; on Arm Linux it has 128 bits, %s",
+			diag_record_help_set(c->p, d, "'long double' is 'double' on Apple; on Arm Linux it has 128 bits, %s",
 				     big ? "up to 1.19E+4932" : "down to 6.48E-4966");
 	}
-	pp_diag_emit(c->p, d);
+	diag_record_emit(c->p, d);
 }
 
 static uint32_t number_s(cc *c, const ptok *t, const char *s, size_t n)

@@ -103,12 +103,12 @@ static void records(pp *p, const uint8_t *cd, size_t cn, const char *src, uint32
 
 	for (int r = 0; r < MAXREC && c.i < c.n; r++) {
 		unsigned op = byte(&c);
-		int level = op % 5 == VDL_NOTE ? VDL_ERROR : op % 5;	/* a top-level note is a stray note */
+		int level = op % 5 == DIAG_LEVEL_NOTE ? DIAG_LEVEL_ERROR : op % 5;	/* a top-level note is a stray note */
 		uint32_t at = loc(&c, base, size);
-		vdiag *d = pp_diag_begin(p, level, at, "%s", text(&c, src, size, t1));
+		diag_record *d = diag_record_begin(p, level, at, "%s", text(&c, src, size, t1));
 
 		if (op & 0x08)
-			pp_diag_flag(d, "fuzz-flag");
+			diag_record_flag_set(d, "fuzz-flag");
 		for (unsigned k = byte(&c) % 5; k--;) {
 			uint32_t b = loc(&c, base, size), e = loc(&c, base, size);
 
@@ -119,7 +119,7 @@ static void records(pp *p, const uint8_t *cd, size_t cn, const char *src, uint32
 
 				b = e, e = x;
 			}
-			pp_diag_label(p, d, b, e, byte(&c) & 1 ? text(&c, src, size, t2) : NULL);
+			diag_record_label_add(p, d, b, e, byte(&c) & 1 ? text(&c, src, size, t2) : NULL);
 		}
 		for (unsigned k = byte(&c) % 4; k--;) {
 			uint32_t b = loc(&c, base, size), e = b;
@@ -129,28 +129,28 @@ static void records(pp *p, const uint8_t *cd, size_t cn, const char *src, uint32
 			e = b + byte(&c) % 8;
 			if (e > base + size)
 				e = base + size;
-			pp_diag_fix(p, d, b, e, text(&c, src, size, t2), byte(&c) % 4);
+			diag_record_fixit_add(p, d, b, e, text(&c, src, size, t2), byte(&c) % 4);
 		}
 		if (op & 0x10)
-			pp_diag_help(p, d, "%s", text(&c, src, size, t2));
+			diag_record_help_set(p, d, "%s", text(&c, src, size, t2));
 		for (unsigned k = byte(&c) % 4; k--;) {
-			vdiag *n = pp_diag_note(p, d, loc(&c, base, size), "%s", text(&c, src, size, t2));
+			diag_record *n = diag_record_note_add(p, d, loc(&c, base, size), "%s", text(&c, src, size, t2));
 			uint32_t b = loc(&c, base, size);
 
 			if (n && b != UINT32_MAX && byte(&c) & 1)
-				pp_diag_label(p, n, b, b + 1 <= base + size ? b + 1 : b, NULL);
+				diag_record_label_add(p, n, b, b + 1 <= base + size ? b + 1 : b, NULL);
 		}
-		pp_diag_emit(p, d);
+		diag_record_emit(p, d);
 	}
 }
 
 int LLVMFuzzerTestOneInput(const uint8_t *d, size_t n)
 {
 	static const struct { int fmt, style, uni, color; } outs[] = {
-		{ PP_DIAG_TEXT, PP_DSTYLE_VCC, 0, -1 },      { PP_DIAG_TEXT, PP_DSTYLE_VCC, 1, 1 },
-		{ PP_DIAG_TEXT, PP_DSTYLE_CLANG, 0, -1 },    { PP_DIAG_TEXT, PP_DSTYLE_CLANG, 0, 1 },
-		{ PP_DIAG_TEXT, PP_DSTYLE_NARRATED, 0, -1 }, { PP_DIAG_TEXT, PP_DSTYLE_VCC, 0, 1 },
-		{ PP_DIAG_JSON, PP_DSTYLE_VCC, 0, -1 },      { PP_DIAG_SARIF, PP_DSTYLE_VCC, 1, -1 },
+		{ DIAG_FORMAT_TEXT, DIAG_STYLE_VCC, 0, -1 },      { DIAG_FORMAT_TEXT, DIAG_STYLE_VCC, 1, 1 },
+		{ DIAG_FORMAT_TEXT, DIAG_STYLE_CLANG, 0, -1 },    { DIAG_FORMAT_TEXT, DIAG_STYLE_CLANG, 0, 1 },
+		{ DIAG_FORMAT_TEXT, DIAG_STYLE_NARRATED, 0, -1 }, { DIAG_FORMAT_TEXT, DIAG_STYLE_VCC, 0, 1 },
+		{ DIAG_FORMAT_JSON, DIAG_STYLE_VCC, 0, -1 },      { DIAG_FORMAT_SARIF, DIAG_STYLE_VCC, 1, -1 },
 	};
 	const uint8_t *sep = memchr(d, 1, n);
 	uint32_t before = vintern_count();
@@ -198,10 +198,10 @@ int LLVMFuzzerTestOneInput(const uint8_t *d, size_t n)
 			do
 				pp_token_next(p, &t);
 			while (t.kind != LEX_TOKEN_EOF);
-			eof = pp_main_eof(p);
+			eof = pp_main_file_end(p);
 			base = eof - (sn && src[sn - 1] == '\n' ? (uint32_t)sn - 1 : (uint32_t)sn);
 			records(p, d, cn, src, base, (uint32_t)sn);
-			pp_diag_summary(p);
+			diag_summary_print(p);
 		}
 		if (print)
 			fprintf(stderr, "---- output %zu ----\n", k);

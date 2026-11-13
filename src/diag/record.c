@@ -11,7 +11,7 @@
 /* ---------------- records ---------------- */
 
 /* vcc's formats and their ids (src/tools/gen-diagids.py) */
-static const struct dfmt { const char *fmt, *id; } dfmts[] = {
+static const struct diag_format_id_entry { const char *fmt, *id; } diag_format_ids[] = {
 #define DID(n, lex_byte_class_table, grp)
 #define DFMT(f, n) { f, #n },
 #include "diagnostic-ids.inc"
@@ -20,16 +20,16 @@ static const struct dfmt { const char *fmt, *id; } dfmts[] = {
 };
 
 /* the id of a format (NULL: not in the table) */
-static const char *fmt_id(const char *fmt)
+static const char *diag_format_id_lookup(const char *fmt)
 {
-	size_t lo = 0, hi = sizeof(dfmts) / sizeof(dfmts[0]);
+	size_t lo = 0, hi = sizeof(diag_format_ids) / sizeof(diag_format_ids[0]);
 
 	while (lo < hi) {
 		size_t mid = (lo + hi) / 2;
-		int r = strcmp(dfmts[mid].fmt, fmt);
+		int r = strcmp(diag_format_ids[mid].fmt, fmt);
 
 		if (!r)
-			return dfmts[mid].id;
+			return diag_format_ids[mid].id;
 		if (r < 0)
 			lo = mid + 1;
 		else
@@ -39,26 +39,26 @@ static const char *fmt_id(const char *fmt)
 }
 
 /* the id of format fmt (for a caller that formats the message itself) */
-const char *pp_diag_fmt_id(const char *fmt)
+const char *diag_format_id_find(const char *fmt)
 {
-	return fmt_id(fmt);
+	return diag_format_id_lookup(fmt);
 }
 
-_Thread_local const void *pp_diag_pc;
-_Thread_local const char *pp_diag_next_id;	/* the next record's id when its format serves several (then NULL) */
+_Thread_local const void *diag_report_site_pc;
+_Thread_local const char *diag_next_id;	/* the next record's id when its format serves several (then NULL) */
 
-static const char *const lvname[] = { "note", "remark", "warning", "error", "fatal error" };
+static const char *const diag_level_names[] = { "note", "remark", "warning", "error", "fatal error" };
 
-const char *pp_diag_level(int level) { return lvname[level]; }
+const char *diag_level_name(int level) { return diag_level_names[level]; }
 
-VPRIV int level_of(const char *what)
+VPRIV int diag_level_from_name(const char *what)
 {
 	switch (what[0]) {
-	case 'e': return VDL_ERROR;
-	case 'f': return VDL_FATAL;
-	case 'w': return VDL_WARNING;
-	case 'r': return VDL_REMARK;
-	default: return VDL_NOTE;
+	case 'e': return DIAG_LEVEL_ERROR;
+	case 'f': return DIAG_LEVEL_FATAL;
+	case 'w': return DIAG_LEVEL_WARNING;
+	case 'r': return DIAG_LEVEL_REMARK;
+	default: return DIAG_LEVEL_NOTE;
 	}
 }
 
@@ -72,7 +72,7 @@ static char *dstr(pp *p, const char *s, size_t n)
 }
 
 /* 'v4\x01(vector of 4 'int' values)' -> 'v4' (vector of 4 'int' values) (cc's type names) */
-static void vec_suffix(char *m, size_t cap)
+static void diag_message_vector_suffix_append(char *m, size_t cap)
 {
 	char *x;
 
@@ -96,62 +96,62 @@ static void vec_suffix(char *m, size_t cap)
 	}
 }
 
-vdiag *pp_diag_vbegin(pp *p, int level, uint32_t loc, const char *fmt, va_list ap)
+diag_record *diag_record_begin_va(pp *p, int level, uint32_t loc, const char *fmt, va_list ap)
 {
-	vdiag *d = varena_alloc(&p->perm, sizeof(*d));
+	diag_record *d = varena_alloc(&p->perm, sizeof(*d));
 	char msg[2048];
 	int n = vsnprintf(msg, sizeof(msg), fmt, ap);
 
 	if (unlikely(n > 0 && memchr(msg, '\x01', (size_t)n < sizeof(msg) ? (size_t)n : sizeof(msg) - 1)))
-		vec_suffix(msg, sizeof(msg));	/* (the same length) */
+		diag_message_vector_suffix_append(msg, sizeof(msg));	/* (the same length) */
 	memset(d, 0, sizeof(*d));
 	d->level = (uint8_t)level;
 	d->loc = loc;
 	d->fmt = fmt;
-	d->id = pp_diag_next_id ? pp_diag_next_id : fmt_id(fmt);
-	pp_diag_next_id = NULL;
-	d->track = pp_diag_pc;
-	pp_diag_pc = NULL;
+	d->id = diag_next_id ? diag_next_id : diag_format_id_lookup(fmt);
+	diag_next_id = NULL;
+	d->track = diag_report_site_pc;
+	diag_report_site_pc = NULL;
 	d->msg = dstr(p, msg, n < 0 ? 0 : (size_t)n < sizeof(msg) ? (size_t)n : sizeof(msg) - 1);
 	return d;
 }
 
-vdiag *pp_diag_begin(pp *p, int level, uint32_t loc, const char *fmt, ...)
+diag_record *diag_record_begin(pp *p, int level, uint32_t loc, const char *fmt, ...)
 {
-	pp_diag_pc = __builtin_return_address(0);
+	diag_report_site_pc = __builtin_return_address(0);
 	va_list ap;
-	vdiag *d;
+	diag_record *d;
 
 	va_start(ap, fmt);
-	d = pp_diag_vbegin(p, level, loc, fmt, ap);
+	d = diag_record_begin_va(p, level, loc, fmt, ap);
 	va_end(ap);
 	return d;
 }
 
-void pp_diag_label(pp *p, vdiag *d, uint32_t b, uint32_t e, const char *label)
+void diag_record_label_add(pp *p, diag_record *d, uint32_t b, uint32_t e, const char *label)
 {
 	if (d->nspan == d->cspan) {
 		uint32_t c = d->cspan ? d->cspan * 2 : 4;
-		vdspan *n = varena_alloc(&p->perm, c * sizeof(*n));
+		diag_record_span *n = varena_alloc(&p->perm, c * sizeof(*n));
 
 		if (d->nspan)
 			memcpy(n, d->span, d->nspan * sizeof(*n));
 		d->span = n, d->cspan = c;
 	}
-	d->span[d->nspan++] = (vdspan){ b, e, label ? dstr(p, label, strlen(label)) : NULL };
+	d->span[d->nspan++] = (diag_record_span){ b, e, label ? dstr(p, label, strlen(label)) : NULL };
 }
 
-int pp_diag_art_on(const pp *p)
+int diag_art_style(const pp *p)
 {
-	return p->o->diag_style != PP_DSTYLE_VCC ? 0 : p->o->diag_unicode ? 2 : 1;
+	return p->o->diag_style != DIAG_STYLE_VCC ? 0 : p->o->diag_unicode ? 2 : 1;
 }
 
-void pp_diag_art(pp *p, vdiag *d, const char *s, size_t n)
+void diag_record_art_set(pp *p, diag_record *d, const char *s, size_t n)
 {
 	d->art = dstr(p, s, n);
 }
 
-void pp_diag_help(pp *p, vdiag *d, const char *fmt, ...)
+void diag_record_help_set(pp *p, diag_record *d, const char *fmt, ...)
 {
 	char buf[512];
 	va_list ap;
@@ -168,33 +168,33 @@ void pp_diag_help(pp *p, vdiag *d, const char *fmt, ...)
    which a fix-it at the invocation would not reach (clang drops such fix-its); a range
    that covers the whole invocation and more ("&& MASK") is a fix of the source */
 
-void pp_diag_fix(pp *p, vdiag *d, uint32_t b, uint32_t e, const char *s, int app)
+void diag_record_fixit_add(pp *p, diag_record *d, uint32_t b, uint32_t e, const char *s, int app)
 {
-	if (unlikely(!(app & VDA_NAME) && fix_in_macro(p, b, e)))
+	if (unlikely(!(app & DIAG_APPLICABILITY_NAME) && pp_fixit_is_in_macro(p, b, e)))
 		return;
-	app &= ~VDA_NAME;
+	app &= ~DIAG_APPLICABILITY_NAME;
 	if (d->nfix == d->cfix) {
 		uint32_t c = d->cfix ? d->cfix * 2 : 4;
-		vdfix *n = varena_alloc(&p->perm, c * sizeof(*n));
+		diag_record_fixit *n = varena_alloc(&p->perm, c * sizeof(*n));
 
 		if (d->nfix)
 			memcpy(n, d->fix, d->nfix * sizeof(*n));
 		d->fix = n, d->cfix = c;
 	}
-	d->fix[d->nfix++] = (vdfix){ b, e, dstr(p, s, strlen(s)), (uint8_t)app };
+	d->fix[d->nfix++] = (diag_record_fixit){ b, e, dstr(p, s, strlen(s)), (uint8_t)app };
 }
 
-void pp_diag_flag(vdiag *d, const char *flag)
+void diag_record_flag_set(diag_record *d, const char *flag)
 {
 	d->flag = flag;
 }
 
-void pp_diag_macro(vdiag *d, const char *ms, uint32_t mlen)
+void diag_record_macro_set(diag_record *d, const char *ms, uint32_t mlen)
 {
 	d->ms = ms, d->mlen = mlen;
 }
 
-VPRIV void kid_add(vdiag *d, vdiag *k)
+VPRIV void diag_record_note_append(diag_record *d, diag_record *k)
 {
 	if (d->klast)
 		d->klast->next = k;
@@ -204,7 +204,7 @@ VPRIV void kid_add(vdiag *d, vdiag *k)
 }
 
 /* n among top's notes right after after (top itself: first) */
-VPRIV void kid_after(vdiag *top, vdiag *after, vdiag *n)
+VPRIV void diag_record_note_insert(diag_record *top, diag_record *after, diag_record *n)
 {
 	if (after == top) {
 		n->next = top->kids, top->kids = n;
@@ -217,20 +217,20 @@ VPRIV void kid_after(vdiag *top, vdiag *after, vdiag *n)
 		top->klast = n;
 }
 
-vdiag *pp_diag_note(pp *p, vdiag *d, uint32_t loc, const char *fmt, ...)
+diag_record *diag_record_note_add(pp *p, diag_record *d, uint32_t loc, const char *fmt, ...)
 {
-	pp_diag_pc = __builtin_return_address(0);
+	diag_report_site_pc = __builtin_return_address(0);
 	va_list ap;
-	vdiag *k;
+	diag_record *k;
 
 	va_start(ap, fmt);
-	k = pp_diag_vbegin(p, VDL_NOTE, loc, fmt, ap);
+	k = diag_record_begin_va(p, DIAG_LEVEL_NOTE, loc, fmt, ap);
 	va_end(ap);
-	kid_add(d, k);
+	diag_record_note_append(d, k);
 	return k;
 }
 
-const vdiag *pp_diag_records(const pp *p) { return p->dhead; }
+const diag_record *diag_records_first(const pp *p) { return p->dhead; }
 
 /* clang: a token from a macro expansion has the caret at the invocation and
    a range over all of it, and a note at the macro's body */

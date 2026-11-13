@@ -294,14 +294,14 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 			if (accept(c, LEX_TOKEN_COMMA))
 				continue;
 			if (std && t->kind == LEX_TOKEN_NUMBER && t->len == 1 && t->s[0] == '1' && (t->flags & PP_TOKEN_FLAG_FROM_MACRO) &&
-			    peek(c, 1)->kind == LEX_TOKEN_COLON_COLON && srcbr && pp_spells(c->p, loc, "__clang__", 9)) {
+			    peek(c, 1)->kind == LEX_TOKEN_COLON_COLON && srcbr && pp_location_spells(c->p, loc, "__clang__", 9)) {
 				/* [[__clang__::x]] as written (not through a macro): clang warns and takes it as clang:: */
-				pp_span r = { loc, pp_tok_end(c->p, loc) };
-				pp_fixit fx = { loc, pp_tok_end(c->p, loc), "_Clang", VDA_NAME };	/* (__clang__ itself) */
+				diag_span r = { loc, pp_token_end_find(c->p, loc) };
+				diag_fixit fx = { loc, pp_token_end_find(c->p, loc), "_Clang", DIAG_APPLICABILITY_NAME };	/* (__clang__ itself) */
 
-				pp_dinfo d = { "warning", loc, &r, 1, &fx, 1, "1", 1 };	/* the note at the macro's body */
+				diag_info d = { "warning", loc, &r, 1, &fx, 1, "1", 1 };	/* the note at the macro's body */
 
-				pp_warnx(c->p, "ignored-attributes", true, NULL, &d,
+				diag_warning_report(c->p, "ignored-attributes", true, NULL, &d,
 					 "'__clang__' is a predefined macro name, not an attribute scope specifier; did you mean '_Clang' instead?");
 				t->kind = LEX_TOKEN_IDENTIFIER, t->id = vintern_cstr("_Clang");
 			}
@@ -330,7 +330,7 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 					if (is(c, LEX_TOKEN_LEFT_PAREN))
 						end = skip_balanced(c);
 					{
-						pp_span r = { sloc, pp_tok_end(c->p, end) };
+						diag_span r = { sloc, pp_token_end_find(c->p, end) };
 
 						cc_warnx(c, "unknown-attributes", true, NULL, sloc, &r, 1, NULL, 0,
 							 "unknown attribute '%.*s::%.*s' ignored", (int)sn->len, sn->s, (int)nm->len, nm->s);
@@ -597,7 +597,7 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 				if (an == A_NONE && !attr_known(c, scope, nm->s, nm->len)) {
 					/* [[gnu::x]]: from the scope, printed as gnu:: (also for __gnu__::) */
 					const char *sp = scope > 0 ? attr_scopes[scope] : "";
-					pp_span r = { sloc, pp_tok_end(c->p, end) };
+					diag_span r = { sloc, pp_token_end_find(c->p, end) };
 					const char *fix = attr_correction(c, scope, nm->s, nm->len);
 					const char *ns = nm->s;
 					size_t nn = nm->len;
@@ -607,7 +607,7 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 
 					if (fix) {
 						char fb[160];
-						pp_fixit fx = { sloc, pp_tok_end(c->p, loc), fb, 0 };
+						diag_fixit fx = { sloc, pp_token_end_find(c->p, loc), fb, 0 };
 
 						snprintf(fb, sizeof(fb), "%s%s", sp, fix);
 						cc_warnx(c, "unknown-attributes", true, NULL, sloc, &r, 1, &fx, 1,

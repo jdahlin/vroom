@@ -82,10 +82,10 @@ static int fmt_class(cc *c, qty t)
 typedef struct fmtx {
 	cc *c;
 	uint32_t node;		/* the N_STR */
-	pp_span all;		/* the format string expression */
+	diag_span all;		/* the format string expression */
 	const char *s;
 	uint32_t n;
-	pp_span via;		/* the format argument when the string is a const variable's initializer */
+	diag_span via;		/* the format argument when the string is a const variable's initializer */
 	bool isvia;
 } fmtx;
 
@@ -100,7 +100,7 @@ static uint32_t fmt_loc2(fmtx *x, uint32_t i, uint32_t *endp)
 {
 	uint32_t b = x->all.b, e = x->all.e;
 	size_t len;
-	const char *src = pp_src(x->c->p, b, e, &len), *p, *end;
+	const char *src = pp_source_text(x->c->p, b, e, &len), *p, *end;
 	uint32_t k = 0;
 
 	if (!src)
@@ -168,9 +168,9 @@ typedef struct fspec {
 	uint32_t conv;		/* the conversion byte */
 } fspec;
 
-static bool fmt_report(fmtx *x, const char *flag, uint32_t loc, const pp_span *r, int nr, const pp_fixit *fx, int nfx,
+static bool fmt_report(fmtx *x, const char *flag, uint32_t loc, const diag_span *r, int nr, const diag_fixit *fx, int nfx,
 		       const char *fmt, ...) __attribute__((format(printf, 8, 9)));
-static bool fmt_report(fmtx *x, const char *flag, uint32_t loc, const pp_span *r, int nr, const pp_fixit *fx, int nfx,
+static bool fmt_report(fmtx *x, const char *flag, uint32_t loc, const diag_span *r, int nr, const diag_fixit *fx, int nfx,
 		       const char *fmt, ...)
 {
 	char buf[512];
@@ -181,24 +181,24 @@ static bool fmt_report(fmtx *x, const char *flag, uint32_t loc, const pp_span *r
 	va_end(ap);
 	bool on;
 
-	pp_diag_next_id = pp_diag_fmt_id(fmt);	/* (the message is formatted here) */
+	diag_next_id = diag_format_id_find(fmt);	/* (the message is formatted here) */
 	if (x->isvia) {
 		/* clang: the warning at the argument (or the format argument), the specifier in a note */
-		pp_span vr[2] = { x->via, nr >= 2 ? r[1] : x->via };
+		diag_span vr[2] = { x->via, nr >= 2 ? r[1] : x->via };
 
 		on = cc_warnx(x->c, flag, true, NULL, nr >= 2 ? loc : x->via.b, vr, nr >= 2 ? 2 : 1, NULL, 0, "%s", buf);
-		pp_diag_next_id = NULL;
+		diag_next_id = NULL;
 		if (on)
 			report(x->c, "note", nr && nr < 2 ? loc : nr ? r[0].b : loc, r, nr ? 1 : 0, fx, nfx, "format string is defined here");
 		return on;
 	}
 	on = cc_warnx(x->c, flag, true, NULL, loc, r, nr, fx, nfx, "%s", buf);
-	pp_diag_next_id = NULL;
+	diag_next_id = NULL;
 	return on;
 }
 
 /* the range of bytes [b, e) */
-static bool fmt_span(fmtx *x, uint32_t b, uint32_t e, pp_span *r)
+static bool fmt_span(fmtx *x, uint32_t b, uint32_t e, diag_span *r)
 {
 	uint32_t end = 0, lb = fmt_loc(x, b), le = e ? fmt_loc2(x, e - 1, &end) : 0;
 
@@ -435,8 +435,8 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 		if (v && (c->syms[v].flags & SF_PARAM) && c->fn && c->syms[c->fn].attrs && c->attr[c->syms[c->fn].attrs].fmt)
 			return;	/* the format parameter of a format function */
 		if (!cst && (is_ptr(c, t) || is_array(c, t))) {
-			pp_span r = rng(c, args[fi]);
-			pp_fixit fx = { r.b, r.b, "\"%s\", ", 0 };
+			diag_span r = rng(c, args[fi]);
+			diag_fixit fx = { r.b, r.b, "\"%s\", ", 0 };
 
 			if (cc_warnx(c, "format-security", true, NULL, r.b, &r, 1, NULL, 0,
 				     "format string is not a string literal (potentially insecure)"))
@@ -471,7 +471,7 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 		uint32_t p;
 		char lc[6];
 		const fmtspec *row = NULL;
-		pp_span sr;
+		diag_span sr;
 		bool havesr;
 		uint32_t cv;
 
@@ -483,7 +483,7 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 		f.start = i, f.pos = -1, f.wstar = f.pstar = -1, f.wpos = f.ppos = -1;
 		p = i + 1;
 		if (p >= n) {
-			pp_span r;
+			diag_span r;
 
 			if (fmt_span(&x, i, n, &r))
 				fmt_report(&x, "format", r.b, &r, 1, NULL, 0, "incomplete format specifier");
@@ -565,7 +565,7 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 		}
 		f.le = p;
 		if (p >= n) {
-			pp_span r;
+			diag_span r;
 
 			if (fmt_span(&x, i, n, &r))
 				fmt_report(&x, "format", r.b, &r, 1, NULL, 0, "incomplete format specifier");
@@ -645,7 +645,7 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 			if (!t || (cl = fmt_class(c, t)) < 0)
 				return;
 			if (tab[0].fix[cl] != 0 && tab[0].fix[cl] != 255) {	/* tab[0]: "d", int */
-				pp_span r[2] = { sr, rng(c, args[first - 1 + ai]) };
+				diag_span r[2] = { sr, rng(c, args[first - 1 + ai]) };
 
 				uint32_t td = atd[first - 1 + ai];
 				char tn[256];
@@ -730,7 +730,7 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 						    "length modifier '%s' results in undefined behavior or no effect with '%c' conversion specifier",
 						    lm, conv) &&
 				    (lm[0] == 'L' || lm[0] == 'q') && strchr("diouxXbBnDOU", conv)) {
-					pp_fixit fx = { l, l + 1, "ll", 0 };
+					diag_fixit fx = { l, l + 1, "ll", 0 };
 
 					report(c, "note", l, NULL, 0, &fx, 1, "did you mean to use 'll'?");
 				}
@@ -743,7 +743,7 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 			uint32_t an, code;
 			qty t;
 			int cl;
-			pp_span r[2];
+			diag_span r[2];
 
 			if (ai >= ndata) {
 				uint32_t l = fmt_loc(&x, f.conv);
@@ -769,7 +769,7 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 			}
 			{
 				char ft[64];
-				pp_fixit fx;
+				diag_fixit fx;
 				bool en = KIND(c, t) == TY_ENUM;
 
 				char lcb[8], tn[256];
@@ -806,7 +806,7 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 					snprintf(tn, sizeof(tn), "'%s'", en ? tyname(c, T(c, t)->base) : tyname(c, t));
 				if (code > 1) {
 					fmt_fixtext(&x, &f, fl, cl >= FT_PCHAR && cl <= FT_PUCHAR, ft, sizeof(ft));
-					fx = (pp_fixit){ sr.b, sr.e, ft, 0 };
+					fx = (diag_fixit){ sr.b, sr.e, ft, 0 };
 				}
 				fmt_report(&x, "format", r[1].b, r, 2, code > 1 ? &fx : NULL, code > 1,
 					   "format specifies type %s but the argument has %stype %s", row->exp,
@@ -818,7 +818,7 @@ VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty
 		return;
 	for (uint32_t ai = 0; ai < ndata; ai++)
 		if (!(covered[ai >> 6] >> (ai & 63) & 1)) {
-			pp_span r = x.all;
+			diag_span r = x.all;
 
 			if (x.isvia)	/* (clang: the literal's range, no note) */
 				cc_warnx(c, "format-extra-args", true, NULL, rng(c, args[first - 1 + ai]).b, &r, 1, NULL, 0,

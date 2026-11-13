@@ -33,7 +33,7 @@ typedef struct uwk {
 	uint32_t self;		/* the variable whose initializer is walked */
 	bool selfhit;
 	uint32_t selfloc;
-	pp_span selfr;
+	diag_span selfr;
 	uint64_t done;
 	uint64_t spend;		/* -Wsometimes-uninitialized: an if left the variable initialized on one arm only */
 	uint64_t sdone;		/* ... reported (a definite report replaces it) */
@@ -47,7 +47,7 @@ typedef struct uwk {
 	uint8_t skind[64];	/* (7: the ifs breaking out of one do-while(0): dl, dlf, ndl) */
 	uint32_t dl[64][8];
 	uint8_t dlf[64][8], ndl[64];
-	pp_span skr[64];	/* ... a case: its value / default's range */
+	diag_span skr[64];	/* ... a case: its value / default's range */
 	/* the switch being walked: the case arm entered from it only, and what it leaves uninitialized */
 	ust *swbrk;
 	uint32_t swlab[8], nswlab, swarm;	/* the arm's labels (stacked: case A: case B:), its number */
@@ -57,13 +57,13 @@ typedef struct uwk {
 	uint32_t sdep[64];
 	ust lp_head, lp_cx, lp_brk;	/* the last loop walked: its head at the fixpoint, its exits */	/* ... at this branch depth: the use must post-dominate it */
 	uint8_t kind[64];	/* report: 1 definite, 2 sometimes */
-	pp_span ur[64];
+	diag_span ur[64];
 	uint32_t sself[16], sloc[16];	/* self-initializations */
-	pp_span sr[16];
+	diag_span sr[16];
 	/* T x = x (exactly): x stays uninitialized; a later read reports the initialization (clang) */
 	uint64_t selfv;
 	uint32_t xloc[64], xsym[64];
-	pp_span xr[64];
+	diag_span xr[64];
 } uwk;
 
 /* the condition can be a constant (fl_const's cases): most are not, and cc_eval is not free */
@@ -156,7 +156,7 @@ static void uv_swarm(uwk *w, const ust *st)
 }
 
 /* a case label's value, default's keyword: the warning's range */
-static pp_span uv_caserange(cc *c, uint32_t n)
+static diag_span uv_caserange(cc *c, uint32_t n)
 {
 	uint32_t b = N(n)->loc;
 	size_t len = 0;
@@ -164,10 +164,10 @@ static pp_span uv_caserange(cc *c, uint32_t n)
 	size_t i = 0, e;
 
 	for (uint32_t n = 256; !t && n >= 8; n /= 2)	/* (near the end of the file) */
-		t = pp_src(c->p, b, b + n, &len);
+		t = pp_source_text(c->p, b, b + n, &len);
 
 	if (N(n)->op == N_DEFAULT || !t)
-		return (pp_span){ b, b + 7 };
+		return (diag_span){ b, b + 7 };
 	if (len > 4 && !memcmp(t, "case", 4))
 		i = 4;
 	while (i < len && (t[i] == ' ' || t[i] == '\t'))
@@ -176,7 +176,7 @@ static pp_span uv_caserange(cc *c, uint32_t n)
 		;
 	while (e > i && (t[e - 1] == ' ' || t[e - 1] == '\t'))
 		e--;
-	return (pp_span){ b + (uint32_t)i, b + (uint32_t)e };
+	return (diag_span){ b + (uint32_t)i, b + (uint32_t)e };
 }
 
 /* leaving a branch: pending ifs inside it do not dominate what follows */
@@ -833,7 +833,7 @@ static uint32_t uv_send(cc *c, uint32_t n)
 {
 	if (N(n)->op == N_EXPR && N(n)->a)
 		return rng_np(c, N(n)->a).e;
-	return pp_tok_end(c->p, c->span[n].e);
+	return pp_token_end_find(c->p, c->span[n].e);
 }
 
 static bool uv_sometimes(cc *c, uwk *w, uint32_t k)
@@ -841,10 +841,10 @@ static bool uv_sometimes(cc *c, uwk *w, uint32_t k)
 	static const char *const g[] = { "uninitialized", "all", "most", NULL };
 	const sym *y = &c->syms[w->var[k]];
 	const node *x = N(w->sif[k]);
-	pp_span cr = rng_np(c, x->a), r[2];
+	diag_span cr = rng_np(c, x->a), r[2];
 	int nr = 1;
 	bool f = w->sfalse[k];
-	pp_dinfo d = { "note", w->uloc[k], &w->ur[k], 1, NULL, 0, NULL, 0 };
+	diag_info d = { "note", w->uloc[k], &w->ur[k], 1, NULL, 0, NULL, 0 };
 
 	static const char *const op[] = { "if", "&&", "||", "?:" };
 	int kd = w->skind[k];
@@ -866,15 +866,15 @@ static bool uv_sometimes(cc *c, uwk *w, uint32_t k)
 		if (!cc_warnx(c, "sometimes-uninitialized", true, g, cr.b, &cr, 1, NULL, 0,
 			      "variable '%.*s' is used uninitialized whenever '%s' condition is %s", IDF(y->name), op[kd], f ? "false" : "true"))
 			return false;
-		pp_diagx(c->p, &d, "uninitialized use occurs here");
+		diag_report_extended(c->p, &d, "uninitialized use occurs here");
 		if (kd != 3)
-			r[0] = (pp_span){ cr.b, rng_np(c, x->b).b };
+			r[0] = (diag_span){ cr.b, rng_np(c, x->b).b };
 		else if (f)
-			r[0] = (pp_span){ cr.b, rng_np(c, x->b).b }, r[1] = (pp_span){ rng_np(c, x->b).e, rng_np(c, x->c).e }, nr = 2;
+			r[0] = (diag_span){ cr.b, rng_np(c, x->b).b }, r[1] = (diag_span){ rng_np(c, x->b).e, rng_np(c, x->c).e }, nr = 2;
 		else
-			r[0] = (pp_span){ cr.b, rng_np(c, x->c).b };
-		d = (pp_dinfo){ "note", r[0].b, r, nr, NULL, 0, NULL, 0 };
-		pp_diagx(c->p, &d, "remove the '%s' if its condition is always %s", op[kd], f ? "true" : "false");
+			r[0] = (diag_span){ cr.b, rng_np(c, x->c).b };
+		d = (diag_info){ "note", r[0].b, r, nr, NULL, 0, NULL, 0 };
+		diag_report_extended(c->p, &d, "remove the '%s' if its condition is always %s", op[kd], f ? "true" : "false");
 		return true;
 	}
 	if (kd == 6) {
@@ -883,12 +883,12 @@ static bool uv_sometimes(cc *c, uwk *w, uint32_t k)
 			      "variable '%.*s' is used uninitialized whenever '%s' loop exits because its condition is false",
 			      IDF(y->name), x->op == N_WHILE ? "while" : "for"))
 			return false;
-		pp_diagx(c->p, &d, "uninitialized use occurs here");
+		diag_report_extended(c->p, &d, "uninitialized use occurs here");
 		{
-			pp_fixit fx = { cr.b, cr.e, "1", 0 };	/* (while: the condition becomes 1; for: it is removed) */
+			diag_fixit fx = { cr.b, cr.e, "1", 0 };	/* (while: the condition becomes 1; for: it is removed) */
 
-			d = (pp_dinfo){ "note", cr.b, &cr, 1, &fx, x->op == N_WHILE, NULL, 0 };
-			pp_diagx(c->p, &d, "remove the condition if it is always true");
+			d = (diag_info){ "note", cr.b, &cr, 1, &fx, x->op == N_WHILE, NULL, 0 };
+			diag_report_extended(c->p, &d, "remove the condition if it is always true");
 		}
 		return true;
 	}
@@ -907,14 +907,14 @@ static bool uv_sometimes(cc *c, uwk *w, uint32_t k)
 			}
 		for (uint32_t i = 0; i < n; i++) {
 			uint32_t ln = w->swc[k][ord[i]];
-			pp_span kr = uv_caserange(c, ln);
+			diag_span kr = uv_caserange(c, ln);
 
 			if (!cc_warnx(c, "sometimes-uninitialized", true, g, kr.b, &kr, 1, NULL, 0,
 				      "variable '%.*s' is used uninitialized whenever switch %s is taken", IDF(y->name),
 				      N(ln)->op == N_CASE ? "case" : "default"))
 				continue;
-			d = (pp_dinfo){ "note", w->uloc[k], &w->ur[k], 1, NULL, 0, NULL, 0 };
-			pp_diagx(c->p, &d, "uninitialized use occurs here");
+			d = (diag_info){ "note", w->uloc[k], &w->ur[k], 1, NULL, 0, NULL, 0 };
+			diag_report_extended(c->p, &d, "uninitialized use occurs here");
 			any = true;
 		}
 		return any;
@@ -922,15 +922,15 @@ static bool uv_sometimes(cc *c, uwk *w, uint32_t k)
 	if (!cc_warnx(c, "sometimes-uninitialized", true, g, cr.b, &cr, 1, NULL, 0,
 		      "variable '%.*s' is used uninitialized whenever 'if' condition is %s", IDF(y->name), f ? "false" : "true"))
 		return false;
-	pp_diagx(c->p, &d, "uninitialized use occurs here");
+	diag_report_extended(c->p, &d, "uninitialized use occurs here");
 	if (f) {
-		r[0] = (pp_span){ c->span[w->sif[k]].b, c->span[x->b].b };
+		r[0] = (diag_span){ c->span[w->sif[k]].b, c->span[x->b].b };
 		if (x->c)	/* (after an expression statement: its ';') */
-			r[1] = (pp_span){ N(x->b)->op == N_EXPR ? c->span[x->b].e : uv_send(c, x->b), uv_send(c, x->c) }, nr = 2;
+			r[1] = (diag_span){ N(x->b)->op == N_EXPR ? c->span[x->b].e : uv_send(c, x->b), uv_send(c, x->c) }, nr = 2;
 	} else
-		r[0] = (pp_span){ c->span[w->sif[k]].b, x->c ? c->span[x->c].b : N(x->b)->op == N_BLOCK ? uv_send(c, x->b) : c->span[x->b].e };	/* (no else: the whole if) */
-	d = (pp_dinfo){ "note", r[0].b, r, nr, NULL, 0, NULL, 0 };
-	pp_diagx(c->p, &d, "remove the 'if' if its condition is always %s", f ? "true" : "false");
+		r[0] = (diag_span){ c->span[w->sif[k]].b, x->c ? c->span[x->c].b : N(x->b)->op == N_BLOCK ? uv_send(c, x->b) : c->span[x->b].e };	/* (no else: the whole if) */
+	d = (diag_info){ "note", r[0].b, r, nr, NULL, 0, NULL, 0 };
+	diag_report_extended(c->p, &d, "remove the 'if' if its condition is always %s", f ? "true" : "false");
 	return true;
 }
 
@@ -942,9 +942,9 @@ static const char *uv_zero(cc *c, qty t)
 		return NULL;
 	if (k >= TY_BFLOAT16 && k <= TY_FLOAT128)
 		return " = 0.0";
-	if (k == TY_BOOL && pp_defined(c->p, vintern_cstr("false")))
+	if (k == TY_BOOL && pp_macro_id_is_defined(c->p, vintern_cstr("false")))
 		return " = false";
-	if (k == TY_PTR && pp_defined(c->p, vintern_cstr("NULL")))
+	if (k == TY_PTR && pp_macro_id_is_defined(c->p, vintern_cstr("NULL")))
 		return " = NULL";
 	if (k == TY_CHAR || k == TY_SCHAR || k == TY_UCHAR)
 		return " = '\\0'";
@@ -960,8 +960,8 @@ VPRIV void uninit_check(cc *c, uint32_t body, uint32_t first_label)
 
 	static const char *const gs[] = { "uninitialized", "all", "most", NULL };
 
-	if (!pp_wstate(c->p, "uninitialized", false, w_all) && !pp_wstate(c->p, "sometimes-uninitialized", false, gs) &&
-	    !pp_diag_pragmas(c->p))	/* (a pragma may turn them on here: each warning asks at its location) */
+	if (!diag_warning_state(c->p, "uninitialized", false, w_all) && !diag_warning_state(c->p, "sometimes-uninitialized", false, gs) &&
+	    !diag_pragma_active(c->p))	/* (a pragma may turn them on here: each warning asks at its location) */
 		return;	/* (-Wsometimes-uninitialized alone runs it too) */
 	/* (only the head is cleared: the report arrays are written before they are read) */
 	memset(w, 0, offsetof(uwk, uloc));
@@ -989,7 +989,7 @@ VPRIV void uninit_check(cc *c, uint32_t body, uint32_t first_label)
 	}
 	for (uint32_t j = 0; j < w->nself; j++) {
 		const sym *y = &c->syms[w->sself[j]];
-		pp_span r[2] = { { y->loc, pp_tok_end(c->p, y->loc) }, w->sr[j] };
+		diag_span r[2] = { { y->loc, pp_token_end_find(c->p, y->loc) }, w->sr[j] };
 
 		cc_warnx(c, "uninitialized", false, w_all, w->sloc[j], r, 2, NULL, 0,
 			 "variable '%.*s' is uninitialized when used within its own initialization", IDF(y->name));
@@ -1007,7 +1007,7 @@ VPRIV void uninit_check(cc *c, uint32_t body, uint32_t first_label)
 		const char *z = uv_zero(c, y->ty);
 
 		if (w->kind[k] == 1 && (w->selfv >> k & 1) && w->xsym[k] == w->var[k]) {
-			pp_span r[2] = { { y->loc, pp_tok_end(c->p, y->loc) }, w->xr[k] };
+			diag_span r[2] = { { y->loc, pp_token_end_find(c->p, y->loc) }, w->xr[k] };
 
 			cc_warnx(c, "uninitialized", false, w_all, w->xloc[k], r, 2, NULL, 0,
 				 "variable '%.*s' is uninitialized when used within its own initialization", IDF(y->name));
@@ -1022,11 +1022,11 @@ VPRIV void uninit_check(cc *c, uint32_t body, uint32_t first_label)
 		if (z) {
 			/* the declarator's end: the name, or ')' of a function pointer (not an asm label or attributes) */
 			bool fp = KIND(c, canon(c, y->ty)) == TY_PTR && KIND(c, canon(c, T(c, canon(c, y->ty))->base)) == TY_FUNC;
-			uint32_t e = pp_tok_end(c->p, fp && y->ple && !y->asmname && !y->attrs ? y->ple : y->loc);
-			pp_fixit fx = { e, e, z, 0 };
-			pp_dinfo d = { "note", e, NULL, 0, &fx, 1, NULL, 0 };
+			uint32_t e = pp_token_end_find(c->p, fp && y->ple && !y->asmname && !y->attrs ? y->ple : y->loc);
+			diag_fixit fx = { e, e, z, 0 };
+			diag_info d = { "note", e, NULL, 0, &fx, 1, NULL, 0 };
 
-			pp_diagx(c->p, &d, "initialize the variable '%.*s' to silence this warning", IDF(y->name));
+			diag_report_extended(c->p, &d, "initialize the variable '%.*s' to silence this warning", IDF(y->name));
 		} else
 			note(c, y->plb ? y->plb : y->loc, "variable '%.*s' is declared here", IDF(y->name));
 	}

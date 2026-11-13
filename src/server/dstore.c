@@ -1,7 +1,7 @@
 /*
  * vccd's diagnostics across a build (PLAN-diag.md D7).
  *
- * Each compile job vccd runs has a pp_dsink.  At the end of the TU pp hands it
+ * Each compile job vccd runs has a diag_sink.  At the end of the TU pp hands it
  * every top-level record as a JSON line; the store keeps them by source file,
  * so a TU compiled again replaces exactly its own set (an editor or LSP asks
  * with `vcc --vccd-diagnostics=json`, a person with `=summary`: counts by
@@ -102,7 +102,7 @@ static const char *intern(const char *s, bool path)
 	return e->s;
 }
 
-static bool seen(pp_dsink *s, uint64_t key)
+static bool seen(diag_sink *s, uint64_t key)
 {
 	bool dup = false;
 
@@ -168,7 +168,7 @@ static void put_jstr(dstore_job *j, const char *s)
 }
 
 /* pp: one top-level record */
-static void record(pp_dsink *s, const pp_drec *r)
+static void record(diag_sink *s, const diag_sink_record *r)
 {
 	dstore_job *j = (dstore_job *)s;
 	struct drec_s d = { (unsigned char)r->level, NULL, NULL };
@@ -352,9 +352,9 @@ int dstore_query(const char *what, int fd, int errfd)
 		for (size_t i = 0; i < n; i++)
 			for (unsigned k = 0; k < all[i]->nrec; k++) {
 				const struct drec_s *r = &all[i]->recs[k];
-				int err = r->level >= VDL_ERROR;
+				int err = r->level >= DIAG_LEVEL_ERROR;
 
-				if (r->level < VDL_WARNING)
+				if (r->level < DIAG_LEVEL_WARNING)
 					continue;
 				err ? e++ : w++;
 				count(&fl, &nfl, &cfl, r->flag ? r->flag : "(no flag)", err);

@@ -17,7 +17,7 @@ import re, json, os, sys
 
 
 def cp_width(c):
-    """diag/source-line.c cp_width: 2 for East Asian wide and emoji, 0 for combining marks"""
+    """diag/source-line.c diag_codepoint_width: 2 for East Asian wide and emoji, 0 for combining marks"""
     if 0x300 <= c <= 0x36f or 0x200b <= c <= 0x200f or 0xfe00 <= c <= 0xfe0f:
         return 0
     if (0x1100 <= c <= 0x115f or (0x2e80 <= c <= 0xa4cf and c != 0x303f) or 0xac00 <= c <= 0xd7a3 or
@@ -28,7 +28,7 @@ def cp_width(c):
 
 
 def pad_at(s, ls, le, f):
-    """diag.c pp_pad_at: an insertion widens clang's caret line unless a blank is next to it"""
+    """diag/render-clang.c diag_snippet_is_padded_at: an insertion widens clang's caret line unless a blank is next to it"""
     x = f['start']['offset']
     if f.get('end') and f['end'].get('offset') != x:
         return False
@@ -36,7 +36,7 @@ def pad_at(s, ls, le, f):
 
 
 def dcols(s, b, e, col=0):
-    """display columns of s[b:e] from col (diag/source-line.c dcols): tabs to the next multiple of 8,
+    """display columns of s[b:e] from col (diag/source-line.c diag_columns_width): tabs to the next multiple of 8,
     UTF-8 by its code point's width, a malformed byte one column"""
     i = b
     while i < e:
@@ -492,7 +492,7 @@ class Renderer:
         for i, k in enumerate(kids):
             folded = any(k is f for f in fold)
             if last is None and not folded and mac(k):
-                # render-vcc.c macro_run_last: 3+ frames show the first and last snippets only
+                # render-vcc.c diag_note_macro_run_last: 3+ frames show the first and last snippets only
                 j, nm, lj = i, 0, i
                 while j < len(kids) and (mac(kids[j]) or skip(kids[j])):
                     if mac(kids[j]):

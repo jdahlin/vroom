@@ -11,8 +11,8 @@ VPRIV void target_attr(cc *c, attrs *a, uint32_t str, uint32_t loc)
 	bool valid = true;
 	for (part = strtok_r(copy, ",", &save); part; part = strtok_r(NULL, ",", &save)) {
 		if (!strncmp(part, "arch=", 5) && !x86_cpu_features(part + 5, &features)) {
-			pp_dinfo d = { .what = "warning", .loc = loc };
-			pp_warnx(c->p, "ignored-attributes", true, NULL, &d,
+			diag_info d = { .what = "warning", .loc = loc };
+			diag_warning_report(c->p, "ignored-attributes", true, NULL, &d,
 					"unsupported '%s' in the 'target' attribute string; 'target' attribute ignored", part);
 			valid = false;
 		}
@@ -36,8 +36,8 @@ VPRIV void target_attr(cc *c, attrs *a, uint32_t str, uint32_t loc)
 		if (!strcmp(name, "sse4")) name = enable ? "sse4.2" : "sse4.1";
 		int bit = x86_feature_find(name);
 		if (bit < 0 || !x86_feature_has(x86_attr_valid, (unsigned)bit)) {
-			pp_dinfo d = { .what = "warning", .loc = loc };
-			pp_warnx(c->p, "ignored-attributes", true, NULL, &d,
+			diag_info d = { .what = "warning", .loc = loc };
+			diag_warning_report(c->p, "ignored-attributes", true, NULL, &d,
 					"unsupported '%s' in the 'target' attribute string; 'target' attribute ignored", part);
 			valid = false;
 		} else {

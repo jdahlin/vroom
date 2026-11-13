@@ -217,9 +217,9 @@ int (*pp_builtin_known)(const char *name);
 static __attribute__((noinline, cold)) void pp_counter_extension_warn(pp *p, uint32_t loc)
 {
 	static const char *const g[] = { "pedantic", NULL };
-	pp_dinfo d = { "warning", loc, NULL, 0, NULL, 0, "__COUNTER__", 11 };
+	diag_info d = { "warning", loc, NULL, 0, NULL, 0, "__COUNTER__", 11 };
 
-	if (pp_warnx(p, "c2y-extensions", false, g, &d, "'__COUNTER__' is a C2y extension"))
+	if (diag_warning_report(p, "c2y-extensions", false, g, &d, "'__COUNTER__' is a C2y extension"))
 		PP_HEADER_CACHE_REGION_REJECT(p);
 }
 
@@ -231,7 +231,7 @@ VPRIV int pp_builtin_macro_expand(pp *p, const pp_macro *m, ptok *t)
 
 	switch (m->builtin) {
 	case PP_BUILTIN_LINE:
-		pp_token_number_make(p, t, loc_line(p, t->loc));
+		pp_token_number_make(p, t, pp_location_line(p, t->loc));
 		break;
 	case PP_BUILTIN_FILE: {
 		uint32_t l, loc = t->loc;
@@ -239,7 +239,7 @@ VPRIV int pp_builtin_macro_expand(pp *p, const pp_macro *m, ptok *t)
 
 		if (loc < p->fe[fc->fe].base || loc > p->fe[fc->fe].base + p->fe[fc->fe].f->size)
 			loc = p->fe[fc->fe].base + fc->vt[fc->i ? fc->i - 1 : 0].off;
-		s = presumed_name(p, fc->fe, loc, &l);
+		s = pp_location_presumed_name(p, fc->fe, loc, &l);
 		pp_token_string_make(p, t, s, l);
 		break;
 	}
