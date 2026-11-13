@@ -109,6 +109,66 @@ the fix.  Each review ends with "Decisions needed" and "Not covered", as
 
 ## Status
 
+### 2026-11-13: P1 done, 18 reviews
+
+`docs/review/quality-*.md`: 18 reviews, 5848 lines, 373 findings, each
+reviewer having read its files in full (the "Not covered" section of each
+says what it did not).  `docs/review/README.md` has the areas, the rules and
+the template.  Evidence checked afterwards by grep or by running in six of
+them (as-obj, backend-records, vir-build, diag, linkers, cc-cache); the rest
+is as the reviewers wrote it.
+
+What the reviews settle or change:
+
+- **arm64 cannot go onto the shared walker without changing its output**
+  (walker-a64: ten gaps in `LO()`, a 36-concept matrix: a quarter the same
+  code renamed, a third the same algorithm written differently, a quarter
+  really different; the two walkers already disagree in 10 places).  First
+  step instead: about 800 lines of target-independent code sit in
+  `arch/a64/emit` and `emitimpl.h` is arm64's header (codegen-shared,
+  boundaries); they move with identical output.  Then a pilot.
+- **wasm stays its own walker for control flow and calls**; the C-level
+  decisions (19 of 32 concepts) are shared.  `vcc-same.py` has no wasm mode,
+  so nothing there can be proved identical yet (walker-wasm).
+- **One record type**: arm64's `ins` and the shared `rec` are the same 16
+  bytes under other field names (backend-records).
+- **`struct cc` is the obstacle for C++**: parser state, AST tables and
+  scratch in one struct that codegen reads 24 fields of; the split into
+  `ast.h` and the parser's part is drafted (cc-expr, cc-decl, boundaries).
+  The cc-emit cycle is one call: `cc_run` calls `emit_tu`.
+- **`common/` first**: 11 facilities ordered by copies replaced; vectors
+  about 330 call sites, 11 hand-written string tables, FNV in 18 files, and
+  no out-of-memory policy (six behaviours) (lib, diag).
+- **Passes, measured** (instructions, warm, one thread): kernel TUs are pp
+  53 %, parse and sema 33 %, emit 13 %; SQLite is emit 58 %.  After VIR's
+  allocator the arm64 clean-ups run again: 10.5 % of a VIR compile.  No pass
+  list exists as data anywhere; VIR computes dominators 3 times and the CFG 5
+  times per function (passes, vir-ir, vir-build).
+- **Scheduling, measured** (one run each, loaded machine): two builds
+  through one vccd flush the caches at every switch (168 TUs: 11.1 s against
+  0.8 s); compiles are off the CPU 43-72 % of their time in old build logs;
+  a small link is 2.3x slower with vlink's pool than without; emit threads
+  leak their scratch (scheduling).
+
+Bugs found on the way (not quality work; each needs a test and a fix):
+
+| Where | What | Status |
+|---|---|---|
+| `driver/ccsnap.c:344-365` | a syntax error after a restored header snapshot kills `vpp --batch -j 4` (and the code runs in vccd) | reproduced here: exit 139 in 4 of 4 runs, exit 1 with `-j 1` or `VCC_NODC=1`; the cause (a kept pointer into another thread's stack) is from reading |
+| `ld/ld.c:65,1977` | `x86_ld` is never cleared, so vccd links arm64 as x86-64 after one x86-64 link | no reset in the source (grep); not run |
+| `emit/vir/a64.c:1270` against `arch/x64/emit/vir.c:91` | the dense-switch case count differs when a range spans all 64 bits | read; not run |
+| `vccd/vccd.c:405,426` | `argc + envc` summed in 32 bits: a malformed request reads `argv[-2]` | reported; not checked |
+| `pp`: `#embed` | read through the token cache: a BOM or `1'0` embeds wrong bytes | reported as confirmed by its reviewer; not checked here |
+| `ld/ld.c` `rel_width`, `wasmld.c` | corrupt x86-64 object can write past a section; unchecked counts | from reading |
+| `cc/func.c:299` | wrong `-Wreturn-type` on an enum-covered switch (TODO.md:1660) | reported as verified against clang |
+| `driver/vpp.c:91` | batch workers have a 512 KB stack: a test file ends a batch with SIGBUS, and nesting limits differ 30x from `vpp` | reported by two reviewers |
+
+Next: P2.  The decisions of all 18 reviews (about 120) collected into one
+list, grouped, with a recommendation each, before `ARCHITECTURE.md` and
+`STYLE.md` are written.  Cost note: the reviews ran on the session's model
+and took about 6.7 M tokens; P2 and P3 read the review files and need no
+such fan-out.
+
 ### 2026-11-13: P0 done, the baseline
 
 `bench/quality.py` reads the tree once (no build, 3 s) and prints the report;
@@ -169,7 +229,6 @@ threads (review A).  Not done: the ratchet is not in `ci/premerge.sh`; with
 P3.  Bless the baseline again when PR #134 lands (the include numbers move
 with the paths).
 
-Next: P1, the reviews.
 
 ### 2026-11-13: method written, survey done
 
