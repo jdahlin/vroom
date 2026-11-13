@@ -147,7 +147,11 @@ relative to it); `TODO.md` stays at the top.
     VCC_UNITY=` compiles file by file, and every file must compile alone.
   - `phase1/`: the clang-based phase 1 tools (`vroomd`, `vroom-cc`, PCH
     prefix) and `vroom-ld`, the ld.lld wrapper the -O0 kernel build links with.
-- `ccs/wasm/`: vcc (vpp) as WebAssembly for a compiler-explorer page
+- WebAssembly is disabled since 2026-11-13 (docs/PLAN-wasm.md): `make VCC_WASM=1`
+  builds it, the default build leaves its sources out and a wasm target is an
+  error; its harnesses, `ccs/wasm/` and `ci/premerge.sh wasm` are not
+  maintained and expected to rot.
+- `ccs/wasm/`: [needs VCC_WASM=1; not maintained] vcc (vpp) as WebAssembly for a compiler-explorer page
   (`build.sh`, emscripten memory64 -> `build/wasm/site/`); `mman.c` turns the
   big reservations into small sbrk stretches, `compat/` maps ACLE CRC to SIMDe.
 - `bench/`: harnesses.  `bench/vcc-diff.py` compares `vpp` with `clang -E`;
@@ -197,8 +201,8 @@ VCC_LDCMP=1 bench/vcc-ctests.py -j 6 --no-cache  # also link with vlink: loaded 
 bench/vcc-stress.py [--vccd]        # pathological inputs fail cleanly, vccd survives (~2 s)
 bench/vcc-abi.py                    # cross-compiler calls, clang/vcc x caller/callee, qemu (ccs/vcc/tests/abi, ~3 s)
 bench/vcc-abi.py --host             # the same for the Apple arm64 ABI, run natively
-bench/vcc-abi.py --target wasm64    # ... for wasm64 (or wasm32; --vlink), emcc + node (~20 s)
-bench/vcc-self.py -j 6              # vcc.wasm built by vcc itself vs the emcc build: -S byte for byte (W6, ~40 s)
+bench/vcc-abi.py --target wasm64    # [needs VCC_WASM=1; not maintained] ... for wasm64 (or wasm32; --vlink), emcc + node (~20 s)
+bench/vcc-self.py -j 6              # [needs VCC_WASM=1; not maintained] vcc.wasm built by vcc itself vs the emcc build: -S byte for byte (W6, ~40 s)
 bench/vcc-darwin-s.py -j 6           # Darwin -S assembled by Apple's as, runs as the direct object (~2 min)
 bench/vcc-diag.py -j 6             # tests/diag: vcc's .stderr snapshots, clang's locations/levels/flags (~2 s)
 bench/vcc-diag.py --bin-dir build/ccs-asan   # ... with a sanitizer build (also vcc-mutate.py, VCC_BIN=$PWD/build/ccs-asan)
@@ -234,10 +238,10 @@ VCC_DIAG_DEDUP=1 make ...           # under vccd: a header warning another TU of
 bench/vccd-kbuild.sh work/build-X -j 6   # cold kernel build, vccd only (no clang/vroomd/lld; ~10 s)
 python3 bench/boot-test.py --kernel work/build-X/arch/arm64/boot/Image --timeout 60   # boots Debian
 bench/vbench.py gate                # performance gate: instructions vs the merge-base, budget 1 % (~1 min)
-bench/vcc-wasm.py -j 6              # the C suites for wasm64: vcc -S, clang -c, emcc, node vs clang's build (~2 min)
+bench/vcc-wasm.py -j 6              # [needs VCC_WASM=1; not maintained] the C suites for wasm64: vcc -S, clang -c, emcc, node vs clang's build (~2 min)
 bench/vcc-x86.py -j 6               # the C suites for x86-64 on an x86-64 host: vcc -S, clang -c, glibc, native (~10 s; first run ~10 min for the references)
-bench/vcc-wasm.py -j 6 --objcmp     # ... and vpp -c's object byte-identical to clang's for the same .s
-bench/vcc-wasm.py -j 6 --obj --vlink  # ... vcc's side through vpp -c and vlink as emcc's wasm-ld (~9 min)
+bench/vcc-wasm.py -j 6 --objcmp     # [VCC_WASM=1] ... and vpp -c's object byte-identical to clang's for the same .s
+bench/vcc-wasm.py -j 6 --obj --vlink  # [VCC_WASM=1] ... vcc's side through vpp -c and vlink as emcc's wasm-ld (~9 min)
 bench/vcc-same.py --base DIR -j 6    # test-suite outputs byte-identical with DIR/vpp (vbench.py mkbase REV), ~80 s
 python3 bench/virgen-test.py --bin-dir build/linux/ccs  # generated VIR integer/control-flow units verify and round-trip
 bench/vas-enc.py $PWD/ccs/vcc/tests/vas   # vas encodings vs llvm-mc
@@ -276,10 +280,10 @@ vcc-sema.py runs are green (878/879: modpost.c lacks a generated header).
 
 ## CI and the premerge gate
 `.github/workflows/premerge.yml` runs one reusable workflow per target in
-parallel (`arm64.yml`: jobs arm64, asan, tsan; `wasm.yml`; x86-64 gets its
-own), each on GitHub's ubuntu-24.04-arm (tsan and wasm on x86-64's
-ubuntu-24.04 for now) in a Debian 13 container
-(`ci/setup-debian.sh`: clang 23 from apt.llvm.org, qemu, emsdk for wasm).
+parallel (`arm64.yml`: jobs arm64, asan, tsan; x86-64 gets its own; `wasm.yml` is
+manual-only, not in the gate), each on GitHub's ubuntu-24.04-arm (tsan on
+x86-64's ubuntu-24.04 for now) in a Debian 13 container
+(`ci/setup-debian.sh`: clang 23 from apt.llvm.org, qemu; `wasm` adds emsdk).
 The test set is `ci/premerge.sh JOB`: the vendored C suites under qemu and
 the fast harnesses, no kernel, PostgreSQL or anything needing `work/`.
 Locally, as CI: `env/linux/run.sh ci/premerge.sh arm64`.  main is not

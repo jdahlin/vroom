@@ -1,6 +1,8 @@
 /* vcc code generator: emitter state, the work queue and threads, emit_tu */
 #include "emitimpl.h"
+#ifdef VCC_WASM
 #include "../arch/wasm/as/wasmas.h"
+#endif
 #include "../lib/buf.h"
 #include "../lib/defer.h"
 
@@ -148,7 +150,9 @@ static void ecx_free(ecx *e, vmreg *r)
 	vmreg_put(&r[14], VMREG_SCRATCH);
 	vmreg_put(&r[15], VMREG_SCRATCH);
 	vmpool_give(&ecxpool, r);
+#ifdef VCC_WASM
 	wasm_ecx_free(e);
+#endif
 	wk_ecx_free(e);
 	vw_wk_ecx_free(e);
 }
@@ -445,7 +449,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	E.stats = getenv("VCC_EMIT_STATS") != NULL;
 	E.noopt = getenv("VCC_NOOPT") != NULL;
 	/* wasm64: objects from the text, through arch/wasm/as */
-	E.objtext = getenv("VCC_OBJ_TEXT") != NULL || PP_IS_WASM(o->target);
+	E.objtext = getenv("VCC_OBJ_TEXT") != NULL || WASM(c);
 	/* -g: the line table is the assembler's, from the printer's .loc */
 	if (o->debug && !DARWIN(c) && !WASM(c) && !X86(c))
 		E.objtext = true;
@@ -655,7 +659,8 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 				all.n = 0;
 				for (int i = 0; i < k; i++)
 					tb_put(&all, iov[i].iov_base, iov[i].iov_len);
-				if (PP_IS_WASM(o->target)) {
+#ifdef VCC_WASM
+				if (WASM(c)) {
 					uint8_t *ob;
 					size_t on;
 					char err[512];
@@ -668,7 +673,9 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 						vbuf_put(o->wasm_obj, ob, on);
 						free(ob);
 					}
-				} else if (elf_set_machine(o->obj, X86(c) ? EM_X86_64 : EM_AARCH64),
+				} else
+#endif
+				if (elf_set_machine(o->obj, X86(c) ? EM_X86_64 : EM_AARCH64),
 					   as_run(o->as, o->obj, all.p, all.n, "<vcc>", &msg)) {
 					as_error(c, "assembler: %s", msg);
 					E.errors++;

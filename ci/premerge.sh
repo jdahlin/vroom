@@ -9,7 +9,7 @@
 #   ci/premerge.sh arm64    vcc build, the C suites under qemu, fast harnesses
 #   ci/premerge.sh asan     ASan+UBSan build: vcc suite, diag, stress, vccd, vlink-bad
 #   ci/premerge.sh tsan     TSan build: vcc suite (threaded emitter), vccd
-#   ci/premerge.sh wasm     the C suites for wasm64 (emcc + node)
+#   ci/premerge.sh wasm     the C suites for wasm64 (emcc + node); DISABLED, manual (docs/PLAN-wasm.md)
 #
 # Locally (Debian arm64 container, as CI):  env/linux/run.sh ci/premerge.sh arm64
 # Each step's output goes to build/linux/ci-logs/STEP.log (CI uploads it on
@@ -43,9 +43,9 @@ step() {	# step NAME CMD...: run, log, report; keep going on failure
 	return 0
 }
 
-build() {	# build MAKE-TARGET: a build failure ends the job
+build() {	# build MAKE-TARGET [VAR=VALUE]: a build failure ends the job
 	echo "::group::make $1"
-	if ! make -C ccs -j "$J" "$1" > "$LOGS/make-$1.log" 2>&1; then
+	if ! make -C ccs -j "$J" "$@" > "$LOGS/make-$1.log" 2>&1; then
 		tail -n 60 "$LOGS/make-$1.log"; echo "::endgroup::"
 		echo "FAIL make $1"; exit 1
 	fi
@@ -162,7 +162,8 @@ tsan)
 	step stress-vccd  python3 bench/vcc-stress.py --vccd --bin-dir "$B"
 	;;
 wasm)
-	build vcc
+	# disabled (2026-11-13): needs the wasm sources compiled in
+	build vcc VCC_WASM=1
 	step switch-bitsets-wasm32 python3 bench/vcc-switch-bitsets.py --target wasm32-unknown-emscripten --run
 	step switch-bitsets-wasm64 python3 bench/vcc-switch-bitsets.py --target wasm64-unknown-emscripten --run
 	step opt-rules-wasm32 python3 bench/vcc-opt-rules.py --target wasm32-unknown-emscripten --run

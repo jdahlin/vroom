@@ -5,7 +5,9 @@
  *       vasm --bench N in.s...  (assemble each file N times, report MB/s)
  */
 #include "as.h"
+#ifdef VCC_WASM
 #include "../arch/wasm/as/wasmas.h"
+#endif
 #include "../obj/obj.h"
 #include "../lib/vperf.h"
 #include <fcntl.h>
@@ -94,6 +96,9 @@ int main(int argc, char **argv)
 	if (!in) { fprintf(stderr, "usage: vasm [--target=wasm64-...|arm64-apple-macos|x86_64-linux-gnu] [-o out.o] in.s\n"); return 2; }
 	size_t n; const char *p = map(in, &n);
 	const char *msg;
+#ifndef VCC_WASM
+	if (wasm) { fprintf(stderr, "vcc: error: this build has no WebAssembly support (make VCC_WASM=1)\n"); return 1; }
+#else
 	if (wasm) {
 		/* LLVM's wasm .s to a wasm object (arch/wasm/as, platform/wasm) */
 		uint8_t *ob; size_t on; char err[512];
@@ -103,6 +108,7 @@ int main(int argc, char **argv)
 		free(ob);
 		return 0;
 	}
+#endif
 	if (macho) {
 		/* Apple's dialect, as vpp -c for a Darwin target: back to ours, then the Mach-O writer */
 		size_t dn;
