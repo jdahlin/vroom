@@ -1,4 +1,16 @@
-/* The option loop: clang's command line syntax into the fields of struct driver_job. */
+/*
+ * cmdline.c: clang's command line syntax into the fields of struct driver_job, one option at a time.
+ *
+ * driver_cmdline_parse is one loop over argv.  An option it does not know is ignored (kbuild passes
+ * many that only matter to clang); one clang rejects (a bad -fstrict-flex-arrays=, -CC) ends the job
+ * with a message on the job's error fd.  The return value is 0 to go on, 1 to end the job
+ * (job->status is set) and 2 to return 1 at once without the job's cleanup (an invalid -ftls-model=).
+ * Nothing here opens a file: options only select what later stages do, so their effect on predefined
+ * macros is in predef.c, on search paths in searchpath.c, on the target's features in target-*.c.
+ * -march/-mcpu are kept separately (march_lse, mcpu_lse) and resolved later because their order
+ * matters.  driver_cmdline_check runs after the target check and refuses a missing input and a bad
+ * option value (job->badval).
+ */
 #include "driver-internal.h"
 
 /* an input file by its suffix, as clang's driver: .c .h .i (C), .S .s (assembly), .dts */
@@ -187,6 +199,7 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
 			continue;
 		}
 		if (!strcmp(a, "--vcc-layout-checks")) { job->syntax = 1; job->layout = 1; continue; }
+		if (!strcmp(a, "--lint")) { job->syntax = 1; job->lint = 1; continue; }	/* vpp only: the style checks, front end alone */
 		if (!strcmp(a, "--vcc-tokhash")) { job->tokhash = 1; continue; }
 		if (!strcmp(a, "-o") && i + 1 < argc) { job->out = argv[++i]; continue; }
 		if (!strncmp(a, "-Wp,-MMD,", 9) || !strncmp(a, "-Wp,-MD,", 8)) {

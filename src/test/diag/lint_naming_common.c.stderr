@@ -1,0 +1,10 @@
+src/common/lint_naming_common.c:2:5: warning: function 'v_empty_facility' should be named 'v<facility>_...' (module src/common/) [-Wvcc-lint-naming]
+    2 | int v_empty_facility(int x) { return x; }
+      |     ^~~~~~~~~~~~~~~~
+src/common/lint_naming_common.c:3:5: warning: function 'vend' should be named 'v<facility>_...' (module src/common/) [-Wvcc-lint-naming]
+    3 | int vend(int x) { return x; }
+      |     ^~~~
+src/common/lint_naming_common.c:4:5: warning: function 'buffer_length' should be named 'v<facility>_...' (module src/common/) [-Wvcc-lint-naming]
+    4 | int buffer_length(int x) { return x; }
+      |     ^~~~~~~~~~~~~
+3 warnings generated.

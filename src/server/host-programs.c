@@ -1,4 +1,14 @@
-/* The host programs of a build (no --target): compile each source, then link. */
+/*
+ * host-programs.c: build kbuild's host programs (no --target: fixdep, mk_elfconfig ...) for macOS
+ * without clang or ld64.
+ *
+ * Only on Darwin; elsewhere it is an error that says --backend-sock is needed.  -c/-S/-E go to the
+ * driver (driver/job.c) as they are, which compiles for the host when there is no --target.  A link
+ * compiles each source to a temporary object next to the output and links the objects with vld's
+ * Mach-O path (platform/darwin/macho-linker.c, libSystem only; -l maps to it, -fuse-ld= is ignored); the
+ * temporary objects are removed after the link.  A command line with a target that cc_is_compile or
+ * cc_is_pp does not take is refused here, never guessed at.  Runs in the calling thread.
+ */
 #include "vccd-internal.h"
 
 /* options that take the next argv entry */

@@ -1,5 +1,11 @@
-/* Driver-only predefines, included after buf/bstr. Tables are generated once
- * from LLVM/Clang; feature resolution and macro emission need no LLVM library. */
+/*
+ * x86predefines.h: the x86-64 feature and CPU macros (__AVX2__, __znver3__ ...) for predef.c.
+ *
+ * Included by predef.c after the buffer type, so it needs `buf` and `bstr`.  The tables
+ * (x86macros-data.inc) are generated from clang by src/tools/gen-x86features.py; the functions here
+ * emit `#undef` then `#define` for every feature macro whose required features are all in the job's
+ * set, and the chosen CPU's own macros, so no LLVM library is needed at run time.
+ */
 #ifndef VCC_X86PREDEFINES_H
 #define VCC_X86PREDEFINES_H
 #include "arch/x64/x86features.h"

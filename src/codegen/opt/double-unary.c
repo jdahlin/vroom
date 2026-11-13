@@ -1,4 +1,9 @@
-/* Two identical integer negations or complements cancel. */
+/*
+ * double-unary.c: -(-x) and ~(~x) are x, for 4- and 8-byte integers of one type.
+ *
+ * em_double_unary(e, n) returns the inner operand node, or 0.  Only at -O1 and up.  Used by the
+ * shared walker, arm64's expression code and wasm's emitter, which then generate the operand alone.
+ */
 #include "../emitimpl.h"
 
 VPRIV uint32_t em_double_unary(ecx *e, uint32_t n)

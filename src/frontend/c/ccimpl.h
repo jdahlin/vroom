@@ -356,6 +356,7 @@ VPRIV void scope_close_proto(cc *c);
 VPRIV void proto_binding(cc *c, uint32_t s);
 VPRIV void unused_statics(cc *c);
 VPRIV void unused_typedefs(cc *c);
+VPRIV void cc_lint_naming_report(cc *c);	/* naming-lint.c: vpp --lint */
 VPRIV uint32_t sym_new(cc *c, int kind, uint32_t name, qty ty, uint32_t loc);
 VPRIV void sym_bind(cc *c, uint32_t s);
 VPRIV uint32_t lookup(cc *c, uint32_t id);

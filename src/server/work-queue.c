@@ -1,5 +1,13 @@
-/* The queue of accepted sockets that wait for a worker thread (or, with
-   --shared-pool, for a job of the shared pool to take them). */
+/*
+ * work-queue.c: the fixed-size queue of accepted sockets waiting for a worker thread (or, with
+ * --shared-pool, for a pool job to take them).
+ *
+ * The accept loop pushes, workers pop; qlock guards the ring (qhead and qtail grow without bound and
+ * are used modulo QSIZE).  n_active counts connections taken and not yet answered; it is raised
+ * under qlock when a socket leaves the queue, so the restart and the exit drain (which wait for it to
+ * reach zero or one) never see a socket in neither place.  A full queue closes the connection: the
+ * shim reports an error.
+ */
 #include "vccd-internal.h"
 
 int queue[QSIZE];

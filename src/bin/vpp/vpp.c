@@ -3,6 +3,12 @@
  *
  *   vpp [--cmp REF.i] [-o OUT] CLANG-ARGS...
  *   vpp --cmp-files OURS REF      compare two -E outputs
+ *   vpp --lint [-fsyntax-only] CLANG-ARGS...
+ *                                 the front end alone plus the style checks: each
+ *                                 file-scope function and object defined in the
+ *                                 main file must carry its module's prefix
+ *                                 (frontend/c/naming-lint.c; the option is parsed
+ *                                 in driver/cmdline.c, off in every other run)
  *   vpp --batch JOBS [-j N] [-C DIR] [--cmp]
  *                                 many TUs in one process on N threads (-j,
  *                                 else VCC_JOBS, else 6: the budget of the

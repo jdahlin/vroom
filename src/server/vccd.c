@@ -12,8 +12,8 @@
  *     on stdin is looked up), user-space link tests, --version,
  *     -print-file-name, and links with options vld refuses;
  *   - runs preprocessing jobs (-E: kbuild's linker scripts and device
- *     trees) itself, with vcc's preprocessor (ppdriver.c), in this thread;
- *   - compiles -c/-S of .c (frontend/pp/ + frontend/c/ + codegen/) and .S (frontend/pp/ + as.c) itself,
+ *     trees) itself, with vcc's preprocessor (driver/job.c), in this thread;
+ *   - compiles -c/-S of .c (frontend/pp/ + frontend/c/ + codegen/) and .S (frontend/pp/ + as/as.c) itself,
  *     in this thread, into the .o and dependency file kbuild names (the
  *     vDSO's -mcmodel=tiny and stdin input included); the header cache is
  *     shared by all jobs, everything else is per thread.  What vcc fails on
@@ -22,17 +22,17 @@
  *     vDSO, with --vroom-stubs for the -O0 dead branches (with --ld PROG:
  *     PROG is run instead);
  *   - compiles and links the host programs (no --target) for macOS the same
- *     way: ppdriver without a target writes Mach-O objects, vld's Mach-O
+ *     way: driver/job.c without a target writes Mach-O objects, vld's Mach-O
  *     path (platform/darwin/macho-linker.c) links them against libSystem.  No
  *     clang, no ld64 (with --backend-sock: they are forwarded there);
- *   - runs the archiver (ar, var, llvm-ar by argv[0]) itself: ar.c;
+ *   - runs the archiver (ar, var, llvm-ar by argv[0]) itself: utils/ar.c;
  *   - runs nm and objcopy (vcc-nm, vcc-objcopy) itself: ld/objcopy.c;
  *   - with VCC_DELEGATE=PROG in the request's environment (a build that is
  *     not the kernel, e.g. PostgreSQL on macOS: bench/pg/build.sh vccd),
  *     a vcc request is either -c of a .c file, compiled here, or run as
  *     PROG with the same arguments (probes, links, --version, and any TU
  *     vcc fails on); sources containing $VCC_DELEGATE_SKIP go to PROG too;
- *   - runs make's recipes for vsh (argv[0] sh): rsh.c interprets kbuild's
+ *   - runs make's recipes for vsh (argv[0] sh): utils/rsh.c interprets kbuild's
  *     subset of sh and runs the tools in it as requests here; anything else
  *     is answered VROOM_STATUS_DECLINE and vsh runs the real shell.
  *

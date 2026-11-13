@@ -1,4 +1,12 @@
-/* Scalar result-table adapter; the shared proof owns all eligibility. */
+/*
+ * switch-values.c: the walker's adapter for the result-table switch: emit a switch that only
+ * produces constants as a table lookup when opt/switch-values.c has proved it.
+ *
+ * wk_switch_values returns false, and the caller emits the switch normally, unless -O1 or more, a
+ * real (not dry) function body without cleanups and not inside an inlined copy, not Darwin, and at
+ * least three free temporaries.  The eligibility itself is the shared proof's, in
+ * em_switch_values_plan.
+ */
 #include "walk.h"
 
 VPRIV bool wk_switch_values(ecx *e, uint32_t n)
