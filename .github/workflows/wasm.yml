@@ -1,9 +1,14 @@
 # WebAssembly (wasm64-unknown-emscripten) target: the same C suites through
 # vcc -S, linked by emcc and run under node against clang's build
 # (bench/vcc-wasm.py).  vcc itself runs on an x86-64 Linux runner for now.
+#
+# DISABLED (2026-11-13, by decision; docs/PLAN-wasm.md): the wasm target is not
+# built by default (ccs/Makefile VCC_WASM) and is left to rot until needed, so
+# this workflow is manual-only and not part of the premerge gate.  To turn it
+# back on: build with VCC_WASM=1 (ci/premerge.sh wasm does) and restore
+# `workflow_call:` below and the `wasm` job and gate's `needs` in premerge.yml.
 name: wasm
 on:
-  workflow_call:
   workflow_dispatch:
 permissions:
   contents: read
