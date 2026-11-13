@@ -133,7 +133,7 @@ relative to it); `TODO.md` stays at the top.
     (`warnings.inc`).  Without `--backend-sock` vccd runs the whole kernel
     build itself: probes, `-E`/`-c`/`-S` (stdin too), links (vld in-process;
     `--ld PROG` spawns one), nm/objcopy behind the `vcc-nm`/`vcc-objcopy`
-    shims, and the host programs (vcc + `ldmacho.c`, macOS only); nothing
+    shims, and the host programs (vcc + `macho-linker.c`, macOS only); nothing
     falls back to clang.
   - `utils/`: what runs inside vccd for kbuild: fixdep, the archiver (`ar.c`:
     thin archives, llvm-ar-identical, so the build uses no llvm-ar) and
@@ -180,7 +180,7 @@ relative to it); `TODO.md` stays at the top.
   - `platform/linux/`: the ELF writer (`elf.c`: relocations, string table,
     file layout as LLVM MC).
   - `platform/darwin/`: the Mach-O writer; vld's Mach-O executables
-    (`ldmacho.c`: libSystem only, chained fixups, ad-hoc signature, chosen
+    (`macho-linker.c`: libSystem only, chained fixups, ad-hoc signature, chosen
     when the first input is Mach-O; the kernel's host programs).
   - `platform/wasm/`: the wasm object writer (`wasm.c`: layout, symbol table,
     relocations as LLVM's WasmObjectWriter, byte for byte).

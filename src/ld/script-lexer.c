@@ -5,20 +5,20 @@
 static const char *sp, *sp_end, *sp_file;
 
 /* character classes of the script lexer (NUL behaves as strchr() made it) */
-enum { CT_NAMEEND = 1, CT_PATEND = 2, CT_IDENT = 4, CT_WORD = 8 };
-#define CT_AN (CT_IDENT | CT_WORD)
-static const uint8_t ctab[256] = {
-	[0] = CT_NAMEEND | CT_PATEND | CT_IDENT,
-	[' '] = CT_NAMEEND | CT_PATEND, ['\t'] = CT_NAMEEND | CT_PATEND,
-	['\r'] = CT_NAMEEND | CT_PATEND, ['\n'] = CT_NAMEEND | CT_PATEND,
-	['('] = CT_NAMEEND | CT_PATEND, [')'] = CT_NAMEEND | CT_PATEND,
-	['{'] = CT_NAMEEND, ['}'] = CT_NAMEEND, [':'] = CT_NAMEEND, [';'] = CT_NAMEEND,
-	[','] = CT_NAMEEND, ['='] = CT_NAMEEND,
-	['0' ... '9'] = CT_AN, ['A' ... 'Z'] = CT_AN, ['a' ... 'z'] = CT_AN,
-	['_'] = CT_AN, ['.'] = CT_AN, ['$'] = CT_IDENT,
+enum { LD_CHARACTER_NAME_END = 1, LD_CHARACTER_PATTERN_END = 2, LD_CHARACTER_IDENTIFIER = 4, LD_CHARACTER_WORD = 8 };
+#define LD_CHARACTER_ALPHANUMERIC (LD_CHARACTER_IDENTIFIER | LD_CHARACTER_WORD)
+static const uint8_t ld_script_character_classes[256] = {
+	[0] = LD_CHARACTER_NAME_END | LD_CHARACTER_PATTERN_END | LD_CHARACTER_IDENTIFIER,
+	[' '] = LD_CHARACTER_NAME_END | LD_CHARACTER_PATTERN_END, ['\t'] = LD_CHARACTER_NAME_END | LD_CHARACTER_PATTERN_END,
+	['\r'] = LD_CHARACTER_NAME_END | LD_CHARACTER_PATTERN_END, ['\n'] = LD_CHARACTER_NAME_END | LD_CHARACTER_PATTERN_END,
+	['('] = LD_CHARACTER_NAME_END | LD_CHARACTER_PATTERN_END, [')'] = LD_CHARACTER_NAME_END | LD_CHARACTER_PATTERN_END,
+	['{'] = LD_CHARACTER_NAME_END, ['}'] = LD_CHARACTER_NAME_END, [':'] = LD_CHARACTER_NAME_END, [';'] = LD_CHARACTER_NAME_END,
+	[','] = LD_CHARACTER_NAME_END, ['='] = LD_CHARACTER_NAME_END,
+	['0' ... '9'] = LD_CHARACTER_ALPHANUMERIC, ['A' ... 'Z'] = LD_CHARACTER_ALPHANUMERIC, ['a' ... 'z'] = LD_CHARACTER_ALPHANUMERIC,
+	['_'] = LD_CHARACTER_ALPHANUMERIC, ['.'] = LD_CHARACTER_ALPHANUMERIC, ['$'] = LD_CHARACTER_IDENTIFIER,
 };
 
-static void sskip(void)
+static void ld_script_whitespace_skip(void)
 {
 	for (;;) {
 		while (sp < sp_end && (*sp == ' ' || *sp == '\t' || *sp == '\n' || *sp == '\r'))
@@ -31,69 +31,69 @@ static void sskip(void)
 		break;
 	}
 }
-static bool satend(void) { sskip(); return sp >= sp_end; }
-static bool speek(char c) { sskip(); return sp < sp_end && *sp == c; }
-static bool sconsume(char c)
+static bool ld_script_is_at_end(void) { ld_script_whitespace_skip(); return sp >= sp_end; }
+static bool ld_script_character_peek(char c) { ld_script_whitespace_skip(); return sp < sp_end && *sp == c; }
+static bool ld_script_character_consume(char c)
 {
-	if (speek(c)) {
+	if (ld_script_character_peek(c)) {
 		sp++;
 		return true;
 	}
 	return false;
 }
-static void serr(const char *what)
+static void ld_script_error_report(const char *what)
 {
 	int line = 1;
 	for (const char *p = sp_file; p < sp; p++)
 		line += *p == '\n';
-	error("linker script line %d: %s near '%.20s'", line, what, sp);
+	ld_error_report("linker script line %d: %s near '%.20s'", line, what, sp);
 }
-static void sexpect(char c)
+static void ld_script_character_expect(char c)
 {
-	if (!sconsume(c)) {
+	if (!ld_script_character_consume(c)) {
 		char m[32];
 		snprintf(m, sizeof m, "expected '%c'", c);
-		serr(m);
+		ld_script_error_report(m);
 		sp = sp_end;
 	}
 }
-static char *sdup(const char *b, const char *e)
+static char *ld_script_text_duplicate(const char *b, const char *e)
 {
-	char *p = alloc(e - b + 1);
+	char *p = ld_region_alloc(e - b + 1);
 	memcpy(p, b, e - b);
 	p[e - b] = 0;
 	return p;
 }
 /* statement-level name: up to whitespace or one of (){}:;,= */
-static char *sname(void)
+static char *ld_script_name_parse(void)
 {
-	sskip();
+	ld_script_whitespace_skip();
 	const char *b = sp;
 	if (sp < sp_end && *sp == '"') {
 		const char *e = memchr(sp + 1, '"', sp_end - sp - 1);
-		if (!e) { serr("unterminated string"); sp = sp_end; return astrdup(""); }
+		if (!e) { ld_script_error_report("unterminated string"); sp = sp_end; return ld_region_string_duplicate(""); }
 		sp = e + 1;
-		return sdup(b + 1, e);
+		return ld_script_text_duplicate(b + 1, e);
 	}
-	while (sp < sp_end && !(ctab[(unsigned char)*sp] & CT_NAMEEND))
+	while (sp < sp_end && !(ld_script_character_classes[(unsigned char)*sp] & LD_CHARACTER_NAME_END))
 		sp++;
-	return sdup(b, sp);
+	return ld_script_text_duplicate(b, sp);
 }
 /* name inside a pattern list or ADDR(): up to whitespace or parens */
-static char *spatname(void)
+static char *ld_script_pattern_name_parse(void)
 {
-	sskip();
+	ld_script_whitespace_skip();
 	const char *b = sp;
-	while (sp < sp_end && !(ctab[(unsigned char)*sp] & CT_PATEND))
+	while (sp < sp_end && !(ld_script_character_classes[(unsigned char)*sp] & LD_CHARACTER_PATTERN_END))
 		sp++;
-	return sdup(b, sp);
+	return ld_script_text_duplicate(b, sp);
 }
-static inline __attribute__((always_inline)) bool sword(const char *w)
+static inline __attribute__((always_inline)) bool ld_script_word_consume(const char *w)
 {
-	sskip();
+	ld_script_whitespace_skip();
 	size_t n = strlen(w);
 	if ((size_t)(sp_end - sp) >= n && !memcmp(sp, w, n) &&
-	    (sp + n == sp_end || !(ctab[(unsigned char)sp[n]] & CT_WORD))) {
+	    (sp + n == sp_end || !(ld_script_character_classes[(unsigned char)sp[n]] & LD_CHARACTER_WORD))) {
 		sp += n;
 		return true;
 	}

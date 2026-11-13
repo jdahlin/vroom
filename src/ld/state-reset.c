@@ -1,7 +1,7 @@
 /* Resetting all per-link state so the linker can run again in one process. */
 
 /* all per-link state, so ld_main can be called again (vccd, VLD_REPEAT) */
-static void reset_state(void)
+static void ld_state_reset(void)
 {
 	memset(&opt, 0, sizeof opt);
 	memset(&objs, 0, sizeof objs);
@@ -32,12 +32,12 @@ static void reset_state(void)
 	memset(&recorded, 0, sizeof recorded);
 	memset(&script_new, 0, sizeof script_new);
 	memset(&routs, 0, sizeof routs);
-	/* in the arena, which free_arenas unmapped after the last link (vccd runs many) */
+	/* in the arena, which ld_regions_free unmapped after the last link (vccd runs many) */
 	ncache = NULL;
 	ncmask = ncount = 0;
 	memset(&ehfdes, 0, sizeof ehfdes);
 	memset(&stop_syms, 0, sizeof stop_syms);
-	ehhdr_isec = NONE;	/* set only while NONE */
+	ehhdr_isec = LD_NONE;	/* set only while LD_NONE */
 	has_tls = headers_loaded = false;
 	x86_ld = false;
 	atomic_store(&ld_machine, 0);
@@ -48,9 +48,9 @@ static void reset_state(void)
 	tr_vals = NULL;
 	tr_mask = tr_n = 0;
 	entry_name = NULL;
-	reladyn_isec = buildid_isec = comment_isec = got_isec = NONE;
-	dynsym_isec = dynstr_isec = hash_isec = gnuhash_isec = NONE;
-	versym_isec = verdef_isec = dynamic_isec = NONE;
+	reladyn_isec = buildid_isec = comment_isec = got_isec = LD_NONE;
+	dynsym_isec = dynstr_isec = hash_isec = gnuhash_isec = LD_NONE;
+	versym_isec = verdef_isec = dynamic_isec = LD_NONE;
 	memset(&sphdrs, 0, sizeof sphdrs);
 	memset(&vernodes, 0, sizeof vernodes);
 	memset(&ver_locals, 0, sizeof ver_locals);
@@ -62,7 +62,7 @@ static void reset_state(void)
 	hdr_va = 0;
 	memset(&gotsyms, 0, sizeof gotsyms);	/* (all of it: its buffer was in the last link's arena) */
 	memset(&gotlocs, 0, sizeof gotlocs);
-	symtab_isec = strtab_isec = shstrtab_isec = NONE;
+	symtab_isec = strtab_isec = shstrtab_isec = LD_NONE;
 	reladyn_buf = NULL;
 	out = NULL;
 	ndyn = 0;

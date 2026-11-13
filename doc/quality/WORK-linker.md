@@ -138,6 +138,17 @@ checked in).  Refresh the opening comments and the stale header of `ld.c`.
 Proof: `VCC_LDCMP=1 bench/vcc-ctests.py`, the kernel link identical, and
 `bench/vbench.py gate` within 1 %.
 
+Status (2026-11-13): the rename half is applied (`rename-ld.tsv`, scoped
+mode of `rename-table.py`): 521 whole-word rows (functions, types,
+enumerators, macros, per-link and process-wide globals) in `src/ld/*.c`
+without `wasmld.c`, `src/arch/*/ld/*.inc` and the Mach-O linker, plus the
+file moves (`elf-definitions.h`, `region.c`, `macho-linker.c`, the five arch
+fragments).  Not done: the 290 field rows (`field,deferred`, they wait for the
+front-end field-use tool) and the link context itself, so the file-scope
+per-link variables keep their names and the part files still do not compile
+alone.  Names the owner may revisit: `macho-linker.c` and `macho_link`,
+`elf-definitions.h` with `elf_*` types, `region.c`.
+
 ### 3. The shared layer
 
 Move what ELF, wasm, Mach-O, objcopy/nm and `ar` each wrote on their own

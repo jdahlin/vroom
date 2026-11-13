@@ -125,7 +125,7 @@ PP_OBJ  = $(call o,$(PP_SRC)) $(SPLIT_OBJ) $(call mod,vir) $(call o,$(VIRA_SRC))
 mod = $(if $(VCC_UNITY),$(OBJ)/unity/$(1).o,$(call o,$($(1)_SRC)))
 AS_SRC  = $(AS_FILES) $(as_SRC) $(obj_SRC)
 AS_OBJ  = $(call o,$(AS_FILES)) $(call mod,as) $(call mod,obj)
-LD_SRC  = ld/ld.c $(LIB_SRC) ld/objcopy.c $(if $(VCC_WASM),ld/wasmld.c) platform/darwin/ldmacho.c
+LD_SRC  = ld/ld.c $(LIB_SRC) ld/objcopy.c $(if $(VCC_WASM),ld/wasmld.c) platform/darwin/macho-linker.c
 
 $(OBJ)/%.o: %.c Makefile | $(OBJ)
 	@mkdir -p $(dir $@)
@@ -154,7 +154,7 @@ $(OBJ)/no/%.o: %.c Makefile | $(OBJ)
 $(OBJ)/ld/ld.o: XFLAGS = -DVLD_MAIN
 
 # the linker without main(), for vccd (links, nm and objcopy run in its worker threads)
-VCCD_LD_OBJ = $(OBJ)/ld/ldlib.o $(call o,ld/objcopy.c platform/darwin/ldmacho.c)
+VCCD_LD_OBJ = $(OBJ)/ld/ldlib.o $(call o,ld/objcopy.c platform/darwin/macho-linker.c)
 $(OBJ)/ld/ldlib.o: ld/ld.c Makefile | $(OBJ)
 	@mkdir -p $(dir $@)
 	$(VCC_CC) $(VCC_FAST) $(VCC_LTO) -MMD -MP -c $< -o $@
@@ -243,10 +243,10 @@ self: $(OUT)/vpp
 	for f in $(SELF_SRC); do o=$$(echo $$f | sed 's,/,-,g'); $(SELF_CC) $(SELF_FLAGS) $$f -o $(SELF)/$${o%.c}.o || exit 1; done
 	$(SELF_CC) $(SELF_FLAGS) -DVLD_MAIN ld/ld.c -o $(SELF)/ld-main.o
 	$(SELF_LD) $(call so,bin/vpp/vpp.c) $(SELF_PP) $(SELF_LEX) $(SELF_AS) -o $(SO)/vpp
-	$(SELF_LD) $(call so,$(VCCD_SRC) $(server_SRC) ld/ld.c ld/objcopy.c platform/darwin/ldmacho.c) $(SELF_PP) $(SELF_LEX) $(SELF_AS) -o $(SO)/vccd
+	$(SELF_LD) $(call so,$(VCCD_SRC) $(server_SRC) ld/ld.c ld/objcopy.c platform/darwin/macho-linker.c) $(SELF_PP) $(SELF_LEX) $(SELF_AS) -o $(SO)/vccd
 	$(SELF_LD) $(call so,bin/vasm/vasm.c $(LIB_SRC)) $(SELF_AS) -o $(SO)/vasm
 	$(SELF_LD) $(call so,bin/lextest/lextest.c port/darwin/pmc.c) $(SELF_LEX) -o $(SO)/lextest
-	$(SELF_LD) $(SO)/ld-main.o $(call so,$(LIB_SRC)) $(SO)/ld-objcopy.o $(SO)/platform-darwin-ldmacho.o -o $(SO)/vlink
+	$(SELF_LD) $(SO)/ld-main.o $(call so,$(LIB_SRC)) $(SO)/ld-objcopy.o $(SO)/platform-darwin-macho-linker.o -o $(SO)/vlink
 	$(SELF_LD) $(call so,bin/vcc/shim.c) -o $(SO)/vcc
 
 self-check: self

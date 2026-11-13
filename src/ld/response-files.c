@@ -5,11 +5,11 @@
  * @FILE that cannot be read stays as it is.  kbuild links a module of
  * several objects with `ld -r -o m.o @m.mod`.  The new vector and its words
  * live in one malloc'ed block list, *keep, freed by the caller. */
-struct rspmem { struct rspmem *next; };
+struct ld_response_memory { struct ld_response_memory *next; };
 
-static void *rsp_alloc(struct rspmem **keep, size_t n)
+static void *ld_response_alloc(struct ld_response_memory **keep, size_t n)
 {
-	struct rspmem *m = malloc(sizeof *m + n);
+	struct ld_response_memory *m = malloc(sizeof *m + n);
 	if (!m) {
 		fputs("vld: out of memory\n", stderr);
 		exit(1);
@@ -19,7 +19,7 @@ static void *rsp_alloc(struct rspmem **keep, size_t n)
 	return m + 1;
 }
 
-static bool rsp_expand(int *pargc, char ***pargv, int dirfd, struct rspmem **keep)
+static bool ld_response_files_expand(int *pargc, char ***pargv, int dirfd, struct ld_response_memory **keep)
 {
 	bool any = false;
 	for (int i = 1; i < *pargc; i++)
@@ -29,7 +29,7 @@ static bool rsp_expand(int *pargc, char ***pargv, int dirfd, struct rspmem **kee
 	/* n == i throughout: out[n] is written only after argv[i] is read, and
 	 * after the first expansion out and argv are the same vector */
 	int argc = *pargc, n = 0, nexp = 0;
-	char **argv = *pargv, **out = rsp_alloc(keep, (argc + 1) * sizeof *out);
+	char **argv = *pargv, **out = ld_response_alloc(keep, (argc + 1) * sizeof *out);
 	for (int i = 0; i < argc; i++) {
 		const char *a = argv[i];
 		char *text = NULL;
@@ -39,7 +39,7 @@ static bool rsp_expand(int *pargc, char ***pargv, int dirfd, struct rspmem **kee
 			struct stat st;
 			if (fd >= 0 && !fstat(fd, &st) && st.st_size >= 0) {
 				len = (size_t)st.st_size;
-				text = rsp_alloc(keep, len + 1);
+				text = ld_response_alloc(keep, len + 1);
 				size_t got = 0;
 				while (got < len) {
 					ssize_t r = read(fd, text + got, len - got);
@@ -60,7 +60,7 @@ static bool rsp_expand(int *pargc, char ***pargv, int dirfd, struct rspmem **kee
 		/* split in place: a word never grows when its quotes are removed */
 		char *p = text, *end = text + len;
 		int nw = 0;
-		char **words = rsp_alloc(keep, (len / 2 + 2) * sizeof *words);
+		char **words = ld_response_alloc(keep, (len / 2 + 2) * sizeof *words);
 		while (p < end) {
 			while (p < end && isspace((unsigned char)*p))
 				p++;
@@ -85,7 +85,7 @@ static bool rsp_expand(int *pargc, char ***pargv, int dirfd, struct rspmem **kee
 		}
 		/* the words replace @FILE; an @ among them is expanded on the next pass */
 		int rest = argc - i - 1;
-		char **nargv = rsp_alloc(keep, (n + nw + rest + 1) * sizeof *nargv);
+		char **nargv = ld_response_alloc(keep, (n + nw + rest + 1) * sizeof *nargv);
 		memcpy(nargv, out, n * sizeof *nargv);
 		memcpy(nargv + n, words, nw * sizeof *nargv);
 		memcpy(nargv + n + nw, argv + i + 1, rest * sizeof *nargv);
