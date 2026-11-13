@@ -13,7 +13,7 @@
 #include <string.h>
 
 #include "port/job-regions.h"
-#include "common/buf.h"
+#include "common/buffer.h"
 #include "vir/vir.h"
 
 #ifndef VPRIV

@@ -28,8 +28,8 @@
 #include "obj/obj.h"
 #include "port/job-regions.h"
 #include "common/digest.h"
-#include "common/buf.h"
-#include "common/defer.h"
+#include "common/buffer.h"
+#include "common/scoped-cleanup.h"
 #include "arch/x64/x86features.h"
 
 /* functions one file defines and another calls: static when the driver is
@@ -45,12 +45,12 @@
 typedef struct buf {
 	char *p;
 	size_t n, cap;
-	vmreg *r;	/* the first 16 MB come from this per-thread region (bfree puts it back) */
+	vjob_region *r;	/* the first 16 MB come from this per-thread region (bfree puts it back) */
 } buf;
 
 /* job-buffer.c */
-extern vmpool bufpool;
-extern _Thread_local vmreg *bufr;	/* this job's (ppd_run) */
+extern vjob_region_pool bufpool;
+extern _Thread_local vjob_region *bufr;	/* this job's (ppd_run) */
 
 /* One job's parsed command line and the state its pieces share: what ppd_run1 held as
    locals before it was cut by job (Q-drv-02). */

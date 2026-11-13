@@ -86,7 +86,7 @@ static bool bc_initializer(cc *c, uint32_t n, uint32_t *out, unsigned depth)
 		*out = 0;
 		return true;
 	}
-	if (depth > 512 || vstack_low())
+	if (depth > 512 || vstack_guard_low())
 		return false;
 	const node *x = N(n);
 	if (x->op == N_VAR)
@@ -145,7 +145,7 @@ static bool bc_grammar(cc *c, uint32_t n, unsigned depth, bool strict)
 {
 	if (!n)
 		return true;
-	if (depth > 512 || vstack_low())
+	if (depth > 512 || vstack_guard_low())
 		return false;
 	const node *x = N(n);
 	if (x->op == N_ZERO || x->op == N_NUM || x->op == N_FNUM)
@@ -186,7 +186,7 @@ static bool bc_grammar(cc *c, uint32_t n, unsigned depth, bool strict)
 		if (!bc_grammar(c, x->a, depth + 1, strict) || !eval(c, x->a, &test))
 			return false;
 		bool yes = test.kind == CV_INT	 ? test.i != 0
-			   : test.kind == CV_FLT ? test.ld ? q_nz(test.q) : test.f != 0
+			   : test.kind == CV_FLT ? test.ld ? vsoftfloat_is_nonzero(test.q) : test.f != 0
 						 : false;
 		return (x->op == N_LOGAND ? !yes : yes) || bc_grammar(c, x->b, depth + 1, strict);
 	}
@@ -197,7 +197,7 @@ static bool bc_grammar(cc *c, uint32_t n, unsigned depth, bool strict)
 		if (!bc_grammar(c, x->a, depth + 1, strict) || !eval(c, x->a, &test))
 			return false;
 		bool yes = test.kind == CV_INT	 ? test.i != 0
-			   : test.kind == CV_FLT ? test.ld ? q_nz(test.q) : test.f != 0
+			   : test.kind == CV_FLT ? test.ld ? vsoftfloat_is_nonzero(test.q) : test.f != 0
 						 : false;
 		return bc_grammar(c, yes ? (x->b ? x->b : x->a) : x->c, depth + 1, strict);
 	}
@@ -307,9 +307,9 @@ static bool bc_encode(cc *c, qty t, cval cv, u128 *v, unsigned *valid)
 	}
 	if (!is_float(c, t) || cv.kind != CV_FLT)
 		return false;
-	u128 q = cv.ld ? cv.q : q_of_d(cv.f);
-	if (cv.ld && q_isnan(q) && *valid <= 64) {
-		*v = q_nan_storage(q,
+	u128 q = cv.ld ? cv.q : vsoftfloat_of_double(cv.f);
+	if (cv.ld && vsoftfloat_is_nan(q) && *valid <= 64) {
+		*v = vsoftfloat_nan_storage(q,
 				   KIND(c, t) == TY_BFLOAT16 ? 7
 				   : *valid == 16	     ? 10
 				   : *valid == 32	     ? 23
@@ -321,9 +321,9 @@ static bool bc_encode(cc *c, qty t, cval cv, u128 *v, unsigned *valid)
 		return true;
 	}
 	if (KIND(c, t) == TY_FLOAT16)
-		*v = q_to_h(q);
+		*v = vsoftfloat_to_half(q);
 	else if (KIND(c, t) == TY_BFLOAT16)
-		*v = q_to_bf(q);
+		*v = vsoftfloat_to_bfloat16(q);
 	else if (*valid == 32) {
 		float f = (float)cv.f;
 		uint32_t bits;
@@ -335,7 +335,7 @@ static bool bc_encode(cc *c, qty t, cval cv, u128 *v, unsigned *valid)
 		*v = bits;
 	} else if (c->o->target == PP_LINUX_X86_64 && KIND(c, t) == TY_LDOUBLE) {
 		uint8_t b[10];
-		q_to_x87(q, b);
+		vsoftfloat_to_x87(q, b);
 		*v = 0;
 		for (unsigned i = 0; i < 10; i++)
 			*v |= (u128)b[i] << (i * 8);
@@ -359,7 +359,7 @@ static bool bc_read(bc_state *state, cc *c, uint32_t n, qty t, uint64_t off, uns
 		    unsigned depth)
 {
 	*v = *known = 0;
-	if (depth > 512 || vstack_low() || count > 128 || off > ty_size(c, t) * 8 || count > ty_size(c, t) * 8 - off)
+	if (depth > 512 || vstack_guard_low() || count > 128 || off > ty_size(c, t) * 8 || count > ty_size(c, t) * 8 - off)
 		return false;
 	const node *x = n ? N(n) : NULL;
 	if (x && x->op == N_CAST && x->aux == CK_BITS) {
@@ -565,7 +565,7 @@ static bool bc_decode(cc *c, qty t, u128 raw, cval *v)
 		if (((raw >> p) & bc_mask(eb)) == bc_mask(eb) && frac) {
 			v->ld = true;
 			v->q = ((raw >> (p + eb)) & 1) << 127 | (u128)0x7fff << 112 | frac << (112 - p);
-			v->f = q_to_d(v->q);
+			v->f = vsoftfloat_to_double(v->q);
 			return true;
 		}
 	}
@@ -591,7 +591,7 @@ static bool bc_decode(cc *c, qty t, u128 raw, cval *v)
 			v->q = ((raw >> 79) & 1) << 127 | (u128)exp << 112 | ((u128)(sig & 0x7fffffffffffffffULL) << 49);
 		} else
 			v->q = raw;
-		v->f = q_to_d(v->q);
+		v->f = vsoftfloat_to_double(v->q);
 	}
 	return true;
 }
@@ -712,7 +712,7 @@ static bool bitcast_constant_read(bc_state *state, cc *c, uint32_t n)
  * AST nodes: this reader is also used by parallel static-data emitters. */
 static u128 bc_q(const cval *v, bool sign)
 {
-	return v->kind == CV_FLT ? v->ld ? v->q : q_of_d(v->f) : q_of_i(v->i, sign);
+	return v->kind == CV_FLT ? v->ld ? v->q : vsoftfloat_of_double(v->f) : vsoftfloat_of_integer(v->i, sign);
 }
 
 static bool bc_convert_value(cc *c, cval *v, qty from, qty to)
@@ -720,9 +720,9 @@ static bool bc_convert_value(cc *c, cval *v, qty from, qty to)
 	if (QUNQ(from) == QUNQ(to))
 		return true;
 	if (is_integer(c, to)) {
-		i128 i = v->kind == CV_INT ? v->i : q_to_int(bc_q(v, true), (int)int_bits(c, to), is_signed(c, to));
+		i128 i = v->kind == CV_INT ? v->i : vsoftfloat_to_integer_saturating(bc_q(v, true), (int)int_bits(c, to), is_signed(c, to));
 		if (KIND(c, to) == TY_BOOL)
-			i = v->kind == CV_INT ? v->i != 0 : q_nz(bc_q(v, true));
+			i = v->kind == CV_INT ? v->i != 0 : vsoftfloat_is_nonzero(bc_q(v, true));
 		memset(v, 0, sizeof(*v));
 		v->kind = CV_INT;
 		v->i = trunc_to(c, i, to);
@@ -734,24 +734,24 @@ static bool bc_convert_value(cc *c, cval *v, qty from, qty to)
 	memset(v, 0, sizeof(*v));
 	v->kind = CV_FLT;
 	if (KIND(c, to) == TY_FLOAT16)
-		v->f = h_to_d(q_to_h(q));
+		v->f = h_to_d(vsoftfloat_to_half(q));
 	else if (KIND(c, to) == TY_BFLOAT16)
-		v->f = bf_to_d(q_to_bf(q));
+		v->f = bf_to_d(vsoftfloat_to_bfloat16(q));
 	else if (KIND(c, to) == TY_FLOAT)
-		v->f = q_to_f(q);
+		v->f = vsoftfloat_to_float(q);
 	else if (KIND(c, to) == TY_DOUBLE)
-		v->f = q_to_d(q);
+		v->f = vsoftfloat_to_double(q);
 	else {
 		v->ld = true;
-		v->q = q_to_p(q, q_prec(c, to));
-		v->f = q_to_d(v->q);
+		v->q = vsoftfloat_to_precision(q, q_prec(c, to));
+		v->f = vsoftfloat_to_double(v->q);
 	}
 	return true;
 }
 
 static bool bc_lane(bc_state *state, cc *c, uint32_t n, uint64_t lane, cval *v, unsigned depth)
 {
-	if (depth > 512 || vstack_low())
+	if (depth > 512 || vstack_guard_low())
 		return false;
 	const node *x = N(n);
 	qty t = x->ty;
@@ -793,7 +793,7 @@ static bool bc_lane(bc_state *state, cc *c, uint32_t n, uint64_t lane, cval *v, 
 		if (!bc_lane(state, c, x->a, lane, &test, depth + 1))
 			return false;
 		bool yes = test.kind == CV_INT	 ? test.i != 0
-			   : test.kind == CV_FLT ? test.ld ? q_nz(test.q) : test.f != 0
+			   : test.kind == CV_FLT ? test.ld ? vsoftfloat_is_nonzero(test.q) : test.f != 0
 						 : false;
 		return bc_lane(state, c, yes ? (x->b ? x->b : x->a) : x->c, lane, v, depth + 1);
 	}
@@ -829,7 +829,7 @@ static bool bc_lane(bc_state *state, cc *c, uint32_t n, uint64_t lane, cval *v, 
 		memset(v, 0, sizeof(*v));
 		if (a.kind == CV_FLT || b.kind == CV_FLT) {
 			u128 l = bc_q(&a, is_signed(c, at)), r = bc_q(&b, is_signed(c, at)), q;
-			int cmp = q_cmp(l, r), p = q_prec(c, at);
+			int cmp = vsoftfloat_compare(l, r), p = q_prec(c, at);
 			if (compare) {
 				bool yes = op == T_LESS		? cmp == -1
 					   : op == T_LESSEQ	? cmp == -1 || cmp == 0
@@ -842,19 +842,19 @@ static bool bc_lane(bc_state *state, cc *c, uint32_t n, uint64_t lane, cval *v, 
 				return true;
 			}
 			if (op == T_PLUS)
-				q = q_addp(l, r, p);
+				q = vsoftfloat_add_with_precision(l, r, p);
 			else if (op == T_MINUS)
-				q = q_subp(l, r, p);
+				q = vsoftfloat_subtract_with_precision(l, r, p);
 			else if (op == T_STAR)
-				q = q_mulp(l, r, p);
+				q = vsoftfloat_multiply_with_precision(l, r, p);
 			else if (op == T_SLASH)
-				q = q_divp(l, r, p);
+				q = vsoftfloat_divide_with_precision(l, r, p);
 			else
 				return false;
 			v->kind = CV_FLT;
 			v->ld = true;
 			v->q = q;
-			v->f = q_to_d(q);
+			v->f = vsoftfloat_to_double(q);
 			return bc_convert_value(c, v, at, et);
 		}
 		u128 l = (u128)a.i, r = (u128)b.i, result = 0;

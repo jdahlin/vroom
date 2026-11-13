@@ -110,14 +110,14 @@ static void set_q(cval *v, u128 q)
 	v->kind = CV_FLT;
 	v->ld = true;
 	v->q = q;
-	v->f = q_to_d(q);
+	v->f = vsoftfloat_to_double(q);
 }
 static u128 get_q(const cval *v, bool sgn)
 {
-	return v->kind == CV_INT ? q_of_i(v->i, sgn) : v->ld ? v->q : q_of_d(v->f);
+	return v->kind == CV_INT ? vsoftfloat_of_integer(v->i, sgn) : v->ld ? v->q : vsoftfloat_of_double(v->f);
 }
 /* nonzero, as a condition */
-static bool cv_nz(cc *c, const cval *v) { return v->kind == CV_BIGINT ? big_nonzero(c, v) : v->ld ? q_nz(v->q) : v->f != 0; }
+static bool cv_nz(cc *c, const cval *v) { return v->kind == CV_BIGINT ? big_nonzero(c, v) : v->ld ? vsoftfloat_is_nonzero(v->q) : v->f != 0; }
 /* an address that may be null: a weak symbol's (clang: Decl::isWeak) */
 static bool cv_weak(const cc *c, const cval *v) { return v->kind == CV_ADDR && v->sym && (c->syms[v->sym].flags & SF_WEAK); }
 
@@ -146,7 +146,7 @@ static bool constexpr_unwrap(cc *c, uint32_t n, uint32_t *out, bool *ice)
 {
 	const node *x = N(n);
 
-	if (vstack_low())
+	if (vstack_guard_low())
 		return false;
 	if (x->op == N_CAST && x->aux == CK_NOP)
 		return constexpr_unwrap(c, x->a, out, ice);
@@ -307,7 +307,7 @@ bool cc_init_subobject(cc *c, uint32_t n, uint32_t *init)
 	bool ice = true, indexed = false;
 	uint32_t root = n;
 
-	if (vstack_low() || (N(n)->op != N_MEMBER && N(n)->op != N_INDEX))
+	if (vstack_guard_low() || (N(n)->op != N_MEMBER && N(n)->op != N_INDEX))
 		return false;
 	while (N(root)->op == N_MEMBER || N(root)->op == N_INDEX || N(root)->op == N_CAST) {
 		indexed |= N(root)->op == N_INDEX;
@@ -492,8 +492,8 @@ VPRIV void constexpr_conversion(cc *c, uint32_t n, qty to)
 			return;
 		u128 aq = get_q(&a, is_signed(c, from)), bq = get_q(&b, true);
 
-		exact = (q_isnan(aq) && q_isnan(bq)) || q_cmp(aq, bq) == 0;
-		if (q_isnan(aq) && !(aq & ((u128)1 << 111)) && KIND(c, from) != KIND(c, to))
+		exact = (vsoftfloat_is_nan(aq) && vsoftfloat_is_nan(bq)) || vsoftfloat_compare(aq, bq) == 0;
+		if (vsoftfloat_is_nan(aq) && !(aq & ((u128)1 << 111)) && KIND(c, from) != KIND(c, to))
 			exact = false;
 		if (a.kind == CV_INT) {
 			u128 magnitude = is_signed(c, from) && a.i < 0 ? (u128)0 - (u128)a.i : (u128)a.i;
@@ -532,7 +532,7 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 #if __has_feature(address_sanitizer)
 	/* the parser's stack check bounds the nesting (cast_expr); ASan's frames make
 	   this recursion's larger than the parser's (vcc-stress ternary-100k) */
-	if (vstack_low())
+	if (vstack_guard_low())
 		return false;
 #endif
 #endif
@@ -626,14 +626,14 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 			v->kind = CV_FLT;
 			v->ice = false;
 			if (is_q(c, to)) {
-				set_q(v, q_of_ip(a.i, is_signed(c, N(x->a)->ty), q_prec(c, to)));
+				set_q(v, vsoftfloat_of_integer_with_precision(a.i, is_signed(c, N(x->a)->ty), q_prec(c, to)));
 				return true;
 			}
 			v->f = is_signed(c, N(x->a)->ty) ? (double)a.i : (double)(u128)a.i;
 			if (KIND(c, to) == TY_BFLOAT16)
-				v->f = bf_to_d(q_to_bf(q_of_i(a.i, is_signed(c, N(x->a)->ty))));
+				v->f = bf_to_d(vsoftfloat_to_bfloat16(vsoftfloat_of_integer(a.i, is_signed(c, N(x->a)->ty))));
 			else if (KIND(c, to) == TY_FLOAT16)
-				v->f = h_to_d(q_to_h(q_of_i(a.i, is_signed(c, N(x->a)->ty))));
+				v->f = h_to_d(vsoftfloat_to_half(vsoftfloat_of_integer(a.i, is_signed(c, N(x->a)->ty))));
 			else if (KIND(c, to) == TY_FLOAT)
 				v->f = is_signed(c, N(x->a)->ty) ? (double)(float)a.i : (double)(float)(u128)a.i;	/* one rounding */
 			return true;
@@ -641,23 +641,23 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 			if (a.kind != CV_FLT)
 				return false;
 			v->kind = CV_INT;
-			v->i = trunc_to(c, q_to_int(get_q(&a, true), (int)int_bits(c, to), is_signed(c, to)), to);
+			v->i = trunc_to(c, vsoftfloat_to_integer_saturating(get_q(&a, true), (int)int_bits(c, to), is_signed(c, to)), to);
 			v->ld = false;
 			v->ice = is_flt_lit(c, x->a);
 			return true;
 		case CK_F2F:
 			if (a.kind != CV_FLT)
 				return false;
-			if (a.ld && q_isnan(a.q)) a.q |= (u128)1 << 111;
+			if (a.ld && vsoftfloat_is_nan(a.q)) a.q |= (u128)1 << 111;
 			v->ice = false;
 			if (is_q(c, to))
-				set_q(v, q_to_p(get_q(&a, true), q_prec(c, to)));
+				set_q(v, vsoftfloat_to_precision(get_q(&a, true), q_prec(c, to)));
 			else if (KIND(c, to) == TY_BFLOAT16)
-				v->f = bf_to_d(q_to_bf(get_q(&a, true))), v->ld = false;
+				v->f = bf_to_d(vsoftfloat_to_bfloat16(get_q(&a, true))), v->ld = false;
 			else if (KIND(c, to) == TY_FLOAT16)
-				v->f = h_to_d(q_to_h(get_q(&a, true))), v->ld = false;
+				v->f = h_to_d(vsoftfloat_to_half(get_q(&a, true))), v->ld = false;
 			else if (a.ld && KIND(c, to) == TY_FLOAT)
-				v->f = q_to_f(a.q), v->ld = false;	/* one rounding */
+				v->f = vsoftfloat_to_float(a.q), v->ld = false;	/* one rounding */
 			else if (KIND(c, to) == TY_FLOAT)
 				v->f = (float)a.f;
 			else
@@ -817,16 +817,16 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 		if ((a.kind == CV_FLT || b.kind == CV_FLT) &&
 		    (a.ld || b.ld || is_q(c, x->ty) || is_q(c, N(x->a)->ty) || is_q(c, N(x->b)->ty))) {
 			int p = q_prec(c, N(x->a)->ty) < q_prec(c, N(x->b)->ty) ? q_prec(c, N(x->a)->ty) : q_prec(c, N(x->b)->ty);
-			u128 l = q_to_p(get_q(&a, is_signed(c, N(x->a)->ty)), p), r = q_to_p(get_q(&b, is_signed(c, N(x->b)->ty)), p);
-			int k = q_cmp(l, r);
+			u128 l = vsoftfloat_to_precision(get_q(&a, is_signed(c, N(x->a)->ty)), p), r = vsoftfloat_to_precision(get_q(&b, is_signed(c, N(x->b)->ty)), p);
+			int k = vsoftfloat_compare(l, r);
 
 			v->ice = false;
 			v->ld = false;
 			switch (op) {
-			case T_PLUS: set_q(v, q_addp(l, r, p)); break;
-			case T_MINUS: set_q(v, q_subp(l, r, p)); break;
-			case T_STAR: set_q(v, q_mulp(l, r, p)); break;
-			case T_SLASH: set_q(v, q_divp(l, r, p)); break;
+			case T_PLUS: set_q(v, vsoftfloat_add_with_precision(l, r, p)); break;
+			case T_MINUS: set_q(v, vsoftfloat_subtract_with_precision(l, r, p)); break;
+			case T_STAR: set_q(v, vsoftfloat_multiply_with_precision(l, r, p)); break;
+			case T_SLASH: set_q(v, vsoftfloat_divide_with_precision(l, r, p)); break;
 			case T_LESS: v->i = k == -1; break;
 			case T_LESSEQ: v->i = k == -1 || k == 0; break;
 			case T_GREATER: v->i = k == 1; break;
@@ -857,9 +857,9 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 			default: return false;
 			}
 			if (v->kind == CV_FLT && KIND(c, x->ty) == TY_BFLOAT16)
-				v->f = bf_to_d(q_to_bf(q_of_d(v->f)));
+				v->f = bf_to_d(vsoftfloat_to_bfloat16(vsoftfloat_of_double(v->f)));
 			if (v->kind == CV_FLT && KIND(c, x->ty) == TY_FLOAT16)
-				v->f = h_to_d(q_to_h(q_of_d(v->f)));
+				v->f = h_to_d(vsoftfloat_to_half(vsoftfloat_of_double(v->f)));
 			if (v->kind == CV_FLT && KIND(c, x->ty) == TY_FLOAT)
 				v->f = (float)v->f;
 			return true;

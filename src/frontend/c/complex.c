@@ -75,7 +75,7 @@ VPRIV uint32_t cplx_reuse(cc *c, uint32_t n, uint32_t *pre)
 	if (N(n)->op == N_COND && cplx_pure(c, N(n)->a, 0)) {
 		cval cv;
 		if (cc_eval(c, N(n)->a, &cv) && (cv.kind == CV_INT || cv.kind == CV_FLT)) {
-			bool yes = cv.kind == CV_INT ? cv.i != 0 : cv.ld ? q_nz(cv.q) : cv.f != 0;
+			bool yes = cv.kind == CV_INT ? cv.i != 0 : cv.ld ? vsoftfloat_is_nonzero(cv.q) : cv.f != 0;
 			return cplx_reuse(c, yes ? (N(n)->b ? N(n)->b : N(n)->a) : N(n)->c, pre);
 		}
 	}
@@ -197,19 +197,19 @@ static u128 cplx_scale(u128 q, int shift)
 	int sign, exp;
 	u128 mant;
 
-	if (!q_nz(q) || q_isinf(q) || q_isnan(q))
+	if (!vsoftfloat_is_nonzero(q) || vsoftfloat_is_infinity(q) || vsoftfloat_is_nan(q))
 		return q;
-	q_un(q, &sign, &exp, &mant);
-	return q_rndp(sign, exp + shift, mant << 3, 112);
+	vsoftfloat_unpack(q, &sign, &exp, &mant);
+	return vsoftfloat_round_with_precision(sign, exp + shift, mant << 3, 112);
 }
 
 static u128 cplx_round(cc *c, qty t, u128 q)
 {
 	if (is_q(c, t))
-		return q_to_p(q, q_prec(c, t));
+		return vsoftfloat_to_precision(q, q_prec(c, t));
 	if (KIND(c, t) == TY_FLOAT16)
-		return q_of_d(h_to_d(q_to_h(q)));
-	return q_of_d(KIND(c, t) == TY_FLOAT ? (double)q_to_f(q) : q_to_d(q));
+		return vsoftfloat_of_double(h_to_d(vsoftfloat_to_half(q)));
+	return vsoftfloat_of_double(KIND(c, t) == TY_FLOAT ? (double)vsoftfloat_to_float(q) : vsoftfloat_to_double(q));
 }
 
 /* Clang's Annex G constant division: scale the denominator, rounding every
@@ -224,46 +224,46 @@ static uint32_t cplx_divconst(cc *c, qty ct, qty et, uint32_t *args, uint32_t lo
 
 		if (!cc_eval(c, args[i], &v) || v.kind != CV_FLT)
 			return 0;
-		q[i] = v.ld ? v.q : q_of_d(v.f);
+		q[i] = v.ld ? v.q : vsoftfloat_of_double(v.f);
 	}
 	u128 max = q[2] & ~Q_SIGN, other = q[3] & ~Q_SIGN;
-	if (q_isnan(max) || (!q_isnan(other) && other > max))
+	if (vsoftfloat_is_nan(max) || (!vsoftfloat_is_nan(other) && other > max))
 		max = other;
-	if (q_nz(max) && !q_isnan(max) && !q_isinf(max)) {
+	if (vsoftfloat_is_nonzero(max) && !vsoftfloat_is_nan(max) && !vsoftfloat_is_infinity(max)) {
 		int sign, exp;
 		u128 mant;
 
-		q_un(max, &sign, &exp, &mant);
-		q_norm(&exp, &mant);
+		vsoftfloat_unpack(max, &sign, &exp, &mant);
+		vsoftfloat_normalize(&exp, &mant);
 		be = exp - 16383;
 	}
 #define CR(x) cplx_round(c, et, (x))
-#define CM(a, b) CR(q_mul((a), (b)))
-#define CA(a, b) CR(q_add((a), (b)))
-#define CS(a, b) CR(q_sub((a), (b)))
-#define CD(a, b) CR(q_div((a), (b)))
+#define CM(a, b) CR(vsoftfloat_multiply((a), (b)))
+#define CA(a, b) CR(vsoftfloat_add((a), (b)))
+#define CS(a, b) CR(vsoftfloat_subtract((a), (b)))
+#define CD(a, b) CR(vsoftfloat_divide((a), (b)))
 	q[2] = CR(cplx_scale(q[2], -be));
 	q[3] = CR(cplx_scale(q[3], -be));
 	den = CA(CM(q[2], q[2]), CM(q[3], q[3]));
 	re = CR(cplx_scale(CD(CA(CM(q[0], q[2]), CM(q[1], q[3])), den), -be));
 	im = CR(cplx_scale(CD(CS(CM(q[1], q[2]), CM(q[0], q[3])), den), -be));
 	/* Annex G recovery, matching the helpers for zero and infinite operands. */
-	if (q_isnan(re) && q_isnan(im)) {
+	if (vsoftfloat_is_nan(re) && vsoftfloat_is_nan(im)) {
 		u128 inf = (u128)0x7fff << 112, one = (u128)16383 << 112;
-		if (!q_nz(den) && (!q_isnan(q[0]) || !q_isnan(q[1]))) {
+		if (!vsoftfloat_is_nonzero(den) && (!vsoftfloat_is_nan(q[0]) || !vsoftfloat_is_nan(q[1]))) {
 			inf |= q[2] & Q_SIGN;
 			re = CM(inf, q[0]);
 			im = CM(inf, q[1]);
-		} else if ((q_isinf(q[0]) || q_isinf(q[1])) &&
-		           !q_isinf(q[2]) && !q_isnan(q[2]) && !q_isinf(q[3]) && !q_isnan(q[3])) {
-			q[0] = (q[0] & Q_SIGN) | (q_isinf(q[0]) ? one : 0);
-			q[1] = (q[1] & Q_SIGN) | (q_isinf(q[1]) ? one : 0);
+		} else if ((vsoftfloat_is_infinity(q[0]) || vsoftfloat_is_infinity(q[1])) &&
+		           !vsoftfloat_is_infinity(q[2]) && !vsoftfloat_is_nan(q[2]) && !vsoftfloat_is_infinity(q[3]) && !vsoftfloat_is_nan(q[3])) {
+			q[0] = (q[0] & Q_SIGN) | (vsoftfloat_is_infinity(q[0]) ? one : 0);
+			q[1] = (q[1] & Q_SIGN) | (vsoftfloat_is_infinity(q[1]) ? one : 0);
 			re = CM(inf, CA(CM(q[0], q[2]), CM(q[1], q[3])));
 			im = CM(inf, CS(CM(q[1], q[2]), CM(q[0], q[3])));
-		} else if ((q_isinf(q[2]) || q_isinf(q[3])) &&
-		           !q_isinf(q[0]) && !q_isnan(q[0]) && !q_isinf(q[1]) && !q_isnan(q[1])) {
-			q[2] = (q[2] & Q_SIGN) | (q_isinf(q[2]) ? one : 0);
-			q[3] = (q[3] & Q_SIGN) | (q_isinf(q[3]) ? one : 0);
+		} else if ((vsoftfloat_is_infinity(q[2]) || vsoftfloat_is_infinity(q[3])) &&
+		           !vsoftfloat_is_infinity(q[0]) && !vsoftfloat_is_nan(q[0]) && !vsoftfloat_is_infinity(q[1]) && !vsoftfloat_is_nan(q[1])) {
+			q[2] = (q[2] & Q_SIGN) | (vsoftfloat_is_infinity(q[2]) ? one : 0);
+			q[3] = (q[3] & Q_SIGN) | (vsoftfloat_is_infinity(q[3]) ? one : 0);
 			re = CM(0, CA(CM(q[0], q[2]), CM(q[1], q[3])));
 			im = CM(0, CS(CM(q[1], q[2]), CM(q[0], q[3])));
 		}
@@ -274,13 +274,13 @@ static uint32_t cplx_divconst(cc *c, qty ct, qty et, uint32_t *args, uint32_t lo
 #undef CS
 #undef CD
 	if (is_q(c, et))
-		return mk_cplx(c, ct, mk_fltq(c, q_to_p(re, q_prec(c, et)), et, loc),
-		               mk_fltq(c, q_to_p(im, q_prec(c, et)), et, loc), loc);
+		return mk_cplx(c, ct, mk_fltq(c, vsoftfloat_to_precision(re, q_prec(c, et)), et, loc),
+		               mk_fltq(c, vsoftfloat_to_precision(im, q_prec(c, et)), et, loc), loc);
 	if (KIND(c, et) == TY_FLOAT16)
-		return mk_cplx(c, ct, mk_flt(c, h_to_d(q_to_h(re)), et, loc),
-		               mk_flt(c, h_to_d(q_to_h(im)), et, loc), loc);
-	return mk_cplx(c, ct, mk_flt(c, KIND(c, et) == TY_FLOAT ? q_to_f(re) : q_to_d(re), et, loc),
-	               mk_flt(c, KIND(c, et) == TY_FLOAT ? q_to_f(im) : q_to_d(im), et, loc), loc);
+		return mk_cplx(c, ct, mk_flt(c, h_to_d(vsoftfloat_to_half(re)), et, loc),
+		               mk_flt(c, h_to_d(vsoftfloat_to_half(im)), et, loc), loc);
+	return mk_cplx(c, ct, mk_flt(c, KIND(c, et) == TY_FLOAT ? vsoftfloat_to_float(re) : vsoftfloat_to_double(re), et, loc),
+	               mk_flt(c, KIND(c, et) == TY_FLOAT ? vsoftfloat_to_float(im) : vsoftfloat_to_double(im), et, loc), loc);
 }
 
 /* The runtime helper owns overflow/underflow scaling and IEEE special cases.
@@ -293,7 +293,7 @@ static uint32_t cplx_divcall(cc *c, qty ct, qty et, uint32_t *a, uint32_t loc)
 		ct = ty_complex(c, et);
 	}
 	const char *name = KIND(c, et) == TY_FLOAT ? "__divsc3" : !is_q(c, et) ? "__divdc3" :
-	                   q_prec(c, et) == Q_P80 ? "__divxc3" : "__divtc3";
+	                   q_prec(c, et) == VSOFTFLOAT_X87_80 ? "__divxc3" : "__divtc3";
 	uint32_t id = vintern_cstr(name), s, fn, n;
 	qty params[4] = { et, et, et, et };
 	qty ft = ty_func(c, ct, params, 4, 0);

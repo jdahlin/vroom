@@ -1,6 +1,6 @@
 /* vcc code generator for WebAssembly: expressions, lvalues, loads and stores (wimpl.h) */
 #include "wimpl.h"
-#include "port/vstack.h"
+#include "port/stack-guard.h"
 
 /* ---------------- conversions ---------------- */
 
@@ -724,17 +724,17 @@ static void wrt(ecx *e, const char *name, const char *sig)
 	wst *W = e->w;
 
 	wmem_fence(e);
-	tb_s(&W->decl, name);
-	tb_c(&W->decl, '\t');
+	vtext_string_append(&W->decl, name);
+	vtext_char_append(&W->decl, '\t');
 	for (; *sig; sig++)
 		if (*sig == 'P')
-			tb_s(&W->decl, wt_name[WPT(e->c)]);
+			vtext_string_append(&W->decl, wt_name[WPT(e->c)]);
 		else
-			tb_c(&W->decl, *sig);
-	tb_c(&W->decl, '\n');
-	tb_s(&W->b, "\tcall\t");
-	tb_s(&W->b, name);
-	tb_c(&W->b, '\n');
+			vtext_char_append(&W->decl, *sig);
+	vtext_char_append(&W->decl, '\n');
+	vtext_string_append(&W->b, "\tcall\t");
+	vtext_string_append(&W->b, name);
+	vtext_char_append(&W->b, '\n');
 }
 
 /* push half h (0 low, 1 high) of the 16 bytes at local a */
@@ -1388,7 +1388,7 @@ static int wbinary(ecx *e, uint32_t n)
 		warith(e, op, ty, 0);
 		return k;
 	}
-	if (unlikely(vstack_low()))
+	if (unlikely(vstack_guard_low()))
 		efatal(e, x->loc, "expression nested too deeply");
 	if (is_vec(c, ty) || is_vec(c, lt)) {
 		wexpr(e, x->a, true);
@@ -1955,9 +1955,9 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 
 			claim_ref(e, r);
 			wdecl(e, r, y->ty, NULL);
-			tb_s(b, WASM32(c) ? "\ti32.const\t" : "\ti64.const\t");
+			vtext_string_append(b, WASM32(c) ? "\ti32.const\t" : "\ti64.const\t");
 			wfname(c, b, r);
-			tb_c(b, '\n');
+			vtext_char_append(b, '\n');
 			return WPT(c);
 		}
 		if (y->kind == S_ENUMCONST) {

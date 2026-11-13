@@ -1,5 +1,5 @@
-#ifndef VCC_LIB_BIGINT_H
-#define VCC_LIB_BIGINT_H
+#ifndef VCC_COMMON_BIGINT_H
+#define VCC_COMMON_BIGINT_H
 /* Fixed-width LE32 arithmetic. Callers own storage; no global mutable state. */
 #include <stdint.h>
 #include <stddef.h>

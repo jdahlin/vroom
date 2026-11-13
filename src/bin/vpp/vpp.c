@@ -71,12 +71,12 @@ static void *worker(void *arg)
 
 		memcpy(ph0, ppd_ph, sizeof(ph0));
 		t0 = now();
-		v0 = vperf_now();
+		v0 = vperformance_now();
 		j->status = ppd_run(j->ac, j->av, &e);
-		j->all = vperf_sub(vperf_now(), v0);
+		j->all = vperformance_subtract(vperformance_now(), v0);
 		j->ms = (now() - t0) * 1e3;
 		for (int i = 0; i < PPD_NPH; i++)
-			j->ph[i] = vperf_sub(ppd_ph[i], ph0[i]);
+			j->ph[i] = vperformance_subtract(ppd_ph[i], ph0[i]);
 	}
 	close(nul);
 	return NULL;
@@ -86,7 +86,7 @@ static void run_pass(int nthr)
 {
 	pthread_t th[64];
 	pthread_attr_t at;
-	/* the parser and emitter recurse with the input's nesting and stop at vstack_low():
+	/* the parser and emitter recurse with the input's nesting and stop at vstack_guard_low():
 	 * a worker gets the main thread's stack, so that a TU compiles in a batch as it
 	 * does alone (Darwin's default for a new thread is 512 KB; as emit/tu.c) */
 	size_t ss = (size_t)8 << 20;
