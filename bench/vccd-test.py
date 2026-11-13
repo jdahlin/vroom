@@ -445,6 +445,40 @@ def header_shadowed_by_new_file():
         check(obj(d, '1.o') != obj(d, '2.o'), 'i1/h.h was not picked up')
     finally: v.stop()
 
+@test()
+def two_groups_share_caches():
+    """two builds at once through one server (Q-SCHED-01): they do not flush each
+    other's caches (at most the first switch, when nothing is running), every
+    object is right, and a build after an edit still sees the edit"""
+    from concurrent.futures import ThreadPoolExecutor
+    v = Vccd(workers=4, env={'VCC_LOG': '1'})
+    try:
+        d = f'{v.dir}/w'; tu(d, 'h.h', '#define N 1\n')
+        leaders = [subprocess.Popen(['sleep', '60'], process_group=0) for _ in range(2)]
+        def one(i, pgid=None, out=None):
+            src = tu(d, f'a{i}.c', f'#include "h.h"\nint v{i} = N + {i};\nint f{i}(void) {{ return v{i} * 3; }}\n')
+            p = subprocess.run([SHIM] + TARGET + ['-c', '-o', out or f'a{i}.o', src], cwd=d, capture_output=True, timeout=30,
+                               env=dict(os.environ, VCC_SOCK=v.sock), process_group=pgid)
+            return i, p.returncode, p.stderr.decode(errors='replace')
+        try:
+            with ThreadPoolExecutor(6) as ex:	# jobs alternate between the two groups
+                res = list(ex.map(lambda i: one(i, leaders[i % 2].pid), range(48)))
+        finally:
+            for l in leaders: l.kill(); l.wait()
+        for i, st, err in res:
+            check(st == 0, f'job {i}: {st} {err[-200:]}')
+            check(f'v{i}'.encode() in obj(d, f'a{i}.o'), f'job {i}: object does not define v{i}')
+        o1 = obj(d, 'a0.o')
+        time.sleep(0.01)
+        open(f'{d}/h.h', 'w').write('#define N 22222\n')
+        _, st, err = one(0, None, 'b0.o'); check(st == 0, err[-300:])	# a new group
+        check(obj(d, 'b0.o') != o1, 'a build after the header edit used the stale header')
+    finally: v.stop()
+    m = re.search(r'(\d+) builds \(cache flushes\)', open(v.logf).read())
+    check(m is not None, 'no flush count in the vccd log')
+    n = int(m.group(1))
+    check(n <= 2, f'{n} cache flushes: at most one for the first switch and one for the build after the edit')
+
 # ---------------- the client's view ----------------
 
 @test()
