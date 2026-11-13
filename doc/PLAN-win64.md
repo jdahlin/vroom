@@ -223,6 +223,74 @@ can move to `long long`), sjlj 4 (`__builtin_setjmp`), ub-trap 3 (clang makes
 abi 1.  60 s cold at `-j 6` on this host, 0.3 s from the cache.  vcc's side
 is wired (`vpp -S`, `--obj`, `--objcmp`) and fails at `as` until WIN1-WIN3.
 
+### WIN7 (2026-11-13): vlink writes PE, byte-identical to lld for clang's objects
+
+`src/platform/win/pe-linker.c` (one TU like `ld/ld.c`, #including
+`pe-options.c`, `pe-input.c`, `pe-resolve.c`, `pe-export.c`,
+`pe-layout.c`, `pe-write.c`; model in `pe-linker-internal.h`, COFF/PE
+constants in `pe-definitions.h`, to be shared with WIN5's `coff.c`):
+`ld_main` hands a link to it when the first input is a COFF x86-64 object
+or the line has `-m i386pep`.  It takes the GNU ld command line that clang
+passes to `ld.lld` for MinGW and reproduces lld-link's MinGW mode:
+
+- **input**: COFF objects (COMDAT with every selection and lld's MinGW
+  merging of any/largest and any/same-size, associative sections and the
+  implicit `.pdata$F`/`.xdata$F` association, weak externals, COMMON with
+  `-aligncomm`, `.drectve` exports/includes/alternate names, long section
+  names, relocation-count overflow), `ar` archives with the GNU or the
+  Microsoft symbol table, short import records and GNU dlltool-style
+  `.idata$N` objects, `.def` files; files read in lld's FIFO order (an
+  archive member is queued by the reference that needs it), a file named
+  twice read once, `crtend.o` moved last;
+- **resolution**: entry point (`mainCRTStartup`/`WinMainCRTStartup`/
+  `DllMainCRTStartup`), `__ImageBase`, the `__guard_*` absolutes
+  (`__guard_flags` = 0x100 when an object has `@feat.00` bit 11),
+  `__CTOR_LIST__`/`__DTOR_LIST__`, `__RUNTIME_PSEUDO_RELOC_LIST__`,
+  alternate names, `_load_config_used`, MinGW auto-import (`__imp_` loads,
+  `.refptr.` replacement, pseudo relocations), `__imp_` of local symbols,
+  undefined symbols reported as lld does, `--gc-sections` (COMDAT and
+  associative aware), MinGW auto-export for DLLs;
+- **output**: lld's partial sections (sorted by name, `$` suffix of MinGW
+  COMDATs stripped, `.CRT` sorted), output sections in link.exe's order with
+  `.idata .xdata .CRT .ctors .dtors .00cfg .edata` merged into `.rdata` and
+  `.bss` into `.data`, synthetic `.idata` and import thunks, `.edata` and
+  `--out-implib` (byte-identical to lld's), `.buildid` with the XXH3 build
+  id, base relocations, sorted `.pdata`, the TLS directory and its alignment,
+  the load config directory, the COFF symbol table and string table (lld's
+  StringTableBuilder order), `SOURCE_DATE_EPOCH`/`--no-insert-timestamp`.
+
+Measured:
+
+- `bench/vcc-win64.py --vlink-ref -j 4` (clang's object of every test linked
+  by lld and by vlink with clang's own link line, `--ld-path`): runs-ok
+  2012/2012 and image-identical 2012/2012 (gcc 1612, tcc 106, vcc 294),
+  83 s cold at `-j 4`.
+- `bench/vlink-pe.py --run`: 57/57 cases against `ld.lld -m i386pep`
+  (options, errors, weak, TLS, constructors, selectany, COMMON, archives,
+  `--whole-archive`, DLLs with `--out-implib` and a `.def`, auto-import of
+  data from a DLL, a GNU dlltool-style import library, local `__imp_`):
+  same success or first error, byte-identical outputs, same run under Wine.
+  A DLL built by vlink loads into a program linked by lld and the reverse.
+- `bench/vlink-pe-bad.py` (ASan+UBSan): 530/530 (field-by-field and 300 random mutations) corrupt COFF objects,
+  archives and import records fail cleanly.
+- ELF and existing users unchanged: `bench/vlink-opts.py` 66/66,
+  `bench/vlink-bad.py` 34/34, `bench/vcc-x86.py --suite vcc --vlink` 293/293
+  (as before the step).  The unity and the file-by-file (`VCC_UNITY=`)
+  builds compile vlink; the file-by-file vccd link fails on
+  `vir_failure_table` defined in several codegen files, which predates WIN7.
+
+Known differences from lld (none seen in the suites): the hash order of
+lld's symbol table is not reproduced where lld iterates it (auto-import
+loads of `__imp_` members for still-undefined symbols, the order of
+`__imp_` pointers to local symbols; vlink uses the order of first
+reference); undefined-symbol reports have no DWARF file:line; `-Map`
+writes the section and input-section lines of lld's map, not the symbol
+lines; lld 23 accepts `--major/minor-image-version` and writes 0.0, as does
+vlink.  Not implemented (a clear error): `--icf=all`, `--guard-cf`,
+`--wrap`, `--defsym`, `--delayload`, `--pdb`, `--output-def`, `-Xlink`,
+`.rsrc` sections, bigobj, thin archives, LTO bitcode, `/merge` and
+`/section` in `.drectve`; i386/ARM targets.
+
 ### WIN1-WIN10 (2026-11-13): planned
 
 Nothing implemented.  The reference chain was checked by hand (clang 23 ->

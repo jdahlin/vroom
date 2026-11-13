@@ -115,7 +115,7 @@ static uint64_t pe_symbol_rva(const pe_symbol *s)
 	pe_chunk *c = pe_sym_chunk(s);
 	switch (s->kind) {
 	case PE_SYM_REGULAR:
-		return (uint64_t)c->rva + s->value;
+		return c ? (uint64_t)c->rva + s->value : 0;
 	case PE_SYM_COMMON:
 	case PE_SYM_IMPORT_DATA:
 	case PE_SYM_IMPORT_THUNK:
