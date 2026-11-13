@@ -277,12 +277,20 @@ threaded emitter tests), measurements B (`sched-measure.py batch --emit
 start (off by default in this stage; the default flips in a later PR after
 the kernel A/B):
 
-- no `worker_main` threads: the accept thread `vtask_spawn`s each accepted
-  socket as a job; budget `-j`, else `VCC_JOBS`, else `granted` (not 2 x);
+- no `worker_main` threads: the accept thread queues each accepted socket
+  in vccd's own ring, as before, and `vtask_spawn`s one job that takes a
+  socket from it; budget `-j`, else `VCC_JOBS`, else `granted` (not 2 x).
+  The sockets stay in the ring so that a memory restart (`do_restart`) can
+  still answer the ones no job has taken, and SIGTERM's drain and the
+  restart keep counting `n_active` exactly as with workers (the polling of
+  both, Q-SCHED-13, is left as it is);
 - the job's blocking parts of 1.4 inside blocking regions, so a compile
-  waiting for its client, a child or a lock does not hold a core;
-- links and emit helpers draw from the same pool (stages 1-2);
-- SIGTERM's drain waits on the pool (`vtask_wait_idle`) instead of polling.
+  waiting for its client, a child or a lock does not hold a core; the long
+  locks (one ELF link, one Mach-O link, one objcopy at a time) through
+  `vtask_mutex_lock`, which enters the region only when the lock is taken;
+- links and emit helpers draw from the same pool (stages 1-2).
+- Threads: at most the budget plus the jobs inside blocking regions, which
+  make's `-j` bounds (every request in flight is a make job).
 
 Without the switch vccd behaves exactly as before the stage.
 
@@ -377,3 +385,41 @@ with `VCC_VIR=1`; TSan: `vcc-ctests.py --suite vcc` 324/326 (same two),
 --emit 4`): resident size after 0/3/7 warm passes 856/1224/1439 MB before,
 829/1060/1111 MB after (+54 MB a pass to +13), CPU -7 %, involuntary
 switches 23.5 k to 2.4 k at 7 passes.
+
+Found later (CI, TSan on x86-64): two `task-test` assertions depended on
+timing (the small-items probe outlasted under TSan; the FIFO order recorded
+after a job started).  The test now asserts what must hold (no wake in a
+round that returned within the probe's 30 us, at most width - 1 otherwise;
+the order exactly, at budget 1); `port/task.c` is unchanged.
+
+### Stage 3 (2026-11-13): vccd on one budget, behind `--shared-pool`
+
+As in stage 3 above, off by default.  Proofs, without and with the switch:
+`vccd-test.py` 31 pass (1 skip, no sudo); `vcc-stress.py --vccd` 36/36;
+`vccd-cc.py` 174/174 (with the switch also at vccd `-j` 2 and 20,
+`VCCD_J`); TSan `vccd-cc.py` 174/174 in both modes, 0 reports.
+
+Measurement D (`sched-measure.py vccd`, 168 TUs, load about 6): 6 clients
+0.71 s / 786 MB max RSS with 20 workers, 0.62 s / 654 MB with the pool
+(budget 10); 14 clients 0.58 s / 863 MB, 0.55 s / 761 MB.
+
+Kernel A/B (one run each per order, load 4.7-5.8 at start; time in flight
+summed over compiles):
+
+| make `-j` | order | old: total / in flight / vccd RSS | `--shared-pool` |
+|---|---|---|---|
+| 6 | A, B | 13.6 s / 17.7 s / 1749 MB | 11.4 s / 14.9 s / 1495 MB |
+| 6 | B, A | 12.6 s / 16.8 s / 1762 MB | 11.8 s / 15.1 s / 1489 MB |
+| 14 | B, A | 7.3 s / 20.2 s / 1911 MB | 8.5 s / 23.7 s / 1770 MB |
+| 14 | A, B | 8.6 s / 23.8 s / 1927 MB | 9.4 s / 24.3 s / 1765 MB |
+
+Every build: exit 0, 925 compiled by vcc, 0 failed.  At `-j 6` the switch
+is faster and smaller; at `-j 14` it is smaller (-140 to -160 MB) but
+0.8-1.2 s slower: with budget 10 the compiles above the core count queue,
+while the old workers ran them all and, on a machine shared with other
+work, took a larger share of it.  So option (a) of the owner's decision
+does not pay at `-j 14` on this machine as measured; the default stays off.
+Next: the A/B on a quiet machine, and with the switch and a budget above
+the cores (`vccd --shared-pool -j 14`), which keeps one pool and its
+memory but stops the queueing.  Not run: the `-j 20` repeat and the boot
+test of the stage's image.

@@ -46,8 +46,11 @@ VPRIV int spawn(const struct req *r, const char *prog)
 		say(r, "%s: error: cannot run %s\n", prog);
 		return 127;
 	}
-	while (waitpid(pid, &st, 0) < 0)
-		if (errno != EINTR)
-			return 127;
+	vtask_blocking_begin();	/* the child uses the core meanwhile */
+	while ((err = waitpid(pid, &st, 0) < 0) && errno == EINTR)
+		;
+	vtask_blocking_end();
+	if (err)
+		return 127;
 	return WIFEXITED(st) ? WEXITSTATUS(st) : 128 + WTERMSIG(st);
 }

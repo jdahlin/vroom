@@ -2,8 +2,9 @@
  * vccd: the vcc server.
  *
  * One process.  The main thread waits in kqueue (epoll on Linux) for connections from the
- * shims (vcc, vld) and hands each accepted socket to a pool of I/O worker
- * threads.  A worker receives the request (argv, env, cwd, fds 0-2) into a
+ * shims (vcc, vld) and hands each accepted socket to a worker thread, or with
+ * --shared-pool to a job of the shared pool (worker.c says how the two
+ * differ).  The thread receives the request (argv, env, cwd, fds 0-2) into a
  * per-thread buffer, then
  *
  *   - answers toolchain probes from the capability table in caps.c,
@@ -37,7 +38,14 @@
  *
  * No allocation per request: buffers are mmap'ed once per worker.
  *
- *   vccd [--sock PATH] [--backend-sock PATH] [--ld PATH] [-j N]
+ *   vccd [--sock PATH] [--backend-sock PATH] [--ld PATH] [-j N] [--shared-pool]
+ *   -j N            worker threads (default 2 x online CPUs); with --shared-pool
+ *                   the budget: compile jobs that run at once (default
+ *                   VCC_JOBS, else the cores the process is granted)
+ *   --shared-pool   (or VCCD_SHARED_POOL=1 at start) connections run as jobs
+ *                   of the shared pool, links and emit helpers from the same
+ *                   budget; waits give the core to the next job
+ *                   (doc/quality/WORK-scheduler.md, stage 3)
  *   --backend-sock  a vroomd (clang) for host programs and for TUs vcc fails on
  *   --ld PROG       links run PROG (e.g. vroom-ld) instead of vld in process
  *   VCC_LOG=1   log one line per request to stderr (kind, ms, argv[0..2])
@@ -80,7 +88,8 @@ int main(int argc, char **argv)
 	/* make never has more than -j requests in flight, and compiles are CPU bound:
 	 * two per core leaves room for the ones that block (recipes waiting on
 	 * their tools, spawned tools) without a thread per possible connection */
-	int nworkers = 2 * (int)sysconf(_SC_NPROCESSORS_ONLN), ls, kq, i, listen_fd = -1;
+	int nworkers = 2 * (int)sysconf(_SC_NPROCESSORS_ONLN), ls, kq, i, listen_fd = -1, jobs = 0;
+	bool shared_pool = getenv("VCCD_SHARED_POOL") && !strcmp(getenv("VCCD_SHARED_POOL"), "1");
 
 	for (i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--sock") && i + 1 < argc)
@@ -94,9 +103,11 @@ int main(int argc, char **argv)
 		else if (!strcmp(argv[i], "--lld") && i + 1 < argc)
 			ld_backend = argv[++i];	/* (old name of --ld) */
 		else if (!strcmp(argv[i], "-j") && i + 1 < argc)
-			nworkers = atoi(argv[++i]);
+			nworkers = jobs = atoi(argv[++i]);
+		else if (!strcmp(argv[i], "--shared-pool"))
+			shared_pool = true;
 		else {
-			fprintf(stderr, "usage: vccd [--sock P] [--backend-sock P] [--ld P] [-j N]\n");
+			fprintf(stderr, "usage: vccd [--sock P] [--backend-sock P] [--ld P] [-j N] [--shared-pool]\n");
 			return 2;
 		}
 	}
@@ -159,7 +170,12 @@ listening:
 	}
 #endif
 
-	for (i = 0; i < nworkers; i++) {
+	if (shared_pool) {
+		vtask_budget_set(jobs > 0 ? jobs : vtask_jobs_from_environment(0));
+		if (log_requests)
+			fprintf(stderr, "vccd: shared pool, budget %d\n", vtask_budget());
+	}
+	for (i = 0; i < (shared_pool ? 0 : nworkers); i++) {
 		pthread_t t;
 		pthread_attr_t at;
 
@@ -267,7 +283,8 @@ listening:
 
 				setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 			}
-			queue_push(c);
+			if (queue_push(c) && shared_pool)
+				vtask_spawn(pool_job, NULL);
 		}
 	}
 #ifndef __APPLE__

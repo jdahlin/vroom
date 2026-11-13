@@ -1,8 +1,21 @@
 /* Forwarding a request to another vroom-protocol server (the backend). */
 #include "vccd-internal.h"
 
-/* relay the request unchanged to another vroom-protocol server */
+static int forward_relay(const struct req *r, const char *sock);
+
+/* relay the request unchanged to another vroom-protocol server; the wait
+   for its answer is a blocking region (the backend uses the core) */
 VPRIV int forward(const struct req *r, const char *sock)
+{
+	int status;
+
+	vtask_blocking_begin();
+	status = forward_relay(r, sock);
+	vtask_blocking_end();
+	return status;
+}
+
+static int forward_relay(const struct req *r, const char *sock)
 {
 	struct sockaddr_un sa = { .sun_family = AF_UNIX };
 	char cbuf[CMSG_SPACE(3 * sizeof(int))];

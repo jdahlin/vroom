@@ -8,11 +8,12 @@ int ld_main(int argc, char **argv, int dirfd, FILE *err)
 	if (first_input_macho(argc, argv, dirfd)) {
 		rc = ld_macho(argc, argv, dirfd, err);
 	} else {
-		VLOCK(ldlock);
+		vtask_mutex_lock(&ldlock);	/* (a second link waits off the CPU budget) */
 		errf = err ? err : stderr;
 		dirfd_base = dirfd;
 		rc = run(argc, argv);
 		free_arenas();
+		pthread_mutex_unlock(&ldlock);
 	}
 	while (rsp) {
 		struct rspmem *nx = rsp->next;
