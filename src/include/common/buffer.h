@@ -150,7 +150,7 @@ typedef struct vfixbuf {
 static inline void vfixbuf_put(vfixbuf *b, const char *s, size_t n)
 {
 	if (b->n + n >= sizeof(b->s))
-		n = sizeof(b->s) - 1 - b->n;
+		vjob_fail("text too long for a fixed buffer (more than 4095 bytes)");
 	memcpy(b->s + b->n, s, n);
 	b->n += n;
 	b->s[b->n] = 0;
