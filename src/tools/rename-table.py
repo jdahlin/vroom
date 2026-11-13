@@ -63,7 +63,8 @@ instead).  --apply edits the bytes at the reported positions (all of a file in o
 to hold `old`; a stale report writes nothing).  Last it lists the whole-word occurrences of `old`
 left in the scope: member-shaped code (text no configuration compiled: check them), comments, strings.
 The owner's `type` rows of the same table are used to find a record before or after its rename.
---leftovers all lists every word, not only the member-shaped ones.
+--leftovers all lists every word in every file; by default only member-shaped ones in the files that use
+the row's field or name its owner (a file that does neither has its own `.p`).
 
 All replacements are done in one pass per file with one alternation, longest
 old name first, so a row can never rewrite the result of another.
@@ -243,9 +244,10 @@ def define_around(text, off):
     return m.group(1), params
 
 
-def leftovers(texts, rows, edited, other):
+def leftovers(texts, rows, edited, other, relevant=None):
     """whole-word occurrences of each old name that are neither edited nor another owner's:
-    (path, line, col, kind, member-shaped, word, line text); kind code, comment, string or prose"""
+    (path, line, col, kind, member-shaped, word, line text); kind code, comment, string or prose;
+    relevant: old -> the files to look in (None: all)"""
     olds = {r.old for r in rows}
     if not olds:
         return []
@@ -259,7 +261,7 @@ def leftovers(texts, rows, edited, other):
         lines = None
         for m in rx.finditer(t):
             off = m.start()
-            if (rel, off) in edited or (rel, off) in other:
+            if (rel, off) in edited or (rel, off) in other or (relevant is not None and rel not in relevant.get(m.group(1), ())):
                 continue
             while ri < len(rng) and rng[ri][1] <= off:
                 ri += 1
@@ -415,7 +417,15 @@ def fields_main(av):
         print(s)
     edited = {(p, o) for p, d in edits.items() for o in d}
     other = {k for k, v in positions.items() if 'other' in v}
-    left = leftovers(texts, [r for r in rows if id(r) not in done], edited, other)
+    relevant = None
+    if show != 'all':   # the files that use the row's field or name its owner: elsewhere the word is another struct's
+        relevant = {}
+        for r in rows:
+            fs = {u[6] for u in by_row[id(r)]}
+            orx = re.compile(r'(?<![A-Za-z0-9_])(' + '|'.join(re.escape(o) for o in r.cands) + r')(?![A-Za-z0-9_])')
+            fs |= {os.path.relpath(p, R) for p, t in texts.items() if p.endswith(('.c', '.h', '.inc')) and orx.search(t)}
+            relevant.setdefault(r.old, set()).update(fs)
+    left = leftovers(texts, [r for r in rows if id(r) not in done], edited, other, relevant)
     shown = 0
     for rel, line, col, kind, shaped, w, text in left:
         if show == 'all' or shaped:
