@@ -109,9 +109,70 @@ the fix.  Each review ends with "Decisions needed" and "Not covered", as
 
 ## Status
 
+### 2026-11-13: P0 done, the baseline
+
+`bench/quality.py` reads the tree once (no build, 3 s) and prints the report;
+`--clones N` lists the longest duplicates, `--json FILE` has every list
+(clones with both line ranges, repeated static names, knobs, module edges),
+`--check` fails when a ratchet number is above `bench/quality-baseline.json`.
+It runs unchanged on the reorganised tree (checked on PR #134's `src/`: same
+numbers, other paths).
+
+Main at 2e6d3e73, `ccs/vcc` without tests and the 18 generated files:
+270 files, 140.0 k lines, 3750 functions, 1.28 M tokens.
+
+| Lens | Number | Baseline |
+|---|---|---|
+| L1 | redundant tokens, runs of 60+ (the later copy only) | 44 645 = 3.48 %, 676 runs; 92 exact, 217 repeat another file |
+| L1 | the same with runs of 30+ / 100+ tokens | 13.0 % / 0.99 % |
+| L2 | files with an FNV hash of their own | 18 |
+| L2 | `realloc` / `mmap` call sites outside `lib/` | 95 / 25 |
+| L2 | LEB128 functions | 15 |
+| L2 | static function names defined in several files | 79 names, 102 extra definitions (`now` x6, `worker` x4, `err` x4) |
+| L3 | `pthread_create` sites / CPU-count probes | 6 / 3 |
+| L3 | mutex and condition variable uses | 31 |
+| L4 | switches on a node kind (approximate) | 142 |
+| L4 | files of 2000+ lines / functions of 300+ and 150+ lines | 14 / 30 and 121 |
+| L6 | files without an opening comment / with a one- or two-line label | 11 / 141 of 270 |
+| L7 | includes across modules / of another module's internal header | 116 / 4 |
+| L7 | module pairs that include each other | 4: `cc`-`emit`, `cc`-`driver`, `driver`-`vccd`, `arch/a64`-`obj` |
+| L8 | thread-locals / file-scope mutable statics (approximate) | 103 / 275 |
+| L8 | environment knobs | 58 names, 77 `getenv` calls |
+
+Where the duplicates are, in tokens: inside `cc` 8.5 k, `emit/walk` 4.2 k,
+`arch/x64/as` 3.9 k, `arch/a64/emit` 3.9 k, `arch/a64/as` 3.7 k, `emit/vir`
+2.9 k; between `arch/a64/emit` and `emit/walk` 2.4 k.  By share of a
+directory: `arch/x64/obj` 52 % (its `fixup.c` repeats arm64's), `arch/x64/ld`
+10 %, `emit/walk` 8.8 %, `platform/wasm` 8.4 %.  The longest: the inline-asm
+template loop (x86-64 = arm64, 265 tokens), `lib/hash.h` = `as/asimpl.h`
+(250), the call sequence in `walk/stmt.c` = `a64/emit/call.c` (226),
+`virtest.c` = `viralloc.c` (214).
+
+How a duplicate is decided: a run matches another place token for token with
+identifiers and string literals ignored; it uses at least 10 different
+tokens; and unless it is an exact copy, 85 % of its identifiers map one to
+one and 30 % of them are names used twice (this removes enumerator lists and
+initializer tables, which map one to one whatever they hold).  Checked by
+reading 16 sampled runs under 90 tokens: before the last rule 2 of 7 were
+tables; after it 9 of 9 were code written twice.
+
+What the numbers say about the survey: its leads hold.  Two corrections:
+30 functions are over 300 lines, not 18; and textual duplication is 3.5 %,
+so most of the three walkers' overlap is the same algorithm written
+differently, which a clone scan cannot see.  That part needs the concept
+matrix of review area 5.
+
+Not measured: identifier quality (needs STYLE.md's rules first), walks per
+function and their cost (review B, in instructions), idle and oversubscribed
+threads (review A).  Not done: the ratchet is not in `ci/premerge.sh`; with
+130 open branches a failing premerge for one more `realloc` is a decision for
+P3.  Bless the baseline again when PR #134 lands (the include numbers move
+with the paths).
+
+Next: P1, the reviews.
+
 ### 2026-11-13: method written, survey done
 
 Three read-only surveys (threading, duplication, passes and naming) over
 main at 2e6d3e73; the counts in the last column of the table were rechecked
 by grep, the rest are unaudited leads.  Nothing built, no code changed.
-Next: P0 once PR #134 is on main.
