@@ -251,6 +251,13 @@ vcc-tsan:
 
 .PHONY: vcc-asan vcc-tsan
 
+# vcc's run-time support library for x86_64-w64-mingw32 (runtime/, libvccrt.a;
+# PLAN-win64.md WIN7R): CC and AR are runtime/build.sh's parameters
+vccrt:
+	sh runtime/build.sh $(OUT)/vccrt
+
+.PHONY: vccrt
+
 # Reuse the normal target graph so each stage gets the same objects and make
 # can schedule independent compilation jobs across the recursive invocation.
 SELF ?= $(if $(filter Darwin,$(HOST_OS)),../build/self,$(OUT)-self)
