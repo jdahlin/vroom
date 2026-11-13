@@ -379,6 +379,25 @@ signerade senare byte och volatile; både assembly och egen objektväg.
 Validerat: egna x86 315/315, GCC 1615/1615, TCC 105/105 och samma fem
 kända inlinefel. Fokuserat ASan/UBSan, filvist bygge och ARM/QEMU gröna.
 
+Avvisade uppföljningar till samma småfunktioner: signerad 16-bitars
+laddning + rorw + movswq minskar vdbeRecordCompareInt med fyra
+instruktioner, men ett fast-alignat 30-miljonersprov av tvåbytesfallet
+ger 42,029 → 52,237 ms (clang 41,465). bswapl + sarl i stället för
+16-bitarsrotation hjälper inte: 42,304 → 52,462 ms. Sexbytesfallet
+förbättras obetydligt och fyrabytesfallet är neutralt. Hela speedtest1
+blir cirka 0,9–1,0 % långsammare. Båda varianterna är borttagna.
+Underlag `work/vir-x86-perf/{signed16,signed16-wide}`; fokuserade körprov
+passerade även dessa försök, så avvisningen gäller prestanda.
+
+Gemensam join-kopiering med högst tre instruktioner prövades också
+(1310,26 → 1316,39 ms). En snäv regel för load+icmp+brif med valfri
+konstant ptradd ger ännu sämre 1279,96 → 1311,55 ms trots färre dynamiska
+instruktioner. vdbeRecordCompareInt kopierar jämförelsen till switcharmarna,
+men måste ändå hoppa till separata returvägar: kodtillväxten köper ingen
+säker vinst. Även dessa ändringar är borttagna. Underlag
+`work/vir-x86-perf/{join3,loadcmp-join}`. Ingen ny target-specifik policy
+har införts och den tidigare gemensamma ARM/x86-layouten behålls.
+
 2026-11-13, små SQLite-funktioner: byte-sammansättningens strukturella bevis
 har flyttats från x86 till `vir/facts.c` (`vir_read_be`). Det normaliserar
 konstanta pekaroffsetar och känner även igen två 32-bitshalvor som en 64-bit
