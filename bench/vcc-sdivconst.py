@@ -14,9 +14,9 @@ SOURCE = r'''
 #include "arch/x64/codegen/x64impl.h"
 #include "codegen/walk/division-signed-constant.c"
 #include "arch/a64/codegen/sdivconst.c"
-VPRIV int x64_nfree(ecx *e) { return 8 - __builtin_popcount(e->x64->live & X_TEMPS); }
+VPRIV int x64_nfree(codegen_context *e) { return 8 - __builtin_popcount(e->x64_context->live & X_TEMPS); }
 VPRIV i128 em_trunc_to(cc *c, i128 v, ast_qualified_type t) { (void)c; (void)t; return v; }
-VPRIV void slot_tag(ecx *e, ins *i, int64_t off, int64_t len)
+VPRIV void slot_tag(codegen_context *e, ins *i, int64_t off, int64_t len)
 { (void)e; (void)i; (void)off; (void)len; }
 
 static uint64_t seed=UINT64_C(0x987654321abcdeff);
@@ -69,18 +69,18 @@ static void divisor(int64_t d, unsigned bits)
 }
 static void pressure(void)
 {
-    emitter emit={0}; xst x={0}; ecx e={.E=&emit,.x64=&x};
+    codegen_unit emit={0}; xst x={0}; codegen_context e={.unit=&emit,.x64_context=&x};
     const int regs[]={RAX,RCX,RDX,RSI,RDI,R8,R9,R10};
     for (unsigned count=0;count<=8;count++) {
         x.live=0;
         for (unsigned j=0;j<8-count;j++) x.live|=1u<<regs[j];
-        e.live=(1u<<(NTEMP-count))-1;
+        e.temporaries_in_use=(1u<<(CODEGEN_TEMPORARY_COUNT-count))-1;
         for (unsigned materialize=0;materialize<2;materialize++)
         for (unsigned add=0;add<2;add++) for (unsigned rem=0;rem<2;rem++) {
             em_sdivconst_recipe r={.add=add,.remainder=rem};
-            val a={.k=materialize ? V_ADDR : V_REG};
+            codegen_value a={.kind=materialize ? CODEGEN_VALUE_ADDRESS : CODEGEN_VALUE_REGISTER};
             unsigned needed=materialize+1+(add||rem);
-            assert(wk_sdivconst_ok(&e,a,&r)==(count>=needed));
+            assert(walk_division_signed_constant_check(&e,a,&r)==(count>=needed));
             assert(a64_sdivconst_ok(&e,a,&r)==(count>=needed));
         }
     }
