@@ -64,9 +64,14 @@
 
 static bool x86_ld;		/* the inputs are x86-64 (arch/x64/ld/relocation.inc) */
 static _Atomic uint16_t ld_machine;	/* e_machine of the first object loaded (ld_object_parse) */
-static uint64_t tls_start;	/* x86: the PT_TLS start (dtpoff) */
 
-#include "elf-definitions.h"
+#include "ld-internal.h"
+
+/* the context of the one link that runs at a time (ld_link_lock); ld-internal.h */
+static struct ld_context ld_link_context;
+static struct ld_context *const ctx = &ld_link_context;
+
+#include "link-context.c"
 
 
 #include "word-access.c"
@@ -135,7 +140,6 @@ static uint64_t tls_start;	/* x86: the PT_TLS start (dtpoff) */
 /* ---------------- writing sections ---------------- */
 
 #include "../arch/a64/ld/relocation-apply.inc"
-static _Atomic bool got_seen;
 #include "../arch/x64/ld/relocation.inc"
 
 #include "section-write.c"

@@ -2,39 +2,38 @@
 
 /* ---------------- output ---------------- */
 
-static uint8_t *shstrtab_buf;
 
 static void ld_section_name_table_build(void)
 {
 	/* deduplicated, in section header order (StringTableBuilder in insertion order) */
 	size_t cap = 1;
-	for (uint32_t i = 0; i < outsecs.n; i++)
-		cap += strlen(osecs.v[outsecs.v[i]].name) + 1;
-	shstrtab_buf = ld_region_alloc(cap);
+	for (uint32_t i = 0; i < ctx->layout.output_sections.n; i++)
+		cap += strlen(osecs.v[ctx->layout.output_sections.v[i]].name) + 1;
+	ctx->output.shstrtab = ld_region_alloc(cap);
 	size_t n = 1;
-	for (uint32_t i = 0; i < outsecs.n; i++) {
-		ld_output_section *os = &osecs.v[outsecs.v[i]];
+	for (uint32_t i = 0; i < ctx->layout.output_sections.n; i++) {
+		ld_output_section *os = &osecs.v[ctx->layout.output_sections.v[i]];
 		size_t l = strlen(os->name);
 		uint32_t found = LD_NONE;
 		for (uint32_t k = 0; k < i; k++)
-			if (!strcmp(osecs.v[outsecs.v[k]].name, os->name)) {
-				found = osecs.v[outsecs.v[k]].nameoff;
+			if (!strcmp(osecs.v[ctx->layout.output_sections.v[k]].name, os->name)) {
+				found = osecs.v[ctx->layout.output_sections.v[k]].nameoff;
 				break;
 			}
 		if (found != LD_NONE) {
 			os->nameoff = found;
 			continue;
 		}
-		memcpy(shstrtab_buf + n, os->name, l + 1);
+		memcpy(ctx->output.shstrtab + n, os->name, l + 1);
 		os->nameoff = n;
 		n += l + 1;
 	}
-	isecs.v[shstrtab_isec].size = n;
+	isecs.v[ctx->output.shstrtab_section].size = n;
 }
 
 static void ld_headers_write(void)
 {
-	elf_file_header *eh = (elf_file_header *)out;
+	elf_file_header *eh = (elf_file_header *)ctx->output.image;
 	memcpy(eh->e_ident, "\177ELF\2\1\1", 7);
 	eh->e_type = opt.relocatable ? 1 : opt.shared ? 3 : 2;
 	eh->e_machine = x86_ld ? 62 : 183;
@@ -46,19 +45,19 @@ static void ld_headers_write(void)
 		ld_warning_report("cannot find entry symbol %s; not setting start address", en);
 	if (!opt.relocatable)
 		eh->e_entry = eg != LD_NONE && gsyms[eg].state != LD_SYMBOL_STATE_UNDEFINED ? ld_global_symbol_address(eg) : 0;
-	eh->e_phoff = phdrs.n ? sizeof(elf_file_header) : 0;
-	eh->e_shoff = shoff;
+	eh->e_phoff = ctx->layout.program_headers.n ? sizeof(elf_file_header) : 0;
+	eh->e_shoff = ctx->layout.section_header_offset;
 	eh->e_ehsize = sizeof(elf_file_header);
-	eh->e_phentsize = phdrs.n ? sizeof(elf_program_header) : 0;
-	eh->e_phnum = phdrs.n;
+	eh->e_phentsize = ctx->layout.program_headers.n ? sizeof(elf_program_header) : 0;
+	eh->e_phnum = ctx->layout.program_headers.n;
 	eh->e_shentsize = sizeof(elf_section_header);
-	eh->e_shnum = outsecs.n + 1;
-	eh->e_shstrndx = osecs.v[ld_input_section_output_section(shstrtab_isec)].shidx;
-	if (phdrs.n)
-		memcpy(out + sizeof(elf_file_header), phdrs.v, phdrs.n * sizeof(elf_program_header));
-	elf_section_header *sh = (elf_section_header *)(out + shoff);
-	for (uint32_t i = 0; i < outsecs.n; i++) {
-		ld_output_section *os = &osecs.v[outsecs.v[i]];
+	eh->e_shnum = ctx->layout.output_sections.n + 1;
+	eh->e_shstrndx = osecs.v[ld_input_section_output_section(ctx->output.shstrtab_section)].shidx;
+	if (ctx->layout.program_headers.n)
+		memcpy(ctx->output.image + sizeof(elf_file_header), ctx->layout.program_headers.v, ctx->layout.program_headers.n * sizeof(elf_program_header));
+	elf_section_header *sh = (elf_section_header *)(ctx->output.image + ctx->layout.section_header_offset);
+	for (uint32_t i = 0; i < ctx->layout.output_sections.n; i++) {
+		ld_output_section *os = &osecs.v[ctx->layout.output_sections.v[i]];
 		elf_section_header *d = &sh[i + 1];
 		d->sh_name = os->nameoff;
 		d->sh_type = os->type;
@@ -76,19 +75,19 @@ static void ld_headers_write(void)
 static void ld_synthetic_sections_write(void)
 {
 	/* .rela.dyn, .symtab and .strtab were written in place */
-	ld_input_section *is = &isecs.v[shstrtab_isec];
-	memcpy(out + osecs.v[ld_input_section_output_section(shstrtab_isec)].offset + is->off, shstrtab_buf, is->size);
+	ld_input_section *is = &isecs.v[ctx->output.shstrtab_section];
+	memcpy(ctx->output.image + osecs.v[ld_input_section_output_section(ctx->output.shstrtab_section)].offset + is->off, ctx->output.shstrtab, is->size);
 }
 
 /* --build-id: lld's "sha1"/"tree" ids are a BLAKE3 tree over 1 MiB chunks */
 static void ld_build_id_write(void)
 {
-	if (buildid_isec == LD_NONE)
+	if (ctx->output.build_id_section == LD_NONE)
 		return;
-	ld_input_section *is = &isecs.v[buildid_isec];
-	uint8_t *dst = out + osecs.v[ld_input_section_output_section(buildid_isec)].offset + is->off + 16;
+	ld_input_section *is = &isecs.v[ctx->output.build_id_section];
+	uint8_t *dst = ctx->output.image + osecs.v[ld_input_section_output_section(ctx->output.build_id_section)].offset + is->off + 16;
 	size_t hl = is->size - 16;
-	size_t nchunks = (filesize + (1u << 20) - 1) >> 20;
+	size_t nchunks = (ctx->layout.file_size + (1u << 20) - 1) >> 20;
 	uint8_t *hashes = ld_region_alloc(nchunks * 20 + 32);
 	if (!strcmp(opt.build_id, "sha1") || !strcmp(opt.build_id, "tree")) {
 		ld_parallel_for(nchunks, ld_build_id_chunk_hash, hashes);
@@ -97,8 +96,8 @@ static void ld_build_id_write(void)
 		/* xxh3 of the chunk hashes (lld: --build-id=fast is xxh3_64bits per chunk) */
 		uint8_t *h8 = ld_region_alloc(nchunks * 8);
 		for (size_t i = 0; i < nchunks; i++) {
-			uint64_t b = (uint64_t)i << 20, n = filesize - b < (1u << 20) ? filesize - b : (1u << 20);
-			uint64_t x = vdigest_xxh3(out + b, n);
+			uint64_t b = (uint64_t)i << 20, n = ctx->layout.file_size - b < (1u << 20) ? ctx->layout.file_size - b : (1u << 20);
+			uint64_t x = vdigest_xxh3(ctx->output.image + b, n);
 			memcpy(h8 + i * 8, &x, 8);
 		}
 		uint64_t x = vdigest_xxh3(h8, nchunks * 8);

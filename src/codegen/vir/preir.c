@@ -61,9 +61,9 @@ VPRIV uint32_t vw_k(ecx *e, uint32_t op, uint32_t ty, uint32_t a, uint32_t b, ui
 
 VPRIV uint32_t vw_iconst(ecx *e, uint32_t ty, int64_t v)
 {
-	if (ty == VT_I32)
-		return vw_k(e, VO_ICONST, VT_I32, 0, (uint32_t)v, 0);
-	return vw_k(e, VO_ICONST, ty, 0, (uint32_t)v, (uint32_t)((uint64_t)v >> 32));
+	if (ty == VIR_TYPE_I32)
+		return vw_k(e, VIR_OP_ICONST, VIR_TYPE_I32, 0, (uint32_t)v, 0);
+	return vw_k(e, VIR_OP_ICONST, ty, 0, (uint32_t)v, (uint32_t)((uint64_t)v >> 32));
 }
 
 VPRIV uint32_t vw_xput(ecx *e, const uint32_t *w, uint32_t n)
@@ -117,9 +117,9 @@ VPRIV void vw_term(ecx *e, uint32_t op, uint32_t a, uint32_t b, uint32_t c, uint
 {
 	vwst *V = e->vw;
 
-	V->b[V->cur].term = vw_put(e, op, VT_VOID, fl, a, b, c, V->cur);
+	V->b[V->cur].term = vw_put(e, op, VIR_TYPE_VOID, fl, a, b, c, V->cur);
 	V->cur = vw_newblk(e);
 	V->nst = 0;
 }
 
-VPRIV void vw_br(ecx *e, uint32_t blk) { vw_term(e, VO_BR, blk, 0, 0, 0); }
+VPRIV void vw_br(ecx *e, uint32_t blk) { vw_term(e, VIR_OP_BR, blk, 0, 0, 0); }

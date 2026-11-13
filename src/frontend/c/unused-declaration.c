@@ -1,9 +1,9 @@
 /* vcc front end: warnings for variables, statics and typedefs that were never used */
-#include "ccimpl.h"
+#include "cc-internal.h"
 
 /* errors other than clang's DefaultError warnings (-Wint-conversion...): clang's
    hasUncompilableErrorOccurred */
-static uint32_t hard_errors(cc *c)
+static uint32_t cc_report_hard_error_count(cc *c)
 {
 	uint32_t ce = (uint32_t)c->errors, pe = (uint32_t)pp_error_count(c->p), e = ce > pe ? ce : pe;
 
@@ -12,44 +12,44 @@ static uint32_t hard_errors(cc *c)
 
 /* -Wunused-variable: a block-scope variable never named (clang's
    ActOnPopScope, in declaration order) */
-VPRIV void unused_vars(cc *c, uint32_t m)
+CC_PRIVATE void cc_unused_variables_report(cc *c, uint32_t m)
 {
 	static const char *const g[] = { "unused", "all", "most", NULL };
 
 	for (uint32_t i = m; i < c->nsstack; i++) {
 		sym *y = &c->syms[c->sstack[i]];
 		const attrs *a = y->attrs ? &c->attr[y->attrs] : NULL;
-		pp_span r;
+		diag_span r;
 
 		if (y->kind != S_VAR || !y->name || (y->flags & (SF_PARAM | SF_ATTR_USED)) ||
 		    y->sc == SC_EXTERN || (a && (a->unused || a->cleanup || a->used)))
 			continue;
 		if (y->flags & SF_REF) {	/* -Wunused-but-set-variable: only assigned */
 			if (!y->nref) {
-				pp_dinfo d = { "warning", y->loc, NULL, 0, NULL, 0, idstr_(y->name), (uint32_t)idlen_(y->name) };
+				diag_info d = { "warning", y->loc, NULL, 0, NULL, 0, cc_identifier_string(y->name), (uint32_t)cc_identifier_length(y->name) };
 				static const char *const gb[] = { "unused-but-set", "unused", "all", "most", NULL };
 
-				pp_warnx(c->p, "unused-but-set-variable", false, gb, &d, "variable '%.*s' set but not used", IDF(y->name));
+				diag_warning_report(c->p, "unused-but-set-variable", false, gb, &d, "variable '%.*s' set but not used", CC_IDENTIFIER(y->name));
 			}
 			continue;
 		}
-		r = (pp_span){ y->loc, pp_tok_end(c->p, y->loc) };
+		r = (diag_span){ y->loc, pp_token_end_find(c->p, y->loc) };
 		{
-			pp_dinfo d = { "warning", y->loc, &r, 1, NULL, 0, idstr_(y->name), (uint32_t)idlen_(y->name) };
+			diag_info d = { "warning", y->loc, &r, 1, NULL, 0, cc_identifier_string(y->name), (uint32_t)cc_identifier_length(y->name) };
 
-			pp_warnx(c->p, "unused-variable", false, g, &d, "unused variable '%.*s'", IDF(y->name));
+			diag_warning_report(c->p, "unused-variable", false, g, &d, "unused variable '%.*s'", CC_IDENTIFIER(y->name));
 		}
 	}
 }
 
 /* -Wunused-variable, -Wunused-const-variable: a static file-scope variable
    of the main file never named, at its definition (clang's end of TU) */
-VPRIV void unused_statics(cc *c)
+CC_PRIVATE void cc_unused_statics_report(cc *c)
 {
 	static const char *const g[] = { "unused", "all", "most", NULL };
 	static const char *const gc[] = { "unused-variable", "unused", "all", "most", NULL };
 
-	if (hard_errors(c))
+	if (cc_report_hard_error_count(c))
 		return;
 	for (uint32_t i = 1; i < c->nsym; i++)	/* alias("f") uses f */
 		if (c->syms[i].attrs && c->attr[c->syms[i].attrs].alias) {
@@ -63,7 +63,7 @@ VPRIV void unused_statics(cc *c)
 		uint32_t at;
 		bool ref = false, used = false, skip = false, fn = y->kind == S_FUNC;
 
-		if ((y->kind != S_VAR && !fn) || y->depth || y->sc != SC_STATIC || !y->name || lookup(c, y->name) != i ||
+		if ((y->kind != S_VAR && !fn) || y->depth || y->sc != SC_STATIC || !y->name || cc_symbol_lookup(c, y->name) != i ||
 		    (y->flags & SF_OVERLOAD))
 			continue;
 		for (uint32_t s = i; s; s = c->syms[s].next) {
@@ -75,35 +75,35 @@ VPRIV void unused_statics(cc *c)
 			skip |= a && (a->unused || a->used || a->alias || a->constructor || a->destructor);
 		}
 		at = y->defloc ? y->defloc : y->loc;
-		if (used || skip || !pp_in_main_file(c->p, at)	/* clang: also a non-inline header function (vcc: its references from unparsed lazy bodies are unknown) */)
+		if (used || skip || !pp_location_is_in_main_file(c->p, at)	/* clang: also a non-inline header function (vcc: its references from unparsed lazy bodies are unknown) */)
 			continue;
 		{
 			qty t = y->ty;
 			bool k = false;
-			pp_span r = { at, pp_tok_end(c->p, at) };
-			pp_dinfo d = { "warning", at, &r, 1, NULL, 0, idstr_(y->name), (uint32_t)idlen_(y->name) };
+			diag_span r = { at, pp_token_end_find(c->p, at) };
+			diag_info d = { "warning", at, &r, 1, NULL, 0, cc_identifier_string(y->name), (uint32_t)cc_identifier_length(y->name) };
 
 			if (!fn) {
-				while (KIND(c, t) == TY_ARRAY)
-					t = QT(QI(T(c, t)->base), QQ(T(c, t)->base) | QQ(t));
+				while (AST_TYPE_KIND(c, t) == TY_ARRAY)
+					t = QT(QI(AST_TYPE(c, t)->base), QQ(AST_TYPE(c, t)->base) | QQ(t));
 				k = (QQ(t) & Q_CONST) != 0;
 			}
 			if (ref) {	/* named only where it is not evaluated (sizeof, typeof) */
 				static const char *const gu[] = { "unused-function", "unused", "all", "most", NULL };
 
-				pp_warnx(c->p, "unneeded-internal-declaration", false, gu, &d, "%s '%.*s' is not needed and will not be emitted",
-					 fn ? "function" : "variable", IDF(y->name));
+				diag_warning_report(c->p, "unneeded-internal-declaration", false, gu, &d, "%s '%.*s' is not needed and will not be emitted",
+					 fn ? "function" : "variable", CC_IDENTIFIER(y->name));
 			} else if (fn)
-				pp_warnx(c->p, "unused-function", false, g, &d, "unused function '%.*s'", IDF(y->name));
+				diag_warning_report(c->p, "unused-function", false, g, &d, "unused function '%.*s'", CC_IDENTIFIER(y->name));
 			else
-				pp_warnx(c->p, k ? "unused-const-variable" : "unused-variable", false, k ? gc : g, &d,
-					 "unused variable '%.*s'", IDF(y->name));
+				diag_warning_report(c->p, k ? "unused-const-variable" : "unused-variable", false, k ? gc : g, &d,
+					 "unused variable '%.*s'", CC_IDENTIFIER(y->name));
 		}
 	}
 }
 
 /* -Wunused-local-typedef: a block-scope typedef never named (clang: at the end of the TU) */
-VPRIV void unused_typedefs(cc *c)
+CC_PRIVATE void cc_unused_typedefs_report(cc *c)
 {
 	static const char *const g[] = { "unused-local-typedefs", "unused", "all", "most", NULL };
 
@@ -116,9 +116,9 @@ VPRIV void unused_typedefs(cc *c)
 		if (y->kind != S_TYPEDEF || !y->depth || !y->name || (y->flags & SF_REF) || (a && (a->unused || a->used)))
 			continue;
 		{
-			pp_dinfo d = { "warning", y->loc, NULL, 0, NULL, 0, idstr_(y->name), (uint32_t)idlen_(y->name) };
+			diag_info d = { "warning", y->loc, NULL, 0, NULL, 0, cc_identifier_string(y->name), (uint32_t)cc_identifier_length(y->name) };
 
-			pp_warnx(c->p, "unused-local-typedef", false, g, &d, "unused typedef '%.*s'", IDF(y->name));
+			diag_warning_report(c->p, "unused-local-typedef", false, g, &d, "unused typedef '%.*s'", CC_IDENTIFIER(y->name));
 		}
 	}
 }

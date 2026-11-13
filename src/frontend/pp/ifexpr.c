@@ -106,15 +106,15 @@ static pp_if_value pp_character_constant_parse(pp *p, const ptok *t)
 		v = narrow ? (v << 8) | (c & 0xff) : c;
 	}
 	if (cnt > 1 && t->kind == LEX_TOKEN_CHARACTER) {
-		pp_span sp;
-		pp_dinfo d = { "warning", t->loc, &sp, 0, NULL, 0, NULL, 0 };
+		diag_span sp;
+		diag_info d = { "warning", t->loc, &sp, 0, NULL, 0, NULL, 0 };
 
 		if (cnt != 4)	/* (4: -Wfour-char-constants, off) */
-			pp_warnx(p, "multichar", true, NULL, &d, "multi-character character constant");
+			diag_warning_report(p, "multichar", true, NULL, &d, "multi-character character constant");
 		if (cnt > 4)
-			pp_diag(p, t->loc, "warning", "character constant too long for its type");
+			diag_report(p, t->loc, "warning", "character constant too long for its type");
 	}
-	if (narrow && cnt == 1 && t->kind == LEX_TOKEN_CHARACTER && !p->o->unsigned_char)
+	if (narrow && cnt == 1 && t->kind == LEX_TOKEN_CHARACTER && !p->options->unsigned_char)
 		v = (uint64_t)(int64_t)(int8_t)v;
 	else if (narrow && cnt > 1)
 		v = (uint64_t)(int64_t)(int32_t)v;
@@ -125,17 +125,17 @@ static pp_if_value pp_character_constant_parse(pp *p, const ptok *t)
 
 typedef struct pp_if_evaluation {
 	pp *p;
-	ptok t;		/* lookahead */
+	ptok lookahead;		/* lookahead */
 	uint32_t loc;
-	uint32_t prev;		/* the last token consumed */
-	uint32_t lb, le;	/* the last primary expression: first and last token */
-	bool bad;
+	uint32_t previous_location;		/* the last token consumed */
+	uint32_t primary_first, primary_last;	/* the last primary expression: first and last token */
+	bool failed;
 } pp_if_evaluation;
 
 static void pp_if_token_advance(pp_if_evaluation *e)
 {
-	e->prev = e->t.loc;
-	pp_token_expanded_next(e->p, &e->t);
+	e->previous_location = e->lookahead.loc;
+	pp_token_expanded_next(e->p, &e->lookahead);
 }
 
 static pp_if_value pp_if_comma_parse(pp_if_evaluation *e, bool live);
@@ -143,10 +143,10 @@ static pp_if_value pp_if_comma_parse(pp_if_evaluation *e, bool live);
 static pp_if_value pp_if_primary_parse_inner(pp_if_evaluation *e, bool live);
 static pp_if_value pp_if_primary_parse(pp_if_evaluation *e, bool live)
 {
-	uint32_t b = e->t.loc;
+	uint32_t b = e->lookahead.loc;
 	pp_if_value r = pp_if_primary_parse_inner(e, live);
 
-	e->lb = b, e->le = e->prev;
+	e->primary_first = b, e->primary_last = e->previous_location;
 	return r;
 }
 
@@ -156,23 +156,23 @@ static pp_if_value pp_if_primary_parse_inner(pp_if_evaluation *e, bool live)
 	pp *p = e->p;
 
 	if (vstack_guard_low())
-		PP_FATAL(p, e->t.loc, "#if expression nested too deeply");
-	switch (e->t.kind) {
+		PP_FATAL(p, e->lookahead.loc, "#if expression nested too deeply");
+	switch (e->lookahead.kind) {
 	case LEX_TOKEN_NUMBER:
-		r = pp_number_parse(p, &e->t);
+		r = pp_number_parse(p, &e->lookahead);
 		pp_if_token_advance(e);
 		return r;
 	case LEX_TOKEN_CHARACTER: case LEX_TOKEN_WIDE_CHARACTER: case LEX_TOKEN_UTF8_CHARACTER: case LEX_TOKEN_UTF16_CHARACTER: case LEX_TOKEN_UTF32_CHARACTER:
-		r = pp_character_constant_parse(p, &e->t);
+		r = pp_character_constant_parse(p, &e->lookahead);
 		pp_if_token_advance(e);
 		return r;
 	case LEX_TOKEN_LEFT_PAREN:
 		pp_if_token_advance(e);
 		r = pp_if_comma_parse(e, live);
-		if (e->t.kind != LEX_TOKEN_RIGHT_PAREN) {
-			if (!e->bad)
+		if (e->lookahead.kind != LEX_TOKEN_RIGHT_PAREN) {
+			if (!e->failed)
 				PP_ERROR(p, e->loc, "expected ')' in preprocessor expression");
-			e->bad = true;
+			e->failed = true;
 			return r;
 		}
 		pp_if_token_advance(e);
@@ -197,14 +197,14 @@ static pp_if_value pp_if_primary_parse_inner(pp_if_evaluation *e, bool live)
 		r.u = false;
 		return r;
 	case LEX_TOKEN_IDENTIFIER:
-		if (e->t.id == KW_defined) {
+		if (e->lookahead.id == KW_defined) {
 			ptok n;
 			bool paren;
 
-			if (unlikely(obj_macro_at(p, e->t.loc))) {
-				pp_dinfo d = { "warning", e->t.loc, NULL, 0, NULL, 0, "defined", 7 };
+			if (unlikely(pp_location_is_object_macro(p, e->lookahead.loc))) {
+				diag_info d = { "warning", e->lookahead.loc, NULL, 0, NULL, 0, "defined", 7 };
 
-				pp_warnx(p, "expansion-to-defined", true, NULL, &d,
+				diag_warning_report(p, "expansion-to-defined", true, NULL, &d,
 					 "macro expansion producing 'defined' has undefined behavior");
 			}
 
@@ -214,7 +214,7 @@ static pp_if_value pp_if_primary_parse_inner(pp_if_evaluation *e, bool live)
 				pp_token_raw_next(p, &n);
 			if (n.kind != LEX_TOKEN_IDENTIFIER) {
 				PP_ERROR(p, e->loc, "macro name must be an identifier");
-				e->bad = true;
+				e->failed = true;
 				return r;
 			}
 			r.v = pp_macro_is_defined(p, n.id);
@@ -222,37 +222,37 @@ static pp_if_value pp_if_primary_parse_inner(pp_if_evaluation *e, bool live)
 				pp_token_raw_next(p, &n);
 				if (n.kind != LEX_TOKEN_RIGHT_PAREN) {
 					PP_ERROR(p, e->loc, "missing ')' after 'defined'");
-					e->bad = true;
+					e->failed = true;
 				}
 			}
 			pp_if_token_advance(e);
 			return r;
 		}
-		if (p->o->c23 && e->t.id == KW_true)
+		if (p->options->c23 && e->lookahead.id == KW_true)
 			r.v = 1;	/* C23: true is 1 in #if (false is 0 anyway) */
 		{
-			uint32_t id = e->t.id, loc = e->t.loc;
+			uint32_t id = e->lookahead.id, loc = e->lookahead.loc;
 
 			pp_if_token_advance(e);	/* an identifier that is not a macro: 0 */
-			if (p->o->c23 && e->t.kind == LEX_TOKEN_CHARACTER && e->t.loc == loc + 2 && vintern_ents[id].len == 2 &&
+			if (p->options->c23 && e->lookahead.kind == LEX_TOKEN_CHARACTER && e->lookahead.loc == loc + 2 && vintern_ents[id].len == 2 &&
 			    !memcmp(vintern_ents[id].s, "u8", 2)) {
 				/* C23 u8'a' (the lexer's C17 tokens u8 and 'a') */
-				e->t.kind = LEX_TOKEN_UTF8_CHARACTER;
-				r = pp_character_constant_parse(p, &e->t);
+				e->lookahead.kind = LEX_TOKEN_UTF8_CHARACTER;
+				r = pp_character_constant_parse(p, &e->lookahead);
 				pp_if_token_advance(e);
 				return r;
 			}
-			if (e->t.kind == LEX_TOKEN_LEFT_PAREN && !e->bad) {
+			if (e->lookahead.kind == LEX_TOKEN_LEFT_PAREN && !e->failed) {
 				PP_ERROR(p, loc, "function-like macro '%.*s' is not defined",
 				      (int)vintern_ents[id].len, vintern_ents[id].s);
-				e->bad = true;
+				e->failed = true;
 			}
 		}
 		return r;
 	default:
-		if (!e->bad)
+		if (!e->failed)
 			PP_ERROR(p, e->loc, "invalid token at start of a preprocessor expression");
-		e->bad = true;
+		e->failed = true;
 		return r;
 	}
 }
@@ -279,11 +279,11 @@ static pp_if_value pp_if_binary_parse(pp_if_evaluation *e, int minp, bool live)
 	pp_if_value l = pp_if_primary_parse(e, live);
 
 	for (;;) {
-		int op = e->t.kind, pr = pp_if_operator_precedence(op);
+		int op = e->lookahead.kind, pr = pp_if_operator_precedence(op);
 		pp_if_value r;
 		bool u;
 
-		if (!pr || pr < minp || e->bad)
+		if (!pr || pr < minp || e->failed)
 			return l;
 		pp_if_token_advance(e);
 		if (op == LEX_TOKEN_AMPERSAND_AMPERSAND) {
@@ -306,7 +306,7 @@ static pp_if_value pp_if_binary_parse(pp_if_evaluation *e, int minp, bool live)
 			if (!r.v) {
 				if (live) {
 					PP_ERROR(e->p, e->loc, "division by zero in preprocessor expression");
-					e->bad = true;
+					e->failed = true;
 				}
 				l.v = 0;
 				break;
@@ -350,14 +350,14 @@ static pp_if_value pp_if_conditional_parse(pp_if_evaluation *e, bool live)
 {
 	pp_if_value c = pp_if_binary_parse(e, 1, live), a, b;
 
-	if (e->t.kind != LEX_TOKEN_QUESTION || e->bad)
+	if (e->lookahead.kind != LEX_TOKEN_QUESTION || e->failed)
 		return c;
 	pp_if_token_advance(e);
 	a = pp_if_comma_parse(e, live && c.v);
-	if (e->t.kind != LEX_TOKEN_COLON) {
-		if (!e->bad)
+	if (e->lookahead.kind != LEX_TOKEN_COLON) {
+		if (!e->failed)
 			PP_ERROR(e->p, e->loc, "expected ':' in preprocessor expression");
-		e->bad = true;
+		e->failed = true;
 		return a;
 	}
 	pp_if_token_advance(e);
@@ -371,7 +371,7 @@ static pp_if_value pp_if_comma_parse(pp_if_evaluation *e, bool live)
 {
 	pp_if_value r = pp_if_conditional_parse(e, live);
 
-	while (e->t.kind == LEX_TOKEN_COMMA && !e->bad) {
+	while (e->lookahead.kind == LEX_TOKEN_COMMA && !e->failed) {
 		pp_if_token_advance(e);
 		r = pp_if_conditional_parse(e, live);
 	}
@@ -381,8 +381,8 @@ static pp_if_value pp_if_comma_parse(pp_if_evaluation *e, bool live)
 /* evaluate tokens [b, e) of fc's current file as an #if expression */
 VPRIV bool pp_if_evaluate(pp *p, const pp_context *fc, uint32_t b, uint32_t e)
 {
-	int d = p->depth;
-	pp_if_evaluation E = { .p = p, .loc = fc->loc + fc->vt[b > 0 ? b - 1 : 0].off };
+	int d = p->context_depth;
+	pp_if_evaluation E = { .p = p, .loc = fc->location + fc->lexed_tokens[b > 0 ? b - 1 : 0].off };
 	pp_if_value r;
 
 	if (b >= e) {
@@ -394,18 +394,18 @@ VPRIV bool pp_if_evaluate(pp *p, const pp_context *fc, uint32_t b, uint32_t e)
 	pp_if_token_advance(&E);
 	r = pp_if_comma_parse(&E, true);
 	p->in_directive--;
-	if (!E.bad && E.t.kind != LEX_TOKEN_EOF)
+	if (!E.failed && E.lookahead.kind != LEX_TOKEN_EOF)
 	{
 		/* clang: at the token, the operand before it underlined */
-		pp_span sp = { E.lb, pp_tok_end(p, E.le) };
-		pp_dinfo d = { "error", E.t.loc, &sp, E.lb && E.le >= E.lb, NULL, 0, NULL, 0 };
-		char tmp[E.t.len + 1];
+		diag_span sp = { E.primary_first, pp_token_end_find(p, E.primary_last) };
+		diag_info d = { "error", E.lookahead.loc, &sp, E.primary_first && E.primary_last >= E.primary_first, NULL, 0, NULL, 0 };
+		char tmp[E.lookahead.len + 1];
 		size_t ml;
 
-		if (E.t.flags & PP_TOKEN_FLAG_FROM_MACRO)	/* (the note at the macro's body token) */
-			d.ms = pp_token_spell(&E.t, tmp, &ml), d.mlen = (uint32_t)ml;
+		if (E.lookahead.flags & PP_TOKEN_FLAG_FROM_MACRO)	/* (the note at the macro's body token) */
+			d.ms = pp_token_spell(&E.lookahead, tmp, &ml), d.mlen = (uint32_t)ml;
 
-		pp_diagx(p, &d, "token is not a valid binary operator in a preprocessor subexpression");
+		diag_report_extended(p, &d, "token is not a valid binary operator in a preprocessor subexpression");
 	}
 	pp_context_pop_to(p, d);
 	return r.v != 0;
@@ -414,7 +414,7 @@ VPRIV bool pp_if_evaluate(pp *p, const pp_context *fc, uint32_t b, uint32_t e)
 /* a constant expression of already expanded tokens (#embed's limit()): false if not one */
 VPRIV bool pp_if_tokens_evaluate(pp *p, const ptok *t, uint32_t n, uint64_t *v)
 {
-	int d = p->depth;
+	int d = p->context_depth;
 	pp_if_evaluation E = { .p = p, .loc = n ? t[0].loc : 0 };
 	pp_if_value r;
 
@@ -425,9 +425,9 @@ VPRIV bool pp_if_tokens_evaluate(pp *p, const ptok *t, uint32_t n, uint64_t *v)
 	pp_if_token_advance(&E);
 	r = pp_if_comma_parse(&E, true);
 	p->in_directive--;
-	if (E.t.kind != LEX_TOKEN_EOF)
-		E.bad = true;
+	if (E.lookahead.kind != LEX_TOKEN_EOF)
+		E.failed = true;
 	pp_context_pop_to(p, d);
 	*v = (uint64_t)r.v;
-	return !E.bad;
+	return !E.failed;
 }

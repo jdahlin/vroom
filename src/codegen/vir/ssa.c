@@ -87,15 +87,15 @@ static uint32_t vw_phity(ecx *e, uint32_t var, uint32_t ty)
 {
 	if (var >= VW_VAR0)
 		return e->vw->vty[var - VW_VAR0];
-	if (ty == VT_I32)
-		return VT_I64;
+	if (ty == VIR_TYPE_I32)
+		return VIR_TYPE_I64;
 	return ty;
 }
 
 VPRIV uint32_t vw_newphi(ecx *e, uint32_t b, uint32_t var, uint32_t ty)
 {
 	vwst *V = e->vw;
-	uint32_t i = vw_put(e, VO_BPARAM, ty, 0, var, VW_NOBLK, 0, b);
+	uint32_t i = vw_put(e, VIR_OP_BPARAM, ty, 0, var, VW_NOBLK, 0, b);
 	vwb *k = &V->b[b];
 
 	if (k->ptail)
@@ -110,7 +110,7 @@ VPRIV uint32_t vw_newphi(ecx *e, uint32_t b, uint32_t var, uint32_t ty)
 VPRIV void vw_phiops(ecx *e, uint32_t p, uint32_t b)
 {
 	vwst *V = e->vw;
-	uint32_t var = V->p[p].in.a, ty = V->p[p].in.ty, np = V->b[b].npred;
+	uint32_t var = V->p[p].in.a, ty = V->p[p].in.type, np = V->b[b].npred;
 	uint32_t o = vw_xput(e, NULL, 0);
 
 	GROW(V->x, V->nx, V->cx, np ? np : 1);
@@ -126,8 +126,8 @@ VPRIV void vw_phiops(ecx *e, uint32_t p, uint32_t b)
 
 VPRIV uint32_t vw_undef(ecx *e, uint32_t ty)
 {
-	if (ty == VT_F32 || ty == VT_F64)
-		return vw_k(e, VO_FCONST, ty, 0, 0, 0);
+	if (ty == VIR_TYPE_F32 || ty == VIR_TYPE_F64)
+		return vw_k(e, VIR_OP_FCONST, ty, 0, 0, 0);
 	return vw_iconst(e, ty, 0);
 }
 

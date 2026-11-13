@@ -22,21 +22,21 @@ static void vw_ownaddr(ecx *e, vwsimp *S)
 		uint32_t b = V->order[i];
 
 		for (uint32_t q = V->b[b].head, pq = 0; q; pq = q, q = V->p[q].next) {
-			vir_ins in = V->p[q].in;
-			uint32_t a, n, w = 1u << VIF_W(in.fl);
+			vir_insn in = V->p[q].in;
+			uint32_t a, n, w = 1u << VIR_INSN_FLAG_WIDTH_LOG2(in.flags);
 			int64_t k;
 
-			if ((in.op != VO_LOAD && in.op != VO_STORE) || q >= S->n0 || vw_find(V, q) != q || vw_promdead(V, q) ||
-			    (in.op == VO_LOAD && !S->cnt[q] && !(in.fl & VIF_VOL)))
+			if ((in.op != VIR_OP_LOAD && in.op != VIR_OP_STORE) || q >= S->n0 || vw_find(V, q) != q || vw_promdead(V, q) ||
+			    (in.op == VIR_OP_LOAD && !S->cnt[q] && !(in.flags & VIR_INSN_FLAG_VOL)))
 				continue;
 			a = vw_find(V, in.a);
-			if (a >= S->n0 || V->p[a].in.op != VO_PTRADD || V->p[a].blk == VW_NOBLK ||
+			if (a >= S->n0 || V->p[a].in.op != VIR_OP_PTRADD || V->p[a].blk == VW_NOBLK ||
 			    !vw_kint(V, vw_find(V, V->p[a].in.b), &k) ||
 			    !((k >= -256 && k <= 255) || (k > 0 && !(k % w) && k / w <= 4095)))
 				continue;
 			if (a == pq && S->cnt[a] == 1)
 				continue;	/* (its own already) */
-			n = vw_put(e, VO_PTRADD, VT_PTR, V->p[a].in.fl, vw_find(V, V->p[a].in.a), vw_find(V, V->p[a].in.b), 0, b);
+			n = vw_put(e, VIR_OP_PTRADD, VIR_TYPE_PTR, V->p[a].in.flags, vw_find(V, V->p[a].in.a), vw_find(V, V->p[a].in.b), 0, b);
 			V->p[n].loc = V->p[q].loc;
 			V->p[n].next = q;
 			if (pq)
@@ -85,7 +85,7 @@ VPRIV void vw_simplify(ecx *e)
 				break;
 			if (vw_find(V, x) == x && !vw_promdead(V, x)) {
 				VW_EACHOP(V, x, o, vw_inc(V, &S, vw_find(V, *o)));
-				if (V->p[x].in.op == VO_I2P) pcopy[vw_find(V, V->p[x].in.a)]++;
+				if (V->p[x].in.op == VIR_OP_I2P) pcopy[vw_find(V, V->p[x].in.a)]++;
 			}
 			if (!q)
 				break;
@@ -93,9 +93,9 @@ VPRIV void vw_simplify(ecx *e)
 	}
 	/* Pointer-only views need no separately allocated integer carrier. */
 	for (uint32_t q = 0; q < S.n0; q++) {
-		vir_ins *in = &V->p[q].in;
-		if (in->op == VO_LOAD && in->ty == VT_I64 && !(in->fl & (VIF_VOL | VIF_MS)) &&
-		    VIF_W(in->fl) == 3 && pcopy[q] && pcopy[q] == S.cnt[q]) in->ty = VT_PTR;
+		vir_insn *in = &V->p[q].in;
+		if (in->op == VIR_OP_LOAD && in->type == VIR_TYPE_I64 && !(in->flags & (VIR_INSN_FLAG_VOL | VIR_INSN_FLAG_MS)) &&
+		    VIR_INSN_FLAG_WIDTH_LOG2(in->flags) == 3 && pcopy[q] && pcopy[q] == S.cnt[q]) in->type = VIR_TYPE_PTR;
 	}
 	/* rewriting and numbering over the dominator tree */
 	vw_doms(e, &S);
@@ -139,21 +139,21 @@ VPRIV void vw_simplify(ecx *e)
 			if (q < S.n0 && vw_find(V, q) == q && !S.cnt[q])
 				stk[ns++] = q;
 	while (ns) {
-		uint32_t q = stk[--ns], op = V->p[q].in.op, eff = vir_optab[op].eff;
+		uint32_t q = stk[--ns], op = V->p[q].in.op, eff = vir_opcode_table[op].effects;
 
 		if (vw_find(V, q) != q || S.cnt[q] || V->p[q].blk == VW_NOBLK)
 			continue;
-		if (op == VO_LOAD ? (V->p[q].in.fl & VIF_VOL) != 0 :
-		    ((eff & ~(EF_UF | EF_F)) != EF_P || op == VO_BPARAM || op == VO_PARAM))	/* (FP status flags are not kept: no FENV_ACCESS) */
+		if (op == VIR_OP_LOAD ? (V->p[q].in.flags & VIR_INSN_FLAG_VOL) != 0 :
+		    ((eff & ~(VIR_EFFECT_UF | VIR_EFFECT_F)) != VIR_EFFECT_P || op == VIR_OP_BPARAM || op == VIR_OP_PARAM))	/* (FP status flags are not kept: no FENV_ACCESS) */
 			continue;
 		VW_EACHOP(V, q, o, {
 			uint32_t x = vw_find(V, *o);
 
 			vw_dec(V, &S, x);
-			if (x < S.n0 && V->p[x].blk != VW_NOBLK && !S.cnt[x] && V->p[x].in.op != VO_BPARAM)
+			if (x < S.n0 && V->p[x].blk != VW_NOBLK && !S.cnt[x] && V->p[x].in.op != VIR_OP_BPARAM)
 				stk[ns++] = x;
 		});
-		V->fwd[q] = vw_undefk(e, &S, V->p[q].in.ty);
+		V->fwd[q] = vw_undefk(e, &S, V->p[q].in.type);
 	}
 	free(S.ht), free(S.log), free(S.egen), free(S.kt);
 	free(S.idom), free(S.dkid), free(S.dnext);

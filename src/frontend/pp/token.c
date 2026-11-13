@@ -63,9 +63,9 @@ VPRIV char *pp_token_spell_to(char *dst, const ptok *t)
 VPRIV ptok *pp_scratch_tokens_take(pp *p, size_t base, uint32_t *n)
 {
 	size_t k = p->scratch_token_count - base;
-	ptok *r = varena_alloc(&p->tmp, (k ? k : 1) * sizeof(ptok));
+	ptok *r = varena_alloc(&p->temporary_region, (k ? k : 1) * sizeof(ptok));
 
-	memcpy(r, p->sv + base, k * sizeof(ptok));
+	memcpy(r, p->scratch_tokens + base, k * sizeof(ptok));
 	p->scratch_token_count = base;
 	*n = (uint32_t)k;
 	return r;
@@ -76,10 +76,10 @@ VPRIV void pp_context_tokens_push(pp *p, const ptok *t, uint32_t n, uint32_t mid
 	pp_context *c = pp_context_push(p);
 
 	c->type = PP_CONTEXT_TOKENS;
-	c->pt = t;
-	c->n = n;
-	c->mid = mid;
-	c->first = first;
+	c->tokens = t;
+	c->count = n;
+	c->macro_to_enable = mid;
+	c->first_flags = first;
 	c->trailing_space = 0;
 	c->barrier = (uint8_t)barrier;
 }
@@ -90,38 +90,38 @@ VPRIV void pp_context_directive_line_push(pp *p, const pp_context *fc, uint32_t 
 	pp_context *c = pp_context_push(p);
 
 	c->type = PP_CONTEXT_LEXED;
-	c->vt = fc->vt + b;
-	c->n = e > b ? e - b : 0;
-	c->src = fc->src;
-	c->loc = fc->loc;
-	c->offloc = 1;
+	c->lexed_tokens = fc->lexed_tokens + b;
+	c->count = e > b ? e - b : 0;
+	c->source = fc->source;
+	c->location = fc->location;
+	c->location_per_token = 1;
 	c->barrier = 1;
 }
 
 /* pop everything down to and including the barrier context at depth d */
 VPRIV void pp_context_pop_to(pp *p, int d)
 {
-	while (p->depth > d) {
-		pp_context *c = &p->cx[p->depth - 1];
+	while (p->context_depth > d) {
+		pp_context *c = &p->contexts[p->context_depth - 1];
 
 		if (c->type == PP_CONTEXT_FILE) {
-			p->nfile--;
-		} else if (c->mid) {
-			pp_macro_table_enable(p, c->mid);
+			p->file_context_count--;
+		} else if (c->macro_to_enable) {
+			pp_macro_table_enable(p, c->macro_to_enable);
 		}
-		p->depth--;
+		p->context_depth--;
 	}
 }
 
 /* a top-level region event (pp_top_events) at the current delivered position */
 VPRIV void pp_top_event_record(pp *p, const void *e, uint32_t base, unsigned ctr, uint8_t end, uint8_t hit)
 {
-	if (p->tev_full)
+	if (p->top_events_full)
 		return;
 	if (!p->top_events)
-		p->top_events = varena_alloc(&p->perm, 1024 * sizeof(pp_topev));
+		p->top_events = varena_alloc(&p->permanent_region, 1024 * sizeof(pp_topev));
 	if (p->top_event_count == 1024) {
-		p->tev_full = 1;
+		p->top_events_full = 1;
 		return;
 	}
 	p->top_events[p->top_event_count++] = (pp_topev){ e, p->tokens_delivered, base, ctr, end, hit };
@@ -131,50 +131,50 @@ VPRIV void pp_top_event_record(pp *p, const void *e, uint32_t base, unsigned ctr
 VPRIV __attribute__((noinline)) void pp_token_raw_next(pp *p, ptok *t)
 {
 	for (;;) {
-		pp_context *c = &p->cx[p->depth - 1];
+		pp_context *c = &p->contexts[p->context_depth - 1];
 
-		if (likely(c->i < c->n)) {
+		if (likely(c->index < c->count)) {
 			if (c->type == PP_CONTEXT_TOKENS) {
-				*t = c->pt[c->i++];
+				*t = c->tokens[c->index++];
 			} else if (c->type == PP_CONTEXT_LEXED) {
-				const lex_token *v = &c->vt[c->i++];
+				const lex_token *v = &c->lexed_tokens[c->index++];
 
-				pp_token_fill_from_lexer(t, v, c->src, c->offloc ? c->loc + v->off : c->loc);
+				pp_token_fill_from_lexer(t, v, c->source, c->location_per_token ? c->location + v->off : c->location);
 			} else if (c->type == PP_CONTEXT_SERVED) {
 				if (pp_header_cache_serve_child(p, c))
 					continue;
 				pp_header_cache_serve_token(p, c, t);
 			} else {
-				const lex_token *v = &c->vt[c->i];
+				const lex_token *v = &c->lexed_tokens[c->index];
 
 				if (unlikely((v->flags & LEX_TOKEN_FLAG_LINE_START) && v->kind == LEX_TOKEN_HASH)) {
 					if (pp_directive_run(p, c, t))
 						return;
 					continue;
 				}
-				c->i++;
-				pp_token_fill_from_lexer(t, v, c->src, c->loc + v->off);
+				c->index++;
+				pp_token_fill_from_lexer(t, v, c->source, c->location + v->off);
 			}
-			if (c->first) {
-				t->flags = (t->flags & ~(LEX_TOKEN_FLAG_LINE_START | LEX_TOKEN_FLAG_SPACE_BEFORE)) | (c->first & 3);
-				c->first = 0;
+			if (c->first_flags) {
+				t->flags = (t->flags & ~(LEX_TOKEN_FLAG_LINE_START | LEX_TOKEN_FLAG_SPACE_BEFORE)) | (c->first_flags & 3);
+				c->first_flags = 0;
 			}
-			if (p->pend) {
-				t->flags |= p->pend;
-				p->pend = 0;
+			if (p->owed_spacing) {
+				t->flags |= p->owed_spacing;
+				p->owed_spacing = 0;
 			}
 			return;
 		}
 		if (c->type == PP_CONTEXT_SERVED) {
 			if (pp_header_cache_serve_child(p, c))
 				continue;
-			if (c->top)
-				p->pend |= c->he->pend_out;
-			if (c->top == 2)
-				pp_top_event_record(p, c->he, 0, 0, 1, 1);
+			if (c->top_level)
+				p->owed_spacing |= c->entry->owed_spacing_at_end;
+			if (c->top_level == 2)
+				pp_top_event_record(p, c->entry, 0, 0, 1, 1);
 			if (unlikely(pp_coverage_enabled))
 				pp_coverage_hit_end(p);
-			p->depth--;
+			p->context_depth--;
 			continue;
 		}
 		if (c->barrier) {
@@ -183,48 +183,48 @@ VPRIV __attribute__((noinline)) void pp_token_raw_next(pp *p, ptok *t)
 		}
 		if (c->type == PP_CONTEXT_FILE) {
 			if (unlikely(p->output_text_mode > 1))
-				pp_comments_flush(p, c, c->src + c->f->size);
-			if (p->nfile == 1) {
+				pp_comments_flush(p, c, c->source + c->lex_file->size);
+			if (p->file_context_count == 1) {
 				pp_token_eof_make(t);
 				return;
 			}
-			if (unlikely(p->rec.on) && p->depth == p->rec.levels[p->rec.n - 1].depth)
+			if (unlikely(p->recording.on) && p->context_depth == p->recording.levels[p->recording.level_count - 1].depth)
 				pp_header_cache_region_end(p);
-			if (unlikely(p->ndtr))
-				diag_file_end(p, c->fe);
-			p->nfile--;
-			p->depth--;
+			if (unlikely(p->diagnostic_transition_count))
+				diag_pragma_file_end(p, c->file_index);
+			p->file_context_count--;
+			p->context_depth--;
 			if (unlikely(p->output_text_mode))
 				pp_output_file_change(p, pp_file_context_current(p), 0);
 			continue;
 		}
-		if (c->mid)
-			pp_macro_table_enable(p, c->mid);
-		if (c->first)
-			p->pend |= c->first & 3;
+		if (c->macro_to_enable)
+			pp_macro_table_enable(p, c->macro_to_enable);
+		if (c->first_flags)
+			p->owed_spacing |= c->first_flags & 3;
 		if (c->type == PP_CONTEXT_TOKENS && c->trailing_space)
-			p->pend |= LEX_TOKEN_FLAG_SPACE_BEFORE;
-		p->depth--;
-		if (unlikely(p->sol_on) && p->depth <= p->line_start_context_depth && !p->collecting)
-			p->sol_on = 0;	/* the line's first expansion printed nothing */
+			p->owed_spacing |= LEX_TOKEN_FLAG_SPACE_BEFORE;
+		p->context_depth--;
+		if (unlikely(p->line_start_name_active) && p->context_depth <= p->line_start_context_depth && !p->collecting_arguments)
+			p->line_start_name_active = 0;	/* the line's first expansion printed nothing */
 	}
 }
 
 /* pp_token_raw_fast_next's fallback: pops exhausted macro contexts (as pp_token_raw_next() does) without pp_token_raw_next()'s frame */
 VPRIV __attribute__((noinline)) void pp_token_raw_pop(pp *p, ptok *t)
 {
-	pp_context *c = &p->cx[p->depth - 1];
+	pp_context *c = &p->contexts[p->context_depth - 1];
 
-	while (c->i >= c->n && (c->type == PP_CONTEXT_TOKENS || c->type == PP_CONTEXT_LEXED) && !c->barrier) {
-		if (c->mid)
-			pp_macro_table_enable(p, c->mid);
-		if (c->first)
-			p->pend |= c->first & 3;
+	while (c->index >= c->count && (c->type == PP_CONTEXT_TOKENS || c->type == PP_CONTEXT_LEXED) && !c->barrier) {
+		if (c->macro_to_enable)
+			pp_macro_table_enable(p, c->macro_to_enable);
+		if (c->first_flags)
+			p->owed_spacing |= c->first_flags & 3;
 		if (c->type == PP_CONTEXT_TOKENS && c->trailing_space)
-			p->pend |= LEX_TOKEN_FLAG_SPACE_BEFORE;
-		p->depth--;
-		if (unlikely(p->sol_on) && p->depth <= p->line_start_context_depth && !p->collecting)
-			p->sol_on = 0;	/* the line's first expansion printed nothing */
+			p->owed_spacing |= LEX_TOKEN_FLAG_SPACE_BEFORE;
+		p->context_depth--;
+		if (unlikely(p->line_start_name_active) && p->context_depth <= p->line_start_context_depth && !p->collecting_arguments)
+			p->line_start_name_active = 0;	/* the line's first expansion printed nothing */
 		c--;
 	}
 	if (pp_token_raw_plain_next(p, c, t))
@@ -235,12 +235,12 @@ VPRIV __attribute__((noinline)) void pp_token_raw_pop(pp *p, ptok *t)
 /* is the next token '(' ?  (clang's isNextPPTokenLParen: no popping) */
 static bool pp_next_is_left_paren(const pp *p)
 {
-	for (int d = p->depth - 1; d >= 0; d--) {
-		const pp_context *c = &p->cx[d];
+	for (int d = p->context_depth - 1; d >= 0; d--) {
+		const pp_context *c = &p->contexts[d];
 
-		if (c->i < c->n)
-			return (c->type == PP_CONTEXT_TOKENS ? c->pt[c->i].kind : c->type == PP_CONTEXT_SERVED ? c->ht[c->i].kind
-							  : c->vt[c->i].kind) == LEX_TOKEN_LEFT_PAREN;
+		if (c->index < c->count)
+			return (c->type == PP_CONTEXT_TOKENS ? c->tokens[c->index].kind : c->type == PP_CONTEXT_SERVED ? c->stored_tokens[c->index].kind
+							  : c->lexed_tokens[c->index].kind) == LEX_TOKEN_LEFT_PAREN;
 		if (c->type == PP_CONTEXT_FILE || c->barrier)
 			return false;
 	}
@@ -292,7 +292,7 @@ VPRIV __attribute__((noinline, cold)) void pp_dollar_split(pp *p, ptok *t)
 	if (!id || !pp_macro_table_get(p, id))
 		return;
 	{
-		ptok *n = varena_alloc(&p->tmp, sizeof(*n));
+		ptok *n = varena_alloc(&p->temporary_region, sizeof(*n));
 
 		*n = *t;
 		n->s = t->s + 1, n->len = t->len - 1, n->id = id, n->loc = t->loc + 1;

@@ -13,7 +13,7 @@ OUT=${OUT:-../build/wasm}
 mkdir -p $OUT/obj
 CFLAGS="-Iport/wasm/compat -Iinclude -std=c11 -O2 -sMEMORY64=1 -msimd128 -mfpu=neon -D_GNU_SOURCE -DVCC_INCDIR=\"/vcc/include\" -Wno-unused-parameter ${WFLAGS}"
 SRC="bin/vpp/vpp.c frontend/lex/lex.c common/intern.c frontend/c/keywords.c common/fail.c port/crc32c.c port/stack-guard.c port/job-regions.c arch/a64/as/enc.c platform/darwin/macho.c arch/wasm/as/as.c platform/wasm/wasm.c
- frontend/pp/dircache.c driver/ccsnap.c common/digest-xxh3.c common/digest-blake3.c common/digest-sha256.c"
+ frontend/pp/dircache.c driver/declaration-cache.c common/digest-xxh3.c common/digest-blake3.c common/digest-sha256.c"
 for m in as obj cc pp emit driver; do
 	case $m in
 	as) f="as/as.c arch/a64/as/parse.c";;
@@ -21,7 +21,7 @@ for m in as obj cc pp emit driver; do
 	cc) f=$(ls frontend/c/*.c);;
 	pp) f="$(ls frontend/pp/*.c | grep -v dircache) $(ls diag/*.c)";;
 	emit) f=$(ls codegen/*.c codegen/opt/*.c codegen/rec/*.c codegen/flow/*.c arch/a64/codegen/*.c arch/wasm/codegen/*.c);;
-	driver) f=$(ls driver/*.c | grep -v ccsnap);;
+	driver) f=$(ls driver/*.c | grep -v declaration-cache);;
 	esac
 	{ echo '#define VCC_UNITY 1'; for x in $f; do echo "#include \"$PWD/$x\""; done; } > $OUT/obj/u-$m.c
 	SRC="$SRC $OUT/obj/u-$m.c"

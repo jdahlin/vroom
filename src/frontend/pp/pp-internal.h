@@ -66,9 +66,9 @@ enum {
 };
 
 typedef struct pp_directive_span {
-	uint32_t tok;	/* the '#' */
-	uint32_t end;	/* first token after the line */
-	uint32_t next;	/* conditionals: next #elif/#else/#endif of the group */
+	uint32_t hash_token;	/* the '#' */
+	uint32_t end_token;	/* first token after the line */
+	uint32_t next_in_group;	/* conditionals: next #elif/#else/#endif of the group */
 	uint32_t kind;
 } pp_directive_span;
 
@@ -76,15 +76,15 @@ typedef struct pp_macro pp_macro;
 typedef struct pp_include_answer pp_include_answer;
 
 typedef struct pp_skeleton {
-	const pp_directive_span *dir;
-	_Atomic(const pp_macro *) *mac;	/* per directive: the #define's macro, built once */
-	_Atomic(const pp_include_answer *) *inc;	/* per directive: #include "x" / <x>, its last answer */
+	const pp_directive_span *directives;
+	_Atomic(const pp_macro *) *macros;	/* per directive: the #define's macro, built once */
+	_Atomic(const pp_include_answer *) *include_answers;	/* per directive: #include "x" / <x>, its last answer */
 	uint32_t directive_count;
-	uint32_t guard;		/* controlling macro id, 0 if none */
-	int bad;		/* unbalanced conditionals */
+	uint32_t guard_macro;		/* controlling macro id, 0 if none */
+	int unbalanced;		/* unbalanced conditionals */
 	uint32_t unbalanced_token;	/* ... the directive name's token */
-	uint32_t *lines;	/* offsets of '\n', built on first __LINE__ (atomic) */
-	uint32_t nlines;
+	uint32_t *line_offsets;	/* offsets of '\n', built on first __LINE__ (atomic) */
+	uint32_t line_count;
 } pp_skeleton;
 
 /* ---------------- arenas ---------------- */
@@ -113,17 +113,17 @@ enum {
  * Macro definitions are immutable and shared by all TUs, so that "the same
  * definition" is one pointer (the header cache compares macro table entries
  * by pointer): a #define in a header is built once per directive site
- * (pfile.mac), one in the main file or <built-in> is made canonical by its
+ * (pfile.macros), one in the main file or <built-in> is made canonical by its
  * content (pp_macro_canonical_get), and the builtin macros are process-wide.
  */
 struct pp_macro {
 	const lex_token *body;
-	const lex_token *plist;	/* function-like: "(" ... ")" (plist[0, nplist)), for -dM */
-	const char *src;
-	const uint8_t *pidx;	/* per body token: parameter index + 1, or 0 */
-	uint32_t nbody, name;
+	const lex_token *parameter_list;	/* function-like: "(" ... ")" (plist[0, nplist)), for -dM */
+	const char *source;
+	const uint8_t *parameter_indices;	/* per body token: parameter index + 1, or 0 */
+	uint32_t body_count, name;
 	uint32_t hash;		/* pp_macro_canonical_get */
-	uint16_t nparam, nplist;
+	uint16_t parameter_count, parameter_list_count;
 	uint8_t kind, flags, builtin;
 };
 
@@ -138,41 +138,41 @@ enum { PP_CONTEXT_FILE, PP_CONTEXT_LEXED, PP_CONTEXT_TOKENS, PP_CONTEXT_SERVED }
 typedef struct pp_context {
 	uint8_t type;
 	uint8_t barrier;	/* yields LEX_TOKEN_EOF when exhausted instead of popping */
-	uint8_t first;		/* 0x80 | SOL/SPACE for the first token (macro contexts) */
-	uint8_t offloc;		/* PP_CONTEXT_LEXED: loc = loc + offset (a directive line) */
+	uint8_t first_flags;		/* 0x80 | SOL/SPACE for the first token (macro contexts) */
+	uint8_t location_per_token;		/* PP_CONTEXT_LEXED: loc = loc + offset (a directive line) */
 	uint8_t trailing_space;		/* PP_CONTEXT_TOKENS: ended in an empty argument after a space: the next token gets one */
-	uint32_t i, n;
-	uint32_t loc;		/* PP_CONTEXT_FILE: file base; PP_CONTEXT_LEXED: expansion loc */
-	uint32_t mid;		/* macro to re-enable when popped */
-	const lex_token *vt;
-	const ptok *pt;
-	const struct pp_header_cache_token *ht;	/* PP_CONTEXT_SERVED: the entry's own tokens (pt: its escapes) */
-	const char *src;	/* (PP_CONTEXT_SERVED: the shared region's base) */
+	uint32_t index, count;
+	uint32_t location;		/* PP_CONTEXT_FILE: file base; PP_CONTEXT_LEXED: expansion loc */
+	uint32_t macro_to_enable;		/* macro to re-enable when popped */
+	const lex_token *lexed_tokens;
+	const ptok *tokens;
+	const struct pp_header_cache_token *stored_tokens;	/* PP_CONTEXT_SERVED: the entry's own tokens (pt: its escapes) */
+	const char *source;	/* (PP_CONTEXT_SERVED: the shared region's base) */
 	/* PP_CONTEXT_FILE */
-	const lex_file *f;
-	const pp_skeleton *fi;
-	uint32_t di;		/* next directive */
-	int32_t sdir;		/* search dir it was found in, -1 if none */
-	uint32_t fe;		/* fent index */
-	const char *spath;	/* the path as clang spells it (f->path is the cache key) */
+	const lex_file *lex_file;
+	const pp_skeleton *skeleton;
+	uint32_t next_directive;		/* next directive */
+	int32_t search_directory;		/* search dir it was found in, -1 if none */
+	uint32_t file_index;		/* fent index */
+	const char *spelled_path;	/* the path as clang spells it (f->path is the cache key) */
 	uint32_t spelled_directory_length;		/* length of spath's directory part, '/' included */
 	/* PP_CONTEXT_SERVED: a header cache entry's tokens (pt, n), its children spliced in */
-	const struct pp_header_cache_entry *he;
-	uint32_t si, ci;	/* next segment, next __COUNTER__ record */
-	unsigned cbase;		/* __COUNTER__ at the entry's start */
-	uint8_t top;		/* outermost: owes the entry's pend_out when done (2: a top-level region) */
-	uint8_t norec;		/* replayed while recording: its token positions are reserved, not copied */
+	const struct pp_header_cache_entry *entry;
+	uint32_t next_segment, next_counter_run;	/* next segment, next __COUNTER__ record */
+	unsigned counter_base;		/* __COUNTER__ at the entry's start */
+	uint8_t top_level;		/* outermost: owes the entry's pend_out when done (2: a top-level region) */
+	uint8_t unrecorded;		/* replayed while recording: its token positions are reserved, not copied */
 } pp_context;
 
 typedef struct pp_file_entry {
-	uint32_t base;
-	const lex_file *f;
-	const pp_skeleton *fi;
+	uint32_t location_base;
+	const lex_file *lex_file;
+	const pp_skeleton *skeleton;
 	const char *name;	/* for __FILE__ (prefix map applied) */
-	uint32_t namelen;
-	const char *spath;	/* as spelled, for dependency files */
-	uint8_t sys;		/* a system header (found in a system directory, or included by one) */
-	uint32_t from;		/* the #include's location (0: the main file, <built-in>, or a cached replay) */
+	uint32_t name_length;
+	const char *spelled_path;	/* as spelled, for dependency files */
+	uint8_t is_system;		/* a system header (found in a system directory, or included by one) */
+	uint32_t included_from;		/* the #include's location (0: the main file, <built-in>, or a cached replay) */
 	uint32_t diagnostic_state;	/* the #pragma diagnostic state where it was entered (pdnode index) */
 	const char *comment_position;	/* -C: its comments before here are printed or dropped (NULL: none yet) */
 } pp_file_entry;
@@ -189,129 +189,129 @@ enum { PP_WARNING_C2Y, PP_WARNING_VARIADIC_MACRO, PP_WARNING_COUNT };
 
 struct pp {
 	uintptr_t *macro_directory[PP_MACRO_DIRECTORY_SIZE];
-	const pp_opts *o;
-	pp_context *cx;
-	int depth, nfile;
-	varena perm, tmp;
+	const pp_opts *options;
+	pp_context *contexts;
+	int context_depth, file_context_count;
+	varena permanent_region, temporary_region;
 	bool keep_macro_text;		/* VCC_FIELD_USES: a main-file macro keeps its body in the file text (no canonical copy) */
 	bool temporary_held;		/* the consumer holds earlier tokens: tmp is not reset (pp_temporary_hold) */
-	ptok *sv;		/* scratch token stack */
+	ptok *scratch_tokens;		/* scratch token stack */
 	size_t scratch_token_count;
-	pp_file_entry *fe;
-	uint32_t nfe, next_location_base;
+	pp_file_entry *files;
+	uint32_t file_count, next_location_base;
 	uint64_t tokens_delivered;	/* tokens pp_token_next delivered */
 	uint64_t tokens_skipped;	/* tokens of regions pp_top_region_skip dropped */
 	pp_hitreg *hit_regions;		/* VCC_DRCOV: header-cache hits in delivered positions (pp_hit_regions) */
-	uint32_t ndrh, open_hit_count;
+	uint32_t hit_region_count, open_hit_count;
 	struct { uint64_t pos; int depth; const void *he; uint32_t base; unsigned ctr; } open_hits[64];	/* hits whose replay is still open */
 	pp_topev *top_events;		/* top-level region events (pp_top_events) */
 	uint32_t top_event_count;
-	uint8_t tev_full, top_region_recording;
+	uint8_t top_events_full, top_region_recording;
 	const void *header_cache_last_entry;	/* the entry pp_header_cache_entry_apply applied last */
-	uint8_t pend;		/* SOL/SPACE owed to the next token (empty expansions) */
+	uint8_t owed_spacing;		/* SOL/SPACE owed to the next token (empty expansions) */
 	uint8_t token_unrecorded;	/* the token pp_token_raw_next() just gave came from a norec replay */
 	int argument_preexpansion;		/* in argument pre-expansion */
-	int errors;
-	unsigned counter;
-	const lex_file **once;
-	uint32_t nonce, once_file_capacity;
-	struct { uint32_t id; uintptr_t m; } *pushed;
+	int error_count;
+	unsigned counter_value;
+	const lex_file **once_files;
+	uint32_t once_file_count, once_file_capacity;
+	struct { uint32_t id; uintptr_t m; } *pushed_macros;
 	uint32_t pushed_macro_count;
 	/* #pragma clang/GCC diagnostic: states are a persistent list (node: one flag's mapping and
 	   the state it was set in, 0: the command line's); the transitions are by location */
-	struct pp_diagnostic_node { uint32_t prev; uint8_t act; char name[59]; } *dn;
+	struct pp_diagnostic_node { uint32_t prev; uint8_t act; char name[59]; } *diagnostic_nodes;
 	struct { uint32_t loc, st; } *diagnostic_transitions;
-	uint32_t ndn, ndtr, dcur, ndstk, diagnostic_stack[64];
+	uint32_t diagnostic_node_count, diagnostic_transition_count, diagnostic_current, diagnostic_stack_depth, diagnostic_stack[64];
 	uint32_t diagnostic_enabling_count;			/* "warning"/"error" nodes: only they turn a warning on */
 	struct pp_macro_define_record *macro_definition_sites;		/* every #define's site, by name (built for a macro note) */
-	uint32_t nmdx, cmdx, macro_definition_site_files;
+	uint32_t macro_definition_site_count, macro_definition_site_capacity, macro_definition_site_files;
 	const void *warning_cache_options;		/* the options wc[] was computed for */
-	bool wc[PP_WARNING_COUNT];			/* -pedantic warnings on hot paths: on (command line) */
-	lex_file builtin;
+	bool warning_cache[PP_WARNING_COUNT];			/* -pedantic warnings on hot paths: on (command line) */
+	lex_file builtin_file;
 	const char *base_file_name;
 	uint32_t base_file_name_length;
 	jmp_buf *fatal_jump;	/* fatal errors end the TU here */
-	int color;		/* diagnostics in colour */
+	int diagnostic_color;		/* diagnostics in colour */
 	uint32_t diagnostic_last_location;	/* the last diagnostic's location + 1, and whether it was a note */
 	bool diagnostic_last_is_note;
 	uint32_t diagnostic_last_file;	/* the file of the last diagnostic + 1 (for "In file included from") */
-	vdiag *dhead, *diagnostic_tail;	/* the TU's diagnostic records (in perm) */
+	diag_record *diagnostic_head, *diagnostic_tail;	/* the TU's diagnostic records (in perm) */
 	bool diagnostic_track;		/* VCC_TRACK_DIAG: vcc's call site after each diagnostic */
-	bool diagnostic_finished;		/* pp_diag_finish ran (JSON flushed, SARIF written) */
-	vdiag *diagnostic_pending_structured;		/* -fdiagnostics-format=json: the record not yet written */
-	vdiag *diagnostic_pending_text;		/* vcc's text style: the record not yet rendered (its notes may follow) */
+	bool diagnostic_finished;		/* diag_finish ran (JSON flushed, SARIF written) */
+	diag_record *diagnostic_pending_structured;		/* -fdiagnostics-format=json: the record not yet written */
+	diag_record *diagnostic_pending_text;		/* vcc's text style: the record not yet rendered (its notes may follow) */
 	uint32_t diagnostic_previous_location;	/* clang's LastLoc + 1 (0: none) and LastLevel: the previous record's */
 	uint8_t diagnostic_previous_level;
 	struct pp_line_mark {		/* #line / GNU line markers */
-		uint32_t fe, off;	/* in fent fe, from byte offset off on */
-		uint32_t pline, line;	/* physical line pline is line */
+		uint32_t file, offset;	/* in fent fe, from byte offset off on */
+		uint32_t physical_line, line;	/* physical line pline is line */
 		const char *name;	/* presumed file name, or NULL */
-		uint32_t namelen;
-	} *lm;
-	uint32_t nlm;
-	int warns;
+		uint32_t name_length;
+	} *line_marks;
+	uint32_t line_mark_count;
+	int warning_count;
 	int in_directive;		/* evaluating a directive's tokens (#if, #include, #line) */
-	int collecting;		/* in pp_macro_arguments_collect(): directives are inside macro arguments */
-	uint32_t coll_loc, collecting_name;	/* the outermost macro collecting: its name token, id */
+	int collecting_arguments;		/* in pp_macro_arguments_collect(): directives are inside macro arguments */
+	uint32_t collecting_location, collecting_name;	/* the outermost macro collecting: its name token, id */
 	/* -E text (pp_text_render) */
-	char *out;
-	size_t nout, output_capacity;
-	unsigned col;
+	char *output;
+	size_t output_length, output_capacity;
+	unsigned output_column;
 	/* the last token printed, for clang's AvoidConcat: kind, an identifier "L", '.' before it, its end */
-	uint8_t pk, pk_L, pk_pp;
+	uint8_t previous_kind, previous_is_wide_prefix, previous_after_period;
 	const char *previous_end;
-	uint8_t sol_on, edir, cmt_sol;	/* cmt_sol: -C, an empty expansion began the line: a comment next starts it */	/* edir: a directive was printed on this line (clang's EmittedDirectiveOnThisLine) */
-	uint32_t cur_line;
-	uint8_t emb_sp, embed_tail;	/* -E after #embed: pending, tokens were suffix()/if_empty() */		/* -E: the previous token was #embed's last byte */
+	uint8_t line_start_name_active, directive_on_line, comment_starts_line;	/* cmt_sol: -C, an empty expansion began the line: a comment next starts it */	/* edir: a directive was printed on this line (clang's EmittedDirectiveOnThisLine) */
+	uint32_t output_line;
+	uint8_t embed_space_pending, embed_tail;	/* -E after #embed: pending, tokens were suffix()/if_empty() */		/* -E: the previous token was #embed's last byte */
 	uint8_t output_text_mode;	/* pp_text_render: track lines for the printer */	/* clang's CurLine: the presumed line the output is on */
 	int line_start_context_depth;
 	uint32_t expansion_location;
 	uint32_t line_start_location;	/* the source macro name a line starts with: expanded tokens' column */
 	/* -E without -P: GNU line markers */
-	uint8_t lmark, lm_blk, marker_is_system;	/* on; <built-in>'s block printed; the current file is a system header */
-	uint32_t lm_n, marker_builtin_line;	/* predefined macros before the command line (+1); <built-in>'s line */
+	uint8_t markers_on, marker_builtin_printed, marker_is_system;	/* on; <built-in>'s block printed; the current file is a system header */
+	uint32_t marker_predefine_count, marker_builtin_line;	/* predefined macros before the command line (+1); <built-in>'s line */
 	const char *marker_file_name;		/* the current file's presumed name */
 	uint32_t marker_file_name_length;
 	struct { uint32_t id; const pp_macro *m; } *define_events;	/* -dD: <built-in>'s #define/#undef, until printed */
-	uint32_t ndd, define_event_capacity;
+	uint32_t define_event_count, define_event_capacity;
 	int define_events_printed;
 	/* header cache */
-	int hc;			/* on (pp_text_render or pp_token_next, not disabled) */
+	int header_cache_on;			/* on (pp_text_render or pp_token_next, not disabled) */
 	int output_mode;		/* 0 unset, 1 text (pp_text_render), 2 tokens (pp_token_next) */
-	uint32_t sig;		/* base signature (PP_HEADER_CACHE_NONE: no cache) */
-	uint32_t *psig;		/* search path prefix ids, [0, ndirs] */
+	uint32_t options_signature;		/* base signature (PP_HEADER_CACHE_NONE: no cache) */
+	uint32_t *search_path_signatures;		/* search path prefix ids, [0, ndirs] */
 	struct pp_recording {
 		int on;		/* n > 0 */
-		int n, nbad;	/* levels; levels [0, nbad) are not cacheable */
+		int level_count, uncacheable_levels;	/* levels; levels [0, nbad) are not cacheable */
 		int uncacheable_line;
 		uint32_t serial;
 		pp_header_cache_level levels[PP_HEADER_CACHE_LEVEL_MAX];
-		pp_header_cache_touch_record *t;
-		uint32_t nt;
-		pp_header_cache_once_mark *ord;
-		uint32_t nord;
-		pp_header_cache_counter_position *ctr;
-		uint32_t nctr;
-		pp_header_cache_counter_read *crd;
-		uint32_t ncrd;
-		pp_header_cache_recorded_segment *seg;
-		uint32_t nseg;
-		pp_header_cache_recorded_child *kid;	/* child entries, in order (their reads and writes are theirs) */
-		uint32_t nkid;
-		uint32_t *kex;
+		pp_header_cache_touch_record *touches;
+		uint32_t touch_count;
+		pp_header_cache_once_mark *once_marks;
+		uint32_t once_mark_count;
+		pp_header_cache_counter_position *counter_positions;
+		uint32_t counter_position_count;
+		pp_header_cache_counter_read *counter_reads;
+		uint32_t counter_read_count;
+		pp_header_cache_recorded_segment *segments;
+		uint32_t segment_count;
+		pp_header_cache_recorded_child *children;	/* child entries, in order (their reads and writes are theirs) */
+		uint32_t child_count;
+		uint32_t *child_exclusions;
 		uint32_t child_exclusion_count;
-		pp_header_cache_lookup *lk;	/* the levels' own lookups (hlook) */
-		uint32_t nlk;
-		pp_header_cache_counter_provenance *cp;	/* indexed by ptok.ctr */
+		pp_header_cache_lookup *lookups;	/* the levels' own lookups (hlook) */
+		uint32_t lookup_count;
+		pp_header_cache_counter_provenance *counter_provenance;	/* indexed by ptok.ctr */
 		uint32_t counter_provenance_count;
-		ptok *tk;	/* tokens handed out (token mode) */
-		uint32_t ntk;
-		char *sb;	/* their spellings that live in per-TU memory */
+		ptok *tokens;	/* tokens handed out (token mode) */
+		uint32_t token_count;
+		char *spellings;	/* their spellings that live in per-TU memory */
 		size_t spelling_bytes;
-	} rec;
-	uint64_t *rst[PP_MACRO_DIRECTORY_SIZE];	/* per id: serial << 32 | index in rec.t */
-	struct { const void *e; uint32_t gen, ok; } hm[4096];	/* child entry verdicts in one pp_header_cache_entry_serve */
-	uint32_t hgen;
+	} recording;
+	uint64_t *recording_stamps[PP_MACRO_DIRECTORY_SIZE];	/* per id: serial << 32 | index in rec.touches */
+	struct { const void *e; uint32_t gen, ok; } child_verdicts[4096];	/* child entry verdicts in one pp_header_cache_entry_serve */
+	uint32_t child_verdict_generation;
 	size_t entry_bytes;	/* what the entry being published allocated */
 	const void *blob_cache[4096];	/* recent spelling blobs, by hash */
 	const char *punctuator_blobs[256];	/* punctuator spelling blobs, by kind */
@@ -319,25 +319,25 @@ struct pp {
 	const pp_header_cache_chunk *chunk_cache_by_ids[4096];	/* recent chunks, by (first id, last id, length) */	/* recent chunks, by hash (most repeats are a child's) */
 };
 
-#define PP_ERROR(p, loc, ...) pp_diag(p, loc, "error", __VA_ARGS__)
-#define PP_FATAL(p, loc, ...) pp_diag(p, loc, "fatal error", __VA_ARGS__)
-#define PP_WARN(p, loc, ...) pp_diag(p, loc, "warning", __VA_ARGS__)
+#define PP_ERROR(p, loc, ...) diag_report(p, loc, "error", __VA_ARGS__)
+#define PP_FATAL(p, loc, ...) diag_report(p, loc, "fatal error", __VA_ARGS__)
+#define PP_WARN(p, loc, ...) diag_report(p, loc, "warning", __VA_ARGS__)
 
 /* ---------------- header cache: recording reads and writes ---------------- */
 
 /* the open regions are not cacheable (something in them depends on more than we record) */
-VPRIV void diag_pragma(pp *p, const char *q, const char *e, uint32_t loc);
-VPRIV void diag_file_end(pp *p, uint32_t fe);
-#define PP_HEADER_CACHE_REGION_REJECT(p) do { if ((p)->rec.n) { (p)->rec.nbad = (p)->rec.n; (p)->rec.uncacheable_line = __LINE__; } } while (0)
+VPRIV void diag_pragma_handle(pp *p, const char *q, const char *e, uint32_t loc);
+VPRIV void diag_pragma_file_end(pp *p, uint32_t fe);
+#define PP_HEADER_CACHE_REGION_REJECT(p) do { if ((p)->recording.level_count) { (p)->recording.uncacheable_levels = (p)->recording.level_count; (p)->recording.uncacheable_line = __LINE__; } } while (0)
 
-VPRIV void pp_wc_fill(pp *p);
+VPRIV void diag_warning_cache_fill(pp *p);
 
 /* false: warning k cannot be reported in this TU (off on the command line, no pragmas) */
 static inline bool pp_warning_is_possible(pp *p, int k)
 {
-	if (p->warning_cache_options != p->o)
-		pp_wc_fill(p);
-	return p->wc[k] || p->diagnostic_enabling_count;
+	if (p->warning_cache_options != p->options)
+		diag_warning_cache_fill(p);
+	return p->warning_cache[k] || p->diagnostic_enabling_count;
 }
 
 /* ---------------- #if expressions ---------------- */
@@ -380,50 +380,50 @@ VPRIV void pp_output_reserve(pp *p, size_t n);
 static inline void pp_output_append(pp *p, const char *s, size_t n);
 static inline void pp_output_append_character(pp *p, char ch);
 /* diag/: locations, diagnostics and their rendering; pp_directive_extra_token_warn is directive.c's */
-VPRIV uint32_t loc_line(const pp *p, uint32_t loc);
-VPRIV const char *presumed_name(const pp *p, uint32_t fe, uint32_t loc, uint32_t *len);
-VPRIV __attribute__((format(printf, 4, 5))) void pp_diag(pp *p, uint32_t loc, const char *what, const char *fmt, ...);
-void pp_diagx(pp *p, const pp_dinfo *d, const char *fmt, ...);
-bool pp_warnx(pp *p, const char *flag, bool on, const char *const *groups, pp_dinfo *d, const char *fmt, ...);
-VPRIV bool obj_macro_at(pp *p, uint32_t loc);
+VPRIV uint32_t pp_location_line(const pp *p, uint32_t loc);
+VPRIV const char *pp_location_presumed_name(const pp *p, uint32_t fe, uint32_t loc, uint32_t *len);
+VPRIV __attribute__((format(printf, 4, 5))) void diag_report(pp *p, uint32_t loc, const char *what, const char *fmt, ...);
+void diag_report_extended(pp *p, const diag_info *d, const char *fmt, ...);
+bool diag_warning_report(pp *p, const char *flag, bool on, const char *const *groups, diag_info *d, const char *fmt, ...);
+VPRIV bool pp_location_is_object_macro(pp *p, uint32_t loc);
 VPRIV void pp_directive_extra_token_warn(pp *p, const pp_context *c, uint32_t name, uint32_t i);
-void pp_diag_summary(pp *p);
-VPRIV const pp_file_entry *loc_fent(const pp *p, uint32_t loc);
-VPRIV bool loc_ok(const pp *p, uint32_t loc, const pp_file_entry **e);
-VPRIV int diag_where(const pp *p, uint32_t loc, const char **name, uint32_t *nl, uint32_t *line, uint32_t *col);
+void diag_summary_print(pp *p);
+VPRIV const pp_file_entry *pp_location_file_entry(const pp *p, uint32_t loc);
+VPRIV bool pp_location_is_valid(const pp *p, uint32_t loc, const pp_file_entry **e);
+VPRIV int diag_location_presumed(const pp *p, uint32_t loc, const char **name, uint32_t *nl, uint32_t *line, uint32_t *col);
 struct vbuffer;
-VPRIV void render_text(pp *p, struct vbuffer *b, const vdiag *d);
-VPRIV bool render_head(pp *p, struct vbuffer *b, const vdiag *d, const pp_file_entry **ep);
-VPRIV void parseable_fixits(pp *p, struct vbuffer *b, const vdiag *d);
-VPRIV uint32_t dcols(const char *s, uint32_t b, uint32_t e, uint32_t col);
-VPRIV void db_c(struct vbuffer *b, char c, int n);
-VPRIV void include_stack(pp *p, struct vbuffer *b, const pp_file_entry *e);
+VPRIV void diag_clang_record_render(pp *p, struct vbuffer *b, const diag_record *d);
+VPRIV bool diag_head_render(pp *p, struct vbuffer *b, const diag_record *d, const pp_file_entry **ep);
+VPRIV void diag_fixits_parseable_render(pp *p, struct vbuffer *b, const diag_record *d);
+VPRIV uint32_t diag_columns_width(const char *s, uint32_t b, uint32_t e, uint32_t col);
+VPRIV void diag_text_char_repeat(struct vbuffer *b, char c, int n);
+VPRIV void diag_include_stack_render(pp *p, struct vbuffer *b, const pp_file_entry *e);
 /* diagtext.c: vcc's text style (records rendered when the next one starts, so that
    their notes can fold into the snippet), the narrated style, the type diff */
-VPRIV void diag_text_flush(pp *p);
-VPRIV void diag_narrate(pp *p, struct vbuffer *b, vdiag *d);
-VPRIV void diag_render_rec(pp *p, struct vbuffer *b, vdiag *d);
-VPRIV void diag_render_color(pp *p, struct vbuffer *b, vdiag *d);
-VPRIV void diag_typediff(struct vbuffer *b, const vdiag *d, const char *plain);
+VPRIV void diag_vcc_flush(pp *p);
+VPRIV void diag_narrated_render(pp *p, struct vbuffer *b, diag_record *d);
+VPRIV void diag_record_render_plain(pp *p, struct vbuffer *b, diag_record *d);
+VPRIV void diag_record_render_color(pp *p, struct vbuffer *b, diag_record *d);
+VPRIV void diag_type_diff_render(struct vbuffer *b, const diag_record *d, const char *plain);
 /* moved apart by the split of the diagnostics engine, still one unity TU */
-VPRIV __attribute__((noinline, cold)) void dsink_records(pp *p);
-VPRIV void jstr(struct vbuffer *b, const char *s, size_t n);
-VPRIV void jcstr(struct vbuffer *b, const char *s);
-VPRIV void html_page(pp *p, struct vbuffer *b);
-VPRIV void sarif_log(pp *p, struct vbuffer *b);
-VPRIV int level_of(const char *what);
-VPRIV void kid_add(vdiag *d, vdiag *k);
-VPRIV void kid_after(vdiag *top, vdiag *after, vdiag *n);
-VPRIV void render_clang(pp *p, struct vbuffer *b, vdiag *d);
-VPRIV void track_str(struct vbuffer *b, const void *pc);
-VPRIV void render_narr(pp *p, struct vbuffer *b, const vdiag *d);
+VPRIV __attribute__((noinline, cold)) void diag_sink_records_send(pp *p);
+VPRIV void diag_json_string_append(struct vbuffer *b, const char *s, size_t n);
+VPRIV void diag_json_cstring_append(struct vbuffer *b, const char *s);
+VPRIV void diag_html_page_write(pp *p, struct vbuffer *b);
+VPRIV void diag_sarif_log_write(pp *p, struct vbuffer *b);
+VPRIV int diag_level_from_name(const char *what);
+VPRIV void diag_record_note_append(diag_record *d, diag_record *k);
+VPRIV void diag_record_note_insert(diag_record *top, diag_record *after, diag_record *n);
+VPRIV void diag_clang_render(pp *p, struct vbuffer *b, diag_record *d);
+VPRIV void diag_report_site_text(struct vbuffer *b, const void *pc);
+VPRIV void diag_narrated_record_render(pp *p, struct vbuffer *b, const diag_record *d);
 VPRIV uint32_t lstart(const char *s, uint32_t off);
 VPRIV uint32_t lend(const char *s, uint32_t size, uint32_t ls);
-VPRIV bool fix_in_macro(const pp *p, uint32_t b, uint32_t e);
-VPRIV void macro_adjust(pp *p, vdiag *top, vdiag *d);
+VPRIV bool pp_fixit_is_in_macro(const pp *p, uint32_t b, uint32_t e);
+VPRIV void pp_expansion_notes_adjust(pp *p, diag_record *top, diag_record *d);
 /* diagout.c: JSON lines and SARIF */
-VPRIV void diag_json_flush(pp *p);
-VPRIV void diag_fixits_out(pp *p);
+VPRIV void diag_json_record_flush(pp *p);
+VPRIV void diag_fixit_output(pp *p);
 /* include.c: dependencies */
 VPRIV uint8_t pp_include_system_kind(pp *p, int32_t sdir);
 VPRIV void pp_dependency_add(pp *p, const char *path, uint8_t sys);
@@ -536,7 +536,7 @@ VPRIV void pp_include_run(pp *p, pp_context *c, uint32_t b, uint32_t e, int kind
 /* directive.c */
 VPRIV int pp_pragma_run(pp *p, const char *s, size_t n, uint32_t loc, ptok *out, uint32_t sloc);
 VPRIV int pp_directive_run(pp *p, pp_context *c, ptok *out);
-VPRIV bool pp_pad_at(const char *s, uint32_t ls, uint32_t le, uint32_t x);
+VPRIV bool diag_snippet_is_padded_at(const char *s, uint32_t ls, uint32_t le, uint32_t x);
 
 /* decimal digits of v at b (no terminator); returns the length */
 static inline int pp_unsigned_format(char *b, unsigned long long v)
@@ -566,7 +566,7 @@ static inline uintptr_t *pp_macro_table_slot(pp *p, uint32_t id)
 	uintptr_t **pg = &p->macro_directory[id >> PP_MACRO_PAGE_BITS];
 
 	if (unlikely(!*pg)) {
-		*pg = varena_alloc(&p->perm, PP_MACRO_PAGE_SIZE * sizeof(uintptr_t));
+		*pg = varena_alloc(&p->permanent_region, PP_MACRO_PAGE_SIZE * sizeof(uintptr_t));
 		memset(*pg, 0, PP_MACRO_PAGE_SIZE * sizeof(uintptr_t));
 	}
 	return &(*pg)[id & (PP_MACRO_PAGE_SIZE - 1)];
@@ -585,21 +585,21 @@ static inline void pp_macro_table_enable(pp *p, uint32_t id) { p->macro_director
 static inline pp_header_cache_touch_record *pp_header_cache_touch(pp *p, uint32_t id, bool *isnew)
 {
 	uint64_t *s = pp_header_cache_stamp_slot(p, id);
-	uint32_t ser = p->rec.levels[p->rec.n - 1].serial;
+	uint32_t ser = p->recording.levels[p->recording.level_count - 1].serial;
 
 	if ((uint32_t)(*s >> 32) == ser) {
 		*isnew = false;
-		return &p->rec.t[(uint32_t)*s];
+		return &p->recording.touches[(uint32_t)*s];
 	}
-	if (unlikely(p->rec.nt == PP_HEADER_CACHE_TOUCH_MAX)) {
+	if (unlikely(p->recording.touch_count == PP_HEADER_CACHE_TOUCH_MAX)) {
 		PP_HEADER_CACHE_REGION_REJECT(p);
 		*isnew = false;
 		return NULL;
 	}
 	*isnew = true;
-	p->rec.t[p->rec.nt] = (pp_header_cache_touch_record){ id, 0, 0, *s };
-	*s = (uint64_t)ser << 32 | p->rec.nt;
-	return &p->rec.t[p->rec.nt++];
+	p->recording.touches[p->recording.touch_count] = (pp_header_cache_touch_record){ id, 0, 0, *s };
+	*s = (uint64_t)ser << 32 | p->recording.touch_count;
+	return &p->recording.touches[p->recording.touch_count++];
 }
 
 /* id read with value v at entry of the innermost level (v: enabled, or PP_HEADER_CACHE_DEFINED) */
@@ -632,7 +632,7 @@ static inline uintptr_t pp_macro_read_token(pp *p, const ptok *t, int def)
 {
 	uintptr_t e = pp_macro_table_get(p, t->id);
 
-	if (unlikely(p->rec.on)) {
+	if (unlikely(p->recording.on)) {
 		if (t->ctr)
 			pp_header_cache_counter_read_record(p, t, e);
 		else
@@ -646,7 +646,7 @@ static inline uintptr_t pp_macro_read(pp *p, uint32_t id)
 {
 	uintptr_t e = pp_macro_table_get(p, id);
 
-	if (unlikely(p->rec.on))
+	if (unlikely(p->recording.on))
 		pp_header_cache_read_record(p, id, e, 0);
 	return e;
 }
@@ -656,7 +656,7 @@ static inline bool pp_macro_is_defined(pp *p, uint32_t id)
 {
 	uintptr_t e = pp_macro_table_get(p, id);
 
-	if (unlikely(p->rec.on))
+	if (unlikely(p->recording.on))
 		pp_header_cache_read_record(p, id, e, 1);
 	return e != 0;
 }
@@ -666,7 +666,7 @@ static inline bool pp_macro_guard_is_defined(pp *p, uint32_t id)
 {
 	uintptr_t e = pp_macro_table_get(p, id);
 
-	if (unlikely(p->rec.on))
+	if (unlikely(p->recording.on))
 		pp_header_cache_read_record(p, id, e, 2);
 	return e != 0;
 }
@@ -674,14 +674,14 @@ static inline bool pp_macro_guard_is_defined(pp *p, uint32_t id)
 static inline void pp_output_append(pp *p, const char *s, size_t n)
 {
 	pp_output_reserve(p, n);
-	memcpy(p->out + p->nout, s, n);
-	p->nout += n;
+	memcpy(p->output + p->output_length, s, n);
+	p->output_length += n;
 }
 
 static inline void pp_output_append_character(pp *p, char ch)
 {
 	pp_output_reserve(p, 1);
-	p->out[p->nout++] = ch;
+	p->output[p->output_length++] = ch;
 }
 
 /* three stores: s, len|id, loc|kind|flags|ctr (little endian) */
@@ -717,40 +717,40 @@ static inline void pp_scratch_token_push(pp *p, const ptok *t)
 {
 	if (unlikely(p->scratch_token_count == PP_SCRATCH_TOKENS_MAX))
 		PP_FATAL(p, 0, "macro expansion too large");
-	p->sv[p->scratch_token_count++] = *t;
+	p->scratch_tokens[p->scratch_token_count++] = *t;
 }
 
 static inline pp_context *pp_context_push(pp *p)
 {
 	pp_context *c;
 
-	if (unlikely(p->depth == PP_CONTEXT_MAX))
+	if (unlikely(p->context_depth == PP_CONTEXT_MAX))
 		PP_FATAL(p, 0, "macro expansion or #include nesting too deep");
-	c = &p->cx[p->depth++];
-	memset(c, 0, offsetof(pp_context, f));
+	c = &p->contexts[p->context_depth++];
+	memset(c, 0, offsetof(pp_context, lex_file));
 	return c;
 }
 
 /* the next token of the top context if it is plain (nothing owed, no directive) */
 static inline __attribute__((always_inline)) bool pp_token_raw_plain_next(pp *p, pp_context *c, ptok *t)
 {
-	if (likely(c->i < c->n && !(c->first | p->pend))) {
+	if (likely(c->index < c->count && !(c->first_flags | p->owed_spacing))) {
 		if (likely(c->type == PP_CONTEXT_TOKENS)) {
-			*t = c->pt[c->i++];
+			*t = c->tokens[c->index++];
 			return true;
 		}
 		if (c->type == PP_CONTEXT_LEXED) {
-			const lex_token *v = &c->vt[c->i++];
+			const lex_token *v = &c->lexed_tokens[c->index++];
 
-			pp_token_fill_from_lexer(t, v, c->src, c->offloc ? c->loc + v->off : c->loc);
+			pp_token_fill_from_lexer(t, v, c->source, c->location_per_token ? c->location + v->off : c->location);
 			return true;
 		}
 		if (c->type == PP_CONTEXT_FILE) {
-			const lex_token *v = &c->vt[c->i];
+			const lex_token *v = &c->lexed_tokens[c->index];
 
 			if (likely(!((v->flags & LEX_TOKEN_FLAG_LINE_START) && v->kind == LEX_TOKEN_HASH))) {
-				c->i++;
-				pp_token_fill_from_lexer(t, v, c->src, c->loc + v->off);
+				c->index++;
+				pp_token_fill_from_lexer(t, v, c->source, c->location + v->off);
 				return true;
 			}
 		}
@@ -761,7 +761,7 @@ static inline __attribute__((always_inline)) bool pp_token_raw_plain_next(pp *p,
 /* pp_token_raw_next(), inline: a macro context's next token with nothing owed (most tokens) */
 static inline __attribute__((always_inline)) void pp_token_raw_fast_next(pp *p, ptok *t)
 {
-	if (likely(pp_token_raw_plain_next(p, &p->cx[p->depth - 1], t)))
+	if (likely(pp_token_raw_plain_next(p, &p->contexts[p->context_depth - 1], t)))
 		return;
 	pp_token_raw_pop(p, t);
 }
@@ -778,7 +778,7 @@ static inline __attribute__((always_inline)) void pp_token_expanded_next(pp *p, 
 		return;
 	e = pp_macro_read_token(p, t, 0);
 	if (likely(!e)) {
-		if (unlikely(p->o->asm_mode) && t->s[0] == '$')
+		if (unlikely(p->options->asm_mode) && t->s[0] == '$')
 			pp_dollar_split(p, t);
 		return;
 	}
@@ -787,8 +787,8 @@ static inline __attribute__((always_inline)) void pp_token_expanded_next(pp *p, 
 
 static inline __attribute__((always_inline)) void pp_token_next_resetting_temporary(pp *p, ptok *t)
 {
-	if (p->depth == p->nfile && !p->scratch_token_count && !p->temporary_held)
-		p->tmp.used = 0;	/* nothing above file level refers to tmp */
+	if (p->context_depth == p->file_context_count && !p->scratch_token_count && !p->temporary_held)
+		p->temporary_region.used = 0;	/* nothing above file level refers to tmp */
 	pp_token_expanded_next(p, t);
 }
 
@@ -800,10 +800,10 @@ static inline bool pp_character_is_identifier(unsigned char c)
 /* the first output of the open levels that have none yet starts here */
 static inline void pp_header_cache_text_start(pp *p, uint8_t sol)
 {
-	for (int i = p->rec.n - 1; i >= 0 && !p->rec.levels[i].text_started; i--) {
-		p->rec.levels[i].text_started = 1;
-		p->rec.levels[i].first_sol = sol;
-		p->rec.levels[i].text_at_start = p->nout;
+	for (int i = p->recording.level_count - 1; i >= 0 && !p->recording.levels[i].text_started; i--) {
+		p->recording.levels[i].text_started = 1;
+		p->recording.levels[i].first_sol = sol;
+		p->recording.levels[i].text_at_start = p->output_length;
 	}
 }
 

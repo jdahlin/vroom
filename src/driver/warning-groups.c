@@ -14,7 +14,7 @@
 /* 0 to go on; 1: the job ends (status and message set) */
 VPRIV int driver_warning_groups_check(struct driver_job *job)
 {
-	if (job->nwargs) {
+	if (job->warning_argument_count) {
 		/* clang: a -W option naming no warning group is -Wunknown-warning-option, which kbuild's
 		   cc-option probes make an error: gcc-only flags must fail as with clang */
 		static const char *const wgroups[] = {
@@ -22,16 +22,16 @@ VPRIV int driver_warning_groups_check(struct driver_job *job)
 		};
 		bool strict = false;
 
-		for (int i = 0; i < job->nwargs; i++)
-			if (!strcmp(job->wargs[i], "-Werror=unknown-warning-option"))
+		for (int i = 0; i < job->warning_argument_count; i++)
+			if (!strcmp(job->warning_arguments[i], "-Werror=unknown-warning-option"))
 				strict = true;
-		for (int i = 0; strict && i < job->nwargs; i++) {
-			const char *w = job->wargs[i] + 2;
+		for (int i = 0; strict && i < job->warning_argument_count; i++) {
+			const char *w = job->warning_arguments[i] + 2;
 			char name[128];
 			size_t n;
 			bool found = false;
 
-			if (job->wargs[i][1] != 'W' || !strcmp(w, "error") || !strcmp(w, "all") || !strcmp(w, "extra") || !strcmp(w, "everything"))
+			if (job->warning_arguments[i][1] != 'W' || !strcmp(w, "error") || !strcmp(w, "all") || !strcmp(w, "extra") || !strcmp(w, "everything"))
 				continue;
 			if (!strncmp(w, "no-", 3))
 				w += 3;
@@ -50,7 +50,7 @@ VPRIV int driver_warning_groups_check(struct driver_job *job)
 			    strcmp(name, "format"))
 				found = false;	/* (clang takes a value for these only: -Wimplicit-fallthrough=5 is unknown) */
 			if (!found) {
-				dprintf(job->errfd, "error: unknown warning option '%s' [-Werror,-Wunknown-warning-option]\n", job->wargs[i]);
+				dprintf(job->errfd, "error: unknown warning option '%s' [-Werror,-Wunknown-warning-option]\n", job->warning_arguments[i]);
 				job->status = 1;
 				return 1;
 			}

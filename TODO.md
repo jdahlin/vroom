@@ -14,7 +14,7 @@ File references: `emit.c:N`, `cc.c:N` and `pp.c:N` predate the split into
 in `as/as.c`, `obj/obj.c` and `ld/ld.c` predate the restructure of
 2026-11-09 (AGENTS.md "Layout"), which moved parts of them to `arch/a64/`
 and `platform/linux/` and shortened the files whose buffers moved to `lib/`
-(`utils/ar.c`, `utils/rsh.c`, `utils/fixdep.c`, `frontend/c/layout.c`, `frontend/diag/diag.c`);
+(`utils/ar.c`, `utils/shell.c`, `utils/fixdep.c`, `frontend/c/layout.c`, `frontend/diag/diag.c`);
 search for the function named in the item.
 The test kinds referenced below are defined in the "Test infrastructure" section
 first; most items only add a file to one of them.
@@ -436,7 +436,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `cc_opts` field before `outfd` (cc.h says parse options go there) plus emit;
   `sig_of` adds wargs and error_limit; `bench/vcc-cachekey.py` 6/6 (the decl
   cache rows need bigger headers to reach a restore).  Was:  `opt_sig`
-  `driver/ccsnap.c:356` misses `-std`, `-fgnu89-inline`, `-finstrument-functions`,
+  `driver/declaration-cache.c:356` misses `-std`, `-fgnu89-inline`, `-finstrument-functions`,
   implicit-int/function flags; `sig_of` `pp.c:1518` misses `-W`/`-Werror`.
   Derive both keys from one struct of all parse-affecting options so a new
   option cannot be forgotten.
@@ -508,7 +508,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   not change the child; a test helper dumps its env).
 - [x] **No protocol/build versioning** [R].  *Done:* magic "roo2", the header
   carries a build id (size+mtime of the vccd next to the shim); vccd answers
-  VROOM_STATUS_MISMATCH and the shim says to restart it (vccd-test
+  VCCD_STATUS_MISMATCH and the shim says to restart it (vccd-test
   other-build-refused).  No automatic restart.  Was:  `protocol.h:12`.  Add a build
   id (hash of the binary or a build-time constant) to the handshake; on
   mismatch the shim restarts the server or falls back.
@@ -537,7 +537,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [x] **Unbounded argv arrays** [P].  *Done:* the directory lists are sized by
   argc (one per-thread allocation), the depfile table grows until every file
   fits; 5000 `-I`, 5000 `-include` and a 70000-header depfile work.  Was:  `driver/ppdriver.c:410,489-498,561`
-  (`dirs_i[1024]`, `all[2048]` …), `write_deps` 65536 files
+  (`dirs_i[1024]`, `all[2048]` …), `driver_depfile_write` 65536 files
   (`driver/ppdriver.c:288`).  Allocate from the job arena.
   *Validate:* T5 (5000 `-I`, 5000 `-include`, a TU with 100k headers in the
   depfile).
@@ -581,7 +581,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [x] **Request environment and umask ignored by in-process jobs** [R].  *Done:*
   jobs read `CPATH` (after -I), `C_INCLUDE_PATH` (after -isystem) and
   `SOURCE_DATE_EPOCH` (UTC __DATE__/__TIME__/__TIMESTAMP__) as clang, from the
-  request's env under vccd (`ppd_env.envp`); outputs follow the client's umask.
+  request's env under vccd (`driver_environment.envp`); outputs follow the client's umask.
   vccd-test request-env-reaches-job.  The VCC_*/VPP_* debug knobs stay
   server-wide.
 - [x] **Caches never invalidated** [R].  *Done:* a build is a client process
@@ -599,7 +599,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   previously missing header → found; `__has_include` flips; regenerate a
   header during a build).
 - [ ] **Memory only grows** [R].  (server side done: at a new build, idle, a vccd
-  above `VCC_RESTART_MB` resident (6144) answers what it holds VROOM_STATUS_RETRY
+  above `VCC_RESTART_MB` resident (6144) answers what it holds VCCD_STATUS_RETRY
   and execs itself on the same listening socket; the shim resends.  vccd-test
   memory-restart-between-builds.  Within one build memory still only grows.
   A full identifier table (6.3M) is an error for the TU, and vccd restarts at
@@ -1315,7 +1315,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `dwarfdump` / lldb line lookup; `-mmacosx-version-min=14.0` in
   `otool -l`); `bench/vcc-abi.py --host pragma_weak` (its xfail goes).
 
-### Driver (`driver/ppdriver.c`, `server/vccd.c`, `server/caps.c`)
+### Driver (`driver/ppdriver.c`, `server/vccd.c`, `server/capabilities.c`)
 - [ ] **vccd compiles only `-c` of one `.c`/`.S` for aarch64 Linux; the rest
   goes to clang** (done: the input anywhere on the line, `-o` before `-c`,
   `-fPIC`, `-S` (without `-o`: the basename with `.s`, as clang); vccd-test
@@ -1324,13 +1324,13 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* T11 (`-c a.c -o a.o`, flags after the input, `-o` before
   `-c`) all handled by vcc (a counter in vccd's stats, or `VCC_NO_FORWARD=1`
   that turns forwarding into an error).
-- [ ] **No linking, no crt/sysroot discovery** (`server/caps.c:174`).
+- [ ] **No linking, no crt/sysroot discovery** (`server/capabilities.c:174`).
   *Validate:* T11 `vcc hello.c -o hello` on aarch64 Linux (qemu-user) and
   macOS; then an autoconf project (e.g. GNU hello) and a CMake project
   configure and build with `CC=vcc`, tests pass.
 - [ ] **Unknown flags silently ignored** [P] (`driver/ppdriver.c:435-533`): `-g`,
   `-fsanitize=*`, `-m32`, `-march=znver4`, `-x c++`, `.cpp` inputs, `@rsp`,
-  several inputs.  (Done: input detection by suffix, `src_suffix`.)
+  several inputs.  (Done: input detection by suffix, `driver_input_is_source`.)
   Every option is either implemented, explicitly ignored with a documented
   reason, or an error (`-Wunused-command-line-argument` like clang).
   *Validate:* T11 table generated from clang's option list
@@ -1339,10 +1339,10 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [ ] **Missing**: (done: `--target=T -dumpmachine` in vccd, vccd-test.)
   `-print-*` (`-print-file-name` echoes, `server/vccd.c:665`), `-v`, `-###`, `-save-temps`, `-shared`, `-l`/`-L`, `-Wl,`.
   *Validate:* T11 rows.
-- [ ] **caps.c probe answers can contradict real compiles** (`server/vccd.c:291`,
-  `server/caps.c:199-208`), unmatched sources forwarded to clang (`server/vccd.c:395`),
+- [ ] **capabilities.c probe answers can contradict real compiles** (`server/vccd.c:291`,
+  `server/capabilities.c:199-208`), unmatched sources forwarded to clang (`server/vccd.c:395`),
   every stdin link probe false (`server/vccd.c:353-356`), `.tmp_` heuristic
-  (`server/vccd.c:252`), `--version` claims clang (`server/caps.c:163`).
+  (`server/vccd.c:252`), `--version` claims clang (`server/capabilities.c:163`).
   Make the table a cache of vcc's own answers (generated by running vcc,
   not clang), key it on target+flags, drop the filename heuristic, report
   an honest version string that CMake/Meson can identify (and a
@@ -1354,8 +1354,8 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 ### rsh
 - [ ] (Done: `trap` with EXIT/0 or no handler goes to the real shell,
   signal traps stay a no-op; rm/mkdir messages from strerror; fixdep only as
-  a whole path component and an existing executable.)  **fixdep path match by suffix** (`utils/rsh.c:414`): require the
-  configured kernel tree.  **Wrong errno text** (`utils/rsh.c:552,568,577`).
+  a whole path component and an existing executable.)  **fixdep path match by suffix** (`utils/shell.c:414`): require the
+  configured kernel tree.  **Wrong errno text** (`utils/shell.c:552,568,577`).
   *Validate:* `bench/vsh-test.py` rows against dash (trap, other fixdep
   paths, ENOENT/EACCES/ENOTDIR messages).
 
@@ -1445,7 +1445,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `int-conversion`, `incompatible-pointer-types` (its subgroup
   `incompatible-function-pointer-types` follows) and the function pointer
   flag; `-Werror=` of one again is clang's plain error (no `-Werror,`:
-  `pp_werror_named`).  Done: diag `conv_flags*.c` (`diag-flags:` in
+  `diag_warning_error_named`).  Done: diag `conv_flags*.c` (`diag-flags:` in
   vcc-diag.py), 12 flag combinations identical to clang.
 - [x] **-Winteger-overflow**: signed `+ - *` and unary `-` of constants
   whose exact value does not fit (innermost only, `NF_OVF`), value with
@@ -1490,7 +1490,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   name, #else, #endif, #undef's name, #include's header name and #line's
   file name, with clang's "//" fix-it; conditionals at the active level
   also when a skip lands on them.  With it: a #line file name now reaches
-  the diagnostics (`diag_where` replaced it by the file's path).  Done:
+  the diagnostics (`diag_location_presumed` replaced it by the file's path).  Done:
   diag `extra_tokens.c`; parity cmp/lines green.  Not modelled: a
   macro-expanded #include name.
 - [x] **pp `#pragma GCC warning`/`error`** ("msg" or ("msg"), else

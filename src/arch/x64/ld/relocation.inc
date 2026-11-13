@@ -9,7 +9,7 @@
  *     anything else gets a .got slot;
  *   - initial-exec GOTTPOFF and general-dynamic TLSGD relax to local-exec;
  *     the thread pointer is the TLS block's end rounded to its alignment
- *     (variant 2): tpoff = va - tls_tp, dtpoff = va - the block's start.
+ *     (variant 2): tpoff = va - tls_thread_pointer, dtpoff = va - the block's start.
  */
 
 
@@ -33,7 +33,7 @@ static int x64_ld_got_relaxation_kind(const ld_object *o, const ld_input_section
 			return 1;
 		if (type == R_X86_64_GOTPCRELX || rl->r_offset < 3)
 			return 0;	/* (the immediate form rewrites the REX byte too) */
-		return pic ? 0 : 2;
+		return ctx->relocations.pic ? 0 : 2;
 	}
 }
 
@@ -56,11 +56,11 @@ static void x64_ld_got_find(void *arg, size_t i)
 	(void)arg;
 	const ld_input_section *is = &isecs.v[i];
 
-	if (is->kind == LD_SECTION_KIND_NONE || is->obj == LD_NONE || atomic_load_explicit(&got_seen, memory_order_relaxed))
+	if (is->kind == LD_SECTION_KIND_NONE || is->obj == LD_NONE || atomic_load_explicit(&ctx->relocations.got_seen, memory_order_relaxed))
 		return;
 	for (uint32_t r = 0; r < is->nrela; r++)
 		if (x64_ld_relocation_needs_got(objs.v[is->obj], is, &is->rela[r])) {
-			atomic_store(&got_seen, true);
+			atomic_store(&ctx->relocations.got_seen, true);
 			return;
 		}
 }
@@ -208,7 +208,7 @@ static void x64_ld_input_section_relocate(uint32_t si, uint8_t *buf)
 				loc[-3] = (uint8_t)((rex & ~0x4) | (rex & 0x4) >> 2);
 				ld_u32_store(loc, (uint32_t)a);
 			} else {
-				uint64_t slot = ld_input_section_address(got_isec, 8 * (uint64_t)(symi < o->firstg ? o->lgotidx[symi] :
+				uint64_t slot = ld_input_section_address(ctx->output.got_section, 8 * (uint64_t)(symi < o->firstg ? o->lgotidx[symi] :
 										  gsyms[o->gs[symi - o->firstg]].gotidx));
 
 				v = (int64_t)(slot + (uint64_t)rl->r_addend - P);
@@ -217,14 +217,14 @@ static void x64_ld_input_section_relocate(uint32_t si, uint8_t *buf)
 			break;
 		}
 		case R_X86_64_TPOFF32: case R_X86_64_TPOFF64:
-			v = (int64_t)(t.va - tls_tp);
+			v = (int64_t)(t.va - ctx->layout.tls_thread_pointer);
 			if (type == R_X86_64_TPOFF64)
 				ld_u64_store(loc, (uint64_t)v);
 			else
 				ld_u32_store(loc, (uint32_t)v);
 			break;
 		case R_X86_64_DTPOFF32: case R_X86_64_DTPOFF64:
-			v = (int64_t)(t.va - tls_start);
+			v = (int64_t)(t.va - ctx->layout.tls_start);
 			if (type == R_X86_64_DTPOFF64)
 				ld_u64_store(loc, (uint64_t)v);
 			else
@@ -253,7 +253,7 @@ static void x64_ld_input_section_relocate(uint32_t si, uint8_t *buf)
 				in[0] = 0x48, in[1] = 0xc7, loc[-1] = (uint8_t)(0xc0 | reg);
 			else
 				a64_ld_relocation_error_report(o, is, rl, "R_X86_64_GOTTPOFF must be used in MOVQ or ADDQ instructions only", 0);
-			ld_u32_store(loc, (uint32_t)(t.va - tls_tp + 4));
+			ld_u32_store(loc, (uint32_t)(t.va - ctx->layout.tls_thread_pointer + 4));
 			break;
 		}
 		case R_X86_64_TLSGD: {
@@ -265,7 +265,7 @@ static void x64_ld_input_section_relocate(uint32_t si, uint8_t *buf)
 				break;
 			}
 			memcpy(loc - 4, in, sizeof in);
-			ld_u32_store(loc + 8, (uint32_t)(t.va - tls_tp + 4));
+			ld_u32_store(loc + 8, (uint32_t)(t.va - ctx->layout.tls_thread_pointer + 4));
 			r++;	/* (the call to __tls_get_addr is gone) */
 			break;
 		}

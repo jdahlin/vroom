@@ -2,10 +2,6 @@
 
 /* ---------------- address-assignment state ---------------- */
 
-static uint64_t dot;
-static uint32_t cur_osec;		/* LD_OUTPUT_SECTION_AETHER or an osec */
-static bool in_layout;
-
 static uint64_t ld_output_section_address(uint32_t o) { return o == LD_OUTPUT_SECTION_AETHER ? 0 : osecs.v[o].va; }
 static uint32_t ld_output_section_header_index(uint32_t o) { return o == LD_OUTPUT_SECTION_AETHER ? 1 : osecs.v[o].shidx; }
 
@@ -98,7 +94,7 @@ static ld_expression_value ld_global_symbol_expression_value(uint32_t g)
 		}
 		return v;
 	}
-	if (in_layout)
+	if (ctx->layout.in_layout)
 		ld_error_report("symbol not found: %s", ld_global_name(g));
 	return ld_expression_value_absolute_make(0);
 }

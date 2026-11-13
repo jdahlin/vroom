@@ -8,22 +8,22 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-static void say_place(pp *p, vbuffer *b, const char *what, uint32_t loc)
+static void diag_narrated_place_say(pp *p, vbuffer *b, const char *what, uint32_t loc)
 {
 	const char *name;
 	uint32_t nl, line, col;
 
-	if (diag_where(p, loc, &name, &nl, &line, &col))
+	if (diag_location_presumed(p, loc, &name, &nl, &line, &col))
 		vbuffer_format_append(b, "%s line %u, column %u", what, line, col);
 }
 
-VPRIV void render_narr(pp *p, vbuffer *b, const vdiag *d)
+VPRIV void diag_narrated_record_render(pp *p, vbuffer *b, const diag_record *d)
 {
 	const pp_file_entry *e;
 
-	if (render_head(p, b, d, &e)) {
-		const char *s = e->f->src;
-		uint32_t ls = lstart(s, d->loc - e->base), le = lend(s, e->f->size, ls);
+	if (diag_head_render(p, b, d, &e)) {
+		const char *s = e->lex_file->src;
+		uint32_t ls = lstart(s, d->loc - e->location_base), le = lend(s, e->lex_file->size, ls);
 
 		vbuffer_format_append(b, "  the source line is: ");
 		while (ls < le && (s[ls] == ' ' || s[ls] == '\t'))
@@ -35,17 +35,17 @@ VPRIV void render_narr(pp *p, vbuffer *b, const vdiag *d)
 			if (!d->span[i].label)
 				continue;
 			vbuffer_string_append(b, "  ");
-			say_place(p, b, "at", d->span[i].b);
+			diag_narrated_place_say(p, b, "at", d->span[i].b);
 			vbuffer_format_append(b, ": %s\n", d->span[i].label);
 		}
 		if (d->label) {
 			vbuffer_string_append(b, "  ");
-			say_place(p, b, "at", d->loc);
+			diag_narrated_place_say(p, b, "at", d->loc);
 			vbuffer_format_append(b, ": %s\n", d->label);
 		}
 	}
 	for (uint32_t i = 0; i < d->nfix; i++) {
-		const vdfix *f = &d->fix[i];
+		const diag_record_fixit *f = &d->fix[i];
 
 		vbuffer_string_append(b, "  fix: ");
 		if (f->b == f->e)
@@ -54,7 +54,7 @@ VPRIV void render_narr(pp *p, vbuffer *b, const vdiag *d)
 			vbuffer_string_append(b, "remove the text ");
 		else
 			vbuffer_format_append(b, "replace the text with '%s' ", f->s);
-		say_place(p, b, "at", f->b);
+		diag_narrated_place_say(p, b, "at", f->b);
 		vbuffer_string_append(b, "\n");
 	}
 	if (d->help)
@@ -63,7 +63,7 @@ VPRIV void render_narr(pp *p, vbuffer *b, const vdiag *d)
 
 /* the pending record (and its notes) to the error stream */
 
-VPRIV void diag_narrate(pp *p, vbuffer *b, vdiag *d)
+VPRIV void diag_narrated_render(pp *p, vbuffer *b, diag_record *d)
 {
-	render_narr(p, b, d);
+	diag_narrated_record_render(p, b, d);
 }

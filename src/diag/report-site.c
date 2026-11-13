@@ -9,7 +9,7 @@
 #include <unistd.h>
 
 /* " {vcc file.c:123 function}": where vcc reported it (VCC_TRACK_DIAG; symbolized by atos) */
-VPRIV void track_str(vbuffer *b, const void *pc)
+VPRIV void diag_report_site_text(vbuffer *b, const void *pc)
 {
 	Dl_info di;
 	char cmd[1200], out[512];

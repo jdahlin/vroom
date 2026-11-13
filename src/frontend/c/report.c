@@ -1,51 +1,51 @@
 /* vcc front end: diagnostics in clang's format, the report entries and their flags */
-#include "ccimpl.h"
+#include "cc-internal.h"
 
 /* ---------------- diagnostics ---------------- */
 
 /* Clang's implicit limit permits 19 errors plus the fatal record; an explicit
- * -ferror-limit=N permits N errors before the fatal (0 means unlimited). */
-VPRIV void error_limit(cc *c)
+ * -ferror-limit=AST_NODE permits AST_NODE errors before the fatal (0 means unlimited). */
+CC_PRIVATE void cc_report_error_limit(cc *c)
 {
-	int lim = pp_error_limit(c->p);
+	int lim = pp_option_error_limit(c->p);
 
 	if (!lim)
 		lim = 19;
 	if (lim > 0 && pp_error_count(c->p) >= lim) {
-		pp_dinfo d = { "fatal error", UINT32_MAX, NULL, 0, NULL, 0, NULL, 0 };
+		diag_info d = { "fatal error", UINT32_MAX, NULL, 0, NULL, 0, NULL, 0 };
 
-		pp_diagx(c->p, &d, "too many errors emitted, stopping now [-ferror-limit=]");
+		diag_report_extended(c->p, &d, "too many errors emitted, stopping now [-ferror-limit=]");
 		longjmp(c->bail, 1);
 	}
 }
 
-VPRIV void diag(cc *c, uint32_t loc, const char *what, const char *fmt, va_list ap)
+CC_PRIVATE void diag(cc *c, uint32_t loc, const char *what, const char *fmt, va_list ap)
 {
 	c->ndiag++;
-	pp_diag_emit(c->p, pp_diag_vbegin(c->p, what[0] == 'e' ? VDL_ERROR : what[0] == 'w' ? VDL_WARNING : VDL_NOTE, loc, fmt, ap));
+	diag_record_emit(c->p, diag_record_begin_va(c->p, what[0] == 'e' ? DIAG_LEVEL_ERROR : what[0] == 'w' ? DIAG_LEVEL_WARNING : DIAG_LEVEL_NOTE, loc, fmt, ap));
 }
 
 /* -Winvalid-pp-token for the unknown tokens read ahead (they always end in an error: here, not per token) */
-static void unknown_toks(cc *c)
+static void cc_report_unknown_tokens(cc *c)
 {
 	for (int i = 0; i < c->ntk; i++) {
 		const ptok *t = &c->tk[i];
 
 		if (t->kind == LEX_TOKEN_UNKNOWN && !(t->flags & PP_TOKEN_FLAG_FROM_MACRO) && t->loc != c->unk_loc) {
 			c->unk_loc = t->loc;
-			pp_invalid_tok(c->p, t->s, t->len, t->loc);
+			pp_token_invalid_report(c->p, t->s, t->len, t->loc);
 		}
 	}
 }
 
 __attribute__((format(printf, 3, 4)))
-VPRIV void cc_error(cc *c, uint32_t loc, const char *fmt, ...)
+CC_PRIVATE void cc_report_error(cc *c, uint32_t loc, const char *fmt, ...)
 {
-	pp_diag_pc = __builtin_return_address(0);
+	diag_report_site_pc = __builtin_return_address(0);
 	va_list ap;
 
-	unknown_toks(c);
-	error_limit(c);
+	cc_report_unknown_tokens(c);
+	cc_report_error_limit(c);
 	va_start(ap, fmt);
 	diag(c, loc, "error", fmt, ap);
 	va_end(ap);
@@ -53,38 +53,38 @@ VPRIV void cc_error(cc *c, uint32_t loc, const char *fmt, ...)
 }
 
 __attribute__((format(printf, 3, 4), noreturn))
-VPRIV void fatal(cc *c, uint32_t loc, const char *fmt, ...)
+CC_PRIVATE void cc_report_fatal(cc *c, uint32_t loc, const char *fmt, ...)
 {
-	pp_diag_pc = __builtin_return_address(0);
+	diag_report_site_pc = __builtin_return_address(0);
 	va_list ap;
 
-	unknown_toks(c);
-	error_limit(c);
+	cc_report_unknown_tokens(c);
+	cc_report_error_limit(c);
 	va_start(ap, fmt);
 	diag(c, loc, "error", fmt, ap);
 	va_end(ap);
 	c->errors++;
-	parse_jump(c);
+	cc_recovery_jump(c);
 }
 
 /* a record with clang's ranges and fix-its */
 /* c->dms to the record (pp moves the location to the macro invocation and adds the
    "expanded from macro" notes at the body token so spelled) */
-static void take_dms(cc *c, vdiag *d)
+static void cc_report_macro_notes_take(cc *c, diag_record *d)
 {
 	if (unlikely(c->dms != NULL)) {
 		if (*c->dms)
-			pp_diag_macro(d, c->dms, (uint32_t)strlen(c->dms));
+			diag_record_macro_set(d, c->dms, (uint32_t)strlen(c->dms));
 		c->dms = NULL;
 	}
 	if (unlikely(c->dfx.s != NULL)) {
-		pp_diag_fix(c->p, d, c->dfx.b, c->dfx.e, c->dfx.s, VDA_MACHINE);
+		diag_record_fixit_add(c->p, d, c->dfx.b, c->dfx.e, c->dfx.s, DIAG_APPLICABILITY_MACHINE);
 		c->dfx.s = NULL;
 	}
 }
 
 /* the spelling of punctuator kind k ("" for others) */
-VPRIV const char *punct_spell(int k)
+CC_PRIVATE const char *cc_punctuator_spelling(int k)
 {
 	static const char *const s[] = {
 		"[", "]", "(", ")", "{", "}", ".", "...", "&", "&&", "&=", "*", "*=", "+", "++", "+=", "-", "->", "--",
@@ -95,94 +95,94 @@ VPRIV const char *punct_spell(int k)
 	return k >= LEX_TOKEN_LEFT_SQUARE && k < LEX_TOKEN_KIND_COUNT ? s[k - LEX_TOKEN_LEFT_SQUARE] : "";
 }
 
-static vdiag *rec(cc *c, int level, uint32_t loc, const pp_span *r, int nr, const pp_fixit *fx, int nfx,
+static diag_record *rec(cc *c, int level, uint32_t loc, const diag_span *r, int nr, const diag_fixit *fx, int nfx,
 		  const char *fmt, va_list ap)
 {
-	vdiag *d = pp_diag_vbegin(c->p, level, loc, fmt, ap);
+	diag_record *d = diag_record_begin_va(c->p, level, loc, fmt, ap);
 
-	take_dms(c, d);
+	cc_report_macro_notes_take(c, d);
 	for (int i = 0; i < nr; i++)
-		pp_diag_label(c->p, d, r[i].b, r[i].e, NULL);
+		diag_record_label_add(c->p, d, r[i].b, r[i].e, NULL);
 	for (int i = 0; i < nfx; i++)
-		pp_diag_fix(c->p, d, fx[i].b, fx[i].e, fx[i].s, fx[i].app);
+		diag_record_fixit_add(c->p, d, fx[i].b, fx[i].e, fx[i].s, fx[i].app);
 	return d;
 }
 
 /* a diagnostic with ranges and fix-its (clang's rendering, pp.c) */
 __attribute__((format(printf, 8, 9)))
-VPRIV void report(cc *c, const char *what, uint32_t loc, const pp_span *r, int nr,
-		   const pp_fixit *fx, int nfx, const char *fmt, ...)
+CC_PRIVATE void report(cc *c, const char *what, uint32_t loc, const diag_span *r, int nr,
+		   const diag_fixit *fx, int nfx, const char *fmt, ...)
 {
-	pp_diag_pc = __builtin_return_address(0);
-	int lv = what[0] == 'e' ? VDL_ERROR : what[0] == 'w' ? VDL_WARNING : VDL_NOTE;
+	diag_report_site_pc = __builtin_return_address(0);
+	int lv = what[0] == 'e' ? DIAG_LEVEL_ERROR : what[0] == 'w' ? DIAG_LEVEL_WARNING : DIAG_LEVEL_NOTE;
 	va_list ap;
 
-	if (lv == VDL_ERROR)
-		unknown_toks(c), error_limit(c), c->errors++;
-	if (lv != VDL_NOTE)
+	if (lv == DIAG_LEVEL_ERROR)
+		cc_report_unknown_tokens(c), cc_report_error_limit(c), c->errors++;
+	if (lv != DIAG_LEVEL_NOTE)
 		c->ndiag++;
 	va_start(ap, fmt);
-	pp_diag_emit(c->p, rec(c, lv, loc, r, nr, fx, nfx, fmt, ap));
+	diag_record_emit(c->p, rec(c, lv, loc, r, nr, fx, nfx, fmt, ap));
 	va_end(ap);
 }
 
 __attribute__((format(printf, 3, 4)))
-VPRIV void note(cc *c, uint32_t loc, const char *fmt, ...)
+CC_PRIVATE void cc_report_note(cc *c, uint32_t loc, const char *fmt, ...)
 {
-	pp_diag_pc = __builtin_return_address(0);
+	diag_report_site_pc = __builtin_return_address(0);
 	va_list ap;
 
 	va_start(ap, fmt);
-	pp_diag_emit(c->p, pp_diag_vbegin(c->p, VDL_NOTE, loc, fmt, ap));
+	diag_record_emit(c->p, diag_record_begin_va(c->p, DIAG_LEVEL_NOTE, loc, fmt, ap));
 	va_end(ap);
 }
 
 /* clang's note on an incomplete struct, union or enum: where it was declared */
-VPRIV void fwd_note(cc *c, qty t)
+CC_PRIVATE void cc_report_forward_note(cc *c, qty t)
 {
-	int k = KIND(c, t);
+	int k = AST_TYPE_KIND(c, t);
 
 	while (k == TY_ARRAY)
-		t = T(c, t)->base, k = KIND(c, t);
-	if ((k == TY_STRUCT || k == TY_UNION || k == TY_ENUM) && c->tags[T(c, t)->aux].loc)
-		note(c, c->tags[T(c, t)->aux].loc, "forward declaration of '%s'", tyname(c, t));
+		t = AST_TYPE(c, t)->base, k = AST_TYPE_KIND(c, t);
+	if ((k == TY_STRUCT || k == TY_UNION || k == TY_ENUM) && c->tags[AST_TYPE(c, t)->aux].loc)
+		cc_report_note(c, c->tags[AST_TYPE(c, t)->aux].loc, "forward declaration of '%s'", tyname(c, t));
 }
 
-const char *const w_all[] = { "all", "most", NULL };
-const char *const w_conv[] = { "conversion", NULL };
-const char *const w_selfassign[] = { "all", "most", NULL };
+const char *const cc_warning_group_all[] = { "all", "most", NULL };
+const char *const cc_warning_group_conversion[] = { "conversion", NULL };
+const char *const cc_warning_group_self_assign[] = { "all", "most", NULL };
 
 /* a warning clang gives through DiagRuntimeBehavior: inside a function it waits for the
    end of the body (clang's PossiblyUnreachableDiags), elsewhere it goes out now */
-VPRIV void rt_emit(cc *c, vdiag *d)
+CC_PRIVATE void cc_report_runtime(cc *c, diag_record *d)
 {
 	if (!c->fn) {
-		pp_diag_emit(c->p, d);
+		diag_record_emit(c->p, d);
 		return;
 	}
 	if (c->nrtq == c->rtqcap) {
 		c->rtqcap = c->rtqcap ? c->rtqcap * 2 : 8;
-		c->rtq = realloc(c->rtq, c->rtqcap * sizeof(vdiag *));
+		c->rtq = realloc(c->rtq, c->rtqcap * sizeof(diag_record *));
 	}
 	c->rtq[c->nrtq++] = d;
 }
 
 /* the function's body is done */
-VPRIV void rt_flush(cc *c)
+CC_PRIVATE void cc_report_runtime_flush(cc *c)
 {
 	for (uint32_t i = 0; i < c->nrtq; i++)
-		pp_diag_emit(c->p, c->rtq[i]);
+		diag_record_emit(c->p, c->rtq[i]);
 	c->nrtq = 0;
 }
 
 /* a warning of clang's flag (on: on by default); false if it is off */
 __attribute__((format(printf, 10, 11)))
-VPRIV bool cc_warnx(cc *c, const char *flag, bool on, const char *const *groups, uint32_t loc,
-		  const pp_span *r, int nr, const pp_fixit *fx, int nfx, const char *fmt, ...)
+CC_PRIVATE bool cc_report_warning(cc *c, const char *flag, bool on, const char *const *groups, uint32_t loc,
+		  const diag_span *r, int nr, const diag_fixit *fx, int nfx, const char *fmt, ...)
 {
-	pp_diag_pc = __builtin_return_address(0);
-	int lv = pp_diag_wlevel(c->p, flag, on, groups, loc);
-	vdiag *d;
+	diag_report_site_pc = __builtin_return_address(0);
+	int lv = diag_warning_level(c->p, flag, on, groups, loc);
+	diag_record *d;
 	va_list ap;
 
 	if (lv < 0) {
@@ -192,80 +192,80 @@ VPRIV bool cc_warnx(cc *c, const char *flag, bool on, const char *const *groups,
 	va_start(ap, fmt);
 	d = rec(c, lv, loc, r, nr, fx, nfx, fmt, ap);
 	va_end(ap);
-	pp_diag_flag(d, flag);
-	d->werror = lv == VDL_ERROR;
-	pp_diag_emit(c->p, d);
+	diag_record_flag_set(d, flag);
+	d->werror = lv == DIAG_LEVEL_ERROR;
+	diag_record_emit(c->p, d);
 	return true;
 }
 
 /* A default error that participates in named -W controls and pragmas. */
 __attribute__((format(printf, 7, 8)))
-VPRIV void cc_errorx(cc *c, const char *flag, const char *const *groups, uint32_t loc,
-                   const pp_span *r, int nr, const char *fmt, ...)
+CC_PRIVATE void cc_report_flag_error(cc *c, const char *flag, const char *const *groups, uint32_t loc,
+                   const diag_span *r, int nr, const char *fmt, ...)
 {
-	int lv = pp_diag_elevel(c->p, flag, groups, loc);
+	int lv = diag_error_level(c->p, flag, groups, loc);
 	va_list ap;
 
 	if (lv < 0) { c->dms = NULL; return; }
-	pp_diag_pc = __builtin_return_address(0);
-	if (lv == VDL_ERROR)
-		unknown_toks(c), error_limit(c), c->errors++;
+	diag_report_site_pc = __builtin_return_address(0);
+	if (lv == DIAG_LEVEL_ERROR)
+		cc_report_unknown_tokens(c), cc_report_error_limit(c), c->errors++;
 	c->ndiag++;
 	va_start(ap, fmt);
-	vdiag *d = rec(c, lv, loc, r, nr, NULL, 0, fmt, ap);
+	diag_record *d = rec(c, lv, loc, r, nr, NULL, 0, fmt, ap);
 	va_end(ap);
-	pp_diag_flag(d, flag);
-	d->werror = lv == VDL_ERROR && pp_werror_named(c->p, flag, groups) > 0;
-	pp_diag_emit(c->p, d);
+	diag_record_flag_set(d, flag);
+	d->werror = lv == DIAG_LEVEL_ERROR && diag_warning_error_named(c->p, flag, groups) > 0;
+	diag_record_emit(c->p, d);
 }
 
-/* a warning record of clang's flag to fill in (labels, help) and pp_diag_emit; NULL if off */
+/* a warning record of clang's flag to fill in (labels, help) and diag_record_emit; NULL if off */
 __attribute__((format(printf, 6, 7)))
-VPRIV vdiag *cc_warn_begin(cc *c, const char *flag, bool on, const char *const *groups, uint32_t loc, const char *fmt, ...)
+CC_PRIVATE diag_record *cc_report_warning_begin(cc *c, const char *flag, bool on, const char *const *groups, uint32_t loc, const char *fmt, ...)
 {
-	int lv = pp_diag_wlevel(c->p, flag, on, groups, loc);
-	vdiag *d;
+	int lv = diag_warning_level(c->p, flag, on, groups, loc);
+	diag_record *d;
 	va_list ap;
 
 	if (lv < 0) {
 		c->dms = NULL;
 		return NULL;
 	}
-	if (lv == VDL_ERROR)
-		error_limit(c), c->errors++;
+	if (lv == DIAG_LEVEL_ERROR)
+		cc_report_error_limit(c), c->errors++;
 	c->ndiag++;
 	va_start(ap, fmt);
-	d = pp_diag_vbegin(c->p, lv, loc, fmt, ap);
+	d = diag_record_begin_va(c->p, lv, loc, fmt, ap);
 	va_end(ap);
-	take_dms(c, d);
-	pp_diag_flag(d, flag);
-	d->werror = lv == VDL_ERROR;
+	cc_report_macro_notes_take(c, d);
+	diag_record_flag_set(d, flag);
+	d->werror = lv == DIAG_LEVEL_ERROR;
 	return d;
 }
 
 /* clang's extension warnings (its ext_* diagnostics): off unless -pedantic or the flag or one
    of its groups is named; whether they are off is kept per flag (wargs are fixed for the TU) */
-const char *const w_gnu[] = { "gnu", "pedantic", NULL };
-const char *const w_ped[] = { "pedantic", NULL };
+const char *const cc_warning_group_gnu[] = { "gnu", "pedantic", NULL };
+const char *const cc_warning_group_pedantic[] = { "pedantic", NULL };
 
-/* every flag ext_on is asked about, and every group they are in: whether any can be on */
-static const char *const ext_flags[] = {
+/* every flag cc_extension_is_enabled is asked about, and every group they are in: whether any can be on */
+static const char *const cc_extension_flags[] = {
 	"c23-extensions", "c2y-extensions", "extra-semi", "gnu-conditional-omitted-operand", "gnu-compound-literal-initializer", "gnu-empty-struct",
 	"gnu-label-as-value", "gnu-pointer-arith", "gnu-statement-expression",
 	"gnu-statement-expression-from-macro-expansion", "language-extension-token", "pedantic", "pointer-arith",
 	"zero-length-array", NULL
 };
-static const char *const ext_groups[] = { "pedantic", "gnu", "pointer-arith", "gnu-statement-expression", NULL };
+static const char *const cc_extension_groups[] = { "pedantic", "gnu", "pointer-arith", "gnu-statement-expression", NULL };
 
-VPRIV bool ext_on_slow(cc *c, const char *flag, const char *const *groups)
+CC_PRIVATE bool cc_extension_enabled_slow(cc *c, const char *flag, const char *const *groups)
 {
 	uint32_t i;
 
 	if (c->ext_off < 0) {	/* off unless an option names one of them ("-Wx", "-Werror=x") */
 		int nw;
-		const char *const *wa = pp_diag_wargs(c->p, &nw);
+		const char *const *wa = diag_warning_arguments(c->p, &nw);
 
-		c->nenable = pp_diag_nenable_ref(c->p);
+		c->nenable = diag_warning_enabled_count_reference(c->p);
 		c->ext_off = 1;
 		for (int k = 0; k < nw && c->ext_off; k++) {
 			const char *a = wa[k];
@@ -275,81 +275,81 @@ VPRIV bool ext_on_slow(cc *c, const char *flag, const char *const *groups)
 			a += strncmp(a, "-Werror=", 8) ? 2 : 8;
 			if (!strcmp(a, "everything"))
 				c->ext_off = 0;
-			for (i = 0; ext_flags[i] && c->ext_off; i++)
-				c->ext_off = strcmp(a, ext_flags[i]) != 0;
-			for (i = 0; ext_groups[i] && c->ext_off; i++)
-				c->ext_off = strcmp(a, ext_groups[i]) != 0;
+			for (i = 0; cc_extension_flags[i] && c->ext_off; i++)
+				c->ext_off = strcmp(a, cc_extension_flags[i]) != 0;
+			for (i = 0; cc_extension_groups[i] && c->ext_off; i++)
+				c->ext_off = strcmp(a, cc_extension_groups[i]) != 0;
 		}
 	}
 	if (c->ext_off > 0)	/* off on the command line: only a "warning"/"error" pragma turns it on */
-		return *c->nenable != 0;	/* (and then pp_diag_wlevel decides by location) */
-	if (pp_diag_npragma(c->p))
-		return true;	/* (a pragma may turn it off somewhere: pp_diag_wlevel decides) */
+		return *c->nenable != 0;	/* (and then diag_warning_level decides by location) */
+	if (diag_pragma_count(c->p))
+		return true;	/* (a pragma may turn it off somewhere: diag_warning_level decides) */
 	for (i = 0; i < c->next_n; i++)
 		if (c->next_k[i] == flag)
 			return c->next_v[i];
 	if (i < sizeof(c->next_k) / sizeof(c->next_k[0])) {
 		uint32_t k = 0;
 
-		while (ext_flags[k] && strcmp(ext_flags[k], flag))
+		while (cc_extension_flags[k] && strcmp(cc_extension_flags[k], flag))
 			k++;
-		if (!ext_flags[k]) {	/* (ext_off would hide it) */
+		if (!cc_extension_flags[k]) {	/* (ext_off would hide it) */
 			fprintf(stderr, "vcc: internal error: ext_on(\"%s\") is not in ext_flags\n", flag);
 			abort();
 		}
 		c->next_k[i] = flag;
-		c->next_v[i] = pp_wstate(c->p, flag, false, groups) != 0;
+		c->next_v[i] = diag_warning_state(c->p, flag, false, groups) != 0;
 		c->next_n++;
 		return c->next_v[i];
 	}
 	return true;
 }
 
-VPRIV void ext_warn(cc *c, const char *flag, const char *const *groups, uint32_t loc, const char *fmt, ...)
+CC_PRIVATE void cc_report_extension(cc *c, const char *flag, const char *const *groups, uint32_t loc, const char *fmt, ...)
 {
 	int lv;
-	vdiag *d;
+	diag_record *d;
 	va_list ap;
 
-	pp_diag_pc = __builtin_return_address(0);
-	if (!ext_on(c, flag, groups) || (lv = pp_diag_wlevel(c->p, flag, false, groups, loc)) < 0) {
+	diag_report_site_pc = __builtin_return_address(0);
+	if (!cc_extension_is_enabled(c, flag, groups) || (lv = diag_warning_level(c->p, flag, false, groups, loc)) < 0) {
 		c->dms = NULL, c->dfx.s = NULL;
 		return;
 	}
-	if (lv == VDL_ERROR)
-		error_limit(c), c->errors++;
+	if (lv == DIAG_LEVEL_ERROR)
+		cc_report_error_limit(c), c->errors++;
 	c->ndiag++;
 	va_start(ap, fmt);
-	d = pp_diag_vbegin(c->p, lv, loc, fmt, ap);
+	d = diag_record_begin_va(c->p, lv, loc, fmt, ap);
 	va_end(ap);
-	take_dms(c, d);
-	pp_diag_flag(d, flag);
-	d->werror = lv == VDL_ERROR;
-	pp_diag_emit(c->p, d);
+	cc_report_macro_notes_take(c, d);
+	diag_record_flag_set(d, flag);
+	d->werror = lv == DIAG_LEVEL_ERROR;
+	diag_record_emit(c->p, d);
 }
 
 /* a warning for the end of the function body (clang's DiagRuntimeBehavior); ms: the macro note's spelling */
 __attribute__((format(printf, 9, 10)))
-VPRIV void rt_defer(cc *c, const char *flag, const char *const *groups, uint32_t loc, const pp_span *r, int nr,
+CC_PRIVATE void cc_report_runtime_defer(cc *c, const char *flag, const char *const *groups, uint32_t loc, const diag_span *r, int nr,
 		    const char *ms, uint32_t mlen, const char *fmt, ...)
 {
 	va_list ap;
 	int lv;
-	vdiag *d;
+	diag_record *d;
 
-	pp_diag_pc = __builtin_return_address(0);
-	if ((lv = pp_diag_wlevel(c->p, flag, true, groups, loc)) < 0)
+	diag_report_site_pc = __builtin_return_address(0);
+	if ((lv = diag_warning_level(c->p, flag, true, groups, loc)) < 0)
 		return;
 	va_start(ap, fmt);
-	d = rec(c, lv, loc, r, nr, NULL, 0, fmt, ap);	/* (as cc_warnx: its macro notes too) */
+	d = rec(c, lv, loc, r, nr, NULL, 0, fmt, ap);	/* (as cc_report_warning: its macro notes too) */
 	va_end(ap);
-	pp_diag_flag(d, flag);
-	d->werror = lv == VDL_ERROR;
+	diag_record_flag_set(d, flag);
+	d->werror = lv == DIAG_LEVEL_ERROR;
 	if (ms) {	/* (a copy: the record waits for the body's end) */
-		char *m = halloc(c, mlen + 1);
+		char *m = cc_heap_allocate(c, mlen + 1);
 
 		memcpy(m, ms, mlen), m[mlen] = 0;
-		pp_diag_macro(d, m, mlen);
+		diag_record_macro_set(d, m, mlen);
 	}
-	rt_emit(c, d);
+	cc_report_runtime(c, d);
 }

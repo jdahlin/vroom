@@ -11,7 +11,7 @@
 
 typedef struct vx {
 	ecx *e;
-	vir_fn *f;
+	vir_function *f;
 	vir_alloc_out *o;
 	int64_t *slot, *spill;
 	int gtmp;
@@ -33,12 +33,12 @@ typedef struct vx {
 VPRIV void *vx_grow(void *p, uint32_t *cap, uint32_t n, size_t size);
 VPRIV int vx_reg(uint8_t r);
 VPRIV int vx_size(uint32_t t);
-VPRIV int64_t vx_bits(const vir_ins *i);
-VPRIV uint8_t vx_arg(const vir_fn *f, uint32_t sig, uint32_t g, int *stack);
-VPRIV bool vx_imm(const vir_fn *f, uint32_t v, int64_t *value);
-VPRIV bool vx_smallmem(const vir_fn *f,const vir_ins *i);
-VPRIV bool vx_dense_switch(const vir_fn *f,const vir_ins *in,uint64_t *low,uint64_t *range);
-VPRIV void vx_fixed(const vir_fn *f, uint32_t v, vir_fix *x, void *ctx);
+VPRIV int64_t vx_bits(const vir_insn *i);
+VPRIV uint8_t vx_arg(const vir_function *f, uint32_t sig, uint32_t g, int *stack);
+VPRIV bool vx_imm(const vir_function *f, uint32_t v, int64_t *value);
+VPRIV bool vx_smallmem(const vir_function *f,const vir_insn *i);
+VPRIV bool vx_dense_switch(const vir_function *f,const vir_insn *in,uint64_t *low,uint64_t *range);
+VPRIV void vx_fixed(const vir_function *f, uint32_t v, vir_register_constraint *x, void *ctx);
 VPRIV void vx_raw(vx *L, const char *s);
 VPRIV void vx_mark(vx *L, bool begin, unsigned bit, uint32_t b, uint32_t pos,
 		    uint32_t v, uint32_t dst, uint32_t src, uint32_t to);
@@ -52,18 +52,18 @@ VPRIV void vx_edge_moves(vx *L, uint32_t g);
 VPRIV uint32_t vx_target(vx *L,uint32_t b,uint32_t k,uint32_t target);
 VPRIV uint32_t vx_next(const vx *L);
 VPRIV void vx_goto(vx *L, uint32_t b, uint32_t target);
-VPRIV bool vx_supported(const vir_fn *f, uint32_t v);
+VPRIV bool vx_supported(const vir_function *f, uint32_t v);
 VPRIV void vx_cmpconst(vx *L, int reg, int size, uint64_t value);
-VPRIV void vx_switch(vx *L, uint32_t block, const vir_ins *in, int selector);
+VPRIV void vx_switch(vx *L, uint32_t block, const vir_insn *in, int selector);
 VPRIV bool vx_foldedits(vx *L,uint32_t b,uint32_t pos,int keep);
 VPRIV bool vx_memnext(vx *L,uint32_t b,uint32_t v);
 VPRIV bool vx_castmem(vx *L,uint32_t b,uint32_t v);
 VPRIV unsigned vx_readword(vx *L,uint32_t b,uint32_t v,uint32_t *end);
 VPRIV unsigned vx_beaddr(vx *L,uint32_t b,uint32_t v,uint32_t *end);
 VPRIV bool vx_addrmem(vx *L,uint32_t b,uint32_t v);
-VPRIV bool vx_clear32(const vir_fn *f,uint32_t v);
+VPRIV bool vx_clear32(const vir_function *f,uint32_t v);
 VPRIV bool vx_sign64(vx *L,uint32_t v);
-VPRIV void vx_memblock(vx *L,const vir_ins *i,int dst,int src);
+VPRIV void vx_memblock(vx *L,const vir_insn *i,int dst,int src);
 VPRIV uint8_t vx_condition(vx *L,uint32_t b,uint32_t v,uint32_t value,int reg);
 VPRIV void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, uint8_t res);
 

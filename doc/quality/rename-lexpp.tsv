@@ -436,11 +436,11 @@ bcache	blob_cache	field	struct pp	recent spelling blobs by hash
 kspell	punctuator_blobs	field	struct pp	punctuator spelling blobs by kind
 ckc	chunk_cache_by_hash	field	struct pp	recent chunks by hash (most repeats are a child's)
 vkc	chunk_cache_by_ids	field	struct pp	recent chunks by (first id, last id, length)
-badline	uncacheable_line	field	struct hrec	source line of the HC_BAD that made them so (debugging)
-lev	levels	field	struct hrec	
-nkex	child_exclusion_count	field	struct hrec	
-ncp	counter_provenance_count	field	struct hrec	
-nsb	spelling_bytes	field	struct hrec	
+badline	uncacheable_line	field	struct pp_recording	source line of the HC_BAD that made them so (debugging)
+lev	levels	field	struct pp_recording	
+nkex	child_exclusion_count	field	struct pp_recording	
+ncp	counter_provenance_count	field	struct pp_recording	
+nsb	spelling_bytes	field	struct pp_recording	
 oadd	once_additions	field	struct hent	
 nbr	brace_pair_count	field	struct hent	
 edir_end	directive_on_line_at_end	field	struct hent	
@@ -729,11 +729,15 @@ T_NKINDS	LEX_TOKEN_KIND_COUNT	constant,public	lex.h
 
 ppimpl.h	pp-internal.h	file,public	src/frontend/pp/	the preprocessor's internal header (git mv by hand: not under include/)
 
-# ---- deferred: fields, need the field-use mode ----
+# ---- fields with short or shared names: APPLIED by the field-use mode ----
 # Struct fields whose old name is short or shared with other structs, locals or
-# parameters: a whole-word script cannot tell the uses apart.  They wait for vcc's
-# field-use mode (the front end reports each use of one struct's field).  The script
-# skips rows whose kind has `deferred` when run with --scoped.
+# parameters: a whole-word script cannot tell the uses apart, so they were applied
+# from vcc's own front end (macOS arm64 and Linux arm64 reports merged):
+#   src/tools/rename-table.py doc/quality/rename-lexpp.tsv --scoped src/frontend/lex,src/frontend/pp,src/frontend/diag \
+#       --users-of src/include/frontend --fields --deferred --report mac.tsv --report linux.tsv --apply
+# The kind keeps `deferred` so that the word passes (which would rewrite `n` everywhere) skip the rows for good.
+# Owners follow the types' new names (struct pp_recording, struct pp_line_mark); the rows `line` and `name` of
+# struct pp_line_mark kept their names and are gone.
 o	options	field,deferred	struct pp	
 cx	contexts	field,deferred	struct pp	the context stack (token sources pp_next reads from)
 depth	context_depth	field,deferred	struct pp	number of contexts on the stack
@@ -789,27 +793,27 @@ rec	recording	field,deferred	struct pp	what open regions have read and written s
 rst	recording_stamps	field,deferred	struct pp	per id: serial << 32 | index in recording.touches
 hm	child_verdicts	field,deferred	struct pp	child entry verdicts within one pp_header_cache_entry_serve
 hgen	child_verdict_generation	field,deferred	struct pp	
-n	level_count	field,deferred	struct hrec	open levels
-nbad	uncacheable_levels	field,deferred	struct hrec	levels [0, this) are not cacheable
-t	touches	field,deferred	struct hrec	a level's first touch of each id
-nt	touch_count	field,deferred	struct hrec	
-ord	once_marks	field,deferred	struct hrec	
-nord	once_mark_count	field,deferred	struct hrec	
-ctr	counter_positions	field,deferred	struct hrec	__COUNTER__ digits in the output
-nctr	counter_position_count	field,deferred	struct hrec	
-crd	counter_reads	field,deferred	struct hrec	
-ncrd	counter_read_count	field,deferred	struct hrec	
-seg	segments	field,deferred	struct hrec	child entries' text in the output
-nseg	segment_count	field,deferred	struct hrec	
-kid	children	field,deferred	struct hrec	child entries in order
-nkid	child_count	field,deferred	struct hrec	
-kex	child_exclusions	field,deferred	struct hrec	ids a level wrote before a child, per child
-lk	lookups	field,deferred	struct hrec	the levels' own include lookups
-nlk	lookup_count	field,deferred	struct hrec	
-cp	counter_provenance	field,deferred	struct hrec	indexed by ptok.ctr
-tk	tokens	field,deferred	struct hrec	tokens handed out (token mode)
-ntk	token_count	field,deferred	struct hrec	
-sb	spellings	field,deferred	struct hrec	spellings that live in per-TU memory
+n	level_count	field,deferred	struct pp_recording	open levels
+nbad	uncacheable_levels	field,deferred	struct pp_recording	levels [0, this) are not cacheable
+t	touches	field,deferred	struct pp_recording	a level's first touch of each id
+nt	touch_count	field,deferred	struct pp_recording	
+ord	once_marks	field,deferred	struct pp_recording	
+nord	once_mark_count	field,deferred	struct pp_recording	
+ctr	counter_positions	field,deferred	struct pp_recording	__COUNTER__ digits in the output
+nctr	counter_position_count	field,deferred	struct pp_recording	
+crd	counter_reads	field,deferred	struct pp_recording	
+ncrd	counter_read_count	field,deferred	struct pp_recording	
+seg	segments	field,deferred	struct pp_recording	child entries' text in the output
+nseg	segment_count	field,deferred	struct pp_recording	
+kid	children	field,deferred	struct pp_recording	child entries in order
+nkid	child_count	field,deferred	struct pp_recording	
+kex	child_exclusions	field,deferred	struct pp_recording	ids a level wrote before a child, per child
+lk	lookups	field,deferred	struct pp_recording	the levels' own include lookups
+nlk	lookup_count	field,deferred	struct pp_recording	
+cp	counter_provenance	field,deferred	struct pp_recording	indexed by ptok.ctr
+tk	tokens	field,deferred	struct pp_recording	tokens handed out (token mode)
+ntk	token_count	field,deferred	struct pp_recording	
+sb	spellings	field,deferred	struct pp_recording	spellings that live in per-TU memory
 next	next_variant	field,deferred	struct hent	the next entry of the same key
 rg	guard_reads	field,deferred	struct hent	inputs: include guards (value HDEF or 0), checked first
 ru	undefined_reads	field,deferred	struct hent	inputs: ids read while undefined
@@ -940,12 +944,10 @@ ex0	exclusions_start	field,deferred	struct hkidr
 nex	exclusion_count	field,deferred	struct hkidr	
 ex	exclusions	field,deferred	struct hkid	sorted ids written before this child
 nex	exclusion_count	field,deferred	struct hkid	
-lm.fe	file	field,deferred	struct lmark	in file index file, from byte offset offset on
-lm.off	offset	field,deferred	struct lmark	
-lm.pline	physical_line	field,deferred	struct lmark	physical line physical_line is line line
-lm.line	line	field,deferred	struct lmark	
-lm.name	name	field,deferred	struct lmark	presumed file name or NULL
-lm.namelen	name_length	field,deferred	struct lmark	
+fe	file	field,deferred	struct pp_line_mark	in file index file, from byte offset offset on
+off	offset	field,deferred	struct pp_line_mark	
+pline	physical_line	field,deferred	struct pp_line_mark	physical line physical_line is line line
+namelen	name_length	field,deferred	struct pp_line_mark	
 sig	signature	field,deferred	struct incent	options signature
 fsig	search_path_signature	field,deferred	struct incent	the whole search path's id
 sdir	search_directory	field,deferred	struct incent	

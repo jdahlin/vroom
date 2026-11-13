@@ -1,6 +1,8 @@
-; A late-used loop parameter crosses a call. The other parameter occupies one
-; callee-saved register; the last free one can keep this value across the call
-; without requiring two additional spare callee-saved registers.
+; A late-used loop parameter crosses a call, on a target with few callee-saved
+; registers (x86-64 has five): the other parameter occupies one callee-saved
+; register; the last free one keeps this value across the call without two
+; additional spare callee-saved registers (late-callee-many.vir: the rule of a
+; target with many).
 ; REGS: 4,2,2,0
 ; SWEEP: yes
 vir 1

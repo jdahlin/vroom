@@ -215,11 +215,11 @@ VPRIV bool vw_try(ecx *e, uint32_t s)
 			b.n = 0;
 		}
 		if (m & 4) {
-			vir_print_fn(&b, NULL, &V->f);
+			vir_print_function(&b, NULL, &V->f);
 			fprintf(stderr, "%.*s", (int)b.n, b.p ? (char *)b.p : "");
 		}
 		if (m & 8)
-			fprintf(stderr, "vir: %s: built, %u instructions, %u blocks%s\n", nm, V->f.nins, V->f.nblk, nerr ? ", INVALID" : "");
+			fprintf(stderr, "vir: %s: built, %u instructions, %u blocks%s\n", nm, V->f.insn_count, V->f.block_count, nerr ? ", INVALID" : "");
 		free(b.p);
 		if (nerr) {
 			char n[16];
@@ -244,7 +244,7 @@ VPRIV bool vw_try(ecx *e, uint32_t s)
 				if (e->E->vstats)
 					e->E->vlowered++;
 				if (m & 8)
-					fprintf(stderr, "vir: %s: lowered, %u spills\n", nm, V->ao.st.spills);
+					fprintf(stderr, "vir: %s: lowered, %u spills\n", nm, V->ao.statistics.spills);
 				return true;
 			}
 			vw_failure_note(e, s, why, VIRFAIL_lowering_failed, V->detail);

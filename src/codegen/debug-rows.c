@@ -45,7 +45,7 @@ VPRIV bool dbg_where(ecx *e, uint32_t loc, uint32_t *file, uint32_t *line, uint3
 	const char *name;
 	uint32_t len;
 
-	if (!pp_where(e->c->p, loc, &name, &len, line, col) || !*line)
+	if (!pp_location_describe(e->c->p, loc, &name, &len, line, col) || !*line)
 		return false;
 	*file = dbg_file(e, name, len);
 	return true;

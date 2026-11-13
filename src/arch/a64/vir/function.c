@@ -6,12 +6,12 @@
  * moves.  finish_function then runs the record clean-ups, lays out the frame
  * and prints or encodes, as for any function.
  *
- *   integer: x0-x15 and x19-x28 (callee-saved); x16 is VR_SCR0 and the
+ *   integer: x0-x15 and x19-x28 (callee-saved); x16 is VIR_REGISTER_SCRATCH0 and the
  *            lowering's own scratch, x17 the printer's (large immediates),
  *            x18 the platform's, x29/x30 the frame
  *   float:   v0-v7 and v16-v30, caller-saved, and v8-v15, whose low 64 bits a
  *            call keeps: offered when no vector lives across a call (vl_vcross)
- *            and saved and restored here, not by the prologue; v31 is VR_SCR1
+ *            and saved and restored here, not by the prologue; v31 is VIR_REGISTER_SCRATCH1
  *
  * Floating-point operations are encoded words (I_WORD), as in fp.c.  A
  * value in a spill slot or a VIR slot is addressed from FRAME, so the frame
@@ -33,8 +33,8 @@ static void vl_target_block_begin(void *ctx, uint32_t b)
 	L->fcc = -1, L->fzr = -1, L->fbit = -1;
 	L->cchi = 0;
 	L->tlo = L->thi = 0;
-	L->pval = 0, L->xval = 0, L->xc = VIR_NOBLK;
-	L->eb = o->boff[L->f->nblk + 1 + b], L->eend = o->boff[L->f->nblk + 2 + b];
+	L->pval = 0, L->xval = 0, L->xc = VIR_BLOCK_NONE;
+	L->eb = o->block_offsets[L->f->block_count + 1 + b], L->eend = o->block_offsets[L->f->block_count + 2 + b];
 	L->ei = L->eb;
 	L->ntr = 0;
 	L->skip = 0;
@@ -47,7 +47,7 @@ static void vl_target_block_enter(void *ctx, uint32_t b)
 
 	if (b == L->sp)
 		put(L->e, I_NOP)->cond = NOP_PROLOG;
-	L->bare = L->sp != VIR_NOBLK && !vir_dominates(L->f, L->sp, b);
+	L->bare = L->sp != VIR_BLOCK_NONE && !vir_block_dominates(L->f, L->sp, b);
 	L->at = b;
 	L->fallok = true;
 }
@@ -59,7 +59,7 @@ static void vl_target_instruction(void *ctx, uint32_t b, uint32_t i, const uint8
 
 	(void)opr;	/* (the driver filled L->ov and L->opr) */
 	L->nop = nopr;
-	if (L->fcc >= 0 && L->fval != L->f->ins[i].a && !(i > L->tlo && i < L->thi))
+	if (L->fcc >= 0 && L->fval != L->f->insns[i].a && !(i > L->tlo && i < L->thi))
 		L->fcc = -1;
 	if (!e->reach)
 		deflabel_forced(e, newlabel(e));	/* (code after a trap: never reached) */
@@ -120,7 +120,7 @@ static void vl_target_after_blocks(void *ctx)
 {
 	vl *L = ctx;
 
-	for (uint32_t b = 0; b < L->f->nblk && L->sp != VIR_NOBLK; b++)
+	for (uint32_t b = 0; b < L->f->block_count && L->sp != VIR_BLOCK_NONE; b++)
 		if (VLT.lbf[b]) {	/* a return in front of the save point, for the code behind it */
 			deflabel_forced(L->e, VLT.lbf[b]);
 			L->bare = false;
@@ -164,41 +164,41 @@ static const virbuild_lowering_target vl_lowering_target = {
  * the test's branch goes back to the body: one branch a round instead of two.  The edges
  * into the loop get a copy of the test (vl_goto), not a jump to it: with the jump,
  * speedtest1 ran more instructions than without the rotation (short loops).  VLT.hl[b] is
- * the loop of a header placed so, else VIR_NOBLK.  VCC_VIR_ROT=0: VIR's order.  The driver
+ * the loop of a header placed so, else VIR_BLOCK_NONE.  VCC_VIR_ROT=0: VIR's order.  The driver
  * makes that layout; this puts the blocks in front of the save point first.
  */
 static void vl_target_order_adjust(void *ctx)
 {
 	vl *L = ctx;
-	const vir_fn *f = L->f;
-	uint32_t n = f->nblk;
+	const vir_function *f = L->f;
+	uint32_t n = f->block_count;
 
-	if (L->sp != VIR_NOBLK) {
+	if (L->sp != VIR_BLOCK_NONE) {
 		/* the blocks in front of the save point first, then it and what it dominates:
 		 * the prologue stands between them (VLT.path: scratch here) */
 		uint32_t np = 0, nq = 0, *q = VLT.path;
 
 		for (uint32_t p = 0; p < n; p++)
-			if (vir_dominates(f, L->sp, L->ord[p]))
+			if (vir_block_dominates(f, L->sp, L->ord[p]))
 				q[nq++] = L->ord[p];
 			else
 				L->ord[np++] = L->ord[p];
 		memcpy(&L->ord[np], q, (size_t)nq * sizeof *q);
 		if (vl_skip(L, L->sp) || L->ord[np] != L->sp)
-			L->sp = VIR_NOBLK;	/* (never the case in dominator order; the order stays) */
+			L->sp = VIR_BLOCK_NONE;	/* (never the case in dominator order; the order stays) */
 		/* from behind the save point back in front of it only to a block that is a return */
-		for (uint32_t p = np; p < n && L->sp != VIR_NOBLK; p++) {
-			vir_ins t = f->ins[f->blk[L->ord[p]].first + f->blk[L->ord[p]].n - 1];
-			vir_oit it;
+		for (uint32_t p = np; p < n && L->sp != VIR_BLOCK_NONE; p++) {
+			vir_insn t = f->insns[f->blocks[L->ord[p]].first + f->blocks[L->ord[p]].insn_count - 1];
+			vir_operand_iterator it;
 			uint32_t *x;
 
-			vir_oit_init(&it, (vir_fn *)f, &t, true);
-			while (L->sp != VIR_NOBLK && (x = vir_oit_next(&it))) {
-				const vir_blk *k = &f->blk[vl_chase(L, *x)];
+			vir_operand_iterator_init(&it, (vir_function *)f, &t, true);
+			while (L->sp != VIR_BLOCK_NONE && (x = vir_operand_iterator_next(&it))) {
+				const vir_block *k = &f->blocks[vl_chase(L, *x)];
 
-				if (!vir_dominates(f, L->sp, vl_chase(L, *x)) &&
-				    ((k->fl & VB_ADDR) || k->n - k->nparam != 1 || f->ins[k->first + k->n - 1].op != VO_RET))
-					L->sp = VIR_NOBLK;
+				if (!vir_block_dominates(f, L->sp, vl_chase(L, *x)) &&
+				    ((k->flags & VIR_BLOCK_FLAG_ADDR) || k->insn_count - k->parameter_count != 1 || f->insns[k->first + k->insn_count - 1].op != VIR_OP_RET))
+					L->sp = VIR_BLOCK_NONE;
 			}
 		}
 	}
@@ -213,58 +213,58 @@ VPRIV void vl_body(vl *L)
 
 /* does a vector live across a call?  (A call keeps only the low half of v8-v15: such a function
  * is not offered them.)  Liveness of the vector values alone, a bit each */
-static bool vl_vcross(vir_fn *f)
+static bool vl_vcross(vir_function *f)
 {
 	uint32_t nv = 0, W, *ix;
 	uint64_t *in, *out, *live;
 	bool calls = false, hit = false;
 
-	for (uint32_t b = 0; b < f->nblk; b++)
-		for (uint32_t i = f->blk[b].first; i < f->blk[b].first + f->blk[b].n; i++) {
-			nv += vir_isvec(f->ins[i].ty);
-			calls |= f->ins[i].op == VO_CALL || ((f->ins[i].op == VO_MEMCPY || f->ins[i].op == VO_MEMSET) && vl_bigmem(f, &f->ins[i]));
+	for (uint32_t b = 0; b < f->block_count; b++)
+		for (uint32_t i = f->blocks[b].first; i < f->blocks[b].first + f->blocks[b].insn_count; i++) {
+			nv += vir_type_is_vector(f->insns[i].type);
+			calls |= f->insns[i].op == VIR_OP_CALL || ((f->insns[i].op == VIR_OP_MEMCPY || f->insns[i].op == VIR_OP_MEMSET) && vl_bigmem(f, &f->insns[i]));
 		}
 	if (!nv || !calls)
 		return false;
 	W = (nv + 63) / 64;
-	ix = malloc((size_t)f->nins * sizeof *ix);
-	in = calloc((size_t)(2 * f->nblk + 1) * W, sizeof *in);
+	ix = malloc((size_t)f->insn_count * sizeof *ix);
+	in = calloc((size_t)(2 * f->block_count + 1) * W, sizeof *in);
 	if (!ix || !in) {
 		free(ix), free(in);
 		return true;
 	}
-	out = in + (size_t)f->nblk * W, live = out + (size_t)f->nblk * W;
+	out = in + (size_t)f->block_count * W, live = out + (size_t)f->block_count * W;
 	nv = 0;
-	for (uint32_t i = 0; i < f->nins; i++)
-		ix[i] = vir_isvec(f->ins[i].ty) ? nv++ : UINT32_MAX;
+	for (uint32_t i = 0; i < f->insn_count; i++)
+		ix[i] = vir_type_is_vector(f->insns[i].type) ? nv++ : UINT32_MAX;
 	for (int pass = 0, ch = 1; ch || pass < 2; pass += !ch) {	/* to a fixed point, then once more to look at the calls */
 		ch = 0;
-		for (uint32_t b = f->nblk; b-- > 0;) {
-			const vir_blk *k = &f->blk[b];
-			vir_ins t = f->ins[k->first + k->n - 1];
-			vir_oit it;
+		for (uint32_t b = f->block_count; b-- > 0;) {
+			const vir_block *k = &f->blocks[b];
+			vir_insn t = f->insns[k->first + k->insn_count - 1];
+			vir_operand_iterator it;
 			uint32_t *p;
 
 			memset(live, 0, W * sizeof *live);
-			vir_oit_init(&it, f, &t, true);
-			while ((p = vir_oit_next(&it)))
-				if (*p < f->nblk)
+			vir_operand_iterator_init(&it, f, &t, true);
+			while ((p = vir_operand_iterator_next(&it)))
+				if (*p < f->block_count)
 					for (uint32_t w = 0; w < W; w++)
 						live[w] |= in[(size_t)*p * W + w];
 			for (uint32_t w = 0; w < W; w++)
 				if (out[(size_t)b * W + w] != live[w])
 					out[(size_t)b * W + w] = live[w], ch = 1;
-			for (uint32_t i = k->first + k->n; i-- > k->first;) {
-				vir_ins x = f->ins[i];
+			for (uint32_t i = k->first + k->insn_count; i-- > k->first;) {
+				vir_insn x = f->insns[i];
 
 				if (ix[i] != UINT32_MAX)
 					live[ix[i] / 64] &= ~(1ull << (ix[i] & 63));
-				if (pass && (x.op == VO_CALL || x.op == VO_MEMCPY || x.op == VO_MEMSET))
+				if (pass && (x.op == VIR_OP_CALL || x.op == VIR_OP_MEMCPY || x.op == VIR_OP_MEMSET))
 					for (uint32_t w = 0; w < W; w++)
 						hit |= live[w] != 0;
-				vir_oit_init(&it, f, &x, false);
-				while ((p = vir_oit_next(&it)))
-					if (*p < f->nins && ix[*p] != UINT32_MAX)
+				vir_operand_iterator_init(&it, f, &x, false);
+				while ((p = vir_operand_iterator_next(&it)))
+					if (*p < f->insn_count && ix[*p] != UINT32_MAX)
 						live[ix[*p] / 64] |= 1ull << (ix[*p] & 63);
 			}
 			for (uint32_t w = 0; w < W; w++)
@@ -282,8 +282,8 @@ static bool vl_vcross(vir_fn *f)
 VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 {
 	vwst *V = e->vw;
-	vir_fn *f = &V->f;
-	vir_regs regs;
+	vir_function *f = &V->f;
+	vir_target_registers regs;
 	vl L = { 0 };
 	cc *c = e->c;
 	const ctype *ft = T(c, c->syms[s].ty);
@@ -301,22 +301,22 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 	}
 	/* i2p and p2i are copies here: their users read the operand (a load's address an add,
 	 * to fold), and they go unemitted */
-	for (uint32_t b = 0; b < f->nblk; b++)
-		for (uint32_t i = f->blk[b].first; i < f->blk[b].first + f->blk[b].n; i++) {
-			vir_oit it;
+	for (uint32_t b = 0; b < f->block_count; b++)
+		for (uint32_t i = f->blocks[b].first; i < f->blocks[b].first + f->blocks[b].insn_count; i++) {
+			vir_operand_iterator it;
 			uint32_t *p;
 
-			vir_oit_init(&it, f, &f->ins[i], false);
-			while ((p = vir_oit_next(&it)))
-				while (f->ins[*p].op == VO_I2P || f->ins[*p].op == VO_P2I)
-					*p = f->ins[*p].a;
+			vir_operand_iterator_init(&it, f, &f->insns[i], false);
+			while ((p = vir_operand_iterator_next(&it)))
+				while (f->insns[*p].op == VIR_OP_I2P || f->insns[*p].op == VIR_OP_P2I)
+					*p = f->insns[*p].a;
 		}
 	/* shrink-wrapping (SPEC-vir.md 15.12): the allocator is told which calls will be sibling
 	 * calls, which need no frame.  Not with unwind tables (the rows would have to follow the
 	 * prologue into the body).  VCC_VIR_SHRINK=0: off */
 	{
 		static int on = -1;
-		vir_aopt ao = { 0 };
+		vir_alloc_options ao = { 0 };
 
 		if (on < 0) {
 			const char *x = getenv("VCC_VIR_SHRINK");
@@ -324,26 +324,26 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 			on = !(x && *x == '0');
 		}
 		L.e = e, L.f = f;
-		VLT.lo32 = vl_grow(VLT.lo32, &VLT.c32, f->nins + 1, 1);
-		VLT.nf = vl_grow(VLT.nf, &VLT.cnf, f->nins + 1, 1);
+		VLT.lo32 = vl_grow(VLT.lo32, &VLT.c32, f->insn_count + 1, 1);
+		VLT.nf = vl_grow(VLT.nf, &VLT.cnf, f->insn_count + 1, 1);
 		L.ret32 = KIND(c, ft->base) != TY_VOID && is_integer(c, ft->base) && tsize(c, ft->base) == 4;
 		L.tail = !(ft->flags & TF_VARIADIC) && em_tail_caller_ok(e, s) && !vl_notail(&L, VLT.lo32);
 		if (on && !e->E->noopt && !(e->E->o->cfi && !DARWIN(c))) {
-			memset(VLT.nf, 0, f->nins);
-			for (uint32_t b = 0; L.tail && b < f->nblk; b++)
-				for (uint32_t i = f->blk[b].first; i < f->blk[b].first + f->blk[b].n; i++)
-					if (f->ins[i].op == VO_CALL) {
+			memset(VLT.nf, 0, f->insn_count);
+			for (uint32_t b = 0; L.tail && b < f->block_count; b++)
+				for (uint32_t i = f->blocks[b].first; i < f->blocks[b].first + f->blocks[b].insn_count; i++)
+					if (f->insns[i].op == VIR_OP_CALL) {
 						VLT.nf[i] = vl_sibcand(&L, b, i);
 					}
 			ao.shrink = true;
-			ao.noframe = VLT.nf;
+			ao.no_frame = VLT.nf;
 		}
 		if (!vir_alloc(f, &V->lp, &regs, &ao, &V->ao)) {
 			*why = VIRFAIL(allocation_failed);
-			snprintf(V->detail, sizeof V->detail, "%s", V->ao.err);
+			snprintf(V->detail, sizeof V->detail, "%s", V->ao.error_message);
 			return false;
 		}
-		L.sp = ao.shrink ? V->ao.spoint : VIR_NOBLK;
+		L.sp = ao.shrink ? V->ao.save_point : VIR_BLOCK_NONE;
 	}
 	if (getenv("VCC_VIR_CHECK")) {
 		vbuffer msg = { 0 };
@@ -358,20 +358,20 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 		free(msg.p);
 	}
 	L.e = e, L.f = f, L.o = &V->ao;
-	VLT.soff = vl_grow(VLT.soff, &VLT.cs, f->nslot + 1, sizeof(int64_t));
-	VLT.spoff = vl_grow(VLT.spoff, &VLT.csp, V->ao.nspill + 1, sizeof(int64_t));
-	VLT.lbl = vl_grow(VLT.lbl, &VLT.cl, f->nblk + 1, sizeof(uint32_t));
-	VLT.uses = vl_grow(VLT.uses, &VLT.cu, f->nins + 1, 1);
-	VLT.lo32 = vl_grow(VLT.lo32, &VLT.c32, f->nins + 1, 1);
-	VLT.chs = vl_grow(VLT.chs, &VLT.cch, f->nblk + 1, sizeof(uint32_t));
-	VLT.path = vl_grow(VLT.path, &VLT.cpa, f->nblk + 1, sizeof(uint32_t));
+	VLT.soff = vl_grow(VLT.soff, &VLT.cs, f->slot_count + 1, sizeof(int64_t));
+	VLT.spoff = vl_grow(VLT.spoff, &VLT.csp, V->ao.spill_count + 1, sizeof(int64_t));
+	VLT.lbl = vl_grow(VLT.lbl, &VLT.cl, f->block_count + 1, sizeof(uint32_t));
+	VLT.uses = vl_grow(VLT.uses, &VLT.cu, f->insn_count + 1, 1);
+	VLT.lo32 = vl_grow(VLT.lo32, &VLT.c32, f->insn_count + 1, 1);
+	VLT.chs = vl_grow(VLT.chs, &VLT.cch, f->block_count + 1, sizeof(uint32_t));
+	VLT.path = vl_grow(VLT.path, &VLT.cpa, f->block_count + 1, sizeof(uint32_t));
 	L.soff = VLT.soff, L.spoff = VLT.spoff, L.lbl = VLT.lbl, L.uses = VLT.uses, L.lo32 = VLT.lo32;
 	L.chs = VLT.chs;
-	VLT.ord = vl_grow(VLT.ord, &VLT.co, f->nblk + 1, sizeof(uint32_t));
-	VLT.opos = vl_grow(VLT.opos, &VLT.cop, f->nblk + 1, sizeof(uint32_t));
-	VLT.hl = vl_grow(VLT.hl, &VLT.chl, f->nblk + 1, sizeof(uint32_t));
-	VLT.lbf = vl_grow(VLT.lbf, &VLT.clf, f->nblk + 1, sizeof(uint32_t));
-	memset(VLT.lbf, 0, (size_t)(f->nblk + 1) * sizeof(uint32_t));
+	VLT.ord = vl_grow(VLT.ord, &VLT.co, f->block_count + 1, sizeof(uint32_t));
+	VLT.opos = vl_grow(VLT.opos, &VLT.cop, f->block_count + 1, sizeof(uint32_t));
+	VLT.hl = vl_grow(VLT.hl, &VLT.chl, f->block_count + 1, sizeof(uint32_t));
+	VLT.lbf = vl_grow(VLT.lbf, &VLT.clf, f->block_count + 1, sizeof(uint32_t));
+	memset(VLT.lbf, 0, (size_t)(f->block_count + 1) * sizeof(uint32_t));
 	L.ord = VLT.ord, L.opos = VLT.opos, L.lp = &V->lp;
 	L.drv = (virbuild_lowering){
 		.target = &vl_lowering_target, .ctx = &L, .f = f, .o = L.o, .lp = L.lp,
@@ -381,8 +381,8 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 	};
 	L.ret32 = KIND(c, ft->base) != TY_VOID && is_integer(c, ft->base) && tsize(c, ft->base) == 4;
 	L.tail = !(ft->flags & TF_VARIADIC) && em_tail_caller_ok(e, s) && !vl_notail(&L, VLT.lo32);	/* (lo32: scratch until it is filled) */
-	vir_uses(f, L.uses);
-	vir_low32(f, L.ret32, L.lo32);
+	vir_uses_count(f, L.uses);
+	vir_demand_low32_compute(f, L.ret32, L.lo32);
 
 	/* Keep result tables queued by the VIR walker: end_function emits them. */
 	/* the emitter's per-function state, as emit_function1 sets it */
@@ -419,17 +419,17 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 		e->vlow = false;
 		return false;
 	}
-	for (uint32_t k = 0; k < f->nslot; k++) {
+	for (uint32_t k = 0; k < f->slot_count; k++) {
 		if (f->slot[k].align > 16)
 			vl_fail(&L, VIRFAIL(over_aligned_slot));
 		L.soff[k] = slot(e, f->slot[k].size ? f->slot[k].size : 1, f->slot[k].align);
 	}
-	for (uint32_t k = 0; k < V->ao.nspill; k++)
-		L.spoff[k] = slot(e, V->ao.ssz[k], V->ao.ssz[k]);
+	for (uint32_t k = 0; k < V->ao.spill_count; k++)
+		L.spoff[k] = slot(e, V->ao.slot_sizes[k], V->ao.slot_sizes[k]);
 	for (int r = 8; r < 16; r++)
 		if (V->ao.callee[1] >> r & 1)
 			L.fcs[r - 8] = slot(e, 8, 8);
-	for (uint32_t b = 0; b < f->nblk; b++)
+	for (uint32_t b = 0; b < f->block_count; b++)
 		L.lbl[b] = newlabel(e);
 	L.retlbl = newlabel(e);
 	vl_body(&L);

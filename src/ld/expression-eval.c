@@ -13,7 +13,7 @@ static uint64_t ld_alignment_check(uint64_t a)
 	if (a == 0)
 		a = 1;
 	if (a & (a - 1)) {
-		if (in_layout)
+		if (ctx->layout.in_layout)
 			ld_error_report("alignment must be power of 2");
 		return 1;
 	}
@@ -30,7 +30,7 @@ static void ld_expression_values_move_absolute_right(ld_expression_value *a, ld_
 		*a = *b;
 		*b = t;
 	}
-	if (!ld_expression_value_is_absolute(*b) && in_layout)
+	if (!ld_expression_value_is_absolute(*b) && ctx->layout.in_layout)
 		ld_error_report("at least one side of the expression must be absolute");
 }
 static ld_expression_value ld_expression_value_add(ld_expression_value a, ld_expression_value b)
@@ -61,11 +61,11 @@ static ld_expression_value ld_expression_binary_eval(const char *op, ld_expressi
 	y = ld_expression_value_resolve(r);
 	if (!strcmp(op, "*")) return ld_expression_value_absolute_make(x * y);
 	if (!strcmp(op, "/")) {
-		if (!y) { if (in_layout) ld_error_report("division by zero"); return ld_expression_value_absolute_make(0); }
+		if (!y) { if (ctx->layout.in_layout) ld_error_report("division by zero"); return ld_expression_value_absolute_make(0); }
 		return ld_expression_value_absolute_make(x / y);
 	}
 	if (!strcmp(op, "%")) {
-		if (!y) { if (in_layout) ld_error_report("modulo by zero"); return ld_expression_value_absolute_make(0); }
+		if (!y) { if (ctx->layout.in_layout) ld_error_report("modulo by zero"); return ld_expression_value_absolute_make(0); }
 		return ld_expression_value_absolute_make(x % y);
 	}
 	if (!strcmp(op, "<<")) return ld_expression_value_absolute_make(x << (y % 64));
@@ -84,7 +84,7 @@ static ld_expression_value ld_expression_binary_eval(const char *op, ld_expressi
 
 static ld_expression_value ld_dot_expression_value(void)
 {
-	ld_expression_value v = {.kind = LD_VALUE_KIND_OUTPUT_SECTION, .idx = cur_osec, .val = dot - ld_output_section_address(cur_osec), .align = 1};
+	ld_expression_value v = {.kind = LD_VALUE_KIND_OUTPUT_SECTION, .idx = ctx->layout.current_output_section, .val = ctx->layout.dot - ld_output_section_address(ctx->layout.current_output_section), .align = 1};
 	return v;
 }
 
@@ -102,7 +102,7 @@ static ld_expression_value ld_expression_eval(ld_expression *e)
 	case LD_EXPRESSION_LOAD_ADDRESS: return ld_expression_value_absolute_make(osecs.v[e->sym].va);	/* LMA == VMA here */
 	case LD_EXPRESSION_SIZEOF: return ld_expression_value_absolute_make(osecs.v[e->sym].size);
 	case LD_EXPRESSION_ALIGNOF: return ld_expression_value_absolute_make(osecs.v[e->sym].addralign);
-	case LD_EXPRESSION_ALIGN_ONE_ARGUMENT: return ld_expression_value_absolute_make(ld_value_align_up(dot, ld_alignment_check(ld_expression_value_resolve(ld_expression_eval(e->a)))));
+	case LD_EXPRESSION_ALIGN_ONE_ARGUMENT: return ld_expression_value_absolute_make(ld_value_align_up(ctx->layout.dot, ld_alignment_check(ld_expression_value_resolve(ld_expression_eval(e->a)))));
 	case LD_EXPRESSION_ALIGN_TWO_ARGUMENTS:
 		v = ld_expression_eval(e->a);
 		v.align = ld_alignment_check(ld_expression_value_resolve(ld_expression_eval(e->b)));
@@ -119,7 +119,7 @@ static ld_expression_value ld_expression_eval(ld_expression *e)
 	case LD_EXPRESSION_ASSERT:
 		if (!ld_expression_value_resolve(ld_expression_eval(e->a)))
 			VVEC_PUSH(assert_fail, e->msg, ld_region_alloc);
-		return ld_expression_value_absolute_make(dot);
+		return ld_expression_value_absolute_make(ctx->layout.dot);
 	case LD_EXPRESSION_DEFINED: {
 		ld_global_symbol *s = &gsyms[e->sym];
 		return ld_expression_value_absolute_make(s->state == LD_SYMBOL_STATE_OBJECT || s->state == LD_SYMBOL_STATE_SCRIPT);

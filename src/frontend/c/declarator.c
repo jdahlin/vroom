@@ -1,70 +1,70 @@
 /* vcc front end: declarators */
-#include "ccimpl.h"
+#include "cc-internal.h"
 
-enum { DQ_ATOMIC = 8 };	/* dop.q: _Atomic on a pointer (beside Q_*) */
+enum { CC_DECLARATOR_QUALIFIER_ATOMIC = 8 };	/* dop.q: _Atomic on a pointer (beside Q_*) */
 
 /* ---------------- declarators ---------------- */
 
 /* GNU vector_size modifies the scalar leaf, retaining declarator layers. */
-VPRIV qty vector_attribute(cc *c, qty t, uint32_t size, uint32_t loc)
+CC_PRIVATE qty cc_declarator_vector_attribute_apply(cc *c, qty t, uint32_t size, uint32_t loc)
 {
-	int kind = KIND(c, t);
+	int kind = AST_TYPE_KIND(c, t);
 	if (kind == TY_PTR || kind == TY_ARRAY || kind == TY_FUNC) {
-		ctype outer = *T(c, t);
-		outer.base = vector_attribute(c, outer.base, size, loc);
+		ctype outer = *AST_TYPE(c, t);
+		outer.base = cc_declarator_vector_attribute_apply(c, outer.base, size, loc);
 		if (kind == TY_ARRAY) {
-			outer.align = ty_align(c, outer.base);
+			outer.align = cc_type_alignment(c, outer.base);
 			if (!(outer.flags & (TF_VLA | TF_INCOMPLETE)))
-				outer.size = ty_size(c, outer.base) * outer.n;
+				outer.size = cc_type_size(c, outer.base) * outer.n;
 		}
-		return QT(ty_intern(c, &outer), QQ(t));
+		return QT(cc_type_intern(c, &outer), QQ(t));
 	}
-	if (is_bigint(c, t)) {
-		cc_error(c, loc, "vector integer elements wider than 128 bits are not supported");
+	if (cc_type_is_bitint(c, t)) {
+		cc_report_error(c, loc, "vector integer elements wider than 128 bits are not supported");
 		return t;
 	}
-	if (kind == TY_BOOL || !is_arith(c, t) || is_complex(c, t) || !ty_size(c, t) ||
-	    ty_size(c, t) > size || size % ty_size(c, t)) {
-		cc_error(c, loc, "invalid vector element type '%s'", tyname(c, t));
+	if (kind == TY_BOOL || !cc_type_is_arithmetic(c, t) || cc_type_is_complex(c, t) || !cc_type_size(c, t) ||
+	    cc_type_size(c, t) > size || size % cc_type_size(c, t)) {
+		cc_report_error(c, loc, "invalid vector element type '%s'", tyname(c, t));
 		return t;
 	}
-	return QT(QI(ty_vector(c, t, size)), QQ(t));
+	return QT(QI(cc_type_vector(c, t, size)), QQ(t));
 }
 
 /* false when the list did not end in its ')' (the declaration is invalid, clang) */
-static bool param_list(cc *c, dop *op, const attrs *leading)
+static bool cc_declarator_parameter_list_parse(cc *c, dop *op, const attrs *leading)
 {
-	vec ptys, psyms;
+	cc_id_list ptys, psyms;
 	int fl = 0;
 	uint32_t open = c->prevloc, voidat = 0;	/* the '('; a 'void' that is not alone (clang: after the list) */
 
-	vinit(&ptys);
-	vinit(&psyms);
-	scope_open(c);
+	cc_id_list_init(&ptys);
+	cc_id_list_init(&psyms);
+	cc_scope_open(c);
 	op->kr = false;
 	if (!c->in_proto)
 		c->nptag = 0;
-	if (is(c, LEX_TOKEN_RIGHT_PAREN)) {
-		if (kwmap != kwmap_c23)
+	if (cc_token_is(c, LEX_TOKEN_RIGHT_PAREN)) {
+		if (cc_keyword_map != cc_keyword_map_c23)
 			fl |= TF_NOPROTO;
-	} else if (iskw(c, KW_void) && peek(c, 1)->kind == LEX_TOKEN_RIGHT_PAREN) {
+	} else if (cc_token_is_keyword(c, KW_void) && cc_token_peek(c, 1)->kind == LEX_TOKEN_RIGHT_PAREN) {
 		next(c);
-	} else if (is(c, LEX_TOKEN_IDENTIFIER) && !kwof(tok(c)) && !is_typedef_name(c, tok(c)) &&
-		   (peek(c, 1)->kind == LEX_TOKEN_COMMA || peek(c, 1)->kind == LEX_TOKEN_RIGHT_PAREN)) {
+	} else if (cc_token_is(c, LEX_TOKEN_IDENTIFIER) && !cc_token_keyword(tok(c)) && !cc_token_is_typedef_name(c, tok(c)) &&
+		   (cc_token_peek(c, 1)->kind == LEX_TOKEN_COMMA || cc_token_peek(c, 1)->kind == LEX_TOKEN_RIGHT_PAREN)) {
 		/* K&R identifier list: int for now, the declarations before the body set the types */
 		fl |= TF_NOPROTO;
 		op->kr = true;
 		for (;;) {
 			uint32_t s;
 
-			if (!is(c, LEX_TOKEN_IDENTIFIER) || kwof(tok(c)))
-				fatal(c, tok(c)->loc, "expected identifier");
-			s = sym_new(c, S_VAR, tok(c)->id, prim(TY_INT), tok(c)->loc);
+			if (!cc_token_is(c, LEX_TOKEN_IDENTIFIER) || cc_token_keyword(tok(c)))
+				cc_report_fatal(c, tok(c)->loc, "expected identifier");
+			s = cc_symbol_new(c, S_VAR, tok(c)->id, cc_type_basic(TY_INT), tok(c)->loc);
 			c->syms[s].flags |= SF_PARAM;
 			c->syms[s].sc = SC_AUTO;
-			vpush(c, &psyms, s);
+			cc_id_list_append(c, &psyms, s);
 			next(c);
-			if (!accept(c, LEX_TOKEN_COMMA))
+			if (!cc_token_accept(c, LEX_TOKEN_COMMA))
 				break;
 		}
 	} else {
@@ -72,115 +72,115 @@ static bool param_list(cc *c, dop *op, const attrs *leading)
 			c->nptag = 0;
 		c->in_proto++;
 		for (;;) {
-			dspec ds;
-			declr d;
+			cc_declaration_specifiers ds;
+			cc_declarator d;
 			uint32_t first, nops, s;
 			qty t;
 
-			if (accept(c, LEX_TOKEN_ELLIPSIS)) {
+			if (cc_token_accept(c, LEX_TOKEN_ELLIPSIS)) {
 				fl |= TF_VARIADIC;
 				break;
 			}
-			if (!decl_specs(c, &ds, true)) {
+			if (!cc_declaration_specifiers_parse(c, &ds, true)) {
 				/* clang: an implicit-int parameter is only an error outside system headers */
-				if (is(c, LEX_TOKEN_IDENTIFIER) && !kwof(tok(c)) && pp_in_system_header(c->p, tok(c)->loc)) {
+				if (cc_token_is(c, LEX_TOKEN_IDENTIFIER) && !cc_token_keyword(tok(c)) && pp_location_is_in_system_header(c->p, tok(c)->loc)) {
 					memset(&ds, 0, sizeof(ds));
-					ds.ty = prim(TY_INT);
+					ds.ty = cc_type_basic(TY_INT);
 					ds.loc = tok(c)->loc;
-				} else if (is(c, LEX_TOKEN_IDENTIFIER)) {
-					unknown_type(c, &ds, true);
+				} else if (cc_token_is(c, LEX_TOKEN_IDENTIFIER)) {
+					cc_declaration_specifiers_unknown_type_report(c, &ds, true);
 				} else {
-					fatal(c, tok(c)->loc, "expected parameter declarator");
+					cc_report_fatal(c, tok(c)->loc, "expected parameter declarator");
 				}
 			}
 			if (leading && !ptys.n) {
-				merge_attrs(&ds.at, leading);
+				cc_attribute_merge(&ds.at, leading);
 				if (leading->mode) {
-					int kind = mode_kind(c, leading->mode, is_signed(c, ds.ty));
-					if (kind) ds.ty = prim(kind);
+					int kind = cc_attribute_mode_kind(c, leading->mode, cc_type_is_signed(c, ds.ty));
+					if (kind) ds.ty = cc_type_basic(kind);
 				}
 			}
 			if (ds.constexpr_)
-				cc_error(c, ds.loc, "function parameter cannot be constexpr");
-			declarator(c, &d, true, &first, &nops);
+				cc_report_error(c, ds.loc, "function parameter cannot be constexpr");
+			cc_declarator_parse(c, &d, true, &first, &nops);
 			if (!d.name && !d.loc)
 				d.loc = tok(c)->loc;	/* an unnamed parameter: where its name would be (clang) */
-			attribute_list(c, &d.at);
-			t = apply_declarator(c, ds.ty, first, nops);
+			cc_attribute_list_parse(c, &d.at);
+			t = cc_declarator_apply(c, ds.ty, first, nops);
 			c->ndops = first;
 			{
 				/* int __attribute__((vector_size(16))) p: a vector parameter, as a declaration */
 				uint32_t vs = d.at.vecsize ? d.at.vecsize : ds.at.vecsize;
 
-				if (vs) t = vector_attribute(c, t, vs, d.loc);
+				if (vs) t = cc_declarator_vector_attribute_apply(c, t, vs, d.loc);
 			}
 			/* adjustments (C11 6.7.6.3p7-8) */
 			uint32_t vsize = 0;
 
-			int pk = KIND(c, t);
+			int pk = AST_TYPE_KIND(c, t);
 
 			if (pk == TY_ARRAY) {
 				const dop *ad = nops ? &c->dops[first + nops - 1] : NULL;
 				int q = ad && ad->kind == 1 ? ad->q : 0;
 
-				/* int a[n++]: the size is still evaluated on entry (function_def) */
-				if ((T(c, t)->flags & TF_VLA) && T(c, t)->n && has_side_effects(c, T(c, t)->n))
-					vsize = T(c, t)->n;
-				t = QT(QI(ty_ptr(c, T(c, t)->base)), q);
+				/* int a[n++]: the size is still evaluated on entry (cc_function_definition_parse) */
+				if ((AST_TYPE(c, t)->flags & TF_VLA) && AST_TYPE(c, t)->n && cc_expression_has_side_effects(c, AST_TYPE(c, t)->n))
+					vsize = AST_TYPE(c, t)->n;
+				t = QT(QI(cc_type_pointer(c, AST_TYPE(c, t)->base)), q);
 			} else if (pk == TY_FUNC) {
-				t = ty_ptr(c, t);
+				t = cc_type_pointer(c, t);
 			} else if (unlikely(pk == TY_VOID)) {
-				if (!d.name && !ptys.n && !is(c, LEX_TOKEN_COMMA) && !QQ(t))
+				if (!d.name && !ptys.n && !cc_token_is(c, LEX_TOKEN_COMMA) && !QQ(t))
 					break;	/* "(void void)" after its error, "(void;": still no parameters */
 				/* "(int a, void)", "(void x)": clang's errors (where the name would be);
 				   the parameter is invalid */
 				if (d.name)
-					cc_error(c, d.loc, "argument may not have 'void' type");
+					cc_report_error(c, d.loc, "argument may not have 'void' type");
 				else if (!voidat)
 					voidat = tok(c)->loc;
 				ds.invalid = true;
 			}
-			vpush(c, &ptys, t);
+			cc_id_list_append(c, &ptys, t);
 			if (d.name) {
-				uint32_t o = lookup(c, d.name);
+				uint32_t o = cc_symbol_lookup(c, d.name);
 
 				if (o && c->syms[o].depth == c->depth && (c->syms[o].flags & SF_PARAM)) {
-					cc_error(c, d.loc, "redefinition of parameter '%.*s'", IDF(d.name));
-					note(c, c->syms[o].loc, "previous declaration is here");
+					cc_report_error(c, d.loc, "redefinition of parameter '%.*s'", CC_IDENTIFIER(d.name));
+					cc_report_note(c, c->syms[o].loc, "previous declaration is here");
 					d.name = 0;	/* clang: the parameter loses its name */
 				}
 			}
-			s = sym_new(c, S_VAR, d.name, t, d.loc ? d.loc : ds.loc);
-			c->syms[s].tdef = decl_tdef(c, ds.tdef, ds.ty, t);
+			s = cc_symbol_new(c, S_VAR, d.name, t, d.loc ? d.loc : ds.loc);
+			c->syms[s].tdef = cc_typedef_sugar_declared(c, ds.tdef, ds.ty, t);
 			c->syms[s].flags |= SF_PARAM | ((d.at.nonnull | ds.at.nonnull) ? SF_NONNULL : 0) | (ds.invalid ? SF_INVALID : 0);
 			if (unlikely(ds.invalid))
-				delayed_bug(c, d.loc, "an invalid parameter without an error");
+				cc_report_delayed_bug(c, d.loc, "an invalid parameter without an error");
 			c->syms[s].body = vsize;	/* parameters: a decayed VLA's size expression with side effects */
 			c->syms[s].sc = ds.sc == SC_REGISTER ? SC_REGISTER : SC_AUTO;
-			sym_bind(c, s);
-			vpush(c, &psyms, s);
-			if (!accept(c, LEX_TOKEN_COMMA))
+			cc_symbol_bind(c, s);
+			cc_id_list_append(c, &psyms, s);
+			if (!cc_token_accept(c, LEX_TOKEN_COMMA))
 				break;
 		}
 		c->in_proto--;
 	}
 	if (unlikely(voidat))	/* the list parsed: "(int, void)", "(void, int)" */
-		cc_error(c, voidat, "'void' must be the first and only parameter if specified");
-	scope_close_proto(c);
-	bool ok = is(c, LEX_TOKEN_RIGHT_PAREN);
+		cc_report_error(c, voidat, "'void' must be the first and only parameter if specified");
+	cc_scope_close_prototype(c);
+	bool ok = cc_token_is(c, LEX_TOKEN_RIGHT_PAREN);
 
-	expect_match(c, LEX_TOKEN_RIGHT_PAREN, open);
+	cc_token_expect_match(c, LEX_TOKEN_RIGHT_PAREN, open);
 	op->kind = 2;
 	op->fl = (uint16_t)fl;
-	op->a = vfreeze(c, &ptys);
+	op->a = cc_id_list_freeze(c, &ptys);
 	op->b = ptys.n;
 	op->np = psyms.n;
 	/* the parameter syms follow the types */
-	vfreeze(c, &psyms);
+	cc_id_list_freeze(c, &psyms);
 	return ok;
 }
 
-static void array_suffix(cc *c, dop *op, uint32_t name)
+static void cc_declarator_array_suffix_parse(cc *c, dop *op, uint32_t name)
 {
 	int q = 0;
 
@@ -188,7 +188,7 @@ static void array_suffix(cc *c, dop *op, uint32_t name)
 	op->loc = c->prevloc;
 	op->fl = 0;
 	for (;;) {
-		int kw = kwof(tok(c));
+		int kw = cc_token_keyword(tok(c));
 
 		if (kw == KW_static) {
 			next(c);
@@ -198,7 +198,7 @@ static void array_suffix(cc *c, dop *op, uint32_t name)
 			q |= Q_VOLATILE, next(c);
 		} else if (kw == KW_restrict || kw == KW___restrict || kw == KW___restrict__) {
 			q |= Q_RESTRICT, next(c);
-		} else if (is_nullability(c, tok(c))) {
+		} else if (cc_token_is_nullability(c, tok(c))) {
 			next(c);
 		} else {
 			break;
@@ -206,29 +206,29 @@ static void array_suffix(cc *c, dop *op, uint32_t name)
 	}
 	op->q = (uint8_t)q;
 	op->np = tok(c)->loc;	/* where the size is written (an array of VLAs: its size node) */
-	if (accept(c, LEX_TOKEN_RIGHT_SQUARE)) {
+	if (cc_token_accept(c, LEX_TOKEN_RIGHT_SQUARE)) {
 		op->fl = TF_INCOMPLETE;
 		return;
 	}
-	if (is(c, LEX_TOKEN_STAR) && peek(c, 1)->kind == LEX_TOKEN_RIGHT_SQUARE) {
+	if (cc_token_is(c, LEX_TOKEN_STAR) && cc_token_peek(c, 1)->kind == LEX_TOKEN_RIGHT_SQUARE) {
 		next(c), next(c);
 		op->fl = TF_VLA;
 		op->a = 0;
 		return;
 	}
 	{
-		uint32_t n = rvalue(c, assign_expr(c));
+		uint32_t n = cc_node_rvalue(c, cc_assignment_parse(c));
 		i128 v;
 		cval bound;
 
-		expect(c, LEX_TOKEN_RIGHT_SQUARE, "']'");
-		if (!is_integer(c, N(n)->ty)) {
-			pp_span r = rng(c, n);
+		cc_token_expect(c, LEX_TOKEN_RIGHT_SQUARE, "']'");
+		if (!cc_type_is_integer(c, AST_NODE(n)->ty)) {
+			diag_span r = cc_node_range(c, n);
 
-			report(c, "error", N(n)->loc, &r, 1, NULL, 0, "size of array has non-integer type '%s'", tyname(c, N(n)->ty));
+			report(c, "error", AST_NODE(n)->loc, &r, 1, NULL, 0, "size of array has non-integer type '%s'", tyname(c, AST_NODE(n)->ty));
 			v = 1;
-		} else if (!eval(c, n, &bound) || bound.kind != CV_INT ||
-			   (!bound.ice && has_side_effects(c, n))) {
+		} else if (!cc_constant_eval(c, n, &bound) || bound.kind != CV_INT ||
+			   (!bound.ice && cc_expression_has_side_effects(c, n))) {
 			/* Knowing the value of (callback(), 1) does not make its
 			   evaluation optional. Keep effectful bounds in the VLA type.
 			   An ICE may contain unevaluated calls in a short-circuit arm. */
@@ -239,25 +239,25 @@ static void array_suffix(cc *c, dop *op, uint32_t name)
 			v = bound.i;
 		}
 		if (v < 0) {
-			pp_span r = rng(c, n);
+			diag_span r = cc_node_range(c, n);
 
 			if (name)
-				report(c, "error", r.b, &r, 1, NULL, 0, "'%.*s' declared as an array with a negative size", IDF(name));
+				report(c, "error", r.b, &r, 1, NULL, 0, "'%.*s' declared as an array with a negative size", CC_IDENTIFIER(name));
 			else
 				report(c, "error", r.b, &r, 1, NULL, 0, "array size is negative");
 			v = 1;
 		}
 		if (unlikely(v == 0))
-			EXT_WARN(c, "zero-length-array", w_gnu, rng(c, n).b, "zero size arrays are an extension");
+			CC_REPORT_EXTENSION(c, "zero-length-array", cc_warning_group_gnu, cc_node_range(c, n).b, "zero size arrays are an extension");
 		op->a = (uint32_t)(uint64_t)v;
 		op->b = (uint32_t)((uint64_t)v >> 32);
 	}
 }
 
-static bool nested_declarator(cc *c, bool abstract_ok)
+static bool cc_declarator_nested_parse(cc *c, bool abstract_ok)
 {
-	const ptok *t = peek(c, 1);
-	int kw = kwof(t);
+	const ptok *t = cc_token_peek(c, 1);
+	int kw = cc_token_keyword(t);
 
 	if (t->kind == LEX_TOKEN_STAR || t->kind == LEX_TOKEN_CARET)
 		return true;
@@ -267,7 +267,7 @@ static bool nested_declarator(cc *c, bool abstract_ok)
 		return abstract_ok;
 	if (kw == KW___attribute__ || kw == KW___attribute)
 		return true;
-	if (t->kind == LEX_TOKEN_IDENTIFIER && !kw && !is_typedef_name(c, t))
+	if (t->kind == LEX_TOKEN_IDENTIFIER && !kw && !cc_token_is_typedef_name(c, t))
 		return true;
 	return false;
 }
@@ -279,43 +279,43 @@ static bool nested_declarator(cc *c, bool abstract_ok)
  */
 /* Arena-backed growth keeps flat declarators off the C stack. Recovery resets
  * ndops; temporary buffers are reclaimed with the translation unit arena. */
-static dop *dop_grow(cc *c, dop *old, uint32_t used, uint32_t *cap, uint32_t need)
+static dop *cc_declarator_operations_grow(cc *c, dop *old, uint32_t used, uint32_t *cap, uint32_t need)
 {
 	uint32_t nc = *cap;
 	dop *p;
 
-	if (need > DOPS_MAX)
-		fatal(c, tok(c)->loc, "declarator too complex");
+	if (need > CC_DECLARATOR_OPERATIONS_MAX)
+		cc_report_fatal(c, tok(c)->loc, "declarator too complex");
 	while (nc < need)
 		nc *= 2;
-	p = halloc(c, nc * sizeof(*p));
+	p = cc_heap_allocate(c, nc * sizeof(*p));
 	memcpy(p, old, used * sizeof(*p));
 	*cap = nc;
 	return p;
 }
 
-VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32_t *nops)
+CC_PRIVATE void cc_declarator_parse(cc *c, cc_declarator *d, bool abstract_ok, uint32_t *first, uint32_t *nops)
 {
 	dop ptrbuf[16], sufbuf[8], *ptrs = ptrbuf, *sufs = sufbuf;
 	uint32_t pcap = 16, scap = 8;
 	int np = 0, ns = 0;
 	uint32_t ifirst = 0, inops = 0;
 	bool inner = false;
-	declr id;
+	cc_declarator id;
 
 	if (vstack_guard_low())	/* int (((((... nests declarators */
-		fatal(c, tok(c)->loc, "declarator nested too deeply");
+		cc_report_fatal(c, tok(c)->loc, "declarator nested too deeply");
 
 	memset(d, 0, sizeof(*d));
 	d->loc = tok(c)->loc;
 	for (;;) {
-		if (is(c, LEX_TOKEN_STAR) || is(c, LEX_TOKEN_CARET)) {	/* ^: a block pointer (Darwin SDK prototypes) */
-			int q = 0, blk = is(c, LEX_TOKEN_CARET);
+		if (cc_token_is(c, LEX_TOKEN_STAR) || cc_token_is(c, LEX_TOKEN_CARET)) {	/* ^: a block pointer (Darwin SDK prototypes) */
+			int q = 0, blk = cc_token_is(c, LEX_TOKEN_CARET);
 
 			next(c);
 
 			for (;;) {
-				int kw = kwof(tok(c));
+				int kw = cc_token_keyword(tok(c));
 
 				if (kw == KW_const || kw == KW___const || kw == KW___const__)
 					q |= Q_CONST;
@@ -324,86 +324,86 @@ VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32
 				else if (kw == KW_restrict || kw == KW___restrict || kw == KW___restrict__)
 					q |= Q_RESTRICT;
 				else if (kw == KW__Atomic)
-					q |= DQ_ATOMIC;
-				else if (is_nullability(c, tok(c)))
+					q |= CC_DECLARATOR_QUALIFIER_ATOMIC;
+				else if (cc_token_is_nullability(c, tok(c)))
 					;
 				else if (kw == KW___attribute__ || kw == KW___attribute ||
-					 (is(c, LEX_TOKEN_LEFT_SQUARE) && peek(c, 1)->kind == LEX_TOKEN_LEFT_SQUARE)) {
-					attribute_list(c, &d->at);
+					 (cc_token_is(c, LEX_TOKEN_LEFT_SQUARE) && cc_token_peek(c, 1)->kind == LEX_TOKEN_LEFT_SQUARE)) {
+					cc_attribute_list_parse(c, &d->at);
 					continue;
 				} else
 					break;
 				next(c);
 			}
 			if ((uint32_t)np == pcap)
-				ptrs = dop_grow(c, ptrs, np, &pcap, pcap + 1);
+				ptrs = cc_declarator_operations_grow(c, ptrs, np, &pcap, pcap + 1);
 			ptrs[np++] = (dop){ .kind = 0, .q = (uint8_t)q, .fl = (uint16_t)(blk ? TF_BLOCK : 0) };
 			continue;
 		}
-		if (iskw(c, KW___attribute__) || iskw(c, KW___attribute)) {
-			attribute_list(c, &d->at);
+		if (cc_token_is_keyword(c, KW___attribute__) || cc_token_is_keyword(c, KW___attribute)) {
+			cc_attribute_list_parse(c, &d->at);
 			continue;
 		}
 		break;
 	}
-	if (is(c, LEX_TOKEN_LEFT_PAREN) && nested_declarator(c, abstract_ok)) {
+	if (cc_token_is(c, LEX_TOKEN_LEFT_PAREN) && cc_declarator_nested_parse(c, abstract_ok)) {
 		uint32_t plb0 = tok(c)->loc;
 
 		next(c);
-		attribute_list(c, &d->at);
-		if (abstract_ok && is_decl_start(c, tok(c))) {
+		cc_attribute_list_parse(c, &d->at);
+		if (abstract_ok && cc_token_is_declaration_start(c, tok(c))) {
 			/* (attributes type ...) starts an abstract function parameter
 			   list, while (attributes *name) still groups a declarator. */
 			attrs leading = d->at;
 			memset(&d->at, 0, sizeof d->at);
-			if (!param_list(c, &sufs[ns], &leading)) d->invalid = true;
+			if (!cc_declarator_parameter_list_parse(c, &sufs[ns], &leading)) d->invalid = true;
 			d->psyms = sufs[ns].a + sufs[ns].b;
 			d->npsyms = sufs[ns].np;
 			d->kr = sufs[ns].kr, d->has_func = true;
 			d->plb = plb0, d->ple = c->prevloc;
 			ns++;
 		} else {
-			declarator(c, &id, abstract_ok, &ifirst, &inops);
-			expect_match(c, LEX_TOKEN_RIGHT_PAREN, plb0);
+			cc_declarator_parse(c, &id, abstract_ok, &ifirst, &inops);
+			cc_token_expect_match(c, LEX_TOKEN_RIGHT_PAREN, plb0);
 			d->name = id.name;
 			d->loc = id.loc;
-			merge_attrs(&d->at, &id.at);
+			cc_attribute_merge(&d->at, &id.at);
 			if (id.has_func) {
 				d->psyms = id.psyms, d->npsyms = id.npsyms, d->kr = id.kr, d->has_func = true;
 				d->plb = id.plb, d->ple = id.ple;
 			}
 			inner = true;
 		}
-	} else if (is(c, LEX_TOKEN_IDENTIFIER) && !kwof(tok(c))) {
+	} else if (cc_token_is(c, LEX_TOKEN_IDENTIFIER) && !cc_token_keyword(tok(c))) {
 		d->name = tok(c)->id;
 		d->loc = tok(c)->loc;
 		if (unlikely(c->field_uses))
 			cc_field_uses_name_keep(c);
-		if (!abstract_ok)	/* an error before the declaration ends declares it, invalid (rec_restore) */
+		if (!abstract_ok)	/* an error before the declaration ends declares it, invalid (cc_recovery_restore) */
 			c->decl_name = d->name, c->decl_loc = d->loc, c->decl_depth = c->depth;
 		next(c);
 	} else if (!abstract_ok) {
 		/* clang: a '(' that is not a grouping one starts the parameters of a nameless
 		   declarator, and the name was expected after it */
-		fatal(c, is(c, LEX_TOKEN_LEFT_PAREN) ? peek(c, 1)->loc : tok(c)->loc,
+		cc_report_fatal(c, cc_token_is(c, LEX_TOKEN_LEFT_PAREN) ? cc_token_peek(c, 1)->loc : tok(c)->loc,
 		      c->in_struct ? "expected member name or ';' after declaration specifiers" : "expected identifier or '('");
 	} else {
 		d->loc = tok(c)->loc;	/* abstract: where the name would be (clang) */
 	}
-	attribute_list(c, &d->at);
+	cc_attribute_list_parse(c, &d->at);
 	for (;;) {
-		if (accept(c, LEX_TOKEN_LEFT_SQUARE)) {
+		if (cc_token_accept(c, LEX_TOKEN_LEFT_SQUARE)) {
 			if ((uint32_t)ns == scap)
-				sufs = dop_grow(c, sufs, ns, &scap, scap + 1);
-			array_suffix(c, &sufs[ns++], d->name);
-		} else if (is(c, LEX_TOKEN_LEFT_PAREN)) {
+				sufs = cc_declarator_operations_grow(c, sufs, ns, &scap, scap + 1);
+			cc_declarator_array_suffix_parse(c, &sufs[ns++], d->name);
+		} else if (cc_token_is(c, LEX_TOKEN_LEFT_PAREN)) {
 			uint32_t plb;
 
 			next(c);
 			plb = tok(c)->loc;
 			if ((uint32_t)ns == scap)
-				sufs = dop_grow(c, sufs, ns, &scap, scap + 1);
-			if (unlikely(!param_list(c, &sufs[ns], NULL)))
+				sufs = cc_declarator_operations_grow(c, sufs, ns, &scap, scap + 1);
+			if (unlikely(!cc_declarator_parameter_list_parse(c, &sufs[ns], NULL)))
 				d->invalid = true;
 			/* Grouping a name adds no operators: (f)(int x) still defines x.
 			 * A pointer/array/function inside the group does take precedence. */
@@ -418,7 +418,7 @@ VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32
 		} else {
 			break;
 		}
-		attribute_list(c, &d->at);
+		cc_attribute_list_parse(c, &d->at);
 	}
 	/* assemble: pointers, suffixes reversed, inner ops */
 	{
@@ -426,7 +426,7 @@ VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32
 		uint32_t n = (uint32_t)np + (uint32_t)ns + inops;
 
 		if (at + n > c->capdops)
-			c->dops = dop_grow(c, c->dops, c->ndops, &c->capdops, at + n);
+			c->dops = cc_declarator_operations_grow(c, c->dops, c->ndops, &c->capdops, at + n);
 		/* the inner ops sit at [ifirst, ifirst + inops) which is below at */
 		if (inner) {
 			at = ifirst;
@@ -447,7 +447,7 @@ VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32
 	}
 }
 
-VPRIV qty apply_declarator(cc *c, qty t, uint32_t first, uint32_t nops)
+CC_PRIVATE qty cc_declarator_apply(cc *c, qty t, uint32_t first, uint32_t nops)
 {
 	for (uint32_t i = 0; i < nops; i++) {
 		const dop *o = &c->dops[first + i];
@@ -457,62 +457,62 @@ VPRIV qty apply_declarator(cc *c, qty t, uint32_t first, uint32_t nops)
 			if (o->fl & TF_BLOCK) {
 				ctype b = { .kind = TY_PTR, .flags = TF_BLOCK, .size = CC_PTRSIZE(c), .align = CC_PTRSIZE(c), .base = t };
 
-				t = QT(ty_intern(c, &b), o->q & Q_MASK);
+				t = QT(cc_type_intern(c, &b), o->q & Q_MASK);
 			} else {
-				t = QT(QI(ty_ptr(c, t)), o->q & Q_MASK);
+				t = QT(QI(cc_type_pointer(c, t)), o->q & Q_MASK);
 			}
-			if (o->q & DQ_ATOMIC)	/* T *_Atomic */
-				t = ty_atomic(c, t, 0);
+			if (o->q & CC_DECLARATOR_QUALIFIER_ATOMIC)	/* AST_TYPE *_Atomic */
+				t = cc_type_atomic(c, t, 0);
 			break;
 		case 1:
-			if (!complete(c, t)) {
-				cc_error(c, o->loc, "array has incomplete element type '%s'", tyname(c, t));
-				fwd_note(c, t);
+			if (!cc_type_complete(c, t)) {
+				cc_report_error(c, o->loc, "array has incomplete element type '%s'", tyname(c, t));
+				cc_report_forward_note(c, t);
 			}
-			if (KIND(c, t) == TY_SVE)
-				cc_error(c, o->np, "array has sizeless element type '%s'", tyname(c, t));
-			if (is_func(c, t))
-				cc_error(c, tok(c)->loc, "array of functions is not allowed");
+			if (AST_TYPE_KIND(c, t) == TY_SVE)
+				cc_report_error(c, o->np, "array has sizeless element type '%s'", tyname(c, t));
+			if (cc_type_is_function(c, t))
+				cc_report_error(c, tok(c)->loc, "array of functions is not allowed");
 			if (o->fl & TF_VLA)
-				t = ty_vla(c, t, o->a);
-			else if ((T(c, t)->flags & TF_VLA) && !(o->fl & TF_INCOMPLETE))
+				t = cc_type_vla(c, t, o->a);
+			else if ((AST_TYPE(c, t)->flags & TF_VLA) && !(o->fl & TF_INCOMPLETE))
 				/* int a[6][n]: an array of VLAs is one too (its size is known only at run time) */
-				t = ty_vla(c, t, mk_int(c, (i128)((uint64_t)o->a | (uint64_t)o->b << 32), prim(TY_ULONG), o->np));
+				t = cc_type_vla(c, t, cc_node_integer_new(c, (i128)((uint64_t)o->a | (uint64_t)o->b << 32), cc_type_basic(TY_ULONG), o->np));
 			else
-				t = ty_array(c, t, (uint64_t)o->a | (uint64_t)o->b << 32, o->fl);
+				t = cc_type_array(c, t, (uint64_t)o->a | (uint64_t)o->b << 32, o->fl);
 			break;
 		case 2:
-			if (is_array(c, t) || is_func(c, t))
-				cc_error(c, tok(c)->loc, "function cannot return %s type", is_array(c, t) ? "array" : "function");
-			t = ty_func(c, QUNQ(t), &c->lists[o->a], o->b, o->fl);
+			if (cc_type_is_array(c, t) || cc_type_is_function(c, t))
+				cc_report_error(c, tok(c)->loc, "function cannot return %s type", cc_type_is_array(c, t) ? "array" : "function");
+			t = cc_type_function(c, QUNQ(t), &c->lists[o->a], o->b, o->fl);
 			break;
 		}
 	}
 	return t;
 }
 
-VPRIV qty type_name(cc *c)
+CC_PRIVATE qty cc_type_name_parse(cc *c)
 {
-	dspec ds;
-	declr d;
+	cc_declaration_specifiers ds;
+	cc_declarator d;
 	uint32_t first, nops;
 	qty t;
 
 	c->in_tyname++;
-	if (!decl_specs(c, &ds, false))
-		fatal(c, tok(c)->loc, "expected a type");
+	if (!cc_declaration_specifiers_parse(c, &ds, false))
+		cc_report_fatal(c, tok(c)->loc, "expected a type");
 	c->in_tyname--;
-	declarator(c, &d, true, &first, &nops);
-	attribute_list(c, &d.at);
-	t = apply_declarator(c, ds.ty, first, nops);
+	cc_declarator_parse(c, &d, true, &first, &nops);
+	cc_attribute_list_parse(c, &d.at);
+	t = cc_declarator_apply(c, ds.ty, first, nops);
 	c->ndops = first;
 	if (d.name)	/* clang: the abstract declarator ends before it */
-		cc_error(c, d.loc, "expected ')'");
+		cc_report_error(c, d.loc, "expected ')'");
 	{
 		uint32_t vs = d.at.vecsize ? d.at.vecsize : ds.at.vecsize;
 
-		/* (__attribute__((vector_size(N))) T) */
-		if (vs) t = vector_attribute(c, t, vs, d.loc);
+		/* (__attribute__((vector_size(AST_NODE))) AST_TYPE) */
+		if (vs) t = cc_declarator_vector_attribute_apply(c, t, vs, d.loc);
 	}
 	c->tn_tdef = ds.tdef && QUNQ(t) == QUNQ(ds.ty) ? ds.tdef : 0;
 	return t;

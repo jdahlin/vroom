@@ -9,15 +9,15 @@
 
 VPRIV const pp_context *pp_file_context_current(const pp *p)
 {
-	for (int d = p->depth - 1; d >= 0; d--)
-		if (p->cx[d].type == PP_CONTEXT_FILE)
-			return &p->cx[d];
+	for (int d = p->context_depth - 1; d >= 0; d--)
+		if (p->contexts[d].type == PP_CONTEXT_FILE)
+			return &p->contexts[d];
 	return NULL;
 }
 
 static void pp_token_number_make(pp *p, ptok *t, unsigned long long v)
 {
-	char *b = varena_alloc(&p->tmp, 40);
+	char *b = varena_alloc(&p->temporary_region, 40);
 	int n = pp_unsigned_format(b, v);
 
 	memset(b + n, 0, 16);
@@ -31,7 +31,7 @@ static void pp_token_number_make(pp *p, ptok *t, unsigned long long v)
 
 static void pp_token_string_make(pp *p, ptok *t, const char *s, size_t n)
 {
-	char *b = varena_alloc(&p->tmp, 2 * n + 24), *w = b;
+	char *b = varena_alloc(&p->temporary_region, 2 * n + 24), *w = b;
 
 	*w++ = '"';
 	for (size_t i = 0; i < n; i++) {
@@ -52,7 +52,7 @@ static void pp_token_string_make(pp *p, ptok *t, const char *s, size_t n)
 /* put t back: it is read again next */
 static void pp_token_unread(pp *p, const ptok *t)
 {
-	ptok *c = varena_alloc(&p->tmp, sizeof(*c));
+	ptok *c = varena_alloc(&p->temporary_region, sizeof(*c));
 
 	*c = *t;
 	pp_context_tokens_push(p, c, 1, 0, 0, 0);
@@ -168,7 +168,7 @@ static int pp_feature_query_answer(pp *p, int b, const char *name, uint32_t loc)
 
 	if (b == PP_BUILTIN_BUILDING_MODULE)
 		return 0;	/* no modules */
-	if (p->o->target == PP_LINUX_X86_64) {	/* its own table (gen-x86data.sh) */
+	if (p->options->target == PP_LINUX_X86_64) {	/* its own table (gen-x86data.sh) */
 		size_t xl = 0, xh = sizeof(has_tab_x86) / sizeof(has_tab_x86[0]);
 
 		while (xl < xh) {
@@ -194,7 +194,7 @@ static int pp_feature_query_answer(pp *p, int b, const char *name, uint32_t loc)
 		if (!c)
 			c = strcmp(has_tab[mid].name, name);
 		if (!c)
-			return has_tab[mid].v[p->o->target == PP_WASM32 ? PP_WASM64 : p->o->target];	/* wasm32 asks as wasm64 */
+			return has_tab[mid].v[p->options->target == PP_WASM32 ? PP_WASM64 : p->options->target];	/* wasm32 asks as wasm64 */
 		if (c < 0)
 			lo = mid + 1;
 		else
@@ -217,9 +217,9 @@ int (*pp_builtin_known)(const char *name);
 static __attribute__((noinline, cold)) void pp_counter_extension_warn(pp *p, uint32_t loc)
 {
 	static const char *const g[] = { "pedantic", NULL };
-	pp_dinfo d = { "warning", loc, NULL, 0, NULL, 0, "__COUNTER__", 11 };
+	diag_info d = { "warning", loc, NULL, 0, NULL, 0, "__COUNTER__", 11 };
 
-	if (pp_warnx(p, "c2y-extensions", false, g, &d, "'__COUNTER__' is a C2y extension"))
+	if (diag_warning_report(p, "c2y-extensions", false, g, &d, "'__COUNTER__' is a C2y extension"))
 		PP_HEADER_CACHE_REGION_REJECT(p);
 }
 
@@ -231,25 +231,25 @@ VPRIV int pp_builtin_macro_expand(pp *p, const pp_macro *m, ptok *t)
 
 	switch (m->builtin) {
 	case PP_BUILTIN_LINE:
-		pp_token_number_make(p, t, loc_line(p, t->loc));
+		pp_token_number_make(p, t, pp_location_line(p, t->loc));
 		break;
 	case PP_BUILTIN_FILE: {
 		uint32_t l, loc = t->loc;
 		const char *s;
 
-		if (loc < p->fe[fc->fe].base || loc > p->fe[fc->fe].base + p->fe[fc->fe].f->size)
-			loc = p->fe[fc->fe].base + fc->vt[fc->i ? fc->i - 1 : 0].off;
-		s = presumed_name(p, fc->fe, loc, &l);
+		if (loc < p->files[fc->file_index].location_base || loc > p->files[fc->file_index].location_base + p->files[fc->file_index].lex_file->size)
+			loc = p->files[fc->file_index].location_base + fc->lexed_tokens[fc->index ? fc->index - 1 : 0].off;
+		s = pp_location_presumed_name(p, fc->file_index, loc, &l);
 		pp_token_string_make(p, t, s, l);
 		break;
 	}
 	case PP_BUILTIN_FILE_NAME: {
-		const pp_file_entry *e = &p->fe[fc->fe];
-		const char *s = e->name + e->namelen;
+		const pp_file_entry *e = &p->files[fc->file_index];
+		const char *s = e->name + e->name_length;
 
 		while (s > e->name && s[-1] != '/')
 			s--;
-		pp_token_string_make(p, t, s, e->namelen - (size_t)(s - e->name));
+		pp_token_string_make(p, t, s, e->name_length - (size_t)(s - e->name));
 		break;
 	}
 	case PP_BUILTIN_BASE_FILE:
@@ -257,40 +257,40 @@ VPRIV int pp_builtin_macro_expand(pp *p, const pp_macro *m, ptok *t)
 		pp_token_string_make(p, t, p->base_file_name, p->base_file_name_length);
 		break;
 	case PP_BUILTIN_COUNTER:
-		if (unlikely(p->o->nwargs) && pp_warning_is_possible(p, PP_WARNING_C2Y))
+		if (unlikely(p->options->nwargs) && pp_warning_is_possible(p, PP_WARNING_C2Y))
 			pp_counter_extension_warn(p, t->loc);	/* (the kernel's __UNIQUE_ID: keep the common case one test) */
-		if (p->rec.on) {
+		if (p->recording.on) {
 			if (p->in_directive)
 				PP_HEADER_CACHE_REGION_REJECT(p);	/* the value decides something */
-			pp_token_number_make(p, t, p->counter);
-			t->ctr = pp_header_cache_counter_provenance_new(p, p->counter, 0, t->len, 0);
-			p->counter++;
+			pp_token_number_make(p, t, p->counter_value);
+			t->ctr = pp_header_cache_counter_provenance_new(p, p->counter_value, 0, t->len, 0);
+			p->counter_value++;
 		} else {
-			pp_token_number_make(p, t, p->counter++);
+			pp_token_number_make(p, t, p->counter_value++);
 		}
 		break;
 	case PP_BUILTIN_INCLUDE_LEVEL:
-		for (int i = 0; i < p->rec.n; i++)
-			p->rec.levels[i].uses_level = 1;
-		pp_token_number_make(p, t, p->nfile > 1 ? (unsigned)p->nfile - 1 : 0);
+		for (int i = 0; i < p->recording.level_count; i++)
+			p->recording.levels[i].uses_level = 1;
+		pp_token_number_make(p, t, p->file_context_count > 1 ? (unsigned)p->file_context_count - 1 : 0);
 		break;
 	case PP_BUILTIN_DATE: case PP_BUILTIN_TIME: case PP_BUILTIN_TIMESTAMP: {
-		time_t now = p->o->has_epoch ? (time_t)p->o->epoch : time(NULL);
+		time_t now = p->options->has_epoch ? (time_t)p->options->epoch : time(NULL);
 
 		PP_HEADER_CACHE_REGION_REJECT(p);
 		struct tm tm;
 		struct stat st;
 
 		/* clang: __TIMESTAMP__ is the current file's mtime */
-		if (m->builtin == PP_BUILTIN_TIMESTAMP && !p->o->has_epoch && fc) {
-			if (stat(p->fe[fc->fe].f->path, &st) != 0) {
+		if (m->builtin == PP_BUILTIN_TIMESTAMP && !p->options->has_epoch && fc) {
+			if (stat(p->files[fc->file_index].lex_file->path, &st) != 0) {
 				pp_token_string_make(p, t, "??? ??? ?? ??:??:?? ????", 24);
 				break;
 			}
 			now = st.st_mtime;
 		}
 
-		if (p->o->has_epoch)	/* reproducible builds: UTC, as clang */
+		if (p->options->has_epoch)	/* reproducible builds: UTC, as clang */
 			gmtime_r(&now, &tm);
 		else
 			localtime_r(&now, &tm);
@@ -327,7 +327,7 @@ VPRIV int pp_builtin_macro_expand(pp *p, const pp_macro *m, ptok *t)
 				sp++;
 				l--;
 			}
-			d = varena_alloc(&p->tmp, l + 16);
+			d = varena_alloc(&p->temporary_region, l + 16);
 			memcpy(d, "pragma ", 7);
 			dn = 7;
 			for (size_t i = 1; i + 1 < l; i++) {
@@ -365,7 +365,7 @@ VPRIV int pp_builtin_macro_expand(pp *p, const pp_macro *m, ptok *t)
 		{
 			const lex_file *hf = pp_include_find(p, fc, buf, n, angled, m->builtin == PP_BUILTIN_HAS_INCLUDE_NEXT, &sd, &path, NULL);
 
-			if (hf && p->o->deps)
+			if (hf && p->options->deps)
 				pp_dependency_add(p, path, pp_include_system_kind(p, sd));	/* a dependency, as clang's */
 			pp_token_number_make(p, t, hf != NULL);
 		}

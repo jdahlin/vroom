@@ -12,7 +12,7 @@
  * [-Wvcc-lint-naming] whose text names the expected prefix; no fix-it, since the new name is
  * not unambiguous.
  */
-#include "ccimpl.h"
+#include "cc-internal.h"
 
 typedef struct lint_module {
 	const char *dir;	/* after src/, with the trailing slash */
@@ -81,7 +81,7 @@ static bool lint_name_ok(const lint_module *m, const char *name, uint32_t len)
 	return false;
 }
 
-VPRIV void cc_lint_naming_report(cc *c)
+CC_PRIVATE void cc_lint_naming_report(cc *c)
 {
 	static const char *const g[] = { "vcc-lint", NULL };
 
@@ -92,32 +92,32 @@ VPRIV void cc_lint_naming_report(cc *c)
 		uint32_t flen, line, col, nlen, at;
 		bool fn = y->kind == S_FUNC, defined = false;
 
-		if ((y->kind != S_VAR && !fn) || y->depth || !y->name || lookup(c, y->name) != i || (y->flags & SF_OVERLOAD))
+		if ((y->kind != S_VAR && !fn) || y->depth || !y->name || cc_symbol_lookup(c, y->name) != i || (y->flags & SF_OVERLOAD))
 			continue;
 		for (uint32_t s = i; s; s = c->syms[s].next)
 			defined |= (c->syms[s].flags & (fn ? SF_DEFINED : (SF_DEFINED | SF_TENTATIVE))) != 0;
 		at = y->defloc ? y->defloc : y->loc;
-		if (!defined || !pp_in_main_file(c->p, at))
+		if (!defined || !pp_location_is_in_main_file(c->p, at))
 			continue;
-		pp_where(c->p, at, &file, &flen, &line, &col);
+		pp_location_describe(c->p, at, &file, &flen, &line, &col);
 		m = lint_module_of(file, flen);
-		name = idstr_(y->name);
-		nlen = (uint32_t)idlen_(y->name);
+		name = cc_identifier_string(y->name);
+		nlen = (uint32_t)cc_identifier_length(y->name);
 		if (!m || lint_name_ok(m, name, nlen))
 			continue;
 		{
-			pp_span r = { at, pp_tok_end(c->p, at) };
-			pp_dinfo d = { "warning", at, &r, 1, NULL, 0, name, nlen };
+			diag_span r = { at, pp_token_end_find(c->p, at) };
+			diag_info d = { "warning", at, &r, 1, NULL, 0, name, nlen };
 			char want[64] = "";
 
 			for (int k = 0; k < 3 && m->prefix[k]; k++)
 				snprintf(want + strlen(want), sizeof want - strlen(want), "%s%s", k ? "' or '" : "",
 					 m->prefix[k][1] ? m->prefix[k] : "v<facility>_");
 			if (fn)
-				pp_warnx(c->p, "vcc-lint-naming", true, g, &d, "function '%.*s' should be named '%s...' (module src/%s)",
+				diag_warning_report(c->p, "vcc-lint-naming", true, g, &d, "function '%.*s' should be named '%s...' (module src/%s)",
 					 (int)nlen, name, want, m->dir);
 			else
-				pp_warnx(c->p, "vcc-lint-naming", true, g, &d, "global variable '%.*s' should be named '%s...' (module src/%s)",
+				diag_warning_report(c->p, "vcc-lint-naming", true, g, &d, "global variable '%.*s' should be named '%s...' (module src/%s)",
 					 (int)nlen, name, want, m->dir);
 		}
 	}
