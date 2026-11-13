@@ -28,10 +28,10 @@ static void park(codegen_context *e, a64_call_argument *a)
 		return;		/* parked while the arguments were evaluated */
 	if (codegen_type_is_aggregate(c, a->type)) {
 		uint64_t sz = (codegen_type_size(c, a->type) + 7) & ~(uint64_t)7;
-		int64_t sl = slot(e, sz ? sz : 8, codegen_type_is_bitint_big(c, a->type) ? codegen_type_alignment(c, a->type) : codegen_type_alignment(c, a->type) > 8 ? 16 : 8);
+		int64_t sl = a64_frame_slot_allocate(e, sz ? sz : 8, codegen_type_is_bitint_big(c, a->type) ? codegen_type_alignment(c, a->type) : codegen_type_alignment(c, a->type) > 8 ? 16 : 8);
 		int rs = toreg(e, &a->value), rd = treg(e);
 
-		opi(e, I_ADDI, 1, rd, FRAME, sl);
+		a64_record_emit_immediate(e, A64_OP_ADDI, 1, rd, A64_REGISTER_FRAME, sl);
 		copy_mem(e, rd, rs, codegen_type_size(c, a->type));
 		tfree(e, rd);
 		val_free(e, &a->value);
@@ -39,13 +39,13 @@ static void park(codegen_context *e, a64_call_argument *a)
 		return;
 	}
 	if (a->value.kind == CODEGEN_VALUE_REGISTER) {
-		a->slot = slot(e, 8, 8);
-		mem(e, I_ST, 3, 0, a->value.register_number, FRAME, a->slot);
+		a->slot = a64_frame_slot_allocate(e, 8, 8);
+		a64_record_emit_memory(e, A64_OP_ST, 3, 0, a->value.register_number, A64_REGISTER_FRAME, a->slot);
 		val_free(e, &a->value);
 	} else if (a->value.kind == CODEGEN_VALUE_REGISTER_PAIR) {
-		a->slot = slot(e, 16, 16);
-		mem(e, I_ST, 3, 0, a->value.register_number, FRAME, a->slot);
-		mem(e, I_ST, 3, 0, a->value.register_high, FRAME, a->slot + 8);
+		a->slot = a64_frame_slot_allocate(e, 16, 16);
+		a64_record_emit_memory(e, A64_OP_ST, 3, 0, a->value.register_number, A64_REGISTER_FRAME, a->slot);
+		a64_record_emit_memory(e, A64_OP_ST, 3, 0, a->value.register_high, A64_REGISTER_FRAME, a->slot + 8);
 		val_free(e, &a->value);
 	}
 }
@@ -58,7 +58,7 @@ static void unpark(codegen_context *e, a64_call_argument *a)
 	if (codegen_type_is_aggregate(e->compile_context, a->type)) {
 		int r = treg(e);
 
-		opi(e, I_ADDI, 1, r, FRAME, a->slot);
+		a64_record_emit_immediate(e, A64_OP_ADDI, 1, r, A64_REGISTER_FRAME, a->slot);
 		a->value = codegen_value_register(r);
 	} else {
 		codegen_lvalue l = { .kind = CODEGEN_LVALUE_FRAME, .offset = a->slot, .align = 8 };
@@ -72,17 +72,17 @@ static void unpark(codegen_context *e, a64_call_argument *a)
 static void arg_word(codegen_context *e, const a64_call_argument *a, int k, int rd)
 {
 	if (a->slot != 1) {
-		mem(e, I_LD, 3, 0, rd, FRAME, a->slot + 8 * k);
+		a64_record_emit_memory(e, A64_OP_LD, 3, 0, rd, A64_REGISTER_FRAME, a->slot + 8 * k);
 		return;
 	}
 	if (a->value.kind == CODEGEN_VALUE_REGISTER || a->value.kind == CODEGEN_VALUE_REGISTER_PAIR) {	/* kept in its temporary (do_call) */
-		mov(e, 1, rd, k ? a->value.register_high : a->value.register_number);
+		a64_record_emit_move(e, 1, rd, k ? a->value.register_high : a->value.register_number);
 	} else if (a->value.kind == CODEGEN_VALUE_CONSTANT) {
-		movi(e, 1, rd, (int64_t)(uint64_t)((u128)a->value.integer >> (64 * k)));
+		a64_record_emit_move_immediate(e, 1, rd, (int64_t)(uint64_t)((u128)a->value.integer >> (64 * k)));
 	} else if (a->value.kind == CODEGEN_VALUE_ADDRESS) {
-		addr_of_ref(e, rd, a->value.reference, (int64_t)a->value.integer);
+		a64_reference_address_emit(e, rd, a->value.reference, (int64_t)a->value.integer);
 	} else {
-		movi(e, 1, rd, 0);
+		a64_record_emit_move_immediate(e, 1, rd, 0);
 	}
 }
 
@@ -116,7 +116,7 @@ VPRIV codegen_value do_call(codegen_context *e, uint32_t ref, codegen_value *fnv
 	cc *c = e->compile_context;
 	int ngrn = 0, nsaa = 0;
 	int64_t fslot = 1, rslot = 1;
-	bool sret = is_sret(c, rty);
+	bool sret = a64_abi_result_is_indirect(c, rty);
 	uint32_t keep = 0;	/* temporaries holding register arguments: moved, not parked or spilled */
 	a64_abi_spill sp;
 	codegen_value res = codegen_value_none();
@@ -130,8 +130,8 @@ VPRIV codegen_value do_call(codegen_context *e, uint32_t ref, codegen_value *fnv
 		} else {
 			int r = toreg(e, fnv);
 
-			fslot = slot(e, 8, 8);
-			mem(e, I_ST, 3, 0, r, FRAME, fslot);
+			fslot = a64_frame_slot_allocate(e, 8, 8);
+			a64_record_emit_memory(e, A64_OP_ST, 3, 0, r, A64_REGISTER_FRAME, fslot);
 			val_free(e, fnv);
 		}
 	} else {
@@ -146,9 +146,9 @@ VPRIV codegen_value do_call(codegen_context *e, uint32_t ref, codegen_value *fnv
 			codegen_fatal_report(e, e->current_location, "arm64: variadic transport of 64/128-lane packed boolean vectors is not supported");
 
 		if (nfix >= 0 && i >= nfix && CODEGEN_IS_DARWIN(c))
-			classify_va(e, a->type, &nsaa, &a->argument);
+			a64_abi_variadic_argument_classify(e, a->type, &nsaa, &a->argument);
 		else
-			classify(e, a->type, &ngrn, &nsaa, &a->argument);
+			a64_abi_argument_classify(e, a->type, &ngrn, &nsaa, &a->argument);
 		/* a scalar for x0-x7 in a temporary stays there until its mov (the moves
 		 * write only x0-x7, never a temporary, so their order does not matter) */
 		if (e->unit->options->opt >= 1 && a->slot == 1 && a->argument.kind == A64_ABI_ARGUMENT_REGISTER && !codegen_type_is_aggregate(c, a->type) &&
@@ -167,7 +167,7 @@ VPRIV codegen_value do_call(codegen_context *e, uint32_t ref, codegen_value *fnv
 	if (nsaa > e->outgoing_argument_bytes_max)
 		e->outgoing_argument_bytes_max = nsaa;
 	if (sret)
-		rslot = slot(e, codegen_type_size(c, rty), codegen_type_alignment(c, rty) > 16 ? 16 : codegen_type_alignment(c, rty));
+		rslot = a64_frame_slot_allocate(e, codegen_type_size(c, rty), codegen_type_alignment(c, rty) > 16 ? 16 : codegen_type_alignment(c, rty));
 	if (!e->is_reachable)
 		return codegen_type_is_void(c, rty) ? codegen_value_none() : codegen_value_constant(0);
 	if (unlikely(CODEGEN_REFERENCE_KIND(ref) == CODEGEN_REFERENCE_SYMBOL && !fnv && codegen_symbol_attributes(c, CODEGEN_REFERENCE_INDEX(ref))->error_fn)) {
@@ -197,7 +197,7 @@ VPRIV codegen_value do_call(codegen_context *e, uint32_t ref, codegen_value *fnv
 		return codegen_type_is_void(c, rty) ? codegen_value_none() : codegen_value_constant(0);
 	}
 	e->temporaries_in_use &= ~keep;	/* dead after their moves: not spilled */
-	spill_live(e, &sp);
+	a64_abi_temporaries_spill(e, &sp);
 	e->temporaries_in_use |= keep;
 	for (int i = 0; i < n; i++) {
 		a64_call_argument *a = &args[i];
@@ -206,9 +206,9 @@ VPRIV codegen_value do_call(codegen_context *e, uint32_t ref, codegen_value *fnv
 		case A64_ABI_ARGUMENT_BOOL_LANES:
 			for (unsigned k = 0; k < T(c, a->type)->n; k++) {
 				int rd = k < a->argument.register_count ? a->argument.register_number + k : R_X16;
-				mem(e, I_LD, 0, 0, rd, FRAME, a->slot + k / 8);
-				opbf(e, I_UBFM, 1, rd, rd, k % 8, k % 8);
-				if (k >= a->argument.register_count) mem(e, I_ST, 3, 0, rd, SP, a->argument.stack_offset + (k - a->argument.register_count) * 8);
+				a64_record_emit_memory(e, A64_OP_LD, 0, 0, rd, A64_REGISTER_FRAME, a->slot + k / 8);
+				a64_record_emit_bitfield(e, A64_OP_UBFM, 1, rd, rd, k % 8, k % 8);
+				if (k >= a->argument.register_count) a64_record_emit_memory(e, A64_OP_ST, 3, 0, rd, SP, a->argument.stack_offset + (k - a->argument.register_count) * 8);
 			}
 			break;
 		case A64_ABI_ARGUMENT_REGISTER:
@@ -225,7 +225,7 @@ VPRIV codegen_value do_call(codegen_context *e, uint32_t ref, codegen_value *fnv
 				int va = nfix >= 0 && i >= nfix;
 
 				arg_word(e, a, 0, R_X16);
-				mem(e, I_ST, va ? 3 : log2sz(a->argument.size), 0, R_X16, SP, a->argument.stack_offset);
+				a64_record_emit_memory(e, A64_OP_ST, va ? 3 : a64_size_log2(a->argument.size), 0, R_X16, SP, a->argument.stack_offset);
 				break;
 			}
 			for (int k = 0; k < a->argument.register_count; k++) {
@@ -233,27 +233,27 @@ VPRIV codegen_value do_call(codegen_context *e, uint32_t ref, codegen_value *fnv
 				int lg = a->argument.float_member_size && a->argument.size - 8 * k < 8 ? 2 : 3;
 
 				arg_word(e, a, k, R_X16);
-				mem(e, I_ST, lg, 0, R_X16, SP, a->argument.stack_offset + 8 * k);
+				a64_record_emit_memory(e, A64_OP_ST, lg, 0, R_X16, SP, a->argument.stack_offset + 8 * k);
 			}
 			break;
 		case A64_ABI_ARGUMENT_REFERENCE_REGISTER:
-			opi(e, I_ADDI, 1, a->argument.register_number, FRAME, a->slot);
+			a64_record_emit_immediate(e, A64_OP_ADDI, 1, a->argument.register_number, A64_REGISTER_FRAME, a->slot);
 			break;
 		case A64_ABI_ARGUMENT_REFERENCE_STACK:
-			opi(e, I_ADDI, 1, R_X16, FRAME, a->slot);
-			mem(e, I_ST, 3, 0, R_X16, SP, a->argument.stack_offset);
+			a64_record_emit_immediate(e, A64_OP_ADDI, 1, R_X16, A64_REGISTER_FRAME, a->slot);
+			a64_record_emit_memory(e, A64_OP_ST, 3, 0, R_X16, SP, a->argument.stack_offset);
 			break;
 		case A64_ABI_ARGUMENT_VECTOR_REGISTER:
 			arg_word(e, a, 0, R_X16);
-			word(e, f_in(a->argument.size >= 8, a->argument.register_number, R_X16));
+			a64_record_emit_word(e, a64_word_fmov_to_vector(a->argument.size >= 8, a->argument.register_number, R_X16));
 			if (a->argument.size == 16) {
 				arg_word(e, a, 1, R_X16);
-				word(e, q_in_hi(a->argument.register_number, R_X16));
+				a64_record_emit_word(e, a64_word_fmov_high_to_vector(a->argument.register_number, R_X16));
 			}
 			break;
 		case A64_ABI_ARGUMENT_HFA:
 			for (int k = 0; k < a->argument.register_count; k++)
-				vr_load(e, a->argument.float_member_size, a->argument.register_number + k, FRAME, a->slot + a->argument.float_member_size * k);
+				vr_load(e, a->argument.float_member_size, a->argument.register_number + k, A64_REGISTER_FRAME, a->slot + a->argument.float_member_size * k);
 			break;
 		}
 	}
@@ -261,75 +261,75 @@ VPRIV codegen_value do_call(codegen_context *e, uint32_t ref, codegen_value *fnv
 		if (args[i].slot == 1 && (args[i].value.kind == CODEGEN_VALUE_REGISTER || args[i].value.kind == CODEGEN_VALUE_REGISTER_PAIR) && args[i].argument.kind == A64_ABI_ARGUMENT_REGISTER)
 			val_free(e, &args[i].value);
 	if (sret)
-		opi(e, I_ADDI, 1, 8, FRAME, rslot);
+		a64_record_emit_immediate(e, A64_OP_ADDI, 1, 8, A64_REGISTER_FRAME, rslot);
 	if (fslot != 1) {
-		mem(e, I_LD, 3, 0, R_X16, FRAME, fslot);
-		put(e, I_BLR)->rn = R_X16;
+		a64_record_emit_memory(e, A64_OP_LD, 3, 0, R_X16, A64_REGISTER_FRAME, fslot);
+		a64_record_emit(e, A64_OP_BLR)->rn = R_X16;
 	} else {
-		put(e, I_BL)->ref = ref;
+		a64_record_emit(e, A64_OP_BL)->ref = ref;
 	}
 	if (codegen_type_is_void(c, rty)) {
 		res = codegen_value_none();
 	} else if (sret) {
 		int r = treg(e);
 
-		opi(e, I_ADDI, 1, r, FRAME, rslot);
+		a64_record_emit_immediate(e, A64_OP_ADDI, 1, r, A64_REGISTER_FRAME, rslot);
 		res = codegen_value_register(r);
 	} else if (codegen_type_is_bool_vector(c, rty)) {
-		int64_t sl = slot(e, 8, 8);
+		int64_t sl = a64_frame_slot_allocate(e, 8, 8);
 		int r = treg(e);
-		bvec_res(e, rty, sl);
-		opi(e, I_ADDI, 1, r, FRAME, sl);
+		a64_abi_bool_vector_result_store(e, rty, sl);
+		a64_record_emit_immediate(e, A64_OP_ADDI, 1, r, A64_REGISTER_FRAME, sl);
 		res = codegen_value_register(r);
-	} else if (codegen_type_is_record_like(c, rty) && hfa(c, rty, &hn)) {
-		int hb = hfa(c, rty, &hn);
-		int64_t sl = slot(e, 64, 16);
+	} else if (codegen_type_is_record_like(c, rty) && a64_abi_hfa_classify(c, rty, &hn)) {
+		int hb = a64_abi_hfa_classify(c, rty, &hn);
+		int64_t sl = a64_frame_slot_allocate(e, 64, 16);
 		int r = treg(e);
 
 		for (int k = 0; k < hn; k++)
-			vr_store(e, hb, k, FRAME, sl + hb * k);
-		opi(e, I_ADDI, 1, r, FRAME, sl);
+			vr_store(e, hb, k, A64_REGISTER_FRAME, sl + hb * k);
+		a64_record_emit_immediate(e, A64_OP_ADDI, 1, r, A64_REGISTER_FRAME, sl);
 		res = codegen_value_register(r);
-	} else if (vec_small(c, rty)) {
-		int64_t sl = slot(e, 8, 8);
+	} else if (a64_abi_vector_is_small(c, rty)) {
+		int64_t sl = a64_frame_slot_allocate(e, 8, 8);
 		int r = treg(e);
 
-		vec_small_res(e, rty, sl);
-		opi(e, I_ADDI, 1, r, FRAME, sl);
+		a64_abi_small_vector_result_store(e, rty, sl);
+		a64_record_emit_immediate(e, A64_OP_ADDI, 1, r, A64_REGISTER_FRAME, sl);
 		res = codegen_value_register(r);
 	} else if (codegen_type_is_record_like(c, rty)) {
-		int64_t sl = slot(e, 16, 16);
+		int64_t sl = a64_frame_slot_allocate(e, 16, 16);
 		int r = treg(e);
 
-		mem(e, I_ST, 3, 0, 0, FRAME, sl);
+		a64_record_emit_memory(e, A64_OP_ST, 3, 0, 0, A64_REGISTER_FRAME, sl);
 		if (codegen_type_size(c, rty) > 8)
-			mem(e, I_ST, 3, 0, 1, FRAME, sl + 8);
-		opi(e, I_ADDI, 1, r, FRAME, sl);
+			a64_record_emit_memory(e, A64_OP_ST, 3, 0, 1, A64_REGISTER_FRAME, sl + 8);
+		a64_record_emit_immediate(e, A64_OP_ADDI, 1, r, A64_REGISTER_FRAME, sl);
 		res = codegen_value_register(r);
 	} else if (codegen_type_is_long_double(c, rty)) {
 		res.kind = CODEGEN_VALUE_REGISTER_PAIR;
 		res.register_number = (uint8_t)treg(e);
 		res.register_high = (uint8_t)treg(e);
-		word(e, f_out(1, res.register_number, 0));
-		word(e, q_out_hi(res.register_high, 0));
+		a64_record_emit_word(e, a64_word_fmov_from_vector(1, res.register_number, 0));
+		a64_record_emit_word(e, a64_word_fmov_high_from_vector(res.register_high, 0));
 	} else if (codegen_type_size(c, rty) == 16 && !codegen_type_is_float(c, rty)) {
 		res.kind = CODEGEN_VALUE_REGISTER_PAIR;
 		res.register_number = (uint8_t)treg(e);
 		res.register_high = (uint8_t)treg(e);
-		mov(e, 1, res.register_number, 0);
-		mov(e, 1, res.register_high, 1);
+		a64_record_emit_move(e, 1, res.register_number, 0);
+		a64_record_emit_move(e, 1, res.register_high, 1);
 	} else if (codegen_type_is_float(c, rty)) {
 		int r = treg(e);
 
-		word(e, f_out(fpk(e, rty), r, 0));
+		a64_record_emit_word(e, a64_word_fmov_from_vector(fpk(e, rty), r, 0));
 		res = codegen_value_register(r);
 	} else {
 		int r = treg(e);
 
-		mov(e, 1, r, 0);
+		a64_record_emit_move(e, 1, r, 0);
 		res = codegen_value_register(r);
 	}
-	unspill(e, &sp);
+	a64_abi_temporaries_restore(e, &sp);
 	if (noret)
 		e->is_reachable = false;
 	return res;
@@ -505,7 +505,7 @@ VPRIV codegen_value inline_call(codegen_context *e, uint32_t s, a64_call_argumen
 	F.instance = ++e->next_instance;
 	F.is_inlined = true;
 	F.return_type = rty;
-	F.return_label = newlabel(e);
+	F.return_label = a64_label_new(e);
 	F.constant_is_ok = true;
 	F.cleanup_base = e->cleanup_count;
 	F.loop_depth = e->loop_count;
@@ -513,7 +513,7 @@ VPRIV codegen_value inline_call(codegen_context *e, uint32_t s, a64_call_argumen
 	if (e->unit->options->opt >= 1 && reg_scalar(e, rty) && CODEGEN_TEMPORARY_COUNT - __builtin_popcount(e->temporaries_in_use) > INLINE_FREE)
 		F.return_register = (uint8_t)(treg(e) + 1);	/* returns put the value there: no slot */
 	else if (!codegen_type_is_void(c, rty))
-		F.return_slot = slot(e, codegen_type_size(c, rty) ? codegen_type_size(c, rty) : 8, codegen_type_alignment(c, rty) > 16 ? 16 : codegen_type_alignment(c, rty));
+		F.return_slot = a64_frame_slot_allocate(e, codegen_type_size(c, rty) ? codegen_type_size(c, rty) : 8, codegen_type_alignment(c, rty) > 16 ? 16 : codegen_type_alignment(c, rty));
 	for (int i = 0; i < (int)body->aux; i++) {
 		uint32_t p = c->lists[body->a + i];
 		const sym *ps = &c->syms[p];
@@ -565,9 +565,9 @@ VPRIV codegen_value inline_call(codegen_context *e, uint32_t s, a64_call_argumen
 	}
 	if (e->unit->node_flags[y->body] & CODEGEN_NODE_HAS_ALLOCA) {
 		int r = treg(e);
-		saved_sp = slot(e, 8, 8);
-		mov(e, 1, r, SP);
-		mem(e, I_ST, 3, 0, r, FRAME, saved_sp);
+		saved_sp = a64_frame_slot_allocate(e, 8, 8);
+		a64_record_emit_move(e, 1, r, SP);
+		a64_record_emit_memory(e, A64_OP_ST, 3, 0, r, A64_REGISTER_FRAME, saved_sp);
 		tfree(e, r);
 	}
 	e->function_instance = &F;
@@ -579,8 +579,8 @@ VPRIV codegen_value inline_call(codegen_context *e, uint32_t s, a64_call_argumen
 	deflabel(e, F.return_label);
 	if (saved_sp) {
 		int r = treg(e);
-		mem(e, I_LD, 3, 0, r, FRAME, saved_sp);
-		mov(e, 1, SP, r);
+		a64_record_emit_memory(e, A64_OP_LD, 3, 0, r, A64_REGISTER_FRAME, saved_sp);
+		a64_record_emit_move(e, 1, SP, r);
 		tfree(e, r);
 	}
 	for (int i = 0; i < (int)body->aux; i++) {
@@ -633,11 +633,11 @@ static codegen_value fold_strcmp(codegen_context *e, const node *x)
 /* one ldp/stp of x registers at [base + off] (off: 8-aligned, -512..504) */
 static void pair(codegen_context *e, int op, int r1, int r2, int base, int64_t off)
 {
-	ins *i;
+	a64_record *i;
 
 	if (!e->is_reachable)
 		return;
-	i = put(e, op);
+	i = a64_record_emit(e, op);
 	i->sz = 1, i->rd = (uint8_t)r1, i->ra = (uint8_t)r2, i->rn = (uint8_t)base, i->imm = off;
 }
 
@@ -647,16 +647,16 @@ static void copy_pairs(codegen_context *e, int d, int sr, uint64_t n)
 	uint64_t o = 0;
 
 	for (; n - o >= 16; o += 16) {
-		pair(e, I_LDP, R_X16, R_X17, sr, (int64_t)o);
-		pair(e, I_STP, R_X16, R_X17, d, (int64_t)o);
+		pair(e, A64_OP_LDP, R_X16, R_X17, sr, (int64_t)o);
+		pair(e, A64_OP_STP, R_X16, R_X17, d, (int64_t)o);
 	}
 	if (o < n) {
 		int t = R_X16;
 
 		for (uint64_t k; o < n; o += k) {
 			k = n - o >= 8 ? 8 : n - o >= 4 ? 4 : n - o >= 2 ? 2 : 1;
-			mem(e, I_LD, log2sz(k), 0, t, sr, (int64_t)o);
-			mem(e, I_ST, log2sz(k), 0, t, d, (int64_t)o);
+			a64_record_emit_memory(e, A64_OP_LD, a64_size_log2(k), 0, t, sr, (int64_t)o);
+			a64_record_emit_memory(e, A64_OP_ST, a64_size_log2(k), 0, t, d, (int64_t)o);
 		}
 	}
 }
@@ -690,11 +690,11 @@ static bool mem_inline(codegen_context *e, int kind, a64_call_argument *args, co
 		uint64_t pat = (uint64_t)(args[1].value.integer & 0xff) * 0x0101010101010101ull, o = 0;
 		int t = R_X16;	/* as copy_mem: not x17 */
 
-		movi(e, 1, t, (int64_t)pat);
+		a64_record_emit_move_immediate(e, 1, t, (int64_t)pat);
 		while (o < n) {
 			uint64_t k = n - o >= 8 ? 8 : n - o >= 4 ? 4 : n - o >= 2 ? 2 : 1;
 
-			mem(e, I_ST, log2sz(k), 0, t, d, (int64_t)o);
+			a64_record_emit_memory(e, A64_OP_ST, a64_size_log2(k), 0, t, d, (int64_t)o);
 			o += k;
 		}
 	}
@@ -778,7 +778,7 @@ __attribute__((noinline)) VPRIV codegen_value gen_call(codegen_context *e, uint3
 			r.integer = (i128)((u128)r.integer & ~((u128)1 << 127));
 		else {
 			toreg2(e, &r, false);
-			opi(e, I_ANDI, 1, r.register_high, r.register_high, INT64_MAX);
+			a64_record_emit_immediate(e, A64_OP_ANDI, 1, r.register_high, r.register_high, INT64_MAX);
 		}
 	} else if (inl) {
 		r = inline_call(e, s, args, na, n);

@@ -36,21 +36,21 @@ VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i, uint8_
 			return;
 		if (in->op == VIR_OP_AND && a64_vir_test_branch_fold(L, b, i))
 			return;
-		static const uint8_t rr[] = { [VIR_OP_ADD] = I_ADD, [VIR_OP_SUB] = I_SUB, [VIR_OP_AND] = I_AND, [VIR_OP_OR] = I_ORR,
-					      [VIR_OP_XOR] = I_EOR, [VIR_OP_PTRADD] = I_ADD };
-		static const uint8_t ri[] = { [VIR_OP_ADD] = I_ADDI, [VIR_OP_SUB] = I_SUBI, [VIR_OP_AND] = I_ANDI, [VIR_OP_OR] = I_ORRI,
-					      [VIR_OP_XOR] = I_EORI, [VIR_OP_PTRADD] = I_ADDI };
+		static const uint8_t rr[] = { [VIR_OP_ADD] = A64_OP_ADD, [VIR_OP_SUB] = A64_OP_SUB, [VIR_OP_AND] = A64_OP_AND, [VIR_OP_OR] = A64_OP_ORR,
+					      [VIR_OP_XOR] = A64_OP_EOR, [VIR_OP_PTRADD] = A64_OP_ADD };
+		static const uint8_t ri[] = { [VIR_OP_ADD] = A64_OP_ADDI, [VIR_OP_SUB] = A64_OP_SUBI, [VIR_OP_AND] = A64_OP_ANDI, [VIR_OP_OR] = A64_OP_ORRI,
+					      [VIR_OP_XOR] = A64_OP_EORI, [VIR_OP_PTRADD] = A64_OP_ADDI };
 		int a = a64_vir_operand_general_register(L, 0, R_X16);
 
 		if (L->operand_registers[1] == VIR_REGISTER_NONE && a64_vir_value_is_integer_constant(f, in->b))
-			opi(e, ri[in->op], x, rd, a, in->op == VIR_OP_AND || in->op == VIR_OP_OR || in->op == VIR_OP_XOR ?
+			a64_record_emit_immediate(e, ri[in->op], x, rd, a, in->op == VIR_OP_AND || in->op == VIR_OP_OR || in->op == VIR_OP_XOR ?
 				(int64_t)a64_vir_constant_logical_immediate(&f->insns[in->b]) : a64_vir_constant_integer(&f->insns[in->b]));
 		else
-			op3(e, rr[in->op], x, rd, a, a64_vir_operand_general_register(L, 1, R_X17));
+			a64_record_emit_three_registers(e, rr[in->op], x, rd, a, a64_vir_operand_general_register(L, 1, R_X17));
 		return;
 	}
 	case VIR_OP_PSUB:
-		op3(e, I_SUB, 1, rd, a64_vir_operand_general_register(L, 0, R_X16), a64_vir_operand_general_register(L, 1, R_X17));
+		a64_record_emit_three_registers(e, A64_OP_SUB, 1, rd, a64_vir_operand_general_register(L, 0, R_X16), a64_vir_operand_general_register(L, 1, R_X17));
 		return;
 	case VIR_OP_MUL:
 		if (a64_vir_chain_fold(L, b, i, res))
@@ -58,21 +58,21 @@ VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i, uint8_
 		if (L->operand_registers[1] == VIR_REGISTER_NONE && a64_vir_value_is_integer_constant(f, in->b) && a64_vir_constant_log2(&f->insns[in->b]) >= 0) {
 			int w = x ? 64 : 32, k = a64_vir_constant_log2(&f->insns[in->b]);
 
-			opbf(e, I_UBFM, x, rd, a64_vir_operand_general_register(L, 0, R_X16), (w - k) & (w - 1), w - 1 - k);
+			a64_record_emit_bitfield(e, A64_OP_UBFM, x, rd, a64_vir_operand_general_register(L, 0, R_X16), (w - k) & (w - 1), w - 1 - k);
 			return;
 		}
-		op4(e, I_MADD, x, rd, a64_vir_operand_general_register(L, 0, R_X16), a64_vir_operand_general_register(L, 1, R_X17), ZR);
+		a64_record_emit_four_registers(e, A64_OP_MADD, x, rd, a64_vir_operand_general_register(L, 0, R_X16), a64_vir_operand_general_register(L, 1, R_X17), ZR);
 		return;
 	case VIR_OP_SDIV: case VIR_OP_UDIV:
-		op3(e, in->op == VIR_OP_SDIV ? I_SDIV : I_UDIV, x, rd, a64_vir_operand_general_register(L, 0, R_X16), a64_vir_operand_general_register(L, 1, R_X17));
+		a64_record_emit_three_registers(e, in->op == VIR_OP_SDIV ? A64_OP_SDIV : A64_OP_UDIV, x, rd, a64_vir_operand_general_register(L, 0, R_X16), a64_vir_operand_general_register(L, 1, R_X17));
 		return;
 	case VIR_OP_SREM: case VIR_OP_UREM: {
 		int a = a64_vir_operand_general_register(L, 0, R_X16), c = a64_vir_operand_general_register(L, 1, R_X17);
 
 		if (a == R_X16 || c == R_X16)
 			a64_vir_fail(L, VIRBUILD_FAILURE(constant_remainder));
-		op3(e, in->op == VIR_OP_SREM ? I_SDIV : I_UDIV, x, R_X16, a, c);
-		op4(e, I_MSUB, x, rd, R_X16, c, a);
+		a64_record_emit_three_registers(e, in->op == VIR_OP_SREM ? A64_OP_SDIV : A64_OP_UDIV, x, R_X16, a, c);
+		a64_record_emit_four_registers(e, A64_OP_MSUB, x, rd, R_X16, c, a);
 		return;
 	}
 	case VIR_OP_SHL: case VIR_OP_LSHR: case VIR_OP_ASHR: {
@@ -86,38 +86,38 @@ VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i, uint8_
 			int s = (int)(a64_vir_constant_integer(&f->insns[in->b]) & (w - 1));
 
 			if (in->op == VIR_OP_SHL)
-				opbf(e, I_UBFM, x, rd, a, (w - s) & (w - 1), w - 1 - s);
+				a64_record_emit_bitfield(e, A64_OP_UBFM, x, rd, a, (w - s) & (w - 1), w - 1 - s);
 			else
-				opbf(e, in->op == VIR_OP_LSHR ? I_UBFM : I_SBFM, x, rd, a, s, w - 1);
+				a64_record_emit_bitfield(e, in->op == VIR_OP_LSHR ? A64_OP_UBFM : A64_OP_SBFM, x, rd, a, s, w - 1);
 		} else {
-			op3(e, in->op == VIR_OP_SHL ? I_LSLV : in->op == VIR_OP_LSHR ? I_LSRV : I_ASRV, x, rd, a, a64_vir_operand_general_register(L, 1, R_X17));
+			a64_record_emit_three_registers(e, in->op == VIR_OP_SHL ? A64_OP_LSLV : in->op == VIR_OP_LSHR ? A64_OP_LSRV : A64_OP_ASRV, x, rd, a, a64_vir_operand_general_register(L, 1, R_X17));
 		}
 		return;
 	}
 	case VIR_OP_UMULHI: case VIR_OP_SMULHI:
-		op3(e, in->op == VIR_OP_UMULHI ? I_UMULH : I_SMULH, 1, rd, a64_vir_operand_general_register(L, 0, R_X16), a64_vir_operand_general_register(L, 1, R_X17));
+		a64_record_emit_three_registers(e, in->op == VIR_OP_UMULHI ? A64_OP_UMULH : A64_OP_SMULH, 1, rd, a64_vir_operand_general_register(L, 0, R_X16), a64_vir_operand_general_register(L, 1, R_X17));
 		return;
 	case VIR_OP_NEG:
-		op3(e, I_SUB, x, rd, ZR, a64_vir_operand_general_register(L, 0, R_X16));
+		a64_record_emit_three_registers(e, A64_OP_SUB, x, rd, ZR, a64_vir_operand_general_register(L, 0, R_X16));
 		return;
 	case VIR_OP_NOT:
-		op3(e, I_ORN, x, rd, ZR, a64_vir_operand_general_register(L, 0, R_X16));
+		a64_record_emit_three_registers(e, A64_OP_ORN, x, rd, ZR, a64_vir_operand_general_register(L, 0, R_X16));
 		return;
 	case VIR_OP_CLZ:
-		op3(e, I_CLZ, x, rd, a64_vir_operand_general_register(L, 0, R_X16), 0);
+		a64_record_emit_three_registers(e, A64_OP_CLZ, x, rd, a64_vir_operand_general_register(L, 0, R_X16), 0);
 		return;
 	case VIR_OP_CTZ:
-		op3(e, I_RBIT, x, rd, a64_vir_operand_general_register(L, 0, R_X16), 0);
-		op3(e, I_CLZ, x, rd, rd, 0);
+		a64_record_emit_three_registers(e, A64_OP_RBIT, x, rd, a64_vir_operand_general_register(L, 0, R_X16), 0);
+		a64_record_emit_three_registers(e, A64_OP_CLZ, x, rd, rd, 0);
 		return;
 	case VIR_OP_POPCNT:
-		word(e, f_in(1, 31, a64_vir_operand_general_register(L, 0, R_X16)));
-		word(e, 0x0e205800u | 31u << 5 | 31u);	/* cnt v31.8b, v31.8b */
-		word(e, 0x0e31b800u | 31u << 5 | 31u);	/* addv b31, v31.8b */
-		word(e, f_out(0, rd, 31));
+		a64_record_emit_word(e, a64_word_fmov_to_vector(1, 31, a64_vir_operand_general_register(L, 0, R_X16)));
+		a64_record_emit_word(e, 0x0e205800u | 31u << 5 | 31u);	/* cnt v31.8b, v31.8b */
+		a64_record_emit_word(e, 0x0e31b800u | 31u << 5 | 31u);	/* addv b31, v31.8b */
+		a64_record_emit_word(e, a64_word_fmov_from_vector(0, rd, 31));
 		return;
 	case VIR_OP_BSWAP:
-		op3(e, I_REV, x, rd, a64_vir_operand_general_register(L, 0, R_X16), 0);
+		a64_record_emit_three_registers(e, A64_OP_REV, x, rd, a64_vir_operand_general_register(L, 0, R_X16), 0);
 		return;
 	case VIR_OP_EXT: {
 		if (a64_vir_chain_fold(L, b, i, res))
@@ -125,19 +125,19 @@ VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i, uint8_
 		int w = VIR_INSN_FLAG_WIDTH_LOG2(in->flags), a = a64_vir_operand_general_register(L, 0, R_X16);
 
 		if (w == 3 || (w == 2 && (!x || L->low32[i])))
-			mov(e, 1, rd, a);	/* (ext.4 whose low half alone is read: a copy) */
+			a64_record_emit_move(e, 1, rd, a);	/* (ext.4 whose low half alone is read: a copy) */
 		else if ((in->flags & VIR_INSN_FLAG_MS) && L->low32[i])	/* only its low half is read: the i32 form */
-			opbf(e, I_SBFM, 0, rd, a, 0, w == 2 ? 31 : (8 << w) - 1);
+			a64_record_emit_bitfield(e, A64_OP_SBFM, 0, rd, a, 0, w == 2 ? 31 : (8 << w) - 1);
 		else if (in->flags & VIR_INSN_FLAG_MS)
-			opbf(e, I_SBFM, x, rd, a, 0, (8 << w) - 1);
+			a64_record_emit_bitfield(e, A64_OP_SBFM, x, rd, a, 0, (8 << w) - 1);
 		else if (w == 2)
-			op3(e, I_MOV, 0, rd, a, 0);
+			a64_record_emit_three_registers(e, A64_OP_MOV, 0, rd, a, 0);
 		else
-			opbf(e, I_UBFM, 0, rd, a, 0, (8 << w) - 1);
+			a64_record_emit_bitfield(e, A64_OP_UBFM, 0, rd, a, 0, (8 << w) - 1);
 		return;
 	}
 	case VIR_OP_TRUNC:	/* an i32's upper half is never read: a copy (ext.4u clears it) */
-		mov(e, 1, rd, a64_vir_operand_general_register(L, 0, R_X16));
+		a64_record_emit_move(e, 1, rd, a64_vir_operand_general_register(L, 0, R_X16));
 		return;
 	case VIR_OP_P2I: case VIR_OP_I2P:	/* (unused: their users read the operand) */
 		return;
@@ -164,9 +164,9 @@ VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i, uint8_
 			int c = in->flags & 15, cz = -1, cb = -1;
 
 			if (!k)
-				cz = c == 0 || c == 7 ? C_EQ : c == 1 || c == 8 ? C_NE : -1, cb = c == 2 ? C_NE : c == 5 ? C_EQ : -1;
+				cz = c == 0 || c == 7 ? A64_CONDITION_EQ : c == 1 || c == 8 ? A64_CONDITION_NE : -1, cb = c == 2 ? A64_CONDITION_NE : c == 5 ? A64_CONDITION_EQ : -1;
 			else if (k == -1)
-				cb = c == 3 ? C_NE : c == 4 ? C_EQ : -1;
+				cb = c == 3 ? A64_CONDITION_NE : c == 4 ? A64_CONDITION_EQ : -1;
 			if (cz >= 0 || cb >= 0) {
 				L->flag_condition = cz >= 0 ? cz : cb;
 				L->flag_value = i;
@@ -192,11 +192,11 @@ VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i, uint8_
 		if (res == VIR_REGISTER_NONE)
 			return;
 		if (cc >= 0) {
-			cset(e, rd, cc);
+			a64_record_emit_condition_set(e, rd, cc);
 		} else {	/* one: less or greater */
-			cset(e, rd, C_MI);
-			op3s(e, I_CSINC, 0, rd, rd, ZR, 0, 0);
-			e->records[e->record_count - 1].cond = C_LE;
+			a64_record_emit_condition_set(e, rd, A64_CONDITION_MI);
+			a64_record_emit_three_registers_shifted(e, A64_OP_CSINC, 0, rd, rd, ZR, 0, 0);
+			e->records[e->record_count - 1].cond = A64_CONDITION_LE;
 		}
 		return;
 	}
@@ -204,48 +204,48 @@ VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i, uint8_
 		int cc = a64_vir_condition_flags_get(L, in);
 
 		if (in->type == VIR_TYPE_F32 || in->type == VIR_TYPE_F64)
-			word(e, 0x1e200c00u | (unsigned)d << 22 | (unsigned)a64_vir_operand_float_register(L, 2) << 16 | (unsigned)cc << 12 |
+			a64_record_emit_word(e, 0x1e200c00u | (unsigned)d << 22 | (unsigned)a64_vir_operand_float_register(L, 2) << 16 | (unsigned)cc << 12 |
 				(unsigned)a64_vir_operand_float_register(L, 1) << 5 | (unsigned)vd);
 		else
-			op3s(e, I_CSEL, x, rd, a64_vir_operand_general_register(L, 1, R_X16), a64_vir_operand_general_register(L, 2, R_X17), 0, 0), e->records[e->record_count - 1].cond = (uint8_t)cc;
+			a64_record_emit_three_registers_shifted(e, A64_OP_CSEL, x, rd, a64_vir_operand_general_register(L, 1, R_X16), a64_vir_operand_general_register(L, 2, R_X17), 0, 0), e->records[e->record_count - 1].cond = (uint8_t)cc;
 		return;
 	}
 	case VIR_OP_FADD: case VIR_OP_FSUB: case VIR_OP_FMUL: case VIR_OP_FDIV: {
 		static const uint32_t op[] = { 0x1e202800u, 0x1e203800u, 0x1e200800u, 0x1e201800u };
 
-		word(e, op[in->op - VIR_OP_FADD] | (unsigned)d << 22 | (unsigned)a64_vir_operand_float_register(L, 1) << 16 | (unsigned)a64_vir_operand_float_register(L, 0) << 5 | (unsigned)vd);
+		a64_record_emit_word(e, op[in->op - VIR_OP_FADD] | (unsigned)d << 22 | (unsigned)a64_vir_operand_float_register(L, 1) << 16 | (unsigned)a64_vir_operand_float_register(L, 0) << 5 | (unsigned)vd);
 		return;
 	}
 	case VIR_OP_FMA:	/* fmadd, fmsub (the product negated), fnmsub (the addend), fnmadd (both) */
-		word(e, 0x1f000000u | (unsigned)d << 22 | (unsigned)((in->flags & VIR_INSN_FLAG_NEGC) != 0) << 21 | (unsigned)a64_vir_operand_float_register(L, 1) << 16 |
+		a64_record_emit_word(e, 0x1f000000u | (unsigned)d << 22 | (unsigned)((in->flags & VIR_INSN_FLAG_NEGC) != 0) << 21 | (unsigned)a64_vir_operand_float_register(L, 1) << 16 |
 			(unsigned)(!(in->flags & VIR_INSN_FLAG_NEGP) != !(in->flags & VIR_INSN_FLAG_NEGC)) << 15 | (unsigned)a64_vir_operand_float_register(L, 2) << 10 |
 			(unsigned)a64_vir_operand_float_register(L, 0) << 5 | (unsigned)vd);
 		return;
 	case VIR_OP_FNEG: case VIR_OP_FABS: case VIR_OP_FSQRT: {
 		uint32_t op = in->op == VIR_OP_FNEG ? 0x1e214000u : in->op == VIR_OP_FABS ? 0x1e20c000u : 0x1e21c000u;
 
-		word(e, op | (unsigned)d << 22 | (unsigned)a64_vir_operand_float_register(L, 0) << 5 | (unsigned)vd);
+		a64_record_emit_word(e, op | (unsigned)d << 22 | (unsigned)a64_vir_operand_float_register(L, 0) << 5 | (unsigned)vd);
 		return;
 	}
 	case VIR_OP_FEXT:
-		word(e, 0x1e22c000u | (unsigned)a64_vir_operand_float_register(L, 0) << 5 | (unsigned)vd);
+		a64_record_emit_word(e, 0x1e22c000u | (unsigned)a64_vir_operand_float_register(L, 0) << 5 | (unsigned)vd);
 		return;
 	case VIR_OP_FTRUNC:
-		word(e, 0x1e624000u | (unsigned)a64_vir_operand_float_register(L, 0) << 5 | (unsigned)vd);
+		a64_record_emit_word(e, 0x1e624000u | (unsigned)a64_vir_operand_float_register(L, 0) << 5 | (unsigned)vd);
 		return;
 	case VIR_OP_S2F: case VIR_OP_U2F:
-		word(e, (in->op == VIR_OP_S2F ? 0x1e220000u : 0x1e230000u) | (unsigned)a64_vir_value_is_64_bit(f, in->a) << 31 | (unsigned)d << 22 |
+		a64_record_emit_word(e, (in->op == VIR_OP_S2F ? 0x1e220000u : 0x1e230000u) | (unsigned)a64_vir_value_is_64_bit(f, in->a) << 31 | (unsigned)d << 22 |
 			(unsigned)a64_vir_operand_general_register(L, 0, R_X16) << 5 | (unsigned)vd);
 		return;
 	case VIR_OP_F2S: case VIR_OP_F2U:
-		word(e, (in->op == VIR_OP_F2S ? 0x1e380000u : 0x1e390000u) | (unsigned)x << 31 |
+		a64_record_emit_word(e, (in->op == VIR_OP_F2S ? 0x1e380000u : 0x1e390000u) | (unsigned)x << 31 |
 			(unsigned)(f->insns[in->a].type == VIR_TYPE_F64) << 22 | (unsigned)a64_vir_operand_float_register(L, 0) << 5 | (unsigned)rd);
 		return;
 	case VIR_OP_BITCAST:
 		if (in->type == VIR_TYPE_F32 || in->type == VIR_TYPE_F64)
-			word(e, f_in(d, vd, a64_vir_operand_general_register(L, 0, R_X16)));
+			a64_record_emit_word(e, a64_word_fmov_to_vector(d, vd, a64_vir_operand_general_register(L, 0, R_X16)));
 		else
-			word(e, f_out(x, rd, a64_vir_operand_float_register(L, 0)));
+			a64_record_emit_word(e, a64_word_fmov_from_vector(x, rd, a64_vir_operand_float_register(L, 0)));
 		return;
 	case VIR_OP_LOAD:
 		a64_vir_load_lower(L, i, in, res);
@@ -257,16 +257,16 @@ VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i, uint8_
 		a64_vir_memory_block_lower(L, in);
 		return;
 	case VIR_OP_ALOAD:	/* ldar: sequentially consistent with stlr */
-		word(e, 0x08dffc00u | (unsigned)VIR_INSN_FLAG_WIDTH_LOG2(in->flags) << 30 | (unsigned)a64_vir_operand_general_register(L, 0, R_X16) << 5 | (unsigned)rd);
+		a64_record_emit_word(e, 0x08dffc00u | (unsigned)VIR_INSN_FLAG_WIDTH_LOG2(in->flags) << 30 | (unsigned)a64_vir_operand_general_register(L, 0, R_X16) << 5 | (unsigned)rd);
 		return;
 	case VIR_OP_ASTORE: {
 		int p = a64_vir_operand_general_register(L, 0, R_X16), v = a64_vir_operand_general_register(L, 1, R_X17);
 
-		word(e, 0x089ffc00u | (unsigned)VIR_INSN_FLAG_WIDTH_LOG2(in->flags) << 30 | (unsigned)p << 5 | (unsigned)v);
+		a64_record_emit_word(e, 0x089ffc00u | (unsigned)VIR_INSN_FLAG_WIDTH_LOG2(in->flags) << 30 | (unsigned)p << 5 | (unsigned)v);
 		return;
 	}
 	case VIR_OP_AFENCE:
-		word(e, 0xd5033bbfu);	/* dmb ish */
+		a64_record_emit_word(e, 0xd5033bbfu);	/* dmb ish */
 		return;
 	case VIR_OP_BARRIER:
 		return;
@@ -283,11 +283,11 @@ VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i, uint8_
 			a64_vir_fail(L, VIRBUILD_FAILURE(variadic_start_lowering));
 		a64_vir_arguments_assign(true, &f->extra[f->signature], &none, 0, &stk);
 		if (l.kind == CODEGEN_LVALUE_SYMBOL) {
-			addr_of_ref(e, R_X17, l.reference, l.offset);
+			a64_reference_address_emit(e, R_X17, l.reference, l.offset);
 			l = (codegen_lvalue){ .kind = CODEGEN_LVALUE_REGISTER, .register_number = R_X17 };
 		}
-		opi(e, I_ADDI, 1, t, R_FP, 16 + ((stk + 7) & ~7));
-		mem(e, I_ST, 3, 0, t, l.kind == CODEGEN_LVALUE_FRAME ? FRAME : l.register_number, l.offset);
+		a64_record_emit_immediate(e, A64_OP_ADDI, 1, t, R_FP, 16 + ((stk + 7) & ~7));
+		a64_record_emit_memory(e, A64_OP_ST, 3, 0, t, l.kind == CODEGEN_LVALUE_FRAME ? A64_REGISTER_FRAME : l.register_number, l.offset);
 		return;
 	}
 	case VIR_OP_BR: {
@@ -307,19 +307,19 @@ VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i, uint8_
 
 			if (t == a64_vir_block_fallthrough(L)) {
 				a64_vir_branch_conditional_emit(e, cc, true, el);
-				jump(e, a64_vir_block_label(L, t));
+				a64_jump_emit(e, a64_vir_block_label(L, t));
 			} else {
 				a64_vir_branch_conditional_emit(e, cc, false, a64_vir_block_label(L, t));
 				a64_vir_goto_emit(L, b, a64_vir_block_chase(L, in->c));
 			}
 		} else if (fp) {
 			a64_vir_branch_conditional_emit(e, cc, true, a64_vir_block_label(L, a64_vir_block_chase(L, in->c)));
-			jump(e, a64_vir_successor_label(L, b, 0, in->b));
+			a64_jump_emit(e, a64_vir_successor_label(L, b, 0, in->b));
 		} else {
 			uint32_t el = a64_vir_successor_label(L, b, 1, in->c), tl = a64_vir_successor_label(L, b, 0, in->b);
 
 			a64_vir_branch_conditional_emit(e, cc, false, tl);
-			jump(e, el);
+			a64_jump_emit(e, el);
 		}
 		return;
 	}
@@ -330,7 +330,7 @@ VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i, uint8_
 		a64_vir_return_lower(L);
 		return;
 	case VIR_OP_TRAP:
-		put(e, I_BRK)->imm = 1;
+		a64_record_emit(e, A64_OP_BRK)->imm = 1;
 		e->is_reachable = false;
 		return;
 	default: {

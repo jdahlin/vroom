@@ -1,15 +1,15 @@
 /* vcc arm64 code generator: frame slots, addresses and typed loads and stores that VIR's lowering shares with the walker */
 #include "../../../codegen/codegen-internal.h"
 
-/* a stack slot: returns its offset (FRAME base) */
-VPRIV int64_t slot(codegen_context *e, uint64_t size, uint32_t align)
+/* a stack slot: returns its offset (A64_REGISTER_FRAME base) */
+VPRIV int64_t a64_frame_slot_allocate(codegen_context *e, uint64_t size, uint32_t align)
 {
 	if (align < 1)
 		align = 1;
 	if (align > 16) {	/* x28: the base of the realigned frame if it turns out dynamic */
 		if (e->local_register_candidate_count)
 			_longjmp(e->bail_jump, 2);	/* it holds a register variable (they start at x28): again without */
-		e->temporaries_reserved |= 1u << codegen_temporary_index(R_BP);
+		e->temporaries_reserved |= 1u << codegen_temporary_index(A64_REGISTER_FRAME_BASE);
 	}
 	if (align > e->frame_alignment)
 		e->frame_alignment = align;	/* over 16: finish_function realigns sp to it */
@@ -32,7 +32,7 @@ VPRIV int64_t slot(codegen_context *e, uint64_t size, uint32_t align)
 }
 
 /* tag record i (frame offset off, len bytes; -1: an address) with its live allocation */
-VPRIV void slot_tag(codegen_context *e, ins *i, int64_t off, int64_t len)
+VPRIV void a64_record_slot_tag(codegen_context *e, a64_record *i, int64_t off, int64_t len)
 {
 	uint32_t lo = 0, hi = e->live_slot_count;
 
@@ -70,51 +70,51 @@ VPRIV void slot_tag(codegen_context *e, ins *i, int64_t off, int64_t len)
 }
 
 /* address of a symbol into rd */
-VPRIV void addr_of_ref(codegen_context *e, int rd, uint32_t ref, int64_t off)
+VPRIV void a64_reference_address_emit(codegen_context *e, int rd, uint32_t ref, int64_t off)
 {
 	cc *c = e->compile_context;
 
 	codegen_reference_note(e, ref);
 	if (codegen_symbol_needs_got(c, ref)) {
-		symop(e, I_LDGOT, 1, 0, rd, 0, ref, 0);
+		a64_record_emit_symbol(e, A64_OP_LDGOT, 1, 0, rd, 0, ref, 0);
 		if (off)
-			opi(e, I_ADDI, 1, rd, rd, off);
+			a64_record_emit_immediate(e, A64_OP_ADDI, 1, rd, rd, off);
 		return;
 	}
 	if (!CODEGEN_SYMBOL_OFFSET_FITS(c, off)) {
-		symop(e, I_ADRP, 1, 0, rd, 0, ref, 0);
-		symop(e, I_ADDLO, 1, 0, rd, rd, ref, 0);
-		opi(e, I_ADDI, 1, rd, rd, (int64_t)off);
+		a64_record_emit_symbol(e, A64_OP_ADRP, 1, 0, rd, 0, ref, 0);
+		a64_record_emit_symbol(e, A64_OP_ADDLO, 1, 0, rd, rd, ref, 0);
+		a64_record_emit_immediate(e, A64_OP_ADDI, 1, rd, rd, (int64_t)off);
 		return;
 	}
-	symop(e, I_ADRP, 1, 0, rd, 0, ref, off);
-	symop(e, I_ADDLO, 1, 0, rd, rd, ref, off);
+	a64_record_emit_symbol(e, A64_OP_ADRP, 1, 0, rd, 0, ref, off);
+	a64_record_emit_symbol(e, A64_OP_ADDLO, 1, 0, rd, rd, ref, off);
 }
 
 /* base register + offset for a memory access; may load a symbol page into x16 */
-VPRIV int lbase(codegen_context *e, const codegen_lvalue *l, int64_t *off, int size)
+VPRIV int a64_lvalue_base_register(codegen_context *e, const codegen_lvalue *l, int64_t *off, int size)
 {
 	switch (l->kind) {
 	case CODEGEN_LVALUE_FRAME:
 		*off = l->offset;
-		return FRAME;
+		return A64_REGISTER_FRAME;
 	case CODEGEN_LVALUE_REGISTER:
 		*off = l->offset;
 		return l->register_number;
 	case CODEGEN_LVALUE_LOCAL_REGISTER:
 		codegen_fatal_report(e, e->current_location, "internal: memory access to a register variable");
 	default:
-		addr_of_ref(e, R_X16, l->reference, l->offset);
+		a64_reference_address_emit(e, R_X16, l->reference, l->offset);
 		*off = 0;
 		(void)size;
 		return R_X16;
 	}
 }
 
-VPRIV int log2sz(uint64_t n) { return n == 1 ? 0 : n == 2 ? 1 : n == 4 ? 2 : 3; }
+VPRIV int a64_size_log2(uint64_t n) { return n == 1 ? 0 : n == 2 ? 1 : n == 4 ? 2 : 3; }
 
 /* the alignment the object a reference names is known to have */
-static uint32_t ref_align(codegen_context *e, const codegen_lvalue *l)
+static uint32_t a64_reference_alignment(codegen_context *e, const codegen_lvalue *l)
 {
 	cc *c = e->compile_context;
 	uint32_t a;
@@ -129,40 +129,40 @@ static uint32_t ref_align(codegen_context *e, const codegen_lvalue *l)
 }
 
 /* load a scalar of size n (1,2,4,8) into rd; ext: 0 zero, 1 sign to x */
-VPRIV void load_n(codegen_context *e, int rd, const codegen_lvalue *l, int n, int ext)
+VPRIV void a64_lvalue_load(codegen_context *e, int rd, const codegen_lvalue *l, int n, int ext)
 {
 	int64_t off;
-	int sz = log2sz((uint64_t)n);
+	int sz = a64_size_log2((uint64_t)n);
 
-	if (l->kind == CODEGEN_LVALUE_SYMBOL && !codegen_symbol_needs_got(e->compile_context, l->reference) && ref_align(e, l) >= (uint32_t)n && (l->offset & (n - 1)) == 0 &&
+	if (l->kind == CODEGEN_LVALUE_SYMBOL && !codegen_symbol_needs_got(e->compile_context, l->reference) && a64_reference_alignment(e, l) >= (uint32_t)n && (l->offset & (n - 1)) == 0 &&
 	    CODEGEN_SYMBOL_OFFSET_FITS(e->compile_context, l->offset)) {
 		codegen_reference_note(e, l->reference);
-		symop(e, I_ADRP, 1, 0, R_X16, 0, l->reference, l->offset);
-		symop(e, I_LDLO, sz, ext, rd, R_X16, l->reference, l->offset);
+		a64_record_emit_symbol(e, A64_OP_ADRP, 1, 0, R_X16, 0, l->reference, l->offset);
+		a64_record_emit_symbol(e, A64_OP_LDLO, sz, ext, rd, R_X16, l->reference, l->offset);
 		return;
 	}
 	{
-		int b = lbase(e, l, &off, n);
+		int b = a64_lvalue_base_register(e, l, &off, n);
 
-		mem(e, I_LD, sz, ext, rd, b, off);
+		a64_record_emit_memory(e, A64_OP_LD, sz, ext, rd, b, off);
 	}
 }
 
-VPRIV void store_n(codegen_context *e, int rs, const codegen_lvalue *l, int64_t extra, int n)
+VPRIV void a64_lvalue_store(codegen_context *e, int rs, const codegen_lvalue *l, int64_t extra, int n)
 {
 	int64_t off;
-	int sz = log2sz((uint64_t)n);
+	int sz = a64_size_log2((uint64_t)n);
 
-	if (l->kind == CODEGEN_LVALUE_SYMBOL && !codegen_symbol_needs_got(e->compile_context, l->reference) && ref_align(e, l) >= (uint32_t)n && ((l->offset + extra) & (n - 1)) == 0 &&
+	if (l->kind == CODEGEN_LVALUE_SYMBOL && !codegen_symbol_needs_got(e->compile_context, l->reference) && a64_reference_alignment(e, l) >= (uint32_t)n && ((l->offset + extra) & (n - 1)) == 0 &&
 	    CODEGEN_SYMBOL_OFFSET_FITS(e->compile_context, l->offset + extra)) {
 		codegen_reference_note(e, l->reference);
-		symop(e, I_ADRP, 1, 0, R_X16, 0, l->reference, l->offset + extra);
-		symop(e, I_STLO, sz, 0, rs, R_X16, l->reference, l->offset + extra);
+		a64_record_emit_symbol(e, A64_OP_ADRP, 1, 0, R_X16, 0, l->reference, l->offset + extra);
+		a64_record_emit_symbol(e, A64_OP_STLO, sz, 0, rs, R_X16, l->reference, l->offset + extra);
 		return;
 	}
 	{
-		int b = lbase(e, l, &off, n);
+		int b = a64_lvalue_base_register(e, l, &off, n);
 
-		mem(e, I_ST, sz, 0, rs, b, off + extra);
+		a64_record_emit_memory(e, A64_OP_ST, sz, 0, rs, b, off + extra);
 	}
 }

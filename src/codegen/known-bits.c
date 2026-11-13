@@ -5,7 +5,7 @@
  * kbits fills a known-mask and the values of those bits; it looks through casts, constants, comma,
  * conditional, bitwise operators and shifts, and is conservative: a bit not proven is not known.  Its
  * only user is arm64's inline-asm operand selection (arch/a64/codegen/asm.c), which also calls
- * codegen_constraint_immediate_fits; codegen_constraint_immediate_fits is the arm64 meaning of the letters (logimm_ok for the logical-immediate ones).
+ * codegen_constraint_immediate_fits; codegen_constraint_immediate_fits is the arm64 meaning of the letters (a64_logical_immediate_is_encodable for the logical-immediate ones).
  */
 #include "codegen-internal.h"
 
@@ -14,8 +14,8 @@ VPRIV bool codegen_constraint_immediate_fits(int ch, i128 v)
 	switch (ch) {
 	case 'I': return v >= 0 && v <= 4095;
 	case 'J': return v >= -4095 && v <= 0;
-	case 'K': return logimm_ok((uint64_t)v, 0) && v == (i128)(uint32_t)v;
-	case 'L': return logimm_ok((uint64_t)v, 1);
+	case 'K': return a64_logical_immediate_is_encodable((uint64_t)v, 0) && v == (i128)(uint32_t)v;
+	case 'L': return a64_logical_immediate_is_encodable((uint64_t)v, 1);
 	case 'M': return v == (i128)(uint32_t)v;
 	case 'N': return true;
 	case 'i': case 'n': case 's': return true;

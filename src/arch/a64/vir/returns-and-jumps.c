@@ -12,11 +12,11 @@ VPRIV void a64_vir_callee_saved_float_save(a64_vir_context *L, bool restore, int
 	for (int r = 8; r < 16; r++)
 		if (L->allocation->callee[1] >> r & 1) {
 			if (restore) {
-				mem(L->context, I_LD, 3, 0, t, FRAME, L->callee_saved_float_offsets[r - 8]);
-				word(L->context, f_in(1, r, t));
+				a64_record_emit_memory(L->context, A64_OP_LD, 3, 0, t, A64_REGISTER_FRAME, L->callee_saved_float_offsets[r - 8]);
+				a64_record_emit_word(L->context, a64_word_fmov_to_vector(1, r, t));
 			} else {
-				word(L->context, f_out(1, t, r));
-				mem(L->context, I_ST, 3, 0, t, FRAME, L->callee_saved_float_offsets[r - 8]);
+				a64_record_emit_word(L->context, a64_word_fmov_from_vector(1, t, r));
+				a64_record_emit_memory(L->context, A64_OP_ST, 3, 0, t, A64_REGISTER_FRAME, L->callee_saved_float_offsets[r - 8]);
 			}
 		}
 }
@@ -24,12 +24,12 @@ VPRIV void a64_vir_callee_saved_float_save(a64_vir_context *L, bool restore, int
 VPRIV void a64_vir_return_lower(a64_vir_context *L)
 {
 	codegen_context *e = L->context;
-	ins *t;
+	a64_record *t;
 
 	if (!e->is_reachable)
 		return;
 	a64_vir_callee_saved_float_save(L, true, R_X16);
-	t = put(e, I_TAIL);
+	t = a64_record_emit(e, A64_OP_TAIL);
 	t->cond = 4;
 	t->sh = L->is_before_save_point;
 	t->label = L->return_label;
@@ -51,7 +51,7 @@ VPRIV void a64_vir_goto_emit(a64_vir_context *L, uint32_t b, uint32_t t)
 	 * the way in costs no jump (loop rotation with the guard, as LLVM's) */
 
 	if (L->is_before_save_point && vir_block_dominates(L->function, L->save_point, t)) {	/* to the save point: its code runs behind the prologue */
-		jump(L->context, L->labels[t]);
+		a64_jump_emit(L->context, L->labels[t]);
 		return;
 	}
 	if (vir_layout_duplicate(L->function, L->loops, a64_vir_thread_state_instance.head_labels, b, t, a64_vir_block_fallthrough(L), L->dup, !L->context->unit->cleanups_disabled)) {
@@ -61,7 +61,7 @@ VPRIV void a64_vir_goto_emit(a64_vir_context *L, uint32_t b, uint32_t t)
 		L->dup = d;
 		return;
 	}
-	jump(L->context, a64_vir_block_label(L, t));
+	a64_jump_emit(L->context, a64_vir_block_label(L, t));
 }
 
 /* the call at i will be a sibling call (a64_vir_call_lower's test, before the registers are known) */

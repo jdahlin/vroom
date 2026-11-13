@@ -51,26 +51,26 @@ static void f_load(codegen_context *e, int d, int vr, codegen_value *v)
 {
 	int r = toreg(e, v);
 
-	word(e, f_in(d, vr, r));
+	a64_record_emit_word(e, a64_word_fmov_to_vector(d, vr, r));
 }
 
 /* an FP value of sz bytes (4, 8, 16) between v<vr> and memory at base + off, through x16 */
 VPRIV void vr_store(codegen_context *e, int sz, int vr, int base, int64_t off)
 {
-	word(e, f_out(sz >= 8, R_X16, vr));
-	mem(e, I_ST, sz >= 8 ? 3 : sz == 2 ? 1 : 2, 0, R_X16, base, off);
+	a64_record_emit_word(e, a64_word_fmov_from_vector(sz >= 8, R_X16, vr));
+	a64_record_emit_memory(e, A64_OP_ST, sz >= 8 ? 3 : sz == 2 ? 1 : 2, 0, R_X16, base, off);
 	if (sz == 16) {
-		word(e, q_out_hi(R_X16, vr));
-		mem(e, I_ST, 3, 0, R_X16, base, off + 8);
+		a64_record_emit_word(e, a64_word_fmov_high_from_vector(R_X16, vr));
+		a64_record_emit_memory(e, A64_OP_ST, 3, 0, R_X16, base, off + 8);
 	}
 }
 VPRIV void vr_load(codegen_context *e, int sz, int vr, int base, int64_t off)
 {
-	mem(e, I_LD, sz >= 8 ? 3 : sz == 2 ? 1 : 2, 0, R_X16, base, off);
-	word(e, f_in(sz >= 8, vr, R_X16));
+	a64_record_emit_memory(e, A64_OP_LD, sz >= 8 ? 3 : sz == 2 ? 1 : 2, 0, R_X16, base, off);
+	a64_record_emit_word(e, a64_word_fmov_to_vector(sz >= 8, vr, R_X16));
 	if (sz == 16) {
-		mem(e, I_LD, 3, 0, R_X16, base, off + 8);
-		word(e, q_in_hi(vr, R_X16));
+		a64_record_emit_memory(e, A64_OP_LD, 3, 0, R_X16, base, off + 8);
+		a64_record_emit_word(e, a64_word_fmov_high_to_vector(vr, R_X16));
 	}
 }
 
@@ -126,18 +126,18 @@ VPRIV codegen_value ld_compare(codegen_context *e, int op, ast_qualified_type t,
 	codegen_value res;
 
 	switch (op) {
-	case LEX_TOKEN_EQUAL_EQUAL: fn = CODEGEN_LIBRARY_EQTF2, cond = C_EQ; break;
-	case LEX_TOKEN_EXCLAMATION_EQUAL: fn = CODEGEN_LIBRARY_NETF2, cond = C_NE; break;
-	case LEX_TOKEN_LESS: fn = CODEGEN_LIBRARY_LTTF2, cond = C_LT; break;
-	case LEX_TOKEN_LESS_EQUAL: fn = CODEGEN_LIBRARY_LETF2, cond = C_LE; break;
-	case LEX_TOKEN_GREATER: fn = CODEGEN_LIBRARY_GTTF2, cond = C_GT; break;
-	case LEX_TOKEN_GREATER_EQUAL: fn = CODEGEN_LIBRARY_GETF2, cond = C_GE; break;
+	case LEX_TOKEN_EQUAL_EQUAL: fn = CODEGEN_LIBRARY_EQTF2, cond = A64_CONDITION_EQ; break;
+	case LEX_TOKEN_EXCLAMATION_EQUAL: fn = CODEGEN_LIBRARY_NETF2, cond = A64_CONDITION_NE; break;
+	case LEX_TOKEN_LESS: fn = CODEGEN_LIBRARY_LTTF2, cond = A64_CONDITION_LT; break;
+	case LEX_TOKEN_LESS_EQUAL: fn = CODEGEN_LIBRARY_LETF2, cond = A64_CONDITION_LE; break;
+	case LEX_TOKEN_GREATER: fn = CODEGEN_LIBRARY_GTTF2, cond = A64_CONDITION_GT; break;
+	case LEX_TOKEN_GREATER_EQUAL: fn = CODEGEN_LIBRARY_GETF2, cond = A64_CONDITION_GE; break;
 	default: codegen_fatal_report(e, e->current_location, "unsupported floating point comparison");
 	}
 	res = ld_call(e, fn, v, ts, 2, codegen_type_primitive(AST_TYPE_INT));
 	r = toreg(e, &res);
-	opi(e, I_SUBSI, 0, ZR, r, 0);
-	cset(e, r, cond);
+	a64_record_emit_immediate(e, A64_OP_SUBSI, 0, ZR, r, 0);
+	a64_record_emit_condition_set(e, r, cond);
 	return codegen_value_register(r);
 }
 
@@ -182,8 +182,8 @@ VPRIV codegen_value f_arith(codegen_context *e, int op, ast_qualified_type ty, c
 	f_load(e, d, FV1, &b);
 	val_free(e, &b);
 	ra = a.register_number;
-	word(e, w | (unsigned)d << 22 | FV1 << 16 | FV0 << 5 | FV0);
-	word(e, f_out(d, ra, FV0));
+	a64_record_emit_word(e, w | (unsigned)d << 22 | FV1 << 16 | FV0 << 5 | FV0);
+	a64_record_emit_word(e, a64_word_fmov_from_vector(d, ra, FV0));
 	return a;
 }
 
@@ -193,17 +193,17 @@ VPRIV int f_cmp(codegen_context *e, int op, int d, codegen_value *a, codegen_val
 	f_load(e, d, FV0, a);
 	if (b) {
 		f_load(e, d, FV1, b);
-		word(e, 0x1e202000u | (unsigned)d << 22 | FV1 << 16 | FV0 << 5);
+		a64_record_emit_word(e, 0x1e202000u | (unsigned)d << 22 | FV1 << 16 | FV0 << 5);
 	} else {
-		word(e, 0x1e202008u | (unsigned)d << 22 | FV0 << 5);
+		a64_record_emit_word(e, 0x1e202008u | (unsigned)d << 22 | FV0 << 5);
 	}
 	switch (op) {
-	case LEX_TOKEN_EQUAL_EQUAL: return C_EQ;
-	case LEX_TOKEN_EXCLAMATION_EQUAL: return C_NE;	/* true when unordered */
-	case LEX_TOKEN_LESS: return C_MI;
-	case LEX_TOKEN_LESS_EQUAL: return C_LS;
-	case LEX_TOKEN_GREATER: return C_GT;
-	case LEX_TOKEN_GREATER_EQUAL: return C_GE;
+	case LEX_TOKEN_EQUAL_EQUAL: return A64_CONDITION_EQ;
+	case LEX_TOKEN_EXCLAMATION_EQUAL: return A64_CONDITION_NE;	/* true when unordered */
+	case LEX_TOKEN_LESS: return A64_CONDITION_MI;
+	case LEX_TOKEN_LESS_EQUAL: return A64_CONDITION_LS;
+	case LEX_TOKEN_GREATER: return A64_CONDITION_GT;
+	case LEX_TOKEN_GREATER_EQUAL: return A64_CONDITION_GE;
 	}
 	codegen_fatal_report(e, e->current_location, "unsupported floating point comparison");
 }
@@ -235,7 +235,7 @@ VPRIV codegen_value f_compare(codegen_context *e, int op, ast_qualified_type t, 
 	}
 	cond = f_cmp(e, op, d, &a, &b);
 	val_free(e, &b);
-	cset(e, a.register_number, cond);
+	a64_record_emit_condition_set(e, a.register_number, cond);
 	return codegen_value_register(a.register_number);
 }
 
@@ -257,7 +257,7 @@ VPRIV codegen_value f_tobool(codegen_context *e, codegen_value v, ast_qualified_
 	if (v.kind == CODEGEN_VALUE_CONSTANT)
 		return codegen_value_constant(f_val(d, v.integer) != 0);
 	f_cmp(e, LEX_TOKEN_EXCLAMATION_EQUAL, d, &v, NULL);
-	cset(e, v.register_number, C_NE);
+	a64_record_emit_condition_set(e, v.register_number, A64_CONDITION_NE);
 	return v;
 }
 
@@ -269,7 +269,7 @@ VPRIV codegen_value f_neg(codegen_context *e, codegen_value v, ast_qualified_typ
 		if (v.kind == CODEGEN_VALUE_CONSTANT)
 			return codegen_value_constant(v.integer ^ 0x8000);
 		toreg(e, &v);
-		opi(e, I_EORI, 0, v.register_number, v.register_number, 0x8000);
+		a64_record_emit_immediate(e, A64_OP_EORI, 0, v.register_number, v.register_number, 0x8000);
 		return v;
 	}
 
@@ -277,7 +277,7 @@ VPRIV codegen_value f_neg(codegen_context *e, codegen_value v, ast_qualified_typ
 		if (v.kind == CODEGEN_VALUE_CONSTANT)
 			return codegen_value_constant((i128)((u128)v.integer ^ (u128)1 << 127));
 		toreg2(e, &v, false);
-		opi(e, I_EORI, 1, v.register_high, v.register_high, (int64_t)0x8000000000000000ULL);
+		a64_record_emit_immediate(e, A64_OP_EORI, 1, v.register_high, v.register_high, (int64_t)0x8000000000000000ULL);
 		return v;
 	}
 	d = fpk(e, t);
@@ -285,8 +285,8 @@ VPRIV codegen_value f_neg(codegen_context *e, codegen_value v, ast_qualified_typ
 	if (v.kind == CODEGEN_VALUE_CONSTANT)
 		return f_const(d, -f_val(d, v.integer));
 	f_load(e, d, FV0, &v);
-	word(e, 0x1e214000u | (unsigned)d << 22 | FV0 << 5 | FV0);
-	word(e, f_out(d, v.register_number, FV0));
+	a64_record_emit_word(e, 0x1e214000u | (unsigned)d << 22 | FV0 << 5 | FV0);
+	a64_record_emit_word(e, a64_word_fmov_from_vector(d, v.register_number, FV0));
 	return v;
 }
 
@@ -394,8 +394,8 @@ VPRIV codegen_value f_cast(codegen_context *e, codegen_value v, ast_qualified_ty
 			uint32_t op = fh ? (d ? 0x1ee2c000u : 0x1ee24000u) : (d ? 0x1e63c000u : 0x1e23c000u);
 
 			f_load(e, !fh && d, FV0, &v);
-			word(e, op | FV0 << 5 | FV0);
-			word(e, f_out(fh && d, v.register_number, FV0));
+			a64_record_emit_word(e, op | FV0 << 5 | FV0);
+			a64_record_emit_word(e, a64_word_fmov_from_vector(fh && d, v.register_number, FV0));
 			return v;
 		}
 	}
@@ -411,8 +411,8 @@ VPRIV codegen_value f_cast(codegen_context *e, codegen_value v, ast_qualified_ty
 		if (v.kind == CODEGEN_VALUE_CONSTANT)
 			return f_const(td, f_val(fd, v.integer));
 		f_load(e, fd, FV0, &v);
-		word(e, (fd ? 0x1e624000u : 0x1e22c000u) | FV0 << 5 | FV0);	/* fcvt s<-d / d<-s */
-		word(e, f_out(td, v.register_number, FV0));
+		a64_record_emit_word(e, (fd ? 0x1e624000u : 0x1e22c000u) | FV0 << 5 | FV0);	/* fcvt s<-d / d<-s */
+		a64_record_emit_word(e, a64_word_fmov_from_vector(td, v.register_number, FV0));
 		return v;
 	}
 	if (tf) {
@@ -445,8 +445,8 @@ VPRIV codegen_value f_cast(codegen_context *e, codegen_value v, ast_qualified_ty
 		if (fs < 4)
 			extend(e, v.register_number, v.register_number, (int)fs, sg);
 		/* scvtf/ucvtf v16, x/w */
-		word(e, (fs == 8 ? 0x9e220000u : 0x1e220000u) | (sg ? 0 : 0x10000u) | (unsigned)td << 22 | (unsigned)v.register_number << 5 | FV0);
-		word(e, f_out(td, v.register_number, FV0));
+		a64_record_emit_word(e, (fs == 8 ? 0x9e220000u : 0x1e220000u) | (sg ? 0 : 0x10000u) | (unsigned)td << 22 | (unsigned)v.register_number << 5 | FV0);
+		a64_record_emit_word(e, a64_word_fmov_from_vector(td, v.register_number, FV0));
 		return v;
 	}
 	{
@@ -471,7 +471,7 @@ VPRIV codegen_value f_cast(codegen_context *e, codegen_value v, ast_qualified_ty
 			return codegen_value_constant(codegen_integer_truncate(c, sg ? (i128)(int64_t)x : (i128)(uint64_t)x, to));
 		}
 		f_load(e, fd, FV0, &v);
-		word(e, (ts == 8 ? 0x9e380000u : 0x1e380000u) | (sg ? 0 : 0x10000u) | (unsigned)fd << 22 | FV0 << 5 | (unsigned)v.register_number);
+		a64_record_emit_word(e, (ts == 8 ? 0x9e380000u : 0x1e380000u) | (sg ? 0 : 0x10000u) | (unsigned)fd << 22 | FV0 << 5 | (unsigned)v.register_number);
 		if (ts < 4)
 			extend(e, v.register_number, v.register_number, (int)ts, sg);
 		return v;

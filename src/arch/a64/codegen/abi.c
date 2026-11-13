@@ -9,16 +9,16 @@
  * the same floating type, or 1-4 short vectors (8 or 16 bytes) of the same
  * size, with no padding; a short vector alone counts as one.  Returns the
  * member size (4, 8 or 16) and sets *n, or 0.  In *base a vector size
- * carries HV, so floats and vectors never mix.
+ * carries A64_ABI_HFA_VECTOR, so floats and vectors never mix.
  */
-enum { HV = 0x100 };
+enum { A64_ABI_HFA_VECTOR = 0x100 };
 
-static int hfa_walk(cc *c, ast_qualified_type t, int *base, uint64_t *n)
+static int a64_abi_hfa_scan(cc *c, ast_qualified_type t, int *base, uint64_t *n)
 {
 	const ctype *y = T(c, t);
 
 	if (y->kind == AST_TYPE_VECTOR) {
-		int b = (int)y->size | HV;
+		int b = (int)y->size | A64_ABI_HFA_VECTOR;
 
 		if ((y->size != 8 && y->size != 16) || (*base && *base != b))
 			return 0;
@@ -38,7 +38,7 @@ static int hfa_walk(cc *c, ast_qualified_type t, int *base, uint64_t *n)
 	if (y->kind == AST_TYPE_ARRAY) {
 		uint64_t m;
 
-		if (y->flags & (AST_TYPE_FLAG_VLA | AST_TYPE_FLAG_INCOMPLETE) || !hfa_walk(c, y->base, base, &m))
+		if (y->flags & (AST_TYPE_FLAG_VLA | AST_TYPE_FLAG_INCOMPLETE) || !a64_abi_hfa_scan(c, y->base, base, &m))
 			return 0;
 		*n = m * y->n;
 		return y->n > 0;
@@ -56,7 +56,7 @@ static int hfa_walk(cc *c, ast_qualified_type t, int *base, uint64_t *n)
 			if ((g->f[k].bitfield && !g->f[k].width) ||
 			    (!g->f[k].bitfield && codegen_type_size(c, g->f[k].ty) == 0))
 				continue;
-			if (g->f[k].bitfield || !hfa_walk(c, g->f[k].ty, base, &m))
+			if (g->f[k].bitfield || !a64_abi_hfa_scan(c, g->f[k].ty, base, &m))
 				return 0;
 			if (y->kind == AST_TYPE_UNION)
 				tot = m > tot ? m : tot;
@@ -64,21 +64,21 @@ static int hfa_walk(cc *c, ast_qualified_type t, int *base, uint64_t *n)
 				tot += m;
 		}
 		*n = tot;
-		return tot > 0 && *base && tot * (uint64_t)(*base & ~HV) == g->size;
+		return tot > 0 && *base && tot * (uint64_t)(*base & ~A64_ABI_HFA_VECTOR) == g->size;
 	}
 	return 0;
 }
 
-VPRIV int hfa(cc *c, ast_qualified_type t, int *n)
+VPRIV int a64_abi_hfa_classify(cc *c, ast_qualified_type t, int *n)
 {
 	int base = 0;
 	uint64_t m = 0;
 
 	if (codegen_type_is_bool_vector(c, t) && (T(c, t)->n == 64 || T(c, t)->n == 128)) return 0;
-	if (!codegen_type_is_record_like(c, t) || !hfa_walk(c, t, &base, &m) || m > 4)
+	if (!codegen_type_is_record_like(c, t) || !a64_abi_hfa_scan(c, t, &base, &m) || m > 4)
 		return 0;
 	*n = (int)m;
-	return base & ~HV;
+	return base & ~A64_ABI_HFA_VECTOR;
 }
 
 /*
@@ -87,45 +87,45 @@ VPRIV int hfa(cc *c, ast_qualified_type t, int *n)
  * widened to 8/n bytes (v4qi as 4h, v2hi and v2qi as 2s), one lane as it
  * is.  As an argument it goes in a GPR as its bytes (classify).
  */
-VPRIV bool vec_small(cc *c, ast_qualified_type t) { return codegen_type_is_vector(c, t) && !codegen_type_is_bool_vector(c, t) && codegen_type_size(c, t) < 8; }
+VPRIV bool a64_abi_vector_is_small(cc *c, ast_qualified_type t) { return codegen_type_is_vector(c, t) && !codegen_type_is_bool_vector(c, t) && codegen_type_size(c, t) < 8; }
 
 /* the vector at [rs] into v0 */
-VPRIV void vec_small_ret(codegen_context *e, ast_qualified_type t, int rs)
+VPRIV void a64_abi_small_vector_return(codegen_context *e, ast_qualified_type t, int rs)
 {
 	cc *c = e->compile_context;
 	uint32_t n = T(c, t)->n, size = (uint32_t)codegen_type_size(c, t), es = n ? size / n : size, w = n > 1 ? 8 / n : 0;
 	int acc = treg(e), x = treg(e);
 
 	if (n <= 1) {
-		mem(e, I_LD, log2sz(size), 0, acc, rs, 0);
-		word(e, f_in(0, 0, acc));	/* fmov s0, w */
+		a64_record_emit_memory(e, A64_OP_LD, a64_size_log2(size), 0, acc, rs, 0);
+		a64_record_emit_word(e, a64_word_fmov_to_vector(0, 0, acc));	/* fmov s0, w */
 	} else {
-		movi(e, 1, acc, 0);
+		a64_record_emit_move_immediate(e, 1, acc, 0);
 		for (uint32_t k = 0; k < n; k++) {
-			mem(e, I_LD, log2sz(es), 0, x, rs, (int32_t)(k * es));
-			op3s(e, I_ORR, 1, acc, acc, x, 0, (int)(8 * w * k));
+			a64_record_emit_memory(e, A64_OP_LD, a64_size_log2(es), 0, x, rs, (int32_t)(k * es));
+			a64_record_emit_three_registers_shifted(e, A64_OP_ORR, 1, acc, acc, x, 0, (int)(8 * w * k));
 		}
-		word(e, f_in(1, 0, acc));	/* fmov d0, x */
+		a64_record_emit_word(e, a64_word_fmov_to_vector(1, 0, acc));	/* fmov d0, x */
 	}
 	tfree(e, x);
 	tfree(e, acc);
 }
 
 /* v0 (a call's result) into the slot at sl */
-VPRIV void vec_small_res(codegen_context *e, ast_qualified_type t, int64_t sl)
+VPRIV void a64_abi_small_vector_result_store(codegen_context *e, ast_qualified_type t, int64_t sl)
 {
 	cc *c = e->compile_context;
 	uint32_t n = T(c, t)->n, size = (uint32_t)codegen_type_size(c, t), es = n ? size / n : size, w = n > 1 ? 8 / n : 0;
 	int acc = treg(e), x = treg(e);
 
 	if (n <= 1) {
-		word(e, f_out(0, acc, 0));	/* fmov w, s0 */
-		mem(e, I_ST, log2sz(size), 0, acc, FRAME, sl);
+		a64_record_emit_word(e, a64_word_fmov_from_vector(0, acc, 0));	/* fmov w, s0 */
+		a64_record_emit_memory(e, A64_OP_ST, a64_size_log2(size), 0, acc, A64_REGISTER_FRAME, sl);
 	} else {
-		word(e, f_out(1, acc, 0));	/* fmov x, d0 */
+		a64_record_emit_word(e, a64_word_fmov_from_vector(1, acc, 0));	/* fmov x, d0 */
 		for (uint32_t k = 0; k < n; k++) {
-			opbf(e, I_UBFM, 1, x, acc, (int)(8 * w * k), (int)(8 * w * k + 8 * es - 1));
-			mem(e, I_ST, log2sz(es), 0, x, FRAME, sl + (int32_t)(k * es));
+			a64_record_emit_bitfield(e, A64_OP_UBFM, 1, x, acc, (int)(8 * w * k), (int)(8 * w * k + 8 * es - 1));
+			a64_record_emit_memory(e, A64_OP_ST, a64_size_log2(es), 0, x, A64_REGISTER_FRAME, sl + (int32_t)(k * es));
 		}
 	}
 	tfree(e, x);
@@ -135,54 +135,54 @@ VPRIV void vec_small_res(codegen_context *e, ast_qualified_type t, int64_t sl)
 /* LLVM legalizes small boolean-vector results independently of packed storage.
  * Power-of-two lane counts 2/4/8/16 use one SIMD register; other counts
  * through eight use one integer register per lane. Larger results use x8. */
-VPRIV void bvec_ret(codegen_context *e, ast_qualified_type t, int rs)
+VPRIV void a64_abi_bool_vector_return(codegen_context *e, ast_qualified_type t, int rs)
 {
 	unsigned n = T(e->compile_context, t)->n;
 	bool simd = n == 2 || n == 4 || n == 8 || n == 16;
 	unsigned stride = n == 16 ? 1 : simd ? 8 / n : 0;
-	int64_t sl = simd ? slot(e, 16, 16) : 0;
+	int64_t sl = simd ? a64_frame_slot_allocate(e, 16, 16) : 0;
 	int r = treg(e);
 	for (unsigned i = 0; i < n; i++) {
-		mem(e, I_LD, 0, 0, r, rs, i / 8);
-		opbf(e, I_UBFM, 1, r, r, i % 8, i % 8);
-		if (simd) mem(e, I_ST, log2sz(stride), 0, r, FRAME, sl + i * stride);
-		else mov(e, 0, i, r);
+		a64_record_emit_memory(e, A64_OP_LD, 0, 0, r, rs, i / 8);
+		a64_record_emit_bitfield(e, A64_OP_UBFM, 1, r, r, i % 8, i % 8);
+		if (simd) a64_record_emit_memory(e, A64_OP_ST, a64_size_log2(stride), 0, r, A64_REGISTER_FRAME, sl + i * stride);
+		else a64_record_emit_move(e, 0, i, r);
 	}
-	if (simd) vr_load(e, n == 16 ? 16 : 8, 0, FRAME, sl);
+	if (simd) vr_load(e, n == 16 ? 16 : 8, 0, A64_REGISTER_FRAME, sl);
 	tfree(e, r);
 }
 
-VPRIV void bvec_res(codegen_context *e, ast_qualified_type t, int64_t sl)
+VPRIV void a64_abi_bool_vector_result_store(codegen_context *e, ast_qualified_type t, int64_t sl)
 {
 	unsigned n = T(e->compile_context, t)->n;
 	bool simd = n == 2 || n == 4 || n == 8 || n == 16;
 	unsigned stride = n == 16 ? 1 : simd ? 8 / n : 0;
-	int64_t tmp = simd ? slot(e, 16, 16) : 0;
+	int64_t tmp = simd ? a64_frame_slot_allocate(e, 16, 16) : 0;
 	int r = treg(e), acc = treg(e);
-	if (simd) vr_store(e, n == 16 ? 16 : 8, 0, FRAME, tmp);
-	movi(e, 1, acc, 0);
+	if (simd) vr_store(e, n == 16 ? 16 : 8, 0, A64_REGISTER_FRAME, tmp);
+	a64_record_emit_move_immediate(e, 1, acc, 0);
 	for (unsigned i = 0; i < n; i++) {
-		if (simd) mem(e, I_LD, log2sz(stride), 0, r, FRAME, tmp + i * stride);
-		else mov(e, 0, r, i);
-		opbf(e, I_UBFM, 1, r, r, 0, 0);
-		op3s(e, I_ORR, 1, acc, acc, r, 0, i);
+		if (simd) a64_record_emit_memory(e, A64_OP_LD, a64_size_log2(stride), 0, r, A64_REGISTER_FRAME, tmp + i * stride);
+		else a64_record_emit_move(e, 0, r, i);
+		a64_record_emit_bitfield(e, A64_OP_UBFM, 1, r, r, 0, 0);
+		a64_record_emit_three_registers_shifted(e, A64_OP_ORR, 1, acc, acc, r, 0, i);
 	}
-	mem(e, I_ST, n > 8 ? 1 : 0, 0, acc, FRAME, sl);
+	a64_record_emit_memory(e, A64_OP_ST, n > 8 ? 1 : 0, 0, acc, A64_REGISTER_FRAME, sl);
 	tfree(e, acc);
 	tfree(e, r);
 }
 
 /* a record result returned through x8 */
-VPRIV bool is_sret(cc *c, ast_qualified_type t)
+VPRIV bool a64_abi_result_is_indirect(cc *c, ast_qualified_type t)
 {
 	int n;
 
 	if (codegen_type_is_bool_vector(c, t)) return T(c, t)->n > 8 && T(c, t)->n != 16;
-	return codegen_type_is_record_like(c, t) && codegen_type_size(c, t) > 16 && !hfa(c, t, &n);
+	return codegen_type_is_record_like(c, t) && codegen_type_size(c, t) > 16 && !a64_abi_hfa_classify(c, t, &n);
 }
 
 /* Apple: an anonymous (variadic) argument always goes on the stack in 8-byte slots */
-VPRIV void classify_va(codegen_context *e, ast_qualified_type t, int *nsaa, a64_abi_argument *a)
+VPRIV void a64_abi_variadic_argument_classify(codegen_context *e, ast_qualified_type t, int *nsaa, a64_abi_argument *a)
 {
 	cc *c = e->compile_context;
 	uint64_t size = codegen_type_size(c, t);
@@ -206,7 +206,7 @@ VPRIV void classify_va(codegen_context *e, ast_qualified_type t, int *nsaa, a64_
 /* the alignment AAPCS64 passes t by: clang's unadjusted alignment (a
  * record's fields without its own aligned(), a scalar's without a typedef's);
  * Apple's ABI takes the type's alignment */
-VPRIV uint32_t abi_align(cc *c, ast_qualified_type t)
+VPRIV uint32_t a64_abi_type_alignment(cc *c, ast_qualified_type t)
 {
 	const ctype *ct = T(c, t);
 
@@ -217,12 +217,12 @@ VPRIV uint32_t abi_align(cc *c, ast_qualified_type t)
 	return c->ty[ct->canon].align;
 }
 
-VPRIV void classify(codegen_context *e, ast_qualified_type t, int *ngrn, int *nsaa, a64_abi_argument *a)
+VPRIV void a64_abi_argument_classify(codegen_context *e, ast_qualified_type t, int *ngrn, int *nsaa, a64_abi_argument *a)
 {
 	cc *c = e->compile_context;
 	uint64_t size = codegen_type_size(c, t);
 	int n;
-	uint32_t al = abi_align(c, t);
+	uint32_t al = a64_abi_type_alignment(c, t);
 
 	memset(a, 0, sizeof(*a));
 	a->size = (uint32_t)size;
@@ -257,7 +257,7 @@ VPRIV void classify(codegen_context *e, ast_qualified_type t, int *ngrn, int *ns
 		goto stack;
 	}
 	if (codegen_type_is_record_like(c, t)) {
-		int hn, hb = hfa(c, t, &hn);
+		int hn, hb = a64_abi_hfa_classify(c, t, &hn);
 
 		if (hb) {
 			if (e->next_vector_register + hn <= 8) {
@@ -334,47 +334,47 @@ stack:
 	*nsaa += n * 8;
 }
 
-VPRIV void spill_live(codegen_context *e, a64_abi_spill *s)
+VPRIV void a64_abi_temporaries_spill(codegen_context *e, a64_abi_spill *s)
 {
 	s->mask = 0;
 	for (int i = 0; i < CODEGEN_TEMPORARY_COUNT; i++)
 		if ((e->temporaries_in_use & (1u << i)) && codegen_temporary_registers[i] < 19) {
-			s->slots[i] = slot(e, 8, 8);
-			mem(e, I_ST, 3, 0, codegen_temporary_registers[i], FRAME, s->slots[i]);
+			s->slots[i] = a64_frame_slot_allocate(e, 8, 8);
+			a64_record_emit_memory(e, A64_OP_ST, 3, 0, codegen_temporary_registers[i], A64_REGISTER_FRAME, s->slots[i]);
 			if (e->is_reachable)
 				e->records[e->record_count - 1].sh = A64_SPILL_RECORD;
 			s->mask |= 1u << i;
 		}
 }
 
-VPRIV void unspill(codegen_context *e, const a64_abi_spill *s)
+VPRIV void a64_abi_temporaries_restore(codegen_context *e, const a64_abi_spill *s)
 {
 	for (int i = 0; i < CODEGEN_TEMPORARY_COUNT; i++)
 		if (s->mask & (1u << i)) {
-			mem(e, I_LD, 3, 0, codegen_temporary_registers[i], FRAME, s->slots[i]);
+			a64_record_emit_memory(e, A64_OP_LD, 3, 0, codegen_temporary_registers[i], A64_REGISTER_FRAME, s->slots[i]);
 			if (e->is_reachable)
 				e->records[e->record_count - 1].sh = A64_SPILL_RECORD;
 		}
 }
 
 /* memcpy(a0, a1, n) / memset(a0, 0, n) with a0/a1 in temporaries */
-VPRIV void call_fixed(codegen_context *e, int fn, int a0, int a1, int a2, int64_t n)
+VPRIV void a64_call_memory_function_emit(codegen_context *e, int fn, int a0, int a1, int a2, int64_t n)
 {
 	a64_abi_spill sp;
-	ins *i;
+	a64_record *i;
 
 	(void)a2;
 	if (!e->is_reachable)
 		return;
 	e->has_calls = true;
-	spill_live(e, &sp);
-	mov(e, 1, 0, a0);
+	a64_abi_temporaries_spill(e, &sp);
+	a64_record_emit_move(e, 1, 0, a0);
 	if (a1 == -2)
-		movi(e, 0, 1, 0);
+		a64_record_emit_move_immediate(e, 0, 1, 0);
 	else
-		mov(e, 1, 1, a1);
-	movi(e, 1, 2, n);
-	i = put(e, I_BL);
+		a64_record_emit_move(e, 1, 1, a1);
+	a64_record_emit_move_immediate(e, 1, 2, n);
+	i = a64_record_emit(e, A64_OP_BL);
 	i->ref = CODEGEN_FIXED_REFERENCE(fn);
-	unspill(e, &sp);
+	a64_abi_temporaries_restore(e, &sp);
 }

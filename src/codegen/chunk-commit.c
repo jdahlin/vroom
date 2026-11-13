@@ -220,7 +220,7 @@ VPRIV int codegen_commit_chunk(codegen_commit_context *R, const char *p, size_t 
 			r = x64_replay(R, q, it->length);
 			break;
 		case CODEGEN_ITEM_CODE:
-			r = a64_replay(R, (const codegen_code_header *)q);
+			r = a64_function_commit(R, (const codegen_code_header *)q);
 			break;
 		case CODEGEN_ITEM_DATA:
 			r = codegen_commit_data(R, (const codegen_data_header *)q);

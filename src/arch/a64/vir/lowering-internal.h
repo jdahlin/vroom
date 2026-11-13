@@ -23,7 +23,7 @@ typedef struct a64_vir_context {
 	codegen_context *context;
 	vir_function *function;
 	const vir_alloc_out *allocation;
-	int64_t *slot_offsets;		/* per VIR slot: its FRAME offset */
+	int64_t *slot_offsets;		/* per VIR slot: its A64_REGISTER_FRAME offset */
 	int64_t *spill_offsets;		/* per spill slot */
 	uint32_t *labels;		/* per block: its label */
 	uint32_t *chases;		/* per block: where a branch to it ends up (a64_vir_block_chase) */
@@ -57,7 +57,7 @@ typedef struct a64_vir_context {
 	bool frame_is_at_risk;		/* x17 held data across a frame access: the frame must stay small */
 	bool tail;		/* a call right before a ret may be a sibling call (a64_vir_tail_call_reason) */
 	bool ret32;		/* the function returns a 32-bit integer: the upper half of x0 is unspecified */
-	int64_t callee_saved_float_offsets[8];		/* the FRAME offsets where d8-d15 are kept (those in o->callee[1]) */
+	int64_t callee_saved_float_offsets[8];		/* the A64_REGISTER_FRAME offsets where d8-d15 are kept (those in o->callee[1]) */
 	uint32_t skip;		/* an instruction not to lower (the ret after a sibling call), 0 none */
 	uint32_t at;		/* the block whose place in the layout the code is at (a copy of another block's: vl_dup) */
 	int dup;		/* ... copies being lowered, one in another: vir_layout_duplicate */
