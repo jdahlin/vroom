@@ -163,6 +163,10 @@ kbuild's probes do not see them.  They have no effect below `-O2`.
 The harnesses take the level as an option: `bench/vcc-ctests.py -O1|-O2|-O3`
 (vcc's level; clang's reference stays at `-O2`) and `--vflags` for vcc-only
 flags, `bench/vir-failures.py --level`, `bench/sched-measure.py emit -O`.
+The code-shape harnesses written for the direct emitter check it alone:
+`bench/vcc-opt-rules.py` at -O0 and -O1 (it still compiles and runs -O2 and
+-O3), `bench/vcc-tail-controls.py` with `-fno-vir`; VIR's gaps against their
+rules are in TODO.md.
 
 ## Measurements (2026-11-13, M1 Pro, shared machine under load)
 

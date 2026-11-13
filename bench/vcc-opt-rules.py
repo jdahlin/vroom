@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Bounded optimization checks, at every optimization level.
+"""Bounded optimization checks of the direct emitter, compiled and run at every level.
+
+The checks of the code's shape are written for the direct emitter, so they run
+at -O0 and -O1 (DIRECT_LEVELS); -O2 and -O3 are VIR's (doc/OPTIMIZATION.md),
+compiled and, with --run, run, but their shape is not checked here.  What VIR
+does not yet do of these rules is in TODO.md.
 
   bench/vcc-opt-rules.py --target x86_64-linux-gnu --run
   bench/vcc-opt-rules.py --target aarch64-linux-gnu --run
@@ -23,6 +28,9 @@ import tempfile
 
 from hostenv import BUILD, R, llvm
 
+
+# the levels whose code the direct emitter makes: the shape checks run at these alone
+DIRECT_LEVELS = (0, 1)
 
 def run(cmd, env=None):
     p = subprocess.run([str(x) for x in cmd], capture_output=True, text=True, timeout=60, env=env)
@@ -980,7 +988,7 @@ def execute(args, directory, assembly, arch, source, level):
                  '-c', source, '-o', obj])
             relocations = run([args.readobj, '-r', obj])
             jump = re.search(r'\bR_AARCH64_JUMP26\s+tc_sum32\b', relocations)
-            if bool(jump) != (level >= 1 and args.sibling_calls != 'off'):
+            if level in DIRECT_LEVELS and bool(jump) != (level >= 1 and args.sibling_calls != 'off'):
                 raise RuntimeError(f'direct object: unexpected sibling-call relocation\n{relocations}')
             if not re.search(r'\bR_AARCH64_CALL26\s+tc_sum32\b', relocations):
                 raise RuntimeError(f'direct object: lost conservative ordinary-call relocation\n{relocations}')
@@ -998,7 +1006,7 @@ def execute(args, directory, assembly, arch, source, level):
         if arch == 'x86_64' and (args.qemu_x86 or platform.machine() != 'x86_64'):
             runner = [args.qemu_x86 or 'qemu-x86_64']
         run(runner + [exe])
-        if arch == 'aarch64' and source.name == 'switch_values.c' and level == 2:
+        if arch == 'aarch64' and source.name == 'switch_values.c' and level == 1:
             # Exercise the direct emitter's per-function table data and its
             # interaction with PIC, line tables, and unwind directives.
             run([args.vpp, f'--target={args.target}', '-O2', '-ffreestanding',
@@ -1085,7 +1093,7 @@ def main():
                 checked = ((arch == 'x86_64' and level >= 1) if rule in ['locals', 'copies', 'extensions', 'deadresults'] else
                            (not arch.startswith('wasm') and level >= 1) if rule in ['fallthrough', 'unreachable'] else
                            arch.startswith('wasm') if rule == 'loopback' else True)
-                checked = checked and check is not None and (rule not in ['switches', 'udivconst', 'udivconst64', 'mulconst', 'bitrules', 'cmpbounds', 'cmpzero', 'repeated', 'doubleunary', 'localvalues'] or level >= 1)
+                checked = checked and level in DIRECT_LEVELS and check is not None and (rule not in ['switches', 'udivconst', 'udivconst64', 'mulconst', 'bitrules', 'cmpbounds', 'cmpzero', 'repeated', 'doubleunary', 'localvalues'] or level >= 1)
                 if checked:
                     if rule in ['sdivconst', 'unusedinit', 'switchvalues']:
                         check(assembly.read_text(), arch, optimized=level >= 1)
@@ -1103,11 +1111,11 @@ def main():
             if rule in ['sdivconst', 'unusedinit', 'switchvalues']:
                 # Check the debugging escape hatch independently of O0.
                 assembly = directory / (rule + '-noopt.s')
-                run([args.vpp, f'--target={args.target}', '-O2',
+                run([args.vpp, f'--target={args.target}', '-O1',
                      '-ffreestanding', '-fno-stack-protector', '-S', source, '-o', assembly],
                     env={**os.environ, 'VCC_NOOPT': '1'})
                 check(assembly.read_text(), arch, optimized=False)
-                print(f'{args.target} {rule} O2 VCC_NOOPT: codegen OK')
+                print(f'{args.target} {rule} O1 VCC_NOOPT: codegen OK')
     return 0
 
 
