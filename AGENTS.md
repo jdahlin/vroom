@@ -22,6 +22,8 @@ relative to it); `TODO.md` stays at the top.
   (x86-64 Linux as a target): plans
   and per-step status (Swedish).  Update the
   status section of a step when it changes.
+- `PLAN-tree.md`: reorganising the source tree PostgreSQL-style (`src/`,
+  `src/include/`, `frontend/`, `bin/`, ...) before a C++ front end (English).
 - `PLAN-release.md`: what vcc 1.0 is and its release gates G0-G9 (Swedish);
   work toward the release should move a gate, and update its status there.
 - `RESEARCH-preprocessor.md`: preprocessor design and prior art.
