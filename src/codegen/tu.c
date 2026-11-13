@@ -448,6 +448,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	}
 	E.stats = getenv("VCC_EMIT_STATS") != NULL;
 	E.vstats = getenv("VCC_VIR_STATS") != NULL;
+	E.rstats = getenv("VCC_REC_STATS") != NULL;
 	E.noopt = getenv("VCC_NOOPT") != NULL;
 	/* wasm64: objects from the text, through arch/wasm/as */
 	E.objtext = getenv("VCC_OBJ_TEXT") != NULL || WASM(c);
@@ -751,6 +752,8 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 			vw_stats_print(&E);
 		vmreg_put(&er[13], tail.n);
 	}
+	if (E.rstats)
+		rp_print(&E);
 	vmreg_put(&er[12], hdr.n);
 	for (int i = 0; i < nthr; i++)
 		ecx_free(&ctx[i], xr[i]);

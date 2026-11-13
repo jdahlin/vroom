@@ -180,3 +180,22 @@ VPRIV val a64_bigcmp(ecx *e, int op, qty t, val a, val b);
 VPRIV val a64_bigcvt(ecx *e, val v, qty from, qty to);
 VPRIV val a64_bigbool(ecx *e, val v, qty t);
 VPRIV val a64_bigcopy(ecx *e, val v, qty t);
+
+/*
+ * VCC_REC_STATS: what each record clean-up pass of finish_function does, per TU, for the
+ * functions that came through VIR's lowering and through the direct emitter (opt.c rp_snap,
+ * rp_count, rp_print).  The names are those of doc/quality/VIR-MIGRATION.md's table.
+ */
+enum {
+	RP_FUNC,	/* the functions that reached the clean-ups (-O1 and up) */
+	RP_UNREACHABLE, RP_FALLTHROUGH, RP_LIVENESS, RP_SPILL_PAIRS, RP_COPIES1, RP_SLOTS, RP_EXTS,
+	RP_COPIES2, RP_DEAD, RP_FOLD, RP_FLAGS, RP_OPT_REGS, RP_EXPAND_TABLES, RP_NOFRAME,
+	RP_TAIL_EXPAND, RP_FRAME_REWRITE, RP_TBZ_RELAX,
+	RP_N
+};
+VPRIV void rp_snap(ecx *e);
+VPRIV void rp_count(ecx *e, int pass);
+VPRIV void rp_print(emitter *E);
+/* a counter increment behind the statistics flag: without the switch, one untaken branch */
+#define RP_BEGIN(e) do { if (unlikely((e)->E->rstats)) rp_snap(e); } while (0)
+#define RP_END(e, p) do { if (unlikely((e)->E->rstats)) rp_count(e, p); } while (0)

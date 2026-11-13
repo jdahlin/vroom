@@ -175,6 +175,8 @@ enum { NA_LABEL = 1, NA_ALLOCA = 2 };				/* per node: statement contains a label
 
 typedef struct em_cg_edge {uint32_t callee,call;} em_cg_edge;
 
+#define REC_PASS_MAX 24
+
 typedef struct emitter {
 	cc *c;
 	const cc_opts *o;
@@ -228,6 +230,9 @@ typedef struct emitter {
 		uint32_t sym;		/* the first function that failed so (under emu) */
 		char detail[96];	/* ... and what the reason leaves out */
 	} vfailed[VIRFAIL_COUNT];
+	/* VCC_REC_STATS: what each record clean-up pass did, [0 direct, 1 VIR][pass][runs, changed, removed, added] (func.c) */
+	bool rstats;
+	_Atomic uint64_t rpass[2][REC_PASS_MAX][4];
 	bool objtext;			/* VCC_OBJ_TEXT: objects through the printer and as_run (checks the object backend) */
 	pthread_mutex_t dmu;		/* -g: the file table */
 	char **dfile;			/* .file N (1-based) names */

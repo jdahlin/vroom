@@ -1,4 +1,3 @@
-/* diag-differs: body_falls_off warns after a switch on an enum that returns in every case (TODO.md: "Merged diagnostics: cases from the D8 branch") */
 /* D5.1: -Wreturn-type as clang's CFG decides it: constant conditions pruned
    (also "x || 1" and a const variable), noreturn calls and builtins end a path,
    a label is reached only by a reachable goto, a switch on an enum covering every

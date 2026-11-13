@@ -7,8 +7,9 @@ parsing unchecked").
 A good object (two functions, data, relocations) and an archive holding it are
 corrupted one field at a time; vlink must exit 1 with an "error:" line, no
 signal, no sanitizer report; vobjcopy -O binary and vnm must not crash.  The unchanged inputs must link.
-The same for a wasm64 object and archive (vlink -mwasm64): a length or count
-that wraps, a size past the end of the file.
+An x86-64 object gets the relocation cases of its own machine.  The same for a
+wasm64 object and archive (vlink -mwasm64): a length or count that wraps, a
+size past the end of the file, an index or relocation field out of range.
 """
 import argparse, os, struct, subprocess, sys, tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -71,6 +72,16 @@ def obj_cases(o):
     yield 'shstrndx-0-strtab-huge', put(sh0, 0x3e, '<H', 0)
     yield 'symtab-link-0-strtab-huge', put(sh0, sym + 40, '<I', 0)
 
+def x64_cases(o):
+    """x86-64: rel_width is the x86-64 one (an 8-byte field 4 bytes before the end), GOTTPOFF at 0"""
+    rela = sec(o, 4)
+    relaoff = u('<Q', o, rela + 24)
+    shoff, _ = shdrs(o)
+    tgt = shoff + 64 * u('<I', o, rela + 44)
+    sym = u('<Q', o, relaoff + 8) >> 32
+    yield 'x64-abs64-at-size-4', put(put(o, relaoff + 8, '<Q', sym << 32 | 1), relaoff, '<Q', u('<Q', o, tgt + 32) - 4)
+    yield 'x64-gottpoff-at-0', put(put(o, relaoff + 8, '<Q', sym << 32 | 22), relaoff, '<Q', 0)
+
 def hdr(name, n):
     return f'{name:<16}{0:<12}{0:<6}{0:<6}{644:<8}{n:<10}`\n'.encode()
 
@@ -120,6 +131,39 @@ def wasm_linking(o, newlen):
         i = j + v
     raise SystemExit('no linking section')
 
+def wasm_secs(o):
+    """[(id, payload)] of a wasm object"""
+    out, i = [], 8
+    while i < len(o):
+        n, j = uleb(o, i + 1)
+        out.append((o[i], o[j:j + n])); i = j + n
+    return out
+
+def wasm_join(secs):
+    return b'\0asm\1\0\0\0' + b''.join(bytes([i]) + enc(len(p)) + p for i, p in secs)
+
+def wasm_edit(o, pick, f):
+    """o with f(payload) for the first section pick(id, payload) selects"""
+    secs = wasm_secs(o)
+    for k, (i, p) in enumerate(secs):
+        if pick(i, p):
+            secs[k] = (i, f(p)); return wasm_join(secs)
+    raise SystemExit('vlink-bad: no such wasm section')
+
+def wasm_custom(name):
+    return lambda i, p: i == 0 and p[1:1 + p[0]] == name
+
+def wasm_reloc_off(o):
+    """the code relocations' first offset moved to 2 bytes before the code section's end"""
+    code = [p for i, p in wasm_secs(o) if i == 10][0]
+    def f(p):
+        k = 1 + p[0]
+        _, k2 = uleb(p, k)              # target section
+        _, k3 = uleb(p, k2)             # count
+        _, k4 = uleb(p, k3 + 1)         # the first entry's offset
+        return p[:k3 + 1] + enc(len(code) - 2) + p[k4:]
+    return wasm_edit(o, wasm_custom(b'reloc.CODE'), f)
+
 def wasm_cases(o):
     be = lambda n: struct.pack('>I', n)
     names = b'_start\0d\0p\0'
@@ -139,6 +183,10 @@ def wasm_cases(o):
     yield 'wasm-ar-count-past-member', arch('/', be(1000) + be(mo) + names), False
     yield 'wasm-ar-member-past-end', good[:-(len(o) // 2)], False
     yield 'wasm-ar-member-offset-wraps', arch('/', be(1) + be(0xffffffe0) + names), False
+    # counts and indices from the object (ld/wasmld.c: rcount, obj_indices_ok, rel_fits)
+    yield 'wasm-func-count-wraps', wasm_edit(o, lambda i, p: i == 3, lambda p: enc(0xffffffff) + p[uleb(p, 0)[1]:]), False
+    yield 'wasm-func-type-range', wasm_edit(o, lambda i, p: i == 3, lambda p: p[:uleb(p, 0)[1]] + enc(1000) + p[uleb(p, uleb(p, 0)[1])[1]:]), False
+    yield 'wasm-reloc-past-function', wasm_reloc_off(o), False
 
 def main():
     ap = argparse.ArgumentParser()
@@ -158,6 +206,9 @@ def main():
                  ('good-ar-odd', ar([('x.txt/', b'x'), ('o.o/', o)]), 'odd')]
         cases += [(n, b, False) for n, b in obj_cases(o)]
         cases += [(n, b, False) for n, b in ar_cases(o)]
+        subprocess.run([vpp, '--target=x86_64-linux-gnu', '-c', f'{t}/a.c', '-o', f'{t}/x.o'], check=True, env=env)
+        x = open(f'{t}/x.o', 'rb').read()
+        cases += [('good-x64', x, True)] + [(n, b, False) for n, b in x64_cases(x)]
         cases = [c + (False,) for c in cases]
         if has_wasm(vpp):
             open(f'{t}/w.c', 'w').write(SRC)
