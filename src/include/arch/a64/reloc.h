@@ -1,4 +1,14 @@
-/* arm64 ELF relocation types, and vcc's internal fixup types (included by include/obj/obj.h) */
+/*
+ * reloc.h (arm64): ELF relocation types for arm64, and vcc's own fixup types for what no ELF
+ * relocation covers.
+ *
+ * Included by include/obj/obj.h; the assembler's fixups, the object writer and vlink's relocation
+ * application use these.  The values are the ELF numbers (the aarch64 ELF ABI), listed only as far as
+ * the kernel and the tests need: add one here with its number, then handle it in
+ * arch/a64/obj/fixup.c and the linker's scan and apply.  R_VCC_* are internal and never reach a
+ * written object: R_VCC_ABS8 is a 1-byte datum that must be resolved at assembly time, and the TLVP
+ * pair is Mach-O's thread-local descriptor.
+ */
 #ifndef VCC_A64_RELOC_H
 #define VCC_A64_RELOC_H
 
