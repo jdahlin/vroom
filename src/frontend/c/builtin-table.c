@@ -53,6 +53,8 @@ static const builtin builtins[] = {
 	{ "__builtin_popcount", BI_POPCOUNT, 1, "iu" }, { "__builtin_popcountl", BI_POPCOUNTL, 1, "iL" },
 	{ "__builtin_popcountll", BI_POPCOUNTLL, 1, "iW" },
 	{ "__builtin_clzg", BI_CLZG, 1, "i." }, { "__builtin_ctzg", BI_CTZG, 1, "i." },
+	{ "__builtin_stdc_count_ones", BI_STDC_COUNT_ONES, 1, "u." },
+	{ "__builtin_stdc_trailing_zeros", BI_STDC_TRAILING_ZEROS, 1, "u." },
 	{ "__builtin_popcountg", BI_POPCOUNTG, 1, "i." },
 	{ "__builtin_parity", BI_PARITY, 1, "iu" }, { "__builtin_parityl", BI_PARITYL, 1, "iL" },
 	{ "__builtin_parityll", BI_PARITYLL, 1, "iW" },

@@ -346,6 +346,7 @@ VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc)
 			return cplx_unary(c, LEX_TOKEN_TILDE, a, loc);
 		return rvalue(c, cplx_part(c, a, b->id == BI_CIMAG));
 	}
+	case BI_STDC_COUNT_ONES: case BI_STDC_TRAILING_ZEROS:
 	case BI_CLZG: case BI_CTZG: case BI_POPCOUNTG:
 		return generic_bitcount(c, b->id, loc);
 	case BI_COUNTED_BY_REF: {

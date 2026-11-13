@@ -111,14 +111,19 @@ VPRIV uint32_t generic_bitcount(cc *c, int id, uint32_t loc)
 	qty xt;
 	unsigned bits, width;
 
+	bool stdc = id == BI_STDC_COUNT_ONES || id == BI_STDC_TRAILING_ZEROS;
+	if (stdc)
+		id = id == BI_STDC_COUNT_ONES ? BI_POPCOUNTG : BI_CTZG;
+	unsigned maxargs = stdc || id == BI_POPCOUNTG ? 1 : 2;
 	args_list(c, &args);
-	if (args.n < 1 || args.n > (id == BI_POPCOUNTG ? 1u : 2u)) {
-		arity(c, loc, id == BI_POPCOUNTG ? 1u : args.n ? 2u : 1u, &args);
+	if (!args.n || args.n > maxargs) {
+		arity(c, loc, args.n ? maxargs : 1, &args);
 		return mk_int(c, 0, prim(TY_INT), loc);
 	}
 	x = decay(c, args.v[0]);
 	xt = QUNQ(N(x)->ty);
-	if (!is_integer(c, xt) || is_signed(c, xt)) {
+	if (!is_integer(c, xt) || is_signed(c, xt) ||
+	    (stdc && (KIND(c, xt) == TY_BOOL || KIND(c, xt) == TY_ENUM))) {
 		cc_error(c, N(x)->loc, "1st argument must be a scalar unsigned integer type");
 		return mk_int(c, 0, prim(TY_INT), loc);
 	}
@@ -133,8 +138,11 @@ VPRIV uint32_t generic_bitcount(cc *c, int id, uint32_t loc)
 		}
 		fb = convert(c, y, prim(TY_INT));
 	}
-	if (bits > 128)
-		return big_bitcount(c, id, x, fb, bits, loc);
+	if (stdc && id == BI_CTZG) fb = mk_int(c, bits, prim(TY_INT), loc);
+	if (bits > 128) {
+		r = big_bitcount(c, id, x, fb, bits, loc);
+		return stdc ? convert(c, r, prim(TY_UINT)) : r;
+	}
 	x = cplx_reuse(c, x, &pre);
 	if (fb) fb = cplx_reuse(c, fb, &fbpre);
 	if (width == 128) {
@@ -160,9 +168,9 @@ VPRIV uint32_t generic_bitcount(cc *c, int id, uint32_t loc)
 	}
 	if (id == BI_CLZG && bits < width)
 		r = binop(c, LEX_TOKEN_MINUS, r, mk_int(c, width - bits, prim(TY_INT), loc), loc);
-	if (args.n == 2)
+	if (fb)
 		r = conditional(c, binop(c, LEX_TOKEN_EXCLAMATION_EQUAL, x, mk_int(c, 0, xt, loc), loc), r, fb, loc);
-	return with_pre(c, pre, with_pre(c, fbpre, r));
+	return with_pre(c, pre, with_pre(c, fbpre, stdc ? convert(c, r, prim(TY_UINT)) : r));
 }
 
 /* Generic rotations preserve the first operand's type and evaluate each
