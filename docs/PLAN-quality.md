@@ -46,7 +46,7 @@ rewrites the paths here.
 | Linkers | `ld.c` (6.7 k lines), `wasmld.c`, `ldmacho.c`, `objcopy.c`: three symbol tables (`gfind`), two `map_file`, four `!<arch>` readers, private byte and output-buffer helpers, argv by hand in each | |
 | Small helpers | FNV-1a written inline; `now()`; LEB128 encoders (6); `die`/`err`/`xmalloc` variants; `write_file` (3); private vector macros (7) while `lib/vec.h` has one user; `lib/mapfile.h` has one user | FNV in 17 files, `now()` 6, `realloc(` 111, `mmap(` 29 |
 | Threads | Six private mechanisms, no shared pool: vccd workers (2 x all cores), emit workers per TU (`VCC_THREADS`, default 1), vlink `pfor` (P cores on macOS, lazily started, never joined), lexer I/O (3, the only ones with a QoS class), `vpp --batch` (hard-coded 6), lextest.  Three mutex+condvar queues, two atomic-index parallel-fors.  Pools nest without a common cap (vccd x emit, vccd + vlink).  `PLAN-fas2.md:160-173` describes one pool with work stealing; the code is not that | 6 `pthread_create` sites; the counts and sources as stated |
-| Passes | Front end: a function body is walked 3-5 times after parsing (two reachability walkers, `cc/flow.c` and `cc/func.c`; uninit; instrument; two linear scans).  No visitor: ~70 hand-written `switch (x->op)` walkers.  arm64: up to 3 AST walks (retry on temporaries), then 8-10 sweeps over records in `opt.c`.  VIR: 15-20 sweeps over the pre-IR in `build.c`, then arm64's record clean-ups again.  Seven or more "has side effects / is pure" predicates | |
+| Passes | One pass per file and a named pass table, for VIR first.  The direct path's passes are counted on VIR output and then deleted or rewritten as VIR passes, not tidied |
 | Files with many jobs | `ld/ld.c`, `as/as.c` (4.1 k), `emit/vir/build.c` (4.0 k: SSA construction, lowering interface, GVN, dominators, if-conversion, emission, vectorizer by `#include`), `vccd/vccd.c`, `driver/ppdriver.c` (`ppd_run1`: 1066 lines), `arch/a64/emit/opt.c`.  18 functions over 300 lines | |
 | Names | File names that hide their job (`hcentry.c`, `replay.c` with three meanings across modules, `exprop.c`, `tu.c`, `ppdriver.c`, `ccsnap.c`, `rsh.c`, `w*.c`); most arm64 emitter functions unprefixed (`mem`, `slot`, `treg`); state named `E->mf`, `E->K`, `W.la`, `VLT.chs`; `W` names three structs | |
 | Documents | No document traces the pipeline end to end.  Stale headers: `emit/emit.h`, `obj/obj.h`, `as/as.h` say arm64 only; AGENTS.md says `vir/` is linked into no tool.  No duplicate detection or lint in `bench/` or `ci/` | 58 distinct `getenv` knobs |
@@ -122,8 +122,8 @@ where the two differ.
 | Rename depth | Files, a module prefix on every file-scope function, long-lived state (struct fields, globals).  Short locals stay |
 | Open branches | Ignored: no aliases, no windows |
 | Pilot | The shared library (`lib/` to `common/`) |
-| Order after it | Bottom-up by layer: lex and pp, diagnostics, C front end, shared codegen, arm64, x86-64, VIR, assembler and object, linker, driver and server.  Modules that do not include each other run in parallel once `common/` has landed (for example linker, assembler, driver and server next to the front end) |
-| arm64 walker | The safe moves (target-independent code out of `arch/a64`, verbatim helpers shared), then a pilot of one statement family on the shared walker with -O0 speed measured |
+| Order after it | Bottom-up by layer, with VIR moved up: lex and pp, diagnostics, C front end, VIR and its builder, what survives of the code generators (ABI, op tables, printers, encoders), assembler and object, linker, driver and server.  Modules that do not include each other run in parallel once `common/` has landed |
+| Code generation | **VIR for everything** (2026-11-13, after a full kernel build with `VCC_VIR=1` at 81.2 s against 79.1 s; 2-3 % loss accepted).  The direct emitters are scheduled for deletion and get no quality pass; optimizations outside VIR move into it.  Gates, pass-by-pass fate and order: `docs/quality/VIR-MIGRATION.md`.  This replaces the earlier decision (safe moves, then a pilot of arm64 on the shared walker) |
 | Passes | One pass per file and a named pass table (time, disable, verify by name), identical output.  Fusing walks comes later, from the per-pass timings |
 | Linker | One linker core with output formats, not three linkers.  (Not the recommendation; it fits the one-binary requirement) |
 | Scheduler | Now only the measured waste: cache flush between process groups, vlink waking every thread for a small link, batch worker stacks.  One scheduler is its own plan after the readability pass |
@@ -146,9 +146,8 @@ Open, each waiting for a measurement or a closer look:
   today's tree first.
 - When `struct cc` is split into AST and parser.  Check the 24 fields code
   generation reads against the hot paths; the split must cost nothing.
-- How shared code reaches a target in a one-binary compiler: the walker
-  compiled once per target (no indirect calls, as VIR does today) or a
-  run-time table of functions.  New ground; decide on a prototype's numbers.
+- (Closed by the VIR decision: a target is a VIR lowering and its op
+  table; the walker has one instance.)
 
 ## Status
 
