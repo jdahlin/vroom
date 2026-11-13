@@ -369,3 +369,19 @@ can crash later in `vcc-stress.py --vccd` (`pp-if-parens-200k`, "nested bug
 in the same thread"); vccd's old workers do the same with `-j 1`, so it is
 TSan's per-thread shadow stack and not the pool, which only reuses threads
 more often (LIFO).
+
+### Stage 2 (2026-11-13): emit rounds on the pool
+
+`emit_tu1` runs its drain loop as `vtask_parallel_for` over the
+`VCC_THREADS` slots; vccd gives the pool its worker stack.  Proofs:
+`vcc-ctests.py --no-cache --suite vcc` 324/326 with and without
+`VCC_THREADS=8` (the two lld image cases of stage 1; the
+`vcc-threads-same` cases pass); `vcc-same.py --base` (stage 1's vpp, both at
+`VCC_THREADS=8`) 6519/6519 identical for c0, c2, s2 and 2173/2173 for c2
+with `VCC_VIR=1`; TSan: `vcc-ctests.py --suite vcc` 324/326 (same two),
+`vcc-cbatch.py` with `VCC_THREADS=4` 840/840, 0 reports.  Measurements
+(load 4.1-4.8, stage 1 as base): C (sqlite3.c `-O2 -c`) unchanged within
+1 % at 1/4/8 threads, direct and VIR, objects identical; B (`batch -j 6
+--emit 4`): resident size after 0/3/7 warm passes 856/1224/1439 MB before,
+829/1060/1111 MB after (+54 MB a pass to +13), CPU -7 %, involuntary
+switches 23.5 k to 2.4 k at 7 passes.
