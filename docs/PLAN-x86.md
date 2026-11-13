@@ -1210,3 +1210,37 @@ som för vanliga mnemoniker. Direkt assemblerregression tillagd. Full
 DWARF-rigg 1591/1591 och assemblerobjekt 62/62, även ASan/UBSan och
 filvist bygge, gröna. SQLite-binären oförändrad mot senaste mätbygget;
 5 %-målet är fortfarande öppet.
+
+### X5/X6 (2026-11-13): SQLite-kompilering utan kvadratiska fragmentvandringar
+
+Delsteget klart. `sqlite3.c` (262 899 rader, 9 282 866 byte) profilerades
+på Ryzen 7 9700X under Linux. 97,33 % av de samplade cyklerna låg i
+`as_end`: grenrelaxeringen räknade om fragmentoffset genom att gå från
+sektionens början vid varje fråga. Assemblern indexerar nu fragmenten i
+sektionsordning och håller levande storlekar i ett Fenwick-träd. Hopp ser
+fortfarande föregående varvs layout; alignment och LEB ser ändringarna
+hittills i det aktuella varvet. CFI och DWARF-rader använder en linjär
+beräkning av offset när layouten är fast.
+
+CPU-tid (user + system), separata processer, `-O2`, median av två körningar
+före och tre efter, med riktiga objektfiler:
+
+| Mål/emitter | Före | Efter | Förbättring |
+|---|---:|---:|---:|
+| x86-64, direkt | 9,005 s | 0,292 s | 30,9× |
+| x86-64, VIR (`VCC_VIR=bl`) | 28,315 s | 0,571 s | 49,6× |
+
+Båda målen mättes på **samma x86-värd**, med respektive libc-headers;
+detta är ingen jämförelse mellan värddatorer. Arm64 ligger fortsatt kring
+0,17 s direkt och 0,48 s med VIR (tre interfolierade före/efter-par). Ingen filcache tömdes. Med `-g` gick
+x86-direkt från 9,990 till 0,305 CPU-s (en körning per version).
+Käll- och binärhashar, kommandon, enskilda tider och objekthashar finns i
+`results/sqlite-compile-20261113.json`; profiler och binärkopior i
+`work/sqlite-compile-profile/`.
+
+Verifiering: SQLite-objekten byte-identiska före/efter för båda målen och
+båda emitterarna, även x86-direkt med `-g`; `vas-obj.py` 63/63 identiska
+mot clang, även ASan/UBSan; x86:s vcc-svit 318/318 med åtta befintliga
+skippar; `as.c` kompilerar separat. `x86-relax-index.s` täcker interfolierade
+sektioner/subsektioner, framåt- och bakåthopp, alignment, LEB, CFI och
+DWARF-rader. X5:s direktkodning från maskinposter återstår.
