@@ -60,7 +60,7 @@ VCC_CC     = $(CCACHE) $(HOST_CC)
 VCC_SAN   ?=
 VCC_SANLD ?=
 VCC_OPT   ?= -O3 $(HOST_CPU)
-# include/: the headers other modules include (common/arena.h, frontend/pp/pp.h, ...)
+# include/: the headers other modules include (common/region.h, frontend/pp/pp.h, ...)
 VCC_INC    = -I$(abspath include)
 VCC_CFLAGS = $(if $(VCC_WASM),-DVCC_WASM) -std=c11 -O2 -Wall -Wextra -Wimplicit-fallthrough -Wno-unused-parameter $(HOST_DEFS) $(VCC_INC) -DVCC_INCDIR='"$(abspath headers)"' $(VCC_SAN)
 # LTO: off; the split modules are one TU each (SPLIT_MODS), which gives the
@@ -104,7 +104,7 @@ SPLIT_MODS = cc pp codegen
 vir_SRC  = vir/table.c vir/vir.c vir/print.c vir/parse.c vir/verify.c vir/facts.c vir/layout.c
 VIRA_SRC = vir/loops.c vir/alloc.c vir/allocchk.c vir/allocdump.c	# (not in the unity TU: own statics)
 obj_SRC  = obj/obj.c arch/a64/obj/fixup.c arch/x64/obj/fixup.c platform/linux/elf.c
-cc_SRC   = $(wildcard frontend/c/*.c)
+cc_SRC   = $(filter-out frontend/c/keywords.c,$(wildcard frontend/c/*.c))
 # pp: the preprocessor and, for now, the diagnostics engine (it uses ppimpl.h)
 pp_SRC   = $(filter-out frontend/pp/dircache.c,$(wildcard frontend/pp/*.c)) $(wildcard frontend/diag/*.c)
 codegen_SRC = $(wildcard codegen/*.c codegen/opt/*.c codegen/rec/*.c codegen/flow/*.c arch/a64/codegen/*.c $(if $(VCC_WASM),arch/wasm/codegen/*.c) codegen/walk/*.c arch/x64/codegen/*.c codegen/vir/*.c)
