@@ -1669,10 +1669,10 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   same pass set as clang.
 - [ ] **One set of data structures in `lib/`** (restructure 2026-11-09).
   Merged so far: `vreserve` (4 copies), `vregion` (as + object writer),
-  `vbuf` (pp diagnostics + fixdep).  Still side by side in `lib/`: the
-  buffers `vbuf`/`vsbuf`/`vzbuf`/`vfixbuf`/`vfdbuf` (they differ in OOM
+  `vbuffer` (pp diagnostics + fixdep).  Still side by side in `lib/`: the
+  buffers `vbuffer`/`vbuffer`/`vbuffer`/`vbuffer`/`vbuffer` (they differ in OOM
   behaviour: abort, sticky flag, bool) and `tbuf.h`; the arenas `vregion`
-  (offsets) and `varena` (pointers); the hashes `vhash_obj`/`vhash_strtab`.
+  (offsets) and `varena` (pointers); the hashes `vhash_string`/`vhash_string`.
   Still in their component, tied to its state: ppdriver's `buf` (first
   16 MB from a per-job vjob_region), cc's `vec` (inline storage, frozen into
   `c->lists`), ld's block arena (process-wide list, generations), as's

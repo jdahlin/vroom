@@ -1,0 +1,6 @@
+# WORK-common step 4, hashes: the object writer's and vobjcopy's string hashes are one vhash_string
+# (the body of vhash_obj: never 0).  Run with --allow-merge, then delete vhash_strtab's body from hash.h.
+# No output byte depends on the table hash: a build with a different mix gave identical vcc-same.py output
+# (15211/15211) and identical vobjcopy-cmp.sh / vobjcopy-any.py results.
+vhash_obj	vhash_string
+vhash_strtab	vhash_string
