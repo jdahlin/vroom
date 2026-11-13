@@ -222,6 +222,18 @@ static int selftest(void)
 	 blk[1].fl=VB_ADDR;CHECK(!vir_layout_duplicate(&g,&lp,rotation,0,1,2,0,true));blk[1].fl=0;
 	 ins[0].op=VO_CALL;CHECK(!vir_layout_duplicate(&g,&lp,rotation,0,1,2,0,true));
 	}
+	/* No-overflow widening is a shared proof, independent of hardware scales. */
+	{
+	 vir_ins ins[4]={{.op=VO_ICONST,.ty=VT_I32,.b=1},{.op=VO_PARAM,.ty=VT_I32},
+	  {.op=VO_SHL,.ty=VT_I32,.fl=VIF_NSW,.a=1,.b=0},{.op=VO_EXT,.ty=VT_I64,.fl=2|VIF_MS,.a=2}};
+	 vir_fn g={.ins=ins,.nins=4};unsigned shift=99;
+	 CHECK(vir_sext_shift(&g,2,&shift) && shift==1);
+	 ins[2].fl=0;CHECK(!vir_sext_shift(&g,2,&shift));ins[2].fl=VIF_NSW;
+	 ins[3].fl=2;CHECK(!vir_sext_shift(&g,2,&shift));ins[3].fl=2|VIF_MS;
+	 ins[0].b=32;CHECK(!vir_sext_shift(&g,2,&shift));ins[0].b=0;
+	 CHECK(vir_sext_shift(&g,2,&shift) && !shift);
+	 CHECK(!vir_sext_shift(&g,3,&shift) && !vir_sext_shift(&g,VIR_NOBLK,&shift));
+	}
 	/* the limit of the constant table: the 2^23+1st constant fails, and the next function starts clean */
 	vir_begin(&f, VTG_X86_64_LINUX, sym, 0);
 	for (uint32_t i = 0; i <= VIR_MAX_CONST; i++)

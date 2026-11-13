@@ -20,7 +20,7 @@ typedef struct vx {
 	const vir_loops *lp;
 	uint32_t *order,*position,*rotation,*chase,at;
 	unsigned dup;bool fallok;
-	uint32_t memv, memskip, scaledv; int membase, memindex, scaleindex; uint8_t memsh, scalesh; bool indexed; int64_t memoff;
+	uint32_t memv, memskip, scaledv, scaledskip; int membase, memindex, scaleindex; uint8_t memsh, scalesh; bool indexed; int64_t memoff;
 	uint32_t bev; int bebase,beindex; uint8_t besh,bewidth; bool beindexed; int64_t beoff;
 	uint32_t cmpmemv; uint8_t cmpmemsize; bool cmpmemside;
 	uint32_t testv; uint8_t testsize; int64_t testimm;
@@ -388,6 +388,28 @@ static unsigned vx_readword(vx *L,uint32_t b,uint32_t v,uint32_t *end)
 	return width;
 }
 
+/* An address private to one exact byte-assembly expression. */
+static unsigned vx_beaddr(vx *L,uint32_t b,uint32_t v,uint32_t *end)
+{
+	const vir_fn *f=L->f;const vir_ins *i=&f->ins[v];
+	uint32_t ptr=v,load=v+1;
+	if(L->o->slot[v]!=VIR_NOBLK)return 0;
+	if(i->op==VO_ADD && i->ty==VT_I64) {
+		if(L->uses[v]!=1 || v+2>=f->blk[b].first+f->blk[b].n ||
+		   f->ins[v+1].op!=VO_I2P || f->ins[v+1].a!=v || L->o->slot[v+1]!=VIR_NOBLK ||
+		   !vx_foldedits(L,b,v+1,XNOREG))return 0;
+		ptr=v+1;load=v+2;
+	} else if(i->op!=VO_PTRADD)return 0;
+	if(load>=f->blk[b].first+f->blk[b].n || f->ins[load].a!=ptr || !vx_foldedits(L,b,load,XNOREG))return 0;
+	unsigned width=vx_readword(L,b,load,end);
+	return width && L->uses[ptr]==width?width:0;
+}
+static bool vx_addrmem(vx *L,uint32_t b,uint32_t v)
+{
+	uint32_t end;
+	return (L->f->ins[v].op==VO_PTRADD && vx_memnext(L,b,v)) || vx_castmem(L,b,v) || vx_beaddr(L,b,v,&end);
+}
+
 
 /* An IR i32 does not itself guarantee zero upper bits: parameters, calls,
  * signed narrow loads and identity truncations can retain arbitrary bits. */
@@ -466,6 +488,7 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 		}
 	}
 	if(L->memskip==v){L->memskip=0;return;}
+	if(L->scaledskip==v){L->scaledskip=0;return;}
 	if(L->bev) {
 		if(v<L->bev)return;
 		if(v==L->bev) {
@@ -529,14 +552,13 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 	}
 	/* The walker also spells pointer arithmetic as add.i64 + i2p. The
 	 * cast is an identity; keep both inputs until the immediate memory use. */
-	if(i->op==VO_ADD && i->ty==VT_I64 && L->uses[v]==1 && L->o->slot[v]==VIR_NOBLK &&
-	   v+2<L->f->blk[b].first+L->f->blk[b].n && L->f->ins[v+1].op==VO_I2P && L->f->ins[v+1].a==v &&
-	   L->o->slot[v+1]==VIR_NOBLK && L->f->ins[v+2].a==v+1 &&
-	   vx_foldedits(L,b,v+1,XNOREG) && vx_foldedits(L,b,v+2,XNOREG)) {
-		uint32_t end;unsigned width=vx_readword(L,b,v+2,&end);
-		if(width && L->uses[v+1]==width) {
+	if(i->op==VO_ADD || i->op==VO_PTRADD) {
+		uint32_t end;unsigned width=vx_beaddr(L,b,v,&end);
+		if(width) {
 			L->bev=end;L->bewidth=width;L->bebase=a;L->beoff=0;
-			L->beindexed=!vx_imm(L->f,i->b,&L->beoff);L->beindex=c;L->besh=0;return;
+			L->beindexed=!vx_imm(L->f,i->b,&L->beoff);
+			L->beindex=L->scaledv==i->b?L->scaleindex:c;
+			L->besh=L->scaledv==i->b?L->scalesh:0;return;
 		}
 	}
 	if(vx_castmem(L,b,v)) {
@@ -555,9 +577,20 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 			a-XMM0, c-XMM0, c-XMM0, a-XMM0, d-XMM0, d-XMM0, d-XMM0, d-XMM0, d-XMM0);
 		vx_raw(L, text); return;
 	}
+	/* Keep the unscaled signed index in the product's allocated register.
+	 * The shared proof permits extending it before the hardware scale. */
+	unsigned signed_scale;
+	if(i->op==VO_SHL && i->ty==VT_I32 && (i->fl&VIF_NSW) &&
+	   vir_sext_shift(L->f,v,&signed_scale) && signed_scale<=3 && L->uses[v]==1 &&
+	   L->o->slot[v]==VIR_NOBLK && v+3<L->f->blk[b].first+L->f->blk[b].n &&
+	   L->uses[v+1]==1 && L->o->slot[v+1]==VIR_NOBLK && L->f->ins[v+2].b==v+1 &&
+	   vx_addrmem(L,b,v+2) && vx_foldedits(L,b,v+1,XNOREG) && vx_foldedits(L,b,v+2,d)) {
+		x64_op3(e,X_EXT,4,d,a,XNOREG)->cond=1;
+		L->scaledv=v+1;L->scaledskip=v+1;L->scaleindex=d;L->scalesh=signed_scale;return;
+	}
 	if ((i->op==VO_MUL || i->op==VO_SHL) && i->ty==VT_I64 && L->uses[v]==1 && L->o->slot[v]==VIR_NOBLK &&
 	    v+2<L->f->blk[b].first+L->f->blk[b].n && L->f->ins[v+1].b==v &&
-	    ((L->f->ins[v+1].op==VO_PTRADD && vx_memnext(L,b,v+1)) || vx_castmem(L,b,v+1)) &&
+	    vx_addrmem(L,b,v+1) &&
 	    vx_foldedits(L,b,v+1,a)) {
 		int64_t k;
 		if(vx_imm(L->f,i->b,&k) && (i->op==VO_SHL ? k>=0 && k<=3 : k==1 || k==2 || k==4 || k==8)) {
@@ -905,7 +938,7 @@ static void vx_block(vx *L, uint32_t b)
 	vir_fn *f = L->f;
 	const vir_alloc_out *o = L->o;
 	L->cmp = UINT32_MAX;
-	L->memv = L->memskip = L->scaledv = L->bev = L->testv = L->cmpmemv = 0;
+	L->memv = L->memskip = L->scaledv = L->scaledskip = L->bev = L->testv = L->cmpmemv = 0;
 	uint32_t at = o->boff[b], ei = o->boff[f->nblk + 1 + b], end = o->boff[f->nblk + 2 + b];
 	for (uint32_t i = f->blk[b].first; i < f->blk[b].first + f->blk[b].n; i++) {
 		uint32_t n = 0;

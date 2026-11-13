@@ -160,3 +160,17 @@ unsigned vir_read_be(const vir_fn *f,const uint8_t *uses,uint32_t first,uint32_t
 	for(uint32_t v=first;v<end;v++)if(uses[v]!=internal[v-first])return 0;
 	*last=end;return width;
 }
+
+/* sext(shl.nsw.i32 x,k) == shl.i64(sext(x),k) on every defined input.
+ * Allocation, use counts, block boundaries and legal hardware scales belong
+ * to the consumer; this rule adds no lifetime or new IR definition. */
+bool vir_sext_shift(const vir_fn *f,uint32_t v,unsigned *count)
+{
+ if(v>=f->nins || f->nins-v<2)return false;
+ const vir_ins *shift=&f->ins[v],*ext=&f->ins[v+1];
+ if(shift->op!=VO_SHL || shift->ty!=VT_I32 || !(shift->fl&VIF_NSW) ||
+    ext->op!=VO_EXT || ext->ty!=VT_I64 || ext->fl!=(2|VIF_MS) || ext->a!=v)return false;
+ const vir_ins *k=&f->ins[shift->b];
+ if(k->op!=VO_ICONST || k->b>=32 || k->c)return false;
+ *count=k->b;return true;
+}

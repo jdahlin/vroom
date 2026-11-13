@@ -1074,3 +1074,18 @@ imulq+load med skala 1 en load med skala 8. Två femprovserier ger 1281/1279
 → 1249/1250 ms CPU, 1,124× clang; cirka 2,3–2,5 % vinst. Målet 1,05× är
 fortfarande öppet. En föreslagen ändring av 32-bitars ABI-bärare avvisades
 som neutral; SPEC:s O1 är oförändrad. Detaljer i PLAN-vir.md.
+
+
+### 2026-11-13: bevara NSW och dela indexbevis med ARM
+
+VIR behåller signerad multiplikations NSW även när den blir en shift.
+Det gemensamma vir_sext_shift-beviset används av ARM:s extended-register
+adresser och x86:s skalade minnesoperander. I BtreeIndexMoveto räcker
+movslq + läsning med skala 2; shll försvinner. Två femprovserier ger cirka
+0,5–0,8 % CPU-vinst, 1,120×/1,126× clang. Instruktioner 1,329× → 1,322×.
+Målet 1,05× är fortfarande öppet. Försöket att flytta om SSA före
+allokering avvisades; själva legalitetsbeviset delas utan ändrade
+livslängder. Validering och mätunderlag i PLAN-vir.md.
+Validerat: egna x86 315/315 och samma fem kända inlinefel, ARM:s 46 VIR-prov,
+ASan/UBSan och filvist bygge gröna. TSVC x86 151/151 och **83** vektorloopar
+(tidigare 82, s1111 tillkommer); ARM/QEMU 151/151 kontrollsummor.

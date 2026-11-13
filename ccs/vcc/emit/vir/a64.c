@@ -1419,6 +1419,16 @@ static bool vl_cinfo(const vl *L, uint32_t b, uint32_t c, vlx *x)
 			return true;
 		}
 	}
+	/* The shared no-overflow rule also admits shift.i32 -> sext.i64.
+	 * Preserve the allocator's lifetimes and fold into the native SXTW form. */
+	unsigned signed_scale;
+	if(j+1==c && j>lo && vl_once(L,j) && vl_once(L,j-1) &&
+	   vir_sext_shift(f,j-1,&signed_scale) && signed_scale<=4 && !vl_isconst(f,f->ins[j-1].a)) {
+		bool scaled_mem=mem && signed_scale==w;
+		*x=(vlx){j-1,f->ins[j-1].a,scaled_mem?VX_MEM:VX_EXT,6,
+		         scaled_mem?(signed_scale!=0):signed_scale,0};
+		return true;
+	}
 	if (j + 1 == x->first && j >= lo && vl_once(L, j) && f->ins[j].op == VO_EXT && VIF_W(f->ins[j].fl) == 2 &&
 	    f->ins[j].ty == VT_I64 && !vl_isconst(f, f->ins[j].a) && (mem || kk <= 4)) {
 		x->first = j, x->xv = f->ins[j].a, x->opt = f->ins[j].fl & VIF_MS ? 6 : 2;

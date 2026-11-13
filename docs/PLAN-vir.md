@@ -240,6 +240,53 @@ ekvivalenstestning återstår. Genererade program använder inga externa anrop.
 ### V4 x86-64 mot clang -O2 (2026-11-12), mål högst 5 % långsammare
 
 
+2026-11-13, gemensamt bevis för signerad indexskalning: den delade walkern
+låter VIR behålla NSW när en signerad multiplikation med en positiv tvåpotens
+blir en shift. Byggaren producerar samma operation och kod som tidigare,
+men overflowfaktumet överlever. -fwrapv och råa C-shifts får inte NSW här.
+Multiplikation med den negativa signbitspotensen stannar som mul.
+
+`vir_sext_shift` i `vir/facts.c` bevisar att `sext(shl.nsw.i32 x,k)` kan
+använda `sext(x)` och en senare skalning. Båda backenderna använder beviset
+med egna gränser för instruktioner, register, engångsvärden och edits:
+x86 kan adressera en exakt big-endian-läsning med skala 2/4/8; ARM väljer
+SXTW i ADD/SUB eller laddning/lagring. Inga nya SSA-livslängder införs.
+I BtreeIndexMoveto försvinner shll före movslq och en läsning med skala 2.
+
+Fem alternerade speedtest1-main-prov per serie, storlek 100 på CPU 7:
+
+| Serie | clang CPU ms | Före CPU ms | Skalat signerad CPU ms | Efter/clang |
+|---|---:|---:|---:|---:|
+| Första | 1113,14 | 1256,27 | 1246,51 | 1,120× |
+| Upprepning | 1110,58 | 1256,26 | 1250,33 | 1,126× |
+
+CPU-vinst cirka 0,5–0,8 %, även färre cykler. Instruktioner/clang 1,329× →
+1,322×. Slutversionen med gemensamt bevis har byteidentisk x86-assembly och
+körbar fil med den uppmätta lokala prototypen. **Målet 1,05× är öppet.**
+Underlag `work/vir-x86-perf/nsw-scale/{results100,repeat100}` och
+`work/vir-x86-perf/scale-proof`.
+
+Ett alternativ som skrev om SSA till breddad shift före allokering
+prövades men behålls inte: 1268,39 ms mot 1247,02 ms för sänkningsvarianten
+(instruktioner 1,321× respektive 1,322× clang). Det ändrade allokering och
+lät t.ex. balance få 89 spill i stället för 87. Själva beviset delas i
+stället; sänkningarna lämnar allokatorns livslängder intakta. Underlag i
+`work/vir-x86-perf/shared-scale`.
+
+Validerat: egna x86 315/315, GCC 1615/1615, TCC 105/105, samma fem kända
+inlinefel. Nytt fokusprov täcker negativa och extrema index, tvåpotenser,
+delade uttryck, volatile, signerade signbitskonstanter och overflow med
+-fwrapv. ARM:s 46 VIR-körprov passerar; TSVC på ARM/QEMU ger 151/151 samma
+kontrollsummor som clang -O3 med -ffp-contract=off. Bevisets enhetsprov
+prövar flaggor, unsigned ext, skiftgräns och saknad efterföljare.
+ASan/UBSan och filvist bygge passerar, även -fwrapv-varianten. VIR-format
+130/130, allokator 20/20 och prefixgeneratorns 134 namn gröna. TSVC på
+x86 passerar 151/151 och ökar från 82 till **83** verkliga vektorloopar,
+alla i sänkta funktioner (158 totalt): s1111, skrivningen till a[2*i],
+blir linjär när overflowfaktumet finns kvar. Ett lokalt intstride-prov
+kräver också SIMD för int-index och testar tail, orörda mellanliggande
+element samt överlappande buffertar som måste ta den skalära vägen.
+
 2026-11-13, rebase och skalade heltalsadresser: grenen ligger nu på
 `5a111ce5` (PR127–129). ARM:s nya kopia av ett block med en vanlig operation
 och `br` ingår i den gemensamma layoutregeln, även för x86. Nytt enhetsprov

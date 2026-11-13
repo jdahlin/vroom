@@ -81,8 +81,9 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
         ('vir_x86_select.c', {'choose', 'uchoose', 'keep', 'boolean', 'pointer'}, {}),
         ('vir_x86_bytes.c', {'be16', 'be32', 'be64', 'be48', 'offset32', 'bev64', 'indexed16', 'indexed32', 'bev16', 'signed16', 'changed'}, {}),
         ('vir_x86_inline.c', {'work'}, {}),
+        ('vir_x86_nsw_index.c', {'be16p', 'be16cast', 'be32cast', 'be64cast', 'load4signed', 'store4signed', 'shared', 'keep_input', 'rawshift', 'vol', 'min32', 'min64'}, {}),
         ('vir_x86_index.c', {'load8', 'load4', 'load2', 'load1', 'store8', 'store4', 'cast8', 'cast4', 'cast2', 'caststore4', 'castmod', 'cast3', 'sharedcast'}, {}),
-        ('vir_vector_stride.c', {'stride', 'wide', 'reverse', 'ordered', 'residue', 'gather', 'carry', 'chain', 'maxval', 'maxindex', 'lastnegative'}, {'stride': 'mulps', 'reverse': 'addpd', 'ordered': 'mulps', 'residue': 'addps', 'gather': 'mulps', 'carry': 'mulps'}),
+        ('vir_vector_stride.c', {'stride', 'intstride', 'wide', 'reverse', 'ordered', 'residue', 'gather', 'carry', 'chain', 'maxval', 'maxindex', 'lastnegative'}, {'stride': 'mulps', 'intstride': 'mulps', 'reverse': 'addpd', 'ordered': 'mulps', 'residue': 'addps', 'gather': 'mulps', 'carry': 'mulps'}),
         ('vir_x86_dispatch.c', {'dense', 'signed_range', 'high', 'shigh', 'atom'}, {}),
         ('vir_x86_calls.c', {'ints', 'floats', 'caller', 'indirect', 'variadic_caller'}, {}),
         ('vir_x86_vectors.c', {'eq', 'ne', 'lt', 'le', 'gt', 'ge', 'compare', 'mul', 'cvt', 'cvt64', 'negate'},
@@ -167,6 +168,17 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
                 body = asm.read_text().split('bev16:\n', 1)[1].split('.Lfunc_end', 1)[0]
                 if body.count('movzbl') != 2 or 'rorw' in body:
                     raise SystemExit('bev16: volatile byte reads were combined')
+            if filename == 'vir_x86_nsw_index.c':
+                for name, scale in [('be16p', 2), ('be16cast', 2), ('be32cast', 4), ('be64cast', 8), ('load4signed', 4), ('store4signed', 4)]:
+                    body = asm.read_text().split(name + ':\n', 1)[1].split('.Lfunc_end', 1)[0]
+                    if not re.search(r'\(%\w+,%\w+,' + str(scale) + r'\)', body):
+                        raise SystemExit(f'{name}: missing exact scaled address')
+                body = asm.read_text().split('rawshift:\n', 1)[1].split('.Lfunc_end', 1)[0]
+                if 'shll' not in body:
+                    raise SystemExit('rawshift: unproven signed shift was folded')
+                body = asm.read_text().split('vol:\n', 1)[1].split('.Lfunc_end', 1)[0]
+                if body.count('movzbl') != 2 or 'rorw' in body:
+                    raise SystemExit('vol: volatile reads were combined')
             if filename == 'vir_x86_index.c':
                 for name, scale in [('load8', 8), ('load4', 4), ('load2', 2), ('load1', 1), ('store8', 8), ('store4', 4), ('cast8', 8), ('cast4', 4), ('cast2', 2), ('caststore4', 4), ('castmod', 8)]:
                     body = asm.read_text().split(name + ':\n', 1)[1].split('.Lfunc_end', 1)[0]
@@ -190,6 +202,19 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
                 run([llvm('clang'), '-no-pie', str(inp), '-o', str(exe)])
                 if run([str(exe)]).stdout != extra_expected:
                     raise SystemExit(f'{filename}: output differs')
+        if filename == 'vir_x86_nsw_index.c':
+            wrapflags = [*flags, '-O2', '-fwrapv', '-DWRAP_MODE']
+            run([llvm('clang'), *wrapflags, str(extra), '-no-pie', '-o', str(ref)])
+            wrap_expected = run([str(ref)]).stdout
+            asm = d / 'wrap.s'
+            run([vpp, *wrapflags, '-S', str(extra), '-o', str(asm)], env=env)
+            body = asm.read_text().split('be16cast:\n', 1)[1].split('.Lfunc_end', 1)[0]
+            if 'shll' not in body:
+                raise SystemExit('be16cast: -fwrapv product was moved past sign extension')
+            exe = d / 'wrap'
+            run([llvm('clang'), '-no-pie', str(asm), '-o', str(exe)])
+            if run([str(exe)]).stdout != wrap_expected:
+                raise SystemExit('wrapping index differs from clang')
         if filename == 'vir_x86_frame.c':
             asm = d / 'keep-frame.s'
             run([vpp, *flags, '-O2', '-fno-omit-frame-pointer', '-S', str(extra), '-o', str(asm)], env=env)

@@ -870,6 +870,12 @@ VPRIV val vw_bin(ecx *e, int op, int size, bool sgn, val a, val b)
 	case T_GREATERGREATER: vop = sgn ? VO_ASHR : VO_LSHR; break;
 	default: vw_fail(e, "VIR: this operator");
 	}
+	uint8_t fl=sgn && !e->E->o->wrapv && (vop==VO_ADD || vop==VO_SUB || vop==VO_MUL)?VIF_NSW:0;
+	if(vop==VO_MUL && (fl&VIF_NSW) && (size==4 || size==8) && b.k==V_CONST && b.i>0 &&
+	   b.i<=(size==4?INT32_MAX:INT64_MAX) &&
+	   !((uint64_t)b.i&((uint64_t)b.i-1))) {
+		vop=VO_SHL;b.i=__builtin_ctzll((uint64_t)b.i);
+	}
 	if ((vop == VO_SHL || vop == VO_ASHR || vop == VO_LSHR) && b.k == V_CONST)
 		b.i &= size * 8 - 1;
 	if (a.k == V_CONST && b.k == V_CONST && vop != VO_SDIV && vop != VO_UDIV && vop != VO_SREM && vop != VO_UREM) {
@@ -879,7 +885,7 @@ VPRIV val vw_bin(ecx *e, int op, int size, bool sgn, val a, val b)
 	y = vw_val(e, &b, ty);
 	r = vw_resname(e, &a, &b);
 	/* signed +, -, *: overflow is undefined (not under -fwrapv), which is what makes an index linear */
-	vw_set(e, r, vw_ins(e, vop, ty, sgn && !e->E->o->wrapv && (vop == VO_ADD || vop == VO_SUB || vop == VO_MUL) ? VIF_NSW : 0, x, y, 0));
+	vw_set(e, r, vw_ins(e, vop, ty, fl, x, y, 0));
 	return (val){ .k = V_REG, .r = (uint8_t)r };
 }
 
