@@ -71,7 +71,7 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
         ('vir_break_dup.c', {'run'}, {}),
         ('vir_loop_rotate.c', {'sum', 'nest', 'skips', 'twoways', 'str', 'middle', 'counted'}, {}),
         ('vir_join_dup.c', {'search', 'chain', 'onearm', 'cmp1', 'cmp2'}, {}),
-        ('vir_low32.c', {'lowloop', 'wideloop', 'lowselect', 'wideselect', 'narrowarg', 'widearg'}, {}),
+        ('vir_demand_low32_compute.c', {'lowloop', 'wideloop', 'lowselect', 'wideselect', 'narrowarg', 'widearg'}, {}),
         ('vir_x86_scratch.c', {'rotate', 'negd', 'absd', 'negf', 'absf'}, {}),
         ('vir_x86_frame.c', {'frames', 'pressure', 'callee'}, {}),
         ('vir_x86_cmpmem.c', {'left', 'right', 'full32', 'sign8', 'zero8', 'sign16', 'indexed', 'keep', 'vol', 'outside', 'narrow'}, {}),

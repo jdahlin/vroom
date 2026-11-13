@@ -50,7 +50,7 @@ VPRIV void vl_goto(vl *L, uint32_t b, uint32_t t)
 	/* into a loop whose test is at its bottom (vl_order): a copy of the test here, so that
 	 * the way in costs no jump (loop rotation with the guard, as LLVM's) */
 
-	if (L->bare && vir_dominates(L->f, L->sp, t)) {	/* to the save point: its code runs behind the prologue */
+	if (L->bare && vir_block_dominates(L->f, L->sp, t)) {	/* to the save point: its code runs behind the prologue */
 		jump(L->e, L->lbl[t]);
 		return;
 	}
@@ -67,12 +67,12 @@ VPRIV void vl_goto(vl *L, uint32_t b, uint32_t t)
 /* the call at i will be a sibling call (vl_call's test, before the registers are known) */
 VPRIV bool vl_sibcand(vl *L, uint32_t b, uint32_t i)
 {
-	const vir_fn *f = L->f;
-	uint32_t ng = VSIG_NGROUPS(f->extra[f->ins[i].b]);
+	const vir_function *f = L->f;
+	uint32_t ng = VIR_SIGNATURE_GROUP_COUNT(f->extra[f->insns[i].b]);
 	vlarg *a = __builtin_alloca(sizeof(vlarg) * (ng + 1));
 	int32_t stk;
 
-	vl_assign(DARWIN(L->e->c), &f->extra[f->ins[i].b], a, ng, &stk);
+	vl_assign(DARWIN(L->e->c), &f->extra[f->insns[i].b], a, ng, &stk);
 	return !stk && vl_sibling(L, b, i);
 }
 

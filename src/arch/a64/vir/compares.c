@@ -8,29 +8,29 @@ VPRIV const int8_t vl_fccs[8] = { C_EQ, C_NE, C_MI, C_LS, C_GT, C_GE, C_VS, -1 }
 
 VPRIV const uint8_t vl_swapcc[10] = { 0, 1, 4, 5, 2, 3, 8, 9, 6, 7 };	/* icmp codes, operands swapped */
 
-VPRIV int vl_cmp(vl *L, const vir_ins *in)	/* the flags for an icmp; its code (swapped if the operands were) */
+VPRIV int vl_cmp(vl *L, const vir_insn *in)	/* the flags for an icmp; its code (swapped if the operands were) */
 {
 	ecx *e = L->e;
 	int x = vl_x(L->f, in->a), a;
 
-	if (L->opr[0] == VR_NONE && vl_iconst(L->f, in->a) && L->opr[1] != VR_NONE) {
-		opi(e, I_SUBSI, x, ZR, vl_gx(L->opr[1]), vl_ival(&L->f->ins[in->a]));
-		return vl_swapcc[in->fl & 15];
+	if (L->opr[0] == VIR_REGISTER_NONE && vl_iconst(L->f, in->a) && L->opr[1] != VIR_REGISTER_NONE) {
+		opi(e, I_SUBSI, x, ZR, vl_gx(L->opr[1]), vl_ival(&L->f->insns[in->a]));
+		return vl_swapcc[in->flags & 15];
 	}
 	a = vl_ix(L, 0, R_X16);
-	if (L->opr[1] == VR_NONE && vl_iconst(L->f, in->b)) {
-		int64_t k = vl_ival(&L->f->ins[in->b]);
+	if (L->opr[1] == VIR_REGISTER_NONE && vl_iconst(L->f, in->b)) {
+		int64_t k = vl_ival(&L->f->insns[in->b]);
 
 		opi(e, I_SUBSI, x, ZR, a, k);
 	} else {
 		op3(e, I_SUBS, x, ZR, a, vl_ix(L, 1, R_X17));
 	}
-	return in->fl & 15;
+	return in->flags & 15;
 }
 
-VPRIV void vl_fcmp(vl *L, const vir_ins *in)
+VPRIV void vl_fcmp(vl *L, const vir_insn *in)
 {
-	int d = L->f->ins[in->a].ty == VT_F64;
+	int d = L->f->insns[in->a].type == VIR_TYPE_F64;
 
 	word(L->e, 0x1e202000u | (unsigned)d << 22 | (unsigned)vl_fx(L, 1) << 16 | (unsigned)vl_fx(L, 0) << 5);
 }
@@ -43,22 +43,22 @@ VPRIV void vl_fcmp(vl *L, const vir_ins *in)
  */
 VPRIV bool vl_chain(vl *L, uint32_t b, uint32_t i)
 {
-	const vir_fn *f = L->f;
-	uint32_t end = f->blk[b].first + f->blk[b].n, v = i, j = i + 1;
+	const vir_function *f = L->f;
+	uint32_t end = f->blocks[b].first + f->blocks[b].insn_count, v = i, j = i + 1;
 
 	for (;;) {
-		const vir_ins *c, *k;
+		const vir_insn *c, *k;
 
-		if (j + 2 >= end || L->uses[v] != 1 || L->o->slot[v] != VIR_NOBLK || L->uses[j] != 1 || L->o->slot[j] != VIR_NOBLK)
+		if (j + 2 >= end || L->uses[v] != 1 || L->o->slot[v] != VIR_BLOCK_NONE || L->uses[j] != 1 || L->o->slot[j] != VIR_BLOCK_NONE)
 			return false;
-		c = &f->ins[j], k = &f->ins[j + 1];
-		if (c->op != VO_ICMP || (k->op != VO_AND && k->op != VO_OR) || k->ty != VT_I32 || k->a != v || k->b != j)
+		c = &f->insns[j], k = &f->insns[j + 1];
+		if (c->op != VIR_OP_ICMP || (k->op != VIR_OP_AND && k->op != VIR_OP_OR) || k->type != VIR_TYPE_I32 || k->a != v || k->b != j)
 			return false;
 		v = j + 1, j += 2;
-		if (f->ins[j].op == VO_ICMP)
+		if (f->insns[j].op == VIR_OP_ICMP)
 			continue;
-		if ((f->ins[j].op != VO_BRIF && f->ins[j].op != VO_SELECT) || f->ins[j].a != v || L->uses[v] != 1 ||
-		    L->o->slot[v] != VIR_NOBLK)
+		if ((f->insns[j].op != VIR_OP_BRIF && f->insns[j].op != VIR_OP_SELECT) || f->insns[j].a != v || L->uses[v] != 1 ||
+		    L->o->slot[v] != VIR_BLOCK_NONE)
 			return false;
 		L->cclo = i, L->cchi = v;
 		return true;
@@ -67,22 +67,22 @@ VPRIV bool vl_chain(vl *L, uint32_t b, uint32_t i)
 
 /* a further compare of a chain: flags = its compare when the condition so far allows it (and: holds,
  * or: fails), else flags that make the joined condition false (and) or true (or) */
-VPRIV void vl_ccmp(vl *L, const vir_ins *in, bool isor)
+VPRIV void vl_ccmp(vl *L, const vir_insn *in, bool isor)
 {
 	static const uint8_t sat[16] = { 4, 0, 2, 0, 8, 0, 1, 0, 2, 0, 0, 8, 0, 4, 0, 0 };	/* nzcv satisfying a condition */
 	ecx *e = L->e;
-	int x = vl_x(L->f, in->a), code = in->fl & 15, cc, rn, rm = -1;
+	int x = vl_x(L->f, in->a), code = in->flags & 15, cc, rn, rm = -1;
 	int64_t k = 0;
 	bool imm = false;
 	uint32_t w;
 
-	if (L->opr[0] == VR_NONE && vl_iconst(L->f, in->a) && L->opr[1] != VR_NONE) {	/* (as vl_cmp: operands swapped) */
-		rn = vl_gx(L->opr[1]), k = vl_ival(&L->f->ins[in->a]), imm = true;
+	if (L->opr[0] == VIR_REGISTER_NONE && vl_iconst(L->f, in->a) && L->opr[1] != VIR_REGISTER_NONE) {	/* (as vl_cmp: operands swapped) */
+		rn = vl_gx(L->opr[1]), k = vl_ival(&L->f->insns[in->a]), imm = true;
 		code = vl_swapcc[code];
 	} else {
 		rn = vl_ix(L, 0, R_X16);
-		if (L->opr[1] == VR_NONE && vl_iconst(L->f, in->b))
-			k = vl_ival(&L->f->ins[in->b]), imm = true;
+		if (L->opr[1] == VIR_REGISTER_NONE && vl_iconst(L->f, in->b))
+			k = vl_ival(&L->f->insns[in->b]), imm = true;
 		else
 			rm = vl_ix(L, 1, R_X17);
 	}
@@ -103,7 +103,7 @@ VPRIV void vl_ccmp(vl *L, const vir_ins *in, bool isor)
 }
 
 /* the flags of a condition value (operand 0): the fused compare's, else `cmp w, #0` and NE */
-VPRIV int vl_cond(vl *L, const vir_ins *in)
+VPRIV int vl_cond(vl *L, const vir_insn *in)
 {
 	if (L->fcc >= 0 && L->fval == in->a) {
 		int c = L->fcc;
@@ -115,7 +115,7 @@ VPRIV int vl_cond(vl *L, const vir_ins *in)
 	return C_NE;
 }
 
-VPRIV vlcc vl_brcond(vl *L, const vir_ins *in)
+VPRIV vlcc vl_brcond(vl *L, const vir_insn *in)
 {
 	if (L->fcc >= 0 && L->fval == in->a) {
 		vlcc c = { L->fcc, L->fzr, L->fzx, L->fbit };
@@ -151,8 +151,8 @@ VPRIV bool vl_kept(const vl *L, uint8_t r, uint32_t upto)
 /* instruction j of block b is used once, by j + 1, and not spilled */
 static bool vl_once1(const vl *L, uint32_t b, uint32_t j)
 {
-	return L->uses[j] == 1 && L->o->slot[j] == VIR_NOBLK && j + 1 < L->f->blk[b].first + L->f->blk[b].n &&
-	       L->f->ins[j + 1].a == j;
+	return L->uses[j] == 1 && L->o->slot[j] == VIR_BLOCK_NONE && j + 1 < L->f->blocks[b].first + L->f->blocks[b].insn_count &&
+	       L->f->insns[j + 1].a == j;
 }
 
 /*
@@ -163,33 +163,33 @@ static bool vl_once1(const vl *L, uint32_t b, uint32_t j)
  */
 VPRIV bool vl_tfold(vl *L, uint32_t b, uint32_t i)
 {
-	const vir_fn *f = L->f;
-	const vir_ins *in = &f->ins[i];
+	const vir_function *f = L->f;
+	const vir_insn *in = &f->insns[i];
 	uint32_t j = i;
-	int x = in->ty != VT_I32, cc = C_NE, k = 0;
+	int x = in->type != VIR_TYPE_I32, cc = C_NE, k = 0;
 	uint64_t wm = x ? ~0ull : 0xffffffffull, m, tm = ~0ull;
 
-	if (L->opr[0] == VR_NONE || !vl_once1(L, b, i))
+	if (L->opr[0] == VIR_REGISTER_NONE || !vl_once1(L, b, i))
 		return false;
-	if (in->op == VO_LSHR || in->op == VO_ASHR) {	/* (a constant in a register too: the immediate) */
-		if (!vl_iconst(f, in->b) || (k = (int)vl_ival(&f->ins[in->b])) <= 0 || k >= (x ? 64 : 32))
+	if (in->op == VIR_OP_LSHR || in->op == VIR_OP_ASHR) {	/* (a constant in a register too: the immediate) */
+		if (!vl_iconst(f, in->b) || (k = (int)vl_ival(&f->insns[in->b])) <= 0 || k >= (x ? 64 : 32))
 			return false;
 		if (!vl_once1(L, b, ++j))
 			return false;
 	}
-	if (f->ins[j].op != VO_AND || !vl_iconst(f, f->ins[j].b) || (f->ins[j].ty != VT_I32) != (x != 0))
+	if (f->insns[j].op != VIR_OP_AND || !vl_iconst(f, f->insns[j].b) || (f->insns[j].type != VIR_TYPE_I32) != (x != 0))
 		return false;
-	m = vl_lval(&f->ins[f->ins[j].b]) & wm;
+	m = vl_lval(&f->insns[f->insns[j].b]) & wm;
 	j++;
-	if (f->ins[j].op == VO_TRUNC && f->ins[j].ty == VT_I32 && vl_once1(L, b, j))
+	if (f->insns[j].op == VIR_OP_TRUNC && f->insns[j].type == VIR_TYPE_I32 && vl_once1(L, b, j))
 		tm = 0xffffffffull, j++;
-	if (f->ins[j].op == VO_ICMP && (f->ins[j].fl & 15) <= 1 && vl_iconst(f, f->ins[j].b) &&
-	    !vl_ival(&f->ins[f->ins[j].b]) && vl_once1(L, b, j))
-		cc = f->ins[j].fl & 15 ? C_NE : C_EQ, j++;
-	if (f->ins[j].op != VO_BRIF || f->ins[j].a != j - 1)
+	if (f->insns[j].op == VIR_OP_ICMP && (f->insns[j].flags & 15) <= 1 && vl_iconst(f, f->insns[j].b) &&
+	    !vl_ival(&f->insns[f->insns[j].b]) && vl_once1(L, b, j))
+		cc = f->insns[j].flags & 15 ? C_NE : C_EQ, j++;
+	if (f->insns[j].op != VIR_OP_BRIF || f->insns[j].a != j - 1)
 		return false;
 	m &= tm;
-	if (in->op == VO_ASHR && k && (m >> ((x ? 64 : 32) - k)))
+	if (in->op == VIR_OP_ASHR && k && (m >> ((x ? 64 : 32) - k)))
 		return false;	/* (it would test copies of the sign) */
 	m = (m << k) & wm;
 	if (!m || !logimm_ok(m, x))
