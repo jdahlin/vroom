@@ -107,6 +107,42 @@ the fix.  Each review ends with "Decisions needed" and "Not covered", as
 7. **Rename windows.**  When each module is renamed relative to the open
    branches, and whether old names stay as aliases for a release.
 
+## Decisions (Johan, 2026-11-13)
+
+Taken in a question round after P1.  They replace "Decisions needed" above
+where the two differ.
+
+| Topic | Decision |
+|---|---|
+| Main goal | Readable by a newcomer: one job per file, names that say the job, a comment on every module.  Duplication, speed and C++ readiness follow from the order below, they do not lead it |
+| Timebox | None fixed; Johan says when the tree is ready for C++ |
+| Requirement | One binary compiles for every target, as clang does (cross compilation).  The target is data chosen at run time; host code never decides target behaviour |
+| Output rule | Byte-identical is the proof as long as nothing better exists, not a goal for ever.  A step that changes output is named as such and validated another way |
+| Method | Module by module, each finished in one go: split, rename, comment |
+| Rename depth | Files, a module prefix on every file-scope function, long-lived state (struct fields, globals).  Short locals stay |
+| Open branches | Ignored: no aliases, no windows |
+| Pilot | The shared library (`lib/` to `common/`) |
+| Order after it | Bottom-up by layer: lex and pp, diagnostics, C front end, shared codegen, arm64, x86-64, VIR, assembler and object, linker, driver and server |
+| arm64 walker | The safe moves (target-independent code out of `arch/a64`, verbatim helpers shared), then a pilot of one statement family on the shared walker with -O0 speed measured |
+| Passes | One pass per file and a named pass table (time, disable, verify by name), identical output.  Fusing walks comes later, from the per-pass timings |
+| Linker | One linker core with output formats, not three linkers.  (Not the recommendation; it fits the one-binary requirement) |
+| Scheduler | Now only the measured waste: cache flush between process groups, vlink waking every thread for a small link, batch worker stacks.  One scheduler is its own plan after the readability pass |
+| wasm | Disabled now, build and CI, and left to rot until needed (its own PR) |
+| Error policy | Fail the job, never the server: bad input, limits and out-of-memory end one job with a diagnostic; `abort` only for internal inconsistency, through one macro; standalone tools print and exit |
+| Environment switches | Product knobs become options that travel with the job; test aids go in one registry read from the job's environment; finished experiments are deleted |
+| Ratchet | `bench/quality.py --check` gates a module once it has had its pass; other modules are reported only |
+| Bugs from the reviews | Fixed now, each with a test, in their own PR |
+
+Open, each waiting for a measurement or a closer look:
+
+- `cc/replay.c`: keep, clean, or move to a branch.  Measure its saving on
+  today's tree first.
+- When `struct cc` is split into AST and parser.  Check the 24 fields code
+  generation reads against the hot paths; the split must cost nothing.
+- How shared code reaches a target in a one-binary compiler: the walker
+  compiled once per target (no indirect calls, as VIR does today) or a
+  run-time table of functions.  New ground; decide on a prototype's numbers.
+
 ## Status
 
 ### 2026-11-13: P1 done, 18 reviews
