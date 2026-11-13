@@ -20,7 +20,6 @@ tar xf "$archive"
 # Keep release-tarball tools from discovering the surrounding vroom Git repo.
 export GIT_CEILING_DIRECTORIES=$PWD
 src=$PWD/ffmpeg-8.1.3
-patch -d "$src" -p1 < "$root/bench/ffmpeg/n8.1.3-mov-chnl.patch"
 # Configure discovers the reference feature set. Make invokes vpp directly for
 # all target C and host C. The configured linker driver receives objects.
 cc="$vpp --target=x86_64-linux-gnu -isystem $resource/include -isystem /usr/include/$multiarch -isystem /usr/include"

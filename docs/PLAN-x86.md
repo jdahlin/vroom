@@ -1416,9 +1416,9 @@ Den direkta emittern klarar H.264:s asm-operander med högt registertryck
 och behåller statiska tabeller som refereras från asm under PIC. Assemblern
 kodar de MMX- och SSSE3-former som FFmpeg använder. Frontänden hanterar
 glibcs `stdc_count_ones` och `stdc_trailing_zeros`.
-Båda träden använder en enradsrättning i FFmpegs `mov_read_chnl`, som
-annars returnerar en oinitierad lokal variabel. Patchen finns i
-`bench/ffmpeg/n8.1.3-mov-chnl.patch`.
+Båda träden använder den oförändrade FFmpeg-utgåvan. Den optimerande
+vandraren väljer noll för en aldrig tilldelad lokal heltalsvariabel vars
+lagring inte kan observeras.
 
 Resultat: 2739/2739 FATE i vardera konfigurationen. Den asm-aktiverade
 körningen omfattade 91 checkasm-mål. Länkaren varnar för DT_TEXTREL i
