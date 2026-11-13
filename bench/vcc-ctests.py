@@ -362,8 +362,10 @@ def one_(t):
     if suite == 'vcc' and re.search(r'/\*\s*vcc-threads-same\s*\*/', src):
         outs = set()
         for k, n in enumerate(['1', '8', '8', '8']):
-            rc, _, err = sh([VPP, '-S'] + vfl + [path, '-o', f'{wd}/vcc{k}.s'], cwd=cwd, env=dict(os.environ, VCC_THREADS=n))
-            outs.add(open(f'{wd}/vcc{k}.s', 'rb').read() if not rc else b'')
+            rc, _, err = sh([VPP, '-S'] + vfl + [path, '-o', f'{wd}/vcc{k}.s'], cwd=cwd, timeout=tmo, env=dict(os.environ, VCC_THREADS=n))
+            if rc:	# (a failed run is not a difference: say what it was)
+                return t, 'fail', 'emit', f'VCC_THREADS={n}: vpp -S {rc}: ' + first_err(err.decode(errors='replace'))
+            outs.add(open(f'{wd}/vcc{k}.s', 'rb').read())
         if len(outs) != 1:
             return t, 'fail', 'emit', 'assembly differs between VCC_THREADS=1 and 8'
     # an object byte-identical to one that passed before (same runtime, same
