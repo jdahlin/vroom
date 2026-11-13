@@ -25,7 +25,6 @@
  */
 #include "ld/ld.h"
 #include "common/digest.h"
-#include "port/task.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -104,9 +103,9 @@ typedef struct {
 typedef struct { uint64_t address; uint64_t value; } macho_fixup;	/* val: bind import + 1 << 63, or rebase target */
 
 /*
- * One Mach-O link's state, created by macho_link_locked and freed by
+ * One Mach-O link's state, created by macho_link and freed by
  * macho_context_destroy.  The libSystem export table below is process-wide
- * (read once, under the link lock).
+ * (read once, by macho_libsystem_load).
  */
 struct macho_context {
 	struct ld_diagnostics diagnostics;	/* at most 20 errors, without lld's announcement */
@@ -275,10 +274,8 @@ static uint32_t macho_version_parse(const char *s)
  * target, over all documents (libSystem and its re-exported libraries).
  * Names are NUL-terminated in place.
  */
-static bool macho_libsystem_load(struct macho_context *ctx)
+static bool macho_libsystem_read(struct macho_context *ctx)
 {
-	if (macho_libsystem_text)
-		return true;
 	char path[1024];
 	snprintf(path, sizeof path, "%s/usr/lib/libSystem.B.tbd", macho_sdk_root_find());
 	size_t n;
@@ -373,6 +370,17 @@ static bool macho_libsystem_load(struct macho_context *ctx)
 		p = memchr(q, '\n', (size_t)(end - q)) ? (char *)memchr(q, '\n', (size_t)(end - q)) + 1 : end;
 	}
 	return true;
+}
+
+/* the export table, read by the first link that needs it; links run concurrently, so the
+   first one reads it under a lock and the others wait for it */
+static bool macho_libsystem_load(struct macho_context *ctx)
+{
+	static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+	pthread_mutex_lock(&lock);
+	bool ok = macho_libsystem_text || macho_libsystem_read(ctx);
+	pthread_mutex_unlock(&lock);
+	return ok;
 }
 
 static bool macho_libsystem_is_exported(const char *name)
@@ -748,19 +756,9 @@ static uint32_t macho_section_index_find(uint32_t osi, const uint32_t *order, ui
 	return 0;
 }
 
-static int macho_link_locked(int argc, char **argv, int dirfd, FILE *err);
-
-/* one link at a time: the libSystem export table is process-wide (vccd calls this from its workers) */
+/* one link; the state is the link's own (struct macho_context), so vccd's workers can run
+   several at once; only the libSystem export table is shared (macho_libsystem_load) */
 int macho_link(int argc, char **argv, int dirfd, FILE *err)
-{
-	static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
-	vtask_mutex_lock(&lock);
-	int rc = macho_link_locked(argc, argv, dirfd, err);
-	pthread_mutex_unlock(&lock);
-	return rc;
-}
-
-static int macho_link_locked(int argc, char **argv, int dirfd, FILE *err)
 {
 	struct macho_context *ctx = calloc(1, sizeof *ctx);
 	if (!ctx) {
