@@ -4,26 +4,26 @@
 
 /* ---------------------------------------------------------------- data */
 
-static _Thread_local uint32_t as_dtype;	/* x86 data with sym@MOD: the relocation type emit_value uses */
+static _Thread_local uint32_t as_data_relocation_type;	/* x86 data with sym@MOD: the relocation type as_value_emit uses */
 
-VPRIV int emit_value(As *a, int size, Val *v)
+VPRIV int as_value_emit(as_context *a, int size, as_value *v)
 {
 	ElfObj *o = a->o;
 	elf_data(o, a->cur);
 	if (elf_sec(o, elf_frag(o, a->cur)->sec)->type == SHT_NOBITS) {	/* zeros only (MC) */
-		fold(a, v);
-		if (v->add || v->sub || v->c) return err(a, "cannot have non-zero initializers in a NOBITS section");
+		as_value_fold(a, v);
+		if (v->add || v->sub || v->c) return as_error_report(a, "cannot have non-zero initializers in a NOBITS section");
 		elf_fill(o, a->cur, (uint64_t)size, 0);
 		return 0;
 	}
 	uint64_t off = elf_frag(o, a->cur)->size;
 	uint8_t *p = elf_grow(o, a->cur, (size_t)size);
-	fold(a, v);
+	as_value_fold(a, v);
 	if (!v->add && !v->sub) {
 		int64_t x = v->c;
 		if (size < 8) {
 			int64_t lo = -((int64_t)1 << (8 * size - 1)), hi = ((int64_t)1 << (8 * size)) - 1;
-			if (x < lo || x > hi) return err(a, "out of range literal value");
+			if (x < lo || x > hi) return as_error_report(a, "out of range literal value");
 		}
 		for (int i = 0; i < size; i++) p[i] = (uint8_t)((uint64_t)x >> 8 * i);
 		return 0;
@@ -31,7 +31,7 @@ VPRIV int emit_value(As *a, int size, Val *v)
 	memset(p, 0, (size_t)size);
 	uint32_t t = size == 8 ? R_AARCH64_ABS64 : size == 4 ? R_AARCH64_ABS32 : size == 2 ? R_AARCH64_ABS16 : R_VCC_ABS8;
 	if (o->machine == EM_X86_64)
-		t = as_dtype ? as_dtype : size == 8 ? R_X86_64_64 : size == 4 ? R_X86_64_32 : size == 2 ? R_X86_64_16 : R_X86_64_8;
+		t = as_data_relocation_type ? as_data_relocation_type : size == 8 ? R_X86_64_64 : size == 4 ? R_X86_64_32 : size == 2 ? R_X86_64_16 : R_X86_64_8;
 	elf_fixup(o, a->cur, off, p, t, *v);
 	return 0;
 }
@@ -39,35 +39,35 @@ VPRIV int emit_value(As *a, int size, Val *v)
 
 
 /* .octa: 16-byte integer literals (only literals: 128-bit expressions do not exist here) */
-VPRIV int d_octa(As *a, const char *p, const char *e)
+VPRIV int as_directive_octa(as_context *a, const char *p, const char *e)
 {
-	for (p = ws(p, e); p < e;) {
+	for (p = as_whitespace_skip(p, e); p < e;) {
 		unsigned __int128 x = 0;
 		int neg = 0;
 		if (*p == '-') { neg = 1; p++; }
 		if (p + 1 < e && p[0] == '0' && (p[1] | 32) == 'x') {
 			const char *s = p += 2;
-			while (p < e && c_xdigit((unsigned char)*p)) { x = x * 16 + (unsigned)(c_digit((unsigned char)*p) ? *p - '0' : c_lower((unsigned char)*p) - 'a' + 10); p++; }
-			if (p == s) return err(a, "invalid hexadecimal number");
-		} else if (p < e && c_digit((unsigned char)*p)) {
-			while (p < e && c_digit((unsigned char)*p)) x = x * 10 + (unsigned)(*p++ - '0');
+			while (p < e && as_char_is_hex_digit((unsigned char)*p)) { x = x * 16 + (unsigned)(as_char_is_digit((unsigned char)*p) ? *p - '0' : as_char_to_lower((unsigned char)*p) - 'a' + 10); p++; }
+			if (p == s) return as_error_report(a, "invalid hexadecimal number");
+		} else if (p < e && as_char_is_digit((unsigned char)*p)) {
+			while (p < e && as_char_is_digit((unsigned char)*p)) x = x * 10 + (unsigned)(*p++ - '0');
 		} else
-			return err(a, "unexpected token in '.octa' directive");
+			return as_error_report(a, "unexpected token in '.octa' directive");
 		if (neg) x = -x;
 		elf_data(a->o, a->cur);
 		uint8_t *q = elf_grow(a->o, a->cur, 16);
 		for (int i = 0; i < 16; i++) q[i] = (uint8_t)(x >> 8 * i);
-		p = ws(p, e);
+		p = as_whitespace_skip(p, e);
 		if (p >= e) break;
-		if (*p != ',') return err(a, "unexpected token in directive");
-		p = ws(p + 1, e);
+		if (*p != ',') return as_error_report(a, "unexpected token in directive");
+		p = as_whitespace_skip(p + 1, e);
 	}
 	return 0;
 }
 
 /* .reloc offset, R_AARCH64_<type>[, expr]: a relocation at a constant offset of the current section */
 /* a .reloc fixup goes among its frag's fixups in offset order (MC) */
-static void reloc_fixup(ElfObj *o, uint32_t f, uint64_t off, uint8_t *at, uint32_t type, Val v)
+static void as_reloc_fixup_add(ElfObj *o, uint32_t f, uint64_t off, uint8_t *at, uint32_t type, as_value v)
 {
 	elf_fixup(o, f, off, at, type, v);
 	ElfFix *fx = (ElfFix *)o->fixes.base;
@@ -85,7 +85,7 @@ static void reloc_fixup(ElfObj *o, uint32_t f, uint64_t off, uint8_t *at, uint32
 	if (k == fr->fix_head) fr->fix_head = id; else fx[prev].next = id;
 }
 
-VPRIV int d_reloc(As *a, const char *p, const char *e)
+VPRIV int as_directive_reloc(as_context *a, const char *p, const char *e)
 {
 	static const struct { const char *n; uint32_t t; } types[] = {
 		{ "R_AARCH64_ABS64", R_AARCH64_ABS64 }, { "R_AARCH64_ABS32", R_AARCH64_ABS32 }, { "R_AARCH64_ABS16", R_AARCH64_ABS16 },
@@ -95,29 +95,29 @@ VPRIV int d_reloc(As *a, const char *p, const char *e)
 		{ "BFD_RELOC_32", R_AARCH64_ABS32 }, { "BFD_RELOC_16", R_AARCH64_ABS16 },
 	};
 	ElfObj *o = a->o;
-	Val ov;
-	if (val_expr(a, &p, e, &ov)) return -1;
-	fold(a, &ov);
-	p = ws(p, e);
-	if (p >= e || *p != ',') return err(a, "expected comma");
-	Sv nm = first_word(p + 1, e);
+	as_value ov;
+	if (as_expression_value_parse(a, &p, e, &ov)) return -1;
+	as_value_fold(a, &ov);
+	p = as_whitespace_skip(p, e);
+	if (p >= e || *p != ',') return as_error_report(a, "expected comma");
+	as_text nm = as_text_first_word(p + 1, e);
 	uint32_t type = (uint32_t)-1, size = 0;
 	for (size_t i = 0; i < sizeof types / sizeof types[0]; i++)
 		if (strlen(types[i].n) == nm.n && !memcmp(types[i].n, nm.s, nm.n)) type = types[i].t;
-	if (type == (uint32_t)-1) return err(a, "unknown relocation name");
+	if (type == (uint32_t)-1) return as_error_report(a, "unknown relocation name");
 	size = type == R_AARCH64_NONE || type == R_AARCH64_TLSDESC_CALL ? 0 :
 	       type == R_AARCH64_ABS64 || type == R_AARCH64_PREL64 ? 8 : type == R_AARCH64_ABS32 || type == R_AARCH64_PREL32 ? 4 : 2;
-	p = ws(nm.s + nm.n, e);
-	Val v = { 0, 0, 0 };
-	if (p < e && *p == ',') { p++; if (val_expr(a, &p, e, &v)) return -1; }
+	p = as_whitespace_skip(nm.s + nm.n, e);
+	as_value v = { 0, 0, 0 };
+	if (p < e && *p == ',') { p++; if (as_expression_value_parse(a, &p, e, &v)) return -1; }
 	uint32_t sec = elf_frag(o, a->cur)->sec;
 	uint64_t off;
 	if (!ov.add && !ov.sub) off = (uint64_t)ov.c;
 	else {
 		/* .reloc sym+c: an offset in sym's section (MC: the section of the offset) */
 		ElfSym *t = ov.add && !ov.sub ? elf_symp(o, ov.add) : 0;
-		if (!t || !(t->flags & ESYM_DEFINED) || (t->flags & ESYM_ABS)) return err(a, ".reloc offset is not absolute or a label");
-		if (!size) { reloc_fixup(o, t->frag, t->value + (uint64_t)ov.c, 0, type, v); return 0; }
+		if (!t || !(t->flags & ESYM_DEFINED) || (t->flags & ESYM_ABS)) return as_error_report(a, ".reloc offset is not absolute or a label");
+		if (!size) { as_reloc_fixup_add(o, t->frag, t->value + (uint64_t)ov.c, 0, type, v); return 0; }
 		sec = elf_frag(o, t->frag)->sec;
 		off = t->value + (uint64_t)ov.c;
 		for (uint32_t f = sec; f != t->frag; f = elf_frag(o, f)->next) off += elf_frag(o, f)->size;
@@ -128,13 +128,13 @@ VPRIV int d_reloc(As *a, const char *p, const char *e)
 		ElfFrag *fr = elf_frag(o, f);
 		if (off >= at && off + size <= at + fr->size + (size == 0)) {
 			uint64_t k = off - at;
-			if (!size) { reloc_fixup(o, f, k, 0, type, v); return 0; }
+			if (!size) { as_reloc_fixup_add(o, f, k, 0, type, v); return 0; }
 			for (ElfChunk *ch = fr->head; ch; ch = ch->next) {
 				if (k + size <= ch->used) {
 					/* llvm-mc keeps the bytes and adds the relocation; the field is not patched */
 					uint8_t keep[8];
 					memcpy(keep, ch->data + k, size);
-					reloc_fixup(o, f, off - at, ch->data + k, type, v);
+					as_reloc_fixup_add(o, f, off - at, ch->data + k, type, v);
 					memcpy(ch->data + k, keep, size);
 					return 0;
 				}
@@ -145,49 +145,49 @@ VPRIV int d_reloc(As *a, const char *p, const char *e)
 		}
 		at += fr->size;
 	}
-	return err(a, ".reloc offset is not inside the section's data");
+	return as_error_report(a, ".reloc offset is not inside the section's data");
 }
 
-VPRIV int d_data(As *a, const char *p, const char *e, int size)
+VPRIV int as_directive_data(as_context *a, const char *p, const char *e, int size)
 {
-	if (a->dwlocp) loc_row(a);
-	p = ws(p, e);
+	if (a->dwlocp) as_dwarf_row_emit(a);
+	p = as_whitespace_skip(p, e);
 	if (p >= e) return 0;
 	for (;;) {
-		Val v;
-		if (val_expr(a, &p, e, &v)) return -1;
-		p = ws(p, e);
+		as_value v;
+		if (as_expression_value_parse(a, &p, e, &v)) return -1;
+		p = as_whitespace_skip(p, e);
 		if (a->o->machine == EM_X86_64 && p < e && *p == '@') {
 			/* sym@DTPOFF, @TPOFF, @GOTOFF, @GOTPCREL, @PLT (debug info of TLS, tables) */
 			const char *m = ++p;
-			while (p < e && isidc((unsigned char)*p)) p++;
-			Sv w = { m, (uint32_t)(p - m) };
-			as_dtype = sveq(w, "DTPOFF") ? (size == 8 ? R_X86_64_DTPOFF64 : R_X86_64_DTPOFF32) :
-				   sveq(w, "TPOFF") ? (size == 8 ? R_X86_64_TPOFF64 : R_X86_64_TPOFF32) :
-				   sveq(w, "GOTOFF") ? R_X86_64_GOTOFF64 : sveq(w, "GOTPCREL") ? R_X86_64_GOTPCREL :
-				   sveq(w, "PLT") ? R_X86_64_PLT32 : 0;
-			if (!as_dtype) return err(a, "invalid variant '%.*s'", (int)w.n, w.s);
-			p = ws(p, e);
+			while (p < e && as_char_is_identifier((unsigned char)*p)) p++;
+			as_text w = { m, (uint32_t)(p - m) };
+			as_data_relocation_type = as_text_equals(w, "DTPOFF") ? (size == 8 ? R_X86_64_DTPOFF64 : R_X86_64_DTPOFF32) :
+				   as_text_equals(w, "TPOFF") ? (size == 8 ? R_X86_64_TPOFF64 : R_X86_64_TPOFF32) :
+				   as_text_equals(w, "GOTOFF") ? R_X86_64_GOTOFF64 : as_text_equals(w, "GOTPCREL") ? R_X86_64_GOTPCREL :
+				   as_text_equals(w, "PLT") ? R_X86_64_PLT32 : 0;
+			if (!as_data_relocation_type) return as_error_report(a, "invalid variant '%.*s'", (int)w.n, w.s);
+			p = as_whitespace_skip(p, e);
 			if (p < e && (*p == '+' || *p == '-')) {
 				int64_t k;
-				if (abs_expr(a, &p, e, &k)) return -1;
+				if (as_expression_absolute_parse(a, &p, e, &k)) return -1;
 				v.c += k;
 			}
 		}
-		int r = emit_value(a, size, &v);
-		as_dtype = 0;
+		int r = as_value_emit(a, size, &v);
+		as_data_relocation_type = 0;
 		if (r) return -1;
-		p = ws(p, e);
+		p = as_whitespace_skip(p, e);
 		if (p >= e) return 0;
-		if (*p != ',') return err(a, "unexpected token in directive");
+		if (*p != ',') return as_error_report(a, "unexpected token in directive");
 		p++;
 	}
 }
 
-VPRIV int parse_string(As *a, const char **pp, const char *e, char *out, size_t *n)
+VPRIV int as_string_parse(as_context *a, const char **pp, const char *e, char *out, size_t *n)
 {
-	const char *p = ws(*pp, e);
-	if (p >= e || *p != '"') return err(a, "expected string");
+	const char *p = as_whitespace_skip(*pp, e);
+	if (p >= e || *p != '"') return as_error_report(a, "expected string");
 	p++;
 	size_t k = 0;
 	while (p < e && *p != '"') {
@@ -197,7 +197,7 @@ VPRIV int parse_string(As *a, const char **pp, const char *e, char *out, size_t 
 			switch (c) {
 			case 'n': c = '\n'; break; case 't': c = '\t'; break; case 'r': c = '\r'; break;
 			case 'b': c = '\b'; break; case 'f': c = '\f'; break; case '"': break; case '\\': break;
-			case 'x': { int v = 0; while (p < e && c_xdigit((unsigned char)*p)) { v = v * 16 + (c_digit((unsigned char)*p) ? *p - '0' : c_lower((unsigned char)*p) - 'a' + 10); p++; } c = (char)v; break; }
+			case 'x': { int v = 0; while (p < e && as_char_is_hex_digit((unsigned char)*p)) { v = v * 16 + (as_char_is_digit((unsigned char)*p) ? *p - '0' : as_char_to_lower((unsigned char)*p) - 'a' + 10); p++; } c = (char)v; break; }
 			default:
 				if (c >= '0' && c <= '7') {
 					int v = c - '0';
@@ -208,38 +208,38 @@ VPRIV int parse_string(As *a, const char **pp, const char *e, char *out, size_t 
 		}
 		out[k++] = c;
 	}
-	if (p >= e) return err(a, "unterminated string");
+	if (p >= e) return as_error_report(a, "unterminated string");
 	*pp = p + 1;
 	*n = k;
 	return 0;
 }
 
-VPRIV int d_ascii(As *a, const char *p, const char *e, int z)
+VPRIV int as_directive_ascii(as_context *a, const char *p, const char *e, int z)
 {
-	if (a->dwlocp) loc_row(a);
-	p = ws(p, e);
+	if (a->dwlocp) as_dwarf_row_emit(a);
+	p = as_whitespace_skip(p, e);
 	if (p >= e) return 0;
 	for (;;) {
 		char sbuf[4096], *buf = sbuf;	/* the decoded string is no longer than its source */
 		size_t n;
-		if ((size_t)(e - p) > sizeof sbuf && !(buf = malloc((size_t)(e - p)))) return err(a, "out of memory");
-		if (parse_string(a, &p, e, buf, &n)) { if (buf != sbuf) free(buf); return -1; }
+		if ((size_t)(e - p) > sizeof sbuf && !(buf = malloc((size_t)(e - p)))) return as_error_report(a, "out of memory");
+		if (as_string_parse(a, &p, e, buf, &n)) { if (buf != sbuf) free(buf); return -1; }
 		elf_data(a->o, a->cur);
 		elf_bytes(a->o, a->cur, buf, n);
 		if (buf != sbuf) free(buf);
 		if (z) elf_fill(a->o, a->cur, 1, 0);
-		p = ws(p, e);
+		p = as_whitespace_skip(p, e);
 		if (p >= e) return 0;
 		if (*p == ',') p++;
-		else if (*p != '"') return err(a, "unexpected token in directive");
+		else if (*p != '"') return as_error_report(a, "unexpected token in directive");
 	}
 }
 
 /* .float/.single (size 4), .double (8): literals, as llvm-mc (inf, nan, signs) */
-VPRIV int d_float(As *a, const char *p, const char *e, int size)
+VPRIV int as_directive_float(as_context *a, const char *p, const char *e, int size)
 {
-	if (a->dwlocp) loc_row(a);
-	p = ws(p, e);
+	if (a->dwlocp) as_dwarf_row_emit(a);
+	p = as_whitespace_skip(p, e);
 	if (p >= e) return 0;
 	for (;;) {
 		char buf[128];
@@ -256,7 +256,7 @@ VPRIV int d_float(As *a, const char *p, const char *e, int size)
 		else if (!strcasecmp(s, "nan")) d = __builtin_nan("");
 		else {
 			d = strtod(s, &end);
-			if (end == s || *end) return err(a, "invalid floating point literal");
+			if (end == s || *end) return as_error_report(a, "invalid floating point literal");
 		}
 		uint64_t bits;
 		if (__builtin_isnan(d))	/* llvm-mc: every mantissa bit set */
@@ -271,23 +271,23 @@ VPRIV int d_float(As *a, const char *p, const char *e, int size)
 			if (neg) d = -d;
 			memcpy(&bits, &d, 8);
 		}
-		Val v = { 0, 0, (int64_t)bits };
-		if (emit_value(a, size, &v)) return -1;
-		p = ws(q, e);
+		as_value v = { 0, 0, (int64_t)bits };
+		if (as_value_emit(a, size, &v)) return -1;
+		p = as_whitespace_skip(q, e);
 		if (p >= e) return 0;
-		if (*p != ',') return err(a, "unexpected token in directive");
-		p = ws(p + 1, e);
+		if (*p != ',') return as_error_report(a, "unexpected token in directive");
+		p = as_whitespace_skip(p + 1, e);
 	}
 }
 
 /* .base64 "..." */
-VPRIV int d_base64(As *a, const char *p, const char *e)
+VPRIV int as_directive_base64(as_context *a, const char *p, const char *e)
 {
 	char buf[4096];
 	size_t n;
-	if ((size_t)(e - p) > sizeof buf) return err(a, "string too long");
-	if (parse_string(a, &p, e, buf, &n)) return -1;
-	if (!n || n % 4) return err(a, "failed to base64 decode string data");
+	if ((size_t)(e - p) > sizeof buf) return as_error_report(a, "string too long");
+	if (as_string_parse(a, &p, e, buf, &n)) return -1;
+	if (!n || n % 4) return as_error_report(a, "failed to base64 decode string data");
 	uint8_t out[3072];
 	size_t m = 0;
 	for (size_t i = 0; i < n; i += 4) {
@@ -297,7 +297,7 @@ VPRIV int d_base64(As *a, const char *p, const char *e)
 			char c = buf[i + j];
 			int v = c >= 'A' && c <= 'Z' ? c - 'A' : c >= 'a' && c <= 'z' ? c - 'a' + 26 : c >= '0' && c <= '9' ? c - '0' + 52 :
 				c == '+' ? 62 : c == '/' ? 63 : c == '=' && i + 4 == n && j >= 2 ? (pad++, 0) : -1;
-			if (v < 0 || (pad && c != '=')) return err(a, "failed to base64 decode string data");
+			if (v < 0 || (pad && c != '=')) return as_error_report(a, "failed to base64 decode string data");
 			w = w << 6 | (uint32_t)v;
 		}
 		out[m++] = (uint8_t)(w >> 16);
@@ -309,30 +309,30 @@ VPRIV int d_base64(As *a, const char *p, const char *e)
 	return 0;
 }
 
-static int code_section(As *a) { return (elf_sec(a->o, elf_frag(a->o, a->cur)->sec)->flags & SHF_EXECINSTR) != 0; }
+static int as_section_is_code(as_context *a) { return (elf_sec(a->o, elf_frag(a->o, a->cur)->sec)->flags & SHF_EXECINSTR) != 0; }
 
 /* .align/.p2align (p2 = 1) or .balign (p2 = 0); .balignw/.p2alignl..: a
  * fill of fsz bytes (little-endian pattern) */
-VPRIV int d_align(As *a, const char *p, const char *e, int p2) { return d_align_w(a, p, e, p2, 1); }
-VPRIV int d_align_w(As *a, const char *p, const char *e, int p2, int fsz)
+VPRIV int as_directive_align(as_context *a, const char *p, const char *e, int p2) { return as_directive_align_width(a, p, e, p2, 1); }
+VPRIV int as_directive_align_width(as_context *a, const char *p, const char *e, int p2, int fsz)
 {
 	int64_t n, fill = 0, max = 0;
 	int hasfill = 0;
-	if (abs_expr(a, &p, e, &n)) return -1;
-	p = ws(p, e);
+	if (as_expression_absolute_parse(a, &p, e, &n)) return -1;
+	p = as_whitespace_skip(p, e);
 	if (p < e && *p == ',') {
-		p = ws(p + 1, e);
-		if (p < e && *p != ',') { if (abs_expr(a, &p, e, &fill)) return -1; hasfill = 1; }
-		p = ws(p, e);
-		if (p < e && *p == ',') { p++; if (abs_expr(a, &p, e, &max)) return -1; }
+		p = as_whitespace_skip(p + 1, e);
+		if (p < e && *p != ',') { if (as_expression_absolute_parse(a, &p, e, &fill)) return -1; hasfill = 1; }
+		p = as_whitespace_skip(p, e);
+		if (p < e && *p == ',') { p++; if (as_expression_absolute_parse(a, &p, e, &max)) return -1; }
 	}
 	unsigned l2;
 	if (p2) {
-		if (n < 0 || n >= 32) return err(a, "invalid alignment value");
+		if (n < 0 || n >= 32) return as_error_report(a, "invalid alignment value");
 		l2 = (unsigned)n;
 	} else {
 		if (n <= 0) n = 1;
-		if (n & (n - 1)) return err(a, "alignment must be a power of 2");
+		if (n & (n - 1)) return as_error_report(a, "alignment must be a power of 2");
 		l2 = (unsigned)__builtin_ctzll((uint64_t)n);
 	}
 	if (fsz == 1) {
@@ -340,19 +340,19 @@ VPRIV int d_align_w(As *a, const char *p, const char *e, int p2, int fsz)
 			/* its frag's start is not known yet (after .prefalign/.uleb128): a variable item */
 			ElfSec *sc = elf_sec(a->o, elf_frag(a->o, a->cur)->sec);
 			if (l2 > sc->align) sc->align = l2;
-			int code = !hasfill && code_section(a);
-			struct VarItem *v = var_item(a, VI_ALIGN);
+			int code = !hasfill && as_section_is_code(a);
+			struct as_variable_item *v = as_variable_item_add(a, AS_VARIABLE_ITEM_ALIGN);
 			v->p2 = (uint8_t)l2; v->code = (uint8_t)code; v->fill = (uint8_t)fill; v->max = (uint64_t)max;
 			return 0;
 		}
-		elf_align(a->o, a->cur, l2, !hasfill && code_section(a), (uint8_t)fill, (uint64_t)max);
+		elf_align(a->o, a->cur, l2, !hasfill && as_section_is_code(a), (uint8_t)fill, (uint64_t)max);
 		return 0;
 	}
 	ElfFrag *f = elf_frag(a->o, a->cur);
 	uint64_t al = (uint64_t)1 << l2, pad = (al - (f->size & (al - 1))) & (al - 1);
 	ElfSec *sc = elf_sec(a->o, f->sec);
 	if (!hasfill || sc->type == SHT_NOBITS) {
-		elf_align(a->o, a->cur, l2, !hasfill && code_section(a), 0, (uint64_t)max);
+		elf_align(a->o, a->cur, l2, !hasfill && as_section_is_code(a), 0, (uint64_t)max);
 		return 0;
 	}
 	/* the pattern repeated over the whole pad (GNU as; llvm-mc lays out the
@@ -367,27 +367,27 @@ VPRIV int d_align_w(As *a, const char *p, const char *e, int p2, int fsz)
 }
 
 /* .comm name, size[, align] (SHN_COMMON, or .bss when the name is local) and .lcomm */
-VPRIV int d_comm(As *a, const char *p, const char *e, int local)
+VPRIV int as_directive_comm(as_context *a, const char *p, const char *e, int local)
 {
-	Sv nm;
+	as_text nm;
 	int64_t size, al = 0;
-	if (parse_name(a, &p, e, &nm)) return -1;
-	p = ws(p, e);
-	if (p >= e || *p != ',') return err(a, "expected a comma");
+	if (as_name_parse(a, &p, e, &nm)) return -1;
+	p = as_whitespace_skip(p, e);
+	if (p >= e || *p != ',') return as_error_report(a, "expected a comma");
 	p++;
-	if (abs_expr(a, &p, e, &size)) return -1;
-	p = ws(p, e);
-	if (p < e && *p == ',') { p++; if (abs_expr(a, &p, e, &al)) return -1; }
-	if (size < 0) return err(a, "invalid '.comm' or '.lcomm' directive size");
-	if (al < 0 || (al & (al - 1))) return err(a, "alignment must be a power of 2");
-	uint32_t y = sym(a, nm.s, nm.n);
+	if (as_expression_absolute_parse(a, &p, e, &size)) return -1;
+	p = as_whitespace_skip(p, e);
+	if (p < e && *p == ',') { p++; if (as_expression_absolute_parse(a, &p, e, &al)) return -1; }
+	if (size < 0) return as_error_report(a, "invalid '.comm' or '.lcomm' directive size");
+	if (al < 0 || (al & (al - 1))) return as_error_report(a, "alignment must be a power of 2");
+	uint32_t y = as_symbol_intern(a, nm.s, nm.n);
 	ElfSym *s = elf_symp(a->o, y);
-	if (s->flags & ESYM_DEFINED) return err(a, "invalid symbol redefinition");
+	if (s->flags & ESYM_DEFINED) return as_error_report(a, "invalid symbol redefinition");
 	elf_reg(a->o, y);
 	s->type = STT_OBJECT;
 	s->size = (uint64_t)size;
 	if (local || ((s->flags & ESYM_BINDSET) && s->bind == STB_LOCAL)) {
-		uint32_t f = std_section(a, ".bss");
+		uint32_t f = as_section_standard_find(a, ".bss");
 		if (al > 1) elf_align(a->o, f, (unsigned)__builtin_ctzll((uint64_t)al), 0, 0, 0);
 		elf_define(a->o, y, f, elf_frag(a->o, f)->size);
 		elf_data(a->o, f);
@@ -401,91 +401,91 @@ VPRIV int d_comm(As *a, const char *p, const char *e, int local)
 
 
 /* .uleb128/.sleb128 expr, ...: constants (label differences resolved by then) */
-VPRIV int d_leb(As *a, const char *p, const char *e, int sgn)
+VPRIV int as_directive_leb128(as_context *a, const char *p, const char *e, int sgn)
 {
-	if (a->dwlocp) loc_row(a);
+	if (a->dwlocp) as_dwarf_row_emit(a);
 	for (;;) {
 		int64_t v;
-		Val x;
-		if (val_expr(a, &p, e, &x)) return -1;
-		fold(a, &x);
+		as_value x;
+		if (as_expression_value_parse(a, &p, e, &x)) return -1;
+		as_value_fold(a, &x);
 		if (x.add || x.sub) {	/* a label difference not known yet: a variable item */
-			if (x.add && !x.sub) return err(a, "expected absolute expression");
-			struct VarItem *vi = var_item(a, sgn ? VI_SLEB : VI_ULEB);
+			if (x.add && !x.sub) return as_error_report(a, "expected absolute expression");
+			struct as_variable_item *vi = as_variable_item_add(a, sgn ? AS_VARIABLE_ITEM_SLEB : AS_VARIABLE_ITEM_ULEB);
 			vi->v = x;
 			goto next;
 		}
 		v = x.c;
 		elf_data(a->o, a->cur);	/* MC: a relaxable LEB gets no mapping symbol */
-		uint8_t t[16]; Buf8 b = { t, 0 };
-		if (sgn) sleb(&b, v); else uleb(&b, (uint64_t)v);
+		uint8_t t[16]; as_byte_span b = { t, 0 };
+		if (sgn) as_leb128_signed_append(&b, v); else as_leb128_unsigned_append(&b, (uint64_t)v);
 		memcpy(elf_grow(a->o, a->cur, b.n), t, b.n);
 	next:
-		p = ws(p, e);
+		p = as_whitespace_skip(p, e);
 		if (p >= e) return 0;
-		if (*p != ',') return err(a, "unexpected token in directive");
+		if (*p != ',') return as_error_report(a, "unexpected token in directive");
 		p++;
 	}
 }
 
-VPRIV int d_space(As *a, const char *p, const char *e)
+VPRIV int as_directive_space(as_context *a, const char *p, const char *e)
 {
 	int64_t n, fill = 0;
 	{
 		/* a count only the layout knows (the kernel's ALTERNATIVE: -((b-a)-(d-c) > 0) * ...) */
 		const char *q = p;
-		Val v;
-		if (val_expr(a, &q, e, &v)) return -1;
-		if (!is_abs(a, &v)) {
-			if (!deferrable(a, &v)) return err(a, "expected absolute expression");
-			q = ws(q, e);
-			if (q < e && *q == ',') { q++; if (abs_expr(a, &q, e, &fill)) return -1; }
+		as_value v;
+		if (as_expression_value_parse(a, &q, e, &v)) return -1;
+		if (!as_value_is_absolute(a, &v)) {
+			if (!as_value_is_deferrable(a, &v)) return as_error_report(a, "expected absolute expression");
+			q = as_whitespace_skip(q, e);
+			if (q < e && *q == ',') { q++; if (as_expression_absolute_parse(a, &q, e, &fill)) return -1; }
 			elf_data(a->o, a->cur);
-			struct VarItem *it = var_item(a, VI_SKIP);
+			struct as_variable_item *it = as_variable_item_add(a, AS_VARIABLE_ITEM_SKIP);
 			it->v = v;
 			it->fill = (uint8_t)fill;
 			return 0;
 		}
 	}
-	if (abs_expr(a, &p, e, &n)) return -1;
-	p = ws(p, e);
-	if (p < e && *p == ',') { p++; if (abs_expr(a, &p, e, &fill)) return -1; }
-	if (n < 0) return err(a, "invalid number of bytes");
+	if (as_expression_absolute_parse(a, &p, e, &n)) return -1;
+	p = as_whitespace_skip(p, e);
+	if (p < e && *p == ',') { p++; if (as_expression_absolute_parse(a, &p, e, &fill)) return -1; }
+	if (n < 0) return as_error_report(a, "invalid number of bytes");
 	elf_data(a->o, a->cur);
 	elf_fill(a->o, a->cur, (uint64_t)n, (uint8_t)fill);
 	return 0;
 }
 
-VPRIV int d_fill(As *a, const char *p, const char *e)
+VPRIV int as_directive_fill(as_context *a, const char *p, const char *e)
 {
 	int64_t n, size = 1, val = 0;
 	{
 		/* .fill end - ., 1, 0xcc: a count the layout settles (the IDT entry stubs), as .skip */
 		const char *q = p;
-		Val v;
-		if (val_expr(a, &q, e, &v)) return -1;
-		if (!is_abs(a, &v)) {
+		as_value v;
+		if (as_expression_value_parse(a, &q, e, &v)) return -1;
+		if (!as_value_is_absolute(a, &v)) {
 			int64_t fsz = 1, fv = 0;
-			q = ws(q, e);
+			q = as_whitespace_skip(q, e);
 			if (q < e && *q == ',') {
-				q++; if (abs_expr(a, &q, e, &fsz)) return -1;
-				q = ws(q, e);
-				if (q < e && *q == ',') { q++; if (abs_expr(a, &q, e, &fv)) return -1; }
+				q++; if (as_expression_absolute_parse(a, &q, e, &fsz)) return -1;
+				q = as_whitespace_skip(q, e);
+				if (q < e && *q == ',') { q++; if (as_expression_absolute_parse(a, &q, e, &fv)) return -1; }
 			}
-			if (fsz != 1 || !deferrable(a, &v)) return err(a, "expected absolute expression");
+			if (fsz != 1 || !as_value_is_deferrable(a, &v)) return as_error_report(a, "expected absolute expression");
 			elf_data(a->o, a->cur);
-			struct VarItem *it = var_item(a, VI_SKIP);
+			struct as_variable_item *it = as_variable_item_add(a, AS_VARIABLE_ITEM_SKIP);
 			it->v = v;
 			it->fill = (uint8_t)fv;
 			return 0;
 		}
 	}
-	if (abs_expr(a, &p, e, &n)) return -1;
-	p = ws(p, e);
+	if (as_expression_absolute_parse(a, &p, e, &n)) return -1;
+	p = as_whitespace_skip(p, e);
 	if (p < e && *p == ',') {
-		p++; if (abs_expr(a, &p, e, &size)) return -1;
-		p = ws(p, e);
-		if (p < e && *p == ',') { p++; if (abs_expr(a, &p, e, &val)) return -1; }
+		p++; if (as_expression_absolute_parse(a, &p, e, &size)) return -1;
+		p = as_whitespace_skip(p, e);
+		if (p < e && *p == ',') { p++; if (as_expression_absolute_parse(a, &p, e, &val)) return -1; }
 	}
 	if (size > 8) size = 8;
 	/* MC: .fill makes no mapping symbol (.space does) */
@@ -496,40 +496,40 @@ VPRIV int d_fill(As *a, const char *p, const char *e)
 	return 0;
 }
 
-VPRIV int d_org(As *a, const char *p, const char *e)
+VPRIV int as_directive_org(as_context *a, const char *p, const char *e)
 {
-	Val v;
+	as_value v;
 	int64_t fill = 0;
-	if (val_expr(a, &p, e, &v)) return -1;
-	p = ws(p, e);
-	if (p < e && *p == ',') { p++; if (abs_expr(a, &p, e, &fill)) return -1; }
+	if (as_expression_value_parse(a, &p, e, &v)) return -1;
+	p = as_whitespace_skip(p, e);
+	if (p < e && *p == ',') { p++; if (as_expression_absolute_parse(a, &p, e, &fill)) return -1; }
 	ElfFrag *f = elf_frag(a->o, a->cur);
 	int64_t target;
 	if (v.add && !v.sub) {
 		ElfSym *y = elf_symp(a->o, v.add);
-		if (!(y->flags & ESYM_DEFINED) || y->frag != a->cur) return err(a, "unsupported .org target");
+		if (!(y->flags & ESYM_DEFINED) || y->frag != a->cur) return as_error_report(a, "unsupported .org target");
 		target = (int64_t)y->value + v.c;
 	} else if (!v.add && !v.sub) {
-		if (f->sub) return err(a, "unsupported absolute .org in a subsection");
+		if (f->sub) return as_error_report(a, "unsupported absolute .org in a subsection");
 		target = v.c;
-	} else return err(a, "expected assembly-time absolute expression");
-	if (target < (int64_t)f->size) return err(a, "attempt to move .org backwards");
+	} else return as_error_report(a, "expected assembly-time absolute expression");
+	if (target < (int64_t)f->size) return as_error_report(a, "attempt to move .org backwards");
 	elf_fill(a->o, a->cur, (uint64_t)target - f->size, (uint8_t)fill);
 	return 0;
 }
 
-VPRIV int d_incbin(As *a, const char *p, const char *e)
+VPRIV int as_directive_incbin(as_context *a, const char *p, const char *e)
 {
 	char path[1024]; size_t n;
-	if ((size_t)(e - p) >= sizeof path) return err(a, "path too long");
-	if (parse_string(a, &p, e, path, &n)) return -1;
+	if ((size_t)(e - p) >= sizeof path) return as_error_report(a, "path too long");
+	if (as_string_parse(a, &p, e, path, &n)) return -1;
 	path[n] = 0;
 	int64_t skip = 0, count = -1;
-	p = ws(p, e);
+	p = as_whitespace_skip(p, e);
 	if (p < e && *p == ',') {
-		p++; if (abs_expr(a, &p, e, &skip)) return -1;
-		p = ws(p, e);
-		if (p < e && *p == ',') { p++; if (abs_expr(a, &p, e, &count)) return -1; }
+		p++; if (as_expression_absolute_parse(a, &p, e, &skip)) return -1;
+		p = as_whitespace_skip(p, e);
+		if (p < e && *p == ',') { p++; if (as_expression_absolute_parse(a, &p, e, &count)) return -1; }
 	}
 	int fd;
 	if (a->dir && path[0] != '/') {
@@ -538,7 +538,7 @@ VPRIV int d_incbin(As *a, const char *p, const char *e)
 		fd = open(full, O_RDONLY | O_CLOEXEC);
 	} else
 		fd = open(path, O_RDONLY | O_CLOEXEC);
-	if (fd < 0) return err(a, "Could not find incbin file '%s'", path);
+	if (fd < 0) return as_error_report(a, "Could not find incbin file '%s'", path);
 	struct stat st;
 	fstat(fd, &st);
 	size_t sz = (size_t)st.st_size;
@@ -559,18 +559,18 @@ VPRIV int d_incbin(As *a, const char *p, const char *e)
 	return 0;
 }
 
-VPRIV int d_inst(As *a, const char *p, const char *e)
+VPRIV int as_directive_inst(as_context *a, const char *p, const char *e)
 {
 	for (;;) {
-		Val v;
-		if (val_expr(a, &p, e, &v)) return -1;
-		fold(a, &v);
-		if (!is_abs(a, &v)) return err(a, "expected constant expression in .inst");
-		if (a->dwlocp) loc_row(a);
+		as_value v;
+		if (as_expression_value_parse(a, &p, e, &v)) return -1;
+		as_value_fold(a, &v);
+		if (!as_value_is_absolute(a, &v)) return as_error_report(a, "expected constant expression in .inst");
+		if (a->dwlocp) as_dwarf_row_emit(a);
 		elf_insn(a->o, a->cur, (uint32_t)v.c);
-		p = ws(p, e);
+		p = as_whitespace_skip(p, e);
 		if (p >= e) return 0;
-		if (*p != ',') return err(a, "unexpected token in .inst");
+		if (*p != ',') return as_error_report(a, "unexpected token in .inst");
 		p++;
 	}
 }

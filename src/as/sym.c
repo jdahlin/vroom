@@ -4,7 +4,7 @@
 
 /* ---------------------------------------------------------------- symbols */
 
-VPRIV uint32_t sym(As *a, const char *s, size_t n)
+VPRIV uint32_t as_symbol_intern(as_context *a, const char *s, size_t n)
 {
 	uint32_t y = elf_sym(a->o, s, (uint32_t)n);
 	ElfSym *p = elf_symp(a->o, y);
@@ -12,25 +12,25 @@ VPRIV uint32_t sym(As *a, const char *s, size_t n)
 	return y;
 }
 
-VPRIV uint32_t tmpsym(As *a)
+VPRIV uint32_t as_symbol_temporary(as_context *a)
 {
 	uint32_t y = elf_sym_anon(a->o, "", 0);
 	elf_symp(a->o, y)->flags |= ESYM_TEMP;
 	return y;
 }
 
-VPRIV uint32_t here(As *a)
+VPRIV uint32_t as_label_temporary_define(as_context *a)
 {
-	uint32_t y = tmpsym(a);
+	uint32_t y = as_symbol_temporary(a);
 	elf_define(a->o, y, a->cur, elf_frag(a->o, a->cur)->size);
 	return y;
 }
 
-VPRIV NumLab *numlab(As *a, uint32_t num)
+VPRIV as_numeric_label *as_numeric_label_find(as_context *a, uint32_t num)
 {
 	if (a->nlcount * 2 >= a->nlmask) {
 		uint32_t nm = a->nlmask * 2 + 1;
-		NumLab *t = rget(&a->defs, sizeof *t * (nm + 1));
+		as_numeric_label *t = as_region_alloc(&a->defs, sizeof *t * (nm + 1));
 		memset(t, 0, sizeof *t * (nm + 1));
 		for (uint32_t i = 0; i <= a->nlmask; i++) {
 			if (!a->nl[i].cur && !a->nl[i].fwd) continue;
@@ -49,11 +49,11 @@ VPRIV NumLab *numlab(As *a, uint32_t num)
 	return &a->nl[j];
 }
 
-VPRIV Var *var_slot(As *a, uint32_t y, int create)
+VPRIV as_variable *as_variable_slot_find(as_context *a, uint32_t y, int create)
 {
 	if (create && a->vcount * 2 >= a->vmask) {
 		uint32_t nm = a->vmask * 2 + 1;
-		Var *t = rget(&a->defs, sizeof *t * (nm + 1));
+		as_variable *t = as_region_alloc(&a->defs, sizeof *t * (nm + 1));
 		memset(t, 0, sizeof *t * (nm + 1));
 		for (uint32_t i = 0; i <= a->vmask; i++) {
 			if (!a->vars[i].sym) continue;
@@ -75,12 +75,12 @@ VPRIV Var *var_slot(As *a, uint32_t y, int create)
 
 /* ---------------------------------------------------------------- symbols directives */
 
-VPRIV int d_symattr(As *a, const char *p, const char *e, int what)
+VPRIV int as_directive_symbol_attribute(as_context *a, const char *p, const char *e, int what)
 {
 	for (;;) {
-		Sv n;
-		if (parse_name(a, &p, e, &n)) return -1;
-		uint32_t y = sym(a, n.s, n.n);
+		as_text n;
+		if (as_name_parse(a, &p, e, &n)) return -1;
+		uint32_t y = as_symbol_intern(a, n.s, n.n);
 		if (what != 'e') elf_reg(a->o, y);
 		ElfSym *s = elf_symp(a->o, y);
 		switch (what) {
@@ -93,56 +93,56 @@ VPRIV int d_symattr(As *a, const char *p, const char *e, int what)
 		case 'e': break;
 		}
 		if (what != 'e' && what != 'l') s->flags &= ~ESYM_TEMP;	/* .globl .Lx makes it real */
-		p = ws(p, e);
+		p = as_whitespace_skip(p, e);
 		if (p >= e) return 0;
-		if (*p != ',') return err(a, "unexpected token in directive");
+		if (*p != ',') return as_error_report(a, "unexpected token in directive");
 		p++;
 	}
 }
 
-VPRIV int d_type(As *a, const char *p, const char *e)
+VPRIV int as_directive_type(as_context *a, const char *p, const char *e)
 {
-	Sv n;
-	if (parse_name(a, &p, e, &n)) return -1;
-	uint32_t y = sym(a, n.s, n.n);
-	p = ws(p, e);
-	if (p < e && *p == ',') p = ws(p + 1, e);
+	as_text n;
+	if (as_name_parse(a, &p, e, &n)) return -1;
+	uint32_t y = as_symbol_intern(a, n.s, n.n);
+	p = as_whitespace_skip(p, e);
+	if (p < e && *p == ',') p = as_whitespace_skip(p + 1, e);
 	if (p < e && (*p == '%' || *p == '@')) p++;
 	const char *s = p;
-	while (p < e && isidc((unsigned char)*p)) p++;
-	Sv t = { s, (uint32_t)(p - s) };
+	while (p < e && as_char_is_identifier((unsigned char)*p)) p++;
+	as_text t = { s, (uint32_t)(p - s) };
 	int ty;
-	if (sveq(t, "function") || sveq(t, "STT_FUNC")) ty = STT_FUNC;
-	else if (sveq(t, "object") || sveq(t, "STT_OBJECT")) ty = STT_OBJECT;
-	else if (sveq(t, "notype") || sveq(t, "STT_NOTYPE")) ty = STT_NOTYPE;
-	else if (sveq(t, "tls_object") || sveq(t, "STT_TLS")) ty = STT_TLS;
-	else if (sveq(t, "gnu_indirect_function") || sveq(t, "STT_GNU_IFUNC")) ty = STT_GNU_IFUNC;
-	else if (sveq(t, "common") || sveq(t, "STT_COMMON")) ty = STT_OBJECT;	/* MC: STT_COMMON is written as OBJECT */
-	else if (sveq(t, "gnu_unique_object")) { ty = STT_OBJECT; elf_bind(a->o, y, 10); }	/* STB_GNU_UNIQUE */
-	else return err(a, "unsupported attribute in '.type' directive");
+	if (as_text_equals(t, "function") || as_text_equals(t, "STT_FUNC")) ty = STT_FUNC;
+	else if (as_text_equals(t, "object") || as_text_equals(t, "STT_OBJECT")) ty = STT_OBJECT;
+	else if (as_text_equals(t, "notype") || as_text_equals(t, "STT_NOTYPE")) ty = STT_NOTYPE;
+	else if (as_text_equals(t, "tls_object") || as_text_equals(t, "STT_TLS")) ty = STT_TLS;
+	else if (as_text_equals(t, "gnu_indirect_function") || as_text_equals(t, "STT_GNU_IFUNC")) ty = STT_GNU_IFUNC;
+	else if (as_text_equals(t, "common") || as_text_equals(t, "STT_COMMON")) ty = STT_OBJECT;	/* MC: STT_COMMON is written as OBJECT */
+	else if (as_text_equals(t, "gnu_unique_object")) { ty = STT_OBJECT; elf_bind(a->o, y, 10); }	/* STB_GNU_UNIQUE */
+	else return as_error_report(a, "unsupported attribute in '.type' directive");
 	elf_reg(a->o, y);
 	elf_type(a->o, y, ty);
 	return 0;
 }
 
-VPRIV int d_size(As *a, const char *p, const char *e)
+VPRIV int as_directive_size(as_context *a, const char *p, const char *e)
 {
-	Sv n;
-	if (parse_name(a, &p, e, &n)) return -1;
-	uint32_t y = sym(a, n.s, n.n);
-	p = ws(p, e);
-	if (p >= e || *p != ',') return err(a, "expected comma in '.size' directive");
+	as_text n;
+	if (as_name_parse(a, &p, e, &n)) return -1;
+	uint32_t y = as_symbol_intern(a, n.s, n.n);
+	p = as_whitespace_skip(p, e);
+	if (p >= e || *p != ',') return as_error_report(a, "expected comma in '.size' directive");
 	p++;
-	Val v;
-	if (val_expr(a, &p, e, &v)) return -1;
-	fold(a, &v);
-	if (is_abs(a, &v)) { elf_symp(a->o, y)->size = (uint64_t)v.c; elf_symp(a->o, y)->flags &= ~ESYM_SIZE_EXPR; }
+	as_value v;
+	if (as_expression_value_parse(a, &p, e, &v)) return -1;
+	as_value_fold(a, &v);
+	if (as_value_is_absolute(a, &v)) { elf_symp(a->o, y)->size = (uint64_t)v.c; elf_symp(a->o, y)->flags &= ~ESYM_SIZE_EXPR; }
 	else elf_size_expr(a->o, y, v);
 	return 0;
 }
 
 /* x86: the register sym was made an alias of, or NULL */
-VPRIV const char *as_ralias(As *a, uint32_t y)
+VPRIV const char *as_register_alias_find(as_context *a, uint32_t y)
 {
 	for (uint32_t i = a->nralias; i-- > 0;)
 		if (a->ralias[i].sym == y)
@@ -152,33 +152,33 @@ VPRIV const char *as_ralias(As *a, uint32_t y)
 
 /* .symver orig, name@[@[@]]ver[, remove|local|hidden]: an alias defined at
    the end (MC's ELFObjectWriter::executePostLayoutBinding) */
-VPRIV int d_symver(As *a, const char *p, const char *e)
+VPRIV int as_directive_symver(as_context *a, const char *p, const char *e)
 {
-	Sv o, v;
-	if (parse_name(a, &p, e, &o)) return -1;
-	p = ws(p, e);
-	if (p >= e || *p != ',') return err(a, "expected a comma");
-	p = ws(p + 1, e);
+	as_text o, v;
+	if (as_name_parse(a, &p, e, &o)) return -1;
+	p = as_whitespace_skip(p, e);
+	if (p >= e || *p != ',') return as_error_report(a, "expected a comma");
+	p = as_whitespace_skip(p + 1, e);
 	const char *q = p;
 	while (q < e && *q != ',' && *q != ' ' && *q != '\t') q++;
-	v = (Sv){ p, (size_t)(q - p) };
+	v = (as_text){ p, (size_t)(q - p) };
 	const char *at = memchr(v.s, '@', v.n);
-	if (!at) return err(a, "expected a '@' in the name");
+	if (!at) return as_error_report(a, "expected a '@' in the name");
 	int rm = 0;
-	p = ws(q, e);
+	p = as_whitespace_skip(q, e);
 	if (p < e && *p == ',') {
-		Sv w = trim(p + 1, e);
+		as_text w = as_text_trim(p + 1, e);
 		if (w.n == 6 && !memcmp(w.s, "remove", 6)) rm = 1;
 		else if (!(w.n == 5 && !memcmp(w.s, "local", 5)) && !(w.n == 6 && !memcmp(w.s, "hidden", 6)))
-			return err(a, "expected 'remove'");
+			return as_error_report(a, "expected 'remove'");
 	}
-	uint32_t yo = sym(a, o.s, o.n);
+	uint32_t yo = as_symbol_intern(a, o.s, o.n);
 	elf_reg(a->o, yo);
-	uint32_t yv = sym(a, v.s, v.n);
+	uint32_t yv = as_symbol_intern(a, v.s, v.n);
 	elf_reg(a->o, yv);
 	if (a->nsv == a->svcap) {
 		uint32_t nc = a->svcap ? a->svcap * 2 : 16;
-		void *t = rget(&a->defs, sizeof *a->sv * nc);
+		void *t = as_region_alloc(&a->defs, sizeof *a->sv * nc);
 		if (a->nsv) memcpy(t, a->sv, sizeof *a->sv * a->nsv);
 		a->sv = t; a->svcap = nc;
 	}
@@ -187,7 +187,7 @@ VPRIV int d_symver(As *a, const char *p, const char *e)
 	return 0;
 }
 
-VPRIV void symver_finish(As *a)
+VPRIV void as_symver_finish(as_context *a)
 {
 	ElfObj *o = a->o;
 	for (uint32_t i = 0; i < a->nsv; i++) {
@@ -216,7 +216,7 @@ VPRIV void symver_finish(As *a)
 		if (at && t->len - (size_t)(at - t->name) >= 3 && !memcmp(at, "@@@", 3)) {
 			/* name@@@v: @@ when defined here, @ otherwise */
 			size_t k = (size_t)(at - t->name);
-			char *n = rget(&a->defs, t->len);
+			char *n = as_region_alloc(&a->defs, t->len);
 			memcpy(n, t->name, k + 1);
 			if (def) { memcpy(n + k + 1, at + 2, t->len - k - 2); }
 			else { memcpy(n + k + 1, at + 3, t->len - k - 3); }

@@ -28,71 +28,71 @@
 #endif
 #endif
 
-#define MAXFR 512
-#define MAXCOND 1024
-#define MAXSECSTK 256
-#define MAXOPS 8
+#define AS_FRAMES_MAX 512
+#define AS_CONDITIONS_MAX 1024
+#define AS_SECTION_STACK_MAX 256
+#define AS_OPERANDS_MAX 8
 
-typedef struct { const char *s; uint32_t n; } Sv;
+typedef struct { const char *s; uint32_t n; } as_text;
 
 typedef struct {
-	Sv name, def;
+	as_text name, def;
 	uint8_t req, vararg;
-} Param;
+} as_macro_parameter;
 
 /* a body split at its substitutions: body[off, off + len), then k (-1 nothing,
  * -2 \@, -3 \+, >= 0 argument k) */
-typedef struct { uint32_t off, len; int32_t k; } Piece;
-typedef struct { Piece *p; uint32_t n; } Tmpl;
+typedef struct { uint32_t off, len; int32_t k; } as_template_piece;
+typedef struct { as_template_piece *p; uint32_t n; } as_template;
 
-typedef struct Macro {
-	Sv name;
-	Param *params; uint32_t np;
-	Sv body;
+typedef struct as_macro {
+	as_text name;
+	as_macro_parameter *params; uint32_t np;
+	as_text body;
 	uint32_t count;
-	Tmpl t;			/* compiled at the first instantiation (t.p == 0 before) */
-	struct Macro *next;
-} Macro;
+	as_template t;			/* compiled at the first instantiation (t.p == 0 before) */
+	struct as_macro *next;
+} as_macro;
 
 typedef struct {
 	const char *p, *e;
-	uint8_t kind;		/* FR_FILE, FR_MACRO, FR_LOOP */
+	uint8_t kind;		/* AS_FRAME_FILE, AS_FRAME_MACRO, AS_FRAME_LOOP */
 	uint8_t bol;		/* at beginning of a line */
 	uint32_t ncond;
 	size_t mark;
 	uint32_t line;
 	uint32_t sline;		/* line of the current statement */
 	uint32_t pline;		/* the instantiating statement's line in the frame below */
-} Frame;
-enum { FR_FILE, FR_MACRO, FR_LOOP };
+} as_frame;
+enum { AS_FRAME_FILE, AS_FRAME_MACRO, AS_FRAME_LOOP };
 
-typedef struct { uint8_t kind, met, ignore; } Cond;	/* kind: 1 if, 2 elseif, 3 else */
+typedef struct { uint8_t kind, met, ignore; } as_condition;	/* kind: 1 if, 2 elseif, 3 else */
 
-typedef struct { uint32_t num, cur, fwd; } NumLab;
+typedef struct { uint32_t num, cur, fwd; } as_numeric_label;
 
-typedef struct { Sv name; Sv reg; uint32_t next; } Alias;	/* next: older entry in the bucket, index + 1 */
-#define ALH 64
+typedef struct { as_text name; as_text reg; uint32_t next; } as_register_alias;	/* next: older entry in the bucket, index + 1 */
+#define AS_ALIAS_BUCKETS 64
 
-typedef ElfVal Val;
+typedef ElfVal as_value;
 
-typedef struct { uint32_t sym; ElfVal v; } Var;	/* .set with a non-absolute value */
+typedef struct { uint32_t sym; ElfVal v; } as_variable;	/* .set with a non-absolute value */
 
 
-struct As {
+struct as_context {
 	ElfObj *o;
 	const char *dir;	/* relative .incbin paths (NULL: process cwd) */
-	Frame fr[MAXFR]; int nfr;
-	Cond cs[MAXCOND]; int ncs;
+	as_frame fr[AS_FRAMES_MAX]; int nfr;
+	as_condition cs[AS_CONDITIONS_MAX]; int ncs;
 	uint32_t cur, prev;	/* current/previous frag */
-	struct { uint32_t cur, prev; } ss[MAXSECSTK]; int nss;
+	struct { uint32_t cur, prev; } ss[AS_SECTION_STACK_MAX]; int nss;
 	vregion xs;		/* expansion text stack */
 	vregion defs;		/* macro definitions etc. (per run) */
 	vregion sb;		/* current statement */
-	Macro **mtab; uint32_t mmask, mcount;
-	NumLab *nl; uint32_t nlmask, nlcount;
-	Alias *al; uint32_t nal, alcap;
-	uint32_t alh[ALH];	/* .req buckets: newest entry, index + 1 */
-	Var *vars; uint32_t vmask, vcount;
+	as_macro **mtab; uint32_t mmask, mcount;
+	as_numeric_label *nl; uint32_t nlmask, nlcount;
+	as_register_alias *al; uint32_t nal, alcap;
+	uint32_t alh[AS_ALIAS_BUCKETS];	/* .req buckets: newest entry, index + 1 */
+	as_variable *vars; uint32_t vmask, vcount;
 	void *pool_dummy; struct PoolS *pool; uint32_t npool, poolcap;
 	uint32_t ninst;		/* \@ */
 	uint64_t nstmt, nstmtb;	/* statistics: statements and their bytes */
@@ -102,23 +102,23 @@ struct As {
 	int altmacro;		/* .altmacro mode */
 	uint32_t eofline;	/* the line after the input's last (errors at the end) */
 	/* .cfi_*: instructions of all FDEs, the FDEs, the open one */
-	struct Cfi { uint8_t op; uint32_t reg, reg2, lab; int64_t off; const uint8_t *esc; } *cfi;
+	struct as_cfi_instruction { uint8_t op; uint32_t reg, reg2, lab; int64_t off; const uint8_t *esc; } *cfi;
 	uint32_t ncfi, cficap;
-	struct Fde { uint32_t start, end, first, n, ra; uint8_t simple, sig, bkey; } *fde;
+	struct as_frame_description { uint32_t start, end, first, n, ra; uint8_t simple, sig, bkey; } *fde;
 	uint32_t nfde, fdecap;
 	int infde, cfi_eh;	/* inside .cfi_startproc; .cfi_sections without .eh_frame: 1 */
 	struct { uint32_t orig, ver, rm; } *sv; uint32_t nsv, svcap;	/* .symver */
 	uint32_t *asg; uint32_t nasg, asgcap;	/* .addrsig_sym */
 	/* .file N / .loc: DWARF line table (MC's MCDwarfLineTable, version 5) */
-	struct DwFile { Sv name; uint32_t dir; uint8_t md5[16]; uint8_t set, hasmd5; } *dwf;
+	struct as_dwarf_file { as_text name; uint32_t dir; uint8_t md5[16]; uint8_t set, hasmd5; } *dwf;
 	uint32_t ndwf, dwfcap;		/* file slots by number (0 = root) */
-	Sv *dwd; uint32_t ndwd, dwdcap;	/* directories; [0] is the root file's */
-	struct DwLoc { uint32_t frag, file, line, col, disc, isa; uint64_t off; uint8_t flags; } *dwl, dwcur;
+	as_text *dwd; uint32_t ndwd, dwdcap;	/* directories; [0] is the root file's */
+	struct as_dwarf_row { uint32_t frag, file, line, col, disc, isa; uint64_t off; uint8_t flags; } *dwl, dwcur;
 	uint32_t ndwl, dwlcap;
 	int dwlocp, dwtab;
 	/* variable-size items at the end of a split frag (.prefalign, alignment
 	   after one, .uleb128/.sleb128 of a label difference), relaxed at the end */
-	struct VarItem { uint32_t frag, end; uint8_t kind, p2, code, fill; uint64_t max, size; Val v; } *pfa;
+	struct as_variable_item { uint32_t frag, end; uint8_t kind, p2, code, fill; uint64_t max, size; as_value v; } *pfa;
 	uint32_t npfa, pfacap;		/* a .loc waits for its instruction; a table is due */
 	uint32_t *var_rank, var_n;	/* section-order ranks during relaxation */
 	uint64_t *var_tree, *var_oldoff;	/* live sizes (Fenwick), previous-pass offsets */
@@ -133,8 +133,8 @@ struct As {
 
 /* ---------------------------------------------------------------- utilities */
 
-static inline void *reserve(size_t n) { return vreserve(n, MAP_NORESERVE, "vcc: as: mmap"); }
-static inline void *rget(vregion *r, size_t n)
+static inline void *as_region_reserve(size_t n) { return vreserve(n, MAP_NORESERVE, "vcc: as: mmap"); }
+static inline void *as_region_alloc(vregion *r, size_t n)
 {
 	size_t u = (r->used + 7) & ~(size_t)7;
 	if (u + n > r->cap || u + n < u)
@@ -144,32 +144,32 @@ static inline void *rget(vregion *r, size_t n)
 }
 
 /* ASCII classes without libc's locale lookups (hot in the scanner) */
-enum { C_D = 1, C_X = 2, C_A = 4, C_S = 8, C_I = 16, C_W = 32, C_E = 64 };	/* C_W: blanks ws() skips; C_E: starts an immediate operand */
-static const uint8_t cclass[256] = {
-	['0' ... '9'] = C_D | C_X | C_I | C_E, ['#'] = C_E, [':'] = C_E, ['('] = C_E, ['-'] = C_E, ['+'] = C_E, ['~'] = C_E, ['a' ... 'f'] = C_A | C_X | C_I, ['A' ... 'F'] = C_A | C_X | C_I,
-	['g' ... 'z'] = C_A | C_I, ['G' ... 'Z'] = C_A | C_I, ['_'] = C_I, ['.'] = C_I, ['$'] = C_I,
-	[0x80 ... 0xff] = C_I,	/* UTF-8 in symbol names (LLVM's lexer takes any byte >= 0x80) */
-	[' '] = C_S | C_W, ['\t'] = C_S | C_W, ['\n'] = C_S, ['\v'] = C_S | C_W, ['\f'] = C_S | C_W, ['\r'] = C_S | C_W,
+enum { AS_CHAR_DIGIT = 1, AS_CHAR_HEX = 2, AS_CHAR_ALPHA = 4, AS_CHAR_SPACE = 8, AS_CHAR_IDENTIFIER = 16, AS_CHAR_BLANK = 32, AS_CHAR_OPERAND_START = 64 };	/* AS_CHAR_BLANK: blanks ws() skips; AS_CHAR_OPERAND_START: starts an immediate operand */
+static const uint8_t as_char_class[256] = {
+	['0' ... '9'] = AS_CHAR_DIGIT | AS_CHAR_HEX | AS_CHAR_IDENTIFIER | AS_CHAR_OPERAND_START, ['#'] = AS_CHAR_OPERAND_START, [':'] = AS_CHAR_OPERAND_START, ['('] = AS_CHAR_OPERAND_START, ['-'] = AS_CHAR_OPERAND_START, ['+'] = AS_CHAR_OPERAND_START, ['~'] = AS_CHAR_OPERAND_START, ['a' ... 'f'] = AS_CHAR_ALPHA | AS_CHAR_HEX | AS_CHAR_IDENTIFIER, ['A' ... 'F'] = AS_CHAR_ALPHA | AS_CHAR_HEX | AS_CHAR_IDENTIFIER,
+	['g' ... 'z'] = AS_CHAR_ALPHA | AS_CHAR_IDENTIFIER, ['G' ... 'Z'] = AS_CHAR_ALPHA | AS_CHAR_IDENTIFIER, ['_'] = AS_CHAR_IDENTIFIER, ['.'] = AS_CHAR_IDENTIFIER, ['$'] = AS_CHAR_IDENTIFIER,
+	[0x80 ... 0xff] = AS_CHAR_IDENTIFIER,	/* UTF-8 in symbol names (LLVM's lexer takes any byte >= 0x80) */
+	[' '] = AS_CHAR_SPACE | AS_CHAR_BLANK, ['\t'] = AS_CHAR_SPACE | AS_CHAR_BLANK, ['\n'] = AS_CHAR_SPACE, ['\v'] = AS_CHAR_SPACE | AS_CHAR_BLANK, ['\f'] = AS_CHAR_SPACE | AS_CHAR_BLANK, ['\r'] = AS_CHAR_SPACE | AS_CHAR_BLANK,
 };
-static inline int c_digit(int c) { return (unsigned)c - '0' < 10; }
-static inline int c_xdigit(int c) { return cclass[(uint8_t)c] & C_X; }
-static inline int c_lower(int c) { return (unsigned)c - 'A' < 26 ? c | 0x20 : c; }
-static inline int isidc(int c) { return cclass[(uint8_t)c] & C_I; }
+static inline int as_char_is_digit(int c) { return (unsigned)c - '0' < 10; }
+static inline int as_char_is_hex_digit(int c) { return as_char_class[(uint8_t)c] & AS_CHAR_HEX; }
+static inline int as_char_to_lower(int c) { return (unsigned)c - 'A' < 26 ? c | 0x20 : c; }
+static inline int as_char_is_identifier(int c) { return as_char_class[(uint8_t)c] & AS_CHAR_IDENTIFIER; }
 
-static inline int isids(int c) { return (cclass[(uint8_t)c] & (C_I | C_D)) == C_I; }	/* letter _ . $ */
-static inline const char *ws(const char *p, const char *e) { while (p < e && (cclass[(uint8_t)*p] & C_W)) p++; return p; }
-static inline int sveq(Sv a, const char *s) { size_t n = strlen(s); return a.n == n && !memcmp(a.s, s, n); }
-static inline int sveqi(const char *p, size_t n, const char *s)
+static inline int as_char_is_identifier_start(int c) { return (as_char_class[(uint8_t)c] & (AS_CHAR_IDENTIFIER | AS_CHAR_DIGIT)) == AS_CHAR_IDENTIFIER; }	/* letter _ . $ */
+static inline const char *as_whitespace_skip(const char *p, const char *e) { while (p < e && (as_char_class[(uint8_t)*p] & AS_CHAR_BLANK)) p++; return p; }
+static inline int as_text_equals(as_text a, const char *s) { size_t n = strlen(s); return a.n == n && !memcmp(a.s, s, n); }
+static inline int as_text_equals_ignore_case(const char *p, size_t n, const char *s)
 {
-	if (!n || c_lower((unsigned char)p[0]) != s[0]) return 0;
+	if (!n || as_char_to_lower((unsigned char)p[0]) != s[0]) return 0;
 	size_t m = strlen(s);
 	if (m != n) return 0;
-	for (size_t i = 0; i < n; i++) if (c_lower((unsigned char)p[i]) != s[i]) return 0;
+	for (size_t i = 0; i < n; i++) if (as_char_to_lower((unsigned char)p[i]) != s[i]) return 0;
 	return 1;
 }
 
 /* word-at-a-time hash */
-static inline uint32_t hsv(const char *s, size_t n)
+static inline uint32_t as_text_hash(const char *s, size_t n)
 {
 	uint64_t h = 0x9e3779b97f4a7c15ull ^ n, w;
 	const char *e = s + n;
@@ -188,45 +188,45 @@ static inline uint32_t hsv(const char *s, size_t n)
 
 /* .req names are case-insensitive; buckets chain entries newest first, so
  * the first match is the newest, as a scan from the end of a->al */
-static inline uint32_t al_hash(const char *s, size_t n)
+static inline uint32_t as_alias_hash(const char *s, size_t n)
 {
 	if (!n) return 0;
-	uint32_t h = (uint32_t)n * 0x9e3779b1u ^ (uint32_t)c_lower((unsigned char)s[0]) * 0x85ebca6bu ^
-		     (uint32_t)c_lower((unsigned char)s[n - 1]) * 0xc2b2ae35u;
-	return (h ^ h >> 15) & (ALH - 1);
+	uint32_t h = (uint32_t)n * 0x9e3779b1u ^ (uint32_t)as_char_to_lower((unsigned char)s[0]) * 0x85ebca6bu ^
+		     (uint32_t)as_char_to_lower((unsigned char)s[n - 1]) * 0xc2b2ae35u;
+	return (h ^ h >> 15) & (AS_ALIAS_BUCKETS - 1);
 }
 
 /* as.c */
-VPRIV Sv svdup(As *a, const char *s, size_t n);
-VPRIV uint32_t curline(As *a);
-VPRIV int err(As *a, const char *fmt, ...);
+VPRIV as_text as_text_duplicate(as_context *a, const char *s, size_t n);
+VPRIV uint32_t as_line_current(as_context *a);
+VPRIV int as_error_report(as_context *a, const char *fmt, ...);
 /* sym.c */
-VPRIV uint32_t tmpsym(As *a);
-VPRIV const char *as_ralias(As *a, uint32_t y);
+VPRIV uint32_t as_symbol_temporary(as_context *a);
+VPRIV const char *as_register_alias_find(as_context *a, uint32_t y);
 /* expr.c */
-VPRIV void fold(As *a, Val *v);
-VPRIV int abs_expr(As *a, const char **pp, const char *e, int64_t *out);
-VPRIV int val_expr(As *a, const char **pp, const char *e, Val *v);
+VPRIV void as_value_fold(as_context *a, as_value *v);
+VPRIV int as_expression_absolute_parse(as_context *a, const char **pp, const char *e, int64_t *out);
+VPRIV int as_expression_value_parse(as_context *a, const char **pp, const char *e, as_value *v);
 /* data.c */
-VPRIV int emit_value(As *a, int size, Val *v);
+VPRIV int as_value_emit(as_context *a, int size, as_value *v);
 /* arch/<cpu>/as/parse.c */
-VPRIV void al_rehash(As *a);
-VPRIV int flush_pools(As *a);
-VPRIV int ltorg(As *a);
-VPRIV int instruction(As *a, const char *p, const char *e, size_t wn);
+VPRIV void as_alias_rehash(as_context *a);
+VPRIV int a64_as_pools_flush(as_context *a);
+VPRIV int a64_as_pools_ltorg(as_context *a);
+VPRIV int a64_as_instruction_assemble(as_context *a, const char *p, const char *e, size_t wn);
 /* dwline.c */
-VPRIV void loc_row(As *a);
+VPRIV void as_dwarf_row_emit(as_context *a);
 /* arch/x64/as/asm.c (EM_X86_64 objects) */
-VPRIV int x64_instruction(As *a, const char *p, const char *e, size_t wn);
+VPRIV int x64_as_instruction_assemble(as_context *a, const char *p, const char *e, size_t wn);
 /* relax.c: an x86-64 jump as a relaxed variable item (cc 16: jmp) */
-VPRIV int as_branch(As *a, int cc, Val v, int mod);
+VPRIV int as_variable_item_branch_add(as_context *a, int cc, as_value v, int mod);
 
 /* what the files of as/ define for each other, by the file that defines it */
-enum { VI_PREFALIGN, VI_ALIGN, VI_ULEB, VI_SLEB, VI_X86BR, VI_SKIP };	/* VI_SKIP: .skip v, fill with v settled by the layout */	/* VI_X86BR: jmp (code 16) / jcc (code cc) to v */
-typedef struct { uint8_t *p; size_t n; } Buf8;
+enum { AS_VARIABLE_ITEM_PREFALIGN, AS_VARIABLE_ITEM_ALIGN, AS_VARIABLE_ITEM_ULEB, AS_VARIABLE_ITEM_SLEB, AS_VARIABLE_ITEM_X64_BRANCH, AS_VARIABLE_ITEM_SKIP };	/* AS_VARIABLE_ITEM_SKIP: .skip v, fill with v settled by the layout */	/* AS_VARIABLE_ITEM_X64_BRANCH: jmp (code 16) / jcc (code cc) to v */
+typedef struct { uint8_t *p; size_t n; } as_byte_span;
 /* LEB128 into a caller's bytes */
-static inline void uleb(Buf8 *b, uint64_t v) { do { uint8_t c = v & 0x7f; v >>= 7; b->p[b->n++] = (uint8_t)(c | (v ? 0x80 : 0)); } while (v); }
-static inline void sleb(Buf8 *b, int64_t v)
+static inline void as_leb128_unsigned_append(as_byte_span *b, uint64_t v) { do { uint8_t c = v & 0x7f; v >>= 7; b->p[b->n++] = (uint8_t)(c | (v ? 0x80 : 0)); } while (v); }
+static inline void as_leb128_signed_append(as_byte_span *b, int64_t v)
 {
 	for (;;) {
 		uint8_t c = v & 0x7f; v >>= 7;
@@ -236,70 +236,70 @@ static inline void sleb(Buf8 *b, int64_t v)
 }
 
 /* as.c */
-VPRIV size_t next_stmt(As *a, Frame *f, const char **raw, const char **s);
-VPRIV void pop_frame(As *a);
-VPRIV int push_frame(As *a, const char *p, size_t n, int kind, size_t mark);
+VPRIV size_t as_statement_next(as_context *a, as_frame *f, const char **raw, const char **s);
+VPRIV void as_frame_pop(as_context *a);
+VPRIV int as_frame_push(as_context *a, const char *p, size_t n, int kind, size_t mark);
 /* cfi.c */
-VPRIV void cfi_finish(As *a);
-VPRIV int d_cfi(As *a, Sv w, const char *p, const char *e);
+VPRIV void as_cfi_frame_emit(as_context *a);
+VPRIV int as_directive_cfi(as_context *a, as_text w, const char *p, const char *e);
 /* cond.c */
-VPRIV int cond_dir(As *a, Sv w, const char *p, const char *e, int *rc);
-VPRIV int cond_ignore(As *a);
-VPRIV Sv trim(const char *p, const char *e);
+VPRIV int as_directive_conditional(as_context *a, as_text w, const char *p, const char *e, int *rc);
+VPRIV int as_condition_is_ignored(as_context *a);
+VPRIV as_text as_text_trim(const char *p, const char *e);
 /* data.c */
-VPRIV int d_align(As *a, const char *p, const char *e, int p2);
-VPRIV int d_align_w(As *a, const char *p, const char *e, int p2, int fsz);
-VPRIV int d_ascii(As *a, const char *p, const char *e, int z);
-VPRIV int d_base64(As *a, const char *p, const char *e);
-VPRIV int d_comm(As *a, const char *p, const char *e, int local);
-VPRIV int d_data(As *a, const char *p, const char *e, int size);
-VPRIV int d_fill(As *a, const char *p, const char *e);
-VPRIV int d_float(As *a, const char *p, const char *e, int size);
-VPRIV int d_incbin(As *a, const char *p, const char *e);
-VPRIV int d_inst(As *a, const char *p, const char *e);
-VPRIV int d_leb(As *a, const char *p, const char *e, int sgn);
-VPRIV int d_octa(As *a, const char *p, const char *e);
-VPRIV int d_org(As *a, const char *p, const char *e);
-VPRIV int d_reloc(As *a, const char *p, const char *e);
-VPRIV int d_space(As *a, const char *p, const char *e);
-VPRIV int parse_string(As *a, const char **pp, const char *e, char *out, size_t *n);
+VPRIV int as_directive_align(as_context *a, const char *p, const char *e, int p2);
+VPRIV int as_directive_align_width(as_context *a, const char *p, const char *e, int p2, int fsz);
+VPRIV int as_directive_ascii(as_context *a, const char *p, const char *e, int z);
+VPRIV int as_directive_base64(as_context *a, const char *p, const char *e);
+VPRIV int as_directive_comm(as_context *a, const char *p, const char *e, int local);
+VPRIV int as_directive_data(as_context *a, const char *p, const char *e, int size);
+VPRIV int as_directive_fill(as_context *a, const char *p, const char *e);
+VPRIV int as_directive_float(as_context *a, const char *p, const char *e, int size);
+VPRIV int as_directive_incbin(as_context *a, const char *p, const char *e);
+VPRIV int as_directive_inst(as_context *a, const char *p, const char *e);
+VPRIV int as_directive_leb128(as_context *a, const char *p, const char *e, int sgn);
+VPRIV int as_directive_octa(as_context *a, const char *p, const char *e);
+VPRIV int as_directive_org(as_context *a, const char *p, const char *e);
+VPRIV int as_directive_reloc(as_context *a, const char *p, const char *e);
+VPRIV int as_directive_space(as_context *a, const char *p, const char *e);
+VPRIV int as_string_parse(as_context *a, const char **pp, const char *e, char *out, size_t *n);
 /* dwline.c */
-VPRIV int d_dwfile(As *a, const char *p, const char *e);
-VPRIV int d_loc(As *a, const char *p, const char *e);
-VPRIV void dwline_finish(As *a);
+VPRIV int as_directive_file(as_context *a, const char *p, const char *e);
+VPRIV int as_directive_loc(as_context *a, const char *p, const char *e);
+VPRIV void as_dwarf_line_finish(as_context *a);
 /* expr.c */
-VPRIV int deferrable(As *a, const Val *v);
-VPRIV int is_abs(As *a, Val *v);
+VPRIV int as_value_is_deferrable(as_context *a, const as_value *v);
+VPRIV int as_value_is_absolute(as_context *a, as_value *v);
 /* macro.c */
-VPRIV int d_exitm(As *a);
-VPRIV int d_irp(As *a, const char *p, const char *e, int chars);
-VPRIV int d_macro(As *a, const char *p, const char *e);
-VPRIV int d_purgem(As *a, const char *p, const char *e);
-VPRIV int d_rept(As *a, const char *p, const char *e);
-VPRIV Macro *find_macro(As *a, const char *s, size_t n);
-VPRIV Sv first_word(const char *p, const char *e);
-VPRIV int invoke(As *a, Macro *m, const char *p, const char *e);
+VPRIV int as_directive_exitm(as_context *a);
+VPRIV int as_directive_irp(as_context *a, const char *p, const char *e, int chars);
+VPRIV int as_directive_macro(as_context *a, const char *p, const char *e);
+VPRIV int as_directive_purgem(as_context *a, const char *p, const char *e);
+VPRIV int as_directive_rept(as_context *a, const char *p, const char *e);
+VPRIV as_macro *as_macro_find(as_context *a, const char *s, size_t n);
+VPRIV as_text as_text_first_word(const char *p, const char *e);
+VPRIV int as_macro_invoke(as_context *a, as_macro *m, const char *p, const char *e);
 /* relax.c */
-VPRIV int d_prefalign(As *a, const char *p, const char *e);
-VPRIV void frag_bases(ElfObj *o);
-VPRIV void var_finish(As *a);
-VPRIV struct VarItem *var_item(As *a, int kind);
+VPRIV int as_directive_prefalign(as_context *a, const char *p, const char *e);
+VPRIV void as_fragment_offsets_cache(ElfObj *o);
+VPRIV void as_variable_items_finish(as_context *a);
+VPRIV struct as_variable_item *as_variable_item_add(as_context *a, int kind);
 /* section.c */
-VPRIV int d_section(As *a, const char *p, const char *e, int push);
-VPRIV int parse_name(As *a, const char **pp, const char *e, Sv *out);
-VPRIV uint32_t std_section(As *a, const char *name);
-VPRIV void switch_to(As *a, uint32_t frag);
+VPRIV int as_directive_section(as_context *a, const char *p, const char *e, int push);
+VPRIV int as_name_parse(as_context *a, const char **pp, const char *e, as_text *out);
+VPRIV uint32_t as_section_standard_find(as_context *a, const char *name);
+VPRIV void as_fragment_switch(as_context *a, uint32_t frag);
 /* sym.c */
-VPRIV int d_size(As *a, const char *p, const char *e);
-VPRIV int d_symattr(As *a, const char *p, const char *e, int what);
-VPRIV int d_symver(As *a, const char *p, const char *e);
-VPRIV int d_type(As *a, const char *p, const char *e);
-VPRIV uint32_t here(As *a);
-VPRIV NumLab *numlab(As *a, uint32_t num);
-VPRIV uint32_t sym(As *a, const char *s, size_t n);
-VPRIV void symver_finish(As *a);
-VPRIV Var *var_slot(As *a, uint32_t y, int create);
+VPRIV int as_directive_size(as_context *a, const char *p, const char *e);
+VPRIV int as_directive_symbol_attribute(as_context *a, const char *p, const char *e, int what);
+VPRIV int as_directive_symver(as_context *a, const char *p, const char *e);
+VPRIV int as_directive_type(as_context *a, const char *p, const char *e);
+VPRIV uint32_t as_label_temporary_define(as_context *a);
+VPRIV as_numeric_label *as_numeric_label_find(as_context *a, uint32_t num);
+VPRIV uint32_t as_symbol_intern(as_context *a, const char *s, size_t n);
+VPRIV void as_symver_finish(as_context *a);
+VPRIV as_variable *as_variable_slot_find(as_context *a, uint32_t y, int create);
 /* section.c */
-VPRIV uint32_t latest(As *a, uint32_t frag);
+VPRIV uint32_t as_fragment_latest(as_context *a, uint32_t frag);
 
 #endif
