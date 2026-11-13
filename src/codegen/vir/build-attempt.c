@@ -13,13 +13,13 @@
  * Only at -O2 and above.
  *
  * VCC_VIR_STATS=1: per TU, on stderr, how many functions went through VIR and
- * why the others did not (reasons: failure.h); see vw_stats_print.
+ * why the others did not (reasons: failure.h); see virbuild_statistics_print.
  *
  * VCC_VIR_PASSES: time, leave out or check the builder's passes by name
  * (pass-table.c); its lines are printed with VCC_VIR_STATS's.
  */
-#define WK_PREFIX vw_
-#define LO_PREFIX vw_
+#define WK_PREFIX virbuild_
+#define LO_PREFIX virbuild_
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
@@ -27,30 +27,30 @@
 #include "port/performance-counters.h"
 
 /* every reason VIR gives up on a function (failure.h); vfail points at a message of this table */
-VPRIV const vir_failure_info vir_failure_table[VIRFAIL_COUNT] = {
+VPRIV const virbuild_failure_info virbuild_failure_table[VIRBUILD_FAILURE_COUNT] = {
 #define X(name, message) { #name, message },
-	VIR_FAILURES(X)
+	VIRBUILD_FAILURES(X)
 #undef X
 };
 
 /* the reason whose message `why` is; none: the walker's own diagnostic, or what `other` says */
-static int vw_failure_find(const char *why)
+static int virbuild_failure_find(const char *why)
 {
-	for (int k = 0; k < VIRFAIL_COUNT; k++)
-		if (vir_failure_table[k].message == why)
+	for (int k = 0; k < VIRBUILD_FAILURE_COUNT; k++)
+		if (virbuild_failure_table[k].message == why)
 			return k;
 	return -1;
 }
 
 /* VCC_VIR_STATS: count one failed function; the first of each reason is kept as its example */
-static void vw_failure_note(ecx *e, uint32_t s, const char *why, vir_failure other, const char *detail)
+static void virbuild_failure_note(ecx *e, uint32_t s, const char *why, virbuild_failure other, const char *detail)
 {
 	emitter *E = e->E;
 	int k;
 
 	if (!E->vstats)
 		return;
-	k = vw_failure_find(why);
+	k = virbuild_failure_find(why);
 	if (k < 0) {	/* a diagnostic of the shared walker or emitter: its format (a literal) is the detail */
 		k = other;
 		detail = why ? why : "";
@@ -72,12 +72,12 @@ static void vw_failure_note(ecx *e, uint32_t s, const char *why, vir_failure oth
  * direct emitter compiled them, one reason each.  Reasons are listed most
  * frequent first.
  */
-VPRIV void vw_stats_print(emitter *E)
+VPRIV void virbuild_statistics_print(emitter *E)
 {
 	uint64_t fell = 0;
-	int ord[VIRFAIL_COUNT], n = 0;
+	int ord[VIRBUILD_FAILURE_COUNT], n = 0;
 
-	for (int k = 0; k < VIRFAIL_COUNT; k++)
+	for (int k = 0; k < VIRBUILD_FAILURE_COUNT; k++)
 		if (E->vfailed[k].count) {
 			int j = n++;
 
@@ -92,13 +92,13 @@ VPRIV void vw_stats_print(emitter *E)
 		int k = ord[i];
 		const vident *id = &vintern_ents[E->c->syms[E->vfailed[k].sym].name];
 
-		fprintf(stderr, "vcc vir-failure: reason=%s count=%u example=%.*s detail=%s\n", vir_failure_table[k].name,
+		fprintf(stderr, "vcc vir-failure: reason=%s count=%u example=%.*s detail=%s\n", virbuild_failure_table[k].name,
 			(unsigned)E->vfailed[k].count, (int)id->len, id->s, E->vfailed[k].detail);
 	}
 	virbuild_pass_stats_print(E);
 }
 
-static int vw_mode(void)
+static int virbuild_mode_get(void)
 {
 	static _Thread_local int mode = -1;
 
@@ -114,7 +114,7 @@ static int vw_mode(void)
 	return mode;
 }
 
-static void vw_name(ecx *e, uint32_t s, char *o, size_t n)
+static void virbuild_function_name_get(ecx *e, uint32_t s, char *o, size_t n)
 {
 	const vident *id = &vintern_ents[e->c->syms[s].name];
 
@@ -122,7 +122,7 @@ static void vw_name(ecx *e, uint32_t s, char *o, size_t n)
 }
 
 /* VCC_VIR_LIST: the function is named in the file (or there is none) */
-static bool vw_listed(ecx *e, uint32_t s)
+static bool virbuild_function_is_listed(ecx *e, uint32_t s)
 {
 	static char *list;
 	static int state;	/* 0 unread, 1 no list, 2 list */
@@ -158,19 +158,19 @@ static bool vw_listed(ecx *e, uint32_t s)
 	if (state != 2)
 		return true;
 	nm[0] = '\n';
-	vw_name(e, s, nm + 1, sizeof nm - 2);
+	virbuild_function_name_get(e, s, nm + 1, sizeof nm - 2);
 	strcat(nm, "\n");
 	return strstr(list, nm) != NULL;
 }
 
-VPRIV bool vw_enabled(const cc_opts *o)
+VPRIV bool virbuild_is_enabled(const cc_opts *o)
 {
-	return (vw_mode() & 16) && o->opt >= 2;
+	return (virbuild_mode_get() & 16) && o->opt >= 2;
 }
 
-VPRIV bool vw_try(ecx *e, uint32_t s)
+VPRIV bool virbuild_function_try(ecx *e, uint32_t s)
 {
-	int m = vw_mode();
+	int m = virbuild_mode_get();
 	char nm[128] = "";
 	bool timed;	/* VCC_VIR_PASSES=time: the build and the lowering are rows of its statistic */
 	uint32_t npass;
@@ -189,22 +189,22 @@ VPRIV bool vw_try(ecx *e, uint32_t s)
 	{
 		int novtag = e->novtag;	/* (a bail out of a volatile access leaves it raised) */
 
-		vw_wk_function(e, s);
+		virbuild_wk_function(e, s);
 		e->novtag = novtag;
 	}
 	if (timed)
-		virbuild_pass_note(e->E, VIR_PASS_ROW_BUILD(npass), vperformance_subtract(vperformance_now(), t0).ins);
+		virbuild_pass_note(e->E, VIRBUILD_PASS_ROW_BUILD(npass), vperformance_subtract(vperformance_now(), t0).ins);
 	e->vtry = false;
 	if (m & 8)
-		vw_name(e, s, nm, sizeof nm);
+		virbuild_function_name_get(e, s, nm, sizeof nm);
 	if (e->vfail) {
-		vw_failure_note(e, s, e->vfail, VIRFAIL_emitter_error, NULL);
+		virbuild_failure_note(e, s, e->vfail, VIRBUILD_FAILURE_emitter_error, NULL);
 		if (m & 8)
 			fprintf(stderr, "vir: %s: no: %s\n", nm, e->vfail);
 		return false;
 	}
 	{
-		vwst *V = e->vw;
+		virbuild_context *V = e->vw;
 		vbuffer b = { 0 };
 		uint32_t nerr = 0;
 
@@ -225,9 +225,9 @@ VPRIV bool vw_try(ecx *e, uint32_t s)
 			char n[16];
 
 			snprintf(n, sizeof n, "%u", nerr);
-			vw_failure_note(e, s, VIRFAIL(verifier_rejected), VIRFAIL_verifier_rejected, n);
+			virbuild_failure_note(e, s, VIRBUILD_FAILURE(verifier_rejected), VIRBUILD_FAILURE_verifier_rejected, n);
 		}
-		if ((m & 16) && !nerr && !vw_listed(e, s))
+		if ((m & 16) && !nerr && !virbuild_function_is_listed(e, s))
 			m &= ~16;
 		if ((m & 16) && !nerr) {
 			const char *why;
@@ -237,9 +237,9 @@ VPRIV bool vw_try(ecx *e, uint32_t s)
 			V->detail[0] = 0;
 			if (timed)
 				t0 = vperformance_now();
-			ok = X86(e->c) ? vw_x64(e, s, &why) : vw_a64(e, s, &why);
+			ok = X86(e->c) ? x64_vir_function_lower(e, s, &why) : a64_vir_function_lower(e, s, &why);
 			if (timed)
-				virbuild_pass_note(e->E, VIR_PASS_ROW_LOWER(npass), vperformance_subtract(vperformance_now(), t0).ins);
+				virbuild_pass_note(e->E, VIRBUILD_PASS_ROW_LOWER(npass), vperformance_subtract(vperformance_now(), t0).ins);
 			if (ok) {
 				if (e->E->vstats)
 					e->E->vlowered++;
@@ -247,7 +247,7 @@ VPRIV bool vw_try(ecx *e, uint32_t s)
 					fprintf(stderr, "vir: %s: lowered, %u spills\n", nm, V->ao.statistics.spills);
 				return true;
 			}
-			vw_failure_note(e, s, why, VIRFAIL_lowering_failed, V->detail);
+			virbuild_failure_note(e, s, why, VIRBUILD_FAILURE_lowering_failed, V->detail);
 			if (m & 8)
 				fprintf(stderr, "vir: %s: not lowered: %s%s%s\n", nm, why, V->detail[0] ? ": " : "", V->detail);
 		} else if (!nerr && e->E->vstats)

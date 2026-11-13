@@ -5,7 +5,7 @@
 /* The allocation constraints and dispatch must agree about when the
  * selector is consumed before R10 is overwritten. Sparse range chains
  * need the original selector for every comparison. */
-VPRIV bool vx_dense_switch(const vir_function *f,const vir_insn *in,uint64_t *low,uint64_t *range)
+VPRIV bool x64_vir_switch_is_dense(const vir_function *f,const vir_insn *in,uint64_t *low,uint64_t *range)
 {
 	bool wide=f->insns[in->a].type==VIR_TYPE_I64;
 	uint32_t stride=wide?5:3,n=f->extra[in->c];
@@ -28,7 +28,7 @@ VPRIV bool vx_dense_switch(const vir_function *f,const vir_insn *in,uint64_t *lo
 
 /* Switch edges retain their allocator edits in separate stubs. Dense tables use
  * signed offsets from a RIP-relative base, so the dispatch stays position independent. */
-VPRIV void vx_cmpconst(vx *L, int reg, int size, uint64_t value)
+VPRIV void x64_vir_constant_compare_emit(vx *L, int reg, int size, uint64_t value)
 {
 	int64_t k = size == 4 ? (int64_t)(int32_t)value : (int64_t)value;
 	if (k == (int32_t)k)
@@ -39,7 +39,7 @@ VPRIV void vx_cmpconst(vx *L, int reg, int size, uint64_t value)
 	}
 }
 
-VPRIV void vx_switch(vx *L, uint32_t block, const vir_insn *in, int selector)
+VPRIV void x64_vir_switch_lower(vx *L, uint32_t block, const vir_insn *in, int selector)
 {
 	ecx *e = L->e;
 	vir_function *f = L->f;
@@ -48,9 +48,9 @@ VPRIV void vx_switch(vx *L, uint32_t block, const vir_insn *in, int selector)
 	const uint32_t *cases = &f->extra[in->c+1];
 	uint32_t *labels = malloc(((size_t)n+1)*sizeof *labels);
 	if (!labels) abort();
-	for (uint32_t k=0;k<=n;k++) labels[k]=vx_target(L,block,k,k?cases[stride*(k-1)+stride-1]:in->b);
+	for (uint32_t k=0;k<=n;k++) labels[k]=x64_vir_edge_target(L,block,k,k?cases[stride*(k-1)+stride-1]:in->b);
 	uint64_t lo,span;
-	if(vx_dense_switch(f,in,&lo,&span)) {
+	if(x64_vir_switch_is_dense(f,in,&lo,&span)) {
 		uint32_t table=wk_newlabel(e);
 		if(selector!=R10 || (size==4 && !x64_last_u32(e,R10)))
 			x64_op3(e,X_MOV,size,R10,selector,XNOREG);
@@ -58,7 +58,7 @@ VPRIV void vx_switch(vx *L, uint32_t block, const vir_insn *in, int selector)
 			x64_movi(e,R11,size==4?(int64_t)(int32_t)lo:(int64_t)lo);
 			x64_op3(e,X_SUB,size,R10,R10,R11);
 		}
-		vx_cmpconst(L,R10,size,span);
+		x64_vir_constant_compare_emit(L,R10,size,span);
 		rec *r=x64_put(e,X_JCC);r->cond=CC_A;r->label=labels[0];
 		x64_op3(e,X_LEAL,8,R11,XNOREG,XNOREG)->label=table;
 		r=x64_op3(e,X_LDX,4,R10,R11,XNOREG);r->r[3]=R10;r->sh=2;r->cond=1;
@@ -81,7 +81,7 @@ VPRIV void vx_switch(vx *L, uint32_t block, const vir_insn *in, int selector)
 				x64_movi(e,R11,size==4?(int64_t)(int32_t)a:(int64_t)a);
 				x64_op3(e,X_SUB,size,R10,selector,R11);reg=R10;
 			}
-			vx_cmpconst(L,reg,size,a==h?a:h-a);
+			x64_vir_constant_compare_emit(L,reg,size,a==h?a:h-a);
 			rec *r=x64_put(e,X_JCC);r->cond=a==h?CC_E:CC_BE;r->label=labels[k+1];
 		}
 		x64_jump(e,labels[0]);

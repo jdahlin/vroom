@@ -1,6 +1,6 @@
 /* The builder's pipeline: the pass table run in order (pass-table.c), sealing, the dead-slot scan and the emission into VIR. */
-#define WK_PREFIX vw_
-#define LO_PREFIX vw_
+#define WK_PREFIX virbuild_
+#define LO_PREFIX virbuild_
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
@@ -9,9 +9,9 @@
 #include "pass-table.h"
 
 /* seal: every placeholder gets its operands, then trivial ones go */
-VPRIV void vw_seal(ecx *e)
+VPRIV void virbuild_blocks_seal(ecx *e)
 {
-	vwst *V = e->vw;
+	virbuild_context *V = e->vw;
 
 	V->sealing = true;
 	GROW(V->fwd, 0, V->cfwd, V->np + 1);
@@ -21,18 +21,18 @@ VPRIV void vw_seal(ecx *e)
 		uint32_t b = V->order[i];
 
 		for (uint32_t p = V->b[b].phead; p; p = V->p[p].next)
-			if (V->p[p].in.b == VW_NOBLK)
-				vw_phiops(e, p, b);
+			if (V->p[p].in.b == VIRBUILD_BLOCK_NONE)
+				virbuild_parameter_operands_fill(e, p, b);
 	}
 }
 
 /* stores to a slot that is not exposed and that nothing reads are dead */
-VPRIV void vw_slot_uses(ecx *e)
+VPRIV void virbuild_slot_uses_compute(ecx *e)
 {
-	vwst *V = e->vw;
+	virbuild_context *V = e->vw;
 
 	for (uint32_t s = 0; s < V->nsl; s++)
-		V->sl[s].used = 0, V->sl[s].fin = VW_NOBLK;
+		V->sl[s].used = 0, V->sl[s].fin = VIRBUILD_BLOCK_NONE;
 	for (uint32_t i = 0; i < V->norder; i++)
 		for (uint32_t q = V->b[V->order[i]].head; q; q = V->p[q].next)
 			if (V->p[q].in.op == VIR_OP_LOAD && V->p[q].slot)
@@ -40,9 +40,9 @@ VPRIV void vw_slot_uses(ecx *e)
 }
 
 /* emission */
-VPRIV bool vw_to_vir(ecx *e)
+VPRIV bool virbuild_function_to_vir(ecx *e)
 {
-	vwst *V = e->vw;
+	virbuild_context *V = e->vw;
 	cc *c = e->c;
 	vir_function *f = &V->f;
 	uint32_t lastloc = UINT32_MAX;
@@ -63,11 +63,11 @@ VPRIV bool vw_to_vir(ecx *e)
 			if (V->fwd[p] == p && !(V->map[p] = vir_insn_add(f, VIR_OP_BPARAM, V->p[p].in.type, 0, 0, 0, 0)))
 				return false;
 		for (uint32_t q = V->b[b].head; q; q = V->p[q].next) {
-			vwp *x = &V->p[q];
+			virbuild_preir_insn *x = &V->p[q];
 
-			if (vw_find(V, q) != q)
+			if (virbuild_value_resolve(V, q) != q)
 				continue;
-			if (vw_promdead(V, q) || (x->in.op == VIR_OP_MEMSET && (x->in.flags & VW_LIFETIME)) ||
+			if (virbuild_promote_store_is_dead(V, q) || (x->in.op == VIR_OP_MEMSET && (x->in.flags & VIRBUILD_MEMSET_LIFETIME_FLAG)) ||
 			    (x->in.op == VIR_OP_STORE && x->slot && !(x->in.flags & VIR_INSN_FLAG_VOL) && !V->sl[x->slot - 1].exposed &&
 			     !V->sl[x->slot - 1].used))
 				continue;	/* (a dead store) */
@@ -75,14 +75,14 @@ VPRIV bool vw_to_vir(ecx *e)
 				vir_location_add(f, x->loc);
 				lastloc = x->loc;
 			}
-			if (!vw_emit_ins(e, q, b))
+			if (!virbuild_to_vir_insn_emit(e, q, b))
 				return false;
 		}
 		if (!V->b[b].term) {
-			V->why = VIRFAIL(block_without_terminator);
+			V->why = VIRBUILD_FAILURE(block_without_terminator);
 			return false;
 		}
-		if (!vw_emit_ins(e, V->b[b].term, b))
+		if (!virbuild_to_vir_insn_emit(e, V->b[b].term, b))
 			return false;
 	}
 	if (vir_is_failed())
@@ -92,18 +92,18 @@ VPRIV bool vw_to_vir(ecx *e)
 
 /* the passes of the table (pass-table.c) in order; with VCC_VIR_PASSES set, through the instrumented
    step (timing, leaving out, checking); false: the function cannot go through VIR (V->why) */
-VPRIV bool vw_emit(ecx *e)
+VPRIV bool virbuild_function_emit(ecx *e)
 {
 	const virbuild_pass_switch *w = virbuild_pass_switch_get();
 	uint32_t n, valid = 0;
 	const virbuild_pass *t = virbuild_pass_list(&n);
-	bool last = false;	/* what the last row without PASS_IF_PREVIOUS_CHANGED returned */
+	bool last = false;	/* what the last row without VIRBUILD_PASS_FLAG_IF_PREVIOUS_CHANGED returned */
 
 	for (uint32_t i = 0; i < n; i++) {
 		const virbuild_pass *p = &t[i];
 		bool changed;
 
-		if ((p->flags & PASS_IF_PREVIOUS_CHANGED) && !last)
+		if ((p->flags & VIRBUILD_PASS_FLAG_IF_PREVIOUS_CHANGED) && !last)
 			continue;
 		if (!w->active)
 			changed = virbuild_pass_step(e, p);
@@ -111,7 +111,7 @@ VPRIV bool vw_emit(ecx *e)
 			changed = false;
 		else
 			changed = virbuild_pass_step_instrumented(e, i, &valid);
-		if (!(p->flags & PASS_IF_PREVIOUS_CHANGED))
+		if (!(p->flags & VIRBUILD_PASS_FLAG_IF_PREVIOUS_CHANGED))
 			last = changed;
 	}
 	return true;

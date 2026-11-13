@@ -2,14 +2,14 @@
 
 #include "lowering-internal.h"
 
-VPRIV void vl_switch(vl *L, uint32_t b, const vir_insn *in)
+VPRIV void a64_vir_switch_lower(vl *L, uint32_t b, const vir_insn *in)
 {
 	ecx *e = L->e;
 	const vir_function *f = L->f;
-	int x = vl_x(f, in->a), r = vl_ix(L, 0, R_X16);
+	int x = a64_vir_value_is_64_bit(f, in->a), r = a64_vir_operand_general_register(L, 0, R_X16);
 	uint32_t n = f->extra[in->c], stride = x ? 5 : 3;
 	const uint32_t *cw = &f->extra[in->c + 1];
-	uint32_t dl = vl_succ(L, b, 0, in->b);
+	uint32_t dl = a64_vir_successor_label(L, b, 0, in->b);
 	uint64_t span = 0, lo = 0, cnt = 0;
 
 	if (n) {
@@ -58,7 +58,7 @@ VPRIV void vl_switch(vl *L, uint32_t b, const vir_insn *in)
 
 			if (k < n && a <= v) {
 				if (!l)
-					l = vl_succ(L, b, 1 + k, cw[stride * k + stride - 1]);
+					l = a64_vir_successor_label(L, b, 1 + k, cw[stride * k + stride - 1]);
 				t = l;
 			} else {
 				t = dl;
@@ -80,14 +80,14 @@ VPRIV void vl_switch(vl *L, uint32_t b, const vir_insn *in)
 	for (uint32_t k = 0; k < n; k++) {
 		uint64_t a = x ? (uint64_t)cw[stride * k + 1] << 32 | cw[stride * k] : cw[stride * k];
 		uint64_t h = x ? (uint64_t)cw[stride * k + 3] << 32 | cw[stride * k + 2] : cw[stride * k + 1];
-		uint32_t t = vl_succ(L, b, 1 + k, cw[stride * k + stride - 1]);
+		uint32_t t = a64_vir_successor_label(L, b, 1 + k, cw[stride * k + stride - 1]);
 
 		if (a == h) {
 			opi(e, I_SUBSI, x, ZR, r, x ? (int64_t)a : (int64_t)(int32_t)a);
 			bcond(e, C_EQ, t);
 		} else {
 			if (r == R_X17)
-				vl_fail(L, VIRFAIL(switch_lowering));
+				a64_vir_fail(L, VIRBUILD_FAILURE(switch_lowering));
 			opi(e, I_SUBI, x, R_X17, r, (int64_t)a);
 			opi(e, I_SUBSI, x, ZR, R_X17, (int64_t)(h - a));
 			bcond(e, C_LS, t);

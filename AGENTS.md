@@ -36,9 +36,9 @@ relative to it); `TODO.md` stays at the top.
   `RESEARCH-vir.md` (LLVM IR's problems): VIR, an SSA IR used only at `-O2`,
   built by compiling the shared walker a second time against a virtual
   lowering target.  Update the status of a step in `PLAN-vir.md`.
-- `src/codegen/vir/`: the VIR builder, one pass per file (`preir.h` the pre-IR and what the files share, `ssa.c`, `lower-*.c`, `promote.c`, the simplifier in `rules.c`, `value-numbering.c`, `load-forwarding.c` and `simplify.c`, `if-conversion.c`, `condition-merge.c`, `to-vir.c`, `pipeline.c`).  `vectorize.c` is the loop vectorizer, on
+- `src/codegen/vir/`: the VIR builder, one pass per file (`preir.h` the pre-IR and what the files share, `ssa-construction.c`, `lower-*.c`, `slot-promotion.c`, the simplifier in `rules.c`, `value-numbering.c`, `load-forwarding.c` and `simplify.c`, `if-conversion.c`, `condition-merge.c`, `to-vir.c`, `pipeline.c`).  `vectorize.c` is the loop vectorizer, on
   the builder's pre-IR; `VCC_VIR_VEC=0` turns it off, `r` reports each
-  innermost loop to stderr, `n` keeps loop constants unhoisted (`vv_pin`).  VIR's vectors: `SPEC-vir.md` 7.5.
+  innermost loop to stderr, `n` keeps loop constants unhoisted (`virbuild_loop_constants_pin`).  VIR's vectors: `SPEC-vir.md` 7.5.
 - `src/arch/a64/vir/` (internal header `lowering-internal.h`; files by topic: `calling-convention.c`, `moves.c`, `compares.c`, `memory.c`, `calls.c`, `switch.c`, `address-folds.c`, `returns-and-jumps.c`, `vectors.c`, `instructions.c`, `function.c`) and `src/arch/x64/vir/` (the same cut): VIR's arm64 and x86-64 lowerings.  arm64: `VCC_VIR_ROT=0` keeps VIR's block order (no loop
   rotation), `VCC_VIR_SHRINK=0` the prologue at the function's entry (no shrink-wrapping); `VCC_VL_PROBE=MASK` puts a nop after each allocator edit of the kinds in MASK, so that
   instructions retired count how often that kind runs.

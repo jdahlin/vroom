@@ -2,26 +2,26 @@
 
 #include "lowering-internal.h"
 
-VPRIV bool vx_imm(const vir_function *f, uint32_t v, int64_t *value)
+VPRIV bool x64_vir_value_immediate(const vir_function *f, uint32_t v, int64_t *value)
 {
 	const vir_insn *i=&f->insns[v];
 	if (i->op!=VIR_OP_ICONST) return false;
-	int64_t k=i->type==VIR_TYPE_I32?(int64_t)(int32_t)i->b:vx_bits(i);
+	int64_t k=i->type==VIR_TYPE_I32?(int64_t)(int32_t)i->b:x64_vir_constant_bits(i);
 	if (k!=(int32_t)k) return false;
 	*value=k;return true;
 }
 
-VPRIV bool vx_smallmem(const vir_function *f,const vir_insn *i)
+VPRIV bool x64_vir_memory_block_is_small(const vir_function *f,const vir_insn *i)
 {
 	const vir_insn *count=&f->insns[i->c];
 	if(count->op!=VIR_OP_ICONST || (i->flags&VIR_INSN_FLAG_VOL))return false;
-	uint64_t n=(uint64_t)vx_bits(count);
+	uint64_t n=(uint64_t)x64_vir_constant_bits(count);
 	if(i->op==VIR_OP_MEMCPY)return n<=128;
 	const vir_insn *byte=&f->insns[i->b];
 	return n<=256 && byte->op==VIR_OP_ICONST && !(byte->b&255);
 }
 
-VPRIV bool vx_supported(const vir_function *f, uint32_t v)
+VPRIV bool x64_vir_value_is_supported(const vir_function *f, uint32_t v)
 {
 	const vir_insn *i = &f->insns[v];
 	bool vec = vir_type_is_vector(i->type);
@@ -53,46 +53,46 @@ VPRIV bool vx_supported(const vir_function *f, uint32_t v)
 
 /* Edits are sorted by instruction. A folded index must survive the intervening
  * reloads/rematerializations; memory consumers require no intervening edit. */
-VPRIV bool vx_foldedits(vx *L,uint32_t b,uint32_t pos,int keep)
+VPRIV bool x64_vir_fold_edits_check(vx *L,uint32_t b,uint32_t pos,int keep)
 {
 	uint32_t lo=L->o->block_offsets[L->f->block_count+1+b],hi=L->o->block_offsets[L->f->block_count+2+b],end=hi;
 	while(lo<hi) {uint32_t m=lo+(hi-lo)/2;if(L->o->edit[m].pos<pos)lo=m+1;else hi=m;}
 	for(uint32_t k=lo;k<end && L->o->edit[k].pos==pos;k++) {
 		const vir_edit *edit=&L->o->edit[k];
-		if(keep==XNOREG || (edit->kind!=VIR_EDIT_REMATERIALIZE && edit->kind!=VIR_EDIT_RELOAD) || vx_reg(edit->dst)==keep)return false;
+		if(keep==XNOREG || (edit->kind!=VIR_EDIT_REMATERIALIZE && edit->kind!=VIR_EDIT_RELOAD) || x64_vir_register_number(edit->dst)==keep)return false;
 	}
 	return true;
 }
 
-VPRIV bool vx_memnext(vx *L,uint32_t b,uint32_t v)
+VPRIV bool x64_vir_memory_next_fold(vx *L,uint32_t b,uint32_t v)
 {
 	return v+1<L->f->blocks[b].first+L->f->blocks[b].insn_count && L->uses[v]==1 && L->o->slot[v]==VIR_BLOCK_NONE &&
 		L->f->insns[v+1].a==v && (L->f->insns[v+1].op==VIR_OP_LOAD || L->f->insns[v+1].op==VIR_OP_STORE) &&
-		vx_foldedits(L,b,v+1,XNOREG);
+		x64_vir_fold_edits_check(L,b,v+1,XNOREG);
 }
 
 /* Integer-address form of the same single memory consumer. */
-VPRIV bool vx_castmem(vx *L,uint32_t b,uint32_t v)
+VPRIV bool x64_vir_memory_cast_fold(vx *L,uint32_t b,uint32_t v)
 {
 	const vir_function *f=L->f;
 	return f->insns[v].op==VIR_OP_ADD && f->insns[v].type==VIR_TYPE_I64 && L->uses[v]==1 && L->o->slot[v]==VIR_BLOCK_NONE &&
 	 v+2<f->blocks[b].first+f->blocks[b].insn_count && f->insns[v+1].op==VIR_OP_I2P && f->insns[v+1].a==v &&
-	 vx_memnext(L,b,v+1) && vx_foldedits(L,b,v+1,XNOREG);
+	 x64_vir_memory_next_fold(L,b,v+1) && x64_vir_fold_edits_check(L,b,v+1,XNOREG);
 }
 
 /* Exact consecutive big-endian byte assembly, with no observable access or
  * allocator edit interleaved. Never widen beyond the bytes actually read. */
-VPRIV unsigned vx_readword(vx *L,uint32_t b,uint32_t v,uint32_t *end)
+VPRIV unsigned x64_vir_word_read_match(vx *L,uint32_t b,uint32_t v,uint32_t *end)
 {
 	unsigned width=vir_big_endian_read_match(L->f,L->uses,v,L->f->blocks[b].first+L->f->blocks[b].insn_count,end);
 	if(!width)return 0;
 	for(uint32_t k=v;k<*end;k++)
-	 if(L->o->slot[k]!=VIR_BLOCK_NONE || !vx_foldedits(L,b,k+1,XNOREG))return 0;
+	 if(L->o->slot[k]!=VIR_BLOCK_NONE || !x64_vir_fold_edits_check(L,b,k+1,XNOREG))return 0;
 	return width;
 }
 
 /* An address private to one exact byte-assembly expression. */
-VPRIV unsigned vx_beaddr(vx *L,uint32_t b,uint32_t v,uint32_t *end)
+VPRIV unsigned x64_vir_big_endian_address_match(vx *L,uint32_t b,uint32_t v,uint32_t *end)
 {
 	const vir_function *f=L->f;const vir_insn *i=&f->insns[v];
 	uint32_t ptr=v,load=v+1;
@@ -100,23 +100,23 @@ VPRIV unsigned vx_beaddr(vx *L,uint32_t b,uint32_t v,uint32_t *end)
 	if(i->op==VIR_OP_ADD && i->type==VIR_TYPE_I64) {
 		if(L->uses[v]!=1 || v+2>=f->blocks[b].first+f->blocks[b].insn_count ||
 		   f->insns[v+1].op!=VIR_OP_I2P || f->insns[v+1].a!=v || L->o->slot[v+1]!=VIR_BLOCK_NONE ||
-		   !vx_foldedits(L,b,v+1,XNOREG))return 0;
+		   !x64_vir_fold_edits_check(L,b,v+1,XNOREG))return 0;
 		ptr=v+1;load=v+2;
 	} else if(i->op!=VIR_OP_PTRADD)return 0;
-	if(load>=f->blocks[b].first+f->blocks[b].insn_count || f->insns[load].a!=ptr || !vx_foldedits(L,b,load,XNOREG))return 0;
-	unsigned width=vx_readword(L,b,load,end);
+	if(load>=f->blocks[b].first+f->blocks[b].insn_count || f->insns[load].a!=ptr || !x64_vir_fold_edits_check(L,b,load,XNOREG))return 0;
+	unsigned width=x64_vir_word_read_match(L,b,load,end);
 	return width && L->uses[ptr]==width?width:0;
 }
 
-VPRIV bool vx_addrmem(vx *L,uint32_t b,uint32_t v)
+VPRIV bool x64_vir_address_memory_fold(vx *L,uint32_t b,uint32_t v)
 {
 	uint32_t end;
-	return (L->f->insns[v].op==VIR_OP_PTRADD && vx_memnext(L,b,v)) || vx_castmem(L,b,v) || vx_beaddr(L,b,v,&end);
+	return (L->f->insns[v].op==VIR_OP_PTRADD && x64_vir_memory_next_fold(L,b,v)) || x64_vir_memory_cast_fold(L,b,v) || x64_vir_big_endian_address_match(L,b,v,&end);
 }
 
 /* An IR i32 does not itself guarantee zero upper bits: parameters, calls,
  * signed narrow loads and identity truncations can retain arbitrary bits. */
-VPRIV bool vx_clear32(const vir_function *f,uint32_t v)
+VPRIV bool x64_vir_value_upper_half_is_clear(const vir_function *f,uint32_t v)
 {
 	const vir_insn *i=&f->insns[v];
 	if(i->type!=VIR_TYPE_I32)return false;
@@ -133,21 +133,21 @@ VPRIV bool vx_clear32(const vir_function *f,uint32_t v)
 
 /* Whether an i32 holder already has the physical sign extension required
  * by a signed index. A 4-byte spill reload destroys a negative sign extension. */
-VPRIV bool vx_sign64(vx *L,uint32_t v)
+VPRIV bool x64_vir_value_is_sign_extended(vx *L,uint32_t v)
 {
 	const vir_insn *source=&L->f->insns[v];
 	if(source->type!=VIR_TYPE_I32)return false;
 	if((source->op==VIR_OP_LOAD || source->op==VIR_OP_EXT) && (source->flags&VIR_INSN_FLAG_MS) &&
 				VIR_INSN_FLAG_WIDTH_LOG2(source->flags)<=2 && L->o->slot[v]==VIR_BLOCK_NONE)return true;
-	return vx_clear32(L->f,v) && !(vir_value_possible_bits(L->f,v,8)>>31);
+	return x64_vir_value_upper_half_is_clear(L->f,v) && !(vir_value_possible_bits(L->f,v,8)>>31);
 }
 
 /* Small constant blocks do not need REP's fixed registers or their clobbers.
  * SSE2 handles complete 16-byte pieces; scalar tails never overread. */
-VPRIV void vx_memblock(vx *L,const vir_insn *i,int dst,int src)
+VPRIV void x64_vir_memory_block_lower(vx *L,const vir_insn *i,int dst,int src)
 {
 	ecx *e=L->e;
-	uint64_t n=(uint64_t)vx_bits(&L->f->insns[i->c]);
+	uint64_t n=(uint64_t)x64_vir_constant_bits(&L->f->insns[i->c]);
 	bool copy=i->op==VIR_OP_MEMCPY;
 	if(!copy) {
 		if(n>=16)x64_op3(e,X_FXOR,16,XMM0+14,XMM0+14,XMM0+14);
@@ -162,7 +162,7 @@ VPRIV void vx_memblock(vx *L,const vir_insn *i,int dst,int src)
 	}
 }
 
-VPRIV uint8_t vx_condition(vx *L,uint32_t b,uint32_t v,uint32_t value,int reg)
+VPRIV uint8_t x64_vir_condition_lower(vx *L,uint32_t b,uint32_t v,uint32_t value,int reg)
 {
 	ecx *e=L->e;
 	bool flags=L->cmp==value && L->cmpblock==b && v==value+1;
@@ -177,6 +177,6 @@ VPRIV uint8_t vx_condition(vx *L,uint32_t b,uint32_t v,uint32_t value,int reg)
 			memmove(&e->x64->in[L->setrec],&e->x64->in[L->setrec+1],(e->x64->nin-L->setrec-1)*sizeof(rec));
 			e->x64->nin--;
 		}
-	} else x64_op3(e, X_TEST, vx_size(L->f->insns[value].type), XNOREG, reg, reg);
+	} else x64_op3(e, X_TEST, x64_vir_type_size(L->f->insns[value].type), XNOREG, reg, reg);
 	return cc;
 }

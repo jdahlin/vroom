@@ -1,6 +1,6 @@
 /* Frame slots to variables: a slot whose address does not escape becomes SSA values. */
-#define WK_PREFIX vw_
-#define LO_PREFIX vw_
+#define WK_PREFIX virbuild_
+#define LO_PREFIX virbuild_
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
@@ -8,13 +8,13 @@
 
 /* ---------------- slots to variables ---------------- */
 
-#define VW_NOCONV UINT32_MAX
+#define VIRBUILD_PROMOTE_NO_CONVERSION UINT32_MAX
 
-typedef struct vwfld { uint32_t slot; int64_t rel; uint32_t size, ty; } vwfld;
+typedef struct virbuild_promote_field { uint32_t slot; int64_t rel; uint32_t size, ty; } virbuild_promote_field;
 
-/* the conversion a load of type ty (flags fl) applies to the stored value of type st: VW_NOCONV
+/* the conversion a load of type ty (flags fl) applies to the stored value of type st: VIRBUILD_PROMOTE_NO_CONVERSION
  * none, VIR_OP_EXT/P2I/BITCAST one instruction; false if it takes more */
-static bool vw_ldconv(uint32_t st, uint32_t ty, uint32_t fl, uint32_t *op)
+static bool virbuild_promote_load_conversion(uint32_t st, uint32_t ty, uint32_t fl, uint32_t *op)
 {
 	uint32_t w = VIR_INSN_FLAG_WIDTH_LOG2(fl);
 
@@ -24,7 +24,7 @@ static bool vw_ldconv(uint32_t st, uint32_t ty, uint32_t fl, uint32_t *op)
 		return st == VIR_TYPE_I32 && (ty == VIR_TYPE_I32 || ty == VIR_TYPE_I64);
 	}
 	if (st == ty)
-		*op = VW_NOCONV;
+		*op = VIRBUILD_PROMOTE_NO_CONVERSION;
 	else if (st == VIR_TYPE_PTR && ty == VIR_TYPE_I64)
 		*op = VIR_OP_P2I;
 	else if (st == VIR_TYPE_I64 && ty == VIR_TYPE_PTR)
@@ -37,62 +37,62 @@ static bool vw_ldconv(uint32_t st, uint32_t ty, uint32_t fl, uint32_t *op)
 	return true;
 }
 
-static int64_t vw_rel(const vwp *a) { return (int64_t)((uint64_t)a->in.b | (uint64_t)a->in.c << 32); }
+static int64_t virbuild_promote_relative_offset(const virbuild_preir_insn *a) { return (int64_t)((uint64_t)a->in.b | (uint64_t)a->in.c << 32); }
 
-static void vw_escape(vwst *V, uint8_t *bad, uint32_t v)
+static void virbuild_promote_escape_mark(virbuild_context *V, uint8_t *bad, uint32_t v)
 {
-	const vwp *q = &V->p[vw_find(V, v)];
+	const virbuild_preir_insn *q = &V->p[virbuild_value_resolve(V, v)];
 
-	if (q->in.op == VIR_OP_SLOTADDR && q->blk == VW_NOBLK)
+	if (q->in.op == VIR_OP_SLOTADDR && q->blk == VIRBUILD_BLOCK_NONE)
 		bad[q->in.a] = 1;
 }
 
 /* var's value on entry to b (b's own definitions come later in it) */
-static uint32_t vw_entry(ecx *e, uint32_t var, uint32_t b, uint32_t ty, bool defs)
+static uint32_t virbuild_promote_variable_entry(ecx *e, uint32_t var, uint32_t b, uint32_t ty, bool defs)
 {
-	vwst *V = e->vw;
+	virbuild_context *V = e->vw;
 	uint32_t *d, p;
 
 	if (!defs)
-		return vw_readv(e, var, b, ty);
+		return virbuild_variable_read(e, var, b, ty);
 	if (!V->b[b].npred)
-		return vw_undef(e, ty);
+		return virbuild_undefined_value(e, ty);
 	if (V->b[b].npred == 1)
-		return vw_readv(e, var, V->pr[V->b[b].pred], ty);
-	d = vw_hslot(e, b, var | 0x80000000u, false);
+		return virbuild_variable_read(e, var, V->pr[V->b[b].pred], ty);
+	d = virbuild_variable_slot(e, b, var | 0x80000000u, false);
 	if (d)
-		return vw_find(V, *d);
-	p = vw_newphi(e, b, var, ty);
-	*vw_hslot(e, b, var | 0x80000000u, true) = p;
-	vw_phiops(e, p, b);
-	return vw_find(V, p);
+		return virbuild_value_resolve(V, *d);
+	p = virbuild_parameter_new(e, b, var, ty);
+	*virbuild_variable_slot(e, b, var | 0x80000000u, true) = p;
+	virbuild_parameter_operands_fill(e, p, b);
+	return virbuild_value_resolve(V, p);
 }
 
-static uint32_t vw_zerok(ecx *e, uint32_t ty)
+static uint32_t virbuild_promote_zero_constant(ecx *e, uint32_t ty)
 {
-	return ty == VIR_TYPE_F32 || ty == VIR_TYPE_F64 ? vw_k(e, VIR_OP_FCONST, ty, 0, 0, 0) : vw_iconst(e, ty, 0);
+	return ty == VIR_TYPE_F32 || ty == VIR_TYPE_F64 ? virbuild_constant_make(e, VIR_OP_FCONST, ty, 0, 0, 0) : virbuild_constant_integer(e, ty, 0);
 }
 
 /* memset q, of a constant length with 0: the bytes (len) it zeroes */
-static bool vw_zeroset(vwst *V, uint32_t q, int64_t *len)
+static bool virbuild_promote_memset_zero_length(virbuild_context *V, uint32_t q, int64_t *len)
 {
 	int64_t z;
 
-	return V->p[q].in.op == VIR_OP_MEMSET && vw_kint(V, vw_find(V, V->p[q].in.b), &z) && !z &&
-	       vw_kint(V, vw_find(V, V->p[q].in.c), len) && *len > 0;
+	return V->p[q].in.op == VIR_OP_MEMSET && virbuild_value_integer_constant(V, virbuild_value_resolve(V, V->p[q].in.b), &z) && !z &&
+	       virbuild_value_integer_constant(V, virbuild_value_resolve(V, V->p[q].in.c), len) && *len > 0;
 }
 
-struct vwms { uint32_t q, slot; int64_t rel, len; };	/* a memset of a slot with 0 */
+struct virbuild_promote_memset { uint32_t q, slot; int64_t rel, len; };	/* a memset of a slot with 0 */
 
-static bool vw_mscov(const struct vwms *m, const vwfld *f)
+static bool virbuild_promote_memset_covers(const struct virbuild_promote_memset *m, const virbuild_promote_field *f)
 {
 	return f->slot == m->slot && m->rel <= f->rel && f->rel + (int64_t)f->size <= m->rel + m->len;
 }
 
 /* a store the promotion made dead (a memset of a promoted slot too) */
-VPRIV bool vw_promdead(const vwst *V, uint32_t q)
+VPRIV bool virbuild_promote_store_is_dead(const virbuild_context *V, uint32_t q)
 {
-	const vwp *x = &V->p[q];
+	const virbuild_preir_insn *x = &V->p[q];
 
 	return (x->in.op == VIR_OP_STORE || x->in.op == VIR_OP_MEMSET) && x->slot && V->sl[x->slot - 1].prom;
 }
@@ -100,16 +100,16 @@ VPRIV bool vw_promdead(const vwst *V, uint32_t q)
 /* a slot whose address does not escape, read and written only as fields (offset, size) that
  * do not overlap, becomes one variable per field: its loads read the value the field holds
  * (Braun, as the walker's locals), its stores go */
-VPRIV bool vw_promote(ecx *e)
+VPRIV bool virbuild_slots_promote(ecx *e)
 {
-	vwst *V = e->vw;
-	vwfld *fd = NULL;
+	virbuild_context *V = e->vw;
+	virbuild_promote_field *fd = NULL;
 	uint32_t nf = 0, cf = 0, *fof, *cur, *cst, np0 = V->np, var0;
 	uint32_t *sf, *fnx = NULL, cfnx = 0;	/* a slot's fields: first + 1 per slot, next + 1 per field */
 	uint8_t *bad;
 	bool done = false;
 	int64_t rel;
-	struct vwms *ms = NULL;	/* the memsets of slots with 0 */
+	struct virbuild_promote_memset *ms = NULL;	/* the memsets of slots with 0 */
 	uint32_t nms = 0, cms = 0;
 
 	if (!V->nsl)
@@ -118,42 +118,42 @@ VPRIV bool vw_promote(ecx *e)
 	sf = calloc(V->nsl, sizeof *sf);
 	fof = malloc((size_t)V->np * sizeof *fof);	/* access -> field + 1 */
 	if (!bad || !fof || !sf)
-		vw_fail(e, VIRFAIL(out_of_memory));
+		virbuild_fail(e, VIRBUILD_FAILURE(out_of_memory));
 	for (uint32_t s = 0; s < V->nsl; s++)
 		bad[s] = V->sl[s].prom;	/* (an earlier run's: its stores are dead, its loads gone) */
 	/* a slot escapes when its address is anything but the address of a load or store (the
 	 * walker's exposed flag is set by any address taken, *(T *)&x too) */
 	for (uint32_t i = 0; i < np0; i++) {
-		const vwp *q = &V->p[i];
+		const virbuild_preir_insn *q = &V->p[i];
 		const vir_opcode_info *oi = &vir_opcode_table[q->in.op];
 
-		if (q->blk == VW_NOBLK || vw_find(V, i) != i || vw_promdead(V, i))
+		if (q->blk == VIRBUILD_BLOCK_NONE || virbuild_value_resolve(V, i) != i || virbuild_promote_store_is_dead(V, i))
 			continue;	/* (a store to a slot promoted before is dead) */
 		if (q->in.op == VIR_OP_BPARAM) {
-			if (q->in.b != VW_NOBLK)
+			if (q->in.b != VIRBUILD_BLOCK_NONE)
 				for (uint32_t j = 0; j < V->b[q->blk].npred; j++)
-					vw_escape(V, bad, V->x[q->in.b + j]);
+					virbuild_promote_escape_mark(V, bad, V->x[q->in.b + j]);
 			continue;
 		}
 		for (int k = 0; k < 3; k++)
-			if (vw_isval(oi->operand_kinds[k]) && !(q->in.op == VIR_OP_BRIF && k > 0) &&
-			    !(k == 0 && (q->in.op == VIR_OP_LOAD || q->in.op == VIR_OP_STORE || vw_zeroset(V, i, &rel))))
-				vw_escape(V, bad, (&q->in.a)[k]);
+			if (virbuild_operand_kind_is_value(oi->operand_kinds[k]) && !(q->in.op == VIR_OP_BRIF && k > 0) &&
+			    !(k == 0 && (q->in.op == VIR_OP_LOAD || q->in.op == VIR_OP_STORE || virbuild_promote_memset_zero_length(V, i, &rel))))
+				virbuild_promote_escape_mark(V, bad, (&q->in.a)[k]);
 		if (q->in.op == VIR_OP_CALL || q->in.op == VIR_OP_RET)
 			for (uint32_t k = 0; k < V->x[q->in.c]; k++)
-				vw_escape(V, bad, V->x[q->in.c + 1 + k]);
+				virbuild_promote_escape_mark(V, bad, V->x[q->in.c + 1 + k]);
 	}
 	/* the fields, and what rules a slot out */
 	for (uint32_t i = 0; i < np0; i++) {
-		vwp *q = &V->p[i];
+		virbuild_preir_insn *q = &V->p[i];
 		uint32_t s, size, ty, k, a;
 		int64_t len;
 
 		fof[i] = 0;
 		if ((q->in.op != VIR_OP_LOAD && q->in.op != VIR_OP_STORE && q->in.op != VIR_OP_MEMSET) ||
-		    q->blk == VW_NOBLK || vw_find(V, i) != i)
+		    q->blk == VIRBUILD_BLOCK_NONE || virbuild_value_resolve(V, i) != i)
 			continue;
-		a = vw_find(V, q->in.a);
+		a = virbuild_value_resolve(V, q->in.a);
 		if (V->p[a].in.op != VIR_OP_SLOTADDR)
 			continue;
 		s = V->p[a].in.a;
@@ -162,12 +162,12 @@ VPRIV bool vw_promote(ecx *e)
 		if (bad[s])
 			continue;
 		if (q->in.op == VIR_OP_MEMSET) {	/* zeroes the fields it covers: checked once all are known */
-			if (!vw_zeroset(V, i, &len)) {
+			if (!virbuild_promote_memset_zero_length(V, i, &len)) {
 				bad[s] = 1;
 				continue;
 			}
 			GROW(ms, nms, cms, 1);
-			ms[nms] = (struct vwms){ i, s, vw_rel(&V->p[a]), len };
+			ms[nms] = (struct virbuild_promote_memset){ i, s, virbuild_promote_relative_offset(&V->p[a]), len };
 			fof[i] = UINT32_MAX - nms++;	/* (a memset: its index in ms) */
 			continue;
 		}
@@ -175,7 +175,7 @@ VPRIV bool vw_promote(ecx *e)
 			bad[s] = 1;
 			continue;
 		}
-		rel = vw_rel(&V->p[a]);
+		rel = virbuild_promote_relative_offset(&V->p[a]);
 		size = 1u << VIR_INSN_FLAG_WIDTH_LOG2(q->in.flags);
 		ty = q->in.op == VIR_OP_STORE ? V->p[q->in.b].in.type : VIR_TYPE_VOID;
 		/* Simplification can remove a truncation before a narrow store.
@@ -184,7 +184,7 @@ VPRIV bool vw_promote(ecx *e)
 		if (size <= 4 && ty == VIR_TYPE_I64)
 			ty = VIR_TYPE_I32;
 		for (k = sf[s] - 1; k != UINT32_MAX; k = fnx[k] - 1) {	/* (the slot's own fields only) */
-			vwfld *f = &fd[k];
+			virbuild_promote_field *f = &fd[k];
 
 			if (f->rel == rel && f->size == size)
 				break;
@@ -199,7 +199,7 @@ VPRIV bool vw_promote(ecx *e)
 			GROW(fnx, nf, cfnx, 1);
 			fnx[nf] = sf[s];
 			sf[s] = nf + 1;
-			fd[nf++] = (vwfld){ s, rel, size, VIR_TYPE_VOID };
+			fd[nf++] = (virbuild_promote_field){ s, rel, size, VIR_TYPE_VOID };
 		}
 		if (ty != VIR_TYPE_VOID) {
 			if (fd[k].ty != VIR_TYPE_VOID && fd[k].ty != ty) {
@@ -215,7 +215,7 @@ VPRIV bool vw_promote(ecx *e)
 	/* a memset covers each field of its slot whole or not at all */
 	for (uint32_t m = 0; m < nms; m++)
 		for (uint32_t k = sf[ms[m].slot] - 1; k != UINT32_MAX; k = fnx[k] - 1) {
-			const vwfld *f = &fd[k];
+			const virbuild_promote_field *f = &fd[k];
 			int64_t lo = ms[m].rel, hi = ms[m].rel + ms[m].len;
 
 			if (f->slot == ms[m].slot && f->rel < hi && lo < f->rel + (int64_t)f->size &&
@@ -224,16 +224,16 @@ VPRIV bool vw_promote(ecx *e)
 		}
 	/* every load must take the field's stored type with one conversion at most */
 	for (uint32_t i = 0; i < V->np; i++) {
-		vwp *q = &V->p[i];
+		virbuild_preir_insn *q = &V->p[i];
 		uint32_t op;
 
 		if (!fof[i] || q->in.op != VIR_OP_LOAD || bad[q->slot - 1])
 			continue;
-		vwfld *f = &fd[fof[i] - 1];
+		virbuild_promote_field *f = &fd[fof[i] - 1];
 
 		if (f->ty == VIR_TYPE_VOID)	/* never stored: as the first load reads it */
 			f->ty = VIR_INSN_FLAG_WIDTH_LOG2(q->in.flags) < 2 || (q->in.flags & VIR_INSN_FLAG_MS) ? VIR_TYPE_I32 : q->in.type;
-		if (!vw_ldconv(f->ty, q->in.type, q->in.flags, &op))
+		if (!virbuild_promote_load_conversion(f->ty, q->in.type, q->in.flags, &op))
 			bad[q->slot - 1] = 1;
 	}
 	{
@@ -250,7 +250,7 @@ VPRIV bool vw_promote(ecx *e)
 	for (uint32_t i = 0; i < np0; i++) {
 		uint32_t p, b;
 
-		if (V->p[i].in.op != VIR_OP_STORE || !fof[i] || bad[V->p[i].slot - 1] || vw_find(V, i) != i)
+		if (V->p[i].in.op != VIR_OP_STORE || !fof[i] || bad[V->p[i].slot - 1] || virbuild_value_resolve(V, i) != i)
 			continue;
 		uint32_t to = fd[fof[i] - 1].ty, from = V->p[V->p[i].in.b].in.type, op;
 		if (to == VIR_TYPE_I64 && from == VIR_TYPE_PTR)
@@ -260,14 +260,14 @@ VPRIV bool vw_promote(ecx *e)
 		else
 			continue;
 		b = V->p[i].blk;
-		p = vw_put(e, op, to, 0, V->p[i].in.b, 0, 0, b);
+		p = virbuild_preir_insn_add(e, op, to, 0, V->p[i].in.b, 0, 0, b);
 		V->p[p].next = V->p[i].next;
 		V->p[i].next = p;
 		if (V->b[b].tail == i)
 			V->b[b].tail = p;
 		V->p[i].in.b = p;
 	}
-	/* the variables: VW_VAR0 + nloc + earlier runs' + field */
+	/* the variables: VIRBUILD_LOCAL_VARIABLE_FIRST + nloc + earlier runs' + field */
 	var0 = V->nloc + V->nprom;
 	GROW(V->vty, var0, V->cvty, nf);
 	for (uint32_t k = 0; k < nf; k++)
@@ -275,29 +275,29 @@ VPRIV bool vw_promote(ecx *e)
 	V->nprom += nf;
 	cur = malloc((size_t)nf * 2 * sizeof *cur);
 	if (!cur)
-		vw_fail(e, VIRFAIL(out_of_memory));
+		virbuild_fail(e, VIRBUILD_FAILURE(out_of_memory));
 	cst = cur + nf;
 	/* each block's last store to a field is the field's value at its end */
 	for (uint32_t oi = 0; oi < V->norder; oi++) {
 		uint32_t b = V->order[oi];
 
 		for (uint32_t q = V->b[b].head; q; q = V->p[q].next) {
-			if (q >= np0 || !fof[q] || bad[V->p[q].slot - 1] || V->p[q].in.op == VIR_OP_LOAD || vw_find(V, q) != q)
+			if (q >= np0 || !fof[q] || bad[V->p[q].slot - 1] || V->p[q].in.op == VIR_OP_LOAD || virbuild_value_resolve(V, q) != q)
 				continue;
 			if (V->p[q].in.op == VIR_OP_STORE) {
-				uint32_t var = VW_VAR0 + var0 + fof[q] - 1;
+				uint32_t var = VIRBUILD_LOCAL_VARIABLE_FIRST + var0 + fof[q] - 1;
 
-				vw_write(e, var, b, V->p[q].in.b);
-				*vw_hslot(e, b, var | 0x40000000u, true) = 1;	/* b defines var */
+				virbuild_variable_write(e, var, b, V->p[q].in.b);
+				*virbuild_variable_slot(e, b, var | 0x40000000u, true) = 1;	/* b defines var */
 				continue;
 			}
 			for (uint32_t k = sf[V->p[q].slot - 1] - 1; k != UINT32_MAX; k = fnx[k] - 1) {
-				uint32_t var = VW_VAR0 + var0 + k;
+				uint32_t var = VIRBUILD_LOCAL_VARIABLE_FIRST + var0 + k;
 
-				if (!vw_mscov(&ms[UINT32_MAX - fof[q]], &fd[k]))
+				if (!virbuild_promote_memset_covers(&ms[UINT32_MAX - fof[q]], &fd[k]))
 					continue;
-				vw_write(e, var, b, vw_zerok(e, fd[k].ty));
-				*vw_hslot(e, b, var | 0x40000000u, true) = 1;
+				virbuild_variable_write(e, var, b, virbuild_promote_zero_constant(e, fd[k].ty));
+				*virbuild_variable_slot(e, b, var | 0x40000000u, true) = 1;
 			}
 		}
 	}
@@ -307,23 +307,23 @@ VPRIV bool vw_promote(ecx *e)
 		uint32_t b = V->order[oi];
 
 		for (uint32_t q = V->b[b].head; q; q = V->p[q].next) {
-			vwp *x = &V->p[q];
+			virbuild_preir_insn *x = &V->p[q];
 			uint32_t k, var, v, op;
 
-			if (q >= np0 || !fof[q] || bad[x->slot - 1] || vw_find(V, q) != q)
+			if (q >= np0 || !fof[q] || bad[x->slot - 1] || virbuild_value_resolve(V, q) != q)
 				continue;
 			if (x->in.op == VIR_OP_MEMSET) {
-				const struct vwms *m = &ms[UINT32_MAX - fof[q]];
+				const struct virbuild_promote_memset *m = &ms[UINT32_MAX - fof[q]];
 
 				for (k = sf[m->slot] - 1; k != UINT32_MAX; k = fnx[k] - 1)
-					if (vw_mscov(m, &fd[k])) {
-						cur[k] = vw_zerok(e, fd[k].ty);
+					if (virbuild_promote_memset_covers(m, &fd[k])) {
+						cur[k] = virbuild_promote_zero_constant(e, fd[k].ty);
 						cst[k] = oi;
 					}
 				continue;
 			}
 			k = fof[q] - 1;
-			var = VW_VAR0 + var0 + k;
+			var = VIRBUILD_LOCAL_VARIABLE_FIRST + var0 + k;
 			if (x->in.op == VIR_OP_STORE) {
 				cur[k] = x->in.b;
 				cst[k] = oi;
@@ -332,11 +332,11 @@ VPRIV bool vw_promote(ecx *e)
 			if (cst[k] == oi) {
 				v = cur[k];
 			} else {
-				v = vw_entry(e, var, b, fd[k].ty, vw_hslot(e, b, var | 0x40000000u, false) != NULL);
-				x = &V->p[q];	/* (vw_entry can grow V->p) */
+				v = virbuild_promote_variable_entry(e, var, b, fd[k].ty, virbuild_variable_slot(e, b, var | 0x40000000u, false) != NULL);
+				x = &V->p[q];	/* (virbuild_promote_variable_entry can grow V->p) */
 			}
-			vw_ldconv(fd[k].ty, x->in.type, x->in.flags, &op);
-			if (op == VW_NOCONV) {
+			virbuild_promote_load_conversion(fd[k].ty, x->in.type, x->in.flags, &op);
+			if (op == VIRBUILD_PROMOTE_NO_CONVERSION) {
 				V->fwd[q] = v;
 			} else {
 				x->in.op = op;
