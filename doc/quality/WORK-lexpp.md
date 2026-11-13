@@ -52,6 +52,7 @@ place in `ppimpl.h`.
 | `setup.c` `out_nl` to `pp_text`, `ucn_utf8`; all of `text.c` | `text-output.c` | the `-E` printer: line markers, comments, spacing, the output buffer |
 | `setup.c` `pp_hc_stats`; `hstat` | `header-cache-statistics.c` | counters of the header cache |
 | `macro.c` `-dM`, `-dD` (lines 184-337) | `macro-dump.c` | printing macros is not the macro table |
+| `include.c` from `#embed (C23)` to the end | `embed.c` | a directive with its own parameters, search and output (`pstrdup` becomes `VPRIV`) |
 
 `ppimpl.h` (1125 lines):
 
@@ -76,7 +77,7 @@ the review's `replay` names become `serve`):
 | `header-cache-record.c` | what a region reads and writes: `hcrec.c`, `rec_tok`, child entries, `hc_begin`, the spare buffers |
 | `header-cache-publish.c` | `hc_end` and the entries it builds, text and tokens |
 
-Not cut, with the reason, when a clean cut was impossible: see "Status".
+Not cut, with the reason: see "Status".
 
 ### 2. Language modes (Q-lexpp-01; changes output, named as such)
 
@@ -125,4 +126,21 @@ API in `pp.h` is `quality-diag`'s; the options record is
 
 ## Status
 
-(Step 1, written as the split was done: see below.)
+Step 1 done (PR "pp: one job per file (moves only)").  Left in place, on
+purpose:
+
+- `lex.c` stays one file.  The review's `lexcache.c` (token cache, file
+  reading, mode rewrites, read-ahead, from line 1540) calls `lex_mode`, which
+  is `static` and specialised by inlining (`vlex` passes `digraphs` = true as a
+  constant); exporting it would change the hot loop's code.  The cut is made
+  in step 2, when the four rewrites go and `lex_mode` takes a mode word.
+- `file.c` (skeleton and `salloc`) and `directive.c`'s `parse_define` keep
+  their place: renaming to `skeleton.c` and moving `parse_define` to `macro.c`
+  belong to step 3 (`salloc` goes to `common/`) and step 5.
+- `struct pp` is not cut into sub-structs: it changes every field access
+  (not a move); step 5 does it with the field rename.
+- `vm()` stays in `translation-unit.c`: it is the TU's address-space
+  reservation until step 3 replaces it.
+- `header-cache-internal.h` keeps the inline `htok_get` with the types (hot
+  path, used by `pp_next`); the prototypes of the header cache's functions
+  stay in `ppimpl.h` because they take `pp *`.
