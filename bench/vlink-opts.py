@@ -263,7 +263,7 @@ def main():
                'sp': 'static int foq(void){return 1;}\nint fooo(void){return 0;} int foo(void); int x_(void);'
                      ' int _start(void){return x_()+foo()+foq();}\nint ffo(void);int g(void){return ffo();}\n'
                      'int foqq(void); int k(void){return foqq();}\n',
-               # a name past 1023 bytes: the report was cut there (vbuf_f)
+               # a name past 1023 bytes: the report was cut there (vbuffer_format_append)
                'long': 'extern int ' + 'L' * 3000 + '(void); int f(void){return ' + 'L' * 3000 + '();}\n'}
         for name, src in UND.items():
             open(f'{t}/{name}.c', 'w').write(src)

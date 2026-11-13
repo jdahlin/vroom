@@ -77,7 +77,9 @@ VPRIV void mdef(pp *p, uint32_t id, const pmacro *m)
 
 static inline bool tu_mem(const pp *p, const char *s)
 {
-	return (s >= p->tmp.base && s < p->tmp.end) || (s >= p->perm.base && s < p->perm.end);
+	const uint8_t *u = (const uint8_t *)s;
+
+	return (u >= p->tmp.base && u < p->tmp.base + p->tmp.cap) || (u >= p->perm.base && u < p->perm.base + p->perm.cap);
 }
 
 /* a token pp_next hands out while recording */

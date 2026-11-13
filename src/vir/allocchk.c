@@ -29,7 +29,7 @@ typedef struct chk {
 	vir_fn *f;
 	const vir_regs *rg;
 	const vir_alloc_out *o;
-	vbuf *msg;
+	vbuffer *msg;
 	uint32_t nloc, nerr, *nm;
 	uint64_t cwrote[2];
 	bool on;		/* report (the last round) */
@@ -75,9 +75,9 @@ static void bad(chk *c, uint32_t b, uint32_t i, const char *fmt, ...)
 	vsnprintf(t, sizeof(t), fmt, ap);
 	va_end(ap);
 	if (i)
-		vbuf_f(c->msg, "alloc-check: b%u ins %u: %s\n", b, i, t);
+		vbuffer_format_append(c->msg, "alloc-check: b%u ins %u: %s\n", b, i, t);
 	else
-		vbuf_f(c->msg, "alloc-check: b%u: %s\n", b, t);
+		vbuffer_format_append(c->msg, "alloc-check: b%u: %s\n", b, t);
 }
 
 static bool reg_ok(const chk *c, uint32_t r, bool scratch)
@@ -356,7 +356,7 @@ static void block(chk *c, uint32_t b, uint32_t *st, uint32_t *tmp, uint32_t **en
 	}
 }
 
-uint32_t vir_alloc_check(vir_fn *f, const vir_regs *rg, const vir_alloc_out *o, vbuf *msg)
+uint32_t vir_alloc_check(vir_fn *f, const vir_regs *rg, const vir_alloc_out *o, vbuffer *msg)
 {
 	chk c = { f, rg, o, msg, 256 + o->nspill, 0, NULL, { 0, 0 }, false };
 	uint32_t nb = f->nblk, *wl, nwl = 0, *st, *tmp, **ent, n = 0;
@@ -409,7 +409,7 @@ uint32_t vir_alloc_check(vir_fn *f, const vir_regs *rg, const vir_alloc_out *o, 
 			bad(&c, 0, 0, "callee-saved %s%d written but not in the used set", cl ? "f" : "r", __builtin_ctzll(m));
 	}
 	if (c.nerr > 10)
-		vbuf_f(msg, "alloc-check: ... %u failures in all\n", c.nerr);
+		vbuffer_format_append(msg, "alloc-check: ... %u failures in all\n", c.nerr);
 	for (uint32_t b = 0; b < nb; b++)
 		free(ent[b]);
 	free(ent);

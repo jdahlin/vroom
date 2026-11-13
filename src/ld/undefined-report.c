@@ -64,7 +64,7 @@ static const char *suggest(const char *name, Obj *ref, const char **where)
 
 /* lld's location of a reference: "SRC.c\n>>>               OBJ:(FUNC)" (the object's STT_FILE, the
    defined symbol around the offset, else SECTION+0xOFF; an archive member "M.o:(F) in archive A") */
-static void ref_loc(vbuf *b, Obj *o, uint32_t sec, uint64_t off)
+static void ref_loc(vbuffer *b, Obj *o, uint32_t sec, uint64_t off)
 {
 	const char *src = NULL, *path = o->path, *lp = strrchr(path, '('), *fn = NULL;
 	char obj[4096];
@@ -85,23 +85,23 @@ static void ref_loc(vbuf *b, Obj *o, uint32_t sec, uint64_t off)
 	else
 		snprintf(obj, sizeof obj, "%s", path);
 	if (src)
-		vbuf_f(b, "%s\n>>>               ", src);
+		vbuffer_format_append(b, "%s\n>>>               ", src);
 	if (fn)
-		vbuf_f(b, "%s:(%s)", obj, fn);
+		vbuffer_format_append(b, "%s:(%s)", obj, fn);
 	else
-		vbuf_f(b, "%s:(%s+0x%llx)", obj, o->shstr + o->sh[sec].sh_name, (unsigned long long)off);
+		vbuffer_format_append(b, "%s:(%s+0x%llx)", obj, o->shstr + o->sh[sec].sh_name, (unsigned long long)off);
 	if (lp && path[strlen(path) - 1] == ')')
-		vbuf_f(b, " in archive %.*s", (int)(lp - path), path);
+		vbuffer_format_append(b, " in archive %.*s", (int)(lp - path), path);
 }
 
 /* "undefined symbol: X" and every reference to it (lld: the first 3, then "referenced N more times") */
 static void undef_refs(uint32_t gid, Obj *first, bool spell)
 {
-	vbuf b = {0};
+	vbuffer b = {0};
 	uint32_t nref = 0;
 	Obj *reffile = NULL;
 
-	vbuf_f(&b, "undefined symbol: %s", gname(gid));
+	vbuffer_format_append(&b, "undefined symbol: %s", gname(gid));
 	for (uint32_t oi = 0; oi < objs.n; oi++) {
 		Obj *o = objs.v[oi];
 
@@ -119,23 +119,23 @@ static void undef_refs(uint32_t gid, Obj *first, bool spell)
 				if (!reffile)
 					reffile = o;
 				if (nref++ < 3) {
-					vbuf_f(&b, "\n>>> referenced by ");
+					vbuffer_format_append(&b, "\n>>> referenced by ");
 					ref_loc(&b, o, h->sh_info, r[j].r_offset);
 				}
 			}
 		}
 	}
 	if (!nref)
-		vbuf_f(&b, "\n>>> referenced by %s", first->path);
+		vbuffer_format_append(&b, "\n>>> referenced by %s", first->path);
 	else if (nref > 3)
-		vbuf_f(&b, "\n>>> referenced %u more times", nref - 3);
+		vbuffer_format_append(&b, "\n>>> referenced %u more times", nref - 3);
 	{
 		const char *where = NULL, *alt = spell ? suggest(gname(gid), reffile, &where) : NULL;
 
 		if (alt)
-			vbuf_f(&b, "\n>>> did you mean: %s\n>>> defined in: %s", alt, where);
+			vbuffer_format_append(&b, "\n>>> did you mean: %s\n>>> defined in: %s", alt, where);
 	}
-	vbuf_put(&b, "", 1);
+	vbuffer_append(&b, "", 1);
 	error("%s", (const char *)b.p);
 	free(b.p);
 }

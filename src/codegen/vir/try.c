@@ -205,7 +205,7 @@ VPRIV bool vw_try(ecx *e, uint32_t s)
 	}
 	{
 		vwst *V = e->vw;
-		vbuf b = { 0 };
+		vbuffer b = { 0 };
 		uint32_t nerr = 0;
 
 		if (m & 2) {

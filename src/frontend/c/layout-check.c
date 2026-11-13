@@ -4,7 +4,7 @@
 
 /* ---------------- layout checks (clang verifies them) ---------------- */
 
-static void field_checks(cc *c, vfdbuf *o, const char *rname, uint32_t ti, uint64_t base, const char *prefix)
+static void field_checks(cc *c, vbuffer *o, const char *rname, uint32_t ti, uint64_t base, const char *prefix)
 {
 	const tag *r = &c->tags[ti];
 
@@ -18,17 +18,21 @@ static void field_checks(cc *c, vfdbuf *o, const char *rname, uint32_t ti, uint6
 				field_checks(c, o, rname, T(c, f->ty)->aux, base + f->off / 8, prefix);
 			continue;
 		}
-		vfdbuf_printf(o, "_Static_assert(__builtin_offsetof(%s, %s%.*s) == %llu, \"vcc\");\n", rname, prefix,
+		vbuffer_format_append(o, "_Static_assert(__builtin_offsetof(%s, %s%.*s) == %llu, \"vcc\");\n", rname, prefix,
 			IDF(f->name), (unsigned long long)(base + f->off / 8));
 	}
 }
 
 VPRIV void layout_checks(cc *c)
 {
-	vfdbuf o = { malloc(1 << 20), 0, 1 << 20, c->o->outfd };
+	char *storage = malloc(1 << 20);
+	vbuffer o;
 	char rn[512];
 
-	vfdbuf_printf(&o, "\n/* vcc layout checks */\n");
+	if (!storage)
+		vout_of_memory();
+	vbuffer_fd(&o, storage, 1 << 20, c->o->outfd);
+	vbuffer_format_append(&o, "\n/* vcc layout checks */\n");
 	for (uint32_t i = 0; i < c->ntag; i++) {
 		const tag *r = &c->tags[i];
 		int k = c->ty[r->ty].kind;
@@ -51,13 +55,13 @@ VPRIV void layout_checks(cc *c)
 		} else {
 			continue;
 		}
-		vfdbuf_printf(&o, "_Static_assert(sizeof(%s) == %llu && _Alignof(%s) == %u, \"vcc\");\n", rn,
+		vbuffer_format_append(&o, "_Static_assert(sizeof(%s) == %llu && _Alignof(%s) == %u, \"vcc\");\n", rn,
 			(unsigned long long)r->size, rn, r->align);
 		if (k == TY_ENUM) {
 			const char *bn = int_name(KIND(c, c->ty[r->ty].base));
 
 			if (bn)
-				vfdbuf_printf(&o, "_Static_assert(__builtin_types_compatible_p(%s, %s), \"vcc\");\n", rn, bn);
+				vbuffer_format_append(&o, "_Static_assert(__builtin_types_compatible_p(%s, %s), \"vcc\");\n", rn, bn);
 			continue;
 		}
 		field_checks(c, &o, rn, i, 0, "");
@@ -69,21 +73,22 @@ VPRIV void layout_checks(cc *c)
 			continue;
 		if (s->kind == S_TYPEDEF) {
 			if (complete(c, s->ty) && !is_func(c, s->ty))
-				vfdbuf_printf(&o, "_Static_assert(sizeof(%.*s) == %llu && _Alignof(%.*s) == %u, \"vcc\");\n",
+				vbuffer_format_append(&o, "_Static_assert(sizeof(%.*s) == %llu && _Alignof(%.*s) == %u, \"vcc\");\n",
 					IDF(s->name), (unsigned long long)ty_size(c, s->ty), IDF(s->name), ty_align(c, s->ty));
 		} else if (s->kind == S_VAR && complete(c, s->ty)) {
-			vfdbuf_printf(&o, "_Static_assert(sizeof(%.*s) == %llu, \"vcc\");\n", IDF(s->name),
+			vbuffer_format_append(&o, "_Static_assert(sizeof(%.*s) == %llu, \"vcc\");\n", IDF(s->name),
 				(unsigned long long)ty_size(c, s->ty));
 		}
 		if (s->kind == S_VAR || s->kind == S_FUNC) {
-			vfixbuf b;
+			char b_bytes[4096];
+			vbuffer b;
 			bool ok = true;
 
-			b.n = 0, b.s[0] = 0;
+			vbuffer_fixed(&b, b_bytes, sizeof(b_bytes));
 			type_str(c, s->ty, "", &b, &ok);
 			if (ok)
-				vfdbuf_printf(&o, "_Static_assert(__builtin_types_compatible_p(__typeof__(%.*s), %s), \"vcc\");\n",
-					IDF(s->name), b.s);
+				vbuffer_format_append(&o, "_Static_assert(__builtin_types_compatible_p(__typeof__(%.*s), %s), \"vcc\");\n",
+					IDF(s->name), b.p);
 		}
 	}
 	/* enumerators: value and type */
@@ -96,9 +101,9 @@ VPRIV void layout_checks(cc *c)
 		tn = int_name(KIND(c, KIND(c, s->ty) == TY_ENUM ? T(c, s->ty)->base : s->ty));
 		if (!tn)
 			continue;
-		vfdbuf_printf(&o, "_Static_assert((%.*s) == %lldLL && __builtin_types_compatible_p(__typeof__(%.*s), %s), \"vcc\");\n",
+		vbuffer_format_append(&o, "_Static_assert((%.*s) == %lldLL && __builtin_types_compatible_p(__typeof__(%.*s), %s), \"vcc\");\n",
 			IDF(s->name), (long long)s->val, IDF(s->name), tn);
 	}
-	vfdbuf_flush(&o);
+	vbuffer_flush(&o);
 	free(o.p);
 }

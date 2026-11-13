@@ -390,32 +390,32 @@ void pp_diag_summary(pp *p);
 VPRIV const fent *loc_fent(const pp *p, uint32_t loc);
 VPRIV bool loc_ok(const pp *p, uint32_t loc, const fent **e);
 VPRIV int diag_where(const pp *p, uint32_t loc, const char **name, uint32_t *nl, uint32_t *line, uint32_t *col);
-struct vbuf;
-VPRIV void render_text(pp *p, struct vbuf *b, const vdiag *d);
-VPRIV bool render_head(pp *p, struct vbuf *b, const vdiag *d, const fent **ep);
-VPRIV void parseable_fixits(pp *p, struct vbuf *b, const vdiag *d);
+struct vbuffer;
+VPRIV void render_text(pp *p, struct vbuffer *b, const vdiag *d);
+VPRIV bool render_head(pp *p, struct vbuffer *b, const vdiag *d, const fent **ep);
+VPRIV void parseable_fixits(pp *p, struct vbuffer *b, const vdiag *d);
 VPRIV uint32_t dcols(const char *s, uint32_t b, uint32_t e, uint32_t col);
-VPRIV void db_c(struct vbuf *b, char c, int n);
-VPRIV void include_stack(pp *p, struct vbuf *b, const fent *e);
+VPRIV void db_c(struct vbuffer *b, char c, int n);
+VPRIV void include_stack(pp *p, struct vbuffer *b, const fent *e);
 /* diagtext.c: vcc's text style (records rendered when the next one starts, so that
    their notes can fold into the snippet), the narrated style, the type diff */
 VPRIV void diag_text_flush(pp *p);
-VPRIV void diag_narrate(pp *p, struct vbuf *b, vdiag *d);
-VPRIV void diag_render_rec(pp *p, struct vbuf *b, vdiag *d);
-VPRIV void diag_render_color(pp *p, struct vbuf *b, vdiag *d);
-VPRIV void diag_typediff(struct vbuf *b, const vdiag *d, const char *plain);
+VPRIV void diag_narrate(pp *p, struct vbuffer *b, vdiag *d);
+VPRIV void diag_render_rec(pp *p, struct vbuffer *b, vdiag *d);
+VPRIV void diag_render_color(pp *p, struct vbuffer *b, vdiag *d);
+VPRIV void diag_typediff(struct vbuffer *b, const vdiag *d, const char *plain);
 /* moved apart by the split of the diagnostics engine, still one unity TU */
 VPRIV __attribute__((noinline, cold)) void dsink_records(pp *p);
-VPRIV void jstr(struct vbuf *b, const char *s, size_t n);
-VPRIV void jcstr(struct vbuf *b, const char *s);
-VPRIV void html_page(pp *p, struct vbuf *b);
-VPRIV void sarif_log(pp *p, struct vbuf *b);
+VPRIV void jstr(struct vbuffer *b, const char *s, size_t n);
+VPRIV void jcstr(struct vbuffer *b, const char *s);
+VPRIV void html_page(pp *p, struct vbuffer *b);
+VPRIV void sarif_log(pp *p, struct vbuffer *b);
 VPRIV int level_of(const char *what);
 VPRIV void kid_add(vdiag *d, vdiag *k);
 VPRIV void kid_after(vdiag *top, vdiag *after, vdiag *n);
-VPRIV void render_clang(pp *p, struct vbuf *b, vdiag *d);
-VPRIV void track_str(struct vbuf *b, const void *pc);
-VPRIV void render_narr(pp *p, struct vbuf *b, const vdiag *d);
+VPRIV void render_clang(pp *p, struct vbuffer *b, vdiag *d);
+VPRIV void track_str(struct vbuffer *b, const void *pc);
+VPRIV void render_narr(pp *p, struct vbuffer *b, const vdiag *d);
 VPRIV uint32_t lstart(const char *s, uint32_t off);
 VPRIV uint32_t lend(const char *s, uint32_t size, uint32_t ls);
 VPRIV bool fix_in_macro(const pp *p, uint32_t b, uint32_t e);
@@ -787,7 +787,7 @@ static inline __attribute__((always_inline)) void next_exp(pp *p, ptok *t)
 static inline __attribute__((always_inline)) void next_tok(pp *p, ptok *t)
 {
 	if (p->depth == p->nfile && !p->svn && !p->hold_tmp)
-		p->tmp.p = p->tmp.base;	/* nothing above file level refers to tmp */
+		p->tmp.used = 0;	/* nothing above file level refers to tmp */
 	next_exp(p, t);
 }
 

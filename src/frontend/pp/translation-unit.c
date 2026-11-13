@@ -96,10 +96,12 @@ pp *pp_open(const pp_opts *o)
 	}
 	p->color = o->diag_color > 0 || (o->diag_color == 0 && isatty(o->errfd ? o->errfd : 2));
 	p->cx = vjob_region_acquire(&ppr[1], MAXCTX * sizeof(ctx), "pp.cx");
-	p->perm.base = p->perm.p = vjob_region_acquire(&ppr[2], 1ull << 30, "pp.perm");
-	p->perm.end = p->perm.base + (1ull << 30);
-	p->tmp.base = p->tmp.p = vjob_region_acquire(&ppr[3], 1ull << 32, "pp.tmp");
-	p->tmp.end = p->tmp.base + (1ull << 32);
+	p->perm.base = vjob_region_acquire(&ppr[2], 1ull << 30, "pp.perm");
+	p->perm.used = 0;
+	p->perm.cap = 1ull << 30;
+	p->tmp.base = vjob_region_acquire(&ppr[3], 1ull << 32, "pp.tmp");
+	p->tmp.used = 0;
+	p->tmp.cap = 1ull << 32;
 	p->psig = varena_alloc(&p->perm, ((size_t)o->ndirs + 1) * sizeof(uint32_t));
 	if (!sig_of(o, &p->sig, p->psig))
 		p->sig = HNONE;
@@ -231,7 +233,7 @@ void pp_close(pp *p)
 	diag_text_flush(p);	/* a record still waiting for its notes (no summary ran) */
 	/* back to the thread: the stacks and tmp (reused all along the TU) as they are */
 	vjob_region_release(&ppr[1], VJOB_REGION_SCRATCH);
-	vjob_region_release(&ppr[2], (size_t)(p->perm.p - p->perm.base) + 64);
+	vjob_region_release(&ppr[2], p->perm.used + 64);
 	vjob_region_release(&ppr[3], VJOB_REGION_SCRATCH);
 	vjob_region_release(&ppr[4], VJOB_REGION_SCRATCH);
 	vjob_region_release(&ppr[5], ((size_t)p->nfe + 1) * sizeof(fent));

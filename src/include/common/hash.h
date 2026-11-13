@@ -1,8 +1,9 @@
 /*
- * String hashes for hash tables, 8 bytes per step with multiply-xorshift
- * mixing.  Two variants, from the object writer and from vobjcopy's string
- * table; they give different values, and each table keeps its own until
- * they are made one.
+ * The string hash of the tools' tables (the object writer's symbols, vobjcopy's
+ * string table): 8 bytes per step with multiply-xorshift mixing.  No output
+ * byte depends on the value (a build with another mix gives identical
+ * objects and identical vobjcopy output), so a table may be built on it
+ * freely.  Not for digests (digest.h).
  */
 #ifndef VCC_COMMON_HASH_H
 #define VCC_COMMON_HASH_H
@@ -10,8 +11,8 @@
 #include <stdint.h>
 #include <string.h>
 
-/* the object writer's symbol table: the tail from whole loads; never 0 */
-static inline uint32_t vhash_obj(const char *s, uint32_t n)
+/* the tail from whole loads (no byte-wise read past the end); never 0 */
+static inline uint32_t vhash_string(const char *s, uint32_t n)
 {
 	uint64_t h = 0x9e3779b97f4a7c15ull ^ n, w;
 	const char *e = s + n;
@@ -25,24 +26,6 @@ static inline uint32_t vhash_obj(const char *s, uint32_t n)
 	else w = 0;
 	h = (h ^ w) * 0xc4ceb9fe1a85ec53ull; h ^= h >> 29;
 	return (uint32_t)h | 1;
-}
-
-/* vobjcopy's string table */
-static inline uint32_t vhash_strtab(const char *s, uint32_t n)
-{
-	/* 8 bytes at a time, multiply-xorshift mixing */
-	uint64_t h = 0x9e3779b97f4a7c15ull ^ n;
-	uint32_t i = 0;
-	for (; i + 8 <= n; i += 8) {
-		uint64_t w;
-		memcpy(&w, s + i, 8);
-		h = (h ^ w) * 0xff51afd7ed558ccdull;
-		h ^= h >> 29;
-	}
-	uint64_t w = 0;
-	memcpy(&w, s + i, n - i);
-	h = (h ^ w) * 0xc4ceb9fe1a85ec53ull;
-	return (uint32_t)(h ^ h >> 32);
 }
 
 #endif

@@ -4,6 +4,8 @@
   src/tools/rename-table.py TABLE.tsv            dry run: counts per row, collisions
   src/tools/rename-table.py TABLE.tsv --apply    rewrite the files
   src/tools/rename-table.py TABLE.tsv --apply --move   ... and git mv the files named in path rows
+  src/tools/rename-table.py TABLE.tsv --rerun ...      the table is applied already and new files came in with old
+                                                       names (a merge): new names existing is then expected
   src/tools/rename-table.py TABLE.tsv --list OLD       the places where OLD is used
 
 TABLE.tsv: lines `old<TAB>new[<TAB>note]`; blank lines and lines starting
@@ -101,6 +103,7 @@ def main():
     apply_ = '--apply' in av
     move = '--move' in av
     merge_ok = '--allow-merge' in av
+    rerun = '--rerun' in av
     extra = [av[i + 1] for i, a in enumerate(av) if a == '--also']
     rows = load(table)
     words, paths, pats = build(rows)
@@ -138,7 +141,7 @@ def main():
             if os.path.exists(dst):
                 problems.append(f'path: {n} exists already (row {ln})')
             continue
-        if n in allwords and n not in words and not note.startswith('unlikely'):
+        if n in allwords and n not in words and not note.startswith('unlikely') and not rerun:
             problems.append(f'exists: {n} (new name of {o}, row {ln}) is already used, e.g. in {os.path.relpath(allwords[n], R)}')
     # old names in string literals that look like output
     strrx = re.compile(r'"(?:[^"\\\n]|\\.)*"')
@@ -196,7 +199,7 @@ def main():
         print('string literal (not changed, decide by hand): ' + s)
     for pr in problems:
         print('PROBLEM: ' + pr)
-    for o in unused:
+    for o in ([] if rerun else unused):
         problems.append(f'unused: {o} occurs nowhere (stale row, or the guard/name is spelled differently)')
     if not apply_:
         return 1 if problems else 0
