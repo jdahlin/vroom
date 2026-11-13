@@ -8,26 +8,26 @@ static inline uint64_t ld_symbol_key(uint32_t obj, uint32_t idx) { return (uint6
  * one's members are dropped.  Their definitions still take part in resolution
  * (lld postParse); one that wins is demoted (ld_symbols_demote), and relocations
  * against it fail as lld's "refers to a symbol in a discarded section" */
-static void ld_comdat_groups_deduplicate(void)
+static void ld_comdat_groups_deduplicate(struct ld_context *ctx)
 {
 	struct { const char *name; uint32_t h; } *tab = NULL;
 	uint32_t mask = 0, n = 0;
 
-	for (uint32_t i = 0; i < objs.n; i++) {
-		ld_object *o = objs.v[i];
+	for (uint32_t i = 0; i < ctx->inputs.objects.n; i++) {
+		ld_object *o = ctx->inputs.objects.v[i];
 
-		for (uint32_t s = 0; o->buf && s < o->nsh; s++) {
-			const elf_section_header *h = &o->sh[s];
-			const uint32_t *w = (const uint32_t *)(o->buf + h->sh_offset);
+		for (uint32_t s = 0; o->file_bytes && s < o->section_header_count; s++) {
+			const elf_section_header *h = &o->section_headers[s];
+			const uint32_t *w = (const uint32_t *)(o->file_bytes + h->sh_offset);
 
 			if (h->sh_type != SHT_GROUP)
 				continue;
 			/* members in a ring, for --gc-sections (lld nextInSectionGroup) */
 			for (uint64_t k = 1; k < h->sh_size / 4; k++)
-				isecs.v[o->isec0 + w[k]].gnext = o->isec0 + w[k + 1 < h->sh_size / 4 ? k + 1 : 1] + 1;
+				ctx->inputs.sections.v[o->first_input_section + w[k]].next_group_member = o->first_input_section + w[k + 1 < h->sh_size / 4 ? k + 1 : 1] + 1;
 			if (!(w[0] & 1))	/* GRP_COMDAT */
 				continue;
-			const char *name = o->str + o->sym[h->sh_info].st_name;
+			const char *name = o->string_table + o->symbols[h->sh_info].st_name;
 			uint32_t len = strlen(name), hh = ld_name_hash(name, len);
 
 			if (!tab || (n + 1) * 2 > mask) {
@@ -61,7 +61,7 @@ static void ld_comdat_groups_deduplicate(void)
 				continue;
 			}
 			for (uint64_t k = 1; k < h->sh_size / 4; k++) {
-				ld_input_section *is = &isecs.v[o->isec0 + w[k]];
+				ld_input_section *is = &ctx->inputs.sections.v[o->first_input_section + w[k]];
 
 				is->kind = LD_SECTION_KIND_NONE;
 				is->dropped = true;
@@ -73,50 +73,50 @@ static void ld_comdat_groups_deduplicate(void)
 
 static void ld_object_symbols_resolve(void *arg, size_t i)
 {
-	(void)arg;
-	ld_object *o = objs.v[i];
-	if (!o->buf)
+	struct ld_context *ctx = arg;
+	ld_object *o = ctx->inputs.objects.v[i];
+	if (!o->file_bytes)
 		return;
-	for (uint32_t s = o->firstg; s < o->nsym; s++) {
-		const elf_symbol *y = &o->sym[s];
+	for (uint32_t s = o->first_global_index; s < o->symbol_count; s++) {
+		const elf_symbol *y = &o->symbols[s];
 		uint8_t bind = y->st_info >> 4;
 		if (bind == STB_LOCAL) {
-			ld_error_report("%s: local symbol after sh_info", o->path);
+			ld_error_report(ctx, "%s: local symbol after sh_info", o->path);
 			continue;
 		}
-		uint32_t g = ld_global_name_intern(o->str + y->st_name);
-		o->gs[s - o->firstg] = g;
-		ld_global_symbol *gs = &gsyms[g];
-		uint64_t k = ld_symbol_key(o->idx, s);
-		ld_atomic_u64_min(&gs->first, k);
-		ld_atomic_u8_min(&gs->visrank, ld_visibility_rank(y->st_other));
-		if (y->st_shndx == SHN_COMMON && opt.relocatable)
-			ld_error_report("%s: common symbol %s not supported with -r", o->path, o->str + y->st_name);
+		uint32_t g = ld_global_name_intern(ctx, o->string_table + y->st_name);
+		o->global_slots[s - o->first_global_index] = g;
+		ld_global_symbol *gs = &ctx->symbols.globals[g];
+		uint64_t k = ld_symbol_key(o->index, s);
+		ld_atomic_u64_min(&gs->first_occurrence, k);
+		ld_atomic_u8_min(&gs->visibility_rank, ld_visibility_rank(y->st_other));
+		if (y->st_shndx == SHN_COMMON && ctx->options.relocatable)
+			ld_error_report(ctx, "%s: common symbol %s not supported with -r", o->path, o->string_table + y->st_name);
 		else if (y->st_shndx == SHN_UNDEF) {
-			if (bind != STB_WEAK && !atomic_load_explicit(&gs->strongref, memory_order_relaxed))
-				atomic_store_explicit(&gs->strongref, 1, memory_order_relaxed);
+			if (bind != STB_WEAK && !atomic_load_explicit(&gs->strong_reference, memory_order_relaxed))
+				atomic_store_explicit(&gs->strong_reference, 1, memory_order_relaxed);
 		} else
 			/* lld Symbol::compare: a strong definition beats a common one, which beats a weak one */
-			ld_atomic_u64_min(&gs->def, (uint64_t)(bind == STB_WEAK ? 2 : y->st_shndx == SHN_COMMON) << 62 | k);
+			ld_atomic_u64_min(&gs->definition, (uint64_t)(bind == STB_WEAK ? 2 : y->st_shndx == SHN_COMMON) << 62 | k);
 	}
 }
 
 static void ld_duplicate_symbols_check(void *arg, size_t i)
 {
-	(void)arg;
-	ld_object *o = objs.v[i];
-	if (!o->buf)
+	struct ld_context *ctx = arg;
+	ld_object *o = ctx->inputs.objects.v[i];
+	if (!o->file_bytes)
 		return;
-	for (uint32_t s = o->firstg; s < o->nsym; s++) {
-		const elf_symbol *y = &o->sym[s];
+	for (uint32_t s = o->first_global_index; s < o->symbol_count; s++) {
+		const elf_symbol *y = &o->symbols[s];
 		if (y->st_shndx == SHN_UNDEF || y->st_shndx == SHN_COMMON || (y->st_info >> 4) == STB_WEAK)
 			continue;
-		ld_global_symbol *g = &gsyms[o->gs[s - o->firstg]];
-		uint64_t d = ld_key_load(&g->def);
-		if ((d >> 62) == 0 && d != ld_symbol_key(o->idx, s)) {
-			ld_object *first = objs.v[(d >> 32) & 0x3fffffff];
-			ld_error_report("duplicate symbol: %s\n>>> defined in %s\n>>> defined in %s",
-			      o->str + y->st_name, first->path, o->path);
+		ld_global_symbol *g = &ctx->symbols.globals[o->global_slots[s - o->first_global_index]];
+		uint64_t d = ld_key_load(&g->definition);
+		if ((d >> 62) == 0 && d != ld_symbol_key(o->index, s)) {
+			ld_object *first = ctx->inputs.objects.v[(d >> 32) & 0x3fffffff];
+			ld_error_report(ctx, "duplicate symbol: %s\n>>> defined in %s\n>>> defined in %s",
+			      o->string_table + y->st_name, first->path, o->path);
 		}
 	}
 }
@@ -124,43 +124,43 @@ static void ld_duplicate_symbols_check(void *arg, size_t i)
 /* fill state/value of every global from its winning definition */
 static void ld_global_symbol_finish(void *arg, size_t i)
 {
-	(void)arg;
-	uint32_t g = gorder.v[i];
-	ld_global_symbol *s = &gsyms[g];
-	s->vis = ld_visibility_from_rank(ld_visibility_load(&s->visrank));
+	struct ld_context *ctx = arg;
+	uint32_t g = ctx->symbols.order.v[i];
+	ld_global_symbol *s = &ctx->symbols.globals[g];
+	s->visibility = ld_visibility_from_rank(ld_visibility_load(&s->visibility_rank));
 	s->thunk = LD_NONE;
-	uint64_t d = ld_key_load(&s->def);
+	uint64_t d = ld_key_load(&s->definition);
 	if (s->state == LD_SYMBOL_STATE_SCRIPT)
 		return;
 	if (d == UINT64_MAX) {
 		s->state = LD_SYMBOL_STATE_UNDEFINED;
-		s->obj = LD_NONE;
+		s->object = LD_NONE;
 		/* weak only if every reference is weak; type from the first one */
-		s->bind = s->strongref ? STB_GLOBAL : STB_WEAK;
-		uint64_t f = ld_key_load(&s->first);
-		if ((f >> 32) < objs.n) {
-			ld_object *o = objs.v[f >> 32];
-			const elf_symbol *y = &o->sym[(uint32_t)f];
+		s->binding = s->strong_reference ? STB_GLOBAL : STB_WEAK;
+		uint64_t f = ld_key_load(&s->first_occurrence);
+		if ((f >> 32) < ctx->inputs.objects.n) {
+			ld_object *o = ctx->inputs.objects.v[f >> 32];
+			const elf_symbol *y = &o->symbols[(uint32_t)f];
 			s->type = y->st_info & 15;
 		} else {
-			s->bind = STB_GLOBAL;
+			s->binding = STB_GLOBAL;
 		}
 		return;
 	}
 	uint32_t oi = (d >> 32) & 0x3fffffff, si = (uint32_t)d;
-	ld_object *o = objs.v[oi];
-	const elf_symbol *y = &o->sym[si];
+	ld_object *o = ctx->inputs.objects.v[oi];
+	const elf_symbol *y = &o->symbols[si];
 	s->state = LD_SYMBOL_STATE_OBJECT;
-	s->obj = oi;
-	s->symidx = si;
-	s->bind = y->st_info >> 4;
+	s->object = oi;
+	s->symbol_index = si;
+	s->binding = y->st_info >> 4;
 	s->type = y->st_info & 15;
 	s->size = y->st_size;
-	s->val = y->st_value;
-	s->sec = y->st_shndx == SHN_ABS || y->st_shndx == SHN_COMMON ? LD_NONE : o->isec0 + y->st_shndx;
+	s->value = y->st_value;
+	s->input_section = y->st_shndx == SHN_ABS || y->st_shndx == SHN_COMMON ? LD_NONE : o->first_input_section + y->st_shndx;
 	s->common = y->st_shndx == SHN_COMMON;
 	if (s->common)
 		s->type = STT_OBJECT;
 	else if (y->st_shndx >= SHN_ABS && y->st_shndx != SHN_ABS)
-		ld_error_report("%s: unsupported section index for %s", o->path, o->str + y->st_name);
+		ld_error_report(ctx, "%s: unsupported section index for %s", o->path, o->string_table + y->st_name);
 }

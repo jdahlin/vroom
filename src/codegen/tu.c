@@ -170,7 +170,7 @@ static void ecx_free(ecx *e, vjob_region *r)
 	wasm_ecx_free(e);
 #endif
 	wk_ecx_free(e);
-	vw_wk_ecx_free(e);
+	virbuild_wk_ecx_free(e);
 }
 
 /* a function the previous round generated, if nothing it asked about has been marked since */
@@ -215,10 +215,10 @@ static void do_item(ecx *e, uint32_t it)
 	if (WASM(c) && c->syms[it].kind == S_FUNC) {
 		wasm_emit_function(e, it);
 	} else if (c->syms[it].kind == S_FUNC && X86(c)) {
-		if (!vw_try(e, it))
+		if (!virbuild_function_try(e, it))
 			wk_function(e, it);
 	} else if (c->syms[it].kind == S_FUNC) {
-		if (!reuse(e, it) && !vw_try(e, it))
+		if (!reuse(e, it) && !virbuild_function_try(e, it))
 			emit_function(e, it);
 	} else {
 		emit_object(e, it);
@@ -471,7 +471,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	E.vstats = o->vir_aid.stats;
 	virbuild_pass_switch_read(&E.vpass, o->optimize.vir ? o->vir_aid.passes : NULL);
 	if (o->optimize.vir && o->vir_aid.functions)
-		vw_function_list_read(&E, o->vir_aid.functions);
+		virbuild_function_list_read(&E, o->vir_aid.functions);
 	E.rstats = getenv("VCC_REC_STATS") != NULL;
 	E.noopt = getenv("VCC_NOOPT") != NULL;
 	/* wasm64: objects from the text, through arch/wasm/as */
@@ -492,7 +492,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 			E.ffacts[s] = FF_BAD;
 		}
 	/* VIR: the functions called once, which its walker inlines whatever their size */
-	if (!WASM(c) && vw_enabled(o))
+	if (!WASM(c) && virbuild_is_enabled(o))
 		E.once = fn_once(c);
 	if (E.once)
 		fn_isize(&E, c, WK_INLINE_VIR);
@@ -750,7 +750,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 				E.print_ns / 1e6, E.walk_ns / 1e6, (unsigned long long)E.nwalk, bytes / 1e6, E.nins * 4 / 1e6 / (t2 - t1));
 		}
 		if (E.vstats && write_out && !*again)	/* (the final round's: objects and text alike) */
-			vw_stats_print(&E);
+			virbuild_statistics_print(&E);
 		vjob_region_release(&er[13], tail.n);
 	}
 	if (E.rstats)

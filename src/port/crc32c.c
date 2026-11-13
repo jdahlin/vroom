@@ -10,10 +10,7 @@
 #include "port/crc32c.h"
 
 #if defined(__x86_64__)
-#if !defined(VCC_BOOTSTRAP_PORTABLE)
-#define CRC_X86_DISPATCH 1
-#include <nmmintrin.h>
-#endif
+#include "port/x86native.h"
 
 static uint32_t crc_byte_soft(uint32_t h, uint8_t b)
 {
@@ -39,34 +36,38 @@ static uint32_t crc_pair_soft(uint32_t h, uint64_t a, uint64_t b)
 	return crc_word_soft(crc_word_soft(h, a), b);
 }
 
-#ifdef CRC_X86_DISPATCH
-__attribute__((target("sse4.2")))
-static uint32_t crc_byte_hw(uint32_t h, uint8_t b) { return _mm_crc32_u8(h, b); }
-__attribute__((target("sse4.2")))
-static uint32_t crc_word_hw(uint32_t h, uint64_t w) { return (uint32_t)_mm_crc32_u64(h, w); }
-__attribute__((target("sse4.2")))
-static uint32_t crc_pair_hw(uint32_t h, uint64_t a, uint64_t b)
+static uint32_t crc_byte_hw(uint32_t h, uint8_t b)
 {
-	return (uint32_t)_mm_crc32_u64(_mm_crc32_u64(h, a), b);
+	__asm__("crc32b %1, %0" : "+r"(h) : "r"(b));
+	return h;
 }
 
-#endif
+static uint32_t crc_word_hw(uint32_t h, uint64_t w)
+{
+	uint64_t crc = h;
+	__asm__("crc32q %1, %0" : "+r"(crc) : "r"(w));
+	return (uint32_t)crc;
+}
+
+static uint32_t crc_pair_hw(uint32_t h, uint64_t a, uint64_t b)
+{
+	return crc_word_hw(crc_word_hw(h, a), b);
+}
 
 /* Safe even if another constructor hashes before our dispatch runs. */
 uint32_t (*vcrc32cb)(uint32_t, uint8_t) = crc_byte_soft;
 uint32_t (*vcrc32cd)(uint32_t, uint64_t) = crc_word_soft;
 uint32_t (*vcrc32c_pair)(uint32_t, uint64_t, uint64_t) = crc_pair_soft;
 
-#ifdef CRC_X86_DISPATCH
 __attribute__((constructor)) static void init_host_crc(void)
 {
 	const char *cap = getenv("VCC_CRC");
-	__builtin_cpu_init();
+	unsigned eax, ebx, ecx, edx;
 	if (cap && !strcmp(cap, "software")) return;
-	if (!__builtin_cpu_supports("sse4.2")) return;
+	x86_native_host_cpuid(NULL, 1, 0, &eax, &ebx, &ecx, &edx);
+	if (!(ecx & (1u << 20))) return;
 	vcrc32cb = crc_byte_hw;
 	vcrc32cd = crc_word_hw;
 	vcrc32c_pair = crc_pair_hw;
 }
-#endif
 #endif

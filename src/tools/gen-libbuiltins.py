@@ -7,20 +7,20 @@ Taken from clang once (no clang at run time): every __builtin_X that clang's
 Builtins.inc marks 'F' (a library function with the __builtin_ prefix), as
 { "__builtin_X", "X", "<clang type string>" }, sorted by name.  vcc declares
 one on first use with that prototype, under the symbol X (frontend/c/library-function.c
-lib_builtin); one whose type string it cannot read stays unknown.
+cc_library_builtin_declare); one whose type string it cannot read stays unknown.
 
 Also libfuncs.inc: every library function clang knows with its header (a
 lowercase 'f', HeaderDesc other than NO_HEADER) as { "X", "header.h",
 "<type string>", gnu }, gnu = 1 for clang's ALL_GNU_LANGUAGES (only under
 -std=gnu*).  A call to an undeclared one is clang's "call to undeclared
 library function 'X' with type T" with the note "include the header <H>"
-(frontend/c/library-function.c lib_func).
+(frontend/c/library-function.c cc_library_function_declare).
 """
 import os, re, sys
 
 src = sys.argv[1] if len(sys.argv) > 1 else '/opt/homebrew/opt/llvm/include/clang/Basic/Builtins.inc'
 out = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'frontend', 'c', 'libbuiltins.inc')
-# the subset of clang's type encoding that frontend/c/library-function.c lb_type reads: only those
+# the subset of clang's type encoding that frontend/c/library-function.c cc_library_signature_type reads: only those
 # entries are written, so the table is also vcc's __has_builtin answer for them
 TYPE = r'(?:[SUIX]*(?:L{0,3}i|[SUI]*[vbcsfzYwPWZ]|Ld|d))(?:\*\d*|[CDR])*'
 SIG = re.compile(rf'^(?:{TYPE})+\.?$')

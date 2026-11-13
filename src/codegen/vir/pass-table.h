@@ -1,5 +1,5 @@
 /*
- * The VIR builder's passes as one table (pass-table.c), in the order vw_emit
+ * The VIR builder's passes as one table (pass-table.c), in the order virbuild_function_emit
  * (pipeline.c) runs them, and -fvir-passes, the switch that times, skips
  * and checks them by name (doc/quality/WORK-vir.md step 2b, SPEC-vir.md 16).
  *
@@ -17,32 +17,32 @@
 
 /* facts about the pre-IR */
 enum {
-	PIR_ORDER = 1,	/* V->order: the reachable blocks, each once (vw_rpo) */
-	PIR_PREDS = 2,	/* V->pr, pred, npred: distinct predecessors that agree with the successors (vw_preds) */
-	PIR_DOMS = 4,	/* dominators: no pass keeps them yet (vw_simplify computes and frees its own) */
+	VIRBUILD_FACT_ORDER = 1,	/* V->order: the reachable blocks, each once (virbuild_block_order_compute) */
+	VIRBUILD_FACT_PREDS = 2,	/* V->pr, pred, npred: distinct predecessors that agree with the successors (virbuild_block_predecessors_compute) */
+	VIRBUILD_FACT_DOMS = 4,	/* dominators: no pass keeps them yet (virbuild_function_simplify computes and frees its own) */
 };
 
 /* flags of a row */
 enum {
-	PASS_REQUIRED = 1,		/* later code relies on it: -fvir-passes cannot leave it out */
-	PASS_THEN_TRIVIAL = 2,		/* when it changed something: vw_trivial to a fixed point */
-	PASS_IF_PREVIOUS_CHANGED = 4,	/* runs only if the last row without this flag ran and changed something */
-	PASS_VECTOR_GATE = 8,		/* under the vectorizer's gate (-fvectorize, -fhoist-loop-constants, -mgeneral-regs-only), which
+	VIRBUILD_PASS_FLAG_REQUIRED = 1,		/* later code relies on it: -fvir-passes cannot leave it out */
+	VIRBUILD_PASS_FLAG_THEN_TRIVIAL = 2,		/* when it changed something: virbuild_parameters_trivial_remove to a fixed point */
+	VIRBUILD_PASS_FLAG_IF_PREVIOUS_CHANGED = 4,	/* runs only if the last row without this flag ran and changed something */
+	VIRBUILD_PASS_FLAG_VECTOR_GATE = 8,		/* under the vectorizer's gate (-fvectorize, -fhoist-loop-constants, -mgeneral-regs-only), which
 					   the pass tests itself */
-	PASS_FIXED_POINT = 16,		/* run again while it changes something (vw_trivial) */
-	PASS_CHANGE_UNKNOWN = 32,	/* returns nothing: its "changed" is not counted */
-	PASS_ON_VIR = 64,		/* works on VIR (V->f), not the pre-IR: checked by vir_verify */
+	VIRBUILD_PASS_FLAG_FIXED_POINT = 16,		/* run again while it changes something (virbuild_parameters_trivial_remove) */
+	VIRBUILD_PASS_FLAG_CHANGE_UNKNOWN = 32,	/* returns nothing: its "changed" is not counted */
+	VIRBUILD_PASS_FLAG_ON_VIR = 64,		/* works on VIR (V->f), not the pre-IR: checked by vir_verify */
 	PASS_OFF_BY_DEFAULT = 128,	/* skipped unless -fvir-passes says +NAME or only=...NAME */
 };
 
 typedef struct virbuild_pass {
 	const char *name;	/* stable; -fvir-passes and the statistics use it */
-	bool (*run)(ecx *e);	/* returns whether it changed anything; a failure is vw_fail */
+	bool (*run)(ecx *e);	/* returns whether it changed anything; a failure is virbuild_fail */
 	uint8_t needs;		/* PIR_*: facts it reads */
 	uint8_t makes;		/* PIR_*: facts it computes */
 	uint8_t keeps;		/* PIR_*: the facts still valid after it; the others are cleared */
 	uint8_t flags;		/* PASS_* */
-	const vir_pass_info *vir;	/* a VIR pass's row (needs PASS_ON_VIR): its registry entry (vir/pass.h), run by
+	const vir_pass_info *vir;	/* a VIR pass's row (needs VIRBUILD_PASS_FLAG_ON_VIR): its registry entry (vir/pass.h), run by
 				   virbuild_pass_vir_run; run is NULL then, and the names agree */
 } virbuild_pass;
 
@@ -57,16 +57,16 @@ VPRIV void virbuild_pass_stats_print(emitter *E);
 /* the rows of virbuild_pass_note that are not passes: the whole build (walk, passes, to-vir,
    canon) and the lowering, so that a pass's share of either can be computed; the
    instructions spent timing the passes inside are taken off */
-#define VIR_PASS_ROW_BUILD(n) (n)
-#define VIR_PASS_ROW_LOWER(n) ((n) + 1)
+#define VIRBUILD_PASS_ROW_BUILD(n) (n)
+#define VIRBUILD_PASS_ROW_LOWER(n) ((n) + 1)
 
 /* pipeline.c */
-VPRIV void vw_seal(ecx *e);
-VPRIV void vw_slot_uses(ecx *e);
-VPRIV bool vw_to_vir(ecx *e);
+VPRIV void virbuild_blocks_seal(ecx *e);
+VPRIV void virbuild_slot_uses_compute(ecx *e);
+VPRIV bool virbuild_function_to_vir(ecx *e);
 
 /* preir-check.c: the pre-IR's invariants (preir.h, quality-vir-build.md section 2) as far as
    the facts in `valid` allow; NULL when they hold, else the first broken one (in buf) */
-VPRIV const char *vw_preir_check(ecx *e, uint32_t valid, char *buf, size_t n);
+VPRIV const char *virbuild_preir_check(ecx *e, uint32_t valid, char *buf, size_t n);
 
 #endif

@@ -178,9 +178,12 @@ Wave 2's tracks:
 
 #### Wave 2, decided by the owner during the wave
 
-- Track G (the linker's context struct and the one linker core) is held by
-  owner, wave 2.  Draft PR #183 (branch `quality/ld-context-1`: the design in
-  `link-context.md` and step 1) stays open and unmerged.
+- Track G (the linker's context struct and the one linker core): released
+  later in the wave.  The link context is done in four PRs (#183 design and
+  step 1, #220 output side, #222 input side, then the context as a parameter):
+  no per-link state is left at file scope, `ld_main` creates one context per
+  link.  Next: the field renames of `rename-ld.tsv`, the part files compiling
+  alone, then WORK-linker steps 3 and 4 (`doc/quality/WORK-linker.md`).
 - Track I (diagnostics as their own module; one option table per tool) is held
   by owner, wave 2, and not started.
 - The field-use mode (track D) stays a plain rename helper; its output is not

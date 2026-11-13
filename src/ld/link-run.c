@@ -1,12 +1,11 @@
 /* ld_link_run(): the passes of one ELF link, in order. */
 
-static int ld_relocatable_link(void);
+static int ld_relocatable_link(struct ld_context *ctx);
 
-static int ld_link_run(int argc, char **argv)
+static int ld_link_run(struct ld_context *ctx, int argc, char **argv)
 {
-	ld_state_reset();
 	ld_thread_count = ld_parallel_default_width();
-	ld_arguments_parse(argc, argv);
+	ld_arguments_parse(ctx, argc, argv);
 	if (atomic_load(&ctx->diagnostics.error_count))
 		return 1;
 #ifdef VLD_MAIN
@@ -19,257 +18,257 @@ static int ld_link_run(int argc, char **argv)
 	ctx->diagnostics.phase_start_time = t0;
 	ctx->diagnostics.phase_start_counters = vperformance_now();
 	ctx->diagnostics.phase_start_faults = ctx->diagnostics.phase_timing ? ld_minor_fault_count() : 0;
-	pic = opt.shared;
+	ctx->relocations.pic = ctx->options.shared;
 
-	ld_inputs_load();
-	ld_phase_time_report("map+parse inputs");
+	ld_inputs_load(ctx);
+	ld_phase_time_report(ctx, "map+parse inputs");
 	if (atomic_load(&ctx->diagnostics.error_count))
 		return 1;
-	ld_global_table_init();
-	if (opt.script) {
+	ld_global_table_init(ctx);
+	if (ctx->options.script) {
 		size_t n;
-		uint8_t *b = ld_file_map(opt.script, &n);
+		uint8_t *b = ld_file_map(ctx, ctx->options.script, &n);
 		if (!b)
 			return 1;
-		ld_script_parse((const char *)b, n);
+		ld_script_parse(ctx, (const char *)b, n);
 		if (atomic_load(&ctx->diagnostics.error_count))
 			return 1;
 	}
-	ld_input_sections_alloc(0);
-	ld_parallel_for(objs.n, ld_input_sections_fill, NULL);
-	ld_comdat_groups_deduplicate();
-	ld_gnu_property_drop();
-	ld_parallel_for(objs.n, ld_object_symbols_resolve, NULL);
-	ld_parallel_for(objs.n, ld_duplicate_symbols_check, NULL);
-	ld_phase_time_report("resolve symbols");
+	ld_input_sections_alloc(ctx, 0);
+	ld_parallel_for(ctx->inputs.objects.n, ld_input_sections_fill, ctx);
+	ld_comdat_groups_deduplicate(ctx);
+	ld_gnu_property_drop(ctx);
+	ld_parallel_for(ctx->inputs.objects.n, ld_object_symbols_resolve, ctx);
+	ld_parallel_for(ctx->inputs.objects.n, ld_duplicate_symbols_check, ctx);
+	ld_phase_time_report(ctx, "resolve symbols");
 	if (atomic_load(&ctx->diagnostics.error_count))
 		return 1;
-	if (opt.relocatable)
-		return ld_relocatable_link();
+	if (ctx->options.relocatable)
+		return ld_relocatable_link(ctx);
 
-	if (opt.stubs) {
-		ld_stubs_collect();
-		if (nstubs) {
-			ld_object *o = ld_stub_object_create(stub_names, nstubs);
-			o->idx = objs.n;
-			VVEC_PUSH(objs, o, ld_region_alloc);
-			ld_input_sections_alloc(o->idx);
-			ld_input_sections_fill(NULL, o->idx);
-			ld_object_symbols_resolve(NULL, o->idx);
-			ld_stub_list_write();
+	if (ctx->options.stubs) {
+		ld_stubs_collect(ctx);
+		if (ctx->symbols.stub_count) {
+			ld_object *o = ld_stub_object_create(ctx, ctx->symbols.stub_names, ctx->symbols.stub_count);
+			o->index = ctx->inputs.objects.n;
+			VVEC_PUSH(ctx->inputs.objects, o, ld_region_alloc);
+			ld_input_sections_alloc(ctx, o->index);
+			ld_input_sections_fill(ctx, o->index);
+			ld_object_symbols_resolve(ctx, o->index);
+			ld_stub_list_write(ctx);
 		}
 	}
-	nobj_real = objs.n;
-	ld_script_symbols_declare();
-	ld_global_order_build();
-	ld_parallel_for(gorder.n, ld_global_symbol_finish_task, NULL);
-	ld_symbol_versions_assign();
-	ld_phase_time_report("script symbols, order");
+	ctx->inputs.real_object_count = ctx->inputs.objects.n;
+	ld_script_symbols_declare(ctx);
+	ld_global_order_build(ctx);
+	ld_parallel_for(ctx->symbols.order.n, ld_global_symbol_finish_task, ctx);
+	ld_symbol_versions_assign(ctx);
+	ld_phase_time_report(ctx, "script symbols, order");
 
-	if (opt.gc && !opt.relocatable)
-		ld_sections_garbage_collect(opt.entry ? opt.entry : entry_name ? entry_name : "_start");
-	ld_common_symbols_replace();
-	ld_synthetic_sections_add();
-	ld_input_sections_assign();
+	if (ctx->options.garbage_collect_sections && !ctx->options.relocatable)
+		ld_sections_garbage_collect(ctx, ctx->options.entry ? ctx->options.entry : ctx->script.entry ? ctx->script.entry : "_start");
+	ld_common_symbols_replace(ctx);
+	ld_synthetic_sections_add(ctx);
+	ld_input_sections_assign(ctx);
 	/* commit sections into their output sections, in order */
-	for (uint32_t c = 0; c < topcmds.n; c++) {
-		if (topcmds.v[c].kind != LD_COMMAND_OUTPUT_SECTION)
+	for (uint32_t c = 0; c < ctx->script.commands.n; c++) {
+		if (ctx->script.commands.v[c].kind != LD_COMMAND_OUTPUT_SECTION)
 			continue;
-		ld_output_section *os = &osecs.v[topcmds.v[c].idx];
-		for (uint32_t k = 0; k < os->cmds.n; k++)
-			if (os->cmds.v[k].kind == LD_COMMAND_INPUT_SECTION_DESCRIPTION) {
-				ld_input_section_description *d = &isds.v[os->cmds.v[k].idx];
-				for (uint32_t s = 0; s < d->secs.n; s++)
-					ld_section_commit(os, &isecs.v[d->secs.v[s]]);
+		ld_output_section *os = &ctx->script.sections.v[ctx->script.commands.v[c].index];
+		for (uint32_t k = 0; k < os->commands.n; k++)
+			if (os->commands.v[k].kind == LD_COMMAND_INPUT_SECTION_DESCRIPTION) {
+				ld_input_section_description *d = &ctx->script.input_descriptions.v[os->commands.v[k].index];
+				for (uint32_t s = 0; s < d->sections.n; s++)
+					ld_section_commit(ctx, os, &ctx->inputs.sections.v[d->sections.v[s]]);
 			}
 	}
-	ld_dynamic_symbol_define();
-	ld_start_stop_symbols_define();
-	ld_parallel_for(gorder.n, ld_symbols_demote, NULL);
-	ld_undefined_symbols_report();
-	ld_phase_time_report("assign sections");
-	ld_merges_finalize();
-	ld_phase_time_report("merge sections");
+	ld_dynamic_symbol_define(ctx);
+	ld_start_stop_symbols_define(ctx);
+	ld_parallel_for(ctx->symbols.order.n, ld_symbols_demote, ctx);
+	ld_undefined_symbols_report(ctx);
+	ld_phase_time_report(ctx, "assign sections");
+	ld_merges_finalize(ctx);
+	ld_phase_time_report(ctx, "merge sections");
 	if (atomic_load(&ctx->diagnostics.error_count))
 		return 1;
 
-	ld_symbol_assignments_process();
-	ld_output_sections_adjust();
-	if (got_isec != LD_NONE)
-		for (uint32_t i = 0; i < objs.n; i++)
-			if (objs.v[i]->buf && objs.v[i]->firstg)
-				objs.v[i]->lgot = calloc(objs.v[i]->firstg, 1);
-	ld_parallel_for(isecs.n, x86_ld ? x64_ld_relocation_scan : a64_ld_relocation_scan, NULL);
+	ld_symbol_assignments_process(ctx);
+	ld_output_sections_adjust(ctx);
+	if (ctx->output.got_section != LD_NONE)
+		for (uint32_t i = 0; i < ctx->inputs.objects.n; i++)
+			if (ctx->inputs.objects.v[i]->file_bytes && ctx->inputs.objects.v[i]->first_global_index)
+				ctx->inputs.objects.v[i]->local_needs_got = calloc(ctx->inputs.objects.v[i]->first_global_index, 1);
+	ld_parallel_for(ctx->inputs.sections.n, ctx->inputs.x86 ? x64_ld_relocation_scan : a64_ld_relocation_scan, ctx);
 	/* .got: one slot per symbol, globals in symbol id order, then the locals by
 	 * file (lld postScanRelocations) */
-	for (uint32_t g = 0, ng = atomic_load(&ngsyms); g < ng; g++)
-		if (atomic_load(&gsyms[g].needgot)) {
-			gsyms[g].gotidx = gotsyms.n;
-			VVEC_PUSH(gotsyms, g, ld_region_alloc);
-			if (pic && got_isec != LD_NONE && !ld_global_symbol_is_absolute(g) && gsyms[g].state != LD_SYMBOL_STATE_UNDEFINED && !gsyms[g].demoted)
-				isecs.v[got_isec].ndyn++;
+	for (uint32_t g = 0, ng = atomic_load(&ctx->symbols.count); g < ng; g++)
+		if (atomic_load(&ctx->symbols.globals[g].needs_got)) {
+			ctx->symbols.globals[g].got_index = ctx->output.got_symbols.n;
+			VVEC_PUSH(ctx->output.got_symbols, g, ld_region_alloc);
+			if (ctx->relocations.pic && ctx->output.got_section != LD_NONE && !ld_global_symbol_is_absolute(ctx, g) && ctx->symbols.globals[g].state != LD_SYMBOL_STATE_UNDEFINED && !ctx->symbols.globals[g].demoted)
+				ctx->inputs.sections.v[ctx->output.got_section].dynamic_relocation_count++;
 		}
-	for (uint32_t i = 0; got_isec != LD_NONE && i < objs.n; i++) {
-		ld_object *o = objs.v[i];
+	for (uint32_t i = 0; ctx->output.got_section != LD_NONE && i < ctx->inputs.objects.n; i++) {
+		ld_object *o = ctx->inputs.objects.v[i];
 
-		for (uint32_t k = 0; o->lgot && k < o->firstg; k++)
-			if (o->lgot[k]) {
-				if (!o->lgotidx)
-					o->lgotidx = ld_region_alloc(o->firstg * sizeof(uint32_t));
-				o->lgotidx[k] = gotsyms.n + gotlocs.n;
-				VVEC_PUSH(gotlocs, ((ld_got_location){i, k}), ld_region_alloc);
-				if (pic && o->sym[k].st_shndx != SHN_ABS)
-					isecs.v[got_isec].ndyn++;
+		for (uint32_t k = 0; o->local_needs_got && k < o->first_global_index; k++)
+			if (o->local_needs_got[k]) {
+				if (!o->local_got_index)
+					o->local_got_index = ld_region_alloc(o->first_global_index * sizeof(uint32_t));
+				o->local_got_index[k] = ctx->output.got_symbols.n + ctx->output.got_locals.n;
+				VVEC_PUSH(ctx->output.got_locals, ((ld_got_location){i, k}), ld_region_alloc);
+				if (ctx->relocations.pic && o->symbols[k].st_shndx != SHN_ABS)
+					ctx->inputs.sections.v[ctx->output.got_section].dynamic_relocation_count++;
 			}
 	}
-	if (got_isec != LD_NONE)
-		isecs.v[got_isec].size = (uint64_t)(gotsyms.n + gotlocs.n) * 8;
-	ndyn = 0;
-	for (uint32_t i = 0; i < isecs.n; i++)
-		ndyn += isecs.v[i].ndyn;
-	if (reladyn_isec != LD_NONE)
-		isecs.v[reladyn_isec].size = ndyn * sizeof(elf_rela);
-	if (reladyn_isec != LD_NONE && !ndyn && ld_input_section_is_live(reladyn_isec)) {
+	if (ctx->output.got_section != LD_NONE)
+		ctx->inputs.sections.v[ctx->output.got_section].size = (uint64_t)(ctx->output.got_symbols.n + ctx->output.got_locals.n) * 8;
+	ctx->output.relative_count = 0;
+	for (uint32_t i = 0; i < ctx->inputs.sections.n; i++)
+		ctx->output.relative_count += ctx->inputs.sections.v[i].dynamic_relocation_count;
+	if (ctx->output.rela_dyn_section != LD_NONE)
+		ctx->inputs.sections.v[ctx->output.rela_dyn_section].size = ctx->output.relative_count * sizeof(elf_rela);
+	if (ctx->output.rela_dyn_section != LD_NONE && !ctx->output.relative_count && ld_input_section_is_live(ctx, ctx->output.rela_dyn_section)) {
 		/* lld drops an empty .rela.dyn (RelocationSection::isNeeded) */
-		ld_input_section_description *d = &isds.v[isecs.v[reladyn_isec].isd];
+		ld_input_section_description *d = &ctx->script.input_descriptions.v[ctx->inputs.sections.v[ctx->output.rela_dyn_section].input_description];
 		uint32_t w = 0;
-		for (uint32_t k = 0; k < d->secs.n; k++)
-			if (d->secs.v[k] != reladyn_isec)
-				d->secs.v[w++] = d->secs.v[k];
-		d->secs.n = w;
-		isecs.v[reladyn_isec].osec = LD_NONE;
-		ld_output_sections_adjust();
+		for (uint32_t k = 0; k < d->sections.n; k++)
+			if (d->sections.v[k] != ctx->output.rela_dyn_section)
+				d->sections.v[w++] = d->sections.v[k];
+		d->sections.n = w;
+		ctx->inputs.sections.v[ctx->output.rela_dyn_section].output_section = LD_NONE;
+		ld_output_sections_adjust(ctx);
 	}
-	ld_dynamic_sections_build();
-	ld_phase_time_report("scan relocations");
+	ld_dynamic_sections_build(ctx);
+	ld_phase_time_report(ctx, "scan relocations");
 	if (atomic_load(&ctx->diagnostics.error_count))
 		return 1;
 
 	/* room for thunk sections without moving isecs */
-	if (isecs.cap < isecs.n + 4096) {
-		ld_input_section *nv = ld_region_alloc((size_t)(isecs.n + 4096) * sizeof(ld_input_section));
-		memcpy(nv, isecs.v, isecs.n * sizeof(ld_input_section));
-		isecs.v = nv;
-		isecs.cap = isecs.n + 4096;
+	if (ctx->inputs.sections.cap < ctx->inputs.sections.n + 4096) {
+		ld_input_section *nv = ld_region_alloc((size_t)(ctx->inputs.sections.n + 4096) * sizeof(ld_input_section));
+		memcpy(nv, ctx->inputs.sections.v, ctx->inputs.sections.n * sizeof(ld_input_section));
+		ctx->inputs.sections.v = nv;
+		ctx->inputs.sections.cap = ctx->inputs.sections.n + 4096;
 	}
 	/* output sections in header order (live ones, script order) */
 	ctx->layout.output_sections.n = 0;
-	for (uint32_t c = 0; c < topcmds.n; c++)
-		if (topcmds.v[c].kind == LD_COMMAND_OUTPUT_SECTION && osecs.v[topcmds.v[c].idx].live) {
-			VVEC_PUSH(ctx->layout.output_sections, topcmds.v[c].idx, ld_region_alloc);
-			osecs.v[topcmds.v[c].idx].shidx = ctx->layout.output_sections.n;
+	for (uint32_t c = 0; c < ctx->script.commands.n; c++)
+		if (ctx->script.commands.v[c].kind == LD_COMMAND_OUTPUT_SECTION && ctx->script.sections.v[ctx->script.commands.v[c].index].live) {
+			VVEC_PUSH(ctx->layout.output_sections, ctx->script.commands.v[c].index, ld_region_alloc);
+			ctx->script.sections.v[ctx->script.commands.v[c].index].section_header_index = ctx->layout.output_sections.n;
 		}
 
-	ld_addresses_assign();
+	ld_addresses_assign(ctx);
 	int pass = 0;
 	for (;;) {
-		bool changed = a64_ld_thunks_create(pass);
+		bool changed = a64_ld_thunks_create(ctx, pass);
 		pass++;
 		if (changed && pass >= 30) {
-			ld_error_report("address assignment did not converge");
+			ld_error_report(ctx, "address assignment did not converge");
 			break;
 		}
-		bool chg2 = ld_addresses_assign();
+		bool chg2 = ld_addresses_assign(ctx);
 		if (!changed && !chg2)
 			break;
 	}
 	ctx->layout.in_layout = true;
-	ld_addresses_assign();
+	ld_addresses_assign(ctx);
 	ctx->layout.in_layout = false;
-	for (uint32_t i = 0; i < stop_syms.n; i++)
-		gsyms[stop_syms.v[i]].ev.val = osecs.v[gsyms[stop_syms.v[i]].ev.idx].size;
-	for (uint32_t i = 0; i < recorded.n; i++)
-		ld_error_report("%s", recorded.v[i]);
-	for (uint32_t i = 0; i < assert_fail.n; i++)
-		ld_error_report("%s", assert_fail.v[i]);
-	ld_phase_time_report("layout");
+	for (uint32_t i = 0; i < ctx->symbols.stop_symbols.n; i++)
+		ctx->symbols.globals[ctx->symbols.stop_symbols.v[i]].expression_value.value = ctx->script.sections.v[ctx->symbols.globals[ctx->symbols.stop_symbols.v[i]].expression_value.index].size;
+	for (uint32_t i = 0; i < ctx->script.address_errors.n; i++)
+		ld_error_report(ctx, "%s", ctx->script.address_errors.v[i]);
+	for (uint32_t i = 0; i < ctx->script.assert_failures.n; i++)
+		ld_error_report(ctx, "%s", ctx->script.assert_failures.v[i]);
+	ld_phase_time_report(ctx, "layout");
 	if (atomic_load(&ctx->diagnostics.error_count))
 		return 1;
 
 	/* drop empty thunk sections (none are kept by construction) */
-	if (have_phdrs) {
-		ld_script_program_headers_create();
+	if (ctx->script.has_phdrs) {
+		ld_script_program_headers_create(ctx);
 	} else {
-		ld_program_headers_create();
-		ld_program_headers_finish();
+		ld_program_headers_create(ctx);
+		ld_program_headers_finish(ctx);
 	}
 	/* symtab and shstrtab sizes are needed before file offsets */
-	ld_section_name_table_build();
-	ld_symbol_table_build();
-	ld_dynamic_section_links_set();
+	ld_section_name_table_build(ctx);
+	ld_symbol_table_build(ctx);
+	ld_dynamic_section_links_set(ctx);
 	{
-		ld_output_section *os = &osecs.v[ld_input_section_output_section(symtab_isec)];
-		os->link = osecs.v[ld_input_section_output_section(strtab_isec)].shidx;
-		os->info = nlocal_out;
-		os->entsize = sizeof(elf_symbol);
+		ld_output_section *os = &ctx->script.sections.v[ld_input_section_output_section(ctx, ctx->output.symtab_section)];
+		os->link = ctx->script.sections.v[ld_input_section_output_section(ctx, ctx->output.strtab_section)].section_header_index;
+		os->info = ctx->symbol_table.local_count;
+		os->entry_size = sizeof(elf_symbol);
 	}
 	/* sizes of the non-alloc synthetic sections changed: re-run layout of them */
 	for (uint32_t i = 0; i < ctx->layout.output_sections.n; i++) {
-		ld_output_section *os = &osecs.v[ctx->layout.output_sections.v[i]];
+		ld_output_section *os = &ctx->script.sections.v[ctx->layout.output_sections.v[i]];
 		if (os->flags & SHF_ALLOC)
 			continue;
 		bool dummy = false;
 		uint64_t d = ctx->layout.dot;
 		ctx->layout.dot = 0;
-		ld_output_section_offsets_assign(ctx->layout.output_sections.v[i], &dummy);
+		ld_output_section_offsets_assign(ctx, ctx->layout.output_sections.v[i], &dummy);
 		ctx->layout.dot = d;
 	}
-	ld_file_offsets_assign();
-	ld_phase_time_report("phdrs, symtab sizes, offsets");
+	ld_file_offsets_assign(ctx);
+	ld_phase_time_report(ctx, "phdrs, symtab sizes, offsets");
 
-	out = ld_region_large_alloc(ctx->layout.file_size);
+	ctx->output.image = ld_region_large_alloc(ctx->layout.file_size);
 	/* RELATIVE relocations: per section, in address order */
-	if (reladyn_isec != LD_NONE && ndyn) {
+	if (ctx->output.rela_dyn_section != LD_NONE && ctx->output.relative_count) {
 		VVEC(uint32_t) dl = {0};
-		for (uint32_t i = 0; i < isecs.n; i++)
-			if (isecs.v[i].ndyn)
+		for (uint32_t i = 0; i < ctx->inputs.sections.n; i++)
+			if (ctx->inputs.sections.v[i].dynamic_relocation_count)
 				VVEC_PUSH(dl, i, ld_region_alloc);
-		qsort(dl.v, dl.n, sizeof(uint32_t), ld_dynamic_symbol_cmp);
+		ld_section_ids_sort(ctx, dl.v, dl.n, LD_SECTION_ORDER_ADDRESS);
 		uint32_t at = 0;
 		for (uint32_t i = 0; i < dl.n; i++) {
-			isecs.v[dl.v[i]].dyn0 = at;
-			at += isecs.v[dl.v[i]].ndyn;
+			ctx->inputs.sections.v[dl.v[i]].first_dynamic_relocation = at;
+			at += ctx->inputs.sections.v[dl.v[i]].dynamic_relocation_count;
 		}
 		/* built in place in the output image */
-		reladyn_buf = (elf_rela *)(void *)(out + osecs.v[ld_input_section_output_section(reladyn_isec)].offset +
-					       isecs.v[reladyn_isec].off);
+		ctx->relocations.rela_dyn_buffer = (elf_rela *)(void *)(ctx->output.image + ctx->script.sections.v[ld_input_section_output_section(ctx, ctx->output.rela_dyn_section)].offset +
+					       ctx->inputs.sections.v[ctx->output.rela_dyn_section].offset);
 	}
-	wjobs.n = 0;
-	for (uint32_t c = 0; c < topcmds.n; c++) {
-		if (topcmds.v[c].kind != LD_COMMAND_OUTPUT_SECTION || !osecs.v[topcmds.v[c].idx].live)
+	ctx->output.write_jobs.n = 0;
+	for (uint32_t c = 0; c < ctx->script.commands.n; c++) {
+		if (ctx->script.commands.v[c].kind != LD_COMMAND_OUTPUT_SECTION || !ctx->script.sections.v[ctx->script.commands.v[c].index].live)
 			continue;
-		ld_output_section *os = &osecs.v[topcmds.v[c].idx];
-		for (uint32_t k = 0; k < os->cmds.n; k++)
-			if (os->cmds.v[k].kind == LD_COMMAND_INPUT_SECTION_DESCRIPTION) {
-				ld_input_section_description *d = &isds.v[os->cmds.v[k].idx];
-				for (uint32_t s = 0; s < d->secs.n; s++)
-					VVEC_PUSH(wjobs, d->secs.v[s], ld_region_alloc);
+		ld_output_section *os = &ctx->script.sections.v[ctx->script.commands.v[c].index];
+		for (uint32_t k = 0; k < os->commands.n; k++)
+			if (os->commands.v[k].kind == LD_COMMAND_INPUT_SECTION_DESCRIPTION) {
+				ld_input_section_description *d = &ctx->script.input_descriptions.v[os->commands.v[k].index];
+				for (uint32_t s = 0; s < d->sections.n; s++)
+					VVEC_PUSH(ctx->output.write_jobs, d->sections.v[s], ld_region_alloc);
 			}
 	}
-	ld_final_addresses_compute();
-	ld_gap_fills_write();
-	ld_parallel_for(wjobs.n, ld_input_section_write, NULL);
-	ld_dynamic_sections_write();
-	ld_eh_frame_header_write();
-	ld_phase_time_report("copy + relocate");
-	ld_symbol_table_fill();
-	ld_synthetic_sections_write();
-	ld_headers_write();
-	ld_phase_time_report("symtab, headers");
+	ld_final_addresses_compute(ctx);
+	ld_gap_fills_write(ctx);
+	ld_parallel_for(ctx->output.write_jobs.n, ld_input_section_write, ctx);
+	ld_dynamic_sections_write(ctx);
+	ld_eh_frame_header_write(ctx);
+	ld_phase_time_report(ctx, "copy + relocate");
+	ld_symbol_table_fill(ctx);
+	ld_synthetic_sections_write(ctx);
+	ld_headers_write(ctx);
+	ld_phase_time_report(ctx, "symtab, headers");
 	if (atomic_load(&ctx->diagnostics.error_count))
 		return 1;
-	ld_build_id_write();
-	ld_phase_time_report("build id");
-	int rc = ld_output_file_write();
-	ld_phase_time_report("write");
+	ld_build_id_write(ctx);
+	ld_phase_time_report(ctx, "build id");
+	int rc = ld_output_file_write(ctx);
+	ld_phase_time_report(ctx, "write");
 	if (ctx->diagnostics.phase_timing)
 		fprintf(ctx->diagnostics.error_stream, "  %-28s %7.2f ms (%u objects, %u sections, %u globals, %llu MB out, %d threads)\n",
-			"total", (ld_clock_now() - t0) * 1e3, objs.n, isecs.n, gorder.n,
+			"total", (ld_clock_now() - t0) * 1e3, ctx->inputs.objects.n, ctx->inputs.sections.n, ctx->symbols.order.n,
 			(unsigned long long)(ctx->layout.file_size >> 20), ld_thread_count);
-	ld_region_unmap(out, ctx->layout.file_size);
-	for (uint32_t i = 0; i < objs.n; i++)
-		if (objs.v[i]->mapped && objs.v[i]->buf)
-			ld_region_unmap(objs.v[i]->buf, objs.v[i]->size);
-	ld_global_table_free();
+	ld_region_unmap(ctx->output.image, ctx->layout.file_size);
+	for (uint32_t i = 0; i < ctx->inputs.objects.n; i++)
+		if (ctx->inputs.objects.v[i]->mapped && ctx->inputs.objects.v[i]->file_bytes)
+			ld_region_unmap(ctx->inputs.objects.v[i]->file_bytes, ctx->inputs.objects.v[i]->size);
+	ld_global_table_free(ctx);
 	return rc || atomic_load(&ctx->diagnostics.error_count) ? 1 : 0;
 }

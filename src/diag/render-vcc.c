@@ -99,12 +99,12 @@ static int diag_snippet_line_compare(const void *a, const void *b)
 /* a range's mark: in the file of e, else none */
 static bool mk(const pp_file_entry *e, uint32_t b, uint32_t en, char ch, const char *label, mark *m)
 {
-	const char *s = e->f->src;
-	uint32_t size = e->f->size;
+	const char *s = e->lex_file->src;
+	uint32_t size = e->lex_file->size;
 
-	if (b < e->base || en < b || b - e->base > size)
+	if (b < e->location_base || en < b || b - e->location_base > size)
 		return false;
-	b -= e->base, en -= e->base;
+	b -= e->location_base, en -= e->location_base;
 	if (en > size)
 		en = size;
 	if (en == b)
@@ -119,17 +119,17 @@ static bool mk(const pp_file_entry *e, uint32_t b, uint32_t en, char ch, const c
 /* a note that can fold into its record's snippet: one place in the same file, near */
 static bool foldable(const pp_file_entry *e, const diag_record *k, uint32_t pls)
 {
-	const char *s = e->f->src;
+	const char *s = e->lex_file->src;
 	uint32_t off, ls;
 
-	if (k->level != DIAG_LEVEL_NOTE || k->nfix || k->help || k->kids || k->loc == UINT32_MAX || k->loc < e->base ||
-	    k->loc - e->base >= e->f->size || (k->id && !strcmp(k->id, "note_macro_expansion_here")))
+	if (k->level != DIAG_LEVEL_NOTE || k->nfix || k->help || k->kids || k->loc == UINT32_MAX || k->loc < e->location_base ||
+	    k->loc - e->location_base >= e->lex_file->size || (k->id && !strcmp(k->id, "note_macro_expansion_here")))
 		return false;	/* (a macro's body is not this code: its own snippet) */
-	off = k->loc - e->base;
+	off = k->loc - e->location_base;
 	ls = lstart(s, off);
 	for (uint32_t i = 0; i < k->nspan; i++)
-		if (k->span[i].b < e->base || k->span[i].e < k->span[i].b || k->span[i].e - e->base > e->f->size ||
-		    lstart(s, k->span[i].b - e->base) != ls || k->span[i].label)
+		if (k->span[i].b < e->location_base || k->span[i].e < k->span[i].b || k->span[i].e - e->location_base > e->lex_file->size ||
+		    lstart(s, k->span[i].b - e->location_base) != ls || k->span[i].label)
 			return false;
 	return (ls <= pls ? diag_lines_count(s, ls, pls) : diag_lines_count(s, pls, ls)) <= DIAG_CONTEXT_LINES;
 }
@@ -140,21 +140,21 @@ static void diag_gutter_render(pp *p, vbuffer *b, uint32_t width, const char *nu
 
 	diag_text_char_repeat(b, ' ', (int)(width - nd + 1));
 	vbuffer_string_append(b, num);
-	vbuffer_string_append(b, p->o->diag_unicode ? " \xe2\x94\x82 " : " | ");
+	vbuffer_string_append(b, p->options->diag_unicode ? " \xe2\x94\x82 " : " | ");
 }
 
 static void bar(pp *p, vbuffer *b, uint32_t width)
 {
 	diag_text_char_repeat(b, ' ', (int)width + 2);
-	vbuffer_string_append(b, p->o->diag_unicode ? "\xe2\x94\x82 " : "| ");
+	vbuffer_string_append(b, p->options->diag_unicode ? "\xe2\x94\x82 " : "| ");
 }
 
 /* one source line with its marks, labels and fix-its */
 static void diag_vcc_snippet_line_render(pp *p, vbuffer *b, const pp_file_entry *e, const diag_record *d, const mark *m, int nm, uint32_t ls,
 		     uint32_t width)
 {
-	const char *s = e->f->src;
-	uint32_t size = e->f->size, le = lend(s, size, ls), lw = diag_columns_width(s, ls, le, 0) + 1;
+	const char *s = e->lex_file->src;
+	uint32_t size = e->lex_file->size, le = lend(s, size, ls), lw = diag_columns_width(s, ls, le, 0) + 1;
 	char num[16], *row;
 	int nlab = 0, lab[DIAG_MARKS_MAX];
 	uint32_t anc[DIAG_MARKS_MAX], maxc0 = 0;
@@ -163,7 +163,7 @@ static void diag_vcc_snippet_line_render(pp *p, vbuffer *b, const pp_file_entry 
 	uint32_t rn;
 	bool inl;
 
-	snprintf(num, sizeof(num), "%u", pp_location_line(p, e->base + ls));
+	snprintf(num, sizeof(num), "%u", pp_location_line(p, e->location_base + ls));
 	diag_gutter_render(p, b, width, num);
 	for (uint32_t i = ls, col = 0; i < le; i++) {
 		if (s[i] == '\t') {
@@ -219,10 +219,10 @@ static void diag_vcc_snippet_line_render(pp *p, vbuffer *b, const pp_file_entry 
 	for (uint32_t i = 0; i < d->nfix; i++) {
 		uint32_t fb = d->fix[i].b, c0;
 
-		if (fb < e->base || fb - e->base < ls || fb - e->base > le || !*d->fix[i].s)	/* a removal: no text line */
+		if (fb < e->location_base || fb - e->location_base < ls || fb - e->location_base > le || !*d->fix[i].s)	/* a removal: no text line */
 			continue;
-		c0 = diag_columns_width(s, ls, fb - e->base, 0);
-		if (c0 > rn && c0 <= lw && d->fix[i].e == fb && diag_snippet_is_padded_at(s, ls, le, fb - e->base))
+		c0 = diag_columns_width(s, ls, fb - e->location_base, 0);
+		if (c0 > rn && c0 <= lw && d->fix[i].e == fb && diag_snippet_is_padded_at(s, ls, le, fb - e->location_base))
 			rn = c0;
 		anyfix = true;
 	}
@@ -231,7 +231,7 @@ static void diag_vcc_snippet_line_render(pp *p, vbuffer *b, const pp_file_entry 
 		return;
 	}
 	bar(p, b, width);
-	if (p->color)
+	if (p->diagnostic_color)
 		vbuffer_string_append(b, DIAG_COLOR_MARK);
 	vbuffer_append(b, row, rn);
 	inl = nlab && rn > 0 && anc[0] >= maxc0;
@@ -239,12 +239,12 @@ static void diag_vcc_snippet_line_render(pp *p, vbuffer *b, const pp_file_entry 
 		/* the rightmost label after the marks, when its mark is the rightmost */
 		const mark *x = &m[lab[0]];
 
-		if (p->color && x->ch == '-')
+		if (p->diagnostic_color && x->ch == '-')
 			vbuffer_string_append(b, DIAG_COLOR_NOTE);
 		vbuffer_string_append(b, " ");
 		vbuffer_string_append(b, x->label);
 	}
-	if (p->color)
+	if (p->diagnostic_color)
 		vbuffer_string_append(b, DIAG_COLOR_RESET);
 	vbuffer_string_append(b, "\n");
 	/* the others below, rightmost first: a line of '|' and the label's own line */
@@ -263,14 +263,14 @@ static void diag_vcc_snippet_line_render(pp *p, vbuffer *b, const pp_file_entry 
 					vbuffer_string_append(&r, m[lab[j]].label);
 					break;
 				}
-				vbuffer_string_append(&r, p->o->diag_unicode ? "\xe2\x94\x82" : "|");
+				vbuffer_string_append(&r, p->options->diag_unicode ? "\xe2\x94\x82" : "|");
 				col = c + 1;
 			}
 			bar(p, b, width);
-			if (p->color)
+			if (p->diagnostic_color)
 				vbuffer_string_append(b, m[lab[k]].ch == '-' ? DIAG_COLOR_NOTE : DIAG_COLOR_MARK);
 			vbuffer_append(b, r.p, r.n);
-			if (p->color)
+			if (p->diagnostic_color)
 				vbuffer_string_append(b, DIAG_COLOR_RESET);
 			vbuffer_string_append(b, "\n");
 			free(r.p);
@@ -280,9 +280,9 @@ static void diag_vcc_snippet_line_render(pp *p, vbuffer *b, const pp_file_entry 
 	for (uint32_t i = 0; i < d->nfix; i++) {
 		uint32_t fb = d->fix[i].b, c0, have;
 
-		if (fb < e->base || fb - e->base < ls || fb - e->base > le || !*d->fix[i].s)
+		if (fb < e->location_base || fb - e->location_base < ls || fb - e->location_base > le || !*d->fix[i].s)
 			continue;
-		c0 = diag_columns_width(s, ls, fb - e->base, 0);
+		c0 = diag_columns_width(s, ls, fb - e->location_base, 0);
 		have = (uint32_t)fl.n;
 		if (c0 < have)
 			c0 = have;
@@ -291,10 +291,10 @@ static void diag_vcc_snippet_line_render(pp *p, vbuffer *b, const pp_file_entry 
 	}
 	if (anyfix) {
 		bar(p, b, width);
-		if (p->color)
+		if (p->diagnostic_color)
 			vbuffer_string_append(b, DIAG_COLOR_FIXIT);
 		vbuffer_append(b, fl.p, fl.n);
-		if (p->color)
+		if (p->diagnostic_color)
 			vbuffer_string_append(b, DIAG_COLOR_RESET);
 		vbuffer_string_append(b, "\n");
 	}
@@ -305,8 +305,8 @@ static void diag_vcc_snippet_line_render(pp *p, vbuffer *b, const pp_file_entry 
 /* the snippet of d (in file e) with the notes in fold[] as labels */
 static void diag_vcc_snippet_render(pp *p, vbuffer *b, const pp_file_entry *e, const diag_record *d, diag_record *const *fold, int nfold)
 {
-	const char *s = e->f->src;
-	uint32_t size = e->f->size, off = d->loc - e->base, pls = lstart(s, off);
+	const char *s = e->lex_file->src;
+	uint32_t size = e->lex_file->size, off = d->loc - e->location_base, pls = lstart(s, off);
 	mark m[DIAG_MARKS_MAX];
 	uint32_t ln[DIAG_SNIPPET_LINES_MAX], width, maxl = 0;
 	int nm = 0, n = 0;
@@ -319,11 +319,11 @@ static void diag_vcc_snippet_render(pp *p, vbuffer *b, const pp_file_entry *e, c
 	for (uint32_t i = 0; i < d->nfix && nm < DIAG_MARKS_MAX; i++) {	/* a fix-it's replaced range, blanks trimmed */
 		uint32_t rb = d->fix[i].b, re = d->fix[i].e;
 
-		if (rb < e->base || re <= rb || re - e->base > size)
+		if (rb < e->location_base || re <= rb || re - e->location_base > size)
 			continue;
-		while (rb < re && (s[rb - e->base] == ' ' || s[rb - e->base] == '\t'))
+		while (rb < re && (s[rb - e->location_base] == ' ' || s[rb - e->location_base] == '\t'))
 			rb++;
-		while (re > rb && (s[re - 1 - e->base] == ' ' || s[re - 1 - e->base] == '\t'))
+		while (re > rb && (s[re - 1 - e->location_base] == ' ' || s[re - 1 - e->location_base] == '\t'))
 			re--;
 		if (re > rb && mk(e, rb, re, '~', NULL, &m[nm]))
 			m[nm].pri = 1, nm++;
@@ -352,7 +352,7 @@ static void diag_vcc_snippet_render(pp *p, vbuffer *b, const pp_file_entry *e, c
 	}
 	qsort(ln, (size_t)n, sizeof(ln[0]), diag_snippet_line_compare);
 	for (int i = 0; i < n; i++) {
-		uint32_t l = pp_location_line(p, e->base + ln[i]);
+		uint32_t l = pp_location_line(p, e->location_base + ln[i]);
 
 		if (l > maxl)
 			maxl = l;
@@ -394,10 +394,10 @@ static void diag_vcc_snippet_render(pp *p, vbuffer *b, const pp_file_entry *e, c
 		uint32_t fo, fl = 0;
 		bool shown = false;
 
-		if (f->b != f->e || f->b < e->base || f->b - e->base > size || !(fl = (uint32_t)strlen(f->s)) ||
-		    f->s[fl - 1] != '\n' || memchr(f->s, '\n', fl - 1) || lstart(s, f->b - e->base) != f->b - e->base)
+		if (f->b != f->e || f->b < e->location_base || f->b - e->location_base > size || !(fl = (uint32_t)strlen(f->s)) ||
+		    f->s[fl - 1] != '\n' || memchr(f->s, '\n', fl - 1) || lstart(s, f->b - e->location_base) != f->b - e->location_base)
 			continue;
-		fo = f->b - e->base;
+		fo = f->b - e->location_base;
 		for (int j = 0; j < n; j++)
 			shown |= ln[j] == fo;
 		if (shown)
@@ -406,10 +406,10 @@ static void diag_vcc_snippet_render(pp *p, vbuffer *b, const pp_file_entry *e, c
 		diag_text_char_repeat(b, ' ', (int)width - (int)strlen(num));
 		vbuffer_string_append(b, num);
 		vbuffer_string_append(b, " + ");
-		if (p->color)
+		if (p->diagnostic_color)
 			vbuffer_string_append(b, DIAG_COLOR_FIXIT);
 		vbuffer_append(b, f->s, fl - 1);
-		if (p->color)
+		if (p->diagnostic_color)
 			vbuffer_string_append(b, DIAG_COLOR_RESET);
 		vbuffer_string_append(b, "\n");
 	}
@@ -459,7 +459,7 @@ static void diag_vcc_record_render(pp *p, vbuffer *b, diag_record *top)
 	int nfold = 0;
 
 	if (diag_head_render(p, b, top, &e)) {
-		uint32_t pls = lstart(e->f->src, top->loc - e->base);
+		uint32_t pls = lstart(e->lex_file->src, top->loc - e->location_base);
 
 		for (diag_record *k = top->kids; k && nfold < DIAG_MARKS_MAX; k = k->next)
 			if (!k->emitted && foldable(e, k, pls))
@@ -496,7 +496,7 @@ static void diag_vcc_record_render(pp *p, vbuffer *b, diag_record *top)
 
 VPRIV void diag_vcc_flush(pp *p)
 {
-	int fd = p->o->errfd ? p->o->errfd : 2;
+	int fd = p->options->errfd ? p->options->errfd : 2;
 	diag_record *d = p->diagnostic_pending_text;
 	vbuffer b = { 0 };
 
@@ -512,7 +512,7 @@ VPRIV void diag_vcc_flush(pp *p)
    marked emitted: JSON and SARIF print no text) */
 VPRIV void diag_record_render_plain(pp *p, vbuffer *b, diag_record *d)
 {
-	if (p->o->diag_style == DIAG_STYLE_VCC) {
+	if (p->options->diag_style == DIAG_STYLE_VCC) {
 		diag_vcc_record_render(p, b, d);
 		d->emitted = 0;
 		for (diag_record *k = d->kids; k; k = k->next)
@@ -520,7 +520,7 @@ VPRIV void diag_record_render_plain(pp *p, vbuffer *b, diag_record *d)
 		return;
 	}
 	for (diag_record *k = d; k; k = k == d ? d->kids : k->next)
-		if (p->o->diag_style == DIAG_STYLE_NARRATED)
+		if (p->options->diag_style == DIAG_STYLE_NARRATED)
 			diag_narrated_record_render(p, b, k);
 		else
 			diag_clang_record_render(p, b, k);
@@ -529,14 +529,14 @@ VPRIV void diag_record_render_plain(pp *p, vbuffer *b, diag_record *d)
 /* d and its notes in the vcc style with colour codes, whatever the text style (the HTML page) */
 VPRIV void diag_record_render_color(pp *p, vbuffer *b, diag_record *d)
 {
-	int color = p->color;
+	int color = p->diagnostic_color;
 
 	d->emitted = 0;	/* (the text output has printed them) */
 	for (diag_record *k = d->kids; k; k = k->next)
 		k->emitted = 0;
-	p->color = 1;
+	p->diagnostic_color = 1;
 	diag_vcc_record_render(p, b, d);
-	p->color = color;
+	p->diagnostic_color = color;
 	d->emitted = 0;
 	for (diag_record *k = d->kids; k; k = k->next)
 		k->emitted = 0;

@@ -2,15 +2,15 @@
  * Why the VIR path gives up on a function (VIR-MIGRATION.md, gate G1).
  *
  * Every bail-out of the builder (codegen/vir/, not a64.c), of arm64's lowering (a64.c), of
- * x86-64's (arch/x64/codegen/vir.c) and of the driver (try.c) names one of
+ * x86-64's (arch/x64/codegen/vir.c) and of the driver (build-attempt.c) names one of
  * these.  The message is what -fvir-report prints; the name is what the
- * statistic -fvir-stats counts (try.c, tu.c).  Add a reason here and use
- * VIRFAIL(name) at the bail-out; never test the message text.
+ * statistic -fvir-stats counts (build-attempt.c, tu.c).  Add a reason here and use
+ * VIRBUILD_FAILURE(name) at the bail-out; never test the message text.
  */
 #ifndef VCC_CODEGEN_VIR_FAILURE_H
 #define VCC_CODEGEN_VIR_FAILURE_H
 
-#define VIR_FAILURES(X) \
+#define VIRBUILD_FAILURES(X) \
 	X(out_of_memory, "out of memory") \
 	X(variable_read_distance, "VIR: a variable read too many blocks from its definition") \
 	X(value_type_mismatch, "VIR: a value of one type read as another") \
@@ -106,15 +106,15 @@
 	X(x64_lowering_failed, "VIR x86-64: lowering failed")
 
 typedef enum {
-#define X(name, message) VIRFAIL_##name,
-	VIR_FAILURES(X)
+#define X(name, message) VIRBUILD_FAILURE_##name,
+	VIRBUILD_FAILURES(X)
 #undef X
-	VIRFAIL_COUNT
-} vir_failure;
+	VIRBUILD_FAILURE_COUNT
+} virbuild_failure;
 
-typedef struct { const char *name, *message; } vir_failure_info;
+typedef struct { const char *name, *message; } virbuild_failure_info;
 
-/* the table is defined in try.c; the message of a reason, which is what vfail holds */
-#define VIRFAIL(name) (vir_failure_table[VIRFAIL_##name].message)
+/* the table is defined in build-attempt.c; the message of a reason, which is what vfail holds */
+#define VIRBUILD_FAILURE(name) (virbuild_failure_table[VIRBUILD_FAILURE_##name].message)
 
 #endif

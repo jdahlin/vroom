@@ -4,7 +4,7 @@
 const pp_topev *pp_top_events(const pp *p, uint32_t *n)
 {
 	*n = p->top_event_count;
-	return p->tev_full ? NULL : p->top_events ? p->top_events : (const pp_topev *)"";
+	return p->top_events_full ? NULL : p->top_events ? p->top_events : (const pp_topev *)"";
 }
 
 uint64_t pp_token_count(const pp *p)
@@ -25,18 +25,18 @@ bool pp_hit_open_get(const pp *p, uint64_t *b, const void **he, uint32_t *base, 
 	*he = p->open_hits[p->open_hit_count - 1].he;
 	if (base)
 		*base = p->open_hits[p->open_hit_count - 1].base, *ctr = p->open_hits[p->open_hit_count - 1].ctr,
-		*span = ((const pp_header_cache_entry *)*he)->span;
+		*span = ((const pp_header_cache_entry *)*he)->token_span;
 	return true;
 }
 
 uint64_t pp_hit_token_count(const void *he)
 {
-	return ((const pp_header_cache_entry *)he)->total;
+	return ((const pp_header_cache_entry *)he)->total_length;
 }
 
 const pp_hitreg *pp_hit_regions(const pp *p, uint32_t *n)
 {
-	*n = p->ndrh;
+	*n = p->hit_region_count;
 	return p->hit_regions;
 }
 
@@ -44,11 +44,11 @@ const pp_hitreg *pp_hit_regions(const pp *p, uint32_t *n)
 VPRIV void pp_coverage_hit_begin(pp *p, int d0)
 {
 	if (!p->hit_regions)
-		p->hit_regions = varena_alloc(&p->perm, PP_COVERAGE_HIT_MAX * sizeof(pp_hitreg));
-	if (p->depth > d0 && p->cx[d0].type == PP_CONTEXT_SERVED && p->cx[d0].he == p->header_cache_last_entry) {
+		p->hit_regions = varena_alloc(&p->permanent_region, PP_COVERAGE_HIT_MAX * sizeof(pp_hitreg));
+	if (p->context_depth > d0 && p->contexts[d0].type == PP_CONTEXT_SERVED && p->contexts[d0].entry == p->header_cache_last_entry) {
 		if (p->open_hit_count < 64) {
-			p->open_hits[p->open_hit_count].pos = p->tokens_delivered, p->open_hits[p->open_hit_count].depth = p->depth;
-			p->open_hits[p->open_hit_count].base = p->cx[d0].loc, p->open_hits[p->open_hit_count].ctr = p->cx[d0].cbase;
+			p->open_hits[p->open_hit_count].pos = p->tokens_delivered, p->open_hits[p->open_hit_count].depth = p->context_depth;
+			p->open_hits[p->open_hit_count].base = p->contexts[d0].location, p->open_hits[p->open_hit_count].ctr = p->contexts[d0].counter_base;
 			p->open_hits[p->open_hit_count++].he = p->header_cache_last_entry;
 		}
 	}
@@ -57,36 +57,36 @@ VPRIV void pp_coverage_hit_begin(pp *p, int d0)
 /* VCC_DRCOV: the replay context at the top of the stack is done */
 VPRIV void pp_coverage_hit_end(pp *p)
 {
-	if (p->open_hit_count && p->open_hits[p->open_hit_count - 1].depth == p->depth) {
+	if (p->open_hit_count && p->open_hits[p->open_hit_count - 1].depth == p->context_depth) {
 		p->open_hit_count--;
-		if (p->ndrh < PP_COVERAGE_HIT_MAX && p->tokens_delivered > p->open_hits[p->open_hit_count].pos)
-			p->hit_regions[p->ndrh++] = (pp_hitreg){ p->open_hits[p->open_hit_count].pos, p->tokens_delivered, (uint32_t)p->nfile,
+		if (p->hit_region_count < PP_COVERAGE_HIT_MAX && p->tokens_delivered > p->open_hits[p->open_hit_count].pos)
+			p->hit_regions[p->hit_region_count++] = (pp_hitreg){ p->open_hits[p->open_hit_count].pos, p->tokens_delivered, (uint32_t)p->file_context_count,
 						    p->open_hits[p->open_hit_count].he };
 	}
 }
 
 int pp_top_region_skip(pp *p)
 {
-	const pp_topev *s = p->top_event_count && !p->tev_full ? &p->top_events[p->top_event_count - 1] : NULL;
+	const pp_topev *s = p->top_event_count && !p->top_events_full ? &p->top_events[p->top_event_count - 1] : NULL;
 	int d0 = -1;
 
 	if (!s || s->end || !s->hit || s->pos + 1 != p->tokens_delivered)
 		return 0;
-	for (int d = p->depth - 1; d >= 0; d--)
-		if (p->cx[d].type == PP_CONTEXT_SERVED && p->cx[d].top == 2) {
+	for (int d = p->context_depth - 1; d >= 0; d--)
+		if (p->contexts[d].type == PP_CONTEXT_SERVED && p->contexts[d].top_level == 2) {
 			d0 = d;
 			break;
 		}
-	if (d0 < 0 || p->cx[d0].he != s->e)
+	if (d0 < 0 || p->contexts[d0].entry != s->e)
 		return 0;
-	for (int d = d0 + 1; d < p->depth; d++)
-		if (p->cx[d].type != PP_CONTEXT_SERVED)
+	for (int d = d0 + 1; d < p->context_depth; d++)
+		if (p->contexts[d].type != PP_CONTEXT_SERVED)
 			return 0;
-	p->tokens_skipped += p->cx[d0].he->total;
+	p->tokens_skipped += p->contexts[d0].entry->total_length;
 	while (p->open_hit_count && p->open_hits[p->open_hit_count - 1].depth > d0)
 		p->open_hit_count--;	/* (VCC_DRCOV: dropped, not counted as a hit) */
-	p->pend |= p->cx[d0].he->pend_out;
-	p->depth = d0;
+	p->owed_spacing |= p->contexts[d0].entry->owed_spacing_at_end;
+	p->context_depth = d0;
 	p->tokens_delivered = s->pos;
 	pp_top_event_record(p, s->e, 0, 0, 1, 1);
 	return 1;
@@ -103,29 +103,29 @@ int pp_hit_skip(pp *p, int dry)
 	if (!p->open_hit_count || p->open_hits[p->open_hit_count - 1].pos + 1 != p->tokens_delivered)
 		return 0;
 	d0 = p->open_hits[p->open_hit_count - 1].depth - 1;
-	if (d0 < 0 || p->cx[d0].type != PP_CONTEXT_SERVED || p->cx[d0].he != p->open_hits[p->open_hit_count - 1].he)
+	if (d0 < 0 || p->contexts[d0].type != PP_CONTEXT_SERVED || p->contexts[d0].entry != p->open_hits[p->open_hit_count - 1].he)
 		return 0;
-	for (int d = d0 + 1; d < p->depth; d++)
-		if (p->cx[d].type != PP_CONTEXT_SERVED)
+	for (int d = d0 + 1; d < p->context_depth; d++)
+		if (p->contexts[d].type != PP_CONTEXT_SERVED)
 			return 0;
-	if (p->rec.on && !p->cx[d0].norec)
+	if (p->recording.on && !p->contexts[d0].unrecorded)
 		return 0;	/* an enclosing header is being recorded: it needs the tokens */
-	top = p->cx[d0].top;
+	top = p->contexts[d0].top_level;
 	if (top == 2) {
-		const pp_topev *t = p->top_event_count && !p->tev_full ? &p->top_events[p->top_event_count - 1] : NULL;
+		const pp_topev *t = p->top_event_count && !p->top_events_full ? &p->top_events[p->top_event_count - 1] : NULL;
 
-		if (!t || t->end || !t->hit || t->pos + 1 != p->tokens_delivered || t->e != p->cx[d0].he)
+		if (!t || t->end || !t->hit || t->pos + 1 != p->tokens_delivered || t->e != p->contexts[d0].entry)
 			return 0;
 		return dry ? 1 : pp_top_region_skip(p);
 	}
 	if (dry)
 		return 1;
-	p->tokens_skipped += p->cx[d0].he->total;
+	p->tokens_skipped += p->contexts[d0].entry->total_length;
 	while (p->open_hit_count && p->open_hits[p->open_hit_count - 1].depth > d0)
 		p->open_hit_count--;
 	if (top)
-		p->pend |= p->cx[d0].he->pend_out;
-	p->depth = d0;
+		p->owed_spacing |= p->contexts[d0].entry->owed_spacing_at_end;
+	p->context_depth = d0;
 	p->tokens_delivered--;
 	return 1;
 }

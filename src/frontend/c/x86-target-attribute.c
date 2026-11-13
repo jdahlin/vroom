@@ -1,8 +1,8 @@
 /* vcc front end: target("...") attribute parsing for x86-64 */
-#include "ccimpl.h"
+#include "cc-internal.h"
 
 /* Preserve effective function features; parse arch before feature overrides. */
-VPRIV void target_attr(cc *c, attrs *a, uint32_t str, uint32_t loc)
+CC_PRIVATE void cc_x86_target_attribute_parse(cc *c, attrs *a, uint32_t str, uint32_t loc)
 {
 	if (!str || c->o->target != PP_LINUX_X86_64) return;
 	const char *text = c->strs[str - 1].s;

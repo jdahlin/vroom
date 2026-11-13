@@ -64,7 +64,7 @@ VPRIV int diag_level_from_name(const char *what)
 
 static char *dstr(pp *p, const char *s, size_t n)
 {
-	char *r = varena_alloc(&p->perm, n + 1);
+	char *r = varena_alloc(&p->permanent_region, n + 1);
 
 	memcpy(r, s, n);
 	r[n] = 0;
@@ -98,7 +98,7 @@ static void diag_message_vector_suffix_append(char *m, size_t cap)
 
 diag_record *diag_record_begin_va(pp *p, int level, uint32_t loc, const char *fmt, va_list ap)
 {
-	diag_record *d = varena_alloc(&p->perm, sizeof(*d));
+	diag_record *d = varena_alloc(&p->permanent_region, sizeof(*d));
 	char msg[2048];
 	int n = vsnprintf(msg, sizeof(msg), fmt, ap);
 
@@ -132,7 +132,7 @@ void diag_record_label_add(pp *p, diag_record *d, uint32_t b, uint32_t e, const 
 {
 	if (d->nspan == d->cspan) {
 		uint32_t c = d->cspan ? d->cspan * 2 : 4;
-		diag_record_span *n = varena_alloc(&p->perm, c * sizeof(*n));
+		diag_record_span *n = varena_alloc(&p->permanent_region, c * sizeof(*n));
 
 		if (d->nspan)
 			memcpy(n, d->span, d->nspan * sizeof(*n));
@@ -143,7 +143,7 @@ void diag_record_label_add(pp *p, diag_record *d, uint32_t b, uint32_t e, const 
 
 int diag_art_style(const pp *p)
 {
-	return p->o->diag_style != DIAG_STYLE_VCC ? 0 : p->o->diag_unicode ? 2 : 1;
+	return p->options->diag_style != DIAG_STYLE_VCC ? 0 : p->options->diag_unicode ? 2 : 1;
 }
 
 void diag_record_art_set(pp *p, diag_record *d, const char *s, size_t n)
@@ -175,7 +175,7 @@ void diag_record_fixit_add(pp *p, diag_record *d, uint32_t b, uint32_t e, const 
 	app &= ~DIAG_APPLICABILITY_NAME;
 	if (d->nfix == d->cfix) {
 		uint32_t c = d->cfix ? d->cfix * 2 : 4;
-		diag_record_fixit *n = varena_alloc(&p->perm, c * sizeof(*n));
+		diag_record_fixit *n = varena_alloc(&p->permanent_region, c * sizeof(*n));
 
 		if (d->nfix)
 			memcpy(n, d->fix, d->nfix * sizeof(*n));
@@ -230,7 +230,7 @@ diag_record *diag_record_note_add(pp *p, diag_record *d, uint32_t loc, const cha
 	return k;
 }
 
-const diag_record *diag_records_first(const pp *p) { return p->dhead; }
+const diag_record *diag_records_first(const pp *p) { return p->diagnostic_head; }
 
 /* clang: a token from a macro expansion has the caret at the invocation and
    a range over all of it, and a note at the macro's body */
