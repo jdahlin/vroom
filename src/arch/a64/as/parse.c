@@ -1,4 +1,12 @@
-/* arm64 instructions in GNU as syntax: registers and .req aliases, operands, literal pools, the statement */
+/* parse.c: arm64 instructions in GNU as syntax, the front half of the assembler's arm64 side: registers
+ * and .req aliases, operands (registers with arrangements, immediates, memory, shifts and extends),
+ * literal pools for ldr =value, and a64_as_instruction_assemble, which parses one statement into
+ * A64Op records and hands them to the encoder in enc.c.
+ *
+ * Called by as.c's statement loop for every non-directive statement when the object's machine is arm64.
+ * A symbol or label operand becomes a fixup recorded in the ElfObj (never a number here), so
+ * relaxation and relocation stay in the object.  Pending literal pools live in the context
+ * (a->pool) and are written by .ltorg (a64_as_pools_ltorg) or at as_end (a64_as_pools_flush).  A malformed statement fails the assembly through as_error_report. */
 #include "../../../as/as-internal.h"
 
 /* ---------------------------------------------------------------- instructions */
