@@ -1,772 +1,769 @@
-# vcc 1.0: första release
+# vcc 1.0: first release
 
-**Mål:** vcc släpps som en snabb C-kompilator som går att använda direkt via
-`CC=vcc`, under MIT-licens.  Den riktar sig till dem som vill ha en snabbare
-kompilator med moderna felmeddelanden.  Kärnbygget (vroom) är vår
-referensanvändare, inte produkten.
+**Goal:** vcc is released as a fast C compiler that can be used directly via
+`CC=vcc`, under the MIT license.  It targets those who want a faster
+compiler with modern error messages.  The kernel build (vroom) is our
+reference user, not the product.
 
-**Beslut (2026-11-09, frågerunda med Johan):**
-- Produkt: vcc som C-kompilator (vcc/vas/vld + vccd).
-- Kvalitetsribba: TODO.md tier 1–3 tomma (tier 4 får finnas kvar som kända begränsningar).
-- Språk: C upp till C23, med GNU-tillägg.
-- Kod: rimlig -O1 (registerallokering, enkel inlining, konstantpropagering).
-- Diagnostik: bättre än clang; clang-paritet är golvet.
-- Plattformar: macOS arm64, Linux arm64, korskompilering mac→Linux, Linux x86-64
-  (ELF, SysV), macOS x86-64 (Mach-O) och wasm.
-- Drop-in: `CC=vcc` räcker. configure, meson och cmake går igenom, och okända
-  gcc/clang-flaggor ger varning, inte fel.
-- vccd: default och transparent.  Shimmen startar servern själv.
-- Fart: publicerad jämförelse mot tcc och clang.
-- Distribution: källkod, förbyggda tarballs, Homebrew, Debian/apt, container.
-- Licens: MIT.
-- Styrning: releasen styrs av kriterier, inte datum.  Agenterna arbetar som
-  nu.  Grindarna nedan är det gemensamma målet.
+**Decisions (2026-11-09, round of questions with Johan):**
+- Product: vcc as a C compiler (vcc/vas/vld + vccd).
+- Quality bar: TODO.md tiers 1-3 empty (tier 4 may remain as known limitations).
+- Language: C up to C23, with GNU extensions.
+- Code: reasonable -O1 (register allocation, simple inlining, constant propagation).
+- Diagnostics: better than clang; clang parity is the floor.
+- Platforms: macOS arm64, Linux arm64, cross-compiling mac->Linux, Linux x86-64
+  (ELF, SysV), macOS x86-64 (Mach-O) and wasm.
+- Drop-in: `CC=vcc` is enough.  configure, meson and cmake get through, and
+  unknown gcc/clang flags give a warning, not an error.
+- vccd: default and transparent.  The shim starts the server itself.
+- Speed: published comparison against tcc and clang.
+- Distribution: source code, prebuilt tarballs, Homebrew, Debian/apt, container.
+- License: MIT.
+- Governance: the release is driven by criteria, not dates.  The agents work as
+  now.  The gates below are the common goal.
 
-## Grindar
+## Gates
 
-Releasen är klar när alla grindar är gröna på alla plattformar som grinden
-gäller.  Varje grind ska ha ett skript med tydligt grönt/rött resultat
-(se G0).
+The release is done when all gates are green on all platforms the gate
+applies to.  Each gate must have a script with a clear green/red result
+(see G0).
 
-| # | Spår | Grind (mätbar) |
-|---|------|----------------|
-| G0 | Grindrigg | `bench/release-gate.py` kör G1–G9 (eller läser deras senaste resultat) och skriver en statustabell per plattform; CI kör den på varje plattform |
-| G1 | Korrekthet | TODO.md tier 1–3 tomma, inga `xfail` kvar som pekar dit. Csmith och YARPGen differentiellt mot clang: N CPU-timmar per mål och optimeringsnivå utan diff |
-| G2 | Korpus | Linux-kärnan bootar Debian till `running`; PostgreSQL `meson test`, SQLite (TCL-testerna) och vcc självbyggd (stage 2 = stage 3) gröna; Debian-urvalet bygger och klarar sina egna tester med `CC=vcc` |
-| G3 | Drop-in | autoconf, meson och cmake konfigurerar med `CC=vcc` för hela korpusen utan projektpatchar. Okända flaggor ger varning. Flaggtabell mot gcc och clang (`bench/vcc-driver.py` utökad) |
-| G4 | Plattformar | G1–G3 körs på varje mål: macOS arm64, Linux arm64, mac→Linux arm64, Linux x86-64, macOS x86-64, wasm. ABI-tester (`bench/vcc-abi.py`) clang/vcc × anropare/anropad på varje mål |
-| G5 | Kodkvalitet | `-O1`: körtid inom X % av clang -O1 på en fast benchmarksvit; `-O0` oförändrat snabbt att kompilera (SSA-vägen `-O2` ägs av `PLAN-vir.md`; G5 mäter `-O1` och stannar hos den icke-SSA optimeraren) |
-| G6 | Diagnostik | `bench/vcc-diag.py` utan regressioner mot clang, och en egen svit med fall där vcc är bevisat bättre än clang (spann genom makron, fix-its, förklaringar) |
-| G7 | Fart | `bench/` publicerar kompileringstid per TU och för hela projekt: vcc mot tcc och clang -O0 (vcc -O0) och mot clang -O1 (vcc -O1), både kallt i egen process och med vccd. Siffrorna står i README |
-| G8 | vccd som default | TODO.md tier 2 tom. Autostart, versionskontroll mellan shim och server, fallback till ren process om vccd saknas eller kraschar. `vccd-test.py` + `vcc-stress.py --vccd` körs i timmar; fungerar i CI och containrar |
-| G9 | Paketering | En tagg ger via CI: källtarball, binära tarballs per plattform, Homebrew-formel, .deb, containeravbild. README, LICENSE (MIT) och THIRD-PARTY med ursprung och licens för clang-tabellerna (`caps.c`, `ppdata*.inc`), gcc c-torture och tcc tests2 |
+| # | Track | Gate (measurable) |
+|---|-------|-------------------|
+| G0 | Gate rig | `bench/release-gate.py` runs G1-G9 (or reads their latest results) and writes a status table per platform; CI runs it on every platform |
+| G1 | Correctness | TODO.md tiers 1-3 empty, no `xfail` left that points there. Csmith and YARPGen differentially against clang: N CPU hours per target and optimization level without a diff |
+| G2 | Corpus | The Linux kernel boots Debian to `running`; PostgreSQL `meson test`, SQLite (the TCL tests) and vcc self-built (stage 2 = stage 3) green; the Debian selection builds and passes its own tests with `CC=vcc` |
+| G3 | Drop-in | autoconf, meson and cmake configure with `CC=vcc` for the whole corpus without project patches. Unknown flags give a warning. Flag table against gcc and clang (`bench/vcc-driver.py` extended) |
+| G4 | Platforms | G1-G3 run on every target: macOS arm64, Linux arm64, mac->Linux arm64, Linux x86-64, macOS x86-64, wasm. ABI tests (`bench/vcc-abi.py`) clang/vcc × caller/callee on every target |
+| G5 | Code quality | `-O1`: run time within X % of clang -O1 on a fixed benchmark suite; `-O0` unchanged in compile speed (the SSA path `-O2` is owned by `PLAN-vir.md`; G5 measures `-O1` and stays with the non-SSA optimizer) |
+| G6 | Diagnostics | `bench/vcc-diag.py` without regressions against clang, and a suite of its own with cases where vcc is provably better than clang (spans through macros, fix-its, explanations) |
+| G7 | Speed | `bench/` publishes compile time per TU and for whole projects: vcc against tcc and clang -O0 (vcc -O0) and against clang -O1 (vcc -O1), both cold in its own process and with vccd. The numbers are in the README |
+| G8 | vccd as default | TODO.md tier 2 empty. Autostart, version check between shim and server, fallback to a plain process if vccd is missing or crashes. `vccd-test.py` + `vcc-stress.py --vccd` run for hours; works in CI and containers |
+| G9 | Packaging | A tag yields via CI: source tarball, binary tarballs per platform, Homebrew formula, .deb, container image. README, LICENSE (MIT) and THIRD-PARTY with origin and license for the clang tables (`caps.c`, `ppdata*.inc`), gcc c-torture and tcc tests2 |
 
-## Ordning
+## Order
 
-Ordningen följer beroenden, inte datum.  Spår som inte rör samma filer
-kan gå parallellt.
+The order follows dependencies, not dates.  Tracks that do not touch the
+same files can run in parallel.
 
-1. **G0 grindrigg och CI.** Den gör status synlig för alla agenter.  Först
-   samlas de befintliga testskripten, sedan läggs nya grindar till när de
-   finns.
-2. **G9 juridik.** LICENSE, THIRD-PARTY och kontroll av att genererade
-   tabeller och importerade testsviter får distribueras under MIT-projektet.
-   Det är billigt nu och dyrt senare.
-3. **G1 tier 1 + differentiell fuzzning**, parallellt med **x86-64-backenden**
-   (`arch/x86_64/`; katalogstrukturen är förberedd).
-4. **G8 tier 2 och vccd som default.**
-5. **Tier 3** (front end, C23, driverflaggor för G3).
-6. **G5 -O1**, först när tier 1 är tom.  En optimerare ovanpå felaktig kod
-   gör buggarna svårare att hitta.
-7. **wasm-målet, Debian-urvalet (G2), G6:s egna svit och G7:s mätningar.**
-8. **G9 paketering**, och sedan taggen.
+1. **G0 gate rig and CI.**  It makes status visible to all agents.  First
+   the existing test scripts are collected, then new gates are added as they
+   exist.
+2. **G9 legal.**  LICENSE, THIRD-PARTY and a check that generated tables and
+   imported test suites may be distributed under the MIT project.  It is
+   cheap now and expensive later.
+3. **G1 tier 1 + differential fuzzing**, in parallel with the **x86-64 backend**
+   (`arch/x86_64/`; the directory structure is prepared).
+4. **G8 tier 2 and vccd as default.**
+5. **Tier 3** (front end, C23, driver flags for G3).
+6. **G5 -O1**, only when tier 1 is empty.  An optimizer on top of incorrect
+   code makes the bugs harder to find.
+7. **The wasm target, the Debian selection (G2), G6's own suite and G7's measurements.**
+8. **G9 packaging**, and then the tag.
 
-## Öppna frågor
+## Open questions
 
-- **wasm:** menas en wasm-backend (wasm32 eller wasm64, WASI?) eller vcc
-  körd som wasm (`ccs/wasm/`, finns redan)?
-- **C23 fullt:** `_BitInt` med godtycklig bredd, `#embed`, `constexpr`: hela
-  standarden eller clangs nivå?
-- **-O1:** vilken benchmarksvit, och vilket X i G5?
-- **Debian-urvalet:** vilka paket och hur många?  Fast lista eller topp N
-  efter popcon bland rena C-paket?
-- **"Bättre än clang":** vem bedömer det?  Kuraterad svit eller A/B-test
-  med användare?
-- **vccd som default:** beteende i CI och containrar, och socketens
-  säkerhetsmodell på delade maskiner.
-- **Namn:** "vcc" krockar med Microsofts VCC och verifieraren VCC.
-- **Grindägare:** ska varje grind ha en ansvarig session?
-- **Csmith/YARPGen:** hur många CPU-timmar är N?
+- **wasm:** does it mean a wasm backend (wasm32 or wasm64, WASI?) or vcc
+  run as wasm (`ccs/wasm/`, already exists)?
+- **Full C23:** `_BitInt` with arbitrary width, `#embed`, `constexpr`: the whole
+  standard or clang's level?
+- **-O1:** which benchmark suite, and which X in G5?
+- **The Debian selection:** which packages and how many?  A fixed list or top N
+  by popcon among pure C packages?
+- **"Better than clang":** who judges that?  A curated suite or an A/B test
+  with users?
+- **vccd as default:** behavior in CI and containers, and the socket's
+  security model on shared machines.
+- **Name:** "vcc" collides with Microsoft's VCC and the verifier VCC.
+- **Gate owners:** should each gate have a responsible session?
+- **Csmith/YARPGen:** how many CPU hours is N?
 
 ## Status
 
-### Status 2026-11-11: G2/G7, PostgreSQL på Linux
+### Status 2026-11-11: G2/G7, PostgreSQL on Linux
 
-PostgreSQL-harnessen kan nu isolera käll- och byggträd på Linux, förbereda
-hela kommandodatabasen och kontrollera att varje kompileringsjobb verkligen
-lyckades innan hastighet jämförs. Snabba kontraktsprov körs i CI utan en
-PostgreSQL-checkout. G2 och G7 är fortsatt öppna: harnessen ensam bevisar
-varken att aktuell main bygger PostgreSQL eller att dess prestandamål uppnås.
+The PostgreSQL harness can now isolate source and build trees on Linux,
+prepare the whole command database and check that every compile job really
+succeeded before speed is compared.  Fast contract tests run in CI without a
+PostgreSQL checkout.  G2 and G7 remain open: the harness alone proves
+neither that current main builds PostgreSQL nor that its performance goals
+are met.
 
-### Status 2026-11-11: G5/G7, wasm-lagringar över strukturerade joins
+### Status 2026-11-11: G5/G7, wasm stores across structured joins
 
-På `1d8e29a` använder wasm32/64 den gemensamma budgeterade flödeslösaren
-för privata exakta 4/8-byte ramceller. Typade kontrollhändelser och unika
-blocktoken beskriver flödet utan textparsning eller SSA. Överskrivna stores
-tas bort genom strukturerade joins; operandutvärderingar och riktiga
-barriärer bevaras. Loopar, dispatchers/goto, asm, SJLJ och dynamiska ramar
-avstår. Full konvergens krävs före publicering.
+At `1d8e29a`, wasm32/64 use the shared budgeted flow solver for private
+exact 4/8-byte frame cells.  Typed control events and unique block tokens
+describe the flow without text parsing or SSA.  Overwritten stores are
+removed across structured joins; operand evaluations and real barriers are
+preserved.  Loops, dispatchers/goto, asm, SJLJ and dynamic frames abstain.
+Full convergence is required before publication.
 
-114 fokuserade/befintliga SDK-fria nivå-/mål-/regelkontroller passerar;
-avsiktligt felaktig barriärsammanslagning avvisas på wasm32 och wasm64.
-Oberoende review är klar. Hela egna SDK-sviter avslutar med status 0:
+114 focused/existing SDK-free level/target/rule checks pass; an
+intentionally incorrect barrier merge is rejected on wasm32 and wasm64.
+Independent review is done.  The full own SDK suites exit with status 0:
 wasm32 178/178 PASS, 36 XFAIL, 16 skips; wasm64 182/182 PASS, 37 XFAIL,
-11 skips. Undantagen räknas inte som PASS; kategorier och loggar står i
-`PLAN-fas2.md`/`PLAN-wasm.md`. CI-steget är tillagt, fjärrkörning återstår.
-Senare integration `1458a90` mot exakt flödesförälder `f7327bd` passerar
-samma 114 kontroller och 66 byteidentiska O0/noopt-par. Matchade clang 23
-v3-byggen ger +0,314–0,552 % Callgrind-Ir i oförändrade kontroller,
-+0,106/+0,095 % i fast wasm32/64-blandning, och +4,494–4,683 % i
-koncentrerade positiva diamantprov. De senare minskar stores 800/1000
-till 200 och relocerbara objekt 2,886–3,325 %. Aktiv analys kostar mer än
-1 % där; resultatet ersätter inte full prestandagrind eller uppmätt
-programfart. Exakta korpusundantag och metod står i planerna. G5/G7,
-generell DSE och full O2 förblir öppna.
-### Status 2026-11-11: G1/G4, semantisk följdmilstolpe ovanpå native-stacken
+11 skips.  The exceptions do not count as PASS; categories and logs are in
+`PLAN-fas2.md`/`PLAN-wasm.md`.  The CI step is added, remote run remains.
+Later integration `1458a90` against the exact flow parent `f7327bd` passes
+the same 114 checks and 66 byte-identical O0/noopt pairs.  Matched clang 23
+v3 builds give +0.314-0.552 % Callgrind Ir in unchanged checks,
++0.106/+0.095 % in a fixed wasm32/64 mix, and +4.494-4.683 % in
+concentrated positive diamond tests.  The latter reduce stores 800/1000
+to 200 and relocatable objects 2.886-3.325 %.  Active analysis costs more than
+1 % there; the result does not replace a full performance gate or measured
+program speed.  Exact corpus exceptions and method are in the plans.  G5/G7,
+general DSE and full O2 remain open.
+### Status 2026-11-11: G1/G4, semantic follow-up milestone on top of the native stack
 
-Fyra separata rättningar bygger vidare på verklig Git-förälder `74f6ec4`:
-livstid för deklarationer efter etiketter, oberoende nästlade GNU-ranglistor,
-C90:s digrafer/satsscope med blandade cachejobb samt full bredd i generiska
-rotationer. Inga kompletta C23-recordkompatibilitetsändringar ingår.
+Four separate fixes build on the real Git parent `74f6ec4`:
+lifetime of declarations after labels, independent nested GNU rank lists,
+C90's digraphs/statement scope with mixed cache jobs, and full width in
+generic rotations.  No complete C23 record compatibility changes are included.
 
-Unity och filvis bygge: egna x86-prov 235/235 med sex referensundantag,
-ARM/QEMU 240/240 med ett befintligt xfail; ABI 33/33 per mål/bygge;
-diagnostik 225/225. Kernel-sema run/batch 887/887 på båda byggena.
-Full PP-paritet är 920/920 i cmp/batch både före ändringen på föräldern
-och efteråt (unity). Fyra riktade oförändrade GCC-fall passerar per mål/bygge;
-C90-orakeln kör sju lägen och 21 blandade cachejobb. Fem fokuserade runtimeprov
-passerar även O2/O3. ASan/UBSan passerar diagnostik, tre nya runtimeprov och
-C90-matrisen på båda Linuxmålen. Wasm64-preflight: 191 pass, 39 befintliga
-xfail, 11 referensundantag; inga XPASS-markörer behövde ändras.
+Unity and file-by-file build: own x86 tests 235/235 with six reference exceptions;
+ARM/QEMU 240/240 with one existing xfail; ABI 33/33 per target/build;
+diagnostics 225/225.  Kernel sema run/batch 887/887 on both builds.
+Full PP parity is 920/920 in cmp/batch both before the change
+on the parent and after (unity).  Four targeted unchanged GCC cases pass per target/build;
+the C90 oracle runs seven modes and 21 mixed cache jobs.  Five focused runtime tests
+pass also at O2/O3.  ASan/UBSan pass diagnostics, three new runtime tests and
+the C90 matrix on both Linux targets.  Wasm64 preflight: 191 pass, 39 existing
+xfail, 11 reference exceptions; no XPASS markers needed changing.
 
-Nio utvalda Kefir-fall passerar alla kombinationer på x86; ARM ger fem pass
-och fyra explicita Clang-referensavvisningar (wchar-/bredtypskontrakt).
-Detta är riktad återvalidering, inte en ny full S4/S5-körning. Artefakter,
-bundle med bevarad Git-historik och manifest: `work/results/semantic-stack-74/`.
-G1/G4 är fortfarande öppna.
+Nine selected Kefir cases pass all combinations on x86; ARM gives five passes
+and four explicit Clang reference rejections (wchar/wide type contract).
+This is targeted revalidation, not a new full S4/S5 run.  Artifacts,
+bundle with preserved Git history and manifest: `work/results/semantic-stack-74/`.
+G1/G4 are still open.
 
-### Status 2026-11-11: G1/G4, rotationer över 128 bitar
+### Status 2026-11-11: G1/G4, rotations over 128 bits
 
-På basen `a41361e` behålls operandens och räknarens fulla bredd före modulo
-för generiska rotationer. GCC:s oförändrade `builtin-stdc-rotate-1.c` behåller
-`-std=c11`; dess 510-bitarsdel körs bara på x86 (ARM annonserar max 128).
-Riktad verifiering: unity/separatfilbygge, O0/O2/O3 med typer, sidoeffekter och
-stora räknare, plus semantik run/batch. Resultat:
-`work/results/stdc-rotate/validation.json`. Clangs begränsning för dynamiska
-rotationer över 128 bitar är separat dokumenterad; det är inte ett pass.
-Hela S4 har inte körts om och G1/G4 är fortfarande öppna.
+On base `a41361e`, the operand's and the count's full width is kept before modulo
+for generic rotations.  GCC's unchanged `builtin-stdc-rotate-1.c` keeps
+`-std=c11`; its 510-bit part runs only on x86 (ARM advertises max 128).
+Targeted verification: unity/separate-file build, O0/O2/O3 with types, side effects and
+large counts, plus semantics run/batch.  Result:
+`work/results/stdc-rotate/validation.json`.  Clang's limitation for dynamic
+rotations over 128 bits is documented separately; it is not a pass.
+The whole of S4 has not been rerun and G1/G4 are still open.
 
-### Status 2026-11-11: G1/G4, livstid för deklarationer efter etiketter
+### Status 2026-11-11: G1/G4, lifetime of declarations after labels
 
-På `a41361e` rättas frontendens syntetiska scope runt deklarationer efter
-etiketter. Detta eliminerar överlappande levande ARM-stackplatser och
-för tidig cleanup även på x86. Kefir std_attributes18 klarar alla fyra
-kombinationer på båda Linux-målen och byggen; egna sviter, sema och diag
-är gröna med befintliga undantag. Se `TEST.plan` S5b och
-`work/arm-computed-goto/` för avgränsade resultat. G1/G4 är fortsatt öppna.
+At `a41361e`, the front end's synthetic scope around declarations after
+labels is fixed.  This eliminates overlapping live ARM stack slots and
+premature cleanup also on x86.  Kefir std_attributes18 passes all four
+combinations on both Linux targets and builds; own suites, sema and diag
+are green with existing exceptions.  See `TEST.plan` S5b and
+`work/arm-computed-goto/` for delimited results.  G1/G4 remain open.
 
-### Status 2026-11-11: G1/G4, kombinerad native-stack ovanpå 1c5b5d1
+### Status 2026-11-11: G1/G4, combined native stack on top of 1c5b5d1
 
-Sju separata native-rättningar har kombinerats och validerats på exakt
-stacktoppen `1c5b5d1`. Unity/filvis: egna Linux-sviter x86 232/232 och ARM
-237/237 med befintliga referensundantag/xfail, ABI 33/33 och atomik 3/3.
-PP-paritet cmp/batch är 920/920; sema run/batch 887/887 på båda byggen.
-Sex fokuserade Kefir-fall passerar alla fyra kombinationer på x86;
-ARM:s tre aktiva fall passerar medan två Clang-avvisningar och x86-vakten
-redovisas separat. ExtInt- och alloca-kantfall samt GCC pr113596 är gröna;
-breda strängars tidigare x86-assertionsfel är nu rättat. Se `TEST.plan`
-S5b och `work/native-stack64/` för exakt evidens och återstående gränser.
-Ingen full Kefir-/GCC-grind eller ytterligare plattformstäckning påstås;
-G1/G4 är fortsatt öppna.
+Seven separate native fixes have been combined and validated at the exact
+stack top `1c5b5d1`.  Unity/file-by-file: own Linux suites x86 232/232 and ARM
+237/237 with existing reference exceptions/xfail, ABI 33/33 and atomics 3/3.
+PP parity cmp/batch is 920/920; sema run/batch 887/887 on both builds.
+Six focused Kefir cases pass all four combinations on x86;
+ARM's three active cases pass while two Clang rejections and the x86 guard
+are reported separately.  ExtInt and alloca edge cases and GCC pr113596 are green;
+the earlier x86 assertion failure for wide strings is now fixed.  See `TEST.plan`
+S5b and `work/native-stack64/` for exact evidence and remaining limits.
+No full Kefir/GCC gate or further platform coverage is claimed;
+G1/G4 are still open.
 
-### Status 2026-11-11: G1/G4, livstid för inlinad alloca
+### Status 2026-11-11: G1/G4, lifetime of inlined alloca
 
-På basen `103cdee` återställs stacken vid den inlinade funktionens gemensamma
-returpunkt på Linux x86/ARM, efter argumentens evaluering. Anroparens VLA-
-sparpunkter ändras inte av den inlinade funktionens alloca. GCC:s oförändrade
-`gcc.dg/pr113596.c` behåller `-O2`; regressionen täcker nästlad inlining,
-tidiga returer och levande VLA/alloca i anroparen, även vid `-O0`.
-Resultat från unity/separatfilbygge, egna körsviter och semantik run/batch:
-`work/results/pr113596/validation.json`. Hela S4 har inte körts om;
-G1/G4 och andra mål förblir separata öppna grindar.
+At base `103cdee`, the stack is restored at the inlined function's common
+return point on Linux x86/ARM, after the arguments are evaluated.  The caller's VLA
+save points are not changed by the inlined function's alloca.  GCC's unchanged
+`gcc.dg/pr113596.c` keeps `-O2`; the regression covers nested inlining,
+early returns and live VLA/alloca in the caller, also at `-O0`.
+Results from unity/separate-file build, own run suites and semantics run/batch:
+`work/results/pr113596/validation.json`.  The whole of S4 has not been rerun;
+G1/G4 and other targets remain separate open gates.
 
 ### Status 2026-11-11: G5/G7, wasm frame-cell forwarding
 
-Wasm32/64 använder nu den gemensamma cell-/värdekärnan för exakta
-4/8-byte frame-celler och tar bort överskrivna lagringar. Typade
-emissionshändelser bevarar adress-/RHS-effekter och operandstack; inga
-SSA-grafer eller assemblertextmönster. Positivt aggregatprov går från sex
-till två minnesoperationer. Blandat elvafilersprov ger +0,599 % värd-Ir,
-kontroller +0,18–0,30 %, positivt prov +7,03 %. Detta är avgränsad data,
-inte hela G7. 16 fokuserade kör-/kodkrav, sanitiserare, oberoende review,
-6120 identiska native-resultat och 149 egna wasm32-PASS verifierar steget.
-Lokal wasm64-referenskrasch är baslinjereproducerad och synlig; se
-PLAN-wasm.md. X86:s adapter är fortsatt experimentell på grund av kostnad;
-smala wasm-celler, generell unread-DSE, full O2 och G5/G7 återstår.
+Wasm32/64 now use the shared cell/value core for exact
+4/8-byte frame cells and remove overwritten stores.  Typed
+emission events preserve address/RHS effects and the operand stack; no
+SSA graphs or assembler text patterns.  A positive aggregate test goes from six
+to two memory operations.  An eleven-file mixed test gives +0.599 % host Ir,
+controls +0.18-0.30 %, positive test +7.03 %.  This is delimited data,
+not the whole of G7.  16 focused run/code requirements, sanitizers, independent review,
+6120 identical native results and 149 own wasm32 PASS verify the step.
+A local wasm64 reference crash is baseline-reproduced and visible; see
+PLAN-wasm.md.  X86's adapter remains experimental because of cost;
+narrow wasm cells, general unread-DSE, full O2 and G5/G7 remain.
 
-### Status 2026-11-11: G1/G4, objektstorlek på Linux
+### Status 2026-11-11: G1/G4, object size on Linux
 
-På basen `9d022c3` skiljer objektstorleksanalysen deklarerade delobjekt från
-rå allokering och padding. `-fstrict-flex-arrays=0..3` ingår i cacheidentiteten;
-läge 3 behåller deklarerad minsta storlek. `counted_by` på stabila pekarfält
-använder aktuell räknare i dynamiska lägen 0–2; volatila baser/fält lämnas
-okända utan läsning. Inlining bevarar bounds bara för direkta, oskrivna och
-icke-aliaserade pekarparametrar med effektfria argument.
+At base `9d022c3`, the object size analysis distinguishes declared subobjects from
+raw allocation and padding.  `-fstrict-flex-arrays=0..3` is part of the cache identity;
+mode 3 keeps the declared minimum size.  `counted_by` on stable pointer fields
+uses the current counter in dynamic modes 0-2; volatile bases/fields are left
+unknown without a read.  Inlining preserves bounds only for direct, unwritten and
+non-aliased pointer parameters with side-effect-free arguments.
 
-Verifiering omfattar unity/separatfilbygge, egna körsviter på Linux x86-64
-följt av ARM64/QEMU, fem oförändrade GCC-fall (`pr101836_1/2/3`, `pr39343`,
-`pointer-counted-by-8`), oberoende strikt-flex/volatile/allokeringsprober och
-kärnans semantik i både process- och batchläge. Exakta resultat och binärhashar:
-`work/results/objsize-main-validation.json` och
+Verification covers unity/separate-file build, own run suites on Linux x86-64
+followed by ARM64/QEMU, five unchanged GCC cases (`pr101836_1/2/3`, `pr39343`,
+`pointer-counted-by-8`), independent strict-flex/volatile/allocation probes and
+the kernel's semantics in both process and batch mode.  Exact results and binary hashes:
+`work/results/objsize-main-validation.json` and
 `work/results/objsize-main-independent/results.json`.
-Båda byggena: ARM 185/185, semantik run/batch 887/887, GCC 5/5 per mål;
-34 oberoende konfigurationer gav 102 matchande körningar (272 kommandon).
-Ursprunglig x86-körning: 179/179 och sex skip, varav `branch_far` var en
-Clang-referenstimeout efter 60 s, inte ett godkänt compilerresultat.
-Separat supplement använder PR37-harness `761142b` och dess uttryckliga
-300 s-kontrakt: 1/1 utan skip på båda mål med båda byggena. Resultat sparas i
-`work/results/objsize-main-branchfar/results.json`. Ursprungliga loggar ändras inte.
+Both builds: ARM 185/185, semantics run/batch 887/887, GCC 5/5 per target;
+34 independent configurations gave 102 matching runs (272 commands).
+Original x86 run: 179/179 and six skips, of which `branch_far` was a
+Clang reference timeout after 60 s, not an approved compiler result.
+A separate supplement uses PR37 harness `761142b` and its explicit
+300 s contract: 1/1 without skips on both targets with both builds.  Results are saved in
+`work/results/objsize-main-branchfar/results.json`.  Original logs are not changed.
 
-Kvar: generell flödes-/aliasanalys, transitiva inline-parametrar,
-`alloc_size`-kontrakt och dynamiska uttryck med sidoeffekter; okända bounds
-ska fortsätta vara okända. Hela S4-korpusen och övriga mål har inte körts om
-för denna milstolpe. Riktade Wasm32/64-prover går 10/10 med ett kört XFAIL
-för `object_size_inline`: samma test ger byteidentisk assemblerkod och
-samma runtimefel med tidigare `main`; Clang-referensen passerar. Testet
-behöver Wasm-inlining/argumentbounds och är inte överhoppat. G1/G4 är inte färdiga.
+Remaining: general flow/alias analysis, transitive inline parameters,
+`alloc_size` contracts and dynamic expressions with side effects; unknown bounds
+should stay unknown.  The whole S4 corpus and other targets have not been rerun
+for this milestone.  Targeted Wasm32/64 probes go 10/10 with one run XFAIL
+for `object_size_inline`: the same test gives byte-identical assembly and the
+same runtime error with the earlier `main`; the Clang reference passes.  The test
+needs Wasm inlining/argument bounds and is not skipped.  G1/G4 are not done.
 
-### Status 2026-11-11: G5/G7, kopior och direkt utvidgningsbevis
+### Status 2026-11-11: G5/G7, copies and direct extension proof
 
-Delad native kopiekärna återanvänder arm64:s analys; x86 gör endast
-kandidatsökning i sin befintliga tvåadressvandring, utan egna allokeringar
-eller livenesspass. Separat extensions.c utelämnar bevisat redundant
-unsigned32-normalisering från föregående skrivning. 148 fokuserade
-körkombinationer gröna efter integration med main9d022c3, inklusive
-volatile/high-bit/signed-regressioner; båda byggsätt och sanitiserade
-kontrakt verifierade. 500-funktions v3-instruktionsprober mot14379fe ger
-+0,23% loop och −0,74% kontroll för kombinationen. Profilens räckvidd
-är begränsad; vbench/native helkorpus och hela G5/G7/O2-målet kvarstår.
-### Status 2026-11-11: G1, breda BitInt på Linux
+A shared native copy core reuses arm64's analysis; x86 does only a
+candidate search in its existing two-address walk, without its own allocations
+or liveness passes.  A separate extensions.c omits provably redundant
+unsigned32 normalization from the preceding write.  148 focused
+run combinations green after integration with main9d022c3, including
+volatile/high-bit/signed regressions; both build modes and sanitized
+contracts verified.  500-function v3 instruction probes against 14379fe give
++0.23% loop and -0.74% control for the combination.  The profile's reach
+is limited; vbench/native full corpus and the whole G5/G7/O2 goal remain.
+### Status 2026-11-11: G1, wide BitInt on Linux
 
-Skalära `_BitInt` över 128 bitar har nu limb-baserad kodgenerering för
-Linux x86-64 och arm64, med de befintliga snabbvägarna för högst 128 bitar
-bevarade. Milstolpen omfattar heltalsaritmetik, jämförelser, konvertering
-mellan heltal, bitfält, generiska biträkningar, konstantuttryck och replay.
-Vektorelement över 128 bitar och switch-gränser utanför signed 128-bitars
-representation avvisas uttryckligen. Flyttalskonvertering följer nedan.
-Detta slutför inte C23 eller G1.
+Scalar `_BitInt` over 128 bits now has limb-based code generation for
+Linux x86-64 and arm64, with the existing fast paths for at most 128 bits
+preserved.  The milestone covers integer arithmetic, comparisons, conversion
+between integers, bit-fields, generic bit counts, constant expressions and replay.
+Vector elements over 128 bits and switch bounds outside the signed 128-bit
+representation are explicitly rejected.  Floating-point conversion follows below.
+This does not complete C23 or G1.
 
-Validering av integrationen på `ae941cb`: unity och separata filer,
-egna x86-prov 184/184 med fem referensundantag och ARM 189/189. Oberoende
-säkerhets- och avvisningsprober passerar 36/36 över båda byggsätten och
-målen. Kärnans sema passerar 887/887 individuellt och i batch för båda
-byggsätten. Bred aritmetik och biträkning passerar tolv bredder 129–7001,
-konstantproven 128 värden plus positiva/negativa kontrakt, replay åtta
-översättningsenheter på två mål och bred ABI 24 former i fyra riktningar
-per mål och byggsätt (384 körningar). Diagnostik: 220/220 per byggsätt.
-Optimizerregler O0–O3 och registereffekter med ASan passerar.
-Fullständiga kommandon och resultat finns i
-`work/results/bitint-integration/`. ARM:s Clang 23 saknar native-stöd för
-bredder över 128; ARM:s breda ABI-prov använder dokumenterade C-aggregat
-som proxy och får inte beskrivas som native Clang BitInt-paritet.
+Validation of the integration at `ae941cb`: unity and separate files,
+own x86 tests 184/184 with five reference exceptions and ARM 189/189.  Independent
+safety and rejection probes pass 36/36 across both build modes and
+targets.  The kernel's sema passes 887/887 individually and in batch for both
+build modes.  Wide arithmetic and bit counting pass twelve widths 129-7001,
+the constant tests 128 values plus positive/negative contracts, replay eight
+translation units on two targets and wide ABI 24 shapes in four directions
+per target and build mode (384 runs).  Diagnostics: 220/220 per build mode.
+Optimizer rules O0-O3 and register effects with ASan pass.
+Full commands and results are in
+`work/results/bitint-integration/`.  ARM's Clang 23 lacks native support for
+widths over 128; ARM's wide ABI tests use documented C aggregates
+as proxy and must not be described as native Clang BitInt parity.
 
-**Återintegration på main `2dc4ea3`:** båda byggsätten passerar egna
-Linux x86 222/222 med sex referensundantag och ARM 227/227 med ett kört
-befintligt XFAIL. Full egen Wasm64-svit: 180/180, 37 körda befintliga
-XFAIL och elva referensundantag. Kärnsema är 887/887 i båda körsätt och
-byggen. Oberoende BitInt-prober är 36/36; dagens leaf-frame-, cell-,
-kopierings- och konstantkontrollgrindar passerar på båda byggena.
-Körtidskonvertering till/från flyttal är fortfarande uttryckligen
-utanför denna integration. Exakta kommandon, resultat och källmanifest:
-`work/results/bitint-main2dc/`. Den fulla vendrade Linux-körkorpusen
-passerar därefter 1942/1942 x86 (130 undantag) och 1945/1945 ARM/QEMU
-(126 undantag och ett befintligt kört XFAIL), utan cacheåteranvändning.
-Hela Kefirs 875 runtime-par har också körts först på x86, sedan ARM:
-x86 572 godkända (+91), 8 vcc-fel och 10 signal/timeout; ARM 455 godkända,
-3 vcc-fel och 7 signal/timeout. Inga tidigare godkännanden förloras;
-referensfel och unsupported är oförändrade och räknas inte som pass.
-Binär SHA256 `f2a6f04804de1393357a2b4341059f8bc9cbc30c8b5361808df43f203d6e0b74`.
-G1/G2 och övrig testplan är fortsatt öppna.
+**Reintegration on main `2dc4ea3`:** both build modes pass own
+Linux x86 222/222 with six reference exceptions and ARM 227/227 with one run
+existing XFAIL.  Full own Wasm64 suite: 180/180, 37 run existing
+XFAIL and eleven reference exceptions.  Kernel sema is 887/887 in both run modes and
+builds.  Independent BitInt probes are 36/36; today's leaf-frame, cell,
+copy and constant check gates pass on both builds.
+Runtime conversion to/from floating point is still explicitly
+outside this integration.  Exact commands, results and source manifest:
+`work/results/bitint-main2dc/`.  The full vendored Linux run corpus
+then passes 1942/1942 x86 (130 exceptions) and 1945/1945 ARM/QEMU
+(126 exceptions and one existing run XFAIL), without cache reuse.
+All of Kefir's 875 runtime pairs have also been run, first on x86, then ARM:
+x86 572 approved (+91), 8 vcc failures and 10 signal/timeout; ARM 455 approved,
+3 vcc failures and 7 signal/timeout.  No earlier approvals are lost;
+reference failures and unsupported are unchanged and do not count as pass.
+Binary SHA256 `f2a6f04804de1393357a2b4341059f8bc9cbc30c8b5361808df43f203d6e0b74`.
+G1/G2 and the rest of the test plan remain open.
 
 
-### Status 2026-11-11: G1, padding i BitInt-uttryck
+### Status 2026-11-11: G1, padding in BitInt expressions
 
-Sammansatta tilldelningar normaliserar nu gamla `_BitInt`-värdet innan
-skift, division och rest på både Linux x86-64 och arm64. Det oförändrade
-Kefir-fallet `bitint_assign_shift1` passerar alla fyra Clang/vcc-parningar
-på båda målen. Regressionen provar 9–128 bitar, smutsig padding, tecken och
-engångsevaluering av operander. Unity och separata filer samt kärnans
-sema 887/887 individuellt och i batch är verifierade för den isolerade
-fixen. Den kombinerade milstolpen `04209a5` passerar 18 oförändrade Kefir-par
-med fyra kompilatorkombinationer per Linux-mål (144 körningar), båda
-byggsätten, diagnostik 220/220, ABI 32/32 per mål och ASan 19/19 per mål.
-Egna ARM-prov: 189/189; x86: 183/183 plus ett separat godkänt `branch_far`
-med PR37:s granskade 300 s-kontrakt (ursprunglig 60 s-timeout bevaras i
-loggen). Fem övriga x86-referensundantag återstår. Wasm64 går 148/148 med
-31 körda XFAIL och tio referensundantag; fokuserad Wasm32 5/5 med sju XFAIL.
-Padding-testets Wasm-lucka är bevisad med båda tidigare baslinjerna.
-Manifest och slutgrind: `work/validate-kefir-7eca264/validation.json` och
-`final-manifest.json`. G1 är fortsatt öppen.
+Compound assignments now normalize the old `_BitInt` value before
+shift, division and remainder on both Linux x86-64 and arm64.  The unchanged
+Kefir case `bitint_assign_shift1` passes all four Clang/vcc pairings
+on both targets.  The regression tests 9-128 bits, dirty padding, sign and
+single evaluation of operands.  Unity and separate files and the kernel's
+sema 887/887 individually and in batch are verified for the isolated
+fix.  The combined milestone `04209a5` passes 18 unchanged Kefir pairs
+with four compiler combinations per Linux target (144 runs), both
+build modes, diagnostics 220/220, ABI 32/32 per target and ASan 19/19 per target.
+Own ARM tests: 189/189; x86: 183/183 plus a separate approved `branch_far`
+with PR37's reviewed 300 s contract (the original 60 s timeout is preserved in
+the log).  Five other x86 reference exceptions remain.  Wasm64 goes 148/148 with
+31 run XFAIL and ten reference exceptions; focused Wasm32 5/5 with seven XFAIL.
+The padding test's Wasm gap is proven with both earlier baselines.
+Manifest and final gate: `work/validate-kefir-7eca264/validation.json` and
+`final-manifest.json`.  G1 remains open.
 
-### Status 2026-11-11: G5/G7, registerlokaler på x86
+### Status 2026-11-11: G5/G7, register locals on x86
 
-Gemensamt behörighetsurval i `emit/opt/locals.c` används av alla tre
-bakändar; x86 håller nu lönsamma skalärer i fyra callee-save-register.
-Cold-prober är oförändrade; ett native loopprov går 7,830→6,345 ms men
-divisionsfritt loopkorpus kostar cirka 11 % mer kompilator-CPU. Det är
-inte en godkänd 1 %-grind. Snapshot/ABI-säkerhet för builtin setjmp och
-sena/inlinade justerade ramar är testad. Båda byggsätten: 116 fokuserade
-kombinationer; x86-egensvit 137/137, arm64 142/142, kors-ABI 22/22.
-CI kör nu x86-prober under qemu-user. Se OPT3 i `PLAN-fas2.md` för
-hashar, mätmetod och återstående arbete. G5/G7/O2-målet fortsatt öppna.
+Common eligibility selection in `emit/opt/locals.c` is used by all three
+backends; x86 now keeps profitable scalars in four callee-save registers.
+Cold probes are unchanged; a native loop test goes 7.830->6.345 ms but
+a division-free loop corpus costs about 11 % more compiler CPU.  That is
+not an approved 1 % gate.  Snapshot/ABI safety for builtin setjmp and
+late/inlined aligned frames is tested.  Both build modes: 116 focused
+combinations; x86 own suite 137/137, arm64 142/142, cross-ABI 22/22.
+CI now runs x86 probes under qemu-user.  See OPT3 in `PLAN-fas2.md` for
+hashes, measurement method and remaining work.  The G5/G7/O2 goal remains open.
 
-### Status 2026-11-11: G5/G7, delad stackcellanalys
+### Status 2026-11-11: G5/G7, shared stack cell analysis
 
-Nästa del delar nu värde-/storefakta i `emit/rec/slot-values.c`. 6108
-byte-identiska arm64-resultat och separata sanitiserade kontrakt verifierar
-flytten. X86-/wasm-anslutning och kombinerad kostnadsgrind pågår; G5/G7
-är fortsatt öppna.
+The next part now shares value/store facts in `emit/rec/slot-values.c`.  6108
+byte-identical arm64 results and separate sanitized contracts verify
+the move.  X86/wasm hookup and a combined cost gate are in progress; G5/G7
+remain open.
 
-Arm64 använder nu en gemensam analys av exakta allokeringsceller,
-överlapp och adressflykt i `emit/rec/slots.c`. 6069 byte-identiska
-objekt-/textjämförelser, 177 egna arm64-körtester och ett sanitiserat
-intervallkontrakt verifierar flytten. Två begränsade instruktionsprofiler
-visar +0,655/+0,303 % kompilatorarbete; metod och baser i OPT5 i
-`PLAN-fas2.md`. X86-/wasm-anslutning och delade omskrivningar återstår;
-G5/G7 och full O2-täckning är inte klara.
+Arm64 now uses a common analysis of exact allocation cells,
+overlap and address escape in `emit/rec/slots.c`.  6069 byte-identical
+object/text comparisons, 177 own arm64 run tests and a sanitized
+interval contract verify the move.  Two limited instruction profiles
+show +0.655/+0.303 % compiler work; method and bases in OPT5 in
+`PLAN-fas2.md`.  X86/wasm hookup and shared rewrites remain;
+G5/G7 and full O2 coverage are not done.
 
-### Status 2026-11-11: G5/G7, direkt parameterbindning
+### Status 2026-11-11: G5/G7, direct parameter binding
 
-Utvalda x86-parametrar binds direkt till registerhem utan extra ABI-spill
-eller efterladdning. Smala typer, stackargument, mixed GP/FP, hidden sret
-och varargs verifierade O0–O3; kors-ABI 22/22. Parade korta mätningar och
-begränsningar finns i OPT3 i `PLAN-fas2.md`. G5/G7/O2-målet fortsatt öppna.
+Selected x86 parameters are bound directly to register homes without extra ABI spill
+or reload.  Narrow types, stack arguments, mixed GP/FP, hidden sret
+and varargs verified at O0-O3; cross-ABI 22/22.  Paired short measurements and
+limitations are in OPT3 in `PLAN-fas2.md`.  The G5/G7/O2 goal remains open.
 
-### Status 2026-11-11: G5/G7, onåbar kod och signed tvåpotenser
+### Status 2026-11-11: G5/G7, unreachable code and signed powers of two
 
-Delat linjärt record-pass tar bort säkert onåbara suffix; x86 har nu
-register-/effektkontrakt för nästa kopie-/livenesssteg. Signed konstant
-tvåpotensdivision/-rest delar ett recept mellan alla bakändar; wasm
-behåller kompakt div/rem där clang också gör det. Separate regelfiler
-och måladaptrar. Båda byggsätten klarar 96 fokuserade kontroller;
-egensviter x86 135/135 och arm64 140/140. Syntetisk kompilator-CPU-kostnad
-och kvarvarande osäkerhet redovisas vid OPT8 i `PLAN-fas2.md`.
-G5/G7 och hela O2-målet är fortsatt öppna.
+A shared linear record pass removes safely unreachable suffixes; x86 now has
+register/effect contracts for the next copy/liveness step.  Signed constant
+power-of-two division/remainder shares one recipe between all backends; wasm
+keeps compact div/rem where clang does too.  Separate rule files
+and target adapters.  Both build modes pass 96 focused checks;
+own suites x86 135/135 and arm64 140/140.  Synthetic compiler CPU cost
+and remaining uncertainty are reported at OPT8 in `PLAN-fas2.md`.
+G5/G7 and the whole O2 goal remain open.
 
-### Status 2026-11-11: G5/G7, delad grenstädning
+### Status 2026-11-11: G5/G7, shared branch cleanup
 
-Arm64 och x86 använder nu `emit/rec/fallthrough.c`; arm64:s extraktion
-är byte-identisk för 131 befintliga testfiler med O1 och -g. Wasm
-utelämnar redundanta while-grenar med separat nåbarhetsbevis. Båda
-byggsätten klarar 64 fokuserade kod-/körkombinationer; egensviter x86
-133/133 och arm64 138/138. Mätdata och kvarvarande CPU-osäkerhet finns
-vid OPT2 i `PLAN-fas2.md`. G5/G7 och O2-målet är fortsatt öppna.
+Arm64 and x86 now use `emit/rec/fallthrough.c`; arm64's extraction
+is byte-identical for 131 existing test files with O1 and -g.  Wasm
+omits redundant while branches with a separate reachability proof.  Both build
+modes pass 64 focused code/run combinations; own suites x86
+133/133 and arm64 138/138.  Measurement data and remaining CPU uncertainty are
+at OPT2 in `PLAN-fas2.md`.  G5/G7 and the O2 goal remain open.
 
-### Status 2026-11-11: G5/G7, delade heltalsidentiteter
+### Status 2026-11-11: G5/G7, shared integer identities
 
-`emit/opt/identity.c` delar nu typkorrekta heltalsidentiteter mellan alla
-bakändar; tvåpotensregeln ligger separat i `divpow2.c`. Unity och
-fil-för-fil klarar 32 kod-/körkontroller vid O0–O3. Egna sviter: x86
-131/131, arm64 136/136. Effekter och smala/höga registerbitar täcks av
-regressioner. Mätbrus hindrar slutsats om små kompilator-CPU-skillnader;
-se OPT1 i `PLAN-fas2.md`. G5/G7 och hela O2-målet är fortsatt öppna.
+`emit/opt/identity.c` now shares type-correct integer identities between all
+backends; the power-of-two rule lives separately in `divpow2.c`.  Unity and
+file-by-file pass 32 code/run checks at O0-O3.  Own suites: x86
+131/131, arm64 136/136.  Effects and narrow/high register bits are covered by
+regressions.  Measurement noise prevents conclusions about small compiler CPU differences;
+see OPT1 in `PLAN-fas2.md`.  G5/G7 and the whole O2 goal remain open.
 
-### Status 2026-11-11: G5/G7, första gemensamma regel implementerad
+### Status 2026-11-11: G5/G7, first shared rule implemented
 
-Unsigned konstant tvåpotensdivision/-rest sänks nu genom samma hjälpare
-för x86, arm64 och wasm32/64. Alla 16 mål-/nivåkombinationer klarar
-kodkrav och literalbaserad körkontroll, även fil-för-fil. Egna sviter:
-x86 130/130, arm64 135/135. Wasm-testvägen använder vcc:s egna objekt
-och länkare plus systemets Node 24/25, utan Emscripten; full
-runtimeersättning är W9 i `PLAN-wasm.md`. Korta före/efter-mätningar
-och begränsningarna för hårdvaruräknare är dokumenterade vid OPT1
-i `PLAN-fas2.md`. Detta är delprogress; G5/G7 är fortsatt öppna.
+Unsigned constant power-of-two division/remainder is now lowered through the same helper
+for x86, arm64 and wasm32/64.  All 16 target/level combinations pass
+code requirements and literal-based run checks, also file-by-file.  Own suites:
+x86 130/130, arm64 135/135.  The wasm test path uses vcc's own objects
+and linker plus the system's Node 24/25, without Emscripten; full
+runtime replacement is W9 in `PLAN-wasm.md`.  Short before/after measurements
+and the limitations of hardware counters are documented at OPT1
+in `PLAN-fas2.md`.  This is partial progress; G5/G7 remain open.
 
-### Status 2026-11-11: G5/G7, gemensam implementationsplan
+### Status 2026-11-11: G5/G7, common implementation plan
 
-`PLAN-fas2.md` **Gemensam optimerare utan SSA** äger nu OPT0–OPT8 efter
-kodgranskning av alla tre generatorer. C-regler/strategier delas av x86,
-arm64 och wasm32/wasm64; arm64:s befintliga postoptimerare extraheras för
-registermålen. X4 och wasm-planen äger inkoppling och målsänkning.
-Planen anger beroenden, effekt-/ABI-/minneskontrakt, begränsad CPU-kostnad,
-tester och separata mätningar av kompilator och genererad kod. Nästa
-leverans är en ny bas och en delad heltalsregel med tre konsumenter.
-Ingen optimering implementerad; G5/G7 är fortsatt öppna och G5:s X saknas.
+`PLAN-fas2.md` **Shared optimizer without SSA** now owns OPT0-OPT8 after
+a code review of all three generators.  C rules/strategies are shared by x86,
+arm64 and wasm32/wasm64; arm64's existing post-optimizer is extracted for
+the register targets.  X4 and the wasm plan own hookup and target lowering.
+The plan states dependencies, effect/ABI/memory contracts, bounded CPU cost,
+tests and separate measurements of compiler and generated code.  The next
+delivery is a new base and a shared integer rule with three consumers.
+No optimization implemented; G5/G7 remain open and G5's X is missing.
 
-### Status 2026-11-11: G5, audit av x86-kodkvalitet
+### Status 2026-11-11: G5, audit of x86 code quality
 
-`PLAN-x86.md` X4 har en prioriterad audit mot clang 23.1.6 och GCC 15.2.0
-på Ryzen 7 9700X: lokala optimeringar med låg kompilatorkostnad utan
-IR/SSA. Utökad med 29 reproducerbara prober vid O0–O3, baseline och
-native: 24/24 körningar ger samma checksumma samt klarar gränsvärden och
-kodkontroller för befintliga egenskaper. Flaggor, passloggar och kod sparas
-av `bench/vcc-optaudit.py`; vcc O1/O2/O3 ger samma assembler här.
-Inga optimeringar implementerade eller uppmätt
-körtidsmål; G5 är fortsatt öppet och benchmarksvitens X är inte fastställt.
+`PLAN-x86.md` X4 has a prioritized audit against clang 23.1.6 and GCC 15.2.0
+on Ryzen 7 9700X: local optimizations with low compiler cost without
+IR/SSA.  Extended with 29 reproducible probes at O0-O3, baseline and
+native: 24/24 runs give the same checksum and pass limit values and
+code checks for existing properties.  Flags, pass logs and code are saved
+by `bench/vcc-optaudit.py`; vcc O1/O2/O3 give the same assembly here.
+No optimizations implemented or measured
+run-time goal; G5 remains open and the benchmark suite's X is not fixed.
 
-### Status 2026-11-11: x86-funktionsmål, SSE4 och matematik
-G1/G2 har en sammanhängande x86-featuremodell utan LLVM vid körning:
-CPU/native, funktionsattribut, inlining, SSE4-strängoperationer och interrupt.
-AVX-ABI för breda vektorer och record diagnostiseras tills transporten finns.
-Fast-math sänker sqrt och begränsade heltalspotenser med bevarad evaluering.
-Isolerad validering på bas 0757803: x86 162/162 (fem referens-/målskip),
-ARM64 167/167, ABI 23/23 per mål, PP 920/920 och sema 887/887 i båda lägena.
-Featuremakron 587/587, attribut/ABI-spärrar 302/302, SSE4-grindar 124/124
-samt GCC pr40470 4/4 passerar. G1/G2 och S4 är fortfarande öppna.
-### Status 2026-11-11: atomiska helobjekt på Linux
-Större atomiska record, heltal och komplexa värden använder nu libatomic-ABI
-när den inbyggda 1/2/4/8-bytevägen inte räcker. Jämför-och-byt-loopar behåller
-hela objektet och rätt förväntat värde även vid padding och konkurrens.
-Pthread-prov samt atomikregressioner klarar Linux x86 och ARM i unity,
-filvis bygge och ASan/UBSan; kernel-sema är 887/887 i båda körsätten.
-Den nya snabba värdriggen körs i normal och ASan-CI. Atomiska vektortyper
-återstår i frontend; G1/G2 är fortsatt öppna.
+### Status 2026-11-11: x86 function targets, SSE4 and math
+G1/G2 have a coherent x86 feature model without LLVM at run time:
+CPU/native, function attributes, inlining, SSE4 string operations and interrupt.
+AVX ABI for wide vectors and records is diagnosed until the transport exists.
+Fast-math lowers sqrt and limited integer powers with preserved evaluation.
+Isolated validation on base 0757803: x86 162/162 (five reference/target skips),
+ARM64 167/167, ABI 23/23 per target, PP 920/920 and sema 887/887 in both modes.
+Feature macros 587/587, attribute/ABI guards 302/302, SSE4 gates 124/124
+and GCC pr40470 4/4 pass.  G1/G2 and S4 are still open.
+### Status 2026-11-11: atomic whole objects on Linux
+Larger atomic records, integers and complex values now use the libatomic ABI
+when the built-in 1/2/4/8-byte path is not enough.  Compare-and-swap loops keep
+the whole object and the right expected value also with padding and contention.
+Pthread tests and atomics regressions pass Linux x86 and ARM in unity,
+file-by-file build and ASan/UBSan; kernel sema is 887/887 in both run modes.
+The new fast host rig runs in normal and ASan CI.  Atomic vector types
+remain in the front end; G1/G2 remain open.
 
-### Status 2026-11-11: objektrepresentationer och packade boolvektorer
-`__builtin_bit_cast` har körning och bytebaserad konstanttolkning med okänd
-padding; packade boolvektorer har logiska element, bitlagring och verifierad
-Linux/Wasm-ABI. Isolerad unity/filvis validering är 164/164 egna x86-prov,
-169/169 ARM-prov och 32/32 ABI-prov per mål. TSan och skyddssidesprov är
-gröna; se `TEST.plan` S2 för gränser och validering. Detta flyttar G1/G2 men
-stänger dem inte; separat `nullptr_t`-identitet återstår.
+### Status 2026-11-11: object representations and packed bool vectors
+`__builtin_bit_cast` has run-time and byte-based constant evaluation with unknown
+padding; packed bool vectors have logical elements, bit storage and verified
+Linux/Wasm ABI.  Isolated unity/file-by-file validation is 164/164 own x86 tests,
+169/169 ARM tests and 32/32 ABI tests per target.  TSan and guard-page tests are
+green; see `TEST.plan` S2 for limits and validation.  This moves G1/G2 but
+does not close them; separate `nullptr_t` identity remains.
 
-### Status 2026-11-11: externa tester på Linux x86-64
-ARM64:s stackallokering och slots använder nu 64-bitars offset med kontrollerad
-överflödeshantering. GCC `20031023-{1..4}` kompilerar (4/4); `frame_wide`
-körs med 64 KiB under QEMU och kompilerar med 1 TiB både direkt till objekt
-och via assemblertext. Isolerad egen ARM64-svit: 115/115. Detta flyttar G1/G2
-men stänger inte grindarna.
+### Status 2026-11-11: external tests on Linux x86-64
+ARM64's stack allocation and slots now use 64-bit offsets with checked
+overflow handling.  GCC `20031023-{1..4}` compile (4/4); `frame_wide`
+runs with 64 KiB under QEMU and compiles with 1 TiB both directly to object
+and via assembly text.  Isolated own ARM64 suite: 115/115.  This moves G1/G2
+but does not close the gates.
 
-G1 har fått mätbara baslinjer från clangs diagnostiktester, GCC:s
-compile-svit och två små körsviter. Fel och krascher återstår; se
-`TEST.plan` S2, S3 och S5. G1 och G2 är inte färdiga.
+G1 has got measurable baselines from clang's diagnostics tests, GCC's
+compile suite and two small run suites.  Failures and crashes remain; see
+`TEST.plan` S2, S3 and S5.  G1 and G2 are not done.
 
-### Status 2026-11-09: plan skriven, inga grindar byggda
-Inget av G0–G9 finns som skript än.  Det som finns i dag och blir delar av
-grindarna: `vcc-diff.py`, `vcc-sema.py`, `vcc-ctests.py`, `vcc-abi.py`,
+### Status 2026-11-09: plan written, no gates built
+None of G0-G9 exists as a script yet.  What exists today and becomes parts of
+the gates: `vcc-diff.py`, `vcc-sema.py`, `vcc-ctests.py`, `vcc-abi.py`,
 `vcc-diag.py`, `vcc-driver.py`, `vccd-test.py`, `vcc-stress.py`,
-`bench/pg/`, `vccd-kbuild.sh` + `boot-test.py`.  Det saknas README,
-LICENSE, x86-64-backend, wasm-backend, -O1, SQLite-korpus, Debian-urval,
-Csmith/YARPGen-rigg och paketering.
+`bench/pg/`, `vccd-kbuild.sh` + `boot-test.py`.  What is missing: README,
+LICENSE, x86-64 backend, wasm backend, -O1, SQLite corpus, Debian selection,
+Csmith/YARPGen rig and packaging.
 
-### Status 2026-11-11: G5/G7, switchmedlemskap med bitmask
+### Status 2026-11-11: G5/G7, switch membership with bitmask
 
-OPT6 känner igen begränsade staplade case med en gemensam destination och
-sänker dem till en intervallskyddad bitmask på arm64, x86 och båda wasm-målen.
-Riktade kör- och kodkontroller passerar O0–O3 och `VCC_NOOPT`; vcc-sviten
-passerar 246/246 med en befintlig xfail. Ett riktat x86-exempel minskar från
-131 till 85 byte. Mätningens begränsningar och kvarvarande arbete finns i
-PLAN-fas2; G5/G7 och full O2 är fortsatt öppna.
+OPT6 recognizes limited stacked cases with a common destination and
+lowers them to a range-guarded bitmask on arm64, x86 and both wasm targets.
+Targeted run and code checks pass O0-O3 and `VCC_NOOPT`; the vcc suite
+passes 246/246 with one existing xfail.  A targeted x86 example shrinks from
+131 to 85 bytes.  The measurement's limitations and remaining work are in
+PLAN-fas2; G5/G7 and full O2 remain open.
 
-### Status 2026-11-11: G5/G7, balanserad switchdispatch
+### Status 2026-11-11: G5/G7, balanced switch dispatch
 
-OPT6:s första del använder gemensamt strategival/sortering och balanserade
-jämförelseträd på x86, arm64 och wasm; täta wasm-tabeller behålls. Kombinationen
-med b63c269 bygger unity/fil-för-fil och passerar 164 riktade kör-/kodkrav,
-219 arm64- och 214 x86-regressioner. På fded15a-basen är 500-funktionskontroller
-byte-identiska och extra Callgrind-kompileringsarbete högst +0,180 %; ett
-riktat x86-switchprov minskar exekverade instruktioner 48,39 %. Avgränsning,
-rådata och kvarvarande OPT6-delar står i PLAN-fas2. G5/G7 och full O2 är öppna.
-
-
-### Status 2026-11-11: G5/G7, billigare gemensam cellinsamling
-
-Arm64/wasm använder den delade strömmande intervallinsamlaren utan ändrad
-kodgenerering. Matchade O1/O2-mikrofall minskar hela kompileringens Ir med
-0,145–0,453 % för flera fält; ett fält kostar 0,050–0,053 % och kontroller
-0,006–0,071 %. Randomiserad sanitizer-/mutationsoracle, 118 byteparitetspar,
-observerbara accesser och fokuserade wasm-körfall passerar. Detaljer och
-avvisade varianter finns i PLAN-fas2. Ingen bred prestandagrind eller ny
-optimeringsregel ingår; G5/G7 och full O2 är fortsatt öppna.
-### Status 2026-11-11: G5/G7, unsigned32 reciprokdivision
-
-OPT8:s u32-del använder gemensamma reciproker för native kvot/rest och
-begränsade wasm-kvoter. 180 riktade kör-/kodkrav, sanitiserade matematik- och
-tryckkontrakt, unity/fil-för-fil samt 220 arm64-/215 x86-regressioner passerar.
-Mot exakt 781ca69 ligger extra arbete i kontroller under +0,442 % och en
-konfigurerad 10–12-filers mix mellan −0,017 % och +0,018 %. En mättad
-arm64-divisionskorpus kostar däremot +19,54 % att kompilera; avvägningen och
-avgränsade x86/wasm-körprov står i PLAN-fas2. Detta stänger inte G5/G7.
-Signed/u64-reciproker och full O2-täckning återstår.
-
-Efter integrering med main54580f7: samma kompilatorkod, 180/180 riktade fall,
-221/221 arm64-regressioner (ett befintligt xfail), 216/216 x86-regressioner
-(sex referensskips) samt sanitiserade reciprok-/tryckkontrakt passerar.
-
-### Status 2026-11-11: G5/G7, unsigned64 reciprokdivision
-
-OPT8 har nu separata u32/u64-recept, native högprodukt med bevarade implicita
-register och billig wasm-u64-jämförelsekvot. 196 riktade fall, sanitiserade
-matematik-/registerkontrakt, unity/fil-för-fil, 222 arm64-/217 x86-regressioner,
-ABI och unwind passerar. Mot exakt 046c6dc kostar kontroll-/loopprov högst
-+0,00021 % och den konfigurerade mixen −0,00794…+0,00082 %.
-Mättade u64-funktioner kostar däremot +14,10 % x86/+17,99 % arm64 att kompilera;
-ett avgränsat seedat x86-körprov minskar median barn-CPU 69,55 % med samma svar.
-Avvägning, exakta hashvärden och begränsningar står i PLAN-fas2. Signed,
-dyrare wasm-klasser och full O2 återstår; G5/G7 stängs inte av detta delsteg.
-
-### Status 2026-11-11: G5/G7, x86-blad utan ram
-
-Verkligt ramfria x86-blad kan nu hoppa över rbp-prolog/epilog; policy och
-begränsad effektkontroll ligger i en egen frame.c och den redan befintliga
-postvandringen. Explicit frame-pointer-policy och blandade deklarationscacher
-är testade. CFI/debug, hårdningsinträden och en riktig signal-unwind genom ett
-ramfritt blad är verifierade; övriga funktioner behåller sin ram. Egna x86-prov
-215/215, ABI 32/32 och befintliga registerhems-unwindprov är gröna.
-Två kalla 501-funktions-profiler ger −0,176 %/−0,537 % Ir; kontrollens assembler
-är identisk. Käll-/binärhashar, flaggor och bytebegränsningar står i PLAN-x86.md.
-Ingen generell fart- eller programkörtidsvinst är bevisad. G5/G7 och hela O2
-är fortsatt öppna; parameterhem och bredare mätningar återstår.
-
-### Status 2026-11-11: G5/G7, rena konstanta kontrollbeslut
-
-OPT6:s gemensamma kontrollhjälpare används av x86, arm64 och wasm med
-respektive måls befintliga `constant_p`-policy. Det nya delsteget bevarar
-O0/noopt i 64 bytejämförelser på fyra mål, passerar 164 befintliga och
-16 nya riktade nivå-/målkontroller samt fil-för-fil-bygge. Två tidigare
-wasm-xfail (`if_call_const`, `cond_dead_and`) är obligatoriska på wasm32/64.
-Globala volatile-/atomic-laddningar och exakt en utvärdering kontrolleras
-uttryckligen. Mot exakt 781ca69 med lika värdflaggor är avgränsade
-500-funktionskontroller inom +0,095 % extra Callgrind-arbete; det positiva
-kontrollprovet minskar kompilatorns instruktioner 2,75–18,36 % beroende på
-mål. Detta ersätter inte full prestandagrind eller CI och belägger ingen
-generell förbättring i programmets körtid. G5/G7 och full O2 är öppna;
-rådata, återstående delar och begränsningar står i PLAN-fas2.
-
-### Status 2026-11-11: integration av x86-funktionsmål och OPT3
-
-Funktionsmål och packad bool-ABI delar nu klassificering med optimerarens
-registerhem. SSE4-poster har explicita register-/flaggeffekter; fasta
-variadiska boolparametrar verifieras även via indirekta anrop. Båda bygglägen
-klarar egna Linuxsviter (176 x86, 181 ARM), ABI 32 per mål, 220 diagnostikprov
-och 887 kernel-TU:er i båda semalägena. G1/G2/G5 förblir öppna.
+OPT6's first part uses common strategy selection/sorting and balanced
+comparison trees on x86, arm64 and wasm; dense wasm tables are kept.  The combination
+with b63c269 builds unity/file-by-file and passes 164 targeted run/code requirements,
+219 arm64 and 214 x86 regressions.  On the fded15a base, 500-function checks
+are byte-identical and extra Callgrind compile work is at most +0.180 %; a
+targeted x86 switch test reduces executed instructions 48.39 %.  Delimitation,
+raw data and remaining OPT6 parts are in PLAN-fas2.  G5/G7 and full O2 are open.
 
 
-### Status 2026-11-11: G5/G7, enoperationsrecept för gånger 3/5/9
+### Status 2026-11-11: G5/G7, cheaper shared cell collection
 
-Ett delat konstanttidsrecept väljer separata native-adaptrar: skalad LEA på
-x86 och skiftad ADD på arm64, O1+ utan VCC_NOOPT. Wasm behåller mul enligt
-referensens kostnadsval. O0/NOOPT/overflow-paritet, modulär sanitizer-/mutationsoracle,
-posteffekter, två bygglägen och fyra måls O0–O3-körfall passerar. Kodformsvinst
-är belagd; matchad mikrokostnad mot historisk bas 69c1bd7 är högst +0,126 %
-för kontroller; positivt prov kostar +0,353 % x86 och −2,147 % arm64.
-Wasm är byteidentiskt. Detta är kompileringens Ir, inte körtidsvinst eller full
-prestandagrind; slutlig integrations-CI återstår. Faktorer
-6/7/10/15 och bredare aritmetikregler är öppna. G5/G7 och full O2 förblir öppna.
+Arm64/wasm use the shared streaming interval collector without changed
+code generation.  Matched O1/O2 micro cases reduce the whole compilation's Ir by
+0.145-0.453 % for several fields; one field costs 0.050-0.053 % and controls
+0.006-0.071 %.  Randomized sanitizer/mutation oracle, 118 byte-parity pairs,
+observable accesses and focused wasm run cases pass.  Details and
+rejected variants are in PLAN-fas2.  No broad performance gate or new
+optimization rule is included; G5/G7 and full O2 remain open.
+### Status 2026-11-11: G5/G7, unsigned32 reciprocal division
 
-Efter konfliktintegration med main4bb6d52 via OPT3-huvudet 9b18f64: unitybygge,
-16/16 riktade unsigned32-fall på fyra mål samt sanitiserade reciprok-/tryck-
-och registereffektkontrakt passerar. Båda planernas status behålls.
+OPT8's u32 part uses common reciprocals for native quotient/remainder and
+limited wasm quotients.  180 targeted run/code requirements, sanitized math and
+pressure contracts, unity/file-by-file and 220 arm64/215 x86 regressions pass.
+Against exact 781ca69, extra work in controls is under +0.442 % and a
+configured 10-12-file mix between -0.017 % and +0.018 %.  A saturated
+arm64 division corpus, however, costs +19.54 % to compile; the trade-off and
+delimited x86/wasm run tests are in PLAN-fas2.  This does not close G5/G7.
+Signed/u64 reciprocals and full O2 coverage remain.
 
-Efter mainf97d16d (#47/#52/#55): unity, 16 unsigned32-mål-/nivåfall,
-16 konstanta kontrollfall och sanitiserade reciprok-/registereffektskontrakt
-passerar igen; de två planernas oberoende statusblock är bevarade.
+After integration with main54580f7: the same compiler code, 180/180 targeted cases,
+221/221 arm64 regressions (one existing xfail), 216/216 x86 regressions
+(six reference skips) and sanitized reciprocal/pressure contracts pass.
 
-U64 integrerat med mainf97d16d/PR51head54c8f3f: 196 regelprov, 16 kontrollprov,
-229 arm64-/224 x86-regressioner, ABI, unity/fil-för-fil och sanitizerkontrakt
-passerar. Ny exakt föräldramätning54c8f3f→d8957b3: fixerad mix högst
-+0,01955 %, mättad u64-korpus +13,55 % x86/+17,97 % arm64 kompilatorarbete;
-avgränsat x86-körprov −69,26 % barn-CPU. Historiska siffror ovan och fulla
-öppna G5/G7-grindar behålls; se PLAN-fas2 för hashvärden och provens gränser.
+### Status 2026-11-11: G5/G7, unsigned64 reciprocal division
 
-Efter main2dc4ea3 (#50:s x86-blad): unity, 16 division-/nivå-/målfall,
-sanitiserade reciprok-/registereffektkontrakt och bladramens policy, cache-,
-debug-/härdnings- och signal-unwindprov passerar. Båda statusblock behålls.
+OPT8 now has separate u32/u64 recipes, native high product with preserved implicit
+registers and a cheap wasm u64 comparison quotient.  196 targeted cases, sanitized
+math/register contracts, unity/file-by-file, 222 arm64/217 x86 regressions,
+ABI and unwind pass.  Against exact 046c6dc, control/loop tests cost at most
++0.00021 % and the configured mix -0.00794...+0.00082 %.
+Saturated u64 functions, however, cost +14.10 % x86/+17.99 % arm64 to compile;
+a delimited seeded x86 run test reduces median child CPU 69.55 % with the same answers.
+Trade-off, exact hash values and limitations are in PLAN-fas2.  Signed,
+more expensive wasm classes and full O2 remain; G5/G7 are not closed by this substep.
 
-### Status 2026-11-11: G5/G7, begränsade native-tail-calls
+### Status 2026-11-11: G5/G7, frameless x86 leaves
 
-Gemensam semantisk kontroll och separata måladaptrar ersätter enkla direkta
-return-call-wrappers med epilog följd av symbolgren på x86 och arm64 vid
-O1–O3. Flaggordning, ärvda attribut, ABI-register, CFI och arm64:s direkta
-objektrelokeringar är verifierade. Standard-wasm behåller vanligt call,
-liksom clang utan explicit tail-call-feature. Kärnsema/paritet på integrerad
-main-bas, egna x86-/arm64-prov, båda native-ABI-sviterna och verklig unwind är gröna.
-Två exakta 501-funktions-Ir-profiler visar −12,082 % för wrapperfallet och
-+0,338 % för oförändrad aritmetisk kontroll; bara wrapperfallet minskar text.
-Hashar, omfattning och kvarvarande undantag står i OPT8 i PLAN-fas2.md.
-Detta bevisar ingen generell fartvinst. G5/G7 och full O2 är fortsatt öppna.
+Truly frameless x86 leaves can now skip the rbp prologue/epilogue; policy and
+limited effect check live in a separate frame.c and the already existing
+post-walk.  Explicit frame-pointer policy and mixed declaration caches
+are tested.  CFI/debug, hardening entries and a real signal unwind through a
+frameless leaf are verified; other functions keep their frame.  Own x86 tests
+215/215, ABI 32/32 and existing register-home unwind tests are green.
+Two cold 501-function profiles give -0.176 %/-0.537 % Ir; the control's assembly
+is identical.  Source/binary hashes, flags and byte limitations are in PLAN-x86.md.
+No general speed or program run-time gain is proven.  G5/G7 and the whole O2
+remain open; parameter homes and broader measurements remain.
 
-U64 har också integrerat main2dc4ea3 via PR51head15551a7: 196 riktade fall,
-sanitiserade kontrakt och hela bladramsharnessen passerar. Reciprokfilerna är
-oförändrade; mätningarna förblir bundna till sina tidigare exakta hashvärden.
+### Status 2026-11-11: G5/G7, pure constant control decisions
 
-### Status 2026-11-11: G5/G7, signed32/64 reciprokdivision
+OPT6's common control helper is used by x86, arm64 and wasm with
+each target's existing `constant_p` policy.  The new substep preserves
+O0/noopt in 64 byte comparisons on four targets, passes 164 existing and
+16 new targeted level/target checks as well as a file-by-file build.  Two earlier
+wasm xfails (`if_call_const`, `cond_dead_and`) are mandatory on wasm32/64.
+Global volatile/atomic loads and exactly one evaluation are checked
+explicitly.  Against exact 781ca69 with equal host flags, delimited
+500-function controls are within +0.095 % extra Callgrind work; the positive
+control test reduces the compiler's instructions 2.75-18.36 % depending on
+target.  This does not replace a full performance gate or CI and does not show any
+general improvement in the program's run time.  G5/G7 and full O2 are open;
+raw data, remaining parts and limitations are in PLAN-fas2.
 
-OPT8:s signed-del ovanpå `f585591` har gemensamma typade reciproker och
-separata x86/arm64-adaptrar. Kvot och rest följer C:s avrundning mot noll,
-även för negativa divisorer och INT_MIN; wasm behåller motorns signed
-division/rest. Ett bevisat likhetsfall tar bort onödig täljaraddition för
-bland annat `/3`. O0, `noopt` och högt registertryck behåller tidigare väg.
+### Status 2026-11-11: integration of x86 function targets and OPT3
 
-Unity/fristående implementationer, 16 mål-/nivåkörningar och fyra noopt-
-kontroller passerar, liksom sanitiserade matematik-/tryck-/registerparskontrakt.
-Native ger 230 arm64-PASS (ett befintligt xfail), 225 x86-PASS (sex synliga
-referensundantag), ABI 32 per mål samt x86 debug/unwind. Parade v3-mätningar
-av exakt `f585591`→`fbc7105` ger fixerad mix högst +0,00572 % extra
-kompilatorinstruktioner. Mättad native signed32/64-kod kostar +14,21…+30,03 %;
-ett avgränsat x86-körprov ger −63,59 % barn-CPU, med clang-identiska svar.
-Åtta O0/noopt-assemblerjämförelser är byte-identiska. Fulla G5/G7 förblir öppna.
-Implementations- och valideringsgränserna står i PLAN-fas2:s signed-status.
+Function targets and packed bool ABI now share classification with the optimizer's
+register homes.  SSE4 records have explicit register/flag effects; fixed
+variadic bool parameters are verified also via indirect calls.  Both build modes
+pass own Linux suites (176 x86, 181 ARM), ABI 32 per target, 220 diagnostics tests
+and 887 kernel TUs in both sema modes.  G1/G2/G5 remain open.
 
 
-OPT1-integrationskontroll på 60027c7 efter wasm-föräldern 6d60e73:
-båda bygglägen, 16 fulla assemblerpar, 16 mål/nivå-körfall, sanitiserade
-recept-/postkontrakt och 36 policy-/overflow-paritetsjämförelser passerar.
-Tidigare kompilatorkostnad gäller fortfarande historiska 69c1bd7 till f92b67b;
-den tillskrivs inte denna nya förälder. Integrations-CI och full G7 återstår.
+### Status 2026-11-11: G5/G7, single-operation recipe for multiplying by 3/5/9
 
-### Status 2026-11-11: G1, promotion av bitfältsuttryck
+A shared constant-time recipe selects separate native adapters: scaled LEA on
+x86 and shifted ADD on arm64, O1+ without VCC_NOOPT.  Wasm keeps mul according to the
+reference's cost choice.  O0/NOOPT/overflow parity, modular sanitizer/mutation oracle,
+post effects, two build modes and four targets' O0-O3 run cases pass.  Code-shape gain
+is proven; matched micro cost against historical base 69c1bd7 is at most +0.126 %
+for controls; the positive test costs +0.353 % x86 and -2.147 % arm64.
+Wasm is byte-identical.  This is the compilation's Ir, not run-time gain or a full
+performance gate; final integration CI remains.  Factors
+6/7/10/15 and broader arithmetic rules are open.  G5/G7 and full O2 remain open.
 
-Smala unsigned-bitfält behåller sin promotionsbredd genom tilldelning,
-sammansatt tilldelning, komma och prefixinkrement. `sizeof`/`typeof`,
-postfix och explicita kast behåller sina separata deklarerade typregler.
-Det rättar två oförändrade Kefir-kontrakt på Linux x86-64 och ARM64/QEMU,
-alla fyra Clang/vcc-parningar. Regressionen provar även sidoeffekter.
-Unity/separata filer, sema run/batch 887/887 och egna körsviter
-223/223 x86 respektive 228/228 ARM är verifierade; sex x86-referensundantag
-och ett befintligt kört ARM-XFAIL redovisas separat. Hela Kefir-sviten och
-G1/G2 återstår. Evidens: `work/agents/kefir-bitfield/results/evidence.txt`.
+After conflict integration with main4bb6d52 via the OPT3 head 9b18f64: unity build,
+16/16 targeted unsigned32 cases on four targets and sanitized reciprocal/pressure
+and register-effect contracts pass.  Both plans' status is kept.
 
-### Status 2026-11-11: G1/G2, strängprefix, embed och VLA-gränser
+After mainf97d16d (#47/#52/#55): unity, 16 unsigned32 target/level cases,
+16 constant control cases and sanitized reciprocal/register-effect contracts
+pass again; the two plans' independent status blocks are preserved.
 
-Sen kodningsprefix styr nu hela följden av angränsande strängliteraler och
-föregående escape-sekvenser. C23:s citerade `#embed` söker arbetskatalogen
-efter inkluderarens katalog och före explicita embed-kataloger. Vikbara
-arraygränser med sidoeffekter utvärderas som VLA i stället för att tappa anropen.
-Fyra oförändrade Kefir-fall passerar alla Clang/vcc-kombinationer på x86;
-ARM/QEMU passerar embed och VLA, medan två strängfall avvisas av Clang
-på grund av upstreams signed-wchar-antaganden. Portabla strängregressioner
-passerar ARM. Unity/separata filer: egna x86 224/224 med sex referensundantag,
-ARM 229/229 med ett befintligt kört XFAIL, diagnostik 224/224 och 40 embed-
-orakeljämförelser. Kernelns sema 887/887 och full PP-paritet 920/920
-passerar både per process och i batch. G1/G2 är fortsatt öppna.
-Fryst källkod och verifieringsunderlag: `86c7352`,
+U64 integrated with mainf97d16d/PR51head54c8f3f: 196 rule tests, 16 control tests,
+229 arm64/224 x86 regressions, ABI, unity/file-by-file and sanitizer contracts
+pass.  New exact parent measurement54c8f3f->d8957b3: fixed mix at most
++0.01955 %, saturated u64 corpus +13.55 % x86/+17.97 % arm64 compiler work;
+delimited x86 run test -69.26 % child CPU.  Historical numbers above and full
+open G5/G7 gates are kept; see PLAN-fas2 for hash values and the tests' limits.
+
+After main2dc4ea3 (#50's x86 leaves): unity, 16 division/level/target cases,
+sanitized reciprocal/register-effect contracts and leaf-frame policy, cache,
+debug/hardening and signal unwind tests pass.  Both status blocks are kept.
+
+### Status 2026-11-11: G5/G7, limited native tail calls
+
+A common semantic check and separate target adapters replace simple direct
+return-call wrappers with an epilogue followed by a symbol branch on x86 and arm64 at
+O1-O3.  Flag order, inherited attributes, ABI registers, CFI and arm64's direct
+object relocations are verified.  Standard wasm keeps a normal call,
+as does clang without the explicit tail-call feature.  Kernel sema/parity on the integrated
+main base, own x86/arm64 tests, both native ABI suites and real unwind are green.
+Two exact 501-function Ir profiles show -12.082 % for the wrapper case and
++0.338 % for an unchanged arithmetic control; only the wrapper case reduces text.
+Hashes, scope and remaining exceptions are in OPT8 in PLAN-fas2.md.
+This proves no general speed gain.  G5/G7 and full O2 remain open.
+
+U64 has also integrated main2dc4ea3 via PR51head15551a7: 196 targeted cases,
+sanitized contracts and the whole leaf-frame harness pass.  The reciprocal files are
+unchanged; the measurements remain bound to their earlier exact hash values.
+
+### Status 2026-11-11: G5/G7, signed32/64 reciprocal division
+
+OPT8's signed part on top of `f585591` has common typed reciprocals and
+separate x86/arm64 adapters.  Quotient and remainder follow C's rounding
+toward zero, also for negative divisors and INT_MIN; wasm keeps the engine's signed
+division/remainder.  A proven equality case removes an unnecessary numerator addition for
+`/3` among others.  O0, `noopt` and high register pressure keep the earlier path.
+
+Unity/standalone implementations, 16 target/level runs and four noopt
+checks pass, as do sanitized math/pressure/register-pair contracts.
+Native gives 230 arm64 PASS (one existing xfail), 225 x86 PASS (six visible
+reference exceptions), ABI 32 per target and x86 debug/unwind.  Paired v3 measurements
+of exact `f585591`->`fbc7105` give a fixed mix of at most +0.00572 % extra
+compiler instructions.  Saturated native signed32/64 code costs +14.21...+30.03 %;
+a delimited x86 run test gives -63.59 % child CPU, with clang-identical answers.
+Eight O0/noopt assembly comparisons are byte-identical.  Full G5/G7 remain open.
+The implementation and validation limits are in PLAN-fas2's signed status.
+
+
+OPT1 integration check on 60027c7 after the wasm parent 6d60e73:
+both build modes, 16 full assembly pairs, 16 target/level run cases, sanitized
+recipe/post contracts and 36 policy/overflow parity comparisons pass.
+The earlier compiler cost still applies to historical 69c1bd7 to f92b67b;
+it is not attributed to this new parent.  Integration CI and full G7 remain.
+
+### Status 2026-11-11: G1, promotion of bit-field expressions
+
+Narrow unsigned bit-fields keep their promotion width through assignment,
+compound assignment, comma and prefix increment.  `sizeof`/`typeof`,
+postfix and explicit casts keep their separate declared type rules.
+This fixes two unchanged Kefir contracts on Linux x86-64 and ARM64/QEMU,
+all four Clang/vcc pairings.  The regression also tests side effects.
+Unity/separate files, sema run/batch 887/887 and own run suites
+223/223 x86 and 228/228 ARM respectively are verified; six x86 reference exceptions
+and one existing run ARM XFAIL are reported separately.  The whole Kefir suite and
+G1/G2 remain.  Evidence: `work/agents/kefir-bitfield/results/evidence.txt`.
+
+### Status 2026-11-11: G1/G2, string prefixes, embed and VLA bounds
+
+A late encoding prefix now governs the whole sequence of adjacent string literals and
+preceding escape sequences.  C23's quoted `#embed` searches the working directory
+after the includer's directory and before explicit embed directories.  Foldable
+array bounds with side effects are evaluated as VLAs instead of dropping the calls.
+Four unchanged Kefir cases pass all Clang/vcc combinations on x86;
+ARM/QEMU passes embed and VLA, while two string cases are rejected by Clang
+because of upstream's signed-wchar assumptions.  Portable string regressions
+pass ARM.  Unity/separate files: own x86 224/224 with six reference exceptions,
+ARM 229/229 with one existing run XFAIL, diagnostics 224/224 and 40 embed
+oracle comparisons.  The kernel's sema 887/887 and full PP parity 920/920
+pass both per process and in batch.  G1/G2 remain open.
+Frozen source and verification basis: `86c7352`,
 `work/results/frontend-milestone-2dc/`.
 
-### Status 2026-11-11: G1, breda heltal till/från flyttal
+### Status 2026-11-11: G1, wide integers to/from floating point
 
-Linux-konverteringar använder hela heltalsmagnituden med guard/sticky-bitar
-och en avrundning till närmaste jämna, respektive avkodning av flyttalets
-exponent och signifikand med trunkering mot noll. Ingen körtids-Clang eller
-128-bitars trunkering av heltalsindata används. Dynamiska avrundningslägen
-ingår inte; detta slutför inte G1.
+Linux conversions use the whole integer magnitude with guard/sticky bits
+and one round to nearest even, and decoding of the floating-point
+exponent and significand with truncation toward zero, respectively.  No run-time Clang or
+128-bit truncation of integer input is used.  Dynamic rounding modes
+are not included; this does not complete G1.
 
-På den privata milstolpen `7a1691f` passerar 6871 exakta x86-konverteringsprov
-och 5667 ARM-prov över fem heltalsbredder 129–7001, med sex respektive fem
-flyttalsformat. Unity och separata filer ger samma resultat. Clang-avvikelser
-för BF16, x87 och unsigned binary128 registreras separat; vcc måste alltid
-matcha den oberoende Python-orakeln. Oförändrat Kefir `bitint_cast_fix2`
-passerar fyra x86-kombinationer och två ARM-kombinationer med vcc-kallee;
-Clang stöder inte ARM-typens bredd. Snapshot/replay passerar med ASan/UBSan
-efter en separat rättning av ett befintligt nollängds-`memcpy` med nullkälla.
-Verifieringsunderlag: `work/results/bitint-float-reviewed/`.
+On the private milestone `7a1691f`, 6871 exact x86 conversion tests
+and 5667 ARM tests pass over five integer widths 129-7001, with six and five
+floating-point formats respectively.  Unity and separate files give the same result.  Clang deviations
+for BF16, x87 and unsigned binary128 are recorded separately; vcc must always
+match the independent Python oracle.  Unchanged Kefir `bitint_cast_fix2`
+passes four x86 combinations and two ARM combinations with a vcc callee;
+Clang does not support the ARM type's width.  Snapshot/replay passes with ASan/UBSan
+after a separate fix of an existing zero-length `memcpy` with a null source.
+Verification basis: `work/results/bitint-float-reviewed/`.
 
-Återintegrationen på `b0b6107` bevarar de nyare konstant- och aliasoptimeringarna.
-Unity och separata filer passerar samma IEEE-matris, 222/222 egna x86-prov
-(med sex befintliga referensundantag), 227/227 ARM-prov (ett befintligt xfail,
-inga hoppade prov) och kärnans sema
-887/887 både individuellt och i batch. IEEE-matrisen passerar även med `-O3`
-på båda målen. Reglerna O0–O3, constant-control, leaf-frame, slot-values,
-slot-observable, switch-plan och debugrader passerar i båda byggsätten.
-ASan/UBSan passerar IEEE, konstantprov och snapshot/replay på båda målen.
-CI kör nu flyttalsmatrisen och sanitizer-replay. Evidens:
+The reintegration on `b0b6107` preserves the newer constant and alias optimizations.
+Unity and separate files pass the same IEEE matrix, 222/222 own x86 tests
+(with six existing reference exceptions), 227/227 ARM tests (one existing xfail,
+no skipped tests) and the kernel's sema
+887/887 both individually and in batch.  The IEEE matrix also passes with `-O3`
+on both targets.  The rules O0-O3, constant-control, leaf-frame, slot-values,
+slot-observable, switch-plan and debug lines pass in both build modes.
+ASan/UBSan pass IEEE, constant tests and snapshot/replay on both targets.
+CI now runs the floating-point matrix and sanitizer replay.  Evidence:
 `work/results/bitint-float-main-reviewed/`.
 
-Importen ovanpå PR #60 behåller dess fulla Linux-baslinjer och ändrar
-endast flyttalsuppföljningen. Båda oförändrade x86-Kefir-fallen
-`bitint_cast_fix2` och `bitint_typeconv6` är nu 2/2 godkända med fyra
-kompilatorkombinationer vardera; motsvarande standard-ARM-körning
-redovisar två Clang-referensavvisningar. Det breda ARM-värdebeviset
-kommer från IEEE-matrisen och de separat redovisade vcc-kalleeanropen.
-G1/G2 och strikt flyttalsmiljö är fortsatt öppna.
+The import on top of PR #60 keeps its full Linux baselines and changes
+only the floating-point follow-up.  Both unchanged x86 Kefir cases
+`bitint_cast_fix2` and `bitint_typeconv6` are now 2/2 approved with four
+compiler combinations each; the corresponding standard ARM run
+reports two Clang reference rejections.  The wide ARM value proof
+comes from the IEEE matrix and the separately reported vcc callee calls.
+G1/G2 and strict floating-point environment remain open.
 
-Fulla Kefir-omkörningar på den frysta stacken `a41361e` ger 585 godkända
-x86-fall och 461 ARM/QEMU-fall, utan vcc-kompileringsfel. Sex respektive fyra
-runtime-/tidsfel och samtliga referens-/unsupported-kategorier behålls;
-G1/G2 är fortsatt öppna. Linux-ASan/UBSan går 232/232 x86 och 237/237 ARM
-med befintliga undantag. Wasm64-preflight går 189/189 med 38 körda XFAIL;
-ExtInt-provet täcker den redan verifierade BitInt-ABI-luckan på Wasm32/64.
-Exakta kommandon, oförändrad kompilatorkod och testmarkörens föräldraprov:
+Full Kefir reruns on the frozen stack `a41361e` give 585 approved
+x86 cases and 461 ARM/QEMU cases, without vcc compile errors.  Six and four
+runtime/timing failures respectively and all reference/unsupported categories are kept;
+G1/G2 remain open.  Linux ASan/UBSan goes 232/232 x86 and 237/237 ARM
+with existing exceptions.  Wasm64 preflight goes 189/189 with 38 run XFAIL;
+the ExtInt test covers the already verified BitInt ABI gap on Wasm32/64.
+Exact commands, unchanged compiler code and the test marker's parent test:
 `work/results/native-stack64-ci-preflight/`.
 
-G7: ett profilstyrt emittersteg minskar upprepad identifierar- och x86-register-
-matchning. Den fasta instruktionsgrinden och de riktade proverna finns i
-PLAN-fas2.md; faktisk kompileringstid på hela projekt återstår att mäta.
+G7: a profile-driven emitter step reduces repeated identifier and x86 register
+matching.  The fixed instruction gate and the targeted tests are in
+PLAN-fas2.md; actual compile time on whole projects remains to be measured.
 
-OPT1-utökningen med tvåpotensmultiplikation och bitkomplement är implementerad
-för x86, arm64 och wasm och har fokuserad O0–O3-validering och en liten
-matchad kompilatorkostnadsprofil i PLAN-fas2.md. G5/G7 och generell O2-täckning
-är fortsatt öppna.
+The OPT1 extension with power-of-two multiplication and bit complement is implemented
+for x86, arm64 and wasm and has focused O0-O3 validation and a small
+matched compiler cost profile in PLAN-fas2.md.  G5/G7 and general O2 coverage
+remain open.
 
-Begränsade switch-värdetabeller har validerats på fyra mål; syntetiska
-kompilatorkostnader och deras begränsningar finns i PLAN-fas2.md. G5/G7 och
-en realistisk sammansatt kostnadsgrind återstår.
+Limited switch value tables have been validated on four targets; synthetic
+compiler costs and their limitations are in PLAN-fas2.md.  G5/G7 and
+a realistic composite cost gate remain.
 
-Avgränsade heltalsjämförelser vid typgränser är implementerade för alla fyra
-mål och har fokuserade korrekthets- och kompilatorkostnadsprov i PLAN-fas2.md.
-G5/G7 och generell O2-täckning är fortsatt öppna.
+The composite optimization stack with value tables passes the limited
+1 % compiler cost gate on four targets (PLAN-fas2.md); the saturated
+switch cost and the release gates G5/G7 remain to be followed up.
 
-Den sammansatta optimeringsstacken med värdetabeller klarar den begränsade
-1 %-kompilatorkostnadsgrinden på fyra mål (PLAN-fas2.md); den mättade
-switchkostnaden och releasegrindarna G5/G7 återstår att följa upp.
+The byte output of switch value tables has been sped up after `perf` profiling;
+matched measurements and their limitations are in PLAN-fas2.md.  G5/G7 remain.
 
-Switch-värdetabellernas byteutmatning har snabbats upp efter `perf`-profilering;
-matchade mätningar och deras begränsningar finns i PLAN-fas2.md. G5/G7 kvarstår.
+The arithmetic and switch stack that previously ended up in feature branches is now
+integrated on main.  Four targets' focused tests, native suites and the current matched
+compiler instruction gate are reported in PLAN-fas2.md.  G5/G7 remain.
 
-Aritmetik- och switchstacken som tidigare hamnade i featuregrenar integreras
-nu på main. Fyra måls fokuserade tester, native-sviter och aktuell matchad
-kompilatorinstruktionsgrind redovisas i PLAN-fas2.md. G5/G7 återstår.
+Type bounds written as limited pure constant expressions are now simplified on the
+four targets.  Tests and the delimited compiler instruction measurement are in
+PLAN-fas2.md; G5/G7 and general O2 coverage remain open.
 
-Typgränser skrivna som begränsade rena konstantuttryck förenklas nu på de
-fyra målen. Tester och den avgränsade kompilatorinstruktionsmätningen finns i
-PLAN-fas2.md; G5/G7 och generell O2-täckning är fortsatt öppna.
+Wasm lowers integer equality with zero and unsigned `x <= 0` to a direct
+zero-test instruction.  Four-target tests and delimited compiler cost are in
+PLAN-fas2.md; G5/G7 and general O2 coverage remain open.
 
-Wasm sänker heltalslikhet med noll och osignerad `x <= 0` till en direkt
-nolltestinstruktion. Fyrmålstester och avgränsad kompilatorkostnad finns i
-PLAN-fas2.md; G5/G7 och generell O2-täckning är fortsatt öppna.
+Delimited identities for the same ordinary local integer variable are simplified
+on all targets.  Four-target tests and compiler instruction measurement are in
+PLAN-fas2.md; G5/G7 and general O2 coverage remain open.
 
-Avgränsade identiteter för samma ordinära lokala heltalsvariabel förenklas
-på alla mål. Fyrmålstester och kompilatorinstruktionsmätning finns i
-PLAN-fas2.md; G5/G7 och generell O2-täckning är fortsatt öppna.
+Self-comparisons of ordinary local integers are also handled by the common
+identity recipe, with a NaN regression and four-target measurement in PLAN-fas2.md.
 
-Även självjämförelser av ordinära lokala heltal hanteras av det gemensamma
-identitetsreceptet, med NaN-regression och fyrmålsmätning i PLAN-fas2.md.
+Double unary integer operations are simplified commonly for all targets; tests and
+delimited compiler cost tests are in PLAN-fas2.md.  G5/G7 remain.
 
-Dubbla unära heltalsoperationer förenklas gemensamt för alla mål; tester och
-avgränsade kompilatorkostnadsprov finns i PLAN-fas2.md. G5/G7 återstår.
+A first budgeted value table reuses safe identical sibling expressions
+on all targets; tests and delimited compiler costs are in PLAN-fas2.md.
+General local CSE, G5/G7 and full O2 coverage remain.
 
-En första budgeterad värdetabell återanvänder säkra identiska syskonuttryck
-på alla mål; tester och avgränsade kompilatorkostnader finns i PLAN-fas2.md.
-Generell lokal CSE, G5/G7 och full O2-täckning återstår.
+A local integer initialization can be reused in a directly following pure return
+on all targets; verification and delimited costs are in PLAN-fas2.md.
+General local CSE and G5/G7 remain.
 
-En lokal heltalsinitiering kan återanvändas i en direkt efterföljande ren retur
-på alla mål; verifiering och avgränsade kostnader finns i PLAN-fas2.md.
-Generell lokal CSE samt G5/G7 återstår.
+The budgeted local value reuse also covers later pure
+integer initializations; four-target tests and delimited cost are in PLAN-fas2.md.
 
-Den budgeterade lokala värdeåteranvändningen omfattar även senare rena
-heltalsinitieringar; fyrmålsprov och avgränsad kostnad finns i PLAN-fas2.md.
+The limited local value scan can pass independent local writes
+with invalidation of dependencies; tests, cost and a saturated control case are in
+PLAN-fas2.md.  General CSE and G5/G7 remain.
 
-Den begränsade lokala värdeskanningen kan passera oberoende lokala skrivningar
-med invalidation av beroenden; tester, kostnad och mättat kontrollfall finns i
-PLAN-fas2.md. Generell CSE och G5/G7 återstår.
+Budgeted local value reuse can also be used in pure assignments;
+four-target tests, costs and limitations are in PLAN-fas2.md.  G5/G7 remain.
 
-Budgeterad lokal värdeåteranvändning kan även användas i rena tilldelningar;
-fyrmålsprov, kostnader och begränsningar finns i PLAN-fas2.md. G5/G7 återstår.
+Local value reuse from PR #97 and #100 is integrated on main; combined
+four-target tests and compiler costs are in PLAN-fas2.md.  G5/G7 remain.
 
-Lokal värdeåteranvändning från PR #97 och #100 integreras på main; samlade
-fyrmålsprov och kompilatorkostnader finns i PLAN-fas2.md. G5/G7 återstår.
+VIR's verification of slot exposure has a safe linear analysis for long
+graphs; test and cost are reported in PLAN-vir.md.  A separate parser finding and
+VIR's remaining V1-V7 as well as G5/G7 remain.
 
-VIR:s verifiering av slot-exponering har en säker linjär analys för långa
-grafer; test och kostnad redovisas i PLAN-vir.md. Ett separat parserfynd och
-VIR:s återstående V1–V7 samt G5/G7 återstår.
+### Status 2026-11-12: G4 basis, x86-64 through VIR
 
-### Status 2026-11-12: G4-underlag, x86-64 genom VIR
+The opt-in SSA path has a first x86-64 lowering of SysV leaf functions
+and SSE2 loops.  `bench/vcc-vir-x86.py` requires real lowering, verifies
+the allocation and runs the assembler and own object paths; unity/nonunity and
+ASan/UBSan/TSan green.  GCC 1615/1615, TCC 105/105 and own 282/282 go with VIR;
+inline has the same five failures with SSA off and on.  This is a new platform basis
+for G4, not a closed gate: calls and broader ABI/corpus coverage remain.
+Measurements and remaining work are owned by `PLAN-vir.md` V2/V4.
 
-Den opt-in SSA-vägen har en första x86-64-sänkning av SysV-bladfunktioner
-och SSE2-loopar. `bench/vcc-vir-x86.py` kräver verklig sänkning, verifierar
-allokeringen och kör assembler- och egna objektvägen; unity/nonunity och
-ASan/UBSan/TSan gröna. GCC 1615/1615, TCC 105/105 och egna 282/282 går med VIR;
-inline har samma fem fel med SSA av och på. Detta är nytt plattformsunderlag
-för G4, inte en stängd grind: anrop och bredare ABI-/korpustäckning återstår.
-Mätningar och återstående arbete ägs av `PLAN-vir.md` V2/V4.
+### Status 2026-11-12: G2/G4, real Linux corpora through x86-VIR
 
-### Status 2026-11-12: G2/G4, verkliga Linux-korpusar genom x86-VIR
-
-TSVC ger 151/151 checksummor och alla 82 kandidater når x86-maskinkod;
-SQLite bygger och speedtest1:s hash är clangs, zlib klarar självtest och
-byte-/CRC-jämförelse. PostgreSQL/psql och CPython är nu också kompilerade
-som korpus: 13 av 1504 respektive fyra av 334 C-jobb avvisas på namngivna
-builtinluckor (TODO T13); CPython har dessutom länkfel, även utan VIR.
-PostgreSQLs uttryckligt märkta blandbygge ger 81 godkända/0 fel/249
-överhoppade tester och räknas inte som grönt G2. Ingen grind stängs av dessa
-delmängder. Täckning, funktionsvisa reträtter och mätningar i PLAN-vir.md.
+TSVC gives 151/151 checksums and all 82 candidates reach x86 machine code;
+SQLite builds and speedtest1's hash is clang's, zlib passes self-test and
+byte/CRC comparison.  PostgreSQL/psql and CPython are now also compiled
+as corpora: 13 of 1504 and four of 334 C jobs respectively are rejected on named
+builtin gaps (TODO T13); CPython additionally has link errors, even without VIR.
+PostgreSQL's explicitly labeled mixed build gives 81 passed/0 failures/249
+skipped tests and does not count as green G2.  No gate is closed by these
+subsets.  Coverage, per-function retreats and measurements in PLAN-vir.md.

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Kallt kärnbygge med fasmätning.
+"""Cold kernel build with phase timing.
 
     python3 bench/kbuild.py [--config env/vroom-min.config] [--out work/build-x]
-                            [-j 10] [--kcflags "-O1"] [-- extra make-argument]
+                            [-j 10] [--kcflags "-O1"] [-- extra make arguments]
 
-Tar bort byggkatalogen, skapar konfigurationen (allnoconfig + fragment) och bygger
-`Image`. Varje rad i make-utdata tidsstämplas. Skriver en sammanfattning med
-total väggtid, CPU-tid och när kompileringsfasen startar/slutar.
+Removes the build directory, creates the configuration (allnoconfig + fragment) and builds
+`Image`. Each line of make output is timestamped. Prints a summary with
+total wall time, CPU time and when the compile phase starts/ends.
 """
 import argparse
 import os
@@ -46,11 +46,11 @@ def main():
     ap.add_argument("--out", default=os.path.join(ROOT, "work/build-x"))
     ap.add_argument("-j", type=int, default=os.cpu_count())
     ap.add_argument("--kcflags", default="")
-    ap.add_argument("--dotconfig", help="färdig .config; hoppar över allnoconfig/merge/olddefconfig")
-    ap.add_argument("--cc", help="CC och HOSTCC (t.ex. build/ccs/vroom-cc)")
-    ap.add_argument("--ar", help="AR (t.ex. build/ccs/var)")
-    ap.add_argument("--shell", help="SHELL och CONFIG_SHELL för hela bygget (t.ex. /bin/dash; /bin/sh är bash)")
-    ap.add_argument("--keep", action="store_true", help="ta inte bort byggkatalogen")
+    ap.add_argument("--dotconfig", help="ready-made .config; skips allnoconfig/merge/olddefconfig")
+    ap.add_argument("--cc", help="CC and HOSTCC (e.g. build/ccs/vroom-cc)")
+    ap.add_argument("--ar", help="AR (e.g. build/ccs/var)")
+    ap.add_argument("--shell", help="SHELL and CONFIG_SHELL for the whole build (e.g. /bin/dash; /bin/sh is bash)")
+    ap.add_argument("--keep", action="store_true", help="do not remove the build directory")
     ap.add_argument("--target", default="Image")
     ap.add_argument("extra", nargs="*")
     a = ap.parse_args()

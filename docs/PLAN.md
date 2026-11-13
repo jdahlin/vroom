@@ -1,219 +1,219 @@
-# Snabb kärnkompilering – Fas 1: Mätning och grund
+# Fast kernel compilation – Phase 1: Measurement and foundation
 
-*Arbetsnamn: **ccs** (compile server). Skriven 2026-11-07.*
+*Working name: **ccs** (compile server). Written 2026-11-07.*
 
-## Bakgrund
+## Background
 
-Långsiktigt mål: en kompilatorserver som bygger Linuxkärnan på `-O0`-nivå
-10× snabbare än `gcc`/`clang`. `/usr/bin/cc` (eller `make CC=...`) blir en tunn
-klient som skickar argv/cwd/fd:er över en Unix-socket till en långlivad server.
+Long-term goal: a compiler server that builds the Linux kernel at the `-O0` level
+10× faster than `gcc`/`clang`. `/usr/bin/cc` (or `make CC=...`) becomes a thin
+client that sends argv/cwd/fds over a Unix socket to a long-lived server.
 
-Hypotesen bakom hela projektet:
+The hypothesis behind the whole project:
 
-1. Frontend (preprocessor + parser + Sema) står för merparten av tiden per
-   översättningsenhet, och nästan allt det arbetet är header-arbete som upprepas.
-2. Med en cache nyckad på *(header, lästa makron, uppslagna deklarationer)*
-   blir nästan allt header-arbete cacheträffar.
-3. En enkelpass-backend (AST → maskinkod via värdestack, à la TCC/TPDE) tar
-   resten av vägen.
+1. The frontend (preprocessor + parser + Sema) accounts for most of the time per
+   translation unit, and almost all of that work is header work that is repeated.
+2. With a cache keyed on *(header, macros read, declarations looked up)*
+   almost all header work becomes cache hits.
+3. A single-pass backend (AST → machine code via a value stack, à la TCC/TPDE) takes
+   care of the rest.
 
-**Fas 1 bygger ingen kompilator.** Den tar fram siffrorna som avgör om
-hypotesen håller, och bygger infrastrukturen (miljö, mätning, klient/server)
-som alla senare faser står på.
+**Phase 1 does not build a compiler.** It produces the numbers that decide whether
+the hypothesis holds, and builds the infrastructure (environment, measurement,
+client/server) that all later phases stand on.
 
-## Mål för fas 1
+## Goals for Phase 1
 
-| # | Fråga / leverans | Svar i form av |
-|---|------------------|----------------|
-| M1 | Var går tiden i ett kärnbygge i dag? | Tabell: total, per Kbuild-steg, frontend vs backend |
-| M2 | Hur mycket header-arbete upprepas? | Andel tokens/deklarationer som vore cacheträffar |
-| M3 | Hur mycket kostar process-/make-overhead? | Mätning med proxyserver vs direkt kompilator |
-| M4 | Fungerande tunn klient + server | Kärna byggd via proxy, byte-identisk, bootar i QEMU |
-| M5 | Go/no-go för fas 2 | Kort rapport med beslut och val av frontend-bas |
+| # | Question / deliverable | Answer in the form of |
+|---|------------------------|-----------------------|
+| M1 | Where does the time go in a kernel build today? | Table: total, per Kbuild step, frontend vs backend |
+| M2 | How much header work is repeated? | Share of tokens/declarations that would be cache hits |
+| M3 | How much do process/make overhead cost? | Measurement with proxy server vs direct compiler |
+| M4 | Working thin client + server | Kernel built via proxy, byte-identical, boots in QEMU |
+| M5 | Go/no-go for Phase 2 | Short report with the decision and the choice of frontend base |
 
-## Avgränsningar
+## Scope limits
 
-- Arkitektur: **x86-64** endast.
-- Kärna: **v7.4-rc1**, låst commit. (Innehåller redan första halvan av
-  Stoakes kbuild-speedup-serie; v5 av resten kan appliceras som jämförelse.)
-- Konfigurationer:
-  - `tinyconfig` – snabb iteration
-  - `defconfig` + fragment `env/fas1.config` – huvudmätning
-- Fragment `fas1.config`: `DEBUG_INFO=n`, `DEBUG_INFO_BTF=n`, ingen LTO,
-  ingen KASAN/KCSAN/KCFI, `MODULES=n` (allt `=y`), `KERNEL_LZ4=y`
-  (eller okomprimerat).
-- Kompilatorer: aktuell GCC och Clang från distributionen.
-- Utanför fas 1: egen preprocessor/parser/backend, länkning i minnet,
-  inkrementellt läge, andra arkitekturer.
+- Architecture: **x86-64** only.
+- Kernel: **v7.4-rc1**, locked commit. (It already contains the first half of
+  Stoakes's kbuild-speedup series; v5 of the rest can be applied for comparison.)
+- Configurations:
+  - `tinyconfig` – fast iteration
+  - `defconfig` + fragment `env/fas1.config` – main measurement
+- Fragment `fas1.config`: `DEBUG_INFO=n`, `DEBUG_INFO_BTF=n`, no LTO,
+  no KASAN/KCSAN/KCFI, `MODULES=n` (everything `=y`), `KERNEL_LZ4=y`
+  (or uncompressed).
+- Compilers: current GCC and Clang from the distribution.
+- Outside Phase 1: own preprocessor/parser/backend, in-memory linking,
+  incremental mode, other architectures.
 
-## Steg
+## Steps
 
-### 1.1 Miljö
+### 1.1 Environment
 
-**Ändrat 2026-11-07:** vi bygger direkt på macOS (Apple Silicon, M1 Pro),
-utan container. Mål-arkitektur i fas 1 blir därför **arm64** (`ARCH=arm64
-LLVM=1`, Homebrew-LLVM); x86-64 som korskompilering senare (kräver objtool och
-mer host-arbete). Linux-specifika saker (io_uring m.m.) portas till senare.
+**Changed 2026-11-07:** we build directly on macOS (Apple Silicon, M1 Pro),
+without a container. The target architecture in Phase 1 therefore becomes **arm64** (`ARCH=arm64
+LLVM=1`, Homebrew LLVM); x86-64 as cross-compilation later (requires objtool and
+more host work). Linux-specific things (io_uring etc.) are ported later.
 
-- `env/setup-macos.sh`: Homebrew-verktyg, skiftlägeskänslig sparsebundle
-  `work.sparsebundle` monterad på `work/`, kloning av kärnan, konfigurationer.
-- `env/macos-env.sh`: GNU-verktyg först i `PATH` och `kmake`-funktion.
-- `env/host-include/`: det macOS saknar för kärnans host-verktyg:
-  `elf.h` (musl, MIT), `byteswap.h`/`endian.h` (egna shims) och
-  `vroom-prelude.h` (förhindrar Darwins `uuid_t`, som krockar med
-  `scripts/mod/file2alias.c`). Ingen ändring i kärnträdet behövs.
-- Ingen `gcc` som mål (bara clang/LLVM) i fas 1 på macOS.
-- Reproducerbarhet: sätt `KBUILD_BUILD_TIMESTAMP`, `KBUILD_BUILD_USER`,
-  `KBUILD_BUILD_HOST`, `SOURCE_DATE_EPOCH` så att två byggen kan jämföras
-  byte för byte.
-- Logga CPU-modell, antal kärnor, RAM, kompilatorversioner i varje resultat.
+- `env/setup-macos.sh`: Homebrew tools, case-sensitive sparsebundle
+  `work.sparsebundle` mounted on `work/`, cloning of the kernel, configurations.
+- `env/macos-env.sh`: GNU tools first in `PATH` and a `kmake` function.
+- `env/host-include/`: what macOS lacks for the kernel's host tools:
+  `elf.h` (musl, MIT), `byteswap.h`/`endian.h` (own shims) and
+  `vroom-prelude.h` (prevents Darwin's `uuid_t`, which collides with
+  `scripts/mod/file2alias.c`). No change in the kernel tree is needed.
+- No `gcc` as a target (only clang/LLVM) in Phase 1 on macOS.
+- Reproducibility: set `KBUILD_BUILD_TIMESTAMP`, `KBUILD_BUILD_USER`,
+  `KBUILD_BUILD_HOST`, `SOURCE_DATE_EPOCH` so that two builds can be compared
+  byte for byte.
+- Log CPU model, number of cores, RAM, compiler versions in every result.
 
-**Klart när:** `kmake defconfig && kmake -j$(sysctl -n hw.ncpu) Image` går
-igenom på macOS och två byggen ger identisk `vmlinux`.
+**Done when:** `kmake defconfig && kmake -j$(sysctl -n hw.ncpu) Image` passes
+on macOS and two builds give an identical `vmlinux`.
 
-### 1.2 Baslinje (M1)
+### 1.2 Baseline (M1)
 
-`bench/baseline.sh` kör, för gcc och clang, best-of-N (N=3–5) med varm page cache:
+`bench/baseline.sh` runs, for gcc and clang, best-of-N (N=3–5) with a warm page cache:
 
-- rent bygge, no-op-bygge, inkrementellt bygge (touch av en `.c`-fil och av en
-  vanligt inkluderad header, t.ex. `include/linux/sched.h`).
+- clean build, no-op build, incremental build (touch of a `.c` file and of a
+  commonly included header, e.g. `include/linux/sched.h`).
 
-Uppdelning:
+Breakdown:
 
-- **Per Kbuild-steg:** wrapper runt `CC`, `LD`, `AS` och scriptsteg som loggar
-  start/stopp + argv till en fil (samma mekanism som klienten i 1.4 –
-  skriv den en gång). Aggregera: kompilering, `.S`, länkning, kallsyms,
-  objtool, modpost, komprimering, övrigt (make/sh).
-- **Frontend vs backend:** `clang -O2 -ftime-trace` (kärnans riktiga flaggor)
-  på alla TU:er, aggregera "Frontend" / "Backend" / "CodeGen" ur JSON.
-  Komplettera med `-fsyntax-only` som snabb kontroll av frontend-andelen.
-- **-O0-proxy:** samma sak med en variant som tvingar `-O0` på de filer som
-  klarar det (bygget behöver inte länka) – ger en bild av backend-kostnaden
-  vid -O0 jämfört med -O2.
-- **Kritisk väg:** tidslinje från wrapper-loggen (Chrome trace-format) som
-  visar seriella faser och kärnutnyttjande.
+- **Per Kbuild step:** a wrapper around `CC`, `LD`, `AS` and script steps that logs
+  start/stop + argv to a file (the same mechanism as the client in 1.4 –
+  write it once). Aggregate: compilation, `.S`, linking, kallsyms,
+  objtool, modpost, compression, other (make/sh).
+- **Frontend vs backend:** `clang -O2 -ftime-trace` (the kernel's real flags)
+  on all TUs, aggregate "Frontend" / "Backend" / "CodeGen" from JSON.
+  Complement with `-fsyntax-only` as a quick check of the frontend share.
+- **-O0 proxy:** the same with a variant that forces `-O0` on the files that
+  can take it (the build does not need to link) – gives a picture of the backend cost
+  at -O0 compared to -O2.
+- **Critical path:** timeline from the wrapper log (Chrome trace format) that
+  shows serial phases and core utilization.
 
-**Klart när:** `results/baseline.md` med tabeller och en tidslinje.
+**Done when:** `results/baseline.md` with tables and a timeline.
 
-### 1.3 Analys av header-redundans (M2)
+### 1.3 Analysis of header redundancy (M2)
 
-Det viktigaste mätvärdet i fasen. Två nivåer:
+The most important metric of the phase. Two levels:
 
-**a) Övre gräns (enkel):** `-E` med linemarkers på alla TU:er. Räkna tokens per
-källfil (header) och hur många gånger samma header bearbetas totalt.
-→ "X % av alla tokens kommer från headers som redan bearbetats i en annan TU."
+**a) Upper bound (simple):** `-E` with line markers on all TUs. Count tokens per
+source file (header) and how many times the same header is processed in total.
+→ "X % of all tokens come from headers that have already been processed in another TU."
 
-**b) Exakt cachenyckel (riktig):** Clang-plugin (`analysis/ppdeps/`) med
-`PPCallbacks` + Sema-hooks som per header-inkludering registrerar:
+**b) Exact cache key (real):** A Clang plugin (`analysis/ppdeps/`) with
+`PPCallbacks` + Sema hooks that records, per header inclusion:
 
-- makron som läses (`Ifdef`, `Ifndef`, `Defined`, `MacroExpands`, `#if`-uttryck)
-  och deras definitioner (hash av token-sekvens),
-- makron som definieras/odefinieras,
-- namnuppslag som når deklarationer *utanför* headern (typedef-namn, taggar,
-  enum-konstanter) och deras identitet (fil:rad + hash),
-- antal tokens och deklarationer headern bidrar med.
+- macros that are read (`Ifdef`, `Ifndef`, `Defined`, `MacroExpands`, `#if` expressions)
+  and their definitions (hash of the token sequence),
+- macros that are defined/undefined,
+- name lookups that reach declarations *outside* the header (typedef names, tags,
+  enum constants) and their identity (file:line + hash),
+- the number of tokens and declarations the header contributes.
 
-Nyckel = hash(headerinnehåll, lästa makron, uppslagna deklarationer).
-Aggregat över hela defconfig:
+Key = hash(header contents, macros read, declarations looked up).
+Aggregates over the whole defconfig:
 
-- andel tokens / deklarationer som vore cacheträffar,
-- vilka headers som har många varianter (X-makron, `define_trace.h`,
-  `-D`-flaggor per katalog) – kandidater för specialhantering,
-- per TU: antal `static inline` som definieras vs faktiskt används
-  (underlag för lat parsning och memoiserad kodgenerering).
+- share of tokens / declarations that would be cache hits,
+- which headers have many variants (X-macros, `define_trace.h`,
+  `-D` flags per directory) – candidates for special handling,
+- per TU: number of `static inline` defined vs actually used
+  (basis for lazy parsing and memoized code generation).
 
-**Klart när:** `results/header-redundancy.md` med siffrorna ovan och topp-50-listor.
+**Done when:** `results/header-redundancy.md` with the figures above and top-50 lists.
 
-### 1.4 Tunn klient + proxyserver (M3, M4)
+### 1.4 Thin client + proxy server (M3, M4)
 
-Katalog `ccs/`.
+Directory `ccs/`.
 
-**Klient (`ccs-cc`)**, C, statiskt länkad (prova `tools/include/nolibc` från kärnträdet):
+**Client (`ccs-cc`)**, C, statically linked (try `tools/include/nolibc` from the kernel tree):
 
-- `connect()` till `$XDG_RUNTIME_DIR/ccs.sock` (eller `$CCS_SOCKET`).
-- Skicka argv, envp (eller vitlistade variabler), och fd:er 0/1/2 + `O_PATH`-fd
-  för cwd via `sendmsg` + `SCM_RIGHTS`, över `SOCK_SEQPACKET`.
-- Vänta på exitstatus, returnera den. Om signal: återskapa via `kill(getpid())`.
-- Fallback: om servern inte svarar, `execv` riktig kompilator (`$CCS_REAL_CC`).
+- `connect()` to `$XDG_RUNTIME_DIR/ccs.sock` (or `$CCS_SOCKET`).
+- Send argv, envp (or whitelisted variables), and fds 0/1/2 + an `O_PATH` fd
+  for cwd via `sendmsg` + `SCM_RIGHTS`, over `SOCK_SEQPACKET`.
+- Wait for the exit status, return it. On a signal: recreate it via `kill(getpid())`.
+- Fallback: if the server does not answer, `execv` the real compiler (`$CCS_REAL_CC`).
 
-**Server (`ccsd`)**, C eller Rust:
+**Server (`ccsd`)**, C or Rust:
 
-- Verifiera `SO_PEERCRED` (samma uid), socket `0600`.
-- Trådpool; per förfrågan: `fchdir`/`openat`-baserad körning av riktig
-  kompilator via `posix_spawn` med klientens fd:er, så diagnostik går rakt till
-  make-terminalen.
-- Logga per förfrågan: argv, kö-tid, körtid, exitstatus (matar 1.2).
-- `--verify`-läge (förberedelse för fas 2): kör förfrågan två gånger och jämför
-  utfiler.
+- Verify `SO_PEERCRED` (same uid), socket `0600`.
+- Thread pool; per request: `fchdir`/`openat`-based execution of the real
+  compiler via `posix_spawn` with the client's fds, so diagnostics go straight to the
+  make terminal.
+- Log per request: argv, queue time, run time, exit status (feeds 1.2).
+- `--verify` mode (preparation for Phase 2): runs the request twice and compares
+  output files.
 
-**Integration:** `make CC=ccs-cc HOSTCC=gcc ...` – ingen ändring av
-`/usr/bin/cc` behövs i fas 1. Kbuilds `cc-option`/`cc-version.sh`/`--version`
-passerar transparent.
+**Integration:** `make CC=ccs-cc HOSTCC=gcc ...` – no change of
+`/usr/bin/cc` is needed in Phase 1. Kbuild's `cc-option`/`cc-version.sh`/`--version`
+pass through transparently.
 
-**Verifiering:**
+**Verification:**
 
-- `vmlinux` byggd via proxy är byte-identisk med direktbygget.
-- Bootar i QEMU (`-kernel bzImage -initrd` med busybox-initramfs som skriver en
-  markör och stänger av); skript `bench/boot-test.sh`.
-- Mät overhead: proxy vs direkt, rent och no-op-bygge. Förväntan: < 2–3 %.
-  Bryt ut ren klient-RTT (mikrobenchmark med `--version`-förfrågningar).
+- `vmlinux` built via proxy is byte-identical to the direct build.
+- Boots in QEMU (`-kernel bzImage -initrd` with a busybox initramfs that writes a
+  marker and powers off); script `bench/boot-test.sh`.
+- Measure overhead: proxy vs direct, clean and no-op build. Expectation: < 2–3 %.
+  Break out the pure client RTT (microbenchmark with `--version` requests).
 
-**Klart när:** `results/proxy.md`, och boot-testet är grönt.
+**Done when:** `results/proxy.md`, and the boot test is green.
 
-### 1.5 Rapport och beslut (M5)
+### 1.5 Report and decision (M5)
 
 `results/fas1-rapport.md`:
 
-- Sammanfattning av 1.2–1.4.
-- **Go-kriterier för fas 2** (föreslagna):
-  - frontend ≥ 50 % av kompileringstiden per TU (vid -O0), **och**
-  - ≥ 80 % av header-tokens är cacheträffar med den exakta nyckeln, **och**
-  - proxy-overhead < 5 %.
-- Val av frontend-bas för fas 2: **sparse** (kärn-GNU C redan täckt),
-  **aro**, eller egen. Kriterier: GNU C-täckning på kärnan, hastighet på
-  `-fsyntax-only`-nivå, hur lätt det är att göra deklarationer oföränderliga och
-  delade.
-- Lista över överraskningar och risker inför fas 2.
+- Summary of 1.2–1.4.
+- **Go criteria for Phase 2** (proposed):
+  - frontend ≥ 50 % of the compilation time per TU (at -O0), **and**
+  - ≥ 80 % of header tokens are cache hits with the exact key, **and**
+  - proxy overhead < 5 %.
+- Choice of frontend base for Phase 2: **sparse** (kernel GNU C already covered),
+  **aro**, or own. Criteria: GNU C coverage on the kernel, speed at
+  `-fsyntax-only` level, how easy it is to make declarations immutable and
+  shared.
+- List of surprises and risks ahead of Phase 2.
 
-## Riktning för fas 2 (diskuterad 2026-11-07)
+## Direction for Phase 2 (discussed 2026-11-07)
 
-Utgå från **TinyCC** (https://repo.or.cz/w/tinycc.git) i stället för en ny
-frontend: preprocessor, kodgenerering, assembler och ELF-länkare i ett pass,
-backends för arm64 och x86-64. Få det att fungera på kärnan först, profilera,
-och optimera sedan steg för steg.
+Start from **TinyCC** (https://repo.or.cz/w/tinycc.git) instead of a new
+frontend: preprocessor, code generation, assembler and ELF linker in one pass,
+backends for arm64 and x86-64. Get it working on the kernel first, profile,
+and then optimize step by step.
 
-Kända hinder att kartlägga i slutet av fas 1:
+Known obstacles to map out at the end of Phase 1:
 
-- Globalt tillstånd (`vtop`, `tok`, `file` …) och symboler som muteras/frigörs
-  vid scope-slut – måste göras om för delad header-cache och trådar.
-- Saknar det kärnan kräver: `always_inline`-inlining, `__builtin_constant_p`
-  efter inlining, eliminering av död kod, delar av GNU C (t.ex. `asm goto`).
-- Länkare: tanken är att bygga in en snabb länkare (mold/wild). Varken mold
-  eller wild har fullt stöd för kärnans länkskript; lld (går att anropa som
-  bibliotek) eller TinyCC:s egen länkare är realistiska alternativ för `vmlinux`.
+- Global state (`vtop`, `tok`, `file` …) and symbols that are mutated/freed
+  at scope end – must be reworked for a shared header cache and threads.
+- Lacks what the kernel requires: `always_inline` inlining, `__builtin_constant_p`
+  after inlining, dead code elimination, parts of GNU C (e.g. `asm goto`).
+- Linker: the idea is to build in a fast linker (mold/wild). Neither mold
+  nor wild has full support for the kernel's linker scripts; lld (can be called
+  as a library) or TinyCC's own linker are realistic alternatives for `vmlinux`.
 
-## Katalogstruktur
+## Directory structure
 
 ```
 PLAN.md
 env/        Dockerfile, setup.sh, fas1.config
 bench/      baseline.sh, boot-test.sh, trace-till-chrome.py
-analysis/   ppdeps/ (clang-plugin), aggregeringsskript
+analysis/   ppdeps/ (clang plugin), aggregation scripts
 ccs/        client/, server/, protocol.h
 results/    baseline.md, header-redundancy.md, proxy.md, fas1-rapport.md
 ```
 
-## Risker
+## Risks
 
-| Risk | Hantering |
-|------|-----------|
-| Containerprestanda på macOS skiljer från bare-metal Linux | Mät relativt (före/efter på samma maskin); verifiera nyckeltal på en Linux-burk om möjligt |
-| `-ftime-trace` ger missvisande fördelning för kärnflaggor | Korsvalidera med `-fsyntax-only` och `perf` på `cc1`/`clang` |
-| Clang-pluginens namnuppslags-spårning är ofullständig | Börja med makronivån (räcker för en övre gräns), lägg till deklarationsberoenden iterativt; jämför mot (a) |
-| Reproducerbara byggen blir inte identiska | Diffa med `diffoscope`; dokumentera kvarvarande skillnader |
-| Kbuild beter sig annorlunda med wrapper-`CC` | Jämför `.config`, `include/generated/` och `cmd`-filer mellan direkt- och proxybygge |
+| Risk | Handling |
+|------|----------|
+| Container performance on macOS differs from bare-metal Linux | Measure relatively (before/after on the same machine); verify key figures on a Linux box if possible |
+| `-ftime-trace` gives a misleading distribution for kernel flags | Cross-validate with `-fsyntax-only` and `perf` on `cc1`/`clang` |
+| The Clang plugin's name-lookup tracking is incomplete | Start at the macro level (enough for an upper bound), add declaration dependencies iteratively; compare against (a) |
+| Reproducible builds do not come out identical | Diff with `diffoscope`; document remaining differences |
+| Kbuild behaves differently with a wrapper `CC` | Compare `.config`, `include/generated/` and `cmd` files between the direct and the proxy build |
 
-## Ordning
+## Order
 
-1.1 → 1.2 och 1.4 parallellt (delar wrapper-/loggmekanism) → 1.3 → 1.5.
-1.3 är fasens viktigaste resultat; 1.4 är den viktigaste infrastrukturen.
+1.1 → 1.2 and 1.4 in parallel (they share the wrapper/log mechanism) → 1.3 → 1.5.
+1.3 is the phase's most important result; 1.4 is the most important infrastructure.

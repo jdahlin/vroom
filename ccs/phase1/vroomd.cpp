@@ -1,10 +1,10 @@
-// vroomd: zygote-server för clang.
+// vroomd: zygote server for clang.
 //
-// Föräldern laddar libclang-cpp/libLLVM och initierar alla mål EN gång, och forkar
-// sedan ett barn per anslutning. Barnet tar emot argv/env/cwd + fd 0,1,2 från
-// vroom-cc, kör clangs driver i processen (cc1 via Driver::CC1Main) och skriver
-// exitstatus tillbaka. Uppstartskostnaden (~45 ms dyld + statisk init på macOS)
-// betalas alltså bara en gång.
+// The parent loads libclang-cpp/libLLVM and initializes all targets ONCE, then forks
+// a child per connection. The child receives argv/env/cwd + fd 0,1,2 from
+// vroom-cc, runs clang's driver in-process (cc1 via Driver::CC1Main) and writes the
+// exit status back. The startup cost (~45 ms dyld + static init on macOS)
+// is thus paid only once.
 //
 //   vroomd [--sock /tmp/vroomd.sock] [--clang /opt/homebrew/opt/llvm/bin/clang]
 
@@ -56,7 +56,7 @@ static std::string g_clang = VROOM_LLVM_BIN "/clang";
 static std::string g_clang = "/opt/homebrew/opt/llvm/bin/clang";
 #endif
 
-// ---------- cc1 i processen ----------
+// ---------- cc1 in the process ----------
 
 static int run_cc1(llvm::ArrayRef<const char *> argv, const char *argv0) {
   auto ci = std::make_unique<CompilerInstance>();
@@ -73,14 +73,14 @@ static int run_cc1(llvm::ArrayRef<const char *> argv, const char *argv0) {
     return 1;
   }
   ok = ExecuteCompilerInvocation(ci.get());
-  // Barnet avslutas med _exit; inget behöver frigöras.
+  // The child exits with _exit; nothing needs to be freed.
   llvm::outs().flush();
   llvm::errs().flush();
   (void)ci.release();
   return ok ? 0 : 1;
 }
 
-// Allt som inte är -cc1 (t.ex. -cc1as för .S-filer) körs av riktig clang.
+// Everything that is not -cc1 (e.g. -cc1as for .S files) is run by the real clang.
 static int spawn_real(llvm::SmallVectorImpl<const char *> &argv) {
   std::vector<char *> a;
   a.push_back(const_cast<char *>(g_clang.c_str()));
@@ -102,7 +102,7 @@ static int cc1_hook(llvm::SmallVectorImpl<const char *> &argv) {
   return spawn_real(argv);
 }
 
-// ---------- drivern ----------
+// ---------- the driver ----------
 
 static int run_driver(std::vector<const char *> &argv) {
   argv[0] = g_clang.c_str();
@@ -126,16 +126,16 @@ static int run_driver(std::vector<const char *> &argv) {
   return res;
 }
 
-// ---------- kärnspecifikt: delad PCH + lägre optimering ----------
+// ---------- kernel-specific: shared PCH + lower optimization ----------
 //
-// Kärnans C-filer kompileras med nästan identiska flaggor och inkluderar i stort
-// sett samma headers. Den första kvalificerade filen bygger en PCH av
-// ccs/phase1/pch/vroom-prefix.h med sina (avskalade) flaggor; alla följande använder den.
-// Varje kompilering med PCH görs i ett barnbarn med fångad stderr – misslyckas
-// den, kompileras filen om utan PCH. Fel blir alltså aldrig fel resultat.
+// The kernel's C files are compiled with nearly identical flags and include more or
+// less the same headers. The first qualifying file builds a PCH from
+// ccs/phase1/pch/vroom-prefix.h with its (stripped) flags; all later ones use it.
+// Every compilation with PCH runs in a grandchild with stderr captured - if it
+// fails, the file is recompiled without PCH. An error thus never gives a wrong result.
 
 static std::string g_prefix = VROOM_PREFIX_DEFAULT;
-static std::vector<std::string> g_optflags; // t.ex. -O1 -fno-inline-functions
+static std::vector<std::string> g_optflags; // e.g. -O1 -fno-inline-functions
 
 static bool has(const std::vector<const char *> &a, llvm::StringRef s) {
   for (auto *x : a)
@@ -172,7 +172,7 @@ static bool kernel_eligible(const std::vector<const char *> &a) {
   return true;
 }
 
-// Kör drivern i ett barnbarn. Om errpath != nullptr hamnar stderr där.
+// Runs the driver in a grandchild. If errpath != nullptr, stderr goes there.
 static int run_driver_forked(std::vector<const char *> argv, const char *errpath) {
   pid_t pid = fork();
   if (pid == 0) {
@@ -223,10 +223,10 @@ static std::string ensure_pch(const std::vector<const char *> &argv) {
       if (x.ends_with(".c"))
         continue;
       if (after_include && x.starts_with("-I"))
-        continue; // katalogspecifika -I
+        continue; // directory-specific -I
       keep.push_back(x.str());
     }
-    // Samma -O som filerna: annars följer __OPTIMIZE__ med PCH:n in i -O0-filer.
+    // Same -O as the files: otherwise __OPTIMIZE__ comes along with the PCH into -O0 files.
     for (auto &f : g_optflags)
       keep.push_back(f.c_str());
     keep.push_back("-x");
@@ -247,7 +247,7 @@ static std::string ensure_pch(const std::vector<const char *> &argv) {
   return exists(pch) ? pch : "";
 }
 
-static std::vector<std::string> g_tryopt; // --try-opt: prova dessa nivåer först (t.ex. -O0)
+static std::vector<std::string> g_tryopt; // --try-opt: try these levels first (e.g. -O0)
 
 static void log_tu(const char *file, const std::vector<const char *> &argv, const std::string &what) {
   int lf = open(file, O_WRONLY | O_CREAT | O_APPEND, 0644);
@@ -264,7 +264,7 @@ static void log_tu(const char *file, const std::vector<const char *> &argv, cons
   close(lf);
 }
 
-// Kör ett försök i ett barn med fångad stderr; vid lyckat försök skrivs stderr ut.
+// Runs an attempt in a child with stderr captured; on success stderr is printed.
 static bool try_quiet(const std::vector<const char *> &a) {
   char errpath[] = "/tmp/vroomd-err.XXXXXX";
   int efd = mkstemp(errpath);
@@ -282,8 +282,8 @@ static bool try_quiet(const std::vector<const char *> &a) {
   return rc == 0;
 }
 
-// Ett -O0-objekt med __init-kod kan få icke-inlinade static inline-kopior i .text
-// som anropar .init.text (modpost: section mismatch). Sådana byggs om på nästa nivå.
+// An -O0 object with __init code can get non-inlined static inline copies in .text
+// that call .init.text (modpost: section mismatch). Such objects are rebuilt at the next level.
 static bool has_init_text(const std::vector<const char *> &argv) {
   const char *obj = nullptr;
   for (size_t i = 1; i + 1 < argv.size(); i++)
@@ -301,21 +301,21 @@ static bool has_init_text(const std::vector<const char *> &argv) {
     data.append(buf, n);
   close(fd);
   static const char pat[] = ".init.text";
-  return data.find(std::string(pat, sizeof(pat))) != std::string::npos; // inkl. NUL
+  return data.find(std::string(pat, sizeof(pat))) != std::string::npos; // incl. NUL
 }
 
 static int run_kernel_tu(std::vector<const char *> argv) {
   std::vector<const char *> base(argv);
   for (auto &f : g_optflags)
-    base.push_back(f.c_str()); // sist på raden: vinner över -O2
+    base.push_back(f.c_str()); // last on the line: wins over -O2
 
   std::string pch = ensure_pch(argv);
   std::vector<const char *> pre;
   if (!pch.empty())
     pre = {"-include-pch", pch.c_str()};
 
-  // Lägre optimeringsnivåer först; kärnan kräver ofta DCE (compiletime_assert),
-  // så vid fel faller vi tillbaka till nästa nivå och till sist --opt.
+  // Lower optimization levels first; the kernel often requires DCE (compiletime_assert),
+  // so on failure we fall back to the next level and finally --opt.
   for (auto &lvl : g_tryopt) {
     std::vector<const char *> a{argv[0]};
     a.insert(a.end(), pre.begin(), pre.end());
@@ -344,7 +344,7 @@ static int run_kernel_tu(std::vector<const char *> argv) {
   return run_driver(base);
 }
 
-// ---------- barn: ta emot förfrågan ----------
+// ---------- child: receive request ----------
 
 static bool read_full(int fd, char *p, size_t n) {
   while (n) {
@@ -379,7 +379,7 @@ static bool read_full(int fd, char *p, size_t n) {
   if (!read_full(conn, payload.data(), payload.size()))
     _exit(1);
 
-  // Packa upp: cwd, argv, envp
+  // Unpack: cwd, argv, envp
   std::vector<const char *> strs;
   for (size_t off = 0; off < payload.size();) {
     strs.push_back(&payload[off]);
@@ -427,7 +427,7 @@ static bool read_full(int fd, char *p, size_t n) {
   _exit(0);
 }
 
-// ---------- förälder ----------
+// ---------- parent ----------
 
 int main(int argc, char **argv) {
   const char *sock = "/tmp/vroomd.sock";
@@ -449,7 +449,7 @@ int main(int argc, char **argv) {
   llvm::InitializeAllAsmPrinters();
   llvm::InitializeAllAsmParsers();
 
-  signal(SIGCHLD, SIG_IGN); // barn städas automatiskt
+  signal(SIGCHLD, SIG_IGN); // children are reaped automatically
   signal(SIGPIPE, SIG_IGN);
 
   int ls = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -462,7 +462,7 @@ int main(int argc, char **argv) {
     return 1;
   }
   chmod(sock, 0600);
-  fprintf(stderr, "vroomd: lyssnar på %s (clang %s)\n", sock, g_clang.c_str());
+  fprintf(stderr, "vroomd: listening on %s (clang %s)\n", sock, g_clang.c_str());
 
   for (;;) {
     int conn = accept(ls, nullptr, nullptr);

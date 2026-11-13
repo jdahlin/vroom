@@ -1,8 +1,8 @@
-/* vroom-cc: tunn klient. Skickar argv/env/cwd + fd 0,1,2 till vroomd och
- * returnerar dess exitstatus. Faller tillbaka på riktig clang om servern saknas.
+/* vroom-cc: thin client. Sends argv/env/cwd + fd 0,1,2 to vroomd and
+ * returns its exit status. Falls back to the real clang if the server is missing.
  *
- *   VROOM_SOCK      socketsökväg (default /tmp/vroomd.sock)
- *   VROOM_REAL_CC   kompilator vid fallback (default /opt/homebrew/opt/llvm/bin/clang)
+ *   VROOM_SOCK      socket path (default /tmp/vroomd.sock)
+ *   VROOM_REAL_CC   compiler on fallback (default /opt/homebrew/opt/llvm/bin/clang)
  */
 #include <errno.h>
 #include <stdio.h>
@@ -80,7 +80,7 @@ int main(int argc, char **argv)
 	c->cmsg_len = CMSG_LEN(sizeof(fds));
 	memcpy(CMSG_DATA(c), fds, sizeof(fds));
 
-	/* Första sendmsg bär fd:erna och början av datat; resten skickas med write. */
+	/* The first sendmsg carries the fds and the start of the data; the rest is sent with write. */
 	ssize_t n = sendmsg(s, &m, 0);
 	if (n < 0)
 		fallback(argv);
@@ -102,7 +102,7 @@ int main(int argc, char **argv)
 		if (n < 0 && errno == EINTR)
 			continue;
 		if (n <= 0) {
-			fprintf(stderr, "vroom-cc: servern stängde anslutningen\n");
+			fprintf(stderr, "vroom-cc: server closed the connection\n");
 			return 1;
 		}
 		got += n;

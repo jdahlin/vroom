@@ -20,15 +20,15 @@ Plans, specs, research notes and reviews are in `docs/` (names below are
 relative to it); `TODO.md` stays at the top.
 - `PLAN.md`, `PLAN-fas2.md`, `PLAN-wasm.md` (WebAssembly as a target), `PLAN-x86.md`
   (x86-64 Linux as a target): plans
-  and per-step status (Swedish).  Update the
+  and per-step status.  Update the
   status section of a step when it changes.
-- `PLAN-release.md`: what vcc 1.0 is and its release gates G0-G9 (Swedish);
+- `PLAN-release.md`: what vcc 1.0 is and its release gates G0-G9;
   work toward the release should move a gate, and update its status there.
 - `RESEARCH-preprocessor.md`: preprocessor design and prior art.
 - `REVIEW-vir-lowering.md`: review of the VIR builder, format and arm64
   lowering (2026-11-12): bugs fixed and open, compile-time and runtime
   findings, spec drift, decisions needed.
-- `PLAN-vir.md` (Swedish, steps V0-V7), `SPEC-vir.md` (VIR format, draft) and
+- `PLAN-vir.md` (steps V0-V7), `SPEC-vir.md` (VIR format, draft) and
   `RESEARCH-vir.md` (LLVM IR's problems): VIR, an SSA IR used only at `-O2`,
   built by compiling the shared walker a second time against a virtual
   lowering target.  Update the status of a step in `PLAN-vir.md`.
@@ -339,6 +339,8 @@ Keep runs to minutes with `-fork=2`.  Every fixed finding gets a minimal
 input in `regress/lex` or `regress/pp`.
 
 ## Working conventions
+- All documentation, comments and messages are in English (prompts may be
+  in Swedish).
 - Commit after each completed step (small, self-contained commits with a
   message saying what changed and how it was verified).
 - Clang is the reference: when behaviour is unclear, test it against clang

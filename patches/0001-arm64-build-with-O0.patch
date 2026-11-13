@@ -14,8 +14,8 @@ index ee75a2f1a..5e107519a 100644
 -
 -	asm goto(
 +/*
-+ * Makron i stället för __always_inline-funktioner: "i"-operanden måste vara en
-+ * konstant redan i frontend, så att kärnan kan byggas med -O0.
++ * Macros instead of __always_inline functions: the "i" operand must be a
++ * constant already in the frontend, so that the kernel can be built with -O0.
 + */
  #ifdef BUILD_VDSO
 -	ALTERNATIVE("b	%l[l_no]", "nop", %[cpucap])
@@ -175,8 +175,8 @@ index 0cb211d36..f61b06001 100644
 -	return true;
 -}
 +/*
-+ * Makron i stället för __always_inline-funktioner: "i"-operanden måste vara en
-+ * konstant redan i frontend, så att kärnan kan byggas med -O0.
++ * Macros instead of __always_inline functions: the "i" operand must be a
++ * constant already in the frontend, so that the kernel can be built with -O0.
 + */
 +#define arch_static_branch(key, branch) ({				\
 +	__label__ __l_yes, __l_out;					\
@@ -247,8 +247,8 @@ index d3dc5dc5f..a9cbcc2eb 100644
  #define BUILD_BUG() BUILD_BUG_ON_MSG(1, "BUILD_BUG failed")
 +#else
 +/*
-+ * Utan optimering kan BUILD_BUG() inte kontrolleras vid kompilering. Grenen är död
-+ * (en optimerad build bryts annars), så fånga den vid körning och gör den noreturn.
++ * Without optimization BUILD_BUG() cannot be checked at compile time. The branch is dead
++ * (an optimized build would break otherwise), so catch it at run time and make it noreturn.
 + */
 +#define BUILD_BUG() __builtin_trap()
 +#endif
@@ -344,7 +344,7 @@ index 6c7c56335..cdd49811e 100644
  extern union sched_feat_key sched_feat_keys[__SCHED_FEAT_NR];
 -#define sched_feat(x) (static_branch_##x(&sched_feat_keys[__SCHED_FEAT_##x]))
 +
-+/* Standardvärdet som konstant, så att nyckeln är en konstant även vid -O0. */
++/* The default value as a constant, so that the key is a constant even at -O0. */
 +#define SCHED_FEAT(name, enabled)	__SCHED_FEAT_EN_##name = enabled,
 +enum { 
 +#include "features.h"

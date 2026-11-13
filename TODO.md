@@ -1368,7 +1368,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   turns from xfail to XPASS (drop it from `INLINE_XFAIL`).
 
 - [ ] **Optimizer shared across x86, arm64 and wasm**. Implementation
-  owner: `PLAN-fas2.md`, **Gemensam optimerare utan SSA**, OPT0–OPT8.
+  owner: `PLAN-fas2.md`, **Shared optimizer without SSA**, OPT0–OPT8.
   arm64 already has register locals, copy/dead-result cleanup, stack-cell
   forwarding and extension facts; wasm already has scalar locals. Extract
   and reuse those algorithms rather than treating x86's gaps as missing

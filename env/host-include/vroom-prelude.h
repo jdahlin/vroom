@@ -1,12 +1,12 @@
-/* Inkluderas med -include i alla host-verktyg på macOS.
- * Darwin definierar uuid_t (unsigned char[16]) via <unistd.h>, vilket krockar
- * med scripts/mod/file2alias.c. Definiera _UUID_T så att Darwins typedef hoppas över. */
+/* Included with -include in all host tools on macOS.
+ * Darwin defines uuid_t (unsigned char[16]) via <unistd.h>, which clashes
+ * with scripts/mod/file2alias.c. Define _UUID_T so that Darwin's typedef is skipped. */
 #ifndef VROOM_PRELUDE_H
 #define VROOM_PRELUDE_H
 #define _UUID_T
-#define __GETHOSTUUID_H  /* deklarerar gethostuuid(uuid_t, ...), används inte */
+#define __GETHOSTUUID_H  /* declares gethostuuid(uuid_t, ...), unused */
 
-/* Linux-specifikt som host-verktyg använder (scripts/gen_init_cpio.c m.fl.) */
+/* Linux-specific things host tools use (scripts/gen_init_cpio.c etc.) */
 #include <sys/types.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -17,11 +17,11 @@ static inline ssize_t copy_file_range(int in, long long *ioff, int out, long lon
 				      size_t len, unsigned int flags)
 {
 	(void)in; (void)ioff; (void)out; (void)ooff; (void)len; (void)flags;
-	errno = ENOSYS;	/* anroparna faller tillbaka på read/write */
+	errno = ENOSYS;	/* callers fall back to read/write */
 	return -1;
 }
 
-/* Darwin kallar struct stat-fälten st_*timespec (scripts/basic/depcheck.c) */
+/* Darwin calls the struct stat fields st_*timespec (scripts/basic/depcheck.c) */
 #ifdef __APPLE__
 #define st_mtim st_mtimespec
 #define st_atim st_atimespec

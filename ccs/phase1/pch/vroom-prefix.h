@@ -54,7 +54,7 @@
 #include <linux/io.h>
 #include <linux/jiffies.h>
 #include <linux/socket.h>
-/* net/tcp.h utesluten: flow_offload.h använder KBUILD_MODNAME i en inline-funktion */
+/* net/tcp.h excluded: flow_offload.h uses KBUILD_MODNAME in an inline function */
 #include <linux/pci.h>
 #include <linux/workqueue.h>
 #include <linux/bug.h>
