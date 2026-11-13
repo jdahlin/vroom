@@ -1,14 +1,14 @@
-/* vcc preprocessor: header cache: serving a valid entry, as tokens to pp_next or as text to pp_text */
-#include "ppimpl.h"
+/* vcc preprocessor: header cache: serving a valid entry, as tokens to pp_token_next or as text to pp_text_render */
+#include "pp-internal.h"
 
-static void push_replay(pp *p, const hent *e, uint32_t base, unsigned cbase, uint8_t top, uint8_t norec)
+static void pp_header_cache_serve_push(pp *p, const pp_header_cache_entry *e, uint32_t base, unsigned cbase, uint8_t top, uint8_t norec)
 {
-	ctx *c = push(p);
+	pp_context *c = pp_context_push(p);
 
-	c->type = C_REPLAY;
+	c->type = PP_CONTEXT_SERVED;
 	c->ht = e->tk;
 	c->pt = e->xtk;
-	c->src = shared_base0();
+	c->src = pp_shared_base();
 	c->n = (uint32_t)e->ntext;
 	c->loc = base;
 	c->he = e;
@@ -19,31 +19,31 @@ static void push_replay(pp *p, const hent *e, uint32_t base, unsigned cbase, uin
 }
 
 /* a child entry's tokens go before the next own token: pushed */
-VPRIV bool replay_seg(pp *p, ctx *c)
+VPRIV bool pp_header_cache_serve_child(pp *p, pp_context *c)
 {
-	const hent *e = c->he;
-	const hseg *g;
+	const pp_header_cache_entry *e = c->he;
+	const pp_header_cache_segment *g;
 
 	if (c->si >= e->nseg || e->seg[c->si].at != c->i)
 		return false;
 	g = &e->seg[c->si++];
-	push_replay(p, g->child, c->loc + g->lbase, c->cbase + g->cdelta, 0, c->norec);
+	pp_header_cache_serve_push(p, g->child, c->loc + g->lbase, c->cbase + g->counter_delta, 0, c->norec);
 	return true;
 }
 
 /* __COUNTER__ digits in the spelling of own token k: this TU's values */
-static __attribute__((noinline)) void ctr_spell(pp *p, const hent *e, uint32_t *ci, uint32_t k, unsigned cbase, ptok *t)
+static __attribute__((noinline)) void pp_header_cache_counter_spell(pp *p, const pp_header_cache_entry *e, uint32_t *ci, uint32_t k, unsigned cbase, ptok *t)
 {
 	char *b = varena_alloc(&p->perm, t->len + 24 * 4 + 32), *w = b;
 	uint32_t at = 0;
 
 	while (*ci < e->nctr && e->ctr[*ci].off == k) {
-		const hctr *h = &e->ctr[(*ci)++];
+		const pp_header_cache_counter_run *h = &e->ctr[(*ci)++];
 		uint32_t bo = h->len >> 16, bl = h->len & 0xffff;
 
 		memcpy(w, t->s + at, bo - at);
 		w += bo - at;
-		w += utoa(w, cbase + h->rel);
+		w += pp_unsigned_format(w, cbase + h->rel);
 		at = bo + bl;
 	}
 	memcpy(w, t->s + at, t->len - at);
@@ -51,39 +51,39 @@ static __attribute__((noinline)) void ctr_spell(pp *p, const hent *e, uint32_t *
 	memset(w, 0, 16);
 	t->s = b;
 	t->len = (uint32_t)(w - b);
-	if (t->kind == T_IDENT)
+	if (t->kind == LEX_TOKEN_IDENTIFIER)
 		t->id = vintern_copy(b, t->len);
 }
 
-VPRIV void replay_tok(pp *p, ctx *c, ptok *t)
+VPRIV void pp_header_cache_serve_token(pp *p, pp_context *c, ptok *t)
 {
-	const hent *e = c->he;
+	const pp_header_cache_entry *e = c->he;
 
-	htok_get(t, &c->ht[c->i], c->pt, c->src, c->loc);
+	pp_header_cache_token_load(t, &c->ht[c->i], c->pt, c->src, c->loc);
 	t->ctr = 0;
-	p->rep_norec = c->norec;
-	if (t->kind == T_IDENT)
-		t->flags |= PF_NOEXP;	/* handed out as recorded: expanded already */
+	p->token_unrecorded = c->norec;
+	if (t->kind == LEX_TOKEN_IDENTIFIER)
+		t->flags |= PP_TOKEN_FLAG_NO_EXPAND;	/* handed out as recorded: expanded already */
 	if (unlikely(c->ci < e->nctr && e->ctr[c->ci].off == c->i))
-		ctr_spell(p, e, &c->ci, c->i, c->cbase, t);
+		pp_header_cache_counter_spell(p, e, &c->ci, c->i, c->cbase, t);
 	c->i++;
 }
 
 /* ---------------- lazy bodies (pp.h) ---------------- */
 
-int pp_lazy_skip(pp *p, const ptok *lb, pp_lazy *z)
+int pp_lazy_body_skip(pp *p, const ptok *lb, pp_lazy *z)
 {
-	ctx *c = &p->cx[p->depth - 1];
-	const hent *e;
+	pp_context *c = &p->cx[p->depth - 1];
+	const pp_header_cache_entry *e;
 	uint32_t k, lo, hi;
 
-	if (c->type != C_REPLAY || !c->i || lb->kind != T_LBRACE || p->pend || (p->rec.on && !c->norec))
+	if (c->type != PP_CONTEXT_SERVED || !c->i || lb->kind != LEX_TOKEN_LEFT_BRACE || p->pend || (p->rec.on && !c->norec))
 		return 0;
 	e = c->he;
 	k = c->i - 1;
-	if (e->tk[k].kind != T_LBRACE || !e->tk[k].loc || lb->loc != c->loc + e->tk[k].loc - 1)
+	if (e->tk[k].kind != LEX_TOKEN_LEFT_BRACE || !e->tk[k].loc || lb->loc != c->loc + e->tk[k].loc - 1)
 		return 0;
-	lo = 0, hi = e->nbr;
+	lo = 0, hi = e->brace_pair_count;
 	while (lo < hi) {
 		uint32_t m = (lo + hi) / 2;
 
@@ -92,7 +92,7 @@ int pp_lazy_skip(pp *p, const ptok *lb, pp_lazy *z)
 		else
 			hi = m;
 	}
-	if (lo >= e->nbr || e->br[2 * lo] != k)
+	if (lo >= e->brace_pair_count || e->br[2 * lo] != k)
 		return 0;
 	*z = (pp_lazy){ e, k, e->br[2 * lo + 1], c->loc, c->cbase, c->ci, k, 0, 0 };
 	z->rloc = e->tk[z->close].loc ? c->loc + e->tk[z->close].loc - 1 : 0;
@@ -100,112 +100,112 @@ int pp_lazy_skip(pp *p, const ptok *lb, pp_lazy *z)
 	c->i = z->close + 1;
 	while (c->ci < e->nctr && e->ctr[c->ci].off <= z->close)
 		c->ci++;
-	p->ntok_out += z->close - k;
+	p->tokens_delivered += z->close - k;
 	return 1;
 }
 
-void pp_lazy_tok(pp *p, pp_lazy *z, ptok *t)
+void pp_lazy_body_token_get(pp *p, pp_lazy *z, ptok *t)
 {
-	const hent *e = z->e;
+	const pp_header_cache_entry *e = z->e;
 	uint32_t k = z->k++;
 
-	htok_get(t, &e->tk[k], e->xtk, shared_base0(), z->base);
-	if (t->kind == T_IDENT)
-		t->flags |= PF_NOEXP;
+	pp_header_cache_token_load(t, &e->tk[k], e->xtk, pp_shared_base(), z->base);
+	if (t->kind == LEX_TOKEN_IDENTIFIER)
+		t->flags |= PP_TOKEN_FLAG_NO_EXPAND;
 	while (z->ci < e->nctr && e->ctr[z->ci].off < k)
 		z->ci++;
 	if (unlikely(z->ci < e->nctr && e->ctr[z->ci].off == k))
-		ctr_spell(p, e, &z->ci, k, z->cbase, t);
+		pp_header_cache_counter_spell(p, e, &z->ci, k, z->cbase, t);
 }
 /* e's delta: its children's in order, then its own */
-static void apply_delta(pp *p, const hent *e)
+static void pp_header_cache_delta_apply(pp *p, const pp_header_cache_entry *e)
 {
 	for (uint32_t i = 0; i < e->nkid; i++)
-		apply_delta(p, e->kid[i].e);
-	HV_FOR(e->dl, hread, x)
-		mset(p, x->id, (const pmacro *)x->v);
+		pp_header_cache_delta_apply(p, e->kid[i].e);
+	PP_HEADER_CACHE_VECTOR_FOR(e->dl, pp_header_cache_read, x)
+		pp_macro_table_set(p, x->id, (const pp_macro *)x->v);
 }
 
-static void hc_apply(pp *p, const hent *e)
+static void pp_header_cache_entry_apply(pp *p, const pp_header_cache_entry *e)
 {
 	unsigned c0 = p->counter;
-	struct hrec *r = &p->rec;
-	hlev *L = r->n ? &r->lev[r->n - 1] : NULL;
+	struct pp_recording *r = &p->rec;
+	pp_header_cache_level *L = r->n ? &r->levels[r->n - 1] : NULL;
 
-	p->hc_last = e;
+	p->header_cache_last_entry = e;
 
-	if (p->tokmode == 2) {
+	if (p->output_mode == 2) {
 		if (e->has_text) {
 			/*
 			 * Recording: the entry's tokens are a segment of the enclosing
 			 * levels, which publish skips; reserve their positions instead of
-			 * copying every token (rec_tok was ~13% of vccd).
+			 * copying every token (pp_header_cache_token_record was ~13% of vccd).
 			 */
 			bool reserve = false;
 
 			if (L) {
-				if (r->nseg < HC_MAXSEG && r->ntk + e->total < HC_MAXTK) {
-					r->seg[r->nseg++] = (hsegr){ r->ntk, r->ntk + e->total, e, c0, p->next_base };
+				if (r->nseg < PP_HEADER_CACHE_SEGMENT_MAX && r->ntk + e->total < PP_HEADER_CACHE_TOKEN_MAX) {
+					r->seg[r->nseg++] = (pp_header_cache_recorded_segment){ r->ntk, r->ntk + e->total, e, c0, p->next_location_base };
 					r->ntk += e->total;
 					reserve = true;
 				} else {
-					HC_BAD(p);
+					PP_HEADER_CACHE_REGION_REJECT(p);
 				}
 			}
-			push_replay(p, e, p->next_base, c0, 1, reserve);
+			pp_header_cache_serve_push(p, e, p->next_location_base, c0, 1, reserve);
 		}
 	} else if (e->has_text) {
 		size_t st;
 
 		if (L)
-			text_start(p, e->first_sol);
-		out_reserve(p, e->total + 16 * (size_t)e->nctr);
+			pp_header_cache_text_start(p, e->first_sol);
+		pp_output_reserve(p, e->total + 16 * (size_t)e->nctr);
 		st = p->nout;
-		emit(p, e, c0);
+		pp_header_cache_text_serve(p, e, c0);
 		p->col = e->col_end;
-		p->edir = e->edir_end;
-		p->pk = e->pk, p->pk_L = e->pk_L, p->pk_pp = e->pk_pp, p->pk_end = NULL;
+		p->edir = e->directive_on_line_at_end;
+		p->pk = e->pk, p->pk_L = e->pk_L, p->pk_pp = e->pk_pp, p->previous_end = NULL;
 		if (L) {
-			if (r->nseg < HC_MAXSEG)
-				r->seg[r->nseg++] = (hsegr){ st, p->nout, e, c0, 0 };
+			if (r->nseg < PP_HEADER_CACHE_SEGMENT_MAX)
+				r->seg[r->nseg++] = (pp_header_cache_recorded_segment){ st, p->nout, e, c0, 0 };
 			else
-				HC_BAD(p);
+				PP_HEADER_CACHE_REGION_REJECT(p);
 		}
 	}
-	if (p->tokmode != 2 && p->out_text)
-		text_file_change(p, cur_file(p), 0);
+	if (p->output_mode != 2 && p->output_text_mode)
+		pp_output_file_change(p, pp_file_context_current(p), 0);
 	if (L) {
 		/* the entry's inputs and writes are the enclosing level's too */
 		for (int i = 0; i < r->n; i++) {
 			if (e->level >= 0)
-				r->lev[i].uses_level = 1;
-			if (r->lev[i].ndirs < e->ndirs)
-				r->lev[i].ndirs = e->ndirs;
+				r->levels[i].uses_level = 1;
+			if (r->levels[i].ndirs < e->ndirs)
+				r->levels[i].ndirs = e->ndirs;
 		}
-		kid_attach(p, e);	/* (its reads and writes stay in it) */
+		pp_header_cache_child_attach(p, e);	/* (its reads and writes stay in it) */
 		for (uint32_t i = 0; i < e->nord; i++) {
-			if (e->ord[i].present && once_index(p, e->ord[i].f) >= (int)L->nonce0)
+			if (e->ord[i].present && pp_once_file_find(p, e->ord[i].f) >= (int)L->nonce0)
 				continue;	/* marked by this level itself */
-			if (r->nord < HC_MAXORD)
+			if (r->nord < PP_HEADER_CACHE_ONCE_MARK_MAX)
 				r->ord[r->nord++] = e->ord[i];
 			else
-				HC_BAD(p);
+				PP_HEADER_CACHE_REGION_REJECT(p);
 		}
 		for (uint32_t i = 0; i < e->ncrd; i++) {
-			const hcread *c = &e->crd[i];
+			const pp_header_cache_counter_name_read *c = &e->crd[i];
 
-			if (r->ncrd < HC_MAXCRD)
-				r->crd[r->ncrd++] = (hcrd){ c->s, c->len, c->off, c->dlen, c0 + c->rel };
+			if (r->ncrd < PP_HEADER_CACHE_COUNTER_READ_MAX)
+				r->crd[r->ncrd++] = (pp_header_cache_counter_read){ c->s, c->len, c->off, c->dlen, c0 + c->rel };
 			else
-				HC_BAD(p);
+				PP_HEADER_CACHE_REGION_REJECT(p);
 		}
 	}
 	for (uint32_t i = 0; i < e->nfe; i++) {
-		const hfent *h = &e->fe[i];
-		fent *d = &p->fe[p->nfe++];
+		const pp_header_cache_file *h = &e->fe[i];
+		pp_file_entry *d = &p->fe[p->nfe++];
 
-		d->base = p->next_base + h->rbase;
-		d->dstate = p->dcur;
+		d->base = p->next_location_base + h->record_base;
+		d->diagnostic_state = p->dcur;
 		d->f = h->f;
 		d->fi = h->fi;
 		d->name = h->name;
@@ -213,46 +213,46 @@ static void hc_apply(pp *p, const hent *e)
 		d->spath = h->spath;
 		d->sys = h->sys;
 	}
-	p->next_base += e->span;
-	apply_delta(p, e);
+	p->next_location_base += e->span;
+	pp_header_cache_delta_apply(p, e);
 	for (uint32_t i = 0; i < e->noadd; i++)
-		once_add(p, e->oadd[i]);
+		pp_once_file_add(p, e->once_additions[i]);
 	p->counter += e->counter_delta;
-	if (p->tokmode != 2 || !e->has_text)
+	if (p->output_mode != 2 || !e->has_text)
 		p->pend = e->pend_out;	/* (tokens: when the replay is done) */
-	atomic_fetch_add_explicit(&hstat.hit, 1, memory_order_relaxed);
-	atomic_fetch_add_explicit(&hstat.bytes_replayed, e->total, memory_order_relaxed);
+	atomic_fetch_add_explicit(&pp_header_cache_statistics.hit, 1, memory_order_relaxed);
+	atomic_fetch_add_explicit(&pp_header_cache_statistics.bytes_replayed, e->total, memory_order_relaxed);
 }
 
-static void hc_why(const pp *p, const hkey *k, const hent *e)
+static void pp_header_cache_miss_explain(const pp *p, const pp_header_cache_key *k, const pp_header_cache_entry *e)
 {
 	char b[512];
 	int n = 0;
 
-	HV_FOR(e->rg, hread, x)
-		if (!n && (mget(p, x->id) != 0) != (x->v != 0)) {
+	PP_HEADER_CACHE_VECTOR_FOR(e->rg, pp_header_cache_read, x)
+		if (!n && (pp_macro_table_get(p, x->id) != 0) != (x->v != 0)) {
 			const vident *d = &vintern_ents[x->id];
 
 			n = snprintf(b, sizeof(b), "hc-miss %s: guard %.*s %s\n", k->spath, (int)d->len, d->s,
 				     x->v ? "def/undef" : "undef/def");
 		}
 	for (uint32_t i = 0; i < e->nord && !n; i++)
-		if ((once_index(p, e->ord[i].f) >= 0) != (bool)e->ord[i].present)
+		if ((pp_once_file_find(p, e->ord[i].f) >= 0) != (bool)e->ord[i].present)
 			n = snprintf(b, sizeof(b), "hc-miss %s: once %s\n", k->spath, e->ord[i].f->path);
-	HV_FOR(e->ru, uint32_t, x)
-		if (!n && mget(p, *x)) {
+	PP_HEADER_CACHE_VECTOR_FOR(e->ru, uint32_t, x)
+		if (!n && pp_macro_table_get(p, *x)) {
 			const vident *d = &vintern_ents[*x];
 
 			n = snprintf(b, sizeof(b), "hc-miss %s: %.*s undef/def\n", k->spath, (int)d->len, d->s);
 		}
-	HV_FOR(e->rv, hread, x) {
-		uintptr_t c = mget(p, x->id) & ~(uintptr_t)1, v = x->v;
+	PP_HEADER_CACHE_VECTOR_FOR(e->rv, pp_header_cache_read, x) {
+		uintptr_t c = pp_macro_table_get(p, x->id) & ~(uintptr_t)1, v = x->v;
 
-		if (!n && (v == HDEF ? !c : c != v)) {
+		if (!n && (v == PP_HEADER_CACHE_DEFINED ? !c : c != v)) {
 			const vident *d = &vintern_ents[x->id];
 
 			n = snprintf(b, sizeof(b), "hc-miss %s: %.*s %s/%s\n", k->spath, (int)d->len, d->s,
-				     v == HDEF ? "def" : "val", c ? "def" : "undef");
+				     v == PP_HEADER_CACHE_DEFINED ? "def" : "val", c ? "def" : "undef");
 		}
 	}
 	if (!n)
@@ -261,26 +261,26 @@ static void hc_why(const pp *p, const hkey *k, const hent *e)
 }
 
 /* replay a matching entry for this #include; true if done */
-VPRIV bool hc_try(pp *p, hkey *k)
+VPRIV bool pp_header_cache_entry_serve(pp *p, pp_header_cache_key *k)
 {
 	static _Atomic int dbg_ = -1;
 	int dbg;
-	const hent *h = atomic_load_explicit(&k->head, memory_order_acquire);
+	const pp_header_cache_entry *h = atomic_load_explicit(&k->head, memory_order_acquire);
 
 	p->hgen++;	/* (child entry verdicts are for one state) */
-	for (const hent *e = h; e; e = e->next)
-		if (hc_valid(p, e)) {
-			hc_apply(p, e);
+	for (const pp_header_cache_entry *e = h; e; e = e->next)
+		if (pp_header_cache_entry_is_valid(p, e)) {
+			pp_header_cache_entry_apply(p, e);
 			return true;
 		}
 	if ((dbg = atomic_load_explicit(&dbg_, memory_order_relaxed)) < 0)
 		atomic_store_explicit(&dbg_, dbg = getenv("VPP_HC_DEBUG") != NULL, memory_order_relaxed);
 	if (dbg && h)
-		hc_why(p, k, h);
+		pp_header_cache_miss_explain(p, k, h);
 	return false;
 }
 /* an entry's text, children spliced in, __COUNTER__ values from base */
-VPRIV void emit(pp *p, const hent *e, unsigned base)
+VPRIV void pp_header_cache_text_serve(pp *p, const pp_header_cache_entry *e, unsigned base)
 {
 	uint32_t pos = 0, ci = 0;
 
@@ -288,16 +288,16 @@ VPRIV void emit(pp *p, const hent *e, unsigned base)
 		uint32_t to = si < e->nseg ? e->seg[si].at : (uint32_t)e->ntext;
 
 		while (ci < e->nctr && e->ctr[ci].off < to) {
-			const hctr *c = &e->ctr[ci++];
+			const pp_header_cache_counter_run *c = &e->ctr[ci++];
 
-			out_put(p, e->text + pos, c->off - pos);
-			out_reserve(p, 24);
-			p->nout += (size_t)utoa(p->out + p->nout, base + c->rel);
+			pp_output_append(p, e->text + pos, c->off - pos);
+			pp_output_reserve(p, 24);
+			p->nout += (size_t)pp_unsigned_format(p->out + p->nout, base + c->rel);
 			pos = c->off + c->len;
 		}
-		out_put(p, e->text + pos, to - pos);
+		pp_output_append(p, e->text + pos, to - pos);
 		pos = to;
 		if (si < e->nseg)
-			emit(p, e->seg[si].child, base + e->seg[si].cdelta);
+			pp_header_cache_text_serve(p, e->seg[si].child, base + e->seg[si].counter_delta);
 	}
 }

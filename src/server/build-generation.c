@@ -151,10 +151,10 @@ VPRIV int gen_enter(uint32_t pgrp)
 					atomic_store(&gen_restart, 1);
 					return 2;
 				}
-				vlex_cache_flush();
-				vdir_flush();
+				lex_cache_flush();
+				pp_directory_cache_flush();
 				dstore_new_build();
-				pp_include_flush();
+				pp_include_cache_flush();
 				atomic_fetch_add(&n_flush, 1);
 			} else if (gen_ngrp) {	/* jobs are running: keep the caches, but check each answer once before it is reused */
 				vcache_new_epoch();

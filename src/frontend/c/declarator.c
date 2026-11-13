@@ -44,27 +44,27 @@ static bool param_list(cc *c, dop *op, const attrs *leading)
 	op->kr = false;
 	if (!c->in_proto)
 		c->nptag = 0;
-	if (is(c, T_RPAREN)) {
+	if (is(c, LEX_TOKEN_RIGHT_PAREN)) {
 		if (kwmap != kwmap_c23)
 			fl |= TF_NOPROTO;
-	} else if (iskw(c, KW_void) && peek(c, 1)->kind == T_RPAREN) {
+	} else if (iskw(c, KW_void) && peek(c, 1)->kind == LEX_TOKEN_RIGHT_PAREN) {
 		next(c);
-	} else if (is(c, T_IDENT) && !kwof(tok(c)) && !is_typedef_name(c, tok(c)) &&
-		   (peek(c, 1)->kind == T_COMMA || peek(c, 1)->kind == T_RPAREN)) {
+	} else if (is(c, LEX_TOKEN_IDENTIFIER) && !kwof(tok(c)) && !is_typedef_name(c, tok(c)) &&
+		   (peek(c, 1)->kind == LEX_TOKEN_COMMA || peek(c, 1)->kind == LEX_TOKEN_RIGHT_PAREN)) {
 		/* K&R identifier list: int for now, the declarations before the body set the types */
 		fl |= TF_NOPROTO;
 		op->kr = true;
 		for (;;) {
 			uint32_t s;
 
-			if (!is(c, T_IDENT) || kwof(tok(c)))
+			if (!is(c, LEX_TOKEN_IDENTIFIER) || kwof(tok(c)))
 				fatal(c, tok(c)->loc, "expected identifier");
 			s = sym_new(c, S_VAR, tok(c)->id, prim(TY_INT), tok(c)->loc);
 			c->syms[s].flags |= SF_PARAM;
 			c->syms[s].sc = SC_AUTO;
 			vpush(c, &psyms, s);
 			next(c);
-			if (!accept(c, T_COMMA))
+			if (!accept(c, LEX_TOKEN_COMMA))
 				break;
 		}
 	} else {
@@ -77,17 +77,17 @@ static bool param_list(cc *c, dop *op, const attrs *leading)
 			uint32_t first, nops, s;
 			qty t;
 
-			if (accept(c, T_ELLIPSIS)) {
+			if (accept(c, LEX_TOKEN_ELLIPSIS)) {
 				fl |= TF_VARIADIC;
 				break;
 			}
 			if (!decl_specs(c, &ds, true)) {
 				/* clang: an implicit-int parameter is only an error outside system headers */
-				if (is(c, T_IDENT) && !kwof(tok(c)) && pp_in_system_header(c->p, tok(c)->loc)) {
+				if (is(c, LEX_TOKEN_IDENTIFIER) && !kwof(tok(c)) && pp_in_system_header(c->p, tok(c)->loc)) {
 					memset(&ds, 0, sizeof(ds));
 					ds.ty = prim(TY_INT);
 					ds.loc = tok(c)->loc;
-				} else if (is(c, T_IDENT)) {
+				} else if (is(c, LEX_TOKEN_IDENTIFIER)) {
 					unknown_type(c, &ds, true);
 				} else {
 					fatal(c, tok(c)->loc, "expected parameter declarator");
@@ -130,7 +130,7 @@ static bool param_list(cc *c, dop *op, const attrs *leading)
 			} else if (pk == TY_FUNC) {
 				t = ty_ptr(c, t);
 			} else if (unlikely(pk == TY_VOID)) {
-				if (!d.name && !ptys.n && !is(c, T_COMMA) && !QQ(t))
+				if (!d.name && !ptys.n && !is(c, LEX_TOKEN_COMMA) && !QQ(t))
 					break;	/* "(void void)" after its error, "(void;": still no parameters */
 				/* "(int a, void)", "(void x)": clang's errors (where the name would be);
 				   the parameter is invalid */
@@ -159,7 +159,7 @@ static bool param_list(cc *c, dop *op, const attrs *leading)
 			c->syms[s].sc = ds.sc == SC_REGISTER ? SC_REGISTER : SC_AUTO;
 			sym_bind(c, s);
 			vpush(c, &psyms, s);
-			if (!accept(c, T_COMMA))
+			if (!accept(c, LEX_TOKEN_COMMA))
 				break;
 		}
 		c->in_proto--;
@@ -167,9 +167,9 @@ static bool param_list(cc *c, dop *op, const attrs *leading)
 	if (unlikely(voidat))	/* the list parsed: "(int, void)", "(void, int)" */
 		cc_error(c, voidat, "'void' must be the first and only parameter if specified");
 	scope_close_proto(c);
-	bool ok = is(c, T_RPAREN);
+	bool ok = is(c, LEX_TOKEN_RIGHT_PAREN);
 
-	expect_match(c, T_RPAREN, open);
+	expect_match(c, LEX_TOKEN_RIGHT_PAREN, open);
 	op->kind = 2;
 	op->fl = (uint16_t)fl;
 	op->a = vfreeze(c, &ptys);
@@ -206,11 +206,11 @@ static void array_suffix(cc *c, dop *op, uint32_t name)
 	}
 	op->q = (uint8_t)q;
 	op->np = tok(c)->loc;	/* where the size is written (an array of VLAs: its size node) */
-	if (accept(c, T_RSQUARE)) {
+	if (accept(c, LEX_TOKEN_RIGHT_SQUARE)) {
 		op->fl = TF_INCOMPLETE;
 		return;
 	}
-	if (is(c, T_STAR) && peek(c, 1)->kind == T_RSQUARE) {
+	if (is(c, LEX_TOKEN_STAR) && peek(c, 1)->kind == LEX_TOKEN_RIGHT_SQUARE) {
 		next(c), next(c);
 		op->fl = TF_VLA;
 		op->a = 0;
@@ -221,7 +221,7 @@ static void array_suffix(cc *c, dop *op, uint32_t name)
 		i128 v;
 		cval bound;
 
-		expect(c, T_RSQUARE, "']'");
+		expect(c, LEX_TOKEN_RIGHT_SQUARE, "']'");
 		if (!is_integer(c, N(n)->ty)) {
 			pp_span r = rng(c, n);
 
@@ -259,15 +259,15 @@ static bool nested_declarator(cc *c, bool abstract_ok)
 	const ptok *t = peek(c, 1);
 	int kw = kwof(t);
 
-	if (t->kind == T_STAR || t->kind == T_CARET)
+	if (t->kind == LEX_TOKEN_STAR || t->kind == LEX_TOKEN_CARET)
 		return true;
-	if (t->kind == T_LPAREN)
+	if (t->kind == LEX_TOKEN_LEFT_PAREN)
 		return true;	/* "((": only a nested declarator (an abstract one or a named one) */
-	if (t->kind == T_LSQUARE)
+	if (t->kind == LEX_TOKEN_LEFT_SQUARE)
 		return abstract_ok;
 	if (kw == KW___attribute__ || kw == KW___attribute)
 		return true;
-	if (t->kind == T_IDENT && !kw && !is_typedef_name(c, t))
+	if (t->kind == LEX_TOKEN_IDENTIFIER && !kw && !is_typedef_name(c, t))
 		return true;
 	return false;
 }
@@ -309,8 +309,8 @@ VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32
 	memset(d, 0, sizeof(*d));
 	d->loc = tok(c)->loc;
 	for (;;) {
-		if (is(c, T_STAR) || is(c, T_CARET)) {	/* ^: a block pointer (Darwin SDK prototypes) */
-			int q = 0, blk = is(c, T_CARET);
+		if (is(c, LEX_TOKEN_STAR) || is(c, LEX_TOKEN_CARET)) {	/* ^: a block pointer (Darwin SDK prototypes) */
+			int q = 0, blk = is(c, LEX_TOKEN_CARET);
 
 			next(c);
 
@@ -328,7 +328,7 @@ VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32
 				else if (is_nullability(c, tok(c)))
 					;
 				else if (kw == KW___attribute__ || kw == KW___attribute ||
-					 (is(c, T_LSQUARE) && peek(c, 1)->kind == T_LSQUARE)) {
+					 (is(c, LEX_TOKEN_LEFT_SQUARE) && peek(c, 1)->kind == LEX_TOKEN_LEFT_SQUARE)) {
 					attribute_list(c, &d->at);
 					continue;
 				} else
@@ -346,7 +346,7 @@ VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32
 		}
 		break;
 	}
-	if (is(c, T_LPAREN) && nested_declarator(c, abstract_ok)) {
+	if (is(c, LEX_TOKEN_LEFT_PAREN) && nested_declarator(c, abstract_ok)) {
 		uint32_t plb0 = tok(c)->loc;
 
 		next(c);
@@ -364,7 +364,7 @@ VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32
 			ns++;
 		} else {
 			declarator(c, &id, abstract_ok, &ifirst, &inops);
-			expect_match(c, T_RPAREN, plb0);
+			expect_match(c, LEX_TOKEN_RIGHT_PAREN, plb0);
 			d->name = id.name;
 			d->loc = id.loc;
 			merge_attrs(&d->at, &id.at);
@@ -374,7 +374,7 @@ VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32
 			}
 			inner = true;
 		}
-	} else if (is(c, T_IDENT) && !kwof(tok(c))) {
+	} else if (is(c, LEX_TOKEN_IDENTIFIER) && !kwof(tok(c))) {
 		d->name = tok(c)->id;
 		d->loc = tok(c)->loc;
 		if (!abstract_ok)	/* an error before the declaration ends declares it, invalid (rec_restore) */
@@ -383,18 +383,18 @@ VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32
 	} else if (!abstract_ok) {
 		/* clang: a '(' that is not a grouping one starts the parameters of a nameless
 		   declarator, and the name was expected after it */
-		fatal(c, is(c, T_LPAREN) ? peek(c, 1)->loc : tok(c)->loc,
+		fatal(c, is(c, LEX_TOKEN_LEFT_PAREN) ? peek(c, 1)->loc : tok(c)->loc,
 		      c->in_struct ? "expected member name or ';' after declaration specifiers" : "expected identifier or '('");
 	} else {
 		d->loc = tok(c)->loc;	/* abstract: where the name would be (clang) */
 	}
 	attribute_list(c, &d->at);
 	for (;;) {
-		if (accept(c, T_LSQUARE)) {
+		if (accept(c, LEX_TOKEN_LEFT_SQUARE)) {
 			if ((uint32_t)ns == scap)
 				sufs = dop_grow(c, sufs, ns, &scap, scap + 1);
 			array_suffix(c, &sufs[ns++], d->name);
-		} else if (is(c, T_LPAREN)) {
+		} else if (is(c, LEX_TOKEN_LEFT_PAREN)) {
 			uint32_t plb;
 
 			next(c);

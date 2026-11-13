@@ -194,7 +194,7 @@ enum {
 	N_PREINC, N_PREDEC, N_POSTINC, N_POSTDEC,
 	N_BINARY,	/* aux: op (T_* kind), a, b */
 	N_LOGAND, N_LOGOR,
-	N_ASSIGN,	/* aux: 0 or the compound op (T_PLUS, ...), a, b */
+	N_ASSIGN,	/* aux: 0 or the compound op (LEX_TOKEN_PLUS, ...), a, b */
 	N_COND,		/* a ? b : c (b == 0: GNU a ?: c) */
 	N_COMMA,
 	N_SIZEOF_VLA,	/* a: expression, b: VLA type; aux=1 captures a new type-name bound */

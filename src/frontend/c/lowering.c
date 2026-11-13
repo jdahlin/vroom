@@ -77,7 +77,7 @@ VPRIV uint32_t neg(cc *c, uint32_t n)
 {
 	uint32_t r = mk(c, N_UNARY, N(n)->ty, N(n)->loc);
 
-	N(r)->aux = T_MINUS;
+	N(r)->aux = LEX_TOKEN_MINUS;
 	N(r)->a = n;
 	return r;
 }

@@ -16,7 +16,7 @@ VPRIV void print_counts(void)
 		char hs[512];
 		struct rusage ru;
 
-		pp_hc_stats(hs, sizeof(hs));
+		pp_header_cache_statistics_format(hs, sizeof(hs));
 		fprintf(stderr, "vccd: %s\n", hs);
 		dc_stats(hs, sizeof(hs));
 		fprintf(stderr, "vccd: %s\n", hs);

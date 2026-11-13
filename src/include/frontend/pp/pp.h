@@ -3,7 +3,7 @@
 /*
  * vcc preprocessor: C (gnu11) translation phase 4, pull model.
  *
- * pp_next() hands out one fully macro-expanded token at a time.  Files come
+ * pp_token_next() hands out one fully macro-expanded token at a time.  Files come
  * from the token cache (lex.h) and are never copied: a file context and an
  * object-like macro body are (pointer, index) into the immutable token
  * arrays.  Only function-like expansions write tokens, into a per-TU arena
@@ -11,7 +11,7 @@
  *
  * Expansion follows clang's model exactly (it is the parity target): a
  * "disabled" bit per macro while its expansion is on the stack, a paint bit
- * (PF_NOEXP) on identifier tokens read while their macro was disabled, and
+ * (PP_TOKEN_FLAG_NO_EXPAND) on identifier tokens read while their macro was disabled, and
  * clang's argument pre-expansion, paste and whitespace rules.
  */
 #include <setjmp.h>
@@ -21,20 +21,20 @@
 #include "frontend/lex/lex.h"
 
 enum {
-	P_DIRECTIVE = T_NKINDS,	/* a line to pass through: s = "pragma ...", "ident ..." */
+	PP_TOKEN_KIND_DIRECTIVE_LINE = LEX_TOKEN_KIND_COUNT,	/* a line to pass through: s = "pragma ...", "ident ..." */
 };
 
 enum {
-	PF_NOEXP = 16,		/* painted: never expand (C11 6.10.3.4p2) */
-	PF_NOPASTE = 32,	/* a ## that came from an argument */
-	PF_MACRO = 64,		/* from a macro expansion (diagnostics) */
-	PF_EMBEND = 128,	/* #embed's last byte: -E prints a space after it (clang) */
+	PP_TOKEN_FLAG_NO_EXPAND = 16,		/* painted: never expand (C11 6.10.3.4p2) */
+	PP_TOKEN_FLAG_NO_PASTE = 32,	/* a ## that came from an argument */
+	PP_TOKEN_FLAG_FROM_MACRO = 64,		/* from a macro expansion (diagnostics) */
+	PP_TOKEN_FLAG_EMBED_END = 128,	/* #embed's last byte: -E prints a space after it (clang) */
 };
 
 typedef struct ptok {
-	const char *s;		/* spelling; raw (with splices) if TF_DIRTY */
+	const char *s;		/* spelling; raw (with splices) if LEX_TOKEN_FLAG_SPLICED */
 	uint32_t len;
-	uint32_t id;		/* interned id (T_IDENT) */
+	uint32_t id;		/* interned id (LEX_TOKEN_IDENTIFIER) */
 	uint32_t loc;		/* TU source location (file base + offset) */
 	uint8_t kind, flags;	/* vtok_kind / P_*, TF_* | PF_* */
 	uint16_t ctr;		/* pp internal: __COUNTER__ digits in the spelling (header cache) */
@@ -109,37 +109,37 @@ typedef struct pp pp;
 pp *pp_open(const pp_opts *o);
 void pp_close(pp *p);
 /* fatal errors (missing #include) longjmp here instead of exiting */
-void pp_set_fatal(pp *p, jmp_buf *jb);
+void pp_fatal_jump_set(pp *p, jmp_buf *jb);
 /* the distinct files read so far, as spelled (for -MD dependency files) */
-size_t pp_files(const pp *p, const char **names, size_t max, int nosys);
-/* the next token; T_EOF at the end (and ever after) */
-void pp_next(pp *p, ptok *t);
+size_t pp_file_names(const pp *p, const char **names, size_t max, int nosys);
+/* the next token; LEX_TOKEN_EOF at the end (and ever after) */
+void pp_token_next(pp *p, ptok *t);
 /*
  * Spellings of tokens pp made (#x, a##b, __LINE__) live in an arena that
- * pp_next reuses once expansion is back at file level.  A consumer that
+ * pp_token_next reuses once expansion is back at file level.  A consumer that
  * still holds earlier tokens when it asks for the next one (lookahead)
- * brackets that pp_next with pp_hold_tmp(p, 1) ... (p, 0).
+ * brackets that pp_token_next with pp_temporary_hold(p, 1) ... (p, 0).
  */
-void pp_hold_tmp(pp *p, int on);
+void pp_temporary_hold(pp *p, int on);
 /*
- * -E: the whole TU as clang -E -P prints it (instead of pp_next), with the
+ * -E: the whole TU as clang -E -P prints it (instead of pp_token_next), with the
  * header cache (VPP_NOHC=1: off).  *out stays valid until pp_close.
  * Returns the number of errors.
  */
-int pp_text(pp *p, const char **out, size_t *len);
+int pp_text_render(pp *p, const char **out, size_t *len);
 /* -dM: the defined macros, sorted, as clang prints them (malloc'ed) */
-int pp_macros(pp *p, char **out, size_t *len);
+int pp_macros_dump(pp *p, char **out, size_t *len);
 /* header cache counters (process-wide) */
-void pp_hc_stats(char *buf, size_t n);
+void pp_header_cache_statistics_format(char *buf, size_t n);
 /* errors reported so far */
-int pp_errors(const pp *p);
+int pp_error_count(const pp *p);
 int pp_diag_pragmas(const pp *p);
 int pp_diag_npragma(const pp *p);	/* #pragma diagnostic transitions so far */
 const char *const *pp_diag_wargs(const pp *p, int *n);	/* the -W/-w options, in order */
 const uint32_t *pp_diag_nenable_ref(const pp *p);	/* ... of them "warning" or "error": the count, for a test inline */
-/* a new build (vccd): forget the include answers; with vlex_cache_flush and
- * vdir_flush, every file is looked up and read again.  No TU may be running. */
-void pp_include_flush(void);
+/* a new build (vccd): forget the include answers; with lex_cache_flush and
+ * pp_directory_cache_flush, every file is looked up and read again.  No TU may be running. */
+void pp_include_cache_flush(void);
 
 /* is loc in a system header */
 int pp_in_system_header(const pp *p, uint32_t loc);
@@ -308,7 +308,7 @@ const char *pp_src(const pp *p, uint32_t b, uint32_t e, size_t *len);
 /* the source text from loc b to the end of its file, NULL if unknown */
 const char *pp_src_rest(const pp *p, uint32_t b, size_t *len);
 /* loc is on a macro name: where an object-like macro's body tokens are (vcc gives them the
-   invocation's location and no PF_MACRO) */
+   invocation's location and no PP_TOKEN_FLAG_FROM_MACRO) */
 int pp_loc_macro(const pp *p, uint32_t loc);
 /* name is a defined macro now */
 int pp_macro_defined(const pp *p, const char *name);
@@ -316,7 +316,7 @@ int pp_macro_defined(const pp *p, const char *name);
 /*
  * Top-level regions (headers included from the main file, cached or being
  * recorded), for the front end's declaration cache.  Positions count the
- * tokens pp_next has delivered.  A region's start comes before its first
+ * tokens pp_token_next has delivered.  A region's start comes before its first
  * token, its end after its last; e identifies the cached entry (the same
  * pointer means the same tokens), NULL for a region that was not stored.
  */
@@ -329,32 +329,32 @@ typedef struct pp_topev {
 } pp_topev;
 /* this TU's events so far; NULL once there were too many */
 const pp_topev *pp_top_events(const pp *p, uint32_t *n);
-/* tokens delivered so far; tokens pp_skip_top dropped */
-uint64_t pp_ntok(const pp *p);
-uint64_t pp_skipped(const pp *p);
+/* tokens delivered so far; tokens pp_top_region_skip dropped */
+uint64_t pp_token_count(const pp *p);
+uint64_t pp_skipped_token_count(const pp *p);
 /* VCC_DRCOV: the header-cache hits of the TU so far, as [first token, end) in delivered positions */
 typedef struct pp_hitreg { uint64_t b, e; uint32_t nfile; const void *he; } pp_hitreg;
 const pp_hitreg *pp_hit_regions(const pp *p, uint32_t *n);
 /* VCC_DRCOV/VCC_DRREC/VCC_DR: the hit whose replay is open (its first token's position, its entry; if base:
    its location base, __COUNTER__ at its start, location span); false if none */
-bool pp_open_hit(const pp *p, uint64_t *b, const void **he, uint32_t *base, unsigned *ctr, uint32_t *span);
+bool pp_hit_open_get(const pp *p, uint64_t *b, const void **he, uint32_t *base, unsigned *ctr, uint32_t *span);
 /* the tokens of hit entry he, with its children's */
-uint64_t pp_hit_ntok(const void *he);
+uint64_t pp_hit_token_count(const void *he);
 /* drop the rest of that hit, whose first token was the last one delivered (frontend/c/replay.c); 0 if not so
    (dry: only whether it would) */
-int pp_skip_hit(pp *p, int dry);
+int pp_hit_skip(pp *p, int dry);
 /*
  * Drop the rest of the replayed region that the last event started, whose
  * first token was the last one delivered: as if it had been delivered and
  * the delivered count stood at its start.  0 if that is not the case.
  */
-int pp_skip_top(pp *p);
+int pp_top_region_skip(pp *p);
 
 /*
- * Lazy bodies straight from the header cache.  When the token pp_next just
+ * Lazy bodies straight from the header cache.  When the token pp_token_next just
  * delivered is a '{' replayed from a cached entry, and its matching '}' is in
- * the same entry's own tokens (no child entry in between), pp_lazy_skip moves
- * past the '}' as if the tokens had been delivered and fills z; pp_lazy_tok
+ * the same entry's own tokens (no child entry in between), pp_lazy_body_skip moves
+ * past the '}' as if the tokens had been delivered and fills z; pp_lazy_body_token_get
  * then hands out '{' .. '}' again, later in the same TU (z is a cursor).
  * The entry is immutable and lives as long as the process.
  */
@@ -364,14 +364,14 @@ typedef struct pp_lazy {
 	uint32_t base;		/* location base of the replay */
 	unsigned cbase;		/* __COUNTER__ at the entry's start */
 	uint32_t ci;		/* the entry's first __COUNTER__ record after '{' */
-	uint32_t k;		/* cursor: next token (pp_lazy_tok) */
+	uint32_t k;		/* cursor: next token (pp_lazy_body_token_get) */
 	uint32_t rloc;		/* the '}': location and flags */
 	uint8_t rflags;
 } pp_lazy;
-int pp_lazy_skip(pp *p, const ptok *lbrace, pp_lazy *z);
-void pp_lazy_tok(pp *p, pp_lazy *z, ptok *t);
+int pp_lazy_body_skip(pp *p, const ptok *lbrace, pp_lazy *z);
+void pp_lazy_body_token_get(pp *p, pp_lazy *z, ptok *t);
 
 /* the token's spelling without splices; buf must hold t->len bytes */
-const char *pp_spell(const ptok *t, char *buf, size_t *len);
+const char *pp_token_spell(const ptok *t, char *buf, size_t *len);
 
 #endif

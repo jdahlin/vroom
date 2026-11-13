@@ -31,14 +31,14 @@ static bool em_unused_pure(cc *c, uint32_t n, unsigned *left)
 			return false;
 		return em_unused_pure(c, x->a, left);
 	case N_UNARY:
-		if (x->aux != T_PLUS && x->aux != T_MINUS && x->aux != T_TILDE && x->aux != T_EXCLAIM)
+		if (x->aux != LEX_TOKEN_PLUS && x->aux != LEX_TOKEN_MINUS && x->aux != LEX_TOKEN_TILDE && x->aux != LEX_TOKEN_EXCLAMATION)
 			return false;
 		return em_unused_pure(c, x->a, left);
 	case N_BINARY:
 		switch (x->aux) {
-		case T_PLUS: case T_MINUS: case T_STAR: case T_AMP: case T_PIPE: case T_CARET:
-		case T_LESS: case T_LESSEQ: case T_GREATER: case T_GREATEREQ:
-		case T_EQUALEQUAL: case T_EXCLAIMEQ:
+		case LEX_TOKEN_PLUS: case LEX_TOKEN_MINUS: case LEX_TOKEN_STAR: case LEX_TOKEN_AMPERSAND: case LEX_TOKEN_PIPE: case LEX_TOKEN_CARET:
+		case LEX_TOKEN_LESS: case LEX_TOKEN_LESS_EQUAL: case LEX_TOKEN_GREATER: case LEX_TOKEN_GREATER_EQUAL:
+		case LEX_TOKEN_EQUAL_EQUAL: case LEX_TOKEN_EXCLAMATION_EQUAL:
 			break;
 		default:
 			return false;

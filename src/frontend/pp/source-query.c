@@ -1,5 +1,5 @@
 /* The parser's source-text queries: limits, include point, token text and extent, `defined`. */
-#include "../pp/ppimpl.h"
+#include "../pp/pp-internal.h"
 #include "common/buffer.h"
 #include <ctype.h>
 #include <dlfcn.h>
@@ -13,7 +13,7 @@ int pp_spell_limit(const pp *p) { return p->o->spell_limit; }
 
 uint32_t pp_main_eof(const pp *p)
 {
-	const fent *e = &p->fe[0];
+	const pp_file_entry *e = &p->fe[0];
 	uint32_t n = e->f->size;
 
 	return e->base + (n && e->f->src[n - 1] == '\n' ? n - 1 : n);
@@ -23,7 +23,7 @@ uint32_t pp_main_eof(const pp *p)
    #include before loc in loc's file, else the file's first line; UINT32_MAX: not in a file */
 uint32_t pp_include_point(const pp *p, uint32_t loc)
 {
-	const fent *e;
+	const pp_file_entry *e;
 	const char *s;
 	uint32_t end, at = 0, i = 0;
 
@@ -61,7 +61,7 @@ uint32_t pp_include_point(const pp *p, uint32_t loc)
 
 const char *pp_src(const pp *p, uint32_t b, uint32_t e, size_t *len)
 {
-	const fent *f;
+	const pp_file_entry *f;
 
 	if (e < b || !loc_ok(p, b, &f) || e - f->base > f->f->size)
 		return NULL;
@@ -90,7 +90,7 @@ void pp_invalid_tok(pp *p, const char *s, uint32_t len, uint32_t loc)
 /* the source at loc spells s[0, n) as a whole token (not a macro's expansion of it) */
 int pp_spells(const pp *p, uint32_t loc, const char *s, uint32_t n)
 {
-	const fent *e;
+	const pp_file_entry *e;
 
 	if (!loc_ok(p, loc, &e) || loc - e->base + n > e->f->size || memcmp(e->f->src + (loc - e->base), s, n))
 		return 0;
@@ -100,7 +100,7 @@ int pp_spells(const pp *p, uint32_t loc, const char *s, uint32_t n)
 /* the source character at loc, -1 if none */
 int pp_loc_char(const pp *p, uint32_t loc)
 {
-	const fent *e;
+	const pp_file_entry *e;
 
 	if (!loc_ok(p, loc, &e) || loc - e->base >= e->f->size)
 		return -1;
@@ -109,7 +109,7 @@ int pp_loc_char(const pp *p, uint32_t loc)
 
 const char *pp_src_rest(const pp *p, uint32_t b, size_t *len)
 {
-	const fent *f;
+	const pp_file_entry *f;
 
 	if (!loc_ok(p, b, &f))
 		return NULL;
@@ -119,7 +119,7 @@ const char *pp_src_rest(const pp *p, uint32_t b, size_t *len)
 
 uint32_t pp_tok_end(const pp *p, uint32_t loc)
 {
-	const fent *e;
+	const pp_file_entry *e;
 	const char *s, *end;
 	uint32_t off;
 
@@ -170,5 +170,5 @@ uint32_t pp_tok_end(const pp *p, uint32_t loc)
 
 int pp_defined(pp *p, uint32_t id)
 {
-	return mdefined(p, id);
+	return pp_macro_is_defined(p, id);
 }

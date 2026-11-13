@@ -94,10 +94,10 @@ VPRIV uint32_t fp_sign_call(cc *c, const char *name, size_t len, qty ft, const v
 		uint32_t ptr = cast_node(c, addr_of(c, tmp[i], loc), ty_ptr(c, bits), CK_P2P);
 		raw[i] = mk(c, N_DEREF, bits, loc); N(raw[i])->a = ptr; N(raw[i])->flags = NF_LVALUE;
 	}
-	uint32_t value = mk_bin(c, T_AMP, bits, rvalue(c, raw[0]), mk_int(c, sign - 1, bits, loc), loc);
+	uint32_t value = mk_bin(c, LEX_TOKEN_AMPERSAND, bits, rvalue(c, raw[0]), mk_int(c, sign - 1, bits, loc), loc);
 	if (copy) {
-		uint32_t source = mk_bin(c, T_AMP, bits, rvalue(c, raw[1]), mk_int(c, sign, bits, loc), loc);
-		value = mk_bin(c, T_PIPE, bits, value, source, loc);
+		uint32_t source = mk_bin(c, LEX_TOKEN_AMPERSAND, bits, rvalue(c, raw[1]), mk_int(c, sign, bits, loc), loc);
+		value = mk_bin(c, LEX_TOKEN_PIPE, bits, value, source, loc);
 	}
 	uint32_t result = with_pre(c, mk2(c, N_ASSIGN, bits, loc, raw[0], value), rvalue(c, tmp[0]));
 	if (copy) result = with_pre(c, pre[1], result);
@@ -148,12 +148,12 @@ VPRIV uint32_t fast_math_call(cc *c, const char *name, size_t len, qty ft, const
 		uint32_t tmp = mk(c, N_VAR, t, loc); N(tmp)->a = s; N(tmp)->flags = NF_LVALUE;
 		pre[np++] = mk2(c, N_ASSIGN, t, loc, tmp, value);
 		value = rvalue(c, tmp);
-		if (n & 1) result = mk_bin(c, T_STAR, t, result, value, loc);
+		if (n & 1) result = mk_bin(c, LEX_TOKEN_STAR, t, result, value, loc);
 		n >>= 1;
 		if (!n) break;
-		value = mk_bin(c, T_STAR, t, value, value, loc);
+		value = mk_bin(c, LEX_TOKEN_STAR, t, value, value, loc);
 	}
-	if (e < 0) result = mk_bin(c, T_SLASH, t, mk_flt(c, 1.0, t, loc), result, loc);
+	if (e < 0) result = mk_bin(c, LEX_TOKEN_SLASH, t, mk_flt(c, 1.0, t, loc), result, loc);
 	while (np) result = with_pre(c, pre[--np], result);
 	return result;
 }

@@ -1,5 +1,5 @@
 /* Reporting: the queue, de-duplication, counting, fatal errors and the end of a run. */
-#include "../frontend/pp/ppimpl.h"
+#include "../frontend/pp/pp-internal.h"
 #include "common/buffer.h"
 #include <ctype.h>
 #include <dlfcn.h>
@@ -36,7 +36,7 @@ void pp_diagx(pp *p, const pp_dinfo *d, const char *fmt, ...)
 /* vccd's dedup: a warning in an included file, printed by another TU of this build */
 static __attribute__((noinline, cold)) bool dsink_dup(pp *p, const vdiag *d)
 {
-	const fent *e;
+	const pp_file_entry *e;
 	const char *name;
 	uint32_t nl, line, col, lc[2];
 	uint64_t h = 1469598103934665603ull;
@@ -63,14 +63,14 @@ void pp_diag_emit(pp *p, vdiag *d)
 	vdiag *top = d;
 	vbuf b = { 0 };
 
-	if (d->level == VDL_NOTE && p->dtail)
-		kid_add(top = p->dtail, d);	/* a note reported after its diagnostic */
+	if (d->level == VDL_NOTE && p->diagnostic_tail)
+		kid_add(top = p->diagnostic_tail, d);	/* a note reported after its diagnostic */
 	else {
-		if (p->dtail)
-			p->dtail->next = d;
+		if (p->diagnostic_tail)
+			p->diagnostic_tail->next = d;
 		else
 			p->dhead = d;
-		p->dtail = d;
+		p->diagnostic_tail = d;
 	}
 	macro_adjust(p, top, d);
 	if (unlikely(p->o->dsink) && d == top && d->level == VDL_WARNING && p->o->dsink->dedup && dsink_dup(p, d)) {
@@ -83,12 +83,12 @@ void pp_diag_emit(pp *p, vdiag *d)
 	if (p->o->diag_format == PP_DIAG_JSON) {
 		/* a record is written when it is complete: at the next one or at the end */
 		if (d == top)
-			diag_json_flush(p), p->dpend = d;
+			diag_json_flush(p), p->diagnostic_pending_structured = d;
 	} else if (p->o->diag_format == PP_DIAG_TEXT && p->o->diag_style == PP_DSTYLE_VCC) {
 		/* rendered when the next record starts (or at the end): its notes come first */
 		if (d == top) {
 			diag_text_flush(p);
-			p->tpend = d;
+			p->diagnostic_pending_text = d;
 		}
 	} else if (p->o->diag_format != PP_DIAG_SARIF) {
 		void (*r)(pp *, vbuf *, vdiag *) = p->o->diag_style == PP_DSTYLE_NARRATED ? diag_narrate : render_clang;
@@ -107,8 +107,8 @@ void pp_diag_emit(pp *p, vdiag *d)
 		p->warns++;
 	if (d->level == VDL_FATAL && !p->o->fatal_continue) {
 		pp_diag_finish(p);
-		if (p->fatal_jb)
-			longjmp(*p->fatal_jb, 1);
+		if (p->fatal_jump)
+			longjmp(*p->fatal_jump, 1);
 		exit(1);
 	}
 }
@@ -178,9 +178,9 @@ void pp_diag_finish(pp *p)
 {
 	int fd = p->o->errfd ? p->o->errfd : 2;
 
-	if (p->dfinished)
+	if (p->diagnostic_finished)
 		return;
-	p->dfinished = true;
+	p->diagnostic_finished = true;
 	diag_text_flush(p);
 	diag_json_flush(p);
 	if (unlikely(p->o->diag_patch || p->o->fix_apply))

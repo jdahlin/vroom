@@ -7,24 +7,24 @@ VPRIV void runtime_warn(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 	cval cv;
 	pp_span rr;
 
-	if (c->dead || (op != T_SLASH && op != T_PERCENT && op != T_LESSLESS && op != T_GREATERGREATER) ||
+	if (c->dead || (op != LEX_TOKEN_SLASH && op != LEX_TOKEN_PERCENT && op != LEX_TOKEN_LESS_LESS && op != LEX_TOKEN_GREATER_GREATER) ||
 	    !is_integer(c, N(l)->ty) || !is_integer(c, N(r)->ty) || !cc_eval(c, r, &cv) || cv.kind != CV_INT)
 		return;
-	if (op == T_SLASH || op == T_PERCENT ? cv.i != 0 : cv.i >= 0 && cv.i < (i128)ty_size(c, promoted(c, l)) * 8)
+	if (op == LEX_TOKEN_SLASH || op == LEX_TOKEN_PERCENT ? cv.i != 0 : cv.i >= 0 && cv.i < (i128)ty_size(c, promoted(c, l)) * 8)
 		return;	/* no warning: no range (pp_tok_end) either */
 	rr = rng(c, r);
-	if (op == T_SLASH || op == T_PERCENT) {
+	if (op == LEX_TOKEN_SLASH || op == LEX_TOKEN_PERCENT) {
 		if (!cv.i && c->unevaluated)
 			;	/* (sizeof, typeof: never runs) */
 		else if (!cv.i && c->defer_rt) {
 			if (c->ndefer < 8)
-				c->defer[c->ndefer].loc = loc, c->defer[c->ndefer].r = rr, c->defer[c->ndefer++].rem = op == T_PERCENT;
+				c->defer[c->ndefer].loc = loc, c->defer[c->ndefer].r = rr, c->defer[c->ndefer++].rem = op == LEX_TOKEN_PERCENT;
 		} else if (!cv.i && c->fn)	/* (clang's DiagRuntimeBehavior: at the end of the function) */
 			rt_defer(c, "division-by-zero", NULL, loc, &rr, 1, NULL, 0, "%s by zero is undefined",
-				 op == T_SLASH ? "division" : "remainder");
+				 op == LEX_TOKEN_SLASH ? "division" : "remainder");
 		else if (!cv.i)
 			cc_warnx(c, "division-by-zero", true, NULL, loc, &rr, 1, NULL, 0, "%s by zero is undefined",
-			      op == T_SLASH ? "division" : "remainder");
+			      op == LEX_TOKEN_SLASH ? "division" : "remainder");
 		return;
 	}
 	{
@@ -41,7 +41,7 @@ VPRIV void runtime_warn(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 		else
 			pp_diag_help(c->p, d, "'%s' is %llu bits wide: a shift by %lld or more is undefined%s", tyname(c, pt),
 				     (unsigned long long)w, (long long)w,
-				     w < 64 && cv.i < 64 && op == T_LESSLESS ? "; shift a 64-bit value (1ULL << n)" : "");
+				     w < 64 && cv.i < 64 && op == LEX_TOKEN_LESS_LESS ? "; shift a 64-bit value (1ULL << n)" : "");
 		rt_emit(c, d);
 	}
 }
@@ -50,7 +50,7 @@ VPRIV void runtime_warn(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
    operand a constant other than 0 and 1, an integer non-bool left one, no enumerator) */
 static __attribute__((cold, noinline)) void logic_const_warn(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc, i128 v)
 {
-	const char *o = op == T_AMPAMP ? "&&" : "||", *bo = op == T_AMPAMP ? "&" : "|";
+	const char *o = op == LEX_TOKEN_AMPERSAND_AMPERSAND ? "&&" : "||", *bo = op == LEX_TOKEN_AMPERSAND_AMPERSAND ? "&" : "|";
 	pp_span lr = rng(c, l), rr = rng(c, r);
 	vdiag *d = cc_warn_begin(c, "constant-logical-operand", true, NULL, loc, "use of logical '%s' with constant operand", o), *n;
 
@@ -61,7 +61,7 @@ static __attribute__((cold, noinline)) void logic_const_warn(cc *c, int op, uint
 	n = pp_diag_note(c->p, d, loc, "use '%s' for a bitwise operation", bo);
 	if (n)
 		pp_diag_fix(c->p, n, loc, loc + 2, bo, VDA_MAYBE);
-	if (op == T_AMPAMP) {
+	if (op == LEX_TOKEN_AMPERSAND_AMPERSAND) {
 		n = pp_diag_note(c->p, d, loc, "remove constant to silence this warning");
 		if (n)
 			pp_diag_fix(c->p, n, lr.e, rr.e, "", VDA_MAYBE);
@@ -124,7 +124,7 @@ VPRIV bool same_ref(cc *c, uint32_t a, uint32_t b, int depth)
 /* clang's -Wtautological-compare for x == x and friends (not floating: NaN) */
 VPRIV __attribute__((cold, noinline)) void self_compare(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 {
-	bool t = op == T_EQUALEQUAL || op == T_LESSEQ || op == T_GREATEREQ;
+	bool t = op == LEX_TOKEN_EQUAL_EQUAL || op == LEX_TOKEN_LESS_EQUAL || op == LEX_TOKEN_GREATER_EQUAL;
 	vdiag *d;
 
 	(void)l, (void)r;
@@ -175,7 +175,7 @@ VPRIV __attribute__((cold, noinline)) void null_compare(cc *c, int op, uint32_t 
 	uint32_t n = no_implicit(c, x), at;
 	const node *y = N(n);
 	const char *what;
-	bool fn = false, eq = op == T_EQUALEQUAL;
+	bool fn = false, eq = op == LEX_TOKEN_EQUAL_EQUAL;
 	char nm[160];
 	size_t nl = 0;
 	pp_span xr, nr = rng(c, nul);
@@ -263,11 +263,11 @@ VPRIV __attribute__((cold, noinline)) void range_compare(cc *c, uint32_t n, int 
 		return;
 	above = v.i > hi;
 	if (!nk)	/* constant on the left: K op X is X op' K */
-		op = op == T_LESS ? T_GREATER : op == T_GREATER ? T_LESS : op == T_LESSEQ ? T_GREATEREQ : op == T_GREATEREQ ? T_LESSEQ : op;
+		op = op == LEX_TOKEN_LESS ? LEX_TOKEN_GREATER : op == LEX_TOKEN_GREATER ? LEX_TOKEN_LESS : op == LEX_TOKEN_LESS_EQUAL ? LEX_TOKEN_GREATER_EQUAL : op == LEX_TOKEN_GREATER_EQUAL ? LEX_TOKEN_LESS_EQUAL : op;
 	switch (op) {
-	case T_EQUALEQUAL: res = false; break;
-	case T_EXCLAIMEQ: res = true; break;
-	case T_LESS: case T_LESSEQ: res = above; break;
+	case LEX_TOKEN_EQUAL_EQUAL: res = false; break;
+	case LEX_TOKEN_EXCLAMATION_EQUAL: res = true; break;
+	case LEX_TOKEN_LESS: case LEX_TOKEN_LESS_EQUAL: res = above; break;
 	default: res = !above; break;
 	}
 	i128s_(vs, sizeof vs, v.i);
@@ -327,9 +327,9 @@ VPRIV void ovf_warn(cc *c, int op, uint32_t n, uint32_t loc, uint32_t sub0, uint
 		return;
 	if (!sub1)
 		v = -a.i;
-	else if (op == T_PLUS)
+	else if (op == LEX_TOKEN_PLUS)
 		v = a.i + b.i;
-	else if (op == T_MINUS)
+	else if (op == LEX_TOKEN_MINUS)
 		v = a.i - b.i;
 	else
 		v = a.i * b.i;

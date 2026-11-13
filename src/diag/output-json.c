@@ -1,5 +1,5 @@
 /* JSON lines, and the record sink vccd reads. */
-#include "../frontend/pp/ppimpl.h"
+#include "../frontend/pp/pp-internal.h"
 #include "common/buffer.h"
 #include <ctype.h>
 #include <dlfcn.h>
@@ -71,7 +71,7 @@ static const char *const appname[] = { "unspecified", "machine", "maybe", "place
 /* {"file", "line", "column", "path", "offset"}, {"file": null} outside any file, null for none */
 static void jloc(pp *p, vbuf *b, uint32_t loc)
 {
-	const fent *e;
+	const pp_file_entry *e;
 	const char *name;
 	uint32_t nl, line, col;
 
@@ -93,12 +93,12 @@ static void jloc(pp *p, vbuf *b, uint32_t loc)
 /* the include stack of loc, outermost first: [{"file", "line"}] */
 static void jincludes(pp *p, vbuf *b, uint32_t loc)
 {
-	const fent *chain[64], *e;
+	const pp_file_entry *chain[64], *e;
 	int n = 0;
 
 	vbuf_s(b, "[");
 	if (loc != UINT32_MAX && loc_ok(p, loc, &e))
-		for (const fent *x = e; x && x->from && n < 64; x = loc_fent(p, x->from))
+		for (const pp_file_entry *x = e; x && x->from && n < 64; x = loc_fent(p, x->from))
 			chain[n++] = x;
 	for (int i = n, first = 1; i-- > 0;) {
 		const char *name;
@@ -157,7 +157,7 @@ static void json_rec(pp *p, vbuf *b, const vdiag *d, int top)
 	jincludes(p, b, d->loc);
 	if (top) {
 		vbuf r = { 0 };
-		uint32_t fe = p->diag_fe;
+		uint32_t fe = p->diagnostic_last_file;
 
 		vbuf_s(b, ",\"children\":[");
 		for (const vdiag *k = d->kids; k; k = k->next) {
@@ -171,12 +171,12 @@ static void json_rec(pp *p, vbuf *b, const vdiag *d, int top)
 		}
 		vbuf_s(b, "],\"rendered\":");
 		/* the text as the text output prints it (in its style), with its include stack */
-		p->diag_fe = 0;
+		p->diagnostic_last_file = 0;
 		bool color = p->color;
 		p->color = 0;
 		diag_render_rec(p, &r, (vdiag *)d);
 		p->color = color;
-		p->diag_fe = fe;
+		p->diagnostic_last_file = fe;
 		jstr(b, r.p ? r.p : "", r.n);
 		free(r.p);
 	}
@@ -189,13 +189,13 @@ VPRIV void diag_json_flush(pp *p)
 	int fd = p->o->errfd ? p->o->errfd : 2;
 	vbuf b = { 0 };
 
-	if (!p->dpend)
+	if (!p->diagnostic_pending_structured)
 		return;
-	json_rec(p, &b, p->dpend, true);
+	json_rec(p, &b, p->diagnostic_pending_structured, true);
 	vbuf_s(&b, "\n");
 	(void)!write(fd, b.p, b.n);
 	free(b.p);
-	p->dpend = NULL;
+	p->diagnostic_pending_structured = NULL;
 }
 
 /* ---------------- SARIF ---------------- */
@@ -204,7 +204,7 @@ VPRIV __attribute__((noinline, cold)) void dsink_records(pp *p)
 {
 	for (const vdiag *d = p->dhead; d; d = d->next) {
 		pp_drec r = { .level = d->level, .flag = d->flag };
-		const fent *e;
+		const pp_file_entry *e;
 		const char *name;
 		uint32_t nl;
 		vbuf b = { 0 };

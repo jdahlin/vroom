@@ -55,13 +55,13 @@ VPRIV bool em_udivconst64(uint64_t d, bool remainder, em_udivconst_recipe *r)
 
 VPRIV bool em_udivconst(cc *c, qty ty, int op, i128 rhs, em_udivconst_recipe *r)
 {
-	if ((op != T_SLASH && op != T_PERCENT) || !is_integer(c, ty) ||
+	if ((op != LEX_TOKEN_SLASH && op != LEX_TOKEN_PERCENT) || !is_integer(c, ty) ||
 	    is_signed(c, ty) || em_bitint(c, ty))
 		return false;
 	unsigned size = (unsigned)tsize(c, ty);
 	if (size == 4)
-		return em_udivconst32((uint32_t)em_trunc_to(c, rhs, ty), op == T_PERCENT, r);
+		return em_udivconst32((uint32_t)em_trunc_to(c, rhs, ty), op == LEX_TOKEN_PERCENT, r);
 	if (size == 8)
-		return em_udivconst64((uint64_t)em_trunc_to(c, rhs, ty), op == T_PERCENT, r);
+		return em_udivconst64((uint64_t)em_trunc_to(c, rhs, ty), op == LEX_TOKEN_PERCENT, r);
 	return false;
 }

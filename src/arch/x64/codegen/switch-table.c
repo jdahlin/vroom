@@ -11,8 +11,8 @@ VPRIV void x64_switch_table(ecx *e, int source, int size, const em_switch_case *
 
 	x64_op3(e, X_MOV, size, index, source, XNOREG);
 	if (lo)
-		offset = x64_bin(e, T_MINUS, size, false, offset, vconst(lo));
-	x64_cmpbr(e, T_GREATER, size, false, offset, vconst(span), dflt);
+		offset = x64_bin(e, LEX_TOKEN_MINUS, size, false, offset, vconst(lo));
+	x64_cmpbr(e, LEX_TOKEN_GREATER, size, false, offset, vconst(span), dflt);
 	if (size == 4)	/* the 32-bit result is zero-extended; the compare saw it unsigned */
 		x64_op3(e, X_MOV, 4, offset.r, offset.r, XNOREG);
 	x64_op3(e, X_LEAL, 8, R11, XNOREG, XNOREG)->label = tab;

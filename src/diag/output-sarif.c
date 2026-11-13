@@ -1,5 +1,5 @@
 /* SARIF 2.1 output. */
-#include "../frontend/pp/ppimpl.h"
+#include "../frontend/pp/pp-internal.h"
 #include "common/buffer.h"
 #include <ctype.h>
 #include <dlfcn.h>
@@ -44,7 +44,7 @@ static void jartifact(vbuf *b, const char *name, size_t nl)
 /* the presumed line and the code point column (1-based) of loc */
 static bool sarif_pos(pp *p, uint32_t loc, const char **name, uint32_t *nl, uint32_t *line, uint32_t *ucol)
 {
-	const fent *e;
+	const pp_file_entry *e;
 	uint32_t col, off, ls;
 
 	if (loc == UINT32_MAX || !loc_ok(p, loc, &e) || !diag_where(p, loc, name, nl, line, &col))
@@ -80,7 +80,7 @@ static bool jphys(pp *p, vbuf *b, uint32_t lb, uint32_t le)
 static void sarif_result(pp *p, vbuf *b, const vdiag *d, const char *const *rules, uint32_t nrules)
 {
 	uint32_t rule = 0, nrel = 0, id = 1;
-	const fent *e;
+	const pp_file_entry *e;
 	uint32_t pe = d->loc;
 
 	while (rule < nrules && strcmp(rules[rule], d->id ? d->id : "vcc_unknown"))
@@ -109,7 +109,7 @@ static void sarif_result(pp *p, vbuf *b, const vdiag *d, const char *const *rule
 			jcstr(b, d->label);
 			vbuf_s(b, "}");
 		}
-		for (const fent *x = e; x && x->from && nchain < 64; x = loc_fent(p, x->from))
+		for (const pp_file_entry *x = e; x && x->from && nchain < 64; x = loc_fent(p, x->from))
 			nchain++;
 		if (nchain) {
 			vbuf_s(b, ",\"relationships\":[{\"target\":1,\"kinds\":[\"isIncludedBy\"]}]");
@@ -118,8 +118,8 @@ static void sarif_result(pp *p, vbuf *b, const vdiag *d, const char *const *rule
 		/* related: the include chain (each included by the next), spans, notes */
 		vbuf_s(b, ",\"relatedLocations\":[");
 		nchain = 0;
-		for (const fent *x = e; x && x->from && nchain < 64; x = loc_fent(p, x->from), nchain++) {
-			const fent *up = loc_fent(p, x->from);
+		for (const pp_file_entry *x = e; x && x->from && nchain < 64; x = loc_fent(p, x->from), nchain++) {
+			const pp_file_entry *up = loc_fent(p, x->from);
 
 			vbuf_f(b, "%s{\"id\":%u,", nrel++ ? "," : "", id);
 			jphys(p, b, x->from, x->from);

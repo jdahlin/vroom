@@ -203,7 +203,7 @@ VPRIV uint32_t lib_builtin(cc *c, uint32_t id, uint32_t loc)
 			memcpy(keep + pre, lib, ll + 1);
 			memset(&a, 0, sizeof(a));
 			a.asmname = c->nstr + 1;
-			c->strs[c->nstr++] = (cstr){ keep, (uint32_t)(ll + pre + 1), 1, T_STRING };
+			c->strs[c->nstr++] = (cstr){ keep, (uint32_t)(ll + pre + 1), 1, LEX_TOKEN_STRING };
 			apply_sym_attrs(c, &c->syms[s], &a);
 			return s;
 		}

@@ -189,13 +189,13 @@ VPRIV bool object_pointer_bound(cc *c, uint32_t n, object_bound *b, unsigned dep
 	}
 	if (is_array(c, x->ty))
 		return object_lvalue_bound(c, n, b, depth + 1, mode);
-	if (x->op == N_BINARY && (x->aux == T_PLUS || x->aux == T_MINUS)) {
+	if (x->op == N_BINARY && (x->aux == LEX_TOKEN_PLUS || x->aux == LEX_TOKEN_MINUS)) {
 		uint32_t p = x->a, i = x->b;
-		if (!is_ptr(c, N(p)->ty) && x->aux == T_PLUS) p = x->b, i = x->a;
+		if (!is_ptr(c, N(p)->ty) && x->aux == LEX_TOKEN_PLUS) p = x->b, i = x->a;
 		if (!is_ptr(c, N(p)->ty) || !object_pointer_bound(c, p, b, depth + 1, mode) ||
 		    !eval(c, i, &index) || index.kind != CV_INT)
 			return false;
-		b->offset += (x->aux == T_MINUS ? -index.i : index.i) * object_element_size(c, N(p)->ty);
+		b->offset += (x->aux == LEX_TOKEN_MINUS ? -index.i : index.i) * object_element_size(c, N(p)->ty);
 		return true;
 	}
 	return false;

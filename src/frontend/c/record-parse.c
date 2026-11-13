@@ -25,7 +25,7 @@ static __attribute__((noinline, cold)) void member_semi(cc *c)
 {
 	uint32_t e = pp_tok_end(c->p, c->prevloc);
 	pp_fixit fx = { e, e, ";", semi_app(c) };
-	bool end = is(c, T_RBRACE);
+	bool end = is(c, LEX_TOKEN_RIGHT_BRACE);
 
 	report(c, end ? "warning" : "error", e, NULL, 0, &fx, 1, "expected ';' at end of declaration list");
 	if (!end)
@@ -50,21 +50,21 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 	DR_TAGWRITE(c, ti);
 	c->tags[ti].flags |= RF_BEING_DEFINED;
 	c->in_struct++;
-	expect(c, T_LBRACE, "'{'");
+	expect(c, LEX_TOKEN_LEFT_BRACE, "'{'");
 	recov rv;
 
 	if (REC_ARM(c, &rv)) {
 		rec_restore(c, &rv, REC_BLOCK);	/* after a parse error: on with the next member */
 		nf = x->n - base;
 	}
-	while (!is(c, T_RBRACE)) {
+	while (!is(c, LEX_TOKEN_RIGHT_BRACE)) {
 		dspec ds;
 
-		if (is(c, T_EOF)) {
+		if (is(c, LEX_TOKEN_EOF)) {
 			cc_error(c, pp_tok_end(c->p, c->prevloc), "expected '}'");
 			longjmp(c->bail, 1);
 		}
-		if (is(c, T_SEMI)) {
+		if (is(c, LEX_TOKEN_SEMICOLON)) {
 			EXT_WARN_DEL(c, ";", tok(c)->flags, "extra-semi", w_ped, tok(c)->loc, "extra ';' inside a %s",
 				 c->tags[ti].flags & RF_UNION ? "union" : "struct");
 			next(c);
@@ -77,9 +77,9 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 		if (!decl_specs(c, &ds, false)) {
 			int k = peek(c, 1)->kind;
 
-			if (!is(c, T_IDENT))
+			if (!is(c, LEX_TOKEN_IDENTIFIER))
 				fatal(c, tok(c)->loc, "expected member declaration");
-			if (!kwof(tok(c)) && (k == T_COMMA || k == T_SEMI || k == T_COLON)) {
+			if (!kwof(tok(c)) && (k == LEX_TOKEN_COMMA || k == LEX_TOKEN_SEMICOLON || k == LEX_TOKEN_COLON)) {
 				/* clang: "struct { a, b; }": int members */
 				cc_error(c, tok(c)->loc, "type name requires a specifier or qualifier");
 				memset(&ds, 0, sizeof(ds));
@@ -90,7 +90,7 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 				unknown_type(c, &ds, false);
 			}
 		}
-		if (is(c, T_SEMI)) {
+		if (is(c, LEX_TOKEN_SEMICOLON)) {
 			/* anonymous struct/union member; with -fms-anonymous-structs also a
 			 * tagged or typedef'd complete record */
 			if (is_record(c, ds.ty) && (!c->tags[T(c, ds.ty)->aux].name ||
@@ -113,7 +113,7 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 			qty t = ds.ty;
 			field f = { 0 };
 
-			if (!is(c, T_COLON)) {
+			if (!is(c, LEX_TOKEN_COLON)) {
 				declarator(c, &d, false, &first, &nops);
 				t = apply_declarator(c, ds.ty, first, nops);
 				c->ndops = first;
@@ -123,7 +123,7 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 			}
 			f.name = d.name;
 			f.loc = d.loc;
-			if (accept(c, T_COLON)) {
+			if (accept(c, LEX_TOKEN_COLON)) {
 				i128 w;
 				uint32_t wn = 0;
 				uint64_t bits = KIND(c, t) == TY_BOOL ? 1 : int_bits(c, t);
@@ -193,10 +193,10 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 			x->fp[base + nf] = d.at.packed;
 			x->fs[base + nf] = f;
 			x->n = base + ++nf;
-			if (!accept(c, T_COMMA))
+			if (!accept(c, LEX_TOKEN_COMMA))
 				break;
 		}
-		if (unlikely(!accept(c, T_SEMI)))
+		if (unlikely(!accept(c, LEX_TOKEN_SEMICOLON)))
 			member_semi(c);
 	}
 	REC_POP(c, &rv);
@@ -241,7 +241,7 @@ VPRIV void enum_body(cc *c, uint32_t ti, attrs *after, uint32_t loc)
 
 	DR_TAGWRITE(c, ti);
 	vinit(&cs);
-	if (accept(c, T_COLON)) {
+	if (accept(c, LEX_TOKEN_COLON)) {
 		dspec ds;
 		uint32_t baseloc = tok(c)->loc, colon = c->prevloc;
 		tag *r = &c->tags[ti];
@@ -282,8 +282,8 @@ VPRIV void enum_body(cc *c, uint32_t ti, attrs *after, uint32_t loc)
 			cc_warnx(c, "pre-c23-compat", false, compat_groups, loc, NULL, 0, NULL, 0,
 				 "enumeration types with a fixed underlying type are incompatible with C standards before C23");
 		}
-		if (!is(c, T_LBRACE)) {
-			if (!is(c, T_SEMI))
+		if (!is(c, LEX_TOKEN_LEFT_BRACE)) {
+			if (!is(c, LEX_TOKEN_SEMICOLON))
 				cc_error(c, colon, "non-defining declaration of enumeration with a fixed underlying type must be standalone [-Welaborated-enum-base]");
 			return;
 		}
@@ -296,19 +296,19 @@ VPRIV void enum_body(cc *c, uint32_t ti, attrs *after, uint32_t loc)
 		cc_error(c, loc, "redefinition of enumeration");
 		note(c, c->tags[ti].loc, "previous definition is here");
 	}
-	expect(c, T_LBRACE, "'{'");
+	expect(c, LEX_TOKEN_LEFT_BRACE, "'{'");
 	c->tags[ti].flags |= RF_BEING_DEFINED;
-	while (!is(c, T_RBRACE)) {
+	while (!is(c, LEX_TOKEN_RIGHT_BRACE)) {
 		uint32_t name, loc, s;
 		attrs ea = { 0 };
 
-		if (!is(c, T_IDENT) || kwof(tok(c)))
+		if (!is(c, LEX_TOKEN_IDENTIFIER) || kwof(tok(c)))
 			fatal(c, tok(c)->loc, "expected identifier");
 		name = tok(c)->id;
 		loc = tok(c)->loc;
 		next(c);
 		attribute_list(c, &ea);
-		bool explicit_value = accept(c, T_EQUAL);
+		bool explicit_value = accept(c, LEX_TOKEN_EQUAL);
 		if (explicit_value)
 			const_expr(c, &v, NULL);
 		else
@@ -360,10 +360,10 @@ VPRIV void enum_body(cc *c, uint32_t ti, attrs *after, uint32_t loc)
 		sym_bind(c, s);
 		proto_binding(c, s);
 		vpush(c, &cs, s);
-		if (!accept(c, T_COMMA))
+		if (!accept(c, LEX_TOKEN_COMMA))
 			break;
 	}
-	expect(c, T_RBRACE, "'}'");
+	expect(c, LEX_TOKEN_RIGHT_BRACE, "'}'");
 	attribute_list(c, after);
 	{
 		qty best;

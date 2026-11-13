@@ -1,114 +1,114 @@
 /* vcc preprocessor: process-wide allocation, the per-file token skeleton, arenas */
-#include "ppimpl.h"
+#include "pp-internal.h"
 
 /* ---------------- shared (process-wide) allocation ---------------- */
 
-static char *shared_base;
-_Atomic size_t shared_used;
-#define SHARED_MAX (1ull << 34)	/* address space; the header cache stops storing at hc_mem_max (8 GB) */
+static char *pp_shared_region_base;
+_Atomic size_t pp_shared_region_used;
+#define PP_SHARED_REGION_SIZE (1ull << 34)	/* address space; the header cache stops storing at pp_header_cache_memory_limit (8 GB) */
 
-VPRIV void *salloc(size_t n)
+VPRIV void *pp_shared_allocate(size_t n)
 {
-	char *b0 = __atomic_load_n(&shared_base, __ATOMIC_ACQUIRE);
+	char *b0 = __atomic_load_n(&pp_shared_region_base, __ATOMIC_ACQUIRE);
 	size_t off;
 
 	if (unlikely(!b0)) {
-		char *b = vm(SHARED_MAX), *z = NULL;
+		char *b = pp_address_space_reserve(PP_SHARED_REGION_SIZE), *z = NULL;
 
-		if (__atomic_compare_exchange_n(&shared_base, &z, b, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+		if (__atomic_compare_exchange_n(&pp_shared_region_base, &z, b, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
 			b0 = b;
 		else
-			munmap(b, SHARED_MAX), b0 = z;	/* the winner's; never re-read the base plainly */
+			munmap(b, PP_SHARED_REGION_SIZE), b0 = z;	/* the winner's; never re-read the base plainly */
 	}
-	off = atomic_fetch_add(&shared_used, (n + 15) & ~(size_t)15);
-	if (off + n > SHARED_MAX)
+	off = atomic_fetch_add(&pp_shared_region_used, (n + 15) & ~(size_t)15);
+	if (off + n > PP_SHARED_REGION_SIZE)
 		vjob_fail_table_full("preprocessor memory full (16 GB shared region)");
 	return b0 + off;
 }
 
-VPRIV const char *shared_base0(void)
+VPRIV const char *pp_shared_base(void)
 {
-	return __atomic_load_n(&shared_base, __ATOMIC_ACQUIRE);
+	return __atomic_load_n(&pp_shared_region_base, __ATOMIC_ACQUIRE);
 }
 
-static int spelled(const vlex_file *f, const vtok *v, const char *s)
+static int pp_token_spelling_equals(const lex_file *f, const lex_token *v, const char *s)
 {
 	size_t n = strlen(s);
 
 	return v->len == n && !memcmp(f->src + v->off, s, n);
 }
 
-static uint32_t dir_kind(const vlex_file *f, uint32_t i, uint32_t end)
+static uint32_t pp_directive_kind_find(const lex_file *f, uint32_t i, uint32_t end)
 {
-	const vtok *v = &f->tok[i];
+	const lex_token *v = &f->tok[i];
 
 	if (i >= end)
-		return D_NULL;
-	if (v->kind == T_NUMBER)
-		return D_LINEMARK;
-	if (v->kind != T_IDENT)
-		return D_OTHER;
+		return PP_DIRECTIVE_NULL;
+	if (v->kind == LEX_TOKEN_NUMBER)
+		return PP_DIRECTIVE_LINE_MARKER;
+	if (v->kind != LEX_TOKEN_IDENTIFIER)
+		return PP_DIRECTIVE_OTHER;
 	switch (v->id) {
-	case KW_if: return D_IF;
-	case KW_ifdef: return D_IFDEF;
-	case KW_ifndef: return D_IFNDEF;
-	case KW_elif: return D_ELIF;
-	case KW_elifdef: return D_ELIFDEF;
-	case KW_elifndef: return D_ELIFNDEF;
-	case KW_else: return D_ELSE;
-	case KW_endif: return D_ENDIF;
-	case KW_define: return D_DEFINE;
-	case KW_undef: return D_UNDEF;
-	case KW_include: return D_INCLUDE;
-	case KW_include_next: return D_INCLUDE_NEXT;
-	case KW_pragma: return D_PRAGMA;
-	case KW_error: return D_ERROR;
-	case KW_warning: return D_WARNING;
-	case KW_line: return D_LINE;
+	case KW_if: return PP_DIRECTIVE_IF;
+	case KW_ifdef: return PP_DIRECTIVE_IFDEF;
+	case KW_ifndef: return PP_DIRECTIVE_IFNDEF;
+	case KW_elif: return PP_DIRECTIVE_ELIF;
+	case KW_elifdef: return PP_DIRECTIVE_ELIFDEF;
+	case KW_elifndef: return PP_DIRECTIVE_ELIFNDEF;
+	case KW_else: return PP_DIRECTIVE_ELSE;
+	case KW_endif: return PP_DIRECTIVE_ENDIF;
+	case KW_define: return PP_DIRECTIVE_DEFINE;
+	case KW_undef: return PP_DIRECTIVE_UNDEF;
+	case KW_include: return PP_DIRECTIVE_INCLUDE;
+	case KW_include_next: return PP_DIRECTIVE_INCLUDE_NEXT;
+	case KW_pragma: return PP_DIRECTIVE_PRAGMA;
+	case KW_error: return PP_DIRECTIVE_ERROR;
+	case KW_warning: return PP_DIRECTIVE_WARNING;
+	case KW_line: return PP_DIRECTIVE_LINE;
 	}
-	if (spelled(f, v, "import"))
-		return D_IMPORT;
-	if (spelled(f, v, "embed"))
-		return D_EMBED;
-	if (spelled(f, v, "ident") || spelled(f, v, "sccs"))
-		return D_IDENT;
-	if (spelled(f, v, "__include_macros"))
-		return D_IMACROS;	/* -imacros, from <built-in> only */
-	return D_OTHER;
+	if (pp_token_spelling_equals(f, v, "import"))
+		return PP_DIRECTIVE_IMPORT;
+	if (pp_token_spelling_equals(f, v, "embed"))
+		return PP_DIRECTIVE_EMBED;
+	if (pp_token_spelling_equals(f, v, "ident") || pp_token_spelling_equals(f, v, "sccs"))
+		return PP_DIRECTIVE_IDENT;
+	if (pp_token_spelling_equals(f, v, "__include_macros"))
+		return PP_DIRECTIVE_IMACROS;	/* -imacros, from <built-in> only */
+	return PP_DIRECTIVE_OTHER;
 }
 
-static pfile *pfile_build(const vlex_file *f)
+static pp_skeleton *pp_skeleton_build(const lex_file *f)
 {
-	const vtok *t = f->tok;
+	const lex_token *t = f->tok;
 	uint32_t n = f->ntok, nd = 0, sp = 0, *stk;
-	pfile *fi = salloc(sizeof(*fi));
-	pdir *d;
+	pp_skeleton *fi = pp_shared_allocate(sizeof(*fi));
+	pp_directive_span *d;
 
 	for (uint32_t i = 0; i < n; i++)
-		nd += (t[i].flags & TF_SOL) && t[i].kind == T_HASH;
-	d = salloc((nd + 1) * sizeof(*d));
+		nd += (t[i].flags & LEX_TOKEN_FLAG_LINE_START) && t[i].kind == LEX_TOKEN_HASH;
+	d = pp_shared_allocate((nd + 1) * sizeof(*d));
 	stk = malloc((nd + 1) * sizeof(*stk));
 	nd = 0;
 	for (uint32_t i = 0; i < n; i++) {
 		uint32_t e, k;
 
-		if (!((t[i].flags & TF_SOL) && t[i].kind == T_HASH))
+		if (!((t[i].flags & LEX_TOKEN_FLAG_LINE_START) && t[i].kind == LEX_TOKEN_HASH))
 			continue;
-		for (e = i + 1; e < n && !(t[e].flags & TF_SOL); e++)
+		for (e = i + 1; e < n && !(t[e].flags & LEX_TOKEN_FLAG_LINE_START); e++)
 			;
-		k = dir_kind(f, i + 1, e);
-		d[nd] = (pdir){ i, e, 0, k };
+		k = pp_directive_kind_find(f, i + 1, e);
+		d[nd] = (pp_directive_span){ i, e, 0, k };
 		switch (k) {
-		case D_IF: case D_IFDEF: case D_IFNDEF:
+		case PP_DIRECTIVE_IF: case PP_DIRECTIVE_IFDEF: case PP_DIRECTIVE_IFNDEF:
 			stk[sp++] = nd;
 			break;
-		case D_ELIF: case D_ELIFDEF: case D_ELIFNDEF: case D_ELSE:
-			if (!sp) { if (!fi->bad) fi->bad = 1, fi->badtok = i + 1; break; }
+		case PP_DIRECTIVE_ELIF: case PP_DIRECTIVE_ELIFDEF: case PP_DIRECTIVE_ELIFNDEF: case PP_DIRECTIVE_ELSE:
+			if (!sp) { if (!fi->bad) fi->bad = 1, fi->unbalanced_token = i + 1; break; }
 			d[stk[sp - 1]].next = nd;
 			stk[sp - 1] = nd;
 			break;
-		case D_ENDIF:
-			if (!sp) { if (!fi->bad) fi->bad = 1, fi->badtok = i + 1; break; }
+		case PP_DIRECTIVE_ENDIF:
+			if (!sp) { if (!fi->bad) fi->bad = 1, fi->unbalanced_token = i + 1; break; }
 			d[stk[--sp]].next = nd;
 			break;
 		}
@@ -116,12 +116,12 @@ static pfile *pfile_build(const vlex_file *f)
 		i = e - 1;
 	}
 	if (sp && !fi->bad)
-		fi->bad = 2, fi->badtok = d[stk[sp - 1]].tok + 1;
+		fi->bad = 2, fi->unbalanced_token = d[stk[sp - 1]].tok + 1;
 	free(stk);
 	fi->dir = d;
-	fi->mac = salloc((nd + 1) * sizeof(*fi->mac));	/* fresh: zero */
-	fi->inc = salloc((nd + 1) * sizeof(*fi->inc));
-	fi->ndir = nd;
+	fi->mac = pp_shared_allocate((nd + 1) * sizeof(*fi->mac));	/* fresh: zero */
+	fi->inc = pp_shared_allocate((nd + 1) * sizeof(*fi->inc));
+	fi->directive_count = nd;
 	/*
 	 * Include guard: the file is one #ifndef X / #if !defined(X) group
 	 * (no #else/#elif) with nothing before or after it.
@@ -129,20 +129,20 @@ static pfile *pfile_build(const vlex_file *f)
 	if (!fi->bad && nd >= 2 && d[0].tok == 0) {
 		uint32_t g = 0, e = d[0].end;
 
-		if (d[0].kind == D_IFNDEF && e == 3 && t[2].kind == T_IDENT)
+		if (d[0].kind == PP_DIRECTIVE_IFNDEF && e == 3 && t[2].kind == LEX_TOKEN_IDENTIFIER)
 			g = t[2].id;
-		else if (d[0].kind == D_IF && t[2].kind == T_EXCLAIM && t[3].kind == T_IDENT &&
+		else if (d[0].kind == PP_DIRECTIVE_IF && t[2].kind == LEX_TOKEN_EXCLAMATION && t[3].kind == LEX_TOKEN_IDENTIFIER &&
 			 t[3].id == KW_defined) {
-			if (e == 5 && t[4].kind == T_IDENT)
+			if (e == 5 && t[4].kind == LEX_TOKEN_IDENTIFIER)
 				g = t[4].id;
-			else if (e == 7 && t[4].kind == T_LPAREN && t[5].kind == T_IDENT &&
-				 t[6].kind == T_RPAREN)
+			else if (e == 7 && t[4].kind == LEX_TOKEN_LEFT_PAREN && t[5].kind == LEX_TOKEN_IDENTIFIER &&
+				 t[6].kind == LEX_TOKEN_RIGHT_PAREN)
 				g = t[5].id;
 		}
 		if (g) {
 			uint32_t k = d[0].next;
 
-			if (d[k].kind == D_ENDIF && d[k].end == n)
+			if (d[k].kind == PP_DIRECTIVE_ENDIF && d[k].end == n)
 				fi->guard = g;
 		}
 	}
@@ -150,15 +150,15 @@ static pfile *pfile_build(const vlex_file *f)
 }
 
 /* *fresh: built by this call (the file's first entry in the process) */
-VPRIV const pfile *pfile_get(const vlex_file *f, bool *fresh)
+VPRIV const pp_skeleton *pp_skeleton_get(const lex_file *f, bool *fresh)
 {
-	vlex_file *w = (vlex_file *)f;
+	lex_file *w = (lex_file *)f;
 	void *fi = __atomic_load_n(&w->pp, __ATOMIC_ACQUIRE), *z = NULL;
 
 	*fresh = false;
 	if (likely(fi != NULL))
 		return fi;
-	fi = pfile_build(f);
+	fi = pp_skeleton_build(f);
 	if (!__atomic_compare_exchange_n(&w->pp, &z, fi, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
 		return z;	/* lost the race; ours is wasted */
 	*fresh = true;
@@ -166,9 +166,9 @@ VPRIV const pfile *pfile_get(const vlex_file *f, bool *fresh)
 }
 
 /* 1-based line of byte offset off */
-VPRIV uint32_t file_line(const vlex_file *f, const pfile *cfi, uint32_t off)
+VPRIV uint32_t pp_file_line_of_offset(const lex_file *f, const pp_skeleton *cfi, uint32_t off)
 {
-	pfile *fi = (pfile *)cfi;
+	pp_skeleton *fi = (pp_skeleton *)cfi;
 	uint32_t *l = __atomic_load_n(&fi->lines, __ATOMIC_ACQUIRE), n, lo, hi;
 
 	if (!l) {
@@ -176,7 +176,7 @@ VPRIV uint32_t file_line(const vlex_file *f, const pfile *cfi, uint32_t off)
 
 		for (uint32_t i = 0; i < f->size; i++)
 			c += f->src[i] == '\n';
-		l = salloc((c + 1) * sizeof(*l));
+		l = pp_shared_allocate((c + 1) * sizeof(*l));
 		c = 0;
 		for (uint32_t i = 0; i < f->size; i++)
 			if (f->src[i] == '\n')

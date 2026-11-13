@@ -13,7 +13,7 @@ VPRIV int write_deps(const pp *p, const char *cwd, const char *depfile, const ch
 	size_t n, col;
 
 	/* grown until every file fits (a full table may have been cut short) */
-	while (!names || (n = pp_files(p, names, cap, nosys)) == cap) {
+	while (!names || (n = pp_file_names(p, names, cap, nosys)) == cap) {
 		free(names);
 		cap = cap ? 2 * cap : 4096;
 		names = malloc(cap * sizeof(*names));

@@ -87,7 +87,7 @@ relative to it); `TODO.md` stays at the top.
       include-directory cache.
     - `diag/`: the diagnostics engine (records, text styles, JSON, SARIF,
       HTML; ids in `diagids.inc`).  Compiled in the pp module for now: it
-      uses `ppimpl.h`.
+      uses `pp-internal.h`.
     - `c/`: parser + sema (GNU C11, clang's layout and constant rules).  C++
       and Objective-C go next to it.
   - `codegen/`: code generator (straight from the AST): the shared part, state
@@ -175,7 +175,7 @@ relative to it); `TODO.md` stays at the top.
   - `platform/wasm/`: the wasm object writer (`wasm.c`: layout, symbol table,
     relocations as LLVM's WasmObjectWriter, byte for byte).
   - `frontend/pp/`, `frontend/c/` and `codegen/` (with `arch/<cpu>/codegen/`) are directories of
-    files by topic, one internal header each (`ppimpl.h`, `ccimpl.h`, `emitimpl.h`) with the types, macros
+    files by topic, one internal header each (`pp-internal.h`, `ccimpl.h`, `emitimpl.h`) with the types, macros
     and prototypes the files share; a shared function is `VPRIV` (static in
     the unity build).  Each such module is compiled as one TU by default
     (`obj/unity/MOD.c` #includes the files in `MOD_SRC`, SQLite style); `make
@@ -362,7 +362,7 @@ default there; vcc exits with its arenas mapped) and the default 8 MB stack
 65-100 s (15-20x the normal build), an ASan suite 12-25 s.  Limits: ASan does
 not see over-reads inside our own mmap'ed arenas (they are never poisoned),
 only in malloc, globals and the stack.  Contract that ASan checks: strings
-handed to `vintern*`/`vlex_get` must be readable 16 (or 8) bytes past their
+handed to `vintern*`/`lex_file_get` must be readable 16 (or 8) bytes past their
 length (`vintern_cstr` pads a literal).  No suppressions are needed today;
 put any in `src/tsan.supp`, one reason per entry, and run with
 `TSAN_OPTIONS=suppressions=$PWD/src/tsan.supp`.
@@ -371,12 +371,12 @@ put any in `src/tsan.supp`, one reason per entry, and run with
 Targets build with Homebrew LLVM's libFuzzer and ASan+UBSan into
 `build/src/fuzz/` (without libFuzzer, `driver.c` gives the same command line
 minus coverage feedback).
-- `fuzz-lex`: vlex on raw bytes; checks token-array invariants, spelling,
+- `fuzz-lex`: lex_tokenize on raw bytes; checks token-array invariants, spelling,
   interning, NEON vs a scalar build of lex.c (`lexref.c`), buffer alignment.
 - `fuzz-diag`: control bytes \x01 a source file; random records (spans,
   labels, fix-its, notes, help) through every style and output.
   `FUZZ_DIAG_PRINT=1` prints them.
-- `fuzz-pp`: one in-memory TU served by `vlex_get_hook`: main `\x01` a.h
+- `fuzz-pp`: one in-memory TU served by `lex_file_get_hook`: main `\x01` a.h
   `\x01` b.h `\x01` sys/c.h, leading `\x02` for asm mode.
   `FUZZ_PP_PRINT=1` prints output and diagnostics.
 ```

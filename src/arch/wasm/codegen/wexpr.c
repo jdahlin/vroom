@@ -790,7 +790,7 @@ VPRIV void w16arith(ecx *e, int op, qty ty, qty rty)
 	uint32_t ta, tb;
 	const char *f = NULL;
 
-	if (op == T_LESSLESS || op == T_GREATERGREATER) {
+	if (op == LEX_TOKEN_LESS_LESS || op == LEX_TOKEN_GREATER_GREATER) {
 		uint32_t n = wtmp(e, WT_I32);
 		int rk = wty(c, rty);
 
@@ -808,7 +808,7 @@ VPRIV void w16arith(ecx *e, int op, qty ty, qty rty)
 			whalf(e, ta, 0);
 			whalf(e, ta, 1);
 			wget(e, n);
-			wrt(e, op == T_LESSLESS ? "__ashlti3" : sg ? "__ashrti3" : "__lshrti3", "(P, i64, i64, i32) -> ()");
+			wrt(e, op == LEX_TOKEN_LESS_LESS ? "__ashlti3" : sg ? "__ashrti3" : "__lshrti3", "(P, i64, i64, i32) -> ()");
 			wslot_addr(e, sl);
 		}
 		wfree(e, ta);
@@ -820,12 +820,12 @@ VPRIV void w16arith(ecx *e, int op, qty ty, qty rty)
 	ta = wtmp(e, WPT(c));
 	wset(e, ta);
 	switch (op) {
-	case T_PLUS: f = fl ? "__addtf3" : NULL; break;
-	case T_MINUS: f = fl ? "__subtf3" : NULL; break;
-	case T_STAR: f = fl ? "__multf3" : "__multi3"; break;
-	case T_SLASH: f = fl ? "__divtf3" : sg ? "__divti3" : "__udivti3"; break;
-	case T_PERCENT: f = fl ? NULL : sg ? "__modti3" : "__umodti3"; break;
-	case T_AMP: case T_PIPE: case T_CARET: break;
+	case LEX_TOKEN_PLUS: f = fl ? "__addtf3" : NULL; break;
+	case LEX_TOKEN_MINUS: f = fl ? "__subtf3" : NULL; break;
+	case LEX_TOKEN_STAR: f = fl ? "__multf3" : "__multi3"; break;
+	case LEX_TOKEN_SLASH: f = fl ? "__divtf3" : sg ? "__divti3" : "__udivti3"; break;
+	case LEX_TOKEN_PERCENT: f = fl ? NULL : sg ? "__modti3" : "__umodti3"; break;
+	case LEX_TOKEN_AMPERSAND: case LEX_TOKEN_PIPE: case LEX_TOKEN_CARET: break;
 	default: efatal(e, e->curloc, "wasm: unsupported operator on a 16-byte value");
 	}
 	if (f) {
@@ -840,9 +840,9 @@ VPRIV void w16arith(ecx *e, int op, qty ty, qty rty)
 		wslot_addr(e, sl);
 	} else if (fl) {
 		efatal(e, e->curloc, "wasm: unsupported operator on long double");
-	} else if (op == T_PLUS || op == T_MINUS) {
+	} else if (op == LEX_TOKEN_PLUS || op == LEX_TOKEN_MINUS) {
 		uint32_t lo = wtmp(e, WT_I64);
-		const char *o = op == T_PLUS ? "i64.add" : "i64.sub";
+		const char *o = op == LEX_TOKEN_PLUS ? "i64.add" : "i64.sub";
 
 		whalf(e, ta, 0);
 		whalf(e, tb, 0);
@@ -852,7 +852,7 @@ VPRIV void w16arith(ecx *e, int op, qty ty, qty rty)
 		whalf(e, tb, 1);
 		wi(e, o);
 		/* the carry (lo < a.lo) or the borrow (a.lo < b.lo) */
-		if (op == T_PLUS) {
+		if (op == LEX_TOKEN_PLUS) {
 			wget(e, lo);
 			whalf(e, ta, 0);
 		} else {
@@ -865,7 +865,7 @@ VPRIV void w16arith(ecx *e, int op, qty ty, qty rty)
 		wpair(e);
 		wfree(e, lo);
 	} else {
-		const char *o = op == T_AMP ? "i64.and" : op == T_PIPE ? "i64.or" : "i64.xor";
+		const char *o = op == LEX_TOKEN_AMPERSAND ? "i64.and" : op == LEX_TOKEN_PIPE ? "i64.or" : "i64.xor";
 
 		whalf(e, ta, 0);
 		whalf(e, tb, 0);
@@ -892,7 +892,7 @@ VPRIV void w16cmp(ecx *e, int op, qty t)
 	if (w16(c, t) == 2) {
 		static const char *const fn[] = { "__eqtf2", "__netf2", "__lttf2", "__gttf2", "__letf2", "__getf2" };
 		static const char *const rel[] = { "i32.eq", "i32.ne", "i32.lt_s", "i32.gt_s", "i32.le_s", "i32.ge_s" };
-		int i = op == T_EQUALEQUAL ? 0 : op == T_EXCLAIMEQ ? 1 : op == T_LESS ? 2 : op == T_GREATER ? 3 : op == T_LESSEQ ? 4 : 5;
+		int i = op == LEX_TOKEN_EQUAL_EQUAL ? 0 : op == LEX_TOKEN_EXCLAMATION_EQUAL ? 1 : op == LEX_TOKEN_LESS ? 2 : op == LEX_TOKEN_GREATER ? 3 : op == LEX_TOKEN_LESS_EQUAL ? 4 : 5;
 
 		whalf(e, ta, 0);
 		whalf(e, ta, 1);
@@ -901,7 +901,7 @@ VPRIV void w16cmp(ecx *e, int op, qty t)
 		wrt(e, fn[i], "(i64, i64, i64, i64) -> (i32)");
 		wconst(e, WT_I32, 0);
 		wi(e, rel[i]);
-	} else if (op == T_EQUALEQUAL || op == T_EXCLAIMEQ) {
+	} else if (op == LEX_TOKEN_EQUAL_EQUAL || op == LEX_TOKEN_EXCLAMATION_EQUAL) {
 		whalf(e, ta, 0);
 		whalf(e, tb, 0);
 		wi(e, "i64.xor");
@@ -910,16 +910,16 @@ VPRIV void w16cmp(ecx *e, int op, qty t)
 		wi(e, "i64.xor");
 		wi(e, "i64.or");
 		wi(e, "i64.eqz");
-		if (op == T_EXCLAIMEQ)
+		if (op == LEX_TOKEN_EXCLAMATION_EQUAL)
 			wi(e, "i32.eqz");
 	} else {
 		bool sg = is_signed(c, t);
 		const char *lo, *hi;
 
 		switch (op) {
-		case T_LESS: lo = "i64.lt_u"; hi = sg ? "i64.lt_s" : "i64.lt_u"; break;
-		case T_GREATER: lo = "i64.gt_u"; hi = sg ? "i64.gt_s" : "i64.gt_u"; break;
-		case T_LESSEQ: lo = "i64.le_u"; hi = sg ? "i64.lt_s" : "i64.lt_u"; break;
+		case LEX_TOKEN_LESS: lo = "i64.lt_u"; hi = sg ? "i64.lt_s" : "i64.lt_u"; break;
+		case LEX_TOKEN_GREATER: lo = "i64.gt_u"; hi = sg ? "i64.gt_s" : "i64.gt_u"; break;
+		case LEX_TOKEN_LESS_EQUAL: lo = "i64.le_u"; hi = sg ? "i64.lt_s" : "i64.lt_u"; break;
 		default: lo = "i64.ge_u"; hi = sg ? "i64.gt_s" : "i64.gt_u"; break;
 		}
 		/* the high halves decide unless equal */
@@ -1064,7 +1064,7 @@ static void w16unary(ecx *e, int op, qty t)
 	uint32_t a = wtmp(e, WPT(c));
 
 	wset(e, a);
-	if (op == T_TILDE) {
+	if (op == LEX_TOKEN_TILDE) {
 		whalf(e, a, 0);
 		wconst(e, WT_I64, -1);
 		wi(e, "i64.xor");
@@ -1118,7 +1118,7 @@ static int w16incdec(ecx *e, uint32_t n, bool want)
 		w16const(e, 0, 0x3fff000000000000ull);
 	else
 		w16const(e, 1, 0);
-	w16arith(e, inc ? T_PLUS : T_MINUS, t, 0);
+	w16arith(e, inc ? LEX_TOKEN_PLUS : LEX_TOKEN_MINUS, t, 0);
 	wcopy(e, 16);
 	if (want) {
 		if (post)
@@ -1149,7 +1149,7 @@ static void wvlanes(ecx *e, int op, qty at, qty bt, qty rt, bool unary)
 	uint32_t ta, tb = UINT32_MAX;
 	uint64_t sl = wslot(e, tsize(c, rt), 16);
 	int k = wty(c, et);
-	bool shift = op == T_LESSLESS || op == T_GREATERGREATER;
+	bool shift = op == LEX_TOKEN_LESS_LESS || op == LEX_TOKEN_GREATER_GREATER;
 
 	if (!unary) {
 		tb = wtmp(e, wty(c, bt));
@@ -1163,7 +1163,7 @@ static void wvlanes(ecx *e, int op, qty at, qty bt, qty rt, bool unary)
 		if (is_bvec(c, at)) la.off = i / 8, la.bf = 1, la.width = 1, la.bitoff = i % 8;
 		if (is_bvec(c, rt)) lr.off = i / 8, lr.bf = 1, lr.width = 1, lr.bitoff = i % 8;
 		wslot_addr(e, sl);
-		if (unary && op == T_MINUS && k != WT_F32 && k != WT_F64)
+		if (unary && op == LEX_TOKEN_MINUS && k != WT_F32 && k != WT_F64)
 			wconst(e, k, 0);
 		wget(e, ta);
 		if (av)
@@ -1171,7 +1171,7 @@ static void wvlanes(ecx *e, int op, qty at, qty bt, qty rt, bool unary)
 		else if (QUNQ(xt) != QUNQ(et))
 			wconv(e, xt, et);
 		if (unary) {
-			if (op == T_MINUS)
+			if (op == LEX_TOKEN_MINUS)
 				wop(e, k, k == WT_F32 || k == WT_F64 ? "neg" : "sub");
 			else {
 				wconst(e, k, -1);
@@ -1211,8 +1211,8 @@ static void wvlanes(ecx *e, int op, qty at, qty bt, qty rt, bool unary)
 
 static bool wis_cmp(int op)
 {
-	return op == T_EQUALEQUAL || op == T_EXCLAIMEQ || op == T_LESS || op == T_GREATER || op == T_LESSEQ ||
-	       op == T_GREATEREQ;
+	return op == LEX_TOKEN_EQUAL_EQUAL || op == LEX_TOKEN_EXCLAMATION_EQUAL || op == LEX_TOKEN_LESS || op == LEX_TOKEN_GREATER || op == LEX_TOKEN_LESS_EQUAL ||
+	       op == LEX_TOKEN_GREATER_EQUAL;
 }
 
 /* stack: [a b] of C type ty (b of rty: a shift count) -> a op b */
@@ -1231,21 +1231,21 @@ VPRIV void warith(ecx *e, int op, qty ty, qty rty)
 	if (k == WT_MEM)
 		efatal(e, e->curloc, "wasm: arithmetic on this type is not supported yet (PLAN-wasm.md W4)");
 	switch (op) {
-	case T_PLUS: o = "add"; break;
-	case T_MINUS: o = "sub"; break;
-	case T_STAR: o = "mul"; break;
-	case T_SLASH: o = fl ? "div" : sg ? "div_s" : "div_u"; break;
-	case T_PERCENT: o = sg ? "rem_s" : "rem_u"; break;
-	case T_AMP: o = "and"; break;
-	case T_PIPE: o = "or"; break;
-	case T_CARET: o = "xor"; break;
-	case T_LESSLESS: o = "shl"; break;
-	case T_GREATERGREATER: o = sg ? "shr_s" : "shr_u"; break;
+	case LEX_TOKEN_PLUS: o = "add"; break;
+	case LEX_TOKEN_MINUS: o = "sub"; break;
+	case LEX_TOKEN_STAR: o = "mul"; break;
+	case LEX_TOKEN_SLASH: o = fl ? "div" : sg ? "div_s" : "div_u"; break;
+	case LEX_TOKEN_PERCENT: o = sg ? "rem_s" : "rem_u"; break;
+	case LEX_TOKEN_AMPERSAND: o = "and"; break;
+	case LEX_TOKEN_PIPE: o = "or"; break;
+	case LEX_TOKEN_CARET: o = "xor"; break;
+	case LEX_TOKEN_LESS_LESS: o = "shl"; break;
+	case LEX_TOKEN_GREATER_GREATER: o = sg ? "shr_s" : "shr_u"; break;
 	}
-	if (!o || (fl && (op == T_PERCENT || op == T_AMP || op == T_PIPE || op == T_CARET || op == T_LESSLESS ||
-			  op == T_GREATERGREATER)))
+	if (!o || (fl && (op == LEX_TOKEN_PERCENT || op == LEX_TOKEN_AMPERSAND || op == LEX_TOKEN_PIPE || op == LEX_TOKEN_CARET || op == LEX_TOKEN_LESS_LESS ||
+			  op == LEX_TOKEN_GREATER_GREATER)))
 		efatal(e, e->curloc, "wasm: unsupported operator");
-	if ((op == T_LESSLESS || op == T_GREATERGREATER) && rty && (wty(c, rty) == WT_MEM || wty(c, rty) != k)) {
+	if ((op == LEX_TOKEN_LESS_LESS || op == LEX_TOKEN_GREATER_GREATER) && rty && (wty(c, rty) == WT_MEM || wty(c, rty) != k)) {
 		if (wty(c, rty) == WT_MEM) {
 			wiu(e, "i64.load", 0);
 			if (k == WT_I32)
@@ -1273,11 +1273,11 @@ VPRIV void wcompare(ecx *e, int op, qty t)
 	if (k == WT_MEM)
 		efatal(e, e->curloc, "wasm: comparisons of this type are not supported yet (PLAN-wasm.md W4)");
 	switch (op) {
-	case T_EQUALEQUAL: wop(e, k, "eq"); return;
-	case T_EXCLAIMEQ: wop(e, k, "ne"); return;
-	case T_LESS: strcpy(o, "lt"); break;
-	case T_GREATER: strcpy(o, "gt"); break;
-	case T_LESSEQ: strcpy(o, "le"); break;
+	case LEX_TOKEN_EQUAL_EQUAL: wop(e, k, "eq"); return;
+	case LEX_TOKEN_EXCLAMATION_EQUAL: wop(e, k, "ne"); return;
+	case LEX_TOKEN_LESS: strcpy(o, "lt"); break;
+	case LEX_TOKEN_GREATER: strcpy(o, "gt"); break;
+	case LEX_TOKEN_LESS_EQUAL: strcpy(o, "le"); break;
 	default: strcpy(o, "ge"); break;
 	}
 	if (!fl)
@@ -1293,8 +1293,8 @@ static bool wbinrule(ecx *e, uint32_t n, qty ty, int *op, i128 *rhs, int *identi
 
 	reciprocal->divisor = 0;
 	switch (*op) {
-	case T_PLUS: case T_MINUS: case T_STAR: case T_SLASH: case T_PERCENT:
-	case T_AMP: case T_PIPE: case T_CARET: case T_LESSLESS: case T_GREATERGREATER:
+	case LEX_TOKEN_PLUS: case LEX_TOKEN_MINUS: case LEX_TOKEN_STAR: case LEX_TOKEN_SLASH: case LEX_TOKEN_PERCENT:
+	case LEX_TOKEN_AMPERSAND: case LEX_TOKEN_PIPE: case LEX_TOKEN_CARET: case LEX_TOKEN_LESS_LESS: case LEX_TOKEN_GREATER_GREATER:
 		break;
 	default:
 		return false;
@@ -1312,7 +1312,7 @@ static bool wbinrule(ecx *e, uint32_t n, qty ty, int *op, i128 *rhs, int *identi
 		em_sdivpow2_recipe recipe;
 
 		if ((!em_sdivpow2(c, ty, *op, *rhs, &recipe) || !wsdivpow2_ok(&recipe)) &&
-		    !(*op == T_SLASH && e->E->o->opt && !e->E->noopt &&
+		    !(*op == LEX_TOKEN_SLASH && e->E->o->opt && !e->E->noopt &&
 		      (tsize(c, ty) == 4 || (tsize(c, ty) == 8 && (uint64_t)*rhs > (UINT64_C(1) << 63))) &&
 		      em_udivconst(c, ty, *op, *rhs, reciprocal) && wudivconst_ok(reciprocal)))
 			return false;
@@ -1396,7 +1396,7 @@ static int wbinary(ecx *e, uint32_t n)
 		wvlanes(e, op, lt, rt, ty, false);
 		return WPT(c);
 	}
-	if (is_ptr(c, ty) && (op == T_PLUS || op == T_MINUS)) {
+	if (is_ptr(c, ty) && (op == LEX_TOKEN_PLUS || op == LEX_TOKEN_MINUS)) {
 		bool lp = is_ptr(c, lt);
 		uint64_t es = welem_size(e, lp ? lt : rt);
 
@@ -1410,10 +1410,10 @@ static int wbinary(ecx *e, uint32_t n)
 			wto_ptr(e, rt);
 			wscale(e, lt, es);
 		}
-		wpop(e, op == T_PLUS ? "add" : "sub");
+		wpop(e, op == LEX_TOKEN_PLUS ? "add" : "sub");
 		return WPT(c);
 	}
-	if (op == T_MINUS && is_ptr(c, lt) && is_ptr(c, rt)) {
+	if (op == LEX_TOKEN_MINUS && is_ptr(c, lt) && is_ptr(c, rt)) {
 		uint64_t es = welem_size(e, lt);
 
 		wexpr(e, x->a, true);
@@ -1450,7 +1450,7 @@ static int wbinary(ecx *e, uint32_t n)
 	bool reduced = wbinrule(e, x->b, ty, &reduced_op, &rhs, &identity, &reciprocal, false);
 	uint32_t value = x->a;
 	qty value_type = lt;
-	if (!reduced && e->E->o->opt && !e->E->noopt && (op == T_STAR || op == T_CARET)) {
+	if (!reduced && e->E->o->opt && !e->E->noopt && (op == LEX_TOKEN_STAR || op == LEX_TOKEN_CARET)) {
 		reduced_op = op;
 		if ((reduced = wbinrule(e, x->a, ty, &reduced_op, &rhs, &identity, &reciprocal, false))) {
 			value = x->b;
@@ -1458,15 +1458,15 @@ static int wbinary(ecx *e, uint32_t n)
 		}
 	}
 	wexpr(e, value, true);
-	if (QUNQ(value_type) != QUNQ(ty) && op != T_LESSLESS && op != T_GREATERGREATER)
+	if (QUNQ(value_type) != QUNQ(ty) && op != LEX_TOKEN_LESS_LESS && op != LEX_TOKEN_GREATER_GREATER)
 		wconv(e, value_type, ty);
 	if (reduced) {
 		wbinreduced(e, ty, reduced_op, rhs, identity, &reciprocal);
 	} else {
 		wexpr(e, x->b, true);
-		if (QUNQ(rt) != QUNQ(ty) && op != T_LESSLESS && op != T_GREATERGREATER)
+		if (QUNQ(rt) != QUNQ(ty) && op != LEX_TOKEN_LESS_LESS && op != LEX_TOKEN_GREATER_GREATER)
 			wconv(e, rt, ty);
-		warith(e, op, ty, (op == T_LESSLESS || op == T_GREATERGREATER) ? rt : 0);
+		warith(e, op, ty, (op == LEX_TOKEN_LESS_LESS || op == LEX_TOKEN_GREATER_GREATER) ? rt : 0);
 	}
 	return wty(c, ty);
 }
@@ -1477,7 +1477,7 @@ static bool wis_bool(cc *c, uint32_t n)
 	const node *x = N(n);
 
 	return (x->op == N_BINARY && wis_cmp(x->aux)) || x->op == N_LOGAND || x->op == N_LOGOR ||
-	       (x->op == N_UNARY && x->aux == T_EXCLAIM) || KIND(c, x->ty) == TY_BOOL;
+	       (x->op == N_UNARY && x->aux == LEX_TOKEN_EXCLAMATION) || KIND(c, x->ty) == TY_BOOL;
 }
 
 /* push an i32 that is nonzero iff n is true */
@@ -1712,7 +1712,7 @@ static int wassign(ecx *e, uint32_t n, bool want)
 				wexpr(e, x->b, true);
 			wto_ptr(e, bt);
 			wscale(e, lt, es);
-			wpop(e, op == T_PLUS ? "add" : "sub");
+			wpop(e, op == LEX_TOKEN_PLUS ? "add" : "sub");
 		} else {
 			int reduced_op = op;
 			i128 rhs = 0;
@@ -1733,9 +1733,9 @@ static int wassign(ecx *e, uint32_t n, bool want)
 					wget(e, tb);
 				else
 					wexpr(e, x->b, true);
-				if (op != T_LESSLESS && op != T_GREATERGREATER && QUNQ(bt) != QUNQ(pt))
+				if (op != LEX_TOKEN_LESS_LESS && op != LEX_TOKEN_GREATER_GREATER && QUNQ(bt) != QUNQ(pt))
 					wconv(e, bt, pt);
-				warith(e, op, pt, (op == T_LESSLESS || op == T_GREATERGREATER) ? bt : 0);
+				warith(e, op, pt, (op == LEX_TOKEN_LESS_LESS || op == LEX_TOKEN_GREATER_GREATER) ? bt : 0);
 			}
 			wconv(e, pt, lt);
 		}
@@ -2100,9 +2100,9 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 		if (operand)
 			return wexpr(e, operand, want);
 		switch (x->aux) {
-		case T_PLUS:
+		case LEX_TOKEN_PLUS:
 			return wexpr(e, x->a, want);
-		case T_MINUS:
+		case LEX_TOKEN_MINUS:
 			if (k == WT_F32 || k == WT_F64) {
 				wexpr(e, x->a, true);
 				wop(e, k, "neg");
@@ -2113,9 +2113,9 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 					break;
 				wexpr(e, x->a, true);
 				if (is_vec(c, x->ty))
-					wvlanes(e, T_MINUS, x->ty, 0, x->ty, true);
+					wvlanes(e, LEX_TOKEN_MINUS, x->ty, 0, x->ty, true);
 				else
-					w16unary(e, T_MINUS, x->ty);
+					w16unary(e, LEX_TOKEN_MINUS, x->ty);
 				return WPT(c);
 			}
 			wconst(e, k, 0);
@@ -2124,22 +2124,22 @@ static int wexpr1(ecx *e, uint32_t n, bool want)
 			if (k == WT_I32)
 				wnarrow(e, prim(TY_INT), x->ty);
 			return k;
-		case T_TILDE:
+		case LEX_TOKEN_TILDE:
 			if (k == WT_MEM) {
 				if (!is_vec(c, x->ty) && !w16(c, x->ty))
 					break;
 				wexpr(e, x->a, true);
 				if (is_vec(c, x->ty))
-					wvlanes(e, T_TILDE, x->ty, 0, x->ty, true);
+					wvlanes(e, LEX_TOKEN_TILDE, x->ty, 0, x->ty, true);
 				else
-					w16unary(e, T_TILDE, x->ty);
+					w16unary(e, LEX_TOKEN_TILDE, x->ty);
 				return WPT(c);
 			}
 			wexpr(e, x->a, true);
 			wconst(e, k, -1);
 			wop(e, k, "xor");
 			return k;
-		case T_EXCLAIM:
+		case LEX_TOKEN_EXCLAMATION:
 			wtruth(e, x->a);
 			wi(e, "i32.eqz");
 			return WT_I32;

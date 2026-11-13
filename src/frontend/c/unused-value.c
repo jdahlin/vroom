@@ -66,7 +66,7 @@ static bool uv_warn(cc *c, uint32_t e, uvw *w)
 	case N_VAARG: case N_ZERO: case N_NONE:
 		return false;
 	case N_UNARY:
-		if (x->aux == T_PLUS || x->aux == T_MINUS || x->aux == T_TILDE || x->aux == T_EXCLAIM)
+		if (x->aux == LEX_TOKEN_PLUS || x->aux == LEX_TOKEN_MINUS || x->aux == LEX_TOKEN_TILDE || x->aux == LEX_TOKEN_EXCLAMATION)
 			goto unop;
 		return false;
 	case N_DEREF:
@@ -155,10 +155,10 @@ VPRIV bool unused_cmp(cc *c, uint32_t e)
 		int k = N(e)->aux;
 		uint32_t op = N(e)->loc;
 		pp_span r = { rng_np(c, N(e)->a).b, rng_np(c, N(e)->b).e };
-		bool eq = k == T_EQUALEQUAL || k == T_EXCLAIMEQ;
+		bool eq = k == LEX_TOKEN_EQUAL_EQUAL || k == LEX_TOKEN_EXCLAMATION_EQUAL;
 
 		if (cc_warnx(c, "unused-comparison", true, w_all, op, &r, 1, NULL, 0, "%s comparison result unused",
-			  eq ? "equality" : "relational") && k == T_EQUALEQUAL) {
+			  eq ? "equality" : "relational") && k == LEX_TOKEN_EQUAL_EQUAL) {
 			pp_span orr = { op, op + 2 };
 			pp_fixit fx = { op, op + 2, "=", 0 };
 			pp_dinfo d = { "note", op, &orr, 1, &fx, 1, NULL, 0 };

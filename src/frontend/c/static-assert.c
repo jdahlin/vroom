@@ -190,7 +190,7 @@ VPRIV void static_assert_decl(cc *c)
 		cc_error(c, loc, "static assertion expression is not an integral constant expression");
 		v = 1;
 	}
-	if (accept(c, T_COMMA)) {
+	if (accept(c, LEX_TOKEN_COMMA)) {
 		size_t k = 0;
 
 		while (is_strtok(tok(c)->kind)) {
@@ -213,6 +213,6 @@ VPRIV void static_assert_decl(cc *c)
 	}
 	if (!v && !ISERR(e))	/* (clang: nothing for an invalid condition) */
 		static_assert_failed(c, e, msg);
-	expect_match(c, T_RPAREN, open);
+	expect_match(c, LEX_TOKEN_RIGHT_PAREN, open);
 	expect_semi(c, "after static_assert");
 }

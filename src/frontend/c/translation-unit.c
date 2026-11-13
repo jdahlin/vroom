@@ -256,7 +256,7 @@ int cc_run(pp *p, const cc_opts *o)
 	delayed_bug_check(c);
 	if (o->dump_layouts && !c->errors)
 		layout_checks(c);
-	if (o->emit && !c->errors && !pp_errors(p))
+	if (o->emit && !c->errors && !pp_error_count(p))
 		c->errors += emit_tu(c, o);
 	errors = c->errors;
 	if (c->drb)
@@ -285,14 +285,14 @@ VPRIV void translation_unit(cc *c)
 			drcov_boundary(c);
 		if (unlikely(c->dr) && dr_boundary(c))
 			continue;	/* replayed: at a boundary again */
-		if (is(c, T_EOF))
+		if (is(c, LEX_TOKEN_EOF))
 			break;
-		if (is(c, T_SEMI)) {
+		if (is(c, LEX_TOKEN_SEMICOLON)) {
 			EXT_WARN_DEL(c, ";", tok(c)->flags, "extra-semi", w_ped, tok(c)->loc, "extra ';' outside of a function");
 			next(c);
 			continue;
 		}
-		if (unlikely(is(c, T_RBRACE))) {
+		if (unlikely(is(c, LEX_TOKEN_RIGHT_BRACE))) {
 			cc_error(c, tok(c)->loc, "extraneous closing brace ('}')");
 			next(c);
 			continue;

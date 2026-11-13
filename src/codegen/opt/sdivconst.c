@@ -50,13 +50,13 @@ VPRIV bool em_sdivconst64(int64_t divisor, bool remainder, em_sdivconst_recipe *
 
 VPRIV bool em_sdivconst(cc *c, qty ty, int op, i128 rhs, em_sdivconst_recipe *r)
 {
-	if ((op != T_SLASH && op != T_PERCENT) || !is_integer(c, ty) ||
+	if ((op != LEX_TOKEN_SLASH && op != LEX_TOKEN_PERCENT) || !is_integer(c, ty) ||
 	    !is_signed(c, ty) || em_bitint(c, ty))
 		return false;
 	unsigned size = (unsigned)tsize(c, ty);
 	if (size == 4)
-		return em_sdivconst32((int32_t)em_trunc_to(c, rhs, ty), op == T_PERCENT, r);
+		return em_sdivconst32((int32_t)em_trunc_to(c, rhs, ty), op == LEX_TOKEN_PERCENT, r);
 	if (size == 8)
-		return em_sdivconst64((int64_t)em_trunc_to(c, rhs, ty), op == T_PERCENT, r);
+		return em_sdivconst64((int64_t)em_trunc_to(c, rhs, ty), op == LEX_TOKEN_PERCENT, r);
 	return false;
 }

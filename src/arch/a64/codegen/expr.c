@@ -301,14 +301,14 @@ static val gen_vbin(ecx *e, int op, int ra, int rb, qty t, uint32_t loc)
 	if (size != 8 && size != 16)
 		efatal(e, loc, "unsupported vector size");
 	switch (op) {
-	case T_AMP: mn = "and"; break;
-	case T_PIPE: mn = "orr"; break;
-	case T_CARET: mn = "eor"; break;
-	case T_PLUS: mn = "add"; break;
-	case T_MINUS: mn = "sub"; break;
+	case LEX_TOKEN_AMPERSAND: mn = "and"; break;
+	case LEX_TOKEN_PIPE: mn = "orr"; break;
+	case LEX_TOKEN_CARET: mn = "eor"; break;
+	case LEX_TOKEN_PLUS: mn = "add"; break;
+	case LEX_TOKEN_MINUS: mn = "sub"; break;
 	default: efatal(e, loc, "unsupported vector operator");
 	}
-	if (op == T_AMP || op == T_PIPE || op == T_CARET) {
+	if (op == LEX_TOKEN_AMPERSAND || op == LEX_TOKEN_PIPE || op == LEX_TOKEN_CARET) {
 		arr = q ? "16b" : "8b";
 	} else {
 		snprintf(ab, sizeof ab, "%u%c", (unsigned)(size / es), es == 1 ? 'b' : es == 2 ? 'h' : es == 4 ? 's' : 'd');
@@ -379,11 +379,11 @@ static val gen_vlanes(ecx *e, int op, qty at, val *a, qty bt, val *b, qty rt, bo
 		qty yt = unary ? et : is_vec(c, bt) ? T(c, bt)->base : bt;
 
 		if (unary) {
-			if (op == T_MINUS)
-				r = is_flt(c, et) ? f_neg(e, x, et) : is_wide(c, et) ? arith2(e, T_MINUS, et, vconst(0), x)
-										 : arith(e, T_MINUS, et, vconst(0), x);
+			if (op == LEX_TOKEN_MINUS)
+				r = is_flt(c, et) ? f_neg(e, x, et) : is_wide(c, et) ? arith2(e, LEX_TOKEN_MINUS, et, vconst(0), x)
+										 : arith(e, LEX_TOKEN_MINUS, et, vconst(0), x);
 			else
-				r = is_wide(c, et) ? arith2(e, T_CARET, et, x, vconst(-1)) : arith(e, T_CARET, et, x, vconst(-1));
+				r = is_wide(c, et) ? arith2(e, LEX_TOKEN_CARET, et, x, vconst(-1)) : arith(e, LEX_TOKEN_CARET, et, x, vconst(-1));
 		} else if (em_is_cmp(op)) {
 			if (is_flt(c, et)) {
 				r = f_compare(e, op, et, x, y);
@@ -408,7 +408,7 @@ static val gen_vlanes(ecx *e, int op, qty at, val *a, qty bt, val *b, qty rt, bo
 				r.k = V_REG2;
 				r.r2 = (uint8_t)h;
 			} else {
-				r = arith(e, T_MINUS, rte, vconst(0), r);
+				r = arith(e, LEX_TOKEN_MINUS, rte, vconst(0), r);
 			}
 		} else if (is_flt(c, et)) {
 			r = f_arith(e, op, et, x, y);
@@ -435,7 +435,7 @@ static bool vbin_fast(cc *c, int op, qty lt, qty rt, qty ty)
 	uint64_t size = tsize(c, ty);
 
 	return !is_bvec(c, ty) && is_vec(c, lt) && is_vec(c, rt) && (size == 8 || size == 16) && !is_flt(c, T(c, ty)->base) &&
-	       (op == T_AMP || op == T_PIPE || op == T_CARET || op == T_PLUS || op == T_MINUS);
+	       (op == LEX_TOKEN_AMPERSAND || op == LEX_TOKEN_PIPE || op == LEX_TOKEN_CARET || op == LEX_TOKEN_PLUS || op == LEX_TOKEN_MINUS);
 }
 
 static val gen_binary(ecx *e, uint32_t n)
@@ -511,17 +511,17 @@ static val gen_binary(ecx *e, uint32_t n)
 		return r;
 	}
 
-	if ((op == T_LESSLESS || op == T_GREATERGREATER) && (em_bigint(c, rt) || is_wide(c, rt)))
+	if ((op == LEX_TOKEN_LESS_LESS || op == LEX_TOKEN_GREATER_GREATER) && (em_bigint(c, rt) || is_wide(c, rt)))
 		b = cast(e, b, rt, prim(TY_INT), CK_INT);
 	if (em_bigint(c, lt))
 		return em_is_cmp(op) ? a64_bigcmp(e, op, lt, a, b) : a64_bigbin(e, op, ty, a, b);
 	if (is_flt(c, lt) || is_flt(c, ty))
 		return em_is_cmp(op) ? f_compare(e, op, lt, a, b) : f_arith(e, op, ty, a, b);
 	/* pointer arithmetic */
-	if (is_ptr(c, ty) && (op == T_PLUS || op == T_MINUS) && is_ptr(c, lt))
-		return ptr_to_vla(c, lt) ? ptr_add_vla(e, a, b, lt, op == T_MINUS)
-					 : ptr_add(e, a, b, (int64_t)elem_size(c, lt), op == T_MINUS);
-	if (op == T_MINUS && is_ptr(c, lt) && is_ptr(c, rt) && ptr_to_vla(c, lt)) {
+	if (is_ptr(c, ty) && (op == LEX_TOKEN_PLUS || op == LEX_TOKEN_MINUS) && is_ptr(c, lt))
+		return ptr_to_vla(c, lt) ? ptr_add_vla(e, a, b, lt, op == LEX_TOKEN_MINUS)
+					 : ptr_add(e, a, b, (int64_t)elem_size(c, lt), op == LEX_TOKEN_MINUS);
+	if (op == LEX_TOKEN_MINUS && is_ptr(c, lt) && is_ptr(c, rt) && ptr_to_vla(c, lt)) {
 		/* (p - q) / the element size, which is known only now */
 		val es = vla_bytes(e, T(c, lt)->base);
 		int ra = toreg(e, &a), rb = toreg(e, &b), rs = toreg(e, &es);
@@ -532,7 +532,7 @@ static val gen_binary(ecx *e, uint32_t n)
 		val_free(e, &es);
 		return a;
 	}
-	if (op == T_MINUS && is_ptr(c, lt) && is_ptr(c, rt)) {
+	if (op == LEX_TOKEN_MINUS && is_ptr(c, lt) && is_ptr(c, rt)) {
 		int64_t es = (int64_t)elem_size(c, lt);
 
 		if ((a.k == V_ADDR && b.k == V_ADDR && a.ref == b.ref) || (a.k == V_CONST && b.k == V_CONST))
@@ -569,13 +569,13 @@ static val gen_binary(ecx *e, uint32_t n)
 
 				return fold_int_bin(e, op, prim(TY_LONG), ty, a.i, b.i, &ok);
 			}
-			if (op == T_EQUALEQUAL)
+			if (op == LEX_TOKEN_EQUAL_EQUAL)
 				return vconst(0);
-			if (op == T_EXCLAIMEQ)
+			if (op == LEX_TOKEN_EXCLAMATION_EQUAL)
 				return vconst(1);
 		}
-		if ((op == T_EQUALEQUAL || op == T_EXCLAIMEQ) && b.k == V_CONST && b.i == 0 && last_cset(e, &a) >= 0) {
-			if (op == T_EQUALEQUAL)	/* (cond) == 0: the inverse cset */
+		if ((op == LEX_TOKEN_EQUAL_EQUAL || op == LEX_TOKEN_EXCLAMATION_EQUAL) && b.k == V_CONST && b.i == 0 && last_cset(e, &a) >= 0) {
+			if (op == LEX_TOKEN_EQUAL_EQUAL)	/* (cond) == 0: the inverse cset */
 				e->in[e->nin - 1].cond ^= 1;
 			return a;
 		}
@@ -594,19 +594,19 @@ static val gen_binary(ecx *e, uint32_t n)
 		bool ok;
 		val v = fold_int_bin(e, op, ty, ty, a.i, b.i, &ok);
 
-		if (op == T_LESSLESS || op == T_GREATERGREATER)
+		if (op == LEX_TOKEN_LESS_LESS || op == LEX_TOKEN_GREATER_GREATER)
 			v = fold_int_bin(e, op, lt, ty, a.i, b.i, &ok);
 		if (ok)
 			return v;
 	}
 	/* 0 << x, 0 >> x, -1 >> x (signed): the constant, whatever x is */
-	if ((op == T_LESSLESS || op == T_GREATERGREATER) && a.k == V_CONST && b.k != V_CONST &&
-	    (em_trunc_to(c, a.i, ty) == 0 || (op == T_GREATERGREATER && is_signed(c, ty) && em_trunc_to(c, a.i, ty) == -1))) {
+	if ((op == LEX_TOKEN_LESS_LESS || op == LEX_TOKEN_GREATER_GREATER) && a.k == V_CONST && b.k != V_CONST &&
+	    (em_trunc_to(c, a.i, ty) == 0 || (op == LEX_TOKEN_GREATER_GREATER && is_signed(c, ty) && em_trunc_to(c, a.i, ty) == -1))) {
 		val_free(e, &b);
 		return vconst(em_trunc_to(c, a.i, ty));
 	}
-	if (a.k == V_ADDR && b.k == V_CONST && (op == T_PLUS || op == T_MINUS) && tsize(c, ty) == 8) {
-		a.i += op == T_PLUS ? b.i : -b.i;
+	if (a.k == V_ADDR && b.k == V_CONST && (op == LEX_TOKEN_PLUS || op == LEX_TOKEN_MINUS) && tsize(c, ty) == 8) {
+		a.i += op == LEX_TOKEN_PLUS ? b.i : -b.i;
 		return a;
 	}
 	if (is_wide(c, ty))
@@ -626,13 +626,13 @@ static val gen_unary(ecx *e, uint32_t n)
 		return gen(e, operand);
 	v = gen(e, x->a);
 
-	if (is_vec(c, x->ty) && (x->aux == T_MINUS || x->aux == T_TILDE))
+	if (is_vec(c, x->ty) && (x->aux == LEX_TOKEN_MINUS || x->aux == LEX_TOKEN_TILDE))
 		return gen_vlanes(e, x->aux, t, &v, t, NULL, x->ty, true);
 	switch (x->aux) {
-	case T_PLUS:
+	case LEX_TOKEN_PLUS:
 		return v;
-	case T_MINUS:
-		if (em_bigint(c, x->ty)) return a64_bigbin(e, T_MINUS, x->ty, vconst(0), v);
+	case LEX_TOKEN_MINUS:
+		if (em_bigint(c, x->ty)) return a64_bigbin(e, LEX_TOKEN_MINUS, x->ty, vconst(0), v);
 		if (is_flt(c, x->ty))
 			return f_neg(e, v, x->ty);
 		if (v.k == V_CONST)
@@ -646,8 +646,8 @@ static val gen_unary(ecx *e, uint32_t n)
 		toreg(e, &v);
 		op3(e, I_SUB, X(c, x->ty), v.r, ZR, v.r);
 		return v;
-	case T_TILDE:
-		if (em_bigint(c, x->ty)) return a64_bigbin(e, T_CARET, x->ty, v, vconst(-1));
+	case LEX_TOKEN_TILDE:
+		if (em_bigint(c, x->ty)) return a64_bigbin(e, LEX_TOKEN_CARET, x->ty, v, vconst(-1));
 		if (v.k == V_CONST)
 			return vconst(em_trunc_to(c, ~v.i, x->ty));
 		if (is_wide(c, x->ty)) {
@@ -659,7 +659,7 @@ static val gen_unary(ecx *e, uint32_t n)
 		toreg(e, &v);
 		op3(e, I_ORN, X(c, x->ty), v.r, ZR, v.r);
 		return v;
-	case T_EXCLAIM:
+	case LEX_TOKEN_EXCLAMATION:
 		v = tobool(e, v, t);
 		if (v.k == V_CONST)
 			return vconst(!v.i);
@@ -722,14 +722,14 @@ static val assign_op(ecx *e, const node *x, qty lt, val old, val v)
 		if (em_bigint(c, lt)) old = a64_bigcopy(e, old, lt);
 		old = a64_bigcvt(e, old, lt, pt);
 		qty rt = N(x->b)->ty;
-		if ((op == T_LESSLESS || op == T_GREATERGREATER) && (em_bigint(c, rt) || is_wide(c, rt)))
+		if ((op == LEX_TOKEN_LESS_LESS || op == LEX_TOKEN_GREATER_GREATER) && (em_bigint(c, rt) || is_wide(c, rt)))
 			v = cast(e, v, rt, prim(TY_INT), CK_INT);
 		old = a64_bigbin(e, op, pt, old, v);
 		return a64_bigcvt(e, old, pt, lt);
 	}
 	if (is_ptr(c, lt)) {
-		old = ptr_to_vla(c, lt) ? ptr_add_vla(e, old, v, lt, op == T_MINUS)
-					: ptr_add(e, old, v, (int64_t)elem_size(c, lt), op == T_MINUS);
+		old = ptr_to_vla(c, lt) ? ptr_add_vla(e, old, v, lt, op == LEX_TOKEN_MINUS)
+					: ptr_add(e, old, v, (int64_t)elem_size(c, lt), op == LEX_TOKEN_MINUS);
 	} else if (is_flt(c, pt) || is_flt(c, lt)) {
 		old = cast(e, old, lt, pt, CK_INT);
 		old = is_flt(c, pt) ? f_arith(e, op, pt, old, v) : arith(e, op, pt, old, v);
@@ -738,7 +738,7 @@ static val assign_op(ecx *e, const node *x, qty lt, val old, val v)
 		old = conv_back(e, old, lt, pt);
 		if (old.k == V_CONST && v.k == V_CONST) {
 			bool ok;
-			val f = fold_int_bin(e, op, (op == T_LESSLESS || op == T_GREATERGREATER) ? pt : pt, pt, old.i, v.i, &ok);
+			val f = fold_int_bin(e, op, (op == LEX_TOKEN_LESS_LESS || op == LEX_TOKEN_GREATER_GREATER) ? pt : pt, pt, old.i, v.i, &ok);
 
 			if (ok)
 				old = f;
@@ -962,12 +962,12 @@ static val incdec_op(ecx *e, qty t, bool inc, bool post, val *old)
 
 	if (em_bigint(c, t)) {
 		if (post) {
-			*old = a64_bigbin(e, T_PLUS, t, *old, vconst(0));
+			*old = a64_bigbin(e, LEX_TOKEN_PLUS, t, *old, vconst(0));
 			val copy = vreg(treg(e));
 			mov(e, 1, copy.r, old->r);
-			return a64_bigbin(e, inc ? T_PLUS : T_MINUS, t, copy, vconst(1));
+			return a64_bigbin(e, inc ? LEX_TOKEN_PLUS : LEX_TOKEN_MINUS, t, copy, vconst(1));
 		}
-		nv = a64_bigbin(e, inc ? T_PLUS : T_MINUS, t, *old, vconst(1));
+		nv = a64_bigbin(e, inc ? LEX_TOKEN_PLUS : LEX_TOKEN_MINUS, t, *old, vconst(1));
 		*old = nv;
 		return nv;
 	}
@@ -990,10 +990,10 @@ static val incdec_op(ecx *e, qty t, bool inc, bool post, val *old)
 			nv.r2 = (uint8_t)treg(e);
 			mov(e, 1, nv.r, cp.r);
 			mov(e, 1, nv.r2, cp.r2);
-			nv = f_arith(e, inc ? T_PLUS : T_MINUS, t, nv, one);
+			nv = f_arith(e, inc ? LEX_TOKEN_PLUS : LEX_TOKEN_MINUS, t, nv, one);
 			*old = cp;
 		} else {
-			nv = *old = f_arith(e, inc ? T_PLUS : T_MINUS, t, cp, one);
+			nv = *old = f_arith(e, inc ? LEX_TOKEN_PLUS : LEX_TOKEN_MINUS, t, cp, one);
 		}
 	} else if (is_flt(c, t)) {
 		toreg(e, old);
@@ -1001,9 +1001,9 @@ static val incdec_op(ecx *e, qty t, bool inc, bool post, val *old)
 			int r = treg(e);
 
 			mov(e, 1, r, old->r);
-			nv = f_arith(e, inc ? T_PLUS : T_MINUS, t, vreg(r), f_const_t(e, t, 1.0));
+			nv = f_arith(e, inc ? LEX_TOKEN_PLUS : LEX_TOKEN_MINUS, t, vreg(r), f_const_t(e, t, 1.0));
 		} else {
-			nv = *old = f_arith(e, inc ? T_PLUS : T_MINUS, t, *old, f_const_t(e, t, 1.0));
+			nv = *old = f_arith(e, inc ? LEX_TOKEN_PLUS : LEX_TOKEN_MINUS, t, *old, f_const_t(e, t, 1.0));
 		}
 	} else if (is_wide(c, t)) {
 		val one = vconst(1), cp = *old;
@@ -1015,10 +1015,10 @@ static val incdec_op(ecx *e, qty t, bool inc, bool post, val *old)
 			nv.r2 = (uint8_t)treg(e);
 			mov(e, 1, nv.r, cp.r);
 			mov(e, 1, nv.r2, cp.r2);
-			nv = arith2(e, inc ? T_PLUS : T_MINUS, t, nv, one);
+			nv = arith2(e, inc ? LEX_TOKEN_PLUS : LEX_TOKEN_MINUS, t, nv, one);
 			*old = cp;
 		} else {
-			nv = arith2(e, inc ? T_PLUS : T_MINUS, t, cp, one);
+			nv = arith2(e, inc ? LEX_TOKEN_PLUS : LEX_TOKEN_MINUS, t, cp, one);
 			*old = nv;
 		}
 	} else if (is_ptr(c, t) && ptr_to_vla(c, t)) {

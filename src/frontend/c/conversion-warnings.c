@@ -310,7 +310,7 @@ static void literal_conv(cc *c, uint32_t n, qty to)
 
 	while (N(e)->op == N_CAST && !c->span[e].e && N(e)->a)
 		e = N(e)->a;
-	lit = N(e)->op == N_UNARY && N(e)->aux == T_MINUS ? N(e)->a : e;
+	lit = N(e)->op == N_UNARY && N(e)->aux == LEX_TOKEN_MINUS ? N(e)->a : e;
 	if (N(lit)->op != N_FNUM || is_q(c, N(lit)->ty) || ty_size(c, N(lit)->ty) > 8)
 		return;
 	v = c->fpool[N(lit)->a];

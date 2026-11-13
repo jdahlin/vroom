@@ -149,12 +149,12 @@ static uint32_t cond_of(cc *c, const char *kw)
 {
 	uint32_t e, open = tok(c)->loc;
 
-	if (unlikely(!is(c, T_LPAREN)))
+	if (unlikely(!is(c, LEX_TOKEN_LEFT_PAREN)))
 		lparen_fail(c, kw);
 	next(c);
 	e = decay(c, expr(c));
 	assign_cond_warn(c, e);
-	expect_close(c, T_RPAREN, open, e);
+	expect_close(c, LEX_TOKEN_RIGHT_PAREN, open, e);
 	return scalar_cond(c, e, "statement");
 }
 
@@ -165,21 +165,21 @@ static uint32_t asm_string(cc *c)
 
 static void asm_operands(cc *c, vec *ops, bool out)
 {
-	if (is(c, T_COLON) || is(c, T_COLONCOLON) || is(c, T_RPAREN))
+	if (is(c, LEX_TOKEN_COLON) || is(c, LEX_TOKEN_COLON_COLON) || is(c, LEX_TOKEN_RIGHT_PAREN))
 		return;
 	for (;;) {
 		uint32_t name = 0, cons, e;
 
-		if (accept(c, T_LSQUARE)) {
-			if (is(c, T_IDENT))
+		if (accept(c, LEX_TOKEN_LEFT_SQUARE)) {
+			if (is(c, LEX_TOKEN_IDENTIFIER))
 				name = tok(c)->id;
 			next(c);
-			expect(c, T_RSQUARE, "']'");
+			expect(c, LEX_TOKEN_RIGHT_SQUARE, "']'");
 		}
 		cons = asm_string(c);
-		expect(c, T_LPAREN, "'('");
+		expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
 		e = expr(c);
-		expect(c, T_RPAREN, "')'");
+		expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 		if (out) {
 			if (!(N(e)->flags & NF_LVALUE))
 				cc_error(c, N(e)->loc, "invalid lvalue in asm output");
@@ -188,7 +188,7 @@ static void asm_operands(cc *c, vec *ops, bool out)
 		vpush(c, ops, name);
 		vpush(c, ops, cons);
 		vpush(c, ops, e);
-		if (!accept(c, T_COMMA))
+		if (!accept(c, LEX_TOKEN_COMMA))
 			break;
 	}
 }
@@ -200,9 +200,9 @@ static int asm_colons(cc *c, int *pending)
 		(*pending)--;
 		return 1;
 	}
-	if (accept(c, T_COLON))
+	if (accept(c, LEX_TOKEN_COLON))
 		return 1;
-	if (accept(c, T_COLONCOLON)) {
+	if (accept(c, LEX_TOKEN_COLON_COLON)) {
 		*pending = 1;
 		return 1;
 	}
@@ -235,7 +235,7 @@ VPRIV uint32_t asm_stmt(cc *c, bool toplevel)
 		next(c);
 	}
 	vinit(&outs), vinit(&ins), vinit(&clob), vinit(&labs);
-	expect(c, T_LPAREN, "'('");
+	expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
 	a->tmpl = asm_string(c);
 	if (!toplevel && asm_colons(c, &pending)) {
 		a->extended = 1;
@@ -245,25 +245,25 @@ VPRIV uint32_t asm_stmt(cc *c, bool toplevel)
 			if (!pending)
 				asm_operands(c, &ins, false);
 			if (asm_colons(c, &pending)) {
-				if (!pending && !is(c, T_COLON) && !is(c, T_COLONCOLON) && !is(c, T_RPAREN)) {
+				if (!pending && !is(c, LEX_TOKEN_COLON) && !is(c, LEX_TOKEN_COLON_COLON) && !is(c, LEX_TOKEN_RIGHT_PAREN)) {
 					do
 						vpush(c, &clob, asm_string(c));
-					while (accept(c, T_COMMA));
+					while (accept(c, LEX_TOKEN_COMMA));
 				}
 				if (asm_colons(c, &pending)) {
-					if (!is(c, T_RPAREN)) {
+					if (!is(c, LEX_TOKEN_RIGHT_PAREN)) {
 						do {
-							if (!is(c, T_IDENT))
+							if (!is(c, LEX_TOKEN_IDENTIFIER))
 								fatal(c, tok(c)->loc, "expected identifier");
 							vpush(c, &labs, label_ref(c, tok(c)->id, tok(c)->loc));
 							next(c);
-						} while (accept(c, T_COMMA));
+						} while (accept(c, LEX_TOKEN_COMMA));
 					}
 				}
 			}
 		}
 	}
-	expect(c, T_RPAREN, "')'");
+	expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 	a = &c->asms[ai];
 	a->nout = outs.n / 3;
 	a->nin = ins.n / 3;
@@ -300,11 +300,11 @@ static bool stmt_kw_typo(cc *c, bool decls)
 	uint32_t kw;
 	int k;
 
-	if (t->kind != T_IDENT || kwof(t) || lookup(c, t->id))	/* declared: no peek */
+	if (t->kind != LEX_TOKEN_IDENTIFIER || kwof(t) || lookup(c, t->id))	/* declared: no peek */
 		return false;
 	k = peek(c, 1)->kind;
-	if (k != T_IDENT && k != T_NUMBER && k != T_CHAR && !is_strtok(k) && k != T_LBRACE &&
-	    k != T_SEMI && k != T_STAR)
+	if (k != LEX_TOKEN_IDENTIFIER && k != LEX_TOKEN_NUMBER && k != LEX_TOKEN_CHARACTER && !is_strtok(k) && k != LEX_TOKEN_LEFT_BRACE &&
+	    k != LEX_TOKEN_SEMICOLON && k != LEX_TOKEN_STAR)
 		return false;
 	t = tok(c);
 	if (!(kw = typo_keyword(c, t->id, KWS_STMT)))
@@ -325,17 +325,17 @@ static __attribute__((cold, noinline)) bool undeclared_type_decl(cc *c, vec *ite
 	const ptok *t = tok(c);
 	int i = 1, k;
 
-	if (lookup(c, t->id) || (t->flags & PF_MACRO))
+	if (lookup(c, t->id) || (t->flags & PP_TOKEN_FLAG_FROM_MACRO))
 		return false;
-	if (peek(c, 1)->kind == T_STAR) {
+	if (peek(c, 1)->kind == LEX_TOKEN_STAR) {
 		if (!lib_header(c, t->id))
 			return false;
 		i = 2;
 	}
-	if (peek(c, i)->kind != T_IDENT || kwof(peek(c, i)))
+	if (peek(c, i)->kind != LEX_TOKEN_IDENTIFIER || kwof(peek(c, i)))
 		return false;
 	k = peek(c, i + 1)->kind;
-	if (k != T_EQUAL && k != T_SEMI && k != T_COMMA && k != T_LSQUARE)
+	if (k != LEX_TOKEN_EQUAL && k != LEX_TOKEN_SEMICOLON && k != LEX_TOKEN_COMMA && k != LEX_TOKEN_LEFT_SQUARE)
 		return false;
 	c->undecl_ty = 1;
 	declaration(c, items, false);
@@ -347,12 +347,12 @@ static __attribute__((cold, noinline)) bool undeclared_type_decl(cc *c, vec *ite
    (unless e was invalid), then the rest of the part skipped up to a ';' or the ')' */
 static void for_semi(cc *c, uint32_t e)
 {
-	if (likely(accept(c, T_SEMI)))
+	if (likely(accept(c, LEX_TOKEN_SEMICOLON)))
 		return;
 	if (!e || !ISERR(e))
 		expect_semi(c, "in 'for' statement specifier");
 	skip_close(c, -1);
-	accept(c, T_SEMI);
+	accept(c, LEX_TOKEN_SEMICOLON);
 }
 
 /* one declaration or statement of a block (at loc), appended to items */
@@ -367,7 +367,7 @@ static void block_item(cc *c, uint32_t loc, vec *items, bool se, uint32_t *sedon
 			set_only(c, N(ls)->a), unused_value(c, N(ls)->a, false);
 		*sedone = items->n;
 	}
-	if (is(c, T_EOF)) {
+	if (is(c, LEX_TOKEN_EOF)) {
 		report(c, "error", pp_main_eof(c->p), NULL, 0, NULL, 0, "expected '}'");
 		note(c, loc, "to match this '{'");
 		longjmp(c->bail, 1);
@@ -378,7 +378,7 @@ static void block_item(cc *c, uint32_t loc, vec *items, bool se, uint32_t *sedon
 		attrs a = { 0 };
 
 		attribute_list(c, &a);
-		if (accept(c, T_SEMI))
+		if (accept(c, LEX_TOKEN_SEMICOLON))
 			return;	/* __attribute__((fallthrough)); */
 		if (is_decl_start(c, tok(c))) {
 			c->pend = a;
@@ -387,15 +387,15 @@ static void block_item(cc *c, uint32_t loc, vec *items, bool se, uint32_t *sedon
 			return;
 		}
 	}
-	if (is_decl_start(c, tok(c)) && !(is(c, T_IDENT) && peek(c, 1)->kind == T_COLON)) {
+	if (is_decl_start(c, tok(c)) && !(is(c, LEX_TOKEN_IDENTIFIER) && peek(c, 1)->kind == LEX_TOKEN_COLON)) {
 		declaration(c, items, false);
 		return;
 	}
-	if (is(c, T_IDENT) && !kwof(tok(c)) && stmt_kw_typo(c, true) && is_decl_start(c, tok(c))) {
+	if (is(c, LEX_TOKEN_IDENTIFIER) && !kwof(tok(c)) && stmt_kw_typo(c, true) && is_decl_start(c, tok(c))) {
 		declaration(c, items, false);
 		return;
 	}
-	if (is(c, T_IDENT) && !kwof(tok(c)) && (peek(c, 1)->kind == T_IDENT || peek(c, 1)->kind == T_STAR) &&
+	if (is(c, LEX_TOKEN_IDENTIFIER) && !kwof(tok(c)) && (peek(c, 1)->kind == LEX_TOKEN_IDENTIFIER || peek(c, 1)->kind == LEX_TOKEN_STAR) &&
 	    undeclared_type_decl(c, items))
 		return;
 	c->se_direct = se;
@@ -418,7 +418,7 @@ VPRIV uint32_t compound_stmt(cc *c, qty *last)
 
 	vinit(&items);
 	vinit(&locals);
-	expect(c, T_LBRACE, "'{'");
+	expect(c, LEX_TOKEN_LEFT_BRACE, "'{'");
 	scope_open(c);
 	/* __label__ a, b; */
 	while (iskw(c, KW___label__)) {
@@ -426,7 +426,7 @@ VPRIV uint32_t compound_stmt(cc *c, qty *last)
 		do {
 			uint32_t l;
 
-			if (!is(c, T_IDENT))
+			if (!is(c, LEX_TOKEN_IDENTIFIER))
 				fatal(c, tok(c)->loc, "expected identifier");
 			l = c->nlabel++;
 			memset(&c->labels[l], 0, sizeof(label));
@@ -437,7 +437,7 @@ VPRIV uint32_t compound_stmt(cc *c, qty *last)
 			*dslot(c, c->ldir, tok(c)->id) = l;
 			vpush(c, &locals, l);
 			next(c);
-		} while (accept(c, T_COMMA));
+		} while (accept(c, LEX_TOKEN_COMMA));
 		expect_semi(c, "at end of declaration");
 	}
 	{
@@ -445,7 +445,7 @@ VPRIV uint32_t compound_stmt(cc *c, qty *last)
 
 		if (REC_ARM(c, &r))
 			rec_restore(c, &r, REC_BLOCK);	/* after a parse error: on with the next statement */
-		while (!is(c, T_RBRACE))
+		while (!is(c, LEX_TOKEN_RIGHT_BRACE))
 			block_item(c, loc, &items, last != NULL, &sedone);	/* (sedone: in memory across the longjmp) */
 		REC_POP(c, &r);
 	}
@@ -486,7 +486,7 @@ static uint32_t sub_statement(cc *c)
 /* what follows a label, case or default: nothing before '}', a declaration (C23) or a statement */
 static uint32_t label_sub(cc *c, uint32_t loc)
 {
-	if (is(c, T_RBRACE))	/* label at end of compound statement (C23) */
+	if (is(c, LEX_TOKEN_RIGHT_BRACE))	/* label at end of compound statement (C23) */
 		return mkstmt(c, N_EXPR, loc, 0, 0, 0);
 	uint32_t dl = tok(c)->loc;
 	bool pend = false;
@@ -495,13 +495,13 @@ static uint32_t label_sub(cc *c, uint32_t loc)
 		attrs a = { 0 };
 
 		attribute_list(c, &a);
-		if (accept(c, T_SEMI))
+		if (accept(c, LEX_TOKEN_SEMICOLON))
 			return mkstmt(c, N_EXPR, loc, 0, 0, 0);	/* fallthrough; */
 		if (!is_decl_start(c, tok(c)))
 			return statement(c);
 		c->pend = a, c->has_pend = true, pend = true;	/* __attribute__((unused)) int x; */
 	}
-	if (pend || (is_decl_start(c, tok(c)) && !(is(c, T_IDENT) && peek(c, 1)->kind == T_COLON))) {
+	if (pend || (is_decl_start(c, tok(c)) && !(is(c, LEX_TOKEN_IDENTIFIER) && peek(c, 1)->kind == LEX_TOKEN_COLON))) {
 		vec items;
 
 		if (kwmap != kwmap_c23)
@@ -523,7 +523,7 @@ static uint32_t label_sub(cc *c, uint32_t loc)
 static bool at_label(cc *c)
 {
 	return iskw(c, KW_case) || iskw(c, KW_default) ||
-	       (is(c, T_IDENT) && !kwof(tok(c)) && peek(c, 1)->kind == T_COLON);
+	       (is(c, LEX_TOKEN_IDENTIFIER) && !kwof(tok(c)) && peek(c, 1)->kind == LEX_TOKEN_COLON);
 }
 
 /* Wide switches currently retain case bounds in signed i128 storage.  The
@@ -543,8 +543,8 @@ static uint32_t label_head(cc *c)
 	int kw = kwof(t);
 
 	switch (t->kind) {
-	case T_IDENT:
-		if (!kw && peek(c, 1)->kind == T_COLON) {
+	case LEX_TOKEN_IDENTIFIER:
+		if (!kw && peek(c, 1)->kind == LEX_TOKEN_COLON) {
 			uint32_t l = label_ref(c, t->id, loc), n, s;
 			attrs la = { 0 };
 
@@ -573,7 +573,7 @@ static uint32_t label_head(cc *c)
 			cc_error(c, loc, "'case' statement not in switch statement");
 		case_constant(c, &lo);
 		hi = lo;
-		if (is(c, T_ELLIPSIS)) {
+		if (is(c, LEX_TOKEN_ELLIPSIS)) {
 			static const char *const g[] = { "pedantic", NULL };
 
 			if (!c->o->c2y)
@@ -581,7 +581,7 @@ static uint32_t label_head(cc *c)
 			next(c);
 			case_constant(c, &hi);
 		}
-		expect(c, T_COLON, "':'");
+		expect(c, LEX_TOKEN_COLON, "':'");
 		if (c->switch_ty)
 			lo = trunc_to(c, lo, c->switch_ty), hi = trunc_to(c, hi, c->switch_ty);
 		if (c->in_switch) {
@@ -615,7 +615,7 @@ static uint32_t label_head(cc *c)
 		uint32_t s;
 
 		next(c);
-		expect(c, T_COLON, "':'");
+		expect(c, LEX_TOKEN_COLON, "':'");
 		if (!c->in_switch)
 			cc_error(c, loc, "'default' statement not in switch statement");
 		c->sw_default = true;
@@ -675,9 +675,9 @@ VPRIV uint32_t statement(cc *c)
 	if (at_label(c))
 		return labeled_statement(c, sed);
 	switch (t->kind) {
-	case T_LBRACE:
+	case LEX_TOKEN_LEFT_BRACE:
 		return compound_stmt(c, NULL);
-	case T_LSQUARE:
+	case LEX_TOKEN_LEFT_SQUARE:
 		if (at_std_attr(c)) {	/* [[fallthrough]]; and friends: no effect on the statement */
 			attrs a = { 0 };
 
@@ -685,7 +685,7 @@ VPRIV uint32_t statement(cc *c)
 			return statement(c);
 		}
 		break;
-	case T_SEMI:
+	case LEX_TOKEN_SEMICOLON:
 		next(c);
 		return mkstmt(c, N_EXPR, loc, 0, 0, 0);
 	default:
@@ -760,7 +760,7 @@ VPRIV uint32_t statement(cc *c)
 
 		next(c);
 		open = tok(c)->loc;
-		if (unlikely(!is(c, T_LPAREN)))
+		if (unlikely(!is(c, LEX_TOKEN_LEFT_PAREN)))
 			lparen_fail(c, "for");
 		next(c);
 		if (c->o->std != 89) scope_open(c);
@@ -779,20 +779,20 @@ VPRIV uint32_t statement(cc *c)
 		} else {
 			uint32_t e = 0;
 
-			if (!is(c, T_SEMI))
+			if (!is(c, LEX_TOKEN_SEMICOLON))
 				init = mkstmt(c, N_EXPR, loc, e = expr(c), 0, 0);
 			for_semi(c, e);
 		}
-		if (!is(c, T_SEMI)) {
+		if (!is(c, LEX_TOKEN_SEMICOLON)) {
 			cnd = decay(c, expr(c));
 			assign_cond_warn(c, cnd);
 			cnd = scalar_cond(c, cnd, "for");
 		}
 		for_semi(c, cnd);
 		c->for_head = false;
-		if (!is(c, T_RPAREN))
+		if (!is(c, LEX_TOKEN_RIGHT_PAREN))
 			step = expr(c);
-		expect_close(c, T_RPAREN, open, step);
+		expect_close(c, LEX_TOKEN_RIGHT_PAREN, open, step);
 	for_body:
 		REC_POP(c, &r);
 		c->in_loop++;
@@ -817,7 +817,7 @@ VPRIV uint32_t statement(cc *c)
 		next(c);
 		if (c->o->std != 89) scope_open(c);
 		open = tok(c)->loc;
-		if (unlikely(!is(c, T_LPAREN)))
+		if (unlikely(!is(c, LEX_TOKEN_LEFT_PAREN)))
 			lparen_fail(c, "switch");
 		next(c);
 		cnd = expr(c);
@@ -825,7 +825,7 @@ VPRIV uint32_t statement(cc *c)
 		while (N(cnd)->op == N_CAST && N(cnd)->a && !c->span[cnd].e && KIND(c, N(N(cnd)->a)->ty) == TY_ENUM)
 			cnd = N(cnd)->a, et = N(cnd)->ty;	/* -Wswitch looks at the enum before promotion */
 		cnd = rvalue(c, cnd);
-		expect_close(c, T_RPAREN, open, cnd);
+		expect_close(c, LEX_TOKEN_RIGHT_PAREN, open, cnd);
 		if (!is_integer(c, N(cnd)->ty)) {
 			pp_span r = rng(c, cnd);
 
@@ -886,7 +886,7 @@ VPRIV uint32_t statement(cc *c)
 		qty rt = c->fn ? T(c, c->syms[c->fn].ty)->base : prim(TY_INT);
 
 		next(c);
-		if (!is(c, T_SEMI)) {
+		if (!is(c, LEX_TOKEN_SEMICOLON)) {
 			e = decay(c, expr(c));
 			if (!is_void(c, rt) && !is_void(c, N(e)->ty))
 				e = is_record(c, rt) && !is_complex(c, rt) ? e : convert_as(c, e, rt, CX_RETURN, loc);
@@ -910,7 +910,7 @@ VPRIV uint32_t statement(cc *c)
 			cc_errorx(c, "return-mismatch", (const char *const[]){"return-type", NULL}, loc, NULL, 0, "non-void function '%.*s' should return a value",
 			       IDF(c->syms[c->fn].name));
 		}
-		if (unlikely(e && ISERR(e)) && !is(c, T_SEMI))
+		if (unlikely(e && ISERR(e)) && !is(c, LEX_TOKEN_SEMICOLON))
 			skip_semi(c);	/* clang: after an invalid expression, silently */
 		else
 			expect_semi(c, "after return statement");
@@ -923,7 +923,7 @@ VPRIV uint32_t statement(cc *c)
 	}
 	case KW_goto:
 		next(c);
-		if (is(c, T_STAR)) {
+		if (is(c, LEX_TOKEN_STAR)) {
 			uint32_t e;
 
 			EXT_WARN_MS(c, "*", "gnu-label-as-value", w_gnu, tok(c)->loc, "use of GNU indirect-goto extension");
@@ -933,7 +933,7 @@ VPRIV uint32_t statement(cc *c)
 			expect_semi(c, "after goto statement");
 			return mkstmt(c, N_GOTO_IND, loc, e, 0, 0);
 		}
-		if (!is(c, T_IDENT))
+		if (!is(c, LEX_TOKEN_IDENTIFIER))
 			fatal(c, tok(c)->loc, "expected identifier");
 		{
 			uint32_t l = label_ref(c, tok(c)->id, tok(c)->loc);
@@ -950,7 +950,7 @@ VPRIV uint32_t statement(cc *c)
 		attrs a = { 0 };
 
 		attribute_list(c, &a);
-		if (accept(c, T_SEMI))
+		if (accept(c, LEX_TOKEN_SEMICOLON))
 			return mkstmt(c, N_EXPR, loc, 0, 0, 0);	/* fallthrough etc. */
 		return statement(c);
 	}
@@ -959,13 +959,13 @@ VPRIV uint32_t statement(cc *c)
 	}
 	if (stmt_kw_typo(c, false))
 		return statement(c);
-	if (is(c, T_IDENT) && !kwof(tok(c)) && peek(c, 1)->kind == T_IDENT && !kwof(peek(c, 1)) &&
+	if (is(c, LEX_TOKEN_IDENTIFIER) && !kwof(tok(c)) && peek(c, 1)->kind == LEX_TOKEN_IDENTIFIER && !kwof(peek(c, 1)) &&
 	    !lookup(c, tok(c)->id)) {
 		/* "foo_t x;" with foo_t unknown: clang reports the identifier and skips the statement */
 		undeclared(c, "use of undeclared identifier", tok(c)->id, tok(c)->loc, false, 0, NULL);
-		while (!is(c, T_SEMI) && !is(c, T_RBRACE) && !is(c, T_EOF))
+		while (!is(c, LEX_TOKEN_SEMICOLON) && !is(c, LEX_TOKEN_RIGHT_BRACE) && !is(c, LEX_TOKEN_EOF))
 			next(c);
-		accept(c, T_SEMI);
+		accept(c, LEX_TOKEN_SEMICOLON);
 		return mkstmt(c, N_EXPR, loc, 0, 0, 0);
 	}
 	{
@@ -983,7 +983,7 @@ VPRIV uint32_t statement(cc *c)
 					      !(N(e)->flags & (NF_PAREN | NF_MACRO))))
 				unused_value(c, e, false);
 		}
-		if (unlikely(!is(c, T_SEMI)) && ISERR(e))
+		if (unlikely(!is(c, LEX_TOKEN_SEMICOLON)) && ISERR(e))
 			skip_semi(c);	/* clang: after an invalid expression, silently to the ';' */
 		else
 			expect_semi(c, "after expression");

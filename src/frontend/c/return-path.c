@@ -105,7 +105,7 @@ VPRIV int cond_value(cc *c, uint32_t n)
 		return a == !d && b == !d ? !d : -1;
 	}
 	case N_UNARY: {
-		int a = x->aux == T_EXCLAIM ? cond_value(c, x->a) : -1;
+		int a = x->aux == LEX_TOKEN_EXCLAMATION ? cond_value(c, x->a) : -1;
 
 		return a < 0 ? -1 : !a;
 	}

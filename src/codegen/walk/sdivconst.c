@@ -22,29 +22,29 @@ VPRIV val wk_sdivconst(ecx *e, qty ty, val a, const em_sdivconst_recipe *r)
 	if (r->bits == 64)
 		q = LO(smulhi)(e, a, vconst(r->magic));
 	else {
-		q = LO(bin)(e, T_STAR, 8, false, a, vconst(r->magic));
-		q = LO(bin)(e, T_GREATERGREATER, 8, true, q, vconst(32));
+		q = LO(bin)(e, LEX_TOKEN_STAR, 8, false, a, vconst(r->magic));
+		q = LO(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, true, q, vconst(32));
 	}
 	if (r->add) {
 		val n = { .k=V_REG, .r=(uint8_t)saved };
 
-		q = LO(bin)(e, T_PLUS, size, false, q, n);
+		q = LO(bin)(e, LEX_TOKEN_PLUS, size, false, q, n);
 		if (r->remainder)
 			LO(tkeep)(e, saved);
 	}
 	if (r->shift)
-		q = LO(bin)(e, T_GREATERGREATER, size, true, q, vconst(r->shift));
+		q = LO(bin)(e, LEX_TOKEN_GREATER_GREATER, size, true, q, vconst(r->shift));
 	{
 		int sign = LO(treg)(e);
 		val s = { .k=V_REG, .r=(uint8_t)sign };
 
 		LO(mov)(e, sign, q.r);
-		s = LO(bin)(e, T_GREATERGREATER, size, false, s, vconst(r->bits - 1));
-		q = LO(bin)(e, T_PLUS, size, false, q, s);
+		s = LO(bin)(e, LEX_TOKEN_GREATER_GREATER, size, false, s, vconst(r->bits - 1));
+		q = LO(bin)(e, LEX_TOKEN_PLUS, size, false, q, s);
 	}
 	if (r->remainder) {
-		q = LO(bin)(e, T_STAR, size, false, q, vconst(r->divisor));
-		return LO(bin)(e, T_MINUS, size, false, (val){ .k=V_REG, .r=(uint8_t)saved }, q);
+		q = LO(bin)(e, LEX_TOKEN_STAR, size, false, q, vconst(r->divisor));
+		return LO(bin)(e, LEX_TOKEN_MINUS, size, false, (val){ .k=V_REG, .r=(uint8_t)saved }, q);
 	}
-	return r->negative ? LO(un)(e, T_MINUS, size, q) : q;
+	return r->negative ? LO(un)(e, LEX_TOKEN_MINUS, size, q) : q;
 }
