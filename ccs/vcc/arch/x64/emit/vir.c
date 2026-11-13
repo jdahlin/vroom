@@ -22,6 +22,7 @@ typedef struct vx {
 	unsigned dup;bool fallok;
 	uint32_t memv, memskip, scaledv; int membase, memindex, scaleindex; uint8_t memsh, scalesh; bool indexed; int64_t memoff;
 	uint32_t bev; int bebase,beindex; uint8_t besh,bewidth; bool beindexed; int64_t beoff;
+	uint32_t cmpmemv; uint8_t cmpmemsize; bool cmpmemside;
 	uint32_t testv; uint8_t testsize; int64_t testimm;
 } vx;
 
@@ -482,6 +483,30 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 			return;
 		}
 	}
+	/* Fold an adjacent private scalar load into its comparison. Narrow
+	 * equality with a representable immediate needs no promotion bits. */
+	if(i->op==VO_LOAD && (i->ty==VT_I32 || i->ty==VT_I64) && !(i->fl&VIF_VOL) &&
+	   L->uses[v]==1 && L->o->slot[v]==VIR_NOBLK && v+1<L->f->blk[b].first+L->f->blk[b].n &&
+	   vx_foldedits(L,b,v+1,XNOREG)) {
+		const vir_ins *next=&L->f->ins[v+1];unsigned width=1<<VIF_W(i->fl);int64_t k=0;
+		bool side=next->b==v,ok=false;
+		if(next->op==VO_ICMP && (next->a==v || side)) {
+			uint32_t other=side?next->a:next->b;
+			bool imm=vx_imm(L->f,other,&k);
+			if(width==vx_size(i->ty))ok=!imm || (!side && (width==4 || k==(int32_t)k));
+			else if(!side && imm && (next->fl&15)<2) {
+				int64_t lo=(i->fl&VIF_MS)?-(INT64_C(1)<<(width*8-1)):0;
+				int64_t hi=(INT64_C(1)<<(width*8-!!(i->fl&VIF_MS)))-1;
+				ok=k>=lo && k<=hi;
+			}
+		}
+		if(ok) {
+			L->cmpmemv=v+1;L->cmpmemsize=width;L->cmpmemside=side;
+			if(L->memv==i->a)L->memv=0;
+			else {L->membase=a;L->memoff=0;L->indexed=false;L->memsh=0;}
+			return;
+		}
+	}
 	if(i->op==VO_LOAD) {
 		uint32_t end;unsigned width=vx_readword(L,b,v,&end);
 		if(width) {
@@ -669,6 +694,13 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 		x64_op3(e, X_MOV, sz, d, L->gtmp, XNOREG); return;
 	case VO_ICMP: {
 		static const uint8_t cc[] = { CC_E, CC_NE, CC_L, CC_LE, CC_G, CC_GE, CC_B, CC_BE, CC_A, CC_AE };
+		if(L->cmpmemv==v) {
+			int other=L->cmpmemside?a:c;
+			rec *r=x64_op3(e,X_CMPM,L->cmpmemsize,XNOREG,L->membase,other);
+			r->r[3]=L->indexed?L->memindex:XNOREG;r->sh=L->memsh;r->off=L->memoff;r->cond=L->cmpmemside;
+			if(!L->cmpmemside && p[1]==VR_NONE) {int64_t k;vx_imm(L->f,i->b,&k);r->r[2]=XNOREG;r->ref=(uint32_t)k;}
+			L->cmpmemv=0;
+		} else
 		if (p[1]==VR_NONE) {int64_t k;vx_imm(L->f,i->b,&k);vx_cmpconst(L,a,vx_size(L->f->ins[i->a].ty),(uint64_t)k);}
 		else x64_op3(e, X_CMP, vx_size(L->f->ins[i->a].ty), XNOREG, a, c);
 		L->cmp=v;L->cmpblock=b;L->setrec=e->x64->nin;
@@ -863,7 +895,7 @@ static void vx_block(vx *L, uint32_t b)
 	vir_fn *f = L->f;
 	const vir_alloc_out *o = L->o;
 	L->cmp = UINT32_MAX;
-	L->memv = L->memskip = L->scaledv = L->bev = L->testv = 0;
+	L->memv = L->memskip = L->scaledv = L->bev = L->testv = L->cmpmemv = 0;
 	uint32_t at = o->boff[b], ei = o->boff[f->nblk + 1 + b], end = o->boff[f->nblk + 2 + b];
 	for (uint32_t i = f->blk[b].first; i < f->blk[b].first + f->blk[b].n; i++) {
 		uint32_t n = 0;

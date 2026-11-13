@@ -240,6 +240,44 @@ ekvivalenstestning återstår. Genererade program använder inga externa anrop.
 ### V4 x86-64 mot clang -O2 (2026-11-12), mål högst 5 % långsammare
 
 
+2026-11-13, jämförelse med minnesoperand: x86 kan nu fälla en intilliggande,
+vanlig engångsladdning direkt till `cmp`. Samma bredd används som laddningen;
+smala laddningar tillåts bara för ==/!= mot en representerbar konstant.
+Volatile, delade resultat och mellanliggande allokator-edits lämnas kvar.
+`X_CMPM` beskriver bas, index, offset, jämförelseriktning och register/imm.
+
+Speedtest1 storlek 100, fem alternerade prov per serie:
+
+| Serie | Före CPU ms | Minnes-cmp CPU ms | Minnes-cmp/clang |
+|---|---:|---:|---:|
+| Första | 1279,08 | 1270,01 | 1,145× |
+| Upprepning | 1288,04 | 1293,41 | 1,154× |
+| Tredje | 1277,17 | 1273,47 | 1,141× |
+
+Instruktioner/clang 1,358× → 1,344×; CPU-vinsten är liten och varierar.
+Målet 1,05× är fortfarande öppet. Underlag `work/vir-x86-perf/cmpmem` och
+`work/vir-x86-perf/lastmem/repeat100`. Direkta spilloperander, begränsade
+last-use-spilloperander och vidareförda LEA-adresser provades men behålls
+inte: de gav inte en ytterligare säker CPU-vinst jämfört med minnes-cmp.
+Även ADD i stället för LEA när resultatet redan delar register med en
+operand avvisades: 1275,98 → 1286,10 ms, samma instruktionsantal. Patchar
+och körbara varianter sparade utanför checkouten.
+
+Validerat: egna x86 308/308, GCC 1615/1615, TCC 105/105, samma fem kända
+inlinefel. Fokuserat körprov testar båda jämförelseriktningar, indexerad
+adress, 8/16/32/64 bit, negativa konstanter, promotionsgränser, volatile och
+fleranvända laddningar, både assembly och egen objektväg. ASan/UBSan och
+filvist bygge gröna; TSVC 151/151, 82 vektorloopar och 158 sänkta funktioner.
+
+En ny snabb dynamisk instruktionsräkning på huvudtestet, storlek 30, lägger
+en NOP före varje instruktion i en klass och tar differensen mot basen.
+Clang 4,228 G, vcc 5,762 G instruktioner. Registerkopior 0,272 → 0,620 G;
+extensioner 0,421 → 0,631 G. LEA+heltals-ALU tillsammans 0,784 → 1,038 G.
+Klasser överlappar (t.ex. en signerad stackladdning är också en extension).
+Push/pop måste räknas med vid stackjämförelsen: clang har 0,122/0,109 G,
+vcc 0,001/0,001 G. Underlag och körskript i
+`work/vir-x86-perf/dynamic-mix/{results.txt,extra-results.txt,run.py,extra.py}`.
+
 2026-11-13, små SQLite-funktioner: byte-sammansättningens strukturella bevis
 har flyttats från x86 till `vir/facts.c` (`vir_read_be`). Det normaliserar
 konstanta pekaroffsetar och känner även igen två 32-bitshalvor som en 64-bit

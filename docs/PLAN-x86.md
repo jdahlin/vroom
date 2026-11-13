@@ -1053,3 +1053,13 @@ instruktioner, sqlite3VdbeSerialGet 138 → 122 och walDecodeFrame 95 → 71.
 Funktionstider är layoutkänsliga; två femprovserier av hela speedtest1 är
 neutrala, cirka 1,148× clang. Färre instruktioner räknas inte som nått
 1,05×-mål. Detaljer och avvisade flagg-/tabellförsök i PLAN-vir.md.
+
+
+### 2026-11-13: jämförelser direkt i minne
+
+VIR:s vanliga engångsladdningar kan bli cmp med exakt minnesbredd, även
+indexerat. Smala promotionsfall kräver representerbar ==/!=-konstant;
+volatile och fleranvända laddningar kombineras inte. Instruktioner/clang i
+SQLite main 1,358× → 1,344×; CPU-tiden varierar mellan serier (1,141–1,154×).
+Målet 1,05× är öppet. Egna x86 308/308, samma fem kända inlinefel, ASan/UBSan,
+filvist bygge och TSVC 151/151 med 82 vektorloopar gröna. Se V4 i PLAN-vir.md.

@@ -87,6 +87,7 @@ enum {
 	X_LDX, X_STX,	/* memory at r1 + (r3 << sh) + off; load r0 / store r2 */
 	X_CMOV,		/* r0 = flags[cond] ? r2 : r1 */
 	X_TESTM,		/* flags: [r1 + (r3 << sh) + off] & (int32_t)ref; r3 optional */
+	X_CMPM,		/* compare memory r1+(r3<<sh)+off with r2 (XNOREG: immediate ref); cond reverses operands */
 	X_NOPS
 };
 
