@@ -156,30 +156,27 @@ static int vl_probe(void)
 
 #define PROBE(bit) do { if (vl_probe() >> (bit) & 1) word(L->e, 0xd503201f); } while (0)
 
-/* the edits before instruction pos */
-VPRIV void vl_edits(vl *L, uint32_t *ei, uint32_t end, uint32_t pos)
+/* one allocator edit, before the instruction it is positioned at */
+VPRIV void vl_edit(vl *L, const vir_edit *x)
 {
 	const vir_alloc_out *o = L->o;
 
-	for (; *ei < end && o->edit[*ei].pos == pos; ++*ei) {
-		const vir_edit *x = &o->edit[*ei];
-
-		switch (x->kind) {
-		case VE_RELOAD:
-			vl_reload(L, x->dst, o->slot[x->v], R_X16); PROBE(0);
-			break;
-		case VE_REMAT:
-			vl_remat(L, x->dst, x->v, R_X16); PROBE(1);
-			break;
-		case VE_MOVE:
-			vl_rmov(L, x->dst, (uint8_t)x->src); PROBE(2);
-			break;
-		case VE_STORE:
-			vl_spill(L, x->src, o->slot[x->v], R_X16); PROBE(3);
-			break;
-		default:
-			vl_fail(L, VIRFAIL(swapped_operands));
-		}
+	L->ei = (uint32_t)(x - o->edit) + 1;	/* (the next edit: what the instruction's folds look past) */
+	switch (x->kind) {
+	case VE_RELOAD:
+		vl_reload(L, x->dst, o->slot[x->v], R_X16); PROBE(0);
+		break;
+	case VE_REMAT:
+		vl_remat(L, x->dst, x->v, R_X16); PROBE(1);
+		break;
+	case VE_MOVE:
+		vl_rmov(L, x->dst, (uint8_t)x->src); PROBE(2);
+		break;
+	case VE_STORE:
+		vl_spill(L, x->src, o->slot[x->v], R_X16); PROBE(3);
+		break;
+	default:
+		vl_fail(L, VIRFAIL(swapped_operands));
 	}
 }
 

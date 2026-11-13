@@ -13,6 +13,8 @@
 #ifndef VCC_CODEGEN_VIR_PASS_TABLE_H
 #define VCC_CODEGEN_VIR_PASS_TABLE_H
 
+#include "vir/pass.h"
+
 /* facts about the pre-IR */
 enum {
 	PIR_ORDER = 1,	/* V->order: the reachable blocks, each once (vw_rpo) */
@@ -30,33 +32,36 @@ enum {
 	PASS_FIXED_POINT = 16,		/* run again while it changes something (vw_trivial) */
 	PASS_CHANGE_UNKNOWN = 32,	/* returns nothing: its "changed" is not counted */
 	PASS_ON_VIR = 64,		/* works on VIR (V->f), not the pre-IR: checked by vir_verify */
+	PASS_OFF_BY_DEFAULT = 128,	/* skipped unless VCC_VIR_PASSES says +NAME or only=...NAME */
 };
 
-typedef struct vir_pass {
+typedef struct virbuild_pass {
 	const char *name;	/* stable; VCC_VIR_PASSES and the statistics use it */
 	bool (*run)(ecx *e);	/* returns whether it changed anything; a failure is vw_fail */
 	uint8_t needs;		/* PIR_*: facts it reads */
 	uint8_t makes;		/* PIR_*: facts it computes */
 	uint8_t keeps;		/* PIR_*: the facts still valid after it; the others are cleared */
 	uint8_t flags;		/* PASS_* */
-} vir_pass;
+	const vir_pass_info *vir;	/* a VIR pass's row (needs PASS_ON_VIR): its registry entry (vir/pass.h), run by
+				   virbuild_pass_vir_run; run is NULL then, and the names agree */
+} virbuild_pass;
 
 /* VCC_VIR_PASSES, read once per process */
-typedef struct vir_pass_switch {
-	uint32_t skip;		/* bit per row: left out */
-	uint32_t verify;	/* bit per row: the check runs after it */
+typedef struct virbuild_pass_switch {
+	uint64_t skip;		/* bit per row: left out */
+	uint64_t verify;	/* bit per row: the check runs after it */
 	bool time;		/* per pass: runs, changed, instructions (with VCC_VIR_STATS) */
 	bool active;		/* any of the above: vw_emit takes the instrumented path */
-} vir_pass_switch;
+} virbuild_pass_switch;
 
 /* pass-table.c */
-VPRIV const vir_pass *vir_pass_list(uint32_t *n);
-VPRIV const vir_pass_switch *vir_pass_switch_get(void);
-VPRIV bool vir_pass_step(ecx *e, const vir_pass *p);
-VPRIV bool vir_pass_step_instrumented(ecx *e, uint32_t i, uint32_t *valid);
-VPRIV void vir_pass_note(emitter *E, uint32_t row, uint64_t instructions);
-VPRIV void vir_pass_stats_print(emitter *E);
-/* the rows of vir_pass_note that are not passes: the whole build (walk, passes, to-vir,
+VPRIV const virbuild_pass *virbuild_pass_list(uint32_t *n);
+VPRIV const virbuild_pass_switch *virbuild_pass_switch_get(void);
+VPRIV bool virbuild_pass_step(ecx *e, const virbuild_pass *p);
+VPRIV bool virbuild_pass_step_instrumented(ecx *e, uint32_t i, uint32_t *valid);
+VPRIV void virbuild_pass_note(emitter *E, uint32_t row, uint64_t instructions);
+VPRIV void virbuild_pass_stats_print(emitter *E);
+/* the rows of virbuild_pass_note that are not passes: the whole build (walk, passes, to-vir,
    canon) and the lowering, so that a pass's share of either can be computed; the
    instructions spent timing the passes inside are taken off */
 #define VIR_PASS_ROW_BUILD(n) (n)

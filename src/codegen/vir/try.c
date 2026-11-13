@@ -95,7 +95,7 @@ VPRIV void vw_stats_print(emitter *E)
 		fprintf(stderr, "vcc vir-failure: reason=%s count=%u example=%.*s detail=%s\n", vir_failure_table[k].name,
 			(unsigned)E->vfailed[k].count, (int)id->len, id->s, E->vfailed[k].detail);
 	}
-	vir_pass_stats_print(E);
+	virbuild_pass_stats_print(E);
 }
 
 static int vw_mode(void)
@@ -182,8 +182,8 @@ VPRIV bool vw_try(ecx *e, uint32_t s)
 	e->vfail = NULL;
 	if (e->E->vstats)
 		e->E->vattempted++;
-	timed = e->E->vstats && vir_pass_switch_get()->time;
-	vir_pass_list(&npass);
+	timed = e->E->vstats && virbuild_pass_switch_get()->time;
+	virbuild_pass_list(&npass);
 	if (timed)
 		t0 = vperformance_now();
 	{
@@ -193,7 +193,7 @@ VPRIV bool vw_try(ecx *e, uint32_t s)
 		e->novtag = novtag;
 	}
 	if (timed)
-		vir_pass_note(e->E, VIR_PASS_ROW_BUILD(npass), vperformance_subtract(vperformance_now(), t0).ins);
+		virbuild_pass_note(e->E, VIR_PASS_ROW_BUILD(npass), vperformance_subtract(vperformance_now(), t0).ins);
 	e->vtry = false;
 	if (m & 8)
 		vw_name(e, s, nm, sizeof nm);
@@ -239,7 +239,7 @@ VPRIV bool vw_try(ecx *e, uint32_t s)
 				t0 = vperformance_now();
 			ok = X86(e->c) ? vw_x64(e, s, &why) : vw_a64(e, s, &why);
 			if (timed)
-				vir_pass_note(e->E, VIR_PASS_ROW_LOWER(npass), vperformance_subtract(vperformance_now(), t0).ins);
+				virbuild_pass_note(e->E, VIR_PASS_ROW_LOWER(npass), vperformance_subtract(vperformance_now(), t0).ins);
 			if (ok) {
 				if (e->E->vstats)
 					e->E->vlowered++;

@@ -94,23 +94,23 @@ VPRIV bool vw_to_vir(ecx *e)
    step (timing, leaving out, checking); false: the function cannot go through VIR (V->why) */
 VPRIV bool vw_emit(ecx *e)
 {
-	const vir_pass_switch *w = vir_pass_switch_get();
+	const virbuild_pass_switch *w = virbuild_pass_switch_get();
 	uint32_t n, valid = 0;
-	const vir_pass *t = vir_pass_list(&n);
+	const virbuild_pass *t = virbuild_pass_list(&n);
 	bool last = false;	/* what the last row without PASS_IF_PREVIOUS_CHANGED returned */
 
 	for (uint32_t i = 0; i < n; i++) {
-		const vir_pass *p = &t[i];
+		const virbuild_pass *p = &t[i];
 		bool changed;
 
 		if ((p->flags & PASS_IF_PREVIOUS_CHANGED) && !last)
 			continue;
 		if (!w->active)
-			changed = vir_pass_step(e, p);
+			changed = virbuild_pass_step(e, p);
 		else if (w->skip >> i & 1)
 			changed = false;
 		else
-			changed = vir_pass_step_instrumented(e, i, &valid);
+			changed = virbuild_pass_step_instrumented(e, i, &valid);
 		if (!(p->flags & PASS_IF_PREVIOUS_CHANGED))
 			last = changed;
 	}
