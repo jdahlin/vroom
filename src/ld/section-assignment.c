@@ -1,13 +1,13 @@
 /* ld_input_sections_assign: matching input sections to the script's output sections, orphans, and the order within each. */
 
-static void ld_input_sections_assign(void)
+static void ld_input_sections_assign(struct ld_context *ctx)
 {
-	ld_name_cache_init();
+	ld_name_cache_init(ctx);
 	for (uint32_t i = 0; i < ctx->inputs.sections.n; i++) {
 		ld_input_section *is = &ctx->inputs.sections.v[i];
 		if (is->kind == LD_SECTION_KIND_NONE)
 			continue;
-		uint32_t d = ld_input_section_description_match(is->name);
+		uint32_t d = ld_input_section_description_match(ctx, is->name);
 		if (d == LD_NONE) {
 			VVEC_PUSH(ctx->layout.orphans, i, ld_region_alloc);
 			continue;
@@ -23,12 +23,12 @@ static void ld_input_sections_assign(void)
 	for (uint32_t i = 0; i < ctx->script.input_descriptions.n; i++) {
 		ld_input_section_description *d = &ctx->script.input_descriptions.v[i];
 		if (d->npats == 1 && d->pats[0].sort != LD_SORT_NONE)
-			qsort(d->secs.v, d->secs.n, sizeof(uint32_t),
-			      d->pats[0].sort == LD_SORT_NAME ? ld_section_name_stable_cmp : ld_section_alignment_stable_cmp);
+			ld_section_ids_sort(ctx, d->secs.v, d->secs.n,
+					    d->pats[0].sort == LD_SORT_NAME ? LD_SECTION_ORDER_NAME : LD_SECTION_ORDER_ALIGNMENT_DESCENDING);
 		else
 			for (uint32_t p = 0; p < d->npats; p++)
 				if (d->pats[p].sort != LD_SORT_NONE)
-					ld_error_report("linker script: SORT mixed with other patterns not supported");
+					ld_error_report(ctx, "linker script: SORT mixed with other patterns not supported");
 	}
 	for (uint32_t i = 0; i < ctx->layout.orphans.n; i++) {
 		ld_input_section *is = &ctx->inputs.sections.v[ctx->layout.orphans.v[i]];
@@ -37,7 +37,7 @@ static void ld_input_sections_assign(void)
 		else if (!ctx->options.orphan || is->kind == LD_SECTION_KIND_GOT)
 			;	/* lld: placed silently by default */
 		else
-			(ctx->options.orphan == 2 ? ld_error_report : ld_warning_report)("%s:(%s) is being placed in '%s'", is->obj != LD_NONE ? ctx->inputs.objects.v[is->obj]->path : "<internal>",
+			(ctx->options.orphan == 2 ? ld_error_report : ld_warning_report)(ctx, "%s:(%s) is being placed in '%s'", is->obj != LD_NONE ? ctx->inputs.objects.v[is->obj]->path : "<internal>",
 			     is->name, is->name);
 	}
 	/* lld sortSections: orphans stable-sorted by rank (non-allocated last), then
@@ -72,7 +72,7 @@ static void ld_input_sections_assign(void)
 			if (!strcmp(ctx->script.sections.v[k].name, is->name))
 				found = k;
 		if (found == LD_NONE) {
-			found = ld_output_section_find(is->name);
+			found = ld_output_section_find(ctx, is->name);
 			VVEC_PUSH(ctx->script.commands, ((ld_command){.kind = LD_COMMAND_OUTPUT_SECTION, .idx = found}), ld_region_alloc);
 			/* lld findOrphanPos, on the coarse ranks: the first output section of
 			 * the closest rank (sections without input sections do not count),
@@ -83,7 +83,7 @@ static void ld_input_sections_assign(void)
 				int best = -1;
 				for (uint32_t c = 0; c + 1 < ctx->script.commands.n; c++)
 					if (ctx->script.commands.v[c].kind == LD_COMMAND_OUTPUT_SECTION) {
-						int q = ld_output_section_rank(ctx->script.commands.v[c].idx);
+						int q = ld_output_section_rank(ctx, ctx->script.commands.v[c].idx);
 						if (q >= 0 && ld_rank_proximity(q, r) > best) {
 							best = ld_rank_proximity(q, r);
 							at = c;
@@ -94,7 +94,7 @@ static void ld_input_sections_assign(void)
 					for (; c + 1 < ctx->script.commands.n; c++) {
 						if (ctx->script.commands.v[c].kind != LD_COMMAND_OUTPUT_SECTION)
 							continue;
-						int q = ld_output_section_rank(ctx->script.commands.v[c].idx);
+						int q = ld_output_section_rank(ctx, ctx->script.commands.v[c].idx);
 						if (q < 0)
 							continue;
 						if (ld_rank_proximity(q, r) != best || r < q)
@@ -104,7 +104,7 @@ static void ld_input_sections_assign(void)
 					 * sections, then past symbol assignments other than '.' */
 					if (c + 1 < ctx->script.commands.n) {
 						uint32_t j = c;
-						while (j > 0 && !(ctx->script.commands.v[j - 1].kind == LD_COMMAND_OUTPUT_SECTION && ld_output_section_rank(ctx->script.commands.v[j - 1].idx) >= 0))
+						while (j > 0 && !(ctx->script.commands.v[j - 1].kind == LD_COMMAND_OUTPUT_SECTION && ld_output_section_rank(ctx, ctx->script.commands.v[j - 1].idx) >= 0))
 							j--;
 						if (j == 0)	/* none before: not ahead of the commands before the first section */
 							while (j < c && ctx->script.commands.v[j].kind != LD_COMMAND_OUTPUT_SECTION)
@@ -166,7 +166,7 @@ static void ld_input_sections_assign(void)
 				if (m == ctx->inputs.merge_sections.n) {
 					ld_merge_section mg = {.flags = is->flags, .entsize = is->entsize, .align = is->align,
 						    .osec = oi};
-					uint32_t syn = ld_input_section_create(ctx->inputs.sections.v[si].name, LD_SECTION_KIND_MERGE, ctx->inputs.sections.v[si].type,
+					uint32_t syn = ld_input_section_create(ctx, ctx->inputs.sections.v[si].name, LD_SECTION_KIND_MERGE, ctx->inputs.sections.v[si].type,
 								ctx->inputs.sections.v[si].flags, ctx->inputs.sections.v[si].align);
 					is = &ctx->inputs.sections.v[si];
 					mg.isec = syn;
@@ -189,7 +189,7 @@ static void ld_input_sections_assign(void)
 		for (uint32_t m = first_merge; m < ctx->inputs.merge_sections.n; m++)
 			ctx->inputs.sections.v[ctx->inputs.merge_sections.v[m].isec].align = ctx->inputs.merge_sections.v[m].align;
 	}
-	ld_eh_frame_merge();
+	ld_eh_frame_merge(ctx);
 	if (ctx->output.eh_frame_header_section != LD_NONE)	/* lld EhFrameHeader::getSize: 12 + 8 per FDE */
 		ctx->inputs.sections.v[ctx->output.eh_frame_header_section].size = 12 + 8 * (uint64_t)ctx->layout.eh_frame_fdes.n;
 	/* output section ownership */

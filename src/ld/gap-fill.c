@@ -8,7 +8,7 @@ static void ld_gap_fill(uint8_t *b, uint64_t n, const uint8_t f[4])
 		memcpy(b + i, f, 4);
 	memcpy(b + i, f, n - i);
 }
-static void ld_gap_fills_write(void)
+static void ld_gap_fills_write(struct ld_context *ctx)
 {
 	for (uint32_t c = 0; c < ctx->script.commands.n; c++) {
 		if (ctx->script.commands.v[c].kind != LD_COMMAND_OUTPUT_SECTION)
@@ -19,7 +19,7 @@ static void ld_gap_fills_write(void)
 		bool trap = !os->fill && ctx->inputs.x86 && (os->flags & SHF_EXECINSTR);
 		if (!os->live || (!os->fill && !trap) || os->type == SHT_NOBITS)
 			continue;
-		uint32_t v = trap ? 0xccccccccu : (uint32_t)ld_expression_value_resolve(ld_expression_eval(os->fill));
+		uint32_t v = trap ? 0xccccccccu : (uint32_t)ld_expression_value_resolve(ctx, ld_expression_eval(ctx, os->fill));
 		if (!v)
 			continue;
 		uint8_t f[4] = {v >> 24, v >> 16, v >> 8, v};	/* big-endian (lld readFill) */

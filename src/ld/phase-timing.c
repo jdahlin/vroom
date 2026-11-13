@@ -14,7 +14,7 @@ static double ld_clock_now(void)
 	clock_gettime(CLOCK_MONOTONIC, &ts);
 	return ts.tv_sec + ts.tv_nsec * 1e-9;
 }
-static void ld_phase_time_report(const char *name)
+static void ld_phase_time_report(struct ld_context *ctx, const char *name)
 {
 	if (!ctx->diagnostics.phase_timing)
 		return;

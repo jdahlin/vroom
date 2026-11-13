@@ -3,10 +3,10 @@
 
 static void ld_input_section_write(void *arg, size_t j)
 {
-	(void)arg;
+	struct ld_context *ctx = arg;
 	uint32_t si = ctx->output.write_jobs.v[j];
 	ld_input_section *is = &ctx->inputs.sections.v[si];
-	uint32_t oi = ld_input_section_output_section(si);
+	uint32_t oi = ld_input_section_output_section(ctx, si);
 	ld_output_section *os = &ctx->script.sections.v[oi];
 	if (os->type == SHT_NOBITS || is->type == SHT_NOBITS)
 		return;
@@ -15,12 +15,12 @@ static void ld_input_section_write(void *arg, size_t j)
 	case LD_SECTION_KIND_NORMAL:
 		memcpy(dst, is->data, is->size);
 		if (is->ehcie)	/* an FDE's CIE pointer: from the field to its CIE */
-			ld_u32_store(dst + 4, (uint32_t)(ld_input_section_address(si, 4) - ld_input_section_address(is->ehcie - 1, 0)));
+			ld_u32_store(dst + 4, (uint32_t)(ld_input_section_address(ctx, si, 4) - ld_input_section_address(ctx, is->ehcie - 1, 0)));
 		if (is->nrela && (is->flags & SHF_ALLOC || !ctx->options.relocatable)) {
 			if (ctx->inputs.x86)
-				x64_ld_input_section_relocate(si, dst);
+				x64_ld_input_section_relocate(ctx, si, dst);
 			else
-				a64_ld_input_section_relocate(si, dst);
+				a64_ld_input_section_relocate(ctx, si, dst);
 		}
 		break;
 	case LD_SECTION_KIND_MERGE: {
@@ -30,7 +30,7 @@ static void ld_input_section_write(void *arg, size_t j)
 				uint64_t u = mg->uniq[s].v[k];
 				ld_merge_input *m = &ctx->inputs.merge_inputs.v[u >> 32];
 				uint32_t p = (uint32_t)u;
-				memcpy(dst + m->outoff[p], ctx->inputs.sections.v[m->isec].data + m->inoff[p], ld_merge_piece_length(m, p));
+				memcpy(dst + m->outoff[p], ctx->inputs.sections.v[m->isec].data + m->inoff[p], ld_merge_piece_length(ctx, m, p));
 			}
 		break;
 	}
@@ -39,7 +39,7 @@ static void ld_input_section_write(void *arg, size_t j)
 		for (uint32_t k = 0; k < ts->list.n; k++) {
 			uint32_t t = ts->list.v[k];
 			uint8_t *b = dst + ctx->relocations.thunks.v[t].off;
-			uint64_t s = a64_ld_thunk_destination(t), p = a64_ld_thunk_address(t);
+			uint64_t s = a64_ld_thunk_destination(ctx, t), p = a64_ld_thunk_address(ctx, t);
 			if (!ctx->relocations.thunks.v[t].lng) {
 				ld_u32_store(b, 0x14000000 | (uint32_t)(((s - p) & 0x0ffffffc) >> 2));
 				continue;
@@ -59,10 +59,10 @@ static void ld_input_section_write(void *arg, size_t j)
 		for (uint32_t k = 0; k < ctx->output.got_symbols.n; k++) {
 			uint32_t g = ctx->output.got_symbols.v[k];
 			bool undef = ctx->symbols.globals[g].state == LD_SYMBOL_STATE_UNDEFINED || ctx->symbols.globals[g].demoted;
-			uint64_t v = undef ? 0 : ld_global_symbol_address(g);
+			uint64_t v = undef ? 0 : ld_global_symbol_address(ctx, g);
 			ld_u64_store(dst + 8 * k, v);
-			if (ctx->relocations.pic && !undef && !ld_global_symbol_is_absolute(g)) {
-				dyn[nd].r_offset = ld_input_section_address(si, 8 * k);
+			if (ctx->relocations.pic && !undef && !ld_global_symbol_is_absolute(ctx, g)) {
+				dyn[nd].r_offset = ld_input_section_address(ctx, si, 8 * k);
 				dyn[nd].r_info = R_AARCH64_RELATIVE;
 				dyn[nd].r_addend = (int64_t)v;
 				nd++;
@@ -72,12 +72,12 @@ static void ld_input_section_write(void *arg, size_t j)
 			const ld_object *o = ctx->inputs.objects.v[ctx->output.got_locals.v[k].obj];
 			const elf_symbol *y = &o->sym[ctx->output.got_locals.v[k].sym];
 			bool abs = y->st_shndx == SHN_ABS;
-			uint64_t v = abs ? y->st_value : ld_input_section_address(o->isec0 + y->st_shndx, y->st_value);
+			uint64_t v = abs ? y->st_value : ld_input_section_address(ctx, o->isec0 + y->st_shndx, y->st_value);
 			uint64_t at = 8 * ((uint64_t)ctx->output.got_symbols.n + k);
 
 			ld_u64_store(dst + at, v);
 			if (ctx->relocations.pic && !abs) {
-				dyn[nd].r_offset = ld_input_section_address(si, at);
+				dyn[nd].r_offset = ld_input_section_address(ctx, si, at);
 				dyn[nd].r_info = R_AARCH64_RELATIVE;
 				dyn[nd].r_addend = (int64_t)v;
 				nd++;

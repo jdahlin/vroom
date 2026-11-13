@@ -1,6 +1,6 @@
 /* Loading all inputs, allocating their sections, and setting up and freeing the global table. */
 
-static void ld_inputs_load(void)
+static void ld_inputs_load(struct ld_context *ctx)
 {
 	bool lazy = false;
 
@@ -14,14 +14,14 @@ static void ld_inputs_load(void)
 	for (uint32_t i = 0; i < ctx->options.inputs.n; i++) {
 		const char *p = ctx->options.inputs.v[i].path;
 		size_t n;
-		uint8_t *b = ld_file_map(p, &n);
+		uint8_t *b = ld_file_map(ctx, p, &n);
 		if (!b)
 			continue;
 		if (n >= 8 && (!memcmp(b, "!<arch>\n", 8) || !memcmp(b, "!<thin>\n", 8))) {
 			if (lazy && !ctx->options.inputs.v[i].whole) {
 				uint32_t before = ctx->inputs.pending.n, c0 = ctx->inputs.lazy_candidates.n;
 
-				ld_archive_add(p, b, n);
+				ld_archive_add(ctx, p, b, n);
 				for (uint32_t k = before; k < ctx->inputs.pending.n; k++) {
 					VVEC_PUSH(ctx->inputs.lazy_candidates, ctx->inputs.pending.v[k], ld_region_alloc);
 					VVEC_PUSH(ctx->inputs.lazy_taken, 0, ld_region_alloc);
@@ -31,7 +31,7 @@ static void ld_inputs_load(void)
 				VVEC_PUSH(ctx->inputs.pending, ((ld_pending_member){.path = NULL, .size = c0, .buf = (const uint8_t *)(uintptr_t)ctx->inputs.lazy_candidates.n}), ld_region_alloc);
 				continue;
 			}
-			ld_archive_add(p, b, n);
+			ld_archive_add(ctx, p, b, n);
 			continue;
 		}
 		VVEC_PUSH(ctx->inputs.pending, ((ld_pending_member){.path = p, .buf = b, .size = n}), ld_region_alloc);
@@ -39,9 +39,9 @@ static void ld_inputs_load(void)
 	if (lazy) {
 		for (uint32_t i = 0; i < ctx->inputs.pending.n; i++)
 			if (ctx->inputs.pending.v[i].path)
-				ld_lazy_object_add(ctx->inputs.pending.v[i]);
+				ld_lazy_object_add(ctx, ctx->inputs.pending.v[i]);
 			else
-				ld_lazy_archive_process(ctx->inputs.pending.v[i].size, (uint32_t)(uintptr_t)ctx->inputs.pending.v[i].buf);
+				ld_lazy_archive_process(ctx, ctx->inputs.pending.v[i].size, (uint32_t)(uintptr_t)ctx->inputs.pending.v[i].buf);
 		ctx->inputs.pending = ctx->inputs.lazy_order;
 	}
 	for (uint32_t i = 0; i < ctx->inputs.pending.n; i++) {
@@ -52,12 +52,12 @@ static void ld_inputs_load(void)
 		o->idx = ctx->inputs.objects.n;
 		VVEC_PUSH(ctx->inputs.objects, o, ld_region_alloc);
 	}
-	ld_parallel_for(ctx->inputs.objects.n, ld_object_parse, NULL);
+	ld_parallel_for(ctx->inputs.objects.n, ld_object_parse, ctx);
 	if (!ctx->options.max_page)
 		ctx->options.max_page = ctx->inputs.x86 ? 4096 : 65536;
 }
 
-static void ld_input_sections_alloc(uint32_t from)
+static void ld_input_sections_alloc(struct ld_context *ctx, uint32_t from)
 {
 	uint32_t total = ctx->inputs.sections.n;
 	for (uint32_t i = from; i < ctx->inputs.objects.n; i++) {
@@ -78,7 +78,7 @@ static void ld_input_sections_alloc(uint32_t from)
 	ctx->inputs.sections.n = total;
 }
 
-static void ld_global_table_init(void)
+static void ld_global_table_init(struct ld_context *ctx)
 {
 	uint64_t total = 1024;
 	for (uint32_t i = 0; i < ctx->inputs.objects.n; i++)
@@ -95,7 +95,7 @@ static void ld_global_table_init(void)
 	atomic_store(&ctx->symbols.count, 0);
 }
 
-static void ld_global_table_free(void)
+static void ld_global_table_free(struct ld_context *ctx)
 {
 	ld_region_unmap((void *)ctx->symbols.slot_names, (size_t)(ctx->symbols.slot_mask + 1) * sizeof(*ctx->symbols.slot_names));
 	ld_region_unmap((void *)ctx->symbols.slot_words, (size_t)(ctx->symbols.slot_mask + 1) * sizeof(*ctx->symbols.slot_words));

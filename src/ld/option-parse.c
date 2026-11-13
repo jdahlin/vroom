@@ -2,14 +2,14 @@
 
 /* ---------------- main link ---------------- */
 
-static void ld_usage_error_report(const char *a)
+static void ld_usage_error_report(struct ld_context *ctx, const char *a)
 {
-	ld_error_report("unknown argument: %s", a);
+	ld_error_report(ctx, "unknown argument: %s", a);
 }
 
 /* -lNAME: libNAME.a in the -L directories in order (only static archives: no
  * dynamic linking yet, so as lld under -Bstatic); -l:FILE takes FILE as is */
-static const char *ld_library_find(const char *name)
+static const char *ld_library_find(struct ld_context *ctx, const char *name)
 {
 	for (uint32_t k = 0; k < ctx->options.libdirs.n; k++) {
 		const char *d = ctx->options.libdirs.v[k];
@@ -26,7 +26,7 @@ static const char *ld_library_find(const char *name)
 	return NULL;
 }
 
-static bool ld_arguments_parse(int argc, char **argv)
+static bool ld_arguments_parse(struct ld_context *ctx, int argc, char **argv)
 {
 	bool whole = false;
 	ctx->options.max_page = 0;	/* (default by machine once the inputs are read: arm64 64 KB, x86-64 4 KB, as lld) */
@@ -67,11 +67,11 @@ static bool ld_arguments_parse(int argc, char **argv)
 		if (LD_ARGUMENT_IS("--print-gc-sections")) { ctx->options.print_gc = true; continue; }
 		if (LD_ARGUMENT_IS("--no-print-gc-sections")) { ctx->options.print_gc = false; continue; }
 		if (LD_ARGUMENT_IS("--vroom-stubs")) { ctx->options.stubs = true; continue; }
-		if (LD_ARGUMENT_IS("--emit-relocs") || LD_ARGUMENT_IS("-q")) { ld_error_report("--emit-relocs is not supported"); continue; }
+		if (LD_ARGUMENT_IS("--emit-relocs") || LD_ARGUMENT_IS("-q")) { ld_error_report(ctx, "--emit-relocs is not supported"); continue; }
 		if ((v = LD_ARGUMENT_VALUE("-m")) || (!strncmp(a, "-m", 2) && a[2] && (v = a + 2))) {
 			/* lld's AArch64 little-endian emulations */
 			if (strcmp(v, "aarch64elf") && strcmp(v, "aarch64linux") && strcmp(v, "aarch64_elf64_le_vec"))
-				ld_error_report("unknown emulation: %s", v);
+				ld_error_report(ctx, "unknown emulation: %s", v);
 			continue;
 		}
 		if (LD_ARGUMENT_IS("--version") || LD_ARGUMENT_IS("-v") || LD_ARGUMENT_IS("-V")) {
@@ -87,9 +87,9 @@ static bool ld_arguments_parse(int argc, char **argv)
 		}
 		if (LD_ARGUMENT_IS("-Bdynamic") || LD_ARGUMENT_IS("--Bdynamic") || LD_ARGUMENT_IS("-dy") || LD_ARGUMENT_IS("-call_shared")) { ctx->options.bstatic = false; continue; }
 		if (LD_ARGUMENT_IS("-no-pie") || LD_ARGUMENT_IS("--no-pie")) continue;
-		if (LD_ARGUMENT_IS("-pie") || LD_ARGUMENT_IS("--pie")) { ld_error_report("-pie is not supported (no dynamic linking yet)"); continue; }
+		if (LD_ARGUMENT_IS("-pie") || LD_ARGUMENT_IS("--pie")) { ld_error_report(ctx, "-pie is not supported (no dynamic linking yet)"); continue; }
 		if ((v = LD_ARGUMENT_VALUE("--dynamic-linker")) || (v = LD_ARGUMENT_VALUE("-dynamic-linker")) || (v = LD_ARGUMENT_VALUE("-I"))) {
-			ld_error_report("--dynamic-linker is not supported (no dynamic linking yet)");
+			ld_error_report(ctx, "--dynamic-linker is not supported (no dynamic linking yet)");
 			continue;
 		}
 		if ((v = LD_ARGUMENT_VALUE("--library-path")) || (v = LD_ARGUMENT_VALUE("-L")) || (!strncmp(a, "-L", 2) && a[2] && (v = a + 2))) {
@@ -97,12 +97,12 @@ static bool ld_arguments_parse(int argc, char **argv)
 			continue;
 		}
 		if ((v = LD_ARGUMENT_VALUE("--library")) || (v = LD_ARGUMENT_VALUE("-l")) || (!strncmp(a, "-l", 2) && a[2] && (v = a + 2))) {
-			const char *f = ld_library_find(v);
+			const char *f = ld_library_find(ctx, v);
 
 			if (f)
 				VVEC_PUSH(ctx->options.inputs, ((ld_input_argument){.path = f, .whole = whole}), ld_region_alloc);
 			else
-				ld_error_report("unable to find library -l%s", v);
+				ld_error_report(ctx, "unable to find library -l%s", v);
 			continue;
 		}
 		if ((v = LD_ARGUMENT_VALUE("--script")) || (v = LD_ARGUMENT_VALUE("-T"))) { ctx->options.script = v; continue; }
@@ -116,7 +116,7 @@ static bool ld_arguments_parse(int argc, char **argv)
 			if (!strcmp(v, "place")) ctx->options.orphan = 0;
 			else if (!strcmp(v, "warn")) ctx->options.orphan = 1;
 			else if (!strcmp(v, "error")) ctx->options.orphan = 2;
-			else ld_error_report("unknown --orphan-handling mode: %s", v);
+			else ld_error_report(ctx, "unknown --orphan-handling mode: %s", v);
 			continue;
 		}
 		if ((v = LD_ARGUMENT_VALUE("--error-limit"))) { ctx->diagnostics.error_limit = atoi(v); continue; }
@@ -131,10 +131,10 @@ static bool ld_arguments_parse(int argc, char **argv)
 				ctx->options.max_page = strtoull(v + 14, NULL, 0);
 			else if (strcmp(v, "norelro") && strcmp(v, "noexecstack") && strcmp(v, "relro") &&
 				 strcmp(v, "text") && strcmp(v, "now") && strcmp(v, "lazy") && strcmp(v, "nodefaultlib"))
-				ld_warning_report("ignoring -z %s", v);
+				ld_warning_report(ctx, "ignoring -z %s", v);
 			continue;
 		}
-		ld_usage_error_report(a);
+		ld_usage_error_report(ctx, a);
 	}
 	if (!ctx->options.out)
 		ctx->options.out = "a.out";

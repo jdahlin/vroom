@@ -14,7 +14,7 @@ static uint32_t ld_output_section_segment_flags(ld_output_section *os)
 }
 
 
-static void ld_segment_section_add(int ph, uint32_t oi)
+static void ld_segment_section_add(struct ld_context *ctx, int ph, uint32_t oi)
 {
 	ld_segment_sections *p = &ctx->layout.program_header_sections.v[ph];
 	if (p->first < 0)
@@ -26,7 +26,7 @@ static void ld_segment_section_add(int ph, uint32_t oi)
 	if (ctx->layout.program_headers.v[ph].p_type == PT_LOAD)
 		os->ptload = ph;
 }
-static int ld_segment_create(uint32_t type, uint32_t flags)
+static int ld_segment_create(struct ld_context *ctx, uint32_t type, uint32_t flags)
 {
 	elf_program_header p = {.p_type = type, .p_flags = flags, .p_align = type == PT_LOAD ? ctx->options.max_page : 0};
 	VVEC_PUSH(ctx->layout.program_headers, p, ld_region_alloc);
@@ -34,7 +34,7 @@ static int ld_segment_create(uint32_t type, uint32_t flags)
 	return ctx->layout.program_headers.n - 1;
 }
 
-static void ld_file_offsets_assign(void)
+static void ld_file_offsets_assign(struct ld_context *ctx)
 {
 	uint64_t off = sizeof(elf_file_header) + (uint64_t)ctx->layout.program_headers.n * sizeof(elf_program_header);
 	for (uint32_t i = 0; i < ctx->layout.output_sections.n; i++) {

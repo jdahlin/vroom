@@ -8,7 +8,7 @@ static inline uint64_t ld_symbol_key(uint32_t obj, uint32_t idx) { return (uint6
  * one's members are dropped.  Their definitions still take part in resolution
  * (lld postParse); one that wins is demoted (ld_symbols_demote), and relocations
  * against it fail as lld's "refers to a symbol in a discarded section" */
-static void ld_comdat_groups_deduplicate(void)
+static void ld_comdat_groups_deduplicate(struct ld_context *ctx)
 {
 	struct { const char *name; uint32_t h; } *tab = NULL;
 	uint32_t mask = 0, n = 0;
@@ -73,7 +73,7 @@ static void ld_comdat_groups_deduplicate(void)
 
 static void ld_object_symbols_resolve(void *arg, size_t i)
 {
-	(void)arg;
+	struct ld_context *ctx = arg;
 	ld_object *o = ctx->inputs.objects.v[i];
 	if (!o->buf)
 		return;
@@ -81,17 +81,17 @@ static void ld_object_symbols_resolve(void *arg, size_t i)
 		const elf_symbol *y = &o->sym[s];
 		uint8_t bind = y->st_info >> 4;
 		if (bind == STB_LOCAL) {
-			ld_error_report("%s: local symbol after sh_info", o->path);
+			ld_error_report(ctx, "%s: local symbol after sh_info", o->path);
 			continue;
 		}
-		uint32_t g = ld_global_name_intern(o->str + y->st_name);
+		uint32_t g = ld_global_name_intern(ctx, o->str + y->st_name);
 		o->gs[s - o->firstg] = g;
 		ld_global_symbol *gs = &ctx->symbols.globals[g];
 		uint64_t k = ld_symbol_key(o->idx, s);
 		ld_atomic_u64_min(&gs->first, k);
 		ld_atomic_u8_min(&gs->visrank, ld_visibility_rank(y->st_other));
 		if (y->st_shndx == SHN_COMMON && ctx->options.relocatable)
-			ld_error_report("%s: common symbol %s not supported with -r", o->path, o->str + y->st_name);
+			ld_error_report(ctx, "%s: common symbol %s not supported with -r", o->path, o->str + y->st_name);
 		else if (y->st_shndx == SHN_UNDEF) {
 			if (bind != STB_WEAK && !atomic_load_explicit(&gs->strongref, memory_order_relaxed))
 				atomic_store_explicit(&gs->strongref, 1, memory_order_relaxed);
@@ -103,7 +103,7 @@ static void ld_object_symbols_resolve(void *arg, size_t i)
 
 static void ld_duplicate_symbols_check(void *arg, size_t i)
 {
-	(void)arg;
+	struct ld_context *ctx = arg;
 	ld_object *o = ctx->inputs.objects.v[i];
 	if (!o->buf)
 		return;
@@ -115,7 +115,7 @@ static void ld_duplicate_symbols_check(void *arg, size_t i)
 		uint64_t d = ld_key_load(&g->def);
 		if ((d >> 62) == 0 && d != ld_symbol_key(o->idx, s)) {
 			ld_object *first = ctx->inputs.objects.v[(d >> 32) & 0x3fffffff];
-			ld_error_report("duplicate symbol: %s\n>>> defined in %s\n>>> defined in %s",
+			ld_error_report(ctx, "duplicate symbol: %s\n>>> defined in %s\n>>> defined in %s",
 			      o->str + y->st_name, first->path, o->path);
 		}
 	}
@@ -124,7 +124,7 @@ static void ld_duplicate_symbols_check(void *arg, size_t i)
 /* fill state/value of every global from its winning definition */
 static void ld_global_symbol_finish(void *arg, size_t i)
 {
-	(void)arg;
+	struct ld_context *ctx = arg;
 	uint32_t g = ctx->symbols.order.v[i];
 	ld_global_symbol *s = &ctx->symbols.globals[g];
 	s->vis = ld_visibility_from_rank(ld_visibility_load(&s->visrank));
@@ -162,5 +162,5 @@ static void ld_global_symbol_finish(void *arg, size_t i)
 	if (s->common)
 		s->type = STT_OBJECT;
 	else if (y->st_shndx >= SHN_ABS && y->st_shndx != SHN_ABS)
-		ld_error_report("%s: unsupported section index for %s", o->path, o->str + y->st_name);
+		ld_error_report(ctx, "%s: unsupported section index for %s", o->path, o->str + y->st_name);
 }

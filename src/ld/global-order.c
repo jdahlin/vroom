@@ -1,7 +1,7 @@
 /* The order of global symbols: first occurrence in file order, then script insertions. */
 
 /* global order: first occurrence in file order, then script insertions */
-static void ld_global_order_build(void)
+static void ld_global_order_build(struct ld_context *ctx)
 {
 	ctx->symbols.order.n = 0;
 	for (uint32_t i = 0; i < ctx->inputs.objects.n; i++) {

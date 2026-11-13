@@ -12,7 +12,7 @@ typedef struct {
 	bool global;
 } ld_relocation_target;
 
-static void ld_relocation_target_find(const ld_object *o, uint32_t symidx, int64_t addend, ld_relocation_target *t)
+static void ld_relocation_target_find(struct ld_context *ctx, const ld_object *o, uint32_t symidx, int64_t addend, ld_relocation_target *t)
 {
 	t->undef = t->discarded = false;
 	if (symidx >= o->firstg) {
@@ -27,14 +27,14 @@ static void ld_relocation_target_find(const ld_object *o, uint32_t symidx, int64
 			t->va = addend;
 			return;
 		}
-		t->abs = ld_global_symbol_is_absolute(g);
-		t->s = ld_global_symbol_address(g);
+		t->abs = ld_global_symbol_is_absolute(ctx, g);
+		t->s = ld_global_symbol_address(ctx, g);
 		if (s->state == LD_SYMBOL_STATE_OBJECT && s->sec != LD_NONE) {
 			ld_input_section *is = &ctx->inputs.sections.v[s->sec];
 			if (is->kind == LD_SECTION_KIND_MERGE_INPUT) {
-				t->va = ld_input_section_address(s->sec, s->val + addend) ;
+				t->va = ld_input_section_address(ctx, s->sec, s->val + addend) ;
 				/* non-section symbol: piece of value, then + addend */
-				t->va = ld_input_section_address(s->sec, s->val) + addend;
+				t->va = ld_input_section_address(ctx, s->sec, s->val) + addend;
 				return;
 			}
 		}
@@ -60,7 +60,7 @@ static void ld_relocation_target_find(const ld_object *o, uint32_t symidx, int64
 	uint32_t sec = o->isec0 + y->st_shndx;
 	ld_input_section *is = &ctx->inputs.sections.v[sec];
 	t->abs = false;
-	uint32_t os = ld_input_section_output_section(sec);
+	uint32_t os = ld_input_section_output_section(ctx, sec);
 	if (is->kind == LD_SECTION_KIND_NONE || os == LD_OUTPUT_SECTION_DISCARD || os == LD_NONE) {
 		t->discarded = true;
 		t->s = 0;
@@ -68,13 +68,13 @@ static void ld_relocation_target_find(const ld_object *o, uint32_t symidx, int64
 		return;
 	}
 	if ((y->st_info & 15) == STT_SECTION) {
-		t->s = ld_input_section_address(sec, 0);
-		t->va = ld_input_section_address(sec, (uint64_t)addend);
+		t->s = ld_input_section_address(ctx, sec, 0);
+		t->va = ld_input_section_address(ctx, sec, (uint64_t)addend);
 		if (is->kind != LD_SECTION_KIND_MERGE_INPUT)
 			t->va = t->s + addend;
 		return;
 	}
-	t->s = ld_input_section_address(sec, y->st_value);
+	t->s = ld_input_section_address(ctx, sec, y->st_value);
 	t->va = t->s + addend;
 }
 
@@ -86,30 +86,30 @@ static void ld_relocation_target_find(const ld_object *o, uint32_t symidx, int64
 
 static void ld_input_section_final_address_set(void *arg, size_t i)
 {
-	(void)arg;
+	struct ld_context *ctx = arg;
 	ld_input_section *is = &ctx->inputs.sections.v[i];
-	uint32_t os = ld_input_section_output_section(i);
+	uint32_t os = ld_input_section_output_section(ctx, i);
 	ctx->relocations.final_section_addresses[i] = is->kind == LD_SECTION_KIND_NONE || is->kind == LD_SECTION_KIND_MERGE_INPUT || os == LD_NONE || os == LD_OUTPUT_SECTION_DISCARD
 			      ? UINT64_MAX : ctx->script.sections.v[os].va + is->off;
 }
 static void ld_global_symbol_final_address_set(void *arg, size_t g)
 {
-	(void)arg;
+	struct ld_context *ctx = arg;
 	ld_global_symbol *s = &ctx->symbols.globals[g];
 	s->fundef = s->state == LD_SYMBOL_STATE_UNDEFINED || s->demoted;
 	if (!s->fundef) {
-		s->fabs = ld_global_symbol_is_absolute((uint32_t)g);
-		s->fva = ld_global_symbol_address((uint32_t)g);
+		s->fabs = ld_global_symbol_is_absolute(ctx, (uint32_t)g);
+		s->fva = ld_global_symbol_address(ctx, (uint32_t)g);
 	}
 }
-static void ld_final_addresses_compute(void)
+static void ld_final_addresses_compute(struct ld_context *ctx)
 {
 	ctx->relocations.final_section_addresses = ld_region_alloc((size_t)ctx->inputs.sections.n * sizeof(uint64_t));
-	ld_parallel_for(ctx->inputs.sections.n, ld_input_section_final_address_set, NULL);
-	ld_parallel_for(atomic_load(&ctx->symbols.count), ld_global_symbol_final_address_set, NULL);
+	ld_parallel_for(ctx->inputs.sections.n, ld_input_section_final_address_set, ctx);
+	ld_parallel_for(atomic_load(&ctx->symbols.count), ld_global_symbol_final_address_set, ctx);
 }
 
-static inline void ld_relocation_target_final_find(const ld_object *o, uint32_t symidx, int64_t addend, ld_relocation_target *t)
+static inline void ld_relocation_target_final_find(struct ld_context *ctx, const ld_object *o, uint32_t symidx, int64_t addend, ld_relocation_target *t)
 {
 	if (symidx >= o->firstg) {
 		uint32_t g = o->gs[symidx - o->firstg];
@@ -138,5 +138,5 @@ static inline void ld_relocation_target_final_find(const ld_object *o, uint32_t 
 			}
 		}
 	}
-	ld_relocation_target_find(o, symidx, addend, t);
+	ld_relocation_target_find(ctx, o, symidx, addend, t);
 }

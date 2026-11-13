@@ -155,8 +155,11 @@ groups are fields of `struct ld_context`, #183); step 2 of the context moves
 the output side (relocation scan, `ld -r`, output, symbol table, dynamic
 sections); step 3 the input side (script, symbols, inputs, options), which
 deletes `ld_state_reset` and moves the data model into `ld-internal.h`.  No
-per-link state is left at file scope; the parameter series follows
-(`link-context.md` section 5).
+per-link state is left at file scope; step 4 passes the context as a
+parameter to every function that uses it and `ld_main` creates one per link
+(`link-context.md` section 5).  Left of step 2: the 290 field rows of
+`rename-ld.tsv`, prototypes for the part files (so that each compiles
+alone), and the refreshed opening comments and `ld.c` header.
 
 ### 3. The shared layer
 

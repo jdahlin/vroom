@@ -2,19 +2,19 @@
 
 /* lld's getAlternativeSpelling: a defined global (or a local of the referencing object) one edit
    away, tried in lld's order: substitute, transpose, insert, delete (characters '0'..'z') */
-static const char *ld_spelling_suggestion_try(const char *cand, ld_object *ref, const char **where)
+static const char *ld_spelling_suggestion_try(struct ld_context *ctx, const char *cand, ld_object *ref, const char **where)
 {
-	uint32_t g = ld_global_name_find(cand);
+	uint32_t g = ld_global_name_find(ctx, cand);
 
 	if (g != LD_NONE && ctx->symbols.globals[g].state == LD_SYMBOL_STATE_OBJECT && ctx->symbols.globals[g].obj != LD_NONE) {
 		*where = ctx->inputs.objects.v[ctx->symbols.globals[g].obj]->path;
-		return ld_global_name(g);
+		return ld_global_name(ctx, g);
 	}
 	(void)ref;	/* (lld suggested no local of the referencing object in our tests) */
 	return NULL;
 }
 
-static const char *ld_spelling_suggestion_find(const char *name, ld_object *ref, const char **where)
+static const char *ld_spelling_suggestion_find(struct ld_context *ctx, const char *name, ld_object *ref, const char **where)
 {
 	size_t n = strlen(name);
 	char *b = malloc(n + 2);
@@ -28,7 +28,7 @@ static const char *ld_spelling_suggestion_find(const char *name, ld_object *ref,
 
 		for (char c = '0'; c <= 'z' && !r; c++) {
 			b[i] = c;
-			r = ld_spelling_suggestion_try(b, ref, where);
+			r = ld_spelling_suggestion_try(ctx, b, ref, where);
 		}
 		b[i] = old;
 	}
@@ -36,7 +36,7 @@ static const char *ld_spelling_suggestion_find(const char *name, ld_object *ref,
 		char t = b[i];
 
 		b[i] = b[i + 1], b[i + 1] = t;
-		r = ld_spelling_suggestion_try(b, ref, where);
+		r = ld_spelling_suggestion_try(ctx, b, ref, where);
 		b[i + 1] = b[i], b[i] = t;
 	}
 	b[0] = '0';
@@ -44,7 +44,7 @@ static const char *ld_spelling_suggestion_find(const char *name, ld_object *ref,
 	for (size_t i = 0; i <= n && !r; i++) {
 		for (char c = '0'; c <= 'z' && !r; c++) {
 			b[i] = c;
-			r = ld_spelling_suggestion_try(b, ref, where);
+			r = ld_spelling_suggestion_try(ctx, b, ref, where);
 		}
 		if (i < n) {	/* (lld: std::swap(newName[i], newName[i + 1])) */
 			char t = b[i];
@@ -56,7 +56,7 @@ static const char *ld_spelling_suggestion_find(const char *name, ld_object *ref,
 	for (size_t i = 0; i < n && !r; i++) {
 		memcpy(b, name, i);
 		memcpy(b + i, name + i + 1, n - i);
-		r = ld_spelling_suggestion_try(b, ref, where);
+		r = ld_spelling_suggestion_try(ctx, b, ref, where);
 	}
 	free(b);
 	return r;
@@ -95,13 +95,13 @@ static void ld_reference_location_describe(vbuffer *b, ld_object *o, uint32_t se
 }
 
 /* "undefined symbol: X" and every reference to it (lld: the first 3, then "referenced N more times") */
-static void ld_undefined_references_report(uint32_t gid, ld_object *first, bool spell)
+static void ld_undefined_references_report(struct ld_context *ctx, uint32_t gid, ld_object *first, bool spell)
 {
 	vbuffer b = {0};
 	uint32_t nref = 0;
 	ld_object *reffile = NULL;
 
-	vbuffer_format_append(&b, "undefined symbol: %s", ld_global_name(gid));
+	vbuffer_format_append(&b, "undefined symbol: %s", ld_global_name(ctx, gid));
 	for (uint32_t oi = 0; oi < ctx->inputs.objects.n; oi++) {
 		ld_object *o = ctx->inputs.objects.v[oi];
 
@@ -130,17 +130,17 @@ static void ld_undefined_references_report(uint32_t gid, ld_object *first, bool 
 	else if (nref > 3)
 		vbuffer_format_append(&b, "\n>>> referenced %u more times", nref - 3);
 	{
-		const char *where = NULL, *alt = spell ? ld_spelling_suggestion_find(ld_global_name(gid), reffile, &where) : NULL;
+		const char *where = NULL, *alt = spell ? ld_spelling_suggestion_find(ctx, ld_global_name(ctx, gid), reffile, &where) : NULL;
 
 		if (alt)
 			vbuffer_format_append(&b, "\n>>> did you mean: %s\n>>> defined in: %s", alt, where);
 	}
 	vbuffer_append(&b, "", 1);
-	ld_error_report("%s", (const char *)b.p);
+	ld_error_report(ctx, "%s", (const char *)b.p);
 	free(b.p);
 }
 
-static void ld_undefined_symbols_report(void)
+static void ld_undefined_symbols_report(struct ld_context *ctx)
 {
 	uint32_t n = 0;
 	for (uint32_t i = 0; i < ctx->symbols.order.n; i++) {
@@ -151,10 +151,10 @@ static void ld_undefined_symbols_report(void)
 			continue;
 		/* x86-64 executables relax every GD/LD sequence to LE, and its call
 		   to __tls_get_addr goes with it (lld scans no relocation there) */
-		if (ctx->inputs.x86 && !ctx->options.shared && !strcmp(ld_global_name(ctx->symbols.order.v[i]), "__tls_get_addr"))
+		if (ctx->inputs.x86 && !ctx->options.shared && !strcmp(ld_global_name(ctx, ctx->symbols.order.v[i]), "__tls_get_addr"))
 			continue;
 		if (ctx->options.no_undefined || !ctx->options.shared) {
-			ld_undefined_references_report(ctx->symbols.order.v[i], ctx->inputs.objects.v[ld_key_load(&s->first) >> 32], n < 2);	/* (lld: spelling for the first two) */
+			ld_undefined_references_report(ctx, ctx->symbols.order.v[i], ctx->inputs.objects.v[ld_key_load(&s->first) >> 32], n < 2);	/* (lld: spelling for the first two) */
 			n++;
 		}
 	}

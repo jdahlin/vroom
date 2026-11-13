@@ -62,12 +62,7 @@
 
 #define LD_NONE 0xffffffffu
 
-
 #include "ld-internal.h"
-
-/* the context of the one link that runs at a time (ld_link_lock); ld-internal.h */
-static struct ld_context ld_link_context;
-static struct ld_context *const ctx = &ld_link_context;
 
 #include "link-context.c"
 

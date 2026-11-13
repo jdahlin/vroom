@@ -19,7 +19,7 @@ static bool ld_output_section_is_discardable(ld_output_section *os)
 	return true;
 }
 
-static void ld_output_sections_adjust(void)
+static void ld_output_sections_adjust(struct ld_context *ctx)
 {
 	uint64_t flags = SHF_ALLOC;
 	for (uint32_t c = 0; c < ctx->script.commands.n; c++) {
@@ -27,7 +27,7 @@ static void ld_output_sections_adjust(void)
 			continue;
 		ld_output_section *os = &ctx->script.sections.v[ctx->script.commands.v[c].idx];
 		if (os->alignx) {
-			uint64_t a = ld_expression_value_resolve(ld_expression_eval(os->alignx));
+			uint64_t a = ld_expression_value_resolve(ctx, ld_expression_eval(ctx, os->alignx));
 			if (a > os->addralign)
 				os->addralign = a;
 		}
