@@ -8,10 +8,22 @@ down to more cpus if we have to".  Names follow `doc/STYLE.md`; the shape is
 the review's recommendation 6.2 B (one job queue plus one shared
 parallel-for, with a task interface that deques could later sit under).
 
-**Builds on** PR #142 (no cache flush between live process groups,
-Q-SCHED-01) and PR #157 (vlink's small parallel loops stay on the caller,
-Q-SCHED-03).  Their behaviour is kept: the probe rule of #157 becomes a flag
-of the shared loop.
+**Builds on** PR #157 (vlink's small parallel loops stay on the caller,
+Q-SCHED-03): its probe rule becomes a flag of the shared loop.
+
+**Does not assume** the vccd half of PR #142 (no cache flush between live
+process groups, Q-SCHED-01).  It is held: it reproduced a stale cache (build
+A running, a header edited, build B compiles the old header).  Two builds
+sharing one vccd is an open problem whose correct form validates cached
+files per new process group (by dev, inode, mtime and size) instead of
+flushing or not flushing globally.  This order is independent of it: the
+build-generation code (`server/build-generation.c`) decides whether a
+request may run and which caches are valid; the scheduler only decides
+where and when it runs.  What changes in stage 3 is that the generation
+wait (`gen_enter` draining a running build before a flush) happens inside a
+blocking region, so a drain no longer holds cores; it neither causes nor
+fixes the stale-cache case.  The A/B below runs one build at a time, so its
+numbers do not depend on Q-SCHED-01 either way.
 
 **Owns** `src/port/task.c`, `src/include/port/task.h`,
 `src/test/port/task-test.c`, `bench/sched-measure.py`, and in the files it
