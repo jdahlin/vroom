@@ -92,6 +92,24 @@ cut by Q-drv-18 in step 4, not here; the `kqueue` and `epoll` loops share
 an inner block across `#ifdef` in `main` and stay in `vccd.c`.
 (Anything else that could not be cut is recorded below.)
 
+What step 1 did differently from the maps above (line numbers in the
+review had drifted by a few lines; the files and jobs are as listed):
+
+- `driver/`: `ppd_run1` is about 120 lines.  `-ftls-model=` with a bad value still
+  returns 1 without the job's cleanup (code 2 of `driver_cmdline_parse`;
+  Q-drv-07 fixes it in step 2).  `--cmp` stays in the job's `ppd_compare`
+  (`tokcmp.c`); making `tokcmp.c` a `vpp`-only TU is Q-drv-12.
+  `explain.c` is the old `explain` and its table; `ppd_getenv` and
+  `intern_full` stay in `job.c`.  `-S`'s output name, the PIE/CFI defaults
+  and the `objmode` switch stay in `ppd_run1` (three to ten lines each).
+- `server/`: the request log (`log_req`), `now_ms` and `req_env` went to
+  `request.c` (they read a request), not to the recipe file.  There is no
+  `stats.c`: the counters and `print_counts` are `counters.c`.
+- Shared variables of the server are globals declared in `vccd-internal.h`
+  (external symbols even in the unity build, as `kwmap` in `ccimpl.h`); the
+  driver's few (`bufpool`, `bufr`, `tl_as`, `tl_obj`, `tl_objbuf`,
+  `tl_wasm_obj`) likewise.
+
 Outside the owned files and left for their owners: `contrib/wasm/build.sh`
 lists `driver/ppdriver.c`; `AGENTS.md` names `ppdriver.c`.
 
