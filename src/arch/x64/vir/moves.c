@@ -22,7 +22,7 @@ VPRIV int64_t x64_vir_constant_bits(const vir_insn *i) { return (int64_t)((uint6
 
 VPRIV void x64_vir_text_append(x64_vir_context *L, const char *s)
 {
-	record *r = x64_put(L->context, X_RAW);
+	record *r = x64_record_emit(L->context, X64_OP_RAW);
 	r->offset = L->context->raw.n;
 	r->reference = strlen(s);
 	vtext_string_append(&L->context->raw, s);
@@ -64,10 +64,10 @@ VPRIV void x64_vir_simd_emit(x64_vir_context *L, const char *op, int d, int a, i
 	char s[160];
 	/* A three-address noncommutative operation may overwrite its second source. */
 	int out = d == b && d != a ? (XMM0 + 14) : d;
-	if (out != a) x64_op3(L->context, X_MOV, 16, out, a, XNOREG);
+	if (out != a) x64_record_emit_three_registers(L->context, X64_OP_MOV, 16, out, a, X64_REGISTER_NONE);
 	snprintf(s, sizeof s, "\t%s\t%%xmm%d, %%xmm%d\n", op, b - XMM0, out - XMM0);
 	x64_vir_text_append(L, s);
-	if (out != d) x64_op3(L->context, X_MOV, 16, d, out, XNOREG);
+	if (out != d) x64_record_emit_three_registers(L->context, X64_OP_MOV, 16, d, out, X64_REGISTER_NONE);
 }
 
 VPRIV void x64_vir_constant_materialize(x64_vir_context *L, uint8_t dst, uint32_t v)
@@ -75,25 +75,25 @@ VPRIV void x64_vir_constant_materialize(x64_vir_context *L, uint8_t dst, uint32_
 	const vir_insn *i = &L->function->insns[v];
 	int d = x64_vir_register_number(dst);
 	if (i->op == VIR_OP_FCONST) {
-		x64_movi(L->context, L->general_temporary, x64_vir_constant_bits(i));
-		x64_op3(L->context, X_MOV, x64_vir_type_size(i->type), d, L->general_temporary, XNOREG);
+		x64_record_emit_move_immediate(L->context, L->general_temporary, x64_vir_constant_bits(i));
+		x64_record_emit_three_registers(L->context, X64_OP_MOV, x64_vir_type_size(i->type), d, L->general_temporary, X64_REGISTER_NONE);
 	} else if (i->op == VIR_OP_ICONST) {
-		x64_movi(L->context, d, x64_vir_constant_bits(i));
+		x64_record_emit_move_immediate(L->context, d, x64_vir_constant_bits(i));
 	} else if (i->op == VIR_OP_SYMADDR && codegen_symbol_needs_got(L->context->compile_context, i->a)) {
-		record *r = x64_op3(L->context, X_GOT, 8, d, XNOREG, XNOREG);
+		record *r = x64_record_emit_three_registers(L->context, X64_OP_GOT, 8, d, X64_REGISTER_NONE, X64_REGISTER_NONE);
 		r->reference = i->a;
-		if (x64_vir_constant_bits(i)) x64_op3(L->context, X_ADDI, 8, d, d, XNOREG)->immediate = x64_vir_constant_bits(i);
+		if (x64_vir_constant_bits(i)) x64_record_emit_three_registers(L->context, X64_OP_ADDI, 8, d, d, X64_REGISTER_NONE)->immediate = x64_vir_constant_bits(i);
 	} else {
 		codegen_lvalue a = { .kind = i->op == VIR_OP_SLOTADDR ? CODEGEN_LVALUE_FRAME : CODEGEN_LVALUE_SYMBOL,
 			.offset = x64_vir_constant_bits(i) + (i->op == VIR_OP_SLOTADDR ? L->slot[i->a] : 0), .reference = i->a };
-		x64_mem(L->context, X_LEA, 8, d, &a, false);
+		x64_record_emit_memory(L->context, X64_OP_LEA, 8, d, &a, false);
 	}
 }
 
 VPRIV void x64_vir_slot_access(x64_vir_context *L, bool load, uint8_t reg, uint32_t s)
 {
 	codegen_lvalue a = { .kind = CODEGEN_LVALUE_FRAME, .offset = L->spill[s] };
-	x64_mem(L->context, load ? X_LD : X_ST, L->allocation->slot_sizes[s], x64_vir_register_number(reg), &a, false);
+	x64_record_emit_memory(L->context, load ? X64_OP_LD : X64_OP_ST, L->allocation->slot_sizes[s], x64_vir_register_number(reg), &a, false);
 }
 
 VPRIV void vx_edit(x64_vir_context *L, const vir_edit *x)

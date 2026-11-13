@@ -217,7 +217,7 @@ VPRIV int codegen_commit_chunk(codegen_commit_context *R, const char *p, size_t 
 			r = as_snippet_assemble(R->assembler, q, it->length);
 			break;
 		case CODEGEN_ITEM_X64:
-			r = x64_replay(R, q, it->length);
+			r = x64_function_commit(R, q, it->length);
 			break;
 		case CODEGEN_ITEM_CODE:
 			r = a64_function_commit(R, (const codegen_code_header *)q);

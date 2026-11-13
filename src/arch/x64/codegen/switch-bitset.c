@@ -1,5 +1,5 @@
 /* One guarded membership mask, using existing scalar lowering operations. */
-#include "x64impl.h"
+#include "x64-internal.h"
 
 VPRIV void x64_switch_bitset(codegen_context *e, int source, int size,
 			    const em_switch_bitset_recipe *recipe,
@@ -9,7 +9,7 @@ VPRIV void x64_switch_bitset(codegen_context *e, int source, int size,
 	codegen_value offset = { .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)index };
 	int width = recipe->bits / 8;
 
-	x64_op3(e, X_MOV, size, index, source, XNOREG);
+	x64_record_emit_three_registers(e, X64_OP_MOV, size, index, source, X64_REGISTER_NONE);
 	if (recipe->lo)
 		offset = x64_bin(e, LEX_TOKEN_MINUS, size, false, offset, codegen_value_constant(recipe->lo));
 	/* x86 masks variable shift counts. Reject every index outside the mask
