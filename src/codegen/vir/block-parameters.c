@@ -1,14 +1,14 @@
 /* Placeholder parameters: trivial ones removed, dead ones dropped. */
-#define WK_PREFIX virbuild_
-#define LO_PREFIX virbuild_
+#define WALK_PREFIX virbuild_
+#define WALK_LOWER_PREFIX virbuild_
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
 
 /* a parameter all of whose operands are one value (or itself) is that value */
-VPRIV bool virbuild_parameters_trivial_remove(ecx *e)
+VPRIV bool virbuild_parameters_trivial_remove(codegen_context *e)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 	bool any = false;
 
 	for (uint32_t i = 0; i < V->block_order_count; i++) {
@@ -51,9 +51,9 @@ static void virbuild_parameter_live_mark(virbuild_context *V, uint32_t *stk, uin
 	}
 }
 
-VPRIV void virbuild_parameters_dead_remove(ecx *e)
+VPRIV void virbuild_parameters_dead_remove(codegen_context *e)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 	uint32_t *stk, n = 0;
 
 	VIRBUILD_ARRAY_GROW(V->value_map, 0, V->value_map_capacity, V->insn_count + 1);

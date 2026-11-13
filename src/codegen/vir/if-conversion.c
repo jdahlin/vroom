@@ -1,6 +1,6 @@
 /* If-conversion of diamonds and triangles into selects. */
-#define WK_PREFIX virbuild_
-#define LO_PREFIX virbuild_
+#define WALK_PREFIX virbuild_
+#define WALK_LOWER_PREFIX virbuild_
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
@@ -141,9 +141,9 @@ static void virbuild_arm_hoist(virbuild_context *V, uint32_t a, uint32_t b, uint
 	V->blocks[a].first_insn = V->blocks[a].last_insn = 0;
 }
 
-VPRIV bool virbuild_if_convert(ecx *e)
+VPRIV bool virbuild_if_convert(codegen_context *e)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 	bool any = false;
 
 	for (uint32_t i = 0; i < V->block_order_count; i++) {
@@ -195,7 +195,7 @@ VPRIV bool virbuild_if_convert(ecx *e)
 		 * nine times slower as selects; sqlite's speedtest1 is the same either way.  Measured on
 		 * arm64 only: x86-64 keeps the selects, which its vectorizer takes as ordered
 		 * reductions (bench/vcc-vir-x86.py requires that of maxval, maxindex, lastnegative). */
-		if (!badsel && nsel && !X86(e->c)) {
+		if (!badsel && nsel && !CODEGEN_IS_X64(e->compile_context)) {
 			bool all = true;
 
 			for (uint32_t k = 0; k < nsel; k++)

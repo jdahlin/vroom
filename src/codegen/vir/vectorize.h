@@ -21,7 +21,7 @@ typedef struct virbuild_vectorize_access { uint32_t insn, position; bool store; 
 typedef struct virbuild_vectorize_reduction { uint32_t parameter, update, operand, accumulator, accumulator_next; } virbuild_vectorize_reduction;
 
 typedef struct virbuild_vectorize_state {
-	ecx *context;
+	codegen_context *context;
 	virbuild_vectorize_info *infos; uint32_t value_count;			/* per value below n0 */
 	uint32_t *touched; uint32_t touched_count, touched_capacity;
 	uint8_t *in_loop;				/* per block: in the loop */
@@ -49,7 +49,7 @@ enum { VIRBUILD_VECTORIZE_MODE_ENTRY, VIRBUILD_VECTORIZE_MODE_BODY, VIRBUILD_VEC
 
 /* vectorize.c */
 VPRIV bool virbuild_vectorize_insn_is_skipped(virbuild_context *V, uint32_t q);
-VPRIV void virbuild_function_vectorize(ecx *e);
+VPRIV void virbuild_function_vectorize(codegen_context *e);
 
 /* loop-constants.c */
 VPRIV void virbuild_loop_constants_pin(virbuild_vectorize_state *S, uint32_t pre);

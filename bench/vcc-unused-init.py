@@ -17,16 +17,16 @@ static node nodes[100];
 static uint8_t flags[5];
 static cc_options options;
 static cc context;
-static emitter emit;
-static ecx state;
+static codegen_unit emit;
+static codegen_context state;
 static unsigned count;
-bool is_local_var(cc *c, uint32_t s)
+bool codegen_symbol_is_local_variable(cc *c, uint32_t s)
 {
     const sym *y=&c->syms[s];
     return y->kind==AST_SYMBOL_VARIABLE && y->depth && (y->sc==AST_STORAGE_AUTO || y->sc==AST_STORAGE_REGISTER ||
         (y->flags&AST_SYMBOL_FLAG_PARAMETER) || (y->sc==AST_STORAGE_NONE && !(y->flags&AST_SYMBOL_FLAG_GLOBAL)));
 }
-const attrs *sym_attrs(cc *c, uint32_t s) { return &c->attr[c->syms[s].attrs]; }
+const attrs *codegen_symbol_attributes(cc *c, uint32_t s) { return &c->attr[c->syms[s].attrs]; }
 static void reset(void)
 {
     memset(types,0,sizeof types); memset(symbols,0,sizeof symbols);
@@ -39,8 +39,8 @@ static void reset(void)
     for(unsigned s=1;s<5;s++) symbols[s]=(sym){.kind=AST_SYMBOL_VARIABLE,.sc=AST_STORAGE_AUTO,.depth=1,.ty=AST_QUALIFIED_TYPE(AST_TYPE_INT,0),.attrs=s};
     options=(cc_options){.opt=1};
     context=(cc){.ty=types,.syms=symbols,.nodes=nodes,.attr=attributes,.o=&options};
-    emit=(emitter){.o=&options,.sflags=flags};
-    state=(ecx){.c=&context,.E=&emit};
+    emit=(codegen_unit){.options=&options,.symbol_flags=flags};
+    state=(codegen_context){.compile_context=&context,.unit=&emit};
 }
 static unsigned make(unsigned op, unsigned aux, unsigned a, unsigned b, unsigned c, ast_qualified_type type)
 {
@@ -86,12 +86,12 @@ int main(void)
     symbols[2].ty=INT; attributes[2].asmname=1; assert(recipe(source,64)==EM_UNUSED_EVAL);
     attributes[2].asmname=0; symbols[2].sc=AST_STORAGE_STATIC; assert(recipe(source,64)==EM_UNUSED_EVAL);
     symbols[2].sc=AST_STORAGE_AUTO;
-    flags[1]=SA_USED; assert(recipe(literal,64)==EM_UNUSED_KEEP); flags[1]=0;
+    flags[1]=CODEGEN_SYMBOL_USED; assert(recipe(literal,64)==EM_UNUSED_KEEP); flags[1]=0;
     options.opt=0; assert(recipe(literal,64)==EM_UNUSED_KEEP); options.opt=1;
-    emit.noopt=true; assert(recipe(literal,64)==EM_UNUSED_KEEP); emit.noopt=false;
+    emit.cleanups_disabled=true; assert(recipe(literal,64)==EM_UNUSED_KEEP); emit.cleanups_disabled=false;
     attributes[3].flags=CC_ATTRIBUTE_FLAG_OPTNONE; assert(recipe(literal,64)==EM_UNUSED_KEEP); attributes[3].flags=0;
-    state.top=4; attributes[4].flags=CC_ATTRIBUTE_FLAG_OPTNONE; assert(recipe(literal,64)==EM_UNUSED_KEEP);
-    state.top=0; attributes[4].flags=0;
+    state.top_symbol=4; attributes[4].flags=CC_ATTRIBUTE_FLAG_OPTNONE; assert(recipe(literal,64)==EM_UNUSED_KEEP);
+    state.top_symbol=0; attributes[4].flags=0;
     attributes[1].cleanup=2; assert(recipe(literal,64)==EM_UNUSED_KEEP); attributes[1].cleanup=0;
     attributes[1].used=1; assert(recipe(literal,64)==EM_UNUSED_KEEP); attributes[1].used=0;
     attributes[1].asmname=1; assert(recipe(literal,64)==EM_UNUSED_KEEP); attributes[1].asmname=0;

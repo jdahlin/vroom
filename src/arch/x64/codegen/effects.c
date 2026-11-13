@@ -9,27 +9,27 @@
 #define X_CALL_DEF (X_TEMPS | X_BIT(R11) | (UINT64_C(0xffff) << XMM0))
 #define X_CALL_USE (X_GP_ARGS | X_FP_ARGS | X_BIT(RAX) | X_BIT(R10) | X_BIT(RSP))
 #define X_ALL_REGS ((UINT64_C(1) << (XMM15 + 1)) - 1)
-#define X_D OD_DEF0
-#define X_U OD_USE1
-#define X_V OD_USE2
-#define X_P OD_PURE
-#define X_W OD_WFLAGS
-#define X_R OD_RFLAGS
-#define X_MEM (OD_LOAD | OD_STORE | OD_TRAP)
-#define X_CALL_FLAGS (X_MEM | OD_CALL | X_W | OD_FP | OD_BARRIER)
-#define X_DESC(regs_, flags_) { .regs = (regs_), .fl = (flags_) }
+#define X_D RECORD_OPERAND_DEFINES_0
+#define X_U RECORD_OPERAND_USES_1
+#define X_V RECORD_OPERAND_USES_2
+#define X_P RECORD_EFFECT_PURE
+#define X_W RECORD_EFFECT_WRITES_FLAGS
+#define X_R RECORD_EFFECT_READS_FLAGS
+#define X_MEM (RECORD_EFFECT_LOAD | RECORD_EFFECT_STORE | RECORD_EFFECT_TRAP)
+#define X_CALL_FLAGS (X_MEM | RECORD_EFFECT_CALL | X_W | RECORD_EFFECT_FLOAT | RECORD_EFFECT_BARRIER)
+#define X_DESC(regs_, flags_) { .registers = (regs_), .flags = (flags_) }
 
-static const opdesc x64_desc[X_NOPS] = {
+static const record_op_descriptor x64_desc[X_NOPS] = {
 	[X_CMOV] = X_DESC(X_D | X_U | X_V, X_P | X_R),
-	[X_CMPM] = X_DESC(X_U | X_V | OD_USE3, OD_LOAD | OD_TRAP | X_W),
-	[X_TESTM] = X_DESC(X_U | OD_USE3, OD_LOAD | OD_TRAP | X_W),
-	[X_LDX] = X_DESC(X_D | X_U | OD_USE3, OD_LOAD | OD_TRAP),
-	[X_STX] = X_DESC(X_U | X_V | OD_USE3, OD_STORE | OD_TRAP),
-	[X_LABEL] = X_DESC(0, OD_LABEL),
+	[X_CMPM] = X_DESC(X_U | X_V | RECORD_OPERAND_USES_3, RECORD_EFFECT_LOAD | RECORD_EFFECT_TRAP | X_W),
+	[X_TESTM] = X_DESC(X_U | RECORD_OPERAND_USES_3, RECORD_EFFECT_LOAD | RECORD_EFFECT_TRAP | X_W),
+	[X_LDX] = X_DESC(X_D | X_U | RECORD_OPERAND_USES_3, RECORD_EFFECT_LOAD | RECORD_EFFECT_TRAP),
+	[X_STX] = X_DESC(X_U | X_V | RECORD_OPERAND_USES_3, RECORD_EFFECT_STORE | RECORD_EFFECT_TRAP),
+	[X_LABEL] = X_DESC(0, RECORD_EFFECT_LABEL),
 	[X_MOV] = X_DESC(X_D | X_U, X_P),
 	[X_MOVI] = X_DESC(X_D, X_P),
-	[X_LD] = X_DESC(X_D | X_U, OD_LOAD | OD_TRAP),
-	[X_ST] = X_DESC(X_U | X_V, OD_STORE | OD_TRAP),
+	[X_LD] = X_DESC(X_D | X_U, RECORD_EFFECT_LOAD | RECORD_EFFECT_TRAP),
+	[X_ST] = X_DESC(X_U | X_V, RECORD_EFFECT_STORE | RECORD_EFFECT_TRAP),
 	[X_LEA] = X_DESC(X_D | X_U, X_P),
 	[X_LEASCALE] = X_DESC(X_D | X_U | X_V, X_P),
 	[X_ADD] = X_DESC(X_D | X_U | X_V, X_P | X_W),
@@ -50,125 +50,125 @@ static const opdesc x64_desc[X_NOPS] = {
 	[X_SHLI] = X_DESC(X_D | X_U, X_P | X_R | X_W),
 	[X_SHRI] = X_DESC(X_D | X_U, X_P | X_R | X_W),
 	[X_SARI] = X_DESC(X_D | X_U, X_P | X_R | X_W),
-	[X_SHL] = { .regs = X_D | X_U | X_V, .fl = X_P | X_R | X_W, .iuse = X_BIT(RCX) },
-	[X_SHR] = { .regs = X_D | X_U | X_V, .fl = X_P | X_R | X_W, .iuse = X_BIT(RCX) },
-	[X_SAR] = { .regs = X_D | X_U | X_V, .fl = X_P | X_R | X_W, .iuse = X_BIT(RCX) },
+	[X_SHL] = { .registers = X_D | X_U | X_V, .flags = X_P | X_R | X_W, .implicit_used = X_BIT(RCX) },
+	[X_SHR] = { .registers = X_D | X_U | X_V, .flags = X_P | X_R | X_W, .implicit_used = X_BIT(RCX) },
+	[X_SAR] = { .registers = X_D | X_U | X_V, .flags = X_P | X_R | X_W, .implicit_used = X_BIT(RCX) },
 	[X_NEG] = X_DESC(X_D | X_U, X_P | X_W),
 	[X_NOT] = X_DESC(X_D | X_U, X_P),
 	[X_CMP] = X_DESC(X_U | X_V, X_P | X_W),
 	[X_CMPI] = X_DESC(X_U, X_P | X_W),
 	[X_TEST] = X_DESC(X_U, X_P | X_W),
 	[X_SETCC] = X_DESC(X_D, X_P | X_R),
-	[X_JMP] = { .br = RB_JUMP },
-	[X_JCC] = { .br = RB_COND, .fl = X_R },
-	[X_CALL] = { .fl = X_CALL_FLAGS, .idef = X_CALL_DEF, .iuse = X_CALL_USE },
-	[X_CALLR] = { .regs = X_U, .fl = X_CALL_FLAGS, .idef = X_CALL_DEF, .iuse = X_CALL_USE },
-	[X_TAIL] = { .br = RB_RET, .fl = OD_BARRIER, .iuse = X_GP_ARGS },
-	[X_PUSH] = { .regs = X_U, .fl = OD_STORE | OD_TRAP, .idef = X_BIT(RSP), .iuse = X_BIT(RSP) },
-	[X_POP] = { .regs = X_D, .fl = OD_LOAD | OD_TRAP, .idef = X_BIT(RSP), .iuse = X_BIT(RSP) },
-	[X_ADJSP] = { .fl = X_P | X_W, .idef = X_BIT(RSP), .iuse = X_BIT(RSP) },
-	[X_CQO] = { .fl = X_P, .idef = X_BIT(RDX), .iuse = X_BIT(RAX) },
-	[X_IDIV] = { .regs = X_U, .fl = OD_TRAP | X_W, .idef = X_BIT(RAX) | X_BIT(RDX), .iuse = X_BIT(RAX) | X_BIT(RDX) },
-	[X_DIV] = { .regs = X_U, .fl = OD_TRAP | X_W, .idef = X_BIT(RAX) | X_BIT(RDX), .iuse = X_BIT(RAX) | X_BIT(RDX) },
-	[X_MULW] = { .regs = X_U, .fl = X_P | X_W, .idef = X_BIT(RAX) | X_BIT(RDX), .iuse = X_BIT(RAX) },
-	[X_SMULW] = { .regs = X_U, .fl = X_P | X_W, .idef = X_BIT(RAX) | X_BIT(RDX), .iuse = X_BIT(RAX) },
-	[X_UD2] = X_DESC(0, OD_TRAP | OD_BARRIER),
-	[X_TLS] = X_DESC(X_D, OD_LOAD | OD_TRAP), /* dynamic model below */
-	[X_GOT] = X_DESC(X_D, OD_LOAD | OD_TRAP),
-	[X_XCHG] = X_DESC(X_D | OD_USE0 | X_U, X_MEM | OD_BARRIER),
-	[X_XADD] = X_DESC(X_D | OD_USE0 | X_U, X_MEM | OD_BARRIER | X_W),
-	[X_CMPXCHG] = { .regs = X_U | X_V, .fl = X_MEM | OD_BARRIER | X_W, .idef = X_BIT(RAX), .iuse = X_BIT(RAX) },
-	[X_MFENCE] = X_DESC(0, OD_BARRIER),
-	[X_BLENDVB] = { .fl = X_P, .idef = X_BIT(XMM0 + 1),
-		.iuse = X_BIT(XMM0) | X_BIT(XMM0 + 1) | X_BIT(XMM0 + 2) },
-	[X_PCMPSTR] = { .fl = X_P | X_W, .iuse = X_BIT(XMM0) | X_BIT(XMM0 + 1) },
-	[X_RAW] = { .br = RB_INDIRECT, .fl = X_MEM | OD_BARRIER | X_R | X_W | OD_FP, .idef = X_ALL_REGS, .iuse = X_ALL_REGS },
-	[X_BARRIER] = X_DESC(0, OD_LOAD | OD_STORE | OD_BARRIER | X_R | X_W),
+	[X_JMP] = { .branch = RECORD_BRANCH_JUMP },
+	[X_JCC] = { .branch = RECORD_BRANCH_CONDITIONAL, .flags = X_R },
+	[X_CALL] = { .flags = X_CALL_FLAGS, .implicit_defined = X_CALL_DEF, .implicit_used = X_CALL_USE },
+	[X_CALLR] = { .registers = X_U, .flags = X_CALL_FLAGS, .implicit_defined = X_CALL_DEF, .implicit_used = X_CALL_USE },
+	[X_TAIL] = { .branch = RECORD_BRANCH_RETURN, .flags = RECORD_EFFECT_BARRIER, .implicit_used = X_GP_ARGS },
+	[X_PUSH] = { .registers = X_U, .flags = RECORD_EFFECT_STORE | RECORD_EFFECT_TRAP, .implicit_defined = X_BIT(RSP), .implicit_used = X_BIT(RSP) },
+	[X_POP] = { .registers = X_D, .flags = RECORD_EFFECT_LOAD | RECORD_EFFECT_TRAP, .implicit_defined = X_BIT(RSP), .implicit_used = X_BIT(RSP) },
+	[X_ADJSP] = { .flags = X_P | X_W, .implicit_defined = X_BIT(RSP), .implicit_used = X_BIT(RSP) },
+	[X_CQO] = { .flags = X_P, .implicit_defined = X_BIT(RDX), .implicit_used = X_BIT(RAX) },
+	[X_IDIV] = { .registers = X_U, .flags = RECORD_EFFECT_TRAP | X_W, .implicit_defined = X_BIT(RAX) | X_BIT(RDX), .implicit_used = X_BIT(RAX) | X_BIT(RDX) },
+	[X_DIV] = { .registers = X_U, .flags = RECORD_EFFECT_TRAP | X_W, .implicit_defined = X_BIT(RAX) | X_BIT(RDX), .implicit_used = X_BIT(RAX) | X_BIT(RDX) },
+	[X_MULW] = { .registers = X_U, .flags = X_P | X_W, .implicit_defined = X_BIT(RAX) | X_BIT(RDX), .implicit_used = X_BIT(RAX) },
+	[X_SMULW] = { .registers = X_U, .flags = X_P | X_W, .implicit_defined = X_BIT(RAX) | X_BIT(RDX), .implicit_used = X_BIT(RAX) },
+	[X_UD2] = X_DESC(0, RECORD_EFFECT_TRAP | RECORD_EFFECT_BARRIER),
+	[X_TLS] = X_DESC(X_D, RECORD_EFFECT_LOAD | RECORD_EFFECT_TRAP), /* dynamic model below */
+	[X_GOT] = X_DESC(X_D, RECORD_EFFECT_LOAD | RECORD_EFFECT_TRAP),
+	[X_XCHG] = X_DESC(X_D | RECORD_OPERAND_USES_0 | X_U, X_MEM | RECORD_EFFECT_BARRIER),
+	[X_XADD] = X_DESC(X_D | RECORD_OPERAND_USES_0 | X_U, X_MEM | RECORD_EFFECT_BARRIER | X_W),
+	[X_CMPXCHG] = { .registers = X_U | X_V, .flags = X_MEM | RECORD_EFFECT_BARRIER | X_W, .implicit_defined = X_BIT(RAX), .implicit_used = X_BIT(RAX) },
+	[X_MFENCE] = X_DESC(0, RECORD_EFFECT_BARRIER),
+	[X_BLENDVB] = { .flags = X_P, .implicit_defined = X_BIT(XMM0 + 1),
+		.implicit_used = X_BIT(XMM0) | X_BIT(XMM0 + 1) | X_BIT(XMM0 + 2) },
+	[X_PCMPSTR] = { .flags = X_P | X_W, .implicit_used = X_BIT(XMM0) | X_BIT(XMM0 + 1) },
+	[X_RAW] = { .branch = RECORD_BRANCH_INDIRECT, .flags = X_MEM | RECORD_EFFECT_BARRIER | X_R | X_W | RECORD_EFFECT_FLOAT, .implicit_defined = X_ALL_REGS, .implicit_used = X_ALL_REGS },
+	[X_BARRIER] = X_DESC(0, RECORD_EFFECT_LOAD | RECORD_EFFECT_STORE | RECORD_EFFECT_BARRIER | X_R | X_W),
 	[X_LEAL] = X_DESC(X_D, X_P),
-	[X_JMPR] = { .regs = X_U, .br = RB_INDIRECT },
-	[X_JTE] = X_DESC(0, OD_BARRIER),
-	[X_NAMED] = X_DESC(0, OD_LABEL | OD_BARRIER),
+	[X_JMPR] = { .registers = X_U, .branch = RECORD_BRANCH_INDIRECT },
+	[X_JTE] = X_DESC(0, RECORD_EFFECT_BARRIER),
+	[X_NAMED] = X_DESC(0, RECORD_EFFECT_LABEL | RECORD_EFFECT_BARRIER),
 	/* Undefined destination for zero input is conservatively an old value. */
-	[X_BSF] = X_DESC(X_D | OD_USE0 | X_U, X_P | X_W),
-	[X_BSR] = X_DESC(X_D | OD_USE0 | X_U, X_P | X_W),
-	[X_BSWAP] = X_DESC(X_D | OD_USE0 | X_U, X_P),
+	[X_BSF] = X_DESC(X_D | RECORD_OPERAND_USES_0 | X_U, X_P | X_W),
+	[X_BSR] = X_DESC(X_D | RECORD_OPERAND_USES_0 | X_U, X_P | X_W),
+	[X_BSWAP] = X_DESC(X_D | RECORD_OPERAND_USES_0 | X_U, X_P),
 	[X_EXT] = X_DESC(X_D | X_U, X_P),
 	/* Direction flag is an input even though REP leaves arithmetic flags alone. */
-	[X_REP] = { .fl = X_MEM | OD_BARRIER | X_R, .idef = X_BIT(RCX) | X_BIT(RDI), .iuse = X_BIT(RCX) | X_BIT(RDI) },
-	[X_FADD] = X_DESC(X_D | OD_USE0 | X_U | X_V, OD_FP | OD_TRAP),
-	[X_FSUB] = X_DESC(X_D | OD_USE0 | X_U | X_V, OD_FP | OD_TRAP),
-	[X_FMUL] = X_DESC(X_D | OD_USE0 | X_U | X_V, OD_FP | OD_TRAP),
-	[X_FDIV] = X_DESC(X_D | OD_USE0 | X_U | X_V, OD_FP | OD_TRAP),
+	[X_REP] = { .flags = X_MEM | RECORD_EFFECT_BARRIER | X_R, .implicit_defined = X_BIT(RCX) | X_BIT(RDI), .implicit_used = X_BIT(RCX) | X_BIT(RDI) },
+	[X_FADD] = X_DESC(X_D | RECORD_OPERAND_USES_0 | X_U | X_V, RECORD_EFFECT_FLOAT | RECORD_EFFECT_TRAP),
+	[X_FSUB] = X_DESC(X_D | RECORD_OPERAND_USES_0 | X_U | X_V, RECORD_EFFECT_FLOAT | RECORD_EFFECT_TRAP),
+	[X_FMUL] = X_DESC(X_D | RECORD_OPERAND_USES_0 | X_U | X_V, RECORD_EFFECT_FLOAT | RECORD_EFFECT_TRAP),
+	[X_FDIV] = X_DESC(X_D | RECORD_OPERAND_USES_0 | X_U | X_V, RECORD_EFFECT_FLOAT | RECORD_EFFECT_TRAP),
 	[X_FXOR] = X_DESC(X_D | X_U | X_V, X_P),
-	[X_FSQRT] = X_DESC(X_D | OD_USE0 | X_U, OD_FP | OD_TRAP),
-	[X_FCMP] = X_DESC(X_U | X_V, OD_FP | OD_TRAP | X_W),
-	[X_FSETCC] = { .regs = X_D, .fl = X_P | X_R | X_W, .idef = X_BIT(R11), .iuse = X_BIT(R11) },
-	[X_CVTI2F] = X_DESC(X_D | OD_USE0 | X_U, OD_FP | OD_TRAP),
-	[X_CVTF2I] = X_DESC(X_D | X_U, OD_FP | OD_TRAP),
-	[X_CVTF2F] = X_DESC(X_D | OD_USE0 | X_U, OD_FP | OD_TRAP),
+	[X_FSQRT] = X_DESC(X_D | RECORD_OPERAND_USES_0 | X_U, RECORD_EFFECT_FLOAT | RECORD_EFFECT_TRAP),
+	[X_FCMP] = X_DESC(X_U | X_V, RECORD_EFFECT_FLOAT | RECORD_EFFECT_TRAP | X_W),
+	[X_FSETCC] = { .registers = X_D, .flags = X_P | X_R | X_W, .implicit_defined = X_BIT(R11), .implicit_used = X_BIT(R11) },
+	[X_CVTI2F] = X_DESC(X_D | RECORD_OPERAND_USES_0 | X_U, RECORD_EFFECT_FLOAT | RECORD_EFFECT_TRAP),
+	[X_CVTF2I] = X_DESC(X_D | X_U, RECORD_EFFECT_FLOAT | RECORD_EFFECT_TRAP),
+	[X_CVTF2F] = X_DESC(X_D | RECORD_OPERAND_USES_0 | X_U, RECORD_EFFECT_FLOAT | RECORD_EFFECT_TRAP),
 	/* x87 stack and control/status state are not physical GPR/XMM bits. */
-	[X_X87] = X_DESC(X_U, OD_FP | OD_TRAP | OD_BARRIER),
-	[X_RESUME_FRAME] = { .fl = OD_BARRIER | X_W, .idef = X_BIT(R12), .iuse = X_BIT(RBP) },
+	[X_X87] = X_DESC(X_U, RECORD_EFFECT_FLOAT | RECORD_EFFECT_TRAP | RECORD_EFFECT_BARRIER),
+	[X_RESUME_FRAME] = { .flags = RECORD_EFFECT_BARRIER | X_W, .implicit_defined = X_BIT(R12), .implicit_used = X_BIT(RBP) },
 };
 
-static rmask x64_effect_reg(unsigned r)
+static record_register_mask x64_effect_reg(unsigned r)
 {
 	if(r==XFRAME)return X_BIT(RSP);
 	return r <= XMM15 ? X_BIT(r) : 0; /* RIP is not a mutable register. */
 }
 
-VPRIV receffects x64_effects(const ecx *e, const rec *i)
+VPRIV record_effects x64_effects(const codegen_context *e, const record *i)
 {
-	if (i->op >= X_NOPS)
-		return (receffects){ .def = X_ALL_REGS, .use = X_ALL_REGS,
-			.fl = X_MEM | OD_FP | OD_BARRIER | X_R | X_W, .br = RB_INDIRECT };
-	const opdesc *d = &x64_desc[i->op];
+	if (i->opcode >= X_NOPS)
+		return (record_effects){ .defines = X_ALL_REGS, .used = X_ALL_REGS,
+			.flags = X_MEM | RECORD_EFFECT_FLOAT | RECORD_EFFECT_BARRIER | X_R | X_W, .branch = RECORD_BRANCH_INDIRECT };
+	const record_op_descriptor *d = &x64_desc[i->opcode];
 	/* A newly added opcode without metadata must be opaque, never a no-op. */
-	if (!d->regs && !d->br && !d->fl && !d->idef && !d->iuse)
-		return (receffects){ .def = X_ALL_REGS, .use = X_ALL_REGS,
-			.fl = X_MEM | OD_FP | OD_BARRIER | X_R | X_W, .br = RB_INDIRECT };
-	receffects f = { .def = d->idef, .use = d->iuse, .fl = d->fl, .br = d->br };
-	if(i->op==X_BSWAP && i->sz==2)f.fl|=OD_WFLAGS; /* byte rotate */
-	if (d->regs & OD_DEF0) f.def |= x64_effect_reg(i->r[0]);
-	if (d->regs & OD_USE0) f.use |= x64_effect_reg(i->r[0]);
-	if (d->regs & OD_USE1) f.use |= x64_effect_reg(i->r[1]);
-	if (d->regs & OD_USE2) f.use |= x64_effect_reg(i->r[2]);
-	if (d->regs & OD_USE3) f.use |= x64_effect_reg(i->r[3]);
+	if (!d->registers && !d->branch && !d->flags && !d->implicit_defined && !d->implicit_used)
+		return (record_effects){ .defines = X_ALL_REGS, .used = X_ALL_REGS,
+			.flags = X_MEM | RECORD_EFFECT_FLOAT | RECORD_EFFECT_BARRIER | X_R | X_W, .branch = RECORD_BRANCH_INDIRECT };
+	record_effects f = { .defines = d->implicit_defined, .used = d->implicit_used, .flags = d->flags, .branch = d->branch };
+	if(i->opcode==X_BSWAP && i->size==2)f.flags|=RECORD_EFFECT_WRITES_FLAGS; /* byte rotate */
+	if (d->registers & RECORD_OPERAND_DEFINES_0) f.defines |= x64_effect_reg(i->registers[0]);
+	if (d->registers & RECORD_OPERAND_USES_0) f.used |= x64_effect_reg(i->registers[0]);
+	if (d->registers & RECORD_OPERAND_USES_1) f.used |= x64_effect_reg(i->registers[1]);
+	if (d->registers & RECORD_OPERAND_USES_2) f.used |= x64_effect_reg(i->registers[2]);
+	if (d->registers & RECORD_OPERAND_USES_3) f.used |= x64_effect_reg(i->registers[3]);
 
 	/* Only MOV and narrow ALU/atomic operations can leave GPR high bits.
 	 * SETCC and EXT contain a widening move; LD also always widens GPRs.
 	 */
-	if ((d->regs & OD_DEF0) && i->sz < 4 && i->r[0] < XMM0 &&
-	    i->op != X_LD && i->op != X_LDX && i->op != X_EXT && i->op != X_SETCC && i->op != X_FSETCC)
-		f.use |= x64_effect_reg(i->r[0]);
-	if ((i->op == X_LD || i->op == X_ST || i->op == X_LDX || i->op == X_STX || i->op == X_TESTM || i->op == X_CMPM || i->op == X_LEA ||
-	     i->op == X_XCHG || i->op == X_XADD || i->op == X_CMPXCHG || i->op == X_X87) &&
-	    i->r[1] == RBP && i->off < 0 && (!e || e->wk->falign > 16))
-		f.use |= X_BIT(R12); /* printer's realigned local-frame base */
-	if (i->op == X_RESUME_FRAME) {
-		if (e && e->wk && e->wk->falign <= 16)
-			f = (receffects){ .fl = OD_BARRIER }; /* printer emits nothing */
-		else if (!e || !e->wk)
-			f.use |= X_BIT(R12); /* unknown alignment may preserve its old value */
-	} else if (i->op == X_PCMPSTR) {
-		f.def |= X_BIT((i->cond & 1) ? RCX : XMM0);
-		if (!(i->cond & 2)) f.use |= X_BIT(RAX) | X_BIT(RDX);
-	} else if (i->op == X_TLS) {
-		if (i->cond == 2) {
-			f.def = X_CALL_DEF;
-			f.use = X_CALL_USE & ~X_BIT(RDI); /* descriptor overwrites RDI */
-			f.fl = X_CALL_FLAGS;
-		} else if (i->cond) {
-			f.fl |= X_W; /* initial-exec uses addq, local-exec LEA does not */
+	if ((d->registers & RECORD_OPERAND_DEFINES_0) && i->size < 4 && i->registers[0] < XMM0 &&
+	    i->opcode != X_LD && i->opcode != X_LDX && i->opcode != X_EXT && i->opcode != X_SETCC && i->opcode != X_FSETCC)
+		f.used |= x64_effect_reg(i->registers[0]);
+	if ((i->opcode == X_LD || i->opcode == X_ST || i->opcode == X_LDX || i->opcode == X_STX || i->opcode == X_TESTM || i->opcode == X_CMPM || i->opcode == X_LEA ||
+	     i->opcode == X_XCHG || i->opcode == X_XADD || i->opcode == X_CMPXCHG || i->opcode == X_X87) &&
+	    i->registers[1] == RBP && i->offset < 0 && (!e || e->walk_state->frame_alignment > 16))
+		f.used |= X_BIT(R12); /* printer's realigned local-frame base */
+	if (i->opcode == X_RESUME_FRAME) {
+		if (e && e->walk_state && e->walk_state->frame_alignment <= 16)
+			f = (record_effects){ .flags = RECORD_EFFECT_BARRIER }; /* printer emits nothing */
+		else if (!e || !e->walk_state)
+			f.used |= X_BIT(R12); /* unknown alignment may preserve its old value */
+	} else if (i->opcode == X_PCMPSTR) {
+		f.defines |= X_BIT((i->condition & 1) ? RCX : XMM0);
+		if (!(i->condition & 2)) f.used |= X_BIT(RAX) | X_BIT(RDX);
+	} else if (i->opcode == X_TLS) {
+		if (i->condition == 2) {
+			f.defines = X_CALL_DEF;
+			f.used = X_CALL_USE & ~X_BIT(RDI); /* descriptor overwrites RDI */
+			f.flags = X_CALL_FLAGS;
+		} else if (i->condition) {
+			f.flags |= X_W; /* initial-exec uses addq, local-exec LEA does not */
 		}
-	} else if (i->op == X_REP) {
-		if (i->cond) f.use |= X_BIT(RAX);
-		else f.def |= X_BIT(RSI), f.use |= X_BIT(RSI);
-	} else if (i->op == X_X87) {
-		switch (i->cond) {
-		case XF_LDT: case XF_LD: case XF_ILD: case XF_LDCW: f.fl |= OD_LOAD; break;
-		case XF_STPT: case XF_STP: case XF_ISTP: case XF_STCW: f.fl |= OD_STORE; break;
-		case XF_UCOMIP: f.fl |= X_W; break;
+	} else if (i->opcode == X_REP) {
+		if (i->condition) f.used |= X_BIT(RAX);
+		else f.defines |= X_BIT(RSI), f.used |= X_BIT(RSI);
+	} else if (i->opcode == X_X87) {
+		switch (i->condition) {
+		case XF_LDT: case XF_LD: case XF_ILD: case XF_LDCW: f.flags |= RECORD_EFFECT_LOAD; break;
+		case XF_STPT: case XF_STP: case XF_ISTP: case XF_STCW: f.flags |= RECORD_EFFECT_STORE; break;
+		case XF_UCOMIP: f.flags |= X_W; break;
 		default: break;
 		}
 	}
@@ -181,90 +181,90 @@ VPRIV receffects x64_effects(const ecx *e, const rec *i)
 VPRIV const uint8_t *x64_flow_table(void)
 {
 	static const uint8_t flow[X_NOPS] = {
-		[X_LABEL] = EM_FLOW_ENTRY,
-		[X_MOV] = EM_FLOW_NEXT,
-		[X_CMOV] = EM_FLOW_NEXT,
-		[X_TESTM] = EM_FLOW_NEXT,
-		[X_MOVI] = EM_FLOW_NEXT,
-		[X_LD] = EM_FLOW_NEXT,
-		[X_LDX] = EM_FLOW_NEXT,
-		[X_STX] = EM_FLOW_NEXT,
-		[X_ST] = EM_FLOW_NEXT,
-		[X_LEA] = EM_FLOW_NEXT,
-		[X_LEASCALE] = EM_FLOW_NEXT,
-		[X_ADD] = EM_FLOW_NEXT,
-		[X_SUB] = EM_FLOW_NEXT,
-		[X_AND] = EM_FLOW_NEXT,
-		[X_OR] = EM_FLOW_NEXT,
-		[X_XOR] = EM_FLOW_NEXT,
-		[X_IMUL] = EM_FLOW_NEXT,
-		[X_ADC] = EM_FLOW_NEXT,
-		[X_SBB] = EM_FLOW_NEXT,
-		[X_ADDI] = EM_FLOW_NEXT,
-		[X_SUBI] = EM_FLOW_NEXT,
-		[X_ANDI] = EM_FLOW_NEXT,
-		[X_ORI] = EM_FLOW_NEXT,
-		[X_XORI] = EM_FLOW_NEXT,
-		[X_IMULI] = EM_FLOW_NEXT,
-		[X_SHLI] = EM_FLOW_NEXT,
-		[X_SHRI] = EM_FLOW_NEXT,
-		[X_SARI] = EM_FLOW_NEXT,
-		[X_SHL] = EM_FLOW_NEXT,
-		[X_SHR] = EM_FLOW_NEXT,
-		[X_SAR] = EM_FLOW_NEXT,
-		[X_NEG] = EM_FLOW_NEXT,
-		[X_NOT] = EM_FLOW_NEXT,
-		[X_CMP] = EM_FLOW_NEXT,
-		[X_CMPM] = EM_FLOW_NEXT,
-		[X_CMPI] = EM_FLOW_NEXT,
-		[X_TEST] = EM_FLOW_NEXT,
-		[X_SETCC] = EM_FLOW_NEXT,
-		[X_JMP] = EM_FLOW_STOP,
-		[X_JCC] = EM_FLOW_NEXT,
-		[X_CALL] = EM_FLOW_NEXT,
-		[X_CALLR] = EM_FLOW_NEXT,
-		[X_TAIL] = EM_FLOW_STOP,
-		[X_PUSH] = EM_FLOW_NEXT,
-		[X_POP] = EM_FLOW_NEXT,
-		[X_ADJSP] = EM_FLOW_NEXT,
-		[X_CQO] = EM_FLOW_NEXT,
-		[X_IDIV] = EM_FLOW_NEXT,
-		[X_DIV] = EM_FLOW_NEXT,
-		[X_MULW] = EM_FLOW_NEXT,
-		[X_SMULW] = EM_FLOW_NEXT,
-		[X_UD2] = EM_FLOW_NEXT,
-		[X_TLS] = EM_FLOW_NEXT,
-		[X_GOT] = EM_FLOW_NEXT,
-		[X_XCHG] = EM_FLOW_NEXT,
-		[X_XADD] = EM_FLOW_NEXT,
-		[X_CMPXCHG] = EM_FLOW_NEXT,
-		[X_MFENCE] = EM_FLOW_NEXT,
-		[X_BLENDVB] = EM_FLOW_NEXT,
-		[X_PCMPSTR] = EM_FLOW_NEXT,
-		[X_RAW] = EM_FLOW_ENTRY,
-		[X_BARRIER] = EM_FLOW_ENTRY,
-		[X_LEAL] = EM_FLOW_NEXT,
-		[X_JMPR] = EM_FLOW_ENTRY,
-		[X_JTE] = EM_FLOW_ENTRY,
-		[X_NAMED] = EM_FLOW_ENTRY,
-		[X_BSF] = EM_FLOW_NEXT,
-		[X_BSR] = EM_FLOW_NEXT,
-		[X_BSWAP] = EM_FLOW_NEXT,
-		[X_EXT] = EM_FLOW_NEXT,
-		[X_REP] = EM_FLOW_NEXT,
-		[X_FADD] = EM_FLOW_NEXT,
-		[X_FSUB] = EM_FLOW_NEXT,
-		[X_FMUL] = EM_FLOW_NEXT,
-		[X_FDIV] = EM_FLOW_NEXT,
-		[X_FXOR] = EM_FLOW_NEXT,
-		[X_FSQRT] = EM_FLOW_NEXT,
-		[X_FCMP] = EM_FLOW_NEXT,
-		[X_FSETCC] = EM_FLOW_NEXT,
-		[X_CVTI2F] = EM_FLOW_NEXT,
-		[X_CVTF2I] = EM_FLOW_NEXT,
-		[X_CVTF2F] = EM_FLOW_NEXT,
-		[X_X87] = EM_FLOW_NEXT,
-		[X_RESUME_FRAME] = EM_FLOW_NEXT,
+		[X_LABEL] = RECORD_FLOW_ENTRY,
+		[X_MOV] = RECORD_FLOW_NEXT,
+		[X_CMOV] = RECORD_FLOW_NEXT,
+		[X_TESTM] = RECORD_FLOW_NEXT,
+		[X_MOVI] = RECORD_FLOW_NEXT,
+		[X_LD] = RECORD_FLOW_NEXT,
+		[X_LDX] = RECORD_FLOW_NEXT,
+		[X_STX] = RECORD_FLOW_NEXT,
+		[X_ST] = RECORD_FLOW_NEXT,
+		[X_LEA] = RECORD_FLOW_NEXT,
+		[X_LEASCALE] = RECORD_FLOW_NEXT,
+		[X_ADD] = RECORD_FLOW_NEXT,
+		[X_SUB] = RECORD_FLOW_NEXT,
+		[X_AND] = RECORD_FLOW_NEXT,
+		[X_OR] = RECORD_FLOW_NEXT,
+		[X_XOR] = RECORD_FLOW_NEXT,
+		[X_IMUL] = RECORD_FLOW_NEXT,
+		[X_ADC] = RECORD_FLOW_NEXT,
+		[X_SBB] = RECORD_FLOW_NEXT,
+		[X_ADDI] = RECORD_FLOW_NEXT,
+		[X_SUBI] = RECORD_FLOW_NEXT,
+		[X_ANDI] = RECORD_FLOW_NEXT,
+		[X_ORI] = RECORD_FLOW_NEXT,
+		[X_XORI] = RECORD_FLOW_NEXT,
+		[X_IMULI] = RECORD_FLOW_NEXT,
+		[X_SHLI] = RECORD_FLOW_NEXT,
+		[X_SHRI] = RECORD_FLOW_NEXT,
+		[X_SARI] = RECORD_FLOW_NEXT,
+		[X_SHL] = RECORD_FLOW_NEXT,
+		[X_SHR] = RECORD_FLOW_NEXT,
+		[X_SAR] = RECORD_FLOW_NEXT,
+		[X_NEG] = RECORD_FLOW_NEXT,
+		[X_NOT] = RECORD_FLOW_NEXT,
+		[X_CMP] = RECORD_FLOW_NEXT,
+		[X_CMPM] = RECORD_FLOW_NEXT,
+		[X_CMPI] = RECORD_FLOW_NEXT,
+		[X_TEST] = RECORD_FLOW_NEXT,
+		[X_SETCC] = RECORD_FLOW_NEXT,
+		[X_JMP] = RECORD_FLOW_STOP,
+		[X_JCC] = RECORD_FLOW_NEXT,
+		[X_CALL] = RECORD_FLOW_NEXT,
+		[X_CALLR] = RECORD_FLOW_NEXT,
+		[X_TAIL] = RECORD_FLOW_STOP,
+		[X_PUSH] = RECORD_FLOW_NEXT,
+		[X_POP] = RECORD_FLOW_NEXT,
+		[X_ADJSP] = RECORD_FLOW_NEXT,
+		[X_CQO] = RECORD_FLOW_NEXT,
+		[X_IDIV] = RECORD_FLOW_NEXT,
+		[X_DIV] = RECORD_FLOW_NEXT,
+		[X_MULW] = RECORD_FLOW_NEXT,
+		[X_SMULW] = RECORD_FLOW_NEXT,
+		[X_UD2] = RECORD_FLOW_NEXT,
+		[X_TLS] = RECORD_FLOW_NEXT,
+		[X_GOT] = RECORD_FLOW_NEXT,
+		[X_XCHG] = RECORD_FLOW_NEXT,
+		[X_XADD] = RECORD_FLOW_NEXT,
+		[X_CMPXCHG] = RECORD_FLOW_NEXT,
+		[X_MFENCE] = RECORD_FLOW_NEXT,
+		[X_BLENDVB] = RECORD_FLOW_NEXT,
+		[X_PCMPSTR] = RECORD_FLOW_NEXT,
+		[X_RAW] = RECORD_FLOW_ENTRY,
+		[X_BARRIER] = RECORD_FLOW_ENTRY,
+		[X_LEAL] = RECORD_FLOW_NEXT,
+		[X_JMPR] = RECORD_FLOW_ENTRY,
+		[X_JTE] = RECORD_FLOW_ENTRY,
+		[X_NAMED] = RECORD_FLOW_ENTRY,
+		[X_BSF] = RECORD_FLOW_NEXT,
+		[X_BSR] = RECORD_FLOW_NEXT,
+		[X_BSWAP] = RECORD_FLOW_NEXT,
+		[X_EXT] = RECORD_FLOW_NEXT,
+		[X_REP] = RECORD_FLOW_NEXT,
+		[X_FADD] = RECORD_FLOW_NEXT,
+		[X_FSUB] = RECORD_FLOW_NEXT,
+		[X_FMUL] = RECORD_FLOW_NEXT,
+		[X_FDIV] = RECORD_FLOW_NEXT,
+		[X_FXOR] = RECORD_FLOW_NEXT,
+		[X_FSQRT] = RECORD_FLOW_NEXT,
+		[X_FCMP] = RECORD_FLOW_NEXT,
+		[X_FSETCC] = RECORD_FLOW_NEXT,
+		[X_CVTI2F] = RECORD_FLOW_NEXT,
+		[X_CVTF2I] = RECORD_FLOW_NEXT,
+		[X_CVTF2F] = RECORD_FLOW_NEXT,
+		[X_X87] = RECORD_FLOW_NEXT,
+		[X_RESUME_FRAME] = RECORD_FLOW_NEXT,
 	};
 	return flow;
 }

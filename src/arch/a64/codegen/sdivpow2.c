@@ -1,7 +1,7 @@
-#include "../../../codegen/emitimpl.h"
+#include "../../../codegen/codegen-internal.h"
 
 /* The shared recipe specifies rounding; this adapter owns registers. */
-VPRIV val a64_sdivpow2(ecx *e, val a, const em_sdivpow2_recipe *r)
+VPRIV codegen_value a64_sdivpow2(codegen_context *e, codegen_value a, const em_sdivpow2_recipe *r)
 {
 	int x = r->bits == 64, ra = toreg(e, &a), bias;
 

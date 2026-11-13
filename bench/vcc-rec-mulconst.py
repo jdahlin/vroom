@@ -58,8 +58,8 @@ def main():
         compile_run(SOURCE)
         if args.check_mutation:
             implementation = (Path(R) / 'src/codegen/opt/mulconst.c').read_text()
-            implementation = implementation.replace('#include "../emitimpl.h"',
-                '#include "' + str(Path(R) / 'src/codegen/emitimpl.h') + '"')
+            implementation = implementation.replace('#include "../codegen-internal.h"',
+                '#include "' + str(Path(R) / 'src/codegen/codegen-internal.h') + '"')
             changed = implementation.replace('case 3: return 1;', 'case 3: return 2;')
             assert changed != implementation
             compile_run(SOURCE.replace('#include "codegen/opt/mulconst.c"', changed), True)

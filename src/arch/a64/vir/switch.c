@@ -4,7 +4,7 @@
 
 VPRIV void a64_vir_switch_lower(a64_vir_context *L, uint32_t b, const vir_insn *in)
 {
-	ecx *e = L->context;
+	codegen_context *e = L->context;
 	const vir_function *f = L->function;
 	int x = a64_vir_value_is_64_bit(f, in->a), r = a64_vir_operand_general_register(L, 0, R_X16);
 	uint32_t n = f->extra[in->c], stride = x ? 5 : 3;
@@ -24,8 +24,8 @@ VPRIV void a64_vir_switch_lower(a64_vir_context *L, uint32_t b, const vir_insn *
 			cnt += h - a >= 64 ? 64 : h - a + 1;	/* (h - a + 1 wraps to 0 for a range of all 2^64 values) */
 		}
 	}
-	if (n >= 6 && span < 4096 && span + 1 <= 4 * cnt && !e->E->noopt) {
-		uint32_t tab = newlabel(e), off = e->njtl;
+	if (n >= 6 && span < 4096 && span + 1 <= 4 * cnt && !e->unit->cleanups_disabled) {
+		uint32_t tab = newlabel(e), off = e->jump_table_label_count;
 		int ix = r;
 
 		/* the index: the selector itself from 0 (a word through uxtw), else x17; never x16,
@@ -36,15 +36,15 @@ VPRIV void a64_vir_switch_lower(a64_vir_context *L, uint32_t b, const vir_insn *
 			op3(e, I_MOV, x, ix = R_X17, r, 0);
 		opi(e, I_SUBSI, x, ZR, ix, (int64_t)span);
 		bcond(e, C_HI, dl);
-		if (e->njtl + (uint32_t)span + 1 > e->capjtl) {
-			e->capjtl = (e->njtl + (uint32_t)span + 1) * 2;
-			e->jtl = realloc(e->jtl, (size_t)e->capjtl * sizeof *e->jtl);
+		if (e->jump_table_label_count + (uint32_t)span + 1 > e->jump_table_label_capacity) {
+			e->jump_table_label_capacity = (e->jump_table_label_count + (uint32_t)span + 1) * 2;
+			e->jump_table_labels = realloc(e->jump_table_labels, (size_t)e->jump_table_label_capacity * sizeof *e->jump_table_labels);
 		}
-		if (e->njt == e->capjt) {
-			e->capjt = e->capjt ? e->capjt * 2 : 4;
-			e->jt = realloc(e->jt, (size_t)e->capjt * sizeof *e->jt);
+		if (e->jump_table_count == e->jump_table_capacity) {
+			e->jump_table_capacity = e->jump_table_capacity ? e->jump_table_capacity * 2 : 4;
+			e->jump_tables = realloc(e->jump_tables, (size_t)e->jump_table_capacity * sizeof *e->jump_tables);
 		}
-		if (!e->jtl || !e->jt)
+		if (!e->jump_table_labels || !e->jump_tables)
 			abort();
 		uint32_t k = 0, l = 0;
 
@@ -63,18 +63,18 @@ VPRIV void a64_vir_switch_lower(a64_vir_context *L, uint32_t b, const vir_insn *
 			} else {
 				t = dl;
 			}
-			e->jtl[e->njtl++] = t;
-			if (!(e->lrefc[t] & LREF_EXT)) {
-				e->lrefc[t]++;
-				e->lrefc[t] |= LREF_EXT;
+			e->jump_table_labels[e->jump_table_label_count++] = t;
+			if (!(e->label_reference_counts[t] & LREF_EXT)) {
+				e->label_reference_counts[t]++;
+				e->label_reference_counts[t] |= LREF_EXT;
 			}
 		}
-		e->jt[e->njt++] = (struct ejt){ tab, off, (uint32_t)span + 1 };
+		e->jump_tables[e->jump_table_count++] = (struct codegen_jump_table){ tab, off, (uint32_t)span + 1 };
 		ins *i = put(e, I_JT);
 		i->rd = (uint8_t)ix;
 		i->cond = ix != R_X17 && !x ? 2 : 0;
 		i->label = tab;
-		e->reach = false;
+		e->is_reachable = false;
 		return;
 	}
 	for (uint32_t k = 0; k < n; k++) {

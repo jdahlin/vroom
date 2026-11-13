@@ -10,7 +10,7 @@ VPRIV const uint8_t a64_vir_condition_swapped[10] = { 0, 1, 4, 5, 2, 3, 8, 9, 6,
 
 VPRIV int a64_vir_integer_compare_lower(a64_vir_context *L, const vir_insn *in)	/* the flags for an icmp; its code (swapped if the operands were) */
 {
-	ecx *e = L->context;
+	codegen_context *e = L->context;
 	int x = a64_vir_value_is_64_bit(L->function, in->a), a;
 
 	if (L->operand_registers[0] == VIR_REGISTER_NONE && a64_vir_value_is_integer_constant(L->function, in->a) && L->operand_registers[1] != VIR_REGISTER_NONE) {
@@ -70,7 +70,7 @@ VPRIV bool a64_vir_compare_chain_lower(a64_vir_context *L, uint32_t b, uint32_t 
 VPRIV void a64_vir_compare_chained_lower(a64_vir_context *L, const vir_insn *in, bool isor)
 {
 	static const uint8_t sat[16] = { 4, 0, 2, 0, 8, 0, 1, 0, 2, 0, 0, 8, 0, 4, 0, 0 };	/* nzcv satisfying a condition */
-	ecx *e = L->context;
+	codegen_context *e = L->context;
 	int x = a64_vir_value_is_64_bit(L->function, in->a), code = in->flags & 15, cc, rn, rm = -1;
 	int64_t k = 0;
 	bool imm = false;
@@ -126,7 +126,7 @@ VPRIV a64_vir_condition a64_vir_branch_condition_get(a64_vir_context *L, const v
 	return (a64_vir_condition){ C_NE, a64_vir_operand_general_register(L, 0, R_X16), a64_vir_value_is_64_bit(L->function, in->a), -1 };
 }
 
-VPRIV void a64_vir_branch_conditional_emit(ecx *e, a64_vir_condition c, bool inv, uint32_t l)
+VPRIV void a64_vir_branch_conditional_emit(codegen_context *e, a64_vir_condition c, bool inv, uint32_t l)
 {
 	int cc = inv ? c.code ^ 1 : c.code;
 
