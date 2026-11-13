@@ -133,7 +133,11 @@ static void x64_asmmem(cc *c, tbuf *b, const lval *l)
 	if (l->off)
 		vtext_signed_append(b, l->off);
 	vtext_char_append(b, '(');
-	x64_asmreg(b, l->k == L_FRAME ? RBP : l->r, 8, false);
+	/* Resolve negative frame offsets after all local alignments are known. */
+	if (l->k == L_FRAME && l->off < 0)
+		vtext_char_append(b, 0);
+	else
+		x64_asmreg(b, l->k == L_FRAME ? RBP : l->r, 8, false);
 	vtext_char_append(b, ')');
 }
 
@@ -481,15 +485,15 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 			while (N(an)->op == N_CAST && (N(an)->aux == CK_NOP || N(an)->aux == CK_P2P || N(an)->aux == CK_DECAY ||
 						       N(an)->aux == CK_FDECAY))
 				an = N(an)->a;
-			if (N(an)->op == N_ADDR)
-				an = N(an)->a;
+			bool address = N(an)->op == N_ADDR;
+			if (address) an = N(an)->a;
 			if (i < 64 && (pkm >> i & 1)) {
 				v = pkv[i];	/* an inlined parameter still holding its constant argument */
 			} else if (is_integer(e->c, N(en)->ty) && cc_eval(e->c, en, &cv) && cv.kind == CV_INT) {
 				/* an integer constant expression as the front end folds it (__builtin_clzll(63), ...) */
 				v = vconst(em_trunc_to(e->c, cv.i, N(en)->ty));
 			} else if (e->c->o->pic && N(an)->op == N_VAR && (c->syms[N(an)->a].kind == S_FUNC ||
-				   (c->syms[N(an)->a].kind == S_VAR && !is_local_var(c, N(an)->a)))) {
+				   (c->syms[N(an)->a].kind == S_VAR && (address || is_array(c, N(an)->ty)) && !is_local_var(c, N(an)->a)))) {
 				/* &sym under -fPIC: an immediate, as clang (the asm names the symbol) */
 				v = (val){ .k = V_ADDR, .ref = REF(RK_SYM, canon_sym(c, N(an)->a)) };
 			} else {
@@ -498,6 +502,7 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 		}
 		if (v.k == V_CONST || v.k == V_ADDR) {	/* (an address is an immediate under -fPIC too, as clang) */
 			bool imm = false;
+			if (v.k == V_ADDR) note_ref(e, v.ref);
 
 			for (const char *p = cs; *p; p++)
 				if (v.k == V_ADDR ? (*p == 'i' || *p == 'g' || *p == 's') : x64_immok(*p, v.i))
@@ -505,8 +510,6 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 			if (imm) {
 				o->kind = XO_IMM;
 				o->v = v;
-				if (v.k == V_ADDR)
-					note_ref(e, v.ref);
 				continue;
 			}
 		}
@@ -578,13 +581,6 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 				x64_tfree(e, op[i].v.r);
 				break;
 			}
-	/* Raw text cannot defer frame-base selection to the printer. Materialize
-	   frame operands through the regular address record, including realignment. */
-	for (uint32_t i = 0; i < nops; i++)
-		if (op[i].kind == XO_MEM && op[i].l.k == L_FRAME) {
-			int r = x64_laddr(e, &op[i].l);
-			op[i].l = (lval){ .k = L_REG, .r = (uint8_t)r };
-		}
 	/* the template: {att|intel} alternatives keep the first */
 	start = rb->n;
 	if (basic) {
@@ -768,8 +764,17 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 		}
 	}
 	uint32_t asm_live = X->live;
+	/* Register inputs are dead after the template. Output
+	   writeback can reuse them while all output values stay live. */
+	uint32_t writeback_live = asm_live;
+	for (uint32_t i = a->nout; i < nops; i++) {
+		if (op[i].kind == XO_REG && op[i].tied < 0 && !op[i].sp)
+			writeback_live &= ~(1u << op[i].reg);
+	}
+	for (uint32_t i = 0; i < a->nout; i++)
+		if (op[i].kind == XO_REG) writeback_live |= 1u << op[i].reg;
 	for (uint32_t edge = 0; edge <= a->nlabel; edge++) {
-		X->live = asm_live;
+		X->live = writeback_live;
 		if (edge) x64_label(e, edges[edge - 1]);
 		/* The prepass keeps every output address-backed (lnoreg). Its
 		   address was evaluated after fixed registers were reserved, so it
@@ -794,6 +799,7 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 			} else {
 				x64_store(e, o->reg, &o->l, o->size);
 			}
+			if (o->lpark) x64_tfree(e, o->l.r);
 		}
 		for (int r = 0; r < 32; r++)
 			if (saved & (1u << r)) {
@@ -814,7 +820,7 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 			x64_tfree(e, o->reg);
 		if (o->kind == XO_X87 && o->out && o->l.k == L_REG)
 			x64_tfree(e, o->l.r);
-		if (o->out && o->l.k == L_REG && !o->l.bf)
+		if (o->out && o->l.k == L_REG && !o->l.bf && !o->lpark)
 			x64_tfree(e, o->l.r);
 		if (!o->out && o->kind == XO_MEM && o->l.k == L_REG)
 			x64_tfree(e, o->l.r);
