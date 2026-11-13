@@ -208,7 +208,7 @@ bool diag_warning_report(pp *p, const char *flag, bool on, const char *const *gr
  * diagnostic becomes that diagnostic's child.  Records are only built on the
  * error path; nothing here runs for a TU without diagnostics.
  *
- *   vdiag *d = diag_record_begin(p, DIAG_LEVEL_ERROR, loc, "expected '%s'", "x");
+ *   diag_record *d = diag_record_begin(p, DIAG_LEVEL_ERROR, loc, "expected '%s'", "x");
  *   diag_record_label_add(p, d, b, e, "this");		// a range (label NULL: plain ~)
  *   diag_record_fixit_add(p, d, b, e, ";", DIAG_APPLICABILITY_MACHINE);	// replace [b, e)
  *   diag_record_note_add(p, d, loc2, "to match this '('");

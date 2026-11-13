@@ -41,7 +41,7 @@ VPRIV int diag_location_presumed(const pp *p, uint32_t loc, const char **name, u
 	return r;
 }
 
-VPRIV void include_stack(pp *p, vbuffer *b, const pp_file_entry *e)
+VPRIV void diag_include_stack_render(pp *p, vbuffer *b, const pp_file_entry *e)
 {
 	const pp_file_entry *chain[64];
 	int n = 0;
@@ -278,7 +278,7 @@ VPRIV bool diag_head_render(pp *p, vbuffer *b, const diag_record *d, const pp_fi
 	bool note = d->level == DIAG_LEVEL_NOTE;
 
 	if (has && !note && (uint32_t)(e - p->fe) + 1 != p->diagnostic_last_file)
-		include_stack(p, b, e);
+		diag_include_stack_render(p, b, e);
 	if (has && !note)
 		p->diagnostic_last_file = (uint32_t)(e - p->fe) + 1;
 	if (p->color)

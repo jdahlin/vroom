@@ -310,7 +310,7 @@ VPRIV int pp_pragma_run(pp *p, const char *s, size_t n, uint32_t loc, ptok *out,
 		r = q;
 		if ((pp_pragma_word_match(&r, e, "clang") || pp_pragma_word_match(&r, e, "GCC")) && pp_pragma_word_match(&r, e, "diagnostic")) {
 			PP_HEADER_CACHE_REGION_REJECT(p);	/* (a replay would not run it) */
-			diag_pragma(p, r, e, loc);	/* (and kept in the output, as clang -E) */
+			diag_pragma_handle(p, r, e, loc);	/* (and kept in the output, as clang -E) */
 		}
 		r = q;
 		if (sloc && pp_pragma_word_match(&r, e, "GCC")) {	/* #pragma GCC warning/error "msg" (_Pragma: not modelled) */

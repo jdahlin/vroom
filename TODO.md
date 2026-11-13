@@ -1490,7 +1490,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   name, #else, #endif, #undef's name, #include's header name and #line's
   file name, with clang's "//" fix-it; conditionals at the active level
   also when a skip lands on them.  With it: a #line file name now reaches
-  the diagnostics (`diag_where` replaced it by the file's path).  Done:
+  the diagnostics (`diag_location_presumed` replaced it by the file's path).  Done:
   diag `extra_tokens.c`; parity cmp/lines green.  Not modelled: a
   macro-expanded #include name.
 - [x] **pp `#pragma GCC warning`/`error`** ("msg" or ("msg"), else

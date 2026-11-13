@@ -131,7 +131,7 @@ static void pp_expansion_note_scan(pp *p, diag_record *top, diag_record *after, 
 		if (len > 1 && rng)	/* (clang: the diagnostic's own ranges mapped into the macro; none, none) */
 			diag_record_label_add(p, n, loc, loc + len, NULL);
 		n->id = "note_macro_expansion_here";
-		kid_after(top, after, n);
+		diag_record_note_insert(top, after, n);
 	}
 }
 
@@ -465,7 +465,7 @@ static void pp_expansion_note_add(pp *p, diag_record *top, diag_record *after, c
 			k = diag_record_begin(p, DIAG_LEVEL_NOTE, UINT32_MAX,
 					  "(skipping %d expansions in backtrace; use -fmacro-backtrace-limit=0 to see all)",
 					  n - head - tail);
-			kid_after(top, after, k), after = k;
+			diag_record_note_insert(top, after, k), after = k;
 			i = n - tail;
 		}
 		k = diag_record_begin(p, DIAG_LEVEL_NOTE, fr[i].loc, "expanded from macro '%.*s'",
@@ -473,7 +473,7 @@ static void pp_expansion_note_add(pp *p, diag_record *top, diag_record *after, c
 		if (rng)	/* (clang: the diagnostic's own ranges mapped into the macro) */
 			diag_record_label_add(p, k, fr[i].loc, fr[i].loc + fr[i].len, NULL);
 		k->id = "note_macro_expansion_here";
-		kid_after(top, after, k), after = k;
+		diag_record_note_insert(top, after, k), after = k;
 		if (n == 1 && nos)
 			pp_expansion_argument_spans(p, k, &fr[0], before, os, nos);
 		if (i == n - 1)

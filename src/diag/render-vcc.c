@@ -19,7 +19,7 @@
  *  - a note on a line already shown (clang's "to match this '('") folds into the
  *    snippet as a label, and its own snippet is left out (its first line stays);
  *  - "= help: ..." for an action in words;
- *  - tabs and wide characters at their display width (dcols).
+ *  - tabs and wide characters at their display width (diag_columns_width).
  *
  * A record is rendered when the next one starts, or at the end (diag_vcc_flush):
  * its notes are reported after it.  bench/diag-render.py rebuilds this text from
