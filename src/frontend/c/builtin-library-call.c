@@ -69,8 +69,8 @@ VPRIV uint32_t fp_sign_call(cc *c, const char *name, size_t len, qty ft, const v
 	if (!elementwise_abs_effects(c, args->v[0], true) && cc_eval(c, args->v[0], &a) && a.kind == CV_FLT &&
 	    (!copy || (!elementwise_abs_effects(c, args->v[1], true) && cc_eval(c, args->v[1], &b) && b.kind == CV_FLT)))
 	{
-		u128 q = a.ld ? a.q : q_of_d(a.f);
-		u128 sign = copy ? (b.ld ? b.q : q_of_d(b.f)) & ((u128)1 << 127) : 0;
+		u128 q = a.ld ? a.q : vsoftfloat_of_double(a.f);
+		u128 sign = copy ? (b.ld ? b.q : vsoftfloat_of_double(b.f)) & ((u128)1 << 127) : 0;
 		/* Keep the original constant node: converting through host double
 		   would quiet or canonicalize a signaling NaN payload. */
 		return ((q ^ sign) >> 127) ? neg(c, args->v[0]) : args->v[0];

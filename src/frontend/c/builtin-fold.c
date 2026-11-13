@@ -106,21 +106,21 @@ VPRIV bool eval_builtin(cc *c, const node *x, cval *v)
 		} else
 			payload |= (u128)1 << (p - 1);
 		v->q = (u128)0x7fff << 112 | payload << (112 - p);
-		v->kind = CV_FLT, v->ld = true, v->f = q_to_d(v->q), v->ice = false;
+		v->kind = CV_FLT, v->ld = true, v->f = vsoftfloat_to_double(v->q), v->ice = false;
 		return true;
 	}
 	case BI_ISNAN: case BI_ISINF: case BI_ISINF_SIGN: case BI_ISFINITE: case BI_ISNORMAL: case BI_SIGNBIT: {
 		if (elementwise_abs_effects(c, arg[0], true) || !eval(c, arg[0], &a) || a.kind != CV_FLT)
 			return false;
-		u128 q = a.ld ? a.q : q_of_d(a.f);
+		u128 q = a.ld ? a.q : vsoftfloat_of_double(a.f);
 		unsigned exponent = (unsigned)(q >> 112) & 0x7fff;
 		int kind = KIND(c, N(arg[0])->ty);
 		unsigned minimum = kind == TY_FLOAT16 ? 16383 - 14 : kind == TY_FLOAT || kind == TY_BFLOAT16 ? 16383 - 126 :
 		                   kind == TY_DOUBLE || c->o->target == PP_DARWIN ? 16383 - 1022 : 1;
 		switch (x->aux) {
-		case BI_ISNAN: v->i = q_isnan(q); break;
-		case BI_ISINF: v->i = q_isinf(q); break;
-		case BI_ISINF_SIGN: v->i = q_isinf(q) ? (q >> 127 ? -1 : 1) : 0; break;
+		case BI_ISNAN: v->i = vsoftfloat_is_nan(q); break;
+		case BI_ISINF: v->i = vsoftfloat_is_infinity(q); break;
+		case BI_ISINF_SIGN: v->i = vsoftfloat_is_infinity(q) ? (q >> 127 ? -1 : 1) : 0; break;
 		case BI_ISFINITE: v->i = exponent != 0x7fff; break;
 		case BI_ISNORMAL: v->i = exponent >= minimum && exponent != 0x7fff; break;
 		default: v->i = q >> 127; break;
@@ -143,9 +143,9 @@ VPRIV bool eval_builtin(cc *c, const node *x, cval *v)
 			if (bits > p) p = bits;
 		}
 		if (!p) return false;
-		u128 l = a.kind == CV_FLT ? (a.ld ? a.q : q_of_d(a.f)) : q_of_ip(a.i, is_signed(c, N(arg[0])->ty), p);
-		u128 r = b.kind == CV_FLT ? (b.ld ? b.q : q_of_d(b.f)) : q_of_ip(b.i, is_signed(c, N(arg[1])->ty), p);
-		int order = q_cmp(l, r);
+		u128 l = a.kind == CV_FLT ? (a.ld ? a.q : vsoftfloat_of_double(a.f)) : vsoftfloat_of_integer_with_precision(a.i, is_signed(c, N(arg[0])->ty), p);
+		u128 r = b.kind == CV_FLT ? (b.ld ? b.q : vsoftfloat_of_double(b.f)) : vsoftfloat_of_integer_with_precision(b.i, is_signed(c, N(arg[1])->ty), p);
+		int order = vsoftfloat_compare(l, r);
 		switch (x->aux) {
 		case BI_ISGREATER: v->i = order == 1; break;
 		case BI_ISGREATEREQUAL: v->i = order == 1 || order == 0; break;
@@ -160,7 +160,7 @@ VPRIV bool eval_builtin(cc *c, const node *x, cval *v)
 	case BI_ISSIGNALING:
 		if (!eval(c, arg[0], &a) || a.kind != CV_FLT)
 			return false;
-		v->i = a.ld ? q_isnan(a.q) && !(a.q & ((u128)1 << 111)) : 0;
+		v->i = a.ld ? vsoftfloat_is_nan(a.q) && !(a.q & ((u128)1 << 111)) : 0;
 		v->ice = false;
 		return true;
 	case BI_CLZ: case BI_CLZL: case BI_CLZLL: case BI_CTZ: case BI_CTZL: case BI_CTZLL:

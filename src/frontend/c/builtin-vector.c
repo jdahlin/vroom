@@ -140,7 +140,7 @@ VPRIV bool elementwise_abs_effects(cc *c, uint32_t n, bool load)
 		cval cv;
 		if (elementwise_abs_effects(c, x->a, true)) return true;
 		if (cc_eval(c, x->a, &cv)) {
-			bool truth = cv.kind == CV_INT ? cv.i != 0 : cv.kind == CV_FLT ? (cv.ld ? q_nz(cv.q) : cv.f != 0) : true;
+			bool truth = cv.kind == CV_INT ? cv.i != 0 : cv.kind == CV_FLT ? (cv.ld ? vsoftfloat_is_nonzero(cv.q) : cv.f != 0) : true;
 			if (x->op == N_COND)
 				return elementwise_abs_effects(c, truth ? x->b : x->c, true);
 			return (x->op == N_LOGAND ? truth : !truth) && elementwise_abs_effects(c, x->b, true);
