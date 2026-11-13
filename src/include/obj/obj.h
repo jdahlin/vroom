@@ -33,7 +33,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "common/arena.h"
+#include "port/job-regions.h"
+#include "common/region.h"
 
 /* ELF constants used by callers */
 enum {

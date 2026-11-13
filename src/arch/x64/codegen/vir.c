@@ -996,40 +996,38 @@ VPRIV bool vw_x64(ecx *e, uint32_t sym, const char **why)
 	vx L = { .e = e, .f = f, .o = &V->ao };
 	vir_regs regs = { .alloc = { (X_TEMPS & ~(1u << R10)) | cs, (1u << 14) - 1 },
 		.callee = { cs, 0 }, .fixed = vx_fixed, .ctx=&L };
-	*why = "VIR x86-64: unsupported operation or ABI";
+	*why = VIRFAIL(x64_unsupported_target_option);
 	if (e->E->o->debug || e->E->o->sprot || x64_nosimd(e)) return false;
 	const attrs *attrs = sym_attrs(e->c, sym);
-	if (attrs && attrs->interrupt) return false;
+	if (attrs && attrs->interrupt) { *why = VIRFAIL(x64_interrupt_function); return false; }
 	for (uint32_t i = 1; i < f->nconst; i++)
 		if (f->ins[i].op != VO_ICONST && f->ins[i].op != VO_FCONST &&
-		    f->ins[i].op != VO_SLOTADDR && f->ins[i].op != VO_SYMADDR) return false;
+		    f->ins[i].op != VO_SLOTADDR && f->ins[i].op != VO_SYMADDR) { *why = VIRFAIL(x64_constant_kind); return false; }
 	for (uint32_t i = 1; i < f->nconst; i++)
 		if ((f->ins[i].op == VO_SYMADDR || f->ins[i].op == VO_SLOTADDR) &&
-		    (vx_bits(&f->ins[i]) < INT32_MIN / 2 || vx_bits(&f->ins[i]) > INT32_MAX / 2)) return false;
+		    (vx_bits(&f->ins[i]) < INT32_MIN / 2 || vx_bits(&f->ins[i]) > INT32_MAX / 2)) { *why = VIRFAIL(x64_constant_range); return false; }
 	for (uint32_t i = f->nconst; i < f->nins; i++)
 		if (f->ins[i].op == VO_CALL && f->extra[f->ins[i].c] >= VIR_FIX_N) {
-			*why = "VIR x86-64: too many call arguments";
+			*why = VIRFAIL(x64_too_many_call_arguments);
 			return false;
 		} else if (f->ins[i].op == VO_CALL && vx_twice(e, &f->ins[f->ins[i].a])) {
-			*why = "VIR x86-64: returns_twice";
+			*why = VIRFAIL(x64_returns_twice);
 			return false;
 		} else if (!vx_supported(f, i)) {
-			static _Thread_local char reason[160];
-			snprintf(reason, sizeof reason, "VIR x86-64: unsupported %s.%s", vir_optab[f->ins[i].op].name,
-				 vir_tyname[f->ins[i].ty]);
-			*why = reason;
+			snprintf(V->detail, sizeof V->detail, "%s.%s", vir_optab[f->ins[i].op].name, vir_tyname[f->ins[i].ty]);
+			*why = VIRFAIL(x64_unsupported_instruction);
 			return false;
 		}
 	uint64_t framesz = (uint64_t)f->nins * 16; /* worst-case spill slots */
 	for (uint32_t i = 0; i < f->nslot; i++) {
-		if (f->slot[i].align > 16 || f->slot[i].size > INT32_MAX / 4) return false;
+		if (f->slot[i].align > 16 || f->slot[i].size > INT32_MAX / 4) { *why = VIRFAIL(x64_slot_size); return false; }
 		framesz += f->slot[i].size + 16;
 	}
-	if (framesz > INT32_MAX / 2) return false;
+	if (framesz > INT32_MAX / 2) { *why = VIRFAIL(x64_frame_size); return false; }
 	L.uses=V->xuses=vx_grow(V->xuses,&V->cxuses,f->nins+1,1);
 	vir_uses(f,L.uses);L.r10=r10;
 	if(r10)regs.alloc[0]|=1u<<R10;
-	if(!vir_loops_build(f,&V->lp)){*why="VIR x86-64: loop analysis failed";return false;}
+	if(!vir_loops_build(f,&V->lp)){*why=VIRFAIL(x64_loop_analysis);return false;}
 	bool allocated=vir_alloc(f,&V->lp,&regs,NULL,&V->ao),scratch=false;
 	if(allocated && r10)for(uint32_t k=0;k<V->ao.nmove;k++) {
 		const vir_emove *m=&V->ao.move[k];
@@ -1043,14 +1041,14 @@ VPRIV bool vw_x64(ecx *e, uint32_t sym, const char **why)
 	}
 	L.gtmp=r10?R11:R10;
 	if (!allocated) {
-		*why = "VIR x86-64: allocation failed"; return false;
+		*why = VIRFAIL(x64_allocation_failed); snprintf(V->detail, sizeof V->detail, "%s", V->ao.err); return false;
 	}
 	if (getenv("VCC_VIR_CHECK")) {
 		vbuf msg = { 0 };
 		uint32_t n = vir_alloc_check(f, &regs, &V->ao, &msg);
 		if (n) fprintf(stderr, "vir x86-64: allocation check: %.*s", (int)msg.n, msg.p ? (char *)msg.p : "");
 		free(msg.p);
-		if (n) { *why = "VIR x86-64: allocation check failed"; return false; }
+		if (n) { *why = VIRFAIL(x64_allocation_check_failed); return false; }
 	}
 	/* No partial function is published before x64_finish; a failed lowering retries the walker. */
 	L.edgelab=V->xedgelab=vx_grow(V->xedgelab,&V->cxedgelab,V->ao.nedge+1,sizeof(uint32_t));
@@ -1060,7 +1058,7 @@ VPRIV bool vw_x64(ecx *e, uint32_t sym, const char **why)
 	L.label = V->xlabel = vx_grow(V->xlabel, &V->cxlabel, f->nblk + 1, sizeof *L.label);
 	e->vtry = true; e->vfail = NULL;
 	if (_setjmp(e->bail)) {
-		*why = e->vfail ? e->vfail : "VIR x86-64: lowering failed";
+		*why = e->vfail ? e->vfail : VIRFAIL(x64_lowering_failed);
 		e->vtry = false;
 		return false;
 	}

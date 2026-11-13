@@ -67,6 +67,7 @@ typedef struct vwst {
 	uint32_t rty;				/* the result's type, VT_VOID none */
 	uint32_t nparam, fsig;			/* the function's signature (pre extra offset) */
 	const char *why;
+	char detail[96];			/* what a failure reason leaves out (an opcode, the allocator's message): VCC_VIR_STATS */
 	vir_fn f;				/* the function built (valid until the thread's next vir_begin) */
 	int64_t *xslot, *xspill;
 	uint8_t *xuses; uint32_t cxuses;
