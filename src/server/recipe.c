@@ -33,7 +33,7 @@ static bool vccd_recipe_is_tool(void *ctx, const char *argv0)
 }
 
 struct vccd_recipe_context {
-	const struct vccd_request *r;	/* the vsh request: cwd and env */
+	const struct vccd_request *request;	/* the vsh request: cwd and env */
 };
 
 /* per thread: the request a recipe's tool call is turned into */
@@ -42,7 +42,7 @@ static _Thread_local char **vccd_recipe_request_strings;
 
 static int vccd_recipe_tool_run(void *ctx, char **argv, char **assign, const int fds[3])
 {
-	const struct vccd_request *r = ((struct vccd_recipe_context *)ctx)->r;
+	const struct vccd_request *r = ((struct vccd_recipe_context *)ctx)->request;
 	struct vccd_request_header *h;
 	struct vccd_request q;
 	const char *kind = "bad";
@@ -105,7 +105,7 @@ big:
 static int vccd_recipe_fixdep_run(void *ctx, const char *dep, const char *target, const char *cmd,
 		     const char *cmdfile, int errfd)
 {
-	return fixdep_run(((struct vccd_recipe_context *)ctx)->r->cwd, dep, target, cmd, cmdfile, errfd);
+	return fixdep_run(((struct vccd_recipe_context *)ctx)->request->cwd, dep, target, cmd, cmdfile, errfd);
 }
 
 /* argv: sh -c SCRIPT or sh -ec SCRIPT (make's .SHELLFLAGS); anything else is the shell's */

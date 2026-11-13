@@ -27,26 +27,26 @@ enum { SHELL_TOKEN_WORD, SHELL_TOKEN_SEMICOLON, SHELL_TOKEN_PIPE, SHELL_TOKEN_RE
 struct shell_token {
 	int kind;
 	bool assign;	/* NAME= before any quote */
-	char *s;	/* SHELL_TOKEN_WORD: the word, quotes removed (malloc'ed) */
+	char *text;	/* SHELL_TOKEN_WORD: the word, quotes removed (malloc'ed) */
 };
 
 struct shell_token_list {
-	struct shell_token *t;
-	int n, cap;
+	struct shell_token *tokens;
+	int count, capacity;
 };
 
 static bool shell_token_push(struct shell_token_list *v, int kind, bool assign, char *s)
 {
-	if (v->n == v->cap) {
-		int cap = v->cap ? 2 * v->cap : 64;
-		struct shell_token *t = realloc(v->t, cap * sizeof(*t));
+	if (v->count == v->capacity) {
+		int cap = v->capacity ? 2 * v->capacity : 64;
+		struct shell_token *t = realloc(v->tokens, cap * sizeof(*t));
 
 		if (!t)
 			return false;
-		v->t = t;
-		v->cap = cap;
+		v->tokens = t;
+		v->capacity = cap;
 	}
-	v->t[v->n++] = (struct shell_token){ kind, assign, s };
+	v->tokens[v->count++] = (struct shell_token){ kind, assign, s };
 	return true;
 }
 
@@ -166,28 +166,28 @@ struct shell_command {
 	char **assign;		/* SHELL_COMMAND_TOOL: NAME=VALUE (owned array) */
 	const char *redir;	/* SHELL_COMMAND_TEXT: > FILE */
 	char *text;		/* SHELL_COMMAND_TEXT: what echo/printf write (malloc'ed) */
-	size_t textlen;
+	size_t text_length;
 	bool xargs;		/* SHELL_COMMAND_TOOL run as printf | xargs: map the status */
 };
 
 struct shell_script {
-	struct shell_command *c;
-	int n, cap;
+	struct shell_command *commands;
+	int count, capacity;
 };
 
 static struct shell_command *shell_script_command_add(struct shell_script *sc)
 {
-	if (sc->n == sc->cap) {
-		int cap = sc->cap ? 2 * sc->cap : 16;
-		struct shell_command *c = realloc(sc->c, cap * sizeof(*c));
+	if (sc->count == sc->capacity) {
+		int cap = sc->capacity ? 2 * sc->capacity : 16;
+		struct shell_command *c = realloc(sc->commands, cap * sizeof(*c));
 
 		if (!c)
 			return NULL;
-		sc->c = c;
-		sc->cap = cap;
+		sc->commands = c;
+		sc->capacity = cap;
 	}
-	memset(&sc->c[sc->n], 0, sizeof(sc->c[0]));
-	return &sc->c[sc->n++];
+	memset(&sc->commands[sc->count], 0, sizeof(sc->commands[0]));
+	return &sc->commands[sc->count++];
 }
 
 /* NULL-terminated copy of n token words (the strings stay owned by the tokens) */
@@ -210,7 +210,7 @@ static char **shell_words_to_argv(struct shell_token *t, int n, vbuffer *extra)
 	if (!v)
 		return NULL;
 	for (i = 0; i < n; i++)
-		v[i] = t[i].s;
+		v[i] = t[i].text;
 	/* xargs: split printf's output in place (it is ours) */
 	if (extra)
 		for (p = extra->p; p && *p;) {
@@ -229,7 +229,7 @@ static char **shell_words_to_argv(struct shell_token *t, int n, vbuffer *extra)
 /* POSIX printf with %s and %% and \n \t \\: the format is reused while arguments remain */
 static bool shell_printf_format(struct shell_token *a, int n, vbuffer *out)
 {
-	const char *fmt = a[0].s;
+	const char *fmt = a[0].text;
 	int ai = 1;
 
 	if (!vbuffer_append(out, "", 0))
@@ -250,7 +250,7 @@ static bool shell_printf_format(struct shell_token *a, int n, vbuffer *out)
 					if (!vbuffer_append(out, "%", 1))
 						return false;
 				} else if (f[1] == 's') {
-					const char *s = ai < n ? a[ai++].s : "";
+					const char *s = ai < n ? a[ai++].text : "";
 
 					used = true;
 					if (!vbuffer_append(out, s, strlen(s)))
@@ -285,7 +285,7 @@ static bool shell_command_parse(struct shell_token *t, int n, struct shell_scrip
 		if (t[i].kind == SHELL_TOKEN_REDIRECT) {
 			if (redir || i + 1 >= n || t[i + 1].kind != SHELL_TOKEN_WORD)
 				return false;
-			redir = t[++i].s;
+			redir = t[++i].text;
 		} else if (t[i].kind != SHELL_TOKEN_WORD) {
 			return false;
 		} else if (t[i].assign && nw == nasg && !redir) {
@@ -297,11 +297,11 @@ static bool shell_command_parse(struct shell_token *t, int n, struct shell_scrip
 	}
 	if (nw == nasg)
 		return false;	/* assignments alone, or nothing */
-	name = w[nasg].s;
+	name = w[nasg].text;
 	if (pipe_in) {
 		/* the right side of printf | xargs TOOL ... */
-		if (nasg || redir || strcmp(name, "xargs") || nw < 2 || w[1].s[0] == '-' ||
-		    !ops->is_tool(ops->ctx, w[1].s) || strpbrk(pipe_in->p, "'\"\\"))
+		if (nasg || redir || strcmp(name, "xargs") || nw < 2 || w[1].text[0] == '-' ||
+		    !ops->is_tool(ops->ctx, w[1].text) || strpbrk(pipe_in->p, "'\"\\"))
 			return false;
 		for (i = 0; pipe_in->p[i] == ' ' || pipe_in->p[i] == '\t' || pipe_in->p[i] == '\n'; i++)
 			;
@@ -324,13 +324,13 @@ static bool shell_command_parse(struct shell_token *t, int n, struct shell_scrip
 	if (!(c = shell_script_command_add(sc)))
 		return false;
 	if (!strcmp(name, "set")) {
-		if (nw != 2 || strcmp(w[1].s, "-e") || redir)
+		if (nw != 2 || strcmp(w[1].text, "-e") || redir)
 			return false;
 		c->kind = SHELL_COMMAND_SET_E;
 	} else if (!strcmp(name, ":") || !strcmp(name, "true") || !strcmp(name, "trap")) {
 		if (name[0] == 't' && name[1] == 'r')	/* trap: signal handlers only; EXIT/0 must run */
 			for (int i = 2; i < nw; i++)
-				if (!strcmp(w[i].s, "EXIT") || !strcmp(w[i].s, "0"))
+				if (!strcmp(w[i].text, "EXIT") || !strcmp(w[i].text, "0"))
 					return false;
 		if (!strcmp(name, "trap") && nw < 3)
 			return false;
@@ -344,8 +344,8 @@ static bool shell_command_parse(struct shell_token *t, int n, struct shell_scrip
 			return false;
 		for (i = 1; i < nw; i++) {
 			/* dash's echo takes -n and expands backslashes */
-			if ((i == 1 && w[i].s[0] == '-') || strchr(w[i].s, '\\') ||
-			    (i > 1 && !vbuffer_append(&b, " ", 1)) || !vbuffer_append(&b, w[i].s, strlen(w[i].s))) {
+			if ((i == 1 && w[i].text[0] == '-') || strchr(w[i].text, '\\') ||
+			    (i > 1 && !vbuffer_append(&b, " ", 1)) || !vbuffer_append(&b, w[i].text, strlen(w[i].text))) {
 				free(b.p);
 				return false;
 			}
@@ -356,7 +356,7 @@ static bool shell_command_parse(struct shell_token *t, int n, struct shell_scrip
 		}
 		c->kind = SHELL_COMMAND_TEXT;
 		c->text = b.p;
-		c->textlen = b.n;
+		c->text_length = b.n;
 		c->redir = redir;
 	} else if (!strcmp(name, "printf")) {
 		vbuffer b = VBUFFER_STICKY_INIT;
@@ -366,29 +366,29 @@ static bool shell_command_parse(struct shell_token *t, int n, struct shell_scrip
 			return false;
 		}
 		if (pipe_out) {
-			sc->n--;	/* no command: its output becomes xargs' words */
+			sc->count--;	/* no command: its output becomes xargs' words */
 			*pipe_out = b;
 			return true;
 		}
 		c->kind = SHELL_COMMAND_TEXT;
 		c->text = b.p;
-		c->textlen = b.n;
+		c->text_length = b.n;
 		c->redir = redir;
 	} else if (!strcmp(name, "rm")) {
-		if (nw < 2 || strcmp(w[1].s, "-f") || redir)
+		if (nw < 2 || strcmp(w[1].text, "-f") || redir)
 			return false;
 		for (i = 2; i < nw; i++)
-			if (w[i].s[0] == '-')
+			if (w[i].text[0] == '-')
 				return false;
 		c->kind = SHELL_COMMAND_RM;
 		c->argv = shell_words_to_argv(w + 2, nw - 2, NULL);
 		return c->argv != NULL;
 	} else if (!strcmp(name, "mkdir") || !strcmp(name, "/bin/mkdir")) {
 		/* mkdir -p: $(shell mkdir -p $(obj)) in every submake */
-		if (nw < 3 || strcmp(w[1].s, "-p") || redir)
+		if (nw < 3 || strcmp(w[1].text, "-p") || redir)
 			return false;
 		for (i = 2; i < nw; i++)
-			if (w[i].s[0] == '-' || !w[i].s[0])
+			if (w[i].text[0] == '-' || !w[i].text[0])
 				return false;
 		c->kind = SHELL_COMMAND_MKDIR;
 		c->argv = shell_words_to_argv(w + 2, nw - 2, NULL);
@@ -419,11 +419,11 @@ static bool shell_script_parse(struct shell_token_list *v, struct shell_script *
 {
 	int i = 0;
 
-	while (i < v->n) {
+	while (i < v->count) {
 		int a = i, p = -1;
 
-		while (i < v->n && v->t[i].kind != SHELL_TOKEN_SEMICOLON) {
-			if (v->t[i].kind == SHELL_TOKEN_PIPE) {
+		while (i < v->count && v->tokens[i].kind != SHELL_TOKEN_SEMICOLON) {
+			if (v->tokens[i].kind == SHELL_TOKEN_PIPE) {
 				if (p >= 0)
 					return false;	/* only two-stage pipes */
 				p = i;
@@ -434,19 +434,19 @@ static bool shell_script_parse(struct shell_token_list *v, struct shell_script *
 			return false;	/* empty command: a syntax error for sh */
 		if (p >= 0) {
 			vbuffer out = VBUFFER_STICKY_INIT;
-			bool ok = shell_command_parse(v->t + a, p - a, sc, ops, NULL, &out) &&
-				  shell_command_parse(v->t + p + 1, i - p - 1, sc, ops, &out, NULL);
+			bool ok = shell_command_parse(v->tokens + a, p - a, sc, ops, NULL, &out) &&
+				  shell_command_parse(v->tokens + p + 1, i - p - 1, sc, ops, &out, NULL);
 
 			free(out.p);
 			if (!ok)
 				return false;
-		} else if (!shell_command_parse(v->t + a, i - a, sc, ops, NULL, NULL)) {
+		} else if (!shell_command_parse(v->tokens + a, i - a, sc, ops, NULL, NULL)) {
 			return false;
 		}
-		if (i < v->n)
+		if (i < v->count)
 			i++;	/* the ; (a trailing one is fine) */
 	}
-	return sc->n > 0;
+	return sc->count > 0;
 }
 
 /* ---------------- running ---------------- */
@@ -522,8 +522,8 @@ static int shell_script_run(const char *cwd, struct shell_script *sc, bool errex
 {
 	int dir = -1, st = 0, i;
 
-	for (i = 0; i < sc->n; i++) {
-		struct shell_command *c = &sc->c[i];
+	for (i = 0; i < sc->count; i++) {
+		struct shell_command *c = &sc->commands[i];
 
 		if ((c->kind == SHELL_COMMAND_RM || c->kind == SHELL_COMMAND_MKDIR || (c->redir && c->kind != SHELL_COMMAND_FIXDEP)) && dir < 0 &&
 		    (dir = open(cwd, O_RDONLY | O_DIRECTORY | O_CLOEXEC)) < 0) {
@@ -547,11 +547,11 @@ static int shell_script_run(const char *cwd, struct shell_script *sc, bool errex
 					st = 2;
 					break;
 				}
-				st = shell_fd_write_all(fd, c->text, c->textlen) ? 0 : 1;
+				st = shell_fd_write_all(fd, c->text, c->text_length) ? 0 : 1;
 				if (close(fd) < 0)
 					st = 1;
 			} else {
-				st = shell_fd_write_all(fds[1], c->text, c->textlen) ? 0 : 1;
+				st = shell_fd_write_all(fds[1], c->text, c->text_length) ? 0 : 1;
 			}
 			break;
 		case SHELL_COMMAND_RM:
@@ -596,14 +596,14 @@ int shell_run(const char *cwd, const char *script, bool errexit, const int fds[3
 
 	if (shell_tokenize(script, &v) && shell_script_parse(&v, &sc, ops))
 		st = shell_script_run(cwd, &sc, errexit, fds, ops);
-	for (i = 0; i < sc.n; i++) {
-		free(sc.c[i].argv);
-		free(sc.c[i].assign);
-		free(sc.c[i].text);
+	for (i = 0; i < sc.count; i++) {
+		free(sc.commands[i].argv);
+		free(sc.commands[i].assign);
+		free(sc.commands[i].text);
 	}
-	free(sc.c);
-	for (i = 0; i < v.n; i++)
-		free(v.t[i].s);
-	free(v.t);
+	free(sc.commands);
+	for (i = 0; i < v.count; i++)
+		free(v.tokens[i].text);
+	free(v.tokens);
 	return st;
 }

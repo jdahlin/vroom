@@ -130,7 +130,7 @@ _Thread_local uint8_t *driver_object_buffer;
 
 
 
-static struct driver_object_state { as_context *as; ElfObj *obj; uint8_t *buf; struct driver_object_state *next; } *driver_object_state_free_list;
+static struct driver_object_state { as_context *assembler; ElfObj *object; uint8_t *buffer; struct driver_object_state *next; } *driver_object_state_free_list;
 static _Thread_local struct driver_object_state *driver_object_state_current;
 static pthread_mutex_t driver_object_state_lock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -148,14 +148,14 @@ VPRIV void driver_object_state_acquire(void)
 	pthread_mutex_unlock(&driver_object_state_lock);
 	if (!s) {
 		s = calloc(1, sizeof(*s));
-		s->as = as_new();
-		s->obj = elf_new();
-		s->buf = mmap(NULL, DRIVER_OBJECT_BUFFER_CAPACITY, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
-		if (s->buf == MAP_FAILED)
+		s->assembler = as_new();
+		s->object = elf_new();
+		s->buffer = mmap(NULL, DRIVER_OBJECT_BUFFER_CAPACITY, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
+		if (s->buffer == MAP_FAILED)
 			abort();
 	}
 	driver_object_state_current = s;
-	driver_assembler = s->as, driver_object = s->obj, driver_object_buffer = s->buf;
+	driver_assembler = s->assembler, driver_object = s->object, driver_object_buffer = s->buffer;
 }
 
 

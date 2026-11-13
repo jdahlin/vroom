@@ -43,9 +43,9 @@
 #endif
 
 typedef struct driver_buffer {
-	char *p;
-	size_t n, cap;
-	vjob_region *r;	/* the first 16 MB come from this per-thread region (driver_buffer_free puts it back) */
+	char *data;
+	size_t length, capacity;
+	vjob_region *region;	/* the first 16 MB come from this per-thread region (driver_buffer_free puts it back) */
 } driver_buffer;
 
 /* job-buffer.c */
@@ -56,49 +56,49 @@ extern _Thread_local vjob_region *driver_buffer_region;	/* this job's (driver_jo
    locals before it was cut by job (Q-drv-02). */
 struct driver_job {
 	/* search path lists (searchpath.c): each holds at most argc entries */
-	const char **dirs_q, **dirs_i, **dirs_s, **dirs_a, **all;
-	int nq, ni, ns, na, n, ne;
-	const char *dirs_e[64];	/* --embed-dir */
-	const char *cpath, *cipath;	/* CPATH, C_INCLUDE_PATH of the job's environment */
-	const char *cmp, *out, *main_file, *depfile, *deptarget;
+	const char **quote_directories, **include_directories, **system_directories, **after_directories, **search_directories;
+	int quote_count, include_count, system_count, after_count, search_count, embed_count;
+	const char *embed_directories[64];	/* --embed-dir */
+	const char *cpath_value, *c_include_path_value;	/* CPATH, C_INCLUDE_PATH of the job's environment */
+	const char *compare_file, *output_file, *main_file, *depfile, *dependency_target;
 	const char *stdin_src;	/* the input `-`, read whole */
 	size_t stdin_len;
-	int errfd, status, md, mdeps, mphony, dcolor, nocaret, elimit, mblimit, slimit, showid, dformat, nwargs, dstyle, dunicode;
-	const char *badval;	/* an option with a value clang would reject */
-	const char **wargs;
-	char pmapbuf[4096];
-	driver_buffer pre, cmdl, incl, imac;
+	int errfd, status, dependency_file_mode, dependency_print_mode, dependency_phony, diagnostic_color, no_caret, error_limit, macro_backtrace_limit, spell_checking_limit, show_diagnostic_id, diagnostic_format, warning_argument_count, diagnostic_style, diagnostic_unicode;
+	const char *bad_value_option;	/* an option with a value clang would reject */
+	const char **warning_arguments;
+	char prefix_map_buffer[4096];
+	driver_buffer predefines, command_line_defines, include_text, include_macros_text;
 	/* no --target: the host's own userland (Darwin on a Mac, glibc aarch64 or x86-64 on Linux) */
 	int darwin;
-	int x86;	/* x86_64-linux-gnu (PLAN-x86.md) */
-	int wasm, lnx;	/* 64 or 32: wasm64/wasm32-unknown-emscripten (PLAN-wasm.md); lnx: aarch64 Linux */
-	int hosted, nostdinc, asm_mode, undef, raw_asm, xlang;	/* raw_asm -1: by the suffix; xlang: -x given */
-	int march_lse, mcpu_lse, lse;
+	int target_x64;	/* x86_64-linux-gnu (PLAN-x86.md) */
+	int wasm_bits, target_linux;	/* 64 or 32: wasm64/wasm32-unknown-emscripten (PLAN-wasm.md); lnx: aarch64 Linux */
+	int hosted, no_standard_includes, asm_mode, undefine_predefined, raw_assembler, language_given;	/* raw_asm -1: by the suffix; xlang: -x given */
+	int march_has_lse, mcpu_has_lse, lse;
 	int sjlj;
-	int opt, olevel, os, pie, pic, tlsmodel, sections, debug, freestanding, nobuiltin, nojt, instr, cfi, strict_align, tiny, gregs, wrapv;
-	x86_features x86_features_, x86_disabled, x86_raw, x86_on, x86_off;
-	const char *x86_cpu;
-	int nosse, nosse2, nommx;	/* x86-64: -mno-sse, -mno-sse2, -mno-mmx (last one wins) */
+	int optimize, optimization_level, optimize_size, pie, pic, tls_model, function_data_sections, debug, freestanding, no_builtin, no_jump_tables, instrument_functions, cfi, strict_align, code_model_tiny, general_regs_only, wrapv;
+	x86_features x64_features, x64_features_disabled, x64_features_raw, x64_features_forced_on, x64_features_forced_off;
+	const char *x64_cpu;
+	int no_sse, no_sse2, no_mmx;	/* x86-64: -mno-sse, -mno-sse2, -mno-mmx (last one wins) */
 	uint64_t disabled_builtins[CC_DISABLED_BUILTIN_WORDS];
 	int omit_frame_pointer;	/* unspecified: x86 enables omission above -O0 */
 	int sibling_calls;	/* explicit sibling-call flags are ordered independently of -O */
-	int xcf, pfe_n, pfe_m, sprot, sp_gs, autozero;
-	const char *sp_sym;	/* x86-64 hardening (cc_opts.xcf ...) */
-	pp_opts po;
-	char *pmap;
-	double t0;
-	int comments, nomarkers;
-	int dmacros, showinc, ddefs, syntax, layout, lint, ms_anon, short_wchar, strict_flex_arrays, tokhash, emit, objmode;
-	const char *stdver, *macos_min;
-	int fast_root4, nocontract;
-	int macos_min_flag, uchar, fmath;	/* fmath: 1 finite-only, 2 no errno, 4 __FAST_MATH__, 8 -pthread, 16 errno, 32 __ARM_FP_FAST */
-	int tri, std, strict, wimpl_int, wimpl_fn, gnu89_inline, vcc_kernel, conv_warn;
-	char objbuf[1024];
+	int x64_hardening_flags, patchable_entry_count, patchable_entry_before, stack_protector, stack_protector_guard_gs, auto_variables_zero;
+	const char *stack_protector_guard_symbol;	/* x86-64 hardening (cc_opts.xcf ...) */
+	pp_opts pp_options;
+	char *prefix_map;
+	double start_time;
+	int comments, no_line_markers;
+	int dump_macros, show_includes, dump_defines, syntax_only, layout_checks, lint, ms_anonymous_structs, short_wchar, strict_flex_arrays, token_hash, emit_assembly, object_mode;
+	const char *standard_version, *macos_minimum_version;
+	int fast_math, no_fp_contract;
+	int macos_minimum_source, unsigned_char, math_flags;	/* fmath: 1 finite-only, 2 no errno, 4 __FAST_MATH__, 8 -pthread, 16 errno, 32 __ARM_FP_FAST */
+	int trigraphs, standard, strict_standard, allow_implicit_int, allow_implicit_function, gnu89_inline, vcc_kernel, conversion_warning_flags;
+	char object_name_buffer[1024];
 	/* dependency rules (depfile.c) */
-	char dtbuf[4096], dfbuf[4200];
-	const char *dtarget;
-	int dnosys;
-	const char *dfirst;
+	char dependency_target_buffer[4096], depfile_name_buffer[4200];
+	const char *depfile_target;
+	int depfile_omit_system;
+	const char *depfile_first_input;
 };
 
 /* output.c: the job's object state (assembler, ELF writer, serialised output) */

@@ -20,10 +20,10 @@ struct driver_snapshot_node;
 struct driver_declaration_cache_state {
 	struct driver_snapshot_node *node;	/* the chain so far */
 	struct driver_snapshot_node *target;	/* stale: the node whose snapshot is the real state */
-	uint64_t pos;		/* where the next region must start */
-	uint32_t ev;		/* events consumed */
-	uint32_t base;		/* location base of the chain's first region */
-	pp_topev open;		/* a region started, not ended */
+	uint64_t position;		/* where the next region must start */
+	uint32_t events;		/* events consumed */
+	uint32_t location_base;		/* location base of the chain's first region */
+	pp_topev open_event;		/* a region started, not ended */
 	bool is_open, dead, stale;	/* stale: a restore is pending */
 };
 
@@ -44,7 +44,7 @@ static inline void driver_declaration_cache_boundary(cc *c)
 
 	if (likely(!d || d->dead))
 		return;
-	if (pp_top_events(c->p, &n) && n == d->ev && !d->stale)
+	if (pp_top_events(c->p, &n) && n == d->events && !d->stale)
 		return;
 	driver_declaration_cache_boundary_slow(c);
 }

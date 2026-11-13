@@ -146,9 +146,9 @@ static int fixdep_file_is_unparsed(const char *s, size_t len)
 
 typedef struct fixdep_job {
 	const char *cwd;
-	vbuffer *o;
+	vbuffer *output;
 	fixdep_item **configs;
-	char err[512];
+	char error_message[512];
 } fixdep_job;
 
 static int fixdep_file_use(fixdep_job *j, const char *path)
@@ -163,16 +163,16 @@ static int fixdep_file_use(fixdep_job *j, const char *path)
 		snprintf(abs, sizeof(abs), "%s", path);
 	f = lex_file_get(abs, strlen(abs));
 	if (!f) {
-		snprintf(j->err, sizeof(j->err), "fixdep: error opening file: %s: %s\n", path, strerror(ENOENT));
+		snprintf(j->error_message, sizeof(j->error_message), "fixdep: error opening file: %s: %s\n", path, strerror(ENOENT));
 		return -1;
 	}
 	for (names = fixdep_file_configs(f); *names;) {
 		const char *e = strchr(names, '\n');
 
 		if (!fixdep_table_contains(names, (unsigned int)(e - names), j->configs)) {
-			vbuffer_string_append(j->o, "    $(wildcard include/config/");
-			vbuffer_append(j->o, names, (size_t)(e - names));
-			vbuffer_string_append(j->o, ") \\\n");
+			vbuffer_string_append(j->output, "    $(wildcard include/config/");
+			vbuffer_append(j->output, names, (size_t)(e - names));
+			vbuffer_string_append(j->output, ") \\\n");
 		}
 		names = e + 1;
 	}
@@ -241,20 +241,20 @@ static int fixdep_depfile_parse(fixdep_job *j, char *p, const char *target)
 		if (is_source) {
 			if (!saw_any_target) {
 				saw_any_target = true;
-				vbuffer_string_append(j->o, "source_");
-				vbuffer_string_append(j->o, target);
-				vbuffer_string_append(j->o, " := ");
-				vbuffer_string_append(j->o, p);
-				vbuffer_string_append(j->o, "\n\n");
-				vbuffer_string_append(j->o, "deps_");
-				vbuffer_string_append(j->o, target);
-				vbuffer_string_append(j->o, " := \\\n");
+				vbuffer_string_append(j->output, "source_");
+				vbuffer_string_append(j->output, target);
+				vbuffer_string_append(j->output, " := ");
+				vbuffer_string_append(j->output, p);
+				vbuffer_string_append(j->output, "\n\n");
+				vbuffer_string_append(j->output, "deps_");
+				vbuffer_string_append(j->output, target);
+				vbuffer_string_append(j->output, " := \\\n");
 				need_parse = true;
 			}
 		} else if (!fixdep_file_is_ignored(p, (size_t)(q - p)) && !fixdep_table_contains(p, (unsigned int)(q - p), files)) {
-			vbuffer_string_append(j->o, "  ");
-			vbuffer_string_append(j->o, p);
-			vbuffer_string_append(j->o, " \\\n");
+			vbuffer_string_append(j->output, "  ");
+			vbuffer_string_append(j->output, p);
+			vbuffer_string_append(j->output, " \\\n");
 			need_parse = true;
 		}
 		if (need_parse && !fixdep_file_is_unparsed(p, (size_t)(q - p)))
@@ -267,16 +267,16 @@ static int fixdep_depfile_parse(fixdep_job *j, char *p, const char *target)
 	if (rc)
 		return rc;
 	if (!saw_any_target) {
-		snprintf(j->err, sizeof(j->err), "fixdep: parse error; no targets found\n");
+		snprintf(j->error_message, sizeof(j->error_message), "fixdep: parse error; no targets found\n");
 		return -1;
 	}
-	vbuffer_string_append(j->o, "\n");
-	vbuffer_string_append(j->o, target);
-	vbuffer_string_append(j->o, ": $(deps_");
-	vbuffer_string_append(j->o, target);
-	vbuffer_string_append(j->o, ")\n\n$(deps_");
-	vbuffer_string_append(j->o, target);
-	vbuffer_string_append(j->o, "):\n");
+	vbuffer_string_append(j->output, "\n");
+	vbuffer_string_append(j->output, target);
+	vbuffer_string_append(j->output, ": $(deps_");
+	vbuffer_string_append(j->output, target);
+	vbuffer_string_append(j->output, ")\n\n$(deps_");
+	vbuffer_string_append(j->output, target);
+	vbuffer_string_append(j->output, "):\n");
 	return 0;
 }
 
@@ -315,7 +315,7 @@ int fixdep_run(const char *cwd, const char *depfile, const char *target, const c
 	char dabs[4096], oabs[4096];
 	fixdep_item *configs[FIXDEP_HASH_SIZE] = { 0 };
 	vbuffer o = { 0 };
-	fixdep_job j = { .cwd = cwd, .o = &o, .configs = configs };
+	fixdep_job j = { .cwd = cwd, .output = &o, .configs = configs };
 
 	vintern_init();	/* the token cache interns; vsh may run fixdep before any compile */
 	char *d = fixdep_file_read(cwd, depfile, dabs, sizeof(dabs));
@@ -334,7 +334,7 @@ int fixdep_run(const char *cwd, const char *depfile, const char *target, const c
 	free(d);
 	fixdep_table_free(configs);
 	if (rc) {
-		dprintf(errfd, "%s", j.err);
+		dprintf(errfd, "%s", j.error_message);
 		free(o.p);
 		return 2;
 	}

@@ -24,9 +24,9 @@ static struct vccd_worker *vccd_worker_buffers_get(void)
 	if (!w.raw) {
 		w.raw = mmap(NULL, sizeof(struct vccd_request_header) + VCCD_PROTOCOL_PAYLOAD_MAX,
 			     PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
-		w.strs = mmap(NULL, VCCD_STRINGS_MAX * sizeof(char *), PROT_READ | PROT_WRITE,
+		w.strings = mmap(NULL, VCCD_STRINGS_MAX * sizeof(char *), PROT_READ | PROT_WRITE,
 			      MAP_PRIVATE | MAP_ANON, -1, 0);
-		if (w.raw == MAP_FAILED || w.strs == MAP_FAILED) {
+		if (w.raw == MAP_FAILED || w.strings == MAP_FAILED) {
 			perror("vccd: mmap");
 			exit(1);
 		}
@@ -51,7 +51,7 @@ static void vccd_worker_connection_serve(struct vccd_worker *w, int conn)
 	if (got) {
 		struct vccd_request_header *h = (struct vccd_request_header *)w->raw;
 
-		if (h->build && vccd_self_build_id && h->build != vccd_self_build_id) {
+		if (h->build_id && vccd_self_build_id && h->build_id != vccd_self_build_id) {
 			status = (int32_t)VCCD_STATUS_MISMATCH, kind = "mismatch";
 		} else {
 			/* a diagnostics query belongs to no build: it must not end the one it asks about */
@@ -59,7 +59,7 @@ static void vccd_worker_connection_serve(struct vccd_worker *w, int conn)
 			int g;
 
 			vtask_blocking_begin();	/* (waits while another build drains) */
-			g = vccd_generation_enter(q ? 0 : h->pgrp);
+			g = vccd_generation_enter(q ? 0 : h->process_group);
 			vtask_blocking_end();
 			if (g) {
 				status = (int32_t)VCCD_STATUS_RETRY, kind = "retry";

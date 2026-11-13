@@ -27,9 +27,9 @@ struct vccd_request_header {
 	uint32_t argc;
 	uint32_t envc;
 	uint32_t payload_len;
-	uint64_t build;	/* vccd_build_id of the vccd binary the shim sits next to (0: unknown, no check) */
-	uint32_t pgrp;	/* the client's process group: one per make invocation from a shell (0: unknown) */
-	uint32_t pad;
+	uint64_t build_id;	/* vccd_build_id of the vccd binary the shim sits next to (0: unknown, no check) */
+	uint32_t process_group;	/* the client's process group: one per make invocation from a shell (0: unknown) */
+	uint32_t padding;
 };
 
 /* a build id: size and mtime of the vccd binary at path (0 when it cannot be read) */

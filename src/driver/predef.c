@@ -4,7 +4,7 @@
  *
  * The per-target base (Linux arm64, Linux x86-64, Darwin) is a table generated from clang once
  * (frontend/pp/ppdata-predef.inc by gen-ppdata.sh, ppdata-x86.inc by gen-x86data.sh): no clang runs
- * here.  driver_predef_build appends it to job->pre as `#define` lines, then what the options change:
+ * here.  driver_predef_build appends it to job->predefines as `#define` lines, then what the options change:
  * __STDC_VERSION__ (the tables are for gnu11), -funsigned-char, the math flags, C23 additions,
  * assembler mode.  It also picks the order -dD prints them in (po.dd_order) and po.target.  What is
  * added here must be what clang prints for the same flags: `bench/vcc-diff.py dm` and `dd` compare
@@ -75,93 +75,93 @@ VPRIV const char *const *driver_predef_darwin_framework_directories(size_t *n)
 /* the -dD order and the predefine text of the job */
 VPRIV void driver_predef_build(struct driver_job *job)
 {
-	job->po.dd_order = job->darwin ? predef_order_darwin : job->wasm == 64 ? predef_order_wasm64 : job->wasm ? predef_order_wasm32
-		    : job->x86 ? predef_order_x86_64 : predef_order_linux;
-	job->po.ndd_order = job->x86 ? (int)(sizeof(predef_order_x86_64) / sizeof(*predef_order_x86_64))
+	job->pp_options.dd_order = job->darwin ? predef_order_darwin : job->wasm_bits == 64 ? predef_order_wasm64 : job->wasm_bits ? predef_order_wasm32
+		    : job->target_x64 ? predef_order_x86_64 : predef_order_linux;
+	job->pp_options.ndd_order = job->target_x64 ? (int)(sizeof(predef_order_x86_64) / sizeof(*predef_order_x86_64))
 		     : job->darwin ? (int)(sizeof(predef_order_darwin) / sizeof(*predef_order_darwin))
-		     : job->wasm == 64 ? (int)(sizeof(predef_order_wasm64) / sizeof(*predef_order_wasm64))
-		     : job->wasm ? (int)(sizeof(predef_order_wasm32) / sizeof(*predef_order_wasm32))
+		     : job->wasm_bits == 64 ? (int)(sizeof(predef_order_wasm64) / sizeof(*predef_order_wasm64))
+		     : job->wasm_bits ? (int)(sizeof(predef_order_wasm32) / sizeof(*predef_order_wasm32))
 			    : (int)(sizeof(predef_order_linux) / sizeof(*predef_order_linux));
 
-	if (job->undef)
-		driver_buffer_append_string(&job->pre, job->asm_mode ? predef_undef_asm : predef_undef_c);
+	if (job->undefine_predefined)
+		driver_buffer_append_string(&job->predefines, job->asm_mode ? predef_undef_asm : predef_undef_c);
 	else
-		driver_buffer_append_string(&job->pre, job->darwin ? predef_darwin : job->wasm == 64 ? predef_wasm64 : job->wasm ? predef_wasm32
-			 : job->x86 ? predef_x86_64_linux : predef_aarch64_linux);
-	if (job->asm_mode && !job->undef)
-		driver_buffer_append_string(&job->pre, "#define __ASSEMBLER__ 1\n#undef __STDC_VERSION__\n#define __STDC_VERSION__ 201710L\n");
-	else if (!job->undef && job->std) {
+		driver_buffer_append_string(&job->predefines, job->darwin ? predef_darwin : job->wasm_bits == 64 ? predef_wasm64 : job->wasm_bits ? predef_wasm32
+			 : job->target_x64 ? predef_x86_64_linux : predef_aarch64_linux);
+	if (job->asm_mode && !job->undefine_predefined)
+		driver_buffer_append_string(&job->predefines, "#define __ASSEMBLER__ 1\n#undef __STDC_VERSION__\n#define __STDC_VERSION__ 201710L\n");
+	else if (!job->undefine_predefined && job->standard) {
 		/* the tables are for -std=gnu11 (the kernel's); other standards as clang predefines them */
 		static const char *const ver[] = { [89] = NULL, [99] = "199901L", [11] = "201112L", [17] = "201710L", [23] = "202311L" };
 
-		driver_buffer_append_string(&job->pre, "#undef __STDC_VERSION__\n");
-		if (job->stdver || ver[job->std]) {
-			driver_buffer_append_string(&job->pre, "#define __STDC_VERSION__ ");
-			driver_buffer_append_string(&job->pre, job->stdver ? job->stdver : ver[job->std]);
-			driver_buffer_append_string(&job->pre, "\n");
+		driver_buffer_append_string(&job->predefines, "#undef __STDC_VERSION__\n");
+		if (job->standard_version || ver[job->standard]) {
+			driver_buffer_append_string(&job->predefines, "#define __STDC_VERSION__ ");
+			driver_buffer_append_string(&job->predefines, job->standard_version ? job->standard_version : ver[job->standard]);
+			driver_buffer_append_string(&job->predefines, "\n");
 		}
-		if (job->std == 89)
-			driver_buffer_append_string(&job->pre, "#undef __GNUC_STDC_INLINE__\n#define __GNUC_GNU_INLINE__ 1\n");
-		if (job->strict)
-			driver_buffer_append_string(&job->pre, "#define __STRICT_ANSI__ 1\n#undef linux\n#undef unix\n");
-		if (job->std == 23)
-			driver_predef_c23_append(&job->pre, job->darwin);
-	} else if (!job->undef && !job->asm_mode) {
-		driver_buffer_append_string(&job->pre, "#undef __STDC_VERSION__\n#define __STDC_VERSION__ 201710L\n");
+		if (job->standard == 89)
+			driver_buffer_append_string(&job->predefines, "#undef __GNUC_STDC_INLINE__\n#define __GNUC_GNU_INLINE__ 1\n");
+		if (job->strict_standard)
+			driver_buffer_append_string(&job->predefines, "#define __STRICT_ANSI__ 1\n#undef linux\n#undef unix\n");
+		if (job->standard == 23)
+			driver_predef_c23_append(&job->predefines, job->darwin);
+	} else if (!job->undefine_predefined && !job->asm_mode) {
+		driver_buffer_append_string(&job->predefines, "#undef __STDC_VERSION__\n#define __STDC_VERSION__ 201710L\n");
 	}
-	job->po.target = job->darwin ? PP_DARWIN : job->wasm == 64 ? PP_WASM64 : job->wasm ? PP_WASM32 : job->x86 ? PP_LINUX_X86_64 : PP_LINUX_AARCH64;
-	if (job->opt == 0 && !job->undef) driver_buffer_append_string(&job->pre, "#undef __OPTIMIZE__\n#define __NO_INLINE__ 1\n");
-	if (job->os && !job->undef) driver_buffer_append_string(&job->pre, "#define __OPTIMIZE_SIZE__ 1\n");
-	if ((job->pie || job->pic) && !job->undef) {
+	job->pp_options.target = job->darwin ? PP_DARWIN : job->wasm_bits == 64 ? PP_WASM64 : job->wasm_bits ? PP_WASM32 : job->target_x64 ? PP_LINUX_X86_64 : PP_LINUX_AARCH64;
+	if (job->optimize == 0 && !job->undefine_predefined) driver_buffer_append_string(&job->predefines, "#undef __OPTIMIZE__\n#define __NO_INLINE__ 1\n");
+	if (job->optimize_size && !job->undefine_predefined) driver_buffer_append_string(&job->predefines, "#define __OPTIMIZE_SIZE__ 1\n");
+	if ((job->pie || job->pic) && !job->undefine_predefined) {
 		char b[160];
 		int l = job->pie ? job->pie : job->pic;
 
 		snprintf(b, sizeof(b), "#define __PIC__ %d\n#define __pic__ %d\n", l, l);
-		driver_buffer_append_string(&job->pre, b);
+		driver_buffer_append_string(&job->predefines, b);
 		if (job->pie) {
 			snprintf(b, sizeof(b), "#define __PIE__ %d\n#define __pie__ %d\n", l, l);
-			driver_buffer_append_string(&job->pre, b);
+			driver_buffer_append_string(&job->predefines, b);
 		}
 	}
 	if (job->gnu89_inline < 0)
-		job->gnu89_inline = job->std == 89;
-	else if (!job->undef && !job->asm_mode)
-		driver_buffer_append_string(&job->pre, job->gnu89_inline ? "#undef __GNUC_STDC_INLINE__\n#undef __GNUC_GNU_INLINE__\n#define __GNUC_GNU_INLINE__ 1\n"
+		job->gnu89_inline = job->standard == 89;
+	else if (!job->undefine_predefined && !job->asm_mode)
+		driver_buffer_append_string(&job->predefines, job->gnu89_inline ? "#undef __GNUC_STDC_INLINE__\n#undef __GNUC_GNU_INLINE__\n#define __GNUC_GNU_INLINE__ 1\n"
 					: "#undef __GNUC_GNU_INLINE__\n#undef __GNUC_STDC_INLINE__\n#define __GNUC_STDC_INLINE__ 1\n");
-	if (job->freestanding) driver_buffer_append_string(&job->pre, "#undef __STDC_HOSTED__\n#define __STDC_HOSTED__ 0\n");
-	if (job->lnx && !job->short_wchar && !job->undef)	/* the Linux table is for the kernel's -fshort-wchar */
-		driver_buffer_append_string(&job->pre, "#undef __ARM_SIZEOF_WCHAR_T\n#define __ARM_SIZEOF_WCHAR_T 4\n"
+	if (job->freestanding) driver_buffer_append_string(&job->predefines, "#undef __STDC_HOSTED__\n#define __STDC_HOSTED__ 0\n");
+	if (job->target_linux && !job->short_wchar && !job->undefine_predefined)	/* the Linux table is for the kernel's -fshort-wchar */
+		driver_buffer_append_string(&job->predefines, "#undef __ARM_SIZEOF_WCHAR_T\n#define __ARM_SIZEOF_WCHAR_T 4\n"
 			   "#undef __SIZEOF_WCHAR_T__\n#define __SIZEOF_WCHAR_T__ 4\n"
 			   "#undef __WCHAR_MAX__\n#define __WCHAR_MAX__ 4294967295U\n"
 			   "#undef __WCHAR_MIN__\n#define __WCHAR_MIN__ 0U\n"
 			   "#undef __WCHAR_TYPE__\n#define __WCHAR_TYPE__ unsigned int\n"
 			   "#undef __WCHAR_WIDTH__\n#define __WCHAR_WIDTH__ 32\n"
 			   "#undef __clang_wide_literal_encoding__\n#define __clang_wide_literal_encoding__ \"UTF-32\"\n");
-	if (!job->undef && (job->fmath || (job->uchar >= 0 && job->uchar != job->lnx)))	/* char is unsigned by default on aarch64 Linux only */
-		driver_predef_flags_append(&job->pre, job->darwin, job->lnx, job->uchar, job->x86 ? job->fmath & ~32 : job->fmath);	/* no __ARM_FP_FAST on x86 */
-	if (job->darwin && job->macos_min && !job->undef) {
+	if (!job->undefine_predefined && (job->math_flags || (job->unsigned_char >= 0 && job->unsigned_char != job->target_linux)))	/* char is unsigned by default on aarch64 Linux only */
+		driver_predef_flags_append(&job->predefines, job->darwin, job->target_linux, job->unsigned_char, job->target_x64 ? job->math_flags & ~32 : job->math_flags);	/* no __ARM_FP_FAST on x86 */
+	if (job->darwin && job->macos_minimum_version && !job->undefine_predefined) {
 		/* clang: MMmmpp (10.x before 10.10: 10mp) */
 		unsigned maj = 0, min = 0, pat = 0, vv;
 		char b[320];
 
-		sscanf(job->macos_min, "%u.%u.%u", &maj, &min, &pat);
+		sscanf(job->macos_minimum_version, "%u.%u.%u", &maj, &min, &pat);
 		vv = maj == 10 && min < 10 ? 1000 + min * 10 + (pat > 9 ? 9 : pat) : maj * 10000 + min * 100 + pat;
 		snprintf(b, sizeof(b), "#undef __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__\n"
 			 "#define __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ %u\n"
 			 "#undef __ENVIRONMENT_OS_VERSION_MIN_REQUIRED__\n#define __ENVIRONMENT_OS_VERSION_MIN_REQUIRED__ %u\n",
 			 vv, vv);
-		driver_buffer_append_string(&job->pre, b);
+		driver_buffer_append_string(&job->predefines, b);
 	}
-	if (job->x86 && job->short_wchar && !job->undef)
-		driver_buffer_append_string(&job->pre, "#undef __SIZEOF_WCHAR_T__\n#define __SIZEOF_WCHAR_T__ 2\n"
+	if (job->target_x64 && job->short_wchar && !job->undefine_predefined)
+		driver_buffer_append_string(&job->predefines, "#undef __SIZEOF_WCHAR_T__\n#define __SIZEOF_WCHAR_T__ 2\n"
 			   "#undef __WCHAR_MAX__\n#define __WCHAR_MAX__ 65535\n"
 			   "#undef __WCHAR_MIN__\n#define __WCHAR_MIN__ 0\n"
 			   "#undef __WCHAR_TYPE__\n#define __WCHAR_TYPE__ unsigned short\n"
 			   "#define __WCHAR_UNSIGNED__ 1\n"
 			   "#undef __WCHAR_WIDTH__\n#define __WCHAR_WIDTH__ 16\n"
 			   "#undef __clang_wide_literal_encoding__\n#define __clang_wide_literal_encoding__ \"UTF-16\"\n");
-	if (job->darwin && job->short_wchar && !job->undef)
-		driver_buffer_append_string(&job->pre, "#undef __ARM_SIZEOF_WCHAR_T\n#define __ARM_SIZEOF_WCHAR_T 2\n"
+	if (job->darwin && job->short_wchar && !job->undefine_predefined)
+		driver_buffer_append_string(&job->predefines, "#undef __ARM_SIZEOF_WCHAR_T\n#define __ARM_SIZEOF_WCHAR_T 2\n"
 			   "#undef __SIZEOF_WCHAR_T__\n#define __SIZEOF_WCHAR_T__ 2\n"
 			   "#undef __WCHAR_MAX__\n#define __WCHAR_MAX__ 65535\n"
 			   "#undef __WCHAR_MIN__\n#define __WCHAR_MIN__ 0\n"
@@ -169,35 +169,35 @@ VPRIV void driver_predef_build(struct driver_job *job)
 			   "#define __WCHAR_UNSIGNED__ 1\n"
 			   "#undef __WCHAR_WIDTH__\n#define __WCHAR_WIDTH__ 16\n"
 			   "#undef __clang_wide_literal_encoding__\n#define __clang_wide_literal_encoding__ \"UTF-16\"\n");
-	if (job->darwin && job->gregs && !job->undef)	/* the Darwin table has Apple's FP/SIMD features */
-		driver_buffer_append_string(&job->pre, "#undef __ARM_FEATURE_AES\n#undef __ARM_FEATURE_CRYPTO\n#undef __ARM_FEATURE_DOTPROD\n"
+	if (job->darwin && job->general_regs_only && !job->undefine_predefined)	/* the Darwin table has Apple's FP/SIMD features */
+		driver_buffer_append_string(&job->predefines, "#undef __ARM_FEATURE_AES\n#undef __ARM_FEATURE_CRYPTO\n#undef __ARM_FEATURE_DOTPROD\n"
 			   "#undef __ARM_FEATURE_FP16_FML\n#undef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC\n"
 			   "#undef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC\n#undef __ARM_FEATURE_SHA2\n"
 			   "#undef __ARM_FEATURE_SHA3\n#undef __ARM_FEATURE_SHA512\n#undef __ARM_FP\n"
 			   "#undef __ARM_NEON\n#undef __ARM_NEON_FP\n");
-	if (job->x86 && !job->undef) {
-		driver_x86_feature_predefines_append(&job->pre, job->x86_features_, job->x86_cpu);
+	if (job->target_x64 && !job->undefine_predefined) {
+		driver_x86_feature_predefines_append(&job->predefines, job->x64_features, job->x64_cpu);
 		/* clang: -mgeneral-regs-only is -mno-sse -mno-mmx; without SSE2 no _Float16 either */
-		if (job->gregs || job->nosse)
-			driver_buffer_append_string(&job->pre, "#undef __SSE__\n#undef __SSE_MATH__\n");
-		if (job->gregs || job->nosse || job->nosse2)
-			driver_buffer_append_string(&job->pre, "#undef __SSE2__\n#undef __SSE2_MATH__\n#undef __FLT16_DECIMAL_DIG__\n#undef __FLT16_DENORM_MIN__\n"
+		if (job->general_regs_only || job->no_sse)
+			driver_buffer_append_string(&job->predefines, "#undef __SSE__\n#undef __SSE_MATH__\n");
+		if (job->general_regs_only || job->no_sse || job->no_sse2)
+			driver_buffer_append_string(&job->predefines, "#undef __SSE2__\n#undef __SSE2_MATH__\n#undef __FLT16_DECIMAL_DIG__\n#undef __FLT16_DENORM_MIN__\n"
 				   "#undef __FLT16_DIG__\n#undef __FLT16_EPSILON__\n#undef __FLT16_HAS_DENORM__\n"
 				   "#undef __FLT16_HAS_INFINITY__\n#undef __FLT16_HAS_QUIET_NAN__\n#undef __FLT16_MANT_DIG__\n"
 				   "#undef __FLT16_MAX_10_EXP__\n#undef __FLT16_MAX__\n#undef __FLT16_MAX_EXP__\n"
 				   "#undef __FLT16_MIN_10_EXP__\n#undef __FLT16_MIN__\n#undef __FLT16_MIN_EXP__\n#undef __FLT16_NORM_MAX__\n");
-		if (job->gregs || job->nommx)
-			driver_buffer_append_string(&job->pre, "#undef __MMX__\n");
+		if (job->general_regs_only || job->no_mmx)
+			driver_buffer_append_string(&job->predefines, "#undef __MMX__\n");
 	}
-	if (job->cfi && !job->undef) driver_buffer_append_string(&job->pre, "#define __GCC_HAVE_DWARF2_CFI_ASM 1\n");
-	if (job->darwin && job->freestanding && !job->undef) driver_buffer_append_string(&job->pre, "#undef __GCC_HAVE_DWARF2_CFI_ASM\n");
+	if (job->cfi && !job->undefine_predefined) driver_buffer_append_string(&job->predefines, "#define __GCC_HAVE_DWARF2_CFI_ASM 1\n");
+	if (job->darwin && job->freestanding && !job->undefine_predefined) driver_buffer_append_string(&job->predefines, "#undef __GCC_HAVE_DWARF2_CFI_ASM\n");
 	/* the Linux table is for the kernel's -mgeneral-regs-only */
-	if (job->lnx && !job->gregs && !job->undef)
-		driver_buffer_append_string(&job->pre, "#define __ARM_FP 0xE\n#define __ARM_NEON 1\n#define __ARM_NEON_FP 0xE\n");
+	if (job->target_linux && !job->general_regs_only && !job->undefine_predefined)
+		driver_buffer_append_string(&job->predefines, "#define __ARM_FP 0xE\n#define __ARM_NEON 1\n#define __ARM_NEON_FP 0xE\n");
 	/* -march wins over -mcpu (clang); Darwin: Apple cores, LSE always */
-	job->lse = job->darwin ? 1 : job->march_lse >= 0 ? job->march_lse : job->mcpu_lse >= 0 ? job->mcpu_lse : 0;
-	if (job->lnx && job->lse && !job->undef)
-		driver_buffer_append_string(&job->pre, "#define __ARM_FEATURE_ATOMICS 1\n");
-	if (job->strict_align) driver_buffer_append_string(&job->pre, "#undef __ARM_FEATURE_UNALIGNED\n");
-	if (job->tiny) driver_buffer_append_string(&job->pre, "#undef __AARCH64_CMODEL_SMALL__\n#define __AARCH64_CMODEL_TINY__ 1\n");
+	job->lse = job->darwin ? 1 : job->march_has_lse >= 0 ? job->march_has_lse : job->mcpu_has_lse >= 0 ? job->mcpu_has_lse : 0;
+	if (job->target_linux && job->lse && !job->undefine_predefined)
+		driver_buffer_append_string(&job->predefines, "#define __ARM_FEATURE_ATOMICS 1\n");
+	if (job->strict_align) driver_buffer_append_string(&job->predefines, "#undef __ARM_FEATURE_UNALIGNED\n");
+	if (job->code_model_tiny) driver_buffer_append_string(&job->predefines, "#undef __AARCH64_CMODEL_SMALL__\n#define __AARCH64_CMODEL_TINY__ 1\n");
 }

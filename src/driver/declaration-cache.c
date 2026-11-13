@@ -39,28 +39,28 @@ enum { DRIVER_SNAPSHOT_ARRAY_TYPES, DRIVER_SNAPSHOT_ARRAY_PARAMETERS, DRIVER_SNA
        DRIVER_SNAPSHOT_ARRAY_SCOPE_STACK, DRIVER_SNAPSHOT_ARRAY_TOP_LEVEL, DRIVER_SNAPSHOT_ARRAY_TOP_LEVEL_ASM, DRIVER_SNAPSHOT_ARRAY_SPANS, DRIVER_SNAPSHOT_ARRAY_LAZY_TYPES, DRIVER_SNAPSHOT_ARRAY_LAZY_FUNCTIONS, DRIVER_SNAPSHOT_ARRAY_LAZY_SYMBOLS, DRIVER_SNAPSHOT_ARRAY_PARENTHESES, DRIVER_SNAPSHOT_ARRAY_HEAP, DRIVER_SNAPSHOT_ARRAY_COUNT };
 
 typedef struct driver_snapshot_array {
-	size_t n;		/* bytes */
-	const char **pg;	/* ceil(n / DRIVER_SNAPSHOT_PAGE_SIZE) pages */
+	size_t bytes;		/* bytes */
+	const char **pages;	/* ceil(n / DRIVER_SNAPSHOT_PAGE_SIZE) pages */
 } driver_snapshot_array;
 
 typedef struct driver_snapshot {
-	cc c;			/* the scalar state; pointers into the heap as offsets */
-	driver_snapshot_array a[DRIVER_SNAPSHOT_ARRAY_COUNT];
+	cc state;			/* the scalar state; pointers into the heap as offsets */
+	driver_snapshot_array arrays[DRIVER_SNAPSHOT_ARRAY_COUNT];
 } driver_snapshot;
 
 typedef struct driver_snapshot_node {
-	const void *e;
-	unsigned ctr;
-	struct driver_snapshot_node *_Atomic kids;
-	struct driver_snapshot_node *sib;
+	const void *element;
+	unsigned counter;
+	struct driver_snapshot_node *_Atomic children;
+	struct driver_snapshot_node *sibling;
 	struct driver_snapshot_node *parent;
 	_Atomic uint32_t visits;
-	driver_snapshot *_Atomic snap;
+	driver_snapshot *_Atomic snapshot;
 } driver_snapshot_node;
 
 
 static struct driver_snapshot_root {
-	uint64_t sig;
+	uint64_t signature;
 	driver_snapshot_node node;
 	struct driver_snapshot_root *next;
 } *_Atomic driver_snapshot_roots;
@@ -104,18 +104,18 @@ static char *driver_snapshot_array_base(const cc *c, int k, size_t *n)
 
 typedef struct driver_snapshot_coder {
 	const char *heap;	/* the heap the pointers point into */
-	size_t hn;
-	char *to;		/* decoding: the heap they will point into */
-	uint32_t base;		/* location base of the chain */
-	bool bad;
+	size_t heap_size;
+	char *target_heap;		/* decoding: the heap they will point into */
+	uint32_t location_base;		/* location base of the chain */
+	bool failed;
 } driver_snapshot_coder;
 
 static void *driver_snapshot_pointer_encode(driver_snapshot_coder *k, const void *p)
 {
 	if (!p)
 		return NULL;
-	if ((const char *)p < k->heap || (const char *)p >= k->heap + k->hn) {
-		k->bad = true;
+	if ((const char *)p < k->heap || (const char *)p >= k->heap + k->heap_size) {
+		k->failed = true;
 		return NULL;
 	}
 	return (void *)((uintptr_t)((const char *)p - k->heap) + 1);
@@ -123,21 +123,21 @@ static void *driver_snapshot_pointer_encode(driver_snapshot_coder *k, const void
 
 static void *driver_snapshot_pointer_decode(const driver_snapshot_coder *k, const void *p)
 {
-	return p ? k->to + ((uintptr_t)p - 1) : NULL;
+	return p ? k->target_heap + ((uintptr_t)p - 1) : NULL;
 }
 
 static inline uint32_t driver_snapshot_location_encode(driver_snapshot_coder *k, uint32_t l)
 {
-	if (l < k->base)
+	if (l < k->location_base)
 		return l;
-	if (l - k->base >= DRIVER_SNAPSHOT_LOCATION_RELATIVE)
-		k->bad = true;
-	return DRIVER_SNAPSHOT_LOCATION_RELATIVE + (l - k->base);
+	if (l - k->location_base >= DRIVER_SNAPSHOT_LOCATION_RELATIVE)
+		k->failed = true;
+	return DRIVER_SNAPSHOT_LOCATION_RELATIVE + (l - k->location_base);
 }
 
 static inline uint32_t driver_snapshot_location_decode(const driver_snapshot_coder *k, uint32_t l)
 {
-	return l >= DRIVER_SNAPSHOT_LOCATION_RELATIVE ? k->base + (l - DRIVER_SNAPSHOT_LOCATION_RELATIVE) : l;
+	return l >= DRIVER_SNAPSHOT_LOCATION_RELATIVE ? k->location_base + (l - DRIVER_SNAPSHOT_LOCATION_RELATIVE) : l;
 }
 
 /* the location fields of an image (arrays at img[k], heap at img[DRIVER_SNAPSHOT_ARRAY_HEAP], tags' f already coded) */
@@ -240,7 +240,7 @@ static void *driver_snapshot_allocate(size_t n)
 static const driver_snapshot *driver_snapshot_ancestor_find(const driver_snapshot_node *n)
 {
 	for (n = n->parent; n; n = n->parent) {
-		const driver_snapshot *s = atomic_load_explicit(&n->snap, memory_order_acquire);
+		const driver_snapshot *s = atomic_load_explicit(&n->snapshot, memory_order_acquire);
 
 		if (s)
 			return s;
@@ -284,13 +284,13 @@ static driver_snapshot *driver_snapshot_take(const cc *c, const driver_snapshot_
 #define ENC(l) driver_snapshot_location_encode(&k, (l))
 	DRIVER_SNAPSHOT_LOCATIONS(img, c, ENC);
 #undef ENC
-	if (k.bad)
+	if (k.failed)
 		return NULL;
 	s = driver_snapshot_allocate(sizeof(*s));
-	s->c = *c;
-	driver_snapshot_state_translate(&k, &s->c, true);
-	s->c.prevloc = driver_snapshot_location_encode(&k, c->prevloc);
-	if (k.bad) {
+	s->state = *c;
+	driver_snapshot_state_translate(&k, &s->state, true);
+	s->state.prevloc = driver_snapshot_location_encode(&k, c->prevloc);
+	if (k.failed) {
 		free(s);
 		return NULL;
 	}
@@ -300,21 +300,21 @@ static driver_snapshot *driver_snapshot_take(const cc *c, const driver_snapshot_
 		for (int a = 0; a < DRIVER_SNAPSHOT_ARRAY_COUNT; a++) {
 			size_t np = (sz[a] + DRIVER_SNAPSHOT_PAGE_SIZE - 1) / DRIVER_SNAPSHOT_PAGE_SIZE;
 
-			s->a[a].n = sz[a];
-			s->a[a].pg = driver_snapshot_allocate((np ? np : 1) * sizeof(char *));
+			s->arrays[a].bytes = sz[a];
+			s->arrays[a].pages = driver_snapshot_allocate((np ? np : 1) * sizeof(char *));
 			own += np * sizeof(char *);
 			for (size_t i = 0; i < np; i++) {
 				size_t len = sz[a] - i * DRIVER_SNAPSHOT_PAGE_SIZE < DRIVER_SNAPSHOT_PAGE_SIZE ? sz[a] - i * DRIVER_SNAPSHOT_PAGE_SIZE : DRIVER_SNAPSHOT_PAGE_SIZE;
 				const char *src = img[a] + i * DRIVER_SNAPSHOT_PAGE_SIZE;
 				char *pg;
 
-				if (par && i * DRIVER_SNAPSHOT_PAGE_SIZE + len <= par->a[a].n && !memcmp(par->a[a].pg[i], src, len)) {
-					s->a[a].pg[i] = par->a[a].pg[i];
+				if (par && i * DRIVER_SNAPSHOT_PAGE_SIZE + len <= par->arrays[a].bytes && !memcmp(par->arrays[a].pages[i], src, len)) {
+					s->arrays[a].pages[i] = par->arrays[a].pages[i];
 					continue;
 				}
 				pg = driver_snapshot_allocate(DRIVER_SNAPSHOT_PAGE_SIZE);
 				memcpy(pg, src, len);
-				s->a[a].pg[i] = pg;
+				s->arrays[a].pages[i] = pg;
 				own += DRIVER_SNAPSHOT_PAGE_SIZE;
 			}
 		}
@@ -334,14 +334,14 @@ static void driver_snapshot_restore(cc *c, const driver_snapshot *s, uint32_t ba
 		size_t n;
 		char *to = a == DRIVER_SNAPSHOT_ARRAY_HEAP ? c->heap : driver_snapshot_array_base(c, a, &n);
 
-		for (size_t i = 0; i * DRIVER_SNAPSHOT_PAGE_SIZE < s->a[a].n; i++) {
-			size_t len = s->a[a].n - i * DRIVER_SNAPSHOT_PAGE_SIZE < DRIVER_SNAPSHOT_PAGE_SIZE ? s->a[a].n - i * DRIVER_SNAPSHOT_PAGE_SIZE : DRIVER_SNAPSHOT_PAGE_SIZE;
+		for (size_t i = 0; i * DRIVER_SNAPSHOT_PAGE_SIZE < s->arrays[a].bytes; i++) {
+			size_t len = s->arrays[a].bytes - i * DRIVER_SNAPSHOT_PAGE_SIZE < DRIVER_SNAPSHOT_PAGE_SIZE ? s->arrays[a].bytes - i * DRIVER_SNAPSHOT_PAGE_SIZE : DRIVER_SNAPSHOT_PAGE_SIZE;
 
-			memcpy(to + i * DRIVER_SNAPSHOT_PAGE_SIZE, s->a[a].pg[i], len);
+			memcpy(to + i * DRIVER_SNAPSHOT_PAGE_SIZE, s->arrays[a].pages[i], len);
 		}
 		img[a] = to;
 	}
-	memcpy(c, &s->c, sizeof(*c));
+	memcpy(c, &s->state, sizeof(*c));
 	/* this TU's own: the token state, the arrays, options */
 	c->p = keep.p;
 	c->o = keep.o;
@@ -358,14 +358,14 @@ static void driver_snapshot_restore(cc *c, const driver_snapshot *s, uint32_t ba
 	/* malloc'd and per TU: the snapshot's would be shared (and realloc'ed) by every TU restoring it */
 	c->cases = keep.cases, c->ncase = keep.ncase, c->capcase = keep.capcase, c->case_base = keep.case_base;
 	c->heap = keep.heap, c->hend = keep.hend, c->ptrc = keep.ptrc;
-	c->hp = c->heap + s->a[DRIVER_SNAPSHOT_ARRAY_HEAP].n;
+	c->hp = c->heap + s->arrays[DRIVER_SNAPSHOT_ARRAY_HEAP].bytes;
 	c->dc = keep.dc;
 	c->drb = keep.drb, c->ndrb = keep.ndrb, c->cdrb = keep.cdrb;	/* (VCC_DRCOV: this TU's) */
 	c->dr = keep.dr, c->dr_on = keep.dr_on;
 	c->dops = keep.dops, c->ndops = keep.ndops;	/* (scratch in this TU's heap) */
 	c->next_n = 0, c->ext_off = -1;	/* (ext_on's caches: the snapshot TU's options and pp) */
 	driver_snapshot_state_translate(&k, c, false);
-	c->prevloc = driver_snapshot_location_decode(&k, s->c.prevloc);
+	c->prevloc = driver_snapshot_location_decode(&k, s->state.prevloc);
 #define DEC(l) driver_snapshot_location_decode(&k, (l))
 	DRIVER_SNAPSHOT_LOCATIONS(img, c, DEC);	/* (first: the tags' f is still coded) */
 #undef DEC
@@ -394,10 +394,10 @@ static driver_snapshot_node *driver_snapshot_root_get(uint64_t sig)
 	for (;;) {
 		h = atomic_load_explicit(&driver_snapshot_roots, memory_order_acquire);
 		for (r = h; r; r = r->next)
-			if (r->sig == sig)
+			if (r->signature == sig)
 				return &r->node;
 		r = calloc(1, sizeof(*r));
-		r->sig = sig;
+		r->signature = sig;
 		r->next = h;
 		if (atomic_compare_exchange_strong_explicit(&driver_snapshot_roots, &h, r, memory_order_acq_rel, memory_order_acquire))
 			return &r->node;
@@ -410,18 +410,18 @@ static driver_snapshot_node *driver_snapshot_node_child(driver_snapshot_node *n,
 	driver_snapshot_node *h, *x;
 
 	for (;;) {
-		h = atomic_load_explicit(&n->kids, memory_order_acquire);
-		for (x = h; x; x = x->sib)
-			if (x->e == e && x->ctr == ctr)
+		h = atomic_load_explicit(&n->children, memory_order_acquire);
+		for (x = h; x; x = x->sibling)
+			if (x->element == e && x->counter == ctr)
 				return x;
 		if (!make)
 			return NULL;
 		x = calloc(1, sizeof(*x));
-		x->e = e;
-		x->ctr = ctr;
+		x->element = e;
+		x->counter = ctr;
 		x->parent = n;
-		x->sib = h;
-		if (atomic_compare_exchange_strong_explicit(&n->kids, &h, x, memory_order_acq_rel, memory_order_acquire))
+		x->sibling = h;
+		if (atomic_compare_exchange_strong_explicit(&n->children, &h, x, memory_order_acq_rel, memory_order_acquire))
 			return x;
 		free(x);
 	}
@@ -460,10 +460,10 @@ void driver_declaration_cache_end(cc *c)
 void driver_declaration_cache_materialize(cc *c)
 {
 	struct driver_declaration_cache_state *d = c->dc;
-	const driver_snapshot *s = atomic_load_explicit(&d->target->snap, memory_order_acquire);
+	const driver_snapshot *s = atomic_load_explicit(&d->target->snapshot, memory_order_acquire);
 
 	d->stale = false;
-	driver_snapshot_restore(c, s, d->base);
+	driver_snapshot_restore(c, s, d->location_base);
 	atomic_fetch_add_explicit(&driver_snapshot_restore_count, 1, memory_order_relaxed);
 }
 
@@ -494,17 +494,17 @@ void driver_declaration_cache_boundary_slow(cc *c)
 			driver_snapshot_mark_dead(c);
 			return;
 		}
-		for (; d->ev < n; d->ev++) {
-			const pp_topev *E = &ev[d->ev];
+		for (; d->events < n; d->events++) {
+			const pp_topev *E = &ev[d->events];
 
 			if (!E->end) {
-				if (d->is_open || E->pos != d->pos) {
+				if (d->is_open || E->pos != d->position) {
 					driver_snapshot_mark_dead(c);
 					return;
 				}
 				if (!d->node->parent)
-					d->base = E->base;
-				d->open = *E;
+					d->location_base = E->base;
+				d->open_event = *E;
 				d->is_open = true;
 				continue;
 			}
@@ -514,25 +514,25 @@ void driver_declaration_cache_boundary_slow(cc *c)
 				return;
 			}
 			d->is_open = false;
-			d->pos = E->pos;
-			d->node = driver_snapshot_node_child(d->node, E->e, d->open.ctr, true);
+			d->position = E->pos;
+			d->node = driver_snapshot_node_child(d->node, E->e, d->open_event.ctr, true);
 			atomic_fetch_add_explicit(&d->node->visits, 1, memory_order_relaxed);
 			if (!d->stale && !c->dr_on && atomic_load_explicit(&d->node->visits, memory_order_relaxed) >= 2 &&
-			    !atomic_load_explicit(&d->node->snap, memory_order_acquire) && !c->errors && !c->ndiag &&
+			    !atomic_load_explicit(&d->node->snapshot, memory_order_acquire) && !c->errors && !c->ndiag &&
 			    !pp_error_count(c->p) && atomic_load_explicit(&driver_snapshot_memory_used, memory_order_relaxed) <
 			    atomic_load_explicit(&driver_snapshot_memory_limit, memory_order_relaxed)) {
-				driver_snapshot *s = driver_snapshot_take(c, d->node, d->base), *z = NULL;
+				driver_snapshot *s = driver_snapshot_take(c, d->node, d->location_base), *z = NULL;
 
-				if (s && atomic_compare_exchange_strong_explicit(&d->node->snap, &z, s,
+				if (s && atomic_compare_exchange_strong_explicit(&d->node->snapshot, &z, s,
 										 memory_order_release, memory_order_relaxed))
 					atomic_fetch_add_explicit(&driver_snapshot_take_count, 1, memory_order_relaxed);
 			}
 		}
 		/* tk[0] is the first token of a replayed region whose state is known: skip it */
-		if (d->is_open && d->open.hit && d->open.pos + 1 == N) {
-			driver_snapshot_node *x = driver_snapshot_node_child(d->node, d->open.e, d->open.ctr, false);
+		if (d->is_open && d->open_event.hit && d->open_event.pos + 1 == N) {
+			driver_snapshot_node *x = driver_snapshot_node_child(d->node, d->open_event.e, d->open_event.ctr, false);
 
-			if (x && atomic_load_explicit(&x->snap, memory_order_acquire) && pp_top_region_skip(c->p)) {
+			if (x && atomic_load_explicit(&x->snapshot, memory_order_acquire) && pp_top_region_skip(c->p)) {
 				d->stale = true;
 				d->target = x;
 				atomic_fetch_add_explicit(&driver_snapshot_region_count, 1, memory_order_relaxed);

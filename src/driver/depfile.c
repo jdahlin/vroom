@@ -28,7 +28,7 @@ VPRIV int driver_depfile_write(const pp *p, const char *cwd, const char *depfile
 		cap = cap ? 2 * cap : 4096;
 		names = malloc(cap * sizeof(*names));
 	}
-	driver_buffer d = { .r = &driver_buffer_region[3] };
+	driver_buffer d = { .region = &driver_buffer_region[3] };
 	int r;
 
 	driver_buffer_append_string(&d, target);
@@ -61,7 +61,7 @@ VPRIV int driver_depfile_write(const pp *p, const char *cwd, const char *depfile
 			driver_buffer_append_string(&d, f);
 			driver_buffer_append_string(&d, ":\n");
 		}
-	r = depfile ? driver_output_file_write(cwd, depfile, d.p, d.n, errfd) : driver_output_write(cwd, out, outfd, d.p, d.n, errfd);
+	r = depfile ? driver_output_file_write(cwd, depfile, d.data, d.length, errfd) : driver_output_write(cwd, out, outfd, d.data, d.length, errfd);
 	driver_buffer_free(&d);
 	return r;
 }
@@ -71,19 +71,19 @@ VPRIV void driver_depfile_names(struct driver_job *job)
 {
 	/* dependency rules, as clang: the target is -o (not for -M/-MM) or the
 	   source's basename with .o; -MD's file is the target's with .d */
-	job->dtarget = job->deptarget;
-	job->dnosys = job->mdeps ? job->mdeps == 2 : job->md == 2;
-	job->dfirst = NULL;
+	job->depfile_target = job->dependency_target;
+	job->depfile_omit_system = job->dependency_print_mode ? job->dependency_print_mode == 2 : job->dependency_file_mode == 2;
+	job->depfile_first_input = NULL;
 
-	if (!job->dtarget)
-		job->dtarget = job->out && strcmp(job->out, "-") && !job->mdeps ? job->out : driver_object_name(job->main_file, job->dtbuf, sizeof(job->dtbuf));
-	if (job->md && !job->mdeps && !job->depfile) {
-		const char *st = job->out && strcmp(job->out, "-") ? job->out : driver_object_name(job->main_file, job->dtbuf + 2048, 2048);
+	if (!job->depfile_target)
+		job->depfile_target = job->output_file && strcmp(job->output_file, "-") && !job->dependency_print_mode ? job->output_file : driver_object_name(job->main_file, job->dependency_target_buffer, sizeof(job->dependency_target_buffer));
+	if (job->dependency_file_mode && !job->dependency_print_mode && !job->depfile) {
+		const char *st = job->output_file && strcmp(job->output_file, "-") ? job->output_file : driver_object_name(job->main_file, job->dependency_target_buffer + 2048, 2048);
 		const char *sl = strrchr(st, '/'), *dot = strrchr(st, '.');
 
 		if (dot && sl && dot < sl)
 			dot = NULL;
-		snprintf(job->dfbuf, sizeof(job->dfbuf), "%.*s.d", (int)(dot ? dot - st : (long)strlen(st)), st);
-		job->depfile = job->dfbuf;
+		snprintf(job->depfile_name_buffer, sizeof(job->depfile_name_buffer), "%.*s.d", (int)(dot ? dot - st : (long)strlen(st)), st);
+		job->depfile = job->depfile_name_buffer;
 	}
 }

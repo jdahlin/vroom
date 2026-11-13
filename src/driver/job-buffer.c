@@ -15,34 +15,34 @@ _Thread_local vjob_region *driver_buffer_region;	/* this job's (driver_job_run) 
 
 VPRIV void driver_buffer_append(driver_buffer *b, const char *s, size_t n)
 {
-	if (b->n + n + 256 > b->cap) {
-		size_t nc = b->cap ? b->cap * 2 : DRIVER_BUFFER_REGION_SIZE;
+	if (b->length + n + 256 > b->capacity) {
+		size_t nc = b->capacity ? b->capacity * 2 : DRIVER_BUFFER_REGION_SIZE;
 		char *np;
 
-		while (nc < b->n + n + 256)
+		while (nc < b->length + n + 256)
 			nc *= 2;
-		if (!b->cap && b->r && nc == DRIVER_BUFFER_REGION_SIZE) {
-			b->p = vjob_region_acquire(b->r, DRIVER_BUFFER_REGION_SIZE, "ppdriver.buf");
-			b->cap = DRIVER_BUFFER_REGION_SIZE;
+		if (!b->capacity && b->region && nc == DRIVER_BUFFER_REGION_SIZE) {
+			b->data = vjob_region_acquire(b->region, DRIVER_BUFFER_REGION_SIZE, "ppdriver.buf");
+			b->capacity = DRIVER_BUFFER_REGION_SIZE;
 			goto put;
 		}
 		np = mmap(NULL, nc, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
 		if (np == MAP_FAILED)
 			abort();
-		if (b->p) {
-			memcpy(np, b->p, b->n);
-			if (b->r)
-				vjob_region_release(b->r, b->n);
+		if (b->data) {
+			memcpy(np, b->data, b->length);
+			if (b->region)
+				vjob_region_release(b->region, b->length);
 			else
-				munmap(b->p, b->cap);
+				munmap(b->data, b->capacity);
 		}
-		b->r = NULL;
-		b->p = np;
-		b->cap = nc;
+		b->region = NULL;
+		b->data = np;
+		b->capacity = nc;
 	}
 put:
-	memcpy(b->p + b->n, s, n);
-	b->n += n;
+	memcpy(b->data + b->length, s, n);
+	b->length += n;
 }
 
 VPRIV void driver_buffer_append_string(driver_buffer *b, const char *s) { driver_buffer_append(b, s, strlen(s)); }
@@ -65,10 +65,10 @@ VPRIV void driver_buffer_append_define(driver_buffer *b, const char *d)
 
 VPRIV void driver_buffer_free(driver_buffer *b)
 {
-	if (b->p && b->r)
-		vjob_region_release(b->r, b->n + 256);
-	else if (b->p)
-		munmap(b->p, b->cap);
-	b->p = NULL;
-	b->n = b->cap = 0;
+	if (b->data && b->region)
+		vjob_region_release(b->region, b->length + 256);
+	else if (b->data)
+		munmap(b->data, b->capacity);
+	b->data = NULL;
+	b->length = b->capacity = 0;
 }

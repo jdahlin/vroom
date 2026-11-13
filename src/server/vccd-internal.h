@@ -71,7 +71,7 @@
 
 struct vccd_request {
 	char *raw;		/* header + payload as received */
-	size_t rawlen;
+	size_t raw_length;
 	int fds[3];
 	const char *cwd;
 	char **argv;
@@ -82,7 +82,7 @@ struct vccd_request {
 
 struct vccd_worker {
 	char *raw;
-	char **strs;
+	char **strings;
 };
 
 /* compiles recurse (parser, emitter): vstack_guard_low() ends a TU that nests too

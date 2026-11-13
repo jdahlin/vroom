@@ -33,13 +33,13 @@ struct vccd_diagnostics_record {
 
 typedef struct vccd_diagnostics_unit {
 	struct vccd_diagnostics_unit *next;
-	char *tu, *json;
-	size_t njson;
-	struct vccd_diagnostics_record *recs;
-	unsigned nrec;
+	char *unit_path, *json;
+	size_t json_length;
+	struct vccd_diagnostics_record *records;
+	unsigned record_count;
 } vccd_diagnostics_unit;
 
-typedef struct vccd_diagnostics_interned_string { struct vccd_diagnostics_interned_string *next; char s[]; } vccd_diagnostics_interned_string;
+typedef struct vccd_diagnostics_interned_string { struct vccd_diagnostics_interned_string *next; char text[]; } vccd_diagnostics_interned_string;
 
 #define VCCD_DIAGNOSTICS_BUCKETS 4096
 
@@ -94,12 +94,12 @@ static const char *vccd_diagnostics_string_intern(const char *s, bool path)
 	}
 	h = vccd_diagnostics_string_hash(s) & 1023;
 	for (e = vccd_diagnostics_string_buckets[h]; e; e = e->next)
-		if (!strcmp(e->s, s))
-			return e->s;
+		if (!strcmp(e->text, s))
+			return e->text;
 	e = vccd_diagnostics_realloc(NULL, sizeof(*e) + strlen(s) + 1);
-	strcpy(e->s, s);
+	strcpy(e->text, s);
 	e->next = vccd_diagnostics_string_buckets[h], vccd_diagnostics_string_buckets[h] = e;
-	return e->s;
+	return e->text;
 }
 
 static bool vccd_diagnostics_key_is_seen(pp_dsink *s, uint64_t key)
@@ -142,12 +142,12 @@ static bool vccd_diagnostics_key_is_seen(pp_dsink *s, uint64_t key)
 
 static void vccd_diagnostics_json_append(vccd_diagnostics_job *j, const char *s, size_t n)
 {
-	if (j->njson + n > j->cjson) {
-		j->cjson = (j->njson + n) * 2 + 256;
-		j->json = vccd_diagnostics_realloc(j->json, j->cjson);
+	if (j->json_length + n > j->json_capacity) {
+		j->json_capacity = (j->json_length + n) * 2 + 256;
+		j->json = vccd_diagnostics_realloc(j->json, j->json_capacity);
 	}
-	memcpy(j->json + j->njson, s, n);
-	j->njson += n;
+	memcpy(j->json + j->json_length, s, n);
+	j->json_length += n;
 }
 
 static void vccd_diagnostics_json_string_append(vccd_diagnostics_job *j, const char *s)
@@ -177,20 +177,20 @@ static void vccd_diagnostics_record_add(pp_dsink *s, const pp_drec *r)
 		VLOCK(vccd_diagnostics_lock);
 		d.flag = vccd_diagnostics_string_intern(r->flag, false);
 		d.path = vccd_diagnostics_string_intern(r->path, true);
-		if (!s->nojson && (j->nrec >= VCCD_DIAGNOSTICS_UNIT_JSON_MAX || vccd_diagnostics_json_bytes + j->njson + r->jlen > VCCD_DIAGNOSTICS_JSON_BUDGET))
+		if (!s->nojson && (j->record_count >= VCCD_DIAGNOSTICS_UNIT_JSON_MAX || vccd_diagnostics_json_bytes + j->json_length + r->jlen > VCCD_DIAGNOSTICS_JSON_BUDGET))
 			s->nojson = 1;	/* (pp sends no more JSON for this TU) */
 	}
-	if (j->nrec == j->crec) {
-		j->crec = j->crec ? 2 * j->crec : 8;
-		j->recs = vccd_diagnostics_realloc(j->recs, j->crec * sizeof(*j->recs));
+	if (j->record_count == j->record_capacity) {
+		j->record_capacity = j->record_capacity ? 2 * j->record_capacity : 8;
+		j->records = vccd_diagnostics_realloc(j->records, j->record_capacity * sizeof(*j->records));
 	}
-	j->recs[j->nrec++] = d;
+	j->records[j->record_count++] = d;
 	if (!r->json || s->nojson || r->jlen < 2 || r->json[0] != '{') {
 		j->omitted++;
 		return;
 	}
 	vccd_diagnostics_json_append(j, "{\"tu\":", 6);
-	vccd_diagnostics_json_string_append(j, j->tu);
+	vccd_diagnostics_json_string_append(j, j->unit_path);
 	vccd_diagnostics_json_append(j, ",", 1);
 	vccd_diagnostics_json_append(j, r->json + 1, r->jlen - 1);
 	vccd_diagnostics_json_append(j, "\n", 1);
@@ -205,56 +205,56 @@ void vccd_diagnostics_job_begin(vccd_diagnostics_job *j, const char *cwd, const 
 	j->sink.seen = vccd_diagnostics_key_is_seen;
 	j->sink.record = vccd_diagnostics_record_add;
 	n = (src[0] == '/' || !cwd ? 0 : strlen(cwd) + 1) + strlen(src) + 1;
-	j->tu = vccd_diagnostics_realloc(NULL, n);
+	j->unit_path = vccd_diagnostics_realloc(NULL, n);
 	if (src[0] == '/' || !cwd)
-		strcpy(j->tu, src);
+		strcpy(j->unit_path, src);
 	else
-		snprintf(j->tu, n, "%s/%s", cwd, src);
+		snprintf(j->unit_path, n, "%s/%s", cwd, src);
 }
 
 static void vccd_diagnostics_unit_free(vccd_diagnostics_unit *t)
 {
-	free(t->recs);
+	free(t->records);
 	free(t->json);
-	free(t->tu);
+	free(t->unit_path);
 	free(t);
 }
 
 void vccd_diagnostics_job_end(vccd_diagnostics_job *j, int ok)
 {
-	uint32_t b = vccd_diagnostics_string_hash(j->tu) & (VCCD_DIAGNOSTICS_BUCKETS - 1);
+	uint32_t b = vccd_diagnostics_string_hash(j->unit_path) & (VCCD_DIAGNOSTICS_BUCKETS - 1);
 	vccd_diagnostics_unit *old = NULL, *nt = NULL;
 
-	if (ok && j->nrec && j->omitted) {
+	if (ok && j->record_count && j->omitted) {
 		char n[32];
 
 		vccd_diagnostics_json_append(j, "{\"tu\":", 6);
-		vccd_diagnostics_json_string_append(j, j->tu);
+		vccd_diagnostics_json_string_append(j, j->unit_path);
 		vccd_diagnostics_json_append(j, n, (size_t)snprintf(n, sizeof n, ",\"omitted\":%u}\n", j->omitted));
 	}
-	if (ok && j->nrec) {
+	if (ok && j->record_count) {
 		nt = vccd_diagnostics_realloc(NULL, sizeof(*nt));
-		*nt = (vccd_diagnostics_unit){ NULL, j->tu, j->json, j->njson, j->recs, j->nrec };
-		j->tu = NULL, j->json = NULL, j->recs = NULL, j->nrec = 0;
+		*nt = (vccd_diagnostics_unit){ NULL, j->unit_path, j->json, j->json_length, j->records, j->record_count };
+		j->unit_path = NULL, j->json = NULL, j->records = NULL, j->record_count = 0;
 	}
 	{
 		VLOCK(vccd_diagnostics_lock);
 		for (vccd_diagnostics_unit **pp = &vccd_diagnostics_unit_buckets[b]; *pp; pp = &(*pp)->next)
-			if (!strcmp((*pp)->tu, nt ? nt->tu : j->tu)) {
+			if (!strcmp((*pp)->unit_path, nt ? nt->unit_path : j->unit_path)) {
 				old = *pp;
 				*pp = old->next;
 				break;
 			}
 		if (old)
-			vccd_diagnostics_json_bytes -= old->njson;
+			vccd_diagnostics_json_bytes -= old->json_length;
 		if (nt)
-			nt->next = vccd_diagnostics_unit_buckets[b], vccd_diagnostics_unit_buckets[b] = nt, vccd_diagnostics_json_bytes += nt->njson;
+			nt->next = vccd_diagnostics_unit_buckets[b], vccd_diagnostics_unit_buckets[b] = nt, vccd_diagnostics_json_bytes += nt->json_length;
 	}
 	if (old)
 		vccd_diagnostics_unit_free(old);
-	free(j->recs);
+	free(j->records);
 	free(j->json);
-	free(j->tu);
+	free(j->unit_path);
 	memset(j, 0, sizeof(*j));
 }
 
@@ -269,13 +269,13 @@ void vccd_diagnostics_build_new(void)
 
 /* ---------------- queries ---------------- */
 
-typedef struct { const char *k; unsigned n[2]; } vccd_diagnostics_key_count;	/* warnings, errors */
+typedef struct { const char *key; unsigned counts[2]; } vccd_diagnostics_key_count;	/* warnings, errors */
 
 static void vccd_diagnostics_key_count_add(vccd_diagnostics_key_count **v, unsigned *n, unsigned *c, const char *k, int err)
 {
 	for (unsigned i = 0; i < *n; i++)
-		if (!strcmp((*v)[i].k, k)) {
-			(*v)[i].n[err]++;
+		if (!strcmp((*v)[i].key, k)) {
+			(*v)[i].counts[err]++;
 			return;
 		}
 	if (*n == *c) {
@@ -288,12 +288,12 @@ static void vccd_diagnostics_key_count_add(vccd_diagnostics_key_count **v, unsig
 static int vccd_diagnostics_key_compare(const void *a, const void *b)
 {
 	const vccd_diagnostics_key_count *x = a, *y = b;
-	unsigned tx = x->n[0] + x->n[1], ty = y->n[0] + y->n[1];
+	unsigned tx = x->counts[0] + x->counts[1], ty = y->counts[0] + y->counts[1];
 
-	return tx != ty ? (tx < ty) - (tx > ty) : strcmp(x->k, y->k);
+	return tx != ty ? (tx < ty) - (tx > ty) : strcmp(x->key, y->key);
 }
 
-static int vccd_diagnostics_unit_compare(const void *a, const void *b) { return strcmp((*(vccd_diagnostics_unit *const *)a)->tu, (*(vccd_diagnostics_unit *const *)b)->tu); }
+static int vccd_diagnostics_unit_compare(const void *a, const void *b) { return strcmp((*(vccd_diagnostics_unit *const *)a)->unit_path, (*(vccd_diagnostics_unit *const *)b)->unit_path); }
 
 static bool vccd_diagnostics_write(int fd, const char *s, size_t n)
 {
@@ -316,8 +316,8 @@ static void vccd_diagnostics_table_print(int fd, const char *title, vccd_diagnos
 	qsort(v, n, sizeof(*v), vccd_diagnostics_key_compare);
 	dprintf(fd, "%s:\n", title);
 	for (unsigned i = 0; i < n; i++) {
-		int l = snprintf(line, sizeof line, "  %6u warning%s %6u error%s  %s\n", v[i].n[0], v[i].n[0] == 1 ? " " : "s",
-				 v[i].n[1], v[i].n[1] == 1 ? " " : "s", v[i].k);
+		int l = snprintf(line, sizeof line, "  %6u warning%s %6u error%s  %s\n", v[i].counts[0], v[i].counts[0] == 1 ? " " : "s",
+				 v[i].counts[1], v[i].counts[1] == 1 ? " " : "s", v[i].key);
 
 		vccd_diagnostics_write(fd, line, (size_t)(l < (int)sizeof line ? l : (int)sizeof line - 1));
 	}
@@ -344,14 +344,14 @@ int vccd_diagnostics_query(const char *what, int fd, int errfd)
 		qsort(all, n, sizeof(*all), vccd_diagnostics_unit_compare);
 	if (json) {
 		for (size_t i = 0; i < n; i++)
-			vccd_diagnostics_write(fd, all[i]->json, all[i]->njson);
+			vccd_diagnostics_write(fd, all[i]->json, all[i]->json_length);
 	} else {
 		vccd_diagnostics_key_count *fl = NULL, *fi = NULL;
 		unsigned nfl = 0, cfl = 0, nfi = 0, cfi = 0, w = 0, e = 0;
 
 		for (size_t i = 0; i < n; i++)
-			for (unsigned k = 0; k < all[i]->nrec; k++) {
-				const struct vccd_diagnostics_record *r = &all[i]->recs[k];
+			for (unsigned k = 0; k < all[i]->record_count; k++) {
+				const struct vccd_diagnostics_record *r = &all[i]->records[k];
 				int err = r->level >= VDL_ERROR;
 
 				if (r->level < VDL_WARNING)
@@ -363,18 +363,18 @@ int vccd_diagnostics_query(const char *what, int fd, int errfd)
 		dprintf(fd, "vccd: %u warning%s and %u error%s in %zu TU%s; %lu header warning%s left out in this build\n", w,
 			w == 1 ? "" : "s", e, e == 1 ? "" : "s", n, n == 1 ? "" : "s", vccd_diagnostics_duplicate_count, vccd_diagnostics_duplicate_count == 1 ? "" : "s");
 		for (unsigned i = 0; i < nfl; i++)
-			if (strcmp(fl[i].k, "(no flag)")) {
-				char *f = vccd_diagnostics_realloc(NULL, strlen(fl[i].k) + 3);
+			if (strcmp(fl[i].key, "(no flag)")) {
+				char *f = vccd_diagnostics_realloc(NULL, strlen(fl[i].key) + 3);
 
-				strcpy(f, "-W"), strcat(f, fl[i].k);
-				fl[i].k = f;
+				strcpy(f, "-W"), strcat(f, fl[i].key);
+				fl[i].key = f;
 			} else {
-				fl[i].k = vccd_diagnostics_strdup(fl[i].k);
+				fl[i].key = vccd_diagnostics_strdup(fl[i].key);
 			}
 		vccd_diagnostics_table_print(fd, "by flag", fl, nfl);
 		vccd_diagnostics_table_print(fd, "by file", fi, nfi);
 		for (unsigned i = 0; i < nfl; i++)
-			free((char *)fl[i].k);
+			free((char *)fl[i].key);
 		free(fl);
 		free(fi);
 	}

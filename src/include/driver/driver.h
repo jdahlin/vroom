@@ -18,11 +18,11 @@ typedef struct driver_environment {
 	const char *cwd;	/* relative paths are relative to this (NULL: process cwd) */
 	int outfd, errfd;	/* output without -o; diagnostics */
 	char **envp;		/* the client's environment (vccd); NULL: this process's */
-	struct pp_dsink *dsink;	/* vccd: the build's diagnostics store (NULL: none) */
-	int errtty;		/* errfd is a capture of a terminal's diagnostics (vccd): colors as for it */
+	struct pp_dsink *diagnostic_sink;	/* vccd: the build's diagnostics store (NULL: none) */
+	int error_is_terminal;		/* errfd is a capture of a terminal's diagnostics (vccd): colors as for it */
 	int infd;		/* the input `-` is read from (0: this process's stdin) */
-	const char *in_src;	/* non-NULL: the input `-` already read (vccd keeps it for a fallback) */
-	size_t in_len;
+	const char *input_text;	/* non-NULL: the input `-` already read (vccd keeps it for a fallback) */
+	size_t input_length;
 } driver_environment;
 
 /* the client's umask for files a job creates (-1: the process's own) */

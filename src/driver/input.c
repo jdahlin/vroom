@@ -5,7 +5,7 @@
  * probes that compile /dev/null).  The lexer wants one padded piece, so the input is read to the end
  * into a per-thread buffer that is reused by the next job on the thread (the result points into it:
  * valid until the thread's next driver_input_stdin_read).  Under vccd the client's stdin comes from env->infd,
- * or already read (env->in_src, which vccd keeps for a retry).  Fails the job (status 1, message on
+ * or already read (env->input_text, which vccd keeps for a retry).  Fails the job (status 1, message on
  * the job's error fd) on a read error or input of 2 GB or more; assembler input from stdin is a usage
  * error (status 2).
  */
@@ -52,13 +52,13 @@ static __attribute__((noinline, cold)) int driver_input_stdin_read(int fd, int e
 /* 0 to go on; 1: the job ends (status and message set) */
 VPRIV int driver_input_read(struct driver_job *job, const driver_environment *env)
 {
-	if (!strcmp(job->main_file, "-") && job->raw_asm == 1) {
+	if (!strcmp(job->main_file, "-") && job->raw_assembler == 1) {
 		dprintf(job->errfd, "vcc: error: assembler input from stdin is not supported\n");
 		job->status = 2;
 		return 1;
 	}
-	if (!strcmp(job->main_file, "-") && env->in_src) {
-		job->stdin_src = env->in_src, job->stdin_len = env->in_len;
+	if (!strcmp(job->main_file, "-") && env->input_text) {
+		job->stdin_src = env->input_text, job->stdin_len = env->input_length;
 	} else if (!strcmp(job->main_file, "-")) {
 		if (driver_input_stdin_read(env->infd, job->errfd, &job->stdin_src, &job->stdin_len)) {
 			job->status = 1;

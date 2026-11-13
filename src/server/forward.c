@@ -29,7 +29,7 @@ static int vccd_backend_relay(const struct vccd_request *r, const char *sock)
 {
 	struct sockaddr_un sa = { .sun_family = AF_UNIX };
 	char cbuf[CMSG_SPACE(3 * sizeof(int))];
-	struct iovec iov = { r->raw, r->rawlen };
+	struct iovec iov = { r->raw, r->raw_length };
 	struct msghdr m = { 0 };
 	struct cmsghdr *c;
 	int32_t status;
@@ -57,7 +57,7 @@ static int vccd_backend_relay(const struct vccd_request *r, const char *sock)
 	do
 		n = sendmsg(s, &m, 0);
 	while (n < 0 && errno == EINTR);
-	if (n < 0 || !vccd_fd_write_full(s, r->raw + n, r->rawlen - n) ||
+	if (n < 0 || !vccd_fd_write_full(s, r->raw + n, r->raw_length - n) ||
 	    !vccd_fd_read_full(s, (char *)&status, sizeof(status)))
 		status = 127;
 	close(s);
@@ -92,7 +92,7 @@ VPRIV int vccd_backend_forward_argv(const struct vccd_request *r, int argc, char
 	for (char **e = r->envp; *e; e++)
 		p = stpcpy(p, *e) + 1;
 	r2.raw = raw;
-	r2.rawlen = sizeof(*nh) + len;
+	r2.raw_length = sizeof(*nh) + len;
 	st = vccd_backend_forward(&r2, vccd_backend_socket);
 	free(raw);
 	return st;

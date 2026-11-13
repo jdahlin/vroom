@@ -90,14 +90,14 @@ VPRIV bool vccd_request_receive(struct vccd_worker *w, int conn, struct vccd_req
 				close(r->fds[i]), r->fds[i] = -1;
 		return false;
 	}
-	if (h->magic != VCCD_PROTOCOL_MAGIC || h->payload_len > VCCD_PROTOCOL_PAYLOAD_MAX || h->payload_len == 0 || h->pad ||
+	if (h->magic != VCCD_PROTOCOL_MAGIC || h->payload_len > VCCD_PROTOCOL_PAYLOAD_MAX || h->payload_len == 0 || h->padding ||
 	    1 + (uint64_t)h->argc + h->envc > VCCD_STRINGS_MAX)	/* (64 bits: argc 0xffffffff wraps to a small count) */
 		return false;
 	if (!vccd_fd_read_full(conn, w->raw + sizeof(*h), h->payload_len))
 		return false;
 	if (w->raw[sizeof(*h) + h->payload_len - 1])
 		return false;	/* the last string's NUL: vccd_request_split's strlen stays in the payload */
-	return vccd_request_split(w->raw, w->strs, r);
+	return vccd_request_split(w->raw, w->strings, r);
 }
 
 /* the strings of a request in raw (header + payload): cwd, argv..., envp... */
@@ -107,11 +107,11 @@ VPRIV bool vccd_request_split(char *raw, char **strs, struct vccd_request *r)
 	size_t off, i, n;
 
 	r->raw = raw;
-	r->rawlen = sizeof(*h) + h->payload_len;
+	r->raw_length = sizeof(*h) + h->payload_len;
 
 	/* split NUL-separated strings: cwd, argv..., envp... */
 	n = 0;
-	for (off = sizeof(*h); off < r->rawlen && n < VCCD_STRINGS_MAX - 2; off += strlen(raw + off) + 1)
+	for (off = sizeof(*h); off < r->raw_length && n < VCCD_STRINGS_MAX - 2; off += strlen(raw + off) + 1)
 		strs[n++] = raw + off;
 	if (n != 1 + h->argc + h->envc || h->argc < 1)
 		return false;

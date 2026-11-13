@@ -224,9 +224,9 @@ int main(int argc, char **argv)
 		char v[4200];
 
 		if (!shim_vccd_path_find(v, sizeof(v)))
-			h->build = vccd_build_id(v);
+			h->build_id = vccd_build_id(v);
 	}
-	h->pgrp = (uint32_t)getpgrp();
+	h->process_group = (uint32_t)getpgrp();
 	h->magic = VCCD_PROTOCOL_MAGIC;
 	h->argc = argc;
 	h->envc = e - environ + 1;

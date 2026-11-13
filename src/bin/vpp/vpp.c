@@ -42,11 +42,11 @@
 #include "port/task.h"
 
 typedef struct vpp_job {
-	char **av;
-	int ac;
+	char **argv;
+	int argc;
 	int status;
-	double ms;
-	vperf all, ph[DRIVER_PHASE_COUNT];
+	double milliseconds;
+	vperf total_counters, phase_counters[DRIVER_PHASE_COUNT];
 } vpp_job;
 
 static vpp_job *vpp_jobs;
@@ -75,11 +75,11 @@ static void vpp_job_run(void *arg, size_t k)
 	memcpy(ph0, driver_phase_counters, sizeof(ph0));	/* (per thread: the job's own work is the delta) */
 	t0 = vpp_clock_seconds();
 	v0 = vperformance_now();
-	j->status = driver_job_run(j->ac, j->av, &e);
-	j->all = vperformance_subtract(vperformance_now(), v0);
-	j->ms = (vpp_clock_seconds() - t0) * 1e3;
+	j->status = driver_job_run(j->argc, j->argv, &e);
+	j->total_counters = vperformance_subtract(vperformance_now(), v0);
+	j->milliseconds = (vpp_clock_seconds() - t0) * 1e3;
 	for (int i = 0; i < DRIVER_PHASE_COUNT; i++)
-		j->ph[i] = vperformance_subtract(driver_phase_counters[i], ph0[i]);
+		j->phase_counters[i] = vperformance_subtract(driver_phase_counters[i], ph0[i]);
 }
 
 /* every job once, nthr at a time: the TUs on the shared pool (port/task.c),
@@ -125,18 +125,18 @@ static int vpp_batch_run(const char *file, int nthr, const char *statsf)
 		for (c = l; *c; c++)
 			n += *c == 0x1f;
 		j = &vpp_jobs[vpp_job_count++];
-		j->av = calloc((size_t)n + 5, sizeof(char *));
+		j->argv = calloc((size_t)n + 5, sizeof(char *));
 		ref = strsep(&l, "\x1f");
-		j->av[j->ac++] = "vpp";
+		j->argv[j->argc++] = "vpp";
 		if (vpp_compare_mode) {
-			j->av[j->ac++] = "--cmp";
-			j->av[j->ac++] = ref;
+			j->argv[j->argc++] = "--cmp";
+			j->argv[j->argc++] = ref;
 		} else {
-			j->av[j->ac++] = "-o";
-			j->av[j->ac++] = "/dev/null";
+			j->argv[j->argc++] = "-o";
+			j->argv[j->argc++] = "/dev/null";
 		}
 		while ((c = strsep(&l, "\x1f")))
-			j->av[j->ac++] = c;
+			j->argv[j->argc++] = c;
 	}
 	if (nthr > 64)
 		nthr = 64;
@@ -150,16 +150,16 @@ static int vpp_batch_run(const char *file, int nthr, const char *statsf)
 	vpp_pass_run(nthr);
 	wall = vpp_clock_seconds() - t0;
 	for (int i = 0; i < vpp_job_count; i++) {
-		sum += vpp_jobs[i].ms;
-		tot.ins += vpp_jobs[i].all.ins;
-		tot.cyc += vpp_jobs[i].all.cyc;
+		sum += vpp_jobs[i].milliseconds;
+		tot.ins += vpp_jobs[i].total_counters.ins;
+		tot.cyc += vpp_jobs[i].total_counters.cyc;
 		for (int k = 0; k < DRIVER_PHASE_COUNT; k++) {
-			ph[k].ins += vpp_jobs[i].ph[k].ins;
-			ph[k].cyc += vpp_jobs[i].ph[k].cyc;
+			ph[k].ins += vpp_jobs[i].phase_counters[k].ins;
+			ph[k].cyc += vpp_jobs[i].phase_counters[k].cyc;
 		}
 		if (vpp_jobs[i].status) {
 			if (bad++ < 10)
-				fprintf(stderr, "failed: %s\n", vpp_jobs[i].av[vpp_jobs[i].ac - 1]);
+				fprintf(stderr, "failed: %s\n", vpp_jobs[i].argv[vpp_jobs[i].argc - 1]);
 		}
 	}
 	{
@@ -208,16 +208,16 @@ static int vpp_batch_run(const char *file, int nthr, const char *statsf)
 		}
 		for (int i = 0; i < vpp_job_count; i++) {
 			vpp_job *j = &vpp_jobs[i];
-			const char *mf = j->av[j->ac - 1];
+			const char *mf = j->argv[j->argc - 1];
 
-			for (int k = j->ac - 1; k > 0; k--)
-				if (j->av[k][0] != '-' && (strstr(j->av[k], ".c") || strstr(j->av[k], ".S"))) {
-					mf = j->av[k];
+			for (int k = j->argc - 1; k > 0; k--)
+				if (j->argv[k][0] != '-' && (strstr(j->argv[k], ".c") || strstr(j->argv[k], ".S"))) {
+					mf = j->argv[k];
 					break;
 				}
-			fprintf(f, "%d\t%.3f\t%llu\t%llu\t%llu\t%llu\t%llu\t%s\n", j->status, j->ms, (unsigned long long)j->all.ins,
-				(unsigned long long)j->all.cyc, (unsigned long long)j->ph[DRIVER_PHASE_COMPILE].ins,
-				(unsigned long long)j->ph[DRIVER_PHASE_EMIT].ins, (unsigned long long)j->ph[DRIVER_PHASE_OBJECT].ins, mf);
+			fprintf(f, "%d\t%.3f\t%llu\t%llu\t%llu\t%llu\t%llu\t%s\n", j->status, j->milliseconds, (unsigned long long)j->total_counters.ins,
+				(unsigned long long)j->total_counters.cyc, (unsigned long long)j->phase_counters[DRIVER_PHASE_COMPILE].ins,
+				(unsigned long long)j->phase_counters[DRIVER_PHASE_EMIT].ins, (unsigned long long)j->phase_counters[DRIVER_PHASE_OBJECT].ins, mf);
 		}
 		fclose(f);
 	}

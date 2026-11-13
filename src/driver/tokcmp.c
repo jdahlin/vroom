@@ -255,7 +255,7 @@ VPRIV void driver_tokens_hash_run(struct driver_job *job, pp *p, const driver_en
 			DRIVER_TOKENS_HASH_BYTES(fn[i], strlen(fn[i]) + 1);
 #undef DRIVER_TOKENS_HASH_BYTES
 		snprintf(line, sizeof(line), "%016llx %lu\n", (unsigned long long)h, n);
-		job->status = pp_error_count(p) ? 1 : driver_output_write(env->cwd, job->out, env->outfd, line, strlen(line), job->errfd);
+		job->status = pp_error_count(p) ? 1 : driver_output_write(env->cwd, job->output_file, env->outfd, line, strlen(line), job->errfd);
 		return;
 	}
 }

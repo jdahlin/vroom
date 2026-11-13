@@ -25,8 +25,8 @@ VPRIV int vccd_compile_in_process(const struct vccd_request *r, const char *src,
 {
 	const char *dd = vccd_request_environment_get(r, "VCC_DIAG_DEDUP");
 	vccd_diagnostics_job j;
-	driver_environment e = { .cwd = r->cwd, .outfd = r->fds[1], .errfd = -1, .envp = r->envp, .dsink = &j.sink,
-		      .errtty = isatty(r->fds[2]), .infd = r->fds[0], .in_src = src, .in_len = len };
+	driver_environment e = { .cwd = r->cwd, .outfd = r->fds[1], .errfd = -1, .envp = r->envp, .diagnostic_sink = &j.sink,
+		      .error_is_terminal = isatty(r->fds[2]), .infd = r->fds[0], .input_text = src, .input_length = len };
 	int st, to;
 	off_t n;
 
