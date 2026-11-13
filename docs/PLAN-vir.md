@@ -240,6 +240,95 @@ ekvivalenstestning återstår. Genererade program använder inga externa anrop.
 ### V4 x86-64 mot clang -O2 (2026-11-12), mål högst 5 % långsammare
 
 
+2026-11-13, dynamisk VM-granskning efter `52b78073` (ingen kompilatorändring):
+En fryst kopia av vpp och färska SQLite-binärer i `work/vir-vm-audit/`;
+VIR-objektet är byteidentiskt med `promote-width-final`. Ryzen 7 9700X,
+CPU 7, samma SQLite 3.50.4, -O2, THREADSAFE=0 och OMIT_LOAD_EXTENSION som
+ovan. Tre alternerade main-prov, storlek 100: clang **1143,52 ms**, VIR
+**1249,01 ms**, **1,092× CPU**, **1,094× cykler**, **1,263× instruktioner**.
+Detta är en nulägesmätning, ingen ny vinst. Oförändrat mål 1,05×.
+Båda originalen verifierar även storlek 100 med samma hash
+`23674002 573a4409d3d2efb9a2072aff97c6cefa6111b1b90cc7a0ef`.
+
+**Var kostnaden finns:** en separat kort cykelprofil per original, 13 372
+respektive 12 332 sampel utan förluster, ger VdbeExec 17,82 % hos VIR och
+18,85 % hos clang. IndexMoveto 8,77/9,08 %, RecordCompareInt 4,99/5,15 %.
+Andelarna är inte funktionsvisa hastighetskvoter: inlining flyttar arbete
+mellan symboler, och en enstaka profil har samplingbrus. VM:n är ett stort
+mål men profilen bevisar inte att den ensam förklarar tidsgapet. Enskilda
+instruktionssampel används inte som latensbevis (skid efter grenar).
+
+**Dynamisk blandning, endast instruktioner i VdbeExec:** ett extra nop per
+vald assemblyinstruktion, differensen i instructions:u mot respektive
+oprobade assemblykontroll, main storlek 100. Varje variant verifieras på
+storlek 10. Kontroller före/efter skiljer 54 respektive 126 instruktioner.
+Viktigt metodfel fångat: clangs interna loopalignment ändrar mängden körd
+nop-padding när prober läggs in. Sluttabellen tar därför bort interna
+align-direktiv i både kontroll och prober (`mix-clean/`); de ursprungliga
+binärerna ovan används för tid/cykelprofil. Klasserna är disjunkta och
+inkluderar xor av ett register med sig självt som konstant, inte aritmetik.
+Summan mot totalproben avviker högst 1,8 M (0,03 %); talen avrundas till M.
+Dessa är arbetsräknare, inte tidsmätningar av instrumenterad kod.
+
+| Körda instruktioner i VM:n, miljoner | clang | VIR | Överskott |
+|---|---:|---:|---:|
+| Totalt | 5646 | 7077 | +1431 |
+| Vanliga mov-laster | 1107 | 1396 | +289 |
+| Registerkopior | 348 | 594 | +246 |
+| Konstantmaterialisering, inklusive xor-nollning | 91 | 319 | +228 |
+| Adressberäkning + övrig ALU | 1105 | 1347 | +242 |
+| Rsp-laster + rsp-lagringar | 849 | 988 | +139 |
+| Registerextensions | 80 | 193 | +113 |
+| Vanliga mov-lagringar | 238 | 314 | +76 |
+| cmp/test | 692 | 745 | +53 |
+| Villkorliga hopp | 668 | 709 | +41 |
+| Ovillkorliga hopp | 361 | 336 | −24 |
+| Anrop | 74 | 73 | −1 |
+
+Minnesoperander i ALU/cmp är i sina instruktioners klasser, inte i
+mov-lasterna; tabellen är inte alla minnesåtkomster eller mikrooperationer.
+LEA ensamt är +561 M men övrig ALU −319 M: räkna dem tillsammans innan
+adressvikning prioriteras. VM:ns instruktionsgap är ungefär en tredjedel
+av hela programmets, inte hela gapet.
+
+**Konkreta heta vägar och nästa avgränsning:** jump-tabellen kopplar opcode
+94 till `.LBB6266_1443` (Column), 39 till `_2119` (Next), 97 till `_1286`
+(MakeRecord), 81 till `_1693` (SCopy). Extra nop vid ingångarna räknar
+22,592 M Column, 12,415 M Next, 2,006 M MakeRecord, 0,990 M SCopy mot
+83,351 M dispatchvarv. Column-kroppens emitterade blockintervall 1443–1589
+står för cirka **3,090 G instruktioner**, varav **299 M registerkopior**
+och **62 M mov av nollor**. Det är ett blockintervall, inte inklusive
+anropade funktioners instruktioner eller en exakt tidsandel per opcode;
+layoutkopior utanför intervallet ingår inte. Heta block i cykelprofilen
+pekar också på Column: cursor/cacheStatus, headeravkodning och destination.
+
+- Första större spåret: Column:s last-/kopiekedjor och registertryck över
+  headeravkodning, SerialGet och memcpy. Räkna allocator-edits på just dessa
+  vägar och jämför clangs motsvarande arbete före en generell heuristik.
+- Mindre, tydligt avgränsat spår: **165 M** `mov $0` nära hoppet tillbaka
+  till dispatch (ofta både rcx och rdx), av **245 M** sådana nollningar i
+  hela VM:n. VIR:s utskrivna loopkant vidarebefordrar blockargument; de
+  extra fysiska nollorna behöver spåras till allokatorns entry-/edge-plan
+  innan de kan tas bort. `alloc.c` ärver live-in-register från en vald
+  föregångare, och `vx_edge` materialiserar edge-konstanter. Detta är en
+  hypotes om förbättringens plats, inte ett bevis att nollorna är döda.
+  Även om alla dessa 165 M försvann är det under 0,8 % av hela programmets
+  instruktioner: ensamt räcker det inte till tidsmålet.
+- Slotten för aMem (776(%rsp)) laddas cirka 92 M gånger. Det motiverar
+  granskning av vilket långlivat värde som får callee-saved-register;
+  att reservera ett register kan samtidigt öka andra spill.
+- Lägre prioritet här: fler generella branch-/tail-call-peepholes eller
+  små hjälpfunktioner utan ny dynamisk evidens. VM:n kör redan färre
+  ovillkorliga hopp och ungefär lika många anrop som clang.
+
+Underlag: `work/vir-vm-audit/{timing/summary.json,vir.perf,clang.perf,
+vir-annotate.txt,clang-annotate.txt,vm.vir,focus.json,mix-clean/mix.json}`.
+`mix.py` och `focus.py` i samma katalog sparar proberna och råa perf-räknare;
+`mix-clean/mix.py` är den korrigerade klassmätningen. Vpp SHA256
+`ff40d17baee9aec0b8ca7f60fe8e3111c10986ae2b98eeb19aac6c267f8fbbec`.
+Ingen runtimevinst hävdas, inga ändringar i den andra sessionens källkod.
+
+
 2026-11-13, främja smala lokalfält trots olika heltalsbärare:
 Jämförelsen av `vdbeRecordCompareString` med clangs assembly visade att
 serial_type låg kvar på stacken. Första främjandet blockeras av en inlinad
