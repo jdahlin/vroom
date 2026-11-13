@@ -9,24 +9,24 @@ static int ld_eh_frame_header_pair_cmp(const void *a, const void *b)
 	const uint64_t *x = a, *y = b;
 	return x[0] != y[0] ? (x[0] < y[0] ? -1 : 1) : x[1] < y[1] ? -1 : x[1] > y[1];	/* lld stable_sort: output order */
 }
-static void ld_eh_frame_header_write(void)
+static void ld_eh_frame_header_write(struct ld_context *ctx)
 {
 	if (ctx->output.eh_frame_header_section == LD_NONE)
 		return;
-	uint32_t ho = ld_input_section_output_section(ctx->output.eh_frame_header_section);
+	uint32_t ho = ld_input_section_output_section(ctx, ctx->output.eh_frame_header_section);
 
 	if (ho == LD_NONE || ho == LD_OUTPUT_SECTION_DISCARD)
 		return;
-	uint64_t hva = ld_input_section_address(ctx->output.eh_frame_header_section, 0);
+	uint64_t hva = ld_input_section_address(ctx, ctx->output.eh_frame_header_section, 0);
 	uint8_t *h = ctx->output.image + ctx->script.sections.v[ho].offset + ctx->inputs.sections.v[ctx->output.eh_frame_header_section].off;
 	uint64_t (*t)[2] = ld_region_alloc((ctx->layout.eh_frame_fdes.n + 1) * sizeof *t);
 	uint32_t n = 0;
 	uint64_t ehva = 0;
 
 	for (uint32_t k = 0; k < ctx->layout.eh_frame_fdes.n; k++) {
-		uint32_t f = ctx->layout.eh_frame_fdes.v[k], fo = ld_input_section_output_section(f);
+		uint32_t f = ctx->layout.eh_frame_fdes.v[k], fo = ld_input_section_output_section(ctx, f);
 		const uint8_t *b = ctx->output.image + ctx->script.sections.v[fo].offset + ctx->inputs.sections.v[f].off;
-		uint64_t fva = ld_input_section_address(f, 0);
+		uint64_t fva = ld_input_section_address(ctx, f, 0);
 
 		if (!k)
 			ehva = ctx->script.sections.v[fo].va;
@@ -36,8 +36,8 @@ static void ld_eh_frame_header_write(void)
 	}
 	if (!ctx->layout.eh_frame_fdes.n && ctx->inputs.sections.n)
 		for (uint32_t i = 0; i < ctx->inputs.sections.n; i++)
-			if (!strcmp(ctx->inputs.sections.v[i].name, ".eh_frame") && ctx->inputs.sections.v[i].kind == LD_SECTION_KIND_NORMAL && ld_input_section_output_section(i) < ctx->script.sections.n) {
-				ehva = ctx->script.sections.v[ld_input_section_output_section(i)].va;
+			if (!strcmp(ctx->inputs.sections.v[i].name, ".eh_frame") && ctx->inputs.sections.v[i].kind == LD_SECTION_KIND_NORMAL && ld_input_section_output_section(ctx, i) < ctx->script.sections.n) {
+				ehva = ctx->script.sections.v[ld_input_section_output_section(ctx, i)].va;
 				break;
 			}
 	qsort(t, n, sizeof *t, ld_eh_frame_header_pair_cmp);

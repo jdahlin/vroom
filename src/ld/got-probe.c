@@ -4,7 +4,7 @@
 
 static void ld_got_find(void *arg, size_t i)
 {
-	(void)arg;
+	struct ld_context *ctx = arg;
 	const ld_input_section *is = &ctx->inputs.sections.v[i];
 	if (is->kind == LD_SECTION_KIND_NONE || atomic_load_explicit(&ctx->relocations.got_seen, memory_order_relaxed))
 		return;
@@ -16,10 +16,10 @@ static void ld_got_find(void *arg, size_t i)
 		}
 	}
 }
-static bool ld_got_is_needed(void)
+static bool ld_got_is_needed(struct ld_context *ctx)
 {
 	atomic_store(&ctx->relocations.got_seen, false);
 	if (!ctx->options.relocatable)
-		ld_parallel_for(ctx->inputs.sections.n, ctx->inputs.x86 ? x64_ld_got_find : ld_got_find, NULL);
+		ld_parallel_for(ctx->inputs.sections.n, ctx->inputs.x86 ? x64_ld_got_find : ld_got_find, ctx);
 	return atomic_load(&ctx->relocations.got_seen);
 }

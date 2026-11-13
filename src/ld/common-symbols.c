@@ -4,7 +4,7 @@
  * (after every file's sections), of the largest size and alignment among its
  * commons, in the first file with that size; placed in the order of the files
  * that have commons, each file's globals in order, at the first mention */
-static void ld_common_symbols_replace(void)
+static void ld_common_symbols_replace(struct ld_context *ctx)
 {
 	bool any = false;
 
@@ -42,7 +42,7 @@ static void ld_common_symbols_replace(void)
 
 			if (!s->common || s->state != LD_SYMBOL_STATE_OBJECT || s->sec != LD_NONE)
 				continue;
-			uint32_t is = ld_input_section_create("COMMON", LD_SECTION_KIND_NORMAL, SHT_NOBITS, SHF_ALLOC | SHF_WRITE,
+			uint32_t is = ld_input_section_create(ctx, "COMMON", LD_SECTION_KIND_NORMAL, SHT_NOBITS, SHF_ALLOC | SHF_WRITE,
 					       s->val ? (uint32_t)s->val : 1);
 
 			ctx->inputs.sections.v[is].size = s->size;

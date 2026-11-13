@@ -1,7 +1,7 @@
 /* The linker script's expression parser (precedence climbing) and its primaries. */
 
-static uint32_t ld_output_section_find(const char *name);
-static ld_expression *ld_script_expression_parse(void);
+static uint32_t ld_output_section_find(struct ld_context *ctx, const char *name);
+static ld_expression *ld_script_expression_parse(struct ld_context *ctx);
 
 static ld_expression *ld_script_expression_create(uint8_t op)
 {
@@ -11,7 +11,7 @@ static ld_expression *ld_script_expression_create(uint8_t op)
 }
 
 
-static void ld_script_symbol_reference_note(uint32_t g)
+static void ld_script_symbol_reference_note(struct ld_context *ctx, uint32_t g)
 {
 	if (ctx->script.current_provide)
 		VVEC_PUSH(ctx->script.current_provide->refs, g, ld_region_alloc);
@@ -38,9 +38,9 @@ static int ld_script_operator_precedence(const char *op)
 }
 /* peek an operator token (longest match of << >> <= >= == != && || op= and
  * the single-character operators); returns length or 0 */
-static int ld_script_operator_peek(char out[4])
+static int ld_script_operator_peek(struct ld_context *ctx, char out[4])
 {
-	ld_script_whitespace_skip();
+	ld_script_whitespace_skip(ctx);
 	size_t left = (size_t)(ctx->script.end - ctx->script.cursor);
 	if (!left)
 		return 0;
@@ -60,12 +60,12 @@ static int ld_script_operator_peek(char out[4])
 	return n;
 }
 
-static ld_expression *ld_script_primary_expression_parse(void);
-static ld_expression *ld_script_expression_climb(ld_expression *lhs, int minp)
+static ld_expression *ld_script_primary_expression_parse(struct ld_context *ctx);
+static ld_expression *ld_script_expression_climb(struct ld_context *ctx, ld_expression *lhs, int minp)
 {
 	char op1[4], op2[4];
 	for (;;) {
-		int n = ld_script_operator_peek(op1);
+		int n = ld_script_operator_peek(ctx, op1);
 		if (!n || ld_script_operator_precedence(op1) < minp || (strchr(op1, '=') && strcmp(op1, "==") && strcmp(op1, "!=") &&
 		    strcmp(op1, "<=") && strcmp(op1, ">=")))
 			break;
@@ -75,20 +75,20 @@ static ld_expression *ld_script_expression_climb(ld_expression *lhs, int minp)
 		if (!strcmp(op1, "?")) {
 			ld_expression *t = ld_script_expression_create(LD_EXPRESSION_TERNARY);
 			t->a = lhs;
-			t->b = ld_script_expression_parse();
-			ld_script_character_expect(':');
-			t->c = ld_script_expression_parse();
+			t->b = ld_script_expression_parse(ctx);
+			ld_script_character_expect(ctx, ':');
+			t->c = ld_script_expression_parse(ctx);
 			return t;
 		}
-		ld_expression *rhs = ld_script_primary_expression_parse();
+		ld_expression *rhs = ld_script_primary_expression_parse(ctx);
 		for (;;) {
-			int m = ld_script_operator_peek(op2);
+			int m = ld_script_operator_peek(ctx, op2);
 			if (!m || ld_script_operator_precedence(op2) <= ld_script_operator_precedence(op1) || !strcmp(op2, ":"))
 				break;
 			if (strchr(op2, '=') && strcmp(op2, "==") && strcmp(op2, "!=") &&
 			    strcmp(op2, "<=") && strcmp(op2, ">="))
 				break;
-			rhs = ld_script_expression_climb(rhs, ld_script_operator_precedence(op2));
+			rhs = ld_script_expression_climb(ctx, rhs, ld_script_operator_precedence(op2));
 		}
 		ld_expression *b = ld_script_expression_create(LD_EXPRESSION_BINARY);
 		strcpy(b->bop, op1);
@@ -98,38 +98,38 @@ static ld_expression *ld_script_expression_climb(ld_expression *lhs, int minp)
 	}
 	return lhs;
 }
-static ld_expression *ld_script_expression_parse(void) { return ld_script_expression_climb(ld_script_primary_expression_parse(), 0); }
+static ld_expression *ld_script_expression_parse(struct ld_context *ctx) { return ld_script_expression_climb(ctx, ld_script_primary_expression_parse(ctx), 0); }
 
-static ld_expression *ld_script_parenthesized_expression_parse(void)
+static ld_expression *ld_script_parenthesized_expression_parse(struct ld_context *ctx)
 {
-	ld_script_character_expect('(');
-	ld_expression *e = ld_script_expression_parse();
-	ld_script_character_expect(')');
+	ld_script_character_expect(ctx, '(');
+	ld_expression *e = ld_script_expression_parse(ctx);
+	ld_script_character_expect(ctx, ')');
 	return e;
 }
-static uint32_t ld_script_parenthesized_output_section_parse(void)
+static uint32_t ld_script_parenthesized_output_section_parse(struct ld_context *ctx)
 {
-	ld_script_character_expect('(');
-	char *n = ld_script_pattern_name_parse();
-	ld_script_character_expect(')');
-	return ld_output_section_find(n);
+	ld_script_character_expect(ctx, '(');
+	char *n = ld_script_pattern_name_parse(ctx);
+	ld_script_character_expect(ctx, ')');
+	return ld_output_section_find(ctx, n);
 }
 
-static ld_expression *ld_script_primary_expression_parse(void)
+static ld_expression *ld_script_primary_expression_parse(struct ld_context *ctx)
 {
-	ld_script_whitespace_skip();
-	if (ld_script_character_peek('('))
-		return ld_script_parenthesized_expression_parse();
-	if (ld_script_character_consume('~')) { ld_expression *e = ld_script_expression_create(LD_EXPRESSION_BITWISE_NOT); e->a = ld_script_primary_expression_parse(); return e; }
-	if (ld_script_character_consume('!')) { ld_expression *e = ld_script_expression_create(LD_EXPRESSION_LOGICAL_NOT); e->a = ld_script_primary_expression_parse(); return e; }
-	if (ld_script_character_consume('-')) { ld_expression *e = ld_script_expression_create(LD_EXPRESSION_NEGATE); e->a = ld_script_primary_expression_parse(); return e; }
-	if (ld_script_character_consume('+')) return ld_script_primary_expression_parse();
-	ld_script_whitespace_skip();
+	ld_script_whitespace_skip(ctx);
+	if (ld_script_character_peek(ctx, '('))
+		return ld_script_parenthesized_expression_parse(ctx);
+	if (ld_script_character_consume(ctx, '~')) { ld_expression *e = ld_script_expression_create(LD_EXPRESSION_BITWISE_NOT); e->a = ld_script_primary_expression_parse(ctx); return e; }
+	if (ld_script_character_consume(ctx, '!')) { ld_expression *e = ld_script_expression_create(LD_EXPRESSION_LOGICAL_NOT); e->a = ld_script_primary_expression_parse(ctx); return e; }
+	if (ld_script_character_consume(ctx, '-')) { ld_expression *e = ld_script_expression_create(LD_EXPRESSION_NEGATE); e->a = ld_script_primary_expression_parse(ctx); return e; }
+	if (ld_script_character_consume(ctx, '+')) return ld_script_primary_expression_parse(ctx);
+	ld_script_whitespace_skip(ctx);
 	const char *b = ctx->script.cursor;
 	if (ctx->script.cursor < ctx->script.end && *ctx->script.cursor == '"') {
-		char *n = ld_script_name_parse();
-		uint32_t g = ld_global_name_intern(n);
-		ld_script_symbol_reference_note(g);
+		char *n = ld_script_name_parse(ctx);
+		uint32_t g = ld_global_name_intern(ctx, n);
+		ld_script_symbol_reference_note(ctx, g);
 		ld_expression *e = ld_script_expression_create(LD_EXPRESSION_SYMBOL);
 		e->sym = g;
 		return e;
@@ -137,7 +137,7 @@ static ld_expression *ld_script_primary_expression_parse(void)
 	while (ctx->script.cursor < ctx->script.end && (ld_script_character_classes[(unsigned char)*ctx->script.cursor] & LD_CHARACTER_IDENTIFIER))
 		ctx->script.cursor++;
 	if (ctx->script.cursor == b) {
-		ld_script_error_report("expected expression");
+		ld_script_error_report(ctx, "expected expression");
 		ctx->script.cursor = ctx->script.end;
 		return ld_script_expression_create(LD_EXPRESSION_NUMBER);
 	}
@@ -158,74 +158,74 @@ static ld_expression *ld_script_primary_expression_parse(void)
 			v = strtoull(tok, &end, 0) * mul;
 		}
 		if (*end)
-			ld_script_error_report("malformed number");
+			ld_script_error_report(ctx, "malformed number");
 		e->num = v;
 		return e;
 	}
 	ld_expression *e;
-	if (!strcmp(tok, "ABSOLUTE")) { e = ld_script_expression_create(LD_EXPRESSION_ABSOLUTE); e->a = ld_script_parenthesized_expression_parse(); return e; }
+	if (!strcmp(tok, "ABSOLUTE")) { e = ld_script_expression_create(LD_EXPRESSION_ABSOLUTE); e->a = ld_script_parenthesized_expression_parse(ctx); return e; }
 	if (!strcmp(tok, "ADDR")) {
 		e = ld_script_expression_create(LD_EXPRESSION_ADDRESS);
-		e->sym = ld_script_parenthesized_output_section_parse();
+		e->sym = ld_script_parenthesized_output_section_parse(ctx);
 		ctx->script.sections.v[e->sym].used_in_expr = true;
 		return e;
 	}
 	if (!strcmp(tok, "LOADADDR")) {
 		e = ld_script_expression_create(LD_EXPRESSION_LOAD_ADDRESS);
-		e->sym = ld_script_parenthesized_output_section_parse();
+		e->sym = ld_script_parenthesized_output_section_parse(ctx);
 		ctx->script.sections.v[e->sym].used_in_expr = true;
 		return e;
 	}
-	if (!strcmp(tok, "SIZEOF")) { e = ld_script_expression_create(LD_EXPRESSION_SIZEOF); e->sym = ld_script_parenthesized_output_section_parse(); return e; }
-	if (!strcmp(tok, "ALIGNOF")) { e = ld_script_expression_create(LD_EXPRESSION_ALIGNOF); e->sym = ld_script_parenthesized_output_section_parse(); return e; }
+	if (!strcmp(tok, "SIZEOF")) { e = ld_script_expression_create(LD_EXPRESSION_SIZEOF); e->sym = ld_script_parenthesized_output_section_parse(ctx); return e; }
+	if (!strcmp(tok, "ALIGNOF")) { e = ld_script_expression_create(LD_EXPRESSION_ALIGNOF); e->sym = ld_script_parenthesized_output_section_parse(ctx); return e; }
 	if (!strcmp(tok, "SIZEOF_HEADERS")) return ld_script_expression_create(LD_EXPRESSION_SIZEOF_HEADERS);
 	if (!strcmp(tok, "ALIGN")) {
-		ld_script_character_expect('(');
-		ld_expression *a = ld_script_expression_parse();
-		if (ld_script_character_consume(')')) { e = ld_script_expression_create(LD_EXPRESSION_ALIGN_ONE_ARGUMENT); e->a = a; return e; }
-		ld_script_character_expect(',');
+		ld_script_character_expect(ctx, '(');
+		ld_expression *a = ld_script_expression_parse(ctx);
+		if (ld_script_character_consume(ctx, ')')) { e = ld_script_expression_create(LD_EXPRESSION_ALIGN_ONE_ARGUMENT); e->a = a; return e; }
+		ld_script_character_expect(ctx, ',');
 		e = ld_script_expression_create(LD_EXPRESSION_ALIGN_TWO_ARGUMENTS);
 		e->a = a;
-		e->b = ld_script_expression_parse();
-		ld_script_character_expect(')');
+		e->b = ld_script_expression_parse(ctx);
+		ld_script_character_expect(ctx, ')');
 		return e;
 	}
 	if (!strcmp(tok, "ASSERT")) {
-		ld_script_character_expect('(');
+		ld_script_character_expect(ctx, '(');
 		e = ld_script_expression_create(LD_EXPRESSION_ASSERT);
-		e->a = ld_script_expression_parse();
-		ld_script_character_expect(',');
-		e->msg = ld_script_name_parse();
-		ld_script_character_expect(')');
+		e->a = ld_script_expression_parse(ctx);
+		ld_script_character_expect(ctx, ',');
+		e->msg = ld_script_name_parse(ctx);
+		ld_script_character_expect(ctx, ')');
 		return e;
 	}
 	if (!strcmp(tok, "DEFINED")) {
-		ld_script_character_expect('(');
+		ld_script_character_expect(ctx, '(');
 		e = ld_script_expression_create(LD_EXPRESSION_DEFINED);
-		e->sym = ld_global_name_intern(ld_script_pattern_name_parse());
-		ld_script_character_expect(')');
+		e->sym = ld_global_name_intern(ctx, ld_script_pattern_name_parse(ctx));
+		ld_script_character_expect(ctx, ')');
 		return e;
 	}
 	if (!strcmp(tok, "MAX") || !strcmp(tok, "MIN")) {
 		e = ld_script_expression_create(tok[1] == 'A' ? LD_EXPRESSION_MAX : LD_EXPRESSION_MIN);
-		ld_script_character_expect('(');
-		e->a = ld_script_expression_parse();
-		ld_script_character_expect(',');
-		e->b = ld_script_expression_parse();
-		ld_script_character_expect(')');
+		ld_script_character_expect(ctx, '(');
+		e->a = ld_script_expression_parse(ctx);
+		ld_script_character_expect(ctx, ',');
+		e->b = ld_script_expression_parse(ctx);
+		ld_script_character_expect(ctx, ')');
 		return e;
 	}
-	if (!strcmp(tok, "LOG2CEIL")) { e = ld_script_expression_create(LD_EXPRESSION_LOG2CEIL); e->a = ld_script_parenthesized_expression_parse(); return e; }
+	if (!strcmp(tok, "LOG2CEIL")) { e = ld_script_expression_create(LD_EXPRESSION_LOG2CEIL); e->a = ld_script_parenthesized_expression_parse(ctx); return e; }
 	if (!strcmp(tok, "CONSTANT")) {
-		ld_script_character_expect('(');
-		char *n = ld_script_pattern_name_parse();
-		ld_script_character_expect(')');
+		ld_script_character_expect(ctx, '(');
+		char *n = ld_script_pattern_name_parse(ctx);
+		ld_script_character_expect(ctx, ')');
 		e = ld_script_expression_create(LD_EXPRESSION_NUMBER);
 		e->num = !strcmp(n, "MAXPAGESIZE") ? ctx->options.max_page : 4096;
 		return e;
 	}
-	uint32_t g = ld_global_name_intern(tok);
-	ld_script_symbol_reference_note(g);
+	uint32_t g = ld_global_name_intern(ctx, tok);
+	ld_script_symbol_reference_note(ctx, g);
 	e = ld_script_expression_create(LD_EXPRESSION_SYMBOL);
 	e->sym = g;
 	return e;

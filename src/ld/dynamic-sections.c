@@ -14,7 +14,7 @@ enum {
 #define DT_VERDEF 0x6ffffffcu
 #define DT_VERDEFNUM 0x6ffffffdu
 
-static bool ld_global_symbol_is_referenced(uint32_t g);
+static bool ld_global_symbol_is_referenced(struct ld_context *ctx, uint32_t g);
 
 static uint32_t ld_symbol_name_elf_hash(const char *n)
 {
@@ -36,7 +36,7 @@ static uint32_t ld_symbol_name_gnu_hash(const char *n)
 	return h;
 }
 
-static uint32_t ld_dynamic_string_add(const char *str)
+static uint32_t ld_dynamic_string_add(struct ld_context *ctx, const char *str)
 {
 	size_t n = strlen(str);
 	for (uint32_t i = 0; i < ctx->dynamic.string_offsets.n; i++)
@@ -50,14 +50,14 @@ static uint32_t ld_dynamic_string_add(const char *str)
 }
 
 /* VERSION: local patterns first, then each node's globals override (lld scanVersionScript) */
-static void ld_symbol_versions_assign(void)
+static void ld_symbol_versions_assign(struct ld_context *ctx)
 {
 	for (uint32_t i = 0; i < ctx->symbols.order.n; i++) {
 		ld_global_symbol *s = &ctx->symbols.globals[ctx->symbols.order.v[i]];
 		s->ver = 1;
 		if (!ctx->script.version_nodes.n || s->state == LD_SYMBOL_STATE_UNDEFINED)
 			continue;
-		const char *n = ld_global_name(ctx->symbols.order.v[i]);
+		const char *n = ld_global_name(ctx, ctx->symbols.order.v[i]);
 		for (uint32_t k = 0; k < ctx->script.version_locals.n; k++)
 			if (ld_glob_match(ctx->script.version_locals.v[k], n)) {
 				s->ver = 0;
@@ -77,21 +77,21 @@ static void ld_symbol_versions_assign(void)
 	}
 }
 
-static bool ld_input_section_is_live(uint32_t isec)
+static bool ld_input_section_is_live(struct ld_context *ctx, uint32_t isec)
 {
 	uint32_t o = isec == LD_NONE ? LD_NONE : ctx->inputs.sections.v[isec].osec;
 	return o != LD_NONE && o != LD_OUTPUT_SECTION_DISCARD;
 }
 
 /* _DYNAMIC: lld defines it (weak, hidden) after the script's symbols */
-static void ld_dynamic_symbol_define(void)
+static void ld_dynamic_symbol_define(struct ld_context *ctx)
 {
-	ctx->output.dynamic_live = ctx->options.shared && ld_input_section_is_live(ctx->output.dynamic_section);
+	ctx->output.dynamic_live = ctx->options.shared && ld_input_section_is_live(ctx, ctx->output.dynamic_section);
 	if (!ctx->output.dynamic_live)
 		return;
-	uint32_t g = ld_global_name_intern("_DYNAMIC");
+	uint32_t g = ld_global_name_intern(ctx, "_DYNAMIC");
 	ld_global_symbol *s = &ctx->symbols.globals[g];
-	if (!ld_global_symbol_is_referenced(g)) {
+	if (!ld_global_symbol_is_referenced(ctx, g)) {
 		VVEC_PUSH(ctx->symbols.order, g, ld_region_alloc);
 		ld_atomic_u64_min(&s->first, ctx->symbols.script_order++);
 	}
@@ -105,17 +105,17 @@ static void ld_dynamic_symbol_define(void)
 }
 
 /* contents and sizes of the dynamic sections (addresses are filled in later) */
-static void ld_dynamic_sections_build(void)
+static void ld_dynamic_sections_build(struct ld_context *ctx)
 {
 	if (!ctx->output.dynamic_live)
 		return;
 	if (ctx->output.relative_count)
-		ld_error_report("dynamic relocations in a shared object with .dynamic are not supported");
+		ld_error_report(ctx, "dynamic relocations in a shared object with .dynamic are not supported");
 	ctx->dynamic.symbols.n = 0;
 	for (uint32_t i = 0; i < ctx->symbols.order.n; i++) {
 		uint32_t g = ctx->symbols.order.v[i];
 		ld_global_symbol *s = &ctx->symbols.globals[g];
-		if (!ld_global_symbol_is_in_symbol_table(g) || ld_global_symbol_is_local(g))
+		if (!ld_global_symbol_is_in_symbol_table(ctx, g) || ld_global_symbol_is_local(ctx, g))
 			continue;
 		if (s->state == LD_SYMBOL_STATE_UNDEFINED && (ld_key_load(&s->first) >> 32) >= ctx->inputs.objects.n)
 			continue;
@@ -140,7 +140,7 @@ static void ld_dynamic_sections_build(void)
 			ld_global_symbol *s = &ctx->symbols.globals[ctx->dynamic.symbols.v[i]];
 			if (s->state == LD_SYMBOL_STATE_UNDEFINED || s->demoted)
 				continue;
-			if (ld_symbol_name_gnu_hash(ld_global_name(ctx->dynamic.symbols.v[i])) % ctx->dynamic.gnu_hash_buckets == b)
+			if (ld_symbol_name_gnu_hash(ld_global_name(ctx, ctx->dynamic.symbols.v[i])) % ctx->dynamic.gnu_hash_buckets == b)
 				tmp[w++] = ctx->dynamic.symbols.v[i];
 		}
 	if (n)
@@ -152,19 +152,19 @@ static void ld_dynamic_sections_build(void)
 	ctx->dynamic.symbol_names = ld_region_alloc((size_t)(n + 1) * sizeof(uint32_t));
 	for (uint32_t i = 0; i < n; i++) {
 		ctx->symbols.globals[ctx->dynamic.symbols.v[i]].dynidx = i + 1;
-		ctx->dynamic.symbol_hashes[i] = ld_symbol_name_gnu_hash(ld_global_name(ctx->dynamic.symbols.v[i]));
-		ctx->dynamic.symbol_names[i] = ld_dynamic_string_add(ld_global_name(ctx->dynamic.symbols.v[i]));
+		ctx->dynamic.symbol_hashes[i] = ld_symbol_name_gnu_hash(ld_global_name(ctx, ctx->dynamic.symbols.v[i]));
+		ctx->dynamic.symbol_names[i] = ld_dynamic_string_add(ctx, ld_global_name(ctx, ctx->dynamic.symbols.v[i]));
 	}
 	const char *fname = ctx->options.soname ? ctx->options.soname : ctx->options.out;
 	ctx->dynamic.version_name_offsets = ld_region_alloc((ctx->script.version_definition_count + 1) * sizeof(uint32_t));
 	if (ctx->script.version_definition_count) {
-		ctx->dynamic.soname_offset = ld_dynamic_string_add(fname);
+		ctx->dynamic.soname_offset = ld_dynamic_string_add(ctx, fname);
 		for (uint32_t v = 0, k = 0; v < ctx->script.version_nodes.n; v++)
 			if (*ctx->script.version_nodes.v[v].name)
-				ctx->dynamic.version_name_offsets[k++] = ld_dynamic_string_add(ctx->script.version_nodes.v[v].name);
+				ctx->dynamic.version_name_offsets[k++] = ld_dynamic_string_add(ctx, ctx->script.version_nodes.v[v].name);
 	}
 	if (ctx->options.soname)
-		ctx->dynamic.soname_offset = ld_dynamic_string_add(ctx->options.soname);
+		ctx->dynamic.soname_offset = ld_dynamic_string_add(ctx, ctx->options.soname);
 	ctx->dynamic.entry_count = (ctx->options.soname ? 1 : 0) + (ctx->options.bsymbolic ? 1 : 0) + 4 + 2 + (ctx->script.version_definition_count ? 3 : 0) + 1;
 
 	ctx->inputs.sections.v[ctx->output.dynsym_section].size = (uint64_t)(n + 1) * sizeof(elf_symbol);
@@ -179,34 +179,34 @@ static void ld_dynamic_sections_build(void)
 }
 
 /* sh_link / sh_info of the dynamic sections */
-static void ld_dynamic_section_links_set(void)
+static void ld_dynamic_section_links_set(struct ld_context *ctx)
 {
 	if (!ctx->output.dynamic_live)
 		return;
-	uint32_t ds = ctx->script.sections.v[ld_input_section_output_section(ctx->output.dynsym_section)].shidx, dstr = ctx->script.sections.v[ld_input_section_output_section(ctx->output.dynstr_section)].shidx;
-	ctx->script.sections.v[ld_input_section_output_section(ctx->output.dynsym_section)].link = dstr;
-	ctx->script.sections.v[ld_input_section_output_section(ctx->output.dynsym_section)].info = 1;	/* no local dynamic symbols */
-	ctx->script.sections.v[ld_input_section_output_section(ctx->output.hash_section)].link = ds;
-	ctx->script.sections.v[ld_input_section_output_section(ctx->output.gnu_hash_section)].link = ds;
-	ctx->script.sections.v[ld_input_section_output_section(ctx->output.dynamic_section)].link = dstr;
+	uint32_t ds = ctx->script.sections.v[ld_input_section_output_section(ctx, ctx->output.dynsym_section)].shidx, dstr = ctx->script.sections.v[ld_input_section_output_section(ctx, ctx->output.dynstr_section)].shidx;
+	ctx->script.sections.v[ld_input_section_output_section(ctx, ctx->output.dynsym_section)].link = dstr;
+	ctx->script.sections.v[ld_input_section_output_section(ctx, ctx->output.dynsym_section)].info = 1;	/* no local dynamic symbols */
+	ctx->script.sections.v[ld_input_section_output_section(ctx, ctx->output.hash_section)].link = ds;
+	ctx->script.sections.v[ld_input_section_output_section(ctx, ctx->output.gnu_hash_section)].link = ds;
+	ctx->script.sections.v[ld_input_section_output_section(ctx, ctx->output.dynamic_section)].link = dstr;
 	if (ctx->output.versym_section != LD_NONE) {
-		ctx->script.sections.v[ld_input_section_output_section(ctx->output.versym_section)].link = ds;
-		ctx->script.sections.v[ld_input_section_output_section(ctx->output.verdef_section)].link = dstr;
-		ctx->script.sections.v[ld_input_section_output_section(ctx->output.verdef_section)].info = ctx->script.version_definition_count + 1;
+		ctx->script.sections.v[ld_input_section_output_section(ctx, ctx->output.versym_section)].link = ds;
+		ctx->script.sections.v[ld_input_section_output_section(ctx, ctx->output.verdef_section)].link = dstr;
+		ctx->script.sections.v[ld_input_section_output_section(ctx, ctx->output.verdef_section)].info = ctx->script.version_definition_count + 1;
 	}
 }
 
-static uint8_t *ld_input_section_image_pointer(uint32_t isec)
+static uint8_t *ld_input_section_image_pointer(struct ld_context *ctx, uint32_t isec)
 {
-	return ctx->output.image + ctx->script.sections.v[ld_input_section_output_section(isec)].offset + ctx->inputs.sections.v[isec].off;
+	return ctx->output.image + ctx->script.sections.v[ld_input_section_output_section(ctx, isec)].offset + ctx->inputs.sections.v[isec].off;
 }
 
-static void ld_dynamic_sections_write(void)
+static void ld_dynamic_sections_write(struct ld_context *ctx)
 {
 	if (!ctx->output.dynamic_live)
 		return;
 	uint32_t n = ctx->dynamic.symbols.n;
-	elf_symbol *ds = (elf_symbol *)(void *)ld_input_section_image_pointer(ctx->output.dynsym_section);
+	elf_symbol *ds = (elf_symbol *)(void *)ld_input_section_image_pointer(ctx, ctx->output.dynsym_section);
 	for (uint32_t i = 0; i < n; i++) {
 		uint32_t g = ctx->dynamic.symbols.v[i];
 		ld_global_symbol *s = &ctx->symbols.globals[g];
@@ -215,28 +215,28 @@ static void ld_dynamic_sections_write(void)
 		d->st_info = (uint8_t)(s->bind << 4 | s->type);
 		d->st_other = s->vis;
 		if (s->state == LD_SYMBOL_STATE_SCRIPT) {
-			d->st_shndx = s->ev.kind == LD_VALUE_KIND_ABSOLUTE ? SHN_ABS : s->ev.kind == LD_VALUE_KIND_OUTPUT_SECTION ? ld_output_section_header_index(s->ev.idx)
-										: ld_symbol_section_index_of_input_section(s->ev.idx);
-			d->st_value = ld_global_symbol_address(g);
+			d->st_shndx = s->ev.kind == LD_VALUE_KIND_ABSOLUTE ? SHN_ABS : s->ev.kind == LD_VALUE_KIND_OUTPUT_SECTION ? ld_output_section_header_index(ctx, s->ev.idx)
+										: ld_symbol_section_index_of_input_section(ctx, s->ev.idx);
+			d->st_value = ld_global_symbol_address(ctx, g);
 		} else if (s->state == LD_SYMBOL_STATE_OBJECT && !s->demoted) {
-			d->st_shndx = s->sec == LD_NONE ? SHN_ABS : ld_symbol_section_index_of_input_section(s->sec);
-			d->st_value = ld_global_symbol_address(g);
+			d->st_shndx = s->sec == LD_NONE ? SHN_ABS : ld_symbol_section_index_of_input_section(ctx, s->sec);
+			d->st_value = ld_global_symbol_address(ctx, g);
 			d->st_size = s->size;
 		}
 	}
-	memcpy(ld_input_section_image_pointer(ctx->output.dynstr_section), ctx->dynamic.strings.v, ctx->dynamic.strings.n);
+	memcpy(ld_input_section_image_pointer(ctx, ctx->output.dynstr_section), ctx->dynamic.strings.v, ctx->dynamic.strings.n);
 	/* .hash: nbucket = nchain = symbol count */
-	uint8_t *h = ld_input_section_image_pointer(ctx->output.hash_section);
+	uint8_t *h = ld_input_section_image_pointer(ctx, ctx->output.hash_section);
 	uint32_t nb = n + 1, *bk = (uint32_t *)(void *)(h + 8), *ch = bk + nb;
 	ld_u32_store(h, nb);
 	ld_u32_store(h + 4, nb);
 	for (uint32_t i = 0; i < n; i++) {
-		uint32_t b = ld_symbol_name_elf_hash(ld_global_name(ctx->dynamic.symbols.v[i])) % nb;
+		uint32_t b = ld_symbol_name_elf_hash(ld_global_name(ctx, ctx->dynamic.symbols.v[i])) % nb;
 		ch[i + 1] = bk[b];
 		bk[b] = i + 1;
 	}
 	/* .gnu.hash */
-	uint8_t *gh = ld_input_section_image_pointer(ctx->output.gnu_hash_section);
+	uint8_t *gh = ld_input_section_image_pointer(ctx, ctx->output.gnu_hash_section);
 	ld_u32_store(gh, ctx->dynamic.gnu_hash_buckets);
 	ld_u32_store(gh + 4, ctx->dynamic.first_hashed_symbol);
 	ld_u32_store(gh + 8, ctx->dynamic.gnu_hash_mask_words);
@@ -256,12 +256,12 @@ static void ld_dynamic_sections_write(void)
 	}
 	/* .gnu.version, .gnu.version_d */
 	if (ctx->output.versym_section != LD_NONE) {
-		uint8_t *vs = ld_input_section_image_pointer(ctx->output.versym_section);
+		uint8_t *vs = ld_input_section_image_pointer(ctx, ctx->output.versym_section);
 		for (uint32_t i = 0; i < n; i++) {
 			uint16_t v = ctx->symbols.globals[ctx->dynamic.symbols.v[i]].ver;
 			memcpy(vs + 2 * (i + 1), &v, 2);
 		}
-		uint8_t *vd = ld_input_section_image_pointer(ctx->output.verdef_section);
+		uint8_t *vd = ld_input_section_image_pointer(ctx, ctx->output.verdef_section);
 		const char *fname = ctx->options.soname ? ctx->options.soname : ctx->options.out;
 		for (uint32_t k = 0; k <= ctx->script.version_definition_count; k++) {
 			uint8_t *e = vd + 28 * k;
@@ -283,22 +283,22 @@ static void ld_dynamic_sections_write(void)
 		}
 	}
 	/* .dynamic (lld DynamicSection::computeContents order) */
-	uint8_t *dy = ld_input_section_image_pointer(ctx->output.dynamic_section);
+	uint8_t *dy = ld_input_section_image_pointer(ctx, ctx->output.dynamic_section);
 	uint32_t at = 0;
 #define LD_DYNAMIC_ENTRY_APPEND(tag, v) do { ld_u64_store(dy + 16 * at, (uint64_t)(tag)); ld_u64_store(dy + 16 * at + 8, (uint64_t)(v)); at++; } while (0)
 	if (ctx->options.soname)
 		LD_DYNAMIC_ENTRY_APPEND(DT_SONAME, ctx->dynamic.soname_offset);
 	if (ctx->options.bsymbolic)
 		LD_DYNAMIC_ENTRY_APPEND(DT_FLAGS, DF_SYMBOLIC);
-	LD_DYNAMIC_ENTRY_APPEND(DT_SYMTAB, ld_input_section_address(ctx->output.dynsym_section, 0));
+	LD_DYNAMIC_ENTRY_APPEND(DT_SYMTAB, ld_input_section_address(ctx, ctx->output.dynsym_section, 0));
 	LD_DYNAMIC_ENTRY_APPEND(DT_SYMENT, sizeof(elf_symbol));
-	LD_DYNAMIC_ENTRY_APPEND(DT_STRTAB, ld_input_section_address(ctx->output.dynstr_section, 0));
+	LD_DYNAMIC_ENTRY_APPEND(DT_STRTAB, ld_input_section_address(ctx, ctx->output.dynstr_section, 0));
 	LD_DYNAMIC_ENTRY_APPEND(DT_STRSZ, ctx->dynamic.strings.n);
-	LD_DYNAMIC_ENTRY_APPEND(DT_GNU_HASH, ld_input_section_address(ctx->output.gnu_hash_section, 0));
-	LD_DYNAMIC_ENTRY_APPEND(DT_HASH, ld_input_section_address(ctx->output.hash_section, 0));
+	LD_DYNAMIC_ENTRY_APPEND(DT_GNU_HASH, ld_input_section_address(ctx, ctx->output.gnu_hash_section, 0));
+	LD_DYNAMIC_ENTRY_APPEND(DT_HASH, ld_input_section_address(ctx, ctx->output.hash_section, 0));
 	if (ctx->output.versym_section != LD_NONE) {
-		LD_DYNAMIC_ENTRY_APPEND(DT_VERSYM, ld_input_section_address(ctx->output.versym_section, 0));
-		LD_DYNAMIC_ENTRY_APPEND(DT_VERDEF, ld_input_section_address(ctx->output.verdef_section, 0));
+		LD_DYNAMIC_ENTRY_APPEND(DT_VERSYM, ld_input_section_address(ctx, ctx->output.versym_section, 0));
+		LD_DYNAMIC_ENTRY_APPEND(DT_VERDEF, ld_input_section_address(ctx, ctx->output.verdef_section, 0));
 		LD_DYNAMIC_ENTRY_APPEND(DT_VERDEFNUM, ctx->script.version_definition_count + 1);
 	}
 	LD_DYNAMIC_ENTRY_APPEND(DT_NULL, 0);

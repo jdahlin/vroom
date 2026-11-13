@@ -5,30 +5,30 @@
  * .ctors/.dtors/.init/.fini/.jcr, and under -shared the exported definitions;
  * relocations, SHF_LINK_ORDER and section groups propagate liveness; a
  * __start_X/__stop_X reference keeps nothing (lld's default -z start-stop-gc) */
-static void ld_sections_garbage_collect(const char *entry)
+static void ld_sections_garbage_collect(struct ld_context *ctx, const char *entry)
 {
 	uint8_t *live = calloc(ctx->inputs.sections.n, 1);
 	uint32_t *work = malloc(ctx->inputs.sections.n * sizeof(uint32_t)), nw = 0;
 #define LD_SECTION_GARBAGE_MARK(x) do { uint32_t m_ = (x); if (m_ < ctx->inputs.sections.n && !live[m_] && ctx->inputs.sections.v[m_].kind != LD_SECTION_KIND_NONE) { live[m_] = 1; work[nw++] = m_; } } while (0)
 
-	ld_name_cache_init();
+	ld_name_cache_init(ctx);
 	for (uint32_t i = 0; i < ctx->inputs.sections.n; i++) {
 		ld_input_section *is = &ctx->inputs.sections.v[i];
 
 		if (is->kind == LD_SECTION_KIND_NONE || is->obj == LD_NONE)
 			continue;
-		if (ld_eh_frame_is_input(is)) {
+		if (ld_eh_frame_is_input(ctx, is)) {
 			/* lld MarkLive::scanEhFrameSection: kept, but its relocations do not
 			 * keep the functions; a CIE's (the personality) keep their targets, an
 			 * FDE's only outside code and section groups (an LSDA) */
 			uint32_t nrec;
-			ld_eh_frame_record *rec = ld_eh_frame_records_split(i, &nrec);
+			ld_eh_frame_record *rec = ld_eh_frame_records_split(ctx, i, &nrec);
 			const ld_object *o = ctx->inputs.objects.v[is->obj];
 
 			live[i] = 1;
 			for (uint32_t r = 0; rec && r < nrec; r++)
 				for (uint32_t k = rec[r].r0; k < rec[r].r1; k++) {
-					uint32_t t = ld_relocation_symbol_input_section(o, ctx->inputs.sections.v[i].rela[k].r_info >> 32);
+					uint32_t t = ld_relocation_symbol_input_section(ctx, o, ctx->inputs.sections.v[i].rela[k].r_info >> 32);
 
 					if (t == LD_NONE)
 						continue;
@@ -40,7 +40,7 @@ static void ld_sections_garbage_collect(const char *entry)
 			continue;
 		}
 		const char *n = is->name;
-		uint32_t d = ld_input_section_description_match(n);
+		uint32_t d = ld_input_section_description_match(ctx, n);
 		bool root = !(is->flags & SHF_ALLOC) || (is->flags & 0x200000) /* SHF_GNU_RETAIN */ ||
 			    is->type == SHT_INIT_ARRAY || is->type == SHT_FINI_ARRAY || is->type == SHT_PREINIT_ARRAY ||
 			    (is->type == SHT_NOTE && !is->gnext) ||
@@ -50,7 +50,7 @@ static void ld_sections_garbage_collect(const char *entry)
 		if (root)
 			LD_SECTION_GARBAGE_MARK(i);
 	}
-	uint32_t eg = ld_global_name_find(entry);
+	uint32_t eg = ld_global_name_find(ctx, entry);
 
 	if (eg != LD_NONE && ctx->symbols.globals[eg].state == LD_SYMBOL_STATE_OBJECT)
 		LD_SECTION_GARBAGE_MARK(ctx->symbols.globals[eg].sec);

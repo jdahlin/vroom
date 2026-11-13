@@ -609,3 +609,24 @@ the compiler): the `vlink-pool.py` times must stay within noise.  Last PR:
 `ld_main` allocates and frees a zeroed context per link, the file-scope
 `ld_link_context` and `ctx` are deleted.  Dropping `ld_link_lock` waits for the
 per-context arena and a reentrant `pfor` (Design 4).
+
+Series (b) is applied as step 4 of the context, in one PR instead of one per
+part file: the change is a script's (every function whose body uses `ctx`,
+directly or through a callee, gets `struct ld_context *ctx` as its first
+parameter and every call passes it; 163 functions), and deleting the
+file-scope `ctx` makes the compiler find any site the script missed.  By
+hand: the 23 `ld_parallel_for` callbacks take the context as their `arg`
+(`struct ld_context *ctx = arg;`); the build-id hash gets a job struct of
+its own; `ld_script_assignments_for_each` passes the context to its
+callback; the orphan warning picks `ld_error_report` or `ld_warning_report`
+and passes the context; the three `qsort` comparators that read the context
+(`ld_section_name_stable_cmp`, `ld_section_alignment_stable_cmp`,
+`ld_dynamic_symbol_cmp`) are replaced by `ld_section_ids_sort`, which takes
+the keys out of the context first and sorts (key, id) pairs, ties by id (the
+three orders were total already, or had no ties: the address order is over
+sections with RELATIVE relocations, never empty).  `ld_main` creates the
+context per link (`ld_context_create`, `calloc`) and frees it
+(`ld_context_destroy`); out of memory fails the link ("vld: error: out of
+memory"), not the process.  No per-link state is left at file scope; what
+is, is process-wide (Design 4), and `ld_link_lock` stays until the region
+allocator and `ld_parallel_for` are per link.

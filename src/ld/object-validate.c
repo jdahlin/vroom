@@ -31,9 +31,9 @@ static bool ld_string_table_is_valid(const ld_object *o, uint32_t k)
 
 /* every offset, index and size the later passes use, checked once (as lld's
  * ObjFile: the message names what is wrong; the object is then dropped) */
-static bool ld_object_is_valid(ld_object *o, const elf_file_header *eh)
+static bool ld_object_is_valid(struct ld_context *ctx, ld_object *o, const elf_file_header *eh)
 {
-#define LD_OBJECT_INVALID(...) do { if (!ctx->inputs.quiet) ld_error_report(__VA_ARGS__); return false; } while (0)
+#define LD_OBJECT_INVALID(...) do { if (!ctx->inputs.quiet) ld_error_report(ctx, __VA_ARGS__); return false; } while (0)
 	uint64_t n = o->size;
 
 	if (eh->e_shoff == 0 || eh->e_shentsize != sizeof(elf_section_header) || eh->e_shoff % 8 ||
@@ -133,10 +133,10 @@ static bool ld_object_is_valid(ld_object *o, const elf_file_header *eh)
 
 static void ld_object_parse(void *arg, size_t i)
 {
-	(void)arg;
+	struct ld_context *ctx = arg;
 	ld_object *o = ctx->inputs.objects.v[i];
 	if (!o->buf) {
-		o->buf = ld_file_map(o->path, &o->size);
+		o->buf = ld_file_map(ctx, o->path, &o->size);
 		o->mapped = true;
 		if (!o->buf)
 			return;
@@ -151,26 +151,26 @@ static void ld_object_parse(void *arg, size_t i)
 	const elf_file_header *eh = (const elf_file_header *)o->buf;
 	if (o->size < sizeof(elf_file_header) || memcmp(eh->e_ident, "\177ELF", 4) || eh->e_ident[4] != 2 ||
 	    eh->e_ident[5] != 1) {
-		ld_error_report("%s: not an ELF64 little-endian file", o->path);
+		ld_error_report(ctx, "%s: not an ELF64 little-endian file", o->path);
 		o->buf = NULL;
 		return;
 	}
 	if (eh->e_type != 1 || (eh->e_machine != 183 && eh->e_machine != 62)) {
-		ld_error_report("%s: not an AArch64 or x86-64 relocatable object", o->path);
+		ld_error_report(ctx, "%s: not an AArch64 or x86-64 relocatable object", o->path);
 		o->buf = NULL;
 		return;
 	}
 	uint16_t m0 = 0;
 
 	if (!atomic_compare_exchange_strong(&ctx->inputs.machine, &m0, eh->e_machine) && m0 != eh->e_machine) {
-		ld_error_report("%s is incompatible with the other inputs (%s, not %s)", o->path,
+		ld_error_report(ctx, "%s is incompatible with the other inputs (%s, not %s)", o->path,
 		      eh->e_machine == 62 ? "x86-64" : "AArch64", m0 == 62 ? "x86-64" : "AArch64");
 		o->buf = NULL;
 		return;
 	}
 	if (eh->e_machine == 62)
 		ctx->inputs.x86 = true;	/* (one machine for all inputs: checked above) */
-	if (!ld_object_is_valid(o, eh)) {
+	if (!ld_object_is_valid(ctx, o, eh)) {
 		o->buf = NULL;
 		return;
 	}

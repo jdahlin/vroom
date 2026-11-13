@@ -14,7 +14,7 @@ static bool ld_section_header_is_content(const elf_section_header *s)
 
 static void ld_input_sections_fill(void *arg, size_t i)
 {
-	(void)arg;
+	struct ld_context *ctx = arg;
 	ld_object *o = ctx->inputs.objects.v[i];
 	if (!o->buf)
 		return;
@@ -36,7 +36,7 @@ static void ld_input_sections_fill(void *arg, size_t i)
 			continue;
 		}
 		if (h->sh_type == SHT_REL) {
-			ld_error_report("%s: SHT_REL not supported", o->path);
+			ld_error_report(ctx, "%s: SHT_REL not supported", o->path);
 			continue;
 		}
 		if (!ld_section_header_is_content(h) || (h->sh_flags & SHF_EXCLUDE && !ctx->options.relocatable))
@@ -52,9 +52,9 @@ static void ld_input_sections_fill(void *arg, size_t i)
 		is->entsize = h->sh_entsize;
 		if (!ctx->options.relocatable && (h->sh_flags & SHF_MERGE) && h->sh_size && h->sh_entsize) {
 			if (h->sh_size % h->sh_entsize)
-				ld_error_report("%s:(%s): SHF_MERGE section size must be a multiple of sh_entsize", o->path, is->name);
+				ld_error_report(ctx, "%s:(%s): SHF_MERGE section size must be a multiple of sh_entsize", o->path, is->name);
 			if (h->sh_flags & SHF_WRITE)
-				ld_error_report("%s:(%s): writable SHF_MERGE section is not supported", o->path, is->name);
+				ld_error_report(ctx, "%s:(%s): writable SHF_MERGE section is not supported", o->path, is->name);
 			is->kind = LD_SECTION_KIND_MERGE_INPUT;
 		}
 	}
@@ -64,7 +64,7 @@ static void ld_input_sections_fill(void *arg, size_t i)
  * input's FEATURE_1_AND (an input without the note counts as 0).  Only the
  * common case is done: when the AND is 0 every input note is dropped, as lld
  * emits none; otherwise the inputs stay as they are (TODO: the merged note) */
-static void ld_gnu_property_drop(void)
+static void ld_gnu_property_drop(struct ld_context *ctx)
 {
 	const uint32_t want = ctx->inputs.x86 ? 0xc0000002u : 0xc0000000u;	/* X86 / AARCH64 FEATURE_1_AND */
 	uint32_t and = ~0u;

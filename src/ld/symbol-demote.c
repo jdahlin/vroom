@@ -1,17 +1,11 @@
 /* Demoting symbols to local, and the __start_X/__stop_X symbols. */
 
-static int ld_dynamic_symbol_cmp(const void *a, const void *b)
-{
-	uint64_t x = ld_input_section_address(*(const uint32_t *)a, 0), y = ld_input_section_address(*(const uint32_t *)b, 0);
-	return (x > y) - (x < y);
-}
-
 static void ld_symbols_demote(void *arg, size_t i)
 {
-	(void)arg;
+	struct ld_context *ctx = arg;
 	ld_global_symbol *s = &ctx->symbols.globals[ctx->symbols.order.v[i]];
 	if (s->state == LD_SYMBOL_STATE_OBJECT && s->sec != LD_NONE) {
-		uint32_t os = ld_input_section_output_section(s->sec);
+		uint32_t os = ld_input_section_output_section(ctx, s->sec);
 		if (ctx->inputs.sections.v[s->sec].kind == LD_SECTION_KIND_NONE || os == LD_NONE || os == LD_OUTPUT_SECTION_DISCARD)
 			s->demoted = 1;
 	}
@@ -22,11 +16,11 @@ static void ld_global_symbol_finish_task(void *arg, size_t i) { ld_global_symbol
 
 /* lld addStartStopSymbols: a referenced, undefined __start_X/__stop_X is the
  * start/end of output section X (X a C identifier), protected, global */
-static void ld_start_stop_symbols_define(void)
+static void ld_start_stop_symbols_define(struct ld_context *ctx)
 {
 	for (uint32_t i = 0; i < ctx->symbols.order.n; i++) {
 		ld_global_symbol *s = &ctx->symbols.globals[ctx->symbols.order.v[i]];
-		const char *n = ld_global_name(ctx->symbols.order.v[i]), *x;
+		const char *n = ld_global_name(ctx, ctx->symbols.order.v[i]), *x;
 
 		if (s->state != LD_SYMBOL_STATE_UNDEFINED || !(x = ld_start_stop_section_name(n)))
 			continue;

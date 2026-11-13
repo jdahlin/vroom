@@ -51,7 +51,7 @@ static inline uint32_t ld_visibility_load(_Atomic uint8_t *p)
  * ~1 MB instead of a sparse 100-byte-per-slot table.  Ids depend on thread
  * timing; nothing orders by them.
  */
-static uint32_t ld_global_name_intern(const char *name)
+static uint32_t ld_global_name_intern(struct ld_context *ctx, const char *name)
 {
 	size_t n = strlen(name);
 	uint32_t h = ld_name_hash(name, n);
@@ -77,7 +77,7 @@ static uint32_t ld_global_name_intern(const char *name)
 		}
 	}
 }
-static uint32_t ld_global_name_find(const char *name)
+static uint32_t ld_global_name_find(struct ld_context *ctx, const char *name)
 {
 	size_t n = strlen(name);
 	uint32_t h = ld_name_hash(name, n);
@@ -90,4 +90,4 @@ static uint32_t ld_global_name_find(const char *name)
 			return (uint32_t)w - 1;
 	}
 }
-static inline const char *ld_global_name(uint32_t g) { return ctx->symbols.names[g]; }
+static inline const char *ld_global_name(struct ld_context *ctx, uint32_t g) { return ctx->symbols.names[g]; }

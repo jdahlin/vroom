@@ -8,7 +8,7 @@
  * undefined non-weak reference already seen.  Only links with a non-whole
  * archive run this sequential pass. */
 
-static ld_lazy_symbol *ld_lazy_symbol_find(const char *name)
+static ld_lazy_symbol *ld_lazy_symbol_find(struct ld_context *ctx, const char *name)
 {
 	uint32_t len = strlen(name), h = ld_name_hash(name, len);
 
@@ -40,10 +40,10 @@ static ld_lazy_symbol *ld_lazy_symbol_find(const char *name)
 
 /* the global symbols of a pending object (mapped and aligned here; NULL: not
  * a valid object, left to ld_object_parse to report) */
-static const elf_symbol *ld_lazy_object_globals(ld_pending_member *p, uint32_t *n, const char **str)
+static const elf_symbol *ld_lazy_object_globals(struct ld_context *ctx, ld_pending_member *p, uint32_t *n, const char **str)
 {
 	if (!p->buf) {
-		p->buf = ld_file_map(p->path, &p->size);
+		p->buf = ld_file_map(ctx, p->path, &p->size);
 		if (!p->buf)
 			return NULL;
 	}
@@ -59,7 +59,7 @@ static const elf_symbol *ld_lazy_object_globals(ld_pending_member *p, uint32_t *
 		return NULL;
 	ld_object o = { .path = p->path, .buf = p->buf, .size = p->size };
 	ctx->inputs.quiet = true;	/* ld_object_parse reports */
-	bool ok = ld_object_is_valid(&o, eh);
+	bool ok = ld_object_is_valid(ctx, &o, eh);
 
 	ctx->inputs.quiet = false;
 	if (!ok)
@@ -76,52 +76,52 @@ static const elf_symbol *ld_lazy_object_globals(ld_pending_member *p, uint32_t *
 	return NULL;
 }
 
-static void ld_lazy_member_extract(uint32_t c);
+static void ld_lazy_member_extract(struct ld_context *ctx, uint32_t c);
 
-static void ld_lazy_object_add(ld_pending_member p)
+static void ld_lazy_object_add(struct ld_context *ctx, ld_pending_member p)
 {
 	uint32_t n = 0;
 	const char *str;
 	VVEC_PUSH(ctx->inputs.lazy_order, p, ld_region_alloc);
 	ld_pending_member *q = &ctx->inputs.lazy_order.v[ctx->inputs.lazy_order.n - 1];
-	const elf_symbol *y = ld_lazy_object_globals(q, &n, &str);
+	const elf_symbol *y = ld_lazy_object_globals(ctx, q, &n, &str);
 
 	for (uint32_t k = 0; y && k < n; k++) {
-		ld_lazy_symbol *l = ld_lazy_symbol_find(str + y[k].st_name);
+		ld_lazy_symbol *l = ld_lazy_symbol_find(ctx, str + y[k].st_name);
 		bool weak = y[k].st_info >> 4 == STB_WEAK;
 
 		if (y[k].st_shndx != SHN_UNDEF)
 			l->st = LD_LAZY_SYMBOL_DEFINED;
 		else if (l->st == LD_LAZY_SYMBOL_LAZY) {
 			if (!weak)
-				ld_lazy_member_extract(l->cand);
+				ld_lazy_member_extract(ctx, l->cand);
 		} else if (l->st == LD_LAZY_SYMBOL_NONE || l->st == LD_LAZY_SYMBOL_WEAK_REFERENCE)
 			l->st = weak ? (l->st == LD_LAZY_SYMBOL_NONE ? LD_LAZY_SYMBOL_WEAK_REFERENCE : l->st) : LD_LAZY_SYMBOL_UNDEFINED;
 	}
 }
 
-static void ld_lazy_member_extract(uint32_t c)
+static void ld_lazy_member_extract(struct ld_context *ctx, uint32_t c)
 {
 	if (ctx->inputs.lazy_taken.v[c])
 		return;
 	ctx->inputs.lazy_taken.v[c] = 1;
-	ld_lazy_object_add(ctx->inputs.lazy_candidates.v[c]);
+	ld_lazy_object_add(ctx, ctx->inputs.lazy_candidates.v[c]);
 }
 
-static void ld_lazy_archive_process(uint32_t c0, uint32_t c1)
+static void ld_lazy_archive_process(struct ld_context *ctx, uint32_t c0, uint32_t c1)
 {
 	for (uint32_t c = c0; c < c1; c++) {
 		uint32_t n = 0;
 		const char *str;
-		const elf_symbol *y = ld_lazy_object_globals(&ctx->inputs.lazy_candidates.v[c], &n, &str);
+		const elf_symbol *y = ld_lazy_object_globals(ctx, &ctx->inputs.lazy_candidates.v[c], &n, &str);
 
 		for (uint32_t k = 0; y && k < n && !ctx->inputs.lazy_taken.v[c]; k++) {
 			if (y[k].st_shndx == SHN_UNDEF)
 				continue;
-			ld_lazy_symbol *l = ld_lazy_symbol_find(str + y[k].st_name);
+			ld_lazy_symbol *l = ld_lazy_symbol_find(ctx, str + y[k].st_name);
 
 			if (l->st == LD_LAZY_SYMBOL_UNDEFINED)
-				ld_lazy_member_extract(c);
+				ld_lazy_member_extract(ctx, c);
 			else if (l->st == LD_LAZY_SYMBOL_NONE || l->st == LD_LAZY_SYMBOL_WEAK_REFERENCE) {
 				l->st = LD_LAZY_SYMBOL_LAZY;
 				l->cand = c;

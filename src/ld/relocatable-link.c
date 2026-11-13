@@ -12,7 +12,7 @@
  * stale).  Byte identity with lld is not a goal here; modpost's view is.
  */
 
-static uint32_t ld_relocatable_section_find(const char *name)
+static uint32_t ld_relocatable_section_find(struct ld_context *ctx, const char *name)
 {
 	uint32_t h = ld_name_hash(name, strlen(name));
 	uint32_t j = h & ctx->relocatable.section_map_mask;
@@ -29,7 +29,7 @@ static uint32_t ld_relocatable_section_find(const char *name)
 }
 
 /* an output section of its own (groups and their members, as lld -r) */
-static uint32_t ld_relocatable_section_create(const char *name)
+static uint32_t ld_relocatable_section_create(struct ld_context *ctx, const char *name)
 {
 	ld_relocatable_section r = {.name = name, .h = ld_name_hash(name, strlen(name)), .align = 1};
 	VVEC_PUSH(ctx->relocatable.sections, r, ld_region_alloc);
@@ -38,7 +38,7 @@ static uint32_t ld_relocatable_section_create(const char *name)
 
 static void ld_relocatable_locals_count(void *arg, size_t i)
 {
-	(void)arg;
+	struct ld_context *ctx = arg;
 	ld_object *o = ctx->inputs.objects.v[i];
 	uint32_t n = 0;
 	uint64_t str = 0;
@@ -57,7 +57,7 @@ static void ld_relocatable_locals_count(void *arg, size_t i)
 
 static void ld_relocatable_locals_write(void *arg, size_t i)
 {
-	(void)arg;
+	struct ld_context *ctx = arg;
 	ld_object *o = ctx->inputs.objects.v[i];
 	if (!o->buf)
 		return;
@@ -92,7 +92,7 @@ static void ld_relocatable_locals_write(void *arg, size_t i)
 
 static void ld_relocatable_globals_write(void *arg, size_t c)
 {
-	(void)arg;
+	struct ld_context *ctx = arg;
 	uint32_t b = c * 4096, e = b + 4096 < ctx->symbols.order.n ? b + 4096 : ctx->symbols.order.n;
 	uint8_t *strbuf = ctx->relocatable.image + ctx->relocatable.strtab_offset;
 	for (uint32_t i = b; i < e; i++) {
@@ -115,13 +115,13 @@ static void ld_relocatable_globals_write(void *arg, size_t c)
 				val = is->off + ctx->inputs.objects.v[s->obj]->sym[s->symidx].st_value;
 			}
 		}
-		ld_symbol_record_store(d, strbuf, &so, ld_global_name(g), (uint8_t)(s->bind << 4 | s->type), s->vis, shndx, val, size);
+		ld_symbol_record_store(d, strbuf, &so, ld_global_name(ctx, g), (uint8_t)(s->bind << 4 | s->type), s->vis, shndx, val, size);
 	}
 }
 
 static void ld_relocatable_input_section_write(void *arg, size_t j)
 {
-	(void)arg;
+	struct ld_context *ctx = arg;
 	uint32_t si = ctx->output.write_jobs.v[j];
 	ld_input_section *is = &ctx->inputs.sections.v[si];
 	ld_relocatable_section *r = &ctx->relocatable.sections.v[is->osec];
@@ -146,7 +146,7 @@ static void ld_relocatable_input_section_write(void *arg, size_t j)
 			if ((y->st_info & 15) == STT_SECTION && y->st_shndx < o->nsh) {
 				ld_input_section *t = &ctx->inputs.sections.v[o->isec0 + y->st_shndx];
 				if (t->kind == LD_SECTION_KIND_NONE)
-					ld_error_report("%s:(%s): relocation against discarded section %s", o->path, is->name, t->name);
+					ld_error_report(ctx, "%s:(%s): relocation against discarded section %s", o->path, is->name, t->name);
 				else
 					addend += t->off;
 			}
@@ -157,11 +157,11 @@ static void ld_relocatable_input_section_write(void *arg, size_t j)
 	}
 }
 
-static int ld_relocatable_link(void)
+static int ld_relocatable_link(struct ld_context *ctx)
 {
 	/* global order and final binding */
-	ld_global_order_build();
-	ld_parallel_for(ctx->symbols.order.n, ld_global_symbol_finish_task, NULL);
+	ld_global_order_build(ctx);
+	ld_parallel_for(ctx->symbols.order.n, ld_global_symbol_finish_task, ctx);
 
 	/* output sections by name, first appearance */
 	uint32_t cap = 1024;
@@ -182,7 +182,7 @@ static int ld_relocatable_link(void)
 
 			if (nw < 2 || ctx->inputs.sections.v[io->isec0 + w[1]].dropped)
 				continue;
-			uint32_t gi = ld_relocatable_section_create(".group");
+			uint32_t gi = ld_relocatable_section_create(ctx, ".group");
 			ld_relocatable_section *g = &ctx->relocatable.sections.v[gi];
 
 			g->type = SHT_GROUP;
@@ -196,7 +196,7 @@ static int ld_relocatable_link(void)
 		if (is->kind != LD_SECTION_KIND_NORMAL)
 			continue;
 		bool member = ih && (ih->sh_flags & SHF_GROUP);
-		uint32_t ri = member ? ld_relocatable_section_create(is->name) : ld_relocatable_section_find(is->name);
+		uint32_t ri = member ? ld_relocatable_section_create(ctx, is->name) : ld_relocatable_section_find(ctx, is->name);
 		ld_relocatable_section *r = &ctx->relocatable.sections.v[ri];
 
 		if (member) {
@@ -224,7 +224,7 @@ static int ld_relocatable_link(void)
 		r->nrela += is->nrela;
 		VVEC_PUSH(r->secs, i, ld_region_alloc);
 	}
-	ld_phase_time_report("-r: output sections");
+	ld_phase_time_report(ctx, "-r: output sections");
 
 	/* section header indices and names */
 	uint32_t sh = 1;
@@ -241,7 +241,7 @@ static int ld_relocatable_link(void)
 		}
 	}
 	if (sh > 0xff00) {
-		ld_error_report("-r: too many output sections (%u)", sh);
+		ld_error_report(ctx, "-r: too many output sections (%u)", sh);
 		return 1;
 	}
 	ctx->relocatable.symtab_index = sh++;
@@ -255,7 +255,7 @@ static int ld_relocatable_link(void)
 
 	/* symbols: null, section symbols, locals per file, globals */
 	ctx->relocatable.local_symbol_map = ld_region_alloc(ctx->inputs.objects.n * sizeof(uint32_t *));
-	ld_parallel_for(ctx->inputs.objects.n, ld_relocatable_locals_count, NULL);
+	ld_parallel_for(ctx->inputs.objects.n, ld_relocatable_locals_count, ctx);
 	ctx->relocatable.local_first_index = ld_region_alloc(ctx->inputs.objects.n * sizeof(uint64_t));
 	ctx->relocatable.local_string_offsets = ld_region_alloc(ctx->inputs.objects.n * sizeof(uint64_t));
 	uint64_t idx = 1 + ctx->relocatable.sections.n, str = 1;
@@ -273,7 +273,7 @@ static int ld_relocatable_link(void)
 		s->outidx = idx++;
 		/* s->val is unused for -r output: park the string offset there */
 		s->val = str;
-		str += strlen(ld_global_name(ctx->symbols.order.v[i])) + 1;
+		str += strlen(ld_global_name(ctx, ctx->symbols.order.v[i])) + 1;
 	}
 	ctx->relocatable.symbol_count = idx;
 	uint64_t strsz = str;
@@ -304,7 +304,7 @@ static int ld_relocatable_link(void)
 	uint64_t shoff_r = ld_value_align_up(off, 8);
 	uint64_t fsize = shoff_r + (uint64_t)ctx->relocatable.section_header_count * sizeof(elf_section_header);
 	ctx->relocatable.image = ld_region_large_alloc(fsize);
-	ld_phase_time_report("-r: layout");
+	ld_phase_time_report(ctx, "-r: layout");
 
 	/* contents and relocations */
 	ctx->output.write_jobs.n = 0;
@@ -312,9 +312,9 @@ static int ld_relocatable_link(void)
 		for (uint32_t k = 0; k < ctx->relocatable.sections.v[i].secs.n; k++)
 			VVEC_PUSH(ctx->output.write_jobs, ctx->relocatable.sections.v[i].secs.v[k], ld_region_alloc);
 	/* local maps must exist before relocations are rewritten */
-	ld_parallel_for(ctx->inputs.objects.n, ld_relocatable_locals_write, NULL);
-	ld_parallel_for(ctx->output.write_jobs.n, ld_relocatable_input_section_write, NULL);
-	ld_parallel_for((ctx->symbols.order.n + 4095) / 4096, ld_relocatable_globals_write, NULL);
+	ld_parallel_for(ctx->inputs.objects.n, ld_relocatable_locals_write, ctx);
+	ld_parallel_for(ctx->output.write_jobs.n, ld_relocatable_input_section_write, ctx);
+	ld_parallel_for((ctx->symbols.order.n + 4095) / 4096, ld_relocatable_globals_write, ctx);
 	/* groups: the flag word, then the members' output indices (a .rela member: its section's) */
 	for (uint32_t i = 0; i < ctx->relocatable.sections.n; i++) {
 		ld_relocatable_section *g = &ctx->relocatable.sections.v[i];
@@ -346,7 +346,7 @@ static int ld_relocatable_link(void)
 		for (uint32_t i = 0; i < ctx->relocatable.sections.n; i++)
 			sy[1 + i] = (elf_symbol){.st_info = STB_LOCAL << 4 | STT_SECTION, .st_shndx = ctx->relocatable.sections.v[i].shidx};
 	}
-	ld_phase_time_report("-r: copy, relocations, symbols");
+	ld_phase_time_report(ctx, "-r: copy, relocations, symbols");
 
 	/* headers */
 	char *shstr = (char *)ctx->relocatable.image + ctx->relocatable.shstrtab_offset;
@@ -401,14 +401,14 @@ static int ld_relocatable_link(void)
 	}
 	ctx->output.image = ctx->relocatable.image;
 	ctx->layout.file_size = fsize;
-	int rc = ld_output_file_write();
-	ld_phase_time_report("-r: write");
+	int rc = ld_output_file_write(ctx);
+	ld_phase_time_report(ctx, "-r: write");
 	ld_region_unmap(ctx->relocatable.image, fsize);
 	ctx->output.image = NULL;
 	for (uint32_t i = 0; i < ctx->inputs.objects.n; i++)
 		if (ctx->inputs.objects.v[i]->mapped && ctx->inputs.objects.v[i]->buf)
 			ld_region_unmap(ctx->inputs.objects.v[i]->buf, ctx->inputs.objects.v[i]->size);
-	ld_global_table_free();
+	ld_global_table_free(ctx);
 	memset(&ctx->relocatable.sections, 0, sizeof ctx->relocatable.sections);
 	return rc || atomic_load(&ctx->diagnostics.error_count) ? 1 : 0;
 }
