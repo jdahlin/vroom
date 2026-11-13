@@ -26,12 +26,12 @@ VPRIV vwhe *vw_hlook(vwsimp *S, const vwhe *x)
 /* one pre-IR value per constant (the walker makes one per use) */
 static uint32_t vw_kcanon(vwst *V, vwsimp *S, uint32_t v)
 {
-	const vir_ins *in = &V->p[v].in;
+	const vir_insn *in = &V->p[v].in;
 	uint64_t h;
 
-	if (V->p[v].blk != VW_NOBLK || in->op == VO_BPARAM)
+	if (V->p[v].blk != VW_NOBLK || in->op == VIR_OP_BPARAM)
 		return v;
-	h = ((uint64_t)in->op << 8 | in->ty) * 0x9e3779b97f4a7c15ull;
+	h = ((uint64_t)in->op << 8 | in->type) * 0x9e3779b97f4a7c15ull;
 	h = (h ^ in->a ^ (uint64_t)in->b << 32) * 0xff51afd7ed558ccdull;
 	h = (h ^ in->c) * 0xc4ceb9fe1a85ec53ull;
 	for (uint32_t i = (uint32_t)(h >> 40) & S->kmask;; i = (i + 1) & S->kmask) {
@@ -44,7 +44,7 @@ static uint32_t vw_kcanon(vwst *V, vwsimp *S, uint32_t v)
 			return v;
 		}
 		k--;
-		if (V->p[k].in.op == in->op && V->p[k].in.ty == in->ty && V->p[k].in.a == in->a &&
+		if (V->p[k].in.op == in->op && V->p[k].in.type == in->type && V->p[k].in.a == in->a &&
 		    V->p[k].in.b == in->b && V->p[k].in.c == in->c)
 			return k;
 	}
@@ -76,25 +76,25 @@ VPRIV void vw_cse_blk(ecx *e, vwsimp *S_, uint32_t b)
 			continue;
 		}
 		op = V->p[q].in.op;
-		eff = vir_optab[op].eff;
+		eff = vir_opcode_table[op].effects;
 		if (vw_promdead(V, q))
 			continue;
-		if (eff & (EF_W | EF_C | EF_A) || op == VO_BARRIER || op == VO_VA_ARG || op == VO_VA_START)
+		if (eff & (VIR_EFFECT_W | VIR_EFFECT_C | VIR_EFFECT_A) || op == VIR_OP_BARRIER || op == VIR_OP_VA_ARG || op == VIR_OP_VA_START)
 			S->memgen = ++S->gens;
-		if (op == VO_STORE) {
-			vir_ins in = V->p[q].in;
-			uint32_t vt = V->p[in.b].in.ty;
+		if (op == VIR_OP_STORE) {
+			vir_insn in = V->p[q].in;
+			uint32_t vt = V->p[in.b].in.type;
 
-			if (!(in.fl & VIF_VOL) && vir_tysize(vt) && 1u << VIF_W(in.fl) == vir_tysize(vt)) {
-				key = (vwhe){ VO_LOAD, vt, VIF_W(in.fl), in.a, 0, 0, S->memgen, 0 };
+			if (!(in.flags & VIR_INSN_FLAG_VOL) && vir_type_size(vt) && 1u << VIR_INSN_FLAG_WIDTH_LOG2(in.flags) == vir_type_size(vt)) {
+				key = (vwhe){ VIR_OP_LOAD, vt, VIR_INSN_FLAG_WIDTH_LOG2(in.flags), in.a, 0, 0, S->memgen, 0 };
 				t = vw_hlook(S, &key);
 				if (!t->v)
 					S->log[S->nlog++] = (uint32_t)(t - S->ht);
 				*t = key;
 				t->v = in.b;
 			}
-			if (!(in.fl & VIF_VOL) && (vt == VT_I32 || vt == VT_I64)) {	/* (any load of its width) */
-				key = (vwhe){ VO_STORE, 0, VIF_W(in.fl), in.a, 0, 0, S->memgen, 0 };
+			if (!(in.flags & VIR_INSN_FLAG_VOL) && (vt == VIR_TYPE_I32 || vt == VIR_TYPE_I64)) {	/* (any load of its width) */
+				key = (vwhe){ VIR_OP_STORE, 0, VIR_INSN_FLAG_WIDTH_LOG2(in.flags), in.a, 0, 0, S->memgen, 0 };
 				t = vw_hlook(S, &key);
 				if (!t->v)
 					S->log[S->nlog++] = (uint32_t)(t - S->ht);
@@ -103,24 +103,24 @@ VPRIV void vw_cse_blk(ecx *e, vwsimp *S_, uint32_t b)
 			}
 			continue;
 		}
-		if (op == VO_LOAD) {
-			vir_ins in = V->p[q].in;
+		if (op == VIR_OP_LOAD) {
+			vir_insn in = V->p[q].in;
 
-			if (in.fl & VIF_VOL)
+			if (in.flags & VIR_INSN_FLAG_VOL)
 				continue;
-			key = (vwhe){ VO_LOAD, in.ty, in.fl & (3 | VIF_MS), in.a, 0, 0, S->memgen, 0 };
-			if ((in.ty == VT_I32 || in.ty == VT_I64) && !vw_hlook(S, &key)->v) {
+			key = (vwhe){ VIR_OP_LOAD, in.type, in.flags & (3 | VIR_INSN_FLAG_MS), in.a, 0, 0, S->memgen, 0 };
+			if ((in.type == VIR_TYPE_I32 || in.type == VIR_TYPE_I64) && !vw_hlook(S, &key)->v) {
 				/* the value a store of this width left: truncated or extended to the load's */
-				vwhe sk = { VO_STORE, 0, VIF_W(in.fl), in.a, 0, 0, S->memgen, 0 };
-				uint32_t v = vw_hlook(S, &sk)->v, w = VIF_W(in.fl), vt;
+				vwhe sk = { VIR_OP_STORE, 0, VIR_INSN_FLAG_WIDTH_LOG2(in.flags), in.a, 0, 0, S->memgen, 0 };
+				uint32_t v = vw_hlook(S, &sk)->v, w = VIR_INSN_FLAG_WIDTH_LOG2(in.flags), vt;
 
 				if (v) {
 					v = vw_find(V, v);
-					vt = V->p[v].in.ty;
-					if (in.ty == VT_I32 && vt == VT_I64 && w == 2)
-						V->p[q].in = (vir_ins){ VO_TRUNC, VT_I32, 0, v, 0, 0 };
-					else if (w < 3 && vir_tysize(vt) <= vir_tysize(in.ty))
-						V->p[q].in = (vir_ins){ VO_EXT, (uint8_t)in.ty, (uint16_t)(w | (in.fl & VIF_MS)), v, 0, 0 };
+					vt = V->p[v].in.type;
+					if (in.type == VIR_TYPE_I32 && vt == VIR_TYPE_I64 && w == 2)
+						V->p[q].in = (vir_insn){ VIR_OP_TRUNC, VIR_TYPE_I32, 0, v, 0, 0 };
+					else if (w < 3 && vir_type_size(vt) <= vir_type_size(in.type))
+						V->p[q].in = (vir_insn){ VIR_OP_EXT, (uint8_t)in.type, (uint16_t)(w | (in.flags & VIR_INSN_FLAG_MS)), v, 0, 0 };
 					else
 						v = 0;
 					if (v) {
@@ -129,17 +129,17 @@ VPRIV void vw_cse_blk(ecx *e, vwsimp *S_, uint32_t b)
 					}
 				}
 			}
-		} else if ((eff & ~EF_UF) == EF_P && op != VO_BPARAM && op != VO_PARAM && op != VO_PROJ) {
-			vir_ins in = V->p[q].in;
+		} else if ((eff & ~VIR_EFFECT_UF) == VIR_EFFECT_P && op != VIR_OP_BPARAM && op != VIR_OP_PARAM && op != VIR_OP_PROJ) {
+			vir_insn in = V->p[q].in;
 
 			if (vw_commutes(op) && in.a > in.b)
-				key = (vwhe){ op, in.ty, in.fl, in.b, in.a, in.c, S->blk, 0 };
+				key = (vwhe){ op, in.type, in.flags, in.b, in.a, in.c, S->blk, 0 };
 			else
-				key = (vwhe){ op, in.ty, in.fl, in.a, in.b, in.c, S->blk, 0 };
+				key = (vwhe){ op, in.type, in.flags, in.a, in.b, in.c, S->blk, 0 };
 		} else
 			continue;
 		t = vw_hlook(S, &key);
-		if (op == VO_LOAD && !t->v && q < S->n0 && S->seq[q]) {
+		if (op == VIR_OP_LOAD && !t->v && q < S->n0 && S->seq[q]) {
 			vwaddr A;
 			bool ok;
 
@@ -162,15 +162,15 @@ VPRIV void vw_cse_blk(ecx *e, vwsimp *S_, uint32_t b)
 					continue;
 			}
 		}
-		if (t->v && op == VO_LOAD && V->p[vw_find(V, t->v)].in.ty != V->p[q].in.ty) {
+		if (t->v && op == VIR_OP_LOAD && V->p[vw_find(V, t->v)].in.type != V->p[q].in.type) {
 			/* the same bytes, loaded as the other integer type (a truncation retyped it) */
-			vir_ins in = V->p[q].in;
-			uint32_t v = vw_find(V, t->v), vt = V->p[v].in.ty;
+			vir_insn in = V->p[q].in;
+			uint32_t v = vw_find(V, t->v), vt = V->p[v].in.type;
 
-			if (in.ty == VT_I32 && vt == VT_I64)
-				V->p[q].in = (vir_ins){ VO_TRUNC, VT_I32, 0, v, 0, 0 };
-			else if (in.ty == VT_I64 && vt == VT_I32 && VIF_W(in.fl) < 3)
-				V->p[q].in = (vir_ins){ VO_EXT, VT_I64, (uint16_t)(in.fl & (3 | VIF_MS)), v, 0, 0 };
+			if (in.type == VIR_TYPE_I32 && vt == VIR_TYPE_I64)
+				V->p[q].in = (vir_insn){ VIR_OP_TRUNC, VIR_TYPE_I32, 0, v, 0, 0 };
+			else if (in.type == VIR_TYPE_I64 && vt == VIR_TYPE_I32 && VIR_INSN_FLAG_WIDTH_LOG2(in.flags) < 3)
+				V->p[q].in = (vir_insn){ VIR_OP_EXT, VIR_TYPE_I64, (uint16_t)(in.flags & (3 | VIR_INSN_FLAG_MS)), v, 0, 0 };
 			else
 				v = 0;
 			if (v) {
@@ -178,7 +178,7 @@ VPRIV void vw_cse_blk(ecx *e, vwsimp *S_, uint32_t b)
 				goto again;
 			}
 		}
-		if (t->v && V->p[vw_find(V, t->v)].in.ty == V->p[q].in.ty) {
+		if (t->v && V->p[vw_find(V, t->v)].in.type == V->p[q].in.type) {
 			r = vw_find(V, t->v);
 			if (r < S->n0 && V->p[r].blk != VW_NOBLK)
 				S->cnt[r] += S->cnt[q];

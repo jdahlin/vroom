@@ -13,25 +13,25 @@
 typedef struct vwfld { uint32_t slot; int64_t rel; uint32_t size, ty; } vwfld;
 
 /* the conversion a load of type ty (flags fl) applies to the stored value of type st: VW_NOCONV
- * none, VO_EXT/P2I/BITCAST one instruction; false if it takes more */
+ * none, VIR_OP_EXT/P2I/BITCAST one instruction; false if it takes more */
 static bool vw_ldconv(uint32_t st, uint32_t ty, uint32_t fl, uint32_t *op)
 {
-	uint32_t w = VIF_W(fl);
+	uint32_t w = VIR_INSN_FLAG_WIDTH_LOG2(fl);
 
 	/* A narrow load, or an i32 field read into i64, extends its stored bits. */
-	if (w < 2 || (fl & VIF_MS) || (w == 2 && st == VT_I32 && ty == VT_I64)) {
-		*op = VO_EXT;
-		return st == VT_I32 && (ty == VT_I32 || ty == VT_I64);
+	if (w < 2 || (fl & VIR_INSN_FLAG_MS) || (w == 2 && st == VIR_TYPE_I32 && ty == VIR_TYPE_I64)) {
+		*op = VIR_OP_EXT;
+		return st == VIR_TYPE_I32 && (ty == VIR_TYPE_I32 || ty == VIR_TYPE_I64);
 	}
 	if (st == ty)
 		*op = VW_NOCONV;
-	else if (st == VT_PTR && ty == VT_I64)
-		*op = VO_P2I;
-	else if (st == VT_I64 && ty == VT_PTR)
-		*op = VO_I2P;
-	else if ((st == VT_I32 && ty == VT_F32) || (st == VT_F32 && ty == VT_I32) ||
-		 (st == VT_I64 && ty == VT_F64) || (st == VT_F64 && ty == VT_I64))
-		*op = VO_BITCAST;
+	else if (st == VIR_TYPE_PTR && ty == VIR_TYPE_I64)
+		*op = VIR_OP_P2I;
+	else if (st == VIR_TYPE_I64 && ty == VIR_TYPE_PTR)
+		*op = VIR_OP_I2P;
+	else if ((st == VIR_TYPE_I32 && ty == VIR_TYPE_F32) || (st == VIR_TYPE_F32 && ty == VIR_TYPE_I32) ||
+		 (st == VIR_TYPE_I64 && ty == VIR_TYPE_F64) || (st == VIR_TYPE_F64 && ty == VIR_TYPE_I64))
+		*op = VIR_OP_BITCAST;
 	else
 		return false;
 	return true;
@@ -43,7 +43,7 @@ static void vw_escape(vwst *V, uint8_t *bad, uint32_t v)
 {
 	const vwp *q = &V->p[vw_find(V, v)];
 
-	if (q->in.op == VO_SLOTADDR && q->blk == VW_NOBLK)
+	if (q->in.op == VIR_OP_SLOTADDR && q->blk == VW_NOBLK)
 		bad[q->in.a] = 1;
 }
 
@@ -70,7 +70,7 @@ static uint32_t vw_entry(ecx *e, uint32_t var, uint32_t b, uint32_t ty, bool def
 
 static uint32_t vw_zerok(ecx *e, uint32_t ty)
 {
-	return ty == VT_F32 || ty == VT_F64 ? vw_k(e, VO_FCONST, ty, 0, 0, 0) : vw_iconst(e, ty, 0);
+	return ty == VIR_TYPE_F32 || ty == VIR_TYPE_F64 ? vw_k(e, VIR_OP_FCONST, ty, 0, 0, 0) : vw_iconst(e, ty, 0);
 }
 
 /* memset q, of a constant length with 0: the bytes (len) it zeroes */
@@ -78,7 +78,7 @@ static bool vw_zeroset(vwst *V, uint32_t q, int64_t *len)
 {
 	int64_t z;
 
-	return V->p[q].in.op == VO_MEMSET && vw_kint(V, vw_find(V, V->p[q].in.b), &z) && !z &&
+	return V->p[q].in.op == VIR_OP_MEMSET && vw_kint(V, vw_find(V, V->p[q].in.b), &z) && !z &&
 	       vw_kint(V, vw_find(V, V->p[q].in.c), len) && *len > 0;
 }
 
@@ -94,7 +94,7 @@ VPRIV bool vw_promdead(const vwst *V, uint32_t q)
 {
 	const vwp *x = &V->p[q];
 
-	return (x->in.op == VO_STORE || x->in.op == VO_MEMSET) && x->slot && V->sl[x->slot - 1].prom;
+	return (x->in.op == VIR_OP_STORE || x->in.op == VIR_OP_MEMSET) && x->slot && V->sl[x->slot - 1].prom;
 }
 
 /* a slot whose address does not escape, read and written only as fields (offset, size) that
@@ -125,21 +125,21 @@ VPRIV bool vw_promote(ecx *e)
 	 * walker's exposed flag is set by any address taken, *(T *)&x too) */
 	for (uint32_t i = 0; i < np0; i++) {
 		const vwp *q = &V->p[i];
-		const vir_opinfo *oi = &vir_optab[q->in.op];
+		const vir_opcode_info *oi = &vir_opcode_table[q->in.op];
 
 		if (q->blk == VW_NOBLK || vw_find(V, i) != i || vw_promdead(V, i))
 			continue;	/* (a store to a slot promoted before is dead) */
-		if (q->in.op == VO_BPARAM) {
+		if (q->in.op == VIR_OP_BPARAM) {
 			if (q->in.b != VW_NOBLK)
 				for (uint32_t j = 0; j < V->b[q->blk].npred; j++)
 					vw_escape(V, bad, V->x[q->in.b + j]);
 			continue;
 		}
 		for (int k = 0; k < 3; k++)
-			if (vw_isval(oi->k[k]) && !(q->in.op == VO_BRIF && k > 0) &&
-			    !(k == 0 && (q->in.op == VO_LOAD || q->in.op == VO_STORE || vw_zeroset(V, i, &rel))))
+			if (vw_isval(oi->operand_kinds[k]) && !(q->in.op == VIR_OP_BRIF && k > 0) &&
+			    !(k == 0 && (q->in.op == VIR_OP_LOAD || q->in.op == VIR_OP_STORE || vw_zeroset(V, i, &rel))))
 				vw_escape(V, bad, (&q->in.a)[k]);
-		if (q->in.op == VO_CALL || q->in.op == VO_RET)
+		if (q->in.op == VIR_OP_CALL || q->in.op == VIR_OP_RET)
 			for (uint32_t k = 0; k < V->x[q->in.c]; k++)
 				vw_escape(V, bad, V->x[q->in.c + 1 + k]);
 	}
@@ -150,18 +150,18 @@ VPRIV bool vw_promote(ecx *e)
 		int64_t len;
 
 		fof[i] = 0;
-		if ((q->in.op != VO_LOAD && q->in.op != VO_STORE && q->in.op != VO_MEMSET) ||
+		if ((q->in.op != VIR_OP_LOAD && q->in.op != VIR_OP_STORE && q->in.op != VIR_OP_MEMSET) ||
 		    q->blk == VW_NOBLK || vw_find(V, i) != i)
 			continue;
 		a = vw_find(V, q->in.a);
-		if (V->p[a].in.op != VO_SLOTADDR)
+		if (V->p[a].in.op != VIR_OP_SLOTADDR)
 			continue;
 		s = V->p[a].in.a;
 		q->in.a = a;
 		q->slot = s + 1;	/* (also an access through the address taken) */
 		if (bad[s])
 			continue;
-		if (q->in.op == VO_MEMSET) {	/* zeroes the fields it covers: checked once all are known */
+		if (q->in.op == VIR_OP_MEMSET) {	/* zeroes the fields it covers: checked once all are known */
 			if (!vw_zeroset(V, i, &len)) {
 				bad[s] = 1;
 				continue;
@@ -171,18 +171,18 @@ VPRIV bool vw_promote(ecx *e)
 			fof[i] = UINT32_MAX - nms++;	/* (a memset: its index in ms) */
 			continue;
 		}
-		if (q->in.fl & VIF_VOL) {
+		if (q->in.flags & VIR_INSN_FLAG_VOL) {
 			bad[s] = 1;
 			continue;
 		}
 		rel = vw_rel(&V->p[a]);
-		size = 1u << VIF_W(q->in.fl);
-		ty = q->in.op == VO_STORE ? V->p[q->in.b].in.ty : VT_VOID;
+		size = 1u << VIR_INSN_FLAG_WIDTH_LOG2(q->in.flags);
+		ty = q->in.op == VIR_OP_STORE ? V->p[q->in.b].in.type : VIR_TYPE_VOID;
 		/* Simplification can remove a truncation before a narrow store.
 		 * Its field still holds only the stored low bits, even when another
 		 * store uses an i32 carrier. Normalize before comparing field types. */
-		if (size <= 4 && ty == VT_I64)
-			ty = VT_I32;
+		if (size <= 4 && ty == VIR_TYPE_I64)
+			ty = VIR_TYPE_I32;
 		for (k = sf[s] - 1; k != UINT32_MAX; k = fnx[k] - 1) {	/* (the slot's own fields only) */
 			vwfld *f = &fd[k];
 
@@ -199,12 +199,12 @@ VPRIV bool vw_promote(ecx *e)
 			GROW(fnx, nf, cfnx, 1);
 			fnx[nf] = sf[s];
 			sf[s] = nf + 1;
-			fd[nf++] = (vwfld){ s, rel, size, VT_VOID };
+			fd[nf++] = (vwfld){ s, rel, size, VIR_TYPE_VOID };
 		}
-		if (ty != VT_VOID) {
-			if (fd[k].ty != VT_VOID && fd[k].ty != ty) {
-				if ((fd[k].ty == VT_PTR || fd[k].ty == VT_I64) && (ty == VT_PTR || ty == VT_I64))
-					ty = VT_I64;	/* a pointer and its integer (p++ as p2i, add, i2p) */
+		if (ty != VIR_TYPE_VOID) {
+			if (fd[k].ty != VIR_TYPE_VOID && fd[k].ty != ty) {
+				if ((fd[k].ty == VIR_TYPE_PTR || fd[k].ty == VIR_TYPE_I64) && (ty == VIR_TYPE_PTR || ty == VIR_TYPE_I64))
+					ty = VIR_TYPE_I64;	/* a pointer and its integer (p++ as p2i, add, i2p) */
 				else
 					bad[s] = 1;	/* stores of different types */
 			}
@@ -227,13 +227,13 @@ VPRIV bool vw_promote(ecx *e)
 		vwp *q = &V->p[i];
 		uint32_t op;
 
-		if (!fof[i] || q->in.op != VO_LOAD || bad[q->slot - 1])
+		if (!fof[i] || q->in.op != VIR_OP_LOAD || bad[q->slot - 1])
 			continue;
 		vwfld *f = &fd[fof[i] - 1];
 
-		if (f->ty == VT_VOID)	/* never stored: as the first load reads it */
-			f->ty = VIF_W(q->in.fl) < 2 || (q->in.fl & VIF_MS) ? VT_I32 : q->in.ty;
-		if (!vw_ldconv(f->ty, q->in.ty, q->in.fl, &op))
+		if (f->ty == VIR_TYPE_VOID)	/* never stored: as the first load reads it */
+			f->ty = VIR_INSN_FLAG_WIDTH_LOG2(q->in.flags) < 2 || (q->in.flags & VIR_INSN_FLAG_MS) ? VIR_TYPE_I32 : q->in.type;
+		if (!vw_ldconv(f->ty, q->in.type, q->in.flags, &op))
 			bad[q->slot - 1] = 1;
 	}
 	{
@@ -250,13 +250,13 @@ VPRIV bool vw_promote(ecx *e)
 	for (uint32_t i = 0; i < np0; i++) {
 		uint32_t p, b;
 
-		if (V->p[i].in.op != VO_STORE || !fof[i] || bad[V->p[i].slot - 1] || vw_find(V, i) != i)
+		if (V->p[i].in.op != VIR_OP_STORE || !fof[i] || bad[V->p[i].slot - 1] || vw_find(V, i) != i)
 			continue;
-		uint32_t to = fd[fof[i] - 1].ty, from = V->p[V->p[i].in.b].in.ty, op;
-		if (to == VT_I64 && from == VT_PTR)
-			op = VO_P2I;
-		else if (to == VT_I32 && from == VT_I64)
-			op = VO_TRUNC;
+		uint32_t to = fd[fof[i] - 1].ty, from = V->p[V->p[i].in.b].in.type, op;
+		if (to == VIR_TYPE_I64 && from == VIR_TYPE_PTR)
+			op = VIR_OP_P2I;
+		else if (to == VIR_TYPE_I32 && from == VIR_TYPE_I64)
+			op = VIR_OP_TRUNC;
 		else
 			continue;
 		b = V->p[i].blk;
@@ -282,9 +282,9 @@ VPRIV bool vw_promote(ecx *e)
 		uint32_t b = V->order[oi];
 
 		for (uint32_t q = V->b[b].head; q; q = V->p[q].next) {
-			if (q >= np0 || !fof[q] || bad[V->p[q].slot - 1] || V->p[q].in.op == VO_LOAD || vw_find(V, q) != q)
+			if (q >= np0 || !fof[q] || bad[V->p[q].slot - 1] || V->p[q].in.op == VIR_OP_LOAD || vw_find(V, q) != q)
 				continue;
-			if (V->p[q].in.op == VO_STORE) {
+			if (V->p[q].in.op == VIR_OP_STORE) {
 				uint32_t var = VW_VAR0 + var0 + fof[q] - 1;
 
 				vw_write(e, var, b, V->p[q].in.b);
@@ -312,7 +312,7 @@ VPRIV bool vw_promote(ecx *e)
 
 			if (q >= np0 || !fof[q] || bad[x->slot - 1] || vw_find(V, q) != q)
 				continue;
-			if (x->in.op == VO_MEMSET) {
+			if (x->in.op == VIR_OP_MEMSET) {
 				const struct vwms *m = &ms[UINT32_MAX - fof[q]];
 
 				for (k = sf[m->slot] - 1; k != UINT32_MAX; k = fnx[k] - 1)
@@ -324,7 +324,7 @@ VPRIV bool vw_promote(ecx *e)
 			}
 			k = fof[q] - 1;
 			var = VW_VAR0 + var0 + k;
-			if (x->in.op == VO_STORE) {
+			if (x->in.op == VIR_OP_STORE) {
 				cur[k] = x->in.b;
 				cst[k] = oi;
 				continue;
@@ -335,12 +335,12 @@ VPRIV bool vw_promote(ecx *e)
 				v = vw_entry(e, var, b, fd[k].ty, vw_hslot(e, b, var | 0x40000000u, false) != NULL);
 				x = &V->p[q];	/* (vw_entry can grow V->p) */
 			}
-			vw_ldconv(fd[k].ty, x->in.ty, x->in.fl, &op);
+			vw_ldconv(fd[k].ty, x->in.type, x->in.flags, &op);
 			if (op == VW_NOCONV) {
 				V->fwd[q] = v;
 			} else {
 				x->in.op = op;
-				x->in.fl = op == VO_EXT ? (x->in.fl & (3 | VIF_MS)) : 0;
+				x->in.flags = op == VIR_OP_EXT ? (x->in.flags & (3 | VIR_INSN_FLAG_MS)) : 0;
 				x->in.a = v;
 				x->in.b = x->in.c = 0;
 				x->slot = 0;

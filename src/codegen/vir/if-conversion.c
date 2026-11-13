@@ -22,12 +22,12 @@ static bool vw_exprsame(vwst *V, uint32_t a, uint32_t b, uint32_t *budget)
 	if (a==b) return true;
 	if (!*budget) return false;
 	--*budget;
-	vir_ins x=V->p[a].in,y=V->p[b].in;
-	if (x.op!=y.op || x.ty!=y.ty || x.fl!=y.fl || !(vir_optab[x.op].eff & EF_P) || x.op==VO_BPARAM || x.op==VO_PARAM)
+	vir_insn x=V->p[a].in,y=V->p[b].in;
+	if (x.op!=y.op || x.type!=y.type || x.flags!=y.flags || !(vir_opcode_table[x.op].effects & VIR_EFFECT_P) || x.op==VIR_OP_BPARAM || x.op==VIR_OP_PARAM)
 		return false;
 	uint32_t u[3]={x.a,x.b,x.c},v[3]={y.a,y.b,y.c};
 	for(int k=0;k<3;k++) {
-		if (vw_isval(vir_optab[x.op].k[k])) {if(!vw_exprsame(V,u[k],v[k],budget))return false;}
+		if (vw_isval(vir_opcode_table[x.op].operand_kinds[k])) {if(!vw_exprsame(V,u[k],v[k],budget))return false;}
 		else if(u[k]!=v[k])return false;
 	}
 	return true;
@@ -41,17 +41,17 @@ static void vw_armreuse(vwst *V,uint32_t a,uint32_t b)
 	bool changed=false;
 	for(uint32_t q=V->b[a].head;q;q=V->p[q].next) {
 		if(vw_find(V,q)!=q)continue;
-		vir_ins in=V->p[q].in;
-		bool load=in.op==VO_LOAD && !(in.fl & VIF_VOL);
-		if ((vir_optab[in.op].eff & (EF_W|EF_C|EF_A)) || (in.op==VO_LOAD && (in.fl & VIF_VOL))) changed=true;
-		if (!(vir_optab[in.op].eff & EF_P) && (!load || changed)) continue;
+		vir_insn in=V->p[q].in;
+		bool load=in.op==VIR_OP_LOAD && !(in.flags & VIR_INSN_FLAG_VOL);
+		if ((vir_opcode_table[in.op].effects & (VIR_EFFECT_W|VIR_EFFECT_C|VIR_EFFECT_A)) || (in.op==VIR_OP_LOAD && (in.flags & VIR_INSN_FLAG_VOL))) changed=true;
+		if (!(vir_opcode_table[in.op].effects & VIR_EFFECT_P) && (!load || changed)) continue;
 		uint32_t found=0;
 		for(uint32_t p=V->b[b].head;p;p=V->p[p].next) {
 			if(vw_find(V,p)!=p)continue;
-			vir_ins x=V->p[p].in;
-			if(load && ((vir_optab[x.op].eff & (EF_W|EF_C|EF_A)) || (x.op==VO_LOAD && (x.fl & VIF_VOL))))found=0;
+			vir_insn x=V->p[p].in;
+			if(load && ((vir_opcode_table[x.op].effects & (VIR_EFFECT_W|VIR_EFFECT_C|VIR_EFFECT_A)) || (x.op==VIR_OP_LOAD && (x.flags & VIR_INSN_FLAG_VOL))))found=0;
 			uint32_t budget=128;
-			if(load ? x.op==VO_LOAD && x.ty==in.ty && x.fl==in.fl && x.b==in.b && vw_exprsame(V,in.a,x.a,&budget) : vw_exprsame(V,q,p,&budget))found=p;
+			if(load ? x.op==VIR_OP_LOAD && x.type==in.type && x.flags==in.flags && x.b==in.b && vw_exprsame(V,in.a,x.a,&budget) : vw_exprsame(V,q,p,&budget))found=p;
 		}
 		if(found)V->fwd[q]=found;
 	}
@@ -61,7 +61,7 @@ VPRIV bool vw_armempty(vwst *V, uint32_t a, uint32_t b, uint32_t cond, uint32_t 
 {
 	const vwb *k = &V->b[a];
 
-	if (a == b || !k->term || V->p[k->term].in.op != VO_BR || k->npred != 1 || V->pr[k->pred] != b)
+	if (a == b || !k->term || V->p[k->term].in.op != VIR_OP_BR || k->npred != 1 || V->pr[k->pred] != b)
 		return false;
 	for (uint32_t p = k->phead; p; p = V->p[p].next)
 		if (V->fwd[p] == p)
@@ -69,11 +69,11 @@ VPRIV bool vw_armempty(vwst *V, uint32_t a, uint32_t b, uint32_t cond, uint32_t 
 	for (uint32_t q = k->head; q; q = V->p[q].next) {
 		uint32_t op = V->p[q].in.op;
 
-		if (vw_find(V, q) != q || vw_promdead(V, q) || (op == VO_MEMSET && (V->p[q].in.fl & VW_LIFETIME)))
+		if (vw_find(V, q) != q || vw_promdead(V, q) || (op == VIR_OP_MEMSET && (V->p[q].in.flags & VW_LIFETIME)))
 			continue;
 		/* cheap and without effects: computed whichever way the branch went (at most 2) */
-		if ((op != VO_ADD && op != VO_SUB && op != VO_AND && op != VO_OR && op != VO_XOR && op != VO_SHL && op != VO_LSHR &&
-		     op != VO_ASHR && op != VO_EXT && op != VO_TRUNC && op != VO_I2P && op != VO_P2I && op != VO_PTRADD) ||
+		if ((op != VIR_OP_ADD && op != VIR_OP_SUB && op != VIR_OP_AND && op != VIR_OP_OR && op != VIR_OP_XOR && op != VIR_OP_SHL && op != VIR_OP_LSHR &&
+		     op != VIR_OP_ASHR && op != VIR_OP_EXT && op != VIR_OP_TRUNC && op != VIR_OP_I2P && op != VIR_OP_P2I && op != VIR_OP_PTRADD) ||
 		    V->p[q].in.a == cond || V->p[q].in.b == cond || ++*n > 2)
 			return false;
 	}
@@ -94,12 +94,12 @@ static void vw_hoist(vwst *V, uint32_t a, uint32_t b, uint32_t cond)
 		bool ok = true;
 
 		last = cond;
-		while (nm + 2 <= 16 && (V->p[v].in.op == VO_AND || V->p[v].in.op == VO_OR) && V->p[v].in.ty == VT_I32 &&
-		       V->p[v].blk == b && V->p[vw_find(V, V->p[v].in.b)].in.op == VO_ICMP) {
+		while (nm + 2 <= 16 && (V->p[v].in.op == VIR_OP_AND || V->p[v].in.op == VIR_OP_OR) && V->p[v].in.type == VIR_TYPE_I32 &&
+		       V->p[v].blk == b && V->p[vw_find(V, V->p[v].in.b)].in.op == VIR_OP_ICMP) {
 			m[nm++] = v, m[nm++] = vw_find(V, V->p[v].in.b);
 			v = vw_find(V, V->p[v].in.a);
 		}
-		if (nm && V->p[v].in.op == VO_ICMP && V->p[v].blk == b) {
+		if (nm && V->p[v].in.op == VIR_OP_ICMP && V->p[v].blk == b) {
 			uint32_t q, left = nm + 1;
 
 			m[nm++] = v;
@@ -126,7 +126,7 @@ static void vw_hoist(vwst *V, uint32_t a, uint32_t b, uint32_t cond)
 	}
 	for (uint32_t q = V->b[a].head; q; q = nx) {
 		nx = V->p[q].next;
-		if (vw_find(V, q) != q || vw_promdead(V, q) || V->p[q].in.op == VO_MEMSET)
+		if (vw_find(V, q) != q || vw_promdead(V, q) || V->p[q].in.op == VIR_OP_MEMSET)
 			continue;
 		V->p[q].blk = b;
 		V->p[q].next = last;
@@ -152,7 +152,7 @@ VPRIV bool vw_ifconv(ecx *e)
 		uint32_t sels[8], tv[8], fv[8];
 		bool badsel = false;
 
-		if (!t || V->p[t].in.op != VO_BRIF)
+		if (!t || V->p[t].in.op != VIR_OP_BRIF)
 			continue;
 		T = V->p[t].in.b, F = V->p[t].in.c;
 		if (T == F)
@@ -183,7 +183,7 @@ VPRIV bool vw_ifconv(ecx *e)
 			a = vw_find(V, V->x[V->p[p].in.b + it]), c = vw_find(V, V->x[V->p[p].in.b + jf]);
 			if (a == c)
 				continue;
-			if (nsel == 8 || V->p[p].in.ty == VT_VOID || V->p[p].in.ty == VT_MULTI || a == p || c == p) {
+			if (nsel == 8 || V->p[p].in.type == VIR_TYPE_VOID || V->p[p].in.type == VIR_TYPE_MULTI || a == p || c == p) {
 				badsel = true;
 				break;
 			}
@@ -199,7 +199,7 @@ VPRIV bool vw_ifconv(ecx *e)
 			bool all = true;
 
 			for (uint32_t k = 0; k < nsel; k++)
-				all &= V->p[tv[k]].in.op == VO_BPARAM || V->p[fv[k]].in.op == VO_BPARAM;
+				all &= V->p[tv[k]].in.op == VIR_OP_BPARAM || V->p[fv[k]].in.op == VIR_OP_BPARAM;
 			badsel = all;
 		}
 		if (badsel)
@@ -211,7 +211,7 @@ VPRIV bool vw_ifconv(ecx *e)
 		if (ef)
 			vw_hoist(V, F, b, cond);
 		for (uint32_t k = 0; k < nsel; k++) {
-			uint32_t s = vw_ins_in(e, b, VO_SELECT, V->p[sels[k]].in.ty, 0, cond, tv[k], fv[k]);
+			uint32_t s = vw_ins_in(e, b, VIR_OP_SELECT, V->p[sels[k]].in.type, 0, cond, tv[k], fv[k]);
 			V->p[s].loc = V->p[t].loc;
 			V->x[V->p[sels[k]].in.b + it] = s;
 		}
@@ -225,7 +225,7 @@ VPRIV bool vw_ifconv(ecx *e)
 		for (uint32_t k = jf; k + 1 < V->b[J].npred; k++)
 			V->pr[V->b[J].pred + k] = V->pr[V->b[J].pred + k + 1];
 		V->b[J].npred--;
-		V->p[t].in = (vir_ins){ VO_BR, VT_VOID, 0, J, 0, 0 };
+		V->p[t].in = (vir_insn){ VIR_OP_BR, VIR_TYPE_VOID, 0, J, 0, 0 };
 		if (et)
 			V->b[T].reach = 0;
 		if (ef)

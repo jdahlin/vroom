@@ -1,5 +1,5 @@
 /*
- * x86predefines.h: the x86-64 feature and CPU macros (__AVX2__, __znver3__ ...) for predef.c.
+ * x86-predefines.h: the x86-64 feature and CPU macros (__AVX2__, __znver3__ ...) for predef.c.
  *
  * Included by predef.c after the buffer type, so it needs `buf` and `bstr`.  The tables
  * (x86macros-data.inc) are generated from clang by src/tools/gen-x86features.py; the functions here
@@ -10,24 +10,24 @@
 #define VCC_X86PREDEFINES_H
 #include "arch/x64/x86features.h"
 #include "x86macros-data.inc"
-static inline void x86_macro_line(buf *pre, const char *name, const char *value)
+static inline void driver_x86_macro_line_append(driver_buffer *pre, const char *name, const char *value)
 {
-	bstr(pre, value ? "#define " : "#undef ");
-	bstr(pre, name);
-	if (value) { bstr(pre, " "); bstr(pre, value); }
-	bstr(pre, "\n");
+	driver_buffer_append_string(pre, value ? "#define " : "#undef ");
+	driver_buffer_append_string(pre, name);
+	if (value) { driver_buffer_append_string(pre, " "); driver_buffer_append_string(pre, value); }
+	driver_buffer_append_string(pre, "\n");
 }
-static inline void x86_feature_predefines(buf *pre, x86_features features, const char *cpu)
+static inline void driver_x86_feature_predefines_append(driver_buffer *pre, x86_features features, const char *cpu)
 {
 	for (unsigned i = 0; i < sizeof(x86_feature_macros)/sizeof(*x86_feature_macros); i++) {
-		x86_macro_line(pre, x86_feature_macros[i].name, NULL);
+		driver_x86_macro_line_append(pre, x86_feature_macros[i].name, NULL);
 		if (x86_features_subset(x86_feature_macros[i].required, features))
-			x86_macro_line(pre, x86_feature_macros[i].name, x86_feature_macros[i].value);
+			driver_x86_macro_line_append(pre, x86_feature_macros[i].name, x86_feature_macros[i].value);
 	}
 	for (unsigned i = 0; i < sizeof(x86_cpu_macro_names)/sizeof(*x86_cpu_macro_names); i++)
-		x86_macro_line(pre, x86_cpu_macro_names[i], NULL);
+		driver_x86_macro_line_append(pre, x86_cpu_macro_names[i], NULL);
 	for (unsigned i = 0; i < sizeof(x86_cpu_macros)/sizeof(*x86_cpu_macros); i++)
 		if (!strcmp(cpu, x86_cpu_macros[i].cpu))
-			x86_macro_line(pre, x86_cpu_macros[i].name, x86_cpu_macros[i].value);
+			driver_x86_macro_line_append(pre, x86_cpu_macros[i].name, x86_cpu_macros[i].value);
 }
 #endif

@@ -20,7 +20,7 @@ VPRIV void pp_header_cache_mode_set(pp *p, int mode)
 	static pthread_once_t once = PTHREAD_ONCE_INIT;
 
 	pthread_once(&once, pp_header_cache_environment_read);
-	p->hc = !pp_header_cache_disabled && !p->o->show_includes && !p->o->dump_defines && !p->o->comments && !p->o->markers && !p->o->imacros;	/* -H: a replay has no nesting to print */
+	p->header_cache_on = !pp_header_cache_disabled && !p->options->show_includes && !p->options->dump_defines && !p->options->comments && !p->options->markers && !p->options->imacros;	/* -H: a replay has no nesting to print */
 	p->output_mode = mode;
 }
 
@@ -31,7 +31,7 @@ static __attribute__((noinline)) void pp_token_next_slow(pp *p, ptok *t)
 	p->token_unrecorded = 0;
 	pp_token_next_resetting_temporary(p, t);
 	p->tokens_delivered++;
-	if (unlikely(p->rec.on) && !p->token_unrecorded)
+	if (unlikely(p->recording.on) && !p->token_unrecorded)
 		pp_header_cache_token_record(p, t);
 }
 
@@ -46,38 +46,38 @@ void pp_temporary_hold(pp *p, int on) { p->temporary_held = on != 0; }
 
 void pp_token_next(pp *p, ptok *t)
 {
-	pp_context *c = &p->cx[p->depth - 1];
+	pp_context *c = &p->contexts[p->context_depth - 1];
 
 	/* a cached header's tokens: straight out, unless a child or __COUNTER__ digits come next */
-	if (c->type == PP_CONTEXT_SERVED && c->i < c->n) {
-		const pp_header_cache_entry *e = c->he;
+	if (c->type == PP_CONTEXT_SERVED && c->index < c->count) {
+		const pp_header_cache_entry *e = c->entry;
 
-		if ((c->si >= e->nseg || e->seg[c->si].at != c->i) && (c->ci >= e->nctr || e->ctr[c->ci].off != c->i)) {
+		if ((c->next_segment >= e->segment_count || e->segments[c->next_segment].at != c->index) && (c->next_counter_run >= e->counter_run_count || e->counter_runs[c->next_counter_run].off != c->index)) {
 			p->tokens_delivered++;
-			pp_header_cache_token_load(t, &c->ht[c->i++], c->pt, c->src, c->loc);
+			pp_header_cache_token_load(t, &c->stored_tokens[c->index++], c->tokens, c->source, c->location);
 			if (t->kind == LEX_TOKEN_IDENTIFIER)
 				t->flags |= PP_TOKEN_FLAG_NO_EXPAND;
-			if (unlikely(p->rec.on) && !c->norec)
+			if (unlikely(p->recording.on) && !c->unrecorded)
 				pp_header_cache_token_record(p, t);
 			return;
 		}
 	}
 	/* a plain token with nothing owed and no macro: inline, no frame (the rest are tail calls) */
-	if (likely(p->output_mode && !p->rec.on && c->i < c->n && !(c->first | p->pend))) {
+	if (likely(p->output_mode && !p->recording.on && c->index < c->count && !(c->first_flags | p->owed_spacing))) {
 		uintptr_t m;
 
 		if (c->type == PP_CONTEXT_TOKENS) {
-			*t = c->pt[c->i++];
+			*t = c->tokens[c->index++];
 		} else if (c->type == PP_CONTEXT_LEXED) {
-			const lex_token *v = &c->vt[c->i++];
+			const lex_token *v = &c->lexed_tokens[c->index++];
 
-			pp_token_fill_from_lexer(t, v, c->src, c->offloc ? c->loc + v->off : c->loc);
-		} else if (c->type == PP_CONTEXT_FILE && !((c->vt[c->i].flags & LEX_TOKEN_FLAG_LINE_START) && c->vt[c->i].kind == LEX_TOKEN_HASH)) {
-			const lex_token *v = &c->vt[c->i++];
+			pp_token_fill_from_lexer(t, v, c->source, c->location_per_token ? c->location + v->off : c->location);
+		} else if (c->type == PP_CONTEXT_FILE && !((c->lexed_tokens[c->index].flags & LEX_TOKEN_FLAG_LINE_START) && c->lexed_tokens[c->index].kind == LEX_TOKEN_HASH)) {
+			const lex_token *v = &c->lexed_tokens[c->index++];
 
-			if (p->depth == p->nfile && !p->scratch_token_count && !p->temporary_held)
-				p->tmp.used = 0;	/* nothing above file level refers to tmp */
-			pp_token_fill_from_lexer(t, v, c->src, c->loc + v->off);
+			if (p->context_depth == p->file_context_count && !p->scratch_token_count && !p->temporary_held)
+				p->temporary_region.used = 0;	/* nothing above file level refers to tmp */
+			pp_token_fill_from_lexer(t, v, c->source, c->location + v->off);
 		} else {
 			pp_token_next_slow(p, t);
 			return;

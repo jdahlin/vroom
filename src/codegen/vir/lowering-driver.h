@@ -22,7 +22,7 @@ typedef struct virbuild_lowering_target {
 	void (*block_begin)(void *ctx, uint32_t b);
 	/* the block's label has been defined and the block is about to be lowered from the layout (not for a copy of it, vir_layout_duplicate) */
 	void (*block_enter)(void *ctx, uint32_t b);
-	/* instruction i of block b; opr[k] is the register of its k-th operand (nopr of them), res that of its result (VR_NONE: none) */
+	/* instruction i of block b; opr[k] is the register of its k-th operand (nopr of them), res that of its result (VIR_REGISTER_NONE: none) */
 	void (*instruction)(void *ctx, uint32_t b, uint32_t i, const uint8_t *opr, uint32_t nopr, uint8_t res);
 	/* a result (or, on arm64, a block parameter) that lives in spill slot `slot` when defined: store res to it */
 	void (*result_spill)(void *ctx, uint8_t res, uint32_t slot);
@@ -45,7 +45,7 @@ typedef struct virbuild_lowering_target {
 	/* differences kept as they are (unresolved, Q-VIRB-02): today's value per target */
 	bool params_in_loop;		/* x86-64: block parameters go through instruction(); arm64: result_spill(), here, in the order of the operand registers */
 	bool edits_at_block_end;	/* x86-64: the edits at pos = first + n run after the last instruction; arm64: none */
-	bool skip_multi_operands;	/* arm64: a VT_MULTI operand has no register and instruction() reads them from ov/opr; x86-64 rejects such functions */
+	bool skip_multi_operands;	/* arm64: a VIR_TYPE_MULTI operand has no register and instruction() reads them from ov/opr; x86-64 rejects such functions */
 	bool rotation_cached;		/* arm64 reads VCC_VIR_ROT once (static); x86-64 per function */
 } virbuild_lowering_target;
 
@@ -53,10 +53,10 @@ typedef struct virbuild_lowering_target {
 typedef struct virbuild_lowering {
 	const virbuild_lowering_target *target;
 	void *ctx;
-	vir_fn *f;
+	vir_function *f;
 	const vir_alloc_out *o;
 	const vir_loops *lp;
-	/* arrays of f->nblk entries the layout fills: order, position, rotation, chase; path is scratch of f->nblk, block_label is the target's */
+	/* arrays of f->block_count entries the layout fills: order, position, rotation, chase; path is scratch of f->block_count, block_label is the target's */
 	uint32_t *order, *position, *rotation, *chase, *path;
 	const uint32_t *block_label;
 	bool optimize;			/* loop rotation and entry duplication are allowed (not -O0) */
@@ -75,6 +75,6 @@ VPRIV void virbuild_lower_block(const virbuild_lowering *d, uint32_t b);
 /* an edge's block: its label, then the edge's moves (the caller ends it with a jump) */
 VPRIV void virbuild_lower_edge_block(const virbuild_lowering *d, uint32_t label, uint32_t g);
 /* callee (a symbol's address) returns twice: setjmp and the like */
-VPRIV bool virbuild_call_returns_twice(ecx *e, const vir_ins *callee);
+VPRIV bool virbuild_call_returns_twice(ecx *e, const vir_insn *callee);
 
 #endif

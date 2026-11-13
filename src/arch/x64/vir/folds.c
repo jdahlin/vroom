@@ -2,50 +2,50 @@
 
 #include "lowering-internal.h"
 
-VPRIV bool vx_imm(const vir_fn *f, uint32_t v, int64_t *value)
+VPRIV bool vx_imm(const vir_function *f, uint32_t v, int64_t *value)
 {
-	const vir_ins *i=&f->ins[v];
-	if (i->op!=VO_ICONST) return false;
-	int64_t k=i->ty==VT_I32?(int64_t)(int32_t)i->b:vx_bits(i);
+	const vir_insn *i=&f->insns[v];
+	if (i->op!=VIR_OP_ICONST) return false;
+	int64_t k=i->type==VIR_TYPE_I32?(int64_t)(int32_t)i->b:vx_bits(i);
 	if (k!=(int32_t)k) return false;
 	*value=k;return true;
 }
 
-VPRIV bool vx_smallmem(const vir_fn *f,const vir_ins *i)
+VPRIV bool vx_smallmem(const vir_function *f,const vir_insn *i)
 {
-	const vir_ins *count=&f->ins[i->c];
-	if(count->op!=VO_ICONST || (i->fl&VIF_VOL))return false;
+	const vir_insn *count=&f->insns[i->c];
+	if(count->op!=VIR_OP_ICONST || (i->flags&VIR_INSN_FLAG_VOL))return false;
 	uint64_t n=(uint64_t)vx_bits(count);
-	if(i->op==VO_MEMCPY)return n<=128;
-	const vir_ins *byte=&f->ins[i->b];
-	return n<=256 && byte->op==VO_ICONST && !(byte->b&255);
+	if(i->op==VIR_OP_MEMCPY)return n<=128;
+	const vir_insn *byte=&f->insns[i->b];
+	return n<=256 && byte->op==VIR_OP_ICONST && !(byte->b&255);
 }
 
-VPRIV bool vx_supported(const vir_fn *f, uint32_t v)
+VPRIV bool vx_supported(const vir_function *f, uint32_t v)
 {
-	const vir_ins *i = &f->ins[v];
-	bool vec = vir_isvec(i->ty);
+	const vir_insn *i = &f->insns[v];
+	bool vec = vir_type_is_vector(i->type);
 	switch (i->op) {
-	case VO_NOP: case VO_BPARAM: case VO_PARAM: case VO_LOAD: case VO_STORE:
-	case VO_BR: case VO_BRIF: case VO_RET: case VO_TRAP: case VO_BARRIER: case VO_CALL:
-	case VO_MEMCPY: case VO_MEMSET: case VO_SWITCH: case VO_ALOAD: case VO_ASTORE: case VO_AFENCE:
-	case VO_PTRADD: case VO_PSUB: case VO_P2I: case VO_I2P: case VO_EXT: case VO_TRUNC:
-	case VO_ICMP: case VO_FCMP: case VO_SELECT: case VO_SHL: case VO_LSHR: case VO_ASHR: case VO_BITCAST:
-	case VO_S2F: case VO_F2S: case VO_VFCMP: case VO_VBITSEL: case VO_VS2F:
-	case VO_FNEG: case VO_FABS: case VO_FSQRT: case VO_NEG: case VO_NOT:
+	case VIR_OP_NOP: case VIR_OP_BPARAM: case VIR_OP_PARAM: case VIR_OP_LOAD: case VIR_OP_STORE:
+	case VIR_OP_BR: case VIR_OP_BRIF: case VIR_OP_RET: case VIR_OP_TRAP: case VIR_OP_BARRIER: case VIR_OP_CALL:
+	case VIR_OP_MEMCPY: case VIR_OP_MEMSET: case VIR_OP_SWITCH: case VIR_OP_ALOAD: case VIR_OP_ASTORE: case VIR_OP_AFENCE:
+	case VIR_OP_PTRADD: case VIR_OP_PSUB: case VIR_OP_P2I: case VIR_OP_I2P: case VIR_OP_EXT: case VIR_OP_TRUNC:
+	case VIR_OP_ICMP: case VIR_OP_FCMP: case VIR_OP_SELECT: case VIR_OP_SHL: case VIR_OP_LSHR: case VIR_OP_ASHR: case VIR_OP_BITCAST:
+	case VIR_OP_S2F: case VIR_OP_F2S: case VIR_OP_VFCMP: case VIR_OP_VBITSEL: case VIR_OP_VS2F:
+	case VIR_OP_FNEG: case VIR_OP_FABS: case VIR_OP_FSQRT: case VIR_OP_NEG: case VIR_OP_NOT:
 		return true;
-	case VO_SDIV: case VO_UDIV: case VO_SREM: case VO_UREM: case VO_SMULHI: case VO_UMULHI: return true;
-	case VO_U2F: return f->ins[i->a].ty == VT_I32;
-	case VO_F2U: return i->ty == VT_I32;
-	case VO_VICMP: return i->ty == VT_I32X4 && (i->fl & 15) < 6;
-	case VO_MUL: return !vec || i->ty == VT_I32X4;
-	case VO_FEXT: case VO_FTRUNC:
+	case VIR_OP_SDIV: case VIR_OP_UDIV: case VIR_OP_SREM: case VIR_OP_UREM: case VIR_OP_SMULHI: case VIR_OP_UMULHI: return true;
+	case VIR_OP_U2F: return f->insns[i->a].type == VIR_TYPE_I32;
+	case VIR_OP_F2U: return i->type == VIR_TYPE_I32;
+	case VIR_OP_VICMP: return i->type == VIR_TYPE_I32X4 && (i->flags & 15) < 6;
+	case VIR_OP_MUL: return !vec || i->type == VIR_TYPE_I32X4;
+	case VIR_OP_FEXT: case VIR_OP_FTRUNC:
 		return true;
-	case VO_ADD: case VO_SUB: case VO_AND: case VO_OR: case VO_XOR:
-	case VO_FADD: case VO_FSUB: case VO_FMUL: case VO_FDIV:
+	case VIR_OP_ADD: case VIR_OP_SUB: case VIR_OP_AND: case VIR_OP_OR: case VIR_OP_XOR:
+	case VIR_OP_FADD: case VIR_OP_FSUB: case VIR_OP_FMUL: case VIR_OP_FDIV:
 		return true;
-	case VO_VINSERT: case VO_VEXTRACT:
-	case VO_VSPLAT: case VO_VSERIES: case VO_VREV: case VO_VREDUCE:
+	case VIR_OP_VINSERT: case VIR_OP_VEXTRACT:
+	case VIR_OP_VSPLAT: case VIR_OP_VSERIES: case VIR_OP_VREV: case VIR_OP_VREDUCE:
 		return true;
 	default: return false;
 	}
@@ -55,28 +55,28 @@ VPRIV bool vx_supported(const vir_fn *f, uint32_t v)
  * reloads/rematerializations; memory consumers require no intervening edit. */
 VPRIV bool vx_foldedits(vx *L,uint32_t b,uint32_t pos,int keep)
 {
-	uint32_t lo=L->o->boff[L->f->nblk+1+b],hi=L->o->boff[L->f->nblk+2+b],end=hi;
+	uint32_t lo=L->o->block_offsets[L->f->block_count+1+b],hi=L->o->block_offsets[L->f->block_count+2+b],end=hi;
 	while(lo<hi) {uint32_t m=lo+(hi-lo)/2;if(L->o->edit[m].pos<pos)lo=m+1;else hi=m;}
 	for(uint32_t k=lo;k<end && L->o->edit[k].pos==pos;k++) {
 		const vir_edit *edit=&L->o->edit[k];
-		if(keep==XNOREG || (edit->kind!=VE_REMAT && edit->kind!=VE_RELOAD) || vx_reg(edit->dst)==keep)return false;
+		if(keep==XNOREG || (edit->kind!=VIR_EDIT_REMATERIALIZE && edit->kind!=VIR_EDIT_RELOAD) || vx_reg(edit->dst)==keep)return false;
 	}
 	return true;
 }
 
 VPRIV bool vx_memnext(vx *L,uint32_t b,uint32_t v)
 {
-	return v+1<L->f->blk[b].first+L->f->blk[b].n && L->uses[v]==1 && L->o->slot[v]==VIR_NOBLK &&
-		L->f->ins[v+1].a==v && (L->f->ins[v+1].op==VO_LOAD || L->f->ins[v+1].op==VO_STORE) &&
+	return v+1<L->f->blocks[b].first+L->f->blocks[b].insn_count && L->uses[v]==1 && L->o->slot[v]==VIR_BLOCK_NONE &&
+		L->f->insns[v+1].a==v && (L->f->insns[v+1].op==VIR_OP_LOAD || L->f->insns[v+1].op==VIR_OP_STORE) &&
 		vx_foldedits(L,b,v+1,XNOREG);
 }
 
 /* Integer-address form of the same single memory consumer. */
 VPRIV bool vx_castmem(vx *L,uint32_t b,uint32_t v)
 {
-	const vir_fn *f=L->f;
-	return f->ins[v].op==VO_ADD && f->ins[v].ty==VT_I64 && L->uses[v]==1 && L->o->slot[v]==VIR_NOBLK &&
-	 v+2<f->blk[b].first+f->blk[b].n && f->ins[v+1].op==VO_I2P && f->ins[v+1].a==v &&
+	const vir_function *f=L->f;
+	return f->insns[v].op==VIR_OP_ADD && f->insns[v].type==VIR_TYPE_I64 && L->uses[v]==1 && L->o->slot[v]==VIR_BLOCK_NONE &&
+	 v+2<f->blocks[b].first+f->blocks[b].insn_count && f->insns[v+1].op==VIR_OP_I2P && f->insns[v+1].a==v &&
 	 vx_memnext(L,b,v+1) && vx_foldedits(L,b,v+1,XNOREG);
 }
 
@@ -84,26 +84,26 @@ VPRIV bool vx_castmem(vx *L,uint32_t b,uint32_t v)
  * allocator edit interleaved. Never widen beyond the bytes actually read. */
 VPRIV unsigned vx_readword(vx *L,uint32_t b,uint32_t v,uint32_t *end)
 {
-	unsigned width=vir_read_be(L->f,L->uses,v,L->f->blk[b].first+L->f->blk[b].n,end);
+	unsigned width=vir_big_endian_read_match(L->f,L->uses,v,L->f->blocks[b].first+L->f->blocks[b].insn_count,end);
 	if(!width)return 0;
 	for(uint32_t k=v;k<*end;k++)
-	 if(L->o->slot[k]!=VIR_NOBLK || !vx_foldedits(L,b,k+1,XNOREG))return 0;
+	 if(L->o->slot[k]!=VIR_BLOCK_NONE || !vx_foldedits(L,b,k+1,XNOREG))return 0;
 	return width;
 }
 
 /* An address private to one exact byte-assembly expression. */
 VPRIV unsigned vx_beaddr(vx *L,uint32_t b,uint32_t v,uint32_t *end)
 {
-	const vir_fn *f=L->f;const vir_ins *i=&f->ins[v];
+	const vir_function *f=L->f;const vir_insn *i=&f->insns[v];
 	uint32_t ptr=v,load=v+1;
-	if(L->o->slot[v]!=VIR_NOBLK)return 0;
-	if(i->op==VO_ADD && i->ty==VT_I64) {
-		if(L->uses[v]!=1 || v+2>=f->blk[b].first+f->blk[b].n ||
-		   f->ins[v+1].op!=VO_I2P || f->ins[v+1].a!=v || L->o->slot[v+1]!=VIR_NOBLK ||
+	if(L->o->slot[v]!=VIR_BLOCK_NONE)return 0;
+	if(i->op==VIR_OP_ADD && i->type==VIR_TYPE_I64) {
+		if(L->uses[v]!=1 || v+2>=f->blocks[b].first+f->blocks[b].insn_count ||
+		   f->insns[v+1].op!=VIR_OP_I2P || f->insns[v+1].a!=v || L->o->slot[v+1]!=VIR_BLOCK_NONE ||
 		   !vx_foldedits(L,b,v+1,XNOREG))return 0;
 		ptr=v+1;load=v+2;
-	} else if(i->op!=VO_PTRADD)return 0;
-	if(load>=f->blk[b].first+f->blk[b].n || f->ins[load].a!=ptr || !vx_foldedits(L,b,load,XNOREG))return 0;
+	} else if(i->op!=VIR_OP_PTRADD)return 0;
+	if(load>=f->blocks[b].first+f->blocks[b].insn_count || f->insns[load].a!=ptr || !vx_foldedits(L,b,load,XNOREG))return 0;
 	unsigned width=vx_readword(L,b,load,end);
 	return width && L->uses[ptr]==width?width:0;
 }
@@ -111,22 +111,22 @@ VPRIV unsigned vx_beaddr(vx *L,uint32_t b,uint32_t v,uint32_t *end)
 VPRIV bool vx_addrmem(vx *L,uint32_t b,uint32_t v)
 {
 	uint32_t end;
-	return (L->f->ins[v].op==VO_PTRADD && vx_memnext(L,b,v)) || vx_castmem(L,b,v) || vx_beaddr(L,b,v,&end);
+	return (L->f->insns[v].op==VIR_OP_PTRADD && vx_memnext(L,b,v)) || vx_castmem(L,b,v) || vx_beaddr(L,b,v,&end);
 }
 
 /* An IR i32 does not itself guarantee zero upper bits: parameters, calls,
  * signed narrow loads and identity truncations can retain arbitrary bits. */
-VPRIV bool vx_clear32(const vir_fn *f,uint32_t v)
+VPRIV bool vx_clear32(const vir_function *f,uint32_t v)
 {
-	const vir_ins *i=&f->ins[v];
-	if(i->ty!=VT_I32)return false;
+	const vir_insn *i=&f->insns[v];
+	if(i->type!=VIR_TYPE_I32)return false;
 	switch(i->op) {
-	case VO_ICONST:return !(i->b>>31);
-	case VO_LOAD: case VO_EXT:return !(i->fl&VIF_MS);
-	case VO_ADD: case VO_SUB: case VO_MUL: case VO_AND: case VO_OR: case VO_XOR:
-	case VO_NEG: case VO_NOT: case VO_ICMP: case VO_FCMP: case VO_F2S: case VO_F2U:
-	case VO_SDIV: case VO_UDIV: case VO_SREM: case VO_UREM: case VO_SMULHI: case VO_UMULHI:return true;
-	case VO_BITCAST:return vir_rclass(f->ins[i->a].ty);
+	case VIR_OP_ICONST:return !(i->b>>31);
+	case VIR_OP_LOAD: case VIR_OP_EXT:return !(i->flags&VIR_INSN_FLAG_MS);
+	case VIR_OP_ADD: case VIR_OP_SUB: case VIR_OP_MUL: case VIR_OP_AND: case VIR_OP_OR: case VIR_OP_XOR:
+	case VIR_OP_NEG: case VIR_OP_NOT: case VIR_OP_ICMP: case VIR_OP_FCMP: case VIR_OP_F2S: case VIR_OP_F2U:
+	case VIR_OP_SDIV: case VIR_OP_UDIV: case VIR_OP_SREM: case VIR_OP_UREM: case VIR_OP_SMULHI: case VIR_OP_UMULHI:return true;
+	case VIR_OP_BITCAST:return vir_register_class(f->insns[i->a].type);
 	default:return false;
 	}
 }
@@ -135,20 +135,20 @@ VPRIV bool vx_clear32(const vir_fn *f,uint32_t v)
  * by a signed index. A 4-byte spill reload destroys a negative sign extension. */
 VPRIV bool vx_sign64(vx *L,uint32_t v)
 {
-	const vir_ins *source=&L->f->ins[v];
-	if(source->ty!=VT_I32)return false;
-	if((source->op==VO_LOAD || source->op==VO_EXT) && (source->fl&VIF_MS) &&
-				VIF_W(source->fl)<=2 && L->o->slot[v]==VIR_NOBLK)return true;
-	return vx_clear32(L->f,v) && !(vir_mask32(L->f,v,8)>>31);
+	const vir_insn *source=&L->f->insns[v];
+	if(source->type!=VIR_TYPE_I32)return false;
+	if((source->op==VIR_OP_LOAD || source->op==VIR_OP_EXT) && (source->flags&VIR_INSN_FLAG_MS) &&
+				VIR_INSN_FLAG_WIDTH_LOG2(source->flags)<=2 && L->o->slot[v]==VIR_BLOCK_NONE)return true;
+	return vx_clear32(L->f,v) && !(vir_value_possible_bits(L->f,v,8)>>31);
 }
 
 /* Small constant blocks do not need REP's fixed registers or their clobbers.
  * SSE2 handles complete 16-byte pieces; scalar tails never overread. */
-VPRIV void vx_memblock(vx *L,const vir_ins *i,int dst,int src)
+VPRIV void vx_memblock(vx *L,const vir_insn *i,int dst,int src)
 {
 	ecx *e=L->e;
-	uint64_t n=(uint64_t)vx_bits(&L->f->ins[i->c]);
-	bool copy=i->op==VO_MEMCPY;
+	uint64_t n=(uint64_t)vx_bits(&L->f->insns[i->c]);
+	bool copy=i->op==VIR_OP_MEMCPY;
 	if(!copy) {
 		if(n>=16)x64_op3(e,X_FXOR,16,XMM0+14,XMM0+14,XMM0+14);
 		if(n&15)x64_movi(e,L->gtmp,0);
@@ -173,10 +173,10 @@ VPRIV uint8_t vx_condition(vx *L,uint32_t b,uint32_t v,uint32_t value,int reg)
 	}
 	if(flags) {
 		cc=e->x64->in[L->setrec].cond;
-		if(L->uses[value]==1 && L->o->slot[value]==VIR_NOBLK) {
+		if(L->uses[value]==1 && L->o->slot[value]==VIR_BLOCK_NONE) {
 			memmove(&e->x64->in[L->setrec],&e->x64->in[L->setrec+1],(e->x64->nin-L->setrec-1)*sizeof(rec));
 			e->x64->nin--;
 		}
-	} else x64_op3(e, X_TEST, vx_size(L->f->ins[value].ty), XNOREG, reg, reg);
+	} else x64_op3(e, X_TEST, vx_size(L->f->insns[value].type), XNOREG, reg, reg);
 	return cc;
 }

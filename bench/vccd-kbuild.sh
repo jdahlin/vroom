@@ -8,7 +8,7 @@
 # patches/0008).  VCC_AR=0: llvm-ar as AR (default: vcc's ar in vccd, ar.c).
 # KB_SHELL: SHELL/CONFIG_SHELL (default /bin/dash; KB_SHELL= for make's /bin/sh,
 # which is bash on macOS).  VSH=1 (default): make's SHELL is vsh (vccd runs kbuild's object
-# and archive recipes itself, rsh.c; the rest goes to $KB_SHELL), CONFIG_SHELL
+# and archive recipes itself, shell.c; the rest goes to $KB_SHELL), CONFIG_SHELL
 # stays $KB_SHELL.
 # VCCD_ARGS: more vccd options (e.g. "--ld contrib/phase1/vroom-ld" to link with lld).
 # KB_OPTS: more kbuild.py options (e.g. "--keep --dotconfig F" for a rebuild).
