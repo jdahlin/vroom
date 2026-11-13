@@ -218,7 +218,7 @@ static void ld_eh_frame_merge(void)
 			for (uint32_t f = 0; f < cies[c].fdes.n; f++) {
 				isecs.v[cies[c].fdes.v[f]].ehcie = cp + 1;
 				VVEC_PUSH(out, cies[c].fdes.v[f], ld_region_alloc);
-				VVEC_PUSH(ehfdes, cies[c].fdes.v[f], ld_region_alloc);
+				VVEC_PUSH(ctx->layout.eh_frame_fdes, cies[c].fdes.v[f], ld_region_alloc);
 			}
 		}
 		{

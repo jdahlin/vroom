@@ -119,7 +119,7 @@ static bool ld_arguments_parse(int argc, char **argv)
 			else ld_error_report("unknown --orphan-handling mode: %s", v);
 			continue;
 		}
-		if ((v = LD_ARGUMENT_VALUE("--error-limit"))) { error_limit = atoi(v); continue; }
+		if ((v = LD_ARGUMENT_VALUE("--error-limit"))) { ctx->diagnostics.error_limit = atoi(v); continue; }
 		if ((v = LD_ARGUMENT_VALUE("--threads"))) { ld_thread_count = atoi(v) > 0 ? atoi(v) : 1; continue; }
 		if ((v = LD_ARGUMENT_VALUE("-Map")) || (v = LD_ARGUMENT_VALUE("--Map"))) { opt.map = v; continue; }
 		if ((v = LD_ARGUMENT_VALUE("--vroom-comment"))) { opt.comment = v; continue; }

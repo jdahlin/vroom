@@ -7,7 +7,7 @@ static int ld_link_run(int argc, char **argv)
 	ld_state_reset();
 	ld_thread_count = ld_parallel_default_width();
 	ld_arguments_parse(argc, argv);
-	if (atomic_load(&nerrors))
+	if (atomic_load(&ctx->diagnostics.error_count))
 		return 1;
 #ifdef VLD_MAIN
 	/* the standalone tool: the process is this link, so --threads is the budget
@@ -16,14 +16,14 @@ static int ld_link_run(int argc, char **argv)
 		vtask_budget_set(ld_thread_count);
 #endif
 	double t0 = ld_clock_now();
-	t_last = t0;
-	p_last = vperformance_now();
-	flt_last = timing ? ld_minor_fault_count() : 0;
+	ctx->diagnostics.phase_start_time = t0;
+	ctx->diagnostics.phase_start_counters = vperformance_now();
+	ctx->diagnostics.phase_start_faults = ctx->diagnostics.phase_timing ? ld_minor_fault_count() : 0;
 	pic = opt.shared;
 
 	ld_inputs_load();
 	ld_phase_time_report("map+parse inputs");
-	if (atomic_load(&nerrors))
+	if (atomic_load(&ctx->diagnostics.error_count))
 		return 1;
 	ld_global_table_init();
 	if (opt.script) {
@@ -32,7 +32,7 @@ static int ld_link_run(int argc, char **argv)
 		if (!b)
 			return 1;
 		ld_script_parse((const char *)b, n);
-		if (atomic_load(&nerrors))
+		if (atomic_load(&ctx->diagnostics.error_count))
 			return 1;
 	}
 	ld_input_sections_alloc(0);
@@ -42,7 +42,7 @@ static int ld_link_run(int argc, char **argv)
 	ld_parallel_for(objs.n, ld_object_symbols_resolve, NULL);
 	ld_parallel_for(objs.n, ld_duplicate_symbols_check, NULL);
 	ld_phase_time_report("resolve symbols");
-	if (atomic_load(&nerrors))
+	if (atomic_load(&ctx->diagnostics.error_count))
 		return 1;
 	if (opt.relocatable)
 		return ld_relocatable_link();
@@ -90,7 +90,7 @@ static int ld_link_run(int argc, char **argv)
 	ld_phase_time_report("assign sections");
 	ld_merges_finalize();
 	ld_phase_time_report("merge sections");
-	if (atomic_load(&nerrors))
+	if (atomic_load(&ctx->diagnostics.error_count))
 		return 1;
 
 	ld_symbol_assignments_process();
@@ -142,7 +142,7 @@ static int ld_link_run(int argc, char **argv)
 	}
 	ld_dynamic_sections_build();
 	ld_phase_time_report("scan relocations");
-	if (atomic_load(&nerrors))
+	if (atomic_load(&ctx->diagnostics.error_count))
 		return 1;
 
 	/* room for thunk sections without moving isecs */
@@ -153,11 +153,11 @@ static int ld_link_run(int argc, char **argv)
 		isecs.cap = isecs.n + 4096;
 	}
 	/* output sections in header order (live ones, script order) */
-	outsecs.n = 0;
+	ctx->layout.output_sections.n = 0;
 	for (uint32_t c = 0; c < topcmds.n; c++)
 		if (topcmds.v[c].kind == LD_COMMAND_OUTPUT_SECTION && osecs.v[topcmds.v[c].idx].live) {
-			VVEC_PUSH(outsecs, topcmds.v[c].idx, ld_region_alloc);
-			osecs.v[topcmds.v[c].idx].shidx = outsecs.n;
+			VVEC_PUSH(ctx->layout.output_sections, topcmds.v[c].idx, ld_region_alloc);
+			osecs.v[topcmds.v[c].idx].shidx = ctx->layout.output_sections.n;
 		}
 
 	ld_addresses_assign();
@@ -173,9 +173,9 @@ static int ld_link_run(int argc, char **argv)
 		if (!changed && !chg2)
 			break;
 	}
-	in_layout = true;
+	ctx->layout.in_layout = true;
 	ld_addresses_assign();
-	in_layout = false;
+	ctx->layout.in_layout = false;
 	for (uint32_t i = 0; i < stop_syms.n; i++)
 		gsyms[stop_syms.v[i]].ev.val = osecs.v[gsyms[stop_syms.v[i]].ev.idx].size;
 	for (uint32_t i = 0; i < recorded.n; i++)
@@ -183,7 +183,7 @@ static int ld_link_run(int argc, char **argv)
 	for (uint32_t i = 0; i < assert_fail.n; i++)
 		ld_error_report("%s", assert_fail.v[i]);
 	ld_phase_time_report("layout");
-	if (atomic_load(&nerrors))
+	if (atomic_load(&ctx->diagnostics.error_count))
 		return 1;
 
 	/* drop empty thunk sections (none are kept by construction) */
@@ -204,20 +204,20 @@ static int ld_link_run(int argc, char **argv)
 		os->entsize = sizeof(elf_symbol);
 	}
 	/* sizes of the non-alloc synthetic sections changed: re-run layout of them */
-	for (uint32_t i = 0; i < outsecs.n; i++) {
-		ld_output_section *os = &osecs.v[outsecs.v[i]];
+	for (uint32_t i = 0; i < ctx->layout.output_sections.n; i++) {
+		ld_output_section *os = &osecs.v[ctx->layout.output_sections.v[i]];
 		if (os->flags & SHF_ALLOC)
 			continue;
 		bool dummy = false;
-		uint64_t d = dot;
-		dot = 0;
-		ld_output_section_offsets_assign(outsecs.v[i], &dummy);
-		dot = d;
+		uint64_t d = ctx->layout.dot;
+		ctx->layout.dot = 0;
+		ld_output_section_offsets_assign(ctx->layout.output_sections.v[i], &dummy);
+		ctx->layout.dot = d;
 	}
 	ld_file_offsets_assign();
 	ld_phase_time_report("phdrs, symtab sizes, offsets");
 
-	out = ld_region_large_alloc(filesize);
+	out = ld_region_large_alloc(ctx->layout.file_size);
 	/* RELATIVE relocations: per section, in address order */
 	if (reladyn_isec != LD_NONE && ndyn) {
 		VVEC(uint32_t) dl = {0};
@@ -256,20 +256,20 @@ static int ld_link_run(int argc, char **argv)
 	ld_synthetic_sections_write();
 	ld_headers_write();
 	ld_phase_time_report("symtab, headers");
-	if (atomic_load(&nerrors))
+	if (atomic_load(&ctx->diagnostics.error_count))
 		return 1;
 	ld_build_id_write();
 	ld_phase_time_report("build id");
 	int rc = ld_output_file_write();
 	ld_phase_time_report("write");
-	if (timing)
-		fprintf(errf, "  %-28s %7.2f ms (%u objects, %u sections, %u globals, %llu MB out, %d threads)\n",
+	if (ctx->diagnostics.phase_timing)
+		fprintf(ctx->diagnostics.error_stream, "  %-28s %7.2f ms (%u objects, %u sections, %u globals, %llu MB out, %d threads)\n",
 			"total", (ld_clock_now() - t0) * 1e3, objs.n, isecs.n, gorder.n,
-			(unsigned long long)(filesize >> 20), ld_thread_count);
-	ld_region_unmap(out, filesize);
+			(unsigned long long)(ctx->layout.file_size >> 20), ld_thread_count);
+	ld_region_unmap(out, ctx->layout.file_size);
 	for (uint32_t i = 0; i < objs.n; i++)
 		if (objs.v[i]->mapped && objs.v[i]->buf)
 			ld_region_unmap(objs.v[i]->buf, objs.v[i]->size);
 	ld_global_table_free();
-	return rc || atomic_load(&nerrors) ? 1 : 0;
+	return rc || atomic_load(&ctx->diagnostics.error_count) ? 1 : 0;
 }

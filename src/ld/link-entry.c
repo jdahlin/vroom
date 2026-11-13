@@ -9,7 +9,7 @@ int ld_main(int argc, char **argv, int dirfd, FILE *err)
 		rc = macho_link(argc, argv, dirfd, err);
 	} else {
 		vtask_mutex_lock(&ld_link_lock);	/* (a second link waits off the CPU budget) */
-		errf = err ? err : stderr;
+		ld_context_init(ctx, err ? err : stderr);
 		dirfd_base = dirfd;
 		rc = ld_link_run(argc, argv);
 		ld_regions_free();
