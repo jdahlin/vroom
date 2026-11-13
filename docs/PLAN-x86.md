@@ -1334,3 +1334,28 @@ baselinebygget: bästa av tre processers CPU-tid **262,1 ms** direkt x86
 objekt, **534,2 ms** VIR. Dessa helprogramtal är inte en isolerad
 före/efterjämförelse eftersom annat backend-arbete pågår i samma checkout.
 Rådata: `results/host-dispatch-20261113.json`. Full kärnparitet återstår.
+
+
+### 2026-11-13: pointer-only laddningar och sista callee-save-registret
+
+Delad builder typbestämmer åttabytesladdningar som ptr när bara I2P-vyer
+observerar resultatet. Integeranvändare och volatile behåller sin gamla
+behandling. Allokatorn kräver inte två extra fria callee-save-register för
+att behålla en sen parameter i ett redan valt callee-save-register.
+Ingen CPU- eller funktionsnamnspolicy införs.
+
+Attribution efter ändringen: aMem går in i dispatch i r15, och dess
+reloads minskar från cirka **92,28 M till 14,54 M** (mappade kontrollpar;
+fold-begränsningen kvar). VM-ramen går **1800 → 1736 bytes**. Tre
+femprovsserier för hela speedtest1 med oinstrumenterade binärer ger
+**1,077×, 1,081×, 1,069× clang**, **1,27–2,00 %** bättre än föregående vpp.
+**1,05×-målet är fortfarande öppet**. Båda ändringarna behövs för den
+uppmätta vinsten; isolerade pointerförsök var neutrala. Försök att sluta
+ärva loopkonstanter gav färre instruktioner men ingen tidsvinst och är
+borttagna. Detaljer och faktortest under V4 i PLAN-vir.md.
+
+Isolerad byggverifiering: egna x86 **319/319**, GCC **1615/1615**, TCC
+**105/105**, samma fem inlinefel; ARM/QEMU VIR **50/50**, allokator **21/21**
+och **240** slumpfunktioner, ASan/UBSan och filvist fokus gröna. TSVC
+**151/151**, **83** vektorloopar kvar. Nya regressionsprov för pointervyer
+och den sista callee-save-platsen.

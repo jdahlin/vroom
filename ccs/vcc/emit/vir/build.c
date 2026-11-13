@@ -2518,6 +2518,10 @@ static bool vw_simp1(ecx *e, vwsimp *S, uint32_t q, uint32_t *r)
 	}
 	switch (in.op) {
 	case VO_I2P: case VO_P2I:	/* a pointer and its address as an integer are the same bits */
+		if (in.op == VO_I2P && V->p[in.a].in.ty == VT_PTR) {
+			*r = in.a;
+			return false;
+		}
 		if (V->p[in.a].in.op == (in.op == VO_I2P ? VO_P2I : VO_I2P))
 			*r = V->p[in.a].in.a;
 		return false;
@@ -3174,7 +3178,7 @@ static void vw_simplify(ecx *e)
 	uint32_t *stk, ns = 0;
 
 	S.n0 = V->np;
-	S.cnt = calloc((size_t)S.n0 + 1, sizeof *S.cnt);
+	S.cnt = calloc(2 * ((size_t)S.n0 + 1), sizeof *S.cnt);
 	stk = malloc(((size_t)S.n0 + 1) * sizeof *stk);
 	{
 		uint32_t kc = 16;
@@ -3188,6 +3192,7 @@ static void vw_simplify(ecx *e)
 	}
 	if (!S.cnt || !stk || !S.kt)
 		vw_fail(e, "out of memory");
+	uint32_t *pcopy = S.cnt + S.n0 + 1;
 	/* uses */
 	for (uint32_t i = 0; i < V->norder; i++) {
 		uint32_t b = V->order[i];
@@ -3200,12 +3205,19 @@ static void vw_simplify(ecx *e)
 
 			if (!x)
 				break;
-			if (vw_find(V, x) == x &&
-			    !vw_promdead(V, x))
+			if (vw_find(V, x) == x && !vw_promdead(V, x)) {
 				VW_EACHOP(V, x, o, vw_inc(V, &S, vw_find(V, *o)));
+				if (V->p[x].in.op == VO_I2P) pcopy[vw_find(V, V->p[x].in.a)]++;
+			}
 			if (!q)
 				break;
 		}
+	}
+	/* Pointer-only views need no separately allocated integer carrier. */
+	for (uint32_t q = 0; q < S.n0; q++) {
+		vir_ins *in = &V->p[q].in;
+		if (in->op == VO_LOAD && in->ty == VT_I64 && !(in->fl & (VIF_VOL | VIF_MS)) &&
+		    VIF_W(in->fl) == 3 && pcopy[q] && pcopy[q] == S.cnt[q]) in->ty = VT_PTR;
 	}
 	/* rewriting and numbering over the dominator tree */
 	vw_doms(e, &S);

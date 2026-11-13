@@ -257,6 +257,72 @@ Inga kompilatorändringar, ingen ny prestandavinst eller stängd releasegrind.
 ### V4 x86-64 mot clang -O2 (2026-11-12), mål högst 5 % långsammare
 
 
+2026-11-13, **pointerladdningar och sista lediga callee-save-registret**:
+Attributionen av allokator-edits ledde till två delade ändringar, utan namnpolicy.
+Buildern typbestämmer nu en icke-volatil, osignerad åttabytesladdning som
+`ptr` när samtliga användare är I2P-vyer; identitetsvyerna faller bort.
+Integerobservatörer behåller i64-bäraren. Detta hindrar också senare GVN
+från att förlänga en integerbärares livstid enbart för pointeranvändare.
+Allokatorn låter en sen loopparameter som lever över anrop behålla ett
+ledigt callee-save-register utan det tidigare kravet på **två ytterligare
+lediga** sådana register. Caller-save-placering använder fortfarande
+web-slotten. Både ARM och x86 använder samma kod.
+
+VdbeExec går från **459 till 426** värden med spill-slot, **106 till 99**
+fysiska slots, **1800 till 1736** rambytes och **17291 till 16992**
+maskininstruktioner. aMem-parametern (intern **v666** efter omnumrering)
+kommer nu in i dispatch i **r15**, i stället för `late-call-web-slot`.
+Attributionsprober med samma mappade kontroll och intern alignment hos
+båda: före **38,14 M** omladdningar inom block och **54,13 M** på kanter;
+efter **inga emitterade reload-sites inom block** för v666 och cirka
+**14,54 M** kant-omladdningar. Det är cirka **77,73 M** färre för detta
+värde, men inte bevis för samma besparing i alla spill: andra värden kan
+byta plats. Allmänna probe-tal har fortfarande fold-begränsningen nedan.
+`vir-edits.py --value V --only 'value-V-(reload|edge-reload)'` väljer ett
+värdes reloadgrupper utan att bygga alla övriga instrumenteringar.
+
+Tre separata femprovsserier, samma main-100 och omodifierade binärer:
+
+| Serie | Clang CPU ms | Före CPU ms | Båda ändringarna CPU ms | Kvot mot clang |
+|---|---:|---:|---:|---:|
+| första | 1137,37 | 1240,52 | 1224,53 | 1,077× |
+| upprepning | 1144,05 | 1252,12 | 1236,16 | 1,081× |
+| separat faktortest | 1157,71 | 1263,07 | 1237,82 | 1,069× |
+
+Vinsten mot föregående kompilator är **1,27–2,00 %**. Dynamiska
+helprogramsinstruktioner är **1,229× clang**, mot tidigare **1,263×**.
+Pointerändringen ensam var neutral inom cirka ±0,6 % i separata serier;
+allokatorändringen ensam gav **1254,13 ms / 1,083×** i faktortestet.
+Det är samspelet som motiverar att behålla båda. **1,05×-målet är öppet**.
+Verifieringshash storlek 10 är identisk med clang; inga instrumenterade
+binärer används för tidsresultaten. Artefakter under
+`work/vir-x86-perf/{pointerload,entrycallee,callee-only,entrycallee-isolated,
+entrycallee-map,entrycallee-counts-prior,entrycallee-counts-new}`.
+Ett isolerat checkout vid e5ea1b30 plus dessa ändringar ger en byteidentisk
+SQLite-binär med den mätta kandidaten; samtidiga emitterändringar ingår
+inte i verifieringskompilatorn.
+
+Avvisade försök före detta steg: att inte ärva konstanter som används
+först under loop-headern minskade VM:ns noll-MOV-platser **789 till 459**
+och hela programmets instruktioner cirka 0,7 %, men var neutralt i två
+serier (**1310,50/1310,87** och **1242,75/1242,05 ms**, före/efter).
+Att begränsa regeln till nollkonstanter gav **1234,40/1242,40 ms**, alltså
+0,65 % långsammare. Båda reglerna är borttagna. Underlag `entryconst` och
+`entryzero`; borttagna patchar i `/tmp/vx-entryzero-experiment.patch` och
+pointer-prototypernas tidigare underlag. Färre remats var inte i sig en
+prestandavinst.
+
+Validerat med den isolerade kompilatorn: egna x86 **319/319**, GCC
+**1615/1615**, TCC **105/105**; inline **83/88**, exakt samma fem kända fel.
+ARM/QEMU VIR **50/50**. Allokator **21/21** och **240** slumpfunktioner
+(frön 17–46) gröna. Nya `late-callee.vir` har noll spill/reloads; samma
+prov med gamla regeln har en spill-slot, två reloads och två kantlagringar.
+`vir_pointer_load.c` täcker pointerkedjor, integerobservation, aliasande
+lagring, muterande anrop och volatile. Fokusharnessen med ASan/UBSan och
+filvist bygge är grön, inklusive Clangs assembler och egna objekt.
+TSVC **151/151** båda vägar, **83** vektorloopar och **158** sänkta funktioner.
+
+
 2026-11-13, **allokatorns edits tillskrivna före policyändringar**:
 x86 stöder nu ARM:s `VCC_VL_PROBE`-bitar 0–7: omladdning, remat,
 registerflytt och lagring inom block; remat, lagring, omladdning och flytt

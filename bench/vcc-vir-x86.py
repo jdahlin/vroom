@@ -106,6 +106,7 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
         ('vir_inline_context.c', {'wrapped', 'layer1', 'layer2', 'constant0', 'constant1', 'general', 'ignored0', 'ignored1'}, {}),
         ('vir_inline_large.c', {'helper', 'large', 'reference'}, {}),
         ('vir_slot_width.c', {'mix32', 'signed32', 'mix16', 'mix8', 'loop32'}, {}),
+        ('vir_pointer_load.c', {'chain', 'bits', 'mixed', 'alias', 'across', 'volatile_root'}, {}),
         ('vir_x86_nsw_index.c', {'be16p', 'be16cast', 'be32cast', 'be64cast', 'load4signed', 'store4signed', 'shared', 'keep_input', 'rawshift', 'vol', 'min32', 'min64', 'clean16', 'clean8', 'change', 'pressure_indices'}, {}),
         ('vir_x86_index.c', {'load8', 'load4', 'load2', 'load1', 'store8', 'store4', 'cast8', 'cast4', 'cast2', 'caststore4', 'castmod', 'cast3', 'sharedcast'}, {}),
         ('vir_vector_stride.c', {'stride', 'intstride', 'wide', 'reverse', 'ordered', 'residue', 'gather', 'carry', 'chain', 'maxval', 'maxindex', 'lastnegative'}, {'stride': 'mulps', 'intstride': 'mulps', 'reverse': 'addpd', 'ordered': 'mulps', 'residue': 'addps', 'gather': 'mulps', 'carry': 'mulps'}),

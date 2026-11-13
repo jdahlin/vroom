@@ -56,6 +56,7 @@ def main():
                    help='also count one emitted edit site (repeatable)')
     p.add_argument('--value', type=int, action='append', default=[],
                    help='also count edits of an internal VIR value (repeatable)')
+    p.add_argument('--only', help='measure only counter group names matching this regular expression')
     a = p.parse_args()
     a.out.mkdir(parents=True, exist_ok=True)
     text = a.asm.read_text()
@@ -69,6 +70,7 @@ def main():
                 groups.setdefault('site-' + str(r['id']), []).append(r['end'])
             if r['v'] in a.value:
                 groups.setdefault('value-' + str(r['v']), []).append(r['end'])
+                groups.setdefault('value-' + str(r['v']) + '-' + KINDS[r['bit']], []).append(r['end'])
     if any('site-' + str(s) not in groups for s in a.site):
         raise ValueError('--site must name an emitted allocator edit, not ordinary lowering')
     for n, r in owners.items():
@@ -85,6 +87,10 @@ def main():
         if re.match(r'mov\w*\s+' + str(a.stack_offset) + r'\(%rsp\),', line):
             groups.setdefault('amem-' + kind, []).append(n)
     groups = {k: sorted(set(v)) for k, v in groups.items() if v}
+    if a.only:
+        groups = {k: v for k, v in groups.items() if re.fullmatch(a.only, k)}
+        if not groups:
+            raise ValueError('--only matched no counter groups')
     # Site IDs distinguish emitted layout duplicates; pos and b link back to
     # the allocation. Decisions are saved verbatim with the final slot map.
     (a.out / 'sites.json').write_text(json.dumps(rows, indent=2) + '\n')
