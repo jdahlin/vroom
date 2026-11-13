@@ -204,8 +204,8 @@ int pp_token_spelling_find(const pp *p, const ptok *t, const vlex_file **file, u
 
 It lives in `src/frontend/pp/source-query.c` and is declared in
 `include/frontend/pp/pp.h`.  It scans `p->fe[]` for the `vlex_file` whose
-`[src, src + size)` holds `t->s`, caching the last hit (uses cluster by
-file).  It then compares that position with the file and offset of `t->loc`
+`[src, src + size)` holds `t->s`, the newest file first
+(uses cluster by file).  It then compares that position with the file and offset of `t->loc`
 (`loc_fent`).  Only the mode calls it.
 
 The table gives each case and what it means for the rename (the `WHERE`

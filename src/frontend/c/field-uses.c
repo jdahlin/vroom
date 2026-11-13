@@ -25,11 +25,11 @@ struct cc_field_uses {
 	bool any_star;
 	ptok pend;		/* the name token of the member access being parsed */
 	ptok *names;		/* declarator names seen inside struct bodies */
-	uint32_t nnames, capnames;
+	size_t nnames, capnames;
 	fu_use *use;
-	uint32_t nuse, capuse;
+	size_t nuse, capuse;
 	struct { uint32_t tag, loc; } *defs;	/* where each record's '{' is */
-	uint32_t ndefs, capdefs;
+	size_t ndefs, capdefs;
 	uint32_t *defloc;	/* at the end: by tag */
 	uint32_t *cont_tag, *cont_fld;	/* at the end: the record an untagged record is a member of */
 	char *out;
@@ -40,15 +40,16 @@ typedef struct cc_field_uses fu;
 
 #define FU_NONE UINT32_MAX
 
-static void *fu_grow(void *p, uint32_t n, uint32_t *cap, size_t sz)
+/* room for element n (doubles *cap) */
+static void *fu_grow(void *p, size_t n, size_t *cap, size_t sz)
 {
-	if (n < *cap)
-		return p;
-	*cap = *cap ? *cap * 2 : 256;
-	p = realloc(p, *cap * sz);
-	if (!p) {
-		fputs("vcc: out of memory\n", stderr);
-		abort();
+	while (n >= *cap) {
+		*cap = *cap ? *cap * 2 : 256;
+		p = realloc(p, *cap * sz);
+		if (!p) {
+			fputs("vcc: out of memory\n", stderr);
+			abort();
+		}
 	}
 	return p;
 }
@@ -66,12 +67,7 @@ static __attribute__((format(printf, 2, 3))) void fu_printf(fu *u, const char *f
 			u->nout += (size_t)n;
 			return;
 		}
-		u->capout = u->capout ? u->capout * 2 : 1 << 16;
-		u->out = realloc(u->out, u->capout);
-		if (!u->out) {
-			fputs("vcc: out of memory\n", stderr);
-			abort();
-		}
+		u->out = fu_grow(u->out, u->capout, &u->capout, 1);
 	}
 }
 
@@ -88,7 +84,7 @@ VPRIV void cc_field_uses_begin(cc *c, const char *path)
 	char *line = NULL;
 	size_t cap = 0;
 	fu *u = calloc(1, sizeof *u);
-	uint32_t scap = 0;
+	size_t scap = 0;
 
 	c->field_uses = u;
 	pp_macro_text_keep(c->p);

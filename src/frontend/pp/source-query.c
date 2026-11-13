@@ -24,18 +24,16 @@ void pp_macro_text_keep(pp *p) { p->keep_macro_text = true; }
 /* pp_token_spelling_find (pp.h): the file whose text holds the token's bytes, by pointer */
 int pp_token_spelling_find(const pp *p, const ptok *t, const lex_file **file, uint32_t *offset)
 {
-	static _Thread_local uint32_t last;
 	const pp_file_entry *e;
 	const lex_file *f = NULL;
 
 	if (t->flags & LEX_TOKEN_FLAG_SPLICED)
 		return PP_SPELLING_DIRTY;
-	for (uint32_t k = 0; k < p->nfe && !f; k++) {
-		uint32_t i = (last + k) % p->nfe;
+	for (uint32_t i = p->nfe; i-- > 0 && !f;) {	/* (the newest file first: uses cluster) */
 		const lex_file *g = p->fe[i].f;
 
 		if (g && t->s >= g->src && t->s < g->src + g->size)
-			f = g, last = i;
+			f = g;
 	}
 	if (!f)
 		return PP_SPELLING_NONE;
