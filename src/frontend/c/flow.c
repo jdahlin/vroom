@@ -280,7 +280,7 @@ static bool fl_stmt(flw *f, uint32_t n, bool in)
 		f->sw_const = cc_eval(c, x->a, &cv) && cv.kind == CV_INT;
 		f->sw_val = f->sw_const ? cv.i : 0;
 		f->sw_hit = f->sw_const && fl_case_match(f, x->b, f->sw_val);
-		def = fl_has_default(f, x->b);
+		def = fl_has_default(f, x->b) || enum_covered(c, x);	/* (clang: no edge past it) */
 		out = fl_stmt(f, x->b, false);
 		def = f->sw_const ? (f->sw_hit || def) : def;
 		out = out || f->brk || (in && !def);

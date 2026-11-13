@@ -63,6 +63,7 @@
 #define NONE 0xffffffffu
 
 static bool x86_ld;		/* the inputs are x86-64 (arch/x64/ld/x64.inc) */
+static _Atomic uint16_t ld_machine;	/* e_machine of the first object loaded (parse_obj) */
 static uint64_t tls_start;	/* x86: the PT_TLS start (dtpoff) */
 
 #include "ldelf.h"
@@ -1867,8 +1868,17 @@ static void add_archive(const char *path, const uint8_t *b, size_t n)
 }
 
 /* the bytes of a relocation's field (0: none, 4: an instruction) */
-static uint32_t rel_width(uint32_t type)
+static uint32_t rel_width(uint32_t type, uint16_t machine)
 {
+	if (machine == 62)	/* x86-64: the fields x64.inc writes */
+		switch (type) {
+		case R_X86_64_NONE: return 0;
+		case R_X86_64_64: case R_X86_64_PC64: case R_X86_64_TPOFF64: case R_X86_64_DTPOFF64:
+		case R_X86_64_SIZE64: return 8;
+		case R_X86_64_16: case R_X86_64_PC16: return 2;
+		case R_X86_64_8: case R_X86_64_PC8: return 1;
+		default: return 4;
+		}
 	switch (type) {
 	case R_AARCH64_NONE: return 0;
 	case R_AARCH64_ABS64: case R_AARCH64_PREL64: return 8;
@@ -1978,7 +1988,7 @@ static bool obj_valid(Obj *o, const Ehdr *eh)
 		for (uint64_t k = 0; k < h->sh_size / sizeof(Rela); k++) {
 			if ((r[k].r_info >> 32) >= nsym && (r[k].r_info >> 32))
 				BAD("%s: invalid symbol index in relocation section %u", o->path, s);
-			uint32_t w = rel_width((uint32_t)r[k].r_info);
+			uint32_t w = rel_width((uint32_t)r[k].r_info, eh->e_machine);
 
 			if (t->sh_type != SHT_NOBITS && (r[k].r_offset > t->sh_size || t->sh_size - r[k].r_offset < w))
 				BAD("%s: relocation at 0x%llx is past the end of section %u", o->path,
@@ -2018,8 +2028,16 @@ static void parse_obj(void *arg, size_t i)
 		o->buf = NULL;
 		return;
 	}
+	uint16_t m0 = 0;
+
+	if (!atomic_compare_exchange_strong(&ld_machine, &m0, eh->e_machine) && m0 != eh->e_machine) {
+		error("%s is incompatible with the other inputs (%s, not %s)", o->path,
+		      eh->e_machine == 62 ? "x86-64" : "AArch64", m0 == 62 ? "x86-64" : "AArch64");
+		o->buf = NULL;
+		return;
+	}
 	if (eh->e_machine == 62)
-		x86_ld = true;	/* (one machine for all inputs: checked once loaded) */
+		x86_ld = true;	/* (one machine for all inputs: checked above) */
 	if (!obj_valid(o, eh)) {
 		o->buf = NULL;
 		return;
@@ -5544,7 +5562,8 @@ static void collect_stubs(void)
 		}
 	}
 	for_assigns(mark_target);	/* idempotent */
-	qsort(names.v, names.n, sizeof(char *), cmp_str);
+	if (names.n)	/* (no stubs: names.v is NULL, and qsort's base is nonnull) */
+		qsort(names.v, names.n, sizeof(char *), cmp_str);
 	stub_names = names.v;
 	nstubs = names.n;
 	for (uint32_t i = 0; i < nstubs; i++)
@@ -6551,6 +6570,8 @@ static void reset_state(void)
 	memset(&stop_syms, 0, sizeof stop_syms);
 	ehhdr_isec = NONE;	/* set only while NONE */
 	has_tls = headers_loaded = false;
+	x86_ld = false;
+	atomic_store(&ld_machine, 0);
 	tls_tp = tbss_off = 0;
 	stub_names = NULL;
 	nstubs = 0;

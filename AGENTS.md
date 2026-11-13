@@ -22,6 +22,8 @@ relative to it); `TODO.md` stays at the top.
   (x86-64 Linux as a target): plans
   and per-step status.  Update the
   status section of a step when it changes.
+- `PLAN-quality.md`: the code quality work before C++ (duplication, one
+  scheduler, one pass per file, names): method, stages P0-P4, baseline.
 - `PLAN-tree.md`: reorganising the source tree PostgreSQL-style (`src/`,
   `src/include/`, `frontend/`, `bin/`, ...) before a C++ front end.
 - `PLAN-release.md`: what vcc 1.0 is and its release gates G0-G9;
@@ -265,6 +267,7 @@ src/tools/gen-walkprefix.py [--check]   # codegen/walk/prefix.h: the walker's fu
 build/src/viralloc --sweep F.vir     # VIR register allocation (vir/alloc.c) on a synthetic target: dump + counters, checker at every register count
 bench/vir-alloc.py [--bless]        # src/test/vir-alloc: expected dumps and sweeps (<1 s); `random -n N`: generated functions (~1 s/unit)
 bench/vir-alloc.py mutate|time      # the checker catches corrupted allocations; ns per VIR instruction (budget 200 for now, target 60: SPEC 22.1)
+bench/record-passes.py -j 3 [-n 200]  # arm64 record clean-ups: records each pass changes, default path vs VCC_VIR=bl (VCC_REC_STATS=1); suites, kernel sample, SQLite (~1 min)
 bench/vcc-bflayout.py               # generated bit-field records, layouts checked by clang, Linux + Apple (~1 s)
 bench/vcc-ldconst.py                # generated long double literals and folds, bits vs clang (~2 s)
 bench/vcc-f80.sh [N]                # x87 long double folding (include/common/f128.h) vs this x86-64 host's FPU (~3 s)
@@ -274,6 +277,8 @@ VCC_DIAG_DEDUP=1 make ...           # under vccd: a header warning another TU of
 bench/vccd-kbuild.sh work/build-X -j 6   # cold kernel build, vccd only (no clang/vroomd/lld; ~10 s)
 python3 bench/boot-test.py --kernel work/build-X/arch/arm64/boot/Image --timeout 60   # boots Debian
 bench/vbench.py gate                # performance gate: instructions vs the merge-base, budget 1 % (~1 min)
+bench/quality.py [--clones N]       # source quality numbers: duplication, private copies of lib/, threads, state, module includes (PLAN-quality.md, 3 s)
+bench/quality.py --check            # ... none above bench/quality-baseline.json (--bless rewrites it)
 bench/vcc-wasm.py -j 6              # [needs VCC_WASM=1; not maintained] the C suites for wasm64: vcc -S, clang -c, emcc, node vs clang's build (~2 min)
 bench/vcc-x86.py -j 6               # the C suites for x86-64 on an x86-64 host: vcc -S, clang -c, glibc, native (~10 s; first run ~10 min for the references)
 bench/vcc-wasm.py -j 6 --objcmp     # [VCC_WASM=1] ... and vpp -c's object byte-identical to clang's for the same .s

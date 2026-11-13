@@ -10,6 +10,9 @@ including explicit x86-64 targets). What a case expects:
   error  invalid or unreasonable input: exit 1..127 and a diagnostic
          ("error" on stderr, and the case's regex if it has one)
   any    either of the two, as long as nothing crashes
+  batch  several files in one `vpp --batch -j 4` (under --vccd: concurrent
+         clients); some are invalid: exit 1 and nothing crashes
+  batch-ok  the same, all valid: exit 0 (a worker thread compiles what vpp does)
 A signal (SIGSEGV from a stack overflow, SIGABRT from an abort()), a
 timeout, or an exit status other than these is a failure.
 
@@ -125,6 +128,21 @@ def cases(d):
          ''.join(f' int v{i}=a+{i};\n' for i in range(66000)) + ' while(g(a)){\n' +
          ''.join(f' v{i}+=a;\n' for i in range(66000)) + ' }\n long r=0;\n' +
          ''.join(f' r+=v{i};\n' for i in range(66000)) + ' return r; }\n'}, 'a.c', ['-O2'], env=VIR)
+    # the decl cache (driver/ccsnap.c): TUs restore the snapshot of a shared header prefix on
+    # other threads; a parse error after the restore jumps to this TU's recovery point
+    hdr = ''.join(f'struct s{i} {{ int a; long b; }};\nint f{i}(struct s{i} *p);\n' for i in range(400))
+    files = {'h.h': hdr}
+    files.update({f'g{i}.c': f'#include "h.h"\nint g{i}(void) {{ return f{i}(0); }}\n' for i in range(12)})
+    files.update({f'b{i}.c': '#include "h.h"\nint x = ;\n' for i in range(6)})
+    case('decl-cache-error-after-restore', 'batch', files, [f for f in files if f.endswith('.c')])
+    # batch workers have the main thread's stack: deep nesting and long flat sequences
+    # compile in a batch as alone (a 512 KB thread stack failed at ~2 300 parentheses).
+    # 5 000, not more: the sanitizer builds' frames are larger (ASan on Linux and vccd's
+    # 2 MB TSan workers end 50 000 with "nested too deeply")
+    flat = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src', 'test', 'vcc',
+                             'flat_declarators_labels.c')).read()
+    case('batch-stack', 'batch-ok', {'p.c': 'int x = ' + nest('(', ')', 5000, '1') + ';\n', 'f.c': flat},
+         ['p.c', 'f.c'])
     # control: a normal TU
     case('normal', 'ok', {'a.c': 'int f(int a) { return a * 2 + 1; }\n'}, 'a.c')
     return C
@@ -160,7 +178,26 @@ class Vccd:
         if self.p and self.alive():
             self.p.send_signal(signal.SIGTERM); self.p.wait()
 
+def run_batch(c, d, vccd):
+    t0 = time.time()
+    if vccd:
+        env = dict(os.environ, VCC_SOCK=vccd.sock)
+        ps = [subprocess.Popen([f'{vd.BIN}/vcc'] + TARGET + ['-fsyntax-only', '-S', '-o', m + '.s', m], cwd=d, env=env,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.PIPE) for m in c['main']]
+        errs = [p.communicate(timeout=TIMEOUT)[1].decode(errors='replace') for p in ps]
+        rcs = [p.returncode for p in ps]
+        bad = [r for r in rcs if r < 0 or r >= 128]
+        return (bad[0] if bad else max(rcs)), time.time() - t0, ''.join(errs)
+    open(f'{d}/jobs', 'w').write(''.join('\x1f'.join(['none.i'] + TARGET + ['-fsyntax-only', m]) + '\n' for m in c['main']))
+    try:
+        p = subprocess.run([vd.VPP, '--batch', 'jobs', '-j', '4'], cwd=d, capture_output=True, timeout=TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return 'timeout', time.time() - t0, ''
+    return p.returncode, time.time() - t0, p.stderr.decode(errors='replace') + p.stdout.decode(errors='replace')
+
 def run(c, d, vccd):
+    if c['expect'] in ('batch', 'batch-ok'):
+        return run_batch(c, d, vccd)
     out = f'{d}/out.o'
     # -S also routes front-end-only jobs through vccd's compile path, and
     # permits x86-64 checks without its unsupported direct-object mode.
@@ -182,6 +219,10 @@ def verdict(c, rc, err, server_ok):
     if rc == 'timeout': return False, f'timeout after {TIMEOUT} s'
     if not server_ok: return False, f'vccd died (client rc {rc})'
     if crashed(rc, err): return False, f'crash: rc {rc}' + (' (sanitizer report)' if 'Sanitizer' in err else '')
+    if c['expect'] == 'batch':
+        return (rc == 1, 'some jobs failed' if rc == 1 else f'rc {rc}, want 1')
+    if c['expect'] == 'batch-ok':
+        return (rc == 0, 'all jobs ok' if rc == 0 else f'rc {rc}, want 0')
     if c['expect'] == 'ok':
         return (rc == 0, 'ok' if rc == 0 else f'rejected valid input: rc {rc}: {first(err)}')
     has_diag = 'error' in err

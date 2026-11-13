@@ -354,6 +354,13 @@ def garbage_requests():
             dict(header=hdr(MAGIC, len(argv), 0, len(good) + 100), payload=good, close_early=True),
             dict(header=hdr(MAGIC, len(argv), 0, len(good)), payload=good.replace(b'\0', b'x')),
             dict(header=b'\x72\x6f', payload=b'', close_early=True),
+            # 1 + argc + envc wraps to 1 in 32 bits: only the cwd
+            dict(header=hdr(MAGIC, 0xffffffff, 1, len(d) + 1), payload=d.encode() + b'\0'),
+            dict(header=hdr(MAGIC, 0xffffffff, 2, len(good)), payload=good),
+            # the payload's last string without its NUL
+            dict(header=hdr(MAGIC, len(argv), 0, len(good) - 1), payload=good[:-1]),
+            # pad not zero
+            dict(header=struct.pack('<IIIIQII', MAGIC, len(argv), 0, len(good), 0, 0, 1), payload=good),
         ]
         for i, b in enumerate(bad):
             try:
@@ -618,6 +625,31 @@ def links_in_process_independent():
                 check(v.alive(), f'vccd died in link {a} (round {rnd})')
                 check(r.returncode == 0, f'link {a} (round {rnd}): {r.stderr[-300:]}')
                 check(open(f'{d}/out{i}', 'rb').read() == ref[i], f'link {a} (round {rnd}) differs from vlink\'s')
+    finally: v.stop()
+
+@test()
+def link_machine_reset():
+    """an x86-64 link leaves nothing behind: the next arm64 link in the same vccd is vlink's"""
+    v = Vccd(workers=1)
+    try:
+        d = f'{v.dir}/w'
+        tu(d, 'm.c', 'int f(void) { return 1; }\nint _start(void) { return f(); }\n')
+        for o, t in (('a.o', 'aarch64'), ('x.o', 'x86_64')):
+            r = subprocess.run([vd.VPP, f'--target={t}-linux-gnu', '-nostdinc', '-ffreestanding', '-c', '-o', o, 'm.c'],
+                               cwd=d, capture_output=True, text=True, timeout=30)
+            check(r.returncode == 0, f'compile {t}: {r.stderr[-300:]}')
+        for o in ('a.o', 'x.o'):
+            r = subprocess.run([f'{vd.BIN}/vlink', '--vroom-stubs', '-o', f'ref-{o}', o], cwd=d, capture_output=True,
+                               text=True, timeout=30)
+            check(r.returncode == 0, f'vlink {o}: {r.stderr[-300:]}')
+        for o in ('a.o', 'x.o', 'a.o'):
+            r = subprocess.run([f'{vd.BIN}/vld', '-o', f'out-{o}', o], cwd=d, capture_output=True, text=True,
+                               env=dict(os.environ, VCC_SOCK=v.sock), timeout=30)
+            check(r.returncode == 0, f'link {o}: {r.stderr[-300:]}')
+            check(obj(d, f'out-{o}') == obj(d, f'ref-{o}'), f'link {o} differs from vlink\'s')
+        r = subprocess.run([f'{vd.BIN}/vld', '-o', 'mix', 'a.o', 'x.o'], cwd=d, capture_output=True, text=True,
+                           env=dict(os.environ, VCC_SOCK=v.sock), timeout=30)
+        check(r.returncode != 0 and 'incompatible' in r.stderr, f'mixed machines: rc {r.returncode} {r.stderr[-300:]}')
     finally: v.stop()
 
 def main():
