@@ -62,7 +62,16 @@ make ──► vcc (shim, ~100 µs) ──unix socket + SCM_RIGHTS──► vccd
 
 | Path | What |
 |---|---|
-| [src/](src/) | the toolchain: `frontend/lex/`, `frontend/pp/`, `frontend/c/` (parser + sema), `codegen/`, `vir/`, `as/`, `obj/`, `ld/`, `driver/`, `vccd/`, `lib/` |
+| [src/](src/) | the toolchain, laid out after PostgreSQL's tree ([doc/PLAN-tree.md](doc/PLAN-tree.md)) |
+| `src/frontend/` | the language side: `lex/`, `pp/`, `diag/`, `c/` (parser + sema) |
+| `src/codegen/`, `src/vir/` | code generation from the AST, and VIR, the SSA IR of `-O2` |
+| `src/as/`, `src/obj/`, `src/ld/` | assembler, in-memory object, linker |
+| `src/driver/`, `src/server/`, `src/utils/` | compile jobs, the `vccd` server, the kbuild helpers it runs (`ar`, `sh`, fixdep) |
+| `src/bin/<prog>/` | each program's `main`: `vcc` (shim), `vpp`, `vasm`, `lextest`, `virtest`, `viralloc` |
+| `src/include/` | the headers modules share, at their module's path (`common/arena.h`, `frontend/pp/pp.h`) |
+| `src/common/`, `src/port/` | shared data structures; host-specific code |
+| `src/headers/` | vcc's own `<arm_neon.h>`, `<stdatomic.h>`, ... |
+| `src/tools/` | generators of checked-in source (`gen-*`) |
 | `src/arch/<cpu>/` | per-CPU code: `a64`, `x64`, `wasm` |
 | `src/platform/<os>/` | per-OS object formats: `linux` (ELF), `darwin` (Mach-O), `wasm` |
 | [src/test/](src/test/) | test suites (own, plus vendored gcc c-torture, tcc tests2 and others) |

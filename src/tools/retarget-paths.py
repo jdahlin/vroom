@@ -3,10 +3,12 @@
 
   src/tools/retarget-paths.py move STEP     git mv the step's files, then rewrite
                                             #include lines and path references
-  src/tools/retarget-paths.py text [FILE..] rewrite path references (all steps,
-                                            in order) in FILEs, default every
-                                            tracked text file: for a branch
-                                            started before the reorganisation
+  src/tools/retarget-paths.py text FILE...  rewrite path references (all steps,
+                                            in order) in FILEs written before
+                                            the reorganisation: a branch's own
+                                            files.  Not on files already in the
+                                            new layout: a short name such as
+                                            `lex/` would be rewritten again
 
 Each step is a list of (old, new) repository paths; a path ending in / is a
 directory prefix.  `move` resolves every quoted #include of a C/C++ file against
@@ -238,9 +240,8 @@ def move(step):
 def main(av):
     if len(av) >= 2 and av[0] == 'move':
         move(av[1])
-    elif av and av[0] == 'text':
-        files = av[1:] or tracked()
-        for f in rewrite_text(files, list(STEPS)):
+    elif len(av) >= 2 and av[0] == 'text':
+        for f in rewrite_text(av[1:], list(STEPS)):
             print(f)
     else:
         sys.exit(__doc__)

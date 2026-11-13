@@ -47,64 +47,91 @@ relative to it); `TODO.md` stays at the top.
 - `RESEARCH-regalloc.md`: register allocation (GCC, LLVM, SSA-based, linear
   scan and its descendants, optimal and learned methods) and the allocator
   `SPEC-vir.md` section 15 specifies for VIR, with its fallback.
-- `src/`: the toolchain; `src/Makefile` builds into `build/src/`.  Under `src/`
-  generic code is in the component directories, code for one target CPU in
-  `arch/<cpu>/<component>/`, code for one target OS in `platform/<os>/`
-  (target, not host: host SIMD and host-OS `#ifdef`s stay with their code).
-  - `lib/`: shared data structures and helpers, header-only unless noted:
-    reservations, regions and arenas (`arena.h`), byte buffers (`buf.h`),
-    the emitter's text buffer (`tbuf.h`), growable arrays (`vec.h`), string
-    hashes (`hash.h`; XXH3/BLAKE3 in `ldhash.c`), file mapping (`mapfile.h`),
-    interning (`intern.c`), binary128 (`f128.h`), thread counters
-    (`vperf.h`), scoped resources through `cleanup` (`defer.h`: VAUTOFREE,
-    VAUTOCLOSE, VLOCK; not across a longjmp), attributes for our own
-    declarations (`attr.h`: VUSE, VNONNULL) and overflow-checked bounds for
-    sizes read from input files (`ckd.h`: vckd_range, vckd_add, vckd_mul).
-    Variants not yet merged are listed in TODO.md.
-  - `frontend/lex/`: SIMD lexer and token cache; `lextest.c` drives it.
-  - `frontend/pp/`: preprocessor (pull model, clang-exact expansion), its generated
-    tables (`ppdata*.inc` via `gen-ppdata.sh`) and the include-directory cache.
-  - `frontend/c/`: parser + sema (GNU C11, clang's layout and constant rules).
+- `src/`: the toolchain; `src/Makefile` builds into `build/src/`.  The tree
+  follows PostgreSQL's (`PLAN-tree.md`): generic code in the component
+  directories, code for one target CPU in `arch/<cpu>/<component>/`, code for
+  one target OS in `platform/<os>/` (target, not host: host-specific code is
+  in `port/`, host SIMD `#ifdef`s stay with their code).
+  - `include/`: the headers another module includes, at the path of the
+    module (`include/common/arena.h`, `include/frontend/pp/pp.h`,
+    `include/arch/a64/a64.h`, `include/protocol.h`); code in `src/` includes
+    them by that name with `-Isrc/include`.  A header only its own module uses
+    stays next to its files, and a module's files include each other by
+    relative path.
+  - `common/`: shared data structures and helpers, header-only unless noted
+    (headers in `include/common/`): reservations, regions and arenas
+    (`arena.h`), byte buffers (`buf.h`), the emitter's text buffer (`tbuf.h`),
+    growable arrays (`vec.h`), string hashes (`hash.h`; XXH3/BLAKE3 in
+    `ldhash.c`), interning (`intern.c`), binary128 (`f128.h`), scoped
+    resources through `cleanup` (`defer.h`: VAUTOFREE, VAUTOCLOSE, VLOCK; not
+    across a longjmp), attributes for our own declarations (`attr.h`: VUSE,
+    VNONNULL) and overflow-checked bounds for sizes read from input files
+    (`ckd.h`: vckd_range, vckd_add, vckd_mul).  Variants not yet merged are
+    listed in TODO.md.
+  - `port/`: what depends on the host (headers in `include/port/`): file
+    mapping (`mapfile.h`), thread counters (`vperf.h`), the stack guard
+    (`vstack.h`), CRC32C (`hostcrc.h`), `-march=native` on x86 (`x86native.h`),
+    Apple PMU counters (`darwin/pmc.c`), and the wasm build's `wasm/mman.c`
+    (the big reservations as small sbrk stretches) and `wasm/compat/` (ACLE CRC
+    through SIMDe).
+  - `headers/`: vcc's own `<arm_neon.h>`, `<arm_acle.h>`, `<arm_sve.h>`,
+    `<stdatomic.h>`, the compiled program's resource headers (`VCC_INCDIR`).
+  - `frontend/`: the language side, from bytes to a typed AST.
+    - `lex/`: SIMD lexer and token cache (`bin/lextest/` drives it).
+    - `pp/`: preprocessor (pull model, clang-exact expansion), its generated
+      tables (`ppdata*.inc` via `tools/gen-ppdata.sh`) and the
+      include-directory cache.
+    - `diag/`: the diagnostics engine (records, text styles, JSON, SARIF,
+      HTML; ids in `diagids.inc`).  Compiled in the pp module for now: it
+      uses `ppimpl.h`.
+    - `c/`: parser + sema (GNU C11, clang's layout and constant rules).  C++
+      and Objective-C go next to it.
   - `codegen/`: code generator (straight from the AST): the shared part, state
     and types (`emitimpl.h`), the work queue and threads (`tu.c`), data
     objects, the prepass; the arm64 part is `arch/a64/codegen/`.
   - `as/`: GNU as syntax (`as.c`: statements, directives, macros,
     conditionals, expressions; internal header `asimpl.h`; one module with
-    `arch/<cpu>/as/parse.c`, `as_SRC`) and the standalone `vasm` driver.
+    `arch/<cpu>/as/parse.c`, `as_SRC`).
   - `obj/`: the in-memory object (`obj.h`: sections, frags, symbols, fixups)
     and its layout; with `arch/<cpu>/obj/fixup.c` and `platform/linux/elf.c`
     one module (`obj_SRC`, internal header `objimpl.h`).
   - `vir/`: VIR, the SSA IR of `-O2` (SPEC-vir.md; one module `vir_SRC`, a unity
-    TU like `as`, linked into no compiler tool yet): `vir.h` the public format
+    TU like `as`): `vir.h` the public format
     (instruction, block, slot, function, the opcode table `table.c` that the
     printer, parser and verifier all read), `vir.c` the thread's reservations
     and construction (hash-consed constants, `extra` lists), `vir_cfg`,
     `vir_dom`, `vir_uses`, `vir_canon`, and the unit tables of the text form;
     `print.c`, `parse.c` (arbitrary bytes fail as `file:line:col`, never crash)
     and `verify.c` (every rule of SPEC section 12); `virimpl.h` is internal.
-    Depends on nothing in `frontend/c/`, `codegen/` or `arch/`.  `virtest.c` is the tool
+    Depends on nothing in `frontend/`, `codegen/` or `arch/`.
+    `bin/virtest/` is the tool
     (`virtest FILE`; `--no-verify`, `--bless`, `--selftest` for the builder API).
-    The interpreter, `virgen` and the fuzz target (the rest of step V1) are not
-    written yet.  Tests: `test/vir/` (`bad/RULE-name.vir`, `canon/`, `dom/`).
-  - `ld/`: the linker `vlink` (`ld.c`, one TU; also linked into vccd, which
-    calls `ld_main` per link) and `vobjcopy`/`vnm`;
+    Tests: `test/vir/` (`bad/RULE-name.vir`, `canon/`, `dom/`).
+  - `ld/`: the linker `vlink` (`ld.c`, one TU with its main; also linked into
+    vccd, which calls `ld_main` per link) and `vobjcopy`/`vnm`;
     `wasmld.c` is vlink for WebAssembly (as `wasm-ld` or with `-mwasm64`).
   - `driver/`: one compile job from a clang command line (`ppdriver.c`), the
-    declaration cache (`ccsnap.c`) and `vpp`, the driver for parity tests.
-  - `vccd/`: the server, the `vcc`/`vas`/`vld`/`var`/`vsh` shim (`shim.c`),
-    the capability table (`caps.c`), and what runs inside vccd: kbuild's
-    fixdep, the archiver (`ar.c`: thin archives, llvm-ar-identical, so the
-    build uses no llvm-ar) and `rsh.c`, kbuild's recipe subset of sh, run for
-    `vsh` (`build/src/vsh/sh`, shim.c with `-DVSH`), make's SHELL in
+    declaration cache (`ccsnap.c`), `--explain` pages (`explain.inc`).
+  - `server/`: vccd (`vccd.c`, with its main), the diagnostics store
+    (`dstore.c`), the capability table (`caps.c`) and the warning groups
+    (`warnings.inc`).  Without `--backend-sock` vccd runs the whole kernel
+    build itself: probes, `-E`/`-c`/`-S` (stdin too), links (vld in-process;
+    `--ld PROG` spawns one), nm/objcopy behind the `vcc-nm`/`vcc-objcopy`
+    shims, and the host programs (vcc + `ldmacho.c`, macOS only); nothing
+    falls back to clang.
+  - `utils/`: what runs inside vccd for kbuild: fixdep, the archiver (`ar.c`:
+    thin archives, llvm-ar-identical, so the build uses no llvm-ar) and
+    `rsh.c`, kbuild's recipe subset of sh, run for `vsh`
+    (`build/src/vsh/sh`, the shim with `-DVSH`), make's SHELL in
     `bench/vccd-kbuild.sh`; anything outside the subset goes to `$VSH_REAL`.
-    Without `--backend-sock` vccd runs the whole kernel build itself: probes,
-    `-E`/`-c`/`-S` (stdin too), links (vld in-process; `--ld PROG` spawns
-    one), nm/objcopy behind the `vcc-nm`/`vcc-objcopy` shims, and the host
-    programs (vcc + `ldmacho.c`, macOS only); nothing falls back to clang.
+  - `bin/<prog>/`: one directory per program's main: `vcc/shim.c` (the
+    `vcc`/`vas`/`vld`/`var`/`vsh` shim), `vpp/` (the driver for parity
+    tests), `vasm/`, `lextest/` (with `lexdiff.py`, `lexpmc.sh`), `virtest/`,
+    `viralloc/`.
   - `arch/a64/`: arm64: instructions in GNU as syntax (`as/parse.c`:
     registers, `.req`, operands, literal pools), the encoder (`as/enc.c`,
-    `a64.h`), system registers,
-    relocation types (`reloc.h`), fixups (`obj/fixup.c`: in place or a
+    `include/arch/a64/a64.h`), system registers (`a64sysreg.inc`),
+    relocation types (`include/arch/a64/reloc.h`), fixups (`obj/fixup.c`: in place or a
     relocation, as LLVM MC), the linker's relocation scan, relocation
     application and range-extension thunks (`ld/*.inc`, #included by
     `ld/ld.c` where they were: the linker is not a split module yet);
@@ -125,34 +152,41 @@ relative to it); `TODO.md` stays at the top.
   - `arch/x64/as/`: the x86-64 assembler, AT&T syntax with MC's encodings:
     operands, the encoder (REX and VEX) and the dispatcher in `asm.c`
     (shared header `x64as.h`), one file per instruction family (`sys.c`,
-    `gpr.c`, `x87.c`, `sse.c`, `avx.c`); `vas-obj.py` checks `x86-*.s`.
+    `gpr.c`, `x87.c`, `sse.c`, `avx.c`); `vas-obj.py` checks `x86-*.s`.  The
+    x86-64 target's feature table is `include/arch/x64/x86features.h`.
   - `arch/wasm/codegen/`: the WebAssembly (wasm64) code generator, AST to
     LLVM's wasm `.s` (`wimpl.h`; `wasm.c` functions, ABI, header; `wexpr.c`,
     `wcall.c`, `wstmt.c`), also in the `codegen` unity TU: every name starts
     with `w`.  `codegen/` picks it per target (`WASM(c)`); PLAN-wasm.md.
   - `arch/wasm/as/`: the wasm assembler (`as.c`, model in `was.h`, interface
-    `wasmas.h`): LLVM's wasm `.s` to a relocatable object; `-c` for wasm64
-    and `vasm --target=wasm64-...` go through it.
+    `include/arch/wasm/as/wasmas.h`): LLVM's wasm `.s` to a relocatable
+    object; `-c` for wasm64 and `vasm --target=wasm64-...` go through it.
   - `platform/linux/`: the ELF writer (`elf.c`: relocations, string table,
     file layout as LLVM MC).
   - `platform/darwin/`: the Mach-O writer; vld's Mach-O executables
     (`ldmacho.c`: libSystem only, chained fixups, ad-hoc signature, chosen
-    when the first input is Mach-O; the kernel's host programs); Apple PMU
-    counters (`pmc.c`).
+    when the first input is Mach-O; the kernel's host programs).
   - `platform/wasm/`: the wasm object writer (`wasm.c`: layout, symbol table,
     relocations as LLVM's WasmObjectWriter, byte for byte).
-  - `frontend/pp/`, `frontend/c/` and `codegen/` (with `arch/<cpu>/emit/`) are directories of
+  - `frontend/pp/`, `frontend/c/` and `codegen/` (with `arch/<cpu>/codegen/`) are directories of
     files by topic, one internal header each (`ppimpl.h`, `ccimpl.h`, `emitimpl.h`) with the types, macros
     and prototypes the files share; a shared function is `VPRIV` (static in
     the unity build).  Each such module is compiled as one TU by default
     (`obj/unity/MOD.c` #includes the files in `MOD_SRC`, SQLite style); `make
     VCC_UNITY=` compiles file by file, and every file must compile alone.
+  - `test/`: the test inputs (`test/vcc/` our regression tests, `diag/`,
+    `vir/`, `abi/`, `vas/`, the vendored `gcc-torture/`, `tcc-tests2/`,
+    `c90/`, ...; the runtime in `rt/`) and `test/fuzz/` (see Fuzzing).
+  - `tools/`: every script that regenerates checked-in source (`gen-*`), and
+    `retarget-paths.py`: the moves of PLAN-tree.md as data, `text` to
+    retarget a branch started before them.
 - `contrib/phase1/`: the clang-based phase 1 tools (`vroomd`, `vroom-cc`, PCH
-    prefix) and `vroom-ld`, the ld.lld wrapper the -O0 kernel build links with.
+  prefix) and `vroom-ld`, the ld.lld wrapper the -O0 kernel build links with.
 - `contrib/wasm/`: vcc (vpp) as WebAssembly for a compiler-explorer page
-  (`build.sh`, emscripten memory64 -> `build/wasm/site/`); `mman.c` turns the
-  big reservations into small sbrk stretches, `compat/` maps ACLE CRC to SIMDe.
-- `bench/`: harnesses.  `bench/vcc-diff.py` compares `vpp` with `clang -E`;
+  (`build.sh`, emscripten memory64 -> `build/wasm/site/`; the host glue is in
+  `src/port/wasm/`).
+- `bench/`: harnesses, correctness and speed (they import each other;
+  PLAN-tree.md T6).  `bench/vcc-diff.py` compares `vpp` with `clang -E`;
   `bench/vcc-sema.py` runs the front end and has clang verify its claims;
   `bench/vccd-cc.py` drives a private vccd with `-c` jobs.
 - `work/` (git-ignored, case-sensitive sparsebundle): kernel source in
