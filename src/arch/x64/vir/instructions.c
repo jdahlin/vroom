@@ -229,6 +229,11 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v, const 
 	}
 	case VIR_OP_ALOAD: case VIR_OP_LOAD: case VIR_OP_STORE: {
 		codegen_lvalue at = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = a };
+		const vir_insn *addr = &L->function->insns[i->a];
+		if (i->op == VIR_OP_STORE && addr->op == VIR_OP_SLOTADDR) {
+			at.kind = CODEGEN_LVALUE_FRAME;
+			at.offset = L->slot[addr->a] + x64_vir_constant_bits(addr);
+		}
 		bool folded=L->memory_value==i->a;
 		if(folded) {at.register_number=L->memory_base;at.offset=L->memory_offset;L->memory_value=0;}
 		bool load = i->op != VIR_OP_STORE;

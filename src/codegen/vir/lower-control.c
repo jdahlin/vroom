@@ -60,7 +60,16 @@ VPRIV int virbuild_atomic(codegen_context *e, int op, int size, int rp, int rv, 
 	return r;
 }
 
-VPRIV int virbuild_tlsaddr(codegen_context *e, uint32_t ref, int model) { (void)ref, (void)model; virbuild_fail(e, VIRBUILD_FAILURE(thread_local)); }
+VPRIV int virbuild_tlsaddr(codegen_context *e, uint32_t ref, int model)
+{
+	if (!CODEGEN_IS_X64(e->compile_context) || model != 0)
+		virbuild_fail(e, VIRBUILD_FAILURE(thread_local));
+	int r = virbuild_treg(e);
+	uint32_t addr = virbuild_constant_make(e, VIR_OP_SYMADDR, VIR_TYPE_PTR,
+		CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_TLS_LE, CODEGEN_REFERENCE_INDEX(ref)), 0, 0);
+	virbuild_register_write(e, r, addr);
+	return r;
+}
 VPRIV codegen_value virbuild_frame(codegen_context *e, bool ret, uint32_t level) { (void)ret, (void)level; virbuild_fail(e, VIRBUILD_FAILURE(frame_address)); }
 VPRIV codegen_value virbuild_alloca(codegen_context *e, codegen_value n) { (void)n; virbuild_fail(e, VIRBUILD_FAILURE(alloca)); }
 VPRIV int virbuild_spget(codegen_context *e) { virbuild_fail(e, VIRBUILD_FAILURE(stack_pointer)); }

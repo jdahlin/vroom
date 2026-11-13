@@ -44,9 +44,18 @@ VPRIV bool x64_record_object_prepare(codegen_context *e, const record *i, record
 
 static void x64_encode_register(XOp *operand, int r, int size)
 {
-	*operand = (XOp){ .kind = XK_REG, .cls = X64_REGISTER_IS_XMM(r) ? XR_XMM : XR_GPR,
-		.reg = (uint8_t)(X64_REGISTER_IS_XMM(r) ? r - XMM0 : r), .size = (uint8_t)(X64_REGISTER_IS_XMM(r) ? 16 : size),
-		.needrex = !X64_REGISTER_IS_XMM(r) && size == 1 && r >= 4 };
+	memset(operand, 0, sizeof *operand);
+	operand->kind = XK_REG;
+	if (X64_REGISTER_IS_XMM(r)) {
+		operand->cls = XR_XMM;
+		operand->reg = r - XMM0;
+		operand->size = 16;
+	} else {
+		operand->cls = XR_GPR;
+		operand->reg = r;
+		operand->size = size;
+		operand->needrex = size == 1 && r >= 4;
+	}
 }
 
 static XOp x64_encode_immediate(int64_t v)

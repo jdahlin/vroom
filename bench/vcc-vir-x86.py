@@ -111,6 +111,7 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
         ('vir_x86_index.c', {'load8', 'load4', 'load2', 'load1', 'store8', 'store4', 'cast8', 'cast4', 'cast2', 'caststore4', 'castmod', 'cast3', 'sharedcast'}, {}),
         ('vir_vector_stride.c', {'stride', 'intstride', 'wide', 'reverse', 'ordered', 'residue', 'gather', 'carry', 'chain', 'maxval', 'maxindex', 'lastnegative'}, {'stride': 'mulps', 'intstride': 'mulps', 'reverse': 'addpd', 'ordered': 'mulps', 'residue': 'addps', 'gather': 'mulps', 'carry': 'mulps'}),
         ('vir_x86_dispatch.c', {'dense', 'byte_switch', 'signed_range', 'high', 'shigh', 'atom'}, {}),
+        ('vir_x86_tls.c', {'tls_member', 'tls_update'}, {}),
         ('vir_x86_calls.c', {'ints', 'floats', 'caller', 'indirect', 'variadic_caller'}, {}),
         ('vir_x86_vectors.c', {'eq', 'ne', 'lt', 'le', 'gt', 'ge', 'compare', 'mul', 'cvt', 'cvt64', 'negate'},
          {'eq': 'cmpps', 'ne': 'cmpps', 'lt': 'cmpps', 'le': 'cmpps', 'gt': 'cmpps', 'ge': 'cmpps',
