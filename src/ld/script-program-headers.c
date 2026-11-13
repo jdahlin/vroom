@@ -7,7 +7,7 @@ static void ld_script_program_headers_create(struct ld_context *ctx)
 	for (uint32_t i = 0; i < ctx->script.segments.n; i++) {
 		ld_script_segment *h = &ctx->script.segments.v[i];
 		int k = ld_segment_create(ctx, h->type, h->flags ? (uint32_t)ld_expression_value_resolve(ctx, ld_expression_eval(ctx, h->flags)) : 0);
-		ctx->layout.program_header_sections.v[k].hdr = (h->filehdr || h->phdrs) && h->type == PT_LOAD;
+		ctx->layout.program_header_sections.v[k].includes_headers = (h->file_header || h->program_headers) && h->type == PT_LOAD;
 	}
 	const char **cur = NULL;
 	uint32_t ncur = 0;
@@ -15,14 +15,14 @@ static void ld_script_program_headers_create(struct ld_context *ctx)
 	for (uint32_t i = 0; i < ctx->layout.output_sections.n; i++) {
 		uint32_t oi = ctx->layout.output_sections.v[i];
 		ld_output_section *os = &ctx->script.sections.v[oi];
-		os->ptload = -1;
+		os->load_segment = -1;
 		if (!(os->flags & SHF_ALLOC))
 			continue;
-		if (os->va < min)
-			min = os->va;
-		if (os->nphn) {
-			cur = os->phn;
-			ncur = os->nphn;
+		if (os->address < min)
+			min = os->address;
+		if (os->program_header_name_count) {
+			cur = os->program_header_names;
+			ncur = os->program_header_name_count;
 		}
 		if (!ncur)
 			ld_error_report(ctx, "section %s is not assigned to a PHDRS segment", os->name);
@@ -44,5 +44,5 @@ static void ld_script_program_headers_create(struct ld_context *ctx)
 	if (min == UINT64_MAX || min < hs)
 		ld_error_report(ctx, "could not allocate headers");
 	else
-		ctx->layout.file_header_address = (min - hs) & ~(ctx->options.max_page - 1);
+		ctx->layout.file_header_address = (min - hs) & ~(ctx->options.max_page_size - 1);
 }

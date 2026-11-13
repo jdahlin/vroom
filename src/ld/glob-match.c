@@ -50,7 +50,7 @@ static bool ld_glob_match(const char *p, const char *s)
 
 static bool ld_pattern_match(const ld_pattern *p, const char *name)
 {
-	for (uint32_t i = 0; i < p->nglobs; i++)
+	for (uint32_t i = 0; i < p->glob_count; i++)
 		if (ld_glob_match(p->globs[i], name))
 			return true;
 	return false;

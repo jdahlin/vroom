@@ -38,49 +38,49 @@ typedef struct {
 } ld_input_argument;
 
 struct ld_options {
-	const char *out;
+	const char *output_path;
 	const char *script;
 	const char *soname;
 	const char *entry;
-	int orphan;			/* --orphan-handling: 0 place, 1 warn, 2 error */		/* -e/--entry: over the script's ENTRY() */
+	int orphan_handling;			/* --orphan-handling: 0 place, 1 warn, 2 error */		/* -e/--entry: over the script's ENTRY() */
 	const char *comment;		/* .comment linker string */
 	const char *build_id;		/* NULL, "sha1", "md5", "fast" */
 	const char *map;
-	bool relocatable, shared, bsymbolic, notext, no_apply_dyn, no_undefined;
-	bool discard_locals, discard_all, strip_debug, pic_veneer, nmagic;
+	bool relocatable, shared, bsymbolic, notext, no_apply_dynamic_relocations, no_undefined;
+	bool discard_locals, discard_all, strip_debug, pic_veneers, nmagic;
 	bool stubs;			/* define unresolved symbols as -O0 stubs */
 	bool relax;
-	uint64_t max_page;
+	uint64_t max_page_size;
 	VVEC(ld_input_argument) inputs;
-	VVEC(const char *) libdirs;
-	bool bstatic;
-	bool gc, print_gc;		/* --gc-sections, --print-gc-sections */
-	bool norelro;			/* -z norelro: no PT_GNU_RELRO */
-	bool eh_frame_hdr;		/* --eh-frame-hdr: .eh_frame_hdr and PT_GNU_EH_FRAME */
+	VVEC(const char *) library_directories;
+	bool static_libraries_only;
+	bool garbage_collect_sections, print_garbage_collected_sections;		/* --gc-sections, --print-gc-sections */
+	bool no_relro;			/* -z norelro: no PT_GNU_RELRO */
+	bool eh_frame_header;		/* --eh-frame-hdr: .eh_frame_hdr and PT_GNU_EH_FRAME */
 	int directory_fd;		/* relative paths are relative to it (ld_main's dirfd) */
 };
 
 /* ---- the inputs: objects, input sections, merge inputs and merge sets, all addressed by index ---- */
 typedef struct ld_object {
 	const char *path;		/* for diagnostics */
-	const uint8_t *buf;
+	const uint8_t *file_bytes;
 	size_t size;
-	const elf_section_header *sh;
-	uint32_t nsh;
-	const elf_symbol *sym;
-	uint32_t nsym, firstg;
-	const char *str;		/* symbol string table */
-	const char *shstr;
-	uint32_t isec0;			/* ISec id of section 0 */
-	uint32_t *gs;			/* global slot of sym[firstg + i] */
-	_Atomic uint8_t *lgot;		/* local k needs a .got slot (only when there is a .got) */
-	uint32_t *lgotidx;		/* its slot */
-	uint32_t idx;
+	const elf_section_header *section_headers;
+	uint32_t section_header_count;
+	const elf_symbol *symbols;
+	uint32_t symbol_count, first_global_index;
+	const char *string_table;		/* symbol string table */
+	const char *section_name_table;
+	uint32_t first_input_section;			/* ISec id of section 0 */
+	uint32_t *global_slots;			/* global slot of sym[firstg + i] */
+	_Atomic uint8_t *local_needs_got;		/* local k needs a .got slot (only when there is a .got) */
+	uint32_t *local_got_index;		/* its slot */
+	uint32_t index;
 	/* symbol table output */
-	uint32_t nloc, loc0;		/* kept locals, first output index */
-	uint32_t (*kept)[2];		/* kept locals: symbol index, name length */
-	uint64_t locstr;		/* strtab bytes of kept locals */
-	uint64_t str0;
+	uint32_t kept_local_count, first_local_output_index;		/* kept locals, first output index */
+	uint32_t (*kept_locals)[2];		/* kept locals: symbol index, name length */
+	uint64_t local_string_bytes;		/* strtab bytes of kept locals */
+	uint64_t string_offset;
 	bool mapped;
 } ld_object;
 
@@ -92,88 +92,88 @@ enum { LD_SECTION_KIND_NONE, LD_SECTION_KIND_NORMAL, LD_SECTION_KIND_MERGE_INPUT
 typedef struct ld_input_section {
 	const uint8_t *data;
 	const char *name;
-	uint64_t size, flags, off;
-	uint32_t type, align, entsize;
-	uint32_t obj;			/* owning object or LD_NONE */
-	uint32_t shndx;
-	uint32_t osec;			/* output section, LD_NONE, or LD_OUTPUT_SECTION_DISCARD */
-	uint32_t isd;
+	uint64_t size, flags, offset;
+	uint32_t type, alignment, entry_size;
+	uint32_t object;			/* owning object or LD_NONE */
+	uint32_t section_header_index;
+	uint32_t output_section;			/* output section, LD_NONE, or LD_OUTPUT_SECTION_DISCARD */
+	uint32_t input_description;
 	const elf_rela *rela;
-	uint32_t nrela;
-	uint32_t aux;			/* LD_SECTION_KIND_MERGE_INPUT: MergeIn idx; LD_SECTION_KIND_MERGE: Merge idx; LD_SECTION_KIND_THUNK: ThunkSec idx */
-	uint32_t ndyn;			/* R_AARCH64_RELATIVE entries produced */
-	uint32_t dyn0;
+	uint32_t rela_count;
+	uint32_t auxiliary_index;			/* LD_SECTION_KIND_MERGE_INPUT: MergeIn idx; LD_SECTION_KIND_MERGE: Merge idx; LD_SECTION_KIND_THUNK: ThunkSec idx */
+	uint32_t dynamic_relocation_count;			/* R_AARCH64_RELATIVE entries produced */
+	uint32_t first_dynamic_relocation;
 	uint8_t kind;
 	bool thunked;			/* some relocation has a a64_ld_thunk_relocation_record entry */
 	bool dropped;			/* member of a COMDAT group seen before */
-	uint32_t gnext;			/* next member of its section group + 1, 0: none */
-	uint32_t ehcie;			/* .eh_frame FDE piece: its CIE piece + 1 (the CIE pointer is written) */
+	uint32_t next_group_member;			/* next member of its section group + 1, 0: none */
+	uint32_t eh_frame_cie_piece;			/* .eh_frame FDE piece: its CIE piece + 1 (the CIE pointer is written) */
 } ld_input_section;
 
 #define LD_OUTPUT_SECTION_DISCARD 0xfffffffeu
 
 /* SHF_MERGE input split into pieces */
 typedef struct {
-	uint32_t isec;
-	uint32_t syn;			/* merge synthetic ISec id */
-	uint32_t npieces;
-	uint32_t *inoff;		/* piece input offsets */
+	uint32_t input_section;
+	uint32_t synthetic_section;			/* merge synthetic ISec id */
+	uint32_t piece_count;
+	uint32_t *input_offsets;		/* piece input offsets */
 	uint32_t *hash;			/* 31-bit hash */
-	uint32_t *outoff;		/* offset in the synthetic section */
+	uint32_t *output_offsets;		/* offset in the synthetic section */
 } ld_merge_input;
 
 typedef struct {
-	uint32_t isec;			/* the synthetic ISec */
-	uint32_t osec;
+	uint32_t synthetic_section;			/* the synthetic ISec */
+	uint32_t output_section;
 	uint64_t flags;
-	uint32_t entsize, align;
+	uint32_t entry_size, alignment;
 	VVEC(uint32_t) members;		/* MergeIn ids in order */
-	uint64_t shardoff[32], shardsize[32];
+	uint64_t shard_offsets[32], shard_sizes[32];
 	/* piece lists per shard for writing: (mergein, piece) of unique pieces */
-	VVEC(uint64_t) uniq[32];
+	VVEC(uint64_t) unique_pieces[32];
 } ld_merge_section;
 
 /* an archive member or object waiting to be loaded (input-mapping.c) */
-typedef struct { const char *path; const uint8_t *buf; size_t size; } ld_pending_member;
+typedef struct { const char *path; const uint8_t *file_bytes; size_t size; } ld_pending_member;
 typedef VVEC(ld_pending_member) ld_pending_member_vector;
 
 /* the lazy-archive pass (lazy-archive.c) */
 enum { LD_LAZY_SYMBOL_NONE, LD_LAZY_SYMBOL_UNDEFINED, LD_LAZY_SYMBOL_WEAK_REFERENCE, LD_LAZY_SYMBOL_DEFINED, LD_LAZY_SYMBOL_LAZY };
-typedef struct { const char *name; uint32_t len, h; uint8_t st; uint32_t cand; } ld_lazy_symbol;
+typedef struct { const char *name; uint32_t length, hash; uint8_t state; uint32_t candidate; } ld_lazy_symbol;
 struct ld_lazy_symbol_table { ld_lazy_symbol *v; uint32_t mask, n; };
 
 /* ---- symbols (global-symbols.c) ---- */
 typedef struct {
 	uint8_t kind;			/* LD_VALUE_KIND_ABSOLUTE / LD_VALUE_KIND_OUTPUT_SECTION / LD_VALUE_KIND_INPUT_SECTION */
-	uint8_t fabs, type;
-	uint32_t idx;
-	uint64_t val, align;
+	uint8_t force_absolute, type;
+	uint32_t index;
+	uint64_t value, alignment;
 } ld_expression_value;
 enum { LD_VALUE_KIND_ABSOLUTE, LD_VALUE_KIND_OUTPUT_SECTION, LD_VALUE_KIND_INPUT_SECTION };
 
 enum { LD_SYMBOL_STATE_UNDEFINED, LD_SYMBOL_STATE_OBJECT, LD_SYMBOL_STATE_SCRIPT };
 
 typedef struct ld_global_symbol {
-	_Atomic uint64_t def;		/* best definition: rank<<62 | obj<<32 | symidx (rank: 0 strong, 1 common, 2 weak) */
-	_Atomic uint64_t first;		/* first occurrence, for symbol table order */
-	_Atomic uint8_t visrank;	/* min visibility (rank, see ld_visibility_rank()) */
-	uint8_t state, type, bind, vis, hidden_script;
-	uint8_t demoted, provide_live, scriptdef, dup, common;
-	_Atomic uint8_t strongref;	/* some non-weak undefined reference */
-	uint32_t obj;			/* defining object, LD_NONE for script */
-	uint32_t symidx;
-	uint32_t sec;			/* LD_SYMBOL_STATE_OBJECT: ISec id or LD_NONE (absolute) */
-	uint64_t val, size;
-	ld_expression_value ev;				/* LD_SYMBOL_STATE_SCRIPT: section + offset */
+	_Atomic uint64_t definition;		/* best definition: rank<<62 | obj<<32 | symidx (rank: 0 strong, 1 common, 2 weak) */
+	_Atomic uint64_t first_occurrence;		/* first occurrence, for symbol table order */
+	_Atomic uint8_t visibility_rank;	/* min visibility (rank, see ld_visibility_rank()) */
+	uint8_t state, type, binding, visibility, hidden_by_script;
+	uint8_t demoted, provide_is_live, defined_by_script, duplicate, common;
+	_Atomic uint8_t strong_reference;	/* some non-weak undefined reference */
+	uint32_t object;			/* defining object, LD_NONE for script */
+	uint32_t symbol_index;
+	uint32_t input_section;			/* LD_SYMBOL_STATE_OBJECT: ISec id or LD_NONE (absolute) */
+	uint64_t value, size;
+	ld_expression_value expression_value;				/* LD_SYMBOL_STATE_SCRIPT: section + offset */
 	uint32_t order;			/* index among globals in insertion order */
-	uint32_t outidx;		/* index in the output .symtab */
+	uint32_t output_index;		/* index in the output .symtab */
 	uint32_t thunk;
-	uint64_t fva;			/* after layout: ld_global_symbol_address() */
-	bool fabs, fundef;		/* ld_global_symbol_is_absolute(); undefined or demoted */
-	_Atomic uint8_t needgot;	/* some GOT relocation names it */
-	uint32_t gotidx;		/* its .got slot */
-	uint16_t ver;			/* VERSION index: 0 local, 1 global, 2.. named */
-	uint32_t dynidx;		/* index in .dynsym, 0 if not exported */
+	uint64_t final_address;			/* after layout: ld_global_symbol_address() */
+	bool is_absolute, is_undefined;		/* ld_global_symbol_is_absolute(); undefined or demoted */
+	_Atomic uint8_t needs_got;	/* some GOT relocation names it */
+	uint32_t got_index;		/* its .got slot */
+	uint16_t version;			/* VERSION index: 0 local, 1 global, 2.. named */
+	uint32_t dynamic_index;		/* index in .dynsym, 0 if not exported */
 } ld_global_symbol;
 
 /* ---- the parsed linker script: expressions, input section descriptions, output sections, PHDRS, VERSION nodes and symbol assignments ---- */
@@ -184,63 +184,63 @@ enum {
 	LD_EXPRESSION_LOG2CEIL, LD_EXPRESSION_SIZEOF_HEADERS,
 };
 struct ld_expression {
-	uint8_t op;
-	char bop[4];
-	ld_expression *a, *b, *c;
-	uint64_t num;
-	uint32_t sym;			/* LD_EXPRESSION_SYMBOL/LD_EXPRESSION_DEFINED: global slot; LD_EXPRESSION_ADDRESS etc: osec */
-	const char *msg;
+	uint8_t operation;
+	char binary_operator[4];
+	ld_expression *first_operand, *second_operand, *third_operand;
+	uint64_t number;
+	uint32_t symbol;			/* LD_EXPRESSION_SYMBOL/LD_EXPRESSION_DEFINED: global slot; LD_EXPRESSION_ADDRESS etc: osec */
+	const char *message;
 };
 
 typedef struct {
 	const char **globs;		/* section name globs */
-	uint32_t nglobs;
+	uint32_t glob_count;
 	uint8_t sort;			/* LD_SORT_NONE, LD_SORT_NAME, LD_SORT_ALIGNMENT */
 } ld_pattern;
 enum { LD_SORT_NONE, LD_SORT_NAME, LD_SORT_ALIGNMENT };
 
 typedef struct ld_input_section_description {
-	uint32_t osec;
-	ld_pattern *pats;
-	uint32_t npats;
+	uint32_t output_section;
+	ld_pattern *patterns;
+	uint32_t pattern_count;
 	bool keep;
-	VVEC(uint32_t) secs;		/* ISec ids, in final order */
-	uint32_t thunksec;		/* ISec of this ld_input_section_description's thunk section, or LD_NONE */
-	uint64_t thunk_off;		/* pass-0 isecLimit */
+	VVEC(uint32_t) sections;		/* ISec ids, in final order */
+	uint32_t thunk_section;		/* ISec of this ld_input_section_description's thunk section, or LD_NONE */
+	uint64_t thunk_offset;		/* pass-0 isecLimit */
 	struct a64_ld_call *calls;		/* CALL26/JUMP26 relocations, built by thunk pass 0 */
-	uint32_t ncalls;
+	uint32_t call_count;
 } ld_input_section_description;
 
 enum { LD_COMMAND_ASSIGNMENT, LD_COMMAND_OUTPUT_SECTION, LD_COMMAND_INPUT_SECTION_DESCRIPTION };
 typedef struct ld_assignment {
-	uint32_t sym;			/* LD_NONE for '.' */
-	ld_expression *e;
-	char op;			/* '=' or the operator of op= */
+	uint32_t symbol;			/* LD_NONE for '.' */
+	ld_expression *expression;
+	char operator_character;			/* '=' or the operator of op= */
 	bool provide, hidden;
 	bool defined;			/* shouldDefineSym() */
-	bool assert_;
+	bool is_assert;
 } ld_assignment;
 typedef struct ld_command {
 	uint8_t kind;
-	uint32_t idx;			/* LD_COMMAND_OUTPUT_SECTION: osec, LD_COMMAND_INPUT_SECTION_DESCRIPTION: isd */
-	ld_assignment *as;
+	uint32_t index;			/* LD_COMMAND_OUTPUT_SECTION: osec, LD_COMMAND_INPUT_SECTION_DESCRIPTION: isd */
+	ld_assignment *assignment;
 } ld_command;
 
 typedef struct ld_output_section {
 	const char *name;
-	ld_expression *addr, *alignx, *lma, *subalign;
-	VVEC(ld_command) cmds;
-	bool nonalloc, noload, discard, used_in_expr, has_input, live, type_set;
-	bool uses_syms;			/* expressionsUseSymbols */
-	uint32_t type, addralign, entsize;
+	ld_expression *address_expression, *align_expression, *load_address_expression, *subalign_expression;
+	VVEC(ld_command) commands;
+	bool not_allocated, noload, discard, used_in_expression, has_input, live, type_set;
+	bool uses_symbols;			/* expressionsUseSymbols */
+	uint32_t type, address_alignment, entry_size;
 	uint64_t flags;
-	uint64_t va, size, offset;
-	uint32_t shidx, nameoff;
-	int ptload;			/* index into the context's program_headers, -1 */
+	uint64_t address, size, offset;
+	uint32_t section_header_index, name_offset;
+	int load_segment;			/* index into the context's program_headers, -1 */
 	uint32_t link, info;
 	ld_expression *fill;			/* =fill */
-	const char *phn[4];		/* :phdr names */
-	uint8_t nphn;
+	const char *program_header_names[4];		/* :phdr names */
+	uint8_t program_header_name_count;
 } ld_output_section;
 
 /* PHDRS */
@@ -248,7 +248,7 @@ typedef struct {
 	const char *name;
 	uint32_t type;
 	ld_expression *flags;			/* FLAGS(expr) or NULL */
-	bool filehdr, phdrs;
+	bool file_header, program_headers;
 } ld_script_segment;
 
 /* VERSION: named nodes get version indices 2.. in order (1 is the file) */
@@ -258,15 +258,15 @@ typedef struct {
 } ld_version_node;
 
 /* names referenced by expressions, in parse order (lld referencedSymbols) */
-typedef struct { uint32_t sym; VVEC(uint32_t) refs; } ld_provide;
+typedef struct { uint32_t symbol; VVEC(uint32_t) references; } ld_provide;
 
 #define LD_OUTPUT_SECTION_AETHER 0xfffffffdu
 
 /* the first and last output section of a program header; hdr: FILEHDR/PHDRS */
-typedef struct { int first, last; bool lma_set, hdr; } ld_segment_sections;
+typedef struct { int first_output_section, last_output_section; bool load_address_set, includes_headers; } ld_segment_sections;
 
 /* an entry of the input-section-name cache: name -> its ld_input_section_description or LD_NONE */
-typedef struct { const char *name; uint32_t h; uint32_t isd; } ld_name_cache_entry;
+typedef struct { const char *name; uint32_t hash; uint32_t input_description; } ld_name_cache_entry;
 
 /* error output, the error count and limit, and the VLD_TIME=1 phase timer */
 struct ld_diagnostics {
@@ -312,36 +312,36 @@ struct ld_layout {
 
 /* an arm64 range-extension thunk (arch/a64/ld/thunk-creation.inc) */
 typedef struct {
-	uint32_t g;			/* destination global (or LD_NONE) */
-	uint32_t sec;			/* destination ISec for local/section targets */
-	uint64_t val;
+	uint32_t global_symbol;			/* destination global (or LD_NONE) */
+	uint32_t input_section;			/* destination ISec for local/section targets */
+	uint64_t value;
 	int64_t addend;
-	uint32_t tsec;			/* thunk ISec */
-	uint32_t off;			/* offset in thunk section */
+	uint32_t thunk_section;			/* thunk ISec */
+	uint32_t offset;			/* offset in thunk section */
 	uint32_t size;			/* 4 (b) or 12 (adrp/add/br) */
-	bool lng;			/* long form; sticky once chosen (lld) */
+	bool is_long;			/* long form; sticky once chosen (lld) */
 	const char *name;
 } a64_ld_thunk;
 typedef struct { VVEC(uint32_t) list; } a64_ld_thunk_section;
 
 /* a .got slot of a local symbol: object and symbol index */
-typedef struct { uint32_t obj, sym; } ld_got_location;
+typedef struct { uint32_t object_index, symbol_index; } ld_got_location;
 
 /* a global symbol's place in .symtab */
-typedef struct { uint32_t g; uint32_t idx; uint64_t str; bool local; } ld_global_symbol_output;
+typedef struct { uint32_t global_symbol; uint32_t index; uint64_t string_offset; bool is_local; } ld_global_symbol_output;
 
 /* an output section of ld -r, grouped by name */
 typedef struct {
 	const char *name;
-	uint32_t h;
-	uint32_t type, align, entsize;
-	uint64_t flags, size, off;
-	VVEC(uint32_t) secs;
-	uint64_t nrela, relaoff;
-	uint32_t shidx, relaidx, nameoff, relanameoff;
-	uint32_t secsym;
-	uint32_t grp;			/* a .group: its input SHT_GROUP ISec + 1 */
-	bool member;			/* a group member: its own output section, SHF_GROUP */
+	uint32_t hash;
+	uint32_t type, alignment, entry_size;
+	uint64_t flags, size, offset;
+	VVEC(uint32_t) sections;
+	uint64_t rela_count, rela_offset;
+	uint32_t section_header_index, rela_section_header_index, name_offset, rela_name_offset;
+	uint32_t section_symbol;
+	uint32_t group;			/* a .group: its input SHT_GROUP ISec + 1 */
+	bool is_group_member;			/* a group member: its own output section, SHF_GROUP */
 } ld_relocatable_section;
 
 /* the relocation scan, thunks and the final addresses relocations read */

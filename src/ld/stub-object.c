@@ -52,15 +52,15 @@ static ld_object *ld_stub_object_create(struct ld_context *ctx, const char **nam
 	}
 	ld_object *o = ld_region_alloc(sizeof *o);
 	o->path = "<vroom-stubs>";
-	o->buf = b;
+	o->file_bytes = b;
 	o->size = (uint8_t *)shstr + 32 + datasz - b;
-	o->sh = sh;
-	o->nsh = 5;
-	o->shstr = shstr;
-	o->sym = sy;
-	o->nsym = n + 2;
-	o->firstg = 2;
-	o->str = str;
-	o->gs = ld_region_alloc(n * sizeof(uint32_t));
+	o->section_headers = sh;
+	o->section_header_count = 5;
+	o->section_name_table = shstr;
+	o->symbols = sy;
+	o->symbol_count = n + 2;
+	o->first_global_index = 2;
+	o->string_table = str;
+	o->global_slots = ld_region_alloc(n * sizeof(uint32_t));
 	return o;
 }

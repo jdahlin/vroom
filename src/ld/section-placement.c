@@ -19,7 +19,7 @@ static void ld_name_cache_grow(struct ld_context *ctx)
 	memset(nc, 0, ncap * sizeof *nc);
 	for (uint32_t i = 0; i <= ctx->layout.name_cache_mask; i++)
 		if (ctx->layout.name_cache[i].name) {
-			uint32_t j = ctx->layout.name_cache[i].h & (ncap - 1);
+			uint32_t j = ctx->layout.name_cache[i].hash & (ncap - 1);
 
 			while (nc[j].name)
 				j = (j + 1) & (ncap - 1);
@@ -35,8 +35,8 @@ static uint32_t ld_input_section_description_match(struct ld_context *ctx, const
 	uint32_t h = ld_name_hash(name, n);
 	uint32_t j = h & ctx->layout.name_cache_mask;
 	while (ctx->layout.name_cache[j].name) {
-		if (ctx->layout.name_cache[j].h == h && !strcmp(ctx->layout.name_cache[j].name, name))
-			return ctx->layout.name_cache[j].isd;
+		if (ctx->layout.name_cache[j].hash == h && !strcmp(ctx->layout.name_cache[j].name, name))
+			return ctx->layout.name_cache[j].input_description;
 		j = (j + 1) & ctx->layout.name_cache_mask;
 	}
 	uint32_t res = LD_NONE;
@@ -44,20 +44,20 @@ static uint32_t ld_input_section_description_match(struct ld_context *ctx, const
 		ld_command *c = &ctx->script.commands.v[i];
 		if (c->kind != LD_COMMAND_OUTPUT_SECTION)
 			continue;
-		ld_output_section *os = &ctx->script.sections.v[c->idx];
-		for (uint32_t k = 0; k < os->cmds.n && res == LD_NONE; k++) {
-			ld_command *cc = &os->cmds.v[k];
+		ld_output_section *os = &ctx->script.sections.v[c->index];
+		for (uint32_t k = 0; k < os->commands.n && res == LD_NONE; k++) {
+			ld_command *cc = &os->commands.v[k];
 			if (cc->kind != LD_COMMAND_INPUT_SECTION_DESCRIPTION)
 				continue;
-			ld_input_section_description *d = &ctx->script.input_descriptions.v[cc->idx];
-			for (uint32_t p = 0; p < d->npats; p++)
-				if (ld_pattern_match(&d->pats[p], name)) {
-					res = cc->idx;
+			ld_input_section_description *d = &ctx->script.input_descriptions.v[cc->index];
+			for (uint32_t p = 0; p < d->pattern_count; p++)
+				if (ld_pattern_match(&d->patterns[p], name)) {
+					res = cc->index;
 					break;
 				}
 		}
 	}
-	ctx->layout.name_cache[j] = (ld_name_cache_entry){.name = name, .h = h, .isd = res};
+	ctx->layout.name_cache[j] = (ld_name_cache_entry){.name = name, .hash = h, .input_description = res};
 	if (++ctx->layout.name_cache_count * 2 > ctx->layout.name_cache_mask + 1)
 		ld_name_cache_grow(ctx);
 	return res;
@@ -92,7 +92,7 @@ static void ld_section_ids_sort(struct ld_context *ctx, uint32_t *ids, uint32_t 
 		if (order == LD_SECTION_ORDER_NAME)
 			t[i].name = is->name;
 		else if (order == LD_SECTION_ORDER_ALIGNMENT_DESCENDING)
-			t[i].key = UINT32_MAX - is->align;
+			t[i].key = UINT32_MAX - is->alignment;
 		else
 			t[i].key = ld_input_section_address(ctx, ids[i], 0);
 	}
@@ -111,17 +111,17 @@ static void ld_section_commit(struct ld_context *ctx, ld_output_section *os, ld_
 	}
 	if (!os->has_input) {
 		os->has_input = true;
-		os->entsize = is->entsize;
+		os->entry_size = is->entry_size;
 		os->flags = is->flags;
 	} else {
-		if (os->entsize != is->entsize)
-			os->entsize = 0;
+		if (os->entry_size != is->entry_size)
+			os->entry_size = 0;
 		os->flags |= is->flags;
 	}
-	if (os->nonalloc)
+	if (os->not_allocated)
 		os->flags &= ~(uint64_t)SHF_ALLOC;
-	if (is->align > os->addralign)
-		os->addralign = is->align;
+	if (is->alignment > os->address_alignment)
+		os->address_alignment = is->alignment;
 }
 
 /* lld's getSectionRank bits that order allocated sections: read-only, code,
@@ -165,9 +165,9 @@ static int ld_rank_proximity(int a, int b) { return a == b ? 32 : __builtin_clz(
 static int ld_output_section_rank(struct ld_context *ctx, uint32_t oi)
 {
 	ld_output_section *os = &ctx->script.sections.v[oi];
-	for (uint32_t k = 0; k < os->cmds.n; k++)
-		if (os->cmds.v[k].kind == LD_COMMAND_INPUT_SECTION_DESCRIPTION && ctx->script.input_descriptions.v[os->cmds.v[k].idx].secs.n) {
-			ld_input_section *is = &ctx->inputs.sections.v[ctx->script.input_descriptions.v[os->cmds.v[k].idx].secs.v[0]];
+	for (uint32_t k = 0; k < os->commands.n; k++)
+		if (os->commands.v[k].kind == LD_COMMAND_INPUT_SECTION_DESCRIPTION && ctx->script.input_descriptions.v[os->commands.v[k].index].sections.n) {
+			ld_input_section *is = &ctx->inputs.sections.v[ctx->script.input_descriptions.v[os->commands.v[k].index].sections.v[0]];
 			return ld_orphan_section_rank(is->flags, is->type, is->name);
 		}
 	return -1;

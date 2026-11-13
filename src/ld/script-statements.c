@@ -6,7 +6,7 @@ static uint32_t ld_output_section_find(struct ld_context *ctx, const char *name)
 		for (uint32_t i = 0; i < ctx->script.sections.n; i++)
 			if (!strcmp(ctx->script.sections.v[i].name, name))
 				return i;
-	ld_output_section o = {.name = name, .type = SHT_PROGBITS, .addralign = 1, .ptload = -1};
+	ld_output_section o = {.name = name, .type = SHT_PROGBITS, .address_alignment = 1, .load_segment = -1};
 	o.discard = !strcmp(name, "/DISCARD/");
 	VVEC_PUSH(ctx->script.sections, o, ld_region_alloc);
 	return ctx->script.sections.n - 1;
@@ -21,9 +21,9 @@ static ld_assignment *ld_script_assignment_rest_parse(struct ld_context *ctx, co
 		return NULL;
 	ctx->script.cursor += n;
 	ld_assignment *a = ld_region_alloc(sizeof *a);
-	a->op = op[0] == '=' ? '=' : op[0];
-	a->sym = strcmp(name, ".") ? ld_global_name_intern(ctx, name) : LD_NONE;
-	a->e = ld_script_expression_parse(ctx);
+	a->operator_character = op[0] == '=' ? '=' : op[0];
+	a->symbol = strcmp(name, ".") ? ld_global_name_intern(ctx, name) : LD_NONE;
+	a->expression = ld_script_expression_parse(ctx);
 	return a;
 }
 
@@ -32,7 +32,7 @@ static ld_assignment *ld_script_provide_parse(struct ld_context *ctx, bool hidde
 	ld_script_character_expect(ctx, '(');
 	char *name = ld_script_name_parse(ctx);
 	ld_assignment *a;
-	VVEC_PUSH(ctx->script.provides, ((ld_provide){.sym = ld_global_name_intern(ctx, name)}), ld_region_alloc);
+	VVEC_PUSH(ctx->script.provides, ((ld_provide){.symbol = ld_global_name_intern(ctx, name)}), ld_region_alloc);
 	ctx->script.current_provide = &ctx->script.provides.v[ctx->script.provides.n - 1];
 	a = ld_script_assignment_rest_parse(ctx, name);
 	ctx->script.current_provide = NULL;
@@ -49,16 +49,16 @@ static ld_assignment *ld_script_provide_parse(struct ld_context *ctx, bool hidde
 static ld_assignment *ld_script_assert_parse(struct ld_context *ctx)
 {
 	ld_assignment *a = ld_region_alloc(sizeof *a);
-	a->sym = LD_NONE;
-	a->op = '=';
-	a->assert_ = true;
+	a->symbol = LD_NONE;
+	a->operator_character = '=';
+	a->is_assert = true;
 	ld_expression *e = ld_script_expression_create(LD_EXPRESSION_ASSERT);
 	ld_script_character_expect(ctx, '(');
-	e->a = ld_script_expression_parse(ctx);
+	e->first_operand = ld_script_expression_parse(ctx);
 	ld_script_character_expect(ctx, ',');
-	e->msg = ld_script_name_parse(ctx);
+	e->message = ld_script_name_parse(ctx);
 	ld_script_character_expect(ctx, ')');
-	a->e = e;
+	a->expression = e;
 	return a;
 }
 
@@ -66,7 +66,7 @@ static void ld_script_input_parse(struct ld_context *ctx, ld_output_section *os,
 {
 	if (strcmp(filepat, "*"))
 		ld_error_report(ctx, "linker script: file pattern '%s' not supported", filepat);
-	ld_input_section_description d = {.osec = osi, .keep = keep, .thunksec = LD_NONE};
+	ld_input_section_description d = {.output_section = osi, .keep = keep, .thunk_section = LD_NONE};
 	VVEC(ld_pattern) pats = {0};
 	ld_script_character_expect(ctx, '(');
 	while (!ld_script_is_at_end(ctx) && !ld_script_character_peek(ctx, ')')) {
@@ -101,15 +101,15 @@ static void ld_script_input_parse(struct ld_context *ctx, ld_output_section *os,
 			}
 		}
 		p.globs = g.v;
-		p.nglobs = g.n;
+		p.glob_count = g.n;
 		VVEC_PUSH(pats, p, ld_region_alloc);
 	}
 	ld_script_character_expect(ctx, ')');
-	d.pats = pats.v;
-	d.npats = pats.n;
+	d.patterns = pats.v;
+	d.pattern_count = pats.n;
 	VVEC_PUSH(ctx->script.input_descriptions, d, ld_region_alloc);
-	ld_command c = {.kind = LD_COMMAND_INPUT_SECTION_DESCRIPTION, .idx = ctx->script.input_descriptions.n - 1};
-	VVEC_PUSH(os->cmds, c, ld_region_alloc);
+	ld_command c = {.kind = LD_COMMAND_INPUT_SECTION_DESCRIPTION, .index = ctx->script.input_descriptions.n - 1};
+	VVEC_PUSH(os->commands, c, ld_region_alloc);
 }
 
 static void ld_script_output_section_parse(struct ld_context *ctx, const char *name)
@@ -146,13 +146,13 @@ static void ld_script_output_section_parse(struct ld_context *ctx, const char *n
 	}
 	ld_script_character_expect(ctx, ':');
 	os = &ctx->script.sections.v[osi];
-	os->addr = addr;
-	os->nonalloc |= info;
+	os->address_expression = addr;
+	os->not_allocated |= info;
 	os->noload |= noload;
 	for (;;) {
-		if (ld_script_word_consume(ctx, "AT")) { ld_expression *e = ld_script_parenthesized_expression_parse(ctx); ctx->script.sections.v[osi].lma = e; continue; }
-		if (ld_script_word_consume(ctx, "ALIGN")) { ld_expression *e = ld_script_parenthesized_expression_parse(ctx); ctx->script.sections.v[osi].alignx = e; continue; }
-		if (ld_script_word_consume(ctx, "SUBALIGN")) { ld_expression *e = ld_script_parenthesized_expression_parse(ctx); ctx->script.sections.v[osi].subalign = e; continue; }
+		if (ld_script_word_consume(ctx, "AT")) { ld_expression *e = ld_script_parenthesized_expression_parse(ctx); ctx->script.sections.v[osi].load_address_expression = e; continue; }
+		if (ld_script_word_consume(ctx, "ALIGN")) { ld_expression *e = ld_script_parenthesized_expression_parse(ctx); ctx->script.sections.v[osi].align_expression = e; continue; }
+		if (ld_script_word_consume(ctx, "SUBALIGN")) { ld_expression *e = ld_script_parenthesized_expression_parse(ctx); ctx->script.sections.v[osi].subalign_expression = e; continue; }
 		break;
 	}
 	ld_script_character_expect(ctx, '{');
@@ -170,8 +170,8 @@ static void ld_script_output_section_parse(struct ld_context *ctx, const char *n
 			continue;
 		if (ld_script_word_consume(ctx, "ASSERT")) {
 			ld_assignment *a = ld_script_assert_parse(ctx);
-			ld_command c = {.kind = LD_COMMAND_ASSIGNMENT, .as = a};
-			VVEC_PUSH(ctx->script.sections.v[osi].cmds, c, ld_region_alloc);
+			ld_command c = {.kind = LD_COMMAND_ASSIGNMENT, .assignment = a};
+			VVEC_PUSH(ctx->script.sections.v[osi].commands, c, ld_region_alloc);
 			ld_script_character_consume(ctx, ';');
 			continue;
 		}
@@ -181,8 +181,8 @@ static void ld_script_output_section_parse(struct ld_context *ctx, const char *n
 			ld_assignment *a = ld_script_provide_parse(ctx, hid);
 			if (a) {
 				a->provide = prov;
-				ld_command c = {.kind = LD_COMMAND_ASSIGNMENT, .as = a};
-				VVEC_PUSH(ctx->script.sections.v[osi].cmds, c, ld_region_alloc);
+				ld_command c = {.kind = LD_COMMAND_ASSIGNMENT, .assignment = a};
+				VVEC_PUSH(ctx->script.sections.v[osi].commands, c, ld_region_alloc);
 			}
 			ld_script_character_expect(ctx, ';');
 			continue;
@@ -191,8 +191,8 @@ static void ld_script_output_section_parse(struct ld_context *ctx, const char *n
 		char *w = ld_script_name_parse(ctx);
 		ld_assignment *a = ld_script_assignment_rest_parse(ctx, w);
 		if (a) {
-			ld_command c = {.kind = LD_COMMAND_ASSIGNMENT, .as = a};
-			VVEC_PUSH(ctx->script.sections.v[osi].cmds, c, ld_region_alloc);
+			ld_command c = {.kind = LD_COMMAND_ASSIGNMENT, .assignment = a};
+			VVEC_PUSH(ctx->script.sections.v[osi].commands, c, ld_region_alloc);
 			ld_script_character_expect(ctx, ';');
 			continue;
 		}
@@ -222,18 +222,18 @@ static void ld_script_output_section_parse(struct ld_context *ctx, const char *n
 		if (ld_script_character_peek(ctx, ':') && ctx->script.cursor + 1 < ctx->script.end && ctx->script.cursor[1] != ':') {
 			ctx->script.cursor++;
 			ld_output_section *o = &ctx->script.sections.v[osi];
-			if (o->nphn == 4)
+			if (o->program_header_name_count == 4)
 				ld_script_error_report(ctx, "too many :phdr names");
 			else
-				o->phn[o->nphn++] = ld_script_name_parse(ctx);
+				o->program_header_names[o->program_header_name_count++] = ld_script_name_parse(ctx);
 			continue;
 		}
 		break;
 	}
 	ld_script_character_consume(ctx, ',');
 	if (ctx->script.referenced_symbols.n > nref0)
-		ctx->script.sections.v[osi].uses_syms = true;
-	ld_command c = {.kind = LD_COMMAND_OUTPUT_SECTION, .idx = osi};
+		ctx->script.sections.v[osi].uses_symbols = true;
+	ld_command c = {.kind = LD_COMMAND_OUTPUT_SECTION, .index = osi};
 	VVEC_PUSH(ctx->script.commands, c, ld_region_alloc);
 }
 
@@ -245,19 +245,19 @@ static void ld_script_sections_parse(struct ld_context *ctx)
 			continue;
 		if (ld_script_word_consume(ctx, "ASSERT")) {
 			ld_assignment *a = ld_script_assert_parse(ctx);
-			VVEC_PUSH(ctx->script.commands, ((ld_command){.kind = LD_COMMAND_ASSIGNMENT, .as = a}), ld_region_alloc);
+			VVEC_PUSH(ctx->script.commands, ((ld_command){.kind = LD_COMMAND_ASSIGNMENT, .assignment = a}), ld_region_alloc);
 			ld_script_character_consume(ctx, ';');
 			continue;
 		}
 		if (ld_script_word_consume(ctx, "PROVIDE_HIDDEN") || ld_script_word_consume(ctx, "HIDDEN")) {
 			ld_assignment *a = ld_script_provide_parse(ctx, true);
-			if (a) VVEC_PUSH(ctx->script.commands, ((ld_command){.kind = LD_COMMAND_ASSIGNMENT, .as = a}), ld_region_alloc);
+			if (a) VVEC_PUSH(ctx->script.commands, ((ld_command){.kind = LD_COMMAND_ASSIGNMENT, .assignment = a}), ld_region_alloc);
 			ld_script_character_expect(ctx, ';');
 			continue;
 		}
 		if (ld_script_word_consume(ctx, "PROVIDE")) {
 			ld_assignment *a = ld_script_provide_parse(ctx, false);
-			if (a) VVEC_PUSH(ctx->script.commands, ((ld_command){.kind = LD_COMMAND_ASSIGNMENT, .as = a}), ld_region_alloc);
+			if (a) VVEC_PUSH(ctx->script.commands, ((ld_command){.kind = LD_COMMAND_ASSIGNMENT, .assignment = a}), ld_region_alloc);
 			ld_script_character_expect(ctx, ';');
 			continue;
 		}
@@ -265,7 +265,7 @@ static void ld_script_sections_parse(struct ld_context *ctx)
 		char *w = ld_script_name_parse(ctx);
 		ld_assignment *a = ld_script_assignment_rest_parse(ctx, w);
 		if (a) {
-			VVEC_PUSH(ctx->script.commands, ((ld_command){.kind = LD_COMMAND_ASSIGNMENT, .as = a}), ld_region_alloc);
+			VVEC_PUSH(ctx->script.commands, ((ld_command){.kind = LD_COMMAND_ASSIGNMENT, .assignment = a}), ld_region_alloc);
 			ld_script_character_expect(ctx, ';');
 			continue;
 		}
@@ -306,8 +306,8 @@ static void ld_script_program_headers_parse(struct ld_context *ctx)
 			return;
 		}
 		for (;;) {
-			if (ld_script_word_consume(ctx, "FILEHDR")) { h.filehdr = true; continue; }
-			if (ld_script_word_consume(ctx, "PHDRS")) { h.phdrs = true; continue; }
+			if (ld_script_word_consume(ctx, "FILEHDR")) { h.file_header = true; continue; }
+			if (ld_script_word_consume(ctx, "PHDRS")) { h.program_headers = true; continue; }
 			if (ld_script_word_consume(ctx, "FLAGS")) { h.flags = ld_script_parenthesized_expression_parse(ctx); continue; }
 			if (ld_script_word_consume(ctx, "AT")) { ld_script_error_report(ctx, "PHDRS AT() not supported"); ctx->script.cursor = ctx->script.end; return; }
 			break;
@@ -385,19 +385,19 @@ static void ld_script_parse(struct ld_context *ctx, const char *text, size_t len
 		}
 		if (ld_script_word_consume(ctx, "ASSERT")) {
 			ld_assignment *a = ld_script_assert_parse(ctx);
-			VVEC_PUSH(ctx->script.commands, ((ld_command){.kind = LD_COMMAND_ASSIGNMENT, .as = a}), ld_region_alloc);
+			VVEC_PUSH(ctx->script.commands, ((ld_command){.kind = LD_COMMAND_ASSIGNMENT, .assignment = a}), ld_region_alloc);
 			ld_script_character_consume(ctx, ';');
 			continue;
 		}
 		if (ld_script_word_consume(ctx, "PROVIDE_HIDDEN") || ld_script_word_consume(ctx, "HIDDEN")) {
 			ld_assignment *a = ld_script_provide_parse(ctx, true);
-			if (a) VVEC_PUSH(ctx->script.commands, ((ld_command){.kind = LD_COMMAND_ASSIGNMENT, .as = a}), ld_region_alloc);
+			if (a) VVEC_PUSH(ctx->script.commands, ((ld_command){.kind = LD_COMMAND_ASSIGNMENT, .assignment = a}), ld_region_alloc);
 			ld_script_character_expect(ctx, ';');
 			continue;
 		}
 		if (ld_script_word_consume(ctx, "PROVIDE")) {
 			ld_assignment *a = ld_script_provide_parse(ctx, false);
-			if (a) VVEC_PUSH(ctx->script.commands, ((ld_command){.kind = LD_COMMAND_ASSIGNMENT, .as = a}), ld_region_alloc);
+			if (a) VVEC_PUSH(ctx->script.commands, ((ld_command){.kind = LD_COMMAND_ASSIGNMENT, .assignment = a}), ld_region_alloc);
 			ld_script_character_expect(ctx, ';');
 			continue;
 		}
@@ -405,7 +405,7 @@ static void ld_script_parse(struct ld_context *ctx, const char *text, size_t len
 		char *w = ld_script_name_parse(ctx);
 		ld_assignment *a = ld_script_assignment_rest_parse(ctx, w);
 		if (a) {
-			VVEC_PUSH(ctx->script.commands, ((ld_command){.kind = LD_COMMAND_ASSIGNMENT, .as = a}), ld_region_alloc);
+			VVEC_PUSH(ctx->script.commands, ((ld_command){.kind = LD_COMMAND_ASSIGNMENT, .assignment = a}), ld_region_alloc);
 			ld_script_character_expect(ctx, ';');
 			continue;
 		}

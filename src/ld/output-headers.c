@@ -17,15 +17,15 @@ static void ld_section_name_table_build(struct ld_context *ctx)
 		uint32_t found = LD_NONE;
 		for (uint32_t k = 0; k < i; k++)
 			if (!strcmp(ctx->script.sections.v[ctx->layout.output_sections.v[k]].name, os->name)) {
-				found = ctx->script.sections.v[ctx->layout.output_sections.v[k]].nameoff;
+				found = ctx->script.sections.v[ctx->layout.output_sections.v[k]].name_offset;
 				break;
 			}
 		if (found != LD_NONE) {
-			os->nameoff = found;
+			os->name_offset = found;
 			continue;
 		}
 		memcpy(ctx->output.shstrtab + n, os->name, l + 1);
-		os->nameoff = n;
+		os->name_offset = n;
 		n += l + 1;
 	}
 	ctx->inputs.sections.v[ctx->output.shstrtab_section].size = n;
@@ -52,23 +52,23 @@ static void ld_headers_write(struct ld_context *ctx)
 	eh->e_phnum = ctx->layout.program_headers.n;
 	eh->e_shentsize = sizeof(elf_section_header);
 	eh->e_shnum = ctx->layout.output_sections.n + 1;
-	eh->e_shstrndx = ctx->script.sections.v[ld_input_section_output_section(ctx, ctx->output.shstrtab_section)].shidx;
+	eh->e_shstrndx = ctx->script.sections.v[ld_input_section_output_section(ctx, ctx->output.shstrtab_section)].section_header_index;
 	if (ctx->layout.program_headers.n)
 		memcpy(ctx->output.image + sizeof(elf_file_header), ctx->layout.program_headers.v, ctx->layout.program_headers.n * sizeof(elf_program_header));
 	elf_section_header *sh = (elf_section_header *)(ctx->output.image + ctx->layout.section_header_offset);
 	for (uint32_t i = 0; i < ctx->layout.output_sections.n; i++) {
 		ld_output_section *os = &ctx->script.sections.v[ctx->layout.output_sections.v[i]];
 		elf_section_header *d = &sh[i + 1];
-		d->sh_name = os->nameoff;
+		d->sh_name = os->name_offset;
 		d->sh_type = os->type;
 		d->sh_flags = os->flags;
-		d->sh_addr = os->va;
+		d->sh_addr = os->address;
 		d->sh_offset = os->offset;
 		d->sh_size = os->size;
 		d->sh_link = os->link;
 		d->sh_info = os->info;
-		d->sh_addralign = os->addralign;
-		d->sh_entsize = os->entsize;
+		d->sh_addralign = os->address_alignment;
+		d->sh_entsize = os->entry_size;
 	}
 }
 
@@ -76,7 +76,7 @@ static void ld_synthetic_sections_write(struct ld_context *ctx)
 {
 	/* .rela.dyn, .symtab and .strtab were written in place */
 	ld_input_section *is = &ctx->inputs.sections.v[ctx->output.shstrtab_section];
-	memcpy(ctx->output.image + ctx->script.sections.v[ld_input_section_output_section(ctx, ctx->output.shstrtab_section)].offset + is->off, ctx->output.shstrtab, is->size);
+	memcpy(ctx->output.image + ctx->script.sections.v[ld_input_section_output_section(ctx, ctx->output.shstrtab_section)].offset + is->offset, ctx->output.shstrtab, is->size);
 }
 
 /* --build-id: lld's "sha1"/"tree" ids are a BLAKE3 tree over 1 MiB chunks */
@@ -85,7 +85,7 @@ static void ld_build_id_write(struct ld_context *ctx)
 	if (ctx->output.build_id_section == LD_NONE)
 		return;
 	ld_input_section *is = &ctx->inputs.sections.v[ctx->output.build_id_section];
-	uint8_t *dst = ctx->output.image + ctx->script.sections.v[ld_input_section_output_section(ctx, ctx->output.build_id_section)].offset + is->off + 16;
+	uint8_t *dst = ctx->output.image + ctx->script.sections.v[ld_input_section_output_section(ctx, ctx->output.build_id_section)].offset + is->offset + 16;
 	size_t hl = is->size - 16;
 	size_t nchunks = (ctx->layout.file_size + (1u << 20) - 1) >> 20;
 	uint8_t *hashes = ld_region_alloc(nchunks * 20 + 32);

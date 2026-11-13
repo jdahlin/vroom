@@ -20,7 +20,7 @@ static int x64_ld_got_relaxation_kind(struct ld_context *ctx, const ld_object *o
 
 	if (!ctx->options.relax || rl->r_addend != -4 || (type != R_X86_64_GOTPCRELX && type != R_X86_64_REX_GOTPCRELX))
 		return 0;
-	if (t->undef || t->abs || t->discarded || rl->r_offset < 2)
+	if (t->is_undefined || t->is_absolute || t->discarded || rl->r_offset < 2)
 		return 0;
 	(void)o;
 	{
@@ -56,10 +56,10 @@ static void x64_ld_got_find(void *arg, size_t i)
 	struct ld_context *ctx = arg;
 	const ld_input_section *is = &ctx->inputs.sections.v[i];
 
-	if (is->kind == LD_SECTION_KIND_NONE || is->obj == LD_NONE || atomic_load_explicit(&ctx->relocations.got_seen, memory_order_relaxed))
+	if (is->kind == LD_SECTION_KIND_NONE || is->object == LD_NONE || atomic_load_explicit(&ctx->relocations.got_seen, memory_order_relaxed))
 		return;
-	for (uint32_t r = 0; r < is->nrela; r++)
-		if (x64_ld_relocation_needs_got(ctx, ctx->inputs.objects.v[is->obj], is, &is->rela[r])) {
+	for (uint32_t r = 0; r < is->rela_count; r++)
+		if (x64_ld_relocation_needs_got(ctx, ctx->inputs.objects.v[is->object], is, &is->rela[r])) {
 			atomic_store(&ctx->relocations.got_seen, true);
 			return;
 		}
@@ -69,19 +69,19 @@ static void x64_ld_relocation_scan(void *arg, size_t i)
 {
 	struct ld_context *ctx = arg;
 	ld_input_section *is = &ctx->inputs.sections.v[i];
-	if (!is->nrela || is->kind == LD_SECTION_KIND_NONE || is->obj == LD_NONE)
+	if (!is->rela_count || is->kind == LD_SECTION_KIND_NONE || is->object == LD_NONE)
 		return;
 	uint32_t os = ld_input_section_output_section(ctx, i);
 	if (os == LD_OUTPUT_SECTION_DISCARD || os == LD_NONE)
 		return;
-	ld_object *o = ctx->inputs.objects.v[is->obj];
+	ld_object *o = ctx->inputs.objects.v[is->object];
 	ld_relocation_target t;
 
-	for (uint32_t r = 0; r < is->nrela; r++) {
+	for (uint32_t r = 0; r < is->rela_count; r++) {
 		const elf_rela *rl = &is->rela[r];
 		uint32_t type = (uint32_t)rl->r_info, symi = rl->r_info >> 32;
 
-		if (symi >= o->nsym) {
+		if (symi >= o->symbol_count) {
 			ld_error_report(ctx, "%s: bad symbol index in relocation", o->path);
 			continue;
 		}
@@ -100,10 +100,10 @@ static void x64_ld_relocation_scan(void *arg, size_t i)
 			break;
 		case R_X86_64_GOTPCREL: case R_X86_64_GOTPCRELX: case R_X86_64_REX_GOTPCRELX:
 			if (x64_ld_relocation_needs_got(ctx, o, is, rl)) {
-				if (symi < o->firstg)
-					atomic_store_explicit(&o->lgot[symi], 1, memory_order_relaxed);
+				if (symi < o->first_global_index)
+					atomic_store_explicit(&o->local_needs_got[symi], 1, memory_order_relaxed);
 				else
-					atomic_store(&ctx->symbols.globals[o->gs[symi - o->firstg]].needgot, 1);
+					atomic_store(&ctx->symbols.globals[o->global_slots[symi - o->first_global_index]].needs_got, 1);
 			}
 			break;
 		default:
@@ -111,17 +111,17 @@ static void x64_ld_relocation_scan(void *arg, size_t i)
 			      (unsigned long long)rl->r_offset, type);
 		}
 	}
-	is->ndyn = 0;
+	is->dynamic_relocation_count = 0;
 }
 
 static void x64_ld_input_section_relocate(struct ld_context *ctx, uint32_t si, uint8_t *buf)
 {
 	ld_input_section *is = &ctx->inputs.sections.v[si];
-	ld_object *o = ctx->inputs.objects.v[is->obj];
+	ld_object *o = ctx->inputs.objects.v[is->object];
 	uint64_t secva = ld_input_section_address(ctx, si, 0);
 	ld_relocation_target t;
 
-	for (uint32_t r = 0; r < is->nrela; r++) {
+	for (uint32_t r = 0; r < is->rela_count; r++) {
 		const elf_rela *rl = &is->rela[r];
 		uint32_t type = (uint32_t)rl->r_info, symi = rl->r_info >> 32;
 		uint8_t *loc = buf + rl->r_offset;
@@ -137,38 +137,38 @@ static void x64_ld_input_section_relocate(struct ld_context *ctx, uint32_t si, u
 		case R_X86_64_NONE:
 			break;
 		case R_X86_64_64:
-			ld_u64_store(loc, t.va);
+			ld_u64_store(loc, t.address);
 			break;
 		case R_X86_64_PC64:
-			ld_u64_store(loc, t.va - P);
+			ld_u64_store(loc, t.address - P);
 			break;
 		case R_X86_64_32:
-			if ((uint64_t)t.va > UINT32_MAX)
-				a64_ld_relocation_error_report(ctx, o, is, rl, "out of range", (int64_t)t.va);
-			ld_u32_store(loc, (uint32_t)t.va);
+			if ((uint64_t)t.address > UINT32_MAX)
+				a64_ld_relocation_error_report(ctx, o, is, rl, "out of range", (int64_t)t.address);
+			ld_u32_store(loc, (uint32_t)t.address);
 			break;
 		case R_X86_64_32S:
-			if (!ld_value_fits_signed((int64_t)t.va, 32))
-				a64_ld_relocation_error_report(ctx, o, is, rl, "out of range", (int64_t)t.va);
-			ld_u32_store(loc, (uint32_t)t.va);
+			if (!ld_value_fits_signed((int64_t)t.address, 32))
+				a64_ld_relocation_error_report(ctx, o, is, rl, "out of range", (int64_t)t.address);
+			ld_u32_store(loc, (uint32_t)t.address);
 			break;
 		case R_X86_64_16: case R_X86_64_PC16: {
-			uint16_t x = (uint16_t)(type == R_X86_64_16 ? t.va : t.va - P);
+			uint16_t x = (uint16_t)(type == R_X86_64_16 ? t.address : t.address - P);
 
 			memcpy(loc, &x, 2);
 			break;
 		}
 		case R_X86_64_8: case R_X86_64_PC8:
-			*loc = (uint8_t)(type == R_X86_64_8 ? t.va : t.va - P);
+			*loc = (uint8_t)(type == R_X86_64_8 ? t.address : t.address - P);
 			break;
 		case R_X86_64_PC32: case R_X86_64_PLT32:
-			v = (int64_t)(t.va - P);
+			v = (int64_t)(t.address - P);
 			if (!ld_value_fits_signed(v, 32))
 				a64_ld_relocation_error_report(ctx, o, is, rl, "out of range", v);
 			ld_u32_store(loc, (uint32_t)v);
 			break;
 		case R_X86_64_SIZE32: case R_X86_64_SIZE64: {
-			uint64_t sz = symi < o->firstg ? o->sym[symi].st_size : ctx->symbols.globals[o->gs[symi - o->firstg]].size;
+			uint64_t sz = symi < o->first_global_index ? o->symbols[symi].st_size : ctx->symbols.globals[o->global_slots[symi - o->first_global_index]].size;
 
 			if (type == R_X86_64_SIZE32)
 				ld_u32_store(loc, (uint32_t)(sz + (uint64_t)rl->r_addend));
@@ -182,7 +182,7 @@ static void x64_ld_input_section_relocate(struct ld_context *ctx, uint32_t si, u
 			if (k == 1) {
 				uint8_t op = loc[-2], modrm = loc[-1];
 
-				v = (int64_t)(t.va - P);
+				v = (int64_t)(t.address - P);
 				if (op == 0x8b) {
 					loc[-2] = 0x8d;		/* mov -> lea */
 					ld_u32_store(loc, (uint32_t)v);
@@ -196,7 +196,7 @@ static void x64_ld_input_section_relocate(struct ld_context *ctx, uint32_t si, u
 			} else if (k == 2) {
 				/* test/binop sym@GOTPCREL(%rip), %reg -> $sym (absolute: the -4 compensated) */
 				uint8_t op = loc[-2], modrm = loc[-1], rex = loc[-3];
-				uint64_t a = t.va + 4;
+				uint64_t a = t.address + 4;
 
 				if (op == 0x85) {
 					loc[-1] = (uint8_t)(0xc0 | (modrm & 0x38) >> 3);
@@ -208,8 +208,8 @@ static void x64_ld_input_section_relocate(struct ld_context *ctx, uint32_t si, u
 				loc[-3] = (uint8_t)((rex & ~0x4) | (rex & 0x4) >> 2);
 				ld_u32_store(loc, (uint32_t)a);
 			} else {
-				uint64_t slot = ld_input_section_address(ctx, ctx->output.got_section, 8 * (uint64_t)(symi < o->firstg ? o->lgotidx[symi] :
-										  ctx->symbols.globals[o->gs[symi - o->firstg]].gotidx));
+				uint64_t slot = ld_input_section_address(ctx, ctx->output.got_section, 8 * (uint64_t)(symi < o->first_global_index ? o->local_got_index[symi] :
+										  ctx->symbols.globals[o->global_slots[symi - o->first_global_index]].got_index));
 
 				v = (int64_t)(slot + (uint64_t)rl->r_addend - P);
 				ld_u32_store(loc, (uint32_t)v);
@@ -217,14 +217,14 @@ static void x64_ld_input_section_relocate(struct ld_context *ctx, uint32_t si, u
 			break;
 		}
 		case R_X86_64_TPOFF32: case R_X86_64_TPOFF64:
-			v = (int64_t)(t.va - ctx->layout.tls_thread_pointer);
+			v = (int64_t)(t.address - ctx->layout.tls_thread_pointer);
 			if (type == R_X86_64_TPOFF64)
 				ld_u64_store(loc, (uint64_t)v);
 			else
 				ld_u32_store(loc, (uint32_t)v);
 			break;
 		case R_X86_64_DTPOFF32: case R_X86_64_DTPOFF64:
-			v = (int64_t)(t.va - ctx->layout.tls_start);
+			v = (int64_t)(t.address - ctx->layout.tls_start);
 			if (type == R_X86_64_DTPOFF64)
 				ld_u64_store(loc, (uint64_t)v);
 			else
@@ -253,7 +253,7 @@ static void x64_ld_input_section_relocate(struct ld_context *ctx, uint32_t si, u
 				in[0] = 0x48, in[1] = 0xc7, loc[-1] = (uint8_t)(0xc0 | reg);
 			else
 				a64_ld_relocation_error_report(ctx, o, is, rl, "R_X86_64_GOTTPOFF must be used in MOVQ or ADDQ instructions only", 0);
-			ld_u32_store(loc, (uint32_t)(t.va - ctx->layout.tls_thread_pointer + 4));
+			ld_u32_store(loc, (uint32_t)(t.address - ctx->layout.tls_thread_pointer + 4));
 			break;
 		}
 		case R_X86_64_TLSGD: {
@@ -265,7 +265,7 @@ static void x64_ld_input_section_relocate(struct ld_context *ctx, uint32_t si, u
 				break;
 			}
 			memcpy(loc - 4, in, sizeof in);
-			ld_u32_store(loc + 8, (uint32_t)(t.va - ctx->layout.tls_thread_pointer + 4));
+			ld_u32_store(loc + 8, (uint32_t)(t.address - ctx->layout.tls_thread_pointer + 4));
 			r++;	/* (the call to __tls_get_addr is gone) */
 			break;
 		}

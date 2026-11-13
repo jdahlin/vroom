@@ -3,8 +3,8 @@
 /* names of undefined symbols that the -O0 stub object defines */
 static void ld_stub_target_mark(struct ld_context *ctx, ld_assignment *a)
 {
-	if (a->sym != LD_NONE)
-		ctx->symbols.globals[a->sym].hidden_script = 1;	/* reused as "assigned by the script" */
+	if (a->symbol != LD_NONE)
+		ctx->symbols.globals[a->symbol].hidden_by_script = 1;	/* reused as "assigned by the script" */
 }
 
 static void ld_stubs_collect(struct ld_context *ctx)
@@ -13,16 +13,16 @@ static void ld_stubs_collect(struct ld_context *ctx)
 	VVEC(const char *) names = {0};
 	for (uint32_t i = 0; i < ctx->inputs.objects.n; i++) {
 		ld_object *o = ctx->inputs.objects.v[i];
-		if (!o->buf)
+		if (!o->file_bytes)
 			continue;
-		for (uint32_t s = o->firstg; s < o->nsym; s++) {
-			uint32_t g = o->gs[s - o->firstg];
+		for (uint32_t s = o->first_global_index; s < o->symbol_count; s++) {
+			uint32_t g = o->global_slots[s - o->first_global_index];
 			ld_global_symbol *gs = &ctx->symbols.globals[g];
-			if (o->sym[s].st_shndx != SHN_UNDEF || ld_global_symbol_is_defined_by_object(ctx, g) || gs->hidden_script || gs->dup)
+			if (o->symbols[s].st_shndx != SHN_UNDEF || ld_global_symbol_is_defined_by_object(ctx, g) || gs->hidden_by_script || gs->duplicate)
 				continue;
-			if ((o->sym[s].st_info >> 4) == STB_WEAK)
+			if ((o->symbols[s].st_info >> 4) == STB_WEAK)
 				continue;
-			gs->dup = 1;
+			gs->duplicate = 1;
 			VVEC_PUSH(names, ld_global_name(ctx, g), ld_region_alloc);
 		}
 	}
@@ -32,13 +32,13 @@ static void ld_stubs_collect(struct ld_context *ctx)
 	ctx->symbols.stub_names = names.v;
 	ctx->symbols.stub_count = names.n;
 	for (uint32_t i = 0; i < ctx->symbols.stub_count; i++)
-		ctx->symbols.globals[ld_global_name_find(ctx, ctx->symbols.stub_names[i])].dup = 0;
+		ctx->symbols.globals[ld_global_name_find(ctx, ctx->symbols.stub_names[i])].duplicate = 0;
 }
 
 static void ld_stub_list_write(struct ld_context *ctx)
 {
-	char *p = ld_region_alloc(strlen(ctx->options.out) + 16);
-	sprintf(p, "%s.vroom-stubs", ctx->options.out);
+	char *p = ld_region_alloc(strlen(ctx->options.output_path) + 16);
+	sprintf(p, "%s.vroom-stubs", ctx->options.output_path);
 	FILE *f = NULL;
 	int fd = openat(ctx->options.directory_fd, p, O_WRONLY | O_CREAT | O_TRUNC, 0666);
 	if (fd >= 0)
