@@ -1335,3 +1335,9 @@ Full kernel parity remains outstanding.
 Raw measurements and validation logs are in
 `results/sqlite-compile-20261113.json`, `results/lexer-simd-20261113.json`,
 `results/host-dispatch-20261113.json` and `results/x64-direct-20261113.json`.
+
+PR integration validation on current main: clean build, **321/321** focused
+x86 direct-object comparisons (five existing input skips), **63/63** assembler
+object fixtures, and all six runtime-dispatch combinations on the host and
+four emulated CPU configurations. The one-test difference from the original
+checkout reflects the unrelated VIR regression kept out of this PR.
