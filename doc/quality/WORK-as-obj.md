@@ -90,7 +90,7 @@ follows.
   for `platform/linux/elf.c` only (STYLE.md: the prefix of a platform is its
   format).
 - `as_` prefix on every file-scope function and long-lived field of the
-  module (`d_data` -> `as_directive_data`, `err` -> `as_error`, ...); rename
+  module (`d_data` -> `as_directive_data`, `err` -> `as_error_report`, ...); rename
   table checked in beforehand, applied by script.
 - `arch/a64/as` and `arch/x64/as`: `a64_as_`/`x64_as_` prefixes, x86-64's
   `strcmp` chain to one hashed table (Q-asobj-05), `enc.c` classes
@@ -99,3 +99,22 @@ follows.
   module overview of the review's section 2.
 - Error policy (Q-asobj-13) and the ELF/Mach-O section mapping in one table
   (Q-asobj-08) are their own PRs.
+
+## Rename table (step 5, assembler part)
+
+`doc/quality/rename-as.tsv`: one `old<TAB>new<TAB>kind<TAB>where` line per
+identifier of `src/as/*.c`, `asimpl.h` and `as.h` (351 lines: 145 functions,
+135 struct fields, 38 constants, 19 types, 5 globals, 9 files).  Rules used:
+`as_noun_verb` in full words (STYLE.md); types `as_noun`, `As` is
+`as_context`; constants `AS_NOUN_VALUE`; functions the arm64 and x86-64
+assemblers define for it carry `a64_as_`/`x64_as_`; `as_darwin_text` is the
+Mach-O dialect translator, so it takes the platform's format prefix
+(`macho_`).  Not in the table: `ElfObj`/`elf_*` (the obj module's table),
+short locals and the parameter name `a`, names that are already right
+(`as_new`, `as_free`, `as_run`, `as_begin`, `as_end`, `VPRIV`).  A `-` as the
+new name means delete (`pool_dummy` is dead, Q-asobj-16).  `Sv`'s fields `s`
+and `n` need a type-aware rewrite, not a whole-word one.  Checked: no two
+olds map to one new in one scope, and no new name exists in the tree
+(`as_directive_data` and `as_expression_parse` appear only in STYLE.md and
+this file as examples).  The fields of `struct PoolS` (arm64's literal
+pools) are for the arm64 pass.
