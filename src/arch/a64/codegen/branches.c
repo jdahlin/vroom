@@ -95,7 +95,7 @@ VPRIV void a64_branch_compare_zero_emit(codegen_context *e, bool nz, int x, int 
 	e->label_reference_counts[l]++;
 }
 
-/* tbz, tbnz: bit of register r (finish_function relaxes one whose label may be beyond 32 KB) */
+/* tbz, tbnz: bit of register r (a64_function_finish relaxes one whose label may be beyond 32 KB) */
 VPRIV void a64_branch_test_bit_emit(codegen_context *e, bool nz, int r, int bit, uint32_t l)
 {
 	a64_record *i;

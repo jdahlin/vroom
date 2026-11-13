@@ -6,7 +6,7 @@
 
 /* registers: 0-30 x0-x30, ZR, SP, A64_REGISTER_FRAME (pseudo base of stack slots) */
 enum { R_FP = 29, R_LR = 30, ZR = 31, SP = 32, A64_REGISTER_FRAME = 33, R_X16 = 16, R_X17 = 17 };
-#define A64_REGISTER_FRAME_BASE 28		/* frame base of a realigned dynamic frame (ecx.falign, finish_function) */
+#define A64_REGISTER_FRAME_BASE 28		/* frame base of a realigned dynamic frame (ecx.falign, a64_function_finish) */
 
 enum {
 	A64_OP_LABEL,	/* label */
@@ -37,7 +37,7 @@ enum {
 	A64_OP_ADR,		/* rd = local label */
 	A64_OP_B, A64_OP_BC,	/* label; A64_OP_BC: cond */
 	A64_OP_CBZ, A64_OP_CBNZ,	/* rd, label */
-	A64_OP_TBZ, A64_OP_TBNZ,	/* rd, sh: the bit (sz 1 when it is 32-63), label (+-32 KB: finish_function relaxes) */
+	A64_OP_TBZ, A64_OP_TBNZ,	/* rd, sh: the bit (sz 1 when it is 32-63), label (+-32 KB: a64_function_finish relaxes) */
 	A64_OP_BL,		/* ref */
 	A64_OP_BLR, A64_OP_BR,	/* rn */
 	A64_OP_RET,
@@ -49,12 +49,12 @@ enum {
 	A64_OP_WORD,		/* imm: an encoded instruction (registers already in it) */
 	A64_OP_TLV,		/* x0 = address of thread-local ref; cond 0: Darwin TLV descriptor call (clobbers x16, lr),
 			 * A64_TLS_LOCAL_EXEC/A64_TLS_INITIAL_EXEC: ELF via tpidr_el0 (clobbers x1), A64_TLS_DESCRIPTOR: ELF TLSDESC call (x1, lr) */
-	A64_OP_JT,		/* jump table dispatch: rd = index (already bounds-checked; cond 2: a w register, uxtw), label: the table; expanded by finish_function
+	A64_OP_JT,		/* jump table dispatch: rd = index (already bounds-checked; cond 2: a w register, uxtw), label: the table; expanded by a64_function_finish
 			 * (adr x16; add x17; ldrsw x17; add x16; br x16), every target label is CODEGEN_LABEL_EXTERNAL */
 	A64_OP_JTE,		/* a table word: label (off) - ref, both labels, in bytes */
 	A64_OP_TAIL,		/* ref: direct sibling target; cond 0 terminal marker, 1 branch after epilogue;
 			 * VIR, anywhere in the body: 2 a sibling call to ref, 3 to the address in rn (expanded by
-			 * finish_function: the epilogue, then b ref or br x16); 4 a return: the epilogue and ret when
+			 * a64_function_finish: the epilogue, then b ref or br x16); 4 a return: the epilogue and ret when
 			 * it is short, else b label (the shared epilogue at the end) */
 	A64_OP_LDF, A64_OP_STF,	/* FP register rd (v0-v31; sz 2: s, 3: d) and [rn + imm] (VIR's lowering) */
 };
@@ -74,7 +74,7 @@ enum { A64_CONDITION_EQ, A64_CONDITION_NE, A64_CONDITION_HS, A64_CONDITION_LO, A
 #define CODEGEN_LABEL_EXTERNAL (1u << 31)
 
 /* A64_OP_NOP.cond: where VIR's lowering wants the prologue (shrink-wrapping: the records in front
- * of it run without the frame; finish_function checks that they can, else it goes to the top) */
+ * of it run without the frame; a64_function_finish checks that they can, else it goes to the top) */
 enum { A64_NOP_PROLOGUE = 0xc0 };
 /* A64_OP_TAIL.sh: 1 on a return or sibling call (cond 2-4) in front of A64_NOP_PROLOGUE: no epilogue */
 

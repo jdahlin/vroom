@@ -3,7 +3,7 @@
  * registers arm64 offers the allocator, the fixed operands of calls,
  * parameters and returns, then one pass over the blocks that writes the
  * emitter's records with the allocated registers, the edits and the edges'
- * moves.  finish_function then runs the record clean-ups, lays out the frame
+ * moves.  a64_function_finish then runs the record clean-ups, lays out the frame
  * and prints or encodes, as for any function.
  *
  *   integer: x0-x15 and x19-x28 (callee-saved); x16 is VIR_REGISTER_SCRATCH0 and the
@@ -15,7 +15,7 @@
  *
  * Floating-point operations are encoded words (A64_OP_WORD), as in fp.c.  A
  * value in a spill slot or a VIR slot is addressed from A64_REGISTER_FRAME, so the frame
- * layout stays finish_function's.  Edge moves of a branch that is not a `br`
+ * layout stays a64_function_finish's.  Edge moves of a branch that is not a `br`
  * go into a small block after the branch's own (a label, the moves, a jump).
  */
 

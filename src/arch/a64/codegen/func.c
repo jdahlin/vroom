@@ -19,7 +19,7 @@ static _Thread_local struct {
 static inline int a64_frame_save_base(void) { return a64_frame_shape.is_stack_pointer_leaf ? SP : R_FP; }
 static inline int64_t a64_frame_save_offset(int32_t csave, int k) { return (a64_frame_shape.is_stack_pointer_leaf ? a64_frame_shape.frame_size : 0) - csave + 8 * k; }
 
-/* finish_function for the object backend: the same function as items */
+/* a64_function_finish for the object backend: the same function as items */
 /* ctor: 1 constructor, 2 destructor, 4 x28 is the frame base (mov x28, sp after the saves), 8 no frame (leaf) */
 /* kpro: the record (A64_NOP_PROLOGUE) in whose place the prologue goes, UINT32_MAX: at the top */
 static void a64_function_items_finish(codegen_context *e, uint32_t s, uint32_t align, const int *cs, int ncs, int32_t csave, int64_t total, int ctor,

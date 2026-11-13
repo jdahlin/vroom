@@ -12,7 +12,7 @@ VPRIV int64_t a64_frame_slot_allocate(codegen_context *e, uint64_t size, uint32_
 		e->temporaries_reserved |= 1u << codegen_temporary_index(A64_REGISTER_FRAME_BASE);
 	}
 	if (align > e->frame_alignment)
-		e->frame_alignment = align;	/* over 16: finish_function realigns sp to it */
+		e->frame_alignment = align;	/* over 16: a64_function_finish realigns sp to it */
 	/* Keep the allocation and its alignment rounding within signed offsets. */
 	uint64_t limit = (uint64_t)INT64_MAX - align;
 	if ((uint64_t)e->frame_offset > limit || size > limit - (uint64_t)e->frame_offset)

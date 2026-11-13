@@ -5,7 +5,7 @@
 /* the block a branch to t ends up in: past blocks that are a lone br without moves */
 VPRIV uint32_t a64_vir_block_chase(a64_vir_context *L, uint32_t t) { return L->chases[t]; }
 
-/* a return: the epilogue and ret, or a jump to the shared one (finish_function decides) */
+/* a return: the epilogue and ret, or a jump to the shared one (a64_function_finish decides) */
 /* d8-d15 as the caller had them: at the entry into their slots, before every way out back */
 VPRIV void a64_vir_callee_saved_float_save(a64_vir_context *L, bool restore, int t)
 {
@@ -40,7 +40,7 @@ VPRIV void a64_vir_return_lower(a64_vir_context *L)
 /*
  * Block t may be copied to the end of a block that jumps to it (tail duplication, as
  * LLVM's block placement): a return (its epilogue, or the jump to the shared one,
- * finish_function's choice), and a lone br (its edge's moves, then on) up to 8 deep.
+ * a64_function_finish's choice), and a lone br (its edge's moves, then on) up to 8 deep.
  * Copies of blocks with work in them (a loop's test at the end of the latch) measured
  * more instructions on speedtest1: their constants and edge moves are lowered again.
  */

@@ -182,7 +182,7 @@ VPRIV codegen_value a64_bigbool(codegen_context *e, codegen_value v, ast_qualifi
 VPRIV codegen_value a64_bigcopy(codegen_context *e, codegen_value v, ast_qualified_type t);
 
 /*
- * VCC_REC_STATS: what each record clean-up pass of finish_function does, per TU, for the
+ * VCC_REC_STATS: what each record clean-up pass of a64_function_finish does, per TU, for the
  * functions that came through VIR's lowering and through the direct emitter (opt.c rp_snap,
  * rp_count, rp_print).  The names are those of doc/quality/VIR-MIGRATION.md's table.
  */

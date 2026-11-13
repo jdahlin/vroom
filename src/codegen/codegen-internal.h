@@ -231,7 +231,7 @@ typedef struct codegen_unit {
 	_Atomic uint64_t print_nanoseconds, walk_nanoseconds, walk_total;
 	uint8_t *inline_everywhere;			/* per sym: static function to inline everywhere (kept across rounds) */
 	_Atomic uint32_t newly_marked_count;		/* marked this round */
-	_Atomic uint32_t nerrcall;	/* error() calls dropped (not folded) */	/* VCC_EMIT_STATS: time in finish_function */
+	_Atomic uint32_t nerrcall;	/* error() calls dropped (not folded) */	/* VCC_EMIT_STATS: time in a64_function_finish */
 	const codegen_keep *previous_keep;			/* the previous round's functions, or NULL */
 	bool stats;
 	/* VCC_VIR_STATS: functions through VIR and the reasons it gave up on one (codegen/vir/build-attempt.c) */
@@ -332,7 +332,7 @@ typedef struct codegen_slot_allocation {
  * reused once a scope ends, so this tells opt.c which accesses belong to
  * one object.  An address at the start of an allocation that is also just
  * past the end of the live one below names that one too, in cond | sh << 8
- * (CODEGEN_SLOT_TAG_SECOND).  finish_function clears the tags before the frame layout.
+ * (CODEGEN_SLOT_TAG_SECOND).  a64_function_finish clears the tags before the frame layout.
  */
 #define CODEGEN_SLOT_TAG(i) ((uint32_t)(i)->rm | (uint32_t)(i)->ra << 8)
 #define CODEGEN_SLOT_TAG_SECOND(i) ((uint32_t)(i)->condition | (uint32_t)(i)->shift << 8)
@@ -432,7 +432,7 @@ typedef struct codegen_context {
 	struct xst *x64_context;	/* X86: arch/x64/codegen/ state (x64impl.h) */
 	struct virbuild_context *vir_builder;	/* the VIR builder's state (codegen/vir/, PLAN-vir.md) */
 	bool vir_try;		/* the VIR walker runs: an error is not reported, it makes the function fall back */
-	bool vir_lowering;		/* the records are VIR's lowering (finish_function's clean-ups for it) */
+	bool vir_lowering;		/* the records are VIR's lowering (a64_function_finish's clean-ups for it) */
 	const char *vir_failure_reason;	/* ... and why (NULL: it did not fail) */
 	struct em_switch_values_data *switch_values; /* accepted tables of this real function */
 } codegen_context;

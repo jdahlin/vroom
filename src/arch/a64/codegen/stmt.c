@@ -378,7 +378,7 @@ static void a64_switch_tree(codegen_context *e, const em_switch_case *cases, uin
 	}
 }
 
-/* A dense switch: index = v - lo, one unsigned bounds check, then A64_OP_JT (finish_function
+/* A dense switch: index = v - lo, one unsigned bounds check, then A64_OP_JT (a64_function_finish
  * expands it and appends the table of label differences after the function's code). */
 static void a64_switch_table(codegen_context *e, const em_switch_case *cases, uint32_t n, int r, int cx, uint32_t dflt)
 {
