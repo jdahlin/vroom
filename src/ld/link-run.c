@@ -14,9 +14,9 @@ VPRIV int ld_link_run(struct ld_context *ctx, int argc, char **argv)
 	if (ld_standalone && ld_thread_count > vtask_budget())
 		vtask_budget_set(ld_thread_count);
 	double t0 = ld_clock_now();
-	ctx->diagnostics.phase_start_time = t0;
-	ctx->diagnostics.phase_start_counters = vperformance_now();
-	ctx->diagnostics.phase_start_faults = ctx->diagnostics.phase_timing ? ld_minor_fault_count() : 0;
+	ctx->timing.start_time = t0;
+	ctx->timing.start_counters = vperformance_now();
+	ctx->timing.start_faults = ctx->timing.enabled ? ld_minor_fault_count() : 0;
 	ctx->relocations.pic = ctx->options.shared;
 
 	ld_inputs_load(ctx);
@@ -260,7 +260,7 @@ VPRIV int ld_link_run(struct ld_context *ctx, int argc, char **argv)
 	ld_phase_time_report(ctx, "build id");
 	int rc = ld_output_file_write(ctx);
 	ld_phase_time_report(ctx, "write");
-	if (ctx->diagnostics.phase_timing)
+	if (ctx->timing.enabled)
 		fprintf(ctx->diagnostics.error_stream, "  %-28s %7.2f ms (%u objects, %u sections, %u globals, %llu MB out, %d threads)\n",
 			"total", (ld_clock_now() - t0) * 1e3, ctx->inputs.objects.n, ctx->inputs.sections.n, ctx->symbols.order.n,
 			(unsigned long long)(ctx->layout.file_size >> 20), ld_thread_count);

@@ -188,6 +188,19 @@ one diagnostics function through the diagnostics module, one ELF validator,
 one option table per tool.  Arena and thread pool go to the shared library
 and the scheduler.
 
+One diagnostics function for the linker tools: `struct ld_diagnostics` and
+`ld_diagnostic_report` (`ld/ld.h`, `ld/diagnostics.c`) print lld's
+"PROGRAM: error: MESSAGE" lines for the ELF linker (its context's member),
+the Mach-O linker and vobjcopy/vnm (a static instance each, set per run,
+replacing their own stream, count and name variables).  Each keeps its
+behaviour through the struct's fields: ELF announces the limit ("too many
+errors emitted") and puts lld's blank line after a multi-line message;
+Mach-O stops printing after 20 errors without a word; objcopy has no limit.
+The VLD_TIME phase timer moved out of the diagnostics into
+`struct ld_phase_timing`.  Not through the diagnostics module: that is
+track I, held by the owner; `utils/ar.c` keeps `ar_error_report`, which
+writes to vccd's request descriptor, until then.
+
 Status (2026-11-13): the file mappings of the ELF linker (`ld_file_map`) and
 of objcopy and nm (`objcopy_elf_open`, `nm_inputs_collect`) go through
 `port/file.h` (`vfile_map_fd`, now public: the callers open the file

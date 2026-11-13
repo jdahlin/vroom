@@ -12,8 +12,11 @@ VPRIV struct ld_context *ld_context_create(FILE *error_stream, int directory_fd)
 		return NULL;
 	ctx->options.directory_fd = directory_fd;
 	ctx->diagnostics.error_stream = error_stream;
+	ctx->diagnostics.program = "vld";
 	ctx->diagnostics.error_limit = 20;
-	ctx->diagnostics.phase_timing = getenv("VLD_TIME") != NULL;
+	ctx->diagnostics.limit_is_announced = true;
+	ctx->diagnostics.blank_line_after_multiline = true;
+	ctx->timing.enabled = getenv("VLD_TIME") != NULL;
 	struct ld_output *o = &ctx->output;
 	o->rela_dyn_section = o->build_id_section = o->comment_section = o->got_section = LD_NONE;
 	o->eh_frame_header_section = o->symtab_section = o->strtab_section = o->shstrtab_section = LD_NONE;
