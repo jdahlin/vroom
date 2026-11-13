@@ -1,0 +1,4 @@
+# expect: problem taken: len -> cur
+# expect: problem taken: x -> y
+len	cur	field	Box
+x	y	field	Anon

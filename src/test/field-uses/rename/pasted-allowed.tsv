@@ -1,0 +1,4 @@
+# expect: ok
+# expect: output by hand (none): cat -> kitty
+# flags: --allow-manual
+cat	kitty	field	P

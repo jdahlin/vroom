@@ -1,7 +1,8 @@
 # Design: renaming struct fields with vcc's own front end
 
 Status: 2026-11-13.  Piece 1 (the front-end mode, PR `quality/field-uses-mode`)
-is implemented; the driver and the script are not.  Corrections made while
+and piece 2 (`field-uses.py`, `rename-table.py --fields`, PR
+`quality/field-uses-apply`) are implemented; the first user (PR 3) is not.  Corrections made while
 implementing piece 1 are marked "(implemented:".
 
 The owner's decision (`PLAN-quality.md`, track D) is this: struct fields are
@@ -450,6 +451,12 @@ Field rows are taken out of the whole-word pass.  `--apply` without
 Today a field row is a word row; from now on a table is applied twice, words
 then fields or the other way round (owners resolve either way).
 
+(Implemented: the word pass skips field rows in unscoped tables only.  A
+`--scoped` table (`rename-lexpp.tsv`) keeps applying its safe `field` rows as
+words, as #189 did; its `field,deferred` rows are the ones for `--fields
+--deferred`.  The owner column may carry a note after `, ` (`struct G,
+ld/global-symbols.c`): the script ignores it.)
+
 ### 4.2 Commands
 
 ```
@@ -464,6 +471,12 @@ temporary file and runs `field-uses.py` (unless `--report` is given).  For
 each row it prints the number of uses and files, the positions grouped by
 `WHERE`, and every problem from 4.3.  `--apply` refuses if there is any
 problem.
+
+(Implemented in `rename-table.py`: `--report-out F` saves the merged report;
+`--commands FILE --root DIR` are passed to `field-uses.py`, which the
+self-test uses; `--bin-dir`, `--config`, `-j`, `--no-build` likewise.  The
+self-test's cases are the `NAME.tsv` files of `src/test/field-uses/rename/`
+with the tree in `tree/`; `--selftest --bless` writes the `NAME.after/` files.)
 
 ### 4.3 Checks
 
@@ -481,7 +494,9 @@ Each of these is a problem unless it says otherwise.
    this also catches a clash with an enclosing anonymous aggregate.
 4. **Merge:** two rows of one owner have the same `new`.
 5. **Macro:** there is a `macro` record for `old` or `new`, or a line
-   matching `#\s*define\s+NEW\b` anywhere in the scope.  A macro named like
+   matching `#\s*define\s+NEW\b` anywhere in the scope except `src/test/`
+   (test programs define such macros and never see the owner's headers; one
+   in `gcc-torture` would otherwise block `value`).  A macro named like
    the field changes what the token means.
 6. **Keyword:** `new` is a C or GNU keyword (the list in
    `frontend/c/keywords.c`).

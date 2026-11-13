@@ -1,0 +1,2 @@
+# expect: problem unused: nosuch -> gone
+nosuch	gone	field	Box

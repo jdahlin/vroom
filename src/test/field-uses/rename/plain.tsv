@@ -1,0 +1,6 @@
+# expect: ok
+# expect: output to check (code, member-shaped): src/a.c:11:
+# expect: output to check (comment, member-shaped): src/a.c:13:
+# old	new	kind	owner	comment
+len	length	field	struct Box
+cur	position	field	struct Box
