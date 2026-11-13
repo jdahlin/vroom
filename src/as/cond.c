@@ -3,14 +3,14 @@
 
 /* ---------------------------------------------------------------- conditionals */
 
-VPRIV int as_condition_is_ignored(as_context *a) { return a->ncs && a->cs[a->ncs - 1].ignore; }
+VPRIV int as_condition_is_ignored(as_context *a) { return a->condition_count && a->conditions[a->condition_count - 1].is_ignored; }
 
 static int as_condition_push(as_context *a, int met)
 {
-	if (a->ncs >= AS_CONDITIONS_MAX) return as_error_report(a, "conditionals nested too deeply");
+	if (a->condition_count >= AS_CONDITIONS_MAX) return as_error_report(a, "conditionals nested too deeply");
 	int parent = as_condition_is_ignored(a);
-	as_condition *c = &a->cs[a->ncs++];
-	c->kind = 1; c->met = (uint8_t)(!parent && met); c->ignore = (uint8_t)(parent || !met);
+	as_condition *c = &a->conditions[a->condition_count++];
+	c->kind = 1; c->is_met = (uint8_t)(!parent && met); c->is_ignored = (uint8_t)(parent || !met);
 	return 0;
 }
 
@@ -47,27 +47,27 @@ VPRIV int as_directive_conditional(as_context *a, as_text w, const char *p, cons
 	if (w.n < 3 || w.s[0] != '.' || (w.s[1] != 'e' && w.s[1] != 'i')) return 0;
 	*rc = 0;
 	if (as_text_equals(w, ".endif")) {
-		if (!a->ncs) { *rc = as_error_report(a, "Encountered a .endif that doesn't follow an .if or .else"); return 1; }
-		a->ncs--;
+		if (!a->condition_count) { *rc = as_error_report(a, "Encountered a .endif that doesn't follow an .if or .else"); return 1; }
+		a->condition_count--;
 		return 1;
 	}
 	if (as_text_equals(w, ".else")) {
-		if (!a->ncs || a->cs[a->ncs - 1].kind == 3) { *rc = as_error_report(a, "Encountered a .else that doesn't follow an .if or an .elseif"); return 1; }
-		as_condition *c = &a->cs[a->ncs - 1];
-		int parent = a->ncs > 1 && a->cs[a->ncs - 2].ignore;
+		if (!a->condition_count || a->conditions[a->condition_count - 1].kind == 3) { *rc = as_error_report(a, "Encountered a .else that doesn't follow an .if or an .elseif"); return 1; }
+		as_condition *c = &a->conditions[a->condition_count - 1];
+		int parent = a->condition_count > 1 && a->conditions[a->condition_count - 2].is_ignored;
 		c->kind = 3;
-		c->ignore = (uint8_t)(parent || c->met);
+		c->is_ignored = (uint8_t)(parent || c->is_met);
 		return 1;
 	}
 	if (as_text_equals(w, ".elseif")) {
-		if (!a->ncs || a->cs[a->ncs - 1].kind == 3) { *rc = as_error_report(a, "Encountered a .elseif that doesn't follow an .if or .elseif"); return 1; }
-		as_condition *c = &a->cs[a->ncs - 1];
-		int parent = a->ncs > 1 && a->cs[a->ncs - 2].ignore;
+		if (!a->condition_count || a->conditions[a->condition_count - 1].kind == 3) { *rc = as_error_report(a, "Encountered a .elseif that doesn't follow an .if or .elseif"); return 1; }
+		as_condition *c = &a->conditions[a->condition_count - 1];
+		int parent = a->condition_count > 1 && a->conditions[a->condition_count - 2].is_ignored;
 		c->kind = 2;
-		if (parent || c->met) { c->ignore = 1; return 1; }
+		if (parent || c->is_met) { c->is_ignored = 1; return 1; }
 		int64_t v;
 		if (as_expression_absolute_parse(a, &p, e, &v)) { *rc = -1; return 1; }
-		c->met = v != 0; c->ignore = !c->met;
+		c->is_met = v != 0; c->is_ignored = !c->is_met;
 		return 1;
 	}
 	if (memcmp(w.s, ".if", 3)) return 0;

@@ -150,7 +150,7 @@ VPRIV int as_directive_reloc(as_context *a, const char *p, const char *e)
 
 VPRIV int as_directive_data(as_context *a, const char *p, const char *e, int size)
 {
-	if (a->dwlocp) as_dwarf_row_emit(a);
+	if (a->dwarf_row_is_pending) as_dwarf_row_emit(a);
 	p = as_whitespace_skip(p, e);
 	if (p >= e) return 0;
 	for (;;) {
@@ -216,7 +216,7 @@ VPRIV int as_string_parse(as_context *a, const char **pp, const char *e, char *o
 
 VPRIV int as_directive_ascii(as_context *a, const char *p, const char *e, int z)
 {
-	if (a->dwlocp) as_dwarf_row_emit(a);
+	if (a->dwarf_row_is_pending) as_dwarf_row_emit(a);
 	p = as_whitespace_skip(p, e);
 	if (p >= e) return 0;
 	for (;;) {
@@ -238,7 +238,7 @@ VPRIV int as_directive_ascii(as_context *a, const char *p, const char *e, int z)
 /* .float/.single (size 4), .double (8): literals, as llvm-mc (inf, nan, signs) */
 VPRIV int as_directive_float(as_context *a, const char *p, const char *e, int size)
 {
-	if (a->dwlocp) as_dwarf_row_emit(a);
+	if (a->dwarf_row_is_pending) as_dwarf_row_emit(a);
 	p = as_whitespace_skip(p, e);
 	if (p >= e) return 0;
 	for (;;) {
@@ -403,7 +403,7 @@ VPRIV int as_directive_comm(as_context *a, const char *p, const char *e, int loc
 /* .uleb128/.sleb128 expr, ...: constants (label differences resolved by then) */
 VPRIV int as_directive_leb128(as_context *a, const char *p, const char *e, int sgn)
 {
-	if (a->dwlocp) as_dwarf_row_emit(a);
+	if (a->dwarf_row_is_pending) as_dwarf_row_emit(a);
 	for (;;) {
 		int64_t v;
 		as_value x;
@@ -566,7 +566,7 @@ VPRIV int as_directive_inst(as_context *a, const char *p, const char *e)
 		if (as_expression_value_parse(a, &p, e, &v)) return -1;
 		as_value_fold(a, &v);
 		if (!as_value_is_absolute(a, &v)) return as_error_report(a, "expected constant expression in .inst");
-		if (a->dwlocp) as_dwarf_row_emit(a);
+		if (a->dwarf_row_is_pending) as_dwarf_row_emit(a);
 		elf_insn(a->o, a->cur, (uint32_t)v.c);
 		p = as_whitespace_skip(p, e);
 		if (p >= e) return 0;

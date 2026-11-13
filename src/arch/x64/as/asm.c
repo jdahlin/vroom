@@ -370,9 +370,9 @@ VPRIV int x64_emit(as_context *a, XForm *f)
 		eb(&x, seg);
 	if (f->opsz16 && !f->vex)
 		eb(&x, 0x66);
-	if (a->x64_lock) {
+	if (a->x64_lock_prefix) {
 		eb(&x, 0xf0);
-		a->x64_lock = 0;
+		a->x64_lock_prefix = 0;
 	}
 	if (f->vex) {
 		/* VEX: R X B (inverted) and W from REX, mmmmm from the map, pp from the prefix */
@@ -485,11 +485,11 @@ VPRIV int x64_imm(as_context *a, const XOp *o, XForm *f, int64_t *k)
 	as_value v = o->v;
 
 	if (isconst(a, &v, k) && !o->mod) {
-		if (a->x64_isz == 1)
+		if (a->x64_operand_size == 1)
 			*k = (int8_t)*k;
-		else if (a->x64_isz == 2)
+		else if (a->x64_operand_size == 2)
 			*k = (int16_t)*k;
-		else if (a->x64_isz == 4)
+		else if (a->x64_operand_size == 4)
 			*k = (int32_t)*k;
 		return 0;
 	}
@@ -531,7 +531,7 @@ VPRIV int x64_alu(as_context *a, int n, int sz, XOp *o, int nops)
 	XOp *s = &o[0], *d = &o[1];
 	int w = sz == 8, p16 = sz == 2, b = sz == 1;
 
-	a->x64_isz = sz;
+	a->x64_operand_size = sz;
 	if (nops != 2)
 		return as_error_report(a, "invalid operand count");
 	if (s->kind == XK_IMM) {
@@ -624,7 +624,7 @@ VPRIV int x64_as_instruction_assemble(as_context *a, const char *p, const char *
 
 	if (wn >= sizeof mn)
 		return as_error_report(a, "invalid instruction mnemonic");
-	a->x64_isz = 0;
+	a->x64_operand_size = 0;
 	for (size_t i = 0; i < wn; i++)
 		mn[i] = (char)as_char_to_lower((unsigned char)p[i]);
 	mn[wn] = 0;
@@ -643,10 +643,10 @@ VPRIV int x64_as_instruction_assemble(as_context *a, const char *p, const char *
 
 			while (q < e && as_char_is_identifier((unsigned char)*q))
 				q++;
-			a->x64_lock = 1;
+			a->x64_lock_prefix = 1;
 			r = x64_as_instruction_assemble(a, p, e, (size_t)(q - p));
-			if (a->x64_lock) {	/* (an instruction without x64_emit: the prefix first) */
-				a->x64_lock = 0;
+			if (a->x64_lock_prefix) {	/* (an instruction without x64_emit: the prefix first) */
+				a->x64_lock_prefix = 0;
 			}
 			return r;
 		}
@@ -661,7 +661,7 @@ VPRIV int x64_as_instruction_assemble(as_context *a, const char *p, const char *
 		}
 		return 0;
 	}
-	if (a->nralias) {
+	if (a->register_alias_count) {
 		/* register aliases (name = %reg) written out as their registers */
 		static _Thread_local char rb[4096];
 		size_t n = 0;
@@ -728,8 +728,8 @@ VPRIV int x64_as_instruction_assemble(as_context *a, const char *p, const char *
 
 int as_x64_insn(as_context *a, char *mn, XOp *o, int nops)
 {
-	if (a->dwlocp) as_dwarf_row_emit(a);
-	a->x64_isz = 0;
+	if (a->dwarf_row_is_pending) as_dwarf_row_emit(a);
+	a->x64_operand_size = 0;
 	{
 		static int (*const fam[])(as_context *, char *, XOp *, int) = {
 			x64_i_crdr,

@@ -186,7 +186,7 @@ static int as_expression_primary_parse(as_expression_reader *l, as_value *v)
 		}
 		uint32_t y = as_symbol_intern(a, s, (size_t)(p - s));
 		*v = (as_value){ y, 0, 0 };
-		if (a->nralias) {
+		if (a->register_alias_count) {
 			const char *rn = as_register_alias_find(a, y);
 			if (rn) {	/* an alias of a register: as the register */
 				uint64_t h = 1469598103934665603ull;
@@ -195,7 +195,7 @@ static int as_expression_primary_parse(as_expression_reader *l, as_value *v)
 				return 0;
 			}
 		}
-		if (a->vcount) {
+		if (a->variable_count) {
 			as_variable *vr = as_variable_slot_find(a, y, 0);
 			if (vr && vr->v.add != (uint32_t)-1) *v = vr->v;
 		}

@@ -8,15 +8,15 @@
 
 VPRIV as_text as_text_duplicate(as_context *a, const char *s, size_t n)
 {
-	char *p = as_region_alloc(&a->defs, n + 1);
+	char *p = as_region_alloc(&a->definitions, n + 1);
 	memcpy(p, s, n); p[n] = 0;
 	return (as_text){ p, (uint32_t)n };
 }
 
 VPRIV uint32_t as_line_current(as_context *a)
 {
-	for (int i = a->nfr - 1; i >= 0; i--) if (a->fr[i].kind == AS_FRAME_FILE) return a->fr[i].sline;
-	return a->eofline;
+	for (int i = a->frame_count - 1; i >= 0; i--) if (a->frames[i].kind == AS_FRAME_FILE) return a->frames[i].statement_line;
+	return a->end_line;
 }
 
 VPRIV int as_error_report(as_context *a, const char *fmt, ...)
@@ -26,9 +26,9 @@ VPRIV int as_error_report(as_context *a, const char *fmt, ...)
 	char *m = a->msg + a->mlen;
 	size_t sz = sizeof a->msg - a->mlen;
 	/* inside a macro or .rept: its body's line, as llvm-mc's <instantiation> buffer */
-	bool inst = a->nfr && a->fr[a->nfr - 1].kind != AS_FRAME_FILE;
-	int k = snprintf(m, sz, "%s%s:%u: error: ", a->mlen ? "\n" : "", inst ? "<instantiation>" : a->fname,
-			 inst ? a->fr[a->nfr - 1].sline : as_line_current(a));
+	bool inst = a->frame_count && a->frames[a->frame_count - 1].kind != AS_FRAME_FILE;
+	int k = snprintf(m, sz, "%s%s:%u: error: ", a->mlen ? "\n" : "", inst ? "<instantiation>" : a->file_name,
+			 inst ? a->frames[a->frame_count - 1].statement_line : as_line_current(a));
 	va_list ap; va_start(ap, fmt);
 	if ((size_t)k < sz) vsnprintf(m + k, sz - k, fmt, ap);
 	va_end(ap);
@@ -39,19 +39,19 @@ VPRIV int as_error_report(as_context *a, const char *fmt, ...)
 
 VPRIV int as_frame_push(as_context *a, const char *p, size_t n, int kind, size_t mark)
 {
-	if (a->nfr >= AS_FRAMES_MAX) return as_error_report(a, "macros nested too deeply");
-	as_frame *f = &a->fr[a->nfr++];
-	f->p = p; f->e = p + n; f->kind = (uint8_t)kind; f->bol = 1;
-	f->ncond = (uint32_t)a->ncs; f->mark = mark; f->line = f->sline = 1;
-	f->pline = a->nfr > 1 ? a->fr[a->nfr - 2].sline : 0;
+	if (a->frame_count >= AS_FRAMES_MAX) return as_error_report(a, "macros nested too deeply");
+	as_frame *f = &a->frames[a->frame_count++];
+	f->p = p; f->e = p + n; f->kind = (uint8_t)kind; f->at_line_start = 1;
+	f->condition_count = (uint32_t)a->condition_count; f->region_mark = mark; f->line = f->statement_line = 1;
+	f->caller_line = a->frame_count > 1 ? a->frames[a->frame_count - 2].statement_line : 0;
 	return 0;
 }
 
 VPRIV void as_frame_pop(as_context *a)
 {
-	as_frame *f = &a->fr[--a->nfr];
-	if (f->kind != AS_FRAME_FILE) a->xs.used = f->mark;
-	else a->eofline = f->line;
+	as_frame *f = &a->frames[--a->frame_count];
+	if (f->kind != AS_FRAME_FILE) a->expansion_text.used = f->region_mark;
+	else a->end_line = f->line;
 }
 
 /* bytes as_statement_next must look at: newline, ';', comments, strings */
@@ -90,10 +90,10 @@ static __attribute__((noinline)) size_t as_statement_next_copy(as_context *a, as
 	for (;;) {
 		if (p >= e) break;
 		char c = *p;
-		if (c == '\n') { p++; f->line++; f->bol = 1; break; }
-		if (f->bol) {
+		if (c == '\n') { p++; f->line++; f->at_line_start = 1; break; }
+		if (f->at_line_start) {
 			if (c == ' ' || c == '\t' || c == '\r') { p++; if (n < cap) o[n++] = c; continue; }
-			f->bol = 0;
+			f->at_line_start = 0;
 			if (c == '#') {		/* cpp line marker (# N "file") / line comment */
 				const char *q = p + 1;
 				while (q < e && (*q == ' ' || *q == '\t')) q++;
@@ -104,7 +104,7 @@ static __attribute__((noinline)) size_t as_statement_next_copy(as_context *a, as
 					if (q < e && *q == '"') {
 						const char *r = ++q;
 						while (q < e && *q != '"' && *q != '\n') q++;
-						a->fname = as_text_duplicate(a, r, (size_t)(q - r)).s;
+						a->file_name = as_text_duplicate(a, r, (size_t)(q - r)).s;
 					}
 					if (ln) f->line = ln - 1;	/* the marker's newline makes it ln */
 				}
@@ -159,9 +159,9 @@ VPRIV __attribute__((always_inline)) size_t as_statement_next(as_context *a, as_
 {
 	const char *p = f->p, *e = f->e;
 	*raw = p;
-	f->sline = f->line;
+	f->statement_line = f->line;
 	const char *q = p;
-	int bol = f->bol;
+	int bol = f->at_line_start;
 	if (a->o->machine == EM_X86_64) goto slow;	/* ('#' comments: the copying scanner) */
 	if (bol) {
 		while (q < e && (*q == ' ' || *q == '\t' || *q == '\r')) q++;
@@ -174,7 +174,7 @@ VPRIV __attribute__((always_inline)) size_t as_statement_next(as_context *a, as_
 		else if (*q != ';') goto slow;
 		f->p = q + 1;
 	} else f->p = q;
-	f->bol = (uint8_t)bol;
+	f->at_line_start = (uint8_t)bol;
 	*s = p;
 	return (size_t)(q - p);
 slow:
@@ -216,7 +216,7 @@ static int as_symbol_assign(as_context *a, as_text n, const char *p, const char 
 		const char *t = e;
 		while (t > q && (t[-1] == ' ' || t[-1] == '\t')) t--;
 		const char *ar = NULL;
-		if (q < t && as_char_is_identifier_start((unsigned char)*q) && a->nralias) {	/* X_ = X0: an alias of an alias */
+		if (q < t && as_char_is_identifier_start((unsigned char)*q) && a->register_alias_count) {	/* X_ = X0: an alias of an alias */
 			for (r = q; r < t && as_char_is_identifier((unsigned char)*r); r++)
 				;
 			if (r == t) ar = as_register_alias_find(a, elf_sym_lookup(a->o, q, (uint32_t)(t - q)));
@@ -228,21 +228,21 @@ static int as_symbol_assign(as_context *a, as_text n, const char *p, const char 
 			else
 				q = ar - 1, r = ar + strlen(ar);
 			if (r == (ar ? r : t) && r - q - 1 < 8) {
-				if (a->nralias == a->raliascap) {
-					uint32_t nc = a->raliascap ? a->raliascap * 2 : 32;
-					void *nb = as_region_alloc(&a->defs, sizeof *a->ralias * nc);
-					if (a->nralias) memcpy(nb, a->ralias, sizeof *a->ralias * a->nralias);
-					a->ralias = nb, a->raliascap = nc;
+				if (a->register_alias_count == a->register_alias_capacity) {
+					uint32_t nc = a->register_alias_capacity ? a->register_alias_capacity * 2 : 32;
+					void *nb = as_region_alloc(&a->definitions, sizeof *a->register_aliases * nc);
+					if (a->register_alias_count) memcpy(nb, a->register_aliases, sizeof *a->register_aliases * a->register_alias_count);
+					a->register_aliases = nb, a->register_alias_capacity = nc;
 				}
-				a->ralias[a->nralias].sym = y;
-				memset(a->ralias[a->nralias].reg, 0, 8);
-				memcpy(a->ralias[a->nralias].reg, q + 1, (size_t)(r - q - 1));
-				a->nralias++;
+				a->register_aliases[a->register_alias_count].sym = y;
+				memset(a->register_aliases[a->register_alias_count].reg, 0, 8);
+				memcpy(a->register_aliases[a->register_alias_count].reg, q + 1, (size_t)(r - q - 1));
+				a->register_alias_count++;
 				return 0;
 			}
 		}
-		for (uint32_t i = 0; i < a->nralias; i++)	/* (redefined as a value: no longer an alias) */
-			if (a->ralias[i].sym == y) a->ralias[i].reg[0] = 0;
+		for (uint32_t i = 0; i < a->register_alias_count; i++)	/* (redefined as a value: no longer an alias) */
+			if (a->register_aliases[i].sym == y) a->register_aliases[i].reg[0] = 0;
 	}
 	if (as_expression_value_parse(a, &p, e, &v)) return -1;
 	elf_reg(a->o, y);
@@ -251,7 +251,7 @@ static int as_symbol_assign(as_context *a, as_text n, const char *p, const char 
 	ElfSym *s = elf_symp(a->o, y);
 	if ((s->flags & ESYM_DEFINED) && !(s->flags & ESYM_ABS) && !(s->flags & ESYM_NOSYMTAB))
 		return as_error_report(a, "redefinition of '%.*s'", (int)n.n, n.s);
-	as_variable *vr = a->vcount ? as_variable_slot_find(a, y, 0) : 0;
+	as_variable *vr = a->variable_count ? as_variable_slot_find(a, y, 0) : 0;
 	if (vr) vr->v.add = (uint32_t)-1;	/* dead */
 	if (!v.add && !v.sub) {
 		s->flags &= ~ESYM_DEFINED;
@@ -287,18 +287,18 @@ static int as_directive_dispatch(as_context *a, as_text w, const char *p, const 
 	}
 	switch (d[0]) {
 	case 'a':
-		if (AS_DIRECTIVE_IS("altmacro")) { a->altmacro = 1; return 0; }
+		if (AS_DIRECTIVE_IS("altmacro")) { a->altmacro_mode = 1; return 0; }
 		if (AS_DIRECTIVE_IS("addrsig")) { a->o->has_addrsig = 1; return 0; }
 		if (AS_DIRECTIVE_IS("addrsig_sym")) {
 			as_text nm;
 			if (as_name_parse(a, &p, e, &nm)) return -1;
-			if (a->nasg == a->asgcap) {
-				uint32_t nc = a->asgcap ? a->asgcap * 2 : 64;
-				uint32_t *t = as_region_alloc(&a->defs, sizeof *t * nc);
-				if (a->nasg) memcpy(t, a->asg, sizeof *t * a->nasg);
-				a->asg = t; a->asgcap = nc;
+			if (a->addrsig_symbol_count == a->addrsig_symbol_capacity) {
+				uint32_t nc = a->addrsig_symbol_capacity ? a->addrsig_symbol_capacity * 2 : 64;
+				uint32_t *t = as_region_alloc(&a->definitions, sizeof *t * nc);
+				if (a->addrsig_symbol_count) memcpy(t, a->addrsig_symbols, sizeof *t * a->addrsig_symbol_count);
+				a->addrsig_symbols = t; a->addrsig_symbol_capacity = nc;
 			}
-			a->asg[a->nasg++] = as_symbol_intern(a, nm.s, nm.n);
+			a->addrsig_symbols[a->addrsig_symbol_count++] = as_symbol_intern(a, nm.s, nm.n);
 			return 0;
 		}
 		if (AS_DIRECTIVE_IS("p2align") || (AS_DIRECTIVE_IS("align") && a->o->machine != EM_X86_64)) return as_directive_align(a, p, e, 1);
@@ -331,7 +331,7 @@ static int as_directive_dispatch(as_context *a, as_text w, const char *p, const 
 		break;
 	case 'e':
 		if (AS_DIRECTIVE_IS("equ")) goto set;
-		if (AS_DIRECTIVE_IS("end")) { a->ended = 1; return 0; }
+		if (AS_DIRECTIVE_IS("end")) { a->end_seen = 1; return 0; }
 		if (AS_DIRECTIVE_IS("error")) {
 			as_text t = as_text_trim(p, e);
 			return as_error_report(a, "%.*s", (int)t.n, t.s);
@@ -391,7 +391,7 @@ static int as_directive_dispatch(as_context *a, as_text w, const char *p, const 
 			/* MC's emitIdent: into .comment at once, a NUL before the first */
 			uint32_t s = elf_section(a->o, ".comment", 8, SHT_PROGBITS, SHF_MERGE | SHF_STRINGS, 1, 0);
 			elf_data(a->o, s);
-			if (!a->nident++) elf_fill(a->o, s, 1, 0);
+			if (!a->ident_count++) elf_fill(a->o, s, 1, 0);
 			elf_bytes(a->o, s, buf, k);
 			elf_fill(a->o, s, 1, 0);
 			return 0;
@@ -409,7 +409,7 @@ static int as_directive_dispatch(as_context *a, as_text w, const char *p, const 
 		if (AS_DIRECTIVE_IS("macro")) return as_directive_macro(a, p, e);
 		break;
 	case 'n':
-		if (AS_DIRECTIVE_IS("noaltmacro")) { a->altmacro = 0; return 0; }
+		if (AS_DIRECTIVE_IS("noaltmacro")) { a->altmacro_mode = 0; return 0; }
 		break;
 	case 'o':
 		if (AS_DIRECTIVE_IS("org")) return as_directive_org(a, p, e);
@@ -418,14 +418,14 @@ static int as_directive_dispatch(as_context *a, as_text w, const char *p, const 
 	case 'p':
 		if (AS_DIRECTIVE_IS("pushsection")) return as_directive_section(a, p, e, 1);
 		if (AS_DIRECTIVE_IS("popsection")) {
-			if (!a->nss) return as_error_report(a, ".popsection without corresponding .pushsection");
-			a->nss--;
-			if (a->cur != a->ss[a->nss].cur) a->dwlocp = 0;
-			a->cur = as_fragment_latest(a, a->ss[a->nss].cur); a->prev = as_fragment_latest(a, a->ss[a->nss].prev);
+			if (!a->section_stack_count) return as_error_report(a, ".popsection without corresponding .pushsection");
+			a->section_stack_count--;
+			if (a->cur != a->section_stack[a->section_stack_count].cur) a->dwarf_row_is_pending = 0;
+			a->cur = as_fragment_latest(a, a->section_stack[a->section_stack_count].cur); a->prev = as_fragment_latest(a, a->section_stack[a->section_stack_count].prev);
 			return 0;
 		}
 		if (AS_DIRECTIVE_IS("prefalign")) return as_directive_prefalign(a, p, e);
-		if (AS_DIRECTIVE_IS("previous")) { a->prev = as_fragment_latest(a, a->prev); uint32_t t = a->cur; if (a->prev != t) a->dwlocp = 0; a->cur = a->prev; a->prev = t; return 0; }
+		if (AS_DIRECTIVE_IS("previous")) { a->prev = as_fragment_latest(a, a->prev); uint32_t t = a->cur; if (a->prev != t) a->dwarf_row_is_pending = 0; a->cur = a->prev; a->prev = t; return 0; }
 		if (AS_DIRECTIVE_IS("p2align")) return as_directive_align(a, p, e, 1);
 		if (AS_DIRECTIVE_IS("p2alignw")) return as_directive_align_width(a, p, e, 1, 2);
 		if (AS_DIRECTIVE_IS("p2alignl")) return as_directive_align_width(a, p, e, 1, 4);
@@ -480,9 +480,9 @@ static int as_directive_dispatch(as_context *a, as_text w, const char *p, const 
 		if (AS_DIRECTIVE_IS("uleb128")) return as_directive_leb128(a, p, e, 0);
 		if (AS_DIRECTIVE_IS("unreq")) {
 			as_text nm = as_text_first_word(p, e);
-			for (uint32_t i = a->nal; i-- > 0;)
+			for (uint32_t i = a->alias_count; i-- > 0;)
 				if (a->al[i].name.n == nm.n && !strncasecmp(a->al[i].name.s, nm.s, nm.n)) {
-					a->al[i] = a->al[--a->nal];
+					a->al[i] = a->al[--a->alias_count];
 					as_alias_rehash(a);
 					return 0;
 				}
@@ -508,14 +508,14 @@ static int as_directive_dispatch(as_context *a, as_text w, const char *p, const 
 			p++;
 			if (as_name_parse(a, &p, e, &tg)) return -1;
 			uint32_t ya = as_symbol_intern(a, al.s, al.n), yt = as_symbol_intern(a, tg.s, tg.n);
-			if (a->nsv == a->svcap) {
-				uint32_t nc = a->svcap ? a->svcap * 2 : 16;
-				void *t = as_region_alloc(&a->defs, sizeof *a->sv * nc);
-				if (a->nsv) memcpy(t, a->sv, sizeof *a->sv * a->nsv);
-				a->sv = t; a->svcap = nc;
+			if (a->symver_count == a->symver_capacity) {
+				uint32_t nc = a->symver_capacity ? a->symver_capacity * 2 : 16;
+				void *t = as_region_alloc(&a->definitions, sizeof *a->symvers * nc);
+				if (a->symver_count) memcpy(t, a->symvers, sizeof *a->symvers * a->symver_count);
+				a->symvers = t; a->symver_capacity = nc;
 			}
-			a->sv[a->nsv].orig = ya; a->sv[a->nsv].ver = yt; a->sv[a->nsv].rm = 2;
-			a->nsv++;
+			a->symvers[a->symver_count].orig = ya; a->symvers[a->symver_count].ver = yt; a->symvers[a->symver_count].rm = 2;
+			a->symver_count++;
 			return 0;
 		}
 		if (AS_DIRECTIVE_IS("word")) return as_directive_data(a, p, e, a->o->machine == EM_X86_64 ? 2 : 4);	/* (x86: 2 bytes, as GNU as) */
@@ -526,9 +526,9 @@ static int as_directive_dispatch(as_context *a, as_text w, const char *p, const 
 			size_t k = 0;
 			const char *q = t.s;
 			if (t.n && *q == '"' && (size_t)(e - q) <= sizeof buf && !as_string_parse(a, &q, e, buf, &k))
-				fprintf(stderr, "%s: warning: %.*s\n", a->fname ? a->fname : "<stdin>", (int)k, buf);
+				fprintf(stderr, "%s: warning: %.*s\n", a->file_name ? a->file_name : "<stdin>", (int)k, buf);
 			else
-				fprintf(stderr, "%s: warning: .warning directive invoked in source file\n", a->fname ? a->fname : "<stdin>");
+				fprintf(stderr, "%s: warning: .warning directive invoked in source file\n", a->file_name ? a->file_name : "<stdin>");
 			return 0;
 		}
 		break;
@@ -603,23 +603,23 @@ static int as_statement_assemble(as_context *a, const char *p, const char *e)
 	if (q < e && *q == '=' && !(q + 1 < e && q[1] == '=')) return as_symbol_assign(a, w, q + 1, e);
 	if (q + 4 <= e && !memcmp(q, ".req", 4) && (q + 4 == e || !as_char_is_identifier((unsigned char)q[4]))) {
 		as_text reg = as_text_trim(q + 4, e);
-		if (a->nal == a->alcap) {
-			uint32_t nc = a->alcap ? a->alcap * 2 : 64;
-			as_register_alias *t = as_region_alloc(&a->defs, sizeof *t * nc);
-			if (a->nal) memcpy(t, a->al, sizeof *t * a->nal);
-			a->al = t; a->alcap = nc;
+		if (a->alias_count == a->alias_capacity) {
+			uint32_t nc = a->alias_capacity ? a->alias_capacity * 2 : 64;
+			as_register_alias *t = as_region_alloc(&a->definitions, sizeof *t * nc);
+			if (a->alias_count) memcpy(t, a->al, sizeof *t * a->alias_count);
+			a->al = t; a->alias_capacity = nc;
 		}
-		a->al[a->nal].name = as_text_duplicate(a, w.s, w.n);
-		a->al[a->nal].reg = as_text_duplicate(a, reg.s, reg.n);
+		a->al[a->alias_count].name = as_text_duplicate(a, w.s, w.n);
+		a->al[a->alias_count].reg = as_text_duplicate(a, reg.s, reg.n);
 		uint32_t h = as_alias_hash(w.s, w.n);
-		a->al[a->nal].next = a->alh[h]; a->alh[h] = a->nal + 1;
-		a->nal++;
+		a->al[a->alias_count].next = a->alias_buckets[h]; a->alias_buckets[h] = a->alias_count + 1;
+		a->alias_count++;
 		return 0;
 	}
 	as_macro *m = as_macro_find(a, w.s, w.n);
 	if (m) return as_macro_invoke(a, m, w.s + w.n, e);
 	if (w.s[0] == '.') return as_directive_dispatch(a, w, w.s + w.n, e);
-	if (a->dwlocp) as_dwarf_row_emit(a);
+	if (a->dwarf_row_is_pending) as_dwarf_row_emit(a);
 	if (a->o->machine == EM_X86_64)
 		return x64_as_instruction_assemble(a, w.s, e, w.n);
 	return a64_as_instruction_assemble(a, w.s, e, w.n);
@@ -630,17 +630,17 @@ static int as_statement_assemble(as_context *a, const char *p, const char *e)
 as_context *as_new(void)
 {
 	as_context *a = as_region_reserve(sizeof *a);
-	a->xs.base = as_region_reserve((size_t)1 << 32); a->xs.cap = (size_t)1 << 32;
-	a->defs.base = as_region_reserve((size_t)1 << 30); a->defs.cap = (size_t)1 << 30;
+	a->expansion_text.base = as_region_reserve((size_t)1 << 32); a->expansion_text.cap = (size_t)1 << 32;
+	a->definitions.base = as_region_reserve((size_t)1 << 30); a->definitions.cap = (size_t)1 << 30;
 	a->sb.base = as_region_reserve((size_t)1 << 24); a->sb.cap = (size_t)1 << 24;
 	return a;
 }
 
-void as_statistics_get(const as_context *a, uint64_t *stmts, uint64_t *bytes) { *stmts = a->nstmt; *bytes = a->nstmtb; }
+void as_statistics_get(const as_context *a, uint64_t *stmts, uint64_t *bytes) { *stmts = a->statement_count; *bytes = a->statement_bytes; }
 
 void as_free(as_context *a)
 {
-	munmap(a->xs.base, a->xs.cap); munmap(a->defs.base, a->defs.cap); munmap(a->sb.base, a->sb.cap);
+	munmap(a->expansion_text.base, a->expansion_text.cap); munmap(a->definitions.base, a->definitions.cap); munmap(a->sb.base, a->sb.cap);
 	munmap(a, sizeof *a);
 }
 
@@ -656,25 +656,25 @@ void as_include_directory_set(as_context *a, const char *dir) { a->dir = dir; }
  */
 void as_begin(as_context *a, ElfObj *o, const char *name)
 {
-	a->o = o; a->nfr = 0; a->ncs = 0; a->nss = 0; a->err = 0; a->msg[0] = 0; a->mlen = a->nerr = 0;
-	a->xs.used = 0; a->defs.used = 0; a->ninst = 0; a->nal = 0; a->alcap = 0; a->al = 0;
-	memset(a->alh, 0, sizeof a->alh);
-	a->fname = name;
-	a->nident = 0; a->ended = 0; a->altmacro = 0; a->eofline = 0;
-	a->ncfi = a->cficap = a->nfde = a->fdecap = 0; a->infde = 0; a->cfi_eh = 0; a->nsv = a->svcap = 0; a->nasg = a->asgcap = 0;
-	a->ndwf = a->dwfcap = a->ndwd = a->dwdcap = a->ndwl = a->dwlcap = 0; a->npfa = a->pfacap = 0; a->dwlocp = a->dwtab = 0;
-	a->var_rank = NULL;
-	memset(&a->dwcur, 0, sizeof a->dwcur); a->dwcur.flags = 1;
-	a->mmask = 255; a->mcount = 0;
-	a->mtab = as_region_alloc(&a->defs, sizeof(as_macro *) * (a->mmask + 1));
-	memset(a->mtab, 0, sizeof(as_macro *) * (a->mmask + 1));
-	a->npool = 0; a->poolcap = 0; a->pool = 0;
-	a->vmask = 63; a->vcount = 0;
-	a->vars = as_region_alloc(&a->defs, sizeof(as_variable) * (a->vmask + 1));
-	memset(a->vars, 0, sizeof(as_variable) * (a->vmask + 1));
-	a->nlmask = 255; a->nlcount = 0;
-	a->nl = as_region_alloc(&a->defs, sizeof(as_numeric_label) * (a->nlmask + 1));
-	memset(a->nl, 0, sizeof(as_numeric_label) * (a->nlmask + 1));
+	a->o = o; a->frame_count = 0; a->condition_count = 0; a->section_stack_count = 0; a->err = 0; a->msg[0] = 0; a->mlen = a->error_count = 0;
+	a->expansion_text.used = 0; a->definitions.used = 0; a->ninst = 0; a->alias_count = 0; a->alias_capacity = 0; a->al = 0;
+	memset(a->alias_buckets, 0, sizeof a->alias_buckets);
+	a->file_name = name;
+	a->ident_count = 0; a->end_seen = 0; a->altmacro_mode = 0; a->end_line = 0;
+	a->cfi_instruction_count = a->cfi_instruction_capacity = a->frame_description_count = a->frame_description_capacity = 0; a->in_frame_description = 0; a->cfi_eh_frame_selected = 0; a->symver_count = a->symver_capacity = 0; a->addrsig_symbol_count = a->addrsig_symbol_capacity = 0;
+	a->dwarf_file_count = a->dwarf_file_capacity = a->dwarf_directory_count = a->dwarf_directory_capacity = a->dwarf_row_count = a->dwarf_row_capacity = 0; a->variable_item_count = a->variable_item_capacity = 0; a->dwarf_row_is_pending = a->dwarf_table_is_due = 0;
+	a->variable_rank = NULL;
+	memset(&a->dwarf_row_pending, 0, sizeof a->dwarf_row_pending); a->dwarf_row_pending.flags = 1;
+	a->macro_mask = 255; a->macro_count = 0;
+	a->macro_table = as_region_alloc(&a->definitions, sizeof(as_macro *) * (a->macro_mask + 1));
+	memset(a->macro_table, 0, sizeof(as_macro *) * (a->macro_mask + 1));
+	a->literal_pool_count = 0; a->literal_pool_capacity = 0; a->pool = 0;
+	a->variable_mask = 63; a->variable_count = 0;
+	a->variables = as_region_alloc(&a->definitions, sizeof(as_variable) * (a->variable_mask + 1));
+	memset(a->variables, 0, sizeof(as_variable) * (a->variable_mask + 1));
+	a->numeric_label_mask = 255; a->numeric_label_count = 0;
+	a->numeric_labels = as_region_alloc(&a->definitions, sizeof(as_numeric_label) * (a->numeric_label_mask + 1));
+	memset(a->numeric_labels, 0, sizeof(as_numeric_label) * (a->numeric_label_mask + 1));
 	elf_reset(o);
 	uint32_t text_sec = as_section_standard_find(a, ".text");
 	elf_sec(o, text_sec)->align = 2;
@@ -686,49 +686,49 @@ int as_snippet_assemble(as_context *a, const char *text, size_t len)
 	ElfObj *o = a->o;
 	if (a->err) return -1;
 	as_frame_push(a, text, len, AS_FRAME_FILE, 0);
-	while (a->nfr && !a->err) {
-		as_frame *f = &a->fr[a->nfr - 1];
+	while (a->frame_count && !a->err) {
+		as_frame *f = &a->frames[a->frame_count - 1];
 		if (f->p >= f->e) { as_frame_pop(a); continue; }
 		const char *raw, *s;
 		size_t n = as_statement_next(a, f, &raw, &s);
-		a->nstmt++; a->nstmtb += n + 1;
+		a->statement_count++; a->statement_bytes += n + 1;
 		if (as_statement_assemble(a, s, s + n)) {
 			size_t k = strlen(a->msg);
 			k += (size_t)snprintf(a->msg + k, sizeof a->msg - k, "\n  in: %.*s", (int)(n > 200 ? 200 : n), s);
 			/* the instantiations it is in, innermost first (llvm-mc's notes) */
-			for (int i = a->nfr - 1; i > 0 && a->fr[i].kind != AS_FRAME_FILE && k < sizeof a->msg; i--)
+			for (int i = a->frame_count - 1; i > 0 && a->frames[i].kind != AS_FRAME_FILE && k < sizeof a->msg; i--)
 				k += (size_t)snprintf(a->msg + k, sizeof a->msg - k, "\n%s:%u: note: while in macro instantiation",
-						      a->fr[i - 1].kind == AS_FRAME_FILE ? a->fname : "<instantiation>", a->fr[i].pline);
+						      a->frames[i - 1].kind == AS_FRAME_FILE ? a->file_name : "<instantiation>", a->frames[i].caller_line);
 			/* as llvm-mc: report it and go on with the next statement (at most 20) */
 			a->mlen = (uint32_t)strlen(a->msg);
-			if (++a->nerr >= 20 || a->mlen + 600 > sizeof a->msg) break;
+			if (++a->error_count >= 20 || a->mlen + 600 > sizeof a->msg) break;
 			a->err = 0;
 			continue;
 		}
 		if (o->has_err) { as_error_report(a, "%s", o->err); break; }
-		if (a->ended) break;	/* .end: the rest of the input is ignored */
+		if (a->end_seen) break;	/* .end: the rest of the input is ignored */
 	}
-	a->nfr = 0;
-	if (a->nerr) a->err = 1;
+	a->frame_count = 0;
+	if (a->error_count) a->err = 1;
 	return a->err ? -1 : 0;
 }
 
 int as_end(as_context *a)
 {
 	ElfObj *o = a->o;
-	if (a->ncs && (!a->err || a->nerr)) {	/* (after statement errors too, as llvm-mc) */
+	if (a->condition_count && (!a->err || a->error_count)) {	/* (after statement errors too, as llvm-mc) */
 		a->err = 0;
 		as_error_report(a, "unmatched .ifs or .elses");
 	}
-	if (!a->err && a->npool) a64_as_pools_flush(a);
+	if (!a->err && a->literal_pool_count) a64_as_pools_flush(a);
 	if (!a->err) {
 		/* undefined numeric forward references */
-		for (uint32_t i = 0; i <= a->nlmask; i++)
-			if (a->nl[i].fwd && !(elf_symp(o, a->nl[i].fwd)->flags & ESYM_DEFINED)) { as_error_report(a, "directional label undefined"); break; }
+		for (uint32_t i = 0; i <= a->numeric_label_mask; i++)
+			if (a->numeric_labels[i].fwd && !(elf_symp(o, a->numeric_labels[i].fwd)->flags & ESYM_DEFINED)) { as_error_report(a, "directional label undefined"); break; }
 	}
-	if (!a->err && a->vcount) {
-		for (uint32_t i = 0; i <= a->vmask; i++) {
-			as_variable *vr = &a->vars[i];
+	if (!a->err && a->variable_count) {
+		for (uint32_t i = 0; i <= a->variable_mask; i++) {
+			as_variable *vr = &a->variables[i];
 			if (!vr->sym || vr->v.add == (uint32_t)-1) continue;
 			ElfSym *s = elf_symp(o, vr->sym);
 			if (s->flags & ESYM_TEMP) continue;
@@ -742,13 +742,13 @@ int as_end(as_context *a)
 			else { as_error_report(a, "unsupported variable '%s'", s->name); break; }
 		}
 	}
-	if (!a->err && a->npfa) as_variable_items_finish(a);
-	if (!a->err && a->nfde) as_cfi_frame_emit(a);
-	if (!a->err && a->dwtab) as_dwarf_line_finish(a);
-	if (!a->err && a->nsv) as_symver_finish(a);
-	if (!a->err && a->nasg) {
-		o->addrsig = a->asg;	/* in a->defs: lives until the next run, after the object is written */
-		o->naddrsig = a->nasg;
+	if (!a->err && a->variable_item_count) as_variable_items_finish(a);
+	if (!a->err && a->frame_description_count) as_cfi_frame_emit(a);
+	if (!a->err && a->dwarf_table_is_due) as_dwarf_line_finish(a);
+	if (!a->err && a->symver_count) as_symver_finish(a);
+	if (!a->err && a->addrsig_symbol_count) {
+		o->addrsig = a->addrsig_symbols;	/* in a->defs: lives until the next run, after the object is written */
+		o->naddrsig = a->addrsig_symbol_count;
 	}
 	return a->err ? -1 : 0;
 }
@@ -764,7 +764,7 @@ uint32_t as_symbol_by_name(as_context *a, const char *name, size_t len) { return
 ElfVal as_symbol_value(as_context *a, uint32_t y, int64_t c)
 {
 	as_value v = { y, 0, 0 };
-	if (a->vcount) {
+	if (a->variable_count) {
 		as_variable *vr = as_variable_slot_find(a, y, 0);
 		if (vr && vr->v.add != (uint32_t)-1) v = vr->v;
 	}

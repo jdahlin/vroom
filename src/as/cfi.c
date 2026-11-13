@@ -64,17 +64,17 @@ static int as_cfi_register_parse(as_context *a, const char **pp, const char *e, 
 
 static struct as_cfi_instruction *as_cfi_instruction_push(as_context *a, uint8_t op)
 {
-	if (a->ncfi == a->cficap) {
-		uint32_t nc = a->cficap ? a->cficap * 2 : 256;
-		struct as_cfi_instruction *t = as_region_alloc(&a->defs, sizeof *t * nc);
-		if (a->ncfi) memcpy(t, a->cfi, sizeof *t * a->ncfi);
-		a->cfi = t; a->cficap = nc;
+	if (a->cfi_instruction_count == a->cfi_instruction_capacity) {
+		uint32_t nc = a->cfi_instruction_capacity ? a->cfi_instruction_capacity * 2 : 256;
+		struct as_cfi_instruction *t = as_region_alloc(&a->definitions, sizeof *t * nc);
+		if (a->cfi_instruction_count) memcpy(t, a->cfi, sizeof *t * a->cfi_instruction_count);
+		a->cfi = t; a->cfi_instruction_capacity = nc;
 	}
-	struct as_cfi_instruction *c = &a->cfi[a->ncfi++];
+	struct as_cfi_instruction *c = &a->cfi[a->cfi_instruction_count++];
 	memset(c, 0, sizeof *c);
 	c->op = op;
 	c->lab = as_label_temporary_define(a);
-	a->fde[a->nfde - 1].n++;
+	a->frame_descriptions[a->frame_description_count - 1].n++;
 	return c;
 }
 
@@ -94,36 +94,36 @@ VPRIV int as_directive_cfi(as_context *a, as_text w, const char *p, const char *
 			if (p < e && *p == ',') p = as_whitespace_skip(p + 1, e);
 		}
 		if (dbg) return as_error_report(a, ".debug_frame is not supported");
-		a->cfi_eh = !eh;
+		a->cfi_eh_frame_selected = !eh;
 		return 0;
 	}
 	if (AS_CFI_DIRECTIVE_IS("cfi_startproc")) {
-		if (a->infde) return as_error_report(a, "starting new .cfi frame before finishing the previous one");
-		if (a->nfde == a->fdecap) {
-			uint32_t nc = a->fdecap ? a->fdecap * 2 : 64;
-			struct as_frame_description *t = as_region_alloc(&a->defs, sizeof *t * nc);
-			if (a->nfde) memcpy(t, a->fde, sizeof *t * a->nfde);
-			a->fde = t; a->fdecap = nc;
+		if (a->in_frame_description) return as_error_report(a, "starting new .cfi frame before finishing the previous one");
+		if (a->frame_description_count == a->frame_description_capacity) {
+			uint32_t nc = a->frame_description_capacity ? a->frame_description_capacity * 2 : 64;
+			struct as_frame_description *t = as_region_alloc(&a->definitions, sizeof *t * nc);
+			if (a->frame_description_count) memcpy(t, a->frame_descriptions, sizeof *t * a->frame_description_count);
+			a->frame_descriptions = t; a->frame_description_capacity = nc;
 		}
-		struct as_frame_description *f = &a->fde[a->nfde++];
+		struct as_frame_description *f = &a->frame_descriptions[a->frame_description_count++];
 		memset(f, 0, sizeof *f);
 		as_text t = as_text_trim(p, e);
-		if (t.n) { if (!as_text_equals(t, "simple")) return as_error_report(a, "unexpected token"); f->simple = 1; }
-		f->start = as_label_temporary_define(a); f->first = a->ncfi; f->ra = a->o->machine == EM_X86_64 ? 16 : 30;
-		a->infde = 1;
+		if (t.n) { if (!as_text_equals(t, "simple")) return as_error_report(a, "unexpected token"); f->is_simple = 1; }
+		f->start = as_label_temporary_define(a); f->first = a->cfi_instruction_count; f->ra = a->o->machine == EM_X86_64 ? 16 : 30;
+		a->in_frame_description = 1;
 		return 0;
 	}
-	if (!a->infde) return as_error_report(a, "this directive must appear between .cfi_startproc and .cfi_endproc directives");
-	struct as_frame_description *f = &a->fde[a->nfde - 1];
-	if (AS_CFI_DIRECTIVE_IS("cfi_endproc")) { f->end = as_label_temporary_define(a); a->infde = 0; return 0; }
+	if (!a->in_frame_description) return as_error_report(a, "this directive must appear between .cfi_startproc and .cfi_endproc directives");
+	struct as_frame_description *f = &a->frame_descriptions[a->frame_description_count - 1];
+	if (AS_CFI_DIRECTIVE_IS("cfi_endproc")) { f->end = as_label_temporary_define(a); a->in_frame_description = 0; return 0; }
 	if (AS_CFI_DIRECTIVE_IS("cfi_signal_frame")) { f->sig = 1; return 0; }
-	if (AS_CFI_DIRECTIVE_IS("cfi_b_key_frame")) { f->bkey = 1; return 0; }
+	if (AS_CFI_DIRECTIVE_IS("cfi_b_key_frame")) { f->uses_b_key = 1; return 0; }
 	if (AS_CFI_DIRECTIVE_IS("cfi_return_column")) return as_cfi_register_parse(a, &p, e, &f->ra);
 	if (AS_CFI_DIRECTIVE_IS("cfi_remember_state")) { as_cfi_instruction_push(a, AS_CFI_REMEMBER); return 0; }
 	if (AS_CFI_DIRECTIVE_IS("cfi_restore_state")) { as_cfi_instruction_push(a, AS_CFI_RESTORE_STATE); return 0; }
 	if (AS_CFI_DIRECTIVE_IS("cfi_negate_ra_state") || AS_CFI_DIRECTIVE_IS("cfi_window_save")) { as_cfi_instruction_push(a, AS_CFI_NEGATE_RA); return 0; }
 	if (AS_CFI_DIRECTIVE_IS("cfi_escape")) {
-		uint8_t *b = as_region_alloc(&a->defs, (size_t)(e - p) + 1);
+		uint8_t *b = as_region_alloc(&a->definitions, (size_t)(e - p) + 1);
 		uint32_t n = 0;
 		while (p < e) {
 			int64_t v;
@@ -158,7 +158,7 @@ VPRIV int as_directive_cfi(as_context *a, as_text w, const char *p, const char *
 		}
 	} else return as_error_report(a, "unknown directive '.%.*s'", (int)w.n, w.s);
 	struct as_cfi_instruction *c = as_cfi_instruction_push(a, op);
-	c->reg = r1; c->reg2 = r2; c->off = off;
+	c->reg = r1; c->register_second = r2; c->off = off;
 	return 0;
 #undef CFIS
 }
@@ -170,8 +170,8 @@ VPRIV int as_directive_cfi(as_context *a, as_text w, const char *p, const char *
 VPRIV void as_cfi_frame_emit(as_context *a)
 {
 	ElfObj *o = a->o;
-	if (a->infde) { as_error_report(a, "unfinished frame"); return; }
-	if (!a->nfde || a->cfi_eh) return;
+	if (a->in_frame_description) { as_error_report(a, "unfinished frame"); return; }
+	if (!a->frame_description_count || a->cfi_eh_frame_selected) return;
 	int x86 = o->machine == EM_X86_64;
 	uint32_t sec = elf_section(o, ".eh_frame", 9, x86 ? 0x70000001u /* SHT_X86_64_UNWIND */ : SHT_PROGBITS, SHF_ALLOC, 0, 0);
 	uint32_t fr = sec;
@@ -180,28 +180,28 @@ VPRIV void as_cfi_frame_emit(as_context *a)
 	as_fragment_offsets_cache(o);
 	struct { uint32_t key, off; } cies[8]; uint32_t ncie = 0;
 	size_t cap = 64;
-	for (uint32_t i = 0; i < a->nfde; i++) cap += 64 + 16 * (size_t)a->fde[i].n;
-	for (uint32_t i = 0; i < a->ncfi; i++) if (a->cfi[i].op == AS_CFI_ESCAPE) cap += (size_t)a->cfi[i].off;
-	as_byte_span b = { as_region_alloc(&a->defs, cap), 0 };
-	size_t *pcbs = as_region_alloc(&a->defs, sizeof(size_t) * a->nfde);
+	for (uint32_t i = 0; i < a->frame_description_count; i++) cap += 64 + 16 * (size_t)a->frame_descriptions[i].n;
+	for (uint32_t i = 0; i < a->cfi_instruction_count; i++) if (a->cfi[i].op == AS_CFI_ESCAPE) cap += (size_t)a->cfi[i].off;
+	as_byte_span b = { as_region_alloc(&a->definitions, cap), 0 };
+	size_t *pcbs = as_region_alloc(&a->definitions, sizeof(size_t) * a->frame_description_count);
 	/* MC stable-sorts the FDEs by CIE key (signal frame, simple, RA column, B key) */
-	uint32_t *ord = as_region_alloc(&a->defs, sizeof(uint32_t) * a->nfde);
-	for (uint32_t i = 0; i < a->nfde; i++) {
-		struct as_frame_description *f = &a->fde[i];
-		uint32_t key = (uint32_t)f->sig << 30 | (uint32_t)f->simple << 29 | f->ra << 1 | f->bkey;
+	uint32_t *ord = as_region_alloc(&a->definitions, sizeof(uint32_t) * a->frame_description_count);
+	for (uint32_t i = 0; i < a->frame_description_count; i++) {
+		struct as_frame_description *f = &a->frame_descriptions[i];
+		uint32_t key = (uint32_t)f->sig << 30 | (uint32_t)f->is_simple << 29 | f->ra << 1 | f->uses_b_key;
 		uint32_t k = i;
 		while (k > 0) {
-			struct as_frame_description *g = &a->fde[ord[k - 1]];
-			uint32_t gk = (uint32_t)g->sig << 30 | (uint32_t)g->simple << 29 | g->ra << 1 | g->bkey;
+			struct as_frame_description *g = &a->frame_descriptions[ord[k - 1]];
+			uint32_t gk = (uint32_t)g->sig << 30 | (uint32_t)g->is_simple << 29 | g->ra << 1 | g->uses_b_key;
 			if (gk <= key) break;
 			ord[k] = ord[k - 1]; k--;
 		}
 		ord[k] = i;
 	}
-	for (uint32_t oi = 0; oi < a->nfde; oi++) {
+	for (uint32_t oi = 0; oi < a->frame_description_count; oi++) {
 		uint32_t i = ord[oi];
-		struct as_frame_description *f = &a->fde[i];
-		uint32_t key = (uint32_t)f->sig << 30 | (uint32_t)f->simple << 29 | f->ra << 1 | f->bkey;
+		struct as_frame_description *f = &a->frame_descriptions[i];
+		uint32_t key = (uint32_t)f->sig << 30 | (uint32_t)f->is_simple << 29 | f->ra << 1 | f->uses_b_key;
 		uint32_t ci;
 		for (ci = 0; ci < ncie; ci++) if (cies[ci].key == key) break;
 		if (ci == ncie) {
@@ -213,15 +213,15 @@ VPRIV void as_cfi_frame_emit(as_context *a)
 			b.p[b.n++] = 1;				/* version */
 			b.p[b.n++] = 'z'; b.p[b.n++] = 'R';
 			if (f->sig) b.p[b.n++] = 'S';
-			if (f->bkey) b.p[b.n++] = 'B';
+			if (f->uses_b_key) b.p[b.n++] = 'B';
 			b.p[b.n++] = 0;
 			as_leb128_unsigned_append(&b, 1); as_leb128_signed_append(&b, x86 ? -8 : -4);
 			b.p[b.n++] = (uint8_t)f->ra;
 			as_leb128_unsigned_append(&b, 1); b.p[b.n++] = 0x1b;	/* augmentation: pcrel sdata4 */
-			if (!f->simple && x86) {	/* cfa = rsp + 8, the return address at cfa - 8 */
+			if (!f->is_simple && x86) {	/* cfa = rsp + 8, the return address at cfa - 8 */
 				b.p[b.n++] = 0x0c; as_leb128_unsigned_append(&b, 7); as_leb128_unsigned_append(&b, 8);
 				b.p[b.n++] = 0x80 | 16; as_leb128_unsigned_append(&b, 1);
-			} else if (!f->simple) { b.p[b.n++] = 0x0c; as_leb128_unsigned_append(&b, 31); as_leb128_unsigned_append(&b, 0); }
+			} else if (!f->is_simple) { b.p[b.n++] = 0x0c; as_leb128_unsigned_append(&b, 31); as_leb128_unsigned_append(&b, 0); }
 			while ((b.n - st) & 3) b.p[b.n++] = 0;
 			uint32_t len = (uint32_t)(b.n - st - 4);
 			memcpy(b.p + st, &len, 4);
@@ -271,7 +271,7 @@ VPRIV void as_cfi_frame_emit(as_context *a)
 				break;
 			case AS_CFI_UNDEFINED: b.p[b.n++] = 0x07; as_leb128_unsigned_append(&b, c->reg); break;
 			case AS_CFI_SAME: b.p[b.n++] = 0x08; as_leb128_unsigned_append(&b, c->reg); break;
-			case AS_CFI_REGISTER: b.p[b.n++] = 0x09; as_leb128_unsigned_append(&b, c->reg); as_leb128_unsigned_append(&b, c->reg2); break;
+			case AS_CFI_REGISTER: b.p[b.n++] = 0x09; as_leb128_unsigned_append(&b, c->reg); as_leb128_unsigned_append(&b, c->register_second); break;
 			case AS_CFI_REMEMBER: b.p[b.n++] = 0x0a; break;
 			case AS_CFI_RESTORE_STATE: b.p[b.n++] = 0x0b; break;
 			case AS_CFI_NEGATE_RA: b.p[b.n++] = 0x2d; break;
@@ -279,7 +279,7 @@ VPRIV void as_cfi_frame_emit(as_context *a)
 			}
 		}
 		while ((b.n - st) & 3) b.p[b.n++] = 0;
-		if (oi == a->nfde - 1) while (b.n & 7) b.p[b.n++] = 0;	/* the section ends 8-aligned (MC) */
+		if (oi == a->frame_description_count - 1) while (b.n & 7) b.p[b.n++] = 0;	/* the section ends 8-aligned (MC) */
 		uint32_t len = (uint32_t)(b.n - st - 4);
 		memcpy(b.p + st, &len, 4);
 		pcbs[i] = pcb;
@@ -287,9 +287,9 @@ VPRIV void as_cfi_frame_emit(as_context *a)
 	uint64_t at = elf_frag(o, fr)->size;
 	uint8_t *q = elf_grow(o, fr, b.n);
 	memcpy(q, b.p, b.n);
-	for (uint32_t oi = 0; oi < a->nfde; oi++) {
+	for (uint32_t oi = 0; oi < a->frame_description_count; oi++) {
 		uint32_t i = ord[oi];
-		struct as_frame_description *f = &a->fde[i];
+		struct as_frame_description *f = &a->frame_descriptions[i];
 		elf_fixup(o, fr, at + pcbs[i], q + pcbs[i], x86 ? R_X86_64_PC32 : R_AARCH64_PREL32, (as_value){ f->start, 0, 0 });
 		elf_fixup(o, fr, at + pcbs[i] + 4, q + pcbs[i] + 4, x86 ? R_X86_64_32 : R_AARCH64_ABS32, (as_value){ f->end, f->start, 0 });
 	}

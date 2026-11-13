@@ -290,7 +290,7 @@ VPRIV int x64_i_int(as_context *a, char *mn, XOp *o, int nops)
 			if (!strcmp(m, "imul")) {
 				int z = x64_size(a, sz, &o[0], &o[nops - 1]);
 
-				a->x64_isz = z;
+				a->x64_operand_size = z;
 				for (int i = 0; i < nops; i++)
 					if (o[i].kind == XK_EXPR)
 						o[i].kind = XK_MEM;

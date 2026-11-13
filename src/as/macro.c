@@ -5,8 +5,8 @@
 
 VPRIV as_macro *as_macro_find(as_context *a, const char *s, size_t n)
 {
-	uint32_t h = as_text_hash(s, n) & a->mmask;
-	for (as_macro *m = a->mtab[h]; m; m = m->next)
+	uint32_t h = as_text_hash(s, n) & a->macro_mask;
+	for (as_macro *m = a->macro_table[h]; m; m = m->next)
 		if (m->name.n == n && !memcmp(m->name.s, s, n)) return m;
 	return 0;
 }
@@ -29,7 +29,7 @@ static int as_directive_is_loop(as_text w)
  * .endm (macro = 1) or .endr.  Returns the raw text. */
 static int as_macro_body_collect(as_context *a, int macro, as_text *body)
 {
-	as_frame *f = &a->fr[a->nfr - 1];
+	as_frame *f = &a->frames[a->frame_count - 1];
 	const char *start = f->p;
 	int depth = 0;
 	while (f->p < f->e) {
@@ -127,7 +127,7 @@ static int as_macro_argument_parse_plain(const char **pp, const char *e, int var
 static int as_macro_argument_parse(as_context *a, const char **pp, const char *e, int vararg, as_text *out)
 {
 	const char *p = *pp;
-	char *buf = (char *)as_region_alloc(&a->xs, (size_t)(e - p) + 1);
+	char *buf = (char *)as_region_alloc(&a->expansion_text, (size_t)(e - p) + 1);
 	size_t n = 0;
 	if (vararg) {
 		p = as_whitespace_skip(p, e);
@@ -179,7 +179,7 @@ static int as_macro_argument_parse(as_context *a, const char **pp, const char *e
 		buf[n++] = c; p++;
 	}
 	if (depth) return as_error_report(a, "unbalanced parentheses in argument");
-	a->xs.used = (size_t)((uint8_t *)buf - a->xs.base) + n;
+	a->expansion_text.used = (size_t)((uint8_t *)buf - a->expansion_text.base) + n;
 	*pp = p;
 	*out = (as_text){ buf, (uint32_t)n };
 	return 0;
@@ -265,7 +265,7 @@ static int as_macro_argument_parse_altmacro(as_context *a, const char **pp, cons
 		int k = snprintf(buf, sizeof buf, "%lld", (long long)v);
 		*out = as_text_duplicate(a, buf, (size_t)k);
 	} else {
-		char *o = as_region_alloc(&a->defs, (size_t)(e - p) + 1);
+		char *o = as_region_alloc(&a->definitions, (size_t)(e - p) + 1);
 		size_t n = 0;
 		for (p++; p < e && *p != '>'; p++) {
 			if (*p == '!' && p + 1 < e) p++;
@@ -322,7 +322,7 @@ VPRIV int as_directive_macro(as_context *a, const char *p, const char *e)
 {
 	as_text name;
 	/* names from file text (not a->sb) stay valid; others are copied */
-	int keep = a->fr[a->nfr - 1].kind == AS_FRAME_FILE && !((const uint8_t *)p >= a->sb.base && (const uint8_t *)p < a->sb.base + a->sb.cap);
+	int keep = a->frames[a->frame_count - 1].kind == AS_FRAME_FILE && !((const uint8_t *)p >= a->sb.base && (const uint8_t *)p < a->sb.base + a->sb.cap);
 	p = as_whitespace_skip(p, e);
 	const char *s = p;
 	while (p < e && as_char_is_identifier((unsigned char)*p)) p++;
@@ -345,7 +345,7 @@ VPRIV int as_directive_macro(as_context *a, const char *p, const char *e)
 			s = p;
 			while (p < e && as_char_is_identifier((unsigned char)*p)) p++;
 			as_text qq = { s, (uint32_t)(p - s) };
-			if (as_text_equals(qq, "req")) q->req = 1;
+			if (as_text_equals(qq, "req")) q->is_required = 1;
 			else if (as_text_equals(qq, "vararg")) q->vararg = 1;
 			else return as_error_report(a, "invalid macro parameter qualifier");
 			p = as_whitespace_skip(p, e);
@@ -353,52 +353,52 @@ VPRIV int as_directive_macro(as_context *a, const char *p, const char *e)
 		if (p < e && *p == '=') {
 			p = as_whitespace_skip(p + 1, e);
 			as_text d;
-			size_t mark = a->xs.used;
+			size_t mark = a->expansion_text.used;
 			if (as_macro_argument_parse(a, &p, e, 0, &d)) return -1;
 			q->def = as_text_duplicate(a, d.s, d.n);
-			a->xs.used = mark;
+			a->expansion_text.used = mark;
 			p = as_whitespace_skip(p, e);
 		}
 		if (p < e && *p == ',') p = as_whitespace_skip(p + 1, e);
 	}
 	as_text body;
 	if (as_macro_body_collect(a, 1, &body)) return -1;
-	as_macro *m = as_region_alloc(&a->defs, sizeof *m);
+	as_macro *m = as_region_alloc(&a->definitions, sizeof *m);
 	m->name = name;
-	m->params = as_region_alloc(&a->defs, sizeof(as_macro_parameter) * (np ? np : 1));
+	m->params = as_region_alloc(&a->definitions, sizeof(as_macro_parameter) * (np ? np : 1));
 	memcpy(m->params, ps, sizeof(as_macro_parameter) * np);
 	m->np = np;
 	/* file text outlives the macro (as_snippet_assemble's contract); expansions do not */
-	m->body = a->fr[a->nfr - 1].kind == AS_FRAME_FILE ? body : as_text_duplicate(a, body.s, body.n);
+	m->body = a->frames[a->frame_count - 1].kind == AS_FRAME_FILE ? body : as_text_duplicate(a, body.s, body.n);
 	m->count = 0;
 	m->t = (as_template){ 0, 0 };
-	if (a->mcount * 2 >= a->mmask) {
-		uint32_t nm = a->mmask * 2 + 1;
-		as_macro **t = as_region_alloc(&a->defs, sizeof *t * (nm + 1));
+	if (a->macro_count * 2 >= a->macro_mask) {
+		uint32_t nm = a->macro_mask * 2 + 1;
+		as_macro **t = as_region_alloc(&a->definitions, sizeof *t * (nm + 1));
 		memset(t, 0, sizeof *t * (nm + 1));
-		for (uint32_t i = 0; i <= a->mmask; i++)
-			for (as_macro *x = a->mtab[i], *nx; x; x = nx) { nx = x->next; uint32_t h = as_text_hash(x->name.s, x->name.n) & nm; x->next = t[h]; t[h] = x; }
-		a->mtab = t; a->mmask = nm;
+		for (uint32_t i = 0; i <= a->macro_mask; i++)
+			for (as_macro *x = a->macro_table[i], *nx; x; x = nx) { nx = x->next; uint32_t h = as_text_hash(x->name.s, x->name.n) & nm; x->next = t[h]; t[h] = x; }
+		a->macro_table = t; a->macro_mask = nm;
 	}
-	uint32_t h = as_text_hash(name.s, name.n) & a->mmask;
-	for (as_macro *x = a->mtab[h]; x; x = x->next)
+	uint32_t h = as_text_hash(name.s, name.n) & a->macro_mask;
+	for (as_macro *x = a->macro_table[h]; x; x = x->next)
 		if (x->name.n == name.n && !memcmp(x->name.s, name.s, name.n)) return as_error_report(a, "macro '%.*s' is already defined", (int)name.n, name.s);
-	m->next = a->mtab[h]; a->mtab[h] = m; a->mcount++;
+	m->next = a->macro_table[h]; a->macro_table[h] = m; a->macro_count++;
 	return 0;
 }
 
 VPRIV int as_directive_purgem(as_context *a, const char *p, const char *e)
 {
 	as_text n = as_text_first_word(p, e);
-	uint32_t h = as_text_hash(n.s, n.n) & a->mmask;
-	for (as_macro **pm = &a->mtab[h]; *pm; pm = &(*pm)->next)
-		if ((*pm)->name.n == n.n && !memcmp((*pm)->name.s, n.s, n.n)) { *pm = (*pm)->next; a->mcount--; return 0; }
+	uint32_t h = as_text_hash(n.s, n.n) & a->macro_mask;
+	for (as_macro **pm = &a->macro_table[h]; *pm; pm = &(*pm)->next)
+		if ((*pm)->name.n == n.n && !memcmp((*pm)->name.s, n.s, n.n)) { *pm = (*pm)->next; a->macro_count--; return 0; }
 	return as_error_report(a, "macro '%.*s' is not defined", (int)n.n, n.s);
 }
 
 VPRIV int as_macro_invoke(as_context *a, as_macro *m, const char *p, const char *e)
 {
-	size_t mark = a->xs.used;
+	size_t mark = a->expansion_text.used;
 	as_text args[64];
 	uint8_t set[64] = { 0 };
 	uint32_t np = m->np, pi = 0;
@@ -426,7 +426,7 @@ VPRIV int as_macro_invoke(as_context *a, as_macro *m, const char *p, const char 
 			}
 			/* the arguments are used before the statement text changes */
 			int va = hasvararg && k == np - 1;
-			if (a->altmacro && p < e && (*p == '%' || *p == '<')) { if (as_macro_argument_parse_altmacro(a, &p, e, &args[k])) return -1; }
+			if (a->altmacro_mode && p < e && (*p == '%' || *p == '<')) { if (as_macro_argument_parse_altmacro(a, &p, e, &args[k])) return -1; }
 			else if (!as_macro_argument_parse_plain(&p, e, va, &args[k]) && as_macro_argument_parse(a, &p, e, va, &args[k])) return -1;
 			set[k] = 1;
 			p = as_whitespace_skip(p, e);
@@ -438,19 +438,19 @@ VPRIV int as_macro_invoke(as_context *a, as_macro *m, const char *p, const char 
 		if (set[k] && args[k].n) continue;
 		if (!set[k] || !args[k].n) {
 			if (m->params[k].def.n && !(set[k] && args[k].n)) args[k] = m->params[k].def;
-			else if (m->params[k].req && !set[k]) return as_error_report(a, "missing value for required parameter '%.*s' in macro '%.*s'", (int)m->params[k].name.n, m->params[k].name.s, (int)m->name.n, m->name.s);
-			else if (m->params[k].req && !args[k].n) return as_error_report(a, "missing value for required parameter '%.*s' in macro '%.*s'", (int)m->params[k].name.n, m->params[k].name.s, (int)m->name.n, m->name.s);
+			else if (m->params[k].is_required && !set[k]) return as_error_report(a, "missing value for required parameter '%.*s' in macro '%.*s'", (int)m->params[k].name.n, m->params[k].name.s, (int)m->name.n, m->name.s);
+			else if (m->params[k].is_required && !args[k].n) return as_error_report(a, "missing value for required parameter '%.*s' in macro '%.*s'", (int)m->params[k].name.n, m->params[k].name.s, (int)m->name.n, m->name.s);
 		}
 	}
 	as_template tt;
-	if (a->altmacro) tt = as_template_compile_altmacro(&a->defs, m->body, m->params, np);
+	if (a->altmacro_mode) tt = as_template_compile_altmacro(&a->definitions, m->body, m->params, np);
 	else {
-		if (!m->t.p) m->t = as_template_compile(a, &a->defs, m->body, m->params, np, 1);
+		if (!m->t.p) m->t = as_template_compile(a, &a->definitions, m->body, m->params, np, 1);
 		tt = m->t;
 	}
-	char *o = (char *)as_region_alloc(&a->xs, as_template_expand_bound(m->body, args, np));
+	char *o = (char *)as_region_alloc(&a->expansion_text, as_template_expand_bound(m->body, args, np));
 	size_t n = as_template_expand(a, o, m->body.s, tt, args, m->count);
-	a->xs.used = (size_t)((uint8_t *)o - a->xs.base) + n;
+	a->expansion_text.used = (size_t)((uint8_t *)o - a->expansion_text.base) + n;
 	a->ninst++;
 	m->count++;
 	return as_frame_push(a, o, n, AS_FRAME_MACRO, mark);
@@ -461,17 +461,17 @@ VPRIV int as_directive_rept(as_context *a, const char *p, const char *e)
 	int64_t cnt;
 	if (as_expression_absolute_parse(a, &p, e, &cnt)) return -1;
 	if (cnt < 0) return as_error_report(a, "Count is negative");
-	uint32_t at = a->nfr ? a->fr[a->nfr - 1].sline : 0;	/* (the .rept line, not .endr's) */
+	uint32_t at = a->frame_count ? a->frames[a->frame_count - 1].statement_line : 0;	/* (the .rept line, not .endr's) */
 	as_text body;
 	if (as_macro_body_collect(a, 0, &body)) return -1;
-	size_t mark = a->xs.used;
-	as_template t = as_template_compile(a, &a->xs, body, 0, 0, 0);
-	char *o = (char *)as_region_alloc(&a->xs, as_template_expand_bound(body, 0, 0) * (size_t)(cnt ? cnt : 1));
+	size_t mark = a->expansion_text.used;
+	as_template t = as_template_compile(a, &a->expansion_text, body, 0, 0, 0);
+	char *o = (char *)as_region_alloc(&a->expansion_text, as_template_expand_bound(body, 0, 0) * (size_t)(cnt ? cnt : 1));
 	size_t n = 0;
 	for (int64_t i = 0; i < cnt; i++) n += as_template_expand(a, o + n, body.s, t, 0, 0);
-	a->xs.used = (size_t)((uint8_t *)o - a->xs.base) + n;
+	a->expansion_text.used = (size_t)((uint8_t *)o - a->expansion_text.base) + n;
 	if (as_frame_push(a, o, n, AS_FRAME_LOOP, mark)) return -1;
-	a->fr[a->nfr - 1].pline = at;
+	a->frames[a->frame_count - 1].caller_line = at;
 	return 0;
 }
 
@@ -486,7 +486,7 @@ VPRIV int as_directive_irp(as_context *a, const char *p, const char *e, int char
 	p = as_whitespace_skip(p, e);
 	if (p >= e || *p != ',') return as_error_report(a, "expected comma");
 	p = as_whitespace_skip(p + 1, e);
-	size_t mark = a->xs.used;
+	size_t mark = a->expansion_text.used;
 	as_text vals[1024]; uint32_t nv = 0;
 	for (;;) {
 		if (nv >= 1024) return as_error_report(a, "too many .irp values");
@@ -498,7 +498,7 @@ VPRIV int as_directive_irp(as_context *a, const char *p, const char *e, int char
 	as_text body;
 	/* the param name lives in a->sb, which as_macro_body_collect overwrites */
 	par.name = as_text_duplicate(a, par.name.s, par.name.n);
-	uint32_t at = a->nfr ? a->fr[a->nfr - 1].sline : 0;
+	uint32_t at = a->frame_count ? a->frames[a->frame_count - 1].statement_line : 0;
 	if (as_macro_body_collect(a, 0, &body)) return -1;
 	if (chars) {
 		as_text v = vals[0];
@@ -509,22 +509,22 @@ VPRIV int as_directive_irp(as_context *a, const char *p, const char *e, int char
 	}
 	size_t tot = 0;
 	for (uint32_t i = 0; i < nv; i++) tot += as_template_expand_bound(body, &vals[i], 1);
-	as_template t = as_template_compile(a, &a->xs, body, &par, 1, 1);
-	char *o = (char *)as_region_alloc(&a->xs, tot + 1);
+	as_template t = as_template_compile(a, &a->expansion_text, body, &par, 1, 1);
+	char *o = (char *)as_region_alloc(&a->expansion_text, tot + 1);
 	size_t n = 0;
 	for (uint32_t i = 0; i < nv; i++) n += as_template_expand(a, o + n, body.s, t, &vals[i], 0);
-	a->xs.used = (size_t)((uint8_t *)o - a->xs.base) + n;
+	a->expansion_text.used = (size_t)((uint8_t *)o - a->expansion_text.base) + n;
 	if (as_frame_push(a, o, n, AS_FRAME_LOOP, mark)) return -1;
-	a->fr[a->nfr - 1].pline = at;
+	a->frames[a->frame_count - 1].caller_line = at;
 	return 0;
 }
 
 VPRIV int as_directive_exitm(as_context *a)
 {
-	for (int i = a->nfr - 1; i >= 0; i--) {
-		if (a->fr[i].kind == AS_FRAME_MACRO) {
-			a->ncs = (int)a->fr[i].ncond;
-			while (a->nfr > i) as_frame_pop(a);
+	for (int i = a->frame_count - 1; i >= 0; i--) {
+		if (a->frames[i].kind == AS_FRAME_MACRO) {
+			a->condition_count = (int)a->frames[i].condition_count;
+			while (a->frame_count > i) as_frame_pop(a);
 			return 0;
 		}
 	}

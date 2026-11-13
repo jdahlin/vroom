@@ -18,7 +18,7 @@ VPRIV uint32_t as_fragment_latest(as_context *a, uint32_t frag)	/* a frag split 
 VPRIV void as_fragment_switch(as_context *a, uint32_t frag)
 {
 	frag = as_fragment_latest(a, frag);
-	if (frag != a->cur) { a->prev = a->cur; a->dwlocp = 0; }	/* MC drops a pending .loc */
+	if (frag != a->cur) { a->prev = a->cur; a->dwarf_row_is_pending = 0; }	/* MC drops a pending .loc */
 	a->cur = frag;
 }
 
@@ -155,8 +155,8 @@ VPRIV int as_directive_section(as_context *a, const char *p, const char *e, int 
 		else if (as_text_has_prefix(name, ".tdata") || as_text_has_prefix(name, ".tbss")) flags = SHF_ALLOC | SHF_WRITE | SHF_TLS;
 	}
 	if (push) {
-		if (a->nss >= AS_SECTION_STACK_MAX) return as_error_report(a, "section stack overflow");
-		a->ss[a->nss].cur = a->cur; a->ss[a->nss].prev = a->prev; a->nss++;
+		if (a->section_stack_count >= AS_SECTION_STACK_MAX) return as_error_report(a, "section stack overflow");
+		a->section_stack[a->section_stack_count].cur = a->cur; a->section_stack[a->section_stack_count].prev = a->prev; a->section_stack_count++;
 	}
 	if ((flags & SHF_GROUP) && !group) return as_error_report(a, "expected group name");
 	uint32_t s = linksec ? elf_section_lo(a->o, name.s, name.n, type, flags, entsize, group, linksec, linksym)

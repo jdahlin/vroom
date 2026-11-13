@@ -28,49 +28,49 @@ VPRIV uint32_t as_label_temporary_define(as_context *a)
 
 VPRIV as_numeric_label *as_numeric_label_find(as_context *a, uint32_t num)
 {
-	if (a->nlcount * 2 >= a->nlmask) {
-		uint32_t nm = a->nlmask * 2 + 1;
-		as_numeric_label *t = as_region_alloc(&a->defs, sizeof *t * (nm + 1));
+	if (a->numeric_label_count * 2 >= a->numeric_label_mask) {
+		uint32_t nm = a->numeric_label_mask * 2 + 1;
+		as_numeric_label *t = as_region_alloc(&a->definitions, sizeof *t * (nm + 1));
 		memset(t, 0, sizeof *t * (nm + 1));
-		for (uint32_t i = 0; i <= a->nlmask; i++) {
-			if (!a->nl[i].cur && !a->nl[i].fwd) continue;
-			uint32_t j = (a->nl[i].num * 2654435761u) & nm;
+		for (uint32_t i = 0; i <= a->numeric_label_mask; i++) {
+			if (!a->numeric_labels[i].cur && !a->numeric_labels[i].fwd) continue;
+			uint32_t j = (a->numeric_labels[i].number * 2654435761u) & nm;
 			while (t[j].cur || t[j].fwd) j = (j + 1) & nm;
-			t[j] = a->nl[i];
+			t[j] = a->numeric_labels[i];
 		}
-		a->nl = t; a->nlmask = nm;
+		a->numeric_labels = t; a->numeric_label_mask = nm;
 	}
-	uint32_t j = (num * 2654435761u) & a->nlmask;
-	while (a->nl[j].cur || a->nl[j].fwd) {
-		if (a->nl[j].num == num) return &a->nl[j];
-		j = (j + 1) & a->nlmask;
+	uint32_t j = (num * 2654435761u) & a->numeric_label_mask;
+	while (a->numeric_labels[j].cur || a->numeric_labels[j].fwd) {
+		if (a->numeric_labels[j].number == num) return &a->numeric_labels[j];
+		j = (j + 1) & a->numeric_label_mask;
 	}
-	a->nl[j].num = num; a->nlcount++;
-	return &a->nl[j];
+	a->numeric_labels[j].number = num; a->numeric_label_count++;
+	return &a->numeric_labels[j];
 }
 
 VPRIV as_variable *as_variable_slot_find(as_context *a, uint32_t y, int create)
 {
-	if (create && a->vcount * 2 >= a->vmask) {
-		uint32_t nm = a->vmask * 2 + 1;
-		as_variable *t = as_region_alloc(&a->defs, sizeof *t * (nm + 1));
+	if (create && a->variable_count * 2 >= a->variable_mask) {
+		uint32_t nm = a->variable_mask * 2 + 1;
+		as_variable *t = as_region_alloc(&a->definitions, sizeof *t * (nm + 1));
 		memset(t, 0, sizeof *t * (nm + 1));
-		for (uint32_t i = 0; i <= a->vmask; i++) {
-			if (!a->vars[i].sym) continue;
-			uint32_t j = (a->vars[i].sym * 2654435761u) & nm;
+		for (uint32_t i = 0; i <= a->variable_mask; i++) {
+			if (!a->variables[i].sym) continue;
+			uint32_t j = (a->variables[i].sym * 2654435761u) & nm;
 			while (t[j].sym) j = (j + 1) & nm;
-			t[j] = a->vars[i];
+			t[j] = a->variables[i];
 		}
-		a->vars = t; a->vmask = nm;
+		a->variables = t; a->variable_mask = nm;
 	}
-	uint32_t j = (y * 2654435761u) & a->vmask;
-	while (a->vars[j].sym) {
-		if (a->vars[j].sym == y) return &a->vars[j];
-		j = (j + 1) & a->vmask;
+	uint32_t j = (y * 2654435761u) & a->variable_mask;
+	while (a->variables[j].sym) {
+		if (a->variables[j].sym == y) return &a->variables[j];
+		j = (j + 1) & a->variable_mask;
 	}
 	if (!create) return 0;
-	a->vars[j].sym = y; a->vcount++;
-	return &a->vars[j];
+	a->variables[j].sym = y; a->variable_count++;
+	return &a->variables[j];
 }
 
 /* ---------------------------------------------------------------- symbols directives */
@@ -144,9 +144,9 @@ VPRIV int as_directive_size(as_context *a, const char *p, const char *e)
 /* x86: the register sym was made an alias of, or NULL */
 VPRIV const char *as_register_alias_find(as_context *a, uint32_t y)
 {
-	for (uint32_t i = a->nralias; i-- > 0;)
-		if (a->ralias[i].sym == y)
-			return a->ralias[i].reg[0] ? a->ralias[i].reg : NULL;
+	for (uint32_t i = a->register_alias_count; i-- > 0;)
+		if (a->register_aliases[i].sym == y)
+			return a->register_aliases[i].reg[0] ? a->register_aliases[i].reg : NULL;
 	return NULL;
 }
 
@@ -176,24 +176,24 @@ VPRIV int as_directive_symver(as_context *a, const char *p, const char *e)
 	elf_reg(a->o, yo);
 	uint32_t yv = as_symbol_intern(a, v.s, v.n);
 	elf_reg(a->o, yv);
-	if (a->nsv == a->svcap) {
-		uint32_t nc = a->svcap ? a->svcap * 2 : 16;
-		void *t = as_region_alloc(&a->defs, sizeof *a->sv * nc);
-		if (a->nsv) memcpy(t, a->sv, sizeof *a->sv * a->nsv);
-		a->sv = t; a->svcap = nc;
+	if (a->symver_count == a->symver_capacity) {
+		uint32_t nc = a->symver_capacity ? a->symver_capacity * 2 : 16;
+		void *t = as_region_alloc(&a->definitions, sizeof *a->symvers * nc);
+		if (a->symver_count) memcpy(t, a->symvers, sizeof *a->symvers * a->symver_count);
+		a->symvers = t; a->symver_capacity = nc;
 	}
-	a->sv[a->nsv].orig = yo; a->sv[a->nsv].ver = yv; a->sv[a->nsv].rm = rm;
-	a->nsv++;
+	a->symvers[a->symver_count].orig = yo; a->symvers[a->symver_count].ver = yv; a->symvers[a->symver_count].rm = rm;
+	a->symver_count++;
 	return 0;
 }
 
 VPRIV void as_symver_finish(as_context *a)
 {
 	ElfObj *o = a->o;
-	for (uint32_t i = 0; i < a->nsv; i++) {
-		uint32_t yo = a->sv[i].orig, yv = a->sv[i].ver;
+	for (uint32_t i = 0; i < a->symver_count; i++) {
+		uint32_t yo = a->symvers[i].orig, yv = a->symvers[i].ver;
 		ElfSym *s = elf_symp(o, yo), *t = elf_symp(o, yv);
-		if (a->sv[i].rm == 2) {	/* .weakref yo -> yv */
+		if (a->symvers[i].rm == 2) {	/* .weakref yo -> yv */
 			if (t->flags & ESYM_DEFINED) {
 				elf_define(o, yo, t->frag, t->value);
 				s->flags |= (t->flags & ESYM_ABS) | ESYM_NOSYMTAB;
@@ -211,12 +211,12 @@ VPRIV void as_symver_finish(as_context *a)
 			s->flags = (uint8_t)((s->flags & ~ESYM_USED) | ESYM_NOSYMTAB);
 			continue;
 		}
-		int def = (s->flags & ESYM_DEFINED) != 0, rm = (int)a->sv[i].rm;
+		int def = (s->flags & ESYM_DEFINED) != 0, rm = (int)a->symvers[i].rm;
 		const char *at = memchr(t->name, '@', t->len);
 		if (at && t->len - (size_t)(at - t->name) >= 3 && !memcmp(at, "@@@", 3)) {
 			/* name@@@v: @@ when defined here, @ otherwise */
 			size_t k = (size_t)(at - t->name);
-			char *n = as_region_alloc(&a->defs, t->len);
+			char *n = as_region_alloc(&a->definitions, t->len);
 			memcpy(n, t->name, k + 1);
 			if (def) { memcpy(n + k + 1, at + 2, t->len - k - 2); }
 			else { memcpy(n + k + 1, at + 3, t->len - k - 3); }

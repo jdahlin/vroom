@@ -21,13 +21,13 @@ VPRIV void as_fragment_offsets_cache(ElfObj *o)
 /* close the current frag with a variable-size item; what follows goes to a new frag */
 VPRIV struct as_variable_item *as_variable_item_add(as_context *a, int kind)
 {
-	if (a->npfa == a->pfacap) {
-		uint32_t nc = a->pfacap ? a->pfacap * 2 : 64;
-		void *t = as_region_alloc(&a->defs, sizeof *a->pfa * nc);
-		if (a->npfa) memcpy(t, a->pfa, sizeof *a->pfa * a->npfa);
-		a->pfa = t; a->pfacap = nc;
+	if (a->variable_item_count == a->variable_item_capacity) {
+		uint32_t nc = a->variable_item_capacity ? a->variable_item_capacity * 2 : 64;
+		void *t = as_region_alloc(&a->definitions, sizeof *a->variable_items * nc);
+		if (a->variable_item_count) memcpy(t, a->variable_items, sizeof *a->variable_items * a->variable_item_count);
+		a->variable_items = t; a->variable_item_capacity = nc;
 	}
-	struct as_variable_item *v = &a->pfa[a->npfa++];
+	struct as_variable_item *v = &a->variable_items[a->variable_item_count++];
 	memset(v, 0, sizeof *v);
 	v->kind = (uint8_t)kind; v->frag = a->cur;
 	a->cur = elf_split(a->o, a->cur);
@@ -89,30 +89,30 @@ static uint32_t as_variable_item_index(ElfObj *o, uint32_t f)
 static uint64_t as_variable_offset_sum(as_context *a, uint32_t i)
 {
 	uint64_t sum = 0;
-	for (; i; i &= i - 1) sum += a->var_tree[i];
+	for (; i; i &= i - 1) sum += a->variable_size_tree[i];
 	return sum;
 }
 
 static void as_variable_offset_add(as_context *a, uint32_t i, uint64_t delta)
 {
 	/* Unsigned wrap also represents a size decrease. */
-	for (; i <= a->var_n; i += i & -i) a->var_tree[i] += delta;
+	for (; i <= a->variable_rank_count; i += i & -i) a->variable_size_tree[i] += delta;
 }
 
 static uint64_t as_fragment_base(as_context *a, uint32_t frag)
 {
 	ElfObj *o = a->o;
-	if (a->var_rank) {
-		uint32_t rank = a->var_rank[as_variable_item_index(o, frag)];
-		if (as_variable_sizes_previous) return a->var_oldoff[rank];
-		uint32_t first = a->var_rank[as_variable_item_index(o, elf_frag(o, frag)->sec)];
+	if (a->variable_rank) {
+		uint32_t rank = a->variable_rank[as_variable_item_index(o, frag)];
+		if (as_variable_sizes_previous) return a->variable_offsets_previous[rank];
+		uint32_t first = a->variable_rank[as_variable_item_index(o, elf_frag(o, frag)->sec)];
 		return as_variable_offset_sum(a, rank - 1) - as_variable_offset_sum(a, first - 1);
 	}
 	uint64_t off = 0;
 	for (uint32_t f = elf_frag(o, frag)->sec; f && f != frag; f = elf_frag(o, f)->next) {
 		off += elf_frag(o, f)->size;
 		if (elf_frag(o, f)->cont && elf_frag(o, f)->aux)
-			off += as_variable_sizes_previous ? as_variable_sizes_previous[elf_frag(o, f)->aux - 1] : a->pfa[elf_frag(o, f)->aux - 1].size;
+			off += as_variable_sizes_previous ? as_variable_sizes_previous[elf_frag(o, f)->aux - 1] : a->variable_items[elf_frag(o, f)->aux - 1].size;
 	}
 	return off;
 }
@@ -177,38 +177,38 @@ static int as_variable_item_evaluate(as_context *a, struct as_variable_item *v, 
 VPRIV void as_variable_items_finish(as_context *a)
 {
 	ElfObj *o = a->o;
-	for (uint32_t i = 0; i < a->npfa; i++) elf_frag(o, a->pfa[i].frag)->aux = i + 1;
+	for (uint32_t i = 0; i < a->variable_item_count; i++) elf_frag(o, a->variable_items[i].frag)->aux = i + 1;
 	uint32_t count = o->nsec + (uint32_t)(o->frags.cap / sizeof(ElfFrag)) - 1 - o->nfrag;
-	a->var_rank = as_region_alloc(&a->defs, sizeof(uint32_t) * count);
-	a->var_tree = as_region_alloc(&a->defs, sizeof(uint64_t) * count);
-	a->var_oldoff = as_region_alloc(&a->defs, sizeof(uint64_t) * count);
-	memset(a->var_tree, 0, sizeof(uint64_t) * count);
-	a->var_n = count - 1;
+	a->variable_rank = as_region_alloc(&a->definitions, sizeof(uint32_t) * count);
+	a->variable_size_tree = as_region_alloc(&a->definitions, sizeof(uint64_t) * count);
+	a->variable_offsets_previous = as_region_alloc(&a->definitions, sizeof(uint64_t) * count);
+	memset(a->variable_size_tree, 0, sizeof(uint64_t) * count);
+	a->variable_rank_count = count - 1;
 	uint32_t rank = 0;
 	for (uint32_t s = 1; s < o->nsec; s++)
 		for (uint32_t f = s; f; f = elf_frag(o, f)->next) {
 			ElfFrag *p = elf_frag(o, f);
-			a->var_rank[as_variable_item_index(o, f)] = ++rank;
-			as_variable_offset_add(a, rank, p->size + (p->cont && p->aux ? a->pfa[p->aux - 1].size : 0));
+			a->variable_rank[as_variable_item_index(o, f)] = ++rank;
+			as_variable_offset_add(a, rank, p->size + (p->cont && p->aux ? a->variable_items[p->aux - 1].size : 0));
 		}
-	uint64_t *prev = as_region_alloc(&a->defs, sizeof(uint64_t) * (a->npfa + 1));
+	uint64_t *prev = as_region_alloc(&a->definitions, sizeof(uint64_t) * (a->variable_item_count + 1));
 	/* pass -1 lays out the items with every jump short (MC's first layout); then each pass
 	   relaxes the jumps against the previous pass's layout and lays the rest out again */
 	for (int it = -1;; it++) {
 		int changed = 0;
-		for (uint32_t i = 0; i < a->npfa; i++) prev[i] = a->pfa[i].size;
+		for (uint32_t i = 0; i < a->variable_item_count; i++) prev[i] = a->variable_items[i].size;
 		/* Jumps see the whole previous pass, while alignments/LEBs see the
 		 * live layout, including size changes earlier in this pass. */
 		for (uint32_t s = 1; s < o->nsec; s++) {
 			uint64_t off = 0;
 			for (uint32_t f = s; f; f = elf_frag(o, f)->next) {
 				ElfFrag *p = elf_frag(o, f);
-				a->var_oldoff[a->var_rank[as_variable_item_index(o, f)]] = off;
+				a->variable_offsets_previous[a->variable_rank[as_variable_item_index(o, f)]] = off;
 				off += p->size + (p->cont && p->aux ? prev[p->aux - 1] : 0);
 			}
 		}
-		for (uint32_t i = 0; i < a->npfa; i++) {
-			struct as_variable_item *v = &a->pfa[i];
+		for (uint32_t i = 0; i < a->variable_item_count; i++) {
+			struct as_variable_item *v = &a->variable_items[i];
 			uint64_t end = as_fragment_base(a, v->frag) + elf_frag(o, v->frag)->size, ns = 0;
 			if (v->kind == AS_VARIABLE_ITEM_PREFALIGN || v->kind == AS_VARIABLE_ITEM_ALIGN) {
 				uint64_t al = (uint64_t)1 << v->p2;
@@ -268,15 +268,15 @@ VPRIV void as_variable_items_finish(as_context *a)
 			}
 			if (ns != v->size) {
 				if (elf_frag(o, v->frag)->cont)
-					as_variable_offset_add(a, a->var_rank[as_variable_item_index(o, v->frag)], ns - v->size);
+					as_variable_offset_add(a, a->variable_rank[as_variable_item_index(o, v->frag)], ns - v->size);
 				v->size = ns; changed = 1;
 			}
 		}
 		if (!changed && it >= 0) break;
 		if (it == 64) { as_error_report(a, "relaxation did not converge"); return; }
 	}
-	for (uint32_t i = 0; i < a->npfa; i++) {
-		struct as_variable_item *v = &a->pfa[i];
+	for (uint32_t i = 0; i < a->variable_item_count; i++) {
+		struct as_variable_item *v = &a->variable_items[i];
 		uint64_t pad = v->size;
 		elf_frag(o, v->frag)->aux = 0;
 		if (!pad) continue;
@@ -319,5 +319,5 @@ VPRIV void as_variable_items_finish(as_context *a)
 		memset(q, 0, z);
 		for (q += z, pad -= z; pad; pad -= 4, q += 4) { q[0] = 0x1f; q[1] = 0x20; q[2] = 0x03; q[3] = 0xd5; }
 	}
-	a->var_rank = NULL;
+	a->variable_rank = NULL;
 }

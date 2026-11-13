@@ -5,17 +5,17 @@
 
 VPRIV void as_alias_rehash(as_context *a)
 {
-	memset(a->alh, 0, sizeof a->alh);
-	for (uint32_t i = 0; i < a->nal; i++) {
+	memset(a->alias_buckets, 0, sizeof a->alias_buckets);
+	for (uint32_t i = 0; i < a->alias_count; i++) {
 		uint32_t h = as_alias_hash(a->al[i].name.s, a->al[i].name.n);
-		a->al[i].next = a->alh[h]; a->alh[h] = i + 1;
+		a->al[i].next = a->alias_buckets[h]; a->alias_buckets[h] = i + 1;
 	}
 }
 
 static int reg_alias(as_context *a, const char *s, size_t n, as_text *out)
 {
-	if (!a->nal) return 0;
-	for (uint32_t i = a->alh[as_alias_hash(s, n)]; i; i = a->al[i - 1].next) {
+	if (!a->alias_count) return 0;
+	for (uint32_t i = a->alias_buckets[as_alias_hash(s, n)]; i; i = a->al[i - 1].next) {
 		const as_register_alias *x = &a->al[i - 1];
 		if (x->name.n == n && as_char_to_lower((unsigned char)x->name.s[0]) == as_char_to_lower((unsigned char)s[0]) &&
 		    !strncasecmp(x->name.s, s, n)) { *out = x->reg; return 1; }
@@ -324,17 +324,17 @@ static uint32_t pool_entry(as_context *a, as_value v, uint32_t size)
 	uint32_t sec = elf_frag(a->o, a->cur)->sec;
 	int plain = (v.add && !v.sub && !v.c) || (!v.add && !v.sub);
 	if (plain)
-		for (uint32_t i = 0; i < a->npool; i++) {
+		for (uint32_t i = 0; i < a->literal_pool_count; i++) {
 			Pool *q = &a->pool[i];
 			if (q->sec == sec && q->size == size && q->v.add == v.add && q->v.sub == v.sub && q->v.c == v.c) return q->label;
 		}
-	if (a->npool == a->poolcap) {
-		uint32_t nc = a->poolcap ? a->poolcap * 2 : 64;
-		Pool *t = as_region_alloc(&a->defs, sizeof *t * nc);
-		if (a->npool) memcpy(t, a->pool, sizeof *t * a->npool);
-		a->pool = t; a->poolcap = nc;
+	if (a->literal_pool_count == a->literal_pool_capacity) {
+		uint32_t nc = a->literal_pool_capacity ? a->literal_pool_capacity * 2 : 64;
+		Pool *t = as_region_alloc(&a->definitions, sizeof *t * nc);
+		if (a->literal_pool_count) memcpy(t, a->pool, sizeof *t * a->literal_pool_count);
+		a->pool = t; a->literal_pool_capacity = nc;
 	}
-	Pool *q = &a->pool[a->npool++];
+	Pool *q = &a->pool[a->literal_pool_count++];
 	q->sec = sec; q->label = as_symbol_temporary(a); q->v = v; q->size = size;
 	return q->label;
 }
@@ -342,13 +342,13 @@ static uint32_t pool_entry(as_context *a, as_value v, uint32_t size)
 /* emitAll: per section in first-use order, align naturally, label, value */
 VPRIV int a64_as_pools_flush(as_context *a)
 {
-	for (uint32_t i = 0; i < a->npool; i++) {
+	for (uint32_t i = 0; i < a->literal_pool_count; i++) {
 		uint32_t sec = a->pool[i].sec;
 		int seen = 0;
 		for (uint32_t j = 0; j < i; j++) if (a->pool[j].sec == sec) seen = 1;
 		if (seen) continue;
 		a->cur = sec;
-		for (uint32_t j = i; j < a->npool; j++) {
+		for (uint32_t j = i; j < a->literal_pool_count; j++) {
 			Pool *q = &a->pool[j];
 			if (q->sec != sec) continue;
 			elf_align(a->o, sec, q->size == 8 ? 3 : 2, 0, 0, 0);
@@ -357,7 +357,7 @@ VPRIV int a64_as_pools_flush(as_context *a)
 			if (as_value_emit(a, (int)q->size, &v)) return -1;
 		}
 	}
-	a->npool = 0;
+	a->literal_pool_count = 0;
 	return 0;
 }
 
@@ -365,7 +365,7 @@ VPRIV int a64_as_pools_flush(as_context *a)
 VPRIV int a64_as_pools_ltorg(as_context *a)
 {
 	uint32_t sec = elf_frag(a->o, a->cur)->sec, k = 0;
-	for (uint32_t j = 0; j < a->npool; j++) {
+	for (uint32_t j = 0; j < a->literal_pool_count; j++) {
 		Pool *q = &a->pool[j];
 		if (q->sec != sec) { a->pool[k++] = *q; continue; }
 		elf_align(a->o, a->cur, q->size == 8 ? 3 : 2, 0, 0, 0);
@@ -373,7 +373,7 @@ VPRIV int a64_as_pools_ltorg(as_context *a)
 		as_value v = q->v;
 		if (as_value_emit(a, (int)q->size, &v)) return -1;
 	}
-	a->npool = k;
+	a->literal_pool_count = k;
 	return 0;
 }
 

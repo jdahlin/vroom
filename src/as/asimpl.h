@@ -37,7 +37,7 @@ typedef struct { const char *s; uint32_t n; } as_text;
 
 typedef struct {
 	as_text name, def;
-	uint8_t req, vararg;
+	uint8_t is_required, vararg;
 } as_macro_parameter;
 
 /* a body split at its substitutions: body[off, off + len), then k (-1 nothing,
@@ -57,18 +57,18 @@ typedef struct as_macro {
 typedef struct {
 	const char *p, *e;
 	uint8_t kind;		/* AS_FRAME_FILE, AS_FRAME_MACRO, AS_FRAME_LOOP */
-	uint8_t bol;		/* at beginning of a line */
-	uint32_t ncond;
-	size_t mark;
+	uint8_t at_line_start;		/* at beginning of a line */
+	uint32_t condition_count;
+	size_t region_mark;
 	uint32_t line;
-	uint32_t sline;		/* line of the current statement */
-	uint32_t pline;		/* the instantiating statement's line in the frame below */
+	uint32_t statement_line;		/* line of the current statement */
+	uint32_t caller_line;		/* the instantiating statement's line in the frame below */
 } as_frame;
 enum { AS_FRAME_FILE, AS_FRAME_MACRO, AS_FRAME_LOOP };
 
-typedef struct { uint8_t kind, met, ignore; } as_condition;	/* kind: 1 if, 2 elseif, 3 else */
+typedef struct { uint8_t kind, is_met, is_ignored; } as_condition;	/* kind: 1 if, 2 elseif, 3 else */
 
-typedef struct { uint32_t num, cur, fwd; } as_numeric_label;
+typedef struct { uint32_t number, cur, fwd; } as_numeric_label;
 
 typedef struct { as_text name; as_text reg; uint32_t next; } as_register_alias;	/* next: older entry in the bucket, index + 1 */
 #define AS_ALIAS_BUCKETS 64
@@ -81,52 +81,52 @@ typedef struct { uint32_t sym; ElfVal v; } as_variable;	/* .set with a non-absol
 struct as_context {
 	ElfObj *o;
 	const char *dir;	/* relative .incbin paths (NULL: process cwd) */
-	as_frame fr[AS_FRAMES_MAX]; int nfr;
-	as_condition cs[AS_CONDITIONS_MAX]; int ncs;
+	as_frame frames[AS_FRAMES_MAX]; int frame_count;
+	as_condition conditions[AS_CONDITIONS_MAX]; int condition_count;
 	uint32_t cur, prev;	/* current/previous frag */
-	struct { uint32_t cur, prev; } ss[AS_SECTION_STACK_MAX]; int nss;
-	vregion xs;		/* expansion text stack */
-	vregion defs;		/* macro definitions etc. (per run) */
+	struct { uint32_t cur, prev; } section_stack[AS_SECTION_STACK_MAX]; int section_stack_count;
+	vregion expansion_text;		/* expansion text stack */
+	vregion definitions;		/* macro definitions etc. (per run) */
 	vregion sb;		/* current statement */
-	as_macro **mtab; uint32_t mmask, mcount;
-	as_numeric_label *nl; uint32_t nlmask, nlcount;
-	as_register_alias *al; uint32_t nal, alcap;
-	uint32_t alh[AS_ALIAS_BUCKETS];	/* .req buckets: newest entry, index + 1 */
-	as_variable *vars; uint32_t vmask, vcount;
-	void *pool_dummy; struct PoolS *pool; uint32_t npool, poolcap;
+	as_macro **macro_table; uint32_t macro_mask, macro_count;
+	as_numeric_label *numeric_labels; uint32_t numeric_label_mask, numeric_label_count;
+	as_register_alias *al; uint32_t alias_count, alias_capacity;
+	uint32_t alias_buckets[AS_ALIAS_BUCKETS];	/* .req buckets: newest entry, index + 1 */
+	as_variable *variables; uint32_t variable_mask, variable_count;
+	void *pool_dummy; struct PoolS *pool; uint32_t literal_pool_count, literal_pool_capacity;
 	uint32_t ninst;		/* \@ */
-	uint64_t nstmt, nstmtb;	/* statistics: statements and their bytes */
-	const char *fname;
-	size_t nident;		/* .ident directives seen (.comment's leading NUL) */
-	int ended;		/* .end seen */
-	int altmacro;		/* .altmacro mode */
-	uint32_t eofline;	/* the line after the input's last (errors at the end) */
+	uint64_t statement_count, statement_bytes;	/* statistics: statements and their bytes */
+	const char *file_name;
+	size_t ident_count;		/* .ident directives seen (.comment's leading NUL) */
+	int end_seen;		/* .end seen */
+	int altmacro_mode;		/* .altmacro mode */
+	uint32_t end_line;	/* the line after the input's last (errors at the end) */
 	/* .cfi_*: instructions of all FDEs, the FDEs, the open one */
-	struct as_cfi_instruction { uint8_t op; uint32_t reg, reg2, lab; int64_t off; const uint8_t *esc; } *cfi;
-	uint32_t ncfi, cficap;
-	struct as_frame_description { uint32_t start, end, first, n, ra; uint8_t simple, sig, bkey; } *fde;
-	uint32_t nfde, fdecap;
-	int infde, cfi_eh;	/* inside .cfi_startproc; .cfi_sections without .eh_frame: 1 */
-	struct { uint32_t orig, ver, rm; } *sv; uint32_t nsv, svcap;	/* .symver */
-	uint32_t *asg; uint32_t nasg, asgcap;	/* .addrsig_sym */
+	struct as_cfi_instruction { uint8_t op; uint32_t reg, register_second, lab; int64_t off; const uint8_t *esc; } *cfi;
+	uint32_t cfi_instruction_count, cfi_instruction_capacity;
+	struct as_frame_description { uint32_t start, end, first, n, ra; uint8_t is_simple, sig, uses_b_key; } *frame_descriptions;
+	uint32_t frame_description_count, frame_description_capacity;
+	int in_frame_description, cfi_eh_frame_selected;	/* inside .cfi_startproc; .cfi_sections without .eh_frame: 1 */
+	struct { uint32_t orig, ver, rm; } *symvers; uint32_t symver_count, symver_capacity;	/* .symver */
+	uint32_t *addrsig_symbols; uint32_t addrsig_symbol_count, addrsig_symbol_capacity;	/* .addrsig_sym */
 	/* .file N / .loc: DWARF line table (MC's MCDwarfLineTable, version 5) */
-	struct as_dwarf_file { as_text name; uint32_t dir; uint8_t md5[16]; uint8_t set, hasmd5; } *dwf;
-	uint32_t ndwf, dwfcap;		/* file slots by number (0 = root) */
-	as_text *dwd; uint32_t ndwd, dwdcap;	/* directories; [0] is the root file's */
-	struct as_dwarf_row { uint32_t frag, file, line, col, disc, isa; uint64_t off; uint8_t flags; } *dwl, dwcur;
-	uint32_t ndwl, dwlcap;
-	int dwlocp, dwtab;
+	struct as_dwarf_file { as_text name; uint32_t dir; uint8_t md5[16]; uint8_t is_set, has_md5; } *dwarf_files;
+	uint32_t dwarf_file_count, dwarf_file_capacity;		/* file slots by number (0 = root) */
+	as_text *dwarf_directories; uint32_t dwarf_directory_count, dwarf_directory_capacity;	/* directories; [0] is the root file's */
+	struct as_dwarf_row { uint32_t frag, file, line, col, discriminator, isa; uint64_t off; uint8_t flags; } *dwarf_rows, dwarf_row_pending;
+	uint32_t dwarf_row_count, dwarf_row_capacity;
+	int dwarf_row_is_pending, dwarf_table_is_due;
 	/* variable-size items at the end of a split frag (.prefalign, alignment
 	   after one, .uleb128/.sleb128 of a label difference), relaxed at the end */
-	struct as_variable_item { uint32_t frag, end; uint8_t kind, p2, code, fill; uint64_t max, size; as_value v; } *pfa;
-	uint32_t npfa, pfacap;		/* a .loc waits for its instruction; a table is due */
-	uint32_t *var_rank, var_n;	/* section-order ranks during relaxation */
-	uint64_t *var_tree, *var_oldoff;	/* live sizes (Fenwick), previous-pass offsets */
-	struct { uint32_t sym; char reg[8]; } *ralias;	/* x86: name = %reg, the register by another name */
-	uint32_t nralias, raliascap;
-	int x64_lock, x64_isz;	/* x86: "lock insn" on one line (after 0x66, as MC); the operation's size (a constant immediate is taken at it) */
+	struct as_variable_item { uint32_t frag, end; uint8_t kind, p2, code, fill; uint64_t max, size; as_value v; } *variable_items;
+	uint32_t variable_item_count, variable_item_capacity;		/* a .loc waits for its instruction; a table is due */
+	uint32_t *variable_rank, variable_rank_count;	/* section-order ranks during relaxation */
+	uint64_t *variable_size_tree, *variable_offsets_previous;	/* live sizes (Fenwick), previous-pass offsets */
+	struct { uint32_t sym; char reg[8]; } *register_aliases;	/* x86: name = %reg, the register by another name */
+	uint32_t register_alias_count, register_alias_capacity;
+	int x64_lock_prefix, x64_operand_size;	/* x86: "lock insn" on one line (after 0x66, as MC); the operation's size (a constant immediate is taken at it) */
 	char msg[4096];		/* the errors so far, one per line group (clang goes on after one) */
-	uint32_t mlen, nerr;
+	uint32_t mlen, error_count;
 	int err;
 };
 
