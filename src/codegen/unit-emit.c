@@ -176,7 +176,7 @@ static void ecx_free(codegen_context *e, vjob_region *r)
 /* a function the previous round generated, if nothing it asked about has been marked since */
 static bool codegen_round_chunk_reuse(codegen_context *e, uint32_t s)
 {
-	const codegen_keep *K = e->E->K;
+	const codegen_keep *K = e->E->previous_keep;
 	const codegen_keep_entry *k;
 	tbuf *b = &e->out;
 	size_t start;
@@ -438,7 +438,7 @@ static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out, u
 	E.c = c;
 	E.o = o;
 	E.mf = mf;
-	E.K = K;
+	E.previous_keep = K;
 	E.claimed = vjob_region_acquire(&er[0], c->nsym + 64, "emit.claimed");
 	E.extref = vjob_region_acquire(&er[1], c->nsym + 64, "emit.extref");
 	E.sflags = vjob_region_acquire(&er[2], c->nsym + 64, "emit.sflags");

@@ -232,7 +232,7 @@ typedef struct codegen_unit {
 	uint8_t *mf;			/* per sym: static function to inline everywhere (kept across rounds) */
 	_Atomic uint32_t newmf;		/* marked this round */
 	_Atomic uint32_t nerrcall;	/* error() calls dropped (not folded) */	/* VCC_EMIT_STATS: time in finish_function */
-	const codegen_keep *K;			/* the previous round's functions, or NULL */
+	const codegen_keep *previous_keep;			/* the previous round's functions, or NULL */
 	bool stats;
 	/* VCC_VIR_STATS: functions through VIR and the reasons it gave up on one (codegen/vir/build-attempt.c) */
 	bool vstats;
