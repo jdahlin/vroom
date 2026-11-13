@@ -5,25 +5,16 @@ static int ld_relocatable(void);
 static int run(int argc, char **argv)
 {
 	reset_state();
-	{
-		int n = 0;
-		size_t len = sizeof n;
-#ifdef __APPLE__
-		if (!sysctlbyname("hw.perflevel0.physicalcpu", &n, &len, NULL, 0) && n > 0)
-			nthreads = n;
-#else
-		(void)len;
-		if ((n = (int)sysconf(_SC_NPROCESSORS_ONLN)) > 0)
-			nthreads = n;
-#endif
-		else
-			nthreads = 4;
-		if (nthreads > 64)
-			nthreads = 64;
-	}
+	nthreads = pfor_default_width();
 	parse_args(argc, argv);
 	if (atomic_load(&nerrors))
 		return 1;
+#ifdef VLD_MAIN
+	/* the standalone tool: the process is this link, so --threads is the budget
+	   (inside vccd the server's budget stays, and nthreads only caps the width) */
+	if (nthreads > vtask_budget())
+		vtask_budget_set(nthreads);
+#endif
 	double t0 = now();
 	t_last = t0;
 	p_last = vperformance_now();

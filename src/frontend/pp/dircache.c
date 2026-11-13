@@ -25,6 +25,7 @@
 
 #include "frontend/pp/dircache.h"
 #include "common/intern.h"
+#include "frontend/lex/lex.h"
 
 enum { D_UNKNOWN, D_PROBING, D_EXISTS, D_MISSING };
 
@@ -32,6 +33,7 @@ typedef struct dnode {
 	struct dnode *next;	/* the bucket's chain (see lex.c's centry_get) */
 	uint32_t hash, plen;
 	_Atomic int state;
+	_Atomic uint32_t epoch;	/* the cache epoch (lex.h) a D_MISSING answer was last checked in */
 	char path[];
 } dnode;
 
@@ -101,11 +103,24 @@ static int dir_state(dnode *n)
 	int s = atomic_load_explicit(&n->state, memory_order_acquire);
 	struct stat st;
 
-	if (s == D_EXISTS || s == D_MISSING)
+	uint32_t cur = vcache_epoch();
+
+	if (s == D_EXISTS)
 		return s;
+	if (s == D_MISSING) {	/* a directory that was missing may have been made since */
+		if (atomic_load_explicit(&n->epoch, memory_order_relaxed) == cur)
+			return s;
+		if (!stat(n->plen ? n->path : ".", &st) && S_ISDIR(st.st_mode)) {
+			atomic_store_explicit(&n->state, D_EXISTS, memory_order_release);
+			return D_EXISTS;
+		}
+		atomic_store_explicit(&n->epoch, cur, memory_order_relaxed);
+		return s;
+	}
 	if (s == D_UNKNOWN && atomic_compare_exchange_strong(&n->state, &s, D_PROBING)) {
 		atomic_fetch_add_explicit(&vdir_probes, 1, memory_order_relaxed);
 		s = !stat(n->plen ? n->path : ".", &st) && S_ISDIR(st.st_mode) ? D_EXISTS : D_MISSING;
+		atomic_store_explicit(&n->epoch, cur, memory_order_relaxed);
 		atomic_store_explicit(&n->state, s, memory_order_release);
 		return s;
 	}

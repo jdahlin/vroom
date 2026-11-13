@@ -1,7 +1,7 @@
 /* x86-64 assembler: general-purpose instructions: jumps and calls, setcc/cmovcc, shifts and bit tests, the integer families, movz/movs */
 #include "x64as.h"
 
-VPRIV int x64_i_jump(As *a, char *mn, XOp *o, int nops)
+VPRIV int x64_i_jump(as_context *a, char *mn, XOp *o, int nops)
 {
 	char stem[32];
 	int sz = 0, cc;
@@ -31,7 +31,7 @@ VPRIV int x64_i_jump(As *a, char *mn, XOp *o, int nops)
 	return X64_NEXT;
 }
 
-VPRIV int x64_i_setcc(As *a, char *mn, XOp *o, int nops)
+VPRIV int x64_i_setcc(as_context *a, char *mn, XOp *o, int nops)
 {
 	char stem[32];
 	int sz = 0, cc;
@@ -64,7 +64,7 @@ VPRIV int x64_i_setcc(As *a, char *mn, XOp *o, int nops)
 	return X64_NEXT;
 }
 
-VPRIV int x64_i_bits(As *a, char *mn, XOp *o, int nops)
+VPRIV int x64_i_bits(as_context *a, char *mn, XOp *o, int nops)
 {
 	char stem[32];
 	int sz = 0, cc;
@@ -141,7 +141,7 @@ VPRIV int x64_i_bits(As *a, char *mn, XOp *o, int nops)
 	return X64_NEXT;
 }
 
-VPRIV int x64_i_int(As *a, char *mn, XOp *o, int nops)
+VPRIV int x64_i_int(as_context *a, char *mn, XOp *o, int nops)
 {
 	char stem[32];
 	int sz = 0, cc;
@@ -182,10 +182,10 @@ VPRIV int x64_i_int(As *a, char *mn, XOp *o, int nops)
 								  .reg = digit, .rm = d, .rex8 = rex8(d)));
 					{
 						int64_t c;
-						Val v = o[0].v;
+						as_value v = o[0].v;
 
 						if (o[0].kind != XK_IMM || !isconst(a, &v, &c))
-							return err(a, "invalid shift count");
+							return as_error_report(a, "invalid shift count");
 						if (c == 1)
 							return x64_emit(a, &F(.w = s == 8, .opsz16 = s == 2, .op = s == 1 ? OPB(0xd0) : OPB(0xd1), .nop = 1,
 									  .reg = digit, .rm = d, .rex8 = rex8(d)));
@@ -290,7 +290,7 @@ VPRIV int x64_i_int(As *a, char *mn, XOp *o, int nops)
 			if (!strcmp(m, "imul")) {
 				int z = x64_size(a, sz, &o[0], &o[nops - 1]);
 
-				a->x64_isz = z;
+				a->x64_operand_size = z;
 				for (int i = 0; i < nops; i++)
 					if (o[i].kind == XK_EXPR)
 						o[i].kind = XK_MEM;
@@ -376,7 +376,7 @@ VPRIV int x64_i_int(As *a, char *mn, XOp *o, int nops)
 	return X64_NEXT;
 }
 
-VPRIV int x64_i_movx(As *a, char *mn, XOp *o, int nops)
+VPRIV int x64_i_movx(as_context *a, char *mn, XOp *o, int nops)
 {
 	char stem[32];
 	int sz = 0, cc;
@@ -398,6 +398,6 @@ VPRIV int x64_i_movx(As *a, char *mn, XOp *o, int nops)
 			}
 		}
 	}
-	return err(a, "invalid instruction mnemonic '%s'", mn);
+	return as_error_report(a, "invalid instruction mnemonic '%s'", mn);
 	return X64_NEXT;
 }
