@@ -277,12 +277,20 @@ threaded emitter tests), measurements B (`sched-measure.py batch --emit
 start (off by default in this stage; the default flips in a later PR after
 the kernel A/B):
 
-- no `worker_main` threads: the accept thread `vtask_spawn`s each accepted
-  socket as a job; budget `-j`, else `VCC_JOBS`, else `granted` (not 2 x);
+- no `worker_main` threads: the accept thread queues each accepted socket
+  in vccd's own ring, as before, and `vtask_spawn`s one job that takes a
+  socket from it; budget `-j`, else `VCC_JOBS`, else `granted` (not 2 x).
+  The sockets stay in the ring so that a memory restart (`do_restart`) can
+  still answer the ones no job has taken, and SIGTERM's drain and the
+  restart keep counting `n_active` exactly as with workers (the polling of
+  both, Q-SCHED-13, is left as it is);
 - the job's blocking parts of 1.4 inside blocking regions, so a compile
-  waiting for its client, a child or a lock does not hold a core;
-- links and emit helpers draw from the same pool (stages 1-2);
-- SIGTERM's drain waits on the pool (`vtask_wait_idle`) instead of polling.
+  waiting for its client, a child or a lock does not hold a core; the long
+  locks (one ELF link, one Mach-O link, one objcopy at a time) through
+  `vtask_mutex_lock`, which enters the region only when the lock is taken;
+- links and emit helpers draw from the same pool (stages 1-2).
+- Threads: at most the budget plus the jobs inside blocking regions, which
+  make's `-j` bounds (every request in flight is a make job).
 
 Without the switch vccd behaves exactly as before the stage.
 
