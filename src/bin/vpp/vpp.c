@@ -4,7 +4,9 @@
  *   vpp [--cmp REF.i] [-o OUT] CLANG-ARGS...
  *   vpp --cmp-files OURS REF      compare two -E outputs
  *   vpp --batch JOBS [-j N] [-C DIR] [--cmp]
- *                                 many TUs in one process on N threads (one
+ *                                 many TUs in one process on N threads (-j,
+ *                                 else VCC_JOBS, else 6: the budget of the
+ *                                 shared pool, nested emit included; one
  *                                 token cache, like vccd); JOBS has one TU per
  *                                 line: REF.i, then the args, all separated by
  *                                 \x1f.  Output is discarded unless --cmp
@@ -31,6 +33,7 @@
 #include "frontend/pp/pp.h"
 #include "driver/ccsnap.h"
 #include "driver/ppdriver.h"
+#include "port/task.h"
 
 typedef struct job {
 	char **av;
@@ -42,7 +45,6 @@ typedef struct job {
 
 static job *jobs;
 static int njobs, cmpmode, warmup;
-static _Atomic int nextjob;
 static const char *bdir;
 
 static double now(void)
@@ -53,67 +55,34 @@ static double now(void)
 	return ts.tv_sec + ts.tv_nsec * 1e-9;
 }
 
-static void *worker(void *arg)
+static int nul = -1;	/* /dev/null: the jobs' output and (without VPP_BATCH_ERR) diagnostics */
+
+/* one TU of the batch, on whichever thread of the pool takes it */
+static void run_job(void *arg, size_t k)
 {
-	int nul = open("/dev/null", O_WRONLY);
+	job *j = &jobs[k];
+	ppd_env e = { .cwd = bdir, .outfd = nul, .errfd = getenv("VPP_BATCH_ERR") ? 2 : nul };
+	vperf v0, ph0[PPD_NPH];
+	double t0;
 
 	(void)arg;
-	for (;;) {
-		int k = atomic_fetch_add(&nextjob, 1);
-		job *j;
-		ppd_env e = { .cwd = bdir, .outfd = nul, .errfd = getenv("VPP_BATCH_ERR") ? 2 : nul };
-		double t0;
-
-		if (k >= njobs)
-			break;
-		j = &jobs[k];
-		vperf v0, ph0[PPD_NPH];
-
-		memcpy(ph0, ppd_ph, sizeof(ph0));
-		t0 = now();
-		v0 = vperf_now();
-		j->status = ppd_run(j->ac, j->av, &e);
-		j->all = vperf_sub(vperf_now(), v0);
-		j->ms = (now() - t0) * 1e3;
-		for (int i = 0; i < PPD_NPH; i++)
-			j->ph[i] = vperf_sub(ppd_ph[i], ph0[i]);
-	}
-	close(nul);
-	return NULL;
+	memcpy(ph0, ppd_ph, sizeof(ph0));	/* (per thread: the job's own work is the delta) */
+	t0 = now();
+	v0 = vperf_now();
+	j->status = ppd_run(j->ac, j->av, &e);
+	j->all = vperf_sub(vperf_now(), v0);
+	j->ms = (now() - t0) * 1e3;
+	for (int i = 0; i < PPD_NPH; i++)
+		j->ph[i] = vperf_sub(ppd_ph[i], ph0[i]);
 }
 
+/* every job once, nthr at a time: the TUs on the shared pool (port/task.c),
+   whose threads get a stack as large as main's, so that a TU nests as deep
+   in a batch as it does alone; emit helpers (VCC_THREADS) come from the same
+   budget, so they only run when TUs leave threads idle */
 static void run_pass(int nthr)
 {
-	pthread_t th[64];
-	pthread_attr_t at;
-	/* the parser and emitter recurse with the input's nesting and stop at vstack_low():
-	 * a worker gets the main thread's stack, so that a TU compiles in a batch as it
-	 * does alone (Darwin's default for a new thread is 512 KB; as emit/tu.c) */
-	size_t ss = (size_t)8 << 20;
-
-#ifdef __APPLE__
-	ss = pthread_get_stacksize_np(pthread_self());
-#else
-	{
-		pthread_attr_t me;
-		void *addr;
-
-		if (!pthread_getattr_np(pthread_self(), &me)) {
-			pthread_attr_getstack(&me, &addr, &ss);
-			pthread_attr_destroy(&me);
-		}
-	}
-#endif
-	if (ss < ((size_t)1 << 20))
-		ss = (size_t)1 << 20;
-	pthread_attr_init(&at);
-	pthread_attr_setstacksize(&at, ss);
-	atomic_store(&nextjob, 0);
-	for (int i = 0; i < nthr; i++)
-		pthread_create(&th[i], &at, worker, NULL);
-	pthread_attr_destroy(&at);
-	for (int i = 0; i < nthr; i++)
-		pthread_join(th[i], NULL);
+	vtask_parallel_for((size_t)njobs, nthr, run_job, NULL, 0);
 }
 
 static int batch(const char *file, int nthr, const char *statsf)
@@ -165,6 +134,10 @@ static int batch(const char *file, int nthr, const char *statsf)
 	}
 	if (nthr > 64)
 		nthr = 64;
+	if (nthr < 1)
+		nthr = 1;
+	vtask_budget_set(nthr);
+	nul = open("/dev/null", O_WRONLY);
 	for (int w = 0; w < warmup; w++)
 		run_pass(nthr);
 	t0 = now();
@@ -260,7 +233,7 @@ int main(int argc, char **argv)
 				   (size_t)st.st_size, argv[3]);
 	}
 	if (argc >= 3 && !strcmp(argv[1], "--batch")) {
-		int nthr = 6;
+		int nthr = vtask_jobs_from_environment(6);
 		const char *statsf = NULL;
 
 		for (int i = 3; i < argc; i++) {

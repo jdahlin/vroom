@@ -79,7 +79,7 @@ VCC_FAST   = $(VCC_CFLAGS) $(VCC_OPT) -pthread
 VCC_LDFLAGS = -O3 $(VCC_SAN) $(VCC_SANLD) $(VCC_LTO) $(if $(VCC_LTO),$(LTO_LINK))
 OBJ        = $(OUT)/obj
 
-vcc: $(OUT)/vcc $(OUT)/vsh/sh $(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vcc-nm $(OUT)/vcc-objcopy $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vlink $(OUT)/vasm $(OUT)/virtest $(OUT)/viralloc
+vcc: $(OUT)/vcc $(OUT)/vsh/sh $(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vcc-nm $(OUT)/vcc-objcopy $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vlink $(OUT)/vasm $(OUT)/virtest $(OUT)/viralloc $(OUT)/task-test
 
 o = $(patsubst %.c,$(OBJ)/%.o,$(1))
 # WebAssembly is off by default (disabled 2026-11-13, doc/PLAN-wasm.md): its
@@ -90,7 +90,7 @@ as_SRC   = as/as.c as/sym.c as/expr.c as/section.c as/data.c as/macro.c as/cond.
            as/dwline.c platform/darwin/astext.c arch/a64/as/parse.c arch/x64/as/asm.c arch/x64/as/sys.c arch/x64/as/gpr.c \
            arch/x64/as/x87.c arch/x64/as/sse.c arch/x64/as/avx.c
 DIGEST_SRC = common/digest-xxh3.c common/digest-blake3.c common/digest-sha256.c
-LEX_SRC = frontend/lex/lex.c common/intern.c frontend/c/keywords.c common/fail.c port/crc32c.c port/stack-guard.c port/job-regions.c
+LEX_SRC = frontend/lex/lex.c common/intern.c frontend/c/keywords.c common/fail.c port/crc32c.c port/stack-guard.c port/job-regions.c port/task.c
 PP_SRC  = frontend/pp/dircache.c driver/ccsnap.c $(DIGEST_SRC)
 VCCD_SRC = server/dstore.c server/caps.c utils/fixdep.c utils/ar.c utils/rsh.c
 # the server proper (vccd.c has main), one TU like the split modules; dstore.c and caps.c stay apart
@@ -121,7 +121,7 @@ PP_OBJ  = $(call o,$(PP_SRC)) $(SPLIT_OBJ) $(call mod,vir) $(call o,$(VIRA_SRC))
 mod = $(if $(VCC_UNITY),$(OBJ)/unity/$(1).o,$(call o,$($(1)_SRC)))
 AS_SRC  = $(AS_FILES) $(as_SRC) $(obj_SRC)
 AS_OBJ  = $(call o,$(AS_FILES)) $(call mod,as) $(call mod,obj)
-LD_SRC  = ld/ld.c $(DIGEST_SRC) ld/objcopy.c $(if $(VCC_WASM),ld/wasmld.c) platform/darwin/ldmacho.c
+LD_SRC  = ld/ld.c $(DIGEST_SRC) port/task.c ld/objcopy.c $(if $(VCC_WASM),ld/wasmld.c) platform/darwin/ldmacho.c
 
 $(OBJ)/%.o: %.c Makefile | $(OBJ)
 	@mkdir -p $(dir $@)
@@ -182,6 +182,12 @@ $(OUT)/vlink: $(call o,$(LD_SRC))
 	ln -sf vlink $(OUT)/vobjcopy
 	ln -sf vlink $(OUT)/vnm
 
+# task-test: the unit test of port/task.c (vtask.h)
+$(OUT)/task-test: $(call o,test/port/task-test.c port/task.c)
+	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@
+task-test: $(OUT)/task-test
+.PHONY: task-test
+
 $(OUT)/vcc: bin/vcc/shim.c include/protocol.h | $(OUT)
 	$(VCC_CC) $(VCC_CFLAGS) $< -o $@
 
@@ -236,7 +242,7 @@ self: $(OUT)/vpp
 	$(SELF_LD) $(call so,$(VCCD_SRC) $(server_SRC) ld/ld.c ld/objcopy.c platform/darwin/ldmacho.c) $(SELF_PP) $(SELF_LEX) $(SELF_AS) -o $(SO)/vccd
 	$(SELF_LD) $(call so,bin/vasm/vasm.c) $(SELF_AS) -o $(SO)/vasm
 	$(SELF_LD) $(call so,bin/lextest/lextest.c port/darwin/pmc.c) $(SELF_LEX) -o $(SO)/lextest
-	$(SELF_LD) $(SO)/ld-main.o $(call so,$(DIGEST_SRC)) $(SO)/ld-objcopy.o $(SO)/platform-darwin-ldmacho.o -o $(SO)/vlink
+	$(SELF_LD) $(SO)/ld-main.o $(call so,$(DIGEST_SRC) port/task.c) $(SO)/ld-objcopy.o $(SO)/platform-darwin-ldmacho.o -o $(SO)/vlink
 	$(SELF_LD) $(call so,bin/vcc/shim.c) -o $(SO)/vcc
 
 self-check: self
