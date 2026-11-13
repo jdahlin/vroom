@@ -107,10 +107,10 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym, const char *
 	uint64_t cs = (1u << RBX) | (1u << R12) | (1u << R13) | (1u << R14) | (1u << R15);
 	if(spframe)cs|=1u<<RBP;
 	x64_vir_context L = { .context = e, .function = f, .allocation = &V->allocation };
-	vir_target_registers regs = { .alloc = { (X_TEMPS & ~(1u << R10)) | cs, (1u << 14) - 1 },
+	vir_target_registers regs = { .alloc = { (X64_TEMPORARIES & ~(1u << R10)) | cs, (1u << 14) - 1 },
 		.callee = { cs, 0 }, .fixed = x64_vir_fixed_registers_get, .context=&L };
 	*why = VIRBUILD_FAILURE(x64_unsupported_target_option);
-	if (e->unit->options->sprot || x64_nosimd(e)) return false;
+	if (e->unit->options->sprot || x64_target_has_no_simd(e)) return false;
 	const attrs *attrs = codegen_symbol_attributes(e->compile_context, sym);
 	if (attrs && attrs->interrupt) { *why = VIRBUILD_FAILURE(x64_interrupt_function); return false; }
 	for (uint32_t i = 1; i < f->constant_count; i++)
@@ -196,8 +196,8 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym, const char *
 	}
 	e->is_reachable = true;
 	x64_begin(e, sym);
-	e->x64_context->spframe=spframe;
-	e->x64_context->interrupt = e->x64_context->nlreg = 0;
+	e->x64_context->stack_pointer_frame=spframe;
+	e->x64_context->interrupt = e->x64_context->local_register_count = 0;
 	e->walk_state->statement_depth = e->walk_state->temporary_slot_in_use_count = e->walk_state->temporary_slot_free_count = 0;
 	e->walk_state->frame_offset = 0; e->walk_state->frame_alignment = 16; e->walk_state->label_count = 0;
 	e->walk_state->stack_pointer_needed = false; e->walk_state->canary = 0;
@@ -213,7 +213,7 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym, const char *
 		.row=e->unit->options->debug?x64_dbgrow:NULL, .row_e=e };
 
 	for (int r = 0; r < 16; r++)
-		if (V->allocation.callee[0] >> r & 1) x64_csused(e, r);
+		if (V->allocation.callee[0] >> r & 1) x64_callee_save_use(e, r);
 	virbuild_lower_body(&L.drv);
 	x64_label(e, L.ret);
 	x64_finish(e, sym);

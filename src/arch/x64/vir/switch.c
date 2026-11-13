@@ -32,10 +32,10 @@ VPRIV void x64_vir_constant_compare_emit(x64_vir_context *L, int reg, int size, 
 {
 	int64_t k = size == 4 ? (int64_t)(int32_t)value : (int64_t)value;
 	if (k == (int32_t)k)
-		x64_op3(L->context, X_CMPI, size, XNOREG, reg, XNOREG)->immediate = k;
+		x64_record_emit_three_registers(L->context, X64_OP_CMPI, size, X64_REGISTER_NONE, reg, X64_REGISTER_NONE)->immediate = k;
 	else {
-		x64_movi(L->context, R11, k);
-		x64_op3(L->context, X_CMP, size, XNOREG, reg, R11);
+		x64_record_emit_move_immediate(L->context, R11, k);
+		x64_record_emit_three_registers(L->context, X64_OP_CMP, size, X64_REGISTER_NONE, reg, R11);
 	}
 }
 
@@ -53,24 +53,24 @@ VPRIV void x64_vir_switch_lower(x64_vir_context *L, uint32_t block, const vir_in
 	if(x64_vir_switch_is_dense(f,in,&lo,&span)) {
 		uint32_t table=walk_label_new(e);
 		if(selector!=R10 || (size==4 && !x64_last_u32(e,R10)))
-			x64_op3(e,X_MOV,size,R10,selector,XNOREG);
+			x64_record_emit_three_registers(e,X64_OP_MOV,size,R10,selector,X64_REGISTER_NONE);
 		if (lo) {
-			x64_movi(e,R11,size==4?(int64_t)(int32_t)lo:(int64_t)lo);
-			x64_op3(e,X_SUB,size,R10,R10,R11);
+			x64_record_emit_move_immediate(e,R11,size==4?(int64_t)(int32_t)lo:(int64_t)lo);
+			x64_record_emit_three_registers(e,X64_OP_SUB,size,R10,R10,R11);
 		}
 		x64_vir_constant_compare_emit(L,R10,size,span);
-		record *r=x64_put(e,X_JCC);r->condition=CC_A;r->label=labels[0];
-		x64_op3(e,X_LEAL,8,R11,XNOREG,XNOREG)->label=table;
-		r=x64_op3(e,X_LDX,4,R10,R11,XNOREG);r->registers[3]=R10;r->shift=2;r->condition=1;
-		x64_op3(e,X_ADD,8,R10,R10,R11);
-		x64_op3(e,X_JMPR,8,XNOREG,R10,XNOREG);
+		record *r=x64_record_emit(e,X64_OP_JCC);r->condition=X64_CONDITION_A;r->label=labels[0];
+		x64_record_emit_three_registers(e,X64_OP_LEAL,8,R11,X64_REGISTER_NONE,X64_REGISTER_NONE)->label=table;
+		r=x64_record_emit_three_registers(e,X64_OP_LDX,4,R10,R11,X64_REGISTER_NONE);r->registers[3]=R10;r->shift=2;r->condition=1;
+		x64_record_emit_three_registers(e,X64_OP_ADD,8,R10,R10,R11);
+		x64_record_emit_three_registers(e,X64_OP_JMPR,8,X64_REGISTER_NONE,R10,X64_REGISTER_NONE);
 		x64_label(e,table);
 		uint32_t k=0;
 		for (uint64_t offset=0;offset<=span;offset++) {
 			uint64_t v=lo+offset,h,a;
 			while (k<n && (h=wide?(uint64_t)cases[stride*k+3]<<32|cases[stride*k+2]:cases[stride*k+1])<v) k++;
 			a=k<n?(wide?(uint64_t)cases[stride*k+1]<<32|cases[stride*k]:cases[stride*k]):0;
-			r=x64_put(e,X_JTE);r->label=k<n && a<=v?labels[k+1]:labels[0];r->reference=table;
+			r=x64_record_emit(e,X64_OP_JTE);r->label=k<n && a<=v?labels[k+1]:labels[0];r->reference=table;
 		}
 	} else {
 		for (uint32_t k=0;k<n;k++) {
@@ -78,11 +78,11 @@ VPRIV void x64_vir_switch_lower(x64_vir_context *L, uint32_t block, const vir_in
 			uint64_t h=wide?(uint64_t)cases[stride*k+3]<<32|cases[stride*k+2]:cases[stride*k+1];
 			int reg=selector;
 			if (a!=h) {
-				x64_movi(e,R11,size==4?(int64_t)(int32_t)a:(int64_t)a);
-				x64_op3(e,X_SUB,size,R10,selector,R11);reg=R10;
+				x64_record_emit_move_immediate(e,R11,size==4?(int64_t)(int32_t)a:(int64_t)a);
+				x64_record_emit_three_registers(e,X64_OP_SUB,size,R10,selector,R11);reg=R10;
 			}
 			x64_vir_constant_compare_emit(L,reg,size,a==h?a:h-a);
-			record *r=x64_put(e,X_JCC);r->condition=a==h?CC_E:CC_BE;r->label=labels[k+1];
+			record *r=x64_record_emit(e,X64_OP_JCC);r->condition=a==h?X64_CONDITION_E:X64_CONDITION_BE;r->label=labels[k+1];
 		}
 		x64_jump(e,labels[0]);
 	}
