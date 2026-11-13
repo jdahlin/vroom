@@ -1,0 +1,595 @@
+{
+  "date": "2026-11-13",
+  "host": "AMD Ryzen 7 9700X, x86_64 Linux",
+  "source": "work/vir-x86-corpus/sqlite/st/sqlite3.c",
+  "source_bytes": 9282866,
+  "source_lines": 262899,
+  "source_sha256": "e3f5d6901e7492af4a1fc8c4d745cae84c264942524c3fbfc02b82a5ca8818c8",
+  "binary_sha256": {
+    "base": "cb7a5c94af25f9431b6787523f68f38a9f9685ecf69f1e181f9afd2093618b92",
+    "layout": "f72e2faf9aa608a2a88c3aeeb698e07ba1d27bc519d230d37cd5bdd412ae88c0"
+  },
+  "method": "Fresh compiler processes, -O2, standalone object emission; CPU user+system, median of 2 baseline and 3 optimized runs. Both target architectures run on the same x86 host, with their respective libc headers. File cache not flushed. VIR=0 or bl. ARM timing control: 3 interleaved before/after pairs, repeated because host load changed during the first follow-up.",
+  "profile_before": "97.33% sampled cycles in as_end (repeated fragment walks)",
+  "summary": [
+    {
+      "target": "x86_64",
+      "mode": "direct",
+      "before_cpu_s": 9.004855,
+      "after_cpu_s": 0.2916690000000002,
+      "speedup": 30.873541583095886,
+      "before_samples": [
+        9.075342000000001,
+        8.934367999999996
+      ],
+      "after_samples": [
+        0.29413999999999996,
+        0.2896449999999995,
+        0.2916690000000002
+      ]
+    },
+    {
+      "target": "x86_64",
+      "mode": "vir",
+      "before_cpu_s": 28.314561499999996,
+      "after_cpu_s": 0.5709200000000001,
+      "speedup": 49.5946218384362,
+      "before_samples": [
+        28.373863,
+        28.255259999999996
+      ],
+      "after_samples": [
+        0.5746870000000002,
+        0.5649330000000001,
+        0.5709200000000001
+      ]
+    },
+    {
+      "target": "aarch64",
+      "mode": "direct",
+      "before_cpu_s": 0.17520200000000022,
+      "after_cpu_s": 0.17225699999999997,
+      "speedup": 1.0170965476003893,
+      "before_samples": [
+        0.17753599999999997,
+        0.17520200000000022,
+        0.17115899999999962
+      ],
+      "after_samples": [
+        0.17565199999999997,
+        0.17225699999999997,
+        0.17115400000000047
+      ]
+    },
+    {
+      "target": "aarch64",
+      "mode": "vir",
+      "before_cpu_s": 0.47675800000000007,
+      "after_cpu_s": 0.4767080000000006,
+      "speedup": 1.0001048860098833,
+      "before_samples": [
+        0.47899100000000006,
+        0.47675800000000007,
+        0.47484100000000024
+      ],
+      "after_samples": [
+        0.48284399999999983,
+        0.4767080000000006,
+        0.4760980000000001
+      ]
+    }
+  ],
+  "debug_object_check": [
+    {
+      "binary": "base",
+      "cpu": 9.990151999999998,
+      "wall": 10.027656903024763,
+      "sha256": "2274c881ccce60d66191dcead38878a0557803421b0b4faf0a029710827156c1"
+    },
+    {
+      "binary": "layout",
+      "cpu": 0.3053050000000016,
+      "wall": 0.31415695464238524,
+      "sha256": "2274c881ccce60d66191dcead38878a0557803421b0b4faf0a029710827156c1"
+    }
+  ],
+  "baseline_commands": [
+    {
+      "target": "x86_64",
+      "mode": "pp",
+      "status": 0,
+      "wall": 0.11369279911741614,
+      "cpu": 0.078069,
+      "args": [
+        "/source/vroom/work/sqlite-compile-profile/vpp-base",
+        "--target=x86_64-linux-gnu",
+        "-O2",
+        "-DSQLITE_OMIT_LOAD_EXTENSION",
+        "-DSQLITE_THREADSAFE=0",
+        "-isystem",
+        "/usr/lib/llvm-23/lib/clang/23/include",
+        "-isystem",
+        "/usr/include/x86_64-linux-gnu",
+        "-isystem",
+        "/usr/include",
+        "-E",
+        "-o",
+        "/dev/null",
+        "/source/vroom/work/vir-x86-corpus/sqlite/st/sqlite3.c"
+      ]
+    },
+    {
+      "target": "x86_64",
+      "mode": "sema",
+      "status": 0,
+      "wall": 0.11387405404821038,
+      "cpu": 0.09132599999999999,
+      "args": [
+        "/source/vroom/work/sqlite-compile-profile/vpp-base",
+        "--target=x86_64-linux-gnu",
+        "-O2",
+        "-DSQLITE_OMIT_LOAD_EXTENSION",
+        "-DSQLITE_THREADSAFE=0",
+        "-isystem",
+        "/usr/lib/llvm-23/lib/clang/23/include",
+        "-isystem",
+        "/usr/include/x86_64-linux-gnu",
+        "-isystem",
+        "/usr/include",
+        "-fsyntax-only",
+        "-o",
+        "/dev/null",
+        "/source/vroom/work/vir-x86-corpus/sqlite/st/sqlite3.c"
+      ]
+    },
+    {
+      "target": "x86_64",
+      "mode": "direct",
+      "status": 0,
+      "wall": 8.874987561721355,
+      "cpu": 8.858034,
+      "args": [
+        "/source/vroom/work/sqlite-compile-profile/vpp-base",
+        "--target=x86_64-linux-gnu",
+        "-O2",
+        "-DSQLITE_OMIT_LOAD_EXTENSION",
+        "-DSQLITE_THREADSAFE=0",
+        "-isystem",
+        "/usr/lib/llvm-23/lib/clang/23/include",
+        "-isystem",
+        "/usr/include/x86_64-linux-gnu",
+        "-isystem",
+        "/usr/include",
+        "-c",
+        "-o",
+        "/dev/null",
+        "/source/vroom/work/vir-x86-corpus/sqlite/st/sqlite3.c"
+      ]
+    },
+    {
+      "target": "x86_64",
+      "mode": "vir",
+      "status": 0,
+      "wall": 28.460983916185796,
+      "cpu": 28.402236,
+      "args": [
+        "/source/vroom/work/sqlite-compile-profile/vpp-base",
+        "--target=x86_64-linux-gnu",
+        "-O2",
+        "-DSQLITE_OMIT_LOAD_EXTENSION",
+        "-DSQLITE_THREADSAFE=0",
+        "-isystem",
+        "/usr/lib/llvm-23/lib/clang/23/include",
+        "-isystem",
+        "/usr/include/x86_64-linux-gnu",
+        "-isystem",
+        "/usr/include",
+        "-c",
+        "-o",
+        "/dev/null",
+        "/source/vroom/work/vir-x86-corpus/sqlite/st/sqlite3.c"
+      ]
+    },
+    {
+      "target": "aarch64",
+      "mode": "pp",
+      "status": 0,
+      "wall": 0.11383086210116744,
+      "cpu": 0.08030500000000385,
+      "args": [
+        "/source/vroom/work/sqlite-compile-profile/vpp-base",
+        "--target=aarch64-linux-gnu",
+        "-O2",
+        "-DSQLITE_OMIT_LOAD_EXTENSION",
+        "-DSQLITE_THREADSAFE=0",
+        "-isystem",
+        "/usr/lib/llvm-23/lib/clang/23/include",
+        "-isystem",
+        "/usr/aarch64-linux-gnu/include",
+        "-E",
+        "-o",
+        "/dev/null",
+        "/source/vroom/work/vir-x86-corpus/sqlite/st/sqlite3.c"
+      ]
+    },
+    {
+      "target": "aarch64",
+      "mode": "sema",
+      "status": 0,
+      "wall": 0.1138466321863234,
+      "cpu": 0.09382699999999727,
+      "args": [
+        "/source/vroom/work/sqlite-compile-profile/vpp-base",
+        "--target=aarch64-linux-gnu",
+        "-O2",
+        "-DSQLITE_OMIT_LOAD_EXTENSION",
+        "-DSQLITE_THREADSAFE=0",
+        "-isystem",
+        "/usr/lib/llvm-23/lib/clang/23/include",
+        "-isystem",
+        "/usr/aarch64-linux-gnu/include",
+        "-fsyntax-only",
+        "-o",
+        "/dev/null",
+        "/source/vroom/work/vir-x86-corpus/sqlite/st/sqlite3.c"
+      ]
+    },
+    {
+      "target": "aarch64",
+      "mode": "direct",
+      "status": 0,
+      "wall": 0.21387756243348122,
+      "cpu": 0.16862999999999878,
+      "args": [
+        "/source/vroom/work/sqlite-compile-profile/vpp-base",
+        "--target=aarch64-linux-gnu",
+        "-O2",
+        "-DSQLITE_OMIT_LOAD_EXTENSION",
+        "-DSQLITE_THREADSAFE=0",
+        "-isystem",
+        "/usr/lib/llvm-23/lib/clang/23/include",
+        "-isystem",
+        "/usr/aarch64-linux-gnu/include",
+        "-c",
+        "-o",
+        "/dev/null",
+        "/source/vroom/work/vir-x86-corpus/sqlite/st/sqlite3.c"
+      ]
+    },
+    {
+      "target": "aarch64",
+      "mode": "vir",
+      "status": 0,
+      "wall": 0.5145420404151082,
+      "cpu": 0.4673430000000015,
+      "args": [
+        "/source/vroom/work/sqlite-compile-profile/vpp-base",
+        "--target=aarch64-linux-gnu",
+        "-O2",
+        "-DSQLITE_OMIT_LOAD_EXTENSION",
+        "-DSQLITE_THREADSAFE=0",
+        "-isystem",
+        "/usr/lib/llvm-23/lib/clang/23/include",
+        "-isystem",
+        "/usr/aarch64-linux-gnu/include",
+        "-c",
+        "-o",
+        "/dev/null",
+        "/source/vroom/work/vir-x86-corpus/sqlite/st/sqlite3.c"
+      ]
+    }
+  ],
+  "object_checks": [
+    {
+      "repeat": 0,
+      "target": "x86_64",
+      "mode": "direct",
+      "binary": "base",
+      "cpu": 9.075342000000001,
+      "wall": 9.078050381038338,
+      "sha256": "4ec1301ac350ffa29fa1b3b5a0bb2859397784ea09b9a9e04b5ee9d681a348d4"
+    },
+    {
+      "repeat": 0,
+      "target": "x86_64",
+      "mode": "direct",
+      "binary": "new",
+      "cpu": 0.3713269999999992,
+      "wall": 0.415717420168221,
+      "sha256": "4ec1301ac350ffa29fa1b3b5a0bb2859397784ea09b9a9e04b5ee9d681a348d4"
+    },
+    {
+      "repeat": 0,
+      "target": "x86_64",
+      "mode": "vir",
+      "binary": "base",
+      "cpu": 28.373863,
+      "wall": 28.403611715883017,
+      "sha256": "0c61ce7e14698182f99312f6b7d5fba59a39131b0a45e27b848627febca5a061"
+    },
+    {
+      "repeat": 0,
+      "target": "x86_64",
+      "mode": "vir",
+      "binary": "new",
+      "cpu": 0.6655210000000005,
+      "wall": 0.7158678309060633,
+      "sha256": "0c61ce7e14698182f99312f6b7d5fba59a39131b0a45e27b848627febca5a061"
+    },
+    {
+      "repeat": 0,
+      "target": "aarch64",
+      "mode": "direct",
+      "binary": "base",
+      "cpu": 0.1665830000000036,
+      "wall": 0.214898772072047,
+      "sha256": "aa3ad3d7fd2dbe55b8aa8424aa5729b69724c7865cc2f7ee857ce9f4bc77a04a"
+    },
+    {
+      "repeat": 0,
+      "target": "aarch64",
+      "mode": "direct",
+      "binary": "new",
+      "cpu": 0.1638419999999971,
+      "wall": 0.16457424499094486,
+      "sha256": "aa3ad3d7fd2dbe55b8aa8424aa5729b69724c7865cc2f7ee857ce9f4bc77a04a"
+    },
+    {
+      "repeat": 0,
+      "target": "aarch64",
+      "mode": "vir",
+      "binary": "base",
+      "cpu": 0.45327399999999696,
+      "wall": 0.46542314533144236,
+      "sha256": "fa1647b942596eb91903de22dcbbf2be4f7f63fb4362c9fc2b4ac259cacd599d"
+    },
+    {
+      "repeat": 0,
+      "target": "aarch64",
+      "mode": "vir",
+      "binary": "new",
+      "cpu": 0.4575380000000037,
+      "wall": 0.46528501994907856,
+      "sha256": "fa1647b942596eb91903de22dcbbf2be4f7f63fb4362c9fc2b4ac259cacd599d"
+    },
+    {
+      "repeat": 1,
+      "target": "x86_64",
+      "mode": "direct",
+      "binary": "base",
+      "cpu": 8.934367999999996,
+      "wall": 8.977387189865112,
+      "sha256": "4ec1301ac350ffa29fa1b3b5a0bb2859397784ea09b9a9e04b5ee9d681a348d4"
+    },
+    {
+      "repeat": 1,
+      "target": "x86_64",
+      "mode": "direct",
+      "binary": "new",
+      "cpu": 0.3588959999999981,
+      "wall": 0.36542655620723963,
+      "sha256": "4ec1301ac350ffa29fa1b3b5a0bb2859397784ea09b9a9e04b5ee9d681a348d4"
+    },
+    {
+      "repeat": 1,
+      "target": "x86_64",
+      "mode": "vir",
+      "binary": "base",
+      "cpu": 28.255259999999996,
+      "wall": 28.30357181886211,
+      "sha256": "0c61ce7e14698182f99312f6b7d5fba59a39131b0a45e27b848627febca5a061"
+    },
+    {
+      "repeat": 1,
+      "target": "x86_64",
+      "mode": "vir",
+      "binary": "new",
+      "cpu": 0.6688340000000046,
+      "wall": 0.7160356398671865,
+      "sha256": "0c61ce7e14698182f99312f6b7d5fba59a39131b0a45e27b848627febca5a061"
+    },
+    {
+      "repeat": 1,
+      "target": "aarch64",
+      "mode": "direct",
+      "binary": "base",
+      "cpu": 0.16833099999999557,
+      "wall": 0.2148294490762055,
+      "sha256": "aa3ad3d7fd2dbe55b8aa8424aa5729b69724c7865cc2f7ee857ce9f4bc77a04a"
+    },
+    {
+      "repeat": 1,
+      "target": "aarch64",
+      "mode": "direct",
+      "binary": "new",
+      "cpu": 0.16947699999999577,
+      "wall": 0.21484060119837523,
+      "sha256": "aa3ad3d7fd2dbe55b8aa8424aa5729b69724c7865cc2f7ee857ce9f4bc77a04a"
+    },
+    {
+      "repeat": 1,
+      "target": "aarch64",
+      "mode": "vir",
+      "binary": "base",
+      "cpu": 0.45392299999999897,
+      "wall": 0.4650547821074724,
+      "sha256": "fa1647b942596eb91903de22dcbbf2be4f7f63fb4362c9fc2b4ac259cacd599d"
+    },
+    {
+      "repeat": 1,
+      "target": "aarch64",
+      "mode": "vir",
+      "binary": "new",
+      "cpu": 0.45524500000001045,
+      "wall": 0.4651104579679668,
+      "sha256": "fa1647b942596eb91903de22dcbbf2be4f7f63fb4362c9fc2b4ac259cacd599d"
+    }
+  ],
+  "optimized_samples": [
+    {
+      "target": "x86_64",
+      "mode": "direct",
+      "binary": "layout",
+      "cpu": 0.29413999999999996,
+      "wall": 0.3166492669843137,
+      "sha256": "4ec1301ac350ffa29fa1b3b5a0bb2859397784ea09b9a9e04b5ee9d681a348d4"
+    },
+    {
+      "target": "x86_64",
+      "mode": "vir",
+      "binary": "layout",
+      "cpu": 0.5746870000000002,
+      "wall": 0.6164376409724355,
+      "sha256": "0c61ce7e14698182f99312f6b7d5fba59a39131b0a45e27b848627febca5a061"
+    },
+    {
+      "target": "x86_64",
+      "mode": "direct",
+      "binary": "layout",
+      "cpu": 0.2896449999999995,
+      "wall": 0.3163230875506997,
+      "sha256": "4ec1301ac350ffa29fa1b3b5a0bb2859397784ea09b9a9e04b5ee9d681a348d4"
+    },
+    {
+      "target": "x86_64",
+      "mode": "vir",
+      "binary": "layout",
+      "cpu": 0.5649330000000001,
+      "wall": 0.6163295959122479,
+      "sha256": "0c61ce7e14698182f99312f6b7d5fba59a39131b0a45e27b848627febca5a061"
+    },
+    {
+      "target": "x86_64",
+      "mode": "direct",
+      "binary": "layout",
+      "cpu": 0.2916690000000002,
+      "wall": 0.3162607690319419,
+      "sha256": "4ec1301ac350ffa29fa1b3b5a0bb2859397784ea09b9a9e04b5ee9d681a348d4"
+    },
+    {
+      "target": "x86_64",
+      "mode": "vir",
+      "binary": "layout",
+      "cpu": 0.5709200000000001,
+      "wall": 0.6167825651355088,
+      "sha256": "0c61ce7e14698182f99312f6b7d5fba59a39131b0a45e27b848627febca5a061"
+    },
+    {
+      "target": "aarch64",
+      "mode": "direct",
+      "binary": "layout",
+      "cpu": 0.16508399999999998
+    },
+    {
+      "target": "aarch64",
+      "mode": "vir",
+      "binary": "layout",
+      "cpu": 0.580476
+    },
+    {
+      "target": "aarch64",
+      "mode": "direct",
+      "binary": "layout",
+      "cpu": 0.20021999999999995
+    },
+    {
+      "target": "aarch64",
+      "mode": "vir",
+      "binary": "layout",
+      "cpu": 0.4805119999999999
+    },
+    {
+      "target": "aarch64",
+      "mode": "direct",
+      "binary": "layout",
+      "cpu": 0.18928800000000004
+    },
+    {
+      "target": "aarch64",
+      "mode": "vir",
+      "binary": "layout",
+      "cpu": 0.5520090000000001
+    }
+  ],
+  "arm_paired_samples": [
+    {
+      "target": "aarch64",
+      "mode": "direct",
+      "binary": "base",
+      "cpu": 0.17753599999999997
+    },
+    {
+      "target": "aarch64",
+      "mode": "direct",
+      "binary": "layout",
+      "cpu": 0.17565199999999997
+    },
+    {
+      "target": "aarch64",
+      "mode": "vir",
+      "binary": "base",
+      "cpu": 0.47899100000000006
+    },
+    {
+      "target": "aarch64",
+      "mode": "vir",
+      "binary": "layout",
+      "cpu": 0.48284399999999983
+    },
+    {
+      "target": "aarch64",
+      "mode": "direct",
+      "binary": "base",
+      "cpu": 0.17520200000000022
+    },
+    {
+      "target": "aarch64",
+      "mode": "direct",
+      "binary": "layout",
+      "cpu": 0.17225699999999997
+    },
+    {
+      "target": "aarch64",
+      "mode": "vir",
+      "binary": "base",
+      "cpu": 0.47675800000000007
+    },
+    {
+      "target": "aarch64",
+      "mode": "vir",
+      "binary": "layout",
+      "cpu": 0.4767080000000006
+    },
+    {
+      "target": "aarch64",
+      "mode": "direct",
+      "binary": "base",
+      "cpu": 0.17115899999999962
+    },
+    {
+      "target": "aarch64",
+      "mode": "direct",
+      "binary": "layout",
+      "cpu": 0.17115400000000047
+    },
+    {
+      "target": "aarch64",
+      "mode": "vir",
+      "binary": "base",
+      "cpu": 0.47484100000000024
+    },
+    {
+      "target": "aarch64",
+      "mode": "vir",
+      "binary": "layout",
+      "cpu": 0.4760980000000001
+    }
+  ],
+  "validation": {
+    "assembler_object_parity": "63/63 normal and ASan+UBSan",
+    "x86_vcc_suite": "318/318, 8 existing skips",
+    "sqlite_objects": "byte-identical before/after for x86_64 and aarch64, direct and VIR; x86_64 direct also with -g",
+    "current_vir_assembly": "byte-identical through pinned old assembler and final assembler; checked after unrelated concurrent VIR rebuild",
+    "separate_compilation": "as.c passes"
+  }
+}

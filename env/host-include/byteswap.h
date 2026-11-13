@@ -1,4 +1,4 @@
-/* Shim för macOS: glibc-kompatibel <byteswap.h> */
+/* Shim for macOS: glibc-compatible <byteswap.h> */
 #ifndef VROOM_BYTESWAP_H
 #define VROOM_BYTESWAP_H
 #define bswap_16(x) __builtin_bswap16(x)

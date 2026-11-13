@@ -1,0 +1,17 @@
+tu	basic.c	ok
+use	decl	A	n	basic.c:5	file	basic.c	95	5	16	1	-
+use	decl	A	len	basic.c:5	file	basic.c	106	5	27	3	-
+use	decl	A	cb	basic.c:5	file	basic.c	117	5	38	2	-
+use	decl	A	bits	basic.c:5	file	basic.c	138	5	59	4	-
+other	decl	B	n	basic.c:6	file	basic.c	166	6	16	1	-
+other	decl	B	len	basic.c:6	file	basic.c	173	6	23	3	-
+use	member	A	n	basic.c:5	file	basic.c	230	9	5	1	-
+use	member	A	n	basic.c:5	file	basic.c	236	9	11	1	-
+other	member	B	n	basic.c:6	file	basic.c	242	9	17	1	-
+use	member	A	len	basic.c:5	file	basic.c	256	10	12	3	-
+other	member	B	len	basic.c:6	file	basic.c	264	10	20	3	-
+use	member	A	bits	basic.c:5	file	basic.c	272	10	28	4	-
+use	member	A	cb	basic.c:5	file	basic.c	282	10	38	2	-
+use	member	A	len	basic.c:5	file	basic.c	300	10	56	3	-
+use	member	A	n	basic.c:5	file	basic.c	315	10	71	1	-
+members	A	basic.c:5	n,p,len,cb,bits

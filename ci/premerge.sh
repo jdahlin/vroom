@@ -7,9 +7,9 @@
 # vcc-builtins.py (Homebrew's clang).
 #
 #   ci/premerge.sh arm64    vcc build, the C suites under qemu, fast harnesses
-#   ci/premerge.sh asan     ASan+UBSan build: vcc suite, diag, stress, vccd, vlink-bad
+#   ci/premerge.sh asan     ASan+UBSan build: vcc suite, diag, stress, vccd, vlink-bad, fuzz-regress
 #   ci/premerge.sh tsan     TSan build: vcc suite (threaded emitter), vccd
-#   ci/premerge.sh wasm     the C suites for wasm64 (emcc + node)
+#   ci/premerge.sh wasm     the C suites for wasm64 (emcc + node); DISABLED, manual (doc/PLAN-wasm.md)
 #
 # Locally (Debian arm64 container, as CI):  env/linux/run.sh ci/premerge.sh arm64
 # Each step's output goes to build/linux/ci-logs/STEP.log (CI uploads it on
@@ -43,9 +43,9 @@ step() {	# step NAME CMD...: run, log, report; keep going on failure
 	return 0
 }
 
-build() {	# build MAKE-TARGET: a build failure ends the job
+build() {	# build MAKE-TARGET [VAR=VALUE]: a build failure ends the job
 	echo "::group::make $1"
-	if ! make -C ccs -j "$J" "$1" > "$LOGS/make-$1.log" 2>&1; then
+	if ! make -C src -j "$J" "$@" > "$LOGS/make-$1.log" 2>&1; then
 		tail -n 60 "$LOGS/make-$1.log"; echo "::endgroup::"
 		echo "FAIL make $1"; exit 1
 	fi
@@ -57,13 +57,15 @@ case $JOB in
 arm64)
 	build vcc
 	if [ "$(uname -s)/$(uname -m)" = Linux/x86_64 ]; then
+		step host-dispatch python3 bench/vcc-host-dispatch.py --bin-dir "$BUILD"
+		step x86-direct-objects python3 bench/vcc-x86.py --suite vcc --objcmp -j "$J"
 		step interrupt python3 bench/vcc-interrupt.py
 		step vir-x86 python3 bench/vcc-vir-x86.py --bin-dir "$BUILD"
 	fi
 	step runtime-exceptions python3 bench/test-runtime-exceptions.py
 	step pg-cc-contract python3 bench/pg/test-cc.py
 	step pg-speed-accounting python3 bench/pg/test-speed.py
-	step memory-cells-generated python3 bench/gen-memory-cells.py --check
+	step memory-cells-generated python3 src/tools/gen-memory-cells.py --check
 	step ctests       python3 bench/vcc-ctests.py -j "$J"
 	step switch-plan python3 bench/vcc-switch-plan.py --sanitize
 	step udivconst python3 bench/vcc-udivconst.py --sanitize
@@ -97,10 +99,13 @@ arm64)
 	step c2y-cache    python3 bench/vcc-c2y-cache.py
 	step embed-search python3 bench/vcc-embed-search.py
 	step diag         python3 bench/vcc-diag.py -j "$J"
+	step field-uses   python3 bench/vcc-field-uses.py -j "$J"
 	step x86-features python3 bench/vcc-x86features.py --clang "${LLVM:-/usr/lib/llvm-23}/bin/clang" --vpp "$BUILD/vpp"
 	step x86-targets  python3 bench/vcc-x86target.py --clang "${LLVM:-/usr/lib/llvm-23}/bin/clang" --vpp "$BUILD/vpp"
 	step stress       python3 bench/vcc-stress.py
 	step stress-vccd  python3 bench/vcc-stress.py --vccd
+	step task-test    "$BUILD/task-test"
+	step common-test  env CC="${LLVM:-/usr/lib/llvm-23}/bin/clang" python3 bench/common-test.py -j "$J"
 	step vccd         python3 bench/vccd-test.py
 	step abi          python3 bench/vcc-abi.py
 	step atomic       python3 bench/vcc-atomic.py --bin-dir "$BUILD" --target aarch64-linux-gnu
@@ -132,7 +137,7 @@ arm64)
 	;;
 asan)
 	build vcc-asan
-	B=$(dirname "$BUILD")/ccs-asan
+	B=$(dirname "$BUILD")/src-asan
 	# LeakSanitizer is on by default on Linux (not on macOS): vcc exits with
 	# its arenas and caches mapped, by design, so every compile would "leak"
 	export ASAN_OPTIONS=${ASAN_OPTIONS:+$ASAN_OPTIONS:}detect_leaks=0
@@ -143,24 +148,30 @@ asan)
 	step virgen       python3 bench/virgen-test.py --bin-dir "$B"
 	step bitint-replay python3 bench/vcc-bitint-replay.py --bin-dir "$B" --output "$LOGS/bitint-replay-asan"
 	step diag         python3 bench/vcc-diag.py -j "$J" --bin-dir "$B"
+	step field-uses   python3 bench/vcc-field-uses.py -j "$J" --bin-dir "$B"
 	step stress       python3 bench/vcc-stress.py --bin-dir "$B"
 	step vccd         python3 bench/vccd-test.py --bin-dir "$B"
 	step vlink-bad    python3 bench/vlink-bad.py --bin-dir "$B"
+	# the fuzz targets (ASan+UBSan, libFuzzer from libclang-rt-N-dev when present, else test/fuzz/driver.c)
+	# build and replay test/fuzz/regress: replay only, no fuzzing; a build break or a failing input fails the job
+	step fuzz-regress make -C src -j "$J" fuzz-regress
 	;;
 tsan)
 	build vcc-tsan
-	B=$(dirname "$BUILD")/ccs-tsan
+	B=$(dirname "$BUILD")/src-tsan
 	if [ "$(uname -s)/$(uname -m)" = Linux/x86_64 ]; then
 		step vir-x86-tsan python3 bench/vcc-vir-x86.py --bin-dir "$B"
 	fi
 	# a test's vcc-timeout bounds the normal build; TSan's is 15-20x slower
 	# (init_large: 10 s was not enough on the x86-64 runner)
 	step ctests-vcc   env VCC_BIN="$B" VCC_TIMEOUT_SCALE=6 python3 bench/vcc-ctests.py -j "$J" --suite vcc
+	step task-test    "$B/task-test"
 	step vccd         python3 bench/vccd-test.py --bin-dir "$B"
 	step stress-vccd  python3 bench/vcc-stress.py --vccd --bin-dir "$B"
 	;;
 wasm)
-	build vcc
+	# disabled (2026-11-13): needs the wasm sources compiled in
+	build vcc VCC_WASM=1
 	step switch-bitsets-wasm32 python3 bench/vcc-switch-bitsets.py --target wasm32-unknown-emscripten --run
 	step switch-bitsets-wasm64 python3 bench/vcc-switch-bitsets.py --target wasm64-unknown-emscripten --run
 	step opt-rules-wasm32 python3 bench/vcc-opt-rules.py --target wasm32-unknown-emscripten --run

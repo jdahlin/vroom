@@ -1,0 +1,1692 @@
+# old	new	kind	where	comment
+# Rename table for VIR, its builder and its two lowerings (doc/quality/WORK-vir.md; names by doc/STYLE.md).
+# Scope: src/vir/, src/codegen/vir/, src/arch/a64/vir/, src/arch/x64/vir/, src/bin/virtest/, src/bin/viralloc/, src/include/vir/.
+# Format as rename-as.tsv: old, new, kind, where, comment; whole-word rows for src/tools/rename-table.py.
+# Kinds: file (path rows), type, function (file-scope, static or not; ",public" when declared in src/include/vir/),
+#   constant (enumerators and constant macros), macro (function-like), variable, field, unsafe (commented out).
+# Prefixes: vir_ for src/vir/, virbuild_ for the builder and vectorizer in src/codegen/vir/, a64_vir_ / x64_vir_ for the
+#   lowerings (STYLE: a target's code in a shared module carries both).  Constants: VIR_, VIRBUILD_, A64_VIR_.
+# NOT renamed, on purpose:
+#   - the text form: opcode, type and condition spellings ("add", "i32", "slt", ...: strings of vir/table.c), pass names of
+#     VCC_VIR_PASSES, .vir files and test expectations under src/test/vir*.  The enumerators behind them (VO_ADD) are C
+#     identifiers and do move (VIR_OP_ADD), their suffix being the opcode's spelling.
+#   - names produced by the walker's second instantiation: WK_PREFIX/LO_PREFIX paste "vw_" in front of every walker function
+#     and of every LO(name) (codegen/walk/prefix.h, gen-walkprefix.py).  The row `vw_` below renames the prefix itself (the
+#     two #define lines of each builder file and the vw_##name of VW_NO); wk_X then becomes virbuild_<walker's new name>
+#     with the walker's own table.  The suffix of an LO(X) implementation is the walker's lowering vocabulary shared by
+#     x64, arm64 and VIR: rows of kind function marked "LO(X)" move the prefix only; X is renamed with codegen/walk/.
+#   - already right: vir_alloc, vir_verify, vir_canon, vir_parse, vir_slot_add, vir_unit_init/alloc/free, vir_loops_build,
+#     vir_layout_order/duplicate, vir_print_group/unit, vir_target_name, vir_synth_init, vir_alloc_check/print.
+# SPEC-vir.md and PLAN-vir.md use many of the old names (vir_ins, vir_blk, vir_fn, vir_cfg, vir_dom, vir_uses, VO_*, ...): doc/ is
+# outside the script's scope; apply with --also doc/SPEC-vir.md (the spec follows the code) once the owner agrees.
+# Files not renamed: vir/vir.c is the construction API, the constant table, the CFG and dominators, canon and the unit: more than one
+# job (STYLE: one job per file), a split rather than a rename; see the PR's open questions.
+# struct actx (vir/alloc.c, the allocator's per-thread arrays, about 85 abbreviated fields: nu, lend, endp, wi, wd, ...) has no
+# rows: their meaning is documented per sweep inside alloc.c and the names should be chosen when that file is split.
+# Rows of kind unsafe are commented out: the old word is also used for other things (locals, other modules), so whole-word
+# replacement is wrong; they need a scoped apply (the where column) or the compiler.  Field rows are kept in the last section.
+#
+# --- the prefix of the walker instantiation
+vw_	virbuild_	constant	codegen/vir/*.c (WK_PREFIX, LO_PREFIX, VW_NO)	the prefix pasted by the walker mechanism; not an identifier of its own
+#
+# --- files (path rows: git mv with --move; where = the directory)
+vir/alloc.c	vir/register-allocation.c	file	src/vir	
+vir/allocchk.c	vir/register-allocation-check.c	file	src/vir	
+vir/allocdump.c	vir/register-allocation-print.c	file	src/vir	
+vir/synth.c	vir/synthetic-target.c	file	src/vir	
+vir/table.c	vir/opcode-table.c	file	src/vir	
+virimpl.h	vir-internal.h	file	src/vir	bare name: no text names the full path (the Makefile uses wildcards); git mv by hand, the tool's --move only moves path rows
+vir/alloc.h	vir/register-allocation.h	file	src/include/vir	
+vir/synth.h	vir/synthetic-target.h	file	src/include/vir	
+promote.c	slot-promotion.c	file	src/codegen/vir	bare name: no text names the full path (the Makefile uses wildcards); git mv by hand, the tool's --move only moves path rows
+# rules.c	simplification-rules.c	file	src/codegen/vir	by hand (git mv + the comments that name it): a whole-word row for the bare name would also rewrite integer_bit_rules.c in bench/vcc-opt-rules.py
+ssa.c	ssa-construction.c	file	src/codegen/vir	bare name: no text names the full path (the Makefile uses wildcards); git mv by hand, the tool's --move only moves path rows
+codegen/vir/try.c	codegen/vir/build-attempt.c	file	src/codegen/vir	
+codegen/vir/walk.c	codegen/vir/walker-instance.c	file	src/codegen/vir	
+parameters.c	block-parameters.c	file	src/codegen/vir	bare name: no text names the full path (the Makefile uses wildcards); git mv by hand, the tool's --move only moves path rows
+# folds.c	operand-folds.c	file	src/arch/x64/vir	by hand (git mv + the comments that name it): a whole-word row for the bare name would also rewrite address-folds.c (arm64)
+#
+# --- types
+vlarg	a64_vir_argument	type	arch/a64/vir/lowering-internal.h	
+vlt	a64_vir_thread_state	type	arch/a64/vir/lowering-internal.h	
+vlcc	a64_vir_condition	type	arch/a64/vir/lowering-internal.h	
+vlx	a64_vir_chain	type	arch/a64/vir/lowering-internal.h	
+vir_failure	virbuild_failure	type	codegen/vir/failure.h	
+vir_failure_info	virbuild_failure_info	type	codegen/vir/failure.h	
+vir_pass_count	virbuild_pass_count	type	codegen/vir/pass-table.c	
+vir_pass_tu	virbuild_pass_unit_counts	type	codegen/vir/pass-table.c	
+vir_pass	virbuild_pass	type	codegen/vir/pass-table.h	
+vir_pass_switch	virbuild_pass_switch	type	codegen/vir/pass-table.h	
+vw_check	virbuild_preir_checker	type	codegen/vir/preir-check.c	
+vwp	virbuild_preir_insn	type	codegen/vir/preir.h	
+vwb	virbuild_preir_block	type	codegen/vir/preir.h	
+vwh	virbuild_variable_entry	type	codegen/vir/preir.h	
+vwslot	virbuild_preir_slot	type	codegen/vir/preir.h	
+vwstent	virbuild_store_entry	type	codegen/vir/preir.h	
+vwloc	virbuild_location	type	codegen/vir/preir.h	
+vwst	virbuild_context	type	codegen/vir/preir.h	
+vwfld	virbuild_promote_field	type	codegen/vir/promote.c	
+vwms	virbuild_promote_memset	type	codegen/vir/promote.c	
+vwhe	virbuild_value_entry	type	codegen/vir/simplify.h	
+vwsimp	virbuild_simplify_state	type	codegen/vir/simplify.h	
+vwaddr	virbuild_address	type	codegen/vir/simplify.h	
+vvi	virbuild_vectorize_info	type	codegen/vir/vectorize.h	
+vvacc	virbuild_vectorize_access	type	codegen/vir/vectorize.h	
+vvred	virbuild_vectorize_reduction	type	codegen/vir/vectorize.h	
+vvs	virbuild_vectorize_state	type	codegen/vir/vectorize.h	
+vir_fix	vir_register_constraint	type	include/vir/alloc.h	
+vir_regs	vir_target_registers	type	include/vir/alloc.h	
+vir_emove	vir_edge_move	type	include/vir/alloc.h	
+vir_aedge	vir_alloc_edge	type	include/vir/alloc.h	
+vir_astats	vir_alloc_statistics	type	include/vir/alloc.h	
+vir_aopt	vir_alloc_options	type	include/vir/alloc.h	
+vir_synth	vir_synthetic_target	type	include/vir/synth.h	
+vir_ctx	vir_context	type	include/vir/vir.h	
+vir_ins	vir_insn	type	include/vir/vir.h	
+vir_blk	vir_block	type	include/vir/vir.h	
+vir_loc	vir_location	type	include/vir/vir.h	
+vir_fn	vir_function	type	include/vir/vir.h	
+vir_opinfo	vir_opcode_info	type	include/vir/vir.h	
+vir_oit	vir_operand_iterator	type	include/vir/vir.h	
+vir_usym	vir_unit_symbol	type	include/vir/vir.h	
+vir_usig	vir_unit_signature	type	include/vir/vir.h	
+vir_uasm	vir_unit_asm	type	include/vir/vir.h	
+vir_perr	vir_parse_error	type	include/vir/vir.h	
+pmv	vir_alloc_parallel_move	type	vir/alloc.c	
+dctx	vir_alloc_printer	type	vir/allocdump.c	
+pcase	vir_parse_switch_case	type	vir/parse.c	
+pblk	vir_parse_block	type	vir/parse.c	
+cdef	vir_parse_constant_definition	type	vir/parse.c	
+pctx	vir_print_state	type	vir/print.c	
+vctx	vir_verify_state	type	vir/verify.c	
+vex_edge	vir_verify_exposure_edge	type	vir/verify.c	
+vex_graph	vir_verify_exposure_graph	type	vir/verify.c	
+#
+# --- functions: file-scope, static or not
+vl_pfold	a64_vir_pointer_fold	function	arch/a64/vir/address-folds.c	
+vl_cinfo	a64_vir_chain_info_get	function	arch/a64/vir/address-folds.c	
+vl_cact	a64_vir_chain_consumer_act	function	arch/a64/vir/address-folds.c	
+vl_cfold	a64_vir_chain_fold	function	arch/a64/vir/address-folds.c	
+vl_assign	a64_vir_arguments_assign	function	arch/a64/vir/calling-convention.c	
+vl_retreg	a64_vir_return_register	function	arch/a64/vir/calling-convention.c	
+vl_bigmem	a64_vir_insn_is_big_memory	function	arch/a64/vir/calling-convention.c	
+vl_fixed	a64_vir_fixed_registers_get	function	arch/a64/vir/calling-convention.c	
+vl_regs	a64_vir_registers_describe	function	arch/a64/vir/calling-convention.c	
+vl_twice	a64_vir_callee_returns_twice	function	arch/a64/vir/calls.c	
+vl_notail	a64_vir_tail_call_reason	function	arch/a64/vir/calls.c	
+vl_pass	a64_vir_pass_through_skip	function	arch/a64/vir/calls.c	
+vl_under	a64_vir_pass_through_value	function	arch/a64/vir/calls.c	
+vl_sibling	a64_vir_call_is_sibling	function	arch/a64/vir/calls.c	
+vl_call	a64_vir_call_lower	function	arch/a64/vir/calls.c	
+vl_param	a64_vir_parameter_lower	function	arch/a64/vir/calls.c	
+vl_cmp	a64_vir_integer_compare_lower	function	arch/a64/vir/compares.c	
+vl_fcmp	a64_vir_float_compare_lower	function	arch/a64/vir/compares.c	
+vl_chain	a64_vir_compare_chain_lower	function	arch/a64/vir/compares.c	
+vl_ccmp	a64_vir_compare_chained_lower	function	arch/a64/vir/compares.c	
+vl_cond	a64_vir_condition_flags_get	function	arch/a64/vir/compares.c	
+vl_brcond	a64_vir_branch_condition_get	function	arch/a64/vir/compares.c	
+vl_bc	a64_vir_branch_conditional_emit	function	arch/a64/vir/compares.c	
+vl_kept	a64_vir_register_is_kept	function	arch/a64/vir/compares.c	
+vl_once1	a64_vir_value_is_used_by_next	function	arch/a64/vir/compares.c	
+vl_tfold	a64_vir_test_branch_fold	function	arch/a64/vir/compares.c	
+vl_block	a64_vir_block_lower	function	arch/a64/vir/function.c	
+vl_order	a64_vir_blocks_order	function	arch/a64/vir/function.c	
+vl_body	a64_vir_function_body_lower	function	arch/a64/vir/function.c	
+vl_vcross	a64_vir_vectors_cross_call	function	arch/a64/vir/function.c	
+vw_a64	a64_vir_function_lower	function	arch/a64/vir/function.c	
+vl_ins	a64_vir_insn_lower	function	arch/a64/vir/instructions.c	
+vl_isconst	a64_vir_value_is_constant	function	arch/a64/vir/lowering-internal.h	
+vl_k64	a64_vir_constant_bits	function	arch/a64/vir/lowering-internal.h	
+vl_ival	a64_vir_constant_integer	function	arch/a64/vir/lowering-internal.h	
+vl_lval	a64_vir_constant_logical_immediate	function	arch/a64/vir/lowering-internal.h	
+vl_pow2	a64_vir_constant_log2	function	arch/a64/vir/lowering-internal.h	
+vl_mulk	a64_vir_constant_is_multiplier	function	arch/a64/vir/lowering-internal.h	
+vl_iconst	a64_vir_value_is_integer_constant	function	arch/a64/vir/lowering-internal.h	
+vl_zero	a64_vir_value_is_zero	function	arch/a64/vir/lowering-internal.h	
+vl_memaddr	a64_vir_value_is_memory_address	function	arch/a64/vir/lowering-internal.h	
+vl_x	a64_vir_value_is_64_bit	function	arch/a64/vir/lowering-internal.h	
+vl_vecacc	a64_vir_access_is_vector	function	arch/a64/vir/lowering-internal.h	
+vl_gx	a64_vir_general_register	function	arch/a64/vir/lowering-internal.h	
+vl_gv	a64_vir_vector_register	function	arch/a64/vir/lowering-internal.h	
+vl_fcls	a64_vir_register_is_float	function	arch/a64/vir/lowering-internal.h	
+vl_ssz	a64_vir_slot_size_log2	function	arch/a64/vir/lowering-internal.h	
+vl_once	a64_vir_value_is_folded	function	arch/a64/vir/lowering-internal.h	
+vl_addr	a64_vir_address_get	function	arch/a64/vir/memory.c	
+vl_fmem	a64_vir_float_memory_access	function	arch/a64/vir/memory.c	
+vl_load	a64_vir_load_lower	function	arch/a64/vir/memory.c	
+vl_store	a64_vir_store_lower	function	arch/a64/vir/memory.c	
+vl_maddr	a64_vir_memory_block_address_get	function	arch/a64/vir/memory.c	
+vl_mem	a64_vir_memory_block_lower	function	arch/a64/vir/memory.c	
+vl_fail	a64_vir_fail	function	arch/a64/vir/moves.c	
+vl_grow	a64_vir_array_grow	function	arch/a64/vir/moves.c	
+vl_mat	a64_vir_constant_materialize	function	arch/a64/vir/moves.c	
+vl_matf	a64_vir_float_constant_materialize	function	arch/a64/vir/moves.c	
+vl_ix	a64_vir_operand_general_register	function	arch/a64/vir/moves.c	
+vl_fx	a64_vir_operand_float_register	function	arch/a64/vir/moves.c	
+vl_rmov	a64_vir_register_move	function	arch/a64/vir/moves.c	
+vl_qslot	a64_vir_vector_slot_access	function	arch/a64/vir/moves.c	
+vl_reload	a64_vir_register_reload	function	arch/a64/vir/moves.c	
+vl_spill	a64_vir_register_spill	function	arch/a64/vir/moves.c	
+vl_remat	a64_vir_register_rematerialize	function	arch/a64/vir/moves.c	
+vl_probe	a64_vir_probe_mask_get	function	arch/a64/vir/moves.c	
+vl_edits	a64_vir_edits_emit	function	arch/a64/vir/moves.c	
+vl_emoves	a64_vir_edge_moves_emit	function	arch/a64/vir/moves.c	
+vl_lbl	a64_vir_block_label	function	arch/a64/vir/moves.c	
+vl_skip	a64_vir_block_is_skipped	function	arch/a64/vir/moves.c	
+vl_next	a64_vir_block_next	function	arch/a64/vir/moves.c	
+vl_fnext	a64_vir_block_fallthrough	function	arch/a64/vir/moves.c	
+vl_succ	a64_vir_successor_label	function	arch/a64/vir/moves.c	
+vl_plain	a64_vir_edge_is_plain	function	arch/a64/vir/moves.c	
+vl_chase	a64_vir_block_chase	function	arch/a64/vir/returns-and-jumps.c	
+vl_fcsave	a64_vir_callee_saved_float_save	function	arch/a64/vir/returns-and-jumps.c	
+vl_ret	a64_vir_return_lower	function	arch/a64/vir/returns-and-jumps.c	
+vl_goto	a64_vir_goto_emit	function	arch/a64/vir/returns-and-jumps.c	
+vl_sibcand	a64_vir_call_is_sibling_candidate	function	arch/a64/vir/returns-and-jumps.c	
+vl_switch	a64_vir_switch_lower	function	arch/a64/vir/switch.c	
+vl_vec	a64_vir_vector_lower	function	arch/a64/vir/vectors.c	
+vx_arg	x64_vir_argument_register	function	arch/x64/vir/calling-convention.c	
+vx_fixed	x64_vir_fixed_registers_get	function	arch/x64/vir/calling-convention.c	
+vx_imm	x64_vir_value_immediate	function	arch/x64/vir/folds.c	
+vx_smallmem	x64_vir_memory_block_is_small	function	arch/x64/vir/folds.c	
+vx_supported	x64_vir_value_is_supported	function	arch/x64/vir/folds.c	
+vx_foldedits	x64_vir_fold_edits_check	function	arch/x64/vir/folds.c	
+vx_memnext	x64_vir_memory_next_fold	function	arch/x64/vir/folds.c	
+vx_castmem	x64_vir_memory_cast_fold	function	arch/x64/vir/folds.c	
+vx_readword	x64_vir_word_read_match	function	arch/x64/vir/folds.c	
+vx_beaddr	x64_vir_big_endian_address_match	function	arch/x64/vir/folds.c	
+vx_addrmem	x64_vir_address_memory_fold	function	arch/x64/vir/folds.c	
+vx_clear32	x64_vir_value_upper_half_is_clear	function	arch/x64/vir/folds.c	
+vx_sign64	x64_vir_value_is_sign_extended	function	arch/x64/vir/folds.c	
+vx_memblock	x64_vir_memory_block_lower	function	arch/x64/vir/folds.c	
+vx_condition	x64_vir_condition_lower	function	arch/x64/vir/folds.c	
+vx_block	x64_vir_block_lower	function	arch/x64/vir/function.c	
+vx_twice	x64_vir_callee_returns_twice	function	arch/x64/vir/function.c	
+vw_x64	x64_vir_function_lower	function	arch/x64/vir/function.c	
+vx_ins	x64_vir_insn_lower	function	arch/x64/vir/instructions.c	
+vx_grow	x64_vir_array_grow	function	arch/x64/vir/moves.c	
+vx_reg	x64_vir_register_number	function	arch/x64/vir/moves.c	
+vx_size	x64_vir_type_size	function	arch/x64/vir/moves.c	
+vx_bits	x64_vir_constant_bits	function	arch/x64/vir/moves.c	
+vx_raw	x64_vir_text_append	function	arch/x64/vir/moves.c	
+vx_simd	x64_vir_simd_emit	function	arch/x64/vir/moves.c	
+vx_mat	x64_vir_constant_materialize	function	arch/x64/vir/moves.c	
+vx_memslot	x64_vir_slot_access	function	arch/x64/vir/moves.c	
+vx_edits	x64_vir_edits_emit	function	arch/x64/vir/moves.c	
+vx_edge	x64_vir_edge_emit	function	arch/x64/vir/moves.c	
+vx_target	x64_vir_edge_target	function	arch/x64/vir/moves.c	
+vx_next	x64_vir_block_next	function	arch/x64/vir/moves.c	
+vx_goto	x64_vir_goto_emit	function	arch/x64/vir/moves.c	
+vx_dense_switch	x64_vir_switch_is_dense	function	arch/x64/vir/switch.c	
+vx_cmpconst	x64_vir_constant_compare_emit	function	arch/x64/vir/switch.c	
+vx_switch	x64_vir_switch_lower	function	arch/x64/vir/switch.c	
+parse_regs	viralloc_registers_parse	function	bin/viralloc/viralloc.c	
+vw_wk_ecx_free	virbuild_wk_ecx_free	function	codegen/tu.c, codegen/emitimpl.h	walker instantiation (WK_PREFIX): as vw_wk_function
+vw_nsucc	virbuild_block_successor_count	function	codegen/vir/cfg.c	
+vw_succp	virbuild_block_successor_pointer	function	codegen/vir/cfg.c	
+vw_thread	virbuild_empty_blocks_thread	function	codegen/vir/cfg.c	
+vw_rpo	virbuild_block_order_compute	function	codegen/vir/cfg.c	
+vw_preds	virbuild_block_predecessors_compute	function	codegen/vir/cfg.c	
+vw_doms	virbuild_block_dominators_compute	function	codegen/vir/cfg.c	
+vw_predix	virbuild_block_predecessor_index	function	codegen/vir/cfg.c	
+vw_split	virbuild_critical_edges_split	function	codegen/vir/cfg.c	
+vw_cbzlike	virbuild_condition_is_zero_test	function	codegen/vir/condition-merge.c	
+vw_cchain	virbuild_condition_is_chainable	function	codegen/vir/condition-merge.c	
+vw_condmerge	virbuild_conditions_merge	function	codegen/vir/condition-merge.c	
+vw_exprsame	virbuild_expression_is_same	function	codegen/vir/if-conversion.c	
+vw_armreuse	virbuild_arm_values_reuse	function	codegen/vir/if-conversion.c	
+vw_armempty	virbuild_arm_is_hoistable	function	codegen/vir/if-conversion.c	
+vw_hoist	virbuild_arm_hoist	function	codegen/vir/if-conversion.c	
+vw_ifconv	virbuild_if_convert	function	codegen/vir/if-conversion.c	
+vw_baseoff	virbuild_address_decompose	function	codegen/vir/load-forwarding.c	
+vw_unwritten	virbuild_bytes_are_unwritten	function	codegen/vir/load-forwarding.c	
+vw_far_init	virbuild_far_load_init	function	codegen/vir/load-forwarding.c	
+vw_far	virbuild_far_load_find	function	codegen/vir/load-forwarding.c	
+vv_pin	virbuild_loop_constants_pin	function	codegen/vir/loop-constants.c	
+vw_classify	virbuild_classify	function	codegen/vir/lower-call.c	LO(classify): the walker's lowering vocabulary, only the prefix moves here
+vw_group	virbuild_call_group_pack	function	codegen/vir/lower-call.c	
+vw_pcty	virbuild_pass_class_type	function	codegen/vir/lower-call.c	
+vw_word	virbuild_call_word_load	function	codegen/vir/lower-call.c	
+vw_sig	virbuild_call_signature_make	function	codegen/vir/lower-call.c	
+vw_call	virbuild_call	function	codegen/vir/lower-call.c	LO(call): the walker's lowering vocabulary, only the prefix moves here
+vw_params	virbuild_params	function	codegen/vir/lower-call.c	LO(params): the walker's lowering vocabulary, only the prefix moves here
+vw_ret	virbuild_ret	function	codegen/vir/lower-call.c	LO(ret): the walker's lowering vocabulary, only the prefix moves here
+vw_begin	virbuild_begin	function	codegen/vir/lower-call.c	LO(begin): the walker's lowering vocabulary, only the prefix moves here
+vw_finish	virbuild_finish	function	codegen/vir/lower-call.c	LO(finish): the walker's lowering vocabulary, only the prefix moves here
+vw_ecx_free	virbuild_ecx_free	function	codegen/vir/lower-call.c	LO(ecx_free): the walker's lowering vocabulary, only the prefix moves here
+vw_bitop	virbuild_bitop	function	codegen/vir/lower-control.c	LO(bitop): the walker's lowering vocabulary, only the prefix moves here
+vw_atomic	virbuild_atomic	function	codegen/vir/lower-control.c	LO(atomic): the walker's lowering vocabulary, only the prefix moves here
+vw_tlsaddr	virbuild_tlsaddr	function	codegen/vir/lower-control.c	LO(tlsaddr): the walker's lowering vocabulary, only the prefix moves here
+vw_frame	virbuild_frame	function	codegen/vir/lower-control.c	LO(frame): the walker's lowering vocabulary, only the prefix moves here
+vw_alloca	virbuild_alloca	function	codegen/vir/lower-control.c	LO(alloca): the walker's lowering vocabulary, only the prefix moves here
+vw_spget	virbuild_spget	function	codegen/vir/lower-control.c	LO(spget): the walker's lowering vocabulary, only the prefix moves here
+vw_spset	virbuild_spset	function	codegen/vir/lower-control.c	LO(spset): the walker's lowering vocabulary, only the prefix moves here
+vw_setjmp	virbuild_setjmp	function	codegen/vir/lower-control.c	LO(setjmp): the walker's lowering vocabulary, only the prefix moves here
+vw_longjmp	virbuild_longjmp	function	codegen/vir/lower-control.c	LO(longjmp): the walker's lowering vocabulary, only the prefix moves here
+vw_asm	virbuild_asm	function	codegen/vir/lower-control.c	LO(asm): the walker's lowering vocabulary, only the prefix moves here
+vw_va_start	virbuild_va_start	function	codegen/vir/lower-control.c	LO(va_start): the walker's lowering vocabulary, only the prefix moves here
+vw_va_arg	virbuild_va_arg	function	codegen/vir/lower-control.c	LO(va_arg): the walker's lowering vocabulary, only the prefix moves here
+vw_retrec	virbuild_retrec	function	codegen/vir/lower-control.c	LO(retrec): the walker's lowering vocabulary, only the prefix moves here
+vw_tail_return	virbuild_tail_return	function	codegen/vir/lower-control.c	LO(tail_return): the walker's lowering vocabulary, only the prefix moves here
+vw_trap	virbuild_trap	function	codegen/vir/lower-control.c	LO(trap): the walker's lowering vocabulary, only the prefix moves here
+vw_barrier	virbuild_barrier	function	codegen/vir/lower-control.c	LO(barrier): the walker's lowering vocabulary, only the prefix moves here
+vw_dbgrow	virbuild_dbgrow	function	codegen/vir/lower-control.c	LO(dbgrow): the walker's lowering vocabulary, only the prefix moves here
+vw_label	virbuild_label	function	codegen/vir/lower-control.c	LO(label): the walker's lowering vocabulary, only the prefix moves here
+vw_jump	virbuild_jump	function	codegen/vir/lower-control.c	LO(jump): the walker's lowering vocabulary, only the prefix moves here
+vw_jumpr	virbuild_jumpr	function	codegen/vir/lower-control.c	LO(jumpr): the walker's lowering vocabulary, only the prefix moves here
+vw_named	virbuild_named	function	codegen/vir/lower-control.c	LO(named): the walker's lowering vocabulary, only the prefix moves here
+vw_slot	virbuild_slot	function	codegen/vir/lower-memory.c	LO(slot): the walker's lowering vocabulary, only the prefix moves here
+vw_slotat	virbuild_slot_find	function	codegen/vir/lower-memory.c	
+vw_slotaddr	virbuild_slot_address	function	codegen/vir/lower-memory.c	
+vw_st_clear	virbuild_store_table_clear	function	codegen/vir/lower-memory.c	
+vw_addr	virbuild_address_make	function	codegen/vir/lower-memory.c	
+vw_log2	virbuild_integer_log2	function	codegen/vir/lower-memory.c	
+vw_mfl	virbuild_memory_flags_make	function	codegen/vir/lower-memory.c	
+vw_lvty	virbuild_lvalue_type	function	codegen/vir/lower-memory.c	
+vw_load	virbuild_load	function	codegen/vir/lower-memory.c	LO(load): the walker's lowering vocabulary, only the prefix moves here
+vw_stty	virbuild_store_type	function	codegen/vir/lower-memory.c	
+vw_store	virbuild_store	function	codegen/vir/lower-memory.c	LO(store): the walker's lowering vocabulary, only the prefix moves here
+vw_laddr	virbuild_laddr	function	codegen/vir/lower-memory.c	LO(laddr): the walker's lowering vocabulary, only the prefix moves here
+vw_copy	virbuild_copy	function	codegen/vir/lower-memory.c	LO(copy): the walker's lowering vocabulary, only the prefix moves here
+vw_zero	virbuild_zero	function	codegen/vir/lower-memory.c	LO(zero): the walker's lowering vocabulary, only the prefix moves here
+vw_locals_begin	virbuild_locals_begin	function	codegen/vir/lower-memory.c	LO(locals_begin): the walker's lowering vocabulary, only the prefix moves here
+vw_lhash	virbuild_local_hash	function	codegen/vir/lower-memory.c	
+vw_local	virbuild_local	function	codegen/vir/lower-memory.c	LO(local): the walker's lowering vocabulary, only the prefix moves here
+vw_undecl	virbuild_undecl	function	codegen/vir/lower-memory.c	LO(undecl): the walker's lowering vocabulary, only the prefix moves here
+vw_conv_in	virbuild_value_convert_in_block	function	codegen/vir/lower-value.c	
+vw_conv	virbuild_value_convert	function	codegen/vir/lower-value.c	
+vw_get	virbuild_register_read	function	codegen/vir/lower-value.c	
+vw_getraw	virbuild_register_read_raw	function	codegen/vir/lower-value.c	
+vw_set	virbuild_register_write	function	codegen/vir/lower-value.c	
+vw_ity	virbuild_integer_type	function	codegen/vir/lower-value.c	
+vw_val	virbuild_walker_value_get	function	codegen/vir/lower-value.c	
+vw_vty	virbuild_walker_value_type	function	codegen/vir/lower-value.c	
+vw_treg	virbuild_treg	function	codegen/vir/lower-value.c	LO(treg): the walker's lowering vocabulary, only the prefix moves here
+vw_ftreg	virbuild_ftreg	function	codegen/vir/lower-value.c	LO(ftreg): the walker's lowering vocabulary, only the prefix moves here
+vw_tfree	virbuild_tfree	function	codegen/vir/lower-value.c	LO(tfree): the walker's lowering vocabulary, only the prefix moves here
+vw_tkeep	virbuild_tkeep	function	codegen/vir/lower-value.c	LO(tkeep): the walker's lowering vocabulary, only the prefix moves here
+vw_nfree	virbuild_nfree	function	codegen/vir/lower-value.c	LO(nfree): the walker's lowering vocabulary, only the prefix moves here
+vw_nffree	virbuild_nffree	function	codegen/vir/lower-value.c	LO(nffree): the walker's lowering vocabulary, only the prefix moves here
+vw_mov	virbuild_mov	function	codegen/vir/lower-value.c	LO(mov): the walker's lowering vocabulary, only the prefix moves here
+vw_toreg	virbuild_toreg	function	codegen/vir/lower-value.c	LO(toreg): the walker's lowering vocabulary, only the prefix moves here
+vw_resname	virbuild_result_register_pick	function	codegen/vir/lower-value.c	
+vw_umulhi	virbuild_umulhi	function	codegen/vir/lower-value.c	LO(umulhi): the walker's lowering vocabulary, only the prefix moves here
+vw_smulhi	virbuild_smulhi	function	codegen/vir/lower-value.c	LO(smulhi): the walker's lowering vocabulary, only the prefix moves here
+vw_bin	virbuild_bin	function	codegen/vir/lower-value.c	LO(bin): the walker's lowering vocabulary, only the prefix moves here
+vw_un	virbuild_un	function	codegen/vir/lower-value.c	LO(un): the walker's lowering vocabulary, only the prefix moves here
+vw_ext	virbuild_ext	function	codegen/vir/lower-value.c	LO(ext): the walker's lowering vocabulary, only the prefix moves here
+vw_icc	virbuild_integer_condition_code	function	codegen/vir/lower-value.c	
+vw_icmp	virbuild_integer_compare	function	codegen/vir/lower-value.c	
+vw_cmp	virbuild_cmp	function	codegen/vir/lower-value.c	LO(cmp): the walker's lowering vocabulary, only the prefix moves here
+vw_brif	virbuild_branch_if	function	codegen/vir/lower-value.c	
+vw_cmpbr	virbuild_cmpbr	function	codegen/vir/lower-value.c	LO(cmpbr): the walker's lowering vocabulary, only the prefix moves here
+vw_brz	virbuild_brz	function	codegen/vir/lower-value.c	LO(brz): the walker's lowering vocabulary, only the prefix moves here
+vw_switch_bitset	virbuild_switch_bitset	function	codegen/vir/lower-value.c	LO(switch_bitset): the walker's lowering vocabulary, only the prefix moves here
+vw_casecmp	virbuild_switch_case_compare	function	codegen/vir/lower-value.c	
+vw_switch_table	virbuild_switch_table	function	codegen/vir/lower-value.c	LO(switch_table): the walker's lowering vocabulary, only the prefix moves here
+vw_ldmem	virbuild_ldmem	function	codegen/vir/lower-value.c	LO(ldmem): the walker's lowering vocabulary, only the prefix moves here
+vw_i128mem	virbuild_i128mem	function	codegen/vir/lower-value.c	LO(i128mem): the walker's lowering vocabulary, only the prefix moves here
+vw_wconst	virbuild_wconst	function	codegen/vir/lower-value.c	LO(wconst): the walker's lowering vocabulary, only the prefix moves here
+vw_wbitint	virbuild_wbitint	function	codegen/vir/lower-value.c	LO(wbitint): the walker's lowering vocabulary, only the prefix moves here
+vw_bigconst	virbuild_bigconst	function	codegen/vir/lower-value.c	LO(bigconst): the walker's lowering vocabulary, only the prefix moves here
+vw_bigbin	virbuild_bigbin	function	codegen/vir/lower-value.c	LO(bigbin): the walker's lowering vocabulary, only the prefix moves here
+vw_bigcmp	virbuild_bigcmp	function	codegen/vir/lower-value.c	LO(bigcmp): the walker's lowering vocabulary, only the prefix moves here
+vw_bigcvt	virbuild_bigcvt	function	codegen/vir/lower-value.c	LO(bigcvt): the walker's lowering vocabulary, only the prefix moves here
+vw_wbin	virbuild_wbin	function	codegen/vir/lower-value.c	LO(wbin): the walker's lowering vocabulary, only the prefix moves here
+vw_wun	virbuild_wun	function	codegen/vir/lower-value.c	LO(wun): the walker's lowering vocabulary, only the prefix moves here
+vw_wcmp	virbuild_wcmp	function	codegen/vir/lower-value.c	LO(wcmp): the walker's lowering vocabulary, only the prefix moves here
+vw_wcvt	virbuild_wcvt	function	codegen/vir/lower-value.c	LO(wcvt): the walker's lowering vocabulary, only the prefix moves here
+vw_fty	virbuild_float_type	function	codegen/vir/lower-value.c	
+vw_fres	virbuild_float_result_register	function	codegen/vir/lower-value.c	
+vw_fconst	virbuild_fconst	function	codegen/vir/lower-value.c	LO(fconst): the walker's lowering vocabulary, only the prefix moves here
+vw_fprod	virbuild_float_product	function	codegen/vir/lower-value.c	
+vw_fbin	virbuild_fbin	function	codegen/vir/lower-value.c	LO(fbin): the walker's lowering vocabulary, only the prefix moves here
+vw_fneg	virbuild_fneg	function	codegen/vir/lower-value.c	LO(fneg): the walker's lowering vocabulary, only the prefix moves here
+vw_fsqrt	virbuild_fsqrt	function	codegen/vir/lower-value.c	LO(fsqrt): the walker's lowering vocabulary, only the prefix moves here
+vw_root4	virbuild_root4	function	codegen/vir/lower-value.c	LO(root4): the walker's lowering vocabulary, only the prefix moves here
+vw_pcmpstr	virbuild_pcmpstr	function	codegen/vir/lower-value.c	LO(pcmpstr): the walker's lowering vocabulary, only the prefix moves here
+vw_fcmp	virbuild_fcmp	function	codegen/vir/lower-value.c	LO(fcmp): the walker's lowering vocabulary, only the prefix moves here
+vw_cvt	virbuild_cvt	function	codegen/vir/lower-value.c	LO(cvt): the walker's lowering vocabulary, only the prefix moves here
+vw_fbits	virbuild_fbits	function	codegen/vir/lower-value.c	LO(fbits): the walker's lowering vocabulary, only the prefix moves here
+vw_trivial	virbuild_parameters_trivial_remove	function	codegen/vir/parameters.c	
+vw_mark	virbuild_parameter_live_mark	function	codegen/vir/parameters.c	
+vw_deadparams	virbuild_parameters_dead_remove	function	codegen/vir/parameters.c	
+vir_pass_thread	virbuild_pass_thread_run	function	codegen/vir/pass-table.c	
+vir_pass_rpo	virbuild_pass_block_order_run	function	codegen/vir/pass-table.c	
+vir_pass_preds	virbuild_pass_predecessors_run	function	codegen/vir/pass-table.c	
+vir_pass_seal	virbuild_pass_seal_run	function	codegen/vir/pass-table.c	
+vir_pass_dead_params	virbuild_pass_dead_parameters_run	function	codegen/vir/pass-table.c	
+vir_pass_simplify	virbuild_pass_simplify_run	function	codegen/vir/pass-table.c	
+vir_pass_vectorize	virbuild_pass_vectorize_run	function	codegen/vir/pass-table.c	
+vir_pass_split	virbuild_pass_split_run	function	codegen/vir/pass-table.c	
+vir_pass_slot_uses	virbuild_pass_slot_uses_run	function	codegen/vir/pass-table.c	
+vir_pass_to_vir	virbuild_pass_to_vir_run	function	codegen/vir/pass-table.c	
+vir_pass_canon	virbuild_pass_canon_run	function	codegen/vir/pass-table.c	
+vir_pass_list	virbuild_pass_list	function	codegen/vir/pass-table.c	
+vir_switch_error	virbuild_pass_switch_error	function	codegen/vir/pass-table.c	
+vir_switch_find	virbuild_pass_switch_find	function	codegen/vir/pass-table.c	
+vir_switch_names	virbuild_pass_switch_names_parse	function	codegen/vir/pass-table.c	
+vir_fact_name	virbuild_fact_name	function	codegen/vir/pass-table.c	
+vir_switch_read	virbuild_pass_switch_read	function	codegen/vir/pass-table.c	
+vir_pass_switch_get	virbuild_pass_switch_get	function	codegen/vir/pass-table.c	
+vir_pass_step	virbuild_pass_step	function	codegen/vir/pass-table.c	
+vir_count_tu	virbuild_pass_counts_find	function	codegen/vir/pass-table.c	
+vir_count_add	virbuild_pass_count_add	function	codegen/vir/pass-table.c	
+vir_pass_note	virbuild_pass_note	function	codegen/vir/pass-table.c	
+vir_fn_name	virbuild_function_name	function	codegen/vir/pass-table.c	
+vir_pass_step_instrumented	virbuild_pass_step_instrumented	function	codegen/vir/pass-table.c	
+vir_pass_stats_print	virbuild_pass_statistics_print	function	codegen/vir/pass-table.c	
+vw_seal	virbuild_blocks_seal	function	codegen/vir/pipeline.c	
+vw_slot_uses	virbuild_slot_uses_compute	function	codegen/vir/pipeline.c	
+vw_to_vir	virbuild_function_to_vir	function	codegen/vir/pipeline.c	
+vw_emit	virbuild_function_emit	function	codegen/vir/pipeline.c	
+vw_check_fail	virbuild_preir_check_fail	function	codegen/vir/preir-check.c	
+vw_check_find	virbuild_preir_check_value_find	function	codegen/vir/preir-check.c	
+vw_check_operand	virbuild_preir_check_operand	function	codegen/vir/preir-check.c	
+vw_check_operands	virbuild_preir_check_operands	function	codegen/vir/preir-check.c	
+vw_check_lists	virbuild_preir_check_lists	function	codegen/vir/preir-check.c	
+vw_check_succ_ok	virbuild_preir_check_successors_are_ok	function	codegen/vir/preir-check.c	
+vw_check_order	virbuild_preir_check_order	function	codegen/vir/preir-check.c	
+vw_check_preds	virbuild_preir_check_predecessors	function	codegen/vir/preir-check.c	
+vw_check_values	virbuild_preir_check_values	function	codegen/vir/preir-check.c	
+vw_preir_check	virbuild_preir_check	function	codegen/vir/preir-check.c	
+vw_st	virbuild_context_get	function	codegen/vir/preir.c	
+vw_fail	virbuild_fail	function	codegen/vir/preir.c	
+vw_put	virbuild_preir_insn_add	function	codegen/vir/preir.c	
+vw_ins_in	virbuild_block_insn_append	function	codegen/vir/preir.c	
+vw_ins	virbuild_insn_append	function	codegen/vir/preir.c	
+vw_k	virbuild_constant_make	function	codegen/vir/preir.c	
+vw_iconst	virbuild_constant_integer	function	codegen/vir/preir.c	
+vw_xput	virbuild_extra_append	function	codegen/vir/preir.c	
+vw_newblk	virbuild_block_new	function	codegen/vir/preir.c	
+vw_lblk	virbuild_label_block	function	codegen/vir/preir.c	
+vw_term	virbuild_block_terminate	function	codegen/vir/preir.c	
+vw_br	virbuild_branch_emit	function	codegen/vir/preir.c	
+vw_isval	virbuild_operand_kind_is_value	function	codegen/vir/preir.h	
+vw_ty	virbuild_value_type	function	codegen/vir/preir.h	
+vw_find	virbuild_value_resolve	function	codegen/vir/preir.h	
+vw_ldconv	virbuild_promote_load_conversion	function	codegen/vir/promote.c	
+vw_rel	virbuild_promote_relative_offset	function	codegen/vir/promote.c	
+vw_escape	virbuild_promote_escape_mark	function	codegen/vir/promote.c	
+vw_entry	virbuild_promote_variable_entry	function	codegen/vir/promote.c	
+vw_zerok	virbuild_promote_zero_constant	function	codegen/vir/promote.c	
+vw_zeroset	virbuild_promote_memset_zero_length	function	codegen/vir/promote.c	
+vw_mscov	virbuild_promote_memset_covers	function	codegen/vir/promote.c	
+vw_promdead	virbuild_promote_store_is_dead	function	codegen/vir/promote.c	
+vw_promote	virbuild_slots_promote	function	codegen/vir/promote.c	
+vw_inc	virbuild_use_count_increment	function	codegen/vir/rules.c	
+vw_dec	virbuild_use_count_decrement	function	codegen/vir/rules.c	
+vw_kint	virbuild_value_integer_constant	function	codegen/vir/rules.c	
+vw_zw	virbuild_value_zero_extended_bytes	function	codegen/vir/rules.c	
+vw_sw	virbuild_value_sign_extended_bytes	function	codegen/vir/rules.c	
+vw_undefk	virbuild_simplify_undefined_value	function	codegen/vir/rules.c	
+vw_simp1	virbuild_insn_simplify	function	codegen/vir/rules.c	
+vw_commutes	virbuild_opcode_is_commutative	function	codegen/vir/rules.c	
+vw_ownaddr	virbuild_address_offsets_fold	function	codegen/vir/simplify.c	
+vw_simplify	virbuild_function_simplify	function	codegen/vir/simplify.c	
+vw_hkey	virbuild_variable_key	function	codegen/vir/ssa.c	
+vw_hgen	virbuild_variable_table_clear	function	codegen/vir/ssa.c	
+vw_hslot	virbuild_variable_slot	function	codegen/vir/ssa.c	
+vw_write	virbuild_variable_write	function	codegen/vir/ssa.c	
+vw_phity	virbuild_parameter_type	function	codegen/vir/ssa.c	
+vw_newphi	virbuild_parameter_new	function	codegen/vir/ssa.c	
+vw_phiops	virbuild_parameter_operands_fill	function	codegen/vir/ssa.c	
+vw_undef	virbuild_undefined_value	function	codegen/vir/ssa.c	
+vw_readv	virbuild_variable_read	function	codegen/vir/ssa.c	
+vw_m	virbuild_to_vir_value	function	codegen/vir/to-vir.c	
+vw_fin_blk	virbuild_to_vir_block	function	codegen/vir/to-vir.c	
+vw_emit_ins	virbuild_to_vir_insn_emit	function	codegen/vir/to-vir.c	
+vw_failure_find	virbuild_failure_find	function	codegen/vir/try.c	
+vw_failure_note	virbuild_failure_note	function	codegen/vir/try.c	
+vw_stats_print	virbuild_statistics_print	function	codegen/vir/try.c	
+vw_mode	virbuild_mode_get	function	codegen/vir/try.c	
+vw_name	virbuild_function_name_get	function	codegen/vir/try.c	
+vw_listed	virbuild_function_is_listed	function	codegen/vir/try.c	
+vw_enabled	virbuild_is_enabled	function	codegen/vir/try.c	
+vw_try	virbuild_function_try	function	codegen/vir/try.c	
+vw_wk_function	virbuild_wk_function	function	codegen/vir/try.c; use in codegen/tu.c, codegen/emitimpl.h	walker instantiation (WK_PREFIX): the prefix moves here, wk_function with the walker table (then a row virbuild_wk_function -> virbuild_<its new name>)
+vw_hlook	virbuild_value_table_lookup	function	codegen/vir/value-numbering.c	
+vw_kcanon	virbuild_constant_canonical	function	codegen/vir/value-numbering.c	
+vw_cse_blk	virbuild_block_values_number	function	codegen/vir/value-numbering.c	
+vv_no	virbuild_vectorize_reject	function	codegen/vir/vectorize.c	
+vv_touch	virbuild_vectorize_info_touch	function	codegen/vir/vectorize.c	
+vv_get	virbuild_vectorize_info_get	function	codegen/vir/vectorize.c	
+vv_isk	virbuild_vectorize_info_is_constant	function	codegen/vir/vectorize.c	
+vv_lin	virbuild_vectorize_info_is_linear	function	codegen/vir/vectorize.c	
+vv_lane	virbuild_vectorize_info_is_lane	function	codegen/vir/vectorize.c	
+vv_comb	virbuild_vectorize_info_combine	function	codegen/vir/vectorize.c	
+vv_opaque	virbuild_vectorize_info_opaque_set	function	codegen/vir/vectorize.c	
+vv_skip	virbuild_vectorize_insn_is_skipped	function	codegen/vir/vectorize.c	
+vv_classify	virbuild_vectorize_insn_classify	function	codegen/vir/vectorize.c	
+vv_chk	virbuild_vectorize_range_pair_add	function	codegen/vir/vectorize.c	
+vv_depend	virbuild_vectorize_dependences_check	function	codegen/vir/vectorize.c	
+vv_ins	virbuild_vectorize_insn_append	function	codegen/vir/vectorize.c	
+vv_clone	virbuild_vectorize_insn_clone	function	codegen/vir/vectorize.c	
+vv_scalar	virbuild_vectorize_scalar_make	function	codegen/vir/vectorize.c	
+vv_vty	virbuild_vectorize_vector_type	function	codegen/vir/vectorize.c	
+vv_step	virbuild_vectorize_step_vector	function	codegen/vir/vectorize.c	
+vv_mask	virbuild_vectorize_mask_make	function	codegen/vir/vectorize.c	
+vv_w32	virbuild_vectorize_lanes_narrow	function	codegen/vir/vectorize.c	
+vv_at	virbuild_vectorize_lane_expression_rebuild	function	codegen/vir/vectorize.c	
+vv_foldat	virbuild_vectorize_lane_recurrence_rebuild	function	codegen/vir/vectorize.c	
+vv_vec	virbuild_vectorize_vector_make	function	codegen/vir/vectorize.c	
+vv_addr	virbuild_vectorize_address_make	function	codegen/vir/vectorize.c	
+vv_range	virbuild_vectorize_range_compute	function	codegen/vir/vectorize.c	
+vv_param	virbuild_vectorize_parameter_new	function	codegen/vir/vectorize.c	
+vv_blk	virbuild_vectorize_block_new	function	codegen/vir/vectorize.c	
+vv_term	virbuild_vectorize_block_terminate	function	codegen/vir/vectorize.c	
+vv_chain	virbuild_vectorize_step_chain_find	function	codegen/vir/vectorize.c	
+vv_ultctl	virbuild_vectorize_loop_test_is_unsigned_less	function	codegen/vir/vectorize.c	
+vv_reaches	virbuild_vectorize_update_depends_on_parameter	function	codegen/vir/vectorize.c	
+vv_loop	virbuild_vectorize_loop	function	codegen/vir/vectorize.c	
+vv_place	virbuild_vectorize_blocks_place	function	codegen/vir/vectorize.c	
+vv_env	virbuild_vectorize_environment_get	function	codegen/vir/vectorize.c	
+vw_vectorize	virbuild_function_vectorize	function	codegen/vir/vectorize.c	
+vir_rclass	vir_register_class	function	include/vir/alloc.h	
+vir_isvec	vir_type_is_vector	function	include/vir/vir.h	
+vir_velem	vir_type_element	function	include/vir/vir.h	
+vir_vint	vir_type_vector_integer	function	include/vir/vir.h	
+vir_vflt	vir_type_vector_float	function	include/vir/vir.h	
+vir_dominates	vir_block_dominates	function	include/vir/vir.h	
+ax_init	vir_alloc_thread_arrays_init	function	vir/alloc.c	
+vcls	vir_alloc_value_class	function	vir/alloc.c	
+blk_last	vir_alloc_block_last	function	vir/alloc.c	
+blk_of	vir_alloc_value_block	function	vir/alloc.c	
+w_has	vir_alloc_web_has_member	function	vir/alloc.c	
+wroot	vir_alloc_web_root	function	vir/alloc.c	
+wvalid	vir_alloc_web_is_valid	function	vir/alloc.c	
+wunion	vir_alloc_web_union	function	vir/alloc.c	
+inrange	vir_alloc_value_is_live_in_loop	function	vir/alloc.c	
+webs_loops	vir_alloc_webs_loops_trim	function	vir/alloc.c	
+wenter	vir_alloc_web_member_enter	function	vir/alloc.c	
+wleave	vir_alloc_web_member_leave	function	vir/alloc.c	
+get_fix	vir_alloc_fix_get	function	vir/alloc.c	
+defdom	vir_alloc_definition_dominates	function	vir/alloc.c	
+sweep5	vir_alloc_liveness_sweep	function	vir/alloc.c	
+inreg	vir_alloc_value_is_in_register	function	vir/alloc.c	
+setreg	vir_alloc_register_set	function	vir/alloc.c	
+clearreg	vir_alloc_register_clear	function	vir/alloc.c	
+defpos	vir_alloc_definition_position	function	vir/alloc.c	
+need_slot	vir_alloc_spill_slot_assign	function	vir/alloc.c	
+is_stored	vir_alloc_value_is_stored	function	vir/alloc.c	
+lowbit	vir_alloc_mask_lowest_bit	function	vir/alloc.c	
+caller_for_call	vir_alloc_hint_prefers_callee_saved	function	vir/alloc.c	
+victim	vir_alloc_register_victim_find	function	vir/alloc.c	
+getreg	vir_alloc_register_get	function	vir/alloc.c	
+displace	vir_alloc_register_displace	function	vir/alloc.c	
+lidx	vir_alloc_location_index	function	vir/alloc.c	
+emove	vir_alloc_move_add	function	vir/alloc.c	
+save_state	vir_alloc_state_save	function	vir/alloc.c	
+read_next	vir_alloc_value_is_read_next	function	vir/alloc.c	
+arg_vote	vir_alloc_argument_register_vote	function	vir/alloc.c	
+preload	vir_alloc_loop_values_preload	function	vir/alloc.c	
+precond	vir_alloc_preconditions_check	function	vir/alloc.c	
+ret_only	vir_alloc_block_is_return_only	function	vir/alloc.c	
+save_point	vir_alloc_save_point_find	function	vir/alloc.c	
+locname	vir_alloc_check_location_name	function	vir/allocchk.c	
+apply_move	vir_alloc_check_move_apply	function	vir/allocchk.c	
+vir_reg_name	vir_alloc_register_name	function,public	vir/allocdump.c	
+vir_low32	vir_demand_low32_compute	function,public	vir/facts.c	
+vir_mask32	vir_value_possible_bits	function,public	vir/facts.c	
+be_address	vir_big_endian_address_match	function	vir/facts.c	
+be_word	vir_big_endian_word_match	function	vir/facts.c	
+vir_read_be	vir_big_endian_read_match	function,public	vir/facts.c	
+vir_sext_shift	vir_sign_extend_shift_match	function,public	vir/facts.c	
+lay_lonebr	vir_layout_block_is_lone_branch	function	vir/layout.c	
+vir_layout_chases	vir_layout_chases_compute	function,public	vir/layout.c	
+lay_plain	vir_layout_block_is_plain	function	vir/layout.c	
+lay_rotok	vir_layout_block_is_rotatable	function	vir/layout.c	
+lay_order_range	vir_layout_order_range	function	vir/layout.c	
+lx_init	vir_loops_thread_init	function	vir/loops.c	
+nm_hash	vir_parse_name_hash	function	vir/parse.c	
+nm_get	vir_parse_name_get	function	vir/parse.c	
+nm_reset	vir_parse_names_reset	function	vir/parse.c	
+nm_free	vir_parse_names_free	function	vir/parse.c	
+perr_at	vir_parse_error_at	function	vir/parse.c	
+idstart	vir_parse_character_is_identifier_start	function	vir/parse.c	
+idchar	vir_parse_character_is_identifier	function	vir/parse.c	
+symchar	vir_parse_character_is_symbol	function	vir/parse.c	
+sput	vir_parse_string_append	function	vir/parse.c	
+lex_all	vir_parse_tokens_lex	function	vir/parse.c	
+is_p	vir_parse_token_is_punctuation	function	vir/parse.c	
+is_id	vir_parse_token_is_identifier	function	vir/parse.c	
+accept_p	vir_parse_punctuation_accept	function	vir/parse.c	
+expect_p	vir_parse_punctuation_expect	function	vir/parse.c	
+expect_k	vir_parse_token_kind_expect	function	vir/parse.c	
+expect_kw	vir_parse_keyword_expect	function	vir/parse.c	
+expect_nl	vir_parse_newline_expect	function	vir/parse.c	
+expect_int	vir_parse_integer_expect	function	vir/parse.c	
+expect_u32	vir_parse_unsigned_expect	function	vir/parse.c	
+expect_type	vir_parse_type_expect	function	vir/parse.c	
+str_of	vir_parse_token_string	function	vir/parse.c	
+log2_align	vir_parse_alignment_log2	function	vir/parse.c	
+parse_group	vir_parse_group	function	vir/parse.c	
+parse_sigdecl	vir_parse_signature_declaration	function	vir/parse.c	
+sym_ref	vir_parse_symbol_reference	function	vir/parse.c	
+parse_asmdecl	vir_parse_asm_declaration	function	vir/parse.c	
+define_sym	vir_parse_symbol_define	function	vir/parse.c	
+parse_datadecl	vir_parse_data_declaration	function	vir/parse.c	
+push_pop	vir_parse_operand_push	function	vir/parse.c	
+check_value_name	vir_parse_value_name_check	function	vir/parse.c	
+name_ref	vir_parse_name_reference	function	vir/parse.c	
+block_ref	vir_parse_block_reference	function	vir/parse.c	
+parse_operand	vir_parse_operand_read	function	vir/parse.c	
+add_fix	vir_parse_fixup_add	function	vir/parse.c	
+fld_val	vir_parse_field_value	function	vir/parse.c	
+fld_blk	vir_parse_field_block	function	vir/parse.c	
+list_val	vir_parse_list_value	function	vir/parse.c	
+list_blk	vir_parse_list_block	function	vir/parse.c	
+low_bits_are_fields	vir_parse_form_has_low_bit_fields	function	vir/parse.c	
+parse_flags	vir_parse_flags	function	vir/parse.c	
+split_op	vir_parse_opcode_split	function	vir/parse.c	
+parse_mem_suffix	vir_parse_memory_suffix	function	vir/parse.c	
+parse_oplist	vir_parse_operand_list	function	vir/parse.c	
+parse_instr	vir_parse_insn	function	vir/parse.c	
+fn_reset	vir_parse_function_reset	function	vir/parse.c	
+define_value	vir_parse_value_define	function	vir/parse.c	
+parse_block_header	vir_parse_block_header	function	vir/parse.c	
+pop_type	vir_parse_operand_type	function	vir/parse.c	
+make_const	vir_parse_constant_make	function	vir/parse.c	
+fn_sig	vir_parse_function_signature	function	vir/parse.c	
+parse_func	vir_parse_function	function	vir/parse.c	
+free_ps	vir_parse_state_free	function	vir/parse.c	
+putf	vir_print_append_format	function	vir/print.c	
+fmt_hexfloat	vir_print_hexfloat_format	function	vir/print.c	
+put_str	vir_print_string_append	function	vir/print.c	
+put_bytes	vir_print_bytes_append	function	vir/print.c	
+vir_print_sig	vir_print_signature	function,public	vir/print.c	
+sig_words	vir_print_signature_words	function	vir/print.c	
+sig_index	vir_print_signature_index	function	vir/print.c	
+put_const	vir_print_constant_append	function	vir/print.c	
+put_val	vir_print_value_append	function	vir/print.c	
+need_ty	vir_print_type_is_needed	function	vir/print.c	
+put_opnd	vir_print_operand_append	function	vir/print.c	
+put_flags	vir_print_flags_append	function	vir/print.c	
+cc_name	vir_print_condition_name	function	vir/print.c	
+put_group_at	vir_print_group_append	function	vir/print.c	
+put_list_vals	vir_print_list_values_append	function	vir/print.c	
+put_ins	vir_print_insn_append	function	vir/print.c	
+put_fn	vir_print_function_append	function	vir/print.c	
+vir_print_fn	vir_print_function	function,public	vir/print.c	
+put_items	vir_print_items_append	function	vir/print.c	
+is_iconst	vir_synth_value_is_integer_constant	function	vir/synth.c	
+vir_opfind	vir_opcode_find	function,public	vir/table.c	
+vir_is_const_op	vir_opcode_is_constant	function,public	vir/table.c	
+vir_is_term	vir_opcode_is_terminator	function,public	vir/table.c	
+vir_tysize	vir_type_size	function,public	vir/table.c	
+vir_opnd_fixed	vir_operand_type_fixed	function,public	vir/table.c	
+vir_fname	vir_function_name	function,public	vir/verify.c	
+opname	vir_verify_opcode_name	function	vir/verify.c	
+is_valty	vir_verify_type_is_value	function	vir/verify.c	
+opnd_ok	vir_verify_operand_type_is_ok	function	vir/verify.c	
+vk_is_value	vir_verify_operand_kind_is_value	function	vir/verify.c	
+sig_check	vir_verify_signature_check	function	vir/verify.c	
+group_types	vir_verify_group_types	function	vir/verify.c	
+word_ty_ok	vir_verify_word_type_is_ok	function	vir/verify.c	
+exposure_use	vir_verify_exposure_use	function	vir/verify.c	
+exposure_enqueue	vir_verify_exposure_enqueue	function	vir/verify.c	
+exposure_build	vir_verify_exposure_build	function	vir/verify.c	
+check_lists_in_range	vir_verify_lists_in_range_check	function	vir/verify.c	
+check_ins	vir_verify_insn_check	function	vir/verify.c	
+asm_is_mem	vir_verify_asm_constraint_is_memory	function	vir/verify.c	
+check_asm	vir_verify_asm_check	function	vir/verify.c	
+res_ty_ok	vir_verify_result_type_is_ok	function	vir/verify.c	
+check_call	vir_verify_call_check	function	vir/verify.c	
+check_ret	vir_verify_return_check	function	vir/verify.c	
+check_switch	vir_verify_switch_check	function	vir/verify.c	
+check_uses	vir_verify_uses_check	function	vir/verify.c	
+check_graph	vir_verify_graph_check	function	vir/verify.c	
+check_misc	vir_verify_misc_check	function	vir/verify.c	
+check_slots	vir_verify_slots_check	function	vir/verify.c	
+check_canon	vir_verify_canonical_check	function	vir/verify.c	
+vir_ctx_get	vir_context_get	function,public	vir/vir.c	
+vir_failed	vir_is_failed	function,public	vir/vir.c	
+vir_ctab_reset	vir_constant_table_reset	function	vir/vir.c	
+chash	vir_constant_hash	function	vir/vir.c	
+cmatch	vir_constant_matches	function	vir/vir.c	
+vir_cfind	vir_constant_find	function	vir/vir.c	
+vir_ctab_rebuild	vir_constant_table_rebuild	function	vir/vir.c	
+vir_begin	vir_function_begin	function,public	vir/vir.c	
+open_block	vir_block_is_open	function	vir/vir.c	
+ins_push	vir_insn_push	function	vir/vir.c	
+vir_const_raw	vir_constant_raw_add	function,public	vir/vir.c	
+vir_const	vir_constant_add	function,public	vir/vir.c	
+vir_blk_add	vir_block_add	function,public	vir/vir.c	
+vir_ins_add	vir_insn_add	function,public	vir/vir.c	
+vir_extra	vir_extra_add	function,public	vir/vir.c	
+vir_loc_add	vir_location_add	function,public	vir/vir.c	
+is_value_kind	vir_operand_kind_is_value	function	vir/vir.c	
+fms_init	vir_field_masks_init	function	vir/vir.c	
+vir_oit_init	vir_operand_iterator_init	function,public	vir/vir.c	
+vir_oit_next	vir_operand_iterator_next	function,public	vir/vir.c	
+vir_term_of	vir_block_terminator	function	vir/vir.c	
+vir_succ_csr	vir_successors_build	function	vir/vir.c	
+vir_cfg	vir_cfg_build	function,public	vir/vir.c	
+rpo_order	vir_blocks_reverse_postorder	function	vir/vir.c	
+vir_dom	vir_dominators_build	function,public	vir/vir.c	
+vir_uses	vir_uses_count	function,public	vir/vir.c	
+loc_at	vir_location_at	function	vir/vir.c	
+vir_unit_str	vir_unit_string_copy	function	vir/vir.c	
+vir_unit_sym	vir_unit_symbol_intern	function,public	vir/vir.c	
+vir_unit_sigw	vir_unit_signature_words_intern	function,public	vir/vir.c	
+dup_arr	vir_array_duplicate	function	vir/vir.c	
+fn_copy	vir_function_copy	function	vir/vir.c	
+vir_fn_save	vir_function_save	function,public	vir/vir.c	
+vir_fn_store	vir_function_store	function,public	vir/vir.c	
+vir_fn_load	vir_function_load	function,public	vir/vir.c	
+#
+# --- enumerators and constant macros
+VX_MEM	A64_VIR_CHAIN_MEM	constant	arch/a64/vir/address-folds.c	
+VX_EXT	A64_VIR_CHAIN_EXT	constant	arch/a64/vir/address-folds.c	
+VX_LSL	A64_VIR_CHAIN_LSL	constant	arch/a64/vir/address-folds.c	
+VX_MADDL	A64_VIR_CHAIN_MADDL	constant	arch/a64/vir/address-folds.c	
+VL_CALLER0	A64_VIR_CALLER_SAVED_INTEGER	constant	arch/a64/vir/calling-convention.c	
+VL_ALLOC0	A64_VIR_ALLOCATABLE_INTEGER	constant	arch/a64/vir/calling-convention.c	
+VL_ALLOC1	A64_VIR_ALLOCATABLE_FLOAT	constant	arch/a64/vir/calling-convention.c	
+VL_FCS	A64_VIR_CALLEE_SAVED_FLOAT_LOW	constant	arch/a64/vir/calling-convention.c	
+VIR_A64_LOWERING_INTERNAL_H	VCC_ARCH_A64_VIR_LOWERING_INTERNAL_H	constant	arch/a64/vir/lowering-internal.h	
+VLDATA	A64_VIR_DATA	constant	arch/a64/vir/lowering-internal.h	
+VL_MAXOP	A64_VIR_OPERAND_MAX	constant	arch/a64/vir/lowering-internal.h	
+VIR_X64_LOWERING_INTERNAL_H	VCC_ARCH_X64_VIR_LOWERING_INTERNAL_H	constant	arch/x64/vir/lowering-internal.h	
+VIRFAIL_	VIRBUILD_FAILURE_	constant	codegen/vir/failure.h	the prefix pasted by VIRFAIL_##name (X macro and VIRFAIL()); the enumerators exist only through the paste
+VIRFAIL_COUNT	VIRBUILD_FAILURE_COUNT	constant	codegen/vir/failure.h, try.c	enumerator of the X list (the others exist only through the VIRFAIL_ paste)
+VIRFAIL_emitter_error	VIRBUILD_FAILURE_emitter_error	constant	codegen/vir/failure.h, try.c	enumerator of the X list (the others exist only through the VIRFAIL_ paste)
+VIRFAIL_lowering_failed	VIRBUILD_FAILURE_lowering_failed	constant	codegen/vir/failure.h, try.c	enumerator of the X list (the others exist only through the VIRFAIL_ paste)
+VIRFAIL_verifier_rejected	VIRBUILD_FAILURE_verifier_rejected	constant	codegen/vir/failure.h, try.c	enumerator of the X list (the others exist only through the VIRFAIL_ paste)
+NPASS	VIRBUILD_PASS_COUNT	constant	codegen/vir/pass-table.c	
+PIR_ORDER	VIRBUILD_FACT_ORDER	constant	codegen/vir/pass-table.h	
+PIR_PREDS	VIRBUILD_FACT_PREDS	constant	codegen/vir/pass-table.h	
+PIR_DOMS	VIRBUILD_FACT_DOMS	constant	codegen/vir/pass-table.h	
+PASS_REQUIRED	VIRBUILD_PASS_FLAG_REQUIRED	constant	codegen/vir/pass-table.h	
+PASS_THEN_TRIVIAL	VIRBUILD_PASS_FLAG_THEN_TRIVIAL	constant	codegen/vir/pass-table.h	
+PASS_IF_PREVIOUS_CHANGED	VIRBUILD_PASS_FLAG_IF_PREVIOUS_CHANGED	constant	codegen/vir/pass-table.h	
+PASS_VECTOR_GATE	VIRBUILD_PASS_FLAG_VECTOR_GATE	constant	codegen/vir/pass-table.h	
+PASS_FIXED_POINT	VIRBUILD_PASS_FLAG_FIXED_POINT	constant	codegen/vir/pass-table.h	
+PASS_CHANGE_UNKNOWN	VIRBUILD_PASS_FLAG_CHANGE_UNKNOWN	constant	codegen/vir/pass-table.h	
+PASS_ON_VIR	VIRBUILD_PASS_FLAG_ON_VIR	constant	codegen/vir/pass-table.h	
+VCC_EMIT_VIR_PREIR_H	VCC_CODEGEN_VIR_PREIR_H	constant	codegen/vir/preir.h	
+VW_LIFETIME	VIRBUILD_MEMSET_LIFETIME_FLAG	constant	codegen/vir/preir.h	
+VW_NONAME	VIRBUILD_REGISTER_NONE	constant	codegen/vir/preir.h	
+VW_FNAME0	VIRBUILD_FLOAT_REGISTER_FIRST	constant	codegen/vir/preir.h	
+VW_RETV	VIRBUILD_RESULT_VARIABLE	constant	codegen/vir/preir.h	
+VW_VAR0	VIRBUILD_LOCAL_VARIABLE_FIRST	constant	codegen/vir/preir.h	
+VW_NOBLK	VIRBUILD_BLOCK_NONE	constant	codegen/vir/preir.h	
+VW_H0	VIRBUILD_VARIABLE_TABLE_INITIAL	constant	codegen/vir/preir.h	
+VW_NOCONV	VIRBUILD_PROMOTE_NO_CONVERSION	constant	codegen/vir/promote.c	
+VCC_EMIT_VIR_SIMPLIFY_H	VCC_CODEGEN_VIR_SIMPLIFY_H	constant	codegen/vir/simplify.h	
+VW_FAROFF	VIRBUILD_FAR_LOAD_OFFSET_MAX	constant	codegen/vir/simplify.h	
+VW_FARMAX	VIRBUILD_FAR_LOAD_WRITERS_MAX	constant	codegen/vir/simplify.h	
+VK_NONE	VIRBUILD_VECTORIZE_KIND_NONE	constant	codegen/vir/vectorize.h	
+VK_INV	VIRBUILD_VECTORIZE_KIND_INV	constant	codegen/vir/vectorize.h	
+VK_LIN	VIRBUILD_VECTORIZE_KIND_LIN	constant	codegen/vir/vectorize.h	
+VK_VEC	VIRBUILD_VECTORIZE_KIND_VEC	constant	codegen/vir/vectorize.h	
+VK_MASK	VIRBUILD_VECTORIZE_KIND_MASK	constant	codegen/vir/vectorize.h	
+VK_RED	VIRBUILD_VECTORIZE_KIND_RED	constant	codegen/vir/vectorize.h	
+VK_REDUPD	VIRBUILD_VECTORIZE_KIND_REDUPD	constant	codegen/vir/vectorize.h	
+VK_BAD	VIRBUILD_VECTORIZE_KIND_BAD	constant	codegen/vir/vectorize.h	
+VK_W32	VIRBUILD_VECTORIZE_KIND_W32	constant	codegen/vir/vectorize.h	
+VK_SCALAR	VIRBUILD_VECTORIZE_KIND_SCALAR	constant	codegen/vir/vectorize.h	
+VK_CARRY	VIRBUILD_VECTORIZE_KIND_CARRY	constant	codegen/vir/vectorize.h	
+VK_FOLD	VIRBUILD_VECTORIZE_KIND_FOLD	constant	codegen/vir/vectorize.h	
+VJ_NONE	VIRBUILD_VECTORIZE_OBJECT_NONE	constant	codegen/vir/vectorize.h	
+VJ_SYM	VIRBUILD_VECTORIZE_OBJECT_SYM	constant	codegen/vir/vectorize.h	
+VJ_PTR	VIRBUILD_VECTORIZE_OBJECT_PTR	constant	codegen/vir/vectorize.h	
+VM_ENTRY	VIRBUILD_VECTORIZE_MODE_ENTRY	constant	codegen/vir/vectorize.h	
+VM_BODY	VIRBUILD_VECTORIZE_MODE_BODY	constant	codegen/vir/vectorize.h	
+VM_T0	VIRBUILD_VECTORIZE_MODE_T0	constant	codegen/vir/vectorize.h	
+VCC_EMIT_VIR_VECTORIZE_H	VCC_CODEGEN_VIR_VECTORIZE_H	constant	codegen/vir/vectorize.h	
+VR_NONE	VIR_REGISTER_NONE	constant	include/vir/alloc.h	
+VR_SCR0	VIR_REGISTER_SCRATCH0	constant	include/vir/alloc.h	
+VR_SCR1	VIR_REGISTER_SCRATCH1	constant	include/vir/alloc.h	
+VFX_TIED	VIR_CONSTRAINT_FLAG_TIED	constant	include/vir/alloc.h	
+VFX_COMMUT	VIR_CONSTRAINT_FLAG_COMMUTATIVE	constant	include/vir/alloc.h	
+VFX_RESTMEM	VIR_CONSTRAINT_FLAG_REST_MEMORY	constant	include/vir/alloc.h	
+VE_RELOAD	VIR_EDIT_RELOAD	constant	include/vir/alloc.h	
+VE_REMAT	VIR_EDIT_REMATERIALIZE	constant	include/vir/alloc.h	
+VE_MOVE	VIR_EDIT_MOVE	constant	include/vir/alloc.h	
+VE_SWAP	VIR_EDIT_SWAP	constant	include/vir/alloc.h	
+VE_XCHG	VIR_EDIT_EXCHANGE	constant	include/vir/alloc.h	
+VE_STORE	VIR_EDIT_STORE	constant	include/vir/alloc.h	
+VIR_FIX_N	VIR_REGISTER_CONSTRAINT_MAX	constant	include/vir/alloc.h	
+VL_SLOT	VIR_LOCATION_SLOT	constant	include/vir/alloc.h	
+VT_VOID	VIR_TYPE_VOID	constant	include/vir/vir.h	
+VT_I32	VIR_TYPE_I32	constant	include/vir/vir.h	
+VT_I64	VIR_TYPE_I64	constant	include/vir/vir.h	
+VT_F32	VIR_TYPE_F32	constant	include/vir/vir.h	
+VT_F64	VIR_TYPE_F64	constant	include/vir/vir.h	
+VT_PTR	VIR_TYPE_PTR	constant	include/vir/vir.h	
+VT_MULTI	VIR_TYPE_MULTI	constant	include/vir/vir.h	
+VT_F32X4	VIR_TYPE_F32X4	constant	include/vir/vir.h	
+VT_I32X4	VIR_TYPE_I32X4	constant	include/vir/vir.h	
+VT_F64X2	VIR_TYPE_F64X2	constant	include/vir/vir.h	
+VT_I64X2	VIR_TYPE_I64X2	constant	include/vir/vir.h	
+VT_N	VIR_TYPE_COUNT	constant	include/vir/vir.h	
+VO_NOP	VIR_OP_NOP	constant	include/vir/vir.h	
+VO_ICONST	VIR_OP_ICONST	constant	include/vir/vir.h	
+VO_FCONST	VIR_OP_FCONST	constant	include/vir/vir.h	
+VO_SYMADDR	VIR_OP_SYMADDR	constant	include/vir/vir.h	
+VO_SLOTADDR	VIR_OP_SLOTADDR	constant	include/vir/vir.h	
+VO_LABELADDR	VIR_OP_LABELADDR	constant	include/vir/vir.h	
+VO_BPARAM	VIR_OP_BPARAM	constant	include/vir/vir.h	
+VO_PARAM	VIR_OP_PARAM	constant	include/vir/vir.h	
+VO_PROJ	VIR_OP_PROJ	constant	include/vir/vir.h	
+VO_ADD	VIR_OP_ADD	constant	include/vir/vir.h	
+VO_SUB	VIR_OP_SUB	constant	include/vir/vir.h	
+VO_MUL	VIR_OP_MUL	constant	include/vir/vir.h	
+VO_SDIV	VIR_OP_SDIV	constant	include/vir/vir.h	
+VO_UDIV	VIR_OP_UDIV	constant	include/vir/vir.h	
+VO_SREM	VIR_OP_SREM	constant	include/vir/vir.h	
+VO_UREM	VIR_OP_UREM	constant	include/vir/vir.h	
+VO_AND	VIR_OP_AND	constant	include/vir/vir.h	
+VO_OR	VIR_OP_OR	constant	include/vir/vir.h	
+VO_XOR	VIR_OP_XOR	constant	include/vir/vir.h	
+VO_SHL	VIR_OP_SHL	constant	include/vir/vir.h	
+VO_LSHR	VIR_OP_LSHR	constant	include/vir/vir.h	
+VO_ASHR	VIR_OP_ASHR	constant	include/vir/vir.h	
+VO_UMULHI	VIR_OP_UMULHI	constant	include/vir/vir.h	
+VO_SMULHI	VIR_OP_SMULHI	constant	include/vir/vir.h	
+VO_NEG	VIR_OP_NEG	constant	include/vir/vir.h	
+VO_NOT	VIR_OP_NOT	constant	include/vir/vir.h	
+VO_CLZ	VIR_OP_CLZ	constant	include/vir/vir.h	
+VO_CTZ	VIR_OP_CTZ	constant	include/vir/vir.h	
+VO_POPCNT	VIR_OP_POPCNT	constant	include/vir/vir.h	
+VO_BSWAP	VIR_OP_BSWAP	constant	include/vir/vir.h	
+VO_EXT	VIR_OP_EXT	constant	include/vir/vir.h	
+VO_TRUNC	VIR_OP_TRUNC	constant	include/vir/vir.h	
+VO_ICMP	VIR_OP_ICMP	constant	include/vir/vir.h	
+VO_FCMP	VIR_OP_FCMP	constant	include/vir/vir.h	
+VO_SELECT	VIR_OP_SELECT	constant	include/vir/vir.h	
+VO_FADD	VIR_OP_FADD	constant	include/vir/vir.h	
+VO_FSUB	VIR_OP_FSUB	constant	include/vir/vir.h	
+VO_FMUL	VIR_OP_FMUL	constant	include/vir/vir.h	
+VO_FDIV	VIR_OP_FDIV	constant	include/vir/vir.h	
+VO_FNEG	VIR_OP_FNEG	constant	include/vir/vir.h	
+VO_FABS	VIR_OP_FABS	constant	include/vir/vir.h	
+VO_FSQRT	VIR_OP_FSQRT	constant	include/vir/vir.h	
+VO_FEXT	VIR_OP_FEXT	constant	include/vir/vir.h	
+VO_FTRUNC	VIR_OP_FTRUNC	constant	include/vir/vir.h	
+VO_S2F	VIR_OP_S2F	constant	include/vir/vir.h	
+VO_U2F	VIR_OP_U2F	constant	include/vir/vir.h	
+VO_F2S	VIR_OP_F2S	constant	include/vir/vir.h	
+VO_F2U	VIR_OP_F2U	constant	include/vir/vir.h	
+VO_BITCAST	VIR_OP_BITCAST	constant	include/vir/vir.h	
+VO_PTRADD	VIR_OP_PTRADD	constant	include/vir/vir.h	
+VO_PSUB	VIR_OP_PSUB	constant	include/vir/vir.h	
+VO_P2I	VIR_OP_P2I	constant	include/vir/vir.h	
+VO_I2P	VIR_OP_I2P	constant	include/vir/vir.h	
+VO_LOAD	VIR_OP_LOAD	constant	include/vir/vir.h	
+VO_STORE	VIR_OP_STORE	constant	include/vir/vir.h	
+VO_MEMCPY	VIR_OP_MEMCPY	constant	include/vir/vir.h	
+VO_MEMSET	VIR_OP_MEMSET	constant	include/vir/vir.h	
+VO_ALOAD	VIR_OP_ALOAD	constant	include/vir/vir.h	
+VO_ASTORE	VIR_OP_ASTORE	constant	include/vir/vir.h	
+VO_AXCHG	VIR_OP_AXCHG	constant	include/vir/vir.h	
+VO_AXADD	VIR_OP_AXADD	constant	include/vir/vir.h	
+VO_ACAS	VIR_OP_ACAS	constant	include/vir/vir.h	
+VO_AFENCE	VIR_OP_AFENCE	constant	include/vir/vir.h	
+VO_CALL	VIR_OP_CALL	constant	include/vir/vir.h	
+VO_VA_START	VIR_OP_VA_START	constant	include/vir/vir.h	
+VO_VA_ARG	VIR_OP_VA_ARG	constant	include/vir/vir.h	
+VO_TLSADDR	VIR_OP_TLSADDR	constant	include/vir/vir.h	
+VO_ASM	VIR_OP_ASM	constant	include/vir/vir.h	
+VO_BARRIER	VIR_OP_BARRIER	constant	include/vir/vir.h	
+VO_FRAMEADDR	VIR_OP_FRAMEADDR	constant	include/vir/vir.h	
+VO_RETADDR	VIR_OP_RETADDR	constant	include/vir/vir.h	
+VO_FMA	VIR_OP_FMA	constant	include/vir/vir.h	
+VO_VSPLAT	VIR_OP_VSPLAT	constant	include/vir/vir.h	
+VO_VSERIES	VIR_OP_VSERIES	constant	include/vir/vir.h	
+VO_VICMP	VIR_OP_VICMP	constant	include/vir/vir.h	
+VO_VFCMP	VIR_OP_VFCMP	constant	include/vir/vir.h	
+VO_VBITSEL	VIR_OP_VBITSEL	constant	include/vir/vir.h	
+VO_VS2F	VIR_OP_VS2F	constant	include/vir/vir.h	
+VO_VREV	VIR_OP_VREV	constant	include/vir/vir.h	
+VO_VREDUCE	VIR_OP_VREDUCE	constant	include/vir/vir.h	
+VO_VINSERT	VIR_OP_VINSERT	constant	include/vir/vir.h	
+VO_VEXTRACT	VIR_OP_VEXTRACT	constant	include/vir/vir.h	
+VO_BR	VIR_OP_BR	constant	include/vir/vir.h	
+VO_BRIF	VIR_OP_BRIF	constant	include/vir/vir.h	
+VO_SWITCH	VIR_OP_SWITCH	constant	include/vir/vir.h	
+VO_IBR	VIR_OP_IBR	constant	include/vir/vir.h	
+VO_ASMGOTO	VIR_OP_ASMGOTO	constant	include/vir/vir.h	
+VO_RET	VIR_OP_RET	constant	include/vir/vir.h	
+VO_TRAP	VIR_OP_TRAP	constant	include/vir/vir.h	
+VO_TARGET0	VIR_OP_TARGET_FIRST	constant	include/vir/vir.h	
+VO_N	VIR_OP_COUNT	constant	include/vir/vir.h	
+VIF_NSW	VIR_INSN_FLAG_NSW	constant	include/vir/vir.h	
+VIF_NUW	VIR_INSN_FLAG_NUW	constant	include/vir/vir.h	
+VIF_EXACT	VIR_INSN_FLAG_EXACT	constant	include/vir/vir.h	
+VIF_NZ	VIR_INSN_FLAG_NZ	constant	include/vir/vir.h	
+VIF_INB	VIR_INSN_FLAG_INB	constant	include/vir/vir.h	
+VIF_MS	VIR_INSN_FLAG_MS	constant	include/vir/vir.h	
+VIF_VOL	VIR_INSN_FLAG_VOL	constant	include/vir/vir.h	
+VIF_CALL_NORETURN	VIR_INSN_FLAG_CALL_NORETURN	constant	include/vir/vir.h	
+VIF_CALL_PURE	VIR_INSN_FLAG_CALL_PURE	constant	include/vir/vir.h	
+VIF_CALL_CONST	VIR_INSN_FLAG_CALL_CONST	constant	include/vir/vir.h	
+VIF_CALL_TAIL	VIR_INSN_FLAG_CALL_TAIL	constant	include/vir/vir.h	
+VIF_LIKELY	VIR_INSN_FLAG_LIKELY	constant	include/vir/vir.h	
+VIF_UNLIKELY	VIR_INSN_FLAG_UNLIKELY	constant	include/vir/vir.h	
+VIF_NEGP	VIR_INSN_FLAG_NEGP	constant	include/vir/vir.h	
+VIF_NEGC	VIR_INSN_FLAG_NEGC	constant	include/vir/vir.h	
+VB_LOOP	VIR_BLOCK_FLAG_LOOP	constant	include/vir/vir.h	
+VB_ADDR	VIR_BLOCK_FLAG_ADDR	constant	include/vir/vir.h	
+VB_COLD	VIR_BLOCK_FLAG_COLD	constant	include/vir/vir.h	
+VS_PARAM	VIR_SLOT_FLAG_PARAM	constant	include/vir/vir.h	
+VS_EXPOSED	VIR_SLOT_FLAG_EXPOSED	constant	include/vir/vir.h	
+VF_NOFP	VIR_FUNCTION_FLAG_NOFP	constant	include/vir/vir.h	
+VF_FENV	VIR_FUNCTION_FLAG_FENV	constant	include/vir/vir.h	
+VF_NULLINVALID	VIR_FUNCTION_FLAG_NULLINVALID	constant	include/vir/vir.h	
+VF_VARIADIC	VIR_FUNCTION_FLAG_VARIADIC	constant	include/vir/vir.h	
+VF_NORETURN	VIR_FUNCTION_FLAG_NORETURN	constant	include/vir/vir.h	
+VF_LOCAL	VIR_FUNCTION_FLAG_LOCAL	constant	include/vir/vir.h	
+VF_EXPOSURE	VIR_FUNCTION_FLAG_EXPOSURE	constant	include/vir/vir.h	
+VTG_NONE	VIR_TARGET_NONE	constant	include/vir/vir.h	
+VTG_X86_64_LINUX	VIR_TARGET_X86_64_LINUX	constant	include/vir/vir.h	
+VTG_A64_LINUX	VIR_TARGET_A64_LINUX	constant	include/vir/vir.h	
+VTG_A64_DARWIN	VIR_TARGET_A64_DARWIN	constant	include/vir/vir.h	
+VTG_N	VIR_TARGET_COUNT	constant	include/vir/vir.h	
+VG_NONE	VIR_GROUP_NONE	constant	include/vir/vir.h	
+VG_REG	VIR_GROUP_REG	constant	include/vir/vir.h	
+VG_MEM	VIR_GROUP_MEM	constant	include/vir/vir.h	
+VG_SRET	VIR_GROUP_SRET	constant	include/vir/vir.h	
+VC_NONE	VIR_CLASS_NONE	constant	include/vir/vir.h	
+VC_INT	VIR_CLASS_INT	constant	include/vir/vir.h	
+VC_F32	VIR_CLASS_F32	constant	include/vir/vir.h	
+VC_F64	VIR_CLASS_F64	constant	include/vir/vir.h	
+TM_V	VIR_TYPE_MASK_V	constant	include/vir/vir.h	
+TM_I32	VIR_TYPE_MASK_I32	constant	include/vir/vir.h	
+TM_I64	VIR_TYPE_MASK_I64	constant	include/vir/vir.h	
+TM_F32	VIR_TYPE_MASK_F32	constant	include/vir/vir.h	
+TM_F64	VIR_TYPE_MASK_F64	constant	include/vir/vir.h	
+TM_PTR	VIR_TYPE_MASK_PTR	constant	include/vir/vir.h	
+TM_MULTI	VIR_TYPE_MASK_MULTI	constant	include/vir/vir.h	
+TM_I	VIR_TYPE_MASK_I	constant	include/vir/vir.h	
+TM_F	VIR_TYPE_MASK_F	constant	include/vir/vir.h	
+TM_ANY	VIR_TYPE_MASK_ANY	constant	include/vir/vir.h	
+TM_F32X4	VIR_TYPE_MASK_F32X4	constant	include/vir/vir.h	
+TM_I32X4	VIR_TYPE_MASK_I32X4	constant	include/vir/vir.h	
+TM_F64X2	VIR_TYPE_MASK_F64X2	constant	include/vir/vir.h	
+TM_I64X2	VIR_TYPE_MASK_I64X2	constant	include/vir/vir.h	
+TM_VI	VIR_TYPE_MASK_VI	constant	include/vir/vir.h	
+TM_VF	VIR_TYPE_MASK_VF	constant	include/vir/vir.h	
+TM_VEC	VIR_TYPE_MASK_VEC	constant	include/vir/vir.h	
+OK_NONE	VIR_OPERAND_KIND_NONE	constant	include/vir/vir.h	
+OK_T	VIR_OPERAND_KIND_T	constant	include/vir/vir.h	
+OK_I	VIR_OPERAND_KIND_I	constant	include/vir/vir.h	
+OK_I32	VIR_OPERAND_KIND_I32	constant	include/vir/vir.h	
+OK_I64	VIR_OPERAND_KIND_I64	constant	include/vir/vir.h	
+OK_PTR	VIR_OPERAND_KIND_PTR	constant	include/vir/vir.h	
+OK_F32	VIR_OPERAND_KIND_F32	constant	include/vir/vir.h	
+OK_F64	VIR_OPERAND_KIND_F64	constant	include/vir/vir.h	
+OK_F	VIR_OPERAND_KIND_F	constant	include/vir/vir.h	
+OK_ANY	VIR_OPERAND_KIND_ANY	constant	include/vir/vir.h	
+OK_X	VIR_OPERAND_KIND_X	constant	include/vir/vir.h	
+OK_FP	VIR_OPERAND_KIND_FP	constant	include/vir/vir.h	
+OK_VI	VIR_OPERAND_KIND_VI	constant	include/vir/vir.h	
+OK_VF	VIR_OPERAND_KIND_VF	constant	include/vir/vir.h	
+OK_ELEM	VIR_OPERAND_KIND_ELEM	constant	include/vir/vir.h	
+OK_VRED	VIR_OPERAND_KIND_VRED	constant	include/vir/vir.h	
+OK_VLANES	VIR_OPERAND_KIND_VLANES	constant	include/vir/vir.h	
+OK_MULTI	VIR_OPERAND_KIND_MULTI	constant	include/vir/vir.h	
+OK_BITC	VIR_OPERAND_KIND_BITC	constant	include/vir/vir.h	
+OK_IMM	VIR_OPERAND_KIND_IMM	constant	include/vir/vir.h	
+OK_BLK	VIR_OPERAND_KIND_BLK	constant	include/vir/vir.h	
+OK_EXT	VIR_OPERAND_KIND_EXT	constant	include/vir/vir.h	
+OK_SIG	VIR_OPERAND_KIND_SIG	constant	include/vir/vir.h	
+OK_GRP	VIR_OPERAND_KIND_GRP	constant	include/vir/vir.h	
+OK_TPL	VIR_OPERAND_KIND_TPL	constant	include/vir/vir.h	
+OK_SYMREF	VIR_OPERAND_KIND_SYMREF	constant	include/vir/vir.h	
+OK_CONSTV	VIR_OPERAND_KIND_CONSTV	constant	include/vir/vir.h	
+EF_P	VIR_EFFECT_P	constant	include/vir/vir.h	
+EF_R	VIR_EFFECT_R	constant	include/vir/vir.h	
+EF_W	VIR_EFFECT_W	constant	include/vir/vir.h	
+EF_U	VIR_EFFECT_U	constant	include/vir/vir.h	
+EF_C	VIR_EFFECT_C	constant	include/vir/vir.h	
+EF_T	VIR_EFFECT_T	constant	include/vir/vir.h	
+EF_A	VIR_EFFECT_A	constant	include/vir/vir.h	
+EF_F	VIR_EFFECT_F	constant	include/vir/vir.h	
+EF_UF	VIR_EFFECT_UF	constant	include/vir/vir.h	
+FM_STD	VIR_FORM_STD	constant	include/vir/vir.h	
+FM_NONE	VIR_FORM_NONE	constant	include/vir/vir.h	
+FM_CC	VIR_FORM_CC	constant	include/vir/vir.h	
+FM_EXT	VIR_FORM_EXT	constant	include/vir/vir.h	
+FM_LOAD	VIR_FORM_LOAD	constant	include/vir/vir.h	
+FM_STORE	VIR_FORM_STORE	constant	include/vir/vir.h	
+FM_ATOM	VIR_FORM_ATOM	constant	include/vir/vir.h	
+FM_MEMCPY	VIR_FORM_MEMCPY	constant	include/vir/vir.h	
+FM_PARAM	VIR_FORM_PARAM	constant	include/vir/vir.h	
+FM_CALL	VIR_FORM_CALL	constant	include/vir/vir.h	
+FM_VAARG	VIR_FORM_VAARG	constant	include/vir/vir.h	
+FM_ASM	VIR_FORM_ASM	constant	include/vir/vir.h	
+FM_ASMGOTO	VIR_FORM_ASMGOTO	constant	include/vir/vir.h	
+FM_BR	VIR_FORM_BR	constant	include/vir/vir.h	
+FM_SWITCH	VIR_FORM_SWITCH	constant	include/vir/vir.h	
+FM_IBR	VIR_FORM_IBR	constant	include/vir/vir.h	
+FM_RET	VIR_FORM_RET	constant	include/vir/vir.h	
+FM_CONST	VIR_FORM_CONST	constant	include/vir/vir.h	
+FM_BPARAM	VIR_FORM_BPARAM	constant	include/vir/vir.h	
+FM_TLS	VIR_FORM_TLS	constant	include/vir/vir.h	
+VU_EXTERN	VIR_UNIT_ITEM_EXTERN	constant	include/vir/vir.h	
+VU_DATA	VIR_UNIT_ITEM_DATA	constant	include/vir/vir.h	
+VU_TDATA	VIR_UNIT_ITEM_TDATA	constant	include/vir/vir.h	
+VU_FUNC	VIR_UNIT_ITEM_FUNC	constant	include/vir/vir.h	
+VU_UNDECL	VIR_UNIT_ITEM_UNDECL	constant	include/vir/vir.h	
+VIR_NOBLK	VIR_BLOCK_NONE	constant	include/vir/vir.h	
+VG_UNNAMED	VIR_GROUP_UNNAMED	constant	include/vir/vir.h	
+VG_RESULT	VIR_GROUP_RESULT	constant	include/vir/vir.h	
+XCALL	VIR_ALLOC_FLAG_CROSSES_CALL	constant	vir/alloc.c	
+XLOOP	VIR_ALLOC_FLAG_CROSSES_LOOP	constant	vir/alloc.c	
+NEEDSLOT	VIR_ALLOC_FLAG_NEEDS_SLOT	constant	vir/alloc.c	
+DEAD	VIR_ALLOC_FLAG_DEAD	constant	vir/alloc.c	
+CALLFIRST	VIR_ALLOC_FLAG_CALL_FIRST	constant	vir/alloc.c	
+PCALL	VIR_ALLOC_FLAG_LIVE_AFTER_CALL	constant	vir/alloc.c	
+PLOOP	VIR_ALLOC_FLAG_LIVE_AFTER_LOOP_CALL	constant	vir/alloc.c	
+KILL	VIR_ALLOC_KILL	constant	vir/alloc.c	
+HREG	VIR_ALLOC_HINT_REGISTER	constant	vir/alloc.c	
+NOPOS	VIR_ALLOC_NO_POSITION	constant	vir/alloc.c	
+FAR	VIR_ALLOC_FAR	constant	vir/alloc.c	
+NOWEB	VIR_ALLOC_NO_WEB	constant	vir/alloc.c	
+WEBMAX	VIR_ALLOC_WEB_MAX	constant	vir/alloc.c	
+T_NL	VIR_PARSE_TOKEN_NL	constant	vir/parse.c	
+T_ID	VIR_PARSE_TOKEN_ID	constant	vir/parse.c	
+T_INT	VIR_PARSE_TOKEN_INT	constant	vir/parse.c	
+T_FLT	VIR_PARSE_TOKEN_FLT	constant	vir/parse.c	
+T_STR	VIR_PARSE_TOKEN_STR	constant	vir/parse.c	
+T_SYM	VIR_PARSE_TOKEN_SYM	constant	vir/parse.c	
+T_SLOT	VIR_PARSE_TOKEN_SLOT	constant	vir/parse.c	
+T_ASM	VIR_PARSE_TOKEN_ASM	constant	vir/parse.c	
+T_SIG	VIR_PARSE_TOKEN_SIG	constant	vir/parse.c	
+T_PUNCT	VIR_PARSE_TOKEN_PUNCT	constant	vir/parse.c	
+T_DOTS	VIR_PARSE_TOKEN_DOTS	constant	vir/parse.c	
+T_DOTDOT	VIR_PARSE_TOKEN_DOTDOT	constant	vir/parse.c	
+PK_NAME	VIR_PARSE_OPERAND_KIND_NAME	constant	vir/parse.c	
+PK_INT	VIR_PARSE_OPERAND_KIND_INT	constant	vir/parse.c	
+PK_FLT	VIR_PARSE_OPERAND_KIND_FLT	constant	vir/parse.c	
+PK_BITS	VIR_PARSE_OPERAND_KIND_BITS	constant	vir/parse.c	
+PK_SYM	VIR_PARSE_OPERAND_KIND_SYM	constant	vir/parse.c	
+PK_SLOT	VIR_PARSE_OPERAND_KIND_SLOT	constant	vir/parse.c	
+PK_LABEL	VIR_PARSE_OPERAND_KIND_LABEL	constant	vir/parse.c	
+FX_VAL	VIR_PARSE_FIXUP_VAL	constant	vir/parse.c	
+FX_BLK	VIR_PARSE_FIXUP_BLK	constant	vir/parse.c	
+WM_POS	VIR_PARSE_LIST_MODE_POS	constant	vir/parse.c	
+WM_LIST	VIR_PARSE_LIST_MODE_LIST	constant	vir/parse.c	
+WM_BR	VIR_PARSE_LIST_MODE_BR	constant	vir/parse.c	
+ARITH_FL	VIR_OPCODE_TABLE_ARITHMETIC_FLAGS	constant	vir/table.c	
+OK_	VIR_OPERAND_KIND_	constant	vir/table.c	the prefix pasted by OK_##a in the opcode table macro R; the OK_* enumerators have their own rows
+VEX_SAFE	VIR_VERIFY_EXPOSURE_SAFE	constant	vir/verify.c	
+VEX_SINK	VIR_VERIFY_EXPOSURE_SINK	constant	vir/verify.c	
+VEX_FLOW	VIR_VERIFY_EXPOSURE_FLOW	constant	vir/verify.c	
+VCC_VIRIMPL_H	VCC_VIR_INTERNAL_H	constant	vir/virimpl.h	
+VIR_CTAB_BITS	VIR_CONSTANT_TABLE_BITS	constant	vir/virimpl.h	
+VIR_FMT	VIR_FORMAT_PRINTF	constant	vir/virimpl.h	
+#
+# --- function-like macros
+VW3	A64_VIR_VECTOR_WORD3	macro	arch/a64/vir/vectors.c	
+VW2	A64_VIR_VECTOR_WORD2	macro	arch/a64/vir/vectors.c	
+RND	VIRALLOC_RANDOM	macro	bin/viralloc/viralloc.c	
+VIR_FAILURES	VIRBUILD_FAILURES	macro	codegen/vir/failure.h	
+VIRFAIL	VIRBUILD_FAILURE	macro	codegen/vir/failure.h	
+VW_NO	VIRBUILD_STUB_UNSUPPORTED	macro	codegen/vir/lower-value.c	
+VIR_PASS_ROW_BUILD	VIRBUILD_PASS_ROW_BUILD	macro	codegen/vir/pass-table.h	
+VIR_PASS_ROW_LOWER	VIRBUILD_PASS_ROW_LOWER	macro	codegen/vir/pass-table.h	
+VW_EACHOP	VIRBUILD_FOR_EACH_OPERAND	macro	codegen/vir/preir.h	
+VR_CLASS	VIR_REGISTER_CLASS	macro	include/vir/alloc.h	
+VR_NUM	VIR_REGISTER_NUMBER	macro	include/vir/alloc.h	
+VR_MAKE	VIR_REGISTER_MAKE	macro	include/vir/alloc.h	
+VR_SCR	VIR_REGISTER_SCRATCH	macro	include/vir/alloc.h	
+VIF_W	VIR_INSN_FLAG_WIDTH_LOG2	macro	include/vir/vir.h	
+VIF_AL	VIR_INSN_FLAG_ALIGN_LOG2	macro	include/vir/vir.h	
+VIF_AL2	VIR_INSN_FLAG_SOURCE_ALIGN_LOG2	macro	include/vir/vir.h	
+VG_KIND	VIR_GROUP_KIND	macro	include/vir/vir.h	
+VG_NPIECE	VIR_GROUP_PIECE_COUNT	macro	include/vir/vir.h	
+VG_CLASS	VIR_GROUP_CLASS	macro	include/vir/vir.h	
+VG_FLAGS	VIR_GROUP_FLAGS	macro	include/vir/vir.h	
+VG_SIZE	VIR_GROUP_SIZE	macro	include/vir/vir.h	
+VG_LALIGN	VIR_GROUP_ALIGN_LOG2	macro	include/vir/vir.h	
+VSIG_HDR	VIR_SIGNATURE_HEADER	macro	include/vir/vir.h	
+VSIG_NGROUPS	VIR_SIGNATURE_GROUP_COUNT	macro	include/vir/vir.h	
+VSIG_VARIADIC	VIR_SIGNATURE_IS_VARIADIC	macro	include/vir/vir.h	
+VG_WORD0	VIR_GROUP_WORD0	macro	include/vir/vir.h	
+VG_WORD1	VIR_GROUP_WORD1	macro	include/vir/vir.h	
+SLOC	VIR_ALLOC_CHECK_SLOT_LOCATION	macro	vir/allocchk.c	
+PV_PUSH	VIR_PARSE_VECTOR_PUSH	macro	vir/parse.c	
+PV_FREE	VIR_PARSE_VECTOR_FREE	macro	vir/parse.c	
+PERR	VIR_PARSE_ERROR	macro	vir/parse.c	
+UGROW	VIR_UNIT_GROW	macro	vir/vir.c	
+#
+# --- file-scope variables
+vl_opfix	a64_vir_operand_fixes	variable	arch/a64/vir/calling-convention.c	
+vl_icc	a64_vir_integer_condition_codes	variable	arch/a64/vir/compares.c	
+vl_fccs	a64_vir_float_condition_codes	variable	arch/a64/vir/compares.c	
+vl_swapcc	a64_vir_condition_swapped	variable	arch/a64/vir/compares.c	
+VLT	a64_vir_thread_state_instance	variable	arch/a64/vir/function.c	
+vir_passes	virbuild_pass_table	variable	codegen/vir/pass-table.c	
+vir_switch	virbuild_pass_switch_current	variable	codegen/vir/pass-table.c	
+vir_read_cost	virbuild_pass_read_cost	variable	codegen/vir/pass-table.c	
+vir_overhead	virbuild_pass_overhead	variable	codegen/vir/pass-table.c	
+vir_switch_once	virbuild_pass_switch_once	variable	codegen/vir/pass-table.c	
+vir_count_mu	virbuild_pass_count_mutex	variable	codegen/vir/pass-table.c	
+vir_count_tus	virbuild_pass_count_units	variable	codegen/vir/pass-table.c	
+vir_count_cap	virbuild_pass_count_capacity	variable	codegen/vir/pass-table.c	
+vir_failure_table	virbuild_failure_table	variable	codegen/vir/try.c	
+vir_optab	vir_opcode_table	variable	include/vir/vir.h	
+vir_tyname	vir_type_names	variable	include/vir/vir.h	
+vir_fcc	vir_float_condition_names	variable	include/vir/vir.h	
+ax_tls	vir_alloc_thread_arrays_instance	variable	vir/alloc.c	
+target_name	vir_target_names	variable	vir/print.c	
+opfix	vir_synth_operand_fixes	variable	vir/synth.c	
+vir_icc	vir_integer_condition_names	variable	vir/table.c	
+tl_ctx	vir_context_thread	variable	vir/vir.c	
+#
+# --- unsafe: not applied by the whole-word script (old word is generic or defined twice)
+# vl	a64_vir_context	unsafe	arch/a64/vir/lowering-internal.h	short type name also used for locals and other things (see outside) [was type]
+# PROBE	A64_VIR_PROBE	unsafe	arch/a64/vir/moves.c	also a word in 1 files outside the VIR set (e.g. bench/vcc-host-dispatch.py) [was macro]
+# vx	x64_vir_context	unsafe	arch/x64/vir/lowering-internal.h	short type name also used for locals and other things (see outside) [was type]
+# find_sep	viralloc_separator_find	unsafe	bin/viralloc/viralloc.c	same old name in bin/viralloc/viralloc.c, bin/virtest/virtest.c [was function]
+# now	viralloc_time_now	unsafe	bin/viralloc/viralloc.c	also a word in 65 files outside the VIR set (e.g. AGENTS.md, TODO.md) [was function]
+# one	viralloc_function_allocate	unsafe	bin/viralloc/viralloc.c	also a word in 426 files outside the VIR set (e.g. AGENTS.md, README.md) [was function]
+# slurp	viralloc_file_read	unsafe	bin/viralloc/viralloc.c	same old name in bin/viralloc/viralloc.c, bin/virtest/virtest.c [was function]
+# CHECK	VIRTEST_CHECK	unsafe	bin/virtest/virtest.c	also a word in 37 files outside the VIR set (e.g. TODO.md, bench/boot-test.py) [was macro]
+# find_sep	virtest_separator_find	unsafe	bin/virtest/virtest.c	same old name in bin/viralloc/viralloc.c, bin/virtest/virtest.c [was function]
+# selftest	virtest_selftest_run	unsafe	bin/virtest/virtest.c	also a word in 2 files outside the VIR set (e.g. AGENTS.md, bench/vir-test.py) [was function]
+# slurp	virtest_file_read	unsafe	bin/virtest/virtest.c	same old name in bin/viralloc/viralloc.c, bin/virtest/virtest.c [was function]
+# GROW	VIRBUILD_ARRAY_GROW	unsafe	codegen/vir/preir.h	also a word in 2 files outside the VIR set (e.g. src/arch/wasm/as/as.c, src/ld/wasmld.c) [was macro]
+# A	vir_allocator	unsafe	vir/alloc.c	also a word in 361 files outside the VIR set (e.g. AGENTS.md, README.md) [was type]
+# CNT	VIR_ALLOC_LIVE_COUNT	unsafe	vir/alloc.c	also a word in 1 files outside the VIR set (e.g. src/frontend/c/replay.c) [was macro]
+# choose	vir_alloc_register_choose	unsafe	vir/alloc.c	also a word in 12 files outside the VIR set (e.g. bench/vbench.py, bench/vcc-vir-x86.py) [was function]
+# clobbers	vir_alloc_clobbers_apply	unsafe	vir/alloc.c	also a word in 15 files outside the VIR set (e.g. bench/vcc-opt-rules.py, src/arch/a64/codegen/asm.c) [was function]
+# conform	vir_alloc_edge_conform	unsafe	vir/alloc.c	the word is also used as a variable, field or parameter inside the VIR files (1 places) [was function]
+# dist	vir_alloc_next_use_distance	unsafe	vir/alloc.c	also a word in 1 files outside the VIR set (e.g. bench/diag-render.py) [was function]
+# edit	vir_alloc_edit_add	unsafe	vir/alloc.c	also a word in 25 files outside the VIR set (e.g. AGENTS.md, TODO.md) [was function]
+# enter	vir_alloc_block_enter	unsafe	vir/alloc.c	also a word in 8 files outside the VIR set (e.g. src/arch/wasm/codegen/wimpl.h, src/frontend/pp/header-cache-internal.h) [was function]
+# evict	vir_alloc_register_evict	unsafe	vir/alloc.c	the word is also used as a variable, field or parameter inside the VIR files (2 places) [was function]
+# fail	vir_alloc_failure_set	unsafe	vir/alloc.c	also a word in 105 files outside the VIR set (e.g. AGENTS.md, TODO.md) [was function]
+# fetch	vir_alloc_value_fetch	unsafe	vir/alloc.c	also a word in 34 files outside the VIR set (e.g. AGENTS.md, TODO.md) [was function]
+# instr	vir_alloc_insn_assign	unsafe	vir/alloc.c	also a word in 9 files outside the VIR set (e.g. TODO.md, bench/vir-passes.py) [was function]
+# is_const	vir_alloc_value_is_constant	unsafe	vir/alloc.c	same old name in vir/alloc.c, vir/print.c [was function]
+# livein	vir_alloc_value_is_live_in	unsafe	vir/alloc.c	the word is also used as a variable, field or parameter inside the VIR files (2 places) [was function]
+# ncd	vir_alloc_dominator_common	unsafe	vir/alloc.c	also a word in 1 files outside the VIR set (e.g. bench/vcc-libc-test.py) [was function]
+# operands	vir_alloc_insn_operands	unsafe	vir/alloc.c	also a word in 84 files outside the VIR set (e.g. AGENTS.md, TODO.md) [was function]
+# sequence	vir_alloc_moves_sequence	unsafe	vir/alloc.c	also a word in 19 files outside the VIR set (e.g. AGENTS.md, TODO.md) [was function]
+# stamp	vir_alloc_stamp_next	unsafe	vir/alloc.c	also a word in 2 files outside the VIR set (e.g. src/frontend/c/replay.c, src/frontend/pp/header-cache-internal.h) [was function]
+# stored	vir_alloc_value_stored_mark	unsafe	vir/alloc.c	also a word in 34 files outside the VIR set (e.g. TODO.md, src/arch/a64/codegen/asm.c) [was function]
+# webs	vir_alloc_webs_build	unsafe	vir/alloc.c	the word is also used as a variable, field or parameter inside the VIR files (4 places) [was function]
+# wsingle	vir_alloc_web_single_set	unsafe	vir/alloc.c	also a word in 1 files outside the VIR set (e.g. src/arch/wasm/codegen/wasm.c) [was function]
+# xcall	vir_alloc_value_crosses_call	unsafe	vir/alloc.c	the word is also used as a variable, field or parameter inside the VIR files (1 places) [was function]
+# bad	vir_alloc_check_failure_add	unsafe	vir/allocchk.c	also a word in 139 files outside the VIR set (e.g. AGENTS.md, TODO.md) [was function]
+# block	vir_alloc_check_block	unsafe	vir/allocchk.c	also a word in 103 files outside the VIR set (e.g. AGENTS.md, TODO.md) [was function]
+# chk	vir_alloc_checker	unsafe	vir/allocchk.c	also a word in 14 files outside the VIR set (e.g. bench/vbench.py, bench/vcc-bflayout.py) [was type]
+# ploc	vir_alloc_check_parameter_location	unsafe	vir/allocchk.c	also a word in 1 files outside the VIR set (e.g. src/frontend/c/expression-parse.c) [was function]
+# reg_ok	vir_alloc_check_register_is_valid	unsafe	vir/allocchk.c	also a word in 2 files outside the VIR set (e.g. src/arch/a64/codegen/asm.c, src/arch/x64/codegen/asm.c) [was function]
+# vname	vir_alloc_check_value_name	unsafe	vir/allocchk.c	also a word in 1 files outside the VIR set (e.g. src/ld/objcopy.c) [was function]
+# wrote	vir_alloc_check_register_written_mark	unsafe	vir/allocchk.c	also a word in 8 files outside the VIR set (e.g. bench/quality.py, src/frontend/c/replay.c) [was function]
+# loc	vir_alloc_print_location_name	unsafe	vir/allocdump.c	also a word in 135 files outside the VIR set (e.g. TODO.md, bench/diag-render.py) [was function]
+# pad	vir_alloc_print_column_pad	unsafe	vir/allocdump.c	also a word in 32 files outside the VIR set (e.g. bench/vccd-test.py, bench/vlink-bad.py) [was function]
+# vn	vir_alloc_print_value_name	unsafe	vir/allocdump.c	also a word in 5 files outside the VIR set (e.g. src/codegen/walk/expr.c, src/frontend/c/declaration-specifiers.c) [was function]
+# lay	vir_layout_state	unsafe	vir/layout.c	also a word in 5 files outside the VIR set (e.g. TODO.md, src/bin/vasm/vasm.c) [was type]
+# by_head	vir_loops_compare_by_head	unsafe	vir/loops.c	the word is also used as a variable, field or parameter inside the VIR files (1 places) [was function]
+# lx	vir_loops_thread_arrays	unsafe	vir/loops.c	also a word in 12 files outside the VIR set (e.g. bench/vcc-x86-unwind-locals.py, bench/vlink-opts.py) [was variable]
+# PV	VIR_PARSE_VECTOR	unsafe	vir/parse.c	one- or two-letter word [was macro]
+# T_ARROW	VIR_PARSE_TOKEN_ARROW	unsafe	vir/parse.c	also a word in 5 files outside the VIR set (e.g. src/frontend/c/ccimpl.h, src/frontend/c/expression.c) [was constant]
+# T_EOF	VIR_PARSE_TOKEN_EOF	unsafe	vir/parse.c	also a word in 26 files outside the VIR set (e.g. src/driver/tokcmp.c, src/frontend/c/attribute.c) [was constant]
+# cur	vir_parse_token_current	unsafe	vir/parse.c	also a word in 33 files outside the VIR set (e.g. bench/clangdiag.py, bench/vcc-cfi.py) [was function]
+# finish_function	vir_parse_function_finish	unsafe	vir/parse.c	also a word in 8 files outside the VIR set (e.g. TODO.md, src/arch/a64/codegen/a64impl.h) [was function]
+# fixup	vir_parse_fixup	unsafe	vir/parse.c	also a word in 21 files outside the VIR set (e.g. AGENTS.md, bench/var-cmp.py) [was type]
+# hexval	vir_parse_hex_digit_value	unsafe	vir/parse.c	also a word in 2 files outside the VIR set (e.g. src/arch/a64/codegen/obj.c, src/frontend/lex/lex.c) [was function]
+# nent	vir_parse_name_entry	unsafe	vir/parse.c	also a word in 3 files outside the VIR set (e.g. src/codegen/emitimpl.h, src/codegen/tu.c) [was type]
+# next	vir_parse_token_next	unsafe	vir/parse.c	also a word in 205 files outside the VIR set (e.g. AGENTS.md, TODO.md) [was function]
+# nm	vir_parse_names	unsafe	vir/parse.c	also a word in 61 files outside the VIR set (e.g. AGENTS.md, TODO.md) [was type]
+# peek	vir_parse_token_peek	unsafe	vir/parse.c	also a word in 12 files outside the VIR set (e.g. src/frontend/c/attribute.c, src/frontend/c/ccimpl.h) [was function]
+# pop	vir_parse_operand_record	unsafe	vir/parse.c	also a word in 47 files outside the VIR set (e.g. TODO.md, bench/clangdiag.py) [was type]
+# ppos	vir_parse_position	unsafe	vir/parse.c	also a word in 1 files outside the VIR set (e.g. src/frontend/c/format-check.c) [was type]
+# ps	vir_parse_state	unsafe	vir/parse.c	also a word in 18 files outside the VIR set (e.g. bench/vcc-stress.py, bench/vcc-x86.py) [was type]
+# tok	vir_parse_token	unsafe	vir/parse.c	also a word in 37 files outside the VIR set (e.g. bench/vbench.py, src/bin/lextest/lextest.c) [was type]
+# type_of	vir_parse_token_type	unsafe	vir/parse.c	also a word in 1 files outside the VIR set (e.g. src/platform/wasm/wasm.c) [was function]
+# is_const	vir_print_value_is_constant	unsafe	vir/print.c	same old name in vir/alloc.c, vir/print.c [was function]
+# put	vir_print_append	unsafe	vir/print.c	also a word in 41 files outside the VIR set (e.g. AGENTS.md, bench/vlink-bad.py) [was function]
+# put_sym	vir_print_symbol_append	unsafe	vir/print.c	also a word in 3 files outside the VIR set (e.g. src/ld/relocatable-link.c, src/ld/symbol-table-locals.c) [was function]
+# assign	vir_synth_arguments_assign	unsafe	vir/synth.c	also a word in 23 files outside the VIR set (e.g. TODO.md, bench/vsh-test.py) [was function]
+# fixed	vir_synth_fixed_registers_get	unsafe	vir/synth.c	also a word in 78 files outside the VIR set (e.g. AGENTS.md, TODO.md) [was function]
+# retreg	vir_synth_return_register	unsafe	vir/synth.c	also a word in 3 files outside the VIR set (e.g. src/arch/a64/codegen/call.c, src/arch/a64/codegen/stmt.c) [was function]
+# tyname	vir_verify_type_name	unsafe	vir/verify.c	also a word in 30 files outside the VIR set (e.g. src/frontend/c/array-bounds.c, src/frontend/c/bitint.c) [was function]
+# vfail	vir_verify_fail	unsafe	vir/verify.c	also a word in 2 files outside the VIR set (e.g. src/codegen/emitimpl.h, src/codegen/tu.c) [was function]
+# fms	vir_field_masks	unsafe	vir/vir.c	also a word in 7 files outside the VIR set (e.g. bench/vcc-sema.py, bench/vcc-verify.py) [was variable]
+#
+# --- fields: applied by the front-end-based tool with the struct tag in `where`, never by whole-word replacement
+# (a field name is shared with locals and other structs; new names are not checked for uniqueness across structs, only inside the struct)
+ty	type	field	struct vir_insn (was vir_ins)	
+fl	flags	field	struct vir_insn (was vir_ins)	
+n	insn_count	field	struct vir_block (was vir_blk)	
+nparam	parameter_count	field	struct vir_block (was vir_blk)	
+fl	flags	field	struct vir_block (was vir_blk)	
+npred	predecessor_count	field	struct vir_block (was vir_blk)	
+pred	predecessor_first	field	struct vir_block (was vir_blk)	
+idom	immediate_dominator	field	struct vir_block (was vir_blk)	
+pre	preorder	field	struct vir_block (was vir_blk)	
+post	preorder_last	field	struct vir_block (was vir_blk)	
+fl	flags	field	struct vir_slot	
+loc	source_location	field	struct vir_location (was vir_loc)	
+fl	flags	field	struct vir_function (was vir_fn)	
+ins	insns	field	struct vir_function (was vir_fn)	
+nins	insn_count	field	struct vir_function (was vir_fn)	
+nconst	constant_count	field	struct vir_function (was vir_fn)	
+blk	blocks	field	struct vir_function (was vir_fn)	
+nblk	block_count	field	struct vir_function (was vir_fn)	
+nslot	slot_count	field	struct vir_function (was vir_fn)	
+nextra	extra_count	field	struct vir_function (was vir_fn)	
+loc	locations	field	struct vir_function (was vir_fn)	
+nloc	location_count	field	struct vir_function (was vir_fn)	
+tmp	scratch	field	struct vir_function (was vir_fn)	
+sig	signature	field	struct vir_function (was vir_fn)	
+sym	symbol	field	struct vir_function (was vir_fn)	
+k	operand_kinds	field	struct vir_opcode_info (was vir_opinfo)	
+flmask	flags_mask	field	struct vir_opcode_info (was vir_opinfo)	
+tmask	type_mask	field	struct vir_opcode_info (was vir_opinfo)	
+eff	effects	field	struct vir_opcode_info (was vir_opinfo)	
+f	function	field	struct vir_operand_iterator (was vir_oit)	
+fi	field_index	field	struct vir_operand_iterator (was vir_oit)	
+fm	field_mask	field	struct vir_operand_iterator (was vir_oit)	
+i	index	field	struct vir_operand_iterator (was vir_oit)	
+in	insn	field	struct vir_operand_iterator (was vir_oit)	
+n	count	field	struct vir_operand_iterator (was vir_oit)	
+ty	type	field	struct vir_item	
+v	value	field	struct vir_item	
+sym	symbol	field	struct vir_item	
+col	column	field	struct vir_unit_symbol (was vir_usym)	
+item0	item_first	field	struct vir_unit_symbol (was vir_usym)	
+nitem	item_count	field	struct vir_unit_symbol (was vir_usym)	
+n	count	field	struct vir_unit_signature (was vir_usig)	
+off	offset	field	struct vir_unit_signature (was vir_usig)	
+nin	input_count	field	struct vir_unit_asm (was vir_uasm)	
+nout	output_count	field	struct vir_unit_asm (was vir_uasm)	
+nclob	clobber_count	field	struct vir_unit_asm (was vir_uasm)	
+clob	clobbers	field	struct vir_unit_asm (was vir_uasm)	
+tmpl	template	field	struct vir_unit_asm (was vir_uasm)	
+ins	inputs	field	struct vir_unit_asm (was vir_uasm)	
+outs	outputs	field	struct vir_unit_asm (was vir_uasm)	
+as	asms	field	struct vir_unit	
+cas	asm_capacity	field	struct vir_unit	
+nas	asm_count	field	struct vir_unit	
+cfn	function_capacity	field	struct vir_unit	
+nfn	function_count	field	struct vir_unit	
+cheap	heap_capacity	field	struct vir_unit	
+heap	heap	field	struct vir_unit	
+nheap	heap_size	field	struct vir_unit	
+citem	item_capacity	field	struct vir_unit	
+nitem	item_count	field	struct vir_unit	
+csig	signature_capacity	field	struct vir_unit	
+nsig	signature_count	field	struct vir_unit	
+csigw	signature_word_capacity	field	struct vir_unit	
+nsigw	signature_word_count	field	struct vir_unit	
+csym	symbol_capacity	field	struct vir_unit	
+nsym	symbol_count	field	struct vir_unit	
+fn	functions	field	struct vir_unit	
+fsym	function_symbols	field	struct vir_unit	
+sigw	signature_words	field	struct vir_unit	
+sig	signatures	field	struct vir_unit	
+sym	symbols	field	struct vir_unit	
+msg	message	field	struct vir_parse_error (was vir_perr)	
+opfix	operand_fixes	field	struct vir_target_registers (was vir_regs)	
+ctx	context	field	struct vir_target_registers (was vir_regs)	
+fl	flags	field	struct vir_register_constraint (was vir_fix)	
+clob	clobbered	field	struct vir_register_constraint (was vir_fix)	
+eclob	edge_clobbered	field	struct vir_register_constraint (was vir_fix)	
+nopnd	operand_count	field	struct vir_register_constraint (was vir_fix)	
+opnd	operands	field	struct vir_register_constraint (was vir_fix)	
+res	result	field	struct vir_register_constraint (was vir_fix)	
+l	loops	field	struct vir_loops	
+n	count	field	struct vir_loops	
+n	count	field	struct vir_alloc_edge (was vir_aedge)	
+k	successor_index	field	struct vir_alloc_edge (was vir_aedge)	
+v	value	field	struct vir_edit	
+v	value	field	struct vir_edge_move (was vir_emove)	
+noframe	no_frame	field	struct vir_alloc_options (was vir_aopt)	
+emoves	edge_moves	field	struct vir_alloc_statistics (was vir_astats)	
+ereloads	edge_reloads	field	struct vir_alloc_statistics (was vir_astats)	
+eremats	edge_rematerializations	field	struct vir_alloc_statistics (was vir_astats)	
+estores	edge_stores	field	struct vir_alloc_statistics (was vir_astats)	
+xchg	exchanges	field	struct vir_alloc_statistics (was vir_astats)	
+boff	block_offsets	field	struct vir_alloc_out	
+cfirst	callee_first	field	struct vir_alloc_out	
+eidx	edge_indices	field	struct vir_alloc_out	
+nedge	edge_count	field	struct vir_alloc_out	
+nedit	edit_count	field	struct vir_alloc_out	
+nmove	move_count	field	struct vir_alloc_out	
+nopr	operand_register_count	field	struct vir_alloc_out	
+nspill	spill_count	field	struct vir_alloc_out	
+opr	operand_registers	field	struct vir_alloc_out	
+sdef	spill_defined	field	struct vir_alloc_out	
+soff	slot_offsets	field	struct vir_alloc_out	
+spoint	save_point	field	struct vir_alloc_out	
+ssz	slot_sizes	field	struct vir_alloc_out	
+st	statistics	field	struct vir_alloc_out	
+err	error	field	struct vir_alloc_out	
+naf	allocatable_float_count	field	struct vir_synthetic_target (was vir_synth)	
+nai	allocatable_integer_count	field	struct vir_synthetic_target (was vir_synth)	
+x86	is_x86	field	struct vir_synthetic_target (was vir_synth)	
+regs	registers	field	struct vir_synthetic_target (was vir_synth)	
+aux	auxiliary	field	struct vir_context (was vir_ctx)	
+blk	blocks	field	struct vir_context (was vir_ctx)	
+blkcur	block_current	field	struct vir_context (was vir_ctx)	
+cur	current	field	struct vir_context (was vir_ctx)	
+extra	extra_words	field	struct vir_context (was vir_ctx)	
+ins	insns	field	struct vir_context (was vir_ctx)	
+loc	locations	field	struct vir_context (was vir_ctx)	
+loccur	location_current	field	struct vir_context (was vir_ctx)	
+slot	slots	field	struct vir_context (was vir_ctx)	
+tmp	scratch	field	struct vir_context (was vir_ctx)	
+f	function	field	struct vir_allocator (was A)	
+lp	loops	field	struct vir_allocator (was A)	
+rg	registers	field	struct vir_allocator (was A)	
+o	out	field	struct vir_allocator (was A)	
+sp	stack_count	field	struct vir_allocator (was A)	
+osp	operand_stack_count	field	struct vir_allocator (was A)	
+npool	pool_count	field	struct vir_allocator (was A)	
+nopr	operand_register_count	field	struct vir_allocator (was A)	
+nedit	edit_count	field	struct vir_allocator (was A)	
+nmove	move_count	field	struct vir_allocator (was A)	
+nedge	edge_count	field	struct vir_allocator (was A)	
+npair	pair_count	field	struct vir_allocator (was A)	
+nspill	spill_count	field	struct vir_allocator (was A)	
+nsucc	successor_count	field	struct vir_allocator (was A)	
+cur_loop	current_loop	field	struct vir_allocator (was A)	
+mbase	move_base	field	struct vir_allocator (was A)	
+pavoid	parallel_avoid	field	struct vir_allocator (was A)	
+x	arrays	field	struct vir_allocator (was A)	
+rmask	register_mask	field	struct vir_allocator (was A)	
+spoint	save_point	field	struct vir_allocator (was A)	
+pre	before_save_point	field	struct vir_allocator (was A)	
+ops	operands	field	struct vir_allocator (was A)	
+byte	register_bytes	field	struct vir_allocator (was A)	
+dn	operand_state	field	struct vir_allocator (was A)	
+nxt	operand_next_use	field	struct vir_allocator (was A)	
+poolmax	pool_maximum	field	struct vir_allocator (was A)	
+v	value	field	struct vir_alloc_parallel_move (was pmv)	
+in	insn	field	struct vir_parse_constant_definition (was cdef)	
+pop	operand	field	struct vir_parse_constant_definition (was cdef)	
+f	function	field	struct vir_alloc_checker (was chk)	
+o	out	field	struct vir_alloc_checker (was chk)	
+rg	registers	field	struct vir_alloc_checker (was chk)	
+nerr	error_count	field	struct vir_alloc_checker (was chk)	
+nloc	location_count	field	struct vir_alloc_checker (was chk)	
+nm	names	field	struct vir_alloc_checker (was chk)	
+cwrote	written_count	field	struct vir_alloc_checker (was chk)	
+msg	message	field	struct vir_alloc_checker (was chk)	
+on	in_worklist	field	struct vir_alloc_checker (was chk)	
+b	buffer	field	struct vir_alloc_printer (was dctx)	
+f	function	field	struct vir_alloc_printer (was dctx)	
+nm	names	field	struct vir_alloc_printer (was dctx)	
+o	out	field	struct vir_alloc_printer (was dctx)	
+u	unit	field	struct vir_alloc_printer (was dctx)	
+at	position	field	struct vir_parse_fixup (was fixup)	
+aux	auxiliary	field	struct vir_parse_fixup (was fixup)	
+fld	field	field	struct vir_parse_fixup (was fixup)	
+idx	index	field	struct vir_parse_fixup (was fixup)	
+k	kind_code	field	struct vir_parse_fixup (was fixup)	
+pop	operand	field	struct vir_parse_fixup (was fixup)	
+f	function	field	struct vir_layout_state (was lay)	
+lp	loops	field	struct vir_layout_state (was lay)	
+h	hash	field	struct vir_parse_name_entry (was nent)	
+n	name_length	field	struct vir_parse_name_entry (was nent)	
+s	string	field	struct vir_parse_name_entry (was nent)	
+st	state	field	struct vir_parse_name_entry (was nent)	
+col	column	field	struct vir_parse_name_entry (was nent)	
+e	entries	field	struct vir_parse_names (was nm)	
+cap	capacity	field	struct vir_parse_names (was nm)	
+tab	table	field	struct vir_parse_names (was nm)	
+fl	flags	field	struct vir_parse_block (was pblk)	
+n	insn_count	field	struct vir_parse_block (was pblk)	
+nparam	parameter_count	field	struct vir_parse_block (was pblk)	
+bn	block	field	struct vir_parse_switch_case (was pcase)	
+lo	low	field	struct vir_parse_switch_case (was pcase)	
+hi	high	field	struct vir_parse_switch_case (was pcase)	
+col	column	field	struct vir_parse_switch_case (was pcase)	
+add	addend	field	struct vir_parse_operand_record (was pop)	
+ty	type	field	struct vir_parse_operand_record (was pop)	
+v	value	field	struct vir_parse_operand_record (was pop)	
+col	column	field	struct vir_parse_operand_record (was pop)	
+neg	is_negative	field	struct vir_parse_operand_record (was pop)	
+c0	column_start	field	struct vir_parse_position (was ppos)	
+c1	column_end	field	struct vir_parse_position (was ppos)	
+cnt	count	field	struct vir_parse_position (was ppos)	
+col	column	field	struct vir_parse_position (was ppos)	
+B	blocks	field	struct vir_parse_state (was ps)	
+asmname	asm_name	field	struct vir_parse_state (was ps)	
+blks	block_records	field	struct vir_parse_state (was ps)	
+bp	block_parameter_count	field	struct vir_parse_state (was ps)	
+cdefs	constant_definitions	field	struct vir_parse_state (was ps)	
+err	error	field	struct vir_parse_state (was ps)	
+f	function	field	struct vir_parse_state (was ps)	
+fix	fixups	field	struct vir_parse_state (was ps)	
+fsigoff	function_signature_offset	field	struct vir_parse_state (was ps)	
+fsym	function_symbol	field	struct vir_parse_state (was ps)	
+infn	in_function	field	struct vir_parse_state (was ps)	
+jb	join_block	field	struct vir_parse_state (was ps)	
+pb	parsed_block	field	struct vir_parse_state (was ps)	
+pops	operands	field	struct vir_parse_state (was ps)	
+pos	position	field	struct vir_parse_state (was ps)	
+sbuf	string_buffer	field	struct vir_parse_state (was ps)	
+scap	string_capacity	field	struct vir_parse_state (was ps)	
+signame	signature_name	field	struct vir_parse_state (was ps)	
+sigoff	signature_offset	field	struct vir_parse_state (was ps)	
+snb	block_name_count	field	struct vir_parse_state (was ps)	
+src	source	field	struct vir_parse_state (was ps)	
+t	tokens	field	struct vir_parse_state (was ps)	
+u	unit	field	struct vir_parse_state (was ps)	
+vals	values	field	struct vir_parse_state (was ps)	
+slots	slot_names	field	struct vir_parse_state (was ps)	
+cases	switch_cases	field	struct vir_parse_state (was ps)	
+ch	character	field	struct vir_parse_token (was tok)	
+k	kind	field	struct vir_parse_token (was tok)	
+s	string	field	struct vir_parse_token (was tok)	
+v	value	field	struct vir_parse_token (was tok)	
+col	column	field	struct vir_parse_token (was tok)	
+b	buffer	field	struct vir_print_state (was pctx)	
+f	function	field	struct vir_print_state (was pctx)	
+nm	names	field	struct vir_print_state (was pctx)	
+u	unit	field	struct vir_print_state (was pctx)	
+f	function	field	struct vir_verify_state (was vctx)	
+max	error_maximum	field	struct vir_verify_state (was vctx)	
+nerr	error_count	field	struct vir_verify_state (was vctx)	
+out	output	field	struct vir_verify_state (was vctx)	
+stop	is_stopped	field	struct vir_verify_state (was vctx)	
+u	unit	field	struct vir_verify_state (was vctx)	
+vb	value_blocks	field	struct vir_verify_state (was vctx)	
+input	source	field	struct vir_verify_exposure_edge (was vex_edge)	
+mem	memory_values	field	struct vir_verify_exposure_graph (was vex_graph)	
+slot	slots	field	struct vir_verify_exposure_graph (was vex_graph)	
+ins	instructions	field	struct virbuild_pass_count (was vir_pass_count)	
+E	emitter	field	struct virbuild_pass_unit_counts (was vir_pass_tu)	
+c	counts	field	struct virbuild_pass_unit_counts (was vir_pass_tu)	
+V	context	field	struct virbuild_preir_checker (was vw_check)	
+n	count	field	struct virbuild_preir_checker (was vw_check)	
+inorder	in_order	field	struct virbuild_preir_checker (was vw_check)	
+live	is_live	field	struct virbuild_preir_checker (was vw_check)	
+nparam	parameter_count	field	struct virbuild_preir_block (was vwb)	
+npred	predecessor_count	field	struct virbuild_preir_block (was vwb)	
+head	first_insn	field	struct virbuild_preir_block (was vwb)	
+tail	last_insn	field	struct virbuild_preir_block (was vwb)	
+phead	first_parameter	field	struct virbuild_preir_block (was vwb)	
+ptail	last_parameter	field	struct virbuild_preir_block (was vwb)	
+term	terminator	field	struct virbuild_preir_block (was vwb)	
+pred	predecessor_first	field	struct virbuild_preir_block (was vwb)	
+fin	final_block	field	struct virbuild_preir_block (was vwb)	
+fall	falls_through	field	struct virbuild_preir_block (was vwb)	
+reach	is_reachable	field	struct virbuild_preir_block (was vwb)	
+def	has_definition	field	struct virbuild_preir_block (was vwb)	
+rel	relative_offset	field	struct virbuild_promote_field (was vwfld)	
+ty	type	field	struct virbuild_promote_field (was vwfld)	
+v	value	field	struct virbuild_variable_entry (was vwh)	
+gen	generation	field	struct virbuild_variable_entry (was vwh)	
+fl	flags	field	struct virbuild_value_entry (was vwhe)	
+op	opcode	field	struct virbuild_value_entry (was vwhe)	
+ty	type	field	struct virbuild_value_entry (was vwhe)	
+v	value	field	struct virbuild_value_entry (was vwhe)	
+gen	generation	field	struct virbuild_value_entry (was vwhe)	
+inst	instance	field	struct virbuild_location (was vwloc)	
+sym	symbol	field	struct virbuild_location (was vwloc)	
+q	insn	field	struct virbuild_promote_memset (was vwms)	
+rel	relative_offset	field	struct virbuild_promote_memset (was vwms)	
+len	length	field	struct virbuild_promote_memset (was vwms)	
+in	insn	field	struct virbuild_preir_insn (was vwp)	
+blk	block	field	struct virbuild_preir_insn (was vwp)	
+loc	location	field	struct virbuild_preir_insn (was vwp)	
+slot	slot_plus_one	field	struct virbuild_preir_insn (was vwp)	
+cnt	use_counts	field	struct virbuild_simplify_state (was vwsimp)	
+n0	constant_start	field	struct virbuild_simplify_state (was vwsimp)	
+ht	value_table	field	struct virbuild_simplify_state (was vwsimp)	
+hmask	value_table_mask	field	struct virbuild_simplify_state (was vwsimp)	
+log	table_log	field	struct virbuild_simplify_state (was vwsimp)	
+nlog	table_log_count	field	struct virbuild_simplify_state (was vwsimp)	
+kt	constant_table	field	struct virbuild_simplify_state (was vwsimp)	
+kmask	constant_table_mask	field	struct virbuild_simplify_state (was vwsimp)	
+ncst	constant_count	field	struct virbuild_simplify_state (was vwsimp)	
+nk	constant_entry_count	field	struct virbuild_simplify_state (was vwsimp)	
+memgen	memory_generation	field	struct virbuild_simplify_state (was vwsimp)	
+gens	block_generations	field	struct virbuild_simplify_state (was vwsimp)	
+egen	end_generations	field	struct virbuild_simplify_state (was vwsimp)	
+blk	block	field	struct virbuild_simplify_state (was vwsimp)	
+idom	immediate_dominators	field	struct virbuild_simplify_state (was vwsimp)	
+dkid	dominator_first_child	field	struct virbuild_simplify_state (was vwsimp)	
+dnext	dominator_next_sibling	field	struct virbuild_simplify_state (was vwsimp)	
+seq	positions	field	struct virbuild_simplify_state (was vwsimp)	
+wr	writers	field	struct virbuild_simplify_state (was vwsimp)	
+nwr	writer_count	field	struct virbuild_simplify_state (was vwsimp)	
+ri	reverse_postorder_index	field	struct virbuild_simplify_state (was vwsimp)	
+bend	block_end_positions	field	struct virbuild_simplify_state (was vwsimp)	
+linner	loop_innermost	field	struct virbuild_simplify_state (was vwsimp)	
+lstart	loop_start	field	struct virbuild_simplify_state (was vwsimp)	
+lend	loop_end	field	struct virbuild_simplify_state (was vwsimp)	
+lpar	loop_parent	field	struct virbuild_simplify_state (was vwsimp)	
+lmerged	loop_is_merged	field	struct virbuild_simplify_state (was vwsimp)	
+undef	undefined_values	field	struct virbuild_simplify_state (was vwsimp)	
+f32w	float32_written	field	struct virbuild_preir_slot (was vwslot)	
+fin	final_slot	field	struct virbuild_preir_slot (was vwslot)	
+prom	is_promoted	field	struct virbuild_preir_slot (was vwslot)	
+p	insns	field	struct virbuild_context (was vwst)	
+np	insn_count	field	struct virbuild_context (was vwst)	
+cp	insn_capacity	field	struct virbuild_context (was vwst)	
+b	blocks	field	struct virbuild_context (was vwst)	
+nb	block_count	field	struct virbuild_context (was vwst)	
+cb	block_capacity	field	struct virbuild_context (was vwst)	
+x	extra	field	struct virbuild_context (was vwst)	
+nx	extra_count	field	struct virbuild_context (was vwst)	
+cx	extra_capacity	field	struct virbuild_context (was vwst)	
+h	variable_entries	field	struct virbuild_context (was vwst)	
+hn	variable_entry_count	field	struct virbuild_context (was vwst)	
+hcap	variable_entry_capacity	field	struct virbuild_context (was vwst)	
+hgen	variable_generation	field	struct virbuild_context (was vwst)	
+halloc	variable_entry_allocated	field	struct virbuild_context (was vwst)	
+lh	local_hash	field	struct virbuild_context (was vwst)	
+lhcap	local_hash_capacity	field	struct virbuild_context (was vwst)	
+lhalloc	local_hash_allocated	field	struct virbuild_context (was vwst)	
+fwd	forward	field	struct virbuild_context (was vwst)	
+cfwd	forward_capacity	field	struct virbuild_context (was vwst)	
+lab	labels	field	struct virbuild_context (was vwst)	
+clab	label_capacity	field	struct virbuild_context (was vwst)	
+labhi	label_high	field	struct virbuild_context (was vwst)	
+sl	slots	field	struct virbuild_context (was vwst)	
+nsl	slot_count	field	struct virbuild_context (was vwst)	
+csl	slot_capacity	field	struct virbuild_context (was vwst)	
+act	active_slots	field	struct virbuild_context (was vwst)	
+nact	active_slot_count	field	struct virbuild_context (was vwst)	
+cact	active_slot_capacity	field	struct virbuild_context (was vwst)	
+st	stores	field	struct virbuild_context (was vwst)	
+nst	store_count	field	struct virbuild_context (was vwst)	
+cst	store_capacity	field	struct virbuild_context (was vwst)	
+loc	locations	field	struct virbuild_context (was vwst)	
+nloc	location_count	field	struct virbuild_context (was vwst)	
+cloc	location_capacity	field	struct virbuild_context (was vwst)	
+nprom	promoted_count	field	struct virbuild_context (was vwst)	
+vty	variable_types	field	struct virbuild_context (was vwst)	
+cvty	variable_type_capacity	field	struct virbuild_context (was vwst)	
+vsgn	variable_is_signed	field	struct virbuild_context (was vwst)	
+cvsgn	variable_is_signed_capacity	field	struct virbuild_context (was vwst)	
+pr	predecessors	field	struct virbuild_context (was vwst)	
+npr	predecessor_count	field	struct virbuild_context (was vwst)	
+cpr	predecessor_capacity	field	struct virbuild_context (was vwst)	
+map	value_map	field	struct virbuild_context (was vwst)	
+cmap	value_map_capacity	field	struct virbuild_context (was vwst)	
+order	block_order	field	struct virbuild_context (was vwst)	
+norder	block_order_count	field	struct virbuild_context (was vwst)	
+corder	block_order_capacity	field	struct virbuild_context (was vwst)	
+bmap	block_map	field	struct virbuild_context (was vwst)	
+cbmap	block_map_capacity	field	struct virbuild_context (was vwst)	
+live	live_names	field	struct virbuild_context (was vwst)	
+flive	live_float_names	field	struct virbuild_context (was vwst)	
+fprod	float_products	field	struct virbuild_context (was vwst)	
+cur	current_block	field	struct virbuild_context (was vwst)	
+rty	result_type	field	struct virbuild_context (was vwst)	
+nparam	parameter_count	field	struct virbuild_context (was vwst)	
+fsig	function_signature	field	struct virbuild_context (was vwst)	
+why	failure_reason	field	struct virbuild_context (was vwst)	
+lp	loops	field	struct virbuild_context (was vwst)	
+ao	allocation	field	struct virbuild_context (was vwst)	
+xslot	lowering_slots	field	struct virbuild_context (was vwst)	
+xspill	lowering_spills	field	struct virbuild_context (was vwst)	
+xuses	lowering_uses	field	struct virbuild_context (was vwst)	
+cxuses	lowering_uses_capacity	field	struct virbuild_context (was vwst)	
+xedgelab	lowering_edge_labels	field	struct virbuild_context (was vwst)	
+cxedgelab	lowering_edge_label_capacity	field	struct virbuild_context (was vwst)	
+xlayout	lowering_layout	field	struct virbuild_context (was vwst)	
+cxlayout	lowering_layout_capacity	field	struct virbuild_context (was vwst)	
+xlabel	lowering_labels	field	struct virbuild_context (was vwst)	
+cxslot	lowering_slot_capacity	field	struct virbuild_context (was vwst)	
+cxspill	lowering_spill_capacity	field	struct virbuild_context (was vwst)	
+cxlabel	lowering_label_capacity	field	struct virbuild_context (was vwst)	
+detail	failure_detail	field	struct virbuild_context (was vwst)	
+off	offset	field	struct virbuild_store_entry (was vwstent)	
+q	insn	field	struct virbuild_vectorize_access (was vvacc)	
+pos	position	field	struct virbuild_vectorize_access (was vvacc)	
+exact	is_exact	field	struct virbuild_vectorize_info (was vvi)	
+objk	has_object	field	struct virbuild_vectorize_info (was vvi)	
+bs	term_factor	field	struct virbuild_vectorize_info (was vvi)	
+bv	term_value	field	struct virbuild_vectorize_info (was vvi)	
+c	step	field	struct virbuild_vectorize_info (was vvi)	
+k	constant	field	struct virbuild_vectorize_info (was vvi)	
+nuse	use_count	field	struct virbuild_vectorize_info (was vvi)	
+objv	object_value	field	struct virbuild_vectorize_info (was vvi)	
+sc0	first_lane_value	field	struct virbuild_vectorize_info (was vvi)	
+sce	entry_value	field	struct virbuild_vectorize_info (was vvi)	
+scb	body_value	field	struct virbuild_vectorize_info (was vvi)	
+vec	lanes	field	struct virbuild_vectorize_info (was vvi)	
+uns	is_unsigned	field	struct virbuild_vectorize_info (was vvi)	
+p	parameter	field	struct virbuild_vectorize_reduction (was vvred)	
+upd	update	field	struct virbuild_vectorize_reduction (was vvred)	
+x	operand	field	struct virbuild_vectorize_reduction (was vvred)	
+acc	accumulator	field	struct virbuild_vectorize_reduction (was vvred)	
+accnext	accumulator_next	field	struct virbuild_vectorize_reduction (was vvred)	
+e	context	field	struct virbuild_vectorize_state (was vvs)	
+I	infos	field	struct virbuild_vectorize_state (was vvs)	
+n0	value_count	field	struct virbuild_vectorize_state (was vvs)	
+touch	touched	field	struct virbuild_vectorize_state (was vvs)	
+ntouch	touched_count	field	struct virbuild_vectorize_state (was vvs)	
+ctouch	touched_capacity	field	struct virbuild_vectorize_state (was vvs)	
+inl	in_loop	field	struct virbuild_vectorize_state (was vvs)	
+lb	loop_blocks	field	struct virbuild_vectorize_state (was vvs)	
+nlb	loop_block_count	field	struct virbuild_vectorize_state (was vvs)	
+H	header	field	struct virbuild_vectorize_state (was vvs)	
+P	predecessor	field	struct virbuild_vectorize_state (was vvs)	
+L	latch	field	struct virbuild_vectorize_state (was vvs)	
+X	exit	field	struct virbuild_vectorize_state (was vvs)	
+jP	predecessor_index	field	struct virbuild_vectorize_state (was vvs)	
+jL	latch_index	field	struct virbuild_vectorize_state (was vvs)	
+VPRE	preheader_block	field	struct virbuild_vectorize_state (was vvs)	
+VPH	vector_header_block	field	struct virbuild_vectorize_state (was vvs)	
+VB	vector_body_block	field	struct virbuild_vectorize_state (was vvs)	
+VX	vector_exit_block	field	struct virbuild_vectorize_state (was vvs)	
+J	join_block	field	struct virbuild_vectorize_state (was vvs)	
+acc	accesses	field	struct virbuild_vectorize_state (was vvs)	
+nacc	access_count	field	struct virbuild_vectorize_state (was vvs)	
+gather	gathers	field	struct virbuild_vectorize_state (was vvs)	
+ngather	gather_count	field	struct virbuild_vectorize_state (was vvs)	
+invld	invariant_loads	field	struct virbuild_vectorize_state (was vvs)	
+ninvld	invariant_load_count	field	struct virbuild_vectorize_state (was vvs)	
+red	reductions	field	struct virbuild_vectorize_state (was vvs)	
+nred	reduction_count	field	struct virbuild_vectorize_state (was vvs)	
+e	context	field	struct a64_vir_context (was vl)	
+f	function	field	struct a64_vir_context (was vl)	
+o	allocation	field	struct a64_vir_context (was vl)	
+soff	slot_offsets	field	struct a64_vir_context (was vl)	
+spoff	spill_offsets	field	struct a64_vir_context (was vl)	
+lbl	labels	field	struct a64_vir_context (was vl)	
+chs	chases	field	struct a64_vir_context (was vl)	
+ord	order	field	struct a64_vir_context (was vl)	
+opos	order_positions	field	struct a64_vir_context (was vl)	
+lp	loops	field	struct a64_vir_context (was vl)	
+sp	save_point	field	struct a64_vir_context (was vl)	
+bare	is_before_save_point	field	struct a64_vir_context (was vl)	
+lo32	low32	field	struct a64_vir_context (was vl)	
+ov	operand_values	field	struct a64_vir_context (was vl)	
+opr	operand_registers	field	struct a64_vir_context (was vl)	
+nop	operand_count	field	struct a64_vir_context (was vl)	
+fcc	flag_condition	field	struct a64_vir_context (was vl)	
+fval	flag_value	field	struct a64_vir_context (was vl)	
+fzr	zero_test_register	field	struct a64_vir_context (was vl)	
+fzx	zero_test_is_64_bit	field	struct a64_vir_context (was vl)	
+fbit	test_bit	field	struct a64_vir_context (was vl)	
+tlo	folded_low	field	struct a64_vir_context (was vl)	
+thi	folded_high	field	struct a64_vir_context (was vl)	
+cclo	chain_low	field	struct a64_vir_context (was vl)	
+cchi	chain_high	field	struct a64_vir_context (was vl)	
+ccrun	chain_condition	field	struct a64_vir_context (was vl)	
+pval	pointer_value	field	struct a64_vir_context (was vl)	
+pbase	pointer_base	field	struct a64_vir_context (was vl)	
+poff	pointer_offset	field	struct a64_vir_context (was vl)	
+xval	index_value	field	struct a64_vir_context (was vl)	
+xfirst	chain_first	field	struct a64_vir_context (was vl)	
+xc	chain_consumer	field	struct a64_vir_context (was vl)	
+xbase	index_base	field	struct a64_vir_context (was vl)	
+xreg	index_register	field	struct a64_vir_context (was vl)	
+xopt	index_extension	field	struct a64_vir_context (was vl)	
+xsh	index_shift	field	struct a64_vir_context (was vl)	
+ei	edit_next	field	struct a64_vir_context (was vl)	
+eend	edit_end	field	struct a64_vir_context (was vl)	
+eb	edit_first	field	struct a64_vir_context (was vl)	
+risk	frame_is_at_risk	field	struct a64_vir_context (was vl)	
+retlbl	return_label	field	struct a64_vir_context (was vl)	
+tr	edge_branches	field	struct a64_vir_context (was vl)	
+ntr	edge_branch_count	field	struct a64_vir_context (was vl)	
+fcs	callee_saved_float_offsets	field	struct a64_vir_context (was vl)	
+stk	stack_offset	field	struct a64_vir_argument (was vlarg)	
+cc	code	field	struct a64_vir_condition (was vlcc)	
+r	register	field	struct a64_vir_condition (was vlcc)	
+x	is_64_bit	field	struct a64_vir_condition (was vlcc)	
+soff	slot_offsets	field	struct a64_vir_thread_state (was vlt)	
+spoff	spill_offsets	field	struct a64_vir_thread_state (was vlt)	
+lbl	labels	field	struct a64_vir_thread_state (was vlt)	
+chs	chases	field	struct a64_vir_thread_state (was vlt)	
+ord	order	field	struct a64_vir_thread_state (was vlt)	
+opos	order_positions	field	struct a64_vir_thread_state (was vlt)	
+hl	head_labels	field	struct a64_vir_thread_state (was vlt)	
+lbf	epilogue_labels	field	struct a64_vir_thread_state (was vlt)	
+nf	needs_fallthrough	field	struct a64_vir_thread_state (was vlt)	
+co	order_capacity	field	struct a64_vir_thread_state (was vlt)	
+cop	order_position_capacity	field	struct a64_vir_thread_state (was vlt)	
+chl	head_label_capacity	field	struct a64_vir_thread_state (was vlt)	
+cnf	fallthrough_capacity	field	struct a64_vir_thread_state (was vlt)	
+clf	epilogue_label_capacity	field	struct a64_vir_thread_state (was vlt)	
+uses	uses	field	struct a64_vir_thread_state (was vlt)	
+lo32	low32	field	struct a64_vir_thread_state (was vlt)	
+cs	slot_offset_capacity	field	struct a64_vir_thread_state (was vlt)	
+csp	spill_offset_capacity	field	struct a64_vir_thread_state (was vlt)	
+cl	label_capacity	field	struct a64_vir_thread_state (was vlt)	
+cch	chase_capacity	field	struct a64_vir_thread_state (was vlt)	
+cpa	path_capacity	field	struct a64_vir_thread_state (was vlt)	
+cu	uses_capacity	field	struct a64_vir_thread_state (was vlt)	
+c32	low32_capacity	field	struct a64_vir_thread_state (was vlt)	
+e	context	field	struct x64_vir_context (was vx)	
+f	function	field	struct x64_vir_context (was vx)	
+lp	loops	field	struct x64_vir_context (was vx)	
+o	allocation	field	struct x64_vir_context (was vx)	
+at	block_current	field	struct x64_vir_context (was vx)	
+bebase	big_endian_base	field	struct x64_vir_context (was vx)	
+beindex	big_endian_index	field	struct x64_vir_context (was vx)	
+beindexed	big_endian_is_indexed	field	struct x64_vir_context (was vx)	
+beoff	big_endian_offset	field	struct x64_vir_context (was vx)	
+besh	big_endian_shift	field	struct x64_vir_context (was vx)	
+bev	big_endian_value	field	struct x64_vir_context (was vx)	
+bewidth	big_endian_width	field	struct x64_vir_context (was vx)	
+cmp	compare_condition	field	struct x64_vir_context (was vx)	
+cmpblock	compare_block	field	struct x64_vir_context (was vx)	
+cmpmemside	compare_memory_side	field	struct x64_vir_context (was vx)	
+cmpmemsize	compare_memory_size	field	struct x64_vir_context (was vx)	
+cmpmemv	compare_memory_value	field	struct x64_vir_context (was vx)	
+edgelab	edge_labels	field	struct x64_vir_context (was vx)	
+fallok	may_fall_through	field	struct x64_vir_context (was vx)	
+gtmp	general_temporary	field	struct x64_vir_context (was vx)	
+indexed	memory_is_indexed	field	struct x64_vir_context (was vx)	
+membase	memory_base	field	struct x64_vir_context (was vx)	
+memindex	memory_index	field	struct x64_vir_context (was vx)	
+memoff	memory_offset	field	struct x64_vir_context (was vx)	
+memsh	memory_shift	field	struct x64_vir_context (was vx)	
+memskip	memory_skip	field	struct x64_vir_context (was vx)	
+memv	memory_value	field	struct x64_vir_context (was vx)	
+r10	scratch_register10	field	struct x64_vir_context (was vx)	
+rotation	rotations	field	struct x64_vir_context (was vx)	
+scaledskip	scaled_skip	field	struct x64_vir_context (was vx)	
+scaledv	scaled_value	field	struct x64_vir_context (was vx)	
+scaleindex	scaled_index	field	struct x64_vir_context (was vx)	
+scalesh	scaled_shift	field	struct x64_vir_context (was vx)	
+setrec	setcc_record	field	struct x64_vir_context (was vx)	
+testimm	test_immediate	field	struct x64_vir_context (was vx)	
+testsize	test_size	field	struct x64_vir_context (was vx)	
+testv	test_value	field	struct x64_vir_context (was vx)	

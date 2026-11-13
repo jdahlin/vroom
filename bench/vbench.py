@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """vbench: small, load-independent benchmarks of the vcc tools, one per module.
 
-The metric is *instructions retired* by the measured threads (ccs/vcc/lib/vperf.h,
+The metric is *instructions retired* by the measured threads (src/include/port/performance-counters.h,
 no root needed): it hardly moves with machine load (~0.5 % noise), so many
 agents can measure at the same time on a shared machine.  Cycles and wall time
 are printed too but are only trustworthy in an A/B run (`ab`, alternating).
@@ -13,14 +13,14 @@ are printed too but are only trustworthy in an A/B run (`ab`, alternating).
                                   A/B against --base (default: mkbase of the merge-base
                                   with main); exit 1 if any mode's instructions grew by
                                   more than PCT (default 1) or twice the noise (TODO.md T0)
-  vbench.py mkbase [REV]          build REV's ccs/ (default: merge-base with main)
+  vbench.py mkbase [REV]          build REV's src/ (default: merge-base with main)
                                   into work/vbench/base/<sha>/; prints the bin dir
   vbench.py pick TSV              choose the corpus from a `vpp --batch --stats`
                                   profile of all TUs (-c, VPP_NOHC=1 VCC_NODC=1)
 
 Modes (default: all; one thread each):
   lex   lextest core: lexing + interning of the 3 225 build files, pre-mapped
-  pp    corpus, tokens only (pp_next), token cache warm, no header cache
+  pp    corpus, tokens only (pp_token_next), token cache warm, no header cache
   pphc  corpus, tokens only, header cache on, cold (record + replay)
   fe    corpus, -fsyntax-only (pp + parse + sema), warm, no header/decl cache
   cc    corpus, -c, warm, no caches; also reports the emit and obj phases
@@ -277,26 +277,33 @@ def cmd_check(bin, base, quick):
 
 # ---------------- base build ----------------
 
+def tree_dir(sha_):
+    """the compiler's directory at a revision: src/, or ccs/ before doc/PLAN-tree.md T1"""
+    p = subprocess.run(['git', '-C', R, 'cat-file', '-e', f'{sha_}:src/Makefile'], capture_output=True)
+    return 'src' if p.returncode == 0 else 'ccs'
+
 def cmd_mkbase(rev, quiet=False):
     if not rev:
         rev = subprocess.run(['git', '-C', R, 'merge-base', 'HEAD', 'main'], capture_output=True, text=True).stdout.strip()
     sha_ = subprocess.run(['git', '-C', R, 'rev-parse', rev], capture_output=True, text=True, check=True).stdout.strip()
     d = f'{VB}/base/{sha_[:12]}'
     os.makedirs(f'{VB}/base', exist_ok=True)
-    # built in place (the binaries hold vcc/include's absolute path), under a
+    # built in place (the binaries hold src/headers' absolute path), under a
     # lock directory so agents asking for the same base at once build it once
     while not os.path.exists(f'{d}/ok'):
         try: os.mkdir(f'{d}.lock')
         except FileExistsError: time.sleep(1); continue
         try:
             shutil.rmtree(d, ignore_errors=True); os.makedirs(d)
-            a = subprocess.run(['git', '-C', R, 'archive', sha_, 'ccs'], capture_output=True, check=True).stdout
+            top = tree_dir(sha_)
+            a = subprocess.run(['git', '-C', R, 'archive', sha_, top], capture_output=True, check=True).stdout
             subprocess.run(['tar', '-x', '-C', d], input=a, check=True)
-            p = subprocess.run(['make', '-C', f'{d}/ccs', '-j', '6', 'vcc'], capture_output=True, text=True)
+            p = subprocess.run(['make', '-C', f'{d}/{top}', '-j', '6', 'vcc'], capture_output=True, text=True)
             if p.returncode: die(f'base build failed:\n{p.stdout[-1500:]}{p.stderr[-1500:]}')
             open(f'{d}/ok', 'w').close()
         finally: os.rmdir(f'{d}.lock')
-    out = f'{d}/build/linux/ccs' if sys.platform.startswith('linux') else f'{d}/build/ccs'	# ccs/Makefile's OUT
+    top = tree_dir(sha_)	# the Makefile's OUT is build/<top>
+    out = f'{d}/build/linux/{top}' if sys.platform.startswith('linux') else f'{d}/build/{top}'
     if not quiet: print(out)
     return out
 
@@ -337,7 +344,7 @@ if __name__ == '__main__':
         if flag: del av[k]; return True
         v = av[k + 1]; del av[k:k + 2]; return v
     quick = opt('--quick', False, True); show_tu = opt('--per-tu', False, True)
-    reps = int(opt('--reps', '3')); bin = os.path.abspath(opt('--bin', f'{R}/build/ccs'))
+    reps = int(opt('--reps', '3')); bin = os.path.abspath(opt('--bin', f'{R}/build/src'))
     base = opt('--base'); base = os.path.abspath(base) if base else None
     budget = float(opt('--budget', '1'))
     cmd, rest = av[0], av[1:]

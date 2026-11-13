@@ -3,12 +3,12 @@
 
   bench/vcc-self.py [-j N] [--self DIR] [--ref DIR] [--target T]... [PAT]
 
-ccs/wasm/build.sh builds vcc.wasm twice: by emcc (--ref, default
+contrib/wasm/build.sh builds vcc.wasm twice: by emcc (--ref, default
 build/wasm-emcc) and by vcc itself (VCC=vpp, --self, default
 build/wasm-self).  Every test of vcc-ctests.py is preprocessed by the native
 vpp for each target (default aarch64-linux-gnu and
 wasm64-unknown-emscripten), and both vcc.wasm run `-O2 -S` on it under node
-(ccs/wasm/selfrun.mjs).  Passes when the outputs (assembly, or the
+(contrib/wasm/selfrun.mjs).  Passes when the outputs (assembly, or the
 diagnostics and exit status) are byte-identical.
 """
 import hashlib, importlib.util, json, os, subprocess, sys, time
@@ -22,7 +22,7 @@ _spec.loader.exec_module(ct)
 R = ct.R
 NODE = 'node'
 OUT = f'{BUILD}/selftests'
-RUN = f'{R}/ccs/wasm/selfrun.mjs'
+RUN = f'{R}/contrib/wasm/selfrun.mjs'
 EMSR = None
 
 def pre(a):

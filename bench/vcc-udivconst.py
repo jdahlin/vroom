@@ -10,10 +10,10 @@ from hostenv import R, llvm
 SOURCE = r'''
 #define VCC_UNITY
 #include <assert.h>
-#include "vcc/emit/opt/udivconst.c"
-#include "vcc/arch/x64/emit/x64impl.h"
-#include "vcc/emit/walk/udivconst.c"
-#include "vcc/arch/a64/emit/udivconst.c"
+#include "codegen/opt/udivconst.c"
+#include "arch/x64/codegen/x64impl.h"
+#include "codegen/walk/udivconst.c"
+#include "arch/a64/codegen/udivconst.c"
 VPRIV int x64_nfree(ecx *e) { return 8 - __builtin_popcount(e->x64->live & X_TEMPS); }
 /* The typed wrapper is unused in this arithmetic-only contract. */
 VPRIV i128 em_trunc_to(cc *c, i128 v, qty t) { (void)c; (void)t; return v; }
@@ -165,7 +165,7 @@ def main():
         binary = Path(tmp) / 'effects'
         source.write_text(SOURCE)
         flags = ['-fsanitize=address,undefined', '-fno-omit-frame-pointer'] if args.sanitize else []
-        subprocess.run([args.cc, '-std=gnu11', '-O1', '-g', '-Wno-undefined-internal', '-I', str(Path(R) / 'ccs'),
+        subprocess.run([args.cc, '-std=gnu11', '-O1', '-g', '-Wno-undefined-internal', '-I', str(Path(R) / 'src'), '-I', str(Path(R) / 'src' / 'include'),
                         *flags, str(source), '-o', str(binary)], check=True, timeout=30)
         subprocess.run([str(binary)], check=True, timeout=10)
     print('unsigned32/64 reciprocal arithmetic contracts: PASS')

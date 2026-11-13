@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """vccd-sample.py: where vccd's CPU goes, from a macOS `sample` call tree.
 
-    sample $(pgrep -f "build/ccs/vccd --sock") 25 1 -mayDie -file OUT.sample   # during a build
+    sample $(pgrep -f "build/src/vccd --sock") 25 1 -mayDie -file OUT.sample   # during a build
     bench/vccd-sample.py OUT.sample [N]
 
 Self samples of blocked frames (cvwait, kevent, read, mutex waits) are dropped;
@@ -30,13 +30,13 @@ for d, n, f in rows:
 while stack: pop()
 def stage(p):
     s = set(p)
-    if 'io_thread' in s: return 'io thread: read source files'
+    if 'lex_prefetch_thread_run' in s: return 'io thread: read source files'
     if 'vfixdep' in s: return 'fixdep (.cmd files)'
     if any(x.startswith('emit') for x in p): return 'emit: codegen'
     if any(x.startswith(('as_', 'a64_')) for x in p): return 'assembler'
     if s & {'write_obj', 'write_file', 'write_deps'}: return 'write .o/.d'
     if any(x.startswith('ar_') or x == 'var_main' for x in p): return 'ar'
-    pp = any(x.startswith(('pp_', 'vlex', 'lex_')) or x in ('subst', 'directive', 'enter_file', 'rec_tok', 'rec_read', 'next_exp_slow', 'find_include', 'find_include_', 'publish', 'eval') for x in p)
+    pp = any(x.startswith(('pp_', 'lex_tokenize', 'lex_')) or x in ('pp_macro_body_substitute', 'pp_directive_run', 'pp_file_enter', 'pp_header_cache_token_record', 'pp_header_cache_read_record', 'pp_token_expanded_next_slow', 'pp_include_find', 'pp_include_find_inner', 'pp_header_cache_entry_publish', 'eval') for x in p)
     if 'cc_run' in s: return 'preprocess (pulled by parser)' if pp else 'parse + sema'
     if pp: return 'preprocess'
     if 'forward' in s: return 'forward to vroomd'

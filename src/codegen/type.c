@@ -1,0 +1,166 @@
+/*
+ * type.c: the type and symbol helpers every backend needs: integer truncation to a type's width,
+ * the canonical symbol of a declaration, a symbol's attributes, and the names symbols and
+ * references are written under.
+ *
+ * em_trunc_to wraps a constant to its type (sign or zero extended from the type's bits, bool to 0/1)
+ * and is what every constant fold uses, so folding agrees with the hardware.  canon_sym follows the
+ * `next` chain of a block-scope declaration to the file-scope symbol, so all references to one
+ * object share one entry.  sym_name/ref_name write the assembler name (quoted when needed) and
+ * fixed_names is the table of library functions the emitter may call by itself (memcpy, __udivti3,
+ * soft-float helpers ...), numbered by the FN_* enum in emitimpl.h: the two must stay in the same
+ * order.
+ */
+#include "emitimpl.h"
+
+VPRIV i128 em_trunc_to(cc *c, i128 v, qty t)
+{
+	int k = KIND(c, t);
+	unsigned bits;
+
+	if (k == TY_BOOL)
+		return v != 0;
+	if (k == TY_PTR)
+		return (i128)(uint64_t)v;
+	bits = is_integer(c, t) && T(c, t)->n && !(T(c, t)->flags & TF_ATOMIC) ?
+		T(c, t)->n : (unsigned)tsize(c, t) * 8;
+	if (bits >= 128)
+		return is_signed(c, t) ? v : (i128)(u128)v;
+	{
+		u128 m = ((u128)1 << bits) - 1;
+		u128 x = (u128)v & m;
+
+		if (is_signed(c, t) && (x >> (bits - 1)) & 1)
+			return (i128)(x | ~m);
+		return (i128)x;
+	}
+}
+
+/* ---------------- names ---------------- */
+
+static const char *const fixed_names[] = {
+	"memcpy", "memset", "memmove", "__udivti3", "__divti3", "__umodti3", "__modti3", "strlen",
+	"__ashlti3", "__lshrti3", "__ashrti3", "__floattisf", "__floattidf", "__floatuntisf", "__floatuntidf",
+	"__fixsfti", "__fixdfti", "__fixunssfti", "__fixunsdfti",
+	"__addtf3", "__subtf3", "__multf3", "__divtf3", "__eqtf2", "__netf2", "__lttf2", "__letf2", "__gttf2", "__getf2", "__unordtf2",
+	"__extenddftf2", "__extendsftf2", "__trunctfdf2", "__trunctfsf2", "__floatsitf", "__floatditf", "__floatunsitf",
+	"__floatunditf", "__floattitf", "__floatuntitf", "__fixtfsi", "__fixtfdi", "__fixunstfsi", "__fixunstfdi",
+	"__fixtfti", "__fixunstfti", "__extendxftf2", "__trunctfxf2",
+	"__extendbfsf2", "__truncsfbf2", "__truncdfbf2", "__truncxfbf2", "__trunctfbf2",
+	"__extendhfsf2", "__truncsfhf2", "__truncdfhf2", "__truncxfhf2", "__trunctfhf2",
+	"__floattixf", "__floatuntixf", "__fixxfti", "__fixunsxfti",
+	"floorf", "ceilf", "truncf", "roundf", "rintf", "nearbyintf", "fabsf",
+};
+
+VPRIV uint32_t canon_sym(cc *c, uint32_t s)
+{
+	while (c->syms[s].next && c->syms[s].depth > 0)
+		s = c->syms[s].next;
+	return s;
+}
+
+VPRIV const attrs *sym_attrs(cc *c, uint32_t s)
+{
+	static const attrs none;
+
+	return c->syms[s].attrs ? &c->attr[c->syms[s].attrs] : &none;
+}
+
+VPRIV void sym_name(cc *c, tbuf *b, uint32_t s)
+{
+	const sym *y;
+	const attrs *a;
+
+	s = canon_sym(c, s);
+	y = &c->syms[s];
+	a = sym_attrs(c, s);
+	if (a->asmname) {
+		vtext_string_append(b, c->strs[a->asmname - 1].s);
+		return;
+	}
+	if (!y->name) {
+		vtext_string_append(b, ".Lcl.");
+		vtext_unsigned_append(b, s);
+		return;
+	}
+	if (DARWIN(c))
+		vtext_char_append(b, '_');
+	if ((WASM(c) || X86(c)) && sym_quoted(c, s)) {
+		/* LLVM's wasm and x86 assemblers require quotes around non-ASCII names. */
+		vtext_char_append(b, '"');
+		vtext_append(b, vintern_ents[y->name].s, vintern_ents[y->name].len);
+		if (y->depth > 0 && y->kind == S_VAR && y->sc == SC_STATIC) {
+			vtext_char_append(b, '.');
+			vtext_unsigned_append(b, s);
+		}
+		vtext_char_append(b, '"');
+		return;
+	}
+	vtext_append(b, vintern_ents[y->name].s, vintern_ents[y->name].len);
+	if (y->depth > 0 && y->kind == S_VAR && y->sc == SC_STATIC) {
+		vtext_char_append(b, '.');
+		vtext_unsigned_append(b, s);
+	}
+}
+
+/* wasm/x86 assembly: non-ASCII names need quotes (asm labels are explicit). */
+VPRIV bool sym_quoted(cc *c, uint32_t s)
+{
+	const sym *y;
+
+	s = canon_sym(c, s);
+	y = &c->syms[s];
+	if (!y->name || sym_attrs(c, s)->asmname)
+		return false;
+	for (uint32_t i = 0; i < vintern_ents[y->name].len; i++)
+		if ((unsigned char)vintern_ents[y->name].s[i] >= 0x80)
+			return true;
+	return false;
+}
+
+VPRIV void ref_name(cc *c, tbuf *b, uint32_t r)
+{
+	uint32_t i = RIDX(r);
+
+	switch (RKIND(r)) {
+	case RK_SYM:
+		sym_name(c, b, i);
+		break;
+	case RK_STR:
+		vtext_string_append(b, ".L.str.");
+		vtext_unsigned_append(b, i);
+		break;
+	case RK_LBL:
+		vtext_string_append(b, ".Ltmp.lbl.");
+		vtext_unsigned_append(b, i);
+		break;
+	case RK_TABLE:
+		vtext_string_append(b, ".Lswitch.values.");
+		vtext_unsigned_append(b, i);
+		break;
+	case RK_NAME:
+		if (DARWIN(c))
+			vtext_char_append(b, '_');
+		if (i >= 0x8000000u) {
+			vtext_string_append(b, fixed_names[i - 0x8000000u]);
+		} else {
+			const char *n = cc_builtin_name(i);
+
+			if (!strncmp(n, "__builtin_", 10))
+				n += 10;
+			vtext_string_append(b, n);
+		}
+		break;
+	}
+}
+
+VPRIV void ref_off(cc *c, tbuf *b, uint32_t r, int64_t off)
+{
+	ref_name(c, b, r);
+	if (off > 0) {
+		vtext_char_append(b, '+');
+		vtext_signed_append(b, off);
+	} else if (off < 0) {
+		vtext_signed_append(b, off);
+	}
+}

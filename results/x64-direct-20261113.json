@@ -1,0 +1,524 @@
+{
+  "host": "AMD Ryzen 7 9700X, shared Linux x86-64 host",
+  "method": "Same pinned baseline-x86-64 vpp binary; VCC_OBJ_TEXT=1 versus default. Seven alternating process pairs per mode. CPU user+system; concurrent load causes large variability. No GCC/Clang compile-speed comparison.",
+  "paired": [
+    {
+      "vir": "0",
+      "mode": "text",
+      "repeat": 0,
+      "cpu_seconds": 0.309791,
+      "sha256": "4ec1301ac350ffa29fa1b3b5a0bb2859397784ea09b9a9e04b5ee9d681a348d4"
+    },
+    {
+      "vir": "0",
+      "mode": "direct",
+      "repeat": 0,
+      "cpu_seconds": 0.25077099999999997,
+      "sha256": "4ec1301ac350ffa29fa1b3b5a0bb2859397784ea09b9a9e04b5ee9d681a348d4"
+    },
+    {
+      "vir": "0",
+      "mode": "direct",
+      "repeat": 1,
+      "cpu_seconds": 0.259764,
+      "sha256": "4ec1301ac350ffa29fa1b3b5a0bb2859397784ea09b9a9e04b5ee9d681a348d4"
+    },
+    {
+      "vir": "0",
+      "mode": "text",
+      "repeat": 1,
+      "cpu_seconds": 0.3244699999999999,
+      "sha256": "4ec1301ac350ffa29fa1b3b5a0bb2859397784ea09b9a9e04b5ee9d681a348d4"
+    },
+    {
+      "vir": "0",
+      "mode": "text",
+      "repeat": 2,
+      "cpu_seconds": 0.4426880000000002,
+      "sha256": "4ec1301ac350ffa29fa1b3b5a0bb2859397784ea09b9a9e04b5ee9d681a348d4"
+    },
+    {
+      "vir": "0",
+      "mode": "direct",
+      "repeat": 2,
+      "cpu_seconds": 0.39141699999999974,
+      "sha256": "4ec1301ac350ffa29fa1b3b5a0bb2859397784ea09b9a9e04b5ee9d681a348d4"
+    },
+    {
+      "vir": "0",
+      "mode": "direct",
+      "repeat": 3,
+      "cpu_seconds": 0.4113680000000002,
+      "sha256": "4ec1301ac350ffa29fa1b3b5a0bb2859397784ea09b9a9e04b5ee9d681a348d4"
+    },
+    {
+      "vir": "0",
+      "mode": "text",
+      "repeat": 3,
+      "cpu_seconds": 0.4634610000000001,
+      "sha256": "4ec1301ac350ffa29fa1b3b5a0bb2859397784ea09b9a9e04b5ee9d681a348d4"
+    },
+    {
+      "vir": "0",
+      "mode": "text",
+      "repeat": 4,
+      "cpu_seconds": 0.4550639999999997,
+      "sha256": "4ec1301ac350ffa29fa1b3b5a0bb2859397784ea09b9a9e04b5ee9d681a348d4"
+    },
+    {
+      "vir": "0",
+      "mode": "direct",
+      "repeat": 4,
+      "cpu_seconds": 0.4252879999999999,
+      "sha256": "4ec1301ac350ffa29fa1b3b5a0bb2859397784ea09b9a9e04b5ee9d681a348d4"
+    },
+    {
+      "vir": "0",
+      "mode": "direct",
+      "repeat": 5,
+      "cpu_seconds": 0.41708000000000034,
+      "sha256": "4ec1301ac350ffa29fa1b3b5a0bb2859397784ea09b9a9e04b5ee9d681a348d4"
+    },
+    {
+      "vir": "0",
+      "mode": "text",
+      "repeat": 5,
+      "cpu_seconds": 0.5010630000000005,
+      "sha256": "4ec1301ac350ffa29fa1b3b5a0bb2859397784ea09b9a9e04b5ee9d681a348d4"
+    },
+    {
+      "vir": "0",
+      "mode": "text",
+      "repeat": 6,
+      "cpu_seconds": 0.3922089999999996,
+      "sha256": "4ec1301ac350ffa29fa1b3b5a0bb2859397784ea09b9a9e04b5ee9d681a348d4"
+    },
+    {
+      "vir": "0",
+      "mode": "direct",
+      "repeat": 6,
+      "cpu_seconds": 0.3680260000000002,
+      "sha256": "4ec1301ac350ffa29fa1b3b5a0bb2859397784ea09b9a9e04b5ee9d681a348d4"
+    },
+    {
+      "vir": "bl",
+      "mode": "text",
+      "repeat": 0,
+      "cpu_seconds": 0.9388110000000005,
+      "sha256": "5b8d55e141c0f77c6830d760900422b575239980469dccab13b3545a01a5369b"
+    },
+    {
+      "vir": "bl",
+      "mode": "direct",
+      "repeat": 0,
+      "cpu_seconds": 0.8927150000000004,
+      "sha256": "5b8d55e141c0f77c6830d760900422b575239980469dccab13b3545a01a5369b"
+    },
+    {
+      "vir": "bl",
+      "mode": "direct",
+      "repeat": 1,
+      "cpu_seconds": 0.8820629999999998,
+      "sha256": "5b8d55e141c0f77c6830d760900422b575239980469dccab13b3545a01a5369b"
+    },
+    {
+      "vir": "bl",
+      "mode": "text",
+      "repeat": 1,
+      "cpu_seconds": 1.0263110000000002,
+      "sha256": "5b8d55e141c0f77c6830d760900422b575239980469dccab13b3545a01a5369b"
+    },
+    {
+      "vir": "bl",
+      "mode": "text",
+      "repeat": 2,
+      "cpu_seconds": 0.9660050000000009,
+      "sha256": "5b8d55e141c0f77c6830d760900422b575239980469dccab13b3545a01a5369b"
+    },
+    {
+      "vir": "bl",
+      "mode": "direct",
+      "repeat": 2,
+      "cpu_seconds": 0.8942629999999996,
+      "sha256": "5b8d55e141c0f77c6830d760900422b575239980469dccab13b3545a01a5369b"
+    },
+    {
+      "vir": "bl",
+      "mode": "direct",
+      "repeat": 3,
+      "cpu_seconds": 0.8338840000000012,
+      "sha256": "5b8d55e141c0f77c6830d760900422b575239980469dccab13b3545a01a5369b"
+    },
+    {
+      "vir": "bl",
+      "mode": "text",
+      "repeat": 3,
+      "cpu_seconds": 0.9046119999999984,
+      "sha256": "5b8d55e141c0f77c6830d760900422b575239980469dccab13b3545a01a5369b"
+    },
+    {
+      "vir": "bl",
+      "mode": "text",
+      "repeat": 4,
+      "cpu_seconds": 0.6448110000000002,
+      "sha256": "5b8d55e141c0f77c6830d760900422b575239980469dccab13b3545a01a5369b"
+    },
+    {
+      "vir": "bl",
+      "mode": "direct",
+      "repeat": 4,
+      "cpu_seconds": 0.5781240000000007,
+      "sha256": "5b8d55e141c0f77c6830d760900422b575239980469dccab13b3545a01a5369b"
+    },
+    {
+      "vir": "bl",
+      "mode": "direct",
+      "repeat": 5,
+      "cpu_seconds": 0.6140909999999993,
+      "sha256": "5b8d55e141c0f77c6830d760900422b575239980469dccab13b3545a01a5369b"
+    },
+    {
+      "vir": "bl",
+      "mode": "text",
+      "repeat": 5,
+      "cpu_seconds": 0.6522649999999994,
+      "sha256": "5b8d55e141c0f77c6830d760900422b575239980469dccab13b3545a01a5369b"
+    },
+    {
+      "vir": "bl",
+      "mode": "text",
+      "repeat": 6,
+      "cpu_seconds": 0.656105000000001,
+      "sha256": "5b8d55e141c0f77c6830d760900422b575239980469dccab13b3545a01a5369b"
+    },
+    {
+      "vir": "bl",
+      "mode": "direct",
+      "repeat": 6,
+      "cpu_seconds": 0.6501779999999986,
+      "sha256": "5b8d55e141c0f77c6830d760900422b575239980469dccab13b3545a01a5369b"
+    }
+  ],
+  "flag_validation_and_initial_loaded_timings": [
+    {
+      "vir": "0",
+      "flags": [],
+      "mode": "text",
+      "cpu_seconds": [
+        0.5176459999999999,
+        0.46425100000000014,
+        0.521633,
+        0.5008979999999998,
+        0.4963389999999998
+      ],
+      "min_cpu_seconds": 0.46425100000000014,
+      "sha256": "4ec1301ac350ffa29fa1b3b5a0bb2859397784ea09b9a9e04b5ee9d681a348d4",
+      "stats": [
+        "vcc emit: 1879 functions, 192 objects, 0 inlined, 0 instructions (0.0 KB code); setup 0.13 ms, emit 82.72 ms (1 threads; 0.00 ms printing, 9.53 ms prepass over 2490 functions), 10.1 MB text; 0 MB/s machine code"
+      ]
+    },
+    {
+      "vir": "0",
+      "flags": [],
+      "mode": "direct",
+      "cpu_seconds": [
+        0.41457800000000045,
+        0.4131539999999998,
+        0.34470100000000015,
+        0.40119699999999925,
+        0.4333920000000009
+      ],
+      "min_cpu_seconds": 0.34470100000000015,
+      "sha256": "4ec1301ac350ffa29fa1b3b5a0bb2859397784ea09b9a9e04b5ee9d681a348d4",
+      "stats": [
+        "vcc emit: 1879 functions, 192 objects, 0 inlined, 0 instructions (0.0 KB code); setup 0.14 ms, emit 69.37 ms (1 threads; 0.00 ms printing, 12.22 ms prepass over 2490 functions), 8.5 MB text; 0 MB/s machine code"
+      ]
+    },
+    {
+      "vir": "0",
+      "flags": [
+        "-g"
+      ],
+      "mode": "text",
+      "cpu_seconds": [
+        0.5433999999999997
+      ],
+      "min_cpu_seconds": 0.5433999999999997,
+      "sha256": "2274c881ccce60d66191dcead38878a0557803421b0b4faf0a029710827156c1",
+      "stats": [
+        "vcc emit: 1879 functions, 192 objects, 0 inlined, 0 instructions (0.0 KB code); setup 0.18 ms, emit 100.75 ms (1 threads; 0.00 ms printing, 9.94 ms prepass over 2490 functions), 11.1 MB text; 0 MB/s machine code"
+      ]
+    },
+    {
+      "vir": "0",
+      "flags": [
+        "-g"
+      ],
+      "mode": "direct",
+      "cpu_seconds": [
+        0.4456730000000002
+      ],
+      "min_cpu_seconds": 0.4456730000000002,
+      "sha256": "2274c881ccce60d66191dcead38878a0557803421b0b4faf0a029710827156c1",
+      "stats": [
+        "vcc emit: 1879 functions, 192 objects, 0 inlined, 0 instructions (0.0 KB code); setup 0.14 ms, emit 84.69 ms (1 threads; 0.00 ms printing, 8.97 ms prepass over 2490 functions), 11.2 MB text; 0 MB/s machine code"
+      ]
+    },
+    {
+      "vir": "0",
+      "flags": [
+        "-fPIC"
+      ],
+      "mode": "text",
+      "cpu_seconds": [
+        0.4888300000000001
+      ],
+      "min_cpu_seconds": 0.4888300000000001,
+      "sha256": "3cda256f3bd962a281f168f01f35eb13d03bf20e64a38813670c44e1485123b6",
+      "stats": [
+        "vcc emit: 1879 functions, 192 objects, 0 inlined, 0 instructions (0.0 KB code); setup 0.32 ms, emit 79.41 ms (1 threads; 0.00 ms printing, 10.83 ms prepass over 2490 functions), 10.1 MB text; 0 MB/s machine code"
+      ]
+    },
+    {
+      "vir": "0",
+      "flags": [
+        "-fPIC"
+      ],
+      "mode": "direct",
+      "cpu_seconds": [
+        0.30704500000000023
+      ],
+      "min_cpu_seconds": 0.30704500000000023,
+      "sha256": "3cda256f3bd962a281f168f01f35eb13d03bf20e64a38813670c44e1485123b6",
+      "stats": [
+        "vcc emit: 1879 functions, 192 objects, 0 inlined, 0 instructions (0.0 KB code); setup 0.10 ms, emit 38.19 ms (1 threads; 0.00 ms printing, 5.76 ms prepass over 2490 functions), 8.5 MB text; 0 MB/s machine code"
+      ]
+    },
+    {
+      "vir": "0",
+      "flags": [
+        "-ffunction-sections",
+        "-fdata-sections"
+      ],
+      "mode": "text",
+      "cpu_seconds": [
+        0.4067729999999996
+      ],
+      "min_cpu_seconds": 0.4067729999999996,
+      "sha256": "917d99197d4470f3d2c59c747f13cfa2fa886ceb2ca2ade501f0fe8a25ee8793",
+      "stats": [
+        "vcc emit: 1879 functions, 192 objects, 0 inlined, 0 instructions (0.0 KB code); setup 0.11 ms, emit 53.63 ms (1 threads; 0.00 ms printing, 6.63 ms prepass over 2490 functions), 10.2 MB text; 0 MB/s machine code"
+      ]
+    },
+    {
+      "vir": "0",
+      "flags": [
+        "-ffunction-sections",
+        "-fdata-sections"
+      ],
+      "mode": "direct",
+      "cpu_seconds": [
+        0.28042400000000045
+      ],
+      "min_cpu_seconds": 0.28042400000000045,
+      "sha256": "917d99197d4470f3d2c59c747f13cfa2fa886ceb2ca2ade501f0fe8a25ee8793",
+      "stats": [
+        "vcc emit: 1879 functions, 192 objects, 0 inlined, 0 instructions (0.0 KB code); setup 0.09 ms, emit 38.27 ms (1 threads; 0.00 ms printing, 5.99 ms prepass over 2490 functions), 8.6 MB text; 0 MB/s machine code"
+      ]
+    },
+    {
+      "vir": "0",
+      "flags": [
+        "-fpatchable-function-entry=8,3"
+      ],
+      "mode": "text",
+      "cpu_seconds": [
+        0.3569479999999994
+      ],
+      "min_cpu_seconds": 0.3569479999999994,
+      "sha256": "b5b217ad51751a026706a6419f81807147b2c42d6874cd3407edc7b72321a213",
+      "stats": [
+        "vcc emit: 1879 functions, 192 objects, 0 inlined, 0 instructions (0.0 KB code); setup 0.10 ms, emit 44.90 ms (1 threads; 0.00 ms printing, 5.65 ms prepass over 2490 functions), 10.4 MB text; 0 MB/s machine code"
+      ]
+    },
+    {
+      "vir": "0",
+      "flags": [
+        "-fpatchable-function-entry=8,3"
+      ],
+      "mode": "direct",
+      "cpu_seconds": [
+        0.2878540000000007
+      ],
+      "min_cpu_seconds": 0.2878540000000007,
+      "sha256": "b5b217ad51751a026706a6419f81807147b2c42d6874cd3407edc7b72321a213",
+      "stats": [
+        "vcc emit: 1879 functions, 192 objects, 0 inlined, 0 instructions (0.0 KB code); setup 0.10 ms, emit 37.93 ms (1 threads; 0.00 ms printing, 5.80 ms prepass over 2490 functions), 8.9 MB text; 0 MB/s machine code"
+      ]
+    },
+    {
+      "vir": "bl",
+      "flags": [],
+      "mode": "text",
+      "cpu_seconds": [
+        0.6433969999999987,
+        0.7331770000000004,
+        0.6667249999999991,
+        0.7149159999999983,
+        0.6347899999999997
+      ],
+      "min_cpu_seconds": 0.6347899999999997,
+      "sha256": "5b8d55e141c0f77c6830d760900422b575239980469dccab13b3545a01a5369b",
+      "stats": [
+        "vcc emit: 1453 functions, 192 objects, 0 inlined, 0 instructions (0.0 KB code); setup 6.80 ms, emit 331.42 ms (1 threads; 0.00 ms printing, 4.77 ms prepass over 2509 functions), 9.1 MB text; 0 MB/s machine code"
+      ]
+    },
+    {
+      "vir": "bl",
+      "flags": [],
+      "mode": "direct",
+      "cpu_seconds": [
+        0.5545720000000003,
+        0.6321629999999998,
+        0.6146079999999996,
+        0.617744000000001,
+        0.6084069999999997
+      ],
+      "min_cpu_seconds": 0.5545720000000003,
+      "sha256": "5b8d55e141c0f77c6830d760900422b575239980469dccab13b3545a01a5369b",
+      "stats": [
+        "vcc emit: 1453 functions, 192 objects, 0 inlined, 0 instructions (0.0 KB code); setup 7.04 ms, emit 306.38 ms (1 threads; 0.00 ms printing, 4.94 ms prepass over 2509 functions), 8.3 MB text; 0 MB/s machine code"
+      ]
+    },
+    {
+      "vir": "bl",
+      "flags": [
+        "-g"
+      ],
+      "mode": "text",
+      "cpu_seconds": [
+        0.5826199999999999
+      ],
+      "min_cpu_seconds": 0.5826199999999999,
+      "sha256": "078106ed299cbdc525da3069f721c43b7e2b8726e0c50238bc2f8f30401f1ec2",
+      "stats": [
+        "vcc emit: 1948 functions, 192 objects, 0 inlined, 0 instructions (0.0 KB code); setup 6.67 ms, emit 295.40 ms (1 threads; 0.00 ms printing, 4.67 ms prepass over 2509 functions), 11.2 MB text; 0 MB/s machine code"
+      ]
+    },
+    {
+      "vir": "bl",
+      "flags": [
+        "-g"
+      ],
+      "mode": "direct",
+      "cpu_seconds": [
+        0.5774740000000014
+      ],
+      "min_cpu_seconds": 0.5774740000000014,
+      "sha256": "078106ed299cbdc525da3069f721c43b7e2b8726e0c50238bc2f8f30401f1ec2",
+      "stats": [
+        "vcc emit: 1948 functions, 192 objects, 0 inlined, 0 instructions (0.0 KB code); setup 7.73 ms, emit 310.10 ms (1 threads; 0.00 ms printing, 5.12 ms prepass over 2509 functions), 11.3 MB text; 0 MB/s machine code"
+      ]
+    },
+    {
+      "vir": "bl",
+      "flags": [
+        "-fPIC"
+      ],
+      "mode": "text",
+      "cpu_seconds": [
+        0.661316999999999
+      ],
+      "min_cpu_seconds": 0.661316999999999,
+      "sha256": "fafd07633196213934e9c99118e42b0d0843324e603f034d05df5bc4aba6a6a8",
+      "stats": [
+        "vcc emit: 1453 functions, 192 objects, 0 inlined, 0 instructions (0.0 KB code); setup 7.79 ms, emit 346.67 ms (1 threads; 0.00 ms printing, 5.38 ms prepass over 2509 functions), 9.1 MB text; 0 MB/s machine code"
+      ]
+    },
+    {
+      "vir": "bl",
+      "flags": [
+        "-fPIC"
+      ],
+      "mode": "direct",
+      "cpu_seconds": [
+        0.6085340000000015
+      ],
+      "min_cpu_seconds": 0.6085340000000015,
+      "sha256": "fafd07633196213934e9c99118e42b0d0843324e603f034d05df5bc4aba6a6a8",
+      "stats": [
+        "vcc emit: 1453 functions, 192 objects, 0 inlined, 0 instructions (0.0 KB code); setup 6.86 ms, emit 311.20 ms (1 threads; 0.00 ms printing, 4.80 ms prepass over 2509 functions), 8.3 MB text; 0 MB/s machine code"
+      ]
+    },
+    {
+      "vir": "bl",
+      "flags": [
+        "-ffunction-sections",
+        "-fdata-sections"
+      ],
+      "mode": "text",
+      "cpu_seconds": [
+        0.592430999999999
+      ],
+      "min_cpu_seconds": 0.592430999999999,
+      "sha256": "a9aa8c440afb5de95547d5a6a173f233a4e26df1f3643f24507faf88d33ef763",
+      "stats": [
+        "vcc emit: 1453 functions, 192 objects, 0 inlined, 0 instructions (0.0 KB code); setup 7.68 ms, emit 316.82 ms (1 threads; 0.00 ms printing, 5.28 ms prepass over 2509 functions), 9.1 MB text; 0 MB/s machine code"
+      ]
+    },
+    {
+      "vir": "bl",
+      "flags": [
+        "-ffunction-sections",
+        "-fdata-sections"
+      ],
+      "mode": "direct",
+      "cpu_seconds": [
+        0.5629149999999989
+      ],
+      "min_cpu_seconds": 0.5629149999999989,
+      "sha256": "a9aa8c440afb5de95547d5a6a173f233a4e26df1f3643f24507faf88d33ef763",
+      "stats": [
+        "vcc emit: 1453 functions, 192 objects, 0 inlined, 0 instructions (0.0 KB code); setup 6.86 ms, emit 317.91 ms (1 threads; 0.00 ms printing, 4.78 ms prepass over 2509 functions), 8.4 MB text; 0 MB/s machine code"
+      ]
+    },
+    {
+      "vir": "bl",
+      "flags": [
+        "-fpatchable-function-entry=8,3"
+      ],
+      "mode": "text",
+      "cpu_seconds": [
+        0.6532769999999983
+      ],
+      "min_cpu_seconds": 0.6532769999999983,
+      "sha256": "1beaf6b5c753885332cf6175e053b2f5573cca967c8aaac3f71e920241eb4fbf",
+      "stats": [
+        "vcc emit: 1453 functions, 192 objects, 0 inlined, 0 instructions (0.0 KB code); setup 7.02 ms, emit 334.21 ms (1 threads; 0.00 ms printing, 4.82 ms prepass over 2509 functions), 9.3 MB text; 0 MB/s machine code"
+      ]
+    },
+    {
+      "vir": "bl",
+      "flags": [
+        "-fpatchable-function-entry=8,3"
+      ],
+      "mode": "direct",
+      "cpu_seconds": [
+        0.638322999999998
+      ],
+      "min_cpu_seconds": 0.638322999999998,
+      "sha256": "1beaf6b5c753885332cf6175e053b2f5573cca967c8aaac3f71e920241eb4fbf",
+      "stats": [
+        "vcc emit: 1453 functions, 192 objects, 0 inlined, 0 instructions (0.0 KB code); setup 8.47 ms, emit 332.78 ms (1 threads; 0.00 ms printing, 5.64 ms prepass over 2509 functions), 8.7 MB text; 0 MB/s machine code"
+      ]
+    }
+  ],
+  "tests": {
+    "full-objcmp.log": "--- skip clang-as: 6\n     1  symbol '.Ltmp.lbl.1' is already defined\n     1  symbol 'g_int' is already defined\n     1  invalid instruction mnemonic 'mrs'\n     1  instruction requires: Not 64-bit mode\n     1  expected register here\n     1  invalid instruction mnemonic 'cbz'\n--- skip emit: 62\n    31  function definition is not allowed here\n     5  'pthread.h' file not found\n     3  a parameter list without types is only allowed in a function definition\n     3  'sys/mman.h' file not found\n     1  '../../gcc.dg/tree-ssa/pr105777.c' file not found\n     1  '../../gcc.dg/tree-ssa/pr109938.c' file not found\n     1  '../../gcc.dg/tree-ssa/pr109986.c' file not found\n     1  too few arguments provided to function-like macro invocation\ngcc  1658/1658 pass (100.0%), 43 skipped   skip:clang-as=1 skip:emit=42\ninline 104/104 pass (100.0%), 6 skipped   skip:emit=6\ntcc  129/129 pass (100.0%), 14 skipped   skip:clang-as=3 skip:emit=11\nvcc  322/322 pass (100.0%), 5 skipped   skip:clang-as=2 skip:emit=3\nall  2213/2213 pass (100.0%), 68 skipped   skip:clang-as=6 skip:emit=62\n11.0 s\n",
+    "vir-objcmp.log": "--- skip clang-as: 2\n     1  expected register here\n     1  invalid instruction mnemonic 'cbz'\n--- skip emit: 3\n     1  impossible constraint in asm: ' i'\n     1  x86-64: builtin 123 is not supported yet (PLAN-x86.md X3)\n     1  \"arm_sve.h needs an AArch64 target\"\nvcc  322/322 pass (100.0%), 5 skipped   skip:clang-as=2 skip:emit=3\nall  322/322 pass (100.0%), 5 skipped   skip:clang-as=2 skip:emit=3\n49.0 s\n",
+    "asan-objcmp.log": "--- skip clang-as: 2\n     1  expected register here\n     1  invalid instruction mnemonic 'cbz'\n--- skip emit: 3\n     1  impossible constraint in asm: ' i'\n     1  x86-64: builtin 123 is not supported yet (PLAN-x86.md X3)\n     1  \"arm_sve.h needs an AArch64 target\"\nvcc  322/322 pass (100.0%), 5 skipped   skip:clang-as=2 skip:emit=3\nall  322/322 pass (100.0%), 5 skipped   skip:clang-as=2 skip:emit=3\n9.1 s\n",
+    "run.log": "--- skip clang-rejects: 5\n     2  \"<arm_neon.h> is intended only for ARM and AArch64 targets\"\n     1  unknown token in expression\n     1  expected register here\n     1  unknown type name '__SVInt8_t'\n--- skip noref: 1\n     1  no clang reference\n--- skip ref-fail: 2\n     1  link: __builtin_arm_clz\n     1  clang build exits 1\nvcc  319/319 pass (100.0%), 8 skipped   skip:clang-rejects=5 skip:noref=1 skip:ref-fail=2\nall  319/319 pass (100.0%), 8 skipped   skip:clang-rejects=5 skip:noref=1 skip:ref-fail=2\n0.5 s\n",
+    "arm-suite.log": "vcc  326/326 pass (100.0%), 1 xfail, 0 skipped   xfail:run=1\nall  326/326 pass (100.0%), 1 xfail, 0 skipped   xfail:run=1\n11.8 s\n"
+  },
+  "remaining": "Prologues, epilogues, CFI/DWARF directives, inline asm and unconverted records use text snippets in the shared session; additional instruction conversions can follow profiling."
+}

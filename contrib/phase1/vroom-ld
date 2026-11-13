@@ -1,0 +1,57 @@
+#!/usr/bin/env python3
+"""vroom-ld: ld.lld wrapper for kernel builds with -O0.
+
+At -O0 dead code is not removed. Branches that -O2 proves dead with the current config
+(e.g. `if (system_supports_sme())` when SME is off) then refer to symbols that
+do not exist, and the link fails. If lld only complains about undefined symbols,
+a stub object is generated: each symbol becomes 64 zero bytes in .data (writable, so that static
+keys work; not executable). 0x00000000 is
+`udf #0` on arm64 and .data is NX, so if such a branch is run anyway it raises an
+exception (like BUG()), and reads give 0.
+
+The list of stubbed symbols is written to <outfile>.vroom-stubs.
+"""
+import os
+import re
+import subprocess
+import sys
+
+import shutil
+_MAC = sys.platform == "darwin"
+LLD = os.environ.get("VROOM_REAL_LD") or ("/opt/homebrew/opt/lld/bin/ld.lld" if _MAC else shutil.which("ld.lld"))
+CLANG = os.environ.get("VROOM_REAL_CC") or ("/opt/homebrew/opt/llvm/bin/clang" if _MAC else shutil.which("clang"))
+
+
+def main():
+    args = sys.argv[1:]
+    p = subprocess.run([LLD, "--error-limit=0"] + args, stderr=subprocess.PIPE)
+    if p.returncode == 0:
+        sys.stderr.buffer.write(p.stderr)
+        return 0
+    err = p.stderr.decode(errors="replace")
+    errors = [l for l in err.splitlines() if "error:" in l]
+    undef = sorted({m.group(1) for m in re.finditer(r"error: undefined symbol: (\S+)", err)})
+    # Only undefined symbols - everything else is a real error.
+    if not undef or any("undefined symbol" not in l for l in errors) or "-r" in args:
+        sys.stderr.write(err)
+        return p.returncode
+    out = args[args.index("-o") + 1] if "-o" in args else "a.out"
+    asm = [".data", ".balign 16"]
+    for s in undef:
+        asm += [f".globl {s}", f"{s}:", ".space 64"]
+    stub_s = out + ".vroom-stubs.S"
+    stub_o = out + ".vroom-stubs.o"
+    with open(stub_s, "w") as f:
+        f.write("\n".join(asm) + "\n")
+    # the link's machine: -m elf_x86_64 (the x86-64 kernel, PLAN-x86.md X8), else arm64
+    x86 = any(a in ("elf_x86_64", "-melf_x86_64") for a in args)
+    subprocess.run([CLANG, "--target=x86_64-linux-gnu" if x86 else "--target=aarch64-linux-gnu", "-c", stub_s, "-o", stub_o],
+                   check=True)
+    with open(out + ".vroom-stubs", "w") as f:
+        f.write("\n".join(undef) + "\n")
+    p = subprocess.run([LLD] + args + [stub_o])
+    return p.returncode
+
+
+if __name__ == "__main__":
+    sys.exit(main())

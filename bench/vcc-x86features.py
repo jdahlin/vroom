@@ -28,22 +28,22 @@ if a.vpp:
   cases.extend([('x86-64',['+'+feature,'-'+feature]),('haswell',['-'+feature,'+'+feature])])
 if a.vpp:cases=[(cpu,opts) for cpu,opts in cases if all(o[1:] in data['cli_features'] or o[1:]=='general-regs-only' for o in opts)]
 if a.all_features:
- names=re.search(r'x86_feature_names\[\] = \{(.*?)\};',(ROOT/'ccs/vcc/lib/x86features-data.inc').read_text()).group(1)
+ names=re.search(r'x86_feature_names\[\] = \{(.*?)\};',(ROOT/'src/include/arch/x64/x86features-data.inc').read_text()).group(1)
  for name in json.loads('['+names+']'):
   if name!='64bit' and (not a.vpp or name in data['cli_features']):cases.extend([('x86-64',['+'+name]),('haswell',['-'+name])])
 with tempfile.TemporaryDirectory() as td:
  probe=pathlib.Path(td)/'probe'
  fixture=pathlib.Path(td)/'native-fixture'
- run([a.clang,'-O2','-Wall','-Wextra','-Werror','-I'+str(ROOT),str(ROOT/'bench/data/x86native-test.c'),'-o',str(fixture)])
+ run([a.clang,'-O2','-Wall','-Wextra','-Werror','-I'+str(ROOT),'-I'+str(ROOT/'src/include'),str(ROOT/'bench/data/x86native-test.c'),'-o',str(fixture)])
  run([str(fixture)])
  if not a.vpp:
   src=pathlib.Path(td)/'probe.c'
   src.write_text(r'''
-#include "ccs/vcc/lib/buf.h"
-typedef vbuf buf;
-#define bstr vbuf_s
-#include "ccs/vcc/driver/x86predefines.h"
-#include "ccs/vcc/lib/x86native.h"
+#include "common/buffer.h"
+typedef vbuffer buf;
+#define bstr vbuffer_string_append
+#include "src/driver/x86predefines.h"
+#include "port/x86native.h"
 static void apply(x86_features *f,x86_features *disabled,const char *s) {
  bool en=*s++=='+';
  if (!strcmp(s,"general-regs-only")) { if(en){apply(f,disabled,"-x87");apply(f,disabled,"-mmx");apply(f,disabled,"-sse");} return; }
@@ -59,7 +59,7 @@ int main(int argc,char **argv) {
  x86_features_finish(&f,disabled);buf out={0};x86_feature_predefines(&out,f,cpu);fwrite(out.p,1,out.n,stdout);free(out.p);return 0;
 }
 ''')
-  run([a.clang,'-O2','-I'+str(ROOT),str(src),'-o',str(probe)])
+  run([a.clang,'-O2','-I'+str(ROOT),'-I'+str(ROOT/'src/include'),str(src),str(ROOT/'src/common/fail.c'),'-o',str(probe)])
  def check(case):
   cpu,opts=case
   ref=[a.clang,'--target=x86_64-unknown-linux-gnu','-march='+cpu,'-dM','-E','-x','c',empty.name]

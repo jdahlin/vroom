@@ -1,0 +1,20 @@
+tu	designators.c	ok
+use	decl	In	h	designators.c:5	file	designators.c	92	5	17	1	-
+use	decl	Out	in	designators.c:6	file	designators.c	128	6	24	2	-
+other	decl	Out	g	designators.c:6	file	designators.c	173	6	69	1	-
+use	decl	S	f	designators.c:7	file	designators.c	205	7	16	1	-
+use	decl	S	g	designators.c:7	file	designators.c	212	7	23	1	-
+use	designator	S	f	designators.c:7	file	designators.c	235	8	18	1	-
+use	designator	S	g	designators.c:7	file	designators.c	243	8	26	1	-
+use	designator	S	g	designators.c:7	file	designators.c	268	9	17	1	-
+use	designator	S	f	designators.c:7	file	designators.c	274	9	23	1	-
+use	designator	Out	in	designators.c:6	file	designators.c	301	10	20	2	-
+use	designator	In	h	designators.c:5	file	designators.c	304	10	23	1	-
+use	designator	In	h	designators.c:5	file	designators.c	318	10	37	1	-
+other	designator	Out	g	designators.c:6	file	designators.c	346	10	65	1	-
+use	designator	Out	in	designators.c:6	file	designators.c	374	11	20	2	-
+use	designator	In	h	designators.c:5	file	designators.c	382	11	28	1	-
+use	designator	S	f	designators.c:7	file	designators.c	435	12	43	1	-
+members	In	designators.c:5	h,i
+members	Out	designators.c:6	in,arr,ar,g,l
+members	S	designators.c:7	f,g

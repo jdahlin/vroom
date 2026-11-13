@@ -1,0 +1,60 @@
+/*xxxxxxxxxxxxxxx*/
+//xxxxxxxxxxxxxxx
+"xxxxxxxxxxxxxxx\"end"
+'\\'
+               a >>= 1; a += .1e+2;
+/*xxxxxxxxxxxxxxxx*/
+//xxxxxxxxxxxxxxxx
+"xxxxxxxxxxxxxxxx\"end"
+'\\'
+                a >>= 1; a += .1e+2;
+/*xxxxxxxxxxxxxxxxx*/
+//xxxxxxxxxxxxxxxxx
+"xxxxxxxxxxxxxxxxx\"end"
+'\\'
+                 a >>= 1; a += .1e+2;
+/*xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx*/
+//xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"end"
+'\\'
+                               a >>= 1; a += .1e+2;
+/*xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx*/
+//xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"end"
+'\\'
+                                a >>= 1; a += .1e+2;
+/*xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx*/
+//xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"end"
+'\\'
+                                 a >>= 1; a += .1e+2;
+/*xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx*/
+//xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"end"
+'\\'
+                                                               a >>= 1; a += .1e+2;
+/*xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx*/
+//xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"end"
+'\\'
+                                                                a >>= 1; a += .1e+2;
+/*xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx*/
+//xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"end"
+'\\'
+                                                                 a >>= 1; a += .1e+2;
+/*xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx*/
+//xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"end"
+'\\'
+                                                                                                                               a >>= 1; a += .1e+2;
+/*xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx*/
+//xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"end"
+'\\'
+                                                                                                                                a >>= 1; a += .1e+2;
+/*xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx*/
+//xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"end"
+'\\'
+                                                                                                                                 a >>= 1; a += .1e+2;

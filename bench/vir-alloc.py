@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-VIR register allocation (PLAN-vir.md V4, SPEC-vir.md 15): build/ccs/viralloc
+VIR register allocation (PLAN-vir.md V4, SPEC-vir.md 15): build/src/viralloc
 on the tests and on random functions, every allocation checked by
 vir_alloc_check.
 
-  bench/vir-alloc.py [test] [-j N] [-v] [PATTERN]   ccs/vcc/tests/vir-alloc/*.vir: output equals the
+  bench/vir-alloc.py [test] [-j N] [-v] [PATTERN]   src/test/vir-alloc/*.vir: output equals the
                                                     expected part, every register count checked (; SWEEP)
   bench/vir-alloc.py --bless PATTERN                rewrite the expected part of the matching tests
   bench/vir-alloc.py random [-n N] [--seed S] [-j N] [--keep DIR]
@@ -16,13 +16,13 @@ vir_alloc_check.
                                                     linear mode; failing units are kept in DIR
   bench/vir-alloc.py mutate [-n K]                  the checker catches corrupted allocations
   bench/vir-alloc.py time                           ns per VIR instruction on large generated functions
-  --bin-dir DIR (or VCC_BIN): another build (build/ccs-asan)
+  --bin-dir DIR (or VCC_BIN): another build (build/src-asan)
 """
 import os, random, re, subprocess, sys, tempfile
 from concurrent.futures import ThreadPoolExecutor
 
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-D = f'{R}/ccs/vcc/tests/vir-alloc'
+D = f'{R}/src/test/vir-alloc'
 
 
 def arg(name, default=None, conv=str):
@@ -31,7 +31,7 @@ def arg(name, default=None, conv=str):
     return default
 
 
-BIN = os.path.abspath(arg('--bin-dir', os.environ.get('VCC_BIN', f'{R}/build/ccs')))
+BIN = os.path.abspath(arg('--bin-dir', os.environ.get('VCC_BIN', f'{R}/build/src')))
 VA = os.path.join(BIN, 'viralloc')
 ENV = dict(os.environ, UBSAN_OPTIONS='halt_on_error=1:print_stacktrace=1', ASAN_OPTIONS='detect_leaks=0')
 
@@ -419,7 +419,7 @@ def main():
     jobs = arg('-j', 6, int)
     n = arg('-n', None, int)
     seed = arg('--seed', 1, int)
-    keep = arg('--keep', f'{R}/build/ccs/vir-alloc-fail')
+    keep = arg('--keep', f'{R}/build/src/vir-alloc-fail')
     bless = '--bless' in sys.argv and not sys.argv.remove('--bless')
     verbose = '-v' in sys.argv and not sys.argv.remove('-v')
     rest = sys.argv[1:]

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """vcc-pic.py: GOT and TLS use per code model (-fno-pic, -fPIE, -fPIC, the hosted
-default) checked against clang: for every C file in ccs/vcc/tests/pic, the
+default) checked against clang: for every C file in src/test/pic, the
 symbols with GOT or TLS relocations and the relocation types in each object must
 match clang -c's, and so must the type and binding of the named symbols
 (STT_GNU_IFUNC for ifunc) (<1 s)."""
@@ -31,7 +31,7 @@ def syms(o):
 TLSM = [f'{p} -ftls-model={m}' for p in ('-fPIC', '-fno-pic') for m in ('global-dynamic', 'local-dynamic', 'initial-exec', 'local-exec')]
 bad = ok = 0
 with tempfile.TemporaryDirectory() as t:
-    for f in sorted(glob.glob(f'{R}/ccs/vcc/tests/pic/*.c')):
+    for f in sorted(glob.glob(f'{R}/src/test/pic/*.c')):
         for mode in ['-fno-pic', '-fPIE', '-fPIC', '-fpie', '-fpic', None] + (TLSM if 'tls' in f else []):
             mode = mode.split() if mode else []
             fl = ['--target=aarch64-linux-gnu', '-O2', '-c', f] + mode

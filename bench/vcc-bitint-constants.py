@@ -50,7 +50,7 @@ try:
  for name,compiler in compilers:
   asm=out/(name+'.s');obj=out/(name+'.o');exe=out/(name+'.exe')
   run([compiler,target,'-std=c23','-w','-S',sourcepath,'-o',asm]);run([cl,target,'-c',asm,'-o',obj]);run([cl,target,'-fuse-ld=lld','-no-pie',caller,obj,'-o',exe]);run((['qemu-aarch64','-L','/usr/aarch64-linux-gnu'] if a.target.startswith('aarch64') else [])+[exe])
- testdir=pathlib.Path(__file__).resolve().parent.parent/'ccs/vcc/tests/bitint'
+ testdir=pathlib.Path(__file__).resolve().parent.parent/'src/test/bitint'
  for name,compiler in compilers:
   run([compiler,target,'-std=c23','-fsyntax-only',testdir/'constant-valid.c'])
   cmd=[compiler,target,'-std=c23','-fsyntax-only',str(testdir/'constant-reject.c')]

@@ -1,0 +1,965 @@
+# old	new	kind	where	comment
+vtok_name	lex_token_name	function,public	lex.c	
+init_struct_tables	lex_structure_tables_init	function	lex.c	
+init_tables	lex_tables_init	function	lex.c	
+mm4	lex_mask_pack	function	lex.c	
+classify	lex_bytes_classify	function	lex.c	
+nibmask	lex_nibbles_first_index	function	lex.c	
+find_cend	lex_comment_end_find	function	lex.c	
+find_nl	lex_line_end_find	function	lex.c	
+find_quote	lex_quote_find	function	lex.c	
+classify_avx512	lex_bytes_classify_avx512	function	lex.c	
+classify_avx2	lex_bytes_classify_avx2	function	lex.c	
+find_cend_avx2	lex_comment_end_find_avx2	function	lex.c	
+find_nl_avx2	lex_line_end_find_avx2	function	lex.c	
+find_quote_avx2	lex_quote_find_avx2	function	lex.c	
+lookup_ascii	lex_table_ascii_lookup	function	lex.c	
+avx_test	lex_avx2_bits_test	function	lex.c	
+init_x86_simd	lex_simd_init_x86	function	lex.c	
+splice_len	lex_splice_length	function	lex.c	
+skip_splices	lex_splices_skip	function	lex.c	
+nx	lex_character_next	function	lex.c	
+c11_id	lex_character_is_c11_identifier	function	lex.c	
+hexval	lex_hex_digit_value	function	lex.c	
+ext_id	lex_identifier_extended_length	function	lex.c	
+is_exp	lex_character_is_exponent	function	lex.c	
+idrun	lex_number_run_end	function	lex.c	
+number_end	lex_number_end	function	lex.c	
+ident_end	lex_identifier_end	function	lex.c	
+quoted_end	lex_quoted_end	function	lex.c	
+raw_delim_char	lex_character_is_raw_delimiter	function	lex.c	
+raw_end	lex_raw_string_end	function	lex.c	
+utf8_len	lex_utf8_length	function	lex.c	
+vlex_scratch_size	lex_scratch_size	function,public	lex.c	
+win	lex_mask_window	function	lex.c	
+prefixed	lex_literal_prefixed_end	function	lex.c	
+intern_dirty	lex_identifier_dirty_intern	function	lex.c	
+intern_list	lex_identifiers_intern	function	lex.c	
+classify_upto	lex_blocks_classify	function	lex.c	
+stat_dump	lex_statistics_dump	function	lex.c	
+lex_mode	lex_tokenize_mode	function	lex.c	
+vlex	lex_tokenize	function,public	lex.c	
+vlex_spell	lex_token_spell	function,public	lex.c	
+arena	lex_region_allocate	function	lex.c	
+arena_trim	lex_region_trim	function	lex.c	
+read_file	lex_file_read	function	lex.c	
+read_src	lex_source_read	function	lex.c	
+lex_src_mode	lex_source_tokenize_mode	function	lex.c	
+lex_src	lex_source_tokenize	function	lex.c	
+vlex_nodigraphs	lex_file_without_digraphs	function,public	lex.c	
+load	lex_file_load	function	lex.c	
+vlex_load_uncached	lex_file_load_uncached	function,public	lex.c	
+centry_get	lex_cache_entry_get	function	lex.c	
+claim	lex_cache_entry_claim	function	lex.c	
+publish	lex_cache_entry_publish	function,also:bench/vccd-sample.py	lex.c	
+vlex_trigraphs	lex_file_trigraphs_replace	function,public	lex.c	
+lx_alnum	lex_character_is_alphanumeric	function	lex.c	
+lx_skip	lex_literal_or_comment_skip	function	lex.c	
+vlex_digitsep	lex_file_digit_separators_remove	function,public	lex.c	
+vlex_c89	lex_file_c89_convert	function,public	lex.c	
+vlex_cache_flush	lex_cache_flush	function,public	lex.c	
+vlex_get	lex_file_get	function,public	lex.c	
+io_thread	lex_prefetch_thread_run	function,also:bench/vccd-sample.py	lex.c	
+start_io	lex_prefetch_threads_start	function	lex.c	
+vlex_prefetch	lex_file_prefetch	function,public	lex.c	
+cur_file	pp_file_context_current	function	builtin.c	
+mknum	pp_token_number_make	function	builtin.c	
+mkstr	pp_token_string_make	function	builtin.c	
+unread	pp_token_unread	function	builtin.c	
+header_name	pp_header_name_read	function	builtin.c	
+feature_arg	pp_feature_argument_read	function	builtin.c	
+has_query	pp_feature_query_answer	function	builtin.c	
+counter_ext	pp_counter_extension_warn	function	builtin.c	
+builtin	pp_builtin_macro_expand	function,in:builtin.c,in:expand.c	builtin.c	
+vdir_flush	pp_directory_cache_flush	function,public	dircache.c	
+dalloc	pp_directory_cache_allocate	function	dircache.c	
+node_get	pp_directory_cache_node_get	function	dircache.c	
+dir_state	pp_directory_state_probe	function	dircache.c	
+vdir_exists	pp_directory_exists	function,public	dircache.c	
+extra_loc	pp_directive_extra_tokens_location	function	directive.c	
+dir_extra_tok	pp_directive_extra_token_warn	function	directive.c	
+extra_at	pp_directive_extra_token_at_warn	function	directive.c	
+dir_extra	pp_directive_extra_tokens_check	function	directive.c	
+cond_true	pp_conditional_is_true	function	directive.c	
+cmt_directive	pp_directive_comments_flush	function	directive.c	
+skip_from	pp_conditional_group_skip	function	directive.c	
+parse_define	pp_define_parse	function	directive.c	
+mem_perm	pp_memory_permanent_allocate	function	directive.c	
+mem_shared	pp_memory_shared_allocate	function	directive.c	
+word	pp_pragma_word_match	function	directive.c	
+pragma_message	pp_pragma_message_run	function	directive.c	
+pragma_text	pp_pragma_run	function	directive.c	
+pragma_macro_name	pp_pragma_macro_name_read	function	directive.c	
+line_directive	pp_line_directive_run	function	directive.c	
+imacros	pp_imacros_run	function	directive.c	
+directive	pp_directive_run	function,also:bench/vccd-sample.py	directive.c	
+emb_init	pp_embed_digits_init	function	embed.c	
+emb_list	pp_embed_tokens_read	function	embed.c	
+emb_int	pp_embed_integer_read	function	embed.c	
+emb_params	pp_embed_parameters_read	function	embed.c	
+find_embed	pp_embed_file_find	function	embed.c	
+emb_is_main	pp_embed_path_is_main	function	embed.c	
+emb_map	pp_embed_file_map	function	embed.c	
+emb_range	pp_embed_range_compute	function	embed.c	
+embed	pp_embed_run	function	embed.c	
+has_embed	pp_embed_has_query	function	embed.c	
+macro_note_	pp_macro_note_at	function,also:bench/vcc-diagcov.py	expand.c	
+macro_note	pp_macro_note	function	expand.c	
+collect_	pp_macro_arguments_collect_inner	function	expand.c	
+collect	pp_macro_arguments_collect	function	expand.c	
+collect_failed	pp_macro_arguments_collect_fail	function	expand.c	
+needs_pre	pp_macro_argument_needs_preexpansion	function	expand.c	
+preexpand_run	pp_macro_argument_preexpand_run	function	expand.c	
+preexpand	pp_macro_argument_preexpand	function	expand.c	
+is_strlit	pp_kind_is_string_literal	function	expand.c	
+stringify	pp_macro_argument_stringify	function	expand.c	
+ucn_at	pp_ucn_length	function	expand.c	
+classify	pp_paste_result_classify	function	expand.c	
+paste_ok	pp_paste_is_valid	function	expand.c	
+paste	pp_paste_tokens	function	expand.c	
+hashhash	pp_paste_operator_is	function	expand.c	
+remove_va_comma	pp_variadic_comma_remove	function	expand.c	
+append	pp_tokens_append_unpasted	function	expand.c	
+subst_range	pp_macro_body_substitute_range	function	expand.c	
+va_opt	pp_va_opt_expand	function	expand.c	
+subst_simple	pp_macro_body_substitute_simple	function	expand.c	
+subst	pp_macro_body_substitute	function,also:bench/vccd-sample.py	expand.c	
+trivial	pp_macro_is_trivial	function	expand.c	
+single	pp_macro_single_token_expand	function	expand.c	
+expand_text	pp_macro_text_position_note	function	expand.c	
+expand	pp_macro_expand	function	expand.c	
+salloc	pp_shared_allocate	function	file.c	
+shared_base0	pp_shared_base	function	file.c	
+spelled	pp_token_spelling_equals	function	file.c	
+dir_kind	pp_directive_kind_find	function	file.c	
+pfile_build	pp_skeleton_build	function	file.c	
+pfile_get	pp_skeleton_get	function	file.c	
+file_line	pp_file_line_of_offset	function	file.c	
+htok_get	pp_header_cache_token_load	function	header-cache-internal.h	
+sig_intern	pp_header_cache_signature_intern	function	header-cache-key.c	
+sig_of	pp_header_cache_signatures_get	function,also:bench/vcc-cachekey.py	header-cache-key.c	
+hkey_get	pp_header_cache_key_get	function	header-cache-key.c	
+once_index	pp_once_file_find	function	header-cache-key.c	
+once_add	pp_once_file_add	function	header-cache-key.c	
+hcopy	pp_header_cache_copy	function	header-cache-publish.c	
+hstrdup	pp_header_cache_string_share	function	header-cache-publish.c	
+spell_blob	pp_header_cache_spelling_blob	function	header-cache-publish.c	
+publish_tok	pp_header_cache_tokens_collect	function	header-cache-publish.c	
+hc_account	pp_header_cache_bytes_account	function	header-cache-publish.c	
+publish	pp_header_cache_entry_publish	function,also:bench/vccd-sample.py	header-cache-publish.c	
+hc_end	pp_header_cache_region_end	function	header-cache-publish.c	
+touch_write_kid	pp_header_cache_touch_write_child	function	header-cache-record.c	
+rslot	pp_header_cache_stamp_slot	function	header-cache-record.c	
+rec_read	pp_header_cache_read_record	function,also:bench/vccd-sample.py	header-cache-record.c	
+new_cprov	pp_header_cache_counter_provenance_new	function	header-cache-record.c	
+cp_chain	pp_header_cache_counter_provenance_chain	function	header-cache-record.c	
+rec_ctr_read	pp_header_cache_counter_read_record	function	header-cache-record.c	
+mdef	pp_macro_define_record	function	header-cache-record.c	
+tu_mem	pp_memory_is_translation_unit	function	header-cache-record.c	
+rec_tok	pp_header_cache_token_record	function,also:bench/vccd-sample.py	header-cache-record.c	
+kex_has	pp_header_cache_child_exclusion_has	function	header-cache-record.c	
+lev_wrote	pp_header_cache_level_wrote	function	header-cache-record.c	
+kid_ex	pp_header_cache_child_exclusions_collect	function	header-cache-record.c	
+kid_writes	pp_header_cache_child_writes_mark	function	header-cache-record.c	
+cmp_u32	pp_uint32_compare	function	header-cache-record.c	
+kid_attach	pp_header_cache_child_attach	function	header-cache-record.c	
+hc_begin	pp_header_cache_region_begin	function	header-cache-record.c	
+push_replay	pp_header_cache_serve_push	function	header-cache-serve.c	
+replay_seg	pp_header_cache_serve_child	function	header-cache-serve.c	
+ctr_spell	pp_header_cache_counter_spell	function	header-cache-serve.c	
+replay_tok	pp_header_cache_serve_token	function	header-cache-serve.c	
+pp_lazy_skip	pp_lazy_body_skip	function,public	header-cache-serve.c	
+pp_lazy_tok	pp_lazy_body_token_get	function,public	header-cache-serve.c	
+apply_delta	pp_header_cache_delta_apply	function	header-cache-serve.c	
+hc_apply	pp_header_cache_entry_apply	function	header-cache-serve.c	
+hc_why	pp_header_cache_miss_explain	function	header-cache-serve.c	
+hc_try	pp_header_cache_entry_serve	function	header-cache-serve.c	
+emit	pp_header_cache_text_serve	function	header-cache-serve.c	
+pp_hc_stats	pp_header_cache_statistics_format	function,public	header-cache-statistics.c	
+hsalloc	pp_header_cache_allocate	function	header-cache-store.c	
+hck_init	pp_header_cache_chunk_table_init	function	header-cache-store.c	
+hck_hash	pp_header_cache_chunk_hash	function	header-cache-store.c	
+hck_get	pp_header_cache_chunk_get	function	header-cache-store.c	
+hc_blob	pp_header_cache_blob_get	function	header-cache-store.c	
+hc_vec	pp_header_cache_vector_store	function	header-cache-store.c	
+hc_top	pp_header_cache_region_is_allowed	function	header-cache-validate.c	
+hex_has	pp_header_cache_exclusion_set_has	function	header-cache-validate.c	
+dirs_differ	pp_header_cache_search_directories_differ	function,also:bench/vcc-cachekey.py	header-cache-validate.c	
+own_reads_ok	pp_header_cache_own_reads_valid	function	header-cache-validate.c	
+kids_ok	pp_header_cache_children_valid	function	header-cache-validate.c	
+tree_ok	pp_header_cache_tree_valid	function	header-cache-validate.c	
+hc_valid	pp_header_cache_entry_is_valid	function	header-cache-validate.c	
+hc_looks_ok	pp_header_cache_lookups_match	function,also:bench/vcc-cachekey.py	include.c	
+hc_env	pp_header_cache_environment_read	function	next-token.c	
+hc_mode	pp_header_cache_mode_set	function	next-token.c	
+pp_ntok	pp_token_count	function,public	header-skip.c	
+pp_skipped	pp_skipped_token_count	function,public	header-skip.c	
+pp_open_hit	pp_hit_open_get	function,public	header-skip.c	
+pp_hit_ntok	pp_hit_token_count	function,public	header-skip.c	
+drcov_hit	pp_coverage_hit_begin	function	header-skip.c	
+drcov_end	pp_coverage_hit_end	function	header-skip.c	
+pp_skip_top	pp_top_region_skip	function,public	header-skip.c	
+pp_skip_hit	pp_hit_skip	function,public	header-skip.c	
+parse_number	pp_number_parse	function	ifexpr.c	
+parse_char	pp_character_constant_parse	function	ifexpr.c	
+eadv	pp_if_token_advance	function	ifexpr.c	
+eprimary	pp_if_primary_parse	function	ifexpr.c	
+eprimary_	pp_if_primary_parse_inner	function	ifexpr.c	
+prec	pp_if_operator_precedence	function	ifexpr.c	
+ebinary	pp_if_binary_parse	function	ifexpr.c	
+econd	pp_if_conditional_parse	function	ifexpr.c	
+ecomma	pp_if_comma_parse	function	ifexpr.c	
+eval_if	pp_if_evaluate	function	ifexpr.c	
+eval_ptoks	pp_if_tokens_evaluate	function	ifexpr.c	
+pstrdup	pp_string_copy	function	include.c	
+try_path_	pp_path_try_inner	function	include.c	
+try_path	pp_path_try	function	include.c	
+find_include_	pp_include_find_inner	function,also:bench/vccd-sample.py	include.c	
+pp_include_flush	pp_include_cache_flush	function,public	include.c	
+inc_same	pp_include_answer_matches	function	include.c	
+inc_valid	pp_include_answer_is_valid	function	include.c	
+inc_used	pp_include_search_prefix_record	function	include.c	
+inc_mode	pp_include_lookup_mode	function	include.c	
+dir_sys	pp_include_directory_is_system	function	include.c	
+rec_lookup	pp_include_lookup_record	function	include.c	
+find_include	pp_include_find	function,also:bench/vccd-sample.py	include.c	
+find_include_at	pp_include_find_at	function	include.c	
+add_fent	pp_file_entry_add	function	include.c	
+guard_known	pp_include_guard_is_known	function	include.c	
+show_include	pp_include_show	function	include.c	
+inc_sys	pp_include_system_kind	function	include.c	
+dep_only	pp_dependency_add	function	include.c	
+prefetch_includes	pp_include_prefetch	function	include.c	
+enter_file	pp_file_enter	function,also:bench/vccd-sample.py	include.c	
+include	pp_include_run	function	include.c	
+mname_cmp	pp_macro_name_compare	function	macro-dump.c	
+dm_put	pp_macro_dump_append	function	macro-dump.c	
+dm_tok	pp_macro_dump_token	function	macro-dump.c	
+dm_one	pp_macro_dump_one	function	macro-dump.c	
+dd_text	pp_macro_define_event_print	function	macro-dump.c	
+dd_flush	pp_macro_define_events_flush	function	macro-dump.c	
+dd_out	pp_macro_define_event_record	function	macro-dump.c	
+pp_macros	pp_macros_dump	function,public	macro-dump.c	
+macro_hash	pp_macro_hash	function	macro.c	
+macro_same	pp_macro_is_same	function	macro.c	
+canon_macro	pp_macro_canonical_get	function	macro.c	
+named_variadic	pp_macro_named_variadic_warn	function	macro.c	
+define	pp_macro_define	function	macro.c	
+pp_next_slow	pp_token_next_slow	function	next-token.c	
+pp_next_mac	pp_token_next_macro	function	next-token.c	
+pp_next	pp_token_next	function,public	next-token.c	
+pp_hold_tmp	pp_temporary_hold	function,public	next-token.c	
+pp_wc_maybe	pp_warning_is_possible	function	ppimpl.h	
+utoa	pp_unsigned_format	function	ppimpl.h	
+mget	pp_macro_table_get	function	ppimpl.h	
+mslot	pp_macro_table_slot	function	ppimpl.h	
+mset	pp_macro_table_set	function	ppimpl.h	
+mdisable	pp_macro_table_disable	function	ppimpl.h	
+menable	pp_macro_table_enable	function	ppimpl.h	
+touch	pp_header_cache_touch	function	ppimpl.h	
+touch_read	pp_header_cache_touch_read	function	ppimpl.h	
+touch_write	pp_header_cache_touch_write	function	ppimpl.h	
+mread_tok	pp_macro_read_token	function	ppimpl.h	
+mread	pp_macro_read	function	ppimpl.h	
+mdefined	pp_macro_is_defined	function	ppimpl.h	
+mguard	pp_macro_guard_is_defined	function	ppimpl.h	
+out_put	pp_output_append	function	ppimpl.h	
+out_ch	pp_output_append_character	function	ppimpl.h	
+vfill	pp_token_fill_from_lexer	function	ppimpl.h	
+spell_to16	pp_token_spell_to_padded	function	ppimpl.h	
+svpush	pp_scratch_token_push	function	ppimpl.h	
+push	pp_context_push	function	ppimpl.h	
+raw_plain	pp_token_raw_plain_next	function	ppimpl.h	
+raw_fast	pp_token_raw_fast_next	function	ppimpl.h	
+next_exp	pp_token_expanded_next	function	ppimpl.h	
+next_tok	pp_token_next_resetting_temporary	function	ppimpl.h	
+idch	pp_character_is_identifier	function	ppimpl.h	
+text_start	pp_header_cache_text_start	function	ppimpl.h	
+out_reserve	pp_output_reserve	function	text-output.c	
+ucn_utf8	pp_identifier_ucn_to_utf8	function	text-output.c	
+out_nl	pp_output_newline	function	text-output.c	
+lm_write	pp_line_marker_write	function	text-output.c	
+lm_file	pp_line_marker_file_set	function	text-output.c	
+lm_count	pp_line_marker_builtin_count	function	text-output.c	
+lm_builtin_block	pp_line_marker_builtin_block_write	function	text-output.c	
+lm_enter	pp_line_marker_file_enter	function	text-output.c	
+lm_rename	pp_line_marker_file_rename	function	text-output.c	
+move_to_line	pp_output_line_move	function	text-output.c	
+text_file_change	pp_output_file_change	function	text-output.c	
+cmt_line_end	pp_comment_line_end	function	text-output.c	
+cmt_print	pp_comment_print	function	text-output.c	
+cmt_flush	pp_comments_flush	function	text-output.c	
+cmt_skip_to	pp_comments_skip_to	function	text-output.c	
+avoid_concat	pp_output_avoids_concatenation	function	text-output.c	
+tok_col	pp_token_column	function	text-output.c	
+render	pp_token_render	function	text-output.c	
+pp_text	pp_text_render	function,public	text-output.c	
+mkeof	pp_token_eof_make	function	token.c	
+splice_at	pp_splice_length	function	token.c	
+pp_spell	pp_token_spell	function,public	token.c	
+spell_to	pp_token_spell_to	function	token.c	
+svtake	pp_scratch_tokens_take	function	token.c	
+push_ptok	pp_context_tokens_push	function	token.c	
+push_line	pp_context_directive_line_push	function	token.c	
+pop_to	pp_context_pop_to	function	token.c	
+top_event	pp_top_event_record	function	token.c	
+raw	pp_token_raw_next	function	token.c	
+raw_pop	pp_token_raw_pop	function	token.c	
+peek_lparen	pp_next_is_left_paren	function	token.c	
+next_exp_slow	pp_token_expanded_next_slow	function,also:bench/vccd-sample.py	token.c	
+dollar_split	pp_dollar_split	function	token.c	
+vm	pp_address_space_reserve	function	translation-unit.c	
+bi_init	pp_builtin_macros_init	function	translation-unit.c	
+stdin_file	pp_stdin_file_lex	function	translation-unit.c	
+pp_errors	pp_error_count	function,public	translation-unit.c	
+pp_set_fatal	pp_fatal_jump_set	function,public	translation-unit.c	
+pp_files	pp_file_names	function,public	translation-unit.c	
+ar_cur	lex_region_cursor	variable	lex.c	per-thread bump region: next free byte
+ar_end	lex_region_end	variable	lex.c	per-thread bump region: end of the mapped stretch
+cls	lex_byte_class_table	variable	lex.c	byte to class (LEX_CLASS_*), built once
+isid	lex_identifier_byte_table	variable	lex.c	byte is an identifier character
+fcls	lex_fast_class_table	variable	lex.c	byte to fast-path class (LEX_FAST_*)
+pidx	lex_punctuator_row_table	variable,in:lex.c	lex.c	byte to row in lex_punctuator_table, 0: not a punctuator
+ptab	lex_punctuator_table	variable	lex.c	per row and next byte: kind | length << 8 | LEX_PUNCTUATOR_* flags
+ptab_alt	lex_punctuator_alternative_table	variable	lex.c	digraph alternatives by kind
+ktab	lex_punctuator_kind_table	variable	lex.c	punctuator kind by its first two bytes (little endian)
+ttab	lex_structure_table	variable	lex.c	structural properties by byte (may double, ...), see the comment above it
+gtab	lex_group_table	variable	lex.c	structural properties of the second byte of a pair
+cltab	lex_class_table	variable	lex.c	the byte classes of the NEON/AVX classifier, by byte
+lo_tab	lex_low_nibble_table	variable	lex.c	PSHUFB table indexed by the low nibble
+hi_tab	lex_high_nibble_table	variable	lex.c	PSHUFB table indexed by the high nibble
+names	lex_token_kind_names	variable	lex.c	clang's raw-token names by kind
+ctab	lex_cache_table	variable	lex.c	the token cache: chained buckets of lex_cache_entry
+ioq	lex_prefetch_queue	variable	lex.c	entries waiting for a read-ahead thread
+ioq_cap	lex_prefetch_queue_capacity	variable	lex.c	
+ioq_head	lex_prefetch_queue_head	variable	lex.c	
+ioq_tail	lex_prefetch_queue_tail	variable	lex.c	
+ioq_mu	lex_prefetch_queue_mutex	variable	lex.c	
+ioq_cv	lex_prefetch_queue_condition	variable	lex.c	
+scratch	lex_scratch	variable	lex.c	per-thread lexer scratch, grown on demand
+scratch_size	lex_scratch_bytes	variable	lex.c	bytes in lex_scratch
+tables_once	lex_tables_once	variable	lex.c	
+vlex_get_hook	lex_file_get_hook	variable,public	lex.h	fuzzing and tests: replaces the file cache
+vlex_no_intern	lex_identifiers_not_interned	variable,public	lex.h	this thread: ids stay 0
+base	pp_directory_cache_base	variable,in:dircache.c	dircache.c	base of the cache's bump region (lazily mapped)
+used	pp_directory_cache_used	variable,in:dircache.c	dircache.c	bytes handed out from pp_directory_cache_base
+dtab	pp_directory_cache_table	variable	dircache.c	chained buckets of pp_directory_node
+vdir_probes	pp_directory_probe_count	variable,public	dircache.h	VPP_TIME counter
+bi	pp_builtin_macro_names	variable,in:translation-unit.c	translation-unit.c	builtin macro names with their PP_BUILTIN_* ids
+bi_macro	pp_builtin_macros	variable	translation-unit.c	the process-wide builtin macro definitions, parallel to the names
+pppool	pp_translation_unit_pool	variable	translation-unit.c	region sets reused from one TU to the next
+ppr	pp_translation_unit_regions	variable	translation-unit.c	this thread's region set while a TU is open
+canon_tab	pp_macro_canonical_table	variable	macro.c	definitions in the main file and <built-in>, one pointer per content
+no_body	pp_macro_empty_body	variable	macro.c	body of an empty macro
+emb_digits	pp_embed_digit_spellings	variable	embed.c	"0" .. "255" for #embed, four bytes each
+emb_once	pp_embed_digits_once	variable	embed.c	
+hc_off	pp_header_cache_disabled	variable	next-token.c	VPP_NOHC
+pp_drcov	pp_coverage_enabled	variable	next-token.c	VCC_DRCOV, VCC_DRREC or VCC_DR set: record cache hits for the coverage tools
+hc_mem_max	pp_header_cache_memory_limit	variable	header-cache-key.c	bytes of entries stored before the cache stops (VPP_HC_MAX_MB)
+hkey_tab	pp_header_cache_key_table	variable	header-cache-key.c	open addressing, insert only
+sig_mu	pp_signature_mutex	variable	header-cache-key.c	guards the three signature arrays
+sig_str	pp_signature_strings	variable	header-cache-key.c	option and search-path strings by id
+sig_len	pp_signature_lengths	variable	header-cache-key.c	
+nsig	pp_signature_count	variable	header-cache-key.c	
+hck_tab	pp_header_cache_chunk_table	variable	header-cache-store.c	shared chunks by content hash
+hck_once	pp_header_cache_chunk_once	variable	header-cache-store.c	
+hstat	pp_header_cache_statistics	variable	header-cache-statistics.c	process-wide counters
+idch_tab	pp_identifier_character_table	variable	expand.c	byte is an identifier character, as the lexer's table
+puncts	pp_punctuator_table	variable	expand.c	spellings of punctuators for the ## classifier
+inc_tab	pp_include_answer_table	variable	include.c	include lookups, insert only, stops at 3/4 full
+inc_n	pp_include_answer_count	variable	include.c	
+pf_on	pp_prefetch_enabled	variable	include.c	-1: not read yet; VPP_NOPREFETCH
+pp_stat_try	pp_include_lookup_count	variable,public	include.c	VPP_TIME: include lookups
+pp_stat_skip	pp_include_guard_skip_count	variable,public	include.c	VPP_TIME: lookups answered by a known guard
+shared_base	pp_shared_region_base	variable	file.c	the process-wide bump region (16 GB reserved)
+shared_used	pp_shared_region_used	variable	file.c	bytes handed out
+out_spare	pp_output_spare	variable	text-output.c	this thread's last -E buffer, kept for the next TU
+out_spare_cap	pp_output_spare_capacity	variable	text-output.c	
+tk_spare	pp_recording_spare_tokens	variable	header-cache-record.c	this thread's recording buffer of tokens, kept for the next TU
+sb_spare	pp_recording_spare_spellings	variable	header-cache-record.c	its spelling buffer
+rec_spare	pp_recording_spare_buffers	variable	header-cache-record.c	the other recording arrays (Q-lexpp-07: kid and kex are not unmapped by pp_close)
+mdir	macro_directory	field	struct pp	pages of macro entries by identifier id (two-level); bit 0 of an entry: disabled while expanding
+hold_tmp	temporary_held	field	struct pp	the consumer still holds earlier tokens: temporary_region is not reset (pp_hold_tmp)
+svn	scratch_token_count	field	struct pp	
+next_base	next_location_base	field	struct pp	location base of the next file entered
+ntok_out	tokens_delivered	field	struct pp	tokens pp_token_next has returned
+skipped_tok	tokens_skipped	field	struct pp	tokens of regions pp_top_region_skip dropped
+drh	hit_regions	field	struct pp	VCC_DRCOV: header-cache hits by delivered position (pp_hit_regions)
+ndrs	open_hit_count	field	struct pp	
+drs	open_hits	field	struct pp	VCC_DRCOV: hits whose replay is still open
+tev	top_events	field	struct pp	top-level region events (pp_top_events)
+ntev	top_event_count	field	struct pp	
+top_rec	top_region_recording	field	struct pp	a top-level region is being recorded: its end is reported as an event
+hc_last	header_cache_last_entry	field	struct pp	the entry applied last
+rep_norec	token_unrecorded	field	struct pp	the token raw() just gave came from a replay whose positions are reserved, not copied
+preexp	argument_preexpansion	field	struct pp	inside argument pre-expansion
+oncecap	once_file_capacity	field	struct pp	
+npushed	pushed_macro_count	field	struct pp	
+dtr	diagnostic_transitions	field	struct pp	state changes by location
+dstk	diagnostic_stack	field	struct pp	#pragma push/pop
+nden	diagnostic_enabling_count	field	struct pp	"warning"/"error" nodes: only they turn a warning on
+mdx	macro_definition_sites	field	struct pp	every #define's site by name, built when a macro note is needed (diag)
+mdx_nfe	macro_definition_site_files	field	struct pp	files already scanned for sites
+wc_o	warning_cache_options	field	struct pp	the options warning_cache was computed for
+base_name	base_file_name	field	struct pp	__BASE_FILE__
+base_namelen	base_file_name_length	field	struct pp	
+fatal_jb	fatal_jump	field	struct pp	fatal errors end the TU here
+diag_last	diagnostic_last_location	field	struct pp	last diagnostic's location + 1
+diag_lastnote	diagnostic_last_is_note	field	struct pp	
+diag_fe	diagnostic_last_file	field	struct pp	file of the last diagnostic + 1 (for "In file included from")
+dtail	diagnostic_tail	field	struct pp	
+dtrack	diagnostic_track	field	struct pp	VCC_TRACK_DIAG: vcc's call site after each diagnostic
+dfinished	diagnostic_finished	field	struct pp	pp_diag_finish ran
+dpend	diagnostic_pending_structured	field	struct pp	-fdiagnostics-format=json: the record not yet written
+tpend	diagnostic_pending_text	field	struct pp	vcc's text style: the record not yet rendered (its notes may follow)
+dlast1	diagnostic_previous_location	field	struct pp	clang's LastLoc + 1 (0: none)
+dlastlv	diagnostic_previous_level	field	struct pp	clang's LastLevel
+in_dir	in_directive	field	struct pp	evaluating a directive's tokens (#if, #include, #line)
+coll_name	collecting_name	field	struct pp	and its id
+capout	output_capacity	field	struct pp	
+pk_end	previous_end	field	struct pp	where its spelling ends in the source (NULL: dirty)
+emb_tail	embed_tail	field	struct pp	-E: tokens left that were suffix() / if_empty()
+out_text	output_text_mode	field	struct pp	0: pp_next, 1: -E, 2: -E -C
+sol_depth	line_start_context_depth	field	struct pp	context depth where line_start_name_active was set
+exp_loc	expansion_location	field	struct pp	clang's expansion location: where the outermost macro name is
+sol_loc	line_start_location	field	struct pp	the source macro name a line starts with
+lm_sys	marker_is_system	field	struct pp	the current file is a system header
+lm_bline	marker_builtin_line	field	struct pp	<built-in>'s line
+lm_name	marker_file_name	field	struct pp	the current file's presumed name
+lm_nlen	marker_file_name_length	field	struct pp	
+dd_ev	define_events	field	struct pp	-dD: <built-in>'s #define/#undef until printed
+capdd	define_event_capacity	field	struct pp	
+dd_done	define_events_printed	field	struct pp	
+tokmode	output_mode	field	struct pp	0 unset, 1 text (pp_text), 2 tokens (pp_next)
+hc_bytes	entry_bytes	field	struct pp	what the entry being published allocated
+bcache	blob_cache	field	struct pp	recent spelling blobs by hash
+kspell	punctuator_blobs	field	struct pp	punctuator spelling blobs by kind
+ckc	chunk_cache_by_hash	field	struct pp	recent chunks by hash (most repeats are a child's)
+vkc	chunk_cache_by_ids	field	struct pp	recent chunks by (first id, last id, length)
+badline	uncacheable_line	field	struct hrec	source line of the HC_BAD that made them so (debugging)
+lev	levels	field	struct hrec	
+nkex	child_exclusion_count	field	struct hrec	
+ncp	counter_provenance_count	field	struct hrec	
+nsb	spelling_bytes	field	struct hrec	
+oadd	once_additions	field	struct hent	
+nbr	brace_pair_count	field	struct hent	
+edir_end	directive_on_line_at_end	field	struct hent	
+trail	trailing_space	field	struct ctx	PP_CONTEXT_TOKENS: ended in an empty argument after a space
+sdl	spelled_directory_length	field	struct ctx	
+dstate	diagnostic_state	field	struct fent	the #pragma diagnostic state where it was entered
+cpos	comment_position	field	struct fent	-C: comments before here are printed or dropped (NULL: none yet)
+ndir	directive_count	field	struct pfile	
+badtok	unbalanced_token	field	struct pfile	the directive name's token
+rbase	record_base	field	struct hfent	
+cdelta	counter_delta	field	struct hseg	child's counter at entry - ours
+from_sdl	from_directory_length	field	struct hlook	
+npushed0	pushed_macros_at_start	field	struct hlev	
+text0	text_at_start	field	struct hlev	
+klen	key_length	field	struct incent	
+usig	used_signature	field	struct incent	psig[used]
+preln	preexpanded_lengths	field	struct margs	
+prest	preexpanded_state	field	struct margs	0: not computed, 1: done
+elided	variadic_elided	field	struct margs	the variadic argument was left out (clang's isVarargsElidedUse)
+emp	if_empty	field	struct embprm	
+nemp	if_empty_count	field	struct embprm	
+pdir	pp_directive_span	type	ppimpl.h	a directive's token range in a file's skeleton
+pmacro	pp_macro	type	ppimpl.h	
+pfile	pp_skeleton	type	ppimpl.h	per-file directive skeleton shared by all TUs
+incent	pp_include_answer	type	include.c	
+ctx	pp_context	type	ppimpl.h	a token source on the context stack
+fent	pp_file_entry	type	ppimpl.h	
+ival	pp_if_value	type	ppimpl.h	
+hread	pp_header_cache_read	type	header-cache-internal.h	
+honce	pp_header_cache_once_mark	type	header-cache-internal.h	
+hfent	pp_header_cache_file	type	header-cache-internal.h	
+cprov	pp_header_cache_counter_provenance	type	header-cache-internal.h	
+hctr	pp_header_cache_counter_run	type	header-cache-internal.h	
+hcread	pp_header_cache_counter_name_read	type	header-cache-internal.h	
+hent	pp_header_cache_entry	type	header-cache-internal.h	
+hkid	pp_header_cache_child	type	header-cache-internal.h	
+htok	pp_header_cache_token	type	header-cache-internal.h	
+hseg	pp_header_cache_segment	type	header-cache-internal.h	
+hck	pp_header_cache_chunk	type	header-cache-internal.h	
+hvec	pp_header_cache_vector	type	header-cache-internal.h	
+hlook	pp_header_cache_lookup	type	header-cache-internal.h	
+hkey	pp_header_cache_key	type	header-cache-internal.h	
+htouch	pp_header_cache_touch_record	type	header-cache-internal.h	
+hcpos	pp_header_cache_counter_position	type	header-cache-internal.h	
+hcrd	pp_header_cache_counter_read	type	header-cache-internal.h	
+hsegr	pp_header_cache_recorded_segment	type	header-cache-internal.h	
+hlev	pp_header_cache_level	type	header-cache-internal.h	
+hkidr	pp_header_cache_recorded_child	type	header-cache-internal.h	
+hstat_t	pp_header_cache_statistics_counters	type	header-cache-internal.h	
+rec_spare_t	pp_recording_spare_buffer_set	type	header-cache-internal.h	
+struct hrec	struct pp_recording	type	ppimpl.h	struct pp.rec
+struct lmark	struct pp_line_mark	type	ppimpl.h	
+struct pdnode	struct pp_diagnostic_node	type	ppimpl.h	
+hexf	pp_header_cache_exclusion_set	type	header-cache-validate.c	
+kexf	pp_header_cache_exclusion_run	type	header-cache-record.c	
+margs	pp_macro_arguments	type	expand.c	
+ev	pp_if_evaluation	type	ifexpr.c	
+embprm	pp_embed_parameters	type	embed.c	
+dnode	pp_directory_node	type	dircache.c	
+centry	lex_cache_entry	type	lex.c	
+vtok	lex_token	type,public	lex.h	
+vlex_file	lex_file	type,public	lex.h	
+enum vtok_kind	enum lex_token_kind	type,public	lex.h	
+D_OTHER	PP_DIRECTIVE_OTHER	constant	ppimpl.h	
+D_NULL	PP_DIRECTIVE_NULL	constant	ppimpl.h	
+D_IF	PP_DIRECTIVE_IF	constant	ppimpl.h	
+D_IFDEF	PP_DIRECTIVE_IFDEF	constant	ppimpl.h	
+D_IFNDEF	PP_DIRECTIVE_IFNDEF	constant	ppimpl.h	
+D_ELIF	PP_DIRECTIVE_ELIF	constant	ppimpl.h	
+D_ELIFDEF	PP_DIRECTIVE_ELIFDEF	constant	ppimpl.h	
+D_ELIFNDEF	PP_DIRECTIVE_ELIFNDEF	constant	ppimpl.h	
+D_ELSE	PP_DIRECTIVE_ELSE	constant	ppimpl.h	
+D_ENDIF	PP_DIRECTIVE_ENDIF	constant	ppimpl.h	
+D_DEFINE	PP_DIRECTIVE_DEFINE	constant	ppimpl.h	
+D_UNDEF	PP_DIRECTIVE_UNDEF	constant	ppimpl.h	
+D_INCLUDE	PP_DIRECTIVE_INCLUDE	constant	ppimpl.h	
+D_INCLUDE_NEXT	PP_DIRECTIVE_INCLUDE_NEXT	constant	ppimpl.h	
+D_IMPORT	PP_DIRECTIVE_IMPORT	constant	ppimpl.h	
+D_PRAGMA	PP_DIRECTIVE_PRAGMA	constant	ppimpl.h	
+D_ERROR	PP_DIRECTIVE_ERROR	constant	ppimpl.h	
+D_WARNING	PP_DIRECTIVE_WARNING	constant	ppimpl.h	
+D_LINE	PP_DIRECTIVE_LINE	constant	ppimpl.h	
+D_LINEMARK	PP_DIRECTIVE_LINE_MARKER	constant	ppimpl.h	
+D_IDENT	PP_DIRECTIVE_IDENT	constant	ppimpl.h	
+D_IMACROS	PP_DIRECTIVE_IMACROS	constant	ppimpl.h	
+D_EMBED	PP_DIRECTIVE_EMBED	constant	ppimpl.h	
+D_UNKNOWN	PP_DIRECTORY_UNKNOWN	constant	dircache.c	
+D_PROBING	PP_DIRECTORY_PROBING	constant	dircache.c	
+D_EXISTS	PP_DIRECTORY_EXISTS	constant	dircache.c	
+D_MISSING	PP_DIRECTORY_MISSING	constant	dircache.c	
+MK_OBJ	PP_MACRO_OBJECT_LIKE	constant	ppimpl.h	
+MK_FUNC	PP_MACRO_FUNCTION_LIKE	constant	ppimpl.h	
+MK_BUILTIN	PP_MACRO_BUILTIN	constant	ppimpl.h	
+MF_VARIADIC	PP_MACRO_FLAG_VARIADIC	constant	ppimpl.h	
+MF_PASTE	PP_MACRO_FLAG_PASTE	constant	ppimpl.h	
+MF_VAOPT	PP_MACRO_FLAG_VA_OPT	constant	ppimpl.h	
+MF_BADHASH	PP_MACRO_FLAG_BAD_HASH	constant	ppimpl.h	
+MF_HASH	PP_MACRO_FLAG_HAS_HASH	constant	ppimpl.h	
+MF_UNKNOWN	PP_MACRO_FLAG_UNKNOWN_TOKEN	constant	ppimpl.h	
+B_NONE	PP_BUILTIN_NONE	constant	ppimpl.h	
+B_FILE	PP_BUILTIN_FILE	constant	ppimpl.h	
+B_LINE	PP_BUILTIN_LINE	constant	ppimpl.h	
+B_COUNTER	PP_BUILTIN_COUNTER	constant	ppimpl.h	
+B_DATE	PP_BUILTIN_DATE	constant	ppimpl.h	
+B_TIME	PP_BUILTIN_TIME	constant	ppimpl.h	
+B_TIMESTAMP	PP_BUILTIN_TIMESTAMP	constant	ppimpl.h	
+B_BASE_FILE	PP_BUILTIN_BASE_FILE	constant	ppimpl.h	
+B_FILE_NAME	PP_BUILTIN_FILE_NAME	constant	ppimpl.h	
+B_INCLUDE_LEVEL	PP_BUILTIN_INCLUDE_LEVEL	constant	ppimpl.h	
+B_PRAGMA	PP_BUILTIN_PRAGMA	constant	ppimpl.h	
+B_HAS_ATTRIBUTE	PP_BUILTIN_HAS_ATTRIBUTE	constant	ppimpl.h	
+B_HAS_BUILTIN	PP_BUILTIN_HAS_BUILTIN	constant	ppimpl.h	
+B_HAS_FEATURE	PP_BUILTIN_HAS_FEATURE	constant	ppimpl.h	
+B_HAS_EXTENSION	PP_BUILTIN_HAS_EXTENSION	constant	ppimpl.h	
+B_HAS_C_ATTRIBUTE	PP_BUILTIN_HAS_C_ATTRIBUTE	constant	ppimpl.h	
+B_HAS_CPP_ATTRIBUTE	PP_BUILTIN_HAS_CPP_ATTRIBUTE	constant	ppimpl.h	
+B_HAS_DECLSPEC	PP_BUILTIN_HAS_DECLSPEC_ATTRIBUTE	constant	ppimpl.h	
+B_HAS_WARNING	PP_BUILTIN_HAS_WARNING	constant	ppimpl.h	
+B_HAS_CONSTEXPR_BUILTIN	PP_BUILTIN_HAS_CONSTEXPR_BUILTIN	constant	ppimpl.h	
+B_IS_TARGET_ARCH	PP_BUILTIN_IS_TARGET_ARCHITECTURE	constant	ppimpl.h	
+B_IS_TARGET_OS	PP_BUILTIN_IS_TARGET_OS	constant	ppimpl.h	
+B_IS_TARGET_VENDOR	PP_BUILTIN_IS_TARGET_VENDOR	constant	ppimpl.h	
+B_IS_TARGET_ENVIRONMENT	PP_BUILTIN_IS_TARGET_ENVIRONMENT	constant	ppimpl.h	
+B_IS_TARGET_VARIANT_OS	PP_BUILTIN_IS_TARGET_VARIANT_OS	constant	ppimpl.h	
+B_IS_TARGET_VARIANT_ENVIRONMENT	PP_BUILTIN_IS_TARGET_VARIANT_ENVIRONMENT	constant	ppimpl.h	
+B_BUILDING_MODULE	PP_BUILTIN_BUILDING_MODULE	constant	ppimpl.h	
+B_IS_IDENTIFIER	PP_BUILTIN_IS_IDENTIFIER	constant	ppimpl.h	
+B_HAS_INCLUDE	PP_BUILTIN_HAS_INCLUDE	constant	ppimpl.h	
+B_HAS_INCLUDE_NEXT	PP_BUILTIN_HAS_INCLUDE_NEXT	constant	ppimpl.h	
+B_HAS_EMBED	PP_BUILTIN_HAS_EMBED	constant	ppimpl.h	
+C_FILE	PP_CONTEXT_FILE	constant	ppimpl.h	
+C_VTOK	PP_CONTEXT_LEXED	constant	ppimpl.h	lexer tokens (vtok), e.g. a macro body or a directive line
+C_PTOK	PP_CONTEXT_TOKENS	constant	ppimpl.h	preprocessor tokens (ptok)
+C_REPLAY	PP_CONTEXT_SERVED	constant	ppimpl.h	a header-cache entry's tokens
+MPAGE_BITS	PP_MACRO_PAGE_BITS	constant	ppimpl.h	
+MPAGE	PP_MACRO_PAGE_SIZE	constant	ppimpl.h	
+NMDIR	PP_MACRO_DIRECTORY_SIZE	constant	ppimpl.h	
+MAXCTX	PP_CONTEXT_MAX	constant	ppimpl.h	
+SVMAX	PP_SCRATCH_TOKENS_MAX	constant	ppimpl.h	
+HDEF	PP_HEADER_CACHE_DEFINED	constant	header-cache-internal.h	read: only "defined" was read, and it was
+HNONE	PP_HEADER_CACHE_NONE	constant	header-cache-internal.h	
+HF_X	PP_HEADER_CACHE_TOKEN_ESCAPE	constant	header-cache-internal.h	
+HC_MAXLEV	PP_HEADER_CACHE_LEVEL_MAX	constant	header-cache-internal.h	
+HC_MAXVAR	PP_HEADER_CACHE_VARIANT_MAX	constant	header-cache-internal.h	
+HC_MAXORD	PP_HEADER_CACHE_ONCE_MARK_MAX	constant	header-cache-internal.h	
+HC_MAXSEG	PP_HEADER_CACHE_SEGMENT_MAX	constant	header-cache-internal.h	
+HC_MAXTK	PP_HEADER_CACHE_TOKEN_MAX	constant	header-cache-internal.h	
+HC_MAXSB	PP_HEADER_CACHE_SPELLING_BYTES_MAX	constant	header-cache-internal.h	
+HC_MAXKID	PP_HEADER_CACHE_CHILD_MAX	constant	header-cache-internal.h	
+HC_MAXKEX	PP_HEADER_CACHE_CHILD_EXCLUSION_MAX	constant	header-cache-internal.h	
+HC_MAXLK	PP_HEADER_CACHE_LOOKUP_MAX	constant	header-cache-internal.h	
+HC_MAXT	PP_HEADER_CACHE_TOUCH_MAX	constant	header-cache-internal.h	
+HC_MAXCP	PP_HEADER_CACHE_COUNTER_PROVENANCE_MAX	constant	header-cache-internal.h	
+HC_MAXCRD	PP_HEADER_CACHE_COUNTER_READ_MAX	constant	header-cache-internal.h	
+HT_R	PP_HEADER_CACHE_TOUCH_READ	constant	header-cache-internal.h	
+HT_W	PP_HEADER_CACHE_TOUCH_WRITE	constant	header-cache-internal.h	
+HT_G	PP_HEADER_CACHE_TOUCH_GUARD	constant	header-cache-internal.h	the read was an include guard check
+HT_O	PP_HEADER_CACHE_TOUCH_OWN	constant	header-cache-internal.h	the last write was the level's own, not a child entry's
+PPW_C2Y	PP_WARNING_C2Y	constant	ppimpl.h	
+PPW_VARIADIC	PP_WARNING_VARIADIC_MACRO	constant	ppimpl.h	
+PPW_N	PP_WARNING_COUNT	constant	ppimpl.h	
+DRCOV_MAX	PP_COVERAGE_HIT_MAX	constant	ppimpl.h	
+SHARED_MAX	PP_SHARED_REGION_SIZE	constant	file.c	
+INC_BITS	PP_INCLUDE_ANSWER_TABLE_BITS	constant	include.c	
+HKEY_BITS	PP_HEADER_CACHE_KEY_TABLE_BITS	constant	header-cache-key.c	
+HCK_BITS	PP_HEADER_CACHE_CHUNK_TABLE_BITS	constant	header-cache-store.c	
+CANON_BITS	PP_MACRO_CANONICAL_TABLE_BITS	constant	macro.c	
+DBITS	PP_DIRECTORY_CACHE_TABLE_BITS	constant	dircache.c	
+DC_MAX	PP_DIRECTORY_CACHE_SIZE	constant	dircache.c	
+error	PP_ERROR	macro	ppimpl.h	collides with libc error()
+fatal	PP_FATAL	macro	ppimpl.h	
+warn	PP_WARN	macro	ppimpl.h	collides with libc warn()
+HC_BAD	PP_HEADER_CACHE_REGION_REJECT	macro	ppimpl.h	the open regions are not cacheable
+HV_FOR	PP_HEADER_CACHE_VECTOR_FOR	macro	header-cache-internal.h	evaluates its arguments once; break leaves the inner loop only
+IDCH_ROW	PP_IDENTIFIER_CHARACTER_ROW	macro	expand.c	
+R16	PP_ROUND_UP_16	macro	header-cache-publish.c	
+C_OTHER	LEX_CLASS_OTHER	constant	lex.c	
+C_WS	LEX_CLASS_WHITESPACE	constant	lex.c	
+C_NL	LEX_CLASS_NEWLINE	constant	lex.c	
+C_CR	LEX_CLASS_CARRIAGE_RETURN	constant	lex.c	
+C_NUL	LEX_CLASS_NUL	constant	lex.c	
+C_ID	LEX_CLASS_IDENTIFIER	constant	lex.c	
+C_PFX	LEX_CLASS_LITERAL_PREFIX	constant	lex.c	
+C_DIGIT	LEX_CLASS_DIGIT	constant	lex.c	
+C_PUNCT	LEX_CLASS_PUNCTUATOR	constant	lex.c	
+C_SQUOTE	LEX_CLASS_SINGLE_QUOTE	constant	lex.c	
+C_DQUOTE	LEX_CLASS_DOUBLE_QUOTE	constant	lex.c	
+C_BSLASH	LEX_CLASS_BACKSLASH	constant	lex.c	
+C_HIGH	LEX_CLASS_HIGH_BIT	constant	lex.c	
+K_ID	LEX_FAST_IDENTIFIER	constant	lex.c	
+K_NUM	LEX_FAST_NUMBER	constant	lex.c	
+K_PUNCT	LEX_FAST_PUNCTUATOR	constant	lex.c	
+K_SLOW	LEX_FAST_SLOW	constant	lex.c	
+PT_ALT	LEX_PUNCTUATOR_ALTERNATIVE	constant	lex.c	
+PT_SLOW	LEX_PUNCTUATOR_SLOW	constant	lex.c	
+M_ID	LEX_MASK_IDENTIFIER	constant	lex.c	
+M_WS	LEX_MASK_WHITESPACE	constant	lex.c	
+M_NL	LEX_MASK_NEWLINE	constant	lex.c	
+M_DIG	LEX_MASK_DIGIT	constant	lex.c	
+M_P	LEX_MASK_PREFIX	constant	lex.c	
+M_PAIR	LEX_MASK_PAIR	constant	lex.c	
+M_X	LEX_MASK_HANDLER	constant	lex.c	
+M_NS	LEX_MASK_SIGN_NEXT	constant	lex.c	
+M_COUNT	LEX_MASK_COUNT	constant	lex.c	
+CE_QUEUED	LEX_CACHE_QUEUED	constant	lex.c	
+CE_READING	LEX_CACHE_READING	constant	lex.c	
+CE_READ	LEX_CACHE_READ	constant	lex.c	
+CE_LOADING	LEX_CACHE_LOADING	constant	lex.c	
+CE_OK	LEX_CACHE_OK	constant	lex.c	
+CE_MISSING	LEX_CACHE_MISSING	constant	lex.c	
+IO_THREADS	LEX_PREFETCH_THREADS	constant	lex.c	
+CBITS	LEX_CACHE_TABLE_BITS	constant	lex.c	
+TF_SOL	LEX_TOKEN_FLAG_LINE_START	constant,public	lex.h	
+TF_SPACE	LEX_TOKEN_FLAG_SPACE_BEFORE	constant,public	lex.h	
+TF_DIRTY	LEX_TOKEN_FLAG_SPLICED	constant,public	lex.h	
+TF_RAW	LEX_TOKEN_FLAG_RAW_STRING	constant,public	lex.h	
+PF_NOEXP	PP_TOKEN_FLAG_NO_EXPAND	constant,public	pp.h	
+PF_NOPASTE	PP_TOKEN_FLAG_NO_PASTE	constant,public	pp.h	
+PF_MACRO	PP_TOKEN_FLAG_FROM_MACRO	constant,public	pp.h	
+PF_EMBEND	PP_TOKEN_FLAG_EMBED_END	constant,public	pp.h	
+P_DIRECTIVE	PP_TOKEN_KIND_DIRECTIVE_LINE	constant,public	pp.h	
+T_EOF	LEX_TOKEN_EOF	constant,public	lex.h	
+T_IDENT	LEX_TOKEN_IDENTIFIER	constant,public	lex.h	
+T_NUMBER	LEX_TOKEN_NUMBER	constant,public	lex.h	
+T_CHAR	LEX_TOKEN_CHARACTER	constant,public	lex.h	
+T_WCHAR	LEX_TOKEN_WIDE_CHARACTER	constant,public	lex.h	
+T_U8CHAR	LEX_TOKEN_UTF8_CHARACTER	constant,public	lex.h	
+T_U16CHAR	LEX_TOKEN_UTF16_CHARACTER	constant,public	lex.h	
+T_U32CHAR	LEX_TOKEN_UTF32_CHARACTER	constant,public	lex.h	
+T_STRING	LEX_TOKEN_STRING	constant,public	lex.h	
+T_WSTRING	LEX_TOKEN_WIDE_STRING	constant,public	lex.h	
+T_U8STRING	LEX_TOKEN_UTF8_STRING	constant,public	lex.h	
+T_U16STRING	LEX_TOKEN_UTF16_STRING	constant,public	lex.h	
+T_U32STRING	LEX_TOKEN_UTF32_STRING	constant,public	lex.h	
+T_UNKNOWN	LEX_TOKEN_UNKNOWN	constant,public	lex.h	
+T_LSQUARE	LEX_TOKEN_LEFT_SQUARE	constant,public	lex.h	
+T_RSQUARE	LEX_TOKEN_RIGHT_SQUARE	constant,public	lex.h	
+T_LPAREN	LEX_TOKEN_LEFT_PAREN	constant,public	lex.h	
+T_RPAREN	LEX_TOKEN_RIGHT_PAREN	constant,public	lex.h	
+T_LBRACE	LEX_TOKEN_LEFT_BRACE	constant,public	lex.h	
+T_RBRACE	LEX_TOKEN_RIGHT_BRACE	constant,public	lex.h	
+T_PERIOD	LEX_TOKEN_PERIOD	constant,public	lex.h	
+T_ELLIPSIS	LEX_TOKEN_ELLIPSIS	constant,public	lex.h	
+T_AMP	LEX_TOKEN_AMPERSAND	constant,public	lex.h	
+T_AMPAMP	LEX_TOKEN_AMPERSAND_AMPERSAND	constant,public	lex.h	
+T_AMPEQ	LEX_TOKEN_AMPERSAND_EQUAL	constant,public	lex.h	
+T_STAR	LEX_TOKEN_STAR	constant,public	lex.h	
+T_STAREQ	LEX_TOKEN_STAR_EQUAL	constant,public	lex.h	
+T_PLUS	LEX_TOKEN_PLUS	constant,public	lex.h	
+T_PLUSPLUS	LEX_TOKEN_PLUS_PLUS	constant,public	lex.h	
+T_PLUSEQ	LEX_TOKEN_PLUS_EQUAL	constant,public	lex.h	
+T_MINUS	LEX_TOKEN_MINUS	constant,public	lex.h	
+T_ARROW	LEX_TOKEN_ARROW	constant,public	lex.h	
+T_MINUSMINUS	LEX_TOKEN_MINUS_MINUS	constant,public	lex.h	
+T_MINUSEQ	LEX_TOKEN_MINUS_EQUAL	constant,public	lex.h	
+T_TILDE	LEX_TOKEN_TILDE	constant,public	lex.h	
+T_EXCLAIM	LEX_TOKEN_EXCLAMATION	constant,public	lex.h	
+T_EXCLAIMEQ	LEX_TOKEN_EXCLAMATION_EQUAL	constant,public	lex.h	
+T_SLASH	LEX_TOKEN_SLASH	constant,public	lex.h	
+T_SLASHEQ	LEX_TOKEN_SLASH_EQUAL	constant,public	lex.h	
+T_PERCENT	LEX_TOKEN_PERCENT	constant,public	lex.h	
+T_PERCENTEQ	LEX_TOKEN_PERCENT_EQUAL	constant,public	lex.h	
+T_LESS	LEX_TOKEN_LESS	constant,public	lex.h	
+T_LESSLESS	LEX_TOKEN_LESS_LESS	constant,public	lex.h	
+T_LESSEQ	LEX_TOKEN_LESS_EQUAL	constant,public	lex.h	
+T_LESSLESSEQ	LEX_TOKEN_LESS_LESS_EQUAL	constant,public	lex.h	
+T_GREATER	LEX_TOKEN_GREATER	constant,public	lex.h	
+T_GREATERGREATER	LEX_TOKEN_GREATER_GREATER	constant,public	lex.h	
+T_GREATEREQ	LEX_TOKEN_GREATER_EQUAL	constant,public	lex.h	
+T_GREATERGREATEREQ	LEX_TOKEN_GREATER_GREATER_EQUAL	constant,public	lex.h	
+T_CARET	LEX_TOKEN_CARET	constant,public	lex.h	
+T_CARETEQ	LEX_TOKEN_CARET_EQUAL	constant,public	lex.h	
+T_PIPE	LEX_TOKEN_PIPE	constant,public	lex.h	
+T_PIPEPIPE	LEX_TOKEN_PIPE_PIPE	constant,public	lex.h	
+T_PIPEEQ	LEX_TOKEN_PIPE_EQUAL	constant,public	lex.h	
+T_QUESTION	LEX_TOKEN_QUESTION	constant,public	lex.h	
+T_COLON	LEX_TOKEN_COLON	constant,public	lex.h	
+T_COLONCOLON	LEX_TOKEN_COLON_COLON	constant,public	lex.h	
+T_SEMI	LEX_TOKEN_SEMICOLON	constant,public	lex.h	
+T_EQUAL	LEX_TOKEN_EQUAL	constant,public	lex.h	
+T_EQUALEQUAL	LEX_TOKEN_EQUAL_EQUAL	constant,public	lex.h	
+T_COMMA	LEX_TOKEN_COMMA	constant,public	lex.h	
+T_HASH	LEX_TOKEN_HASH	constant,public	lex.h	
+T_HASHHASH	LEX_TOKEN_HASH_HASH	constant,public	lex.h	
+T_NKINDS	LEX_TOKEN_KIND_COUNT	constant,public	lex.h	
+
+ppimpl.h	pp-internal.h	file,public	src/frontend/pp/	the preprocessor's internal header (git mv by hand: not under include/)
+
+# ---- deferred: fields, need the field-use mode ----
+# Struct fields whose old name is short or shared with other structs, locals or
+# parameters: a whole-word script cannot tell the uses apart.  They wait for vcc's
+# field-use mode (the front end reports each use of one struct's field).  The script
+# skips rows whose kind has `deferred` when run with --scoped.
+o	options	field,deferred	struct pp	
+cx	contexts	field,deferred	struct pp	the context stack (token sources pp_next reads from)
+depth	context_depth	field,deferred	struct pp	number of contexts on the stack
+nfile	file_context_count	field,deferred	struct pp	contexts on the stack that are files; equal to context_depth when only files are left
+perm	permanent_region	field,deferred	struct pp	definitions and file names; lives until pp_close
+tmp	temporary_region	field,deferred	struct pp	expansion results; reset whenever only file contexts are left
+sv	scratch_tokens	field,deferred	struct pp	scratch token stack used while collecting and substituting
+fe	files	field,deferred	struct pp	the files entered, in order (their location bases)
+nfe	file_count	field,deferred	struct pp	
+ndrh	hit_region_count	field,deferred	struct pp	
+tev_full	top_events_full	field,deferred	struct pp	too many events: the list is dropped
+pend	owed_spacing	field,deferred	struct pp	TF_SOL / TF_SPACE owed to the next token (empty expansions leave it)
+errors	error_count	field,deferred	struct pp	
+counter	counter_value	field,deferred	struct pp	__COUNTER__
+once	once_files	field,deferred	struct pp	files marked #pragma once in this TU
+nonce	once_file_count	field,deferred	struct pp	
+pushed	pushed_macros	field,deferred	struct pp	#pragma push_macro stack
+dn	diagnostic_nodes	field,deferred	struct pp	#pragma diagnostic states as a persistent list; node: one flag's mapping (0: the command line's)
+ndn	diagnostic_node_count	field,deferred	struct pp	
+ndtr	diagnostic_transition_count	field,deferred	struct pp	
+dcur	diagnostic_current	field,deferred	struct pp	the current state node
+ndstk	diagnostic_stack_depth	field,deferred	struct pp	
+nmdx	macro_definition_site_count	field,deferred	struct pp	
+cmdx	macro_definition_site_capacity	field,deferred	struct pp	
+wc	warning_cache	field,deferred	struct pp	-pedantic warnings on hot paths: on on the command line
+builtin	builtin_file	field,deferred	struct pp	the <built-in> file (predefines, -D/-U, -include)
+color	diagnostic_color	field,deferred	struct pp	
+dhead	diagnostic_head	field,deferred	struct pp	the TU's diagnostic records (in permanent_region)
+lm	line_marks	field,deferred	struct pp	#line / GNU line markers
+nlm	line_mark_count	field,deferred	struct pp	
+warns	warning_count	field,deferred	struct pp	
+collecting	collecting_arguments	field,deferred	struct pp	inside collect: directives are inside macro arguments
+coll_loc	collecting_location	field,deferred	struct pp	the outermost macro collecting: its name token
+out	output	field,deferred	struct pp	-E text
+nout	output_length	field,deferred	struct pp	
+col	output_column	field,deferred	struct pp	
+pk	previous_kind	field,deferred	struct pp	the last token printed, for clang's AvoidConcat
+pk_L	previous_is_wide_prefix	field,deferred	struct pp	it was the identifier L
+pk_pp	previous_after_period	field,deferred	struct pp	a '.' came before it
+sol_on	line_start_name_active	field,deferred	struct pp	a source macro name starts the line: expanded tokens' column is its column
+edir	directive_on_line	field,deferred	struct pp	a directive was printed on this line (clang's EmittedDirectiveOnThisLine)
+cmt_sol	comment_starts_line	field,deferred	struct pp	-C: an empty expansion began the line, so a comment next starts it
+cur_line	output_line	field,deferred	struct pp	clang's CurLine: the presumed line the output is on
+emb_sp	embed_space_pending	field,deferred	struct pp	-E after #embed: a space is owed
+lmark	markers_on	field,deferred	struct pp	-E without -P: GNU line markers
+lm_blk	marker_builtin_printed	field,deferred	struct pp	<built-in>'s block was printed
+lm_n	marker_predefine_count	field,deferred	struct pp	predefined macros before the command line, plus 1
+ndd	define_event_count	field,deferred	struct pp	
+hc	header_cache_on	field,deferred	struct pp	the header cache is used (-E or pp_next, not disabled)
+sig	options_signature	field,deferred	struct pp	base signature of the options (HNONE: no cache)
+psig	search_path_signatures	field,deferred	struct pp	ids of the search-path prefixes, [0, ndirs]
+rec	recording	field,deferred	struct pp	what open regions have read and written so far
+rst	recording_stamps	field,deferred	struct pp	per id: serial << 32 | index in recording.touches
+hm	child_verdicts	field,deferred	struct pp	child entry verdicts within one pp_header_cache_entry_serve
+hgen	child_verdict_generation	field,deferred	struct pp	
+n	level_count	field,deferred	struct hrec	open levels
+nbad	uncacheable_levels	field,deferred	struct hrec	levels [0, this) are not cacheable
+t	touches	field,deferred	struct hrec	a level's first touch of each id
+nt	touch_count	field,deferred	struct hrec	
+ord	once_marks	field,deferred	struct hrec	
+nord	once_mark_count	field,deferred	struct hrec	
+ctr	counter_positions	field,deferred	struct hrec	__COUNTER__ digits in the output
+nctr	counter_position_count	field,deferred	struct hrec	
+crd	counter_reads	field,deferred	struct hrec	
+ncrd	counter_read_count	field,deferred	struct hrec	
+seg	segments	field,deferred	struct hrec	child entries' text in the output
+nseg	segment_count	field,deferred	struct hrec	
+kid	children	field,deferred	struct hrec	child entries in order
+nkid	child_count	field,deferred	struct hrec	
+kex	child_exclusions	field,deferred	struct hrec	ids a level wrote before a child, per child
+lk	lookups	field,deferred	struct hrec	the levels' own include lookups
+nlk	lookup_count	field,deferred	struct hrec	
+cp	counter_provenance	field,deferred	struct hrec	indexed by ptok.ctr
+tk	tokens	field,deferred	struct hrec	tokens handed out (token mode)
+ntk	token_count	field,deferred	struct hrec	
+sb	spellings	field,deferred	struct hrec	spellings that live in per-TU memory
+next	next_variant	field,deferred	struct hent	the next entry of the same key
+rg	guard_reads	field,deferred	struct hent	inputs: include guards (value HDEF or 0), checked first
+ru	undefined_reads	field,deferred	struct hent	inputs: ids read while undefined
+rv	value_reads	field,deferred	struct hent	inputs: other reads with the value seen
+dl	writes	field,deferred	struct hent	effects: (id, new value) for every macro written
+ord	once_marks	field,deferred	struct hent	files marked #pragma once, with whether already marked at entry
+fe	files	field,deferred	struct hent	files entered (dependencies, locations)
+text	own_text	field,deferred	struct hent	
+tk	own_tokens	field,deferred	struct hent	token entries: own tokens (htok)
+xtk	escape_tokens	field,deferred	struct hent	full ptoks of own tokens flagged HF_X: spliced identifiers, long spellings, odd ids
+ctr	counter_runs	field,deferred	struct hent	__COUNTER__ digits in own text or tokens
+crd	counter_name_reads	field,deferred	struct hent	lookups of identifiers pasted from __COUNTER__ (must be undefined)
+seg	segments	field,deferred	struct hent	where child entries go in own text or tokens
+kid	children	field,deferred	struct hent	child entries in order; their reads are inputs except ids this entry wrote first
+nkid	child_count	field,deferred	struct hent	
+lk	lookups	field,deferred	struct hent	own include lookups that depended on the search directories
+nlk	lookup_count	field,deferred	struct hent	
+ntext	own_length	field,deferred	struct hent	own text bytes, or own tokens
+total	total_length	field,deferred	struct hent	with the children
+level	include_level	field,deferred	struct hent	__INCLUDE_LEVEL__ used: the depth it ran at (-1: not used)
+ndirs	search_directory_count	field,deferred	struct hent	leading search directories its lookups depended on
+psig	search_path_signature	field,deferred	struct hent	and their signature id
+br	brace_pairs	field,deferred	struct hent	outermost { } pairs of own tokens with no child inside, by open (pp_lazy_body_skip)
+nord	once_mark_count	field,deferred	struct hent	
+noadd	once_addition_count	field,deferred	struct hent	
+nfe	file_count	field,deferred	struct hent	
+nctr	counter_run_count	field,deferred	struct hent	
+ncrd	counter_name_read_count	field,deferred	struct hent	
+nseg	segment_count	field,deferred	struct hent	
+span	token_span	field,deferred	struct hent	tokens in the entry's own range, for the front end's declaration cache
+has_text	has_content	field,deferred	struct hent	
+first_sol	first_at_line_start	field,deferred	struct hent	
+col_end	end_column	field,deferred	struct hent	
+pend_out	owed_spacing_at_end	field,deferred	struct hent	
+pk	previous_kind	field,deferred	struct hent	the printer's last token at the end
+pk_L	previous_is_wide_prefix	field,deferred	struct hent	
+pk_pp	previous_after_period	field,deferred	struct hent	
+first	first_flags	field,deferred	struct ctx	0x80 | SOL/SPACE for the first token (macro contexts)
+offloc	location_per_token	field,deferred	struct ctx	PP_CONTEXT_LEXED: location = location + token offset (a directive line)
+i	index	field,deferred	struct ctx	next token
+n	count	field,deferred	struct ctx	
+loc	location	field,deferred	struct ctx	
+mid	macro_to_enable	field,deferred	struct ctx	macro id to re-enable when popped
+vt	lexed_tokens	field,deferred	struct ctx	
+pt	tokens	field,deferred	struct ctx	
+ht	stored_tokens	field,deferred	struct ctx	PP_CONTEXT_SERVED: the entry's own tokens
+src	source	field,deferred	struct ctx	
+f	lex_file	field,deferred	struct ctx	
+fi	skeleton	field,deferred	struct ctx	
+di	next_directive	field,deferred	struct ctx	
+sdir	search_directory	field,deferred	struct ctx	-1 if none
+fe	file_index	field,deferred	struct ctx	index in struct pp files
+spath	spelled_path	field,deferred	struct ctx	the path as clang spells it (the lex file's path is the cache key)
+he	entry	field,deferred	struct ctx	
+si	next_segment	field,deferred	struct ctx	
+ci	next_counter_run	field,deferred	struct ctx	
+cbase	counter_base	field,deferred	struct ctx	__COUNTER__ at the entry's start
+top	top_level	field,deferred	struct ctx	outermost: owes the entry's owed spacing when done (2: a top-level region)
+norec	unrecorded	field,deferred	struct ctx	served while recording: token positions are reserved, not copied
+base	location_base	field,deferred	struct fent	
+f	lex_file	field,deferred	struct fent	
+fi	skeleton	field,deferred	struct fent	
+namelen	name_length	field,deferred	struct fent	
+spath	spelled_path	field,deferred	struct fent	as spelled, for dependency files
+sys	is_system	field,deferred	struct fent	
+from	included_from	field,deferred	struct fent	the #include's location (0: main file, <built-in>, or a served entry)
+dir	directives	field,deferred	struct pfile	
+mac	macros	field,deferred	struct pfile	per directive: the #define's macro, built once
+inc	include_answers	field,deferred	struct pfile	per directive: #include's last answer
+guard	guard_macro	field,deferred	struct pfile	controlling macro id, 0 if none
+bad	unbalanced	field,deferred	struct pfile	unbalanced conditionals
+lines	line_offsets	field,deferred	struct pfile	offsets of '\n', built on first __LINE__
+nlines	line_count	field,deferred	struct pfile	
+tok	hash_token	field,deferred	struct pdir	the '#'
+end	end_token	field,deferred	struct pdir	first token after the line
+next	next_in_group	field,deferred	struct pdir	conditionals: next #elif/#else/#endif of the group
+plist	parameter_list	field,deferred	struct pmacro	function-like: "(" ... ")" tokens, for -dM
+src	source	field,deferred	struct pmacro	
+pidx	parameter_indices	field,deferred	struct pmacro	per body token: parameter index + 1, or 0
+nbody	body_count	field,deferred	struct pmacro	
+nparam	parameter_count	field,deferred	struct pmacro	
+nplist	parameter_list_count	field,deferred	struct pmacro	
+v	value	field,deferred	struct hread	value at entry (enabled), or HDEF
+present	was_present	field,deferred	struct honce	
+val	value	field,deferred	struct cprov	
+off	offset	field,deferred	struct cprov	
+len	length	field,deferred	struct cprov	
+next	next_run	field,deferred	struct cprov	next run in the same token (a chain, increasing offset)
+rel	relative	field,deferred	struct hctr	value - counter at entry
+rel	relative	field,deferred	struct hcread	
+dlen	digit_length	field,deferred	struct hcread	
+sp	spelling	field,deferred	struct htok	identifier: its id; others: offset / 16 in the shared region + 1; HF_X: index of the escape
+lbase	location_base_delta	field,deferred	struct hseg	tokens: child's location base - ours
+esz	element_size	field,deferred	struct hck	1: a blob of n bytes
+c	chunks	field,deferred	struct hvec	
+nc	chunk_count	field,deferred	struct hvec	
+from_sdir	from_search_directory	field,deferred	struct hlook	
+from_bi	from_builtin	field,deferred	struct hlook	
+sdir	search_directory	field,deferred	struct hlook	
+nlen	name_length	field,deferred	struct hlook	
+sys	is_system	field,deferred	struct hlook	
+sig	signature	field,deferred	struct hkey	
+nfile	file_depth	field,deferred	struct hkey	
+sdir	search_directory	field,deferred	struct hkey	
+sys	is_system	field,deferred	struct hkey	
+n	variant_count	field,deferred	struct hkey	
+k	key	field,deferred	struct hlev	
+errors0	errors_at_start	field,deferred	struct hlev	
+warns0	warnings_at_start	field,deferred	struct hlev	
+t0	touches_at_start	field,deferred	struct hlev	
+o0	once_marks_at_start	field,deferred	struct hlev	
+c0	counter_positions_at_start	field,deferred	struct hlev	
+r0	counter_reads_at_start	field,deferred	struct hlev	
+s0	segments_at_start	field,deferred	struct hlev	
+fe0	files_at_start	field,deferred	struct hlev	
+base0	location_base_at_start	field,deferred	struct hlev	
+nonce0	once_files_at_start	field,deferred	struct hlev	
+nlm0	line_marks_at_start	field,deferred	struct hlev	
+counter0	counter_at_start	field,deferred	struct hlev	
+k0	children_at_start	field,deferred	struct hlev	
+x0	child_exclusions_at_start	field,deferred	struct hlev	
+l0	lookups_at_start	field,deferred	struct hlev	
+prev	previous_stamp	field,deferred	struct htouch	the id's stamp before (the enclosing levels')
+pos	position	field,deferred	struct hcpos	
+counter0	counter_at_start	field,deferred	struct hsegr	
+base0	location_base_at_start	field,deferred	struct hsegr	
+ex0	exclusions_start	field,deferred	struct hkidr	
+nex	exclusion_count	field,deferred	struct hkidr	
+ex	exclusions	field,deferred	struct hkid	sorted ids written before this child
+nex	exclusion_count	field,deferred	struct hkid	
+lm.fe	file	field,deferred	struct lmark	in file index file, from byte offset offset on
+lm.off	offset	field,deferred	struct lmark	
+lm.pline	physical_line	field,deferred	struct lmark	physical line physical_line is line line
+lm.line	line	field,deferred	struct lmark	
+lm.name	name	field,deferred	struct lmark	presumed file name or NULL
+lm.namelen	name_length	field,deferred	struct lmark	
+sig	signature	field,deferred	struct incent	options signature
+fsig	search_path_signature	field,deferred	struct incent	the whole search path's id
+sdir	search_directory	field,deferred	struct incent	
+tok	tokens	field,deferred	struct margs	
+st	starts	field,deferred	struct margs	per parameter: start in tokens
+ln	lengths	field,deferred	struct margs	per parameter: length in tokens
+pre	preexpanded	field,deferred	struct margs	pre-expanded arguments, lazily
+t	lookahead	field,deferred	struct ev	
+prev	previous_location	field,deferred	struct ev	the last token consumed
+lb	primary_first	field,deferred	struct ev	the last primary expression: first token
+le	primary_last	field,deferred	struct ev	and last token
+bad	failed	field,deferred	struct ev	
+pre	prefix	field,deferred	struct embprm	
+suf	suffix	field,deferred	struct embprm	
+npre	prefix_count	field,deferred	struct embprm	
+nsuf	suffix_count	field,deferred	struct embprm	
+plen	path_length	field,deferred	struct dnode	

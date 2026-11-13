@@ -12,7 +12,7 @@
 file-scope struct, union, enum and typedef, sizeof of every global, every
 enumerator's value and type) and appends them to clang's own -E output of the
 TU (work/ppref, from vcc-diff.py ref); clang -fsyntax-only on that file then
-fails on any claim vcc got wrong.  clang's verdict is cached (build/ccs/layout-ok,
+fails on any claim vcc got wrong.  clang's verdict is cached (build/src/layout-ok,
 keyed by the claims, the reference and the flags): a TU whose claims did not
 change is not checked by clang again; NOCACHE=1 checks all.
 

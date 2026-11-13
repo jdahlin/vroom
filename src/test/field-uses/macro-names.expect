@@ -1,0 +1,7 @@
+tu	macro-names.c	ok
+use	decl	S	cur	macro-names.c:3	file	macro-names.c	65	3	16	3	-
+use	decl	S	len	macro-names.c:3	file	macro-names.c	74	3	25	3	-
+use	member	S	cur	macro-names.c:3	file	macro-names.c	142	6	32	3	-
+members	S	macro-names.c:3	cur,len
+macro	next
+macro	len

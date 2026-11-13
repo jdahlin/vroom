@@ -1,0 +1,350 @@
+svdup	as_text_duplicate	function	as/as.c
+curline	as_line_current	function	as/as.c
+err	as_error_report	function	as/as.c
+push_frame	as_frame_push	function	as/as.c
+pop_frame	as_frame_pop	function	as/as.c
+find_stop	as_statement_stop_find	function	as/as.c
+find_stop86	as_statement_stop_find_x64	function	as/as.c
+next_stmt_copy	as_statement_next_copy	function	as/as.c
+next_stmt	as_statement_next	function	as/as.c
+define_label	as_label_define	function	as/as.c
+assign	as_symbol_assign	function	as/as.c
+directive	as_directive_dispatch	function	as/as.c
+statement	as_statement_assemble	function	as/as.c
+as_stats	as_statistics_get	function	as/as.c, include/as/as.h (public API; as_new, as_free, as_run, as_begin, as_end keep their names)
+as_set_dir	as_include_directory_set	function	as/as.c, include/as/as.h (public API; as_new, as_free, as_run, as_begin, as_end keep their names)
+as_snippet	as_snippet_assemble	function	as/as.c, include/as/as.h (public API; as_new, as_free, as_run, as_begin, as_end keep their names)
+as_msg	as_message_get	function	as/as.c, include/as/as.h (public API; as_new, as_free, as_run, as_begin, as_end keep their names)
+as_frag	as_fragment_current	function	as/as.c, include/as/as.h (public API; as_new, as_free, as_run, as_begin, as_end keep their names)
+as_failed	as_is_failed	function	as/as.c, include/as/as.h (public API; as_new, as_free, as_run, as_begin, as_end keep their names)
+as_sym	as_symbol_by_name	function	as/as.c, include/as/as.h (public API; as_new, as_free, as_run, as_begin, as_end keep their names)
+as_val	as_symbol_value	function	as/as.c, include/as/as.h (public API; as_new, as_free, as_run, as_begin, as_end keep their names)
+as_label	as_label_define_symbol	function	as/as.c, include/as/as.h (public API; as_new, as_free, as_run, as_begin, as_end keep their names)
+as_darwin_text	macho_dialect_translate	function	as/as.c (include/as/as.h; users: arch/*/codegen, bin/vasm)
+cfi_reg86	as_cfi_register_x64_parse	function	as/cfi.c
+cfi_reg	as_cfi_register_parse	function	as/cfi.c
+cfi_push	as_cfi_instruction_push	function	as/cfi.c
+d_cfi	as_directive_cfi	function	as/cfi.c
+cfi_finish	as_cfi_frame_emit	function	as/cfi.c
+cond_ignore	as_condition_is_ignored	function	as/cond.c
+push_cond	as_condition_push	function	as/cond.c
+trim	as_text_trim	function	as/cond.c
+ifc_str	as_condition_string_parse	function	as/cond.c
+cond_dir	as_directive_conditional	function	as/cond.c
+emit_value	as_value_emit	function	as/data.c
+d_octa	as_directive_octa	function	as/data.c
+reloc_fixup	as_reloc_fixup_add	function	as/data.c
+d_reloc	as_directive_reloc	function	as/data.c
+d_data	as_directive_data	function	as/data.c
+parse_string	as_string_parse	function	as/data.c
+d_ascii	as_directive_ascii	function	as/data.c
+d_float	as_directive_float	function	as/data.c
+d_base64	as_directive_base64	function	as/data.c
+code_section	as_section_is_code	function	as/data.c
+d_align	as_directive_align	function	as/data.c
+d_align_w	as_directive_align_width	function	as/data.c
+d_comm	as_directive_comm	function	as/data.c
+d_leb	as_directive_leb128	function	as/data.c
+d_space	as_directive_space	function	as/data.c
+d_fill	as_directive_fill	function	as/data.c
+d_org	as_directive_org	function	as/data.c
+d_incbin	as_directive_incbin	function	as/data.c
+d_inst	as_directive_inst	function	as/data.c
+dw_num	as_dwarf_number_parse	function	as/dwline.c (renamed dwarf-line-table.c)
+dw_dir_from	as_dwarf_directory_find_from	function	as/dwline.c (renamed dwarf-line-table.c)
+dw_dir	as_dwarf_directory_find	function	as/dwline.c (renamed dwarf-line-table.c)
+d_dwfile	as_directive_file	function	as/dwline.c (renamed dwarf-line-table.c)
+d_loc	as_directive_loc	function	as/dwline.c (renamed dwarf-line-table.c)
+loc_row	as_dwarf_row_emit	function	as/dwline.c (renamed dwarf-line-table.c)
+dw_adv	as_dwarf_advance_encode	function	as/dwline.c (renamed dwarf-line-table.c)
+dw_str	as_dwarf_string_add	function	as/dwline.c (renamed dwarf-line-table.c)
+dwline_finish	as_dwarf_line_finish	function	as/dwline.c (renamed dwarf-line-table.c)
+is_abs	as_value_is_absolute	function	as/expr.c
+fold	as_value_fold	function	as/expr.c
+is_xsym	as_value_is_deferred_symbol	function	as/expr.c
+deferrable	as_value_is_deferrable	function	as/expr.c
+defer_op	as_value_defer_operation	function	as/expr.c
+expr	as_expression_parse	function	as/expr.c
+parse_number	as_number_parse	function	as/expr.c
+primary	as_expression_primary_parse	function	as/expr.c
+binop	as_operator_parse	function	as/expr.c
+apply	as_operator_apply	function	as/expr.c
+expr_prec	as_expression_precedence_parse	function	as/expr.c
+abs_expr	as_expression_absolute_parse	function	as/expr.c
+val_expr	as_expression_value_parse	function	as/expr.c
+find_macro	as_macro_find	function	as/macro.c
+first_word	as_text_first_word	function	as/macro.c
+is_loop_dir	as_directive_is_loop	function	as/macro.c
+collect_body	as_macro_body_collect	function	as/macro.c
+is_op_start	as_text_is_operator_start	function	as/macro.c
+op_len	as_operator_length	function	as/macro.c
+macro_arg_plain	as_macro_argument_parse_plain	function	as/macro.c
+macro_arg	as_macro_argument_parse	function	as/macro.c
+tmpl_compile	as_template_compile	function	as/macro.c
+tmpl_compile_alt	as_template_compile_altmacro	function	as/macro.c
+alt_arg	as_macro_argument_parse_altmacro	function	as/macro.c
+utoa	as_unsigned_format	function	as/macro.c
+xcopy	as_text_copy_overrun	function	as/macro.c
+expand	as_template_expand	function	as/macro.c
+expand_bound	as_template_expand_bound	function	as/macro.c
+d_macro	as_directive_macro	function	as/macro.c
+d_purgem	as_directive_purgem	function	as/macro.c
+invoke	as_macro_invoke	function	as/macro.c
+d_rept	as_directive_rept	function	as/macro.c
+d_irp	as_directive_irp	function	as/macro.c
+d_exitm	as_directive_exitm	function	as/macro.c
+frag_bases	as_fragment_offsets_cache	function	as/relax.c
+var_item	as_variable_item_add	function	as/relax.c
+as_branch	as_variable_item_branch_add	function	as/relax.c
+d_prefalign	as_directive_prefalign	function	as/relax.c
+var_index	as_variable_item_index	function	as/relax.c
+var_sum	as_variable_offset_sum	function	as/relax.c
+var_add	as_variable_offset_add	function	as/relax.c
+frag_base	as_fragment_base	function	as/relax.c
+sym_secoff	as_symbol_section_offset	function	as/relax.c
+fits_i8	as_value_fits_int8	function	as/relax.c
+leb_len	as_leb128_length	function	as/relax.c
+lay_eval	as_value_evaluate_in_layout	function	as/relax.c
+var_eval	as_variable_item_evaluate	function	as/relax.c
+var_finish	as_variable_items_finish	function	as/relax.c
+hasprefix	as_text_has_prefix	function	as/section.c
+latest	as_fragment_latest	function	as/section.c
+switch_to	as_fragment_switch	function	as/section.c
+std_section	as_section_standard_find	function	as/section.c
+parse_name	as_name_parse	function	as/section.c
+d_section	as_directive_section	function	as/section.c
+sym	as_symbol_intern	function	as/sym.c
+tmpsym	as_symbol_temporary	function	as/sym.c
+here	as_label_temporary_define	function	as/sym.c
+numlab	as_numeric_label_find	function	as/sym.c
+var_slot	as_variable_slot_find	function	as/sym.c
+d_symattr	as_directive_symbol_attribute	function	as/sym.c
+d_type	as_directive_type	function	as/sym.c
+d_size	as_directive_size	function	as/sym.c
+as_ralias	as_register_alias_find	function	as/sym.c
+d_symver	as_directive_symver	function	as/sym.c
+symver_finish	as_symver_finish	function	as/sym.c
+reserve	as_region_reserve	function	as/asimpl.h
+rget	as_region_alloc	function	as/asimpl.h
+c_digit	as_char_is_digit	function	as/asimpl.h
+c_xdigit	as_char_is_hex_digit	function	as/asimpl.h
+c_lower	as_char_to_lower	function	as/asimpl.h
+isidc	as_char_is_identifier	function	as/asimpl.h
+isids	as_char_is_identifier_start	function	as/asimpl.h
+ws	as_whitespace_skip	function	as/asimpl.h
+sveq	as_text_equals	function	as/asimpl.h
+sveqi	as_text_equals_ignore_case	function	as/asimpl.h
+hsv	as_text_hash	function	as/asimpl.h
+al_hash	as_alias_hash	function	as/asimpl.h
+uleb	as_leb128_unsigned_append	function	as/asimpl.h
+sleb	as_leb128_signed_append	function	as/asimpl.h
+al_rehash	as_alias_rehash	function	as/asimpl.h (defined in arch/a64/as/parse.c)
+flush_pools	a64_as_pools_flush	function	as/asimpl.h (defined in arch/a64/as/parse.c)
+ltorg	a64_as_pools_ltorg	function	as/asimpl.h (defined in arch/a64/as/parse.c)
+instruction	a64_as_instruction_assemble	function	as/asimpl.h (defined in arch/a64/as/parse.c)
+x64_instruction	x64_as_instruction_assemble	function	as/asimpl.h (defined in arch/x64/as/asm.c)
+as_trace	as_trace_level	global	as/asimpl.h, arch/a64/as/parse.c, bin/vasm
+as_dtype	as_data_relocation_type	global	as/data.c (thread-local)
+var_prev	as_variable_sizes_previous	global	as/relax.c (thread-local)
+sstop	as_statement_stop_table	global	as/as.c
+cclass	as_char_class	global	as/asimpl.h
+o	object	field	struct As
+dir	incbin_directory	field	struct As
+fr	frames	field	struct As
+nfr	frame_count	field	struct As
+cs	conditions	field	struct As
+ncs	condition_count	field	struct As
+cur	fragment_current	field	struct As
+prev	fragment_previous	field	struct As
+ss	section_stack	field	struct As
+nss	section_stack_count	field	struct As
+xs	expansion_text	field	struct As
+defs	definitions	field	struct As
+sb	statement_buffer	field	struct As
+mtab	macro_table	field	struct As
+mmask	macro_mask	field	struct As
+mcount	macro_count	field	struct As
+nl	numeric_labels	field	struct As
+nlmask	numeric_label_mask	field	struct As
+nlcount	numeric_label_count	field	struct As
+al	aliases	field	struct As
+nal	alias_count	field	struct As
+alcap	alias_capacity	field	struct As
+alh	alias_buckets	field	struct As
+vars	variables	field	struct As
+vmask	variable_mask	field	struct As
+vcount	variable_count	field	struct As
+pool	literal_pools	field	struct As
+npool	literal_pool_count	field	struct As
+poolcap	literal_pool_capacity	field	struct As
+ninst	macro_instance_count	field	struct As
+nstmt	statement_count	field	struct As
+nstmtb	statement_bytes	field	struct As
+fname	file_name	field	struct As
+nident	ident_count	field	struct As
+ended	end_seen	field	struct As
+altmacro	altmacro_mode	field	struct As
+eofline	end_line	field	struct As
+cfi	cfi_instructions	field	struct As
+ncfi	cfi_instruction_count	field	struct As
+cficap	cfi_instruction_capacity	field	struct As
+fde	frame_descriptions	field	struct As
+nfde	frame_description_count	field	struct As
+fdecap	frame_description_capacity	field	struct As
+infde	in_frame_description	field	struct As
+cfi_eh	cfi_eh_frame_selected	field	struct As
+sv	symvers	field	struct As
+nsv	symver_count	field	struct As
+svcap	symver_capacity	field	struct As
+asg	addrsig_symbols	field	struct As
+nasg	addrsig_symbol_count	field	struct As
+asgcap	addrsig_symbol_capacity	field	struct As
+dwf	dwarf_files	field	struct As
+ndwf	dwarf_file_count	field	struct As
+dwfcap	dwarf_file_capacity	field	struct As
+dwd	dwarf_directories	field	struct As
+ndwd	dwarf_directory_count	field	struct As
+dwdcap	dwarf_directory_capacity	field	struct As
+dwl	dwarf_rows	field	struct As
+dwcur	dwarf_row_pending	field	struct As
+ndwl	dwarf_row_count	field	struct As
+dwlcap	dwarf_row_capacity	field	struct As
+dwlocp	dwarf_row_is_pending	field	struct As
+dwtab	dwarf_table_is_due	field	struct As
+pfa	variable_items	field	struct As
+npfa	variable_item_count	field	struct As
+pfacap	variable_item_capacity	field	struct As
+var_rank	variable_rank	field	struct As
+var_n	variable_rank_count	field	struct As
+var_tree	variable_size_tree	field	struct As
+var_oldoff	variable_offsets_previous	field	struct As
+ralias	register_aliases	field	struct As
+nralias	register_alias_count	field	struct As
+raliascap	register_alias_capacity	field	struct As
+x64_lock	x64_lock_prefix	field	struct As
+x64_isz	x64_operand_size	field	struct As
+msg	messages	field	struct As
+mlen	message_length	field	struct As
+nerr	error_count	field	struct As
+err	failed	field	struct As
+def	default_value	field	struct Param
+req	is_required	field	struct Param
+vararg	is_variadic	field	struct Param
+off	offset	field	struct Piece
+len	length	field	struct Piece
+k	argument_index	field	struct Piece
+p	pieces	field	struct Tmpl
+n	count	field	struct Tmpl
+np	parameter_count	field	struct Macro
+t	template	field	struct Macro
+count	invocation_count	field	struct Macro
+p	cursor	field	struct Frame
+e	end	field	struct Frame
+bol	at_line_start	field	struct Frame
+ncond	condition_count	field	struct Frame
+mark	region_mark	field	struct Frame
+sline	statement_line	field	struct Frame
+pline	caller_line	field	struct Frame
+met	is_met	field	struct Cond
+ignore	is_ignored	field	struct Cond
+num	number	field	struct NumLab
+cur	current	field	struct NumLab
+fwd	forward	field	struct NumLab
+reg	register_name	field	struct Alias
+next	older	field	struct Alias
+sym	symbol	field	struct Var
+v	value	field	struct Var
+op	operation	field	struct Cfi
+reg	register_first	field	struct Cfi
+reg2	register_second	field	struct Cfi
+lab	label	field	struct Cfi
+off	offset	field	struct Cfi
+esc	escape_bytes	field	struct Cfi
+first	first_instruction	field	struct Fde
+n	instruction_count	field	struct Fde
+ra	return_register	field	struct Fde
+simple	is_simple	field	struct Fde
+sig	is_signal	field	struct Fde
+bkey	uses_b_key	field	struct Fde
+dir	directory	field	struct DwFile
+set	is_set	field	struct DwFile
+hasmd5	has_md5	field	struct DwFile
+frag	fragment	field	struct DwLoc
+col	column	field	struct DwLoc
+disc	discriminator	field	struct DwLoc
+off	offset	field	struct DwLoc
+frag	fragment	field	struct VarItem
+end	end_symbol	field	struct VarItem
+p2	log2_alignment	field	struct VarItem
+v	value	field	struct VarItem
+a	context	field	struct Lx
+p	cursor	field	struct Lx
+e	end	field	struct Lx
+s	text	field	struct Sv	ambiguous: whole-word rename is unsafe, needs a type-aware tool (done by --fields)
+n	length	field	struct Sv	ambiguous: whole-word rename is unsafe, needs a type-aware tool (done by --fields)
+As	as_context	type	as/asimpl.h, include/as/as.h
+Sv	as_text	type	as/asimpl.h, include/as/as.h
+Param	as_macro_parameter	type	as/asimpl.h, include/as/as.h
+Piece	as_template_piece	type	as/asimpl.h, include/as/as.h
+Tmpl	as_template	type	as/asimpl.h, include/as/as.h
+Macro	as_macro	type	as/asimpl.h, include/as/as.h
+Frame	as_frame	type	as/asimpl.h, include/as/as.h
+Cond	as_condition	type	as/asimpl.h, include/as/as.h
+NumLab	as_numeric_label	type	as/asimpl.h, include/as/as.h
+Alias	as_register_alias	type	as/asimpl.h, include/as/as.h
+Val	as_value	type	as/asimpl.h, include/as/as.h
+Var	as_variable	type	as/asimpl.h, include/as/as.h
+Buf8	as_byte_span	type	as/asimpl.h, include/as/as.h
+Lx	as_expression_reader	type	as/asimpl.h, include/as/as.h
+Cfi	as_cfi_instruction	type	as/asimpl.h, include/as/as.h
+Fde	as_frame_description	type	as/asimpl.h, include/as/as.h
+DwFile	as_dwarf_file	type	as/asimpl.h, include/as/as.h
+DwLoc	as_dwarf_row	type	as/asimpl.h, include/as/as.h
+VarItem	as_variable_item	type	as/asimpl.h, include/as/as.h
+MAXFR	AS_FRAMES_MAX	constant	as/asimpl.h
+MAXCOND	AS_CONDITIONS_MAX	constant	as/asimpl.h
+MAXSECSTK	AS_SECTION_STACK_MAX	constant	as/asimpl.h
+MAXOPS	AS_OPERANDS_MAX	constant	as/asimpl.h
+ALH	AS_ALIAS_BUCKETS	constant	as/asimpl.h
+FR_FILE	AS_FRAME_FILE	constant	as/asimpl.h
+FR_MACRO	AS_FRAME_MACRO	constant	as/asimpl.h
+FR_LOOP	AS_FRAME_LOOP	constant	as/asimpl.h
+C_D	AS_CHAR_DIGIT	constant	as/asimpl.h
+C_X	AS_CHAR_HEX	constant	as/asimpl.h
+C_A	AS_CHAR_ALPHA	constant	as/asimpl.h
+C_S	AS_CHAR_SPACE	constant	as/asimpl.h
+C_I	AS_CHAR_IDENTIFIER	constant	as/asimpl.h
+C_W	AS_CHAR_BLANK	constant	as/asimpl.h
+C_E	AS_CHAR_OPERAND_START	constant	as/asimpl.h
+VI_PREFALIGN	AS_VARIABLE_ITEM_PREFALIGN	constant	as/asimpl.h
+VI_ALIGN	AS_VARIABLE_ITEM_ALIGN	constant	as/asimpl.h
+VI_ULEB	AS_VARIABLE_ITEM_ULEB	constant	as/asimpl.h
+VI_SLEB	AS_VARIABLE_ITEM_SLEB	constant	as/asimpl.h
+VI_X86BR	AS_VARIABLE_ITEM_X64_BRANCH	constant	as/asimpl.h
+VI_SKIP	AS_VARIABLE_ITEM_SKIP	constant	as/asimpl.h
+CF_DEF_CFA	AS_CFI_DEF_CFA	constant	as/cfi.c
+CF_DEF_CFA_OFFSET	AS_CFI_DEF_CFA_OFFSET	constant	as/cfi.c
+CF_DEF_CFA_REGISTER	AS_CFI_DEF_CFA_REGISTER	constant	as/cfi.c
+CF_ADJUST	AS_CFI_ADJUST	constant	as/cfi.c
+CF_OFFSET	AS_CFI_OFFSET	constant	as/cfi.c
+CF_REL_OFFSET	AS_CFI_REL_OFFSET	constant	as/cfi.c
+CF_RESTORE	AS_CFI_RESTORE	constant	as/cfi.c
+CF_UNDEFINED	AS_CFI_UNDEFINED	constant	as/cfi.c
+CF_SAME	AS_CFI_SAME	constant	as/cfi.c
+CF_REGISTER	AS_CFI_REGISTER	constant	as/cfi.c
+CF_REMEMBER	AS_CFI_REMEMBER	constant	as/cfi.c
+CF_RESTORE_STATE	AS_CFI_RESTORE_STATE	constant	as/cfi.c
+CF_ESCAPE	AS_CFI_ESCAPE	constant	as/cfi.c
+CF_NEGATE_RA	AS_CFI_NEGATE_RA	constant	as/cfi.c
+CIS	AS_CFI_DIRECTIVE_IS	constant	as/cfi.c
+IS	AS_DIRECTIVE_IS	constant	as/as.c
+LW	AS_DWARF_DIRECTIVE_IS	constant	as/dwline.c
+sym.c	symbol.c	file	src/as
+expr.c	expression.c	file	src/as
+data.c	data-directives.c	file	src/as
+cond.c	conditional.c	file	src/as
+cfi.c	call-frame-information.c	file	src/as
+relax.c	variable-items.c	file	src/as
+dwline.c	dwarf-line-table.c	file	src/as
+asimpl.h	as-internal.h	file	src/as
+astext.c	apple-dialect-translate.c	file	src/platform/darwin

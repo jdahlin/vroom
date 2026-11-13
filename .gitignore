@@ -1,7 +1,7 @@
-# Skiftlägeskänslig volym med kärnträd och byggkataloger
+# Case-sensitive volume with kernel tree and build directories
 /work.sparsebundle/
 /work
-# byggutdata och externa kloner
+# build output and external clones
 /build/
 /third_party/
 __pycache__/

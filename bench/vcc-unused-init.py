@@ -9,7 +9,7 @@ from hostenv import R, llvm
 
 SOURCE = r'''
 #include <assert.h>
-#include "vcc/emit/opt/unusedinit.c"
+#include "codegen/opt/unusedinit.c"
 static ctype types[TY_NKINDS+2];
 static sym symbols[5];
 static attrs attributes[5];
@@ -61,17 +61,17 @@ int main(void)
     assert(recipe(literal,0)==EM_UNUSED_EVAL);
     assert(recipe(literal,1)==EM_UNUSED_OMIT);
     unsigned source=make(N_VAR,0,2,0,0,INT);
-    unsigned add=make(N_BINARY,T_PLUS,source,literal,0,INT);
+    unsigned add=make(N_BINARY,LEX_TOKEN_PLUS,source,literal,0,INT);
     assert(recipe(add,2)==EM_UNUSED_EVAL);
     assert(recipe(add,3)==EM_UNUSED_OMIT);
     assert(recipe(0,0)==EM_UNUSED_OMIT);
     unsigned boolean=make(N_CAST,CK_BOOL,source,0,0,INT);
     assert(recipe(boolean,2)==EM_UNUSED_OMIT);
-    unsigned division=make(N_BINARY,T_SLASH,source,literal,0,INT);
+    unsigned division=make(N_BINARY,LEX_TOKEN_SLASH,source,literal,0,INT);
     assert(recipe(division,64)==EM_UNUSED_EVAL);
-    unsigned shift=make(N_BINARY,T_LESSLESS,source,literal,0,INT);
+    unsigned shift=make(N_BINARY,LEX_TOKEN_LESS_LESS,source,literal,0,INT);
     assert(recipe(shift,64)==EM_UNUSED_EVAL);
-    unsigned load=make(N_UNARY,T_STAR,source,0,0,INT);
+    unsigned load=make(N_UNARY,LEX_TOKEN_STAR,source,0,0,INT);
     assert(recipe(load,64)==EM_UNUSED_EVAL);
     unsigned call=make(N_CALL,0,0,0,0,INT);
     unsigned unknown=make(N_NKINDS,0,0,0,0,INT);
@@ -125,7 +125,7 @@ def main():
         binary = Path(tmp) / 'unused'
         source.write_text(SOURCE)
         flags = ['-fsanitize=address,undefined', '-fno-omit-frame-pointer'] if args.sanitize else []
-        subprocess.run([args.cc, '-std=gnu11', '-O1', '-g', '-I', str(Path(R) / 'ccs'),
+        subprocess.run([args.cc, '-std=gnu11', '-O1', '-g', '-I', str(Path(R) / 'src'), '-I', str(Path(R) / 'src' / 'include'),
                         *flags, str(source), '-o', str(binary)], check=True, timeout=30)
         subprocess.run([str(binary)], check=True, timeout=10)
     print('unused integer initializer contracts: PASS')
