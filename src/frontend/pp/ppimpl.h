@@ -180,260 +180,8 @@ typedef struct fent {
 #define MAXCTX (1u << 15)
 #define SVMAX (1u << 24)
 
-/* ---------------- header cache: types ---------------- */
-
-/*
- * The header cache (step 2.4; -E text only for now).  Every #include is a
- * region.  While a region runs for the first time its inputs are recorded
- * exactly:
- *
- *   - every macro table entry it reads before writing it: the value at
- *     region entry, or only whether it was defined (#ifdef, defined(),
- *     include guards).  Definitions are shared pointers (see pmacro), so
- *     "same definition" is pointer equality;
- *   - #pragma once membership of the files it would enter;
- *   - names pasted from __COUNTER__ that it looks up (must be undefined);
- *
- * and its effects: the final value of every macro it wrote, the files it
- * marked once, the files it entered (dependencies, locations), the counter
- * delta, and its output text.  Uses of __COUNTER__ are relative: digit runs
- * are tracked through paste and stringify (ptok.ctr) and rewritten on
- * replay.  A region's text is a rope: its own text with the entries of the
- * nested regions it contains spliced in, so each header's text is stored
- * once however deep it is included.
- *
- * Regions nest; recording keeps one level per open region.  A read is
- * recorded in the innermost level; a level's records are merged into its
- * parent when it ends (and a replayed entry's into the level it is
- * replayed in).  A later TU with the same search path signature reaching
- * the same #include (file, search dir, spelling, nesting level, system
- * header or not) replays an entry whose inputs all match the current state
- * instead of running the header.  Regions that print diagnostics, change
- * #line state, use push/pop_macro, __DATE__/__TIME__/__TIMESTAMP__/
- * __BASE_FILE__ or __COUNTER__ in a directive are not cached.  Entries are
- * immutable and shared by all threads.
- */
-#define HDEF ((uintptr_t)1)	/* read: only "defined" was read, and it was */
-#define HNONE 0xffffffffu
-#define HC_MAXLEV 64
-
-typedef struct hread {
-	uint32_t id, _pad;
-	uintptr_t v;		/* value at entry (enabled), or HDEF */
-} hread;
-
-typedef struct honce {
-	const vlex_file *f;
-	uint32_t present;
-} honce;
-
-typedef struct hfent {
-	const vlex_file *f;
-	const pfile *fi;
-	const char *name, *spath;
-	uint32_t namelen, rbase;
-	uint8_t sys;
-} hfent;
-
-/* __COUNTER__ digits: in a token's spelling (cprov) or in an entry's own text (hctr) */
-typedef struct cprov {
-	uint32_t val;
-	uint32_t off;
-	uint16_t len, next;	/* next run in the same token (a chain, increasing off) */
-} cprov;
-
-typedef struct hctr {
-	uint32_t off, len, rel;	/* own-text offset; value - counter at entry */
-} hctr;	/* tokens: off = own-token index, len = byte offset << 16 | length */
-
-/* a lookup of an identifier pasted from __COUNTER__ (it was undefined) */
-typedef struct hcread {
-	const char *s;
-	uint32_t len, off, dlen, rel;
-} hcread;
-
-typedef struct hent hent;
-
-typedef struct hkid {
-	const hent *e;
-	const uint32_t *ex;
-	uint32_t nex;
-} hkid;
-
-/*
- * A stored token (12 bytes; ptok is 24).  T_IDENT: sp is the id and the
- * spelling the id's.  Others: sp - 1 is the spelling's offset / 16 in the
- * shared region (hc_blob: stored once).  HF_X: sp indexes the entry's
- * escapes (full ptoks: spliced identifiers, long spellings, odd ids).
- */
-typedef struct htok {
-	uint32_t sp;
-	uint32_t loc;		/* offset from the base + 1, 0: none */
-	uint8_t kind, flags;
-	uint16_t len;
-} htok;
-#define HF_X 128
-
-static inline void htok_get(ptok *t, const htok *h, const ptok *xtk, const char *sbase, uint32_t base)
-{
-	if (__builtin_expect(h->flags & HF_X, 0)) {
-		*t = xtk[h->sp];
-	} else {
-		t->kind = h->kind;
-		t->flags = h->flags;
-		t->len = h->len;
-		t->ctr = 0;
-		if (h->kind == T_IDENT) {
-			t->id = h->sp;
-			t->s = vintern_ents[h->sp].s;
-		} else {
-			t->id = 0;
-			t->s = sbase + ((size_t)(h->sp - 1) << 4);
-		}
-	}
-	t->loc = h->loc ? base + h->loc - 1 : 0;
-}
-
-typedef struct hseg {
-	uint32_t at;		/* own-text offset (tokens: own-token index) the child goes before */
-	uint32_t cdelta;	/* child's counter at entry - ours */
-	const hent *child;
-	uint32_t lbase;		/* tokens: child's location base - ours */
-} hseg;
-
-/*
- * Arrays of reads and writes are stored as chunks deduplicated across all
- * entries (an enclosing header's arrays repeat its children's runs).  The
- * cuts are content defined (by id), so the same run of ids cuts the same
- * way wherever it occurs.
- */
-typedef struct hck {
-	uint64_t h;
-	uint32_t n, esz;	/* elements, element size (1: a blob of n bytes) */
-	_Alignas(16) char d[];
-} hck;
-
-typedef struct hvec {
-	const hck *const *c;
-	uint32_t nc, n;		/* chunks, elements */
-} hvec;
-
-/* for (const T *x ...) over the elements of v; break leaves only the inner loop */
-#define HV_FOR(v, T, x) \
-	for (uint32_t hvi_ = 0; hvi_ < (v).nc; hvi_++) \
-		for (const T *x = (const T *)(const void *)(v).c[hvi_]->d, *x##_e = x + (v).c[hvi_]->n; x < x##_e; x++)
-
-/*
- * An include lookup an entry made itself that depended on the search
- * directories (used > 0).  The entry's ndirs/psig say the directories it
- * depended on were the same; where they differ, the entry still holds when
- * each such lookup gives the same answer here (hc_looks_ok): PostgreSQL
- * puts a per-target directory first, which every lookup passes through.
- */
-typedef struct hlook {
-	const char *name;	/* as written */
-	const char *from;	/* the includer's spath (NULL: no includer) */
-	const char *path;	/* the answer's spelling (NULL: not found) */
-	const vlex_file *f;
-	int32_t from_sdir, sdir;
-	uint32_t nlen, from_sdl;
-	uint8_t angled, next, from_bi, sys;
-} hlook;
-
-struct hent {
-	hent *next;
-	hvec rg;		/* inputs: include guards (v: HDEF or 0); checked first */
-	hvec ru;		/* inputs: ids read while undefined (uint32_t) */
-	hvec rv;		/* inputs: other reads */
-	hvec dl;		/* delta: (id, new value) */
-	const honce *ord;
-	const vlex_file *const *oadd;
-	const hfent *fe;
-	const char *text;	/* own text */
-	const htok *tk;		/* token entries: own tokens */
-	const ptok *xtk;	/* their escapes (HF_X) */
-	const hctr *ctr;
-	const hcread *crd;
-	const hseg *seg;
-	/*
-	 * Child entries in order: their reads are this entry's inputs except
-	 * the ids this entry wrote before the child (ex, sorted), and their
-	 * deltas apply before this entry's own (dl: the ids whose last write was
-	 * this entry's own).  Reads and writes are stored once, in the entry
-	 * that made them.
-	 */
-	const struct hkid *kid;
-	uint32_t nkid;
-	const hlook *lk;	/* its own lookups that depended on the search directories */
-	uint32_t nlk;
-	size_t ntext, total;	/* own text (tokens); with the children */
-	int32_t level;		/* __INCLUDE_LEVEL__ used: the include depth it ran at (-1: not used) */
-	uint32_t ndirs, psig;	/* leading search directories its lookups depended on; their id */
-	const uint32_t *br;	/* token entries: outermost '{' '}' pairs of the own tokens with no child
-				   inside, (open, close) own-token indices, by open (pp_lazy_skip) */
-	uint32_t nbr;
-	uint32_t nord, noadd, nfe, nctr, ncrd, nseg, span, counter_delta;
-	uint8_t has_text, first_sol, col_end, pend_out;
-	uint8_t edir_end;
-	uint8_t pk, pk_L, pk_pp;	/* the printer's last token at the end (pp.pk...) */
-};
-
-typedef struct hkey {
-	uint64_t hash;
-	const vlex_file *f;
-	const char *spath;
-	uint32_t sig, nfile;
-	int32_t sdir;
-	uint8_t sys;
-	_Atomic(hent *) head;
-	_Atomic uint32_t n;
-} hkey;
-
-/* recording, per TU */
-enum { HT_R = 1, HT_W = 2, HT_G = 4 /* the read was an include guard check */,
-       HT_O = 8 /* the last write was the level's own (not a child entry's) */ };
-
-typedef struct htouch {	/* a level's first touch of an id */
-	uint32_t id, flags;	/* HT_* */
-	uintptr_t v;		/* HT_R: value at entry or HDEF */
-	uint64_t prev;		/* the id's stamp before (the enclosing levels') */
-} htouch;
-
-typedef struct hcpos {		/* __COUNTER__ digits in the output */
-	size_t pos;
-	uint32_t len, val;
-} hcpos;
-
-typedef struct hcrd {		/* hcread while recording: absolute value */
-	const char *s;
-	uint32_t len, off, dlen, val;
-} hcrd;
-
-typedef struct hsegr {		/* a child entry's text (tokens) in the output */
-	size_t start, end;
-	const hent *child;
-	uint32_t counter0;
-	uint32_t base0;		/* tokens: its location base */
-} hsegr;
-
-typedef struct hlev {
-	hkey *k;
-	uint32_t serial;
-	int depth, errors0, warns0, text_started;
-	uint32_t t0, o0, c0, r0, s0;	/* starts in the stacks below */
-	uint32_t fe0, base0, nonce0, nlm0, npushed0;
-	unsigned counter0;
-	size_t text0;
-	uint8_t first_sol, uses_level;
-	uint32_t nfile, ndirs;
-	uint32_t k0, x0;	/* starts in rec.kid, rec.kex */
-	uint32_t l0;		/* start in rec.lk */
-} hlev;
-
-typedef struct hkidr {		/* a child entry of a level while recording */
-	const hent *e;
-	uint32_t ex0, nex;	/* its exclusions in rec.kex */
-} hkidr;
+/* the header cache's types (header-cache-internal.h) */
+#include "header-cache-internal.h"
 
 /* -pedantic warnings on hot paths (__COUNTER__, every #define of a variadic macro): their
    command-line state, once per TU, so the common case (off, no pragmas) is one test */
@@ -591,20 +339,6 @@ static inline bool pp_wc_maybe(pp *p, int k)
 	return p->wc[k] || p->nden;
 }
 
-#define HC_MAXT (1u << 24)
-
-#define HC_MAXCP 65535u
-
-#define HC_MAXCRD 65536u
-
-/* ---------------- header cache: shared table ---------------- */
-
-typedef struct {
-	_Atomic unsigned long hit, miss, rec, uncacheable, full, bytes_replayed, bytes_rec, mem;
-	_Atomic unsigned long nru, nrv, ndl, nfe, nvalid, nchecked;
-	_Atomic unsigned long b_rd, b_dl, b_once, b_fe, b_text, b_seg, b_ent;	/* bytes stored, by kind */
-} hstat_t;
-
 /* ---------------- #if expressions ---------------- */
 
 typedef struct ival {
@@ -612,74 +346,23 @@ typedef struct ival {
 	bool u;
 } ival;
 
-/*
- * Include resolution, process-wide.  A lookup's answer depends only on the
- * options' signature (cwd, frameworks, ...), the mode (where the search
- * starts, angled, include_next), the includer's directory (quoted), the name
- * and the search directories it looked at: the ones up to where it found
- * the file (all if not found), whose prefix signature (psig) it keeps.
- * Files never change under the token cache (vlex_get caches misses too).
- * Kbuild puts the per-directory -I last, so one entry serves every TU.  A
- * warm lookup is one probe instead of a path build, directory-cache probe
- * and token-cache probe per search directory.
- *
- * The key also holds the whole search path's id (fsig): meson puts each
- * target's own -I first, so the prefix an answer depends on differs per
- * target anyway, and without fsig the entries of hundreds of targets for
- * the same header shared one hash and one probe cluster (PostgreSQL: 175
- * probes per lookup, half of them same-key entries for other targets).
- */
-struct incent {
-	uint64_t hash;
-	uint32_t sig, fsig, klen;
-	int32_t mode;		/* start * 4 + angled * 2 + next */
-	uint32_t used, usig;	/* directories looked at, psig[used] */
-	int32_t sdir;
-	const vlex_file *f;
-	const char *path;
-	char key[];		/* includer's directory, '\0', name; zero padded to 8 */
-};
-
-/* ---------------- header cache: regions ---------------- */
-
-#define HC_MAXVAR 64	/* entries per key */
-#define HC_MAXORD (1u << 20)
-#define HC_MAXSEG (1u << 20)
-
-#define HC_MAXTK (1u << 24)
-#define HC_MAXSB ((size_t)1 << 28)
-#define HC_MAXKID (1u << 20)
-#define HC_MAXKEX (1u << 22)
-#define HC_MAXLK (1u << 16)
-
-typedef struct {
-	htouch *t;
-	honce *ord;
-	hcpos *ctr;
-	hcrd *crd;
-	hsegr *seg;
-	hkidr *kid;
-	uint32_t *kex;
-	hlook *lk;
-	cprov *cp;
-} rec_spare_t;
-
 /* ---------------- across files ---------------- */
-
-/* setup.c */
+/* translation-unit.c */
 VPRIV void *vm(size_t n);
 static inline int utoa(char *b, unsigned long long v);
+/* next-token.c */
+VPRIV void hc_mode(pp *p, int mode);
 /* file.c */
 extern _Atomic size_t shared_used;
 VPRIV void *salloc(size_t n);
 VPRIV const char *shared_base0(void);
+VPRIV const pfile *pfile_get(const vlex_file *f, bool *fresh);
+VPRIV uint32_t file_line(const vlex_file *f, const pfile *cfi, uint32_t off);
+/* header-cache-store.c */
 VPRIV void *hsalloc(pp *p, size_t n);
 VPRIV hvec hc_vec(pp *p, const void *a, uint32_t n, uint32_t esz);
 VPRIV const void *hc_blob(pp *p, const void *s, size_t n);
-VPRIV const pfile *pfile_get(const vlex_file *f, bool *fresh);
-VPRIV uint32_t file_line(const vlex_file *f, const pfile *cfi, uint32_t off);
-/* diag.c */
-VPRIV uint32_t loc_line(const pp *p, uint32_t loc);
+/* text-output.c: line markers, comments, the output buffer */
 VPRIV bool move_to_line(pp *p, uint32_t line, bool req);
 VPRIV void out_nl(pp *p);
 VPRIV void cmt_flush(pp *p, ctx *c, const char *upto);
@@ -690,6 +373,13 @@ VPRIV void text_file_change(pp *p, const ctx *from, int enter);
 VPRIV void lm_count(pp *p);
 VPRIV void lm_enter(pp *p, const fent *e);
 VPRIV void lm_rename(pp *p, const char *name, uint32_t nlen, uint32_t line);
+extern _Thread_local char *out_spare;
+extern _Thread_local size_t out_spare_cap;
+VPRIV void out_reserve(pp *p, size_t n);
+static inline void out_put(pp *p, const char *s, size_t n);
+static inline void out_ch(pp *p, char ch);
+/* frontend/diag/: locations, diagnostics and their rendering; dir_extra_tok is directive.c's */
+VPRIV uint32_t loc_line(const pp *p, uint32_t loc);
 VPRIV const char *presumed_name(const pp *p, uint32_t fe, uint32_t loc, uint32_t *len);
 VPRIV __attribute__((format(printf, 4, 5))) void pp_diag(pp *p, uint32_t loc, const char *what, const char *fmt, ...);
 void pp_diagx(pp *p, const pp_dinfo *d, const char *fmt, ...);
@@ -721,17 +411,17 @@ VPRIV void diag_fixits_out(pp *p);
 VPRIV uint8_t inc_sys(pp *p, int32_t sdir);
 VPRIV void dep_only(pp *p, const char *path, uint8_t sys);
 
-/* macro.c: -dD */
+/* macro-dump.c: -dD */
 VPRIV void dd_out(pp *p, uint32_t id, const pmacro *m, bool builtin);
 VPRIV void dd_flush(pp *p);
 
-/* macro.c */
+/* macro table: inline, below */
 static inline uintptr_t mget(const pp *p, uint32_t id);
 static inline uintptr_t *mslot(pp *p, uint32_t id);
 static inline void mset(pp *p, uint32_t id, const pmacro *m);
 static inline void mdisable(pp *p, uint32_t id);
 static inline void menable(pp *p, uint32_t id);
-/* hcrec.c */
+/* header-cache-record.c */
 VPRIV uint64_t *rslot(pp *p, uint32_t id);
 static inline htouch *touch(pp *p, uint32_t id, bool *isnew);
 static inline void touch_read(pp *p, uint32_t id, uintptr_t v, uint32_t g);
@@ -745,17 +435,12 @@ static inline uintptr_t mread(pp *p, uint32_t id);
 static inline bool mdefined(pp *p, uint32_t id);
 static inline bool mguard(pp *p, uint32_t id);
 VPRIV void mdef(pp *p, uint32_t id, const pmacro *m);
-/* hcache.c */
+/* header-cache-statistics.c */
 extern hstat_t hstat;
+/* header-cache-key.c */
 extern size_t hc_mem_max;
 VPRIV bool sig_of(const pp_opts *o, uint32_t *sig, uint32_t *psig);
 VPRIV hkey *hkey_get(uint32_t sig, const vlex_file *f, int32_t sdir, uint32_t nfile, const char *spath, uint8_t sys, bool make);
-/* text.c */
-extern _Thread_local char *out_spare;
-extern _Thread_local size_t out_spare_cap;
-VPRIV void out_reserve(pp *p, size_t n);
-static inline void out_put(pp *p, const char *s, size_t n);
-static inline void out_ch(pp *p, char ch);
 /* token.c */
 static inline void vfill(ptok *t, const vtok *v, const char *src, uint32_t loc);
 const char *pp_spell(const ptok *t, char *buf, size_t *len);
@@ -768,10 +453,13 @@ VPRIV void push_ptok(pp *p, const ptok *t, uint32_t n, uint32_t mid, uint8_t fir
 VPRIV void push_line(pp *p, const ctx *fc, uint32_t b, uint32_t e);
 VPRIV void pop_to(pp *p, int d);
 #define DRCOV_MAX 65536
+/* next-token.c: VCC_DRCOV and friends, read once */
 extern int pp_drcov;
+/* header-skip.c */
 VPRIV void drcov_hit(pp *p, int d0);
 VPRIV void drcov_end(pp *p);
 VPRIV void top_event(pp *p, const void *e, uint32_t base, unsigned ctr, uint8_t end, uint8_t hit);
+/* token.c */
 VPRIV __attribute__((noinline)) void raw(pp *p, ptok *t);
 static inline __attribute__((always_inline)) bool raw_plain(pp *p, ctx *c, ptok *t);
 VPRIV __attribute__((noinline)) void raw_pop(pp *p, ptok *t);
@@ -792,6 +480,8 @@ VPRIV int builtin(pp *p, const pmacro *m, ptok *t);
 VPRIV ival parse_number(pp *p, const ptok *t);
 VPRIV bool eval_if(pp *p, const ctx *fc, uint32_t b, uint32_t e);
 VPRIV bool eval_ptoks(pp *p, const ptok *t, uint32_t n, uint64_t *v);
+/* include.c: pstrdup, used by embed.c; embed.c: #embed */
+VPRIV char *pstrdup(pp *p, const char *s, size_t n);
 VPRIV void embed(pp *p, ctx *c, uint32_t b, uint32_t e, uint32_t loc, uint32_t nloc);
 VPRIV int has_embed(pp *p, const ctx *fc, uint32_t loc);
 /* directive.c */
@@ -805,14 +495,14 @@ VPRIV void define(pp *p, ctx *c, uint32_t b, uint32_t e);
 VPRIV const vlex_file *try_path(const pp_opts *o, const char *path, size_t len);
 VPRIV const vlex_file *find_include(pp *p, const ctx *from, const char *name, size_t nlen, bool angled, bool next, int32_t *sdir, const char **path, const incent **ie);
 VPRIV bool hc_looks_ok(pp *p, const hent *e);
-/* hcache.c */
+/* header-cache-key.c: the #pragma once set; header-cache-validate.c; header-cache-serve.c */
 VPRIV int once_index(const pp *p, const vlex_file *f);
 VPRIV void once_add(pp *p, const vlex_file *f);
 VPRIV bool hc_top(const pp *p);
 VPRIV bool hc_valid(pp *p, const hent *e);
 VPRIV void emit(pp *p, const hent *e, unsigned base);
 static inline void text_start(pp *p, uint8_t sol);
-/* hcentry.c */
+/* header-cache-serve.c, header-cache-record.c, header-cache-publish.c */
 VPRIV bool replay_seg(pp *p, ctx *c);
 VPRIV void replay_tok(pp *p, ctx *c, ptok *t);
 VPRIV void rec_tok(pp *p, const ptok *t);
@@ -822,6 +512,7 @@ extern _Thread_local char *sb_spare;
 extern _Thread_local rec_spare_t rec_spare;
 VPRIV void hc_begin(pp *p, hkey *k);
 VPRIV void hc_end(pp *p);
+VPRIV void kid_attach(pp *p, const hent *e);
 /* include.c */
 VPRIV void enter_file(pp *p, const vlex_file *f, const char *path, int32_t sdir);
 VPRIV void include(pp *p, ctx *c, uint32_t b, uint32_t e, int kind, uint32_t loc);
@@ -917,16 +608,6 @@ static inline void touch_write(pp *p, uint32_t id)
 
 	if (t)
 		t->flags |= HT_W | HT_O;
-}
-
-/* a child entry wrote id: not the level's own write any more */
-static inline void touch_write_kid(pp *p, uint32_t id)
-{
-	bool isnew;
-	htouch *t = touch(p, id, &isnew);
-
-	if (t)
-		t->flags = (t->flags | HT_W) & ~(uint32_t)HT_O;
 }
 
 /* the entry for token t's identifier, as an expansion reads it */
@@ -1069,30 +750,7 @@ static inline __attribute__((always_inline)) void raw_fast(pp *p, ptok *t)
 }
 
 /* the next fully expanded token */
-/*
- * assembler-with-cpp: '$' is no identifier character (clang), so in "$APIC_ID"
- * the macro APIC_ID expands: t becomes the '$' and the name is read next.
- * (vcc's lexer is shared with C, where '$' is one: the split is made here.)
- */
-static __attribute__((noinline, cold)) void dollar_split(pp *p, ptok *t)
-{
-	uint32_t id;
-
-	if (t->len < 2 || t->s[0] != '$' || (t->flags & TF_DIRTY) || t->s[1] == '$' || (t->s[1] >= '0' && t->s[1] <= '9'))
-		return;
-	id = vintern_find(t->s + 1, t->len - 1, vintern_hash(t->s + 1, t->len - 1));
-	if (!id || !mget(p, id))
-		return;
-	{
-		ptok *n = varena_alloc(&p->tmp, sizeof(*n));
-
-		*n = *t;
-		n->s = t->s + 1, n->len = t->len - 1, n->id = id, n->loc = t->loc + 1;
-		n->flags &= (uint8_t)~(TF_SOL | TF_SPACE);
-		push_ptok(p, n, 1, 0, 0, 0);
-		t->len = 1, t->id = 0, t->kind = T_UNKNOWN;
-	}
-}
+VPRIV __attribute__((noinline, cold)) void dollar_split(pp *p, ptok *t);
 
 static inline __attribute__((always_inline)) void next_exp(pp *p, ptok *t)
 {
@@ -1108,6 +766,13 @@ static inline __attribute__((always_inline)) void next_exp(pp *p, ptok *t)
 		return;
 	}
 	next_exp_slow(p, t, e);
+}
+
+static inline __attribute__((always_inline)) void next_tok(pp *p, ptok *t)
+{
+	if (p->depth == p->nfile && !p->svn && !p->hold_tmp)
+		p->tmp.p = p->tmp.base;	/* nothing above file level refers to tmp */
+	next_exp(p, t);
 }
 
 static inline bool idch(unsigned char c)

@@ -112,9 +112,11 @@ relative to it); `TODO.md` stays at the top.
   - `ld/`: the linker `vlink` (`ld.c`, one TU with its main; also linked into
     vccd, which calls `ld_main` per link) and `vobjcopy`/`vnm`;
     `wasmld.c` is vlink for WebAssembly (as `wasm-ld` or with `-mwasm64`).
-  - `driver/`: one compile job from a clang command line (`ppdriver.c`), the
-    declaration cache (`ccsnap.c`), `--explain` pages (`explain.inc`).
-  - `server/`: vccd (`vccd.c`, with its main), the diagnostics store
+  - `driver/`: one compile job from a clang command line (`job.c` calls the
+    pieces: `cmdline.c`, `searchpath.c`, `predef.c`, `depfile.c`, `output.c`, ...;
+    `driver-internal.h`), the declaration cache (`ccsnap.c`), `--explain` pages (`explain.inc`).
+  - `server/`: vccd (`vccd.c`, with its main; one file per job beside it,
+    `vccd-internal.h`), the diagnostics store
     (`dstore.c`), the capability table (`caps.c`) and the warning groups
     (`warnings.inc`).  Without `--backend-sock` vccd runs the whole kernel
     build itself: probes, `-E`/`-c`/`-S` (stdin too), links (vld in-process;
