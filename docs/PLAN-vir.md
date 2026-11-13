@@ -280,6 +280,49 @@ kända inlinefel; fokuserat ASan/UBSan och filvist bygge gröna, O0/O1
 oförändrade. ARM/QEMU 47/47 VIR-prov. TSVC 151/151 kontrollsummor,
 **83** vektorloopar kvar; walk-prefixkontrollen 134 namn.
 
+2026-11-13, mät isolerad helprogramvinst innan nästa optimering:
+`bench/sqlite/vir-x86-swap.py` bygger diagnostiska hybrider med clangs
+assembly för en liten funktion i taget och för alla valda tillsammans.
+Det finns också en VIR-kontroll med samma 2048-bytes textslotar. Lokala
+labels döps om; jump-tabeller hålls i text. Verktyget kräver att samtliga
+1478 textsymbolers adresser är identiska mellan kontrollen och varje
+hybrid, och avvisar externa lokala sträng-/datareferenser. Ingen
+kompilator- eller runtimekod byts i projektet av denna mätning.
+
+Testade vdbeRecordCompareInt, btreeParseCellPtr, getCellInfo och
+pcache1Fetch, samma -O2-kod och ABI som referensen. Alla sex binärer klarar
+speedtest1-verifieringen med samma hash. Fem alternerade main-prov,
+storlek 100, CPU 7, median CPU ms:
+
+| Binär | Vanliga funktionsstorlekar | Adressmatchade textslotar |
+|---|---:|---:|
+| VIR-kontroll | 1233,85 | 1242,85 |
+| Clang RecordCompareInt | 1238,13 | 1247,51 |
+| Clang btreeParseCellPtr | 1232,87 | 1236,11 |
+| Clang getCellInfo | 1232,70 | 1244,09 |
+| Clang pcache1Fetch | 1235,76 | 1257,43 |
+| Alla fyra från clang | 1236,95 | 1237,05 |
+| Hela clang-referensen | 1113,70 | 1111,39 |
+
+Byte av alla fyra minskar dynamiska instruktioner 21,908 → 21,500
+miljarder, men den första adressmatchade serien vinner bara 0,5 % i tid.
+En upprepning gav kontroll 1257,15, cell 1240,47, alla fyra 1231,27 och
+clang 1122,63 ms. Den serien har en synlig last-/frekvensförändring från
+tredje rundan (råproven sparas utan filtrering), så dess 2,1 % bör inte
+läsas som en stabil vinst. En kort tredje serie (tre alternerade prov)
+gav 1242,27 → 1232,74 ms för alla fyra, clang 1109,42 ms: 0,8 % vinst,
+1,111× clang. De stabilare serierna pekar alltså på cirka 0,5–0,8 %.
+Till och med dessa hybrider ligger klart över
+1,05× clang. Detta utesluter inte andra förbättringar, men motiverar att
+nästa insats fokuserar på VM:n och de större sökrutinerna snarare än att
+jaga clangs instruktionsantal i just dessa fyra små funktioner.
+
+Bygg matched-katalogen med `vir-x86-swap.py --vir VIR.s --clang CLANG.s
+--driver-object vir-speedtest1.o --out DIR vdbeRecordCompareInt
+btreeParseCellPtr getCellInfo pcache1Fetch`; tidtagningen görs av befintliga
+`vir-x86.py run`. Underlag
+`work/vir-x86-perf/hybrid-small/{results100,matched/{results100,repeat100,confirm100}}`.
+
 2026-11-13, gemensam edge-känslig branch-threading prövad:
 En delad layoutprototyp kunde hoppa över en ren icmp+brif när inkommande
 blockargument var konstanta eller en tidigare kant redan bevisade samma/

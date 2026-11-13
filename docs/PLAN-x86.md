@@ -1143,3 +1143,17 @@ i PLAN-vir.md.
 Validerat: egna x86 316/316, GCC 1615/1615, TCC 105/105, samma fem kända
 inlinefel; ARM/QEMU 47/47, ASan/UBSan och filvist bygge gröna. TSVC
 151/151 och **83** vektorloopar, prefixkontroll 134 namn.
+
+
+### 2026-11-13: mät småfunktionernas återstående helprogrambidrag
+
+Ny `bench/sqlite/vir-x86-swap.py` mäter clangs assembly för RecordCompareInt,
+btreeParseCellPtr, getCellInfo och pcache1Fetch i temporära VIR-hybrider.
+2048-bytes textslotar och kontroll av alla 1478 textsymboladresser håller
+övrig kod på samma adress. Alla verifieringshashar stämmer. Första
+femprovserien vinner bara 0,5 % med alla fyra bytta; en tredje kort serie
+bekräftar 0,8 %. Den mellanliggande upprepningen har tydlig lastvariation. Även hybriderna ligger över 1,05× clang, så nästa fokus är
+VM:n och större sökrutiner. Ingen ny optimeringskod behålls från denna
+omgång; prototyper med färre kopior/tester var neutrala eller långsammare.
+Fulla mätningar och avvisade försök under V4 i PLAN-vir.md. Den återställda
+kompilatorn passerar fokuserade x86-riggen och VIR:s självprov.
