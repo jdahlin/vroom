@@ -32,8 +32,8 @@
  * claim then changes the output); VCC_VMREG_STATS=1 prints per region the
  * resident bytes handed back.  Both use mincore and are slow.
  */
-#ifndef VCC_ARENA_H
-#define VCC_ARENA_H
+#ifndef VCC_JOB_REGIONS_H
+#define VCC_JOB_REGIONS_H
 
 #include <pthread.h>
 #include <stdint.h>
@@ -68,75 +68,19 @@ static inline VUSE VRETNONNULL void *vmreg_map(size_t n)
 	return p;
 }
 
-/* ---- debugging: VCC_VMREG_CHECK / VCC_VMREG_STATS ---- */
+/* ---- debugging: VCC_VMREG_CHECK / VCC_VMREG_STATS (job-regions.c) ---- */
 
-static int vmreg_dbg_mode = -1;	/* bit 0 check, bit 1 stats */
+extern int vmreg_dbg_mode;	/* -1 until read from the environment; bit 0 check, bit 1 stats */
+int vmreg_dbg_init(void);	/* reads the environment (once), returns the mode */
+__attribute__((noinline, cold)) void vmreg_dbg_put(vmreg *r, size_t used);
 
-static struct { const char *name; unsigned long long res, puts, bad; } vmreg_dbg_tab[64];
-static pthread_mutex_t vmreg_dbg_mu = PTHREAD_MUTEX_INITIALIZER;
-
-static void vmreg_dbg_report(void)
-{
-	for (int i = 0; i < 64 && vmreg_dbg_tab[i].name; i++)
-		fprintf(stderr, "vmreg %-14s %6llu puts, %9.1f MB resident at put, %llu bad\n", vmreg_dbg_tab[i].name,
-			vmreg_dbg_tab[i].puts, vmreg_dbg_tab[i].res / 1e6, vmreg_dbg_tab[i].bad);
-}
-
-static int vmreg_dbg(void)
+static inline int vmreg_dbg(void)
 {
 	int m = __atomic_load_n(&vmreg_dbg_mode, __ATOMIC_RELAXED);	/* (threads race to set it: same value) */
 
-	if (__builtin_expect(m < 0, 0)) {
-		int z = -1;
-
-		m = (getenv("VCC_VMREG_CHECK") ? 1 : 0) | (getenv("VCC_VMREG_STATS") ? 2 : 0);
-		if (__atomic_compare_exchange_n(&vmreg_dbg_mode, &z, m, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED) && (m & 2))
-			atexit(vmreg_dbg_report);
-	}
+	if (__builtin_expect(m < 0, 0))
+		m = vmreg_dbg_init();
 	return m;
-}
-
-__attribute__((noinline, cold)) static void vmreg_dbg_put(vmreg *r, size_t used)
-{
-	size_t pg = (size_t)getpagesize(), lim = r->cap < ((size_t)8 << 30) ? r->cap : ((size_t)8 << 30);
-	size_t np = lim / pg, res = 0, bad = 0;
-	char *vec = malloc(np);
-	int i;
-
-	mincore(r->p, lim, (void *)vec);	/* char * on Darwin, unsigned char * on Linux */
-	for (size_t k = 0; k < np; k++) {
-		char *pp = r->p + k * pg;
-
-		if (!(vec[k] & 1))
-			continue;
-		res += pg;
-		if (used == VMREG_SCRATCH) {
-			if (vmreg_dbg_mode & 1)
-				memset(pp, 0xa5, pg);
-		} else if ((vmreg_dbg_mode & 1) && k * pg + pg > used) {
-			size_t from = k * pg < used ? used - k * pg : 0;
-
-			for (size_t j = from; j < pg; j++)
-				if (pp[j]) {
-					if (!bad)
-						fprintf(stderr, "vmreg %s: nonzero byte at %zu, past used %zu\n", r->name,
-							k * pg + j, used);
-					bad++;
-					break;
-				}
-		}
-	}
-	free(vec);
-	pthread_mutex_lock(&vmreg_dbg_mu);
-	for (i = 0; i < 63 && vmreg_dbg_tab[i].name && strcmp(vmreg_dbg_tab[i].name, r->name); i++)
-		;
-	vmreg_dbg_tab[i].name = r->name;
-	vmreg_dbg_tab[i].res += res;
-	vmreg_dbg_tab[i].puts++;
-	vmreg_dbg_tab[i].bad += bad;
-	pthread_mutex_unlock(&vmreg_dbg_mu);
-	if (bad && (vmreg_dbg_mode & 1))
-		abort();
 }
 
 /* ---- the regions ---- */
@@ -229,40 +173,6 @@ static inline VUSE VRETNONNULL void *vreserve(size_t n, int flags, const char *m
 		abort();
 	}
 	return p;
-}
-
-/* a bump region over a reservation, by offset (the assembler, the object writer) */
-typedef struct vregion { uint8_t *base; size_t used, cap; } vregion;
-
-/* n bytes aligned to al (a power of two); prints msg and aborts when full */
-static inline VUSE VRETNONNULL VNONNULL(1) void *vregion_push(vregion *r, size_t n, size_t al, const char *msg)
-{
-	size_t u = (r->used + al - 1) & ~(al - 1);
-
-	if (u + n > r->cap) {
-		fprintf(stderr, "%s\n", msg);
-		abort();
-	}
-	r->used = u + n;
-	return r->base + u;
-}
-
-/* a bump arena by pointers, 8-byte granules (the preprocessor) */
-typedef struct varena {
-	char *base, *p, *end;
-} varena;
-
-static inline VUSE VRETNONNULL VNONNULL(1) void *varena_alloc(varena *a, size_t n)
-{
-	char *r = a->p;
-
-	n = (n + 7) & ~(size_t)7;
-	if (__builtin_expect((size_t)(a->end - r) < n, 0)) {
-		fprintf(stderr, "vcc: preprocessor arena full\n");
-		abort();
-	}
-	a->p = r + n;
-	return r;
 }
 
 #endif

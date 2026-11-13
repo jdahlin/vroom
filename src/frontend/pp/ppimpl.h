@@ -38,8 +38,11 @@
 
 #include "frontend/pp/dircache.h"
 #include "common/intern.h"
+#include "common/fail.h"
+#include "frontend/c/keywords.h"
 #include "frontend/pp/pp.h"
-#include "common/arena.h"
+#include "port/job-regions.h"
+#include "common/region.h"
 
 /* functions one file defines and another calls: static when the directory is
    compiled as one TU (VCC_UNITY, the default build), so they stay internal */

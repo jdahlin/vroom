@@ -33,7 +33,7 @@
 #include "frontend/c/ccint.h"
 #include "codegen/emit.h"
 #include "driver/ccsnap.h"
-#include "common/arena.h"
+#include "port/job-regions.h"
 #include "common/f128.h"
 
 /* functions one file defines and another calls: static when the directory is

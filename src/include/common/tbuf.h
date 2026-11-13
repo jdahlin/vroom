@@ -1,6 +1,6 @@
 /*
  * tbuf: the code generator's text buffer.  Its bytes are a fixed reservation
- * (an mmap, or a reused vmreg region from arena.h), so a put only checks the
+ * (an mmap, or a reused vmreg region from port/job-regions.h), so a put only checks the
  * bound; running past it aborts.  The fast paths are inline: the printer
  * calls them for every operand.
  */
@@ -14,7 +14,7 @@
 #include <string.h>
 #include <sys/mman.h>
 
-#include "common/arena.h"
+#include "port/job-regions.h"
 
 typedef struct tbuf {
 	char *p;
@@ -28,7 +28,7 @@ static inline void tb_init(tbuf *b, size_t cap)
 	b->cap = cap;
 }
 
-/* a buffer in a reused region (arena.h) */
+/* a buffer in a reused region (port/job-regions.h) */
 static inline void tb_reg(tbuf *b, vmreg *r, size_t cap, const char *name)
 {
 	b->p = vmreg_get(r, cap, name);

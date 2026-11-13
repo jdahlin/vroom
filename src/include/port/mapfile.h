@@ -12,6 +12,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "common/attr.h"
+#include "common/defer.h"
 
 typedef struct vmapped {
 	const unsigned char *p;
@@ -48,5 +49,13 @@ static inline VNONNULL_ALL void vunmap_file(vmapped *m)
 	if (m->p)
 		munmap((void *)m->p, m->n);
 }
+
+static inline void vdefer_unmap(vmapped *m)
+{
+	vunmap_file(m);
+	m->p = NULL;
+	m->n = 0;
+}
+#define VAUTOUNMAP VCLEANUP(vdefer_unmap)	/* VAUTOUNMAP vmapped m; unmaps at the end of the block */
 
 #endif
