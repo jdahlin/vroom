@@ -6,91 +6,18 @@
  */
 #include <setjmp.h>
 #include "frontend/c/cc.h"
+#include "frontend/ast.h"
 #include "common/intern.h"
 #include "frontend/c/keywords.h"
 
 #define unlikely(x) __builtin_expect(!!(x), 0)
 #define likely(x) __builtin_expect(!!(x), 1)
 
-typedef __int128 i128;
-typedef unsigned __int128 u128;
-
 /* ---------------- per-TU state ---------------- */
 
 #define DIR_BITS 11
 #define DIR_PAGE (1u << DIR_BITS)
 #define NDIR ((1u << VINTERN_ID_BITS) >> DIR_BITS)
-
-typedef struct cstr {		/* a string literal */
-	const char *s;		/* bytes, element size each, zero terminated */
-	uint32_t n;		/* elements, terminator included */
-	uint8_t esz;		/* element size: 1, 2, 4 */
-	uint8_t kind;		/* LEX_TOKEN_STRING / LEX_TOKEN_WIDE_STRING / ... */
-} cstr;
-
-typedef struct label {
-	uint32_t name, loc;
-	uint32_t defined;	/* node of the N_LABEL, 0 if only referenced */
-	uint32_t shadow;	/* __label__ scoping */
-	uint32_t depth;
-	uint8_t local;		/* declared with __label__ */
-	uint8_t addr_taken;
-} label;
-
-/* Call-site restrictions kept with declaration attributes, including redeclarations. */
-enum {
-	AF_TAIL_RETURNS_TWICE = 1u << 0,
-	AF_TAIL_DISABLE = 1u << 1,
-	AF_TAIL_NOT_CALLED = 1u << 2,
-	AF_OPTNONE = 1u << 3,	/* currently prevents the new sibling-call transformation */
-};
-
-typedef struct attrs {		/* the attributes of one declaration */
-	x86_features x86_features;
-	uint32_t x86_target;	/* effective function target features are present */
-	uint32_t aligned;	/* bytes; 0: none */
-	uint32_t section, alias, asmname;	/* string index + 1, 0: none */
-	uint32_t cleanup;	/* sym */
-	uint32_t mode;		/* 0, or the integer type kind from mode() */
-	uint32_t vecsize;	/* vector_size(n) bytes, 0: none */
-	uint32_t extvec;	/* ext_vector_type(n) elements, 0: none */
-	uint32_t depr;		/* deprecated: the attribute name's location, 0: none */
-	uint32_t deprmsg;	/* deprecated("msg"): string index + 1, 0: none */
-	uint32_t wur;		/* 1: warn_unused_result, 2: [[nodiscard]] */
-	uint32_t nonnull;	/* nonnull: bit 0 all pointer parameters, bit i parameter i (1-based) */
-	uint32_t fmt;		/* format(printf, i, j): 1 << 16 | i << 8 | j, 0: none or not printf */
-	uint32_t ifunc;		/* ifunc("resolver"): alias is the resolver, an STT_GNU_IFUNC symbol */
-	uint32_t counted_by;	/* identifier id */
-	uint32_t errmsg;	/* error("..."): string index + 1, 0: none */
-	uint32_t interrupt;	/* x86 interrupt calling convention */
-	uint32_t ms_struct;	/* Microsoft record layout */
-	uint32_t tlsloc;		/* tls_model attribute location */
-	uint32_t visibility;
-	uint32_t flags;		/* AF_* declaration/call restrictions */
-	uint8_t packed, transparent, used, unused, weak, noreturn, constructor, destructor;
-	uint8_t nonstring, may_alias, cold, gnu_inline, always_inline, noinline, ainline, error_fn;
-	uint8_t overloadable, noinstr;
-	uint8_t pure;		/* 1: pure, 2: const (-Wunused-value) */
-	uint8_t unavail;	/* unavailable("msg"): depr/deprmsg say where and why, uses are errors */
-	uint8_t fmtarg;		/* format_arg(i) */
-	uint16_t prio;		/* constructor(N)/destructor(N), 0: none (65535) */
-	uint8_t tlsmodel;	/* tls_model(): VCC_TLS_*, 0: none */
-} attrs;
-
-typedef struct asmop {
-	uint32_t name;		/* [name] id, 0 */
-	uint32_t constraint;	/* string index */
-	uint32_t expr;		/* node */
-} asmop;
-
-typedef struct casm {
-	uint32_t tmpl;		/* string index */
-	uint32_t nout, nin, nclob, nlabel;
-	asmop *ops;		/* outputs then inputs */
-	uint32_t *clob;		/* string indices */
-	uint32_t *labels;	/* label indices */
-	uint8_t vol, go, inl, extended;
-} casm;
 
 /*
  * Lazy function bodies: a static function defined in a header keeps its
@@ -118,8 +45,13 @@ typedef struct lzfn {
 
 
 struct cc {
-	pp *p;
-	const cc_opts *o;
+	/* the AST code generation reads (frontend/ast.h), first: its per-node tables stay in reach of
+	   a scaled load and of ldp (doc/quality/MEASURE-ast-split.md); c->syms and c->ast.syms are
+	   the same field */
+	union {
+		struct ast ast;
+		struct { AST_FIELDS };
+	};
 	struct cc_type_name *tyb;	/* tyname/tyname_sugar: 8 buffers in rotation (allocated at the first) */
 	unsigned tyk;
 	jmp_buf bail;
@@ -169,39 +101,15 @@ struct cc {
 	uint8_t cv_what;		/* context of the conversion being checked: CX_* (diagnostics) */
 	uint32_t cv_loc, cv_fn, cv_arg, cv_callee;	/* cv_callee: CX_PASS: the callee expression's first location */	/* CX_PASS: the callee's sym (0: unknown) and the argument */
 
-	ctype *ty;
-	uint32_t nty;
 	uint32_t *tyhash;	/* interning, open addressing */
 	uint32_t tyhcap;
-	qty *params;
-	uint32_t nparams;
 	uint32_t *fnhash, fnhcap, nfn;
 	uint32_t *ptrc;		/* qty -> type index of a pointer to it (a cache, checked on use) */
 	uint32_t ptr_lo;	/* ptrc entries below are not used (1; a recorded region: its first type) */
 
-	tag *tags;
-	uint32_t ntag;
 	uint32_t cplx[TY_NKINDS];	/* _Complex <kind>: its record type (0: not made yet) */
-	sym *syms;
-	uint32_t nsym;
-	node *nodes;
 	diag_span *span;		/* per node: first and last token (start locations), 0: unknown */
 	struct cparen { uint16_t l, r; } *paren;	/* per node: its outermost parentheses, bytes before span.b / after span.e (0: none) */
-	uint32_t nnode;
-	uint32_t *lists;
-	uint32_t nlist;
-	i128 *ipool;
-	uint32_t nipool;
-	double *fpool;		/* a 16-byte long double: its double, then its binary128 bits in the next two */
-	uint32_t nfpool;
-	cstr *strs;
-	uint32_t nstr;
-	label *labels;
-	uint32_t nlabel;
-	attrs *attr;
-	uint32_t nattr;
-	casm *asms;
-	uint32_t nasm;
 
 	char *heap, *hp, *hend;	/* bump allocator for everything else */
 	struct dop *dops;	/* declarator op stack (frontend/c/declarator.c) */
@@ -257,16 +165,11 @@ struct cc {
 	uint32_t npweak, cpweak;	/* (the done aliases, sym set, stay for the end-of-TU check) */
 
 	/* builtin types */
-	qty t_size, t_ptrdiff, t_wchar, t_char16, t_char32, t_valist;
 	uint32_t valist_tag;
 	uint32_t id_func, id_FUNCTION, id_PRETTY, id_main;
 	uint32_t id_int128_t, id_uint128_t, id_valist;
 	uint32_t id_null[4];	/* _Nonnull _Nullable _Null_unspecified _Nullable_result */
 	uint32_t func_name_sym;
-	uint32_t ntoplevel;
-	uint32_t *toplevel;	/* file-scope syms in declaration order */
-	uint32_t *tlasm;	/* file-scope asm("...") statements (N_ASM nodes) */
-	uint32_t ntlasm;
 	uint32_t ndiag;		/* diagnostics reported */
 	struct driver_declaration_cache_state *dc;	/* declaration cache (declaration-cache.c), NULL: off */
 
@@ -290,6 +193,8 @@ struct cc {
 	struct drrec *dr;
 	uint8_t dr_on;		/* a region is being recorded: the hooks log */
 };
+_Static_assert(offsetof(struct cc, ast) == 0, "struct ast is struct cc's first member");
+_Static_assert(sizeof(struct ast) < 504, "struct ast stays within ldp's reach");
 
 
 enum {

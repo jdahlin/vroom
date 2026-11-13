@@ -21,10 +21,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "common/intern.h"
+#include "../c/cc-internal.h"	/* the shared AST (frontend/ast.h) and the code that builds it */
 #include "frontend/cxx/cxx.h"
-#include "frontend/lex/lex.h"
-#include "frontend/pp/pp.h"
 
 #ifndef VPRIV
 #ifdef VCC_UNITY
@@ -126,6 +124,7 @@ typedef struct cxx_late { uint32_t begin, end; cxx_scope *scope; uint8_t what; }
 typedef struct cxx {
 	pp *p;
 	const cxx_options *o;
+	cc *ast;			/* the TU's AST tables (struct ast inside struct cc), what code generation reads */
 	cxx_token *tok;			/* the TU's tokens, then CXX_EOF */
 	uint32_t ntok, pos;
 	cxx_undo *undo;

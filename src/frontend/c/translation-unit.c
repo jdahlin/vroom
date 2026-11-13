@@ -21,7 +21,7 @@ CC_PRIVATE void *cc_heap_allocate(cc *c, size_t n)
 
 /* ---------------- driver ---------------- */
 
-static void cc_translation_unit_init(cc *c, pp *p, const cc_opts *o)
+CC_PRIVATE void cc_translation_unit_init(cc *c, pp *p, const cc_opts *o)
 {
 	memset(c, 0, sizeof(*c));
 	c->ptr_lo = 1;
@@ -175,7 +175,7 @@ static void cc_translation_unit_init(cc *c, pp *p, const cc_opts *o)
 }
 
 /* the tables back to the thread, zeroed up to what the TU used (+ one element) */
-static void cc_translation_unit_free(cc *c)
+CC_PRIVATE void cc_translation_unit_free(cc *c)
 {
 #define CC_TRANSLATION_UNIT_USED_BYTES(n, a) (((size_t)(n) + 2) * sizeof(*(a)))
 	vjob_region_release(&cc_regions[0], CC_TRANSLATION_UNIT_USED_BYTES(c->nty, c->ty));

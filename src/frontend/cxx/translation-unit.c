@@ -14,10 +14,12 @@ static void cxx_free(cxx *c)
 	free(c->undo);
 	free(c->late);
 	pp_temporary_hold(c->p, 0);
+	cc_translation_unit_free(c->ast);
+	free(c->ast);
 	/* (scopes and entities are leaked with the TU for now: the AST step gives them an arena) */
 }
 
-int cxx_run(pp *p, const cxx_options *o)
+int cxx_run(pp *p, const cc_opts *co, const cxx_options *o)
 {
 	cxx c;
 	jmp_buf top;
@@ -26,6 +28,8 @@ int cxx_run(pp *p, const cxx_options *o)
 	memset(&c, 0, sizeof c);
 	c.p = p;
 	c.o = o;
+	c.ast = malloc(sizeof(cc));
+	cc_translation_unit_init(c.ast, p, co);	/* the builtin types, the tables */
 	cxx_tokens_read(&c);
 	c.global = cxx_scope_new(&c, CXX_SCOPE_NAMESPACE, NULL, NULL);
 	c.scope = c.global;

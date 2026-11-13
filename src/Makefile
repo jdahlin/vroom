@@ -109,16 +109,15 @@ server_SRC = $(filter-out server/diagnostics-store.c server/capabilities.c,$(wil
 # SQLite's amalgamation), so the code generator sees all of it, also in `make
 # self` where there is no LTO, and what the files share stays static (VPRIV in
 # the headers).  `make VCC_UNITY=` compiles the files one by one.
-SPLIT_MODS = cc cxx pp codegen driver
+SPLIT_MODS = cc pp codegen driver
 # the object writer: the model, the CPU's fixups, the ELF writer (linked with as)
 # VIR (SPEC-vir.md): the format and its tools, register allocation (V4); linked into the
 # compiler for codegen/vir/ (VCC_VIR)
 vir_SRC  = vir/opcode-table.c vir/vir.c vir/print.c vir/parse.c vir/verify.c vir/facts.c vir/layout.c vir/compact.c vir/pass-list.c $(wildcard vir/pass/*.c)
 VIRA_SRC = vir/loops.c vir/register-allocation.c vir/register-allocation-check.c vir/register-allocation-print.c	# (not in the unity TU: own statics)
 obj_SRC  = obj/obj.c arch/a64/obj/fixup.c arch/x64/obj/fixup.c platform/linux/elf.c
-# the C++ front end (PLAN-cxx.md)
-cxx_SRC  = $(wildcard frontend/cxx/*.c)
-cc_SRC   = $(filter-out frontend/c/keywords.c frontend/c/replay.c,$(wildcard frontend/c/*.c)) frontend/c/replay.c
+# with the C++ front end (PLAN-cxx.md): it builds the same AST, with the same type, layout and constant code
+cc_SRC   = $(filter-out frontend/c/keywords.c frontend/c/replay.c,$(wildcard frontend/c/*.c)) frontend/c/replay.c $(wildcard frontend/cxx/*.c)
 # the compile job (driver_job_run); declaration-cache.c stays a TU of its own
 driver_SRC = $(filter-out driver/declaration-cache.c,$(wildcard driver/*.c))
 # pp: the preprocessor and, for now, the diagnostics engine (it uses pp-internal.h)

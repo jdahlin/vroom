@@ -48,6 +48,10 @@
 
 #define CC_IDENTIFIER(id) cc_identifier_length(id), cc_identifier_string(id)
 
+/* a TU's tables: also the C++ front end's AST (frontend/cxx/, compiled in this module) */
+CC_PRIVATE void cc_translation_unit_init(cc *c, pp *p, const cc_opts *o);
+CC_PRIVATE void cc_translation_unit_free(cc *c);
+
 /* ---------------- types ---------------- */
 
 typedef struct { uint8_t size, align; } cc_basic_type_layout;
