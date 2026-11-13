@@ -49,7 +49,7 @@ source, its path, flags and runtime), so a rerun only builds and runs vcc's side
 to one that passed before (build/src/ctests/pass, keyed by the object, the
 runtime and the reference) is not linked or run again; --no-cache runs all.
 """
-import hashlib, json, os, re, shutil, subprocess, sys, time
+import difflib, hashlib, json, os, re, shutil, subprocess, sys, time
 from collections import Counter, defaultdict
 from multiprocessing import Pool
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -360,14 +360,17 @@ def one_(t):
         cat = 'fp' if re.search(r'floating point|long double', e) else 'emit'
         return t, 'fail', cat, first_err(e) if isinstance(rc, int) and rc > 0 else f'vpp: signal/timeout {rc}: ' + first_err(e)
     if suite == 'vcc' and re.search(r'/\*\s*vcc-threads-same\s*\*/', src):
-        outs = set()
+        outs = []
         for k, n in enumerate(['1', '8', '8', '8']):
             rc, _, err = sh([VPP, '-S'] + vfl + [path, '-o', f'{wd}/vcc{k}.s'], cwd=cwd, timeout=tmo, env=dict(os.environ, VCC_THREADS=n))
             if rc:	# (a failed run is not a difference: say what it was)
                 return t, 'fail', 'emit', f'VCC_THREADS={n}: vpp -S {rc}: ' + first_err(err.decode(errors='replace'))
-            outs.add(open(f'{wd}/vcc{k}.s', 'rb').read())
-        if len(outs) != 1:
-            return t, 'fail', 'emit', 'assembly differs between VCC_THREADS=1 and 8'
+            outs.append(open(f'{wd}/vcc{k}.s', 'rb').read())
+        if len(set(outs)) != 1:	# (the first lines that differ, for a difference CI alone sees)
+            other = next(o for o in outs if o != outs[0])
+            diff = [l for l in difflib.unified_diff(outs[0].decode(errors='replace').splitlines(),
+                                                     other.decode(errors='replace').splitlines(), 'THREADS=1', 'THREADS=8', n=1, lineterm='')][2:14]
+            return t, 'fail', 'emit', 'assembly differs between VCC_THREADS=1 and 8: ' + ' | '.join(diff)
     # an object byte-identical to one that passed before (same runtime, same
     # reference) passes again: no link, no qemu (they are ~90% of the time)
     pk = hashlib.sha1(open(f'{wd}/vcc.o', 'rb').read() + (RTHASH + ref['key'] + os.environ.get('VCC_QEMU_CPU', 'max')).encode()).hexdigest()
