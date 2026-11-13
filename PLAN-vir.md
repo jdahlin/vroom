@@ -1531,8 +1531,12 @@ från #125:
   clang konverterar dem också.  Hoppet är snabbare på TSVC:s data.
 - **Tester:** nytt `vcc/vir_search_loop.c` (lika värden, −0, NaN);
   C-sviterna genom VIR med kontrollen 2103/2103, inline 85/85, vcc 300/300
-  direkt, TSVC 151/151, sqlite samma hash.  x86-64 är inte kört: ändringen i
-  `vw_ifconv` gäller alla mål.
+  direkt, TSVC 151/151, sqlite samma hash.
+- **x86-64 (2026-11-13):** regeln i `vw_ifconv` gällde först alla mål och fällde
+  `bench/vcc-vir-x86.py` i CI (tsan-jobbet kör på x86-64): testet kräver att
+  maxval, maxindex och lastnegative vektoriseras där, som ordnade reduktioner
+  av just de `select` regeln tog bort.  Regeln gäller nu inte x86-64, liksom
+  den i `vec.inc`.  Om looparna är snabbare så på x86-64 är inte mätt.
 
 ### Underlag för V4 (2026-11-11): registerallokering, ingen kod
 

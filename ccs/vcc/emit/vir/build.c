@@ -3448,8 +3448,10 @@ static bool vw_ifconv(ecx *e)
 		/* Values that each either keep a block parameter or replace it (a maximum, and its
 		 * index, in a search loop) stay a branch: as selects every round waits for the one
 		 * before, and such a branch is mostly not taken.  TSVC s314-s316, s3110: three to
-		 * nine times slower as selects; sqlite's speedtest1 is the same either way. */
-		if (!badsel && nsel) {
+		 * nine times slower as selects; sqlite's speedtest1 is the same either way.  Measured on
+		 * arm64 only: x86-64 keeps the selects, which its vectorizer takes as ordered
+		 * reductions (bench/vcc-vir-x86.py requires that of maxval, maxindex, lastnegative). */
+		if (!badsel && nsel && !X86(e->c)) {
 			bool all = true;
 
 			for (uint32_t k = 0; k < nsel; k++)
