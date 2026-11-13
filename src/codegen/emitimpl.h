@@ -69,7 +69,7 @@
 #include "obj/obj.h"
 #include "driver/ppdriver.h"
 #include "port/job-regions.h"
-#include "common/tbuf.h"
+#include "common/text-buffer.h"
 
 #include "name.h"
 

@@ -1143,7 +1143,7 @@ static void gen_stmt1(ecx *e, uint32_t n)
 
 			i->off = (int32_t)e->raw.n;
 			i->ref = (uint32_t)k;
-			tb_put(&e->raw, b, (size_t)k);
+			vtext_append(&e->raw, b, (size_t)k);
 		}
 		gen_stmt(e, x->c);
 		return;

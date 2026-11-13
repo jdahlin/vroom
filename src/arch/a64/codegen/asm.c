@@ -43,14 +43,14 @@ static void vraw(ecx *e, const char *opn, int k, int v, int xr)
 	size_t st = rb->n;
 	ins *i;
 
-	tb_c(rb, '\t');
-	tb_s(rb, opn);
-	tb_c(rb, '\t');
-	tb_c(rb, (char)k);
-	tb_u(rb, (uint64_t)v);
-	tb_s(rb, ", [");
+	vtext_char_append(rb, '\t');
+	vtext_string_append(rb, opn);
+	vtext_char_append(rb, '\t');
+	vtext_char_append(rb, (char)k);
+	vtext_unsigned_append(rb, (uint64_t)v);
+	vtext_string_append(rb, ", [");
 	reg(rb, xr, 1);
-	tb_c(rb, ']');
+	vtext_char_append(rb, ']');
 	i = put(e, I_RAW);
 	i->off = (int32_t)st;
 	i->ref = (uint32_t)(rb->n - st);
@@ -335,28 +335,28 @@ VPRIV void gen_asm(ecx *e, uint32_t n)
 	   (inlined copies counted) */
 	uniq = UINT64_MAX;	/* taken at the first %= */
 	if (basic) {
-		tb_s(rb, tp);
+		vtext_string_append(rb, tp);
 	} else {
 		for (const char *p = tp; *p; p++) {
 			char mod = 0;
 			int idx = -1;
 
 			if (*p != '%') {
-				tb_c(rb, *p);
+				vtext_char_append(rb, *p);
 				continue;
 			}
 			p++;
-			if (*p == '%') { tb_c(rb, '%'); continue; }
+			if (*p == '%') { vtext_char_append(rb, '%'); continue; }
 			if (*p == '=') {
 				if (uniq == UINT64_MAX) {
 					if (e->asmk >= 1024)
 						efatal(e, x->loc, "more than 1024 inline asm statements with %%= in one function");
 					uniq = (uint64_t)e->top * 1024 + e->asmk++;
 				}
-				tb_u(rb, uniq);
+				vtext_unsigned_append(rb, uniq);
 				continue;
 			}
-			if (*p == '{' || *p == '|' || *p == '}') { tb_c(rb, *p); continue; }
+			if (*p == '{' || *p == '|' || *p == '}') { vtext_char_append(rb, *p); continue; }
 			if (*p && strchr("wxcalHnPQRsqdbh", *p) && (p[1] == '[' || (p[1] >= '0' && p[1] <= '9')))
 				mod = *p++;
 			if (*p == '[') {
@@ -401,20 +401,20 @@ VPRIV void gen_asm(ecx *e, uint32_t n)
 				switch (o->kind) {
 				case AO_VREG:
 					if (is_sve(c, o->t)) {
-						tb_c(rb, (char)vreg_kind(c, o->t));
-						tb_u(rb, o->reg);
+						vtext_char_append(rb, (char)vreg_kind(c, o->t));
+						vtext_unsigned_append(rb, o->reg);
 						break;
 					}
-					tb_c(rb, mod == 'q' || mod == 'd' || mod == 's' || mod == 'h' || mod == 'b' ? mod : 'v');
-					tb_u(rb, o->reg);
+					vtext_char_append(rb, mod == 'q' || mod == 'd' || mod == 's' || mod == 'h' || mod == 'b' ? mod : 'v');
+					vtext_unsigned_append(rb, o->reg);
 					break;
 				case AO_REG:
 					if (mod == 'H' && o->wide) {
 						reg(rb, o->v.r2, 1);
 					} else if (mod == 'a') {	/* address operand: [xN] */
-						tb_c(rb, '[');
+						vtext_char_append(rb, '[');
 						reg(rb, o->reg, 1);
-						tb_c(rb, ']');
+						vtext_char_append(rb, ']');
 					} else {
 						reg(rb, o->reg, mod != 'w');
 					}
@@ -423,15 +423,15 @@ VPRIV void gen_asm(ecx *e, uint32_t n)
 					reg(rb, ZR, mod != 'w');
 					break;
 				case AO_MEM:
-					tb_c(rb, '[');
+					vtext_char_append(rb, '[');
 					reg(rb, o->reg, 1);
-					tb_c(rb, ']');
+					vtext_char_append(rb, ']');
 					break;
 				case AO_IMM:
 					if (o->v.k == V_ADDR) {
 						ref_off(c, rb, o->v.ref, (int64_t)o->v.i);
 					} else {	/* clang prints a bare number, as the assembler reads it */
-						tb_i(rb, mod == 'n' ? -(int64_t)o->v.i : (int64_t)o->v.i);
+						vtext_signed_append(rb, mod == 'n' ? -(int64_t)o->v.i : (int64_t)o->v.i);
 					}
 					break;
 				}
@@ -471,7 +471,7 @@ VPRIV void gen_asm(ecx *e, uint32_t n)
 				if (!o->out || o->inout)
 					m[0] |= r;
 			}
-			tb_put(rb, (const char *)m, sizeof(m));
+			vtext_append(rb, (const char *)m, sizeof(m));
 			i->cond = RAW_MASKS;
 		}
 	}

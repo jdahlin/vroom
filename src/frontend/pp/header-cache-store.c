@@ -1,6 +1,6 @@
 /* vcc preprocessor: header cache: the shared store of deduplicated chunks and blobs */
 #include "ppimpl.h"
-#include "port/hostcrc.h"
+#include "port/crc32c.h"
 
 /* ---------------- deduplicated chunks and blobs ---------------- */
 

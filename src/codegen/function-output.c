@@ -23,9 +23,9 @@ VPRIV void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec, 
 		const char *sn = c->strs[a->section - 1].s;
 		bool bss = !strncmp(sn, ".bss", 4) || !strncmp(sn, ".tbss", 5);
 
-		tb_s(b, "\t.section\t\"");
-		tb_s(b, sn);
-		tb_s(b, fn ? "\",\"ax\",@progbits\n" : bss ? "\",\"aw\",@nobits\n" :
+		vtext_string_append(b, "\t.section\t\"");
+		vtext_string_append(b, sn);
+		vtext_string_append(b, fn ? "\",\"ax\",@progbits\n" : bss ? "\",\"aw\",@nobits\n" :
 			 (QQ(y->ty) & Q_CONST) && !strncmp(sn, ".rodata", 7) ? "\",\"a\",@progbits\n" : "\",\"aw\",@progbits\n");
 	} else if (!DARWIN(c) && (c->o->sections & (fn ? 1 : 2))) {
 		/* -ffunction-sections / -fdata-sections: .text.NAME etc., as clang */
@@ -52,15 +52,15 @@ VPRIV void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec, 
 			}
 		}
 		if (base) {
-			tb_s(b, "\t.section\t");
-			tb_s(b, base);
+			vtext_string_append(b, "\t.section\t");
+			vtext_string_append(b, base);
 			sym_name(c, b, s);
-			tb_s(b, rest);
+			vtext_string_append(b, rest);
 		} else {
-			tb_s(b, defsec);
+			vtext_string_append(b, defsec);
 		}
 	} else {
-		tb_s(b, defsec);
+		vtext_string_append(b, defsec);
 	}
 	if (h != SIZE_MAX && !(fn && X86(c) && c->o->pfe_m)) {
 		symhdr *sh;
@@ -81,34 +81,34 @@ VPRIV void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec, 
 		return;
 	}
 	if (global) {
-		tb_s(b, (y->flags & SF_WEAK) ? "\t.weak\t" : "\t.globl\t");
+		vtext_string_append(b, (y->flags & SF_WEAK) ? "\t.weak\t" : "\t.globl\t");
 		sym_name(c, b, s);
-		tb_c(b, '\n');
+		vtext_char_append(b, '\n');
 		if (a->visibility) {
 			const char *v = c->strs[a->visibility - 1].s;
 
 			if (!strcmp(v, "hidden") || !strcmp(v, "protected")) {
-				tb_s(b, !strcmp(v, "hidden") ? "\t.hidden\t" : "\t.protected\t");
+				vtext_string_append(b, !strcmp(v, "hidden") ? "\t.hidden\t" : "\t.protected\t");
 				sym_name(c, b, s);
-				tb_c(b, '\n');
+				vtext_char_append(b, '\n');
 			}
 		}
 	}
-	tb_s(b, "\t.p2align\t");
-	tb_u(b, (uint64_t)__builtin_ctz(align ? align : 1));
-	tb_s(b, fn ? "\n\t.type\t" : "\n\t.type\t");
+	vtext_string_append(b, "\t.p2align\t");
+	vtext_unsigned_append(b, (uint64_t)__builtin_ctz(align ? align : 1));
+	vtext_string_append(b, fn ? "\n\t.type\t" : "\n\t.type\t");
 	sym_name(c, b, s);
-	tb_s(b, fn ? ",@function\n" : ",@object\n");
+	vtext_string_append(b, fn ? ",@function\n" : ",@object\n");
 	if (fn && X86(c) && c->o->pfe_m) {
 		/* -fpatchable-function-entry=N,M: M nops before the entry, recorded for ftrace */
-		tb_s(b, ".Lpfe");
-		tb_u(b, s);
-		tb_s(b, ":\n");
+		vtext_string_append(b, ".Lpfe");
+		vtext_unsigned_append(b, s);
+		vtext_string_append(b, ":\n");
 		for (int k = 0; k < c->o->pfe_m; k++)
-			tb_s(b, "\tnop\n");
+			vtext_string_append(b, "\tnop\n");
 	}
 	sym_name(c, b, s);
-	tb_s(b, ":\n");
+	vtext_string_append(b, ":\n");
 	it_close(e, h);
 }
 
@@ -117,13 +117,13 @@ VPRIV void ctor_entry(cc *c, tbuf *b, uint32_t s, bool fini)
 {
 	const attrs *a = sym_attrs(c, s);
 
-	tb_s(b, fini ? "\t.section\t.fini_array" : "\t.section\t.init_array");
+	vtext_string_append(b, fini ? "\t.section\t.fini_array" : "\t.section\t.init_array");
 	if (a && a->prio) {
-		tb_c(b, '.');
-		tb_u(b, a->prio);
+		vtext_char_append(b, '.');
+		vtext_unsigned_append(b, a->prio);
 	}
-	tb_s(b, fini ? ",\"aw\",@fini_array\n\t.p2align\t3\n" : ",\"aw\",@init_array\n\t.p2align\t3\n");
-	tb_s(b, X86(c) ? "\t.quad\t" : "\t.xword\t");
+	vtext_string_append(b, fini ? ",\"aw\",@fini_array\n\t.p2align\t3\n" : ",\"aw\",@init_array\n\t.p2align\t3\n");
+	vtext_string_append(b, X86(c) ? "\t.quad\t" : "\t.xword\t");
 	sym_name(c, b, s);
-	tb_c(b, '\n');
+	vtext_char_append(b, '\n');
 }

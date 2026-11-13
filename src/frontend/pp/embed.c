@@ -1,7 +1,7 @@
 /* vcc preprocessor: #embed (C23) and __has_embed: parameters, search, the file's bytes as integer literals */
 #include <errno.h>
 #include "ppimpl.h"
-#include "port/mapfile.h"
+#include "port/file.h"
 
 /* a #embed / __has_embed parameter list (after the file name) */
 typedef struct embprm {
@@ -215,7 +215,7 @@ static bool emb_is_main(const pp *p, const char *path)
 
 /* the file's bytes as they are on disk: the lexer's copy (find_embed) has a BOM
    blanked and, in C23, the separators of numbers removed */
-static bool emb_map(const pp *p, const char *path, vmapped *m)
+static bool emb_map(const pp *p, const char *path, vfile_mapping *m)
 {
 	char abs[8192];
 	struct stat st;
@@ -230,7 +230,7 @@ static bool emb_map(const pp *p, const char *path, vmapped *m)
 		memcpy(abs + cl + 1, path, l + 1);
 		path = abs;
 	}
-	return vmap_file(path, m, &st);
+	return vfile_map(path, m, &st);
 }
 
 /* the bytes #embed takes from a file of sz bytes: [*b, *b + *n) */
@@ -256,7 +256,7 @@ VPRIV void embed(pp *p, ctx *c, uint32_t b, uint32_t e, uint32_t loc, uint32_t n
 	uint32_t floc;
 	embprm m = { 0 };
 	uint64_t ob, on;
-	vmapped raw_;
+	vfile_mapping raw_;
 
 	pthread_once(&emb_once, emb_init);
 	if (!p->o->c23) {
@@ -306,7 +306,7 @@ VPRIV void embed(pp *p, ctx *c, uint32_t b, uint32_t e, uint32_t loc, uint32_t n
 		ptok *o, *w;
 
 		if (!nt) {
-			vunmap_file(&raw_);
+			vfile_unmap(&raw_);
 			return;
 		}
 		o = w = varena_alloc(&p->tmp, nt * sizeof(ptok));
@@ -329,7 +329,7 @@ VPRIV void embed(pp *p, ctx *c, uint32_t b, uint32_t e, uint32_t loc, uint32_t n
 			memcpy(w, m.emp, m.nemp * sizeof(ptok)), w += m.nemp;
 		}
 		w[-1].flags |= PF_EMBEND;
-		vunmap_file(&raw_);
+		vfile_unmap(&raw_);
 		p->emb_tail = !on ? 1 : m.nsuf ? 2 : 0;	/* markers left: 2 bytes then suffix, 1 if_empty/suffix */
 		push_ptok(p, o, (uint32_t)(w - o), 0, 0, 0);
 	}
@@ -365,11 +365,11 @@ VPRIV int has_embed(pp *p, const ctx *fc, uint32_t loc)
 		return 0;
 	if (p->o->deps && !emb_is_main(p, path))
 		dep_only(p, path, false);
-	vmapped raw_;
+	vfile_mapping raw_;
 
 	if (!emb_map(p, path, &raw_))
 		return 0;
 	emb_range(raw_.n, &m, &ob, &on);
-	vunmap_file(&raw_);
+	vfile_unmap(&raw_);
 	return on ? 1 : 2;
 }

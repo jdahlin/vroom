@@ -1,6 +1,6 @@
 /* vcc code generator: data: initialised objects and strings */
 #include "emitimpl.h"
-#include "common/f128.h"
+#include "common/softfloat.h"
 
 /* ---------------- data ---------------- */
 
@@ -205,12 +205,12 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 			}
 			return;
 		case CV_FLT:
-			if (n <= 8 && cv.ld && q_isnan(cv.q)) {
-				data_put(e, off, q_nan_storage(cv.q, KIND(c, ty) == TY_BFLOAT16 ? 7 : n == 2 ? 10 : n == 4 ? 23 : 52, KIND(c, ty) == TY_BFLOAT16 ? 8 : n == 2 ? 5 : n == 4 ? 8 : 11), n);
+			if (n <= 8 && cv.ld && vsoftfloat_is_nan(cv.q)) {
+				data_put(e, off, vsoftfloat_nan_storage(cv.q, KIND(c, ty) == TY_BFLOAT16 ? 7 : n == 2 ? 10 : n == 4 ? 23 : 52, KIND(c, ty) == TY_BFLOAT16 ? 8 : n == 2 ? 5 : n == 4 ? 8 : 11), n);
 				return;
 			}
 			if (n == 2) {
-				data_put(e, off, (KIND(c, ty) == TY_BFLOAT16 ? q_to_bf(cv.ld ? cv.q : q_of_d(cv.f)) : q_to_h(cv.ld ? cv.q : q_of_d(cv.f))), 2);
+				data_put(e, off, (KIND(c, ty) == TY_BFLOAT16 ? vsoftfloat_to_bfloat16(cv.ld ? cv.q : vsoftfloat_of_double(cv.f)) : vsoftfloat_to_half(cv.ld ? cv.q : vsoftfloat_of_double(cv.f))), 2);
 			} else if (n == 4) {
 				float f = (float)cv.f;
 				uint32_t u;
@@ -225,7 +225,7 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 					uint8_t xb[10];
 					uint64_t lo;
 
-					q_to_x87(q, xb);
+					vsoftfloat_to_x87(q, xb);
 					memcpy(&lo, xb, 8);
 					data_put(e, off, lo, 8);
 					data_put(e, off + 8, (uint64_t)xb[8] | (uint64_t)xb[9] << 8, 8);
@@ -337,13 +337,13 @@ static void data_bytes(ecx *e, tbuf *b, uint64_t size)
 		if (ri < e->nrel && o == e->rel[ri].off) {
 			uint32_t sz = e->rel[ri].sz ? e->rel[ri].sz : 8;
 
-			tb_s(b, sz == 4 ? (WASM(e->c) ? "\t.int32\t" : X86(e->c) ? "\t.long\t" : "\t.word\t") : WASM(e->c) ? "\t.int64\t" : X86(e->c) ? "\t.quad\t" : "\t.xword\t");
+			vtext_string_append(b, sz == 4 ? (WASM(e->c) ? "\t.int32\t" : X86(e->c) ? "\t.long\t" : "\t.word\t") : WASM(e->c) ? "\t.int64\t" : X86(e->c) ? "\t.quad\t" : "\t.xword\t");
 			ref_off(e->c, b, e->rel[ri].ref, e->rel[ri].add);
 			if (e->rel[ri].sub) {
-				tb_c(b, '-');
+				vtext_char_append(b, '-');
 				ref_name(e->c, b, e->rel[ri].sub - 1);
 			}
-			tb_c(b, '\n');
+			vtext_char_append(b, '\n');
 			o += sz;
 			ri++;
 			continue;
@@ -355,9 +355,9 @@ static void data_bytes(ecx *e, tbuf *b, uint64_t size)
 				z++;
 			if (z - o >= 8 || z == end) {
 				if (z > o) {
-					tb_s(b, "\t.zero\t");
-					tb_u(b, z - o);
-					tb_c(b, '\n');
+					vtext_string_append(b, "\t.zero\t");
+					vtext_unsigned_append(b, z - o);
+					vtext_char_append(b, '\n');
 				}
 				o = z;
 				continue;
@@ -367,15 +367,15 @@ static void data_bytes(ecx *e, tbuf *b, uint64_t size)
 
 				/* o < data.n here; past it the bytes are zero, not what the buffer holds */
 				memcpy(&w, d + o, o + 8 <= e->data.n ? 8 : e->data.n - o);
-				tb_s(b, WASM(e->c) ? "\t.int64\t" : X86(e->c) ? "\t.quad\t" : "\t.xword\t");
-				tb_hex(b, w);
-				tb_c(b, '\n');
+				vtext_string_append(b, WASM(e->c) ? "\t.int64\t" : X86(e->c) ? "\t.quad\t" : "\t.xword\t");
+				vtext_hex_prefixed_append(b, w);
+				vtext_char_append(b, '\n');
 				o += 8;
 				continue;
 			}
-			tb_s(b, "\t.byte\t");
-			tb_u(b, o < e->data.n ? d[o] : 0);
-			tb_c(b, '\n');
+			vtext_string_append(b, "\t.byte\t");
+			vtext_unsigned_append(b, o < e->data.n ? d[o] : 0);
+			vtext_char_append(b, '\n');
 			o++;
 		}
 	}
@@ -421,17 +421,17 @@ VPRIV void emit_object(ecx *e, uint32_t s)
 
 		/* _Thread_local: an ordinary object, as LLVM strips TLS from a
 		 * module without shared memory (no -pthread) */
-		tb_s(b, "\t.section\t");
+		vtext_string_append(b, "\t.section\t");
 		if (a->section) {
-			tb_s(b, c->strs[a->section - 1].s);
+			vtext_string_append(b, c->strs[a->section - 1].s);
 		} else {
 			/* a quoted name: the whole section name in quotes, as clang */
 			bool q = sym_quoted(c, s);
 			size_t at;
 
 			if (q)
-				tb_c(b, '"');
-			tb_s(b, all_const(c, y->ty) ? ".rodata." : zero ? ".bss." : ".data.");
+				vtext_char_append(b, '"');
+			vtext_string_append(b, all_const(c, y->ty) ? ".rodata." : zero ? ".bss." : ".data.");
 			at = b->n;
 			sym_name(c, b, s);
 			if (q) {
@@ -439,31 +439,31 @@ VPRIV void emit_object(ecx *e, uint32_t s)
 				b->n--;
 			}
 		}
-		tb_s(b, ",\"\",@\n");
+		vtext_string_append(b, ",\"\",@\n");
 		if (global) {
-			tb_s(b, (y->flags & SF_WEAK) ? "\t.weak\t" : "\t.globl\t");
+			vtext_string_append(b, (y->flags & SF_WEAK) ? "\t.weak\t" : "\t.globl\t");
 			sym_name(c, b, s);
-			tb_c(b, '\n');
+			vtext_char_append(b, '\n');
 		}
-		tb_s(b, "\t.p2align\t");
-		tb_u(b, (uint64_t)__builtin_ctz(align ? align : 1));
-		tb_s(b, "\n\t.type\t");
+		vtext_string_append(b, "\t.p2align\t");
+		vtext_unsigned_append(b, (uint64_t)__builtin_ctz(align ? align : 1));
+		vtext_string_append(b, "\n\t.type\t");
 		sym_name(c, b, s);
-		tb_s(b, ",@object\n");
+		vtext_string_append(b, ",@object\n");
 		sym_name(c, b, s);
-		tb_s(b, ":\n");
+		vtext_string_append(b, ":\n");
 		if (zero && !e->nrel) {
-			tb_s(b, "\t.zero\t");
-			tb_u(b, size ? size : 1);
-			tb_c(b, '\n');
+			vtext_string_append(b, "\t.zero\t");
+			vtext_unsigned_append(b, size ? size : 1);
+			vtext_char_append(b, '\n');
 		} else {
 			data_bytes(e, b, size);
 		}
-		tb_s(b, "\t.size\t");
+		vtext_string_append(b, "\t.size\t");
 		sym_name(c, b, s);
-		tb_s(b, ", ");
-		tb_u(b, size ? size : 1);
-		tb_c(b, '\n');
+		vtext_string_append(b, ", ");
+		vtext_unsigned_append(b, size ? size : 1);
+		vtext_char_append(b, '\n');
 		e->E->nobj++;
 		out_chunk(e, ((uint64_t)s << 1) | 1, start);
 		return;
@@ -488,17 +488,17 @@ VPRIV void emit_object(ecx *e, uint32_t s)
 		}
 		sym_header(e, b, s, false, sec, align);
 		if (zero && !e->nrel) {
-			tb_s(b, "\t.zero\t");
-			tb_u(b, size ? size : 1);
-			tb_c(b, '\n');
+			vtext_string_append(b, "\t.zero\t");
+			vtext_unsigned_append(b, size ? size : 1);
+			vtext_char_append(b, '\n');
 		} else {
 			data_bytes(e, b, size);
 		}
-		tb_s(b, "\t.size\t");
+		vtext_string_append(b, "\t.size\t");
 		sym_name(c, b, s);
-		tb_s(b, ", ");
-		tb_u(b, size);
-		tb_c(b, '\n');
+		vtext_string_append(b, ", ");
+		vtext_unsigned_append(b, size);
+		vtext_char_append(b, '\n');
 		e->E->nobj++;
 		out_chunk(e, ((uint64_t)s << 1) | 1, start);
 		return;
@@ -509,30 +509,30 @@ VPRIV void emit_object(ecx *e, uint32_t s)
 		/* the same TLV layout as text; darwin_text names the sections */
 		bool global = y->sc != SC_STATIC && y->depth == 0 && y->name;
 
-		tb_s(b, zero ? "\t.section\t.tbss,\"aw\",@nobits\n" : "\t.section\t.tdata,\"aw\",@progbits\n");
-		tb_s(b, "\t.p2align\t");
-		tb_u(b, (uint64_t)__builtin_ctz(align ? align : 1));
-		tb_c(b, '\n');
+		vtext_string_append(b, zero ? "\t.section\t.tbss,\"aw\",@nobits\n" : "\t.section\t.tdata,\"aw\",@progbits\n");
+		vtext_string_append(b, "\t.p2align\t");
+		vtext_unsigned_append(b, (uint64_t)__builtin_ctz(align ? align : 1));
+		vtext_char_append(b, '\n');
 		sym_name(c, b, s);
-		tb_s(b, "$tlv$init:\n");
+		vtext_string_append(b, "$tlv$init:\n");
 		if (zero && !e->nrel) {
-			tb_s(b, "\t.zero\t");
-			tb_u(b, size ? size : 1);
-			tb_c(b, '\n');
+			vtext_string_append(b, "\t.zero\t");
+			vtext_unsigned_append(b, size ? size : 1);
+			vtext_char_append(b, '\n');
 		} else {
 			data_bytes(e, b, size);
 		}
-		tb_s(b, "\t.section\t.tlv,\"aw\",@progbits\n");
+		vtext_string_append(b, "\t.section\t.tlv,\"aw\",@progbits\n");
 		if (global) {
-			tb_s(b, (y->flags & SF_WEAK) ? "\t.weak\t" : "\t.globl\t");
+			vtext_string_append(b, (y->flags & SF_WEAK) ? "\t.weak\t" : "\t.globl\t");
 			sym_name(c, b, s);
-			tb_c(b, '\n');
+			vtext_char_append(b, '\n');
 		}
-		tb_s(b, "\t.p2align\t3\n");
+		vtext_string_append(b, "\t.p2align\t3\n");
 		sym_name(c, b, s);
-		tb_s(b, ":\n\t.xword\t__tlv_bootstrap\n\t.xword\t0\n\t.xword\t");
+		vtext_string_append(b, ":\n\t.xword\t__tlv_bootstrap\n\t.xword\t0\n\t.xword\t");
 		sym_name(c, b, s);
-		tb_s(b, "$tlv$init\n");
+		vtext_string_append(b, "$tlv$init\n");
 		e->E->nobj++;
 		out_chunk(e, ((uint64_t)s << 1) | 1, start);
 		return;
@@ -549,26 +549,26 @@ VPRIV void emit_object(ecx *e, uint32_t s)
 		b->n = (b->n + 7) & ~(size_t)7;
 		start = b->n;
 		h = it_open(e, IT_TEXT);
-		tb_s(b, zero ? "\t.section\t.tbss,\"aw\",@nobits\n" : "\t.section\t.tdata,\"aw\",@progbits\n");
-		tb_s(b, "\t.p2align\t");
-		tb_u(b, (uint64_t)__builtin_ctz(align ? align : 1));
-		tb_c(b, '\n');
+		vtext_string_append(b, zero ? "\t.section\t.tbss,\"aw\",@nobits\n" : "\t.section\t.tdata,\"aw\",@progbits\n");
+		vtext_string_append(b, "\t.p2align\t");
+		vtext_unsigned_append(b, (uint64_t)__builtin_ctz(align ? align : 1));
+		vtext_char_append(b, '\n');
 		sym_name(c, b, s);
-		tb_s(b, "$tlv$init:\n");
+		vtext_string_append(b, "$tlv$init:\n");
 		it_close(e, h);
 		data_item(e, zero && !e->nrel ? (size ? size : 1) : size, zero && !e->nrel);
 		h = it_open(e, IT_TEXT);
-		tb_s(b, "\t.section\t.tlv,\"aw\",@progbits\n");
+		vtext_string_append(b, "\t.section\t.tlv,\"aw\",@progbits\n");
 		if (global) {
-			tb_s(b, (y->flags & SF_WEAK) ? "\t.weak\t" : "\t.globl\t");
+			vtext_string_append(b, (y->flags & SF_WEAK) ? "\t.weak\t" : "\t.globl\t");
 			sym_name(c, b, s);
-			tb_c(b, '\n');
+			vtext_char_append(b, '\n');
 		}
-		tb_s(b, "\t.p2align\t3\n");
+		vtext_string_append(b, "\t.p2align\t3\n");
 		sym_name(c, b, s);
-		tb_s(b, ":\n\t.xword\t__tlv_bootstrap\n\t.xword\t0\n\t.xword\t");
+		vtext_string_append(b, ":\n\t.xword\t__tlv_bootstrap\n\t.xword\t0\n\t.xword\t");
 		sym_name(c, b, s);
-		tb_s(b, "$tlv$init\n");
+		vtext_string_append(b, "$tlv$init\n");
 		it_close(e, h);
 		e->E->nobj++;
 		out_chunk(e, ((uint64_t)s << 1) | 1, start);
@@ -593,22 +593,22 @@ VPRIV void emit_object(ecx *e, uint32_t s)
 		   all_const(c, y->ty) ? "\t.section\t.rodata,\"a\",@progbits\n" : zero ? "\t.bss\n" : "\t.data\n", align);
 	if (zero && !e->nrel) {
 		if (a->section && !strncmp(c->strs[a->section - 1].s, ".bss", 4)) {
-			tb_s(b, "\t.zero\t");
-			tb_u(b, size ? size : 1);
-			tb_c(b, '\n');
+			vtext_string_append(b, "\t.zero\t");
+			vtext_unsigned_append(b, size ? size : 1);
+			vtext_char_append(b, '\n');
 		} else {
-			tb_s(b, "\t.zero\t");
-			tb_u(b, size ? size : 1);
-			tb_c(b, '\n');
+			vtext_string_append(b, "\t.zero\t");
+			vtext_unsigned_append(b, size ? size : 1);
+			vtext_char_append(b, '\n');
 		}
 	} else {
 		data_bytes(e, b, size);
 	}
-	tb_s(b, "\t.size\t");
+	vtext_string_append(b, "\t.size\t");
 	sym_name(c, b, s);
-	tb_s(b, ", ");
-	tb_u(b, size);
-	tb_c(b, '\n');
+	vtext_string_append(b, ", ");
+	vtext_unsigned_append(b, size);
+	vtext_char_append(b, '\n');
 	e->E->nobj++;
 	out_chunk(e, ((uint64_t)s << 1) | 1, start);
 }
@@ -644,11 +644,11 @@ VPRIV void emit_string(ecx *e, uint32_t i)
 		start = b->n;
 		h = it_open(e, IT_TEXT);
 		if (nul)
-			tb_s(b, "\t.section\t.rodata,\"a\",@progbits\n");
+			vtext_string_append(b, "\t.section\t.rodata,\"a\",@progbits\n");
 		else
-			tb_f(b, "\t.section\t.rodata.str%u.%u,\"aMS\",@progbits,%u\n", s->esz, s->esz, s->esz);
+			vtext_format_append(b, "\t.section\t.rodata.str%u.%u,\"aMS\",@progbits,%u\n", s->esz, s->esz, s->esz);
 		if (s->esz > 1)
-			tb_f(b, "\t.p2align\t%d\n", s->esz == 2 ? 1 : 2);
+			vtext_format_append(b, "\t.p2align\t%d\n", s->esz == 2 ? 1 : 2);
 		it_close(e, h);
 		h = it_open(e, IT_LABEL);
 		memcpy(it_room(e, 4), &ref, 4);
@@ -663,45 +663,45 @@ VPRIV void emit_string(ecx *e, uint32_t i)
 		return;
 	}
 	if (WASM(c))
-		tb_f(b, "\t.section\t.rodata..L.str.%u,\"\",@\n", i);
+		vtext_format_append(b, "\t.section\t.rodata..L.str.%u,\"\",@\n", i);
 	else if (nul)
-		tb_s(b, "\t.section\t.rodata,\"a\",@progbits\n");
+		vtext_string_append(b, "\t.section\t.rodata,\"a\",@progbits\n");
 	else
-		tb_f(b, "\t.section\t.rodata.str%u.%u,\"aMS\",@progbits,%u\n", s->esz, s->esz, s->esz);
+		vtext_format_append(b, "\t.section\t.rodata.str%u.%u,\"aMS\",@progbits,%u\n", s->esz, s->esz, s->esz);
 	if (s->esz > 1)
-		tb_f(b, "\t.p2align\t%d\n", s->esz == 2 ? 1 : 2);
-	tb_s(b, ".L.str.");
-	tb_u(b, i);
-	tb_s(b, ":\n");
+		vtext_format_append(b, "\t.p2align\t%d\n", s->esz == 2 ? 1 : 2);
+	vtext_string_append(b, ".L.str.");
+	vtext_unsigned_append(b, i);
+	vtext_string_append(b, ":\n");
 	if (s->esz == 1 && !nul) {
-		tb_s(b, "\t.asciz\t\"");
+		vtext_string_append(b, "\t.asciz\t\"");
 		for (uint64_t k = 0; k + 1 < n; k++) {
 			unsigned char ch = (unsigned char)s->s[k];
 
 			if (ch == '"' || ch == '\\') {
-				tb_c(b, '\\');
-				tb_c(b, (char)ch);
+				vtext_char_append(b, '\\');
+				vtext_char_append(b, (char)ch);
 			} else if (ch >= 32 && ch < 127) {
-				tb_c(b, (char)ch);
+				vtext_char_append(b, (char)ch);
 			} else {
-				tb_c(b, '\\');
-				tb_c(b, (char)('0' + (ch >> 6)));
-				tb_c(b, (char)('0' + ((ch >> 3) & 7)));
-				tb_c(b, (char)('0' + (ch & 7)));
+				vtext_char_append(b, '\\');
+				vtext_char_append(b, (char)('0' + (ch >> 6)));
+				vtext_char_append(b, (char)('0' + ((ch >> 3) & 7)));
+				vtext_char_append(b, (char)('0' + (ch & 7)));
 			}
 		}
-		tb_s(b, "\"\n");
+		vtext_string_append(b, "\"\n");
 	} else {
 		for (uint64_t k = 0; k < n; k += s->esz) {
 			uint32_t v = 0;
 
 			memcpy(&v, s->s + k, s->esz);
-			tb_s(b, s->esz == 1 ? "\t.byte\t" : s->esz == 2 ? "\t.short\t" : WASM(c) || X86(c) ? "\t.long\t" : "\t.word\t");
-			tb_u(b, v);
-			tb_c(b, '\n');
+			vtext_string_append(b, s->esz == 1 ? "\t.byte\t" : s->esz == 2 ? "\t.short\t" : WASM(c) || X86(c) ? "\t.long\t" : "\t.word\t");
+			vtext_unsigned_append(b, v);
+			vtext_char_append(b, '\n');
 		}
 	}
 	if (WASM(c))
-		tb_f(b, "\t.size\t.L.str.%u, %llu\n", i, (unsigned long long)n);
+		vtext_format_append(b, "\t.size\t.L.str.%u, %llu\n", i, (unsigned long long)n);
 	out_chunk(e, ((uint64_t)1 << 62) | i, start);
 }
