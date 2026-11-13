@@ -280,6 +280,80 @@ kända inlinefel; fokuserat ASan/UBSan och filvist bygge gröna, O0/O1
 oförändrade. ARM/QEMU 47/47 VIR-prov. TSVC 151/151 kontrollsummor,
 **83** vektorloopar kvar; walk-prefixkontrollen 134 namn.
 
+2026-11-13, gemensam edge-känslig branch-threading prövad:
+En delad layoutprototyp kunde hoppa över en ren icmp+brif när inkommande
+blockargument var konstanta eller en tidigare kant redan bevisade samma/
+inverterade heltalsvillkor. Den bevarade inkommande kantkopior, avvisade
+edits, externa jämförelseanvändningar och parameter-/jämförelsespill, samt
+krävde tomma utgående kantkopior för direkt ompekade labelmål. Ett begränsat
+bakåtsteg genom unika föregångare stoppade vid operanddefinitioner, så
+fakta inte överlevde en ny loopiteration. Båda backenderna använde samma
+bevis; ARM:s prolog-/save-point-regler fick en separat skyddskontroll.
+
+Den första fokuskörningen fångade ett fel i läsningen av BR:s oräknade
+argumentlista (listan har inget inledande antal). Det rättades och ett
+riktat självprov tillkom. De slutliga fokuskörningarna och självproven
+passerade. En tidig prototyp trådade bara fallthrough-vägen; den slutliga
+flyttade även tagna villkorskanter. Då går pcache1Fetch:s nyckelträff
+direkt förbi det andra nullprovet, och BtreeNext tappar sitt första
+konstanta rc-prov. Allmän ARM-/sanitizergrind är inte körd på prototypen.
+
+Ändå ingen helprogramvinst på speedtest1 main storlek 100: enbart
+konstantkanter 1231,83 → 1240,59 ms; direkt upprepat/inverterat villkor
+1240,80 → 1244,72 ms (upprepning 1234,60 → 1255,43); utökade föregångarfakta
+1232,48 → 1243,62. Slutlig båda-kantversion 1234,81 → 1242,08 ms, upprepning 1237,36 →
+1245,38 ms (cirka 0,6 % långsammare i båda).
+Den minskar 387383 → 386208 statiska instruktioner och den dynamiska
+instruktionskvoten/clang 1,314× → 1,311×. Alla mätserier har fem
+alternerade prov och samma verifieringshash. **Ingen prototyp behålls.**
+Underlag `work/vir-x86-perf/thread{,2,3,4,5}` och
+`/tmp/vx-layout-thread-experiment.patch` (inklusive självproven).
+
+2026-11-13, fler korta profilbaserade x86-försök:
+En färsk storlek-100-profil (cirka 2000 cykelsampel, inga förluster)
+har VdbeExec 20,35 %, IndexMoveto 7,69 %, RecordCompareInt 4,21 %,
+TableMoveto 3,90 %, btreeParseCellPtr 3,18 %, pcache1Fetch 2,92 %.
+Korta assemblyjämförelser mot clang gav följande avvisade prototyper:
+
+- Osignerad big-endian-halvordsläsning med bswapl+shrl16 i stället för
+  rorw8 (61 platser): speedtest1 1233,32 → 1248,09 ms. Rotationen behålls.
+- Promoverade byte med bevisat intervall 0..255 kan jämföras med 128/127
+  via testb och S/NS i stället för cmp. Alla åtta relevanta signerade/
+  osignerade predikat, 16-bitars motexempel och branchprov passerade över
+  hela byte-/halvordsintervallet i fokusriggern; assembly och egen
+  objektväg också gröna. Hela speedtest1 1285,07 → 1288,19 ms, ingen vinst.
+- Indirekta anrop direkt i allokerat målregister; kopian till r11 behövs
+  bara när variadisk AL-skrivning förstör ett mål i rax. Tar bort 990
+  statiska instruktioner (åtta i IndexMoveto), 21,908 → 21,831 miljarder
+  dynamiska. Nya variadiska funktionspekar- och heltals-stackargumentprov
+  passerade fokusriggern. Hela speedtest1 1236,05 → 1255,05 ms, upprepning
+  1233,44 → 1250,15 ms; **1,4–1,5 % långsammare**, därför borttagen.
+
+Alla helprogramprov är alternerade main storlek 100 på CPU 7 och
+validerar samma checksumma. För de två första används fem prov, för
+anropskopians upprepning tre. Underlag
+`work/vir-x86-perf/{halfword,bytethreshold,callreg}`; prototyperna är bara
+sparade som patchar i /tmp, ingen sådan kod behålls.
+
+2026-11-13, fysisk extensions-forwarding och funktionsalignment prövade:
+En x86-prototyp lät en privat, fysiskt identisk i32→i64-extensions nästa
+ALU-konsument läsa ursprungsregistret direkt. Ingen mellanliggande edit,
+extern användning eller spillslot tilläts. Den tog bort sju kopior i
+btreeParseCellPtr och 32 instruktioner i hela SQLite; fokusriggern med
+egen objektväg passerade. Ett 64-bytesalignat tvåbytes-varintprov med
+30 miljoner anrop, sju alternerade rundor, gick 50,160 → 48,556 ms
+(−3,2 %), clang 41,434 ms, identisk checksumma 124034992832.
+
+Hela speedtest1 main storlek 100: 1231,57 → 1241,74 ms, upprepning
+1248,40 → 1247,35 ms. **Ingen säker helprogramvinst**, därför borttagen.
+Separata assembly-varianter med funktionsalignment 32/64 byte i hela
+amalgamationen gav heller ingen vinst: i samma femprovserie bas 1235,29,
+32 byte 1244,92, 64 byte 1244,46; forwarding plus 32/64 byte 1246,78 /
+1246,25 ms. Vanliga 16 byte behålls. Proven anger inte orsaken till de
+små kodändringarnas tidsvariation. Underlag
+`work/vir-x86-perf/{extforward,function-align}` och
+`/tmp/vx-extforward-experiment.patch`.
+
 2026-11-13, avvisat smalt relationsprov i minnet:
 Utökat x86:s privata load+icmp-vikning till byte/halvord med en konstant
 inom källtypens intervall. Signerade jämförelser av nollutvidgade värden
