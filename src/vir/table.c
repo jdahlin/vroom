@@ -1,6 +1,11 @@
 /*
- * The opcode table: one row per opcode, read by the printer, the parser and
- * the verifier so that the three cannot disagree (SPEC-vir.md 7.3, 8.1).
+ * table.c: the opcode table: one row per opcode, read by the printer, the parser and the verifier
+ * so that the three cannot disagree (SPEC-vir.md 7.3, 8.1).
+ *
+ * A row holds the opcode's text name, its format (how many and what kind of operands), the type
+ * rule, the flags it accepts and its effects.  Adding an opcode means adding its enum value in
+ * include/vir/vir.h and one row here; print.c, parse.c and verify.c then know it, and the lowerings
+ * (arch/a64/vir, arch/x64/vir) must handle it.
  */
 #include "virimpl.h"
 

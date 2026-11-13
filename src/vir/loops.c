@@ -1,14 +1,17 @@
 /*
- * The loop forest as ranges of the block array (SPEC-vir.md 15.5).  The spec
- * gives this to vir_canon (22.5), which does not exist yet; this file is the
- * stand-in, with the interface vir_canon's forest will have (vir_loops).
+ * loops.c: the loop forest as ranges of the block array (SPEC-vir.md 15.5), built by
+ * vir_loops_build for the register allocator and the lowerings.
  *
- * A loop is a range [head, end] of blocks: for every edge s -> t with t <= s
- * the range t..s.  Ranges with the same head are one loop (the largest end).
- * Ranges that overlap partially are merged into one, so the result is a
- * properly nested forest; on irreducible control flow a merged range has
- * several entries and its head is only its first block.  Cost: one pass over
- * the predecessor lists, a sort of the loops, one pass over the blocks.
+ * The spec gives the forest to vir_canon (22.5), which does not build it yet; until it does, callers
+ * (the lowerings' function.c in arch/a64/vir and arch/x64/vir, viralloc) call vir_loops_build themselves,
+ * after vir_canon, and this file is the stand-in with the interface the forest will keep (vir_loops).
+ *
+ * A loop is a range [head, end] of blocks: for every edge s -> t with t <= s the range t..s.  Ranges
+ * with the same head are one loop (the largest end).  Ranges that overlap partially are merged into
+ * one, so the result is a properly nested forest; on irreducible control flow a merged range has
+ * several entries and its head is only its first block.  Cost: one pass over the predecessor lists, a
+ * sort of the loops, one pass over the blocks.  The scratch is per thread; the result is valid
+ * until the next call on that thread.
  */
 #include "virimpl.h"
 #include "vir/alloc.h"
