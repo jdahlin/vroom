@@ -318,6 +318,7 @@ static int replay(cc *c, const cc_opts *o, const char *hp, size_t hn, const char
 	R.pend = pend;
 	R.ser = ser;
 	R.pt = pt;
+	elf_set_machine(R.o, X86(c) ? EM_X86_64 : EM_AARCH64);
 	as_begin(R.as, R.o, "<vcc>");
 	if (as_snippet(R.as, hp, hn))
 		r = -1;
@@ -445,14 +446,11 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	E.noopt = getenv("VCC_NOOPT") != NULL;
 	/* wasm64: objects from the text, through arch/wasm/as */
 	E.objtext = getenv("VCC_OBJ_TEXT") != NULL || PP_IS_WASM(o->target);
-	/* x86-64: objects from the printer's text through arch/x64/as (PLAN-x86.md X5) */
-	if (X86(c))
-		E.objtext = true;
 	/* -g: the line table is the assembler's, from the printer's .loc */
-	if (o->debug && !DARWIN(c) && !WASM(c))
+	if (o->debug && !DARWIN(c) && !WASM(c) && !X86(c))
 		E.objtext = true;
 	/* unwind tables: .eh_frame is the assembler's, from the printer's .cfi_* */
-	if (o->cfi && !DARWIN(c) && !WASM(c))
+	if (o->cfi && !DARWIN(c) && !WASM(c) && !X86(c))
 		E.objtext = true;
 	/* Lazy walks own only their function's automatic variables. Globals and
 	   static objects can be modified by other functions (including ones not

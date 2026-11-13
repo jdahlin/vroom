@@ -651,6 +651,7 @@ VPRIV void x64_finish(ecx *e, uint32_t s)
 	start = b->n;
 	sym_header(e, b, s, true, "\t.text\n", 16);
 	x64_print(e, b, s);
+	size_t text = it_open(e, IT_TEXT);
 	if (e->E->o->pfe_n) {
 		/* the patchable entry's address (the M nops before it, else the entry itself) */
 		tb_s(b, "\t.pushsection\t__patchable_function_entries,\"awo\",@progbits,");
@@ -672,6 +673,7 @@ VPRIV void x64_finish(ecx *e, uint32_t s)
 		if (a->destructor)
 			ctor_entry(e->c, b, s, true);
 	}
+	it_close(e, text);
 	e->E->nfn++;
 	em_switch_values_emit(e);
 	out_chunk(e, (uint64_t)s << 1, start);

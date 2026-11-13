@@ -1359,3 +1359,46 @@ Isolerad byggverifiering: egna x86 **319/319**, GCC **1615/1615**, TCC
 och **240** slumpfunktioner, ASan/UBSan och filvist fokus gröna. TSVC
 **151/151**, **83** vektorloopar kvar. Nya regressionsprov för pointervyer
 och den sista callee-save-platsen.
+
+
+### X5 (2026-11-13): x86-poster direkt till den gemensamma assemblersessionen
+
+`-c` använder nu kompakta x86-poster för heltalsflytt, laster/lagringar,
+LEA, aritmetik, jämförelser, villkorsval, hopp/anrop, push/pop,
+utvidgningar och vanliga skalära SSE-operationer. `-S` är oförändrat;
+`VCC_OBJ_TEXT=1` behåller den kompletta textvägen som jämförelse.
+Assemblerns strukturerade operand-API återanvänder samma instruktionsfamiljer,
+kodare, relocation-val och hopprelaxering som textassemblern. Ingen andra
+x86-kodare införs. RIP använder assemblerns registernummer, och ramrelativa
+operander normaliseras med samma stackdelta som skrivaren.
+
+ARM:s item-ström, dataobjekt, symboler och replay har flyttats från
+`arch/a64/emit/obj.c` till `emit/obj.c` och delas av målen. x86-alignment
+går genom assemblerns relaxeringshantering. Symboler med UTF-8 avciteras
+innan de interneras; patchable-entry-huvuden behåller sina nops och etiketter.
+CFI och DWARF-direktiv körs i samma session mellan posterna, med rätt
+pending-`.loc` före nästa direktkodade instruktion.
+
+X5-planens steg 1–2 och gemensam datareplay är klara. Prolog/epilog,
+inline asm, direktiv och ännu inte konverterade instruktioner (bland annat
+x87, TLS-sekvenser, atomics och vissa SIMD-operationer) är fortsatt
+textsnuttar. Ingen komplett `.s` byggs för vanlig `-c`. Nästa steg är att
+minska dessa återstående textdelar om kärnprofilen visar att de kostar.
+
+Verifierat: `vcc-x86.py --objcmp -j 6` jämför nu också direkt `vpp -c`
+med vasm och Clang för samma `.s`: **2213/2213** identiska, 68 indata
+avvisas redan vid generering/Clang-assemblering. Egna sviten:
+**322/322** objekt även med VIR och ASan/UBSan; körning av direkta x86-objekt
+**319/319** med åtta befintliga skippar. ARM **326/326**, en befintlig xfail.
+Sju berörda implementationsfiler kompilerar separat. Det snabba x86-
+objektjämförelsetestet ingår i premerge.
+
+SQLite direkt/VIR: objekt byteidentiska mellan text och poster även med
+`-g`, `-fPIC`, `-ffunction-sections -fdata-sections` och
+`-fpatchable-function-entry=8,3`. Samma pinnade kompilatorbinär, sju
+alternerade processpar per läge på den delade Ryzen 7 9700X-värden:
+median CPU **442,7 → 391,4 ms** för direktgeneratorn (**11,6 % mindre**),
+**904,6 → 833,9 ms** för VIR (**7,8 % mindre**). Bästa tider var
+309,8/250,8 respektive 644,8/578,1 ms. Stor spridning under samtidig last;
+inte jämförbart med tidigare obelastade absoluta tal.
+Rådata och validering: `results/x64-direct-20261113.json`.

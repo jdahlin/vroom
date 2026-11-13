@@ -64,7 +64,7 @@ VPRIV void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec, 
 	} else {
 		tb_s(b, defsec);
 	}
-	if (h != SIZE_MAX) {
+	if (h != SIZE_MAX && !(fn && X86(c) && c->o->pfe_m)) {
 		symhdr *sh;
 
 		it_close(e, h);
@@ -111,6 +111,7 @@ VPRIV void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec, 
 	}
 	sym_name(c, b, s);
 	tb_s(b, ":\n");
+	it_close(e, h);
 }
 
 /* a constructor's or destructor's pointer: .init_array[.prio] / .fini_array[.prio], as clang */

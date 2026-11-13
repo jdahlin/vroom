@@ -723,6 +723,13 @@ VPRIV int x64_instruction(As *a, const char *p, const char *e, size_t wn)
 			return z == 8 || z == 2 ? x64_raw(a, b, 2) : x64_raw(a, b + 1, 1);
 		}
 	}
+	return as_x64_insn(a, mn, o, nops);
+}
+
+int as_x64_insn(As *a, char *mn, XOp *o, int nops)
+{
+	if (a->dwlocp) loc_row(a);
+	a->x64_isz = 0;
 	{
 		static int (*const fam[])(As *, char *, XOp *, int) = {
 			x64_i_crdr,
