@@ -66,7 +66,7 @@ typedef struct OSec {
 	uint64_t flags;
 	uint64_t va, size, offset;
 	uint32_t shidx, nameoff;
-	int ptload;			/* index into phdrs, -1 */
+	int ptload;			/* index into the context's program_headers, -1 */
 	uint32_t link, info;
 	Expr *fill;			/* =fill */
 	const char *phn[4];		/* :phdr names */

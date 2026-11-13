@@ -9,7 +9,7 @@
  *     anything else gets a .got slot;
  *   - initial-exec GOTTPOFF and general-dynamic TLSGD relax to local-exec;
  *     the thread pointer is the TLS block's end rounded to its alignment
- *     (variant 2): tpoff = va - tls_tp, dtpoff = va - the block's start.
+ *     (variant 2): tpoff = va - tls_thread_pointer, dtpoff = va - the block's start.
  */
 
 
@@ -217,14 +217,14 @@ static void x64_relocate_isec(uint32_t si, uint8_t *buf)
 			break;
 		}
 		case R_X86_64_TPOFF32: case R_X86_64_TPOFF64:
-			v = (int64_t)(t.va - tls_tp);
+			v = (int64_t)(t.va - ctx->layout.tls_thread_pointer);
 			if (type == R_X86_64_TPOFF64)
 				wr64(loc, (uint64_t)v);
 			else
 				wr32(loc, (uint32_t)v);
 			break;
 		case R_X86_64_DTPOFF32: case R_X86_64_DTPOFF64:
-			v = (int64_t)(t.va - tls_start);
+			v = (int64_t)(t.va - ctx->layout.tls_start);
 			if (type == R_X86_64_DTPOFF64)
 				wr64(loc, (uint64_t)v);
 			else
@@ -253,7 +253,7 @@ static void x64_relocate_isec(uint32_t si, uint8_t *buf)
 				in[0] = 0x48, in[1] = 0xc7, loc[-1] = (uint8_t)(0xc0 | reg);
 			else
 				reloc_error(o, is, rl, "R_X86_64_GOTTPOFF must be used in MOVQ or ADDQ instructions only", 0);
-			wr32(loc, (uint32_t)(t.va - tls_tp + 4));
+			wr32(loc, (uint32_t)(t.va - ctx->layout.tls_thread_pointer + 4));
 			break;
 		}
 		case R_X86_64_TLSGD: {
@@ -265,7 +265,7 @@ static void x64_relocate_isec(uint32_t si, uint8_t *buf)
 				break;
 			}
 			memcpy(loc - 4, in, sizeof in);
-			wr32(loc + 8, (uint32_t)(t.va - tls_tp + 4));
+			wr32(loc + 8, (uint32_t)(t.va - ctx->layout.tls_thread_pointer + 4));
 			r++;	/* (the call to __tls_get_addr is gone) */
 			break;
 		}

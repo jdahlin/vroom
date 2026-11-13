@@ -2,10 +2,6 @@
 
 /* ---------------- address-assignment state ---------------- */
 
-static uint64_t dot;
-static uint32_t cur_osec;		/* AETHER or an osec */
-static bool in_layout;
-
 static uint64_t osec_addr(uint32_t o) { return o == AETHER ? 0 : osecs.v[o].va; }
 static uint32_t osec_shidx(uint32_t o) { return o == AETHER ? 1 : osecs.v[o].shidx; }
 
@@ -98,7 +94,7 @@ static EV gsym_ev(uint32_t g)
 		}
 		return v;
 	}
-	if (in_layout)
+	if (ctx->layout.in_layout)
 		error("symbol not found: %s", gname(g));
 	return evabs(0);
 }

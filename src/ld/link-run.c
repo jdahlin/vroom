@@ -7,7 +7,7 @@ static int run(int argc, char **argv)
 	reset_state();
 	nthreads = pfor_default_width();
 	parse_args(argc, argv);
-	if (atomic_load(&nerrors))
+	if (atomic_load(&ctx->diagnostics.error_count))
 		return 1;
 #ifdef VLD_MAIN
 	/* the standalone tool: the process is this link, so --threads is the budget
@@ -16,14 +16,14 @@ static int run(int argc, char **argv)
 		vtask_budget_set(nthreads);
 #endif
 	double t0 = now();
-	t_last = t0;
-	p_last = vperformance_now();
-	flt_last = timing ? minflt() : 0;
+	ctx->diagnostics.phase_start_time = t0;
+	ctx->diagnostics.phase_start_counters = vperformance_now();
+	ctx->diagnostics.phase_start_faults = ctx->diagnostics.phase_timing ? minflt() : 0;
 	pic = opt.shared;
 
 	load_inputs();
 	phase("map+parse inputs");
-	if (atomic_load(&nerrors))
+	if (atomic_load(&ctx->diagnostics.error_count))
 		return 1;
 	gtable_init();
 	if (opt.script) {
@@ -32,7 +32,7 @@ static int run(int argc, char **argv)
 		if (!b)
 			return 1;
 		parse_script((const char *)b, n);
-		if (atomic_load(&nerrors))
+		if (atomic_load(&ctx->diagnostics.error_count))
 			return 1;
 	}
 	alloc_isecs(0);
@@ -42,7 +42,7 @@ static int run(int argc, char **argv)
 	pfor(objs.n, resolve_obj, NULL);
 	pfor(objs.n, check_dups, NULL);
 	phase("resolve symbols");
-	if (atomic_load(&nerrors))
+	if (atomic_load(&ctx->diagnostics.error_count))
 		return 1;
 	if (opt.relocatable)
 		return ld_relocatable();
@@ -90,7 +90,7 @@ static int run(int argc, char **argv)
 	phase("assign sections");
 	finalize_merges();
 	phase("merge sections");
-	if (atomic_load(&nerrors))
+	if (atomic_load(&ctx->diagnostics.error_count))
 		return 1;
 
 	process_symbol_assignments();
@@ -142,7 +142,7 @@ static int run(int argc, char **argv)
 	}
 	build_dynamic();
 	phase("scan relocations");
-	if (atomic_load(&nerrors))
+	if (atomic_load(&ctx->diagnostics.error_count))
 		return 1;
 
 	/* room for thunk sections without moving isecs */
@@ -153,11 +153,11 @@ static int run(int argc, char **argv)
 		isecs.cap = isecs.n + 4096;
 	}
 	/* output sections in header order (live ones, script order) */
-	outsecs.n = 0;
+	ctx->layout.output_sections.n = 0;
 	for (uint32_t c = 0; c < topcmds.n; c++)
 		if (topcmds.v[c].kind == C_OSEC && osecs.v[topcmds.v[c].idx].live) {
-			VVEC_PUSH(outsecs, topcmds.v[c].idx, alloc);
-			osecs.v[topcmds.v[c].idx].shidx = outsecs.n;
+			VVEC_PUSH(ctx->layout.output_sections, topcmds.v[c].idx, alloc);
+			osecs.v[topcmds.v[c].idx].shidx = ctx->layout.output_sections.n;
 		}
 
 	assign_addresses();
@@ -173,9 +173,9 @@ static int run(int argc, char **argv)
 		if (!changed && !chg2)
 			break;
 	}
-	in_layout = true;
+	ctx->layout.in_layout = true;
 	assign_addresses();
-	in_layout = false;
+	ctx->layout.in_layout = false;
 	for (uint32_t i = 0; i < stop_syms.n; i++)
 		gsyms[stop_syms.v[i]].ev.val = osecs.v[gsyms[stop_syms.v[i]].ev.idx].size;
 	for (uint32_t i = 0; i < recorded.n; i++)
@@ -183,7 +183,7 @@ static int run(int argc, char **argv)
 	for (uint32_t i = 0; i < assert_fail.n; i++)
 		error("%s", assert_fail.v[i]);
 	phase("layout");
-	if (atomic_load(&nerrors))
+	if (atomic_load(&ctx->diagnostics.error_count))
 		return 1;
 
 	/* drop empty thunk sections (none are kept by construction) */
@@ -204,20 +204,20 @@ static int run(int argc, char **argv)
 		os->entsize = sizeof(Sym);
 	}
 	/* sizes of the non-alloc synthetic sections changed: re-run layout of them */
-	for (uint32_t i = 0; i < outsecs.n; i++) {
-		OSec *os = &osecs.v[outsecs.v[i]];
+	for (uint32_t i = 0; i < ctx->layout.output_sections.n; i++) {
+		OSec *os = &osecs.v[ctx->layout.output_sections.v[i]];
 		if (os->flags & SHF_ALLOC)
 			continue;
 		bool dummy = false;
-		uint64_t d = dot;
-		dot = 0;
-		assign_offsets(outsecs.v[i], &dummy);
-		dot = d;
+		uint64_t d = ctx->layout.dot;
+		ctx->layout.dot = 0;
+		assign_offsets(ctx->layout.output_sections.v[i], &dummy);
+		ctx->layout.dot = d;
 	}
 	assign_file_offsets();
 	phase("phdrs, symtab sizes, offsets");
 
-	out = bigalloc(filesize);
+	out = bigalloc(ctx->layout.file_size);
 	/* RELATIVE relocations: per section, in address order */
 	if (reladyn_isec != NONE && ndyn) {
 		VVEC(uint32_t) dl = {0};
@@ -256,20 +256,20 @@ static int run(int argc, char **argv)
 	write_synthetic();
 	write_headers();
 	phase("symtab, headers");
-	if (atomic_load(&nerrors))
+	if (atomic_load(&ctx->diagnostics.error_count))
 		return 1;
 	write_build_id();
 	phase("build id");
 	int rc = write_output();
 	phase("write");
-	if (timing)
-		fprintf(errf, "  %-28s %7.2f ms (%u objects, %u sections, %u globals, %llu MB out, %d threads)\n",
+	if (ctx->diagnostics.phase_timing)
+		fprintf(ctx->diagnostics.error_stream, "  %-28s %7.2f ms (%u objects, %u sections, %u globals, %llu MB out, %d threads)\n",
 			"total", (now() - t0) * 1e3, objs.n, isecs.n, gorder.n,
-			(unsigned long long)(filesize >> 20), nthreads);
-	unmap(out, filesize);
+			(unsigned long long)(ctx->layout.file_size >> 20), nthreads);
+	unmap(out, ctx->layout.file_size);
 	for (uint32_t i = 0; i < objs.n; i++)
 		if (objs.v[i]->mapped && objs.v[i]->buf)
 			unmap(objs.v[i]->buf, objs.v[i]->size);
 	gtable_free();
-	return rc || atomic_load(&nerrors) ? 1 : 0;
+	return rc || atomic_load(&ctx->diagnostics.error_count) ? 1 : 0;
 }

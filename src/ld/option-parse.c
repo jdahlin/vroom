@@ -119,7 +119,7 @@ static bool parse_args(int argc, char **argv)
 			else error("unknown --orphan-handling mode: %s", v);
 			continue;
 		}
-		if ((v = VAL("--error-limit"))) { error_limit = atoi(v); continue; }
+		if ((v = VAL("--error-limit"))) { ctx->diagnostics.error_limit = atoi(v); continue; }
 		if ((v = VAL("--threads"))) { nthreads = atoi(v) > 0 ? atoi(v) : 1; continue; }
 		if ((v = VAL("-Map")) || (v = VAL("--Map"))) { opt.map = v; continue; }
 		if ((v = VAL("--vroom-comment"))) { opt.comment = v; continue; }

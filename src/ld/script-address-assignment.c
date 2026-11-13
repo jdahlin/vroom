@@ -40,13 +40,13 @@ static bool assign_symbol(Assign *a, bool insec)
 	if (a->sym == NONE) {
 		EV v = apply_op(a->op, dot_ev(), eval(a->e));
 		uint64_t val = ev_value(v);
-		if (insec && val < dot) {
+		if (insec && val < ctx->layout.dot) {
 			char *m = alloc(160);
 			snprintf(m, 160, "unable to move location counter (0x%llx) backward to 0x%llx for section '%s'",
-				 (unsigned long long)dot, (unsigned long long)val, osecs.v[cur_osec].name);
+				 (unsigned long long)ctx->layout.dot, (unsigned long long)val, osecs.v[ctx->layout.current_output_section].name);
 			VVEC_PUSH(recorded, m, alloc);
 		}
-		dot = val;
+		ctx->layout.dot = val;
 		return false;
 	}
 	if (!a->defined)
@@ -62,26 +62,23 @@ static bool assign_symbol(Assign *a, bool insec)
 	return old.kind != s->ev.kind || old.idx != s->ev.idx || old.val != s->ev.val;
 }
 
-/* lld: .tbss takes no address space; consecutive ones stack from here */
-static uint64_t tbss_off;
-
 /* assignOffsets(); returns true if the section address changed */
 static bool assign_offsets(uint32_t oi, bool *symchg)
 {
 	OSec *os = &osecs.v[oi];
-	uint64_t saved = dot;
+	uint64_t saved = ctx->layout.dot;
 	bool tbss = (os->flags & (SHF_ALLOC | SHF_TLS)) == (SHF_ALLOC | SHF_TLS) && os->type == SHT_NOBITS;
 	if (tbss)
-		dot += tbss_off;
+		ctx->layout.dot += ctx->layout.tbss_offset;
 	if (!(os->flags & SHF_ALLOC))
-		dot = 0;
+		ctx->layout.dot = 0;
 	else if (os->addr)
-		dot = ev_value(eval(os->addr));
-	cur_osec = oi;
+		ctx->layout.dot = ev_value(eval(os->addr));
+	ctx->layout.current_output_section = oi;
 	if (!os->addr)
-		dot = alignup(dot, os->addralign);
-	bool changed = os->va != dot;
-	os->va = dot;
+		ctx->layout.dot = alignup(ctx->layout.dot, os->addralign);
+	bool changed = os->va != ctx->layout.dot;
+	os->va = ctx->layout.dot;
 	for (uint32_t c = 0; c < os->cmds.n; c++) {
 		Cmd *cm = &os->cmds.v[c];
 		if (cm->kind == C_ASSIGN) {
@@ -91,17 +88,17 @@ static bool assign_offsets(uint32_t oi, bool *symchg)
 		ISD *d = &isds.v[cm->idx];
 		for (uint32_t k = 0; k < d->secs.n; k++) {
 			ISec *is = &isecs.v[d->secs.v[k]];
-			dot = alignup(dot, is->align);
-			is->off = dot - os->va;
-			dot += is->size;
+			ctx->layout.dot = alignup(ctx->layout.dot, is->align);
+			is->off = ctx->layout.dot - os->va;
+			ctx->layout.dot += is->size;
 		}
 	}
-	os->size = dot - os->va;
+	os->size = ctx->layout.dot - os->va;
 	if (!(os->flags & SHF_ALLOC))
-		dot = saved;
+		ctx->layout.dot = saved;
 	else if (tbss) {
-		tbss_off = dot - saved;
-		dot = saved;
+		ctx->layout.tbss_offset = ctx->layout.dot - saved;
+		ctx->layout.dot = saved;
 	}
 	return changed;
 }
@@ -109,9 +106,9 @@ static bool assign_offsets(uint32_t oi, bool *symchg)
 static bool assign_addresses(void)
 {
 	bool changed = false, symchg = false;
-	dot = 0;
-	tbss_off = 0;
-	cur_osec = AETHER;
+	ctx->layout.dot = 0;
+	ctx->layout.tbss_offset = 0;
+	ctx->layout.current_output_section = AETHER;
 	recorded.n = 0;
 	assert_fail.n = 0;
 	for (uint32_t i = 0; i < topcmds.n; i++) {
@@ -150,8 +147,8 @@ static void add_script_symbol(Assign *a)
 
 static void process_symbol_assignments(void)
 {
-	dot = 0;
-	cur_osec = AETHER;
+	ctx->layout.dot = 0;
+	ctx->layout.current_output_section = AETHER;
 	for (uint32_t i = 0; i < topcmds.n; i++) {
 		Cmd *c = &topcmds.v[i];
 		if (c->kind == C_ASSIGN) {

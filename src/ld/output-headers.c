@@ -8,17 +8,17 @@ static void build_shstrtab(void)
 {
 	/* deduplicated, in section header order (StringTableBuilder in insertion order) */
 	size_t cap = 1;
-	for (uint32_t i = 0; i < outsecs.n; i++)
-		cap += strlen(osecs.v[outsecs.v[i]].name) + 1;
+	for (uint32_t i = 0; i < ctx->layout.output_sections.n; i++)
+		cap += strlen(osecs.v[ctx->layout.output_sections.v[i]].name) + 1;
 	shstrtab_buf = alloc(cap);
 	size_t n = 1;
-	for (uint32_t i = 0; i < outsecs.n; i++) {
-		OSec *os = &osecs.v[outsecs.v[i]];
+	for (uint32_t i = 0; i < ctx->layout.output_sections.n; i++) {
+		OSec *os = &osecs.v[ctx->layout.output_sections.v[i]];
 		size_t l = strlen(os->name);
 		uint32_t found = NONE;
 		for (uint32_t k = 0; k < i; k++)
-			if (!strcmp(osecs.v[outsecs.v[k]].name, os->name)) {
-				found = osecs.v[outsecs.v[k]].nameoff;
+			if (!strcmp(osecs.v[ctx->layout.output_sections.v[k]].name, os->name)) {
+				found = osecs.v[ctx->layout.output_sections.v[k]].nameoff;
 				break;
 			}
 		if (found != NONE) {
@@ -46,19 +46,19 @@ static void write_headers(void)
 		warn("cannot find entry symbol %s; not setting start address", en);
 	if (!opt.relocatable)
 		eh->e_entry = eg != NONE && gsyms[eg].state != GS_UNDEF ? gsym_va(eg) : 0;
-	eh->e_phoff = phdrs.n ? sizeof(Ehdr) : 0;
-	eh->e_shoff = shoff;
+	eh->e_phoff = ctx->layout.program_headers.n ? sizeof(Ehdr) : 0;
+	eh->e_shoff = ctx->layout.section_header_offset;
 	eh->e_ehsize = sizeof(Ehdr);
-	eh->e_phentsize = phdrs.n ? sizeof(Phdr) : 0;
-	eh->e_phnum = phdrs.n;
+	eh->e_phentsize = ctx->layout.program_headers.n ? sizeof(Phdr) : 0;
+	eh->e_phnum = ctx->layout.program_headers.n;
 	eh->e_shentsize = sizeof(Shdr);
-	eh->e_shnum = outsecs.n + 1;
+	eh->e_shnum = ctx->layout.output_sections.n + 1;
 	eh->e_shstrndx = osecs.v[isec_osec(shstrtab_isec)].shidx;
-	if (phdrs.n)
-		memcpy(out + sizeof(Ehdr), phdrs.v, phdrs.n * sizeof(Phdr));
-	Shdr *sh = (Shdr *)(out + shoff);
-	for (uint32_t i = 0; i < outsecs.n; i++) {
-		OSec *os = &osecs.v[outsecs.v[i]];
+	if (ctx->layout.program_headers.n)
+		memcpy(out + sizeof(Ehdr), ctx->layout.program_headers.v, ctx->layout.program_headers.n * sizeof(Phdr));
+	Shdr *sh = (Shdr *)(out + ctx->layout.section_header_offset);
+	for (uint32_t i = 0; i < ctx->layout.output_sections.n; i++) {
+		OSec *os = &osecs.v[ctx->layout.output_sections.v[i]];
 		Shdr *d = &sh[i + 1];
 		d->sh_name = os->nameoff;
 		d->sh_type = os->type;
@@ -88,7 +88,7 @@ static void write_build_id(void)
 	ISec *is = &isecs.v[buildid_isec];
 	uint8_t *dst = out + osecs.v[isec_osec(buildid_isec)].offset + is->off + 16;
 	size_t hl = is->size - 16;
-	size_t nchunks = (filesize + (1u << 20) - 1) >> 20;
+	size_t nchunks = (ctx->layout.file_size + (1u << 20) - 1) >> 20;
 	uint8_t *hashes = alloc(nchunks * 20 + 32);
 	if (!strcmp(opt.build_id, "sha1") || !strcmp(opt.build_id, "tree")) {
 		pfor(nchunks, hash_chunk, hashes);
@@ -97,7 +97,7 @@ static void write_build_id(void)
 		/* xxh3 of the chunk hashes (lld: --build-id=fast is xxh3_64bits per chunk) */
 		uint8_t *h8 = alloc(nchunks * 8);
 		for (size_t i = 0; i < nchunks; i++) {
-			uint64_t b = (uint64_t)i << 20, n = filesize - b < (1u << 20) ? filesize - b : (1u << 20);
+			uint64_t b = (uint64_t)i << 20, n = ctx->layout.file_size - b < (1u << 20) ? ctx->layout.file_size - b : (1u << 20);
 			uint64_t x = vdigest_xxh3(out + b, n);
 			memcpy(h8 + i * 8, &x, 8);
 		}

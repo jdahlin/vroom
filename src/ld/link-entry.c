@@ -9,7 +9,7 @@ int ld_main(int argc, char **argv, int dirfd, FILE *err)
 		rc = ld_macho(argc, argv, dirfd, err);
 	} else {
 		vtask_mutex_lock(&ldlock);	/* (a second link waits off the CPU budget) */
-		errf = err ? err : stderr;
+		ld_context_init(ctx, err ? err : stderr);
 		dirfd_base = dirfd;
 		rc = run(argc, argv);
 		free_arenas();

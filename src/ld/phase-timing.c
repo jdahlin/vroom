@@ -2,10 +2,6 @@
 
 /* ---------------- timing (VLD_TIME=1) ---------------- */
 
-static bool timing;
-static double t_last;
-static vperf p_last;			/* main thread's counters at the last phase */
-static long flt_last;			/* process minor faults at the last phase */
 static long minflt(void)
 {
 	struct rusage ru;
@@ -20,14 +16,14 @@ static double now(void)
 }
 static void phase(const char *name)
 {
-	if (!timing)
+	if (!ctx->diagnostics.phase_timing)
 		return;
 	double t = now();
-	vperf p = vperformance_now(), d = vperformance_subtract(p, p_last);
+	vperf p = vperformance_now(), d = vperformance_subtract(p, ctx->diagnostics.phase_start_counters);
 	long f = minflt();
-	fprintf(errf, "  %-28s %7.2f ms %8.1f M ins (main thread) %6ld faults\n", name, (t - t_last) * 1e3,
-		d.ins / 1e6, f - flt_last);
-	t_last = t;
-	p_last = p;
-	flt_last = f;
+	fprintf(ctx->diagnostics.error_stream, "  %-28s %7.2f ms %8.1f M ins (main thread) %6ld faults\n", name, (t - ctx->diagnostics.phase_start_time) * 1e3,
+		d.ins / 1e6, f - ctx->diagnostics.phase_start_faults);
+	ctx->diagnostics.phase_start_time = t;
+	ctx->diagnostics.phase_start_counters = p;
+	ctx->diagnostics.phase_start_faults = f;
 }

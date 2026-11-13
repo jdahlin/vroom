@@ -19,12 +19,12 @@ static void write_ehhdr(void)
 		return;
 	uint64_t hva = isec_va(ehhdr_isec, 0);
 	uint8_t *h = out + osecs.v[ho].offset + isecs.v[ehhdr_isec].off;
-	uint64_t (*t)[2] = alloc((ehfdes.n + 1) * sizeof *t);
+	uint64_t (*t)[2] = alloc((ctx->layout.eh_frame_fdes.n + 1) * sizeof *t);
 	uint32_t n = 0;
 	uint64_t ehva = 0;
 
-	for (uint32_t k = 0; k < ehfdes.n; k++) {
-		uint32_t f = ehfdes.v[k], fo = isec_osec(f);
+	for (uint32_t k = 0; k < ctx->layout.eh_frame_fdes.n; k++) {
+		uint32_t f = ctx->layout.eh_frame_fdes.v[k], fo = isec_osec(f);
 		const uint8_t *b = out + osecs.v[fo].offset + isecs.v[f].off;
 		uint64_t fva = isec_va(f, 0);
 
@@ -34,7 +34,7 @@ static void write_ehhdr(void)
 		t[n][1] = fva;
 		n++;
 	}
-	if (!ehfdes.n && isecs.n)
+	if (!ctx->layout.eh_frame_fdes.n && isecs.n)
 		for (uint32_t i = 0; i < isecs.n; i++)
 			if (!strcmp(isecs.v[i].name, ".eh_frame") && isecs.v[i].kind == K_NORMAL && isec_osec(i) < osecs.n) {
 				ehva = osecs.v[isec_osec(i)].va;

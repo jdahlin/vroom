@@ -13,7 +13,7 @@ static uint64_t chkalign(uint64_t a)
 	if (a == 0)
 		a = 1;
 	if (a & (a - 1)) {
-		if (in_layout)
+		if (ctx->layout.in_layout)
 			error("alignment must be power of 2");
 		return 1;
 	}
@@ -30,7 +30,7 @@ static void move_abs_right(EV *a, EV *b)
 		*a = *b;
 		*b = t;
 	}
-	if (!ev_isabs(*b) && in_layout)
+	if (!ev_isabs(*b) && ctx->layout.in_layout)
 		error("at least one side of the expression must be absolute");
 }
 static EV ev_add(EV a, EV b)
@@ -61,11 +61,11 @@ static EV binop(const char *op, EV l, EV r)
 	y = ev_value(r);
 	if (!strcmp(op, "*")) return evabs(x * y);
 	if (!strcmp(op, "/")) {
-		if (!y) { if (in_layout) error("division by zero"); return evabs(0); }
+		if (!y) { if (ctx->layout.in_layout) error("division by zero"); return evabs(0); }
 		return evabs(x / y);
 	}
 	if (!strcmp(op, "%")) {
-		if (!y) { if (in_layout) error("modulo by zero"); return evabs(0); }
+		if (!y) { if (ctx->layout.in_layout) error("modulo by zero"); return evabs(0); }
 		return evabs(x % y);
 	}
 	if (!strcmp(op, "<<")) return evabs(x << (y % 64));
@@ -84,7 +84,7 @@ static EV binop(const char *op, EV l, EV r)
 
 static EV dot_ev(void)
 {
-	EV v = {.kind = EV_OSEC, .idx = cur_osec, .val = dot - osec_addr(cur_osec), .align = 1};
+	EV v = {.kind = EV_OSEC, .idx = ctx->layout.current_output_section, .val = ctx->layout.dot - osec_addr(ctx->layout.current_output_section), .align = 1};
 	return v;
 }
 
@@ -102,7 +102,7 @@ static EV eval(Expr *e)
 	case E_LOADADDR: return evabs(osecs.v[e->sym].va);	/* LMA == VMA here */
 	case E_SIZEOF: return evabs(osecs.v[e->sym].size);
 	case E_ALIGNOF: return evabs(osecs.v[e->sym].addralign);
-	case E_ALIGN1: return evabs(alignup(dot, chkalign(ev_value(eval(e->a)))));
+	case E_ALIGN1: return evabs(alignup(ctx->layout.dot, chkalign(ev_value(eval(e->a)))));
 	case E_ALIGN2:
 		v = eval(e->a);
 		v.align = chkalign(ev_value(eval(e->b)));
@@ -119,7 +119,7 @@ static EV eval(Expr *e)
 	case E_ASSERT:
 		if (!ev_value(eval(e->a)))
 			VVEC_PUSH(assert_fail, e->msg, alloc);
-		return evabs(dot);
+		return evabs(ctx->layout.dot);
 	case E_DEFINED: {
 		G *s = &gsyms[e->sym];
 		return evabs(s->state == GS_OBJ || s->state == GS_SCRIPT);

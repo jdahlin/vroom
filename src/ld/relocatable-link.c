@@ -417,12 +417,12 @@ static int ld_relocatable(void)
 	eh->e_shentsize = sizeof(Shdr);
 	eh->e_shnum = r_nsh;
 	eh->e_shstrndx = r_shstridx;
-	if (atomic_load(&nerrors)) {
+	if (atomic_load(&ctx->diagnostics.error_count)) {
 		munmap(rbuf, fsize);
 		return 1;
 	}
 	out = rbuf;
-	filesize = fsize;
+	ctx->layout.file_size = fsize;
 	int rc = write_output();
 	phase("-r: write");
 	unmap(rbuf, fsize);
@@ -432,5 +432,5 @@ static int ld_relocatable(void)
 			unmap(objs.v[i]->buf, objs.v[i]->size);
 	gtable_free();
 	memset(&routs, 0, sizeof routs);
-	return rc || atomic_load(&nerrors) ? 1 : 0;
+	return rc || atomic_load(&ctx->diagnostics.error_count) ? 1 : 0;
 }

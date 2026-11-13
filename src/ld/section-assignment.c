@@ -9,7 +9,7 @@ static void assign_sections(void)
 			continue;
 		uint32_t d = match_isd(is->name);
 		if (d == NONE) {
-			VVEC_PUSH(orphans, i, alloc);
+			VVEC_PUSH(ctx->layout.orphans, i, alloc);
 			continue;
 		}
 		ISD *isd = &isds.v[d];
@@ -30,8 +30,8 @@ static void assign_sections(void)
 				if (d->pats[p].sort != SORT_NONE)
 					error("linker script: SORT mixed with other patterns not supported");
 	}
-	for (uint32_t i = 0; i < orphans.n; i++) {
-		ISec *is = &isecs.v[orphans.v[i]];
+	for (uint32_t i = 0; i < ctx->layout.orphans.n; i++) {
+		ISec *is = &isecs.v[ctx->layout.orphans.v[i]];
 		if (!strcmp(is->name, ".note.GNU-stack") || (is->flags & SHF_EXCLUDE))
 			is->osec = OS_DISCARD;
 		else if (!opt.orphan || is->kind == K_GOT)
@@ -43,11 +43,11 @@ static void assign_sections(void)
 	/* lld sortSections: orphans stable-sorted by rank (non-allocated last), then
 	 * placed one by one, each seeing those placed before it */
 	{
-		uint32_t n = orphans.n, *tmp = alloc(n * sizeof(uint32_t) + 1), k = 0;
+		uint32_t n = ctx->layout.orphans.n, *tmp = alloc(n * sizeof(uint32_t) + 1), k = 0;
 
 		/* stable: by rank, non-allocated last */
 		for (uint32_t i = 0; i < n; i++) {
-			const ISec *is = &isecs.v[orphans.v[i]];
+			const ISec *is = &isecs.v[ctx->layout.orphans.v[i]];
 			uint64_t q = orphan_key(is);
 			uint32_t at = k++;
 
@@ -59,12 +59,12 @@ static void assign_sections(void)
 				tmp[at] = tmp[at - 1];
 				at--;
 			}
-			tmp[at] = orphans.v[i];
+			tmp[at] = ctx->layout.orphans.v[i];
 		}
-		memcpy(orphans.v, tmp, n * sizeof(uint32_t));
+		memcpy(ctx->layout.orphans.v, tmp, n * sizeof(uint32_t));
 	}
-	for (uint32_t i = 0; i < orphans.n; i++) {
-		ISec *is = &isecs.v[orphans.v[i]];
+	for (uint32_t i = 0; i < ctx->layout.orphans.n; i++) {
+		ISec *is = &isecs.v[ctx->layout.orphans.v[i]];
 		if (is->osec == OS_DISCARD)
 			continue;
 		uint32_t found = NONE;
@@ -134,7 +134,7 @@ static void assign_sections(void)
 			VVEC_PUSH(osecs.v[found].cmds, ((Cmd){.kind = C_ISD, .idx = di}), alloc);
 		}
 		is->isd = di;
-		VVEC_PUSH(isds.v[di].secs, orphans.v[i], alloc);
+		VVEC_PUSH(isds.v[di].secs, ctx->layout.orphans.v[i], alloc);
 	}
 
 	/* merge sections: one synthetic per (flags, entsize[, align]) per output section */
@@ -191,7 +191,7 @@ static void assign_sections(void)
 	}
 	eh_frames();
 	if (ehhdr_isec != NONE)	/* lld EhFrameHeader::getSize: 12 + 8 per FDE */
-		isecs.v[ehhdr_isec].size = 12 + 8 * (uint64_t)ehfdes.n;
+		isecs.v[ehhdr_isec].size = 12 + 8 * (uint64_t)ctx->layout.eh_frame_fdes.n;
 	/* output section ownership */
 	for (uint32_t i = 0; i < isds.n; i++)
 		for (uint32_t s = 0; s < isds.v[i].secs.n; s++)

@@ -10,8 +10,8 @@ static int write_output(void)
 		return 1;
 	}
 	uint64_t off = 0;
-	while (off < filesize) {
-		ssize_t w = write(fd, out + off, filesize - off > (1 << 30) ? (1 << 30) : filesize - off);
+	while (off < ctx->layout.file_size) {
+		ssize_t w = write(fd, out + off, ctx->layout.file_size - off > (1 << 30) ? (1 << 30) : ctx->layout.file_size - off);
 		if (w <= 0) {
 			error("write %s: %s", opt.out, strerror(errno));
 			close(fd);
@@ -26,6 +26,6 @@ static int write_output(void)
 static void hash_chunk(void *arg, size_t i)
 {
 	uint8_t *hashes = arg;
-	uint64_t b = (uint64_t)i << 20, n = filesize - b < (1u << 20) ? filesize - b : (1u << 20);
+	uint64_t b = (uint64_t)i << 20, n = ctx->layout.file_size - b < (1u << 20) ? ctx->layout.file_size - b : (1u << 20);
 	vdigest_blake3(out + b, n, hashes + i * 20, 20);
 }

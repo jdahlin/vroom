@@ -2,7 +2,6 @@
 
 /* ---------------- phdrs (lld createPhdrs) ---------------- */
 
-static bool headers_loaded;
 
 /* lld isRelroSection */
 static bool is_relro(uint32_t oi)
@@ -26,7 +25,7 @@ static bool is_relro(uint32_t oi)
 
 static void create_phdrs(void)
 {
-	phdrs.n = phsecs.n = 0;
+	ctx->layout.program_headers.n = ctx->layout.program_header_sections.n = 0;
 	phnew(PT_PHDR, PF_R);
 	int hdrload = phnew(PT_LOAD, PF_R);
 	int load = hdrload;
@@ -34,16 +33,16 @@ static void create_phdrs(void)
 	/* lld relroEnd: the first section after the relro run starts a PT_LOAD */
 	uint32_t relro_end = NONE;
 
-	for (uint32_t i = 0, in = 0; i < outsecs.n && !opt.norelro && !opt.relocatable && relro_end == NONE; i++) {
-		if (!sec_in_load(&osecs.v[outsecs.v[i]]))
+	for (uint32_t i = 0, in = 0; i < ctx->layout.output_sections.n && !opt.norelro && !opt.relocatable && relro_end == NONE; i++) {
+		if (!sec_in_load(&osecs.v[ctx->layout.output_sections.v[i]]))
 			continue;
-		if (is_relro(outsecs.v[i]))
+		if (is_relro(ctx->layout.output_sections.v[i]))
 			in = 1;
 		else if (in)
-			relro_end = outsecs.v[i];
+			relro_end = ctx->layout.output_sections.v[i];
 	}
-	for (uint32_t i = 0; i < outsecs.n; i++) {
-		uint32_t oi = outsecs.v[i];
+	for (uint32_t i = 0; i < ctx->layout.output_sections.n; i++) {
+		uint32_t oi = ctx->layout.output_sections.v[i];
 		OSec *os = &osecs.v[oi];
 		os->ptload = -1;
 		if (!sec_in_load(os))
@@ -51,9 +50,9 @@ static void create_phdrs(void)
 		uint32_t nf = phflags(os);
 		if ((flags ^ nf) || oi == relro_end)
 			load = -1;
-		bool last_is_hdr = load == hdrload && phsecs.v[load].last < 0;
+		bool last_is_hdr = load == hdrload && ctx->layout.program_header_sections.v[load].last < 0;
 		if (load >= 0 && (!os->lma || last_is_hdr)) {
-			phdrs.v[load].p_flags |= nf;
+			ctx->layout.program_headers.v[load].p_flags |= nf;
 		} else {
 			load = phnew(PT_LOAD, nf);
 			flags = nf;
@@ -63,8 +62,8 @@ static void create_phdrs(void)
 	/* lld: one PT_TLS over the SHF_TLS sections, after the PT_LOADs */
 	{
 		int tls = -1;
-		for (uint32_t i = 0; i < outsecs.n; i++) {
-			uint32_t oi = outsecs.v[i];
+		for (uint32_t i = 0; i < ctx->layout.output_sections.n; i++) {
+			uint32_t oi = ctx->layout.output_sections.v[i];
 			if ((osecs.v[oi].flags & (SHF_ALLOC | SHF_TLS)) != (SHF_ALLOC | SHF_TLS))
 				continue;
 			if (tls < 0)
@@ -80,8 +79,8 @@ static void create_phdrs(void)
 		int rr = -1;
 		bool in = false, ended = false;
 
-		for (uint32_t i = 0; i < outsecs.n; i++) {
-			uint32_t oi = outsecs.v[i];
+		for (uint32_t i = 0; i < ctx->layout.output_sections.n; i++) {
+			uint32_t oi = ctx->layout.output_sections.v[i];
 
 			if (!sec_in_load(&osecs.v[oi]))
 				continue;
@@ -100,17 +99,17 @@ static void create_phdrs(void)
 			}
 		}
 		if (rr >= 0)
-			phdrs.v[rr].p_align = 1;
+			ctx->layout.program_headers.v[rr].p_align = 1;
 	}
 	if (ehhdr_isec != NONE && isec_osec(ehhdr_isec) != NONE && isec_osec(ehhdr_isec) != OS_DISCARD)
 		phadd(phnew(PT_GNU_EH_FRAME, PF_R), isec_osec(ehhdr_isec));
 	phnew(PT_GNU_STACK, PF_R | PF_W);
 	int note = -1;
-	for (uint32_t i = 0; i < outsecs.n; i++) {
-		uint32_t oi = outsecs.v[i];
+	for (uint32_t i = 0; i < ctx->layout.output_sections.n; i++) {
+		uint32_t oi = ctx->layout.output_sections.v[i];
 		OSec *os = &osecs.v[oi];
 		if (os->type == SHT_NOTE && (os->flags & SHF_ALLOC)) {
-			if (note < 0 || os->lma || osecs.v[phsecs.v[note].last].addralign != os->addralign)
+			if (note < 0 || os->lma || osecs.v[ctx->layout.program_header_sections.v[note].last].addralign != os->addralign)
 				note = phnew(PT_NOTE, PF_R);
 			phadd(note, oi);
 		} else {
@@ -123,24 +122,24 @@ static void create_phdrs(void)
 static void finish_phdrs(void)
 {
 	uint64_t min = UINT64_MAX;
-	for (uint32_t i = 0; i < outsecs.n; i++) {
-		OSec *os = &osecs.v[outsecs.v[i]];
+	for (uint32_t i = 0; i < ctx->layout.output_sections.n; i++) {
+		OSec *os = &osecs.v[ctx->layout.output_sections.v[i]];
 		if ((os->flags & SHF_ALLOC) && os->va < min)
 			min = os->va;
 	}
-	uint64_t hsize = sizeof(Ehdr) + (uint64_t)phdrs.n * sizeof(Phdr);
+	uint64_t hsize = sizeof(Ehdr) + (uint64_t)ctx->layout.program_headers.n * sizeof(Phdr);
 	uint64_t base = min & ~(opt.max_page - 1);
-	headers_loaded = !opt.nmagic && hsize <= min - base;
-	if (headers_loaded)
+	ctx->layout.headers_loaded = !opt.nmagic && hsize <= min - base;
+	if (ctx->layout.headers_loaded)
 		error("ELF headers in the first PT_LOAD are not supported (no SECTIONS gap below the first section)");
-	int *map = alloc(phdrs.n * sizeof(int));
+	int *map = alloc(ctx->layout.program_headers.n * sizeof(int));
 	uint32_t w = 0;
-	for (uint32_t i = 0; i < phdrs.n; i++) {
-		Phdr *p = &phdrs.v[i];
-		PhdrSecs *s = &phsecs.v[i];
+	for (uint32_t i = 0; i < ctx->layout.program_headers.n; i++) {
+		Phdr *p = &ctx->layout.program_headers.v[i];
+		PhdrSecs *s = &ctx->layout.program_header_sections.v[i];
 		bool keep = true;
 		if (p->p_type == PT_PHDR)
-			keep = headers_loaded;
+			keep = ctx->layout.headers_loaded;
 		else if (p->p_type == PT_LOAD) {
 			if (s->first < 0)
 				keep = false;
@@ -151,14 +150,14 @@ static void finish_phdrs(void)
 		}
 		map[i] = keep ? (int)w : -1;
 		if (keep) {
-			phdrs.v[w] = *p;
-			phsecs.v[w] = *s;
+			ctx->layout.program_headers.v[w] = *p;
+			ctx->layout.program_header_sections.v[w] = *s;
 			w++;
 		}
 	}
-	phdrs.n = phsecs.n = w;
-	for (uint32_t k = 0; k < outsecs.n; k++) {
-		OSec *os = &osecs.v[outsecs.v[k]];
+	ctx->layout.program_headers.n = ctx->layout.program_header_sections.n = w;
+	for (uint32_t k = 0; k < ctx->layout.output_sections.n; k++) {
+		OSec *os = &osecs.v[ctx->layout.output_sections.v[k]];
 		if (os->ptload >= 0)
 			os->ptload = map[os->ptload];
 	}
