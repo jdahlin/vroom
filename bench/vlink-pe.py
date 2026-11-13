@@ -56,6 +56,10 @@ SRC = {
     'dllall': 'int add(int a, int b){ return a + b; }\nint counter = 5;\nint bump(void){ return ++counter; }\n',
     'impdata': '#include <stdio.h>\nextern int counter;\nint bump(void);\n'
                'int main(void){ bump(); printf("%d\\n", counter); return counter; }\n',
+    'limp': '__declspec(dllimport) int foo(void);\nint main(void){ return foo(); }\n',
+    'lfoo': 'int foo(void){ return 9; }\n',
+    'gnuuse': '#include <stdio.h>\nint bump(void);\n__declspec(dllimport) extern int counter;\n'
+              'int main(void){ int x = bump(); printf("%d %d\\n", x, counter); return counter; }\n',
     'bigframe': '#include <stdio.h>\n#include <string.h>\nint main(void){ char b[100000]; memset(b, 1, sizeof b); '
                 'printf("%d\\n", b[99999]); return 0; }\n',
 }
@@ -123,12 +127,75 @@ CASES = [
     ('-m i386pe', ['main'], ['-m', 'i386pe'], False, []),
     ('-shared', ['dllall'], ['--out-implib', 'OUT.a'], True, ['OUT.a']),
     ('-shared dllexport', ['dll'], ['--out-implib', 'OUT.a'], True, ['OUT.a']),
+    ('-shared .def', ['dllall', 'exports.def'], ['--out-implib', 'OUT.a'], True, ['OUT.a']),
     ('-shared --exclude-all-symbols', ['dllall'], ['--exclude-all-symbols'], True, []),
     ('-shared --image-base', ['dllall'], ['--image-base', '0x6f000000'], True, []),
+    ('local __imp_ (LNK4217)', ['limp', 'lfoo'], [], False, []),
+    ('GNU dlltool import library', ['gnuuse', 'GNULIB'], [], False, []),
     ('auto-import (DLL)', ['impdata', 'DLLLIB'], [], False, []),
     ('--disable-auto-import', ['impdata', 'DLLLIB'], ['--disable-auto-import'], False, []),
     ('--disable-runtime-pseudo-reloc', ['impdata', 'DLLLIB'], ['--disable-runtime-pseudo-reloc'], False, []),
 ]
+
+
+def gnu_import_library(tmp, out, dll, syms):
+    """an import library as GNU dlltool writes one: a head object (the .idata$2 entry), one object per
+    symbol (jmp thunk, .idata$4/$5 entries, .idata$6 hint/name, .idata$7 reference to the head), a tail
+    (the .idata$4/$5 terminators and the DLL name in .idata$7), sorted by object name"""
+    base = 'lib' + dll.split('.')[0] + '_a'
+    files = {'dh': f'''
+	.section .idata$2,"dw"
+	.globl _head_{base}
+_head_{base}:
+	.rva hname
+	.long 0
+	.long 0
+	.rva __{base}_iname
+	.rva fthunk
+	.section .idata$5,"dw"
+fthunk:
+	.section .idata$4,"dw"
+hname:
+'''}
+    for i, sym in enumerate(syms):
+        name, _, kind = sym.partition(':')
+        thunk = '' if kind == 'data' else f'\t.text\n\t.globl {name}\n{name}:\n\tjmp *__imp_{name}(%rip)\n\tnop\n\tnop\n'
+        files[f'ds{i:05d}'] = thunk + f'''
+	.section .idata$7,"dw"
+	.rva _head_{base}
+	.section .idata$5,"dw"
+	.globl __imp_{name}
+__imp_{name}:
+	.rva hn{i}
+	.long 0
+	.section .idata$4,"dw"
+	.rva hn{i}
+	.long 0
+	.section .idata$6,"dw"
+	.p2align 1
+hn{i}:
+	.short {i}
+	.asciz "{name}"
+	.p2align 1
+'''
+    files['dt'] = f'''
+	.section .idata$4,"dw"
+	.long 0
+	.long 0
+	.section .idata$5,"dw"
+	.long 0
+	.long 0
+	.section .idata$7,"dw"
+	.globl __{base}_iname
+__{base}_iname:
+	.asciz "{dll}"
+'''
+    objs = []
+    for n, src in files.items():
+        open(f'{tmp}/{n}.s', 'w').write(src)
+        subprocess.run([CL] + TGT + ['-c', f'{tmp}/{n}.s', '-o', f'{tmp}/{n}.o'], check=True)
+        objs.append(f'{tmp}/{n}.o')
+    subprocess.run([llvm('llvm-ar'), 'rcs', '--format=gnu', out] + objs, check=True)
 
 
 def first_err(s):
@@ -153,9 +220,12 @@ def main():
         open(f'{tmp}/{n}.c', 'w').write(src)
         subprocess.run([CL] + TGT + ['-O1', '-c', f'{tmp}/{n}.c', '-o', f'{tmp}/{n}.o'] + FLAGS.get(n, []), check=True)
     subprocess.run([llvm('llvm-ar'), 'rcs', f'{tmp}/libx.a', f'{tmp}/lib1.o', f'{tmp}/lib2.o'], check=True)
+    open(f'{tmp}/exports.def', 'w').write('LIBRARY out.dll\nEXPORTS\n  add\n  twice = add\n  counter DATA\n'
+                                          '  bump @7\n  fwd = kernel32.Sleep\n  hidden_ord = bump @9 NONAME\n')
     # the DLL the auto-import cases link against (and its import library), linked by lld
     subprocess.run([LLD] + link_line([f'{tmp}/dllall.o'], ['--out-implib', f'{tmp}/libd.dll.a'], True) + ['-o', f'{tmp}/d.dll'],
                    check=True, capture_output=True, env=env)
+    gnu_import_library(tmp, f'{tmp}/libdg.a', 'd.dll', ['bump', 'counter:data'])
     wenv = hostenv.wine_env(f'{BUILD}/wine')
     if run:
         hostenv.wine_start(f'{BUILD}/wine')
@@ -167,8 +237,8 @@ def main():
         for who, prog in (('lld', LLD), ('vlink', VLINK)):
             d = f'{tmp}/{who}'
             os.makedirs(d, exist_ok=True)
-            ob = [f'{tmp}/libx.a' if o == 'LIB' else f'{tmp}/libd.dll.a' if o == 'DLLLIB' else
-                  f'{tmp}/{o}' if o.endswith('.o') else f'{tmp}/{o}.o' for o in objs]
+            ob = [f'{tmp}/libx.a' if o == 'LIB' else f'{tmp}/libd.dll.a' if o == 'DLLLIB' else f'{tmp}/libdg.a' if o == 'GNULIB' else
+                  f'{tmp}/{o}' if o.endswith('.o') or o.endswith('.def') else f'{tmp}/{o}.o' for o in objs]
             ex = [f'{tmp}/libx.a' if e == 'LIB' else f'{d}/{e}' if e.startswith('OUT') else e for e in extra]
             out = f'{d}/out.dll' if shared else f'{d}/out.exe'
             for f in [out] + [f'{d}/{o}' for o in outs]:
@@ -195,11 +265,15 @@ def main():
                 outs_ = []
                 for f, d in ((lfiles[0], ld), (vfiles[0], vd)):
                     shutil.copy(f'{tmp}/d.dll', f'{d}/d.dll')
-                    try:
-                        p = subprocess.run([WINE, f], capture_output=True, env=wenv, cwd=d, timeout=30)
-                        outs_.append((p.returncode, p.stdout))
-                    except subprocess.TimeoutExpired:
-                        outs_.append(('timeout', b''))
+                    r = ('timeout', b'')
+                    for _ in range(2):	# (once more after a timeout: Wine's first start, a loaded machine)
+                        try:
+                            p = subprocess.run([WINE, f], capture_output=True, env=wenv, cwd=d, timeout=30)
+                            r = (p.returncode, p.stdout)
+                            break
+                        except subprocess.TimeoutExpired:
+                            pass
+                    outs_.append(r)
                 if outs_[0] != outs_[1]:
                     msg = f'run differs: lld {outs_[0]}, vlink {outs_[1]}'
         if msg:

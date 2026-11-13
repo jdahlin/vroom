@@ -209,6 +209,105 @@ static void pe_export_parse(const char *spec, bool from_directive)
 	pe_export_add(&e);
 }
 
+/* a module-definition file named as an input (lld's -def:): LIBRARY and EXPORTS */
+static void pe_def_file_read(const char *path)
+{
+	int fd = openat(pe_dirfd, path, O_RDONLY | O_CLOEXEC);
+	struct stat st;
+	if (fd < 0 || fstat(fd, &st) < 0) {
+		pe_error("could not open '%s': %s", path, strerror(errno));
+		if (fd >= 0)
+			close(fd);
+		return;
+	}
+	char *text = pe_alloc((size_t)st.st_size + 1);
+	ssize_t got = read(fd, text, (size_t)st.st_size);
+	close(fd);
+	if (got < 0)
+		got = 0;
+	text[got] = 0;
+	bool in_exports = false;
+	for (char *line = text; line && *line;) {
+		char *nl = strchr(line, '\n');
+		if (nl)
+			*nl = 0;
+		char *semi = strchr(line, ';');
+		if (semi)
+			*semi = 0;
+		/* tokens: words, '=', '@N' */
+		char *tok[16];
+		int nt = 0;
+		for (char *p = line; *p && nt < 16;) {
+			while (*p == ' ' || *p == '\t' || *p == '\r')
+				p++;
+			if (!*p)
+				break;
+			if (*p == '=') {
+				tok[nt++] = "=";
+				p++;
+				continue;
+			}
+			char *b = p;
+			if (*p == '"') {
+				b = ++p;
+				while (*p && *p != '"')
+					p++;
+			} else
+				while (*p && *p != ' ' && *p != '\t' && *p != '\r' && *p != '=')
+					p++;
+			char c = *p;
+			tok[nt++] = pe_strndup(b, (size_t)(p - b));
+			if (c == '"')
+				p++;
+		}
+		line = nl ? nl + 1 : NULL;
+		if (!nt)
+			continue;
+		if (!strcasecmp(tok[0], "EXPORTS")) {
+			in_exports = true;
+			continue;
+		}
+		if (!strcasecmp(tok[0], "LIBRARY") || !strcasecmp(tok[0], "NAME") || !strcasecmp(tok[0], "HEAPSIZE") ||
+		    !strcasecmp(tok[0], "STACKSIZE") || !strcasecmp(tok[0], "VERSION") || !strcasecmp(tok[0], "SECTIONS") ||
+		    !strcasecmp(tok[0], "DESCRIPTION")) {
+			in_exports = false;
+			continue;
+		}
+		if (!in_exports) {
+			pe_error("%s: unknown directive: %s", path, tok[0]);
+			continue;
+		}
+		pe_export e = {0};
+		e.name = e.symbol_name = tok[0];
+		int k = 1;
+		if (k + 1 < nt && !strcmp(tok[k], "=")) {
+			e.symbol_name = tok[k + 1];
+			k += 2;
+		}
+		for (; k < nt; k++) {
+			if (tok[k][0] == '@') {
+				uint64_t v;
+				if (pe_parse_u64(tok[k] + 1, &v) && v && v < 0x10000)
+					e.ordinal = (uint16_t)v;
+				else
+					pe_error("%s: invalid ordinal: %s", path, tok[k]);
+			} else if (!strcasecmp(tok[k], "NONAME"))
+				e.no_name = true;
+			else if (!strcasecmp(tok[k], "DATA"))
+				e.data = true;
+			else if (!strcasecmp(tok[k], "CONSTANT"))
+				e.constant = true;
+			else if (!strcasecmp(tok[k], "PRIVATE"))
+				e.private_ = true;
+			else
+				pe_error("%s: invalid export attribute: %s", path, tok[k]);
+		}
+		if (strchr(e.symbol_name, '.') && e.symbol_name != e.name)
+			e.forward_to = e.symbol_name;	/* NAME = DLL.FUNC */
+		pe_export_add(&e);
+	}
+}
+
 static const char *pe_with_sysroot(const char *p)
 {
 	if (p[0] == '=' && pe_sysroot)
@@ -291,7 +390,11 @@ static bool pe_options_parse(int argc, char **argv)
 	for (int i = 1; i < argc; i++) {
 		const char *a = argv[i], *v;
 		if (a[0] != '-' || !a[1]) {
-			pe_input_add(pe_with_sysroot(a), whole);
+			size_t al = strlen(a);
+			if (al > 4 && !strcasecmp(a + al - 4, ".def"))
+				pe_def_file_read(a);
+			else
+				pe_input_add(pe_with_sysroot(a), whole);
 			continue;
 		}
 		/* static/dynamic library search */
@@ -394,7 +497,7 @@ static bool pe_options_parse(int argc, char **argv)
 			continue;
 		}
 		if ((v = pe_value(argc, argv, &i, "out-implib"))) { cfg.implib = v; continue; }
-		if ((v = pe_value(argc, argv, &i, "output-def"))) { cfg.output_def = v; continue; }
+		if ((v = pe_value(argc, argv, &i, "output-def"))) { pe_error("--output-def is not supported by vlink"); continue; }
 		if ((v = pe_value(argc, argv, &i, "Map"))) { cfg.map_file = v; continue; }
 		if ((v = pe_value(argc, argv, &i, "require-defined"))) { PE_PUSH_STR(cfg.includes, cfg.nincludes, v); continue; }
 		if ((v = pe_value(argc, argv, &i, "undefined"))) { PE_PUSH_STR(cfg.optional_includes, cfg.noptional_includes, v); continue; }

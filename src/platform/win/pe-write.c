@@ -383,7 +383,7 @@ static void pe_chunk_write(pe_chunk *c, uint8_t *buf, uint8_t *image)
 		pe_chunk *dll = c->aux;
 		memset(buf, 0, PE_EXPORT_DIRECTORY_SIZE);
 		pe_wr32(buf + 12, dll->rva);
-		pe_wr32(buf + 16, 1);
+		pe_wr32(buf + 16, pe_export_base);
 		pe_wr32(buf + 20, (uint32_t)c->value);
 		pe_wr32(buf + 24, c->aux_count);
 		pe_wr32(buf + 28, c->target->rva);
@@ -394,8 +394,10 @@ static void pe_chunk_write(pe_chunk *c, uint8_t *buf, uint8_t *image)
 	case PE_CHUNK_EXPORT_ADDRESS_TABLE:
 		for (uint32_t i = 0; i < cfg.nexports; i++) {
 			pe_export *e = &cfg.exports[i];
-			if (e->sym && pe_sym_is_defined(e->sym))
-				pe_wr32(buf + 4 * (e->ordinal - 1u), (uint32_t)pe_symbol_rva(e->sym));
+			if (e->forward_chunk)
+				pe_wr32(buf + 4 * (e->ordinal - pe_export_base), e->forward_chunk->rva);
+			else if (e->sym && pe_sym_is_defined(e->sym))
+				pe_wr32(buf + 4 * (e->ordinal - pe_export_base), (uint32_t)pe_symbol_rva(e->sym));
 		}
 		break;
 	case PE_CHUNK_EXPORT_NAME_POINTERS: {
@@ -408,7 +410,7 @@ static void pe_chunk_write(pe_chunk *c, uint8_t *buf, uint8_t *image)
 		uint32_t k = 0;
 		for (uint32_t i = 0; i < cfg.nexports; i++)
 			if (!cfg.exports[i].no_name)
-				pe_wr16(buf + 2 * k++, (uint16_t)(cfg.exports[i].ordinal - 1));
+				pe_wr16(buf + 2 * k++, (uint16_t)(cfg.exports[i].ordinal - pe_export_base));
 		break;
 	}
 	}

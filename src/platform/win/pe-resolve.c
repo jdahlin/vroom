@@ -549,8 +549,6 @@ static void pe_resolve_remaining(void)
 				pe_sym_replace(s, PE_SYM_LOCAL_IMPORT, NULL);
 				s->chunk = c;
 				PE_PUSH(pe_local_import_chunks, pe_local_import_count, pe_local_import_capacity, c);
-				pe_warn("%s: locally defined symbol imported: %s (defined in %s)", "<unknown>", s->name + 6,
-					pe_file_name(imp->file));
 				continue;
 			}
 		}
@@ -560,6 +558,17 @@ static void pe_resolve_remaining(void)
 	}
 	pe_report_undefined(undefs, nundef);
 	free(undefs);
+	/* lld's LNK4217 warning, once per object that refers to such an __imp_ symbol */
+	if (pe_local_import_count)
+		for (uint32_t fi = 0; fi < pe_object_count; fi++) {
+			pe_file *f = pe_objects[fi];
+			for (uint32_t k = 0; k < f->nsyms; k++) {
+				pe_symbol *s = f->syms[k];
+				if (s && s->kind == PE_SYM_LOCAL_IMPORT && s->chunk && s->chunk->sym)
+					pe_warn("%s: locally defined symbol imported: %s (defined in %s) [LNK4217]", pe_file_name(f),
+						s->chunk->sym->name, pe_file_name(s->chunk->sym->file));
+			}
+		}
 }
 
 static bool pe_is_crtend(const char *path)
@@ -697,7 +706,7 @@ static bool pe_resolve_run(void)
 			pe_export *e = &cfg.exports[i];
 			if (e->forward_to)
 				continue;
-			e->sym = pe_driver_undefined(e->name);
+			e->sym = pe_driver_undefined(e->symbol_name ? e->symbol_name : e->name);
 		}
 		for (uint32_t i = 0; i < cfg.nalternate_names; i++) {
 			pe_symbol *s = pe_sym_find(cfg.alternate_names[i].from);

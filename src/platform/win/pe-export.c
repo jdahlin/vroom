@@ -134,6 +134,8 @@ static void pe_exports_fixup(void)
 	qsort(cfg.exports, cfg.nexports, sizeof *cfg.exports, pe_export_cmp);
 	uint32_t max = 0;
 	for (uint32_t i = 0; i < cfg.nexports; i++)
+		cfg.exports[i].given_ordinal = cfg.exports[i].ordinal;
+	for (uint32_t i = 0; i < cfg.nexports; i++)
 		if (cfg.exports[i].ordinal > max)
 			max = cfg.exports[i].ordinal;
 	for (uint32_t i = 0; i < cfg.nexports; i++)
@@ -144,7 +146,7 @@ static void pe_exports_fixup(void)
 	/* the symbols: exports of data are not functions; resolve to definitions */
 	for (uint32_t i = 0; i < cfg.nexports; i++) {
 		pe_export *e = &cfg.exports[i];
-		if (!e->sym)
+		if (!e->sym && !e->forward_to)
 			e->sym = pe_sym_find(e->symbol_name ? e->symbol_name : e->name);
 	}
 }
@@ -357,7 +359,7 @@ static bool pe_implib_write(const char *path)
 		pe_bytes_u16(&mem.body, IMAGE_FILE_MACHINE_AMD64);
 		pe_bytes_u32(&mem.body, 0);
 		pe_bytes_u32(&mem.body, (uint32_t)(ln + 1 + dn + 1));
-		pe_bytes_u16(&mem.body, e->no_name ? e->ordinal : 0);
+		pe_bytes_u16(&mem.body, e->given_ordinal);
 		uint16_t type = e->data ? IMPORT_DATA : e->constant ? IMPORT_CONST : IMPORT_CODE;
 		uint16_t name_type = e->no_name ? IMPORT_ORDINAL : IMPORT_NAME;
 		pe_bytes_u16(&mem.body, (uint16_t)(type | name_type << 2));

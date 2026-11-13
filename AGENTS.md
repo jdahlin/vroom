@@ -185,6 +185,12 @@ relative to it); `TODO.md` stays at the top.
     when the first input is Mach-O; the kernel's host programs).
   - `platform/wasm/`: the wasm object writer (`wasm.c`: layout, symbol table,
     relocations as LLVM's WasmObjectWriter, byte for byte).
+  - `platform/win/`: vlink's PE/COFF linker for MinGW x86-64 (`pe-linker.c`,
+    one TU like `ld/ld.c` that #includes `pe-options.c`, `pe-input.c`,
+    `pe-resolve.c`, `pe-export.c`, `pe-layout.c`, `pe-write.c`; model in
+    `pe-linker-internal.h`, COFF/PE constants in `pe-definitions.h`): chosen
+    when the first input is COFF x86-64 or by `-m i386pep`; ld.lld's MinGW
+    command line, output byte-identical to lld's (doc/PLAN-win64.md WIN7).
   - `frontend/pp/`, `frontend/c/` and `codegen/` (with `arch/<cpu>/codegen/`) are directories of
     files by topic, one internal header each (`pp-internal.h`, `cc-internal.h`, `emitimpl.h`) with the types, macros
     and prototypes the files share; a shared function is `VPRIV` (static in
@@ -241,6 +247,8 @@ bench/vcc-cfi.py -j 6               # -fasynchronous-unwind-tables: .eh_frame pe
 bench/vcc-dwarf.py -j 6             # -g line tables: dwarfdump --verify, .text unchanged, rows vs clang (~2 min)
 bench/vlink-bad.py                  # corrupt objects/archives: vlink (ASan) fails cleanly (<1 s)
 bench/vlink-opts.py                 # vlink options vs ld.lld: errors and loaded image (<1 s)
+bench/vlink-pe.py [--run]           # vlink's PE linker vs ld.lld -m i386pep: options, errors, DLL+implib, byte-identical (~15 s; --run: under Wine)
+bench/vlink-pe-bad.py               # corrupt COFF objects/archives/import records: vlink (ASan) fails cleanly (~1 min)
 build/src/task-test                 # port/task.c: the pool and budget (also under TSan, <1 s)
 bench/sched-measure.py batch|emit|link|vccd|kbuild-log   # scheduling measurements A-F of doc/review/quality-scheduling.md
 bench/vcc-pic.py                    # GOT and TLS relocations per -fno-pic/-fPIE/-fPIC vs clang (<1 s)
@@ -306,6 +314,7 @@ bench/vcc-x86.py -j 6               # the C suites for x86-64 on an x86-64 host:
 bench/fetch-testsuites.sh llvm-mingw # the pinned MinGW-w64 sysroot (UCRT) -> work/llvm-mingw (SHA-256 checked; no-op when there)
 bench/vcc-win64.py -j 6 --ref-only  # the C suites for x86_64-w64-mingw32: clang + lld + llvm-mingw sysroot, run under Wine (~60 s cold, <1 s cached)
 bench/vcc-win64.py -j 6 [--obj|--objcmp]   # ... and vcc's side (vpp -S, clang -c, lld, Wine) vs those references (doc/PLAN-win64.md)
+bench/vcc-win64.py -j 4 --vlink-ref # WIN7: clang's objects linked by lld and by vlink (same line): runs under Wine, file byte-identical (~2 min cold)
 bench/vcc-wasm.py -j 6 --objcmp     # [VCC_WASM=1] ... and vpp -c's object byte-identical to clang's for the same .s
 bench/vcc-wasm.py -j 6 --obj --vlink  # [VCC_WASM=1] ... vcc's side through vpp -c and vlink as emcc's wasm-ld (~9 min)
 bench/vcc-same.py --base DIR -j 6    # test-suite outputs byte-identical with DIR/vpp (vbench.py mkbase REV), ~80 s

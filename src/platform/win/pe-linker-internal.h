@@ -134,7 +134,9 @@ typedef struct {
 	const char *symbol_name;	/* the symbol it refers to */
 	const char *forward_to;
 	pe_symbol *sym;
+	pe_chunk *forward_chunk;
 	uint16_t ordinal;
+	uint16_t given_ordinal;		/* as written (.def @N, -export:,@N): the import library's hint */
 	bool data, private_, no_name, constant, from_directive;
 } pe_export;
 

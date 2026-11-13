@@ -17,6 +17,7 @@ static uint32_t pe_import_table_size, pe_iat_size;
 static pe_chunk *pe_edata_start, *pe_edata_end;
 static pe_chunk *pe_debug_directory, *pe_cv_record;
 static uint32_t pe_tls_alignment;
+static uint32_t pe_export_base;		/* the lowest ordinal (the export directory's OrdinalBase) */
 static uint32_t pe_size_of_headers, pe_size_of_image;
 static uint64_t pe_file_size;
 /* idata */
@@ -45,6 +46,7 @@ static void pe_layout_reset(void)
 	pe_edata_start = pe_edata_end = NULL;
 	pe_debug_directory = pe_cv_record = NULL;
 	pe_tls_alignment = 0;
+	pe_export_base = 0;
 	pe_size_of_headers = pe_size_of_image = 0;
 	pe_file_size = 0;
 	free(pe_idata_dirs);
@@ -475,6 +477,16 @@ static void pe_runtime_pseudo_relocs(void)
 			pe_error("output image has runtime pseudo relocations, but the function _pei386_runtime_relocator is missing; it is needed for fixing the relocations at runtime");
 	}
 	pe_chunk *table = pe_synth(PE_CHUNK_PSEUDO_RELOC_TABLE, n ? 12 + 12 * n : 0, 4);
+	if (n) {
+		/* (into the arena: the table lives as long as the link) */
+		pe_pseudo_reloc *keep = pe_alloc(n * sizeof *keep);
+		memcpy(keep, rels, n * sizeof *keep);
+		free(rels);
+		rels = keep;
+	} else {
+		free(rels);
+		rels = NULL;
+	}
 	table->aux = rels;
 	table->aux_count = n;
 	pe_output_add(pe_rdata, table);
@@ -560,16 +572,19 @@ static void pe_export_table(void)
 	}
 	if (!cfg.nexports)
 		return;
-	uint32_t max = 0, nnames = 0;
+	uint32_t max = 0, base = 0x10000, nnames = 0;
 	for (uint32_t i = 0; i < cfg.nexports; i++) {
 		if (cfg.exports[i].ordinal > max)
 			max = cfg.exports[i].ordinal;
+		if (cfg.exports[i].ordinal < base)
+			base = cfg.exports[i].ordinal;
 		if (!cfg.exports[i].no_name)
 			nnames++;
 	}
 	pe_chunk *dll = pe_synth(PE_CHUNK_STRING, (uint32_t)strlen(pe_basename(cfg.output)) + 1, 1);
 	dll->str = pe_basename(cfg.output);
-	pe_chunk *addr = pe_synth(PE_CHUNK_EXPORT_ADDRESS_TABLE, max * 4, 1);
+	pe_export_base = base;
+	pe_chunk *addr = pe_synth(PE_CHUNK_EXPORT_ADDRESS_TABLE, (max - base + 1) * 4, 1);
 	pe_chunk *names = pe_synth(PE_CHUNK_EXPORT_NAME_POINTERS, nnames * 4, 1);
 	pe_chunk *ords = pe_synth(PE_CHUNK_EXPORT_ORDINALS, nnames * 2, 1);
 	pe_chunk *dir = pe_synth(PE_CHUNK_EXPORT_DIRECTORY, PE_EXPORT_DIRECTORY_SIZE, 4);
@@ -586,7 +601,7 @@ static void pe_export_table(void)
 	dir->target3 = ords;
 	dir->sym = NULL;
 	dir->aux = dll;
-	dir->value = max;
+	dir->value = max - base + 1;
 	dir->aux_count = nnames;
 	names->aux = strs;
 	names->aux_count = nnames;
@@ -597,6 +612,14 @@ static void pe_export_table(void)
 	pe_output_add(pe_edata, ords);
 	for (uint32_t i = 0; i < nnames; i++)
 		pe_output_add(pe_edata, strs[i]);
+	/* forwarders: the address entry is the RVA of "DLL.NAME" */
+	for (uint32_t i = 0; i < cfg.nexports; i++)
+		if (cfg.exports[i].forward_to) {
+			pe_chunk *f = pe_synth(PE_CHUNK_STRING, (uint32_t)strlen(cfg.exports[i].forward_to) + 1, 1);
+			f->str = cfg.exports[i].forward_to;
+			cfg.exports[i].forward_chunk = f;
+			pe_output_add(pe_edata, f);
+		}
 	pe_edata_start = dir;
 	pe_edata_end = pe_edata->chunks[pe_edata->nchunks - 1];
 }
@@ -682,6 +705,11 @@ static void pe_add_baserels(void)
 			continue;
 		for (uint32_t ci = 0; ci < o->nchunks; ci++) {
 			pe_chunk *c = o->chunks[ci];
+			if (c->kind == PE_CHUNK_LOCAL_IMPORT) {
+				pe_baserel b = { c->rva, IMAGE_REL_BASED_DIR64 };
+				PE_PUSH(v, n, cap, b);
+				continue;
+			}
 			if (c->kind != PE_CHUNK_SECTION)
 				continue;
 			for (uint32_t r = 0; r < c->nrelocs; r++) {

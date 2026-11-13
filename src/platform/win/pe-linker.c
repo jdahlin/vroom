@@ -207,6 +207,15 @@ static inline uint64_t pe_align_up(uint64_t v, uint64_t a) { return a ? (v + a -
 
 static void pe_state_reset(void)
 {
+	for (uint32_t i = 0; i < pe_object_count; i++)
+		free(pe_objects[i]->chunks);
+	free(cfg.exports);
+	free(cfg.align_comm);
+	free(cfg.alternate_names);
+	free((void *)cfg.includes);
+	free((void *)cfg.optional_includes);
+	free((void *)cfg.exclude_libs);
+	free((void *)cfg.exclude_symbols);
 	free(pe_objects);
 	free(pe_imports);
 	free(pe_globals);
