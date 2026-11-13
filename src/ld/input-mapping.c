@@ -6,21 +6,19 @@
 
 VPRIV uint8_t *ld_file_map(struct ld_context *ctx, const char *path, size_t *size)
 {
-	int fd = openat(ctx->options.directory_fd, path, O_RDONLY);
+	VAUTOCLOSE int fd = openat(ctx->options.directory_fd, path, O_RDONLY);
 	if (fd < 0) {
 		ld_error_report(ctx, "cannot open %s: %s", path, strerror(errno));
 		return NULL;
 	}
+	vfile_mapping m;
 	struct stat st;
-	fstat(fd, &st);
-	*size = st.st_size;
-	void *p = st.st_size ? mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0) : (void *)"";
-	close(fd);
-	if (p == MAP_FAILED) {
+	if (!vfile_map_fd(fd, &m, &st)) {
 		ld_error_report(ctx, "cannot mmap %s", path);
 		return NULL;
 	}
-	return p;
+	*size = m.n;
+	return m.n ? (uint8_t *)m.p : (uint8_t *)"";	/* an empty file is not a failure */
 }
 
 

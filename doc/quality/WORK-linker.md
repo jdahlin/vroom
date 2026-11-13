@@ -188,6 +188,18 @@ one diagnostics function through the diagnostics module, one ELF validator,
 one option table per tool.  Arena and thread pool go to the shared library
 and the scheduler.
 
+Status (2026-11-13): the file mappings of the ELF linker (`ld_file_map`) and
+of objcopy and nm (`objcopy_elf_open`, `nm_inputs_collect`) go through
+`port/file.h` (`vfile_map_fd`, now public: the callers open the file
+themselves, because their messages tell an open failure from a mapping
+failure, and an unchanged message is the rule).  Left, with the reason:
+the Mach-O linker reads its inputs into its arena with 8 bytes of padding
+(`vfile_read` gives 1); objcopy's `-I binary`, `--add-section` and
+`--add-gnu-debuglink` reads print "short read", which `vfile_read` cannot
+tell apart; `wasmld.c` is not built.  Next: one archive parser (`ld_archive_add`,
+`nm_inputs_collect`, `utils/ar.c`, the Mach-O linker's), then the
+diagnostics function.
+
 ### 4. One linker core
 
 ELF, wasm and Mach-O become output formats of one core: one symbol table,
