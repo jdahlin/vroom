@@ -149,6 +149,43 @@ VPRIV int x64_i_bits(as_context *a, char *mn, XOp *o, int nops)
 	return X64_NEXT;
 }
 
+/* Shared by text assembly and compiler records: keep encoding decisions in
+ * one place, while records supply the already known operation and width. */
+static int x64_mov(as_context *a, int sz, XOp *o)
+{
+	XOp *s = &o[0], *d = &o[1];
+	int z = x64_size(a, sz, s, d);
+
+	for (int i = 0; i < 2; i++)
+		if (o[i].kind == XK_EXPR)
+			o[i].kind = XK_MEM;
+	if (s->kind == XK_IMM) {
+		int64_t c = 0;
+		XForm f = F(.w = z == 8, .opsz16 = z == 2, .rex8 = rex8(d), .immsgn = 1);
+		int sym = x64_imm(a, s, &f, &c);
+
+		if (d->kind == XK_REG) {
+			if (z == 8 && (sym || fits32(c))) {
+				f.op = OPB(0xc7), f.nop = 1, f.reg = 0, f.rm = d, f.isz = 4, f.imm = c;
+				return x64_emit(a, &f);
+			}
+			/* b0+r / b8+r with the whole immediate (movabs for 64 bits) */
+			f.op = z == 1 ? OPB(0xb0) : OPB(0xb8), f.nop = 1, f.oreg = d->reg + 1;
+			f.isz = z, f.imm = c, f.immsgn = 0;
+			return x64_emit(a, &f);
+		}
+		f.op = z == 1 ? OPB(0xc6) : OPB(0xc7), f.nop = 1, f.reg = 0, f.rm = d, f.isz = z == 8 ? 4 : z, f.imm = c;
+		return x64_emit(a, &f);
+	}
+	if (s->kind == XK_REG && s->cls == XR_GPR)
+		return x64_emit(a, &F(.w = z == 8, .opsz16 = z == 2, .op = z == 1 ? OPB(0x88) : OPB(0x89), .nop = 1, .reg = s->reg,
+				      .rm = d, .rex8 = rex8(s) || rex8(d)));
+	if (d->kind == XK_REG)
+		return x64_emit(a, &F(.w = z == 8, .opsz16 = z == 2, .op = z == 1 ? OPB(0x8a) : OPB(0x8b), .nop = 1, .reg = d->reg,
+				      .rm = s, .rex8 = rex8(d), .gotx = 2));
+	return X64_NEXT;
+}
+
 VPRIV int x64_i_int(as_context *a, char *mn, XOp *o, int nops)
 {
 	char stem[32];
@@ -202,36 +239,8 @@ VPRIV int x64_i_int(as_context *a, char *mn, XOp *o, int nops)
 					}
 				}
 			if (!strcmp(m, "mov") && nops == 2) {
-				XOp *s = &o[0], *d = &o[1];
-				int z = x64_size(a, sz, s, d);
-
-				for (int i = 0; i < 2; i++)
-					if (o[i].kind == XK_EXPR)
-						o[i].kind = XK_MEM;
-				if (s->kind == XK_IMM) {
-					int64_t c = 0;
-					XForm f = F(.w = z == 8, .opsz16 = z == 2, .rex8 = rex8(d), .immsgn = 1);
-					int sym = x64_imm(a, s, &f, &c);
-
-					if (d->kind == XK_REG) {
-						if (z == 8 && (sym || fits32(c))) {
-							f.op = OPB(0xc7), f.nop = 1, f.reg = 0, f.rm = d, f.isz = 4, f.imm = c;
-							return x64_emit(a, &f);
-						}
-						/* b0+r / b8+r with the whole immediate (movabs for 64 bits) */
-						f.op = z == 1 ? OPB(0xb0) : OPB(0xb8), f.nop = 1, f.oreg = d->reg + 1;
-						f.isz = z, f.imm = c, f.immsgn = 0;
-						return x64_emit(a, &f);
-					}
-					f.op = z == 1 ? OPB(0xc6) : OPB(0xc7), f.nop = 1, f.reg = 0, f.rm = d, f.isz = z == 8 ? 4 : z, f.imm = c;
-					return x64_emit(a, &f);
-				}
-				if (s->kind == XK_REG && s->cls == XR_GPR)
-					return x64_emit(a, &F(.w = z == 8, .opsz16 = z == 2, .op = z == 1 ? OPB(0x88) : OPB(0x89), .nop = 1, .reg = s->reg,
-							      .rm = d, .rex8 = rex8(s) || rex8(d)));
-				if (d->kind == XK_REG)
-					return x64_emit(a, &F(.w = z == 8, .opsz16 = z == 2, .op = z == 1 ? OPB(0x8a) : OPB(0x8b), .nop = 1, .reg = d->reg,
-							      .rm = s, .rex8 = rex8(d), .gotx = 2));
+				int r = x64_mov(a, sz, o);
+				if (r != X64_NEXT) return r;
 			}
 			if (!strcmp(m, "movabs") && nops == 2) {
 				int64_t c = 0;
@@ -391,10 +400,11 @@ VPRIV int x64_i_movx(as_context *a, char *mn, XOp *o, int nops)
 
 	(void)a, (void)mn, (void)o, (void)nops, (void)stem, (void)sz, (void)cc;
 	/* ---- movz/movs: movzbl, movsbq, movslq ... ---- */
-	if ((!strncmp(mn, "movz", 4) || !strncmp(mn, "movs", 4)) && nops == 2 && strlen(mn) == 6) {
-		int from = sfxsize(mn[4]), to = sfxsize(mn[5]), sx = mn[3] == 's';
+	if ((!strncmp(mn, "movz", 4) || !strncmp(mn, "movs", 4)) && nops == 2 &&
+	    o[1].kind == XK_REG && o[1].cls == XR_GPR && (strlen(mn) == 5 || strlen(mn) == 6)) {
+		int from = sfxsize(mn[4]), to = mn[5] ? sfxsize(mn[5]) : o[1].size, sx = mn[3] == 's';
 
-		if (from && to) {
+		if (from && from < to && to == o[1].size && (from < 4 || (from == 4 && sx))) {
 			if (o[0].kind == XK_EXPR)
 				o[0].kind = XK_MEM;
 			if (from == 4 && sx)
@@ -408,4 +418,15 @@ VPRIV int x64_i_movx(as_context *a, char *mn, XOp *o, int nops)
 	}
 	return as_error_report(a, "invalid instruction mnemonic '%s'", mn);
 	return X64_NEXT;
+}
+
+/* Restricted to the compiler's well-formed integer operands. Other forms
+ * continue through as_x64_insn and its full mnemonic/operand dispatch. */
+int as_x64_op(as_context *a, enum X64Op op, int size, XOp *o)
+{
+	if (a->dwarf_row_is_pending) as_dwarf_row_emit(a);
+	a->x64_operand_size = 0;
+	if (op <= X64O_CMP) return x64_alu(a, op, size, o, 2);
+	if (op == X64O_MOV) return x64_mov(a, size, o);
+	return as_error_report(a, "invalid structured integer operation");
 }

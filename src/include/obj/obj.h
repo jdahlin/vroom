@@ -73,6 +73,7 @@ typedef struct {
 	uint32_t cont;		/* elf_split: the frag that continues this one */
 	uint8_t split;		/* made by elf_split (its base is not known while assembling) */
 	uint32_t aux;		/* the assembler's use (its variable item) */
+	uint32_t last_cont;	/* last known continuation; cont retains the immediate successor */
 } ElfFrag;
 
 typedef struct {

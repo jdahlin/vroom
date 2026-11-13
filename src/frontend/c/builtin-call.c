@@ -346,6 +346,7 @@ CC_PRIVATE uint32_t cc_builtin_call_build(cc *c, const cc_builtin *b, uint32_t l
 			return cc_complex_unary(c, LEX_TOKEN_TILDE, a, loc);
 		return cc_node_rvalue(c, cc_complex_part(c, a, b->id == CC_BUILTIN_CIMAG));
 	}
+	case CC_BUILTIN_STDC_COUNT_ONES: case CC_BUILTIN_STDC_TRAILING_ZEROS:
 	case CC_BUILTIN_CLZG: case CC_BUILTIN_CTZG: case CC_BUILTIN_POPCOUNTG:
 		return cc_builtin_bit_count_generic(c, b->id, loc);
 	case CC_BUILTIN_COUNTED_BY_REF: {

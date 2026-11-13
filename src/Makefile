@@ -260,6 +260,8 @@ SELF_FLAGS ?= --target=$(SELF_TARGET) -I$(abspath headers)
 ifeq ($(HOST_OS),Linux)
 SELF_FLAGS += -isystem $(HOST_RESOURCE) -isystem /usr/include/$(SELF_TARGET) -isystem /usr/include
 endif
+# The stage compiles at VCC_OPT (-O3: VIR with the vectorizer, doc/OPTIMIZATION.md) on
+# every host; VCC_OPT=-O1 builds a comparison stage with the direct emitter.
 SELF_LINK ?= $(HOST_CC) $(if $(filter Linux,$(HOST_OS)),-no-pie)
 
 self: $(OUT)/vpp
