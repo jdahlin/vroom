@@ -1009,20 +1009,18 @@ static int macho_link_locked(int argc, char **argv, int dirfd, FILE *err)
 		} else {
 			segfilesz[seg] = segpresent[seg] && fend > segstart[seg] ? macho_value_align_up(fend - segstart[seg], MACHO_PAGE_SIZE) : 0;
 		}
-		if (!segfilesz[seg] && seg > SEG_TEXT)
-			segfile[seg] = 0;
-		fileoff = segfile[seg] + segfilesz[seg];
 		if (seg == SEG_TEXT)
 			fileoff = segfilesz[seg];
+		else if (!segfilesz[seg])
+			segfile[seg] = 0;	/* no bytes in the file: the next segment starts where this one would have */
+		else
+			fileoff = segfile[seg] + segfilesz[seg];
 		if (!segpresent[seg]) {
 			segend[seg] = segstart[seg];
 			addr = segstart[seg];
 		}
 	}
 	segstart[SEG_LINKEDIT] = macho_value_align_up(addr, MACHO_PAGE_SIZE);
-	for (int seg = SEG_DATA_CONST; seg < SEG_LINKEDIT; seg++)
-		if (segpresent[seg] && segfilesz[seg])
-			fileoff = segfile[seg] + segfilesz[seg];
 	segfile[SEG_LINKEDIT] = macho_value_align_up(fileoff, MACHO_PAGE_SIZE);
 
 	/* final symbol addresses */
