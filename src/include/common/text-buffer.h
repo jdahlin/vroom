@@ -141,6 +141,10 @@ static inline void vtext_format_append(tbuf *b, const char *fmt, ...)
 	va_start(ap, fmt);
 	n = vsnprintf(b->p + b->n, b->cap - b->n, fmt, ap);
 	va_end(ap);
+	if (n < 0)
+		return;
+	if ((size_t)n >= b->cap - b->n)	/* vsnprintf returns the untruncated length */
+		vjob_fail("emitter text buffer full");
 	b->n += (size_t)n;
 }
 
