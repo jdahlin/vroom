@@ -4,7 +4,7 @@ Usage: gen-x86native.py /path/to/llvm/lib/TargetParser/Host.cpp
 Source revision c47d7823685a, LLVM23.1.6; see x86native-LICENSE.txt.
 """
 import hashlib,pathlib,re,sys
-root=pathlib.Path(__file__).resolve().parents[1]
+root=pathlib.Path(__file__).resolve().parents[2]
 s=pathlib.Path(sys.argv[1]).read_text()
 def func(start):
  p=s.index(start);b=s.index('{',p);depth=1;e=b+1
@@ -19,7 +19,7 @@ def calls(t):
 header='''/* Generated from LLVM llvm/lib/TargetParser/Host.cpp c47d7823685a.
  * Copyright LLVM contributors. Apache-2.0 WITH LLVM-exception.
  * See x86native-LICENSE.txt. Adapted to C and vcc feature masks by
- * bench/gen-x86native.py; no runtime LLVM dependency.
+ * src/tools/gen-x86native.py; no runtime LLVM dependency.
 '''+f' * Source SHA256 {hashlib.sha256(s.encode()).hexdigest()}\n */\n'
 out=header
 for vendor,typ in [('Intel','StringRef'),('AMD','const char *'),('Hygon','StringRef')]:

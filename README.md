@@ -65,8 +65,8 @@ make ──► vcc (shim, ~100 µs) ──unix socket + SCM_RIGHTS──► vccd
 | [src/](src/) | the toolchain: `frontend/lex/`, `frontend/pp/`, `frontend/c/` (parser + sema), `codegen/`, `vir/`, `as/`, `obj/`, `ld/`, `driver/`, `vccd/`, `lib/` |
 | `src/arch/<cpu>/` | per-CPU code: `a64`, `x64`, `wasm` |
 | `src/platform/<os>/` | per-OS object formats: `linux` (ELF), `darwin` (Mach-O), `wasm` |
-| [src/tests/](src/tests/) | test suites (own, plus vendored gcc c-torture, tcc tests2 and others) |
-| [src/fuzz/](src/fuzz/) | libFuzzer targets for the lexer, preprocessor and diagnostics |
+| [src/test/](src/test/) | test suites (own, plus vendored gcc c-torture, tcc tests2 and others) |
+| [src/test/fuzz/](src/test/fuzz/) | libFuzzer targets for the lexer, preprocessor and diagnostics |
 | [contrib/wasm/](contrib/wasm/) | vcc built as WebAssembly for the browser |
 | [contrib/phase1/](contrib/phase1/) | phase 1's clang-based tools (`vroomd`, `vroom-cc`) |
 | [bench/](bench/) | harnesses: parity against clang, test runners, benchmarks, kernel build and boot |
@@ -178,8 +178,8 @@ and agent notes are in English.
 
 vroom and vcc are released under the [MIT License](LICENSE).
 
-The vendored test suites under `src/tests/` keep their own licenses
+The vendored test suites under `src/test/` keep their own licenses
 (for example GPL-3.0 for gcc c-torture and LGPL-2.1 for tcc tests2).
-[src/tests/README.md](src/tests/README.md) lists each suite with
+[src/test/README.md](src/test/README.md) lists each suite with
 its source and license.  The kernel patches in [patches/](patches/) apply
 to Linux and fall under its license (GPL-2.0).

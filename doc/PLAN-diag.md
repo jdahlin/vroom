@@ -25,7 +25,7 @@ källor: `RESEARCH-diagnostics.md`.
 | varav C (heuristik, `bench/clangdiag.py stats`) | 2 985 (1 468 err, 876 warn, 245 ext, 385 note); ~15 % är C++ som läcker in, så ~2 500 |
 | vcc | 295 diagnosanrop, 245 distinkta format, 7 `-W`-flaggor |
 | täckning (`bench/vcc-diagcov.py`) | 105 clang-diagnoser (70 err, 11 warn, 5 ext, 16 note i C); 47 vcc-format säger mindre än clangs (typen eller detaljen saknas); 78 finns bara i vcc (gränser, "unsupported", interna fel) |
-| `tests/diag/` | 66 fall, exakt lika med clang (blir snapshots av vcc:s egen text, D1.2) |
+| `test/diag/` | 66 fall, exakt lika med clang (blir snapshots av vcc:s egen text, D1.2) |
 | felåterhämtning | varje `expect()`-miss och 46 `fatal()` avslutar TU:n |
 | utskrift | `frontend/diag/diag.c` formaterar med printf och skriver direkt till fd; ingen post sparas |
 
@@ -39,7 +39,7 @@ Tio lager; varje steg nedan säger vilka det berör.
    (`/* diag-differs: ... */`).
 2. **Täckning** — `bench/vcc-diagcov.py` (D0.1): clangs C-relevanta id:n mot vcc:s; listar
    vad som saknas, per område, och vilka vi har som clang aldrig ger på samma fall.
-3. **Mutationskorpus** — `bench/vcc-mutate.py` (D0.2): ta giltiga TU:er (`tests/vcc`,
+3. **Mutationskorpus** — `bench/vcc-mutate.py` (D0.2): ta giltiga TU:er (`test/vcc`,
    PostgreSQL, kärnan), injicera ett fel (ta bort en token, byt `;`/`,`, döp om en
    identifierare, ändra en typ, ta bort `}`), kör vcc och clang.  Mäter per mutant:
    - ingen krasch/timeout, exit 1, minst ett fel;
@@ -47,7 +47,7 @@ Tio lager; varje steg nedan säger vilka det berör.
    - **följdfel**: antal fel utöver det första, vcc mot clang — målet är färre;
    - ett fel som clang hittar men vcc inte (och tvärtom), per mutationstyp.
    Fast frö, ~2 000 mutanter, < 30 s med `-j 6`.  Siffrorna förs in i planen per steg.
-4. **Snapshots** — `tests/diag/*.c` med `*.stderr`, `*.json`, `*.sarif` per renderare,
+4. **Snapshots** — `test/diag/*.c` med `*.stderr`, `*.json`, `*.sarif` per renderare,
    `--bless` för att skriva om; normaliserade sökvägar.  Inline-förväntningar
    (`// expect-error: REGEX`, `@+N`, rustc/Swift-stil) för fall där bara innehållet spelar
    roll — samma format som T4 `reject` i TODO.md, så de två slås ihop.
@@ -83,7 +83,7 @@ Tio lager; varje steg nedan säger vilka det berör.
   `diagids.inc` för vcc självt genereras i D1.1.
   *Validerat:* 7 297 diagnoser (diagtool: 7 298), 830 grupper, 20 substitutioner.
 - **D0.2 mutationskorpus** enligt lager 3.  *Klart 2026-11-09.*  `bench/vcc-mutate.py`:
-  TU:er som både clang och vcc godtar (gcc-torture, tcc-tests2, `tests/vcc` med
+  TU:er som både clang och vcc godtar (gcc-torture, tcc-tests2, `test/vcc` med
   vcc-ctests flaggor, och kärn-TU:er), ett fel injicerat i huvudfilen av elva mutatorer
   (`del-semi`, `del-close`, `del-open`, `del-token`, `dup-token`, `semi-comma`,
   `typo-ident`, `typo-keyword`, `change-type`, `insert`, `operator`), `-fsyntax-only
@@ -131,7 +131,7 @@ Tio lager; varje steg nedan säger vilka det berör.
   raden före något som inte kan börja en deklarator ett `;` ("expected ';' at end of
   declaration").  Första felet på clangs plats 82,6 → 88,7 %, annanstans 9,2 → 3,5 %;
   `semi-comma` 154 av 155 på clangs plats (den sista pekar vcc på själva `,`, clang på
-  följdfelet).  Fler följdfel än clang 18,5 → 17,4 %.  Test: `tests/diag/comma_semi.c`.
+  följdfelet).  Fler följdfel än clang 18,5 → 17,4 %.  Test: `test/diag/comma_semi.c`.
   **Efter felstavade nyckelord (2026-11-09):** typo-rättningen erbjuder nyckelord som
   clang (Semas CTypeSpecs där en typ kan stå, satsnyckelorden i början av en sats;
   `break`/`continue`/`case`/`default` bara där de är tillåtna, `bool` bara i C23) och
@@ -146,8 +146,8 @@ Tio lager; varje steg nedan säger vilka det berör.
   89,7 %, fler följdfel 17,4 → 13,3 %, missade 34 → 27.  Kvar i kategorin: kaskader på felnoder (`in
   y[8];` ger "subscripted value is not an array" på `y`), `as volatile (...)`; den
   missade är en K&R-definition mot en tidigare prototyp (TODO.md).
-  Test: `tests/diag/keyword_typo.c` (med `.expect`: vcc visar fix-it även för
-  `(doubl)x`, där clang tappar den), `tests/diag/kr_decl.c`.  `vcc-diag.py` tar nu
+  Test: `test/diag/keyword_typo.c` (med `.expect`: vcc visar fix-it även för
+  `(doubl)x`, där clang tappar den), `test/diag/kr_decl.c`.  `vcc-diag.py` tar nu
   `X.c.expect` där vcc medvetet säger mer än clang: vcc:s text måste stämma med filen
   och diagnosraderna (`fil:rad:kol: nivå:`) med clangs.
   **Efter felnoder (2026-11-09):** clangs ogiltiga uttryck och deklarationer.  Ett uttryck
@@ -168,8 +168,8 @@ Tio lager; varje steg nedan säger vilka det berör.
   (~100 000 per kernel-TU), så kontrollerna ligger på den felaktiga token i kalla
   funktioner utan pekare till loopens variabler (`&sgn` tvingade dem till minnet: +0,4 %);
   parametrarnas typ läses en gång (`KIND`).  fe +0,27 % mot förra steget; grenen ligger på
-  +0,91 % mot merge-basen, nära budgeten på 1 %.  Test: `tests/diag/error_nodes.c`,
-  `tests/diag/spec_combine.c`.
+  +0,91 % mot merge-basen, nära budgeten på 1 %.  Test: `test/diag/error_nodes.c`,
+  `test/diag/spec_combine.c`.
 
 ### D1. Strukturerade diagnoser (grunden)
 
@@ -211,7 +211,7 @@ Tio lager; varje steg nedan säger vilka det berör.
   `pp_diagx` och `pp_vdiag` är tunna omslag; flaggan ligger i posten, inte i texten.
   Konverteringsfelen som clang har som varningar med fel som standard (`-Wint-conversion`,
   `-Wincompatible-pointer-types`) och `#error`/`#warning` sätter id och flagga själva.
-  `diagids.inc` (`bench/gen-diagids.py`, incheckad): varje format vcc rapporterar får
+  `diagids.inc` (`src/tools/gen-diagids.py`, incheckad): varje format vcc rapporterar får
   clangs namn när texten matchar (som `vcc-diagcov.py`, även `?:`-format) och annars
   `vcc_` + formatets ord; posten slår upp formatet (binärsökning, bara på felvägen).  270
   format, 240 id, 72 `vcc_*`.  `--check` säger om tabellen är inaktuell.
@@ -224,7 +224,7 @@ Tio lager; varje steg nedan säger vilka det berör.
   19/19; PostgreSQL med vcc: 1 504 filer, `meson test` 81 ok, 0 fel; `vbench.py gate` ok
   (fe +0,94 %).
 - **D1.2 textrenderaren.**  Dagens `vdiagx_`/`snippet` flyttas till en renderare som tar
-  en post; i början samma utseende som clang.  `tests/diag/` får vcc:s egen förväntade
+  en post; i början samma utseende som clang.  `test/diag/` får vcc:s egen förväntade
   text (`*.stderr`, `--bless`) och `vcc-diag.py` byter till lager 1:s jämförelse, så
   att texten sedan får bli bättre.
   *Validera:* lager 1, 4 + 5a (JSON-rundresan bevisar att posten räcker).
@@ -290,7 +290,7 @@ Tio lager; varje steg nedan säger vilka det berör.
   `skip_balanced` hoppade bara över parenteser (en initierare av ofullständig typ åt bara
   sin `{`).  Mutationskorpusen (mot 76c0909): första felet på clangs plats 91,0 → 91,7 %,
   fler följdfel än clang 11,2 → 6,7 %, samma 68,0 → 79,4 %, färre 20,8 → 13,9 %; fel totalt
-  2323 → 3006 (clang 3518); spurious 20 → 17; inga krascher.  `tests/diag/recovery.c`: tolv
+  2323 → 3006 (clang 3518); spurious 20 → 17; inga krascher.  `test/diag/recovery.c`: tolv
   oberoende fel, exakt clangs utdata.  Prestanda: fe +0,62 % mot merge-basen (nyckelords-
   korrigeringens ParseImplicitInt-test flyttat till loopens utgång: −0,22 %).
 
@@ -307,7 +307,7 @@ Tio lager; varje steg nedan säger vilka det berör.
   sprider felnoder; en ogiltig `return`-operand hoppas tyst till `;`; en saknad `;` efter en
   prototyp före en ny deklaration är "after top level declarator", inte "expected function
   body"; ett makroanrop som når filens slut tas bort med sitt namn, som i clang (`clang -E`
-  likadan).  `tests/diag/recovery_decl.c` nytt.  Prestanda: fe +0,89 % mot merge-basen
+  likadan).  `test/diag/recovery_decl.c` nytt.  Prestanda: fe +0,89 % mot merge-basen
   (preprocessorns felväg i en kall funktion: utan den kostade sex rader +0,27 % pp).
   Kvar: `f(a; )` (clangs "unexpected ';' before ')'"), avbrutna attribut, clangs
   parentes-socker i typnamn (`double (*())`), "expected ';' after struct" när en
@@ -315,7 +315,7 @@ Tio lager; varje steg nedan säger vilka det berör.
 - **D2.3 dubbletter** (`void v;`, sammansatt literal i parentes, typförslag som kaskaderar:
   TODO.md "Error recovery").
   *Validera:* lager 3: inga krascher, första felet på clangs plats i ≥ 95 %, följdfel
-  inte fler än clangs i ≥ 95 % av mutanterna och färre totalt; nya `tests/diag/`-fall med flera oberoende fel; T5 stress
+  inte fler än clangs i ≥ 95 % av mutanterna och färre totalt; nya `test/diag/`-fall med flera oberoende fel; T5 stress
   grön; lager 9.
 
   *Status (klart, målen nådda):* första felet på clangs plats 93,2 → 95,3 % (samma rad
@@ -331,7 +331,7 @@ Tio lager; varje steg nedan säger vilka det berör.
   "cannot combine"-vägen) med ett inskjutet `;` så att resten parsas som clang, en namnlös
   deklarator "(int x)" får felet efter `(`, ett namn i ett typnamn är "expected ')'".
   Dubbletterna (`void v;`, sammansatt literal i parentes, rättade namn) var redan som
-  clangs: `tests/diag/dup_followons.c` håller dem där; en parentes-uttrycks intervall
+  clangs: `test/diag/dup_followons.c` håller dem där; en parentes-uttrycks intervall
   omfattar parenteserna (clangs ParenExpr, beräknat först i `rng()`).  Nya fall:
   `tag_semi.c`, `cond_paren.c`, `paren_close.c`, `dup_followons.c` (82/82, 80 textidentiska
   med clang).  Lager 9: diag 82/82, mutationer och stress under ASan (`vcc-diag.py
@@ -407,13 +407,13 @@ automatisk under `NO_COLOR` (NO_COLOR betyder bara inga färger; skärmläsaranv
 Validering: vcc-diag 82/82 (även ASan), 80 fall text-identiska med clang i clang-stilen,
 JSON återskapar både vcc- och clang-stilen (`bench/diag-render.py --style`), diag-formats-fall
 har `.narrated`-snapshots; mutate `--formats` 1970/1970; lager 8: `fuzz-diag` (slumpade poster
-över slumpad text genom alla stilar/utdata, ASan) 85 k körningar utan fynd, `fuzz/regress/diag`;
+över slumpad text genom alla stilar/utdata, ASan) 85 k körningar utan fynd, `test/fuzz/regress/diag`;
 lager 10: `bench/vcc-diag-catalog.py` (HTML: källa, clang, vcc, narrated, JSON).
 Prestanda: grinden fe +0.03 %, cc +0.08 %.
 
 ### D5. Innehåll (ett delsteg per område, i värde-per-insats-ordning)
 
-Varje delsteg: nya fall i `tests/diag/` (snapshots, och clang som mätpunkt), lager 6 grönt.
+Varje delsteg: nya fall i `test/diag/` (snapshots, och clang som mätpunkt), lager 6 grönt.
 
 1. **Saknade varningar** från TODO.md (`-Wunused-variable`, `-Wuninitialized`,
    `-Wformat`, `-Wconstant-conversion`, ...) — prioriteras med lager 2:s tabell efter hur
@@ -537,7 +537,7 @@ Varje delsteg: nya fall i `tests/diag/` (snapshots, och clang som mätpunkt), la
    för `sizeof(struct X)`/`sizeof(T)` i villkoret en not vid posten, "'struct hdr' is 24 bytes
    (alignment 8)", med etiketter "7 bytes of padding after this" / "... at the end" och
    `help: ordering its members by decreasing alignment makes it 16 bytes`
-   (`tests/diag/static_assert_layout.c`).
+   (`test/diag/static_assert_layout.c`).
 4. **Include-tips**: `memcpy` → `<string.h>` som fix-it, från en genererad libc/POSIX-tabell.
    **Status (2026-11-09): klart.**  `frontend/c/libfuncs.inc` (genererad av `gen-libbuiltins.py` ur
    clangs Builtins.inc: 354 biblioteksfunktioner med header) — ett anrop till en odeklarerad
@@ -677,13 +677,13 @@ formatflagga, `%zu`/`%td`/`%jd`, och ett saknat `;` när nästa token börjar en
 "expected X", ett `;` mitt på raden, ett extra `)`/`]`.  En fix-it vars intervall ligger helt
 inuti ett makronamn tas bort (ändringen hör till makrots definition).
 `-fdiagnostics-parseable-fixits` skriver clangs `fix-it:"fil":{l:k-l:k}:"text"` (i alla tre
-stilarna); på `tests/diag` skiljer sig raderna från clangs bara där förslagen avsiktligt
+stilarna); på `test/diag` skiljer sig raderna från clangs bara där förslagen avsiktligt
 gör det (include-förslag, nyckelordsstavning, clangs felaktiga `sizeof`-förslag).
 `-fdiagnostics-generate-patch` skriver alla förslag (postens egna, annars dess första
 nots) som en unified diff, `vcc --fix` skriver de maskin-säkra till filerna (temporär fil som
 byter namn, rättigheterna behålls, aldrig systemheaders) och säger "applied N fix-its".
 `vcc --explain ID` (även `[ID]`-formen ur `-fdiagnostics-show-id`; utan ID: listan) skriver
-`doc/diag/ID.md`, inkompilerad via `bench/gen-explain.py` → `driver/explain.inc`;
+`doc/diag/ID.md`, inkompilerad via `src/tools/gen-explain.py` → `driver/explain.inc`;
 12 sidor för de vanligaste diagnoserna.  vccd kör `--explain`/`--fix` själv med klientens
 fd:er (`vcc` via shimmen ger samma fil som `vpp --fix`).  *Validerat:* lager 5b i
 `vcc-diag.py` (`/* diag-fix */`: `--fix` upprepas tills inget mer tillämpas, högst 4 gånger,
@@ -845,7 +845,7 @@ D1 och D2 hänger ihop (feltypen behöver posten); D0.2 först så att D2 har en
 - [x] D8.1 – D8.4 — 2026-11-10
 - [x] D8.5 — 2026-11-10 (grenen `claude/review-remaining-errors-acd5c5` har en egen version)
 - [x] Sammanslagning med main — 2026-11-10: där båda grenarna hade en egen version
-  vann den som träffade clang bäst per varning (mätt mot clang på tests/diag och
+  vann den som träffade clang bäst per varning (mätt mot clang på test/diag och
   gcc-torture/tcc/vcc): mains `flow.c` (-Wuninitialized, -Wreturn-type), `fmt.c`
   (-Wformat), unused-value/-variable, deprecated/nonnull/warn_unused_result,
   konverteringsvarningar och integer-overflow; grenens motor, återhämtning, include-

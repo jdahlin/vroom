@@ -174,7 +174,7 @@ Not taken: translation/i18n, chatty first-person first lines, lazy analysis,
 mandatory unused-variable errors (only as an opt-in strict mode).
 
 ## Sources
-- rustc-dev-guide: diagnostics, error-guaranteed, diagnostic-structs, tests/ui
+- rustc-dev-guide: diagnostics, error-guaranteed, diagnostic-structs, test/ui
 - blog.rust-lang.org/2016/08/10/Shape-of-errors-to-come; doc.rust-lang.org/error_codes;
   github.com/rust-lang/compiler-team/issues/967; Rust surveys 2021 and 2025
 - elm-lang.org/news/compiler-errors-for-humans, /compilers-as-assistants, /the-syntax-cliff;

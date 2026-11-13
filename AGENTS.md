@@ -85,7 +85,7 @@ relative to it); `TODO.md` stays at the top.
     Depends on nothing in `frontend/c/`, `codegen/` or `arch/`.  `virtest.c` is the tool
     (`virtest FILE`; `--no-verify`, `--bless`, `--selftest` for the builder API).
     The interpreter, `virgen` and the fuzz target (the rest of step V1) are not
-    written yet.  Tests: `tests/vir/` (`bad/RULE-name.vir`, `canon/`, `dom/`).
+    written yet.  Tests: `test/vir/` (`bad/RULE-name.vir`, `canon/`, `dom/`).
   - `ld/`: the linker `vlink` (`ld.c`, one TU; also linked into vccd, which
     calls `ld_main` per link) and `vobjcopy`/`vnm`;
     `wasmld.c` is vlink for WebAssembly (as `wasm-ld` or with `-mwasm64`).
@@ -121,7 +121,7 @@ relative to it); `TODO.md` stays at the top.
     x86-64 is their only user; arm64 moves to them later (TODO.md).
     `walk/prefix.h` is generated from the walker's definitions: with
     `WK_PREFIX`/`LO_PREFIX` defined the walker compiles a second time under
-    other names (`bench/gen-walkprefix.py`; PLAN-vir.md).
+    other names (`src/tools/gen-walkprefix.py`; PLAN-vir.md).
   - `arch/x64/as/`: the x86-64 assembler, AT&T syntax with MC's encodings:
     operands, the encoder (REX and VEX) and the dispatcher in `asm.c`
     (shared header `x64as.h`), one file per instruction family (`sys.c`,
@@ -187,29 +187,29 @@ bench/vcc-dwarf.py -j 6             # -g line tables: dwarfdump --verify, .text 
 bench/vlink-bad.py                  # corrupt objects/archives: vlink (ASan) fails cleanly (<1 s)
 bench/vlink-opts.py                 # vlink options vs ld.lld: errors and loaded image (<1 s)
 bench/vcc-pic.py                    # GOT and TLS relocations per -fno-pic/-fPIE/-fPIC vs clang (<1 s)
-bench/vcc-volatile.py               # volatile loads/stores kept one for one, direct emitter and VIR (tests/volatile, <1 s)
-bench/vir-test.py -j 6              # VIR: parser/printer round trip, verifier rules, canon, dominators (src/tests/vir, ~1 s)
+bench/vcc-volatile.py               # volatile loads/stores kept one for one, direct emitter and VIR (test/volatile, <1 s)
+bench/vir-test.py -j 6              # VIR: parser/printer round trip, verifier rules, canon, dominators (src/test/vir, ~1 s)
 bench/vir-exposure.py               # VIR: generated long, cyclic and multi-slot exposure checks (<1 s)
 bench/vir-test.py --mutate 3000 --bin-dir build/src-asan   # random mutants of those units: virtest never crashes (~1 min)
-bench/vcc-ctests.py -j 6 --suite vcc # our own regression tests (src/tests/vcc), ~1 s
-bench/vcc-ctests.py -j 6 --suite inline   # gcc/llvm inlining and IPA run tests (src/tests/inline); VCC_VIR=bl for VIR's inliner
+bench/vcc-ctests.py -j 6 --suite vcc # our own regression tests (src/test/vcc), ~1 s
+bench/vcc-ctests.py -j 6 --suite inline   # gcc/llvm inlining and IPA run tests (src/test/inline); VCC_VIR=bl for VIR's inliner
 bench/vcc-ctests.py -j 6 --cpu cortex-a53   # vcc's binaries on a CPU without LSE (atomics as LL/SC)
 VCC_LDCMP=1 bench/vcc-ctests.py -j 6 --no-cache  # also link with vlink: loaded image byte-identical to lld's (VCC_LD=vlink: run vlink's)
                                     # VCC_CFLAGS=-fasynchronous-unwind-tables: extra flags for both compilers (.eh_frame)
 bench/vcc-stress.py [--vccd]        # pathological inputs fail cleanly, vccd survives (~2 s)
-bench/vcc-abi.py                    # cross-compiler calls, clang/vcc x caller/callee, qemu (src/tests/abi, ~3 s)
+bench/vcc-abi.py                    # cross-compiler calls, clang/vcc x caller/callee, qemu (src/test/abi, ~3 s)
 bench/vcc-abi.py --host             # the same for the Apple arm64 ABI, run natively
 bench/vcc-abi.py --target wasm64    # ... for wasm64 (or wasm32; --vlink), emcc + node (~20 s)
 bench/vcc-self.py -j 6              # vcc.wasm built by vcc itself vs the emcc build: -S byte for byte (W6, ~40 s)
 bench/vcc-darwin-s.py -j 6           # Darwin -S assembled by Apple's as, runs as the direct object (~2 min)
-bench/vcc-diag.py -j 6             # tests/diag: vcc's .stderr snapshots, clang's locations/levels/flags (~2 s)
+bench/vcc-diag.py -j 6             # test/diag: vcc's .stderr snapshots, clang's locations/levels/flags (~2 s)
 bench/vcc-diag.py --bin-dir build/src-asan   # ... with a sanitizer build (also vcc-mutate.py, VCC_BIN=$PWD/build/src-asan)
 bench/vcc-diag.py --bless PATTERN   # ... rewrite the snapshots of a changed message (review the diff)
-bench/gen-diagids.py [--check]      # frontend/diag/diagids.inc: each diagnostic format's id (clang's name or vcc_*)
+src/tools/gen-diagids.py [--check]      # frontend/diag/diagids.inc: each diagnostic format's id (clang's name or vcc_*)
 VCC_TRACK_DIAG=1 vpp ... -fdiagnostics-show-id   # each diagnostic's id and where vcc reported it
 bench/vcc-mutate.py -j 6 --formats  # ... and every mutant's JSON rebuilds its text (diag-render.py), SARIF checked, HTML page has the text
 vpp ... -fdiagnostics-add-output=html:file=F   # a standalone page of the TU's diagnostics, vcc style in colour
-bench/vcc-diag-catalog.py           # build/src/diag-catalog.html: every tests/diag case, clang/vcc/narrated/JSON side by side
+bench/vcc-diag-catalog.py           # build/src/diag-catalog.html: every test/diag case, clang/vcc/narrated/JSON side by side
 vpp -fdiagnostics-style=vcc|clang|narrated -fdiagnostics-text-art-charset=ascii|unicode   # text styles (vcc default)
 bench/sarif-check.py F.sarif        # SARIF structure (+ the official schema once `fetch`ed)
 bench/vcc-darwin-s.py -j 6 --clang   # clang's Darwin -S assembled by vpp -c runs as clang's (~2 min)
@@ -222,10 +222,10 @@ bench/vcc-mutate.py -j 6             # one injected error per valid TU, vcc vs c
 bench/vcc-mutate.py show firstloc     # ... the mutants of one category with both compilers' errors
 bench/vcc-mutate.py -j 6 --fix       # ... vcc --fix on every rejected mutant: never worse for clang
 bench/vcc-explain.py                # doc/diag pages: the wrong example gives the id, the fixed one nothing
-bench/gen-explain.py [--check]      # driver/explain.inc from doc/diag/*.md (vcc --explain ID)
-bench/gen-walkprefix.py [--check]   # codegen/walk/prefix.h: the walker's function names, WK_PREFIX compiles it under another name (VIR)
+src/tools/gen-explain.py [--check]      # driver/explain.inc from doc/diag/*.md (vcc --explain ID)
+src/tools/gen-walkprefix.py [--check]   # codegen/walk/prefix.h: the walker's function names, WK_PREFIX compiles it under another name (VIR)
 build/src/viralloc --sweep F.vir     # VIR register allocation (vir/alloc.c) on a synthetic target: dump + counters, checker at every register count
-bench/vir-alloc.py [--bless]        # src/tests/vir-alloc: expected dumps and sweeps (<1 s); `random -n N`: generated functions (~1 s/unit)
+bench/vir-alloc.py [--bless]        # src/test/vir-alloc: expected dumps and sweeps (<1 s); `random -n N`: generated functions (~1 s/unit)
 bench/vir-alloc.py mutate|time      # the checker catches corrupted allocations; ns per VIR instruction (budget 200 for now, target 60: SPEC 22.1)
 bench/vcc-bflayout.py               # generated bit-field records, layouts checked by clang, Linux + Apple (~1 s)
 bench/vcc-ldconst.py                # generated long double literals and folds, bits vs clang (~2 s)
@@ -242,8 +242,8 @@ bench/vcc-wasm.py -j 6 --objcmp     # ... and vpp -c's object byte-identical to 
 bench/vcc-wasm.py -j 6 --obj --vlink  # ... vcc's side through vpp -c and vlink as emcc's wasm-ld (~9 min)
 bench/vcc-same.py --base DIR -j 6    # test-suite outputs byte-identical with DIR/vpp (vbench.py mkbase REV), ~80 s
 python3 bench/virgen-test.py --bin-dir build/linux/src  # generated VIR integer/control-flow units verify and round-trip
-bench/vas-enc.py $PWD/src/tests/vas   # vas encodings vs llvm-mc
-bench/vas-obj.py                    # vasm objects vs clang -c byte for byte (src/tests/vas-obj, <1 s)
+bench/vas-enc.py $PWD/src/test/vas   # vas encodings vs llvm-mc
+bench/vas-obj.py                    # vasm objects vs clang -c byte for byte (src/test/vas-obj, <1 s)
 bench/vas-corpus.py -j 6 [-O2] [PAT] # clang -S of the test C files: clang -c vs vasm (~6 min for -O0 -O2)
 bench/pg/build.sh clang && bench/pg/build.sh vcc   # PostgreSQL (macOS, meson+ninja): build + meson test (~2 min each)
 bench/pg/build.sh vccd             # ... CC = vcc shim + private vccd (VCC_DELEGATE=bench/pg/cc for the rest)
@@ -266,7 +266,7 @@ does, so before a commit also run the per-process `cmp` and `run`.
 PostgreSQL (`work/postgres`, `bench/pg/`) is the second test project: a
 native macOS build where vcc compiles every C file (`bench/pg/cc`) and clang
 links; the reference is Homebrew clang, and both builds must pass the same
-`meson test` set.  A bug found there gets a test in `src/tests/vcc/`.
+`meson test` set.  A bug found there gets a test in `src/test/vcc/`.
 `TODO.md` lists what is left before vcc is a production compiler, each item
 with how it is validated.  The vcc suite, stress and vccd tests mark known bugs
 `xfail` with their TODO.md item; a fix that makes one pass turns it into an
@@ -315,7 +315,7 @@ length (`vintern_cstr` pads a literal).  No suppressions are needed today;
 put any in `src/tsan.supp`, one reason per entry, and run with
 `TSAN_OPTIONS=suppressions=$PWD/src/tsan.supp`.
 
-## Fuzzing (`src/fuzz/`)
+## Fuzzing (`src/test/fuzz/`)
 Targets build with Homebrew LLVM's libFuzzer and ASan+UBSan into
 `build/src/fuzz/` (without libFuzzer, `driver.c` gives the same command line
 minus coverage feedback).
@@ -329,13 +329,13 @@ minus coverage feedback).
   `FUZZ_PP_PRINT=1` prints output and diagnostics.
 ```
 make -C src fuzz                    # build the targets
-src/fuzz/gen-corpus.py              # seed corpora from work/linux headers -> build/src/fuzz/corpus
-cd build/src/fuzz && ./fuzz-pp -fork=2 -max_total_time=180 -dict=../../../src/fuzz/c.dict \
+src/test/fuzz/gen-corpus.py              # seed corpora from work/linux headers -> build/src/fuzz/corpus
+cd build/src/fuzz && ./fuzz-pp -fork=2 -max_total_time=180 -dict=../../../src/test/fuzz/c.dict \
     -max_len=4096 -timeout=5 -artifact_prefix=art/ run-pp corpus/pp   # same for fuzz-lex
-make -C src fuzz-regress            # replay src/fuzz/regress/{lex,pp,diag}
+make -C src fuzz-regress            # replay src/test/fuzz/regress/{lex,pp,diag}
 make -C src fuzz-diff               # vpp vs clang -E -P on regress + seeds
-src/fuzz/pp-diff.py -j 4 --text DIR # ... byte for byte (spacing, indentation, blank lines)
-src/fuzz/pp-diff.py -j 4 DIR...     # ... on any corpus; mismatches -> build/src/fuzz/diff/
+src/test/fuzz/pp-diff.py -j 4 --text DIR # ... byte for byte (spacing, indentation, blank lines)
+src/test/fuzz/pp-diff.py -j 4 DIR...     # ... on any corpus; mismatches -> build/src/fuzz/diff/
 ```
 Keep runs to minutes with `-fork=2`.  Every fixed finding gets a minimal
 input in `regress/lex` or `regress/pp`.

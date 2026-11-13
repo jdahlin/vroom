@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """gen-libbuiltins.py: clang's library builtins -> src/frontend/c/libbuiltins.inc
 
-    src/frontend/c/gen-libbuiltins.py [Builtins.inc]
+    src/tools/gen-libbuiltins.py [Builtins.inc]
 
 Taken from clang once (no clang at run time): every __builtin_X that clang's
 Builtins.inc marks 'F' (a library function with the __builtin_ prefix), as
@@ -19,7 +19,7 @@ library function 'X' with type T" with the note "include the header <H>"
 import os, re, sys
 
 src = sys.argv[1] if len(sys.argv) > 1 else '/opt/homebrew/opt/llvm/include/clang/Basic/Builtins.inc'
-out = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'libbuiltins.inc')
+out = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'frontend', 'c', 'libbuiltins.inc')
 # the subset of clang's type encoding that frontend/c/decl.c lb_type reads: only those
 # entries are written, so the table is also vcc's __has_builtin answer for them
 TYPE = r'(?:[SUIX]*(?:L{0,3}i|[SUI]*[vbcsfzYwPWZ]|Ld|d))(?:\*\d*|[CDR])*'

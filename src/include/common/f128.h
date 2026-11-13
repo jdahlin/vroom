@@ -4,7 +4,7 @@
    significand) is held in the same layout with the low 49 fraction bits
    zero: the ...p functions round to p fraction bits, 112 or 63 (Q_P80).
    Integer arithmetic only, round to nearest even, no exception flags (the
-   tf soft float in tests/rt is the same algorithm).  Header-only: frontend/c/ and
+   tf soft float in test/rt is the same algorithm).  Header-only: frontend/c/ and
    codegen/ each include it. */
 #ifndef VCC_F128_H
 #define VCC_F128_H

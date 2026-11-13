@@ -5,7 +5,7 @@
 set -e
 CL=${CLANG:-/opt/homebrew/opt/llvm/bin/clang}
 INC=${INC:-$(dirname $(dirname $CL))/include/clang/Sema/AttrParsedAttrKinds.inc}
-D=$(dirname "$0")
+D=$(dirname "$0")/../frontend/c
 T=$(mktemp -d); trap "rm -rf $T" EXIT
 awk '/AS_GNU == Syntax/{f=1;next} f&&/if \(AttributeCommonInfo::AS_/{exit} f' "$INC" |
 	grep -o '// "[^"]*"' | sed 's/^\/\/ "//;s/"$//' | LC_ALL=C sort -u > $T/names

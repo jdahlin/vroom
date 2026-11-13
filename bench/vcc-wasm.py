@@ -16,7 +16,7 @@ wasm-ld, through a directory of emscripten's LLVM tools with that one
 replaced); --obj --vlink is vcc's whole chain.
 Failures by stage: emit (vpp fails), as (clang rejects vcc's assembly),
 objcmp, link (emcc), run.
-The test runtime headers (src/tests/rt/include) are used on both sides,
+The test runtime headers (src/test/rt/include) are used on both sides,
 emscripten's libc behind them.  Clang's results are cached in
 build/src/wasmtests/ref (keyed by the source and flags).  A vcc object
 byte-identical to one that passed before (build/src/wasmtests/pass, keyed by
@@ -52,7 +52,7 @@ WASM_SKIP = {}
 _WOPT = 'wasm: no inliner or dead-code removal (TODO.md)'
 WASM_XFAIL = {n: _WOPT for n in ('20020720-1', '20030216-1', '20041114-1', 'compare-3',
                                  'pure-1', 'shiftopt-1', 'bcp-1')}
-# ... and tests of our own suite (src/tests/vcc) the wasm emitter does not handle yet
+# ... and tests of our own suite (src/test/vcc) the wasm emitter does not handle yet
 WASM_XFAIL.update({
     'fp_class_runtime': 'wasm: __builtin_isfpclass/__builtin_fpclassify not lowered (PLAN-wasm.md W4)',
     'inline_walk': 'wasm: inlining (const parameters, labels per instance) only in the shared walker, not the wasm emitter',
@@ -172,7 +172,8 @@ def run(js, diagnostics=False):
 def reference(suite, name, path, flags, wd):
     with open(path, 'rb') as source:
         src = source.read().decode('latin-1')
-    key = hashlib.sha1(('oracle-status-v2 ' + src + ' '.join(flags) + ' '.join(ct.CLFL) + ' '.join(LINK) + 'rt1').encode()).hexdigest()[:16]
+    # the path too: a test that prints __FILE__ changes when its file moves
+    key = hashlib.sha1(('oracle-status-v2 ' + os.path.relpath(path, ct.R) + ' ' + src + ' '.join(flags) + ' '.join(ct.CLFL) + ' '.join(LINK) + 'rt1').encode()).hexdigest()[:16]
     cf = f'{OUT}/ref/{suite}/{name}.json'
     try:
         with open(cf) as cache:

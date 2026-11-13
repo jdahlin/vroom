@@ -23,7 +23,7 @@ FL = ['--target=aarch64-linux-gnu', '-fsyntax-only', '-fno-color-diagnostics', '
 def known_ids():
     """frontend/diag/diagids.inc's ids and the ones the code sets itself (gen-diagids.py explicit_ids)"""
     import importlib.util
-    spec = importlib.util.spec_from_file_location('gendiagids', f'{R}/bench/gen-diagids.py')
+    spec = importlib.util.spec_from_file_location('gendiagids', f'{R}/src/tools/gen-diagids.py')
     g = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(g)
     s = open(f'{R}/src/frontend/diag/diagids.inc').read()
@@ -66,7 +66,7 @@ def check(name, text, ids, verbose):
                 errs.append('the fixed example has an error')
     p = subprocess.run([VPP, '--explain', i], capture_output=True, text=True)
     if p.returncode or p.stdout != text:
-        errs.append('vpp --explain does not print it (run bench/gen-explain.py)')
+        errs.append('vpp --explain does not print it (run src/tools/gen-explain.py)')
     return errs
 
 

@@ -14,7 +14,7 @@ and exits like clang's build.
 | `rt/` | our runtime: start.S, link.ld, a tiny libc (rt.c, include/) | here | | |
 | `emit/` | emitter tests (run.sh) | here | | |
 | `vcc/` | our regression tests, one per bug found outside the kernel (`--suite vcc`; self-checking: exit 0 or `abort()`, output compared with clang's) | here | | |
-| `vas/` | assembler encodings checked against llvm-mc: `bench/vas-enc.py $PWD/src/tests/vas` | here | | |
+| `vas/` | assembler encodings checked against llvm-mc: `bench/vas-enc.py $PWD/src/test/vas` | here | | |
 
 The files are vendored as they are (no local edits), so updating is a copy.
 
@@ -64,18 +64,18 @@ are reported separately from candidate failures.
 ```
 git clone --depth 1 --filter=blob:none --sparse https://github.com/gcc-mirror/gcc
 (cd gcc && git sparse-checkout set gcc/testsuite/gcc.c-torture/execute)
-rm src/tests/gcc-torture/execute/*
-cp gcc/gcc/testsuite/gcc.c-torture/execute/*.[ch] src/tests/gcc-torture/execute/
+rm src/test/gcc-torture/execute/*
+cp gcc/gcc/testsuite/gcc.c-torture/execute/*.[ch] src/test/gcc-torture/execute/
 git clone --depth 1 https://repo.or.cz/tinycc.git
-rm -r src/tests/tcc-tests2; mkdir src/tests/tcc-tests2
-cp tinycc/tests/tests2/* src/tests/tcc-tests2/; cp tinycc/COPYING src/tests/tcc-tests2/
+rm -r src/test/tcc-tests2; mkdir src/test/tcc-tests2
+cp tinycc/tests/tests2/* src/test/tcc-tests2/; cp tinycc/COPYING src/test/tcc-tests2/
 ```
 Then update the commits above and the `TCC_SKIP` list in the runner (it
 mirrors the SKIP/FLAGS lines in `tcc-tests2/Makefile`).
 
 The inline suite, from `bench/fetch-testsuites.sh gcc llvm-test-suite`:
 ```
-G=work/testsuites/gcc/gcc/testsuite L=work/testsuites/llvm-test-suite D=src/tests/inline
+G=work/testsuites/gcc/gcc/testsuite L=work/testsuites/llvm-test-suite D=src/test/inline
 { grep -l 'dg-do run' $G/gcc.dg/ipa/*.c; ls $G/gcc.dg/torture/*inl*.c | xargs grep -l 'dg-do run'
   grep -l 'dg-do run' $G/gcc.dg/torture/*.c | xargs grep -l 'always_inline\|flatten'
   ls $G/gcc.dg/*inline*.c | xargs grep -l 'dg-do run'

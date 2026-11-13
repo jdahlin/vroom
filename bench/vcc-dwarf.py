@@ -3,7 +3,7 @@
 
   bench/vcc-dwarf.py [-j N] [-O LEVEL] [PAT]
 
-For every C file in src/tests/vcc and tests/gcc-torture/execute
+For every C file in src/test/vcc and tests/gcc-torture/execute
 (matching PAT), compiled for aarch64 Linux:
   - vpp -g -c passes llvm-dwarfdump --verify;
   - -g does not change the code: .text is byte-identical with and without -g;
@@ -20,7 +20,7 @@ from hostenv import llvm, BUILD
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VPP = os.path.join(os.environ.get('VCC_BIN') or BUILD, 'vpp')
 CL, DD, OC = llvm('clang'), llvm('llvm-dwarfdump'), llvm('llvm-objcopy')
-RT = f'{R}/src/tests/rt/include'
+RT = f'{R}/src/test/rt/include'
 FL = ['--target=aarch64-linux-gnu', '-w', '-ffreestanding', '-I', RT]
 REF = f'{BUILD}/dwarfref'
 CLV = subprocess.run([CL, '--version'], capture_output=True, text=True).stdout
@@ -111,7 +111,7 @@ def main():
     a = ap.parse_args()
     global NOCACHE
     NOCACHE = a.no_cache
-    files = sorted(glob.glob(f'{R}/src/tests/vcc/*.c') + glob.glob(f'{R}/src/tests/gcc-torture/execute/*.c'))
+    files = sorted(glob.glob(f'{R}/src/test/vcc/*.c') + glob.glob(f'{R}/src/test/gcc-torture/execute/*.c'))
     if a.pat: files = [f for f in files if a.pat in f]
     with Pool(a.j, initializer=_init, initargs=(a.no_cache,)) as p: res = p.map(one, [(f, '-O' + a.opt) for f in files], chunksize=4)
     n = {'ok': 0, 'fail': 0, 'skip': 0}

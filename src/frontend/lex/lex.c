@@ -983,7 +983,7 @@ static uint32_t lex_mode(const char *s, size_t n, vtok *out, void *scratch, bool
 	 */
 fast:
 #ifdef VLEX_SCALAR
-	DISPATCH();	/* reference build (fuzz/lexref.c): every token by its handler */
+	DISPATCH();	/* reference build (test/fuzz/lexref.c): every token by its handler */
 #endif
 	if (unlikely(gap != p))
 		DISPATCH();	/* a token directly after a splice */

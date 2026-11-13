@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """pp-diff.py: differential check of fuzz-pp inputs, vpp against clang -E -P.
 
-  src/fuzz/pp-diff.py [-j N] [--out DIR] [--show N] [--text] PATH...
+  src/test/fuzz/pp-diff.py [-j N] [--out DIR] [--show N] [--text] PATH...
 
 PATH is a file or directory of fuzz-pp inputs (corpus, crash-*, regress/pp).
 Each input is unpacked as fuzz-pp sees it (main \\x01 a.h \\x01 b.h \\x01
@@ -20,7 +20,7 @@ import argparse, hashlib, os, shutil, subprocess, sys, tempfile
 from multiprocessing import Pool
 
 H = os.path.dirname(os.path.abspath(__file__))
-R = os.path.dirname(os.path.dirname(H))
+R = os.path.dirname(os.path.dirname(os.path.dirname(H)))	# src/test/fuzz/ -> the checkout
 CL = '/opt/homebrew/opt/llvm/bin/clang'
 VPP = f'{R}/build/src/vpp'
 NAMES = ['main', 'a.h', 'b.h', 'sys/c.h']

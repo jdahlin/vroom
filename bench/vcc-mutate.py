@@ -35,7 +35,7 @@ from hostenv import llvm, BUILD
 import importlib.util
 
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-T = f'{R}/src/tests'
+T = f'{R}/src/test'
 CL = llvm('clang')
 VPP = os.path.join(os.environ.get('VCC_BIN') or BUILD, 'vpp')
 OUT = f'{BUILD}/mutate'

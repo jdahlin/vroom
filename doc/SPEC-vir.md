@@ -1100,7 +1100,7 @@ x86-like constraints) until V2 brings real input.
 | `virrun FILE` | Section 13 |
 | `virgen --seed=N [--size=N]` | A random verified unit using the built-in externs only, for `--equiv` and for `fuzz-vir` |
 | `vpp -fvir-dump=...` | 11.7 |
-| `src/fuzz/fuzz-vir` | libFuzzer over the parser, verifier, passes and interpreter: parse must not crash; a verified function must stay verified and equivalent after each pass |
+| `src/test/fuzz/fuzz-vir` | libFuzzer over the parser, verifier, passes and interpreter: parse must not crash; a verified function must stay verified and equivalent after each pass |
 
 Environment: `VCC_VIR=1` enables VIR before it is the `-O2` default;
 `VCC_VIR_VERIFY=1` verifies after every pass; `VCC_VIR_STATS=1` prints per TU
@@ -1113,7 +1113,7 @@ Reasons a function is not built (stable names, counted): `returns_twice`,
 
 ## 17. Tests
 
-17.1 `src/tests/vir/*.vir`. A test file is a unit with directives in
+17.1 `src/test/vir/*.vir`. A test file is a unit with directives in
 comments at the top:
 
 ```
@@ -1127,7 +1127,7 @@ followed by the unit, a line `; ---`, and the expected output of
 that line. `PASSES: canon` puts each function in canonical form before it is
 verified; `VERIFY: no` is `--no-verify`; `DOM: yes` appends each function's
 dominator tree (`; dom @f bN idom bM pre P post Q`) as comments. The tests
-under `tests/vir/bad/` must make `virtest` exit with status 1; a file named
+under `test/vir/bad/` must make `virtest` exit with status 1; a file named
 `bad/RULE-name.vir` (`RULE` a rule of section 12) must produce failures of
 exactly that rule. `bench/vir-test.py -j 6` runs them all; `--bless PATTERN`
 rewrites expectations; `--mutate N` runs random mutants of the units and
@@ -1135,7 +1135,7 @@ requires that `virtest` never crashes.
 
 17.2 Required test sets before a step is done:
 - parser/printer: every instruction and flag once; round trip identical;
-- verifier: one failing unit per rule id in section 12 (`tests/vir/bad/`),
+- verifier: one failing unit per rule id in section 12 (`test/vir/bad/`),
   each expecting that id;
 - interpreter: one unit per instruction with boundary values, and one per
   immediate-UB case expecting its report;
@@ -1196,7 +1196,7 @@ followed by the name. The paste needs two macro levels (`WK_PASTE`,
 `LO_PASTE`), otherwise the prefix macro is not expanded. `walk.h` includes
 `prefix.h` before `emitimpl.h`, because `emitimpl.h` declares
 `wk_switch_values`. `stmt.c` named `x64_ecx_free` outside `LO()`; it is
-`LO(ecx_free)` now. `bench/gen-walkprefix.py [--check]` regenerates the header
+`LO(ecx_free)` now. `src/tools/gen-walkprefix.py [--check]` regenerates the header
 from the definitions (as `gen-diagids.py` does for diagnostics). The VIR
 instantiation is one more file, `codegen/vir/walk.c`, that sets the two prefixes
 and includes `walk/*.c`. It must be its own translation unit, not part of the

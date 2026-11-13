@@ -6,7 +6,7 @@ each class vcc maps an argument to) clang is asked once per target; the table
 keeps, per specification, the expected type as clang prints it, whether the
 length modifier is invalid with the conversion, and per argument type whether
 it mismatches and the fix-it clang suggests.  Run once (needs clang):
-    src/frontend/c/gen-fmttab.py > src/frontend/c/fmttab.inc
+    src/tools/gen-fmttab.py > src/frontend/c/fmttab.inc
 """
 import os, re, subprocess, sys, tempfile
 

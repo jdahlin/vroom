@@ -19,7 +19,7 @@ import concurrent.futures, os, re, subprocess, sys, tempfile
 
 B = os.path.dirname(os.path.abspath(__file__))
 R = os.path.dirname(B)
-T = f'{R}/src/tests'
+T = f'{R}/src/test'
 VPP = os.environ.get('VCC_BIN', f'{R}/build/src') + '/vpp'
 CLANG = 'clang'
 # text has no branch relaxation (func.c: every cbz/b.cond far in a huge function)

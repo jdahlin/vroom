@@ -15,7 +15,8 @@
 set -e
 L=${1:?linux source}
 CL=${CLANG:-/opt/homebrew/opt/llvm/bin/clang}
-D=$(dirname "$0")
+TOOLS=$(dirname "$0")
+D=$TOOLS/../frontend/pp
 T=${KEEP:-$(mktemp -d)}; mkdir -p $T; [ -n "$KEEP" ] || trap "rm -rf $T" EXIT
 FL="--target=aarch64-linux-gnu -std=gnu11 -O2 -fno-PIE -mlittle-endian -fshort-wchar -funsigned-char -fno-common -fno-strict-aliasing -mgeneral-regs-only -fno-asynchronous-unwind-tables -fno-unwind-tables -mbranch-protection=none -fno-delete-null-pointer-checks -fno-stack-protector -fno-omit-frame-pointer -fno-strict-overflow"
 FH="-std=gnu11 -O2"
@@ -48,16 +49,16 @@ RESINC=$(echo "$SYS" | grep -v framework | sed 's/^ *//' | head -1)
 	$CL -undef -dM -E -x assembler-with-cpp /dev/null | LC_ALL=C sort | cstr
 	echo "	;"
 	echo "static const char *const predef_order_linux[] = {"
-	python3 $D/gen-ppdata-order.py $CL "$FL" "$FL -O0" "$FL -Os" "$FL -mcmodel=tiny" "--target=aarch64-linux-gnu" "--target=aarch64-linux-gnu -O2 -fPIC" "--target=aarch64-linux-gnu -fno-PIE"
+	python3 $TOOLS/gen-ppdata-order.py $CL "$FL" "$FL -O0" "$FL -Os" "$FL -mcmodel=tiny" "--target=aarch64-linux-gnu" "--target=aarch64-linux-gnu -O2 -fPIC" "--target=aarch64-linux-gnu -fno-PIE"
 	echo "};"
 	echo "static const char *const predef_order_darwin[] = {"
-	python3 $D/gen-ppdata-order.py $CL "$FH" "$FH -O0" "$FH -Os" "" "-O0 -fno-PIC"
+	python3 $TOOLS/gen-ppdata-order.py $CL "$FH" "$FH -O0" "$FH -Os" "" "-O0 -fno-PIC"
 	echo "};"
 	echo "static const char *const predef_order_wasm64[] = {"
-	python3 $D/gen-ppdata-order.py $CL "$FW" "$FW -O0" "$FW -Os" "--target=wasm64-unknown-emscripten"
+	python3 $TOOLS/gen-ppdata-order.py $CL "$FW" "$FW -O0" "$FW -Os" "--target=wasm64-unknown-emscripten"
 	echo "};"
 	echo "static const char *const predef_order_wasm32[] = {"
-	python3 $D/gen-ppdata-order.py $CL "$FW32" "$FW32 -O0" "$FW32 -Os" "--target=wasm32-unknown-emscripten"
+	python3 $TOOLS/gen-ppdata-order.py $CL "$FW32" "$FW32 -O0" "$FW32 -Os" "--target=wasm32-unknown-emscripten"
 	echo "};"
 	echo "static const char *const sysdirs_darwin[] = {"
 	echo "$SYS" | grep -v framework | sed 's/^ *\(.*\)$/	"\1",/'

@@ -415,7 +415,7 @@ TU:er (`vcc -c` mot `vcc -S | vasm`: samma objekt), tid per TU (vbench).
   tom `.got` kvar efter avslappad GD/LD, `__tls_get_addr` ej odefinierad.
 - `.note.gnu.property`: när AND av FEATURE_1_AND är 0 släpps alla (som lld);
   annars ligger indata kvar (sammanslagen not: kvar att göra).
-- Testkörtid: `tests/rt/start-x86.S`, `link-x86.ld` (statiskt, eget TLS).
+- Testkörtid: `test/rt/start-x86.S`, `link-x86.ld` (statiskt, eget TLS).
 - `bench/vcc-x86.py -j 6 --vlink`: 1750/1751 laddade bilder byte-identiska
   med lld:s och körs; kvar 20030125-1 (floor→floorf, kräver optimeraren).
   arm64 oförändrad: `VCC_LDCMP=1 vcc-ctests.py` 1780/1780, vlink-opts, vlink-bad.
@@ -702,7 +702,7 @@ Detta flyttar X3 men är inte ett godkännande av återstående steg.
 - `stack_overalign`: fasta objekt (64/128/256), VLA (256), rekursion,
   stackargument, variadiska argument och 64-justerad struktur som värde
   passerar på x86-64 och arm64/QEMU. Korsanrop clang/vcc i båda riktningar
-  passerar på båda målen (`tests/abi/stack_overalign`). cproc:s 12
+  passerar på båda målen (`test/abi/stack_overalign`). cproc:s 12
   alignmentfall passerar kompilering på båda målen. `vla_zero` passerar också:
   nollningsslingans byteräknare rundas upp till hela 8-byteord.
 - Inline asm som explicit använder `r12` i en överjusterad funktion ger
@@ -734,7 +734,7 @@ fil-för-fil-bygget passerar också.
 GCC:s `compile/20000701-1.c` kraschade när ett void-lvärde gav en
 minnesläsning med storlek noll. Vandraren utvärderar nu adressen och
 frigör dess register utan att läsa minnet, även för `volatile void`.
-`tests/vcc/void_lvalue.c` kontrollerar också sid-effekter i adresser och
+`test/vcc/void_lvalue.c` kontrollerar också sid-effekter i adresser och
 villkorsuttryck. x86:s egna tester: 47/56 godkända, mot 46/56 före
 ändringen; de nio tidigare funktionsluckorna återstår.
 
@@ -814,7 +814,7 @@ villkorsuttryck. x86:s egna tester: 47/56 godkända, mot 46/56 före
 ### X1 (2026-11-10): front end klar, x86-data och vcc-ldconst väntar på kodgeneratorn
 - `PP_LINUX_X86_64`: `--target=x86_64-*`, och standard utan `--target` på en
   x86-64-värd (glibcs `x86_64-linux-gnu`). Clang-data i egna filer från
-  `frontend/pp/gen-x86data.sh` (clang 23.1.6): predefines och `-dD`-ordning
+  `tools/gen-x86data.sh` (clang 23.1.6): predefines och `-dD`-ordning
   (`frontend/pp/ppdata-x86.inc`), `__has_*` (`has_tab_x86`) och attributnamn
   (`frontend/c/attrnames-x86.inc`). De andra målens tabeller (23.1.4) rörs inte.
 - `va_list` som `struct __va_list_tag[1]`; `long double` som x87 i konstanter och

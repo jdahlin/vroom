@@ -164,13 +164,13 @@ def main():
             info['build_log'] = dict(path=str(log.resolve()), sha256=digest(log))
         report['binary'][label] = info
     for name in SOURCES:
-        path = Path(R) / 'src/tests/vcc' / (name + '.c')
+        path = Path(R) / 'src/test/vcc' / (name + '.c')
         report['sources'][name] = dict(path=str(path), sha256=digest(path))
     report['resource_dir'] = str(resources.resolve())
     report['resource_headers_sha256'] = {str(path.relative_to(resources)): digest(path)
                                          for path in sorted(resources.rglob('*.h'))}
     report['runtime_headers_sha256'] = {str(path.relative_to(Path(R))): digest(path)
-                                        for path in sorted((Path(R) / 'src/tests/rt/include').rglob('*')) if path.is_file()}
+                                        for path in sorted((Path(R) / 'src/test/rt/include').rglob('*')) if path.is_file()}
     report['versions'] = {name: invoke(command, env) for name, command in
                           [('clang', [llvm('clang'), '--version']), ('valgrind', [args.valgrind, '--version'])]}
     result_path = output / ('preflight.json' if args.preflight_only else 'result.json')
@@ -178,7 +178,7 @@ def main():
         for name in SOURCES:
             row = dict(target=target, source=name, sides={})
             flags = [f'--target={target}', '-O2', '-ffreestanding', '-fno-stack-protector', '-std=c23',
-                     '-isystem', str(resources), '-I' + str(Path(R) / 'src/tests/rt/include')]
+                     '-isystem', str(resources), '-I' + str(Path(R) / 'src/test/rt/include')]
             source = report['sources'][name]['path']
             for label in labels:
                 stem = output / f'{target}-{name}-{label}'

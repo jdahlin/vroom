@@ -92,6 +92,17 @@ STEPS = {
     'T4': [*[(f'src/{h}', f'src/include/{h}') for h in PUBLIC_T4],
            ('src/platform/darwin/pmc.h', 'src/include/port/darwin/pmc.h'),
            ('src/include/vcc/protocol.h', 'src/include/protocol.h')],
+    # tests and fuzzing under src/test/, every generator of checked-in source in src/tools/
+    'T5': [('src/tests/', 'src/test/'),
+           ('src/fuzz/', 'src/test/fuzz/'),
+           *[(f'src/{d}/{g}', f'src/tools/{g}') for d, g in (
+               ('frontend/c', 'gen-attrnames.sh'), ('frontend/c', 'gen-fmttab.py'),
+               ('frontend/c', 'gen-libbuiltins.py'), ('frontend/pp', 'gen-ppdata.sh'),
+               ('frontend/pp', 'gen-x86data.sh'), ('frontend/pp', 'gen-ppdata-order.py'),
+               ('server', 'gen-warnings.sh'), ('arch/a64', 'gen-sysreg.sh'))],
+           *[(f'bench/{g}', f'src/tools/{g}') for g in (
+               'gen-diagids.py', 'gen-explain.py', 'gen-walkprefix.py', 'gen-memory-cells.py',
+               'gen-x86features.py', 'gen-x86native.py')]],
 }
 TEXT = {'T1': T1_TEXT}
 
@@ -162,10 +173,12 @@ def text_pairs(step):
     out = []
     pairs = sorted(STEPS.get(step, []) + TEXT.get(step, []), key=lambda p: -len(p[0]))
     def rx(a, left):
+        # build/src/fuzz is make's output, not the source directory src/fuzz
+        left_build = r'(?<!build/)(?<!build/linux/)'
         # a directory also matches without its slash at the end of a name (`{R}/ccs/vcc/docs/diag'`)
         if a.endswith('/') and '/' in a[:-1]:	# never a bare word: `lex` in prose
-            return re.compile(r'(?<![' + left + r'])' + re.escape(a[:-1]) + r'(?=/|(?![' + PATHCH + r']))')
-        return re.compile(r'(?<![' + left + r'])' + re.escape(a))
+            return re.compile(left_build + r'(?<![' + left + r'])' + re.escape(a[:-1]) + r'(?=/|(?![' + PATHCH + r']))')
+        return re.compile(left_build + r'(?<![' + left + r'])' + re.escape(a))
     for a, b in pairs:
         out.append((rx(a, PATHCH), b[:-1] if a.endswith('/') and '/' in a[:-1] else b, False))
     for a, b in pairs:

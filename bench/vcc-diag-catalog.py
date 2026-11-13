@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 The diagnostics catalog (PLAN-diag.md test layer 10): one HTML page with
-every src/tests/diag case, its source, clang's text, vcc's text in the
+every src/test/diag case, its source, clang's text, vcc's text in the
 vcc style (in color, as a terminal shows it), the narrated style and the
 JSON records, side by side.  For review by eye: a change to the renderer or
 to a message shows up as a page to read, not only as snapshot diffs.
@@ -116,7 +116,7 @@ def main():
          '<meta name="viewport" content="width=device-width, initial-scale=1">',
          f'<title>vcc diagnostics catalog</title><style>{CSS}</style></head><body>',
          '<h1>vcc diagnostics catalog</h1>',
-         f'<p class="sub">{len(res)} cases from src/tests/diag: clang, vcc (default style), narrated, JSON records</p>',
+         f'<p class="sub">{len(res)} cases from src/test/diag: clang, vcc (default style), narrated, JSON records</p>',
          '<input id="q" placeholder="filter: name, message, flag" autofocus>']
     for name, src, vcc, narr, cl, js in res:
         h.append(f'<section id="{html.escape(name)}"><h2><a href="#{html.escape(name)}">{html.escape(name)}</a></h2>')

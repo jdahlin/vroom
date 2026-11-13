@@ -20,7 +20,7 @@
  */
 #ifndef VCC_WALK_H
 #define VCC_WALK_H
-#include "prefix.h"	/* generated (bench/gen-walkprefix.py): WK_PREFIX renames the walker's functions; first, so that emitimpl.h's wk_ prototypes are renamed too */
+#include "prefix.h"	/* generated (src/tools/gen-walkprefix.py): WK_PREFIX renames the walker's functions; first, so that emitimpl.h's wk_ prototypes are renamed too */
 #include "../emitimpl.h"
 #include "../rec/rec.h"
 

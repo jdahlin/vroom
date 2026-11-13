@@ -153,7 +153,7 @@ programmet måste byggas eller startas med Emscripten.
 | Steg | Leverans | Status och verifiering |
 | --- | --- | --- |
 | W9.1 | Libc-fri testväg: vpp -S för kodkrav, vpp -c för eget objekt, vlink för modul, liten Node-launcher | Klar för OPT1:s första regel: `bench/vcc-opt-rules.py --target wasm32-unknown-emscripten --run` och motsvarande wasm64. O0–O3 kör samma C-regression. Ingen emcc, LLVM-assembler, wasm-ld eller SDK används i denna wasm-väg. Verifierat med systemets `/usr/bin/node` 24.22.2 och därefter 25.9.0 utan SDK-sökväg. Tidigare Node 22 saknade table64 och kunde inte köra denna wasm64-modul. |
-| W9.2 | Egen test-runtime för ett uttryckligt urval av de vendrade C-sviterna | Planerad. Återanvänd portabel C ur `tests/rt/rt.c` eller granskade libc/compiler-rt-källor; bygg med vcc. Separera arm64-start, UART/exit- och FP-asm. Lägg små JS-importer för output/exit samt heap med memory.grow. Behåll samma deklarationer/testkontrakt och verifiera även referenskompilatorns program mot runtime. |
+| W9.2 | Egen test-runtime för ett uttryckligt urval av de vendrade C-sviterna | Planerad. Återanvänd portabel C ur `test/rt/rt.c` eller granskade libc/compiler-rt-källor; bygg med vcc. Separera arm64-start, UART/exit- och FP-asm. Lägg små JS-importer för output/exit samt heap med memory.grow. Behåll samma deklarationer/testkontrakt och verifiera även referenskompilatorns program mot runtime. |
 | W9.3 | Komplett bibliotek-/builtinsstöd för testkorpuset, inklusive exceptionbaserad setjmp | Planerad. Inventera faktiska undefined-symboler; implementera eller vcc-bygg kompatibla __int128/binary128/complex-hjälpare och libc/libm-källor. __wasm_setjmp/__wasm_longjmp och __c_longjmp-taggen kräver egna ABI-/EH-tester. Saknade funktioner ger uttryckligt unsupported, inte falskt godkända eller tyst filtrerade tester. |
 | W9.4 | Fristående explorer och självbygge | Planerad. Ersätt em-config/sysroot-val, libc-header/runtimeleverans, startup/argv/stdout/exit och genererade VccModule/FS/callMain/ExitStatus med egen adapter. Packa filerna i VFS; behåll worker-API eller migrera worker/selfrun i samma steg. Testa filer, minnestillväxt, diagnostik och självbyggets stage2=stage3. |
 | W9.5 | GHA:s obligatoriska wasm-grind använder den egna kedjan | Påbörjad med W9.1-regressionerna i `ci/premerge.sh`; den gamla fullsviten behöver fortfarande emcc. Ta bort SDK-installationen först när samma beslutade korpus och ABI-tester går med W9.2–W9.4. Emscripten kan därefter finnas som valfri jämförelsereferens, aldrig som obligatorisk bygg-/runtimekomponent. |
@@ -226,7 +226,7 @@ adresser i data (`.int32`/`.int64`, tabellindex), varargs-platser minst 4 byte.
   `24_math_library` (bibliotekets signaturer för implicit deklarerade).
 - `bench/vcc-abi.py --target wasm64|wasm32 [--vlink]` (2026-11-10): de fyra
   kombinationerna clang/vcc × anropare/anropad, `vpp -c`, länkade av emcc och
-  körda i node.  Nytt test `tests/abi/aggregates` (poster 0..48 byte, ett
+  körda i node.  Nytt test `test/abi/aggregates` (poster 0..48 byte, ett
   element, unioner, bit-fält, `__int128`, `long double`, `_Complex`, varargs
   med poster, återanrop åt båda hållen) och `aligned_args`.  Det hittade:
   en vektor med en lane returneras som skalär (som LLVM), inte genom pekare.
@@ -239,7 +239,7 @@ adresser i data (`.int32`/`.int64`, tabellindex), varargs-platser minst 4 byte.
 Senare samma dag: `setjmp`/`longjmp` genom wasm-EH (`-mllvm -wasm-enable-sjlj`,
 som emscriptens `-sSUPPORT_LONGJMP=wasm`: `__wasm_setjmp`/`__wasm_longjmp`,
 `try`/`catch __c_longjmp`, taggar i assemblern, objektet och vlink;
-`tests/vcc/setjmp_sites.c`), destruktorer, `asm goto` med tom mall, `switch`
+`test/vcc/setjmp_sites.c`), destruktorer, `asm goto` med tom mall, `switch`
 på `__int128`, breda bit-fält, `_Atomic`-objekt, matematikfunktioner som
 instruktioner. `vcc-wasm.py -j 6`: 1 739/1 746 i alla lägen (`-S`, `--objcmp`
 byte för byte, `--obj --vlink`); kvar är de 6 `link_error`-testerna (kräver
@@ -254,9 +254,9 @@ assembler och objektskrivare mot emscriptens libc-huvuden; emcc länkar bara
   intrinsics för andra mål än arm64 (lane för lane; CRC32/CRC32C en nibble i
   taget), provade mot clangs NEON på 20 000 slumpade indata;
 - `_Thread_local` som vanliga objekt på wasm, som LLVM gör utan delat minne
-  (`tests/vcc/thread_local.c`);
+  (`test/vcc/thread_local.c`);
 - `__builtin_bitreverse8..64`, `__builtin_isinf`/`isfinite` i wasm-generatorn
-  (`tests/vcc/bitreverse.c`, `fp_class_builtins.c`).
+  (`test/vcc/bitreverse.c`, `fp_class_builtins.c`).
 `bench/vcc-self.py -j 6`: varje test i sviterna, förbehandlat av den native
 vpp för aarch64 och wasm64, kompileras `-O2 -S` av både emcc-bygget och det
 självbyggda `vcc.wasm` (`contrib/wasm/selfrun.mjs`, node): 3 741/3 741 utdata
@@ -277,7 +277,7 @@ symboler i memarg, objektskrivaren med i32-gränser för minne och tabell och
 (fel vid blandning).  Två rättelser i front end som wasm32 hittade (ILP32 gör
 `1ul << 40` till ett överskift): konstanta skift viks som clangs C (antal ≥
 bredd blir bredd−1, negativt antal skiftar åt andra hållet,
-`tests/vcc/const_shift.c`), och `-Wno-[error=]int-conversion`,
+`test/vcc/const_shift.c`), och `-Wno-[error=]int-conversion`,
 `incompatible-pointer-types` och `incompatible-function-pointer-types` gör
 felet till en varning som clang.
 - `vcc-wasm.py -j 6 --wasm32`: 1 739/1 746, `--objcmp` byte för byte med
@@ -348,7 +348,7 @@ felet till en varning som clang.
   `.no_dead_strip` (tabellimporten clang -O0 tvingar fram), segmentflaggan
   `"S"` och symboler som minnesoffset (`i32.store x`, MEMORY_ADDR_LEB64):
   clangs egen `-O0`-`.s` ger nu samma objekt som clang. Test
-  `tests/vcc/ctor_priority.c` (arm64 och wasm); destruktorer ger fel för
+  `test/vcc/ctor_priority.c` (arm64 och wasm); destruktorer ger fel för
   wasm (clang gör dem till `__cxa_atexit`-anrop).
   Namn utanför ASCII skrivs inom citattecken (`"привет"`, sektionen
   `".data.привет"`) som clang -S; LLVM:s wasm-assembler tar inte tillbaka

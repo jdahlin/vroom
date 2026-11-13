@@ -2,7 +2,7 @@
 """
 VIR's own tests (SPEC-vir.md 17; PLAN-vir.md step V1).
 
-Every src/tests/vir/**/*.vir is a unit with directives in comments at the
+Every src/test/vir/**/*.vir is a unit with directives in comments at the
 top (`; PASSES: canon`), a line `; ---`, and the expected output of
 `virtest FILE`: the unit printed, or the errors.  virtest runs from the test
 directory (so the file names in syntax errors are stable).  A test passes
@@ -24,7 +24,7 @@ import difflib, os, random, re, subprocess, sys, tempfile
 from concurrent.futures import ThreadPoolExecutor
 
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-D = f'{R}/src/tests/vir'
+D = f'{R}/src/test/vir'
 
 
 def bin_dir():

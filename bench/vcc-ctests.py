@@ -3,12 +3,12 @@
 
   bench/vcc-ctests.py [-j N] [--suite gcc|tcc|vcc|inline] [--fe] [--cpu QEMU_CPU] [-v] [--show CAT] [PAT]
 
-Suites (src/tests/, see the README there):
+Suites (src/test/, see the README there):
   gcc  gcc.c-torture/execute: exits 0 on success, abort()s on failure
   tcc  tinycc tests2: prints output, compared with clang's (and tcc's .expect)
   inline  inlining and IPA tests: gcc.dg/ipa, gcc.dg/torture, c-c++-common and
-       llvm-test-suite run tests (src/tests/inline): as gcc, output vs clang's
-  vcc  our own regression tests (src/tests/vcc): exit 0 (or abort()) and
+       llvm-test-suite run tests (src/test/inline): as gcc, output vs clang's
+  vcc  our own regression tests (src/test/vcc): exit 0 (or abort()) and
        print what clang's build prints.  Comments in a test steer the runner:
          /* vcc-flags: -std=c23 ... */   extra flags for both compilers
          /* vcc-noref: reason */         clang rejects it (a GNU extension): no
@@ -28,7 +28,7 @@ Suites (src/tests/, see the README there):
 Exit status 1 when anything fails or XPASSes.
 
 Every test is built twice: by clang (the oracle) and by vcc (vpp -c), each
-linked with the bare-metal runtime in src/tests/rt (built by clang) and
+linked with the bare-metal runtime in src/test/rt (built by clang) and
 run under qemu-system-aarch64 -M virt with semihosting.  vcc passes when its
 binary prints what clang's prints and exits with the same status (0 for gcc).
 
@@ -42,7 +42,7 @@ a call, and vcc has no such pass), run.
 
 --fe stops after the front end (no code, no qemu): fe pass rate only.
 Clang reference results are cached in build/src/ctests/ref (keyed by the
-source, flags and runtime), so a rerun only builds and runs vcc's side.  A vcc object byte-identical
+source, its path, flags and runtime), so a rerun only builds and runs vcc's side.  A vcc object byte-identical
 to one that passed before (build/src/ctests/pass, keyed by the object, the
 runtime and the reference) is not linked or run again; --no-cache runs all.
 """
@@ -53,7 +53,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from hostenv import llvm, BUILD
 
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-T = f'{R}/src/tests'
+T = f'{R}/src/test'
 RT = f'{T}/rt'
 CL = llvm('clang')
 VPP = os.path.join(os.environ.get('VCC_BIN') or BUILD, 'vpp')
@@ -248,7 +248,9 @@ def exec_marks(src):
 def reference(suite, name, path, flags, rthash, wd):
     with open(path, 'rb') as source:
         src = source.read().decode('latin-1')
-    key = hashlib.sha1(('oracle-status-v2 ' + src + ' '.join(flags) + rthash + ' '.join(CLFL)).encode()).hexdigest()[:16]
+    # the path too: a test that prints __FILE__ changes when its file moves
+    rel = os.path.relpath(path, R)
+    key = hashlib.sha1(('oracle-status-v2 ' + rel + ' ' + src + ' '.join(flags) + rthash + ' '.join(CLFL)).encode()).hexdigest()[:16]
     cf = f'{OUT}/ref/{suite}/{name}.json'
     try:
         with open(cf) as cache:

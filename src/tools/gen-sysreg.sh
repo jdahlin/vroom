@@ -4,7 +4,7 @@
 # Output: { "name", encoding16, rw } sorted by lowercase name; rw bit 0 =
 # readable (mrs), bit 1 = writable (msr).
 LLVM=${LLVM:-/opt/homebrew/opt/llvm}
-python3 - "$LLVM/bin/llvm-mc" > a64sysreg.inc <<'PY'
+python3 - "$LLVM/bin/llvm-mc" > "$(dirname "$0")/../arch/a64/a64sysreg.inc" <<'PY'
 import subprocess, sys, re
 mc = sys.argv[1]
 lines = []

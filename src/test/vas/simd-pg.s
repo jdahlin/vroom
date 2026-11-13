@@ -1,5 +1,5 @@
 // AdvSIMD forms added for PostgreSQL's NEON code (vcc's arm_neon.h); every
-// arrangement the instruction takes.  bench/vas-enc.py $PWD/src/tests/vas
+// arrangement the instruction takes.  bench/vas-enc.py $PWD/src/test/vas
 // checks vas's encodings against llvm-mc.
 	uqsub	v0.8b, v1.8b, v2.8b
 	uqsub	v0.16b, v1.16b, v2.16b

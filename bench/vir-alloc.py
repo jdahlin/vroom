@@ -4,7 +4,7 @@ VIR register allocation (PLAN-vir.md V4, SPEC-vir.md 15): build/src/viralloc
 on the tests and on random functions, every allocation checked by
 vir_alloc_check.
 
-  bench/vir-alloc.py [test] [-j N] [-v] [PATTERN]   src/tests/vir-alloc/*.vir: output equals the
+  bench/vir-alloc.py [test] [-j N] [-v] [PATTERN]   src/test/vir-alloc/*.vir: output equals the
                                                     expected part, every register count checked (; SWEEP)
   bench/vir-alloc.py --bless PATTERN                rewrite the expected part of the matching tests
   bench/vir-alloc.py random [-n N] [--seed S] [-j N] [--keep DIR]
@@ -22,7 +22,7 @@ import os, random, re, subprocess, sys, tempfile
 from concurrent.futures import ThreadPoolExecutor
 
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-D = f'{R}/src/tests/vir-alloc'
+D = f'{R}/src/test/vir-alloc'
 
 
 def arg(name, default=None, conv=str):

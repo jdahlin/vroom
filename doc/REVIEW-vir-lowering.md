@@ -43,7 +43,7 @@ input), **decision** (needs a design call).  Measurements are sqlite3.c at
 | F1 | A later mask or sign extension dropped after `add x, x, w, sxtw/uxtw`: `exts` read the extended-operand form as a plain 64-bit add | `opt.c` `xresult` | a51b4106 | `vir_ext_add_facts.c` |
 | F2 | A compare dropped at a label that a later branch jumps back to | `opt.c` `flags` | a51b4106 | `vir_flags_backedge.c` |
 | F3 | A read of x16/x17 moved past a record whose expansion rebuilds them (large immediate or offset) | `opt.c` `fdefof`/`fwriter`/`fkept` | a51b4106 | `vir_scratch_fold.c` |
-| F4 | Volatile through VIR: locals forwarded and merged, dead volatile stores dropped, bit-fields and initializers unmarked | lowering, builder, walker | 8dceb271 | `bench/vcc-volatile.py`, `tests/volatile/access.c` |
+| F4 | Volatile through VIR: locals forwarded and merged, dead volatile stores dropped, bit-fields and initializers unmarked | lowering, builder, walker | 8dceb271 | `bench/vcc-volatile.py`, `test/volatile/access.c` |
 | F5 | The store table forwarded a local's value past a pointer store or call when its address is taken later in the text but earlier in execution (a loop): `x = i; *p = 100; s += x; p = &x;` gave 6 for 300 | `build.c` `vw_st_clear` | c93460e7 | `vir_store_late_addr.c` |
 | F6 | A select on a 64-bit condition compared only the low word | `a64.c` `vl_cond` | 9bd65d4f | `vir_branch_bits.c`, `vir_select.c` |
 | F7 | The low-half sweep was quadratic (4000 chained `if`s 0.57 s, now 0.02 s) | `a64.c` | b096c081 | timing |
@@ -129,7 +129,7 @@ other targets cannot share it, it runs after the only simplifier (so
 has no profitability test.  Speculated instructions keep their flags; that is
 only correct because the builder never sets `nsw`/`nuw`/`exact`.
 **Recommendation:** make it a pass over finished VIR (spec section 14), with
-`tests/vir` cases, run before a simplification step.
+`test/vir` cases, run before a simplification step.
 
 ### 2.5 The low-half analysis  (**decision**)
 

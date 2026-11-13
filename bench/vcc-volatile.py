@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Volatile accesses survive one for one: the loads and stores of each function in
-src/tests/volatile/*.c (-O2 -S), against the "/* ld N st N */" before it, for the
+src/test/volatile/*.c (-O2 -S), against the "/* ld N st N */" before it, for the
 direct emitter and for VIR (VCC_VIR=bl).  --bin-dir DIR picks vpp."""
 import os, re, subprocess, sys, glob
 
@@ -35,7 +35,7 @@ def counts(src, vir):
     return out
 
 bad = n = 0
-for src in sorted(glob.glob(os.path.join(root, 'src/tests/volatile/*.c'))):
+for src in sorted(glob.glob(os.path.join(root, 'src/test/volatile/*.c'))):
     want = {m.group(3): [int(m.group(1)), int(m.group(2))]
             for m in re.finditer(r'/\* ld (\d+) st (\d+) \*/[^(\n]*?(\w+)\(', open(src).read())}
     for vir in (False, True):

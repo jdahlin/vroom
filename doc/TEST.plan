@@ -11,7 +11,7 @@ riktiga program med egna testsviter.
 Allt hämtas med `bench/fetch-testsuites.sh` till `work/testsuites/`.  Där är
 det git-ignorerat och låst vid commits som står i skriptet.  Det är cirka
 320 MB och tar en halv minut.  Vad som finns där står i
-`src/tests/README.md`.  Varje steg nedan ska ge ett skript med grönt/rött
+`src/test/README.md`.  Varje steg nedan ska ge ett skript med grönt/rött
 resultat (PLAN-release G0) och flytta G1 (korrekthet) eller G2 (korpus).
 
 Princip för alla steg: **clang är orakel och filter.**  Ett test räknas bara
@@ -111,7 +111,7 @@ behåller begränsningarna för pekare, unioner, volatilitet och aktiv unionsmed
 Packade boolvektorer använder logiska element och bitlagring, inklusive
 indexering, operatorer och Linux/Wasm-ABI. En direkt bitfältsoperand läses som
 sitt deklarerade skalärvärde; detta avviker avsiktligt från clangs kopiering av
-omgivande lagring (se `src/tests/bitcast/README.md`). Det gäller även ett
+omgivande lagring (se `src/test/bitcast/README.md`). Det gäller även ett
 packat boolvektorelement.
 
 Ny isolerad bas på `1f4c8d2`: unity och filvis bygge klarar egna körsviten
@@ -941,7 +941,7 @@ upstream-integration valideras för en följande PR.
 ### S7 Slumpprogram (TODO T10) — rigg klar, långkörningar återstår
 csmith och yarpgen byggs från `work/testsuites/`.  `bench/vcc-csmith.py`
 bygger programmen med clang -O0 och vcc, kör dem och jämför checksummor.
-Avvikelser reduceras med creduce till tester i `tests/vcc`.
+Avvikelser reduceras med creduce till tester i `test/vcc`.
 
 Status 2026-11-11: båda pinnade generatorerna byggda med CMake.
 `LLVM=/usr/lib/llvm-23 bench/vcc-csmith.py --count 3 -j 2` sparar källor,

@@ -100,7 +100,7 @@ def main():
     if not x86:formats=[f for f in formats if f[0]!='__float128']
     native = platform.machine().lower() in (('x86_64','amd64') if x86 else ('aarch64','arm64'))
     runner = [] if native else (['qemu-x86_64','-L','/usr/x86_64-linux-gnu'] if x86 else ['qemu-aarch64','-L','/usr/aarch64-linux-gnu'])
-    fixture=pathlib.Path(__file__).resolve().parent.parent/'src/tests/bitint/float-runtime.c'
+    fixture=pathlib.Path(__file__).resolve().parent.parent/'src/test/bitint/float-runtime.c'
     try:
         for width in args.widths:
             for fp,p,bias,eb,x87 in formats:

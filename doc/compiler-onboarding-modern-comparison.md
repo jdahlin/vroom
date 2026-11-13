@@ -102,7 +102,7 @@ find.
 | `--fix`, parseable edits and unified patches; only machine-applicable edits are written by `--fix` | Driver parser and `diagout.c:fix_collect`/`fix_write` | Make the preview/write distinction explicit. A patch can contain speculative suggestions; it is not equivalent to safe automatic repair. |
 | Twelve explain pages, compiled into the executable, each with wrong/fixed examples | [`doc/diag/README.md`](../doc/diag/README.md), [`vcc-explain.py`](../bench/vcc-explain.py) | IDs exist beyond these pages. Teach discovery and grow pages where they add conceptual value. |
 | Per-TU diagnostic store and build-level deduplication | `server/dstore.c`, plan D7 | A diagnostic query socket is not a complete language server. Unsaved-buffer handling, versioned edits, cancellation and compile context still need a contract. |
-| Snapshots, mutation tests, fuzzing, catalog and fix round trips | `bench/vcc-diag.py`, `vcc-mutate.py`, `vcc-diag-catalog.py`, `src/fuzz/fuzz-diag.c` | Add task outcomes and novice review; snapshots establish consistency rather than comprehension. |
+| Snapshots, mutation tests, fuzzing, catalog and fix round trips | `bench/vcc-diag.py`, `vcc-mutate.py`, `vcc-diag-catalog.py`, `src/test/fuzz/fuzz-diag.c` | Add task outcomes and novice review; snapshots establish consistency rather than comprehension. |
 
 Two concrete audit findings deserve follow-up:
 
@@ -138,7 +138,7 @@ return count;
 ```
 
 Before: an expected-token error can leave the user wondering why `return` is wrong.
-Current evidence: `tests/diag/missing_semi_decl.c.stderr` already points to the end of
+Current evidence: `test/diag/missing_semi_decl.c.stderr` already points to the end of
 the declaration and offers `;`; retain that behavior.
 
 Proposed help:
@@ -418,7 +418,7 @@ Deliverables:
 
 - `doc/getting-started-linux.md` with verified native and ARM/QEMU steps and a short
   compiler/linker/runtime troubleshooting table.
-- A compact `tests/diag/onboarding_*` corpus with positive neighbors and deliberate
+- A compact `test/diag/onboarding_*` corpus with positive neighbors and deliberate
   ambiguity, linked from the guide and diagnostic catalog.
 - Focused explanation additions where they teach declaration vs definition, value vs
   address, or source error vs toolchain configuration.

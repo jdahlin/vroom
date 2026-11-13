@@ -168,10 +168,10 @@ fixpunkter utan budget (samma regel som `codegen/flow/`).
 - Skrivare och parser för en textform; `vpp -fvir-dump=STEG`.
 - Verifierare efter varje pass i test- och sanitizerbyggen.
 - `virtest` kör namngivna pass på `.vir`-filer; ögonblicksbilder i
-  `src/tests/vir/`.
+  `src/test/vir/`.
 - `virrun`, en tolk, är referenssemantiken.  Varje pass kontrolleras genom
   tolkning före och efter, på testerna och på slumpade funktioner
-  (`src/fuzz/fuzz-vir`).
+  (`src/test/fuzz/fuzz-vir`).
 
 ### Filer
 
@@ -1405,7 +1405,7 @@ med annat steg än elementet 16, anrop 11, adress som inte är symbol + linjär
 (pekare) 10, lagrat värde läst 1–3 varv senare 10, värde som inte kan bli
 banor (gather, `double`) 9, fel ordning inom kroppen 6.
 
-Validering: `tests/vcc/vir_vec_loops.c` (47 loopar × varvtal 0–9 och 37 mot
+Validering: `test/vcc/vir_vec_loops.c` (47 loopar × varvtal 0–9 och 37 mot
 clang: rest 0–3, nedåtlöpande, avstånd −5..5 inom en array, lagring före
 laddning, summor, val, invariant ur minnet); `vcc-ctests.py` med `VCC_VIR=bl`
 2079/2082 (de tre `.Lswitch.values`-felen fanns före), utan VIR oförändrat;
@@ -1441,9 +1441,9 @@ vektoriserar tar vi 36; störst skillnad: 9 med villkorlig lagring (clang
 skalariserar lagringen per bana), 7 flyttalsreduktioner (clang: ordnade), 6
 med steg som bara är känt i körtid i en multiplikation.
 
-Tester: `tests/vcc/vir_vec_loops.c` (nu även överlappande pekare, 10
+Tester: `test/vcc/vir_vec_loops.c` (nu även överlappande pekare, 10
 spillda vektorer, steg 1 och 3, okänt avstånd, teckenlösa räknare),
-`tests/vcc/vir_fp_callee.c`.  `vcc-ctests.py` med `VCC_VIR=bl` 2080/2083 (samma
+`test/vcc/vir_fp_callee.c`.  `vcc-ctests.py` med `VCC_VIR=bl` 2080/2083 (samma
 tre), utan VIR 2083/2083; ASan/UBSan rent.
 
 **Tredje omgången (samma dag): skalärloopar.  VIR 6,3 G cykler, clang 4,75.**
@@ -1482,7 +1482,7 @@ Mätt i cykler (G): direkt emitter 23,6, VIR 6,33, clang -O3 4,75; 151/151.
   −1,3 % cykler på TSVC, 0 på sqlite, +0,9 % kod.  Inte infört (samma slutsats
   som tidigare i `vl_dupok`).
 
-`tests/vcc/vir_vec_wide.c` (51 loopar på 8-bytesbanor × varvtal 0–9 och 37).
+`test/vcc/vir_vec_wide.c` (51 loopar på 8-bytesbanor × varvtal 0–9 och 37).
 TSVC oförändrat (allt där är `float`): 43 av 120, 6,3 G cykler.  SQLites
 speedtest1 genom VIR: samma verifieringshash som clang, 2,29 G cykler (clang
 2,01, direkt emitter 3,05); 5 av 565 innerloopar vektoriseras där (resten är
@@ -1528,7 +1528,7 @@ gjorda (SPEC-vir.md avsnitt 19, X1–X3); inget under `src/vir/`.
   `x64_tmpslot` (namnkrock som specen inte såg).
 - **X3:** `L_VAR` i `lval`-uppräkningen; `x64_load`/`x64_store`/`x64_laddr`
   ger internt fel.  Ingen producerar den än.
-- **X1:** `bench/gen-walkprefix.py [--check]` genererar
+- **X1:** `src/tools/gen-walkprefix.py [--check]` genererar
   `codegen/walk/prefix.h` (130 namn); `WK_PREFIX`/`LO_PREFIX` ger en andra
   instans.  Bevisat med ett engångsbygge (inte incheckat): `walk/*.c` med och
   utan `-DWK_PREFIX=vw_ -DLO_PREFIX=vw_` ger 46 globala symboler vardera utan
@@ -1558,7 +1558,7 @@ per block), `vir_uses`, `vir_canon`, `print.c`, `parse.c`, `verify.c` (alla
 27 regler i SPEC avsnitt 12), verktyget `virtest` och `bench/vir-test.py`.
 SPEC rättad till utkast 0.4 i egen commit (lista i PR:en).
 
-- **Tester:** 118/118 (`src/tests/vir/`): 9 operationsfiler där varje
+- **Tester:** 118/118 (`src/test/vir/`): 9 operationsfiler där varje
   instruktion och flagga skrivs–läses–skrivs identiskt, 56 verifierarfall (minst
   ett per regel, exakt den regelns id), 39 syntaxfel, 7 canon-fall, 6
   dominatorfall (tre irreducibla grafer) och `--selftest` för byggar-API:t.
@@ -1587,7 +1587,7 @@ ingen kod i V1 ändrad.
   eller scratch), textdump och verktyget `viralloc` (`allocdump.c`,
   `viralloc.c`: dump och räknare, `--sweep`, `--time`, `--mutate`).
   Inline-asm (15.10) och `dce`-sammanslagningen ingår inte.
-- **Tester:** 16 filer i `src/tests/vir-alloc/` med förväntade dumpar
+- **Tester:** 16 filer i `src/test/vir-alloc/` med förväntade dumpar
   (rak kod, diamant, nästlade loopar, genomlevande värden, kritiska kanter,
   blockargument som byter plats och roterar, anrop, fasta x86-register,
   `ibr` till `VB_ADDR`, irreducibelt, linjärt läge); varje fil körs vid alla
@@ -2033,7 +2033,7 @@ minnestillstånd: det bröts vid varje sammanflöde och varje lagring, och adres
   lever över block), kompilering av sqlite3.c 0,632 → 0,643 s.
 - Också rättat: `vw_simp1` räknade `k + 1` med tecken för masken `INT64_MAX`
   (UBSan, nio tester i vcc-sviten under `build/src-asan`).
-- Test: `tests/vcc/vir_load_far.c` (lagring efter laddningen i kroppen, genom
+- Test: `test/vcc/vir_load_far.c` (lagring efter laddningen i kroppen, genom
   annan pekare, överlappande smalare och bredare, anrop, inre slinga, en arm,
   goto-slinga med ingång i mitten, variabelt index, flydd lokal).
 - Verifierat: vcc-ctests med `VCC_VIR=bl VCC_VIR_CHECK=1` 2077/2080 (samma tre
@@ -2071,7 +2071,7 @@ vektoriserar `slide_hash`), `deflate_fast` 596 mot 422, `longest_match` 838 mot
   med typbaserad alias, som VIR enligt beslutet 2026-11-11 inte har utan flagga.
   Utan beslut: lagring → laddning över lagringar till samma bas på annat offset
   (`str w2, [x0, #8]; str w1, [x0, #12]; ldrsw x1, [x0, #8]`).
-- Test: `tests/vcc/vir_field_access.c`.  Verifierat: vcc-ctests `VCC_VIR=bl
+- Test: `test/vcc/vir_field_access.c`.  Verifierat: vcc-ctests `VCC_VIR=bl
   VCC_VIR_CHECK=1` 2079/2082 (samma tre), med verifieraren (`blv`) vcc-sviten,
   inline 85/85, direkta emittern 2082/2082, ASan+UBSan som förut, vir-test,
   vcc-volatile, sqlite3.c med kontrollen och samma verifieringshash, zlib ger
@@ -2105,9 +2105,9 @@ Gren `claude/vir-sqlite-optimization-acaf18`.  Mätt på sqlite3.c `-O2`
   som ännu inte använts i funktionen, alltså en tidigare funktions stämpel:
   med flera trådar skilde sqlite3.o mellan körningar (16 funktioner).  Nollas
   nu vid varje definition; 26 funktioner ändras även på en tråd.  Emit-trådarna
-  fick Darwins standardstack (512 KB): `tests/vcc/limits.c` gav inget objekt
+  fick Darwins standardstack (512 KB): `test/vcc/limits.c` gav inget objekt
   på 8 trådar; de får nu den skapande trådens storlek.
-- **Öppet, inte VIR:** `tests/vcc/deep_expr.c` och `deep_mixed.c` ger olika
+- **Öppet, inte VIR:** `test/vcc/deep_expr.c` och `deep_mixed.c` ger olika
   objekt mellan körningar med `VCC_THREADS=8` också på direkta vägen (utan
   `VCC_VIR`).  Inte utrett.
 - **Kvar i profilen (platt, ingen post över 6 %):** `vw_hslot` 6 % (Brauns

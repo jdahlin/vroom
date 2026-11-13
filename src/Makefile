@@ -209,7 +209,7 @@ SELF ?= ../build/self
 SELF_CC = $(OUT)/vpp
 SELF_FLAGS = -c -std=c11 -O2 -D_DARWIN_C_SOURCE $(VCC_INC) -DVCC_INCDIR='"$(abspath headers)"'
 SELF_LD = ld -arch arm64 -platform_version macos 14.0 14.0 -syslibroot $$(xcrun --show-sdk-path) -lSystem
-SELF_SRC = $(filter-out tests/% fuzz/%,$(wildcard */*.c */*/*.c */*/*/*.c))
+SELF_SRC = $(filter-out test/% test/fuzz/%,$(wildcard */*.c */*/*.c */*/*/*.c))
 SO = $(SELF)
 # objects are named after the path below src/, / -> - (frontend/c/expr.c -> frontend-c-expr.o)
 so = $(addprefix $(SO)/,$(subst /,-,$(patsubst %.c,%.o,$(1))))
@@ -235,9 +235,9 @@ self-check: self
 
 .PHONY: self self-check
 
-# ---- fuzzing (fuzz/; see AGENTS.md) ----
+# ---- fuzzing (test/fuzz/; see AGENTS.md) ----
 # libFuzzer from Homebrew LLVM when it has one, else the standalone driver
-# (fuzz/driver.c: replay + blind mutation) with Apple clang.
+# (test/fuzz/driver.c: replay + blind mutation) with Apple clang.
 # On Linux: the distro clang's libFuzzer and the host's CPU flags.
 FUZZ_LIBFUZZER := $(wildcard $(LLVM)/lib/clang/*/lib/darwin/libclang_rt.fuzzer_osx.a $(LLVM)/lib/clang/*/lib/linux/libclang_rt.fuzzer-$(shell uname -m).a)
 ifneq ($(FUZZ_LIBFUZZER),)
@@ -247,7 +247,7 @@ FUZZ_DRIVER =
 else
 FUZZ_CC = $(HOST_CC)
 FUZZ_ENGINE =
-FUZZ_DRIVER = fuzz/driver.c
+FUZZ_DRIVER = test/fuzz/driver.c
 endif
 FUZZ_CFLAGS = -std=gnu11 -g -O1 $(HOST_CPU) $(HOST_DEFS) $(VCC_INC) -pthread \
 	-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer \
@@ -260,23 +260,23 @@ fuzz: $(FUZZ_OUT)/fuzz-lex $(FUZZ_OUT)/fuzz-pp $(FUZZ_OUT)/fuzz-diag
 $(FUZZ_OUT):
 	mkdir -p $@
 
-$(FUZZ_OUT)/fuzz-lex: fuzz/fuzz-lex.c fuzz/lexref.c fuzz/fuzz.h $(FUZZ_DRIVER) $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
-	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) fuzz/fuzz-lex.c fuzz/lexref.c $(FUZZ_DRIVER) $(LEX_SRC) -o $@
+$(FUZZ_OUT)/fuzz-lex: test/fuzz/fuzz-lex.c test/fuzz/lexref.c test/fuzz/fuzz.h $(FUZZ_DRIVER) $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
+	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) test/fuzz/fuzz-lex.c test/fuzz/lexref.c $(FUZZ_DRIVER) $(LEX_SRC) -o $@
 
-$(FUZZ_OUT)/fuzz-pp: fuzz/fuzz-pp.c fuzz/fuzz.h $(FUZZ_DRIVER) $(wildcard frontend/pp/*.c frontend/pp/*.h frontend/diag/*.c) $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
-	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) fuzz/fuzz-pp.c $(FUZZ_DRIVER) $(pp_SRC) frontend/pp/dircache.c $(LEX_SRC) -o $@
+$(FUZZ_OUT)/fuzz-pp: test/fuzz/fuzz-pp.c test/fuzz/fuzz.h $(FUZZ_DRIVER) $(wildcard frontend/pp/*.c frontend/pp/*.h frontend/diag/*.c) $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
+	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) test/fuzz/fuzz-pp.c $(FUZZ_DRIVER) $(pp_SRC) frontend/pp/dircache.c $(LEX_SRC) -o $@
 
-$(FUZZ_OUT)/fuzz-diag: fuzz/fuzz-diag.c fuzz/fuzz.h $(FUZZ_DRIVER) $(wildcard frontend/pp/*.c frontend/pp/*.h frontend/diag/*.c) $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
-	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) fuzz/fuzz-diag.c $(FUZZ_DRIVER) $(pp_SRC) frontend/pp/dircache.c $(LEX_SRC) -o $@
+$(FUZZ_OUT)/fuzz-diag: test/fuzz/fuzz-diag.c test/fuzz/fuzz.h $(FUZZ_DRIVER) $(wildcard frontend/pp/*.c frontend/pp/*.h frontend/diag/*.c) $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
+	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) test/fuzz/fuzz-diag.c $(FUZZ_DRIVER) $(pp_SRC) frontend/pp/dircache.c $(LEX_SRC) -o $@
 
-# replay the regression inputs (fuzz/regress/{lex,pp}/): every one must pass
+# replay the regression inputs (test/fuzz/regress/{lex,pp}/): every one must pass
 fuzz-regress: fuzz
-	$(FUZZ_OUT)/fuzz-lex -runs=0 fuzz/regress/lex
-	$(FUZZ_OUT)/fuzz-pp -runs=0 -timeout=10 fuzz/regress/pp
-	$(FUZZ_OUT)/fuzz-diag -runs=0 fuzz/regress/diag
+	$(FUZZ_OUT)/fuzz-lex -runs=0 test/fuzz/regress/lex
+	$(FUZZ_OUT)/fuzz-pp -runs=0 -timeout=10 test/fuzz/regress/pp
+	$(FUZZ_OUT)/fuzz-diag -runs=0 test/fuzz/regress/diag
 
 # the differential check (vpp against clang -E -P) on the regression and seed inputs
 fuzz-diff: $(OUT)/vpp
-	fuzz/pp-diff.py -j 4 fuzz/regress/pp fuzz/seeds/pp
+	test/fuzz/pp-diff.py -j 4 test/fuzz/regress/pp test/fuzz/seeds/pp
 
 .PHONY: fuzz fuzz-regress fuzz-diff

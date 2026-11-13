@@ -75,7 +75,7 @@ comparison without requiring language rejection.
 ```sh
 LLVM=/usr/lib/llvm-23 python3 bench/vcc-onboarding.py --baseline --bless B01
 LLVM=/usr/lib/llvm-23 python3 bench/vcc-onboarding.py --baseline --bless --target aarch64-linux-gnu B01
-git diff -- src/tests/onboarding/01_missing_semicolon.test
+git diff -- src/test/onboarding/01_missing_semicolon.test
 ```
 
 Review the diff. Tests and CI never regenerate expectations. Bless target runs

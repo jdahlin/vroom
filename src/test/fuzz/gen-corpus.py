@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """gen-corpus.py: seed corpora for fuzz-lex and fuzz-pp from kernel headers.
 
-  src/fuzz/gen-corpus.py [--linux DIR] [--out DIR] [-n N]
+  src/test/fuzz/gen-corpus.py [--linux DIR] [--out DIR] [-n N]
 
 Takes small snippets (at most ~1.5 KB, cut at line boundaries outside
 continued lines) of headers in work/linux (include/linux, include/uapi,
@@ -18,7 +18,7 @@ kernel text stays in work/.
 import argparse, hashlib, os, re, sys
 
 H = os.path.dirname(os.path.abspath(__file__))
-R = os.path.dirname(os.path.dirname(H))
+R = os.path.dirname(os.path.dirname(os.path.dirname(H)))	# src/test/fuzz/ -> the checkout
 
 
 def default_linux():

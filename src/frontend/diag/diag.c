@@ -1316,7 +1316,7 @@ static void expansion_note(pp *p, vdiag *top, vdiag *after, const pmacro *m, uin
 
 /* ---------------- records ---------------- */
 
-/* vcc's formats and their ids (bench/gen-diagids.py) */
+/* vcc's formats and their ids (src/tools/gen-diagids.py) */
 static const struct dfmt { const char *fmt, *id; } dfmts[] = {
 #define DID(n, cls, grp)
 #define DFMT(f, n) { f, #n },

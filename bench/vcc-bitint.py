@@ -88,11 +88,11 @@ def main():
         runs=[]
         for compiler in (['vcc','clang'] if vx else ['vcc']):
             obj=wd/(compiler+'.o');exe=ct.VPP if compiler=='vcc' else ct.CL
-            rc,out,err=ct.sh([exe,*base,'-DWIDTH='+str(bits),'-c',str(bench.parent/'src/tests/bitint/operations.c'),'-o',str(obj)])
+            rc,out,err=ct.sh([exe,*base,'-DWIDTH='+str(bits),'-c',str(bench.parent/'src/test/bitint/operations.c'),'-o',str(obj)])
             (wd/(compiler+'.log')).write_bytes(out+err)
             if rc:runs.append(dict(compiler=compiler,stage='compile',exit=rc,message=err.decode(errors='replace')));continue
             counts=wd/(compiler+'-counts.o')
-            rc,out,err=ct.sh([exe,*base,'-c',str(bench.parent/'src/tests/bitint/counts.c'),'-o',str(counts)])
+            rc,out,err=ct.sh([exe,*base,'-c',str(bench.parent/'src/test/bitint/counts.c'),'-o',str(counts)])
             (wd/(compiler+'-counts.log')).write_bytes(out+err)
             if rc:runs.append(dict(compiler=compiler,stage='counts',exit=rc,message=err.decode(errors='replace')));continue
             elf=str(wd/(compiler+'.elf'));rc,err=(vx.link if vx else ct.link)([str(caller_obj),str(obj),str(counts)],elf)

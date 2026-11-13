@@ -1,7 +1,7 @@
 /* Generated from LLVM llvm/lib/TargetParser/Host.cpp c47d7823685a.
  * Copyright LLVM contributors. Apache-2.0 WITH LLVM-exception.
  * See x86native-LICENSE.txt. Adapted to C and vcc feature masks by
- * bench/gen-x86native.py; no runtime LLVM dependency.
+ * src/tools/gen-x86native.py; no runtime LLVM dependency.
  * Source SHA256 aa72fa102140de2f8a28b195f7b18bb25b44bbc9d19295c14a5991c212c8af52
  */
 static const char *x86_native_intel(unsigned Family, unsigned Model, x86_features features) {
