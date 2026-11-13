@@ -89,7 +89,7 @@ AS_FILES = arch/a64/as/enc.c platform/darwin/macho.c $(if $(VCC_WASM),arch/wasm/
 as_SRC   = as/as.c arch/a64/as/parse.c arch/x64/as/asm.c arch/x64/as/sys.c arch/x64/as/gpr.c \
            arch/x64/as/x87.c arch/x64/as/sse.c arch/x64/as/avx.c
 LEX_SRC = frontend/lex/lex.c common/intern.c
-PP_SRC  = frontend/pp/dircache.c driver/ppdriver.c driver/ccsnap.c common/ldhash.c
+PP_SRC  = frontend/pp/dircache.c driver/ccsnap.c common/ldhash.c
 VCCD_SRC = server/dstore.c server/caps.c utils/fixdep.c utils/ar.c utils/rsh.c
 # the server proper (vccd.c has main), one TU like the split modules; dstore.c and caps.c stay apart
 server_SRC = $(filter-out server/dstore.c server/caps.c,$(wildcard server/*.c))
@@ -98,7 +98,7 @@ server_SRC = $(filter-out server/dstore.c server/caps.c,$(wildcard server/*.c))
 # SQLite's amalgamation), so the code generator sees all of it, also in `make
 # self` where there is no LTO, and what the files share stays static (VPRIV in
 # the headers).  `make VCC_UNITY=` compiles the files one by one.
-SPLIT_MODS = cc pp codegen
+SPLIT_MODS = cc pp codegen driver
 # the object writer: the model, the CPU's fixups, the ELF writer (linked with as)
 # VIR (SPEC-vir.md): the format and its tools, register allocation (V4); linked into the
 # compiler for codegen/vir/ (VCC_VIR)
@@ -106,6 +106,8 @@ vir_SRC  = vir/table.c vir/vir.c vir/print.c vir/parse.c vir/verify.c vir/facts.
 VIRA_SRC = vir/loops.c vir/alloc.c vir/allocchk.c vir/allocdump.c	# (not in the unity TU: own statics)
 obj_SRC  = obj/obj.c arch/a64/obj/fixup.c arch/x64/obj/fixup.c platform/linux/elf.c
 cc_SRC   = $(wildcard frontend/c/*.c)
+# the compile job (ppd_run); ccsnap.c stays a TU of its own
+driver_SRC = $(filter-out driver/ccsnap.c,$(wildcard driver/*.c))
 # pp: the preprocessor and, for now, the diagnostics engine (it uses ppimpl.h)
 pp_SRC   = $(filter-out frontend/pp/dircache.c,$(wildcard frontend/pp/*.c)) $(wildcard frontend/diag/*.c)
 codegen_SRC = $(wildcard codegen/*.c codegen/opt/*.c codegen/rec/*.c codegen/flow/*.c arch/a64/codegen/*.c $(if $(VCC_WASM),arch/wasm/codegen/*.c) codegen/walk/*.c arch/x64/codegen/*.c codegen/vir/*.c)
