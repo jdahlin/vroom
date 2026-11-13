@@ -100,7 +100,7 @@ typedef struct cxx_tparam {
 
 /* a template argument, as far as it is known: a type or an integer value */
 typedef struct cxx_targ {
-	uint8_t kind;		/* 0 unknown, 1 type, 2 value */
+	uint8_t kind;		/* 0 unknown, 1 type, 2 value, 3 a value placeholder (v: the parameter's index) */
 	qty t;
 	int64_t v;
 } cxx_targ;
@@ -118,6 +118,7 @@ typedef struct cxx_entity {
 	struct cxx_instance *instance;	/* an instance: its cache entry (completed on demand) */
 	uint32_t sym;			/* a variable or function: its AST symbol (0: none yet) */
 	int64_t value;			/* a constant (value template argument, constexpr/const integer): its value */
+	uint16_t placeholder;		/* a value parameter of a partial specialization being matched: its index + 1 */
 	uint8_t has_value;
 	cxx_scope **specs;		/* class template: its partial and explicit specializations' scopes */
 	uint32_t nspecs;
@@ -197,6 +198,10 @@ typedef struct cxx {
 	cxx_scope **tag_scope;		/* per AST tag: the class's scope (a type parameter bound to it: T::member) */
 	uint32_t ntag_scope;
 	void **tag_instance;		/* per AST tag: an instance not completed yet (instantiate.c) */
+	void **tag_info;		/* per AST tag: the instance it is (template, arguments), for matching */
+	struct { void *owner; uint32_t index; } *tag_placeholder;	/* per AST tag: a placeholder's partial and index + 1 */
+	uint32_t ntag_info, ntag_placeholder;
+	uint32_t partial_matches, partial_unknown;
 	uint32_t ntag_instance;
 	char **tag_spelling;		/* per AST tag: its name as C++ source (the layout dump), NULL: none */
 	uint32_t ntag_spelling;
@@ -276,7 +281,7 @@ VPRIV void cxx_name_path_pop(cxx *c, uint32_t saved_len, uint8_t saved_valid);
 /* instantiation (instantiate.c) */
 VPRIV cxx_template *cxx_template_of(cxx_entity *e);	/* (allocates) */
 VPRIV void cxx_template_define(cxx *c, cxx_entity *e, cxx_scope *params, cxx_scope *home, uint32_t pos, uint32_t end, bool alias);
-VPRIV void cxx_template_partial(cxx_entity *e);
+VPRIV void cxx_template_partial(cxx *c, cxx_entity *e, cxx_scope *params, cxx_scope *home, uint32_t less_pos, uint32_t key_pos);
 VPRIV void cxx_template_declared(cxx *c, cxx_entity *e, cxx_scope *params);
 VPRIV void cxx_tparam_add(cxx *c, int kind, uint32_t name, bool pack, uint32_t def_b, uint32_t def_e);
 VPRIV cxx_entity *cxx_instantiate(cxx *c, cxx_entity *te, const cxx_targ *args, uint32_t nargs, bool complete);
@@ -284,6 +289,7 @@ VPRIV void cxx_instance_complete(cxx *c, cxx_entity *inst);
 VPRIV void cxx_type_require_complete(cxx *c, qty t);
 VPRIV cxx_scope *cxx_type_class_scope(cxx *c, qty t);
 VPRIV void cxx_tag_instance_set(cxx *c, uint32_t tag, void *x);
+VPRIV void cxx_tag_info_set(cxx *c, uint32_t tag, void *x);
 VPRIV void cxx_instance_register(cxx *c, cxx_entity *te, const cxx_targ *args, uint32_t nargs, cxx_entity *inst);
 VPRIV bool cxx_type_spell(cxx *c, qty t, char *buf, size_t cap, size_t *len);
 VPRIV void cxx_tag_spelling_set(cxx *c, uint32_t tag, const char *s, size_t n);

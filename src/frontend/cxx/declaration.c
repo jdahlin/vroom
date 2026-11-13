@@ -228,8 +228,11 @@ static void cxx_template_argument_parse(cxx *c, cxx_targ *out)
 	}
 	if (n->kind == LEX_TOKEN_COMMA || n->kind == LEX_TOKEN_GREATER) {
 		int64_t v = cxx_literal_value(c);
+		cxx_entity *e = t->kind == LEX_TOKEN_IDENTIFIER && !t->kw ? cxx_lookup(c, t->id) : NULL;
 
-		if (v >= 0)
+		if (e && e->kind == CXX_ENTITY_VALUE && e->placeholder)
+			out->kind = 3, out->v = e->placeholder - 1;	/* a partial specialization's value parameter */
+		else if (v >= 0)
 			out->kind = 2, out->v = v;
 	}
 	(void)t;
@@ -1479,8 +1482,11 @@ static void cxx_using_parse(cxx *c)
 					}
 					e = cxx_declare(c, cxx_declaration_scope(c), name, t->kind);
 					if (e && e != t) {
+						/* the same entity under another name: all of what it is (std::uint64_t's type) */
 						e->members = t->members, e->dependent = t->dependent;
 						e->specs = t->specs, e->nspecs = t->nspecs;
+						e->ty = t->ty, e->tmpl = t->tmpl, e->sym = t->sym, e->instance = t->instance;
+						e->value = t->value, e->has_value = t->has_value;
 					}
 				}
 			} else if (dep || is_typename) {
@@ -1771,7 +1777,7 @@ static void cxx_class_specifier_parse(cxx *c, bool is_template)
 	/* an instantiation re-parsing this class's tokens (instantiate.c): it defines that instance */
 	cxx_entity *instance = c->instantiation_target, *instance_of = c->instantiation_template;
 	cxx_targ spec_args[32];
-	uint32_t nspec_args = 0;
+	uint32_t nspec_args = 0, spec_less = 0;
 
 	c->instantiation_target = c->instantiation_template = NULL;
 	cxx_advance(c);	/* class / struct / union */
@@ -1783,6 +1789,7 @@ static void cxx_class_specifier_parse(cxx *c, bool is_template)
 		name = cxx_peek(c, 0)->id;
 		cxx_advance(c);
 		if (cxx_is(c, LEX_TOKEN_LESS)) {	/* a specialization */
+			spec_less = c->pos;
 			cxx_template_arguments_parse(c);
 			specialization = true;
 			nspec_args = c->ntargs < 32 ? c->ntargs : 32;
@@ -1841,8 +1848,8 @@ static void cxx_class_specifier_parse(cxx *c, bool is_template)
 			if (te && !c->tentative) {
 				te->specs = realloc(te->specs, (te->nspecs + 1) * sizeof *te->specs);
 				te->specs[te->nspecs++] = cs;
-				if (c->template_depth)
-					cxx_template_partial(te);	/* (instances of te: unknown until matching is written) */
+				if (c->template_depth)	/* a partial specialization: matched when te is instantiated */
+					cxx_template_partial(c, te, c->scope, target, spec_less, key_pos);
 				else {
 					explicit_instance = calloc(1, sizeof *explicit_instance);
 					explicit_instance->name = name, explicit_instance->kind = CXX_ENTITY_TYPE;
