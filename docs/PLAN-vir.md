@@ -240,6 +240,42 @@ ekvivalenstestning återstår. Genererade program använder inga externa anrop.
 ### V4 x86-64 mot clang -O2 (2026-11-12), mål högst 5 % långsammare
 
 
+2026-11-13, rebase och skalade heltalsadresser: grenen ligger nu på
+`5a111ce5` (PR127–129). ARM:s nya kopia av ett block med en vanlig operation
+och `br` ingår i den gemensamma layoutregeln, även för x86. Nytt enhetsprov
+för storlek/djup/cold/adresstagning/anrop och det befintliga
+`vir_break_dup.c` i x86-fokusriggen; ARM:s break-/rotations-/joinprov matchar
+referensen under QEMU. Planer/specifikationer följer main till `docs/`.
+
+En föreslagen ändring till i32-bärare för 32-bitars ABI-delar behålls inte.
+Bara parametrar: 1270,81 → 1270,54 ms. Även anropsargument/-resultat och
+returvärden: 1271,91 → 1271,33 ms, instruktioner/clang 1,344× → 1,342×.
+Vinsten motiverar inte att ändra SPEC:s beslut O1. Format och byggare är
+återställda. Underlag `work/vir-x86-perf/{param32,abi32}`.
+
+Den behållna x86-ändringen tar bort skalnings-MUL/SHL även när adressen är
+`add.i64` + `i2p` framför minnesåtkomsten. Samma krav på engångsvärden,
+spill och edits som för `ptradd`. `pcache1Fetch` blir exempelvis
+`movq (%r8,%rdx,8), %rax` i stället för `imulq $8, %rdx, %rdx` och en
+laddning med skala 1, som jämförelsen med clang pekade ut.
+
+Fem alternerade prov per serie, speedtest1 main storlek 100 på CPU 7:
+
+| Serie | clang CPU ms | Före CPU ms | Skalad adress CPU ms | Skalad/clang |
+|---|---:|---:|---:|---:|
+| Första | 1111,14 | 1281,37 | 1249,30 | 1,124× |
+| Upprepning | 1112,07 | 1279,26 | 1250,42 | 1,124× |
+
+Cirka 2,3–2,5 % lägre CPU-tid, även färre cykler; instruktioner/clang
+1,336× → 1,329×. Båda har samma verifieringshash. **Målet 1,05× är öppet.**
+Underlag `work/vir-x86-perf/castscale/{results100,repeat100}`. Nytt körprov
+täcker skalorna 2/4/8, negativa index, moduloindex, volatile store, ett
+index som också lagras och en skala 3 som inte får bli hårdvaruskala.
+Validerat: egna x86 314/314, GCC 1615/1615, TCC 105/105, samma fem kända
+inlinefel. Fokusprov med egen assembler, ett/sex trådar, ASan/UBSan och
+filvist bygge gröna. VIR 130/130 och builder-selftest gröna. TSVC 151/151
+kontrollsummor, 82 vektorloopar och 158 funktioner genom VIR.
+
 2026-11-13, jämförelse med minnesoperand: x86 kan nu fälla en intilliggande,
 vanlig engångsladdning direkt till `cmp`. Samma bredd används som laddningen;
 smala laddningar tillåts bara för ==/!= mot en representerbar konstant.

@@ -368,6 +368,15 @@ static bool vx_memnext(vx *L,uint32_t b,uint32_t v)
 		vx_foldedits(L,b,v+1,XNOREG);
 }
 
+/* Integer-address form of the same single memory consumer. */
+static bool vx_castmem(vx *L,uint32_t b,uint32_t v)
+{
+	const vir_fn *f=L->f;
+	return f->ins[v].op==VO_ADD && f->ins[v].ty==VT_I64 && L->uses[v]==1 && L->o->slot[v]==VIR_NOBLK &&
+	 v+2<f->blk[b].first+f->blk[b].n && f->ins[v+1].op==VO_I2P && f->ins[v+1].a==v &&
+	 vx_memnext(L,b,v+1) && vx_foldedits(L,b,v+1,XNOREG);
+}
+
 /* Exact consecutive big-endian byte assembly, with no observable access or
  * allocator edit interleaved. Never widen beyond the bytes actually read. */
 static unsigned vx_readword(vx *L,uint32_t b,uint32_t v,uint32_t *end)
@@ -530,11 +539,11 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 			L->beindexed=!vx_imm(L->f,i->b,&L->beoff);L->beindex=c;L->besh=0;return;
 		}
 	}
-	if(i->op==VO_ADD && i->ty==VT_I64 && L->uses[v]==1 && L->o->slot[v]==VIR_NOBLK &&
-	   v+2<L->f->blk[b].first+L->f->blk[b].n && L->f->ins[v+1].op==VO_I2P && L->f->ins[v+1].a==v &&
-	   vx_memnext(L,b,v+1) && vx_foldedits(L,b,v+1,XNOREG)) {
+	if(vx_castmem(L,b,v)) {
 		L->memv=v+1;L->memskip=v+1;L->membase=a;L->memoff=0;
-		L->indexed=!vx_imm(L->f,i->b,&L->memoff);L->memindex=c;L->memsh=0;return;
+		L->indexed=!vx_imm(L->f,i->b,&L->memoff);
+		L->memindex=L->scaledv==i->b?L->scaleindex:c;
+		L->memsh=L->scaledv==i->b?L->scalesh:0;return;
 	}
 	if (i->op == VO_MUL && i->ty == VT_I32X4) {
 		char text[600];
@@ -547,8 +556,9 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 		vx_raw(L, text); return;
 	}
 	if ((i->op==VO_MUL || i->op==VO_SHL) && i->ty==VT_I64 && L->uses[v]==1 && L->o->slot[v]==VIR_NOBLK &&
-	    v+2<L->f->blk[b].first+L->f->blk[b].n && L->f->ins[v+1].op==VO_PTRADD && L->f->ins[v+1].b==v &&
-	    vx_memnext(L,b,v+1) && vx_foldedits(L,b,v+1,a)) {
+	    v+2<L->f->blk[b].first+L->f->blk[b].n && L->f->ins[v+1].b==v &&
+	    ((L->f->ins[v+1].op==VO_PTRADD && vx_memnext(L,b,v+1)) || vx_castmem(L,b,v+1)) &&
+	    vx_foldedits(L,b,v+1,a)) {
 		int64_t k;
 		if(vx_imm(L->f,i->b,&k) && (i->op==VO_SHL ? k>=0 && k<=3 : k==1 || k==2 || k==4 || k==8)) {
 			L->scaledv=v;L->scaleindex=a;

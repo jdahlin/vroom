@@ -1063,3 +1063,14 @@ volatile och fleranvända laddningar kombineras inte. Instruktioner/clang i
 SQLite main 1,358× → 1,344×; CPU-tiden varierar mellan serier (1,141–1,154×).
 Målet 1,05× är öppet. Egna x86 308/308, samma fem kända inlinefel, ASan/UBSan,
 filvist bygge och TSVC 151/151 med 82 vektorloopar gröna. Se V4 i PLAN-vir.md.
+
+
+### 2026-11-13: main PR127–129 och skala genom pekarkast
+
+Rebase på 5a111ce5. Den gemensamma blockplaneraren behåller även main:s nya
+regel för en operation följd av br; ARM och x86 använder samma bevis.
+x86:s indexskalning fälls nu även genom add.i64+i2p. I pcache1Fetch blir
+imulq+load med skala 1 en load med skala 8. Två femprovserier ger 1281/1279
+→ 1249/1250 ms CPU, 1,124× clang; cirka 2,3–2,5 % vinst. Målet 1,05× är
+fortfarande öppet. En föreslagen ändring av 32-bitars ABI-bärare avvisades
+som neutral; SPEC:s O1 är oförändrad. Detaljer i PLAN-vir.md.

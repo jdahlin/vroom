@@ -209,6 +209,19 @@ static int selftest(void)
 	 vir_aedge edge={.n=1};o.edge=&edge;eidx[3]=0;
 	 vir_layout_chases(&f,&o,chase,path);CHECK(chase[2]==2);
 	}
+	/* ARM's dispatch-latch rule is shared too: one plain operation and br. */
+	{
+	 vir_ins ins[3]={{.op=VO_ADD},{.op=VO_BR},{.op=VO_RET}};
+	 vir_blk blk[3]={{.first=2,.n=1},{.first=0,.n=2},{.first=2,.n=1}};
+	 vir_fn g={.ins=ins,.blk=blk,.nins=3,.nblk=3};
+	 vir_loops lp={0};uint32_t rotation[3]={VIR_NOBLK,VIR_NOBLK,VIR_NOBLK};
+	 CHECK(vir_layout_duplicate(&g,&lp,rotation,0,1,2,0,true));
+	 CHECK(!vir_layout_duplicate(&g,&lp,rotation,0,1,2,0,false));
+	 CHECK(!vir_layout_duplicate(&g,&lp,rotation,0,1,2,2,true));
+	 blk[0].fl=VB_COLD;CHECK(!vir_layout_duplicate(&g,&lp,rotation,0,1,2,0,true));blk[0].fl=0;
+	 blk[1].fl=VB_ADDR;CHECK(!vir_layout_duplicate(&g,&lp,rotation,0,1,2,0,true));blk[1].fl=0;
+	 ins[0].op=VO_CALL;CHECK(!vir_layout_duplicate(&g,&lp,rotation,0,1,2,0,true));
+	}
 	/* the limit of the constant table: the 2^23+1st constant fails, and the next function starts clean */
 	vir_begin(&f, VTG_X86_64_LINUX, sym, 0);
 	for (uint32_t i = 0; i <= VIR_MAX_CONST; i++)
