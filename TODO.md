@@ -1657,7 +1657,6 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   - -Wsometimes-uninitialized: `if (c && (x = g())) return x; return x;`, an `if` whose
     then-branch only breaks or returns, `if (c) x = 1; else if (d) x = 2;`
     (`uninit_v2.c`), and the edge and the use drawn as numbered path steps;
-  - -Wreturn-type after a switch on an enum that returns in every case (clang: none);
   - -Wreturn-stack-address: two shapes missed, one extra (`return_stack_v2.c`);
   - -Wunused-value/-Wunused-comparison: four cases (`unused_value_v2.c`);
   - -Wformat for scanf and its family (fmt.c checks printf only).

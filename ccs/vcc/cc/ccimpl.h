@@ -538,6 +538,7 @@ VPRIV void lazy_closure(cc *c);
 /* func.c */
 VPRIV void function_def(cc *c, uint32_t s, const declr *d);
 VPRIV void translation_unit(cc *c);
+VPRIV bool enum_covered(cc *c, const node *sw);
 /* layout.c */
 VPRIV const char *tyname(cc *c, qty t);
 VPRIV void layout_checks(cc *c);
