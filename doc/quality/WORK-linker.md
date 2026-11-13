@@ -224,6 +224,13 @@ resolution and section assignment, with a format writer each.  The decision
 of `PLAN-quality.md` ("one linker core, not three linkers") applies; the
 step is designed when 2 and 3 are done.
 
+Design (2026-11-13): `DESIGN-linker-core.md`.  The core is the entry, the
+context, inputs and archives, and diagnostics; resolution, layout, the ELF
+symbol table and the output writer stay per format, with the reasons and two
+questions for the owner there.  PRs: a Mach-O comparison harness, Mach-O
+state in a context, one entry and lock, Mach-O names on
+`common/string-index.h`.
+
 ## Decisions (coordinator, on the owner's behalf, 2026-11-13)
 
 - The `vld: error: out of memory` message when the context allocation fails
