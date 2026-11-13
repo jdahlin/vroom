@@ -77,7 +77,7 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
         ('vir_x86_blocks.c', {'copy1', 'copy24', 'copy127', 'copy128', 'copy129', 'zero24', 'zero256', 'zero257', 'zero_local', 'readbyte', 'dynamic', 'nonzero', 'lowzero'}, {}),
         ('vir_x86_ext.c', {'clean', 'trim', 'mask', 'signedload', 'fromcall'}, {}),
         ('vir_x86_select.c', {'choose', 'uchoose', 'keep', 'boolean', 'pointer'}, {}),
-        ('vir_x86_bytes.c', {'be16', 'be32', 'indexed16', 'indexed32', 'bev16', 'signed16', 'changed'}, {}),
+        ('vir_x86_bytes.c', {'be16', 'be32', 'be64', 'be48', 'offset32', 'bev64', 'indexed16', 'indexed32', 'bev16', 'signed16', 'changed'}, {}),
         ('vir_x86_inline.c', {'work'}, {}),
         ('vir_x86_index.c', {'load8', 'load4', 'load2', 'load1', 'store8', 'store4'}, {}),
         ('vir_vector_stride.c', {'stride', 'wide', 'reverse', 'ordered', 'residue', 'gather', 'carry', 'chain', 'maxval', 'maxindex', 'lastnegative'}, {'stride': 'mulps', 'reverse': 'addpd', 'ordered': 'mulps', 'residue': 'addps', 'gather': 'mulps', 'carry': 'mulps'}),
@@ -142,6 +142,13 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
                 body = asm.read_text().split('be32:\n', 1)[1].split('.Lfunc_end', 1)[0]
                 if 'bswapl' not in body:
                     raise SystemExit('be32: missing combined word read and byte swap')
+                for name, opcode in [('be64', 'bswapq'), ('be48', 'bswapl'), ('offset32', 'bswapl')]:
+                    body = asm.read_text().split(name + ':\n', 1)[1].split('.Lfunc_end', 1)[0]
+                    if opcode not in body:
+                        raise SystemExit(f'{name}: missing combined read and byte swap')
+                body = asm.read_text().split('bev64:\n', 1)[1].split('.Lfunc_end', 1)[0]
+                if body.count('movzbl') != 8 or 'bswap' in body:
+                    raise SystemExit('bev64: volatile byte reads were combined')
                 for name in ('indexed16', 'indexed32'):
                     body = asm.read_text().split(name + ':\n', 1)[1].split('.Lfunc_end', 1)[0]
                     if not re.search(r'\(%\w+,%\w+,1\)', body):

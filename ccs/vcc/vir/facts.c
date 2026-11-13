@@ -85,3 +85,78 @@ uint32_t vir_mask32(const vir_fn *f,uint32_t v,unsigned depth)
 	default:return UINT32_MAX;
 	}
 }
+
+/* Consecutive unsigned byte assembly. Keep this proof in VIR: targets choose
+ * their unaligned load/reversal and separately check allocation edits. */
+static uint32_t be_address(const vir_fn *f,uint32_t v,uint64_t *off)
+{
+	for(unsigned depth=0;depth<8 && f->ins[v].op==VO_PTRADD;depth++) {
+		const vir_ins *i=&f->ins[v],*k=&f->ins[i->b];
+		if(k->op!=VO_ICONST)break;
+		*off+=(uint64_t)k->c<<32|k->b;v=i->a;
+	}
+	return v;
+}
+static bool be_word(const vir_fn *f,uint32_t v,uint32_t limit,unsigned width,uint32_t *last)
+{
+	uint32_t at=v,acc=v;
+	if(limit-v<4*width-3)return false;
+	const vir_ins *first=&f->ins[v];
+	if(first->op!=VO_LOAD || first->ty!=VT_I32 || (first->fl&(VIF_VOL|VIF_MS|3)))return false;
+	uint64_t off=0;uint32_t base=be_address(f,first->a,&off);
+	for(unsigned byte=0;byte<width;byte++) {
+		uint32_t part=v;
+		if(byte) {
+			const vir_ins *addr=&f->ins[++at];uint64_t delta=0;
+			if(addr->op!=VO_PTRADD || be_address(f,at,&delta)!=base || delta-off!=byte)return false;
+			const vir_ins *load=&f->ins[++at];
+			if(load->op!=VO_LOAD || load->ty!=VT_I32 || load->a!=at-1 || (load->fl&(VIF_VOL|VIF_MS|3)))return false;
+			part=at;
+		}
+		if(byte+1<width) {
+			const vir_ins *shift=&f->ins[++at];
+			if(shift->op!=VO_SHL)return false;
+			const vir_ins *k=&f->ins[shift->b];
+			if(shift->op!=VO_SHL || shift->ty!=VT_I32 || shift->a!=part || k->op!=VO_ICONST || k->b!=8*(width-byte-1) || k->c)return false;
+			part=at;
+		}
+		if(byte) {
+			const vir_ins *join=&f->ins[++at];
+			if(join->op!=VO_OR || join->ty!=VT_I32 || !((join->a==acc && join->b==part)||(join->b==acc && join->a==part)))return false;
+		}
+		acc=at;
+	}
+	*last=at;return true;
+}
+unsigned vir_read_be(const vir_fn *f,const uint8_t *uses,uint32_t first,uint32_t limit,uint32_t *last)
+{
+	uint32_t end;
+	if(first>=limit || limit>f->nins)return 0;
+	unsigned width=be_word(f,first,limit,4,&end)?4:be_word(f,first,limit,2,&end)?2:0;
+	if(!width)return 0;
+	if(width==4 && limit-end>18) {
+		const vir_ins *ext=&f->ins[end+1],*shift=&f->ins[end+2],*addr=&f->ins[end+3];
+		const vir_ins *k=shift->op==VO_SHL?&f->ins[shift->b]:&f->ins[0];uint32_t low;
+		uint64_t a=0,b=0;
+		if(ext->op==VO_EXT && ext->ty==VT_I64 && ext->fl==2 && ext->a==end &&
+		   shift->op==VO_SHL && shift->ty==VT_I64 && shift->a==end+1 && k->op==VO_ICONST && k->b==32 && !k->c &&
+		   addr->op==VO_PTRADD && be_address(f,end+3,&b)==be_address(f,f->ins[first].a,&a) && b-a==4 &&
+		   be_word(f,end+4,limit,4,&low) && f->ins[end+4].a==end+3 && low+2<limit) {
+			const vir_ins *le=&f->ins[low+1],*join=&f->ins[low+2];
+			if(le->op==VO_EXT && le->ty==VT_I64 && le->fl==2 && le->a==low &&
+			   join->op==VO_OR && join->ty==VT_I64 &&
+			   ((join->a==end+2 && join->b==low+1)||(join->b==end+2 && join->a==low+1)))width=8,end=low+2;
+		}
+	}
+	/* Every skipped definition is private to this expression. This also
+	 * handles the second half's shared pointer without allowing outside uses. */
+	uint8_t internal[40]={0};
+	if(end-first>=sizeof internal)return 0;
+	for(uint32_t v=first;v<=end;v++) {
+		vir_ins i=f->ins[v];vir_oit it;uint32_t *p;
+		vir_oit_init(&it,(vir_fn *)f,&i,false);
+		while((p=vir_oit_next(&it)))if(*p>=first && *p<=end)internal[*p-first]++;
+	}
+	for(uint32_t v=first;v<end;v++)if(uses[v]!=internal[v-first])return 0;
+	*last=end;return width;
+}

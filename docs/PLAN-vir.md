@@ -240,6 +240,36 @@ ekvivalenstestning återstår. Genererade program använder inga externa anrop.
 ### V4 x86-64 mot clang -O2 (2026-11-12), mål högst 5 % långsammare
 
 
+2026-11-13, små SQLite-funktioner: byte-sammansättningens strukturella bevis
+har flyttats från x86 till `vir/facts.c` (`vir_read_be`). Det normaliserar
+konstanta pekaroffsetar och känner även igen två 32-bitshalvor som en 64-bit
+big-endian-läsning. x86 väljer en exakt bred laddning och bswap; inga extra
+byte läses, och varken volatile, signerade byte eller externt använda
+mellanvärden får kombineras. Edits/spillkontrollen ligger kvar i målet.
+
+`vdbeRecordCompareInt`: 102 → 82 maskininstruktioner; åttabytesfallet är
+nu movq+bswapq, sexbytesfallet använder movl+bswapl för den osignerade
+fyrabytesdelen. Samma regel förbättrar `sqlite3VdbeSerialGet` 138 → 122 och
+`walDecodeFrame` 95 → 71. Separata 300-miljonersprov gav cirka 17 % lägre
+CPU-tid för sexbytesfallet och 11 % för åttabytesfallet i de länkade
+SQLite-objekten. Ett separat fast-alignat funktionsprov ändrade resultatet
+kraftigt: vinsterna är **layoutkänsliga**, inte stabila löften per datatyp.
+
+Hela speedtest1, fem alternerade prov, storlek 100: 1275,02 → 1274,71 ms;
+upprepning 1274,46 → 1275,21 ms. Båda cirka 1,148× clang, alltså ingen
+mätbar helprogramvinst av byteläsningen. Underlag:
+`work/vir-x86-perf/byteflags/{results100,repeat100}` och
+`work/vir-x86-perf/record-int` (byteflags-serierna innehåller även den
+behållna byte64-varianten). Flaggåteranvändning över enkla branchkedjor och
+flyttade switchtabeller prövades men behålls inte: omkring 1 % långsammare
+SQLite, trots färre instruktioner för flaggvarianten. Målet 1,05× är öppet.
+
+Regressionsprovet täcker 16/32/64 bit, offsetad 32-bit, signerad 48-bit,
+alla byte-alignments och separata volatile-läsningar. Egna x86 307/307,
+GCC 1615/1615, TCC 105/105, samma fem kända inlinefel; fokuserat ASan/UBSan
+och filvist bygge gröna. VIR-formatprov 130/130 och allokatorprov 20/20.
+TSVC 151/151 kontrollsummor, 82 vektorloopar och 158 funktioner sänkta.
+
 2026-11-13, allokering vid switch: gemensamma allokatorn flyttar nu levande
 värden ur sena/tidiga clobbers även före villkorliga terminatorers utgående
 tillstånd. Tidigare hoppades fasen över. x86 kan därför använda r10 mellan

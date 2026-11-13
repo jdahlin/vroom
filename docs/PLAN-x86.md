@@ -1043,3 +1043,13 @@ behöver inte reservera det genom hela funktioner med gles/multianvänd switch.
 Två korta femprovserier gav cirka 0,5–0,6 % lägre CPU-tid för SQLite main;
 1,141× clang i den andra serien. Syntetiskt prov reproducerar det gamla
 allokatorfelet och sveper 48 registerkonfigurationer. Se V4 i PLAN-vir.md.
+
+
+### 2026-11-13: små SQLite-avkodare
+
+Gemensamma `vir_read_be` känner igen exakta 16/32/64-bitars byte-läsningar,
+även med konstanta offsetar. x86:s vdbeRecordCompareInt går 102 → 82
+instruktioner, sqlite3VdbeSerialGet 138 → 122 och walDecodeFrame 95 → 71.
+Funktionstider är layoutkänsliga; två femprovserier av hela speedtest1 är
+neutrala, cirka 1,148× clang. Färre instruktioner räknas inte som nått
+1,05×-mål. Detaljer och avvisade flagg-/tabellförsök i PLAN-vir.md.

@@ -369,37 +369,13 @@ static bool vx_memnext(vx *L,uint32_t b,uint32_t v)
 
 /* Exact consecutive big-endian byte assembly, with no observable access or
  * allocator edit interleaved. Never widen beyond the bytes actually read. */
-static bool vx_readword(vx *L,uint32_t b,uint32_t v,unsigned width)
+static unsigned vx_readword(vx *L,uint32_t b,uint32_t v,uint32_t *end)
 {
-	const vir_fn *f=L->f;
-	uint32_t end=v+4*width-4,at=v,acc=v;
-	if(end>=f->blk[b].first+f->blk[b].n)return false;
-	const vir_ins *first=&f->ins[v];
-	if(first->op!=VO_LOAD || first->ty!=VT_I32 || (first->fl&(VIF_VOL|VIF_MS|3)))return false;
-	for(unsigned byte=0;byte<width;byte++) {
-		uint32_t part=v;
-		int64_t k;
-		if(byte) {
-			const vir_ins *addr=&f->ins[++at];
-			if(addr->op!=VO_PTRADD || addr->a!=first->a || !vx_imm(f,addr->b,&k) || k!=byte)return false;
-			const vir_ins *load=&f->ins[++at];
-			if(load->op!=VO_LOAD || load->ty!=VT_I32 || load->a!=at-1 || (load->fl&(VIF_VOL|VIF_MS|3)))return false;
-			part=at;
-		}
-		if(byte+1<width) {
-			const vir_ins *shift=&f->ins[++at];
-			if(shift->op!=VO_SHL || shift->ty!=VT_I32 || shift->a!=part || !vx_imm(f,shift->b,&k) || k!=8*(width-byte-1))return false;
-			part=at;
-		}
-		if(byte) {
-			const vir_ins *join=&f->ins[++at];
-			if(join->op!=VO_OR || join->ty!=VT_I32 || !((join->a==acc && join->b==part)||(join->b==acc && join->a==part)))return false;
-		}
-		acc=at;
-	}
-	for(uint32_t k=v;k<end;k++)
-		if(L->uses[k]!=1 || L->o->slot[k]!=VIR_NOBLK || !vx_foldedits(L,b,k+1,XNOREG))return false;
-	return true;
+	unsigned width=vir_read_be(L->f,L->uses,v,L->f->blk[b].first+L->f->blk[b].n,end);
+	if(!width)return 0;
+	for(uint32_t k=v;k<*end;k++)
+	 if(L->o->slot[k]!=VIR_NOBLK || !vx_foldedits(L,b,k+1,XNOREG))return 0;
+	return width;
 }
 
 
@@ -507,9 +483,9 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 		}
 	}
 	if(i->op==VO_LOAD) {
-		unsigned width=vx_readword(L,b,v,4)?4:vx_readword(L,b,v,2)?2:0;
+		uint32_t end;unsigned width=vx_readword(L,b,v,&end);
 		if(width) {
-			L->bev=v+4*width-4;L->bewidth=width;L->bebase=a;L->beoff=0;L->beindexed=false;
+			L->bev=end;L->bewidth=width;L->bebase=a;L->beoff=0;L->beindexed=false;
 			if(L->memv==i->a) {
 				L->bebase=L->membase;L->beoff=L->memoff;L->beindexed=L->indexed;
 				L->beindex=L->memindex;L->besh=L->memsh;L->memv=0;
@@ -523,9 +499,9 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 	   v+2<L->f->blk[b].first+L->f->blk[b].n && L->f->ins[v+1].op==VO_I2P && L->f->ins[v+1].a==v &&
 	   L->o->slot[v+1]==VIR_NOBLK && L->f->ins[v+2].a==v+1 &&
 	   vx_foldedits(L,b,v+1,XNOREG) && vx_foldedits(L,b,v+2,XNOREG)) {
-		unsigned width=vx_readword(L,b,v+2,4)?4:vx_readword(L,b,v+2,2)?2:0;
+		uint32_t end;unsigned width=vx_readword(L,b,v+2,&end);
 		if(width && L->uses[v+1]==width) {
-			L->bev=v+2+4*width-4;L->bewidth=width;L->bebase=a;L->beoff=0;
+			L->bev=end;L->bewidth=width;L->bebase=a;L->beoff=0;
 			L->beindexed=!vx_imm(L->f,i->b,&L->beoff);L->beindex=c;L->besh=0;return;
 		}
 	}
