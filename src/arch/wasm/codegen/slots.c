@@ -240,38 +240,38 @@ VPRIV void wmem_render(ecx *e, tbuf *out)
 	size_t pos = 0;
 
 	if (!W->memchanged) {
-		tb_put(out, W->b.p, W->b.n);
+		vtext_append(out, W->b.p, W->b.n);
 		return;
 	}
 	for (uint32_t i = 0; i < W->nmem; i++) {
 		const wmem *m = &W->mem[i];
 		if (!m->dead && !m->capture && m->source == UINT32_MAX)
 			continue;
-		tb_put(out, W->b.p + pos, m->begin - pos);
+		vtext_append(out, W->b.p + pos, m->begin - pos);
 		if (m->source != UINT32_MAX) {
-			tb_s(out, "\tdrop\n\tlocal.get\t");
-			tb_u(out, W->mem[m->source].cache);
-			tb_c(out, '\n');
+			vtext_string_append(out, "\tdrop\n\tlocal.get\t");
+			vtext_unsigned_append(out, W->mem[m->source].cache);
+			vtext_char_append(out, '\n');
 		} else if (m->dead) {
 			if (m->capture) {
-				tb_s(out, "\tlocal.set\t");
-				tb_u(out, m->cache);
-				tb_s(out, "\n\tdrop\n");
-			} else tb_s(out, "\tdrop\n\tdrop\n");
+				vtext_string_append(out, "\tlocal.set\t");
+				vtext_unsigned_append(out, m->cache);
+				vtext_string_append(out, "\n\tdrop\n");
+			} else vtext_string_append(out, "\tdrop\n\tdrop\n");
 		} else {
 			if (m->capture && m->kind == WM_STORE) {
-				tb_s(out, "\tlocal.tee\t");
-				tb_u(out, m->cache);
-				tb_c(out, '\n');
+				vtext_string_append(out, "\tlocal.tee\t");
+				vtext_unsigned_append(out, m->cache);
+				vtext_char_append(out, '\n');
 			}
-			tb_put(out, W->b.p + m->begin, m->end - m->begin);
+			vtext_append(out, W->b.p + m->begin, m->end - m->begin);
 			if (m->capture && m->kind == WM_LOAD) {
-				tb_s(out, "\tlocal.tee\t");
-				tb_u(out, m->cache);
-				tb_c(out, '\n');
+				vtext_string_append(out, "\tlocal.tee\t");
+				vtext_unsigned_append(out, m->cache);
+				vtext_char_append(out, '\n');
 			}
 		}
 		pos = m->end;
 	}
-	tb_put(out, W->b.p + pos, W->b.n - pos);
+	vtext_append(out, W->b.p + pos, W->b.n - pos);
 }

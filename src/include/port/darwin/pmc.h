@@ -1,5 +1,5 @@
-#ifndef VCC_PMC_H
-#define VCC_PMC_H
+#ifndef VCC_PORT_DARWIN_PMC_H
+#define VCC_PORT_DARWIN_PMC_H
 #include <stdint.h>
 
 enum { PMC_N = 10 };

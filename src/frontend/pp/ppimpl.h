@@ -22,7 +22,7 @@
  * read), the paint flag, GNU ", ## __VA_ARGS__", and the leading-space
  * propagation that stringification makes visible.
  */
-#include "port/vstack.h"
+#include "port/stack-guard.h"
 #include <pthread.h>
 #include <setjmp.h>
 #include <stdarg.h>
@@ -378,7 +378,7 @@ extern _Thread_local size_t out_spare_cap;
 VPRIV void out_reserve(pp *p, size_t n);
 static inline void out_put(pp *p, const char *s, size_t n);
 static inline void out_ch(pp *p, char ch);
-/* frontend/diag/: locations, diagnostics and their rendering; dir_extra_tok is directive.c's */
+/* diag/: locations, diagnostics and their rendering; dir_extra_tok is directive.c's */
 VPRIV uint32_t loc_line(const pp *p, uint32_t loc);
 VPRIV const char *presumed_name(const pp *p, uint32_t fe, uint32_t loc, uint32_t *len);
 VPRIV __attribute__((format(printf, 4, 5))) void pp_diag(pp *p, uint32_t loc, const char *what, const char *fmt, ...);
@@ -404,6 +404,22 @@ VPRIV void diag_narrate(pp *p, struct vbuf *b, vdiag *d);
 VPRIV void diag_render_rec(pp *p, struct vbuf *b, vdiag *d);
 VPRIV void diag_render_color(pp *p, struct vbuf *b, vdiag *d);
 VPRIV void diag_typediff(struct vbuf *b, const vdiag *d, const char *plain);
+/* moved apart by the split of the diagnostics engine, still one unity TU */
+VPRIV __attribute__((noinline, cold)) void dsink_records(pp *p);
+VPRIV void jstr(struct vbuf *b, const char *s, size_t n);
+VPRIV void jcstr(struct vbuf *b, const char *s);
+VPRIV void html_page(pp *p, struct vbuf *b);
+VPRIV void sarif_log(pp *p, struct vbuf *b);
+VPRIV int level_of(const char *what);
+VPRIV void kid_add(vdiag *d, vdiag *k);
+VPRIV void kid_after(vdiag *top, vdiag *after, vdiag *n);
+VPRIV void render_clang(pp *p, struct vbuf *b, vdiag *d);
+VPRIV void track_str(struct vbuf *b, const void *pc);
+VPRIV void render_narr(pp *p, struct vbuf *b, const vdiag *d);
+VPRIV uint32_t lstart(const char *s, uint32_t off);
+VPRIV uint32_t lend(const char *s, uint32_t size, uint32_t ls);
+VPRIV bool fix_in_macro(const pp *p, uint32_t b, uint32_t e);
+VPRIV void macro_adjust(pp *p, vdiag *top, vdiag *d);
 /* diagout.c: JSON lines and SARIF */
 VPRIV void diag_json_flush(pp *p);
 VPRIV void diag_fixits_out(pp *p);

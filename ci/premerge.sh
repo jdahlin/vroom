@@ -7,7 +7,7 @@
 # vcc-builtins.py (Homebrew's clang).
 #
 #   ci/premerge.sh arm64    vcc build, the C suites under qemu, fast harnesses
-#   ci/premerge.sh asan     ASan+UBSan build: vcc suite, diag, stress, vccd, vlink-bad
+#   ci/premerge.sh asan     ASan+UBSan build: vcc suite, diag, stress, vccd, vlink-bad, fuzz-regress
 #   ci/premerge.sh tsan     TSan build: vcc suite (threaded emitter), vccd
 #   ci/premerge.sh wasm     the C suites for wasm64 (emcc + node); DISABLED, manual (doc/PLAN-wasm.md)
 #
@@ -148,6 +148,9 @@ asan)
 	step stress       python3 bench/vcc-stress.py --bin-dir "$B"
 	step vccd         python3 bench/vccd-test.py --bin-dir "$B"
 	step vlink-bad    python3 bench/vlink-bad.py --bin-dir "$B"
+	# the fuzz targets (ASan+UBSan, libFuzzer from libclang-rt-N-dev when present, else test/fuzz/driver.c)
+	# build and replay test/fuzz/regress: replay only, no fuzzing; a build break or a failing input fails the job
+	step fuzz-regress make -C src -j "$J" fuzz-regress
 	;;
 tsan)
 	build vcc-tsan

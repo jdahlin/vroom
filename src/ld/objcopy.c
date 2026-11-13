@@ -23,8 +23,8 @@
  */
 #include "ld/ld.h"
 #include "common/hash.h"
-#include "common/defer.h"
-#include "common/ckd.h"
+#include "common/scoped-cleanup.h"
+#include "common/checked-arithmetic.h"
 #include "ldelf.h"
 
 #include <ctype.h>
@@ -121,7 +121,7 @@ static bool elf_valid(Elf *e)
 	for (uint32_t k = 0; k < e->nsh; k++) {
 		const Shdr *s = &e->sh[k];
 
-		if (s->sh_type != SHT_NOBITS && s->sh_type != SHT_NULL && !vckd_range(s->sh_offset, s->sh_size, e->size))
+		if (s->sh_type != SHT_NOBITS && s->sh_type != SHT_NULL && !vchecked_range(s->sh_offset, s->sh_size, e->size))
 			return false;
 		if (s->sh_addralign & (s->sh_addralign - 1))
 			return false;

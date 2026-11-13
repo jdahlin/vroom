@@ -515,7 +515,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* T12 (shim from build A against vccd from build B → clear
   error or restart, never silent service).
 - [ ] **Input-driven `abort()` / stack overflow kill the whole server** [P].  (recursion
-  done: `include/port/vstack.h` checks the stack pointer in cast_expr, the #if evaluator
+  done: `include/port/stack-guard.h` checks the stack pointer in cast_expr, the #if evaluator
   and argument pre-expansion; 128 KB left ends the TU (clang itself crashes
   on these inputs).  Overflow is a per-TU error now too: pp's
   token stack via fatal(), as/elf regions via `vjob_fail` (include/obj/obj.h, a longjmp
@@ -531,7 +531,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   pre-expansion.  Turn arena/limit failures into per-TU fatal errors
   (longjmp to the job, as `fatal_jb` already does in pp), add depth limits
   matching clang's (bracket depth 256 by default, `-fbracket-depth`), and
-  check `vmreg` reservations in `mk`/`sym`/`tag`.
+  check `vjob_region` reservations in `mk`/`sym`/`tag`.
   *Validate:* T5 (every generated case: exit 1 with a diagnostic, and in
   `--vccd` mode the server keeps serving).
 - [x] **Unbounded argv arrays** [P].  *Done:* the directory lists are sized by
@@ -1084,7 +1084,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [ ] **x86-64 host build** (builds and runs since 2026-11-10, PLAN-x86.md X0):
   `classify` and the three searches in `frontend/lex/lex.c` have a scalar version
   for hosts without NEON, CRC32C selects SSE4.2 or software at runtime
-  (`include/port/hostcrc.h`), `pause` for `yield`, baseline `-march=x86-64`,
+  (`include/port/crc32c.h`), `pause` for `yield`, baseline `-march=x86-64`,
   the fuzz targets use the host's clang
   and libFuzzer. AVX2/AVX-512 classification and AVX2 searches added
   2026-11-13 (PLAN-x86.md X0), selected at runtime with scalar fallback. Left: full kernel
@@ -1167,7 +1167,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   symbol STT_TLS and labels in TLS sections are STT_TLS, as MC.  *Validated:*
   `src/test/vas-obj/tlsops.s`, `tlslocal.s` byte-identical with clang -c.
 - [~] **Mach-O syntax** `@PAGE`/`@PAGEOFF`/`@GOTPAGE…`/`@TLVPPAGE…`: `vpp -c x.s`
-  for a Darwin target reads Apple's dialect (`as_darwin_text`, the inverse of
+  for a Darwin target reads Apple's dialect (`macho_dialect_translate`, the inverse of
   emit's `darwin_text`: sections, `L` labels, `.zerofill`/`.tbss`/`.comm` log2
   alignment, NEON `op.T vA, vB` and `mov d0, v1[1]`) into the Mach-O writer
   (commons now as Mach-O commons).  *Validated:* `vcc-darwin-s.py`: vpp -c of
@@ -1674,7 +1674,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   behaviour: abort, sticky flag, bool) and `tbuf.h`; the arenas `vregion`
   (offsets) and `varena` (pointers); the hashes `vhash_obj`/`vhash_strtab`.
   Still in their component, tied to its state: ppdriver's `buf` (first
-  16 MB from a per-job vmreg), cc's `vec` (inline storage, frozen into
+  16 MB from a per-job vjob_region), cc's `vec` (inline storage, frozen into
   `c->lists`), ld's block arena (process-wide list, generations), as's
   `.req` hash, objcopy's StrTab and the object writer's symbol table.  One
   OOM policy for code inside vccd (fail the request, never abort) decides
