@@ -12,6 +12,7 @@
 #define wk_ael_drop WK_NAME(wk_ael_drop)
 #define wk_ael_find WK_NAME(wk_ael_find)
 #define wk_ael_of WK_NAME(wk_ael_of)
+#define wk_alloca WK_NAME(wk_alloca)
 #define wk_argslot WK_NAME(wk_argslot)
 #define wk_arith WK_NAME(wk_arith)
 #define wk_assign WK_NAME(wk_assign)

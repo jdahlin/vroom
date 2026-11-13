@@ -644,24 +644,31 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 		if (dbg) {
 			/* one compile unit over .text: producer, C11, name, its line table, dir, pc range */
 			/* (x86: .word is 2 bytes there, so .short/.long/.quad) */
-			bool x = X86(c);
+			bool x = X86(c), w = WIN64(c);	/* (COFF: "dr" sections, section-relative offsets) */
 
-			vtext_string_append(&tail, "\t.text\n.Ldbg_text1:\n"
+			vtext_string_append(&tail, w ? "\t.text\n.Ldbg_text1:\n"
+				    "\t.section\t.debug_abbrev,\"dr\"\n.Ldbg_abbrev:\n"
+				    "\t.byte\t1, 17, 0, 37, 8, 19, 5, 3, 8, 16, 23, 27, 8, 17, 1, 18, 6, 0, 0, 0\n"
+				    "\t.section\t.debug_info,\"dr\"\n" : "\t.text\n.Ldbg_text1:\n"
 				    "\t.section\t.debug_abbrev,\"\",@progbits\n.Ldbg_abbrev:\n"
 				    "\t.byte\t1, 17, 0, 37, 8, 19, 5, 3, 8, 16, 23, 27, 8, 17, 1, 18, 6, 0, 0, 0\n"
 				    "\t.section\t.debug_info,\"\",@progbits\n");
-			vtext_string_append(&tail, x ? "\t.long\t.Ldbg_cu_end-.Ldbg_cu_start\n.Ldbg_cu_start:\n"
+			vtext_string_append(&tail, w ? "\t.long\t.Ldbg_cu_end-.Ldbg_cu_start\n.Ldbg_cu_start:\n"
+				        "\t.short\t5\n\t.byte\t1, 8\n\t.secrel32\t.Ldbg_abbrev\n\t.byte\t1\n\t.asciz\t\"vcc\"\n"
+				        "\t.short\t29\n\t.asciz\t" : x ? "\t.long\t.Ldbg_cu_end-.Ldbg_cu_start\n.Ldbg_cu_start:\n"
 				        "\t.short\t5\n\t.byte\t1, 8\n\t.long\t.Ldbg_abbrev\n\t.byte\t1\n\t.asciz\t\"vcc\"\n"
 				        "\t.short\t29\n\t.asciz\t" :
 				        "\t.word\t.Ldbg_cu_end-.Ldbg_cu_start\n.Ldbg_cu_start:\n"
 				        "\t.hword\t5\n\t.byte\t1, 8\n\t.word\t.Ldbg_abbrev\n\t.byte\t1\n\t.asciz\t\"vcc\"\n"
 				        "\t.hword\t29\n\t.asciz\t");
 			dbg_str(&tail, o->dbg_name ? o->dbg_name : "<stdin>");
-			vtext_string_append(&tail, x ? "\n\t.long\t.Lline_table_start0\n\t.asciz\t" : "\n\t.word\t.Lline_table_start0\n\t.asciz\t");
+			vtext_string_append(&tail, w ? "\n\t.secrel32\t.Lline_table_start0\n\t.asciz\t" :
+				    x ? "\n\t.long\t.Lline_table_start0\n\t.asciz\t" : "\n\t.word\t.Lline_table_start0\n\t.asciz\t");
 			dbg_str(&tail, o->dbg_dir ? o->dbg_dir : ".");
 			vtext_string_append(&tail, x ? "\n\t.quad\t.Ldbg_text0\n\t.long\t.Ldbg_text1-.Ldbg_text0\n.Ldbg_cu_end:\n" :
 				        "\n\t.xword\t.Ldbg_text0\n\t.word\t.Ldbg_text1-.Ldbg_text0\n.Ldbg_cu_end:\n");
-			vtext_string_append(&tail, "\t.section\t.debug_line,\"\",@progbits\n.Lline_table_start0:\n");
+			vtext_string_append(&tail, w ? "\t.section\t.debug_line,\"dr\"\n.Lline_table_start0:\n" :
+				    "\t.section\t.debug_line,\"\",@progbits\n.Lline_table_start0:\n");
 		}
 		if (WASM(c))
 			wasm_tail(c, &tail, E.claimed);

@@ -75,3 +75,14 @@ VPRIV bool x64_local(ecx *e, uint32_t s, lval *l)
 		}
 	return false;
 }
+
+/* the Microsoft convention: a by-reference parameter's slot holds the address of the caller's copy */
+VPRIV bool x64_byref(ecx *e, uint32_t s)
+{
+	wkarg a;
+
+	if (!e->x64->msfn || e->wk->inst || !(e->c->syms[s].flags & SF_PARAM))
+		return false;
+	x64w_classify(e, e->c->syms[s].ty, &a, false);
+	return a.mem || a.up;
+}

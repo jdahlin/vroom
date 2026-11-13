@@ -549,6 +549,18 @@ VPRIV val x64_cvt(ecx *e, val v, qty from, qty to)
 
 	if (KIND(c, from) == TY_BFLOAT16) {
 		if (KIND(c, to) == TY_BFLOAT16) return v;
+		if (WIN64(c) && v.k == V_REG) {
+			/* the float with the same top 16 bits, as clang (MinGW's compiler-rt takes
+			   __extendbfsf2's argument in an integer register) */
+			int r = x64_treg(e), q = x64_ftreg(e);
+
+			x64_op3(e, X_MOV, 4, r, v.r, XNOREG);
+			x64_op3(e, X_SHLI, 4, r, r, XNOREG)->imm = 16;
+			x64_op3(e, X_MOV, 4, q, r, XNOREG);
+			x64_tfree(e, r);
+			x64_tfree(e, v.r);
+			return x64_cvt(e, x64_vr(q), prim(TY_FLOAT), to);
+		}
 		v = x64_half_call(e, FN_EXTENDBFSF2, v, from, prim(TY_FLOAT));
 		return x64_cvt(e, v, prim(TY_FLOAT), to);
 	}

@@ -351,7 +351,7 @@ VPRIV void wk_cleanups(ecx *e, int to)
 		wkarg a;
 		val r;
 
-		wk_abi(e, c->syms[fn].ty);
+		em_abi(e, c->syms[fn].ty);
 		LO(classify)(e, e->c->t_size, &a, false);
 		a.slot = wk_slot(e, 8, 8);
 		{
@@ -363,7 +363,7 @@ VPRIV void wk_cleanups(ecx *e, int to)
 		}
 		note_ref(e, REF(RK_SYM, fn));
 		e->calls = true;
-		wk_abi(e, c->syms[fn].ty);
+		em_abi(e, c->syms[fn].ty);
 		r = LO(call)(e, REF(RK_SYM, fn), NULL, &a, 1, false, NULL, prim(TY_VOID));
 		wk_free(e, &r);
 	}
@@ -1603,7 +1603,7 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 	}
 	W->retlbl = wk_newlabel(e);
 	LO(locals_begin)(e, s);
-	wk_abi(e, y->ty);
+	em_abi(e, y->ty);
 	if (wk_mem(e, W->rty)) {
 		LO(classify)(e, W->rty, &W->rrec, false);
 		W->rrec.slot = wk_slot(e, 8, 8);	/* (memory: the hidden pointer's slot) */
@@ -1620,10 +1620,10 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 			pt = prim(TY_DOUBLE);	/* K&R: received as the caller promoted it */
 		LO(classify)(e, pt, &pa[i], false);
 		lval home;
-		pa[i].slot = LO(local)(e, p, &home) ? 0 :
+		pa[i].slot = LO(local)(e, p, &home) ? 0 : LO(byref)(e, p) ? wk_pslot_kind(e, 8, 8, WK_SLOT_PARAM) :
 			wk_pslot_kind(e, pa[i].size > 8 ? (pa[i].size + 7) & ~(uint64_t)7 : 8, pa[i].align, WK_SLOT_PARAM);	/* (sdepth is 0: wk_slot was wk_pslot) */
 	}
-	wk_abi(e, y->ty);
+	em_abi(e, y->ty);
 	LO(params)(e, pa, (int)body->aux, wk_mem(e, W->rty) ? &W->rrec : NULL, (ft->flags & TF_VARIADIC) != 0);
 	for (uint32_t i = 0; i < body->aux; i++) {
 		uint32_t p = c->lists[body->a + i];

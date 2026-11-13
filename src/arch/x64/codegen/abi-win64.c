@@ -191,9 +191,8 @@ VPRIV val x64w_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool v
 }
 
 /*
- * The incoming side.  Position p's word is in its register (p < 4) or at [rbp + 16 + 8p]; the
- * registers are stored first (a copy of a by-reference argument may need rcx, rsi, rdi), then the
- * by-reference objects copied into the parameters' slots.
+ * The incoming side.  Position p's word is in its register (p < 4) or at [rbp + 16 + 8p].  A
+ * by-reference parameter is used in place: its slot holds the address (x64_byref, the walker).
  */
 VPRIV void x64w_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic)
 {
@@ -201,7 +200,6 @@ VPRIV void x64w_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic)
 	cc *c = e->c;
 	const node *body = N(c->syms[e->wk->fsym].body);
 	int first = r && r->mem ? 1 : 0;
-	int64_t ptr[4] = { 0 };	/* a by-reference parameter's pointer, parked in a slot */
 
 	X->interrupt = 0;
 	X->sret = 0;
@@ -226,12 +224,13 @@ VPRIV void x64w_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic)
 		lval home;
 		bool local = x64_local(e, sym, &home);
 
-		if (x64w_byref(&a[k])) {
-			if (p < 4) {
-				lval d = x64w_fr(ptr[p] = wk_slot(e, 8, 8));
+		if (x64w_byref(&a[k])) {	/* (x64_byref: the slot holds the caller copy's address) */
+			lval d = x64w_fr(a[k].slot);
 
+			if (p < 4)
 				x64_mem(e, X_ST, 8, x64w_gpr[p], &d, false);
-			}
+			else
+				a[k].slot = 16 + 8 * p;
 			continue;
 		}
 		if (p < 4) {
@@ -255,21 +254,6 @@ VPRIV void x64w_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic)
 
 			x64_load(e, home.r, &from, wk_size(c, ty), wk_signed(c, ty));
 		}
-	}
-	for (int k = 0; k < n; k++) {
-		int p = first + k;
-		lval s, d = x64w_fr(a[k].slot);
-		int rs, rd;
-
-		if (!x64w_byref(&a[k]))
-			continue;
-		s = x64w_fr(p < 4 ? ptr[p] : 16 + 8 * p);
-		rs = x64_treg(e);
-		x64_mem(e, X_LD, 8, rs, &s, false);
-		rd = x64_laddr(e, &d);
-		x64_copy(e, rd, rs, a[k].size);
-		x64_tfree(e, rd);
-		x64_tfree(e, rs);
 	}
 	X->ngp = first + n, X->nfp = 0, X->stk = 0;
 	if (variadic)

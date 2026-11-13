@@ -301,7 +301,7 @@ VPRIV lval wk_lval(ecx *e, uint32_t n)
 	case N_VAR: {
 		uint32_t s = x->a, cs;
 
-		if (is_local_var(c, s) && (T(c, c->syms[s].ty)->flags & TF_VLA)) {
+		if (is_local_var(c, s) && ((T(c, c->syms[s].ty)->flags & TF_VLA) || ((c->syms[s].flags & SF_PARAM) && LO(byref)(e, s)))) {
 			lval a = { .k = L_FRAME, .off = wk_local(e, s), .align = 8 };
 			int r = LO(treg)(e);
 
@@ -2145,6 +2145,27 @@ static bool wk_mem_inline(ecx *e, uint32_t n, int kind, val *out)
 	return true;
 }
 
+/* alloca(n) */
+static val wk_alloca(ecx *e, uint32_t an)
+{
+	cc *c = e->c;
+	val v = wk_gen(e, an);
+
+	e->dyn = true;
+	val p = LO(alloca)(e, wk_conv(e, v, N(an)->ty, e->c->t_size));
+	/* Preserve this allocation across every currently active VLA scope. */
+	if (e->wk->nvla) {
+		int sp = LO(spget)(e);
+
+		for (int i = e->wk->inl ? e->wk->inl->vbase : 0; i < e->wk->nvla; ++i) {
+			lval saved = { .k = L_FRAME, .off = wk_local(e, e->wk->vla[i]) + 8, .align = 8 };
+			LO(store)(e, sp, &saved, 8);
+		}
+		LO(tfree)(e, sp);
+	}
+	return p;
+}
+
 static val wk_call(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
@@ -2231,13 +2252,18 @@ static val wk_call(ecx *e, uint32_t n)
 			wkarg fa;
 			val v;
 
-			wk_abi(e, 0);
+			em_abi(e, 0);
 			LO(classify)(e, N(an)->ty, &fa, false);
 			wk_argslot(e, &fa, N(an)->ty, wk_gen(e, an));
 			e->calls = true;
-			wk_abi(e, 0);
+			em_abi(e, 0);
 			v = LO(call)(e, FIXED(k), NULL, &fa, 1, false, NULL, prim(TY_FLOAT));
 			return wk_conv(e, v, prim(TY_FLOAT), prim(TY_DOUBLE));
+		} else if (WIN64(c) && x->c == 1 && !c->syms[s].body && c->syms[s].sc != SC_STATIC &&
+			   EM_IDENT_IS(c->syms[s].name, "alloca")) {
+			/* a declared alloca is clang's library builtin; MinGW has no such function */
+			if (args != argbuf) free(args);
+			return wk_alloca(e, c->lists[x->b]);
 		} else {
 			note_ref(e, REF(RK_SYM, s));
 			ref = REF(RK_SYM, s);
@@ -2248,12 +2274,12 @@ static val wk_call(ecx *e, uint32_t n)
 		qty at = N(an)->ty;
 
 		wk_scalar(e, an, at);
-		wk_abi(e, ft);
+		em_abi(e, ft);
 		LO(classify)(e, at, &args[i], (f->flags & TF_VARIADIC) && i >= f->n);
 		wk_argslot(e, &args[i], at, wk_gen(e, an));
 	}
 	if (rec_) {
-		wk_abi(e, ft);
+		em_abi(e, ft);
 		LO(classify)(e, f->base, &r, false);
 		r.slot = wk_slot(e, (r.size + 7) & ~(uint64_t)7 ?: 8, r.align);
 	}
@@ -2262,7 +2288,7 @@ static val wk_call(ecx *e, uint32_t n)
 		wk_reg(e, &fn, e->c->t_size);
 	}
 	e->calls = true;
-	wk_abi(e, ft);
+	em_abi(e, ft);
 	{
 		val v = LO(call)(e, ref, ref ? NULL : &fn, args, (int)na, var, rec_ ? &r : NULL, f->base);
 		lval l = { .k = L_FRAME, .off = r.slot, .align = 8 };
@@ -2997,23 +3023,8 @@ static val wk_builtin(ecx *e, uint32_t n)
 		}
 		return vconst(1);
 	}
-	case BI_ALLOCA: case BI_ALLOCA_UNINIT: {
-		val v = wk_gen(e, arg[0]);
-
-		e->dyn = true;
-		val p = LO(alloca)(e, wk_conv(e, v, N(arg[0])->ty, e->c->t_size));
-		/* Preserve this allocation across every currently active VLA scope. */
-		if (e->wk->nvla) {
-			int sp = LO(spget)(e);
-
-			for (int i = e->wk->inl ? e->wk->inl->vbase : 0; i < e->wk->nvla; ++i) {
-				lval saved = { .k = L_FRAME, .off = wk_local(e, e->wk->vla[i]) + 8, .align = 8 };
-				LO(store)(e, sp, &saved, 8);
-			}
-			LO(tfree)(e, sp);
-		}
-		return p;
-	}
+	case BI_ALLOCA: case BI_ALLOCA_UNINIT:
+		return wk_alloca(e, arg[0]);
 	case BI_CLZ: case BI_CLZL: case BI_CLZLL: case BI_CTZ: case BI_CTZL: case BI_CTZLL:
 	case BI_FFS: case BI_FFSL: case BI_FFSLL: case BI_POPCOUNT: case BI_POPCOUNTL: case BI_POPCOUNTLL:
 	case BI_PARITY: case BI_PARITYL: case BI_PARITYLL: case BI_BSWAP16: case BI_BSWAP32: case BI_BSWAP64: {

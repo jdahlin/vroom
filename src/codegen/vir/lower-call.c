@@ -138,6 +138,9 @@ VPRIV val vw_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool var
 	}
 }
 
+/* (records are not VIR's yet: no by-reference parameters) */
+VPRIV bool vw_byref(ecx *e, uint32_t s) { (void)e, (void)s; return false; }
+
 VPRIV void vw_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic)
 {
 	vwst *V = e->vw;

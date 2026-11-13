@@ -160,6 +160,9 @@ VPRIV int LO(va_arg)(ecx *e, int rap, qty t);		/* the next argument's address */
 VPRIV void LO(begin)(ecx *e, uint32_t s);
 VPRIV void LO(locals_begin)(ecx *e, uint32_t s);
 VPRIV bool LO(local)(ecx *e, uint32_t s, lval *l);
+/* a parameter of the function (not of an inlined copy) whose frame slot holds its address: the
+   Microsoft convention's by-reference arguments, used in place (PLAN-win64.md WIN2) */
+VPRIV bool LO(byref)(ecx *e, uint32_t s);
 #ifdef WK_PREFIX
 /* VIR: a local declared without an initializer: its value is indeterminate from here (C11 6.2.4) */
 VPRIV void LO(undecl)(ecx *e, const lval *l, uint64_t size);

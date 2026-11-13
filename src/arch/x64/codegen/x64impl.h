@@ -159,6 +159,7 @@ VPRIV void x64_dead(ecx *e);
 VPRIV void x64_dead_budget(ecx *e, uint32_t budget);	/* internal bounded-fallback contracts */
 VPRIV void x64_locals_begin(ecx *e, uint32_t s);
 VPRIV bool x64_local(ecx *e, uint32_t s, lval *l);
+VPRIV bool x64_byref(ecx *e, uint32_t s);
 /* effects.c: logical records before or after two-address expansion. */
 VPRIV const uint8_t *x64_flow_table(void);
 /* Prepared for shared copy/liveness passes; also exercised by contract tests. */

@@ -10,6 +10,7 @@
 #undef wk_ael_drop
 #undef wk_ael_find
 #undef wk_ael_of
+#undef wk_alloca
 #undef wk_argslot
 #undef wk_arith
 #undef wk_assign
