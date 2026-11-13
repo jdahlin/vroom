@@ -14,7 +14,7 @@ SOURCE = r'''
 #include "arch/x64/codegen/x64-internal.h"
 #include "codegen/walk/division-unsigned-constant.c"
 #include "arch/a64/codegen/udivconst.c"
-VPRIV int x64_nfree(codegen_context *e) { return 8 - __builtin_popcount(e->x64_context->live & X_TEMPS); }
+VPRIV int x64_nfree(codegen_context *e) { return 8 - __builtin_popcount(e->x64_context->temporaries_in_use & X64_TEMPORARIES); }
 /* The typed wrapper is unused in this arithmetic-only contract. */
 VPRIV i128 em_trunc_to(cc *c, i128 v, ast_qualified_type t) { (void)c; (void)t; return v; }
 VPRIV void slot_tag(codegen_context *e, ins *i, int64_t off, int64_t len)
@@ -92,12 +92,12 @@ static void divisor64(uint64_t d)
 static void pressure(void)
 {
     codegen_unit emit={0};
-    xst x={0};
+    x64_lowering_context x={0};
     codegen_context e={.unit=&emit,.x64_context=&x};
     const int regs[]={RAX,RCX,RDX,RSI,RDI,R8,R9,R10};
     for (unsigned count=0;count<=8;count++) {
-        x.live=0;
-        for (unsigned j=0;j<8-count;j++) x.live |= 1u<<regs[j];
+        x.temporaries_in_use=0;
+        for (unsigned j=0;j<8-count;j++) x.temporaries_in_use |= 1u<<regs[j];
         e.temporaries_in_use=(1u<<(CODEGEN_TEMPORARY_COUNT-count))-1;
         for (unsigned materialize=0;materialize<2;materialize++) {
             codegen_value a={.kind=materialize ? CODEGEN_VALUE_ADDRESS : CODEGEN_VALUE_REGISTER};

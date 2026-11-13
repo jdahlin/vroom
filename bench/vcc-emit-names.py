@@ -36,26 +36,26 @@ int main(void)
     };
     char spelling[32];
     for (unsigned i = 0; i < sizeof legacy / sizeof *legacy; i++) {
-        assert(x64_rname(legacy[i].name) == legacy[i].reg);
+        assert(x64_asm_register_find(legacy[i].name) == legacy[i].reg);
         snprintf(spelling, sizeof spelling, "%%%s", legacy[i].name);
-        assert(x64_rname(spelling) == legacy[i].reg);
+        assert(x64_asm_register_find(spelling) == legacy[i].reg);
     }
     for (int i = 8; i <= 15; i++) {
         const char *suffixes[] = {"", "d", "w", "b"};
         for (unsigned j = 0; j < 4; j++) {
             snprintf(spelling, sizeof spelling, "r%d%s", i, suffixes[j]);
-            assert(x64_rname(spelling) == i);
+            assert(x64_asm_register_find(spelling) == i);
         }
     }
     for (int i = 0; i <= 15; i++) {
         snprintf(spelling, sizeof spelling, "%%xmm%d", i);
-        assert(x64_rname(spelling) == XMM0 + i);
+        assert(x64_asm_register_find(spelling) == XMM0 + i);
     }
     const char *invalid[] = {"", "a", "r", "e", "x", "rip", "r7", "r16", "xmm16", "raxz", "dp", "bil"};
     for (unsigned i = 0; i < sizeof invalid / sizeof *invalid; i++)
-        assert(x64_rname(invalid[i]) == -1);
+        assert(x64_asm_register_find(invalid[i]) == -1);
     /* Preserve existing atoi-based acceptance of suffixes on numbered names. */
-    assert(x64_rname("r8junk") == R8 && x64_rname("xmm") == XMM0);
+    assert(x64_asm_register_find("r8junk") == R8 && x64_asm_register_find("xmm") == XMM0);
 
     vintern_ents = names;
     assert(!CODEGEN_IDENTIFIER_IS(0, "main"));
