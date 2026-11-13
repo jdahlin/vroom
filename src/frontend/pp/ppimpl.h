@@ -22,7 +22,7 @@
  * read), the paint flag, GNU ", ## __VA_ARGS__", and the leading-space
  * propagation that stringification makes visible.
  */
-#include "port/vstack.h"
+#include "port/stack-guard.h"
 #include <pthread.h>
 #include <setjmp.h>
 #include <stdarg.h>

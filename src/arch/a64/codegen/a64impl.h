@@ -7,7 +7,7 @@ static inline void reg(tbuf *b, int r, int x)
 {
 	char *p;
 
-	tb_need(b, 4);
+	vtext_need(b, 4);
 	p = b->p + b->n;
 	p[0] = x ? 'x' : 'w';
 	if (likely(r < 10)) {

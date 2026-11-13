@@ -29,7 +29,7 @@
 #include "common/intern.h"
 #include "frontend/lex/lex.h"
 #include "port/darwin/pmc.h"
-#include "port/vperf.h"
+#include "port/performance-counters.h"
 
 static double now(clockid_t c)
 {
@@ -210,13 +210,13 @@ static int core(const char *list, int reps)
 		toks = 0;
 		if (pmc)
 			pmc_read(c0);
-		v0 = vperf_now();
+		v0 = vperformance_now();
 		t0 = now(CLOCK_THREAD_CPUTIME_ID);
 		for (size_t i = 0; i < npaths; i++)
 			if (src[i])
 				toks += vlex(src[i], sz[i], out, scratch);
 		t0 = now(CLOCK_THREAD_CPUTIME_ID) - t0;
-		v0 = vperf_sub(vperf_now(), v0);
+		v0 = vperformance_subtract(vperformance_now(), v0);
 		vbest.ins = v0.ins < vbest.ins ? v0.ins : vbest.ins;
 		vbest.cyc = v0.cyc < vbest.cyc ? v0.cyc : vbest.cyc;
 		if (pmc)

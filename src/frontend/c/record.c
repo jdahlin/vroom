@@ -43,7 +43,7 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 	/* A member's declaration specifiers can recursively define another record
 	 * before reaching the declarator's own stack guard. Do not recover within
 	 * an enclosing record while the C stack is still exhausted. */
-	if (vstack_low()) {
+	if (vstack_guard_low()) {
 		cc_error(c, tok(c)->loc, "record nested too deeply");
 		longjmp(c->bail, 1);
 	}

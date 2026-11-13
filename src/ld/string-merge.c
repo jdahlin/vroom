@@ -54,7 +54,7 @@ static void split_pieces(void *arg, size_t i)
 				q += es;
 			}
 			m->inoff[k] = (uint32_t)p;
-			m->hash[k] = (uint32_t)ld_xxh3(d + p, len) >> 1;
+			m->hash[k] = (uint32_t)vdigest_xxh3(d + p, len) >> 1;
 			k++;
 			p = q;
 		}
@@ -65,7 +65,7 @@ static void split_pieces(void *arg, size_t i)
 		m->outoff = alloc(cnt * 4);
 		for (uint32_t k = 0; k < cnt; k++) {
 			m->inoff[k] = k * es;
-			m->hash[k] = (uint32_t)ld_xxh3(d + (uint64_t)k * es, es) >> 1;
+			m->hash[k] = (uint32_t)vdigest_xxh3(d + (uint64_t)k * es, es) >> 1;
 		}
 	}
 	m->npieces = cnt;

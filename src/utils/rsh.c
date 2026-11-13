@@ -16,7 +16,7 @@
 #include <unistd.h>
 
 #include "utils/rsh.h"
-#include "common/buf.h"
+#include "common/buffer.h"
 
 /* ---------------- growable buffers ---------------- */
 

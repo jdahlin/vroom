@@ -9,7 +9,7 @@
 #include "arch/wasm/as/wasmas.h"
 #endif
 #include "obj/obj.h"
-#include "port/vperf.h"
+#include "port/performance-counters.h"
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -54,7 +54,7 @@ int main(int argc, char **argv)
 		uint64_t h = 1469598103934665603ull;
 		for (int r = 0; r < bench; r++) {
 			double t0 = now();
-			vperf v0 = vperf_now();
+			vperf v0 = vperformance_now();
 			for (int i = 0; i < nf; i++) {
 				const char *msg;
 				if (as_run(a, o, ps[i], ns[i], argv[first + i], &msg)) { fprintf(stderr, "%s\n", msg); return 1; }
@@ -66,7 +66,7 @@ int main(int argc, char **argv)
 					for (size_t b = 0; b < k; b++) h = (h ^ buf[b]) * 1099511628211ull;
 				}
 			}
-			v0 = vperf_sub(vperf_now(), v0);
+			v0 = vperformance_subtract(vperformance_now(), v0);
 			if (r) {	/* the first pass also hashes the objects */
 				vbest.ins = v0.ins < vbest.ins ? v0.ins : vbest.ins;
 				vbest.cyc = v0.cyc < vbest.cyc ? v0.cyc : vbest.cyc;
