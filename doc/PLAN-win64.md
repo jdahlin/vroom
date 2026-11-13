@@ -291,7 +291,96 @@ vlink.  Not implemented (a clear error): `--icf=all`, `--guard-cf`,
 `.rsrc` sections, bigobj, thin archives, LTO bitcode, `/merge` and
 `/section` in `.drectve`; i386/ARM targets.
 
-### WIN1-WIN10 (2026-11-13): planned
+### WIN7 on current main (2026-11-14)
+
+Merged with main after the linker split (#230) and the renames (#224,
+#225, #228, #231): `src/Makefile` keeps main's `LD_PARTS` and adds
+`platform/win/pe-linker.c` to `LD_SRC` and `VCCD_LD_OBJ`; `pe-*.c` and
+`ld/link-entry.c` needed no change.  The file-by-file build's duplicate
+`virbuild_failure_table` (present on main without WIN7) is fixed: the
+declaration in `codegen/emitimpl.h` is `extern` outside `VCC_UNITY`.
+Measured after the merge: unity and file-by-file builds clean;
+`vlink-pe.py --run` 57/57; `vcc-win64.py --vlink-ref -j 4` runs-ok and
+image-identical 2012/2012 (134 s cold); `vlink-pe-bad.py` (ASan) 530/530;
+`vlink-opts.py` 66/66; `vlink-bad.py` 34/34; `vcc-x86.py --suite vcc
+--vlink` 295/295.
+
+### WIN7R (2026-11-14): vcc's runtime library; programs link without compiler-rt
+
+`src/runtime/` (internal header `runtime-internal.h`, 12 C files and
+`stack-probe.S`, about 1900 lines) builds `libvccrt.a` with
+`src/runtime/build.sh` (`make -C src vccrt`; CC and AR are parameters,
+today clang for the target and llvm-ar).  Written from the helpers'
+specifications, no compiler-rt or libgcc source; compiler-rt is only the
+oracle in `bench/vccrt-test.py`.
+
+Which helpers, from data (`vccrt-test.py needs`): 70.  The test objects
+(clang, -O0 and -O2, the 2012 reference-ok tests) need 41 of them (36 at
+-O2; -O0 adds `__modti3 __umodti3 __muldc3 __trunctfsf2 __trunctfxf2`):
+`___chkstk_ms` in 85 objects; `__int128` division in `pr84748`,
+`bitint_runtime`; `__float128` arithmetic, comparisons and conversions in
+`float128`; x87 <-> `__int128` in `ldouble_int128`; `_Float16`/`__bf16`
+narrowings; `__divsc3 __divdc3 __divxc3 __muldc3`.  The CRT needs
+`___chkstk_ms` (libmingw32 pseudo-reloc, libmingwex) and `__mulsc3
+__muldc3 __mulxc3 __divsc3 __divdc3 __divxc3` (libmingwex's cpow*/ctan*);
+vcc's code generator names the rest (`__ashlti3 __lshrti3 __ashrti3`, the
+sf/df `__int128` conversions, the remaining tf conversions, `__trunctfhf2
+__trunctfbf2 __truncxfbf2 __truncxfhf2 __extendbfsf2`, `__divtc3`,
+`__powisf2 __powidf2 __powixf2 __powitf2`).  `__multc3` is added (clang
+calls it for `_Complex __float128` `*`).  Nothing else from the builtins
+archive is reachable: no atomics, `__multi3`, `__popcount*` or `__bswap*`
+(clang and vcc inline them for x86-64).
+
+ABI, checked with `clang -S` for the target: every helper is called with
+the C ABI of its C prototype (`__int128`, `long double` and `__float128`
+arguments by reference, `__int128` returned in xmm0, `long double`,
+`__float128` and `_Complex double` and wider returned through a hidden
+pointer, `_Float16`/`__bf16` in xmm0), so the C definitions match;
+`___chkstk_ms` keeps every register (rax included) and touches each page
+from the caller's rsp down to rsp - rax, in order.
+
+Measured:
+
+- `vccrt-test.py diff`: 70/70 helpers bit-identical to compiler-rt under
+  Wine (1.19 M calls, 2.7 s; `-n 300000`: 17.4 M calls, 21 s); three are
+  checked against the exact result computed by the harness instead:
+  `__truncxfbf2` (not in compiler-rt), `__truncxfhf2` (compiler-rt rounds
+  twice, through double: `bff4cf90000000200000` gives `927c`, the correct
+  result is `927d`), `__extendbfsf2` (compiler-rt's reads the `__bf16` from
+  `%cx`; clang passes it in `%xmm0`).  Complex results compare NaN parts
+  only as NaN (which NaN depends on the order of the hardware operations).
+  Choices matched to compiler-rt where the specification is open: the
+  default NaN is positive, unordered comparisons give 1 (eq/ne/lt/le) or
+  -1 (gt/ge), widening keeps a signalling NaN signalling, `__trunctfxf2`
+  and `__truncsfbf2` quiet a NaN only when payload bits are lost.  Out of
+  range float-to-integer conversions (undefined in C) saturate and are not
+  compared.  The Annex G division keeps a NaN quotient for a divisor of
+  NaN and zero parts (the example's text would give zero).
+- `vccrt-test.py chkstk`: registers preserved for sizes 0-250000, every
+  page of the range written (GetWriteWatch: 489 pages for 2 MB), frames
+  up to 950000 bytes on a 1 MiB-reservation thread.  Under Wine only the
+  write-watch check detects a probe that skips pages (Wine commits thread
+  stacks itself); compiler-rt's probe reads, so that check is libvccrt's
+  only.  Real Windows (WIN9's native job) is still to run it.
+- `vccrt-test.py native` (x86-64 Linux, SysV): the library compiled by vcc
+  itself (`vpp --target=x86_64-linux-gnu`) is bit-identical to the
+  clang-built one on all 70 helpers; host compiler-rt 66/69 (the three
+  differences explained), libgcc 49/70 (soft-fp's negative default NaN and
+  2/-2 unordered results, NaN quieting, its own complex division).
+- `vcc-win64.py --vccrt-ref -j 4`: 2012/2012 tests run as the reference
+  linked with libvccrt.a instead of compiler-rt, by lld and by vlink; no
+  link map names compiler-rt, libgcc or libunwind (80 s).
+
+Not done: `var` cannot archive the library yet (it writes a symbol table
+only for ELF members; lld and vlink need one for COFF), so AR defaults to
+llvm-ar.  Building with vcc for the target needs WIN1-WIN5 (the target,
+the Windows ABI, COFF objects and `.seh_*` in `vas` for `stack-probe.S`);
+then CC="vcc --target=x86_64-w64-mingw32" and AR=var are the only change.
+The driver does not link it yet (WIN8: `-nodefaultlibs` + libvccrt.a).
+Rounding modes other than to nearest and exception flags are not
+supported (C cannot read MXCSR without an intrinsic).
+
+### WIN1-WIN6, WIN8-WIN10 (2026-11-13): planned
 
 Nothing implemented.  The reference chain was checked by hand (clang 23 ->
 COFF -> `ld.lld -m i386pep` -> Wine 11 exit code); the sysroot is not
