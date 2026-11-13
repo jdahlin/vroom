@@ -17,9 +17,9 @@
 
 int ld_main(int argc, char **argv, int dirfd, FILE *err);
 
-/* arm64 Mach-O executables from MH_OBJECTs (platform/darwin/ldmacho.c);
+/* arm64 Mach-O executables from MH_OBJECTs (platform/darwin/macho-linker.c);
    ld_main dispatches here when the first input is Mach-O */
-int ld_macho(int argc, char **argv, int dirfd, FILE *err);
+int macho_link(int argc, char **argv, int dirfd, FILE *err);
 
 /* objcopy/nm subset used by the kernel build (objcopy.c) */
 int objcopy_main(int argc, char **argv, int dirfd, FILE *err);

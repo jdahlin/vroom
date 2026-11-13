@@ -60,13 +60,13 @@
 #include <time.h>
 #include <unistd.h>
 
-#define NONE 0xffffffffu
+#define LD_NONE 0xffffffffu
 
-static bool x86_ld;		/* the inputs are x86-64 (arch/x64/ld/x64.inc) */
-static _Atomic uint16_t ld_machine;	/* e_machine of the first object loaded (parse_obj) */
+static bool x86_ld;		/* the inputs are x86-64 (arch/x64/ld/relocation.inc) */
+static _Atomic uint16_t ld_machine;	/* e_machine of the first object loaded (ld_object_parse) */
 static uint64_t tls_start;	/* x86: the PT_TLS start (dtpoff) */
 
-#include "ldelf.h"
+#include "elf-definitions.h"
 
 
 #include "word-access.c"
@@ -75,7 +75,7 @@ static uint64_t tls_start;	/* x86: the PT_TLS start (dtpoff) */
 
 #include "phase-timing.c"
 
-#include "arena.c"
+#include "region.c"
 
 #include "thread-pool.c"
 
@@ -113,7 +113,7 @@ static uint64_t tls_start;	/* x86: the PT_TLS start (dtpoff) */
 
 #include "eh-frame.c"
 
-#include "../arch/a64/ld/thunks.inc"
+#include "../arch/a64/ld/thunk-model.inc"
 
 #include "section-placement.c"
 
@@ -123,9 +123,9 @@ static uint64_t tls_start;	/* x86: the PT_TLS start (dtpoff) */
 
 #include "string-merge.c"
 
-#include "../arch/a64/ld/scan.inc"
+#include "../arch/a64/ld/relocation-scan.inc"
 
-#include "../arch/a64/ld/thunkpass.inc"
+#include "../arch/a64/ld/thunk-creation.inc"
 
 #include "file-layout.c"
 
@@ -134,9 +134,9 @@ static uint64_t tls_start;	/* x86: the PT_TLS start (dtpoff) */
 /* ---------------- writing sections ---------------- */
 /* ---------------- writing sections ---------------- */
 
-#include "../arch/a64/ld/relocate.inc"
+#include "../arch/a64/ld/relocation-apply.inc"
 static _Atomic bool got_seen;
-#include "../arch/x64/ld/x64.inc"
+#include "../arch/x64/ld/relocation.inc"
 
 #include "section-write.c"
 

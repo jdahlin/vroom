@@ -7,19 +7,19 @@
  * lazy archive's member is extracted when one of its definitions meets an
  * undefined non-weak reference already seen.  Only links with a non-whole
  * archive run this sequential pass. */
-enum { LS_NONE, LS_UNDEF, LS_WEAKREF, LS_DEF, LS_LAZY };
-typedef struct { const char *name; uint32_t len, h; uint8_t st; uint32_t cand; } LSym;
-static struct { LSym *v; uint32_t mask, n; } lsyms;
-static PendVec lcand, lout;
+enum { LD_LAZY_SYMBOL_NONE, LD_LAZY_SYMBOL_UNDEFINED, LD_LAZY_SYMBOL_WEAK_REFERENCE, LD_LAZY_SYMBOL_DEFINED, LD_LAZY_SYMBOL_LAZY };
+typedef struct { const char *name; uint32_t len, h; uint8_t st; uint32_t cand; } ld_lazy_symbol;
+static struct { ld_lazy_symbol *v; uint32_t mask, n; } lsyms;
+static ld_pending_member_vector lcand, lout;
 static VVEC(uint8_t) ltaken;
 
-static LSym *lsym(const char *name)
+static ld_lazy_symbol *ld_lazy_symbol_find(const char *name)
 {
-	uint32_t len = strlen(name), h = strhash(name, len);
+	uint32_t len = strlen(name), h = ld_name_hash(name, len);
 
 	if (!lsyms.v || (lsyms.n + 1) * 2 > lsyms.mask) {
 		uint32_t m = lsyms.v ? (lsyms.mask + 1) * 2 : 4096;
-		LSym *nv = calloc(m, sizeof(LSym));
+		ld_lazy_symbol *nv = calloc(m, sizeof(ld_lazy_symbol));
 
 		for (uint32_t k = 0; lsyms.v && k <= lsyms.mask; k++)
 			if (lsyms.v[k].name) {
@@ -39,41 +39,41 @@ static LSym *lsym(const char *name)
 		if (lsyms.v[j].h == h && lsyms.v[j].len == len && !memcmp(lsyms.v[j].name, name, len))
 			return &lsyms.v[j];
 	lsyms.n++;
-	lsyms.v[j] = (LSym){ .name = name, .len = len, .h = h };
+	lsyms.v[j] = (ld_lazy_symbol){ .name = name, .len = len, .h = h };
 	return &lsyms.v[j];
 }
 
 /* the global symbols of a pending object (mapped and aligned here; NULL: not
- * a valid object, left to parse_obj to report) */
-static const Sym *lglobals(Pending *p, uint32_t *n, const char **str)
+ * a valid object, left to ld_object_parse to report) */
+static const elf_symbol *ld_lazy_object_globals(ld_pending_member *p, uint32_t *n, const char **str)
 {
 	if (!p->buf) {
-		p->buf = map_file(p->path, &p->size);
+		p->buf = ld_file_map(p->path, &p->size);
 		if (!p->buf)
 			return NULL;
 	}
 	if ((uintptr_t)p->buf & 7) {
-		uint8_t *c = alloc(p->size);
+		uint8_t *c = ld_region_alloc(p->size);
 
 		memcpy(c, p->buf, p->size);
 		p->buf = c;
 	}
-	const Ehdr *eh = (const Ehdr *)p->buf;
+	const elf_file_header *eh = (const elf_file_header *)p->buf;
 
-	if (p->size < sizeof(Ehdr) || memcmp(eh->e_ident, "\177ELF\2\1", 6))
+	if (p->size < sizeof(elf_file_header) || memcmp(eh->e_ident, "\177ELF\2\1", 6))
 		return NULL;
-	Obj o = { .path = p->path, .buf = p->buf, .size = p->size };
-	obj_quiet = true;	/* parse_obj reports */
-	bool ok = obj_valid(&o, eh);
+	ld_object o = { .path = p->path, .buf = p->buf, .size = p->size };
+	obj_quiet = true;	/* ld_object_parse reports */
+	bool ok = ld_object_is_valid(&o, eh);
 
 	obj_quiet = false;
 	if (!ok)
 		return NULL;
 	for (uint32_t s = 0; s < o.nsh; s++)
 		if (o.sh[s].sh_type == SHT_SYMTAB) {
-			const Sym *y = (const Sym *)(o.buf + o.sh[s].sh_offset);
+			const elf_symbol *y = (const elf_symbol *)(o.buf + o.sh[s].sh_offset);
 
-			*n = o.sh[s].sh_size / sizeof(Sym) - o.sh[s].sh_info;
+			*n = o.sh[s].sh_size / sizeof(elf_symbol) - o.sh[s].sh_info;
 			*str = (const char *)o.buf + o.sh[o.sh[s].sh_link].sh_offset;
 			return y + o.sh[s].sh_info;
 		}
@@ -81,54 +81,54 @@ static const Sym *lglobals(Pending *p, uint32_t *n, const char **str)
 	return NULL;
 }
 
-static void lextract(uint32_t c);
+static void ld_lazy_member_extract(uint32_t c);
 
-static void lobject(Pending p)
+static void ld_lazy_object_add(ld_pending_member p)
 {
 	uint32_t n = 0;
 	const char *str;
-	VVEC_PUSH(lout, p, alloc);
-	Pending *q = &lout.v[lout.n - 1];
-	const Sym *y = lglobals(q, &n, &str);
+	VVEC_PUSH(lout, p, ld_region_alloc);
+	ld_pending_member *q = &lout.v[lout.n - 1];
+	const elf_symbol *y = ld_lazy_object_globals(q, &n, &str);
 
 	for (uint32_t k = 0; y && k < n; k++) {
-		LSym *l = lsym(str + y[k].st_name);
+		ld_lazy_symbol *l = ld_lazy_symbol_find(str + y[k].st_name);
 		bool weak = y[k].st_info >> 4 == STB_WEAK;
 
 		if (y[k].st_shndx != SHN_UNDEF)
-			l->st = LS_DEF;
-		else if (l->st == LS_LAZY) {
+			l->st = LD_LAZY_SYMBOL_DEFINED;
+		else if (l->st == LD_LAZY_SYMBOL_LAZY) {
 			if (!weak)
-				lextract(l->cand);
-		} else if (l->st == LS_NONE || l->st == LS_WEAKREF)
-			l->st = weak ? (l->st == LS_NONE ? LS_WEAKREF : l->st) : LS_UNDEF;
+				ld_lazy_member_extract(l->cand);
+		} else if (l->st == LD_LAZY_SYMBOL_NONE || l->st == LD_LAZY_SYMBOL_WEAK_REFERENCE)
+			l->st = weak ? (l->st == LD_LAZY_SYMBOL_NONE ? LD_LAZY_SYMBOL_WEAK_REFERENCE : l->st) : LD_LAZY_SYMBOL_UNDEFINED;
 	}
 }
 
-static void lextract(uint32_t c)
+static void ld_lazy_member_extract(uint32_t c)
 {
 	if (ltaken.v[c])
 		return;
 	ltaken.v[c] = 1;
-	lobject(lcand.v[c]);
+	ld_lazy_object_add(lcand.v[c]);
 }
 
-static void larchive(uint32_t c0, uint32_t c1)
+static void ld_lazy_archive_process(uint32_t c0, uint32_t c1)
 {
 	for (uint32_t c = c0; c < c1; c++) {
 		uint32_t n = 0;
 		const char *str;
-		const Sym *y = lglobals(&lcand.v[c], &n, &str);
+		const elf_symbol *y = ld_lazy_object_globals(&lcand.v[c], &n, &str);
 
 		for (uint32_t k = 0; y && k < n && !ltaken.v[c]; k++) {
 			if (y[k].st_shndx == SHN_UNDEF)
 				continue;
-			LSym *l = lsym(str + y[k].st_name);
+			ld_lazy_symbol *l = ld_lazy_symbol_find(str + y[k].st_name);
 
-			if (l->st == LS_UNDEF)
-				lextract(c);
-			else if (l->st == LS_NONE || l->st == LS_WEAKREF) {
-				l->st = LS_LAZY;
+			if (l->st == LD_LAZY_SYMBOL_UNDEFINED)
+				ld_lazy_member_extract(c);
+			else if (l->st == LD_LAZY_SYMBOL_NONE || l->st == LD_LAZY_SYMBOL_WEAK_REFERENCE) {
+				l->st = LD_LAZY_SYMBOL_LAZY;
 				l->cand = c;
 			}
 		}

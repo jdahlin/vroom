@@ -14,7 +14,7 @@
 
 
 /* a [REX_]GOTPCRELX that relaxes, as lld's adjustGotPcExpr (0: no, 1: rip form, 2: immediate form) */
-static int x64_relax_kind(const Obj *o, const ISec *is, const Rela *rl, const Target *t)
+static int x64_ld_got_relaxation_kind(const ld_object *o, const ld_input_section *is, const elf_rela *rl, const ld_relocation_target *t)
 {
 	uint32_t type = (uint32_t)rl->r_info;
 
@@ -37,57 +37,57 @@ static int x64_relax_kind(const Obj *o, const ISec *is, const Rela *rl, const Ta
 	}
 }
 
-static bool x64_needs_got(const Obj *o, const ISec *is, const Rela *rl)
+static bool x64_ld_relocation_needs_got(const ld_object *o, const ld_input_section *is, const elf_rela *rl)
 {
 	uint32_t type = (uint32_t)rl->r_info;
-	Target t;
+	ld_relocation_target t;
 
 	/* lld keeps .got (empty if need be) once a GD/LD sequence is relaxed */
 	if (type == R_X86_64_TLSGD || type == R_X86_64_TLSLD)
 		return true;
 	if (type != R_X86_64_GOTPCREL && type != R_X86_64_GOTPCRELX && type != R_X86_64_REX_GOTPCRELX)
 		return false;
-	reloc_class(o, (uint32_t)(rl->r_info >> 32), &t);
-	return !x64_relax_kind(o, is, rl, &t);
+	a64_ld_relocation_target_classify(o, (uint32_t)(rl->r_info >> 32), &t);
+	return !x64_ld_got_relaxation_kind(o, is, rl, &t);
 }
 
-static void x64_find_got(void *arg, size_t i)
+static void x64_ld_got_find(void *arg, size_t i)
 {
 	(void)arg;
-	const ISec *is = &isecs.v[i];
+	const ld_input_section *is = &isecs.v[i];
 
-	if (is->kind == K_NONE || is->obj == NONE || atomic_load_explicit(&got_seen, memory_order_relaxed))
+	if (is->kind == LD_SECTION_KIND_NONE || is->obj == LD_NONE || atomic_load_explicit(&got_seen, memory_order_relaxed))
 		return;
 	for (uint32_t r = 0; r < is->nrela; r++)
-		if (x64_needs_got(objs.v[is->obj], is, &is->rela[r])) {
+		if (x64_ld_relocation_needs_got(objs.v[is->obj], is, &is->rela[r])) {
 			atomic_store(&got_seen, true);
 			return;
 		}
 }
 
-static void x64_scan_relocs(void *arg, size_t i)
+static void x64_ld_relocation_scan(void *arg, size_t i)
 {
 	(void)arg;
-	ISec *is = &isecs.v[i];
-	if (!is->nrela || is->kind == K_NONE || is->obj == NONE)
+	ld_input_section *is = &isecs.v[i];
+	if (!is->nrela || is->kind == LD_SECTION_KIND_NONE || is->obj == LD_NONE)
 		return;
-	uint32_t os = isec_osec(i);
-	if (os == OS_DISCARD || os == NONE)
+	uint32_t os = ld_input_section_output_section(i);
+	if (os == LD_OUTPUT_SECTION_DISCARD || os == LD_NONE)
 		return;
-	Obj *o = objs.v[is->obj];
-	Target t;
+	ld_object *o = objs.v[is->obj];
+	ld_relocation_target t;
 
 	for (uint32_t r = 0; r < is->nrela; r++) {
-		const Rela *rl = &is->rela[r];
+		const elf_rela *rl = &is->rela[r];
 		uint32_t type = (uint32_t)rl->r_info, symi = rl->r_info >> 32;
 
 		if (symi >= o->nsym) {
-			error("%s: bad symbol index in relocation", o->path);
+			ld_error_report("%s: bad symbol index in relocation", o->path);
 			continue;
 		}
-		reloc_class(o, symi, &t);
+		a64_ld_relocation_target_classify(o, symi, &t);
 		if (t.discarded && (is->flags & SHF_ALLOC))
-			error("%s:(%s+0x%llx): relocation refers to a discarded section", o->path, is->name,
+			ld_error_report("%s:(%s+0x%llx): relocation refers to a discarded section", o->path, is->name,
 			      (unsigned long long)rl->r_offset);
 		switch (type) {
 		case R_X86_64_NONE: case R_X86_64_64: case R_X86_64_PC32: case R_X86_64_PLT32: case R_X86_64_32:
@@ -95,11 +95,11 @@ static void x64_scan_relocs(void *arg, size_t i)
 		case R_X86_64_PC64: case R_X86_64_TPOFF32: case R_X86_64_TPOFF64: case R_X86_64_DTPOFF32:
 		case R_X86_64_DTPOFF64: case R_X86_64_GOTTPOFF: case R_X86_64_TLSGD: case R_X86_64_SIZE32: case R_X86_64_SIZE64:
 			if (opt.shared && (type == R_X86_64_GOTTPOFF || type == R_X86_64_TLSGD))
-				error("%s:(%s+0x%llx): TLS relocation %u in a shared object is not supported", o->path,
+				ld_error_report("%s:(%s+0x%llx): TLS relocation %u in a shared object is not supported", o->path,
 				      is->name, (unsigned long long)rl->r_offset, type);
 			break;
 		case R_X86_64_GOTPCREL: case R_X86_64_GOTPCRELX: case R_X86_64_REX_GOTPCRELX:
-			if (x64_needs_got(o, is, rl)) {
+			if (x64_ld_relocation_needs_got(o, is, rl)) {
 				if (symi < o->firstg)
 					atomic_store_explicit(&o->lgot[symi], 1, memory_order_relaxed);
 				else
@@ -107,50 +107,50 @@ static void x64_scan_relocs(void *arg, size_t i)
 			}
 			break;
 		default:
-			error("%s:(%s+0x%llx): unsupported relocation type %u", o->path, is->name,
+			ld_error_report("%s:(%s+0x%llx): unsupported relocation type %u", o->path, is->name,
 			      (unsigned long long)rl->r_offset, type);
 		}
 	}
 	is->ndyn = 0;
 }
 
-static void x64_relocate_isec(uint32_t si, uint8_t *buf)
+static void x64_ld_input_section_relocate(uint32_t si, uint8_t *buf)
 {
-	ISec *is = &isecs.v[si];
-	Obj *o = objs.v[is->obj];
-	uint64_t secva = isec_va(si, 0);
-	Target t;
+	ld_input_section *is = &isecs.v[si];
+	ld_object *o = objs.v[is->obj];
+	uint64_t secva = ld_input_section_address(si, 0);
+	ld_relocation_target t;
 
 	for (uint32_t r = 0; r < is->nrela; r++) {
-		const Rela *rl = &is->rela[r];
+		const elf_rela *rl = &is->rela[r];
 		uint32_t type = (uint32_t)rl->r_info, symi = rl->r_info >> 32;
 		uint8_t *loc = buf + rl->r_offset;
 		uint64_t P = secva + rl->r_offset;
 		int64_t v;
 
 		if (rl->r_offset >= is->size + (type == R_X86_64_NONE)) {
-			error("%s:(%s): relocation offset out of range", o->path, is->name);
+			ld_error_report("%s:(%s): relocation offset out of range", o->path, is->name);
 			continue;
 		}
-		reloc_target_final(o, symi, rl->r_addend, &t);
+		ld_relocation_target_final_find(o, symi, rl->r_addend, &t);
 		switch (type) {
 		case R_X86_64_NONE:
 			break;
 		case R_X86_64_64:
-			wr64(loc, t.va);
+			ld_u64_store(loc, t.va);
 			break;
 		case R_X86_64_PC64:
-			wr64(loc, t.va - P);
+			ld_u64_store(loc, t.va - P);
 			break;
 		case R_X86_64_32:
 			if ((uint64_t)t.va > UINT32_MAX)
-				reloc_error(o, is, rl, "out of range", (int64_t)t.va);
-			wr32(loc, (uint32_t)t.va);
+				a64_ld_relocation_error_report(o, is, rl, "out of range", (int64_t)t.va);
+			ld_u32_store(loc, (uint32_t)t.va);
 			break;
 		case R_X86_64_32S:
-			if (!fits_int((int64_t)t.va, 32))
-				reloc_error(o, is, rl, "out of range", (int64_t)t.va);
-			wr32(loc, (uint32_t)t.va);
+			if (!ld_value_fits_signed((int64_t)t.va, 32))
+				a64_ld_relocation_error_report(o, is, rl, "out of range", (int64_t)t.va);
+			ld_u32_store(loc, (uint32_t)t.va);
 			break;
 		case R_X86_64_16: case R_X86_64_PC16: {
 			uint16_t x = (uint16_t)(type == R_X86_64_16 ? t.va : t.va - P);
@@ -163,21 +163,21 @@ static void x64_relocate_isec(uint32_t si, uint8_t *buf)
 			break;
 		case R_X86_64_PC32: case R_X86_64_PLT32:
 			v = (int64_t)(t.va - P);
-			if (!fits_int(v, 32))
-				reloc_error(o, is, rl, "out of range", v);
-			wr32(loc, (uint32_t)v);
+			if (!ld_value_fits_signed(v, 32))
+				a64_ld_relocation_error_report(o, is, rl, "out of range", v);
+			ld_u32_store(loc, (uint32_t)v);
 			break;
 		case R_X86_64_SIZE32: case R_X86_64_SIZE64: {
 			uint64_t sz = symi < o->firstg ? o->sym[symi].st_size : gsyms[o->gs[symi - o->firstg]].size;
 
 			if (type == R_X86_64_SIZE32)
-				wr32(loc, (uint32_t)(sz + (uint64_t)rl->r_addend));
+				ld_u32_store(loc, (uint32_t)(sz + (uint64_t)rl->r_addend));
 			else
-				wr64(loc, sz + (uint64_t)rl->r_addend);
+				ld_u64_store(loc, sz + (uint64_t)rl->r_addend);
 			break;
 		}
 		case R_X86_64_GOTPCREL: case R_X86_64_GOTPCRELX: case R_X86_64_REX_GOTPCRELX: {
-			int k = x64_relax_kind(o, is, rl, &t);
+			int k = x64_ld_got_relaxation_kind(o, is, rl, &t);
 
 			if (k == 1) {
 				uint8_t op = loc[-2], modrm = loc[-1];
@@ -185,13 +185,13 @@ static void x64_relocate_isec(uint32_t si, uint8_t *buf)
 				v = (int64_t)(t.va - P);
 				if (op == 0x8b) {
 					loc[-2] = 0x8d;		/* mov -> lea */
-					wr32(loc, (uint32_t)v);
+					ld_u32_store(loc, (uint32_t)v);
 				} else if (modrm == 0x15) {
 					loc[-2] = 0x67, loc[-1] = 0xe8;	/* addr32 call */
-					wr32(loc, (uint32_t)v);
+					ld_u32_store(loc, (uint32_t)v);
 				} else {
 					loc[-2] = 0xe9, loc[3] = 0x90;	/* jmp, nop */
-					wr32(loc - 1, (uint32_t)(v + 1));
+					ld_u32_store(loc - 1, (uint32_t)(v + 1));
 				}
 			} else if (k == 2) {
 				/* test/binop sym@GOTPCREL(%rip), %reg -> $sym (absolute: the -4 compensated) */
@@ -206,36 +206,36 @@ static void x64_relocate_isec(uint32_t si, uint8_t *buf)
 					loc[-2] = 0x81;
 				}
 				loc[-3] = (uint8_t)((rex & ~0x4) | (rex & 0x4) >> 2);
-				wr32(loc, (uint32_t)a);
+				ld_u32_store(loc, (uint32_t)a);
 			} else {
-				uint64_t slot = isec_va(got_isec, 8 * (uint64_t)(symi < o->firstg ? o->lgotidx[symi] :
+				uint64_t slot = ld_input_section_address(got_isec, 8 * (uint64_t)(symi < o->firstg ? o->lgotidx[symi] :
 										  gsyms[o->gs[symi - o->firstg]].gotidx));
 
 				v = (int64_t)(slot + (uint64_t)rl->r_addend - P);
-				wr32(loc, (uint32_t)v);
+				ld_u32_store(loc, (uint32_t)v);
 			}
 			break;
 		}
 		case R_X86_64_TPOFF32: case R_X86_64_TPOFF64:
 			v = (int64_t)(t.va - tls_tp);
 			if (type == R_X86_64_TPOFF64)
-				wr64(loc, (uint64_t)v);
+				ld_u64_store(loc, (uint64_t)v);
 			else
-				wr32(loc, (uint32_t)v);
+				ld_u32_store(loc, (uint32_t)v);
 			break;
 		case R_X86_64_DTPOFF32: case R_X86_64_DTPOFF64:
 			v = (int64_t)(t.va - tls_start);
 			if (type == R_X86_64_DTPOFF64)
-				wr64(loc, (uint64_t)v);
+				ld_u64_store(loc, (uint64_t)v);
 			else
-				wr32(loc, (uint32_t)v);
+				ld_u32_store(loc, (uint32_t)v);
 			break;
 		case R_X86_64_GOTTPOFF: {
 			/* initial-exec -> local-exec (lld's relaxTlsIeToLe) */
 			uint8_t *in = loc - 3, reg;
 
 			if (rl->r_offset < 3) {
-				reloc_error(o, is, rl, "GOTTPOFF at the start of a section", 0);
+				a64_ld_relocation_error_report(o, is, rl, "GOTTPOFF at the start of a section", 0);
 				break;
 			}
 			reg = (uint8_t)((loc[-1] >> 3) & 7);
@@ -252,8 +252,8 @@ static void x64_relocate_isec(uint32_t si, uint8_t *buf)
 			else if (in[0] == 0x48 && in[1] == 0x8b)
 				in[0] = 0x48, in[1] = 0xc7, loc[-1] = (uint8_t)(0xc0 | reg);
 			else
-				reloc_error(o, is, rl, "R_X86_64_GOTTPOFF must be used in MOVQ or ADDQ instructions only", 0);
-			wr32(loc, (uint32_t)(t.va - tls_tp + 4));
+				a64_ld_relocation_error_report(o, is, rl, "R_X86_64_GOTTPOFF must be used in MOVQ or ADDQ instructions only", 0);
+			ld_u32_store(loc, (uint32_t)(t.va - tls_tp + 4));
 			break;
 		}
 		case R_X86_64_TLSGD: {
@@ -261,11 +261,11 @@ static void x64_relocate_isec(uint32_t si, uint8_t *buf)
 			static const uint8_t in[16] = { 0x64, 0x48, 0x8b, 0x04, 0x25, 0, 0, 0, 0, 0x48, 0x8d, 0x80, 0, 0, 0, 0 };
 
 			if (rl->r_offset < 4 || rl->r_offset + 12 > is->size) {
-				reloc_error(o, is, rl, "malformed TLSGD sequence", 0);
+				a64_ld_relocation_error_report(o, is, rl, "malformed TLSGD sequence", 0);
 				break;
 			}
 			memcpy(loc - 4, in, sizeof in);
-			wr32(loc + 8, (uint32_t)(t.va - tls_tp + 4));
+			ld_u32_store(loc + 8, (uint32_t)(t.va - tls_tp + 4));
 			r++;	/* (the call to __tls_get_addr is gone) */
 			break;
 		}

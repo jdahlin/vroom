@@ -22,7 +22,7 @@ static bool is_src(const char *a)
  * A host job (no --target: the build machine's own programs).  -c/-S/-E go
  * to ppdriver as they are (it compiles for the host when there is no
  * --target).  A link, with or without sources: each source is compiled to a
- * temporary object next to the output, then vld (ldmacho.c) links the
+ * temporary object next to the output, then vld (macho-linker.c) links the
  * objects; -l maps to libSystem.  -fuse-ld= is ignored: vld is the linker.
  */
 VPRIV int host_cc(const struct req *r)

@@ -5,7 +5,7 @@
 typedef struct {
 	const char *path;
 	bool whole;
-} InputArg;
+} ld_input_argument;
 
 static struct {
 	const char *out;
@@ -21,7 +21,7 @@ static struct {
 	bool stubs;			/* define unresolved symbols as -O0 stubs */
 	bool relax;
 	uint64_t max_page;
-	VVEC(InputArg) inputs;
+	VVEC(ld_input_argument) inputs;
 	VVEC(const char *) libdirs;
 	bool bstatic;
 	bool gc, print_gc;		/* --gc-sections, --print-gc-sections */

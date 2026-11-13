@@ -2,21 +2,21 @@
 
 int ld_main(int argc, char **argv, int dirfd, FILE *err)
 {
-	struct rspmem *rsp = NULL;
-	rsp_expand(&argc, &argv, dirfd, &rsp);
+	struct ld_response_memory *rsp = NULL;
+	ld_response_files_expand(&argc, &argv, dirfd, &rsp);
 	int rc;
-	if (first_input_macho(argc, argv, dirfd)) {
-		rc = ld_macho(argc, argv, dirfd, err);
+	if (ld_first_input_is_macho(argc, argv, dirfd)) {
+		rc = macho_link(argc, argv, dirfd, err);
 	} else {
-		vtask_mutex_lock(&ldlock);	/* (a second link waits off the CPU budget) */
+		vtask_mutex_lock(&ld_link_lock);	/* (a second link waits off the CPU budget) */
 		errf = err ? err : stderr;
 		dirfd_base = dirfd;
-		rc = run(argc, argv);
-		free_arenas();
-		pthread_mutex_unlock(&ldlock);
+		rc = ld_link_run(argc, argv);
+		ld_regions_free();
+		pthread_mutex_unlock(&ld_link_lock);
 	}
 	while (rsp) {
-		struct rspmem *nx = rsp->next;
+		struct ld_response_memory *nx = rsp->next;
 		free(rsp);
 		rsp = nx;
 	}

@@ -23,7 +23,7 @@
  *     PROG is run instead);
  *   - compiles and links the host programs (no --target) for macOS the same
  *     way: ppdriver without a target writes Mach-O objects, vld's Mach-O
- *     path (platform/darwin/ldmacho.c) links them against libSystem.  No
+ *     path (platform/darwin/macho-linker.c) links them against libSystem.  No
  *     clang, no ld64 (with --backend-sock: they are forwarded there);
  *   - runs the archiver (ar, var, llvm-ar by argv[0]) itself: ar.c;
  *   - runs nm and objcopy (vcc-nm, vcc-objcopy) itself: ld/objcopy.c;
