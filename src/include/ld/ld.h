@@ -44,6 +44,12 @@ int ld_main(int argc, char **argv, int dirfd, FILE *err);
    ld_main dispatches here when the first input is Mach-O */
 int macho_link(int argc, char **argv, int dirfd, FILE *err);
 
+/* x86-64 PE32+ executables and DLLs from COFF objects (platform/win/pe-linker.c);
+   ld_main dispatches here when the first input is COFF x86-64 or -m i386pep is given */
+int pe_link(int argc, char **argv, int dirfd, FILE *err);
+#include <stdbool.h>
+bool pe_link_wanted(int argc, char **argv, int dirfd);
+
 /* objcopy/nm subset used by the kernel build (objcopy.c) */
 int objcopy_main(int argc, char **argv, int dirfd, FILE *err);
 int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err);
