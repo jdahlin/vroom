@@ -486,6 +486,53 @@ def two_groups_share_caches():
     n = int(m.group(1))
     check(n <= 2, f'{n} cache flushes: at most one for the first switch and one for the build after the edit')
 
+def long_job(v, d):
+    """a compile in its own process group that is still running while the caller goes on (a build in progress)"""
+    big = tu(d, 'big.c', ''.join(f'int f{i}(int x) {{ return x * {i} + (x >> 3) - {i}; }}\n' for i in range(600000)))
+    p = subprocess.Popen([SHIM] + TARGET + ['-c', '-o', 'big.o', big], cwd=d, env=dict(os.environ, VCC_SOCK=v.sock),
+                         stderr=subprocess.DEVNULL, process_group=0)
+    time.sleep(0.5)
+    check(p.poll() is None, 'the long job ended too early for this test')
+    return p
+
+@test()
+def edit_seen_by_build_started_while_another_runs():
+    """Q-SCHED-01: build A is running, build B compiles a file that includes h.h, h.h is edited, build C starts (a new
+    make, while A still runs: no flush): C compiles the NEW h.h, not the one B's compile left in the caches"""
+    v = Vccd(workers=4)
+    try:
+        d = f'{v.dir}/w'; tu(d, 'h.h', '#define N 1\n'); src = tu(d, 'a.c', '#include "h.h"\nint v = N;\n')
+        a = long_job(v, d)
+        try:
+            st, err = v.cc(d, src, out='1.o'); check(st == 0, err[-300:])
+            time.sleep(0.01)
+            open(f'{d}/h.h', 'w').write('#define N 22222\n')
+            st, err = v.cc(d, src, out='2.o'); check(st == 0, err[-300:])
+            check(a.poll() is None, 'the long job ended before the second build: the test did not test the case')
+            check(obj(d, '1.o') != obj(d, '2.o'), 'the build started while another ran used the header from before the edit')
+            check(obj(d, '2.o') == fresh(d, src, '3.o'), 'second build differs from a fresh server')
+        finally: a.kill(); a.wait()
+    finally: v.stop(120)
+
+@test()
+def unedited_files_hit_the_cache_for_a_new_build():
+    """the other half: a file that did not change is not read again by a build that starts while another runs.  The
+    check is a stat (size, mtime, identity), so a rewrite of the same size with the same mtime goes unseen: that is how
+    this shows that the cached copy was used"""
+    v = Vccd(workers=4)
+    try:
+        d = f'{v.dir}/w'; tu(d, 'h.h', '#define N 1111\n'); src = tu(d, 'a.c', '#include "h.h"\nint v = N;\n')
+        a = long_job(v, d)
+        try:
+            st, err = v.cc(d, src, out='1.o'); check(st == 0, err[-300:])
+            ns = os.stat(f'{d}/h.h').st_mtime_ns
+            with open(f'{d}/h.h', 'r+') as f: f.write('#define N 2222\n')	# same size, same inode
+            os.utime(f'{d}/h.h', ns=(ns, ns))
+            st, err = v.cc(d, src, out='2.o'); check(st == 0, err[-300:])
+            check(obj(d, '1.o') == obj(d, '2.o'), 'an unchanged file (size, mtime) was read again')
+        finally: a.kill(); a.wait()
+    finally: v.stop(120)
+
 # ---------------- the client's view ----------------
 
 @test()

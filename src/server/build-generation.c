@@ -7,8 +7,12 @@
  * has not seen lately is a new make invocation: if no job is running, the
  * file, directory and include caches are emptied first (old entries stay
  * allocated, so nothing in flight dangles).  If jobs are running the caches
- * stay: they are what those jobs rely on, and nothing waits.  Two makes
- * through one server thus share the caches instead of draining each other.
+ * stay and nothing waits, but a new cache epoch begins (vcache_new_epoch):
+ * every cached file, directory and include answer is checked against the
+ * file system once (a stat, no lock held) before the next lookup uses it,
+ * and an answer that no longer holds is dropped and found again.  Two makes
+ * through one server thus share the caches instead of draining each other,
+ * and a file edited between them is seen.
  * A group stays known for GEN_KEEP_MS after its last request, so a make with
  * gaps between its jobs does not look new when it comes back.
  */
@@ -152,6 +156,8 @@ VPRIV int gen_enter(uint32_t pgrp)
 				dstore_new_build();
 				pp_include_flush();
 				atomic_fetch_add(&n_flush, 1);
+			} else if (gen_ngrp) {	/* jobs are running: keep the caches, but check each answer once before it is reused */
+				vcache_new_epoch();
 			}
 			for (int j = 0; j < gen_ngrp; j++)	/* forget the groups long gone */
 				if (t - gen_grp[j].ms < GEN_KEEP_MS)
