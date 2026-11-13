@@ -17,6 +17,9 @@ with # are ignored.  Two kinds of row:
               ([A-Za-z0-9_] boundaries) in C, headers, Python, shell, Makefiles
               and the live documents.
 
+In C files nothing inside a string literal is changed (output text stays) except on
+#include lines.
+
 Scope: src/, bench/, ci/, contrib/, AGENTS.md, README.md, TODO.md and
 doc/STYLE.md; not doc/ otherwise (plans and reviews keep their history),
 not build/, work/ or test inputs under src/test/ that are expected outputs
@@ -27,6 +30,7 @@ Safety: the dry run (and --apply, which refuses) report a collision when
     old name of the table (rename into an existing identifier), or
   - two rows give the same new name (a merge: say so in the row's note and
     use --allow-merge, the author must make the bodies agree first), or
+  - an old name occurs nowhere (a stale row or a misspelt guard),
   - an old name occurs in a string literal that looks like output (listed,
     not changed: decide by hand).
 All replacements are done in one pass per file with one alternation, longest
@@ -158,21 +162,42 @@ def main():
             counts[o] = counts.get(o, 0) + 1
             return n
         u = t
-        for pat in pats:
-            u = pat.sub(sub, u)
+        if p.endswith(('.c', '.h', '.inc')):
+            # not inside string literals (output text stays as it is), except #include lines
+            lit = re.compile(r'"(?:[^"\\\n]|\\.)*"')
+            def line(l):
+                if l.lstrip().startswith('#include'):
+                    for pat in pats:
+                        l = pat.sub(sub, l)
+                    return l
+                parts, pos = [], 0
+                for m in lit.finditer(l):
+                    seg = l[pos:m.start()]
+                    for pat in pats:
+                        seg = pat.sub(sub, seg)
+                    parts += [seg, m.group(0)]
+                    pos = m.end()
+                seg = l[pos:]
+                for pat in pats:
+                    seg = pat.sub(sub, seg)
+                return ''.join(parts) + seg
+            u = '\n'.join(line(l) for l in t.split('\n'))
+        else:
+            for pat in pats:
+                u = pat.sub(sub, u)
         if u != t:
             new_texts[p] = u
 
     for o, n, note, ln in rows:
         print(f'{counts.get(o, 0):6d}  {o} -> {n}')
+    unused = [o for o, n, _, _ in rows if not counts.get(o)]
     print(f'{len(new_texts)} files change, {sum(counts.values())} replacements, {len(rows)} rows')
     for s in strs:
         print('string literal (not changed, decide by hand): ' + s)
     for pr in problems:
         print('PROBLEM: ' + pr)
-    unused = [o for o, n, _, _ in rows if not counts.get(o)]
-    if unused:
-        print('rows with no use (stale?): ' + ', '.join(unused))
+    for o in unused:
+        problems.append(f'unused: {o} occurs nowhere (stale row, or the guard/name is spelled differently)')
     if not apply_:
         return 1 if problems else 0
     if problems:
