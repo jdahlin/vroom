@@ -51,58 +51,93 @@ static bool vir_redundant_candidate(const vir_fn *f, const vir_ins *x)
 	return false;
 }
 
+/* Instruction i (its operands already replaced): the value that is equal to it and defined before, or i itself */
+static uint32_t vir_redundant_replacement(const vir_fn *f, const uint32_t *kb, uint32_t i)
+{
+	const vir_ins *in = &f->ins[i];
+	uint32_t w = in->ty == VT_I32 ? 32 : 64;
+
+	if (in->op == VO_EXT) {
+		uint32_t bits = 8u << VIF_W(in->fl), z, s;
+
+		if (in->a >= i || !vir_redundant_integer(in->ty) || f->ins[in->a].ty != in->ty)
+			return i;
+		z = vir_known_bits_z(kb[in->a]);
+		s = vir_known_bits_s(kb[in->a]);
+		return (!(in->fl & VIF_MS) ? z <= bits : s <= bits || z < bits) ? in->a : i;
+	}
+	if (in->op == VO_AND && vir_redundant_integer(in->ty)) {
+		uint64_t m = vir_redundant_mask(f, in->b, w);
+		uint32_t other = in->a, z;
+
+		if (!m) {
+			m = vir_redundant_mask(f, in->a, w);
+			other = in->b;
+		}
+		if (!m || other >= i || f->ins[other].ty != in->ty)
+			return i;
+		z = vir_known_bits_z(kb[other]);
+		if (z < w ? (m & (((uint64_t)1 << z) - 1)) == ((uint64_t)1 << z) - 1 : m == (w == 32 ? 0xffffffffull : ~0ull))
+			return other;
+	}
+	return i;
+}
+
+/* the operands of instruction i through the replacement map (constants are their own) */
+static inline void vir_redundant_operands(vir_fn *f, const uint32_t *rep, uint32_t i)
+{
+	vir_ins *in = &f->ins[i];
+	uint8_t m = vir_value_fields(in->op);
+
+	if (m & 1 && in->a >= f->nconst && in->a < i)
+		in->a = rep[in->a];
+	if (m & 2 && in->b >= f->nconst && in->b < i)
+		in->b = rep[in->b];
+	if (m & 4 && in->c >= f->nconst && in->c < i)
+		in->c = rep[in->c];
+	if (m & VIR_FIELDS_LIST) {
+		vir_oit it;
+		uint32_t *p;
+
+		vir_oit_init_list(&it, f, in);
+		while ((p = vir_oit_next(&it)))
+			if (*p >= f->nconst && *p < i)
+				*p = rep[*p];
+	}
+}
+
 bool vir_redundant_extensions_remove(vir_fn *f, vir_pass_context *ctx)
 {
 	vir_ctx *x = vir_ctx_get();
-	uint32_t *rep = x->aux, *kb = f->tmp, removed = 0;
-	bool any = false;
+	uint32_t *rep = x->aux, *kb = f->tmp, *late = x->bs[0], loops[2], removed = 0;
+	bool any = false, has_late;
 
 	for (uint32_t b = 0; b < f->nblk && !any; b++)
 		for (uint32_t i = f->blk[b].first; i < f->blk[b].first + f->blk[b].n && !any; i++)
 			any = vir_redundant_candidate(f, &f->ins[i]);
-	if (!any || !vir_known_bits_compute(f, ctx, kb))
+	if (!any || !vir_known_bits_begin(f, kb, late, &has_late, loops))
 		return false;
-	for (uint32_t v = 0; v < f->nconst; v++)
-		rep[v] = v;
+	/* with a late parameter the facts need rounds before any of them may be used: compute them all, then sweep */
+	if (has_late)
+		vir_known_bits_settle(f, ctx, kb, late, loops, true);
+	/* one forward sweep: replacement map written as values are visited (nothing is cleared); facts are computed in the
+	   same sweep when no parameter is late; a replaced value's facts are never read (its uses name the replacement) */
 	for (uint32_t b = 0; b < f->nblk; b++)
 		for (uint32_t i = f->blk[b].first; i < f->blk[b].first + f->blk[b].n; i++) {
-			vir_ins *in = &f->ins[i];
-			uint32_t w = in->ty == VT_I32 ? 32 : 64, r = i;
-			vir_oit it;
-			uint32_t *p;
+			uint32_t r;
 
-			vir_oit_init(&it, f, in, false);
-			while ((p = vir_oit_next(&it)))
-				if (*p < i)
-					*p = rep[*p];
-			/* (the facts of a replacement are the facts of the value it replaces, or better) */
-			if (in->op == VO_EXT && in->a < i && vir_redundant_integer(in->ty) && f->ins[in->a].ty == in->ty) {
-				uint32_t bits = 8u << VIF_W(in->fl), z = vir_known_bits_z(kb[in->a]), s = vir_known_bits_s(kb[in->a]);
-
-				if (!(in->fl & VIF_MS) ? z <= bits : s <= bits || z < bits)
-					r = in->a;
-			} else if (in->op == VO_AND && vir_redundant_integer(in->ty)) {
-				uint64_t m = vir_redundant_mask(f, in->b, w);
-				uint32_t other = in->a;
-
-				if (!m) {
-					m = vir_redundant_mask(f, in->a, w);
-					other = in->b;
-				}
-				if (m && other < i && f->ins[other].ty == in->ty) {
-					uint32_t z = vir_known_bits_z(kb[other]);
-
-					if (z < w ? (m & (((uint64_t)1 << z) - 1)) == ((uint64_t)1 << z) - 1 : m == (w == 32 ? 0xffffffffull : ~0ull))
-						r = other;
-				}
-			}
+			if (removed)	/* (until the first removal every operand is its own replacement) */
+				vir_redundant_operands(f, rep, i);
+			r = f->ins[i].op == VO_EXT || f->ins[i].op == VO_AND ? vir_redundant_replacement(f, kb, i) : i;
 			if (r != i) {
 				rep[i] = r;
-				memset(in, 0, sizeof *in);	/* a nop: pure, and every use comes later and is rewritten */
+				memset(&f->ins[i], 0, sizeof f->ins[i]);	/* a nop: pure, and every use comes later and is rewritten */
 				removed++;
-			} else {
-				rep[i] = i;
+				continue;
 			}
+			rep[i] = i;
+			if (!has_late)
+				vir_known_bits_step(f, kb, late, i);
 		}
 	if (!removed)
 		return false;

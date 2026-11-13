@@ -32,15 +32,26 @@ uint32_t vir_function_compact(vir_fn *f)
 
 		for (uint32_t i = kb->first; i < kb->first + kb->n && i < nins; i++) {
 			vir_ins y = f->ins[i];
-			vir_oit it;
-			uint32_t *p;
+			uint8_t m;
 
 			if (y.op == VO_NOP)
 				continue;
-			vir_oit_init(&it, f, &y, false);
-			while ((p = vir_oit_next(&it)))
-				if (*p >= 1 && *p < nconst)
-					tmp[*p] = 0;
+			m = vir_value_fields(y.op);
+			if (m & 1 && y.a - 1 < nconst - 1)	/* (unsigned: 1 <= a < nconst) */
+				tmp[y.a] = 0;
+			if (m & 2 && y.b - 1 < nconst - 1)
+				tmp[y.b] = 0;
+			if (m & 4 && y.c - 1 < nconst - 1)
+				tmp[y.c] = 0;
+			if (m & VIR_FIELDS_LIST) {
+				vir_oit it;
+				uint32_t *p;
+
+				vir_oit_init_list(&it, f, &y);
+				while ((p = vir_oit_next(&it)))
+					if (*p - 1 < nconst - 1)
+						tmp[*p] = 0;
+			}
 		}
 	}
 	/* 2. the new index of every kept value */
@@ -93,14 +104,25 @@ uint32_t vir_function_compact(vir_fn *f)
 
 		for (uint32_t i = kb->first; i < end && i < nins; i++) {
 			vir_ins y = f->ins[i];
-			vir_oit it;
-			uint32_t *p;
+			uint8_t m;
 
 			if (y.op == VO_NOP)
 				continue;
-			vir_oit_init(&it, f, &y, false);
-			while ((p = vir_oit_next(&it)))
-				*p = *p < nins && tmp[*p] != VIR_COMPACT_NONE ? tmp[*p] : 0;
+			m = vir_value_fields(y.op);
+			if (m & 1)
+				y.a = y.a < nins && tmp[y.a] != VIR_COMPACT_NONE ? tmp[y.a] : 0;
+			if (m & 2)
+				y.b = y.b < nins && tmp[y.b] != VIR_COMPACT_NONE ? tmp[y.b] : 0;
+			if (m & 4)
+				y.c = y.c < nins && tmp[y.c] != VIR_COMPACT_NONE ? tmp[y.c] : 0;
+			if (m & VIR_FIELDS_LIST) {
+				vir_oit it;
+				uint32_t *p;
+
+				vir_oit_init_list(&it, f, &y);
+				while ((p = vir_oit_next(&it)))
+					*p = *p < nins && tmp[*p] != VIR_COMPACT_NONE ? tmp[*p] : 0;
+			}
 			f->ins[tmp[i]] = y;
 			o++;
 		}

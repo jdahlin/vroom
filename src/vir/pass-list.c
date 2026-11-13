@@ -23,8 +23,8 @@ static bool vir_compact_run(vir_fn *f, vir_pass_context *ctx)
 }
 
 const vir_pass_info vir_pass_compact = { "compact", vir_compact_run, 0, VIR_VALID_CFG | VIR_VALID_DOM, 0 };
-/* it calls vir_cfg itself (the predecessor lists are what makes parameters late); it changes no block, edge or terminator */
-const vir_pass_info vir_pass_redundant_extensions = { "redundant-extensions", vir_redundant_extensions_remove, VIR_VALID_CFG,
+/* it asks for no analysis (a late parameter is found from the brs) and changes no block, edge or terminator */
+const vir_pass_info vir_pass_redundant_extensions = { "redundant-extensions", vir_redundant_extensions_remove, 0,
 						      VIR_VALID_CFG | VIR_VALID_DOM, 0 };
 
 static const vir_pass_info *const vir_passes[] = { &vir_pass_compact, &vir_pass_redundant_extensions };

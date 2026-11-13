@@ -181,76 +181,119 @@ static uint32_t vir_kb_transfer(const vir_fn *f, const uint32_t *out, uint32_t i
 	}
 }
 
-/* one forward sweep; true when a late block parameter's facts grew */
-static bool vir_kb_sweep(vir_fn *f, uint32_t *out, const uint32_t *late)
+/* The fact of instruction i is written to out[i]; a `br` joins its arguments into the parameters of its target.
+ * True when a late parameter's facts grew.  A value of another type than i32 and i64 gets no fact (nothing reads it). */
+bool vir_known_bits_step(const vir_fn *f, uint32_t *out, const uint32_t *late, uint32_t i)
+{
+	const vir_ins *x = &f->ins[i];
+
+	if (x->op == VO_BPARAM)
+		return false;	/* accumulated by the brs into it */
+	if (x->op == VO_BR) {
+		const vir_blk *t = &f->blk[x->a];
+		bool grew = false;
+
+		for (uint32_t j = 0; j < t->nparam; j++) {
+			uint32_t arg = f->extra[x->c + j], p = t->first + j, w = vir_kb_width(f->ins[p].ty), nv;
+
+			if (!w || arg >= f->nins)
+				continue;
+			bool back = late[x->a] && i >= f->blk[x->a].first;	/* from the loop's own blocks: the edge that decides */
+
+			nv = vir_kb_join(out[p], out[arg], w);
+			if (nv != out[p] && back)
+				nv = vir_kb_pack(vir_kb_widen(vir_known_bits_z(nv), false, w), vir_kb_widen(vir_known_bits_s(nv), true, w), w);
+			if (nv != out[p]) {
+				out[p] = nv;
+				grew |= back;
+			}
+		}
+		return grew;
+	}
+	if (x->ty == VT_I32 || x->ty == VT_I64)
+		out[i] = vir_kb_transfer(f, out, i);
+	return false;
+}
+
+/* one forward sweep over the blocks [from, to); true when a late block parameter's facts grew on a back edge */
+static bool vir_kb_sweep(vir_fn *f, uint32_t *out, const uint32_t *late, uint32_t from, uint32_t to)
 {
 	bool grew = false;
 
-	for (uint32_t bi = 0; bi < f->nblk; bi++) {
+	for (uint32_t bi = from; bi < to; bi++) {
 		const vir_blk *kb = &f->blk[bi];
 
-		for (uint32_t i = kb->first; i < kb->first + kb->n; i++) {
-			const vir_ins *x = &f->ins[i];
-
-			if (x->op == VO_BPARAM)
-				continue;	/* accumulated by the brs into it */
-			if (x->op == VO_BR) {
-				const vir_blk *t = &f->blk[x->a];
-
-				for (uint32_t j = 0; j < t->nparam; j++) {
-					uint32_t arg = f->extra[x->c + j], p = t->first + j, w = vir_kb_width(f->ins[p].ty);
-					uint32_t nv;
-
-					if (!w || arg >= f->nins)
-						continue;
-					nv = vir_kb_join(out[p], out[arg], w);
-					if (nv != out[p] && late[x->a])
-						nv = vir_kb_pack(vir_kb_widen(vir_known_bits_z(nv), false, w), vir_kb_widen(vir_known_bits_s(nv), true, w), w);
-					if (nv != out[p]) {
-						out[p] = nv;
-						grew |= late[x->a] != 0;
-					}
-				}
-				continue;
-			}
-			out[i] = vir_kb_transfer(f, out, i);
-		}
+		for (uint32_t i = kb->first; i < kb->first + kb->n; i++)
+			grew |= vir_known_bits_step(f, out, late, i);
 	}
 	return grew;
 }
 
-bool vir_known_bits_compute(vir_fn *f, const vir_pass_context *ctx, uint32_t *out)
+bool vir_known_bits_begin(vir_fn *f, uint32_t *out, uint32_t *late, bool *has_late, uint32_t *loops)
 {
-	vir_ctx *x = vir_ctx_get();
-	uint32_t *late = x->bs[0];
-	uint32_t budget = ctx && ctx->budget ? ctx->budget : VIR_PASS_BUDGET;
-	bool any = false, grew = true;
+	bool any = false;
 
-	if (!vir_cfg(f))
-		return false;	/* (the getter's scratch is free again) */
+	if (!f->nblk || f->nconst > f->nins)
+		return false;
 	out[0] = vir_kb_unknown(VT_VOID);
-	for (uint32_t i = 1; i < f->nconst && i < f->nins; i++)
+	for (uint32_t i = 1; i < f->nconst; i++)
 		out[i] = vir_kb_constant(&f->ins[i]);
+	loops[0] = f->nblk;
+	loops[1] = 0;
+	/* only a `br` passes arguments to parameters, so a parameter is late when a `br` at or after its block targets it (no
+	   predecessor lists needed); the instructions are all written by the sweeps, the parameters start with "no value yet" */
 	for (uint32_t b = 0; b < f->nblk; b++) {
 		const vir_blk *kb = &f->blk[b];
+		const vir_ins *t;
 
 		late[b] = 0;
-		for (uint32_t j = 0; j < kb->npred; j++)
-			if (f->extra[kb->pred + j] >= b)
-				late[b] = 1;
-		any |= late[b] != 0;
-		for (uint32_t i = kb->first; i < kb->first + kb->n; i++)
-			out[i] = f->ins[i].op == VO_BPARAM && vir_kb_width(f->ins[i].ty) ? vir_kb_pack(0, 1, vir_kb_width(f->ins[i].ty))
-							    : vir_kb_unknown(f->ins[i].ty);
+		if (!kb->n || kb->first + kb->n > f->nins || kb->nparam > kb->n)
+			return false;
+		t = &f->ins[kb->first + kb->n - 1];
+		if (t->op == VO_BR && t->a < f->nblk && t->a <= b && f->blk[t->a].nparam) {
+			late[t->a] = 1;
+			any = true;
+			if (t->a < loops[0])
+				loops[0] = t->a;
+			loops[1] = b + 1;	/* the blocks [loops[0], loops[1]) hold every loop that carries a parameter */
+		}
+		for (uint32_t i = kb->first; i < kb->first + kb->nparam; i++)
+			out[i] = vir_kb_width(f->ins[i].ty) ? vir_kb_pack(0, 1, vir_kb_width(f->ins[i].ty)) : vir_kb_unknown(f->ins[i].ty);
 	}
-	for (uint32_t round = 0; grew && round < budget; round++)
-		grew = vir_kb_sweep(f, out, late) && any;
+	*has_late = any;
+	return true;
+}
+
+bool vir_known_bits_compute(vir_fn *f, const vir_pass_context *ctx, uint32_t *out)
+{
+	uint32_t *late = vir_ctx_get()->bs[0], loops[2];
+	bool any;
+
+	if (!vir_known_bits_begin(f, out, late, &any, loops))
+		return false;
+	vir_known_bits_settle(f, ctx, out, late, loops, any);
+	return true;
+}
+
+void vir_known_bits_settle(vir_fn *f, const vir_pass_context *ctx, uint32_t *out, const uint32_t *late, const uint32_t *loops, bool any)
+{
+	uint32_t budget = ctx && ctx->budget ? ctx->budget : VIR_PASS_BUDGET, round = 1;
+	bool grew;
+
+	/* round 1 is the whole function; while a back edge keeps growing a parameter only the blocks of the loops are swept
+	   again, and the blocks after them once the parameters have settled */
+	grew = vir_kb_sweep(f, out, late, 0, f->nblk) && any;
+	while (grew && round < budget) {
+		round++;
+		grew = vir_kb_sweep(f, out, late, loops[0], loops[1]);
+	}
 	if (grew) {	/* out of budget: the late parameters know nothing, and one round settles the rest */
 		for (uint32_t b = 0; b < f->nblk; b++)
 			if (late[b])
 				for (uint32_t j = 0; j < f->blk[b].nparam; j++)
 					out[f->blk[b].first + j] = vir_kb_unknown(f->ins[f->blk[b].first + j].ty);
-		vir_kb_sweep(f, out, late);
+		vir_kb_sweep(f, out, late, loops[0], f->nblk);
+	} else if (round > 1) {
+		vir_kb_sweep(f, out, late, loops[1], f->nblk);
 	}
-	return true;
 }

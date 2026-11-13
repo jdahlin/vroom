@@ -43,6 +43,15 @@ struct vir_ctx {
 };
 #define VIR_CTAB_BITS 24
 
+#define VIR_FIELDS_LIST 0x80
+VPRIV uint8_t vir_value_fields(uint32_t op);	/* fields a, b, c that hold values (bits 0-2), VIR_FIELDS_LIST: and an extra list */
+/* the extra-list operands of an instruction (call ret br asm asmgoto) only, to read or rewrite: the fields are not yielded */
+static inline void vir_oit_init_list(vir_oit *it, vir_fn *f, vir_ins *in)
+{
+	vir_oit_init(it, f, in, false);
+	it->fi = 3;
+}
+
 VPRIV uint32_t vir_term_of(const vir_fn *f, uint32_t b);	/* index of block b's terminator (its last real instruction), or 0 */
 VPRIV bool vir_succ_csr(vir_fn *f, uint32_t *off, uint32_t *succ);	/* successor lists; false if a target is out of range */
 VPRIV void vir_ctab_reset(vir_ctx *c);
