@@ -1,9 +1,9 @@
 /*
  * request.c: receive a request from a connection, validate it, split it into cwd, argv and
- * environment, and the small helpers that work on it (say, req_env, log_req).
+ * environment, and the small helpers that work on it (say, vccd_request_environment_get, vccd_request_log).
  *
- * recv_req takes the header and the three fds (SCM_RIGHTS, close-on-exec) and then the payload into
- * the worker's buffer; split_req points into that buffer, so a struct req is valid only while the
+ * vccd_request_receive takes the header and the three fds (SCM_RIGHTS, close-on-exec) and then the payload into
+ * the worker's buffer; vccd_request_split points into that buffer, so a struct req is valid only while the
  * buffer is: until the thread's next request.  Everything arrives from a client we do not trust
  * (the socket is 0600 and vccd checks the peer, but the bytes are still checked): the header is checked before it is used, the
  * counts in 64 bits, the payload's last byte must be a NUL so the strlen's stay inside it.  A request
@@ -12,7 +12,7 @@
  */
 #include "vccd-internal.h"
 
-VPRIV bool read_full(int fd, char *p, size_t n)
+VPRIV bool vccd_fd_read_full(int fd, char *p, size_t n)
 {
 	while (n) {
 		ssize_t r = read(fd, p, n);
@@ -27,7 +27,7 @@ VPRIV bool read_full(int fd, char *p, size_t n)
 	return true;
 }
 
-VPRIV bool write_full(int fd, const char *p, size_t n)
+VPRIV bool vccd_fd_write_full(int fd, const char *p, size_t n)
 {
 	while (n) {
 		ssize_t r = write(fd, p, n);
@@ -43,9 +43,9 @@ VPRIV bool write_full(int fd, const char *p, size_t n)
 }
 
 
-VPRIV bool recv_req(struct worker *w, int conn, struct req *r)
+VPRIV bool vccd_request_receive(struct vccd_worker *w, int conn, struct vccd_request *r)
 {
-	struct vroom_req_hdr *h = (struct vroom_req_hdr *)w->raw;
+	struct vccd_request_header *h = (struct vccd_request_header *)w->raw;
 	char cbuf[CMSG_SPACE(16 * sizeof(int))] = { 0 };
 	struct iovec iov = { h, sizeof(*h) };
 	int nfd = 0, bad = 0;
@@ -90,28 +90,28 @@ VPRIV bool recv_req(struct worker *w, int conn, struct req *r)
 				close(r->fds[i]), r->fds[i] = -1;
 		return false;
 	}
-	if (h->magic != VROOM_MAGIC || h->payload_len > VROOM_MAX_PAYLOAD || h->payload_len == 0 || h->pad ||
-	    1 + (uint64_t)h->argc + h->envc > MAX_STRS)	/* (64 bits: argc 0xffffffff wraps to a small count) */
+	if (h->magic != VCCD_PROTOCOL_MAGIC || h->payload_len > VCCD_PROTOCOL_PAYLOAD_MAX || h->payload_len == 0 || h->padding ||
+	    1 + (uint64_t)h->argc + h->envc > VCCD_STRINGS_MAX)	/* (64 bits: argc 0xffffffff wraps to a small count) */
 		return false;
-	if (!read_full(conn, w->raw + sizeof(*h), h->payload_len))
+	if (!vccd_fd_read_full(conn, w->raw + sizeof(*h), h->payload_len))
 		return false;
 	if (w->raw[sizeof(*h) + h->payload_len - 1])
-		return false;	/* the last string's NUL: split_req's strlen stays in the payload */
-	return split_req(w->raw, w->strs, r);
+		return false;	/* the last string's NUL: vccd_request_split's strlen stays in the payload */
+	return vccd_request_split(w->raw, w->strings, r);
 }
 
 /* the strings of a request in raw (header + payload): cwd, argv..., envp... */
-VPRIV bool split_req(char *raw, char **strs, struct req *r)
+VPRIV bool vccd_request_split(char *raw, char **strs, struct vccd_request *r)
 {
-	struct vroom_req_hdr *h = (struct vroom_req_hdr *)raw;
+	struct vccd_request_header *h = (struct vccd_request_header *)raw;
 	size_t off, i, n;
 
 	r->raw = raw;
-	r->rawlen = sizeof(*h) + h->payload_len;
+	r->raw_length = sizeof(*h) + h->payload_len;
 
 	/* split NUL-separated strings: cwd, argv..., envp... */
 	n = 0;
-	for (off = sizeof(*h); off < r->rawlen && n < MAX_STRS - 2; off += strlen(raw + off) + 1)
+	for (off = sizeof(*h); off < r->raw_length && n < VCCD_STRINGS_MAX - 2; off += strlen(raw + off) + 1)
 		strs[n++] = raw + off;
 	if (n != 1 + h->argc + h->envc || h->argc < 1)
 		return false;
@@ -128,7 +128,7 @@ VPRIV bool split_req(char *raw, char **strs, struct req *r)
 	return true;
 }
 
-VPRIV void say(const struct req *r, const char *fmt, const char *arg)
+VPRIV void vccd_request_message_write(const struct vccd_request *r, const char *fmt, const char *arg)
 {
 	char line[512];
 	int n = snprintf(line, sizeof(line), fmt, r->tool, arg);
@@ -136,7 +136,7 @@ VPRIV void say(const struct req *r, const char *fmt, const char *arg)
 	if (n > 0)
 		(void)!write(r->fds[2], line, n < (int)sizeof(line) ? n : (int)sizeof(line) - 1);
 }
-VPRIV double now_ms(void)
+VPRIV double vccd_clock_milliseconds(void)
 {
 	struct timespec ts;
 
@@ -144,7 +144,7 @@ VPRIV double now_ms(void)
 	return ts.tv_sec * 1e3 + ts.tv_nsec / 1e6;
 }
 
-VPRIV const char *req_env(const struct req *r, const char *name)
+VPRIV const char *vccd_request_environment_get(const struct vccd_request *r, const char *name)
 {
 	size_t n = strlen(name);
 
@@ -153,10 +153,10 @@ VPRIV const char *req_env(const struct req *r, const char *name)
 			return *e + n + 1;
 	return NULL;
 }
-VPRIV void log_req(const struct req *r, const char *kind, int status, double t0)
+VPRIV void vccd_request_log(const struct vccd_request *r, const char *kind, int status, double t0)
 {
-	if (log_requests) {
-		double t1 = now_ms();
+	if (vccd_log_requests) {
+		double t1 = vccd_clock_milliseconds();
 
 		/* @: start time (monotonic ms), for concurrency timelines; last: the input */
 		fprintf(stderr, "vccd %-10s %7.2f ms rc=%d @%.2f %s %.200s\n", kind, t1 - t0, status, t0,

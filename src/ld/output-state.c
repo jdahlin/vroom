@@ -3,15 +3,9 @@
 /* ---------------- output state ---------------- */
 
 static uint8_t *out;			/* output file image */
-static uint64_t filesize, shoff;
-static VVEC(elf_program_header) phdrs;
-typedef struct { int first, last; bool lma_set, hdr; } ld_segment_sections;	/* hdr: FILEHDR/PHDRS */
-static VVEC(ld_segment_sections) phsecs;		/* first/last osec of each phdr */
-static VVEC(uint32_t) outsecs;		/* live output sections in header order */
 static uint64_t ndyn;			/* RELATIVE relocations */
 static uint32_t reladyn_isec = LD_NONE, buildid_isec = LD_NONE, comment_isec = LD_NONE, got_isec = LD_NONE;
 static uint32_t ehhdr_isec = LD_NONE;	/* --eh-frame-hdr */
-static VVEC(uint32_t) ehfdes;		/* the FDE pieces in the output, for .eh_frame_hdr */
 static VVEC(uint32_t) gotsyms;		/* .got slot -> ld_global_symbol id (the globals, first) */
 typedef struct { uint32_t obj, sym; } ld_got_location;
 static VVEC(ld_got_location) gotlocs;		/* then the locals: slot gotsyms.n + i */

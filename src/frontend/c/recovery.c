@@ -196,7 +196,7 @@ VPRIV void rec_restore(cc *c, recov *r, int mode)
 		}
 	}
 	c->decl_name = 0;
-	dc_kill(c);	/* no declaration snapshots after an error */
+	driver_declaration_cache_kill(c);	/* no declaration snapshots after an error */
 	if (tok(c)->loc == r->again) {	/* no progress since the last one: past this token */
 		if (is(c, LEX_TOKEN_EOF))
 			longjmp(c->bail, 1);

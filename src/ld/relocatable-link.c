@@ -417,12 +417,12 @@ static int ld_relocatable_link(void)
 	eh->e_shentsize = sizeof(elf_section_header);
 	eh->e_shnum = r_nsh;
 	eh->e_shstrndx = r_shstridx;
-	if (atomic_load(&nerrors)) {
+	if (atomic_load(&ctx->diagnostics.error_count)) {
 		munmap(rbuf, fsize);
 		return 1;
 	}
 	out = rbuf;
-	filesize = fsize;
+	ctx->layout.file_size = fsize;
 	int rc = ld_output_file_write();
 	ld_phase_time_report("-r: write");
 	ld_region_unmap(rbuf, fsize);
@@ -432,5 +432,5 @@ static int ld_relocatable_link(void)
 			ld_region_unmap(objs.v[i]->buf, objs.v[i]->size);
 	ld_global_table_free();
 	memset(&routs, 0, sizeof routs);
-	return rc || atomic_load(&nerrors) ? 1 : 0;
+	return rc || atomic_load(&ctx->diagnostics.error_count) ? 1 : 0;
 }

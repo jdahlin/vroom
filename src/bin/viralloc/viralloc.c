@@ -72,7 +72,7 @@ static bool viralloc_registers_parse(const char *s, uint32_t r[4])
 	return sscanf(s, "%u,%u,%u,%u", &r[0], &r[1], &r[2], &r[3]) >= 2;
 }
 
-static double viralloc_time_now(void)
+static double viralloc_clock_seconds(void)
 {
 	struct timespec t;
 
@@ -299,12 +299,12 @@ int main(int argc, char **argv)
 
 			vir_synth_init(&t, regs[0], regs[1], regs[2], regs[3], x86, err, sizeof(err));
 			for (uint32_t k = 0; k < rep; k++) {
-				t0 = viralloc_time_now();
+				t0 = viralloc_clock_seconds();
 				vir_loops_build(&f, &lp);
-				double t1 = viralloc_time_now();
+				double t1 = viralloc_clock_seconds();
 
 				vir_alloc(&f, &lp, &t.registers, &opt, &o);
-				double t2 = viralloc_time_now();
+				double t2 = viralloc_clock_seconds();
 
 				if (t2 - t1 < best)
 					best = t2 - t1;

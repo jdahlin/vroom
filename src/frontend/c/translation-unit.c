@@ -235,7 +235,7 @@ int cc_run(pp *p, const cc_opts *o)
 	if (unlikely(o->field_uses))
 		cc_field_uses_begin(c, o->field_uses);
 	if (!setjmp(c->bail)) {
-		dc_begin(c);
+		driver_declaration_cache_begin(c);
 		fetch(c, &c->tk[0]);
 		c->ntk = 1;
 		translation_unit(c);
@@ -268,7 +268,7 @@ int cc_run(pp *p, const cc_opts *o)
 	if (c->drb)
 		drcov_finish(c);
 	dr_end(c);
-	dc_end(c);
+	driver_declaration_cache_end(c);
 	cc_free(c);
 	free(c->tyb);
 	free(c);
@@ -286,7 +286,7 @@ VPRIV void translation_unit(cc *c)
 	for (;;) {
 		if (unlikely(c->dr_on))
 			dr_close(c);	/* (a recording open; before a snapshot can be taken) */
-		dc_boundary(c);
+		driver_declaration_cache_boundary(c);
 		if (unlikely(c->drb))
 			drcov_boundary(c);
 		if (unlikely(c->dr) && dr_boundary(c))
