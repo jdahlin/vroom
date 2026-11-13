@@ -1,4 +1,16 @@
-/* The include search path of a job: -iquote, -I, CPATH, -isystem, the SDK and resource directories, -idirafter. */
+/*
+ * searchpath.c: the include search path of a job, in clang's order: -iquote, -I, CPATH, -isystem,
+ * C_INCLUDE_PATH, the target's system headers, -idirafter.
+ *
+ * driver_searchpath_alloc sizes one per-thread array for the longest command line seen (each list
+ * holds at most argc entries); the option loop fills the lists and driver_searchpath_build merges
+ * them into job->all, dropping exact duplicates from -I on and recording the boundaries the
+ * preprocessor needs (po.nquote, nsys1, the extern "C" range xc0..xc1 that shows as flags in line
+ * markers).  The order is observable in `-H`, `-M` and in which header is found, and is checked
+ * against clang by vcc-diff.py hdr and deps: change it only against clang.  vcc's own headers
+ * (VCC_INCDIR) go before clang's resource directory, so arm_neon.h and stdatomic.h are ours.  On
+ * Darwin this also finds SDKSettings.json, which clang lists first among the dependencies.
+ */
 #include "driver-internal.h"
 
 /* CPATH-style lists (kept out of ppd_run: its size decides how clang

@@ -1,4 +1,15 @@
-/* Receiving, validating and splitting a request, and what reads one: say, req_env, the request log. */
+/*
+ * request.c: receive a request from a connection, validate it, split it into cwd, argv and
+ * environment, and the small helpers that work on it (say, req_env, log_req).
+ *
+ * recv_req takes the header and the three fds (SCM_RIGHTS, close-on-exec) and then the payload into
+ * the worker's buffer; split_req points into that buffer, so a struct req is valid only while the
+ * buffer is: until the thread's next request.  Everything arrives from a client we do not trust
+ * (the socket is 0600 and vccd checks the peer, but the bytes are still checked): the header is checked before it is used, the
+ * counts in 64 bits, the payload's last byte must be a NUL so the strlen's stay inside it.  A request
+ * that fails any check closes its fds and is dropped.  `say` writes a message to the client's
+ * stderr in the form `TOOL: error: ...`.
+ */
 #include "vccd-internal.h"
 
 VPRIV bool read_full(int fd, char *p, size_t n)

@@ -1,4 +1,16 @@
-/* Compiling a job here with captured diagnostics, delegating it to another program, fixdep afterwards. */
+/*
+ * compile.c: run a -c job in this thread (cc_own), delegate to another program when vcc fails
+ * (delegate), and finish kbuild's fixdep step (fixdep_after).
+ *
+ * cc_own gives the driver (ppd_run) a scratch file for diagnostics instead of the client's stderr:
+ * a TU vcc fails on is passed on to clang or PROG, which reports in its own words, so vcc's messages
+ * reach the client only when the job succeeded or when there is no fallback (`final`).  The
+ * diagnostics store (dstore.c) gets the job's records in either case and drops them again if the TU
+ * fell back.  The capture file is per thread and reused.  delegate is the VCC_DELEGATE mode for
+ * builds that are not the kernel: a plain -c of a .c file is compiled here, everything else runs as
+ * PROG.  fixdep_after is called by handle() for the compile kinds only, and only when the request
+ * carries the VCC_FIXDEP_* variables.
+ */
 #include "vccd-internal.h"
 
 /* a -c job vcc compiles itself.  Its diagnostics go to a scratch file and to the

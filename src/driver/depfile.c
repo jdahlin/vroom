@@ -1,4 +1,14 @@
-/* The make rule of -MD/-M (clang's DependencyFileGenerator) and the depfile's name and target. */
+/*
+ * depfile.c: the make rule of -MD/-MMD/-M/-MM, and the name and target it is written under.
+ *
+ * write_deps reproduces clang's DependencyFileGenerator byte for byte (bench/vcc-diff.py deps checks
+ * it): names from pp_file_names wrapped at 75 columns, `./` dropped, `<stdin>` left out, -MMD/-MM
+ * without system headers, -MP phony targets for every file but the main one.  `first` is a file that
+ * comes before the rest (Darwin's SDKSettings.json, which clang reads).  driver_depfile_names sets
+ * the target (-MT, -o, or the source's object name) and the file's name (-MF, or the target's with
+ * .d) in the job.  The text is built in a job buffer and written with write_file/write_out; a failure
+ * is reported on the job's error fd and returned as 1.
+ */
 #include "driver-internal.h"
 
 /* make-style dependency file, as clang -MD writes it */

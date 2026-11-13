@@ -1,4 +1,14 @@
-/* make's recipes for vsh: the callbacks rsh.c uses to run tools as requests here. */
+/*
+ * recipe.c: the callbacks utils/rsh.c needs to run make's recipes inside the server (the `vsh`
+ * shim, argv[0] sh).
+ *
+ * rsh interprets the subset of sh that kbuild recipes use; every tool call in a recipe that names one
+ * of our shims (vcc, vas, vld, var, vcc-nm, vcc-objcopy in tool_dir) is turned into a request
+ * (sh_run_tool builds the raw bytes in per-thread buffers, with the recipe's NAME=VALUE assignments
+ * first in the environment) and run through handle() in this thread, with the recipe's fds.  Anything
+ * rsh does not know makes run_sh return RSH_DECLINE and the shim runs the real shell.  A tool call
+ * too large for VROOM_MAX_PAYLOAD fails the recipe with 127.
+ */
 #include "vccd-internal.h"
 
 /* a shim of ours: vcc, vas, vld or var next to vccd */
