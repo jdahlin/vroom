@@ -8,12 +8,25 @@
  */
 #include <pthread.h>
 #include <stdatomic.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "port/task.h"
+
+#if defined(__SANITIZE_THREAD__)
+#define TASK_TEST_TSAN 1
+#elif defined(__has_feature)
+#if __has_feature(thread_sanitizer)
+#define TASK_TEST_TSAN 1
+#endif
+#endif
+#ifndef TASK_TEST_TSAN
+#define TASK_TEST_TSAN 0
+#endif
 
 static int failures;
 
@@ -131,21 +144,50 @@ static void test_limits(void)
 
 /* ---- small items: tiny loops wake nobody ---- */
 
+static uint64_t now_ns(void)
+{
+	struct timespec ts;
+
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (uint64_t)ts.tv_sec * 1000000000u + (uint64_t)ts.tv_nsec;
+}
+
+/*
+ * The probe decides by time: the caller runs items for 30 us (task.c's
+ * VTASK_PROBE_NS) and wakes helpers only if items are left then.  So a loop
+ * that returned within 30 us of its start cannot have woken anyone and ran
+ * every item on the caller; a slower round (a preempted caller, a
+ * sanitizer) may wake helpers, at most width - 1.  Most rounds must be fast
+ * without a sanitizer; under TSan they need not be.
+ */
 static void test_small_items(void)
 {
-	unsigned long w0;
+	int fast = 0;
 	counts *c;
 
 	vtask_budget_set(4);
-	w0 = vtask_stats_get().wakes;
 	for (int r = 0; r < 200; r++) {
+		unsigned long w0 = vtask_stats_get().wakes, dw;
+		uint64_t t0, el;
+
 		c = counts_new(64, 0);
+		t0 = now_ns();
 		vtask_parallel_for(c->n, 4, count_item, c, VTASK_SMALL_ITEMS);
+		el = now_ns() - t0;
 		counts_check_once(c);
-		CHECK(atomic_load(&c->threads_seen[0]) == 64);
+		dw = vtask_stats_get().wakes - w0;
+		CHECK(dw <= 3);
+		if (el < 30000) {
+			fast++;
+			CHECK(atomic_load(&c->threads_seen[0]) == 64);
+			CHECK(dw == 0);
+		}
 		counts_free(c);
 	}
-	CHECK(vtask_stats_get().wakes == w0);
+#if !TASK_TEST_TSAN
+	CHECK(fast >= 100);
+#endif
+	(void)fast;
 }
 
 /* ---- nesting: a loop inside an item, outer x inner indices once ---- */
@@ -255,13 +297,21 @@ static void test_jobs(void)
 	vtask_wait_idle();
 	CHECK(atomic_load(&job_next) == 400);
 	CHECK(atomic_load(&job_max) <= 3);
-	{	/* started in order, give or take the threads racing to record it */
-		int late = 0;
+	CHECK(vtask_stats_get().running == 0);
 
-		for (int i = 0; i < 400; i++)
-			late += abs(atomic_load(&job_order[i]) - i) > 3;
-		CHECK(late == 0);
-	}
+	/*
+	 * FIFO: with one job running at a time the recorded order is the queue's
+	 * (with more, a thread preempted between taking a job and recording it
+	 * can record arbitrarily late).
+	 */
+	vtask_budget_set(1);
+	atomic_store(&job_next, 0);
+	for (int k = 1; k < 200; k += 5)	/* no nested loops: k % 5 != 0 */
+		vtask_spawn(job_fn, (void *)(intptr_t)k);
+	vtask_wait_idle();
+	CHECK(atomic_load(&job_next) == 40);
+	for (int i = 0; i < 40; i++)
+		CHECK(atomic_load(&job_order[i]) == 1 + 5 * i);
 	CHECK(vtask_stats_get().running == 0);
 }
 

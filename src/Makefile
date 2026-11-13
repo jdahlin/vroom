@@ -107,7 +107,7 @@ SPLIT_MODS = cc pp codegen driver
 vir_SRC  = vir/table.c vir/vir.c vir/print.c vir/parse.c vir/verify.c vir/facts.c vir/layout.c
 VIRA_SRC = vir/loops.c vir/alloc.c vir/allocchk.c vir/allocdump.c	# (not in the unity TU: own statics)
 obj_SRC  = obj/obj.c arch/a64/obj/fixup.c arch/x64/obj/fixup.c platform/linux/elf.c
-cc_SRC   = $(filter-out frontend/c/keywords.c,$(wildcard frontend/c/*.c))
+cc_SRC   = $(filter-out frontend/c/keywords.c frontend/c/replay.c,$(wildcard frontend/c/*.c)) frontend/c/replay.c
 # the compile job (ppd_run); ccsnap.c stays a TU of its own
 driver_SRC = $(filter-out driver/ccsnap.c,$(wildcard driver/*.c))
 # pp: the preprocessor and, for now, the diagnostics engine (it uses ppimpl.h)
