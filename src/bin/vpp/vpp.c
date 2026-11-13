@@ -1,5 +1,5 @@
 /*
- * vpp: the preprocessor alone (see ppdriver.c), for parity tests.
+ * vpp: the preprocessor alone (the driver is ppd_run in driver/job.c), for parity tests.
  *
  *   vpp [--cmp REF.i] [-o OUT] CLANG-ARGS...
  *   vpp --cmp-files OURS REF      compare two -E outputs

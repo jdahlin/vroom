@@ -1,7 +1,7 @@
 /*
  * Mach-O (arm64, MH_OBJECT) writer for an ElfObj: the code generator and
  * the assembler build the same section/frag/symbol/fixup model as for ELF
- * (elf.h); this lays it out as a Mach-O relocatable object for ld64.
+ * (obj/obj.h); this lays it out as a Mach-O relocatable object for ld64.
  *
  *   sections  ELF names map to a fixed set of Mach-O sections (.text ->
  *             __TEXT,__text, .rodata* -> __TEXT,__const or __DATA,__const
@@ -20,7 +20,10 @@
  *             atom); the rest become ARM64_RELOC_* entries, always
  *             against a symbol, addends in ARM64_RELOC_ADDEND or in place.
  *
- * Errors go to o->err like elf_finish's.
+ * macho_finish returns the size (0 on error, o->err set, as elf_finish does) and macho_emit writes
+ * the file into a buffer of that size; both run on the thread that owns the ElfObj.  Only arm64
+ * is written.  vcc -S's Darwin output reaches here through the assembler after
+ * apple-dialect-translate.c has turned it into the GNU dialect.
  */
 #include <stdlib.h>
 #include <string.h>

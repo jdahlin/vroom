@@ -1,6 +1,7 @@
 /*
  * vasm: assembler driver.  vasm [-o out.o] in.s  (input: preprocessed text)
- *       vasm --target=wasm64-unknown-emscripten [-o out.o] in.s  (LLVM's wasm syntax)
+ *       vasm --target=x86_64-linux-gnu [-o out.o] in.s  (x86-64 AT&T syntax, an ELF object; default is arm64 ELF)
+ *       vasm --target=wasm64-unknown-emscripten [-o out.o] in.s  (LLVM's wasm syntax; only with make VCC_WASM=1)
  *       vasm --target=arm64-apple-macos [-o out.o] in.s  (Apple's syntax, a Mach-O object)
  *       vasm --bench N in.s...  (assemble each file N times, report MB/s)
  */

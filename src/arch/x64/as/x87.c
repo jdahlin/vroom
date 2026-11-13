@@ -1,4 +1,10 @@
-/* x86-64 assembler: x87 floating point */
+/* x87.c: x86-64 assembler, the x87 floating-point families: x64_i_x87 (the main x87 instruction
+ * set) and x64_i_x87ar (x87 arithmetic with %st registers and integer memory operands, fcmov).
+ *
+ * Each returns X64_NEXT for a mnemonic that is not theirs; the order in which asm.c tries the
+ * families is in x64as.h (x64_i_x87ar is tried late, after the SSE, system and bit families).
+ * Memory forms go through x64_x87m, register forms through x64_x87r.  The bytes equal LLVM MC's
+ * (bench/vas-enc.py). */
 #include "x64as.h"
 
 VPRIV int x64_i_x87(as_context *a, char *mn, XOp *o, int nops)

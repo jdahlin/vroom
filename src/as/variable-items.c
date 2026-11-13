@@ -1,4 +1,13 @@
-/* variable-items.c: variable-size items (.prefalign, alignment after one, LEB128 of a label difference, .skip, x86-64 jumps) and their relaxation at the end of assembly. */
+/* variable-items.c: items whose size the layout decides (.prefalign, alignment after one, a LEB128 of a
+ * label difference, .skip with a layout-dependent count, x86-64 jmp/jcc) and their relaxation at the
+ * end of assembly, MC's relaxOnce loop.
+ *
+ * During assembly each such item is a record that ends a frag; as_variable_items_finish (called by
+ * as_end before CFI and DWARF are encoded) lays all frags out, then repeats passes until no size
+ * changes, and fails if 64 passes do not converge.  Jumps are judged against the previous pass's
+ * layout (the stale offsets MC uses), alignments and LEBs against the live one: this difference is
+ * what makes the output byte-identical to clang's, so do not "simplify" it.  The size tree and ranks
+ * live in the context's definitions region for the duration of the run. */
 #include "as-internal.h"
 
 /* After relaxation, debug encoders only read the layout until they append
