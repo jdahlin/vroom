@@ -1,6 +1,6 @@
 /*
  * A function through VIR (PLAN-vir.md): the VIR walker builds it
- * (codegen/vir/build.c); what it cannot build is emitted as before (X8).
+ * (codegen/vir/preir.h); what it cannot build is emitted as before (X8).
  *
  * VCC_VIR (read once): unset or 0 off; otherwise letters:
  *   b  build VIR (then emit the function as before)
