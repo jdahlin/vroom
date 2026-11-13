@@ -33,6 +33,7 @@
 #include <unistd.h>
 
 #include "common/intern.h"
+#include "common/fail.h"
 #include "frontend/pp/pp.h"
 #include "frontend/c/cc.h"
 #include "driver/ppdriver.h"
@@ -41,8 +42,8 @@
 #include "../frontend/pp/ppdata-predef.inc"
 #define PPDATA_X86_PREDEF
 #include "../frontend/pp/ppdata-x86.inc"
-#include "common/arena.h"
-#include "common/ldhash.h"
+#include "port/job-regions.h"
+#include "common/digest.h"
 #include "common/buf.h"
 #include "common/defer.h"
 

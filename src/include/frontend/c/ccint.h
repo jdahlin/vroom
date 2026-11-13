@@ -7,6 +7,7 @@
 #include <setjmp.h>
 #include "frontend/c/cc.h"
 #include "common/intern.h"
+#include "frontend/c/keywords.h"
 
 #define unlikely(x) __builtin_expect(!!(x), 0)
 #define likely(x) __builtin_expect(!!(x), 1)

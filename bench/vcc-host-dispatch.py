@@ -57,7 +57,8 @@ def main():
         (d/'crc.c').write_text(PROBE)
         subprocess.run([hostenv.llvm('clang'), '-O2', '-march=x86-64', '-D_GNU_SOURCE',
                         '-I'+str(ROOT/'src/include'), str(d/'crc.c'),
-                        str(ROOT/'src/common/intern.c'), '-pthread', '-o', str(d/'crc')], check=True)
+                        str(ROOT/'src/common/intern.c'), str(ROOT/'src/common/fail.c'),
+                        str(ROOT/'src/port/crc32c.c'), str(ROOT/'src/port/job-regions.c'), '-pthread', '-o', str(d/'crc')], check=True)
         src = d/'input.c'
         src.write_text(''.join('/*'+'x'*n+'*/\nconst char *s%d="%s\\\"";\n' % (n,'y'*n)
                                for n in (15,16,17,31,32,33,63,64,65,127,128,129)) +

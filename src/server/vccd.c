@@ -84,6 +84,7 @@
 #include "frontend/pp/pp.h"
 #include "frontend/lex/lex.h"
 #include "common/intern.h"
+#include "common/fail.h"
 #include "frontend/pp/dircache.h"
 #include "driver/ppdriver.h"
 #include "utils/fixdep.h"

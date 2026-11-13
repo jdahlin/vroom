@@ -3,7 +3,8 @@
 #define VCC_ASIMPL_H
 
 #include "as/as.h"
-#include "common/arena.h"
+#include "port/job-regions.h"
+#include "common/region.h"
 #include "arch/a64/a64.h"
 #include <fcntl.h>
 #include <stdarg.h>
@@ -199,21 +200,106 @@ static inline uint32_t al_hash(const char *s, size_t n)
 VPRIV Sv svdup(As *a, const char *s, size_t n);
 VPRIV uint32_t curline(As *a);
 VPRIV int err(As *a, const char *fmt, ...);
+/* sym.c */
 VPRIV uint32_t tmpsym(As *a);
-VPRIV void fold(As *a, Val *v);
 VPRIV const char *as_ralias(As *a, uint32_t y);
+/* expr.c */
+VPRIV void fold(As *a, Val *v);
 VPRIV int abs_expr(As *a, const char **pp, const char *e, int64_t *out);
 VPRIV int val_expr(As *a, const char **pp, const char *e, Val *v);
+/* data.c */
 VPRIV int emit_value(As *a, int size, Val *v);
 /* arch/<cpu>/as/parse.c */
 VPRIV void al_rehash(As *a);
 VPRIV int flush_pools(As *a);
 VPRIV int ltorg(As *a);
 VPRIV int instruction(As *a, const char *p, const char *e, size_t wn);
-/* arch/x64/as/asm.c (EM_X86_64 objects) */
+/* dwline.c */
 VPRIV void loc_row(As *a);
+/* arch/x64/as/asm.c (EM_X86_64 objects) */
 VPRIV int x64_instruction(As *a, const char *p, const char *e, size_t wn);
-/* as.c: an x86-64 jump as a relaxed variable item (cc 16: jmp) */
+/* relax.c: an x86-64 jump as a relaxed variable item (cc 16: jmp) */
 VPRIV int as_branch(As *a, int cc, Val v, int mod);
+
+/* what the files of as/ define for each other, by the file that defines it */
+enum { VI_PREFALIGN, VI_ALIGN, VI_ULEB, VI_SLEB, VI_X86BR, VI_SKIP };	/* VI_SKIP: .skip v, fill with v settled by the layout */	/* VI_X86BR: jmp (code 16) / jcc (code cc) to v */
+typedef struct { uint8_t *p; size_t n; } Buf8;
+/* LEB128 into a caller's bytes */
+static inline void uleb(Buf8 *b, uint64_t v) { do { uint8_t c = v & 0x7f; v >>= 7; b->p[b->n++] = (uint8_t)(c | (v ? 0x80 : 0)); } while (v); }
+static inline void sleb(Buf8 *b, int64_t v)
+{
+	for (;;) {
+		uint8_t c = v & 0x7f; v >>= 7;
+		if ((v == 0 && !(c & 0x40)) || (v == -1 && (c & 0x40))) { b->p[b->n++] = c; return; }
+		b->p[b->n++] = (uint8_t)(c | 0x80);
+	}
+}
+
+/* as.c */
+VPRIV size_t next_stmt(As *a, Frame *f, const char **raw, const char **s);
+VPRIV void pop_frame(As *a);
+VPRIV int push_frame(As *a, const char *p, size_t n, int kind, size_t mark);
+/* cfi.c */
+VPRIV void cfi_finish(As *a);
+VPRIV int d_cfi(As *a, Sv w, const char *p, const char *e);
+/* cond.c */
+VPRIV int cond_dir(As *a, Sv w, const char *p, const char *e, int *rc);
+VPRIV int cond_ignore(As *a);
+VPRIV Sv trim(const char *p, const char *e);
+/* data.c */
+VPRIV int d_align(As *a, const char *p, const char *e, int p2);
+VPRIV int d_align_w(As *a, const char *p, const char *e, int p2, int fsz);
+VPRIV int d_ascii(As *a, const char *p, const char *e, int z);
+VPRIV int d_base64(As *a, const char *p, const char *e);
+VPRIV int d_comm(As *a, const char *p, const char *e, int local);
+VPRIV int d_data(As *a, const char *p, const char *e, int size);
+VPRIV int d_fill(As *a, const char *p, const char *e);
+VPRIV int d_float(As *a, const char *p, const char *e, int size);
+VPRIV int d_incbin(As *a, const char *p, const char *e);
+VPRIV int d_inst(As *a, const char *p, const char *e);
+VPRIV int d_leb(As *a, const char *p, const char *e, int sgn);
+VPRIV int d_octa(As *a, const char *p, const char *e);
+VPRIV int d_org(As *a, const char *p, const char *e);
+VPRIV int d_reloc(As *a, const char *p, const char *e);
+VPRIV int d_space(As *a, const char *p, const char *e);
+VPRIV int parse_string(As *a, const char **pp, const char *e, char *out, size_t *n);
+/* dwline.c */
+VPRIV int d_dwfile(As *a, const char *p, const char *e);
+VPRIV int d_loc(As *a, const char *p, const char *e);
+VPRIV void dwline_finish(As *a);
+/* expr.c */
+VPRIV int deferrable(As *a, const Val *v);
+VPRIV int is_abs(As *a, Val *v);
+/* macro.c */
+VPRIV int d_exitm(As *a);
+VPRIV int d_irp(As *a, const char *p, const char *e, int chars);
+VPRIV int d_macro(As *a, const char *p, const char *e);
+VPRIV int d_purgem(As *a, const char *p, const char *e);
+VPRIV int d_rept(As *a, const char *p, const char *e);
+VPRIV Macro *find_macro(As *a, const char *s, size_t n);
+VPRIV Sv first_word(const char *p, const char *e);
+VPRIV int invoke(As *a, Macro *m, const char *p, const char *e);
+/* relax.c */
+VPRIV int d_prefalign(As *a, const char *p, const char *e);
+VPRIV void frag_bases(ElfObj *o);
+VPRIV void var_finish(As *a);
+VPRIV struct VarItem *var_item(As *a, int kind);
+/* section.c */
+VPRIV int d_section(As *a, const char *p, const char *e, int push);
+VPRIV int parse_name(As *a, const char **pp, const char *e, Sv *out);
+VPRIV uint32_t std_section(As *a, const char *name);
+VPRIV void switch_to(As *a, uint32_t frag);
+/* sym.c */
+VPRIV int d_size(As *a, const char *p, const char *e);
+VPRIV int d_symattr(As *a, const char *p, const char *e, int what);
+VPRIV int d_symver(As *a, const char *p, const char *e);
+VPRIV int d_type(As *a, const char *p, const char *e);
+VPRIV uint32_t here(As *a);
+VPRIV NumLab *numlab(As *a, uint32_t num);
+VPRIV uint32_t sym(As *a, const char *s, size_t n);
+VPRIV void symver_finish(As *a);
+VPRIV Var *var_slot(As *a, uint32_t y, int create);
+/* section.c */
+VPRIV uint32_t latest(As *a, uint32_t frag);
 
 #endif
