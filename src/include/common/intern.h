@@ -1,5 +1,5 @@
-#ifndef VCC_INTERN_H
-#define VCC_INTERN_H
+#ifndef VCC_COMMON_INTERN_H
+#define VCC_COMMON_INTERN_H
 /*
  * Identifier interning, shared by all threads.
  *
@@ -46,15 +46,15 @@ uint32_t vintern_count(void);
  * inline, so a hit compares two words in L1 and touches neither the shared
  * table nor the spelling.  Hashes agree with vintern_hash().
  */
-#include "port/hostcrc.h"
+#include "port/crc32c.h"
 #include <string.h>
 
 /* identifier ids are below 1 << VINTERN_ID_BITS: tables indexed by id are sized by it */
 #define VINTERN_ID_BITS 23
 
-#define VIC_BITS 11
+#define VINTERN_CACHE_BITS 11
 typedef struct vintern_cache {
-	struct { uint64_t w0, w1; uint32_t _hash, id; uint64_t _pad; } e[1u << VIC_BITS];
+	struct { uint64_t w0, w1; uint32_t _hash, id; uint64_t _pad; } e[1u << VINTERN_CACHE_BITS];
 } vintern_cache;
 
 #define unlikely_vi(x) __builtin_expect(!!(x), 0)
@@ -99,7 +99,7 @@ static inline __attribute__((always_inline)) uint32_t vintern_fast(vintern_cache
 	vintern_words16(s, len, &w0, &w1);
 	h = vcrc32c_two((uint32_t)len, w0, w1) * 0x9E3779B1u;
 	{
-		__typeof__(&c->e[0]) e = &c->e[h & ((1u << VIC_BITS) - 1)];
+		__typeof__(&c->e[0]) e = &c->e[h & ((1u << VINTERN_CACHE_BITS) - 1)];
 
 		VI_STAT(0);
 		/* identifiers hold no NUL: the zero-padded words determine len */

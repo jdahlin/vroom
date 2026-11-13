@@ -11,28 +11,28 @@
 
 #include "port/job-regions.h"
 
-int vmreg_dbg_mode = -1;	/* bit 0 check, bit 1 stats */
+int vjob_region_debug_mode = -1;	/* bit 0 check, bit 1 stats */
 
-static struct { const char *name; unsigned long long res, puts, bad; } vmreg_dbg_tab[64];
-static pthread_mutex_t vmreg_dbg_mu = PTHREAD_MUTEX_INITIALIZER;
+static struct { const char *name; unsigned long long res, puts, bad; } vjob_region_debug_table[64];
+static pthread_mutex_t vjob_region_debug_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-static void vmreg_dbg_report(void)
+static void vjob_region_debug_report(void)
 {
-	for (int i = 0; i < 64 && vmreg_dbg_tab[i].name; i++)
-		fprintf(stderr, "vmreg %-14s %6llu puts, %9.1f MB resident at put, %llu bad\n", vmreg_dbg_tab[i].name,
-			vmreg_dbg_tab[i].puts, vmreg_dbg_tab[i].res / 1e6, vmreg_dbg_tab[i].bad);
+	for (int i = 0; i < 64 && vjob_region_debug_table[i].name; i++)
+		fprintf(stderr, "vmreg %-14s %6llu puts, %9.1f MB resident at put, %llu bad\n", vjob_region_debug_table[i].name,
+			vjob_region_debug_table[i].puts, vjob_region_debug_table[i].res / 1e6, vjob_region_debug_table[i].bad);
 }
 
-int vmreg_dbg_init(void)
+int vjob_region_debug_init(void)
 {
 	int z = -1, m = (getenv("VCC_VMREG_CHECK") ? 1 : 0) | (getenv("VCC_VMREG_STATS") ? 2 : 0);
 
-	if (__atomic_compare_exchange_n(&vmreg_dbg_mode, &z, m, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED) && (m & 2))
-		atexit(vmreg_dbg_report);
+	if (__atomic_compare_exchange_n(&vjob_region_debug_mode, &z, m, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED) && (m & 2))
+		atexit(vjob_region_debug_report);
 	return m;
 }
 
-void vmreg_dbg_put(vmreg *r, size_t used)
+void vjob_region_debug_release(vjob_region *r, size_t used)
 {
 	size_t pg = (size_t)getpagesize(), lim = r->cap < ((size_t)8 << 30) ? r->cap : ((size_t)8 << 30);
 	size_t np = lim / pg, res = 0, bad = 0;
@@ -46,10 +46,10 @@ void vmreg_dbg_put(vmreg *r, size_t used)
 		if (!(vec[k] & 1))
 			continue;
 		res += pg;
-		if (used == VMREG_SCRATCH) {
-			if (vmreg_dbg_mode & 1)
+		if (used == VJOB_REGION_SCRATCH) {
+			if (vjob_region_debug_mode & 1)
 				memset(pp, 0xa5, pg);
-		} else if ((vmreg_dbg_mode & 1) && k * pg + pg > used) {
+		} else if ((vjob_region_debug_mode & 1) && k * pg + pg > used) {
 			size_t from = k * pg < used ? used - k * pg : 0;
 
 			for (size_t j = from; j < pg; j++)
@@ -63,14 +63,14 @@ void vmreg_dbg_put(vmreg *r, size_t used)
 		}
 	}
 	free(vec);
-	pthread_mutex_lock(&vmreg_dbg_mu);
-	for (i = 0; i < 63 && vmreg_dbg_tab[i].name && strcmp(vmreg_dbg_tab[i].name, r->name); i++)
+	pthread_mutex_lock(&vjob_region_debug_mutex);
+	for (i = 0; i < 63 && vjob_region_debug_table[i].name && strcmp(vjob_region_debug_table[i].name, r->name); i++)
 		;
-	vmreg_dbg_tab[i].name = r->name;
-	vmreg_dbg_tab[i].res += res;
-	vmreg_dbg_tab[i].puts++;
-	vmreg_dbg_tab[i].bad += bad;
-	pthread_mutex_unlock(&vmreg_dbg_mu);
-	if (bad && (vmreg_dbg_mode & 1))
+	vjob_region_debug_table[i].name = r->name;
+	vjob_region_debug_table[i].res += res;
+	vjob_region_debug_table[i].puts++;
+	vjob_region_debug_table[i].bad += bad;
+	pthread_mutex_unlock(&vjob_region_debug_mutex);
+	if (bad && (vjob_region_debug_mode & 1))
 		abort();
 }

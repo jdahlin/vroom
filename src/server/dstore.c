@@ -14,7 +14,7 @@
  * records) and by dedup lookups, both rare next to a compile.
  */
 #include "dstore.h"
-#include "common/defer.h"
+#include "common/scoped-cleanup.h"
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>

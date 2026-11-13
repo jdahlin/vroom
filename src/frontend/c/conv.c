@@ -7,13 +7,13 @@ static __attribute__((noinline)) uint32_t fold_f2i(cc *c, uint32_t n, qty to)
 	cval v;
 
 	if (!is_bigint(c, to) && eval(c, n, &v) && v.kind == CV_FLT && v.f > -9.3e18 && v.f < 1.8e19) {
-		u128 q = v.ld ? v.q : q_of_d(v.f);
+		u128 q = v.ld ? v.q : vsoftfloat_of_double(v.f);
 		int bits = (int)int_bits(c, to);
 		bool sg = is_signed(c, to);
-		i128 i = q_to_int(q, 128, true);
+		i128 i = vsoftfloat_to_integer_saturating(q, 128, true);
 
 		/* in range only: out of range is undefined, and eval saturates as clang */
-		if (i == q_to_int(q, bits, sg) || KIND(c, to) == TY_BOOL)
+		if (i == vsoftfloat_to_integer_saturating(q, bits, sg) || KIND(c, to) == TY_BOOL)
 			return mk_int(c, trunc_to(c, i, to), to, N(n)->loc);
 	}
 	return UINT32_MAX;

@@ -4,8 +4,8 @@
  * table; they give different values, and each table keeps its own until
  * they are made one.
  */
-#ifndef VCC_HASH_H
-#define VCC_HASH_H
+#ifndef VCC_COMMON_HASH_H
+#define VCC_COMMON_HASH_H
 
 #include <stdint.h>
 #include <string.h>

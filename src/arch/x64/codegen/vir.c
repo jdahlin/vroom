@@ -163,7 +163,7 @@ static void vx_raw(vx *L, const char *s)
 	rec *r = x64_put(L->e, X_RAW);
 	r->off = L->e->raw.n;
 	r->ref = strlen(s);
-	tb_s(&L->e->raw, s);
+	vtext_string_append(&L->e->raw, s);
 }
 static void vx_simd(vx *L, const char *op, int d, int a, int b)
 {

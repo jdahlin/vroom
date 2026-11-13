@@ -3,7 +3,7 @@
 #define LO_PREFIX vw_
 #include "../walk/walk.h"
 #include "../walk/proto.h"
-#include "port/vstack.h"
+#include "port/stack-guard.h"
 #include "preir.h"
 
 /* ---------------- variables (Braun) ---------------- */
@@ -146,7 +146,7 @@ VPRIV uint32_t vw_readv(ecx *e, uint32_t var, uint32_t b, uint32_t ty)
 	}
 	/* one level per block between a read and the definition it reaches (through vw_phiops
 	 * at a join): a function of tens of thousands of blocks in a row goes the ordinary way */
-	if (vstack_low())
+	if (vstack_guard_low())
 		vw_fail(e, VIRFAIL(variable_read_distance));
 	if (!V->b[b].npred) {
 		v = vw_undef(e, vw_phity(e, var, ty));

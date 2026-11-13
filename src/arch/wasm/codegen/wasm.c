@@ -20,10 +20,10 @@ VPRIV wst *w_state(ecx *e)
 	pthread_mutex_unlock(&wpool_mu);
 	if (!W) {
 		W = calloc(1, sizeof *W);
-		tb_init(&W->b, (size_t)1 << 32);
-		tb_init(&W->fn, (size_t)1 << 32);
-		tb_init(&W->decl, (size_t)1 << 30);
-		tb_init(&W->sig, (size_t)1 << 24);
+		vtext_init(&W->b, (size_t)1 << 32);
+		vtext_init(&W->fn, (size_t)1 << 32);
+		vtext_init(&W->decl, (size_t)1 << 30);
+		vtext_init(&W->sig, (size_t)1 << 24);
 		W->lt = reserve(WMAXLOC);
 		for (int i = 0; i < 5; i++)
 			W->fl[i] = reserve(WMAXLOC * sizeof(uint32_t));
@@ -167,9 +167,9 @@ static void wsig_param(cc *c, tbuf *b, qty t, bool *first)
 		return;
 	for (uint32_t i = 0; i < wparts(a); i++) {
 		if (!*first)
-			tb_s(b, ", ");
+			vtext_string_append(b, ", ");
 		*first = false;
-		tb_s(b, wt_name[a.st]);
+		vtext_string_append(b, wt_name[a.st]);
 	}
 }
 
@@ -186,9 +186,9 @@ VPRIV void wsig(ecx *e, tbuf *b, qty ft, uint32_t call, uint32_t def, bool *sret
 	wabi r = wclassify_ret(c, f->base);
 	bool first = true;
 
-	tb_c(b, '(');
+	vtext_char_append(b, '(');
 	if (r.k == WA_IND) {
-		tb_s(b, wt_name[WPT(c)]);
+		vtext_string_append(b, wt_name[WPT(c)]);
 		first = false;
 	}
 	if (sret)
@@ -209,13 +209,13 @@ VPRIV void wsig(ecx *e, tbuf *b, qty ft, uint32_t call, uint32_t def, bool *sret
 	}
 	if (f->flags & TF_VARIADIC) {
 		if (!first)
-			tb_s(b, ", ");
-		tb_s(b, wt_name[WPT(c)]);
+			vtext_string_append(b, ", ");
+		vtext_string_append(b, wt_name[WPT(c)]);
 	}
-	tb_s(b, ") -> (");
+	vtext_string_append(b, ") -> (");
 	if (r.k == WA_SCALAR)
-		tb_s(b, wt_name[r.st]);
-	tb_c(b, ')');
+		vtext_string_append(b, wt_name[r.st]);
+	vtext_char_append(b, ')');
 }
 
 VPRIV bool wis_main(cc *c, uint32_t s)
@@ -236,7 +236,7 @@ VPRIV void wfname(cc *c, tbuf *b, uint32_t ref)
 
 			if (!np && y->body && N(y->body)->op == N_BLOCK)
 				np = N(y->body)->aux;	/* K&R */
-			tb_s(b, np ? "__main_argc_argv" : "__original_main");
+			vtext_string_append(b, np ? "__main_argc_argv" : "__original_main");
 			return;
 		}
 	}
@@ -262,12 +262,12 @@ VPRIV void wdecl(ecx *e, uint32_t ref, qty ft, const char *sig)
 	tbuf *d = &e->w->decl;
 
 	wfname(c, d, ref);
-	tb_c(d, '\t');
+	vtext_char_append(d, '\t');
 	if (sig)
-		tb_s(d, sig);
+		vtext_string_append(d, sig);
 	else
 		wsig(e, d, ft, 0, RKIND(ref) == RK_SYM ? RIDX(ref) : 0, NULL);
-	tb_c(d, '\n');
+	vtext_char_append(d, '\n');
 }
 
 /* the header: .globaltype, .tabletype and every referenced function's .functype, once each */
@@ -290,7 +290,7 @@ static void wfmt(tbuf *t, const char *fmt, ...)
 	va_start(ap, fmt);
 	vsnprintf(b, sizeof b, fmt, ap);
 	va_end(ap);
-	tb_s(t, b);
+	vtext_string_append(t, b);
 }
 
 static int wprio_cmp(const void *a, const void *b)
@@ -341,11 +341,11 @@ VPRIV void wasm_tail(cc *c, tbuf *t, _Atomic uint8_t *claimed)
 		for (uint32_t k = j; k-- > i;) {
 			uint32_t s = (uint32_t)d[k];
 
-			tb_s(t, "\tcall\t");
+			vtext_string_append(t, "\tcall\t");
 			wfname(c, t, REF(RK_SYM, s));
-			tb_c(t, '\n');
+			vtext_char_append(t, '\n');
 			if (!is_void(c, T(c, c->syms[s].ty)->base))
-				tb_s(t, "\tdrop\n");
+				vtext_string_append(t, "\tdrop\n");
 		}
 		wfmt(t, "\tend_function\n\t.section\t.text..Lregister_call_dtors%s,\"\",@\n"
 			  "\t.type\t.Lregister_call_dtors%s,@function\n.Lregister_call_dtors%s:\n"
@@ -356,7 +356,7 @@ VPRIV void wasm_tail(cc *c, tbuf *t, _Atomic uint8_t *claimed)
 			  sfx, sfx, sfx, sfx, P, sfx, P, P, sfx, WASM32(c) ? 2 : 3, WASM32(c) ? 32 : 64, sfx);
 		i = j;
 	}
-	tb_s(t, "\t.hidden\t__dso_handle\n\t.weak\t__dso_handle\n");
+	vtext_string_append(t, "\t.hidden\t__dso_handle\n\t.weak\t__dso_handle\n");
 	free(d);
 }
 
@@ -366,8 +366,8 @@ VPRIV void wasm_header(cc *c, tbuf *hdr, ecx *ctx, int nthr)
 	bool tag = false;
 	const char **v;
 
-	tb_s(hdr, WASM32(c) ? "\t.globaltype\t__stack_pointer, i32\n" : "\t.globaltype\t__stack_pointer, i64\n");
-	tb_s(hdr, "\t.tabletype\t__indirect_function_table, funcref\n");
+	vtext_string_append(hdr, WASM32(c) ? "\t.globaltype\t__stack_pointer, i32\n" : "\t.globaltype\t__stack_pointer, i64\n");
+	vtext_string_append(hdr, "\t.tabletype\t__indirect_function_table, funcref\n");
 	for (int t = 0; t < nthr; t++)
 		if (ctx[t].w)
 			for (size_t i = 0; i < ctx[t].w->decl.n; i++)
@@ -396,16 +396,16 @@ VPRIV void wasm_header(cc *c, tbuf *hdr, ecx *ctx, int nthr)
 			q++;
 		if (!strncmp(p, "__wasm_setjmp_test\t", 19))
 			tag = true;
-		tb_s(hdr, "\t.functype\t");
+		vtext_string_append(hdr, "\t.functype\t");
 		while (*p != '\t')
-			tb_c(hdr, *p++);
-		tb_c(hdr, ' ');
-		tb_put(hdr, p + 1, (size_t)(q - p - 1));
-		tb_c(hdr, '\n');
+			vtext_char_append(hdr, *p++);
+		vtext_char_append(hdr, ' ');
+		vtext_append(hdr, p + 1, (size_t)(q - p - 1));
+		vtext_char_append(hdr, '\n');
 	}
 	/* a function catches longjmp's exception (wsj_end) */
 	if (tag)
-		tb_s(hdr, WASM32(c) ? "\t.tagtype\t__c_longjmp i32\n" : "\t.tagtype\t__c_longjmp i64\n");
+		vtext_string_append(hdr, WASM32(c) ? "\t.tagtype\t__c_longjmp i32\n" : "\t.tagtype\t__c_longjmp i64\n");
 	free(v);
 }
 
@@ -529,16 +529,16 @@ static void wsection(ecx *e, tbuf *b, uint32_t s, const char *kind)
 	cc *c = e->c;
 	const attrs *a = sym_attrs(c, s);
 
-	tb_s(b, "\t.section\t");
+	vtext_string_append(b, "\t.section\t");
 	if (a->section) {
-		tb_s(b, c->strs[a->section - 1].s);
+		vtext_string_append(b, c->strs[a->section - 1].s);
 	} else {
 		bool q = sym_quoted(c, s);
 		size_t at;
 
 		if (q)
-			tb_c(b, '"');	/* the whole section name quoted, as clang */
-		tb_s(b, kind);
+			vtext_char_append(b, '"');	/* the whole section name quoted, as clang */
+		vtext_string_append(b, kind);
 		at = b->n;
 		wfname(c, b, REF(RK_SYM, s));
 		if (q) {
@@ -546,7 +546,7 @@ static void wsection(ecx *e, tbuf *b, uint32_t s, const char *kind)
 			b->n--;
 		}
 	}
-	tb_s(b, ",\"\",@\n");
+	vtext_string_append(b, ",\"\",@\n");
 }
 
 VPRIV void wasm_emit_function(ecx *e, uint32_t s)
@@ -616,82 +616,82 @@ VPRIV void wasm_emit_function(ecx *e, uint32_t s)
 
 		wsection(e, f, s, ".text.");
 		if (global) {
-			tb_s(f, (y->flags & SF_WEAK) ? "\t.weak\t" : "\t.globl\t");
+			vtext_string_append(f, (y->flags & SF_WEAK) ? "\t.weak\t" : "\t.globl\t");
 			wfname(c, f, REF(RK_SYM, s));
-			tb_c(f, '\n');
+			vtext_char_append(f, '\n');
 		}
-		tb_s(f, "\t.type\t");
+		vtext_string_append(f, "\t.type\t");
 		wfname(c, f, REF(RK_SYM, s));
-		tb_s(f, ",@function\n");
+		vtext_string_append(f, ",@function\n");
 		wfname(c, f, REF(RK_SYM, s));
-		tb_s(f, ":\n\t.functype\t");
+		vtext_string_append(f, ":\n\t.functype\t");
 		wfname(c, f, REF(RK_SYM, s));
-		tb_c(f, ' ');
+		vtext_char_append(f, ' ');
 		{
 			size_t sg = f->n;
 
 			wsig(e, f, y->ty, 0, s, NULL);
 			/* the header declares it too */
 			wfname(c, &W->decl, REF(RK_SYM, s));
-			tb_c(&W->decl, '\t');
-			tb_put(&W->decl, f->p + sg, f->n - sg);
-			tb_c(&W->decl, '\n');
+			vtext_char_append(&W->decl, '\t');
+			vtext_append(&W->decl, f->p + sg, f->n - sg);
+			vtext_char_append(&W->decl, '\n');
 		}
-		tb_c(f, '\n');
+		vtext_char_append(f, '\n');
 	}
 	if (W->nloc > np) {
-		tb_s(f, "\t.local\t");
+		vtext_string_append(f, "\t.local\t");
 		for (uint32_t i = np; i < W->nloc; i++) {
 			if (i > np)
-				tb_s(f, ", ");
-			tb_s(f, wt_name[W->lt[i]]);
+				vtext_string_append(f, ", ");
+			vtext_string_append(f, wt_name[W->lt[i]]);
 		}
-		tb_c(f, '\n');
+		vtext_char_append(f, '\n');
 	}
 	if (W->sp0 != UINT32_MAX) {
 		uint64_t fs = (W->frame + 15) & ~(uint64_t)15;
 
-		tb_s(f, "\tglobal.get\t__stack_pointer\n\tlocal.tee\t");
-		tb_u(f, W->sp0);
-		tb_s(f, "\n");
+		vtext_string_append(f, "\tglobal.get\t__stack_pointer\n\tlocal.tee\t");
+		vtext_unsigned_append(f, W->sp0);
+		vtext_string_append(f, "\n");
 		if (W->fp != UINT32_MAX) {
 			const char *P = wt_name[WPT(c)];
 
 			wfmt(f, "\t%s.const\t%llu\n\t%s.sub\n", P, (unsigned long long)fs, P);
 			if (W->falign > 16)
 				wfmt(f, "\t%s.const\t%lld\n\t%s.and\n", P, -(long long)W->falign, P);
-			tb_s(f, "\tlocal.tee\t");
-			tb_u(f, W->fp);
-			tb_s(f, "\n");
+			vtext_string_append(f, "\tlocal.tee\t");
+			vtext_unsigned_append(f, W->fp);
+			vtext_string_append(f, "\n");
 		}
-		tb_s(f, "\tglobal.set\t__stack_pointer\n");
+		vtext_string_append(f, "\tglobal.set\t__stack_pointer\n");
 	}
 	wmem_render(e, f);
 	if (W->sp0 != UINT32_MAX) {
-		tb_s(f, "\tlocal.get\t");
-		tb_u(f, W->sp0);
-		tb_s(f, "\n\tglobal.set\t__stack_pointer\n");
+		vtext_string_append(f, "\tlocal.get\t");
+		vtext_unsigned_append(f, W->sp0);
+		vtext_string_append(f, "\n\tglobal.set\t__stack_pointer\n");
 	}
 	if (W->rt != WT_NONE) {
-		tb_s(f, "\tlocal.get\t");
-		tb_u(f, W->rv);
-		tb_c(f, '\n');
+		vtext_string_append(f, "\tlocal.get\t");
+		vtext_unsigned_append(f, W->rv);
+		vtext_char_append(f, '\n');
 	}
-	tb_s(f, "\tend_function\n");
+	vtext_string_append(f, "\tend_function\n");
 	{
 		/* a constructor: a pointer in .init_array[.prio], which the assembler turns
 		   into the object's init functions */
 		const attrs *a = sym_attrs(c, s);
 
 		if (a && a->constructor) {
-			tb_s(f, "\t.section\t.init_array");
+			vtext_string_append(f, "\t.section\t.init_array");
 			if (a->prio) {
-				tb_c(f, '.');
-				tb_u(f, a->prio);
+				vtext_char_append(f, '.');
+				vtext_unsigned_append(f, a->prio);
 			}
-			tb_s(f, WASM32(c) ? ",\"\",@\n\t.p2align\t2, 0x0\n\t.int32\t" : ",\"\",@\n\t.p2align\t3, 0x0\n\t.int64\t");
+			vtext_string_append(f, WASM32(c) ? ",\"\",@\n\t.p2align\t2, 0x0\n\t.int32\t" : ",\"\",@\n\t.p2align\t3, 0x0\n\t.int64\t");
 			wfname(c, f, REF(RK_SYM, s));
-			tb_c(f, '\n');
+			vtext_char_append(f, '\n');
 		}
 		/* a destructor: registered at the end of the TU (wasm_tail) */
 	}
@@ -706,7 +706,7 @@ VPRIV void wasm_emit_function(ecx *e, uint32_t s)
 	}
 	e->out.n = (e->out.n + 7) & ~(size_t)7;
 	start = e->out.n;
-	tb_put(&e->out, f->p, f->n);
+	vtext_append(&e->out, f->p, f->n);
 	e->E->nfn++;
 	em_switch_values_emit(e);
 	out_chunk(e, (uint64_t)s << 1, start);

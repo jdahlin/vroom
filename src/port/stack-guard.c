@@ -1,12 +1,12 @@
 /*
- * The per-thread stack limit behind vstack_low() (vstack.h).
+ * The per-thread stack limit behind vstack_guard_low() (vstack.h).
  */
 #include <pthread.h>
-#include "port/vstack.h"
+#include "port/stack-guard.h"
 
-_Thread_local uintptr_t vstack_lim;
+_Thread_local uintptr_t vstack_guard_limit;
 
-void vstack_init(void)
+void vstack_guard_init(void)
 {
 	pthread_t t = pthread_self();
 	uintptr_t lo;
@@ -18,12 +18,12 @@ void vstack_init(void)
 	size_t sz;
 
 	if (pthread_getattr_np(t, &a)) {
-		vstack_lim = 1;	/* unknown: never low */
+		vstack_guard_limit = 1;	/* unknown: never low */
 		return;
 	}
 	pthread_attr_getstack(&a, &addr, &sz);
 	pthread_attr_destroy(&a);
 	lo = (uintptr_t)addr;
 #endif
-	vstack_lim = lo + VSTACK_RESERVE;
+	vstack_guard_limit = lo + VSTACK_GUARD_RESERVE;
 }

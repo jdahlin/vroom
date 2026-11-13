@@ -16,8 +16,8 @@
  *
  * The emitter's text buffer, a fixed mmap reservation, is tbuf.h.
  */
-#ifndef VCC_BUF_H
-#define VCC_BUF_H
+#ifndef VCC_COMMON_BUFFER_H
+#define VCC_COMMON_BUFFER_H
 
 #include <stdarg.h>
 #include <stdbool.h>
@@ -26,7 +26,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "common/attr.h"
+#include "common/attributes.h"
 
 /* ---------------- vbuf ---------------- */
 

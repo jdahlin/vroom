@@ -1,5 +1,5 @@
 /*
- * common/f128.h's x87 extended arithmetic (the ...p functions at Q_P80) against
+ * common/softfloat.h's x87 extended arithmetic (the ...p functions at VSOFTFLOAT_X87_80) against
  * the host's x87 long double, bit for bit: + - * /, comparison, integer and
  * double conversions, decimal and hex parsing, over random values (normal,
  * subnormal, infinite, NaN, short significands).  x86-64 hosts only:
@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <float.h>
-#include "../../include/common/f128.h"
+#include "../../include/common/softfloat.h"
 typedef unsigned __int128 U;
 /* host x87 long double -> held layout */
 static U of_ld(long double x) {
@@ -17,7 +17,7 @@ static U of_ld(long double x) {
 	unsigned e = se & 0x7fff, s = se >> 15;
 	return (U)s << 127 | (U)e << 112 | (U)(m & ((1ull << 63) - 1)) << 49;
 }
-static long double to_ld(U q) { unsigned char b[16] = {0}; q_to_x87(q, b); long double x; memcpy(&x, b, 10); memset((char*)&x + 10, 0, 6); return x; }
+static long double to_ld(U q) { unsigned char b[16] = {0}; vsoftfloat_to_x87(q, b); long double x; memcpy(&x, b, 10); memset((char*)&x + 10, 0, 6); return x; }
 static uint64_t st = 88172645463325252ull;
 static uint64_t rnd(void) { st ^= st << 13; st ^= st >> 7; st ^= st << 17; return st; }
 static long double rld(void) {
@@ -37,23 +37,23 @@ int main(int argc, char **argv) {
 	for (long i = 0; i < rounds; i++) {
 		long double a = rld(), b = rld(); U qa = of_ld(a), qb = of_ld(b);
 		long double r[4] = { a + b, a - b, a * b, a / b };
-		U q[4] = { q_addp(qa, qb, Q_P80), q_subp(qa, qb, Q_P80), q_mulp(qa, qb, Q_P80), q_divp(qa, qb, Q_P80) };
+		U q[4] = { vsoftfloat_add_with_precision(qa, qb, VSOFTFLOAT_X87_80), vsoftfloat_subtract_with_precision(qa, qb, VSOFTFLOAT_X87_80), vsoftfloat_multiply_with_precision(qa, qb, VSOFTFLOAT_X87_80), vsoftfloat_divide_with_precision(qa, qb, VSOFTFLOAT_X87_80) };
 		for (int k = 0; k < 4; k++, n++) if (!same(r[k], to_ld(q[k]))) { if (bad++ < 8) printf("op%d %La %La: host %La vcc %La\n", k, a, b, r[k], to_ld(q[k])); }
-		if (q_cmp(qa, qb) != (a != a || b != b ? 2 : a < b ? -1 : a > b ? 1 : 0)) { if (bad++ < 8) printf("cmp %La %La\n", a, b); }
+		if (vsoftfloat_compare(qa, qb) != (a != a || b != b ? 2 : a < b ? -1 : a > b ? 1 : 0)) { if (bad++ < 8) printf("cmp %La %La\n", a, b); }
 		long long v = (long long)rnd() >> (rnd() % 64); unsigned long long u = rnd();
 		n += 3;
-		if (!same((long double)v, to_ld(q_of_ip(v, 1, Q_P80)))) { if (bad++ < 8) printf("i2f %lld\n", v); }
-		if (!same((long double)u, to_ld(q_of_ip((__int128)u, 0, Q_P80)))) { if (bad++ < 8) printf("u2f %llu\n", u); }
-		if (a == a && a > -9e18L && a < 9e18L && (long long)a != (long long)q_to_int(qa, 64, 1)) { if (bad++ < 8) printf("f2i %La\n", a); }
+		if (!same((long double)v, to_ld(vsoftfloat_of_integer_with_precision(v, 1, VSOFTFLOAT_X87_80)))) { if (bad++ < 8) printf("i2f %lld\n", v); }
+		if (!same((long double)u, to_ld(vsoftfloat_of_integer_with_precision((__int128)u, 0, VSOFTFLOAT_X87_80)))) { if (bad++ < 8) printf("u2f %llu\n", u); }
+		if (a == a && a > -9e18L && a < 9e18L && (long long)a != (long long)vsoftfloat_to_integer_saturating(qa, 64, 1)) { if (bad++ < 8) printf("f2i %La\n", a); }
 		double d = (double)a;
-		n++; if (memcmp(&d, &(double){q_to_d(qa)}, 8) && d == d) { if (bad++ < 8) printf("f2d %La\n", a); }
+		n++; if (memcmp(&d, &(double){vsoftfloat_to_double(qa)}, 8) && d == d) { if (bad++ < 8) printf("f2d %La\n", a); }
 	}
 	/* parsing */
 	for (long i = 0; i < rounds / 6; i++) {
 		char buf[96]; long double a = rld(); if (a != a || a - a != 0) continue;
 		int prec = (int)(rnd() % 40) + 1;
 		if (rnd() & 1) snprintf(buf, sizeof buf, "%.*Le", prec, a); else snprintf(buf, sizeof buf, "%La", a);
-		long double h = strtold(buf, NULL); U q = q_parsep(buf, strlen(buf), Q_P80);
+		long double h = strtold(buf, NULL); U q = vsoftfloat_parse_with_precision(buf, strlen(buf), VSOFTFLOAT_X87_80);
 		n++; if (!same(h, to_ld(q))) { if (bad++ < 16) printf("parse %s: host %La vcc %La\n", buf, h, to_ld(q)); }
 	}
 	printf("%ld checks, %ld wrong\n", n, bad);

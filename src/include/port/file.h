@@ -1,9 +1,9 @@
 /*
- * A whole file mapped read-only (vmap_file; an empty file maps to p = NULL,
+ * A whole file mapped read-only (vfile_map; an empty file maps to p = NULL,
  * n = 0), from ar.
  */
-#ifndef VCC_MAPFILE_H
-#define VCC_MAPFILE_H
+#ifndef VCC_PORT_FILE_H
+#define VCC_PORT_FILE_H
 
 #include <fcntl.h>
 #include <stdbool.h>
@@ -11,15 +11,15 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include "common/attr.h"
-#include "common/defer.h"
+#include "common/attributes.h"
+#include "common/scoped-cleanup.h"
 
-typedef struct vmapped {
+typedef struct vfile_mapping {
 	const unsigned char *p;
 	size_t n;
-} vmapped;
+} vfile_mapping;
 
-static inline VUSE VNONNULL_ALL bool vmap_file(const char *abs, vmapped *m, struct stat *st)
+static inline VUSE VNONNULL_ALL bool vfile_map(const char *abs, vfile_mapping *m, struct stat *st)
 {
 	int fd = open(abs, O_RDONLY);
 	void *p;
@@ -44,18 +44,18 @@ static inline VUSE VNONNULL_ALL bool vmap_file(const char *abs, vmapped *m, stru
 	return true;
 }
 
-static inline VNONNULL_ALL void vunmap_file(vmapped *m)
+static inline VNONNULL_ALL void vfile_unmap(vfile_mapping *m)
 {
 	if (m->p)
 		munmap((void *)m->p, m->n);
 }
 
-static inline void vdefer_unmap(vmapped *m)
+static inline void vdefer_unmap(vfile_mapping *m)
 {
-	vunmap_file(m);
+	vfile_unmap(m);
 	m->p = NULL;
 	m->n = 0;
 }
-#define VAUTOUNMAP VCLEANUP(vdefer_unmap)	/* VAUTOUNMAP vmapped m; unmaps at the end of the block */
+#define VAUTOUNMAP VCLEANUP(vdefer_unmap)	/* VAUTOUNMAP vfile_mapping m; unmaps at the end of the block */
 
 #endif
