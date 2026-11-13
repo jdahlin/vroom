@@ -174,7 +174,6 @@ alh	alias_buckets	field	struct As
 vars	variables	field	struct As
 vmask	variable_mask	field	struct As
 vcount	variable_count	field	struct As
-pool_dummy	-	field	struct As
 pool	literal_pools	field	struct As
 npool	literal_pool_count	field	struct As
 poolcap	literal_pool_capacity	field	struct As
@@ -281,8 +280,8 @@ v	value	field	struct VarItem
 a	context	field	struct Lx
 p	cursor	field	struct Lx
 e	end	field	struct Lx
-s	text	field	struct Sv (ambiguous: whole-word rename is unsafe, needs a type-aware tool)
-n	length	field	struct Sv (ambiguous: whole-word rename is unsafe, needs a type-aware tool)
+s	text	field	struct Sv	ambiguous: whole-word rename is unsafe, needs a type-aware tool (done by --fields)
+n	length	field	struct Sv	ambiguous: whole-word rename is unsafe, needs a type-aware tool (done by --fields)
 As	as_context	type	as/asimpl.h, include/as/as.h
 Sv	as_text	type	as/asimpl.h, include/as/as.h
 Param	as_macro_parameter	type	as/asimpl.h, include/as/as.h

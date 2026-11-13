@@ -25,7 +25,7 @@ static int as_dwarf_number_parse(as_context *a, const char **pp, const char *e, 
 
 static uint32_t as_dwarf_directory_find_from(as_context *a, as_text d, uint32_t from)
 {
-	for (uint32_t i = from; i < a->dwarf_directory_count; i++) if (a->dwarf_directories[i].n == d.n && !memcmp(a->dwarf_directories[i].s, d.s, d.n)) return i;
+	for (uint32_t i = from; i < a->dwarf_directory_count; i++) if (a->dwarf_directories[i].length == d.length && !memcmp(a->dwarf_directories[i].text, d.text, d.length)) return i;
 	if (a->dwarf_directory_count == a->dwarf_directory_capacity) {
 		uint32_t nc = a->dwarf_directory_capacity ? a->dwarf_directory_capacity * 2 : 16;
 		as_text *t = as_region_alloc(&a->definitions, sizeof *t * nc);
@@ -57,8 +57,8 @@ VPRIV int as_directive_file(as_context *a, const char *p, const char *e)
 		p = as_whitespace_skip(p, e);
 		if (p >= e) break;
 		as_text w = as_text_first_word(p, e);
-		if (w.n == 3 && !memcmp(w.s, "md5", 3)) {
-			p = as_whitespace_skip(w.s + 3, e);
+		if (w.length == 3 && !memcmp(w.text, "md5", 3)) {
+			p = as_whitespace_skip(w.text + 3, e);
 			if (p + 2 > e || p[0] != '0' || (p[1] | 0x20) != 'x') return as_error_report(a, "MD5 checksum specified, but no file number");
 			p += 2;
 			const char *s = p;
@@ -73,8 +73,8 @@ VPRIV int as_directive_file(as_context *a, const char *p, const char *e)
 		} else return as_error_report(a, "unexpected token in '.file' directive");
 	}
 	/* MC: a file named as the root file (file 0) is the root: N stays unassigned */
-	if (n && a->dwarf_file_count && a->dwarf_files[0].is_set && !hasmd5 && !a->dwarf_files[0].has_md5 && name.n == a->dwarf_files[0].name.n &&
-	    !memcmp(name.s, a->dwarf_files[0].name.s, name.n))
+	if (n && a->dwarf_file_count && a->dwarf_files[0].is_set && !hasmd5 && !a->dwarf_files[0].has_md5 && name.length == a->dwarf_files[0].name.length &&
+	    !memcmp(name.text, a->dwarf_files[0].name.text, name.length))
 		return 0;
 	if (n >= a->dwarf_file_capacity) {
 		uint32_t nc = a->dwarf_file_capacity ? a->dwarf_file_capacity : 16;
@@ -89,10 +89,10 @@ VPRIV int as_directive_file(as_context *a, const char *p, const char *e)
 	int split = 0;
 	if (!two && n) {	/* "sub/y.h": directory "sub", name "y.h" (MC's tryGetFile) */
 		const char *sl = 0;
-		for (uint32_t i = 0; i < name.n; i++) if (name.s[i] == '/') sl = name.s + i;
-		if (sl && sl + 1 < name.s + name.n && sl > name.s) {
-			dir = (as_text){ name.s, (uint32_t)(sl - name.s) };
-			name = (as_text){ sl + 1, (uint32_t)(name.s + name.n - sl - 1) };
+		for (uint32_t i = 0; i < name.length; i++) if (name.text[i] == '/') sl = name.text + i;
+		if (sl && sl + 1 < name.text + name.length && sl > name.text) {
+			dir = (as_text){ name.text, (uint32_t)(sl - name.text) };
+			name = (as_text){ sl + 1, (uint32_t)(name.text + name.length - sl - 1) };
 			split = 1;
 		}
 	}
@@ -109,8 +109,8 @@ VPRIV int as_directive_file(as_context *a, const char *p, const char *e)
 	f->name = name; f->is_set = 1; f->has_md5 = (uint8_t)hasmd5;
 	if (hasmd5) memcpy(f->md5, md5, 16);
 	/* (a directory split from the name goes in MC's list of the others: never entry 0) */
-	f->dir = n == 0 || !dir.n ? 0 : split && a->o->machine == EM_X86_64 ? as_dwarf_directory_find_from(a, dir, 1) : as_dwarf_directory_find(a, dir);
-	if (!two && n && f->dir == 0 && dir.n) f->dir = as_dwarf_directory_find(a, dir);
+	f->directory = n == 0 || !dir.length ? 0 : split && a->object->machine == EM_X86_64 ? as_dwarf_directory_find_from(a, dir, 1) : as_dwarf_directory_find(a, dir);
+	if (!two && n && f->directory == 0 && dir.length) f->directory = as_dwarf_directory_find(a, dir);
 	a->dwarf_table_is_due = 1;
 	return 0;
 }
@@ -126,15 +126,15 @@ VPRIV int as_directive_loc(as_context *a, const char *p, const char *e)
 	if (p < e && as_char_is_digit((unsigned char)*p) && as_dwarf_number_parse(a, &p, e, &col)) return -1;
 	if (a->dwarf_row_is_pending) as_dwarf_row_emit(a);
 	struct as_dwarf_row *l = &a->dwarf_row_pending;
-	l->file = (uint32_t)fi; l->line = (uint32_t)ln; l->col = (uint32_t)col;
+	l->file = (uint32_t)fi; l->line = (uint32_t)ln; l->column = (uint32_t)col;
 	l->flags &= 1; l->isa = 0; l->discriminator = 0;
 	for (;;) {
 		p = as_whitespace_skip(p, e);
 		if (p >= e) break;
 		as_text w = as_text_first_word(p, e);
-		p = w.s + w.n;
+		p = w.text + w.length;
 		uint64_t v;
-#define AS_DWARF_DIRECTIVE_IS(lit) (w.n == sizeof lit - 1 && !memcmp(w.s, lit, w.n))
+#define AS_DWARF_DIRECTIVE_IS(lit) (w.length == sizeof lit - 1 && !memcmp(w.text, lit, w.length))
 		if (AS_DWARF_DIRECTIVE_IS("basic_block")) l->flags |= 2;
 		else if (AS_DWARF_DIRECTIVE_IS("prologue_end")) l->flags |= 4;
 		else if (AS_DWARF_DIRECTIVE_IS("epilogue_begin")) l->flags |= 8;
@@ -161,7 +161,7 @@ VPRIV void as_dwarf_row_emit(as_context *a)
 	}
 	struct as_dwarf_row *l = &a->dwarf_rows[a->dwarf_row_count++];
 	*l = a->dwarf_row_pending;
-	l->frag = a->cur; l->off = elf_frag(a->o, a->cur)->size;
+	l->fragment = a->fragment_current; l->offset = elf_frag(a->object, a->fragment_current)->size;
 }
 
 /* MCDwarfLineAddr::encode with DWARF v5's line_base -5, line_range 14, opcode_base 13 */
@@ -198,26 +198,26 @@ static uint32_t as_dwarf_string_add(ElfObj *o, uint32_t ls, as_text s)
 	for (ElfChunk *c = f->head; c; c = c->next) {
 		for (uint32_t i = 0; i < c->used;) {
 			size_t k = strlen((const char *)c->data + i);
-			if (k == s.n && !memcmp(c->data + i, s.s, s.n)) return off + i;
+			if (k == s.length && !memcmp(c->data + i, s.text, s.length)) return off + i;
 			i += (uint32_t)k + 1;
 		}
 		off += c->used;
 	}
 	off = (uint32_t)f->size;
-	uint8_t *q = elf_grow(o, ls, s.n + 1);
-	memcpy(q, s.s, s.n); q[s.n] = 0;
+	uint8_t *q = elf_grow(o, ls, s.length + 1);
+	memcpy(q, s.text, s.length); q[s.length] = 0;
 	return off;
 }
 
 VPRIV void as_dwarf_line_finish(as_context *a)
 {
-	ElfObj *o = a->o;
+	ElfObj *o = a->object;
 	if (a->dwarf_row_is_pending) a->dwarf_row_is_pending = 0;
 	if (!a->dwarf_file_count || !a->dwarf_files[0].is_set) {
 		if (a->dwarf_file_count > 1 && a->dwarf_files[1].is_set) {	/* no root file: file 1 is (MC) */
 			if (!a->dwarf_file_count) a->dwarf_file_count = 1;
 			a->dwarf_files[0] = a->dwarf_files[1];
-			a->dwarf_files[0].dir = 0;
+			a->dwarf_files[0].directory = 0;
 		} else { as_error_report(a, "no root file for the line table"); return; }
 	}
 	for (uint32_t i = 1; i < a->dwarf_file_count; i++)
@@ -256,7 +256,7 @@ VPRIV void as_dwarf_line_finish(as_context *a)
 		struct as_dwarf_file *f = &a->dwarf_files[i];
 		sfix[2 * nsfix] = (uint32_t)b.n; sfix[2 * nsfix + 1] = as_dwarf_string_add(o, ls, f->name); nsfix++;
 		memset(b.p + b.n, 0, 4); b.n += 4;
-		as_leb128_unsigned_append(&b, f->dir);
+		as_leb128_unsigned_append(&b, f->directory);
 		if (md5) { memcpy(b.p + b.n, f->md5, 16); b.n += 16; }
 	}
 	uint32_t hlen = (uint32_t)(b.n - hl - 4);
@@ -269,18 +269,18 @@ VPRIV void as_dwarf_line_finish(as_context *a)
 	memset(done, 0, a->dwarf_row_count + 1);
 	for (uint32_t s = 0; s < a->dwarf_row_count; s++) {
 		if (done[s]) continue;
-		uint32_t sc = elf_frag(o, a->dwarf_rows[s].frag)->sec;
+		uint32_t sc = elf_frag(o, a->dwarf_rows[s].fragment)->sec;
 		uint32_t file = 1, line = 1, col = 0, disc = 0, isa = 0, flags = 1;
 		uint64_t last = 0; int first = 1;
 		for (uint32_t i = s; i < a->dwarf_row_count; i++) {
 			struct as_dwarf_row *l = &a->dwarf_rows[i];
-			if (elf_frag(o, l->frag)->sec != sc) continue;
-			uint64_t at = elf_frag(o, l->frag)->base + l->off;
+			if (elf_frag(o, l->fragment)->sec != sc) continue;
+			uint64_t at = elf_frag(o, l->fragment)->base + l->offset;
 			done[i] = 1;
 			if (b.n + 64 > cap) { as_error_report(a, "line table overflow"); return; }
 			int64_t ld = (int64_t)l->line - line;
 			if (file != l->file) { file = l->file; b.p[b.n++] = 4; as_leb128_unsigned_append(&b, file); }
-			if (col != l->col) { col = l->col; b.p[b.n++] = 5; as_leb128_unsigned_append(&b, col); }
+			if (col != l->column) { col = l->column; b.p[b.n++] = 5; as_leb128_unsigned_append(&b, col); }
 			if (disc != l->discriminator) {
 				disc = l->discriminator;
 				as_byte_span t = { b.p + b.n + 2, 0 }; as_leb128_unsigned_append(&t, disc);
@@ -319,7 +319,7 @@ VPRIV void as_dwarf_line_finish(as_context *a)
 		struct as_dwarf_row *l = &a->dwarf_rows[afix[2 * i + 1]];
 		uint32_t y = elf_sym_anon(o, ".Ltmp", 5);
 		elf_symp(o, y)->flags |= ESYM_TEMP;
-		elf_define(o, y, l->frag, l->off);
+		elf_define(o, y, l->fragment, l->offset);
 		elf_fixup(o, sec, at + afix[2 * i], q + afix[2 * i], o->machine == EM_X86_64 ? R_X86_64_64 : R_AARCH64_ABS64, (as_value){ y, 0, 0 });
 	}
 }
