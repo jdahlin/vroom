@@ -1,0 +1,58 @@
+{
+  "gcc_version": "gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+  "gcc_target": "x86_64-linux-gnu",
+  "llvm_version": "Ubuntu LLVM version 23.1.6\n  Optimized build.\n  Default target: x86_64-pc-linux-gnu\n  Host CPU: znver5",
+  "counts": {
+    "gcc": 305,
+    "llvm": 821
+  },
+  "missing_llvm_values": [
+    "asan-instrument-address-spaces",
+    "print-after-pass-number",
+    "print-before-pass-number",
+    "thinlto-move-symbols",
+    "polly-2nd-level-tile-sizes",
+    "polly-register-tile-sizes",
+    "polly-tile-sizes"
+  ],
+  "scope": "Inventory exposed GCC parameters and LLVM numeric-option candidates.\n\nThis captures reported values, not effective per-function optimizer policy.\nLLVM targets and pass constructors may override defaults; a pass may be off.\nBoolean options, general enums and unexposed source constants are not enumerated\non the LLVM side. Numeric lists and ElementCount options are included explicitly.\nNo compilation, benchmark or network access is performed.",
+  "date": "2026-11-13",
+  "llvm_source_revision": "c47d7823685a",
+  "gcc_source_revision": "releases/gcc-15.2.0",
+  "families": {
+    "builtins-prefetch": 13,
+    "cfg-layout": 106,
+    "compiler-resources": 12,
+    "diagnostics-testing": 66,
+    "inlining": 56,
+    "instrumentation": 68,
+    "loop-transforms": 85,
+    "lto-ipa": 65,
+    "memory-optimization": 57,
+    "other-runtime": 11,
+    "other-target": 187,
+    "profile-frequency": 80,
+    "register-allocation": 28,
+    "runtime-contract": 20,
+    "scalar-analysis": 35,
+    "scalar-combining": 59,
+    "scheduling": 62,
+    "target-policy": 62,
+    "training-score": 5,
+    "vectorization": 49
+  },
+  "dispositions": {
+    "adapt-policy": 334,
+    "adapt-profitability": 49,
+    "adapt-with-frequency-model": 80,
+    "calibrate-per-target": 75,
+    "defer-unsupported": 187,
+    "defer-until-pass": 138,
+    "derive-from-contract": 20,
+    "diagnostic-only": 5,
+    "exclude-from-speed-tuning": 134,
+    "retain-local-budget": 104
+  },
+  "source_locations": 398,
+  "review_depth": "Inventory-wide family triage; source-backed analysis of selected relevant passes in RESEARCH-optimizer-limits.md. Not a proof of profitability or an exhaustive audit of unexposed source literals."
+}

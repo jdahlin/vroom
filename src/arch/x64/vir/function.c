@@ -13,7 +13,7 @@ static void vx_target_block_begin(void *ctx, uint32_t b)
 {
 	vx *L = ctx;
 
-	(void)b;
+	L->map_block = b;
 	L->cmp = UINT32_MAX;
 	L->memv = L->memskip = L->scaledv = L->scaledskip = L->bev = L->testv = L->cmpmemv = 0;
 }
@@ -28,12 +28,21 @@ static void vx_target_block_enter(void *ctx, uint32_t b)
 
 static void vx_target_instruction(void *ctx, uint32_t b, uint32_t i, const uint8_t *opr, uint32_t nopr, uint8_t res)
 {
-	vx_ins(ctx, b, i, opr, nopr, res);
+	vx *L = ctx;
+	vx_mark(L,true,9,b,i,i,res,VR_NONE,VIR_NOBLK);
+	vx_ins(L, b, i, opr, nopr, res);
+	vx_mark(L,false,9,0,0,0,0,0,0);
+	L->map_block = b;
+	L->map_value = i;
 }
 
 static void vx_target_result_spill(void *ctx, uint8_t res, uint32_t slot)
 {
-	vx_memslot(ctx, false, res, slot);
+	vx *L = ctx;
+	vx_mark(L,true,8,L->map_block,L->map_value,L->map_value,VR_NONE,res,VIR_NOBLK);
+	vx_memslot(L, false, res, slot);
+	vx_probe(L,8);
+	vx_mark(L,false,8,0,0,0,0,0,0);
 }
 
 static void vx_target_edit(void *ctx, const vir_edit *x)
@@ -83,6 +92,12 @@ static const virbuild_lowering_target vx_lowering_target = {
 	.rotation_cached = false,
 };
 
+static void vx_entry(void *ctx,uint32_t b,uint32_t pred,uint32_t v,
+		     uint8_t reg,bool stored,const char *decision)
+{
+	vbuffer_format_append(ctx,"vl-entry b=%u pred=%u v=%u reg=%u stored=%u decision=%s\n",
+		b,pred,v,reg,stored,decision);
+}
 VPRIV bool vw_x64(ecx *e, uint32_t sym, const char **why)
 {
 	vwst *V = e->vw;
@@ -126,7 +141,14 @@ VPRIV bool vw_x64(ecx *e, uint32_t sym, const char **why)
 	vir_uses(f,L.uses);L.r10=r10;
 	if(r10)regs.alloc[0]|=1u<<R10;
 	if(!vir_loops_build(f,&V->lp)){*why=VIRFAIL(x64_loop_analysis);return false;}
-	bool allocated=vir_alloc(f,&V->lp,&regs,NULL,&V->ao),scratch=false;
+	const char *filter=getenv("VCC_VL_FILTER"), *mapping=getenv("VCC_VL_MAP"), *probe=getenv("VCC_VL_PROBE");
+	const vident *name=&vintern_ents[e->c->syms[sym].name];
+	bool selected=!filter || (strlen(filter)==name->len && !memcmp(filter,name->s,name->len));
+	L.map=selected && mapping && *mapping && *mapping!='0';
+	L.probe=selected && probe?(unsigned)strtoul(probe,NULL,0):0;
+	vbuffer entries={0};
+	vir_aopt diagnostic={.entry=L.map?vx_entry:NULL,.entry_ctx=&entries};
+	bool allocated=vir_alloc(f,&V->lp,&regs,&diagnostic,&V->ao),scratch=false;
 	if(allocated && r10)for(uint32_t k=0;k<V->ao.nmove;k++) {
 		const vir_emove *m=&V->ao.move[k];
 		if(m->src==VR_SCR0 || m->dst==VR_SCR0){scratch=true;break;}
@@ -135,8 +157,18 @@ VPRIV bool vw_x64(ecx *e, uint32_t sym, const char **why)
 		/* A cycle may need the allocator's GP scratch at the same time as
 		 * a slot-to-slot copy. Keep the second reserve for those functions. */
 		r10=L.r10=false;regs.alloc[0]&=~(UINT64_C(1)<<R10);
-		allocated=vir_alloc(f,&V->lp,&regs,NULL,&V->ao);
+		entries.n=0;
+		allocated=vir_alloc(f,&V->lp,&regs,&diagnostic,&V->ao);
 	}
+	if(L.map && allocated) {
+		const vir_astats *s=&V->ao.st;
+		fprintf(stderr,"vl-function %.*s reloads=%u remats=%u moves=%u stores=%u swaps=%u ereloads=%u eremats=%u emoves=%u estores=%u edges=%u xchg=%u spills=%u slots=%u callee=%u linear=%u pool=%u\n",
+			(int)name->len,name->s,s->reloads,s->remats,s->moves,s->stores,s->swaps,s->ereloads,s->eremats,s->emoves,s->estores,s->edges,s->xchg,s->spills,s->slots,s->callee,s->linear,s->pool);
+		if (entries.n) fwrite(entries.p,1,entries.n,stderr);
+		for(uint32_t v=1;v<f->nins;v++)if(V->ao.slot[v]!=VIR_NOBLK)
+			fprintf(stderr,"vl-slot v=%u slot=%u sdef=%u\n",v,V->ao.slot[v],V->ao.sdef[v]);
+	}
+	free(entries.p);
 	L.gtmp=r10?R11:R10;
 	if (!allocated) {
 		*why = VIRFAIL(x64_allocation_failed); snprintf(V->detail, sizeof V->detail, "%s", V->ao.err); return false;

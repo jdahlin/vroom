@@ -114,6 +114,7 @@ typedef struct A {
 	vir_fn *f;
 	const vir_loops *lp;
 	const vir_regs *rg;
+	const vir_aopt *opt;
 	vir_alloc_out *o;
 	uint64_t poolmax;
 	uint32_t sp, osp, npool, nopr, nedit, nmove, nedge, npair, nspill, nsucc;
@@ -1428,6 +1429,8 @@ static void enter(A *a, uint32_t b)
 			}
 		}
 	}
+	if (a->opt && a->opt->entry)
+		a->opt->entry(a->opt->entry_ctx, b, best, 0, VR_NONE, false, "predecessor");
 	/* the loop-header rule: drop values live through the loop without a use in it */
 	if (l != VIR_NOBLK && a->lp->l[l].head == b)
 		for (int c = 0; c < 2; c++) {
@@ -1449,6 +1452,7 @@ static void enter(A *a, uint32_t b)
 	for (uint32_t j = 0; j < k->nparam; j++) {
 		uint32_t q = k->first + j, c = vcls(f, q);
 		int r = -1;
+		const char *decision = "dead-or-address";
 
 		ax.slot[q] = VIR_NOBLK;
 		ax.reg[q] = VR_NONE;
@@ -1466,6 +1470,7 @@ static void enter(A *a, uint32_t b)
 				r = (int)h;
 			else
 				r = choose(a, q, c, 0);
+			decision = r < 0 ? "pressure-slot" : r == (int)h ? "hint-register" : "chosen-register";
 			/* a web's parameter that lives across a call and is not used soon (not in b nor
 			 * at the top of each successor, or after a call, or only passed on by b's br)
 			 * enters in the web's slot: the edges then move nothing for an argument already
@@ -1483,18 +1488,21 @@ static void enter(A *a, uint32_t b)
 						if (f->extra[t->c + x] == q) {
 							uint8_t pr = ax.opr[ax.boff[t->a] + x];
 
-							if (pr == VR_NONE)
+							if (pr == VR_NONE) {
 								r = -1;
-							else if (VR_CLASS(pr) == c && (ax.fr[c] >> VR_NUM(pr) & 1))
+								decision = "match-header-slot";
+							} else if (VR_CLASS(pr) == c && (ax.fr[c] >> VR_NUM(pr) & 1)) {
 								r = pr;
+								decision = "match-header-register";
+							}
 							break;
 						}
 				} else if ((ax.vfl[q] & XCALL) && (late || (u == e && t->op == VO_BR)) &&
-					   !((a->rg->callee[c] >> VR_NUM((uint32_t)r) & 1) &&
-					     __builtin_popcountll(ax.fr[c] & a->rg->callee[c] & ~(1ull << VR_NUM((uint32_t)r))) >= 2)) {
-					/* (a callee-saved register keeps it across the call, when others are free:
-					 * otherwise the values used sooner need them) */
+					   !(a->rg->callee[c] >> VR_NUM((uint32_t)r) & 1)) {
+					/* A free callee-saved register can keep this parameter across
+					 * the call; caller-saved placement would just delay the spill. */
 					r = -1;
+					decision = "late-call-web-slot";
 				}
 			}
 		}
@@ -1512,10 +1520,18 @@ static void enter(A *a, uint32_t b)
 			stored(a, q);
 		}
 		ax.opr[a->nopr++] = r >= 0 ? (uint8_t)r : VR_NONE;
+		if (a->opt && a->opt->entry)
+			a->opt->entry(a->opt->entry_ctx, b, best, q, r >= 0 ? (uint8_t)r : VR_NONE,
+				      ax.sst[q] == ax.bgen, decision);
 	}
 	if (l != VIR_NOBLK && a->lp->l[l].head == b && best != VIR_NOBLK && !a->linear)
 		preload(a, b, l, best);
 	save_state(a, ax.ent_off, ax.ent_n, b);
+	if (a->opt && a->opt->entry)
+		for (uint32_t j = 0; j < ax.ent_n[b]; j++) {
+			uint32_t x = ax.ent_off[b] + j;
+			a->opt->entry(a->opt->entry_ctx, b, best, ax.pv[x], ax.pr[x], ax.ps[x], "entry-register");
+		}
 	relocate = b == a->spoint;
 	/* forward edges into b */
 	{
@@ -1955,6 +1971,7 @@ bool vir_alloc(vir_fn *f, const vir_loops *lp, const vir_regs *rg, const vir_aop
 	a->f = f;
 	a->lp = lp;
 	a->rg = rg;
+	a->opt = opt;
 	a->o = out;
 	a->poolmax = opt && opt->pool ? opt->pool : VIR_MAX_INS;
 	if (!nb || !precond(a))

@@ -56,7 +56,7 @@ VPRIV void vw_simplify(ecx *e)
 	uint32_t *stk, ns = 0;
 
 	S.n0 = V->np;
-	S.cnt = calloc((size_t)S.n0 + 1, sizeof *S.cnt);
+	S.cnt = calloc(2 * ((size_t)S.n0 + 1), sizeof *S.cnt);
 	stk = malloc(((size_t)S.n0 + 1) * sizeof *stk);
 	{
 		uint32_t kc = 16;
@@ -70,6 +70,7 @@ VPRIV void vw_simplify(ecx *e)
 	}
 	if (!S.cnt || !stk || !S.kt)
 		vw_fail(e, VIRFAIL(out_of_memory));
+	uint32_t *pcopy = S.cnt + S.n0 + 1;
 	/* uses */
 	for (uint32_t i = 0; i < V->norder; i++) {
 		uint32_t b = V->order[i];
@@ -82,12 +83,19 @@ VPRIV void vw_simplify(ecx *e)
 
 			if (!x)
 				break;
-			if (vw_find(V, x) == x &&
-			    !vw_promdead(V, x))
+			if (vw_find(V, x) == x && !vw_promdead(V, x)) {
 				VW_EACHOP(V, x, o, vw_inc(V, &S, vw_find(V, *o)));
+				if (V->p[x].in.op == VO_I2P) pcopy[vw_find(V, V->p[x].in.a)]++;
+			}
 			if (!q)
 				break;
 		}
+	}
+	/* Pointer-only views need no separately allocated integer carrier. */
+	for (uint32_t q = 0; q < S.n0; q++) {
+		vir_ins *in = &V->p[q].in;
+		if (in->op == VO_LOAD && in->ty == VT_I64 && !(in->fl & (VIF_VOL | VIF_MS)) &&
+		    VIF_W(in->fl) == 3 && pcopy[q] && pcopy[q] == S.cnt[q]) in->ty = VT_PTR;
 	}
 	/* rewriting and numbering over the dominator tree */
 	vw_doms(e, &S);

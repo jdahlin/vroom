@@ -84,6 +84,10 @@ VPRIV bool vw_simp1(ecx *e, vwsimp *S, uint32_t q, uint32_t *r)
 	}
 	switch (in.op) {
 	case VO_I2P: case VO_P2I:	/* a pointer and its address as an integer are the same bits */
+		if (in.op == VO_I2P && V->p[in.a].in.ty == VT_PTR) {
+			*r = in.a;
+			return false;
+		}
 		if (V->p[in.a].in.op == (in.op == VO_I2P ? VO_P2I : VO_I2P))
 			*r = V->p[in.a].in.a;
 		return false;

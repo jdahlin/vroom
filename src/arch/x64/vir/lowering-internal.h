@@ -19,6 +19,9 @@ typedef struct vx {
 	uint8_t *uses;
 	const vir_loops *lp;
 	uint32_t *order,*position,*rotation,*chase,at;
+	bool map;
+	unsigned probe, site;
+	uint32_t map_block, map_value;
 	unsigned dup;bool fallok,r10;
 	uint32_t memv, memskip, scaledv, scaledskip; int membase, memindex, scaleindex; uint8_t memsh, scalesh; bool indexed; int64_t memoff;
 	uint32_t bev; int bebase,beindex; uint8_t besh,bewidth; bool beindexed; int64_t beoff;
@@ -37,6 +40,9 @@ VPRIV bool vx_smallmem(const vir_fn *f,const vir_ins *i);
 VPRIV bool vx_dense_switch(const vir_fn *f,const vir_ins *in,uint64_t *low,uint64_t *range);
 VPRIV void vx_fixed(const vir_fn *f, uint32_t v, vir_fix *x, void *ctx);
 VPRIV void vx_raw(vx *L, const char *s);
+VPRIV void vx_mark(vx *L, bool begin, unsigned bit, uint32_t b, uint32_t pos,
+		    uint32_t v, uint32_t dst, uint32_t src, uint32_t to);
+VPRIV void vx_probe(vx *L, unsigned bit);
 VPRIV void vx_simd(vx *L, const char *op, int d, int a, int b);
 VPRIV void vx_mat(vx *L, uint8_t dst, uint32_t v);
 VPRIV void vx_memslot(vx *L, bool load, uint8_t reg, uint32_t s);

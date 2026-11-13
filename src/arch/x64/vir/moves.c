@@ -28,6 +28,37 @@ VPRIV void vx_raw(vx *L, const char *s)
 	vtext_string_append(&L->e->raw, s);
 }
 
+/* ARM-compatible probe bits 0..7; bit 8 is a definition store, 10 an edge
+ * exchange. Bit 9 only maps ordinary lowering (which may branch).
+ * Mapping brackets emitted sites (including
+ * layout duplicates), not just the allocator's static edit list. Raw records
+ * deliberately stop folds: compare probes to a similarly mapped control. */
+VPRIV void vx_mark(vx *L, bool begin, unsigned bit, uint32_t b, uint32_t pos,
+		    uint32_t v, uint32_t dst, uint32_t src, uint32_t to)
+{
+	if (!L->map) return;
+	char text[384];
+	if (!begin) { vx_raw(L,"\t# vl-end\n"); return; }
+	uint32_t slot=v?L->o->slot[v]:VIR_NOBLK;
+	uint32_t param=0;
+	if(to!=VIR_NOBLK)for(uint32_t j=0;j<L->f->blk[to].nparam;j++) {
+		uint32_t q=L->f->blk[to].first+j;
+		uint32_t loc=L->o->opr[L->o->boff[to]+j];
+		if(loc==VR_NONE && L->o->slot[q]!=VIR_NOBLK)loc=VL_SLOT|L->o->slot[q];
+		if(loc==dst){param=q;break;}
+	}
+	snprintf(text,sizeof text,"\t# vl-site id=%u bit=%u b=%u pos=%u v=%u dst=%u src=%u to=%u param=%u slot=%u off=%lld op=%s ty=%s bits=%llu\n",
+		L->site++,bit,b,pos,v,dst,src,to,param,slot,
+		(long long)(slot==VIR_NOBLK?0:L->spill[slot]),
+		v?vir_optab[L->f->ins[v].op].name:"none",
+		v?vir_tyname[L->f->ins[v].ty]:"void",
+		(unsigned long long)(v && v<L->f->nconst?vx_bits(&L->f->ins[v]):0));
+	vx_raw(L,text);
+}
+VPRIV void vx_probe(vx *L,unsigned bit)
+{
+	if (L->probe & (1u<<bit)) vx_raw(L,"\tnop\n");
+}
 VPRIV void vx_simd(vx *L, const char *op, int d, int a, int b)
 {
 	char s[160];
@@ -67,6 +98,8 @@ VPRIV void vx_memslot(vx *L, bool load, uint8_t reg, uint32_t s)
 
 VPRIV void vx_edit(vx *L, const vir_edit *x)
 {
+	unsigned bit=x->kind==VE_RELOAD?0:x->kind==VE_REMAT?1:x->kind==VE_MOVE?2:3;
+	vx_mark(L,true,bit,L->map_block,x->pos,x->v,x->dst,x->src,VIR_NOBLK);
 	switch (x->kind) {
 	case VE_REMAT: vx_mat(L, x->dst, x->v); break;
 	case VE_RELOAD: vx_memslot(L, true, x->dst, L->o->slot[x->v]); break;
@@ -74,6 +107,8 @@ VPRIV void vx_edit(vx *L, const vir_edit *x)
 	case VE_MOVE: x64_mov(L->e, vx_reg(x->dst), vx_reg(x->src)); break;
 	default: abort(); /* no swapped/tied operands in vx_fixed */
 	}
+	vx_probe(L,bit);
+	vx_mark(L,false,bit,0,0,0,0,0,0);
 }
 
 VPRIV void vx_edge(vx *L, uint32_t b, uint32_t k)
@@ -92,6 +127,8 @@ VPRIV void vx_edge_moves(vx *L, uint32_t g)
 		bool ds = m->dst & VL_SLOT, ss = m->src & VL_SLOT;
 		uint32_t d = m->dst & ~VL_SLOT, s = m->src & ~VL_SLOT;
 		uint8_t tmp = vir_rclass(L->f->ins[m->v].ty) ? VR_MAKE(1, 14) : L->gtmp;
+		unsigned bit=m->kind==VE_REMAT?4:m->kind==VE_XCHG?10:ds?5:ss?6:7;
+		vx_mark(L,true,bit,ed->from,ed->first+j,m->v,m->dst,m->src,ed->to);
 		if (m->kind == VE_REMAT) {
 			vx_mat(L, ds ? tmp : d, m->v);
 			if (ds) vx_memslot(L, false, tmp, d);
@@ -106,6 +143,8 @@ VPRIV void vx_edge_moves(vx *L, uint32_t g)
 		} else if (ds) vx_memslot(L, false, s, d);
 		else if (ss) vx_memslot(L, true, d, s);
 		else x64_mov(L->e, vx_reg(d), vx_reg(s));
+		vx_probe(L,bit);
+		vx_mark(L,false,bit,0,0,0,0,0,0);
 	}
 }
 
