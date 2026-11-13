@@ -112,9 +112,11 @@ relative to it); `TODO.md` stays at the top.
   - `ld/`: the linker `vlink` (`ld.c`, one TU with its main; also linked into
     vccd, which calls `ld_main` per link) and `vobjcopy`/`vnm`;
     `wasmld.c` is vlink for WebAssembly (as `wasm-ld` or with `-mwasm64`).
-  - `driver/`: one compile job from a clang command line (`ppdriver.c`), the
-    declaration cache (`ccsnap.c`), `--explain` pages (`explain.inc`).
-  - `server/`: vccd (`vccd.c`, with its main), the diagnostics store
+  - `driver/`: one compile job from a clang command line (`job.c` calls the
+    pieces: `cmdline.c`, `searchpath.c`, `predef.c`, `depfile.c`, `output.c`, ...;
+    `driver-internal.h`), the declaration cache (`ccsnap.c`), `--explain` pages (`explain.inc`).
+  - `server/`: vccd (`vccd.c`, with its main; one file per job beside it,
+    `vccd-internal.h`), the diagnostics store
     (`dstore.c`), the capability table (`caps.c`) and the warning groups
     (`warnings.inc`).  Without `--backend-sock` vccd runs the whole kernel
     build itself: probes, `-E`/`-c`/`-S` (stdin too), links (vld in-process;
@@ -267,6 +269,7 @@ src/tools/gen-walkprefix.py [--check]   # codegen/walk/prefix.h: the walker's fu
 build/src/viralloc --sweep F.vir     # VIR register allocation (vir/alloc.c) on a synthetic target: dump + counters, checker at every register count
 bench/vir-alloc.py [--bless]        # src/test/vir-alloc: expected dumps and sweeps (<1 s); `random -n N`: generated functions (~1 s/unit)
 bench/vir-alloc.py mutate|time      # the checker catches corrupted allocations; ns per VIR instruction (budget 200 for now, target 60: SPEC 22.1)
+bench/vir-failures.py [-n N]        # why VIR gives up on functions (VCC_VIR_STATS=1; reasons: codegen/vir/failure.h): suites, kernel, PostgreSQL, SQLite, most frequent first (~1 min)
 bench/record-passes.py -j 3 [-n 200]  # arm64 record clean-ups: records each pass changes, default path vs VCC_VIR=bl (VCC_REC_STATS=1); suites, kernel sample, SQLite (~1 min)
 bench/vcc-bflayout.py               # generated bit-field records, layouts checked by clang, Linux + Apple (~1 s)
 bench/vcc-ldconst.py                # generated long double literals and folds, bits vs clang (~2 s)

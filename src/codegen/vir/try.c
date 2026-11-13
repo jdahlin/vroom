@@ -11,12 +11,86 @@
  *      VCC_VIR_CHECK=1 also runs the allocation checker; VCC_VIR_LIST=FILE lowers
  *      only the functions named in FILE, one per line (bisecting)
  * Only at -O2 and above.
+ *
+ * VCC_VIR_STATS=1: per TU, on stderr, how many functions went through VIR and
+ * why the others did not (reasons: failure.h); see vw_stats_print.
  */
 #define WK_PREFIX vw_
 #define LO_PREFIX vw_
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "vw.h"
+
+/* every reason VIR gives up on a function (failure.h); vfail points at a message of this table */
+VPRIV const vir_failure_info vir_failure_table[VIRFAIL_COUNT] = {
+#define X(name, message) { #name, message },
+	VIR_FAILURES(X)
+#undef X
+};
+
+/* the reason whose message `why` is; none: the walker's own diagnostic, or what `other` says */
+static int vw_failure_find(const char *why)
+{
+	for (int k = 0; k < VIRFAIL_COUNT; k++)
+		if (vir_failure_table[k].message == why)
+			return k;
+	return -1;
+}
+
+/* VCC_VIR_STATS: count one failed function; the first of each reason is kept as its example */
+static void vw_failure_note(ecx *e, uint32_t s, const char *why, vir_failure other, const char *detail)
+{
+	emitter *E = e->E;
+	int k;
+
+	if (!E->vstats)
+		return;
+	k = vw_failure_find(why);
+	if (k < 0) {	/* a diagnostic of the shared walker or emitter: its format (a literal) is the detail */
+		k = other;
+		detail = why ? why : "";
+	}
+	pthread_mutex_lock(&E->emu);
+	if (!E->vfailed[k].count++) {
+		E->vfailed[k].sym = s;
+		snprintf(E->vfailed[k].detail, sizeof E->vfailed[k].detail, "%s", detail ? detail : "");
+	}
+	pthread_mutex_unlock(&E->emu);
+}
+
+/*
+ * VCC_VIR_STATS=1, after a TU's code is generated (stderr, parsed by bench/vir-failures.py):
+ *   vcc vir: attempted=N lowered=N built=N fallback=N
+ *   vcc vir-failure: reason=NAME count=N example=FUNCTION detail=TEXT-TO-END-OF-LINE
+ * attempted: functions the VIR builder was started on; lowered: emitted from
+ * VIR; built: built but, without `l` in VCC_VIR, not lowered; fallback: the
+ * direct emitter compiled them, one reason each.  Reasons are listed most
+ * frequent first.
+ */
+VPRIV void vw_stats_print(emitter *E)
+{
+	uint64_t fell = 0;
+	int ord[VIRFAIL_COUNT], n = 0;
+
+	for (int k = 0; k < VIRFAIL_COUNT; k++)
+		if (E->vfailed[k].count) {
+			int j = n++;
+
+			fell += E->vfailed[k].count;
+			while (j > 0 && E->vfailed[ord[j - 1]].count < E->vfailed[k].count)
+				ord[j] = ord[j - 1], j--;
+			ord[j] = k;
+		}
+	fprintf(stderr, "vcc vir: attempted=%llu lowered=%llu built=%llu fallback=%llu\n", (unsigned long long)E->vattempted,
+		(unsigned long long)E->vlowered, (unsigned long long)E->vbuilt, (unsigned long long)fell);
+	for (int i = 0; i < n; i++) {
+		int k = ord[i];
+		const vident *id = &vintern_ents[E->c->syms[E->vfailed[k].sym].name];
+
+		fprintf(stderr, "vcc vir-failure: reason=%s count=%u example=%.*s detail=%s\n", vir_failure_table[k].name,
+			(unsigned)E->vfailed[k].count, (int)id->len, id->s, E->vfailed[k].detail);
+	}
+}
 
 static int vw_mode(void)
 {
@@ -97,6 +171,8 @@ VPRIV bool vw_try(ecx *e, uint32_t s)
 		return false;
 	e->vtry = true;
 	e->vfail = NULL;
+	if (e->E->vstats)
+		e->E->vattempted++;
 	{
 		int novtag = e->novtag;	/* (a bail out of a volatile access leaves it raised) */
 
@@ -107,6 +183,7 @@ VPRIV bool vw_try(ecx *e, uint32_t s)
 	if (m & 8)
 		vw_name(e, s, nm, sizeof nm);
 	if (e->vfail) {
+		vw_failure_note(e, s, e->vfail, VIRFAIL_emitter_error, NULL);
 		if (m & 8)
 			fprintf(stderr, "vir: %s: no: %s\n", nm, e->vfail);
 		return false;
@@ -129,19 +206,30 @@ VPRIV bool vw_try(ecx *e, uint32_t s)
 		if (m & 8)
 			fprintf(stderr, "vir: %s: built, %u instructions, %u blocks%s\n", nm, V->f.nins, V->f.nblk, nerr ? ", INVALID" : "");
 		free(b.p);
+		if (nerr) {
+			char n[16];
+
+			snprintf(n, sizeof n, "%u", nerr);
+			vw_failure_note(e, s, VIRFAIL(verifier_rejected), VIRFAIL_verifier_rejected, n);
+		}
 		if ((m & 16) && !nerr && !vw_listed(e, s))
 			m &= ~16;
 		if ((m & 16) && !nerr) {
 			const char *why;
 
+			V->detail[0] = 0;
 			if (X86(e->c) ? vw_x64(e, s, &why) : vw_a64(e, s, &why)) {
+				if (e->E->vstats)
+					e->E->vlowered++;
 				if (m & 8)
 					fprintf(stderr, "vir: %s: lowered, %u spills\n", nm, V->ao.st.spills);
 				return true;
 			}
+			vw_failure_note(e, s, why, VIRFAIL_lowering_failed, V->detail);
 			if (m & 8)
-				fprintf(stderr, "vir: %s: not lowered: %s\n", nm, why);
-		}
+				fprintf(stderr, "vir: %s: not lowered: %s%s%s\n", nm, why, V->detail[0] ? ": " : "", V->detail);
+		} else if (!nerr && e->E->vstats)
+			e->E->vbuilt++;
 	}
 	return false;
 }

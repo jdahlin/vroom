@@ -618,6 +618,33 @@ def link_machine_reset():
         check(r.returncode != 0 and 'incompatible' in r.stderr, f'mixed machines: rc {r.returncode} {r.stderr[-300:]}')
     finally: v.stop()
 
+@test()
+def link_tls_reset():
+    """a link with a PT_TLS leaves no thread-local base behind: the next link, which has none but a DTPOFF
+    relocation, is what a fresh vlink makes"""
+    v = Vccd(workers=1)
+    try:
+        d = f'{v.dir}/w'
+        os.makedirs(d, exist_ok=True)
+        srcs = {'tls.s': '\t.globl _start\n_start:\tret\n\t.section .tdata,"awT",@progbits\n\t.long 5\n'
+                         '\t.section .tbss,"awT",@nobits\n\t.zero 8\n',
+                'dtp.s': '\t.globl _start\n_start:\tleaq dv@DTPOFF(%rax), %rcx\n\tret\n\t.data\n\t.globl dv\ndv:\t.long 1\n'}
+        for name, text in srcs.items():
+            open(f'{d}/{name}', 'w').write(text)
+            r = subprocess.run([vd.VPP, '--target=x86_64-linux-gnu', '-c', '-o', name[:-2] + '.o', name], cwd=d,
+                               capture_output=True, text=True, timeout=30)
+            check(r.returncode == 0, f'assemble {name}: {r.stderr[-300:]}')
+        r = subprocess.run([f'{vd.BIN}/vlink', '--vroom-stubs', '-o', 'ref', 'dtp.o'], cwd=d, capture_output=True, text=True,
+                           timeout=30)
+        check(r.returncode == 0, f'vlink: {r.stderr[-300:]}')
+        for o in ('tls.o', 'dtp.o'):
+            r = subprocess.run([f'{vd.BIN}/vld', '-o', f'out-{o}', o], cwd=d, capture_output=True, text=True,
+                               env=dict(os.environ, VCC_SOCK=v.sock), timeout=30)
+            check(r.returncode == 0, f'link {o}: {r.stderr[-300:]}')
+        check(open(f'{d}/out-dtp.o', 'rb').read() == open(f'{d}/ref', 'rb').read(),
+              'the link after a TLS link differs from a fresh vlink\'s')
+    finally: v.stop()
+
 def main():
     av = sys.argv[1:]
     verbose = '-v' in av; av = [a for a in av if a != '-v']
