@@ -52,9 +52,9 @@ static const char *reloc(tbuf *o, const char *p, const char *e, const char *spec
 		;
 	if (s + 1 < p && s[0] == '.' && s[1] == 'L')
 		s++;
-	tb_put(o, s, (size_t)(k - s));
-	tb_s(o, spec);
-	tb_put(o, k, (size_t)(p - k));
+	vtext_append(o, s, (size_t)(k - s));
+	vtext_string_append(o, spec);
+	vtext_append(o, k, (size_t)(p - k));
 	return p;
 }
 
@@ -80,31 +80,31 @@ static void section(tbuf *o, const char *p, const char *e, const char *end)
 {
 	/* p: after "\t.section\t" */
 	if (starts(p, e, ".rodata.str1.")) {
-		tb_s(o, "\t.section\t__TEXT,__cstring,cstring_literals\n");
+		vtext_string_append(o, "\t.section\t__TEXT,__cstring,cstring_literals\n");
 	} else if (starts(p, e, ".rodata") || starts(p, e, "\".rodata")) {
 		/* const data holding addresses is __DATA,__const (no text relocations), as clang */
-		tb_s(o, relocs(e + 1, end) ? "\t.section\t__DATA,__const\n" : "\t.section\t__TEXT,__const\n");
+		vtext_string_append(o, relocs(e + 1, end) ? "\t.section\t__DATA,__const\n" : "\t.section\t__TEXT,__const\n");
 	} else if (starts(p, e, ".tdata")) {
-		tb_s(o, "\t.section\t__DATA,__thread_data,thread_local_regular\n");
+		vtext_string_append(o, "\t.section\t__DATA,__thread_data,thread_local_regular\n");
 	} else if (starts(p, e, ".tbss")) {
-		tb_s(o, "\t.section\t__DATA,__thread_bss,thread_local_zerofill\n");
+		vtext_string_append(o, "\t.section\t__DATA,__thread_bss,thread_local_zerofill\n");
 	} else if (starts(p, e, ".tlv")) {
-		tb_s(o, "\t.section\t__DATA,__thread_vars,thread_local_variables\n");
+		vtext_string_append(o, "\t.section\t__DATA,__thread_vars,thread_local_variables\n");
 	} else if (starts(p, e, ".init_array")) {
-		tb_s(o, "\t.section\t__DATA,__mod_init_func,mod_init_funcs\n");
+		vtext_string_append(o, "\t.section\t__DATA,__mod_init_func,mod_init_funcs\n");
 	} else if (starts(p, e, ".fini_array")) {
-		tb_s(o, "\t.section\t__DATA,__mod_term_func,mod_term_funcs\n");
+		vtext_string_append(o, "\t.section\t__DATA,__mod_term_func,mod_term_funcs\n");
 	} else if (*p == '"') {
 		/* section("seg,sect") as the attribute gave it */
 		const char *q = memchr(p + 1, '"', (size_t)(e - p - 1));
 
-		tb_s(o, "\t.section\t");
-		tb_put(o, p + 1, q ? (size_t)(q - p - 1) : 0);
-		tb_c(o, '\n');
+		vtext_string_append(o, "\t.section\t");
+		vtext_append(o, p + 1, q ? (size_t)(q - p - 1) : 0);
+		vtext_char_append(o, '\n');
 	} else {
-		tb_s(o, "\t.section\t");
-		tb_put(o, p, (size_t)(e - p));
-		tb_c(o, '\n');
+		vtext_string_append(o, "\t.section\t");
+		vtext_append(o, p, (size_t)(e - p));
+		vtext_char_append(o, '\n');
 	}
 }
 
@@ -127,18 +127,18 @@ VPRIV void darwin_text(tbuf *o, const char *t, size_t tn)
 			goto next;
 		}
 		if (starts(p, le, "\t.bss")) {
-			tb_s(o, "\t.section\t__DATA,__bss\n");
+			vtext_string_append(o, "\t.section\t__DATA,__bss\n");
 			goto next;
 		}
 		if (starts(p, le, "\t.weak\t")) {
-			tb_s(o, defined(t, tn, p + 7, (size_t)(le - p - 7)) ? "\t.weak_definition\t" : "\t.weak_reference\t");
-			tb_put(o, p + 7, (size_t)(le - p - 7));
-			tb_c(o, '\n');
+			vtext_string_append(o, defined(t, tn, p + 7, (size_t)(le - p - 7)) ? "\t.weak_definition\t" : "\t.weak_reference\t");
+			vtext_append(o, p + 7, (size_t)(le - p - 7));
+			vtext_char_append(o, '\n');
 			goto next;
 		}
 		for (size_t i = 0; i < sizeof(dirs) / sizeof(dirs[0]); i++)
 			if (starts(p, le, dirs[i].from)) {
-				tb_s(o, dirs[i].to);
+				vtext_string_append(o, dirs[i].to);
 				p += strlen(dirs[i].from);
 				break;
 			}
@@ -158,16 +158,16 @@ VPRIV void darwin_text(tbuf *o, const char *t, size_t tn)
 				} else if (ins && starts(q, le, ":got:")) {
 					q = reloc(o, q + 5, le, "@GOTPAGE");
 				} else if (adrp && *q == ',' && q + 2 < le && q[2] != ':') {
-					tb_s(o, ", ");
+					vtext_string_append(o, ", ");
 					q += 2;
 					q = reloc(o, q, le, "@PAGE");
 				} else if (*q == '.' && q + 1 < le && q[1] == 'L' && (q == p || !idch(q[-1]))) {
 					q++;	/* .Lx: Mach-O's local labels are Lx */
 				} else {
-					tb_c(o, *q++);
+					vtext_char_append(o, *q++);
 				}
 			}
-			tb_c(o, '\n');
+			vtext_char_append(o, '\n');
 		}
 next:
 		p = le + 1;

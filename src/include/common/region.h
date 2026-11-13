@@ -4,14 +4,14 @@
  * preprocessor).  Neither maps anything; the reservations come from
  * port/job-regions.h.
  */
-#ifndef VCC_REGION_H
-#define VCC_REGION_H
+#ifndef VCC_COMMON_REGION_H
+#define VCC_COMMON_REGION_H
 
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "common/attr.h"
+#include "common/attributes.h"
 
 /* a bump region over a reservation, by offset (the assembler, the object writer) */
 typedef struct vregion { uint8_t *base; size_t used, cap; } vregion;

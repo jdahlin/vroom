@@ -44,7 +44,7 @@ VPRIV uint32_t cplx_reuse(cc *c, uint32_t n, uint32_t *pre)
 	if (N(n)->op == N_COND && cplx_pure(c, N(n)->a, 0)) {
 		cval cv;
 		if (cc_eval(c, N(n)->a, &cv) && (cv.kind == CV_INT || cv.kind == CV_FLT)) {
-			bool yes = cv.kind == CV_INT ? cv.i != 0 : cv.ld ? q_nz(cv.q) : cv.f != 0;
+			bool yes = cv.kind == CV_INT ? cv.i != 0 : cv.ld ? vsoftfloat_is_nonzero(cv.q) : cv.f != 0;
 			return cplx_reuse(c, yes ? (N(n)->b ? N(n)->b : N(n)->a) : N(n)->c, pre);
 		}
 	}

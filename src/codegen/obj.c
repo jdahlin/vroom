@@ -14,7 +14,7 @@ VPRIV size_t it_open(ecx *e, uint32_t kind)
 
 	if (!direct(e))
 		return SIZE_MAX;
-	tb_need(b, 16);
+	vtext_need(b, 16);
 	b->n = (b->n + 7) & ~(size_t)7;
 	h = b->n;
 	((item *)(b->p + h))->kind = kind;
@@ -29,7 +29,7 @@ VPRIV void it_close(ecx *e, size_t h)
 	if (h == SIZE_MAX)
 		return;
 	((item *)(b->p + h))->len = (uint32_t)(b->n - h - sizeof(item));
-	tb_need(b, 8);
+	vtext_need(b, 8);
 	while (b->n & 7)
 		b->p[b->n++] = 0;
 }
@@ -38,7 +38,7 @@ VPRIV void *it_room(ecx *e, size_t n)
 {
 	void *p;
 
-	tb_need(&e->out, n + 8);
+	vtext_need(&e->out, n + 8);
 	p = e->out.p + e->out.n;
 	e->out.n += n;
 	return p;
@@ -144,7 +144,7 @@ static int r_symhdr(rctx *R, const symhdr *h)
 		/* x86 alignment participates in branch relaxation, including when
 		 * an earlier branch has split the current subsection into frags. */
 		R->nb.n = 0;
-		tb_f(&R->nb, "\t.p2align %u\n", h->p2);
+		vtext_format_append(&R->nb, "\t.p2align %u\n", h->p2);
 		if (as_snippet(R->as, R->nb.p, R->nb.n)) return -1;
 	} else
 		elf_align(o, frag, h->p2, (elf_sec(o, elf_frag(o, frag)->sec)->flags & SHF_EXECINSTR) != 0, 0, 0);
@@ -160,8 +160,8 @@ static int r_fend(rctx *R, uint32_t s)
 	ElfVal a, b;
 
 	R->nb.n = 0;
-	tb_s(&R->nb, ".Lfe");
-	tb_u(&R->nb, s);
+	vtext_string_append(&R->nb, ".Lfe");
+	vtext_unsigned_append(&R->nb, s);
 	l = as_sym(R->as, R->nb.p, R->nb.n);
 	if (as_label(R->as, l))
 		return -1;

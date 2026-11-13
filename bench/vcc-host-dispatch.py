@@ -14,7 +14,7 @@ import hostenv
 
 ROOT = Path(__file__).resolve().parent.parent
 PROBE = r'''
-#include "port/hostcrc.h"
+#include "port/crc32c.h"
 #include "common/intern.h"
 #include <assert.h>
 #include <stdio.h>

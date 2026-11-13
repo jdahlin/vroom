@@ -5,7 +5,7 @@
  *
  *   VAUTOFREE char *p = malloc(n);      free(p) at the end of the block
  *   VAUTOCLOSE int fd = open(...);      close(fd) unless fd < 0
- *   (VAUTOUNMAP, for a mapped file, is in port/mapfile.h)
+ *   (VAUTOUNMAP, for a mapped file, is in port/file.h)
  *   VLOCK(mu);                          pthread_mutex_unlock(&mu) at the end
  *   VLOCK_AS(g, mu);                    ... with a name, to drop it early:
  *   VUNLOCK(g);                         unlocks now (and not again)
@@ -23,8 +23,8 @@
  *
  * The cleanup functions are static inline: nothing here costs a call at -O2.
  */
-#ifndef VCC_DEFER_H
-#define VCC_DEFER_H
+#ifndef VCC_COMMON_SCOPED_CLEANUP_H
+#define VCC_COMMON_SCOPED_CLEANUP_H
 
 #include <pthread.h>
 #include <stdlib.h>

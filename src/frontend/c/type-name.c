@@ -1,6 +1,6 @@
 /* vcc front end: types spelled as clang does in diagnostics, and as C for the layout checks */
 #include "ccimpl.h"
-#include "common/buf.h"
+#include "common/buffer.h"
 
 VPRIV const char *int_name(int k)
 {

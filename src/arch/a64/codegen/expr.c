@@ -1,6 +1,6 @@
 /* vcc code generator: expressions */
 #include "../../../codegen/emitimpl.h"
-#include "port/vstack.h"
+#include "port/stack-guard.h"
 
 /* ---------------- expressions ---------------- */
 
@@ -318,21 +318,21 @@ static val gen_vbin(ecx *e, int op, int ra, int rb, qty t, uint32_t loc)
 	rd = treg(e);
 	opi(e, I_ADDI, 1, rd, FRAME, sl);
 	st = rb_->n;
-	tb_s(rb_, q ? "\tldr\tq16, [" : "\tldr\td16, [");
+	vtext_string_append(rb_, q ? "\tldr\tq16, [" : "\tldr\td16, [");
 	reg(rb_, ra, 1);
-	tb_s(rb_, q ? "]\n\tldr\tq17, [" : "]\n\tldr\td17, [");
+	vtext_string_append(rb_, q ? "]\n\tldr\tq17, [" : "]\n\tldr\td17, [");
 	reg(rb_, rb, 1);
-	tb_s(rb_, "]\n\t");
-	tb_s(rb_, mn);
-	tb_s(rb_, "\tv16.");
-	tb_s(rb_, arr);
-	tb_s(rb_, ", v16.");
-	tb_s(rb_, arr);
-	tb_s(rb_, ", v17.");
-	tb_s(rb_, arr);
-	tb_s(rb_, q ? "\n\tstr\tq16, [" : "\n\tstr\td16, [");
+	vtext_string_append(rb_, "]\n\t");
+	vtext_string_append(rb_, mn);
+	vtext_string_append(rb_, "\tv16.");
+	vtext_string_append(rb_, arr);
+	vtext_string_append(rb_, ", v16.");
+	vtext_string_append(rb_, arr);
+	vtext_string_append(rb_, ", v17.");
+	vtext_string_append(rb_, arr);
+	vtext_string_append(rb_, q ? "\n\tstr\tq16, [" : "\n\tstr\td16, [");
 	reg(rb_, rd, 1);
-	tb_c(rb_, ']');
+	vtext_char_append(rb_, ']');
 	i = put(e, I_RAW);
 	i->off = (int32_t)st;
 	i->ref = (uint32_t)(rb_->n - st);
@@ -477,7 +477,7 @@ static val gen_binary(ecx *e, uint32_t n)
 		mov(e, X(c, ty), rb, ra);
 		return arith(e, op, ty, a, vreg(rb));
 	}
-	if (unlikely(vstack_low()))	/* nested operators recurse here: an error before the stack runs out */
+	if (unlikely(vstack_guard_low()))	/* nested operators recurse here: an error before the stack runs out */
 		efatal(e, x->loc, "expression nested too deeply");
 	a = gen(e, x->a);
 	if (unlikely(e->spill) && (a.k == V_REG || a.k == V_REG2) && tidx(a.r) >= 0 &&

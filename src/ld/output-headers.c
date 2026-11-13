@@ -92,16 +92,16 @@ static void write_build_id(void)
 	uint8_t *hashes = alloc(nchunks * 20 + 32);
 	if (!strcmp(opt.build_id, "sha1") || !strcmp(opt.build_id, "tree")) {
 		pfor(nchunks, hash_chunk, hashes);
-		ld_blake3(hashes, nchunks * 20, dst, hl);
+		vdigest_blake3(hashes, nchunks * 20, dst, hl);
 	} else if (!strcmp(opt.build_id, "fast")) {
 		/* xxh3 of the chunk hashes (lld: --build-id=fast is xxh3_64bits per chunk) */
 		uint8_t *h8 = alloc(nchunks * 8);
 		for (size_t i = 0; i < nchunks; i++) {
 			uint64_t b = (uint64_t)i << 20, n = filesize - b < (1u << 20) ? filesize - b : (1u << 20);
-			uint64_t x = ld_xxh3(out + b, n);
+			uint64_t x = vdigest_xxh3(out + b, n);
 			memcpy(h8 + i * 8, &x, 8);
 		}
-		uint64_t x = ld_xxh3(h8, nchunks * 8);
+		uint64_t x = vdigest_xxh3(h8, nchunks * 8);
 		memcpy(dst, &x, 8);
 	} else {
 		error("--build-id=%s is not supported", opt.build_id);

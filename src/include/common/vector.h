@@ -4,8 +4,8 @@
  * from alloc(bytes); the old array is not freed (arena allocators).  From
  * the linker, where alloc is its per-thread arena.
  */
-#ifndef VCC_VEC_H
-#define VCC_VEC_H
+#ifndef VCC_COMMON_VECTOR_H
+#define VCC_COMMON_VECTOR_H
 
 #include <stdint.h>
 #include <string.h>

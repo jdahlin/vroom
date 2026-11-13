@@ -1,6 +1,6 @@
 /* vcc front end: the record layout self-check (-fdump-record-layouts) that clang verifies */
 #include "ccimpl.h"
-#include "common/buf.h"
+#include "common/buffer.h"
 
 /* ---------------- layout checks (clang verifies them) ---------------- */
 

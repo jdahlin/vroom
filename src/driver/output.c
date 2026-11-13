@@ -173,7 +173,7 @@ _Thread_local vbuf tl_wasm_obj;
 VPRIV int write_obj(const char *cwd, const char *out, int outfd, int errfd, int macho)
 {
 	unsigned long long t0 = nsnow();
-	vperf v0 = vperf_now();
+	vperf v0 = vperformance_now();
 	size_t n = macho ? macho_finish(tl_obj) : elf_finish(tl_obj);
 	int r;
 
