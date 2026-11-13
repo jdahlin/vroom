@@ -166,7 +166,13 @@ Five sub-steps, one PR each.  Order and parallelism:
 
 **Status (main at ddbb6413):** 2a merged (#167), 2b merged (#175), 2c
 merged (#154) without the debug check `VCC_VIR_CHECK_ANALYSES=1` (it now
-comes with step 4.0), 2d merged (#172).  2e is open.
+comes with step 4.0), 2d merged (#172).  2e done in `src/codegen/vir/lowering-driver.[ch]`
+(branch `quality/vir-lowering-driver`): the table differs from the sketch below in
+these ways, all forced by what the two targets share: `block_enter` (the code after a
+block's label from the layout loop), `body_begin`, `block_end` (arm64's edge blocks), `fail`,
+`edge_blocks_at_end` is not a field (each target's own `block_end`/`after_blocks` places
+them, both through `virbuild_lower_edge_block`), and the driver's input struct also holds the
+operand buffers arm64 fills (`skip_multi_operands`) and `skip_at`.  `vl_grow`/`vx_grow` untouched.
 
 #### 2a. One pass per file in the builder (moves only)
 
