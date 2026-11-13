@@ -1167,7 +1167,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   symbol STT_TLS and labels in TLS sections are STT_TLS, as MC.  *Validated:*
   `src/test/vas-obj/tlsops.s`, `tlslocal.s` byte-identical with clang -c.
 - [~] **Mach-O syntax** `@PAGE`/`@PAGEOFF`/`@GOTPAGE…`/`@TLVPPAGE…`: `vpp -c x.s`
-  for a Darwin target reads Apple's dialect (`as_darwin_text`, the inverse of
+  for a Darwin target reads Apple's dialect (`macho_dialect_translate`, the inverse of
   emit's `darwin_text`: sections, `L` labels, `.zerofill`/`.tbss`/`.comm` log2
   alignment, NEON `op.T vA, vB` and `mov d0, v1[1]`) into the Mach-O writer
   (commons now as Mach-O commons).  *Validated:* `vcc-darwin-s.py`: vpp -c of

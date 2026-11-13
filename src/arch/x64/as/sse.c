@@ -1,7 +1,7 @@
 /* x86-64 assembler: SSE through SSE4.2, AES-NI, PCLMUL, SHA, CRC32, FS/GS base */
 #include "x64as.h"
 
-VPRIV int x64_i_sse(As *a, char *mn, XOp *o, int nops)
+VPRIV int x64_i_sse(as_context *a, char *mn, XOp *o, int nops)
 {
 	char stem[32];
 	int sz = 0, cc;
@@ -96,7 +96,7 @@ VPRIV int x64_i_sse(As *a, char *mn, XOp *o, int nops)
 	return X64_NEXT;
 }
 
-VPRIV int x64_i_sse4(As *a, char *mn, XOp *o, int nops)
+VPRIV int x64_i_sse4(as_context *a, char *mn, XOp *o, int nops)
 {
 	char stem[32];
 	int sz = 0, cc;
@@ -181,7 +181,7 @@ VPRIV int x64_i_sse4(As *a, char *mn, XOp *o, int nops)
 			uint8_t ops[3] = { 0x0f, 0x38, (uint8_t)(z == 1 ? 0xf0 : 0xf1) };
 
 			if (!z || (mn[5] && mn[6]))
-				return err(a, "invalid operand for instruction");
+				return as_error_report(a, "invalid operand for instruction");
 			if (o[0].kind == XK_EXPR)
 				o[0].kind = XK_MEM;
 			return x64_emit(a, &F(.w = z == 8, .opsz16 = z == 2, .rep = 0xf2, .rex8 = z == 1 && o[0].kind == XK_REG && o[0].needrex,
@@ -197,7 +197,7 @@ VPRIV int x64_i_sse4(As *a, char *mn, XOp *o, int nops)
 			XForm f = F(.w = mn[5] == 'q', .opsz16 = 1, .op = ops, .nop = 3, .reg = x->reg, .rm = g, .isz = 1);
 
 			if (x->kind != XK_REG || x->cls != XR_XMM)
-				return err(a, "invalid operand for instruction");
+				return as_error_report(a, "invalid operand for instruction");
 			if (g->kind == XK_EXPR)
 				g->kind = XK_MEM;
 			x64_imm(a, &o[0], &f, &c);
@@ -229,7 +229,7 @@ VPRIV int x64_i_sse4(As *a, char *mn, XOp *o, int nops)
 	return X64_NEXT;
 }
 
-VPRIV int x64_i_ssepk(As *a, char *mn, XOp *o, int nops)
+VPRIV int x64_i_ssepk(as_context *a, char *mn, XOp *o, int nops)
 {
 	char stem[32];
 	int sz = 0, cc;

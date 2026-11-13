@@ -118,3 +118,23 @@ olds map to one new in one scope, and no new name exists in the tree
 (`as_directive_data` and `as_expression_parse` appear only in STYLE.md and
 this file as examples).  The fields of `struct PoolS` (arm64's literal
 pools) are for the arm64 pass.
+
+### Rename table: applied (PR "as: names per STYLE.md, by table")
+
+Applied: all functions, types, constants, globals and file names of the table,
+and 82 of the 135 struct fields.  The library's `rename-table.py` replaces whole
+words in the whole tree, which the table's short names (`sym`, `err`, `here`,
+`expr`, `trim`, ...) cannot take, so the rows were applied by a scoped run (the
+assembler's files, plus the users of its public API in `driver/` and
+`codegen/`) that leaves comments (except for names with an underscore),
+strings and member accesses (`a->err`, `o->err`) alone: a function row matches a
+call or declaration only, a type, constant or global row a whole word.
+
+Left for a type-aware step (a clang AST rewrite): the 53 field rows whose name
+is declared in several structs or also in other headers (`o`, `dir`, `cur`,
+`prev`, `err`, `off`, `p`, `n`, `e`, `v`, `k`, `t`, `reg`, `op`, `sym`, `frag`,
+`end`, `next`, `s`, `a`, `sb`, `al`, `pool`, `ninst`, `cfi`, `msg`, `mlen`,
+`def`, `vararg`, `np`, `len`, `count`, `fwd`, `lab`, `esc`, `first`, `ra`,
+`sig`, `col`, `p2`) and `pool_dummy` (to delete).  They keep their old names
+until then.  Names inside comments that are plain English words (`sym`,
+`expr`, ...) were left as they were.

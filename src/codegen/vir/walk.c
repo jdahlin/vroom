@@ -1,7 +1,7 @@
 /*
  * The walker compiled a second time, against the VIR builder (SPEC-vir.md
  * X1): every wk_ function is vw_wk_..., every LO(name) is vw_name
- * (codegen/vir/build.c).  Part of the codegen unity TU, after the first
+ * (codegen/vir/preir.h).  Part of the codegen unity TU, after the first
  * instantiation; unprefix.h gives the later files the first one's names.
  */
 #define WK_PREFIX vw_

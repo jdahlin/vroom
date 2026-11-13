@@ -2,7 +2,7 @@
  * x86-64 instructions in AT&T syntax: the parser and the encoder, choosing
  * the encodings LLVM MC chooses (clang -c), so an object is byte-identical
  * with clang's for the same text.  Jumps to labels are variable items the
- * assembler relaxes (as.c: as_branch).
+ * assembler relaxes (as.c: as_variable_item_branch_add).
  */
 #include "x64as.h"
 
@@ -20,7 +20,7 @@ static int x64_regname(const char *s, size_t n, XOp *o)
 	if (n >= sizeof b)
 		return -1;
 	for (size_t i = 0; i < n; i++)
-		b[i] = (char)c_lower((unsigned char)s[i]);
+		b[i] = (char)as_char_to_lower((unsigned char)s[i]);
 	b[n] = 0;
 	o->cls = XR_GPR;
 	o->hi8 = 0;
@@ -33,11 +33,11 @@ static int x64_regname(const char *s, size_t n, XOp *o)
 	}
 	for (int i = 0; i < 4; i++)
 		if (!strcmp(b, r8h[i])) { o->reg = (uint8_t)(i + 4), o->size = 1, o->hi8 = 1; return 0; }
-	if (b[0] == 'r' && c_digit((unsigned char)b[1])) {
+	if (b[0] == 'r' && as_char_is_digit((unsigned char)b[1])) {
 		int r = atoi(b + 1);
 		const char *t = b + 1;
 
-		while (c_digit((unsigned char)*t))
+		while (as_char_is_digit((unsigned char)*t))
 			t++;
 		if (r < 8 || r > 15)
 			return -1;
@@ -45,7 +45,7 @@ static int x64_regname(const char *s, size_t n, XOp *o)
 		o->size = !*t ? 8 : !strcmp(t, "d") ? 4 : !strcmp(t, "w") ? 2 : !strcmp(t, "b") ? 1 : 0;
 		return o->size ? 0 : -1;
 	}
-	if ((!strncmp(b, "xmm", 3) || !strncmp(b, "ymm", 3)) && c_digit((unsigned char)b[3])) {
+	if ((!strncmp(b, "xmm", 3) || !strncmp(b, "ymm", 3)) && as_char_is_digit((unsigned char)b[3])) {
 		int r = atoi(b + 3);
 
 		if (r > 15)
@@ -54,11 +54,11 @@ static int x64_regname(const char *s, size_t n, XOp *o)
 		return 0;
 	}
 	if (!strcmp(b, "rip")) { o->cls = XR_RIP; return 0; }
-	if ((!strncmp(b, "cr", 2) || !strncmp(b, "db", 2) || !strncmp(b, "dr", 2)) && c_digit((unsigned char)b[2])) {
+	if ((!strncmp(b, "cr", 2) || !strncmp(b, "db", 2) || !strncmp(b, "dr", 2)) && as_char_is_digit((unsigned char)b[2])) {
 		int r = atoi(b + 2);
 		const char *t = b + 2;
 
-		while (c_digit((unsigned char)*t))
+		while (as_char_is_digit((unsigned char)*t))
 			t++;
 		if (r > 15 || *t)
 			return -1;
@@ -76,25 +76,25 @@ static int x64_regname(const char *s, size_t n, XOp *o)
 }
 
 /* a register at p (after %): its name's end */
-static const char *x64_reg(As *a, const char *p, const char *e, XOp *o)
+static const char *x64_reg(as_context *a, const char *p, const char *e, XOp *o)
 {
 	const char *q = p;
 
-	while (q < e && (isidc((unsigned char)*q) || c_digit((unsigned char)*q)))
+	while (q < e && (as_char_is_identifier((unsigned char)*q) || as_char_is_digit((unsigned char)*q)))
 		q++;
 	if (q == p || x64_regname(p, (size_t)(q - p), o)) {
-		err(a, "invalid register name");
+		as_error_report(a, "invalid register name");
 		return NULL;
 	}
 	if (o->cls == XR_ST) {
-		const char *r = ws(q, e);
+		const char *r = as_whitespace_skip(q, e);
 
 		if (r < e && *r == '(') {
-			r = ws(r + 1, e);
-			if (r >= e || !c_digit((unsigned char)*r)) { err(a, "invalid st register"); return NULL; }
+			r = as_whitespace_skip(r + 1, e);
+			if (r >= e || !as_char_is_digit((unsigned char)*r)) { as_error_report(a, "invalid st register"); return NULL; }
 			o->reg = (uint8_t)(*r++ - '0');
-			r = ws(r, e);
-			if (r >= e || *r != ')') { err(a, "invalid st register"); return NULL; }
+			r = as_whitespace_skip(r, e);
+			if (r >= e || *r != ')') { as_error_report(a, "invalid st register"); return NULL; }
 			q = r + 1;
 		}
 	}
@@ -102,7 +102,7 @@ static const char *x64_reg(As *a, const char *p, const char *e, XOp *o)
 }
 
 /* an expression with an optional @MOD: [p, e) up to a top-level ( or , */
-static int x64_expr(As *a, const char **pp, const char *e, Val *v, uint8_t *mod)
+static int x64_expr(as_context *a, const char **pp, const char *e, as_value *v, uint8_t *mod)
 {
 	const char *p = *pp, *q = p, *at = NULL;
 	int depth = 0;
@@ -115,7 +115,7 @@ static int x64_expr(As *a, const char **pp, const char *e, Val *v, uint8_t *mod)
 			while (q < e && *q != '"')
 				q++;
 		} else if (*q == '(') {
-			const char *r = ws(q + 1, e);
+			const char *r = as_whitespace_skip(q + 1, e);
 
 			if (depth == 0 && (r >= e || *r == '%' || *r == ','))
 				break;
@@ -137,42 +137,42 @@ static int x64_expr(As *a, const char **pp, const char *e, Val *v, uint8_t *mod)
 		const char *m = at + 1, *me = m;
 		const char *x = p;
 
-		while (me < q && isidc((unsigned char)*me))
+		while (me < q && as_char_is_identifier((unsigned char)*me))
 			me++;
 		for (size_t i = 0; i < sizeof mods / sizeof *mods; i++)
 			if ((size_t)(me - m) == strlen(mods[i].n) && !memcmp(m, mods[i].n, (size_t)(me - m)))
 				*mod = mods[i].m;
 		if (*mod == XM_NONE)
-			return err(a, "invalid variant '%.*s'", (int)(me - m), m);
-		if (val_expr(a, &x, at, v))
+			return as_error_report(a, "invalid variant '%.*s'", (int)(me - m), m);
+		if (as_expression_value_parse(a, &x, at, v))
 			return -1;
 		/* sym@MOD+k */
-		if (ws(me, q) < q) {
+		if (as_whitespace_skip(me, q) < q) {
 			int64_t k;
 			const char *y = me;
 
-			if (abs_expr(a, &y, q, &k))
+			if (as_expression_absolute_parse(a, &y, q, &k))
 				return -1;
 			v->c += k;
 		}
 		*pp = q;
 		return 0;
 	}
-	if (val_expr(a, &p, q, v))
+	if (as_expression_value_parse(a, &p, q, v))
 		return -1;
 	*pp = p;
 	return 0;
 }
 
-static int x64_operand(As *a, const char **pp, const char *e, XOp *o)
+static int x64_operand(as_context *a, const char **pp, const char *e, XOp *o)
 {
-	const char *p = ws(*pp, e);
+	const char *p = as_whitespace_skip(*pp, e);
 
 	memset(o, 0, sizeof *o);
 	o->base = o->index = -1;
 	if (p < e && *p == '*') {
 		o->star = 1;
-		p = ws(p + 1, e);
+		p = as_whitespace_skip(p + 1, e);
 	}
 	if (p < e && *p == '$') {
 		o->kind = XK_IMM;
@@ -189,9 +189,9 @@ static int x64_operand(As *a, const char **pp, const char *e, XOp *o)
 
 		if (!q)
 			return -1;
-		if (r.cls == XR_SEG && ws(q, e) < e && *ws(q, e) == ':') {
+		if (r.cls == XR_SEG && as_whitespace_skip(q, e) < e && *as_whitespace_skip(q, e) == ':') {
 			o->seg = r.reg;
-			p = ws(ws(q, e) + 1, e);
+			p = as_whitespace_skip(as_whitespace_skip(q, e) + 1, e);
 			goto mem;
 		}
 		{
@@ -207,61 +207,61 @@ static int x64_operand(As *a, const char **pp, const char *e, XOp *o)
 	}
 mem:
 	/* a displacement may start with a parenthesis: (2f)(%rip), (a+b)*4(%rax) */
-	if (p < e && (*p != '(' || (ws(p + 1, e) < e && *ws(p + 1, e) != '%' && *ws(p + 1, e) != ','))) {
+	if (p < e && (*p != '(' || (as_whitespace_skip(p + 1, e) < e && *as_whitespace_skip(p + 1, e) != '%' && *as_whitespace_skip(p + 1, e) != ','))) {
 		if (x64_expr(a, &p, e, &o->v, &o->mod))
 			return -1;
 		o->hasv = 1;
 	}
-	p = ws(p, e);
+	p = as_whitespace_skip(p, e);
 	if (p < e && *p == '(') {
 		XOp r;
 
 		o->kind = XK_MEM;
-		p = ws(p + 1, e);
+		p = as_whitespace_skip(p + 1, e);
 		if (p < e && *p == '%') {
 			const char *q = x64_reg(a, p + 1, e, &r);
 
 			if (!q)
 				return -1;
-			if (r.cls == XR_GPR && r.size == 2 && r.reg == 2 && !o->hasv && ws(q, e) < e && *ws(q, e) == ')') {
+			if (r.cls == XR_GPR && r.size == 2 && r.reg == 2 && !o->hasv && as_whitespace_skip(q, e) < e && *as_whitespace_skip(q, e) == ')') {
 				/* in/out (%dx): the port register */
 				*o = r;
 				o->kind = XK_REG, o->base = o->index = -1;
-				*pp = ws(q, e) + 1;
+				*pp = as_whitespace_skip(q, e) + 1;
 				return 0;
 			}
 			o->base = (int8_t)(r.cls == XR_RIP ? 16 : r.reg);
 			if (r.cls != XR_RIP && (r.cls != XR_GPR || r.size != 8))
-				return err(a, "invalid base register");
-			p = ws(q, e);
+				return as_error_report(a, "invalid base register");
+			p = as_whitespace_skip(q, e);
 		}
 		if (p < e && *p == ',') {
-			p = ws(p + 1, e);
+			p = as_whitespace_skip(p + 1, e);
 			if (p < e && *p == '%') {
 				const char *q = x64_reg(a, p + 1, e, &r);
 
 				if (!q)
 					return -1;
 				if (r.cls != XR_GPR || r.size != 8 || r.reg == 4)
-					return err(a, "invalid index register");
+					return as_error_report(a, "invalid index register");
 				o->index = (int8_t)r.reg;
-				p = ws(q, e);
+				p = as_whitespace_skip(q, e);
 			}
 			o->scale = 1;
 			if (p < e && *p == ',') {
 				int64_t s;
 
-				p = ws(p + 1, e);
-				if (abs_expr(a, &p, e, &s))
+				p = as_whitespace_skip(p + 1, e);
+				if (as_expression_absolute_parse(a, &p, e, &s))
 					return -1;
 				if (s != 1 && s != 2 && s != 4 && s != 8)
-					return err(a, "scale factor in address must be 1, 2, 4 or 8");
+					return as_error_report(a, "scale factor in address must be 1, 2, 4 or 8");
 				o->scale = (uint8_t)s;
-				p = ws(p, e);
+				p = as_whitespace_skip(p, e);
 			}
 		}
 		if (p >= e || *p != ')')
-			return err(a, "unexpected token in memory operand");
+			return as_error_report(a, "unexpected token in memory operand");
 		p++;
 	} else {
 		o->kind = o->seg ? XK_MEM : XK_EXPR;	/* a bare expression: a branch target or an absolute address */
@@ -282,9 +282,9 @@ VPRIV int fits8(int64_t v) { return v >= -128 && v <= 127; }
 VPRIV int fits32(int64_t v) { return v >= INT32_MIN && v <= INT32_MAX; }
 
 /* a constant Val (no symbol): its value */
-VPRIV int isconst(As *a, Val *v, int64_t *c)
+VPRIV int isconst(as_context *a, as_value *v, int64_t *c)
 {
-	fold(a, v);
+	as_value_fold(a, v);
 	if (v->add || v->sub)
 		return 0;
 	*c = v->c;
@@ -312,7 +312,7 @@ VPRIV int x64_rtype(int mod, int pcrel, int size, int sgn, int rexw, int gotx)
 
 
 
-VPRIV int x64_emit(As *a, XForm *f)
+VPRIV int x64_emit(as_context *a, XForm *f)
 {
 	XEnc x = { 0 };
 	const XOp *rm = f->rm;
@@ -321,7 +321,7 @@ VPRIV int x64_emit(As *a, XForm *f)
 	uint8_t modrm[8];
 	int nm = 0, dispsz = 0, ripfix = 0;
 	int64_t disp = 0;
-	Val dv = { 0, 0, 0 };
+	as_value dv = { 0, 0, 0 };
 	int dsym = 0;
 
 	if (rm && rm->kind == XK_REG) {
@@ -370,9 +370,9 @@ VPRIV int x64_emit(As *a, XForm *f)
 		eb(&x, seg);
 	if (f->opsz16 && !f->vex)
 		eb(&x, 0x66);
-	if (a->x64_lock) {
+	if (a->x64_lock_prefix) {
 		eb(&x, 0xf0);
-		a->x64_lock = 0;
+		a->x64_lock_prefix = 0;
 	}
 	if (f->vex) {
 		/* VEX: R X B (inverted) and W from REX, mmmmm from the map, pp from the prefix */
@@ -407,7 +407,7 @@ VPRIV int x64_emit(As *a, XForm *f)
 			x.fixat = x.n, x.fixtype = rt, x.fixsize = 4;
 			x.fixv = dv;
 			if (ripfix && !dsym && !rm->hasv)
-				x.fixv = (Val){ 0, 0, 0 };
+				x.fixv = (as_value){ 0, 0, 0 };
 			if (ripfix)
 				x.fixv.c -= 4 + f->isz;	/* from the end of the instruction */
 			if (ripfix && !dsym) {
@@ -448,7 +448,7 @@ VPRIV int x64_emit(As *a, XForm *f)
 }
 
 /* raw bytes (no operands) */
-VPRIV int x64_raw(As *a, const uint8_t *b, int n)
+VPRIV int x64_raw(as_context *a, const uint8_t *b, int n)
 {
 	uint32_t fr = a->cur;
 
@@ -480,16 +480,16 @@ VPRIV int sfxsize(char c) { return c == 'b' ? 1 : c == 'w' ? 2 : c == 'l' ? 4 : 
 VPRIV int opsize(const XOp *o) { return o->kind == XK_REG && o->cls == XR_GPR ? o->size : 0; }
 
 
-VPRIV int x64_imm(As *a, const XOp *o, XForm *f, int64_t *k)
+VPRIV int x64_imm(as_context *a, const XOp *o, XForm *f, int64_t *k)
 {
-	Val v = o->v;
+	as_value v = o->v;
 
 	if (isconst(a, &v, k) && !o->mod) {
-		if (a->x64_isz == 1)
+		if (a->x64_operand_size == 1)
 			*k = (int8_t)*k;
-		else if (a->x64_isz == 2)
+		else if (a->x64_operand_size == 2)
 			*k = (int16_t)*k;
-		else if (a->x64_isz == 4)
+		else if (a->x64_operand_size == 4)
 			*k = (int32_t)*k;
 		return 0;
 	}
@@ -500,12 +500,12 @@ VPRIV int x64_imm(As *a, const XOp *o, XForm *f, int64_t *k)
 }
 
 /* the size of a two-operand instruction: its suffix, else a register operand's */
-VPRIV int x64_size(As *a, int sfx, const XOp *s, const XOp *d)
+VPRIV int x64_size(as_context *a, int sfx, const XOp *s, const XOp *d)
 {
 	int sz = sfx ? sfx : opsize(d) ? opsize(d) : opsize(s);
 
 	if (!sz)
-		err(a, "cannot infer the operand size");
+		as_error_report(a, "cannot infer the operand size");
 	return sz;
 }
 
@@ -526,14 +526,14 @@ VPRIV int split_sfx(const char *mn, char *stem, int *sz)
 	return 1;
 }
 
-VPRIV int x64_alu(As *a, int n, int sz, XOp *o, int nops)
+VPRIV int x64_alu(as_context *a, int n, int sz, XOp *o, int nops)
 {
 	XOp *s = &o[0], *d = &o[1];
 	int w = sz == 8, p16 = sz == 2, b = sz == 1;
 
-	a->x64_isz = sz;
+	a->x64_operand_size = sz;
 	if (nops != 2)
-		return err(a, "invalid operand count");
+		return as_error_report(a, "invalid operand count");
 	if (s->kind == XK_IMM) {
 		int64_t k = 0;
 		XForm f = F(.w = w, .opsz16 = p16, .reg = n, .rm = d, .rex8 = rex8(d), .immsgn = 1);
@@ -565,18 +565,18 @@ VPRIV int x64_alu(As *a, int n, int sz, XOp *o, int nops)
 		/* (a load form relaxes GOTPCRELX, MC's list: adc add and cmp or sbb sub xor) */
 		return x64_emit(a, &F(.w = w, .opsz16 = p16, .op = &op, .nop = 1, .reg = d->reg, .rm = s, .rex8 = rex8(d), .gotx = 2));
 	}
-	return err(a, "invalid operand for instruction");
+	return as_error_report(a, "invalid operand for instruction");
 }
 
 /* a jump or call to a target expression: jumps relax (as.c), calls are rel32 */
-VPRIV int x64_branch(As *a, int cc, XOp *t, int call)
+VPRIV int x64_branch(as_context *a, int cc, XOp *t, int call)
 {
 	if (call) {
 		XEnc x = { 0 };
 		uint32_t fr = a->cur;
 		uint64_t off;
 		uint8_t *p;
-		Val v = t->v;
+		as_value v = t->v;
 
 		eb(&x, 0xe8);
 		ew(&x, 0, 4);
@@ -590,11 +590,11 @@ VPRIV int x64_branch(As *a, int cc, XOp *t, int call)
 			((ElfFix *)a->o->fixes.base)[a->o->nfix - 1].pad = 1;	/* sym@PLT: never resolved in place (MC) */
 		return 0;
 	}
-	return as_branch(a, cc, t->v, t->mod);
+	return as_variable_item_branch_add(a, cc, t->v, t->mod);
 }
 
 /* SSE: [prefix] [REX] 0f op ModRM */
-VPRIV int x64_sse(As *a, int pfx, int op, int w, int reg, const XOp *rm)
+VPRIV int x64_sse(as_context *a, int pfx, int op, int w, int reg, const XOp *rm)
 {
 	uint8_t ops[2] = { 0x0f, (uint8_t)op };
 
@@ -602,33 +602,33 @@ VPRIV int x64_sse(As *a, int pfx, int op, int w, int reg, const XOp *rm)
 }
 
 /* x87 with a memory operand: op /digit */
-VPRIV int x64_x87m(As *a, int op, int digit, const XOp *m)
+VPRIV int x64_x87m(as_context *a, int op, int digit, const XOp *m)
 {
 	uint8_t b = (uint8_t)op;
 
 	return x64_emit(a, &F(.op = &b, .nop = 1, .reg = digit, .rm = m));
 }
 
-VPRIV int x64_x87r(As *a, int op, int base, int i)
+VPRIV int x64_x87r(as_context *a, int op, int base, int i)
 {
 	uint8_t b[2] = { (uint8_t)op, (uint8_t)(base + i) };
 
 	return x64_raw(a, b, 2);
 }
 
-VPRIV int x64_instruction(As *a, const char *p, const char *e, size_t wn)
+VPRIV int x64_as_instruction_assemble(as_context *a, const char *p, const char *e, size_t wn)
 {
 	char mn[32];
 	XOp o[4];
 	int nops = 0;
 
 	if (wn >= sizeof mn)
-		return err(a, "invalid instruction mnemonic");
-	a->x64_isz = 0;
+		return as_error_report(a, "invalid instruction mnemonic");
+	a->x64_operand_size = 0;
 	for (size_t i = 0; i < wn; i++)
-		mn[i] = (char)c_lower((unsigned char)p[i]);
+		mn[i] = (char)as_char_to_lower((unsigned char)p[i]);
 	mn[wn] = 0;
-	p = ws(p + wn, e);
+	p = as_whitespace_skip(p + wn, e);
 	/* prefixes written as their own word: lock, rep, data16, rex64 */
 	if (!strcmp(mn, "lock") || !strcmp(mn, "rep") || !strcmp(mn, "repz") || !strcmp(mn, "repe") || !strcmp(mn, "repnz") ||
 	    !strcmp(mn, "repne") || !strcmp(mn, "data16") || !strcmp(mn, "rex64") || !strcmp(mn, "cs") || !strcmp(mn, "notrack") ||
@@ -641,12 +641,12 @@ VPRIV int x64_instruction(As *a, const char *p, const char *e, size_t wn)
 			const char *q = p;
 			int r;
 
-			while (q < e && isidc((unsigned char)*q))
+			while (q < e && as_char_is_identifier((unsigned char)*q))
 				q++;
-			a->x64_lock = 1;
-			r = x64_instruction(a, p, e, (size_t)(q - p));
-			if (a->x64_lock) {	/* (an instruction without x64_emit: the prefix first) */
-				a->x64_lock = 0;
+			a->x64_lock_prefix = 1;
+			r = x64_as_instruction_assemble(a, p, e, (size_t)(q - p));
+			if (a->x64_lock_prefix) {	/* (an instruction without x64_emit: the prefix first) */
+				a->x64_lock_prefix = 0;
 			}
 			return r;
 		}
@@ -655,26 +655,26 @@ VPRIV int x64_instruction(As *a, const char *p, const char *e, size_t wn)
 		if (p < e) {
 			const char *q = p;
 
-			while (q < e && isidc((unsigned char)*q))
+			while (q < e && as_char_is_identifier((unsigned char)*q))
 				q++;
-			return x64_instruction(a, p, e, (size_t)(q - p));
+			return x64_as_instruction_assemble(a, p, e, (size_t)(q - p));
 		}
 		return 0;
 	}
-	if (a->nralias) {
+	if (a->register_alias_count) {
 		/* register aliases (name = %reg) written out as their registers */
 		static _Thread_local char rb[4096];
 		size_t n = 0;
 		int sub = 0;
 
 		for (const char *q = p; q < e && n < sizeof rb - 16;) {
-			if (isids((unsigned char)*q) && (q == p || (!isidc((unsigned char)q[-1]) && q[-1] != '%' && q[-1] != '$' && q[-1] != '.'))) {
+			if (as_char_is_identifier_start((unsigned char)*q) && (q == p || (!as_char_is_identifier((unsigned char)q[-1]) && q[-1] != '%' && q[-1] != '$' && q[-1] != '.'))) {
 				const char *t = q;
 				const char *rn;
 
-				while (t < e && isidc((unsigned char)*t))
+				while (t < e && as_char_is_identifier((unsigned char)*t))
 					t++;
-				rn = as_ralias(a, elf_sym_lookup(a->o, q, (uint32_t)(t - q)));
+				rn = as_register_alias_find(a, elf_sym_lookup(a->o, q, (uint32_t)(t - q)));
 				if (rn && n + 10 < sizeof rb) {
 					rb[n++] = '%';
 					for (; *rn; rn++)
@@ -694,15 +694,15 @@ VPRIV int x64_instruction(As *a, const char *p, const char *e, size_t wn)
 	}
 	while (p < e) {
 		if (nops == 4)
-			return err(a, "too many operands");
+			return as_error_report(a, "too many operands");
 		if (x64_operand(a, &p, e, &o[nops]))
 			return -1;
 		nops++;
-		p = ws(p, e);
+		p = as_whitespace_skip(p, e);
 		if (p < e && *p == ',')
-			p = ws(p + 1, e);
+			p = as_whitespace_skip(p + 1, e);
 		else if (p < e)
-			return err(a, "unexpected token in argument list");
+			return as_error_report(a, "unexpected token in argument list");
 	}
 	/* string instructions with their implicit operands written out: as without */
 	if (nops && (!strncmp(mn, "movs", 4) || !strncmp(mn, "stos", 4) || !strncmp(mn, "lods", 4) || !strncmp(mn, "cmps", 4) ||
@@ -726,12 +726,12 @@ VPRIV int x64_instruction(As *a, const char *p, const char *e, size_t wn)
 	return as_x64_insn(a, mn, o, nops);
 }
 
-int as_x64_insn(As *a, char *mn, XOp *o, int nops)
+int as_x64_insn(as_context *a, char *mn, XOp *o, int nops)
 {
-	if (a->dwlocp) loc_row(a);
-	a->x64_isz = 0;
+	if (a->dwarf_row_is_pending) as_dwarf_row_emit(a);
+	a->x64_operand_size = 0;
 	{
-		static int (*const fam[])(As *, char *, XOp *, int) = {
+		static int (*const fam[])(as_context *, char *, XOp *, int) = {
 			x64_i_crdr,
 			x64_i_zero,
 			x64_i_jump,
@@ -755,5 +755,5 @@ int as_x64_insn(As *a, char *mn, XOp *o, int nops)
 				return r;
 		}
 	}
-	return err(a, "invalid instruction mnemonic '%s'", mn);
+	return as_error_report(a, "invalid instruction mnemonic '%s'", mn);
 }
