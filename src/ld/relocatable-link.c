@@ -18,11 +18,11 @@ static uint32_t ld_relocatable_section_find(struct ld_context *ctx, const char *
 	uint32_t j = h & ctx->relocatable.section_map_mask;
 	while (ctx->relocatable.section_map[j] != LD_NONE) {
 		ld_relocatable_section *r = &ctx->relocatable.sections.v[ctx->relocatable.section_map[j]];
-		if (r->h == h && !strcmp(r->name, name))
+		if (r->hash == h && !strcmp(r->name, name))
 			return ctx->relocatable.section_map[j];
 		j = (j + 1) & ctx->relocatable.section_map_mask;
 	}
-	ld_relocatable_section r = {.name = name, .h = h, .align = 1};
+	ld_relocatable_section r = {.name = name, .hash = h, .alignment = 1};
 	VVEC_PUSH(ctx->relocatable.sections, r, ld_region_alloc);
 	ctx->relocatable.section_map[j] = ctx->relocatable.sections.n - 1;
 	return ctx->relocatable.sections.n - 1;
@@ -31,7 +31,7 @@ static uint32_t ld_relocatable_section_find(struct ld_context *ctx, const char *
 /* an output section of its own (groups and their members, as lld -r) */
 static uint32_t ld_relocatable_section_create(struct ld_context *ctx, const char *name)
 {
-	ld_relocatable_section r = {.name = name, .h = ld_name_hash(name, strlen(name)), .align = 1};
+	ld_relocatable_section r = {.name = name, .hash = ld_name_hash(name, strlen(name)), .alignment = 1};
 	VVEC_PUSH(ctx->relocatable.sections, r, ld_region_alloc);
 	return ctx->relocatable.sections.n - 1;
 }
@@ -42,51 +42,51 @@ static void ld_relocatable_locals_count(void *arg, size_t i)
 	ld_object *o = ctx->inputs.objects.v[i];
 	uint32_t n = 0;
 	uint64_t str = 0;
-	if (o->buf)
-		for (uint32_t s = 1; s < o->firstg && s < o->nsym; s++) {
-			const elf_symbol *y = &o->sym[s];
+	if (o->file_bytes)
+		for (uint32_t s = 1; s < o->first_global_index && s < o->symbol_count; s++) {
+			const elf_symbol *y = &o->symbols[s];
 			if ((y->st_info & 15) == STT_SECTION)
 				continue;
 			n++;
-			str += strlen(o->str + y->st_name) + 1;
+			str += strlen(o->string_table + y->st_name) + 1;
 		}
-	o->nloc = n;
-	o->locstr = str;
-	ctx->relocatable.local_symbol_map[i] = o->firstg ? ld_region_alloc(o->firstg * sizeof(uint32_t)) : NULL;
+	o->kept_local_count = n;
+	o->local_string_bytes = str;
+	ctx->relocatable.local_symbol_map[i] = o->first_global_index ? ld_region_alloc(o->first_global_index * sizeof(uint32_t)) : NULL;
 }
 
 static void ld_relocatable_locals_write(void *arg, size_t i)
 {
 	struct ld_context *ctx = arg;
 	ld_object *o = ctx->inputs.objects.v[i];
-	if (!o->buf)
+	if (!o->file_bytes)
 		return;
 	elf_symbol *d = (elf_symbol *)(ctx->relocatable.image + ctx->relocatable.symtab_offset) + ctx->relocatable.local_first_index[i];
 	uint32_t idx = ctx->relocatable.local_first_index[i];
 	uint64_t so = ctx->relocatable.local_string_offsets[i];
 	uint8_t *strbuf = ctx->relocatable.image + ctx->relocatable.strtab_offset;
-	for (uint32_t s = 1; s < o->firstg && s < o->nsym; s++) {
-		const elf_symbol *y = &o->sym[s];
+	for (uint32_t s = 1; s < o->first_global_index && s < o->symbol_count; s++) {
+		const elf_symbol *y = &o->symbols[s];
 		if ((y->st_info & 15) == STT_SECTION) {
-			uint32_t sec = o->isec0 + y->st_shndx;
-			ctx->relocatable.local_symbol_map[i][s] = y->st_shndx < o->nsh && ctx->inputs.sections.v[sec].kind != LD_SECTION_KIND_NONE ?
-				     ctx->relocatable.sections.v[ctx->inputs.sections.v[sec].osec].secsym : 0;
+			uint32_t sec = o->first_input_section + y->st_shndx;
+			ctx->relocatable.local_symbol_map[i][s] = y->st_shndx < o->section_header_count && ctx->inputs.sections.v[sec].kind != LD_SECTION_KIND_NONE ?
+				     ctx->relocatable.sections.v[ctx->inputs.sections.v[sec].output_section].section_symbol : 0;
 			continue;
 		}
 		uint16_t shndx = y->st_shndx;
 		uint64_t val = y->st_value;
 		if (shndx != SHN_UNDEF && shndx < 0xff00) {
-			ld_input_section *is = &ctx->inputs.sections.v[o->isec0 + shndx];
+			ld_input_section *is = &ctx->inputs.sections.v[o->first_input_section + shndx];
 			if (is->kind == LD_SECTION_KIND_NONE) {
 				shndx = SHN_UNDEF;
 				val = 0;
 			} else {
-				shndx = ctx->relocatable.sections.v[is->osec].shidx;
-				val += is->off;
+				shndx = ctx->relocatable.sections.v[is->output_section].section_header_index;
+				val += is->offset;
 			}
 		}
 		ctx->relocatable.local_symbol_map[i][s] = idx++;
-		ld_symbol_record_store(d++, strbuf, &so, o->str + y->st_name, y->st_info, y->st_other, shndx, val, y->st_size);
+		ld_symbol_record_store(d++, strbuf, &so, o->string_table + y->st_name, y->st_info, y->st_other, shndx, val, y->st_size);
 	}
 }
 
@@ -98,24 +98,24 @@ static void ld_relocatable_globals_write(void *arg, size_t c)
 	for (uint32_t i = b; i < e; i++) {
 		uint32_t g = ctx->symbols.order.v[i];
 		ld_global_symbol *s = &ctx->symbols.globals[g];
-		elf_symbol *d = (elf_symbol *)(ctx->relocatable.image + ctx->relocatable.symtab_offset) + s->outidx;
-		uint64_t so = s->val;		/* string offset parked here, see below */
+		elf_symbol *d = (elf_symbol *)(ctx->relocatable.image + ctx->relocatable.symtab_offset) + s->output_index;
+		uint64_t so = s->value;		/* string offset parked here, see below */
 		uint16_t shndx = SHN_UNDEF;
 		uint64_t val = 0, size = 0;
 		if (s->state == LD_SYMBOL_STATE_OBJECT) {
 			size = s->size;
-			if (s->sec == LD_NONE) {
+			if (s->input_section == LD_NONE) {
 				shndx = SHN_ABS;
-				val = ctx->inputs.objects.v[s->obj]->sym[s->symidx].st_value;
-			} else if (ctx->inputs.sections.v[s->sec].kind == LD_SECTION_KIND_NONE) {
+				val = ctx->inputs.objects.v[s->object]->symbols[s->symbol_index].st_value;
+			} else if (ctx->inputs.sections.v[s->input_section].kind == LD_SECTION_KIND_NONE) {
 				size = 0;	/* in a dropped group member: undefined (lld) */
 			} else {
-				ld_input_section *is = &ctx->inputs.sections.v[s->sec];
-				shndx = ctx->relocatable.sections.v[is->osec].shidx;
-				val = is->off + ctx->inputs.objects.v[s->obj]->sym[s->symidx].st_value;
+				ld_input_section *is = &ctx->inputs.sections.v[s->input_section];
+				shndx = ctx->relocatable.sections.v[is->output_section].section_header_index;
+				val = is->offset + ctx->inputs.objects.v[s->object]->symbols[s->symbol_index].st_value;
 			}
 		}
-		ld_symbol_record_store(d, strbuf, &so, ld_global_name(ctx, g), (uint8_t)(s->bind << 4 | s->type), s->vis, shndx, val, size);
+		ld_symbol_record_store(d, strbuf, &so, ld_global_name(ctx, g), (uint8_t)(s->binding << 4 | s->type), s->visibility, shndx, val, size);
 	}
 }
 
@@ -124,34 +124,34 @@ static void ld_relocatable_input_section_write(void *arg, size_t j)
 	struct ld_context *ctx = arg;
 	uint32_t si = ctx->output.write_jobs.v[j];
 	ld_input_section *is = &ctx->inputs.sections.v[si];
-	ld_relocatable_section *r = &ctx->relocatable.sections.v[is->osec];
+	ld_relocatable_section *r = &ctx->relocatable.sections.v[is->output_section];
 	if (is->type != SHT_NOBITS && r->type != SHT_NOBITS && is->size)
-		memcpy(ctx->relocatable.image + r->off + is->off, is->data, is->size);
-	if (!is->nrela)
+		memcpy(ctx->relocatable.image + r->offset + is->offset, is->data, is->size);
+	if (!is->rela_count)
 		return;
-	ld_object *o = ctx->inputs.objects.v[is->obj];
-	elf_rela *d = (elf_rela *)(ctx->relocatable.image + r->relaoff) + is->dyn0;
-	for (uint32_t k = 0; k < is->nrela; k++) {
+	ld_object *o = ctx->inputs.objects.v[is->object];
+	elf_rela *d = (elf_rela *)(ctx->relocatable.image + r->rela_offset) + is->first_dynamic_relocation;
+	for (uint32_t k = 0; k < is->rela_count; k++) {
 		const elf_rela *rl = &is->rela[k];
 		uint32_t symi = rl->r_info >> 32, type = (uint32_t)rl->r_info;
 		int64_t addend = rl->r_addend;
 		uint32_t ns;
 		if (symi == 0) {
 			ns = 0;
-		} else if (symi >= o->firstg) {
-			ns = ctx->symbols.globals[o->gs[symi - o->firstg]].outidx;
+		} else if (symi >= o->first_global_index) {
+			ns = ctx->symbols.globals[o->global_slots[symi - o->first_global_index]].output_index;
 		} else {
-			const elf_symbol *y = &o->sym[symi];
-			ns = ctx->relocatable.local_symbol_map[is->obj][symi];
-			if ((y->st_info & 15) == STT_SECTION && y->st_shndx < o->nsh) {
-				ld_input_section *t = &ctx->inputs.sections.v[o->isec0 + y->st_shndx];
+			const elf_symbol *y = &o->symbols[symi];
+			ns = ctx->relocatable.local_symbol_map[is->object][symi];
+			if ((y->st_info & 15) == STT_SECTION && y->st_shndx < o->section_header_count) {
+				ld_input_section *t = &ctx->inputs.sections.v[o->first_input_section + y->st_shndx];
 				if (t->kind == LD_SECTION_KIND_NONE)
 					ld_error_report(ctx, "%s:(%s): relocation against discarded section %s", o->path, is->name, t->name);
 				else
-					addend += t->off;
+					addend += t->offset;
 			}
 		}
-		d[k].r_offset = rl->r_offset + is->off;
+		d[k].r_offset = rl->r_offset + is->offset;
 		d[k].r_info = (uint64_t)ns << 32 | type;
 		d[k].r_addend = addend;
 	}
@@ -172,25 +172,25 @@ static int ld_relocatable_link(struct ld_context *ctx)
 	ctx->relocatable.section_map_mask = cap - 1;
 	for (uint32_t i = 0; i < ctx->inputs.sections.n; i++) {
 		ld_input_section *is = &ctx->inputs.sections.v[i];
-		const ld_object *io = is->obj != LD_NONE ? ctx->inputs.objects.v[is->obj] : NULL;
-		const elf_section_header *ih = io && is->shndx < io->nsh ? &io->sh[is->shndx] : NULL;
+		const ld_object *io = is->object != LD_NONE ? ctx->inputs.objects.v[is->object] : NULL;
+		const elf_section_header *ih = io && is->section_header_index < io->section_header_count ? &io->section_headers[is->section_header_index] : NULL;
 
 		if (ih && ih->sh_type == SHT_GROUP) {
 			/* a group whose members are kept (a later COMDAT copy is dropped) */
-			const uint32_t *w = (const uint32_t *)(io->buf + ih->sh_offset);
+			const uint32_t *w = (const uint32_t *)(io->file_bytes + ih->sh_offset);
 			uint32_t nw = (uint32_t)(ih->sh_size / 4);
 
-			if (nw < 2 || ctx->inputs.sections.v[io->isec0 + w[1]].dropped)
+			if (nw < 2 || ctx->inputs.sections.v[io->first_input_section + w[1]].dropped)
 				continue;
 			uint32_t gi = ld_relocatable_section_create(ctx, ".group");
 			ld_relocatable_section *g = &ctx->relocatable.sections.v[gi];
 
 			g->type = SHT_GROUP;
-			g->align = 4;
-			g->entsize = 4;
-			g->grp = i + 1;
+			g->alignment = 4;
+			g->entry_size = 4;
+			g->group = i + 1;
 			g->size = 4 * (uint64_t)nw;
-			is->osec = gi;
+			is->output_section = gi;
 			continue;
 		}
 		if (is->kind != LD_SECTION_KIND_NORMAL)
@@ -200,29 +200,29 @@ static int ld_relocatable_link(struct ld_context *ctx)
 		ld_relocatable_section *r = &ctx->relocatable.sections.v[ri];
 
 		if (member) {
-			r->member = true;
+			r->is_group_member = true;
 			is->flags |= SHF_GROUP;
 		}
-		if (!r->secs.n) {
+		if (!r->sections.n) {
 			r->type = is->type;
 			r->flags = is->flags;
-			r->entsize = is->entsize;
+			r->entry_size = is->entry_size;
 		} else {
 			if (r->type != is->type && !(r->type == SHT_NOBITS && is->type == SHT_NOBITS))
 				r->type = SHT_PROGBITS;
-			if (r->entsize != is->entsize)
-				r->entsize = 0;
+			if (r->entry_size != is->entry_size)
+				r->entry_size = 0;
 			r->flags |= is->flags;
 		}
-		if (is->align > r->align)
-			r->align = is->align;
-		is->osec = ri;
-		r->size = ld_value_align_up(r->size, is->align);
-		is->off = r->size;
+		if (is->alignment > r->alignment)
+			r->alignment = is->alignment;
+		is->output_section = ri;
+		r->size = ld_value_align_up(r->size, is->alignment);
+		is->offset = r->size;
 		r->size += is->size;
-		is->dyn0 = r->nrela;
-		r->nrela += is->nrela;
-		VVEC_PUSH(r->secs, i, ld_region_alloc);
+		is->first_dynamic_relocation = r->rela_count;
+		r->rela_count += is->rela_count;
+		VVEC_PUSH(r->sections, i, ld_region_alloc);
 	}
 	ld_phase_time_report(ctx, "-r: output sections");
 
@@ -231,12 +231,12 @@ static int ld_relocatable_link(struct ld_context *ctx)
 	uint64_t shs = 1;
 	for (uint32_t i = 0; i < ctx->relocatable.sections.n; i++) {
 		ld_relocatable_section *r = &ctx->relocatable.sections.v[i];
-		r->shidx = sh++;
-		r->nameoff = shs;
+		r->section_header_index = sh++;
+		r->name_offset = shs;
 		shs += strlen(r->name) + 1;
-		if (r->nrela) {
-			r->relaidx = sh++;
-			r->relanameoff = shs;
+		if (r->rela_count) {
+			r->rela_section_header_index = sh++;
+			r->rela_name_offset = shs;
 			shs += strlen(r->name) + 6;
 		}
 	}
@@ -260,19 +260,19 @@ static int ld_relocatable_link(struct ld_context *ctx)
 	ctx->relocatable.local_string_offsets = ld_region_alloc(ctx->inputs.objects.n * sizeof(uint64_t));
 	uint64_t idx = 1 + ctx->relocatable.sections.n, str = 1;
 	for (uint32_t i = 0; i < ctx->relocatable.sections.n; i++)
-		ctx->relocatable.sections.v[i].secsym = 1 + i;
+		ctx->relocatable.sections.v[i].section_symbol = 1 + i;
 	for (uint32_t i = 0; i < ctx->inputs.objects.n; i++) {
 		ctx->relocatable.local_first_index[i] = idx;
 		ctx->relocatable.local_string_offsets[i] = str;
-		idx += ctx->inputs.objects.v[i]->nloc;
-		str += ctx->inputs.objects.v[i]->locstr;
+		idx += ctx->inputs.objects.v[i]->kept_local_count;
+		str += ctx->inputs.objects.v[i]->local_string_bytes;
 	}
 	ctx->relocatable.local_count = idx;
 	for (uint32_t i = 0; i < ctx->symbols.order.n; i++) {
 		ld_global_symbol *s = &ctx->symbols.globals[ctx->symbols.order.v[i]];
-		s->outidx = idx++;
-		/* s->val is unused for -r output: park the string offset there */
-		s->val = str;
+		s->output_index = idx++;
+		/* s->value is unused for -r output: park the string offset there */
+		s->value = str;
 		str += strlen(ld_global_name(ctx, ctx->symbols.order.v[i])) + 1;
 	}
 	ctx->relocatable.symbol_count = idx;
@@ -282,18 +282,18 @@ static int ld_relocatable_link(struct ld_context *ctx)
 	uint64_t off = sizeof(elf_file_header);
 	for (uint32_t i = 0; i < ctx->relocatable.sections.n; i++) {
 		ld_relocatable_section *r = &ctx->relocatable.sections.v[i];
-		off = ld_value_align_up(off, r->align);
-		r->off = off;
+		off = ld_value_align_up(off, r->alignment);
+		r->offset = off;
 		if (r->type != SHT_NOBITS)
 			off += r->size;
 	}
 	off = ld_value_align_up(off, 8);
 	for (uint32_t i = 0; i < ctx->relocatable.sections.n; i++) {
 		ld_relocatable_section *r = &ctx->relocatable.sections.v[i];
-		if (!r->nrela)
+		if (!r->rela_count)
 			continue;
-		r->relaoff = off;
-		off += r->nrela * sizeof(elf_rela);
+		r->rela_offset = off;
+		off += r->rela_count * sizeof(elf_rela);
 	}
 	ctx->relocatable.symtab_offset = off;
 	off += ctx->relocatable.symbol_count * sizeof(elf_symbol);
@@ -309,8 +309,8 @@ static int ld_relocatable_link(struct ld_context *ctx)
 	/* contents and relocations */
 	ctx->output.write_jobs.n = 0;
 	for (uint32_t i = 0; i < ctx->relocatable.sections.n; i++)
-		for (uint32_t k = 0; k < ctx->relocatable.sections.v[i].secs.n; k++)
-			VVEC_PUSH(ctx->output.write_jobs, ctx->relocatable.sections.v[i].secs.v[k], ld_region_alloc);
+		for (uint32_t k = 0; k < ctx->relocatable.sections.v[i].sections.n; k++)
+			VVEC_PUSH(ctx->output.write_jobs, ctx->relocatable.sections.v[i].sections.v[k], ld_region_alloc);
 	/* local maps must exist before relocations are rewritten */
 	ld_parallel_for(ctx->inputs.objects.n, ld_relocatable_locals_write, ctx);
 	ld_parallel_for(ctx->output.write_jobs.n, ld_relocatable_input_section_write, ctx);
@@ -319,22 +319,22 @@ static int ld_relocatable_link(struct ld_context *ctx)
 	for (uint32_t i = 0; i < ctx->relocatable.sections.n; i++) {
 		ld_relocatable_section *g = &ctx->relocatable.sections.v[i];
 
-		if (!g->grp)
+		if (!g->group)
 			continue;
-		const ld_input_section *gs = &ctx->inputs.sections.v[g->grp - 1];
-		const ld_object *o = ctx->inputs.objects.v[gs->obj];
-		const elf_section_header *h = &o->sh[gs->shndx];
-		const uint32_t *w = (const uint32_t *)(o->buf + h->sh_offset);
-		uint32_t *d = (uint32_t *)(void *)(ctx->relocatable.image + g->off), n = 0;
+		const ld_input_section *gs = &ctx->inputs.sections.v[g->group - 1];
+		const ld_object *o = ctx->inputs.objects.v[gs->object];
+		const elf_section_header *h = &o->section_headers[gs->section_header_index];
+		const uint32_t *w = (const uint32_t *)(o->file_bytes + h->sh_offset);
+		uint32_t *d = (uint32_t *)(void *)(ctx->relocatable.image + g->offset), n = 0;
 
 		d[n++] = w[0];
 		for (uint64_t k = 1; k < h->sh_size / 4; k++) {
-			const elf_section_header *m = &o->sh[w[k]];
-			const ld_input_section *mi = &ctx->inputs.sections.v[o->isec0 + (m->sh_type == SHT_RELA ? m->sh_info : w[k])];
+			const elf_section_header *m = &o->section_headers[w[k]];
+			const ld_input_section *mi = &ctx->inputs.sections.v[o->first_input_section + (m->sh_type == SHT_RELA ? m->sh_info : w[k])];
 
-			if (mi->kind == LD_SECTION_KIND_NONE || mi->osec == LD_NONE)
+			if (mi->kind == LD_SECTION_KIND_NONE || mi->output_section == LD_NONE)
 				continue;
-			uint32_t x = m->sh_type == SHT_RELA ? ctx->relocatable.sections.v[mi->osec].relaidx : ctx->relocatable.sections.v[mi->osec].shidx;
+			uint32_t x = m->sh_type == SHT_RELA ? ctx->relocatable.sections.v[mi->output_section].rela_section_header_index : ctx->relocatable.sections.v[mi->output_section].section_header_index;
 
 			if (x)
 				d[n++] = x;
@@ -344,7 +344,7 @@ static int ld_relocatable_link(struct ld_context *ctx)
 	{
 		elf_symbol *sy = (elf_symbol *)(ctx->relocatable.image + ctx->relocatable.symtab_offset);
 		for (uint32_t i = 0; i < ctx->relocatable.sections.n; i++)
-			sy[1 + i] = (elf_symbol){.st_info = STB_LOCAL << 4 | STT_SECTION, .st_shndx = ctx->relocatable.sections.v[i].shidx};
+			sy[1 + i] = (elf_symbol){.st_info = STB_LOCAL << 4 | STT_SECTION, .st_shndx = ctx->relocatable.sections.v[i].section_header_index};
 	}
 	ld_phase_time_report(ctx, "-r: copy, relocations, symbols");
 
@@ -353,25 +353,25 @@ static int ld_relocatable_link(struct ld_context *ctx)
 	elf_section_header *shd = (elf_section_header *)(ctx->relocatable.image + shoff_r);
 	for (uint32_t i = 0; i < ctx->relocatable.sections.n; i++) {
 		ld_relocatable_section *r = &ctx->relocatable.sections.v[i];
-		strcpy(shstr + r->nameoff, r->name);
-		shd[r->shidx] = (elf_section_header){.sh_name = r->nameoff, .sh_type = r->type, .sh_flags = r->flags,
-				       .sh_offset = r->off, .sh_size = r->size, .sh_addralign = r->align,
-				       .sh_entsize = r->entsize};
-		if (r->grp) {	/* sh_link the symbol table, sh_info the signature */
-			const ld_input_section *gs = &ctx->inputs.sections.v[r->grp - 1];
-			const ld_object *o = ctx->inputs.objects.v[gs->obj];
-			uint32_t y = o->sh[gs->shndx].sh_info;
+		strcpy(shstr + r->name_offset, r->name);
+		shd[r->section_header_index] = (elf_section_header){.sh_name = r->name_offset, .sh_type = r->type, .sh_flags = r->flags,
+				       .sh_offset = r->offset, .sh_size = r->size, .sh_addralign = r->alignment,
+				       .sh_entsize = r->entry_size};
+		if (r->group) {	/* sh_link the symbol table, sh_info the signature */
+			const ld_input_section *gs = &ctx->inputs.sections.v[r->group - 1];
+			const ld_object *o = ctx->inputs.objects.v[gs->object];
+			uint32_t y = o->section_headers[gs->section_header_index].sh_info;
 
-			shd[r->shidx].sh_size = r->size;
-			shd[r->shidx].sh_link = ctx->relocatable.symtab_index;
-			shd[r->shidx].sh_info = y >= o->firstg ? ctx->symbols.globals[o->gs[y - o->firstg]].outidx : ctx->relocatable.local_symbol_map[gs->obj][y];
+			shd[r->section_header_index].sh_size = r->size;
+			shd[r->section_header_index].sh_link = ctx->relocatable.symtab_index;
+			shd[r->section_header_index].sh_info = y >= o->first_global_index ? ctx->symbols.globals[o->global_slots[y - o->first_global_index]].output_index : ctx->relocatable.local_symbol_map[gs->object][y];
 		}
-		if (r->nrela) {
-			sprintf(shstr + r->relanameoff, ".rela%s", r->name);
-			shd[r->relaidx] = (elf_section_header){.sh_name = r->relanameoff, .sh_type = SHT_RELA,
-						 .sh_flags = SHF_INFO_LINK | (r->member ? SHF_GROUP : 0),
-						 .sh_offset = r->relaoff, .sh_size = r->nrela * sizeof(elf_rela),
-						 .sh_link = ctx->relocatable.symtab_index, .sh_info = r->shidx, .sh_addralign = 8,
+		if (r->rela_count) {
+			sprintf(shstr + r->rela_name_offset, ".rela%s", r->name);
+			shd[r->rela_section_header_index] = (elf_section_header){.sh_name = r->rela_name_offset, .sh_type = SHT_RELA,
+						 .sh_flags = SHF_INFO_LINK | (r->is_group_member ? SHF_GROUP : 0),
+						 .sh_offset = r->rela_offset, .sh_size = r->rela_count * sizeof(elf_rela),
+						 .sh_link = ctx->relocatable.symtab_index, .sh_info = r->section_header_index, .sh_addralign = 8,
 						 .sh_entsize = sizeof(elf_rela)};
 		}
 	}
@@ -406,8 +406,8 @@ static int ld_relocatable_link(struct ld_context *ctx)
 	ld_region_unmap(ctx->relocatable.image, fsize);
 	ctx->output.image = NULL;
 	for (uint32_t i = 0; i < ctx->inputs.objects.n; i++)
-		if (ctx->inputs.objects.v[i]->mapped && ctx->inputs.objects.v[i]->buf)
-			ld_region_unmap(ctx->inputs.objects.v[i]->buf, ctx->inputs.objects.v[i]->size);
+		if (ctx->inputs.objects.v[i]->mapped && ctx->inputs.objects.v[i]->file_bytes)
+			ld_region_unmap(ctx->inputs.objects.v[i]->file_bytes, ctx->inputs.objects.v[i]->size);
 	ld_global_table_free(ctx);
 	memset(&ctx->relocatable.sections, 0, sizeof ctx->relocatable.sections);
 	return rc || atomic_load(&ctx->diagnostics.error_count) ? 1 : 0;

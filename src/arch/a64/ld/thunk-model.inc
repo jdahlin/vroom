@@ -49,14 +49,14 @@ static bool ld_value_fits_signed(int64_t v, int bits);
 static uint64_t a64_ld_thunk_address(struct ld_context *ctx, uint32_t t)
 {
 	a64_ld_thunk *th = &ctx->relocations.thunks.v[t];
-	return ld_input_section_address(ctx, th->tsec, th->off);
+	return ld_input_section_address(ctx, th->thunk_section, th->offset);
 }
 static uint64_t a64_ld_thunk_destination(struct ld_context *ctx, uint32_t t)
 {
 	a64_ld_thunk *th = &ctx->relocations.thunks.v[t];
-	if (th->g != LD_NONE)
-		return ld_global_symbol_address(ctx, th->g) + th->addend;
-	return ld_input_section_address(ctx, th->sec, th->val) + th->addend;
+	if (th->global_symbol != LD_NONE)
+		return ld_global_symbol_address(ctx, th->global_symbol) + th->addend;
+	return ld_input_section_address(ctx, th->input_section, th->value) + th->addend;
 }
 
 static bool a64_ld_branch_is_in_range(uint64_t src, uint64_t dst)

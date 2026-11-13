@@ -93,7 +93,7 @@ static void ld_archive_add(struct ld_context *ctx, const char *path, const uint8
 			}
 			char *full = ld_region_alloc(strlen(path) + strlen(name) + 3);
 			sprintf(full, "%s(%s)", path, name);
-			VVEC_PUSH(ctx->inputs.pending, ((ld_pending_member){.path = full, .buf = b + off, .size = size}), ld_region_alloc);
+			VVEC_PUSH(ctx->inputs.pending, ((ld_pending_member){.path = full, .file_bytes = b + off, .size = size}), ld_region_alloc);
 			off += size + (size & 1);
 		}
 	}

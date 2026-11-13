@@ -25,7 +25,7 @@ static ld_expression_value ld_expression_eval(struct ld_context *ctx, ld_express
 
 static void ld_expression_values_move_absolute_right(struct ld_context *ctx, ld_expression_value *a, ld_expression_value *b)
 {
-	if (a->kind == LD_VALUE_KIND_ABSOLUTE || (a->fabs && !ld_expression_value_is_absolute(*b))) {
+	if (a->kind == LD_VALUE_KIND_ABSOLUTE || (a->force_absolute && !ld_expression_value_is_absolute(*b))) {
 		ld_expression_value t = *a;
 		*a = *b;
 		*b = t;
@@ -36,7 +36,7 @@ static void ld_expression_values_move_absolute_right(struct ld_context *ctx, ld_
 static ld_expression_value ld_expression_value_add(struct ld_context *ctx, ld_expression_value a, ld_expression_value b)
 {
 	ld_expression_values_move_absolute_right(ctx, &a, &b);
-	return ld_expression_value_in_section_make(a, a.fabs, ld_expression_value_section_offset(ctx, a) + ld_expression_value_resolve(ctx, b));
+	return ld_expression_value_in_section_make(a, a.force_absolute, ld_expression_value_section_offset(ctx, a) + ld_expression_value_resolve(ctx, b));
 }
 static ld_expression_value ld_expression_value_subtract(struct ld_context *ctx, ld_expression_value a, ld_expression_value b)
 {
@@ -49,7 +49,7 @@ static ld_expression_value ld_expression_value_bitwise(struct ld_context *ctx, l
 	ld_expression_values_move_absolute_right(ctx, &a, &b);
 	uint64_t x = ld_expression_value_resolve(ctx, a), y = ld_expression_value_resolve(ctx, b);
 	uint64_t r = op == '&' ? x & y : op == '|' ? x | y : x ^ y;
-	return ld_expression_value_in_section_make(a, a.fabs, r - ld_expression_value_section_address(ctx, a));
+	return ld_expression_value_in_section_make(a, a.force_absolute, r - ld_expression_value_section_address(ctx, a));
 }
 static ld_expression_value ld_expression_binary_eval(struct ld_context *ctx, const char *op, ld_expression_value l, ld_expression_value r)
 {
@@ -84,7 +84,7 @@ static ld_expression_value ld_expression_binary_eval(struct ld_context *ctx, con
 
 static ld_expression_value ld_dot_expression_value(struct ld_context *ctx)
 {
-	ld_expression_value v = {.kind = LD_VALUE_KIND_OUTPUT_SECTION, .idx = ctx->layout.current_output_section, .val = ctx->layout.dot - ld_output_section_address(ctx, ctx->layout.current_output_section), .align = 1};
+	ld_expression_value v = {.kind = LD_VALUE_KIND_OUTPUT_SECTION, .index = ctx->layout.current_output_section, .value = ctx->layout.dot - ld_output_section_address(ctx, ctx->layout.current_output_section), .alignment = 1};
 	return v;
 }
 
@@ -92,42 +92,42 @@ static ld_expression_value ld_dot_expression_value(struct ld_context *ctx)
 static ld_expression_value ld_expression_eval(struct ld_context *ctx, ld_expression *e)
 {
 	ld_expression_value v;
-	switch (e->op) {
-	case LD_EXPRESSION_NUMBER: return ld_expression_value_absolute_make(e->num);
-	case LD_EXPRESSION_SYMBOL: return ld_global_symbol_expression_value(ctx, e->sym);
+	switch (e->operation) {
+	case LD_EXPRESSION_NUMBER: return ld_expression_value_absolute_make(e->number);
+	case LD_EXPRESSION_SYMBOL: return ld_global_symbol_expression_value(ctx, e->symbol);
 	case LD_EXPRESSION_DOT: return ld_dot_expression_value(ctx);
 	case LD_EXPRESSION_ADDRESS:
-		return (ld_expression_value){.kind = LD_VALUE_KIND_OUTPUT_SECTION, .idx = e->sym, .val = 0, .align = 1};
-	case LD_EXPRESSION_LOAD_ADDRESS: return ld_expression_value_absolute_make(ctx->script.sections.v[e->sym].va);	/* LMA == VMA here */
-	case LD_EXPRESSION_SIZEOF: return ld_expression_value_absolute_make(ctx->script.sections.v[e->sym].size);
-	case LD_EXPRESSION_ALIGNOF: return ld_expression_value_absolute_make(ctx->script.sections.v[e->sym].addralign);
-	case LD_EXPRESSION_ALIGN_ONE_ARGUMENT: return ld_expression_value_absolute_make(ld_value_align_up(ctx->layout.dot, ld_alignment_check(ctx, ld_expression_value_resolve(ctx, ld_expression_eval(ctx, e->a)))));
+		return (ld_expression_value){.kind = LD_VALUE_KIND_OUTPUT_SECTION, .index = e->symbol, .value = 0, .alignment = 1};
+	case LD_EXPRESSION_LOAD_ADDRESS: return ld_expression_value_absolute_make(ctx->script.sections.v[e->symbol].address);	/* LMA == VMA here */
+	case LD_EXPRESSION_SIZEOF: return ld_expression_value_absolute_make(ctx->script.sections.v[e->symbol].size);
+	case LD_EXPRESSION_ALIGNOF: return ld_expression_value_absolute_make(ctx->script.sections.v[e->symbol].address_alignment);
+	case LD_EXPRESSION_ALIGN_ONE_ARGUMENT: return ld_expression_value_absolute_make(ld_value_align_up(ctx->layout.dot, ld_alignment_check(ctx, ld_expression_value_resolve(ctx, ld_expression_eval(ctx, e->first_operand)))));
 	case LD_EXPRESSION_ALIGN_TWO_ARGUMENTS:
-		v = ld_expression_eval(ctx, e->a);
-		v.align = ld_alignment_check(ctx, ld_expression_value_resolve(ctx, ld_expression_eval(ctx, e->b)));
+		v = ld_expression_eval(ctx, e->first_operand);
+		v.alignment = ld_alignment_check(ctx, ld_expression_value_resolve(ctx, ld_expression_eval(ctx, e->second_operand)));
 		return v;
 	case LD_EXPRESSION_ABSOLUTE:
-		v = ld_expression_eval(ctx, e->a);
-		v.fabs = 1;
+		v = ld_expression_eval(ctx, e->first_operand);
+		v.force_absolute = 1;
 		return v;
-	case LD_EXPRESSION_BINARY: return ld_expression_binary_eval(ctx, e->bop, ld_expression_eval(ctx, e->a), ld_expression_eval(ctx, e->b));
-	case LD_EXPRESSION_NEGATE: return ld_expression_value_absolute_make(-ld_expression_value_resolve(ctx, ld_expression_eval(ctx, e->a)));
-	case LD_EXPRESSION_BITWISE_NOT: return ld_expression_value_absolute_make(~ld_expression_value_resolve(ctx, ld_expression_eval(ctx, e->a)));
-	case LD_EXPRESSION_LOGICAL_NOT: return ld_expression_value_absolute_make(!ld_expression_value_resolve(ctx, ld_expression_eval(ctx, e->a)));
-	case LD_EXPRESSION_TERNARY: return ld_expression_value_resolve(ctx, ld_expression_eval(ctx, e->a)) ? ld_expression_eval(ctx, e->b) : ld_expression_eval(ctx, e->c);
+	case LD_EXPRESSION_BINARY: return ld_expression_binary_eval(ctx, e->binary_operator, ld_expression_eval(ctx, e->first_operand), ld_expression_eval(ctx, e->second_operand));
+	case LD_EXPRESSION_NEGATE: return ld_expression_value_absolute_make(-ld_expression_value_resolve(ctx, ld_expression_eval(ctx, e->first_operand)));
+	case LD_EXPRESSION_BITWISE_NOT: return ld_expression_value_absolute_make(~ld_expression_value_resolve(ctx, ld_expression_eval(ctx, e->first_operand)));
+	case LD_EXPRESSION_LOGICAL_NOT: return ld_expression_value_absolute_make(!ld_expression_value_resolve(ctx, ld_expression_eval(ctx, e->first_operand)));
+	case LD_EXPRESSION_TERNARY: return ld_expression_value_resolve(ctx, ld_expression_eval(ctx, e->first_operand)) ? ld_expression_eval(ctx, e->second_operand) : ld_expression_eval(ctx, e->third_operand);
 	case LD_EXPRESSION_ASSERT:
-		if (!ld_expression_value_resolve(ctx, ld_expression_eval(ctx, e->a)))
-			VVEC_PUSH(ctx->script.assert_failures, e->msg, ld_region_alloc);
+		if (!ld_expression_value_resolve(ctx, ld_expression_eval(ctx, e->first_operand)))
+			VVEC_PUSH(ctx->script.assert_failures, e->message, ld_region_alloc);
 		return ld_expression_value_absolute_make(ctx->layout.dot);
 	case LD_EXPRESSION_DEFINED: {
-		ld_global_symbol *s = &ctx->symbols.globals[e->sym];
+		ld_global_symbol *s = &ctx->symbols.globals[e->symbol];
 		return ld_expression_value_absolute_make(s->state == LD_SYMBOL_STATE_OBJECT || s->state == LD_SYMBOL_STATE_SCRIPT);
 	}
 	case LD_EXPRESSION_MAX: case LD_EXPRESSION_MIN: {
-		uint64_t a = ld_expression_value_resolve(ctx, ld_expression_eval(ctx, e->a)), b = ld_expression_value_resolve(ctx, ld_expression_eval(ctx, e->b));
-		return ld_expression_value_absolute_make(e->op == LD_EXPRESSION_MAX ? (a > b ? a : b) : (a < b ? a : b));
+		uint64_t a = ld_expression_value_resolve(ctx, ld_expression_eval(ctx, e->first_operand)), b = ld_expression_value_resolve(ctx, ld_expression_eval(ctx, e->second_operand));
+		return ld_expression_value_absolute_make(e->operation == LD_EXPRESSION_MAX ? (a > b ? a : b) : (a < b ? a : b));
 	}
-	case LD_EXPRESSION_LOG2CEIL: return ld_expression_value_absolute_make(ld_integer_log2_ceil(ld_expression_value_resolve(ctx, ld_expression_eval(ctx, e->a))));
+	case LD_EXPRESSION_LOG2CEIL: return ld_expression_value_absolute_make(ld_integer_log2_ceil(ld_expression_value_resolve(ctx, ld_expression_eval(ctx, e->first_operand))));
 	case LD_EXPRESSION_SIZEOF_HEADERS: return ld_expression_value_absolute_make(ld_headers_size(ctx));
 	}
 	return ld_expression_value_absolute_make(0);

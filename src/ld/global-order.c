@@ -6,11 +6,11 @@ static void ld_global_order_build(struct ld_context *ctx)
 	ctx->symbols.order.n = 0;
 	for (uint32_t i = 0; i < ctx->inputs.objects.n; i++) {
 		ld_object *o = ctx->inputs.objects.v[i];
-		if (!o->buf)
+		if (!o->file_bytes)
 			continue;
-		for (uint32_t s = o->firstg; s < o->nsym; s++) {
-			uint32_t g = o->gs[s - o->firstg];
-			if (ld_key_load(&ctx->symbols.globals[g].first) == ld_symbol_key(o->idx, s))
+		for (uint32_t s = o->first_global_index; s < o->symbol_count; s++) {
+			uint32_t g = o->global_slots[s - o->first_global_index];
+			if (ld_key_load(&ctx->symbols.globals[g].first_occurrence) == ld_symbol_key(o->index, s))
 				VVEC_PUSH(ctx->symbols.order, g, ld_region_alloc);
 		}
 	}

@@ -11,8 +11,8 @@ static void ld_usage_error_report(struct ld_context *ctx, const char *a)
  * dynamic linking yet, so as lld under -Bstatic); -l:FILE takes FILE as is */
 static const char *ld_library_find(struct ld_context *ctx, const char *name)
 {
-	for (uint32_t k = 0; k < ctx->options.libdirs.n; k++) {
-		const char *d = ctx->options.libdirs.v[k];
+	for (uint32_t k = 0; k < ctx->options.library_directories.n; k++) {
+		const char *d = ctx->options.library_directories.v[k];
 		size_t n = strlen(d) + strlen(name) + 8;
 		char *p = ld_region_alloc(n);
 
@@ -29,7 +29,7 @@ static const char *ld_library_find(struct ld_context *ctx, const char *name)
 static bool ld_arguments_parse(struct ld_context *ctx, int argc, char **argv)
 {
 	bool whole = false;
-	ctx->options.max_page = 0;	/* (default by machine once the inputs are read: arm64 64 KB, x86-64 4 KB, as lld) */
+	ctx->options.max_page_size = 0;	/* (default by machine once the inputs are read: arm64 64 KB, x86-64 4 KB, as lld) */
 	ctx->options.relax = true;
 	ctx->options.comment = "Linker: vld (vroom)";
 	for (int i = 1; i < argc; i++) {
@@ -42,30 +42,30 @@ static bool ld_arguments_parse(struct ld_context *ctx, int argc, char **argv)
 			VVEC_PUSH(ctx->options.inputs, ((ld_input_argument){.path = a, .whole = whole}), ld_region_alloc);
 			continue;
 		}
-		if (LD_ARGUMENT_IS("-o") && i + 1 < argc) { ctx->options.out = argv[++i]; continue; }
-		if (!strncmp(a, "-o", 2) && a[2]) { ctx->options.out = a + 2; continue; }
+		if (LD_ARGUMENT_IS("-o") && i + 1 < argc) { ctx->options.output_path = argv[++i]; continue; }
+		if (!strncmp(a, "-o", 2) && a[2]) { ctx->options.output_path = a + 2; continue; }
 		if (LD_ARGUMENT_IS("-r") || LD_ARGUMENT_IS("--relocatable") || LD_ARGUMENT_IS("-i")) { ctx->options.relocatable = true; continue; }
 		if (LD_ARGUMENT_IS("-shared") || LD_ARGUMENT_IS("--shared") || LD_ARGUMENT_IS("-Bshareable")) { ctx->options.shared = true; continue; }
 		if (LD_ARGUMENT_IS("-Bsymbolic") || LD_ARGUMENT_IS("--Bsymbolic")) { ctx->options.bsymbolic = true; continue; }
 		if (LD_ARGUMENT_IS("--whole-archive") || LD_ARGUMENT_IS("-whole-archive")) { whole = true; continue; }
 		if (LD_ARGUMENT_IS("--no-whole-archive") || LD_ARGUMENT_IS("-no-whole-archive")) { whole = false; continue; }
 		if (LD_ARGUMENT_IS("--start-group") || LD_ARGUMENT_IS("--end-group") || LD_ARGUMENT_IS("-(") || LD_ARGUMENT_IS("-)")) continue;
-		if (LD_ARGUMENT_IS("--pic-veneer")) { ctx->options.pic_veneer = true; continue; }
-		if (LD_ARGUMENT_IS("--eh-frame-hdr")) { ctx->options.eh_frame_hdr = true; continue; }
-		if (LD_ARGUMENT_IS("--no-eh-frame-hdr")) { ctx->options.eh_frame_hdr = false; continue; }
+		if (LD_ARGUMENT_IS("--pic-veneer")) { ctx->options.pic_veneers = true; continue; }
+		if (LD_ARGUMENT_IS("--eh-frame-hdr")) { ctx->options.eh_frame_header = true; continue; }
+		if (LD_ARGUMENT_IS("--no-eh-frame-hdr")) { ctx->options.eh_frame_header = false; continue; }
 		if (LD_ARGUMENT_IS("-EL") || LD_ARGUMENT_IS("--no-undefined-version")) continue;
 		if (LD_ARGUMENT_IS("--no-undefined") || LD_ARGUMENT_IS("-zdefs")) { ctx->options.no_undefined = true; continue; }
 		if (LD_ARGUMENT_IS("-X") || LD_ARGUMENT_IS("--discard-locals")) { ctx->options.discard_locals = true; continue; }
 		if (LD_ARGUMENT_IS("-x") || LD_ARGUMENT_IS("--discard-all")) { ctx->options.discard_all = true; continue; }
 		if (LD_ARGUMENT_IS("-S") || LD_ARGUMENT_IS("--strip-debug")) { ctx->options.strip_debug = true; continue; }
 		if (LD_ARGUMENT_IS("-n") || LD_ARGUMENT_IS("--nmagic")) { ctx->options.nmagic = true; continue; }
-		if (LD_ARGUMENT_IS("--no-apply-dynamic-relocs")) { ctx->options.no_apply_dyn = true; continue; }
-		if (LD_ARGUMENT_IS("--apply-dynamic-relocs")) { ctx->options.no_apply_dyn = false; continue; }
+		if (LD_ARGUMENT_IS("--no-apply-dynamic-relocs")) { ctx->options.no_apply_dynamic_relocations = true; continue; }
+		if (LD_ARGUMENT_IS("--apply-dynamic-relocs")) { ctx->options.no_apply_dynamic_relocations = false; continue; }
 		if (LD_ARGUMENT_IS("--no-relax")) { ctx->options.relax = false; continue; }
-		if (LD_ARGUMENT_IS("--gc-sections")) { ctx->options.gc = true; continue; }
-		if (LD_ARGUMENT_IS("--no-gc-sections")) { ctx->options.gc = false; continue; }
-		if (LD_ARGUMENT_IS("--print-gc-sections")) { ctx->options.print_gc = true; continue; }
-		if (LD_ARGUMENT_IS("--no-print-gc-sections")) { ctx->options.print_gc = false; continue; }
+		if (LD_ARGUMENT_IS("--gc-sections")) { ctx->options.garbage_collect_sections = true; continue; }
+		if (LD_ARGUMENT_IS("--no-gc-sections")) { ctx->options.garbage_collect_sections = false; continue; }
+		if (LD_ARGUMENT_IS("--print-gc-sections")) { ctx->options.print_garbage_collected_sections = true; continue; }
+		if (LD_ARGUMENT_IS("--no-print-gc-sections")) { ctx->options.print_garbage_collected_sections = false; continue; }
 		if (LD_ARGUMENT_IS("--vroom-stubs")) { ctx->options.stubs = true; continue; }
 		if (LD_ARGUMENT_IS("--emit-relocs") || LD_ARGUMENT_IS("-q")) { ld_error_report(ctx, "--emit-relocs is not supported"); continue; }
 		if ((v = LD_ARGUMENT_VALUE("-m")) || (!strncmp(a, "-m", 2) && a[2] && (v = a + 2))) {
@@ -82,10 +82,10 @@ static bool ld_arguments_parse(struct ld_context *ctx, int argc, char **argv)
 			continue;
 		}
 		if (LD_ARGUMENT_IS("-static") || LD_ARGUMENT_IS("-Bstatic") || LD_ARGUMENT_IS("--Bstatic") || LD_ARGUMENT_IS("-dn") || LD_ARGUMENT_IS("-non_shared")) {
-			ctx->options.bstatic = true;
+			ctx->options.static_libraries_only = true;
 			continue;
 		}
-		if (LD_ARGUMENT_IS("-Bdynamic") || LD_ARGUMENT_IS("--Bdynamic") || LD_ARGUMENT_IS("-dy") || LD_ARGUMENT_IS("-call_shared")) { ctx->options.bstatic = false; continue; }
+		if (LD_ARGUMENT_IS("-Bdynamic") || LD_ARGUMENT_IS("--Bdynamic") || LD_ARGUMENT_IS("-dy") || LD_ARGUMENT_IS("-call_shared")) { ctx->options.static_libraries_only = false; continue; }
 		if (LD_ARGUMENT_IS("-no-pie") || LD_ARGUMENT_IS("--no-pie")) continue;
 		if (LD_ARGUMENT_IS("-pie") || LD_ARGUMENT_IS("--pie")) { ld_error_report(ctx, "-pie is not supported (no dynamic linking yet)"); continue; }
 		if ((v = LD_ARGUMENT_VALUE("--dynamic-linker")) || (v = LD_ARGUMENT_VALUE("-dynamic-linker")) || (v = LD_ARGUMENT_VALUE("-I"))) {
@@ -93,7 +93,7 @@ static bool ld_arguments_parse(struct ld_context *ctx, int argc, char **argv)
 			continue;
 		}
 		if ((v = LD_ARGUMENT_VALUE("--library-path")) || (v = LD_ARGUMENT_VALUE("-L")) || (!strncmp(a, "-L", 2) && a[2] && (v = a + 2))) {
-			VVEC_PUSH(ctx->options.libdirs, v, ld_region_alloc);
+			VVEC_PUSH(ctx->options.library_directories, v, ld_region_alloc);
 			continue;
 		}
 		if ((v = LD_ARGUMENT_VALUE("--library")) || (v = LD_ARGUMENT_VALUE("-l")) || (!strncmp(a, "-l", 2) && a[2] && (v = a + 2))) {
@@ -113,9 +113,9 @@ static bool ld_arguments_parse(struct ld_context *ctx, int argc, char **argv)
 		if ((v = LD_ARGUMENT_VALUE("--build-id"))) { ctx->options.build_id = strcmp(v, "none") ? v : NULL; continue; }
 		if (LD_ARGUMENT_IS("--build-id")) { ctx->options.build_id = "fast"; continue; }
 		if ((v = LD_ARGUMENT_VALUE("--orphan-handling"))) {
-			if (!strcmp(v, "place")) ctx->options.orphan = 0;
-			else if (!strcmp(v, "warn")) ctx->options.orphan = 1;
-			else if (!strcmp(v, "error")) ctx->options.orphan = 2;
+			if (!strcmp(v, "place")) ctx->options.orphan_handling = 0;
+			else if (!strcmp(v, "warn")) ctx->options.orphan_handling = 1;
+			else if (!strcmp(v, "error")) ctx->options.orphan_handling = 2;
 			else ld_error_report(ctx, "unknown --orphan-handling mode: %s", v);
 			continue;
 		}
@@ -125,10 +125,10 @@ static bool ld_arguments_parse(struct ld_context *ctx, int argc, char **argv)
 		if ((v = LD_ARGUMENT_VALUE("--vroom-comment"))) { ctx->options.comment = v; continue; }
 		if ((v = LD_ARGUMENT_VALUE("-z")) || (!strncmp(a, "-z", 2) && a[2] && (v = a + 2))) {
 			if (!strcmp(v, "notext")) ctx->options.notext = true;
-			else if (!strcmp(v, "norelro")) ctx->options.norelro = true;
-			else if (!strcmp(v, "relro")) ctx->options.norelro = false;
+			else if (!strcmp(v, "norelro")) ctx->options.no_relro = true;
+			else if (!strcmp(v, "relro")) ctx->options.no_relro = false;
 			else if (!strcmp(v, "max-page-size") || !strncmp(v, "max-page-size=", 14))
-				ctx->options.max_page = strtoull(v + 14, NULL, 0);
+				ctx->options.max_page_size = strtoull(v + 14, NULL, 0);
 			else if (strcmp(v, "norelro") && strcmp(v, "noexecstack") && strcmp(v, "relro") &&
 				 strcmp(v, "text") && strcmp(v, "now") && strcmp(v, "lazy") && strcmp(v, "nodefaultlib"))
 				ld_warning_report(ctx, "ignoring -z %s", v);
@@ -136,9 +136,9 @@ static bool ld_arguments_parse(struct ld_context *ctx, int argc, char **argv)
 		}
 		ld_usage_error_report(ctx, a);
 	}
-	if (!ctx->options.out)
-		ctx->options.out = "a.out";
+	if (!ctx->options.output_path)
+		ctx->options.output_path = "a.out";
 	if (ctx->options.nmagic)		/* lld: -n ignores -z max-page-size */
-		ctx->options.max_page = 1;
+		ctx->options.max_page_size = 1;
 	return true;
 }

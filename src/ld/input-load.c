@@ -28,41 +28,41 @@ static void ld_inputs_load(struct ld_context *ctx)
 				}
 				ctx->inputs.pending.n = before;
 				/* an input marker: the archive's members are read here */
-				VVEC_PUSH(ctx->inputs.pending, ((ld_pending_member){.path = NULL, .size = c0, .buf = (const uint8_t *)(uintptr_t)ctx->inputs.lazy_candidates.n}), ld_region_alloc);
+				VVEC_PUSH(ctx->inputs.pending, ((ld_pending_member){.path = NULL, .size = c0, .file_bytes = (const uint8_t *)(uintptr_t)ctx->inputs.lazy_candidates.n}), ld_region_alloc);
 				continue;
 			}
 			ld_archive_add(ctx, p, b, n);
 			continue;
 		}
-		VVEC_PUSH(ctx->inputs.pending, ((ld_pending_member){.path = p, .buf = b, .size = n}), ld_region_alloc);
+		VVEC_PUSH(ctx->inputs.pending, ((ld_pending_member){.path = p, .file_bytes = b, .size = n}), ld_region_alloc);
 	}
 	if (lazy) {
 		for (uint32_t i = 0; i < ctx->inputs.pending.n; i++)
 			if (ctx->inputs.pending.v[i].path)
 				ld_lazy_object_add(ctx, ctx->inputs.pending.v[i]);
 			else
-				ld_lazy_archive_process(ctx, ctx->inputs.pending.v[i].size, (uint32_t)(uintptr_t)ctx->inputs.pending.v[i].buf);
+				ld_lazy_archive_process(ctx, ctx->inputs.pending.v[i].size, (uint32_t)(uintptr_t)ctx->inputs.pending.v[i].file_bytes);
 		ctx->inputs.pending = ctx->inputs.lazy_order;
 	}
 	for (uint32_t i = 0; i < ctx->inputs.pending.n; i++) {
 		ld_object *o = ld_region_alloc(sizeof *o);
 		o->path = ctx->inputs.pending.v[i].path;
-		o->buf = ctx->inputs.pending.v[i].buf;
+		o->file_bytes = ctx->inputs.pending.v[i].file_bytes;
 		o->size = ctx->inputs.pending.v[i].size;
-		o->idx = ctx->inputs.objects.n;
+		o->index = ctx->inputs.objects.n;
 		VVEC_PUSH(ctx->inputs.objects, o, ld_region_alloc);
 	}
 	ld_parallel_for(ctx->inputs.objects.n, ld_object_parse, ctx);
-	if (!ctx->options.max_page)
-		ctx->options.max_page = ctx->inputs.x86 ? 4096 : 65536;
+	if (!ctx->options.max_page_size)
+		ctx->options.max_page_size = ctx->inputs.x86 ? 4096 : 65536;
 }
 
 static void ld_input_sections_alloc(struct ld_context *ctx, uint32_t from)
 {
 	uint32_t total = ctx->inputs.sections.n;
 	for (uint32_t i = from; i < ctx->inputs.objects.n; i++) {
-		ctx->inputs.objects.v[i]->isec0 = total;
-		total += ctx->inputs.objects.v[i]->nsh;
+		ctx->inputs.objects.v[i]->first_input_section = total;
+		total += ctx->inputs.objects.v[i]->section_header_count;
 	}
 	if (total > ctx->inputs.sections.cap) {
 		uint32_t nc = ctx->inputs.sections.cap ? ctx->inputs.sections.cap : 1024;
@@ -82,8 +82,8 @@ static void ld_global_table_init(struct ld_context *ctx)
 {
 	uint64_t total = 1024;
 	for (uint32_t i = 0; i < ctx->inputs.objects.n; i++)
-		if (ctx->inputs.objects.v[i]->nsym > ctx->inputs.objects.v[i]->firstg)
-			total += ctx->inputs.objects.v[i]->nsym - ctx->inputs.objects.v[i]->firstg;
+		if (ctx->inputs.objects.v[i]->symbol_count > ctx->inputs.objects.v[i]->first_global_index)
+			total += ctx->inputs.objects.v[i]->symbol_count - ctx->inputs.objects.v[i]->first_global_index;
 	uint32_t cap = 4096;
 	while (cap < total * 2 + 4096)
 		cap *= 2;

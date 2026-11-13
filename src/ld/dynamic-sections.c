@@ -54,13 +54,13 @@ static void ld_symbol_versions_assign(struct ld_context *ctx)
 {
 	for (uint32_t i = 0; i < ctx->symbols.order.n; i++) {
 		ld_global_symbol *s = &ctx->symbols.globals[ctx->symbols.order.v[i]];
-		s->ver = 1;
+		s->version = 1;
 		if (!ctx->script.version_nodes.n || s->state == LD_SYMBOL_STATE_UNDEFINED)
 			continue;
 		const char *n = ld_global_name(ctx, ctx->symbols.order.v[i]);
 		for (uint32_t k = 0; k < ctx->script.version_locals.n; k++)
 			if (ld_glob_match(ctx->script.version_locals.v[k], n)) {
-				s->ver = 0;
+				s->version = 0;
 				break;
 			}
 		uint16_t named = 2;
@@ -70,7 +70,7 @@ static void ld_symbol_versions_assign(struct ld_context *ctx)
 			for (uint32_t k = 0; k < vn->globs.n && !hit; k++)
 				hit = ld_glob_match(vn->globs.v[k], n);
 			if (hit)
-				s->ver = *vn->name ? named : 1;
+				s->version = *vn->name ? named : 1;
 			if (*vn->name)
 				named++;
 		}
@@ -79,7 +79,7 @@ static void ld_symbol_versions_assign(struct ld_context *ctx)
 
 static bool ld_input_section_is_live(struct ld_context *ctx, uint32_t isec)
 {
-	uint32_t o = isec == LD_NONE ? LD_NONE : ctx->inputs.sections.v[isec].osec;
+	uint32_t o = isec == LD_NONE ? LD_NONE : ctx->inputs.sections.v[isec].output_section;
 	return o != LD_NONE && o != LD_OUTPUT_SECTION_DISCARD;
 }
 
@@ -93,15 +93,15 @@ static void ld_dynamic_symbol_define(struct ld_context *ctx)
 	ld_global_symbol *s = &ctx->symbols.globals[g];
 	if (!ld_global_symbol_is_referenced(ctx, g)) {
 		VVEC_PUSH(ctx->symbols.order, g, ld_region_alloc);
-		ld_atomic_u64_min(&s->first, ctx->symbols.script_order++);
+		ld_atomic_u64_min(&s->first_occurrence, ctx->symbols.script_order++);
 	}
 	s->state = LD_SYMBOL_STATE_SCRIPT;
-	s->ev = (ld_expression_value){.kind = LD_VALUE_KIND_INPUT_SECTION, .idx = ctx->output.dynamic_section, .align = 1};
-	s->bind = STB_WEAK;
+	s->expression_value = (ld_expression_value){.kind = LD_VALUE_KIND_INPUT_SECTION, .index = ctx->output.dynamic_section, .alignment = 1};
+	s->binding = STB_WEAK;
 	s->type = STT_NOTYPE;
-	s->vis = STV_HIDDEN;
+	s->visibility = STV_HIDDEN;
 	s->thunk = LD_NONE;
-	s->ver = 1;
+	s->version = 1;
 }
 
 /* contents and sizes of the dynamic sections (addresses are filled in later) */
@@ -117,7 +117,7 @@ static void ld_dynamic_sections_build(struct ld_context *ctx)
 		ld_global_symbol *s = &ctx->symbols.globals[g];
 		if (!ld_global_symbol_is_in_symbol_table(ctx, g) || ld_global_symbol_is_local(ctx, g))
 			continue;
-		if (s->state == LD_SYMBOL_STATE_UNDEFINED && (ld_key_load(&s->first) >> 32) >= ctx->inputs.objects.n)
+		if (s->state == LD_SYMBOL_STATE_UNDEFINED && (ld_key_load(&s->first_occurrence) >> 32) >= ctx->inputs.objects.n)
 			continue;
 		VVEC_PUSH(ctx->dynamic.symbols, g, ld_region_alloc);
 	}
@@ -151,11 +151,11 @@ static void ld_dynamic_sections_build(struct ld_context *ctx)
 	VVEC_PUSH(ctx->dynamic.strings, 0, ld_region_alloc);
 	ctx->dynamic.symbol_names = ld_region_alloc((size_t)(n + 1) * sizeof(uint32_t));
 	for (uint32_t i = 0; i < n; i++) {
-		ctx->symbols.globals[ctx->dynamic.symbols.v[i]].dynidx = i + 1;
+		ctx->symbols.globals[ctx->dynamic.symbols.v[i]].dynamic_index = i + 1;
 		ctx->dynamic.symbol_hashes[i] = ld_symbol_name_gnu_hash(ld_global_name(ctx, ctx->dynamic.symbols.v[i]));
 		ctx->dynamic.symbol_names[i] = ld_dynamic_string_add(ctx, ld_global_name(ctx, ctx->dynamic.symbols.v[i]));
 	}
-	const char *fname = ctx->options.soname ? ctx->options.soname : ctx->options.out;
+	const char *fname = ctx->options.soname ? ctx->options.soname : ctx->options.output_path;
 	ctx->dynamic.version_name_offsets = ld_region_alloc((ctx->script.version_definition_count + 1) * sizeof(uint32_t));
 	if (ctx->script.version_definition_count) {
 		ctx->dynamic.soname_offset = ld_dynamic_string_add(ctx, fname);
@@ -183,7 +183,7 @@ static void ld_dynamic_section_links_set(struct ld_context *ctx)
 {
 	if (!ctx->output.dynamic_live)
 		return;
-	uint32_t ds = ctx->script.sections.v[ld_input_section_output_section(ctx, ctx->output.dynsym_section)].shidx, dstr = ctx->script.sections.v[ld_input_section_output_section(ctx, ctx->output.dynstr_section)].shidx;
+	uint32_t ds = ctx->script.sections.v[ld_input_section_output_section(ctx, ctx->output.dynsym_section)].section_header_index, dstr = ctx->script.sections.v[ld_input_section_output_section(ctx, ctx->output.dynstr_section)].section_header_index;
 	ctx->script.sections.v[ld_input_section_output_section(ctx, ctx->output.dynsym_section)].link = dstr;
 	ctx->script.sections.v[ld_input_section_output_section(ctx, ctx->output.dynsym_section)].info = 1;	/* no local dynamic symbols */
 	ctx->script.sections.v[ld_input_section_output_section(ctx, ctx->output.hash_section)].link = ds;
@@ -198,7 +198,7 @@ static void ld_dynamic_section_links_set(struct ld_context *ctx)
 
 static uint8_t *ld_input_section_image_pointer(struct ld_context *ctx, uint32_t isec)
 {
-	return ctx->output.image + ctx->script.sections.v[ld_input_section_output_section(ctx, isec)].offset + ctx->inputs.sections.v[isec].off;
+	return ctx->output.image + ctx->script.sections.v[ld_input_section_output_section(ctx, isec)].offset + ctx->inputs.sections.v[isec].offset;
 }
 
 static void ld_dynamic_sections_write(struct ld_context *ctx)
@@ -212,14 +212,14 @@ static void ld_dynamic_sections_write(struct ld_context *ctx)
 		ld_global_symbol *s = &ctx->symbols.globals[g];
 		elf_symbol *d = &ds[i + 1];
 		d->st_name = ctx->dynamic.symbol_names[i];
-		d->st_info = (uint8_t)(s->bind << 4 | s->type);
-		d->st_other = s->vis;
+		d->st_info = (uint8_t)(s->binding << 4 | s->type);
+		d->st_other = s->visibility;
 		if (s->state == LD_SYMBOL_STATE_SCRIPT) {
-			d->st_shndx = s->ev.kind == LD_VALUE_KIND_ABSOLUTE ? SHN_ABS : s->ev.kind == LD_VALUE_KIND_OUTPUT_SECTION ? ld_output_section_header_index(ctx, s->ev.idx)
-										: ld_symbol_section_index_of_input_section(ctx, s->ev.idx);
+			d->st_shndx = s->expression_value.kind == LD_VALUE_KIND_ABSOLUTE ? SHN_ABS : s->expression_value.kind == LD_VALUE_KIND_OUTPUT_SECTION ? ld_output_section_header_index(ctx, s->expression_value.index)
+										: ld_symbol_section_index_of_input_section(ctx, s->expression_value.index);
 			d->st_value = ld_global_symbol_address(ctx, g);
 		} else if (s->state == LD_SYMBOL_STATE_OBJECT && !s->demoted) {
-			d->st_shndx = s->sec == LD_NONE ? SHN_ABS : ld_symbol_section_index_of_input_section(ctx, s->sec);
+			d->st_shndx = s->input_section == LD_NONE ? SHN_ABS : ld_symbol_section_index_of_input_section(ctx, s->input_section);
 			d->st_value = ld_global_symbol_address(ctx, g);
 			d->st_size = s->size;
 		}
@@ -258,11 +258,11 @@ static void ld_dynamic_sections_write(struct ld_context *ctx)
 	if (ctx->output.versym_section != LD_NONE) {
 		uint8_t *vs = ld_input_section_image_pointer(ctx, ctx->output.versym_section);
 		for (uint32_t i = 0; i < n; i++) {
-			uint16_t v = ctx->symbols.globals[ctx->dynamic.symbols.v[i]].ver;
+			uint16_t v = ctx->symbols.globals[ctx->dynamic.symbols.v[i]].version;
 			memcpy(vs + 2 * (i + 1), &v, 2);
 		}
 		uint8_t *vd = ld_input_section_image_pointer(ctx, ctx->output.verdef_section);
-		const char *fname = ctx->options.soname ? ctx->options.soname : ctx->options.out;
+		const char *fname = ctx->options.soname ? ctx->options.soname : ctx->options.output_path;
 		for (uint32_t k = 0; k <= ctx->script.version_definition_count; k++) {
 			uint8_t *e = vd + 28 * k;
 			const char *nm = fname;
