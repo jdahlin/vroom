@@ -2,21 +2,20 @@
  * A function through VIR (PLAN-vir.md): the VIR walker builds it
  * (codegen/vir/preir.h); what it cannot build is emitted as before (X8).
  *
- * VCC_VIR (read once): unset or 0 off; otherwise letters:
- *   b  build VIR (then emit the function as before)
- *   v  ... and run the verifier on it (failures to stderr)
- *   d  ... and print it to stderr
- *   s  one line per function to stderr: built, or why not
- *   l  lower what was built to target records (arm64 or x86-64) and use them;
- *      VCC_VIR_CHECK=1 also runs the allocation checker; VCC_VIR_LIST=FILE lowers
- *      only the functions named in FILE, one per line (bisecting)
- * Only at -O2 and above.
- *
- * VCC_VIR_STATS=1: per TU, on stderr, how many functions went through VIR and
- * why the others did not (reasons: failure.h); see vw_stats_print.
- *
- * VCC_VIR_PASSES: time, leave out or check the builder's passes by name
- * (pass-table.c); its lines are printed with VCC_VIR_STATS's.
+ * VIR is -O2's code generator: cc_opts.optimize.vir (driver/optimization.c,
+ * doc/OPTIMIZATION.md).  The developer's aids, cc_opts.vir_aid:
+ *   -fno-vir-lower         build VIR, then emit the function as before
+ *   -fvir-verify           run the verifier on it (failures to stderr)
+ *   -fvir-dump             print it to stderr
+ *   -fvir-report           one line per function to stderr: built, lowered, or why not
+ *   -fvir-check            the allocation checker runs after the allocator
+ *   -fvir-functions=FILE   only the functions named in FILE, one per line, are
+ *                          lowered (bisecting)
+ *   -fvir-stats            per TU, on stderr, how many functions went through VIR
+ *                          and why the others did not (reasons: failure.h); see
+ *                          vw_stats_print
+ *   -fvir-passes=ITEMS     time, leave out or check the builder's passes by name
+ *                          (pass-table.c); its lines are printed with -fvir-stats's
  */
 #define WK_PREFIX vw_
 #define LO_PREFIX vw_
@@ -42,7 +41,7 @@ static int vw_failure_find(const char *why)
 	return -1;
 }
 
-/* VCC_VIR_STATS: count one failed function; the first of each reason is kept as its example */
+/* -fvir-stats: count one failed function; the first of each reason is kept as its example */
 static void vw_failure_note(ecx *e, uint32_t s, const char *why, vir_failure other, const char *detail)
 {
 	emitter *E = e->E;
@@ -64,11 +63,11 @@ static void vw_failure_note(ecx *e, uint32_t s, const char *why, vir_failure oth
 }
 
 /*
- * VCC_VIR_STATS=1, after a TU's code is generated (stderr, parsed by bench/vir-failures.py):
+ * -fvir-stats, after a TU's code is generated (stderr, parsed by bench/vir-failures.py):
  *   vcc vir: attempted=N lowered=N built=N fallback=N
  *   vcc vir-failure: reason=NAME count=N example=FUNCTION detail=TEXT-TO-END-OF-LINE
  * attempted: functions the VIR builder was started on; lowered: emitted from
- * VIR; built: built but, without `l` in VCC_VIR, not lowered; fallback: the
+ * VIR; built: built but, with -fno-vir-lower, not lowered; fallback: the
  * direct emitter compiled them, one reason each.  Reasons are listed most
  * frequent first.
  */
@@ -98,20 +97,23 @@ VPRIV void vw_stats_print(emitter *E)
 	virbuild_pass_stats_print(E);
 }
 
-static int vw_mode(void)
+/* what vw_try does with a function */
+enum {
+	VW_BUILD = 1,
+	VW_VERIFY = 2,
+	VW_DUMP = 4,
+	VW_REPORT = 8,
+	VW_LOWER = 16,
+};
+
+static int vw_mode(const cc_opts *o)
 {
-	static _Thread_local int mode = -1;
+	const cc_vir_aids *v = &o->vir_aid;
 
-	if (mode < 0) {
-		const char *s = getenv("VCC_VIR");
-		int m = 0;
-
-		if (s && *s && strcmp(s, "0"))
-			for (m = 1; *s; s++)
-				m |= *s == 'v' ? 2 : *s == 'd' ? 4 : *s == 's' ? 8 : *s == 'l' ? 16 : 0;
-		mode = m;
-	}
-	return mode;
+	if (!o->optimize.vir)
+		return 0;
+	return VW_BUILD | (v->verify ? VW_VERIFY : 0) | (v->dump ? VW_DUMP : 0) | (v->report ? VW_REPORT : 0) |
+	       (v->build_only ? 0 : VW_LOWER);
 }
 
 static void vw_name(ecx *e, uint32_t s, char *o, size_t n)
@@ -121,68 +123,64 @@ static void vw_name(ecx *e, uint32_t s, char *o, size_t n)
 	snprintf(o, n, "%.*s", (int)id->len, id->s);
 }
 
-/* VCC_VIR_LIST: the function is named in the file (or there is none) */
+/* -fvir-functions=FILE, read once per TU (tu.c): the names between newlines; a file that cannot be
+   read fails the job */
+VPRIV void vw_function_list_read(emitter *E, const char *path)
+{
+	FILE *fp = fopen(path, "r");
+	size_t n = 0, cap = 1 << 16, k;
+	char *list;
+
+	if (!fp)
+		vjob_fail_errno(path);
+	list = malloc(cap + 2);
+	if (!list)
+		vout_of_memory();
+	list[n++] = '\n';
+	while ((k = fread(list + n, 1, cap - n, fp)) > 0) {
+		n += k;
+		if (n == cap && !(list = realloc(list, (cap *= 2) + 2)))
+			vout_of_memory();
+	}
+	fclose(fp);
+	list[n++] = '\n';
+	list[n] = 0;
+	E->vlist = list;
+}
+
+/* the function is named in -fvir-functions' file (or there is none) */
 static bool vw_listed(ecx *e, uint32_t s)
 {
-	static char *list;
-	static int state;	/* 0 unread, 1 no list, 2 list */
-	static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
 	char nm[130];
 
-	pthread_mutex_lock(&mu);
-	if (!state) {
-		const char *p = getenv("VCC_VIR_LIST");
-		FILE *fp = p ? fopen(p, "r") : NULL;
-
-		state = 1;
-		if (fp) {
-			size_t n = 0, cap = 1 << 16;
-			size_t k;
-
-			list = malloc(cap + 2);
-			list[n++] = '\n';
-			while (list && (k = fread(list + n, 1, cap - n, fp)) > 0) {
-				n += k;
-				if (n == cap)
-					list = realloc(list, (cap *= 2) + 2);
-			}
-			fclose(fp);
-			if (list) {
-				list[n++] = '\n';
-				list[n] = 0;
-				state = 2;
-			}
-		}
-	}
-	pthread_mutex_unlock(&mu);
-	if (state != 2)
+	if (!e->E->vlist)
 		return true;
 	nm[0] = '\n';
 	vw_name(e, s, nm + 1, sizeof nm - 2);
 	strcat(nm, "\n");
-	return strstr(list, nm) != NULL;
+	return strstr(e->E->vlist, nm) != NULL;
 }
 
 VPRIV bool vw_enabled(const cc_opts *o)
 {
-	return (vw_mode() & 16) && o->opt >= 2;
+	return (vw_mode(o) & VW_LOWER) != 0;
 }
 
 VPRIV bool vw_try(ecx *e, uint32_t s)
 {
-	int m = vw_mode();
+	int m = vw_mode(e->E->o);
 	char nm[128] = "";
-	bool timed;	/* VCC_VIR_PASSES=time: the build and the lowering are rows of its statistic */
+	bool timed;	/* -fvir-passes=time: the build and the lowering are rows of its statistic */
 	uint32_t npass;
 	vperf t0 = { 0, 0 };
 
-	if (!m || e->E->o->opt < 2 || WASM(e->c))
+	if (!m || WASM(e->c))
 		return false;
 	e->vtry = true;
 	e->vfail = NULL;
 	if (e->E->vstats)
 		e->E->vattempted++;
-	timed = e->E->vstats && virbuild_pass_switch_get()->time;
+	timed = e->E->vstats && e->E->vpass.time;
 	virbuild_pass_list(&npass);
 	if (timed)
 		t0 = vperformance_now();
@@ -195,11 +193,11 @@ VPRIV bool vw_try(ecx *e, uint32_t s)
 	if (timed)
 		virbuild_pass_note(e->E, VIR_PASS_ROW_BUILD(npass), vperformance_subtract(vperformance_now(), t0).ins);
 	e->vtry = false;
-	if (m & 8)
+	if (m & VW_REPORT)
 		vw_name(e, s, nm, sizeof nm);
 	if (e->vfail) {
 		vw_failure_note(e, s, e->vfail, VIRFAIL_emitter_error, NULL);
-		if (m & 8)
+		if (m & VW_REPORT)
 			fprintf(stderr, "vir: %s: no: %s\n", nm, e->vfail);
 		return false;
 	}
@@ -208,17 +206,17 @@ VPRIV bool vw_try(ecx *e, uint32_t s)
 		vbuffer b = { 0 };
 		uint32_t nerr = 0;
 
-		if (m & 2) {
+		if (m & VW_VERIFY) {
 			nerr = vir_verify(&V->f, NULL, &b, 10);
 			if (nerr)
 				fprintf(stderr, "vir: %s: %u verifier failures:\n%.*s", nm[0] ? nm : "?", nerr, (int)b.n, b.p ? (char *)b.p : "");
 			b.n = 0;
 		}
-		if (m & 4) {
+		if (m & VW_DUMP) {
 			vir_print_fn(&b, NULL, &V->f);
 			fprintf(stderr, "%.*s", (int)b.n, b.p ? (char *)b.p : "");
 		}
-		if (m & 8)
+		if (m & VW_REPORT)
 			fprintf(stderr, "vir: %s: built, %u instructions, %u blocks%s\n", nm, V->f.nins, V->f.nblk, nerr ? ", INVALID" : "");
 		free(b.p);
 		if (nerr) {
@@ -227,9 +225,9 @@ VPRIV bool vw_try(ecx *e, uint32_t s)
 			snprintf(n, sizeof n, "%u", nerr);
 			vw_failure_note(e, s, VIRFAIL(verifier_rejected), VIRFAIL_verifier_rejected, n);
 		}
-		if ((m & 16) && !nerr && !vw_listed(e, s))
-			m &= ~16;
-		if ((m & 16) && !nerr) {
+		if ((m & VW_LOWER) && !nerr && !vw_listed(e, s))
+			m &= ~VW_LOWER;
+		if ((m & VW_LOWER) && !nerr) {
 			const char *why;
 
 			bool ok;
@@ -243,12 +241,12 @@ VPRIV bool vw_try(ecx *e, uint32_t s)
 			if (ok) {
 				if (e->E->vstats)
 					e->E->vlowered++;
-				if (m & 8)
+				if (m & VW_REPORT)
 					fprintf(stderr, "vir: %s: lowered, %u spills\n", nm, V->ao.st.spills);
 				return true;
 			}
 			vw_failure_note(e, s, why, VIRFAIL_lowering_failed, V->detail);
-			if (m & 8)
+			if (m & VW_REPORT)
 				fprintf(stderr, "vir: %s: not lowered: %s%s%s\n", nm, why, V->detail[0] ? ": " : "", V->detail);
 		} else if (!nerr && e->E->vstats)
 			e->E->vbuilt++;

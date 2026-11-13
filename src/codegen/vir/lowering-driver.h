@@ -46,7 +46,6 @@ typedef struct virbuild_lowering_target {
 	bool params_in_loop;		/* x86-64: block parameters go through instruction(); arm64: result_spill(), here, in the order of the operand registers */
 	bool edits_at_block_end;	/* x86-64: the edits at pos = first + n run after the last instruction; arm64: none */
 	bool skip_multi_operands;	/* arm64: a VT_MULTI operand has no register and instruction() reads them from ov/opr; x86-64 rejects such functions */
-	bool rotation_cached;		/* arm64 reads VCC_VIR_ROT once (static); x86-64 per function */
 } virbuild_lowering_target;
 
 /* the driver's inputs for one function; the target fills it, the driver reads it */
@@ -59,7 +58,8 @@ typedef struct virbuild_lowering {
 	/* arrays of f->nblk entries the layout fills: order, position, rotation, chase; path is scratch of f->nblk, block_label is the target's */
 	uint32_t *order, *position, *rotation, *chase, *path;
 	const uint32_t *block_label;
-	bool optimize;			/* loop rotation and entry duplication are allowed (not -O0) */
+	bool optimize;			/* loop rotation and entry duplication are allowed (not VCC_NOOPT) */
+	bool rotate;			/* -frotate-loops: the layout puts a loop's test at its end (else VIR's block order) */
 	/* skip_multi_operands: where the operands' values and registers go, and the room (arm64) */
 	uint32_t *operand_value;
 	uint8_t *operand_reg;

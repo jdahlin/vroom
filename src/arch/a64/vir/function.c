@@ -154,7 +154,6 @@ static const virbuild_lowering_target vl_lowering_target = {
 	.params_in_loop = false,
 	.edits_at_block_end = false,
 	.skip_multi_operands = true,
-	.rotation_cached = true,
 };
 
 /*
@@ -164,7 +163,7 @@ static const virbuild_lowering_target vl_lowering_target = {
  * the test's branch goes back to the body: one branch a round instead of two.  The edges
  * into the loop get a copy of the test (vl_goto), not a jump to it: with the jump,
  * speedtest1 ran more instructions than without the rotation (short loops).  VLT.hl[b] is
- * the loop of a header placed so, else VIR_NOBLK.  VCC_VIR_ROT=0: VIR's order.  The driver
+ * the loop of a header placed so, else VIR_NOBLK.  -fno-rotate-loops: VIR's order.  The driver
  * makes that layout; this puts the blocks in front of the save point first.
  */
 static void vl_target_order_adjust(void *ctx)
@@ -313,22 +312,16 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 		}
 	/* shrink-wrapping (SPEC-vir.md 15.12): the allocator is told which calls will be sibling
 	 * calls, which need no frame.  Not with unwind tables (the rows would have to follow the
-	 * prologue into the body).  VCC_VIR_SHRINK=0: off */
+	 * prologue into the body).  -fno-shrink-wrap: off */
 	{
-		static int on = -1;
 		vir_aopt ao = { 0 };
 
-		if (on < 0) {
-			const char *x = getenv("VCC_VIR_SHRINK");
-
-			on = !(x && *x == '0');
-		}
 		L.e = e, L.f = f;
 		VLT.lo32 = vl_grow(VLT.lo32, &VLT.c32, f->nins + 1, 1);
 		VLT.nf = vl_grow(VLT.nf, &VLT.cnf, f->nins + 1, 1);
 		L.ret32 = KIND(c, ft->base) != TY_VOID && is_integer(c, ft->base) && tsize(c, ft->base) == 4;
 		L.tail = !(ft->flags & TF_VARIADIC) && em_tail_caller_ok(e, s) && !vl_notail(&L, VLT.lo32);
-		if (on && !e->E->noopt && !(e->E->o->cfi && !DARWIN(c))) {
+		if (e->E->o->optimize.shrink_wrap && !e->E->noopt && !(e->E->o->cfi && !DARWIN(c))) {
 			memset(VLT.nf, 0, f->nins);
 			for (uint32_t b = 0; L.tail && b < f->nblk; b++)
 				for (uint32_t i = f->blk[b].first; i < f->blk[b].first + f->blk[b].n; i++)
@@ -345,7 +338,7 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 		}
 		L.sp = ao.shrink ? V->ao.spoint : VIR_NOBLK;
 	}
-	if (getenv("VCC_VIR_CHECK")) {
+	if (e->E->o->vir_aid.check) {
 		vbuffer msg = { 0 };
 		uint32_t n = vir_alloc_check(f, &regs, &V->ao, &msg);
 
@@ -376,7 +369,7 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 	L.drv = (virbuild_lowering){
 		.target = &vl_lowering_target, .ctx = &L, .f = f, .o = L.o, .lp = L.lp,
 		.order = L.ord, .position = L.opos, .rotation = VLT.hl, .chase = L.chs, .path = VLT.path,
-		.block_label = L.lbl, .optimize = !e->E->noopt,
+		.block_label = L.lbl, .optimize = !e->E->noopt, .rotate = e->E->o->optimize.rotate_loops,
 		.operand_value = L.ov, .operand_reg = L.opr, .max_operands = VL_MAXOP, .skip_at = &L.skip,
 	};
 	L.ret32 = KIND(c, ft->base) != TY_VOID && is_integer(c, ft->base) && tsize(c, ft->base) == 4;

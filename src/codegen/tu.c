@@ -468,7 +468,10 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 			E.nlreg = MAXLREG;
 	}
 	E.stats = getenv("VCC_EMIT_STATS") != NULL;
-	E.vstats = getenv("VCC_VIR_STATS") != NULL;
+	E.vstats = o->vir_aid.stats;
+	virbuild_pass_switch_read(&E.vpass, o->optimize.vir ? o->vir_aid.passes : NULL);
+	if (o->optimize.vir && o->vir_aid.functions)
+		vw_function_list_read(&E, o->vir_aid.functions);
 	E.rstats = getenv("VCC_REC_STATS") != NULL;
 	E.noopt = getenv("VCC_NOOPT") != NULL;
 	/* wasm64: objects from the text, through arch/wasm/as */

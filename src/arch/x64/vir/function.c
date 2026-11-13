@@ -80,7 +80,6 @@ static const virbuild_lowering_target vx_lowering_target = {
 	.params_in_loop = true,
 	.edits_at_block_end = true,
 	.skip_multi_operands = false,
-	.rotation_cached = false,
 };
 
 VPRIV bool vw_x64(ecx *e, uint32_t sym, const char **why)
@@ -141,7 +140,7 @@ VPRIV bool vw_x64(ecx *e, uint32_t sym, const char **why)
 	if (!allocated) {
 		*why = VIRFAIL(x64_allocation_failed); snprintf(V->detail, sizeof V->detail, "%s", V->ao.err); return false;
 	}
-	if (getenv("VCC_VIR_CHECK")) {
+	if (e->E->o->vir_aid.check) {
 		vbuffer msg = { 0 };
 		uint32_t n = vir_alloc_check(f, &regs, &V->ao, &msg);
 		if (n) fprintf(stderr, "vir x86-64: allocation check: %.*s", (int)msg.n, msg.p ? (char *)msg.p : "");
@@ -175,7 +174,7 @@ VPRIV bool vw_x64(ecx *e, uint32_t sym, const char **why)
 	L.order=layout;L.position=layout+f->nblk;L.rotation=layout+2*f->nblk;L.chase=layout+3*f->nblk;L.lp=&V->lp;
 	L.drv=(virbuild_lowering){ .target=&vx_lowering_target, .ctx=&L, .f=f, .o=&V->ao, .lp=&V->lp,
 		.order=L.order, .position=L.position, .rotation=L.rotation, .chase=L.chase, .path=layout+4*f->nblk,
-		.block_label=L.label, .optimize=!e->E->noopt };
+		.block_label=L.label, .optimize=!e->E->noopt, .rotate=e->E->o->optimize.rotate_loops };
 
 	for (int r = 0; r < 16; r++)
 		if (V->ao.callee[0] >> r & 1) x64_csused(e, r);

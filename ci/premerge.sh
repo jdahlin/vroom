@@ -66,7 +66,11 @@ arm64)
 	step pg-cc-contract python3 bench/pg/test-cc.py
 	step pg-speed-accounting python3 bench/pg/test-speed.py
 	step memory-cells-generated python3 src/tools/gen-memory-cells.py --check
+	# the suites at each code generator (doc/OPTIMIZATION.md): -O2 VIR (the default), -O1 the
+	# direct emitter, -O3 VIR with the vectorizer and its checks (verifier, allocation check)
 	step ctests       python3 bench/vcc-ctests.py -j "$J"
+	step ctests-O1    python3 bench/vcc-ctests.py -j "$J" -O1
+	step ctests-O3    python3 bench/vcc-ctests.py -j "$J" -O3 --vflags "-fvir-verify -fvir-check"
 	step switch-plan python3 bench/vcc-switch-plan.py --sanitize
 	step udivconst python3 bench/vcc-udivconst.py --sanitize
 	step sdivconst python3 bench/vcc-sdivconst.py --sanitize
@@ -142,6 +146,7 @@ asan)
 	# its arenas and caches mapped, by design, so every compile would "leak"
 	export ASAN_OPTIONS=${ASAN_OPTIONS:+$ASAN_OPTIONS:}detect_leaks=0
 	step ctests-vcc   env VCC_BIN="$B" python3 bench/vcc-ctests.py -j "$J" --suite vcc
+	step ctests-vcc-O1 env VCC_BIN="$B" python3 bench/vcc-ctests.py -j "$J" --suite vcc -O1
 	step vir-tests-asan python3 bench/vir-test.py -j "$J" --bin-dir "$B"
 	step vir-exposure-asan python3 bench/vir-exposure.py --bin-dir "$B"
 	step atomic       python3 bench/vcc-atomic.py --bin-dir "$B" --target aarch64-linux-gnu

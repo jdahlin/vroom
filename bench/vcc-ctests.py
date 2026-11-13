@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """vcc-ctests.py: run vendored C compiler test suites through vcc.
 
-  bench/vcc-ctests.py [-j N] [--suite gcc|tcc|vcc|inline] [--fe] [--cpu QEMU_CPU] [-v] [--show CAT] [PAT]
+  bench/vcc-ctests.py [-j N] [-O LEVEL] [--vflags FLAGS] [--suite gcc|tcc|vcc|inline] [--fe] [--cpu QEMU_CPU] [-v] [--show CAT] [PAT]
 
 Suites (src/test/, see the README there):
   gcc  gcc.c-torture/execute: exits 0 on success, abort()s on failure
@@ -40,6 +40,9 @@ fp (floating point the emitter rejects), emit, link, opt (an
 undefined link_error/link_failure: the test checks that the optimizer removed
 a call, and vcc has no such pass), run.
 
+-O1, -O3, ...: vcc's level (default -O2, VIR; -O1 is the direct emitter, doc/OPTIMIZATION.md); a
+test's own -O flags still win, and clang's reference stays at -O2.  --vflags 'FLAGS': more
+flags for vcc alone (-fvir-check, -fvir-passes=..., -fno-rotate-loops).
 --fe stops after the front end (no code, no qemu): fe pass rate only.
 Clang reference results are cached in build/src/ctests/ref (keyed by the
 source, its path, flags and runtime), so a rerun only builds and runs vcc's side.  A vcc object byte-identical
@@ -329,10 +332,10 @@ def one_(t):
     tmo = int(m.group(1)) * TMO_SCALE if m else 60
     if name.startswith('76_dollars'):
         flags = ['-fdollars-in-identifiers']
-    wd = f'{OUT}/w/{suite}/{name}'
+    wd = f'{OUT}/w{VSFX}/{suite}/{name}'
     os.makedirs(wd, exist_ok=True)
     cwd = os.path.dirname(path)
-    vfl = BASE + CLFL + flags   # the same flags as clang (vpp ignores what it does not know)
+    vfl = BASE + [VOPT] + CLFL + flags + VFLAGS   # the same flags as clang (vpp ignores what it does not know), at vcc's level
     if FE_ONLY:
         timeout = reference_timeout(path)
         rc, _, err = sh([CL, '-fsyntax-only'] + BASE + CLFL + flags + [path], cwd=cwd, timeout=timeout)
@@ -366,7 +369,7 @@ def one_(t):
     # an object byte-identical to one that passed before (same runtime, same
     # reference) passes again: no link, no qemu (they are ~90% of the time)
     pk = hashlib.sha1(open(f'{wd}/vcc.o', 'rb').read() + (RTHASH + ref['key'] + os.environ.get('VCC_QEMU_CPU', 'max')).encode()).hexdigest()
-    pf = f'{OUT}/pass/{suite}/{name}'
+    pf = f'{OUT}/pass{VSFX}/{suite}/{name}'
     if not NOCACHE:
         try:
             if open(pf).read() == pk:
@@ -390,9 +393,12 @@ def one_(t):
     open(f'{wd}/vcc.out', 'w').write(out); open(f'{wd}/ref.out', 'w').write(ref['out'])
     return t, 'fail', 'run', why
 
-def init(fe, rth, nocache=False):
-    global FE_ONLY, RTHASH, NOCACHE
-    FE_ONLY, RTHASH, NOCACHE = fe, rth, nocache
+VOPT, VSFX, VFLAGS = '-O2', '', []	# vcc's level and flags; the work and pass directories of another level get its name
+
+def init(fe, rth, nocache=False, vopt='-O2', vflags=()):
+    global FE_ONLY, RTHASH, NOCACHE, VOPT, VSFX, VFLAGS
+    FE_ONLY, RTHASH, NOCACHE, VOPT, VFLAGS = fe, rth, nocache, vopt, list(vflags)
+    VSFX = '' if vopt == '-O2' else vopt
 
 if __name__ == '__main__':
     av = [part for arg in sys.argv[1:]
@@ -401,14 +407,18 @@ if __name__ == '__main__':
     fe = '--fe' in av
     nocache = '--no-cache' in av
     av = [a for a in av if a not in ('--fe', '--no-cache')]
+    vopt = next((a for a in av if re.fullmatch(r'-O[0-9sgz]?|-Ofast', a)), '-O2')
+    av = [a for a in av if not re.fullmatch(r'-O[0-9sgz]?|-Ofast', a)]
     if '-v' in av: verbose = True; av.remove('-v')
     if '--cpu' in av:	# vcc's binaries run on this qemu CPU (cortex-a53: no LSE); clang's on max
         k = av.index('--cpu'); os.environ['VCC_QEMU_CPU'] = av[k + 1]; del av[k:k + 2]
-    for opt in ('-j', '--suite', '--show'):
+    vflags = []
+    for opt in ('-j', '--suite', '--show', '--vflags'):
         if opt in av:
             k = av.index(opt); v = av[k + 1]; del av[k:k + 2]
             if opt == '-j': j = int(v)
             elif opt == '--suite': suite = v
+            elif opt == '--vflags': vflags = v.split()
             else: show = v
     pat = av[0] if av else None
     rth = build_rt()
@@ -416,7 +426,7 @@ if __name__ == '__main__':
     if not ts:
         sys.exit('no tests matched the requested suite/pattern')
     t0 = time.time()
-    with Pool(j, initializer=init, initargs=(fe, rth, nocache)) as pool:
+    with Pool(j, initializer=init, initargs=(fe, rth, nocache, vopt, vflags)) as pool:
         res = pool.map(one, ts, chunksize=1)
     by = defaultdict(Counter)
     whys = defaultdict(Counter)
@@ -449,5 +459,5 @@ if __name__ == '__main__':
                and not json.load(open(f'{OUT}/ref/tcc/{n}.json')).get('expect_ok')]
         if bad:
             print(f'note: clang+rt output differs from tcc .expect for {len(bad)}: {" ".join(bad[:12])}')
-    print(f'{time.time() - t0:.1f} s')
+    print(f'{time.time() - t0:.1f} s (vcc {" ".join([vopt] + vflags)})')
     sys.exit(1 if tot['fail'] or tot['error'] else 0)

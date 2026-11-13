@@ -3,8 +3,8 @@
  *
  * Every bail-out of the builder (codegen/vir/, not a64.c), of arm64's lowering (a64.c), of
  * x86-64's (arch/x64/codegen/vir.c) and of the driver (try.c) names one of
- * these.  The message is what VCC_VIR=s prints; the name is what the
- * statistic VCC_VIR_STATS=1 counts (try.c, tu.c).  Add a reason here and use
+ * these.  The message is what -fvir-report prints; the name is what the
+ * statistic -fvir-stats counts (try.c, tu.c).  Add a reason here and use
  * VIRFAIL(name) at the bail-out; never test the message text.
  */
 #ifndef VCC_CODEGEN_VIR_FAILURE_H

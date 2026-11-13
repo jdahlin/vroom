@@ -141,20 +141,11 @@ static void vl_remat(vl *L, uint8_t dst, uint32_t v, int t)
 		vl_mat(L, v, vl_gx(dst));
 }
 
-/* VCC_VL_PROBE=MASK (measuring): a nop after every allocator edit of the kinds in MASK, so
+/* -fvir-probe=MASK (measuring): a nop after every allocator edit of the kinds in MASK, so
  * that instructions retired minus an unprobed run's is how often that kind executes.
  * Bits: 0 reload, 1 remat, 2 move, 3 store (edits before an instruction); 4 remat, 5 store,
  * 6 reload, 7 move (on an edge).  An upper bound: the nop also stops the record folds. */
-static int vl_probe(void)
-{
-	static int m = -1;
-
-	if (m < 0)
-		m = getenv("VCC_VL_PROBE") ? atoi(getenv("VCC_VL_PROBE")) : 0;
-	return m;
-}
-
-#define PROBE(bit) do { if (vl_probe() >> (bit) & 1) word(L->e, 0xd503201f); } while (0)
+#define PROBE(bit) do { if (L->e->E->o->vir_aid.probe >> (bit) & 1) word(L->e, 0xd503201f); } while (0)
 
 /* one allocator edit, before the instruction it is positioned at */
 VPRIV void vl_edit(vl *L, const vir_edit *x)

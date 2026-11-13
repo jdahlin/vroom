@@ -189,6 +189,15 @@ typedef struct em_cg_edge {uint32_t callee,call;} em_cg_edge;
 
 #define REC_PASS_MAX 24
 
+/* -fvir-passes (codegen/vir/pass-table.c reads it, once per TU) */
+typedef struct virbuild_pass_switch {
+	uint64_t skip;		/* bit per row: left out */
+	uint64_t verify;	/* bit per row: the check runs after it */
+	bool time;		/* per pass: runs, changed, instructions (with -fvir-stats) */
+	bool analyses;		/* a VIR pass's `keeps` is checked against a fresh computation (vir_pass_run) */
+	bool active;		/* skip, verify or time: vw_emit takes the instrumented path */
+} virbuild_pass_switch;
+
 typedef struct emitter {
 	cc *c;
 	const cc_opts *o;
@@ -234,9 +243,11 @@ typedef struct emitter {
 	_Atomic uint32_t nerrcall;	/* error() calls dropped (not folded) */	/* VCC_EMIT_STATS: time in finish_function */
 	const keep *K;			/* the previous round's functions, or NULL */
 	bool stats;
-	/* VCC_VIR_STATS: functions through VIR and the reasons it gave up on one (codegen/vir/try.c) */
+	/* -fvir-stats: functions through VIR and the reasons it gave up on one (codegen/vir/try.c) */
 	bool vstats;
-	_Atomic uint64_t vattempted, vlowered, vbuilt;	/* vbuilt: built but not lowered (VCC_VIR without l) */
+	_Atomic uint64_t vattempted, vlowered, vbuilt;	/* vbuilt: built but not lowered (-fno-vir-lower) */
+	virbuild_pass_switch vpass;	/* -fvir-passes */
+	char *vlist;			/* -fvir-functions: "\nNAME\nNAME\n", or NULL: every function */
 	struct {
 		_Atomic uint32_t count;
 		uint32_t sym;		/* the first function that failed so (under emu) */
@@ -968,9 +979,11 @@ VPRIV void wk_ecx_free(ecx *e);
 VPRIV bool vw_x64(ecx *e, uint32_t s, const char **why);
 VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why);	/* codegen/vir/a64.c: the built VIR as arm64 records */
 VPRIV const vir_failure_info vir_failure_table[VIRFAIL_COUNT];
-VPRIV void vw_stats_print(emitter *E);	/* VCC_VIR_STATS: one line of totals, one per reason (stderr) */
-VPRIV bool vw_try(ecx *e, uint32_t s);	/* codegen/vir/: s through VIR (VCC_VIR); false: emit it as before */
-VPRIV bool vw_enabled(const cc_opts *o);	/* VIR lowers functions (VCC_VIR with l, -O2) */
+VPRIV void vw_stats_print(emitter *E);	/* -fvir-stats: one line of totals, one per reason (stderr) */
+VPRIV bool vw_try(ecx *e, uint32_t s);	/* codegen/vir/: s through VIR (-O2: cc_opts.optimize.vir); false: emit it as before */
+VPRIV bool vw_enabled(const cc_opts *o);	/* VIR lowers functions (-O2, and not -fno-vir or -fno-vir-lower) */
+VPRIV void vw_function_list_read(emitter *E, const char *path);	/* -fvir-functions=FILE into E->vlist */
+VPRIV void virbuild_pass_switch_read(virbuild_pass_switch *w, const char *items);	/* -fvir-passes=ITEMS (NULL: none) */
 VPRIV void vw_wk_ecx_free(ecx *e);
 VPRIV void wasm_data_ref(ecx *e, uint32_t ref);
 VPRIV void wasm_header(cc *c, tbuf *hdr, ecx *ctx, int nthr);

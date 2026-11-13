@@ -123,16 +123,15 @@ def cases(d):
     # every symbol: clang's -fspell-checking-limit of 50 attempts bounds it; records are in an arena)
     case('errors-40k', 'error', {'a.c': 'int counter;\n' + ''.join(f'int v{i} = countr + undeclared{i};\n' for i in range(40000))},
          'a.c', ['-ferror-limit=0'], budget=3)
-    # VIR (VCC_VIR=bl, without vccd): limits end in the ordinary code generator, not a crash.
+    # VIR (-O2, without vccd): limits end in the ordinary code generator, not a crash.
     # A variable read 60 000 blocks below its definition (the builder's SSA lookup recurses per
     # block), and a loop that carries 66 000 variables (a block takes 65 535 parameters).
-    VIR = {'VCC_VIR': 'bl'}
     case('vir-read-60k-blocks-down', 'ok', {'a.c': 'int g(int); int f(int a){ int x = g(a); int s = 0;\n' +
-         ''.join(f' if (a & {i + 1}) s += {i};\n' for i in range(60000)) + ' return s + x;}\n'}, 'a.c', ['-O2'], env=VIR)
+         ''.join(f' if (a & {i + 1}) s += {i};\n' for i in range(60000)) + ' return s + x;}\n'}, 'a.c', ['-O2'])
     case('vir-66k-loop-variables', 'ok', {'a.c': 'int g(int);\nlong f(int a){\n' +
          ''.join(f' int v{i}=a+{i};\n' for i in range(66000)) + ' while(g(a)){\n' +
          ''.join(f' v{i}+=a;\n' for i in range(66000)) + ' }\n long r=0;\n' +
-         ''.join(f' r+=v{i};\n' for i in range(66000)) + ' return r; }\n'}, 'a.c', ['-O2'], env=VIR)
+         ''.join(f' r+=v{i};\n' for i in range(66000)) + ' return r; }\n'}, 'a.c', ['-O2'])
     # the decl cache (driver/ccsnap.c): TUs restore the snapshot of a shared header prefix on
     # other threads; a parse error after the restore jumps to this TU's recovery point
     hdr = ''.join(f'struct s{i} {{ int a; long b; }};\nint f{i}(struct s{i} *p);\n' for i in range(400))

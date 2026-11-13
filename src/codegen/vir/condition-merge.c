@@ -94,22 +94,17 @@ VPRIV bool vw_condmerge(ecx *e)
 				if (X == S || X == b)
 					continue;
 				{
-					/* VCC_CCMP: `all` joins every such pair, `off` none.  The default joins only where
+					/* -fvir-ccmp=: `all` joins every such pair, `none` none.  The default (`select`) joins only where
 					 * the if-conversion can follow (X an empty arm into O, or both into one block: a
 					 * value, not control flow).  Joining a plain branch pair costs the second compare
 					 * whenever the first decided alone, and pays only when the branches mispredict:
 					 * measured on sqlite, all: +0.4 % instructions, cycles unchanged (PLAN-vir.md). */
-					static _Thread_local int mode = -1;
+					int mode = e->E->o->vir_aid.ccmp;
 					uint32_t dn = 0;
 
-					if (mode < 0) {
-						const char *m = getenv("VCC_CCMP");
-
-						mode = !m ? 1 : !strcmp(m, "off") ? 0 : !strcmp(m, "all") ? 2 : 1;
-					}
-					if (!mode)
+					if (mode == CC_CCMP_NONE)
 						continue;
-					if (mode == 1) {
+					if (mode == CC_CCMP_SELECT) {
 						bool ex = vw_armempty(V, X, S, 0, &dn);
 						uint32_t jx = ex ? V->p[V->b[X].term].in.a : VW_NOBLK;
 						const vwb *ko = &V->b[O];

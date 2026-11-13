@@ -90,11 +90,11 @@ VPRIV bool vw_to_vir(ecx *e)
 	return true;
 }
 
-/* the passes of the table (pass-table.c) in order; with VCC_VIR_PASSES set, through the instrumented
+/* the passes of the table (pass-table.c) in order; with -fvir-passes given, through the instrumented
    step (timing, leaving out, checking); false: the function cannot go through VIR (V->why) */
 VPRIV bool vw_emit(ecx *e)
 {
-	const virbuild_pass_switch *w = virbuild_pass_switch_get();
+	const virbuild_pass_switch *w = &e->E->vpass;
 	uint32_t n, valid = 0;
 	const virbuild_pass *t = virbuild_pass_list(&n);
 	bool last = false;	/* what the last row without PASS_IF_PREVIOUS_CHANGED returned */

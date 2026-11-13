@@ -7,7 +7,7 @@
  * test is rotated so the back edge is the conditional branch, and `chase` skips empty blocks so that
  * a branch targets the real destination.  The module allocates nothing (the caller owns the arrays,
  * f->nblk entries each) and emits no CPU code: the lowering still emits its own instructions and edge
- * copies from this plan.  VCC_VIR_ROT=0 turns rotation off.  A lowering that follows the plan
+ * copies from this plan.  -fno-rotate-loops turns rotation off.  A lowering that follows the plan
  * without duplicating the test on entry edges when vir_layout_duplicate asks produces wrong
  * control flow.
  */

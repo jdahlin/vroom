@@ -1,6 +1,6 @@
 /*
  * The VIR builder's passes as one table (pass-table.c), in the order vw_emit
- * (pipeline.c) runs them, and VCC_VIR_PASSES, the switch that times, skips
+ * (pipeline.c) runs them, and -fvir-passes, the switch that times, skips
  * and checks them by name (doc/quality/WORK-vir.md step 2b, SPEC-vir.md 16).
  *
  * A row names facts about the pre-IR, not arrays, so that a row can later run
@@ -24,19 +24,19 @@ enum {
 
 /* flags of a row */
 enum {
-	PASS_REQUIRED = 1,		/* later code relies on it: VCC_VIR_PASSES cannot leave it out */
+	PASS_REQUIRED = 1,		/* later code relies on it: -fvir-passes cannot leave it out */
 	PASS_THEN_TRIVIAL = 2,		/* when it changed something: vw_trivial to a fixed point */
 	PASS_IF_PREVIOUS_CHANGED = 4,	/* runs only if the last row without this flag ran and changed something */
-	PASS_VECTOR_GATE = 8,		/* under the vectorizer's gate (VCC_VIR_VEC, -mgeneral-regs-only), which
+	PASS_VECTOR_GATE = 8,		/* under the vectorizer's gate (-fvectorize, -fhoist-loop-constants, -mgeneral-regs-only), which
 					   the pass tests itself */
 	PASS_FIXED_POINT = 16,		/* run again while it changes something (vw_trivial) */
 	PASS_CHANGE_UNKNOWN = 32,	/* returns nothing: its "changed" is not counted */
 	PASS_ON_VIR = 64,		/* works on VIR (V->f), not the pre-IR: checked by vir_verify */
-	PASS_OFF_BY_DEFAULT = 128,	/* skipped unless VCC_VIR_PASSES says +NAME or only=...NAME */
+	PASS_OFF_BY_DEFAULT = 128,	/* skipped unless -fvir-passes says +NAME or only=...NAME */
 };
 
 typedef struct virbuild_pass {
-	const char *name;	/* stable; VCC_VIR_PASSES and the statistics use it */
+	const char *name;	/* stable; -fvir-passes and the statistics use it */
 	bool (*run)(ecx *e);	/* returns whether it changed anything; a failure is vw_fail */
 	uint8_t needs;		/* PIR_*: facts it reads */
 	uint8_t makes;		/* PIR_*: facts it computes */
@@ -46,17 +46,10 @@ typedef struct virbuild_pass {
 				   virbuild_pass_vir_run; run is NULL then, and the names agree */
 } virbuild_pass;
 
-/* VCC_VIR_PASSES, read once per process */
-typedef struct virbuild_pass_switch {
-	uint64_t skip;		/* bit per row: left out */
-	uint64_t verify;	/* bit per row: the check runs after it */
-	bool time;		/* per pass: runs, changed, instructions (with VCC_VIR_STATS) */
-	bool active;		/* any of the above: vw_emit takes the instrumented path */
-} virbuild_pass_switch;
+/* (the switch -fvir-passes fills, virbuild_pass_switch, is the emitter's: emitimpl.h) */
 
 /* pass-table.c */
 VPRIV const virbuild_pass *virbuild_pass_list(uint32_t *n);
-VPRIV const virbuild_pass_switch *virbuild_pass_switch_get(void);
 VPRIV bool virbuild_pass_step(ecx *e, const virbuild_pass *p);
 VPRIV bool virbuild_pass_step_instrumented(ecx *e, uint32_t i, uint32_t *valid);
 VPRIV void virbuild_pass_note(emitter *E, uint32_t row, uint64_t instructions);

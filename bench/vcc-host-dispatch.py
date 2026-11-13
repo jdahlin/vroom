@@ -71,7 +71,7 @@ def main():
         for label, prefix in prefixes:
             for crc in ('software', 'auto'):
                 for simd in ('scalar', 'avx2', 'auto'):
-                    env = dict(os.environ, VCC_CRC=crc, VCC_LEX_SIMD=simd, VCC_VIR='0')
+                    env = dict(os.environ, VCC_CRC=crc, VCC_LEX_SIMD=simd)
                     def run(command):
                         return subprocess.run(prefix+list(map(str, command)), env=env,
                                               capture_output=True, check=True, timeout=30).stdout

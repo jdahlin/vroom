@@ -2,15 +2,15 @@
 """zlib as a test corpus and code-quality benchmark (TODO.md T13/T15).
 
   bench/zlib/run.py fetch                     # zlib tarball -> work/zlib (once, SHA-256 checked)
-  bench/zlib/run.py build [clang vcc vir gcc] # the library, example, minigzip, zbench
-  bench/zlib/run.py test  [clang vcc vir]     # self-tests, and the same bytes as clang's build
-  bench/zlib/run.py speed [-n 3] [--corpus FILE] [clang vcc vir gcc]
+  bench/zlib/run.py build [clang vcc vir vir3 gcc] # the library, example, minigzip, zbench
+  bench/zlib/run.py test  [clang vcc vir vir3]    # self-tests, and the same bytes as clang's build
+  bench/zlib/run.py speed [-n 3] [--corpus FILE] [clang vcc vir vir3 gcc]
   bench/zlib/run.py all                       # build, test, speed
 
 Each compiler builds zlib's 15 library files with -O2 into work/zlib/b-NAME
 (no configure: zconf.h works as shipped); clang compiles the test programs
-and links, so only the library differs.  `vcc` is vpp's direct emitter,
-`vir` is vpp with VCC_VIR=bl (the -O2 path through VIR).
+and links, so only the library differs.  `vcc` is vpp's direct emitter (-O1),
+`vir` is vpp at -O2 (through VIR), `vir3` at -O3 (VIR with the loop vectorizer).
 `test`: zlib's own example and infcover, a minigzip round trip checked by
 the system gzip, and zbench's sizes and CRCs equal to the clang build's
 (deflate is deterministic, so a miscompiled matcher shows as other bytes).
@@ -44,7 +44,7 @@ def find_gcc():
 
 
 GCC = find_gcc()
-CC = {'clang': (CLANG, {}), 'gcc': (GCC, {}), 'vcc': (VPP, {'VCC_VIR': '0'}), 'vir': (VPP, {'VCC_VIR': 'bl'})}
+CC = {'clang': (CLANG, []), 'gcc': (GCC, []), 'vcc': (VPP, ['-O1']), 'vir': (VPP, ['-O2']), 'vir3': (VPP, ['-O3'])}
 
 
 def sh(cmd, **kw):
@@ -68,16 +68,15 @@ def fetch():
 
 def build(name):
     fetch()
-    cc, env = CC[name]
+    cc, level = CC[name]
     if not cc:
         sys.exit(f'{name}: no compiler (set GCC)')
     b = os.path.join(W, 'b-' + name)
     shutil.rmtree(b, ignore_errors=True)
     os.makedirs(b)
-    env = dict(os.environ, **env)
     t = time.time()
     for f in LIB:
-        p = subprocess.run([cc] + FLAGS + ['-c', os.path.join(SRC, f + '.c'), '-o', f + '.o'], cwd=b, env=env)
+        p = subprocess.run([cc] + FLAGS + level + ['-c', os.path.join(SRC, f + '.c'), '-o', f + '.o'], cwd=b)
         if p.returncode:
             sys.exit(f'{name}: {f}.c does not compile')
     ct = time.time() - t
@@ -172,7 +171,7 @@ def main():
         i = a.index('-n'); n = int(a[i + 1]); del a[i:i + 2]
     if '--corpus' in a:
         i = a.index('--corpus'); corpus = os.path.abspath(a[i + 1]); del a[i:i + 2]
-    dflt = ['clang', 'vcc', 'vir']
+    dflt = ['clang', 'vcc', 'vir', 'vir3']
     if cmd == 'fetch':
         fetch()
     elif cmd == 'build':

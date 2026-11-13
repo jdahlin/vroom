@@ -80,6 +80,9 @@ struct driver_job {
 	const char *x86_cpu;
 	int nosse, nosse2, nommx;	/* x86-64: -mno-sse, -mno-sse2, -mno-mmx (last one wins) */
 	uint64_t disabled_builtins[CC_DISABLED_BUILTIN_WORDS];
+	/* optimization.c: per row of CC_OPTIMIZATIONS, 1 -fNAME, -1 -fno-NAME, 0 the level decides; the -fvir-* aids */
+	signed char optimization[CC_OPTIMIZATION_COUNT];
+	cc_vir_aids vir_aid;
 	int omit_frame_pointer;	/* unspecified: x86 enables omission above -O0 */
 	int sibling_calls;	/* explicit sibling-call flags are ordered independently of -O */
 	int xcf, pfe_n, pfe_m, sprot, sp_gs, autozero;
@@ -148,6 +151,10 @@ VPRIV int explain(int argc, char **argv, const ppd_env *env);
 /* cmdline.c: 0 to go on, 1 to end the job (status set), 2 to return 1 at once (the -ftls-model= error) */
 VPRIV int driver_cmdline_parse(struct driver_job *job, int argc, char **argv);
 VPRIV int driver_cmdline_check(struct driver_job *job);
+/* optimization.c */
+VPRIV int driver_optimization_level(const char *s);
+VPRIV bool driver_optimization_option(struct driver_job *job, const char *a);
+VPRIV cc_optimizations driver_optimization_resolve(const struct driver_job *job);
 /* warning-groups.c */
 VPRIV int driver_warning_groups_check(struct driver_job *job);
 /* job.c */

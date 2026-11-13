@@ -1,4 +1,5 @@
-/* Scalar gathers/scatters must touch only their selected elements. Ordered sums must round at every addition. */
+/* vcc-flags: -O3 */
+/* The loop vectorizer (-O3): scalar gathers/scatters must touch only their selected elements. Ordered sums must round at every addition. */
 #define NI __attribute__((noinline))
 NI void stride(float *o,const float *a,int n) {for(long i=0;i<n;i++)o[3*i]=a[2*i]*2.f;}
 NI void intstride(float *o,const float *a,int n) {for(int i=0;i<n;i++)o[2*i]=a[i]*2.f;}

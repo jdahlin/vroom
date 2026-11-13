@@ -1363,18 +1363,6 @@ static void vv_place(vvs *S)
 	V->norder += 5;
 }
 
-static int vv_env(void)
-{
-	static _Thread_local int m = -1;
-
-	if (m < 0) {
-		const char *s = getenv("VCC_VIR_VEC");	/* 0: off; r: report each loop to stderr; n: no constants hoisted */
-
-		m = s && !strcmp(s, "0") ? 0 : 1 | (s && strchr(s, 'r') ? 2 : 0) | (s && strchr(s, 'n') ? 4 : 0);
-	}
-	return m;
-}
-
 VPRIV void vw_vectorize(ecx *e)
 {
 	vwst *V = e->vw;
@@ -1382,7 +1370,11 @@ VPRIV void vw_vectorize(ecx *e)
 	uint32_t n0 = V->norder, *hs, nh = 0, loc = e->curloc;
 	char nm[100];
 
-	if (!vv_env() || e->E->o->general_regs_only || !vw_enabled(e->E->o))
+	const cc_optimizations *on = &e->E->o->optimize;
+
+	/* the innermost loops: -fvectorize makes them vector loops, -fhoist-loop-constants makes
+	   their constants in front of them; neither with -mgeneral-regs-only (PASS_VECTOR_GATE) */
+	if ((!on->vectorize && !on->hoist_loop_constants) || e->E->o->general_regs_only || !vw_enabled(e->E->o))
 		return;
 	hs = malloc(((size_t)n0 + 1) * sizeof *hs);
 	if (!hs)
@@ -1431,16 +1423,16 @@ VPRIV void vw_vectorize(ecx *e)
 		}
 		for (uint32_t k = 0; k < S.nlb; k++)
 			S.inl[S.lb[k]] = 1;
-		done = vv_loop(&S);
+		done = on->vectorize && vv_loop(&S);
 		if (done)
 			vv_place(&S);
-		if (!(vv_env() & 4)) {
+		if (on->hoist_loop_constants) {
 			if (done)
 				vv_pin(&S, S.J);
 			else if (V->p[V->b[S.P].term].in.op == VO_BR && V->p[V->b[S.P].term].in.a == H)
 				vv_pin(&S, S.P);
 		}
-		if (vv_env() & 2) {
+		if (on->vectorize && e->E->o->vir_aid.vectorize_report) {
 			const vident *id = &vintern_ents[e->c->syms[e->wk->fsym].name];
 
 			snprintf(nm, sizeof nm, "%.*s", (int)id->len, id->s);

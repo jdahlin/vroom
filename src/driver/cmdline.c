@@ -289,9 +289,13 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
 			job->raw_asm = !strcmp(argv[i], "assembler") ? 1 : 0;
 			job->xlang = strcmp(argv[i], "none") != 0;
 		}
-		else if (!strcmp(a, "-O0")) job->opt = 0, job->os = 0, job->olevel = 0;
-		else if (!strcmp(a, "-Os") || !strcmp(a, "-Oz")) { job->opt = 2; job->os = 1; job->olevel = 2; }
-		else if (!strncmp(a, "-O", 2)) job->opt = 2, job->os = 0, job->olevel = !strcmp(a, "-O1") || !strcmp(a, "-Og") ? 1 : 2;
+		/* opt: __OPTIMIZE__ (predef.c); olevel: the code generator's level, 0-3 (optimization.c) */
+		else if (!strncmp(a, "-O", 2)) {
+			job->olevel = driver_optimization_level(a + 2);
+			job->opt = job->olevel ? 2 : 0;
+			job->os = !strcmp(a, "-Os") || !strcmp(a, "-Oz");
+		}
+		else if (driver_optimization_option(job, a)) ;
 		else if (!strcmp(a, "-fpie")) job->pie = 1, job->pic = 0;
 		else if (!strcmp(a, "-fPIE")) job->pie = 2, job->pic = 0;
 		else if (!strcmp(a, "-fpic")) job->pic = 1, job->pie = 0;

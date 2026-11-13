@@ -177,7 +177,7 @@ static void job_compile(struct driver_job *job, pp *p, const ppd_env *env)
 				.strict_std = job->strict,
 				.fast_math = job->fast_root4 && (job->fmath & 7) == 7, .no_fp_contract = job->nocontract, .gnu89_inline = job->gnu89_inline, .no_builtin = job->freestanding || job->nobuiltin, .no_jump_tables = job->nojt, .instrument = job->instr, .wasm_sjlj = job->sjlj,
 				.x86_features = job->x86_features_, .x86_disabled = job->x86_disabled, .x86_features_set = job->x86, .x86_raw = job->x86_raw, .x86_override_on = job->x86_on, .x86_override_off = job->x86_off,
-				.general_regs_only = job->gregs || (job->x86 && (job->nosse || job->nosse2)), .vcc_kernel = job->vcc_kernel, .lse = job->lse, .opt = job->olevel, .wrapv = job->wrapv, .pic = job->pic ? 2 : job->pie ? 1 : 0, .tlsmodel = job->tlsmodel, .sections = job->sections, .debug = job->debug, .cfi = job->cfi > 0, .dbg_name = job->main_file,
+				.general_regs_only = job->gregs || (job->x86 && (job->nosse || job->nosse2)), .vcc_kernel = job->vcc_kernel, .lse = job->lse, .opt = job->olevel, .optimize = driver_optimization_resolve(job), .vir_aid = job->vir_aid, .wrapv = job->wrapv, .pic = job->pic ? 2 : job->pie ? 1 : 0, .tlsmodel = job->tlsmodel, .sections = job->sections, .debug = job->debug, .cfi = job->cfi > 0, .dbg_name = job->main_file,
 				.omit_frame_pointer = job->x86 && (job->omit_frame_pointer < 0 ? job->olevel > 0 : job->omit_frame_pointer),
 				.sibling_calls = job->sibling_calls,
 				.xcf = job->x86 ? job->xcf : 0, .pfe_n = job->x86 ? job->pfe_n : 0, .pfe_m = job->pfe_m, .sprot = job->x86 ? job->sprot : 0, .sp_gs = job->sp_gs, .sp_sym = job->sp_sym, .autozero = job->x86 ? job->autozero : 0,

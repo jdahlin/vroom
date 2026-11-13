@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 """vcc-same.py: are vcc's outputs byte-identical with another build's?
 
-  bench/vcc-same.py --base DIR [-j N] [--pat RE] [--modes M,...]
+  bench/vcc-same.py --base DIR [-j N] [--pat RE] [--modes M,...] [--vflags F] [--base-vflags F]
 
 For a change that must not alter code generation (a refactor; a new target
 that must leave arm64 alone, PLAN-wasm.md): every C file of the test suites
 (src/test: gcc-torture, tcc-tests2, vcc) is compiled by DIR/vpp and by
 this tree's vpp in each mode, and the outputs (exit status, object or text)
-are compared.  Modes (default all): c0 c1 c2 (-c -O0/-O1/-O2, Linux), s2 (-S
--O2, Linux), e (-E), d2 (-c -O2, arm64 Darwin), ds (-S -O2, Darwin).  The flags
+are compared.  Modes (default all): c0 c1 c2 c3 (-c -O0/-O1/-O2/-O3, Linux),
+s2 s3 (-S -O2/-O3, Linux), e (-E), d2 (-c -O2, arm64 Darwin), ds (-S -O2,
+Darwin).  c0 and c1 are the direct emitter, the -O2 and -O3 modes VIR
+(doc/OPTIMIZATION.md).  --vflags 'F' adds flags to this tree's vpp alone,
+--base-vflags to DIR's (an option's effect against the base: --vflags
+'-fno-rotate-loops' --modes s2 shows what rotation changes).  The flags
 are vcc-ctests.py's (its freestanding runtime headers), so no system headers
 are involved.  The kernel side is `bench/vbench.py check --base DIR`.
 
@@ -28,7 +32,8 @@ COMMON = ['-nostdinc', '-I', f'{T}/rt/include', '-isystem', RES, '-fno-PIE', '-f
           '-fno-stack-protector', '-w', '-fno-strict-aliasing', '-ffp-contract=off']
 LNX, DAR = '--target=aarch64-linux-gnu', '--target=arm64-apple-darwin'
 MODES = {
-    'c0': [LNX, '-c', '-O0'], 'c1': [LNX, '-c', '-O1'], 'c2': [LNX, '-c', '-O2'], 's2': [LNX, '-S', '-O2'],
+    'c0': [LNX, '-c', '-O0'], 'c1': [LNX, '-c', '-O1'], 'c2': [LNX, '-c', '-O2'], 'c3': [LNX, '-c', '-O3'],
+    's2': [LNX, '-S', '-O2'], 's3': [LNX, '-S', '-O3'],
     'e': [LNX, '-E', '-O2'], 'd2': [DAR, '-c', '-O2'], 'ds': [DAR, '-S', '-O2'],
 }
 
@@ -57,11 +62,11 @@ def run(vpp, args, path, tmp):
 
 
 def one(job):
-    base, mode, path = job
+    base, mode, path, bfl, vfl = job
     tag = f'{os.getpid()}-{mode}'
     tmp = os.path.join(os.environ.get('TMPDIR', '/tmp'), f'vcc-same-{tag}')
-    a = run(f'{base}/vpp', MODES[mode], path, tmp + '-a')
-    b = run(VPP, MODES[mode], path, tmp + '-b')
+    a = run(f'{base}/vpp', MODES[mode] + bfl, path, tmp + '-a')
+    b = run(VPP, MODES[mode] + vfl, path, tmp + '-b')
     return mode, path, a, b
 
 
@@ -72,7 +77,9 @@ def main(av):
     j = int(av[av.index('-j') + 1]) if '-j' in av else 6
     pat = av[av.index('--pat') + 1] if '--pat' in av else None
     modes = av[av.index('--modes') + 1].split(',') if '--modes' in av else list(MODES)
-    jobs = [(base, m, f) for f in files(pat) for m in modes]
+    vfl = av[av.index('--vflags') + 1].split() if '--vflags' in av else []
+    bfl = av[av.index('--base-vflags') + 1].split() if '--base-vflags' in av else []
+    jobs = [(base, m, f, bfl, vfl) for f in files(pat) for m in modes]
     bad = 0
     with Pool(j) as pool:
         for mode, path, a, b in pool.imap_unordered(one, jobs, chunksize=8):

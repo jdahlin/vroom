@@ -89,29 +89,13 @@ VPRIV void virbuild_lower_block(const virbuild_lowering *d, uint32_t b)
 		t->block_end(ctx, b);
 }
 
-/* VCC_VIR_ROT=0 keeps VIR's block order */
-static bool virbuild_rotation_wanted(bool cached)
-{
-	static int once = -1;
-
-	if (!cached || once < 0) {
-		const char *s = getenv("VCC_VIR_ROT");
-		int v = !(s && *s == '0');
-
-		if (!cached)
-			return v;
-		once = v;
-	}
-	return once;
-}
-
 VPRIV void virbuild_lower_body(const virbuild_lowering *d)
 {
 	const virbuild_lowering_target *t = d->target;
 	vir_fn *f = d->f;
 
 	vir_layout_chases(f, d->o, d->chase, d->path);
-	vir_layout_order(f, d->lp, d->chase, virbuild_rotation_wanted(t->rotation_cached) && d->optimize, d->order, d->position, d->rotation);
+	vir_layout_order(f, d->lp, d->chase, d->rotate && d->optimize, d->order, d->position, d->rotation);
 	if (t->order_adjust)
 		t->order_adjust(d->ctx);
 	if (t->body_begin)

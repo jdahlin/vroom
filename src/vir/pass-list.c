@@ -3,13 +3,12 @@
  * no order (the -O2 order is the builder's table, codegen/vir/pass-table.c;
  * virtest runs the order a test names), and vir_pass_run, which runs a pass
  * and, when asked, checks the claim of its `keeps` row against a fresh
- * computation (VCC_VIR_CHECK_ANALYSES=1).
+ * computation (vir_pass_context.check_analyses).
  *
  * `compact` is the registry's first row: vir_function_compact as a pass, so
  * that virtest can run, verify and print a pass end to end.  It is not a row
  * of the compiler's table.
  */
-#include <pthread.h>
 
 #include "virimpl.h"
 #include "vir/pass.h"
@@ -43,16 +42,6 @@ const vir_pass_info *vir_pass_find(const char *name, size_t n)
 }
 
 /* ---------------- the check of `keeps` ---------------- */
-
-static bool vir_check_env;
-static pthread_once_t vir_check_once = PTHREAD_ONCE_INIT;
-
-static void vir_check_read(void)
-{
-	const char *s = getenv("VCC_VIR_CHECK_ANALYSES");
-
-	vir_check_env = s && *s && *s != '0';
-}
 
 /* The analyses of `keeps` still marked valid in f are computed again and compared.  Debug runs only: it
  * copies what it compares (malloc), puts f back as it found it, and returns the name of the first stale
@@ -120,8 +109,7 @@ bool vir_pass_run(vir_fn *f, const vir_pass_info *p, vir_pass_context *ctx, char
 
 	if (n)
 		*err = 0;
-	pthread_once(&vir_check_once, vir_check_read);
-	if (n && (ctx->checked || vir_check_env)) {
+	if (n && (ctx->checked || ctx->check_analyses)) {
 		const char *bad = vir_analyses_check(f, p->keeps);
 
 		if (bad)
