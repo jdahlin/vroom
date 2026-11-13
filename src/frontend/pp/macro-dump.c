@@ -43,8 +43,8 @@ static void pp_macro_dump_one(char **bp, size_t *np, size_t *capp, uint32_t id, 
 	pp_macro_dump_append(bp, np, capp, vintern_ents[id].s, vintern_ents[id].len);
 	if (m->kind == PP_MACRO_FUNCTION_LIKE) {
 		/* spelled from kinds and ids: a canonical copy's src is its body's text only */
-		for (uint32_t j = 0; j < m->nplist; j++) {
-			const lex_token *q = &m->plist[j];
+		for (uint32_t j = 0; j < m->parameter_list_count; j++) {
+			const lex_token *q = &m->parameter_list[j];
 
 			if (q->kind == LEX_TOKEN_IDENTIFIER)
 				pp_macro_dump_append(bp, np, capp, vintern_ents[q->id].s, vintern_ents[q->id].len);
@@ -54,10 +54,10 @@ static void pp_macro_dump_one(char **bp, size_t *np, size_t *capp, uint32_t id, 
 		}
 	}
 	pp_macro_dump_append(bp, np, capp, " ", 1);
-	for (uint32_t j = 0; j < m->nbody; j++) {
+	for (uint32_t j = 0; j < m->body_count; j++) {
 		if (j && (m->body[j].flags & LEX_TOKEN_FLAG_SPACE_BEFORE))
 			pp_macro_dump_append(bp, np, capp, " ", 1);
-		pp_macro_dump_token(bp, np, capp, m->src, &m->body[j]);
+		pp_macro_dump_token(bp, np, capp, m->source, &m->body[j]);
 	}
 	pp_macro_dump_append(bp, np, capp, "\n", 1);
 }
@@ -75,10 +75,10 @@ static void pp_macro_define_event_print(pp *p, uint32_t id, const pp_macro *m)
 		pp_macro_dump_append(&b, &n, &cap, vintern_ents[id].s, vintern_ents[id].len);
 		pp_macro_dump_append(&b, &n, &cap, "\n", 1);
 	}
-	if (p->col)
+	if (p->output_column)
 		pp_output_append_character(p, '\n');
 	pp_output_append(p, b, n);
-	p->col = 0;
+	p->output_column = 0;
 	free(b);
 }
 
@@ -87,20 +87,20 @@ static void pp_macro_define_event_print(pp *p, uint32_t id, const pp_macro *m)
  * <built-in>'s directives (the command line's -D/-U) one by one */
 VPRIV void pp_macro_define_events_flush(pp *p)
 {
-	uint8_t *done = calloc(p->ndd + 1, 1);
+	uint8_t *done = calloc(p->define_event_count + 1, 1);
 
 	p->define_events_printed = 1;
-	for (int k = 0; k < p->o->ndd_order; k++) {
-		const char *s = p->o->dd_order[k];
+	for (int k = 0; k < p->options->ndd_order; k++) {
+		const char *s = p->options->dd_order[k];
 		uint32_t id = vintern_find(s, strlen(s), vintern_hash(s, strlen(s))), any = 0;
 
-		for (uint32_t i = 0; id && i < p->ndd; i++)
+		for (uint32_t i = 0; id && i < p->define_event_count; i++)
 			if (p->define_events[i].id == id)
 				done[i] = 1, any = 1;
 		if (any && pp_macro_table_get(p, id))
 			pp_macro_define_event_print(p, id, (const pp_macro *)(pp_macro_table_get(p, id) & ~(uintptr_t)1));
 	}
-	for (uint32_t i = 0; i < p->ndd; i++)
+	for (uint32_t i = 0; i < p->define_event_count; i++)
 		if (!done[i])
 			pp_macro_define_event_print(p, p->define_events[i].id, p->define_events[i].m);
 	free(done);
@@ -113,10 +113,10 @@ VPRIV void pp_macro_define_events_flush(pp *p)
 VPRIV void pp_macro_define_event_record(pp *p, uint32_t id, const pp_macro *m, bool builtin)
 {
 	if (builtin && !p->define_events_printed) {
-		if (p->ndd == p->define_event_capacity)
+		if (p->define_event_count == p->define_event_capacity)
 			p->define_events = realloc(p->define_events, (p->define_event_capacity = p->define_event_capacity ? 2 * p->define_event_capacity : 1024) * sizeof(*p->define_events));
-		p->define_events[p->ndd].id = id;
-		p->define_events[p->ndd++].m = m;
+		p->define_events[p->define_event_count].id = id;
+		p->define_events[p->define_event_count++].m = m;
 		return;
 	}
 	if (!p->define_events_printed)

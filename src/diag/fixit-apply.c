@@ -20,12 +20,12 @@ static void diag_fixit_edit_add(const pp *p, diag_fixit_edit_list *x, const diag
 		const diag_record_fixit *k = &d->fix[i];
 		const pp_file_entry *f;
 
-		if ((machine && k->app != DIAG_APPLICABILITY_MACHINE) || !pp_location_is_valid(p, k->b, &f) || f->sys || k->e < k->b ||
-		    k->e - f->base > f->f->size || !f->f->path)
+		if ((machine && k->app != DIAG_APPLICABILITY_MACHINE) || !pp_location_is_valid(p, k->b, &f) || f->is_system || k->e < k->b ||
+		    k->e - f->location_base > f->lex_file->size || !f->lex_file->path)
 			continue;
 		if (x->n == x->cap)
 			x->v = realloc(x->v, (x->cap = x->cap ? x->cap * 2 : 64) * sizeof(*x->v));
-		x->v[x->n] = (diag_fixit_edit){ f->f, k->b - f->base, k->e - f->base, x->n, k->s };
+		x->v[x->n] = (diag_fixit_edit){ f->lex_file, k->b - f->location_base, k->e - f->location_base, x->n, k->s };
 		x->n++;
 	}
 }
@@ -50,7 +50,7 @@ static void diag_fixit_edits_collect(const pp *p, diag_fixit_edit_list *x, bool 
 {
 	uint32_t k = 0;
 
-	for (const diag_record *d = p->dhead; d; d = d->next) {
+	for (const diag_record *d = p->diagnostic_head; d; d = d->next) {
 		diag_fixit_edit_add(p, x, d, machine);
 		for (const diag_record *c = d->kids; c; c = c->next)
 			if (machine) {
@@ -188,8 +188,8 @@ static void diag_fixit_file_write(pp *p, int fd, const lex_file *f, const diag_f
 	struct stat st;
 	int out;
 
-	if (fp[0] != '/' && p->o->cwd)
-		snprintf(path, sizeof(path), "%s/%s", p->o->cwd, fp), fp = path;
+	if (fp[0] != '/' && p->options->cwd)
+		snprintf(path, sizeof(path), "%s/%s", p->options->cwd, fp), fp = path;
 	fix_apply(&o, f->src, 0, f->size, v, n);
 	snprintf(tmp, sizeof(tmp), "%s.vcc-fix.%d", fp, (int)getpid());
 	if ((out = open(tmp, O_WRONLY | O_CREAT | O_EXCL, 0644)) < 0) {
@@ -210,13 +210,13 @@ static void diag_fixit_file_write(pp *p, int fd, const lex_file *f, const diag_f
 
 VPRIV void diag_fixit_output(pp *p)
 {
-	int fd = p->o->errfd ? p->o->errfd : 2;
+	int fd = p->options->errfd ? p->options->errfd : 2;
 
 	for (int machine = 0; machine < 2; machine++) {
 		diag_fixit_edit_list x = { 0 };
 		vbuffer b = { 0 };
 
-		if (!(machine ? p->o->fix_apply : p->o->diag_patch))
+		if (!(machine ? p->options->fix_apply : p->options->diag_patch))
 			continue;
 		diag_fixit_edits_collect(p, &x, machine);
 		for (uint32_t i = 0; i < x.n;) {

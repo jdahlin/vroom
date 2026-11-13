@@ -36,8 +36,8 @@ VPRIV int diag_location_presumed(const pp *p, uint32_t loc, const char **name, u
 	int r = pp_location_describe(p, loc, name, nl, line, col);
 	const pp_file_entry *e = pp_location_file_entry(p, loc);
 
-	if (r && e && e->spath && loc - e->base <= e->f->size && *name == e->name)	/* (not a #line name) */
-		*name = e->spath, *nl = (uint32_t)strlen(e->spath);
+	if (r && e && e->spelled_path && loc - e->location_base <= e->lex_file->size && *name == e->name)	/* (not a #line name) */
+		*name = e->spelled_path, *nl = (uint32_t)strlen(e->spelled_path);
 	return r;
 }
 
@@ -46,8 +46,8 @@ VPRIV void diag_include_stack_render(pp *p, vbuffer *b, const pp_file_entry *e)
 	const pp_file_entry *chain[64];
 	int n = 0;
 
-	for (const pp_file_entry *x = e; x && x->from && n < 64; ) {
-		const pp_file_entry *y = pp_location_file_entry(p, x->from);
+	for (const pp_file_entry *x = e; x && x->included_from && n < 64; ) {
+		const pp_file_entry *y = pp_location_file_entry(p, x->included_from);
 
 		chain[n++] = x;
 		x = y;
@@ -56,7 +56,7 @@ VPRIV void diag_include_stack_render(pp *p, vbuffer *b, const pp_file_entry *e)
 		const char *name;
 		uint32_t nl, line, col;
 
-		if (diag_location_presumed(p, chain[i]->from, &name, &nl, &line, &col))
+		if (diag_location_presumed(p, chain[i]->included_from, &name, &nl, &line, &col))
 			vbuffer_format_append(b, "In file included from %.*s:%u:\n", (int)nl, name, line);
 	}
 }
@@ -80,7 +80,7 @@ static uint32_t diag_snippet_line_start(const char *s, uint32_t o)
 static void diag_snippet_line_render(pp *p, vbuffer *b, const pp_file_entry *e, const diag_record *d, uint32_t ls, uint32_t le, uint32_t line,
 		    uint32_t width, bool caret, uint32_t off, vbuffer *cl)
 {
-	const char *s = e->f->src;
+	const char *s = e->lex_file->src;
 	char num[16];
 	uint32_t nd = (uint32_t)snprintf(num, sizeof(num), "%u", line);
 
@@ -108,9 +108,9 @@ static void diag_snippet_line_render(pp *p, vbuffer *b, const pp_file_entry *e, 
 		for (uint32_t i = 0; i < d->nspan; i++) {
 			uint32_t rb = d->span[i].b, re = d->span[i].e;
 
-			if (rb < e->base || re < rb || d->span[i].label)	/* (a label: vcc's style only) */
+			if (rb < e->location_base || re < rb || d->span[i].label)	/* (a label: vcc's style only) */
 				continue;
-			rb -= e->base, re -= e->base;
+			rb -= e->location_base, re -= e->location_base;
 			if (re <= ls || rb >= le || (re == ls && rb < ls))
 				continue;
 			if (rb < ls)
@@ -129,9 +129,9 @@ static void diag_snippet_line_render(pp *p, vbuffer *b, const pp_file_entry *e, 
 		for (uint32_t i = 0; i < d->nfix; i++) {
 			uint32_t rb = d->fix[i].b, re = d->fix[i].e;
 
-			if (rb < e->base || re <= rb)
+			if (rb < e->location_base || re <= rb)
 				continue;
-			rb -= e->base, re -= e->base;
+			rb -= e->location_base, re -= e->location_base;
 			if (rb < ls || rb >= le)
 				continue;
 			if (re > le)
@@ -158,10 +158,10 @@ static void diag_snippet_line_render(pp *p, vbuffer *b, const pp_file_entry *e, 
 			for (uint32_t i = 0; caret && i < d->nfix; i++) {
 				uint32_t fb = d->fix[i].b, c0;
 
-				if (fb < e->base || fb - e->base < ls || fb - e->base > le || !*d->fix[i].s ||
-				    d->fix[i].e != fb || !diag_snippet_is_padded_at(s, ls, le, fb - e->base))
+				if (fb < e->location_base || fb - e->location_base < ls || fb - e->location_base > le || !*d->fix[i].s ||
+				    d->fix[i].e != fb || !diag_snippet_is_padded_at(s, ls, le, fb - e->location_base))
 					continue;
-				c0 = diag_columns_width(s, ls, fb - e->base, 0);
+				c0 = diag_columns_width(s, ls, fb - e->location_base, 0);
 				if (c0 > cl->n)
 					diag_text_char_repeat(cl, ' ', (int)(c0 - cl->n));
 			}
@@ -171,10 +171,10 @@ static void diag_snippet_line_render(pp *p, vbuffer *b, const pp_file_entry *e, 
 	if (cl->n) {
 		diag_text_char_repeat(b, ' ', (int)width + 2);
 		vbuffer_string_append(b, "| ");
-		if (p->color)
+		if (p->diagnostic_color)
 			vbuffer_string_append(b, DIAG_COLOR_CARET);
 		vbuffer_append(b, cl->p, cl->n);
-		if (p->color)
+		if (p->diagnostic_color)
 			vbuffer_string_append(b, DIAG_COLOR_RESET);
 		vbuffer_string_append(b, "\n");
 	}
@@ -182,8 +182,8 @@ static void diag_snippet_line_render(pp *p, vbuffer *b, const pp_file_entry *e, 
 
 static void diag_snippet_render(pp *p, vbuffer *b, const pp_file_entry *e, const diag_record *d)
 {
-	const char *s = e->f->src;
-	uint32_t off = d->loc - e->base, size = e->f->size, ls, le, line, width, nd;
+	const char *s = e->lex_file->src;
+	uint32_t off = d->loc - e->location_base, size = e->lex_file->size, ls, le, line, width, nd;
 	char num[16];
 	vbuffer cl = { 0 }, fl = { 0 };
 	bool anyfix = false;
@@ -202,10 +202,10 @@ static void diag_snippet_render(pp *p, vbuffer *b, const pp_file_entry *e, const
 	for (uint32_t i = 0; i < d->nspan; i++) {
 		uint32_t rb = d->span[i].b, re = d->span[i].e, a, z;
 
-		if (rb < e->base || re < rb || re - e->base > size || d->span[i].label)	/* (a label: not a clang range) */
+		if (rb < e->location_base || re < rb || re - e->location_base > size || d->span[i].label)	/* (a label: not a clang range) */
 			continue;
 		a = pp_location_line(p, rb);
-		z = pp_location_line(p, re > rb && s[re - e->base - 1] == '\n' ? re - 1 : re);
+		z = pp_location_line(p, re > rb && s[re - e->location_base - 1] == '\n' ? re - 1 : re);
 		/* clang's maybeAddRange (MaxLines 16) */
 		{
 			uint32_t mn = a < l0 ? a : l0, mx = z > l1 ? z : l1;
@@ -241,9 +241,9 @@ static void diag_snippet_render(pp *p, vbuffer *b, const pp_file_entry *e, const
 				uint32_t fb = d->fix[i].b;
 				uint32_t c0, have;
 
-				if (fb < e->base || fb - e->base < ls || fb - e->base > le || !*d->fix[i].s)	/* a removal: no text line */
+				if (fb < e->location_base || fb - e->location_base < ls || fb - e->location_base > le || !*d->fix[i].s)	/* a removal: no text line */
 					continue;
-				c0 = diag_columns_width(s, ls, fb - e->base, 0);
+				c0 = diag_columns_width(s, ls, fb - e->location_base, 0);
 				have = (uint32_t)fl.n;
 				if (c0 < have)
 					c0 = have;
@@ -254,10 +254,10 @@ static void diag_snippet_render(pp *p, vbuffer *b, const pp_file_entry *e, const
 			if (anyfix) {
 				diag_text_char_repeat(b, ' ', (int)width + 2);
 				vbuffer_string_append(b, "| ");
-				if (p->color)
+				if (p->diagnostic_color)
 					vbuffer_string_append(b, DIAG_COLOR_FIXIT);
 				vbuffer_append(b, fl.p, fl.n);
-				if (p->color)
+				if (p->diagnostic_color)
 					vbuffer_string_append(b, DIAG_COLOR_RESET);
 				vbuffer_string_append(b, "\n");
 			}
@@ -277,11 +277,11 @@ VPRIV bool diag_head_render(pp *p, vbuffer *b, const diag_record *d, const pp_fi
 	bool has = d->loc != UINT32_MAX && pp_location_is_valid(p, d->loc, &e);	/* UINT32_MAX: no location */
 	bool note = d->level == DIAG_LEVEL_NOTE;
 
-	if (has && !note && (uint32_t)(e - p->fe) + 1 != p->diagnostic_last_file)
+	if (has && !note && (uint32_t)(e - p->files) + 1 != p->diagnostic_last_file)
 		diag_include_stack_render(p, b, e);
 	if (has && !note)
-		p->diagnostic_last_file = (uint32_t)(e - p->fe) + 1;
-	if (p->color)
+		p->diagnostic_last_file = (uint32_t)(e - p->files) + 1;
+	if (p->diagnostic_color)
 		vbuffer_string_append(b, DIAG_COLOR_BOLD);
 	if (has && diag_location_presumed(p, d->loc, &name, &nl, &line, &col))
 		vbuffer_format_append(b, "%.*s:%u:%u: ", (int)nl, name, line, col);
@@ -289,37 +289,37 @@ VPRIV bool diag_head_render(pp *p, vbuffer *b, const diag_record *d, const pp_fi
 		;	/* "fatal error: too many errors emitted" has no location */
 	else if (!has)
 		vbuffer_string_append(b, "vcc: ");
-	if (p->color)
+	if (p->diagnostic_color)
 		vbuffer_string_append(b, dcolor(what));
 	vbuffer_string_append(b, what);
 	vbuffer_string_append(b, ": ");
-	if (p->color)
+	if (p->diagnostic_color)
 		vbuffer_string_append(b, note ? DIAG_COLOR_RESET : DIAG_COLOR_RESET DIAG_COLOR_BOLD);
-	if (p->color && p->o->diag_style != DIAG_STYLE_CLANG)
+	if (p->diagnostic_color && p->options->diag_style != DIAG_STYLE_CLANG)
 		diag_type_diff_render(b, d, note ? DIAG_COLOR_RESET : DIAG_COLOR_RESET DIAG_COLOR_BOLD);
 	else
 		vbuffer_string_append(b, d->msg);
-	if (d->flag && p->color)	/* OSC 8: the flag links to clang's reference */
+	if (d->flag && p->diagnostic_color)	/* OSC 8: the flag links to clang's reference */
 		vbuffer_format_append(b, " [%s\033]8;;https://clang.llvm.org/doc/DiagnosticsReference.html#w%s\033\\-W%s\033]8;;\033\\]",
 		       d->werror ? "-Werror," : "", d->flag, d->flag);
 	else if (d->flag)
 		vbuffer_format_append(b, " [%s-W%s]", d->werror ? "-Werror," : "", d->flag);
-	if (p->o->diag_show_id) {
+	if (p->options->diag_show_id) {
 		const char *docs = getenv("VCC_DIAG_DOCS");	/* where `vcc --explain` pages are (D6) */
 		const char *id = d->id ? d->id : "vcc_unknown";
 
-		if (p->color && docs && *docs)
+		if (p->diagnostic_color && docs && *docs)
 			vbuffer_format_append(b, " [\033]8;;%s/%s.md\033\\%s\033]8;;\033\\]", docs, id, id);
 		else
 			vbuffer_format_append(b, " [%s]", id);
 	}
 	if (p->diagnostic_track)
 		diag_report_site_text(b, d->track);
-	if (p->color)
+	if (p->diagnostic_color)
 		vbuffer_string_append(b, DIAG_COLOR_RESET);
 	vbuffer_string_append(b, "\n");
 	*ep = e;
-	return has && !p->o->diag_nocaret && d->loc - e->base < e->f->size;
+	return has && !p->options->diag_nocaret && d->loc - e->location_base < e->lex_file->size;
 }
 
 /* -fdiagnostics-parseable-fixits: a line per fix-it after the record's snippet, as clang
@@ -345,7 +345,7 @@ static void esc(vbuffer *b, const char *s, size_t n)
 
 VPRIV void diag_fixits_parseable_render(pp *p, vbuffer *b, const diag_record *d)
 {
-	if (likely(!p->o->diag_parseable))
+	if (likely(!p->options->diag_parseable))
 		return;
 	for (uint32_t i = 0; i < d->nfix; i++) {
 		const char *nb, *ne;

@@ -11,7 +11,7 @@
 /* the token of file entry e at offset off, or NULL */
 static const lex_token *pp_expansion_token_at(const pp_file_entry *e, uint32_t off, uint32_t *ix)
 {
-	const lex_file *f = e->f;
+	const lex_file *f = e->lex_file;
 	uint32_t n = f && f->tok ? f->ntok : 0, lo = 0, hi = n;
 
 	while (lo < hi) {
@@ -41,27 +41,27 @@ static const pp_macro *pp_expansion_find(pp *p, uint32_t loc, uint32_t *b, uint3
 	uint32_t i;
 	uintptr_t m;
 
-	if (!pp_location_is_valid(p, loc, &e) || !(t = pp_expansion_token_at(e, loc - e->base, &i)))
+	if (!pp_location_is_valid(p, loc, &e) || !(t = pp_expansion_token_at(e, loc - e->location_base, &i)))
 		return NULL;
 	*ee = loc + t->len;
 	if (t->kind == LEX_TOKEN_RIGHT_PAREN) {
 		int depth = 0;
 
 		for (;; i--) {
-			if (e->f->tok[i].kind == LEX_TOKEN_RIGHT_PAREN)
+			if (e->lex_file->tok[i].kind == LEX_TOKEN_RIGHT_PAREN)
 				depth++;
-			else if (e->f->tok[i].kind == LEX_TOKEN_LEFT_PAREN && !--depth)
+			else if (e->lex_file->tok[i].kind == LEX_TOKEN_LEFT_PAREN && !--depth)
 				break;
 			if (!i)
 				return NULL;
 		}
 		if (!i)
 			return NULL;
-		t = &e->f->tok[i - 1];
+		t = &e->lex_file->tok[i - 1];
 	}
 	if (t->kind != LEX_TOKEN_IDENTIFIER || !(m = pp_macro_table_get(p, t->id) & ~(uintptr_t)1))
 		return NULL;
-	*b = e->base + t->off;
+	*b = e->location_base + t->off;
 	return (const pp_macro *)m;
 }
 
@@ -72,7 +72,7 @@ VPRIV bool pp_location_is_object_macro(pp *p, uint32_t loc)
 	const pp_file_entry *e;
 	const pp_macro *m;
 
-	if (!pp_location_is_valid(p, loc, &e) || (loc - e->base + 7 <= e->f->size && !memcmp(e->f->src + (loc - e->base), "defined", 7)))
+	if (!pp_location_is_valid(p, loc, &e) || (loc - e->location_base + 7 <= e->lex_file->size && !memcmp(e->lex_file->src + (loc - e->location_base), "defined", 7)))
 		return false;	/* spelled here */
 	m = pp_expansion_find(p, loc, &b, &ee);
 	return m && m->kind == PP_MACRO_OBJECT_LIKE;
@@ -85,8 +85,8 @@ static void pp_expansion_note_scan(pp *p, diag_record *top, diag_record *after, 
 {
 	uint32_t loc = 0, len = 0;
 
-	for (uint32_t i = 0; i < p->nfe; i++) {
-		const lex_file *f = p->fe[i].f;
+	for (uint32_t i = 0; i < p->file_count; i++) {
+		const lex_file *f = p->files[i].lex_file;
 		const lex_token *q;
 
 		if (!f || !f->tok)
@@ -97,7 +97,7 @@ static void pp_expansion_note_scan(pp *p, diag_record *top, diag_record *after, 
 
 			if (!(q[k].kind == LEX_TOKEN_IDENTIFIER && q[k].id == m->name && q[k - 1].id == KW_define &&
 			      q[k - 2].kind == LEX_TOKEN_HASH && (q[k - 2].flags & LEX_TOKEN_FLAG_LINE_START) &&
-			      (p->fe[i].base + q[k].off < before || f == &p->builtin)))	/* <built-in> comes first */
+			      (p->files[i].location_base + q[k].off < before || f == &p->builtin_file)))	/* <built-in> comes first */
 				continue;
 			if (b < f->ntok && q[b].kind == LEX_TOKEN_LEFT_PAREN && !(q[b].flags & LEX_TOKEN_FLAG_SPACE_BEFORE) && !(q[b].flags & LEX_TOKEN_FLAG_LINE_START)) {
 				pb = b + 1;
@@ -120,7 +120,7 @@ static void pp_expansion_note_scan(pp *p, diag_record *top, diag_record *after, 
 			if (hit || first) {
 				uint32_t t = (hit ? hit : first) - 1;
 
-				loc = p->fe[i].base + q[t].off, len = q[t].len;
+				loc = p->files[i].location_base + q[t].off, len = q[t].len;
 			}
 		}
 	}
@@ -156,10 +156,10 @@ static int pp_macro_definition_compare(const void *a, const void *b)
 /* index the #defines of the file entries not indexed yet (when a note needs it) */
 static void pp_macro_definition_index_update(pp *p)
 {
-	if (p->macro_definition_site_files == p->nfe)
+	if (p->macro_definition_site_files == p->file_count)
 		return;
-	for (uint32_t i = p->macro_definition_site_files; i < p->nfe; i++) {
-		const lex_file *f = p->fe[i].f;
+	for (uint32_t i = p->macro_definition_site_files; i < p->file_count; i++) {
+		const lex_file *f = p->files[i].lex_file;
 
 		if (!f || !f->tok)
 			continue;
@@ -169,19 +169,19 @@ static void pp_macro_definition_index_update(pp *p)
 			if (!(q[k].kind == LEX_TOKEN_IDENTIFIER && q[k - 1].id == KW_define && q[k - 1].kind == LEX_TOKEN_IDENTIFIER &&
 			      q[k - 2].kind == LEX_TOKEN_HASH && (q[k - 2].flags & LEX_TOKEN_FLAG_LINE_START)))
 				continue;
-			if (p->nmdx == p->cmdx) {
-				uint32_t c = p->cmdx ? p->cmdx * 2 : 1024;
-				struct pp_macro_define_record *n = varena_alloc(&p->perm, c * sizeof(*n));
+			if (p->macro_definition_site_count == p->macro_definition_site_capacity) {
+				uint32_t c = p->macro_definition_site_capacity ? p->macro_definition_site_capacity * 2 : 1024;
+				struct pp_macro_define_record *n = varena_alloc(&p->permanent_region, c * sizeof(*n));
 
-				if (p->nmdx)
-					memcpy(n, p->macro_definition_sites, p->nmdx * sizeof(*n));
-				p->macro_definition_sites = n, p->cmdx = c;
+				if (p->macro_definition_site_count)
+					memcpy(n, p->macro_definition_sites, p->macro_definition_site_count * sizeof(*n));
+				p->macro_definition_sites = n, p->macro_definition_site_capacity = c;
 			}
-			p->macro_definition_sites[p->nmdx++] = (struct pp_macro_define_record){ q[k].id, p->fe[i].base + q[k].off, i, k };
+			p->macro_definition_sites[p->macro_definition_site_count++] = (struct pp_macro_define_record){ q[k].id, p->files[i].location_base + q[k].off, i, k };
 		}
 	}
-	p->macro_definition_site_files = p->nfe;
-	qsort(p->macro_definition_sites, p->nmdx, sizeof(*p->macro_definition_sites), pp_macro_definition_compare);
+	p->macro_definition_site_files = p->file_count;
+	qsort(p->macro_definition_sites, p->macro_definition_site_count, sizeof(*p->macro_definition_sites), pp_macro_definition_compare);
 }
 
 /* m's body in the source: the file tokens of the last #define of its name whose tokens are
@@ -191,7 +191,7 @@ static const lex_token *pp_macro_definition_body(pp *p, const pp_macro *m, const
 	size_t lo = 0, hi;
 
 	pp_macro_definition_index_update(p);
-	hi = p->nmdx;
+	hi = p->macro_definition_site_count;
 	while (lo < hi) {
 		size_t mid = (lo + hi) / 2;
 
@@ -201,23 +201,23 @@ static const lex_token *pp_macro_definition_body(pp *p, const pp_macro *m, const
 			hi = mid;
 	}
 	for (size_t x = lo; x-- > 0 && p->macro_definition_sites[x].name == m->name;) {
-		const pp_file_entry *e = &p->fe[p->macro_definition_sites[x].fe];
-		const lex_token *q = e->f->tok;
-		uint32_t b = p->macro_definition_sites[x].k + 1, n = e->f->ntok, i;
+		const pp_file_entry *e = &p->files[p->macro_definition_sites[x].fe];
+		const lex_token *q = e->lex_file->tok;
+		uint32_t b = p->macro_definition_sites[x].k + 1, n = e->lex_file->ntok, i;
 
 		if (b < n && q[b].kind == LEX_TOKEN_LEFT_PAREN && !(q[b].flags & (LEX_TOKEN_FLAG_SPACE_BEFORE | LEX_TOKEN_FLAG_LINE_START))) {
 			while (b < n && q[b].kind != LEX_TOKEN_RIGHT_PAREN && !(q[b].flags & LEX_TOKEN_FLAG_LINE_START))
 				b++;
 			b++;
 		}
-		if (b + m->nbody > n || (m->nbody && (q[b].flags & LEX_TOKEN_FLAG_LINE_START)) ||
-		    (b + m->nbody < n && !(q[b + m->nbody].flags & LEX_TOKEN_FLAG_LINE_START)))
+		if (b + m->body_count > n || (m->body_count && (q[b].flags & LEX_TOKEN_FLAG_LINE_START)) ||
+		    (b + m->body_count < n && !(q[b + m->body_count].flags & LEX_TOKEN_FLAG_LINE_START)))
 			continue;
-		for (i = 0; i < m->nbody; i++)
+		for (i = 0; i < m->body_count; i++)
 			if (q[b + i].kind != m->body[i].kind || q[b + i].len != m->body[i].len ||
-			    memcmp(e->f->src + q[b + i].off, m->src + m->body[i].off, q[b + i].len))
+			    memcmp(e->lex_file->src + q[b + i].off, m->source + m->body[i].off, q[b + i].len))
 				break;
-		if (i == m->nbody) {
+		if (i == m->body_count) {
 			*ep = e;
 			return q + b;
 		}
@@ -231,26 +231,26 @@ static int pp_expansion_chain_build(pp *p, const pp_macro *m, const char *ms, ui
 	const pp_file_entry *e;
 	const lex_token *ft;
 
-	if (n >= cap || !m->nbody || --*budget < 0 || !(ft = pp_macro_definition_body(p, m, &e)))
+	if (n >= cap || !m->body_count || --*budget < 0 || !(ft = pp_macro_definition_body(p, m, &e)))
 		return -1;
-	for (uint32_t i = m->nbody; i-- > 0;) {	/* the last one: clang agrees more often (kernel) */
+	for (uint32_t i = m->body_count; i-- > 0;) {	/* the last one: clang agrees more often (kernel) */
 		const lex_token *t = &m->body[i];
 
-		if ((!m->pidx || !m->pidx[i]) && t->len == mlen && !memcmp(m->src + t->off, ms, mlen)) {
-			out[n] = (pp_expansion_frame){ m, ft, e->base, i, e->base + ft[i].off, t->len };
+		if ((!m->parameter_indices || !m->parameter_indices[i]) && t->len == mlen && !memcmp(m->source + t->off, ms, mlen)) {
+			out[n] = (pp_expansion_frame){ m, ft, e->location_base, i, e->location_base + ft[i].off, t->len };
 			return n + 1;
 		}
 	}
-	for (uint32_t i = 0; i < m->nbody; i++) {
+	for (uint32_t i = 0; i < m->body_count; i++) {
 		const lex_token *t = &m->body[i];
 		uintptr_t v;
 		const pp_macro *x;
 		int r;
 
-		if (t->kind != LEX_TOKEN_IDENTIFIER || (m->pidx && m->pidx[i]) || !(v = pp_macro_table_get(p, t->id) & ~(uintptr_t)1))
+		if (t->kind != LEX_TOKEN_IDENTIFIER || (m->parameter_indices && m->parameter_indices[i]) || !(v = pp_macro_table_get(p, t->id) & ~(uintptr_t)1))
 			continue;
 		x = (const pp_macro *)v;
-		if (x == m || x->kind == PP_MACRO_BUILTIN || (x->kind == PP_MACRO_FUNCTION_LIKE && (i + 1 >= m->nbody || m->body[i + 1].kind != LEX_TOKEN_LEFT_PAREN)))
+		if (x == m || x->kind == PP_MACRO_BUILTIN || (x->kind == PP_MACRO_FUNCTION_LIKE && (i + 1 >= m->body_count || m->body[i + 1].kind != LEX_TOKEN_LEFT_PAREN)))
 			continue;
 		if ((r = pp_expansion_chain_build(p, x, ms, mlen, before, out, n + 1, cap, budget)) > 0) {
 			uint32_t len = t->len;
@@ -258,7 +258,7 @@ static int pp_expansion_chain_build(pp *p, const pp_macro *m, const char *ms, ui
 			if (x->kind == PP_MACRO_FUNCTION_LIKE) {	/* clang: the range is the whole invocation */
 				int depth = 0;
 
-				for (uint32_t k = i + 1; k < m->nbody; k++) {
+				for (uint32_t k = i + 1; k < m->body_count; k++) {
 					depth += ft[k].kind == LEX_TOKEN_LEFT_PAREN;
 					if (ft[k].kind == LEX_TOKEN_RIGHT_PAREN && !--depth) {
 						len = ft[k].off + ft[k].len - ft[i].off;
@@ -266,7 +266,7 @@ static int pp_expansion_chain_build(pp *p, const pp_macro *m, const char *ms, ui
 					}
 				}
 			}
-			out[n] = (pp_expansion_frame){ m, ft, e->base, i, e->base + ft[i].off, len };
+			out[n] = (pp_expansion_frame){ m, ft, e->location_base, i, e->location_base + ft[i].off, len };
 			return r;
 		}
 	}
@@ -282,11 +282,11 @@ static void pp_expansion_argument_spans(pp *p, diag_record *k, const pp_expansio
 	uint32_t ix, ab[64], ae[64], na = 0;
 	int depth = 0;
 
-	if (!f->m->pidx || !pp_location_is_valid(p, b, &e) || !(t = pp_expansion_token_at(e, b - e->base, &ix)) || ix + 1 >= e->f->ntok ||
-	    e->f->tok[ix + 1].kind != LEX_TOKEN_LEFT_PAREN)
+	if (!f->m->parameter_indices || !pp_location_is_valid(p, b, &e) || !(t = pp_expansion_token_at(e, b - e->location_base, &ix)) || ix + 1 >= e->lex_file->ntok ||
+	    e->lex_file->tok[ix + 1].kind != LEX_TOKEN_LEFT_PAREN)
 		return;
-	for (uint32_t i = ix + 1; i < e->f->ntok && na < 64; i++) {
-		const lex_token *q = &e->f->tok[i];
+	for (uint32_t i = ix + 1; i < e->lex_file->ntok && na < 64; i++) {
+		const lex_token *q = &e->lex_file->tok[i];
 
 		if (q->kind == LEX_TOKEN_LEFT_PAREN && !depth++) {
 			ab[na] = UINT32_MAX;
@@ -300,8 +300,8 @@ static void pp_expansion_argument_spans(pp *p, diag_record *k, const pp_expansio
 			continue;
 		}
 		if (ab[na] == UINT32_MAX)
-			ab[na] = e->base + q->off;
-		ae[na] = e->base + q->off + q->len;
+			ab[na] = e->location_base + q->off;
+		ae[na] = e->location_base + q->off + q->len;
 	}
 	for (int s = 0; s < nos; s++) {
 		uint32_t a = 0, best = UINT32_MAX, bd = UINT32_MAX;
@@ -310,10 +310,10 @@ static void pp_expansion_argument_spans(pp *p, diag_record *k, const pp_expansio
 			a++;
 		if (a == na)
 			continue;
-		for (uint32_t i = 0; i < f->m->nbody; i++) {
+		for (uint32_t i = 0; i < f->m->body_count; i++) {
 			uint32_t d = i > f->bi ? i - f->bi : f->bi - i;
 
-			if (f->m->pidx[i] == a + 1 && d < bd)
+			if (f->m->parameter_indices[i] == a + 1 && d < bd)
 				best = i, bd = d;
 		}
 		if (best == UINT32_MAX)
@@ -321,7 +321,7 @@ static void pp_expansion_argument_spans(pp *p, diag_record *k, const pp_expansio
 		{
 			uint32_t lo = best, hi = best;
 
-			if (lo > 0 && hi + 1 < f->m->nbody && f->ft[lo - 1].kind == LEX_TOKEN_LEFT_PAREN && f->ft[hi + 1].kind == LEX_TOKEN_RIGHT_PAREN)
+			if (lo > 0 && hi + 1 < f->m->body_count && f->ft[lo - 1].kind == LEX_TOKEN_LEFT_PAREN && f->ft[hi + 1].kind == LEX_TOKEN_RIGHT_PAREN)
 				lo--, hi++;
 			diag_record_label_add(p, k, f->base + f->ft[lo].off, f->base + f->ft[hi].off + f->ft[hi].len, NULL);
 		}
@@ -351,7 +351,7 @@ static void pp_expansion_text_build(const pp_expansion_frame *f, uint32_t lo, ui
 
 	for (uint32_t i = lo; i < hi; i++) {
 		const lex_token *t = &f->ft[i];
-		uint32_t pi = m->pidx ? m->pidx[i] : 0;
+		uint32_t pi = m->parameter_indices ? m->parameter_indices[i] : 0;
 
 		if (t->kind == LEX_TOKEN_HASH_HASH && m->kind == PP_MACRO_FUNCTION_LIKE) {
 			pp_paste_tokens = true;
@@ -360,8 +360,8 @@ static void pp_expansion_text_build(const pp_expansion_frame *f, uint32_t lo, ui
 		if (i > lo && (t->flags & LEX_TOKEN_FLAG_SPACE_BEFORE) && !pp_paste_tokens && out->n)
 			pp_expansion_text_append(out, " ", 1);
 		pp_paste_tokens = false;
-		if (t->kind == LEX_TOKEN_HASH && m->kind == PP_MACRO_FUNCTION_LIKE && i + 1 < hi && m->pidx && m->pidx[i + 1]) {
-			uint32_t k = m->pidx[i + 1] - 1;
+		if (t->kind == LEX_TOKEN_HASH && m->kind == PP_MACRO_FUNCTION_LIKE && i + 1 < hi && m->parameter_indices && m->parameter_indices[i + 1]) {
+			uint32_t k = m->parameter_indices[i + 1] - 1;
 
 			pp_expansion_text_append(out, "\"", 1);
 			for (uint32_t j = 0; k < na && j < a[k].n; j++) {
@@ -376,7 +376,7 @@ static void pp_expansion_text_build(const pp_expansion_frame *f, uint32_t lo, ui
 		if (pi && pi - 1 < na)
 			pp_expansion_text_append(out, a[pi - 1].s, a[pi - 1].n);
 		else if (!pi)
-			pp_expansion_text_append(out, m->src + m->body[i].off, t->len);
+			pp_expansion_text_append(out, m->source + m->body[i].off, t->len);
 	}
 }
 
@@ -392,7 +392,7 @@ static uint32_t xargs(const lex_token *q, const char *src, uint32_t b, uint32_t 
 		if (q[i].kind == LEX_TOKEN_LEFT_PAREN)
 			depth++;
 		if ((q[i].kind == LEX_TOKEN_RIGHT_PAREN && !--depth) || (q[i].kind == LEX_TOKEN_COMMA && depth == 1 &&
-		     !((callee->flags & PP_MACRO_FLAG_VARIADIC) && na + 1 >= callee->nparam))) {
+		     !((callee->flags & PP_MACRO_FLAG_VARIADIC) && na + 1 >= callee->parameter_count))) {
 			if (na == PP_EXPANSION_ARGUMENTS_MAX)
 				return na;
 			out[na].n = 0;
@@ -420,23 +420,23 @@ static bool pp_expansion_help_build(pp *p, diag_record *k, const pp_expansion_fr
 	const pp_file_entry *e;
 	int cur = 0;
 
-	if (!fr[n - 1].m->nparam && n == 1)
+	if (!fr[n - 1].m->parameter_count && n == 1)
 		return false;	/* (an object-like macro: its body is shown already) */
-	if (!pp_location_is_valid(p, b, &e) || !pp_expansion_token_at(e, b - e->base, &ix))
+	if (!pp_location_is_valid(p, b, &e) || !pp_expansion_token_at(e, b - e->location_base, &ix))
 		return false;
 	if (fr[0].m->kind == PP_MACRO_FUNCTION_LIKE) {
-		if (ix + 1 >= e->f->ntok || e->f->tok[ix + 1].kind != LEX_TOKEN_LEFT_PAREN)
+		if (ix + 1 >= e->lex_file->ntok || e->lex_file->tok[ix + 1].kind != LEX_TOKEN_LEFT_PAREN)
 			return false;
-		na = xargs(e->f->tok, e->f->src, ix + 1, e->f->ntok, NULL, NULL, 0, fr[0].m, a[cur]);
+		na = xargs(e->lex_file->tok, e->lex_file->src, ix + 1, e->lex_file->ntok, NULL, NULL, 0, fr[0].m, a[cur]);
 	}
 	for (int i = 0; i + 1 < n; i++) {	/* the next level's arguments, from this level's body */
 		uint32_t nb = fr[i].bi, nn = 0;
 
 		if (fr[i + 1].m->kind == PP_MACRO_FUNCTION_LIKE)
-			nn = xargs(fr[i].ft, NULL, nb + 1, fr[i].m->nbody, &fr[i], a[cur], na, fr[i + 1].m, a[!cur]);
+			nn = xargs(fr[i].ft, NULL, nb + 1, fr[i].m->body_count, &fr[i], a[cur], na, fr[i + 1].m, a[!cur]);
 		cur = !cur, na = nn;
 	}
-	pp_expansion_text_build(&fr[n - 1], 0, fr[n - 1].m->nbody, a[cur], na, &out);
+	pp_expansion_text_build(&fr[n - 1], 0, fr[n - 1].m->body_count, a[cur], na, &out);
 	if (out.n >= XS || !out.n)
 		return false;
 	diag_record_help_set(p, k, "the expansion of '%.*s' here: `%.*s`", (int)vintern_ents[fr[n - 1].m->name].len,
@@ -449,7 +449,7 @@ static void pp_expansion_note_add(pp *p, diag_record *top, diag_record *after, c
 {
 	pp_expansion_frame fr[64];
 	int budget = 4096, n = pp_expansion_chain_build(p, m, ms, mlen, before, fr, 0, 64, &budget);
-	int lim = p->o->macro_bt_limit ? p->o->macro_bt_limit : 6, head = n, tail = 0;
+	int lim = p->options->macro_bt_limit ? p->options->macro_bt_limit : 6, head = n, tail = 0;
 
 	if (n <= 0) {
 		pp_expansion_note_scan(p, top, after, m, before, ms, mlen, rng);
@@ -487,14 +487,14 @@ VPRIV bool pp_fixit_is_in_macro(const pp *p, uint32_t b, uint32_t e)
 	const char *s;
 	uint32_t i, j, n, at;
 
-	if (e <= b || !pp_location_is_valid(p, b, &f) || e - f->base > f->f->size)
+	if (e <= b || !pp_location_is_valid(p, b, &f) || e - f->location_base > f->lex_file->size)
 		return false;
-	s = f->f->src, n = f->f->size, at = b - f->base;
+	s = f->lex_file->src, n = f->lex_file->size, at = b - f->location_base;
 	for (i = at; i > 0 && (isalnum((unsigned char)s[i - 1]) || s[i - 1] == '_' || s[i - 1] == '$'); i--)
 		;
 	for (j = at; j < n && (isalnum((unsigned char)s[j]) || s[j] == '_' || s[j] == '$'); j++)
 		;
-	if (j <= i || isdigit((unsigned char)s[i]) || e - f->base > j)
+	if (j <= i || isdigit((unsigned char)s[i]) || e - f->location_base > j)
 		return false;
 	{
 		uint32_t id = vintern_find(s + i, j - i, vintern_hash(s + i, j - i));

@@ -49,11 +49,11 @@ static bool diag_sarif_position_find(pp *p, uint32_t loc, const char **name, uin
 
 	if (loc == UINT32_MAX || !pp_location_is_valid(p, loc, &e) || !diag_location_presumed(p, loc, name, nl, line, &col))
 		return false;
-	off = loc - e->base;
+	off = loc - e->location_base;
 	ls = off - (col - 1);
 	*ucol = 1;
 	for (uint32_t i = ls; i < off; i++)
-		if (((unsigned char)e->f->src[i] & 0xc0) != 0x80)
+		if (((unsigned char)e->lex_file->src[i] & 0xc0) != 0x80)
 			(*ucol)++;
 	return true;
 }
@@ -109,7 +109,7 @@ static void diag_sarif_result_append(pp *p, vbuffer *b, const diag_record *d, co
 			diag_json_cstring_append(b, d->label);
 			vbuffer_string_append(b, "}");
 		}
-		for (const pp_file_entry *x = e; x && x->from && nchain < 64; x = pp_location_file_entry(p, x->from))
+		for (const pp_file_entry *x = e; x && x->included_from && nchain < 64; x = pp_location_file_entry(p, x->included_from))
 			nchain++;
 		if (nchain) {
 			vbuffer_string_append(b, ",\"relationships\":[{\"target\":1,\"kinds\":[\"isIncludedBy\"]}]");
@@ -118,13 +118,13 @@ static void diag_sarif_result_append(pp *p, vbuffer *b, const diag_record *d, co
 		/* related: the include chain (each included by the next), spans, notes */
 		vbuffer_string_append(b, ",\"relatedLocations\":[");
 		nchain = 0;
-		for (const pp_file_entry *x = e; x && x->from && nchain < 64; x = pp_location_file_entry(p, x->from), nchain++) {
-			const pp_file_entry *up = pp_location_file_entry(p, x->from);
+		for (const pp_file_entry *x = e; x && x->included_from && nchain < 64; x = pp_location_file_entry(p, x->included_from), nchain++) {
+			const pp_file_entry *up = pp_location_file_entry(p, x->included_from);
 
 			vbuffer_format_append(b, "%s{\"id\":%u,", nrel++ ? "," : "", id);
-			diag_sarif_physical_location_append(p, b, x->from, x->from);
+			diag_sarif_physical_location_append(p, b, x->included_from, x->included_from);
 			vbuffer_string_append(b, ",\"message\":{\"text\":\"included from here\"}");
-			if (up && up->from)
+			if (up && up->included_from)
 				vbuffer_format_append(b, ",\"relationships\":[{\"target\":%u,\"kinds\":[\"isIncludedBy\"]}]", id + 1);
 			vbuffer_string_append(b, "}");
 			id++;
@@ -199,7 +199,7 @@ VPRIV void diag_sarif_log_write(pp *p, vbuffer *b)
 	const char *rules[512];
 	uint32_t nr = 0;
 
-	for (const diag_record *d = p->dhead; d; d = d->next) {
+	for (const diag_record *d = p->diagnostic_head; d; d = d->next) {
 		const char *id = d->id ? d->id : "vcc_unknown";
 		uint32_t i = 0;
 
@@ -218,7 +218,7 @@ VPRIV void diag_sarif_log_write(pp *p, vbuffer *b)
 	vbuffer_string_append(b, "]}},\"columnKind\":\"unicodeCodePoints\",\"originalUriBaseIds\":{\"%SRCROOT%\":{\"uri\":");
 	{
 		vbuffer u = { 0 };
-		const char *cwd = p->o->cwd ? p->o->cwd : ".";
+		const char *cwd = p->options->cwd ? p->options->cwd : ".";
 
 		vbuffer_string_append(&u, "file://");
 		diag_sarif_uri_path_append(&u, cwd, strlen(cwd));
@@ -227,14 +227,14 @@ VPRIV void diag_sarif_log_write(pp *p, vbuffer *b)
 		diag_json_string_append(b, u.p, u.n);
 		free(u.p);
 	}
-	vbuffer_format_append(b, "}},\"invocations\":[{\"executionSuccessful\":%s,\"arguments\":[", p->errors ? "false" : "true");
-	for (int i = 0; i < p->o->argc; i++) {
+	vbuffer_format_append(b, "}},\"invocations\":[{\"executionSuccessful\":%s,\"arguments\":[", p->error_count ? "false" : "true");
+	for (int i = 0; i < p->options->argc; i++) {
 		if (i)
 			vbuffer_string_append(b, ",");
-		diag_json_cstring_append(b, p->o->argv[i]);
+		diag_json_cstring_append(b, p->options->argv[i]);
 	}
 	vbuffer_string_append(b, "]}],\"results\":[");
-	for (const diag_record *d = p->dhead; d; d = d->next) {
+	for (const diag_record *d = p->diagnostic_head; d; d = d->next) {
 		diag_sarif_result_append(p, b, d, rules, nr);
 		if (d->next)
 			vbuffer_string_append(b, ",");
