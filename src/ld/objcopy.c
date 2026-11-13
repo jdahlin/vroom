@@ -22,6 +22,7 @@
  * (null, FILE, SECTION, $d/$x mapping symbols) are not printed.
  */
 #include "ld/ld.h"
+#include "common/archive-reader.h"
 #include "common/hash.h"
 #include "common/scoped-cleanup.h"
 #include "port/file.h"
@@ -1347,79 +1348,47 @@ static void nm_inputs_collect(int dirfd, const char *path, nm_input **v, int *n)
 	char magic[8];
 
 	if (fd < 0 || fstat(fd, &st) < 0 || st.st_size < 8 || pread(fd, magic, 8, 0) != 8 ||
-	    (memcmp(magic, "!<arch>\n", 8) && memcmp(magic, "!<thin>\n", 8))) {
+	    varchive_format_detect(magic, 8) == VARCHIVE_FORMAT_NONE) {
 		nm_input_append(v, n, (nm_input){.label = strdup(path), .path = strdup(path)});
 		return;
 	}
-	bool thin = magic[2] == 't';
 	VAUTOUNMAP vfile_mapping m;
 	if (!vfile_map_fd(fd, &m, &st)) {
 		objcopy_error_report("'%s': %s", path, strerror(errno));
 		return;
 	}
-	size_t sz = m.n;
-	const uint8_t *b = m.p;
-	const char *longn = NULL;
-	size_t longsz = 0;
 	const char *slash = strrchr(path, '/');
+	varchive_cursor cursor;
+	varchive_member member;
 
 	VCLOSE(fd);	/* (the mapping outlives the descriptor) */
-	for (size_t o = 8; o + 60 <= sz;) {
-		const char *h = (const char *)b + o;
-		char num[11] = { 0 }, name[4096];
-		size_t msz, nl;
+	varchive_cursor_init(&cursor, m.p, m.n);
+	for (; varchive_member_next(&cursor, &member); varchive_cursor_advance(&cursor, &member)) {
+		char name[4096];
 
-		if (h[58] != '`' || h[59] != '\n') {
+		if (!member.header_valid || (member.has_data && !member.data_fits)) {
 			objcopy_error_report("'%s': truncated or malformed archive", path);
 			break;
 		}
-		memcpy(num, h + 48, 10);
-		msz = strtoull(num, NULL, 10);
-		bool special = h[0] == '/' && (h[1] == ' ' || (h[1] == '/' && h[2] == ' ') || !memcmp(h, "/SYM64/", 7));
-		bool data = !thin || special;	/* thin: only the special members have data */
-		if (data && msz > sz - o - 60) {
-			objcopy_error_report("'%s': truncated or malformed archive", path);
-			break;
-		}
-		if (h[0] == '/' && h[1] == '/' && h[2] == ' ') {
-			longn = h + 60, longsz = msz;
-		} else if (h[0] == '/' && (h[1] == ' ' || !memcmp(h, "/SYM64/", 7))) {
-			/* symbol table */
+		if (member.kind != VARCHIVE_MEMBER_FILE)
+			continue;
+		/* a long name not in "//" is empty */
+		snprintf(name, sizeof name, "%.*s", member.name ? (int)member.name_length : 0, member.name ? member.name : "");
+		nm_input x = {.label = strdup(name), .is_member = true, .archive = path};
+		if (cursor.thin) {
+			char full[8192];
+
+			if (name[0] == '/' || !slash)
+				snprintf(full, sizeof full, "%s", name);
+			else
+				snprintf(full, sizeof full, "%.*s/%s", (int)(slash - path), path, name);
+			x.path = strdup(full);
 		} else {
-			if (h[0] == '/' && longn) {
-				size_t off = strtoull(h + 1, NULL, 10), e = off;
-
-				while (e < longsz && longn[e] != '\n')
-					e++;
-				nl = e - off;
-				if (off > longsz)
-					nl = 0, off = 0;
-				if (nl && longn[off + nl - 1] == '/')
-					nl--;
-				snprintf(name, sizeof name, "%.*s", (int)nl, longn + off);
-			} else {
-				nl = 0;
-				while (nl < 16 && h[nl] != '/')
-					nl++;
-				snprintf(name, sizeof name, "%.*s", (int)nl, h);
-			}
-			nm_input x = {.label = strdup(name), .is_member = true, .archive = path};
-			if (thin) {
-				char full[8192];
-
-				if (name[0] == '/' || !slash)
-					snprintf(full, sizeof full, "%s", name);
-				else
-					snprintf(full, sizeof full, "%.*s/%s", (int)(slash - path), path, name);
-				x.path = strdup(full);
-			} else {
-				x.member_bytes = objcopy_zeroed_alloc(msz + 8, 1);
-				memcpy(x.member_bytes, h + 60, msz);
-				x.size = msz;
-			}
-			nm_input_append(v, n, x);
+			x.member_bytes = objcopy_zeroed_alloc(member.size + 8, 1);
+			memcpy(x.member_bytes, member.data, member.size);
+			x.size = member.size;
 		}
-		o += 60 + (data ? msz + (msz & 1) : 0);
+		nm_input_append(v, n, x);
 	}
 }
 

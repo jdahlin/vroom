@@ -33,6 +33,7 @@
 
 #include "ld/ld.h"
 #include "arch/x64/reloc.h"
+#include "common/archive-reader.h"
 #include "common/buffer.h"
 #include "common/scoped-cleanup.h"
 #include "common/checked-arithmetic.h"
