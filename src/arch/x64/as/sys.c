@@ -1,7 +1,7 @@
 /* x86-64 assembler: system and control instructions: control/debug registers, the no-operand table, system, cache and port instructions */
 #include "x64as.h"
 
-VPRIV int x64_i_crdr(As *a, char *mn, XOp *o, int nops)
+VPRIV int x64_i_crdr(as_context *a, char *mn, XOp *o, int nops)
 {
 	char stem[32];
 	int sz = 0, cc;
@@ -20,7 +20,7 @@ VPRIV int x64_i_crdr(As *a, char *mn, XOp *o, int nops)
 			if (pfx[k] == sr->reg)
 				sn = k;
 		if (sn < 0)
-			return err(a, "invalid segment register");
+			return as_error_report(a, "invalid segment register");
 		if (g->kind == XK_EXPR)
 			g->kind = XK_MEM;
 		if (to)
@@ -37,13 +37,13 @@ VPRIV int x64_i_crdr(As *a, char *mn, XOp *o, int nops)
 		uint8_t ops[2] = { 0x0f, (uint8_t)((sr->cls == XR_CR ? 0x20 : 0x21) | (to ? 2 : 0)) };
 
 		if (g->kind != XK_REG || g->cls != XR_GPR || g->size != 8)
-			return err(a, "invalid operand for instruction");
+			return as_error_report(a, "invalid operand for instruction");
 		return x64_emit(a, &F(.op = ops, .nop = 2, .reg = sr->reg, .rm = g));
 	}
 	return X64_NEXT;
 }
 
-VPRIV int x64_i_zero(As *a, char *mn, XOp *o, int nops)
+VPRIV int x64_i_zero(as_context *a, char *mn, XOp *o, int nops)
 {
 	char stem[32];
 	int sz = 0, cc;
@@ -103,7 +103,7 @@ VPRIV int x64_i_zero(As *a, char *mn, XOp *o, int nops)
 	return X64_NEXT;
 }
 
-VPRIV int x64_i_sys(As *a, char *mn, XOp *o, int nops)
+VPRIV int x64_i_sys(as_context *a, char *mn, XOp *o, int nops)
 {
 	char stem[32];
 	int sz = 0, cc;
@@ -139,7 +139,7 @@ VPRIV int x64_i_sys(As *a, char *mn, XOp *o, int nops)
 					if (o[0].kind == XK_EXPR)
 						o[0].kind = XK_MEM;
 					if (o[0].kind != XK_MEM && !(sm[i].reg && o[0].kind == XK_REG && o[0].cls == XR_GPR))
-						return err(a, "invalid operand for instruction");
+						return as_error_report(a, "invalid operand for instruction");
 					return x64_emit(a, &F(.w = sm[i].w, .opsz16 = sm[i].pre == 0x66, .rep = sm[i].pre == 0xf3 ? 0xf3 : 0,
 							      .op = ops, .nop = 2, .reg = sm[i].d, .rm = &o[0]));
 				}

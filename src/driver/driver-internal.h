@@ -102,7 +102,7 @@ struct driver_job {
 };
 
 /* output.c: the job's object state (assembler, ELF writer, serialised output) */
-extern _Thread_local As *tl_as;
+extern _Thread_local as_context *tl_as;
 extern _Thread_local ElfObj *tl_obj;
 extern _Thread_local uint8_t *tl_objbuf;
 extern _Thread_local vbuf tl_wasm_obj;

@@ -1,4 +1,4 @@
-/* astext.c: Apple's assembler dialect to GNU's, text to text; uses nothing of the assembler's state. */
+/* apple-dialect-translate.c: Apple's assembler dialect to GNU's, text to text; uses nothing of the assembler's state. */
 #include "as/as.h"
 #include <ctype.h>
 #include <stdbool.h>
@@ -260,7 +260,7 @@ static bool dt_neon(DBuf *b, const char *s, const char *c)
 	return true;
 }
 
-char *as_darwin_text(const char *t, size_t n, size_t *outn)
+char *macho_dialect_translate(const char *t, size_t n, size_t *outn)
 {
 	DBuf b = { 0 };
 	static const char *const drop[] = {

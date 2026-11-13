@@ -1,7 +1,7 @@
 /* x86-64 assembler: AVX/AVX2 (VEX) and BMI2 */
 #include "x64as.h"
 
-VPRIV int x64_i_avx(As *a, char *mn, XOp *o, int nops)
+VPRIV int x64_i_avx(as_context *a, char *mn, XOp *o, int nops)
 {
 	char stem[32];
 	int sz = 0, cc;
@@ -90,7 +90,7 @@ VPRIV int x64_i_avx(As *a, char *mn, XOp *o, int nops)
 			uint8_t ops[2] = { 0x0f, (uint8_t)(dq ? (store ? 0x7f : 0x6f) : al ? (store ? 0x29 : 0x28) : (store ? 0x11 : 0x10)) };
 
 			if (r->kind != XK_REG || r->cls != XR_XMM)
-				return err(a, "invalid operand for instruction");
+				return as_error_report(a, "invalid operand for instruction");
 			if (m->kind == XK_EXPR)
 				m->kind = XK_MEM;
 			/* MC: a register move whose source needs VEX.B takes the store form (2-byte VEX) */
@@ -146,7 +146,7 @@ VPRIV int x64_i_avx(As *a, char *mn, XOp *o, int nops)
 
 			if (ins && nops == 4) f.reg = o[3].reg, f.rm = &o[1], f.vvvv = o[2].reg;
 			else if (!ins && nops == 3) f.reg = o[1].reg, f.rm = &o[2];
-			else return err(a, "invalid operand for instruction");
+			else return as_error_report(a, "invalid operand for instruction");
 			if (f.rm->kind == XK_EXPR)
 				((XOp *)f.rm)->kind = XK_MEM;
 			x64_imm(a, &o[0], &f, &c);

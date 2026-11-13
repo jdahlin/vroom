@@ -92,7 +92,7 @@ relative to it); `TODO.md` stays at the top.
     and types (`emitimpl.h`), the work queue and threads (`tu.c`), data
     objects, the prepass; the arm64 part is `arch/a64/codegen/`.
   - `as/`: GNU as syntax (`as.c`: statements, directives, macros,
-    conditionals, expressions; internal header `asimpl.h`; one module with
+    conditionals, expressions; internal header `as-internal.h`; one module with
     `arch/<cpu>/as/parse.c`, `as_SRC`).
   - `obj/`: the in-memory object (`obj.h`: sections, frags, symbols, fixups)
     and its layout; with `arch/<cpu>/obj/fixup.c` and `platform/linux/elf.c`

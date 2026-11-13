@@ -441,10 +441,10 @@ enum { FN_MEMCPY, FN_MEMSET, FN_MEMMOVE, FN_UDIVTI3, FN_DIVTI3, FN_UMODTI3, FN_M
  * With cc_opts.emit == 2 a chunk is a stream of items instead of text:
  *
  *   IT_TEXT   directives (section switches, .globl/.type/.size, aliases,
- *             top-level asm), run by the TU's assembler (as_snippet);
+ *             top-level asm), run by the TU's assembler (as_snippet_assemble);
  *   IT_CODE   a function's records (prologue and epilogue included) and its
  *             inline asm text, encoded here with a64.h straight into the
- *             current frag; asm statements go through as_snippet in place;
+ *             current frag; asm statements go through as_snippet_assemble in place;
  *   IT_X64    x86 records, using the assembler encoder and relaxation;
  *             unhandled records, prologues, CFI and DWARF remain IT_TEXT.
  *   IT_DATA   an object's bytes and relocations; IT_LABEL + IT_BYTES: a
@@ -474,7 +474,7 @@ typedef struct osize { uint32_t sym, pad; uint64_t size; } osize;
 /* replay state: one per TU */
 typedef struct rctx {
 	cc *c;
-	As *as;
+	as_context *as;
 	ElfObj *o;
 	uint32_t *symc, *strc, *lblc;	/* ref -> ElfSym (0: not yet) */
 	uint32_t *loff;			/* direct labels: word offset in the function */
