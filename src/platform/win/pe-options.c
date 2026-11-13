@@ -17,6 +17,7 @@ static uint32_t pe_input_count, pe_input_capacity;
 static const char **pe_search_dirs;
 static uint32_t pe_search_dir_count, pe_search_dir_capacity;
 static const char *pe_sysroot;
+static const char *pe_machine_name;	/* -m other than i386pep: the machine every x64 input conflicts with */
 
 /* matches -NAME / --NAME exactly */
 static bool pe_flag(const char *a, const char *name)
@@ -218,15 +219,15 @@ static const char *pe_with_sysroot(const char *p)
 /* options lld's MinGW driver accepts and ignores */
 static const char *const pe_ignored_flags[] = {
 	"start-group", "end-group", "(", ")", "no-undefined", "enable-auto-image-base", "disable-auto-image-base",
-	"color-diagnostics", "no-color-diagnostics", "nxcompat", "no-keep-memory", "as-needed", "no-as-needed",
-	"sort-common", "no-seh-disable", "Bsymbolic", "no-copy-dt-needed-entries", "eh-frame-hdr", "g",
+	"nxcompat", "no-keep-memory", "as-needed", "no-as-needed",
+	"sort-common", "no-seh", "disable-no-seh", "no-copy-dt-needed-entries", "eh-frame-hdr",
 	"enable-stdcall-fixup", "disable-stdcall-fixup", "no-relax", "relax", "warn-common", "no-warn-mismatch",
-	"enable-long-section-names", "disable-long-section-names", "full-shutdown", "nostdlib", "no-allow-shlib-undefined",
+	"enable-long-section-names", "disable-long-section-names", "full-shutdown", "no-allow-shlib-undefined",
 	NULL,
 };
 static const char *const pe_ignored_values[] = {
 	"plugin", "plugin-opt", "threads", "error-limit", "O", "mllvm", "lto-O", "lto-CGO", "thinlto-cache-dir",
-	"exclude-modules-for-implib", "sort-section", "hash-style", "dependent-load-flag", "color-diagnostics",
+	"exclude-modules-for-implib", "sort-section", "hash-style", "dependent-load-flag",
 	NULL,
 };
 
@@ -250,6 +251,8 @@ static bool pe_subsystem_parse(const char *s)
 			if (colon) {
 				pe_parse_version("--subsystem", colon + 1, &cfg.major_subsystem, &cfg.minor_subsystem);
 				cfg.subsystem_version_set = true;
+				cfg.major_os = cfg.major_subsystem;
+				cfg.minor_os = cfg.minor_subsystem;
 			}
 			return true;
 		}
@@ -277,12 +280,12 @@ static bool pe_options_parse(int argc, char **argv)
 	cfg.dynamic_base = cfg.high_entropy_va = cfg.nx_compat = cfg.ts_aware = cfg.large_address_aware = true;
 	cfg.relocatable = true;
 	cfg.debug = 2;
-	cfg.build_id = true;
+	int build_id = -1;	/* default: with DWARF (not -s, not -S) */
 	cfg.insert_timestamp = true;
 	cfg.auto_import = cfg.pseudo_relocs = true;
 	cfg.demangle = true;
 	cfg.allow_duplicate_weak = true;
-	bool bstatic = false, whole = false, have_m = false, build_id_none = false;
+	bool bstatic = false, whole = false, have_m = false;
 	const char *m = NULL;
 
 	for (int i = 1; i < argc; i++) {
@@ -314,17 +317,8 @@ static bool pe_options_parse(int argc, char **argv)
 		if (pe_flag(a, "tsaware")) { cfg.ts_aware = true; continue; }
 		if (pe_flag(a, "disable-tsaware")) { cfg.ts_aware = false; continue; }
 		if (pe_flag(a, "large-address-aware")) { cfg.large_address_aware = true; continue; }
-		if (pe_flag(a, "disable-large-address-aware")) { cfg.large_address_aware = false; continue; }
-		if (pe_flag(a, "no-seh")) { cfg.no_seh = true; continue; }
-		if (pe_flag(a, "disable-no-seh")) { cfg.no_seh = false; continue; }
-		if (pe_flag(a, "no-isolation")) { cfg.no_isolation = true; continue; }
-		if (pe_flag(a, "disable-no-isolation")) { cfg.no_isolation = false; continue; }
-		if (pe_flag(a, "no-bind")) { cfg.no_bind = true; continue; }
-		if (pe_flag(a, "disable-no-bind")) { cfg.no_bind = false; continue; }
 		if (pe_flag(a, "appcontainer")) { cfg.appcontainer = true; continue; }
 		if (pe_flag(a, "disable-appcontainer")) { cfg.appcontainer = false; continue; }
-		if (pe_flag(a, "forceinteg")) { cfg.integrity_check = true; continue; }
-		if (pe_flag(a, "disable-forceinteg")) { cfg.integrity_check = false; continue; }
 		if (pe_flag(a, "disable-reloc-section")) { cfg.relocatable = false; continue; }
 		if (pe_flag(a, "enable-reloc-section")) { cfg.relocatable = true; continue; }
 		if (pe_flag(a, "insert-timestamp")) { cfg.insert_timestamp = true; continue; }
@@ -334,7 +328,6 @@ static bool pe_options_parse(int argc, char **argv)
 		if (pe_flag(a, "enable-runtime-pseudo-reloc")) { cfg.pseudo_relocs = true; continue; }
 		if (pe_flag(a, "disable-runtime-pseudo-reloc")) { cfg.pseudo_relocs = false; continue; }
 		if (pe_flag(a, "export-all-symbols")) { cfg.export_all = cfg.export_all_set = true; continue; }
-		if (pe_flag(a, "no-export-all-symbols")) { cfg.export_all = false; cfg.export_all_set = true; continue; }
 		if (pe_flag(a, "exclude-all-symbols")) { cfg.exclude_all = true; continue; }
 		if (pe_flag(a, "allow-multiple-definition")) { cfg.allow_multiple = true; continue; }
 		if (pe_flag(a, "no-allow-multiple-definition")) { cfg.allow_multiple = false; continue; }
@@ -343,19 +336,14 @@ static bool pe_options_parse(int argc, char **argv)
 		if (pe_flag(a, "no-demangle")) { cfg.demangle = false; continue; }
 		if (pe_flag(a, "fatal-warnings")) { cfg.fatal_warnings = true; continue; }
 		if (pe_flag(a, "no-fatal-warnings")) { cfg.fatal_warnings = false; continue; }
-		if (pe_flag(a, "build-id")) { cfg.build_id = true; build_id_none = false; continue; }
-		if (!strcmp(a, "-z")) {
-			if (i + 1 < argc && !strcmp(argv[i + 1], "muldefs")) { cfg.allow_multiple = true; i++; continue; }
-			pe_error("unknown argument: -z %s", i + 1 < argc ? argv[i + 1] : "");
-			i++;
-			continue;
-		}
+		if (pe_flag(a, "build-id")) { build_id = 1; continue; }
 		if ((v = pe_value(argc, argv, &i, "build-id"))) {
-			if (!strcmp(v, "none")) { cfg.build_id = false; build_id_none = true; }
+			if (!strcmp(v, "none"))
+				build_id = 0;
 			else {
 				if (*v && strcmp(v, "fast") && strcmp(v, "md5") && strcmp(v, "sha1") && strcmp(v, "tree") && strcmp(v, "uuid"))
 					pe_warn("unsupported build id hashing: %s, using default hashing.", v);
-				cfg.build_id = true;
+				build_id = 1;
 			}
 			continue;
 		}
@@ -397,6 +385,8 @@ static bool pe_options_parse(int argc, char **argv)
 			uint64_t x;
 			if (!pe_parse_u64(v, &x) || x > 0xffff)
 				pe_error("invalid number: %s", v);
+			else if (vmaj == &cfg.major_image || vmin == &cfg.minor_image)
+				;	/* lld 23 accepts the image version and writes 0.0: so does vlink */
 			else if (is_major)
 				*vmaj = (uint16_t)x;
 			else
@@ -417,7 +407,7 @@ static bool pe_options_parse(int argc, char **argv)
 				pe_input_add(p, whole);
 			continue;
 		}
-		if ((v = pe_value(argc, argv, &i, "exclude-libs"))) {
+		if ((pe_flag(a, "exclude-libs") && (v = pe_value(argc, argv, &i, "exclude-libs")))) {
 			for (const char *s = v; *s;) {
 				size_t n = strcspn(s, ",:");
 				char *lib = pe_strndup(s, n);
@@ -495,19 +485,26 @@ static bool pe_options_parse(int argc, char **argv)
 		case 'm': m = pe_short(argc, argv, &i, 'm'); have_m = true; continue;
 		case 's': if (!a[2]) { cfg.debug = 0; continue; } break;
 		case 'S': if (!a[2]) { if (cfg.debug) cfg.debug = 1; continue; } break;
-		case 'O': if (!a[2] || isdigit((unsigned char)a[2]) || a[2] == 's' || a[2] == 'z') { if (!a[2]) i++; continue; } break;
+		case 'O': continue;	/* -O<level>: ignored */
 		case 'v': if (!a[2]) { fprintf(stdout, "vlink (compatible with GNU linkers)\n"); continue; } break;
 		case '(': case ')': if (!a[2]) continue; break;
 		}
 		pe_error("unknown argument: %s", a);
 	}
-	(void)build_id_none;
+	cfg.build_id = build_id < 0 ? cfg.debug == 2 : build_id;
 
-	if (!have_m) {
-		/* lld's MinGW driver defaults to i386pep... it needs -m to know the machine; x86-64 here */
-	} else if (strcmp(m, "i386pep")) {
-		if (!strcmp(m, "i386pe") || !strcmp(m, "thumb2pe") || !strcmp(m, "arm64pe") || !strcmp(m, "arm64ecpe"))
-			pe_error("vlink: emulation %s is not supported (only i386pep, x86-64)", m);
+	if (have_m && strcmp(m, "i386pep")) {
+		/* other machines are known to lld; their inputs then conflict with x64 objects */
+		if (!strcmp(m, "i386pe"))
+			pe_machine_name = "x86";
+		else if (!strcmp(m, "thumb2pe"))
+			pe_machine_name = "arm";
+		else if (!strcmp(m, "arm64pe"))
+			pe_machine_name = "arm64";
+		else if (!strcmp(m, "arm64ecpe"))
+			pe_machine_name = "arm64ec";
+		else if (!strcmp(m, "arm64xpe"))
+			pe_machine_name = "arm64x";
 		else
 			pe_error("unknown parameter: -m%s", m);
 	}
@@ -517,8 +514,8 @@ static bool pe_options_parse(int argc, char **argv)
 		cfg.image_base = cfg.dll ? 0x180000000ull : 0x140000000ull;
 	if (cfg.dll)
 		cfg.ts_aware = false;
-	if (!cfg.dynamic_base)
-		cfg.high_entropy_va = cfg.high_entropy_va && cfg.dynamic_base;
+	if (!cfg.relocatable)
+		cfg.dynamic_base = false;	/* (lld-link -fixed) */
 	if (!pe_input_count && !pe_error_count)
 		pe_error("no input files");
 	return true;

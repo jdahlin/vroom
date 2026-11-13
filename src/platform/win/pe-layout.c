@@ -532,7 +532,7 @@ static void pe_misc_chunks(void)
 		}
 	for (uint32_t i = 0; i < pe_local_import_count; i++)
 		pe_output_add(pe_rdata, pe_local_import_chunks[i]);
-	if (cfg.build_id || cfg.debug) {
+	if (cfg.build_id || cfg.debug == 2) {
 		pe_debug_directory = pe_synth(PE_CHUNK_DEBUG_DIRECTORY, PE_DEBUG_DIRECTORY_SIZE, 4);
 		pe_output_add(pe_buildid, pe_debug_directory);
 		pe_cv_record = pe_synth(PE_CHUNK_CODEVIEW_RECORD, 25, 4);

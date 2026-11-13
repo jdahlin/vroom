@@ -688,7 +688,7 @@ static bool pe_resolve_run(void)
 	}
 	pe_add_absolute("__CTOR_LIST__", 13, 0, NULL, NULL);
 	pe_add_absolute("__DTOR_LIST__", 13, 0, NULL, NULL);
-	if ((cfg.debug || cfg.build_id) && pe_sym_find("__buildid"))
+	if ((cfg.debug == 2 || cfg.build_id) && pe_sym_find("__buildid"))
 		pe_driver_undefined("__buildid");
 	pe_alternate_name_add("__image_base__", "__ImageBase");
 

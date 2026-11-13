@@ -40,7 +40,7 @@ static const uint8_t *pe_file_map(const char *path, size_t *size)
 {
 	int fd = openat(pe_dirfd, path, O_RDONLY | O_CLOEXEC);
 	if (fd < 0) {
-		pe_error("cannot open %s: %s", path, strerror(errno));
+		pe_error("could not open '%s': %s", path, strerror(errno));
 		return NULL;
 	}
 	struct stat st;
@@ -174,8 +174,7 @@ static pe_symbol *pe_add_undefined(const char *name, size_t n, pe_file *f, bool 
 {
 	bool inserted;
 	pe_symbol *s = pe_sym_insert(name, n, &inserted);
-	if (f)
-		s->used_in_regular = true;
+	s->used_in_regular = true;
 	if (inserted || (s->kind == PE_SYM_LAZY_ARCHIVE && override_lazy)) {
 		pe_sym_replace(s, PE_SYM_UNDEFINED, f);
 		return s;
@@ -391,6 +390,10 @@ static bool pe_obj_validate(pe_file *f)
 		return false;
 	}
 	uint16_t machine = pe_rd16(d);
+	if (pe_machine_name && machine == IMAGE_FILE_MACHINE_AMD64) {
+		pe_error("%s: machine type x64 conflicts with %s", fn, pe_machine_name);
+		return false;
+	}
 	if (machine != IMAGE_FILE_MACHINE_AMD64) {
 		if (machine == 0 && pe_rd16(d + 2) == 0xffff)
 			pe_error("%s: bigobj COFF objects are not supported by vlink", fn);

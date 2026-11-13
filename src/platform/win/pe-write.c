@@ -671,8 +671,8 @@ static bool pe_write_run(void)
 	if (pe_cv_record && !pe_cv_record->os->removed) {
 		uint8_t *cv = pe_chunk_buffer(img, pe_cv_record);
 		uint64_t h = cfg.build_id ? vdigest_xxh3(img, pe_file_size) : 0;
-		memcpy(cv, "RSDS", 4);
 		if (cfg.build_id) {
+			memcpy(cv, "RSDS", 4);
 			pe_wr64(cv + 4, h);
 			memcpy(cv + 12, "LLD PDB.", 8);
 			pe_wr32(cv + 20, 1);

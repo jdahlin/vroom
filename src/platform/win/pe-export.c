@@ -255,7 +255,9 @@ typedef struct { const char *name; pe_bytes body; const char **syms; uint32_t ns
 static void pe_ar_header(pe_bytes *b, const char *name, size_t size)
 {
 	char h[61];
-	snprintf(h, sizeof h, "%-16s%-12s%-6s%-6s%-8s%-10zu`\n", name, "0", "0", "0", "644", size);
+	/* (the linker members and the long name table have mode 0, as llvm's archive writer) */
+	const char *mode = name[0] == '/' && (name[1] == 0 || name[1] == '/') ? "0" : "644";
+	snprintf(h, sizeof h, "%-16s%-12s%-6s%-6s%-8s%-10zu`\n", name, "0", "0", "0", mode, size);
 	pe_bytes_put(b, h, 60);
 }
 
@@ -299,10 +301,10 @@ static bool pe_implib_write(const char *path)
 		};
 		pe_mini_symbol syms[7] = {
 			{ pe_format("__IMPORT_DESCRIPTOR_%s", base), 0, 1, IMAGE_SYM_CLASS_EXTERNAL },
-			{ ".idata$2", 0xc0000040, 1, IMAGE_SYM_CLASS_SECTION },
+			{ ".idata$2", 0, 1, IMAGE_SYM_CLASS_SECTION },
 			{ ".idata$6", 0, 2, IMAGE_SYM_CLASS_STATIC },
-			{ ".idata$4", 0xc0000040, 0, IMAGE_SYM_CLASS_SECTION },
-			{ ".idata$5", 0xc0000040, 0, IMAGE_SYM_CLASS_SECTION },
+			{ ".idata$4", 0, 0, IMAGE_SYM_CLASS_SECTION },
+			{ ".idata$5", 0, 0, IMAGE_SYM_CLASS_SECTION },
 			{ "__NULL_IMPORT_DESCRIPTOR", 0, 0, IMAGE_SYM_CLASS_EXTERNAL },
 			{ pe_format("\x7f%s_NULL_THUNK_DATA", base), 0, 0, IMAGE_SYM_CLASS_EXTERNAL },
 		};
