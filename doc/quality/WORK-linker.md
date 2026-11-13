@@ -153,6 +153,17 @@ resolution and section assignment, with a format writer each.  The decision
 of `PLAN-quality.md` ("one linker core, not three linkers") applies; the
 step is designed when 2 and 3 are done.
 
+## Known problem, to investigate
+
+`VCC_LDCMP=1 bench/vcc-ctests.py -j 3 --no-cache` on a macOS host fails two
+cases on `origin/main`, before and after step 1 (the same objects, the same
+`vlink`): `vcc/data_sections` and `vcc/tls_static`, both "link: vlink image
+differs from lld".  Not caused by the split; the cause is open (the host's
+lld, or a real difference in how `vlink` lays out those two sections; the
+`tls_static` case touches `tls_start`, see `link-context.md`).  Whoever takes
+step 2 should look at them first, since step 2's proof depends on this
+comparison being green.
+
 ## Proof for step 1
 
 `make -C src -j 3 vcc` and the file-by-file build (`VCC_UNITY=
