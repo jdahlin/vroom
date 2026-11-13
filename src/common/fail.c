@@ -1,29 +1,50 @@
 /*
- * Leaving the job when a server-wide table or region is full: an error for
- * this job (and vccd restarts when idle: vtables_full), abort without a job
- * to end.  The job's hook is the driver's (an error for this TU, longjmp).
+ * How a job, or a tool, stops (common/fail.h): the message, then the job's
+ * jump buffer or exit.  The only abort() and exit() of the library.
  */
-#include <stdatomic.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 #include "common/fail.h"
 
-void (*vintern_full_hook)(void);
+_Thread_local jmp_buf *vjob_jb;
+_Thread_local int vjob_fail_fd = 2;
 _Atomic int vtables_full;
 
-_Thread_local int vjob_escape_fd = 2;
+void vjob_fail(const char *message)
+{
+	dprintf(vjob_fail_fd, "vcc: error: %s\n", message);
+	if (vjob_fail_fd != 2)	/* (the server's log too) */
+		fprintf(stderr, "vcc: error: %s\n", message);
+	if (vjob_jb)
+		longjmp(*vjob_jb, 1);
+	exit(1);
+}
 
-void vjob_escape(const char *msg)
+void vjob_fail_errno(const char *what)
+{
+	char message[256];
+
+	snprintf(message, sizeof(message), "%s: %s", what, strerror(errno));
+	vjob_fail(message);
+}
+
+void vjob_fail_table_full(const char *message)
 {
 	atomic_store(&vtables_full, 1);
-	void (*hook)(void) = __atomic_load_n(&vintern_full_hook, __ATOMIC_RELAXED);
+	vjob_fail(message);
+}
 
-	dprintf(vjob_escape_fd, "vcc: error: %s\n", msg);
-	if (vjob_escape_fd != 2)	/* (the server's log too) */
-		fprintf(stderr, "vcc: error: %s\n", msg);
-	if (hook)
-		hook();
+void vout_of_memory(void)
+{
+	vjob_fail("out of memory");
+}
+
+void vbug(const char *file, int line, const char *message)
+{
+	fprintf(stderr, "vcc: internal error: %s:%d: %s\n", file, line, message);
 	abort();
 }

@@ -48,8 +48,9 @@ def nest(open_, close, n, inner):
 #        main file, extra args)
 def cases(d):
     C = {}
-    def case(name, expect, files, main, args=(), regex=None, xfail=None, budget=None, env=None):
-        C[name] = dict(expect=expect, regex=regex, xfail=xfail, files=files, main=main, args=list(args), budget=budget, env=env)
+    def case(name, expect, files, main, args=(), regex=None, xfail=None, budget=None, env=None, closed_stdout=False):
+        C[name] = dict(expect=expect, regex=regex, xfail=xfail, files=files, main=main, args=list(args), budget=budget, env=env,
+                       closed_stdout=closed_stdout)
 
     # front end recursion: vstack.h ends the TU before the stack runs out (clang itself crashes here)
     case('paren-200k', 'error', {'a.c': 'int x = ' + nest('(', ')', 200000, '1') + ';\n'}, 'a.c')
@@ -108,6 +109,10 @@ def cases(d):
     case('anon-nest-20', 'ok', {'a.c': 'struct s { ' + 'struct { ' * 20 + 'int x; ' + '}; ' * 20 + '} v;\nint f(void) { return v.x; }\n'}, 'a.c')
     case('call-300-args', 'ok', {'a.c': 'void g(' + ', '.join(['int'] * 300) + ');\nvoid f(void) { g(' + ', '.join(['1'] * 300) + '); }\n'}, 'a.c')
     case('include-dirs-5000', 'ok', {'a.c': 'int x;\n'}, 'a.c', [f'-I{d}/nodir{i}' for i in range(5000)])
+    # a write error ends the job with a diagnostic (vfdbuf_flush: it dropped the data and exited 0);
+    # the layout dump goes to a closed stdout.  Without vccd: the shim's output is the client's.
+    case('write-error-closed-stdout', 'error', {'a.c': 'struct s { int a; long b; };\nstruct s v;\n'}, 'a.c',
+         ['--vcc-layout-checks', '-fsyntax-only'], regex='write error', closed_stdout=True)
     # files
     case('file-3g', 'error', {'a.c': ('sparse', 3 << 30)}, 'a.c', regex='too large')
     # assembler
@@ -201,7 +206,7 @@ def run(c, d, vccd):
     out = f'{d}/out.o'
     # -S also routes front-end-only jobs through vccd's compile path, and
     # permits x86-64 checks without its unsupported direct-object mode.
-    mode = ['-S' if '-fsyntax-only' in c['args'] else '-c', '-o', out]
+    mode = ['-S' if '-fsyntax-only' in c['args'] else '-c', '-o', '-' if c['closed_stdout'] else out]
     argv = TARGET + c['args'] + mode + [c['main']]
     if vccd:
         cmd, env = [f'{vd.BIN}/vcc'] + argv, dict(os.environ, VCC_SOCK=vccd.sock)
@@ -209,7 +214,9 @@ def run(c, d, vccd):
         cmd, env = [vd.VPP] + argv, dict(os.environ, **c['env']) if c.get('env') else None
     t0 = time.time()
     try:
-        p = subprocess.run(cmd, cwd=d, capture_output=True, timeout=TIMEOUT, env=env)
+        pre = (lambda: os.close(1)) if c['closed_stdout'] else None
+        p = subprocess.run(cmd, cwd=d, stdout=None if c['closed_stdout'] else subprocess.PIPE, stderr=subprocess.PIPE,
+                           timeout=TIMEOUT, env=env, preexec_fn=pre)
         rc, err = p.returncode, p.stderr.decode(errors='replace')
     except subprocess.TimeoutExpired:
         return 'timeout', time.time() - t0, ''
@@ -243,7 +250,7 @@ def main():
     verbose = '-v' in av; av = [a for a in av if a != '-v']
     pat = av[0] if av else None
     tmp = tempfile.mkdtemp(prefix='vcc-stress-')
-    C = {k: v for k, v in cases(tmp).items() if not pat or re.search(pat, k)}
+    C = {k: v for k, v in cases(tmp).items() if (not pat or re.search(pat, k)) and not (use_vccd and v['closed_stdout'])}
     vccd = Vccd(tmp) if use_vccd else None
     if vccd: vccd.start()
     fails = xfails = passes = 0

@@ -44,6 +44,7 @@
 #include <unistd.h>
 
 #include "common/attributes.h"
+#include "common/fail.h"
 
 typedef struct vjob_region {
 	char *p;
@@ -61,10 +62,8 @@ static inline VUSE VRETNONNULL void *vjob_region_map(size_t n)
 {
 	void *p = mmap(NULL, n, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
 
-	if (p == MAP_FAILED) {
-		perror("vcc: mmap");
-		abort();
-	}
+	if (p == MAP_FAILED)
+		vjob_fail_errno("cannot map memory for a job region");
 	return p;
 }
 
@@ -117,10 +116,8 @@ static inline void vjob_region_release(vjob_region *r, size_t used)
 	} else {
 		memset(r->p, 0, VJOB_REGION_KEEP);
 		if (mmap(r->p + VJOB_REGION_KEEP, used - VJOB_REGION_KEEP, PROT_READ | PROT_WRITE,
-			 MAP_PRIVATE | MAP_ANON | MAP_NORESERVE | MAP_FIXED, -1, 0) == MAP_FAILED) {
-			perror("vcc: mmap");
-			abort();
-		}
+			 MAP_PRIVATE | MAP_ANON | MAP_NORESERVE | MAP_FIXED, -1, 0) == MAP_FAILED)
+			vjob_fail_errno("cannot map fresh pages for a job region");
 	}
 }
 
@@ -146,7 +143,7 @@ static inline vjob_region *vjob_region_pool_take(vjob_region_pool *pl)
 	if (!s) {
 		s = calloc(1, sizeof(void *) + (size_t)pl->n * sizeof(vjob_region));
 		if (!s)
-			abort();
+			vout_of_memory();
 	}
 	return (vjob_region *)(s + 1);
 }
@@ -163,15 +160,13 @@ static inline void vjob_region_pool_give(vjob_region_pool *pl, vjob_region *r)
 
 /* ---------------- reservations, regions, arenas ---------------- */
 
-/* n bytes of anonymous memory (flags: MAP_NORESERVE or 0); perror(msg) and abort on failure */
+/* n bytes of anonymous memory (flags: MAP_NORESERVE or 0); fails the job with msg and errno when the mapping fails */
 static inline VUSE VRETNONNULL void *vreserve(size_t n, int flags, const char *msg)
 {
 	void *p = mmap(NULL, n, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON | flags, -1, 0);
 
-	if (p == MAP_FAILED) {
-		perror(msg);
-		abort();
-	}
+	if (p == MAP_FAILED)
+		vjob_fail_errno(msg);
 	return p;
 }
 

@@ -12,19 +12,18 @@
 #include <stdlib.h>
 
 #include "common/attributes.h"
+#include "common/fail.h"
 
 /* a bump region over a reservation, by offset (the assembler, the object writer) */
 typedef struct vregion { uint8_t *base; size_t used, cap; } vregion;
 
-/* n bytes aligned to al (a power of two); prints msg and aborts when full */
+/* n bytes aligned to al (a power of two); fails the job with msg when full */
 static inline VUSE VRETNONNULL VNONNULL(1) void *vregion_push(vregion *r, size_t n, size_t al, const char *msg)
 {
 	size_t u = (r->used + al - 1) & ~(al - 1);
 
-	if (u + n > r->cap) {
-		fprintf(stderr, "%s\n", msg);
-		abort();
-	}
+	if (u + n > r->cap)
+		vjob_fail(msg);
 	r->used = u + n;
 	return r->base + u;
 }
@@ -39,10 +38,8 @@ static inline VUSE VRETNONNULL VNONNULL(1) void *varena_alloc(varena *a, size_t 
 	char *r = a->p;
 
 	n = (n + 7) & ~(size_t)7;
-	if (__builtin_expect((size_t)(a->end - r) < n, 0)) {
-		fprintf(stderr, "vcc: preprocessor arena full\n");
-		abort();
-	}
+	if (__builtin_expect((size_t)(a->end - r) < n, 0))
+		vjob_fail("preprocessor arena full");
 	a->p = r + n;
 	return r;
 }

@@ -19,6 +19,7 @@
 #ifndef VCC_COMMON_BUFFER_H
 #define VCC_COMMON_BUFFER_H
 
+#include <errno.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -27,6 +28,7 @@
 #include <unistd.h>
 
 #include "common/attributes.h"
+#include "common/fail.h"
 
 /* ---------------- vbuf ---------------- */
 
@@ -35,7 +37,8 @@ typedef struct vbuf {
 	size_t n, cap;
 } vbuf;
 
-static inline VNONNULL(1) void vbuf_put(vbuf *b, const void *s, size_t n)
+/* room for n more bytes (doubling; fails the job when realloc does) */
+static inline VNONNULL(1) void vbuf_reserve(vbuf *b, size_t n)
 {
 	if (b->n + n > b->cap) {
 		size_t c = b->cap ? b->cap * 2 : 4096;
@@ -44,9 +47,14 @@ static inline VNONNULL(1) void vbuf_put(vbuf *b, const void *s, size_t n)
 			c *= 2;
 		b->p = realloc(b->p, c);
 		if (!b->p)
-			abort();
+			vout_of_memory();
 		b->cap = c;
 	}
+}
+
+static inline VNONNULL(1) void vbuf_put(vbuf *b, const void *s, size_t n)
+{
+	vbuf_reserve(b, n);
 	if (n)	/* (an empty append to an empty buffer: b->p is NULL, which memcpy must not get) */
 		memcpy(b->p + b->n, s, n);
 	b->n += n;
@@ -57,14 +65,19 @@ static inline void vbuf_s(vbuf *b, const char *s) { vbuf_put(b, s, strlen(s)); }
 __attribute__((format(printf, 2, 3)))
 static inline void vbuf_f(vbuf *b, const char *fmt, ...)
 {
-	char t[1024];
-	va_list ap;
+	va_list ap, again;
 	int n;
 
 	va_start(ap, fmt);
-	n = vsnprintf(t, sizeof(t), fmt, ap);
+	va_copy(again, ap);
+	n = vsnprintf(NULL, 0, fmt, ap);	/* the whole length: nothing is cut */
 	va_end(ap);
-	vbuf_put(b, t, n < (int)sizeof(t) ? (size_t)n : sizeof(t) - 1);
+	if (n > 0) {
+		vbuf_reserve(b, (size_t)n + 1);	/* (vsnprintf writes a terminator too) */
+		vsnprintf(b->p + b->n, (size_t)n + 1, fmt, again);
+		b->n += (size_t)n;
+	}
+	va_end(again);
 }
 
 /* ---------------- vsbuf ---------------- */
@@ -77,7 +90,7 @@ typedef struct vsbuf {
 
 static inline VNONNULL(1) void vsbuf_put(vsbuf *b, const void *s, size_t n)
 {
-	if (b->oom)
+	if (b->oom || !n)	/* (an empty append: b->p may be NULL, which memcpy must not get) */
 		return;
 	if (b->n + n > b->cap) {
 		size_t cap = b->cap ? b->cap : 4096;
@@ -138,7 +151,7 @@ typedef struct vfixbuf {
 static inline void vfixbuf_put(vfixbuf *b, const char *s, size_t n)
 {
 	if (b->n + n >= sizeof(b->s))
-		n = sizeof(b->s) - 1 - b->n;
+		vjob_fail("text too long for a fixed buffer (more than 4095 bytes)");
 	memcpy(b->s + b->n, s, n);
 	b->n += n;
 	b->s[b->n] = 0;
@@ -161,8 +174,10 @@ static inline void vfdbuf_flush(vfdbuf *o)
 	while (off < o->n) {
 		ssize_t w = write(o->fd, o->p + off, o->n - off);
 
+		if (w < 0 && errno == EINTR)
+			continue;
 		if (w <= 0)
-			break;
+			vjob_fail_errno("write error");
 		off += (size_t)w;
 	}
 	o->n = 0;

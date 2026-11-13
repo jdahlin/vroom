@@ -14,6 +14,12 @@
  *   - A cleanup runs when the block is left normally; longjmp and exit()
  *     skip it.  Leave a lock before a longjmp (emit's efatal does) and use
  *     these only where nothing jumps out of the scope.
+ *   - A scope that holds a VAUTO* or VLOCK resource must not call anything
+ *     that can vjob_fail (common/fail.h: it leaves through a longjmp, or
+ *     exits, and the cleanup never runs): allocation helpers, vbuf, the
+ *     regions, the text buffer.  Inside such a scope use what fails by a
+ *     flag or a result (vsbuf's oom, vzbuf_put's false, plain malloc and a
+ *     check), or take the resource out (VTAKE) before the call.
  *   - To hand the resource over, take it out first: VTAKE(p) returns the
  *     pointer and leaves NULL behind, VTAKE_FD(fd) returns the fd and
  *     leaves -1.

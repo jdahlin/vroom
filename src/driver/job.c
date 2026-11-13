@@ -29,12 +29,6 @@ static double now(void)
 	return ts.tv_sec + ts.tv_nsec * 1e-9;
 }
 
-static void intern_full(void)
-{
-	if (vjob_jb)
-		longjmp(*vjob_jb, 1);
-}
-
 /* a variable of the job's environment: the client's under vccd */
 VPRIV const char *ppd_getenv(const ppd_env *env, const char *name)
 {
@@ -339,7 +333,7 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 		goto out;
 	if (driver_target_features_check(job, argc, argv))
 		goto out;
-	vjob_fail_fd = vjob_escape_fd = job->errfd;	/* (vccd: the client's stderr, not the server's) */
+	vjob_fail_fd = job->errfd;	/* (vccd: the client's stderr, not the server's) */
 	if (driver_cmdline_check(job))
 		goto out;
 	if (driver_warning_groups_check(job))
@@ -395,7 +389,6 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 			goto out;
 		}
 		vjob_jb = &jo;
-		__atomic_store_n(&vintern_full_hook, intern_full, __ATOMIC_RELAXED);	/* (every job: the same value) */
 		p = pp_open(&job->po);
 		vjob_jb = NULL;
 	}
@@ -410,7 +403,6 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 		goto done;
 	}
 	vjob_jb = &jb;	/* as/elf overflow ends this TU too */
-	__atomic_store_n(&vintern_full_hook, intern_full, __ATOMIC_RELAXED);	/* (only reaches vjob_jb in the thread that set it) */
 	if (job->tokhash) {
 		driver_tokhash_run(job, p, env);
 		goto done;
@@ -425,7 +417,7 @@ done:
 	pp_diag_summary(p);
 	pp_close(p);	/* frees the text in o */
 out:
-	vjob_fail_fd = vjob_escape_fd = 2;
+	vjob_fail_fd = 2;
 	bfree(&job->pre);
 	bfree(&job->cmdl);
 	bfree(&job->incl);

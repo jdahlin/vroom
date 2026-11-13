@@ -143,13 +143,7 @@ ElfObj *elf_new(void);
 void elf_reset(ElfObj *o);
 enum { EM_X86_64 = 62, EM_AARCH64 = 183 };
 static inline void elf_set_machine(ElfObj *o, int m) { o->machine = (uint16_t)m; }	/* kept across elf_reset */
-/* a job's escape for input-driven overflow (an arena or region full): set by
- * the driver around a TU, the assembler and object writer longjmp there with
- * a message instead of abort() taking down vccd; NULL: abort as before */
-#include <setjmp.h>
-extern _Thread_local jmp_buf *vjob_jb;
-__attribute__((noreturn)) void vjob_fail(const char *msg);
-extern _Thread_local int vjob_fail_fd;	/* where vjob_fail reports: the job's diagnostics (2) */
+#include "common/fail.h"	/* vjob_fail: input-driven overflow (an arena or region full) ends the job */
 void elf_free(ElfObj *o);
 void elf_error(ElfObj *o, const char *fmt, ...);
 
