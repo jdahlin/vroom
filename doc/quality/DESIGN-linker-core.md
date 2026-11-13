@@ -34,8 +34,8 @@ What every link does, whatever it writes:
 
 | Part | Owner after step 4 |
 |---|---|
-| Entry: response files, the one link lock, the context's creation and end, the regions' release | `link-entry.c` (`ld_main`) for both formats |
-| The context: options common to both (inputs, `-o`, `-L`/`-l`, directory), diagnostics, the format's own state as a member | `struct ld_context`, with `struct macho_context *macho` beside the ELF groups |
+| Entry: response files and the choice of format | `link-entry.c` (`ld_main`) for both formats; the ELF link lock and regions stay ELF's |
+| The context: one per link, created by the entry of its format, with the diagnostics | `struct ld_context` (ELF), `struct macho_context` (Mach-O) |
 | Diagnostics | `struct ld_diagnostics` (done in step 3) |
 | Input files and archives | `port/file.h`, `common/archive-reader.c` (done) |
 | Name tables of a single-threaded format | `common/string-index.h` |
@@ -66,11 +66,14 @@ Each builds and passes alone, and none changes an output byte.
    pairs instead (names are unique, so the order is the same).
    Proof: `vlink-macho.py` byte-identical, also with the ASan build
    (lifetimes move); the ELF proof (`vlink-pool`, LDCMP) unchanged.
-2. **One entry.**  `ld_main` takes the link lock and creates the context for
-   both formats; Mach-O's own lock goes; `macho_link` receives the context and
-   reports through `ctx->diagnostics` (limit 20, not announced: unchanged
-   messages).  Proof: as 1, plus `vccd-test`, and TSan with concurrent
-   Mach-O and ELF links through one vccd, since the lock changes.
+2. **No lock for Mach-O links.**  Once its state is in a context, a Mach-O
+   link shares only the libSystem export table, read once: that read gets a
+   lock of its own and `macho_link` takes none, so vccd links host programs
+   in parallel.  (The first draft had `ld_main` take one lock for both
+   formats; that would serialise host-program links with ELF links.)  The
+   Mach-O context stays its own struct rather than a member of
+   `struct ld_context`, whose groups are all ELF's.  Proof: as 1, plus
+   `vccd-test`, and concurrent Mach-O links through one TSan vccd.
 3. **Mach-O's names through `common/string-index.h`.**  The FNV table and
    its growth go; ids stay in insertion order, so every output is the same.
    Proof: as 1, and `vbench` is not concerned (ELF untouched).
@@ -89,3 +92,8 @@ writer (above).
   wanted, it needs Mach-O to follow lld's rules (a behaviour change for host
   programs) or ELF to grow a second rule set.
 - One output writer: in place (ELF) or temporary and rename (Mach-O)?
+
+## Status (2026-11-13)
+
+PR 0 #240, PR 1 #243, PR 2 #244, PR 3 #245.  With these the plan of this
+file is complete; what is left per format is listed above as not shared.
