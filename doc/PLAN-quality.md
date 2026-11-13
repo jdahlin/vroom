@@ -152,6 +152,20 @@ Open, each waiting for a measurement or a closer look:
 
 ## Status
 
+### 2026-11-13: on the reorganised tree
+
+PR #134 is on main (`src/`, `doc/`); PR #136 took wasm out of the default
+build.  This plan, the reviews and the work orders moved to `doc/` with
+them.  `bench/quality-baseline.json` is blessed again on `src/`: the
+numbers that moved are path-dependent (includes of another module's
+internal header 4 to 7 and mutual module pairs 4 to 5, because public
+headers now sit under `include/`), one more environment switch from main,
+and 2 redundant tokens.
+
+Rule for the parallel work: the agent that opens a PR keeps it mergeable and
+green until it is merged; the integrator coordinates, reviews scope and
+merges, and does not fix other agents' PRs.
+
 ### 2026-11-13: P1 done, 18 reviews
 
 `doc/review/quality-*.md`: 18 reviews, 5848 lines, 373 findings, each
