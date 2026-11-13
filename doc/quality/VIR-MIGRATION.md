@@ -148,7 +148,7 @@ pass's own cost (`bench/vir-passes.py`, share of `@build` + `@lower`).
 
 | Step | Net, kernel sample (cc / emit) | Own cost, SQLite (share of build + lower) | Running sum |
 |---|---|---|---|
-| 4.1 `redundant-extensions` | +0.13 % / +0.65 % | 98 M of 3 307 M (3.0 %); the design's 0.3 % is not met | 0.13 % (cc) |
+| 4.1 `redundant-extensions` | +0.27 % / +0.76 % (noise 0.2 / 0.5 %) | suites 0.3 % (290 M); SQLite 98 M of 3 314 M (3.0 %), over the design's 0.3 % | 0.27 % (cc) |
 
 ## What this does to the quality plan
 
