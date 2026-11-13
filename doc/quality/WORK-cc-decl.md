@@ -429,3 +429,24 @@ proof plus `make -C src vcc-asan` and `bench/vcc-sema.py batch -j 3
 | `diag.c` | `vbuf_*` in the report entries | all | `vbuffer_*` (renamed by WORK-common's script; nothing to do unless its failure mode changed) |
 
 No FNV, LEB128, byte load/store or file mapping in these files.
+
+## Status
+
+- Step 1 done (PR "cc: declarations, statements and flow, one job per file").
+  Every row of the table was cut as written; the line ranges held except
+  for small shifts: `stmt.c` 30 (a stray `-Wparentheses` comment) went with
+  `assign_cond_warn` it describes, and `decl.c` 488 (the C89 implicit-function
+  comment) went with `implicit_func` in `library-function.c`.
+- Cuts that needed code beyond moving: `flw` and the four `fl_*` predicates
+  `uninitialized.c` uses stay in `reach.c` but are `VPRIV`, the typedef in
+  `ccimpl.h`; `declare`, `instrument`, `object_size_locals`,
+  `fold_local_builtins`, `return_type_warn`, `return_stack_addr`,
+  `target_attr` and `drcov_finish` are `VPRIV` with prototypes in `ccimpl.h`.
+  `drcov_on` was a file-level static in `tu.c` read by `cc_init`/`cc_run` and
+  by the DRCOV code: it stays static in `declaration-coverage.c` behind
+  `drcov_init()`/`drcov_active()`.
+- `declaration.c` keeps `skip_vla_init` and `kr_params` (the table says
+  "K&R parameters" for it).  `translation-unit.c` is `tu.c` with
+  `translation_unit` appended.
+- Proof not run: `bench/quality.py --clones 999` and `bench/vbench.py gate`
+  (needs a quiet machine).
