@@ -1,0 +1,10 @@
+tu	offsetof.c	ok
+use	decl	In	h	offsetof.c:4	file	offsetof.c	74	4	17	1	-
+use	decl	Out	in	offsetof.c:5	file	offsetof.c	119	5	33	2	-
+use	decl	S	f	offsetof.c:6	file	offsetof.c	144	6	16	1	-
+use	offsetof	Out	in	offsetof.c:5	file	offsetof.c	264	9	37	2	-
+use	offsetof	In	h	offsetof.c:4	file	offsetof.c	270	9	43	1	-
+use	offsetof	S	f	offsetof.c:6	file	offsetof.c	329	10	45	1	-
+members	In	offsetof.c:4	h,i
+members	Out	offsetof.c:5	pad,in
+members	S	offsetof.c:6	f

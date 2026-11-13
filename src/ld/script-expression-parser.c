@@ -1,26 +1,26 @@
 /* The linker script's expression parser (precedence climbing) and its primaries. */
 
-static uint32_t get_osec(const char *name);
-static Expr *pexpr(void);
+static uint32_t ld_output_section_find(const char *name);
+static ld_expression *ld_script_expression_parse(void);
 
-static Expr *mk(uint8_t op)
+static ld_expression *ld_script_expression_create(uint8_t op)
 {
-	Expr *e = alloc(sizeof *e);
+	ld_expression *e = ld_region_alloc(sizeof *e);
 	e->op = op;
 	return e;
 }
 
-static Provide *cur_provide;
+static ld_provide *cur_provide;
 
-static void note_ref(uint32_t g)
+static void ld_script_symbol_reference_note(uint32_t g)
 {
 	if (cur_provide)
-		VVEC_PUSH(cur_provide->refs, g, alloc);
+		VVEC_PUSH(cur_provide->refs, g, ld_region_alloc);
 	else
-		VVEC_PUSH(refsyms, g, alloc);
+		VVEC_PUSH(refsyms, g, ld_region_alloc);
 }
 
-static int prec(const char *op)
+static int ld_script_operator_precedence(const char *op)
 {
 	char c = op[0], c1 = c ? op[1] : 0;
 	if (c1 && op[2])
@@ -39,9 +39,9 @@ static int prec(const char *op)
 }
 /* peek an operator token (longest match of << >> <= >= == != && || op= and
  * the single-character operators); returns length or 0 */
-static int peekop(char out[4])
+static int ld_script_operator_peek(char out[4])
 {
-	sskip();
+	ld_script_whitespace_skip();
 	size_t left = (size_t)(sp_end - sp);
 	if (!left)
 		return 0;
@@ -61,37 +61,37 @@ static int peekop(char out[4])
 	return n;
 }
 
-static Expr *pprimary(void);
-static Expr *pexpr1(Expr *lhs, int minp)
+static ld_expression *ld_script_primary_expression_parse(void);
+static ld_expression *ld_script_expression_climb(ld_expression *lhs, int minp)
 {
 	char op1[4], op2[4];
 	for (;;) {
-		int n = peekop(op1);
-		if (!n || prec(op1) < minp || (strchr(op1, '=') && strcmp(op1, "==") && strcmp(op1, "!=") &&
+		int n = ld_script_operator_peek(op1);
+		if (!n || ld_script_operator_precedence(op1) < minp || (strchr(op1, '=') && strcmp(op1, "==") && strcmp(op1, "!=") &&
 		    strcmp(op1, "<=") && strcmp(op1, ">=")))
 			break;
 		if (!strcmp(op1, ":"))
 			break;
 		sp += n;
 		if (!strcmp(op1, "?")) {
-			Expr *t = mk(E_TERN);
+			ld_expression *t = ld_script_expression_create(LD_EXPRESSION_TERNARY);
 			t->a = lhs;
-			t->b = pexpr();
-			sexpect(':');
-			t->c = pexpr();
+			t->b = ld_script_expression_parse();
+			ld_script_character_expect(':');
+			t->c = ld_script_expression_parse();
 			return t;
 		}
-		Expr *rhs = pprimary();
+		ld_expression *rhs = ld_script_primary_expression_parse();
 		for (;;) {
-			int m = peekop(op2);
-			if (!m || prec(op2) <= prec(op1) || !strcmp(op2, ":"))
+			int m = ld_script_operator_peek(op2);
+			if (!m || ld_script_operator_precedence(op2) <= ld_script_operator_precedence(op1) || !strcmp(op2, ":"))
 				break;
 			if (strchr(op2, '=') && strcmp(op2, "==") && strcmp(op2, "!=") &&
 			    strcmp(op2, "<=") && strcmp(op2, ">="))
 				break;
-			rhs = pexpr1(rhs, prec(op2));
+			rhs = ld_script_expression_climb(rhs, ld_script_operator_precedence(op2));
 		}
-		Expr *b = mk(E_BIN);
+		ld_expression *b = ld_script_expression_create(LD_EXPRESSION_BINARY);
 		strcpy(b->bop, op1);
 		b->a = lhs;
 		b->b = rhs;
@@ -99,53 +99,53 @@ static Expr *pexpr1(Expr *lhs, int minp)
 	}
 	return lhs;
 }
-static Expr *pexpr(void) { return pexpr1(pprimary(), 0); }
+static ld_expression *ld_script_expression_parse(void) { return ld_script_expression_climb(ld_script_primary_expression_parse(), 0); }
 
-static Expr *pparen(void)
+static ld_expression *ld_script_parenthesized_expression_parse(void)
 {
-	sexpect('(');
-	Expr *e = pexpr();
-	sexpect(')');
+	ld_script_character_expect('(');
+	ld_expression *e = ld_script_expression_parse();
+	ld_script_character_expect(')');
 	return e;
 }
-static uint32_t pparen_osec(void)
+static uint32_t ld_script_parenthesized_output_section_parse(void)
 {
-	sexpect('(');
-	char *n = spatname();
-	sexpect(')');
-	return get_osec(n);
+	ld_script_character_expect('(');
+	char *n = ld_script_pattern_name_parse();
+	ld_script_character_expect(')');
+	return ld_output_section_find(n);
 }
 
-static Expr *pprimary(void)
+static ld_expression *ld_script_primary_expression_parse(void)
 {
-	sskip();
-	if (speek('('))
-		return pparen();
-	if (sconsume('~')) { Expr *e = mk(E_NOT); e->a = pprimary(); return e; }
-	if (sconsume('!')) { Expr *e = mk(E_LNOT); e->a = pprimary(); return e; }
-	if (sconsume('-')) { Expr *e = mk(E_NEG); e->a = pprimary(); return e; }
-	if (sconsume('+')) return pprimary();
-	sskip();
+	ld_script_whitespace_skip();
+	if (ld_script_character_peek('('))
+		return ld_script_parenthesized_expression_parse();
+	if (ld_script_character_consume('~')) { ld_expression *e = ld_script_expression_create(LD_EXPRESSION_BITWISE_NOT); e->a = ld_script_primary_expression_parse(); return e; }
+	if (ld_script_character_consume('!')) { ld_expression *e = ld_script_expression_create(LD_EXPRESSION_LOGICAL_NOT); e->a = ld_script_primary_expression_parse(); return e; }
+	if (ld_script_character_consume('-')) { ld_expression *e = ld_script_expression_create(LD_EXPRESSION_NEGATE); e->a = ld_script_primary_expression_parse(); return e; }
+	if (ld_script_character_consume('+')) return ld_script_primary_expression_parse();
+	ld_script_whitespace_skip();
 	const char *b = sp;
 	if (sp < sp_end && *sp == '"') {
-		char *n = sname();
-		uint32_t g = gintern(n);
-		note_ref(g);
-		Expr *e = mk(E_SYM);
+		char *n = ld_script_name_parse();
+		uint32_t g = ld_global_name_intern(n);
+		ld_script_symbol_reference_note(g);
+		ld_expression *e = ld_script_expression_create(LD_EXPRESSION_SYMBOL);
 		e->sym = g;
 		return e;
 	}
-	while (sp < sp_end && (ctab[(unsigned char)*sp] & CT_IDENT))
+	while (sp < sp_end && (ld_script_character_classes[(unsigned char)*sp] & LD_CHARACTER_IDENTIFIER))
 		sp++;
 	if (sp == b) {
-		serr("expected expression");
+		ld_script_error_report("expected expression");
 		sp = sp_end;
-		return mk(E_NUM);
+		return ld_script_expression_create(LD_EXPRESSION_NUMBER);
 	}
-	char *tok = sdup(b, sp);
-	if (!strcmp(tok, ".")) return mk(E_DOT);
+	char *tok = ld_script_text_duplicate(b, sp);
+	if (!strcmp(tok, ".")) return ld_script_expression_create(LD_EXPRESSION_DOT);
 	if (isdigit((unsigned char)tok[0])) {
-		Expr *e = mk(E_NUM);
+		ld_expression *e = ld_script_expression_create(LD_EXPRESSION_NUMBER);
 		char *end;
 		uint64_t v;
 		size_t n = strlen(tok);
@@ -159,75 +159,75 @@ static Expr *pprimary(void)
 			v = strtoull(tok, &end, 0) * mul;
 		}
 		if (*end)
-			serr("malformed number");
+			ld_script_error_report("malformed number");
 		e->num = v;
 		return e;
 	}
-	Expr *e;
-	if (!strcmp(tok, "ABSOLUTE")) { e = mk(E_ABSOLUTE); e->a = pparen(); return e; }
+	ld_expression *e;
+	if (!strcmp(tok, "ABSOLUTE")) { e = ld_script_expression_create(LD_EXPRESSION_ABSOLUTE); e->a = ld_script_parenthesized_expression_parse(); return e; }
 	if (!strcmp(tok, "ADDR")) {
-		e = mk(E_ADDR);
-		e->sym = pparen_osec();
+		e = ld_script_expression_create(LD_EXPRESSION_ADDRESS);
+		e->sym = ld_script_parenthesized_output_section_parse();
 		osecs.v[e->sym].used_in_expr = true;
 		return e;
 	}
 	if (!strcmp(tok, "LOADADDR")) {
-		e = mk(E_LOADADDR);
-		e->sym = pparen_osec();
+		e = ld_script_expression_create(LD_EXPRESSION_LOAD_ADDRESS);
+		e->sym = ld_script_parenthesized_output_section_parse();
 		osecs.v[e->sym].used_in_expr = true;
 		return e;
 	}
-	if (!strcmp(tok, "SIZEOF")) { e = mk(E_SIZEOF); e->sym = pparen_osec(); return e; }
-	if (!strcmp(tok, "ALIGNOF")) { e = mk(E_ALIGNOF); e->sym = pparen_osec(); return e; }
-	if (!strcmp(tok, "SIZEOF_HEADERS")) return mk(E_SIZEOF_HEADERS);
+	if (!strcmp(tok, "SIZEOF")) { e = ld_script_expression_create(LD_EXPRESSION_SIZEOF); e->sym = ld_script_parenthesized_output_section_parse(); return e; }
+	if (!strcmp(tok, "ALIGNOF")) { e = ld_script_expression_create(LD_EXPRESSION_ALIGNOF); e->sym = ld_script_parenthesized_output_section_parse(); return e; }
+	if (!strcmp(tok, "SIZEOF_HEADERS")) return ld_script_expression_create(LD_EXPRESSION_SIZEOF_HEADERS);
 	if (!strcmp(tok, "ALIGN")) {
-		sexpect('(');
-		Expr *a = pexpr();
-		if (sconsume(')')) { e = mk(E_ALIGN1); e->a = a; return e; }
-		sexpect(',');
-		e = mk(E_ALIGN2);
+		ld_script_character_expect('(');
+		ld_expression *a = ld_script_expression_parse();
+		if (ld_script_character_consume(')')) { e = ld_script_expression_create(LD_EXPRESSION_ALIGN_ONE_ARGUMENT); e->a = a; return e; }
+		ld_script_character_expect(',');
+		e = ld_script_expression_create(LD_EXPRESSION_ALIGN_TWO_ARGUMENTS);
 		e->a = a;
-		e->b = pexpr();
-		sexpect(')');
+		e->b = ld_script_expression_parse();
+		ld_script_character_expect(')');
 		return e;
 	}
 	if (!strcmp(tok, "ASSERT")) {
-		sexpect('(');
-		e = mk(E_ASSERT);
-		e->a = pexpr();
-		sexpect(',');
-		e->msg = sname();
-		sexpect(')');
+		ld_script_character_expect('(');
+		e = ld_script_expression_create(LD_EXPRESSION_ASSERT);
+		e->a = ld_script_expression_parse();
+		ld_script_character_expect(',');
+		e->msg = ld_script_name_parse();
+		ld_script_character_expect(')');
 		return e;
 	}
 	if (!strcmp(tok, "DEFINED")) {
-		sexpect('(');
-		e = mk(E_DEFINED);
-		e->sym = gintern(spatname());
-		sexpect(')');
+		ld_script_character_expect('(');
+		e = ld_script_expression_create(LD_EXPRESSION_DEFINED);
+		e->sym = ld_global_name_intern(ld_script_pattern_name_parse());
+		ld_script_character_expect(')');
 		return e;
 	}
 	if (!strcmp(tok, "MAX") || !strcmp(tok, "MIN")) {
-		e = mk(tok[1] == 'A' ? E_MAX : E_MIN);
-		sexpect('(');
-		e->a = pexpr();
-		sexpect(',');
-		e->b = pexpr();
-		sexpect(')');
+		e = ld_script_expression_create(tok[1] == 'A' ? LD_EXPRESSION_MAX : LD_EXPRESSION_MIN);
+		ld_script_character_expect('(');
+		e->a = ld_script_expression_parse();
+		ld_script_character_expect(',');
+		e->b = ld_script_expression_parse();
+		ld_script_character_expect(')');
 		return e;
 	}
-	if (!strcmp(tok, "LOG2CEIL")) { e = mk(E_LOG2CEIL); e->a = pparen(); return e; }
+	if (!strcmp(tok, "LOG2CEIL")) { e = ld_script_expression_create(LD_EXPRESSION_LOG2CEIL); e->a = ld_script_parenthesized_expression_parse(); return e; }
 	if (!strcmp(tok, "CONSTANT")) {
-		sexpect('(');
-		char *n = spatname();
-		sexpect(')');
-		e = mk(E_NUM);
+		ld_script_character_expect('(');
+		char *n = ld_script_pattern_name_parse();
+		ld_script_character_expect(')');
+		e = ld_script_expression_create(LD_EXPRESSION_NUMBER);
 		e->num = !strcmp(n, "MAXPAGESIZE") ? opt.max_page : 4096;
 		return e;
 	}
-	uint32_t g = gintern(tok);
-	note_ref(g);
-	e = mk(E_SYM);
+	uint32_t g = ld_global_name_intern(tok);
+	ld_script_symbol_reference_note(g);
+	e = ld_script_expression_create(LD_EXPRESSION_SYMBOL);
 	e->sym = g;
 	return e;
 }

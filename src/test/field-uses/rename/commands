@@ -1,0 +1,7 @@
+src	cc -c a.c
+src	cc -c b.c
+src	cc -c anon.c
+src	cc -c tpl.c
+src	cc -c mp.c
+src	cc -c paste.c
+src	cc -c m.c

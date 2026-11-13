@@ -5,7 +5,7 @@
  * Only on Darwin; elsewhere it is an error that says --backend-sock is needed.  -c/-S/-E go to the
  * driver (driver/job.c) as they are, which compiles for the host when there is no --target.  A link
  * compiles each source to a temporary object next to the output and links the objects with vld's
- * Mach-O path (platform/darwin/ldmacho.c, libSystem only; -l maps to it, -fuse-ld= is ignored); the
+ * Mach-O path (platform/darwin/macho-linker.c, libSystem only; -l maps to it, -fuse-ld= is ignored); the
  * temporary objects are removed after the link.  A command line with a target that cc_is_compile or
  * cc_is_pp does not take is refused here, never guessed at.  Runs in the calling thread.
  */
@@ -32,7 +32,7 @@ static bool is_src(const char *a)
  * A host job (no --target: the build machine's own programs).  -c/-S/-E go
  * to ppdriver as they are (it compiles for the host when there is no
  * --target).  A link, with or without sources: each source is compiled to a
- * temporary object next to the output, then vld (ldmacho.c) links the
+ * temporary object next to the output, then vld (macho-linker.c) links the
  * objects; -l maps to libSystem.  -fuse-ld= is ignored: vld is the linker.
  */
 VPRIV int host_cc(const struct req *r)

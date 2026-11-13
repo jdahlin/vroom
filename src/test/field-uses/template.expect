@@ -1,0 +1,7 @@
+tu	template.c	ok
+use	decl	One	count	template.c:3	file	template.c	65	3	18	5	-
+use	decl	Two	count	template.c:4	file	template.c	92	4	18	5	-
+use	member	One	count	template.c:3	macro	./template.h	61	2	25	5	./template.h:3:60
+use	member	Two	count	template.c:4	macro	./template.h	61	2	25	5	./template.h:3:60
+members	One	template.c:3	count
+members	Two	template.c:4	count

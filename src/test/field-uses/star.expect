@@ -1,0 +1,8 @@
+tu	star.c	ok
+use	decl	S	a	star.c:2	file	star.c	33	2	16	1	-
+use	decl	S	b	star.c:2	file	star.c	40	2	23	1	-
+use	decl	S	in	star.c:2	file	star.c	61	2	44	2	-
+use	member	S	a	star.c:2	file	star.c	133	4	45	1	-
+use	member	S	b	star.c:2	file	star.c	140	4	52	1	-
+use	member	S	in	star.c:2	file	star.c	147	4	59	2	-
+members	S	star.c:2	a,b,in

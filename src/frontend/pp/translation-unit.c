@@ -89,6 +89,7 @@ pp *pp_open(const pp_opts *o)
 	vintern_init();
 	p->o = o;
 	p->warning_cache_options = NULL;	/* (the region may be a previous TU's) */
+	p->keep_macro_text = false;
 	{
 		const char *t = getenv("VCC_TRACK_DIAG");
 

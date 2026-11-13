@@ -131,6 +131,7 @@ struct cc {
 	uint32_t dbug_loc;
 	uint32_t ntypo;		/* typo corrections tried (clang's -fspell-checking-limit) */
 	uint32_t miss_loc;	/* where the last "expected ')'" was: one per place */
+	struct cc_field_uses *field_uses;	/* VCC_FIELD_USES (field-uses.c): NULL when off */
 	uint32_t decl_name, decl_loc, decl_depth;	/* the last declarator's name, where, at which scope depth */
 
 	/* tokens: tk[0] is the current one */

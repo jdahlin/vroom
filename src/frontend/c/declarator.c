@@ -377,6 +377,8 @@ VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32
 	} else if (is(c, LEX_TOKEN_IDENTIFIER) && !kwof(tok(c))) {
 		d->name = tok(c)->id;
 		d->loc = tok(c)->loc;
+		if (unlikely(c->field_uses))
+			cc_field_uses_name_keep(c);
 		if (!abstract_ok)	/* an error before the declaration ends declares it, invalid (rec_restore) */
 			c->decl_name = d->name, c->decl_loc = d->loc, c->decl_depth = c->depth;
 		next(c);

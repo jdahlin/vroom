@@ -2,134 +2,134 @@
 
 /* ---------------- expressions: evaluation (lld ExprValue rules) ---------------- */
 
-static uint64_t log2ceil(uint64_t x)
+static uint64_t ld_integer_log2_ceil(uint64_t x)
 {
 	if (x <= 1)
 		return 0;
 	return 64 - __builtin_clzll(x - 1);
 }
-static uint64_t chkalign(uint64_t a)
+static uint64_t ld_alignment_check(uint64_t a)
 {
 	if (a == 0)
 		a = 1;
 	if (a & (a - 1)) {
 		if (in_layout)
-			error("alignment must be power of 2");
+			ld_error_report("alignment must be power of 2");
 		return 1;
 	}
 	return a;
 }
 
-static uint64_t header_size(void);
-static EV eval(Expr *e);
+static uint64_t ld_headers_size(void);
+static ld_expression_value ld_expression_eval(ld_expression *e);
 
-static void move_abs_right(EV *a, EV *b)
+static void ld_expression_values_move_absolute_right(ld_expression_value *a, ld_expression_value *b)
 {
-	if (a->kind == EV_ABS || (a->fabs && !ev_isabs(*b))) {
-		EV t = *a;
+	if (a->kind == LD_VALUE_KIND_ABSOLUTE || (a->fabs && !ld_expression_value_is_absolute(*b))) {
+		ld_expression_value t = *a;
 		*a = *b;
 		*b = t;
 	}
-	if (!ev_isabs(*b) && in_layout)
-		error("at least one side of the expression must be absolute");
+	if (!ld_expression_value_is_absolute(*b) && in_layout)
+		ld_error_report("at least one side of the expression must be absolute");
 }
-static EV ev_add(EV a, EV b)
+static ld_expression_value ld_expression_value_add(ld_expression_value a, ld_expression_value b)
 {
-	move_abs_right(&a, &b);
-	return evsec(a, a.fabs, ev_secoff(a) + ev_value(b));
+	ld_expression_values_move_absolute_right(&a, &b);
+	return ld_expression_value_in_section_make(a, a.fabs, ld_expression_value_section_offset(a) + ld_expression_value_resolve(b));
 }
-static EV ev_sub(EV a, EV b)
+static ld_expression_value ld_expression_value_subtract(ld_expression_value a, ld_expression_value b)
 {
-	if (!ev_isabs(a) && !ev_isabs(b))
-		return evabs(ev_value(a) - ev_value(b));
-	return evsec(a, false, ev_secoff(a) - ev_value(b));
+	if (!ld_expression_value_is_absolute(a) && !ld_expression_value_is_absolute(b))
+		return ld_expression_value_absolute_make(ld_expression_value_resolve(a) - ld_expression_value_resolve(b));
+	return ld_expression_value_in_section_make(a, false, ld_expression_value_section_offset(a) - ld_expression_value_resolve(b));
 }
-static EV ev_bit(EV a, EV b, char op)
+static ld_expression_value ld_expression_value_bitwise(ld_expression_value a, ld_expression_value b, char op)
 {
-	move_abs_right(&a, &b);
-	uint64_t x = ev_value(a), y = ev_value(b);
+	ld_expression_values_move_absolute_right(&a, &b);
+	uint64_t x = ld_expression_value_resolve(a), y = ld_expression_value_resolve(b);
 	uint64_t r = op == '&' ? x & y : op == '|' ? x | y : x ^ y;
-	return evsec(a, a.fabs, r - ev_secaddr(a));
+	return ld_expression_value_in_section_make(a, a.fabs, r - ld_expression_value_section_address(a));
 }
-static EV binop(const char *op, EV l, EV r)
+static ld_expression_value ld_expression_binary_eval(const char *op, ld_expression_value l, ld_expression_value r)
 {
 	uint64_t x, y;
-	if (!strcmp(op, "+")) return ev_add(l, r);
-	if (!strcmp(op, "-")) return ev_sub(l, r);
-	if (!strcmp(op, "&") || !strcmp(op, "|") || !strcmp(op, "^")) return ev_bit(l, r, op[0]);
-	x = ev_value(l);
-	y = ev_value(r);
-	if (!strcmp(op, "*")) return evabs(x * y);
+	if (!strcmp(op, "+")) return ld_expression_value_add(l, r);
+	if (!strcmp(op, "-")) return ld_expression_value_subtract(l, r);
+	if (!strcmp(op, "&") || !strcmp(op, "|") || !strcmp(op, "^")) return ld_expression_value_bitwise(l, r, op[0]);
+	x = ld_expression_value_resolve(l);
+	y = ld_expression_value_resolve(r);
+	if (!strcmp(op, "*")) return ld_expression_value_absolute_make(x * y);
 	if (!strcmp(op, "/")) {
-		if (!y) { if (in_layout) error("division by zero"); return evabs(0); }
-		return evabs(x / y);
+		if (!y) { if (in_layout) ld_error_report("division by zero"); return ld_expression_value_absolute_make(0); }
+		return ld_expression_value_absolute_make(x / y);
 	}
 	if (!strcmp(op, "%")) {
-		if (!y) { if (in_layout) error("modulo by zero"); return evabs(0); }
-		return evabs(x % y);
+		if (!y) { if (in_layout) ld_error_report("modulo by zero"); return ld_expression_value_absolute_make(0); }
+		return ld_expression_value_absolute_make(x % y);
 	}
-	if (!strcmp(op, "<<")) return evabs(x << (y % 64));
-	if (!strcmp(op, ">>")) return evabs(x >> (y % 64));
-	if (!strcmp(op, "<")) return evabs(x < y);
-	if (!strcmp(op, ">")) return evabs(x > y);
-	if (!strcmp(op, "<=")) return evabs(x <= y);
-	if (!strcmp(op, ">=")) return evabs(x >= y);
-	if (!strcmp(op, "==")) return evabs(x == y);
-	if (!strcmp(op, "!=")) return evabs(x != y);
-	if (!strcmp(op, "&&")) return evabs(x && y);
-	if (!strcmp(op, "||")) return evabs(x || y);
-	error("bad operator %s", op);
-	return evabs(0);
+	if (!strcmp(op, "<<")) return ld_expression_value_absolute_make(x << (y % 64));
+	if (!strcmp(op, ">>")) return ld_expression_value_absolute_make(x >> (y % 64));
+	if (!strcmp(op, "<")) return ld_expression_value_absolute_make(x < y);
+	if (!strcmp(op, ">")) return ld_expression_value_absolute_make(x > y);
+	if (!strcmp(op, "<=")) return ld_expression_value_absolute_make(x <= y);
+	if (!strcmp(op, ">=")) return ld_expression_value_absolute_make(x >= y);
+	if (!strcmp(op, "==")) return ld_expression_value_absolute_make(x == y);
+	if (!strcmp(op, "!=")) return ld_expression_value_absolute_make(x != y);
+	if (!strcmp(op, "&&")) return ld_expression_value_absolute_make(x && y);
+	if (!strcmp(op, "||")) return ld_expression_value_absolute_make(x || y);
+	ld_error_report("bad operator %s", op);
+	return ld_expression_value_absolute_make(0);
 }
 
-static EV dot_ev(void)
+static ld_expression_value ld_dot_expression_value(void)
 {
-	EV v = {.kind = EV_OSEC, .idx = cur_osec, .val = dot - osec_addr(cur_osec), .align = 1};
+	ld_expression_value v = {.kind = LD_VALUE_KIND_OUTPUT_SECTION, .idx = cur_osec, .val = dot - ld_output_section_address(cur_osec), .align = 1};
 	return v;
 }
 
 static VVEC(const char *) assert_fail;	/* recorded failures of the current pass */
 
-static EV eval(Expr *e)
+static ld_expression_value ld_expression_eval(ld_expression *e)
 {
-	EV v;
+	ld_expression_value v;
 	switch (e->op) {
-	case E_NUM: return evabs(e->num);
-	case E_SYM: return gsym_ev(e->sym);
-	case E_DOT: return dot_ev();
-	case E_ADDR:
-		return (EV){.kind = EV_OSEC, .idx = e->sym, .val = 0, .align = 1};
-	case E_LOADADDR: return evabs(osecs.v[e->sym].va);	/* LMA == VMA here */
-	case E_SIZEOF: return evabs(osecs.v[e->sym].size);
-	case E_ALIGNOF: return evabs(osecs.v[e->sym].addralign);
-	case E_ALIGN1: return evabs(alignup(dot, chkalign(ev_value(eval(e->a)))));
-	case E_ALIGN2:
-		v = eval(e->a);
-		v.align = chkalign(ev_value(eval(e->b)));
+	case LD_EXPRESSION_NUMBER: return ld_expression_value_absolute_make(e->num);
+	case LD_EXPRESSION_SYMBOL: return ld_global_symbol_expression_value(e->sym);
+	case LD_EXPRESSION_DOT: return ld_dot_expression_value();
+	case LD_EXPRESSION_ADDRESS:
+		return (ld_expression_value){.kind = LD_VALUE_KIND_OUTPUT_SECTION, .idx = e->sym, .val = 0, .align = 1};
+	case LD_EXPRESSION_LOAD_ADDRESS: return ld_expression_value_absolute_make(osecs.v[e->sym].va);	/* LMA == VMA here */
+	case LD_EXPRESSION_SIZEOF: return ld_expression_value_absolute_make(osecs.v[e->sym].size);
+	case LD_EXPRESSION_ALIGNOF: return ld_expression_value_absolute_make(osecs.v[e->sym].addralign);
+	case LD_EXPRESSION_ALIGN_ONE_ARGUMENT: return ld_expression_value_absolute_make(ld_value_align_up(dot, ld_alignment_check(ld_expression_value_resolve(ld_expression_eval(e->a)))));
+	case LD_EXPRESSION_ALIGN_TWO_ARGUMENTS:
+		v = ld_expression_eval(e->a);
+		v.align = ld_alignment_check(ld_expression_value_resolve(ld_expression_eval(e->b)));
 		return v;
-	case E_ABSOLUTE:
-		v = eval(e->a);
+	case LD_EXPRESSION_ABSOLUTE:
+		v = ld_expression_eval(e->a);
 		v.fabs = 1;
 		return v;
-	case E_BIN: return binop(e->bop, eval(e->a), eval(e->b));
-	case E_NEG: return evabs(-ev_value(eval(e->a)));
-	case E_NOT: return evabs(~ev_value(eval(e->a)));
-	case E_LNOT: return evabs(!ev_value(eval(e->a)));
-	case E_TERN: return ev_value(eval(e->a)) ? eval(e->b) : eval(e->c);
-	case E_ASSERT:
-		if (!ev_value(eval(e->a)))
-			VVEC_PUSH(assert_fail, e->msg, alloc);
-		return evabs(dot);
-	case E_DEFINED: {
-		G *s = &gsyms[e->sym];
-		return evabs(s->state == GS_OBJ || s->state == GS_SCRIPT);
+	case LD_EXPRESSION_BINARY: return ld_expression_binary_eval(e->bop, ld_expression_eval(e->a), ld_expression_eval(e->b));
+	case LD_EXPRESSION_NEGATE: return ld_expression_value_absolute_make(-ld_expression_value_resolve(ld_expression_eval(e->a)));
+	case LD_EXPRESSION_BITWISE_NOT: return ld_expression_value_absolute_make(~ld_expression_value_resolve(ld_expression_eval(e->a)));
+	case LD_EXPRESSION_LOGICAL_NOT: return ld_expression_value_absolute_make(!ld_expression_value_resolve(ld_expression_eval(e->a)));
+	case LD_EXPRESSION_TERNARY: return ld_expression_value_resolve(ld_expression_eval(e->a)) ? ld_expression_eval(e->b) : ld_expression_eval(e->c);
+	case LD_EXPRESSION_ASSERT:
+		if (!ld_expression_value_resolve(ld_expression_eval(e->a)))
+			VVEC_PUSH(assert_fail, e->msg, ld_region_alloc);
+		return ld_expression_value_absolute_make(dot);
+	case LD_EXPRESSION_DEFINED: {
+		ld_global_symbol *s = &gsyms[e->sym];
+		return ld_expression_value_absolute_make(s->state == LD_SYMBOL_STATE_OBJECT || s->state == LD_SYMBOL_STATE_SCRIPT);
 	}
-	case E_MAX: case E_MIN: {
-		uint64_t a = ev_value(eval(e->a)), b = ev_value(eval(e->b));
-		return evabs(e->op == E_MAX ? (a > b ? a : b) : (a < b ? a : b));
+	case LD_EXPRESSION_MAX: case LD_EXPRESSION_MIN: {
+		uint64_t a = ld_expression_value_resolve(ld_expression_eval(e->a)), b = ld_expression_value_resolve(ld_expression_eval(e->b));
+		return ld_expression_value_absolute_make(e->op == LD_EXPRESSION_MAX ? (a > b ? a : b) : (a < b ? a : b));
 	}
-	case E_LOG2CEIL: return evabs(log2ceil(ev_value(eval(e->a))));
-	case E_SIZEOF_HEADERS: return evabs(header_size());
+	case LD_EXPRESSION_LOG2CEIL: return ld_expression_value_absolute_make(ld_integer_log2_ceil(ld_expression_value_resolve(ld_expression_eval(e->a))));
+	case LD_EXPRESSION_SIZEOF_HEADERS: return ld_expression_value_absolute_make(ld_headers_size());
 	}
-	return evabs(0);
+	return ld_expression_value_absolute_make(0);
 }

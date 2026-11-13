@@ -1,5 +1,9 @@
 # old	new	kind	where
-# Rename table for WORK-linker step 2 (doc/quality/WORK-linker.md).  Document only: nothing is applied by this file yet.
+# Rename table for WORK-linker step 2 (doc/quality/WORK-linker.md).  APPLIED (rows other than fields) with the scoped mode of src/tools/rename-table.py:
+#   src/tools/rename-table.py doc/quality/rename-ld.tsv --scoped src/ld,src/arch/a64/ld,src/arch/x64/ld --users-of src/ld,src/arch/a64/ld,src/arch/x64/ld,src/platform/darwin --also src/platform/darwin/ldmacho.c
+# (wasmld.c is left alone by hand; the file moves, ld_macho in ld.h and the .c includes whose names contain a renamed word were fixed by hand.)
+# The kind column carries the scope: in:FILE narrows a row to files, also:PATH adds the Mach-O linker, which is outside the local directories;
+# in:macho-linker.c on a Mach-O row keeps it out of the ELF linker files.  The old `unsafe` rows are live now, scoped.
 # Scope: the ELF linker (src/ld/*.c without wasmld.c; objcopy.c, which holds vnm too, is in), its arch fragments
 # (src/arch/a64/ld/*.inc, src/arch/x64/ld/*.inc), the Mach-O linker (src/platform/darwin/ldmacho.c) and the
 # ELF definitions header (src/ld/ldelf.h).  For src/tools/rename-table.py (whole-word rows) and, for the field
@@ -37,14 +41,14 @@
 # ldmacho.c compile and vlink links.
 
 # --- files
-ldelf.h	elf-definitions.h	file	src/ld
-arena.c	region.c	file	src/ld
-ldmacho.c	macho-linker.c	file	src/platform/darwin
-thunks.inc	thunk-model.inc	file	src/arch/a64/ld
-scan.inc	relocation-scan.inc	file	src/arch/a64/ld
-thunkpass.inc	thunk-creation.inc	file	src/arch/a64/ld
-relocate.inc	relocation-apply.inc	file	src/arch/a64/ld
-x64.inc	relocation.inc	file	src/arch/x64/ld
+ldelf.h	elf-definitions.h	file,public	src/ld
+arena.c	region.c	file,public	src/ld
+ldmacho.c	macho-linker.c	file,public	src/platform/darwin
+thunks.inc	thunk-model.inc	file,public	src/arch/a64/ld
+scan.inc	relocation-scan.inc	file,public	src/arch/a64/ld
+thunkpass.inc	thunk-creation.inc	file,public	src/arch/a64/ld
+relocate.inc	relocation-apply.inc	file,public	src/arch/a64/ld
+x64.inc	relocation.inc	file,public	src/arch/x64/ld
 
 # --- functions
 write_le_imm	a64_ld_instruction_immediate_store	function	arch/a64/ld/relocate.inc
@@ -81,15 +85,15 @@ evsec	ld_expression_value_in_section_make	function	ld/address-values.c
 gsym_ev	ld_global_symbol_expression_value	function	ld/address-values.c
 gsym_va	ld_global_symbol_address	function	ld/address-values.c
 gsym_isabs	ld_global_symbol_is_absolute	function	ld/address-values.c
-# unmap	ld_region_unmap	unsafe	ld/arena.c; also used outside the linker: src/frontend/pp/text-output.c
+unmap	ld_region_unmap	function	ld/arena.c
 bigalloc	ld_region_large_alloc	function	ld/arena.c
-# alloc	ld_region_alloc	unsafe	ld/arena.c; also used outside the linker: bench/vir-alloc.py, bench/vobjcopy-any.py, bench/vobjcopy-cmp.sh ...; a plain word in the prose of AGENTS.md, TODO.md
+alloc	ld_region_alloc	function	ld/arena.c
 free_arenas	ld_regions_free	function	ld/arena.c
 astrdup	ld_region_string_duplicate	function	ld/arena.c
 make_commons	ld_common_symbols_replace	function	ld/common-symbols.c
-# diag	ld_diagnostic_print	unsafe	ld/diagnostics.c; also used outside the linker: bench/clangdiag.py, bench/diag-render.py, bench/sarif-check.py ...; a plain word in the prose of AGENTS.md, README.md
-# error	ld_error_report	unsafe	ld/diagnostics.c; the same old name is renamed differently in another file of the linker (macho_error_report); used in wasmld.c, which stays as it is; also used outside the linker: bench/clangdiag.py, bench/diag-render.py, bench/ffmpeg/run.py ...; a plain word in the prose of AGENTS.md, TODO.md
-# warn	ld_warning_report	unsafe	ld/diagnostics.c; also used outside the linker: bench/vbench.py, bench/vcc-diagcov.py, bench/vcc-explain.py ...; a plain word in the prose of TODO.md
+diag	ld_diagnostic_print	function	ld/diagnostics.c
+error	ld_error_report	function,in:address-values.c,in:arena.c,in:common-symbols.c,in:diagnostics.c,in:dynamic-sections.c,in:eh-frame-header.c,in:eh-frame.c,in:expression-eval.c,in:file-layout.c,in:gap-fill.c,in:glob-match.c,in:global-order.c,in:global-symbols.c,in:got-probe.c,in:input-load.c,in:input-mapping.c,in:input-model.c,in:input-sections.c,in:lazy-archive.c,in:ld.c,in:link-entry.c,in:link-run.c,in:macho-probe.c,in:object-validate.c,in:option-parse.c,in:option-state.c,in:output-file-write.c,in:output-headers.c,in:output-section-adjust.c,in:output-state.c,in:phase-timing.c,in:program-headers.c,in:relocatable-link.c,in:relocation-target.c,in:response-files.c,in:script-address-assignment.c,in:script-expression-parser.c,in:script-lexer.c,in:script-model.c,in:script-program-headers.c,in:script-statements.c,in:script-symbols.c,in:section-assignment.c,in:section-gc.c,in:section-placement.c,in:section-write.c,in:state-reset.c,in:string-merge.c,in:stub-collection.c,in:stub-object.c,in:symbol-demote.c,in:symbol-resolution.c,in:symbol-table-locals.c,in:symbol-table-write.c,in:synthetic-sections.c,in:thread-pool.c,in:undefined-report.c,in:vlink-main.c,in:word-access.c,in:relocate.inc,in:scan.inc,in:thunkpass.inc,in:thunks.inc,in:x64.inc	ld/diagnostics.c
+warn	ld_warning_report	function	ld/diagnostics.c
 elf_hash	ld_symbol_name_elf_hash	function	ld/dynamic-sections.c
 gnu_hash	ld_symbol_name_gnu_hash	function	ld/dynamic-sections.c
 dynstr_add	ld_dynamic_string_add	function	ld/dynamic-sections.c
@@ -115,9 +119,9 @@ move_abs_right	ld_expression_values_move_absolute_right	function	ld/expression-e
 ev_add	ld_expression_value_add	function	ld/expression-eval.c
 ev_sub	ld_expression_value_subtract	function	ld/expression-eval.c
 ev_bit	ld_expression_value_bitwise	function	ld/expression-eval.c
-# binop	ld_expression_binary_eval	unsafe	ld/expression-eval.c; also used outside the linker: src/frontend/c/atomic-wide.c, src/frontend/c/bitint-float-cast.c, src/frontend/c/builtin-bit-count.c ...
+binop	ld_expression_binary_eval	function	ld/expression-eval.c
 dot_ev	ld_dot_expression_value	function	ld/expression-eval.c
-# eval	ld_expression_eval	unsafe	ld/expression-eval.c; also used outside the linker: bench/vccd-sample.py, src/frontend/c/bitint.c, src/frontend/c/builtin-atomic.c ...; a plain word in the prose of TODO.md, doc/STYLE.md
+eval	ld_expression_eval	function	ld/expression-eval.c
 sec_in_load	ld_output_section_is_in_load_segment	function	ld/file-layout.c
 phflags	ld_output_section_segment_flags	function	ld/file-layout.c
 phadd	ld_segment_section_add	function	ld/file-layout.c
@@ -125,10 +129,10 @@ phnew	ld_segment_create	function	ld/file-layout.c
 assign_file_offsets	ld_file_offsets_assign	function	ld/file-layout.c
 fill_gap	ld_gap_fill	function	ld/gap-fill.c
 write_fills	ld_gap_fills_write	function	ld/gap-fill.c
-# glob	ld_glob_match	unsafe	ld/glob-match.c; also used outside the linker: bench/sqlite/run.py, bench/test-libc-test.py, bench/torture_directives.py ...
+glob	ld_glob_match	function	ld/glob-match.c
 pat_match	ld_pattern_match	function	ld/glob-match.c
 build_gorder	ld_global_order_build	function	ld/global-order.c
-# strhash	ld_name_hash	unsafe	ld/global-symbols.c; the same old name is renamed differently in another file of the linker (macho_name_hash); also used outside the linker: src/platform/darwin/ldmacho.c, src/utils/fixdep.c
+strhash	ld_name_hash	function,in:address-values.c,in:arena.c,in:common-symbols.c,in:diagnostics.c,in:dynamic-sections.c,in:eh-frame-header.c,in:eh-frame.c,in:expression-eval.c,in:file-layout.c,in:gap-fill.c,in:glob-match.c,in:global-order.c,in:global-symbols.c,in:got-probe.c,in:input-load.c,in:input-mapping.c,in:input-model.c,in:input-sections.c,in:lazy-archive.c,in:ld.c,in:link-entry.c,in:link-run.c,in:macho-probe.c,in:object-validate.c,in:option-parse.c,in:option-state.c,in:output-file-write.c,in:output-headers.c,in:output-section-adjust.c,in:output-state.c,in:phase-timing.c,in:program-headers.c,in:relocatable-link.c,in:relocation-target.c,in:response-files.c,in:script-address-assignment.c,in:script-expression-parser.c,in:script-lexer.c,in:script-model.c,in:script-program-headers.c,in:script-statements.c,in:script-symbols.c,in:section-assignment.c,in:section-gc.c,in:section-placement.c,in:section-write.c,in:state-reset.c,in:string-merge.c,in:stub-collection.c,in:stub-object.c,in:symbol-demote.c,in:symbol-resolution.c,in:symbol-table-locals.c,in:symbol-table-write.c,in:synthetic-sections.c,in:thread-pool.c,in:undefined-report.c,in:vlink-main.c,in:word-access.c,in:relocate.inc,in:scan.inc,in:thunkpass.inc,in:thunks.inc,in:x64.inc	ld/global-symbols.c
 visrank	ld_visibility_rank	function	ld/global-symbols.c
 rankvis	ld_visibility_from_rank	function	ld/global-symbols.c
 atomic_min64	ld_atomic_u64_min	function	ld/global-symbols.c
@@ -136,30 +140,30 @@ atomic_min8	ld_atomic_u8_min	function	ld/global-symbols.c
 kget	ld_key_load	function	ld/global-symbols.c
 vget	ld_visibility_load	function	ld/global-symbols.c
 gintern	ld_global_name_intern	function	ld/global-symbols.c
-# gfind	ld_global_name_find	unsafe	ld/global-symbols.c; the same old name is renamed differently in another file of the linker (macho_global_find_or_add); used in wasmld.c, which stays as it is; also used outside the linker: src/platform/darwin/ldmacho.c
-# gname	ld_global_name	unsafe	ld/global-symbols.c; used in wasmld.c, which stays as it is
+gfind	ld_global_name_find	function,in:address-values.c,in:arena.c,in:common-symbols.c,in:diagnostics.c,in:dynamic-sections.c,in:eh-frame-header.c,in:eh-frame.c,in:expression-eval.c,in:file-layout.c,in:gap-fill.c,in:glob-match.c,in:global-order.c,in:global-symbols.c,in:got-probe.c,in:input-load.c,in:input-mapping.c,in:input-model.c,in:input-sections.c,in:lazy-archive.c,in:ld.c,in:link-entry.c,in:link-run.c,in:macho-probe.c,in:object-validate.c,in:option-parse.c,in:option-state.c,in:output-file-write.c,in:output-headers.c,in:output-section-adjust.c,in:output-state.c,in:phase-timing.c,in:program-headers.c,in:relocatable-link.c,in:relocation-target.c,in:response-files.c,in:script-address-assignment.c,in:script-expression-parser.c,in:script-lexer.c,in:script-model.c,in:script-program-headers.c,in:script-statements.c,in:script-symbols.c,in:section-assignment.c,in:section-gc.c,in:section-placement.c,in:section-write.c,in:state-reset.c,in:string-merge.c,in:stub-collection.c,in:stub-object.c,in:symbol-demote.c,in:symbol-resolution.c,in:symbol-table-locals.c,in:symbol-table-write.c,in:synthetic-sections.c,in:thread-pool.c,in:undefined-report.c,in:vlink-main.c,in:word-access.c,in:relocate.inc,in:scan.inc,in:thunkpass.inc,in:thunks.inc,in:x64.inc	ld/global-symbols.c
+gname	ld_global_name	function	ld/global-symbols.c
 find_got	ld_got_find	function	ld/got-probe.c
 any_got	ld_got_is_needed	function	ld/got-probe.c
 load_inputs	ld_inputs_load	function	ld/input-load.c
 alloc_isecs	ld_input_sections_alloc	function	ld/input-load.c
 gtable_init	ld_global_table_init	function	ld/input-load.c
 gtable_free	ld_global_table_free	function	ld/input-load.c
-# map_file	ld_file_map	unsafe	ld/input-mapping.c; used in wasmld.c, which stays as it is
-# add_archive	ld_archive_add	unsafe	ld/input-mapping.c; used in wasmld.c, which stays as it is
+map_file	ld_file_map	function	ld/input-mapping.c
+add_archive	ld_archive_add	function	ld/input-mapping.c
 is_content	ld_section_header_is_content	function	ld/input-sections.c
 fill_isecs	ld_input_sections_fill	function	ld/input-sections.c
 drop_gnu_property	ld_gnu_property_drop	function	ld/input-sections.c
-# lsym	ld_lazy_symbol_find	unsafe	ld/lazy-archive.c; also used outside the linker: src/arch/a64/codegen/obj.c, src/arch/x64/codegen/locals.c, src/arch/x64/codegen/x64impl.h ...
+lsym	ld_lazy_symbol_find	function	ld/lazy-archive.c
 lglobals	ld_lazy_object_globals	function	ld/lazy-archive.c
 lobject	ld_lazy_object_add	function	ld/lazy-archive.c
 lextract	ld_lazy_member_extract	function	ld/lazy-archive.c
 larchive	ld_lazy_archive_process	function	ld/lazy-archive.c
-# run	ld_link_run	unsafe	ld/link-run.c; used in wasmld.c, which stays as it is; also used outside the linker: bench/boot-test.py, bench/clangdiag.py, bench/emit-roofline.c ...; a plain word in the prose of AGENTS.md, README.md
+run	ld_link_run	function	ld/link-run.c
 first_input_macho	ld_first_input_is_macho	function	ld/macho-probe.c
 oerror	objcopy_error_report	function	ld/objcopy.c
 xcalloc	objcopy_zeroed_alloc	function	ld/objcopy.c
 alignto	objcopy_value_align_up	function	ld/objcopy.c
-# alignskew	ld_value_align_skew	unsafe	ld/word-access.c; the same old name is renamed differently in another file of the linker (objcopy_value_align_skew); also used outside the linker: src/ld/objcopy.c
+alignskew	ld_value_align_skew	function,in:address-values.c,in:arena.c,in:common-symbols.c,in:diagnostics.c,in:dynamic-sections.c,in:eh-frame-header.c,in:eh-frame.c,in:expression-eval.c,in:file-layout.c,in:gap-fill.c,in:glob-match.c,in:global-order.c,in:global-symbols.c,in:got-probe.c,in:input-load.c,in:input-mapping.c,in:input-model.c,in:input-sections.c,in:lazy-archive.c,in:ld.c,in:link-entry.c,in:link-run.c,in:macho-probe.c,in:object-validate.c,in:option-parse.c,in:option-state.c,in:output-file-write.c,in:output-headers.c,in:output-section-adjust.c,in:output-state.c,in:phase-timing.c,in:program-headers.c,in:relocatable-link.c,in:relocation-target.c,in:response-files.c,in:script-address-assignment.c,in:script-expression-parser.c,in:script-lexer.c,in:script-model.c,in:script-program-headers.c,in:script-statements.c,in:script-symbols.c,in:section-assignment.c,in:section-gc.c,in:section-placement.c,in:section-write.c,in:state-reset.c,in:string-merge.c,in:stub-collection.c,in:stub-object.c,in:symbol-demote.c,in:symbol-resolution.c,in:symbol-table-locals.c,in:symbol-table-write.c,in:synthetic-sections.c,in:thread-pool.c,in:undefined-report.c,in:vlink-main.c,in:word-access.c,in:relocate.inc,in:scan.inc,in:thunkpass.inc,in:thunks.inc,in:x64.inc	ld/word-access.c
 in_file	objcopy_table_is_in_file	function	ld/objcopy.c
 elf_valid	objcopy_elf_is_valid	function	ld/objcopy.c
 elf_open	objcopy_elf_open	function	ld/objcopy.c
@@ -174,26 +178,26 @@ st_write	objcopy_string_table_write	function	ld/objcopy.c
 st_free	objcopy_string_table_free	function	ld/objcopy.c
 set_flags	objcopy_section_flags_set	function	ld/objcopy.c
 match_list	objcopy_name_list_match	function	ld/objcopy.c
-# sname	objcopy_section_name	unsafe	ld/objcopy.c; the same old name is renamed differently in another file of the linker (ld_script_name_parse); also used outside the linker: bench/vcc-obj.py, src/ld/script-expression-parser.c, src/ld/script-lexer.c ...
+sname	objcopy_section_name	function,in:objcopy.c	ld/objcopy.c
 yname	objcopy_symbol_name	function	ld/objcopy.c
 sec_in_seg	objcopy_section_is_in_segment	function	ld/objcopy.c
 seg_before	objcopy_segment_is_before	function	ld/objcopy.c
-# write_file	objcopy_file_write	unsafe	ld/objcopy.c; also used outside the linker: bench/vccd-sample.py, src/diag/report.c, src/driver/depfile.c ...
+write_file	objcopy_file_write	function	ld/objcopy.c
 binary_in	objcopy_binary_input	function	ld/objcopy.c
 oown_done	objcopy_owned_free	function	ld/objcopy.c
-# push	objcopy_name_list_append	unsafe	ld/objcopy.c; also used outside the linker: bench/sqlite/mix.py, bench/vcc-driver.py, bench/vcc-interrupt.py ...; a plain word in the prose of AGENTS.md, TODO.md
+push	objcopy_name_list_append	function	ld/objcopy.c
 ncmp_name	nm_symbol_name_cmp	function	ld/objcopy.c
 ncmp_num	nm_symbol_address_cmp	function	ld/objcopy.c
 nm_type	nm_symbol_type_letter	function	ld/objcopy.c
 nin_push	nm_input_append	function	ld/objcopy.c
 nm_inputs	nm_inputs_collect	function	ld/objcopy.c
-# rel_width	ld_relocation_width	unsafe	ld/object-validate.c; also used outside the linker: bench/vlink-bad.py
+rel_width	ld_relocation_width	function	ld/object-validate.c
 strtab_ok	ld_string_table_is_valid	function	ld/object-validate.c
-# obj_valid	ld_object_is_valid	unsafe	ld/object-validate.c; also used outside the linker: src/ld/objcopy.c
-# parse_obj	ld_object_parse	unsafe	ld/object-validate.c; used in wasmld.c, which stays as it is
+obj_valid	ld_object_is_valid	function	ld/object-validate.c
+parse_obj	ld_object_parse	function	ld/object-validate.c
 usage_error	ld_usage_error_report	function	ld/option-parse.c
 find_lib	ld_library_find	function	ld/option-parse.c
-# parse_args	ld_arguments_parse	unsafe	ld/option-parse.c; also used outside the linker: bench/boot-test.py, bench/kbuild.py, bench/micro/gen.py ...
+parse_args	ld_arguments_parse	function	ld/option-parse.c
 write_output	ld_output_file_write	function	ld/output-file-write.c
 hash_chunk	ld_build_id_chunk_hash	function	ld/output-file-write.c
 build_shstrtab	ld_section_name_table_build	function	ld/output-headers.c
@@ -204,8 +208,8 @@ osec_discardable	ld_output_section_is_discardable	function	ld/output-section-adj
 adjust_output_sections	ld_output_sections_adjust	function	ld/output-section-adjust.c
 new_isec	ld_input_section_create	function	ld/output-state.c
 minflt	ld_minor_fault_count	function	ld/phase-timing.c
-# now	ld_clock_now	unsafe	ld/phase-timing.c; also used outside the linker: bench/emit-roofline.c, bench/openbench.c, bench/vcc-abi.py ...; a plain word in the prose of AGENTS.md, TODO.md
-# phase	ld_phase_time_report	unsafe	ld/phase-timing.c; also used outside the linker: bench/kbuild.py, bench/sched-measure.py, bench/test-onboarding.py ...; a plain word in the prose of AGENTS.md, README.md
+now	ld_clock_now	function	ld/phase-timing.c
+phase	ld_phase_time_report	function	ld/phase-timing.c
 is_relro	ld_output_section_is_relro	function	ld/program-headers.c
 create_phdrs	ld_program_headers_create	function	ld/program-headers.c
 finish_phdrs	ld_program_headers_finish	function	ld/program-headers.c
@@ -229,9 +233,9 @@ assign_offsets	ld_output_section_offsets_assign	function	ld/script-address-assig
 assign_addresses	ld_addresses_assign	function	ld/script-address-assignment.c
 add_script_symbol	ld_script_symbol_add	function	ld/script-address-assignment.c
 process_symbol_assignments	ld_symbol_assignments_process	function	ld/script-address-assignment.c
-# mk	ld_script_expression_create	unsafe	ld/script-expression-parser.c; also used outside the linker: bench/diag-render.py, bench/kbuild.py, bench/kefir-source.json ...; a plain word in the prose of TODO.md
-# note_ref	ld_script_symbol_reference_note	unsafe	ld/script-expression-parser.c; also used outside the linker: src/arch/a64/codegen/asm.c, src/arch/a64/codegen/call.c, src/arch/a64/codegen/expr.c ...
-# prec	ld_script_operator_precedence	unsafe	ld/script-expression-parser.c; also used outside the linker: src/as/expression.c, src/frontend/c/builtin-os-log.c, src/frontend/c/conversion-warnings.c ...
+mk	ld_script_expression_create	function	ld/script-expression-parser.c
+note_ref	ld_script_symbol_reference_note	function	ld/script-expression-parser.c
+prec	ld_script_operator_precedence	function	ld/script-expression-parser.c
 peekop	ld_script_operator_peek	function	ld/script-expression-parser.c
 pexpr1	ld_script_expression_climb	function	ld/script-expression-parser.c
 pexpr	ld_script_expression_parse	function	ld/script-expression-parser.c
@@ -246,7 +250,7 @@ serr	ld_script_error_report	function	ld/script-lexer.c
 sexpect	ld_script_character_expect	function	ld/script-lexer.c
 sdup	ld_script_text_duplicate	function	ld/script-lexer.c
 spatname	ld_script_pattern_name_parse	function	ld/script-lexer.c
-# sword	ld_script_word_consume	unsafe	ld/script-lexer.c; also used outside the linker: src/test/gcc-torture/execute/961125-1.c
+sword	ld_script_word_consume	function	ld/script-lexer.c
 create_script_phdrs	ld_script_program_headers_create	function	ld/script-program-headers.c
 get_osec	ld_output_section_find	function	ld/script-statements.c
 passign_rest	ld_script_assignment_rest_parse	function	ld/script-statements.c
@@ -263,7 +267,7 @@ g_referenced	ld_global_symbol_is_referenced	function	ld/script-symbols.c
 g_defined_obj	ld_global_symbol_is_defined_by_object	function	ld/script-symbols.c
 script_insert	ld_script_symbol_insert	function	ld/script-symbols.c
 decide_define	ld_script_symbol_define_decide	function	ld/script-symbols.c
-# declare	ld_script_symbol_declare	unsafe	ld/script-symbols.c; also used outside the linker: src/frontend/c/attrnames.inc, src/frontend/c/ccimpl.h, src/frontend/c/declaration.c ...
+declare	ld_script_symbol_declare	function	ld/script-symbols.c
 script_symbols	ld_script_symbols_declare	function	ld/script-symbols.c
 assign_sections	ld_input_sections_assign	function	ld/section-assignment.c
 gc_sections	ld_sections_garbage_collect	function	ld/section-gc.c
@@ -288,7 +292,7 @@ finalize_merges	ld_merges_finalize	function	ld/string-merge.c
 mark_target	ld_stub_target_mark	function	ld/stub-collection.c
 collect_stubs	ld_stubs_collect	function	ld/stub-collection.c
 write_stub_list	ld_stub_list_write	function	ld/stub-collection.c
-# cmp_str	ld_string_cmp	unsafe	ld/stub-object.c; also used outside the linker: src/server/caps.c
+cmp_str	ld_string_cmp	function	ld/stub-object.c
 make_stub_obj	ld_stub_object_create	function	ld/stub-object.c
 cmp_dyn	ld_dynamic_symbol_cmp	function	ld/symbol-demote.c
 demote_symbols	ld_symbols_demote	function	ld/symbol-demote.c
@@ -302,7 +306,7 @@ finish_sym	ld_global_symbol_finish	function	ld/symbol-resolution.c
 keep_local	ld_local_symbol_is_kept	function	ld/symbol-table-locals.c
 count_locals	ld_local_symbols_count	function	ld/symbol-table-locals.c
 sym_shndx_isec	ld_symbol_section_index_of_input_section	function	ld/symbol-table-locals.c
-# put_sym	ld_symbol_record_store	unsafe	ld/symbol-table-locals.c; also used outside the linker: src/vir/print.c
+put_sym	ld_symbol_record_store	function	ld/symbol-table-locals.c
 put_global	ld_global_symbol_record_store	function	ld/symbol-table-write.c
 write_locals	ld_local_symbols_write	function	ld/symbol-table-write.c
 write_globals	ld_global_symbols_write	function	ld/symbol-table-write.c
@@ -314,55 +318,55 @@ add_synthetic_sections	ld_synthetic_sections_add	function	ld/synthetic-sections.
 pfor	ld_parallel_for	function	ld/thread-pool.c
 pfor_default_width	ld_parallel_default_width	function	ld/thread-pool.c
 suggest_one	ld_spelling_suggestion_try	function	ld/undefined-report.c
-# suggest	ld_spelling_suggestion_find	unsafe	ld/undefined-report.c; also used outside the linker: src/server/warnings.inc, src/test/tcc-tests2/COPYING
+suggest	ld_spelling_suggestion_find	function	ld/undefined-report.c
 ref_loc	ld_reference_location_describe	function	ld/undefined-report.c
 undef_refs	ld_undefined_references_report	function	ld/undefined-report.c
 report_undefined	ld_undefined_symbols_report	function	ld/undefined-report.c
-# rd32	ld_u32_load	unsafe	ld/word-access.c; the same old name is renamed differently in another file of the linker (macho_u32_load); also used outside the linker: src/common/digest-blake3.c, src/common/digest-xxh3.c, src/platform/darwin/ldmacho.c
-# wr32	ld_u32_store	unsafe	ld/word-access.c; the same old name is renamed differently in another file of the linker (macho_u32_store); also used outside the linker: src/platform/darwin/ldmacho.c
-# wr64	ld_u64_store	unsafe	ld/word-access.c; the same old name is renamed differently in another file of the linker (macho_u64_store); also used outside the linker: src/platform/darwin/ldmacho.c
-# alignup	ld_value_align_up	unsafe	ld/word-access.c; the same old name is renamed differently in another file of the linker (macho_value_align_up); also used outside the linker: src/platform/darwin/ldmacho.c
-# error	macho_error_report	unsafe	platform/darwin/ldmacho.c; the same old name is renamed differently in another file of the linker (ld_error_report); used in wasmld.c, which stays as it is; also used outside the linker: bench/clangdiag.py, bench/diag-render.py, bench/ffmpeg/run.py ...; a plain word in the prose of AGENTS.md, TODO.md
-# xmalloc	macho_alloc	unsafe	platform/darwin/ldmacho.c; also used outside the linker: src/test/gcc-torture/execute/20001203-2.c
-# rd32	macho_u32_load	unsafe	platform/darwin/ldmacho.c; the same old name is renamed differently in another file of the linker (ld_u32_load); also used outside the linker: src/arch/a64/ld/relocate.inc, src/common/digest-blake3.c, src/common/digest-xxh3.c ...
-# wr32	macho_u32_store	unsafe	platform/darwin/ldmacho.c; the same old name is renamed differently in another file of the linker (ld_u32_store); also used outside the linker: src/arch/a64/ld/relocate.inc, src/arch/x64/ld/x64.inc, src/ld/dynamic-sections.c ...
-# wr64	macho_u64_store	unsafe	platform/darwin/ldmacho.c; the same old name is renamed differently in another file of the linker (ld_u64_store); also used outside the linker: src/arch/a64/ld/relocate.inc, src/arch/x64/ld/x64.inc, src/ld/dynamic-sections.c ...
-# be32	macho_u32_store_big_endian	unsafe	platform/darwin/ldmacho.c; used in wasmld.c, which stays as it is; also used outside the linker: bench/vcc-vir-x86.py, src/test/vcc/vir_x86_bytes.c, src/utils/ar.c
-# be64	macho_u64_store_big_endian	unsafe	platform/darwin/ldmacho.c; also used outside the linker: bench/vcc-vir-x86.py, src/test/vcc/vir_x86_bytes.c
-# alignup	macho_value_align_up	unsafe	platform/darwin/ldmacho.c; the same old name is renamed differently in another file of the linker (ld_value_align_up); also used outside the linker: src/ld/address-values.c, src/ld/expression-eval.c, src/ld/file-layout.c ...
-osec_get	macho_output_section_get	function	platform/darwin/ldmacho.c
-# strhash	macho_name_hash	unsafe	platform/darwin/ldmacho.c; the same old name is renamed differently in another file of the linker (ld_name_hash); also used outside the linker: src/ld/global-symbols.c, src/ld/lazy-archive.c, src/ld/relocatable-link.c ...
-# gfind	macho_global_find_or_add	unsafe	platform/darwin/ldmacho.c; the same old name is renamed differently in another file of the linker (ld_global_name_find); used in wasmld.c, which stays as it is; also used outside the linker: src/ld/global-symbols.c, src/ld/output-headers.c, src/ld/section-gc.c ...
-sdk_root	macho_sdk_root_find	function	platform/darwin/ldmacho.c
-read_whole	macho_file_read	function	platform/darwin/ldmacho.c
-parse_version	macho_version_parse	function	platform/darwin/ldmacho.c
-load_libsystem	macho_libsystem_load	function	platform/darwin/ldmacho.c
-libsystem_exports	macho_libsystem_is_exported	function	platform/darwin/ldmacho.c
-read_obj	macho_object_read	function	platform/darwin/ldmacho.c
-# sym_name	macho_object_symbol_name	unsafe	platform/darwin/ldmacho.c; also used outside the linker: src/arch/a64/codegen/func.c, src/arch/x64/codegen/lower.c, src/arch/x64/codegen/print.c ...
-add_fixup	macho_fixup_add	function	platform/darwin/ldmacho.c
-import_of	macho_import_index	function	platform/darwin/ldmacho.c
-got_of	macho_got_slot_index	function	platform/darwin/ldmacho.c
-stub_of	macho_stub_index	function	platform/darwin/ldmacho.c
-local_addr	macho_local_symbol_address	function	platform/darwin/ldmacho.c
-# target	macho_relocation_target_find	unsafe	platform/darwin/ldmacho.c; also used outside the linker: bench/boot-test.py, bench/clangdiag.py, bench/fetch-testsuites.sh ...; a plain word in the prose of AGENTS.md, README.md
-ldst_scale	macho_load_store_scale	function	platform/darwin/ldmacho.c
-put_page21	macho_page21_store	function	platform/darwin/ldmacho.c
-put_lo12	macho_lo12_store	function	platform/darwin/ldmacho.c
-# relocs	macho_relocations_process	unsafe	platform/darwin/ldmacho.c; also used outside the linker: bench/vbench.py, bench/vcc-obj.py, bench/vcc-pic.py ...; a plain word in the prose of TODO.md
-# bput	macho_buffer_append	unsafe	platform/darwin/ldmacho.c; also used outside the linker: src/driver/driver-internal.h, src/driver/job-buffer.c, src/driver/job.c
-# b32	macho_buffer_append_u32	unsafe	platform/darwin/ldmacho.c; also used outside the linker: src/as/data-directives.c, src/test/vcc/vir_branch_bits.c
-# b64	macho_buffer_append_u64	unsafe	platform/darwin/ldmacho.c; also used outside the linker: src/frontend/c/replay.c
-# b16	macho_buffer_append_u16	unsafe	platform/darwin/ldmacho.c; also used outside the linker: src/frontend/lex/lex.c
-bpad	macho_buffer_pad	function	platform/darwin/ldmacho.c
-cmp_fix	macho_fixup_cmp	function	platform/darwin/ldmacho.c
-cmp_name	macho_name_cmp	function	platform/darwin/ldmacho.c
-# reset	macho_state_reset	unsafe	platform/darwin/ldmacho.c; also used outside the linker: bench/vcc-rec-slot-values.py, bench/vcc-unused-init.py, bench/vccd-test.py ...; a plain word in the prose of TODO.md
-section_index_of	macho_section_index_find	function	platform/darwin/ldmacho.c
-ld_macho	macho_link	function	platform/darwin/ldmacho.c, include/ld/ld.h (public API, called from link-entry.c)
-link_macho	macho_link_locked	function	platform/darwin/ldmacho.c
-# alignskew	objcopy_value_align_skew	unsafe	ld/objcopy.c; the same old name is renamed differently in another file of the linker (ld_value_align_skew); also used outside the linker: src/ld/file-layout.c, src/ld/word-access.c
-# sname	ld_script_name_parse	unsafe	ld/script-lexer.c; the same old name is renamed differently in another file of the linker (objcopy_section_name); also used outside the linker: bench/vcc-obj.py, src/ld/objcopy.c, src/test/fuzz/seeds/pp/c11-examples.c
+rd32	ld_u32_load	function,in:address-values.c,in:arena.c,in:common-symbols.c,in:diagnostics.c,in:dynamic-sections.c,in:eh-frame-header.c,in:eh-frame.c,in:expression-eval.c,in:file-layout.c,in:gap-fill.c,in:glob-match.c,in:global-order.c,in:global-symbols.c,in:got-probe.c,in:input-load.c,in:input-mapping.c,in:input-model.c,in:input-sections.c,in:lazy-archive.c,in:ld.c,in:link-entry.c,in:link-run.c,in:macho-probe.c,in:object-validate.c,in:option-parse.c,in:option-state.c,in:output-file-write.c,in:output-headers.c,in:output-section-adjust.c,in:output-state.c,in:phase-timing.c,in:program-headers.c,in:relocatable-link.c,in:relocation-target.c,in:response-files.c,in:script-address-assignment.c,in:script-expression-parser.c,in:script-lexer.c,in:script-model.c,in:script-program-headers.c,in:script-statements.c,in:script-symbols.c,in:section-assignment.c,in:section-gc.c,in:section-placement.c,in:section-write.c,in:state-reset.c,in:string-merge.c,in:stub-collection.c,in:stub-object.c,in:symbol-demote.c,in:symbol-resolution.c,in:symbol-table-locals.c,in:symbol-table-write.c,in:synthetic-sections.c,in:thread-pool.c,in:undefined-report.c,in:vlink-main.c,in:word-access.c,in:relocate.inc,in:scan.inc,in:thunkpass.inc,in:thunks.inc,in:x64.inc	ld/word-access.c
+wr32	ld_u32_store	function,in:address-values.c,in:arena.c,in:common-symbols.c,in:diagnostics.c,in:dynamic-sections.c,in:eh-frame-header.c,in:eh-frame.c,in:expression-eval.c,in:file-layout.c,in:gap-fill.c,in:glob-match.c,in:global-order.c,in:global-symbols.c,in:got-probe.c,in:input-load.c,in:input-mapping.c,in:input-model.c,in:input-sections.c,in:lazy-archive.c,in:ld.c,in:link-entry.c,in:link-run.c,in:macho-probe.c,in:object-validate.c,in:option-parse.c,in:option-state.c,in:output-file-write.c,in:output-headers.c,in:output-section-adjust.c,in:output-state.c,in:phase-timing.c,in:program-headers.c,in:relocatable-link.c,in:relocation-target.c,in:response-files.c,in:script-address-assignment.c,in:script-expression-parser.c,in:script-lexer.c,in:script-model.c,in:script-program-headers.c,in:script-statements.c,in:script-symbols.c,in:section-assignment.c,in:section-gc.c,in:section-placement.c,in:section-write.c,in:state-reset.c,in:string-merge.c,in:stub-collection.c,in:stub-object.c,in:symbol-demote.c,in:symbol-resolution.c,in:symbol-table-locals.c,in:symbol-table-write.c,in:synthetic-sections.c,in:thread-pool.c,in:undefined-report.c,in:vlink-main.c,in:word-access.c,in:relocate.inc,in:scan.inc,in:thunkpass.inc,in:thunks.inc,in:x64.inc	ld/word-access.c
+wr64	ld_u64_store	function,in:address-values.c,in:arena.c,in:common-symbols.c,in:diagnostics.c,in:dynamic-sections.c,in:eh-frame-header.c,in:eh-frame.c,in:expression-eval.c,in:file-layout.c,in:gap-fill.c,in:glob-match.c,in:global-order.c,in:global-symbols.c,in:got-probe.c,in:input-load.c,in:input-mapping.c,in:input-model.c,in:input-sections.c,in:lazy-archive.c,in:ld.c,in:link-entry.c,in:link-run.c,in:macho-probe.c,in:object-validate.c,in:option-parse.c,in:option-state.c,in:output-file-write.c,in:output-headers.c,in:output-section-adjust.c,in:output-state.c,in:phase-timing.c,in:program-headers.c,in:relocatable-link.c,in:relocation-target.c,in:response-files.c,in:script-address-assignment.c,in:script-expression-parser.c,in:script-lexer.c,in:script-model.c,in:script-program-headers.c,in:script-statements.c,in:script-symbols.c,in:section-assignment.c,in:section-gc.c,in:section-placement.c,in:section-write.c,in:state-reset.c,in:string-merge.c,in:stub-collection.c,in:stub-object.c,in:symbol-demote.c,in:symbol-resolution.c,in:symbol-table-locals.c,in:symbol-table-write.c,in:synthetic-sections.c,in:thread-pool.c,in:undefined-report.c,in:vlink-main.c,in:word-access.c,in:relocate.inc,in:scan.inc,in:thunkpass.inc,in:thunks.inc,in:x64.inc	ld/word-access.c
+alignup	ld_value_align_up	function,in:address-values.c,in:arena.c,in:common-symbols.c,in:diagnostics.c,in:dynamic-sections.c,in:eh-frame-header.c,in:eh-frame.c,in:expression-eval.c,in:file-layout.c,in:gap-fill.c,in:glob-match.c,in:global-order.c,in:global-symbols.c,in:got-probe.c,in:input-load.c,in:input-mapping.c,in:input-model.c,in:input-sections.c,in:lazy-archive.c,in:ld.c,in:link-entry.c,in:link-run.c,in:macho-probe.c,in:object-validate.c,in:option-parse.c,in:option-state.c,in:output-file-write.c,in:output-headers.c,in:output-section-adjust.c,in:output-state.c,in:phase-timing.c,in:program-headers.c,in:relocatable-link.c,in:relocation-target.c,in:response-files.c,in:script-address-assignment.c,in:script-expression-parser.c,in:script-lexer.c,in:script-model.c,in:script-program-headers.c,in:script-statements.c,in:script-symbols.c,in:section-assignment.c,in:section-gc.c,in:section-placement.c,in:section-write.c,in:state-reset.c,in:string-merge.c,in:stub-collection.c,in:stub-object.c,in:symbol-demote.c,in:symbol-resolution.c,in:symbol-table-locals.c,in:symbol-table-write.c,in:synthetic-sections.c,in:thread-pool.c,in:undefined-report.c,in:vlink-main.c,in:word-access.c,in:relocate.inc,in:scan.inc,in:thunkpass.inc,in:thunks.inc,in:x64.inc	ld/word-access.c
+error	macho_error_report	function,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+xmalloc	macho_alloc	function,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+rd32	macho_u32_load	function,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+wr32	macho_u32_store	function,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+wr64	macho_u64_store	function,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+be32	macho_u32_store_big_endian	function,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+be64	macho_u64_store_big_endian	function,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+alignup	macho_value_align_up	function,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+osec_get	macho_output_section_get	function,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+strhash	macho_name_hash	function,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+gfind	macho_global_find_or_add	function,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+sdk_root	macho_sdk_root_find	function,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+read_whole	macho_file_read	function,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+parse_version	macho_version_parse	function,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+load_libsystem	macho_libsystem_load	function,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+libsystem_exports	macho_libsystem_is_exported	function,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+read_obj	macho_object_read	function,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+sym_name	macho_object_symbol_name	function,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+add_fixup	macho_fixup_add	function,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+import_of	macho_import_index	function,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+got_of	macho_got_slot_index	function,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+stub_of	macho_stub_index	function,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+local_addr	macho_local_symbol_address	function,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+target	macho_relocation_target_find	function,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+ldst_scale	macho_load_store_scale	function,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+put_page21	macho_page21_store	function,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+put_lo12	macho_lo12_store	function,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+relocs	macho_relocations_process	function,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+bput	macho_buffer_append	function,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+b32	macho_buffer_append_u32	function,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+b64	macho_buffer_append_u64	function,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+b16	macho_buffer_append_u16	function,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+bpad	macho_buffer_pad	function,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+cmp_fix	macho_fixup_cmp	function,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+cmp_name	macho_name_cmp	function,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+reset	macho_state_reset	function,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+section_index_of	macho_section_index_find	function,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+ld_macho	macho_link	function,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c, include/ld/ld.h (public API, called from link-entry.c)
+link_macho	macho_link_locked	function,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+alignskew	objcopy_value_align_skew	function,in:objcopy.c	ld/objcopy.c
+sname	ld_script_name_parse	function,in:address-values.c,in:arena.c,in:common-symbols.c,in:diagnostics.c,in:dynamic-sections.c,in:eh-frame-header.c,in:eh-frame.c,in:expression-eval.c,in:file-layout.c,in:gap-fill.c,in:glob-match.c,in:global-order.c,in:global-symbols.c,in:got-probe.c,in:input-load.c,in:input-mapping.c,in:input-model.c,in:input-sections.c,in:lazy-archive.c,in:ld.c,in:link-entry.c,in:link-run.c,in:macho-probe.c,in:object-validate.c,in:option-parse.c,in:option-state.c,in:output-file-write.c,in:output-headers.c,in:output-section-adjust.c,in:output-state.c,in:phase-timing.c,in:program-headers.c,in:relocatable-link.c,in:relocation-target.c,in:response-files.c,in:script-address-assignment.c,in:script-expression-parser.c,in:script-lexer.c,in:script-model.c,in:script-program-headers.c,in:script-statements.c,in:script-symbols.c,in:section-assignment.c,in:section-gc.c,in:section-placement.c,in:section-write.c,in:state-reset.c,in:string-merge.c,in:stub-collection.c,in:stub-object.c,in:symbol-demote.c,in:symbol-resolution.c,in:symbol-table-locals.c,in:symbol-table-write.c,in:synthetic-sections.c,in:thread-pool.c,in:undefined-report.c,in:vlink-main.c,in:word-access.c,in:relocate.inc,in:scan.inc,in:thunkpass.inc,in:thunks.inc,in:x64.inc	ld/script-lexer.c
 reset_state	ld_state_reset	function	ld/state-reset.c
 
 # --- types
@@ -371,33 +375,33 @@ Shdr	elf_section_header	type	ld/ldelf.h
 Sym	elf_symbol	type	ld/ldelf.h
 Rela	elf_rela	type	ld/ldelf.h
 Phdr	elf_program_header	type	ld/ldelf.h
-# Block	ld_region_block	unsafe	ld/arena.c; also used outside the linker: src/arch/a64/vir/moves.c, src/arch/a64/vir/returns-and-jumps.c, src/arch/x64/codegen/copies.c ...
+Block	ld_region_block	type	ld/arena.c
 pfn	ld_parallel_function	type	ld/thread-pool.c
 InputArg	ld_input_argument	type	ld/option-state.c
-# Obj	ld_object	unsafe	ld/input-model.c; the same old name is renamed differently in another file of the linker (macho_object); also used outside the linker: src/platform/darwin/ldmacho.c
+Obj	ld_object	type,in:address-values.c,in:arena.c,in:common-symbols.c,in:diagnostics.c,in:dynamic-sections.c,in:eh-frame-header.c,in:eh-frame.c,in:expression-eval.c,in:file-layout.c,in:gap-fill.c,in:glob-match.c,in:global-order.c,in:global-symbols.c,in:got-probe.c,in:input-load.c,in:input-mapping.c,in:input-model.c,in:input-sections.c,in:lazy-archive.c,in:ld.c,in:link-entry.c,in:link-run.c,in:macho-probe.c,in:object-validate.c,in:option-parse.c,in:option-state.c,in:output-file-write.c,in:output-headers.c,in:output-section-adjust.c,in:output-state.c,in:phase-timing.c,in:program-headers.c,in:relocatable-link.c,in:relocation-target.c,in:response-files.c,in:script-address-assignment.c,in:script-expression-parser.c,in:script-lexer.c,in:script-model.c,in:script-program-headers.c,in:script-statements.c,in:script-symbols.c,in:section-assignment.c,in:section-gc.c,in:section-placement.c,in:section-write.c,in:state-reset.c,in:string-merge.c,in:stub-collection.c,in:stub-object.c,in:symbol-demote.c,in:symbol-resolution.c,in:symbol-table-locals.c,in:symbol-table-write.c,in:synthetic-sections.c,in:thread-pool.c,in:undefined-report.c,in:vlink-main.c,in:word-access.c,in:relocate.inc,in:scan.inc,in:thunkpass.inc,in:thunks.inc,in:x64.inc	ld/input-model.c
 ISec	ld_input_section	type	ld/input-model.c
 MergeIn	ld_merge_input	type	ld/input-model.c
 Merge	ld_merge_section	type	ld/input-model.c
-# EV	ld_expression_value	unsafe	ld/global-symbols.c; also used outside the linker: src/test/gcc-torture/execute/981206-1.c
-# G	ld_global_symbol	unsafe	ld/global-symbols.c; the same old name is renamed differently in another file of the linker (macho_global_symbol); also used outside the linker: bench/sqlite/mix.py, bench/vcc-stress.py, bench/vcc-tsvc.py ...; a plain word in the prose of TODO.md, src/test/README.md
-# Expr	ld_expression	unsafe	ld/script-model.c; also used outside the linker: src/codegen/expression-effects.c, src/frontend/c/unused-value.c
+EV	ld_expression_value	type	ld/global-symbols.c
+G	ld_global_symbol	type,in:address-values.c,in:arena.c,in:common-symbols.c,in:diagnostics.c,in:dynamic-sections.c,in:eh-frame-header.c,in:eh-frame.c,in:expression-eval.c,in:file-layout.c,in:gap-fill.c,in:glob-match.c,in:global-order.c,in:global-symbols.c,in:got-probe.c,in:input-load.c,in:input-mapping.c,in:input-model.c,in:input-sections.c,in:lazy-archive.c,in:ld.c,in:link-entry.c,in:link-run.c,in:macho-probe.c,in:object-validate.c,in:option-parse.c,in:option-state.c,in:output-file-write.c,in:output-headers.c,in:output-section-adjust.c,in:output-state.c,in:phase-timing.c,in:program-headers.c,in:relocatable-link.c,in:relocation-target.c,in:response-files.c,in:script-address-assignment.c,in:script-expression-parser.c,in:script-lexer.c,in:script-model.c,in:script-program-headers.c,in:script-statements.c,in:script-symbols.c,in:section-assignment.c,in:section-gc.c,in:section-placement.c,in:section-write.c,in:state-reset.c,in:string-merge.c,in:stub-collection.c,in:stub-object.c,in:symbol-demote.c,in:symbol-resolution.c,in:symbol-table-locals.c,in:symbol-table-write.c,in:synthetic-sections.c,in:thread-pool.c,in:undefined-report.c,in:vlink-main.c,in:word-access.c,in:relocate.inc,in:scan.inc,in:thunkpass.inc,in:thunks.inc,in:x64.inc	ld/global-symbols.c
+Expr	ld_expression	type	ld/script-model.c
 Pat	ld_pattern	type	ld/script-model.c
 ISD	ld_input_section_description	type	ld/script-model.c
 Assign	ld_assignment	type	ld/script-model.c
 Cmd	ld_command	type	ld/script-model.c
-# OSec	ld_output_section	unsafe	ld/script-model.c; the same old name is renamed differently in another file of the linker (macho_output_section, objcopy_section); also used outside the linker: src/ld/objcopy.c, src/platform/darwin/ldmacho.c
+OSec	ld_output_section	type,in:address-values.c,in:arena.c,in:common-symbols.c,in:diagnostics.c,in:dynamic-sections.c,in:eh-frame-header.c,in:eh-frame.c,in:expression-eval.c,in:file-layout.c,in:gap-fill.c,in:glob-match.c,in:global-order.c,in:global-symbols.c,in:got-probe.c,in:input-load.c,in:input-mapping.c,in:input-model.c,in:input-sections.c,in:lazy-archive.c,in:ld.c,in:link-entry.c,in:link-run.c,in:macho-probe.c,in:object-validate.c,in:option-parse.c,in:option-state.c,in:output-file-write.c,in:output-headers.c,in:output-section-adjust.c,in:output-state.c,in:phase-timing.c,in:program-headers.c,in:relocatable-link.c,in:relocation-target.c,in:response-files.c,in:script-address-assignment.c,in:script-expression-parser.c,in:script-lexer.c,in:script-model.c,in:script-program-headers.c,in:script-statements.c,in:script-symbols.c,in:section-assignment.c,in:section-gc.c,in:section-placement.c,in:section-write.c,in:state-reset.c,in:string-merge.c,in:stub-collection.c,in:stub-object.c,in:symbol-demote.c,in:symbol-resolution.c,in:symbol-table-locals.c,in:symbol-table-write.c,in:synthetic-sections.c,in:thread-pool.c,in:undefined-report.c,in:vlink-main.c,in:word-access.c,in:relocate.inc,in:scan.inc,in:thunkpass.inc,in:thunks.inc,in:x64.inc	ld/script-model.c
 SPhdr	ld_script_segment	type	ld/script-model.c
 VerNode	ld_version_node	type	ld/script-model.c
 Provide	ld_provide	type	ld/script-model.c
-# Pending	ld_pending_member	unsafe	ld/input-mapping.c; also used outside the linker: src/frontend/c/pragma-weak.c
+Pending	ld_pending_member	type	ld/input-mapping.c
 PendVec	ld_pending_member_vector	type	ld/input-mapping.c
-# Target	ld_relocation_target	unsafe	ld/relocation-target.c; also used outside the linker: bench/vcc-cproc.py, src/bin/virtest/virtest.c, src/codegen/flow/flow.h ...
+Target	ld_relocation_target	type	ld/relocation-target.c
 PhdrSecs	ld_segment_sections	type	ld/output-state.c
 GotLoc	ld_got_location	type	ld/output-state.c
 EhRec	ld_eh_frame_record	type	ld/eh-frame.c
 Thunk	a64_ld_thunk	type	arch/a64/ld/thunks.inc
 ThunkSec	a64_ld_thunk_section	type	arch/a64/ld/thunks.inc
-# Call	a64_ld_call	unsafe	arch/a64/ld/thunkpass.inc; also used outside the linker: src/driver/explain.inc, src/include/frontend/c/ccint.h, src/test/gcc-torture/execute/bcp-1.c
+Call	a64_ld_call	type	arch/a64/ld/thunkpass.inc
 NameEnt	ld_name_cache_entry	type	ld/section-placement.c
 LSym	ld_lazy_symbol	type	ld/lazy-archive.c
 GOut	ld_global_symbol_output	type	ld/symbol-table-write.c
@@ -407,23 +411,23 @@ Elf	objcopy_elf	type	ld/objcopy.c
 StrEnt	objcopy_string_entry	type	ld/objcopy.c
 StrTab	objcopy_string_table	type	ld/objcopy.c
 SortEnt	objcopy_sort_entry	type	ld/objcopy.c
-# OSec	objcopy_section	unsafe	ld/objcopy.c; the same old name is renamed differently in another file of the linker (ld_output_section, macho_output_section); also used outside the linker: src/arch/a64/ld/thunkpass.inc, src/ld/file-layout.c, src/ld/gap-fill.c ...
+OSec	objcopy_section	type,in:objcopy.c	ld/objcopy.c
 OSeg	objcopy_segment	type	ld/objcopy.c
 OSym	objcopy_symbol	type	ld/objcopy.c
-# Pattern	objcopy_pattern	unsafe	ld/objcopy.c; also used outside the linker: src/test/tcc-tests2/46_grep.c
+Pattern	objcopy_pattern	type	ld/objcopy.c
 OOwn	objcopy_owned	type	ld/objcopy.c
 NSym	nm_symbol	type	ld/objcopy.c
 NIn	nm_input	type	ld/objcopy.c
-Sect	macho_section_header	type	platform/darwin/ldmacho.c
-Nlist	macho_nlist	type	platform/darwin/ldmacho.c
-Reloc	macho_relocation	type	platform/darwin/ldmacho.c
-# Obj	macho_object	unsafe	platform/darwin/ldmacho.c; the same old name is renamed differently in another file of the linker (ld_object); also used outside the linker: src/arch/a64/ld/relocate.inc, src/arch/a64/ld/scan.inc, src/arch/a64/ld/thunkpass.inc ...
-# OSec	macho_output_section	unsafe	platform/darwin/ldmacho.c; the same old name is renamed differently in another file of the linker (ld_output_section, objcopy_section); also used outside the linker: src/arch/a64/ld/thunkpass.inc, src/ld/file-layout.c, src/ld/gap-fill.c ...
-# G	macho_global_symbol	unsafe	platform/darwin/ldmacho.c; the same old name is renamed differently in another file of the linker (ld_global_symbol); also used outside the linker: bench/sqlite/mix.py, bench/vcc-stress.py, bench/vcc-tsvc.py ...; a plain word in the prose of TODO.md, src/test/README.md
-Fixup	macho_fixup	type	platform/darwin/ldmacho.c
-Tgt	macho_target	type	platform/darwin/ldmacho.c
-# Buf	macho_buffer	unsafe	platform/darwin/ldmacho.c; also used outside the linker: src/test/tcc-tests2/37_sprintf.c
-OutSym	macho_output_symbol	type	platform/darwin/ldmacho.c
+Sect	macho_section_header	type,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+Nlist	macho_nlist	type,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+Reloc	macho_relocation	type,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+Obj	macho_object	type,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+OSec	macho_output_section	type,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+G	macho_global_symbol	type,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+Fixup	macho_fixup	type,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+Tgt	macho_target	type,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+Buf	macho_buffer	type,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+OutSym	macho_output_symbol	type,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
 
 # --- enumerators
 K_NONE	LD_SECTION_KIND_NONE	constant	ld/input-model.c
@@ -498,365 +502,365 @@ SK_RAW	OBJCOPY_SECTION_KIND_RAW	constant	ld/objcopy.c
 SK_SYMTAB	OBJCOPY_SECTION_KIND_SYMBOL_TABLE	constant	ld/objcopy.c
 SK_STRTAB	OBJCOPY_SECTION_KIND_STRING_TABLE	constant	ld/objcopy.c
 SK_RELA	OBJCOPY_SECTION_KIND_RELA	constant	ld/objcopy.c
-NSEG	MACHO_SEGMENT_COUNT	constant	platform/darwin/ldmacho.c
+NSEG	MACHO_SEGMENT_COUNT	constant,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
 
 # --- macros
 ARENA_BLOCK	LD_REGION_BLOCK_SIZE	macro	ld/arena.c
 OS_DISCARD	LD_OUTPUT_SECTION_DISCARD	macro	ld/input-model.c
 AETHER	LD_OUTPUT_SECTION_AETHER	macro	ld/script-model.c
-# NONE	LD_NONE	unsafe	ld/ld.c; the same old name is renamed differently in another file of the linker (MACHO_NONE, OBJCOPY_NONE); also used outside the linker: src/ld/objcopy.c, src/platform/darwin/ldmacho.c, src/vir/table.c
-# NONE	OBJCOPY_NONE	unsafe	ld/objcopy.c; the same old name is renamed differently in another file of the linker (LD_NONE, MACHO_NONE); also used outside the linker: src/arch/a64/ld/relocate.inc, src/arch/a64/ld/scan.inc, src/arch/a64/ld/thunkpass.inc ...
-# NONE	MACHO_NONE	unsafe	platform/darwin/ldmacho.c; the same old name is renamed differently in another file of the linker (LD_NONE, OBJCOPY_NONE); also used outside the linker: src/arch/a64/ld/relocate.inc, src/arch/a64/ld/scan.inc, src/arch/a64/ld/thunkpass.inc ...
+NONE	LD_NONE	macro,in:address-values.c,in:arena.c,in:common-symbols.c,in:diagnostics.c,in:dynamic-sections.c,in:eh-frame-header.c,in:eh-frame.c,in:expression-eval.c,in:file-layout.c,in:gap-fill.c,in:glob-match.c,in:global-order.c,in:global-symbols.c,in:got-probe.c,in:input-load.c,in:input-mapping.c,in:input-model.c,in:input-sections.c,in:lazy-archive.c,in:ld.c,in:link-entry.c,in:link-run.c,in:macho-probe.c,in:object-validate.c,in:option-parse.c,in:option-state.c,in:output-file-write.c,in:output-headers.c,in:output-section-adjust.c,in:output-state.c,in:phase-timing.c,in:program-headers.c,in:relocatable-link.c,in:relocation-target.c,in:response-files.c,in:script-address-assignment.c,in:script-expression-parser.c,in:script-lexer.c,in:script-model.c,in:script-program-headers.c,in:script-statements.c,in:script-symbols.c,in:section-assignment.c,in:section-gc.c,in:section-placement.c,in:section-write.c,in:state-reset.c,in:string-merge.c,in:stub-collection.c,in:stub-object.c,in:symbol-demote.c,in:symbol-resolution.c,in:symbol-table-locals.c,in:symbol-table-write.c,in:synthetic-sections.c,in:thread-pool.c,in:undefined-report.c,in:vlink-main.c,in:word-access.c,in:relocate.inc,in:scan.inc,in:thunkpass.inc,in:thunks.inc,in:x64.inc	ld/ld.c
+NONE	OBJCOPY_NONE	macro,in:objcopy.c	ld/objcopy.c
+NONE	MACHO_NONE	macro,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
 DYN	LD_DYNAMIC_ENTRY_APPEND	macro	ld/dynamic-sections.c
-# BAD	LD_OBJECT_INVALID	unsafe	ld/object-validate.c; used in wasmld.c, which stays as it is; also used outside the linker: bench/vsh-test.py, src/codegen/rec/slots.h
-# ARG	LD_ARGUMENT_IS	unsafe	ld/option-parse.c; also used outside the linker: bench/clangdiag.py, src/driver/cmdline.c, src/frontend/c/builtin-os-log.c ...
-# VAL	LD_ARGUMENT_VALUE	unsafe	ld/option-parse.c; the same old name is renamed differently in another file of the linker (OBJCOPY_ARGUMENT_VALUE); used in wasmld.c, which stays as it is; also used outside the linker: src/ld/objcopy.c, src/test/gcc-torture/execute/960117-1.c, src/test/gcc-torture/execute/pr37780.c
-# VAL	OBJCOPY_ARGUMENT_VALUE	unsafe	ld/objcopy.c; the same old name is renamed differently in another file of the linker (LD_ARGUMENT_VALUE); used in wasmld.c, which stays as it is; also used outside the linker: src/ld/option-parse.c, src/test/gcc-torture/execute/960117-1.c, src/test/gcc-torture/execute/pr37780.c
-# OPT	OBJCOPY_ARGUMENT_IS	unsafe	ld/objcopy.c; also used outside the linker: src/test/gcc-torture/execute/split-path-1.c
-# FL	OBJCOPY_FLAG_IS	unsafe	ld/objcopy.c; also used outside the linker: bench/vcc-cfi.py, bench/vcc-darwin-s.py, bench/vcc-diag.py ...
+BAD	LD_OBJECT_INVALID	macro	ld/object-validate.c
+ARG	LD_ARGUMENT_IS	macro	ld/option-parse.c
+VAL	LD_ARGUMENT_VALUE	macro,in:address-values.c,in:arena.c,in:common-symbols.c,in:diagnostics.c,in:dynamic-sections.c,in:eh-frame-header.c,in:eh-frame.c,in:expression-eval.c,in:file-layout.c,in:gap-fill.c,in:glob-match.c,in:global-order.c,in:global-symbols.c,in:got-probe.c,in:input-load.c,in:input-mapping.c,in:input-model.c,in:input-sections.c,in:lazy-archive.c,in:ld.c,in:link-entry.c,in:link-run.c,in:macho-probe.c,in:object-validate.c,in:option-parse.c,in:option-state.c,in:output-file-write.c,in:output-headers.c,in:output-section-adjust.c,in:output-state.c,in:phase-timing.c,in:program-headers.c,in:relocatable-link.c,in:relocation-target.c,in:response-files.c,in:script-address-assignment.c,in:script-expression-parser.c,in:script-lexer.c,in:script-model.c,in:script-program-headers.c,in:script-statements.c,in:script-symbols.c,in:section-assignment.c,in:section-gc.c,in:section-placement.c,in:section-write.c,in:state-reset.c,in:string-merge.c,in:stub-collection.c,in:stub-object.c,in:symbol-demote.c,in:symbol-resolution.c,in:symbol-table-locals.c,in:symbol-table-write.c,in:synthetic-sections.c,in:thread-pool.c,in:undefined-report.c,in:vlink-main.c,in:word-access.c,in:relocate.inc,in:scan.inc,in:thunkpass.inc,in:thunks.inc,in:x64.inc	ld/option-parse.c
+VAL	OBJCOPY_ARGUMENT_VALUE	macro,in:objcopy.c	ld/objcopy.c
+OPT	OBJCOPY_ARGUMENT_IS	macro	ld/objcopy.c
+FL	OBJCOPY_FLAG_IS	macro	ld/objcopy.c
 CT_AN	LD_CHARACTER_ALPHANUMERIC	macro	ld/script-lexer.c
-# MARK	LD_SECTION_GARBAGE_MARK	unsafe	ld/section-gc.c; also used outside the linker: bench/vcc-diagcov.py, src/frontend/c/replay.c, src/tools/gen-diagids.py
-# VGROW	MACHO_VECTOR_GROW	unsafe	platform/darwin/ldmacho.c; also used outside the linker: src/frontend/c/replay.c
-# BASE	MACHO_IMAGE_BASE	unsafe	platform/darwin/ldmacho.c; also used outside the linker: bench/boot-test.py, bench/test-runtime-exceptions.py, bench/vcc-abi.py ...
-# PAGE	MACHO_PAGE_SIZE	unsafe	platform/darwin/ldmacho.c; also used outside the linker: src/arch/a64/codegen/darwin.c, src/platform/darwin/apple-dialect-translate.c
-SEGCMD	MACHO_SEGMENT_COMMAND_WRITE	macro	platform/darwin/ldmacho.c
+MARK	LD_SECTION_GARBAGE_MARK	macro	ld/section-gc.c
+VGROW	MACHO_VECTOR_GROW	macro,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+BASE	MACHO_IMAGE_BASE	macro,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+PAGE	MACHO_PAGE_SIZE	macro,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+SEGCMD	MACHO_SEGMENT_COMMAND_WRITE	macro,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
 
 # --- process-wide and per-thread state
 errlock	ld_diagnostics_lock	global	ld/diagnostics.c
-# blocks	ld_region_blocks	unsafe	ld/arena.c; also used outside the linker: bench/optaudit/coverage-ledger.json, bench/vcc-flow.py, bench/vcc-libc-test.py ...; a plain word in the prose of TODO.md
+blocks	ld_region_blocks	global	ld/arena.c
 blocklock	ld_region_blocks_lock	global	ld/arena.c
 acur	ld_region_current	global	ld/arena.c
 aend	ld_region_end	global	ld/arena.c
 arena_gen	ld_region_generation	global	ld/arena.c
 my_gen	ld_region_thread_generation	global	ld/arena.c
 keep_maps	ld_keep_mappings	global	ld/arena.c
-# nthreads	ld_thread_count	unsafe	ld/thread-pool.c; also used outside the linker: src/codegen/tu.c, src/driver/job.c, src/include/frontend/c/cc.h ...
+nthreads	ld_thread_count	global	ld/thread-pool.c
 ldlock	ld_link_lock	global	ld/macho-probe.c
-# ctab	ld_script_character_classes	unsafe	ld/script-lexer.c; also used outside the linker: src/frontend/lex/lex.c, src/vir/verify.c, src/vir/vir.c ...
-# scratch	ld_local_symbols_scratch	unsafe	ld/symbol-table-locals.c; also used outside the linker: bench/pg/build.sh, bench/pg/cc, bench/vas-enc.py ...; a plain word in the prose of README.md, TODO.md
-# scap	ld_local_symbols_scratch_capacity	unsafe	ld/symbol-table-locals.c; also used outside the linker: src/frontend/c/declarator.c, src/include/protocol.h, src/vir/parse.c
+ctab	ld_script_character_classes	global	ld/script-lexer.c
+scratch	ld_local_symbols_scratch	global	ld/symbol-table-locals.c
+scap	ld_local_symbols_scratch_capacity	global	ld/symbol-table-locals.c
 oerr	objcopy_error_stream	global	ld/objcopy.c
 oerrors	objcopy_error_count	global	ld/objcopy.c
-# prog	objcopy_program_name	unsafe	ld/objcopy.c; also used outside the linker: bench/zlib/run.py, src/server/compile.c, src/server/spawn.c ...; a plain word in the prose of AGENTS.md, README.md
-# oc	objcopy_options	unsafe	ld/objcopy.c; also used outside the linker: bench/vcc-ctests.py, bench/vcc-x86.py, src/arch/wasm/codegen/wcall.c ...
-# errf	macho_error_stream	unsafe	platform/darwin/ldmacho.c; also used outside the linker: src/ld/diagnostics.c, src/ld/link-entry.c, src/ld/link-run.c ...
-# nerr	macho_error_count	unsafe	platform/darwin/ldmacho.c; used in wasmld.c, which stays as it is; also used outside the linker: bench/vcc-diag.py, bench/vcc-mutate.py, src/codegen/vir/pass-table.c ...
-# objs	macho_objects	unsafe	platform/darwin/ldmacho.c; used in wasmld.c, which stays as it is; also used outside the linker: bench/pg/cc, bench/vcc-abi.py, bench/vcc-csmith.py ...; a plain word in the prose of TODO.md
-# nobjs	macho_object_count	unsafe	platform/darwin/ldmacho.c; used in wasmld.c, which stays as it is
-# osecs	macho_output_sections	unsafe	platform/darwin/ldmacho.c; also used outside the linker: src/arch/a64/ld/thunkpass.inc, src/ld/address-values.c, src/ld/dynamic-sections.c ...
-nosecs	macho_output_section_count	global	platform/darwin/ldmacho.c
-cap_osecs	macho_output_section_capacity	global	platform/darwin/ldmacho.c
-os_text	macho_text_section	global	platform/darwin/ldmacho.c
-os_stubs	macho_stubs_section	global	platform/darwin/ldmacho.c
-os_got	macho_got_section	global	platform/darwin/ldmacho.c
-# gs	macho_globals	unsafe	platform/darwin/ldmacho.c; also used outside the linker: src/arch/a64/ld/relocate.inc, src/arch/a64/ld/scan.inc, src/arch/a64/ld/thunkpass.inc ...
-# ngs	macho_global_count	unsafe	platform/darwin/ldmacho.c; also used outside the linker: src/frontend/pp/expand.c
-cap_gs	macho_global_capacity	global	platform/darwin/ldmacho.c
-# gh	macho_global_hash_slots	unsafe	platform/darwin/ldmacho.c; also used outside the linker: ci/premerge-push, src/ld/dynamic-sections.c, src/test/gcc-torture/execute/20050502-1.c
-ghmask	macho_global_hash_mask	global	platform/darwin/ldmacho.c
-tbd	macho_libsystem_text	global	platform/darwin/ldmacho.c
-ex_hash	macho_export_hash_slots	global	platform/darwin/ldmacho.c
-ex_mask	macho_export_hash_mask	global	platform/darwin/ldmacho.c
-sdk_version	macho_sdk_version	global	platform/darwin/ldmacho.c
-# fixups	macho_fixups	unsafe	platform/darwin/ldmacho.c; also used outside the linker: src/Makefile, src/arch/a64/codegen/obj.c, src/arch/a64/obj/fixup.c ...; a plain word in the prose of AGENTS.md
-# nfix	macho_fixup_count	unsafe	platform/darwin/ldmacho.c; also used outside the linker: src/arch/a64/codegen/call.c, src/arch/wasm/codegen/wcall.c, src/arch/x64/as/asm.c ...
-cap_fix	macho_fixup_capacity	global	platform/darwin/ldmacho.c
-# imports	macho_imports	unsafe	platform/darwin/ldmacho.c; used in wasmld.c, which stays as it is; also used outside the linker: src/platform/wasm/wasm.c; a plain word in the prose of AGENTS.md
-nimports	macho_import_count	global	platform/darwin/ldmacho.c
-cap_imports	macho_import_capacity	global	platform/darwin/ldmacho.c
-ngot	macho_got_count	global	platform/darwin/ldmacho.c
-nstub	macho_stub_count	global	platform/darwin/ldmacho.c
-got_g	macho_got_globals	global	platform/darwin/ldmacho.c
-stub_g	macho_stub_globals	global	platform/darwin/ldmacho.c
+prog	objcopy_program_name	global	ld/objcopy.c
+oc	objcopy_options	global	ld/objcopy.c
+errf	macho_error_stream	global,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+nerr	macho_error_count	global,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+objs	macho_objects	global,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+nobjs	macho_object_count	global,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+osecs	macho_output_sections	global,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+nosecs	macho_output_section_count	global,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+cap_osecs	macho_output_section_capacity	global,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+os_text	macho_text_section	global,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+os_stubs	macho_stubs_section	global,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+os_got	macho_got_section	global,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+gs	macho_globals	global,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+ngs	macho_global_count	global,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+cap_gs	macho_global_capacity	global,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+gh	macho_global_hash_slots	global,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+ghmask	macho_global_hash_mask	global,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+tbd	macho_libsystem_text	global,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+ex_hash	macho_export_hash_slots	global,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+ex_mask	macho_export_hash_mask	global,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+sdk_version	macho_sdk_version	global,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+fixups	macho_fixups	global,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+nfix	macho_fixup_count	global,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+cap_fix	macho_fixup_capacity	global,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+imports	macho_imports	global,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+nimports	macho_import_count	global,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+cap_imports	macho_import_capacity	global,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+ngot	macho_got_count	global,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+nstub	macho_stub_count	global,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+got_g	macho_got_globals	global,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
+stub_g	macho_stub_globals	global,in:macho-linker.c,also:src/platform/darwin/ldmacho.c	platform/darwin/ldmacho.c
 
 # --- fields: NOT for rename-table.py (applied by the front-end based tool; the note names the struct)
-out	output_path	field	struct opt, ld/option-state.c (anonymous struct of the variable opt)
-orphan	orphan_handling	field	struct opt, ld/option-state.c (anonymous struct of the variable opt)
-no_apply_dyn	no_apply_dynamic_relocations	field	struct opt, ld/option-state.c (anonymous struct of the variable opt)
-pic_veneer	pic_veneers	field	struct opt, ld/option-state.c (anonymous struct of the variable opt)
-max_page	max_page_size	field	struct opt, ld/option-state.c (anonymous struct of the variable opt)
-libdirs	library_directories	field	struct opt, ld/option-state.c (anonymous struct of the variable opt)
-bstatic	static_libraries_only	field	struct opt, ld/option-state.c (anonymous struct of the variable opt)
-gc	garbage_collect_sections	field	struct opt, ld/option-state.c (anonymous struct of the variable opt)
-print_gc	print_garbage_collected_sections	field	struct opt, ld/option-state.c (anonymous struct of the variable opt)
-norelro	no_relro	field	struct opt, ld/option-state.c (anonymous struct of the variable opt)
-eh_frame_hdr	eh_frame_header	field	struct opt, ld/option-state.c (anonymous struct of the variable opt)
-buf	file_bytes	field	struct Obj, ld/input-model.c
-sh	section_headers	field	struct Obj, ld/input-model.c
-nsh	section_header_count	field	struct Obj, ld/input-model.c
-sym	symbols	field	struct Obj, ld/input-model.c
-nsym	symbol_count	field	struct Obj, ld/input-model.c
-firstg	first_global_index	field	struct Obj, ld/input-model.c
-str	string_table	field	struct Obj, ld/input-model.c
-shstr	section_name_table	field	struct Obj, ld/input-model.c
-isec0	first_input_section	field	struct Obj, ld/input-model.c
-gs	global_slots	field	struct Obj, ld/input-model.c
-lgot	local_needs_got	field	struct Obj, ld/input-model.c
-lgotidx	local_got_index	field	struct Obj, ld/input-model.c
-idx	index	field	struct Obj, ld/input-model.c
-nloc	kept_local_count	field	struct Obj, ld/input-model.c
-loc0	first_local_output_index	field	struct Obj, ld/input-model.c
-kept	kept_locals	field	struct Obj, ld/input-model.c
-locstr	local_string_bytes	field	struct Obj, ld/input-model.c
-str0	string_offset	field	struct Obj, ld/input-model.c
-off	offset	field	struct ISec, ld/input-model.c
-align	alignment	field	struct ISec, ld/input-model.c
-entsize	entry_size	field	struct ISec, ld/input-model.c
-obj	object	field	struct ISec, ld/input-model.c
-shndx	section_header_index	field	struct ISec, ld/input-model.c
-osec	output_section	field	struct ISec, ld/input-model.c
-isd	input_description	field	struct ISec, ld/input-model.c
-nrela	rela_count	field	struct ISec, ld/input-model.c
-aux	auxiliary_index	field	struct ISec, ld/input-model.c
-ndyn	dynamic_relocation_count	field	struct ISec, ld/input-model.c
-dyn0	first_dynamic_relocation	field	struct ISec, ld/input-model.c
-gnext	next_group_member	field	struct ISec, ld/input-model.c
-ehcie	eh_frame_cie_piece	field	struct ISec, ld/input-model.c
-isec	input_section	field	struct MergeIn, ld/input-model.c
-syn	synthetic_section	field	struct MergeIn, ld/input-model.c
-npieces	piece_count	field	struct MergeIn, ld/input-model.c
-inoff	input_offsets	field	struct MergeIn, ld/input-model.c
-outoff	output_offsets	field	struct MergeIn, ld/input-model.c
-isec	synthetic_section	field	struct Merge, ld/input-model.c
-osec	output_section	field	struct Merge, ld/input-model.c
-entsize	entry_size	field	struct Merge, ld/input-model.c
-align	alignment	field	struct Merge, ld/input-model.c
-shardoff	shard_offsets	field	struct Merge, ld/input-model.c
-shardsize	shard_sizes	field	struct Merge, ld/input-model.c
-uniq	unique_pieces	field	struct Merge, ld/input-model.c
-fabs	force_absolute	field	struct EV, ld/global-symbols.c
-idx	index	field	struct EV, ld/global-symbols.c
-val	value	field	struct EV, ld/global-symbols.c
-align	alignment	field	struct EV, ld/global-symbols.c
-def	definition	field	struct G, ld/global-symbols.c
-first	first_occurrence	field	struct G, ld/global-symbols.c
-visrank	visibility_rank	field	struct G, ld/global-symbols.c
-bind	binding	field	struct G, ld/global-symbols.c
-vis	visibility	field	struct G, ld/global-symbols.c
-hidden_script	hidden_by_script	field	struct G, ld/global-symbols.c
-provide_live	provide_is_live	field	struct G, ld/global-symbols.c
-scriptdef	defined_by_script	field	struct G, ld/global-symbols.c
-dup	duplicate	field	struct G, ld/global-symbols.c
-strongref	strong_reference	field	struct G, ld/global-symbols.c
-obj	object	field	struct G, ld/global-symbols.c
-symidx	symbol_index	field	struct G, ld/global-symbols.c
-sec	input_section	field	struct G, ld/global-symbols.c
-val	value	field	struct G, ld/global-symbols.c
-ev	expression_value	field	struct G, ld/global-symbols.c
-outidx	output_index	field	struct G, ld/global-symbols.c
-fva	final_address	field	struct G, ld/global-symbols.c
-fabs	is_absolute	field	struct G, ld/global-symbols.c
-fundef	is_undefined	field	struct G, ld/global-symbols.c
-needgot	needs_got	field	struct G, ld/global-symbols.c
-gotidx	got_index	field	struct G, ld/global-symbols.c
-ver	version	field	struct G, ld/global-symbols.c
-dynidx	dynamic_index	field	struct G, ld/global-symbols.c
-op	operation	field	struct Expr, ld/script-model.c
-bop	binary_operator	field	struct Expr, ld/script-model.c
-a	first_operand	field	struct Expr, ld/script-model.c
-b	second_operand	field	struct Expr, ld/script-model.c
-c	third_operand	field	struct Expr, ld/script-model.c
-num	number	field	struct Expr, ld/script-model.c
-sym	symbol	field	struct Expr, ld/script-model.c
-msg	message	field	struct Expr, ld/script-model.c
-nglobs	glob_count	field	struct Pat, ld/script-model.c
-osec	output_section	field	struct ISD, ld/script-model.c
-pats	patterns	field	struct ISD, ld/script-model.c
-npats	pattern_count	field	struct ISD, ld/script-model.c
-secs	sections	field	struct ISD, ld/script-model.c
-thunksec	thunk_section	field	struct ISD, ld/script-model.c
-thunk_off	thunk_offset	field	struct ISD, ld/script-model.c
-ncalls	call_count	field	struct ISD, ld/script-model.c
-sym	symbol	field	struct Assign, ld/script-model.c
-e	expression	field	struct Assign, ld/script-model.c
-op	operator_character	field	struct Assign, ld/script-model.c
-assert_	is_assert	field	struct Assign, ld/script-model.c
-idx	index	field	struct Cmd, ld/script-model.c
-as	assignment	field	struct Cmd, ld/script-model.c
-addr	address_expression	field	struct OSec, ld/script-model.c
-alignx	align_expression	field	struct OSec, ld/script-model.c
-lma	load_address_expression	field	struct OSec, ld/script-model.c
-subalign	subalign_expression	field	struct OSec, ld/script-model.c
-cmds	commands	field	struct OSec, ld/script-model.c
-nonalloc	not_allocated	field	struct OSec, ld/script-model.c
-used_in_expr	used_in_expression	field	struct OSec, ld/script-model.c
-uses_syms	uses_symbols	field	struct OSec, ld/script-model.c
-addralign	address_alignment	field	struct OSec, ld/script-model.c
-entsize	entry_size	field	struct OSec, ld/script-model.c
-va	address	field	struct OSec, ld/script-model.c
-shidx	section_header_index	field	struct OSec, ld/script-model.c
-nameoff	name_offset	field	struct OSec, ld/script-model.c
-ptload	load_segment	field	struct OSec, ld/script-model.c
-phn	program_header_names	field	struct OSec, ld/script-model.c
-nphn	program_header_name_count	field	struct OSec, ld/script-model.c
-filehdr	file_header	field	struct SPhdr, ld/script-model.c
-phdrs	program_headers	field	struct SPhdr, ld/script-model.c
-sym	symbol	field	struct Provide, ld/script-model.c
-refs	references	field	struct Provide, ld/script-model.c
-buf	file_bytes	field	struct Pending, ld/input-mapping.c
-va	address	field	struct Target, ld/relocation-target.c
-s	symbol_address	field	struct Target, ld/relocation-target.c
-abs	is_absolute	field	struct Target, ld/relocation-target.c
-undef	is_undefined	field	struct Target, ld/relocation-target.c
-global	is_global	field	struct Target, ld/relocation-target.c
-first	first_output_section	field	struct PhdrSecs, ld/output-state.c
-last	last_output_section	field	struct PhdrSecs, ld/output-state.c
-lma_set	load_address_set	field	struct PhdrSecs, ld/output-state.c
-hdr	includes_headers	field	struct PhdrSecs, ld/output-state.c
-obj	object_index	field	struct GotLoc, ld/output-state.c
-sym	symbol_index	field	struct GotLoc, ld/output-state.c
-off	offset	field	struct EhRec, ld/eh-frame.c
-r0	first_relocation	field	struct EhRec, ld/eh-frame.c
-r1	end_relocation	field	struct EhRec, ld/eh-frame.c
-cieoff	cie_offset	field	struct EhRec, ld/eh-frame.c
-cie	is_cie	field	struct EhRec, ld/eh-frame.c
-g	global_symbol	field	struct Thunk, arch/a64/ld/thunks.inc
-sec	input_section	field	struct Thunk, arch/a64/ld/thunks.inc
-val	value	field	struct Thunk, arch/a64/ld/thunks.inc
-tsec	thunk_section	field	struct Thunk, arch/a64/ld/thunks.inc
-off	offset	field	struct Thunk, arch/a64/ld/thunks.inc
-lng	is_long	field	struct Thunk, arch/a64/ld/thunks.inc
-h	hash	field	struct NameEnt, ld/section-placement.c
-isd	input_description	field	struct NameEnt, ld/section-placement.c
-si	input_section	field	struct Call, arch/a64/ld/thunkpass.inc
-r	relocation_index	field	struct Call, arch/a64/ld/thunkpass.inc
-dsec	destination_section	field	struct Call, arch/a64/ld/thunkpass.inc
-th	thunk	field	struct Call, arch/a64/ld/thunkpass.inc
-doff	destination_offset	field	struct Call, arch/a64/ld/thunkpass.inc
-len	length	field	struct LSym, ld/lazy-archive.c
-h	hash	field	struct LSym, ld/lazy-archive.c
-st	state	field	struct LSym, ld/lazy-archive.c
-cand	candidate	field	struct LSym, ld/lazy-archive.c
-g	global_symbol	field	struct GOut, ld/symbol-table-write.c
-idx	index	field	struct GOut, ld/symbol-table-write.c
-str	string_offset	field	struct GOut, ld/symbol-table-write.c
-local	is_local	field	struct GOut, ld/symbol-table-write.c
-h	hash	field	struct ROut, ld/relocatable-link.c
-align	alignment	field	struct ROut, ld/relocatable-link.c
-entsize	entry_size	field	struct ROut, ld/relocatable-link.c
-off	offset	field	struct ROut, ld/relocatable-link.c
-secs	sections	field	struct ROut, ld/relocatable-link.c
-nrela	rela_count	field	struct ROut, ld/relocatable-link.c
-relaoff	rela_offset	field	struct ROut, ld/relocatable-link.c
-shidx	section_header_index	field	struct ROut, ld/relocatable-link.c
-relaidx	rela_section_header_index	field	struct ROut, ld/relocatable-link.c
-nameoff	name_offset	field	struct ROut, ld/relocatable-link.c
-relanameoff	rela_name_offset	field	struct ROut, ld/relocatable-link.c
-secsym	section_symbol	field	struct ROut, ld/relocatable-link.c
-grp	group	field	struct ROut, ld/relocatable-link.c
-member	is_group_member	field	struct ROut, ld/relocatable-link.c
-buf	file_bytes	field	struct Elf, ld/objcopy.c
-eh	file_header	field	struct Elf, ld/objcopy.c
-sh	section_headers	field	struct Elf, ld/objcopy.c
-nsh	section_header_count	field	struct Elf, ld/objcopy.c
-ph	program_headers	field	struct Elf, ld/objcopy.c
-nph	program_header_count	field	struct Elf, ld/objcopy.c
-shstr	section_name_table	field	struct Elf, ld/objcopy.c
-s	string	field	struct StrEnt, ld/objcopy.c
-len	length	field	struct StrEnt, ld/objcopy.c
-h	hash	field	struct StrEnt, ld/objcopy.c
-off	offset	field	struct StrEnt, ld/objcopy.c
-v	entries	field	struct StrTab, ld/objcopy.c
-n	count	field	struct StrTab, ld/objcopy.c
-cap	capacity	field	struct StrTab, ld/objcopy.c
-tab	hash_table	field	struct StrTab, ld/objcopy.c
-tmask	hash_mask	field	struct StrTab, ld/objcopy.c
-r	reversed_name	field	struct SortEnt, ld/objcopy.c
-len	length	field	struct SortEnt, ld/objcopy.c
-e	entry	field	struct SortEnt, ld/objcopy.c
-newname	new_name	field	struct OSec, ld/objcopy.c
-origname	original_name	field	struct OSec, ld/objcopy.c
-addr	address	field	struct OSec, ld/objcopy.c
-origoff	original_offset	field	struct OSec, ld/objcopy.c
-align	alignment	field	struct OSec, ld/objcopy.c
-entsize	entry_size	field	struct OSec, ld/objcopy.c
-parent	parent_segment	field	struct OSec, ld/objcopy.c
-idx	new_index	field	struct OSec, ld/objcopy.c
-off	new_offset	field	struct OSec, ld/objcopy.c
-gen	generated_contents	field	struct OSec, ld/objcopy.c
-p	program_header	field	struct OSeg, ld/objcopy.c
-origoff	original_offset	field	struct OSeg, ld/objcopy.c
-off	offset	field	struct OSeg, ld/objcopy.c
-filesz	file_size	field	struct OSeg, ld/objcopy.c
-vaddr	virtual_address	field	struct OSeg, ld/objcopy.c
-align	alignment	field	struct OSeg, ld/objcopy.c
-parent	parent_segment	field	struct OSeg, ld/objcopy.c
-newname	new_name	field	struct OSym, ld/objcopy.c
-shndx	original_section_index	field	struct OSym, ld/objcopy.c
-idx	new_index	field	struct OSym, ld/objcopy.c
-sidx	string_index	field	struct OSym, ld/objcopy.c
-pat	text	field	struct Pattern, ld/objcopy.c
-in	input_path	field	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
-out	output_path	field	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
-binary_in	binary_input	field	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
-prefix_syms	prefix_symbols	field	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
-prefix_alloc	prefix_alloc_sections	field	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
-remove	remove_names	field	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
-nremove	remove_count	field	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
-redef	redefine_symbols	field	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
-nredef	redefine_count	field	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
-add	add_sections	field	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
-nadd	add_count	field	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
-ssf	set_section_flags	field	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
-nssf	set_section_flags_count	field	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
-ren	rename_sections	field	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
-nren	rename_sections_count	field	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
-only	only_sections	field	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
-nonly	only_count	field	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
-unneeded	unneeded_symbols	field	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
-nunneeded	unneeded_count	field	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
-dump	dump_sections	field	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
-ndump	dump_count	field	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
-sec	sections	field	struct OOwn, ld/objcopy.c
-nsec	section_count	field	struct OOwn, ld/objcopy.c
-sym	symbols	field	struct OOwn, ld/objcopy.c
-nsym	symbol_count	field	struct OOwn, ld/objcopy.c
-mem	member_bytes	field	struct NIn, ld/objcopy.c
-member	is_member	field	struct NIn, ld/objcopy.c
-sectname	section_name	field	struct Sect, platform/darwin/ldmacho.c
-segname	segment_name	field	struct Sect, platform/darwin/ldmacho.c
-addr	address	field	struct Sect, platform/darwin/ldmacho.c
-reloff	relocations_offset	field	struct Sect, platform/darwin/ldmacho.c
-nreloc	relocation_count	field	struct Sect, platform/darwin/ldmacho.c
-r1	reserved1	field	struct Sect, platform/darwin/ldmacho.c
-r2	reserved2	field	struct Sect, platform/darwin/ldmacho.c
-r3	reserved3	field	struct Sect, platform/darwin/ldmacho.c
-strx	string_index	field	struct Nlist, platform/darwin/ldmacho.c
-sect	section_number	field	struct Nlist, platform/darwin/ldmacho.c
-desc	description	field	struct Nlist, platform/darwin/ldmacho.c
-addr	address	field	struct Reloc, platform/darwin/ldmacho.c
-buf	file_bytes	field	struct Obj, platform/darwin/ldmacho.c
-sect	sections	field	struct Obj, platform/darwin/ldmacho.c
-nsect	section_count	field	struct Obj, platform/darwin/ldmacho.c
-osec	output_sections	field	struct Obj, platform/darwin/ldmacho.c
-off	section_offsets	field	struct Obj, platform/darwin/ldmacho.c
-sym	symbols	field	struct Obj, platform/darwin/ldmacho.c
-nsym	symbol_count	field	struct Obj, platform/darwin/ldmacho.c
-str	string_table	field	struct Obj, platform/darwin/ldmacho.c
-strsize	string_table_size	field	struct Obj, platform/darwin/ldmacho.c
-gsym	global_ids	field	struct Obj, platform/darwin/ldmacho.c
-minos	minimum_os_version	field	struct Obj, platform/darwin/ldmacho.c
-seg	segment_name	field	struct OSec, platform/darwin/ldmacho.c
-segi	segment_index	field	struct OSec, platform/darwin/ldmacho.c
-addr	address	field	struct OSec, platform/darwin/ldmacho.c
-fileoff	file_offset	field	struct OSec, platform/darwin/ldmacho.c
-obj	object	field	struct G, platform/darwin/ldmacho.c
-sym	symbol	field	struct G, platform/darwin/ldmacho.c
-csize	common_size	field	struct G, platform/darwin/ldmacho.c
-calign	common_alignment	field	struct G, platform/darwin/ldmacho.c
-import	import_index	field	struct G, platform/darwin/ldmacho.c
-got	got_slot	field	struct G, platform/darwin/ldmacho.c
-stub	stub_slot	field	struct G, platform/darwin/ldmacho.c
-ref_obj	first_reference_object	field	struct G, platform/darwin/ldmacho.c
-addr	address	field	struct G, platform/darwin/ldmacho.c
-addr	address	field	struct Fixup, platform/darwin/ldmacho.c
-val	value	field	struct Fixup, platform/darwin/ldmacho.c
-import	is_import	field	struct Tgt, platform/darwin/ldmacho.c
-g	global	field	struct Tgt, platform/darwin/ldmacho.c
-addr	address	field	struct Tgt, platform/darwin/ldmacho.c
-p	bytes	field	struct Buf, platform/darwin/ldmacho.c
-n	length	field	struct Buf, platform/darwin/ldmacho.c
-cap	capacity	field	struct Buf, platform/darwin/ldmacho.c
-addr	address	field	struct OutSym, platform/darwin/ldmacho.c
-sect	section	field	struct OutSym, platform/darwin/ldmacho.c
-desc	description	field	struct OutSym, platform/darwin/ldmacho.c
+out	output_path	field,deferred	struct opt, ld/option-state.c (anonymous struct of the variable opt)
+orphan	orphan_handling	field,deferred	struct opt, ld/option-state.c (anonymous struct of the variable opt)
+no_apply_dyn	no_apply_dynamic_relocations	field,deferred	struct opt, ld/option-state.c (anonymous struct of the variable opt)
+pic_veneer	pic_veneers	field,deferred	struct opt, ld/option-state.c (anonymous struct of the variable opt)
+max_page	max_page_size	field,deferred	struct opt, ld/option-state.c (anonymous struct of the variable opt)
+libdirs	library_directories	field,deferred	struct opt, ld/option-state.c (anonymous struct of the variable opt)
+bstatic	static_libraries_only	field,deferred	struct opt, ld/option-state.c (anonymous struct of the variable opt)
+gc	garbage_collect_sections	field,deferred	struct opt, ld/option-state.c (anonymous struct of the variable opt)
+print_gc	print_garbage_collected_sections	field,deferred	struct opt, ld/option-state.c (anonymous struct of the variable opt)
+norelro	no_relro	field,deferred	struct opt, ld/option-state.c (anonymous struct of the variable opt)
+eh_frame_hdr	eh_frame_header	field,deferred	struct opt, ld/option-state.c (anonymous struct of the variable opt)
+buf	file_bytes	field,deferred	struct Obj, ld/input-model.c
+sh	section_headers	field,deferred	struct Obj, ld/input-model.c
+nsh	section_header_count	field,deferred	struct Obj, ld/input-model.c
+sym	symbols	field,deferred	struct Obj, ld/input-model.c
+nsym	symbol_count	field,deferred	struct Obj, ld/input-model.c
+firstg	first_global_index	field,deferred	struct Obj, ld/input-model.c
+str	string_table	field,deferred	struct Obj, ld/input-model.c
+shstr	section_name_table	field,deferred	struct Obj, ld/input-model.c
+isec0	first_input_section	field,deferred	struct Obj, ld/input-model.c
+gs	global_slots	field,deferred	struct Obj, ld/input-model.c
+lgot	local_needs_got	field,deferred	struct Obj, ld/input-model.c
+lgotidx	local_got_index	field,deferred	struct Obj, ld/input-model.c
+idx	index	field,deferred	struct Obj, ld/input-model.c
+nloc	kept_local_count	field,deferred	struct Obj, ld/input-model.c
+loc0	first_local_output_index	field,deferred	struct Obj, ld/input-model.c
+kept	kept_locals	field,deferred	struct Obj, ld/input-model.c
+locstr	local_string_bytes	field,deferred	struct Obj, ld/input-model.c
+str0	string_offset	field,deferred	struct Obj, ld/input-model.c
+off	offset	field,deferred	struct ISec, ld/input-model.c
+align	alignment	field,deferred	struct ISec, ld/input-model.c
+entsize	entry_size	field,deferred	struct ISec, ld/input-model.c
+obj	object	field,deferred	struct ISec, ld/input-model.c
+shndx	section_header_index	field,deferred	struct ISec, ld/input-model.c
+osec	output_section	field,deferred	struct ISec, ld/input-model.c
+isd	input_description	field,deferred	struct ISec, ld/input-model.c
+nrela	rela_count	field,deferred	struct ISec, ld/input-model.c
+aux	auxiliary_index	field,deferred	struct ISec, ld/input-model.c
+ndyn	dynamic_relocation_count	field,deferred	struct ISec, ld/input-model.c
+dyn0	first_dynamic_relocation	field,deferred	struct ISec, ld/input-model.c
+gnext	next_group_member	field,deferred	struct ISec, ld/input-model.c
+ehcie	eh_frame_cie_piece	field,deferred	struct ISec, ld/input-model.c
+isec	input_section	field,deferred	struct MergeIn, ld/input-model.c
+syn	synthetic_section	field,deferred	struct MergeIn, ld/input-model.c
+npieces	piece_count	field,deferred	struct MergeIn, ld/input-model.c
+inoff	input_offsets	field,deferred	struct MergeIn, ld/input-model.c
+outoff	output_offsets	field,deferred	struct MergeIn, ld/input-model.c
+isec	synthetic_section	field,deferred	struct Merge, ld/input-model.c
+osec	output_section	field,deferred	struct Merge, ld/input-model.c
+entsize	entry_size	field,deferred	struct Merge, ld/input-model.c
+align	alignment	field,deferred	struct Merge, ld/input-model.c
+shardoff	shard_offsets	field,deferred	struct Merge, ld/input-model.c
+shardsize	shard_sizes	field,deferred	struct Merge, ld/input-model.c
+uniq	unique_pieces	field,deferred	struct Merge, ld/input-model.c
+fabs	force_absolute	field,deferred	struct EV, ld/global-symbols.c
+idx	index	field,deferred	struct EV, ld/global-symbols.c
+val	value	field,deferred	struct EV, ld/global-symbols.c
+align	alignment	field,deferred	struct EV, ld/global-symbols.c
+def	definition	field,deferred	struct G, ld/global-symbols.c
+first	first_occurrence	field,deferred	struct G, ld/global-symbols.c
+visrank	visibility_rank	field,deferred	struct G, ld/global-symbols.c
+bind	binding	field,deferred	struct G, ld/global-symbols.c
+vis	visibility	field,deferred	struct G, ld/global-symbols.c
+hidden_script	hidden_by_script	field,deferred	struct G, ld/global-symbols.c
+provide_live	provide_is_live	field,deferred	struct G, ld/global-symbols.c
+scriptdef	defined_by_script	field,deferred	struct G, ld/global-symbols.c
+dup	duplicate	field,deferred	struct G, ld/global-symbols.c
+strongref	strong_reference	field,deferred	struct G, ld/global-symbols.c
+obj	object	field,deferred	struct G, ld/global-symbols.c
+symidx	symbol_index	field,deferred	struct G, ld/global-symbols.c
+sec	input_section	field,deferred	struct G, ld/global-symbols.c
+val	value	field,deferred	struct G, ld/global-symbols.c
+ev	expression_value	field,deferred	struct G, ld/global-symbols.c
+outidx	output_index	field,deferred	struct G, ld/global-symbols.c
+fva	final_address	field,deferred	struct G, ld/global-symbols.c
+fabs	is_absolute	field,deferred	struct G, ld/global-symbols.c
+fundef	is_undefined	field,deferred	struct G, ld/global-symbols.c
+needgot	needs_got	field,deferred	struct G, ld/global-symbols.c
+gotidx	got_index	field,deferred	struct G, ld/global-symbols.c
+ver	version	field,deferred	struct G, ld/global-symbols.c
+dynidx	dynamic_index	field,deferred	struct G, ld/global-symbols.c
+op	operation	field,deferred	struct Expr, ld/script-model.c
+bop	binary_operator	field,deferred	struct Expr, ld/script-model.c
+a	first_operand	field,deferred	struct Expr, ld/script-model.c
+b	second_operand	field,deferred	struct Expr, ld/script-model.c
+c	third_operand	field,deferred	struct Expr, ld/script-model.c
+num	number	field,deferred	struct Expr, ld/script-model.c
+sym	symbol	field,deferred	struct Expr, ld/script-model.c
+msg	message	field,deferred	struct Expr, ld/script-model.c
+nglobs	glob_count	field,deferred	struct Pat, ld/script-model.c
+osec	output_section	field,deferred	struct ISD, ld/script-model.c
+pats	patterns	field,deferred	struct ISD, ld/script-model.c
+npats	pattern_count	field,deferred	struct ISD, ld/script-model.c
+secs	sections	field,deferred	struct ISD, ld/script-model.c
+thunksec	thunk_section	field,deferred	struct ISD, ld/script-model.c
+thunk_off	thunk_offset	field,deferred	struct ISD, ld/script-model.c
+ncalls	call_count	field,deferred	struct ISD, ld/script-model.c
+sym	symbol	field,deferred	struct Assign, ld/script-model.c
+e	expression	field,deferred	struct Assign, ld/script-model.c
+op	operator_character	field,deferred	struct Assign, ld/script-model.c
+assert_	is_assert	field,deferred	struct Assign, ld/script-model.c
+idx	index	field,deferred	struct Cmd, ld/script-model.c
+as	assignment	field,deferred	struct Cmd, ld/script-model.c
+addr	address_expression	field,deferred	struct OSec, ld/script-model.c
+alignx	align_expression	field,deferred	struct OSec, ld/script-model.c
+lma	load_address_expression	field,deferred	struct OSec, ld/script-model.c
+subalign	subalign_expression	field,deferred	struct OSec, ld/script-model.c
+cmds	commands	field,deferred	struct OSec, ld/script-model.c
+nonalloc	not_allocated	field,deferred	struct OSec, ld/script-model.c
+used_in_expr	used_in_expression	field,deferred	struct OSec, ld/script-model.c
+uses_syms	uses_symbols	field,deferred	struct OSec, ld/script-model.c
+addralign	address_alignment	field,deferred	struct OSec, ld/script-model.c
+entsize	entry_size	field,deferred	struct OSec, ld/script-model.c
+va	address	field,deferred	struct OSec, ld/script-model.c
+shidx	section_header_index	field,deferred	struct OSec, ld/script-model.c
+nameoff	name_offset	field,deferred	struct OSec, ld/script-model.c
+ptload	load_segment	field,deferred	struct OSec, ld/script-model.c
+phn	program_header_names	field,deferred	struct OSec, ld/script-model.c
+nphn	program_header_name_count	field,deferred	struct OSec, ld/script-model.c
+filehdr	file_header	field,deferred	struct SPhdr, ld/script-model.c
+phdrs	program_headers	field,deferred	struct SPhdr, ld/script-model.c
+sym	symbol	field,deferred	struct Provide, ld/script-model.c
+refs	references	field,deferred	struct Provide, ld/script-model.c
+buf	file_bytes	field,deferred	struct Pending, ld/input-mapping.c
+va	address	field,deferred	struct Target, ld/relocation-target.c
+s	symbol_address	field,deferred	struct Target, ld/relocation-target.c
+abs	is_absolute	field,deferred	struct Target, ld/relocation-target.c
+undef	is_undefined	field,deferred	struct Target, ld/relocation-target.c
+global	is_global	field,deferred	struct Target, ld/relocation-target.c
+first	first_output_section	field,deferred	struct PhdrSecs, ld/output-state.c
+last	last_output_section	field,deferred	struct PhdrSecs, ld/output-state.c
+lma_set	load_address_set	field,deferred	struct PhdrSecs, ld/output-state.c
+hdr	includes_headers	field,deferred	struct PhdrSecs, ld/output-state.c
+obj	object_index	field,deferred	struct GotLoc, ld/output-state.c
+sym	symbol_index	field,deferred	struct GotLoc, ld/output-state.c
+off	offset	field,deferred	struct EhRec, ld/eh-frame.c
+r0	first_relocation	field,deferred	struct EhRec, ld/eh-frame.c
+r1	end_relocation	field,deferred	struct EhRec, ld/eh-frame.c
+cieoff	cie_offset	field,deferred	struct EhRec, ld/eh-frame.c
+cie	is_cie	field,deferred	struct EhRec, ld/eh-frame.c
+g	global_symbol	field,deferred	struct Thunk, arch/a64/ld/thunks.inc
+sec	input_section	field,deferred	struct Thunk, arch/a64/ld/thunks.inc
+val	value	field,deferred	struct Thunk, arch/a64/ld/thunks.inc
+tsec	thunk_section	field,deferred	struct Thunk, arch/a64/ld/thunks.inc
+off	offset	field,deferred	struct Thunk, arch/a64/ld/thunks.inc
+lng	is_long	field,deferred	struct Thunk, arch/a64/ld/thunks.inc
+h	hash	field,deferred	struct NameEnt, ld/section-placement.c
+isd	input_description	field,deferred	struct NameEnt, ld/section-placement.c
+si	input_section	field,deferred	struct Call, arch/a64/ld/thunkpass.inc
+r	relocation_index	field,deferred	struct Call, arch/a64/ld/thunkpass.inc
+dsec	destination_section	field,deferred	struct Call, arch/a64/ld/thunkpass.inc
+th	thunk	field,deferred	struct Call, arch/a64/ld/thunkpass.inc
+doff	destination_offset	field,deferred	struct Call, arch/a64/ld/thunkpass.inc
+len	length	field,deferred	struct LSym, ld/lazy-archive.c
+h	hash	field,deferred	struct LSym, ld/lazy-archive.c
+st	state	field,deferred	struct LSym, ld/lazy-archive.c
+cand	candidate	field,deferred	struct LSym, ld/lazy-archive.c
+g	global_symbol	field,deferred	struct GOut, ld/symbol-table-write.c
+idx	index	field,deferred	struct GOut, ld/symbol-table-write.c
+str	string_offset	field,deferred	struct GOut, ld/symbol-table-write.c
+local	is_local	field,deferred	struct GOut, ld/symbol-table-write.c
+h	hash	field,deferred	struct ROut, ld/relocatable-link.c
+align	alignment	field,deferred	struct ROut, ld/relocatable-link.c
+entsize	entry_size	field,deferred	struct ROut, ld/relocatable-link.c
+off	offset	field,deferred	struct ROut, ld/relocatable-link.c
+secs	sections	field,deferred	struct ROut, ld/relocatable-link.c
+nrela	rela_count	field,deferred	struct ROut, ld/relocatable-link.c
+relaoff	rela_offset	field,deferred	struct ROut, ld/relocatable-link.c
+shidx	section_header_index	field,deferred	struct ROut, ld/relocatable-link.c
+relaidx	rela_section_header_index	field,deferred	struct ROut, ld/relocatable-link.c
+nameoff	name_offset	field,deferred	struct ROut, ld/relocatable-link.c
+relanameoff	rela_name_offset	field,deferred	struct ROut, ld/relocatable-link.c
+secsym	section_symbol	field,deferred	struct ROut, ld/relocatable-link.c
+grp	group	field,deferred	struct ROut, ld/relocatable-link.c
+member	is_group_member	field,deferred	struct ROut, ld/relocatable-link.c
+buf	file_bytes	field,deferred	struct Elf, ld/objcopy.c
+eh	file_header	field,deferred	struct Elf, ld/objcopy.c
+sh	section_headers	field,deferred	struct Elf, ld/objcopy.c
+nsh	section_header_count	field,deferred	struct Elf, ld/objcopy.c
+ph	program_headers	field,deferred	struct Elf, ld/objcopy.c
+nph	program_header_count	field,deferred	struct Elf, ld/objcopy.c
+shstr	section_name_table	field,deferred	struct Elf, ld/objcopy.c
+s	string	field,deferred	struct StrEnt, ld/objcopy.c
+len	length	field,deferred	struct StrEnt, ld/objcopy.c
+h	hash	field,deferred	struct StrEnt, ld/objcopy.c
+off	offset	field,deferred	struct StrEnt, ld/objcopy.c
+v	entries	field,deferred	struct StrTab, ld/objcopy.c
+n	count	field,deferred	struct StrTab, ld/objcopy.c
+cap	capacity	field,deferred	struct StrTab, ld/objcopy.c
+tab	hash_table	field,deferred	struct StrTab, ld/objcopy.c
+tmask	hash_mask	field,deferred	struct StrTab, ld/objcopy.c
+r	reversed_name	field,deferred	struct SortEnt, ld/objcopy.c
+len	length	field,deferred	struct SortEnt, ld/objcopy.c
+e	entry	field,deferred	struct SortEnt, ld/objcopy.c
+newname	new_name	field,deferred	struct OSec, ld/objcopy.c
+origname	original_name	field,deferred	struct OSec, ld/objcopy.c
+addr	address	field,deferred	struct OSec, ld/objcopy.c
+origoff	original_offset	field,deferred	struct OSec, ld/objcopy.c
+align	alignment	field,deferred	struct OSec, ld/objcopy.c
+entsize	entry_size	field,deferred	struct OSec, ld/objcopy.c
+parent	parent_segment	field,deferred	struct OSec, ld/objcopy.c
+idx	new_index	field,deferred	struct OSec, ld/objcopy.c
+off	new_offset	field,deferred	struct OSec, ld/objcopy.c
+gen	generated_contents	field,deferred	struct OSec, ld/objcopy.c
+p	program_header	field,deferred	struct OSeg, ld/objcopy.c
+origoff	original_offset	field,deferred	struct OSeg, ld/objcopy.c
+off	offset	field,deferred	struct OSeg, ld/objcopy.c
+filesz	file_size	field,deferred	struct OSeg, ld/objcopy.c
+vaddr	virtual_address	field,deferred	struct OSeg, ld/objcopy.c
+align	alignment	field,deferred	struct OSeg, ld/objcopy.c
+parent	parent_segment	field,deferred	struct OSeg, ld/objcopy.c
+newname	new_name	field,deferred	struct OSym, ld/objcopy.c
+shndx	original_section_index	field,deferred	struct OSym, ld/objcopy.c
+idx	new_index	field,deferred	struct OSym, ld/objcopy.c
+sidx	string_index	field,deferred	struct OSym, ld/objcopy.c
+pat	text	field,deferred	struct Pattern, ld/objcopy.c
+in	input_path	field,deferred	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
+out	output_path	field,deferred	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
+binary_in	binary_input	field,deferred	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
+prefix_syms	prefix_symbols	field,deferred	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
+prefix_alloc	prefix_alloc_sections	field,deferred	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
+remove	remove_names	field,deferred	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
+nremove	remove_count	field,deferred	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
+redef	redefine_symbols	field,deferred	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
+nredef	redefine_count	field,deferred	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
+add	add_sections	field,deferred	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
+nadd	add_count	field,deferred	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
+ssf	set_section_flags	field,deferred	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
+nssf	set_section_flags_count	field,deferred	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
+ren	rename_sections	field,deferred	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
+nren	rename_sections_count	field,deferred	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
+only	only_sections	field,deferred	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
+nonly	only_count	field,deferred	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
+unneeded	unneeded_symbols	field,deferred	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
+nunneeded	unneeded_count	field,deferred	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
+dump	dump_sections	field,deferred	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
+ndump	dump_count	field,deferred	struct oc, ld/objcopy.c (anonymous struct of the variable oc)
+sec	sections	field,deferred	struct OOwn, ld/objcopy.c
+nsec	section_count	field,deferred	struct OOwn, ld/objcopy.c
+sym	symbols	field,deferred	struct OOwn, ld/objcopy.c
+nsym	symbol_count	field,deferred	struct OOwn, ld/objcopy.c
+mem	member_bytes	field,deferred	struct NIn, ld/objcopy.c
+member	is_member	field,deferred	struct NIn, ld/objcopy.c
+sectname	section_name	field,deferred	struct Sect, platform/darwin/ldmacho.c
+segname	segment_name	field,deferred	struct Sect, platform/darwin/ldmacho.c
+addr	address	field,deferred	struct Sect, platform/darwin/ldmacho.c
+reloff	relocations_offset	field,deferred	struct Sect, platform/darwin/ldmacho.c
+nreloc	relocation_count	field,deferred	struct Sect, platform/darwin/ldmacho.c
+r1	reserved1	field,deferred	struct Sect, platform/darwin/ldmacho.c
+r2	reserved2	field,deferred	struct Sect, platform/darwin/ldmacho.c
+r3	reserved3	field,deferred	struct Sect, platform/darwin/ldmacho.c
+strx	string_index	field,deferred	struct Nlist, platform/darwin/ldmacho.c
+sect	section_number	field,deferred	struct Nlist, platform/darwin/ldmacho.c
+desc	description	field,deferred	struct Nlist, platform/darwin/ldmacho.c
+addr	address	field,deferred	struct Reloc, platform/darwin/ldmacho.c
+buf	file_bytes	field,deferred	struct Obj, platform/darwin/ldmacho.c
+sect	sections	field,deferred	struct Obj, platform/darwin/ldmacho.c
+nsect	section_count	field,deferred	struct Obj, platform/darwin/ldmacho.c
+osec	output_sections	field,deferred	struct Obj, platform/darwin/ldmacho.c
+off	section_offsets	field,deferred	struct Obj, platform/darwin/ldmacho.c
+sym	symbols	field,deferred	struct Obj, platform/darwin/ldmacho.c
+nsym	symbol_count	field,deferred	struct Obj, platform/darwin/ldmacho.c
+str	string_table	field,deferred	struct Obj, platform/darwin/ldmacho.c
+strsize	string_table_size	field,deferred	struct Obj, platform/darwin/ldmacho.c
+gsym	global_ids	field,deferred	struct Obj, platform/darwin/ldmacho.c
+minos	minimum_os_version	field,deferred	struct Obj, platform/darwin/ldmacho.c
+seg	segment_name	field,deferred	struct OSec, platform/darwin/ldmacho.c
+segi	segment_index	field,deferred	struct OSec, platform/darwin/ldmacho.c
+addr	address	field,deferred	struct OSec, platform/darwin/ldmacho.c
+fileoff	file_offset	field,deferred	struct OSec, platform/darwin/ldmacho.c
+obj	object	field,deferred	struct G, platform/darwin/ldmacho.c
+sym	symbol	field,deferred	struct G, platform/darwin/ldmacho.c
+csize	common_size	field,deferred	struct G, platform/darwin/ldmacho.c
+calign	common_alignment	field,deferred	struct G, platform/darwin/ldmacho.c
+import	import_index	field,deferred	struct G, platform/darwin/ldmacho.c
+got	got_slot	field,deferred	struct G, platform/darwin/ldmacho.c
+stub	stub_slot	field,deferred	struct G, platform/darwin/ldmacho.c
+ref_obj	first_reference_object	field,deferred	struct G, platform/darwin/ldmacho.c
+addr	address	field,deferred	struct G, platform/darwin/ldmacho.c
+addr	address	field,deferred	struct Fixup, platform/darwin/ldmacho.c
+val	value	field,deferred	struct Fixup, platform/darwin/ldmacho.c
+import	is_import	field,deferred	struct Tgt, platform/darwin/ldmacho.c
+g	global	field,deferred	struct Tgt, platform/darwin/ldmacho.c
+addr	address	field,deferred	struct Tgt, platform/darwin/ldmacho.c
+p	bytes	field,deferred	struct Buf, platform/darwin/ldmacho.c
+n	length	field,deferred	struct Buf, platform/darwin/ldmacho.c
+cap	capacity	field,deferred	struct Buf, platform/darwin/ldmacho.c
+addr	address	field,deferred	struct OutSym, platform/darwin/ldmacho.c
+sect	section	field,deferred	struct OutSym, platform/darwin/ldmacho.c
+desc	description	field,deferred	struct OutSym, platform/darwin/ldmacho.c

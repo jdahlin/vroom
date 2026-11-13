@@ -133,7 +133,7 @@ relative to it); `TODO.md` stays at the top.
     (`warnings.inc`).  Without `--backend-sock` vccd runs the whole kernel
     build itself: probes, `-E`/`-c`/`-S` (stdin too), links (vld in-process;
     `--ld PROG` spawns one), nm/objcopy behind the `vcc-nm`/`vcc-objcopy`
-    shims, and the host programs (vcc + `ldmacho.c`, macOS only); nothing
+    shims, and the host programs (vcc + `macho-linker.c`, macOS only); nothing
     falls back to clang.
   - `utils/`: what runs inside vccd for kbuild: fixdep, the archiver (`ar.c`:
     thin archives, llvm-ar-identical, so the build uses no llvm-ar) and
@@ -180,7 +180,7 @@ relative to it); `TODO.md` stays at the top.
   - `platform/linux/`: the ELF writer (`elf.c`: relocations, string table,
     file layout as LLVM MC).
   - `platform/darwin/`: the Mach-O writer; vld's Mach-O executables
-    (`ldmacho.c`: libSystem only, chained fixups, ad-hoc signature, chosen
+    (`macho-linker.c`: libSystem only, chained fixups, ad-hoc signature, chosen
     when the first input is Mach-O; the kernel's host programs).
   - `platform/wasm/`: the wasm object writer (`wasm.c`: layout, symbol table,
     relocations as LLVM's WasmObjectWriter, byte for byte).
@@ -260,6 +260,7 @@ bench/vcc-abi.py --target wasm64    # [needs VCC_WASM=1; not maintained] ... for
 bench/vcc-self.py -j 6              # [needs VCC_WASM=1; not maintained] vcc.wasm built by vcc itself vs the emcc build: -S byte for byte (W6, ~40 s)
 bench/vcc-darwin-s.py -j 6           # Darwin -S assembled by Apple's as, runs as the direct object (~2 min)
 bench/vcc-diag.py -j 6             # test/diag: vcc's .stderr snapshots, clang's locations/levels/flags (~2 s)
+bench/vcc-field-uses.py -j 6       # VCC_FIELD_USES: every use of selected struct fields with its bytes, snapshots (src/test/field-uses, <1 s)
 bench/vcc-diag.py lint_naming       # vpp --lint (style checks, off elsewhere; frontend/c/naming-lint.c): cases with /* diag-vpp-flags: --lint */
 bench/vcc-diag.py --bin-dir build/src-asan   # ... with a sanitizer build (also vcc-mutate.py, VCC_BIN=$PWD/build/src-asan)
 bench/vcc-diag.py --bless PATTERN   # ... rewrite the snapshots of a changed message (review the diff)

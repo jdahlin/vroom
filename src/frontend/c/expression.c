@@ -1113,6 +1113,8 @@ VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 			{
 				uint32_t id = tok(c)->id, nloc = tok(c)->loc;
 
+				if (unlikely(c->field_uses))
+					cc_field_uses_name_keep(c);
 				next(c);
 				if (is_vector(c, N(n)->ty) && T(c, N(n)->ty)->ext) {
 					uint32_t b = c->span[n].e ? c->span[n].b : N(n)->loc;
@@ -1136,6 +1138,8 @@ VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 						c->span[n] = b;
 				}
 				n = member(c, n, id, loc);
+				if (unlikely(c->field_uses))
+					cc_field_uses_member(c, n, id);
 			}
 			continue;
 		case LEX_TOKEN_ARROW:
@@ -1145,6 +1149,8 @@ VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 			{
 				uint32_t id = tok(c)->id;
 
+				if (unlikely(c->field_uses))
+					cc_field_uses_name_keep(c);
 				next(c);
 				if (is_record(c, N(n)->ty)) {
 					/* clang: fix-it '.', then go on as if it were there */
@@ -1163,6 +1169,8 @@ VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 						c->span[n] = b;
 					n = member(c, n, id, loc);
 				}
+				if (unlikely(c->field_uses))
+					cc_field_uses_member(c, n, id);
 			}
 			continue;
 		case LEX_TOKEN_PLUS_PLUS:

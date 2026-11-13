@@ -13,27 +13,27 @@ typedef struct {
 	uint64_t e_entry, e_phoff, e_shoff;
 	uint32_t e_flags;
 	uint16_t e_ehsize, e_phentsize, e_phnum, e_shentsize, e_shnum, e_shstrndx;
-} Ehdr;
+} elf_file_header;
 typedef struct {
 	uint32_t sh_name, sh_type;
 	uint64_t sh_flags, sh_addr, sh_offset, sh_size;
 	uint32_t sh_link, sh_info;
 	uint64_t sh_addralign, sh_entsize;
-} Shdr;
+} elf_section_header;
 typedef struct {
 	uint32_t st_name;
 	uint8_t st_info, st_other;
 	uint16_t st_shndx;
 	uint64_t st_value, st_size;
-} Sym;
+} elf_symbol;
 typedef struct {
 	uint64_t r_offset, r_info;
 	int64_t r_addend;
-} Rela;
+} elf_rela;
 typedef struct {
 	uint32_t p_type, p_flags;
 	uint64_t p_offset, p_vaddr, p_paddr, p_filesz, p_memsz, p_align;
-} Phdr;
+} elf_program_header;
 
 enum {
 	SHT_NULL = 0, SHT_PROGBITS = 1, SHT_SYMTAB = 2, SHT_STRTAB = 3, SHT_RELA = 4,

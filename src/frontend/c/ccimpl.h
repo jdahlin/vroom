@@ -230,6 +230,15 @@ VPRIV void unused_value(cc *c, uint32_t e, bool comma);
 VPRIV bool unused_cmp(cc *c, uint32_t e);
 VPRIV void set_only(cc *c, uint32_t e);
 VPRIV __attribute__((format(printf, 10, 11))) bool cc_warnx(cc *c, const char *flag, bool on, const char *const *groups, uint32_t loc, const pp_span *r, int nr, const pp_fixit *fx, int nfx, const char *fmt, ...);
+/* field-uses.c: the VCC_FIELD_USES test aid */
+enum { FU_DECL, FU_MEMBER, FU_DESIGNATOR, FU_OFFSETOF };
+VPRIV void cc_field_uses_begin(cc *c, const char *selection_path);
+VPRIV __attribute__((noinline, cold)) void cc_field_uses_def(cc *c, uint32_t ti);
+VPRIV __attribute__((noinline, cold)) void cc_field_uses_name_keep(cc *c);
+VPRIV __attribute__((noinline, cold)) void cc_field_uses_decl(cc *c, uint32_t tag, uint32_t idx, uint32_t name, uint32_t loc);
+VPRIV __attribute__((noinline, cold)) void cc_field_uses_member(cc *c, uint32_t n, uint32_t id);
+VPRIV __attribute__((noinline, cold)) void cc_field_uses_path_record(cc *c, int role, uint32_t tag, const uint32_t *path, int depth);
+VPRIV void cc_field_uses_finish(cc *c);
 VPRIV const char *idname(uint32_t id, int *len);
 VPRIV int idlen_(uint32_t id);
 VPRIV const char *idstr_(uint32_t id);

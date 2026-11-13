@@ -1,0 +1,11 @@
+tu	contexts.c	ok
+use	decl	S	f	contexts.c:2	file	contexts.c	33	2	16	1	-
+other	decl	T	f	contexts.c:3	file	contexts.c	54	3	16	1	-
+use	member	S	f	contexts.c:2	file	contexts.c	92	6	12	1	-
+use	member	S	f	contexts.c:2	file	contexts.c	109	6	29	1	-
+use	member	S	f	contexts.c:2	file	contexts.c	153	7	41	1	-
+use	member	S	f	contexts.c:2	file	contexts.c	188	8	22	1	-
+use	member	S	f	contexts.c:2	file	contexts.c	232	10	13	1	-
+use	member	S	f	contexts.c:2	file	contexts.c	290	11	56	1	-
+use	member	S	f	contexts.c:2	file	contexts.c	320	11	86	1	-
+members	S	contexts.c:2	f

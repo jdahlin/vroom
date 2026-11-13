@@ -10,38 +10,38 @@ typedef struct {
 	bool discarded;
 	uint32_t key;			/* identity for ADRP relaxation */
 	bool global;
-} Target;
+} ld_relocation_target;
 
-static void reloc_target(const Obj *o, uint32_t symidx, int64_t addend, Target *t)
+static void ld_relocation_target_find(const ld_object *o, uint32_t symidx, int64_t addend, ld_relocation_target *t)
 {
 	t->undef = t->discarded = false;
 	if (symidx >= o->firstg) {
 		uint32_t g = o->gs[symidx - o->firstg];
-		G *s = &gsyms[g];
+		ld_global_symbol *s = &gsyms[g];
 		t->key = g;
 		t->global = true;
-		if (s->state == GS_UNDEF || s->demoted) {
+		if (s->state == LD_SYMBOL_STATE_UNDEFINED || s->demoted) {
 			t->undef = true;
 			t->abs = true;
 			t->s = 0;
 			t->va = addend;
 			return;
 		}
-		t->abs = gsym_isabs(g);
-		t->s = gsym_va(g);
-		if (s->state == GS_OBJ && s->sec != NONE) {
-			ISec *is = &isecs.v[s->sec];
-			if (is->kind == K_MERGE_IN) {
-				t->va = isec_va(s->sec, s->val + addend) ;
+		t->abs = ld_global_symbol_is_absolute(g);
+		t->s = ld_global_symbol_address(g);
+		if (s->state == LD_SYMBOL_STATE_OBJECT && s->sec != LD_NONE) {
+			ld_input_section *is = &isecs.v[s->sec];
+			if (is->kind == LD_SECTION_KIND_MERGE_INPUT) {
+				t->va = ld_input_section_address(s->sec, s->val + addend) ;
 				/* non-section symbol: piece of value, then + addend */
-				t->va = isec_va(s->sec, s->val) + addend;
+				t->va = ld_input_section_address(s->sec, s->val) + addend;
 				return;
 			}
 		}
 		t->va = t->s + addend;
 		return;
 	}
-	const Sym *y = &o->sym[symidx];
+	const elf_symbol *y = &o->sym[symidx];
 	t->key = symidx;
 	t->global = false;
 	if (y->st_shndx == SHN_ABS) {
@@ -58,63 +58,63 @@ static void reloc_target(const Obj *o, uint32_t symidx, int64_t addend, Target *
 		return;
 	}
 	uint32_t sec = o->isec0 + y->st_shndx;
-	ISec *is = &isecs.v[sec];
+	ld_input_section *is = &isecs.v[sec];
 	t->abs = false;
-	uint32_t os = isec_osec(sec);
-	if (is->kind == K_NONE || os == OS_DISCARD || os == NONE) {
+	uint32_t os = ld_input_section_output_section(sec);
+	if (is->kind == LD_SECTION_KIND_NONE || os == LD_OUTPUT_SECTION_DISCARD || os == LD_NONE) {
 		t->discarded = true;
 		t->s = 0;
 		t->va = addend;
 		return;
 	}
 	if ((y->st_info & 15) == STT_SECTION) {
-		t->s = isec_va(sec, 0);
-		t->va = isec_va(sec, (uint64_t)addend);
-		if (is->kind != K_MERGE_IN)
+		t->s = ld_input_section_address(sec, 0);
+		t->va = ld_input_section_address(sec, (uint64_t)addend);
+		if (is->kind != LD_SECTION_KIND_MERGE_INPUT)
 			t->va = t->s + addend;
 		return;
 	}
-	t->s = isec_va(sec, y->st_value);
+	t->s = ld_input_section_address(sec, y->st_value);
 	t->va = t->s + addend;
 }
 
 /*
- * Final addresses, once layout is done: reloc_target() for the copy pass
+ * Final addresses, once layout is done: ld_relocation_target_find() for the copy pass
  * from per-symbol and per-section values computed once (fin_*), falling
- * back to reloc_target() for undefined, discarded and merge-piece targets.
+ * back to ld_relocation_target_find() for undefined, discarded and merge-piece targets.
  */
-static uint64_t *isec_fva;		/* isec_va(s, 0), or UINT64_MAX: take reloc_target */
+static uint64_t *isec_fva;		/* ld_input_section_address(s, 0), or UINT64_MAX: take ld_relocation_target_find */
 
-static void fin_isec(void *arg, size_t i)
+static void ld_input_section_final_address_set(void *arg, size_t i)
 {
 	(void)arg;
-	ISec *is = &isecs.v[i];
-	uint32_t os = isec_osec(i);
-	isec_fva[i] = is->kind == K_NONE || is->kind == K_MERGE_IN || os == NONE || os == OS_DISCARD
+	ld_input_section *is = &isecs.v[i];
+	uint32_t os = ld_input_section_output_section(i);
+	isec_fva[i] = is->kind == LD_SECTION_KIND_NONE || is->kind == LD_SECTION_KIND_MERGE_INPUT || os == LD_NONE || os == LD_OUTPUT_SECTION_DISCARD
 			      ? UINT64_MAX : osecs.v[os].va + is->off;
 }
-static void fin_gsym(void *arg, size_t g)
+static void ld_global_symbol_final_address_set(void *arg, size_t g)
 {
 	(void)arg;
-	G *s = &gsyms[g];
-	s->fundef = s->state == GS_UNDEF || s->demoted;
+	ld_global_symbol *s = &gsyms[g];
+	s->fundef = s->state == LD_SYMBOL_STATE_UNDEFINED || s->demoted;
 	if (!s->fundef) {
-		s->fabs = gsym_isabs((uint32_t)g);
-		s->fva = gsym_va((uint32_t)g);
+		s->fabs = ld_global_symbol_is_absolute((uint32_t)g);
+		s->fva = ld_global_symbol_address((uint32_t)g);
 	}
 }
-static void final_addresses(void)
+static void ld_final_addresses_compute(void)
 {
-	isec_fva = alloc((size_t)isecs.n * sizeof(uint64_t));
-	pfor(isecs.n, fin_isec, NULL);
-	pfor(atomic_load(&ngsyms), fin_gsym, NULL);
+	isec_fva = ld_region_alloc((size_t)isecs.n * sizeof(uint64_t));
+	ld_parallel_for(isecs.n, ld_input_section_final_address_set, NULL);
+	ld_parallel_for(atomic_load(&ngsyms), ld_global_symbol_final_address_set, NULL);
 }
 
-static inline void reloc_target_final(const Obj *o, uint32_t symidx, int64_t addend, Target *t)
+static inline void ld_relocation_target_final_find(const ld_object *o, uint32_t symidx, int64_t addend, ld_relocation_target *t)
 {
 	if (symidx >= o->firstg) {
 		uint32_t g = o->gs[symidx - o->firstg];
-		const G *s = &gsyms[g];
+		const ld_global_symbol *s = &gsyms[g];
 		if (!s->fundef) {
 			t->undef = t->discarded = false;
 			t->key = g;
@@ -125,7 +125,7 @@ static inline void reloc_target_final(const Obj *o, uint32_t symidx, int64_t add
 			return;
 		}
 	} else {
-		const Sym *y = &o->sym[symidx];
+		const elf_symbol *y = &o->sym[symidx];
 		if (y->st_shndx != SHN_UNDEF && y->st_shndx < 0xff00) {
 			uint64_t b = isec_fva[o->isec0 + y->st_shndx];
 			if (b != UINT64_MAX) {
@@ -139,5 +139,5 @@ static inline void reloc_target_final(const Obj *o, uint32_t symidx, int64_t add
 			}
 		}
 	}
-	reloc_target(o, symidx, addend, t);
+	ld_relocation_target_find(o, symidx, addend, t);
 }

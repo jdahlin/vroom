@@ -1,6 +1,9 @@
 # Design: renaming struct fields with vcc's own front end
 
-Status: design, 2026-11-13.  None of it is implemented yet.
+Status: 2026-11-13.  Piece 1 (the front-end mode, PR `quality/field-uses-mode`)
+and piece 2 (`field-uses.py`, `rename-table.py --fields`, PR
+`quality/field-uses-apply`) are implemented; the first user (PR 3) is not.  Corrections made while
+implementing piece 1 are marked "(implemented:".
 
 The owner's decision (`PLAN-quality.md`, track D) is this: struct fields are
 renamed with a mode of vcc's own front end that reports every use of a given
@@ -133,7 +136,7 @@ gone afterwards.
 
 | Syntax | Where the parser resolves it | Hook |
 |---|---|---|
-| declaration: `int n;`, `int *p, n:3;` | `struct_body` (`frontend/c/record-parse.c`), in the member loop after `declarator()` | When the mode is on, `declarator()` (`frontend/c/declarator.c`) copies the name token into the mode's state.  `struct_body` then records a `decl` for the record being defined and field index `nf`. |
+| declaration: `int n;`, `int *p, n:3;` | `struct_body` (`frontend/c/record-parse.c`), in the member loop after `declarator()` | When the mode is on, `declarator()` (`frontend/c/declarator.c`) copies the name token into the mode's state.  `struct_body` then records a `decl` for the record being defined and field index `nf`.  (Implemented: a nested declarator or a parameter list parses more names before `struct_body` sees the declarator, as in `int (*f)(int n)`, so the mode keeps every name token read inside a struct body and `struct_body` picks the one at the declarator's `loc`.) |
 | `x.f`, `p->f` | postfix loop of `frontend/c/expression.c` (`case T_PERIOD`, `case T_ARROW`), then `member()` or `member_slow()` | Before `next(c)`, copy the name token.  After the case's `member()` call(s), record a `member` from the result node if it is `N_MEMBER`.  The node's `b` is the tag and `c` the field index, both of the innermost record on an anonymous path. |
 | designators: `.f =`, nested `.a.b =`, `[i].f`, ranges `[0 ... 3].f`, GNU `f:` | `il_designation_path` (`frontend/c/initializer.c`), at `find_member` (the name is `tok(c)`).  Nested designators recurse into the same function. | Record a `designator` from `l->ty`'s tag, `path` and depth `d`. |
 | `offsetof(T, a.b[i].c)`, `__builtin_offsetof` | `offsetof_expr` (`frontend/c/builtin-call.c`), at `find_member` for each `.` component | Record an `offsetof` from `ti`, `path` and `d`. |
@@ -177,8 +180,15 @@ Every recorded use keeps a copy of the name's `ptok` (`s`, `len`, `loc`,
 
 - for a token read from a file, it points into that file's text;
 - for a token of a macro body, it points into the text of the file holding
-  the `#define` (`vfill` in `frontend/pp/ppimpl.h`; a body's `src` is that
-  file's text, see `macro.c`).
+  the `#define` (a body's `src` is that file's text, see `macro.c`).
+
+(Implemented: this holds for a `#define` in a header, which is built once per
+directive site.  A `#define` in the main file or in `<built-in>` is made
+canonical by content (`pp_macro_canonical_get`): its body is copied into
+shared memory, and `s` points into the copy, which is in no file.  The mode
+therefore calls `pp_macro_text_keep(p)` when it starts, and `pp_macro_define`
+then keeps the per-TU macro, whose body is still the main file's text.  The
+flag is `pp::keep_macro_text`, reset in `pp_open`.)
 
 In both cases the pointer lies inside a `vlex_file`'s `src`.  So the
 spelling position comes from the pointer, whatever the expansion did with
@@ -195,8 +205,8 @@ int pp_token_spelling_find(const pp *p, const ptok *t, const vlex_file **file, u
 
 It lives in `src/frontend/pp/source-query.c` and is declared in
 `include/frontend/pp/pp.h`.  It scans `p->fe[]` for the `vlex_file` whose
-`[src, src + size)` holds `t->s`, caching the last hit (uses cluster by
-file).  It then compares that position with the file and offset of `t->loc`
+`[src, src + size)` holds `t->s`, the newest file first
+(uses cluster by file).  It then compares that position with the file and offset of `t->loc`
 (`loc_fent`).  Only the mode calls it.
 
 The table gives each case and what it means for the rename (the `WHERE`
@@ -441,6 +451,12 @@ Field rows are taken out of the whole-word pass.  `--apply` without
 Today a field row is a word row; from now on a table is applied twice, words
 then fields or the other way round (owners resolve either way).
 
+(Implemented: the word pass skips field rows in unscoped tables only.  A
+`--scoped` table (`rename-lexpp.tsv`) keeps applying its safe `field` rows as
+words, as #189 did; its `field,deferred` rows are the ones for `--fields
+--deferred`.  The owner column may carry a note after `, ` (`struct G,
+ld/global-symbols.c`): the script ignores it.)
+
 ### 4.2 Commands
 
 ```
@@ -455,6 +471,12 @@ temporary file and runs `field-uses.py` (unless `--report` is given).  For
 each row it prints the number of uses and files, the positions grouped by
 `WHERE`, and every problem from 4.3.  `--apply` refuses if there is any
 problem.
+
+(Implemented in `rename-table.py`: `--report-out F` saves the merged report;
+`--commands FILE --root DIR` are passed to `field-uses.py`, which the
+self-test uses; `--bin-dir`, `--config`, `-j`, `--no-build` likewise.  The
+self-test's cases are the `NAME.tsv` files of `src/test/field-uses/rename/`
+with the tree in `tree/`; `--selftest --bless` writes the `NAME.after/` files.)
 
 ### 4.3 Checks
 
@@ -472,7 +494,9 @@ Each of these is a problem unless it says otherwise.
    this also catches a clash with an enclosing anonymous aggregate.
 4. **Merge:** two rows of one owner have the same `new`.
 5. **Macro:** there is a `macro` record for `old` or `new`, or a line
-   matching `#\s*define\s+NEW\b` anywhere in the scope.  A macro named like
+   matching `#\s*define\s+NEW\b` anywhere in the scope except `src/test/`
+   (test programs define such macros and never see the owner's headers; one
+   in `gcc-torture` would otherwise block `value`).  A macro named like
    the field changes what the token means.
 6. **Keyword:** `new` is a C or GNU keyword (the list in
    `frontend/c/keywords.c`).
@@ -564,7 +588,8 @@ Files:
   `initializer.c`, `builtin-call.c` and `translation-unit.c`;
 - `pp_token_spelling_find` in `frontend/pp/source-query.c` and `pp.h`;
 - `driver/job.c`;
-- `src/Makefile` (`cc_SRC`);
+- (`src/Makefile` needs no change: `cc_SRC` is a wildcard);
+- `pp_macro_text_keep` and `pp::keep_macro_text` (`frontend/pp/`: `macro.c`, `pp-internal.h`, `translation-unit.c`);
 - the tests, `ci/premerge.sh`, and one line in `AGENTS.md`'s Build and test
   section.
 

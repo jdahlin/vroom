@@ -1,9 +1,9 @@
 /* The lock that serialises links and the test for a Mach-O first input. */
 
-static pthread_mutex_t ldlock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t ld_link_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* the first input file (an argument that is not an option or its value) is Mach-O */
-static bool first_input_macho(int argc, char **argv, int dirfd)
+static bool ld_first_input_is_macho(int argc, char **argv, int dirfd)
 {
 	for (int i = 1; i < argc; i++) {
 		const char *a = argv[i];

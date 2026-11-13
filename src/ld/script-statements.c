@@ -1,286 +1,286 @@
-/* The linker script's statements: assignments, PROVIDE, ASSERT, input and output section descriptions, SECTIONS, PHDRS, VERSION, and parse_script. */
+/* The linker script's statements: assignments, PROVIDE, ASSERT, input and output section descriptions, SECTIONS, PHDRS, VERSION, and ld_script_parse. */
 
-static uint32_t get_osec(const char *name)
+static uint32_t ld_output_section_find(const char *name)
 {
 	if (strcmp(name, "/DISCARD/"))
 		for (uint32_t i = 0; i < osecs.n; i++)
 			if (!strcmp(osecs.v[i].name, name))
 				return i;
-	OSec o = {.name = name, .type = SHT_PROGBITS, .addralign = 1, .ptload = -1};
+	ld_output_section o = {.name = name, .type = SHT_PROGBITS, .addralign = 1, .ptload = -1};
 	o.discard = !strcmp(name, "/DISCARD/");
-	VVEC_PUSH(osecs, o, alloc);
+	VVEC_PUSH(osecs, o, ld_region_alloc);
 	return osecs.n - 1;
 }
 
 /* After `name` was read: op= expr.  Returns NULL if not an assignment. */
-static Assign *passign_rest(const char *name)
+static ld_assignment *ld_script_assignment_rest_parse(const char *name)
 {
 	char op[4];
-	int n = peekop(op);
+	int n = ld_script_operator_peek(op);
 	if (!n || !strchr(op, '=') || !strcmp(op, "==") || !strcmp(op, "<=") || !strcmp(op, ">=") || !strcmp(op, "!="))
 		return NULL;
 	sp += n;
-	Assign *a = alloc(sizeof *a);
+	ld_assignment *a = ld_region_alloc(sizeof *a);
 	a->op = op[0] == '=' ? '=' : op[0];
-	a->sym = strcmp(name, ".") ? gintern(name) : NONE;
-	a->e = pexpr();
+	a->sym = strcmp(name, ".") ? ld_global_name_intern(name) : LD_NONE;
+	a->e = ld_script_expression_parse();
 	return a;
 }
 
-static Assign *pprovide(bool hidden)
+static ld_assignment *ld_script_provide_parse(bool hidden)
 {
-	sexpect('(');
-	char *name = sname();
-	Assign *a;
-	VVEC_PUSH(provides, ((Provide){.sym = gintern(name)}), alloc);
+	ld_script_character_expect('(');
+	char *name = ld_script_name_parse();
+	ld_assignment *a;
+	VVEC_PUSH(provides, ((ld_provide){.sym = ld_global_name_intern(name)}), ld_region_alloc);
 	cur_provide = &provides.v[provides.n - 1];
-	a = passign_rest(name);
+	a = ld_script_assignment_rest_parse(name);
 	cur_provide = NULL;
 	if (!a) {
-		serr("expected assignment");
+		ld_script_error_report("expected assignment");
 		return NULL;
 	}
 	a->provide = true;
 	a->hidden = hidden;
-	sexpect(')');
+	ld_script_character_expect(')');
 	return a;
 }
 
-static Assign *passert(void)
+static ld_assignment *ld_script_assert_parse(void)
 {
-	Assign *a = alloc(sizeof *a);
-	a->sym = NONE;
+	ld_assignment *a = ld_region_alloc(sizeof *a);
+	a->sym = LD_NONE;
 	a->op = '=';
 	a->assert_ = true;
-	Expr *e = mk(E_ASSERT);
-	sexpect('(');
-	e->a = pexpr();
-	sexpect(',');
-	e->msg = sname();
-	sexpect(')');
+	ld_expression *e = ld_script_expression_create(LD_EXPRESSION_ASSERT);
+	ld_script_character_expect('(');
+	e->a = ld_script_expression_parse();
+	ld_script_character_expect(',');
+	e->msg = ld_script_name_parse();
+	ld_script_character_expect(')');
 	a->e = e;
 	return a;
 }
 
-static void pinput(OSec *os, uint32_t osi, const char *filepat, bool keep)
+static void ld_script_input_parse(ld_output_section *os, uint32_t osi, const char *filepat, bool keep)
 {
 	if (strcmp(filepat, "*"))
-		error("linker script: file pattern '%s' not supported", filepat);
-	ISD d = {.osec = osi, .keep = keep, .thunksec = NONE};
-	VVEC(Pat) pats = {0};
-	sexpect('(');
-	while (!satend() && !speek(')')) {
-		Pat p = {0};
+		ld_error_report("linker script: file pattern '%s' not supported", filepat);
+	ld_input_section_description d = {.osec = osi, .keep = keep, .thunksec = LD_NONE};
+	VVEC(ld_pattern) pats = {0};
+	ld_script_character_expect('(');
+	while (!ld_script_is_at_end() && !ld_script_character_peek(')')) {
+		ld_pattern p = {0};
 		VVEC(const char *) g = {0};
 		const char *save = sp;
-		char *w = spatname();
-		if ((!strcmp(w, "SORT") || !strcmp(w, "SORT_BY_NAME") || !strcmp(w, "SORT_BY_ALIGNMENT")) && speek('(')) {
-			p.sort = w[5] == 'B' && w[8] == 'A' ? SORT_ALIGN : SORT_NAME;
-			sexpect('(');
-			while (!satend() && !speek(')'))
-				VVEC_PUSH(g, spatname(), alloc);
-			sexpect(')');
+		char *w = ld_script_pattern_name_parse();
+		if ((!strcmp(w, "SORT") || !strcmp(w, "SORT_BY_NAME") || !strcmp(w, "SORT_BY_ALIGNMENT")) && ld_script_character_peek('(')) {
+			p.sort = w[5] == 'B' && w[8] == 'A' ? LD_SORT_ALIGNMENT : LD_SORT_NAME;
+			ld_script_character_expect('(');
+			while (!ld_script_is_at_end() && !ld_script_character_peek(')'))
+				VVEC_PUSH(g, ld_script_pattern_name_parse(), ld_region_alloc);
+			ld_script_character_expect(')');
 		} else if (!strcmp(w, "EXCLUDE_FILE")) {
-			error("linker script: EXCLUDE_FILE not supported");
+			ld_error_report("linker script: EXCLUDE_FILE not supported");
 			sp = save;
 			return;
 		} else {
-			VVEC_PUSH(g, w, alloc);
+			VVEC_PUSH(g, w, ld_region_alloc);
 			/* consecutive plain globs belong to the same pattern */
 			for (;;) {
 				const char *s2 = sp;
-				sskip();
-				if (speek(')'))
+				ld_script_whitespace_skip();
+				if (ld_script_character_peek(')'))
 					break;
-				char *w2 = spatname();
+				char *w2 = ld_script_pattern_name_parse();
 				if (!strncmp(w2, "SORT", 4) || !strcmp(w2, "EXCLUDE_FILE")) {
 					sp = s2;
 					break;
 				}
-				VVEC_PUSH(g, w2, alloc);
+				VVEC_PUSH(g, w2, ld_region_alloc);
 			}
 		}
 		p.globs = g.v;
 		p.nglobs = g.n;
-		VVEC_PUSH(pats, p, alloc);
+		VVEC_PUSH(pats, p, ld_region_alloc);
 	}
-	sexpect(')');
+	ld_script_character_expect(')');
 	d.pats = pats.v;
 	d.npats = pats.n;
-	VVEC_PUSH(isds, d, alloc);
-	Cmd c = {.kind = C_ISD, .idx = isds.n - 1};
-	VVEC_PUSH(os->cmds, c, alloc);
+	VVEC_PUSH(isds, d, ld_region_alloc);
+	ld_command c = {.kind = LD_COMMAND_INPUT_SECTION_DESCRIPTION, .idx = isds.n - 1};
+	VVEC_PUSH(os->cmds, c, ld_region_alloc);
 }
 
-static void poutsec(const char *name)
+static void ld_script_output_section_parse(const char *name)
 {
-	uint32_t osi = get_osec(name);
+	uint32_t osi = ld_output_section_find(name);
 	uint32_t nref0 = refsyms.n;
-	OSec *os;
-	Expr *addr = NULL;
+	ld_output_section *os;
+	ld_expression *addr = NULL;
 	bool info = false, noload = false;
 	/* optional address and (TYPE) */
-	if (!speek(':')) {
-		if (speek('(')) {
+	if (!ld_script_character_peek(':')) {
+		if (ld_script_character_peek('(')) {
 			const char *save = sp;
 			sp++;
-			char *t = spatname();
+			char *t = ld_script_pattern_name_parse();
 			if (!strcmp(t, "INFO") || !strcmp(t, "NOLOAD") || !strcmp(t, "COPY") || !strcmp(t, "OVERLAY")) {
-				sexpect(')');
+				ld_script_character_expect(')');
 				info = strcmp(t, "NOLOAD");
 				noload = !info;
 			} else {
 				sp = save;
-				addr = pexpr();
+				addr = ld_script_expression_parse();
 			}
 		} else {
-			addr = pexpr();
-			if (speek('(')) {
+			addr = ld_script_expression_parse();
+			if (ld_script_character_peek('(')) {
 				sp++;
-				char *t = spatname();
-				sexpect(')');
+				char *t = ld_script_pattern_name_parse();
+				ld_script_character_expect(')');
 				info = strcmp(t, "NOLOAD");
 				noload = !info;
 			}
 		}
 	}
-	sexpect(':');
+	ld_script_character_expect(':');
 	os = &osecs.v[osi];
 	os->addr = addr;
 	os->nonalloc |= info;
 	os->noload |= noload;
 	for (;;) {
-		if (sword("AT")) { Expr *e = pparen(); osecs.v[osi].lma = e; continue; }
-		if (sword("ALIGN")) { Expr *e = pparen(); osecs.v[osi].alignx = e; continue; }
-		if (sword("SUBALIGN")) { Expr *e = pparen(); osecs.v[osi].subalign = e; continue; }
+		if (ld_script_word_consume("AT")) { ld_expression *e = ld_script_parenthesized_expression_parse(); osecs.v[osi].lma = e; continue; }
+		if (ld_script_word_consume("ALIGN")) { ld_expression *e = ld_script_parenthesized_expression_parse(); osecs.v[osi].alignx = e; continue; }
+		if (ld_script_word_consume("SUBALIGN")) { ld_expression *e = ld_script_parenthesized_expression_parse(); osecs.v[osi].subalign = e; continue; }
 		break;
 	}
-	sexpect('{');
-	while (!satend() && !speek('}')) {
-		if (sconsume(';'))
+	ld_script_character_expect('{');
+	while (!ld_script_is_at_end() && !ld_script_character_peek('}')) {
+		if (ld_script_character_consume(';'))
 			continue;
-		if (sword("KEEP")) {
-			sexpect('(');
-			char *fp = spatname();
-			pinput(&osecs.v[osi], osi, fp, true);
-			sexpect(')');
-			continue;
-		}
-		if (sword("CONSTRUCTORS"))
-			continue;
-		if (sword("ASSERT")) {
-			Assign *a = passert();
-			Cmd c = {.kind = C_ASSIGN, .as = a};
-			VVEC_PUSH(osecs.v[osi].cmds, c, alloc);
-			sconsume(';');
+		if (ld_script_word_consume("KEEP")) {
+			ld_script_character_expect('(');
+			char *fp = ld_script_pattern_name_parse();
+			ld_script_input_parse(&osecs.v[osi], osi, fp, true);
+			ld_script_character_expect(')');
 			continue;
 		}
-		int pk = sword("PROVIDE") ? 1 : sword("PROVIDE_HIDDEN") ? 2 : sword("HIDDEN") ? 3 : 0;
+		if (ld_script_word_consume("CONSTRUCTORS"))
+			continue;
+		if (ld_script_word_consume("ASSERT")) {
+			ld_assignment *a = ld_script_assert_parse();
+			ld_command c = {.kind = LD_COMMAND_ASSIGNMENT, .as = a};
+			VVEC_PUSH(osecs.v[osi].cmds, c, ld_region_alloc);
+			ld_script_character_consume(';');
+			continue;
+		}
+		int pk = ld_script_word_consume("PROVIDE") ? 1 : ld_script_word_consume("PROVIDE_HIDDEN") ? 2 : ld_script_word_consume("HIDDEN") ? 3 : 0;
 		if (pk) {
 			bool hid = pk >= 2, prov = pk <= 2;
-			Assign *a = pprovide(hid);
+			ld_assignment *a = ld_script_provide_parse(hid);
 			if (a) {
 				a->provide = prov;
-				Cmd c = {.kind = C_ASSIGN, .as = a};
-				VVEC_PUSH(osecs.v[osi].cmds, c, alloc);
+				ld_command c = {.kind = LD_COMMAND_ASSIGNMENT, .as = a};
+				VVEC_PUSH(osecs.v[osi].cmds, c, ld_region_alloc);
 			}
-			sexpect(';');
+			ld_script_character_expect(';');
 			continue;
 		}
 		const char *save = sp;
-		char *w = sname();
-		Assign *a = passign_rest(w);
+		char *w = ld_script_name_parse();
+		ld_assignment *a = ld_script_assignment_rest_parse(w);
 		if (a) {
-			Cmd c = {.kind = C_ASSIGN, .as = a};
-			VVEC_PUSH(osecs.v[osi].cmds, c, alloc);
-			sexpect(';');
+			ld_command c = {.kind = LD_COMMAND_ASSIGNMENT, .as = a};
+			VVEC_PUSH(osecs.v[osi].cmds, c, ld_region_alloc);
+			ld_script_character_expect(';');
 			continue;
 		}
 		sp = save;
-		w = spatname();
+		w = ld_script_pattern_name_parse();
 		if (!*w) {
-			serr("unexpected token in output section");
+			ld_script_error_report("unexpected token in output section");
 			sp = sp_end;
 			break;
 		}
-		pinput(&osecs.v[osi], osi, w, false);
+		ld_script_input_parse(&osecs.v[osi], osi, w, false);
 	}
-	sexpect('}');
+	ld_script_character_expect('}');
 	/* trailers: >region, AT>region, :phdr, =fill */
 	for (;;) {
-		sskip();
+		ld_script_whitespace_skip();
 		if (sp < sp_end && *sp == '>') {
-			error("linker script: memory regions not supported in %s", name);
+			ld_error_report("linker script: memory regions not supported in %s", name);
 			sp = sp_end;
 			break;
 		}
 		if (sp < sp_end && *sp == '=') {
 			sp++;
-			osecs.v[osi].fill = pprimary();	/* lld readFill: a primary */
+			osecs.v[osi].fill = ld_script_primary_expression_parse();	/* lld readFill: a primary */
 			continue;
 		}
-		if (speek(':') && sp + 1 < sp_end && sp[1] != ':') {
+		if (ld_script_character_peek(':') && sp + 1 < sp_end && sp[1] != ':') {
 			sp++;
-			OSec *o = &osecs.v[osi];
+			ld_output_section *o = &osecs.v[osi];
 			if (o->nphn == 4)
-				serr("too many :phdr names");
+				ld_script_error_report("too many :phdr names");
 			else
-				o->phn[o->nphn++] = sname();
+				o->phn[o->nphn++] = ld_script_name_parse();
 			continue;
 		}
 		break;
 	}
-	sconsume(',');
+	ld_script_character_consume(',');
 	if (refsyms.n > nref0)
 		osecs.v[osi].uses_syms = true;
-	Cmd c = {.kind = C_OSEC, .idx = osi};
-	VVEC_PUSH(topcmds, c, alloc);
+	ld_command c = {.kind = LD_COMMAND_OUTPUT_SECTION, .idx = osi};
+	VVEC_PUSH(topcmds, c, ld_region_alloc);
 }
 
-static void psections(void)
+static void ld_script_sections_parse(void)
 {
-	sexpect('{');
-	while (!satend() && !speek('}')) {
-		if (sconsume(';'))
+	ld_script_character_expect('{');
+	while (!ld_script_is_at_end() && !ld_script_character_peek('}')) {
+		if (ld_script_character_consume(';'))
 			continue;
-		if (sword("ASSERT")) {
-			Assign *a = passert();
-			VVEC_PUSH(topcmds, ((Cmd){.kind = C_ASSIGN, .as = a}), alloc);
-			sconsume(';');
-			continue;
-		}
-		if (sword("PROVIDE_HIDDEN") || sword("HIDDEN")) {
-			Assign *a = pprovide(true);
-			if (a) VVEC_PUSH(topcmds, ((Cmd){.kind = C_ASSIGN, .as = a}), alloc);
-			sexpect(';');
+		if (ld_script_word_consume("ASSERT")) {
+			ld_assignment *a = ld_script_assert_parse();
+			VVEC_PUSH(topcmds, ((ld_command){.kind = LD_COMMAND_ASSIGNMENT, .as = a}), ld_region_alloc);
+			ld_script_character_consume(';');
 			continue;
 		}
-		if (sword("PROVIDE")) {
-			Assign *a = pprovide(false);
-			if (a) VVEC_PUSH(topcmds, ((Cmd){.kind = C_ASSIGN, .as = a}), alloc);
-			sexpect(';');
+		if (ld_script_word_consume("PROVIDE_HIDDEN") || ld_script_word_consume("HIDDEN")) {
+			ld_assignment *a = ld_script_provide_parse(true);
+			if (a) VVEC_PUSH(topcmds, ((ld_command){.kind = LD_COMMAND_ASSIGNMENT, .as = a}), ld_region_alloc);
+			ld_script_character_expect(';');
+			continue;
+		}
+		if (ld_script_word_consume("PROVIDE")) {
+			ld_assignment *a = ld_script_provide_parse(false);
+			if (a) VVEC_PUSH(topcmds, ((ld_command){.kind = LD_COMMAND_ASSIGNMENT, .as = a}), ld_region_alloc);
+			ld_script_character_expect(';');
 			continue;
 		}
 		const char *save = sp;
-		char *w = sname();
-		Assign *a = passign_rest(w);
+		char *w = ld_script_name_parse();
+		ld_assignment *a = ld_script_assignment_rest_parse(w);
 		if (a) {
-			VVEC_PUSH(topcmds, ((Cmd){.kind = C_ASSIGN, .as = a}), alloc);
-			sexpect(';');
+			VVEC_PUSH(topcmds, ((ld_command){.kind = LD_COMMAND_ASSIGNMENT, .as = a}), ld_region_alloc);
+			ld_script_character_expect(';');
 			continue;
 		}
 		if (!*w) {
 			sp = save;
-			serr("unexpected token in SECTIONS");
+			ld_script_error_report("unexpected token in SECTIONS");
 			sp = sp_end;
 			return;
 		}
-		poutsec(w);
+		ld_script_output_section_parse(w);
 	}
-	sexpect('}');
+	ld_script_character_expect('}');
 }
 
-static void pphdrs(void)
+static void ld_script_program_headers_parse(void)
 {
 	static const struct { const char *n; uint32_t t; } pt[] = {
 		{"PT_NULL", 0}, {"PT_LOAD", 1}, {"PT_DYNAMIC", 2}, {"PT_INTERP", 3}, {"PT_NOTE", 4},
@@ -288,12 +288,12 @@ static void pphdrs(void)
 		{"PT_GNU_STACK", 0x6474e551}, {"PT_GNU_RELRO", 0x6474e552}, {"PT_GNU_PROPERTY", 0x6474e553},
 	};
 	have_phdrs = true;
-	sexpect('{');
-	while (!satend() && !speek('}')) {
-		if (sconsume(';'))
+	ld_script_character_expect('{');
+	while (!ld_script_is_at_end() && !ld_script_character_peek('}')) {
+		if (ld_script_character_consume(';'))
 			continue;
-		SPhdr h = {.name = sname()};
-		char *t = sname();
+		ld_script_segment h = {.name = ld_script_name_parse()};
+		char *t = ld_script_name_parse();
 		bool ok = false;
 		for (size_t i = 0; i < sizeof pt / sizeof pt[0] && !ok; i++)
 			if (!strcmp(t, pt[i].n))
@@ -301,116 +301,116 @@ static void pphdrs(void)
 		if (!ok && *t >= '0' && *t <= '9')
 			h.type = (uint32_t)strtoul(t, NULL, 0), ok = true;
 		if (!ok) {
-			serr("unknown program header type");
+			ld_script_error_report("unknown program header type");
 			sp = sp_end;
 			return;
 		}
 		for (;;) {
-			if (sword("FILEHDR")) { h.filehdr = true; continue; }
-			if (sword("PHDRS")) { h.phdrs = true; continue; }
-			if (sword("FLAGS")) { h.flags = pparen(); continue; }
-			if (sword("AT")) { serr("PHDRS AT() not supported"); sp = sp_end; return; }
+			if (ld_script_word_consume("FILEHDR")) { h.filehdr = true; continue; }
+			if (ld_script_word_consume("PHDRS")) { h.phdrs = true; continue; }
+			if (ld_script_word_consume("FLAGS")) { h.flags = ld_script_parenthesized_expression_parse(); continue; }
+			if (ld_script_word_consume("AT")) { ld_script_error_report("PHDRS AT() not supported"); sp = sp_end; return; }
 			break;
 		}
-		VVEC_PUSH(sphdrs, h, alloc);
-		sexpect(';');
+		VVEC_PUSH(sphdrs, h, ld_region_alloc);
+		ld_script_character_expect(';');
 	}
-	sexpect('}');
+	ld_script_character_expect('}');
 }
 
-static void pversion(void)
+static void ld_script_version_parse(void)
 {
-	sexpect('{');
-	while (!satend() && !speek('}')) {
-		VerNode v = {.name = ""};
-		if (!speek('{'))
-			v.name = sname();
-		sexpect('{');
+	ld_script_character_expect('{');
+	while (!ld_script_is_at_end() && !ld_script_character_peek('}')) {
+		ld_version_node v = {.name = ""};
+		if (!ld_script_character_peek('{'))
+			v.name = ld_script_name_parse();
+		ld_script_character_expect('{');
 		bool local = false;
-		while (!satend() && !speek('}')) {
-			if (sconsume(';'))
+		while (!ld_script_is_at_end() && !ld_script_character_peek('}')) {
+			if (ld_script_character_consume(';'))
 				continue;
-			if (sword("global")) { sexpect(':'); local = false; continue; }
-			if (sword("local")) { sexpect(':'); local = true; continue; }
-			if (sword("extern")) { serr("VERSION extern not supported"); sp = sp_end; return; }
-			char *n = sname();
+			if (ld_script_word_consume("global")) { ld_script_character_expect(':'); local = false; continue; }
+			if (ld_script_word_consume("local")) { ld_script_character_expect(':'); local = true; continue; }
+			if (ld_script_word_consume("extern")) { ld_script_error_report("VERSION extern not supported"); sp = sp_end; return; }
+			char *n = ld_script_name_parse();
 			if (!*n) {
-				serr("unexpected token in VERSION");
+				ld_script_error_report("unexpected token in VERSION");
 				sp = sp_end;
 				return;
 			}
 			if (local)
-				VVEC_PUSH(ver_locals, n, alloc);
+				VVEC_PUSH(ver_locals, n, ld_region_alloc);
 			else
-				VVEC_PUSH(v.globs, n, alloc);
-			sexpect(';');
+				VVEC_PUSH(v.globs, n, ld_region_alloc);
+			ld_script_character_expect(';');
 		}
-		sexpect('}');
-		while (!satend() && !speek(';'))	/* dependencies */
-			if (!*sname()) {
-				serr("unexpected token in VERSION");
+		ld_script_character_expect('}');
+		while (!ld_script_is_at_end() && !ld_script_character_peek(';'))	/* dependencies */
+			if (!*ld_script_name_parse()) {
+				ld_script_error_report("unexpected token in VERSION");
 				sp = sp_end;
 				return;
 			}
-		sexpect(';');
+		ld_script_character_expect(';');
 		if (*v.name)
 			nverdefs++;
-		VVEC_PUSH(vernodes, v, alloc);
+		VVEC_PUSH(vernodes, v, ld_region_alloc);
 	}
-	sexpect('}');
+	ld_script_character_expect('}');
 }
 
-static void parse_script(const char *text, size_t len)
+static void ld_script_parse(const char *text, size_t len)
 {
 	sp = sp_file = text;
 	sp_end = text + len;
-	while (!satend()) {
-		if (sconsume(';'))
+	while (!ld_script_is_at_end()) {
+		if (ld_script_character_consume(';'))
 			continue;
-		if (sword("SECTIONS")) { psections(); continue; }
-		if (sword("PHDRS")) { pphdrs(); continue; }
-		if (sword("VERSION")) { pversion(); continue; }
-		if (sword("OUTPUT_ARCH") || sword("OUTPUT_FORMAT") || sword("TARGET") || sword("SEARCH_DIR")) {
-			sexpect('(');
-			while (!satend() && !speek(')'))
+		if (ld_script_word_consume("SECTIONS")) { ld_script_sections_parse(); continue; }
+		if (ld_script_word_consume("PHDRS")) { ld_script_program_headers_parse(); continue; }
+		if (ld_script_word_consume("VERSION")) { ld_script_version_parse(); continue; }
+		if (ld_script_word_consume("OUTPUT_ARCH") || ld_script_word_consume("OUTPUT_FORMAT") || ld_script_word_consume("TARGET") || ld_script_word_consume("SEARCH_DIR")) {
+			ld_script_character_expect('(');
+			while (!ld_script_is_at_end() && !ld_script_character_peek(')'))
 				sp++;
-			sexpect(')');
+			ld_script_character_expect(')');
 			continue;
 		}
-		if (sword("ENTRY")) {
-			sexpect('(');
-			entry_name = sname();
-			sexpect(')');
+		if (ld_script_word_consume("ENTRY")) {
+			ld_script_character_expect('(');
+			entry_name = ld_script_name_parse();
+			ld_script_character_expect(')');
 			continue;
 		}
-		if (sword("ASSERT")) {
-			Assign *a = passert();
-			VVEC_PUSH(topcmds, ((Cmd){.kind = C_ASSIGN, .as = a}), alloc);
-			sconsume(';');
+		if (ld_script_word_consume("ASSERT")) {
+			ld_assignment *a = ld_script_assert_parse();
+			VVEC_PUSH(topcmds, ((ld_command){.kind = LD_COMMAND_ASSIGNMENT, .as = a}), ld_region_alloc);
+			ld_script_character_consume(';');
 			continue;
 		}
-		if (sword("PROVIDE_HIDDEN") || sword("HIDDEN")) {
-			Assign *a = pprovide(true);
-			if (a) VVEC_PUSH(topcmds, ((Cmd){.kind = C_ASSIGN, .as = a}), alloc);
-			sexpect(';');
+		if (ld_script_word_consume("PROVIDE_HIDDEN") || ld_script_word_consume("HIDDEN")) {
+			ld_assignment *a = ld_script_provide_parse(true);
+			if (a) VVEC_PUSH(topcmds, ((ld_command){.kind = LD_COMMAND_ASSIGNMENT, .as = a}), ld_region_alloc);
+			ld_script_character_expect(';');
 			continue;
 		}
-		if (sword("PROVIDE")) {
-			Assign *a = pprovide(false);
-			if (a) VVEC_PUSH(topcmds, ((Cmd){.kind = C_ASSIGN, .as = a}), alloc);
-			sexpect(';');
+		if (ld_script_word_consume("PROVIDE")) {
+			ld_assignment *a = ld_script_provide_parse(false);
+			if (a) VVEC_PUSH(topcmds, ((ld_command){.kind = LD_COMMAND_ASSIGNMENT, .as = a}), ld_region_alloc);
+			ld_script_character_expect(';');
 			continue;
 		}
 		const char *save = sp;
-		char *w = sname();
-		Assign *a = passign_rest(w);
+		char *w = ld_script_name_parse();
+		ld_assignment *a = ld_script_assignment_rest_parse(w);
 		if (a) {
-			VVEC_PUSH(topcmds, ((Cmd){.kind = C_ASSIGN, .as = a}), alloc);
-			sexpect(';');
+			VVEC_PUSH(topcmds, ((ld_command){.kind = LD_COMMAND_ASSIGNMENT, .as = a}), ld_region_alloc);
+			ld_script_character_expect(';');
 			continue;
 		}
 		sp = save;
-		serr("unsupported linker script command");
+		ld_script_error_report("unsupported linker script command");
 		return;
 	}
 }
