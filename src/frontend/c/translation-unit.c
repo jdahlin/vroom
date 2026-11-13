@@ -1,4 +1,4 @@
-/* vcc front end: the per-TU tables and the entry points (cc_init, cc_run, cc_free) */
+/* vcc front end: the per-TU tables and the entry points (cc_init, cc_run, cc_free), the translation unit */
 #include <stdatomic.h>
 
 #include "ccimpl.h"
@@ -209,86 +209,12 @@ static void cc_free(cc *c)
 	ccr = NULL;
 }
 
-static int drcov_on;
-
 static void init_tables(void)
 {
-	drcov_on = getenv("VCC_DRCOV") != NULL;
+	drcov_init();
 	init_keywords();
 	init_builtins();
 	init_attrs();
-}
-
-/* ---------------- VCC_DRCOV: coverage of a per-region declaration replay ---------------- */
-
-static _Atomic uint64_t dr_tok, dr_hits, dr_htok, dr_ok, dr_oktok, dr_oktop, dr_endbad, dr_startbad, dr_dc;
-
-VPRIV void drcov_boundary(cc *c)
-{
-	if (c->ndrb == c->cdrb) {
-		c->cdrb = c->cdrb ? c->cdrb * 2 : 4096;
-		c->drb = realloc(c->drb, c->cdrb * sizeof(uint64_t));
-	}
-	if (c->ntk == 1)
-		c->drb[c->ndrb++] = pp_ntok(c->p) - 1;
-}
-
-static bool drb_has(const cc *c, uint64_t x)
-{
-	uint32_t lo = 0, hi = c->ndrb;	/* (ascending) */
-
-	while (lo < hi) {
-		uint32_t m = (lo + hi) / 2;
-
-		if (c->drb[m] < x)
-			lo = m + 1;
-		else
-			hi = m;
-	}
-	return lo < c->ndrb && c->drb[lo] == x;
-}
-
-static void drcov_finish(cc *c)
-{
-	uint32_t n;
-	const pp_hitreg *h = pp_hit_regions(c->p, &n);
-	uint64_t ok = 0, oktok = 0, oktop = 0, htok = 0, eb = 0, sb = 0;
-
-	for (uint32_t i = 0; i < n; i++) {
-		uint64_t len = h[i].e - h[i].b;
-		bool s = drb_has(c, h[i].b), e = drb_has(c, h[i].e);
-
-		htok += len;
-		if (s && e)
-			ok++, oktok += len, oktop += h[i].nfile == 1 ? len : 0;
-		else if (s)
-			eb += len;
-		else
-			sb += len;
-	}
-	atomic_fetch_add(&dr_tok, pp_ntok(c->p));
-	atomic_fetch_add(&dr_hits, n);
-	atomic_fetch_add(&dr_htok, htok);
-	atomic_fetch_add(&dr_ok, ok);
-	atomic_fetch_add(&dr_oktok, oktok);
-	atomic_fetch_add(&dr_oktop, oktop);
-	atomic_fetch_add(&dr_endbad, eb);
-	atomic_fetch_add(&dr_startbad, sb);
-	atomic_fetch_add(&dr_dc, pp_skipped(c->p));
-	free(c->drb);
-	c->drb = NULL;
-}
-
-void cc_drcov_stats(char *buf, size_t n)
-{
-	if (!drcov_on) {
-		*buf = 0;
-		return;
-	}
-	snprintf(buf, n, "drcov: %.1f M tokens delivered (+%.1f M dc-skipped); %llu hits %.1f M tokens; "
-		 "at boundaries %llu hits %.1f M tokens (%.1f M top-level); end not at one %.1f M, start not at one %.1f M",
-		 dr_tok / 1e6, dr_dc / 1e6, (unsigned long long)dr_hits, dr_htok / 1e6, (unsigned long long)dr_ok,
-		 dr_oktok / 1e6, dr_oktop / 1e6, dr_endbad / 1e6, dr_startbad / 1e6);
 }
 
 int cc_run(pp *p, const cc_opts *o)
@@ -303,7 +229,7 @@ int cc_run(pp *p, const cc_opts *o)
 	if (unlikely(getenv("VCC_TEST_DELAYED_BUG") != NULL))	/* test hook: vcc-driver.py */
 		delayed_bug(c, 0, "VCC_TEST_DELAYED_BUG");
 	c->drb = NULL, c->ndrb = c->cdrb = 0;
-	if (drcov_on)
+	if (drcov_active())
 		drcov_boundary(c), c->ndrb = 0;	/* (allocates) */
 	dr_begin(c);
 	if (!setjmp(c->bail)) {
@@ -341,4 +267,46 @@ int cc_run(pp *p, const cc_opts *o)
 	free(c->tyb);
 	free(c);
 	return errors;
+}
+
+/* ---------------- translation unit ---------------- */
+
+VPRIV void translation_unit(cc *c)
+{
+	recov r;
+
+	if (REC_ARM(c, &r))
+		rec_restore(c, &r, REC_TOP);	/* after a parse error: on with the next declaration */
+	for (;;) {
+		if (unlikely(c->dr_on))
+			dr_close(c);	/* (a recording open; before a snapshot can be taken) */
+		dc_boundary(c);
+		if (unlikely(c->drb))
+			drcov_boundary(c);
+		if (unlikely(c->dr) && dr_boundary(c))
+			continue;	/* replayed: at a boundary again */
+		if (is(c, T_EOF))
+			break;
+		if (is(c, T_SEMI)) {
+			EXT_WARN_DEL(c, ";", tok(c)->flags, "extra-semi", w_ped, tok(c)->loc, "extra ';' outside of a function");
+			next(c);
+			continue;
+		}
+		if (unlikely(is(c, T_RBRACE))) {
+			cc_error(c, tok(c)->loc, "extraneous closing brace ('}')");
+			next(c);
+			continue;
+		}
+		if (iskw(c, KW___extension__)) {
+			next(c);
+			continue;
+		}
+		if (at_asm(c)) {
+			c->tlasm[c->ntlasm++] = asm_stmt(c, true);
+			continue;
+		}
+		declaration(c, NULL, true);
+		c->ndops = 0;
+	}
+	REC_POP(c, &r);
 }
