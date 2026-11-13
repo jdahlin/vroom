@@ -1,9 +1,9 @@
 /* vcc front end: AST node constructors */
-#include "ccimpl.h"
+#include "cc-internal.h"
 
 /* ---------------- nodes ---------------- */
 
-VPRIV uint32_t mk(cc *c, int op, qty ty, uint32_t loc)
+CC_PRIVATE uint32_t cc_node_new(cc *c, int op, qty ty, uint32_t loc)
 {
 	uint32_t i = c->nnode++;
 	node *n = &c->nodes[i];
@@ -16,48 +16,48 @@ VPRIV uint32_t mk(cc *c, int op, qty ty, uint32_t loc)
 }
 
 /* the character range of n for a diagnostic (implicit conversions: their operand's) */
-VPRIV diag_span rng_np(cc *c, uint32_t n)
+CC_PRIVATE diag_span cc_node_range_bare(cc *c, uint32_t n)
 {
-	while (n && !c->span[n].e && N(n)->op == N_CAST && N(n)->a)
-		n = N(n)->a;
+	while (n && !c->span[n].e && AST_NODE(n)->op == N_CAST && AST_NODE(n)->a)
+		n = AST_NODE(n)->a;
 	if (!n)
 		return (diag_span){ 0, 0 };
 	if (!c->span[n].e)
-		return (diag_span){ N(n)->loc, pp_token_end_find(c->p, N(n)->loc) };
+		return (diag_span){ AST_NODE(n)->loc, pp_token_end_find(c->p, AST_NODE(n)->loc) };
 	return (diag_span){ c->span[n].b, pp_token_end_find(c->p, c->span[n].e) };
 }
 
 /* ... with its outermost parentheses (clang's ParenExpr) */
-VPRIV diag_span rng(cc *c, uint32_t n)
+CC_PRIVATE diag_span cc_node_range(cc *c, uint32_t n)
 {
 	diag_span r;
 
-	while (n && !c->span[n].e && N(n)->op == N_CAST && N(n)->a)
-		n = N(n)->a;
-	r = rng_np(c, n);
+	while (n && !c->span[n].e && AST_NODE(n)->op == N_CAST && AST_NODE(n)->a)
+		n = AST_NODE(n)->a;
+	r = cc_node_range_bare(c, n);
 	if (n && (c->paren[n].l || c->paren[n].r)) {
-		uint32_t e = (c->span[n].e ? c->span[n].e : N(n)->loc) + c->paren[n].r;
+		uint32_t e = (c->span[n].e ? c->span[n].e : AST_NODE(n)->loc) + c->paren[n].r;
 
 		r.b -= c->paren[n].l, r.e = pp_token_end_find(c->p, e);
 	}
 	return r;
 }
 
-VPRIV uint32_t mk2(cc *c, int op, qty ty, uint32_t loc, uint32_t a, uint32_t b)
+CC_PRIVATE uint32_t cc_node_new_operands(cc *c, int op, qty ty, uint32_t loc, uint32_t a, uint32_t b)
 {
-	uint32_t i = mk(c, op, ty, loc);
+	uint32_t i = cc_node_new(c, op, ty, loc);
 
 	c->nodes[i].a = a;
 	c->nodes[i].b = b;
 	return i;
 }
 
-VPRIV void vinit(vec *v) { v->v = v->inl, v->n = 0, v->cap = 16; }
+CC_PRIVATE void cc_id_list_init(cc_id_list *v) { v->v = v->inl, v->n = 0, v->cap = 16; }
 
-VPRIV void vpush(cc *c, vec *v, uint32_t x)
+CC_PRIVATE void cc_id_list_append(cc *c, cc_id_list *v, uint32_t x)
 {
 	if (unlikely(v->n == v->cap)) {
-		uint32_t *nv = halloc(c, v->cap * 2 * sizeof(uint32_t));
+		uint32_t *nv = cc_heap_allocate(c, v->cap * 2 * sizeof(uint32_t));
 
 		memcpy(nv, v->v, v->n * sizeof(uint32_t));
 		v->v = nv;
@@ -66,7 +66,7 @@ VPRIV void vpush(cc *c, vec *v, uint32_t x)
 	v->v[v->n++] = x;
 }
 
-VPRIV uint32_t vfreeze(cc *c, const vec *v)
+CC_PRIVATE uint32_t cc_id_list_freeze(cc *c, const cc_id_list *v)
 {
 	uint32_t at = c->nlist, *d = &c->lists[at];
 
@@ -78,10 +78,10 @@ VPRIV uint32_t vfreeze(cc *c, const vec *v)
 	return at;
 }
 
-VPRIV uint32_t mk_int(cc *c, i128 v, qty ty, uint32_t loc)
+CC_PRIVATE uint32_t cc_node_integer_new(cc *c, i128 v, qty ty, uint32_t loc)
 {
-	if (is_bigint(c, ty)) return big_int_node(c, v, ty, loc);
-	uint32_t n = mk(c, N_NUM, ty, loc);
+	if (cc_type_is_bitint(c, ty)) return cc_bitint_node_new_integer(c, v, ty, loc);
+	uint32_t n = cc_node_new(c, N_NUM, ty, loc);
 
 	c->ipool[c->nipool] = v;
 	c->nodes[n].a = c->nipool++;
@@ -90,41 +90,41 @@ VPRIV uint32_t mk_int(cc *c, i128 v, qty ty, uint32_t loc)
 
 /* stands in for an expression already diagnosed: operators on it say nothing more
    (clang's invalid expressions); an int 0 lvalue, so a constant and assignable */
-VPRIV uint32_t err_node(cc *c, uint32_t loc)
+CC_PRIVATE uint32_t cc_node_error_new(cc *c, uint32_t loc)
 {
-	uint32_t n = mk_int(c, 0, prim(TY_INT), loc);
+	uint32_t n = cc_node_integer_new(c, 0, cc_type_basic(TY_INT), loc);
 
 	c->nodes[n].flags |= NF_ERR | NF_LVALUE;
-	delayed_bug(c, loc, "an error node without an error");
+	cc_report_delayed_bug(c, loc, "an error node without an error");
 	return n;
 }
 
-VPRIV uint32_t mk_flt(cc *c, double v, qty ty, uint32_t loc)
+CC_PRIVATE uint32_t cc_node_float_new(cc *c, double v, qty ty, uint32_t loc)
 {
-	uint32_t n = mk(c, N_FNUM, ty, loc);
+	uint32_t n = cc_node_new(c, N_FNUM, ty, loc);
 
 	c->fpool[c->nfpool] = v;
 	c->nodes[n].a = c->nfpool++;
-	if (is_q(c, ty))
-		fpool_q(c, vsoftfloat_of_double(v));
+	if (cc_type_is_float128(c, ty))
+		cc_float_pool_append_float128(c, vsoftfloat_of_double(v));
 	return n;
 }
 
 /* a 16-byte long double constant from its bits */
-VPRIV uint32_t mk_fltq(cc *c, u128 q, qty ty, uint32_t loc)
+CC_PRIVATE uint32_t cc_node_float128_new(cc *c, u128 q, qty ty, uint32_t loc)
 {
-	uint32_t n = mk(c, N_FNUM, ty, loc);
+	uint32_t n = cc_node_new(c, N_FNUM, ty, loc);
 
 	c->fpool[c->nfpool] = vsoftfloat_to_double(q);
 	c->nodes[n].a = c->nfpool++;
-	fpool_q(c, q);
+	cc_float_pool_append_float128(c, q);
 	return n;
 }
 
-VPRIV uint32_t mk_bin(cc *c, int op, qty ty, uint32_t a, uint32_t b, uint32_t loc)
+CC_PRIVATE uint32_t cc_node_binary_new(cc *c, int op, qty ty, uint32_t a, uint32_t b, uint32_t loc)
 {
-	uint32_t r = mk2(c, N_BINARY, ty, loc, a, b);
+	uint32_t r = cc_node_new_operands(c, N_BINARY, ty, loc, a, b);
 
-	N(r)->aux = (uint16_t)op;
+	AST_NODE(r)->aux = (uint16_t)op;
 	return r;
 }
