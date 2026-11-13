@@ -48,7 +48,7 @@ VPRIV bool em_sdivconst64(int64_t divisor, bool remainder, em_sdivconst_recipe *
 	return true;
 }
 
-VPRIV bool em_sdivconst(cc *c, qty ty, int op, i128 rhs, em_sdivconst_recipe *r)
+VPRIV bool em_sdivconst(cc *c, ast_qualified_type ty, int op, i128 rhs, em_sdivconst_recipe *r)
 {
 	if ((op != LEX_TOKEN_SLASH && op != LEX_TOKEN_PERCENT) || !is_integer(c, ty) ||
 	    !is_signed(c, ty) || em_bitint(c, ty))

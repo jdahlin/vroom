@@ -12,14 +12,14 @@ VPRIV uint32_t em_double_unary(ecx *e, uint32_t n)
 	const node *x = N(n), *inner, *operand;
 	uint64_t size;
 
-	if (!e->E->o->opt || e->E->noopt || x->op != N_UNARY ||
+	if (!e->E->o->opt || e->E->noopt || x->op != AST_NODE_UNARY ||
 	    (x->aux != LEX_TOKEN_MINUS && x->aux != LEX_TOKEN_TILDE))
 		return 0;
 	inner = N(x->a);
-	if (inner->op != N_UNARY || inner->aux != x->aux)
+	if (inner->op != AST_NODE_UNARY || inner->aux != x->aux)
 		return 0;
 	operand = N(inner->a);
-	if (QUNQ(x->ty) != QUNQ(inner->ty) || QUNQ(x->ty) != QUNQ(operand->ty) ||
+	if (AST_QUALIFIED_TYPE_UNQUALIFIED(x->ty) != AST_QUALIFIED_TYPE_UNQUALIFIED(inner->ty) || AST_QUALIFIED_TYPE_UNQUALIFIED(x->ty) != AST_QUALIFIED_TYPE_UNQUALIFIED(operand->ty) ||
 	    !is_integer(c, x->ty) || em_bitint(c, x->ty))
 		return 0;
 	size = tsize(c, x->ty);

@@ -70,7 +70,7 @@ CC_PRIVATE __attribute__((noinline)) void cc_token_fetch_directive(cc *c, ptok *
 /* a lazy body's next token (lazy.c), LEX_TOKEN_EOF after its '}' */
 CC_PRIVATE __attribute__((noinline)) void cc_token_fetch_lazy(cc *c, ptok *t)
 {
-	const lztok *z;
+	const cc_lazy_token *z;
 
 	if (c->lz_hc && c->lzz.k <= c->lzz.close) {
 		pp_lazy_body_token_get(c->p, &c->lzz, t);
@@ -106,7 +106,7 @@ CC_PRIVATE __attribute__((noinline)) void cc_token_fetch_lazy(cc *c, ptok *t)
 	}
 }
 
-void cc_fetch(cc *c, ptok *t) { cc_token_fetch(c, t); }
+void cc_token_fetch_out_of_line(cc *c, ptok *t) { cc_token_fetch(c, t); }
 
 CC_PRIVATE ptok *cc_token_peek(cc *c, int k)
 {

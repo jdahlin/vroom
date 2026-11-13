@@ -41,7 +41,7 @@ static void cc_pragma_weak_alias(cc *c, uint32_t t, uint32_t alias, uint32_t loc
 	at.alias = cc_pragma_weak_identifier_string(c, c->syms[t].name);
 	if (!a) {
 		a = cc_symbol_new(c, c->syms[t].kind, alias, c->syms[t].ty, loc);
-		c->syms[a].flags |= SF_GLOBAL;
+		c->syms[a].flags |= AST_SYMBOL_FLAG_GLOBAL;
 		c->syms[a].depth = 0;
 		if (c->depth == 0)
 			cc_symbol_bind(c, a);
@@ -81,7 +81,7 @@ static uint32_t cc_pragma_weak_identifier_parse(const char **s, const char *e)
 
 static bool cc_pragma_weak_is_function_or_variable(const sym *y)
 {
-	return y->kind == S_FUNC || y->kind == S_VAR;
+	return y->kind == AST_SYMBOL_FUNCTION || y->kind == AST_SYMBOL_VARIABLE;
 }
 
 /* s .. e: the text after "weak"; base: the directive's text, at loc + 1 */
@@ -117,8 +117,8 @@ CC_PRIVATE void cc_pragma_weak_parse(cc *c, const char *s, const char *e, const 
 
 		if (target)
 			cc_pragma_weak_alias(c, k, name, nl);
-		else if (y->sc != SC_STATIC && !(y->flags & (SF_DEFINED | SF_REF)))
-			y->flags |= SF_WEAK;
+		else if (y->sc != AST_STORAGE_STATIC && !(y->flags & (AST_SYMBOL_FLAG_DEFINED | AST_SYMBOL_FLAG_REFERENCED)))
+			y->flags |= AST_SYMBOL_FLAG_WEAK;
 		return;
 	}
 	cc_pragma_weak_push(c, target ? target : name, target ? name : 0, nl, 0);
@@ -129,7 +129,7 @@ CC_PRIVATE void cc_pragma_weak_declared(cc *c, uint32_t s)
 {
 	const sym *y = &c->syms[s];
 
-	if (!cc_pragma_weak_is_function_or_variable(y) || !(y->flags & SF_GLOBAL) || y->sc == SC_STATIC)
+	if (!cc_pragma_weak_is_function_or_variable(y) || !(y->flags & AST_SYMBOL_FLAG_GLOBAL) || y->sc == AST_STORAGE_STATIC)
 		return;
 	for (uint32_t i = 0; i < c->npweak;) {
 		struct pweak w = c->pweak[i];
@@ -143,7 +143,7 @@ CC_PRIVATE void cc_pragma_weak_declared(cc *c, uint32_t s)
 		if (w.alias)
 			cc_pragma_weak_alias(c, s, w.alias, w.loc);
 		else
-			c->syms[s].flags |= SF_WEAK;
+			c->syms[s].flags |= AST_SYMBOL_FLAG_WEAK;
 	}
 }
 
@@ -163,7 +163,7 @@ CC_PRIVATE void cc_pragma_weak_finish(cc *c)
 		const struct pweak *w = &c->pweak[i];
 		const sym *t = &c->syms[w->key];
 
-		if (w->sym && !(t->kind == S_FUNC ? (t->flags & SF_DEFINED) && t->body : (t->flags & (SF_DEFINED | SF_TENTATIVE)))) {
+		if (w->sym && !(t->kind == AST_SYMBOL_FUNCTION ? (t->flags & AST_SYMBOL_FLAG_DEFINED) && t->body : (t->flags & (AST_SYMBOL_FLAG_DEFINED | AST_SYMBOL_FLAG_TENTATIVE)))) {
 			cc_report_error(c, w->loc, "alias must point to a defined variable or function");
 			cc_report_note(c, w->loc, "the function or variable specified in an alias must refer to its mangled name");
 		}

@@ -31,7 +31,7 @@
  *     return the same constant is that constant to the caller;
  *   - lazy emission: static functions and objects are emitted only when
  *     emitted code or data refers to them;
- *   - from -O1 on (cc_opts.opt), the three items below; at -O0 locals
+ *   - from -O1 on (cc_options.opt), the three items below; at -O0 locals
  *     and inlined params and results live in stack slots;
  *   - the emitted function's most used scalar locals and params whose
  *     address is never needed (prepass: luse, lnoreg) live in callee-saved
@@ -119,17 +119,17 @@
  */
 static inline bool inline_only(const sym *y)
 {
-	if (y->kind != S_FUNC || !(y->flags & SF_DEFINED) || !y->body)
+	if (y->kind != AST_SYMBOL_FUNCTION || !(y->flags & AST_SYMBOL_FLAG_DEFINED) || !y->body)
 		return false;
-	if ((y->flags & SF_GNU_INLINE) && !(y->flags & SF_INLINE_NOEXTERN))
+	if ((y->flags & AST_SYMBOL_FLAG_GNU_INLINE) && !(y->flags & AST_SYMBOL_FLAG_INLINE_WITHOUT_EXTERN))
 		return true;
-	return (y->flags & SF_INLINE) && !(y->flags & (SF_GNU_INLINE | SF_EXTDECL)) && y->sc != SC_EXTERN && y->sc != SC_STATIC;
+	return (y->flags & AST_SYMBOL_FLAG_INLINE) && !(y->flags & (AST_SYMBOL_FLAG_GNU_INLINE | AST_SYMBOL_FLAG_EXTERNAL_DECLARATION)) && y->sc != AST_STORAGE_EXTERN && y->sc != AST_STORAGE_STATIC;
 }
 /* a symbol offset the relocation itself can carry: ELF RELA 32 bits here, a
  * Mach-O ARM64_RELOC_ADDEND 24 bits signed (clang adds the rest in code) */
 #define SYMOFF_OK(c, off) (DARWIN(c) ? (off) >= -(1 << 23) && (off) < (1 << 23) : (off) >= INT32_MIN && (off) <= INT32_MAX)
-#define T(c, t) CT(c, t)
-#define KIND(c, t) CKIND(c, t)
+#define T(c, t) AST_TYPE_OF(c, t)
+#define KIND(c, t) AST_TYPE_KIND_OF(c, t)
 
 #include "../arch/a64/codegen/ins.h"
 #include "rec/rec.h"
@@ -191,7 +191,7 @@ typedef struct em_cg_edge {uint32_t callee,call;} em_cg_edge;
 
 typedef struct emitter {
 	cc *c;
-	const cc_opts *o;
+	const cc_options *o;
 	_Atomic uint8_t *claimed;	/* per sym: queued for emission */
 	_Atomic uint8_t *strdone;	/* per string: emitted */
 	_Atomic uint8_t *extref;	/* per sym: referenced (for .weak of undefined syms) */
@@ -304,7 +304,7 @@ typedef struct fnctx {		/* one function instance: the emitted function or an inl
 	uint32_t retlbl;
 	int64_t retslot;
 	uint8_t retreg;		/* inlined: the result's temporary + 1 (0: in retslot) */
-	qty rty;
+	ast_qualified_type rty;
 	bool inl;
 	bool cst_ok, any_ret;
 	val cst;
@@ -364,7 +364,7 @@ typedef struct ecx {
 	/* bindings */
 	bind *b;		/* per sym */
 	lbl *lm;		/* per label */
-	uint32_t *caselbl;	/* per node (N_CASE / N_DEFAULT): local label */
+	uint32_t *caselbl;	/* per node (AST_NODE_CASE / AST_NODE_DEFAULT): local label */
 	uint32_t *lrefc;	/* per local label: branches to it; LREF_EXT: also reached from outside the records */
 	uint32_t nlabel, caplabel;
 	/*
@@ -450,7 +450,7 @@ enum { FN_MEMCPY, FN_MEMSET, FN_MEMMOVE, FN_UDIVTI3, FN_DIVTI3, FN_UMODTI3, FN_M
 /* ---------------- object backend: records -> machine code ---------------- */
 
 /*
- * With cc_opts.emit == 2 a chunk is a stream of items instead of text:
+ * With cc_options.emit == 2 a chunk is a stream of items instead of text:
  *
  *   IT_TEXT   directives (section switches, .globl/.type/.size, aliases,
  *             top-level asm), run by the TU's assembler (as_snippet_assemble);
@@ -548,7 +548,7 @@ typedef struct spill {
 
 typedef struct carg {
 	val v;
-	qty t;
+	ast_qualified_type t;
 	abiarg a;
 	int64_t slot;		/* value parked in a frame slot (-1: v is a constant/address) */
 } carg;
@@ -559,7 +559,7 @@ typedef struct carg {
 typedef struct em_switch_values_recipe {
  i128 lo;
  uint64_t values[256], fallback;
- qty ty;
+ ast_qualified_type ty;
  uint32_t destination;
  uint16_t slots;
  uint8_t selector_bits, element_bytes;
@@ -576,32 +576,32 @@ VPRIV bool wswitch_values(ecx *e, uint32_t n);
 VPRIV void *reserve(size_t n);
 VPRIV double now(void);
 /* type.c */
-static inline qty prim(int k);
+static inline ast_qualified_type prim(int k);
 static inline bool k_int(int k);
-static inline bool is_integer(cc *c, qty t);
-static inline bool is_ptr(cc *c, qty t);
-static inline bool is_flt(cc *c, qty t);
-static inline bool is_record(cc *c, qty t);
-static inline bool is_array(cc *c, qty t);
-static inline bool is_func(cc *c, qty t);
-static inline bool is_void(cc *c, qty t);
-static inline bool is_vec(cc *c, qty t);
-static inline bool is_recabi(cc *c, qty t);
-static inline bool is_agg(cc *c, qty t);
-static inline uint64_t tsize(cc *c, qty t);
-static inline uint32_t talign(cc *c, qty t);
-static inline bool is_signed(cc *c, qty t);
-static inline bool is_ld(cc *c, qty t);
-static inline bool is_wide(cc *c, qty t);
-VPRIV i128 em_trunc_to(cc *c, i128 v, qty t);
+static inline bool is_integer(cc *c, ast_qualified_type t);
+static inline bool is_ptr(cc *c, ast_qualified_type t);
+static inline bool is_flt(cc *c, ast_qualified_type t);
+static inline bool is_record(cc *c, ast_qualified_type t);
+static inline bool is_array(cc *c, ast_qualified_type t);
+static inline bool is_func(cc *c, ast_qualified_type t);
+static inline bool is_void(cc *c, ast_qualified_type t);
+static inline bool is_vec(cc *c, ast_qualified_type t);
+static inline bool is_recabi(cc *c, ast_qualified_type t);
+static inline bool is_agg(cc *c, ast_qualified_type t);
+static inline uint64_t tsize(cc *c, ast_qualified_type t);
+static inline uint32_t talign(cc *c, ast_qualified_type t);
+static inline bool is_signed(cc *c, ast_qualified_type t);
+static inline bool is_ld(cc *c, ast_qualified_type t);
+static inline bool is_wide(cc *c, ast_qualified_type t);
+VPRIV i128 em_trunc_to(cc *c, i128 v, ast_qualified_type t);
 /* opt/divpow2.c */
-VPRIV bool em_divpow2(cc *c, qty ty, int *op, i128 *rhs);
+VPRIV bool em_divpow2(cc *c, ast_qualified_type ty, int *op, i128 *rhs);
 /* opt/sdivpow2.c: bias negative dividends to preserve truncation toward zero. */
 typedef struct em_sdivpow2_recipe {
 	uint8_t bits, shift;
 	bool negative, remainder;
 } em_sdivpow2_recipe;
-VPRIV bool em_sdivpow2(cc *c, qty ty, int op, i128 rhs, em_sdivpow2_recipe *r);
+VPRIV bool em_sdivpow2(cc *c, ast_qualified_type ty, int op, i128 rhs, em_sdivpow2_recipe *r);
 /* opt/mulconst.c: shift for x + (x << shift), or zero to retain multiply. */
 VPRIV unsigned em_mulconst(unsigned bits, i128 rhs);
 
@@ -614,7 +614,7 @@ typedef struct em_udivconst_recipe {
 } em_udivconst_recipe;
 VPRIV bool em_udivconst32(uint32_t divisor, bool remainder, em_udivconst_recipe *r);
 VPRIV bool em_udivconst64(uint64_t divisor, bool remainder, em_udivconst_recipe *r);
-VPRIV bool em_udivconst(cc *c, qty ty, int op, i128 rhs, em_udivconst_recipe *r);
+VPRIV bool em_udivconst(cc *c, ast_qualified_type ty, int op, i128 rhs, em_udivconst_recipe *r);
 VPRIV bool a64_udivconst_ok(ecx *e, val a, const em_udivconst_recipe *r);
 VPRIV val a64_udivconst(ecx *e, val a, const em_udivconst_recipe *r);
 /* opt/sdivconst.c: reciprocal for a positive divisor magnitude. Signed high
@@ -627,7 +627,7 @@ typedef struct em_sdivconst_recipe {
 } em_sdivconst_recipe;
 VPRIV bool em_sdivconst32(int32_t divisor, bool remainder, em_sdivconst_recipe *r);
 VPRIV bool em_sdivconst64(int64_t divisor, bool remainder, em_sdivconst_recipe *r);
-VPRIV bool em_sdivconst(cc *c, qty ty, int op, i128 rhs, em_sdivconst_recipe *r);
+VPRIV bool em_sdivconst(cc *c, ast_qualified_type ty, int op, i128 rhs, em_sdivconst_recipe *r);
 VPRIV bool a64_sdivconst_ok(ecx *e, val a, const em_sdivconst_recipe *r);
 VPRIV val a64_sdivconst(ecx *e, val a, const em_sdivconst_recipe *r);
 /* opt/mulshift.c and opt/xor-not.c: machine recipes, no operand evaluation. */
@@ -640,11 +640,11 @@ VPRIV bool em_block_value_reuse(ecx *e, const node *block, uint32_t first, uint3
 VPRIV uint32_t em_double_unary(ecx *e, uint32_t n);
 
 VPRIV bool em_cmpzero(ecx *e, uint32_t n, uint32_t *operand);
-VPRIV bool em_mulshift(cc *c, qty ty, int *op, i128 *rhs);
-VPRIV bool em_xor_not(cc *c, qty ty, int op, i128 rhs);
+VPRIV bool em_mulshift(cc *c, ast_qualified_type ty, int *op, i128 *rhs);
+VPRIV bool em_xor_not(cc *c, ast_qualified_type ty, int op, i128 rhs);
 /* opt/identity.c */
 enum { EM_ID_NONE, EM_ID_LEFT, EM_ID_ZERO, EM_ID_ONES, EM_ID_TRUE };
-VPRIV int em_bin_identity(cc *c, qty ty, int op, i128 rhs);
+VPRIV int em_bin_identity(cc *c, ast_qualified_type ty, int op, i128 rhs);
 /* opt/switch.c: inclusive ranges in controlling-type order. Preparation only
  * for tree dispatch (>=8 cases); no allocation or target state in the policy.
  * Preparation rejects wrapped/overlapping ranges: callers retain the chain. */
@@ -679,9 +679,9 @@ VPRIV bool em_tail_candidate(ecx *e, uint32_t fn, uint32_t expr, uint32_t maxarg
 VPRIV bool a64_tail_return(ecx *e, uint32_t expr);
 VPRIV uint32_t a64_tail_ref(const ecx *e);
 VPRIV bool em_local_eligible(ecx *e, uint32_t s);
-VPRIV bool em_local_gpr_type(cc *c, qty ty);
+VPRIV bool em_local_gpr_type(cc *c, ast_qualified_type ty);
 VPRIV unsigned em_select_locals(ecx *e, uint32_t fn, uint32_t *cand, unsigned max,
-			       bool (*target_ok)(cc *, qty));
+			       bool (*target_ok)(cc *, ast_qualified_type));
 /* rec/fallthrough.c: opaque records; no shared struct layout is assumed. */
 typedef struct em_rec_layout {
 	size_t stride, op_offset, label_offset;
@@ -740,20 +740,20 @@ VPRIV uint32_t canon_sym(cc *c, uint32_t s);
 VPRIV const attrs *sym_attrs(cc *c, uint32_t s);
 
 /* memcpy/memmove/memset declared by a header (symbol s, na arguments): clang's builtin at -O1 and up (not
- * under -ffreestanding/-fno-builtin[-NAME]).  CC_LIB_MEMCPY.., or 0 */
+ * under -ffreestanding/-fno-builtin[-NAME]).  CC_LIBRARY_KIND_MEMCPY.., or 0 */
 static inline int em_plain_mem_kind(ecx *e, uint32_t s, int na)
 {
 	cc *c = e->c;
 	const sym *y = &c->syms[s];
 
-	if (na != 3 || e->E->o->opt < 1 || e->E->o->no_builtin || y->sc == SC_STATIC || !(y->flags & SF_GLOBAL) ||
+	if (na != 3 || e->E->o->opt < 1 || e->E->o->no_builtin || y->sc == AST_STORAGE_STATIC || !(y->flags & AST_SYMBOL_FLAG_GLOBAL) ||
 	    sym_attrs(c, s)->asmname)
 		return 0;
 	for (unsigned i = 0; i < CC_DISABLED_BUILTIN_WORDS; i++)
 		if (e->E->o->disabled_builtins[i])
 			return 0;
-	return EM_IDENT_IS(y->name, "memcpy") ? CC_LIB_MEMCPY : EM_IDENT_IS(y->name, "memmove") ? CC_LIB_MEMMOVE :
-	       EM_IDENT_IS(y->name, "memset") ? CC_LIB_MEMSET : 0;
+	return EM_IDENT_IS(y->name, "memcpy") ? CC_LIBRARY_KIND_MEMCPY : EM_IDENT_IS(y->name, "memmove") ? CC_LIBRARY_KIND_MEMMOVE :
+	       EM_IDENT_IS(y->name, "memset") ? CC_LIBRARY_KIND_MEMSET : 0;
 }
 VPRIV void sym_name(cc *c, tbuf *b, uint32_t s);
 VPRIV bool sym_quoted(cc *c, uint32_t s);
@@ -825,16 +825,16 @@ VPRIV lval lfromval(ecx *e, val v, uint32_t align);
 VPRIV void copy_mem(ecx *e, int dst, int src, uint64_t n);
 VPRIV void zero_mem(ecx *e, int dst, uint64_t n);
 /* abi.c */
-VPRIV int hfa(cc *c, qty t, int *n);
-VPRIV bool vec_small(cc *c, qty t);
-VPRIV void bvec_ret(ecx *e, qty t, int rs);
-VPRIV void bvec_res(ecx *e, qty t, int64_t sl);
-VPRIV void vec_small_ret(ecx *e, qty t, int rs);
-VPRIV void vec_small_res(ecx *e, qty t, int64_t sl);
-VPRIV bool is_sret(cc *c, qty t);
-VPRIV void classify_va(ecx *e, qty t, int *nsaa, abiarg *a);
-VPRIV uint32_t abi_align(cc *c, qty t);
-VPRIV void classify(ecx *e, qty t, int *ngrn, int *nsaa, abiarg *a);
+VPRIV int hfa(cc *c, ast_qualified_type t, int *n);
+VPRIV bool vec_small(cc *c, ast_qualified_type t);
+VPRIV void bvec_ret(ecx *e, ast_qualified_type t, int rs);
+VPRIV void bvec_res(ecx *e, ast_qualified_type t, int64_t sl);
+VPRIV void vec_small_ret(ecx *e, ast_qualified_type t, int rs);
+VPRIV void vec_small_res(ecx *e, ast_qualified_type t, int64_t sl);
+VPRIV bool is_sret(cc *c, ast_qualified_type t);
+VPRIV void classify_va(ecx *e, ast_qualified_type t, int *nsaa, abiarg *a);
+VPRIV uint32_t abi_align(cc *c, ast_qualified_type t);
+VPRIV void classify(ecx *e, ast_qualified_type t, int *ngrn, int *nsaa, abiarg *a);
 VPRIV void spill_live(ecx *e, spill *s);
 VPRIV void unspill(ecx *e, const spill *s);
 VPRIV void call_fixed(ecx *e, int fn, int a0, int a1, int a2, int64_t n);
@@ -842,7 +842,7 @@ VPRIV void finish_function(ecx *e, uint32_t s);	/* arch/a64/codegen/func.c: opti
 VPRIV bool sym_needs_got(cc *c, uint32_t ref);
 /* bind.c */
 static inline int64_t keep_cl(const ecx *e, int64_t mark);
-static inline int X(cc *c, qty t);
+static inline int X(cc *c, ast_qualified_type t);
 static inline void rlog(ecx *e, uint32_t tag, uint32_t v);
 VPRIV void note_ref(ecx *e, uint32_t ref);
 VPRIV void claim_ref(ecx *e, uint32_t ref);
@@ -854,16 +854,16 @@ VPRIV uint32_t sym_align(cc *c, uint32_t s);
 VPRIV bool is_local_var(cc *c, uint32_t s);
 /* lval.c */
 VPRIV uint32_t align_at(uint64_t off, uint32_t a);
-VPRIV uint64_t elem_size(cc *c, qty ptr);
+VPRIV uint64_t elem_size(cc *c, ast_qualified_type ptr);
 VPRIV val ptr_add(ecx *e, val p, val i, int64_t scale, bool sub);
-VPRIV val ptr_add_vla(ecx *e, val p, val i, qty ptr, bool sub);
-VPRIV bool ptr_to_vla(cc *c, qty ptr);
+VPRIV val ptr_add_vla(ecx *e, val p, val i, ast_qualified_type ptr, bool sub);
+VPRIV bool ptr_to_vla(cc *c, ast_qualified_type ptr);
 VPRIV lval gen_lval(ecx *e, uint32_t n);
-VPRIV val load(ecx *e, lval *l, qty t);
-VPRIV bool is_atomic_lv(ecx *e, const lval *l, qty t);
-VPRIV int atomic_sz(ecx *e, qty t);
+VPRIV val load(ecx *e, lval *l, ast_qualified_type t);
+VPRIV bool is_atomic_lv(ecx *e, const lval *l, ast_qualified_type t);
+VPRIV int atomic_sz(ecx *e, ast_qualified_type t);
 VPRIV int atomic_addr(ecx *e, lval *l, bool *own);
-VPRIV void store(ecx *e, lval *l, qty t, val *v);
+VPRIV void store(ecx *e, lval *l, ast_qualified_type t, val *v);
 /* arith.c */
 VPRIV void extend(ecx *e, int rd, int rs, int from, bool sgn);
 VPRIV int lreg_of(ecx *e, uint32_t s);
@@ -874,7 +874,7 @@ enum { OPF_ALL = 1, OPF_CALL = 2, OPF_FRAME = 4 };
 VPRIV uint64_t opt_regs(ecx *e, unsigned *fl);
 VPRIV bool opt_noframe(ecx *e, uint32_t n);
 VPRIV lval bind_lreg(ecx *e, uint32_t s);
-VPRIV val fold_int_bin(ecx *e, int op, qty ot, qty rt, i128 l, i128 r, bool *ok);
+VPRIV val fold_int_bin(ecx *e, int op, ast_qualified_type ot, ast_qualified_type rt, i128 l, i128 r, bool *ok);
 VPRIV bool em_is_cmp(int op);
 /* Pure control proofs: bounded shared walk, no committed target instructions. */
 VPRIV bool em_const_strcmp(cc *c, uint32_t n, i128 *value);
@@ -882,11 +882,11 @@ VPRIV int em_const_truth(ecx *e, uint32_t n, int (*constant_p)(ecx *, uint32_t))
 VPRIV int a64_constant_p(ecx *e, uint32_t arg);
 VPRIV int emit_cmp(ecx *e, int op, int x, bool sg, val *a, val *b);
 VPRIV int emit_cmp2(ecx *e, int op, bool sg, val *a, val *b);
-VPRIV int test_zero(ecx *e, val *v, qty t, uint32_t l, bool nz);
-VPRIV val tobool(ecx *e, val v, qty t);
+VPRIV int test_zero(ecx *e, val *v, ast_qualified_type t, uint32_t l, bool nz);
+VPRIV val tobool(ecx *e, val v, ast_qualified_type t);
 /* fp.c */
 static inline void word(ecx *e, uint32_t w);
-VPRIV int fpk(ecx *e, qty t);
+VPRIV int fpk(ecx *e, ast_qualified_type t);
 static inline uint32_t f_in(int d, int vr, int r);
 static inline uint32_t f_out(int d, int r, int vr);
 VPRIV val f_const(int d, double x);
@@ -895,26 +895,26 @@ static inline uint32_t q_out_hi(int r, int vr);
 VPRIV void vr_store(ecx *e, int sz, int vr, int base, int64_t off);
 VPRIV void vr_load(ecx *e, int sz, int vr, int base, int64_t off);
 VPRIV i128 ld_of_d(double x);
-VPRIV val f_const_cv(ecx *e, qty t, const cval *cv);
-VPRIV val f_const_t(ecx *e, qty t, double x);
-VPRIV val ld_compare(ecx *e, int op, qty t, val a, val b);
-VPRIV val f_arith(ecx *e, int op, qty ty, val a, val b);
+VPRIV val f_const_cv(ecx *e, ast_qualified_type t, const cc_value *cv);
+VPRIV val f_const_t(ecx *e, ast_qualified_type t, double x);
+VPRIV val ld_compare(ecx *e, int op, ast_qualified_type t, val a, val b);
+VPRIV val f_arith(ecx *e, int op, ast_qualified_type ty, val a, val b);
 VPRIV int f_cmp(ecx *e, int op, int d, val *a, val *b);
-VPRIV val f_compare(ecx *e, int op, qty t, val a, val b);
-VPRIV val f_tobool(ecx *e, val v, qty t);
-VPRIV val f_neg(ecx *e, val v, qty t);
-VPRIV val ld_cast(ecx *e, val v, qty from, qty to);
-VPRIV val f_cast(ecx *e, val v, qty from, qty to);
+VPRIV val f_compare(ecx *e, int op, ast_qualified_type t, val a, val b);
+VPRIV val f_tobool(ecx *e, val v, ast_qualified_type t);
+VPRIV val f_neg(ecx *e, val v, ast_qualified_type t);
+VPRIV val ld_cast(ecx *e, val v, ast_qualified_type from, ast_qualified_type to);
+VPRIV val f_cast(ecx *e, val v, ast_qualified_type from, ast_qualified_type to);
 /* arith.c */
-VPRIV val cast(ecx *e, val v, qty from, qty to, int kind);
+VPRIV val cast(ecx *e, val v, ast_qualified_type from, ast_qualified_type to, int kind);
 VPRIV val a64_sdivpow2(ecx *e, val a, const em_sdivpow2_recipe *r);
-VPRIV bool a64_mulconst(ecx *e, qty ty, int r, i128 rhs);
+VPRIV bool a64_mulconst(ecx *e, ast_qualified_type ty, int r, i128 rhs);
 VPRIV void shift_imm(ecx *e, int op, int x, int rd, int rn, int k);
-VPRIV val arith(ecx *e, int op, qty ty, val a, val b);
-VPRIV val arith2(ecx *e, int op, qty ty, val a, val b);
+VPRIV val arith(ecx *e, int op, ast_qualified_type ty, val a, val b);
+VPRIV val arith2(ecx *e, int op, ast_qualified_type ty, val a, val b);
 /* call.c */
-VPRIV val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, qty rty, bool noret, int nfix);
-VPRIV val call_named(ecx *e, uint32_t ref, val *vals, qty *tys, int n, qty rty, bool noret);
+VPRIV val do_call(ecx *e, uint32_t ref, val *fnv, carg *args, int n, ast_qualified_type rty, bool noret, int nfix);
+VPRIV val call_named(ecx *e, uint32_t ref, val *vals, ast_qualified_type *tys, int n, ast_qualified_type rty, bool noret);
 VPRIV void walk_fn(ecx *e, uint32_t s);
 VPRIV void kv_track(ecx *e, uint32_t s, const val *v);
 VPRIV int ael_slot(ecx *e, uint32_t n, bool create);
@@ -931,7 +931,7 @@ VPRIV val dry(ecx *e, uint32_t n);
 VPRIV val va_arg_(ecx *e, const node *x);
 VPRIV val gen_builtin(ecx *e, uint32_t n);
 /* expr.c */
-VPRIV void move_to(ecx *e, int r, int r2, val *v, qty t);
+VPRIV void move_to(ecx *e, int r, int r2, val *v, ast_qualified_type t);
 VPRIV val gen(ecx *e, uint32_t n);
 /* cond.c */
 VPRIV int cond_fold(ecx *e, uint32_t n);
@@ -940,12 +940,12 @@ VPRIV bool imm_fits(int ch, i128 v);
 VPRIV void kbits(ecx *e, uint32_t n, uint64_t *k, uint64_t *v);
 VPRIV void gen_cond(ecx *e, uint32_t n, bool jump_if, uint32_t l);
 /* stmt.c */
-VPRIV void gen_init_local(ecx *e, const lval *dst, qty ty, uint32_t init);
+VPRIV void gen_init_local(ecx *e, const lval *dst, ast_qualified_type ty, uint32_t init);
 VPRIV void run_cleanups(ecx *e, int to);
 VPRIV uint32_t user_label(ecx *e, uint32_t l);
 VPRIV val gen_block(ecx *e, uint32_t n, bool want);
-VPRIV val vla_bytes(ecx *e, qty t);
-VPRIV void vla_fix(ecx *e, qty t, bool pure);
+VPRIV val vla_bytes(ecx *e, ast_qualified_type t);
+VPRIV void vla_fix(ecx *e, ast_qualified_type t, bool pure);
 VPRIV void gen_stmt(ecx *e, uint32_t n);
 VPRIV bool dbg_where(ecx *e, uint32_t loc, uint32_t *file, uint32_t *line, uint32_t *col);
 VPRIV void dbg_row(ecx *e, uint32_t loc);	/* -g: a line-table row at the next record */
@@ -970,7 +970,7 @@ VPRIV bool a64_vir_function_lower(ecx *e, uint32_t s, const char **why);	/* code
 VPRIV const virbuild_failure_info virbuild_failure_table[VIRBUILD_FAILURE_COUNT];
 VPRIV void virbuild_statistics_print(emitter *E);	/* VCC_VIR_STATS: one line of totals, one per reason (stderr) */
 VPRIV bool virbuild_function_try(ecx *e, uint32_t s);	/* codegen/vir/: s through VIR (VCC_VIR); false: emit it as before */
-VPRIV bool virbuild_is_enabled(const cc_opts *o);	/* VIR lowers functions (VCC_VIR with l, -O2) */
+VPRIV bool virbuild_is_enabled(const cc_options *o);	/* VIR lowers functions (VCC_VIR with l, -O2) */
 VPRIV void virbuild_wk_ecx_free(ecx *e);
 VPRIV void wasm_data_ref(ecx *e, uint32_t ref);
 VPRIV void wasm_header(cc *c, tbuf *hdr, ecx *ctx, int nthr);
@@ -1000,52 +1000,52 @@ VPRIV void enqueue(emitter *E, uint32_t item);
 
 /* ---------------- types (the few predicates the emitter needs) ---------------- */
 
-static inline qty prim(int k) { return QT(k, 0); }
-static inline bool k_int(int k) { return (k >= TY_BOOL && k <= TY_UINT128) || k == TY_BITINT || k == TY_UBITINT || k == TY_ENUM; }
-static inline bool em_bigint(cc *c, qty t) { int k = KIND(c, t); return k == TY_BITINT || k == TY_UBITINT; }
-static inline bool is_integer(cc *c, qty t) { return k_int(KIND(c, t)); }
-static inline bool em_bitint(cc *c, qty t)
+static inline ast_qualified_type prim(int k) { return AST_QUALIFIED_TYPE(k, 0); }
+static inline bool k_int(int k) { return (k >= AST_TYPE_BOOL && k <= AST_TYPE_UINT128) || k == AST_TYPE_BITINT || k == AST_TYPE_UNSIGNED_BITINT || k == AST_TYPE_ENUM; }
+static inline bool em_bigint(cc *c, ast_qualified_type t) { int k = KIND(c, t); return k == AST_TYPE_BITINT || k == AST_TYPE_UNSIGNED_BITINT; }
+static inline bool is_integer(cc *c, ast_qualified_type t) { return k_int(KIND(c, t)); }
+static inline bool em_bitint(cc *c, ast_qualified_type t)
 {
-	return ((KIND(c, t) >= TY_CHAR && KIND(c, t) <= TY_UINT128) || em_bigint(c, t)) &&
-	       !(T(c, t)->flags & TF_ATOMIC) && T(c, t)->n;
+	return ((KIND(c, t) >= AST_TYPE_CHAR && KIND(c, t) <= AST_TYPE_UINT128) || em_bigint(c, t)) &&
+	       !(T(c, t)->flags & AST_TYPE_FLAG_ATOMIC) && T(c, t)->n;
 }
-static inline bool is_ptr(cc *c, qty t) { return KIND(c, t) == TY_PTR; }
-static inline bool is_flt(cc *c, qty t) { int k = KIND(c, t); return k >= TY_BFLOAT16 && k <= TY_FLOAT128; }
-static inline bool is_record(cc *c, qty t) { int k = KIND(c, t); return k == TY_STRUCT || k == TY_UNION; }
-static inline bool is_array(cc *c, qty t) { return KIND(c, t) == TY_ARRAY; }
-static inline bool is_func(cc *c, qty t) { return KIND(c, t) == TY_FUNC; }
-static inline bool is_void(cc *c, qty t) { return KIND(c, t) == TY_VOID; }
-static inline bool is_vec(cc *c, qty t) { return KIND(c, t) == TY_VECTOR; }
-static inline bool is_bvec(cc *c, qty t) { return is_vec(c, t) && KIND(c, T(c, t)->base) == TY_BOOL; }
+static inline bool is_ptr(cc *c, ast_qualified_type t) { return KIND(c, t) == AST_TYPE_POINTER; }
+static inline bool is_flt(cc *c, ast_qualified_type t) { int k = KIND(c, t); return k >= AST_TYPE_BFLOAT16 && k <= AST_TYPE_FLOAT128; }
+static inline bool is_record(cc *c, ast_qualified_type t) { int k = KIND(c, t); return k == AST_TYPE_STRUCT || k == AST_TYPE_UNION; }
+static inline bool is_array(cc *c, ast_qualified_type t) { return KIND(c, t) == AST_TYPE_ARRAY; }
+static inline bool is_func(cc *c, ast_qualified_type t) { return KIND(c, t) == AST_TYPE_FUNCTION; }
+static inline bool is_void(cc *c, ast_qualified_type t) { return KIND(c, t) == AST_TYPE_VOID; }
+static inline bool is_vec(cc *c, ast_qualified_type t) { return KIND(c, t) == AST_TYPE_VECTOR; }
+static inline bool is_bvec(cc *c, ast_qualified_type t) { return is_vec(c, t) && KIND(c, T(c, t)->base) == AST_TYPE_BOOL; }
 /* passed and returned like a record (vcc's own convention for vectors) */
-static inline bool is_recabi(cc *c, qty t) { return is_record(c, t) || is_vec(c, t) || em_bigint(c, t); }
+static inline bool is_recabi(cc *c, ast_qualified_type t) { return is_record(c, t) || is_vec(c, t) || em_bigint(c, t); }
 /* an SVE sizeless value: address-valued, in a frame slot of the largest vector length (a predicate's is 32 bytes) */
-static inline bool is_sve(cc *c, qty t) { return KIND(c, t) == TY_SVE; }
-static inline bool is_svpred(cc *c, qty t) { return is_sve(c, t) && T(c, t)->size == 32; }
-static inline bool is_agg(cc *c, qty t) { return is_record(c, t) || is_array(c, t) || is_vec(c, t) || is_sve(c, t) || em_bigint(c, t); }
-static inline uint64_t tsize(cc *c, qty t) { return T(c, t)->size; }
+static inline bool is_sve(cc *c, ast_qualified_type t) { return KIND(c, t) == AST_TYPE_SVE_BUILTIN; }
+static inline bool is_svpred(cc *c, ast_qualified_type t) { return is_sve(c, t) && T(c, t)->size == 32; }
+static inline bool is_agg(cc *c, ast_qualified_type t) { return is_record(c, t) || is_array(c, t) || is_vec(c, t) || is_sve(c, t) || em_bigint(c, t); }
+static inline uint64_t tsize(cc *c, ast_qualified_type t) { return T(c, t)->size; }
 
 /* Apple arm64: an integer under 4 bytes in a register is extended to 32 bits by its producer */
-static inline bool darwin_narrow(cc *c, qty t) { return DARWIN(c) && T(c, t)->size < 4 && is_integer(c, t); }
+static inline bool darwin_narrow(cc *c, ast_qualified_type t) { return DARWIN(c) && T(c, t)->size < 4 && is_integer(c, t); }
 
 /* a VLA somewhere in t's pointer/array chain (int a[n], int (*p)[n][4]) */
-static inline bool vm_type(cc *c, qty t)
+static inline bool vm_type(cc *c, ast_qualified_type t)
 {
 	for (;;) {
 		const ctype *a = T(c, t);
 
-		if (a->kind == TY_ARRAY && (a->flags & TF_VLA))
+		if (a->kind == AST_TYPE_ARRAY && (a->flags & AST_TYPE_FLAG_VLA))
 			return true;
-		if (a->kind != TY_ARRAY && a->kind != TY_PTR)
+		if (a->kind != AST_TYPE_ARRAY && a->kind != AST_TYPE_POINTER)
 			return false;
 		t = a->base;
 	}
 }
-static inline uint32_t talign(cc *c, qty t) { return T(c, t)->align; }
-static inline bool is_signed(cc *c, qty t) { return cc_is_signed(c, t); }
+static inline uint32_t talign(cc *c, ast_qualified_type t) { return T(c, t)->align; }
+static inline bool is_signed(cc *c, ast_qualified_type t) { return cc_is_signed(c, t); }
 /* long double: binary128, kept as its bits in a register pair (arithmetic: the __*tf* helpers) */
-static inline bool is_ld(cc *c, qty t) { return is_flt(c, t) && tsize(c, t) == 16; }
-static inline bool is_wide(cc *c, qty t) { return (is_integer(c, t) || is_flt(c, t)) && tsize(c, t) == 16; }
+static inline bool is_ld(cc *c, ast_qualified_type t) { return is_flt(c, t) && tsize(c, t) == 16; }
+static inline bool is_wide(cc *c, ast_qualified_type t) { return (is_integer(c, t) || is_flt(c, t)) && tsize(c, t) == 16; }
 
 static inline bool direct(const ecx *e) { return e->E->o->emit == 2 && !e->E->objtext; }
 
@@ -1059,8 +1059,8 @@ static inline bool ref_weak(const cc *c, uint32_t ref)
 {
 	const sym *y = &c->syms[RIDX(ref)];
 
-	return RKIND(ref) == RK_SYM && (y->flags & SF_WEAK) &&
-	       !(y->kind == S_FUNC ? (y->flags & SF_DEFINED) && y->body : (y->flags & (SF_DEFINED | SF_TENTATIVE)));
+	return RKIND(ref) == RK_SYM && (y->flags & AST_SYMBOL_FLAG_WEAK) &&
+	       !(y->kind == AST_SYMBOL_FUNCTION ? (y->flags & AST_SYMBOL_FLAG_DEFINED) && y->body : (y->flags & (AST_SYMBOL_FLAG_DEFINED | AST_SYMBOL_FLAG_TENTATIVE)));
 }
 static inline val vnone(void) { val v = { .k = V_NONE }; return v; }
 
@@ -1070,7 +1070,7 @@ static inline int64_t keep_cl(const ecx *e, int64_t mark)
 	return mark > e->cl_top ? mark : e->cl_top;
 }
 
-static inline int X(cc *c, qty t) { return tsize(c, t) == 8 || is_ptr(c, t) || is_func(c, t) ? 1 : 0; }
+static inline int X(cc *c, ast_qualified_type t) { return tsize(c, t) == 8 || is_ptr(c, t) || is_func(c, t) ? 1 : 0; }
 static inline void rlog(ecx *e, uint32_t tag, uint32_t v)
 {
 	if (unlikely(e->nrlog + 2 > RLOG_CAP)) {

@@ -30,38 +30,38 @@ CC_PRIVATE uint32_t cc_builtin_arguments_parse(cc *c, cc_id_list *args)
 }
 
 /* t without qualifiers, down through array element types (clang's unqualified array type) */
-static qty cc_type_unqualified_array(cc *c, qty t)
+static ast_qualified_type cc_type_unqualified_array(cc *c, ast_qualified_type t)
 {
 	const ctype *x;
 
-	t = QUNQ(t);
+	t = AST_QUALIFIED_TYPE_UNQUALIFIED(t);
 	if (!cc_type_is_array(c, t))
 		return t;
 	x = AST_TYPE(c, t);
-	if (x->flags & TF_VLA)
+	if (x->flags & AST_TYPE_FLAG_VLA)
 		return t;
 	{
-		qty e = x->base, ue = cc_type_unqualified_array(c, e);
-		int fl = x->flags & TF_INCOMPLETE;
+		ast_qualified_type e = x->base, ue = cc_type_unqualified_array(c, e);
+		int fl = x->flags & AST_TYPE_FLAG_INCOMPLETE;
 
 		return ue == e ? t : cc_type_array(c, ue, fl ? 0 : cc_type_array_length(c, t), fl);
 	}
 }
 
 
-CC_PRIVATE uint32_t cc_builtin_node_new(cc *c, int id, qty ty, uint32_t loc, const cc_id_list *args)
+CC_PRIVATE uint32_t cc_builtin_node_new(cc *c, int id, ast_qualified_type ty, uint32_t loc, const cc_id_list *args)
 {
 	/* A counted pointer has a runtime extent even if its allocation is
 	   unknown. Read the sibling count at the query, not at declaration.
 	   Restrict this lowering to a stable base so no operand effects are lost. */
-	if (id == BI_DYNAMIC_OBJECT_SIZE && args->n == 2) {
+	if (id == CC_BUILTIN_DYNAMIC_OBJECT_SIZE && args->n == 2) {
 		uint32_t m = args->v[0];
-		cval mode;
-		while (AST_NODE(m)->op == N_CAST)
+		cc_value mode;
+		while (AST_NODE(m)->op == AST_NODE_CAST)
 			m = AST_NODE(m)->a;
-		if (AST_NODE(m)->op == N_MEMBER && cc_type_is_pointer(c, AST_NODE(m)->ty) &&
+		if (AST_NODE(m)->op == AST_NODE_MEMBER && cc_type_is_pointer(c, AST_NODE(m)->ty) &&
 		    !cc_builtin_has_effects(c, args->v[0], true) && cc_constant_eval(c, args->v[1], &mode) &&
-		    mode.kind == CV_INT && mode.i >= 0 && mode.i <= 2) {
+		    mode.kind == CC_VALUE_INTEGER && mode.i >= 0 && mode.i <= 2) {
 			uint32_t count = cc_node_member_field(c, AST_NODE(m))->counted_by;
 			const tag *r = &c->tags[AST_NODE(m)->b];
 			for (uint32_t i = 0; count && i < r->nfield; i++) {
@@ -75,11 +75,11 @@ CC_PRIVATE uint32_t cc_builtin_node_new(cc *c, int id, qty ty, uint32_t loc, con
 			}
 		}
 	}
-	uint32_t n = cc_node_new(c, N_BUILTIN, ty, loc);
+	uint32_t n = cc_node_new(c, AST_NODE_BUILTIN, ty, loc);
 
 	AST_NODE(n)->aux = (uint16_t)id;
-	if (c->fn && (id == BI_OBJECT_SIZE || id == BI_DYNAMIC_OBJECT_SIZE))
-		c->syms[c->fn].flags |= SF_BOS_QUERY;
+	if (c->fn && (id == CC_BUILTIN_OBJECT_SIZE || id == CC_BUILTIN_DYNAMIC_OBJECT_SIZE))
+		c->syms[c->fn].flags |= AST_SYMBOL_FLAG_OBJECT_SIZE_QUERY;
 	AST_NODE(n)->b = cc_id_list_freeze(c, args);
 	AST_NODE(n)->c = args->n;
 	return n;
@@ -87,7 +87,7 @@ CC_PRIVATE uint32_t cc_builtin_node_new(cc *c, int id, qty ty, uint32_t loc, con
 
 CC_PRIVATE uint32_t cc_builtin_offsetof_build(cc *c, uint32_t loc)
 {
-	qty t;
+	ast_qualified_type t;
 	uint32_t res;
 	i128 off = 0;
 	uint32_t dyn = 0;	/* non-constant part (node), 0 if none */
@@ -157,20 +157,20 @@ CC_PRIVATE uint32_t cc_builtin_offsetof_build(cc *c, uint32_t loc)
 CC_PRIVATE uint32_t cc_builtin_call_build(cc *c, const cc_builtin *b, uint32_t loc)
 {
 	cc_id_list args;
-	qty rt = cc_builtin_signature_type(c, b->sig[0]);
+	ast_qualified_type rt = cc_builtin_signature_type(c, b->sig[0]);
 
 	switch (b->id) {
-	case BI_OS_LOG_FORMAT: case BI_OS_LOG_SIZE:
+	case CC_BUILTIN_OS_LOG_FORMAT: case CC_BUILTIN_OS_LOG_SIZE:
 		return cc_builtin_os_log_build(c, b->id, loc);
-	case BI_ATOMIC_LOCK_FREE:
+	case CC_BUILTIN_ATOMIC_LOCK_FREE:
 		return cc_builtin_atomic_lock_free_build(c, b, loc);
-	case BI_STDC_ROTL: case BI_STDC_ROTR:
+	case CC_BUILTIN_STDC_ROTL: case CC_BUILTIN_STDC_ROTR:
 		return cc_builtin_rotate_build(c, b, loc);
-	case BI_ELEMENTWISE_ABS:
+	case CC_BUILTIN_ELEMENTWISE_ABS:
 		return cc_builtin_elementwise_abs_build(c, b, loc);
-	case BI_ISFPCLASS: case BI_ISSUBNORMAL: case BI_ISZERO: {
-		i128 mask = b->id == BI_ISSUBNORMAL ? 144 : 96;
-		unsigned nargs = b->id == BI_ISFPCLASS ? 2 : 1;
+	case CC_BUILTIN_ISFPCLASS: case CC_BUILTIN_ISSUBNORMAL: case CC_BUILTIN_ISZERO: {
+		i128 mask = b->id == CC_BUILTIN_ISSUBNORMAL ? 144 : 96;
+		unsigned nargs = b->id == CC_BUILTIN_ISFPCLASS ? 2 : 1;
 		uint32_t pre;
 
 		cc_builtin_arguments_parse(c, &args);
@@ -183,7 +183,7 @@ CC_PRIVATE uint32_t cc_builtin_call_build(cc *c, const cc_builtin *b, uint32_t l
 			         tyname(c, AST_NODE(args.v[0])->ty));
 			return cc_node_error_new(c, loc);
 		}
-		if (b->id == BI_ISFPCLASS && !cc_constant_integer(c, args.v[1], &mask)) {
+		if (b->id == CC_BUILTIN_ISFPCLASS && !cc_constant_integer(c, args.v[1], &mask)) {
 			cc_report_error(c, loc, "argument to '%s' must be a constant integer", b->name);
 			return cc_node_error_new(c, loc);
 		}
@@ -195,24 +195,24 @@ CC_PRIVATE uint32_t cc_builtin_call_build(cc *c, const cc_builtin *b, uint32_t l
 		cc_id_list unary;
 		cc_id_list_init(&unary);
 		cc_id_list_append(c, &unary, cc_node_rvalue(c, a));
-		uint32_t sign = cc_builtin_node_new(c, BI_SIGNBIT, cc_type_basic(TY_INT), loc, &unary);
+		uint32_t sign = cc_builtin_node_new(c, CC_BUILTIN_SIGNBIT, cc_type_basic(AST_TYPE_INT), loc, &unary);
 		/* Each pair is the negative/positive membership bit, except NaNs,
 		 * whose class is determined by the quiet bit rather than their sign. */
 		const int bits[5][2] = {{0,1}, {2,9}, {3,8}, {4,7}, {5,6}};
 		uint32_t member[5];
 		for (int i = 0; i < 5; i++) {
-			uint32_t neg = cc_node_integer_new(c, !!(mask & ((i128)1 << bits[i][0])), cc_type_basic(TY_INT), loc);
-			uint32_t pos = cc_node_integer_new(c, !!(mask & ((i128)1 << bits[i][1])), cc_type_basic(TY_INT), loc);
-			uint32_t cond = i ? sign : cc_builtin_node_new(c, BI_ISSIGNALING, cc_type_basic(TY_INT), loc, &unary);
+			uint32_t neg = cc_node_integer_new(c, !!(mask & ((i128)1 << bits[i][0])), cc_type_basic(AST_TYPE_INT), loc);
+			uint32_t pos = cc_node_integer_new(c, !!(mask & ((i128)1 << bits[i][1])), cc_type_basic(AST_TYPE_INT), loc);
+			uint32_t cond = i ? sign : cc_builtin_node_new(c, CC_BUILTIN_ISSIGNALING, cc_type_basic(AST_TYPE_INT), loc, &unary);
 			member[i] = cc_conditional_build(c, cond, neg, pos, loc);
 		}
 		uint32_t n = cc_conditional_build(c, a, member[3], member[4], loc);
-		const int ids[] = {BI_ISNAN, BI_ISINF, BI_ISNORMAL};
+		const int ids[] = {CC_BUILTIN_ISNAN, CC_BUILTIN_ISINF, CC_BUILTIN_ISNORMAL};
 		for (int i = 2; i >= 0; i--)
-			n = cc_conditional_build(c, cc_builtin_node_new(c, ids[i], cc_type_basic(TY_INT), loc, &unary), member[i], n, loc);
+			n = cc_conditional_build(c, cc_builtin_node_new(c, ids[i], cc_type_basic(AST_TYPE_INT), loc, &unary), member[i], n, loc);
 		return cc_lowering_sequence(c, pre, n);
 	}
-	case BI_FPCLASSIFY: {
+	case CC_BUILTIN_FPCLASSIFY: {
 		uint32_t saved[6], pre[6];
 
 		cc_builtin_arguments_parse(c, &args);
@@ -228,7 +228,7 @@ CC_PRIVATE uint32_t cc_builtin_call_build(cc *c, const cc_builtin *b, uint32_t l
 		for (int i = 0; i < 6; i++) {
 			uint32_t a = cc_node_rvalue(c, args.v[i]);
 			if (i < 5)
-				a = cc_conversion_apply(c, a, cc_type_basic(TY_INT));
+				a = cc_conversion_apply(c, a, cc_type_basic(AST_TYPE_INT));
 			saved[i] = cc_lowering_once(c, a, &pre[i]);
 		}
 		/* Match clang's classification tree: save the operand once, test zero,
@@ -237,15 +237,15 @@ CC_PRIVATE uint32_t cc_builtin_call_build(cc *c, const cc_builtin *b, uint32_t l
 		cc_id_list unary;
 		cc_id_list_init(&unary);
 		cc_id_list_append(c, &unary, cc_node_rvalue(c, saved[5]));
-		uint32_t n = cc_conditional_build(c, cc_builtin_node_new(c, BI_ISNORMAL, cc_type_basic(TY_INT), loc, &unary), saved[2], saved[3], loc);
+		uint32_t n = cc_conditional_build(c, cc_builtin_node_new(c, CC_BUILTIN_ISNORMAL, cc_type_basic(AST_TYPE_INT), loc, &unary), saved[2], saved[3], loc);
 		n = cc_lowering_sequence(c, pre[2], cc_lowering_sequence(c, pre[3], n));
-		const int ids[] = {BI_ISNAN, BI_ISINF};
+		const int ids[] = {CC_BUILTIN_ISNAN, CC_BUILTIN_ISINF};
 		for (int i = 1; i >= 0; i--)
-			n = cc_lowering_sequence(c, pre[i], cc_conditional_build(c, cc_builtin_node_new(c, ids[i], cc_type_basic(TY_INT), loc, &unary), saved[i], n, loc));
+			n = cc_lowering_sequence(c, pre[i], cc_conditional_build(c, cc_builtin_node_new(c, ids[i], cc_type_basic(AST_TYPE_INT), loc, &unary), saved[i], n, loc));
 		n = cc_lowering_sequence(c, pre[4], cc_conditional_build(c, saved[5], n, saved[4], loc));
 		return cc_lowering_sequence(c, pre[5], n);
 	}
-	case BI_CHOOSE: {
+	case CC_BUILTIN_CHOOSE_EXPR: {
 		uint32_t cond, x, y;
 		i128 v = 0;
 
@@ -260,21 +260,21 @@ CC_PRIVATE uint32_t cc_builtin_call_build(cc *c, const cc_builtin *b, uint32_t l
 			cc_report_error(c, AST_NODE(cond)->loc, "'__builtin_choose_expr' requires a constant expression");
 		return v ? x : y;
 	}
-	case BI_TYPES_COMPAT: {
-		qty a, t;
+	case CC_BUILTIN_TYPES_COMPATIBLE: {
+		ast_qualified_type a, t;
 
 		cc_token_expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
 		a = cc_type_name_parse(c);
 		cc_token_expect(c, LEX_TOKEN_COMMA, "','");
 		t = cc_type_name_parse(c);
 		cc_token_expect_here(c, LEX_TOKEN_RIGHT_PAREN, "')'");
-		return cc_node_integer_new(c, cc_type_is_compatible(c, cc_type_unqualified_array(c, a), cc_type_unqualified_array(c, t)), cc_type_basic(TY_INT), loc);
+		return cc_node_integer_new(c, cc_type_is_compatible(c, cc_type_unqualified_array(c, a), cc_type_unqualified_array(c, t)), cc_type_basic(AST_TYPE_INT), loc);
 	}
-	case BI_OFFSETOF:
+	case CC_BUILTIN_OFFSETOF:
 		return cc_builtin_offsetof_build(c, loc);
-	case BI_VA_ARG: {
+	case CC_BUILTIN_VA_ARG: {
 		uint32_t ap, n, first_bound;
-		qty t;
+		ast_qualified_type t;
 
 		cc_token_expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
 		ap = cc_assignment_parse(c);
@@ -282,11 +282,11 @@ CC_PRIVATE uint32_t cc_builtin_call_build(cc *c, const cc_builtin *b, uint32_t l
 		first_bound = c->nnode;
 		t = cc_type_name_parse(c);
 		cc_token_expect_here(c, LEX_TOKEN_RIGHT_PAREN, "')'");
-		n = cc_node_new(c, N_VAARG, t, loc);
+		n = cc_node_new(c, AST_NODE_VA_ARG, t, loc);
 		AST_NODE(n)->a = ap;
 		return cc_vla_bounds_capture(c, t, first_bound, n, loc);
 	}
-	case BI_CONSTANT_P: {
+	case CC_BUILTIN_CONSTANT_P: {
 		uint32_t n;
 
 		c->unevaluated++, c->bcp++;	/* (clang: what it names is used) */
@@ -296,19 +296,19 @@ CC_PRIVATE uint32_t cc_builtin_call_build(cc *c, const cc_builtin *b, uint32_t l
 			cc_builtin_arity_check(c, loc, 1, &args);
 		for (uint32_t i = 0; i < args.n; i++)
 			args.v[i] = cc_conversion_decay(c, args.v[i]);
-		n = cc_builtin_node_new(c, b->id, cc_type_basic(TY_INT), loc, &args);
+		n = cc_builtin_node_new(c, b->id, cc_type_basic(AST_TYPE_INT), loc, &args);
 		return n;
 	}
-	case BI_ATOMIC_LOAD_N: case BI_ATOMIC_STORE_N: case BI_ATOMIC_EXCHANGE_N: case BI_ATOMIC_CMPXCHG_N:
-	case BI_ATOMIC_LOAD: case BI_ATOMIC_STORE: case BI_ATOMIC_EXCHANGE: case BI_ATOMIC_CMPXCHG:
-	case BI_ATOMIC_FETCH_ADD: case BI_ATOMIC_FETCH_SUB: case BI_ATOMIC_FETCH_AND: case BI_ATOMIC_FETCH_OR:
-	case BI_ATOMIC_FETCH_XOR: case BI_ATOMIC_ADD_FETCH: case BI_ATOMIC_SUB_FETCH: case BI_ATOMIC_AND_FETCH:
-	case BI_ATOMIC_OR_FETCH: case BI_ATOMIC_XOR_FETCH: case BI_ATOMIC_FETCH_NAND: case BI_ATOMIC_FETCH_MAX:
-	case BI_ATOMIC_FETCH_MIN: case BI_ATOMIC_NAND_FETCH: case BI_ATOMIC_MAX_FETCH: case BI_ATOMIC_MIN_FETCH:
-	case BI_ATOMIC_TEST_AND_SET: case BI_ATOMIC_CLEAR:
-	case BI_SYNC_VAL_CAS: case BI_SYNC_BOOL_CAS: case BI_SYNC_LOCK_RELEASE: case BI_SYNC_SYNCHRONIZE:
+	case CC_BUILTIN_ATOMIC_LOAD_N: case CC_BUILTIN_ATOMIC_STORE_N: case CC_BUILTIN_ATOMIC_EXCHANGE_N: case CC_BUILTIN_ATOMIC_CMPXCHG_N:
+	case CC_BUILTIN_ATOMIC_LOAD: case CC_BUILTIN_ATOMIC_STORE: case CC_BUILTIN_ATOMIC_EXCHANGE: case CC_BUILTIN_ATOMIC_CMPXCHG:
+	case CC_BUILTIN_ATOMIC_FETCH_ADD: case CC_BUILTIN_ATOMIC_FETCH_SUB: case CC_BUILTIN_ATOMIC_FETCH_AND: case CC_BUILTIN_ATOMIC_FETCH_OR:
+	case CC_BUILTIN_ATOMIC_FETCH_XOR: case CC_BUILTIN_ATOMIC_ADD_FETCH: case CC_BUILTIN_ATOMIC_SUB_FETCH: case CC_BUILTIN_ATOMIC_AND_FETCH:
+	case CC_BUILTIN_ATOMIC_OR_FETCH: case CC_BUILTIN_ATOMIC_XOR_FETCH: case CC_BUILTIN_ATOMIC_FETCH_NAND: case CC_BUILTIN_ATOMIC_FETCH_MAX:
+	case CC_BUILTIN_ATOMIC_FETCH_MIN: case CC_BUILTIN_ATOMIC_NAND_FETCH: case CC_BUILTIN_ATOMIC_MAX_FETCH: case CC_BUILTIN_ATOMIC_MIN_FETCH:
+	case CC_BUILTIN_ATOMIC_TEST_AND_SET: case CC_BUILTIN_ATOMIC_CLEAR:
+	case CC_BUILTIN_SYNC_VAL_CAS: case CC_BUILTIN_SYNC_BOOL_CAS: case CC_BUILTIN_SYNC_LOCK_RELEASE: case CC_BUILTIN_SYNC_SYNCHRONIZE:
 		return cc_builtin_atomic_build(c, b, loc);
-	case BI_COMPLEX: {
+	case CC_BUILTIN_COMPLEX: {
 		cc_builtin_arguments_parse(c, &args);
 		if (args.n != 2) {
 			cc_builtin_arity_check(c, loc, 2, &args);
@@ -321,8 +321,8 @@ CC_PRIVATE uint32_t cc_builtin_call_build(cc *c, const cc_builtin *b, uint32_t l
 				return cc_node_error_new(c, loc);
 			}
 		}
-		qty t = AST_NODE(args.v[0])->ty;
-		if (QI(canon(c, t)) != QI(canon(c, AST_NODE(args.v[1])->ty))) {
+		ast_qualified_type t = AST_NODE(args.v[0])->ty;
+		if (AST_QUALIFIED_TYPE_INDEX(canon(c, t)) != AST_QUALIFIED_TYPE_INDEX(canon(c, AST_NODE(args.v[1])->ty))) {
 			cc_report_error(c, loc, "arguments are of different types ('%s' vs '%s')", tyname(c, t), tyname(c, AST_NODE(args.v[1])->ty));
 			return cc_node_error_new(c, loc);
 		}
@@ -332,44 +332,44 @@ CC_PRIVATE uint32_t cc_builtin_call_build(cc *c, const cc_builtin *b, uint32_t l
 		uint32_t re = cc_lowering_once(c, args.v[0], &p0), im = cc_lowering_once(c, args.v[1], &p1);
 		return cc_lowering_sequence(c, p0, cc_lowering_sequence(c, p1, cc_complex_node_new(c, cc_type_complex(c, t), re, im, loc)));
 	}
-	case BI_CONJ: case BI_CREAL: case BI_CIMAG: {
-		qty ct = cc_type_complex(c, cc_builtin_signature_type(c, b->sig[0]));
+	case CC_BUILTIN_CONJ: case CC_BUILTIN_CREAL: case CC_BUILTIN_CIMAG: {
+		ast_qualified_type ct = cc_type_complex(c, cc_builtin_signature_type(c, b->sig[0]));
 		uint32_t a;
 
 		cc_builtin_arguments_parse(c, &args);
 		if (args.n != 1) {
 			cc_builtin_arity_check(c, loc, 1, &args);
-			return cc_node_integer_new(c, 0, cc_type_basic(TY_INT), loc);
+			return cc_node_integer_new(c, 0, cc_type_basic(AST_TYPE_INT), loc);
 		}
 		a = cc_conversion_apply(c, cc_node_rvalue(c, args.v[0]), ct);
-		if (b->id == BI_CONJ)
+		if (b->id == CC_BUILTIN_CONJ)
 			return cc_complex_unary(c, LEX_TOKEN_TILDE, a, loc);
-		return cc_node_rvalue(c, cc_complex_part(c, a, b->id == BI_CIMAG));
+		return cc_node_rvalue(c, cc_complex_part(c, a, b->id == CC_BUILTIN_CIMAG));
 	}
-	case BI_CLZG: case BI_CTZG: case BI_POPCOUNTG:
+	case CC_BUILTIN_CLZG: case CC_BUILTIN_CTZG: case CC_BUILTIN_POPCOUNTG:
 		return cc_builtin_bit_count_generic(c, b->id, loc);
-	case BI_COUNTED_BY_REF: {
+	case CC_BUILTIN_COUNTED_BY_REF: {
 		uint32_t m;
 
 		cc_builtin_arguments_parse(c, &args);
 		m = args.n ? args.v[0] : 0;
-		if (m && AST_NODE(m)->op == N_MEMBER && cc_node_member_field(c, AST_NODE(m))->counted_by) {
+		if (m && AST_NODE(m)->op == AST_NODE_MEMBER && cc_node_member_field(c, AST_NODE(m))->counted_by) {
 			uint32_t cnt = member(c, AST_NODE(m)->a, cc_node_member_field(c, AST_NODE(m))->counted_by, loc);
 
 			return cc_address_of_build(c, cnt, loc);
 		}
-		return cc_cast_insert(c, cc_node_integer_new(c, 0, cc_type_basic(TY_INT), loc), cc_type_pointer(c, cc_type_basic(TY_VOID)), CK_NULL);
+		return cc_cast_insert(c, cc_node_integer_new(c, 0, cc_type_basic(AST_TYPE_INT), loc), cc_type_pointer(c, cc_type_basic(AST_TYPE_VOID)), AST_CAST_NULL_POINTER);
 	}
 	default:
 		break;
 	}
 	cc_builtin_arguments_parse(c, &args);
-	if (b->id == BI_VA_START && !strcmp(b->name, "__builtin_c23_va_start") && args.n > 2) {
+	if (b->id == CC_BUILTIN_VA_START && !strcmp(b->name, "__builtin_c23_va_start") && args.n > 2) {
 		cc_builtin_arity_check(c, loc, 2, &args);
 		return cc_node_error_new(c, loc);
 	}
 	{
-		qty ft = cc_builtin_type(c, b);
+		ast_qualified_type ft = cc_builtin_type(c, b);
 		const ctype *f = AST_TYPE(c, ft);
 		uint32_t np = f->n;
 
@@ -378,41 +378,41 @@ CC_PRIVATE uint32_t cc_builtin_call_build(cc *c, const cc_builtin *b, uint32_t l
 
 			if (i < np)
 				a = cc_conversion_apply(c, a, c->params[f->aux + i]);
-			else if (b->id == BI_LIB) {
+			else if (b->id == CC_BUILTIN_LIBRARY) {
 				/* the variable part of __builtin_printf and the _chk
 				   forms: default argument promotions, as a call */
 				a = cc_node_rvalue(c, a);
-				if (AST_TYPE_KIND(c, AST_NODE(a)->ty) == TY_FLOAT)
-					a = cc_cast_insert(c, a, cc_type_basic(TY_DOUBLE), CK_F2F);
+				if (AST_TYPE_KIND(c, AST_NODE(a)->ty) == AST_TYPE_FLOAT)
+					a = cc_cast_insert(c, a, cc_type_basic(AST_TYPE_DOUBLE), AST_CAST_FLOAT_TO_FLOAT);
 			}
 			args.v[i] = a;
 		}
-		if (args.n < np || (args.n > np && !(f->flags & TF_VARIADIC)))
+		if (args.n < np || (args.n > np && !(f->flags & AST_TYPE_FLAG_VARIADIC)))
 			cc_builtin_arity_check(c, loc, np, &args);
-		if (b->id == BI_X86_PCMPSTR)
+		if (b->id == CC_BUILTIN_X86_PCMPSTR)
 			return cc_builtin_x86_pcmpstr_build(c, b, &args, rt, loc);
-		if (b->id == BI_X86_SIMD)
+		if (b->id == CC_BUILTIN_X86_SIMD)
 			return cc_builtin_x86_simd_build(c, b, &args, rt, loc);
 		switch (b->id) {
-		case BI_ADD_OVERFLOW: case BI_SUB_OVERFLOW: case BI_MUL_OVERFLOW:
+		case CC_BUILTIN_ADD_OVERFLOW: case CC_BUILTIN_SUB_OVERFLOW: case CC_BUILTIN_MUL_OVERFLOW:
 			if (args.n != 3 || !cc_type_is_pointer(c, AST_NODE(args.v[2])->ty))
 				cc_report_error(c, args.n == 3 ? AST_NODE(args.v[2])->loc : loc, "result argument to overflow builtin must be a pointer to a non-const integer type ('%s' invalid)",
 					 args.n == 3 ? tyname(c, AST_NODE(args.v[2])->ty) : "void");
 			break;
-		case BI_LONGJMP: {
+		case CC_BUILTIN_LONGJMP: {
 			i128 value;
 			if (args.n == 2 && (!cc_constant_integer(c, args.v[1], &value) || value != 1))
 				cc_report_error(c, AST_NODE(args.v[1])->loc, "second argument to '__builtin_longjmp' must be the constant integer 1");
 			break;
 		}
-		case BI_ADDC: case BI_SUBC:
+		case CC_BUILTIN_ADDC: case CC_BUILTIN_SUBC:
 			if (args.n != 4 || !cc_type_is_pointer(c, AST_NODE(args.v[3])->ty))
 				cc_report_error(c, loc, "carry-out argument to builtin must be a pointer");
 			break;
-		case BI_ISNAN: case BI_ISINF: case BI_ISFINITE: case BI_SIGNBIT: case BI_ISNORMAL:
-		case BI_ISINF_SIGN: case BI_FPCLASSIFY:
+		case CC_BUILTIN_ISNAN: case CC_BUILTIN_ISINF: case CC_BUILTIN_ISFINITE: case CC_BUILTIN_SIGNBIT: case CC_BUILTIN_ISNORMAL:
+		case CC_BUILTIN_ISINF_SIGN: case CC_BUILTIN_FPCLASSIFY:
 			break;
-		case BI_ISSIGNALING:
+		case CC_BUILTIN_ISSIGNALING:
 			if (args.n != 1) {
 				cc_builtin_arity_check(c, loc, 1, &args);
 				return cc_node_error_new(c, loc);
@@ -424,35 +424,35 @@ CC_PRIVATE uint32_t cc_builtin_call_build(cc *c, const cc_builtin *b, uint32_t l
 			}
 			break;
 		}
-		if (b->id == BI_STRLEN || b->id == BI_NAN || b->id == BI_NANF || b->id == BI_NANS) {
+		if (b->id == CC_BUILTIN_STRLEN || b->id == CC_BUILTIN_NAN || b->id == CC_BUILTIN_NANF || b->id == CC_BUILTIN_NANS) {
 			/* Fold known strings/payloads; otherwise emit the library call. */
 			if (args.n != 1)
 				return cc_node_error_new(c, loc);
 			uint32_t n = cc_builtin_node_new(c, b->id, rt, loc, &args);
-			cval cv;
+			cc_value cv;
 
-			if (cc_eval(c, n, &cv) && (cv.kind == CV_INT || cv.kind == CV_FLT))
+			if (cc_eval(c, n, &cv) && (cv.kind == CC_VALUE_INTEGER || cv.kind == CC_VALUE_FLOAT))
 				return n;
 		}
-		if (b->id == BI_LIB && !c->o->no_builtin && !cc_library_builtin_is_disabled(c->o, "strncmp", 7) &&
+		if (b->id == CC_BUILTIN_LIBRARY && !c->o->no_builtin && !cc_library_builtin_is_disabled(c->o, "strncmp", 7) &&
 		    !strcmp(b->name, "__builtin_strncmp")) {
 			uint32_t folded = cc_builtin_strncmp_zero_fold(c, &args, loc);
 			if (folded)
 				return folded;
 		}
-		if (b->id == BI_LIB) {
+		if (b->id == CC_BUILTIN_LIBRARY) {
 			uint32_t result = cc_builtin_fp_sign_build(c, b->name + 10, strlen(b->name + 10), ft, &args, loc);
 			if (!result) result = cc_builtin_fast_math_build(c, b->name + 10, strlen(b->name + 10), ft, &args, loc);
 			if (result) return result;
 		}
-		if (b->id == BI_LIB || b->id == BI_STRLEN || b->id == BI_NAN || b->id == BI_NANF || b->id == BI_NANS) {
+		if (b->id == CC_BUILTIN_LIBRARY || b->id == CC_BUILTIN_STRLEN || b->id == CC_BUILTIN_NAN || b->id == CC_BUILTIN_NANF || b->id == CC_BUILTIN_NANS) {
 			/* a call to the library function the builtin names */
-			uint32_t s = cc_symbol_new(c, S_BUILTIN, 0, ft, loc), fn, n;
+			uint32_t s = cc_symbol_new(c, AST_SYMBOL_BUILTIN, 0, ft, loc), fn, n;
 
 			c->syms[s].val = b - cc_builtin_table_get();
-			fn = cc_node_new(c, N_VAR, ft, loc);
+			fn = cc_node_new(c, AST_NODE_VARIABLE, ft, loc);
 			AST_NODE(fn)->a = s;
-			n = cc_node_new(c, N_CALL, rt, loc);
+			n = cc_node_new(c, AST_NODE_CALL, rt, loc);
 			AST_NODE(n)->a = cc_conversion_decay(c, fn);
 			AST_NODE(n)->b = cc_id_list_freeze(c, &args);
 			AST_NODE(n)->c = args.n;

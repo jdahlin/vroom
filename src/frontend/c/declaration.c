@@ -38,7 +38,7 @@ CC_PRIVATE __attribute__((noinline, cold)) void cc_deprecated_use_report(cc *c, 
 		cc_report_note(c, dloc, "'%.*s' has been explicitly marked unavailable here", CC_IDENTIFIER(name));	/* (clang: the declaration) */
 		return;
 	}
-	if (c->fn && (c->syms[c->fn].flags & SF_DEPRECATED) && !c->attr[c->syms[c->fn].attrs].unavail)
+	if (c->fn && (c->syms[c->fn].flags & AST_SYMBOL_FLAG_DEPRECATED) && !c->attr[c->syms[c->fn].attrs].unavail)
 		return;	/* clang: not inside a deprecated function */
 	if (a->deprmsg)
 		cc_report_warning(c, "deprecated-declarations", true, NULL, loc, NULL, 0, NULL, 0, "'%.*s' is deprecated: %s",
@@ -63,16 +63,16 @@ CC_PRIVATE void cc_attribute_apply_symbol(cc *c, sym *s, const attrs *a)
 		const ctype *ft = AST_TYPE(c, s->ty);
 		if (c->o->target != PP_LINUX_X86_64)
 			cc_report_error(c, s->loc, "interrupt calling convention is supported only for x86-64 Linux");
-		else if (s->kind != S_FUNC || ft->kind != TY_FUNC)
+		else if (s->kind != AST_SYMBOL_FUNCTION || ft->kind != AST_TYPE_FUNCTION)
 			cc_report_error(c, s->loc, "'interrupt' attribute only applies to functions");
-		else if (AST_TYPE_KIND(c, ft->base) != TY_VOID)
+		else if (AST_TYPE_KIND(c, ft->base) != AST_TYPE_VOID)
 			cc_report_error(c, s->loc, "interrupt function must return void");
-		else if ((ft->flags & TF_NOPROTO) || ft->n < 1 || ft->n > 2 || !cc_type_is_pointer(c, c->params[ft->aux]))
+		else if ((ft->flags & AST_TYPE_FLAG_NO_PROTOTYPE) || ft->n < 1 || ft->n > 2 || !cc_type_is_pointer(c, c->params[ft->aux]))
 			cc_report_error(c, s->loc, "interrupt function requires a pointer parameter optionally followed by an unsigned long");
-		else if (ft->n == 2 && AST_TYPE_KIND(c, c->params[ft->aux + 1]) != TY_ULONG && AST_TYPE_KIND(c, c->params[ft->aux + 1]) != TY_ULLONG)
+		else if (ft->n == 2 && AST_TYPE_KIND(c, c->params[ft->aux + 1]) != AST_TYPE_UNSIGNED_LONG && AST_TYPE_KIND(c, c->params[ft->aux + 1]) != AST_TYPE_UNSIGNED_LONG_LONG)
 			cc_report_error(c, s->loc, "interrupt function second parameter must have unsigned long type");
 	}
-	if (a->tlsmodel && (s->kind != S_VAR || !(s->flags & SF_THREAD)))
+	if (a->tlsmodel && (s->kind != AST_SYMBOL_VARIABLE || !(s->flags & AST_SYMBOL_FLAG_THREAD)))
 		cc_report_error(c, a->tlsloc, "'tls_model' attribute only applies to thread-local variables");
 	if (s->attrs)
 		cc_attribute_merge(&c->attr[s->attrs], a);
@@ -80,16 +80,16 @@ CC_PRIVATE void cc_attribute_apply_symbol(cc *c, sym *s, const attrs *a)
 		s->attrs = cc_attribute_new(c, a);
 	if (a->aligned > s->align)
 		s->align = a->aligned;
-	if (a->weak) s->flags |= SF_WEAK;
-	if (a->depr) s->flags |= SF_DEPRECATED;
-	if (a->wur) s->flags |= SF_WUR;
-	if (a->noreturn) s->flags |= SF_NORETURN;
-	if (a->always_inline) s->flags |= SF_ALWAYS_INLINE;
-	if (a->noinline) s->flags |= SF_NOINLINE;
-	if (a->noinstr) s->flags |= SF_NOINSTR;
-	if (a->gnu_inline) s->flags |= SF_GNU_INLINE;
-	if (a->used) s->flags |= SF_ATTR_USED;
-	if (a->overloadable) s->flags |= SF_OVERLOAD;
+	if (a->weak) s->flags |= AST_SYMBOL_FLAG_WEAK;
+	if (a->depr) s->flags |= AST_SYMBOL_FLAG_DEPRECATED;
+	if (a->wur) s->flags |= AST_SYMBOL_FLAG_WARN_UNUSED_RESULT;
+	if (a->noreturn) s->flags |= AST_SYMBOL_FLAG_NORETURN;
+	if (a->always_inline) s->flags |= AST_SYMBOL_FLAG_ALWAYS_INLINE;
+	if (a->noinline) s->flags |= AST_SYMBOL_FLAG_NOINLINE;
+	if (a->noinstr) s->flags |= AST_SYMBOL_FLAG_NO_INSTRUMENT;
+	if (a->gnu_inline) s->flags |= AST_SYMBOL_FLAG_GNU_INLINE;
+	if (a->used) s->flags |= AST_SYMBOL_FLAG_ATTRIBUTE_USED;
+	if (a->overloadable) s->flags |= AST_SYMBOL_FLAG_OVERLOAD;
 }
 
 /* the file-scope entity name refers to, if any */
@@ -102,7 +102,7 @@ CC_PRIVATE uint32_t cc_symbol_file_scope_find(cc *c, uint32_t name)
 }
 
 /* the file-scope sym named s (the emitter: alias targets), or 0 */
-uint32_t cc_global_named(cc *c, const char *s)
+uint32_t cc_symbol_global_find(cc *c, const char *s)
 {
 	size_t n = strlen(s);
 	uint32_t id = vintern_find(s, n, vintern_hash(s, n));
@@ -110,7 +110,7 @@ uint32_t cc_global_named(cc *c, const char *s)
 	return id ? cc_symbol_file_scope_find(c, id) : 0;
 }
 
-CC_PRIVATE uint32_t cc_declaration_bind(cc *c, const cc_declaration_specifiers *ds, cc_declarator *d, qty t, bool file)
+CC_PRIVATE uint32_t cc_declaration_bind(cc *c, const cc_declaration_specifiers *ds, cc_declarator *d, ast_qualified_type t, bool file)
 {
 	attrs at = d->at;
 	uint32_t s, prev;
@@ -126,14 +126,14 @@ CC_PRIVATE uint32_t cc_declaration_bind(cc *c, const cc_declaration_specifiers *
 		int k = cc_attribute_mode_kind(c, d->at.mode, cc_type_is_signed(c, t));
 
 		if (k)
-			t = QT(k, QQ(t));
+			t = AST_QUALIFIED_TYPE(k, AST_QUALIFIED_TYPE_QUALIFIERS(t));
 	}
 	if (at.vecsize) t = cc_declarator_vector_attribute_apply(c, t, at.vecsize, d->loc);
-	if (at.extvec && ds->sc == SC_TYPEDEF && cc_type_is_bitint(c, t))
+	if (at.extvec && ds->sc == AST_STORAGE_TYPEDEF && cc_type_is_bitint(c, t))
 		cc_report_error(c, d->loc, "vector integer elements wider than 128 bits are not supported");
-	else if (at.extvec && ds->sc == SC_TYPEDEF && cc_type_is_arithmetic(c, t) && !cc_type_is_complex(c, t)) {
+	else if (at.extvec && ds->sc == AST_STORAGE_TYPEDEF && cc_type_is_arithmetic(c, t) && !cc_type_is_complex(c, t)) {
 		/* clang: n elements, the size rounded up to a power of 2 (float3: 16) */
-		uint64_t sz = AST_TYPE_KIND(c, t) == TY_BOOL ? (at.extvec + 7) / 8 : (uint64_t)at.extvec * cc_type_size(c, t), p = 1;
+		uint64_t sz = AST_TYPE_KIND(c, t) == AST_TYPE_BOOL ? (at.extvec + 7) / 8 : (uint64_t)at.extvec * cc_type_size(c, t), p = 1;
 
 		while (p < sz)
 			p <<= 1;
@@ -141,29 +141,29 @@ CC_PRIVATE uint32_t cc_declaration_bind(cc *c, const cc_declaration_specifiers *
 			ctype v = *AST_TYPE(c, cc_type_vector(c, t, (uint32_t)p));
 
 			v.ext = (uint16_t)at.extvec;
-			if (AST_TYPE_KIND(c, t) == TY_BOOL) {
+			if (AST_TYPE_KIND(c, t) == AST_TYPE_BOOL) {
 				v.n = at.extvec;
 				if (c->o->target == PP_LINUX_X86_64) v.align = (uint32_t)p;
 			}
-			t = QT(cc_type_intern(c, &v), QQ(t));
+			t = AST_QUALIFIED_TYPE(cc_type_intern(c, &v), AST_QUALIFIED_TYPE_QUALIFIERS(t));
 		}
 	}
-	if (ds->sc == SC_TYPEDEF) {
+	if (ds->sc == AST_STORAGE_TYPEDEF) {
 		if (at.aligned)
 			t = cc_type_aligned(c, t, at.aligned);
-		if (at.transparent && AST_TYPE_KIND(c, t) == TY_UNION) {
+		if (at.transparent && AST_TYPE_KIND(c, t) == AST_TYPE_UNION) {
 			CC_REPLAY_TAG_WRITE_LOG(c, AST_TYPE(c, t)->aux);
-			c->ty[QI(t)].flags |= TF_TRANSPARENT;
+			c->ty[AST_QUALIFIED_TYPE_INDEX(t)].flags |= AST_TYPE_FLAG_TRANSPARENT;
 		}
 		prev = cc_symbol_lookup(c, d->name);
-		if (prev && c->syms[prev].depth == c->depth && c->syms[prev].kind == S_TYPEDEF) {
-			if (!cc_type_is_compatible(c, c->syms[prev].ty, t) || QQ(c->syms[prev].ty) != QQ(t))
+		if (prev && c->syms[prev].depth == c->depth && c->syms[prev].kind == AST_SYMBOL_TYPEDEF) {
+			if (!cc_type_is_compatible(c, c->syms[prev].ty, t) || AST_QUALIFIED_TYPE_QUALIFIERS(c->syms[prev].ty) != AST_QUALIFIED_TYPE_QUALIFIERS(t))
 				cc_report_error(c, d->loc, "typedef redefinition with different types");
 			return prev;
 		}
-		s = cc_symbol_new(c, S_TYPEDEF, d->name, t, d->loc);
-		c->syms[s].sc = SC_TYPEDEF;
-		c->syms[s].tdef = ds->tdef && QUNQ(t) == QUNQ(ds->ty) ? ds->tdef : 0;
+		s = cc_symbol_new(c, AST_SYMBOL_TYPEDEF, d->name, t, d->loc);
+		c->syms[s].sc = AST_STORAGE_TYPEDEF;
+		c->syms[s].tdef = ds->tdef && AST_QUALIFIED_TYPE_UNQUALIFIED(t) == AST_QUALIFIED_TYPE_UNQUALIFIED(ds->ty) ? ds->tdef : 0;
 		if (unlikely(at.depr)) {	/* only what a typedef's use needs */
 			attrs da = { 0 };
 
@@ -171,7 +171,7 @@ CC_PRIVATE uint32_t cc_declaration_bind(cc *c, const cc_declaration_specifiers *
 			cc_attribute_apply_symbol(c, &c->syms[s], &da);
 		}
 		cc_symbol_bind(c, s);
-		if (cc_type_is_record(c, t) || AST_TYPE_KIND(c, t) == TY_ENUM) {
+		if (cc_type_is_record(c, t) || AST_TYPE_KIND(c, t) == AST_TYPE_ENUM) {
 			tag *r = &c->tags[AST_TYPE(c, t)->aux];
 
 			if (!r->name && !r->typedef_name && file) {
@@ -183,8 +183,8 @@ CC_PRIVATE uint32_t cc_declaration_bind(cc *c, const cc_declaration_specifiers *
 			c->toplevel[c->ntoplevel++] = s;
 		return s;
 	}
-	kind = cc_type_is_function(c, t) ? S_FUNC : S_VAR;
-	if (kind == S_VAR && cc_type_is_void(c, t) && ds->sc != SC_EXTERN) {
+	kind = cc_type_is_function(c, t) ? AST_SYMBOL_FUNCTION : AST_SYMBOL_VARIABLE;
+	if (kind == AST_SYMBOL_VARIABLE && cc_type_is_void(c, t) && ds->sc != AST_STORAGE_EXTERN) {
 		cc_report_error(c, d->loc, "variable has incomplete type 'void'");
 		d->invalid = true;
 	}
@@ -193,22 +193,22 @@ CC_PRIVATE uint32_t cc_declaration_bind(cc *c, const cc_declaration_specifiers *
 	{
 		uint32_t p = cc_symbol_lookup(c, d->name);
 		bool same = p && c->syms[p].depth == c->depth;
-		bool linkage = file || ds->sc == SC_EXTERN || kind == S_FUNC;
+		bool linkage = file || ds->sc == AST_STORAGE_EXTERN || kind == AST_SYMBOL_FUNCTION;
 
 		if (same && linkage) {
 			prev = p;
-		} else if (same && c->syms[p].kind != S_TYPEDEF) {
+		} else if (same && c->syms[p].kind != AST_SYMBOL_TYPEDEF) {
 			cc_report_error(c, d->loc, "redefinition of '%.*s'", CC_IDENTIFIER(d->name));
 			cc_report_note(c, c->syms[p].loc, "previous definition is here");
 		} else if (!file && linkage) {
 			/* An extern declaration inherits the nearest visible declaration
 			   with linkage, including one in an enclosing block. */
-			inherit_type = p && (c->syms[p].flags & SF_GLOBAL);
+			inherit_type = p && (c->syms[p].flags & AST_SYMBOL_FLAG_GLOBAL);
 			prev = inherit_type ? p : cc_symbol_file_scope_find(c, d->name);
 		}
 	}
-	if (prev && kind == S_FUNC && c->syms[prev].kind == S_FUNC &&
-	    (at.overloadable || (c->syms[prev].flags & SF_OVERLOAD))) {
+	if (prev && kind == AST_SYMBOL_FUNCTION && c->syms[prev].kind == AST_SYMBOL_FUNCTION &&
+	    (at.overloadable || (c->syms[prev].flags & AST_SYMBOL_FLAG_OVERLOAD))) {
 		/* overloadable: redeclare the member with this type, or add one to the set */
 		uint32_t head = prev, q;
 
@@ -217,18 +217,18 @@ CC_PRIVATE uint32_t cc_declaration_bind(cc *c, const cc_declaration_specifiers *
 				break;
 		if (q) {
 			prev = q;
-		} else if (at.overloadable && (c->syms[head].flags & SF_OVERLOAD)) {
+		} else if (at.overloadable && (c->syms[head].flags & AST_SYMBOL_FLAG_OVERLOAD)) {
 			sym *y;
 
 			s = cc_symbol_new(c, kind, d->name, t, d->loc);
 			y = &c->syms[s];
 			y->sc = (uint8_t)ds->sc;
 			y->depth = c->syms[head].depth;
-			y->flags |= SF_GLOBAL;
+			y->flags |= AST_SYMBOL_FLAG_GLOBAL;
 			if (ds->inline_)
-				y->flags |= SF_INLINE | (ds->sc != SC_EXTERN ? SF_INLINE_NOEXTERN : 0);
+				y->flags |= AST_SYMBOL_FLAG_INLINE | (ds->sc != AST_STORAGE_EXTERN ? AST_SYMBOL_FLAG_INLINE_WITHOUT_EXTERN : 0);
 			if (ds->noreturn)
-				y->flags |= SF_NORETURN;
+				y->flags |= AST_SYMBOL_FLAG_NORETURN;
 			cc_attribute_apply_symbol(c, y, &at);
 			for (q = head; c->syms[q].ovl; q = c->syms[q].ovl)
 				;
@@ -243,7 +243,7 @@ CC_PRIVATE uint32_t cc_declaration_bind(cc *c, const cc_declaration_specifiers *
 			return head;
 		}
 	}
-	if (prev && unlikely(c->syms[prev].flags & SF_INVALID) && c->syms[prev].kind != kind)
+	if (prev && unlikely(c->syms[prev].flags & AST_SYMBOL_FLAG_INVALID) && c->syms[prev].kind != kind)
 		prev = 0;	/* a placeholder left by parser recovery (cc_recovery_restore): replaced */
 	if (prev) {
 		sym *y = &c->syms[prev];
@@ -253,28 +253,28 @@ CC_PRIVATE uint32_t cc_declaration_bind(cc *c, const cc_declaration_specifiers *
 			cc_report_note(c, y->loc, "previous definition is here");
 		} else if (!cc_type_is_compatible(c, y->ty, t)) {
 			cc_report_error(c, d->loc, "conflicting types for '%.*s'", CC_IDENTIFIER(d->name));
-			if (kind == S_FUNC && (y->flags & SF_DEFINED) && y->defloc)	/* (clang: a defined function's definition) */
+			if (kind == AST_SYMBOL_FUNCTION && (y->flags & AST_SYMBOL_FLAG_DEFINED) && y->defloc)	/* (clang: a defined function's definition) */
 				cc_report_note(c, y->defloc, "previous definition is here");
 			else
 				cc_report_note(c, y->loc, "previous declaration is here");
 		} else {
-			qty merged = inherit_type ? QT(QI(cc_type_composite(c, y->ty, t)), QQ(y->ty) | QQ(t)) : t;
+			ast_qualified_type merged = inherit_type ? AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(cc_type_composite(c, y->ty, t)), AST_QUALIFIED_TYPE_QUALIFIERS(y->ty) | AST_QUALIFIED_TYPE_QUALIFIERS(t)) : t;
 			bool inner = !file && y->depth != c->depth;
 			/* A composite bound is visible in the new declaration's scope;
 			   completing an inner extern must not complete its outer binding. */
 			if (!inner)
 				y->ty = merged;
-			if (ds->sc == SC_STATIC && kind == S_FUNC)
-				y->sc = SC_STATIC;
+			if (ds->sc == AST_STORAGE_STATIC && kind == AST_SYMBOL_FUNCTION)
+				y->sc = AST_STORAGE_STATIC;
 			if (ds->inline_)
-				y->flags |= SF_INLINE | (ds->sc != SC_EXTERN ? SF_INLINE_NOEXTERN : 0);
-			if (kind == S_FUNC && file && (!ds->inline_ || ds->sc == SC_EXTERN))
-				y->flags |= SF_EXTDECL;
+				y->flags |= AST_SYMBOL_FLAG_INLINE | (ds->sc != AST_STORAGE_EXTERN ? AST_SYMBOL_FLAG_INLINE_WITHOUT_EXTERN : 0);
+			if (kind == AST_SYMBOL_FUNCTION && file && (!ds->inline_ || ds->sc == AST_STORAGE_EXTERN))
+				y->flags |= AST_SYMBOL_FLAG_EXTERNAL_DECLARATION;
 			cc_attribute_apply_symbol(c, y, &at);
 			if (inner) {
 				/* block-scope extern: a local type, linked to the same entity */
 				s = cc_symbol_new(c, kind, d->name, merged, d->loc);
-				c->syms[s].sc = SC_EXTERN;
+				c->syms[s].sc = AST_STORAGE_EXTERN;
 				c->syms[s].next = prev;
 				c->syms[s].flags = y->flags;
 				cc_symbol_bind(c, s);
@@ -288,28 +288,28 @@ CC_PRIVATE uint32_t cc_declaration_bind(cc *c, const cc_declaration_specifiers *
 		sym *y = &c->syms[s];
 
 		y->tdef = cc_typedef_sugar_declared(c, ds->tdef, ds->ty, t);
-		y->sc = (uint8_t)(ds->sc == SC_TYPEDEF ? SC_NONE : ds->sc);
-		if (file || ds->sc == SC_EXTERN || kind == S_FUNC)
-			y->flags |= SF_GLOBAL;
+		y->sc = (uint8_t)(ds->sc == AST_STORAGE_TYPEDEF ? AST_STORAGE_NONE : ds->sc);
+		if (file || ds->sc == AST_STORAGE_EXTERN || kind == AST_SYMBOL_FUNCTION)
+			y->flags |= AST_SYMBOL_FLAG_GLOBAL;
 		if (ds->inline_)
-			y->flags |= SF_INLINE | (ds->sc != SC_EXTERN ? SF_INLINE_NOEXTERN : 0);
-		if (kind == S_FUNC && file && (!ds->inline_ || ds->sc == SC_EXTERN))
-			y->flags |= SF_EXTDECL;
+			y->flags |= AST_SYMBOL_FLAG_INLINE | (ds->sc != AST_STORAGE_EXTERN ? AST_SYMBOL_FLAG_INLINE_WITHOUT_EXTERN : 0);
+		if (kind == AST_SYMBOL_FUNCTION && file && (!ds->inline_ || ds->sc == AST_STORAGE_EXTERN))
+			y->flags |= AST_SYMBOL_FLAG_EXTERNAL_DECLARATION;
 		if (ds->noreturn)
-			y->flags |= SF_NORETURN;
+			y->flags |= AST_SYMBOL_FLAG_NORETURN;
 		if (ds->thread)
-			y->flags |= SF_THREAD;
+			y->flags |= AST_SYMBOL_FLAG_THREAD;
 		cc_attribute_apply_symbol(c, y, &at);
-		if (!file && kind == S_VAR && ds->sc != SC_EXTERN && ds->sc != SC_STATIC && !y->sc)
-			y->sc = SC_AUTO;
-		if (!file && prev == 0 && (ds->sc == SC_EXTERN || kind == S_FUNC)) {
+		if (!file && kind == AST_SYMBOL_VARIABLE && ds->sc != AST_STORAGE_EXTERN && ds->sc != AST_STORAGE_STATIC && !y->sc)
+			y->sc = AST_STORAGE_AUTO;
+		if (!file && prev == 0 && (ds->sc == AST_STORAGE_EXTERN || kind == AST_SYMBOL_FUNCTION)) {
 			/* first declaration of a global from block scope: also the file-scope entity */
 		}
 	}
 	cc_symbol_bind(c, s);
 	if (file)
 		c->toplevel[c->ntoplevel++] = s;
-	if (kind == S_FUNC && at.overloadable)
+	if (kind == AST_SYMBOL_FUNCTION && at.overloadable)
 		cc_mangle_overload_name_set(c, s);
 	if (unlikely(c->npweak))
 		cc_pragma_weak_declared(c, s);
@@ -334,7 +334,7 @@ static void cc_declaration_kr_parameters_parse(cc *c, const cc_declarator *fd)
 		for (;;) {
 			cc_declarator d;
 			uint32_t first, nops, i;
-			qty t;
+			ast_qualified_type t;
 
 			cc_declarator_parse(c, &d, false, &first, &nops);
 			cc_attribute_list_parse(c, &d.at);
@@ -356,8 +356,8 @@ static void cc_declaration_kr_parameters_parse(cc *c, const cc_declarator *fd)
 					cc_report_error(c, d.loc, "redefinition of parameter '%.*s'", CC_IDENTIFIER(d.name));
 				y->ty = t;
 				y->loc = d.loc;
-				if (ds.sc == SC_REGISTER)
-					y->sc = SC_REGISTER;
+				if (ds.sc == AST_STORAGE_REGISTER)
+					y->sc = AST_STORAGE_REGISTER;
 			}
 			if (!cc_token_accept(c, LEX_TOKEN_COMMA))
 				break;
@@ -375,7 +375,7 @@ static void cc_declaration_kr_parameters_parse(cc *c, const cc_declarator *fd)
 			}
 }
 
-/* a declaration; block-scope ones append N_DECL statements to out */
+/* a declaration; block-scope ones append AST_NODE_DECLARATION statements to out */
 /* the ';' ending a declaration; clang's ParseDeclGroup when it is missing: unless a
    declaration starts here, the rest is skipped through the next ';' */
 static void cc_declaration_semicolon_expect(cc *c, bool file)
@@ -406,7 +406,7 @@ CC_PRIVATE void cc_declaration_parse(cc *c, cc_id_list *out, bool file)
 			     cc_token_is(c, LEX_TOKEN_STAR))) {
 			/* C89 implicit int: "f(x) { ... }", "x;" at file scope */
 			memset(&ds, 0, sizeof(ds));
-			ds.ty = cc_type_basic(TY_INT);
+			ds.ty = cc_type_basic(AST_TYPE_INT);
 			ds.loc = tok(c)->loc;
 			if (!c->o->implicit_int) {
 				uint32_t i = 0;
@@ -430,17 +430,17 @@ CC_PRIVATE void cc_declaration_parse(cc *c, cc_id_list *out, bool file)
 	for (;;) {
 		cc_declarator d;
 		uint32_t first, nops, s;
-		qty t;
+		ast_qualified_type t;
 
 		cc_declarator_parse(c, &d, false, &first, &nops);
 		t = cc_declarator_apply(c, ds.ty, first, nops);
 		if (ds.constexpr_ && !cc_type_is_function(c, t))
-			t = cc_type_qualify(c, t, Q_CONST);
+			t = cc_type_qualify(c, t, AST_QUALIFIER_CONST);
 		if (file) {
-			qty vm = t;
+			ast_qualified_type vm = t;
 
-			while (cc_type_is_array(c, vm) || AST_TYPE_KIND(c, vm) == TY_PTR) {
-				if (AST_TYPE(c, vm)->flags & TF_VLA) {
+			while (cc_type_is_array(c, vm) || AST_TYPE_KIND(c, vm) == AST_TYPE_POINTER) {
+				if (AST_TYPE(c, vm)->flags & AST_TYPE_FLAG_VLA) {
 					cc_report_error(c, d.loc, "variably modified type declaration not allowed at file scope");
 					ds.invalid = true;
 					break;
@@ -450,7 +450,7 @@ CC_PRIVATE void cc_declaration_parse(cc *c, cc_id_list *out, bool file)
 		}
 		c->ndops = first;
 		cc_asm_label_parse(c, &d.at);
-		if (unlikely(file && (ds.sc == SC_AUTO || (ds.sc == SC_REGISTER && !d.at.asmname))) && d.name) {
+		if (unlikely(file && (ds.sc == AST_STORAGE_AUTO || (ds.sc == AST_STORAGE_REGISTER && !d.at.asmname))) && d.name) {
 			/* (GNU: a global register variable, "register AST_TYPE x asm("reg")", is fine) */
 			/* (clang: the declaration is invalid; a function's at the declaration's start) */
 			if (cc_type_is_function(c, t))
@@ -469,7 +469,7 @@ CC_PRIVATE void cc_declaration_parse(cc *c, cc_id_list *out, bool file)
 
 				cc_report_error(c, d.loc, "declaration of variable '%.*s' with deduced type 'auto' requires an initializer",
 					 CC_IDENTIFIER(d.name));
-				d2.auto_type = false, d2.invalid = true, d2.ty = cc_type_basic(TY_INT);
+				d2.auto_type = false, d2.invalid = true, d2.ty = cc_type_basic(AST_TYPE_INT);
 				cc_declaration_bind(c, &d2, &d, d2.ty, file);	/* (invalid: its uses say nothing more) */
 				if (cc_token_accept(c, LEX_TOKEN_COMMA))
 					continue;
@@ -478,7 +478,7 @@ CC_PRIVATE void cc_declaration_parse(cc *c, cc_id_list *out, bool file)
 			}
 			cc_token_expect(c, LEX_TOKEN_EQUAL, "'=' (__auto_type requires an initializer)");
 			v = cc_conversion_decay(c, cc_assignment_parse(c));
-			t = QT(QI(QUNQ(AST_NODE(v)->ty)), QQ(ds.ty) | (ds.constexpr_ ? Q_CONST : 0));
+			t = AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE(v)->ty)), AST_QUALIFIED_TYPE_QUALIFIERS(ds.ty) | (ds.constexpr_ ? AST_QUALIFIER_CONST : 0));
 			{
 				cc_declaration_specifiers d2 = ds;
 
@@ -486,7 +486,7 @@ CC_PRIVATE void cc_declaration_parse(cc *c, cc_id_list *out, bool file)
 				s = cc_declaration_bind(c, &d2, &d, t, file);
 			}
 			if (ds.constexpr_) {
-				c->syms[s].flags |= SF_CONSTEXPR;
+				c->syms[s].flags |= AST_SYMBOL_FLAG_CONSTEXPR;
 				if (!cc_constexpr_type_is_valid(c, t))
 					cc_report_error(c, d.loc, "constexpr variable cannot have type '%s'", tyname(c, t));
 				cc_constexpr_conversion_check(c, v, t);
@@ -494,9 +494,9 @@ CC_PRIVATE void cc_declaration_parse(cc *c, cc_id_list *out, bool file)
 					cc_report_error(c, d.loc, "constexpr variable '%.*s' must be initialized by a constant expression", CC_IDENTIFIER(d.name));
 			}
 			c->syms[s].body = v;
-			c->syms[s].flags |= SF_DEFINED;
+			c->syms[s].flags |= AST_SYMBOL_FLAG_DEFINED;
 			if (out) {
-				uint32_t n = cc_node_new_operands(c, N_DECL, cc_type_basic(TY_VOID), d.loc, s, v);
+				uint32_t n = cc_node_new_operands(c, AST_NODE_DECLARATION, cc_type_basic(AST_TYPE_VOID), d.loc, s, v);
 
 				AST_NODE(n)->aux = 1; /* inferred type: its bounds are evaluated by the initializer */
 				cc_id_list_append(c, out, n);
@@ -512,36 +512,36 @@ CC_PRIVATE void cc_declaration_parse(cc *c, cc_id_list *out, bool file)
 			cc_declaration_kr_parameters_parse(c, &d);
 		else if (d.kr)
 			cc_report_error(c, d.plb, "a parameter list without types is only allowed in a function definition");
-		if (AST_TYPE_KIND(c, t) == TY_SVE && ds.sc != SC_TYPEDEF &&
-		    (file || ds.sc == SC_STATIC || ds.sc == SC_EXTERN || ds.thread)) {
+		if (AST_TYPE_KIND(c, t) == AST_TYPE_SVE_BUILTIN && ds.sc != AST_STORAGE_TYPEDEF &&
+		    (file || ds.sc == AST_STORAGE_STATIC || ds.sc == AST_STORAGE_EXTERN || ds.thread)) {
 			cc_report_error(c, d.loc, "non-local variable with sizeless type '%s'", tyname(c, t));
 			ds.invalid = true;
 		}
 		s = cc_declaration_bind(c, &ds, &d, t, file);
 		if (ds.constexpr_) {
-			if (c->syms[s].kind != S_VAR)
+			if (c->syms[s].kind != AST_SYMBOL_VARIABLE)
 				cc_report_error(c, d.loc, "constexpr can only be used in variable declarations");
 			else {
-				c->syms[s].flags |= SF_CONSTEXPR;
+				c->syms[s].flags |= AST_SYMBOL_FLAG_CONSTEXPR;
 				if (file)
-					c->syms[s].sc = SC_STATIC;	/* C23: file-scope constexpr has internal linkage */
+					c->syms[s].sc = AST_STORAGE_STATIC;	/* C23: file-scope constexpr has internal linkage */
 				if (!cc_constexpr_type_is_valid(c, t))
 					cc_report_error(c, d.loc, "constexpr variable cannot have type '%s'", tyname(c, t));
 			}
-			if (ds.sc == SC_EXTERN || ds.thread)
+			if (ds.sc == AST_STORAGE_EXTERN || ds.thread)
 				cc_report_error(c, d.loc, "constexpr cannot be combined with extern or thread-local storage");
 		}
 		if (unlikely(ds.invalid | d.invalid)) {
-			c->syms[s].flags |= SF_INVALID;	/* its type was an error: uses say nothing more */
+			c->syms[s].flags |= AST_SYMBOL_FLAG_INVALID;	/* its type was an error: uses say nothing more */
 			cc_report_delayed_bug(c, d.loc, "an invalid declaration without an error");
 		}
-		if (d.has_func && c->syms[s].kind == S_FUNC && cc_type_is_function(c, c->syms[s].ty) &&
+		if (d.has_func && c->syms[s].kind == AST_SYMBOL_FUNCTION && cc_type_is_function(c, c->syms[s].ty) &&
 		    d.npsyms == AST_TYPE(c, c->syms[s].ty)->n)
 		{
 			c->syms[s].psyms = d.psyms + 1, c->syms[s].plb = d.plb, c->syms[s].ple = d.ple;
 			for (uint32_t i = 0; unlikely(c->nnparam) && i < d.npsyms; i++)	/* a nonnull parameter: checked at calls */
-				if (c->syms[c->lists[d.psyms + i]].flags & SF_NONNULL)
-					c->syms[s].flags |= SF_NONNULL;
+				if (c->syms[c->lists[d.psyms + i]].flags & AST_SYMBOL_FLAG_NONNULL)
+					c->syms[s].flags |= AST_SYMBOL_FLAG_NONNULL;
 		}
 		if (d.at.vecsize || ds.at.vecsize || d.at.mode || ds.at.mode)
 			t = c->syms[s].ty;	/* declare made it a vector / applied mode: initialize that */
@@ -565,22 +565,22 @@ CC_PRIVATE void cc_declaration_parse(cc *c, cc_id_list *out, bool file)
 		if (cc_token_accept(c, LEX_TOKEN_EQUAL)) {
 			sym *y = &c->syms[s];
 			/* int a[]: the size of an earlier declaration (the composite type), if it had one */
-			qty it = cc_type_is_array(c, t) && (AST_TYPE(c, t)->flags & TF_INCOMPLETE) && cc_type_is_array(c, y->ty) &&
-				 !(AST_TYPE(c, y->ty)->flags & (TF_INCOMPLETE | TF_VLA)) ? QT(QI(y->ty), QQ(t)) : t;
-			bool st = file || ds.sc == SC_STATIC;
+			ast_qualified_type it = cc_type_is_array(c, t) && (AST_TYPE(c, t)->flags & AST_TYPE_FLAG_INCOMPLETE) && cc_type_is_array(c, y->ty) &&
+				 !(AST_TYPE(c, y->ty)->flags & (AST_TYPE_FLAG_INCOMPLETE | AST_TYPE_FLAG_VLA)) ? AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(y->ty), AST_QUALIFIED_TYPE_QUALIFIERS(t)) : t;
+			bool st = file || ds.sc == AST_STORAGE_STATIC;
 			uint32_t v;
 			int nerr = c->errors;
 			uint32_t nconv0 = c->nconv;
 
-			if (ds.sc == SC_TYPEDEF || cc_type_is_function(c, t))
+			if (ds.sc == AST_STORAGE_TYPEDEF || cc_type_is_function(c, t))
 				cc_report_error(c, d.loc, "illegal initializer");
-			if (!file && ds.sc == SC_EXTERN)
+			if (!file && ds.sc == AST_STORAGE_EXTERN)
 				cc_report_error(c, d.loc, "declaration of block scope identifier with linkage cannot have an initializer");
-			if (unlikely(AST_TYPE(c, t)->flags & TF_VLA)) {
+			if (unlikely(AST_TYPE(c, t)->flags & AST_TYPE_FLAG_VLA)) {
 				/* only = {} (C23, a GNU extension before): zero it at run time (emit gen_vla_decl) */
 				if (cc_token_is(c, LEX_TOKEN_LEFT_BRACE) && cc_token_peek(c, 1)->kind == LEX_TOKEN_RIGHT_BRACE) {
 					next(c), next(c);
-					v = cc_node_new(c, N_ZERO, t, d.loc);
+					v = cc_node_new(c, AST_NODE_ZERO, t, d.loc);
 				} else if (cc_token_is(c, LEX_TOKEN_LEFT_BRACE)) {
 					/* clang: at the outermost size, no range */
 					cc_report_error(c, AST_NODE(AST_TYPE(c, t)->n)->loc, "variable-sized object may not be initialized");
@@ -593,12 +593,12 @@ CC_PRIVATE void cc_declaration_parse(cc *c, cc_id_list *out, bool file)
 					report(c, "error", d.loc, &r, 1, NULL, 0, "variable-sized object may not be initialized");
 					v = 0;
 				}
-			} else if (!file && ds.sc != SC_EXTERN && ds.sc != SC_TYPEDEF && !cc_type_is_function(c, t) && !cc_type_is_array(c, t) &&
+			} else if (!file && ds.sc != AST_STORAGE_EXTERN && ds.sc != AST_STORAGE_TYPEDEF && !cc_type_is_function(c, t) && !cc_type_is_array(c, t) &&
 				   !cc_type_complete(c, t)) {
 				/* clang: the variable is invalid, its initializer not checked */
 				cc_report_error(c, d.loc, "variable has incomplete type '%s'", tyname(c, t));
-				c->syms[s].flags |= SF_INVALID;
-				if (cc_type_is_record(c, t) || AST_TYPE_KIND(c, t) == TY_ENUM)
+				c->syms[s].flags |= AST_SYMBOL_FLAG_INVALID;
+				if (cc_type_is_record(c, t) || AST_TYPE_KIND(c, t) == AST_TYPE_ENUM)
 					cc_report_note(c, c->tags[AST_TYPE(c, t)->aux].loc, "forward declaration of '%s'", tyname(c, t));
 				if (cc_token_is(c, LEX_TOKEN_LEFT_BRACE))
 					cc_declaration_vla_initializer_skip(c);
@@ -625,12 +625,12 @@ CC_PRIVATE void cc_declaration_parse(cc *c, cc_id_list *out, bool file)
 				c->cv_what = sw, c->cv_loc = sl;
 			}
 			y = &c->syms[s];
-			if (QI(it) != QI(t)) {
+			if (AST_QUALIFIED_TYPE_INDEX(it) != AST_QUALIFIED_TYPE_INDEX(t)) {
 				/* array size from the initializer */
-				y->ty = QT(QI(it), QQ(y->ty));
+				y->ty = AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(it), AST_QUALIFIED_TYPE_QUALIFIERS(y->ty));
 			}
 			if (unlikely(cc_type_is_record(c, it) && !cc_type_complete(c, it))) {
-				y->flags |= SF_INVALID;	/* initializer said so: its uses are silent */
+				y->flags |= AST_SYMBOL_FLAG_INVALID;	/* initializer said so: its uses are silent */
 				cc_report_delayed_bug(c, d.loc, "an incomplete initializer without an error");
 			}
 			if (y->body && file) {
@@ -638,7 +638,7 @@ CC_PRIVATE void cc_declaration_parse(cc *c, cc_id_list *out, bool file)
 				cc_report_note(c, y->loc, "previous definition is here");
 			}
 			y->body = v;
-			y->flags |= SF_DEFINED;
+			y->flags |= AST_SYMBOL_FLAG_DEFINED;
 			if (ds.constexpr_ && c->errors == nerr && !cc_constexpr_initializer_is_ok(c, v))
 				cc_report_error(c, d.loc, "constexpr variable '%.*s' must be initialized by a constant expression", CC_IDENTIFIER(d.name));
 			{
@@ -666,48 +666,48 @@ CC_PRIVATE void cc_declaration_parse(cc *c, cc_id_list *out, bool file)
 			}
 			y = &c->syms[s];
 			if (out && !st) {
-				uint32_t n = cc_node_new_operands(c, N_DECL, cc_type_basic(TY_VOID), d.loc, s, v);
+				uint32_t n = cc_node_new_operands(c, AST_NODE_DECLARATION, cc_type_basic(AST_TYPE_VOID), d.loc, s, v);
 
 				cc_id_list_append(c, out, n);
 			}
 		} else {
 			sym *y = &c->syms[s];
 
-			if (ds.constexpr_ && y->kind == S_VAR)
+			if (ds.constexpr_ && y->kind == AST_SYMBOL_VARIABLE)
 				cc_report_error(c, d.loc, "constexpr variable '%.*s' must be initialized by a constant expression", CC_IDENTIFIER(d.name));
-			if (y->kind == S_VAR && ds.sc != SC_EXTERN && ds.sc != SC_TYPEDEF) {
+			if (y->kind == AST_SYMBOL_VARIABLE && ds.sc != AST_STORAGE_EXTERN && ds.sc != AST_STORAGE_TYPEDEF) {
 				if (file)
-					y->flags |= SF_TENTATIVE;
-				else if (!cc_type_complete(c, y->ty) && ds.sc != SC_STATIC) {
+					y->flags |= AST_SYMBOL_FLAG_TENTATIVE;
+				else if (!cc_type_complete(c, y->ty) && ds.sc != AST_STORAGE_STATIC) {
 					if (cc_type_is_array(c, y->ty))
 						cc_report_error(c, d.loc, "definition of variable with array type needs an explicit size or an initializer");
 					else if (!cc_type_is_void(c, y->ty)) {	/* void: declare said so */
 						cc_report_error(c, d.loc, "variable has incomplete type '%s'", tyname(c, y->ty));
 						cc_report_forward_note(c, y->ty);
 					}
-					y->flags |= SF_INVALID;
+					y->flags |= AST_SYMBOL_FLAG_INVALID;
 				}
-				if (out && (y->sc == SC_AUTO || y->sc == SC_REGISTER)) {
-					uint32_t n = cc_node_new_operands(c, N_DECL, cc_type_basic(TY_VOID), d.loc, s, 0);
+				if (out && (y->sc == AST_STORAGE_AUTO || y->sc == AST_STORAGE_REGISTER)) {
+					uint32_t n = cc_node_new_operands(c, AST_NODE_DECLARATION, cc_type_basic(AST_TYPE_VOID), d.loc, s, 0);
 
 					cc_id_list_append(c, out, n);
 					if (cc_uninitialized_is_tracked(c, y->ty)) {
 						c->uv_any |= 1;
-						y->flags |= SF_UVPEND;
+						y->flags |= AST_SYMBOL_FLAG_UNINITIALIZED_PENDING;
 						if (c->nuv < 64)
 							c->uvc[c->nuv] = c->cnd, c->uv[c->nuv++] = s;
 					}
 				}
 			}
 		}
-		if (out && ds.sc == SC_TYPEDEF) {
-			for (qty vm = t; cc_type_is_array(c, vm) || cc_type_is_pointer(c, vm); vm = AST_TYPE(c, vm)->base)
-				if (AST_TYPE(c, vm)->flags & TF_VLA) {
-					cc_id_list_append(c, out, cc_node_new_operands(c, N_DECL, cc_type_basic(TY_VOID), d.loc, s, 0));
+		if (out && ds.sc == AST_STORAGE_TYPEDEF) {
+			for (ast_qualified_type vm = t; cc_type_is_array(c, vm) || cc_type_is_pointer(c, vm); vm = AST_TYPE(c, vm)->base)
+				if (AST_TYPE(c, vm)->flags & AST_TYPE_FLAG_VLA) {
+					cc_id_list_append(c, out, cc_node_new_operands(c, AST_NODE_DECLARATION, cc_type_basic(AST_TYPE_VOID), d.loc, s, 0));
 					break;
 				}
 		}
-		if (c->syms[s].kind == S_VAR)	/* the declaration's range, for notes */
+		if (c->syms[s].kind == AST_SYMBOL_VARIABLE)	/* the declaration's range, for notes */
 			c->syms[s].plb = dbeg, c->syms[s].ple = c->prevloc;
 		if (cc_declaration_comma_typo(c))
 			return;

@@ -21,57 +21,57 @@ enum {
 _Static_assert(CC_FORMAT_TABLE_TYPE_COUNT == 32, "fmttab.inc columns");
 
 /* t's class, -1 if the table has none for it */
-static int cc_format_check_class(cc *c, qty t)
+static int cc_format_check_class(cc *c, ast_qualified_type t)
 {
 	int k = AST_TYPE_KIND(c, t);
 
 	switch (k) {
-	case TY_BOOL: return CC_FORMAT_TYPE_BOOL;
-	case TY_CHAR: return CC_FORMAT_TYPE_CHAR;
-	case TY_SCHAR: return CC_FORMAT_TYPE_SCHAR;
-	case TY_UCHAR: return CC_FORMAT_TYPE_UCHAR;
-	case TY_SHORT: return CC_FORMAT_TYPE_SHORT;
-	case TY_USHORT: return CC_FORMAT_TYPE_USHORT;
-	case TY_INT: return CC_FORMAT_TYPE_INT;
-	case TY_UINT: return CC_FORMAT_TYPE_UINT;
-	case TY_LONG: return CC_FORMAT_TYPE_LONG;
-	case TY_ULONG: return CC_FORMAT_TYPE_ULONG;
-	case TY_LLONG: return CC_FORMAT_TYPE_LLONG;
-	case TY_ULLONG: return CC_FORMAT_TYPE_ULLONG;
-	case TY_INT128: return CC_FORMAT_TYPE_I128;
-	case TY_UINT128: return CC_FORMAT_TYPE_U128;
-	case TY_FLOAT: return CC_FORMAT_TYPE_FLOAT;
-	case TY_DOUBLE: return CC_FORMAT_TYPE_DOUBLE;
-	case TY_LDOUBLE: return CC_FORMAT_TYPE_LDOUBLE;
-	case TY_ENUM: {
+	case AST_TYPE_BOOL: return CC_FORMAT_TYPE_BOOL;
+	case AST_TYPE_CHAR: return CC_FORMAT_TYPE_CHAR;
+	case AST_TYPE_SIGNED_CHAR: return CC_FORMAT_TYPE_SCHAR;
+	case AST_TYPE_UNSIGNED_CHAR: return CC_FORMAT_TYPE_UCHAR;
+	case AST_TYPE_SHORT: return CC_FORMAT_TYPE_SHORT;
+	case AST_TYPE_UNSIGNED_SHORT: return CC_FORMAT_TYPE_USHORT;
+	case AST_TYPE_INT: return CC_FORMAT_TYPE_INT;
+	case AST_TYPE_UNSIGNED_INT: return CC_FORMAT_TYPE_UINT;
+	case AST_TYPE_LONG: return CC_FORMAT_TYPE_LONG;
+	case AST_TYPE_UNSIGNED_LONG: return CC_FORMAT_TYPE_ULONG;
+	case AST_TYPE_LONG_LONG: return CC_FORMAT_TYPE_LLONG;
+	case AST_TYPE_UNSIGNED_LONG_LONG: return CC_FORMAT_TYPE_ULLONG;
+	case AST_TYPE_INT128: return CC_FORMAT_TYPE_I128;
+	case AST_TYPE_UINT128: return CC_FORMAT_TYPE_U128;
+	case AST_TYPE_FLOAT: return CC_FORMAT_TYPE_FLOAT;
+	case AST_TYPE_DOUBLE: return CC_FORMAT_TYPE_DOUBLE;
+	case AST_TYPE_LONG_DOUBLE: return CC_FORMAT_TYPE_LDOUBLE;
+	case AST_TYPE_ENUM: {
 		int b = AST_TYPE_KIND(c, AST_TYPE(c, t)->base);
 
-		return b == TY_UINT ? CC_FORMAT_TYPE_ENUM_UNSIGNED : b == TY_INT ? CC_FORMAT_TYPE_ENUM_INT : -1;
+		return b == AST_TYPE_UNSIGNED_INT ? CC_FORMAT_TYPE_ENUM_UNSIGNED : b == AST_TYPE_INT ? CC_FORMAT_TYPE_ENUM_INT : -1;
 	}
-	case TY_PTR: {
-		qty p = AST_TYPE(c, t)->base;
-		int pk = AST_TYPE_KIND(c, p), q = QQ(p);
+	case AST_TYPE_POINTER: {
+		ast_qualified_type p = AST_TYPE(c, t)->base;
+		int pk = AST_TYPE_KIND(c, p), q = AST_QUALIFIED_TYPE_QUALIFIERS(p);
 
-		if (AST_TYPE(c, t)->flags & TF_BLOCK)
+		if (AST_TYPE(c, t)->flags & AST_TYPE_FLAG_BLOCK)
 			return -1;
-		if (pk == TY_PTR)
+		if (pk == AST_TYPE_POINTER)
 			return CC_FORMAT_TYPE_POINTER_POINTER;
-		if (pk == TY_STRUCT || pk == TY_UNION || pk == TY_FUNC || pk == TY_FLOAT || pk == TY_DOUBLE)
+		if (pk == AST_TYPE_STRUCT || pk == AST_TYPE_UNION || pk == AST_TYPE_FUNCTION || pk == AST_TYPE_FLOAT || pk == AST_TYPE_DOUBLE)
 			return CC_FORMAT_TYPE_POINTER_OBJECT;
-		if (q == Q_CONST)
-			return pk == TY_CHAR ? CC_FORMAT_TYPE_POINTER_CONST_CHAR : pk == TY_VOID ? CC_FORMAT_TYPE_POINTER_CONST_VOID : -1;
+		if (q == AST_QUALIFIER_CONST)
+			return pk == AST_TYPE_CHAR ? CC_FORMAT_TYPE_POINTER_CONST_CHAR : pk == AST_TYPE_VOID ? CC_FORMAT_TYPE_POINTER_CONST_VOID : -1;
 		if (q)
 			return -1;
 		switch (pk) {
-		case TY_CHAR: return CC_FORMAT_TYPE_POINTER_CHAR;
-		case TY_SCHAR: return CC_FORMAT_TYPE_POINTER_SIGNED_CHAR;
-		case TY_UCHAR: return CC_FORMAT_TYPE_POINTER_UNSIGNED_CHAR;
-		case TY_VOID: return CC_FORMAT_TYPE_POINTER_VOID;
-		case TY_INT: return CC_FORMAT_TYPE_POINTER_INT;
-		case TY_LONG: return CC_FORMAT_TYPE_POINTER_LONG;
-		case TY_LLONG: return CC_FORMAT_TYPE_POINTER_LONG_LONG;
-		case TY_SHORT: return CC_FORMAT_TYPE_POINTER_SHORT;
-		case TY_UINT: return CC_FORMAT_TYPE_POINTER_UNSIGNED_INT;
+		case AST_TYPE_CHAR: return CC_FORMAT_TYPE_POINTER_CHAR;
+		case AST_TYPE_SIGNED_CHAR: return CC_FORMAT_TYPE_POINTER_SIGNED_CHAR;
+		case AST_TYPE_UNSIGNED_CHAR: return CC_FORMAT_TYPE_POINTER_UNSIGNED_CHAR;
+		case AST_TYPE_VOID: return CC_FORMAT_TYPE_POINTER_VOID;
+		case AST_TYPE_INT: return CC_FORMAT_TYPE_POINTER_INT;
+		case AST_TYPE_LONG: return CC_FORMAT_TYPE_POINTER_LONG;
+		case AST_TYPE_LONG_LONG: return CC_FORMAT_TYPE_POINTER_LONG_LONG;
+		case AST_TYPE_SHORT: return CC_FORMAT_TYPE_POINTER_SHORT;
+		case AST_TYPE_UNSIGNED_INT: return CC_FORMAT_TYPE_POINTER_UNSIGNED_INT;
 		}
 		return -1;
 	}
@@ -81,7 +81,7 @@ static int cc_format_check_class(cc *c, qty t)
 
 typedef struct cc_format_check_state {
 	cc *c;
-	uint32_t node;		/* the N_STR */
+	uint32_t node;		/* the AST_NODE_STRING */
 	diag_span all;		/* the format string expression */
 	const char *s;
 	uint32_t n;
@@ -270,7 +270,7 @@ static const char *const cc_format_valid_flags[6] = {
 };
 
 /*
- * The checks of one N_STR format string, in clang's order: per specification
+ * The checks of one AST_NODE_STRING format string, in clang's order: per specification
  * its flags, width and precision, length modifier, then (first != 0) the
  * argument; at the end the first data argument no specification used.
  */
@@ -284,30 +284,30 @@ static uint32_t cc_typedef_sugar_expression_walk(cc *c, uint32_t n, int depth)
 		return 0;
 	x = AST_NODE(n);
 	switch (x->op) {
-	case N_VAR:
+	case AST_NODE_VARIABLE:
 		return c->syms[x->a].tdef;
-	case N_MEMBER:
-		return x->flags & NF_BITFIELD ? 0 : cc_node_member_field(c, x)->tdef;
-	case N_CAST:
+	case AST_NODE_MEMBER:
+		return x->flags & AST_NODE_FLAG_BITFIELD ? 0 : cc_node_member_field(c, x)->tdef;
+	case AST_NODE_CAST:
 		if (x->b)	/* (an explicit cast's typedef) */
 			return x->b;
 		return cc_typedef_sugar_expression_walk(c, x->a, depth + 1);
-	case N_INDEX: case N_DEREF:
+	case AST_NODE_INDEX: case AST_NODE_DEREFERENCE:
 		return cc_typedef_sugar_expression_walk(c, x->a, depth + 1);
-	case N_CALL:
+	case AST_NODE_CALL:
 		return cc_typedef_sugar_expression_walk(c, x->a, depth + 1);
-	case N_COMMA:
+	case AST_NODE_COMMA:
 		return cc_typedef_sugar_expression_walk(c, x->b, depth + 1);
-	case N_ASSIGN: case N_PREINC: case N_PREDEC: case N_POSTINC: case N_POSTDEC: case N_UNARY:
+	case AST_NODE_ASSIGN: case AST_NODE_PRE_INCREMENT: case AST_NODE_PRE_DECREMENT: case AST_NODE_POST_INCREMENT: case AST_NODE_POST_DECREMENT: case AST_NODE_UNARY:
 		return cc_typedef_sugar_expression_walk(c, x->a, depth + 1);
-	case N_BINARY: {
+	case AST_NODE_BINARY: {
 		uint32_t l = cc_typedef_sugar_expression_walk(c, x->a, depth + 1);
 
-		if (l && QUNQ(canon(c, c->syms[l].ty)) == QUNQ(canon(c, x->ty)))
+		if (l && AST_QUALIFIED_TYPE_UNQUALIFIED(canon(c, c->syms[l].ty)) == AST_QUALIFIED_TYPE_UNQUALIFIED(canon(c, x->ty)))
 			return l;
 		return cc_typedef_sugar_expression_walk(c, x->b, depth + 1);
 	}
-	case N_COND: {
+	case AST_NODE_CONDITIONAL: {
 		uint32_t l = cc_typedef_sugar_expression_walk(c, x->b ? x->b : x->a, depth + 1);
 
 		return l == cc_typedef_sugar_expression_walk(c, x->c, depth + 1) ? l : 0;
@@ -321,7 +321,7 @@ CC_PRIVATE uint32_t cc_typedef_sugar_expression(cc *c, uint32_t n)
 {
 	uint32_t td = cc_typedef_sugar_expression_walk(c, n, 0);
 
-	return td && QUNQ(canon(c, c->syms[td].ty)) == QUNQ(canon(c, AST_NODE(n)->ty)) ? td : 0;
+	return td && AST_QUALIFIED_TYPE_UNQUALIFIED(canon(c, c->syms[td].ty)) == AST_QUALIFIED_TYPE_UNQUALIFIED(canon(c, AST_NODE(n)->ty)) ? td : 0;
 }
 
 /* format(printf, i, j) of fs: its attribute, or what clang gives a library builtin of the printf
@@ -339,7 +339,7 @@ CC_PRIVATE uint32_t cc_format_check_attribute(cc *c, uint32_t fs)
 
 	if (y->attrs && c->attr[y->attrs].fmt)
 		return c->attr[y->attrs].fmt;
-	if (c->o->no_builtin || y->kind != S_FUNC || y->sc == SC_STATIC || !y->name)
+	if (c->o->no_builtin || y->kind != AST_SYMBOL_FUNCTION || y->sc == AST_STORAGE_STATIC || !y->name)
 		return 0;
 	nm = cc_identifier_string(y->name), len = cc_identifier_length(y->name);
 	if (cc_library_builtin_is_disabled(c->o, nm, len))
@@ -347,26 +347,26 @@ CC_PRIVATE uint32_t cc_format_check_attribute(cc *c, uint32_t fs)
 	if (len < 6 || len > 9 || !strchr("psafv", nm[0]))
 		return 0;
 	for (size_t i = 0; i < sizeof(lib) / sizeof(lib[0]); i++) {
-		qty pt;
+		ast_qualified_type pt;
 
 		if (strlen(lib[i].n) != len || memcmp(lib[i].n, nm, len))
 			continue;
 		f = AST_TYPE(c, canon(c, y->ty));
-		if ((f->flags & TF_NOPROTO) || AST_TYPE_KIND(c, canon(c, f->base)) != TY_INT ||
-		    f->n != lib[i].fi + (lib[i].first ? 0 : 1) || !(f->flags & TF_VARIADIC) != !lib[i].first)
+		if ((f->flags & AST_TYPE_FLAG_NO_PROTOTYPE) || AST_TYPE_KIND(c, canon(c, f->base)) != AST_TYPE_INT ||
+		    f->n != lib[i].fi + (lib[i].first ? 0 : 1) || !(f->flags & AST_TYPE_FLAG_VARIADIC) != !lib[i].first)
 			return 0;
 		/* the format: const char * */
 		pt = canon(c, c->params[f->aux + lib[i].fi - 1]);
-		if (AST_TYPE_KIND(c, pt) != TY_PTR || AST_TYPE_KIND(c, canon(c, AST_TYPE(c, pt)->base)) != TY_CHAR || !(QQ(AST_TYPE(c, pt)->base) & Q_CONST))
+		if (AST_TYPE_KIND(c, pt) != AST_TYPE_POINTER || AST_TYPE_KIND(c, canon(c, AST_TYPE(c, pt)->base)) != AST_TYPE_CHAR || !(AST_QUALIFIED_TYPE_QUALIFIERS(AST_TYPE(c, pt)->base) & AST_QUALIFIER_CONST))
 			return 0;
 		/* before it: pointers (char *, char **, FILE *), snprintf's size */
 		for (uint32_t k = 0; k + 1 < lib[i].fi; k++) {
-			qty a = canon(c, c->params[f->aux + k]);
+			ast_qualified_type a = canon(c, c->params[f->aux + k]);
 
-			if (AST_TYPE_KIND(c, a) != TY_PTR && !(k == 1 && lib[i].fi == 3 && cc_type_is_integer(c, a)))
+			if (AST_TYPE_KIND(c, a) != AST_TYPE_POINTER && !(k == 1 && lib[i].fi == 3 && cc_type_is_integer(c, a)))
 				return 0;
 			/* fprintf/vfprintf: FILE *, a struct */
-			if ((lib[i].n[0] == 'f' || !strcmp(lib[i].n, "vfprintf")) && AST_TYPE_KIND(c, canon(c, AST_TYPE(c, a)->base)) != TY_STRUCT)
+			if ((lib[i].n[0] == 'f' || !strcmp(lib[i].n, "vfprintf")) && AST_TYPE_KIND(c, canon(c, AST_TYPE(c, a)->base)) != AST_TYPE_STRUCT)
 				return 0;
 		}
 		return 1u << 16 | (uint32_t)lib[i].fi << 8 | lib[i].first;
@@ -374,7 +374,7 @@ CC_PRIVATE uint32_t cc_format_check_attribute(cc *c, uint32_t fs)
 	return 0;
 }
 
-CC_PRIVATE void cc_format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty, const uint32_t *atd, uint32_t nargs)
+CC_PRIVATE void cc_format_check(cc *c, uint32_t fs, const uint32_t *args, const ast_qualified_type *aty, const uint32_t *atd, uint32_t nargs)
 {
 	uint32_t fa = cc_format_check_attribute(c, fs), fi, first, ndata, n;
 	const cc_format_table_entry *tab;
@@ -408,15 +408,15 @@ CC_PRIVATE void cc_format_check(cc *c, uint32_t fs, const uint32_t *args, const 
 	for (;;) {
 		uint32_t cal;
 
-		while (AST_NODE(s)->op == N_CAST)
+		while (AST_NODE(s)->op == AST_NODE_CAST)
 			s = AST_NODE(s)->a;
 		/* a call of a format_arg function: its format argument (gettext) */
-		if (AST_NODE(s)->op != N_CALL)
+		if (AST_NODE(s)->op != AST_NODE_CALL)
 			break;
 		cal = AST_NODE(s)->a;
-		while (AST_NODE(cal)->op == N_CAST)
+		while (AST_NODE(cal)->op == AST_NODE_CAST)
 			cal = AST_NODE(cal)->a;
-		if (AST_NODE(cal)->op != N_VAR || c->syms[AST_NODE(cal)->a].kind != S_FUNC || !c->syms[AST_NODE(cal)->a].attrs)
+		if (AST_NODE(cal)->op != AST_NODE_VARIABLE || c->syms[AST_NODE(cal)->a].kind != AST_SYMBOL_FUNCTION || !c->syms[AST_NODE(cal)->a].attrs)
 			break;
 		{
 			uint32_t k = c->attr[c->syms[AST_NODE(cal)->a].attrs].fmtarg;
@@ -426,13 +426,13 @@ CC_PRIVATE void cc_format_check(cc *c, uint32_t fs, const uint32_t *args, const 
 			s = c->lists[AST_NODE(s)->b + k - 1];
 		}
 	}
-	if (first && first - 1 == nargs && (AST_NODE(s)->op == N_VAR || AST_NODE(s)->op == N_MEMBER)) {
+	if (first && first - 1 == nargs && (AST_NODE(s)->op == AST_NODE_VARIABLE || AST_NODE(s)->op == AST_NODE_MEMBER)) {
 		/* -Wformat-security: a format that is no literal and no data arguments */
-		qty t = AST_NODE(s)->ty;
-		bool cst = cc_type_is_array(c, t) ? (QQ(AST_TYPE(c, t)->base) & Q_CONST) : (QQ(t) & Q_CONST);
-		uint32_t v = AST_NODE(s)->op == N_VAR ? AST_NODE(s)->a : 0;
+		ast_qualified_type t = AST_NODE(s)->ty;
+		bool cst = cc_type_is_array(c, t) ? (AST_QUALIFIED_TYPE_QUALIFIERS(AST_TYPE(c, t)->base) & AST_QUALIFIER_CONST) : (AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_CONST);
+		uint32_t v = AST_NODE(s)->op == AST_NODE_VARIABLE ? AST_NODE(s)->a : 0;
 
-		if (v && (c->syms[v].flags & SF_PARAM) && c->fn && c->syms[c->fn].attrs && c->attr[c->syms[c->fn].attrs].fmt)
+		if (v && (c->syms[v].flags & AST_SYMBOL_FLAG_PARAMETER) && c->fn && c->syms[c->fn].attrs && c->attr[c->syms[c->fn].attrs].fmt)
 			return;	/* the format parameter of a format function */
 		if (!cst && (cc_type_is_pointer(c, t) || cc_type_is_array(c, t))) {
 			diag_span r = cc_node_range(c, args[fi]);
@@ -445,21 +445,21 @@ CC_PRIVATE void cc_format_check(cc *c, uint32_t fs, const uint32_t *args, const 
 		return;
 	}
 	x.isvia = false;
-	if (AST_NODE(s)->op == N_VAR && c->syms[AST_NODE(s)->a].kind == S_VAR && c->syms[AST_NODE(s)->a].body) {
+	if (AST_NODE(s)->op == AST_NODE_VARIABLE && c->syms[AST_NODE(s)->a].kind == AST_SYMBOL_VARIABLE && c->syms[AST_NODE(s)->a].body) {
 		/* a const char array (or const pointer) initialized with a literal (clang's checkFormatStringExpr) */
 		const sym *v = &c->syms[AST_NODE(s)->a];
-		qty t = v->ty;
-		bool cst = cc_type_is_array(c, t) ? (QQ(AST_TYPE(c, t)->base) & Q_CONST) : cc_type_is_pointer(c, t) && (QQ(t) & Q_CONST);
+		ast_qualified_type t = v->ty;
+		bool cst = cc_type_is_array(c, t) ? (AST_QUALIFIED_TYPE_QUALIFIERS(AST_TYPE(c, t)->base) & AST_QUALIFIER_CONST) : cc_type_is_pointer(c, t) && (AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_CONST);
 		uint32_t b = v->body;
 
-		while (AST_NODE(b)->op == N_CAST)
+		while (AST_NODE(b)->op == AST_NODE_CAST)
 			b = AST_NODE(b)->a;
-		if (cst && AST_NODE(b)->op == N_STR) {
+		if (cst && AST_NODE(b)->op == AST_NODE_STRING) {
 			x.via = cc_node_range(c, args[fi]), x.isvia = true;
 			s = b;
 		}
 	}
-	if (AST_NODE(s)->op != N_STR || (AST_NODE(s)->flags & NF_PAREN) || c->strs[AST_NODE(s)->a].esz != 1)
+	if (AST_NODE(s)->op != AST_NODE_STRING || (AST_NODE(s)->flags & AST_NODE_FLAG_PARENTHESIZED) || c->strs[AST_NODE(s)->a].esz != 1)
 		return;
 	x.c = c, x.node = s;
 	x.all = cc_node_range(c, s);
@@ -620,7 +620,7 @@ CC_PRIVATE void cc_format_check(cc *c, uint32_t fs, const uint32_t *args, const 
 		for (int k = 0; k < 2; k++) {
 			int star = k ? f.pstar : f.wstar;
 			uint32_t ai, l;
-			qty t;
+			ast_qualified_type t;
 			int cl;
 
 			if (star < 0)
@@ -650,10 +650,10 @@ CC_PRIVATE void cc_format_check(cc *c, uint32_t fs, const uint32_t *args, const 
 				uint32_t td = atd[first - 1 + ai];
 				char tn[256];
 
-				if (td && AST_TYPE_KIND(c, t) != TY_FLOAT)
+				if (td && AST_TYPE_KIND(c, t) != AST_TYPE_FLOAT)
 					snprintf(tn, sizeof(tn), "'%.*s' (aka '%s')", CC_IDENTIFIER(c->syms[td].name), tyname(c, t));
 				else
-					snprintf(tn, sizeof(tn), "'%s'", AST_TYPE_KIND(c, t) == TY_FLOAT ? "double" : tyname(c, t));
+					snprintf(tn, sizeof(tn), "'%s'", AST_TYPE_KIND(c, t) == AST_TYPE_FLOAT ? "double" : tyname(c, t));
 				if (l)
 					cc_format_check_report(&x, "format", l, r, 2, NULL, 0, "field %s should have type 'int', but argument has type %s",
 						   k ? "precision" : "width", tn);
@@ -741,7 +741,7 @@ CC_PRIVATE void cc_format_check(cc *c, uint32_t fs, const uint32_t *args, const 
 		{
 			uint32_t ai = positional ? (uint32_t)f.pos : (uint32_t)argi++;
 			uint32_t an, code;
-			qty t;
+			ast_qualified_type t;
 			int cl;
 			diag_span r[2];
 
@@ -770,7 +770,7 @@ CC_PRIVATE void cc_format_check(cc *c, uint32_t fs, const uint32_t *args, const 
 			{
 				char ft[64];
 				diag_fixit fx;
-				bool en = AST_TYPE_KIND(c, t) == TY_ENUM;
+				bool en = AST_TYPE_KIND(c, t) == AST_TYPE_ENUM;
 
 				char lcb[8], tn[256];
 				const char *fl = code > 1 ? cc_format_table_fix[code - 1] : NULL;

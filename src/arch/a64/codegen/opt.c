@@ -1931,7 +1931,7 @@ VPRIV void opt_function(ecx *e)
 
 	rawp = e->raw.p;
 	retreads = RB(0) | RB(1);
-	qty rt = T(e->c, e->c->syms[e->top].ty)->base;
+	ast_qualified_type rt = T(e->c, e->c->syms[e->top].ty)->base;
 	if (is_bvec(e->c, rt)) {
 		unsigned lanes = T(e->c, rt)->n;
 		if (lanes <= 8 && lanes != 2 && lanes != 4 && lanes != 8)

@@ -35,23 +35,23 @@ VPRIV void kbits(ecx *e, uint32_t n, uint64_t *k, uint64_t *v)
 	if (!w || w > 64)
 		return;
 	switch (x->op) {
-	case N_NUM:
+	case AST_NODE_NUMBER:
 		*k = ~0ull;
 		*v = (uint64_t)c->ipool[x->a];
 		break;
-	case N_COMMA:
+	case AST_NODE_COMMA:
 		kbits(e, x->b, k, v);
 		break;
-	case N_CAST: {
+	case AST_NODE_CAST: {
 		const node *a = N(x->a);
 		int aw = is_integer(c, a->ty) ? (int)tsize(c, a->ty) * 8 : 0;
 
-		if (x->aux != CK_NOP && x->aux != CK_INT && x->aux != CK_BOOL)
+		if (x->aux != AST_CAST_NOP && x->aux != AST_CAST_INTEGER && x->aux != AST_CAST_BOOL)
 			return;
 		kbits(e, x->a, &ka, &va);
 		if (!aw || aw > 64)
 			return;
-		if (x->aux == CK_BOOL) {
+		if (x->aux == AST_CAST_BOOL) {
 			uint64_t am = aw >= 64 ? ~0ull : (1ull << aw) - 1;
 
 			*k = ~1ull;	/* 0 or 1 */
@@ -74,13 +74,13 @@ VPRIV void kbits(ecx *e, uint32_t n, uint64_t *k, uint64_t *v)
 		*k = ka, *v = va;
 		break;
 	}
-	case N_UNARY:
+	case AST_NODE_UNARY:
 		if (x->aux != LEX_TOKEN_TILDE)
 			return;
 		kbits(e, x->a, &ka, &va);
 		*k = ka, *v = ~va & ka;
 		break;
-	case N_BINARY:
+	case AST_NODE_BINARY:
 		kbits(e, x->a, &ka, &va);
 		kbits(e, x->b, &kb, &vb);
 		switch (x->aux) {
@@ -141,7 +141,7 @@ VPRIV void kbits(ecx *e, uint32_t n, uint64_t *k, uint64_t *v)
 			return;
 		}
 		break;
-	case N_COND:
+	case AST_NODE_CONDITIONAL:
 		if (!x->b)
 			return;
 		kbits(e, x->a, &ka, &va);

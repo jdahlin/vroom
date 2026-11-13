@@ -17,16 +17,16 @@ VPRIV int ael_slot(ecx *e, uint32_t n, bool create)
 	uint32_t s, idx;
 	const sym *y;
 	const ctype *at;
-	qty et;
+	ast_qualified_type et;
 
 	if (!is_aconst(c, n))
 		return -1;
 	s = N(N(N(n)->a)->a)->a, y = &c->syms[s];
-	if (!is_local_var(c, s) || y->sc == SC_STATIC || (e->E->sflags[s] & SA_AESC) || sym_attrs(c, s)->cleanup)
+	if (!is_local_var(c, s) || y->sc == AST_STORAGE_STATIC || (e->E->sflags[s] & SA_AESC) || sym_attrs(c, s)->cleanup)
 		return -1;
 	at = T(c, y->ty), et = at->base;
-	if (at->kind != TY_ARRAY || (at->flags & (TF_VLA | TF_INCOMPLETE)) || !is_integer(c, et) || is_wide(c, et) ||
-	    (QQ(et) & Q_VOLATILE) || (T(c, et)->flags & TF_ATOMIC) || (QQ(y->ty) & Q_VOLATILE))
+	if (at->kind != AST_TYPE_ARRAY || (at->flags & (AST_TYPE_FLAG_VLA | AST_TYPE_FLAG_INCOMPLETE)) || !is_integer(c, et) || is_wide(c, et) ||
+	    (AST_QUALIFIED_TYPE_QUALIFIERS(et) & AST_QUALIFIER_VOLATILE) || (T(c, et)->flags & AST_TYPE_FLAG_ATOMIC) || (AST_QUALIFIED_TYPE_QUALIFIERS(y->ty) & AST_QUALIFIER_VOLATILE))
 		return -1;
 	idx = aconst_idx(c, n);
 	if (idx >= at->n)

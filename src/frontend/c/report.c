@@ -138,13 +138,13 @@ CC_PRIVATE void cc_report_note(cc *c, uint32_t loc, const char *fmt, ...)
 }
 
 /* clang's note on an incomplete struct, union or enum: where it was declared */
-CC_PRIVATE void cc_report_forward_note(cc *c, qty t)
+CC_PRIVATE void cc_report_forward_note(cc *c, ast_qualified_type t)
 {
 	int k = AST_TYPE_KIND(c, t);
 
-	while (k == TY_ARRAY)
+	while (k == AST_TYPE_ARRAY)
 		t = AST_TYPE(c, t)->base, k = AST_TYPE_KIND(c, t);
-	if ((k == TY_STRUCT || k == TY_UNION || k == TY_ENUM) && c->tags[AST_TYPE(c, t)->aux].loc)
+	if ((k == AST_TYPE_STRUCT || k == AST_TYPE_UNION || k == AST_TYPE_ENUM) && c->tags[AST_TYPE(c, t)->aux].loc)
 		cc_report_note(c, c->tags[AST_TYPE(c, t)->aux].loc, "forward declaration of '%s'", tyname(c, t));
 }
 

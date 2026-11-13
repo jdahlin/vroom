@@ -20,7 +20,7 @@
  *       --warm N   N untimed passes over all jobs first (warm token cache,
  *                  header cache and declaration cache; outputs discarded)
  *       --stats F  one line per job to F: status, ms, instructions, cycles,
- *                  and instructions in cc_run / emit_tu / object write
+ *                  and instructions in cc_translation_unit_run / emit_tu / object write
  *                  (tab separated, last column the main file); vbench.py
  *   VPP_WARM=N   N untimed passes first (fills the token cache; profiling)
  */
@@ -169,16 +169,16 @@ static int vpp_batch_run(const char *file, int nthr, const char *statsf)
 		printf("%s\n", hs);
 		driver_declaration_cache_statistics_format(hs, sizeof(hs));
 		printf("%s\n", hs);
-		cc_lz_stats(hs, sizeof(hs));
+		cc_lazy_body_statistics(hs, sizeof(hs));
 		printf("%s\n", hs);
-		cc_drcov_stats(hs, sizeof(hs));
+		cc_replay_coverage_statistics(hs, sizeof(hs));
 		if (*hs)
 			printf("%s\n", hs);
 	}
 	{
 		char ds[2048];
 
-		cc_dr_stats(ds, sizeof(ds));
+		cc_replay_statistics(ds, sizeof(ds));
 		if (*ds)
 			printf("%s\n", ds);
 	}

@@ -10,16 +10,16 @@ CC_PRIVATE void cc_function_definition_parse(cc *c, uint32_t s, const cc_declara
 	int saved_fnerr = c->fnerr;
 	uint32_t saved_fnconv = c->fnconv;
 
-	if (c->syms[s].flags & SF_DEFINED && !(c->syms[s].flags & SF_GNU_INLINE)) {
+	if (c->syms[s].flags & AST_SYMBOL_FLAG_DEFINED && !(c->syms[s].flags & AST_SYMBOL_FLAG_GNU_INLINE)) {
 		cc_report_error(c, d->loc, "redefinition of '%.*s'", CC_IDENTIFIER(d->name));
 		cc_report_note(c, c->syms[s].loc, "previous definition is here");
 	}
-	c->syms[s].flags |= SF_DEFINED;
+	c->syms[s].flags |= AST_SYMBOL_FLAG_DEFINED;
 	c->syms[s].defloc = d->loc;
 	c->fn = s;
 	c->fnerr = c->errors, c->fnconv = c->nconv;
 	{
-		qty rt = AST_TYPE(c, c->syms[s].ty)->base;
+		ast_qualified_type rt = AST_TYPE(c, c->syms[s].ty)->base;
 
 		if (!cc_type_is_void(c, rt) && !cc_type_complete(c, rt)) {
 			cc_report_error(c, d->loc, "incomplete result type '%s' in function definition", tyname(c, rt));
@@ -31,13 +31,13 @@ CC_PRIVATE void cc_function_definition_parse(cc *c, uint32_t s, const cc_declara
 		uint32_t p = c->lists[d->psyms + i];
 		sym *y = &c->syms[p];
 
-		if (!cc_type_is_void(c, y->ty) && !cc_type_complete(c, y->ty) && !(y->flags & SF_INVALID)) {
+		if (!cc_type_is_void(c, y->ty) && !cc_type_complete(c, y->ty) && !(y->flags & AST_SYMBOL_FLAG_INVALID)) {
 			cc_report_error(c, y->loc, "variable has incomplete type '%s'", tyname(c, y->ty));
 			cc_report_forward_note(c, y->ty);
-			y->flags |= SF_INVALID;
+			y->flags |= AST_SYMBOL_FLAG_INVALID;
 		}
 		if (!y->name) {	/* C23: unnamed parameters in definitions */
-			if (cc_keyword_map != cc_keyword_map_c23 && AST_TYPE_KIND(c, y->ty) != TY_VOID)
+			if (cc_keyword_map != cc_keyword_map_c23 && AST_TYPE_KIND(c, y->ty) != AST_TYPE_VOID)
 				cc_report_warning(c, "c23-extensions", true, NULL, y->loc, NULL, 0, NULL, 0,
 					 "omitting the parameter name in a function definition is a C23 extension");
 			continue;
@@ -63,8 +63,8 @@ CC_PRIVATE void cc_function_definition_parse(cc *c, uint32_t s, const cc_declara
 	{
 		uint32_t rb = c->prevloc;	/* the closing brace */
 		const sym *y = &c->syms[s];
-		bool nr = y->flags & SF_NORETURN;
-		qty rt = AST_TYPE(c, y->ty)->base;
+		bool nr = y->flags & AST_SYMBOL_FLAG_NORETURN;
+		ast_qualified_type rt = AST_TYPE(c, y->ty)->base;
 		bool main_ = cc_identifier_length(y->name) == 4 && !memcmp(cc_identifier_string(y->name), "main", 4);
 
 		if (clean && (nr || (!cc_type_is_void(c, rt) && !main_))) {
@@ -87,12 +87,12 @@ CC_PRIVATE void cc_function_definition_parse(cc *c, uint32_t s, const cc_declara
 			uint32_t p = c->lists[d->psyms + i];
 
 			if (c->syms[p].body)
-				cc_id_list_append(c, &items, cc_statement_new(c, N_EXPR, c->syms[p].loc, c->syms[p].body, 0, 0));
+				cc_id_list_append(c, &items, cc_statement_new(c, AST_NODE_EXPRESSION, c->syms[p].loc, c->syms[p].body, 0, 0));
 		}
 		if (items.n) {
 			for (uint32_t i = 0; i < AST_NODE(body)->c; i++)
 				cc_id_list_append(c, &items, c->lists[AST_NODE(body)->b + i]);
-			body = cc_statement_new(c, N_BLOCK, AST_NODE(body)->loc, 0, cc_id_list_freeze(c, &items), items.n);
+			body = cc_statement_new(c, AST_NODE_BLOCK, AST_NODE(body)->loc, 0, cc_id_list_freeze(c, &items), items.n);
 		}
 	}
 	for (uint32_t l = first_label; l < c->nlabel; l++) {
@@ -103,11 +103,11 @@ CC_PRIVATE void cc_function_definition_parse(cc *c, uint32_t s, const cc_declara
 		if (!lb->local && cc_scope_get(c->ldir, lb->name) == l)
 			*cc_scope_slot(c, c->ldir, lb->name) = 0;
 	}
-	if (c->o->instrument && !(c->syms[s].flags & (SF_NOINSTR | SF_ALWAYS_INLINE)))
+	if (c->o->instrument && !(c->syms[s].flags & (AST_SYMBOL_FLAG_NO_INSTRUMENT | AST_SYMBOL_FLAG_ALWAYS_INLINE)))
 		body = cc_instrument_functions(c, s, body);
 	c->syms[s].body = body;
 	if (clean) cc_function_body_fold(c, object_sym0, object_node0);
-	if (clean && (c->syms[s].flags & SF_BOS_QUERY))
+	if (clean && (c->syms[s].flags & AST_SYMBOL_FLAG_OBJECT_SIZE_QUERY))
 		cc_function_object_size_locals(c, object_sym0, object_node0);
 	/* for the emitter: the parameter syms, on the body block */
 	AST_NODE(body)->a = d->psyms;

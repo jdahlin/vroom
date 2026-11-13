@@ -18,7 +18,7 @@ typedef struct xopnd {
 	lval l;			/* XO_MEM: the memory; outputs: where the result goes */
 	int64_t park;		/* a fixed input's value parked in this slot (0: none) */
 	int32_t lpark;		/* a register output's address parked in this slot until the store (0: none) */
-	qty t;
+	ast_qualified_type t;
 	uint32_t name;
 } xopnd;
 
@@ -138,9 +138,9 @@ static void x64_asmmem(cc *c, tbuf *b, const lval *l)
 }
 
 /* a float value as an x87 long double object's address (fld of it) */
-static val wk_x87val(ecx *e, val v, qty t)
+static val wk_x87val(ecx *e, val v, ast_qualified_type t)
 {
-	return wk_conv(e, v, t, prim(TY_LDOUBLE));
+	return wk_conv(e, v, t, prim(AST_TYPE_LONG_DOUBLE));
 }
 
 static bool x64_immok(int ch, i128 v)
@@ -161,7 +161,7 @@ static bool x64_immok(int ch, i128 v)
 
 /* A GPR constraint transports object bits, independently of the C value's
  * normal register class (SSE scalars and address-held small aggregates). */
-static val x64_asmbits(ecx *e, val v, qty t, int size)
+static val x64_asmbits(ecx *e, val v, ast_qualified_type t, int size)
 {
 	if (size != 1 && size != 2 && size != 4 && size != 8)
 		efatal(e, e->curloc, "x86-64: unsupported asm GPR operand size");
@@ -190,7 +190,7 @@ static val x64_asmbits(ecx *e, val v, qty t, int size)
 static void x64_asmpark(ecx *e, xopnd *o)
 {
 	if (!o->flt) o->v = x64_asmbits(e, o->v, o->t, o->size);
-	int r = wk_reg(e, &o->v, o->flt ? o->t : prim(TY_ULLONG));
+	int r = wk_reg(e, &o->v, o->flt ? o->t : prim(AST_TYPE_UNSIGNED_LONG_LONG));
 	lval l = { .k = L_FRAME, .off = o->park = wk_slot(e, 8, 8), .align = 8 };
 
 	x64_store(e, r, &l, o->flt ? o->size : 8);
@@ -216,7 +216,7 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 	cc *c = e->c;
 	xst *X = e->x64;
 	const node *x = N(n);
-	const casm *a = &c->asms[x->a];
+	const ast_asm_statement *a = &c->asms[x->a];
 	const char *tp = c->strs[a->tmpl - 1].s;
 	uint32_t nops = a->nout + a->nin;
 	bool basic = !a->extended;
@@ -300,9 +300,9 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 
 		for (const char *p = cs; *p && *p != '[' && r < 0; p++)
 			r = x64_creg(*p);
-		if (r < 0 && N(en)->op == N_VAR && sym_attrs(c, N(en)->a)->asmname && (c->syms[N(en)->a].sc == SC_REGISTER))
+		if (r < 0 && N(en)->op == AST_NODE_VARIABLE && sym_attrs(c, N(en)->a)->asmname && (c->syms[N(en)->a].sc == AST_STORAGE_REGISTER))
 			r = x64_rname(c->strs[sym_attrs(c, N(en)->a)->asmname - 1].s);	/* register long x asm("rdx") */
-		if (r == RSP && N(en)->op == N_VAR && c->syms[N(en)->a].sc == SC_REGISTER) {
+		if (r == RSP && N(en)->op == AST_NODE_VARIABLE && c->syms[N(en)->a].sc == AST_STORAGE_REGISTER) {
 			op[i].fixed = op[i].sp = 1;
 			op[i].reg = RSP;
 			continue;
@@ -355,7 +355,7 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 	uint64_t pkm = 0;
 
 	for (uint32_t i = a->nout; i < nops && i < 64; i++)
-		if (N(a->ops[i].expr)->op == N_VAR && strpbrk(c->strs[a->ops[i].constraint - 1].s, "in") &&
+		if (N(a->ops[i].expr)->op == AST_NODE_VARIABLE && strpbrk(c->strs[a->ops[i].constraint - 1].s, "in") &&
 		    wk_pk_get(e, N(a->ops[i].expr)->a, &pkv[i]))
 			pkm |= 1ull << i;
 	/* outputs: lvalues; a register's value read first for + */
@@ -465,31 +465,31 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 		   the instruction accepts the original scalar memory operand. */
 		if (o->flt && mem_ok && !o->fixed) reg_ok = false;
 		if (mem_ok && !reg_ok && !strpbrk(cs, "inIJKLMNeZ")) {
-			if (N(en)->op == N_CAST && N(en)->aux == CK_DECAY)
+			if (N(en)->op == AST_NODE_CAST && N(en)->aux == AST_CAST_ARRAY_DECAY)
 				en = N(en)->a;	/* an array as a memory operand: the array itself */
-			if (N(en)->flags & NF_LVALUE || N(en)->op == N_VAR || N(en)->op == N_DEREF || N(en)->op == N_MEMBER ||
-			    N(en)->op == N_INDEX) {
+			if (N(en)->flags & AST_NODE_FLAG_LVALUE || N(en)->op == AST_NODE_VARIABLE || N(en)->op == AST_NODE_DEREFERENCE || N(en)->op == AST_NODE_MEMBER ||
+			    N(en)->op == AST_NODE_INDEX) {
 				o->kind = XO_MEM;
 				o->l = wk_lval(e, en);
 				continue;
 			}
 		}
 		{
-			cval cv;
+			cc_value cv;
 			uint32_t an = en;
 
-			while (N(an)->op == N_CAST && (N(an)->aux == CK_NOP || N(an)->aux == CK_P2P || N(an)->aux == CK_DECAY ||
-						       N(an)->aux == CK_FDECAY))
+			while (N(an)->op == AST_NODE_CAST && (N(an)->aux == AST_CAST_NOP || N(an)->aux == AST_CAST_POINTER_TO_POINTER || N(an)->aux == AST_CAST_ARRAY_DECAY ||
+						       N(an)->aux == AST_CAST_FUNCTION_DECAY))
 				an = N(an)->a;
-			if (N(an)->op == N_ADDR)
+			if (N(an)->op == AST_NODE_ADDRESS)
 				an = N(an)->a;
 			if (i < 64 && (pkm >> i & 1)) {
 				v = pkv[i];	/* an inlined parameter still holding its constant argument */
-			} else if (is_integer(e->c, N(en)->ty) && cc_eval(e->c, en, &cv) && cv.kind == CV_INT) {
+			} else if (is_integer(e->c, N(en)->ty) && cc_eval(e->c, en, &cv) && cv.kind == CC_VALUE_INTEGER) {
 				/* an integer constant expression as the front end folds it (__builtin_clzll(63), ...) */
 				v = vconst(em_trunc_to(e->c, cv.i, N(en)->ty));
-			} else if (e->c->o->pic && N(an)->op == N_VAR && (c->syms[N(an)->a].kind == S_FUNC ||
-				   (c->syms[N(an)->a].kind == S_VAR && !is_local_var(c, N(an)->a)))) {
+			} else if (e->c->o->pic && N(an)->op == AST_NODE_VARIABLE && (c->syms[N(an)->a].kind == AST_SYMBOL_FUNCTION ||
+				   (c->syms[N(an)->a].kind == AST_SYMBOL_VARIABLE && !is_local_var(c, N(an)->a)))) {
 				/* &sym under -fPIC: an immediate, as clang (the asm names the symbol) */
 				v = (val){ .k = V_ADDR, .ref = REF(RK_SYM, canon_sym(c, N(an)->a)) };
 			} else {
@@ -536,12 +536,12 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 		if (o->fixed) {
 			/* parked until the fixed registers are loaded, last */
 			lval s = { .k = L_FRAME, .off = o->park = wk_slot(e, 8, 8), .align = 8 };
-			int r = wk_reg(e, &v, o->flt ? o->t : prim(TY_ULLONG));
+			int r = wk_reg(e, &v, o->flt ? o->t : prim(AST_TYPE_UNSIGNED_LONG_LONG));
 
 			x64_mem(e, X_ST, o->flt ? o->size : 8, r, &s, false);
 			x64_tfree(e, r);
 		} else {
-			wk_reg(e, &v, o->flt ? o->t : prim(TY_ULLONG));
+			wk_reg(e, &v, o->flt ? o->t : prim(AST_TYPE_UNSIGNED_LONG_LONG));
 			o->reg = v.r;
 			o->v = v;
 		}
@@ -554,7 +554,7 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 			continue;
 		if (o->inout && !o->flt) o->v = x64_asmbits(e, o->v, o->t, o->size);
 		if (o->inout) {
-			wk_reg(e, &o->v, o->flt ? o->t : prim(TY_ULLONG));
+			wk_reg(e, &o->v, o->flt ? o->t : prim(AST_TYPE_UNSIGNED_LONG_LONG));
 			o->reg = o->v.r;
 		} else {
 			o->reg = (uint8_t)(o->flt ? x64_ftreg(e) : x64_treg(e));
@@ -755,7 +755,7 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 					int sz = wk_size(c, op[i].t);
 					lval l = op[i].l;
 
-					if (KIND(c, op[i].t) == TY_LDOUBLE)
+					if (KIND(c, op[i].t) == AST_TYPE_LONG_DOUBLE)
 						x64_x87(e, XF_STPT, &l, 10);
 					else
 						x64_x87(e, XF_STP, &l, sz);

@@ -31,7 +31,7 @@ CC_PRIVATE void cc_declaration_specifiers_unknown_type_report(cc *c, cc_declarat
 	}
 	next(c);
 	memset(ds, 0, sizeof(*ds));
-	ds->ty = s ? c->syms[s].ty : cc_type_basic(TY_INT);
+	ds->ty = s ? c->syms[s].ty : cc_type_basic(AST_TYPE_INT);
 	ds->loc = loc;
 	ds->has_type = true;
 	ds->invalid = !s;
@@ -66,14 +66,14 @@ CC_PRIVATE uint32_t cc_tag_new(cc *c, int kind, uint32_t name, uint32_t loc)
 	t = cc_type_new(c, kind);
 	c->ty[t].aux = ti;
 	c->ty[t].align = 1;
-	if (kind == TY_ENUM) {
-		c->ty[t].base = cc_type_basic(TY_UINT);
+	if (kind == AST_TYPE_ENUM) {
+		c->ty[t].base = cc_type_basic(AST_TYPE_UNSIGNED_INT);
 		c->ty[t].size = 4;
 		c->ty[t].align = 4;
-		r->flags |= RF_ENUM;
+		r->flags |= AST_RECORD_FLAG_ENUM;
 	}
-	if (kind == TY_UNION)
-		r->flags |= RF_UNION;
+	if (kind == AST_TYPE_UNION)
+		r->flags |= AST_RECORD_FLAG_UNION;
 	r->ty = t;
 	return ti;
 }
@@ -99,14 +99,14 @@ static uint32_t cc_tag_lookup_or_new(cc *c, int kind, uint32_t name, uint32_t lo
 	{
 		uint32_t ti = cc_tag_new(c, kind, name, loc);
 
-		if (kind == TY_ENUM && !define)	/* (clang -pedantic) */
+		if (kind == AST_TYPE_ENUM && !define)	/* (clang -pedantic) */
 			CC_REPORT_EXTENSION(c, "pedantic", NULL, loc, "ISO C forbids forward references to 'enum' types");
 		if (name && c->in_proto)
 			cc_report_warning(c, "visibility", true, NULL, loc, NULL, 0, NULL, 0,
 				 "declaration of '%s %.*s' will not be visible outside of this function",
-				 kind == TY_STRUCT ? "struct" : kind == TY_UNION ? "union" : "enum", CC_IDENTIFIER(name));
+				 kind == AST_TYPE_STRUCT ? "struct" : kind == AST_TYPE_UNION ? "union" : "enum", CC_IDENTIFIER(name));
 		if (name) {
-			uint32_t ns = cc_symbol_new(c, CC_SYMBOL_NAMESPACE_TAG, name, QT(c->tags[ti].ty, 0), loc);
+			uint32_t ns = cc_symbol_new(c, CC_SYMBOL_NAMESPACE_TAG, name, AST_QUALIFIED_TYPE(c->tags[ti].ty, 0), loc);
 
 			c->syms[ns].val = ti;
 			cc_symbol_bind(c, ns);
@@ -116,56 +116,56 @@ static uint32_t cc_tag_lookup_or_new(cc *c, int kind, uint32_t name, uint32_t lo
 	}
 }
 
-static qty cc_declaration_specifiers_integer_type(cc *c, int nlong, int sgn, int base, uint32_t loc)
+static ast_qualified_type cc_declaration_specifiers_integer_type(cc *c, int nlong, int sgn, int base, uint32_t loc)
 {
 	(void)c;
 	switch (base) {
 	case KW_char:
-		return cc_type_basic(sgn == 0 ? TY_CHAR : sgn > 0 ? TY_SCHAR : TY_UCHAR);
+		return cc_type_basic(sgn == 0 ? AST_TYPE_CHAR : sgn > 0 ? AST_TYPE_SIGNED_CHAR : AST_TYPE_UNSIGNED_CHAR);
 	case KW_short:
-		return cc_type_basic(sgn < 0 ? TY_USHORT : TY_SHORT);
+		return cc_type_basic(sgn < 0 ? AST_TYPE_UNSIGNED_SHORT : AST_TYPE_SHORT);
 	case KW___int128:
-		return cc_type_basic(sgn < 0 ? TY_UINT128 : TY_INT128);
+		return cc_type_basic(sgn < 0 ? AST_TYPE_UINT128 : AST_TYPE_INT128);
 	default:
 		if (nlong == 1)
-			return cc_type_basic(sgn < 0 ? TY_ULONG : TY_LONG);
+			return cc_type_basic(sgn < 0 ? AST_TYPE_UNSIGNED_LONG : AST_TYPE_LONG);
 		if (nlong >= 2) {
 			if (nlong > 2)
 				cc_report_error(c, loc, "'long long long' is invalid");
-			return cc_type_basic(sgn < 0 ? TY_ULLONG : TY_LLONG);
+			return cc_type_basic(sgn < 0 ? AST_TYPE_UNSIGNED_LONG_LONG : AST_TYPE_LONG_LONG);
 		}
-		return cc_type_basic(sgn < 0 ? TY_UINT : TY_INT);
+		return cc_type_basic(sgn < 0 ? AST_TYPE_UNSIGNED_INT : AST_TYPE_INT);
 	}
 }
 
 /* A variably modified typeof expression is evaluated once. Fresh capture
    nodes read the original dimensions' saved values after that evaluation,
    even when the operand changes their bound variables. */
-static qty cc_declaration_specifiers_typeof_evaluated(cc *c, qty ty, uint32_t *operand, uint32_t loc)
+static ast_qualified_type cc_declaration_specifiers_typeof_evaluated(cc *c, ast_qualified_type ty, uint32_t *operand, uint32_t loc)
 {
 	ctype t = *AST_TYPE(c, ty);
 	bool changed = false;
 
-	if (t.kind != TY_PTR && t.kind != TY_ARRAY)
+	if (t.kind != AST_TYPE_POINTER && t.kind != AST_TYPE_ARRAY)
 		return ty;
-	if (t.kind == TY_ARRAY && (t.flags & TF_VLA) && t.n) {
-		qty dimension = cc_type_vla(c, cc_type_basic(TY_CHAR), t.n);
+	if (t.kind == AST_TYPE_ARRAY && (t.flags & AST_TYPE_FLAG_VLA) && t.n) {
+		ast_qualified_type dimension = cc_type_vla(c, cc_type_basic(AST_TYPE_CHAR), t.n);
 
-		t.n = cc_node_new_operands(c, N_SIZEOF_VLA, c->t_size, loc, *operand, dimension);
+		t.n = cc_node_new_operands(c, AST_NODE_SIZEOF_VLA, c->t_size, loc, *operand, dimension);
 		*operand = 0;
 		changed = true;
 	}
-	qty base = cc_declaration_specifiers_typeof_evaluated(c, t.base, operand, loc);
+	ast_qualified_type base = cc_declaration_specifiers_typeof_evaluated(c, t.base, operand, loc);
 
 	if (!changed && base == t.base)
 		return ty;
 	t.base = base;
-	return QT(cc_type_intern(c, &t), QQ(ty));
+	return AST_QUALIFIED_TYPE(cc_type_intern(c, &t), AST_QUALIFIED_TYPE_QUALIFIERS(ty));
 }
 
-static qty cc_declaration_specifiers_typeof_parse(cc *c, bool unqual)
+static ast_qualified_type cc_declaration_specifiers_typeof_parse(cc *c, bool unqual)
 {
-	qty t;
+	ast_qualified_type t;
 	uint32_t open;
 
 	next(c);
@@ -185,7 +185,7 @@ static qty cc_declaration_specifiers_typeof_parse(cc *c, bool unqual)
 		t = cc_declaration_specifiers_typeof_evaluated(c, AST_NODE(n)->ty, &n, loc);
 	}
 	cc_token_expect_match(c, LEX_TOKEN_RIGHT_PAREN, open);
-	return unqual ? QUNQ(t) : t;
+	return unqual ? AST_QUALIFIED_TYPE_UNQUALIFIED(t) : t;
 }
 
 /* a token that may follow the name in a declarator (clang's
@@ -254,14 +254,14 @@ static bool cc_declaration_specifiers_tag_ends_line(cc *c, const cc_declaration_
 {
 	if (!ds->tag_bare || !(tok(c)->flags & LEX_TOKEN_FLAG_LINE_START) || c->in_tyname)
 		return false;
-	cc_declaration_specifiers_tag_semicolon_recover(c, AST_TYPE_KIND(c, QT(c->tags[ds->tagdecl].ty, 0)));
+	cc_declaration_specifiers_tag_semicolon_recover(c, AST_TYPE_KIND(c, AST_QUALIFIED_TYPE(c->tags[ds->tagdecl].ty, 0)));
 	return true;
 }
 
 static __attribute__((noinline, cold)) void cc_declaration_specifiers_tag_width_report(cc *c, cc_declaration_specifiers *ds, int kw)
 {
-	int k = AST_TYPE_KIND(c, QT(c->tags[ds->tagdecl].ty, 0));
-	const char *tn = k == TY_ENUM ? "enum" : k == TY_UNION ? "union" : "struct";
+	int k = AST_TYPE_KIND(c, AST_QUALIFIED_TYPE(c->tags[ds->tagdecl].ty, 0));
+	const char *tn = k == AST_TYPE_ENUM ? "enum" : k == AST_TYPE_UNION ? "union" : "struct";
 
 	if (cc_declaration_specifiers_tag_ends_line(c, ds))
 		return;
@@ -346,7 +346,7 @@ static __attribute__((noinline, cold)) void cc_declaration_specifiers_tag_semico
 	ptok *t = c->tk;
 
 	report(c, "error", e, NULL, 0, &fx, !(c->prevflags & PP_TOKEN_FLAG_FROM_MACRO), "expected ';' after %s",
-	       kind == TY_ENUM ? "enum" : kind == TY_UNION ? "union" : "struct");
+	       kind == AST_TYPE_ENUM ? "enum" : kind == AST_TYPE_UNION ? "union" : "struct");
 	cc_token_peek(c, 0);
 	if (c->ntk >= 4)
 		return;
@@ -379,8 +379,8 @@ static __attribute__((noinline, cold)) void cc_declaration_specifiers_clash_repo
 		cc_report_error(c, t->loc, "cannot combine with previous '%.*s' declaration specifier", CC_IDENTIFIER(base));
 	else
 		cc_report_error(c, t->loc, "cannot combine with previous '%s' declaration specifier",
-			 AST_TYPE_KIND(c, QT(c->tags[ds->tagdecl].ty, 0)) == TY_ENUM ? "enum" :
-			 AST_TYPE_KIND(c, QT(c->tags[ds->tagdecl].ty, 0)) == TY_UNION ? "union" : "struct");
+			 AST_TYPE_KIND(c, AST_QUALIFIED_TYPE(c->tags[ds->tagdecl].ty, 0)) == AST_TYPE_ENUM ? "enum" :
+			 AST_TYPE_KIND(c, AST_QUALIFIED_TYPE(c->tags[ds->tagdecl].ty, 0)) == AST_TYPE_UNION ? "union" : "struct");
 	next(c);
 	if (kw == KW_struct || kw == KW_union || kw == KW_enum) {
 		attrs a = { 0 };
@@ -396,8 +396,8 @@ static __attribute__((noinline, cold)) void cc_declaration_specifiers_clash_repo
 /* clang's ParseImplicitInt: "static in f(void)", "const unsigne long *p": after
    specifiers without a type, an unknown name where only a type fits is an unknown
    type name.  0: not one; CC_DECLARATION_SPECIFIERS_KEYWORD_ONLY: a keyword typo, rewritten; else the type */
-#define CC_DECLARATION_SPECIFIERS_KEYWORD_ONLY ((qty)~0u)
-static __attribute__((noinline, cold)) qty cc_declaration_specifiers_implicit_int_name(cc *c, cc_declaration_specifiers *ds)
+#define CC_DECLARATION_SPECIFIERS_KEYWORD_ONLY ((ast_qualified_type)~0u)
+static __attribute__((noinline, cold)) ast_qualified_type cc_declaration_specifiers_implicit_int_name(cc *c, cc_declaration_specifiers *ds)
 {
 	ptok *t;
 	uint32_t kwc, s;
@@ -412,7 +412,7 @@ static __attribute__((noinline, cold)) qty cc_declaration_specifiers_implicit_in
 	}
 	next(c);
 	ds->invalid = !s;
-	return s ? c->syms[s].ty : cc_type_basic(TY_INT);
+	return s ? c->syms[s].ty : cc_type_basic(AST_TYPE_INT);
 }
 
 /* no type specifier: clang reports it at the declarator's name ("static *p", "volatile (v)") */
@@ -435,7 +435,7 @@ CC_PRIVATE bool cc_declaration_specifiers_parse(cc *c, cc_declaration_specifiers
 	int nlong = 0, sgn = 0, base = 0, q = 0;
 	unsigned bitwidth = 0;
 	bool any = false, cplx = false, c23auto = false;
-	qty named = 0;
+	ast_qualified_type named = 0;
 	bool have_named = false;
 	uint32_t atomic = 0;	/* the _Atomic qualifier's location */
 
@@ -462,11 +462,11 @@ again:
 			if (!have_named && !base && !nlong && !sgn && t->kind == LEX_TOKEN_IDENTIFIER && cc_symbol_is_typedef_identifier(c, t->id)) {
 				uint32_t ts = cc_symbol_lookup(c, t->id);
 
-				if (unlikely(c->syms[ts].flags & SF_DEPRECATED))
+				if (unlikely(c->syms[ts].flags & AST_SYMBOL_FLAG_DEPRECATED))
 					cc_deprecated_use_report(c, t->loc, t->id, &c->attr[c->syms[ts].attrs], c->syms[ts].loc);
 				named = c->syms[ts].ty;
 				ds->tdef = ts;
-				c->syms[ts].flags |= SF_REF;	/* (-Wunused-local-typedef) */
+				c->syms[ts].flags |= AST_SYMBOL_FLAG_REFERENCED;	/* (-Wunused-local-typedef) */
 				have_named = true;
 				any = true;
 				next(c);
@@ -476,8 +476,8 @@ again:
 		}
 		switch (kw) {
 		case KW_typedef: case KW_extern: case KW_static: case KW_auto: case KW_register: {
-			int sc = kw == KW_typedef ? SC_TYPEDEF : kw == KW_extern ? SC_EXTERN : kw == KW_static ? SC_STATIC :
-				 kw == KW_auto ? SC_AUTO : SC_REGISTER;
+			int sc = kw == KW_typedef ? AST_STORAGE_TYPEDEF : kw == KW_extern ? AST_STORAGE_EXTERN : kw == KW_static ? AST_STORAGE_STATIC :
+				 kw == KW_auto ? AST_STORAGE_AUTO : AST_STORAGE_REGISTER;
 
 			if (!allow_sc)
 				cc_report_error(c, t->loc, "invalid storage class specifier");
@@ -508,13 +508,13 @@ again:
 				cc_report_error(c, t->loc, "type name does not allow constexpr");
 			break;
 		case KW_const: case KW___const__: case KW___const:
-			q |= Q_CONST;
+			q |= AST_QUALIFIER_CONST;
 			break;
 		case KW_volatile: case KW___volatile__: case KW___volatile:
-			q |= Q_VOLATILE;
+			q |= AST_QUALIFIER_VOLATILE;
 			break;
 		case KW_restrict: case KW___restrict__: case KW___restrict:
-			q |= Q_RESTRICT;
+			q |= AST_QUALIFIER_RESTRICT;
 			break;
 		case KW__Atomic: {
 			uint32_t aloc = t->loc;
@@ -524,12 +524,12 @@ again:
 				uint32_t open = tok(c)->loc;
 
 				next(c);
-				qty operand = cc_type_name_parse(c);
+				ast_qualified_type operand = cc_type_name_parse(c);
 
-				if (AST_TYPE(c, operand)->flags & TF_ATOMIC) {
+				if (AST_TYPE(c, operand)->flags & AST_TYPE_FLAG_ATOMIC) {
 					cc_report_error(c, aloc, "_Atomic cannot be applied to atomic type '%s'", tyname(c, operand));
 					ds->invalid = true;
-				} else if (QQ(operand)) {
+				} else if (AST_QUALIFIED_TYPE_QUALIFIERS(operand)) {
 					cc_report_error(c, aloc, "_Atomic cannot be applied to qualified type '%s'", tyname(c, operand));
 					ds->invalid = true;
 				}
@@ -667,10 +667,10 @@ again:
 			ds->auto_type = true;
 			any = true;
 			have_named = true;
-			named = cc_type_basic(TY_INT);
+			named = cc_type_basic(AST_TYPE_INT);
 			break;
 		case KW_struct: case KW_union: case KW_enum: {
-			int kind = kw == KW_struct ? TY_STRUCT : kw == KW_union ? TY_UNION : TY_ENUM;
+			int kind = kw == KW_struct ? AST_TYPE_STRUCT : kw == KW_union ? AST_TYPE_UNION : AST_TYPE_ENUM;
 			uint32_t loc = t->loc, name = 0, ti;
 			attrs pre = { 0 }, post = { 0 };
 			bool body;
@@ -692,7 +692,7 @@ again:
 				loc = tok(c)->loc;
 				next(c);
 			}
-			body = cc_token_is(c, LEX_TOKEN_LEFT_BRACE) || (kind == TY_ENUM && cc_token_is(c, LEX_TOKEN_COLON));
+			body = cc_token_is(c, LEX_TOKEN_LEFT_BRACE) || (kind == AST_TYPE_ENUM && cc_token_is(c, LEX_TOKEN_COLON));
 			ti = cc_tag_lookup_or_new(c, kind, name, loc, body, !body && cc_token_is(c, LEX_TOKEN_SEMICOLON) && !c->in_struct);
 			if (!body && c->tags[ti].depr)
 				cc_deprecated_use_report(c, loc, name, &c->attr[c->tags[ti].depr], c->tags[ti].loc);
@@ -700,21 +700,21 @@ again:
 				tag *r = &c->tags[ti];
 
 				cc_tag_deprecate(c, ti, &pre);
-				if ((r->flags & RF_COMPLETE) && kind != TY_ENUM) {
+				if ((r->flags & AST_RECORD_FLAG_COMPLETE) && kind != AST_TYPE_ENUM) {
 					cc_report_error(c, loc, "redefinition of '%.*s'", CC_IDENTIFIER(name));
 					cc_report_note(c, r->loc, "previous definition is here");
 				}
-				if (kind == TY_ENUM) {
+				if (kind == AST_TYPE_ENUM) {
 					cc_attribute_merge(&post, &pre);
 					cc_enum_body_parse(c, ti, &post, loc);
 					cc_declaration_specifiers_tag_body_end(c, kind);
 				} else {
 					CC_REPLAY_TAG_WRITE_LOG(c, ti);
-					c->tags[ti].flags |= (pre.packed ? RF_PACKED : 0) | ((pre.ms_struct || c->ms_struct) ? RF_MS_STRUCT : 0);
+					c->tags[ti].flags |= (pre.packed ? AST_RECORD_FLAG_PACKED : 0) | ((pre.ms_struct || c->ms_struct) ? AST_RECORD_FLAG_MS_STRUCT : 0);
 					c->tags[ti].maxalign = pre.aligned;
 					cc_record_body_parse(c, ti);
-					if (kind == TY_UNION && pre.transparent)
-						c->ty[c->tags[ti].ty].flags |= TF_TRANSPARENT;
+					if (kind == AST_TYPE_UNION && pre.transparent)
+						c->ty[c->tags[ti].ty].flags |= AST_TYPE_FLAG_TRANSPARENT;
 					cc_declaration_specifiers_tag_body_end(c, kind);
 					if (unlikely(cc_extension_is_enabled(c, "gnu-empty-struct", cc_warning_group_gnu))) {
 						const tag *r = &c->tags[ti];
@@ -724,16 +724,16 @@ again:
 							named = r->f[i].name || (!r->f[i].bitfield && cc_type_is_record(c, r->f[i].ty));
 						if (!named)
 							cc_report_extension(c, "gnu-empty-struct", cc_warning_group_gnu, loc, r->nfield ? "%s without named members is a GNU extension"
-								 : "empty %s is a GNU extension", kind == TY_UNION ? "union" : "struct");
+								 : "empty %s is a GNU extension", kind == AST_TYPE_UNION ? "union" : "struct");
 					}
 				}
 			} else {
 				ds->tag_bare = true;
 			}
-			if (kind == TY_ENUM)
-				c->tags[ti].flags |= RF_ENUM_DECLARED;
+			if (kind == AST_TYPE_ENUM)
+				c->tags[ti].flags |= AST_RECORD_FLAG_ENUM_DECLARED;
 			ds->tagdecl = ti;
-			named = QT(c->tags[ti].ty, 0);
+			named = AST_QUALIFIED_TYPE(c->tags[ti].ty, 0);
 			have_named = true;
 			any = true;
 			continue;
@@ -755,7 +755,7 @@ again:
 done:
 	/* any: also a base, width, sign, _Complex or named type */
 	if (unlikely(!any) && cc_token_is(c, LEX_TOKEN_IDENTIFIER) && (q || atomic || ds->sc || ds->inline_ || ds->noreturn || ds->thread)) {
-		qty it = cc_declaration_specifiers_implicit_int_name(c, ds);
+		ast_qualified_type it = cc_declaration_specifiers_implicit_int_name(c, ds);
 
 		if (it) {
 			if (it != CC_DECLARATION_SPECIFIERS_KEYWORD_ONLY)
@@ -777,21 +777,21 @@ done:
 		}
 		ds->ty = cc_type_bitint(c, bitwidth, sgn < 0);
 	} else if (base == KW_void) {
-		ds->ty = cc_type_basic(TY_VOID);
+		ds->ty = cc_type_basic(AST_TYPE_VOID);
 	} else if (base == KW__Bool) {
-		ds->ty = cc_type_basic(TY_BOOL);
+		ds->ty = cc_type_basic(AST_TYPE_BOOL);
 	} else if (base == KW_float) {
-		ds->ty = cc_type_basic(TY_FLOAT);
+		ds->ty = cc_type_basic(AST_TYPE_FLOAT);
 	} else if (base == KW___bf16) {
-		ds->ty = cc_type_basic(TY_BFLOAT16);
+		ds->ty = cc_type_basic(AST_TYPE_BFLOAT16);
 	} else if (base == KW__Float16 || base == KW___fp16) {
-		ds->ty = cc_type_basic(TY_FLOAT16);
+		ds->ty = cc_type_basic(AST_TYPE_FLOAT16);
 	} else if (base == KW_double) {
-		ds->ty = cc_type_basic(nlong ? TY_LDOUBLE : TY_DOUBLE);
+		ds->ty = cc_type_basic(nlong ? AST_TYPE_LONG_DOUBLE : AST_TYPE_DOUBLE);
 	} else if (base == KW___float128) {
 		if (c->o->target != PP_LINUX_X86_64)
 			cc_report_error(c, ds->loc, "__float128 is not supported on this target");
-		ds->ty = cc_type_basic(c->o->target == PP_LINUX_X86_64 ? TY_FLOAT128 : TY_LDOUBLE);
+		ds->ty = cc_type_basic(c->o->target == PP_LINUX_X86_64 ? AST_TYPE_FLOAT128 : AST_TYPE_LONG_DOUBLE);
 	} else {
 		if (unlikely(!any)) {
 			if (c23auto && !nlong && !sgn && !cplx) {
@@ -803,13 +803,13 @@ done:
 		ds->ty = cc_declaration_specifiers_integer_type(c, nlong, sgn, base, ds->loc);
 	}
 	if (unlikely(c23auto) && !ds->auto_type && !ds->sc)	/* C23 "auto int x": the storage class */
-		ds->sc = SC_AUTO, ds->sckw = KW_auto;
+		ds->sc = AST_STORAGE_AUTO, ds->sckw = KW_auto;
 	if (cplx) {
 		if (!base && !nlong && !sgn && !have_named)
-			ds->ty = cc_type_basic(TY_DOUBLE);	/* plain _Complex: double (GNU) */
+			ds->ty = cc_type_basic(AST_TYPE_DOUBLE);	/* plain _Complex: double (GNU) */
 		if (cc_type_is_integer(c, ds->ty) && AST_TYPE(c, ds->ty)->n)
 			cc_report_error(c, ds->loc, "'_Complex _BitInt' is invalid");
-		else if (AST_TYPE_KIND(c, ds->ty) == TY_BFLOAT16)
+		else if (AST_TYPE_KIND(c, ds->ty) == AST_TYPE_BFLOAT16)
 			cc_report_error(c, ds->loc, "_Complex __bf16 is invalid");
 		else if (!cc_type_is_arithmetic(c, ds->ty))
 			cc_report_error(c, ds->loc, "_Complex requires an arithmetic element type");

@@ -16,7 +16,7 @@ SOURCE = r'''
 #include "arch/a64/codegen/udivconst.c"
 VPRIV int x64_nfree(ecx *e) { return 8 - __builtin_popcount(e->x64->live & X_TEMPS); }
 /* The typed wrapper is unused in this arithmetic-only contract. */
-VPRIV i128 em_trunc_to(cc *c, i128 v, qty t) { (void)c; (void)t; return v; }
+VPRIV i128 em_trunc_to(cc *c, i128 v, ast_qualified_type t) { (void)c; (void)t; return v; }
 VPRIV void slot_tag(ecx *e, ins *i, int64_t off, int64_t len)
 { (void)e; (void)i; (void)off; (void)len; }
 

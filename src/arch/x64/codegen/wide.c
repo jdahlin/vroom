@@ -374,18 +374,18 @@ VPRIV val x64_wcmp(ecx *e, int op, bool sgn, val a, val b)
 /* ---------------- conversions ---------------- */
 
 /* v of type from as type to, __int128 on at least one side */
-VPRIV val x64_wcvt(ecx *e, val v, qty from, qty to)
+VPRIV val x64_wcvt(ecx *e, val v, ast_qualified_type from, ast_qualified_type to)
 {
 	cc *c = e->c;
-	bool fw = KIND(c, from) == TY_INT128 || KIND(c, from) == TY_UINT128;
-	bool tw = KIND(c, to) == TY_INT128 || KIND(c, to) == TY_UINT128;
+	bool fw = KIND(c, from) == AST_TYPE_INT128 || KIND(c, from) == AST_TYPE_UINT128;
+	bool tw = KIND(c, to) == AST_TYPE_INT128 || KIND(c, to) == AST_TYPE_UINT128;
 	int64_t slot;
 
 	if (fw && tw)
 		return v;
-	if (KIND(c, from) == TY_FLOAT128 || KIND(c, to) == TY_FLOAT128)
+	if (KIND(c, from) == AST_TYPE_FLOAT128 || KIND(c, to) == AST_TYPE_FLOAT128)
 		return x64_cvt(e, v, from, to);	/* (fp.c: libgcc's __fixtfti, __floattitf ...) */
-	if (KIND(c, from) == TY_LDOUBLE || KIND(c, to) == TY_LDOUBLE) {
+	if (KIND(c, from) == AST_TYPE_LONG_DOUBLE || KIND(c, to) == AST_TYPE_LONG_DOUBLE) {
 		/* x86 long double uses the x87 helpers, not binary128's TF ABI.
 		 * Both source representations occupy a 16-byte object; let the
 		 * normal call classifier place it on the stack or in integer regs. */
@@ -421,7 +421,7 @@ VPRIV val x64_wcvt(ecx *e, val v, qty from, qty to)
 		x64_tfree(e, v.r);
 		w[0] = (int64_t)d.off;
 		rd = x64_wnew(e, &slot);
-		x64_lcall(e, KIND(c, to) == TY_INT128 ? (fs == 4 ? FN_FIXSFTI : FN_FIXDFTI) : (fs == 4 ? FN_FIXUNSSFTI : FN_FIXUNSDFTI),
+		x64_lcall(e, KIND(c, to) == AST_TYPE_INT128 ? (fs == 4 ? FN_FIXSFTI : FN_FIXDFTI) : (fs == 4 ? FN_FIXUNSSFTI : FN_FIXUNSDFTI),
 			  w, 1, 0, slot, 2, false);
 		return x64_wv(rd);
 	}
@@ -442,7 +442,7 @@ VPRIV val x64_wcvt(ecx *e, val v, qty from, qty to)
 		x64_tfree(e, r);
 		return x64_wv(rd);
 	}
-	if (KIND(c, to) == TY_BOOL) {
+	if (KIND(c, to) == AST_TYPE_BOOL) {
 		int ra = x64_waddr(e, &v), t = x64_treg(e);
 		lval lo = x64_wat(ra, 0), hi = x64_wat(ra, 8);
 
@@ -459,7 +459,7 @@ VPRIV val x64_wcvt(ecx *e, val v, qty from, qty to)
 		lval d = { .k = L_FRAME, .off = wk_slot(e, 8, 8), .align = 8 };
 
 		x64_tfree(e, ra);
-		x64_lcall(e, KIND(c, from) == TY_INT128 ? (ts == 4 ? FN_FLOATTISF : FN_FLOATTIDF) : (ts == 4 ? FN_FLOATUNTISF : FN_FLOATUNTIDF),
+		x64_lcall(e, KIND(c, from) == AST_TYPE_INT128 ? (ts == 4 ? FN_FLOATTISF : FN_FLOATTIDF) : (ts == 4 ? FN_FLOATUNTISF : FN_FLOATUNTIDF),
 			  w, 2, -1, (int64_t)d.off, 1, true);
 		x = x64_ftreg(e);
 		x64_mem(e, X_LD, ts, x, &d, false);
@@ -481,13 +481,13 @@ VPRIV val x64_wcvt(ecx *e, val v, qty from, qty to)
 
 /* ---------------- arbitrary-width integer objects ---------------- */
 
-static int x64_bignew(ecx *e, qty t)
+static int x64_bignew(ecx *e, ast_qualified_type t)
 {
 	lval l = { .k = L_FRAME, .off = wk_slot(e, tsize(e->c, t), 8), .align = 8 };
 	return x64_laddr(e, &l);
 }
 
-static void x64_bignorm(ecx *e, int rd, qty t)
+static void x64_bignorm(ecx *e, int rd, ast_qualified_type t)
 {
 	cc *c = e->c;
 	unsigned bits = T(c, t)->n, rem = bits & 63;
@@ -500,7 +500,7 @@ static void x64_bignorm(ecx *e, int rd, qty t)
 	}
 }
 
-VPRIV val x64_bigconst(ecx *e, qty t, const uint32_t *words, i128 small)
+VPRIV val x64_bigconst(ecx *e, ast_qualified_type t, const uint32_t *words, i128 small)
 {
 	int rd = x64_bignew(e, t);
 	unsigned n = (unsigned)tsize(e->c, t) / 8;
@@ -546,7 +546,7 @@ static val x64_bigword(ecx *e, int ra, unsigned n, int i, bool right, bool sgn, 
 	return x64_wv(r);
 }
 
-static val x64_bigshift(ecx *e, int op, qty t, val a, val b)
+static val x64_bigshift(ecx *e, int op, ast_qualified_type t, val a, val b)
 {
 	bool right = op == LEX_TOKEN_GREATER_GREATER;
 	unsigned n = (unsigned)tsize(e->c, t)/8;
@@ -603,7 +603,7 @@ static void x64_bigneg_if(ecx *e, int ptr, unsigned n, val sign)
 /* Restoring division: Q initially holds the dividend. Each iteration moves
  * its high bit into the remainder and appends one quotient bit. The extra
  * remainder limb retains carry even for a divisor with its top bit set. */
-static val x64_bigdiv(ecx *e, int op, qty t, val a, val b)
+static val x64_bigdiv(ecx *e, int op, ast_qualified_type t, val a, val b)
 {
 	unsigned n = (unsigned)tsize(e->c, t)/8;
 	int qa = x64_toreg(e, &a, 8), db = x64_toreg(e, &b, 8);
@@ -686,7 +686,7 @@ static val x64_bigdiv(ecx *e, int op, qty t, val a, val b)
 	return x64_wv(result);
 }
 
-VPRIV val x64_bigbin(ecx *e, int op, qty t, val a, val b)
+VPRIV val x64_bigbin(ecx *e, int op, ast_qualified_type t, val a, val b)
 {
 	if (a.k == V_CONST) a = x64_bigconst(e, t, NULL, a.i);
 	if (b.k == V_CONST && op != LEX_TOKEN_LESS_LESS && op != LEX_TOKEN_GREATER_GREATER)
@@ -738,7 +738,7 @@ VPRIV val x64_bigbin(ecx *e, int op, qty t, val a, val b)
 	return x64_wv(rd);
 }
 
-VPRIV val x64_bigcmp(ecx *e, int op, qty t, val a, val b)
+VPRIV val x64_bigcmp(ecx *e, int op, ast_qualified_type t, val a, val b)
 {
 	if (a.k == V_CONST) a = x64_bigconst(e, t, NULL, a.i);
 	if (b.k == V_CONST) b = x64_bigconst(e, t, NULL, b.i);
@@ -768,19 +768,19 @@ VPRIV val x64_bigcmp(ecx *e, int op, qty t, val a, val b)
 	return x64_wv(r);
 }
 
-VPRIV val x64_bigcvt(ecx *e, val v, qty from, qty to)
+VPRIV val x64_bigcvt(ecx *e, val v, ast_qualified_type from, ast_qualified_type to)
 {
 	cc *c = e->c;
 	bool fb = em_bigint(c, from), tb = em_bigint(c, to);
-	if (KIND(c, to) == TY_VOID) {
+	if (KIND(c, to) == AST_TYPE_VOID) {
 		wk_free(e, &v);
 		return vconst(0);
 	}
 	if (is_flt(c, from) || is_flt(c, to))
 		efatal(e, 0, "wide _BitInt floating conversion not implemented");
 	if (tb) {
-		if (!fb && !((KIND(c, from) == TY_INT128) || (KIND(c, from) == TY_UINT128)))
-			v = x64_wcvt(e, v, from, prim(TY_INT128));
+		if (!fb && !((KIND(c, from) == AST_TYPE_INT128) || (KIND(c, from) == AST_TYPE_UINT128)))
+			v = x64_wcvt(e, v, from, prim(AST_TYPE_INT128));
 		unsigned src = fb ? (unsigned)tsize(c, from) / 8 : 2, dst = (unsigned)tsize(c, to) / 8;
 		int rs = x64_waddr(e, &v), rd = x64_bignew(e, to);
 		for (unsigned i = 0; i < dst; i++) {
@@ -799,7 +799,7 @@ VPRIV val x64_bigcvt(ecx *e, val v, qty from, qty to)
 		return x64_wv(rd);
 	}
 	int rs = x64_toreg(e, &v, 8), rd;
-	if (KIND(c, to) == TY_BOOL) {
+	if (KIND(c, to) == AST_TYPE_BOOL) {
 		rd = x64_treg(e);
 		x64_movi(e, rd, 0);
 		for (unsigned i = 0; i < tsize(c, from)/8; i++) {

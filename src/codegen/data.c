@@ -52,46 +52,46 @@ static void data_reloc(ecx *e, uint64_t off, uint32_t ref, int64_t add, int n)
 	note_ref(e, ref);
 }
 
-static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
+static void data_init(ecx *e, uint64_t off, ast_qualified_type ty, uint32_t init)
 {
 	cc *c = e->c;
 	const node *x;
-	cval cv;
+	cc_value cv;
 
 	if (!init)
 		return;
 	x = N(init);
-	if (x->op == N_CAST && x->aux == CK_BITS) {
+	if (x->op == AST_NODE_CAST && x->aux == AST_CAST_BIT_CAST) {
 		for (uint64_t pos = 0, size = tsize(c, ty); pos < size;) {
 			unsigned char bytes[16], known[16];
 			unsigned len = size - pos > 16 ? 16 : (unsigned)(size - pos);
-			if (!cc_bitcast_read(c, init, pos, len, bytes, known)) efatal(e, x->loc, "initializer element is not a compile-time constant");
+			if (!cc_bit_cast_object_read(c, init, pos, len, bytes, known)) efatal(e, x->loc, "initializer element is not a compile-time constant");
 			for (unsigned i = 0; i < len; i++) data_put(e, off + pos + i, bytes[i] & known[i], 1);
 			pos += len;
 		}
 		return;
 	}
-	if (x->op == N_ZERO)
+	if (x->op == AST_NODE_ZERO)
 		return;
-	if (is_bvec(c, ty) && x->op == N_CAST && x->aux == CK_SPLAT) {
-		if (!cc_eval(c, x->a, &cv) || cv.kind != CV_INT)
+	if (is_bvec(c, ty) && x->op == AST_NODE_CAST && x->aux == AST_CAST_SPLAT) {
+		if (!cc_eval(c, x->a, &cv) || cv.kind != CC_VALUE_INTEGER)
 			efatal(e, x->loc, "initializer element is not a compile-time constant");
 		for (uint64_t k = 0; k < T(c, ty)->n; k++)
 			if (cv.i) data_or(e, off + k / 8, 1u << (k % 8));
 		return;
 	}
-	if (x->op == N_INIT) {
+	if (x->op == AST_NODE_INITIALIZER) {
 		const uint32_t *v = &c->lists[x->b];
 
 		if (x->aux == 1) {
-			qty et = T(c, ty)->base;
+			ast_qualified_type et = T(c, ty)->base;
 			uint64_t es = tsize(c, et);
 
 			uint64_t n = 0;
 
 			if (is_bvec(c, ty)) {
 				for (uint32_t i = 0; i < x->c; i++) {
-					if (!cc_eval(c, v[3*i+2], &cv) || cv.kind != CV_INT)
+					if (!cc_eval(c, v[3*i+2], &cv) || cv.kind != CC_VALUE_INTEGER)
 						efatal(e, x->loc, "initializer element is not a compile-time constant");
 					for (uint64_t k = v[3*i]; k <= v[3*i+1]; k++) {
 						uint64_t at = off + k / 8;
@@ -108,7 +108,7 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 				if (v[3 * i + 1] + 1 > n)
 					n = v[3 * i + 1] + 1;
 			}
-			if (T(c, ty)->flags & TF_INCOMPLETE)
+			if (T(c, ty)->flags & AST_TYPE_FLAG_INCOMPLETE)
 				data_put(e, off + n * es, 0, 0);	/* flexible array member: its initialized length counts */
 			return;
 		}
@@ -126,7 +126,7 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 					uint64_t bo = f->off, w = f->width;
 					u128 bits;
 
-					if (!cc_eval(c, v[i], &cv) || (cv.kind != CV_INT && cv.kind != CV_BIGINT))
+					if (!cc_eval(c, v[i], &cv) || (cv.kind != CC_VALUE_INTEGER && cv.kind != CC_VALUE_BITINT))
 						efatal(e, x->loc, "initializer element is not a compile-time constant");
 					/* The per-bit loop truncates to the field width. Keep the
 					   full constant so shifts through bit 127 remain defined. */
@@ -136,7 +136,7 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 						uint8_t m = (uint8_t)(1u << ((bo + k) % 8));
 
 						data_or(e, at, 0);
-						e->data.p[at] = (char)((e->data.p[at] & ~m) | ((cv.kind == CV_BIGINT ? (k/32 < cv.nbig && ((c->lists[cv.big+k/32] >> (k%32)) & 1)) : k < 128 ? ((bits >> k) & 1) : cv.i < 0) ? m : 0));
+						e->data.p[at] = (char)((e->data.p[at] & ~m) | ((cv.kind == CC_VALUE_BITINT ? (k/32 < cv.nbig && ((c->lists[cv.big+k/32] >> (k%32)) & 1)) : k < 128 ? ((bits >> k) & 1) : cv.i < 0) ? m : 0));
 					}
 					continue;
 				}
@@ -145,23 +145,23 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 		}
 		return;
 	}
-	if (x->op == N_COMMA) {
+	if (x->op == AST_NODE_COMMA) {
 		data_init(e, off, ty, x->b);
 		return;
 	}
 	{
 		uint32_t selected;
 
-		if (cc_init_subobject(c, init, &selected)) {
+		if (cc_initializer_subobject_find(c, init, &selected)) {
 			data_init(e, off, ty, selected);
 			return;
 		}
 	}
-	if (x->op == N_STR && is_array(c, ty)) {
+	if (x->op == AST_NODE_STRING && is_array(c, ty)) {
 		const cstr *s = &c->strs[x->a];
 		uint64_t n = (uint64_t)s->n * s->esz, cap = tsize(c, ty);
 
-		if (T(c, ty)->flags & TF_INCOMPLETE)
+		if (T(c, ty)->flags & AST_TYPE_FLAG_INCOMPLETE)
 			cap = n;
 		if (n > cap)
 			n = cap;
@@ -169,18 +169,18 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 			data_put(e, off + i, (uint8_t)s->s[i], 1);
 		return;
 	}
-	if (x->op == N_COMPLIT) {
+	if (x->op == AST_NODE_COMPOUND_LITERAL) {
 		data_init(e, off, ty, x->a);
 		return;
 	}
-	if (x->op == N_CPLX) {
-		qty et = c->tags[T(c, x->ty)->aux].f[0].ty;
+	if (x->op == AST_NODE_COMPLEX) {
+		ast_qualified_type et = c->tags[T(c, x->ty)->aux].f[0].ty;
 
 		data_init(e, off, et, x->a);
 		data_init(e, off + tsize(c, et), et, x->b);
 		return;
 	}
-	if (x->op == N_CAST && x->aux == CK_NOP && is_agg(c, ty) && !em_bigint(c, ty)) {
+	if (x->op == AST_NODE_CAST && x->aux == AST_CAST_NOP && is_agg(c, ty) && !em_bigint(c, ty)) {
 		data_init(e, off, ty, x->a);
 		return;
 	}
@@ -188,7 +188,7 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 		/* a const aggregate object as the initializer (clang extension) */
 		uint32_t m = strip_casts(c, init);
 
-		if (N(m)->op == N_VAR && c->syms[N(m)->a].body) {
+		if (N(m)->op == AST_NODE_VARIABLE && c->syms[N(m)->a].body) {
 			data_init(e, off, ty, c->syms[N(m)->a].body);
 			return;
 		}
@@ -200,11 +200,11 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 		int n = (int)tsize(c, ty);
 
 		switch (cv.kind) {
-		case CV_BIGINT:
+		case CC_VALUE_BITINT:
 			for (unsigned i = 0; i < cv.nbig; i++)
 				data_put(e, off + 4 * i, c->lists[cv.big + i], 4);
 			return;
-		case CV_INT:
+		case CC_VALUE_INTEGER:
 			if (em_bigint(c, ty)) {
 				for (int i = 0; i < n; i += 8)
 					data_put(e, off + i, i < 16 ? (uint64_t)((u128)cv.i >> (8*i)) : cv.i < 0 ? UINT64_MAX : 0, 8);
@@ -217,13 +217,13 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 				data_put(e, off, (uint64_t)cv.i, n);
 			}
 			return;
-		case CV_FLT:
+		case CC_VALUE_FLOAT:
 			if (n <= 8 && cv.ld && vsoftfloat_is_nan(cv.q)) {
-				data_put(e, off, vsoftfloat_nan_storage(cv.q, KIND(c, ty) == TY_BFLOAT16 ? 7 : n == 2 ? 10 : n == 4 ? 23 : 52, KIND(c, ty) == TY_BFLOAT16 ? 8 : n == 2 ? 5 : n == 4 ? 8 : 11), n);
+				data_put(e, off, vsoftfloat_nan_storage(cv.q, KIND(c, ty) == AST_TYPE_BFLOAT16 ? 7 : n == 2 ? 10 : n == 4 ? 23 : 52, KIND(c, ty) == AST_TYPE_BFLOAT16 ? 8 : n == 2 ? 5 : n == 4 ? 8 : 11), n);
 				return;
 			}
 			if (n == 2) {
-				data_put(e, off, (KIND(c, ty) == TY_BFLOAT16 ? vsoftfloat_to_bfloat16(cv.ld ? cv.q : vsoftfloat_of_double(cv.f)) : vsoftfloat_to_half(cv.ld ? cv.q : vsoftfloat_of_double(cv.f))), 2);
+				data_put(e, off, (KIND(c, ty) == AST_TYPE_BFLOAT16 ? vsoftfloat_to_bfloat16(cv.ld ? cv.q : vsoftfloat_of_double(cv.f)) : vsoftfloat_to_half(cv.ld ? cv.q : vsoftfloat_of_double(cv.f))), 2);
 			} else if (n == 4) {
 				float f = (float)cv.f;
 				uint32_t u;
@@ -233,7 +233,7 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 			} else {
 				uint64_t u;
 
-				if (n == 16 && X86(c) && KIND(c, ty) == TY_LDOUBLE) {	/* x87: 10 bytes, 6 of padding */
+				if (n == 16 && X86(c) && KIND(c, ty) == AST_TYPE_LONG_DOUBLE) {	/* x87: 10 bytes, 6 of padding */
 					u128 q = cv.ld ? cv.q : (u128)ld_of_d(cv.f);
 					uint8_t xb[10];
 					uint64_t lo;
@@ -255,7 +255,7 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 				data_put(e, off, u, 8);
 			}
 			return;
-		case CV_ADDR:
+		case CC_VALUE_ADDRESS:
 			if (WASM(c) && cv.label) {
 				/* wasm: a label's address is its number (PLAN-wasm.md W4) */
 				data_put(e, off, (uint64_t)cv.label - (cv.sublabel ? (uint64_t)cv.sublabel : 0) + (uint64_t)cv.i, n);
@@ -394,9 +394,9 @@ static void data_bytes(ecx *e, tbuf *b, uint64_t size)
 	}
 }
 
-static bool all_const(cc *c, qty t)
+static bool all_const(cc *c, ast_qualified_type t)
 {
-	if (QQ(t) & Q_CONST)
+	if (AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_CONST)
 		return true;
 	if (is_array(c, t))
 		return all_const(c, T(c, t)->base);
@@ -423,14 +423,14 @@ VPRIV void emit_object(ecx *e, uint32_t s)
 		data_init(e, 0, y->ty, y->body);
 	if (e->data.n > size)
 		size = e->data.n;	/* flexible array member initialised */
-	if (size == 0 && !y->body && is_array(c, y->ty) && (T(c, y->ty)->flags & TF_INCOMPLETE))
+	if (size == 0 && !y->body && is_array(c, y->ty) && (T(c, y->ty)->flags & AST_TYPE_FLAG_INCOMPLETE))
 		size = tsize(c, T(c, y->ty)->base);	/* int x[]; is one element */
 	zero = e->nrel == 0;
 	for (uint64_t i = 0; zero && i < e->data.n; i++)
 		zero = !e->data.p[i];
 	if (WASM(c)) {
 		/* one section per object, as clang writes them */
-		bool global = y->sc != SC_STATIC && y->depth == 0 && y->name;
+		bool global = y->sc != AST_STORAGE_STATIC && y->depth == 0 && y->name;
 
 		/* _Thread_local: an ordinary object, as LLVM strips TLS from a
 		 * module without shared memory (no -pthread) */
@@ -454,7 +454,7 @@ VPRIV void emit_object(ecx *e, uint32_t s)
 		}
 		vtext_string_append(b, ",\"\",@\n");
 		if (global) {
-			vtext_string_append(b, (y->flags & SF_WEAK) ? "\t.weak\t" : "\t.globl\t");
+			vtext_string_append(b, (y->flags & AST_SYMBOL_FLAG_WEAK) ? "\t.weak\t" : "\t.globl\t");
 			sym_name(c, b, s);
 			vtext_char_append(b, '\n');
 		}
@@ -481,7 +481,7 @@ VPRIV void emit_object(ecx *e, uint32_t s)
 		out_chunk(e, ((uint64_t)s << 1) | 1, start);
 		return;
 	}
-	if (!a->section && (y->flags & SF_THREAD) && !DARWIN(c)) {
+	if (!a->section && (y->flags & AST_SYMBOL_FLAG_THREAD) && !DARWIN(c)) {
 		/* ELF: .tdata/.tbss; code reaches it through I_TLV (lval.c) */
 		const char *sec = zero && !e->nrel ? "\t.section\t.tbss,\"awT\",@nobits\n" : "\t.section\t.tdata,\"awT\",@progbits\n";
 
@@ -516,11 +516,11 @@ VPRIV void emit_object(ecx *e, uint32_t s)
 		out_chunk(e, ((uint64_t)s << 1) | 1, start);
 		return;
 	}
-	if (!a->section && (y->flags & SF_THREAD) && !direct(e) && !DARWIN(e->c))
+	if (!a->section && (y->flags & AST_SYMBOL_FLAG_THREAD) && !direct(e) && !DARWIN(e->c))
 		efatal(e, y->loc, "thread-local storage is not supported");
-	if (!direct(e) && DARWIN(e->c) && (y->flags & SF_THREAD)) {
+	if (!direct(e) && DARWIN(e->c) && (y->flags & AST_SYMBOL_FLAG_THREAD)) {
 		/* the same TLV layout as text; darwin_text names the sections */
-		bool global = y->sc != SC_STATIC && y->depth == 0 && y->name;
+		bool global = y->sc != AST_STORAGE_STATIC && y->depth == 0 && y->name;
 
 		vtext_string_append(b, zero ? "\t.section\t.tbss,\"aw\",@nobits\n" : "\t.section\t.tdata,\"aw\",@progbits\n");
 		vtext_string_append(b, "\t.p2align\t");
@@ -537,7 +537,7 @@ VPRIV void emit_object(ecx *e, uint32_t s)
 		}
 		vtext_string_append(b, "\t.section\t.tlv,\"aw\",@progbits\n");
 		if (global) {
-			vtext_string_append(b, (y->flags & SF_WEAK) ? "\t.weak\t" : "\t.globl\t");
+			vtext_string_append(b, (y->flags & AST_SYMBOL_FLAG_WEAK) ? "\t.weak\t" : "\t.globl\t");
 			sym_name(c, b, s);
 			vtext_char_append(b, '\n');
 		}
@@ -550,14 +550,14 @@ VPRIV void emit_object(ecx *e, uint32_t s)
 		out_chunk(e, ((uint64_t)s << 1) | 1, start);
 		return;
 	}
-	if (direct(e) && (y->flags & SF_THREAD)) {
+	if (direct(e) && (y->flags & AST_SYMBOL_FLAG_THREAD)) {
 		/*
 		 * Darwin TLV: the initial value in __thread_data/__thread_bss under
 		 * a local label, the symbol itself on a descriptor in
 		 * __thread_vars: { __tlv_bootstrap, 0, initial value }.
 		 */
 		size_t h;
-		bool global = y->sc != SC_STATIC && y->depth == 0 && y->name;
+		bool global = y->sc != AST_STORAGE_STATIC && y->depth == 0 && y->name;
 
 		b->n = (b->n + 7) & ~(size_t)7;
 		start = b->n;
@@ -573,7 +573,7 @@ VPRIV void emit_object(ecx *e, uint32_t s)
 		h = it_open(e, IT_TEXT);
 		vtext_string_append(b, "\t.section\t.tlv,\"aw\",@progbits\n");
 		if (global) {
-			vtext_string_append(b, (y->flags & SF_WEAK) ? "\t.weak\t" : "\t.globl\t");
+			vtext_string_append(b, (y->flags & AST_SYMBOL_FLAG_WEAK) ? "\t.weak\t" : "\t.globl\t");
 			sym_name(c, b, s);
 			vtext_char_append(b, '\n');
 		}

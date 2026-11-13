@@ -1,0 +1,397 @@
+cc_object_size	cc_builtin_object_size	public,function	frontend/c/builtin-object-size.c	public: read outside the module (codegen/prepass.c): the rename is tree-wide
+cc_builtin_name	cc_builtin_name_get	public,function	frontend/c/builtin-table.c	public: read outside the module (arch/wasm, codegen/type.c): the rename is tree-wide; also named in bench/ or tools/ scripts
+cc_builtin_libkind	cc_builtin_library_kind	public,function	frontend/c/builtin-table.c	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/opt, codegen/walk): the rename is tree-wide; also named in bench/ or tools/ scripts
+cc_chk_simplify	cc_builtin_checked_simplify	public,function	frontend/c/builtin-table.c	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+cc_builtin_plain	cc_builtin_unchecked	public,function	frontend/c/builtin-table.c	public (declared in include/frontend/c/)
+cc_lib_sig	cc_builtin_library_signature	public,function	frontend/c/builtin-table.c	public: read outside the module (arch/wasm): the rename is tree-wide
+cc_init_subobject	cc_initializer_subobject_find	public,function	frontend/c/constant-eval.c	public: read outside the module (codegen/data.c): the rename is tree-wide
+cc_drcov_stats	cc_replay_coverage_statistics	public,function	frontend/c/declaration-coverage.c	public: read outside the module (bin/vpp): the rename is tree-wide
+cc_global_named	cc_symbol_global_find	public,function	frontend/c/declaration.c	public: read outside the module (codegen/tu.c): the rename is tree-wide
+cc_lz_stats	cc_lazy_body_statistics	public,function	frontend/c/lazy-body.c	public: read outside the module (bin/vpp): the rename is tree-wide
+cc_disable_builtin	cc_builtin_disable	public,function	frontend/c/library-function.c	public: read outside the module (driver/cmdline.c): the rename is tree-wide
+cc_bitcast_read	cc_bit_cast_object_read	public,function	frontend/c/object-representation.c	public: read outside the module (codegen/data.c): the rename is tree-wide
+dr_restored	cc_replay_restored	public,function	frontend/c/replay.c	public: read outside the module (driver/ccsnap.c): the rename is tree-wide; also used in replay.c (1): the script edits it
+cc_dr_stats	cc_replay_statistics	public,function	frontend/c/replay.c	public: read outside the module (bin/vpp): the rename is tree-wide; also used in replay.c (1): the script edits it
+cc_run	cc_translation_unit_run	public,function	frontend/c/translation-unit.c	public: read outside the module (bin/vpp, driver/job.c, include/codegen, include/driver): the rename is tree-wide; also named in bench/ or tools/ scripts
+vcc_tls_model	cc_tls_model_parse	public,function	include/frontend/c/cc.h	public: read outside the module (driver/cmdline.c): the rename is tree-wide
+cc_x86_features	cc_x86_features_get	public,function	include/frontend/c/ccint.h	public: read outside the module (arch/x64, codegen/walk): the rename is tree-wide
+qty	ast_qualified_type	public,type	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/condition-fold.c, codegen/data.c, codegen/emitimpl.h): the rename is tree-wide; also used in replay.c (18): the script edits it; also named in bench/ or tools/ scripts
+cc_opts	cc_options	public,type	include/frontend/c/cc.h	public: read outside the module (arch/x64, codegen/emitimpl.h, codegen/tu.c, codegen/vir, driver/ccsnap.c, driver/driver-internal.h): the rename is tree-wide; also used in replay.c (1): the script edits it; also named in bench/ or tools/ scripts; also named in TODO.md/AGENTS.md prose
+asmop	ast_asm_operand	public,type	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm): the rename is tree-wide
+casm	ast_asm_statement	public,type	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/prepass.c, codegen/tu.c, codegen/walk): the rename is tree-wide
+lztok	cc_lazy_token	public,type	include/frontend/c/ccint.h	public: read outside the module (driver/ccsnap.c): the rename is tree-wide
+lzfn	cc_lazy_function	public,type	include/frontend/c/ccint.h	public: read outside the module (driver/ccsnap.c): the rename is tree-wide; also used in replay.c (10): the script edits it
+cval	cc_value	public,type	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/condition-fold.c, codegen/data.c, codegen/emitimpl.h): the rename is tree-wide
+recov	cc_recovery_point	public,type	frontend/c/ccimpl.h	
+cparen	cc_node_parentheses	public,type	?	also used in replay.c (1): the script edits it
+swcase	cc_switch_case	public,type	?	
+QUNQ	AST_QUALIFIED_TYPE_UNQUALIFIED	public,macro	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/condition-fold.c, codegen/opt, codegen/walk): the rename is tree-wide
+DIR_BITS	CC_DIRECTORY_BITS	public,macro	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+DIR_PAGE	CC_DIRECTORY_PAGE	public,macro	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+NDIR	CC_DIRECTORY_COUNT	public,macro	include/frontend/c/ccint.h	public: read outside the module (driver/ccsnap.c): the rename is tree-wide
+CKIND	AST_TYPE_KIND_OF	public,macro	include/frontend/c/ccint.h	public: read outside the module (codegen/emitimpl.h): the rename is tree-wide
+VCC_CC_H	VCC_FRONTEND_C_CC_H	public,macro	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+VCC_CCINT_H	VCC_FRONTEND_C_CCINT_H	public,macro	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+Q_CONST	AST_QUALIFIER_CONST	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, codegen/data.c, codegen/function-output.c, codegen/walk): the rename is tree-wide
+Q_VOLATILE	AST_QUALIFIER_VOLATILE	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/condition-fold.c, codegen/expression-effects.c, codegen/known-values.c, codegen/opt): the rename is tree-wide; also named in bench/ or tools/ scripts
+Q_RESTRICT	AST_QUALIFIER_RESTRICT	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+Q_MASK	AST_QUALIFIER_MASK	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+TF_VARIADIC	AST_TYPE_FLAG_VARIADIC	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/opt, codegen/prepass.c, codegen/vir, codegen/walk): the rename is tree-wide
+TF_NOPROTO	AST_TYPE_FLAG_NO_PROTOTYPE	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/opt, codegen/prepass.c, codegen/walk): the rename is tree-wide
+TF_INCOMPLETE	AST_TYPE_FLAG_INCOMPLETE	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/data.c, codegen/known-values.c, codegen/walk): the rename is tree-wide
+TF_VLA	AST_TYPE_FLAG_VLA	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/emitimpl.h, codegen/expression-queries.c, codegen/known-values.c, codegen/opt): the rename is tree-wide; also used in replay.c (4): the script edits it
+TF_ALIGNED	AST_TYPE_FLAG_ALIGNED	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/); also used in replay.c (6): the script edits it
+TF_TRANSPARENT	AST_TYPE_FLAG_TRANSPARENT	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+TF_BLOCK	AST_TYPE_FLAG_BLOCK	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+TF_ATOMIC	AST_TYPE_FLAG_ATOMIC	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/emitimpl.h, codegen/expression-effects.c, codegen/known-values.c, codegen/opt): the rename is tree-wide; also used in replay.c (4): the script edits it; also named in bench/ or tools/ scripts; also named in TODO.md/AGENTS.md prose
+RF_COMPLETE	AST_RECORD_FLAG_COMPLETE	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+RF_UNION	AST_RECORD_FLAG_UNION	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+RF_PACKED	AST_RECORD_FLAG_PACKED	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+RF_FLEX	AST_RECORD_FLAG_FLEXIBLE	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/wasm): the rename is tree-wide
+RF_ENUM	AST_RECORD_FLAG_ENUM	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+RF_BEING_DEFINED	AST_RECORD_FLAG_BEING_DEFINED	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+RF_ENUM_FIXED	AST_RECORD_FLAG_ENUM_FIXED	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+RF_ENUM_DEFINED	AST_RECORD_FLAG_ENUM_DEFINED	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+RF_ENUM_DECLARED	AST_RECORD_FLAG_ENUM_DECLARED	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+RF_MS_STRUCT	AST_RECORD_FLAG_MS_STRUCT	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+RF_COMPLEX	AST_RECORD_FLAG_COMPLEX	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/wasm, arch/x64): the rename is tree-wide
+S_VAR	AST_SYMBOL_VARIABLE	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/condition-fold.c, codegen/local-variables.c, codegen/opt): the rename is tree-wide; also used in replay.c (3): the script edits it; also named in bench/ or tools/ scripts
+S_FUNC	AST_SYMBOL_FUNCTION	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/emitimpl.h, codegen/expression-queries.c, codegen/opt): the rename is tree-wide
+S_TYPEDEF	AST_SYMBOL_TYPEDEF	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+S_ENUMCONST	AST_SYMBOL_ENUMERATOR	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/wasm, codegen/opt, codegen/walk): the rename is tree-wide; also used in replay.c (2): the script edits it
+S_BUILTIN	AST_SYMBOL_BUILTIN	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/expression-queries.c, codegen/opt, codegen/walk): the rename is tree-wide
+SC_NONE	AST_STORAGE_NONE	public,constant	include/frontend/c/cc.h	public: read outside the module (codegen/local-variables.c): the rename is tree-wide; also named in bench/ or tools/ scripts
+SC_EXTERN	AST_STORAGE_EXTERN	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/emitimpl.h, codegen/opt, codegen/tu.c, codegen/walk): the rename is tree-wide; also named in bench/ or tools/ scripts
+SC_STATIC	AST_STORAGE_STATIC	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/data.c, codegen/emitimpl.h, codegen/function-output.c, codegen/known-values.c): the rename is tree-wide; also named in bench/ or tools/ scripts
+SC_AUTO	AST_STORAGE_AUTO	public,constant	include/frontend/c/cc.h	public: read outside the module (codegen/local-variables.c): the rename is tree-wide; also named in bench/ or tools/ scripts
+SC_REGISTER	AST_STORAGE_REGISTER	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/x64, codegen/local-variables.c, codegen/opt, codegen/tu.c, codegen/walk): the rename is tree-wide; also named in bench/ or tools/ scripts
+SC_TYPEDEF	AST_STORAGE_TYPEDEF	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/opt, codegen/walk): the rename is tree-wide; also named in bench/ or tools/ scripts
+SF_DEFINED	AST_SYMBOL_FLAG_DEFINED	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/emitimpl.h, codegen/prepass.c, codegen/references.c, codegen/symbol-access.c): the rename is tree-wide
+SF_TENTATIVE	AST_SYMBOL_FLAG_TENTATIVE	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, codegen/emitimpl.h, codegen/references.c, codegen/symbol-access.c, codegen/tu.c, codegen/walk): the rename is tree-wide
+SF_INLINE	AST_SYMBOL_FLAG_INLINE	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, codegen/emitimpl.h, codegen/opt, codegen/prepass.c, codegen/tu.c, codegen/walk): the rename is tree-wide
+SF_USED	AST_SYMBOL_FLAG_USED	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+SF_PARAM	AST_SYMBOL_FLAG_PARAMETER	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/x64, codegen/local-variables.c, codegen/prepass.c): the rename is tree-wide; also named in bench/ or tools/ scripts
+SF_GLOBAL	AST_SYMBOL_FLAG_GLOBAL	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, codegen/emitimpl.h, codegen/local-variables.c, codegen/prepass.c): the rename is tree-wide; also named in bench/ or tools/ scripts
+SF_GNU_INLINE	AST_SYMBOL_FLAG_GNU_INLINE	public,constant	include/frontend/c/cc.h	public: read outside the module (codegen/emitimpl.h, codegen/tu.c): the rename is tree-wide
+SF_NORETURN	AST_SYMBOL_FLAG_NORETURN	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/x64, codegen/opt): the rename is tree-wide; also named in bench/ or tools/ scripts
+SF_WEAK	AST_SYMBOL_FLAG_WEAK	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/wasm, codegen/data.c, codegen/emitimpl.h, codegen/function-output.c, codegen/references.c, codegen/symbol-access.c): the rename is tree-wide
+SF_ALWAYS_INLINE	AST_SYMBOL_FLAG_ALWAYS_INLINE	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, codegen/opt, codegen/prepass.c, codegen/walk): the rename is tree-wide
+SF_NOINLINE	AST_SYMBOL_FLAG_NOINLINE	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, codegen/prepass.c, codegen/walk): the rename is tree-wide
+SF_THREAD	AST_SYMBOL_FLAG_THREAD	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, codegen/data.c, codegen/walk): the rename is tree-wide
+SF_ATTR_USED	AST_SYMBOL_FLAG_ATTRIBUTE_USED	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+SF_ADDR_TAKEN	AST_SYMBOL_FLAG_ADDRESS_TAKEN	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/wasm, codegen/opt, codegen/prepass.c): the rename is tree-wide; also named in bench/ or tools/ scripts
+SF_INLINE_NOEXTERN	AST_SYMBOL_FLAG_INLINE_WITHOUT_EXTERN	public,constant	include/frontend/c/cc.h	public: read outside the module (codegen/emitimpl.h, codegen/tu.c): the rename is tree-wide
+SF_NOINSTR	AST_SYMBOL_FLAG_NO_INSTRUMENT	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+SF_OVERLOAD	AST_SYMBOL_FLAG_OVERLOAD	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+SF_LAZY	AST_SYMBOL_FLAG_LAZY	public,constant	include/frontend/c/cc.h	public: read outside the module (codegen/references.c): the rename is tree-wide
+SF_REF	AST_SYMBOL_FLAG_REFERENCED	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+SF_DEPRECATED	AST_SYMBOL_FLAG_DEPRECATED	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+SF_WUR	AST_SYMBOL_FLAG_WARN_UNUSED_RESULT	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+SF_NONNULL	AST_SYMBOL_FLAG_NONNULL	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+SF_INVALID	AST_SYMBOL_FLAG_INVALID	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+SF_BOS_QUERY	AST_SYMBOL_FLAG_OBJECT_SIZE_QUERY	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+SF_CONSTEXPR	AST_SYMBOL_FLAG_CONSTEXPR	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+SF_EXTDECL	AST_SYMBOL_FLAG_EXTERNAL_DECLARATION	public,constant	include/frontend/c/cc.h	public: read outside the module (codegen/emitimpl.h, codegen/tu.c): the rename is tree-wide
+SF_BOS_INIT	AST_SYMBOL_FLAG_OBJECT_SIZE_INITIALIZER	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+SF_UVPEND	AST_SYMBOL_FLAG_UNINITIALIZED_PENDING	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+NUM_RADIX	AST_NUMBER_RADIX	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+NUM_ENUM	AST_NUMBER_ENUMERATOR	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+NUM_NO_ICE	AST_NUMBER_NOT_ICE	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+NUM_NO_CONSTEXPR	AST_NUMBER_NOT_CONSTEXPR	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+NF_LVALUE	AST_NODE_FLAG_LVALUE	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/prepass.c, codegen/walk): the rename is tree-wide
+NF_BITFIELD	AST_NODE_FLAG_BITFIELD	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+NF_PAREN	AST_NODE_FLAG_PARENTHESIZED	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+NF_NPC	AST_NODE_FLAG_NULL_POINTER_CONSTANT	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+NF_ERR	AST_NODE_FLAG_ERROR	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+NF_MACRO	AST_NODE_FLAG_FROM_MACRO	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+NF_BOUNDS	AST_NODE_FLAG_BOUNDS_CHECKED	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+NF_OVF	AST_NODE_FLAG_OVERFLOW_REPORTED	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/); also named in TODO.md/AGENTS.md prose
+NC_FP_NONNEG	AST_NODE_COMMA_FP_NONNEGATIVE	public,constant	include/frontend/c/cc.h	public: read outside the module (codegen/prepass.c): the rename is tree-wide
+VCC_TLS_GD	CC_TLS_GLOBAL_DYNAMIC	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, codegen/walk): the rename is tree-wide
+VCC_TLS_LD	CC_TLS_LOCAL_DYNAMIC	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+VCC_TLS_IE	CC_TLS_INITIAL_EXEC	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, codegen/walk): the rename is tree-wide
+VCC_TLS_LE	CC_TLS_LOCAL_EXEC	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, codegen/walk): the rename is tree-wide
+TY_VOID	AST_TYPE_VOID	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/emitimpl.h, codegen/opt, codegen/prepass.c): the rename is tree-wide
+TY_BOOL	AST_TYPE_BOOL	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/condition-fold.c, codegen/emitimpl.h, codegen/type.c): the rename is tree-wide
+TY_CHAR	AST_TYPE_CHAR	public,constant	include/frontend/c/cc.h	public: read outside the module (codegen/emitimpl.h): the rename is tree-wide
+TY_SCHAR	AST_TYPE_SIGNED_CHAR	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+TY_UCHAR	AST_TYPE_UNSIGNED_CHAR	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm): the rename is tree-wide
+TY_SHORT	AST_TYPE_SHORT	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+TY_USHORT	AST_TYPE_UNSIGNED_SHORT	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/wasm): the rename is tree-wide
+TY_INT	AST_TYPE_INT	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/walk): the rename is tree-wide; also named in bench/ or tools/ scripts
+TY_UINT	AST_TYPE_UNSIGNED_INT	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+TY_LONG	AST_TYPE_LONG	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+TY_ULONG	AST_TYPE_UNSIGNED_LONG	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+TY_LLONG	AST_TYPE_LONG_LONG	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/wasm): the rename is tree-wide; also named in bench/ or tools/ scripts
+TY_ULLONG	AST_TYPE_UNSIGNED_LONG_LONG	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/wasm, arch/x64): the rename is tree-wide
+TY_INT128	AST_TYPE_INT128	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/walk): the rename is tree-wide; also named in bench/ or tools/ scripts
+TY_UINT128	AST_TYPE_UINT128	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/emitimpl.h, codegen/walk): the rename is tree-wide
+TY_BFLOAT16	AST_TYPE_BFLOAT16	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/x64, codegen/data.c, codegen/emitimpl.h, codegen/vir, codegen/walk): the rename is tree-wide
+TY_FLOAT16	AST_TYPE_FLOAT16	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/x64, codegen/vir, codegen/walk): the rename is tree-wide
+TY_FLOAT	AST_TYPE_FLOAT	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/prepass.c, codegen/vir, codegen/walk): the rename is tree-wide
+TY_DOUBLE	AST_TYPE_DOUBLE	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/prepass.c, codegen/vir, codegen/walk): the rename is tree-wide; also named in bench/ or tools/ scripts
+TY_LDOUBLE	AST_TYPE_LONG_DOUBLE	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/data.c, codegen/vir, codegen/walk): the rename is tree-wide
+TY_FLOAT128	AST_TYPE_FLOAT128	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/x64, codegen/emitimpl.h, codegen/vir, codegen/walk): the rename is tree-wide
+TY_PTR	AST_TYPE_POINTER	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/emitimpl.h, codegen/type.c, codegen/walk): the rename is tree-wide; also named in bench/ or tools/ scripts
+TY_ARRAY	AST_TYPE_ARRAY	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/emitimpl.h, codegen/expression-queries.c, codegen/known-values.c): the rename is tree-wide; also used in replay.c (1): the script edits it
+TY_FUNC	AST_TYPE_FUNCTION	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/emitimpl.h, codegen/opt, codegen/prepass.c): the rename is tree-wide; also used in replay.c (13): the script edits it
+TY_STRUCT	AST_TYPE_STRUCT	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/emitimpl.h): the rename is tree-wide; also used in replay.c (2): the script edits it
+TY_UNION	AST_TYPE_UNION	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/emitimpl.h): the rename is tree-wide; also used in replay.c (1): the script edits it
+TY_ENUM	AST_TYPE_ENUM	public,constant	include/frontend/c/cc.h	public: read outside the module (codegen/emitimpl.h): the rename is tree-wide; also used in replay.c (1): the script edits it
+TY_VECTOR	AST_TYPE_VECTOR	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/x64, codegen/emitimpl.h): the rename is tree-wide
+TY_SVE	AST_TYPE_SVE_BUILTIN	public,constant	include/frontend/c/cc.h	public: read outside the module (codegen/emitimpl.h, codegen/prepass.c): the rename is tree-wide
+TY_BITINT	AST_TYPE_BITINT	public,constant	include/frontend/c/cc.h	public: read outside the module (codegen/emitimpl.h): the rename is tree-wide
+TY_UBITINT	AST_TYPE_UNSIGNED_BITINT	public,constant	include/frontend/c/cc.h	public: read outside the module (codegen/emitimpl.h): the rename is tree-wide
+TY_NKINDS	AST_TYPE_KIND_COUNT	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/); also used in replay.c (1): the script edits it; also named in bench/ or tools/ scripts
+N_NONE	AST_NODE_NONE	public,constant	include/frontend/c/cc.h	public: read outside the module (codegen/walk): the rename is tree-wide; also used in replay.c (1): the script edits it
+N_NUM	AST_NODE_NUMBER	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/condition-fold.c, codegen/expression-effects.c, codegen/known-bits.c, codegen/opt): the rename is tree-wide; also used in replay.c (1): the script edits it; also named in bench/ or tools/ scripts; also named in TODO.md/AGENTS.md prose
+N_FNUM	AST_NODE_FLOAT_NUMBER	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/expression-effects.c, codegen/prepass.c, codegen/walk): the rename is tree-wide; also used in replay.c (1): the script edits it; also named in bench/ or tools/ scripts
+N_BIGNUM	AST_NODE_BITINT_NUMBER	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, codegen/prepass.c, codegen/walk): the rename is tree-wide; also used in replay.c (2): the script edits it
+N_STR	AST_NODE_STRING	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/data.c, codegen/expression-effects.c, codegen/opt, codegen/prepass.c): the rename is tree-wide; also used in replay.c (1): the script edits it; also named in bench/ or tools/ scripts
+N_VAR	AST_NODE_VARIABLE	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/condition-fold.c, codegen/data.c, codegen/expression-effects.c): the rename is tree-wide; also used in replay.c (1): the script edits it; also named in bench/ or tools/ scripts
+N_MEMBER	AST_NODE_MEMBER	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/expression-effects.c, codegen/prepass.c, codegen/walk): the rename is tree-wide; also used in replay.c (1): the script edits it
+N_INDEX	AST_NODE_INDEX	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/expression-effects.c, codegen/prepass.c, codegen/walk): the rename is tree-wide; also used in replay.c (1): the script edits it
+N_CALL	AST_NODE_CALL	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/expression-effects.c, codegen/opt, codegen/prepass.c, codegen/walk): the rename is tree-wide; also used in replay.c (2): the script edits it; also named in bench/ or tools/ scripts
+N_BUILTIN	AST_NODE_BUILTIN	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/expression-effects.c, codegen/opt, codegen/prepass.c, codegen/walk): the rename is tree-wide; also used in replay.c (2): the script edits it
+N_CAST	AST_NODE_CAST	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/condition-fold.c, codegen/data.c, codegen/expression-effects.c): the rename is tree-wide; also used in replay.c (1): the script edits it; also named in bench/ or tools/ scripts
+N_UNARY	AST_NODE_UNARY	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/condition-fold.c, codegen/expression-effects.c, codegen/known-bits.c, codegen/opt): the rename is tree-wide; also used in replay.c (1): the script edits it; also named in bench/ or tools/ scripts
+N_ADDR	AST_NODE_ADDRESS	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/expression-effects.c, codegen/prepass.c, codegen/walk): the rename is tree-wide; also used in replay.c (1): the script edits it
+N_DEREF	AST_NODE_DEREFERENCE	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/expression-effects.c, codegen/prepass.c, codegen/walk): the rename is tree-wide; also used in replay.c (1): the script edits it
+N_PREINC	AST_NODE_PRE_INCREMENT	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/expression-effects.c, codegen/opt, codegen/prepass.c, codegen/walk): the rename is tree-wide; also used in replay.c (1): the script edits it
+N_PREDEC	AST_NODE_PRE_DECREMENT	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/expression-effects.c, codegen/opt, codegen/prepass.c, codegen/walk): the rename is tree-wide; also used in replay.c (1): the script edits it
+N_POSTINC	AST_NODE_POST_INCREMENT	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/expression-effects.c, codegen/opt, codegen/prepass.c, codegen/walk): the rename is tree-wide; also used in replay.c (1): the script edits it
+N_POSTDEC	AST_NODE_POST_DECREMENT	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/expression-effects.c, codegen/opt, codegen/prepass.c, codegen/walk): the rename is tree-wide; also used in replay.c (1): the script edits it
+N_BINARY	AST_NODE_BINARY	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/condition-fold.c, codegen/expression-effects.c, codegen/known-bits.c, codegen/opt): the rename is tree-wide; also used in replay.c (1): the script edits it; also named in bench/ or tools/ scripts
+N_LOGAND	AST_NODE_LOGICAL_AND	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/condition-fold.c, codegen/expression-effects.c, codegen/opt, codegen/prepass.c): the rename is tree-wide; also used in replay.c (1): the script edits it
+N_LOGOR	AST_NODE_LOGICAL_OR	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/condition-fold.c, codegen/expression-effects.c, codegen/opt, codegen/prepass.c): the rename is tree-wide; also used in replay.c (1): the script edits it
+N_ASSIGN	AST_NODE_ASSIGN	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/expression-effects.c, codegen/opt, codegen/prepass.c, codegen/walk): the rename is tree-wide; also used in replay.c (1): the script edits it
+N_COND	AST_NODE_CONDITIONAL	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/expression-effects.c, codegen/known-bits.c, codegen/opt, codegen/prepass.c): the rename is tree-wide; also used in replay.c (1): the script edits it
+N_COMMA	AST_NODE_COMMA	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/data.c, codegen/expression-effects.c, codegen/known-bits.c, codegen/opt): the rename is tree-wide; also used in replay.c (1): the script edits it
+N_SIZEOF_VLA	AST_NODE_SIZEOF_VLA	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/prepass.c, codegen/walk): the rename is tree-wide; also used in replay.c (1): the script edits it
+N_STMTEXPR	AST_NODE_STATEMENT_EXPRESSION	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/expression-effects.c, codegen/prepass.c, codegen/walk): the rename is tree-wide; also used in replay.c (1): the script edits it
+N_COMPLIT	AST_NODE_COMPOUND_LITERAL	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/data.c, codegen/expression-effects.c, codegen/prepass.c, codegen/walk): the rename is tree-wide; also used in replay.c (1): the script edits it
+N_INIT	AST_NODE_INITIALIZER	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/data.c, codegen/expression-effects.c, codegen/opt, codegen/prepass.c): the rename is tree-wide; also used in replay.c (2): the script edits it; also named in bench/ or tools/ scripts
+N_DESIG	AST_NODE_DESIGNATOR	public,constant	include/frontend/c/cc.h	public (declared in include/frontend/c/)
+N_LABELADDR	AST_NODE_LABEL_ADDRESS	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/expression-effects.c, codegen/prepass.c, codegen/walk): the rename is tree-wide
+N_VAARG	AST_NODE_VA_ARG	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/prepass.c, codegen/walk): the rename is tree-wide; also used in replay.c (1): the script edits it
+N_ZERO	AST_NODE_ZERO	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/data.c, codegen/expression-effects.c, codegen/opt, codegen/prepass.c): the rename is tree-wide; also used in replay.c (1): the script edits it; also named in bench/ or tools/ scripts
+N_CPLX	AST_NODE_COMPLEX	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/data.c, codegen/expression-effects.c, codegen/prepass.c, codegen/walk): the rename is tree-wide; also used in replay.c (1): the script edits it
+N_BLOCK	AST_NODE_BLOCK	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/expression-effects.c, codegen/opt, codegen/prepass.c, codegen/walk): the rename is tree-wide; also used in replay.c (2): the script edits it
+N_EXPR	AST_NODE_EXPRESSION	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/expression-effects.c, codegen/opt, codegen/prepass.c, codegen/walk): the rename is tree-wide; also used in replay.c (1): the script edits it
+N_DECL	AST_NODE_DECLARATION	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/expression-effects.c, codegen/opt, codegen/prepass.c, codegen/walk): the rename is tree-wide; also used in replay.c (1): the script edits it; also named in bench/ or tools/ scripts
+N_IF	AST_NODE_IF	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/expression-effects.c, codegen/prepass.c, codegen/walk): the rename is tree-wide; also used in replay.c (1): the script edits it
+N_WHILE	AST_NODE_WHILE	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/prepass.c, codegen/walk): the rename is tree-wide; also used in replay.c (1): the script edits it
+N_DO	AST_NODE_DO	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/prepass.c, codegen/walk): the rename is tree-wide; also used in replay.c (1): the script edits it
+N_FOR	AST_NODE_FOR	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/prepass.c, codegen/walk): the rename is tree-wide; also used in replay.c (2): the script edits it
+N_SWITCH	AST_NODE_SWITCH	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/opt, codegen/prepass.c, codegen/walk): the rename is tree-wide; also used in replay.c (1): the script edits it
+N_CASE	AST_NODE_CASE	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/emitimpl.h, codegen/opt, codegen/prepass.c, codegen/walk): the rename is tree-wide; also used in replay.c (1): the script edits it
+N_DEFAULT	AST_NODE_DEFAULT	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/emitimpl.h, codegen/opt, codegen/prepass.c, codegen/walk): the rename is tree-wide; also used in replay.c (1): the script edits it
+N_LABEL	AST_NODE_LABEL	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/prepass.c, codegen/walk): the rename is tree-wide
+N_GOTO	AST_NODE_GOTO	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/prepass.c, codegen/walk): the rename is tree-wide
+N_GOTO_IND	AST_NODE_GOTO_INDIRECT	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/prepass.c, codegen/walk): the rename is tree-wide; also used in replay.c (1): the script edits it
+N_BREAK	AST_NODE_BREAK	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/opt, codegen/walk): the rename is tree-wide; also used in replay.c (1): the script edits it
+N_CONTINUE	AST_NODE_CONTINUE	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide; also used in replay.c (1): the script edits it
+N_RETURN	AST_NODE_RETURN	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/expression-effects.c, codegen/opt, codegen/prepass.c, codegen/walk): the rename is tree-wide; also used in replay.c (1): the script edits it
+N_ASM	AST_NODE_ASM	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/expression-effects.c, codegen/prepass.c, codegen/walk): the rename is tree-wide
+N_NKINDS	AST_NODE_KIND_COUNT	public,constant	include/frontend/c/cc.h	public: read outside the module (codegen/walk): the rename is tree-wide; also named in bench/ or tools/ scripts
+CK_NOP	AST_CAST_NOP	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/data.c, codegen/expression-queries.c, codegen/known-bits.c): the rename is tree-wide
+CK_INT	AST_CAST_INTEGER	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/known-bits.c, codegen/opt, codegen/walk): the rename is tree-wide; also named in bench/ or tools/ scripts
+CK_BOOL	AST_CAST_BOOL	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/known-bits.c, codegen/opt, codegen/walk): the rename is tree-wide; also named in bench/ or tools/ scripts
+CK_I2F	AST_CAST_INTEGER_TO_FLOAT	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, codegen/walk): the rename is tree-wide
+CK_F2I	AST_CAST_FLOAT_TO_INTEGER	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, codegen/walk): the rename is tree-wide
+CK_F2F	AST_CAST_FLOAT_TO_FLOAT	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, codegen/walk): the rename is tree-wide
+CK_P2I	AST_CAST_POINTER_TO_INTEGER	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, codegen/walk): the rename is tree-wide
+CK_I2P	AST_CAST_INTEGER_TO_POINTER	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+CK_P2P	AST_CAST_POINTER_TO_POINTER	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/x64, codegen/expression-queries.c, codegen/opt, codegen/prepass.c, codegen/walk): the rename is tree-wide
+CK_DECAY	AST_CAST_ARRAY_DECAY	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/opt, codegen/prepass.c, codegen/walk): the rename is tree-wide
+CK_FDECAY	AST_CAST_FUNCTION_DECAY	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/expression-queries.c, codegen/opt, codegen/prepass.c): the rename is tree-wide
+CK_VOID	AST_CAST_VOID	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+CK_UNION	AST_CAST_UNION	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+CK_NULL	AST_CAST_NULL_POINTER	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+CK_SPLAT	AST_CAST_SPLAT	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/data.c, codegen/walk): the rename is tree-wide; also named in TODO.md/AGENTS.md prose
+CK_BITS	AST_CAST_BIT_CAST	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/data.c, codegen/prepass.c, codegen/walk): the rename is tree-wide
+CK_VBITS	AST_CAST_VECTOR_BITS	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+CK_VADDR	AST_CAST_VECTOR_ADDRESS	public,constant	include/frontend/c/cc.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_NONE	CC_BUILTIN_NONE	public,constant	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+BI_CONSTANT_P	CC_BUILTIN_CONSTANT_P	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/expression-effects.c, codegen/opt, codegen/walk): the rename is tree-wide
+BI_EXPECT	CC_BUILTIN_EXPECT	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_EXPECT_PROB	CC_BUILTIN_EXPECT_PROB	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_CHOOSE	CC_BUILTIN_CHOOSE_EXPR	public,constant	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+BI_TYPES_COMPAT	CC_BUILTIN_TYPES_COMPATIBLE	public,constant	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+BI_OFFSETOF	CC_BUILTIN_OFFSETOF	public,constant	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+BI_VA_START	CC_BUILTIN_VA_START	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/expression-effects.c, codegen/prepass.c, codegen/walk): the rename is tree-wide
+BI_VA_END	CC_BUILTIN_VA_END	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/expression-effects.c, codegen/prepass.c, codegen/walk): the rename is tree-wide
+BI_VA_COPY	CC_BUILTIN_VA_COPY	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/expression-effects.c, codegen/prepass.c, codegen/walk): the rename is tree-wide
+BI_VA_ARG	CC_BUILTIN_VA_ARG	public,constant	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+BI_CLZ	CC_BUILTIN_CLZ	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/vir, codegen/walk): the rename is tree-wide
+BI_CLZL	CC_BUILTIN_CLZL	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/vir, codegen/walk): the rename is tree-wide
+BI_CLZLL	CC_BUILTIN_CLZLL	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/vir, codegen/walk): the rename is tree-wide
+BI_CTZ	CC_BUILTIN_CTZ	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/vir, codegen/walk): the rename is tree-wide
+BI_CTZL	CC_BUILTIN_CTZL	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/vir, codegen/walk): the rename is tree-wide
+BI_CTZLL	CC_BUILTIN_CTZLL	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/vir, codegen/walk): the rename is tree-wide
+BI_FFS	CC_BUILTIN_FFS	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/walk): the rename is tree-wide
+BI_FFSL	CC_BUILTIN_FFSL	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/walk): the rename is tree-wide
+BI_FFSLL	CC_BUILTIN_FFSLL	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/walk): the rename is tree-wide
+BI_POPCOUNT	CC_BUILTIN_POPCOUNT	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/vir, codegen/walk): the rename is tree-wide
+BI_POPCOUNTL	CC_BUILTIN_POPCOUNTL	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/vir, codegen/walk): the rename is tree-wide
+BI_POPCOUNTLL	CC_BUILTIN_POPCOUNTLL	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/vir, codegen/walk): the rename is tree-wide
+BI_PARITY	CC_BUILTIN_PARITY	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/vir, codegen/walk): the rename is tree-wide
+BI_PARITYL	CC_BUILTIN_PARITYL	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/vir, codegen/walk): the rename is tree-wide
+BI_PARITYLL	CC_BUILTIN_PARITYLL	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/vir, codegen/walk): the rename is tree-wide
+BI_CLRSB	CC_BUILTIN_CLRSB	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_CLRSBL	CC_BUILTIN_CLRSBL	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_CLRSBLL	CC_BUILTIN_CLRSBLL	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_CLZG	CC_BUILTIN_CLZG	public,constant	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+BI_CTZG	CC_BUILTIN_CTZG	public,constant	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+BI_POPCOUNTG	CC_BUILTIN_POPCOUNTG	public,constant	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+BI_SHUFFLEVECTOR	CC_BUILTIN_SHUFFLEVECTOR	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_CONVERTVECTOR	CC_BUILTIN_CONVERTVECTOR	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_BSWAP16	CC_BUILTIN_BSWAP16	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/vir, codegen/walk): the rename is tree-wide
+BI_BSWAP32	CC_BUILTIN_BSWAP32	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/vir, codegen/walk): the rename is tree-wide
+BI_BSWAP64	CC_BUILTIN_BSWAP64	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/vir, codegen/walk): the rename is tree-wide
+BI_BITREVERSE8	CC_BUILTIN_BITREVERSE8	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_BITREVERSE16	CC_BUILTIN_BITREVERSE16	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_BITREVERSE32	CC_BUILTIN_BITREVERSE32	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_BITREVERSE64	CC_BUILTIN_BITREVERSE64	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_UNREACHABLE	CC_BUILTIN_UNREACHABLE	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/expression-effects.c, codegen/walk): the rename is tree-wide
+BI_TRAP	CC_BUILTIN_TRAP	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/expression-effects.c, codegen/walk): the rename is tree-wide
+BI_DEBUGTRAP	CC_BUILTIN_DEBUGTRAP	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/expression-effects.c): the rename is tree-wide
+BI_RETURN_ADDRESS	CC_BUILTIN_RETURN_ADDRESS	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_FRAME_ADDRESS	CC_BUILTIN_FRAME_ADDRESS	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_EXTRACT_RETURN_ADDR	CC_BUILTIN_EXTRACT_RETURN_ADDRESS	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_ADD_OVERFLOW	CC_BUILTIN_ADD_OVERFLOW	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/expression-effects.c, codegen/walk): the rename is tree-wide
+BI_SUB_OVERFLOW	CC_BUILTIN_SUB_OVERFLOW	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/expression-effects.c, codegen/walk): the rename is tree-wide
+BI_MUL_OVERFLOW	CC_BUILTIN_MUL_OVERFLOW	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/expression-effects.c, codegen/walk): the rename is tree-wide
+BI_ADDC	CC_BUILTIN_ADDC	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, codegen/expression-effects.c): the rename is tree-wide
+BI_SUBC	CC_BUILTIN_SUBC	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, codegen/expression-effects.c): the rename is tree-wide
+BI_OBJECT_SIZE	CC_BUILTIN_OBJECT_SIZE	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_DYNAMIC_OBJECT_SIZE	CC_BUILTIN_DYNAMIC_OBJECT_SIZE	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_COUNTED_BY_REF	CC_BUILTIN_COUNTED_BY_REF	public,constant	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+BI_ALLOCA	CC_BUILTIN_ALLOCA	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/expression-effects.c, codegen/prepass.c, codegen/walk): the rename is tree-wide
+BI_ALLOCA_UNINIT	CC_BUILTIN_ALLOCA_UNINITIALIZED	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/prepass.c, codegen/walk): the rename is tree-wide
+BI_PREFETCH	CC_BUILTIN_PREFETCH	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_ASSUME_ALIGNED	CC_BUILTIN_ASSUME_ALIGNED	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_ASSUME	CC_BUILTIN_ASSUME	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_CLASSIFY_TYPE	CC_BUILTIN_CLASSIFY_TYPE	public,constant	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+BI_IS_CONSTANT_EVALUATED	CC_BUILTIN_IS_CONSTANT_EVALUATED	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, codegen/walk): the rename is tree-wide
+BI_STRLEN	CC_BUILTIN_STRLEN	public,constant	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+BI_HUGE_VAL	CC_BUILTIN_HUGE_VAL	public,constant	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+BI_HUGE_VALF	CC_BUILTIN_HUGE_VALF	public,constant	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+BI_INF	CC_BUILTIN_INF	public,constant	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+BI_INFF	CC_BUILTIN_INFF	public,constant	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+BI_NAN	CC_BUILTIN_NAN	public,constant	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+BI_NANF	CC_BUILTIN_NANF	public,constant	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+BI_ISNAN	CC_BUILTIN_ISNAN	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_ISINF	CC_BUILTIN_ISINF	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_ISFINITE	CC_BUILTIN_ISFINITE	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_SIGNBIT	CC_BUILTIN_SIGNBIT	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_FPCLASSIFY	CC_BUILTIN_FPCLASSIFY	public,constant	include/frontend/c/ccint.h	public: read outside the module (codegen/walk): the rename is tree-wide
+BI_ISINF_SIGN	CC_BUILTIN_ISINF_SIGN	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_ISNORMAL	CC_BUILTIN_ISNORMAL	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, codegen/walk): the rename is tree-wide
+BI_ISGREATER	CC_BUILTIN_ISGREATER	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_ISGREATEREQUAL	CC_BUILTIN_ISGREATEREQUAL	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_ISLESS	CC_BUILTIN_ISLESS	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_ISLESSEQUAL	CC_BUILTIN_ISLESSEQUAL	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_ISLESSGREATER	CC_BUILTIN_ISLESSGREATER	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_ISUNORDERED	CC_BUILTIN_ISUNORDERED	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_CPU_SUPPORTS	CC_BUILTIN_CPU_SUPPORTS	public,constant	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+BI_ARM_RSR	CC_BUILTIN_ARM_RSR	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64): the rename is tree-wide
+BI_FLT_ROUNDS	CC_BUILTIN_FLT_ROUNDS	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm): the rename is tree-wide
+BI_OS_LOG_FORMAT	CC_BUILTIN_OS_LOG_FORMAT	public,constant	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+BI_OS_LOG_SIZE	CC_BUILTIN_OS_LOG_SIZE	public,constant	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+BI_ATOMIC_LOAD_N	CC_BUILTIN_ATOMIC_LOAD_N	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/expression-effects.c, codegen/walk): the rename is tree-wide
+BI_ATOMIC_STORE_N	CC_BUILTIN_ATOMIC_STORE_N	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_ATOMIC_EXCHANGE_N	CC_BUILTIN_ATOMIC_EXCHANGE_N	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_ATOMIC_CMPXCHG_N	CC_BUILTIN_ATOMIC_CMPXCHG_N	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_ATOMIC_LOAD	CC_BUILTIN_ATOMIC_LOAD	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_ATOMIC_STORE	CC_BUILTIN_ATOMIC_STORE	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_ATOMIC_EXCHANGE	CC_BUILTIN_ATOMIC_EXCHANGE	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_ATOMIC_CMPXCHG	CC_BUILTIN_ATOMIC_CMPXCHG	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_ATOMIC_FETCH_ADD	CC_BUILTIN_ATOMIC_FETCH_ADD	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_ATOMIC_FETCH_SUB	CC_BUILTIN_ATOMIC_FETCH_SUB	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_ATOMIC_FETCH_AND	CC_BUILTIN_ATOMIC_FETCH_AND	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_ATOMIC_FETCH_OR	CC_BUILTIN_ATOMIC_FETCH_OR	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_ATOMIC_FETCH_XOR	CC_BUILTIN_ATOMIC_FETCH_XOR	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_ATOMIC_FETCH_NAND	CC_BUILTIN_ATOMIC_FETCH_NAND	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_ATOMIC_FETCH_MAX	CC_BUILTIN_ATOMIC_FETCH_MAX	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_ATOMIC_FETCH_MIN	CC_BUILTIN_ATOMIC_FETCH_MIN	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_ATOMIC_ADD_FETCH	CC_BUILTIN_ATOMIC_ADD_FETCH	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_ATOMIC_SUB_FETCH	CC_BUILTIN_ATOMIC_SUB_FETCH	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_ATOMIC_AND_FETCH	CC_BUILTIN_ATOMIC_AND_FETCH	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_ATOMIC_OR_FETCH	CC_BUILTIN_ATOMIC_OR_FETCH	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_ATOMIC_XOR_FETCH	CC_BUILTIN_ATOMIC_XOR_FETCH	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_ATOMIC_NAND_FETCH	CC_BUILTIN_ATOMIC_NAND_FETCH	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_ATOMIC_MAX_FETCH	CC_BUILTIN_ATOMIC_MAX_FETCH	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_ATOMIC_MIN_FETCH	CC_BUILTIN_ATOMIC_MIN_FETCH	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_ATOMIC_TEST_AND_SET	CC_BUILTIN_ATOMIC_TEST_AND_SET	public,constant	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+BI_ATOMIC_CLEAR	CC_BUILTIN_ATOMIC_CLEAR	public,constant	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+BI_ATOMIC_THREAD_FENCE	CC_BUILTIN_ATOMIC_THREAD_FENCE	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_ATOMIC_SIGNAL_FENCE	CC_BUILTIN_ATOMIC_SIGNAL_FENCE	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/expression-effects.c, codegen/walk): the rename is tree-wide
+BI_ATOMIC_LOCK_FREE	CC_BUILTIN_ATOMIC_LOCK_FREE	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_SYNC_VAL_CAS	CC_BUILTIN_SYNC_VAL_CAS	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_SYNC_BOOL_CAS	CC_BUILTIN_SYNC_BOOL_CAS	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide
+BI_SYNC_LOCK_RELEASE	CC_BUILTIN_SYNC_LOCK_RELEASE	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/wasm): the rename is tree-wide
+BI_SYNC_SYNCHRONIZE	CC_BUILTIN_SYNC_SYNCHRONIZE	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/wasm): the rename is tree-wide
+BI_CONJ	CC_BUILTIN_CONJ	public,constant	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+BI_CREAL	CC_BUILTIN_CREAL	public,constant	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+BI_CIMAG	CC_BUILTIN_CIMAG	public,constant	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+BI_ROTL8	CC_BUILTIN_ROTL8	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64): the rename is tree-wide
+BI_ROTL16	CC_BUILTIN_ROTL16	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64): the rename is tree-wide
+BI_ROTL32	CC_BUILTIN_ROTL32	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm): the rename is tree-wide
+BI_ROTL64	CC_BUILTIN_ROTL64	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm): the rename is tree-wide
+BI_ROTR8	CC_BUILTIN_ROTR8	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64): the rename is tree-wide
+BI_ROTR16	CC_BUILTIN_ROTR16	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64): the rename is tree-wide
+BI_ROTR32	CC_BUILTIN_ROTR32	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm): the rename is tree-wide
+BI_ROTR64	CC_BUILTIN_ROTR64	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm): the rename is tree-wide
+BI_ARM_NOP	CC_BUILTIN_ARM_NOP	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, codegen/expression-effects.c): the rename is tree-wide
+BI_ARM_YIELD	CC_BUILTIN_ARM_YIELD	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64): the rename is tree-wide
+BI_ARM_WFE	CC_BUILTIN_ARM_WFE	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64): the rename is tree-wide
+BI_ARM_WFI	CC_BUILTIN_ARM_WFI	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64): the rename is tree-wide
+BI_ARM_SEV	CC_BUILTIN_ARM_SEV	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64): the rename is tree-wide
+BI_ARM_SEVL	CC_BUILTIN_ARM_SEVL	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64): the rename is tree-wide
+BI_ARM_CLREX	CC_BUILTIN_ARM_CLREX	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64): the rename is tree-wide
+BI_ARM_ISB	CC_BUILTIN_ARM_ISB	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64): the rename is tree-wide
+BI_ARM_DMB	CC_BUILTIN_ARM_DMB	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64): the rename is tree-wide
+BI_ARM_DSB	CC_BUILTIN_ARM_DSB	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64): the rename is tree-wide
+BI_ARM_TRAP	CC_BUILTIN_ARM_TRAP	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, codegen/expression-effects.c): the rename is tree-wide
+BI_SETJMP	CC_BUILTIN_SETJMP	public,constant	include/frontend/c/ccint.h	public: read outside the module (codegen/walk): the rename is tree-wide
+BI_LONGJMP	CC_BUILTIN_LONGJMP	public,constant	include/frontend/c/ccint.h	public: read outside the module (codegen/walk): the rename is tree-wide
+BI_LIB	CC_BUILTIN_LIBRARY	public,constant	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+BI_NANS	CC_BUILTIN_NANS	public,constant	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+BI_ISSIGNALING	CC_BUILTIN_ISSIGNALING	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, codegen/walk): the rename is tree-wide
+BI_ISFPCLASS	CC_BUILTIN_ISFPCLASS	public,constant	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+BI_ISSUBNORMAL	CC_BUILTIN_ISSUBNORMAL	public,constant	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+BI_ISZERO	CC_BUILTIN_ISZERO	public,constant	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+BI_X86_SIMD	CC_BUILTIN_X86_SIMD	public,constant	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+BI_X86_PCMPSTR	CC_BUILTIN_X86_PCMPSTR	public,constant	include/frontend/c/ccint.h	public: read outside the module (codegen/walk): the rename is tree-wide
+BI_X86_BLENDVB	CC_BUILTIN_X86_BLENDVB	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/x64, codegen/walk): the rename is tree-wide
+BI_ELEMENTWISE_ABS	CC_BUILTIN_ELEMENTWISE_ABS	public,constant	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+BI_STDC_ROTL	CC_BUILTIN_STDC_ROTL	public,constant	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+BI_STDC_ROTR	CC_BUILTIN_STDC_ROTR	public,constant	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+BI_FAST_SQRT	CC_BUILTIN_FAST_SQRT	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, codegen/walk): the rename is tree-wide
+BI_FAST_ROOT4	CC_BUILTIN_FAST_ROOT4	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, codegen/walk): the rename is tree-wide
+BI_COMPLEX	CC_BUILTIN_COMPLEX	public,constant	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+BI_COUNT	CC_BUILTIN_COUNT	public,constant	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+CV_NONE	CC_VALUE_NONE	public,constant	include/frontend/c/ccint.h	public (declared in include/frontend/c/)
+CV_INT	CC_VALUE_INTEGER	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, arch/x64, codegen/condition-fold.c, codegen/data.c, codegen/opt): the rename is tree-wide
+CV_FLT	CC_VALUE_FLOAT	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/condition-fold.c, codegen/data.c, codegen/prepass.c, codegen/walk): the rename is tree-wide
+CV_ADDR	CC_VALUE_ADDRESS	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/data.c, codegen/prepass.c, codegen/walk): the rename is tree-wide
+CV_BIGINT	CC_VALUE_BITINT	public,constant	include/frontend/c/ccint.h	public: read outside the module (codegen/data.c): the rename is tree-wide
+AF_TAIL_RETURNS_TWICE	CC_ATTRIBUTE_FLAG_TAIL_RETURNS_TWICE	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/x64, codegen/opt, codegen/prepass.c): the rename is tree-wide
+AF_TAIL_DISABLE	CC_ATTRIBUTE_FLAG_TAIL_DISABLE	public,constant	include/frontend/c/ccint.h	public: read outside the module (codegen/opt): the rename is tree-wide
+AF_TAIL_NOT_CALLED	CC_ATTRIBUTE_FLAG_TAIL_NOT_CALLED	public,constant	include/frontend/c/ccint.h	public: read outside the module (codegen/opt): the rename is tree-wide
+AF_OPTNONE	CC_ATTRIBUTE_FLAG_OPTNONE	public,constant	include/frontend/c/ccint.h	public: read outside the module (codegen/opt): the rename is tree-wide; also named in bench/ or tools/ scripts
+CC_LIB_OTHER	CC_LIBRARY_KIND_OTHER	public,constant	include/frontend/c/ccint.h	public (declared in include/frontend/c/); also named in bench/ or tools/ scripts
+CC_LIB_MEMCPY	CC_LIBRARY_KIND_MEMCPY	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, codegen/emitimpl.h, codegen/walk): the rename is tree-wide; also named in bench/ or tools/ scripts
+CC_LIB_MEMMOVE	CC_LIBRARY_KIND_MEMMOVE	public,constant	include/frontend/c/ccint.h	public: read outside the module (codegen/emitimpl.h, codegen/walk): the rename is tree-wide; also named in bench/ or tools/ scripts
+CC_LIB_MEMSET	CC_LIBRARY_KIND_MEMSET	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, codegen/emitimpl.h, codegen/walk): the rename is tree-wide; also named in bench/ or tools/ scripts
+CC_LIB_STRCMP	CC_LIBRARY_KIND_STRCMP	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, codegen/opt, codegen/walk): the rename is tree-wide; also named in bench/ or tools/ scripts
+CC_LIB_FABSL	CC_LIBRARY_KIND_FABSL	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/x64): the rename is tree-wide; also named in bench/ or tools/ scripts
+CC_LIB_CHK	CC_LIBRARY_KIND_CHECKED	public,constant	include/frontend/c/ccint.h	public: read outside the module (arch/a64, arch/wasm, codegen/walk): the rename is tree-wide; also named in bench/ or tools/ scripts
+dop	cc_declarator_operation	public,function	frontend/c/ccimpl.h	an English word used in comments or prose; was type
+QT	AST_QUALIFIED_TYPE	public,function	include/frontend/c/cc.h	one- or two-letter name; was macro; public: read outside the module (arch/a64, codegen/emitimpl.h, codegen/walk): the rename is tree-wide; also used in replay.c (3): the script edits it
+QI	AST_QUALIFIED_TYPE_INDEX	public,function	include/frontend/c/cc.h	one- or two-letter name; test inputs use the word; was macro; public: read outside the module (arch/a64): the rename is tree-wide; also used in replay.c (19): the script edits it
+QQ	AST_QUALIFIED_TYPE_QUALIFIERS	public,function	include/frontend/c/cc.h	one- or two-letter name; was macro; public: read outside the module (arch/a64, arch/wasm, codegen/condition-fold.c, codegen/data.c, codegen/expression-effects.c, codegen/function-output.c): the rename is tree-wide; also used in replay.c (7): the script edits it
+CT	AST_TYPE_OF	public,function	include/frontend/c/ccint.h	one- or two-letter name; was macro; public: read outside the module (codegen/emitimpl.h): the rename is tree-wide
+CN	AST_NODE_OF	public,function	include/frontend/c/ccint.h	one- or two-letter name; was macro; public (declared in include/frontend/c/)
+cc_fetch	cc_token_fetch_out_of_line	public,function	frontend/c/token.c	used by the driver (include/driver/ccsnap.h, driver/ccsnap.c); also used in replay.c (1): the script edits it
