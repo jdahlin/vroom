@@ -91,7 +91,7 @@ VPRIV int x64_replay(rctx *R, const char *p, size_t n)
 	};
 	for (size_t k = 0; k < (n - 8) / sizeof(rec); k++) {
 		const rec *i = &in[k];
-		int sz = i->sz, count = 2;
+		int sz = i->sz, count = 2, op = -1;
 		const char *mn = NULL;
 		char name[24];
 		XOp o[3] = { xo_reg(i->r[1], sz), xo_reg(i->r[0], sz), {0} };
@@ -101,15 +101,16 @@ VPRIV int x64_replay(rctx *R, const char *p, size_t n)
 			continue;
 		case X_MOV:
 			mn = "mov";
+			if (!IS_XMM(i->r[0]) && !IS_XMM(i->r[1])) op=X64O_MOV;
 			if (IS_XMM(i->r[0]) && IS_XMM(i->r[1])) { mn="movaps"; sz=0; }
 			else if (IS_XMM(i->r[0]) || IS_XMM(i->r[1])) { mn=sz==4?"movd":"movq"; sz=0; }
 			break;
 		case X_MOVI:
-			mn="mov";
+			mn="mov"; op=X64O_MOV;
 			if (sz==4) o[0]=xo_imm((int32_t)i->imm);
 			else if (i->imm >= INT32_MIN && i->imm <= INT32_MAX) { sz=8; o[0]=xo_imm(i->imm); }
 			else if ((uint64_t)i->imm <= UINT32_MAX) { sz=4; o[0]=xo_imm(i->imm); }
-			else { mn="movabs"; sz=8; o[0]=xo_imm(i->imm); }
+			else { op=-1; mn="movabs"; sz=8; o[0]=xo_imm(i->imm); }
 			o[1]=xo_reg(i->r[0],sz); break;
 		case X_LD: case X_LDX: case X_EXT:
 			o[0]=i->op==X_EXT?xo_reg(i->r[1],sz):xo_mem(R,i);
@@ -118,10 +119,12 @@ VPRIV int x64_replay(rctx *R, const char *p, size_t n)
 				static const char *const sx[] = { [1]="movsbq",[2]="movswq",[4]="movslq",[8]="movq" };
 				static const char *const zx[] = { [1]="movzbl",[2]="movzwl",[4]="movl",[8]="movq" };
 				mn=i->cond?sx[sz]:zx[sz]; o[1]=xo_reg(i->r[0],i->cond||sz==8?8:4);
+				if (sz==8 || (sz==4 && !i->cond)) op=X64O_MOV;
 			}
 			sz=0; break;
 		case X_ST: case X_STX:
 			mn="mov"; o[0]=xo_reg(i->r[2],sz); o[1]=xo_mem(R,i);
+			if (!IS_XMM(i->r[2])) op=X64O_MOV;
 			if (IS_XMM(i->r[2])) { mn=sz==4?"movss":sz==8?"movsd":"movups"; sz=0; } break;
 		case X_LEA: mn="lea"; o[0]=xo_mem(R,i); break;
 		case X_LEASCALE:
@@ -133,8 +136,8 @@ VPRIV int x64_replay(rctx *R, const char *p, size_t n)
 		case X_SHL: case X_SHR: case X_SAR: mn=alu[i->op]; o[0]=xo_reg(RCX,1); break;
 		case X_IMULI: mn="imul"; o[2]=o[1]; o[1]=o[0]; o[0]=xo_imm(i->imm); count=3; break;
 		case X_NEG: case X_NOT: mn=i->op==X_NEG?"neg":"not"; o[0]=o[1]; count=1; break;
-		case X_CMP: mn="cmp"; o[1]=o[0]; o[0]=xo_reg(i->r[2],sz); break;
-		case X_CMPI: mn="cmp"; o[1]=o[0]; o[0]=xo_imm(i->imm); break;
+		case X_CMP: op=X64O_CMP; mn="cmp"; o[1]=o[0]; o[0]=xo_reg(i->r[2],sz); break;
+		case X_CMPI: op=X64O_CMP; mn="cmp"; o[1]=o[0]; o[0]=xo_imm(i->imm); break;
 		case X_TEST: mn="test"; o[1]=o[0]; break;
 		case X_CMOV: snprintf(name,sizeof name,"cmov%s",ccname[i->cond]); mn=name; o[0]=xo_reg(i->r[2],sz); break;
 		case X_SETCC:
@@ -163,7 +166,21 @@ VPRIV int x64_replay(rctx *R, const char *p, size_t n)
 		case X_FXOR: mn="xorps";sz=0;o[0]=xo_reg(i->r[2],8);break;
 		default: return -1;
 		}
-		if(xo_emit(R,mn,sz,o,count)) return -1;
+		/* Choose the encoding directly from the record, without constructing or
+		 * reclassifying a mnemonic. Noninteger forms retain the general path. */
+		switch (i->op) {
+		case X_ADD: case X_ADDI: op=X64O_ADD; break;
+		case X_OR: case X_ORI: op=X64O_OR; break;
+		case X_ADC: op=X64O_ADC; break;
+		case X_SBB: op=X64O_SBB; break;
+		case X_AND: case X_ANDI: op=X64O_AND; break;
+		case X_SUB: case X_SUBI: op=X64O_SUB; break;
+		case X_XOR: case X_XORI: op=X64O_XOR; break;
+		default: break;
+		}
+		if (op >= 0) {
+			if (as_x64_op(R->as, (enum X64Op)op, sz ? sz : o[1].size, o)) return -1;
+		} else if(xo_emit(R,mn,sz,o,count)) return -1;
 	}
 	return 0;
 }
