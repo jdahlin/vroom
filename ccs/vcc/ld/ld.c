@@ -63,6 +63,7 @@
 #define NONE 0xffffffffu
 
 static bool x86_ld;		/* the inputs are x86-64 (arch/x64/ld/x64.inc) */
+static _Atomic uint16_t ld_machine;	/* e_machine of the first object loaded (parse_obj) */
 static uint64_t tls_start;	/* x86: the PT_TLS start (dtpoff) */
 
 #include "ldelf.h"
@@ -1973,8 +1974,16 @@ static void parse_obj(void *arg, size_t i)
 		o->buf = NULL;
 		return;
 	}
+	uint16_t m0 = 0;
+
+	if (!atomic_compare_exchange_strong(&ld_machine, &m0, eh->e_machine) && m0 != eh->e_machine) {
+		error("%s is incompatible with the other inputs (%s, not %s)", o->path,
+		      eh->e_machine == 62 ? "x86-64" : "AArch64", m0 == 62 ? "x86-64" : "AArch64");
+		o->buf = NULL;
+		return;
+	}
 	if (eh->e_machine == 62)
-		x86_ld = true;	/* (one machine for all inputs: checked once loaded) */
+		x86_ld = true;	/* (one machine for all inputs: checked above) */
 	if (!obj_valid(o, eh)) {
 		o->buf = NULL;
 		return;
@@ -6506,6 +6515,8 @@ static void reset_state(void)
 	memset(&stop_syms, 0, sizeof stop_syms);
 	ehhdr_isec = NONE;	/* set only while NONE */
 	has_tls = headers_loaded = false;
+	x86_ld = false;
+	atomic_store(&ld_machine, 0);
 	tls_tp = tbss_off = 0;
 	stub_names = NULL;
 	nstubs = 0;
