@@ -13,7 +13,7 @@ import re
 import subprocess
 import tempfile
 
-from hostenv import BUILD, R
+from hostenv import BUILD, R, has_wasm
 
 
 def run(cmd):
@@ -247,6 +247,9 @@ def main():
     source = args.source_root / 'src/test/vcc/stack_cells.c'
     targets = args.target or ['x86_64-linux-gnu', 'aarch64-linux-gnu',
                              'wasm32-unknown-emscripten', 'wasm64-unknown-emscripten']
+    if not args.target and not has_wasm(args.vpp):
+        targets = [t for t in targets if not t.startswith('wasm')]
+        print('wasm targets left out: vpp is built without WebAssembly (make VCC_WASM=1)', flush=True)
     with tempfile.TemporaryDirectory(prefix='vcc-slot-observable-') as tmp:
         directory = Path(tmp)
         mutant = directory / 'mutant.c'

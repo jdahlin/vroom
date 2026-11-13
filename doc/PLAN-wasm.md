@@ -152,6 +152,21 @@ runnable objects. W1 can partly run in parallel with W0.
 
 ## Status
 
+### Disabled (2026-11-13, by decision)
+
+The owner has switched the wasm target off until it is needed again; it is
+expected to rot meanwhile.  The default build no longer compiles
+`arch/wasm/`, `platform/wasm/` or `ld/wasmld.c` (`src/Makefile`, `VCC_WASM`,
+empty by default), `WASM(c)` is a constant 0 in `emit/`, and a wasm target
+(`--target=wasm*`, `vasm --target=wasm*`, `vlink -mwasm64`) fails with
+"vcc: error: this build has no WebAssembly support (make VCC_WASM=1)".  The
+`wasm` job is out of the premerge gate (`wasm.yml` is manual-only,
+`workflow_dispatch`).  To turn it back on: build with `make -C ccs vcc
+VCC_WASM=1` (also `OUT=` another directory to keep both), run the harnesses
+below against that build, and restore `workflow_call` in `wasm.yml` and the
+`wasm` job and `needs` entry in `premerge.yml`.  Nothing was deleted; the
+steps below are as they were.
+
 ### W9 (2026-11-11): replace Emscripten, first standalone test path done
 
 The goal is to build and run wasm without emcc/emsdk. Emscripten is today

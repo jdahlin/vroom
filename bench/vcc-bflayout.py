@@ -16,7 +16,7 @@ import os, random, re, subprocess, sys, tempfile
 
 B = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from hostenv import BUILD
+from hostenv import BUILD, has_wasm
 VPP = os.environ.get('VCC_BIN', BUILD) + '/vpp'
 CL = os.environ.get('CLANG', 'clang')
 TARGETS = ('aarch64-linux-gnu', 'arm64-apple-darwin', 'wasm64-unknown-emscripten', 'wasm32-unknown-emscripten',
@@ -81,7 +81,11 @@ def main():
     d = keep or tempfile.mkdtemp(prefix='vcc-bflayout-')
     os.makedirs(d, exist_ok=True)
     bad = 0
-    for t in TARGETS:
+    targets = TARGETS
+    if not has_wasm(VPP):
+        targets = [t for t in TARGETS if not t.startswith('wasm')]
+        print('wasm targets left out: vpp is built without WebAssembly (make VCC_WASM=1)')
+    for t in targets:
         LONG32 = t in ILP32
         src = f'{d}/bf{"32" if LONG32 else ""}.c'
         open(src, 'w').write(gen(n, seed))

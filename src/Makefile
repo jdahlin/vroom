@@ -62,7 +62,7 @@ VCC_SANLD ?=
 VCC_OPT   ?= -O3 $(HOST_CPU)
 # include/: the headers other modules include (common/arena.h, frontend/pp/pp.h, ...)
 VCC_INC    = -I$(abspath include)
-VCC_CFLAGS = -std=c11 -O2 -Wall -Wextra -Wimplicit-fallthrough -Wno-unused-parameter $(HOST_DEFS) $(VCC_INC) -DVCC_INCDIR='"$(abspath headers)"' $(VCC_SAN)
+VCC_CFLAGS = $(if $(VCC_WASM),-DVCC_WASM) -std=c11 -O2 -Wall -Wextra -Wimplicit-fallthrough -Wno-unused-parameter $(HOST_DEFS) $(VCC_INC) -DVCC_INCDIR='"$(abspath headers)"' $(VCC_SAN)
 # LTO: off; the split modules are one TU each (SPLIT_MODS), which gives the
 # inlining LTO would.  `make VCC_LTO=-flto=thin` turns it on (vbench: pp +0.5 %,
 # emit -2.5 % instructions, -c as a whole the same).
@@ -82,7 +82,10 @@ OBJ        = $(OUT)/obj
 vcc: $(OUT)/vcc $(OUT)/vsh/sh $(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vcc-nm $(OUT)/vcc-objcopy $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vlink $(OUT)/vasm $(OUT)/virtest $(OUT)/viralloc
 
 o = $(patsubst %.c,$(OBJ)/%.o,$(1))
-AS_FILES = arch/a64/as/enc.c platform/darwin/macho.c arch/wasm/as/as.c platform/wasm/wasm.c
+# WebAssembly is off by default (disabled 2026-11-13, doc/PLAN-wasm.md): its
+# sources are not built and a wasm target is an error.  `make VCC_WASM=1` builds it.
+VCC_WASM ?=
+AS_FILES = arch/a64/as/enc.c platform/darwin/macho.c $(if $(VCC_WASM),arch/wasm/as/as.c platform/wasm/wasm.c)
 as_SRC   = as/as.c arch/a64/as/parse.c arch/x64/as/asm.c arch/x64/as/sys.c arch/x64/as/gpr.c \
            arch/x64/as/x87.c arch/x64/as/sse.c arch/x64/as/avx.c
 LEX_SRC = frontend/lex/lex.c common/intern.c
@@ -103,7 +106,7 @@ obj_SRC  = obj/obj.c arch/a64/obj/fixup.c arch/x64/obj/fixup.c platform/linux/el
 cc_SRC   = $(wildcard frontend/c/*.c)
 # pp: the preprocessor and, for now, the diagnostics engine (it uses ppimpl.h)
 pp_SRC   = $(filter-out frontend/pp/dircache.c,$(wildcard frontend/pp/*.c)) $(wildcard frontend/diag/*.c)
-codegen_SRC = $(wildcard codegen/*.c codegen/opt/*.c codegen/rec/*.c codegen/flow/*.c arch/a64/codegen/*.c arch/wasm/codegen/*.c codegen/walk/*.c arch/x64/codegen/*.c codegen/vir/*.c)
+codegen_SRC = $(wildcard codegen/*.c codegen/opt/*.c codegen/rec/*.c codegen/flow/*.c arch/a64/codegen/*.c $(if $(VCC_WASM),arch/wasm/codegen/*.c) codegen/walk/*.c arch/x64/codegen/*.c codegen/vir/*.c)
 VCC_UNITY ?= y
 SPLIT_SRC = $(foreach m,$(SPLIT_MODS),$($(m)_SRC))
 SPLIT_OBJ = $(if $(VCC_UNITY),$(patsubst %,$(OBJ)/unity/%.o,$(SPLIT_MODS)),$(call o,$(SPLIT_SRC)))
@@ -112,7 +115,7 @@ PP_OBJ  = $(call o,$(PP_SRC)) $(SPLIT_OBJ) $(call mod,vir) $(call o,$(VIRA_SRC))
 mod = $(if $(VCC_UNITY),$(OBJ)/unity/$(1).o,$(call o,$($(1)_SRC)))
 AS_SRC  = $(AS_FILES) $(as_SRC) $(obj_SRC)
 AS_OBJ  = $(call o,$(AS_FILES)) $(call mod,as) $(call mod,obj)
-LD_SRC  = ld/ld.c common/ldhash.c ld/objcopy.c ld/wasmld.c platform/darwin/ldmacho.c
+LD_SRC  = ld/ld.c common/ldhash.c ld/objcopy.c $(if $(VCC_WASM),ld/wasmld.c) platform/darwin/ldmacho.c
 
 $(OBJ)/%.o: %.c Makefile | $(OBJ)
 	@mkdir -p $(dir $@)

@@ -91,7 +91,11 @@
  * arguments on the stack, va_list a char *, stack arguments packed */
 #define DARWIN(c) ((c)->o->target == PP_DARWIN)
 /* WebAssembly (wasm64): arch/wasm/codegen/ generates the functions, data.c the data */
+#ifdef VCC_WASM
 #define WASM(c) PP_IS_WASM((c)->o->target)
+#else
+#define WASM(c) 0	/* wasm is not built (make VCC_WASM=1): the branches vanish */
+#endif
 #define WASM32(c) ((c)->o->target == PP_WASM32)
 /* x86-64 Linux: codegen/walk/ and arch/x64/codegen/ generate the functions (PLAN-x86.md) */
 #define X86(c) ((c)->o->target == PP_LINUX_X86_64)

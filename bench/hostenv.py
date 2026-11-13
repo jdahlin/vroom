@@ -32,6 +32,15 @@ LLVM_BIN = _llvm_bin()
 BUILD = os.environ.get('VCC_BUILD', f'{R}/build/linux/src' if LINUX else f'{R}/build/src')
 
 
+def has_wasm(vpp):
+    """False when this vpp was built without WebAssembly (the default since
+    2026-11-13, doc/PLAN-wasm.md; `make VCC_WASM=1` builds it): a harness of
+    several targets then leaves its wasm ones out."""
+    import subprocess
+    p = subprocess.run([vpp, '--target=wasm64-unknown-emscripten', '-E', os.devnull], capture_output=True, text=True)
+    return 'no WebAssembly support' not in p.stderr
+
+
 def llvm(tool):
     """Path of an LLVM tool (clang, llvm-objcopy, ld.lld, ...)."""
     p = f'{LLVM_BIN}/{tool}'
