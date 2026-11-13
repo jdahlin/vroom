@@ -1,5 +1,5 @@
 /* vcc code generator, x86-64: inline asm in AT&T syntax (for -S) */
-#include "x64impl.h"
+#include "x64-internal.h"
 
 /*
  * An operand: in a register (a temporary, or a fixed one a constraint or
@@ -8,22 +8,22 @@
  * reserved before any operand is evaluated: a temporary that is live in
  * one (the enclosing expression's) is saved to a slot and restored after.
  */
-enum { XO_REG, XO_MEM, XO_IMM, XO_X87 };	/* XO_X87: on the x87 stack, reg 0 st(0) (t), 1 st(1) (u) */
+enum { X64_ASM_OPERAND_REGISTER, X64_ASM_OPERAND_MEMORY, X64_ASM_OPERAND_IMMEDIATE, X64_ASM_OPERAND_X87 };	/* X64_ASM_OPERAND_X87: on the x87 stack, reg 0 st(0) (t), 1 st(1) (u) */
 
-typedef struct xopnd {
+typedef struct x64_asm_operand {
 	uint8_t kind, reg, out, inout, flt, fixed, sp;	/* sp: register ... asm("rsp") (ASM_CALL_CONSTRAINT): %rsp itself, nothing moved */
 	int8_t tied;		/* an input: the output it shares a register with, -1 none */
 	int size;		/* the operand's size in bytes (register names) */
-	codegen_value v;			/* XO_IMM: the value; an input's value until it is placed */
-	codegen_lvalue l;			/* XO_MEM: the memory; outputs: where the result goes */
+	codegen_value v;			/* X64_ASM_OPERAND_IMMEDIATE: the value; an input's value until it is placed */
+	codegen_lvalue l;			/* X64_ASM_OPERAND_MEMORY: the memory; outputs: where the result goes */
 	int64_t park;		/* a fixed input's value parked in this slot (0: none) */
 	int32_t lpark;		/* a register output's address parked in this slot until the store (0: none) */
 	ast_qualified_type t;
 	uint32_t name;
-} xopnd;
+} x64_asm_operand;
 
 /* the register a constraint letter names, -1 for none */
-static int x64_creg(int ch)
+static int x64_asm_constraint_register(int ch)
 {
 	switch (ch) {
 	case 'a': return RAX;
@@ -37,7 +37,7 @@ static int x64_creg(int ch)
 }
 
 /* the register a clobber or register variable names (with or without %), -1 for none */
-static int x64_rname(const char *s)
+static int x64_asm_register_find(const char *s)
 {
 	if (*s == '%')
 		s++;
@@ -85,7 +85,7 @@ static int x64_rname(const char *s)
 }
 
 /* a register's name for an operand of size bytes; h: the high byte (ah ...) */
-static void x64_asmreg(tbuf *b, int r, int size, bool h)
+static void x64_asm_register_append(tbuf *b, int r, int size, bool h)
 {
 	static const char *const n64[] = { "rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi" };
 	static const char *const n32[] = { "eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi" };
@@ -114,7 +114,7 @@ static void x64_asmreg(tbuf *b, int r, int size, bool h)
 }
 
 /* a local label of this function, as print.c names it */
-static void x64_asmlabel(codegen_context *e, tbuf *b, uint32_t l)
+static void x64_asm_label_append(codegen_context *e, tbuf *b, uint32_t l)
 {
 	vtext_string_append(b, ".LBB");
 	vtext_unsigned_append(b, e->walk_state->function_symbol);
@@ -123,7 +123,7 @@ static void x64_asmlabel(codegen_context *e, tbuf *b, uint32_t l)
 }
 
 /* a memory operand as AT&T text */
-static void x64_asmmem(cc *c, tbuf *b, const codegen_lvalue *l)
+static void x64_asm_memory_append(cc *c, tbuf *b, const codegen_lvalue *l)
 {
 	if (l->kind == CODEGEN_LVALUE_SYMBOL) {
 		codegen_reference_offset_append(c, b, l->reference, l->offset);
@@ -137,17 +137,17 @@ static void x64_asmmem(cc *c, tbuf *b, const codegen_lvalue *l)
 	if (l->kind == CODEGEN_LVALUE_FRAME && l->offset < 0)
 		vtext_char_append(b, 0);
 	else
-		x64_asmreg(b, l->kind == CODEGEN_LVALUE_FRAME ? RBP : l->register_number, 8, false);
+		x64_asm_register_append(b, l->kind == CODEGEN_LVALUE_FRAME ? RBP : l->register_number, 8, false);
 	vtext_char_append(b, ')');
 }
 
 /* a float value as an x87 long double object's address (fld of it) */
-static codegen_value wk_x87val(codegen_context *e, codegen_value v, ast_qualified_type t)
+static codegen_value x64_asm_x87_value(codegen_context *e, codegen_value v, ast_qualified_type t)
 {
 	return walk_value_convert(e, v, t, codegen_type_primitive(AST_TYPE_LONG_DOUBLE));
 }
 
-static bool x64_immok(int ch, i128 v)
+static bool x64_asm_immediate_fits(int ch, i128 v)
 {
 	switch (ch) {
 	case 'i': case 'n': case 'g': return true;
@@ -165,7 +165,7 @@ static bool x64_immok(int ch, i128 v)
 
 /* A GPR constraint transports object bits, independently of the C value's
  * normal register class (SSE scalars and address-held small aggregates). */
-static codegen_value x64_asmbits(codegen_context *e, codegen_value v, ast_qualified_type t, int size)
+static codegen_value x64_asm_bits_transport(codegen_context *e, codegen_value v, ast_qualified_type t, int size)
 {
 	if (size != 1 && size != 2 && size != 4 && size != 8)
 		codegen_fatal_report(e, e->current_location, "x86-64: unsupported asm GPR operand size");
@@ -191,9 +191,9 @@ static codegen_value x64_asmbits(codegen_context *e, codegen_value v, ast_qualif
 /* Fixed operands are loaded only after all expressions have been evaluated.
  * Park their input values immediately so several read/write outputs do not
  * consume the few temporaries left after reserving the fixed registers. */
-static void x64_asmpark(codegen_context *e, xopnd *o)
+static void x64_asm_operand_park(codegen_context *e, x64_asm_operand *o)
 {
-	if (!o->flt) o->v = x64_asmbits(e, o->v, o->t, o->size);
+	if (!o->flt) o->v = x64_asm_bits_transport(e, o->v, o->t, o->size);
 	int r = walk_value_to_register(e, &o->v, o->flt ? o->t : codegen_type_primitive(AST_TYPE_UNSIGNED_LONG_LONG));
 	codegen_lvalue l = { .kind = CODEGEN_LVALUE_FRAME, .offset = o->park = walk_slot_temporary(e, 8, 8), .align = 8 };
 
@@ -203,9 +203,9 @@ static void x64_asmpark(codegen_context *e, xopnd *o)
 }
 
 /* a callee-saved register the asm uses: saved by the prologue */
-VPRIV void x64_csused(codegen_context *e, int r)
+VPRIV void x64_callee_save_use(codegen_context *e, int r)
 {
-	xst *X = e->x64_context;
+	x64_lowering_context *X = e->x64_context;
 
 	if (r == RBX || (r == RBP && X->spframe) || (r >= R12 && r <= R15)) {
 		if (r == R12 && e->walk_state->frame_alignment > 16)
@@ -218,7 +218,7 @@ VPRIV void x64_csused(codegen_context *e, int r)
 VPRIV void x64_asm(codegen_context *e, uint32_t n)
 {
 	cc *c = e->compile_context;
-	xst *X = e->x64_context;
+	x64_lowering_context *X = e->x64_context;
 	const node *x = N(n);
 	const ast_asm_statement *a = &c->asms[x->a];
 	const char *tp = c->strs[a->tmpl - 1].s;
@@ -230,7 +230,7 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 	const char *ccop[64] = { 0 };	/* "=@cc<cond>": the flag the output reads (set<cond> after the template) */
 	uint32_t fixed = 0, saved = 0, reserved = 0;
 	int64_t sslot[32] = { 0 };
-	xopnd *op;
+	x64_asm_operand *op;
 	tbuf *rb = &e->raw;
 	size_t start;
 	record *ri;
@@ -252,7 +252,7 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 		uint32_t occupied = 0, early = 0;
 		const char *q_cc;
 		for (uint32_t i = 0; i < a->nclob; i++) {
-			int r = x64_rname(c->strs[a->clob[i] - 1].s);
+			int r = x64_asm_register_find(c->strs[a->clob[i] - 1].s);
 			if (r >= 0) occupied |= 1u << r;
 		}
 		for (uint32_t i = 0; i < nops; i++) {
@@ -274,7 +274,7 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 				continue;
 			}
 			int r = -1;
-			for (const char *q = copy; *q && *q != '[' && r < 0; q++) r = x64_creg(*q);
+			for (const char *q = copy; *q && *q != '[' && r < 0; q++) r = x64_asm_constraint_register(*q);
 			if (r >= 0) {
 				if ((occupied | early) & (1u << r)) valid = false;
 				if (i < a->nout && strchr(copy, '&')) early |= 1u << r;
@@ -286,15 +286,15 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 	if (!selected) codegen_fatal_report(e, x->loc, "no allocatable x86 inline asm constraint alternative");
 	for (uint32_t i = 0; i < a->nlabel; i++) edges[i] = walk_label_new(e);
 	if (a->nlabel) done = walk_label_new(e);
-	op = alloca((nops + 1) * sizeof(xopnd));
-	memset(op, 0, (nops + 1) * sizeof(xopnd));
+	op = alloca((nops + 1) * sizeof(x64_asm_operand));
+	memset(op, 0, (nops + 1) * sizeof(x64_asm_operand));
 	/* the fixed registers: clobbers and register constraints */
 	for (uint32_t i = 0; i < a->nclob; i++) {
-		int r = x64_rname(c->strs[a->clob[i] - 1].s);
+		int r = x64_asm_register_find(c->strs[a->clob[i] - 1].s);
 
 		if (r >= 0) {
 			fixed |= 1u << r;
-			x64_csused(e, r);
+			x64_callee_save_use(e, r);
 		}
 	}
 	for (uint32_t i = 0; i < nops; i++) {
@@ -303,9 +303,9 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 		int r = -1;
 
 		for (const char *p = cs; *p && *p != '[' && r < 0; p++)
-			r = x64_creg(*p);
+			r = x64_asm_constraint_register(*p);
 		if (r < 0 && N(en)->op == AST_NODE_VARIABLE && codegen_symbol_attributes(c, N(en)->a)->asmname && (c->syms[N(en)->a].sc == AST_STORAGE_REGISTER))
-			r = x64_rname(c->strs[codegen_symbol_attributes(c, N(en)->a)->asmname - 1].s);	/* register long x asm("rdx") */
+			r = x64_asm_register_find(c->strs[codegen_symbol_attributes(c, N(en)->a)->asmname - 1].s);	/* register long x asm("rdx") */
 		if (r == RSP && N(en)->op == AST_NODE_VARIABLE && c->syms[N(en)->a].sc == AST_STORAGE_REGISTER) {
 			op[i].fixed = op[i].sp = 1;
 			op[i].reg = RSP;
@@ -315,7 +315,7 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 			op[i].fixed = 1;
 			op[i].reg = (uint8_t)r;
 			fixed |= 1u << r;
-			x64_csused(e, r);
+			x64_callee_save_use(e, r);
 		}
 	}
 	/* Q and R restrict the GPR class; reserve a suitable register before
@@ -331,7 +331,7 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 		op[i].fixed = 1;
 		op[i].reg = (uint8_t)r;
 		fixed |= 1u << r;
-		x64_csused(e, r);
+		x64_callee_save_use(e, r);
 	}
 	if (fixed & ((1u << RSP) | (1u << RBP)))
 		codegen_fatal_report(e, x->loc, "x86-64: asm clobbering rsp or rbp is not supported");
@@ -345,7 +345,7 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 			if ((X->live | homes) & (1u << r)) {
 				codegen_lvalue s = { .kind = CODEGEN_LVALUE_FRAME, .offset = sslot[r] = walk_slot_temporary(e, r >= XMM0 ? 16 : 8, 16), .align = 8 };
 
-				x64_mem(e, X_ST, r >= XMM0 ? 16 : 8, r, &s, false);
+				x64_record_emit_memory(e, X64_OP_ST, r >= XMM0 ? 16 : 8, r, &s, false);
 				saved |= 1u << r;
 			}
 			/* A home gets a snapshot but no lasting temporary ownership. */
@@ -366,7 +366,7 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 	for (uint32_t i = 0; i < a->nout; i++) {
 		const char *cs = csop[i];
 		uint32_t en = a->ops[i].expr;
-		xopnd *o = &op[i];
+		x64_asm_operand *o = &op[i];
 		bool mem_ok = strpbrk(cs, "mogVX") != NULL, reg_ok = strpbrk(cs, "rqQRgXabcdSDxyl") != NULL || o->fixed;
 
 		o->out = 1;
@@ -377,35 +377,35 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 		o->size = walk_type_size(c, o->t);
 		o->flt = strpbrk(cs, "xy") != NULL && codegen_type_is_float(c, o->t);
 		if (o->sp) {
-			o->kind = XO_REG;
+			o->kind = X64_ASM_OPERAND_REGISTER;
 			continue;
 		}
 		o->l = walk_lvalue_emit(e, en);
 		if (strpbrk(cs, "tu") && codegen_type_is_float(c, o->t)) {
-			o->kind = XO_X87;
+			o->kind = X64_ASM_OPERAND_X87;
 			o->reg = strchr(cs, 'u') ? 1 : 0;
-			if (o->inout) o->v = wk_x87val(e, walk_lvalue_reload(e, &o->l, o->t), o->t);
+			if (o->inout) o->v = x64_asm_x87_value(e, walk_lvalue_reload(e, &o->l, o->t), o->t);
 			continue;
 		}
 		if (mem_ok && !reg_ok) {
-			o->kind = XO_MEM;
+			o->kind = X64_ASM_OPERAND_MEMORY;
 			if (o->l.is_bitfield)
 				codegen_fatal_report(e, x->loc, "x86-64: a bit-field as an asm memory operand");
 			continue;
 		}
-		o->kind = XO_REG;
+		o->kind = X64_ASM_OPERAND_REGISTER;
 		if (walk_type_is_in_memory(e, o->t) && (o->flt || o->size > 8))
 			codegen_fatal_report(e, x->loc, "x86-64: address-held asm register operand is not supported");
 		if (o->inout) {
 			o->v = walk_lvalue_reload(e, &o->l, o->t);
-			if (o->fixed) x64_asmpark(e, o);
+			if (o->fixed) x64_asm_operand_park(e, o);
 		}
 		if (o->l.kind == CODEGEN_LVALUE_REGISTER && !o->l.is_bitfield) {
 			/* the address waits in a slot: four outputs through pointers and four fixed
 			   registers (cpuid) would leave no temporaries */
 			codegen_lvalue s = { .kind = CODEGEN_LVALUE_FRAME, .offset = o->lpark = walk_slot_temporary(e, 8, 8), .align = 8 };
 
-			x64_mem(e, X_ST, 8, o->l.register_number, &s, false);
+			x64_record_emit_memory(e, X64_OP_ST, 8, o->l.register_number, &s, false);
 			x64_tfree(e, o->l.register_number);
 		}
 	}
@@ -413,7 +413,7 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 	for (uint32_t i = a->nout; i < nops; i++) {
 		const char *cs = csop[i];
 		uint32_t en = a->ops[i].expr;
-		xopnd *o = &op[i];
+		x64_asm_operand *o = &op[i];
 		bool reg_ok = strpbrk(cs, "rqQRgXabcdSDxyl") != NULL || o->fixed, mem_ok = strpbrk(cs, "mogVX") != NULL;
 		int tied = -1;
 		codegen_value v;
@@ -424,7 +424,7 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 		o->flt = strpbrk(cs, "xy") != NULL && codegen_type_is_float(c, o->t);
 		o->tied = -1;
 		if (o->sp) {
-			o->kind = XO_REG;
+			o->kind = X64_ASM_OPERAND_REGISTER;
 			continue;
 		}
 		for (const char *p = cs; *p; p++) {
@@ -437,30 +437,30 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 				break;
 			}
 		}
-		if (tied >= 0 && (uint32_t)tied < a->nout && op[tied].kind == XO_X87) {
-			o->kind = XO_X87;
+		if (tied >= 0 && (uint32_t)tied < a->nout && op[tied].kind == X64_ASM_OPERAND_X87) {
+			o->kind = X64_ASM_OPERAND_X87;
 			o->reg = op[tied].reg;
 			o->tied = (int8_t)tied;
-			o->v = wk_x87val(e, walk_value_emit(e, en), o->t);
+			o->v = x64_asm_x87_value(e, walk_value_emit(e, en), o->t);
 			continue;
 		}
 		if (strpbrk(cs, "tu") && codegen_type_is_float(c, o->t)) {
-			o->kind = XO_X87;
+			o->kind = X64_ASM_OPERAND_X87;
 			o->reg = strchr(cs, 'u') ? 1 : 0;
-			o->v = wk_x87val(e, walk_value_emit(e, en), o->t);
+			o->v = x64_asm_x87_value(e, walk_value_emit(e, en), o->t);
 			continue;
 		}
 		if (tied >= 0 && (uint32_t)tied < a->nout) {
 			/* the output's register, holding this value before the template */
-			xopnd *to = &op[tied];
+			x64_asm_operand *to = &op[tied];
 
 			v = walk_value_emit(e, en);
 			if (to->inout)
 				walk_value_free(e, &to->v);
 			to->v = v;
 			to->inout = 1;
-			if (to->fixed) x64_asmpark(e, to);
-			o->kind = XO_REG;
+			if (to->fixed) x64_asm_operand_park(e, to);
+			o->kind = X64_ASM_OPERAND_REGISTER;
 			o->tied = (int8_t)tied;
 			continue;
 		}
@@ -473,7 +473,7 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 				en = N(en)->a;	/* an array as a memory operand: the array itself */
 			if (N(en)->flags & AST_NODE_FLAG_LVALUE || N(en)->op == AST_NODE_VARIABLE || N(en)->op == AST_NODE_DEREFERENCE || N(en)->op == AST_NODE_MEMBER ||
 			    N(en)->op == AST_NODE_INDEX) {
-				o->kind = XO_MEM;
+				o->kind = X64_ASM_OPERAND_MEMORY;
 				o->l = walk_lvalue_emit(e, en);
 				continue;
 			}
@@ -505,10 +505,10 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 			if (v.kind == CODEGEN_VALUE_ADDRESS) codegen_reference_note(e, v.reference);
 
 			for (const char *p = cs; *p; p++)
-				if (v.kind == CODEGEN_VALUE_ADDRESS ? (*p == 'i' || *p == 'g' || *p == 's') : x64_immok(*p, v.integer))
+				if (v.kind == CODEGEN_VALUE_ADDRESS ? (*p == 'i' || *p == 'g' || *p == 's') : x64_asm_immediate_fits(*p, v.integer))
 					imm = true;
 			if (imm) {
-				o->kind = XO_IMM;
+				o->kind = X64_ASM_OPERAND_IMMEDIATE;
 				o->v = v;
 				continue;
 			}
@@ -517,7 +517,7 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 			if (!mem_ok)
 				codegen_fatal_report(e, x->loc, "impossible constraint in asm: '%s'", cs);
 			/* a value for a memory operand: in a slot */
-			o->kind = XO_MEM;
+			o->kind = X64_ASM_OPERAND_MEMORY;
 			o->l = (codegen_lvalue){ .kind = CODEGEN_LVALUE_FRAME, .offset = walk_slot_temporary(e, o->size > 8 ? (uint64_t)o->size : 8, 16), .align = 16 };
 			if (walk_type_is_in_memory(e, o->t)) {
 				v = walk_lvalue_store_memory(e, &o->l, o->t, v);
@@ -530,10 +530,10 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 			}
 			continue;
 		}
-		o->kind = XO_REG;
+		o->kind = X64_ASM_OPERAND_REGISTER;
 		if (walk_type_is_in_memory(e, o->t) && (o->flt || o->size > 8))
 			codegen_fatal_report(e, x->loc, "x86-64: address-held asm register operand is not supported");
-		if (!o->flt) v = x64_asmbits(e, v, o->t, o->size);
+		if (!o->flt) v = x64_asm_bits_transport(e, v, o->t, o->size);
 		if (!o->flt && o->size > 8)
 			codegen_fatal_report(e, x->loc, "x86-64: an asm register operand of this type is not supported");
 		if (o->fixed) {
@@ -541,7 +541,7 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 			codegen_lvalue s = { .kind = CODEGEN_LVALUE_FRAME, .offset = o->park = walk_slot_temporary(e, 8, 8), .align = 8 };
 			int r = walk_value_to_register(e, &v, o->flt ? o->t : codegen_type_primitive(AST_TYPE_UNSIGNED_LONG_LONG));
 
-			x64_mem(e, X_ST, o->flt ? o->size : 8, r, &s, false);
+			x64_record_emit_memory(e, X64_OP_ST, o->flt ? o->size : 8, r, &s, false);
 			x64_tfree(e, r);
 		} else {
 			walk_value_to_register(e, &v, o->flt ? o->t : codegen_type_primitive(AST_TYPE_UNSIGNED_LONG_LONG));
@@ -551,11 +551,11 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 	}
 	/* output registers */
 	for (uint32_t i = 0; i < a->nout; i++) {
-		xopnd *o = &op[i];
+		x64_asm_operand *o = &op[i];
 
-		if (o->kind != XO_REG || o->fixed)
+		if (o->kind != X64_ASM_OPERAND_REGISTER || o->fixed)
 			continue;
-		if (o->inout && !o->flt) o->v = x64_asmbits(e, o->v, o->t, o->size);
+		if (o->inout && !o->flt) o->v = x64_asm_bits_transport(e, o->v, o->t, o->size);
 		if (o->inout) {
 			walk_value_to_register(e, &o->v, o->flt ? o->t : codegen_type_primitive(AST_TYPE_UNSIGNED_LONG_LONG));
 			o->reg = o->v.register_number;
@@ -569,15 +569,15 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 		if (op[i].park) {
 			codegen_lvalue s = { .kind = CODEGEN_LVALUE_FRAME, .offset = op[i].park, .align = 8 };
 
-			x64_mem(e, X_LD, op[i].flt ? op[i].size : 8, op[i].reg, &s, false);
+			x64_record_emit_memory(e, X64_OP_LD, op[i].flt ? op[i].size : 8, op[i].reg, &s, false);
 		}
 	/* x87 inputs pushed: st(1) first, then st(0) */
 	for (int st = 1; st >= 0; st--)
 		for (uint32_t i = 0; i < nops; i++)
-			if (op[i].kind == XO_X87 && (!op[i].out || op[i].inout) && op[i].reg == st) {
+			if (op[i].kind == X64_ASM_OPERAND_X87 && (!op[i].out || op[i].inout) && op[i].reg == st) {
 				codegen_lvalue m = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = op[i].v.register_number };
 
-				x64_x87(e, XF_LDT, &m, 10);
+				x64_x87(e, X64_X87_LDT, &m, 10);
 				x64_tfree(e, op[i].v.register_number);
 				break;
 			}
@@ -648,7 +648,7 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 
 				if (k >= a->nlabel)
 					codegen_fatal_report(e, x->loc, "invalid operand number %d in inline asm string", idx);
-				x64_asmlabel(e, rb, edges[k]);
+				x64_asm_label_append(e, rb, edges[k]);
 				continue;
 			}
 			if ((uint32_t)idx >= nops) {
@@ -659,33 +659,33 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 				if (idx < 0) codegen_fatal_report(e, x->loc, "invalid inline asm operand number");
 			}
 			{
-				xopnd *o = &op[idx];
+				x64_asm_operand *o = &op[idx];
 
 				if (o->tied >= 0)
 					o = &op[o->tied];
 				switch (o->kind) {
-				case XO_REG: {
+				case X64_ASM_OPERAND_REGISTER: {
 					int sz = mod == 'b' || mod == 'h' ? 1 : mod == 'w' ? 2 : mod == 'k' ? 4 : mod == 'q' ? 8 :
 						 o->size > 8 || o->size < 1 ? 8 : o->size == 3 ? 4 : o->size > 4 ? 8 : o->size;
 
 					if (mod == 'a') {
 						vtext_char_append(rb, '(');
-						x64_asmreg(rb, o->reg, 8, false);
+						x64_asm_register_append(rb, o->reg, 8, false);
 						vtext_char_append(rb, ')');
 					} else if (mod == 'z') {
 						vtext_char_append(rb, sz == 8 ? 'q' : sz == 4 ? 'l' : sz == 2 ? 'w' : 'b');
 					} else {
-						x64_asmreg(rb, o->reg, sz, mod == 'h');
+						x64_asm_register_append(rb, o->reg, sz, mod == 'h');
 					}
 					break;
 				}
-				case XO_MEM:
-					x64_asmmem(c, rb, &o->l);
+				case X64_ASM_OPERAND_MEMORY:
+					x64_asm_memory_append(c, rb, &o->l);
 					break;
-				case XO_X87:
+				case X64_ASM_OPERAND_X87:
 					vtext_string_append(rb, o->reg ? "%st(1)" : "%st");
 					break;
-				case XO_IMM:
+				case X64_ASM_OPERAND_IMMEDIATE:
 					if (mod != 'c' && mod != 'P' && mod != 'a' && mod != 'n')
 						vtext_char_append(rb, '$');
 					if (o->v.kind == CODEGEN_VALUE_ADDRESS)
@@ -700,20 +700,20 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 	/* flag outputs: the condition as 0 or 1 in the output's register */
 	for (uint32_t i = 0; i < a->nout; i++)
 		if (ccop[i]) {
-			if (op[i].kind != XO_REG || op[i].fixed)
+			if (op[i].kind != X64_ASM_OPERAND_REGISTER || op[i].fixed)
 				codegen_fatal_report(e, x->loc, "x86-64: unsupported asm flag output");
 			if (rb->n > start && rb->p[rb->n - 1] != '\n')
 				vtext_char_append(rb, '\n');
 			vtext_string_append(rb, "\tset");
 			vtext_string_append(rb, ccop[i]);
 			vtext_char_append(rb, ' ');
-			x64_asmreg(rb, op[i].reg, 1, false);
+			x64_asm_register_append(rb, op[i].reg, 1, false);
 			vtext_string_append(rb, "\n\tmovzbl ");
-			x64_asmreg(rb, op[i].reg, 1, false);
+			x64_asm_register_append(rb, op[i].reg, 1, false);
 			vtext_string_append(rb, ", ");
-			x64_asmreg(rb, op[i].reg, 4, false);
+			x64_asm_register_append(rb, op[i].reg, 4, false);
 		}
-	ri = x64_put(e, X_RAW);
+	ri = x64_record_emit(e, X64_OP_RAW);
 	ri->offset = (int32_t)start;
 	ri->reference = (uint32_t)(rb->n - start);
 	ri->condition = !!(fixed & (1u << R12));
@@ -724,7 +724,7 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 		bool in0 = false, in1 = false, out0 = false, out1 = false;
 
 		for (uint32_t i = 0; i < nops; i++)
-			if (op[i].kind == XO_X87) {
+			if (op[i].kind == X64_ASM_OPERAND_X87) {
 				if (op[i].out && op[i].reg)
 					out1 = true;
 				else if (op[i].out)
@@ -747,18 +747,18 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 			depth--;
 		for (int st = 0; st < 2 && depth > 0; st++) {
 			for (uint32_t i = 0; i < a->nout; i++)
-				if (op[i].kind == XO_X87 && op[i].reg == st) {
+				if (op[i].kind == X64_ASM_OPERAND_X87 && op[i].reg == st) {
 					int sz = walk_type_size(c, op[i].t);
 					codegen_lvalue l = op[i].l;
 
 					if (KIND(c, op[i].t) == AST_TYPE_LONG_DOUBLE)
-						x64_x87(e, XF_STPT, &l, 10);
+						x64_x87(e, X64_X87_STPT, &l, 10);
 					else
-						x64_x87(e, XF_STP, &l, sz);
+						x64_x87(e, X64_X87_STP, &l, sz);
 					depth--;
 					goto next;
 				}
-			x64_x87(e, XF_POP, NULL, 0);
+			x64_x87(e, X64_X87_POP, NULL, 0);
 			depth--;
 		next:;
 		}
@@ -768,11 +768,11 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 	   writeback can reuse them while all output values stay live. */
 	uint32_t writeback_live = asm_live;
 	for (uint32_t i = a->nout; i < nops; i++) {
-		if (op[i].kind == XO_REG && op[i].tied < 0 && !op[i].sp)
+		if (op[i].kind == X64_ASM_OPERAND_REGISTER && op[i].tied < 0 && !op[i].sp)
 			writeback_live &= ~(1u << op[i].reg);
 	}
 	for (uint32_t i = 0; i < a->nout; i++)
-		if (op[i].kind == XO_REG) writeback_live |= 1u << op[i].reg;
+		if (op[i].kind == X64_ASM_OPERAND_REGISTER) writeback_live |= 1u << op[i].reg;
 	for (uint32_t edge = 0; edge <= a->nlabel; edge++) {
 		X->live = writeback_live;
 		if (edge) x64_label(e, edges[edge - 1]);
@@ -781,15 +781,15 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 		   uses an independent temporary, never a persistent home. Store the
 		   physical result before restoring any overlapping saved home. */
 		for (uint32_t i = 0; i < a->nout; i++) {
-			xopnd *o = &op[i];
+			x64_asm_operand *o = &op[i];
 
-			if (o->kind != XO_REG || o->sp)
+			if (o->kind != X64_ASM_OPERAND_REGISTER || o->sp)
 				continue;
 			if (o->lpark) {
 				codegen_lvalue s = { .kind = CODEGEN_LVALUE_FRAME, .offset = o->lpark, .align = 8 };
 
 				o->l.register_number = (uint8_t)x64_treg(e);
-				x64_mem(e, X_LD, 8, o->l.register_number, &s, false);
+				x64_record_emit_memory(e, X64_OP_LD, 8, o->l.register_number, &s, false);
 			}
 			if (o->l.is_bitfield) {
 				codegen_value v = { .kind = CODEGEN_VALUE_REGISTER, .register_number = o->reg };
@@ -805,7 +805,7 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 			if (saved & (1u << r)) {
 				codegen_lvalue s = { .kind = CODEGEN_LVALUE_FRAME, .offset = sslot[r], .align = 8 };
 
-				x64_mem(e, X_LD, r >= XMM0 ? 16 : 8, r, &s, false);
+				x64_record_emit_memory(e, X64_OP_LD, r >= XMM0 ? 16 : 8, r, &s, false);
 			}
 		if (edge) walk_goto_emit(e, a->labels[edge - 1]);
 		else if (done) x64_jump(e, done);
@@ -814,15 +814,15 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 	X->live = asm_live;
 	/* temporaries given back, the saved ones restored */
 	for (uint32_t i = 0; i < nops; i++) {
-		xopnd *o = &op[i];
+		x64_asm_operand *o = &op[i];
 
-		if (o->kind == XO_REG && !o->fixed && o->tied < 0)
+		if (o->kind == X64_ASM_OPERAND_REGISTER && !o->fixed && o->tied < 0)
 			x64_tfree(e, o->reg);
-		if (o->kind == XO_X87 && o->out && o->l.kind == CODEGEN_LVALUE_REGISTER)
+		if (o->kind == X64_ASM_OPERAND_X87 && o->out && o->l.kind == CODEGEN_LVALUE_REGISTER)
 			x64_tfree(e, o->l.register_number);
 		if (o->out && o->l.kind == CODEGEN_LVALUE_REGISTER && !o->l.is_bitfield && !o->lpark)
 			x64_tfree(e, o->l.register_number);
-		if (!o->out && o->kind == XO_MEM && o->l.kind == CODEGEN_LVALUE_REGISTER)
+		if (!o->out && o->kind == X64_ASM_OPERAND_MEMORY && o->l.kind == CODEGEN_LVALUE_REGISTER)
 			x64_tfree(e, o->l.register_number);
 		if (o->out && o->l.is_bitfield && o->l.kind == CODEGEN_LVALUE_REGISTER)
 			x64_tfree(e, o->l.register_number);

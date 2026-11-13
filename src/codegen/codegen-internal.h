@@ -429,7 +429,7 @@ typedef struct codegen_context {
 	jmp_buf bail_jump;
 	struct wst *wasm_state;		/* WASM: arch/wasm/codegen/ state (wimpl.h) */
 	struct walk_state *walk_state;	/* X86: the walker's state (codegen/walk/walk.h) */
-	struct xst *x64_context;	/* X86: arch/x64/codegen/ state (x64impl.h) */
+	struct x64_lowering_context *x64_context;	/* X86: arch/x64/codegen/ state (x64-internal.h) */
 	struct virbuild_context *vir_builder;	/* the VIR builder's state (codegen/vir/, PLAN-vir.md) */
 	bool vir_try;		/* the VIR walker runs: an error is not reported, it makes the function fall back */
 	bool vir_lowering;		/* the records are VIR's lowering (finish_function's clean-ups for it) */
@@ -772,8 +772,8 @@ VPRIV void *codegen_item_room_need(codegen_context *e, size_t n);
 VPRIV int a64_replay(codegen_commit_context *R, const codegen_code_header *h);
 VPRIV int codegen_commit_fail(codegen_commit_context *R, const char *msg);
 VPRIV uint32_t codegen_commit_symbol_find(codegen_commit_context *R, uint32_t ref);
-VPRIV bool x64_obj_record(codegen_context *e, const record *i, record *out);
-VPRIV int x64_replay(codegen_commit_context *R, const char *p, size_t n);
+VPRIV bool x64_record_object_prepare(codegen_context *e, const record *i, record *out);
+VPRIV int x64_function_commit(codegen_commit_context *R, const char *p, size_t n);
 VPRIV int codegen_commit_chunk(codegen_commit_context *R, const char *p, size_t n);
 /* label.c */
 static inline ins *put(codegen_context *e, int op);

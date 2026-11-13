@@ -11,7 +11,7 @@ SOURCE = r'''
 #define VCC_UNITY
 #include <assert.h>
 #include "codegen/opt/sdivconst.c"
-#include "arch/x64/codegen/x64impl.h"
+#include "arch/x64/codegen/x64-internal.h"
 #include "codegen/walk/division-signed-constant.c"
 #include "arch/a64/codegen/sdivconst.c"
 VPRIV int x64_nfree(codegen_context *e) { return 8 - __builtin_popcount(e->x64_context->live & X_TEMPS); }

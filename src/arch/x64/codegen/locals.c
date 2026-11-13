@@ -1,6 +1,6 @@
 /* x86 persistent scalar homes. Selection and escape policy live in opt/locals.c;
    this file only supplies physical homes and preserves the System V ABI. */
-#include "x64impl.h"
+#include "x64-internal.h"
 
 /* A home adds a save and restore; a stack parameter also needs an entry load.
    Require at least four weighted references to repay that memory traffic.
@@ -28,7 +28,7 @@ static bool x64_local_profitable(codegen_context *e, uint32_t s)
 VPRIV void x64_locals_begin(codegen_context *e, uint32_t s)
 {
 	static const uint8_t regs[] = { RBX, R13, R14, R15 };
-	xst *X = e->x64_context;
+	x64_lowering_context *X = e->x64_context;
 	unsigned n = sizeof regs;
 
 	X->nlreg = 0;
@@ -60,7 +60,7 @@ VPRIV void x64_slot(codegen_context *e, int64_t off, uint64_t size, uint32_t ali
 
 VPRIV bool x64_local(codegen_context *e, uint32_t s, codegen_lvalue *l)
 {
-	xst *X = e->x64_context;
+	x64_lowering_context *X = e->x64_context;
 
 	/* An inlined body can refer to the same symbol in recursive expansion.
 	   Its independent bindings must remain in the inliner's frame slots. */

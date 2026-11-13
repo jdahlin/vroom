@@ -59,7 +59,7 @@ VPRIV bool x64_vir_fold_edits_check(x64_vir_context *L,uint32_t b,uint32_t pos,i
 	while(lo<hi) {uint32_t m=lo+(hi-lo)/2;if(L->allocation->edit[m].pos<pos)lo=m+1;else hi=m;}
 	for(uint32_t k=lo;k<end && L->allocation->edit[k].pos==pos;k++) {
 		const vir_edit *edit=&L->allocation->edit[k];
-		if(keep==XNOREG || (edit->kind!=VIR_EDIT_REMATERIALIZE && edit->kind!=VIR_EDIT_RELOAD) || x64_vir_register_number(edit->dst)==keep)return false;
+		if(keep==X64_REGISTER_NONE || (edit->kind!=VIR_EDIT_REMATERIALIZE && edit->kind!=VIR_EDIT_RELOAD) || x64_vir_register_number(edit->dst)==keep)return false;
 	}
 	return true;
 }
@@ -68,7 +68,7 @@ VPRIV bool x64_vir_memory_next_fold(x64_vir_context *L,uint32_t b,uint32_t v)
 {
 	return v+1<L->function->blocks[b].first+L->function->blocks[b].insn_count && L->uses[v]==1 && L->allocation->slot[v]==VIR_BLOCK_NONE &&
 		L->function->insns[v+1].a==v && (L->function->insns[v+1].op==VIR_OP_LOAD || L->function->insns[v+1].op==VIR_OP_STORE) &&
-		x64_vir_fold_edits_check(L,b,v+1,XNOREG);
+		x64_vir_fold_edits_check(L,b,v+1,X64_REGISTER_NONE);
 }
 
 /* Integer-address form of the same single memory consumer. */
@@ -77,7 +77,7 @@ VPRIV bool x64_vir_memory_cast_fold(x64_vir_context *L,uint32_t b,uint32_t v)
 	const vir_function *f=L->function;
 	return f->insns[v].op==VIR_OP_ADD && f->insns[v].type==VIR_TYPE_I64 && L->uses[v]==1 && L->allocation->slot[v]==VIR_BLOCK_NONE &&
 	 v+2<f->blocks[b].first+f->blocks[b].insn_count && f->insns[v+1].op==VIR_OP_I2P && f->insns[v+1].a==v &&
-	 x64_vir_memory_next_fold(L,b,v+1) && x64_vir_fold_edits_check(L,b,v+1,XNOREG);
+	 x64_vir_memory_next_fold(L,b,v+1) && x64_vir_fold_edits_check(L,b,v+1,X64_REGISTER_NONE);
 }
 
 /* Exact consecutive big-endian byte assembly, with no observable access or
@@ -87,7 +87,7 @@ VPRIV unsigned x64_vir_word_read_match(x64_vir_context *L,uint32_t b,uint32_t v,
 	unsigned width=vir_big_endian_read_match(L->function,L->uses,v,L->function->blocks[b].first+L->function->blocks[b].insn_count,end);
 	if(!width)return 0;
 	for(uint32_t k=v;k<*end;k++)
-	 if(L->allocation->slot[k]!=VIR_BLOCK_NONE || !x64_vir_fold_edits_check(L,b,k+1,XNOREG))return 0;
+	 if(L->allocation->slot[k]!=VIR_BLOCK_NONE || !x64_vir_fold_edits_check(L,b,k+1,X64_REGISTER_NONE))return 0;
 	return width;
 }
 
@@ -100,10 +100,10 @@ VPRIV unsigned x64_vir_big_endian_address_match(x64_vir_context *L,uint32_t b,ui
 	if(i->op==VIR_OP_ADD && i->type==VIR_TYPE_I64) {
 		if(L->uses[v]!=1 || v+2>=f->blocks[b].first+f->blocks[b].insn_count ||
 		   f->insns[v+1].op!=VIR_OP_I2P || f->insns[v+1].a!=v || L->allocation->slot[v+1]!=VIR_BLOCK_NONE ||
-		   !x64_vir_fold_edits_check(L,b,v+1,XNOREG))return 0;
+		   !x64_vir_fold_edits_check(L,b,v+1,X64_REGISTER_NONE))return 0;
 		ptr=v+1;load=v+2;
 	} else if(i->op!=VIR_OP_PTRADD)return 0;
-	if(load>=f->blocks[b].first+f->blocks[b].insn_count || f->insns[load].a!=ptr || !x64_vir_fold_edits_check(L,b,load,XNOREG))return 0;
+	if(load>=f->blocks[b].first+f->blocks[b].insn_count || f->insns[load].a!=ptr || !x64_vir_fold_edits_check(L,b,load,X64_REGISTER_NONE))return 0;
 	unsigned width=x64_vir_word_read_match(L,b,load,end);
 	return width && L->uses[ptr]==width?width:0;
 }
@@ -150,15 +150,15 @@ VPRIV void x64_vir_memory_block_lower(x64_vir_context *L,const vir_insn *i,int d
 	uint64_t n=(uint64_t)x64_vir_constant_bits(&L->function->insns[i->c]);
 	bool copy=i->op==VIR_OP_MEMCPY;
 	if(!copy) {
-		if(n>=16)x64_op3(e,X_FXOR,16,XMM0+14,XMM0+14,XMM0+14);
-		if(n&15)x64_movi(e,L->general_temporary,0);
+		if(n>=16)x64_record_emit_three_registers(e,X64_OP_FXOR,16,XMM0+14,XMM0+14,XMM0+14);
+		if(n&15)x64_record_emit_move_immediate(e,L->general_temporary,0);
 	}
 	for(uint64_t off=0;off<n;) {
 		unsigned width=n-off>=16?16:n-off>=8?8:n-off>=4?4:n-off>=2?2:1;
 		int scratch=width==16?XMM0+14:L->general_temporary;
 		codegen_lvalue from={.kind=CODEGEN_LVALUE_REGISTER,.register_number=src,.offset=(int64_t)off},to={.kind=CODEGEN_LVALUE_REGISTER,.register_number=dst,.offset=(int64_t)off};
-		if(copy)x64_mem(e,X_LD,width,scratch,&from,false);
-		x64_mem(e,X_ST,width,scratch,&to,false);off+=width;
+		if(copy)x64_record_emit_memory(e,X64_OP_LD,width,scratch,&from,false);
+		x64_record_emit_memory(e,X64_OP_ST,width,scratch,&to,false);off+=width;
 	}
 }
 
@@ -166,10 +166,10 @@ VPRIV uint8_t x64_vir_condition_lower(x64_vir_context *L,uint32_t b,uint32_t v,u
 {
 	codegen_context *e=L->context;
 	bool flags=L->compare_condition==value && L->compare_block==b && v==value+1;
-	uint8_t cc=CC_NE;
+	uint8_t cc=X64_CONDITION_NE;
 	if (flags) {
 		for(uint32_t k=L->setcc_record+1;k<e->x64_context->nin;k++)
-			if(x64_effects(e,&e->x64_context->in[k]).flags & (RECORD_EFFECT_WRITES_FLAGS|RECORD_EFFECT_BARRIER|RECORD_EFFECT_CALL)) {flags=false;break;}
+			if(x64_record_effects(e,&e->x64_context->in[k]).flags & (RECORD_EFFECT_WRITES_FLAGS|RECORD_EFFECT_BARRIER|RECORD_EFFECT_CALL)) {flags=false;break;}
 	}
 	if(flags) {
 		cc=e->x64_context->in[L->setcc_record].condition;
@@ -177,6 +177,6 @@ VPRIV uint8_t x64_vir_condition_lower(x64_vir_context *L,uint32_t b,uint32_t v,u
 			memmove(&e->x64_context->in[L->setcc_record],&e->x64_context->in[L->setcc_record+1],(e->x64_context->nin-L->setcc_record-1)*sizeof(record));
 			e->x64_context->nin--;
 		}
-	} else x64_op3(e, X_TEST, x64_vir_type_size(L->function->insns[value].type), XNOREG, reg, reg);
+	} else x64_record_emit_three_registers(e, X64_OP_TEST, x64_vir_type_size(L->function->insns[value].type), X64_REGISTER_NONE, reg, reg);
 	return cc;
 }

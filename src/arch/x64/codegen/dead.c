@@ -1,7 +1,7 @@
 /* Bounded physical-register liveness before two-address lowering. Topology and
  * convergence are shared; x86 retains effects, flags and epilogue contracts.
  */
-#include "x64impl.h"
+#include "x64-internal.h"
 
 #define X_DEAD_BLOCKS 256
 #define X_DEAD_EDGES 1024
@@ -68,7 +68,7 @@ static bool x64_dead_target(uint32_t label, uint32_t labels, uint32_t *target)
 
 VPRIV void x64_dead_budget(codegen_context *e, uint32_t budget)
 {
-	xst *x = e->x64_context;
+	x64_lowering_context *x = e->x64_context;
 	uint32_t n = x->nin, blocks = 1, labels = 0, edges = 0;
 	uint32_t *start = x64_dead_work.start;
 	em_flow_transfer *transfer = x64_dead_work.transfer;
@@ -86,14 +86,14 @@ VPRIV void x64_dead_budget(codegen_context *e, uint32_t budget)
 		/* An opaque record or escaped label could add unrepresented entries
 		 * or edges. Decline the whole function without modifying any record.
 		 */
-		if (i->opcode >= X_NOPS || i->opcode == X_RAW || i->opcode == X_NAMED || i->opcode == X_JMPR || i->opcode == X_LEAL)
+		if (i->opcode >= X64_OP_COUNT || i->opcode == X64_OP_RAW || i->opcode == X64_OP_NAMED || i->opcode == X64_OP_JMPR || i->opcode == X64_OP_LEAL)
 			return;
-		if (k && (i->opcode == X_LABEL || x->in[k - 1].opcode == X_JMP || x->in[k - 1].opcode == X_JCC)) {
+		if (k && (i->opcode == X64_OP_LABEL || x->in[k - 1].opcode == X64_OP_JMP || x->in[k - 1].opcode == X64_OP_JCC)) {
 			if (blocks == X_DEAD_BLOCKS)
 				return;
 			start[blocks++] = k;
 		}
-		if (i->opcode == X_LABEL) {
+		if (i->opcode == X64_OP_LABEL) {
 			uint32_t previous;
 
 			if (labels == X_DEAD_BLOCKS || x64_dead_target(i->label, labels, &previous))
@@ -107,10 +107,10 @@ VPRIV void x64_dead_budget(codegen_context *e, uint32_t budget)
 		em_flow_transfer t = { 0 };
 
 		for (uint32_t k = start[b]; k < start[b + 1]; k++) {
-			record_effects f = x64_effects(e, &x->in[k]);
+			record_effects f = x64_record_effects(e, &x->in[k]);
 			uint64_t use = x64_dead_use(f);
 
-			if (f.branch != RECORD_BRANCH_NONE && x->in[k].opcode != X_JMP && x->in[k].opcode != X_JCC)
+			if (f.branch != RECORD_BRANCH_NONE && x->in[k].opcode != X64_OP_JMP && x->in[k].opcode != X64_OP_JCC)
 				return;
 			t.use |= use & ~t.def;
 			/* RECORD_EFFECT_WRITES_FLAGS describes an output, not necessarily a complete
@@ -120,13 +120,13 @@ VPRIV void x64_dead_budget(codegen_context *e, uint32_t budget)
 			t.def |= f.defines;
 		}
 		const record *last = &x->in[start[b + 1] - 1];
-		if (last->opcode == X_JMP || last->opcode == X_JCC) {
+		if (last->opcode == X64_OP_JMP || last->opcode == X64_OP_JCC) {
 			uint32_t target;
 
 			if (!x64_dead_target(last->label, labels, &target) || !x64_dead_edge(b, target, &edges))
 				return;
 		}
-		if (last->opcode != X_JMP) {
+		if (last->opcode != X64_OP_JMP) {
 			if (b + 1 < blocks) {
 				if (!x64_dead_edge(b, b + 1, &edges))
 					return;
@@ -151,7 +151,7 @@ VPRIV void x64_dead_budget(codegen_context *e, uint32_t budget)
 		uint64_t live = x64_dead_work.live.out[b];
 
 		for (uint32_t k = start[b + 1]; k-- > start[b];) {
-			record_effects f = x64_effects(e, &x->in[k]);
+			record_effects f = x64_record_effects(e, &x->in[k]);
 			uint64_t def = x64_dead_def(f);
 
 			if (def && !(def & live) && x64_dead_removable(f)) {

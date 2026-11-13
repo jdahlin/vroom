@@ -1,6 +1,6 @@
 /* Direct register-only sibling calls. The shared proof limits this to exact
    forwarding wrappers; a terminal marker keeps ABI arguments live to exit. */
-#include "x64impl.h"
+#include "x64-internal.h"
 
 VPRIV bool x64_tail_return(codegen_context *e, uint32_t expr)
 {
@@ -36,24 +36,24 @@ VPRIV bool x64_tail_return(codegen_context *e, uint32_t expr)
 		if (slots[i]) {
 			codegen_lvalue from = { .kind = CODEGEN_LVALUE_FRAME, .offset = slots[i], .align = 8 };
 
-			x64_load(e, x64_argreg((int)i), &from, walk_type_size(c, ty), walk_type_is_signed(c, ty));
+			x64_load(e, x64_argument_register((int)i), &from, walk_type_size(c, ty), walk_type_is_signed(c, ty));
 		} else {
-			x64_op3(e, X_MOVI, walk_type_size(c, ty), x64_argreg((int)i), XNOREG, XNOREG)->immediate =
+			x64_record_emit_three_registers(e, X64_OP_MOVI, walk_type_size(c, ty), x64_argument_register((int)i), X64_REGISTER_NONE, X64_REGISTER_NONE)->immediate =
 				(int64_t)codegen_integer_truncate(c, values[i].integer, ty);
 		}
 	}
 	codegen_reference_note(e, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, callee));
-	x64_put(e, X_TAIL)->reference = CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, callee);
+	x64_record_emit(e, X64_OP_TAIL)->reference = CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, callee);
 	return true;
 }
 
 VPRIV uint32_t x64_tail_ref(const codegen_context *e)
 {
-	const xst *X = e->x64_context;
+	const x64_lowering_context *X = e->x64_context;
 
 	/* Only the common return label may follow this slice's terminal marker. */
 	for (uint32_t k = X->nin; k-- > 0;)
-		if (X->in[k].opcode != X_LABEL)
-			return X->in[k].opcode == X_TAIL ? X->in[k].reference : 0;
+		if (X->in[k].opcode != X64_OP_LABEL)
+			return X->in[k].opcode == X64_OP_TAIL ? X->in[k].reference : 0;
 	return 0;
 }
