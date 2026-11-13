@@ -76,6 +76,23 @@ def is_compiler(argv):
     return bool(argv) and re.search(r'(^|/)(clang|gcc|cc|vcc)(-[0-9.]+)?$', argv[0]) is not None
 
 
+_sysdirs = {}
+
+
+def system_dirs(cc):
+    """Linux: the compiler's system include directories (clang's resource directory first), as
+    -nostdinc -isystem DIR...: vpp then puts vcc's own arm_neon.h and arm_acle.h before clang's,
+    which need clang's builtins.  None on macOS: vpp finds the SDK."""
+    if platform.system() == 'Darwin':
+        return []
+    if cc not in _sysdirs:
+        p = subprocess.run([cc, '-E', '-v', '-x', 'c', os.devnull], capture_output=True, text=True)
+        m = re.search(r'#include <\.\.\.> search starts here:\n(.*?)\nEnd of search list', p.stderr, re.S)
+        dirs = [l.strip() for l in m.group(1).splitlines()] if m else []
+        _sysdirs[cc] = ['-nostdinc'] + [x for d in dirs for x in ('-isystem', d)] if dirs else []
+    return _sysdirs[cc]
+
+
 def make_commands(cfg, tmp, jobs):
     """[(cwd, vpp flags, source)] from `make -n` for one configuration"""
     base = {'files': ['vcc', 'VCC_UNITY='], 'unity': ['vcc'], 'wasm': ['vcc', 'VCC_WASM=1', 'VCC_UNITY='], 'fuzz': ['fuzz']}
@@ -101,6 +118,7 @@ def make_commands(cfg, tmp, jobs):
         if not is_compiler(argv):
             continue
         flags, srcs = compile_args(argv)
+        flags = system_dirs(argv[0]) + flags
         if cfg == 'x86':
             if platform.system() != 'Darwin':
                 return []
