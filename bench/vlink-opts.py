@@ -262,14 +262,16 @@ def main():
                'st': 'int h(void); int _start(void){return h();}\n',
                'sp': 'static int foq(void){return 1;}\nint fooo(void){return 0;} int foo(void); int x_(void);'
                      ' int _start(void){return x_()+foo()+foq();}\nint ffo(void);int g(void){return ffo();}\n'
-                     'int foqq(void); int k(void){return foqq();}\n'}
+                     'int foqq(void); int k(void){return foqq();}\n',
+               # a name past 1023 bytes: the report was cut there (vbuf_f)
+               'long': 'extern int ' + 'L' * 3000 + '(void); int f(void){return ' + 'L' * 3000 + '();}\n'}
         for name, src in UND.items():
             open(f'{t}/{name}.c', 'w').write(src)
             subprocess.run([llvm('clang'), '--target=aarch64-linux-gnu', '-w', '-c', f'{name}.c', '-o', f'{name}.o'],
                            cwd=t, check=True)
         subprocess.run([llvm('llvm-ar'), 'rc', f'{t}/lu.a', f'{t}/un2.o'], check=True)
         for args in ('un1.o un2.o -e f', 'st.o lu.a', 'un3.o un1.o -e a1', 'sp.o', 'sp.o un3.o', 'un3.o sp.o',
-                     'nope1.o nope2.o'):
+                     'nope1.o nope2.o', 'long.o -e f'):
             errs = []
             # lld scans relocations in parallel: with threads the order of its errors (and so
             # which two get "did you mean") varies run to run; vlink's is lld's sequential one
