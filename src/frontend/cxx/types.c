@@ -123,6 +123,12 @@ VPRIV void cxx_class_begin(cxx *c, cxx_entity *e, uint32_t name, uint32_t loc, b
 	if (e && e->ty != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, e->ty) &&
 	    !(c->ast->tags[AST_TYPE(c->ast, e->ty)->aux].flags & RF_COMPLETE)) {
 		b->tag = AST_TYPE(c->ast, e->ty)->aux;	/* declared before: its record, completed now */
+		if (is_union && !(c->ast->tags[b->tag].flags & RF_UNION)) {	/* (an instance is declared as a struct) */
+			c->ast->tags[b->tag].flags |= RF_UNION;
+			c->ast->ty[c->ast->tags[b->tag].ty].kind = TY_UNION;
+		}
+		if (c->tag_instance && b->tag < c->ntag_instance)
+			c->tag_instance[b->tag] = NULL;	/* (being completed: not again) */
 		return;
 	}
 	b->tag = cc_tag_new(c->ast, is_union ? TY_UNION : TY_STRUCT, name, loc);
@@ -147,6 +153,12 @@ VPRIV void cxx_class_field(cxx *c, uint32_t name, qty t, uint32_t loc, int bitfi
 		b->skip = t == CXX_TY_UNKNOWN ? CXX_SKIP_UNKNOWN_MEMBER : CXX_SKIP_BITFIELD;
 		return;
 	}
+	if (AST_TYPE_KIND(c->ast, t) == TY_VOID || AST_TYPE_KIND(c->ast, t) == TY_FUNC) {
+		b->skip = CXX_SKIP_UNKNOWN_MEMBER;	/* (ill-formed: never laid out) */
+		return;
+	}
+	if (cc_type_is_record(c->ast, t) && !(c->ast->tags[AST_TYPE(c->ast, t)->aux].flags & RF_COMPLETE))
+		cxx_type_require_complete(c, t);	/* a member by value: an instance is completed now */
 	if (cc_type_is_record(c->ast, t) && !(c->ast->tags[AST_TYPE(c->ast, t)->aux].flags & RF_COMPLETE)) {
 		b->skip = CXX_SKIP_UNKNOWN_MEMBER;	/* a member of a class that was not laid out */
 		return;
@@ -171,6 +183,8 @@ VPRIV void cxx_class_end(cxx *c)
 		return;
 	}
 	c->anonymous_class = CXX_TY_UNKNOWN;
+	if (b->tag && c->name_path_valid && c->name_path_len)	/* its name as source: the type printer's */
+		cxx_tag_spelling_set(c, b->tag, c->name_path, c->name_path_len);
 	if (b->skip >= 0 || !b->tag) {
 		c->stats.classes_skipped[b->skip >= 0 ? b->skip : CXX_SKIP_TEMPLATE]++;
 		if (c->build && b->skip >= 0)

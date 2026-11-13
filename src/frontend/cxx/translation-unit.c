@@ -33,6 +33,7 @@ int cxx_run(pp *p, const cc_opts *co, const cxx_options *o)
 	c.ast = malloc(sizeof(cc));
 	cc_translation_unit_init(c.ast, p, co);	/* the builtin types, the tables */
 	c.name_path_valid = 1;
+	c.trace = getenv("VCC_CXX_TRACE") != NULL;
 	c.layout_fd = -1;
 	if (getenv("VCC_CXX_LAYOUT"))	/* static_asserts of the layouts built, for clang to check (bench/cxx-layout.py) */
 		c.layout_fd = open(getenv("VCC_CXX_LAYOUT"), O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -82,6 +83,7 @@ int cxx_run(pp *p, const cc_opts *co, const cxx_options *o)
 			st->declarations, st->declarations_typed, st->classes, st->classes_laid_out, st->classes_skipped[CXX_SKIP_TEMPLATE],
 			st->classes_skipped[CXX_SKIP_BASES], st->classes_skipped[CXX_SKIP_VIRTUAL], st->classes_skipped[CXX_SKIP_UNKNOWN_MEMBER],
 			st->classes_skipped[CXX_SKIP_BITFIELD], st->classes_skipped[CXX_SKIP_SPECIALIZATION], st->symbols);
+		dprintf(o->errfd, "cxx: instances %u made, %u failed; cache %u\n", c.instances_made, c.instances_failed, c.ninstances);
 	}
 	if (c.layout_fd >= 0)
 		close(c.layout_fd);

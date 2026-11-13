@@ -77,7 +77,11 @@ static void cxx_unqualified_id_rest_parse(cxx *c)
 		} else if ((k >= LEX_TOKEN_PERIOD && k <= LEX_TOKEN_COMMA && k != LEX_TOKEN_SEMICOLON && k != LEX_TOKEN_COLON &&
 			    k != LEX_TOKEN_QUESTION && k != LEX_TOKEN_COLON_COLON && k != LEX_TOKEN_PERIOD && k != LEX_TOKEN_ELLIPSIS) ||
 			   k == CXX_TOKEN_ARROW_STAR || k == CXX_TOKEN_SPACESHIP) {
-			cxx_advance(c);
+			uint32_t n;
+
+			cxx_operator_at(c, &n);	/* operator>> and friends: joined pieces */
+			while (n--)
+				cxx_advance(c);
 		} else
 			cxx_type_id_parse(c);	/* conversion function */
 		if (cxx_is(c, LEX_TOKEN_LESS) && cxx_lookahead_fn(c, cxx_template_arguments_then_call))
@@ -422,10 +426,13 @@ static void cxx_paren_expression_parse(cxx *c)
 	c->in_template_args = 0;
 	c->implicit_typename = 0;
 	if (cxx_is(c, LEX_TOKEN_ELLIPSIS)) {	/* ( ... op e ) */
+		uint32_t n;
+
 		cxx_advance(c);
-		if (!cxx_is_fold_operator(cxx_kind(c)))
+		if (!cxx_is_fold_operator(cxx_operator_at(c, &n)))
 			cxx_fail(c, "expected a fold operator");
-		cxx_advance(c);
+		while (n--)
+			cxx_advance(c);
 		cxx_cast_expression_parse(c);
 		cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
 		c->in_template_args = targs;
@@ -440,11 +447,16 @@ static void cxx_paren_expression_parse(cxx *c)
 		return;
 	}
 	cxx_expression_parse(c);
-	if (cxx_is_fold_operator(cxx_kind(c)) && cxx_peek(c, 1)->kind == LEX_TOKEN_ELLIPSIS) {	/* ( e op ... [op e] ) */
-		cxx_advance(c);
+	uint32_t n;
+
+	if (cxx_is_fold_operator(cxx_operator_at(c, &n)) && cxx_peek(c, n)->kind == LEX_TOKEN_ELLIPSIS) {	/* ( e op ... [op e] ) */
+		while (n--)
+			cxx_advance(c);
 		cxx_advance(c);
 		if (!cxx_is(c, LEX_TOKEN_RIGHT_PAREN)) {
-			cxx_advance(c);
+			cxx_operator_at(c, &n);
+			while (n--)
+				cxx_advance(c);
 			cxx_cast_expression_parse(c);
 		}
 	}
@@ -825,9 +837,9 @@ static void cxx_cast_expression_parse(cxx *c)
 	cxx_unary_expression_parse(c);
 }
 
-static int cxx_binary_precedence(cxx *c)
+static int cxx_binary_precedence(cxx *c, uint32_t *ntok)
 {
-	switch (cxx_kind(c)) {
+	switch (cxx_operator_at(c, ntok)) {
 	case CXX_TOKEN_PERIOD_STAR: case CXX_TOKEN_ARROW_STAR: return 14;
 	case LEX_TOKEN_STAR: case LEX_TOKEN_SLASH: case LEX_TOKEN_PERCENT: return 13;
 	case LEX_TOKEN_PLUS: case LEX_TOKEN_MINUS: return 12;
@@ -836,7 +848,7 @@ static int cxx_binary_precedence(cxx *c)
 	case CXX_TOKEN_SPACESHIP: return 10;
 	case LEX_TOKEN_LESS: case LEX_TOKEN_LESS_EQUAL: return 9;
 	case LEX_TOKEN_GREATER: return c->in_template_args ? 0 : 9;
-	case LEX_TOKEN_GREATER_EQUAL: return 9;	/* one token: an operator even in template arguments */
+	case LEX_TOKEN_GREATER_EQUAL: return 9;	/* written as one token: an operator even in template arguments */
 	case LEX_TOKEN_EQUAL_EQUAL: case LEX_TOKEN_EXCLAMATION_EQUAL: return 8;
 	case LEX_TOKEN_AMPERSAND: return 7;
 	case LEX_TOKEN_CARET: return 6;
@@ -851,14 +863,16 @@ static void cxx_binary_expression_parse(cxx *c, int min)
 {
 	cxx_cast_expression_parse(c);
 	for (;;) {
-		int p = cxx_binary_precedence(c);
+		uint32_t n;
+		int p = cxx_binary_precedence(c, &n);
 
 		if (!p || p < min)
 			return;
 		/* a fold: e op ... (the caller, a parenthesized expression, takes it) */
-		if (cxx_peek(c, 1)->kind == LEX_TOKEN_ELLIPSIS)
+		if (cxx_peek(c, n)->kind == LEX_TOKEN_ELLIPSIS)
 			return;
-		cxx_advance(c);
+		while (n--)
+			cxx_advance(c);
 		cxx_binary_expression_parse(c, p + 1);
 	}
 }
@@ -878,9 +892,9 @@ VPRIV void cxx_conditional_expression_parse(cxx *c)
 	}
 }
 
-static bool cxx_is_assignment_operator(cxx *c)
+static bool cxx_is_assignment_operator(cxx *c, uint32_t *ntok)
 {
-	switch (cxx_kind(c)) {
+	switch (cxx_operator_at(c, ntok)) {
 	case LEX_TOKEN_EQUAL: case LEX_TOKEN_STAR_EQUAL: case LEX_TOKEN_SLASH_EQUAL: case LEX_TOKEN_PERCENT_EQUAL:
 	case LEX_TOKEN_PLUS_EQUAL: case LEX_TOKEN_MINUS_EQUAL: case LEX_TOKEN_LESS_LESS_EQUAL: case LEX_TOKEN_AMPERSAND_EQUAL:
 	case LEX_TOKEN_CARET_EQUAL: case LEX_TOKEN_PIPE_EQUAL:
@@ -906,10 +920,13 @@ VPRIV void cxx_assignment_expression_parse(cxx *c)
 		return;
 	}
 	cxx_conditional_expression_parse(c);
-	if (cxx_is_assignment_operator(c)) {
-		if (cxx_peek(c, 1)->kind == LEX_TOKEN_ELLIPSIS)
+	uint32_t n;
+
+	if (cxx_is_assignment_operator(c, &n)) {
+		if (cxx_peek(c, n)->kind == LEX_TOKEN_ELLIPSIS)
 			return;	/* a fold over = */
-		cxx_advance(c);
+		while (n--)
+			cxx_advance(c);
 		cxx_initializer_parse(c);
 	}
 }
