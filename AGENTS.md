@@ -73,6 +73,8 @@ relative to it); `TODO.md` stays at the top.
   - `port/`: what depends on the host (headers in `include/port/`): file
     mapping (`mapfile.h`), thread counters (`vperf.h`), the stack guard
     (`vstack.h`), CRC32C (`hostcrc.h`), `-march=native` on x86 (`x86native.h`),
+    the shared thread pool and CPU budget (`task.h`, `vtask_*`: parallel-for,
+    jobs, blocking regions; doc/quality/WORK-scheduler.md; `-j`/`VCC_JOBS`),
     Apple PMU counters (`darwin/pmc.c`), and the wasm build's `wasm/mman.c`
     (the big reservations as small sbrk stretches) and `wasm/compat/` (ACLE CRC
     through SIMDe).
@@ -228,6 +230,8 @@ bench/vcc-cfi.py -j 6               # -fasynchronous-unwind-tables: .eh_frame pe
 bench/vcc-dwarf.py -j 6             # -g line tables: dwarfdump --verify, .text unchanged, rows vs clang (~2 min)
 bench/vlink-bad.py                  # corrupt objects/archives: vlink (ASan) fails cleanly (<1 s)
 bench/vlink-opts.py                 # vlink options vs ld.lld: errors and loaded image (<1 s)
+build/src/task-test                 # port/task.c: the pool and budget (also under TSan, <1 s)
+bench/sched-measure.py batch|emit|link|vccd|kbuild-log   # scheduling measurements A-F of doc/review/quality-scheduling.md
 bench/vcc-pic.py                    # GOT and TLS relocations per -fno-pic/-fPIE/-fPIC vs clang (<1 s)
 bench/vcc-volatile.py               # volatile loads/stores kept one for one, direct emitter and VIR (test/volatile, <1 s)
 bench/vir-test.py -j 6              # VIR: parser/printer round trip, verifier rules, canon, dominators (src/test/vir, ~1 s)
