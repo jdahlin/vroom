@@ -339,7 +339,7 @@ static void vl_mat(vl *L, uint32_t v, int rd)
 		opi(e, I_ADDI, 1, rd, FRAME, L->soff[k->a] + vl_k64(&(vir_ins){ .b = k->b, .c = k->c }));
 		return;
 	default:
-		vl_fail(L, "VIR lowering: a constant it cannot materialize");
+		vl_fail(L, VIRFAIL(constant_not_materializable));
 	}
 }
 
@@ -350,7 +350,7 @@ static void vl_matf(vl *L, uint32_t v, int vd, int t)
 	int d = k->ty == VT_F64;
 
 	if (k->op != VO_FCONST)
-		vl_fail(L, "VIR lowering: a float constant that is not fconst");
+		vl_fail(L, VIRFAIL(float_constant_not_fconst));
 	if (!k->b && !k->c) {
 		word(L->e, f_in(d, vd, ZR));
 		return;
@@ -377,13 +377,13 @@ static int vl_ix(vl *L, uint32_t k, int t)
 		mem(L->e, I_LD, vl_ssz(L, L->o->slot[v]), 0, t, FRAME, L->spoff[L->o->slot[v]]);
 		return t;
 	}
-	vl_fail(L, "VIR lowering: an operand without a location");
+	vl_fail(L, VIRFAIL(operand_without_location));
 }
 
 static int vl_fx(vl *L, uint32_t k)
 {
 	if (L->opr[k] == VR_NONE)
-		vl_fail(L, "VIR lowering: a float operand without a register");
+		vl_fail(L, VIRFAIL(float_operand_without_register));
 	return vl_gv(L->opr[k]);
 }
 
@@ -394,7 +394,7 @@ static void vl_rmov(vl *L, uint8_t dst, uint8_t src)
 	if (dst == src)
 		return;
 	if (vl_fcls(dst) != vl_fcls(src))
-		vl_fail(L, "VIR lowering: a move between register classes");
+		vl_fail(L, VIRFAIL(move_between_register_classes));
 	if (vl_fcls(dst))
 		word(L->e, 0x4ea01c00u | (unsigned)vl_gv(src) << 16 | (unsigned)vl_gv(src) << 5 | (unsigned)vl_gv(dst));	/* mov v.16b, v.16b (a vector's upper half too) */
 	else
@@ -478,7 +478,7 @@ static void vl_edits(vl *L, uint32_t *ei, uint32_t end, uint32_t pos)
 			vl_spill(L, x->src, o->slot[x->v], R_X16); PROBE(3);
 			break;
 		default:
-			vl_fail(L, "VIR lowering: swapped operands");
+			vl_fail(L, VIRFAIL(swapped_operands));
 		}
 	}
 }
@@ -519,7 +519,7 @@ static void vl_emoves(vl *L, uint32_t g)
 					const vir_emove *o2 = &o->move[ed->first + k];
 
 					if ((!(o2->dst & VL_SLOT) && o2->dst == VR_SCR1) || (o2->kind != VE_REMAT && !(o2->src & VL_SLOT) && o2->src == VR_SCR1))
-						vl_fail(L, "VIR lowering: a vector moved between spill slots while the scratch register is taken");
+						vl_fail(L, VIRFAIL(vector_spill_move_scratch_taken));
 				}
 				vl_qslot(L, true, 31, sn, t);
 				vl_qslot(L, false, 31, dn, t);
@@ -536,7 +536,7 @@ static void vl_emoves(vl *L, uint32_t g)
 			break;
 		case VE_XCHG:
 			if (ds || ss || vl_fcls((uint8_t)dn) != vl_fcls((uint8_t)sn))
-				vl_fail(L, "VIR lowering: an exchange with a slot");
+				vl_fail(L, VIRFAIL(exchange_with_slot));
 			if (vl_fcls((uint8_t)dn)) {
 				unsigned a = (unsigned)vl_gv((uint8_t)dn), b = (unsigned)vl_gv((uint8_t)sn);
 
@@ -552,7 +552,7 @@ static void vl_emoves(vl *L, uint32_t g)
 			}
 			break;
 		default:
-			vl_fail(L, "VIR lowering: an unknown edge move");
+			vl_fail(L, VIRFAIL(unknown_edge_move));
 		}
 	}
 }
@@ -600,7 +600,7 @@ static uint32_t vl_succ(vl *L, uint32_t b, uint32_t k, uint32_t to)
 	if (g == VIR_NOBLK || !o->edge[g].n)
 		return vl_lbl(L, vl_chase(L, to));
 	if (L->ntr == sizeof L->tr / sizeof L->tr[0])
-		vl_fail(L, "VIR lowering: too many edges with moves from one block");
+		vl_fail(L, VIRFAIL(too_many_edge_moves));
 	L->tr[L->ntr].l = newlabel(L->e);
 	L->tr[L->ntr].e = g;
 	L->tr[L->ntr].to = to;
@@ -991,13 +991,13 @@ static void vl_mem(vl *L, const vir_ins *in)
 		return;
 	}
 	if (in->op == VO_MEMSET && !vl_zero(L->f, in->b))
-		vl_fail(L, "VIR lowering: memset of a nonzero byte");
+		vl_fail(L, VIRFAIL(memset_nonzero_byte));
 	{
 		int64_t doff, soff = 0;
 		int d = vl_maddr(L, 0, R_X17, &doff), s = in->op == VO_MEMCPY ? vl_maddr(L, 1, R_X16, &soff) : ZR;
 
 		if (d == R_X17 || s == R_X16)
-			vl_fail(L, "VIR lowering: a memcpy address without a register");
+			vl_fail(L, VIRFAIL(memcpy_address_without_register));
 		for (uint64_t o = 0; o < n;) {
 			uint64_t k = n - o >= 8 ? 8 : n - o >= 4 ? 4 : n - o >= 2 ? 2 : 1;
 
@@ -1143,7 +1143,7 @@ static void vl_call(vl *L, uint32_t b, uint32_t i, const vir_ins *in)
 	int32_t stk;
 
 	if (ng + 1 > L->nop)
-		vl_fail(L, "VIR lowering: call operands");
+		vl_fail(L, VIRFAIL(call_operands));
 	a = __builtin_alloca(sizeof(vlarg) * (ng + 1));
 	uint8_t gm = 0;	/* the x registers the arguments are in */
 
@@ -1153,7 +1153,7 @@ static void vl_call(vl *L, uint32_t b, uint32_t i, const vir_ins *in)
 
 		if (a[k].reg != VR_NONE) {
 			if (r != a[k].reg)
-				vl_fail(L, "VIR lowering: an argument not in its register");
+				vl_fail(L, VIRFAIL(argument_not_in_register));
 			if (!vl_fcls(r) && vl_gx(r) < 8)
 				gm |= (uint8_t)(1u << vl_gx(r));
 			else if (!vl_fcls(r))
@@ -1189,7 +1189,7 @@ static void vl_call(vl *L, uint32_t b, uint32_t i, const vir_ins *in)
 			const vir_ins *k = &f->ins[in->a];
 
 			if (k->op != VO_SYMADDR || k->b || k->c)
-				vl_fail(L, "VIR lowering: an indirect callee without a register");
+				vl_fail(L, VIRFAIL(indirect_callee_without_register));
 			t->cond = 2;
 			t->ref = f->ins[in->a].a;
 			note_ref(e, t->ref);
@@ -1208,7 +1208,7 @@ static void vl_call(vl *L, uint32_t b, uint32_t i, const vir_ins *in)
 		const vir_ins *k = &f->ins[in->a];
 
 		if (k->op != VO_SYMADDR || k->b || k->c)
-			vl_fail(L, "VIR lowering: an indirect callee without a register");
+			vl_fail(L, VIRFAIL(indirect_callee_without_register));
 		note_ref(e, k->a);
 		ins *c = put(e, I_BL);
 
@@ -1231,12 +1231,12 @@ static void vl_param(vl *L, const vir_ins *in, uint8_t res)
 	int32_t stk;
 
 	if (ng > VL_MAXOP || in->a >= ng)
-		vl_fail(L, "VIR lowering: a parameter");
+		vl_fail(L, VIRFAIL(lowering_parameter));
 	a = __builtin_alloca(sizeof(vlarg) * ng);
 	vl_assign(DARWIN(e->c), &f->extra[f->sig], a, ng, &stk);
 	if (a[in->a].reg != VR_NONE) {
 		if (res != VR_NONE && res != a[in->a].reg)
-			vl_fail(L, "VIR lowering: a parameter not in its register");
+			vl_fail(L, VIRFAIL(parameter_not_in_register));
 		return;
 	}
 	if (res == VR_NONE)
@@ -1333,7 +1333,7 @@ static void vl_switch(vl *L, uint32_t b, const vir_ins *in)
 			bcond(e, C_EQ, t);
 		} else {
 			if (r == R_X17)
-				vl_fail(L, "VIR lowering: switch");
+				vl_fail(L, VIRFAIL(switch_lowering));
 			opi(e, I_SUBI, x, R_X17, r, (int64_t)a);
 			opi(e, I_SUBSI, x, ZR, R_X17, (int64_t)(h - a));
 			bcond(e, C_LS, t);
@@ -1627,7 +1627,7 @@ static bool vl_vec(vl *L, const vir_ins *in, uint8_t res)
 		a = vl_fx(L, 0), b = vl_fx(L, 1), c = vl_fx(L, 2);
 		t = vd == c ? vd : vd == a || vd == b ? 31 : vd;
 		if (t == 31 && (a == 31 || b == 31))
-			vl_fail(L, "VIR lowering: a vector fma without a free register");
+			vl_fail(L, VIRFAIL(vector_fma_without_register));
 		if (t != c)
 			VW3(0x4ea01c00u, c, c, t);
 		if (in->fl & VIF_NEGC)
@@ -1659,7 +1659,7 @@ static bool vl_vec(vl *L, const vir_ins *in, uint8_t res)
 	case VO_SELECT:
 		if (!vir_isvec(in->ty))
 			return false;
-		vl_fail(L, "VIR lowering: select of vectors");
+		vl_fail(L, VIRFAIL(vector_select));
 	case VO_VSPLAT:
 		if (L->opr[0] != VR_NONE && vl_fcls(L->opr[0]))
 			VW2(D ? 0x4e080400u : 0x4e040400u, vl_gv(L->opr[0]), vd);	/* dup v.4s, v.s[0] (.2d, .d[0]) */
@@ -1698,7 +1698,7 @@ static bool vl_vec(vl *L, const vir_ins *in, uint8_t res)
 		case 5: VW3(0x6e20e400u | D, b, a, vd); break;	/* oge */
 		default:	/* uno: not (a == a and b == b); one: a > b or b > a */
 			if (a == 31 || b == 31 || vd == 31)
-				vl_fail(L, "VIR lowering: a vector compare without a scratch register");
+				vl_fail(L, VIRFAIL(vector_compare_without_scratch));
 			if ((in->fl & 15) == 6) {
 				VW3(0x4e20e400u | D, a, a, 31);
 				VW3(0x4e20e400u | D, b, b, vd);
@@ -1842,7 +1842,7 @@ static void vl_ins(vl *L, uint32_t b, uint32_t i, uint8_t res)
 		int a = vl_ix(L, 0, R_X16), c = vl_ix(L, 1, R_X17);
 
 		if (a == R_X16 || c == R_X16)
-			vl_fail(L, "VIR lowering: a remainder of a constant");
+			vl_fail(L, VIRFAIL(constant_remainder));
 		op3(e, in->op == VO_SREM ? I_SDIV : I_UDIV, x, R_X16, a, c);
 		op4(e, I_MSUB, x, rd, R_X16, c, a);
 		return;
@@ -2052,7 +2052,7 @@ static void vl_ins(vl *L, uint32_t b, uint32_t i, uint8_t res)
 		int t = l.k == L_REG && l.r == R_X16 ? R_X17 : R_X16;
 
 		if (!DARWIN(e->c))
-			vl_fail(L, "VIR lowering: va_start");
+			vl_fail(L, VIRFAIL(variadic_start_lowering));
 		vl_assign(true, &f->extra[f->sig], &none, 0, &stk);
 		if (l.k == L_SYM) {
 			addr_of_ref(e, R_X17, l.ref, l.off);
@@ -2106,10 +2106,8 @@ static void vl_ins(vl *L, uint32_t b, uint32_t i, uint8_t res)
 		e->reach = false;
 		return;
 	default: {
-		static _Thread_local char m[80];
-
-		snprintf(m, sizeof m, "VIR lowering: %s", vir_optab[in->op].name ? vir_optab[in->op].name : "?");
-		vl_fail(L, m);
+		snprintf(L->e->vw->detail, sizeof L->e->vw->detail, "%s", vir_optab[in->op].name ? vir_optab[in->op].name : "?");
+		vl_fail(L, VIRFAIL(unsupported_instruction));
 	}
 	}
 }
@@ -2155,7 +2153,7 @@ static void vl_block(vl *L, uint32_t b)
 			if (f->ins[*p].ty == VT_MULTI)
 				continue;
 			if (L->nop == VL_MAXOP)
-				vl_fail(L, "VIR lowering: too many operands");
+				vl_fail(L, VIRFAIL(too_many_operands));
 			L->ov[L->nop] = *p;
 			L->opr[L->nop++] = o->opr[pos++];
 		}
@@ -2170,7 +2168,7 @@ static void vl_block(vl *L, uint32_t b)
 			vl_spill(L, res, o->slot[i], R_X16);
 	}
 	if (e->reach)
-		vl_fail(L, "VIR lowering: a block without a terminator");
+		vl_fail(L, VIRFAIL(lowering_block_without_terminator));
 	if (L->ntr) {	/* (a copy in vl_goto reuses L->tr) */
 		uint32_t n = L->ntr;
 		struct { uint32_t l, e, to; } *tr = __builtin_alloca(n * sizeof *tr);
@@ -2355,13 +2353,13 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 
 	*why = NULL;
 	if (e->E->o->debug) {
-		*why = "VIR lowering: -g";
+		*why = VIRFAIL(debug_info);
 		return false;
 	}
 	/* (unwind tables would have to describe the d registers' slots: not written) */
 	vl_regs(&regs, DARWIN(c), !e->E->o->cfi && !vl_vcross(f));
 	if (!vir_loops_build(f, &V->lp)) {
-		*why = "VIR: loops";
+		*why = VIRFAIL(loop_analysis);
 		return false;
 	}
 	/* i2p and p2i are copies here: their users read the operand (a load's address an add,
@@ -2404,7 +2402,8 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 			ao.noframe = VLT.nf;
 		}
 		if (!vir_alloc(f, &V->lp, &regs, &ao, &V->ao)) {
-			*why = V->ao.err[0] ? V->ao.err : "VIR: allocation failed";
+			*why = VIRFAIL(allocation_failed);
+			snprintf(V->detail, sizeof V->detail, "%s", V->ao.err);
 			return false;
 		}
 		L.sp = ao.shrink ? V->ao.spoint : VIR_NOBLK;
@@ -2416,7 +2415,7 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 		if (n) {
 			fprintf(stderr, "vir: allocation check: %u failures\n%.*s", n, (int)msg.n, msg.p ? (char *)msg.p : "");
 			free(msg.p);
-			*why = "VIR: the allocation check failed";
+			*why = VIRFAIL(allocation_check_failed);
 			return false;
 		}
 		free(msg.p);
@@ -2473,14 +2472,14 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 	case 0:
 		break;
 	default:
-		*why = e->vfail ? e->vfail : "VIR lowering: failed";
+		*why = e->vfail ? e->vfail : VIRFAIL(lowering_failed);
 		e->vtry = false;
 		e->vlow = false;
 		return false;
 	}
 	for (uint32_t k = 0; k < f->nslot; k++) {
 		if (f->slot[k].align > 16)
-			vl_fail(&L, "VIR lowering: an over-aligned slot");
+			vl_fail(&L, VIRFAIL(over_aligned_slot));
 		L.soff[k] = slot(e, f->slot[k].size ? f->slot[k].size : 1, f->slot[k].align);
 	}
 	for (uint32_t k = 0; k < V->ao.nspill; k++)
@@ -2494,7 +2493,7 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 	vl_body(&L);
 	deflabel_forced(e, L.retlbl);
 	if (L.risk && e->fmax + e->outmax + 128 > 4000)
-		vl_fail(&L, "VIR lowering: x17 across a large frame");
+		vl_fail(&L, VIRFAIL(large_frame_scratch));
 	for (int r = 19; r <= 28; r++)
 		if (V->ao.callee[0] >> r & 1)
 			e->usedcs |= 1u << r;

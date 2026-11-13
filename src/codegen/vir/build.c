@@ -58,7 +58,7 @@ static vwst *vw_st(ecx *e)
 		size_t nc_ = (cap) ? (size_t)(cap) * 2 : 256; \
 		while (nc_ < (uint64_t)(n) + (k)) nc_ *= 2; \
 		void *q_ = realloc((p), nc_ * sizeof *(p)); \
-		if (!q_) vw_fail(e, "out of memory"); \
+		if (!q_) vw_fail(e, VIRFAIL(out_of_memory)); \
 		(p) = q_; (cap) = (uint32_t)nc_; \
 	} } while (0)
 
@@ -160,7 +160,7 @@ static uint32_t vw_lblk(ecx *e, uint32_t l)
 			nc *= 2;
 		V->lab = realloc(V->lab, nc * sizeof *V->lab);
 		if (!V->lab)
-			vw_fail(e, "out of memory");
+			vw_fail(e, VIRFAIL(out_of_memory));
 		memset(V->lab + V->clab, 0xff, (nc - V->clab) * sizeof *V->lab);
 		V->clab = nc;
 	}
@@ -211,7 +211,7 @@ static uint32_t *vw_hslot(ecx *e, uint32_t b, uint32_t var, bool add)
 		vwh *live = malloc(((size_t)V->hn + 1) * sizeof *live);
 
 		if (!live)
-			vw_fail(e, "out of memory");
+			vw_fail(e, VIRFAIL(out_of_memory));
 		for (uint32_t i = 0; i < oc; i++)
 			if (V->h[i].gen == V->hgen)
 				live[n++] = V->h[i];
@@ -221,7 +221,7 @@ static uint32_t *vw_hslot(ecx *e, uint32_t b, uint32_t var, bool add)
 			if (!V->h) {
 				V->hcap = V->halloc = 0;
 				free(live);
-				vw_fail(e, "out of memory");
+				vw_fail(e, VIRFAIL(out_of_memory));
 			}
 			V->halloc = nc;
 			V->hgen = 1;
@@ -346,7 +346,7 @@ static uint32_t vw_readv(ecx *e, uint32_t var, uint32_t b, uint32_t ty)
 	/* one level per block between a read and the definition it reaches (through vw_phiops
 	 * at a join): a function of tens of thousands of blocks in a row goes the ordinary way */
 	if (vstack_low())
-		vw_fail(e, "VIR: a variable read too many blocks from its definition");
+		vw_fail(e, VIRFAIL(variable_read_distance));
 	if (!V->b[b].npred) {
 		v = vw_undef(e, vw_phity(e, var, ty));
 	} else if (V->b[b].npred == 1) {
@@ -390,7 +390,7 @@ static uint32_t vw_conv_in(ecx *e, uint32_t b, uint32_t v, uint32_t to)
 	default: break;
 	}
 #undef I
-	vw_fail(e, "VIR: a value of one type read as another");
+	vw_fail(e, VIRFAIL(value_type_mismatch));
 }
 
 static uint32_t vw_conv(ecx *e, uint32_t v, uint32_t to) { return vw_conv_in(e, e->vw->cur, v, to); }
@@ -399,7 +399,7 @@ static uint32_t vw_conv(ecx *e, uint32_t v, uint32_t to) { return vw_conv_in(e, 
 static uint32_t vw_get(ecx *e, int r, uint32_t ty)
 {
 	if (r < 0 || r >= VW_NONAME)
-		vw_fail(e, "VIR: no such register");
+		vw_fail(e, VIRFAIL(no_such_register));
 	return vw_conv(e, vw_readv(e, (uint32_t)r, e->vw->cur, ty), ty);
 }
 
@@ -416,7 +416,7 @@ static uint32_t vw_getraw(ecx *e, int r)	/* name r's value as it is */
 static void vw_set(ecx *e, int r, uint32_t v)
 {
 	if (r < 0 || r >= VW_NONAME)
-		vw_fail(e, "VIR: no such register");
+		vw_fail(e, VIRFAIL(no_such_register));
 	if (r >= VW_FNAME0)
 		e->vw->fprod[r - VW_FNAME0] = 0;
 	vw_write(e, (uint32_t)r, e->vw->cur, v);
@@ -430,7 +430,7 @@ static uint32_t vw_val(ecx *e, const val *v, uint32_t ty)
 	switch (v->k) {
 	case V_CONST:
 		if (ty == VT_F32 || ty == VT_F64)
-			vw_fail(e, "VIR: an integer constant as a float");
+			vw_fail(e, VIRFAIL(integer_constant_as_float));
 		return vw_iconst(e, ty, (int64_t)v->i);
 	case V_ADDR: {
 		uint32_t a = vw_k(e, VO_SYMADDR, VT_PTR, v->ref, (uint32_t)(uint64_t)v->i, (uint32_t)((uint64_t)v->i >> 32));
@@ -441,7 +441,7 @@ static uint32_t vw_val(ecx *e, const val *v, uint32_t ty)
 	case V_REG:
 		return vw_get(e, v->r, ty);
 	default:
-		vw_fail(e, "VIR: this value kind");
+		vw_fail(e, VIRFAIL(unsupported_value_kind));
 	}
 }
 
@@ -468,7 +468,7 @@ VPRIV int vw_treg(ecx *e)
 			V->live[w] |= 1ull << k;
 			return w * 64 + k;
 		}
-	vw_fail(e, "VIR: out of names");
+	vw_fail(e, VIRFAIL(out_of_names));
 }
 
 VPRIV int vw_ftreg(ecx *e)
@@ -480,7 +480,7 @@ VPRIV int vw_ftreg(ecx *e)
 			V->flive |= 1ull << (r - VW_FNAME0);
 			return r;
 		}
-	vw_fail(e, "VIR: out of float names");
+	vw_fail(e, VIRFAIL(out_of_float_names));
 }
 
 VPRIV void vw_tfree(ecx *e, int r)
@@ -581,12 +581,12 @@ static uint32_t vw_slotat(ecx *e, int64_t off, uint64_t size, int64_t *rel)
 
 		if (s->off <= off && off < s->off + (int64_t)s->size) {
 			if (off + (int64_t)size > s->off + (int64_t)s->size)
-				vw_fail(e, "VIR: an access across two slots");
+				vw_fail(e, VIRFAIL(access_across_slots));
 			*rel = off - s->off;
 			return V->act[i];
 		}
 	}
-	vw_fail(e, "VIR: a frame access outside every slot");
+	vw_fail(e, VIRFAIL(access_outside_slots));
 }
 
 static uint32_t vw_slotaddr(ecx *e, uint32_t s, int64_t rel)
@@ -626,7 +626,7 @@ static uint32_t vw_addr(ecx *e, const lval *l, uint64_t size, uint32_t *slot, in
 		return vw_ins(e, VO_PTRADD, VT_PTR, 0, b, vw_iconst(e, VT_I64, l->off), 0);
 	}
 	default:
-		vw_fail(e, "VIR: this lvalue kind");
+		vw_fail(e, VIRFAIL(unsupported_lvalue_kind));
 	}
 }
 
@@ -652,7 +652,7 @@ VPRIV void vw_load(ecx *e, int rd, const lval *l, int size, bool sgn)
 	int64_t rel;
 
 	if (l->bf)
-		vw_fail(e, "VIR: a bit-field lvalue");
+		vw_fail(e, VIRFAIL(bit_field_lvalue));
 	if (l->k == L_VAR) {
 		v = vw_readv(e, l->ref, V->cur, vw_lvty(e, l));
 		if (f)
@@ -665,7 +665,7 @@ VPRIV void vw_load(ecx *e, int rd, const lval *l, int size, bool sgn)
 	else
 		ty = size == 8 ? VT_I64 : sgn ? VT_I64 : VT_I32;
 	if (!ty)
-		vw_fail(e, "VIR: a float load of this size");
+		vw_fail(e, VIRFAIL(float_load_size));
 	a = vw_addr(e, l, (uint64_t)size, &slot, &rel);
 	if (f && size == 8 && slot != VW_NOBLK && V->sl[slot].size == 8 && V->sl[slot].f32w) {
 		/* the word of a float temporary (a conditional expression's value): the f32 stored in it */
@@ -719,7 +719,7 @@ VPRIV void vw_store(ecx *e, int rs, const lval *l, int size)
 	if (rs >= VW_FNAME0 && rs < VW_NONAME)
 		V->fprod[rs - VW_FNAME0] = 0;	/* (an assignment's value is not the product any more, as clang) */
 	if (l->bf)
-		vw_fail(e, "VIR: a bit-field lvalue");
+		vw_fail(e, VIRFAIL(bit_field_lvalue));
 	if (l->k == L_VAR) {
 		uint32_t lt = vw_lvty(e, l);
 
@@ -741,7 +741,7 @@ VPRIV void vw_store(ecx *e, int rs, const lval *l, int size)
 			size = 4;	/* (a float's word in an argument or temporary slot: its low 4 bytes) */
 		ty = vw_stty(e, v, size);
 		if (!ty)
-			vw_fail(e, "VIR: a float store of this size");
+			vw_fail(e, VIRFAIL(float_store_size));
 		a = vw_addr(e, l, (uint64_t)size, &slot, &rel);
 		if (slot != VW_NOBLK && V->sl[slot].size == 8 && (fw || size == 8))
 			V->sl[slot].f32w = fw;	/* (what a load of the word into a float name reads back) */
@@ -773,7 +773,7 @@ VPRIV int vw_laddr(ecx *e, const lval *l)
 	int r;
 
 	if (l->k == L_VAR || l->k == L_VREG)
-		vw_fail(e, "VIR: the address of a register variable");
+		vw_fail(e, VIRFAIL(register_variable_address));
 	a = vw_addr(e, l, 1, &slot, &rel);
 	if (slot != VW_NOBLK) {
 		V->sl[slot].exposed = 1;
@@ -868,7 +868,7 @@ VPRIV val vw_bin(ecx *e, int op, int size, bool sgn, val a, val b)
 	case T_CARET: vop = VO_XOR; break;
 	case T_LESSLESS: vop = VO_SHL; break;
 	case T_GREATERGREATER: vop = sgn ? VO_ASHR : VO_LSHR; break;
-	default: vw_fail(e, "VIR: this operator");
+	default: vw_fail(e, VIRFAIL(unsupported_operator));
 	}
 	uint8_t fl=sgn && !e->E->o->wrapv && (vop==VO_ADD || vop==VO_SUB || vop==VO_MUL)?VIF_NSW:0;
 	if(vop==VO_MUL && (fl&VIF_NSW) && (size==4 || size==8) && b.k==V_CONST && b.i>0 &&
@@ -924,7 +924,7 @@ VPRIV void vw_ext(ecx *e, int r, int from, bool sgn)
 		return;
 	}
 	if (vw_ty(e, v) == VT_F32 || vw_ty(e, v) == VT_F64)
-		vw_fail(e, "VIR: extension of a float");
+		vw_fail(e, VIRFAIL(float_extension));
 	/* narrow: the result as wide as the operand (an i32 with a zero upper half, or i64 for a sign) */
 	if (sgn)
 		v = vw_conv(e, v, VT_I64);
@@ -999,7 +999,7 @@ VPRIV void vw_brz(ecx *e, val a, int size, bool nz, uint32_t lbl)
 VPRIV void vw_switch_bitset(ecx *e, int r, int size, const em_switch_bitset_recipe *recipe, uint32_t target, uint32_t dflt)
 {
 	(void)r, (void)size, (void)recipe, (void)target, (void)dflt;
-	vw_fail(e, "VIR: switch bit set");
+	vw_fail(e, VIRFAIL(switch_bit_set));
 }
 
 static int vw_casecmp(const void *a, const void *b)
@@ -1017,7 +1017,7 @@ VPRIV void vw_switch_table(ecx *e, int r, int size, const em_switch_case *cases,
 	uint32_t o;
 
 	if (!c3)
-		vw_fail(e, "out of memory");
+		vw_fail(e, VIRFAIL(out_of_memory));
 	/* VIR's cases are unsigned and sorted: a range across the sign splits in two */
 	for (uint32_t k = 0; k < n; k++) {
 		uint64_t lo = (uint64_t)cases[k].lo & mask, hi = (uint64_t)cases[k].hi & mask, t = vw_lblk(e, cases[k].target);
@@ -1051,17 +1051,17 @@ VPRIV void vw_switch_table(ecx *e, int r, int size, const em_switch_case *cases,
 /* __int128 and _BitInt: not in 1.0 (SPEC 19) */
 VPRIV bool vw_ldmem(void) { return true; }
 VPRIV bool vw_i128mem(void) { return true; }
-#define VW_NO(name, ...) VPRIV val vw_##name(ecx *e, __VA_ARGS__) { vw_fail(e, "VIR: " #name); }
-VPRIV val vw_wconst(ecx *e, i128 v) { (void)v; vw_fail(e, "VIR: __int128"); }
-VPRIV val vw_wbitint(ecx *e, val v, unsigned bits, bool sgn) { (void)v, (void)bits, (void)sgn; vw_fail(e, "VIR: _BitInt"); }
-VPRIV val vw_bigconst(ecx *e, qty t, const uint32_t *words, i128 small) { (void)t, (void)words, (void)small; vw_fail(e, "VIR: _BitInt"); }
-VPRIV val vw_bigbin(ecx *e, int op, qty t, val a, val b) { (void)op, (void)t, (void)a, (void)b; vw_fail(e, "VIR: _BitInt"); }
-VPRIV val vw_bigcmp(ecx *e, int op, qty t, val a, val b) { (void)op, (void)t, (void)a, (void)b; vw_fail(e, "VIR: _BitInt"); }
-VPRIV val vw_bigcvt(ecx *e, val v, qty from, qty to) { (void)v, (void)from, (void)to; vw_fail(e, "VIR: _BitInt"); }
-VPRIV val vw_wbin(ecx *e, int op, bool sgn, val a, val b) { (void)op, (void)sgn, (void)a, (void)b; vw_fail(e, "VIR: __int128"); }
-VPRIV val vw_wun(ecx *e, int op, val a) { (void)op, (void)a; vw_fail(e, "VIR: __int128"); }
-VPRIV val vw_wcmp(ecx *e, int op, bool sgn, val a, val b) { (void)op, (void)sgn, (void)a, (void)b; vw_fail(e, "VIR: __int128"); }
-VPRIV val vw_wcvt(ecx *e, val v, qty from, qty to) { (void)v, (void)from, (void)to; vw_fail(e, "VIR: __int128"); }
+#define VW_NO(name, ...) VPRIV val vw_##name(ecx *e, __VA_ARGS__) { vw_fail(e, VIRFAIL(unsupported_builtin)); }
+VPRIV val vw_wconst(ecx *e, i128 v) { (void)v; vw_fail(e, VIRFAIL(wide_integer)); }
+VPRIV val vw_wbitint(ecx *e, val v, unsigned bits, bool sgn) { (void)v, (void)bits, (void)sgn; vw_fail(e, VIRFAIL(bit_precise_integer)); }
+VPRIV val vw_bigconst(ecx *e, qty t, const uint32_t *words, i128 small) { (void)t, (void)words, (void)small; vw_fail(e, VIRFAIL(bit_precise_integer)); }
+VPRIV val vw_bigbin(ecx *e, int op, qty t, val a, val b) { (void)op, (void)t, (void)a, (void)b; vw_fail(e, VIRFAIL(bit_precise_integer)); }
+VPRIV val vw_bigcmp(ecx *e, int op, qty t, val a, val b) { (void)op, (void)t, (void)a, (void)b; vw_fail(e, VIRFAIL(bit_precise_integer)); }
+VPRIV val vw_bigcvt(ecx *e, val v, qty from, qty to) { (void)v, (void)from, (void)to; vw_fail(e, VIRFAIL(bit_precise_integer)); }
+VPRIV val vw_wbin(ecx *e, int op, bool sgn, val a, val b) { (void)op, (void)sgn, (void)a, (void)b; vw_fail(e, VIRFAIL(wide_integer)); }
+VPRIV val vw_wun(ecx *e, int op, val a) { (void)op, (void)a; vw_fail(e, VIRFAIL(wide_integer)); }
+VPRIV val vw_wcmp(ecx *e, int op, bool sgn, val a, val b) { (void)op, (void)sgn, (void)a, (void)b; vw_fail(e, VIRFAIL(wide_integer)); }
+VPRIV val vw_wcvt(ecx *e, val v, qty from, qty to) { (void)v, (void)from, (void)to; vw_fail(e, VIRFAIL(wide_integer)); }
 
 /* ---------------- floating point ---------------- */
 
@@ -1073,7 +1073,7 @@ static uint32_t vw_fty(ecx *e, qty t)
 		return VT_F32;
 	if (k == TY_DOUBLE || (k == TY_LDOUBLE && tsize(e->c, t) == 8))
 		return VT_F64;
-	vw_fail(e, "VIR: this floating type");
+	vw_fail(e, VIRFAIL(unsupported_floating_type));
 }
 
 static int vw_fres(ecx *e, const val *a, const val *b)
@@ -1172,8 +1172,8 @@ VPRIV val vw_fsqrt(ecx *e, qty t, val a)
 	return (val){ .k = V_REG, .r = (uint8_t)r };
 }
 
-VPRIV val vw_root4(ecx *e, val a) { (void)a; vw_fail(e, "VIR: root4"); }
-VPRIV val vw_pcmpstr(ecx *e, uint32_t n) { (void)n; vw_fail(e, "VIR: pcmpstr"); }
+VPRIV val vw_root4(ecx *e, val a) { (void)a; vw_fail(e, VIRFAIL(root4)); }
+VPRIV val vw_pcmpstr(ecx *e, uint32_t n) { (void)n; vw_fail(e, VIRFAIL(string_compare)); }
 
 VPRIV val vw_fcmp(ecx *e, int op, qty t, val a, val b)
 {
@@ -1189,7 +1189,7 @@ VPRIV val vw_fcmp(ecx *e, int op, qty t, val a, val b)
 	case T_GREATEREQ: cc = 5; break;
 	case WK_FCMP_UNORDERED: cc = 6; break;
 	case WK_FCMP_ORDERED_NE: cc = 7; break;
-	default: vw_fail(e, "VIR: this float comparison");
+	default: vw_fail(e, VIRFAIL(unsupported_float_comparison));
 	}
 	if (a.k == V_REG) vw_tfree(e, a.r);
 	if (b.k == V_REG) vw_tfree(e, b.r);
@@ -1293,7 +1293,7 @@ VPRIV val vw_bitop(ecx *e, int bi, int size, val a)
 		x = vw_ins(e, VO_POPCNT, ty, 0, x, 0, 0);
 		vw_set(e, r, vw_ins(e, VO_AND, ty, 0, x, vw_iconst(e, ty, 1), 0));
 		return (val){ .k = V_REG, .r = (uint8_t)r };
-	default: vw_fail(e, "VIR: this builtin");
+	default: vw_fail(e, VIRFAIL(unsupported_builtin));
 	}
 	vw_set(e, r, vw_ins(e, op, ty, 0, x, 0, 0));
 	return (val){ .k = V_REG, .r = (uint8_t)r };
@@ -1328,19 +1328,19 @@ VPRIV int vw_atomic(ecx *e, int op, int size, int rp, int rv, int rexp)
 	return r;
 }
 
-VPRIV int vw_tlsaddr(ecx *e, uint32_t ref, int model) { (void)ref, (void)model; vw_fail(e, "VIR: thread-local"); }
-VPRIV val vw_frame(ecx *e, bool ret, uint32_t level) { (void)ret, (void)level; vw_fail(e, "VIR: frame address"); }
-VPRIV val vw_alloca(ecx *e, val n) { (void)n; vw_fail(e, "VIR: alloca"); }
-VPRIV int vw_spget(ecx *e) { vw_fail(e, "VIR: stack pointer"); }
-VPRIV void vw_spset(ecx *e, int r) { (void)r; vw_fail(e, "VIR: stack pointer"); }
-VPRIV val vw_setjmp(ecx *e, int rbuf) { (void)rbuf; vw_fail(e, "VIR: setjmp"); }
-VPRIV void vw_longjmp(ecx *e, int rbuf) { (void)rbuf; vw_fail(e, "VIR: longjmp"); }
-VPRIV void vw_asm(ecx *e, uint32_t n) { (void)n; vw_fail(e, "VIR: inline asm"); }
+VPRIV int vw_tlsaddr(ecx *e, uint32_t ref, int model) { (void)ref, (void)model; vw_fail(e, VIRFAIL(thread_local)); }
+VPRIV val vw_frame(ecx *e, bool ret, uint32_t level) { (void)ret, (void)level; vw_fail(e, VIRFAIL(frame_address)); }
+VPRIV val vw_alloca(ecx *e, val n) { (void)n; vw_fail(e, VIRFAIL(alloca)); }
+VPRIV int vw_spget(ecx *e) { vw_fail(e, VIRFAIL(stack_pointer)); }
+VPRIV void vw_spset(ecx *e, int r) { (void)r; vw_fail(e, VIRFAIL(stack_pointer)); }
+VPRIV val vw_setjmp(ecx *e, int rbuf) { (void)rbuf; vw_fail(e, VIRFAIL(setjmp)); }
+VPRIV void vw_longjmp(ecx *e, int rbuf) { (void)rbuf; vw_fail(e, VIRFAIL(longjmp)); }
+VPRIV void vw_asm(ecx *e, uint32_t n) { (void)n; vw_fail(e, VIRFAIL(inline_assembly)); }
 /* the va_list at rap points at the first unnamed argument (Apple's: on the stack) */
 VPRIV void vw_va_start(ecx *e, int rap)
 {
 	if (!DARWIN(e->c))
-		vw_fail(e, "VIR: va_start (AAPCS64's register save areas)");
+		vw_fail(e, VIRFAIL(variadic_start));
 	vw_ins(e, VO_VA_START, VT_VOID, 0, vw_get(e, rap, VT_PTR), 0, 0);
 	vw_st_clear(e, true);
 }
@@ -1357,7 +1357,7 @@ VPRIV int vw_va_arg(ecx *e, int rap, qty t)
 	int r, rn;
 
 	if (!DARWIN(c))
-		vw_fail(e, "VIR: va_arg (AAPCS64's register save areas)");
+		vw_fail(e, VIRFAIL(variadic_argument));
 	r = vw_treg(e);
 	vw_load(e, r, &ap, 8, false);
 	p = vw_get(e, r, VT_PTR);
@@ -1380,7 +1380,7 @@ VPRIV int vw_va_arg(ecx *e, int rap, qty t)
 	}
 	return r;
 }
-VPRIV void vw_retrec(ecx *e, int raddr, const wkarg *r, uint32_t lbl) { (void)raddr, (void)r, (void)lbl; vw_fail(e, "VIR: a record result"); }
+VPRIV void vw_retrec(ecx *e, int raddr, const wkarg *r, uint32_t lbl) { (void)raddr, (void)r, (void)lbl; vw_fail(e, VIRFAIL(record_result)); }
 VPRIV bool vw_tail_return(ecx *e, uint32_t expr) { (void)e, (void)expr; return false; }
 
 VPRIV void vw_trap(ecx *e)
@@ -1409,8 +1409,8 @@ VPRIV void vw_label(ecx *e, uint32_t l)
 }
 
 VPRIV void vw_jump(ecx *e, uint32_t l) { vw_br(e, vw_lblk(e, l)); }
-VPRIV void vw_jumpr(ecx *e, int r) { (void)r; vw_fail(e, "VIR: computed goto"); }
-VPRIV void vw_named(ecx *e, uint32_t ref) { (void)ref; vw_fail(e, "VIR: an address-taken label"); }
+VPRIV void vw_jumpr(ecx *e, int r) { (void)r; vw_fail(e, VIRFAIL(computed_goto)); }
+VPRIV void vw_named(ecx *e, uint32_t ref) { (void)ref; vw_fail(e, VIRFAIL(label_address)); }
 
 /* ---------------- locals ---------------- */
 
@@ -1449,7 +1449,7 @@ VPRIV bool vw_local(ecx *e, uint32_t s, lval *l)
 			V->lh = malloc(nc * sizeof *V->lh);
 			if (!V->lh) {
 				V->lhcap = V->lhalloc = 0;
-				vw_fail(e, "out of memory");
+				vw_fail(e, VIRFAIL(out_of_memory));
 			}
 			V->lhalloc = nc;
 		}
@@ -1525,7 +1525,7 @@ VPRIV void vw_classify(ecx *e, qty t, wkarg *a, bool unnamed)
 	a->unnamed = unnamed;
 	if (is_record(c, t) || is_array(c, t) || is_vec(c, t) || is_wide(c, t) || k == TY_LDOUBLE || k == TY_FLOAT128 ||
 	    k == TY_FLOAT16 || k == TY_BFLOAT16 || size > 8)
-		vw_fail(e, "VIR: an argument or result passed as a record");
+		vw_fail(e, VIRFAIL(record_argument_or_result));
 	a->n = 1;
 	a->cls[0] = a->cls[1] = is_flt(c, t) ? WA_SSE : WA_INT;
 }
@@ -1595,10 +1595,10 @@ VPRIV val vw_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool var
 	uint32_t *w;
 
 	if (r)
-		vw_fail(e, "VIR: a record result");
+		vw_fail(e, VIRFAIL(record_result));
 	for (int k = 0; k < n; k++)
 		if (a[k].mem || a[k].n != 1)
-			vw_fail(e, "VIR: a record argument");
+			vw_fail(e, VIRFAIL(record_argument));
 	if (fn) {
 		callee = vw_val(e, fn, VT_PTR);
 		if (fn->k == V_REG)
@@ -1650,9 +1650,9 @@ VPRIV void vw_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic)
 	const node *body = N(c->syms[e->wk->fsym].body);
 
 	if (r)
-		vw_fail(e, "VIR: a record result");
+		vw_fail(e, VIRFAIL(record_result));
 	if (variadic && !DARWIN(c))
-		vw_fail(e, "VIR: a variadic function (AAPCS64's register save areas)");
+		vw_fail(e, VIRFAIL(variadic_function));
 	uint32_t pv0 = V->np;	/* the params first (SPEC 15.2: the allocator reads them from the ABI registers) */
 
 	for (int k = 0; k < n; k++) {
@@ -1661,9 +1661,9 @@ VPRIV void vw_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic)
 		uint32_t pc = a[k].cls[0] == WA_SSE ? (a[k].size == 4 ? VC_F32 : VC_F64) : VC_INT;
 
 		if (a[k].mem || a[k].n != 1)
-			vw_fail(e, "VIR: a record parameter");
+			vw_fail(e, VIRFAIL(record_parameter));
 		if (vw_ins(e, VO_PARAM, pc == VC_INT && is_ptr(c, ty) ? VT_PTR : vw_pcty(pc), 0, (uint32_t)k, 0, 0) != pv0 + (uint32_t)k)
-			vw_fail(e, "VIR: parameters");
+			vw_fail(e, VIRFAIL(parameters));
 	}
 	for (int k = 0; k < n; k++) {
 		uint32_t sym = c->lists[body->a + (uint32_t)k];
@@ -1786,7 +1786,7 @@ VPRIV void vw_finish(ecx *e, uint32_t s)
 		V->b[V->cur].term = vw_put(e, VO_RET, VT_VOID, 0, 0, 0, o, V->cur);
 	}
 	if (!vw_emit(e))
-		vw_fail(e, V->why ? V->why : "VIR: the function could not be built");
+		vw_fail(e, V->why ? V->why : VIRFAIL(build_failed));
 }
 
 VPRIV void vw_ecx_free(ecx *e)
@@ -1986,7 +1986,7 @@ static void vw_deadparams(ecx *e)
 	memset(V->map, 0, (size_t)V->np * sizeof *V->map);
 	stk = malloc((size_t)(V->np + 1) * sizeof *stk);
 	if (!stk)
-		vw_fail(e, "out of memory");
+		vw_fail(e, VIRFAIL(out_of_memory));
 	for (uint32_t i = 0; i < V->norder; i++) {
 		uint32_t b = V->order[i];
 
@@ -2141,7 +2141,7 @@ static bool vw_promote(ecx *e)
 	sf = calloc(V->nsl, sizeof *sf);
 	fof = malloc((size_t)V->np * sizeof *fof);	/* access -> field + 1 */
 	if (!bad || !fof || !sf)
-		vw_fail(e, "out of memory");
+		vw_fail(e, VIRFAIL(out_of_memory));
 	for (uint32_t s = 0; s < V->nsl; s++)
 		bad[s] = V->sl[s].prom;	/* (an earlier run's: its stores are dead, its loads gone) */
 	/* a slot escapes when its address is anything but the address of a load or store (the
@@ -2298,7 +2298,7 @@ static bool vw_promote(ecx *e)
 	V->nprom += nf;
 	cur = malloc((size_t)nf * 2 * sizeof *cur);
 	if (!cur)
-		vw_fail(e, "out of memory");
+		vw_fail(e, VIRFAIL(out_of_memory));
 	cst = cur + nf;
 	/* each block's last store to a field is the field's value at its end */
 	for (uint32_t oi = 0; oi < V->norder; oi++) {
@@ -2846,7 +2846,7 @@ static void vw_far_init(ecx *e, vwsimp *S)
 	iend = malloc(((size_t)n + 1) * sizeof *iend);
 	if (!S->seq || !S->wr || !S->ri || !S->bend || !S->linner || !S->lstart || !S->lend || !S->lpar ||
 	    !S->lmerged || !stk || !iend)
-		vw_fail(e, "out of memory");
+		vw_fail(e, VIRFAIL(out_of_memory));
 	for (uint32_t b = 0; b < V->nb; b++)
 		S->ri[b] = VW_NOBLK;
 	for (uint32_t i = 0; i < n; i++)
@@ -3082,7 +3082,7 @@ static void vw_doms(ecx *e, vwsimp *S)
 	S->dkid = malloc(((size_t)V->nb + 1) * sizeof *S->dkid);
 	S->dnext = malloc(((size_t)V->nb + 1) * sizeof *S->dnext);
 	if (!ri || !S->idom || !S->dkid || !S->dnext)
-		vw_fail(e, "out of memory");
+		vw_fail(e, VIRFAIL(out_of_memory));
 	for (uint32_t b = 0; b < V->nb; b++)
 		ri[b] = VW_NOBLK, S->idom[b] = VW_NOBLK, S->dkid[b] = VW_NOBLK, S->dnext[b] = VW_NOBLK;
 	for (uint32_t i = 0; i < n; i++)
@@ -3187,7 +3187,7 @@ static void vw_simplify(ecx *e)
 		S.kmask = kc - 1;
 	}
 	if (!S.cnt || !stk || !S.kt)
-		vw_fail(e, "out of memory");
+		vw_fail(e, VIRFAIL(out_of_memory));
 	/* uses */
 	for (uint32_t i = 0; i < V->norder; i++) {
 		uint32_t b = V->order[i];
@@ -3220,7 +3220,7 @@ static void vw_simplify(ecx *e)
 		S.log = malloc((2 * (size_t)V->np + 2) * sizeof *S.log);	/* (a store or a load adds two) */
 		S.egen = malloc(((size_t)V->nb + 1) * sizeof *S.egen);
 		if (!S.ht || !S.log || !bst || !S.egen)
-			vw_fail(e, "out of memory");
+			vw_fail(e, VIRFAIL(out_of_memory));
 		bst[top++] = V->order[0], bst[top++] = 0;
 		while (top) {
 			uint32_t ph = bst[--top], b = bst[--top];
@@ -3567,7 +3567,7 @@ static bool vw_condmerge(ecx *e)
 	bool any = false, again = true;
 
 	if (!cnt)
-		vw_fail(e, "out of memory");
+		vw_fail(e, VIRFAIL(out_of_memory));
 	for (uint32_t i = 0; i < V->norder; i++) {
 		uint32_t b = V->order[i];
 
@@ -3690,7 +3690,7 @@ static bool vw_condmerge(ecx *e)
 					V->p[c2].in.fl = (uint16_t)((V->p[c2].in.fl & ~15u) | inv[V->p[c2].in.fl & 15]);
 				n = vw_ins_in(e, b, onfalse ? VO_OR : VO_AND, VT_I32, 0, c1, c2, 0);
 				if (n >= ncnt)
-					vw_fail(e, "VIR: joined conditions");
+					vw_fail(e, VIRFAIL(joined_conditions));
 				V->p[n].loc = V->p[t].loc;
 				cnt[n] = 1;
 				V->p[t].in = onfalse ? (vir_ins){ VO_BRIF, VT_VOID, 0, n, O, X } : (vir_ins){ VO_BRIF, VT_VOID, 0, n, X, O };
@@ -3775,7 +3775,7 @@ static void vw_split(ecx *e)
 		uint32_t *o = malloc((size_t)V->norder * sizeof *o), m = 0;
 
 		if (!o)
-			vw_fail(e, "out of memory");
+			vw_fail(e, VIRFAIL(out_of_memory));
 		for (uint32_t i = 0; i < n0; i++) {
 			uint32_t b = V->order[i];
 
@@ -3800,7 +3800,7 @@ static uint32_t vw_m(ecx *e, uint32_t v)
 		return V->map[v];
 	q = &V->p[v];
 	if (q->blk != VW_NOBLK) {
-		V->why = "VIR: a value used before its definition";
+		V->why = VIRFAIL(use_before_definition);
 		return 0;
 	}
 	if (q->in.op == VO_SLOTADDR) {
@@ -3975,7 +3975,7 @@ VPRIV bool vw_emit(ecx *e)
 				return false;
 		}
 		if (!V->b[b].term) {
-			V->why = "VIR: a block without a terminator";
+			V->why = VIRFAIL(block_without_terminator);
 			return false;
 		}
 		if (!vw_emit_ins(e, V->b[b].term, b))
