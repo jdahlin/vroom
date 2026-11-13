@@ -77,7 +77,9 @@ VPRIV void pp_macro_define_record(pp *p, uint32_t id, const pp_macro *m)
 
 static inline bool pp_memory_is_translation_unit(const pp *p, const char *s)
 {
-	return (s >= p->tmp.base && s < p->tmp.end) || (s >= p->perm.base && s < p->perm.end);
+	const uint8_t *u = (const uint8_t *)s;
+
+	return (u >= p->tmp.base && u < p->tmp.base + p->tmp.cap) || (u >= p->perm.base && u < p->perm.base + p->perm.cap);
 }
 
 /* a token pp_token_next hands out while recording */

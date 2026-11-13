@@ -31,72 +31,72 @@
  * error path runs any of this.
  */
 
-VPRIV void jstr(vbuf *b, const char *s, size_t n)
+VPRIV void jstr(vbuffer *b, const char *s, size_t n)
 {
 	static const char hex[] = "0123456789abcdef";
 
-	vbuf_s(b, "\"");
+	vbuffer_string_append(b, "\"");
 	for (size_t i = 0; i < n; i++) {
 		unsigned char c = (unsigned char)s[i];
 
 		if (c == '"' || c == '\\') {
 			char e[2] = { '\\', (char)c };
 
-			vbuf_put(b, e, 2);
+			vbuffer_append(b, e, 2);
 		} else if (c == '\n')
-			vbuf_s(b, "\\n");
+			vbuffer_string_append(b, "\\n");
 		else if (c == '\t')
-			vbuf_s(b, "\\t");
+			vbuffer_string_append(b, "\\t");
 		else if (c < 0x20 || c == 0x7f) {
 			char e[6] = { '\\', 'u', '0', '0', hex[c >> 4], hex[c & 15] };
 
-			vbuf_put(b, e, 6);
+			vbuffer_append(b, e, 6);
 		} else
-			vbuf_put(b, &s[i], 1);
+			vbuffer_append(b, &s[i], 1);
 	}
-	vbuf_s(b, "\"");
+	vbuffer_string_append(b, "\"");
 }
 
-VPRIV void jcstr(vbuf *b, const char *s)
+VPRIV void jcstr(vbuffer *b, const char *s)
 {
 	if (s)
 		jstr(b, s, strlen(s));
 	else
-		vbuf_s(b, "null");
+		vbuffer_string_append(b, "null");
 }
 
 static const char *const lvjson[] = { "note", "remark", "warning", "error", "fatal error" };
 static const char *const appname[] = { "unspecified", "machine", "maybe", "placeholder" };
 
 /* {"file", "line", "column", "path", "offset"}, {"file": null} outside any file, null for none */
-static void jloc(pp *p, vbuf *b, uint32_t loc)
+static void jloc(pp *p, vbuffer *b, uint32_t loc)
 {
 	const pp_file_entry *e;
 	const char *name;
 	uint32_t nl, line, col;
 
 	if (loc == UINT32_MAX) {
-		vbuf_s(b, "null");
+		vbuffer_string_append(b, "null");
 		return;
 	}
 	if (!loc_ok(p, loc, &e) || !diag_where(p, loc, &name, &nl, &line, &col)) {
-		vbuf_s(b, "{\"file\":null}");
+		vbuffer_string_append(b, "{\"file\":null}");
 		return;
 	}
-	vbuf_s(b, "{\"file\":");
+	vbuffer_string_append(b, "{\"file\":");
 	jstr(b, name, nl);
-	vbuf_f(b, ",\"line\":%u,\"column\":%u,\"path\":", line, col);
+	vbuffer_format_append(b, ",\"line\":%u,\"column\":%u,\"path\":", line, col);
 	jcstr(b, e->f->path);
-	vbuf_f(b, ",\"offset\":%u}", loc - e->base);
+	vbuffer_format_append(b, ",\"offset\":%u}", loc - e->base);
 }
 
 /* the include stack of loc, outermost first: [{"file", "line"}] */
-static void jincludes(pp *p, vbuf *b, uint32_t loc)
+static void jincludes(pp *p, vbuffer *b, uint32_t loc)
 {
 	const pp_file_entry *chain[64], *e;
 	int n = 0;
 
-	vbuf_s(b, "[");
+	vbuffer_string_append(b, "[");
 	if (loc != UINT32_MAX && loc_ok(p, loc, &e))
 		for (const pp_file_entry *x = e; x && x->from && n < 64; x = loc_fent(p, x->from))
 			chain[n++] = x;
@@ -106,70 +106,70 @@ static void jincludes(pp *p, vbuf *b, uint32_t loc)
 
 		if (!diag_where(p, chain[i]->from, &name, &nl, &line, &col))
 			continue;
-		vbuf_s(b, first ? "{\"file\":" : ",{\"file\":");
+		vbuffer_string_append(b, first ? "{\"file\":" : ",{\"file\":");
 		jstr(b, name, nl);
-		vbuf_f(b, ",\"line\":%u}", line);
+		vbuffer_format_append(b, ",\"line\":%u}", line);
 		first = 0;
 	}
-	vbuf_s(b, "]");
+	vbuffer_string_append(b, "]");
 }
 
 /* top: 0 a child, 1 a record, 2 a record without "rendered" (vccd's store) */
-static void json_rec(pp *p, vbuf *b, const vdiag *d, int top)
+static void json_rec(pp *p, vbuffer *b, const vdiag *d, int top)
 {
-	vbuf_s(b, "{\"id\":");
+	vbuffer_string_append(b, "{\"id\":");
 	jcstr(b, d->id);
-	vbuf_f(b, ",\"level\":\"%s\",\"flag\":", lvjson[d->level]);
+	vbuffer_format_append(b, ",\"level\":\"%s\",\"flag\":", lvjson[d->level]);
 	jcstr(b, d->flag);
-	vbuf_f(b, ",\"werror\":%s,\"message\":", d->werror ? "true" : "false");
+	vbuffer_format_append(b, ",\"werror\":%s,\"message\":", d->werror ? "true" : "false");
 	jcstr(b, d->msg);
-	vbuf_s(b, ",\"location\":");
+	vbuffer_string_append(b, ",\"location\":");
 	jloc(p, b, d->loc);
-	vbuf_s(b, ",\"label\":");
+	vbuffer_string_append(b, ",\"label\":");
 	jcstr(b, d->label);
-	vbuf_s(b, ",\"help\":");
+	vbuffer_string_append(b, ",\"help\":");
 	jcstr(b, d->help);
 	if (d->art) {
-		vbuf_s(b, ",\"art\":");
+		vbuffer_string_append(b, ",\"art\":");
 		jcstr(b, d->art);
 	}
-	vbuf_s(b, ",\"spans\":[");
+	vbuffer_string_append(b, ",\"spans\":[");
 	for (uint32_t i = 0; i < d->nspan; i++) {
-		vbuf_s(b, i ? ",{\"start\":" : "{\"start\":");
+		vbuffer_string_append(b, i ? ",{\"start\":" : "{\"start\":");
 		jloc(p, b, d->span[i].b);
-		vbuf_s(b, ",\"end\":");
+		vbuffer_string_append(b, ",\"end\":");
 		jloc(p, b, d->span[i].e);
-		vbuf_s(b, ",\"label\":");
+		vbuffer_string_append(b, ",\"label\":");
 		jcstr(b, d->span[i].label);
-		vbuf_s(b, "}");
+		vbuffer_string_append(b, "}");
 	}
-	vbuf_s(b, "],\"fixits\":[");
+	vbuffer_string_append(b, "],\"fixits\":[");
 	for (uint32_t i = 0; i < d->nfix; i++) {
-		vbuf_s(b, i ? ",{\"start\":" : "{\"start\":");
+		vbuffer_string_append(b, i ? ",{\"start\":" : "{\"start\":");
 		jloc(p, b, d->fix[i].b);
-		vbuf_s(b, ",\"end\":");
+		vbuffer_string_append(b, ",\"end\":");
 		jloc(p, b, d->fix[i].e);
-		vbuf_s(b, ",\"text\":");
+		vbuffer_string_append(b, ",\"text\":");
 		jcstr(b, d->fix[i].s);
-		vbuf_f(b, ",\"applicability\":\"%s\"}", appname[d->fix[i].app & 3]);
+		vbuffer_format_append(b, ",\"applicability\":\"%s\"}", appname[d->fix[i].app & 3]);
 	}
-	vbuf_s(b, "],\"include_stack\":");
+	vbuffer_string_append(b, "],\"include_stack\":");
 	jincludes(p, b, d->loc);
 	if (top) {
-		vbuf r = { 0 };
+		vbuffer r = { 0 };
 		uint32_t fe = p->diagnostic_last_file;
 
-		vbuf_s(b, ",\"children\":[");
+		vbuffer_string_append(b, ",\"children\":[");
 		for (const vdiag *k = d->kids; k; k = k->next) {
 			json_rec(p, b, k, false);
 			if (k->next)
-				vbuf_s(b, ",");
+				vbuffer_string_append(b, ",");
 		}
 		if (top == 2) {
-			vbuf_s(b, "]}");
+			vbuffer_string_append(b, "]}");
 			return;
 		}
-		vbuf_s(b, "],\"rendered\":");
+		vbuffer_string_append(b, "],\"rendered\":");
 		/* the text as the text output prints it (in its style), with its include stack */
 		p->diagnostic_last_file = 0;
 		bool color = p->color;
@@ -180,19 +180,19 @@ static void json_rec(pp *p, vbuf *b, const vdiag *d, int top)
 		jstr(b, r.p ? r.p : "", r.n);
 		free(r.p);
 	}
-	vbuf_s(b, "}");
+	vbuffer_string_append(b, "}");
 }
 
 /* write the pending JSON record */
 VPRIV void diag_json_flush(pp *p)
 {
 	int fd = p->o->errfd ? p->o->errfd : 2;
-	vbuf b = { 0 };
+	vbuffer b = { 0 };
 
 	if (!p->diagnostic_pending_structured)
 		return;
 	json_rec(p, &b, p->diagnostic_pending_structured, true);
-	vbuf_s(&b, "\n");
+	vbuffer_string_append(&b, "\n");
 	(void)!write(fd, b.p, b.n);
 	free(b.p);
 	p->diagnostic_pending_structured = NULL;
@@ -207,7 +207,7 @@ VPRIV __attribute__((noinline, cold)) void dsink_records(pp *p)
 		const pp_file_entry *e;
 		const char *name;
 		uint32_t nl;
-		vbuf b = { 0 };
+		vbuffer b = { 0 };
 
 		if (d->loc != UINT32_MAX && loc_ok(p, d->loc, &e) && diag_where(p, d->loc, &name, &nl, &r.line, &r.col))
 			r.path = e->f->path;

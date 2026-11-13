@@ -134,23 +134,23 @@ static bool foldable(const pp_file_entry *e, const vdiag *k, uint32_t pls)
 	return (ls <= pls ? lcount(s, ls, pls) : lcount(s, pls, ls)) <= CONTEXT;
 }
 
-static void gutter(pp *p, vbuf *b, uint32_t width, const char *num)
+static void gutter(pp *p, vbuffer *b, uint32_t width, const char *num)
 {
 	uint32_t nd = (uint32_t)strlen(num);
 
 	db_c(b, ' ', (int)(width - nd + 1));
-	vbuf_s(b, num);
-	vbuf_s(b, p->o->diag_unicode ? " \xe2\x94\x82 " : " | ");
+	vbuffer_string_append(b, num);
+	vbuffer_string_append(b, p->o->diag_unicode ? " \xe2\x94\x82 " : " | ");
 }
 
-static void bar(pp *p, vbuf *b, uint32_t width)
+static void bar(pp *p, vbuffer *b, uint32_t width)
 {
 	db_c(b, ' ', (int)width + 2);
-	vbuf_s(b, p->o->diag_unicode ? "\xe2\x94\x82 " : "| ");
+	vbuffer_string_append(b, p->o->diag_unicode ? "\xe2\x94\x82 " : "| ");
 }
 
 /* one source line with its marks, labels and fix-its */
-static void one_line(pp *p, vbuf *b, const pp_file_entry *e, const vdiag *d, const mark *m, int nm, uint32_t ls,
+static void one_line(pp *p, vbuffer *b, const pp_file_entry *e, const vdiag *d, const mark *m, int nm, uint32_t ls,
 		     uint32_t width)
 {
 	const char *s = e->f->src;
@@ -158,7 +158,7 @@ static void one_line(pp *p, vbuf *b, const pp_file_entry *e, const vdiag *d, con
 	char num[16], *row;
 	int nlab = 0, lab[MAXMARKS];
 	uint32_t anc[MAXMARKS], maxc0 = 0;
-	vbuf fl = { 0 };
+	vbuffer fl = { 0 };
 	bool anyfix = false;
 	uint32_t rn;
 	bool inl;
@@ -174,11 +174,11 @@ static void one_line(pp *p, vbuf *b, const pp_file_entry *e, const vdiag *d, con
 		} else {
 			uint32_t c1 = dcols(s, i, i + 1, col);
 
-			vbuf_put(b, s + i, 1);
+			vbuffer_append(b, s + i, 1);
 			col = c1;
 		}
 	}
-	vbuf_s(b, "\n");
+	vbuffer_string_append(b, "\n");
 	/* the marks: each column to the mark that wins it */
 	row = calloc(lw + 2, 1);
 	{
@@ -232,25 +232,25 @@ static void one_line(pp *p, vbuf *b, const pp_file_entry *e, const vdiag *d, con
 	}
 	bar(p, b, width);
 	if (p->color)
-		vbuf_s(b, DC_MARK);
-	vbuf_put(b, row, rn);
+		vbuffer_string_append(b, DC_MARK);
+	vbuffer_append(b, row, rn);
 	inl = nlab && rn > 0 && anc[0] >= maxc0;
 	if (inl) {
 		/* the rightmost label after the marks, when its mark is the rightmost */
 		const mark *x = &m[lab[0]];
 
 		if (p->color && x->ch == '-')
-			vbuf_s(b, DC_NOTE);
-		vbuf_s(b, " ");
-		vbuf_s(b, x->label);
+			vbuffer_string_append(b, DC_NOTE);
+		vbuffer_string_append(b, " ");
+		vbuffer_string_append(b, x->label);
 	}
 	if (p->color)
-		vbuf_s(b, DC_RESET);
-	vbuf_s(b, "\n");
+		vbuffer_string_append(b, DC_RESET);
+	vbuffer_string_append(b, "\n");
 	/* the others below, rightmost first: a line of '|' and the label's own line */
 	for (int k = inl; k < nlab; k++) {
 		for (int pass = 0; pass < 2; pass++) {
-			vbuf r = { 0 };
+			vbuffer r = { 0 };
 			uint32_t col = 0;
 
 			for (int j = nlab - 1; j >= k; j--) {
@@ -260,19 +260,19 @@ static void one_line(pp *p, vbuf *b, const pp_file_entry *e, const vdiag *d, con
 					continue;
 				db_c(&r, ' ', (int)(c - col));
 				if (pass == 1 && j == k) {
-					vbuf_s(&r, m[lab[j]].label);
+					vbuffer_string_append(&r, m[lab[j]].label);
 					break;
 				}
-				vbuf_s(&r, p->o->diag_unicode ? "\xe2\x94\x82" : "|");
+				vbuffer_string_append(&r, p->o->diag_unicode ? "\xe2\x94\x82" : "|");
 				col = c + 1;
 			}
 			bar(p, b, width);
 			if (p->color)
-				vbuf_s(b, m[lab[k]].ch == '-' ? DC_NOTE : DC_MARK);
-			vbuf_put(b, r.p, r.n);
+				vbuffer_string_append(b, m[lab[k]].ch == '-' ? DC_NOTE : DC_MARK);
+			vbuffer_append(b, r.p, r.n);
 			if (p->color)
-				vbuf_s(b, DC_RESET);
-			vbuf_s(b, "\n");
+				vbuffer_string_append(b, DC_RESET);
+			vbuffer_string_append(b, "\n");
 			free(r.p);
 		}
 	}
@@ -287,23 +287,23 @@ static void one_line(pp *p, vbuf *b, const pp_file_entry *e, const vdiag *d, con
 		if (c0 < have)
 			c0 = have;
 		db_c(&fl, ' ', (int)(c0 - have));
-		vbuf_s(&fl, d->fix[i].s);
+		vbuffer_string_append(&fl, d->fix[i].s);
 	}
 	if (anyfix) {
 		bar(p, b, width);
 		if (p->color)
-			vbuf_s(b, DC_FIXIT);
-		vbuf_put(b, fl.p, fl.n);
+			vbuffer_string_append(b, DC_FIXIT);
+		vbuffer_append(b, fl.p, fl.n);
 		if (p->color)
-			vbuf_s(b, DC_RESET);
-		vbuf_s(b, "\n");
+			vbuffer_string_append(b, DC_RESET);
+		vbuffer_string_append(b, "\n");
 	}
 	free(fl.p);
 	free(row);
 }
 
 /* the snippet of d (in file e) with the notes in fold[] as labels */
-static void snippet_vcc(pp *p, vbuf *b, const pp_file_entry *e, const vdiag *d, vdiag *const *fold, int nfold)
+static void snippet_vcc(pp *p, vbuffer *b, const pp_file_entry *e, const vdiag *d, vdiag *const *fold, int nfold)
 {
 	const char *s = e->f->src;
 	uint32_t size = e->f->size, off = d->loc - e->base, pls = lstart(s, off);
@@ -368,7 +368,7 @@ static void snippet_vcc(pp *p, vbuf *b, const pp_file_entry *e, const vdiag *d, 
 				one_line(p, b, e, d, m, nm, lnext(s, size, ln[i - 1]), width);
 			} else if (gap > 2) {
 				db_c(b, ' ', (int)width - 2);
-				vbuf_s(b, "...\n");
+				vbuffer_string_append(b, "...\n");
 			}
 		}
 		one_line(p, b, e, d, m, nm, ln[i], width);
@@ -378,14 +378,14 @@ static void snippet_vcc(pp *p, vbuf *b, const pp_file_entry *e, const vdiag *d, 
 		if (!z)
 			z = a + strlen(a);
 		db_c(b, ' ', (int)width + 2);
-		vbuf_put(b, a, (size_t)(z - a));
-		vbuf_s(b, "\n");
+		vbuffer_append(b, a, (size_t)(z - a));
+		vbuffer_string_append(b, "\n");
 	}
 	if (d->help) {
 		db_c(b, ' ', (int)width + 2);
-		vbuf_s(b, "= help: ");
-		vbuf_s(b, d->help);
-		vbuf_s(b, "\n");
+		vbuffer_string_append(b, "= help: ");
+		vbuffer_string_append(b, d->help);
+		vbuffer_string_append(b, "\n");
 	}
 	/* whole lines a fix-it inserts away from the shown ones (an #include): as a patch line,
 	   "  2 + #include <stddef.h>" (rustc's "consider importing") */
@@ -404,24 +404,24 @@ static void snippet_vcc(pp *p, vbuf *b, const pp_file_entry *e, const vdiag *d, 
 			continue;
 		snprintf(num, sizeof(num), "%u", loc_line(p, f->b));
 		db_c(b, ' ', (int)width - (int)strlen(num));
-		vbuf_s(b, num);
-		vbuf_s(b, " + ");
+		vbuffer_string_append(b, num);
+		vbuffer_string_append(b, " + ");
 		if (p->color)
-			vbuf_s(b, DC_FIXIT);
-		vbuf_put(b, f->s, fl - 1);
+			vbuffer_string_append(b, DC_FIXIT);
+		vbuffer_append(b, f->s, fl - 1);
 		if (p->color)
-			vbuf_s(b, DC_RESET);
-		vbuf_s(b, "\n");
+			vbuffer_string_append(b, DC_RESET);
+		vbuffer_string_append(b, "\n");
 	}
 }
 
 /* a record without a source line: its help still shows */
-static void help_only(vbuf *b, const vdiag *d)
+static void help_only(vbuffer *b, const vdiag *d)
 {
 	if (d->help) {
-		vbuf_s(b, "      = help: ");
-		vbuf_s(b, d->help);
-		vbuf_s(b, "\n");
+		vbuffer_string_append(b, "      = help: ");
+		vbuffer_string_append(b, d->help);
+		vbuffer_string_append(b, "\n");
 	}
 }
 
@@ -451,7 +451,7 @@ static const vdiag *macro_run_last(const vdiag *k)
 	return nm >= 3 ? last : NULL;
 }
 
-static void render_vcc(pp *p, vbuf *b, vdiag *top)
+static void render_vcc(pp *p, vbuffer *b, vdiag *top)
 {
 	const pp_file_entry *e;
 	vdiag *fold[MAXMARKS];
@@ -498,7 +498,7 @@ VPRIV void diag_text_flush(pp *p)
 {
 	int fd = p->o->errfd ? p->o->errfd : 2;
 	vdiag *d = p->diagnostic_pending_text;
-	vbuf b = { 0 };
+	vbuffer b = { 0 };
 
 	if (!d)
 		return;
@@ -510,7 +510,7 @@ VPRIV void diag_text_flush(pp *p)
 
 /* d and its notes as the text output prints them, for JSON's "rendered" (nothing is
    marked emitted: JSON and SARIF print no text) */
-VPRIV void diag_render_rec(pp *p, vbuf *b, vdiag *d)
+VPRIV void diag_render_rec(pp *p, vbuffer *b, vdiag *d)
 {
 	if (p->o->diag_style == PP_DSTYLE_VCC) {
 		render_vcc(p, b, d);
@@ -527,7 +527,7 @@ VPRIV void diag_render_rec(pp *p, vbuf *b, vdiag *d)
 }
 
 /* d and its notes in the vcc style with colour codes, whatever the text style (the HTML page) */
-VPRIV void diag_render_color(pp *p, vbuf *b, vdiag *d)
+VPRIV void diag_render_color(pp *p, vbuffer *b, vdiag *d)
 {
 	int color = p->color;
 

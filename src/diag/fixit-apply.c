@@ -73,16 +73,16 @@ static void fix_collect(const pp *p, fedits *x, bool machine)
 }
 
 /* src[lo, hi) with the edits v[0, n) (inside it) applied */
-static void fix_apply(vbuf *o, const char *src, uint32_t lo, uint32_t hi, const fedit *v, uint32_t n)
+static void fix_apply(vbuffer *o, const char *src, uint32_t lo, uint32_t hi, const fedit *v, uint32_t n)
 {
 	uint32_t at = lo;
 
 	for (uint32_t i = 0; i < n; i++) {
-		vbuf_put(o, src + at, v[i].b - at);
-		vbuf_s(o, v[i].s);
+		vbuffer_append(o, src + at, v[i].b - at);
+		vbuffer_string_append(o, v[i].s);
 		at = v[i].e;
 	}
-	vbuf_put(o, src + at, hi - at);
+	vbuffer_append(o, src + at, hi - at);
 }
 
 static uint32_t line_of(const char *s, uint32_t off)	/* 1-based */
@@ -104,7 +104,7 @@ static uint32_t line_start(const char *s, uint32_t size, uint32_t line)	/* offse
 }
 
 /* the text's lines, each prefixed by c ('-', '+', ' ') */
-static uint32_t put_lines(vbuf *b, char c, const char *s, uint32_t n)
+static uint32_t put_lines(vbuffer *b, char c, const char *s, uint32_t n)
 {
 	uint32_t k = 0;
 
@@ -113,9 +113,9 @@ static uint32_t put_lines(vbuf *b, char c, const char *s, uint32_t n)
 
 		while (j < n && s[j] != '\n')
 			j++;
-		vbuf_put(b, &c, 1);
-		vbuf_put(b, s + i, j - i);
-		vbuf_s(b, j < n ? "\n" : "\n\\ No newline at end of file\n");
+		vbuffer_append(b, &c, 1);
+		vbuffer_append(b, s + i, j - i);
+		vbuffer_string_append(b, j < n ? "\n" : "\n\\ No newline at end of file\n");
 		i = j + 1, k++;
 	}
 	return k;
@@ -133,21 +133,21 @@ static uint32_t nlines(const char *s, uint32_t n)
 /* a unified diff of one file's edits v[0, n), 3 lines of context (GCC's -fdiagnostics-generate-patch):
    edits on the same or adjacent lines are one block of - and + lines, blocks less than 7 lines
    apart one hunk */
-static void fix_patch(vbuf *b, const lex_file *f, const fedit *v, uint32_t n)
+static void fix_patch(vbuffer *b, const lex_file *f, const fedit *v, uint32_t n)
 {
 	const char *s = f->src;
 	uint32_t total = nlines(s, f->size);
 	int32_t delta = 0;
 
-	vbuf_f(b, "--- %s\n+++ %s\n", f->path, f->path);
+	vbuffer_format_append(b, "--- %s\n+++ %s\n", f->path, f->path);
 	for (uint32_t i = 0; i < n;) {
 		uint32_t c1 = line_of(s, v[i].b), c2, prev = 0, no = 0, nn = 0;
-		vbuf h = { 0 };
+		vbuffer h = { 0 };
 
 		c1 = c1 > 3 ? c1 - 3 : 1;
 		for (;;) {	/* the blocks of one hunk */
 			uint32_t j = i + 1, l1 = line_of(s, v[i].b), l2 = line_of(s, v[i].e), mb, me, k;
-			vbuf mid = { 0 };
+			vbuffer mid = { 0 };
 
 			while (j < n && line_of(s, v[j].b) <= l2 + 1) {
 				uint32_t le = line_of(s, v[j].e);
@@ -172,8 +172,8 @@ static void fix_patch(vbuf *b, const lex_file *f, const fedit *v, uint32_t n)
 
 			no += k = put_lines(&h, ' ', s + mb, me - mb), nn += k;
 		}
-		vbuf_f(b, "@@ -%u,%u +%u,%u @@\n", c1, no, (uint32_t)((int32_t)c1 + delta), nn);
-		vbuf_put(b, h.p, h.n);
+		vbuffer_format_append(b, "@@ -%u,%u +%u,%u @@\n", c1, no, (uint32_t)((int32_t)c1 + delta), nn);
+		vbuffer_append(b, h.p, h.n);
 		delta += (int32_t)nn - (int32_t)no;
 		free(h.p);
 	}
@@ -184,7 +184,7 @@ static void fix_write(pp *p, int fd, const lex_file *f, const fedit *v, uint32_t
 {
 	char path[4096], tmp[4200];
 	const char *fp = f->path;
-	vbuf o = { 0 };
+	vbuffer o = { 0 };
 	struct stat st;
 	int out;
 
@@ -214,7 +214,7 @@ VPRIV void diag_fixits_out(pp *p)
 
 	for (int machine = 0; machine < 2; machine++) {
 		fedits x = { 0 };
-		vbuf b = { 0 };
+		vbuffer b = { 0 };
 
 		if (!(machine ? p->o->fix_apply : p->o->diag_patch))
 			continue;

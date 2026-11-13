@@ -4,6 +4,8 @@
   src/tools/rename-table.py TABLE.tsv            dry run: counts per row, collisions
   src/tools/rename-table.py TABLE.tsv --apply    rewrite the files
   src/tools/rename-table.py TABLE.tsv --apply --move   ... and git mv the files named in path rows
+  src/tools/rename-table.py TABLE.tsv --rerun ...      the table is applied already and new files came in with old
+                                                       names (a merge): new names existing is then expected
   src/tools/rename-table.py TABLE.tsv --list OLD       the places where OLD is used
 
 TABLE.tsv: lines `old<TAB>new[<TAB>note]`; blank lines and lines starting
@@ -148,6 +150,7 @@ def main():
     move = '--move' in av
     merge_ok = '--allow-merge' in av
     exists_ok = set(av[av.index('--allow-exists') + 1].split(',')) if '--allow-exists' in av else set()
+    rerun = '--rerun' in av
     extra = [av[i + 1] for i, a in enumerate(av) if a == '--also']
     rows = load(table)
     scoped = [av[i + 1] for i, a in enumerate(av) if a in ('--scoped', '--users-of')][:2]
@@ -213,7 +216,7 @@ def main():
             if os.path.exists(dst):
                 problems.append(f'path: {n} exists already (row {ln})')
             continue
-        if n in allwords and n not in words and not note.startswith('unlikely') and n not in exists_ok:
+        if n in allwords and n not in words and not note.startswith('unlikely') and n not in exists_ok and not rerun:
             hits = allwords[n]
             if scoped:
                 want = 'pub' if o in pub_names else 'loc'
@@ -329,7 +332,7 @@ def main():
     print(f'{len(new_texts)} files change, {sum(counts.values())} replacements, {len(rows)} rows')
     for s in strs:
         print('string literal (not changed, decide by hand): ' + s)
-    for o in unused:
+    for o in ([] if rerun else unused):
         problems.append(f'unused: {o} occurs nowhere (stale row, or the guard/name is spelled differently)')
     for pr in problems:
         print('PROBLEM: ' + pr)

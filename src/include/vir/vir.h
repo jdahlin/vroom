@@ -348,16 +348,16 @@ uint32_t vir_unit_sigw(vir_unit *u, const uint32_t *w, uint32_t n);	/* find or a
 /* ---- text form (11) ---- */
 typedef struct vir_perr { uint32_t line, col; char msg[200]; } vir_perr;
 bool vir_parse(vir_unit *u, const char *src, size_t n, vir_perr *err);	/* false: err says where */
-void vir_print_fn(vbuf *b, const vir_unit *u, const vir_fn *f);
-void vir_print_unit(vbuf *b, const vir_unit *u);	/* the functions through vir_fn_load, one at a time */
+void vir_print_fn(vbuffer *b, const vir_unit *u, const vir_fn *f);
+void vir_print_unit(vbuffer *b, const vir_unit *u);	/* the functions through vir_fn_load, one at a time */
 const char *vir_target_name(uint32_t t);
-void vir_print_sig(vbuf *b, const uint32_t *w);	/* `(int, f64, ...) -> int` for the signature words w */
-void vir_print_group(vbuf *b, uint32_t w0, uint32_t w1);
+void vir_print_sig(vbuffer *b, const uint32_t *w);	/* `(int, f64, ...) -> int` for the signature words w */
+void vir_print_group(vbuffer *b, uint32_t w0, uint32_t w1);
 
 /* ---- verifier (12) ---- */
 /* checks every rule of section 12; each failure is appended to out as
  * `@func bN.I: RULE: message` (the first max); returns the number of failures */
-uint32_t vir_verify(vir_fn *f, const vir_unit *u, vbuf *out, uint32_t max);
+uint32_t vir_verify(vir_fn *f, const vir_unit *u, vbuffer *out, uint32_t max);
 const char *vir_fname(const vir_unit *u, const vir_fn *f);	/* the name of f's symbol, or "?" */
 
 #endif

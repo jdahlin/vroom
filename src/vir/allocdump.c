@@ -22,7 +22,7 @@ void vir_reg_name(char *o, uint32_t r)
 }
 
 typedef struct dctx {
-	vbuf *b;
+	vbuffer *b;
 	const vir_unit *u;
 	vir_fn *f;
 	const vir_alloc_out *o;
@@ -69,19 +69,19 @@ static void loc(char *o, size_t n, uint32_t l)
 		vir_reg_name(o, l);
 }
 
-static void pad(vbuf *b, size_t start, size_t col)
+static void pad(vbuffer *b, size_t start, size_t col)
 {
 	size_t w = b->n - start;
 
 	if (w < col)
-		vbuf_put(b, "                                                            ", col - w < 60 ? col - w : 60);
+		vbuffer_append(b, "                                                            ", col - w < 60 ? col - w : 60);
 	else
-		vbuf_s(b, " ");
+		vbuffer_string_append(b, " ");
 }
 
-void vir_alloc_print(vbuf *b, const vir_unit *u, vir_fn *f, const vir_loops *lp, const vir_alloc_out *o)
+void vir_alloc_print(vbuffer *b, const vir_unit *u, vir_fn *f, const vir_loops *lp, const vir_alloc_out *o)
 {
-	vbuf t = { 0 };
+	vbuffer t = { 0 };
 	dctx d = { b, u, f, o, NULL };
 	uint32_t blk = VIR_NOBLK, ins = 0, pos = 0, e = 0, nv = 0;
 	char s1[48], s2[48], s3[48];
@@ -100,7 +100,7 @@ void vir_alloc_print(vbuf *b, const vir_unit *u, vir_fn *f, const vir_loops *lp,
 		while (j < t.n && t.p[j] != '\n')
 			j++;
 		ls = b->n;
-		vbuf_put(b, t.p + i, j - i);
+		vbuffer_append(b, t.p + i, j - i);
 		if (j - i >= 2 && t.p[i] == 'b' && t.p[j - 1] == ':') {
 			const vir_blk *k;
 
@@ -111,16 +111,16 @@ void vir_alloc_print(vbuf *b, const vir_unit *u, vir_fn *f, const vir_loops *lp,
 			e = o->boff[f->nblk + 1 + blk];
 			if (lp && lp->inner[blk] != VIR_NOBLK && lp->l[lp->inner[blk]].head == blk) {
 				pad(b, ls, 40);
-				vbuf_f(b, "; loop to b%u depth %u", lp->l[lp->inner[blk]].end, lp->l[lp->inner[blk]].depth);
+				vbuffer_format_append(b, "; loop to b%u depth %u", lp->l[lp->inner[blk]].end, lp->l[lp->inner[blk]].depth);
 			}
 			for (uint32_t q = 0; q < k->nparam; q++) {
 				uint8_t r = o->opr[pos++];
 				uint32_t v = k->first + q;
 
 				if (!q && !(lp && lp->inner[blk] != VIR_NOBLK && lp->l[lp->inner[blk]].head == blk))
-					pad(b, ls, 40), vbuf_s(b, ";");
+					pad(b, ls, 40), vbuffer_string_append(b, ";");
 				else if (!q)
-					vbuf_s(b, ";");
+					vbuffer_string_append(b, ";");
 				vn(&d, s1, sizeof(s1), v);
 				if (r != VR_NONE)
 					vir_reg_name(s2, r);
@@ -128,7 +128,7 @@ void vir_alloc_print(vbuf *b, const vir_unit *u, vir_fn *f, const vir_loops *lp,
 					snprintf(s2, sizeof(s2), "ss%u", o->slot[v]);
 				else
 					strcpy(s2, "-");
-				vbuf_f(b, "%s %s %s", q ? "," : "", s1, s2);
+				vbuffer_format_append(b, "%s %s %s", q ? "," : "", s1, s2);
 			}
 		} else if (blk != VIR_NOBLK && j - i > 2 && t.p[i] == ' ' && ins < f->blk[blk].first + f->blk[blk].n) {
 			const vir_ins *in = &f->ins[ins];
@@ -139,7 +139,7 @@ void vir_alloc_print(vbuf *b, const vir_unit *u, vir_fn *f, const vir_loops *lp,
 
 			/* the edits go before the line: move the line after them */
 			{
-				vbuf ed = { 0 };
+				vbuffer ed = { 0 };
 
 				for (; e < o->boff[f->nblk + 2 + blk] && o->edit[e].pos == ins; e++) {
 					const vir_edit *x2 = &o->edit[e];
@@ -148,21 +148,21 @@ void vir_alloc_print(vbuf *b, const vir_unit *u, vir_fn *f, const vir_loops *lp,
 					vn(&d, s2, sizeof(s2), x2->v);
 					switch (x2->kind) {
 					case VE_RELOAD:
-						vbuf_f(&ed, "  ; reload %s <- %s (ss%u)\n", s1, s2, o->slot[x2->v]);
+						vbuffer_format_append(&ed, "  ; reload %s <- %s (ss%u)\n", s1, s2, o->slot[x2->v]);
 						break;
 					case VE_REMAT:
-						vbuf_f(&ed, "  ; remat %s <- %s\n", s1, s2);
+						vbuffer_format_append(&ed, "  ; remat %s <- %s\n", s1, s2);
 						break;
 					case VE_MOVE:
 						vir_reg_name(s3, x2->src);
-						vbuf_f(&ed, "  ; move %s <- %s (%s)\n", s1, s3, s2);
+						vbuffer_format_append(&ed, "  ; move %s <- %s (%s)\n", s1, s3, s2);
 						break;
 					case VE_SWAP:
-						vbuf_s(&ed, "  ; swap operands\n");
+						vbuffer_string_append(&ed, "  ; swap operands\n");
 						break;
 					case VE_STORE:
 						vir_reg_name(s3, x2->src);
-						vbuf_f(&ed, "  ; store ss%u <- %s (%s)\n", o->slot[x2->v], s3, s2);
+						vbuffer_format_append(&ed, "  ; store ss%u <- %s (%s)\n", o->slot[x2->v], s3, s2);
 						break;
 					}
 				}
@@ -172,76 +172,76 @@ void vir_alloc_print(vbuf *b, const vir_unit *u, vir_fn *f, const vir_loops *lp,
 
 					memcpy(line, b->p + back, ln);
 					b->n = back;
-					vbuf_put(b, ed.p, ed.n);
+					vbuffer_append(b, ed.p, ed.n);
 					ls = b->n;
-					vbuf_put(b, line, ln);
+					vbuffer_append(b, line, ln);
 					free(line);
 					free(ed.p);
 				}
 			}
 			pad(b, ls, 40);
-			vbuf_s(b, ";");
+			vbuffer_string_append(b, ";");
 			vir_oit_init(&it, f, &x, false);
 			while ((p = vir_oit_next(&it))) {
 				if (f->ins[*p].ty == VT_MULTI)
 					continue;
 				vir_reg_name(s1, o->opr[pos++]);
-				vbuf_f(b, "%s %s", n++ ? "," : "", s1);
+				vbuffer_format_append(b, "%s %s", n++ ? "," : "", s1);
 			}
 			if (in->ty != VT_VOID && in->ty != VT_MULTI) {
 				uint8_t r = o->opr[pos++];
 
 				vir_reg_name(s1, r);
-				vbuf_f(b, " -> %s", s1);
+				vbuffer_format_append(b, " -> %s", s1);
 				if (o->slot[ins] != VIR_NOBLK)
-					vbuf_f(b, o->sdef[ins] ? " [ss%u]" : " [ss%u later]", o->slot[ins]);
+					vbuffer_format_append(b, o->sdef[ins] ? " [ss%u]" : " [ss%u later]", o->slot[ins]);
 			}
 			ins++;
 		}
-		vbuf_s(b, "\n");
+		vbuffer_string_append(b, "\n");
 		i = j + 1;
 	}
 	for (uint32_t x = 0; x < o->nedge; x++) {
 		const vir_aedge *g = &o->edge[x];
 
-		vbuf_f(b, "; edge b%u.%u -> b%u:", g->from, g->k, g->to);
+		vbuffer_format_append(b, "; edge b%u.%u -> b%u:", g->from, g->k, g->to);
 		for (uint32_t m = 0; m < g->n; m++) {
 			const vir_emove *mv = &o->move[g->first + m];
 
 			loc(s1, sizeof(s1), mv->dst);
 			vn(&d, s3, sizeof(s3), mv->v);
 			if (mv->kind == VE_REMAT) {
-				vbuf_f(b, "%s %s <- %s", m ? ";" : "", s1, s3);
+				vbuffer_format_append(b, "%s %s <- %s", m ? ";" : "", s1, s3);
 			} else {
 				loc(s2, sizeof(s2), mv->src);
-				vbuf_f(b, "%s %s %s %s (%s)", m ? ";" : "", s1, mv->kind == VE_XCHG ? "<->" : "<-", s2, s3);
+				vbuffer_format_append(b, "%s %s %s %s (%s)", m ? ";" : "", s1, mv->kind == VE_XCHG ? "<->" : "<-", s2, s3);
 			}
 		}
-		vbuf_s(b, "\n");
+		vbuffer_string_append(b, "\n");
 	}
 	if (o->nspill) {
-		vbuf_s(b, "; spill slots:");
+		vbuffer_string_append(b, "; spill slots:");
 		for (uint32_t s = 0; s < o->nspill; s++) {
-			vbuf_f(b, " ss%u(%u):", s, o->ssz[s]);
+			vbuffer_format_append(b, " ss%u(%u):", s, o->ssz[s]);
 			for (uint32_t v = f->nconst; v < f->nins; v++)
 				if (f->ins[v].ty != VT_VOID && f->ins[v].ty != VT_MULTI && o->slot[v] == s)
-					vbuf_f(b, " v%u", d.nm[v]);
+					vbuffer_format_append(b, " v%u", d.nm[v]);
 		}
-		vbuf_s(b, "\n");
+		vbuffer_string_append(b, "\n");
 	}
 	if (o->callee[0] | o->callee[1]) {
-		vbuf_s(b, "; callee-saved:");
+		vbuffer_string_append(b, "; callee-saved:");
 		for (uint32_t r = 0; r < 128; r++)
 			if (o->callee[VR_CLASS(r)] >> VR_NUM(r) & 1) {
 				vir_reg_name(s1, r);
-				vbuf_f(b, " %s (b%u)", s1, o->cfirst[r]);
+				vbuffer_format_append(b, " %s (b%u)", s1, o->cfirst[r]);
 			}
-		vbuf_s(b, "\n");
+		vbuffer_string_append(b, "\n");
 	}
 	{
 		const vir_astats *s = &o->st;
 
-		vbuf_f(b, "; spills %u reloads %u remats %u moves %u swaps %u stores %u; edges %u: moves %u reloads %u remats %u stores %u xchg %u; slots %u callee %u%s\n",
+		vbuffer_format_append(b, "; spills %u reloads %u remats %u moves %u swaps %u stores %u; edges %u: moves %u reloads %u remats %u stores %u xchg %u; slots %u callee %u%s\n",
 		       s->spills, s->reloads, s->remats, s->moves, s->swaps, s->stores, s->edges, s->emoves, s->ereloads, s->eremats, s->estores,
 		       s->xchg, s->slots, s->callee, s->linear ? " linear" : "");
 	}

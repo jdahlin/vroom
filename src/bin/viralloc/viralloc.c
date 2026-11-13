@@ -81,7 +81,7 @@ static double now(void)
 }
 
 /* allocate and check one function with one configuration; 0 ok */
-static uint32_t one(vir_fn *f, const vir_unit *u, const vir_loops *lp, uint32_t r[4], bool x86, uint64_t pool, vbuf *out,
+static uint32_t one(vir_fn *f, const vir_unit *u, const vir_loops *lp, uint32_t r[4], bool x86, uint64_t pool, vbuffer *out,
 		    bool print)
 {
 	vir_synth t;
@@ -91,28 +91,28 @@ static uint32_t one(vir_fn *f, const vir_unit *u, const vir_loops *lp, uint32_t 
 	uint32_t nbad;
 
 	if (!vir_synth_init(&t, r[0], r[1], r[2], r[3], x86, err, sizeof(err))) {
-		vbuf_f(out, "viralloc: %s\n", err);
+		vbuffer_format_append(out, "viralloc: %s\n", err);
 		return 1;
 	}
 	if (!vir_alloc(f, lp, &t.regs, &opt, &o)) {
-		vbuf_f(out, "; alloc @%s regs %u,%u,%u,%u%s: failed: %s\n", vir_fname(u, f), r[0], r[1], r[2], r[3],
+		vbuffer_format_append(out, "; alloc @%s regs %u,%u,%u,%u%s: failed: %s\n", vir_fname(u, f), r[0], r[1], r[2], r[3],
 		       x86 ? " x86" : "", o.err);
 		return 1;
 	}
 	if (print) {
-		vbuf_f(out, "; alloc @%s regs %u,%u,%u,%u%s\n", vir_fname(u, f), r[0], r[1], r[2], r[3], x86 ? " x86" : "");
+		vbuffer_format_append(out, "; alloc @%s regs %u,%u,%u,%u%s\n", vir_fname(u, f), r[0], r[1], r[2], r[3], x86 ? " x86" : "");
 		vir_alloc_print(out, u, f, lp, &o);
 	}
 	{
-		vbuf m = { 0 };
+		vbuffer m = { 0 };
 
 		nbad = vir_alloc_check(f, &t.regs, &o, &m);
 		if (nbad) {
 			if (!print) {
-				vbuf_f(out, "; check @%s regs %u,%u,%u,%u%s pool %llu:\n", vir_fname(u, f), r[0], r[1], r[2], r[3],
+				vbuffer_format_append(out, "; check @%s regs %u,%u,%u,%u%s pool %llu:\n", vir_fname(u, f), r[0], r[1], r[2], r[3],
 				       x86 ? " x86" : "", (unsigned long long)pool);
 			}
-			vbuf_put(out, m.p, m.n);
+			vbuffer_append(out, m.p, m.n);
 		}
 		free(m.p);
 	}
@@ -129,7 +129,7 @@ int main(int argc, char **argv)
 	size_t n, sep;
 	vir_unit u;
 	vir_perr perr;
-	vbuf out = { 0 };
+	vbuffer out = { 0 };
 	int rc = 1;
 
 	for (int i = 1; i < argc; i++) {
@@ -183,28 +183,28 @@ int main(int argc, char **argv)
 	}
 	vir_unit_init(&u);
 	if (!vir_parse(&u, src, sep, &perr)) {
-		vbuf_f(&out, "%s:%u:%u: %s\n", path, perr.line, perr.col, perr.msg);
+		vbuffer_format_append(&out, "%s:%u:%u: %s\n", path, perr.line, perr.col, perr.msg);
 		goto done;
 	}
 	for (uint32_t fi = 0; fi < u.nfn; fi++) {
 		vir_fn f;
 		vir_loops lp;
-		vbuf ver = { 0 };
+		vbuffer ver = { 0 };
 
 		vir_fn_load(&f, &u, fi);
 		if (!vir_canon(&f)) {
-			vbuf_f(&out, "@%s: no canonical form\n", vir_fname(&u, &f));
+			vbuffer_format_append(&out, "@%s: no canonical form\n", vir_fname(&u, &f));
 			nbad++;
 			continue;
 		}
 		if (vir_verify(&f, &u, &ver, 10)) {
-			vbuf_put(&out, ver.p, ver.n);
+			vbuffer_append(&out, ver.p, ver.n);
 			free(ver.p);
 			nbad++;
 			continue;
 		}
 		if (!vir_loops_build(&f, &lp)) {
-			vbuf_f(&out, "@%s: no loops\n", vir_fname(&u, &f));
+			vbuffer_format_append(&out, "@%s: no loops\n", vir_fname(&u, &f));
 			nbad++;
 			continue;
 		}
@@ -229,7 +229,7 @@ int main(int argc, char **argv)
 							}
 						}
 			if (!quiet || fails)
-				vbuf_f(&out, "; sweep @%s: %u configurations, %u failed\n", vir_fname(&u, &f), cnt, fails);
+				vbuffer_format_append(&out, "; sweep @%s: %u configurations, %u failed\n", vir_fname(&u, &f), cnt, fails);
 			nbad += fails;
 		}
 		if (mut) {
@@ -241,7 +241,7 @@ int main(int argc, char **argv)
 
 			vir_synth_init(&t, regs[0], regs[1], regs[2], regs[3], x86, err, sizeof(err));
 			for (uint32_t k = 0; k < mut; k++) {
-				vbuf m = { 0 };
+				vbuffer m = { 0 };
 				uint32_t what;
 
 				if (!vir_alloc(&f, &lp, &t.regs, &opt, &o))
@@ -287,7 +287,7 @@ int main(int argc, char **argv)
 					caught++;
 				free(m.p);
 			}
-			vbuf_f(&out, "; mutate @%s: %u mutations, %u caught\n", vir_fname(&u, &f), tried, caught);
+			vbuffer_format_append(&out, "; mutate @%s: %u mutations, %u caught\n", vir_fname(&u, &f), tried, caught);
 		}
 		if (rep) {
 			vir_synth t;

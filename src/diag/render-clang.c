@@ -8,10 +8,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-VPRIV void db_c(vbuf *b, char c, int n)
+VPRIV void db_c(vbuffer *b, char c, int n)
 {
 	while (n-- > 0)
-		vbuf_put(b, &c, 1);
+		vbuffer_append(b, &c, 1);
 }
 
 /* clang's colours (TextDiagnostic.cpp) */
@@ -41,7 +41,7 @@ VPRIV int diag_where(const pp *p, uint32_t loc, const char **name, uint32_t *nl,
 	return r;
 }
 
-VPRIV void include_stack(pp *p, vbuf *b, const pp_file_entry *e)
+VPRIV void include_stack(pp *p, vbuffer *b, const pp_file_entry *e)
 {
 	const pp_file_entry *chain[64];
 	int n = 0;
@@ -57,7 +57,7 @@ VPRIV void include_stack(pp *p, vbuf *b, const pp_file_entry *e)
 		uint32_t nl, line, col;
 
 		if (diag_where(p, chain[i]->from, &name, &nl, &line, &col))
-			vbuf_f(b, "In file included from %.*s:%u:\n", (int)nl, name, line);
+			vbuffer_format_append(b, "In file included from %.*s:%u:\n", (int)nl, name, line);
 	}
 }
 
@@ -77,16 +77,16 @@ static uint32_t sn_ls(const char *s, uint32_t o)
 
 /* one source line [ls, le) with its marker line: ~ under the ranges' parts on it, ^ at off if
    caret; the marker line only when it has a mark (clang) */
-static void sn_line(pp *p, vbuf *b, const pp_file_entry *e, const vdiag *d, uint32_t ls, uint32_t le, uint32_t line,
-		    uint32_t width, bool caret, uint32_t off, vbuf *cl)
+static void sn_line(pp *p, vbuffer *b, const pp_file_entry *e, const vdiag *d, uint32_t ls, uint32_t le, uint32_t line,
+		    uint32_t width, bool caret, uint32_t off, vbuffer *cl)
 {
 	const char *s = e->f->src;
 	char num[16];
 	uint32_t nd = (uint32_t)snprintf(num, sizeof(num), "%u", line);
 
 	db_c(b, ' ', (int)(width - nd + 1));
-	vbuf_s(b, num);
-	vbuf_s(b, " | ");
+	vbuffer_string_append(b, num);
+	vbuffer_string_append(b, " | ");
 	for (uint32_t i = ls, col = 0; i < le; i++) {
 		if (s[i] == '\t') {
 			uint32_t to = (col / 8 + 1) * 8;
@@ -94,12 +94,12 @@ static void sn_line(pp *p, vbuf *b, const pp_file_entry *e, const vdiag *d, uint
 			db_c(b, ' ', (int)(to - col));
 			col = to;
 		} else {
-			vbuf_put(b, s + i, 1);
+			vbuffer_append(b, s + i, 1);
 			if (((unsigned char)s[i] & 0xc0) != 0x80)
 				col++;
 		}
 	}
-	vbuf_s(b, "\n");
+	vbuffer_string_append(b, "\n");
 	{
 		uint32_t lw = dcols(s, ls, le, 0) + 1, ccol = caret ? dcols(s, ls, off, 0) : UINT32_MAX;
 		char *m = calloc(lw + 1, 1);
@@ -152,7 +152,7 @@ static void sn_line(pp *p, vbuf *b, const pp_file_entry *e, const vdiag *d, uint
 			while (n > 0 && m[n - 1] == ' ')
 				n--;
 			cl->n = 0;
-			vbuf_put(cl, m, n);
+			vbuffer_append(cl, m, n);
 			/* clang highlights an insertion's empty range too: the caret line reaches its
 			   column unless a blank is next to it (highlightRange trims blanks) */
 			for (uint32_t i = 0; caret && i < d->nfix; i++) {
@@ -170,22 +170,22 @@ static void sn_line(pp *p, vbuf *b, const pp_file_entry *e, const vdiag *d, uint
 	}
 	if (cl->n) {
 		db_c(b, ' ', (int)width + 2);
-		vbuf_s(b, "| ");
+		vbuffer_string_append(b, "| ");
 		if (p->color)
-			vbuf_s(b, DC_CARET);
-		vbuf_put(b, cl->p, cl->n);
+			vbuffer_string_append(b, DC_CARET);
+		vbuffer_append(b, cl->p, cl->n);
 		if (p->color)
-			vbuf_s(b, DC_RESET);
-		vbuf_s(b, "\n");
+			vbuffer_string_append(b, DC_RESET);
+		vbuffer_string_append(b, "\n");
 	}
 }
 
-static void snippet(pp *p, vbuf *b, const pp_file_entry *e, const vdiag *d)
+static void snippet(pp *p, vbuffer *b, const pp_file_entry *e, const vdiag *d)
 {
 	const char *s = e->f->src;
 	uint32_t off = d->loc - e->base, size = e->f->size, ls, le, line, width, nd;
 	char num[16];
-	vbuf cl = { 0 }, fl = { 0 };
+	vbuffer cl = { 0 }, fl = { 0 };
 	bool anyfix = false;
 	uint32_t l0, l1;	/* the lines shown (clang: grown to the ranges, at most 16) */
 
@@ -248,18 +248,18 @@ static void snippet(pp *p, vbuf *b, const pp_file_entry *e, const vdiag *d)
 				if (c0 < have)
 					c0 = have;
 				db_c(&fl, ' ', (int)(c0 - have));
-				vbuf_s(&fl, d->fix[i].s);
+				vbuffer_string_append(&fl, d->fix[i].s);
 				anyfix = true;
 			}
 			if (anyfix) {
 				db_c(b, ' ', (int)width + 2);
-				vbuf_s(b, "| ");
+				vbuffer_string_append(b, "| ");
 				if (p->color)
-					vbuf_s(b, DC_FIXIT);
-				vbuf_put(b, fl.p, fl.n);
+					vbuffer_string_append(b, DC_FIXIT);
+				vbuffer_append(b, fl.p, fl.n);
 				if (p->color)
-					vbuf_s(b, DC_RESET);
-				vbuf_s(b, "\n");
+					vbuffer_string_append(b, DC_RESET);
+				vbuffer_string_append(b, "\n");
 			}
 			goto after_fix;
 		}
@@ -269,7 +269,7 @@ static void snippet(pp *p, vbuf *b, const pp_file_entry *e, const vdiag *d)
 }
 
 /* a record's first line (clang's, in every style); true and *ep when it has a source line */
-VPRIV bool render_head(pp *p, vbuf *b, const vdiag *d, const pp_file_entry **ep)
+VPRIV bool render_head(pp *p, vbuffer *b, const vdiag *d, const pp_file_entry **ep)
 {
 	const char *name, *what = pp_diag_level(d->level);
 	uint32_t nl, line, col;
@@ -282,42 +282,42 @@ VPRIV bool render_head(pp *p, vbuf *b, const vdiag *d, const pp_file_entry **ep)
 	if (has && !note)
 		p->diagnostic_last_file = (uint32_t)(e - p->fe) + 1;
 	if (p->color)
-		vbuf_s(b, DC_BOLD);
+		vbuffer_string_append(b, DC_BOLD);
 	if (has && diag_where(p, d->loc, &name, &nl, &line, &col))
-		vbuf_f(b, "%.*s:%u:%u: ", (int)nl, name, line, col);
+		vbuffer_format_append(b, "%.*s:%u:%u: ", (int)nl, name, line, col);
 	else if (d->loc == UINT32_MAX)
 		;	/* "fatal error: too many errors emitted" has no location */
 	else if (!has)
-		vbuf_s(b, "vcc: ");
+		vbuffer_string_append(b, "vcc: ");
 	if (p->color)
-		vbuf_s(b, dcolor(what));
-	vbuf_s(b, what);
-	vbuf_s(b, ": ");
+		vbuffer_string_append(b, dcolor(what));
+	vbuffer_string_append(b, what);
+	vbuffer_string_append(b, ": ");
 	if (p->color)
-		vbuf_s(b, note ? DC_RESET : DC_RESET DC_BOLD);
+		vbuffer_string_append(b, note ? DC_RESET : DC_RESET DC_BOLD);
 	if (p->color && p->o->diag_style != PP_DSTYLE_CLANG)
 		diag_typediff(b, d, note ? DC_RESET : DC_RESET DC_BOLD);
 	else
-		vbuf_s(b, d->msg);
+		vbuffer_string_append(b, d->msg);
 	if (d->flag && p->color)	/* OSC 8: the flag links to clang's reference */
-		vbuf_f(b, " [%s\033]8;;https://clang.llvm.org/doc/DiagnosticsReference.html#w%s\033\\-W%s\033]8;;\033\\]",
+		vbuffer_format_append(b, " [%s\033]8;;https://clang.llvm.org/doc/DiagnosticsReference.html#w%s\033\\-W%s\033]8;;\033\\]",
 		       d->werror ? "-Werror," : "", d->flag, d->flag);
 	else if (d->flag)
-		vbuf_f(b, " [%s-W%s]", d->werror ? "-Werror," : "", d->flag);
+		vbuffer_format_append(b, " [%s-W%s]", d->werror ? "-Werror," : "", d->flag);
 	if (p->o->diag_show_id) {
 		const char *docs = getenv("VCC_DIAG_DOCS");	/* where `vcc --explain` pages are (D6) */
 		const char *id = d->id ? d->id : "vcc_unknown";
 
 		if (p->color && docs && *docs)
-			vbuf_f(b, " [\033]8;;%s/%s.md\033\\%s\033]8;;\033\\]", docs, id, id);
+			vbuffer_format_append(b, " [\033]8;;%s/%s.md\033\\%s\033]8;;\033\\]", docs, id, id);
 		else
-			vbuf_f(b, " [%s]", id);
+			vbuffer_format_append(b, " [%s]", id);
 	}
 	if (p->diagnostic_track)
 		track_str(b, d->track);
 	if (p->color)
-		vbuf_s(b, DC_RESET);
-	vbuf_s(b, "\n");
+		vbuffer_string_append(b, DC_RESET);
+	vbuffer_string_append(b, "\n");
 	*ep = e;
 	return has && !p->o->diag_nocaret && d->loc - e->base < e->f->size;
 }
@@ -325,25 +325,25 @@ VPRIV bool render_head(pp *p, vbuf *b, const vdiag *d, const pp_file_entry **ep)
 /* -fdiagnostics-parseable-fixits: a line per fix-it after the record's snippet, as clang
    (TextDiagnostic::emitParseableFixits): 1-based byte columns, the end exclusive, the file
    name and the text escaped as LLVM's write_escaped */
-static void esc(vbuf *b, const char *s, size_t n)
+static void esc(vbuffer *b, const char *s, size_t n)
 {
 	for (size_t i = 0; i < n; i++) {
 		unsigned char ch = (unsigned char)s[i];
 
 		if (ch == '\\' || ch == '"')
-			vbuf_f(b, "\\%c", ch);
+			vbuffer_format_append(b, "\\%c", ch);
 		else if (ch == '\t')
-			vbuf_s(b, "\\t");
+			vbuffer_string_append(b, "\\t");
 		else if (ch == '\n')
-			vbuf_s(b, "\\n");
+			vbuffer_string_append(b, "\\n");
 		else if (ch < 0x20 || ch >= 0x7f)
-			vbuf_f(b, "\\%03o", ch);
+			vbuffer_format_append(b, "\\%03o", ch);
 		else
-			vbuf_put(b, s + i, 1);
+			vbuffer_append(b, s + i, 1);
 	}
 }
 
-VPRIV void parseable_fixits(pp *p, vbuf *b, const vdiag *d)
+VPRIV void parseable_fixits(pp *p, vbuffer *b, const vdiag *d)
 {
 	if (likely(!p->o->diag_parseable))
 		return;
@@ -354,16 +354,16 @@ VPRIV void parseable_fixits(pp *p, vbuf *b, const vdiag *d)
 		if (!diag_where(p, d->fix[i].b, &nb, &lb, &l1, &c1) || !diag_where(p, d->fix[i].e, &ne, &le, &l2, &c2) ||
 		    lb != le || memcmp(nb, ne, lb))
 			continue;
-		vbuf_s(b, "fix-it:\"");
+		vbuffer_string_append(b, "fix-it:\"");
 		esc(b, nb, lb);
-		vbuf_f(b, "\":{%u:%u-%u:%u}:\"", l1, c1, l2, c2);
+		vbuffer_format_append(b, "\":{%u:%u-%u:%u}:\"", l1, c1, l2, c2);
 		esc(b, d->fix[i].s, strlen(d->fix[i].s));
-		vbuf_s(b, "\"\n");
+		vbuffer_string_append(b, "\"\n");
 	}
 }
 
 /* one record in clang's text format */
-VPRIV void render_text(pp *p, vbuf *b, const vdiag *d)
+VPRIV void render_text(pp *p, vbuffer *b, const vdiag *d)
 {
 	const pp_file_entry *e;
 	/* clang (DiagnosticRenderer): no snippet again for a record at the previous one's
@@ -377,4 +377,4 @@ VPRIV void render_text(pp *p, vbuf *b, const vdiag *d)
 	}
 }
 
-VPRIV void render_clang(pp *p, vbuf *b, vdiag *d) { render_text(p, b, d); }
+VPRIV void render_clang(pp *p, vbuffer *b, vdiag *d) { render_text(p, b, d); }

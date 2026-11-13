@@ -76,7 +76,7 @@ void pp_token_next(pp *p, ptok *t)
 			const lex_token *v = &c->vt[c->i++];
 
 			if (p->depth == p->nfile && !p->scratch_token_count && !p->temporary_held)
-				p->tmp.p = p->tmp.base;	/* nothing above file level refers to tmp */
+				p->tmp.used = 0;	/* nothing above file level refers to tmp */
 			pp_token_fill_from_lexer(t, v, c->src, c->loc + v->off);
 		} else {
 			pp_token_next_slow(p, t);

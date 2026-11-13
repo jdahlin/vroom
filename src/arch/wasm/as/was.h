@@ -77,7 +77,7 @@ typedef struct wseg {
 	char *name;
 	uint32_t p2align;
 	uint32_t flags;
-	vbuf data;
+	vbuffer data;
 	wrel *rel;
 	uint32_t nrel, crel;
 	uint64_t vaddr;		/* layout */
@@ -86,8 +86,8 @@ typedef struct wseg {
 typedef struct wfunc {
 	uint32_t sym;
 	int32_t sig;
-	vbuf locals;		/* valtype per local */
-	vbuf body;		/* instructions, the final end included */
+	vbuffer locals;		/* valtype per local */
+	vbuffer body;		/* instructions, the final end included */
 	wrel *rel;
 	uint32_t nrel, crel;
 	bool done;
@@ -119,7 +119,7 @@ typedef struct wmod {
 } wmod;
 
 /* platform/wasm/wasm.c */
-int wasm_write(wmod *m, vbuf *out);
+int wasm_write(wmod *m, vbuffer *out);
 
 /* as.c, shared with wasm.c */
 int was_error(wmod *m, const char *fmt, ...) __attribute__((format(printf, 2, 3)));

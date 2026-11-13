@@ -28,20 +28,12 @@ static inline VUSE VRETNONNULL VNONNULL(1) void *vregion_push(vregion *r, size_t
 	return r->base + u;
 }
 
-/* a bump arena by pointers, 8-byte granules (the preprocessor) */
-typedef struct varena {
-	char *base, *p, *end;
-} varena;
+/* a vregion used in 8-byte granules, as the preprocessor does (base, used, cap: reset by used = 0) */
+typedef vregion varena;
 
 static inline VUSE VRETNONNULL VNONNULL(1) void *varena_alloc(varena *a, size_t n)
 {
-	char *r = a->p;
-
-	n = (n + 7) & ~(size_t)7;
-	if (__builtin_expect((size_t)(a->end - r) < n, 0))
-		vjob_fail("preprocessor arena full");
-	a->p = r + n;
-	return r;
+	return vregion_push(a, (n + 7) & ~(size_t)7, 1, "preprocessor arena full");
 }
 
 #endif
