@@ -82,6 +82,29 @@ typedef struct builtin {
 	const char *sig;	/* return type then parameters; '.' variadic (see sigtype) */
 } builtin;
 
+typedef struct object_bound {
+	i128 offset, whole, sub;
+	qty storage;
+} object_bound;
+
+VPRIV const builtin *builtin_all(void);
+VPRIV uint32_t atomic_lock_free_call(cc *c, const builtin *b, uint32_t loc);
+VPRIV uint32_t atomic_call(cc *c, const builtin *b, uint32_t loc);
+VPRIV uint32_t stdc_rotate(cc *c, const builtin *b, uint32_t loc);
+VPRIV uint32_t generic_bitcount(cc *c, int id, uint32_t loc);
+VPRIV bool object_pointer_bound(cc *c, uint32_t n, object_bound *b, unsigned depth, unsigned mode);
+VPRIV uint32_t os_log_call(cc *c, int id, uint32_t loc);
+VPRIV void arity(cc *c, uint32_t loc, unsigned want, const vec *args);
+VPRIV qty sigtype(cc *c, char ch);
+VPRIV qty builtin_type(cc *c, const builtin *b);
+VPRIV uint32_t elementwise_abs_call(cc *c, const builtin *b, uint32_t loc);
+VPRIV bool elementwise_abs_effects(cc *c, uint32_t n, bool load);
+VPRIV uint32_t x86_pcmpstr_call(cc *c, const builtin *b, vec *args, qty rt, uint32_t loc);
+VPRIV uint32_t x86_simd_call(cc *c, const builtin *b, vec *args, qty rt, uint32_t loc);
+VPRIV uint32_t bitcount_local(cc *c, vec *body, qty t, uint32_t init, uint32_t loc);
+VPRIV void bitcount_statement(cc *c, vec *body, uint32_t n, uint32_t loc);
+VPRIV uint32_t builtin_vector_lane(cc *c, uint32_t v, qty et, unsigned i, uint32_t loc);
+
 /* implicit conversion of an rvalue (already decayed) to type to */
 enum { CX_NONE, CX_INIT, CX_PASS, CX_RETURN, CX_ASSIGN };
 
@@ -146,6 +169,7 @@ VPRIV void drcov_boundary(cc *c);
 VPRIV void drcov_finish(cc *c);
 VPRIV void drcov_init(void);
 VPRIV bool drcov_active(void);
+/* replay.c */
 VPRIV void dr_read(cc *c, int ns, uint32_t id, uint32_t s);
 VPRIV uint32_t dr_intern(cc *c, const ctype *t);
 VPRIV void dr_pragma(cc *c, int kind);
