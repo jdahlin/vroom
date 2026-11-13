@@ -1601,7 +1601,7 @@ static char *read_file(int fd, size_t size, size_t *got)
 }
 
 /* open + read: the file's bytes in this thread's arena, false if unreadable */
-static bool read_src(const char *path, const char **src, size_t *size, uint64_t id[2])
+static bool read_src(const char *path, const char **src, size_t *size, uint64_t id[4])
 {
 	struct stat st;
 	int fd;
@@ -1618,6 +1618,12 @@ static bool read_src(const char *path, const char **src, size_t *size, uint64_t 
 	*src = read_file(fd, (size_t)st.st_size, size);
 	id[0] = (uint64_t)st.st_dev;
 	id[1] = (uint64_t)st.st_ino;
+	id[2] = (uint64_t)st.st_size;
+#ifdef __APPLE__
+	id[3] = (uint64_t)st.st_mtimespec.tv_sec * 1000000000u + (uint64_t)st.st_mtimespec.tv_nsec;
+#else
+	id[3] = (uint64_t)st.st_mtim.tv_sec * 1000000000u + (uint64_t)st.st_mtim.tv_nsec;
+#endif
 	close(fd);
 	return true;
 }
@@ -1664,17 +1670,19 @@ const vlex_file *vlex_nodigraphs(const vlex_file *f)
 	return nf;
 }
 
-static bool load(vlex_file *f, const char *path)
+static bool load(vlex_file *f, const char *path, uint64_t sm[2])
 {
 	const char *src;
 	size_t size;
 
-	uint64_t id[2];
+	uint64_t id[4];
 
 	if (!read_src(path, &src, &size, id))
 		return false;
 	f->dev = id[0];
 	f->ino = id[1];
+	sm[0] = id[2];
+	sm[1] = id[3];
 	lex_src(f, src, size);
 	return true;
 }
@@ -1682,7 +1690,9 @@ static bool load(vlex_file *f, const char *path)
 /* benchmarking: lex path as vlex_get() would, without the cache (leaks) */
 int vlex_load_uncached(const char *path, vlex_file *f)
 {
-	return load(f, path);
+	uint64_t sm[2];
+
+	return load(f, path, sm);
 }
 
 /*
@@ -1697,8 +1707,49 @@ typedef struct centry {
 	struct centry *next;	/* the bucket's chain, newest first; set before publication */
 	uint32_t hash, len;
 	_Atomic int state;
+	_Atomic uint32_t epoch;	/* the cache epoch this entry was last known to match the file system in */
+	_Atomic int dead;	/* found changed: later lookups skip it (the file is read again) */
+	uint64_t sm[2];		/* size and mtime (ns) of the file as read */
 	char path[];
 } centry;
+
+/*
+ * Validation (vccd, Q-SCHED-01).  A new make that starts while jobs of another
+ * run cannot flush the caches; instead vcache_new_epoch() starts a new epoch,
+ * and a final entry of an older one is checked once (a stat: file identity,
+ * size, mtime; for a missing file, that it is still missing) before it is
+ * used again.  A changed entry is marked dead and read afresh (old entries
+ * stay allocated: pointers into them stay valid).  The directory and include
+ * caches check the same epoch.
+ */
+static _Atomic uint32_t cache_epoch = 1;
+
+uint32_t vcache_epoch(void)
+{
+	return atomic_load_explicit(&cache_epoch, memory_order_acquire);
+}
+
+void vcache_new_epoch(void)
+{
+	atomic_fetch_add_explicit(&cache_epoch, 1, memory_order_acq_rel);
+}
+
+static bool entry_fresh(const centry *e, int st)
+{
+	struct stat s;
+
+	if (stat(e->path, &s))
+		return st == CE_MISSING;
+	if (st != CE_OK)
+		return false;	/* it exists now */
+	return S_ISREG(s.st_mode) && (uint64_t)s.st_dev == e->f.dev && (uint64_t)s.st_ino == e->f.ino &&
+	       (uint64_t)s.st_size == e->sm[0] &&
+#ifdef __APPLE__
+	       (uint64_t)s.st_mtimespec.tv_sec * 1000000000u + (uint64_t)s.st_mtimespec.tv_nsec == e->sm[1];
+#else
+	       (uint64_t)s.st_mtim.tv_sec * 1000000000u + (uint64_t)s.st_mtim.tv_nsec == e->sm[1];
+#endif
+}
 
 /*
  * Chained, never full: every probed path (missing ones too) gets an entry,
@@ -1717,7 +1768,8 @@ static centry *centry_get(const char *path, size_t len, int st0, bool *ins)
 	*ins = false;
 	for (;;) {
 		for (centry *e = head; e != seen; e = e->next)
-			if (e->hash == h && e->len == len && !memcmp(e->path, path, len))
+			if (e->hash == h && e->len == len && !memcmp(e->path, path, len) &&
+			    !atomic_load_explicit(&e->dead, memory_order_relaxed))
 				return e;	/* mine, if allocated, is wasted arena space: rare */
 		if (!mine) {
 			mine = arena(sizeof(*mine) + len + 1);
@@ -1728,6 +1780,7 @@ static centry *centry_get(const char *path, size_t len, int st0, bool *ins)
 			mine->path[len] = 0;
 			mine->f.path = mine->path;
 			atomic_init(&mine->state, st0);
+			atomic_init(&mine->epoch, vcache_epoch());
 		}
 		mine->next = head;
 		seen = head;	/* scanned: only entries pushed after it are new */
@@ -1938,7 +1991,7 @@ const vlex_file *vlex_get(const char *path, size_t len)
 	e = centry_get(path, len, CE_LOADING, &ins);
 
 	if (ins) {
-		bool ok = load(&e->f, e->path);
+		bool ok = load(&e->f, e->path, e->sm);
 
 		publish(e, ok);
 		return ok ? &e->f : NULL;
@@ -1946,11 +1999,21 @@ const vlex_file *vlex_get(const char *path, size_t len)
 	for (int spin = 0;; spin++) {
 		int st = atomic_load_explicit(&e->state, memory_order_acquire);
 
-		if (st == CE_OK || st == CE_MISSING)
-			return st == CE_OK ? &e->f : NULL;
+		if (st == CE_OK || st == CE_MISSING) {
+			uint32_t cur = vcache_epoch();
+
+			if (likely(atomic_load_explicit(&e->epoch, memory_order_relaxed) == cur))
+				return st == CE_OK ? &e->f : NULL;
+			if (entry_fresh(e, st)) {	/* (no lock: threads that race each stat once) */
+				atomic_store_explicit(&e->epoch, cur, memory_order_relaxed);
+				return st == CE_OK ? &e->f : NULL;
+			}
+			atomic_store_explicit(&e->dead, 1, memory_order_relaxed);
+			return vlex_get(path, len);	/* a fresh entry, read now */
+		}
 		if (st == CE_QUEUED && claim(e, CE_QUEUED, CE_LOADING)) {
 			/* not reached by the I/O threads yet: do it here */
-			bool ok = load(&e->f, e->path);
+			bool ok = load(&e->f, e->path, e->sm);
 
 			publish(e, ok);
 			return ok ? &e->f : NULL;
@@ -2003,11 +2066,13 @@ static void *io_thread(void *arg)
 			const char *src;
 			size_t size;
 
-			uint64_t id[2];
+			uint64_t id[4];
 
 			if (read_src(e->path, &src, &size, id)) {
 				e->f.dev = id[0];
 				e->f.ino = id[1];
+				e->sm[0] = id[2];
+				e->sm[1] = id[3];
 				e->f.src = src;
 				e->f.size = (uint32_t)size;
 				atomic_store_explicit(&e->state, CE_READ, memory_order_release);

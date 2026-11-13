@@ -9,6 +9,8 @@
 #define vlex_get vlex_get_ref
 #define vlex_get_hook vlex_get_hook_ref
 #define vlex_cache_flush vlex_cache_flush_ref
+#define vcache_epoch vcache_epoch_ref
+#define vcache_new_epoch vcache_new_epoch_ref
 #define vlex_trigraphs vlex_trigraphs_ref
 #define vlex_digitsep vlex_digitsep_ref
 #define vlex_c89 vlex_c89_ref
