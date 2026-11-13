@@ -74,6 +74,7 @@ struct driver_job {
 	int target_win64;	/* x86_64-w64-mingw32 (PLAN-win64.md): LLP64, MinGW-w64 headers; target_x64 is set too */
 	int ms_bitfields;	/* -mms-bitfields / -mno-ms-bitfields; -1: the target's default (on for Windows) */
 	const char *sysroot;	/* --sysroot= */
+	char sysroot_directories[3][4200];	/* Windows: the system directories under it (searchpath.c) */
 	int unicode;	/* -municode (Windows: UNICODE) */
 	int wasm_bits, target_linux;	/* 64 or 32: wasm64/wasm32-unknown-emscripten (PLAN-wasm.md); lnx: aarch64 Linux */
 	int hosted, no_standard_includes, asm_mode, undefine_predefined, raw_assembler, language_given;	/* raw_asm -1: by the suffix; xlang: -x given */

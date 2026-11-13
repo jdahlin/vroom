@@ -128,7 +128,7 @@ VPRIV void driver_searchpath_build(struct driver_job *job, const driver_environm
 	   <triple>/include, <triple>/usr/include (if it exists) and include; no sysroot: only the
 	   resource headers.  None of them is an extern "C" directory. */
 	if (job->target_win64 && !job->no_standard_includes) {
-		static _Thread_local char win[3][4200];
+		char (*win)[4200] = job->sysroot_directories;
 
 		ADD(VCC_RESDIR);
 		if (job->sysroot && *job->sysroot) {
