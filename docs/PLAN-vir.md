@@ -329,6 +329,19 @@ vir-annotate.txt,clang-annotate.txt,vm.vir,focus.json,mix-clean/mix.json}`.
 Ingen runtimevinst hävdas, inga ändringar i den andra sessionens källkod.
 
 
+2026-11-13, CI-fix för dispatchprovets ARM-radtabell:
+PR130:s ARM-jobb hittade att vir_x86_dispatch.c gav olika objekt från
+`-g -c` och clangs assembler på `-g -S`, trots identisk maskinkod. Raden
+för atomic_thread_fence hamnade fyra byte sent. Orsaken var assemblerns
+`.inst`, som inte konsumerade en väntande `.loc` före instruktionen.
+Den gör nu det, på samma sätt som en vanlig mnemonik. Nytt direkt
+assemblerprov dwarf-inst.s täcker enstaka och kommaseparerade råa
+instruktioner mellan radbyten; det gamla bygget fallerar objektjämförelsen.
+Validerat: full DWARF-rigg 1591/1591 (436 hoppade), assemblerobjekt
+62/62 byteidentiska med clang, även genom ASan/UBSan och filvist bygge.
+SQLite-binären är byteidentisk med senaste prestandabygget: ingen ny
+hastighetsvinst eller uppnådd 1,05×-grind hävdas av debug-fixen.
+
 2026-11-13, avvisade teckenintervall och lokal dödlagringsrensning:
 Nästa clang-jämförelse gällde divisionen `(serial_type-12)/2` i
 vdbeRecordCompareString. En föregående gren bevisar att värdet är minst

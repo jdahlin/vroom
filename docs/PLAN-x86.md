@@ -1200,3 +1200,13 @@ Båda prototyperna och tillfälliga främjandespårningar är återställda;
 fokusprov och verifieringshashar var gröna. Mätunderlag under V4 i
 PLAN-vir.md. Den behållna kompilatorn ligger fortsatt på 1,094–1,096× clang
 i de senaste jämförbara serierna; 1,05×-målet är öppet.
+
+
+### 2026-11-13: ARM-CI:s debugrad för råa instruktioner
+
+Nya dispatchprovet exponerade att assemblerns `.inst` lät en väntande
+`.loc` hamna efter instruktionen. Raden konsumeras nu före kodbytena,
+som för vanliga mnemoniker. Direkt assemblerregression tillagd. Full
+DWARF-rigg 1591/1591 och assemblerobjekt 62/62, även ASan/UBSan och
+filvist bygge, gröna. SQLite-binären oförändrad mot senaste mätbygget;
+5 %-målet är fortfarande öppet.
