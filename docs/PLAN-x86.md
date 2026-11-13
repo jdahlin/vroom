@@ -1173,3 +1173,18 @@ Validerat: egna x86 317/317, GCC 1615/1615, TCC 105/105 och samma fem kända
 inlinefel; ARM/QEMU 48/48, fokuserat ASan/UBSan och filvist bygge gröna.
 TSVC 151/151 och **83** vektorloopar; prefixkontroll 134 namn. Slutbyggets
 SQLite-binär är byteidentisk med den mätta kandidaten.
+
+
+### 2026-11-13: smala lokalfält med olika heltalsbärare
+
+Förenkling kan ta bort en trunc före en smal lagring. Slotfrämjandet i den
+delade byggaren normaliserar nu i64/i32-bärare efter fältets minnesbredd,
+så blandade lagringsvägar inte lämnar en lokal på stacken. Clang-jämförelsen
+pekade på serial_type i vdbeRecordCompareString, som nu hålls i register.
+Två femprovserier av speedtest1 ger 0,92–0,98 % CPU-vinst, **1,094–1,096×
+clang -O2**. Dynamiska instruktioner 1,272× → 1,263× clang. Målet 1,05× är
+fortsatt öppet; mätunderlag under V4 i PLAN-vir.md.
+Validerat: egna x86 318/318, GCC 1615/1615, TCC 105/105, samma fem kända
+inlinefel, ARM/QEMU 49/49 VIR-prov, fokuserat ASan/UBSan och filvist bygge.
+TSVC behåller 151/151 kontrollsummor och **83** vektorloopar. Regeln delas
+med ARM, vars nativeprestanda inte har mätts.

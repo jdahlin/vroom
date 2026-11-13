@@ -240,6 +240,44 @@ ekvivalenstestning återstår. Genererade program använder inga externa anrop.
 ### V4 x86-64 mot clang -O2 (2026-11-12), mål högst 5 % långsammare
 
 
+2026-11-13, främja smala lokalfält trots olika heltalsbärare:
+Jämförelsen av `vdbeRecordCompareString` med clangs assembly visade att
+serial_type låg kvar på stacken. Första främjandet blockeras av en inlinad
+pekarparameter. Efter förenklingen är adressen fri, men en bortvikt trunc
+före en fyrabyteslagring ger en i64-bärare bredvid andra i32-lagringar.
+Fältmodellen avvisade därför samma minnesfält som olika lagringstyper.
+
+Den delade byggaren normaliserar nu heltalsfält på högst fyra byte till
+i32 innan lagringstyper jämförs, och lägger en trunc på i64-värdet när
+fältet främjas. En fyrabyteslast till i64 utvidgar fältets i32-värde.
+Åtkomstbredder, volatile-, escape- och överlappningsregler ändras inte.
+ARM och x86 använder samma kod. String-jämförelsens serial_type går nu i
+register; dess kod krymper 554 → 535 byte. VdbeExec påverkas bara marginellt;
+vinsten kommer inte från att generellt minska inlining.
+
+Två alternerade femprovserier, CPU 7, speedtest1 main storlek 100:
+
+| Serie | clang ms | Före ms | Efter ms | Efter/clang |
+|---|---:|---:|---:|---:|
+| Första | 1110,71 | 1226,01 | 1214,68 | 1,094× |
+| Upprepning | 1109,10 | 1227,85 | 1215,77 | 1,096× |
+
+CPU-vinst 0,92–0,98 %, cykler förbättras också. Dynamiska instruktioner
+21,204 → 21,065 miljarder, kvoten mot clang 1,272× → 1,263×.
+Alla verifieringshashar stämmer, och slutbyggets SQLite-binär är
+byteidentisk med den först mätta kandidaten. **1,05×-målet är öppet.**
+Underlag `work/vir-x86-perf/promote-width/{results100,repeat100}` och
+`work/vir-x86-perf/promote-width-final`.
+
+`vir_slot_width.c` prövar 8/16/32-bitars fält, signerade och osignerade
+returer till 64 bitar, olika lagringsvägar, höga ingångsbitar och loop-phi.
+Fokusriggern kräver stackfria blandningsfunktioner: det gamla bygget
+behöll stacklagringar och missar kontrollen. Validerat: egna x86 318/318,
+GCC 1615/1615, TCC 105/105 och samma fem namngivna inlinefel; ARM/QEMU
+49/49 VIR-prov, ASan/UBSan och filvist bygge gröna. TSVC 151/151 för direkt
+och VIR, **83** vektorloopar och 158 sänkta funktioner; prefixkontroll 134.
+ARM:s nativeprestanda är inte mätt.
+
 2026-11-13, avvisat försök att också begränsa konstantargumentsbonusen:
 Samma gräns på anroparens egen AST provades för 600-nodersbonusen i både
 prepass och walker. VM:n krympte ytterligare cirka 11 % och ramen
