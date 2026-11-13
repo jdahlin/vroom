@@ -34,8 +34,8 @@
 #define LO_PREFIX vw_
 #include "../walk/walk.h"
 #include "../walk/proto.h"
-#include "../../vir/vir.h"
-#include "../../port/vstack.h"
+#include "vir/vir.h"
+#include "port/vstack.h"
 #include "vw.h"
 
 /* ---------------- state ---------------- */

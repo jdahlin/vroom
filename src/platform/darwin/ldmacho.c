@@ -23,8 +23,8 @@
  * loads of symbols defined in the link are relaxed to ADRP+ADD, as ld64
  * does, so local data needs no rebase.
  */
-#include "../../ld/ld.h"
-#include "../../common/ldhash.h"
+#include "ld/ld.h"
+#include "common/ldhash.h"
 
 #include <errno.h>
 #include <fcntl.h>

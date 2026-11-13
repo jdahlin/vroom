@@ -28,7 +28,7 @@ katalogomflyttningen (PLAN-fas2.md, "Status katalogstruktur").
   AAPCS64-structen eller Apples `char *` (`frontend/c/tu.c:94`).
 - Predefines finns för två mål (`ppdata-predef.inc`: aarch64-linux, Darwin).
 - Objektskrivarna är ELF (`platform/linux/elf.c`) och Mach-O
-  (`platform/darwin/macho.c`) ovanpå den gemensamma objektmodellen `obj/obj.h`
+  (`platform/darwin/macho.c`) ovanpå den gemensamma objektmodellen `include/obj/obj.h`
   (sektioner, frags, symboler, fixups).
 - Emscripten 7.0.0 finns (Homebrew), med en wasm64-sysroot (libc, compiler-rt).
   Node 26 kör memory64 utan flaggor. Clang 23 skriver wasm-`.s` och objekt för

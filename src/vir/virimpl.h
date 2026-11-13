@@ -12,9 +12,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../common/arena.h"
-#include "../common/buf.h"
-#include "vir.h"
+#include "common/arena.h"
+#include "common/buf.h"
+#include "vir/vir.h"
 
 #ifndef VPRIV
 #ifdef VCC_UNITY

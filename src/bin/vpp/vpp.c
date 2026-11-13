@@ -28,9 +28,9 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "../../frontend/pp/pp.h"
-#include "../../driver/ccsnap.h"
-#include "../../driver/ppdriver.h"
+#include "frontend/pp/pp.h"
+#include "driver/ccsnap.h"
+#include "driver/ppdriver.h"
 
 typedef struct job {
 	char **av;

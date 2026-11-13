@@ -2,7 +2,7 @@
  * and decide which entry guards/joins to duplicate. Extracted from ARM's
  * lowering; the consumer still emits its own instructions and edge copies. */
 #include "virimpl.h"
-#include "layout.h"
+#include "vir/layout.h"
 
 typedef struct lay {
 	const vir_fn *f;

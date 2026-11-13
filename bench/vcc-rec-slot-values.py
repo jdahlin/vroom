@@ -178,7 +178,7 @@ def main():
         binary = Path(tmp) / 'slot-values'
         source.write_text(SOURCE)
         flags = ['-fsanitize=address,undefined', '-fno-omit-frame-pointer'] if args.sanitize else []
-        subprocess.run([args.cc, '-std=gnu11', '-O1', '-g', '-I', str(args.source_root / 'src'),
+        subprocess.run([args.cc, '-std=gnu11', '-O1', '-g', '-I', str(args.source_root / 'src'), '-I', str(args.source_root / 'src' / 'include'),
                         *flags, str(source), '-o', str(binary)], check=True, timeout=30)
         subprocess.run([str(binary)], check=True, timeout=10)
     print('machine record exact-slot value contracts: PASS')

@@ -14,8 +14,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include "../../../common/buf.h"
-#include "wasmas.h"
+#include "common/buf.h"
+#include "arch/wasm/as/wasmas.h"
 
 /* ---------------- the model (as.c -> wasm.c) ---------------- */
 

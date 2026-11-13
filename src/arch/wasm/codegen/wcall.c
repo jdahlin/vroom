@@ -1,6 +1,6 @@
 /* vcc code generator for WebAssembly: calls, variadic arguments, builtins (wimpl.h) */
 #include "wimpl.h"
-#include "../../../common/f128.h"
+#include "common/f128.h"
 
 /* the direct callee of a call: its reference (0: an indirect call) */
 static uint32_t wcallee(cc *c, uint32_t fn)

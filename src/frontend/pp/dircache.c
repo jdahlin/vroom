@@ -23,8 +23,8 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 
-#include "dircache.h"
-#include "../../common/intern.h"
+#include "frontend/pp/dircache.h"
+#include "common/intern.h"
 
 enum { D_UNKNOWN, D_PROBING, D_EXISTS, D_MISSING };
 

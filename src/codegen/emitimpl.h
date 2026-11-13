@@ -63,13 +63,13 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "../frontend/c/ccint.h"
-#include "emit.h"
-#include "../as/as.h"
-#include "../obj/obj.h"
-#include "../driver/ppdriver.h"
-#include "../common/arena.h"
-#include "../common/tbuf.h"
+#include "frontend/c/ccint.h"
+#include "codegen/emit.h"
+#include "as/as.h"
+#include "obj/obj.h"
+#include "driver/ppdriver.h"
+#include "common/arena.h"
+#include "common/tbuf.h"
 
 #include "name.h"
 

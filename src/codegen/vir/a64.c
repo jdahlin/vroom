@@ -20,7 +20,7 @@
  */
 #include "../emitimpl.h"
 #include "vw.h"
-#include "../../vir/layout.h"
+#include "vir/layout.h"
 
 #define VL_MAXOP 512
 

@@ -139,7 +139,7 @@ def main():
         binary = Path(tmp) / 'slots'
         source.write_text(SOURCE)
         flags = ['-fsanitize=address,undefined', '-fno-omit-frame-pointer'] if args.sanitize else []
-        subprocess.run([args.cc, '-std=gnu11', '-O1', '-g', '-I', str(Path(R) / 'src'),
+        subprocess.run([args.cc, '-std=gnu11', '-O1', '-g', '-I', str(Path(R) / 'src'), '-I', str(Path(R) / 'src' / 'include'),
                         *flags, str(source), '-o', str(binary)], check=True, timeout=30)
         subprocess.run([str(binary)], check=True, timeout=10)
         if args.check_mutation:
@@ -153,7 +153,7 @@ def main():
             for name, dropped in mutations:
                 assert dropped != implementation
                 source.write_text(SOURCE.replace('#include "codegen/rec/slots.c"',dropped))
-                subprocess.run([args.cc,'-std=gnu11','-O1','-g','-I',str(Path(R)/'src'),
+                subprocess.run([args.cc,'-std=gnu11','-O1','-g','-I',str(Path(R)/'src'),'-I',str(Path(R)/'src'/'include'),
                                 *flags,str(source),'-o',str(binary)],check=True,timeout=30)
                 result=subprocess.run([str(binary)],capture_output=True,cwd=tmp,timeout=10)
                 if result.returncode==0 or b'Assertion' not in result.stderr:

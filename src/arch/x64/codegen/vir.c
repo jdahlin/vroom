@@ -7,7 +7,7 @@
 #include "x64impl.h"
 #include "../../../codegen/walk/proto.h"
 #include "../../../codegen/vir/vw.h"
-#include "../../../vir/layout.h"
+#include "vir/layout.h"
 
 typedef struct vx {
 	ecx *e;

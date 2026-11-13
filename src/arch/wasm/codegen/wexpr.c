@@ -1,6 +1,6 @@
 /* vcc code generator for WebAssembly: expressions, lvalues, loads and stores (wimpl.h) */
 #include "wimpl.h"
-#include "../../../port/vstack.h"
+#include "port/vstack.h"
 
 /* ---------------- conversions ---------------- */
 

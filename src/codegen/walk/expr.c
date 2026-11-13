@@ -1,7 +1,7 @@
 /* vcc code generator, AST walker: expressions, lvalues, conditions (walk.h) */
 #include "walk.h"
-#include "../../port/vstack.h"
-#include "../../common/f128.h"
+#include "port/vstack.h"
+#include "common/f128.h"
 
 /* ---------------- types and values ---------------- */
 

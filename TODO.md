@@ -243,7 +243,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   and for `adr` to a label beyond 1 MB, an error instead of wrapped code
   (relaxation there is still to do).  The emitter has no tbz.  Left: the
   assembler's integer targets (`b.eq 0x100000000`), see the assembler section.
-  `arch/a64/a64.h:129-140` mask the offset; `enc()` in `emit.c:1484`.  Out-of-range
+  `include/arch/a64/a64.h:129-140` mask the offset; `enc()` in `emit.c:1484`.  Out-of-range
   conditional branches must become an inverted branch over a `b`; `adr`
   beyond ±1 MB must become `adrp+add`; `tbz` (±32 KB) likewise.  Also assert
   in the encoders (debug builds) that the offset fits.  Assembler too:
@@ -515,10 +515,10 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* T12 (shim from build A against vccd from build B → clear
   error or restart, never silent service).
 - [ ] **Input-driven `abort()` / stack overflow kill the whole server** [P].  (recursion
-  done: `port/vstack.h` checks the stack pointer in cast_expr, the #if evaluator
+  done: `include/port/vstack.h` checks the stack pointer in cast_expr, the #if evaluator
   and argument pre-expansion; 128 KB left ends the TU (clang itself crashes
   on these inputs).  Overflow is a per-TU error now too: pp's
-  token stack via fatal(), as/elf regions via `vjob_fail` (obj/obj.h, a longjmp
+  token stack via fatal(), as/elf regions via `vjob_fail` (include/obj/obj.h, a longjmp
   the driver sets); vcc-stress 19/19, --vccd 20/20.  Audited the rest: input-driven
   ones are errors now (front-end heap: fatal; labels: efatal; pp shared region,
   identifier table: `vjob_escape` in common/intern.c; ELF sections: vjob_fail); the
@@ -1079,11 +1079,11 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   the install prefix.
 - [x] **Files ≥ 2 GB reported as missing** (*Done:* the main file says "file too
   large (2 GB or more)"; an #include of one still says not found) (`frontend/lex/lex.c:1373`, `uint32` offsets
-  `frontend/lex/lex.h:50,61`).  Clear error.
+  `include/frontend/lex/lex.h:50,61`).  Clear error.
   *Validate:* T5 (sparse 3 GB file → "file too large").
 - [ ] **x86-64 host build** (builds and runs since 2026-11-10, PLAN-x86.md X0):
   `classify` and the three searches in `frontend/lex/lex.c` have a scalar version
-  for hosts without NEON, CRC32C is SSE4.2 (`port/hostcrc.h`), `pause` for
+  for hosts without NEON, CRC32C is SSE4.2 (`include/port/hostcrc.h`), `pause` for
   `yield`, `-march=native -msse4.2`, the fuzz targets use the host's clang
   and libFuzzer.  Left: an SSE2/AVX2 `classify` (the scalar one is a byte
   at a time), and the kernel parity runs on this host (no `work/` here).

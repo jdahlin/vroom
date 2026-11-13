@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
-#include "../common/intern.h"
+#include "common/intern.h"
 
 /* Interning already stores the first 16 bytes as padded words. Compare short
  * literal identifiers without rescanning their spelling or interning again.

@@ -19,8 +19,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../../vir/vir.h"
-#include "../../vir/layout.h"
+#include "vir/vir.h"
+#include "vir/layout.h"
 
 static char *slurp(const char *path, size_t *n)
 {

@@ -1,7 +1,7 @@
 /* vccd's diagnostics across a build (PLAN-diag.md D7): see dstore.c */
 #ifndef VCCD_DSTORE_H
 #define VCCD_DSTORE_H
-#include "../frontend/pp/pp.h"
+#include "frontend/pp/pp.h"
 
 /* one compile job: its sink (dedup when the client's VCC_DIAG_DEDUP is set) */
 typedef struct dstore_job {

@@ -4,10 +4,10 @@
  *       vasm --target=arm64-apple-macos [-o out.o] in.s  (Apple's syntax, a Mach-O object)
  *       vasm --bench N in.s...  (assemble each file N times, report MB/s)
  */
-#include "../../as/as.h"
-#include "../../arch/wasm/as/wasmas.h"
-#include "../../obj/obj.h"
-#include "../../port/vperf.h"
+#include "as/as.h"
+#include "arch/wasm/as/wasmas.h"
+#include "obj/obj.h"
+#include "port/vperf.h"
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>

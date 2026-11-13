@@ -29,8 +29,8 @@
 #include <string.h>
 #include <sys/mman.h>
 
-#include "../frontend/c/ccint.h"
-#include "ccsnap.h"
+#include "frontend/c/ccint.h"
+#include "driver/ccsnap.h"
 
 #define DC_PAGE ((size_t)16384)
 #define LOC_REL (1u << 31)	/* encoded locations: LOC_REL + (loc - base) */

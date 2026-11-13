@@ -106,7 +106,7 @@ with tempfile.TemporaryDirectory(prefix='vcc-emit-names-') as tmp:
     for program in (SOURCE, BUILTINS):
         source.write_text(program)
         command = [llvm('clang'), '-std=c11', '-D_GNU_SOURCE', '-O1', '-ffunction-sections',
-                   '-fdata-sections', '-I' + str(Path(R) / 'src'), *flags, str(source),
+                   '-fdata-sections', '-I' + str(Path(R) / 'src'), '-I' + str(Path(R) / 'src' / 'include'), *flags, str(source),
                    ('-Wl,-dead_strip' if platform.system() == 'Darwin' else '-Wl,--gc-sections'),
                    '-o', str(binary)]
         subprocess.run(command, check=True)

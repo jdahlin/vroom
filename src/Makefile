@@ -14,12 +14,12 @@ OUT  ?= $(if $(filter Linux,$(shell uname -s)),../build/linux/src,../build/src)
 
 all: $(OUT)/vroomd $(OUT)/vroom-cc vcc
 
-$(OUT)/vroomd: ../contrib/phase1/vroomd.cpp include/vcc/protocol.h | $(OUT)
+$(OUT)/vroomd: ../contrib/phase1/vroomd.cpp include/protocol.h | $(OUT)
 	$(LLVM)/bin/clang++ -std=c++17 -O2 -fno-rtti -I$(LLVM)/include $(TOOL_DEFS) \
 		-DVROOM_PREFIX_DEFAULT='"$(abspath ../contrib/phase1/pch/vroom-prefix.h)"' $< -o $@ \
 		-L$(LLVM)/lib -lclang-cpp -lLLVM -Wl,-rpath,$(LLVM)/lib
 
-$(OUT)/vroom-cc: ../contrib/phase1/vroom-cc.c include/vcc/protocol.h | $(OUT)
+$(OUT)/vroom-cc: ../contrib/phase1/vroom-cc.c include/protocol.h | $(OUT)
 	$(SYS_CC) -O2 -Wall $(TOOL_DEFS) $< -o $@
 
 $(OUT):
@@ -58,7 +58,9 @@ VCC_CC     = $(CCACHE) $(HOST_CC)
 VCC_SAN   ?=
 VCC_SANLD ?=
 VCC_OPT   ?= -O3 $(HOST_CPU)
-VCC_CFLAGS = -std=c11 -O2 -Wall -Wextra -Wimplicit-fallthrough -Wno-unused-parameter $(HOST_DEFS) -DVCC_INCDIR='"$(abspath headers)"' $(VCC_SAN)
+# include/: the headers other modules include (common/arena.h, frontend/pp/pp.h, ...)
+VCC_INC    = -I$(abspath include)
+VCC_CFLAGS = -std=c11 -O2 -Wall -Wextra -Wimplicit-fallthrough -Wno-unused-parameter $(HOST_DEFS) $(VCC_INC) -DVCC_INCDIR='"$(abspath headers)"' $(VCC_SAN)
 # LTO: off; the split modules are one TU each (SPLIT_MODS), which gives the
 # inlining LTO would.  `make VCC_LTO=-flto=thin` turns it on (vbench: pp +0.5 %,
 # emit -2.5 % instructions, -c as a whole the same).
@@ -169,11 +171,11 @@ $(OUT)/vlink: $(call o,$(LD_SRC))
 	ln -sf vlink $(OUT)/vobjcopy
 	ln -sf vlink $(OUT)/vnm
 
-$(OUT)/vcc: bin/vcc/shim.c include/vcc/protocol.h | $(OUT)
+$(OUT)/vcc: bin/vcc/shim.c include/protocol.h | $(OUT)
 	$(VCC_CC) $(VCC_CFLAGS) $< -o $@
 
 # vsh: make's SHELL; named sh so make still execs simple commands directly
-$(OUT)/vsh/sh: bin/vcc/shim.c include/vcc/protocol.h | $(OUT)
+$(OUT)/vsh/sh: bin/vcc/shim.c include/protocol.h | $(OUT)
 	mkdir -p $(OUT)/vsh
 	$(VCC_CC) $(VCC_CFLAGS) -DVSH $< -o $@
 
@@ -205,7 +207,7 @@ vcc-tsan:
 # $(SELF); self-check builds stage 3 with stage 2 and requires identical objects.
 SELF ?= ../build/self
 SELF_CC = $(OUT)/vpp
-SELF_FLAGS = -c -std=c11 -O2 -D_DARWIN_C_SOURCE -DVCC_INCDIR='"$(abspath headers)"'
+SELF_FLAGS = -c -std=c11 -O2 -D_DARWIN_C_SOURCE $(VCC_INC) -DVCC_INCDIR='"$(abspath headers)"'
 SELF_LD = ld -arch arm64 -platform_version macos 14.0 14.0 -syslibroot $$(xcrun --show-sdk-path) -lSystem
 SELF_SRC = $(filter-out tests/% fuzz/%,$(wildcard */*.c */*/*.c */*/*/*.c))
 SO = $(SELF)
@@ -247,11 +249,11 @@ FUZZ_CC = $(HOST_CC)
 FUZZ_ENGINE =
 FUZZ_DRIVER = fuzz/driver.c
 endif
-FUZZ_CFLAGS = -std=gnu11 -g -O1 $(HOST_CPU) $(HOST_DEFS) -pthread \
+FUZZ_CFLAGS = -std=gnu11 -g -O1 $(HOST_CPU) $(HOST_DEFS) $(VCC_INC) -pthread \
 	-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer \
 	-Wall -Wno-unused-parameter
 FUZZ_OUT = $(OUT)/fuzz
-FUZZ_HDR = frontend/lex/lex.h common/intern.h frontend/pp/pp.h frontend/pp/dircache.h
+FUZZ_HDR = include/frontend/lex/lex.h include/common/intern.h include/frontend/pp/pp.h include/frontend/pp/dircache.h
 
 fuzz: $(FUZZ_OUT)/fuzz-lex $(FUZZ_OUT)/fuzz-pp $(FUZZ_OUT)/fuzz-diag
 

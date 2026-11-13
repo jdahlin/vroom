@@ -14,7 +14,7 @@
  * which sweep 5 clears for the values of the function (22.3).
  */
 #include "virimpl.h"
-#include "alloc.h"
+#include "vir/alloc.h"
 
 #define KILL	0x80000000u
 #define HREG	0x80000000u	/* hint[v]: a register (low byte) instead of a value */

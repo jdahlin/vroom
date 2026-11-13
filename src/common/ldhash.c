@@ -6,7 +6,7 @@
  * No dependency: XXH3 is plain C; BLAKE3 hashes four chunks per NEON lane
  * set on aarch64 (plain C elsewhere), and the build-id is parallel over chunks.
  */
-#include "ldhash.h"
+#include "common/ldhash.h"
 #include <string.h>
 
 static inline uint64_t rd64(const uint8_t *p) { uint64_t v; memcpy(&v, p, 8); return v; }

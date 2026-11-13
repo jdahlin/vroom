@@ -20,8 +20,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "../../common/intern.h"
-#include "lex.h"
+#include "common/intern.h"
+#include "frontend/lex/lex.h"
 
 #define likely(x) __builtin_expect(!!(x), 1)
 #define unlikely(x) __builtin_expect(!!(x), 0)

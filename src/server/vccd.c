@@ -78,20 +78,20 @@
 #ifdef __APPLE__
 #include <mach/mach.h>
 #endif
-#include "../include/vcc/protocol.h"
+#include "protocol.h"
 #include "caps.h"
-#include "../driver/ccsnap.h"
-#include "../frontend/pp/pp.h"
-#include "../frontend/lex/lex.h"
-#include "../common/intern.h"
-#include "../frontend/pp/dircache.h"
-#include "../driver/ppdriver.h"
-#include "../utils/fixdep.h"
+#include "driver/ccsnap.h"
+#include "frontend/pp/pp.h"
+#include "frontend/lex/lex.h"
+#include "common/intern.h"
+#include "frontend/pp/dircache.h"
+#include "driver/ppdriver.h"
+#include "utils/fixdep.h"
 #include "dstore.h"
-#include "../utils/ar.h"
-#include "../utils/rsh.h"
-#include "../ld/ld.h"
-#include "../common/defer.h"
+#include "utils/ar.h"
+#include "utils/rsh.h"
+#include "ld/ld.h"
+#include "common/defer.h"
 
 #define MAX_STRS	(VROOM_MAX_PAYLOAD / 2)
 

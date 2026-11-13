@@ -11,7 +11,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
-#include "../../src/include/vcc/protocol.h"
+#include "../../src/include/protocol.h"
 
 extern char **environ;
 

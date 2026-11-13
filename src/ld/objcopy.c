@@ -21,10 +21,10 @@
  * (name, size, address); symbols that llvm-nm treats as format specific
  * (null, FILE, SECTION, $d/$x mapping symbols) are not printed.
  */
-#include "ld.h"
-#include "../common/hash.h"
-#include "../common/defer.h"
-#include "../common/ckd.h"
+#include "ld/ld.h"
+#include "common/hash.h"
+#include "common/defer.h"
+#include "common/ckd.h"
 #include "ldelf.h"
 
 #include <ctype.h>

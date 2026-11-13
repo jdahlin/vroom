@@ -91,7 +91,7 @@ mo+='static const struct { const char *cpu, *name, *value; } x86_cpu_macros[] = 
 for cpu,s in snapshots.items():
  for m in sorted(identity & s.keys()):mo+='{'+','.join(map(json.dumps,(cpu,m,s[m])))+'},\n'
 mo+='};\n'
-(ROOT/'src/arch/x64/x86features-data.inc').write_text(out)
+(ROOT/'src/include/arch/x64/x86features-data.inc').write_text(out)
 (ROOT/'src/driver/x86macros-data.inc').write_text(mo)
 (ROOT/'bench/data/x86features-oracle.json').write_text(json.dumps({'version':version,'cli_features':sorted(cli_names),'attr_features':sorted(attr_names),'source_sha256':hashlib.sha256(source.encode()).hexdigest(),'cpus':list(snapshots),'feature_macros':{m:sorted(fs) for m,fs in macros.items()},'cpu_macro_names':sorted(identity)},indent=2,sort_keys=True)+'\n')
 print(f'{len(cpus)} CPUs, {len(names)} features, {len(macros)} feature macros, {len(identity)} CPU macro names')

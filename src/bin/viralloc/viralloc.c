@@ -27,8 +27,8 @@
 #include <string.h>
 #include <time.h>
 
-#include "../../vir/alloc.h"
-#include "../../vir/synth.h"
+#include "vir/alloc.h"
+#include "vir/synth.h"
 
 static char *slurp(const char *path, size_t *n)
 {

@@ -21,8 +21,8 @@
  * Minimum: N >= 3 with C <= N - 2, M >= 2 with D <= M - 2.
  */
 #include "virimpl.h"
-#include "alloc.h"
-#include "synth.h"
+#include "vir/alloc.h"
+#include "vir/synth.h"
 
 static bool is_iconst(const vir_fn *f, uint32_t v) { return v && v < f->nconst && f->ins[v].op == VO_ICONST; }
 

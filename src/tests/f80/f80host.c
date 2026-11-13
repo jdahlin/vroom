@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <float.h>
-#include "../../common/f128.h"
+#include "../../include/common/f128.h"
 typedef unsigned __int128 U;
 /* host x87 long double -> held layout */
 static U of_ld(long double x) {

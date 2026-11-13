@@ -7,7 +7,7 @@
  * instruction the way LLVM's AArch64AsmParser chooses them, so the
  * encodings are the ones clang produces.
  */
-#include "../a64.h"
+#include "arch/a64/a64.h"
 #include <string.h>
 #include <strings.h>
 #include <pthread.h>

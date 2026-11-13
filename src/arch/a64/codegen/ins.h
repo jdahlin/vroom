@@ -1,6 +1,6 @@
 /* vcc code generator, arm64: registers, condition codes and the instruction records
  * the code generator builds (included by codegen/emitimpl.h before the emitter state) */
-#include "../a64.h"
+#include "arch/a64/a64.h"
 
 /* ---------------- instruction records ---------------- */
 

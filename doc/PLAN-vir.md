@@ -1575,7 +1575,7 @@ SPEC rättad till utkast 0.4 i egen commit (lista i PR:en).
 
 Gren `claude/vir-regalloc-impl-f22a1d` på `main` (V1:s första halva);
 ingen kod i V1 ändrad.
-- **Gjort:** SPEC 15.1–15.2 som gränssnitt (`vir/alloc.h`: `vir_regs`,
+- **Gjort:** SPEC 15.1–15.2 som gränssnitt (`include/vir/alloc.h`: `vir_regs`,
   `vir_fix`, `vir_alloc_out` i trådens reservationer), loopskogen som
   intervall av blockföljden (`loops.c`, `vir_loops_build`, ersätts av
   `vir_canon` i V2), `vir_alloc_check` (`allocchk.c`, skrevs före

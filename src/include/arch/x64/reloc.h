@@ -1,0 +1,16 @@
+/* x86-64 ELF relocation types (included by include/obj/obj.h; fixups carry them when
+   the object's machine is EM_X86_64) */
+#ifndef VCC_X64_RELOC_H
+#define VCC_X64_RELOC_H
+
+enum {
+	R_X86_64_NONE = 0, R_X86_64_64 = 1, R_X86_64_PC32 = 2, R_X86_64_GOT32 = 3, R_X86_64_PLT32 = 4,
+	R_X86_64_GOTPCREL = 9, R_X86_64_32 = 10, R_X86_64_32S = 11, R_X86_64_16 = 12, R_X86_64_PC16 = 13,
+	R_X86_64_8 = 14, R_X86_64_PC8 = 15, R_X86_64_DTPMOD64 = 16, R_X86_64_DTPOFF64 = 17,
+	R_X86_64_TPOFF64 = 18, R_X86_64_TLSGD = 19, R_X86_64_TLSLD = 20, R_X86_64_DTPOFF32 = 21,
+	R_X86_64_GOTTPOFF = 22, R_X86_64_TPOFF32 = 23, R_X86_64_PC64 = 24, R_X86_64_GOTOFF64 = 25,
+	R_X86_64_GOTPC32 = 26, R_X86_64_SIZE32 = 32, R_X86_64_SIZE64 = 33, R_X86_64_GOTPCRELX = 41,
+	R_X86_64_REX_GOTPCRELX = 42,
+};
+
+#endif

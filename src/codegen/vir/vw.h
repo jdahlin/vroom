@@ -1,8 +1,8 @@
 /* The VIR builder's state (codegen/vir/build.c): one per ecx, reused by every function. */
 #ifndef VCC_EMIT_VIR_VW_H
 #define VCC_EMIT_VIR_VW_H
-#include "../../vir/vir.h"
-#include "../../vir/alloc.h"
+#include "vir/vir.h"
+#include "vir/alloc.h"
 
 typedef struct vwp {	/* a pre-IR instruction: operands are pre-IR values, extras in vwst.x */
 	vir_ins in;

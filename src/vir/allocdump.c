@@ -7,7 +7,7 @@
  * `ss0`, `ss1`, ...; `-` is no register (an immediate or memory operand).
  */
 #include "virimpl.h"
-#include "alloc.h"
+#include "vir/alloc.h"
 
 void vir_reg_name(char *o, uint32_t r)
 {

@@ -1,4 +1,4 @@
-#include "../port/hostcrc.h"
+#include "port/hostcrc.h"
 #include <stdatomic.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -6,8 +6,8 @@
 #include <string.h>
 #include <sys/mman.h>
 
-#include "intern.h"
-#include "arena.h"
+#include "common/intern.h"
+#include "common/arena.h"
 
 #define SLOT_BITS 23	/* 64 MB of slots, touched as ids arrive */
 #define NSLOT (1u << SLOT_BITS)
@@ -280,7 +280,7 @@ vintern_cache *vintern_local(void)
 
 
 /* ---------------- stack guard (vstack.h) ---------------- */
-#include "../port/vstack.h"
+#include "port/vstack.h"
 
 _Thread_local uintptr_t vstack_lim;
 

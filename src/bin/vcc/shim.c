@@ -32,7 +32,7 @@
 #include <sys/un.h>
 #include <unistd.h>
 
-#include "../../include/vcc/protocol.h"
+#include "protocol.h"
 
 #ifdef MSG_NOSIGNAL
 #define SHIM_NOSIG MSG_NOSIGNAL	/* Linux: no SIGPIPE from a send to a closed peer */

@@ -11,7 +11,7 @@ cd "$(dirname "$0")/../../src"
 W=../contrib/wasm
 OUT=${OUT:-../build/wasm}
 mkdir -p $OUT/obj
-CFLAGS="-Iport/wasm/compat -std=c11 -O2 -sMEMORY64=1 -msimd128 -mfpu=neon -D_GNU_SOURCE -DVCC_INCDIR=\"/vcc/include\" -Wno-unused-parameter ${WFLAGS}"
+CFLAGS="-Iport/wasm/compat -Iinclude -std=c11 -O2 -sMEMORY64=1 -msimd128 -mfpu=neon -D_GNU_SOURCE -DVCC_INCDIR=\"/vcc/include\" -Wno-unused-parameter ${WFLAGS}"
 SRC="bin/vpp/vpp.c frontend/lex/lex.c common/intern.c arch/a64/as/enc.c platform/darwin/macho.c arch/wasm/as/as.c platform/wasm/wasm.c
  frontend/pp/dircache.c driver/ppdriver.c driver/ccsnap.c common/ldhash.c"
 for m in as obj cc pp emit; do
@@ -29,7 +29,7 @@ if [ -n "$VCC" ]; then
 	SR=$(em-config CACHE)/sysroot
 	RES=$(${LLVM:-/opt/homebrew/opt/llvm}/bin/clang -print-resource-dir)/include
 	COMPILE="$VCC --target=wasm64-unknown-emscripten -nostdinc -isystem $RES -isystem $SR/include/wasm64-emscripten
-	 -isystem $SR/include -std=c11 -O2 -D_GNU_SOURCE -DVCC_INCDIR=\"/vcc/include\" -Wno-unused-parameter -mllvm -wasm-enable-sjlj ${WFLAGS}"
+	 -isystem $SR/include -Iinclude -std=c11 -O2 -D_GNU_SOURCE -DVCC_INCDIR=\"/vcc/include\" -Wno-unused-parameter -mllvm -wasm-enable-sjlj ${WFLAGS}"
 	LFLAGS=-sSUPPORT_LONGJMP=wasm	# setjmp through wasm exception handling, as vcc compiles it
 else
 	COMPILE="emcc $CFLAGS"

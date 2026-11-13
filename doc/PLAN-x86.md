@@ -23,10 +23,10 @@ x86_64-apple-darwin ingår inte.
   saknas**, liksom qemu. De behövs som referens (se Risker: installation).
 - **vcc bygger inte på x86-64**: lexern är NEON (`frontend/lex/lex.c:4`, med en skalär väg
   bakom `VLEX_SCALAR`), interneringen använder ACLE-CRC32C (`common/intern.c:1`,
-  `common/intern.h:86`), `common/ldhash.c:184` har aarch64-grenar och Makefile väljer
+  `include/common/intern.h:86`), `common/ldhash.c:184` har aarch64-grenar och Makefile väljer
   `-mcpu=…` (TODO.md: "x86-64 host build"). `src/port/wasm/compat/` visar redan hur
   ACLE-CRC och NEON mappas när vcc byggs för ett annat mål.
-- Målvalet är `po.target` (`frontend/pp/pp.h:82`: `PP_LINUX_AARCH64, PP_DARWIN, PP_WASM64,
+- Målvalet är `po.target` (`include/frontend/pp/pp.h:82`: `PP_LINUX_AARCH64, PP_DARWIN, PP_WASM64,
   PP_WASM32`), med makron `DARWIN(c)`/`WASM(c)` i `codegen/emitimpl.h` och
   `CC_ILP32(c)` i cc. Emittern väljer generator per funktion i `codegen/tu.c:178`
   (`wasm_emit_function` eller `emit_function`), data-direktiv i `codegen/data.c`.
@@ -36,7 +36,7 @@ x86_64-apple-darwin ingår inte.
   postoptimerare (`opt.c`), en skrivare (`print.c`) och en kodare direkt till
   objektmodellen (`obj.c`). Vikning, nåbarhet, inlining och `__builtin_constant_p`
   ligger kvar där (W1 i PLAN-wasm.md lyfte inte ut dem).
-- Objektlagret är arm64-bundet: `obj/obj.h:54` inkluderar `arch/a64/reloc.h`, och
+- Objektlagret är arm64-bundet: `include/obj/obj.h:54` inkluderar `include/arch/a64/reloc.h`, och
   ELF-skrivaren skriver `e_machine = 183` (`platform/linux/elf.c:279`) och har
   AArch64-relokeringar i sin GOT/TLS-logik (`:42`).
 - Länkaren (`ld/ld.c`) är en TU med arm64-fragment (`arch/a64/ld/*.inc`).
@@ -56,14 +56,14 @@ x86_64-apple-darwin ingår inte.
 
 LP64 som arm64, så typtabellen kan stå kvar. Det nya är x87-`long double`:
 konstantvikning, literaler och utdata (`.quad`+`.short`, 6 byte utfyllnad) behöver
-en `lib/f80.h` bredvid `common/f128.h`, och `__float128` blir en egen typ.
+en `lib/f80.h` bredvid `include/common/f128.h`, och `__float128` blir en egen typ.
 
 ## Arkitektur
 
 | Del | Fil(er) | Innehåll |
 |---|---|---|
 | Värdbygge | `frontend/lex/lex.c`, `common/intern.*`, `common/ldhash.c`, `src/Makefile` | SSE2/AVX2-lexer (skalär först), CRC32C via SSE4.2 (`_mm_crc32_u64`: samma polynom, samma hashar), `pause` i stället för `yield`, `-march=native` |
-| Målval | `frontend/pp/pp.h`, `driver/ppdriver.c`, `server/caps.c` | `PP_LINUX_X86_64`; `--target=x86_64-*-linux-gnu`, `-m64`; utan `--target` på en x86-64-värd: x86-64 (som arm64-värden ger aarch64) |
+| Målval | `include/frontend/pp/pp.h`, `driver/ppdriver.c`, `server/caps.c` | `PP_LINUX_X86_64`; `--target=x86_64-*-linux-gnu`, `-m64`; utan `--target` på en x86-64-värd: x86-64 (som arm64-värden ger aarch64) |
 | Predefines, `__has_*` | `frontend/pp/ppdata-predef.inc`, `gen-ppdata.sh` | En kolumn till ur clang; `-march=`/`-msse4.2`/`-mavx2`/`-mno-sse`/`-mgeneral-regs-only`-deltan som tabell |
 | Layout | `frontend/c/type.c`, `frontend/c/tu.c`, `frontend/c/layout.c` | `char` signed, `wchar_t` int, x87 `long double`, `__float128`, `va_list` |
 | AST-vandrare | `codegen/walk/` | Lager 1 nedan: vikning, nåbarhet, inlining, `__builtin_constant_p`, switch-strategi, stackplatser, `val`/`lval`, anropssekvensen; sänkningsgränssnittet `walk/lower.h` |
@@ -73,7 +73,7 @@ en `lib/f80.h` bredvid `common/f128.h`, och `__float128` blir en egen typ.
 | Textutdata | `arch/x64/codegen/print.c` | `-S` i clangs AT&T-syntax (`.p2align 4, 0x90`, `.type`, `.size`, `#APP`) |
 | Kodare | `arch/x64/as/enc.c`, `x64.h` | REX/ModRM/SIB/disp/imm, VEX/EVEX senare; tabelldriven, tabellen genererad en gång ur LLVM:s X86-tabeller |
 | Assembler | `arch/x64/as/parse.c` | AT&T-syntax för `vas`, inline asm och kärnans `.S` |
-| Fixups | `arch/x64/reloc.h`, `arch/x64/obj/fixup.c` | `R_X86_64_PC32/PLT32/32/32S/64/PC64/GOTPCRELX/REX_GOTPCRELX/TPOFF32/GOTTPOFF/TLSGD/TLSLD/DTPOFF32`; hoppavslappning rel8↔rel32 som MC |
+| Fixups | `include/arch/x64/reloc.h`, `arch/x64/obj/fixup.c` | `R_X86_64_PC32/PLT32/32/32S/64/PC64/GOTPCRELX/REX_GOTPCRELX/TPOFF32/GOTTPOFF/TLSGD/TLSLD/DTPOFF32`; hoppavslappning rel8↔rel32 som MC |
 | Objektskrivare | `platform/linux/elf.c` | `e_machine` och relokeringsregler från arch i stället för hårdkodat |
 | Länkare | `arch/x64/ld/*` | Relokeringar, GOT/PLT, TLS- och GOTPCRELX-avslappning (inga thunks) |
 
@@ -818,7 +818,7 @@ villkorsuttryck. x86:s egna tester: 47/56 godkända, mot 46/56 före
   (`frontend/pp/ppdata-x86.inc`), `__has_*` (`has_tab_x86`) och attributnamn
   (`frontend/c/attrnames-x86.inc`). De andra målens tabeller (23.1.4) rörs inte.
 - `va_list` som `struct __va_list_tag[1]`; `long double` som x87 i konstanter och
-  vikning (`common/f128.h`: binary128-layout avrundad till 63 bitar, `q_*p`);
+  vikning (`include/common/f128.h`: binary128-layout avrundad till 63 bitar, `q_*p`);
   `__float128` som egen typ (`TY_FLOAT128`, suffix `q`). `char` signed, `wchar_t`
   int. glibcs huvudfiler går igenom hostat.
 - Verifierat: `-dM` = clang för 29 flaggset, `-dD`-ordning för 17;
@@ -834,7 +834,7 @@ villkorsuttryck. x86:s egna tester: 47/56 godkända, mot 46/56 före
 ### X0 (2026-11-10): bygger och kör, SIMD-lexer och kärnparitet kvar
 - `make -C src vcc` på x86-64 Linux med clang 22: `classify`, `find_cend`,
   `find_nl` och `find_quote` i `frontend/lex/lex.c` har en skalär version utan NEON
-  (samma masker bit för bit), CRC32C via SSE4.2 (`port/hostcrc.h`, samma polynom),
+  (samma masker bit för bit), CRC32C via SSE4.2 (`include/port/hostcrc.h`, samma polynom),
   `pause` i spinnslingan, `-march=native -msse4.2`. Fuzz-målen tar värdens clang
   och libFuzzer (LeakSanitizer är på som standard på Linux: `ASAN_OPTIONS=detect_leaks=0`
   för regress-körningen, eftersom den rapporterar läckor redan på tom indata).

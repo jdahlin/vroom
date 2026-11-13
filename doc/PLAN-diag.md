@@ -201,7 +201,7 @@ Tio lager; varje steg nedan säger vilka det berör.
   anropsställena kan flyttas över ett i taget.  `diagids.inc` genereras ur `.td`-filerna
   (bara C-hinken och de id vcc använder), som `ppdata*.inc`.
   *Validera:* lager 1 (66/66), 6, 7.
-  *Klart 2026-11-09.*  `vdiag` i `frontend/pp/pp.h`: id, format, flagga, meddelande, primär plats och
+  *Klart 2026-11-09.*  `vdiag` i `include/frontend/pp/pp.h`: id, format, flagga, meddelande, primär plats och
   etikett, spann med etiketter, fix-its med tillämplighet (`VDA_MACHINE/MAYBE/PLACEHOLDER`),
   makrots token, barn (noter) och `track` (för D1.3).  Byggs i TU:ns `perm`-arena med
   `pp_diag_begin/label/fix/note/emit`; `pp_diag_records()` ger TU:ns poster i ordning.  En

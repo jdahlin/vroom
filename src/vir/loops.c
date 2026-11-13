@@ -11,7 +11,7 @@
  * the predecessor lists, a sort of the loops, one pass over the blocks.
  */
 #include "virimpl.h"
-#include "alloc.h"
+#include "vir/alloc.h"
 
 static _Thread_local struct lctx {
 	vir_loop *l;

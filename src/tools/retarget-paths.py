@@ -27,6 +27,18 @@ T1_TEXT = [('build/linux/ccs', 'build/linux/src'), ('build/ccs', 'build/src'),
            ('ccs-base', 'src-base'), ('ccs-exp', 'src-exp'),
            ('make -C ccs', 'make -C src'), ('-C ccs ', '-C src ')]
 
+PUBLIC_T4 = (
+    'arch/a64/a64.h', 'arch/a64/reloc.h', 'arch/x64/reloc.h', 'arch/x64/x86features.h',
+    'arch/x64/x86features-data.inc', 'arch/wasm/as/wasmas.h', 'as/as.h', 'codegen/emit.h',
+    *[f'common/{h}' for h in ('arena.h', 'attr.h', 'bigint.h', 'buf.h', 'ckd.h', 'defer.h', 'f128.h',
+                              'hash.h', 'intern.h', 'ldhash.h', 'tbuf.h', 'vec.h')],
+    'driver/ccsnap.h', 'driver/ppdriver.h', 'frontend/c/cc.h', 'frontend/c/ccint.h',
+    'frontend/lex/lex.h', 'frontend/pp/dircache.h', 'frontend/pp/pp.h', 'ld/ld.h', 'obj/obj.h',
+    *[f'port/{h}' for h in ('hostcrc.h', 'mapfile.h', 'vperf.h', 'vstack.h', 'x86native.h',
+                            'x86native-data.inc', 'x86native-LICENSE.txt')],
+    'utils/ar.h', 'utils/fixdep.h', 'utils/rsh.h',
+    'vir/alloc.h', 'vir/layout.h', 'vir/synth.h', 'vir/vir.h')
+
 STEPS = {
     'T1': [('ccs/vcc/include/', 'src/headers/'),
            ('ccs/vcc/docs/diag/', 'doc/diag/'),
@@ -75,11 +87,17 @@ STEPS = {
            ('src/driver/vpp.c', 'src/bin/vpp/vpp.c'),
            ('src/vir/virtest.c', 'src/bin/virtest/virtest.c'),
            ('src/vir/viralloc.c', 'src/bin/viralloc/viralloc.c')],
+    # the headers other modules include -> src/include/, mirroring the tree
+    # (PostgreSQL's src/include); included as "common/arena.h" with -Isrc/include
+    'T4': [*[(f'src/{h}', f'src/include/{h}') for h in PUBLIC_T4],
+           ('src/platform/darwin/pmc.h', 'src/include/port/darwin/pmc.h'),
+           ('src/include/vcc/protocol.h', 'src/include/protocol.h')],
 }
 TEXT = {'T1': T1_TEXT}
 
 # never rewritten: the plan that describes the old paths, logs
 SKIP_TEXT = re.compile(r'^(doc/PLAN-tree\.md|docs/PLAN-tree\.md|results/|patches/|src/tools/retarget-paths\.py)')
+ROOT_INC = 'src/include/'
 C_EXT = ('.c', '.h', '.inc', '.cpp', '.cc', '.S', '.def')
 PATHCH = r'A-Za-z0-9_.\-'
 
@@ -125,7 +143,12 @@ def rewrite_includes(newfile, oldfile, m, old_set):
         tgt = os.path.normpath(os.path.join(olddir, name))
         if tgt not in old_set:
             return mo.group(0)
-        rel = os.path.relpath(m(tgt), newdir or '.')
+        new = m(tgt)
+        if (new.startswith(ROOT_INC) and newfile.startswith('src/')
+                and not newfile.startswith(('src/tests/', 'src/test/'))):
+            rel = new[len(ROOT_INC):]	# -Isrc/include
+        else:
+            rel = os.path.relpath(new, newdir or '.')
         return mo.group(1) + rel + mo.group(3) if rel != name else mo.group(0)
     t = INC.sub(fix, s)
     if t != s:
@@ -164,12 +187,17 @@ def rewrite_text(files, steps):
             continue
         p = os.path.join(R, f)
         s = open(p, encoding='utf-8', errors='surrogateescape').read()
-        t = s
+        # #include lines are rewrite_includes' (a root-relative name is not a path from here)
+        lines = s.splitlines(keepends=True)
         for step in steps:
-            for rx, b, rel in text_pairs(step):
-                if rel and not in_relative_scope(f):
+            pairs = [(rx, b) for rx, b, rel in text_pairs(step) if not rel or in_relative_scope(f)]
+            for i, line in enumerate(lines):
+                if f.endswith(C_EXT) and INC.match(line):
                     continue
-                t = rx.sub(lambda mo: b, t)
+                for rx, b in pairs:
+                    line = rx.sub(lambda mo: b, line)
+                lines[i] = line
+        t = ''.join(lines)
         if t != s:
             open(p, 'w', encoding='utf-8', errors='surrogateescape').write(t)
             changed.append(f)

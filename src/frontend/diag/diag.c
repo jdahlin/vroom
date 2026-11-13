@@ -1,7 +1,7 @@
 /* vcc preprocessor: diagnostics in clang's text format */
 #include "../pp/ppimpl.h"
 #include <ctype.h>
-#include "../../common/buf.h"
+#include "common/buf.h"
 #include <dlfcn.h>
 
 /* ---------------- diagnostics ---------------- */

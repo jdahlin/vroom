@@ -48,10 +48,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "ar.h"
-#include "../common/buf.h"
-#include "../port/mapfile.h"
-#include "../common/defer.h"
+#include "utils/ar.h"
+#include "common/buf.h"
+#include "port/mapfile.h"
+#include "common/defer.h"
 
 /* ---------------- growable buffer ---------------- */
 

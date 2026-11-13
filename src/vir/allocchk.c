@@ -23,7 +23,7 @@
  * is in the output's set.  Not a fast path: it allocates with calloc.
  */
 #include "virimpl.h"
-#include "alloc.h"
+#include "vir/alloc.h"
 
 typedef struct chk {
 	vir_fn *f;

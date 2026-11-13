@@ -2,7 +2,7 @@
  * from LLVM/Clang; feature resolution and macro emission need no LLVM library. */
 #ifndef VCC_X86PREDEFINES_H
 #define VCC_X86PREDEFINES_H
-#include "../arch/x64/x86features.h"
+#include "arch/x64/x86features.h"
 #include "x86macros-data.inc"
 static inline void x86_macro_line(buf *pre, const char *name, const char *value)
 {

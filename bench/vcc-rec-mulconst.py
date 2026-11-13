@@ -47,7 +47,7 @@ def main():
         flags = ['-fsanitize=address,undefined', '-fno-omit-frame-pointer'] if args.sanitize else []
         def compile_run(text, mutation=False):
             source.write_text(text)
-            subprocess.run([args.cc, '-std=gnu11', '-O1', '-g', '-I', str(Path(R) / 'src'),
+            subprocess.run([args.cc, '-std=gnu11', '-O1', '-g', '-I', str(Path(R) / 'src'), '-I', str(Path(R) / 'src' / 'include'),
                             *flags, str(source), '-o', str(binary)], check=True, timeout=30)
             result = subprocess.run([str(binary)], capture_output=True, cwd=tmp, timeout=10)
             if mutation:

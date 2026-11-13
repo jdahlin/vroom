@@ -42,7 +42,7 @@
 #include <vector>
 
 extern "C" {
-#include "../../src/include/vcc/protocol.h"
+#include "../../src/include/protocol.h"
 }
 
 extern char **environ;
