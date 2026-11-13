@@ -1,4 +1,16 @@
-/* x86-64 target resolution: CPU and feature options in command-line order, and the x86 switches arm64 rejects. */
+/*
+ * target-x64.c: resolve the x86-64 target's CPU and feature set from the options, and reject x86
+ * switches on arm64.
+ *
+ * x86_driver_features follows clang: the CPU first (-march=, `native` asking the host through
+ * port/x86native.h), then every -m[no-]feature in command-line order, each applying the feature
+ * table's dependencies (include/arch/x64/x86features.h, generated from clang by
+ * tools/gen-x86features.py).  Besides the result in job->x86_features_ it keeps the raw, on and off
+ * sets that the code generator and the predefined macros need.  An unknown CPU or feature fails the
+ * job with status 1.  On arm64 and Darwin the same switches (-mavx2, -mno-sse ...) are errors, as in
+ * clang, except -msse4 and -msse4.2 which clang only calls unused.  Called once per job, after the
+ * option loop and before anything reads the feature fields.
+ */
 #include "driver-internal.h"
 #include "port/x86native.h"
 

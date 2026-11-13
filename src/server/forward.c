@@ -1,4 +1,14 @@
-/* Forwarding a request to another vroom-protocol server (the backend). */
+/*
+ * forward.c: pass a request on, unchanged, to another vroom-protocol server (the backend given by
+ * --backend-sock: clang's vroomd).
+ *
+ * The request is sent as it came (header, payload, the client's three fds as SCM_RIGHTS) and the
+ * backend's status word is the answer, so the backend runs the job with the client's own cwd,
+ * environment and stdio.  forward_argv does the same with another argv (the host-program link, the
+ * stdin fallback).  Failure to connect is exit status 127 with a message.  The wait for the backend
+ * is a blocking region (vtask_blocking_begin) so that, with --shared-pool, the core goes to the next
+ * job meanwhile.
+ */
 #include "vccd-internal.h"
 
 static int forward_relay(const struct req *r, const char *sock);

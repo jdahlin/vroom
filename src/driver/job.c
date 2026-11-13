@@ -1,21 +1,19 @@
-/* One compile job from a clang command line: parse, classify, run one of the four modes, write. */
 /*
- * (formerly ppdriver.c) one preprocessing job (-E) from a clang command line.  Used by
- * vpp (parity tests) and by vccd (kbuild's -E commands: linker scripts,
- * device trees).  Thread safe; no process state (cwd, fds) is touched.
+ * job.c: one compile job from a clang command line (ppd_run): parse the options, then run one of
+ * four modes (--cmp token comparison, -S/-c compile, assembler source, plain -E) and write the output.
  *
- * Takes the options kbuild passes (-I, -iquote, -isystem, -idirafter,
- * -include, -D, -U, -undef, -nostdinc, -x, --target, -O, the -f/-m flags
- * that change predefined macros, -fmacro-prefix-map, -o, -Wp,-MMD,FILE /
- * -MD -MF -MT) and prints what clang -E -P prints.  With --cmp REF.i the
- * output is compared with REF.i token by token instead (vcc's lexer: kind
- * and spelling); the first difference is shown, status 1.  The reference's
- * token-stream hash is kept in REF.i.th (keyed by its size and mtime): when
- * ours hashes the same, the reference is not read again.
+ * Callers: vpp (parity tests) and vccd (server/dispatch.c, compile.c, probe.c, host-programs.c), one
+ * job per call and per thread.  The job is thread safe and touches no process state: the working
+ * directory, environment and file descriptors come in through ppd_env (ppdriver.h), so under vccd
+ * they are the client's.  The only per-thread state is the buffer regions (job-buffer.c) and the
+ * object state (output.c: one assembler, one ElfObj, one output buffer per thread).
  *
- * With -c the TU is compiled (C: frontend/c/ + codegen/, .S: as.c) into an ELF
- * object, written with one write(); the dependency file is written as for -E.
- * Each thread keeps one assembler, one ElfObj and one output buffer.
+ * The order in ppd_run1 matters: the option loop (cmdline.c) and its checks come first, defaults
+ * that depend on the target (PIE, CFI) are fixed after them, and the search paths and predefined
+ * macros are built before pp_open lexes the main file.  A job ends by setting job->status
+ * (0 ok, 1 failed, 2 usage error) and jumping to `out`; a full table or an overflow in the
+ * preprocessor, assembler or ELF writer longjmps to the job's jmp_buf, so a failed job returns
+ * status 1 and the thread goes on with the next.
  *
  *   VPP_TIME=1   report the preprocessing time on the error fd
  */
