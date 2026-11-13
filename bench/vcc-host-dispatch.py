@@ -13,7 +13,7 @@ import tempfile
 import hostenv
 
 ROOT = Path(__file__).resolve().parent.parent
-A64_VIR_PROBE = r'''
+PROBE = r'''
 #include "port/crc32c.h"
 #include "common/intern.h"
 #include <assert.h>
@@ -54,7 +54,7 @@ def main():
     bins = Path(args.bin_dir).resolve()
     with tempfile.TemporaryDirectory(prefix='vcc-host-dispatch-') as tmp:
         d = Path(tmp)
-        (d/'crc.c').write_text(A64_VIR_PROBE)
+        (d/'crc.c').write_text(PROBE)
         subprocess.run([hostenv.llvm('clang'), '-O2', '-march=x86-64', '-D_GNU_SOURCE',
                         '-I'+str(ROOT/'src/include'), str(d/'crc.c'),
                         str(ROOT/'src/common/intern.c'), str(ROOT/'src/common/fail.c'),

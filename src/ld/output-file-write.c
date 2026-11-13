@@ -11,7 +11,7 @@ static int ld_output_file_write(void)
 	}
 	uint64_t off = 0;
 	while (off < ctx->layout.file_size) {
-		ssize_t w = write(fd, out + off, ctx->layout.file_size - off > (1 << 30) ? (1 << 30) : ctx->layout.file_size - off);
+		ssize_t w = write(fd, ctx->output.image + off, ctx->layout.file_size - off > (1 << 30) ? (1 << 30) : ctx->layout.file_size - off);
 		if (w <= 0) {
 			ld_error_report("write %s: %s", opt.out, strerror(errno));
 			close(fd);
@@ -27,5 +27,5 @@ static void ld_build_id_chunk_hash(void *arg, size_t i)
 {
 	uint8_t *hashes = arg;
 	uint64_t b = (uint64_t)i << 20, n = ctx->layout.file_size - b < (1u << 20) ? ctx->layout.file_size - b : (1u << 20);
-	vdigest_blake3(out + b, n, hashes + i * 20, 20);
+	vdigest_blake3(ctx->output.image + b, n, hashes + i * 20, 20);
 }

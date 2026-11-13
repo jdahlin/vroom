@@ -495,6 +495,43 @@ groups first and the hot ones (`symbols`, `inputs`) where the timing of
 
 Series (a), groups into the struct:
 
+Decision (2026-11-13, owner's go-ahead for the whole chain): the groups go in
+two PRs instead of nine, because each move is mechanical and its proof is the
+same (a deleted static makes the compiler find every use; the outputs are
+byte-identical): **step 2 of the context** moves the output side, lines 2-6
+below (relocation scan, `ld -r`, output, symbol table, dynamic sections: 69
+variables); **step 3** moves the input side, lines 7-10 (script, symbols,
+inputs, options) and deletes `state-reset.c`.  The new names:
+
+- `relocations` (lines 2): `final_section_addresses`, `thunks`,
+  `thunk_sections`, `thunk_redirect_keys`/`_values`/`_mask`/`_count`, `pic`,
+  `rela_dyn_buffer`, `got_seen` (it was declared twice, in `ld.c` and
+  `got-probe.c`: Q-ld-22; now one field).
+- `relocatable` (line 3): `sections`, `section_map`, `section_map_mask`,
+  `local_symbol_map`, `image`, `symtab_offset`, `strtab_offset`,
+  `shstrtab_offset`, `shstrtab_size`, `symbol_count`, `local_count`,
+  `symtab_index`, `strtab_index`, `shstrtab_index`, `section_header_count`,
+  `local_string_offsets`, `local_first_index`.
+- `output` (line 4, and `shstrtab_buf` of line 5): `image`, `shstrtab`,
+  `relative_count`, `write_jobs`, `got_symbols`, `got_locals`,
+  `dynamic_live`, and the synthetic sections' ids `rela_dyn_section`,
+  `build_id_section`, `comment_section`, `got_section`,
+  `eh_frame_header_section`, `symtab_section`, `strtab_section`,
+  `shstrtab_section`, `dynsym_section`, `dynstr_section`, `hash_section`,
+  `gnu_hash_section`, `versym_section`, `verdef_section`,
+  `dynamic_section` (all `LD_NONE` in `ld_context_init`).
+- `symbol_table` (line 5): `globals`, `global_count`, `symtab`, `strtab`,
+  `first_thunk_symbol`, `first_thunk_string`, `symbol_count`,
+  `string_size`, `local_count`.
+- `dynamic` (line 6 without `script_ord`, which goes with the symbols):
+  `symbols`, `first_hashed_symbol`, `gnu_hash_buckets`,
+  `gnu_hash_mask_words`, `symbol_hashes`, `strings`, `string_offsets`,
+  `symbol_names`, `soname_offset`, `version_name_offsets`, `entry_count`.
+- Types moved to `ld-internal.h` unchanged: `a64_ld_thunk`,
+  `a64_ld_thunk_section`, `ld_got_location`, `ld_global_symbol_output`,
+  `ld_relocatable_section`.  The arm64 thunk types are in the generic header
+  because the context holds them; they move to a per-CPU part with Q-ld-15.
+
 2. **relocation scan** (10): `isec_fva`, `thunks`, `thunksecs`, `tr_keys`,
    `tr_vals`, `tr_mask`, `tr_n`, `pic`, `reladyn_buf`, `got_seen`.  Types
    `Thunk`, `ThunkSec` move from `arch/a64/ld/thunk-model.inc` to the header;

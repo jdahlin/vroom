@@ -24,9 +24,9 @@ def module(name, filename):
     return m
 
 ct = module('ct', 'vcc-ctests.py')
-x64_vir_context = module('x64_vir_context', 'vcc-x86.py') if a.target == 'x86_64' else None
-if x64_vir_context:
-    x64_vir_context.rt_obj()
+vx = module('vx', 'vcc-x86.py') if a.target == 'x86_64' else None
+if vx:
+    vx.rt_obj()
 else:
     ct.build_rt()
 
@@ -35,12 +35,12 @@ def check(shape):
     wd = a.output / (str(width)+('-signed' if signed else '-unsigned')+'-align'+str(align))
     wd.mkdir(exist_ok=True)
     objects = {}
-    base = x64_vir_context.BASE if x64_vir_context else ct.BASE
+    base = vx.BASE if vx else ct.BASE
     for half in ['caller', 'callee']:
         for compiler in ['clang', 'vcc']:
             obj = str(wd / f'{half}-{compiler}.o')
             flags = [*base, '-DWIDTH='+str(width), '-DSIGNED='+str(signed), '-DTYPE_ALIGN='+str(align), '-I', str(source)]
-            if not x64_vir_context and compiler == 'clang':
+            if not vx and compiler == 'clang':
                 flags += ['-DABI_PROXY=1']
             exe = ct.CL if compiler == 'clang' else ct.VPP
             cmd = [exe, *flags, '-c', str(source / (half+'.c')), '-o', obj]
@@ -55,9 +55,9 @@ def check(shape):
         for callee in ['clang','vcc']:
             name = caller+'-'+callee
             elf = str(wd / (name+'.elf'))
-            rc, err = (x64_vir_context.link if x64_vir_context else ct.link)([objects['caller',caller],objects['callee',callee]],elf)
+            rc, err = (vx.link if vx else ct.link)([objects['caller',caller],objects['callee',callee]],elf)
             if not rc:
-                rc, out = (x64_vir_context.run if x64_vir_context else ct.qemu)(elf)
+                rc, out = (vx.run if vx else ct.qemu)(elf)
             else:
                 out = err
             directions.append(dict(caller=caller,callee=callee,exit=rc,output=out))
@@ -70,6 +70,6 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=a.j) as pool:
 (a.output/'results.json').write_text(json.dumps(results,indent=2)+'\n')
 for r in results:
     print(r['result'],r['width'],'signed' if r['signed'] else 'unsigned','align'+str(r['align']),r.get('message',''),flush=True)
-mode = 'Clang BitInt ABI' if x64_vir_context else 'documented AAPCS aggregate proxy (NOT Clang BitInt parity)'
+mode = 'Clang BitInt ABI' if vx else 'documented AAPCS aggregate proxy (NOT Clang BitInt parity)'
 print(mode+': '+str(sum(r['result']=='pass' for r in results))+'/'+str(len(results))+' pass; four compiler directions each')
 raise SystemExit(any(r['result']!='pass' for r in results))

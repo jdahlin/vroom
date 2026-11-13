@@ -13,9 +13,9 @@ static bool ld_output_section_is_relro(uint32_t oi)
 	if ((os->flags & SHF_TLS) || os->type == SHT_INIT_ARRAY || os->type == SHT_FINI_ARRAY ||
 	    os->type == SHT_PREINIT_ARRAY)
 		return true;
-	if (got_isec != LD_NONE && ld_input_section_output_section(got_isec) == oi)
+	if (ctx->output.got_section != LD_NONE && ld_input_section_output_section(ctx->output.got_section) == oi)
 		return true;
-	if (dynamic_isec != LD_NONE && ld_input_section_output_section(dynamic_isec) == oi)
+	if (ctx->output.dynamic_section != LD_NONE && ld_input_section_output_section(ctx->output.dynamic_section) == oi)
 		return true;
 	return !strcmp(n, ".data.rel.ro") || !strcmp(n, ".bss.rel.ro") || !strcmp(n, ".ctors") ||
 	       !strcmp(n, ".dtors") || !strcmp(n, ".jcr") || !strcmp(n, ".eh_frame") ||
@@ -71,8 +71,8 @@ static void ld_program_headers_create(void)
 		}
 	}
 	/* lld: PT_DYNAMIC over .dynamic */
-	if (dyn_live)
-		ld_segment_section_add(ld_segment_create(PT_DYNAMIC, ld_output_section_segment_flags(&osecs.v[ld_input_section_output_section(dynamic_isec)])), ld_input_section_output_section(dynamic_isec));
+	if (ctx->output.dynamic_live)
+		ld_segment_section_add(ld_segment_create(PT_DYNAMIC, ld_output_section_segment_flags(&osecs.v[ld_input_section_output_section(ctx->output.dynamic_section)])), ld_input_section_output_section(ctx->output.dynamic_section));
 	/* lld: one PT_GNU_RELRO over the contiguous relro sections */
 	if (!opt.norelro && !opt.relocatable) {
 		int rr = -1;
@@ -100,8 +100,8 @@ static void ld_program_headers_create(void)
 		if (rr >= 0)
 			ctx->layout.program_headers.v[rr].p_align = 1;
 	}
-	if (ehhdr_isec != LD_NONE && ld_input_section_output_section(ehhdr_isec) != LD_NONE && ld_input_section_output_section(ehhdr_isec) != LD_OUTPUT_SECTION_DISCARD)
-		ld_segment_section_add(ld_segment_create(PT_GNU_EH_FRAME, PF_R), ld_input_section_output_section(ehhdr_isec));
+	if (ctx->output.eh_frame_header_section != LD_NONE && ld_input_section_output_section(ctx->output.eh_frame_header_section) != LD_NONE && ld_input_section_output_section(ctx->output.eh_frame_header_section) != LD_OUTPUT_SECTION_DISCARD)
+		ld_segment_section_add(ld_segment_create(PT_GNU_EH_FRAME, PF_R), ld_input_section_output_section(ctx->output.eh_frame_header_section));
 	ld_segment_create(PT_GNU_STACK, PF_R | PF_W);
 	int note = -1;
 	for (uint32_t i = 0; i < ctx->layout.output_sections.n; i++) {

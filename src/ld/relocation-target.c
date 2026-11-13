@@ -83,14 +83,13 @@ static void ld_relocation_target_find(const ld_object *o, uint32_t symidx, int64
  * from per-symbol and per-section values computed once (fin_*), falling
  * back to ld_relocation_target_find() for undefined, discarded and merge-piece targets.
  */
-static uint64_t *isec_fva;		/* ld_input_section_address(s, 0), or UINT64_MAX: take ld_relocation_target_find */
 
 static void ld_input_section_final_address_set(void *arg, size_t i)
 {
 	(void)arg;
 	ld_input_section *is = &isecs.v[i];
 	uint32_t os = ld_input_section_output_section(i);
-	isec_fva[i] = is->kind == LD_SECTION_KIND_NONE || is->kind == LD_SECTION_KIND_MERGE_INPUT || os == LD_NONE || os == LD_OUTPUT_SECTION_DISCARD
+	ctx->relocations.final_section_addresses[i] = is->kind == LD_SECTION_KIND_NONE || is->kind == LD_SECTION_KIND_MERGE_INPUT || os == LD_NONE || os == LD_OUTPUT_SECTION_DISCARD
 			      ? UINT64_MAX : osecs.v[os].va + is->off;
 }
 static void ld_global_symbol_final_address_set(void *arg, size_t g)
@@ -105,7 +104,7 @@ static void ld_global_symbol_final_address_set(void *arg, size_t g)
 }
 static void ld_final_addresses_compute(void)
 {
-	isec_fva = ld_region_alloc((size_t)isecs.n * sizeof(uint64_t));
+	ctx->relocations.final_section_addresses = ld_region_alloc((size_t)isecs.n * sizeof(uint64_t));
 	ld_parallel_for(isecs.n, ld_input_section_final_address_set, NULL);
 	ld_parallel_for(atomic_load(&ngsyms), ld_global_symbol_final_address_set, NULL);
 }
@@ -127,7 +126,7 @@ static inline void ld_relocation_target_final_find(const ld_object *o, uint32_t 
 	} else {
 		const elf_symbol *y = &o->sym[symidx];
 		if (y->st_shndx != SHN_UNDEF && y->st_shndx < 0xff00) {
-			uint64_t b = isec_fva[o->isec0 + y->st_shndx];
+			uint64_t b = ctx->relocations.final_section_addresses[o->isec0 + y->st_shndx];
 			if (b != UINT64_MAX) {
 				t->undef = t->discarded = false;
 				t->key = symidx;

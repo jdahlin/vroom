@@ -1,15 +1,15 @@
 /* vcc front end: helpers that lowering of complex, wide atomics and _BitInt casts build AST with */
-#include "ccimpl.h"
+#include "cc-internal.h"
 
-VPRIV uint32_t zero_of(cc *c, qty t, uint32_t loc)
+CC_PRIVATE uint32_t cc_lowering_zero(cc *c, qty t, uint32_t loc)
 {
-	return is_float(c, t) ? mk_flt(c, 0, QUNQ(t), loc) : mk_int(c, 0, QUNQ(t), loc);
+	return cc_type_is_float(c, t) ? cc_node_float_new(c, 0, QUNQ(t), loc) : cc_node_integer_new(c, 0, QUNQ(t), loc);
 }
 
 /* evaluating n twice is the same as once (and cheap) */
-VPRIV bool cplx_pure(cc *c, uint32_t n, int d)
+CC_PRIVATE bool cc_lowering_is_pure(cc *c, uint32_t n, int d)
 {
-	const node *x = N(n);
+	const node *x = AST_NODE(n);
 
 	if (d > 8)
 		return false;
@@ -24,72 +24,72 @@ VPRIV bool cplx_pure(cc *c, uint32_t n, int d)
 	case N_VAR:
 		return !(QQ(x->ty) & Q_VOLATILE);
 	case N_MEMBER: case N_CAST: case N_UNARY: case N_DEREF:
-		return !(QQ(x->ty) & Q_VOLATILE) && cplx_pure(c, x->a, d + 1);
+		return !(QQ(x->ty) & Q_VOLATILE) && cc_lowering_is_pure(c, x->a, d + 1);
 	case N_BINARY: case N_INDEX: case N_CPLX: case N_LOGAND: case N_LOGOR: case N_COMMA:
-		return cplx_pure(c, x->a, d + 1) && cplx_pure(c, x->b, d + 1);
+		return cc_lowering_is_pure(c, x->a, d + 1) && cc_lowering_is_pure(c, x->b, d + 1);
 	default:
 		return false;
 	}
 }
 
 /* n, or a temporary holding it (*pre: the assignment to run first) */
-VPRIV uint32_t cplx_reuse(cc *c, uint32_t n, uint32_t *pre)
+CC_PRIVATE uint32_t cc_lowering_once(cc *c, uint32_t n, uint32_t *pre)
 {
-	qty t = QUNQ(N(n)->ty);
+	qty t = QUNQ(AST_NODE(n)->ty);
 	uint32_t s, v;
 
 	*pre = 0;
 	/* A constant conditional must not acquire an automatic temporary merely
 	   because its selected complex value will be used twice. */
-	if (N(n)->op == N_COND && cplx_pure(c, N(n)->a, 0)) {
+	if (AST_NODE(n)->op == N_COND && cc_lowering_is_pure(c, AST_NODE(n)->a, 0)) {
 		cval cv;
-		if (cc_eval(c, N(n)->a, &cv) && (cv.kind == CV_INT || cv.kind == CV_FLT)) {
+		if (cc_eval(c, AST_NODE(n)->a, &cv) && (cv.kind == CV_INT || cv.kind == CV_FLT)) {
 			bool yes = cv.kind == CV_INT ? cv.i != 0 : cv.ld ? vsoftfloat_is_nonzero(cv.q) : cv.f != 0;
-			return cplx_reuse(c, yes ? (N(n)->b ? N(n)->b : N(n)->a) : N(n)->c, pre);
+			return cc_lowering_once(c, yes ? (AST_NODE(n)->b ? AST_NODE(n)->b : AST_NODE(n)->a) : AST_NODE(n)->c, pre);
 		}
 	}
-	if (cplx_pure(c, n, 0))
+	if (cc_lowering_is_pure(c, n, 0))
 		return n;
-	s = sym_new(c, S_VAR, 0, t, N(n)->loc);
+	s = cc_symbol_new(c, S_VAR, 0, t, AST_NODE(n)->loc);
 	c->syms[s].sc = SC_AUTO;
-	v = mk(c, N_VAR, t, N(n)->loc);
-	N(v)->a = s;
-	N(v)->flags = NF_LVALUE;
-	*pre = mk2(c, N_ASSIGN, t, N(n)->loc, v, n);
+	v = cc_node_new(c, N_VAR, t, AST_NODE(n)->loc);
+	AST_NODE(v)->a = s;
+	AST_NODE(v)->flags = NF_LVALUE;
+	*pre = cc_node_new_operands(c, N_ASSIGN, t, AST_NODE(n)->loc, v, n);
 	return v;
 }
 
-VPRIV uint32_t with_pre(cc *c, uint32_t pre, uint32_t n)
+CC_PRIVATE uint32_t cc_lowering_sequence(cc *c, uint32_t pre, uint32_t n)
 {
-	return pre ? mk2(c, N_COMMA, N(n)->ty, N(n)->loc, pre, n) : n;
+	return pre ? cc_node_new_operands(c, N_COMMA, AST_NODE(n)->ty, AST_NODE(n)->loc, pre, n) : n;
 }
 
 /* a condition: complex values test both parts */
-VPRIV uint32_t scalar_cond(cc *c, uint32_t n, const char *what)
+CC_PRIVATE uint32_t cc_condition_scalar(cc *c, uint32_t n, const char *what)
 {
-	if (is_complex(c, N(n)->ty))
-		return cplx_bool(c, n);
-	need_scalar(c, n, what);
+	if (cc_type_is_complex(c, AST_NODE(n)->ty))
+		return cc_complex_to_bool(c, n);
+	cc_node_require_scalar(c, n, what);
 	return n;
 }
 
-VPRIV uint32_t neg(cc *c, uint32_t n)
+CC_PRIVATE uint32_t neg(cc *c, uint32_t n)
 {
-	uint32_t r = mk(c, N_UNARY, N(n)->ty, N(n)->loc);
+	uint32_t r = cc_node_new(c, N_UNARY, AST_NODE(n)->ty, AST_NODE(n)->loc);
 
-	N(r)->aux = LEX_TOKEN_MINUS;
-	N(r)->a = n;
+	AST_NODE(r)->aux = LEX_TOKEN_MINUS;
+	AST_NODE(r)->a = n;
 	return r;
 }
 
 /* "invalid operands to binary expression ('L' and 'R')", ranges on both */
-VPRIV void bad_operands(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
+CC_PRIVATE void cc_operands_invalid_report(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 {
-	diag_span s[2] = { rng(c, l), rng(c, r) };
+	diag_span s[2] = { cc_node_range(c, l), cc_node_range(c, r) };
 
-	if ((N(l)->flags | N(r)->flags) & NF_ERR)
+	if ((AST_NODE(l)->flags | AST_NODE(r)->flags) & NF_ERR)
 		return;
-	c->dms = punct_spell(op);
+	c->dms = cc_punctuator_spelling(op);
 	report(c, "error", loc, s, 2, NULL, 0, "invalid operands to binary expression ('%s' and '%s')",
-	       tyname(c, N(l)->ty), tyname(c, N(r)->ty));
+	       tyname(c, AST_NODE(l)->ty), tyname(c, AST_NODE(r)->ty));
 }

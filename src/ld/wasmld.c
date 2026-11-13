@@ -30,7 +30,7 @@ int wasm_ld_main(int argc, char **argv);
 
 /* ---------------- basics ---------------- */
 
-#define VIRBUILD_ARRAY_GROW(p, n, c) \
+#define GROW(p, n, c) \
 	do { \
 		if ((n) >= (c)) { \
 			(c) = (c) ? (c) * 2 : 16; \
@@ -403,7 +403,7 @@ static gsym *gfind(const char *s, size_t n, bool create)
 	g->next = ght[h & (ghcap - 1)];
 	ght[h & (ghcap - 1)] = g;
 	ngsym++;
-	VIRBUILD_ARRAY_GROW(gall, ngall, cgall);
+	GROW(gall, ngall, cgall);
 	gall[ngall++] = g;
 	return g;
 }
@@ -922,7 +922,7 @@ static void add_obj(obj *o)
 		err("%s: a wasm%d object in a wasm%d link", o->name, o->mem, memw);
 	else if (o->mem)
 		memw = o->mem;
-	VIRBUILD_ARRAY_GROW(objs, nobjs, cobjs);
+	GROW(objs, nobjs, cobjs);
 	objs[nobjs++] = o;
 	o->loaded = true;
 	for (uint32_t i = 0; i < o->nsym; i++) {
@@ -982,7 +982,7 @@ static void load_member(int a, uint32_t off)
 	for (uint32_t i = 0; i < A->nloaded; i++)
 		if (A->loaded[i] == off)
 			return;
-	VIRBUILD_ARRAY_GROW(A->loaded, A->nloaded, A->cloaded);
+	GROW(A->loaded, A->nloaded, A->cloaded);
 	A->loaded[A->nloaded++] = off;
 	if (!vchecked_range(off, 60, A->n)) {
 		err("%s: bad member offset", A->name);
@@ -1016,7 +1016,7 @@ static void add_archive(const char *name, const uint8_t *p, size_t n)
 	size_t off = 8;
 	int a;
 
-	VIRBUILD_ARRAY_GROW(ars, nars, cars);
+	GROW(ars, nars, cars);
 	a = (int)nars++;
 	A = &ars[a];
 	memset(A, 0, sizeof *A);
@@ -1250,11 +1250,11 @@ static void mark_tgt(tgt t)
 		return;
 	if (t.kind == K_FUNCTION && t.idx < t.o->nfn && !t.o->fn[t.idx].live) {
 		t.o->fn[t.idx].live = true;
-		VIRBUILD_ARRAY_GROW(wl, nwl, cwl);
+		GROW(wl, nwl, cwl);
 		wl[nwl++] = (work){ t.o, t.idx, 0 };
 	} else if (t.kind == K_DATA && t.y && t.y->seg < t.o->nseg && !t.o->seg[t.y->seg].live) {
 		t.o->seg[t.y->seg].live = true;
-		VIRBUILD_ARRAY_GROW(wl, nwl, cwl);
+		GROW(wl, nwl, cwl);
 		wl[nwl++] = (work){ t.o, t.y->seg, 1 };
 	} else if (t.kind == K_GLOBAL && t.idx < t.o->ngl) {
 		t.o->gl[t.idx].live = true;
@@ -1338,7 +1338,7 @@ static uint32_t otype(span t)
 	for (uint32_t i = 0; i < notypes; i++)
 		if (span_eq(otypes[i], t))
 			return i;
-	VIRBUILD_ARRAY_GROW(otypes, notypes, cotypes);
+	GROW(otypes, notypes, cotypes);
 	otypes[notypes] = t;
 	return notypes++;
 }
@@ -1430,15 +1430,15 @@ static uint32_t slot_of(gsym *g, obj *o, uint32_t fidx)
 		if (g->out < 0 || (g->state == G_SYNTH && strcmp(g->name, "__wasm_call_ctors")))
 			return 0;	/* an undefined weak function: null (calls go to a stub that traps) */
 		out = g->out;
-		VIRBUILD_ARRAY_GROW(slot_func, nslots, cslot_func);
+		GROW(slot_func, nslots, cslot_func);
 		slot_func[nslots++] = (uint32_t)out;
 		return g->slot = (uint32_t)(opt.table_base + nslots - 1);
 	}
 	for (uint32_t i = 0; i < nlslots; i++)
 		if (lslots[i].o == o && lslots[i].f == fidx)
 			return lslots[i].slot;
-	VIRBUILD_ARRAY_GROW(lslots, nlslots, clslots);
-	VIRBUILD_ARRAY_GROW(slot_func, nslots, cslot_func);
+	GROW(lslots, nlslots, clslots);
+	GROW(slot_func, nslots, cslot_func);
 	slot_func[nslots++] = (uint32_t)o->fn[fidx].out;
 	lslots[nlslots] = (lslot){ o, fidx, (uint32_t)(opt.table_base + nslots - 1) };
 	return lslots[nlslots++].slot;
@@ -1641,7 +1641,7 @@ static int write_module(void)
 					continue;
 				}
 				if (allowed) {
-					VIRBUILD_ARRAY_GROW(fimps, nfi, cfi);
+					GROW(fimps, nfi, cfi);
 					fimps[nfi++] = g;
 				} else if (!g->strong_ref) {
 					g->state = G_SYNTH;	/* an undefined weak function: a stub that traps */
@@ -1658,7 +1658,7 @@ static int write_module(void)
 		gsym *c = gfind("__wasm_call_ctors", 17, false);
 
 		if (c && c->live && c->state == G_SYNTH) {
-			VIRBUILD_ARRAY_GROW(ofns, nof, cof);
+			GROW(ofns, nof, cof);
 			ofns[nof] = (struct ofn){ NULL, 0, c, otype((span){ t_void, 2 }) };
 			ctors = (int32_t)(nfi + nof++);
 			c->out = ctors;
@@ -1667,7 +1667,7 @@ static int write_module(void)
 	for (uint32_t k = 0; k < nobjs; k++)
 		for (uint32_t i = 0; i < objs[k]->nfn; i++)
 			if (objs[k]->fn[i].live) {
-				VIRBUILD_ARRAY_GROW(ofns, nof, cof);
+				GROW(ofns, nof, cof);
 				ofns[nof] = (struct ofn){ objs[k], i, NULL, 0 };
 				objs[k]->fn[i].out = (int32_t)(nfi + nof++);
 			}
@@ -1678,7 +1678,7 @@ static int write_module(void)
 			isym *y = &g->uo->sym[g->usi];
 			uint32_t ty = y->index < g->uo->nfimp ? g->uo->imp[g->uo->fimp[y->index]].type : 0;
 
-			VIRBUILD_ARRAY_GROW(ofns, nof, cof);
+			GROW(ofns, nof, cof);
 			ofns[nof] = (struct ofn){ NULL, 0, g, otype(g->uo->types[ty]) };
 			g->out = (int32_t)(nfi + nof++);
 		}
@@ -1687,18 +1687,18 @@ static int write_module(void)
 	for (uint32_t k = 0; k < nobjs; k++)
 		for (uint32_t i = 0; i < objs[k]->ntag; i++)
 			if (objs[k]->tag[i].live) {
-				VIRBUILD_ARRAY_GROW(otags, notag, cotag);
+				GROW(otags, notag, cotag);
 				otags[notag] = otype(objs[k]->types[objs[k]->tag[i].type]);
 				objs[k]->tag[i].out = (int32_t)notag++;
 			}
 	/* globals: __stack_pointer, then the objects' */
-	VIRBUILD_ARRAY_GROW(ogl, nog, cog);
+	GROW(ogl, nog, cog);
 	ogl[nog++] = (struct oglob){ W32 ? 0x7f : 0x7e, 1, { 0 }, 0, true };
 	sp_global = 0;
 	for (uint32_t k = 0; k < nobjs; k++)
 		for (uint32_t i = 0; i < objs[k]->ngl; i++)
 			if (objs[k]->gl[i].live) {
-				VIRBUILD_ARRAY_GROW(ogl, nog, cog);
+				GROW(ogl, nog, cog);
 				ogl[nog] = (struct oglob){ objs[k]->gl[i].type, objs[k]->gl[i].mut, objs[k]->gl[i].init, 0, false };
 				objs[k]->gl[i].out = (int32_t)(ngi + nog++);
 			}
@@ -1711,7 +1711,7 @@ static int write_module(void)
 			g->out = (int32_t)ngi + sp_global;
 		else if (!strcmp(g->name, "__tls_base") || !strcmp(g->name, "__tls_size") || !strcmp(g->name, "__tls_align") ||
 			 !strcmp(g->name, "__memory_base") || !strcmp(g->name, "__table_base")) {
-			VIRBUILD_ARRAY_GROW(ogl, nog, cog);
+			GROW(ogl, nog, cog);
 			ogl[nog] = (struct oglob){ W32 ? 0x7f : 0x7e, 0, { 0 }, 0, true };
 			g->out = (int32_t)(ngi + nog++);
 		} else {
@@ -1827,7 +1827,7 @@ static int write_module(void)
 				: !strcmp(g->name, "__tls_align") ? tls_align : !strcmp(g->name, "__table_base") ? opt.table_base : 0;
 	}
 	/* exports */
-	VIRBUILD_ARRAY_GROW(ex, nex, cex);
+	GROW(ex, nex, cex);
 	ex[nex++] = (oexp){ "memory", 2, 0 };
 	for (int pass = 0; pass < 2; pass++)
 		for (uint32_t i = 0; i < (pass ? opt.nexpi : opt.nexp); i++) {
@@ -1845,13 +1845,13 @@ static int write_module(void)
 					goto next_export;
 			if (g->state == G_SYNTH) {
 				if (g->kind == K_FUNCTION && g->out >= 0) {
-					VIRBUILD_ARRAY_GROW(ex, nex, cex);
+					GROW(ex, nex, cex);
 					ex[nex++] = (oexp){ g->name, 0, (uint32_t)g->out };
 				}
 				continue;
 			}
 			t = resolve(g->o, g->si);
-			VIRBUILD_ARRAY_GROW(ex, nex, cex);
+			GROW(ex, nex, cex);
 			if (t.kind == K_FUNCTION)
 				ex[nex++] = (oexp){ g->name, 0, (uint32_t)t.o->fn[t.idx].out };
 			else if (t.kind == K_GLOBAL)
@@ -1860,7 +1860,7 @@ static int write_module(void)
 				ex[nex++] = (oexp){ g->name, 4, (uint32_t)t.o->tag[t.idx].out };
 			else if (t.kind == K_DATA) {
 				/* a data symbol: an immutable global holding its address */
-				VIRBUILD_ARRAY_GROW(ogl, nog, cog);
+				GROW(ogl, nog, cog);
 				ogl[nog] = (struct oglob){ W32 ? 0x7f : 0x7e, 0, { 0 }, t.o->seg[t.y->seg].addr + t.y->off, true };
 				ex[nex++] = (oexp){ g->name, 3, ngi + nog++ };
 			}
@@ -1873,7 +1873,7 @@ static int write_module(void)
 		(void)g;
 	}
 	if (opt.export_table) {
-		VIRBUILD_ARRAY_GROW(ex, nex, cex);
+		GROW(ex, nex, cex);
 		ex[nex++] = (oexp){ "__indirect_function_table", 1, 0 };
 	}
 	/* synthetic data symbols asked for as exports (__start_em_js ...) */
@@ -1882,9 +1882,9 @@ static int write_module(void)
 		uint64_t a;
 
 		if (g && g->state == G_UNDEF && synth_data(g, &a)) {
-			VIRBUILD_ARRAY_GROW(ogl, nog, cog);
+			GROW(ogl, nog, cog);
 			ogl[nog] = (struct oglob){ W32 ? 0x7f : 0x7e, 0, { 0 }, a, true };
-			VIRBUILD_ARRAY_GROW(ex, nex, cex);
+			GROW(ex, nex, cex);
 			ex[nex++] = (oexp){ g->name, 3, ngi + nog++ };
 		}
 	}
@@ -2160,7 +2160,7 @@ static int write_module(void)
 
 static void add_list(const char ***v, uint32_t *n, uint32_t *c, const char *s)
 {
-	VIRBUILD_ARRAY_GROW(*v, *n, *c);
+	GROW(*v, *n, *c);
 	(*v)[(*n)++] = s;
 }
 

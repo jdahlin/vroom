@@ -2,7 +2,6 @@
 
 /* ---------------- output ---------------- */
 
-static uint8_t *shstrtab_buf;
 
 static void ld_section_name_table_build(void)
 {
@@ -10,7 +9,7 @@ static void ld_section_name_table_build(void)
 	size_t cap = 1;
 	for (uint32_t i = 0; i < ctx->layout.output_sections.n; i++)
 		cap += strlen(osecs.v[ctx->layout.output_sections.v[i]].name) + 1;
-	shstrtab_buf = ld_region_alloc(cap);
+	ctx->output.shstrtab = ld_region_alloc(cap);
 	size_t n = 1;
 	for (uint32_t i = 0; i < ctx->layout.output_sections.n; i++) {
 		ld_output_section *os = &osecs.v[ctx->layout.output_sections.v[i]];
@@ -25,16 +24,16 @@ static void ld_section_name_table_build(void)
 			os->nameoff = found;
 			continue;
 		}
-		memcpy(shstrtab_buf + n, os->name, l + 1);
+		memcpy(ctx->output.shstrtab + n, os->name, l + 1);
 		os->nameoff = n;
 		n += l + 1;
 	}
-	isecs.v[shstrtab_isec].size = n;
+	isecs.v[ctx->output.shstrtab_section].size = n;
 }
 
 static void ld_headers_write(void)
 {
-	elf_file_header *eh = (elf_file_header *)out;
+	elf_file_header *eh = (elf_file_header *)ctx->output.image;
 	memcpy(eh->e_ident, "\177ELF\2\1\1", 7);
 	eh->e_type = opt.relocatable ? 1 : opt.shared ? 3 : 2;
 	eh->e_machine = x86_ld ? 62 : 183;
@@ -53,10 +52,10 @@ static void ld_headers_write(void)
 	eh->e_phnum = ctx->layout.program_headers.n;
 	eh->e_shentsize = sizeof(elf_section_header);
 	eh->e_shnum = ctx->layout.output_sections.n + 1;
-	eh->e_shstrndx = osecs.v[ld_input_section_output_section(shstrtab_isec)].shidx;
+	eh->e_shstrndx = osecs.v[ld_input_section_output_section(ctx->output.shstrtab_section)].shidx;
 	if (ctx->layout.program_headers.n)
-		memcpy(out + sizeof(elf_file_header), ctx->layout.program_headers.v, ctx->layout.program_headers.n * sizeof(elf_program_header));
-	elf_section_header *sh = (elf_section_header *)(out + ctx->layout.section_header_offset);
+		memcpy(ctx->output.image + sizeof(elf_file_header), ctx->layout.program_headers.v, ctx->layout.program_headers.n * sizeof(elf_program_header));
+	elf_section_header *sh = (elf_section_header *)(ctx->output.image + ctx->layout.section_header_offset);
 	for (uint32_t i = 0; i < ctx->layout.output_sections.n; i++) {
 		ld_output_section *os = &osecs.v[ctx->layout.output_sections.v[i]];
 		elf_section_header *d = &sh[i + 1];
@@ -76,17 +75,17 @@ static void ld_headers_write(void)
 static void ld_synthetic_sections_write(void)
 {
 	/* .rela.dyn, .symtab and .strtab were written in place */
-	ld_input_section *is = &isecs.v[shstrtab_isec];
-	memcpy(out + osecs.v[ld_input_section_output_section(shstrtab_isec)].offset + is->off, shstrtab_buf, is->size);
+	ld_input_section *is = &isecs.v[ctx->output.shstrtab_section];
+	memcpy(ctx->output.image + osecs.v[ld_input_section_output_section(ctx->output.shstrtab_section)].offset + is->off, ctx->output.shstrtab, is->size);
 }
 
 /* --build-id: lld's "sha1"/"tree" ids are a BLAKE3 tree over 1 MiB chunks */
 static void ld_build_id_write(void)
 {
-	if (buildid_isec == LD_NONE)
+	if (ctx->output.build_id_section == LD_NONE)
 		return;
-	ld_input_section *is = &isecs.v[buildid_isec];
-	uint8_t *dst = out + osecs.v[ld_input_section_output_section(buildid_isec)].offset + is->off + 16;
+	ld_input_section *is = &isecs.v[ctx->output.build_id_section];
+	uint8_t *dst = ctx->output.image + osecs.v[ld_input_section_output_section(ctx->output.build_id_section)].offset + is->off + 16;
 	size_t hl = is->size - 16;
 	size_t nchunks = (ctx->layout.file_size + (1u << 20) - 1) >> 20;
 	uint8_t *hashes = ld_region_alloc(nchunks * 20 + 32);
@@ -98,7 +97,7 @@ static void ld_build_id_write(void)
 		uint8_t *h8 = ld_region_alloc(nchunks * 8);
 		for (size_t i = 0; i < nchunks; i++) {
 			uint64_t b = (uint64_t)i << 20, n = ctx->layout.file_size - b < (1u << 20) ? ctx->layout.file_size - b : (1u << 20);
-			uint64_t x = vdigest_xxh3(out + b, n);
+			uint64_t x = vdigest_xxh3(ctx->output.image + b, n);
 			memcpy(h8 + i * 8, &x, 8);
 		}
 		uint64_t x = vdigest_xxh3(h8, nchunks * 8);

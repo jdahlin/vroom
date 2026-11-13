@@ -379,7 +379,7 @@ VPRIV int x64_emit(as_context *a, XForm *f)
 		int R = !(rex & 4), X = !(rex & 2), B = !(rex & 1), W = !!(rex & 8);
 		int mm = f->nop == 3 ? (f->op[1] == 0x38 ? 2 : 3) : 1;
 		int pp = f->opsz16 ? 1 : f->rep == 0xf3 ? 2 : f->rep == 0xf2 ? 3 : 0;
-		int tail = (~f->vvvv & 15) << 3 | (f->a64_vir_context ? 4 : 0) | pp;
+		int tail = (~f->vvvv & 15) << 3 | (f->vl ? 4 : 0) | pp;
 
 		if (X && B && !W && mm == 1) {
 			eb(&x, 0xc5);

@@ -146,7 +146,7 @@ def main():
             sys.exit(f'vcc-abi: --target {t}: wasm64, wasm32 or x86_64')
         if t == 'x86_64':
             global X86
-            spec = importlib.util.spec_from_file_location('x64_vir_context', f'{B}/vcc-x86.py')
+            spec = importlib.util.spec_from_file_location('vx', f'{B}/vcc-x86.py')
             X86 = importlib.util.module_from_spec(spec); spec.loader.exec_module(X86)
             X86.rt_obj()
         else:

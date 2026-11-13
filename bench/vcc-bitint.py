@@ -77,16 +77,16 @@ def main():
         spec=importlib.util.spec_from_file_location(name,bench/file)
         m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m);return m
     ct=module('ct','vcc-ctests.py')
-    x64_vir_context=module('x64_vir_context','vcc-x86.py') if args.target=='x86_64' else None
-    (x64_vir_context.rt_obj if x64_vir_context else ct.build_rt)()
+    vx=module('vx','vcc-x86.py') if args.target=='x86_64' else None
+    (vx.rt_obj if vx else ct.build_rt)()
     def check(bits):
         wd=args.output/str(bits);wd.mkdir(exist_ok=True)
-        main=wd/'main.c';main.write_text(caller(bits));base=x64_vir_context.BASE if x64_vir_context else ct.BASE
+        main=wd/'main.c';main.write_text(caller(bits));base=vx.BASE if vx else ct.BASE
         caller_obj=wd/'main.o'
         rc,out,err=ct.sh([ct.CL,*base,'-c',str(main),'-o',str(caller_obj)])
         if rc:return dict(width=bits,result='fail',stage='caller',message=err.decode(errors='replace'))
         runs=[]
-        for compiler in (['vcc','clang'] if x64_vir_context else ['vcc']):
+        for compiler in (['vcc','clang'] if vx else ['vcc']):
             obj=wd/(compiler+'.o');exe=ct.VPP if compiler=='vcc' else ct.CL
             rc,out,err=ct.sh([exe,*base,'-DWIDTH='+str(bits),'-c',str(bench.parent/'src/test/bitint/operations.c'),'-o',str(obj)])
             (wd/(compiler+'.log')).write_bytes(out+err)
@@ -95,8 +95,8 @@ def main():
             rc,out,err=ct.sh([exe,*base,'-c',str(bench.parent/'src/test/bitint/counts.c'),'-o',str(counts)])
             (wd/(compiler+'-counts.log')).write_bytes(out+err)
             if rc:runs.append(dict(compiler=compiler,stage='counts',exit=rc,message=err.decode(errors='replace')));continue
-            elf=str(wd/(compiler+'.elf'));rc,err=(x64_vir_context.link if x64_vir_context else ct.link)([str(caller_obj),str(obj),str(counts)],elf)
-            if not rc:rc,out=(x64_vir_context.run if x64_vir_context else ct.qemu)(elf)
+            elf=str(wd/(compiler+'.elf'));rc,err=(vx.link if vx else ct.link)([str(caller_obj),str(obj),str(counts)],elf)
+            if not rc:rc,out=(vx.run if vx else ct.qemu)(elf)
             else:out=err
             runs.append(dict(compiler=compiler,stage='run',exit=rc,output=out))
         return dict(width=bits,result='pass' if all(r['exit']==0 for r in runs) else 'fail',runs=runs)

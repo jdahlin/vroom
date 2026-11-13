@@ -2,13 +2,6 @@
 
 /* ---------------- symbol table ---------------- */
 
-typedef struct { uint32_t g; uint32_t idx; uint64_t str; bool local; } ld_global_symbol_output;
-static ld_global_symbol_output *gouts;
-static uint32_t ngouts;
-static uint8_t *symtab_buf, *strtab_buf;	/* in the output image (ld_symbol_table_fill) */
-static uint64_t thunk_sym0, thunk_str0;		/* first thunk symbol and its string */
-static uint64_t nsymout, strsize;
-static uint32_t nlocal_out;
 
 static void ld_global_symbol_record_store(elf_symbol *d, uint64_t stroff, uint32_t g, bool local)
 {
@@ -30,7 +23,7 @@ static void ld_global_symbol_record_store(elf_symbol *d, uint64_t stroff, uint32
 		size = 0;
 	}
 	uint64_t so = stroff;
-	ld_symbol_record_store(d, strtab_buf, &so, ld_global_name(g), (uint8_t)(bind << 4 | s->type), s->vis, shndx, val, size);
+	ld_symbol_record_store(d, ctx->symbol_table.strtab, &so, ld_global_name(g), (uint8_t)(bind << 4 | s->type), s->vis, shndx, val, size);
 }
 
 static void ld_local_symbols_write(void *arg, size_t i)
@@ -39,7 +32,7 @@ static void ld_local_symbols_write(void *arg, size_t i)
 	ld_object *o = objs.v[i];
 	if (!o->buf || !o->nloc)
 		return;
-	elf_symbol *d = (elf_symbol *)symtab_buf + o->loc0;
+	elf_symbol *d = (elf_symbol *)ctx->symbol_table.symtab + o->loc0;
 	uint64_t so = o->str0;
 	for (uint32_t k = 0; k < o->nloc; k++) {
 		const elf_symbol *y = &o->sym[o->kept[k][0]];
@@ -54,7 +47,7 @@ static void ld_local_symbols_write(void *arg, size_t i)
 			shndx = ld_symbol_section_index_of_input_section(sec);
 			val = ld_input_section_address(sec, y->st_value);
 		}
-		memcpy(strtab_buf + so, o->str + y->st_name, l + 1);
+		memcpy(ctx->symbol_table.strtab + so, o->str + y->st_name, l + 1);
 		d->st_name = (uint32_t)so;
 		so += l + 1;
 		d->st_info = y->st_info;
@@ -69,9 +62,9 @@ static void ld_local_symbols_write(void *arg, size_t i)
 static void ld_global_symbols_write(void *arg, size_t c)
 {
 	(void)arg;
-	uint32_t b = c * 4096, e = b + 4096 < ngouts ? b + 4096 : ngouts;
+	uint32_t b = c * 4096, e = b + 4096 < ctx->symbol_table.global_count ? b + 4096 : ctx->symbol_table.global_count;
 	for (uint32_t i = b; i < e; i++)
-		ld_global_symbol_record_store((elf_symbol *)symtab_buf + gouts[i].idx, gouts[i].str, gouts[i].g, gouts[i].local);
+		ld_global_symbol_record_store((elf_symbol *)ctx->symbol_table.symtab + ctx->symbol_table.globals[i].idx, ctx->symbol_table.globals[i].str, ctx->symbol_table.globals[i].g, ctx->symbol_table.globals[i].local);
 }
 
 static bool ld_global_symbol_is_in_symbol_table(uint32_t g)
@@ -131,8 +124,8 @@ static void ld_symbol_table_build(void)
 	uint32_t *grp_next = ld_region_alloc((objs.n + 1) * sizeof(uint32_t));
 	for (uint32_t i = 0; i < objs.n; i++)
 		grp_next[i] = LD_NONE;
-	gouts = ld_region_alloc((size_t)nglob * sizeof(ld_global_symbol_output));
-	ngouts = 0;
+	ctx->symbol_table.globals = ld_region_alloc((size_t)nglob * sizeof(ld_global_symbol_output));
+	ctx->symbol_table.global_count = 0;
 	uint64_t gstr = str;
 	/* first pass: place hidden symbols */
 	for (uint32_t i = 0; i < gorder.n; i++) {
@@ -152,12 +145,12 @@ static void ld_symbol_table_build(void)
 		} else {
 			at = idx++;
 		}
-		gouts[ngouts++] = (ld_global_symbol_output){.g = g, .idx = at, .local = true};
+		ctx->symbol_table.globals[ctx->symbol_table.global_count++] = (ld_global_symbol_output){.g = g, .idx = at, .local = true};
 	}
 	/* thunk symbols */
 	uint64_t thunk0 = idx;
-	idx += 2 * (uint64_t)thunks.n;
-	nlocal_out = idx;
+	idx += 2 * (uint64_t)ctx->relocations.thunks.n;
+	ctx->symbol_table.local_count = idx;
 	/* globals, and string offsets in insertion order */
 	uint32_t h = 0;
 	for (uint32_t i = 0; i < gorder.n; i++) {
@@ -167,37 +160,37 @@ static void ld_symbol_table_build(void)
 		uint64_t so = gstr;
 		gstr += strlen(ld_global_name(g)) + 1;
 		if (ld_global_symbol_is_local(g)) {
-			gouts[h++].str = so;	/* same order as the first pass */
+			ctx->symbol_table.globals[h++].str = so;	/* same order as the first pass */
 			continue;
 		}
-		gouts[ngouts++] = (ld_global_symbol_output){.g = g, .idx = idx++, .str = so};
+		ctx->symbol_table.globals[ctx->symbol_table.global_count++] = (ld_global_symbol_output){.g = g, .idx = idx++, .str = so};
 	}
-	nsymout = idx;
+	ctx->symbol_table.symbol_count = idx;
 	uint64_t tstr = gstr;
-	for (uint32_t t = 0; t < thunks.n; t++)
-		tstr += strlen(thunks.v[t].name) + 1 + 3;
-	strsize = tstr;
-	ld_input_section *st = &isecs.v[symtab_isec], *ss = &isecs.v[strtab_isec];
-	st->size = nsymout * sizeof(elf_symbol);
-	ss->size = strsize;
-	thunk_sym0 = thunk0;
-	thunk_str0 = gstr;
+	for (uint32_t t = 0; t < ctx->relocations.thunks.n; t++)
+		tstr += strlen(ctx->relocations.thunks.v[t].name) + 1 + 3;
+	ctx->symbol_table.string_size = tstr;
+	ld_input_section *st = &isecs.v[ctx->output.symtab_section], *ss = &isecs.v[ctx->output.strtab_section];
+	st->size = ctx->symbol_table.symbol_count * sizeof(elf_symbol);
+	ss->size = ctx->symbol_table.string_size;
+	ctx->symbol_table.first_thunk_symbol = thunk0;
+	ctx->symbol_table.first_thunk_string = gstr;
 	(void)nhid;
 }
 
 /* .symtab and .strtab are written in place in the output image */
 static void ld_symbol_table_fill(void)
 {
-	symtab_buf = out + osecs.v[ld_input_section_output_section(symtab_isec)].offset + isecs.v[symtab_isec].off;
-	strtab_buf = out + osecs.v[ld_input_section_output_section(strtab_isec)].offset + isecs.v[strtab_isec].off;
-	uint64_t so = thunk_str0;
-	for (uint32_t t = 0; t < thunks.n; t++) {
-		a64_ld_thunk *th = &thunks.v[t];
-		elf_symbol *d = (elf_symbol *)(void *)symtab_buf + thunk_sym0 + 2 * t;
+	ctx->symbol_table.symtab = ctx->output.image + osecs.v[ld_input_section_output_section(ctx->output.symtab_section)].offset + isecs.v[ctx->output.symtab_section].off;
+	ctx->symbol_table.strtab = ctx->output.image + osecs.v[ld_input_section_output_section(ctx->output.strtab_section)].offset + isecs.v[ctx->output.strtab_section].off;
+	uint64_t so = ctx->symbol_table.first_thunk_string;
+	for (uint32_t t = 0; t < ctx->relocations.thunks.n; t++) {
+		a64_ld_thunk *th = &ctx->relocations.thunks.v[t];
+		elf_symbol *d = (elf_symbol *)(void *)ctx->symbol_table.symtab + ctx->symbol_table.first_thunk_symbol + 2 * t;
 		uint16_t shndx = ld_symbol_section_index_of_input_section(th->tsec);
-		ld_symbol_record_store(d, strtab_buf, &so, th->name, STB_LOCAL << 4 | STT_FUNC, 0, shndx, a64_ld_thunk_address(t), th->size);
-		ld_symbol_record_store(d + 1, strtab_buf, &so, "$x", STB_LOCAL << 4 | STT_NOTYPE, 0, shndx, a64_ld_thunk_address(t), 0);
+		ld_symbol_record_store(d, ctx->symbol_table.strtab, &so, th->name, STB_LOCAL << 4 | STT_FUNC, 0, shndx, a64_ld_thunk_address(t), th->size);
+		ld_symbol_record_store(d + 1, ctx->symbol_table.strtab, &so, "$x", STB_LOCAL << 4 | STT_NOTYPE, 0, shndx, a64_ld_thunk_address(t), 0);
 	}
 	ld_parallel_for(objs.n, ld_local_symbols_write, NULL);
-	ld_parallel_for((ngouts + 4095) / 4096, ld_global_symbols_write, NULL);
+	ld_parallel_for((ctx->symbol_table.global_count + 4095) / 4096, ld_global_symbols_write, NULL);
 }

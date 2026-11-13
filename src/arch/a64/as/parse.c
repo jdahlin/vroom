@@ -270,7 +270,7 @@ static int parse_mem(as_context *a, const char **pp, const char *e, A64Op *op)
 			if (parse_imm(a, &p, e, &im)) return -1;
 			op->imm = im.imm; op->v = im.v; op->hassym = im.hassym; op->mod = im.mod; op->hasamt = 1;
 			p = as_whitespace_skip(p, e);
-			if (p < e && *p == ',') {	/* SVE: #imm, mul a64_vir_context */
+			if (p < e && *p == ',') {	/* SVE: #imm, mul vl */
 				const char *q = as_whitespace_skip(p + 1, e);
 				if (e - q >= 3 && as_text_equals_ignore_case(q, 3, "mul")) {
 					q = as_whitespace_skip(q + 3, e);
@@ -404,7 +404,7 @@ VPRIV int a64_as_instruction_assemble(as_context *a, const char *p, const char *
 	uint32_t w;
 	A64Fix fx; fx.type = 0;
 	p = as_whitespace_skip(p, e);
-	/* SME ldr/str za[Wv, #imm], [Xn{, #imm, mul a64_vir_context}] */
+	/* SME ldr/str za[Wv, #imm], [Xn{, #imm, mul vl}] */
 	if (mlen == 3 && (!memcmp(mn, "ldr", 3) || !memcmp(mn, "str", 3)) && e - p > 3 && (p[0] | 32) == 'z' && (p[1] | 32) == 'a' && p[2] == '[') {
 		char buf[96], tail[16] = "";
 		unsigned v, i1, n, i2 = 0;

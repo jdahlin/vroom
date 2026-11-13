@@ -1,5 +1,5 @@
 /* Two compares joined by && or || into one condition (VIR at -O2: the builder's
-   virbuild_conditions_merge, lowered to cmp + ccmp/ccmn; by default where the result is a value,
+   vw_condmerge, lowered to cmp + ccmp/ccmn; by default where the result is a value,
    VCC_CCMP=all also for plain branches).  Every condition code on both sides of and
    and or, 32 and 64 bits, signed and unsigned, immediates ccmp takes (0..31), ccmn
    takes (-1..-31) and neither (32, -32, large), a constant on the left, chains of
