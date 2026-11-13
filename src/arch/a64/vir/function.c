@@ -326,8 +326,8 @@ VPRIV bool a64_vir_function_lower(ecx *e, uint32_t s, const char **why)
 		L.context = e, L.function = f;
 		a64_vir_thread_state_instance.low32 = a64_vir_array_grow(a64_vir_thread_state_instance.low32, &a64_vir_thread_state_instance.low32_capacity, f->insn_count + 1, 1);
 		a64_vir_thread_state_instance.needs_fallthrough = a64_vir_array_grow(a64_vir_thread_state_instance.needs_fallthrough, &a64_vir_thread_state_instance.fallthrough_capacity, f->insn_count + 1, 1);
-		L.ret32 = KIND(c, ft->base) != TY_VOID && is_integer(c, ft->base) && tsize(c, ft->base) == 4;
-		L.tail = !(ft->flags & TF_VARIADIC) && em_tail_caller_ok(e, s) && !a64_vir_tail_call_reason(&L, a64_vir_thread_state_instance.low32);
+		L.ret32 = KIND(c, ft->base) != AST_TYPE_VOID && is_integer(c, ft->base) && tsize(c, ft->base) == 4;
+		L.tail = !(ft->flags & AST_TYPE_FLAG_VARIADIC) && em_tail_caller_ok(e, s) && !a64_vir_tail_call_reason(&L, a64_vir_thread_state_instance.low32);
 		if (on && !e->E->noopt && !(e->E->o->cfi && !DARWIN(c))) {
 			memset(a64_vir_thread_state_instance.needs_fallthrough, 0, f->insn_count);
 			for (uint32_t b = 0; L.tail && b < f->block_count; b++)
@@ -379,8 +379,8 @@ VPRIV bool a64_vir_function_lower(ecx *e, uint32_t s, const char **why)
 		.block_label = L.labels, .optimize = !e->E->noopt,
 		.operand_value = L.operand_values, .operand_reg = L.operand_registers, .max_operands = A64_VIR_OPERAND_MAX, .skip_at = &L.skip,
 	};
-	L.ret32 = KIND(c, ft->base) != TY_VOID && is_integer(c, ft->base) && tsize(c, ft->base) == 4;
-	L.tail = !(ft->flags & TF_VARIADIC) && em_tail_caller_ok(e, s) && !a64_vir_tail_call_reason(&L, a64_vir_thread_state_instance.low32);	/* (lo32: scratch until it is filled) */
+	L.ret32 = KIND(c, ft->base) != AST_TYPE_VOID && is_integer(c, ft->base) && tsize(c, ft->base) == 4;
+	L.tail = !(ft->flags & AST_TYPE_FLAG_VARIADIC) && em_tail_caller_ok(e, s) && !a64_vir_tail_call_reason(&L, a64_vir_thread_state_instance.low32);	/* (lo32: scratch until it is filled) */
 	vir_uses_count(f, L.uses);
 	vir_demand_low32_compute(f, L.ret32, L.low32);
 
@@ -404,7 +404,7 @@ VPRIV bool a64_vir_function_lower(ecx *e, uint32_t s, const char **why)
 	e->top = s;
 	e->asmk = 0;
 	e->inline_depth = 0;
-	e->vararg = (ft->flags & TF_VARIADIC) != 0;
+	e->vararg = (ft->flags & AST_TYPE_FLAG_VARIADIC) != 0;
 	e->nlr = 0;
 	e->f = NULL;
 	e->vfail = NULL;

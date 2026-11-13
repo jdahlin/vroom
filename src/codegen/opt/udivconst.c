@@ -53,7 +53,7 @@ VPRIV bool em_udivconst64(uint64_t d, bool remainder, em_udivconst_recipe *r)
 	return true;
 }
 
-VPRIV bool em_udivconst(cc *c, qty ty, int op, i128 rhs, em_udivconst_recipe *r)
+VPRIV bool em_udivconst(cc *c, ast_qualified_type ty, int op, i128 rhs, em_udivconst_recipe *r)
 {
 	if ((op != LEX_TOKEN_SLASH && op != LEX_TOKEN_PERCENT) || !is_integer(c, ty) ||
 	    is_signed(c, ty) || em_bitint(c, ty))

@@ -4,22 +4,22 @@
 /* ---------------- literals ---------------- */
 
 /* the type of an integer literal (C11 6.4.4.1p5) */
-static inline qty cc_literal_integer_type(cc *c, u128 v, int l, bool u, bool dec)
+static inline ast_qualified_type cc_literal_integer_type(cc *c, u128 v, int l, bool u, bool dec)
 {
 	/* long: 64 bits, or 32 under ILP32 */
 	u128 lmax = CC_ILP32(c) ? INT32_MAX : INT64_MAX, ulmax = CC_ILP32(c) ? UINT32_MAX : UINT64_MAX;
 
 	if (l == 0 && !u && v <= INT32_MAX)
-		return cc_type_basic(TY_INT);
+		return cc_type_basic(AST_TYPE_INT);
 	if (l == 0 && (u || !dec) && v <= UINT32_MAX)
-		return cc_type_basic(TY_UINT);
+		return cc_type_basic(AST_TYPE_UNSIGNED_INT);
 	if (l <= 1 && !u && v <= lmax)
-		return cc_type_basic(TY_LONG);
+		return cc_type_basic(AST_TYPE_LONG);
 	if (l <= 1 && (u || !dec) && v <= ulmax)
-		return cc_type_basic(TY_ULONG);
+		return cc_type_basic(AST_TYPE_UNSIGNED_LONG);
 	if (!u && v <= INT64_MAX)
-		return cc_type_basic(TY_LLONG);
-	return l <= 1 && !CC_ILP32(c) ? cc_type_basic(TY_ULONG) : cc_type_basic(TY_ULLONG);
+		return cc_type_basic(AST_TYPE_LONG_LONG);
+	return l <= 1 && !CC_ILP32(c) ? cc_type_basic(AST_TYPE_UNSIGNED_LONG) : cc_type_basic(AST_TYPE_UNSIGNED_LONG_LONG);
 }
 
 static uint32_t cc_literal_number_parse_text(cc *c, const ptok *t, const char *s, size_t n);
@@ -46,7 +46,7 @@ static __attribute__((noinline)) uint32_t cc_literal_number_parse_slow(cc *c, co
 }
 
 /* -Wliteral-range: a constant that rounds to infinity, or to zero although a digit is not 0 */
-static __attribute__((noinline, cold)) void cc_literal_range_warn(cc *c, const ptok *t, const char *s, size_t k, qty ty, bool big)
+static __attribute__((noinline, cold)) void cc_literal_range_warn(cc *c, const ptok *t, const char *s, size_t k, ast_qualified_type ty, bool big)
 {
 	bool hex = k > 1 && s[0] == '0' && (s[1] | 32) == 'x';
 	int kd = AST_TYPE_KIND(c, ty);
@@ -63,9 +63,9 @@ static __attribute__((noinline, cold)) void cc_literal_range_warn(cc *c, const p
 		if (!nz)
 			return;
 	}
-	if (kd == TY_FLOAT16)
+	if (kd == AST_TYPE_FLOAT16)
 		lim = big ? "6.5504E+4" : "5.96046E-8";
-	else if (kd == TY_FLOAT)
+	else if (kd == AST_TYPE_FLOAT)
 		lim = big ? "3.40282347E+38" : "1.40129846E-45";
 	else if (q)
 		lim = big ? "1.18973149535723176508575932662800702E+4932" : "6.47517511943802511092443895822764655E-4966";
@@ -76,7 +76,7 @@ static __attribute__((noinline, cold)) void cc_literal_range_warn(cc *c, const p
 	if (!d)
 		return;
 	diag_record_label_add(c->p, d, t->loc, pp_token_end_find(c->p, t->loc), NULL);
-	if (kd == TY_LDOUBLE && !q) {	/* a constant binary128 holds: written for Arm Linux */
+	if (kd == AST_TYPE_LONG_DOUBLE && !q) {	/* a constant binary128 holds: written for Arm Linux */
 		u128 v = vsoftfloat_parse(s, k);
 		unsigned ex = (unsigned)(v >> 112) & 0x7fff;
 
@@ -108,13 +108,13 @@ static uint32_t cc_literal_number_parse_text(cc *c, const ptok *t, const char *s
 	}
 	if (isf) {
 		size_t k = n;
-		qty ty = cc_type_basic(TY_DOUBLE);
+		ast_qualified_type ty = cc_type_basic(AST_TYPE_DOUBLE);
 		double d;
 
 		if (k >= 3 && (s[k - 3] | 32) == 'f' && s[k - 2] == '1' && s[k - 1] == '6') {
 			uint16_t h = vsoftfloat_to_half(vsoftfloat_parse(s, k - 3));
 
-			ty = cc_type_basic(TY_FLOAT16);
+			ty = cc_type_basic(AST_TYPE_FLOAT16);
 			if ((h & 0x7fff) == 0x7c00 || !(h & 0x7fff))
 				cc_literal_range_warn(c, t, s, k - 3, ty, (h & 0x7fff) == 0x7c00);
 			return cc_node_float_new(c, h_to_d(h), ty, t->loc);
@@ -123,11 +123,11 @@ static uint32_t cc_literal_number_parse_text(cc *c, const ptok *t, const char *s
 				 s[k - 1] == 'q' || s[k - 1] == 'Q'))
 			k--;
 		if (k < n && (s[k] == 'f' || s[k] == 'F'))
-			ty = cc_type_basic(TY_FLOAT);
+			ty = cc_type_basic(AST_TYPE_FLOAT);
 		else if (k < n && (s[k] == 'q' || s[k] == 'Q'))	/* __float128 (x86-64; binary128 long double elsewhere) */
-			ty = cc_type_basic(c->o->target == PP_LINUX_X86_64 ? TY_FLOAT128 : TY_LDOUBLE);
+			ty = cc_type_basic(c->o->target == PP_LINUX_X86_64 ? AST_TYPE_FLOAT128 : AST_TYPE_LONG_DOUBLE);
 		else if (k < n)
-			ty = cc_type_basic(TY_LDOUBLE);
+			ty = cc_type_basic(AST_TYPE_LONG_DOUBLE);
 		if (k >= sizeof(buf))
 			k = sizeof(buf) - 1;
 		if (cc_type_is_float128(c, ty)) {
@@ -140,7 +140,7 @@ static uint32_t cc_literal_number_parse_text(cc *c, const ptok *t, const char *s
 		}
 		memcpy(buf, s, k);
 		buf[k] = 0;
-		d = AST_TYPE_KIND(c, ty) == TY_FLOAT ? (double)strtof(buf, NULL) : strtod(buf, NULL);	/* one rounding */
+		d = AST_TYPE_KIND(c, ty) == AST_TYPE_FLOAT ? (double)strtof(buf, NULL) : strtod(buf, NULL);	/* one rounding */
 		if (unlikely(isinf(d) || d == 0))
 			cc_literal_range_warn(c, t, s, k, ty, isinf(d));
 		return cc_node_float_new(c, d, ty, t->loc);
@@ -212,7 +212,7 @@ static uint32_t cc_literal_number_parse_text(cc *c, const ptok *t, const char *s
 	{
 		uint32_t r = cc_node_integer_new(c, (i128)v, cc_literal_integer_type(c, v, l, u, base == 10), t->loc);
 
-		AST_NODE(r)->aux = base != 10 ? NUM_RADIX : 0;	/* spelled with a leading 0 (-Wconstant-conversion) */
+		AST_NODE(r)->aux = base != 10 ? AST_NUMBER_RADIX : 0;	/* spelled with a leading 0 (-Wconstant-conversion) */
 		return r;
 	}
 }
@@ -266,7 +266,7 @@ CC_PRIVATE uint32_t cc_literal_number_parse(cc *c, const ptok *t)
 	{
 		uint32_t r = cc_node_integer_new(c, (i128)v, cc_literal_integer_type(c, v, l, u, dec), t->loc);
 
-		AST_NODE(r)->aux = dec ? 0 : NUM_RADIX;	/* spelled with a leading 0 (-Wconstant-conversion) */
+		AST_NODE(r)->aux = dec ? 0 : AST_NUMBER_RADIX;	/* spelled with a leading 0 (-Wconstant-conversion) */
 		return r;
 	}
 }
@@ -380,7 +380,7 @@ static size_t cc_literal_utf8_encode(uint32_t cp, char *o)
 
 CC_PRIVATE bool cc_token_kind_is_string(int k) { return k >= LEX_TOKEN_STRING && k <= LEX_TOKEN_UTF32_STRING; }
 
-/* adjacent string literals -> one N_STR of type char[AST_NODE] (or wide) */
+/* adjacent string literals -> one AST_NODE_STRING of type char[AST_NODE] (or wide) */
 CC_PRIVATE uint32_t cc_literal_string_parse(cc *c)
 {
 	uint32_t loc = tok(c)->loc;
@@ -491,15 +491,15 @@ CC_PRIVATE uint32_t cc_literal_string_parse(cc *c)
 	{
 		char *keep = cc_heap_allocate(c, n);
 		uint32_t si = c->nstr++;
-		qty et;
+		ast_qualified_type et;
 
 		c->strs[si] = (cstr){ keep, (uint32_t)(n / (size_t)esz), (uint8_t)esz, (uint8_t)kind };
-		et = esz == 1 ? cc_type_basic(kind == LEX_TOKEN_UTF8_STRING && cc_keyword_map == cc_keyword_map_c23 ? TY_UCHAR : TY_CHAR) : kind == LEX_TOKEN_WIDE_STRING ? c->t_wchar : kind == LEX_TOKEN_UTF16_STRING ? c->t_char16 : c->t_char32;
+		et = esz == 1 ? cc_type_basic(kind == LEX_TOKEN_UTF8_STRING && cc_keyword_map == cc_keyword_map_c23 ? AST_TYPE_UNSIGNED_CHAR : AST_TYPE_CHAR) : kind == LEX_TOKEN_WIDE_STRING ? c->t_wchar : kind == LEX_TOKEN_UTF16_STRING ? c->t_char16 : c->t_char32;
 		{
-			uint32_t r = cc_node_new(c, N_STR, cc_type_array(c, et, n / (size_t)esz, 0), loc);
+			uint32_t r = cc_node_new(c, AST_NODE_STRING, cc_type_array(c, et, n / (size_t)esz, 0), loc);
 
 			c->nodes[r].a = si;
-			c->nodes[r].flags = NF_LVALUE;
+			c->nodes[r].flags = AST_NODE_FLAG_LVALUE;
 			return r;
 		}
 	}
@@ -514,7 +514,7 @@ CC_PRIVATE uint32_t cc_literal_character_build(cc *c)
 	int kind = t->kind;
 	i128 v = 0;
 	int nch = 0;
-	qty ty = cc_type_basic(TY_INT);
+	ast_qualified_type ty = cc_type_basic(AST_TYPE_INT);
 	uint32_t loc;
 
 	while (*s != '\'')
@@ -578,8 +578,8 @@ CC_PRIVATE uint32_t cc_literal_character_build(cc *c)
 	} else if (kind == LEX_TOKEN_UTF32_CHARACTER) {
 		ty = c->t_char32;
 	} else if (kind == LEX_TOKEN_UTF8_CHARACTER) {
-		ty = c->o->unsigned_char ? cc_type_basic(TY_UCHAR) : cc_type_basic(TY_CHAR);
-		ty = cc_type_basic(TY_UCHAR);
+		ty = c->o->unsigned_char ? cc_type_basic(AST_TYPE_UNSIGNED_CHAR) : cc_type_basic(AST_TYPE_CHAR);
+		ty = cc_type_basic(AST_TYPE_UNSIGNED_CHAR);
 	}
 	loc = t->loc;	/* (t is the next token after next()) */
 	next(c);

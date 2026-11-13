@@ -77,19 +77,19 @@ int (*pp_builtin_known)(const char *);
 bool cc_library_builtin_is_known(const char *name) { (void)name; return false; }
 int main(void) {
  unsigned count = 0;
- for (int i = 0; cc_builtin_name(i); i++) {
-  const char *s = cc_builtin_name(i);
-  int want = !strcmp(s,"__builtin_memcpy") ? CC_LIB_MEMCPY :
-             !strcmp(s,"__builtin_memmove") ? CC_LIB_MEMMOVE :
-             !strcmp(s,"__builtin_memset") ? CC_LIB_MEMSET :
-             !strcmp(s,"__builtin_strcmp") ? CC_LIB_STRCMP :
-             !strcmp(s,"__builtin_fabsl") ? CC_LIB_FABSL :
+ for (int i = 0; cc_builtin_name_get(i); i++) {
+  const char *s = cc_builtin_name_get(i);
+  int want = !strcmp(s,"__builtin_memcpy") ? CC_LIBRARY_KIND_MEMCPY :
+             !strcmp(s,"__builtin_memmove") ? CC_LIBRARY_KIND_MEMMOVE :
+             !strcmp(s,"__builtin_memset") ? CC_LIBRARY_KIND_MEMSET :
+             !strcmp(s,"__builtin_strcmp") ? CC_LIBRARY_KIND_STRCMP :
+             !strcmp(s,"__builtin_fabsl") ? CC_LIBRARY_KIND_FABSL :
              !strcmp(s,"__builtin___memcpy_chk") || !strcmp(s,"__builtin___memmove_chk") ||
              !strcmp(s,"__builtin___memset_chk") || !strcmp(s,"__builtin___strcpy_chk") ||
              !strcmp(s,"__builtin___strcat_chk") || !strcmp(s,"__builtin___strncpy_chk") ||
-             !strcmp(s,"__builtin___strncat_chk") ? CC_LIB_CHK : CC_LIB_OTHER;
-  assert(cc_builtin_libkind(i) == want);
-  if (want) { count++; assert((cc_builtin_table[i].flags & 1) == (want == CC_LIB_FABSL)); }
+             !strcmp(s,"__builtin___strncat_chk") ? CC_LIBRARY_KIND_CHECKED : CC_LIBRARY_KIND_OTHER;
+  assert(cc_builtin_library_kind(i) == want);
+  if (want) { count++; assert((cc_builtin_table[i].flags & 1) == (want == CC_LIBRARY_KIND_FABSL)); }
  }
  assert(count == 12);
  return 0;

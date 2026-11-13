@@ -75,7 +75,7 @@ CC_PRIVATE void cc_replay_coverage_finish(cc *c)
 	c->drb = NULL;
 }
 
-void cc_drcov_stats(char *buf, size_t n)
+void cc_replay_coverage_statistics(char *buf, size_t n)
 {
 	if (!cc_replay_coverage_on) {
 		*buf = 0;

@@ -6,7 +6,7 @@
 typedef struct cc_mangler {
 	char b[512];
 	uint32_t n;
-	qty sub[64];		/* substitution candidates, in order: canonical (qualified) types */
+	ast_qualified_type sub[64];		/* substitution candidates, in order: canonical (qualified) types */
 	uint32_t nsub;
 	bool full;
 } cc_mangler;
@@ -40,7 +40,7 @@ static void cc_mangle_append_source_name(cc_mangler *m, uint32_t id)
 }
 
 /* S_, S0_, S1_ ... SZ_, S10_ for a type seen before; false if t is new */
-static bool cc_mangle_substitution_find(cc_mangler *m, qty t)
+static bool cc_mangle_substitution_find(cc_mangler *m, ast_qualified_type t)
 {
 	for (uint32_t i = 0; i < m->nsub; i++) {
 		char t2[16], d[8];
@@ -64,60 +64,60 @@ static bool cc_mangle_substitution_find(cc_mangler *m, qty t)
 	return false;
 }
 
-static void cc_mangle_substitution_add(cc_mangler *m, qty t)
+static void cc_mangle_substitution_add(cc_mangler *m, ast_qualified_type t)
 {
 	if (m->nsub < 64)
 		m->sub[m->nsub++] = t;
 }
 
-static void cc_mangle_type(cc *c, cc_mangler *m, qty t)
+static void cc_mangle_type(cc *c, cc_mangler *m, ast_qualified_type t)
 {
 	static const char *const prim_code[] = {
-		[TY_VOID] = "v", [TY_BOOL] = "b", [TY_CHAR] = "c", [TY_SCHAR] = "a", [TY_UCHAR] = "h",
-		[TY_SHORT] = "s", [TY_USHORT] = "t", [TY_INT] = "i", [TY_UINT] = "j", [TY_LONG] = "l",
-		[TY_ULONG] = "m", [TY_LLONG] = "x", [TY_ULLONG] = "y", [TY_INT128] = "n", [TY_UINT128] = "o",
-		[TY_BFLOAT16] = "DF16b", [TY_FLOAT16] = "DF16_", [TY_FLOAT] = "f", [TY_DOUBLE] = "d", [TY_LDOUBLE] = "e", [TY_FLOAT128] = "g",
+		[AST_TYPE_VOID] = "v", [AST_TYPE_BOOL] = "b", [AST_TYPE_CHAR] = "c", [AST_TYPE_SIGNED_CHAR] = "a", [AST_TYPE_UNSIGNED_CHAR] = "h",
+		[AST_TYPE_SHORT] = "s", [AST_TYPE_UNSIGNED_SHORT] = "t", [AST_TYPE_INT] = "i", [AST_TYPE_UNSIGNED_INT] = "j", [AST_TYPE_LONG] = "l",
+		[AST_TYPE_UNSIGNED_LONG] = "m", [AST_TYPE_LONG_LONG] = "x", [AST_TYPE_UNSIGNED_LONG_LONG] = "y", [AST_TYPE_INT128] = "n", [AST_TYPE_UINT128] = "o",
+		[AST_TYPE_BFLOAT16] = "DF16b", [AST_TYPE_FLOAT16] = "DF16_", [AST_TYPE_FLOAT] = "f", [AST_TYPE_DOUBLE] = "d", [AST_TYPE_LONG_DOUBLE] = "e", [AST_TYPE_FLOAT128] = "g",
 	};
-	int q = QQ(t), k;
+	int q = AST_QUALIFIED_TYPE_QUALIFIERS(t), k;
 	const ctype *x;
 
 	t = canon(c, t);	/* keeps the qualifiers */
 	k = AST_TYPE_KIND(c, t);
-	if (!q && k < TY_PTR) {
+	if (!q && k < AST_TYPE_POINTER) {
 		cc_mangle_append_text(m, prim_code[k]);
 		return;
 	}
 	if (cc_mangle_substitution_find(m, t))
 		return;
 	if (q) {
-		if (q & Q_RESTRICT) cc_mangle_append_text(m, "r");
-		if (q & Q_VOLATILE) cc_mangle_append_text(m, "V");
-		if (q & Q_CONST) cc_mangle_append_text(m, "K");
-		cc_mangle_type(c, m, QUNQ(t));
+		if (q & AST_QUALIFIER_RESTRICT) cc_mangle_append_text(m, "r");
+		if (q & AST_QUALIFIER_VOLATILE) cc_mangle_append_text(m, "V");
+		if (q & AST_QUALIFIER_CONST) cc_mangle_append_text(m, "K");
+		cc_mangle_type(c, m, AST_QUALIFIED_TYPE_UNQUALIFIED(t));
 		cc_mangle_substitution_add(m, t);
 		return;
 	}
 	x = AST_TYPE(c, t);
 	switch (k) {
-	case TY_PTR:
+	case AST_TYPE_POINTER:
 		cc_mangle_append_text(m, "P");
 		cc_mangle_type(c, m, x->base);
 		break;
-	case TY_ARRAY:
+	case AST_TYPE_ARRAY:
 		cc_mangle_append_text(m, "A");
-		if (!(x->flags & (TF_INCOMPLETE | TF_VLA)))
+		if (!(x->flags & (AST_TYPE_FLAG_INCOMPLETE | AST_TYPE_FLAG_VLA)))
 			cc_mangle_append_number(m, x->n);
 		cc_mangle_append_text(m, "_");
 		cc_mangle_type(c, m, x->base);
 		break;
-	case TY_FUNC:
+	case AST_TYPE_FUNCTION:
 		cc_mangle_append_text(m, "F");
 		cc_mangle_type(c, m, x->base);
-		if (!x->n && !(x->flags & TF_VARIADIC))
+		if (!x->n && !(x->flags & AST_TYPE_FLAG_VARIADIC))
 			cc_mangle_append_text(m, "v");
 		for (uint32_t i = 0; i < x->n; i++)
-			cc_mangle_type(c, m, QUNQ(c->params[x->aux + i]));
-		if (x->flags & TF_VARIADIC)
+			cc_mangle_type(c, m, AST_QUALIFIED_TYPE_UNQUALIFIED(c->params[x->aux + i]));
+		if (x->flags & AST_TYPE_FLAG_VARIADIC)
 			cc_mangle_append_text(m, "z");
 		cc_mangle_append_text(m, "E");
 		break;
@@ -146,13 +146,13 @@ static uint32_t cc_mangle_overload(cc *c, uint32_t s)
 
 	m.n = m.nsub = 0;
 	m.full = false;
-	cc_mangle_append_text(&m, y->sc == SC_STATIC ? "_ZL" : "_Z");
+	cc_mangle_append_text(&m, y->sc == AST_STORAGE_STATIC ? "_ZL" : "_Z");
 	cc_mangle_append_source_name(&m, y->name);
-	if (!f->n && !(f->flags & TF_VARIADIC))
+	if (!f->n && !(f->flags & AST_TYPE_FLAG_VARIADIC))
 		cc_mangle_append_text(&m, "v");
 	for (uint32_t i = 0; i < f->n; i++)
-		cc_mangle_type(c, &m, QUNQ(c->params[f->aux + i]));
-	if (f->flags & TF_VARIADIC)
+		cc_mangle_type(c, &m, AST_QUALIFIED_TYPE_UNQUALIFIED(c->params[f->aux + i]));
+	if (f->flags & AST_TYPE_FLAG_VARIADIC)
 		cc_mangle_append_text(&m, "z");
 	if (m.full)
 		return 0;

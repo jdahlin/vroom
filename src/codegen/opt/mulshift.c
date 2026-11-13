@@ -8,7 +8,7 @@
  */
 #include "../emitimpl.h"
 
-VPRIV bool em_mulshift(cc *c, qty ty, int *op, i128 *rhs)
+VPRIV bool em_mulshift(cc *c, ast_qualified_type ty, int *op, i128 *rhs)
 {
 	if (*op != LEX_TOKEN_STAR || !is_integer(c, ty) || em_bitint(c, ty))
 		return false;

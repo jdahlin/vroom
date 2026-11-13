@@ -115,7 +115,7 @@ int main(void)
     assert(x.nin==1 && gated[0].r[0]==RAX);
     /* An explicit noreturn convention cannot use the ordinary exit seed. */
     rec nonreturn[]={IMM(R10),IMM(RAX)};
-    sym syms[2]={{0},{.flags=SF_NORETURN}}; cc c={.syms=syms};
+    sym syms[2]={{0},{.flags=AST_SYMBOL_FLAG_NORETURN}}; cc c={.syms=syms};
     w.fsym=1; e.c=&c; x.in=nonreturn; x.nin=2;
     x64_dead(&e);
     assert(x.nin==2 && nonreturn[0].r[0]==R10);

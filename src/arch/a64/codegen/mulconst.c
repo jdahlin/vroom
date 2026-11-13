@@ -1,7 +1,7 @@
 /* One shifted ADD for a profitable shared constant-multiply recipe. */
 #include "../../../codegen/emitimpl.h"
 
-VPRIV bool a64_mulconst(ecx *e, qty ty, int r, i128 rhs)
+VPRIV bool a64_mulconst(ecx *e, ast_qualified_type ty, int r, i128 rhs)
 {
 	cc *c = e->c;
 	if (e->E->o->opt < 1 || e->E->noopt || !is_integer(c, ty) || em_bitint(c, ty))

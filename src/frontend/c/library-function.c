@@ -8,11 +8,11 @@ static const struct cc_library_builtin_entry { const char *name, *lib, *sig; } c
 };
 
 /* one type of a clang builtin type string at *p (Builtins.def's encoding); false: not one vcc reads */
-static bool cc_library_signature_type(cc *c, const char **p, qty *out)
+static bool cc_library_signature_type(cc *c, const char **p, ast_qualified_type *out)
 {
 	const char *s = *p;
 	int lng = 0, sgn = 0, uns = 0, cplx = 0;
-	qty t;
+	ast_qualified_type t;
 
 	for (;; s++) {
 		if (*s == 'L') lng++;
@@ -23,28 +23,28 @@ static bool cc_library_signature_type(cc *c, const char **p, qty *out)
 		else break;
 	}
 	switch (*s++) {
-	case 'v': t = cc_type_basic(TY_VOID); break;
-	case 'b': t = cc_type_basic(TY_BOOL); break;
-	case 'c': t = cc_type_basic(uns ? TY_UCHAR : sgn ? TY_SCHAR : TY_CHAR); break;
-	case 's': t = cc_type_basic(uns ? TY_USHORT : TY_SHORT); break;
+	case 'v': t = cc_type_basic(AST_TYPE_VOID); break;
+	case 'b': t = cc_type_basic(AST_TYPE_BOOL); break;
+	case 'c': t = cc_type_basic(uns ? AST_TYPE_UNSIGNED_CHAR : sgn ? AST_TYPE_SIGNED_CHAR : AST_TYPE_CHAR); break;
+	case 's': t = cc_type_basic(uns ? AST_TYPE_UNSIGNED_SHORT : AST_TYPE_SHORT); break;
 	case 'i':
-		t = cc_type_basic(lng == 0 ? (uns ? TY_UINT : TY_INT) : lng == 1 ? (uns ? TY_ULONG : TY_LONG)
-			 : lng == 2 ? (uns ? TY_ULLONG : TY_LLONG) : (uns ? TY_UINT128 : TY_INT128));
+		t = cc_type_basic(lng == 0 ? (uns ? AST_TYPE_UNSIGNED_INT : AST_TYPE_INT) : lng == 1 ? (uns ? AST_TYPE_UNSIGNED_LONG : AST_TYPE_LONG)
+			 : lng == 2 ? (uns ? AST_TYPE_UNSIGNED_LONG_LONG : AST_TYPE_LONG_LONG) : (uns ? AST_TYPE_UINT128 : AST_TYPE_INT128));
 		lng = 0;
 		break;
-	case 'f': t = cc_type_basic(TY_FLOAT); break;
+	case 'f': t = cc_type_basic(AST_TYPE_FLOAT); break;
 	case 'd':
 		if (lng > 1)
 			return false;	/* __float128 */
-		t = cc_type_basic(lng ? TY_LDOUBLE : TY_DOUBLE);
+		t = cc_type_basic(lng ? AST_TYPE_LONG_DOUBLE : AST_TYPE_DOUBLE);
 		lng = 0;
 		break;
-	case 'z': t = cc_type_basic(TY_ULONG); break;	/* size_t */
-	case 'Y': t = cc_type_basic(TY_LONG); break;	/* ptrdiff_t */
+	case 'z': t = cc_type_basic(AST_TYPE_UNSIGNED_LONG); break;	/* size_t */
+	case 'Y': t = cc_type_basic(AST_TYPE_LONG); break;	/* ptrdiff_t */
 	case 'w': t = c->t_wchar; break;
-	case 'P': t = cc_type_basic(TY_VOID); break;	/* FILE: only ever as P*, a void * */
+	case 'P': t = cc_type_basic(AST_TYPE_VOID); break;	/* FILE: only ever as P*, a void * */
 	case 'W': t = cc_type_basic(CC_I64(c, false)); break;	/* int64_t */
-	case 'Z': t = cc_type_basic(TY_INT); break;	/* int32_t */
+	case 'Z': t = cc_type_basic(AST_TYPE_INT); break;	/* int32_t */
 	default: return false;
 	}
 	if (lng)
@@ -58,7 +58,7 @@ static bool cc_library_signature_type(cc *c, const char **p, qty *out)
 			while (*s >= '0' && *s <= '9')
 				s++;	/* address space */
 		} else if (*s == 'C' || *s == 'D' || *s == 'R') {
-			t = QT(QI(t), QQ(t) | (*s == 'C' ? Q_CONST : *s == 'D' ? Q_VOLATILE : Q_RESTRICT));
+			t = AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(t), AST_QUALIFIED_TYPE_QUALIFIERS(t) | (*s == 'C' ? AST_QUALIFIER_CONST : *s == 'D' ? AST_QUALIFIER_VOLATILE : AST_QUALIFIER_RESTRICT));
 			s++;
 		} else if (*s == '&') {
 			return false;
@@ -72,9 +72,9 @@ static bool cc_library_signature_type(cc *c, const char **p, qty *out)
 }
 
 /* a function type from a clang builtin type string (its result in *ret); false: not readable */
-static bool cc_library_signature_function_type(cc *c, const char *p, qty *fty, qty *ret)
+static bool cc_library_signature_function_type(cc *c, const char *p, ast_qualified_type *fty, ast_qualified_type *ret)
 {
-	qty par[16];
+	ast_qualified_type par[16];
 	uint32_t np = 0;
 	int fl = 0;
 
@@ -82,7 +82,7 @@ static bool cc_library_signature_function_type(cc *c, const char *p, qty *fty, q
 		return false;
 	while (*p) {
 		if (*p == '.') {
-			fl |= TF_VARIADIC;
+			fl |= AST_TYPE_FLAG_VARIADIC;
 			break;
 		}
 		if (np == 16 || !cc_library_signature_type(c, &p, &par[np]))
@@ -136,7 +136,7 @@ static const struct cc_library_builtin_entry *cc_library_disabled_find(const cha
 	return cc_library_builtin_find(full, len + 10);
 }
 
-void cc_disable_builtin(uint64_t *bits, const char *name)
+void cc_builtin_disable(uint64_t *bits, const char *name)
 {
 	const struct cc_library_builtin_entry *b = cc_library_disabled_find(name, strlen(name));
 	if (b) {
@@ -145,7 +145,7 @@ void cc_disable_builtin(uint64_t *bits, const char *name)
 	}
 }
 
-CC_PRIVATE bool cc_library_builtin_is_disabled(const cc_opts *o, const char *name, size_t len)
+CC_PRIVATE bool cc_library_builtin_is_disabled(const cc_options *o, const char *name, size_t len)
 {
 	uint64_t any = 0;
 	for (unsigned i = 0; i < CC_DISABLED_BUILTIN_WORDS; i++)
@@ -179,12 +179,12 @@ CC_PRIVATE uint32_t cc_library_builtin_declare(cc *c, uint32_t id, uint32_t loc)
 	if (!b)
 		return 0;
 	{
-		qty fty, ret;
+		ast_qualified_type fty, ret;
 
 		if (!cc_library_signature_function_type(c, b->sig, &fty, &ret))
 			return 0;
 		{
-			cc_declaration_specifiers ds = { .ty = ret, .sc = SC_EXTERN, .loc = loc };
+			cc_declaration_specifiers ds = { .ty = ret, .sc = AST_STORAGE_EXTERN, .loc = loc };
 			cc_declarator d = { .name = id, .loc = loc };
 			uint32_t s = cc_declaration_bind(c, &ds, &d, fty, true);
 			/* Integer-power builtins name compiler-runtime helpers, not C
@@ -212,11 +212,11 @@ CC_PRIVATE uint32_t cc_library_builtin_declare(cc *c, uint32_t id, uint32_t loc)
 
 /* the type clang gives an implicitly declared library function (asin: double
    (double)), 0: not one (or -fno-builtin) */
-CC_PRIVATE qty cc_library_implicit_type(cc *c, uint32_t id)
+CC_PRIVATE ast_qualified_type cc_library_implicit_type(cc *c, uint32_t id)
 {
 	char nm[128];
 	const char *p;
-	qty ret, par[16];
+	ast_qualified_type ret, par[16];
 	uint32_t np = 0;
 	int fl = 0, enc;
 
@@ -225,7 +225,7 @@ CC_PRIVATE qty cc_library_implicit_type(cc *c, uint32_t id)
 		return 0;
 	memcpy(nm, cc_identifier_string(id), cc_identifier_length(id));
 	nm[cc_identifier_length(id)] = 0;
-	if (!(p = cc_lib_sig(nm, &enc)))
+	if (!(p = cc_builtin_library_signature(nm, &enc)))
 		return 0;
 	if (!enc)
 		return cc_builtin_signature_function_type(c, p);
@@ -233,7 +233,7 @@ CC_PRIVATE qty cc_library_implicit_type(cc *c, uint32_t id)
 		return 0;
 	while (*p) {
 		if (*p == '.') {
-			fl |= TF_VARIADIC;
+			fl |= AST_TYPE_FLAG_VARIADIC;
 			break;
 		}
 		if (np == 16 || !cc_library_signature_type(c, &p, &par[np]))
@@ -243,9 +243,9 @@ CC_PRIVATE qty cc_library_implicit_type(cc *c, uint32_t id)
 	return cc_type_function(c, ret, par, np, fl);
 }
 
-CC_PRIVATE uint32_t cc_library_implicit_declare(cc *c, uint32_t id, uint32_t loc, qty t)
+CC_PRIVATE uint32_t cc_library_implicit_declare(cc *c, uint32_t id, uint32_t loc, ast_qualified_type t)
 {
-	cc_declaration_specifiers ds = { .ty = AST_TYPE(c, t)->base, .sc = SC_EXTERN, .loc = loc };
+	cc_declaration_specifiers ds = { .ty = AST_TYPE(c, t)->base, .sc = AST_STORAGE_EXTERN, .loc = loc };
 	cc_declarator d = { .name = id, .loc = loc };
 
 	return cc_declaration_bind(c, &ds, &d, t, c->depth == 0);
@@ -255,10 +255,10 @@ CC_PRIVATE uint32_t cc_library_implicit_declare(cc *c, uint32_t id, uint32_t loc
 
 CC_PRIVATE uint32_t cc_implicit_function_declare(cc *c, uint32_t id, uint32_t loc)
 {
-	cc_declaration_specifiers ds = { .ty = cc_type_basic(TY_INT), .sc = SC_EXTERN, .loc = loc };
+	cc_declaration_specifiers ds = { .ty = cc_type_basic(AST_TYPE_INT), .sc = AST_STORAGE_EXTERN, .loc = loc };
 	cc_declarator d = { .name = id, .loc = loc };
 
-	return cc_declaration_bind(c, &ds, &d, cc_type_function(c, cc_type_basic(TY_INT), NULL, 0, TF_NOPROTO), c->depth == 0);
+	return cc_declaration_bind(c, &ds, &d, cc_type_function(c, cc_type_basic(AST_TYPE_INT), NULL, 0, AST_TYPE_FLAG_NO_PROTOTYPE), c->depth == 0);
 }
 
 /* ---------------- library functions and names with a header (D5.4) ---------------- */
@@ -330,7 +330,7 @@ CC_PRIVATE uint32_t cc_library_function_declare(cc *c, uint32_t id, uint32_t loc
 {
 	static const char *const none[] = { NULL };
 	const struct cc_library_function_entry *f = cc_library_function_find(c, id);
-	qty fty, ret;
+	ast_qualified_type fty, ret;
 	int lv;
 
 	if (!f || strchr(f->sig, 'P') || !cc_library_signature_function_type(c, f->sig, &fty, &ret) || !strcmp(f->name, "alloca"))
@@ -358,7 +358,7 @@ CC_PRIVATE uint32_t cc_library_function_declare(cc *c, uint32_t id, uint32_t loc
 		cc_report_note(c, loc, "include the header <%s> or explicitly provide a declaration for '%.*s'", f->hdr, CC_IDENTIFIER(id));
 	}
 	{
-		cc_declaration_specifiers ds = { .ty = ret, .sc = SC_EXTERN, .loc = loc };
+		cc_declaration_specifiers ds = { .ty = ret, .sc = AST_STORAGE_EXTERN, .loc = loc };
 		cc_declarator d = { .name = id, .loc = loc };
 
 		return cc_declaration_bind(c, &ds, &d, fty, c->depth == 0);

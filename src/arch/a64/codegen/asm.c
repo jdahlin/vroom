@@ -9,7 +9,7 @@ typedef struct asmopnd {
 	uint8_t kind, reg, fixed, out, inout, wide;
 	val v;			/* AO_IMM: the constant / address */
 	lval l;			/* outputs: where the result goes */
-	qty t;
+	ast_qualified_type t;
 	uint32_t name;
 } asmopnd;
 
@@ -57,13 +57,13 @@ static void vraw(ecx *e, const char *opn, int k, int v, int xr)
 }
 
 /* the register name's letter of a vector operand's load and store */
-static int vreg_kind(cc *c, qty t)
+static int vreg_kind(cc *c, ast_qualified_type t)
 {
 	return is_svpred(c, t) ? 'p' : is_sve(c, t) ? 'z' : tsize(c, t) == 16 ? 'q' : 'd';
 }
 
 /* the register of a vector operand: v16+ (z16+), an SVE predicate p0+ (a governing predicate must be p0-p7) */
-static uint8_t sve_opreg(ecx *e, uint32_t loc, qty t, int *nv, int *np)
+static uint8_t sve_opreg(ecx *e, uint32_t loc, ast_qualified_type t, int *nv, int *np)
 {
 	if (is_svpred(e->c, t)) {
 		if (*np >= 8)
@@ -79,7 +79,7 @@ VPRIV void gen_asm(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
 	const node *x = N(n);
-	const casm *a = &c->asms[x->a];
+	const ast_asm_statement *a = &c->asms[x->a];
 	const char *tp = c->strs[a->tmpl - 1].s;
 	uint32_t nops = a->nout + a->nin;
 	asmopnd *op;
@@ -122,7 +122,7 @@ VPRIV void gen_asm(ecx *e, uint32_t n)
 		}
 	/* outputs: lvalues and registers */
 	for (uint32_t i = 0; i < a->nout; i++) {
-		const asmop *ao = &a->ops[i];
+		const ast_asm_operand *ao = &a->ops[i];
 		const char *cs = c->strs[ao->constraint - 1].s;
 		asmopnd *o = &op[i];
 		bool mem_ok = strpbrk(cs, "mQog") != NULL, reg_ok = strpbrk(cs, "rg") != NULL;
@@ -151,7 +151,7 @@ VPRIV void gen_asm(ecx *e, uint32_t n)
 		}
 		o->kind = AO_REG;
 		o->l = gen_lval(e, en);
-		if (N(en)->op == N_VAR && is_local_var(c, N(en)->a) && binding(e, N(en)->a)->reg != 0xff &&
+		if (N(en)->op == AST_NODE_VARIABLE && is_local_var(c, N(en)->a) && binding(e, N(en)->a)->reg != 0xff &&
 		    binding(e, N(en)->a)->kind == B_SLOT) {
 			o->fixed = 1;
 			o->reg = binding(e, N(en)->a)->reg;
@@ -166,7 +166,7 @@ VPRIV void gen_asm(ecx *e, uint32_t n)
 	}
 	/* inputs */
 	for (uint32_t i = a->nout; i < nops; i++) {
-		const asmop *ao = &a->ops[i];
+		const ast_asm_operand *ao = &a->ops[i];
 		const char *cs = c->strs[ao->constraint - 1].s;
 		asmopnd *o = &op[i];
 		uint32_t en = ao->expr;
@@ -204,7 +204,7 @@ VPRIV void gen_asm(ecx *e, uint32_t n)
 		if (mem_ok && !reg_ok && !strpbrk(cs, "inIJKLMNZ")) {
 			lval l;
 
-			if (N(en)->op == N_CAST && N(en)->aux == CK_DECAY)
+			if (N(en)->op == AST_NODE_CAST && N(en)->aux == AST_CAST_ARRAY_DECAY)
 				en = N(en)->a;	/* an array as a memory operand: the array itself */
 			l = gen_lval(e, en);
 			val av = laddr(e, &l);
@@ -268,7 +268,7 @@ VPRIV void gen_asm(ecx *e, uint32_t n)
 			else
 				toreg(e, &v);
 			o->v = v;
-			if (N(en)->op == N_VAR && is_local_var(c, N(en)->a) && binding(e, N(en)->a)->reg != 0xff &&
+			if (N(en)->op == AST_NODE_VARIABLE && is_local_var(c, N(en)->a) && binding(e, N(en)->a)->reg != 0xff &&
 			    binding(e, N(en)->a)->kind == B_SLOT) {
 				o->fixed = 1;
 				o->reg = binding(e, N(en)->a)->reg;

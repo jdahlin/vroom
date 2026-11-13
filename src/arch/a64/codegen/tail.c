@@ -30,7 +30,7 @@ VPRIV bool a64_tail_return(ecx *e, uint32_t expr)
 		}
 	}
 	for (uint32_t i = 0; i < call->c; i++) {
-		qty ty = N(c->lists[call->b + i])->ty;
+		ast_qualified_type ty = N(c->lists[call->b + i])->ty;
 		int wide = tsize(c, ty) == 8;
 
 		if (slots[i])

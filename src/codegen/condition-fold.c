@@ -15,8 +15,8 @@
 /* e >> 0, e << 0: e */
 static uint32_t strip_shift0(cc *c, uint32_t n)
 {
-	while (N(n)->op == N_BINARY && (N(n)->aux == LEX_TOKEN_LESS_LESS || N(n)->aux == LEX_TOKEN_GREATER_GREATER) &&
-	       N(N(n)->b)->op == N_NUM && c->ipool[N(N(n)->b)->a] == 0 && QUNQ(N(n)->ty) == QUNQ(N(N(n)->a)->ty))
+	while (N(n)->op == AST_NODE_BINARY && (N(n)->aux == LEX_TOKEN_LESS_LESS || N(n)->aux == LEX_TOKEN_GREATER_GREATER) &&
+	       N(N(n)->b)->op == AST_NODE_NUMBER && c->ipool[N(N(n)->b)->a] == 0 && AST_QUALIFIED_TYPE_UNQUALIFIED(N(n)->ty) == AST_QUALIFIED_TYPE_UNQUALIFIED(N(N(n)->a)->ty))
 		n = N(n)->a;
 	return n;
 }
@@ -28,17 +28,17 @@ static bool same_pure(cc *c, uint32_t a, uint32_t b)
 
 	a = strip_shift0(c, a), b = strip_shift0(c, b);
 	x = N(a), y = N(b);
-	if (x->op != y->op || QUNQ(x->ty) != QUNQ(y->ty) || (QQ(x->ty) | QQ(y->ty)) & Q_VOLATILE ||
+	if (x->op != y->op || AST_QUALIFIED_TYPE_UNQUALIFIED(x->ty) != AST_QUALIFIED_TYPE_UNQUALIFIED(y->ty) || (AST_QUALIFIED_TYPE_QUALIFIERS(x->ty) | AST_QUALIFIED_TYPE_QUALIFIERS(y->ty)) & AST_QUALIFIER_VOLATILE ||
 	    !(is_integer(c, x->ty) || is_ptr(c, x->ty)))
 		return false;
 	switch (x->op) {
-	case N_VAR:
-		return x->a == y->a && c->syms[x->a].kind == S_VAR && !(QQ(c->syms[x->a].ty) & Q_VOLATILE);
-	case N_NUM:
+	case AST_NODE_VARIABLE:
+		return x->a == y->a && c->syms[x->a].kind == AST_SYMBOL_VARIABLE && !(AST_QUALIFIED_TYPE_QUALIFIERS(c->syms[x->a].ty) & AST_QUALIFIER_VOLATILE);
+	case AST_NODE_NUMBER:
 		return c->ipool[x->a] == c->ipool[y->a];
-	case N_CAST:
+	case AST_NODE_CAST:
 		return x->aux == y->aux && same_pure(c, x->a, y->a);
-	case N_BINARY:
+	case AST_NODE_BINARY:
 		return x->aux == y->aux && !em_is_cmp(x->aux) && x->aux != LEX_TOKEN_SLASH && x->aux != LEX_TOKEN_PERCENT &&
 		       same_pure(c, x->a, y->a) && same_pure(c, x->b, y->b);
 	}
@@ -51,7 +51,7 @@ static int cmp_mask(cc *c, uint32_t n, uint32_t *l, uint32_t *r)
 	const node *x = N(n);
 	int m;
 
-	if (x->op != N_BINARY || !em_is_cmp(x->aux) || is_flt(c, N(x->a)->ty) || is_wide(c, N(x->a)->ty))
+	if (x->op != AST_NODE_BINARY || !em_is_cmp(x->aux) || is_flt(c, N(x->a)->ty) || is_wide(c, N(x->a)->ty))
 		return 0;
 	switch (x->aux) {
 	case LEX_TOKEN_LESS: m = 1; break;
@@ -66,11 +66,11 @@ static int cmp_mask(cc *c, uint32_t n, uint32_t *l, uint32_t *r)
 }
 
 /* the values of an integer type */
-static bool trange(cc *c, qty t, i128 *lo, i128 *hi)
+static bool trange(cc *c, ast_qualified_type t, i128 *lo, i128 *hi)
 {
 	uint64_t sz;
 
-	if (!is_integer(c, t) || is_wide(c, t) || KIND(c, t) == TY_BOOL)
+	if (!is_integer(c, t) || is_wide(c, t) || KIND(c, t) == AST_TYPE_BOOL)
 		return false;
 	sz = tsize(c, t) * 8;
 	if (is_signed(c, t))
@@ -86,29 +86,29 @@ static bool irange(cc *c, uint32_t n, uint32_t s, i128 slo, i128 shi, i128 *lo, 
 	const node *x = N(n);
 	i128 tlo, thi, alo, ahi, blo, bhi;
 
-	cval cv;
+	cc_value cv;
 
-	if (!trange(c, x->ty, &tlo, &thi) || (QQ(x->ty) & Q_VOLATILE))
+	if (!trange(c, x->ty, &tlo, &thi) || (AST_QUALIFIED_TYPE_QUALIFIERS(x->ty) & AST_QUALIFIER_VOLATILE))
 		return false;
-	if (x->op != N_VAR && cc_eval(c, n, &cv) && cv.kind == CV_INT) {
+	if (x->op != AST_NODE_VARIABLE && cc_eval(c, n, &cv) && cv.kind == CC_VALUE_INTEGER) {
 		*lo = *hi = em_trunc_to(c, cv.i, x->ty);
 		return true;
 	}
 	switch (x->op) {
-	case N_NUM:
+	case AST_NODE_NUMBER:
 		*lo = *hi = em_trunc_to(c, c->ipool[x->a], x->ty);
 		return true;
-	case N_VAR:
+	case AST_NODE_VARIABLE:
 		if (x->a == s)
 			*lo = slo, *hi = shi;
 		else
 			*lo = tlo, *hi = thi;
 		return true;
-	case N_CAST:
+	case AST_NODE_CAST:
 		if (!irange(c, x->a, s, slo, shi, &alo, &ahi))
 			return false;
 		break;
-	case N_BINARY:
+	case AST_NODE_BINARY:
 		if ((x->aux != LEX_TOKEN_PLUS && x->aux != LEX_TOKEN_MINUS) || !irange(c, x->a, s, slo, shi, &alo, &ahi) ||
 		    !irange(c, x->b, s, slo, shi, &blo, &bhi))
 			return false;
@@ -133,7 +133,7 @@ static int irange_cmp(cc *c, uint32_t n, uint32_t s, i128 slo, i128 shi)
 	const node *x = N(n);
 	i128 alo, ahi, blo, bhi;
 
-	if (x->op != N_BINARY || !em_is_cmp(x->aux) || !irange(c, x->a, s, slo, shi, &alo, &ahi) ||
+	if (x->op != AST_NODE_BINARY || !em_is_cmp(x->aux) || !irange(c, x->a, s, slo, shi, &alo, &ahi) ||
 	    !irange(c, x->b, s, slo, shi, &blo, &bhi))
 		return -1;
 	switch (x->aux) {
@@ -154,8 +154,8 @@ static bool cmp_var_range(cc *c, uint32_t n, bool t, uint32_t *s, i128 *lo, i128
 	int op;
 	i128 k;
 
-	if (x->op != N_BINARY || !em_is_cmp(x->aux) || N(x->a)->op != N_VAR || N(x->b)->op != N_NUM ||
-	    !trange(c, N(x->a)->ty, lo, hi) || (QQ(N(x->a)->ty) & Q_VOLATILE) || c->syms[N(x->a)->a].kind != S_VAR)
+	if (x->op != AST_NODE_BINARY || !em_is_cmp(x->aux) || N(x->a)->op != AST_NODE_VARIABLE || N(x->b)->op != AST_NODE_NUMBER ||
+	    !trange(c, N(x->a)->ty, lo, hi) || (AST_QUALIFIED_TYPE_QUALIFIERS(N(x->a)->ty) & AST_QUALIFIER_VOLATILE) || c->syms[N(x->a)->a].kind != AST_SYMBOL_VARIABLE)
 		return false;
 	op = x->aux, k = em_trunc_to(c, c->ipool[N(x->b)->a], N(x->a)->ty);
 	if (!t)
@@ -179,14 +179,14 @@ static bool ffact(ecx *e, uint32_t n, uint8_t f)
 {
 	cc *c = e->c;
 	const node *x = N(n);
-	cval cv;
+	cc_value cv;
 
-	if (x->op == N_VAR && is_local_var(c, x->a) && !(QQ(x->ty) & Q_VOLATILE)) {
+	if (x->op == AST_NODE_VARIABLE && is_local_var(c, x->a) && !(AST_QUALIFIED_TYPE_QUALIFIERS(x->ty) & AST_QUALIFIER_VOLATILE)) {
 		uint8_t g = e->E->ffacts[x->a];
 
 		return (g & (FF_SEEN | FF_BAD)) == FF_SEEN && (g & f) == f;
 	}
-	return f == FF_ZERO && is_flt(c, x->ty) && cc_eval(c, n, &cv) && cv.kind == CV_FLT && (cv.ld ? !(cv.q << 1) : cv.f == 0);
+	return f == FF_ZERO && is_flt(c, x->ty) && cc_eval(c, n, &cv) && cv.kind == CC_VALUE_FLOAT && (cv.ld ? !(cv.q << 1) : cv.f == 0);
 }
 
 VPRIV int cond_fold(ecx *e, uint32_t n)
@@ -198,20 +198,20 @@ VPRIV int cond_fold(ecx *e, uint32_t n)
 	i128 lo, hi;
 
 	/* a || b with b true wherever a is false (a && b: b false wherever a is true) */
-	if ((x->op == N_LOGAND || x->op == N_LOGOR) && cmp_var_range(c, x->a, x->op == N_LOGAND, &s, &lo, &hi)) {
+	if ((x->op == AST_NODE_LOGICAL_AND || x->op == AST_NODE_LOGICAL_OR) && cmp_var_range(c, x->a, x->op == AST_NODE_LOGICAL_AND, &s, &lo, &hi)) {
 		int k = irange_cmp(c, x->b, s, lo, hi);
 
-		if (x->op == N_LOGOR && k == 1)
+		if (x->op == AST_NODE_LOGICAL_OR && k == 1)
 			return 1;
-		if (x->op == N_LOGAND && k == 0)
+		if (x->op == AST_NODE_LOGICAL_AND && k == 0)
 			return 0;
 	}
-	if (x->op == N_UNARY && x->aux == LEX_TOKEN_EXCLAMATION) {
+	if (x->op == AST_NODE_UNARY && x->aux == LEX_TOKEN_EXCLAMATION) {
 		int k = cond_fold(e, x->a);
 
 		return k < 0 ? -1 : !k;
 	}
-	if (x->op == N_LOGAND || x->op == N_LOGOR) {
+	if (x->op == AST_NODE_LOGICAL_AND || x->op == AST_NODE_LOGICAL_OR) {
 		m1 = cmp_mask(c, x->a, &l1, &r1);
 		m2 = cmp_mask(c, x->b, &l2, &r2);
 		if (!m1 || !m2)
@@ -220,11 +220,11 @@ VPRIV int cond_fold(ecx *e, uint32_t n)
 			m2 = (m2 & 2) | (m2 & 1) << 2 | (m2 & 4) >> 2;
 		else if (!same_pure(c, l1, l2) || !same_pure(c, r1, r2))
 			return -1;
-		m = x->op == N_LOGAND ? m1 & m2 : m1 | m2;
+		m = x->op == AST_NODE_LOGICAL_AND ? m1 & m2 : m1 | m2;
 		return m == 0 ? 0 : m == 7 ? 1 : -1;
 	}
 	/* fabs(x) < 0.0 (through locals): false, NaN included */
-	if (x->op == N_BINARY && (x->aux == LEX_TOKEN_LESS || x->aux == LEX_TOKEN_GREATER) && is_flt(c, N(x->a)->ty) &&
+	if (x->op == AST_NODE_BINARY && (x->aux == LEX_TOKEN_LESS || x->aux == LEX_TOKEN_GREATER) && is_flt(c, N(x->a)->ty) &&
 	    !is_ld(c, N(x->a)->ty) && ffact(e, x->aux == LEX_TOKEN_LESS ? x->a : x->b, FF_NONNEG) &&
 	    ffact(e, x->aux == LEX_TOKEN_LESS ? x->b : x->a, FF_ZERO))
 		return 0;
