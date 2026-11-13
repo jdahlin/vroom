@@ -1,7 +1,7 @@
 /* vcc front end: types: interning, predicates, compatibility (C11 6.2.7) */
-#include "ccimpl.h"
+#include "cc-internal.h"
 
-const basic_ty basic[TY_PTR] = {
+const cc_basic_type_layout cc_basic_types[TY_PTR] = {
 	[TY_VOID] = { 1, 1 }, [TY_BOOL] = { 1, 1 },
 	[TY_CHAR] = { 1, 1 }, [TY_SCHAR] = { 1, 1 }, [TY_UCHAR] = { 1, 1 },
 	[TY_SHORT] = { 2, 2 }, [TY_USHORT] = { 2, 2 },
@@ -12,36 +12,36 @@ const basic_ty basic[TY_PTR] = {
 	[TY_BFLOAT16] = { 2, 2 }, [TY_FLOAT16] = { 2, 2 }, [TY_FLOAT] = { 4, 4 }, [TY_DOUBLE] = { 8, 8 },
 	[TY_LDOUBLE] = { 16, 16 }, [TY_FLOAT128] = { 16, 16 },
 };
-VPRIV bool is_bigint(cc *c, qty t) { int k = KIND(c, t); return k == TY_BITINT || k == TY_UBITINT; }
-VPRIV bool is_integer(cc *c, qty t) { int k = KIND(c, t); return is_int_kind(k) || k == TY_ENUM; }
-VPRIV bool is_float(cc *c, qty t) { return is_flt_kind(KIND(c, t)); }
-VPRIV bool is_arith(cc *c, qty t) { return is_integer(c, t) || is_float(c, t); }
-VPRIV bool is_ptr(cc *c, qty t) { return KIND(c, t) == TY_PTR; }
-VPRIV bool is_scalar(cc *c, qty t) { return is_arith(c, t) || is_ptr(c, t); }
-VPRIV bool is_void(cc *c, qty t) { return KIND(c, t) == TY_VOID; }
-VPRIV bool is_array(cc *c, qty t) { return KIND(c, t) == TY_ARRAY; }
-VPRIV bool is_func(cc *c, qty t) { return KIND(c, t) == TY_FUNC; }
-VPRIV bool is_record(cc *c, qty t) { int k = KIND(c, t); return k == TY_STRUCT || k == TY_UNION; }
-VPRIV bool is_vector(cc *c, qty t) { return KIND(c, t) == TY_VECTOR; }
-VPRIV bool is_bool_vector(cc *c, qty t) { return is_vector(c, t) && KIND(c, T(c, t)->base) == TY_BOOL; }
+CC_PRIVATE bool cc_type_is_bitint(cc *c, qty t) { int k = AST_TYPE_KIND(c, t); return k == TY_BITINT || k == TY_UBITINT; }
+CC_PRIVATE bool cc_type_is_integer(cc *c, qty t) { int k = AST_TYPE_KIND(c, t); return cc_type_kind_is_integer(k) || k == TY_ENUM; }
+CC_PRIVATE bool cc_type_is_float(cc *c, qty t) { return cc_type_kind_is_float(AST_TYPE_KIND(c, t)); }
+CC_PRIVATE bool cc_type_is_arithmetic(cc *c, qty t) { return cc_type_is_integer(c, t) || cc_type_is_float(c, t); }
+CC_PRIVATE bool cc_type_is_pointer(cc *c, qty t) { return AST_TYPE_KIND(c, t) == TY_PTR; }
+CC_PRIVATE bool cc_type_is_scalar(cc *c, qty t) { return cc_type_is_arithmetic(c, t) || cc_type_is_pointer(c, t); }
+CC_PRIVATE bool cc_type_is_void(cc *c, qty t) { return AST_TYPE_KIND(c, t) == TY_VOID; }
+CC_PRIVATE bool cc_type_is_array(cc *c, qty t) { return AST_TYPE_KIND(c, t) == TY_ARRAY; }
+CC_PRIVATE bool cc_type_is_function(cc *c, qty t) { return AST_TYPE_KIND(c, t) == TY_FUNC; }
+CC_PRIVATE bool cc_type_is_record(cc *c, qty t) { int k = AST_TYPE_KIND(c, t); return k == TY_STRUCT || k == TY_UNION; }
+CC_PRIVATE bool cc_type_is_vector(cc *c, qty t) { return AST_TYPE_KIND(c, t) == TY_VECTOR; }
+CC_PRIVATE bool cc_type_is_bool_vector(cc *c, qty t) { return cc_type_is_vector(c, t) && AST_TYPE_KIND(c, AST_TYPE(c, t)->base) == TY_BOOL; }
 /* initialized by a list of elements */
-VPRIV bool is_complex(cc *c, qty t) { return KIND(c, t) == TY_STRUCT && (c->tags[T(c, t)->aux].flags & RF_COMPLEX); }
-VPRIV bool is_ilagg(cc *c, qty t) { int k = KIND(c, t); return (k == TY_STRUCT && !is_complex(c, t)) || k == TY_UNION || k == TY_ARRAY || k == TY_VECTOR; }
+CC_PRIVATE bool cc_type_is_complex(cc *c, qty t) { return AST_TYPE_KIND(c, t) == TY_STRUCT && (c->tags[AST_TYPE(c, t)->aux].flags & RF_COMPLEX); }
+CC_PRIVATE bool cc_type_is_initializer_aggregate(cc *c, qty t) { int k = AST_TYPE_KIND(c, t); return (k == TY_STRUCT && !cc_type_is_complex(c, t)) || k == TY_UNION || k == TY_ARRAY || k == TY_VECTOR; }
 
-VPRIV qty canon(cc *c, qty t) { return QT(T(c, t)->canon, QQ(t)); }
+CC_PRIVATE qty canon(cc *c, qty t) { return QT(AST_TYPE(c, t)->canon, QQ(t)); }
 
-VPRIV bool is_signed(cc *c, qty t)
+CC_PRIVATE bool cc_type_is_signed(cc *c, qty t)
 {
-	int k = KIND(c, t);
+	int k = AST_TYPE_KIND(c, t);
 
 	if (k == TY_ENUM)
-		return is_signed(c, T(c, t)->base);
+		return cc_type_is_signed(c, AST_TYPE(c, t)->base);
 	if (k == TY_CHAR)
 		return !c->o->unsigned_char;
 	return k == TY_SCHAR || k == TY_SHORT || k == TY_INT || k == TY_LONG || k == TY_LLONG || k == TY_INT128 || k == TY_BITINT;
 }
 
-VPRIV uint32_t ty_hash(const ctype *t)
+CC_PRIVATE uint32_t cc_type_hash(const ctype *t)
 {
 	uint64_t h = (uint64_t)t->kind * 0x9E3779B97F4A7C15ull;
 
@@ -51,16 +51,16 @@ VPRIV uint32_t ty_hash(const ctype *t)
 	return (uint32_t)(h ^ (h >> 32));
 }
 
-static bool ty_eq(const ctype *a, const ctype *b)
+static bool cc_type_equal(const ctype *a, const ctype *b)
 {
 	return a->kind == b->kind && a->flags == b->flags && a->base == b->base && a->n == b->n &&
 	       a->aux == b->aux && a->align == b->align && a->size == b->size && a->ext == b->ext;
 }
 
-/* intern a type (records and enums are created with ty_new) */
-VPRIV uint32_t ty_intern(cc *c, const ctype *t)
+/* intern a type (records and enums are created with cc_type_new) */
+CC_PRIVATE uint32_t cc_type_intern(cc *c, const ctype *t)
 {
-	uint32_t h = ty_hash(t), m = c->tyhcap - 1;
+	uint32_t h = cc_type_hash(t), m = c->tyhcap - 1;
 
 	for (uint32_t i = h & m;; i = (i + 1) & m) {
 		uint32_t e = c->tyhash[i];
@@ -69,7 +69,7 @@ VPRIV uint32_t ty_intern(cc *c, const ctype *t)
 			uint32_t idx;
 
 			if (unlikely(c->dr_on))
-				return dr_intern(c, t);	/* (a region's own table: first use of t in it) */
+				return cc_replay_type_intern(c, t);	/* (a region's own table: first use of t in it) */
 			idx = c->nty++;
 
 			c->ty[idx] = *t;
@@ -77,7 +77,7 @@ VPRIV uint32_t ty_intern(cc *c, const ctype *t)
 				c->ty[idx].canon = idx;
 			c->tyhash[i] = idx;
 			if (c->nty * 2 > c->tyhcap) {	/* grow */
-				uint32_t ncap = c->tyhcap * 2, *nh = halloc(c, ncap * sizeof(uint32_t));
+				uint32_t ncap = c->tyhcap * 2, *nh = cc_heap_allocate(c, ncap * sizeof(uint32_t));
 
 				memset(nh, 0, ncap * sizeof(uint32_t));
 				for (uint32_t j = 0; j < c->tyhcap; j++) {
@@ -85,7 +85,7 @@ VPRIV uint32_t ty_intern(cc *c, const ctype *t)
 
 					if (!x)
 						continue;
-					for (k = ty_hash(&c->ty[x]) & (ncap - 1); nh[k]; k = (k + 1) & (ncap - 1))
+					for (k = cc_type_hash(&c->ty[x]) & (ncap - 1); nh[k]; k = (k + 1) & (ncap - 1))
 						;
 					nh[k] = x;
 				}
@@ -94,13 +94,13 @@ VPRIV uint32_t ty_intern(cc *c, const ctype *t)
 			}
 			return idx;
 		}
-		if (ty_eq(&c->ty[e], t)) {
+		if (cc_type_equal(&c->ty[e], t)) {
 			return e;
 		}
 	}
 }
 
-VPRIV uint32_t ty_new(cc *c, int kind)
+CC_PRIVATE uint32_t cc_type_new(cc *c, int kind)
 {
 	uint32_t idx = c->nty++;
 
@@ -108,35 +108,35 @@ VPRIV uint32_t ty_new(cc *c, int kind)
 	c->ty[idx].kind = (uint8_t)kind;
 	c->ty[idx].canon = idx;
 	if (unlikely(c->dr_on))
-		dr_new(c, idx);	/* (frontend/c/replay.c: the type log) */
+		cc_replay_type_new_log(c, idx);	/* (frontend/c/replay.c: the type log) */
 	return idx;
 }
 
 /* Bit-precise integers retain a storage kind for scalar lowering, but their
    precision makes them distinct from all standard integer types. */
-VPRIV qty ty_bitint(cc *c, unsigned bits, bool unsign)
+CC_PRIVATE qty cc_type_bitint(cc *c, unsigned bits, bool unsign)
 {
 	if (bits > 128) {
 		ctype t = { .kind = unsign ? TY_UBITINT : TY_BITINT, .size = 8 * (((uint64_t)bits + 63) / 64), .align = 8, .n = bits };
-		return QT(ty_intern(c, &t), 0);
+		return QT(cc_type_intern(c, &t), 0);
 	}
 	unsigned size = bits <= 8 ? 1 : bits <= 16 ? 2 : bits <= 32 ? 4 : bits <= 64 ? 8 : 16;
 	int kind = size == 1 ? TY_SCHAR : size == 2 ? TY_SHORT : size == 4 ? TY_INT : size == 8 ? TY_LLONG : TY_INT128;
 	ctype t = { .kind = (uint8_t)(kind + unsign), .size = size, .align = size > 8 && (c->o->target == PP_LINUX_X86_64 || PP_IS_WASM(c->o->target)) ? 8 : size, .n = bits };
 
-	return QT(ty_intern(c, &t), 0);
+	return QT(cc_type_intern(c, &t), 0);
 }
 
-VPRIV unsigned int_bits(cc *c, qty t)
+CC_PRIVATE unsigned cc_type_integer_bits(cc *c, qty t)
 {
-	if (KIND(c, t) == TY_ENUM)
-		return int_bits(c, T(c, t)->base);
-	if (is_int_kind(KIND(c, t)) && !(T(c, t)->flags & TF_ATOMIC) && T(c, t)->n)
-		return T(c, t)->n;
-	return (unsigned)ty_size(c, t) * 8;
+	if (AST_TYPE_KIND(c, t) == TY_ENUM)
+		return cc_type_integer_bits(c, AST_TYPE(c, t)->base);
+	if (cc_type_kind_is_integer(AST_TYPE_KIND(c, t)) && !(AST_TYPE(c, t)->flags & TF_ATOMIC) && AST_TYPE(c, t)->n)
+		return AST_TYPE(c, t)->n;
+	return (unsigned)cc_type_size(c, t) * 8;
 }
 
-VPRIV qty ty_ptr(cc *c, qty base)
+CC_PRIVATE qty cc_type_pointer(cc *c, qty base)
 {
 	uint32_t i = c->ptrc[base];
 
@@ -150,15 +150,15 @@ VPRIV qty ty_ptr(cc *c, qty base)
 	{
 		ctype t = { .kind = TY_PTR, .size = CC_PTRSIZE(c), .align = CC_PTRSIZE(c), .base = base };
 
-		i = ty_intern(c, &t);
+		i = cc_type_intern(c, &t);
 		c->ptrc[base] = i;
 		return QT(i, 0);
 	}
 }
 
-VPRIV qty ty_array(cc *c, qty elem, uint64_t n, int flags)
+CC_PRIVATE qty cc_type_array(cc *c, qty elem, uint64_t n, int flags)
 {
-	const ctype *e = T(c, elem);
+	const ctype *e = AST_TYPE(c, elem);
 	ctype t = { .kind = TY_ARRAY, .flags = (uint8_t)flags, .base = elem, .align = e->align };
 
 	if (!(flags & (TF_INCOMPLETE | TF_VLA))) {
@@ -166,24 +166,24 @@ VPRIV qty ty_array(cc *c, qty elem, uint64_t n, int flags)
 		t.aux = (uint32_t)(n >> 32);
 		t.size = e->size * n;
 	}
-	return QT(ty_intern(c, &t), 0);
+	return QT(cc_type_intern(c, &t), 0);
 }
 
-VPRIV uint64_t arr_len(cc *c, qty t)
+CC_PRIVATE uint64_t cc_type_array_length(cc *c, qty t)
 {
-	const ctype *a = T(c, t);
+	const ctype *a = AST_TYPE(c, t);
 
 	return a->n | (uint64_t)a->aux << 32;
 }
 
-VPRIV qty ty_vla(cc *c, qty elem, uint32_t sizenode)
+CC_PRIVATE qty cc_type_vla(cc *c, qty elem, uint32_t sizenode)
 {
-	ctype t = { .kind = TY_ARRAY, .flags = TF_VLA, .base = elem, .align = T(c, elem)->align, .n = sizenode };
+	ctype t = { .kind = TY_ARRAY, .flags = TF_VLA, .base = elem, .align = AST_TYPE(c, elem)->align, .n = sizenode };
 
-	return QT(ty_intern(c, &t), 0);
+	return QT(cc_type_intern(c, &t), 0);
 }
 
-VPRIV uint32_t fn_hash(qty ret, const qty *par, uint32_t n, int flags)
+CC_PRIVATE uint32_t cc_type_function_hash(qty ret, const qty *par, uint32_t n, int flags)
 {
 	uint32_t h = (ret * 0x9E3779B1u) ^ (n * 0x85EBCA77u) ^ (uint32_t)flags;
 
@@ -194,35 +194,35 @@ VPRIV uint32_t fn_hash(qty ret, const qty *par, uint32_t n, int flags)
 
 /* function types have their own table: the key includes the parameter list */
 /* add qualifiers; on an array type they belong to the element type (C11 6.7.3p9) */
-VPRIV qty qualify(cc *c, qty t, int q)
+CC_PRIVATE qty cc_type_qualify(cc *c, qty t, int q)
 {
-	const ctype *x = T(c, t);
+	const ctype *x = AST_TYPE(c, t);
 
 	if (!q)
 		return t;
 	if (x->kind == TY_ARRAY) {
-		qty e = qualify(c, x->base, q);
+		qty e = cc_type_qualify(c, x->base, q);
 
 		if (x->flags & TF_VLA)
-			return QT(QI(ty_vla(c, e, x->n)), QQ(t));
-		return QT(QI(ty_array(c, e, x->flags & TF_INCOMPLETE ? 0 : arr_len(c, t), x->flags & TF_INCOMPLETE)), QQ(t));
+			return QT(QI(cc_type_vla(c, e, x->n)), QQ(t));
+		return QT(QI(cc_type_array(c, e, x->flags & TF_INCOMPLETE ? 0 : cc_type_array_length(c, t), x->flags & TF_INCOMPLETE)), QQ(t));
 	}
 	return QT(QI(t), QQ(t) | q);
 }
 
-VPRIV qty ty_func(cc *c, qty ret, const qty *par, uint32_t n, int flags)
+CC_PRIVATE qty cc_type_function(cc *c, qty ret, const qty *par, uint32_t n, int flags)
 {
 	uint32_t m = c->fnhcap - 1;
 
-	for (uint32_t i = fn_hash(ret, par, n, flags) & m;; i = (i + 1) & m) {
+	for (uint32_t i = cc_type_function_hash(ret, par, n, flags) & m;; i = (i + 1) & m) {
 		uint32_t e = c->fnhash[i];
 
 		if (!e) {
 			uint32_t idx;
 
 			if (unlikely(c->dr_on))
-				return dr_func(c, ret, par, n, flags);	/* (a region's own table: first use) */
-			idx = ty_new(c, TY_FUNC);
+				return cc_replay_type_function(c, ret, par, n, flags);	/* (a region's own table: first use) */
+			idx = cc_type_new(c, TY_FUNC);
 			ctype *t = &c->ty[idx];
 
 			t->flags = (uint8_t)flags, t->base = ret, t->n = n, t->size = 1, t->align = 4;
@@ -232,7 +232,7 @@ VPRIV qty ty_func(cc *c, qty ret, const qty *par, uint32_t n, int flags)
 			c->nparams += n;
 			c->fnhash[i] = idx;
 			if (++c->nfn * 2 > c->fnhcap) {
-				uint32_t ncap = c->fnhcap * 2, *nh = halloc(c, ncap * sizeof(uint32_t));
+				uint32_t ncap = c->fnhcap * 2, *nh = cc_heap_allocate(c, ncap * sizeof(uint32_t));
 
 				memset(nh, 0, ncap * sizeof(uint32_t));
 				for (uint32_t j = 0; j < c->fnhcap; j++) {
@@ -241,7 +241,7 @@ VPRIV qty ty_func(cc *c, qty ret, const qty *par, uint32_t n, int flags)
 
 					if (!x)
 						continue;
-					for (k = fn_hash(f->base, &c->params[f->aux], f->n, f->flags) & (ncap - 1); nh[k];
+					for (k = cc_type_function_hash(f->base, &c->params[f->aux], f->n, f->flags) & (ncap - 1); nh[k];
 					     k = (k + 1) & (ncap - 1))
 						;
 					nh[k] = x;
@@ -268,64 +268,64 @@ VPRIV qty ty_func(cc *c, qty ret, const qty *par, uint32_t n, int flags)
 }
 
 /* GNU vector of total size bytes with elements elem */
-VPRIV qty ty_vector(cc *c, qty elem, uint32_t size)
+CC_PRIVATE qty cc_type_vector(cc *c, qty elem, uint32_t size)
 {
-	const ctype *e = T(c, elem);
+	const ctype *e = AST_TYPE(c, elem);
 	/* ARM64 caps vector alignment at 16; x86 and wasm use its full size. */
 	ctype t = { .kind = TY_VECTOR, .base = QUNQ(elem), .size = size,
 		    .align = size > 16 && !PP_IS_WASM(c->o->target) && c->o->target != PP_LINUX_X86_64 ? 16 : size };
 
 	t.n = e->size ? (uint32_t)(size / e->size) : 0;
-	return QT(ty_intern(c, &t), 0);
+	return QT(cc_type_intern(c, &t), 0);
 }
 
 /* aligned typedef variant: same type, other alignment */
-VPRIV qty ty_aligned(cc *c, qty t, uint32_t align)
+CC_PRIVATE qty cc_type_aligned(cc *c, qty t, uint32_t align)
 {
-	ctype v = *T(c, t);
+	ctype v = *AST_TYPE(c, t);
 
 	if (v.align == align && !(v.flags & TF_ALIGNED))
 		return t;
 	v.align = align;
 	v.flags |= TF_ALIGNED;
 	{
-		uint32_t i = ty_intern(c, &v);
+		uint32_t i = cc_type_intern(c, &v);
 
-		c->ty[i].canon = T(c, t)->canon;
+		c->ty[i].canon = AST_TYPE(c, t)->canon;
 		return QT(i, QQ(t));
 	}
 }
 
 /*
- * _Atomic(T): a type of its own (not compatible with T), laid out as clang
+ * _Atomic(AST_TYPE): a type of its own (not compatible with AST_TYPE), laid out as clang
  * does: a size up to 16 bytes is rounded up to a power of 2, which is also
- * the alignment (_Atomic struct { char a[3]; } is 4/4).  n keeps T.
+ * the alignment (_Atomic struct { char a[3]; } is 4/4).  n keeps AST_TYPE.
  */
-VPRIV qty ty_atomic(cc *c, qty t, uint32_t loc)
+CC_PRIVATE qty cc_type_atomic(cc *c, qty t, uint32_t loc)
 {
-	ctype v = *T(c, t);
+	ctype v = *AST_TYPE(c, t);
 
 	if (v.flags & TF_ATOMIC)
 		return t;
 	if (v.kind == TY_SVE) {
-		cc_error(c, loc, "_Atomic cannot be applied to sizeless type '%s'", tyname(c, t));
+		cc_report_error(c, loc, "_Atomic cannot be applied to sizeless type '%s'", tyname(c, t));
 		return t;
 	}
 	if (v.kind == TY_ARRAY || v.kind == TY_FUNC) {
-		cc_error(c, loc, "_Atomic cannot be applied to %s type '%s' ", v.kind == TY_ARRAY ? "array" : "function", tyname(c, t));
+		cc_report_error(c, loc, "_Atomic cannot be applied to %s type '%s' ", v.kind == TY_ARRAY ? "array" : "function", tyname(c, t));
 		return t;
 	}
-	if (!complete(c, t)) {
-		cc_error(c, loc, "_Atomic cannot be applied to incomplete type '%s' ", tyname(c, t));
-		fwd_note(c, t);
+	if (!cc_type_complete(c, t)) {
+		cc_report_error(c, loc, "_Atomic cannot be applied to incomplete type '%s' ", tyname(c, t));
+		cc_report_forward_note(c, t);
 		return t;
 	}
-	if (is_int_kind(v.kind) && v.n) {
-		cc_error(c, loc, "_Atomic cannot be applied to integer type '%s' ", tyname(c, t));
+	if (cc_type_kind_is_integer(v.kind) && v.n) {
+		cc_report_error(c, loc, "_Atomic cannot be applied to integer type '%s' ", tyname(c, t));
 		return t;
 	}
 	if (v.kind == TY_VECTOR) {
-		cc_error(c, loc, "_Atomic vector types are not supported by vcc");
+		cc_report_error(c, loc, "_Atomic vector types are not supported by vcc");
 		return t;
 	}
 	v.flags = (uint8_t)((v.flags & ~TF_ALIGNED) | TF_ATOMIC);
@@ -338,15 +338,15 @@ VPRIV qty ty_atomic(cc *c, qty t, uint32_t loc)
 		v.size = s;
 		v.align = (uint32_t)s;
 	}
-	return QT(ty_intern(c, &v), QQ(t));
+	return QT(cc_type_intern(c, &v), QQ(t));
 }
 
-VPRIV uint64_t ty_size(cc *c, qty t) { return T(c, t)->size; }
-VPRIV uint32_t ty_align(cc *c, qty t) { return T(c, t)->align; }
+CC_PRIVATE uint64_t cc_type_size(cc *c, qty t) { return AST_TYPE(c, t)->size; }
+CC_PRIVATE uint32_t cc_type_alignment(cc *c, qty t) { return AST_TYPE(c, t)->align; }
 
-VPRIV bool complete(cc *c, qty t)
+CC_PRIVATE bool cc_type_complete(cc *c, qty t)
 {
-	const ctype *x = T(c, t);
+	const ctype *x = AST_TYPE(c, t);
 
 	switch (x->kind) {
 	case TY_VOID:
@@ -363,9 +363,9 @@ VPRIV bool complete(cc *c, qty t)
 }
 
 /* integer conversion rank */
-VPRIV int rank(cc *c, qty t)
+CC_PRIVATE int cc_type_rank(cc *c, qty t)
 {
-	switch (KIND(c, t)) {
+	switch (AST_TYPE_KIND(c, t)) {
 	case TY_BOOL: return 1;
 	case TY_CHAR: case TY_SCHAR: case TY_UCHAR: return 2;
 	case TY_SHORT: case TY_USHORT: return 3;
@@ -374,71 +374,71 @@ VPRIV int rank(cc *c, qty t)
 	case TY_LLONG: case TY_ULLONG: return 6;
 	case TY_INT128: case TY_UINT128: return 7;
 	case TY_BITINT: case TY_UBITINT: return 8;
-	case TY_ENUM: return rank(c, T(c, t)->base);
+	case TY_ENUM: return cc_type_rank(c, AST_TYPE(c, t)->base);
 	default: return 0;
 	}
 }
 
-VPRIV qty prim(int k) { return QT(k, 0); }
+CC_PRIVATE qty cc_type_basic(int k) { return QT(k, 0); }
 
-VPRIV qty unsigned_of(cc *c, qty t)
+CC_PRIVATE qty cc_type_unsigned(cc *c, qty t)
 {
-	if (is_int_kind(KIND(c, t)) && T(c, t)->n && !(T(c, t)->flags & TF_ATOMIC))
-		return ty_bitint(c, T(c, t)->n, true);
-	switch (KIND(c, t)) {
-	case TY_CHAR: case TY_SCHAR: return prim(TY_UCHAR);
-	case TY_SHORT: return prim(TY_USHORT);
-	case TY_INT: return prim(TY_UINT);
-	case TY_LONG: return prim(TY_ULONG);
-	case TY_LLONG: return prim(TY_ULLONG);
-	case TY_INT128: return prim(TY_UINT128);
-	case TY_ENUM: return unsigned_of(c, T(c, t)->base);
+	if (cc_type_kind_is_integer(AST_TYPE_KIND(c, t)) && AST_TYPE(c, t)->n && !(AST_TYPE(c, t)->flags & TF_ATOMIC))
+		return cc_type_bitint(c, AST_TYPE(c, t)->n, true);
+	switch (AST_TYPE_KIND(c, t)) {
+	case TY_CHAR: case TY_SCHAR: return cc_type_basic(TY_UCHAR);
+	case TY_SHORT: return cc_type_basic(TY_USHORT);
+	case TY_INT: return cc_type_basic(TY_UINT);
+	case TY_LONG: return cc_type_basic(TY_ULONG);
+	case TY_LLONG: return cc_type_basic(TY_ULLONG);
+	case TY_INT128: return cc_type_basic(TY_UINT128);
+	case TY_ENUM: return cc_type_unsigned(c, AST_TYPE(c, t)->base);
 	default: return QUNQ(t);
 	}
 }
 
 /* the result of comparing vectors of type v: signed integers of the lane size */
-VPRIV qty vec_mask_type(cc *c, qty v)
+CC_PRIVATE qty cc_type_vector_mask(cc *c, qty v)
 {
-	if (is_bool_vector(c, v)) return QUNQ(v);
-	uint32_t es = (uint32_t)T(c, T(c, v)->base)->size;
+	if (cc_type_is_bool_vector(c, v)) return QUNQ(v);
+	uint32_t es = (uint32_t)AST_TYPE(c, AST_TYPE(c, v)->base)->size;
 	int k = es == 1 ? TY_SCHAR : es == 2 ? TY_SHORT : es == 4 ? TY_INT : es == 8 ? CC_I64(c, false) : TY_INT128;
 
-	return ty_vector(c, prim(k), (uint32_t)T(c, v)->size);
+	return cc_type_vector(c, cc_type_basic(k), (uint32_t)AST_TYPE(c, v)->size);
 }
 
 /* integer promotion (bit-fields are handled by the caller) */
-VPRIV qty promote(cc *c, qty t)
+CC_PRIVATE qty cc_type_promote(cc *c, qty t)
 {
-	int k = KIND(c, t);
+	int k = AST_TYPE_KIND(c, t);
 
 	if (k == TY_ENUM)
-		return promote(c, T(c, t)->base);
-	if (is_int_kind(k) && !T(c, t)->n && rank(c, t) < 4)
-		return prim(TY_INT);
-	return QT(T(c, t)->canon, 0);
+		return cc_type_promote(c, AST_TYPE(c, t)->base);
+	if (cc_type_kind_is_integer(k) && !AST_TYPE(c, t)->n && cc_type_rank(c, t) < 4)
+		return cc_type_basic(TY_INT);
+	return QT(AST_TYPE(c, t)->canon, 0);
 }
 
-VPRIV qty arith_conv(cc *c, qty a, qty b)
+CC_PRIVATE qty cc_type_arithmetic_conversion(cc *c, qty a, qty b)
 {
 	int ka, kb;
 
-	if (is_float(c, a) || is_float(c, b)) {
-		ka = is_float(c, a) ? KIND(c, a) : 0;
-		kb = is_float(c, b) ? KIND(c, b) : 0;
-		return prim(ka > kb ? ka : kb);
+	if (cc_type_is_float(c, a) || cc_type_is_float(c, b)) {
+		ka = cc_type_is_float(c, a) ? AST_TYPE_KIND(c, a) : 0;
+		kb = cc_type_is_float(c, b) ? AST_TYPE_KIND(c, b) : 0;
+		return cc_type_basic(ka > kb ? ka : kb);
 	}
-	a = promote(c, a);
-	b = promote(c, b);
+	a = cc_type_promote(c, a);
+	b = cc_type_promote(c, b);
 	if (a == b)
 		return a;
 	{
-		bool sa = is_signed(c, a), sb = is_signed(c, b);
-		int ra = rank(c, a), rb = rank(c, b);
+		bool sa = cc_type_is_signed(c, a), sb = cc_type_is_signed(c, b);
+		int ra = cc_type_rank(c, a), rb = cc_type_rank(c, b);
 
-		if (T(c, a)->n || T(c, b)->n) {
-			ra = (int)int_bits(c, a) * 16 + (T(c, a)->n ? 0 : ra);
-			rb = (int)int_bits(c, b) * 16 + (T(c, b)->n ? 0 : rb);
+		if (AST_TYPE(c, a)->n || AST_TYPE(c, b)->n) {
+			ra = (int)cc_type_integer_bits(c, a) * 16 + (AST_TYPE(c, a)->n ? 0 : ra);
+			rb = (int)cc_type_integer_bits(c, b) * 16 + (AST_TYPE(c, b)->n ? 0 : rb);
 		}
 
 		if (sa == sb)
@@ -448,25 +448,25 @@ VPRIV qty arith_conv(cc *c, qty a, qty b)
 		if (!sb && rb >= ra)
 			return b;
 		/* signed operand has greater rank */
-		if (sa && int_bits(c, a) > int_bits(c, b))
+		if (sa && cc_type_integer_bits(c, a) > cc_type_integer_bits(c, b))
 			return a;
-		if (sb && int_bits(c, b) > int_bits(c, a))
+		if (sb && cc_type_integer_bits(c, b) > cc_type_integer_bits(c, a))
 			return b;
-		return unsigned_of(c, sa ? a : b);
+		return cc_type_unsigned(c, sa ? a : b);
 	}
 }
 
-static bool compatible_q(cc *c, qty a, qty b)
+static bool cc_type_is_compatible_qualified(cc *c, qty a, qty b)
 {
-	return QQ(a) == QQ(b) && compatible(c, a, b);
+	return QQ(a) == QQ(b) && cc_type_is_compatible(c, a, b);
 }
 
 /* GNU transparent unions accept a member type in a function prototype.
    This does not make the union and that member compatible as object types. */
-static bool compatible_param(cc *c, qty a, qty b)
+static bool cc_type_is_compatible_parameter(cc *c, qty a, qty b)
 {
-	if (compatible(c, a, b)) return true;
-	const ctype *x = T(c, canon(c, a)), *y = T(c, canon(c, b));
+	if (cc_type_is_compatible(c, a, b)) return true;
+	const ctype *x = AST_TYPE(c, canon(c, a)), *y = AST_TYPE(c, canon(c, b));
 	if (x->kind == TY_UNION && y->kind == TY_UNION) return false;
 	if (y->kind == TY_UNION) {
 		x = y;
@@ -475,36 +475,36 @@ static bool compatible_param(cc *c, qty a, qty b)
 	if (x->kind != TY_UNION || !(x->flags & TF_TRANSPARENT)) return false;
 	const tag *r = &c->tags[x->aux];
 	for (uint32_t i = 0; i < r->nfield; i++)
-		if (compatible(c, r->f[i].ty, b)) return true;
+		if (cc_type_is_compatible(c, r->f[i].ty, b)) return true;
 	return false;
 }
 
-VPRIV bool compatible(cc *c, qty a, qty b)
+CC_PRIVATE bool cc_type_is_compatible(cc *c, qty a, qty b)
 {
 	const ctype *x, *y;
 
 	a = canon(c, a), b = canon(c, b);
 	if (QI(a) == QI(b))
 		return true;
-	x = T(c, a), y = T(c, b);
+	x = AST_TYPE(c, a), y = AST_TYPE(c, b);
 	if ((x->flags ^ y->flags) & TF_ATOMIC)
 		return false;
 	if (x->flags & TF_ATOMIC)
-		return compatible(c, ty_unatomic(c, a), ty_unatomic(c, b));
+		return cc_type_is_compatible(c, cc_type_unatomic(c, a), cc_type_unatomic(c, b));
 	/* an enum is compatible with its underlying type */
 	if (x->kind == TY_ENUM && y->kind != TY_ENUM)
-		return compatible(c, x->base, b);
+		return cc_type_is_compatible(c, x->base, b);
 	if (y->kind == TY_ENUM && x->kind != TY_ENUM)
-		return compatible(c, a, y->base);
+		return cc_type_is_compatible(c, a, y->base);
 	if (x->kind != y->kind)
 		return false;
-	if (is_int_kind(x->kind) && x->n != y->n)
+	if (cc_type_kind_is_integer(x->kind) && x->n != y->n)
 		return false;
 	switch (x->kind) {
 	case TY_PTR:
-		return (x->flags & TF_BLOCK) == (y->flags & TF_BLOCK) && compatible_q(c, x->base, y->base);
+		return (x->flags & TF_BLOCK) == (y->flags & TF_BLOCK) && cc_type_is_compatible_qualified(c, x->base, y->base);
 	case TY_ARRAY:
-		if (!compatible_q(c, x->base, y->base))
+		if (!cc_type_is_compatible_qualified(c, x->base, y->base))
 			return false;
 		if ((x->flags | y->flags) & TF_INCOMPLETE)
 			return true;
@@ -512,15 +512,15 @@ VPRIV bool compatible(cc *c, qty a, qty b)
 			/* A constant outer bound of an array of VLAs still participates
 			 * in compatibility. Only genuinely variable bounds are ignored. */
 			cval xv, yv;
-			uint64_t xn = arr_len(c, a), yn = arr_len(c, b);
+			uint64_t xn = cc_type_array_length(c, a), yn = cc_type_array_length(c, b);
 
 			if (x->flags & TF_VLA) {
-				if (!x->n || !eval(c, x->n, &xv) || xv.kind != CV_INT || !xv.ice)
+				if (!x->n || !cc_constant_eval(c, x->n, &xv) || xv.kind != CV_INT || !xv.ice)
 					return true;
 				xn = (uint64_t)xv.i;
 			}
 			if (y->flags & TF_VLA) {
-				if (!y->n || !eval(c, y->n, &yv) || yv.kind != CV_INT || !yv.ice)
+				if (!y->n || !cc_constant_eval(c, y->n, &yv) || yv.kind != CV_INT || !yv.ice)
 					return true;
 				yn = (uint64_t)yv.i;
 			}
@@ -528,14 +528,14 @@ VPRIV bool compatible(cc *c, qty a, qty b)
 		}
 		return x->n == y->n && x->aux == y->aux;
 	case TY_FUNC:
-		if (!compatible(c, x->base, y->base) || QQ(x->base) != QQ(y->base))
+		if (!cc_type_is_compatible(c, x->base, y->base) || QQ(x->base) != QQ(y->base))
 			return false;
 		if ((x->flags | y->flags) & TF_NOPROTO)
 			return true;
 		if (x->n != y->n || (x->flags & TF_VARIADIC) != (y->flags & TF_VARIADIC))
 			return false;
 		for (uint32_t i = 0; i < x->n; i++)
-			if (!compatible_param(c, c->params[x->aux + i], c->params[y->aux + i]))
+			if (!cc_type_is_compatible_parameter(c, c->params[x->aux + i], c->params[y->aux + i]))
 				return false;
 		return true;
 	default:
@@ -544,20 +544,20 @@ VPRIV bool compatible(cc *c, qty a, qty b)
 }
 
 /* composite type of two compatible types (redeclarations, ?: on pointers) */
-VPRIV qty composite(cc *c, qty a, qty b)
+CC_PRIVATE qty cc_type_composite(cc *c, qty a, qty b)
 {
-	const ctype *x = T(c, a), *y = T(c, b);
+	const ctype *x = AST_TYPE(c, a), *y = AST_TYPE(c, b);
 
 	if ((x->flags & y->flags) & TF_ATOMIC)
-		return qualify(c, ty_atomic(c, composite(c, ty_unatomic(c, a), ty_unatomic(c, b)), 0), QQ(a));
+		return cc_type_qualify(c, cc_type_atomic(c, cc_type_composite(c, cc_type_unatomic(c, a), cc_type_unatomic(c, b)), 0), QQ(a));
 
 	if (x->kind == TY_ARRAY && y->kind == TY_ARRAY) {
-		qty e = composite(c, x->base, y->base);
+		qty e = cc_type_composite(c, x->base, y->base);
 
 		if (!(x->flags & (TF_INCOMPLETE | TF_VLA)))
-			return QT(QI(ty_array(c, e, arr_len(c, a), 0)), QQ(a));
+			return QT(QI(cc_type_array(c, e, cc_type_array_length(c, a), 0)), QQ(a));
 		if (!(y->flags & (TF_INCOMPLETE | TF_VLA)))
-			return QT(QI(ty_array(c, e, arr_len(c, b), 0)), QQ(a));
+			return QT(QI(cc_type_array(c, e, cc_type_array_length(c, b), 0)), QQ(a));
 		return a;
 	}
 	if (x->kind == TY_FUNC && y->kind == TY_FUNC) {
@@ -566,6 +566,6 @@ VPRIV qty composite(cc *c, qty a, qty b)
 		return a;
 	}
 	if (x->kind == TY_PTR && y->kind == TY_PTR)
-		return QT(QI(ty_ptr(c, composite(c, x->base, y->base))), QQ(a));
+		return QT(QI(cc_type_pointer(c, cc_type_composite(c, x->base, y->base))), QQ(a));
 	return a;
 }

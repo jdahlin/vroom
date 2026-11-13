@@ -2,7 +2,7 @@
    place it resolves a name to a struct or union field (declaration, `.`, `->`, designator,
    offsetof); at the end of the TU the uses of the selected fields are printed, one line
    each, with the bytes a rename has to edit (doc/quality/DESIGN-field-uses.md). */
-#include "ccimpl.h"
+#include "cc-internal.h"
 #include <errno.h>
 
 typedef struct fu_sel {
@@ -78,7 +78,7 @@ static int fu_cmp_u32(const void *a, const void *b)
 	return x < y ? -1 : x > y;
 }
 
-VPRIV void cc_field_uses_begin(cc *c, const char *path)
+CC_PRIVATE void cc_field_uses_begin(cc *c, const char *path)
 {
 	FILE *f = fopen(path, "r");
 	char *line = NULL;
@@ -149,7 +149,7 @@ static bool fu_wanted(const fu *u, uint32_t id)
 }
 
 /* a record's body starts: tok(c) is its '{' */
-VPRIV void cc_field_uses_def(cc *c, uint32_t ti)
+CC_PRIVATE void cc_field_uses_def(cc *c, uint32_t ti)
 {
 	fu *u = c->field_uses;
 
@@ -158,7 +158,7 @@ VPRIV void cc_field_uses_def(cc *c, uint32_t ti)
 	u->defs[u->ndefs++].loc = tok(c)->loc;
 }
 
-VPRIV void cc_field_uses_name_keep(cc *c)
+CC_PRIVATE void cc_field_uses_name_keep(cc *c)
 {
 	fu *u = c->field_uses;
 
@@ -178,7 +178,7 @@ static void fu_add(cc *c, int role, uint32_t tag, uint32_t idx, const ptok *t)
 }
 
 /* a member declaration: the declarator's name token is the one kept at loc */
-VPRIV void cc_field_uses_decl(cc *c, uint32_t tag, uint32_t idx, uint32_t name, uint32_t loc)
+CC_PRIVATE void cc_field_uses_decl(cc *c, uint32_t tag, uint32_t idx, uint32_t name, uint32_t loc)
 {
 	fu *u = c->field_uses;
 
@@ -192,24 +192,24 @@ VPRIV void cc_field_uses_decl(cc *c, uint32_t tag, uint32_t idx, uint32_t name, 
 }
 
 /* n: the node member() returned for the name kept by cc_field_uses_name_keep */
-VPRIV void cc_field_uses_member(cc *c, uint32_t n, uint32_t id)
+CC_PRIVATE void cc_field_uses_member(cc *c, uint32_t n, uint32_t id)
 {
 	fu *u = c->field_uses;
 
-	if (N(n)->op != N_MEMBER || !fu_wanted(u, id))
+	if (AST_NODE(n)->op != N_MEMBER || !fu_wanted(u, id))
 		return;
-	if (N(n)->b < c->ntag && N(n)->c < c->tags[N(n)->b].nfield && c->tags[N(n)->b].f[N(n)->c].name == id)
-		fu_add(c, FU_MEMBER, N(n)->b, N(n)->c, &u->pend);
+	if (AST_NODE(n)->b < c->ntag && AST_NODE(n)->c < c->tags[AST_NODE(n)->b].nfield && c->tags[AST_NODE(n)->b].f[AST_NODE(n)->c].name == id)
+		fu_add(c, FU_MEMBER, AST_NODE(n)->b, AST_NODE(n)->c, &u->pend);
 }
 
-/* find_member's result for the name at tok(c): the last step of the path is the named field */
-VPRIV void cc_field_uses_path_record(cc *c, int role, uint32_t tag, const uint32_t *path, int depth)
+/* cc_member_find's result for the name at tok(c): the last step of the path is the named field */
+CC_PRIVATE void cc_field_uses_path_record(cc *c, int role, uint32_t tag, const uint32_t *path, int depth)
 {
 	fu *u = c->field_uses;
 	uint32_t ti = tag;
 
 	for (int i = 0; i + 1 < depth; i++)
-		ti = T(c, c->tags[ti].f[path[i]].ty)->aux;
+		ti = AST_TYPE(c, c->tags[ti].f[path[i]].ty)->aux;
 	if (fu_wanted(u, tok(c)->id))
 		fu_add(c, role, ti, path[depth - 1], tok(c));
 }
@@ -239,9 +239,9 @@ static void fu_owner(cc *c, uint32_t ti, char *b, size_t n, int depth)
 	const tag *r = &c->tags[ti];
 
 	if (r->name)
-		snprintf(b, n, "%.*s", IDF(r->name));
+		snprintf(b, n, "%.*s", CC_IDENTIFIER(r->name));
 	else if (r->typedef_name)
-		snprintf(b, n, "%.*s", IDF(r->typedef_name));
+		snprintf(b, n, "%.*s", CC_IDENTIFIER(r->typedef_name));
 	else if (u->cont_tag[ti] != FU_NONE && depth < 64) {
 		uint32_t ct = u->cont_tag[ti];
 		const field *f = &c->tags[ct].f[u->cont_fld[ti]];
@@ -250,7 +250,7 @@ static void fu_owner(cc *c, uint32_t ti, char *b, size_t n, int depth)
 		if (f->name) {
 			size_t l = strlen(b);
 
-			snprintf(b + l, n - l, ".%.*s", IDF(f->name));
+			snprintf(b + l, n - l, ".%.*s", CC_IDENTIFIER(f->name));
 		}
 	} else {
 		char w[600];
@@ -260,7 +260,7 @@ static void fu_owner(cc *c, uint32_t ti, char *b, size_t n, int depth)
 	}
 }
 
-/* the names find_member finds from a record: its fields and its anonymous members' */
+/* the names cc_member_find finds from a record: its fields and its anonymous members' */
 static void fu_names(cc *c, uint32_t ti, char *b, size_t n, int depth)
 {
 	const tag *r = &c->tags[ti];
@@ -270,9 +270,9 @@ static void fu_names(cc *c, uint32_t ti, char *b, size_t n, int depth)
 		size_t l = strlen(b);
 
 		if (f->name)
-			snprintf(b + l, n - l, "%s%.*s", l ? "," : "", IDF(f->name));
-		else if (!f->bitfield && is_record(c, f->ty) && depth < 64)
-			fu_names(c, T(c, f->ty)->aux, b, n, depth + 1);
+			snprintf(b + l, n - l, "%s%.*s", l ? "," : "", CC_IDENTIFIER(f->name));
+		else if (!f->bitfield && cc_type_is_record(c, f->ty) && depth < 64)
+			fu_names(c, AST_TYPE(c, f->ty)->aux, b, n, depth + 1);
 	}
 }
 
@@ -295,14 +295,14 @@ static void fu_line(cc *c, const char *kind, const fu_use *x, const char *owner,
 				line++, b = i + 1;
 		col = off - b + 1;
 		fu_printf(u, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%u\t%u\t%u\t%d\t%s\n", kind, roles[x->role], owner, field, def, wheres[rc],
-			  f->path, off, line, col, idlen_(c->tags[x->tag].f[x->idx].name), rc == PP_SPELLING_FILE ? "-" : ex);
+			  f->path, off, line, col, cc_identifier_length(c->tags[x->tag].f[x->idx].name), rc == PP_SPELLING_FILE ? "-" : ex);
 	} else {
 		fu_printf(u, "%s\t%s\t%s\t%s\t%s\t%s\t%.*s\t-1\t%u\t%u\t%d\t%s\n", kind, roles[x->role], owner, field, def, wheres[rc],
-			  (int)nl, name, el, ec, idlen_(c->tags[x->tag].f[x->idx].name), ex);
+			  (int)nl, name, el, ec, cc_identifier_length(c->tags[x->tag].f[x->idx].name), ex);
 	}
 }
 
-VPRIV void cc_field_uses_finish(cc *c)
+CC_PRIVATE void cc_field_uses_finish(cc *c)
 {
 	fu *u = c->field_uses;
 	uint32_t n = c->ntag;
@@ -328,10 +328,10 @@ VPRIV void cc_field_uses_finish(cc *c)
 		for (uint32_t i = 0; i < c->tags[ti].nfield; i++) {
 			qty t = c->tags[ti].f[i].ty;
 
-			while (is_array(c, t))
-				t = T(c, t)->base;
-			if (is_record(c, t)) {
-				uint32_t t2 = T(c, t)->aux;
+			while (cc_type_is_array(c, t))
+				t = AST_TYPE(c, t)->base;
+			if (cc_type_is_record(c, t)) {
+				uint32_t t2 = AST_TYPE(c, t)->aux;
 
 				if (!c->tags[t2].name && !c->tags[t2].typedef_name && t2 != ti && u->cont_tag[t2] == FU_NONE)
 					u->cont_tag[t2] = ti, u->cont_fld[t2] = i;
@@ -353,7 +353,7 @@ VPRIV void cc_field_uses_finish(cc *c)
 		if (sel || bsearch(&name, u->fids, u->nfids, sizeof(uint32_t), fu_cmp_u32)) {
 			char fld[256];
 
-			snprintf(fld, sizeof fld, "%.*s", IDF(name));
+			snprintf(fld, sizeof fld, "%.*s", CC_IDENTIFIER(name));
 			fu_line(c, sel ? "use" : "other", x, owner, def, fld);
 		}
 	}

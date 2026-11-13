@@ -59,7 +59,7 @@ def explicit_ids():
                     src = open(os.path.join(root, f), errors='replace').read()
                     got |= set(re.findall(r'->id = "(\w+)"', src))
                     got |= {x for p in re.findall(r'->id = [^;]*\? "(\w+)" : "(\w+)"', src) for x in p}
-                    for m in re.finditer(r'conv_error\(c, n, to, "[^"]*", "(\w+)"', src):
+                    for m in re.finditer(r'cc_conversion_error_report\(c, n, to, "[^"]*", "(\w+)"', src):
                         got.add(m.group(1))
     return got
 

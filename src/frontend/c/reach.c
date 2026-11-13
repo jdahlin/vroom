@@ -1,5 +1,5 @@
 /* vcc front end: can a function body fall off its end (clang's CheckFallThrough, -Wreturn-type, -Winvalid-noreturn) */
-#include "ccimpl.h"
+#include "cc-internal.h"
 
 /*
  * Reachability over the statement tree, as clang's CFG sees it: constant
@@ -9,7 +9,7 @@
  */
 
 /* a condition: 1 constant true, 0 constant false, -1 not constant */
-VPRIV int fl_const(flw *f, uint32_t n)
+CC_PRIVATE int cc_reach_condition_constant(cc_reach_state *f, uint32_t n)
 {
 	cval cv;
 
@@ -20,37 +20,37 @@ VPRIV int fl_const(flw *f, uint32_t n)
 	if (cc_eval(c, n, &cv) && cv.kind == CV_INT)
 		return cv.i != 0;
 	/* clang's tryEvaluateBool: && and || with one known side, !, a const variable's initializer */
-	switch (N(n)->op) {
+	switch (AST_NODE(n)->op) {
 	case N_LOGOR: {
-		int a = fl_const(f, N(n)->a), b;
+		int a = cc_reach_condition_constant(f, AST_NODE(n)->a), b;
 
 		if (a == 1)
 			return 1;
-		b = fl_const(f, N(n)->b);
+		b = cc_reach_condition_constant(f, AST_NODE(n)->b);
 		return b == 1 ? 1 : a == 0 && b == 0 ? 0 : -1;
 	}
 	case N_LOGAND: {
-		int a = fl_const(f, N(n)->a), b;
+		int a = cc_reach_condition_constant(f, AST_NODE(n)->a), b;
 
 		if (a == 0)
 			return 0;
-		b = fl_const(f, N(n)->b);
+		b = cc_reach_condition_constant(f, AST_NODE(n)->b);
 		return b == 0 ? 0 : a == 1 && b == 1 ? 1 : -1;
 	}
 	case N_UNARY:
-		if (N(n)->aux == LEX_TOKEN_EXCLAMATION) {
-			int a = fl_const(f, N(n)->a);
+		if (AST_NODE(n)->aux == LEX_TOKEN_EXCLAMATION) {
+			int a = cc_reach_condition_constant(f, AST_NODE(n)->a);
 
 			return a < 0 ? -1 : !a;
 		}
 		return -1;
 	case N_CAST:
-		return N(n)->aux == CK_BOOL || N(n)->aux == CK_INT || N(n)->aux == CK_NOP ? fl_const(f, N(n)->a) : -1;
+		return AST_NODE(n)->aux == CK_BOOL || AST_NODE(n)->aux == CK_INT || AST_NODE(n)->aux == CK_NOP ? cc_reach_condition_constant(f, AST_NODE(n)->a) : -1;
 	case N_VAR: {
-		const sym *y = &c->syms[N(n)->a];
+		const sym *y = &c->syms[AST_NODE(n)->a];
 
 		if (y->kind == S_VAR && (QQ(y->ty) & Q_CONST) && !(QQ(y->ty) & Q_VOLATILE) && y->body &&
-		    is_integer(c, y->ty) && cc_eval(c, y->body, &cv) && cv.kind == CV_INT)
+		    cc_type_is_integer(c, y->ty) && cc_eval(c, y->body, &cv) && cv.kind == CV_INT)
 			return cv.i != 0;
 		return -1;
 	}
@@ -60,24 +60,24 @@ VPRIV int fl_const(flw *f, uint32_t n)
 }
 
 /* an expression statement that never completes: a call of a noreturn function */
-VPRIV bool fl_noreturn(flw *f, uint32_t e)
+CC_PRIVATE bool cc_reach_is_noreturn(cc_reach_state *f, uint32_t e)
 {
 	cc *c = f->c;
 
-	while (e && N(e)->op == N_CAST)
-		e = N(e)->a;
+	while (e && AST_NODE(e)->op == N_CAST)
+		e = AST_NODE(e)->a;
 	if (!e)
 		return false;
-	if (N(e)->op == N_COMMA)
-		return fl_noreturn(f, N(e)->a) || fl_noreturn(f, N(e)->b);
-	if (N(e)->op == N_BUILTIN)
-		return N(e)->aux == BI_UNREACHABLE || N(e)->aux == BI_TRAP;
-	if (N(e)->op == N_CALL) {
-		uint32_t fn = N(e)->a;
+	if (AST_NODE(e)->op == N_COMMA)
+		return cc_reach_is_noreturn(f, AST_NODE(e)->a) || cc_reach_is_noreturn(f, AST_NODE(e)->b);
+	if (AST_NODE(e)->op == N_BUILTIN)
+		return AST_NODE(e)->aux == BI_UNREACHABLE || AST_NODE(e)->aux == BI_TRAP;
+	if (AST_NODE(e)->op == N_CALL) {
+		uint32_t fn = AST_NODE(e)->a;
 
-		while (N(fn)->op == N_CAST)
-			fn = N(fn)->a;
-		if (N(fn)->op == N_VAR && (c->syms[N(fn)->a].flags & SF_NORETURN))
+		while (AST_NODE(fn)->op == N_CAST)
+			fn = AST_NODE(fn)->a;
+		if (AST_NODE(fn)->op == N_VAR && (c->syms[AST_NODE(fn)->a].flags & SF_NORETURN))
 			return true;
 		/* a call through a pointer to a noreturn function type is not tracked */
 	}
@@ -85,36 +85,36 @@ VPRIV bool fl_noreturn(flw *f, uint32_t e)
 }
 
 /* a noreturn call anywhere in the expression (?:, &&, || operands, arguments) */
-static bool fl_has_noreturn(flw *f, uint32_t e)
+static bool cc_reach_has_noreturn(cc_reach_state *f, uint32_t e)
 {
 	cc *c = f->c;
 	const node *x;
 
 	if (!e)
 		return false;
-	x = N(e);
+	x = AST_NODE(e);
 	switch (x->op) {
 	case N_CALL:
-		if (fl_noreturn(f, e))
+		if (cc_reach_is_noreturn(f, e))
 			return true;
 		for (uint32_t i = 0; i < x->c; i++)
-			if (fl_has_noreturn(f, c->lists[x->b + i]))
+			if (cc_reach_has_noreturn(f, c->lists[x->b + i]))
 				return true;
 		return false;
 	case N_BUILTIN:
-		return fl_noreturn(f, e);
+		return cc_reach_is_noreturn(f, e);
 	case N_COND:
-		return fl_has_noreturn(f, x->a) || fl_has_noreturn(f, x->b) || fl_has_noreturn(f, x->c);
+		return cc_reach_has_noreturn(f, x->a) || cc_reach_has_noreturn(f, x->b) || cc_reach_has_noreturn(f, x->c);
 	case N_LOGAND: case N_LOGOR: case N_COMMA: case N_BINARY: case N_ASSIGN:
-		return fl_has_noreturn(f, x->a) || fl_has_noreturn(f, x->b);
+		return cc_reach_has_noreturn(f, x->a) || cc_reach_has_noreturn(f, x->b);
 	case N_CAST: case N_UNARY:
-		return fl_has_noreturn(f, x->a);
+		return cc_reach_has_noreturn(f, x->a);
 	default:
 		return false;
 	}
 }
 
-static void fl_reach_label(flw *f, uint32_t l)
+static void cc_reach_label_mark(cc_reach_state *f, uint32_t l)
 {
 	if (l >= f->first && l - f->first < f->nlab && !f->lab[l - f->first]) {
 		f->lab[l - f->first] = 1;
@@ -124,98 +124,98 @@ static void fl_reach_label(flw *f, uint32_t l)
 
 
 /* the switch body's own case labels (not a nested switch's): one matches v / a default */
-VPRIV bool fl_case_match(flw *f, uint32_t n, i128 v)
+CC_PRIVATE bool cc_reach_case_matches(cc_reach_state *f, uint32_t n, i128 v)
 {
 	cc *c = f->c;
 	const node *x;
 
 	if (!n)
 		return false;
-	x = N(n);
+	x = AST_NODE(n);
 	switch (x->op) {
 	case N_BLOCK:
 		for (uint32_t i = 0; i < x->c; i++)
-			if (fl_case_match(f, c->lists[x->b + i], v))
+			if (cc_reach_case_matches(f, c->lists[x->b + i], v))
 				return true;
 		return false;
 	case N_CASE:
-		return (v >= c->ipool[x->a] && v <= c->ipool[x->b]) || fl_case_match(f, x->c, v);
+		return (v >= c->ipool[x->a] && v <= c->ipool[x->b]) || cc_reach_case_matches(f, x->c, v);
 	case N_DEFAULT: case N_LABEL:
-		return fl_case_match(f, x->c, v);
+		return cc_reach_case_matches(f, x->c, v);
 	case N_IF:
-		return fl_case_match(f, x->b, v) || fl_case_match(f, x->c, v);
+		return cc_reach_case_matches(f, x->b, v) || cc_reach_case_matches(f, x->c, v);
 	case N_WHILE: case N_DO:
-		return fl_case_match(f, x->b, v);
+		return cc_reach_case_matches(f, x->b, v);
 	case N_FOR:
-		return fl_case_match(f, c->lists[x->c + 1], v);
+		return cc_reach_case_matches(f, c->lists[x->c + 1], v);
 	default:
 		return false;
 	}
 }
 
-VPRIV bool fl_has_default(flw *f, uint32_t n)
+CC_PRIVATE bool cc_reach_has_default(cc_reach_state *f, uint32_t n)
 {
 	cc *c = f->c;
 	const node *x;
 
 	if (!n)
 		return false;
-	x = N(n);
+	x = AST_NODE(n);
 	switch (x->op) {
 	case N_BLOCK:
 		for (uint32_t i = 0; i < x->c; i++)
-			if (fl_has_default(f, c->lists[x->b + i]))
+			if (cc_reach_has_default(f, c->lists[x->b + i]))
 				return true;
 		return false;
 	case N_DEFAULT:
 		return true;
 	case N_CASE: case N_LABEL:
-		return fl_has_default(f, x->c);
+		return cc_reach_has_default(f, x->c);
 	case N_IF:
-		return fl_has_default(f, x->b) || fl_has_default(f, x->c);
+		return cc_reach_has_default(f, x->b) || cc_reach_has_default(f, x->c);
 	case N_WHILE: case N_DO:
-		return fl_has_default(f, x->b);
+		return cc_reach_has_default(f, x->b);
 	case N_FOR:
-		return fl_has_default(f, c->lists[x->c + 1]);
+		return cc_reach_has_default(f, c->lists[x->c + 1]);
 	default:
 		return false;
 	}
 }
 
-static bool fl_stmt(flw *f, uint32_t n, bool in);
+static bool cc_reach_statement(cc_reach_state *f, uint32_t n, bool in);
 
-static bool fl_loop_body(flw *f, uint32_t body, bool in, bool *brk, bool *cont)
+static bool cc_reach_loop_body(cc_reach_state *f, uint32_t body, bool in, bool *brk, bool *cont)
 {
 	bool sb = f->brk, sc = f->cont, out;
 
 	f->brk = f->cont = false;
-	out = fl_stmt(f, body, in);
+	out = cc_reach_statement(f, body, in);
 	*brk = f->brk, *cont = f->cont;
 	f->brk = sb, f->cont = sc;
 	return out;
 }
 
-static bool fl_stmt(flw *f, uint32_t n, bool in)
+static bool cc_reach_statement(cc_reach_state *f, uint32_t n, bool in)
 {
 	cc *c = f->c;
 	const node *x;
 
 	if (!n)
 		return in;
-	x = N(n);
+	x = AST_NODE(n);
 	switch (x->op) {
 	case N_BLOCK:
 		for (uint32_t i = 0; i < x->c; i++)
-			in = fl_stmt(f, c->lists[x->b + i], in);
+			in = cc_reach_statement(f, c->lists[x->b + i], in);
 		return in;
 	case N_EXPR:
-		if (in && x->a && N(x->a)->op == N_STMTEXPR)
-			return fl_stmt(f, N(x->a)->a, in);
-		if (in && fl_noreturn(f, x->a)) {
+		if (in && x->a && AST_NODE(x->a)->op == N_STMTEXPR)
+			return cc_reach_statement(f, AST_NODE(x->a)->a, in);
+		if (in && cc_reach_is_noreturn(f, x->a)) {
 			f->fake = true;
 			return false;
 		}
-		if (in && fl_has_noreturn(f, x->a))
+		if (in && cc_reach_has_noreturn(f, x->a))
 			f->fake = true;	/* (a noreturn call on some path through the expression) */
 		return in;
 	case N_DECL:
@@ -225,20 +225,20 @@ static bool fl_stmt(flw *f, uint32_t n, bool in)
 			f->live_ret = true;
 		return false;
 	case N_IF: {
-		int k = fl_const(f, x->a);
-		bool t = fl_stmt(f, x->b, in && k != 0), e = fl_stmt(f, x->c, in && k != 1);
+		int k = cc_reach_condition_constant(f, x->a);
+		bool t = cc_reach_statement(f, x->b, in && k != 0), e = cc_reach_statement(f, x->c, in && k != 1);
 
 		return t || e;
 	}
 	case N_WHILE: {
-		int k = fl_const(f, x->a);
-		bool brk, cont, end = fl_loop_body(f, x->b, in && k != 0, &brk, &cont);
+		int k = cc_reach_condition_constant(f, x->a);
+		bool brk, cont, end = cc_reach_loop_body(f, x->b, in && k != 0, &brk, &cont);
 
 		return brk || ((in || end || cont) && k != 1);
 	}
 	case N_DO: {
-		int k = fl_const(f, x->a);
-		bool brk, cont, end = fl_loop_body(f, x->b, in, &brk, &cont);
+		int k = cc_reach_condition_constant(f, x->a);
+		bool brk, cont, end = cc_reach_loop_body(f, x->b, in, &brk, &cont);
 
 		return brk || ((end || cont) && k != 1);
 	}
@@ -247,12 +247,12 @@ static bool fl_stmt(flw *f, uint32_t n, bool in)
 		int k;
 		bool brk, cont, end;
 
-		in = fl_stmt(f, x->a, in);
-		k = fl_const(f, x->b);
-		end = fl_loop_body(f, body, in && k != 0, &brk, &cont);
-		if (step && N(step)->op == N_STMTEXPR) {
+		in = cc_reach_statement(f, x->a, in);
+		k = cc_reach_condition_constant(f, x->b);
+		end = cc_reach_loop_body(f, body, in && k != 0, &brk, &cont);
+		if (step && AST_NODE(step)->op == N_STMTEXPR) {
 			/* a statement expression step (the kernel's scoped_guard: ({ goto l; })) */
-			bool back = fl_stmt(f, N(step)->a, end || cont);
+			bool back = cc_reach_statement(f, AST_NODE(step)->a, end || cont);
 
 			return brk || ((in || back) && k != 1);
 		}
@@ -267,9 +267,9 @@ static bool fl_stmt(flw *f, uint32_t n, bool in)
 		f->sw_in = in;
 		f->sw_const = cc_eval(c, x->a, &cv) && cv.kind == CV_INT;
 		f->sw_val = f->sw_const ? cv.i : 0;
-		f->sw_hit = f->sw_const && fl_case_match(f, x->b, f->sw_val);
-		def = fl_has_default(f, x->b) || enum_covered(c, x);	/* (clang: no edge past it) */
-		out = fl_stmt(f, x->b, false);
+		f->sw_hit = f->sw_const && cc_reach_case_matches(f, x->b, f->sw_val);
+		def = cc_reach_has_default(f, x->b) || cc_switch_is_enum_covered(c, x);	/* (clang: no edge past it) */
+		out = cc_reach_statement(f, x->b, false);
 		def = f->sw_const ? (f->sw_hit || def) : def;
 		out = out || f->brk || (in && !def);
 		f->cont = sc || f->cont;
@@ -284,25 +284,25 @@ static bool fl_stmt(flw *f, uint32_t n, bool in)
 
 			here = here && f->sw_val >= lo && f->sw_val <= hi;
 		}
-		return fl_stmt(f, x->c, in || here);
+		return cc_reach_statement(f, x->c, in || here);
 	}
 	case N_DEFAULT: {
 		/* a constant switch reaches default only when no case matches */
 		bool here = f->sw_in && !(f->sw_const && f->sw_hit);
 
-		return fl_stmt(f, x->c, in || here);
+		return cc_reach_statement(f, x->c, in || here);
 	}
 	case N_LABEL:
-		return fl_stmt(f, x->c, in || (x->a >= f->first && x->a - f->first < f->nlab && f->lab[x->a - f->first]));
+		return cc_reach_statement(f, x->c, in || (x->a >= f->first && x->a - f->first < f->nlab && f->lab[x->a - f->first]));
 	case N_GOTO:
 		if (in)
-			fl_reach_label(f, x->a);
+			cc_reach_label_mark(f, x->a);
 		return false;
 	case N_GOTO_IND:
 		if (in)
 			for (uint32_t l = f->first; l < f->first + f->nlab; l++)
 				if (c->labels[l].addr_taken)
-					fl_reach_label(f, l);
+					cc_reach_label_mark(f, l);
 		return false;
 	case N_BREAK:
 		if (in)
@@ -317,7 +317,7 @@ static bool fl_stmt(flw *f, uint32_t n, bool in)
 
 		if (in)
 			for (uint32_t i = 0; i < a->nlabel; i++)
-				fl_reach_label(f, a->labels[i]);
+				cc_reach_label_mark(f, a->labels[i]);
 		return in;
 	}
 	default:
@@ -329,9 +329,9 @@ static bool fl_stmt(flw *f, uint32_t n, bool in)
  * After a function body: 0 the end is not reached, 1 it may be (clang's
  * MaybeFallThrough: also returns or noreturn calls), 2 it always is.
  */
-VPRIV int body_falls_off(cc *c, uint32_t body, uint32_t first_label)
+CC_PRIVATE int cc_reach_body_falls_off(cc *c, uint32_t body, uint32_t first_label)
 {
-	flw f = { .c = c };
+	cc_reach_state f = { .c = c };
 	uint8_t small[256];
 	bool end = false;
 	uint32_t nl = c->nlabel - first_label;
@@ -346,7 +346,7 @@ VPRIV int body_falls_off(cc *c, uint32_t body, uint32_t first_label)
 		f.changed = false;
 		f.live_ret = f.fake = false;
 		f.brk = f.cont = f.sw_in = false;
-		end = fl_stmt(&f, body, true);
+		end = cc_reach_statement(&f, body, true);
 		if (!f.changed)
 			break;
 	}
