@@ -1,0 +1,12 @@
+; PASSES: canon,no-such-pass
+; a name the registry does not know is an error that lists the passes
+vir 1
+target arm64-linux
+sig %s = (int) -> int
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  ret v0
+}
+; ---
+bad/pass-unknown.vir: unknown pass `no-such-pass` (passes: canon compact)

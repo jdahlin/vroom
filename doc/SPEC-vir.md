@@ -768,9 +768,39 @@ and reported separately.
 ## 14. Passes
 
 Every pass takes a canonical, verified function and returns one that is a
-refinement of it. A pass is a plain function `bool vir_NAME(vir_fn *)` that
-returns whether it changed anything. Order at `-O2`: `simplify`, `gvn`, `mem`,
-`simplify`, `dce`.
+refinement of it, in canonical form. This section first says what exists
+(14.0); 14.1-14.5 are the target list of passes on VIR itself, not code.
+
+14.0 **What exists** (`doc/quality/DESIGN-vir-optimizer.md` has the design).
+
+- *The builder's passes* (`src/codegen/vir/pass-table.c`) work on the builder's
+  pre-IR, before `to-vir`: `thread`, `rpo`, `preds`, `seal`, `promote`,
+  `trivial`, `dead-params`, `simplify` (with its `-again` rows),
+  `condition-merge`, `if-conversion`, `vectorize`, `split`, `slot-uses`; then
+  `to-vir` and `canon` produce the function the rest of this specification is
+  about. They stay until each is ported to VIR, one row at a time.
+- *Passes on VIR* are `vir_pass_info` rows of the registry
+  (`src/include/vir/pass.h`, `src/vir/pass-list.c`; one pass per file in
+  `src/vir/pass/`), each `bool run(vir_fn *f, vir_pass_context *ctx)`: it gets
+  a canonical, verified function in the thread's `vir_ctx`, sees only `f` and
+  the context (the unit when `virtest` runs it, a budget for fixed points,
+  the `changes` it adds the instructions it rewrote or removed to), returns
+  whether it changed `f`, and uses no memory but the thread's scratch
+  (`f->tmp`, `vir_ctx.aux`, `bs[]`, 22.2). A pass that only rewrites operands
+  and turns instructions into `nop` ends with `vir_function_compact(f)`
+  (drops the nops and the constants nothing uses, in place, keeping
+  `f->valid`); one that edits blocks or edges ends with `vir_canon`. Its row
+  says which analyses it needs and which stay valid (`keeps`); with
+  `VCC_VIR_CHECK_ANALYSES=1`, `virtest` and `VCC_VIR_PASSES=verify` compute
+  each analysis `keeps` claims again after the pass and report a stale one by
+  the pass's name. The registry has the pass `compact` (`vir_function_compact`)
+  for now. The `-O2` order is the builder's table, which has one row per VIR
+  pass after `canon` (`VCC_VIR_PASSES` names them like the others; a row may
+  be off by default and asked for with `+NAME`).
+- A pass is tested by `virtest` on `.vir` files (16, 17.1).
+
+The target order at `-O2` of the passes on VIR is `simplify`, `gvn`, `mem`,
+`simplify`, `dce` (14.1-14.5).
 
 14.1 **Append-time folding** (part of the builder and of every pass that
 creates instructions, `vir_emit`): an instruction with effects P whose value
@@ -1096,7 +1126,7 @@ x86-like constraints) until V2 brings real input.
 
 | Tool | Use |
 |---|---|
-| `virtest [--no-verify] [--bless] FILE` | Parse, run the passes named in the file (only `canon` until the passes exist), verify, print, and parse and print the result again (11.1); `--equiv` adds 13.9 (with the interpreter); `--bless` rewrites the expected output |
+| `virtest [--no-verify] [--bless] [--passes A,B,...] FILE` | Parse, run the passes named in the file (`canon` and the registry's, 14.0) or by `--passes` (which overrides the file), verify before the first registry pass and after each pass (`@f bN.I: after PASS: RULE: message`; the first failure stops that function), print, and parse and print the result again (11.1); `--equiv` adds 13.9 (with the interpreter); `--bless` rewrites the expected output |
 | `virrun FILE` | Section 13 |
 | `virgen --seed=N [--size=N]` | A random verified unit using the built-in externs only, for `--equiv` and for `fuzz-vir` |
 | `vpp -fvir-dump=...` | 11.7 |
@@ -1105,7 +1135,10 @@ x86-like constraints) until V2 brings real input.
 Environment: `VCC_VIR=1` enables VIR before it is the `-O2` default;
 `VCC_VIR_VERIFY=1` verifies after every pass; `VCC_VIR_STATS=1` prints per TU
 how many functions were built as VIR and the reason for each that was not;
-`VCC_VIR_PASSES=a,b,...` overrides the pass list.
+`VCC_VIR_PASSES=a,b,...` overrides the pass list (`-NAME`, `+NAME`, `only=`,
+`verify`, `time`: `src/codegen/vir/pass-table.c`); `VCC_VIR_CHECK_ANALYSES=1`
+checks, after every pass on VIR, that the analyses its `keeps` row names are
+what a fresh computation gives.
 
 Reasons a function is not built (stable names, counted): `returns_twice`,
 `alloca`, `wide_int`, `long_double`, `vector`, `asm_unsupported`, `tail`,
@@ -1117,7 +1150,8 @@ Reasons a function is not built (stable names, counted): `returns_twice`,
 comments at the top:
 
 ```
-; PASSES: simplify,gvn
+; PASSES: canon,compact
+; CHANGES: yes
 ; EQUIV: @f 1 2 ; @f -1 0        (inputs for --equiv)
 ; EXPECT-UB: no
 ```
@@ -1126,7 +1160,13 @@ followed by the unit, a line `; ---`, and the expected output of
 `virtest` (the printed unit, or the error lines). The unit is the text before
 that line. `PASSES: canon` puts each function in canonical form before it is
 verified; `VERIFY: no` is `--no-verify`; `DOM: yes` appends each function's
-dominator tree (`; dom @f bN idom bM pre P post Q`) as comments. The tests
+dominator tree (`; dom @f bN idom bM pre P post Q`) as comments. `PASSES:`
+lists `canon` and the names of the registry's passes, run in that order on
+every function; `CHANGES: yes` appends, per registry pass and function,
+`; pass NAME @f: changed, N instructions` or `; pass NAME @f: unchanged`, so
+that a test can say that nothing changed. The tests of a pass are in
+`src/test/vir/pass/NAME/`: `change-*.vir` (inputs it must change) and
+`keep-*.vir` (inputs it must not). The tests
 under `test/vir/bad/` must make `virtest` exit with status 1; a file named
 `bad/RULE-name.vir` (`RULE` a rule of section 12) must produce failures of
 exactly that rule. `bench/vir-test.py -j 6` runs them all; `--bless PATTERN`
