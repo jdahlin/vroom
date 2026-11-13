@@ -19,7 +19,8 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
 Plans, specs, research notes and reviews are in `doc/` (names below are
 relative to it); `TODO.md` stays at the top.
 - `PLAN.md`, `PLAN-fas2.md`, `PLAN-wasm.md` (WebAssembly as a target), `PLAN-x86.md`
-  (x86-64 Linux as a target): plans
+  (x86-64 Linux as a target), `PLAN-win64.md` (Windows x64 through MinGW-w64,
+  steps WIN0-WIN10): plans
   and per-step status.  Update the
   status section of a step when it changes.
 - `PLAN-quality.md`: the code quality work before C++ (duplication, one
@@ -302,6 +303,9 @@ bench/quality.py [--clones N]       # source quality numbers: duplication, priva
 bench/quality.py --check            # ... none above bench/quality-baseline.json (--bless rewrites it)
 bench/vcc-wasm.py -j 6              # [needs VCC_WASM=1; not maintained] the C suites for wasm64: vcc -S, clang -c, emcc, node vs clang's build (~2 min)
 bench/vcc-x86.py -j 6               # the C suites for x86-64 on an x86-64 host: vcc -S, clang -c, glibc, native (~10 s; first run ~10 min for the references)
+bench/fetch-testsuites.sh llvm-mingw # the pinned MinGW-w64 sysroot (UCRT) -> work/llvm-mingw (SHA-256 checked; no-op when there)
+bench/vcc-win64.py -j 6 --ref-only  # the C suites for x86_64-w64-mingw32: clang + lld + llvm-mingw sysroot, run under Wine (~60 s cold, <1 s cached)
+bench/vcc-win64.py -j 6 [--obj|--objcmp]   # ... and vcc's side (vpp -S, clang -c, lld, Wine) vs those references (doc/PLAN-win64.md)
 bench/vcc-wasm.py -j 6 --objcmp     # [VCC_WASM=1] ... and vpp -c's object byte-identical to clang's for the same .s
 bench/vcc-wasm.py -j 6 --obj --vlink  # [VCC_WASM=1] ... vcc's side through vpp -c and vlink as emcc's wasm-ld (~9 min)
 bench/vcc-same.py --base DIR -j 6    # test-suite outputs byte-identical with DIR/vpp (vbench.py mkbase REV), ~80 s
