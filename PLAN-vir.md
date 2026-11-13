@@ -1451,6 +1451,93 @@ loopar, färre återanvända över block, inlining), `mov` (allokeraren:
 blockparametrar och argumentkopior), villkorliga hopp (inlining, färre
 `csel`), `b` (blockplacering).
 
+### Flyttar: tre regler prövade utan mätbar vinst; main efter #125 (2026-11-12)
+
+Gren `claude/vir-moves` på main efter #126.  sqlite speedtest1 `--size 100`,
+instruktioner; bruset mellan körningar är ca ±0,005 G.
+
+- **Main efter #125 är 25,71 G, grenen före var 25,52 G.**  #124 ändrar inget
+  (26,178 mot 26,181 på d0cbdcc7); #125 ger +0,19 G (+0,7 %): if-konverteringen
+  i byggaren gör nu upp till åtta `select` per sammanflöde i stället för en,
+  så båda armarna räknas oftare.  Cyklerna är oförändrade (sex parade
+  körningar: −0,1 % [−0,5 .. +0,9]).  Vektoriseraren är det inte
+  (`VCC_VIR_VEC=0`: 25,70 G).  Jämförelser i instruktioner mot clang utgår
+  alltså från 1,084x nu, inte 1,077x.
+- **Prövat mot `mov` (+0,38 G mot clang), inget av det behållet:**
+  1. En blockparameter som bara returneras tar returregistret, och dess
+     argument hintas dit: −0,003 G, statiskt +85 instruktioner.  Fallet som
+     motiverade det (sqlite3DbMallocRawNN: `mov x2, x0; mov x0, x2`) var redan
+     löst av syskonanropen.
+  2. Kopian i argumentregistret behålls när ett värde flyttas till
+     callee-saved vid sparpunkten: −0,006 G.
+  3. Ett registers reservation: registret för en parameter vars argument
+     blocket definierar längre ned hålls ledigt till dess: −88 `mov`
+     statiskt, dynamiskt inget.
+- **Kantflyttarna per slag av värde** (nop-prob, G körningar; totalt ca 0,52):
+  framåtkant: argument definierat i föregångaren 0,14 (därav 0,09 där
+  parameterns register var känt men upptaget, 0,06 där argumentet satte det
+  tentativa registret och parametern ändå hamnade annorstädes), argument som
+  är en blockparameter 0,06, definierat tidigare 0,06, från anrop eller
+  parameter 0,05, vanligt värde 0,09; bakkant: argument definierat före
+  latchen 0,10, vanligt värde 0,05.  "Upptaget" är alltså ett värde som redan
+  låg där vid blockets början (typiskt variabelns gamla värde som ännu
+  används), inte ett som tog registret under tiden: det löser ingen hint.
+- **Var resten av `mov`-gapet troligen ligger:** anropen.  Vi kör 0,40 G
+  anrop mot clangs 0,34 G, och varje anrop kostar argumentkopior av levande
+  värden (0,73 G när det mättes) och flyttar till callee-saved: 0,06 G fler
+  anrop à ca tre flyttar är ungefär hälften av gapet.  Det följer inliningen.
+
+### Tolkens `break`-block kopieras in i fallen (2026-11-12)
+
+- **Orsak till `b` i sqlite3VdbeExec (0,39 G mot clangs 0,27 G):** 201 av
+  funktionens 1181 `b` gick till ett block med `add x25, x25, #24; b` (`pOp++`
+  och hoppet tillbaka till dispatchen).  Varje opcode körde alltså två
+  ovillkorliga hopp, clang ett.
+- **Gjort (`vl_small`):** ett hopp framåt till ett block med högst en
+  instruktion före sitt `br` ersätts av en kopia av blocket, som redan gällde
+  för block som slutar i `brif`.
+- **Mätt, sqlite speedtest1 `--size 100`:** 25,720 G → 25,574 G instruktioner
+  (**−0,57 %**), kod +1,05 % (295 592 → 298 695); cykler −1,4 %, −0,5 %, +0,1 %
+  i tre parade körningar.  Mot clang 1,078x i instruktioner.
+- **Tester:** nytt `vcc/vir_break_dup.c`; C-sviterna genom VIR med kontrollen
+  2102/2102 (de tre switch-felen är borta på main), inline 85/85, vcc 299/299
+  direkt, TSVC 151/151, sqlite samma hash.
+- **TSVC på main är 7,37 G cykler, var 6,29 G före #125** (77 vektoriserade
+  loopar mot 43).  Samma tal med och utan den här ändringen, med
+  `VCC_VIR_SHRINK=0` och med `VCC_VIR_ROT=0`: det kommer inte härifrån och är
+  inte undersökt.
+
+### TSVC efter #125: sökloopar (2026-11-12)
+
+TSVC genom VIR gick från 6,26 G cykler (de4e5a65) till 7,37 G på main.  Per
+loop (`vcc-tsvc.py -v` med båda kompilatorerna) låg allt i fem loopar: s314 och
+s316 (största och minsta värde: 0,026 och 0,019 s → 0,172 och 0,171), s315,
+s3110 och s13110 (största värde med index: 0,005 → 0,035).  Två orsaker, båda
+från #125:
+
+- **Ordnad reduktion ensam vektoriserades:** vektorloopen läste fyra element
+  och tog sedan ut dem ett i taget med jämförelse och val i ordning, alltså
+  den skalära loopen med en vektorlast framför.  En loop utan lagring och utan
+  packad summa vektoriseras inte längre på arm64 (`vec.inc`; x86-64 lämnat som
+  det skrevs, inte mätt här).  7,37 G → 6,60 G.
+- **If-konverteringen** gör nu `select` också när armen bara laddar om det
+  villkoret läste (`vw_armreuse`) och för flera värden per sammanflöde.  I en
+  sökloop blir det en kedja där varje varv väntar på det förra, där hoppet
+  förut nästan aldrig togs.  Värden som vart och ett antingen behåller en
+  blockparameter eller ersätter den förblir nu ett hopp (`vw_ifconv`).
+  6,60 G → 6,21 G.  sqlite speedtest1: 25,56 G → 25,49 G instruktioner,
+  cykler oförändrade.
+- Med bara flera värden undantagna hamnade s314/s316 på clangs nivå (0,053 s);
+  clang konverterar dem också.  Hoppet är snabbare på TSVC:s data.
+- **Tester:** nytt `vcc/vir_search_loop.c` (lika värden, −0, NaN);
+  C-sviterna genom VIR med kontrollen 2103/2103, inline 85/85, vcc 300/300
+  direkt, TSVC 151/151, sqlite samma hash.
+- **x86-64 (2026-11-13):** regeln i `vw_ifconv` gällde först alla mål och fällde
+  `bench/vcc-vir-x86.py` i CI (tsan-jobbet kör på x86-64): testet kräver att
+  maxval, maxindex och lastnegative vektoriseras där, som ordnade reduktioner
+  av just de `select` regeln tog bort.  Regeln gäller nu inte x86-64, liksom
+  den i `vec.inc`.  Om looparna är snabbare så på x86-64 är inte mätt.
+
 ### Underlag för V4 (2026-11-11): registerallokering, ingen kod
 
 - `RESEARCH-regalloc.md`: vad GCC (IRA, LRA) och LLVM (Greedy, Fast, PBQP,
