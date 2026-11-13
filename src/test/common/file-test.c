@@ -6,7 +6,7 @@
 #include "check.h"
 #include "port/file.h"
 
-static int interrupted;
+static volatile sig_atomic_t interrupted;
 static void on_alarm(int sig) { (void)sig; interrupted++; }
 
 int main(void)
@@ -98,6 +98,8 @@ int main(void)
 				_exit(0);
 			}
 			CHECK(vfile_write_all(pfd[1], src, want));
+			if (!interrupted)
+				fprintf(stderr, "note: no signal interrupted the write\n");
 			waitpid(killer, NULL, 0);
 		}
 		close(pfd[1]);
