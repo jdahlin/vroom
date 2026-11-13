@@ -7,8 +7,8 @@
  * Instruction counts barely depend on machine load (~0.5 % noise from
  * interrupts), which is what bench/vbench.py compares; cycles do.
  */
-#ifndef VPERF_H
-#define VPERF_H
+#ifndef VCC_PORT_PERFORMANCE_COUNTERS_H
+#define VCC_PORT_PERFORMANCE_COUNTERS_H
 
 #include <stdint.h>
 
@@ -20,7 +20,7 @@ typedef struct vperf {
 #include <sys/syscall.h>
 #include <unistd.h>
 
-static inline vperf vperf_now(void)
+static inline vperf vperformance_now(void)
 {
 	uint64_t c[2] = { 0, 0 };
 
@@ -31,13 +31,13 @@ static inline vperf vperf_now(void)
 	return (vperf){ c[0], c[1] };
 }
 #else
-static inline vperf vperf_now(void)
+static inline vperf vperformance_now(void)
 {
 	return (vperf){ 0, 0 };
 }
 #endif
 
-static inline vperf vperf_sub(vperf a, vperf b)
+static inline vperf vperformance_subtract(vperf a, vperf b)
 {
 	return (vperf){ a.ins - b.ins, a.cyc - b.cyc };
 }

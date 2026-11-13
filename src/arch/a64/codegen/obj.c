@@ -380,7 +380,7 @@ static void r_words(rctx *R, uint32_t frag, const uint32_t *w, unsigned n, const
 
 static inline int hexval(char ch)
 {
-	return ch >= '0' && ch <= '9' ? ch - '0' : ch >= 'a' && ch <= 'f' ? ch - 'a' + 10 : -1;	/* tb_x: lower case */
+	return ch >= '0' && ch <= '9' ? ch - '0' : ch >= 'a' && ch <= 'f' ? ch - 'a' + 10 : -1;	/* vtext_hex_digits_append: lower case */
 }
 
 /* per label of a function with inline asm (valid if ser == rctx.ser) */

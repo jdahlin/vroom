@@ -146,7 +146,7 @@ static void b3hash4(const uint8_t *const in[4], size_t nblocks, uint64_t ctr, in
 
 /* Chunk CVs four at a time, then the tree level by level (pairing adjacent
  * CVs with an odd one carried up gives BLAKE3's left-complete tree). */
-void ld_blake3(const void *data, size_t len, uint8_t *out, size_t outlen) {
+void vdigest_blake3(const void *data, size_t len, uint8_t *out, size_t outlen) {
     const uint8_t *in = data;
     uint32_t o[16];
     size_t nch = len ? (len + 1023) / 1024 : 1;
@@ -187,7 +187,7 @@ void ld_blake3(const void *data, size_t len, uint8_t *out, size_t outlen) {
     memcpy(out, o, outlen > 32 ? 32 : outlen);
 }
 #else
-void ld_blake3(const void *data, size_t len, uint8_t *out, size_t outlen) {
+void vdigest_blake3(const void *data, size_t len, uint8_t *out, size_t outlen) {
     const uint8_t *in = data;
     uint32_t stack[54][8], o[16];
     int sp = 0;

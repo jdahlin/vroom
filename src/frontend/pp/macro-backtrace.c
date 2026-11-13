@@ -1,6 +1,6 @@
 /* Macro backtraces: a location inside an expansion, its notes and the fix-it mapped out of a macro. */
 #include "../pp/ppimpl.h"
-#include "common/buf.h"
+#include "common/buffer.h"
 #include <ctype.h>
 #include <dlfcn.h>
 #include <errno.h>

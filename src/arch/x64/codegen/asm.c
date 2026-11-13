@@ -93,33 +93,33 @@ static void x64_asmreg(tbuf *b, int r, int size, bool h)
 	static const char *const n8[] = { "al", "cl", "dl", "bl", "spl", "bpl", "sil", "dil" };
 	static const char *const nh[] = { "ah", "ch", "dh", "bh" };
 
-	tb_c(b, '%');
+	vtext_char_append(b, '%');
 	if (r >= XMM0) {
-		tb_s(b, "xmm");
-		tb_u(b, (uint64_t)(r - XMM0));
+		vtext_string_append(b, "xmm");
+		vtext_unsigned_append(b, (uint64_t)(r - XMM0));
 		return;
 	}
 	if (h && r < 4) {
-		tb_s(b, nh[r]);
+		vtext_string_append(b, nh[r]);
 		return;
 	}
 	if (r < 8) {
-		tb_s(b, size == 8 ? n64[r] : size == 4 ? n32[r] : size == 2 ? n16[r] : n8[r]);
+		vtext_string_append(b, size == 8 ? n64[r] : size == 4 ? n32[r] : size == 2 ? n16[r] : n8[r]);
 		return;
 	}
-	tb_c(b, 'r');
-	tb_u(b, (uint64_t)r);
+	vtext_char_append(b, 'r');
+	vtext_unsigned_append(b, (uint64_t)r);
 	if (size != 8)
-		tb_c(b, size == 4 ? 'd' : size == 2 ? 'w' : 'b');
+		vtext_char_append(b, size == 4 ? 'd' : size == 2 ? 'w' : 'b');
 }
 
 /* a local label of this function, as print.c names it */
 static void x64_asmlabel(ecx *e, tbuf *b, uint32_t l)
 {
-	tb_s(b, ".LBB");
-	tb_u(b, e->wk->fsym);
-	tb_c(b, '_');
-	tb_u(b, l);
+	vtext_string_append(b, ".LBB");
+	vtext_unsigned_append(b, e->wk->fsym);
+	vtext_char_append(b, '_');
+	vtext_unsigned_append(b, l);
 }
 
 /* a memory operand as AT&T text */
@@ -127,14 +127,14 @@ static void x64_asmmem(cc *c, tbuf *b, const lval *l)
 {
 	if (l->k == L_SYM) {
 		ref_off(c, b, l->ref, l->off);
-		tb_s(b, "(%rip)");
+		vtext_string_append(b, "(%rip)");
 		return;
 	}
 	if (l->off)
-		tb_i(b, l->off);
-	tb_c(b, '(');
+		vtext_signed_append(b, l->off);
+	vtext_char_append(b, '(');
 	x64_asmreg(b, l->k == L_FRAME ? RBP : l->r, 8, false);
-	tb_c(b, ')');
+	vtext_char_append(b, ')');
 }
 
 /* a float value as an x87 long double object's address (fld of it) */
@@ -588,16 +588,16 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 	/* the template: {att|intel} alternatives keep the first */
 	start = rb->n;
 	if (basic) {
-		tb_c(rb, '\t');
+		vtext_char_append(rb, '\t');
 		for (const char *p = tp; *p; p++) {
-			tb_c(rb, *p);
+			vtext_char_append(rb, *p);
 			if (*p == '\n' && p[1])
-				tb_c(rb, '\t');
+				vtext_char_append(rb, '\t');
 		}
 	} else {
 		int alt = 0;
 
-		tb_c(rb, '\t');
+		vtext_char_append(rb, '\t');
 		for (const char *p = tp; *p; p++) {
 			char mod = 0;
 			int idx = -1;
@@ -608,18 +608,18 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 			if (alt == 2)
 				continue;
 			if (*p != '%') {
-				tb_c(rb, *p);
+				vtext_char_append(rb, *p);
 				if (*p == '\n' && p[1])
-					tb_c(rb, '\t');
+					vtext_char_append(rb, '\t');
 				continue;
 			}
 			p++;
-			if (*p == '%') { tb_c(rb, '%'); continue; }
+			if (*p == '%') { vtext_char_append(rb, '%'); continue; }
 			if (*p == '=') {
-				tb_u(rb, ((uint64_t)e->top << 32) | serial);
+				vtext_unsigned_append(rb, ((uint64_t)e->top << 32) | serial);
 				continue;
 			}
-			if (*p == '{' || *p == '|' || *p == '}') { tb_c(rb, *p); continue; }
+			if (*p == '{' || *p == '|' || *p == '}') { vtext_char_append(rb, *p); continue; }
 			if (*p && strchr("bwkqhcPalzVHn", *p) && (p[1] == '[' || (p[1] >= '0' && p[1] <= '9')))
 				mod = *p++;
 			if (*p == '[') {
@@ -673,11 +673,11 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 						 o->size > 8 || o->size < 1 ? 8 : o->size == 3 ? 4 : o->size > 4 ? 8 : o->size;
 
 					if (mod == 'a') {
-						tb_c(rb, '(');
+						vtext_char_append(rb, '(');
 						x64_asmreg(rb, o->reg, 8, false);
-						tb_c(rb, ')');
+						vtext_char_append(rb, ')');
 					} else if (mod == 'z') {
-						tb_c(rb, sz == 8 ? 'q' : sz == 4 ? 'l' : sz == 2 ? 'w' : 'b');
+						vtext_char_append(rb, sz == 8 ? 'q' : sz == 4 ? 'l' : sz == 2 ? 'w' : 'b');
 					} else {
 						x64_asmreg(rb, o->reg, sz, mod == 'h');
 					}
@@ -687,15 +687,15 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 					x64_asmmem(c, rb, &o->l);
 					break;
 				case XO_X87:
-					tb_s(rb, o->reg ? "%st(1)" : "%st");
+					vtext_string_append(rb, o->reg ? "%st(1)" : "%st");
 					break;
 				case XO_IMM:
 					if (mod != 'c' && mod != 'P' && mod != 'a' && mod != 'n')
-						tb_c(rb, '$');
+						vtext_char_append(rb, '$');
 					if (o->v.k == V_ADDR)
-						ref_off(c, rb, o->v.ref, (int64_t)o->v.i), mod == 'a' ? tb_s(rb, "(%rip)") : (void)0;	/* (clang: %a of a symbol is RIP-relative) */
+						ref_off(c, rb, o->v.ref, (int64_t)o->v.i), mod == 'a' ? vtext_string_append(rb, "(%rip)") : (void)0;	/* (clang: %a of a symbol is RIP-relative) */
 					else
-						tb_i(rb, mod == 'n' ? (int64_t)(0 - (uint64_t)o->v.i) : (int64_t)o->v.i);
+						vtext_signed_append(rb, mod == 'n' ? (int64_t)(0 - (uint64_t)o->v.i) : (int64_t)o->v.i);
 					break;
 				}
 			}
@@ -707,14 +707,14 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 			if (op[i].kind != XO_REG || op[i].fixed)
 				efatal(e, x->loc, "x86-64: unsupported asm flag output");
 			if (rb->n > start && rb->p[rb->n - 1] != '\n')
-				tb_c(rb, '\n');
-			tb_s(rb, "\tset");
-			tb_s(rb, ccop[i]);
-			tb_c(rb, ' ');
+				vtext_char_append(rb, '\n');
+			vtext_string_append(rb, "\tset");
+			vtext_string_append(rb, ccop[i]);
+			vtext_char_append(rb, ' ');
 			x64_asmreg(rb, op[i].reg, 1, false);
-			tb_s(rb, "\n\tmovzbl ");
+			vtext_string_append(rb, "\n\tmovzbl ");
 			x64_asmreg(rb, op[i].reg, 1, false);
-			tb_s(rb, ", ");
+			vtext_string_append(rb, ", ");
 			x64_asmreg(rb, op[i].reg, 4, false);
 		}
 	ri = x64_put(e, X_RAW);

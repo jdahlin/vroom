@@ -1,6 +1,6 @@
 /* Applying fix-its to files (--fix) and the unified diff of the change. */
 #include "../frontend/pp/ppimpl.h"
-#include "common/buf.h"
+#include "common/buffer.h"
 #include <ctype.h>
 #include <dlfcn.h>
 #include <errno.h>

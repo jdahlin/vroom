@@ -1,6 +1,6 @@
 /* JSON lines, and the record sink vccd reads. */
 #include "../frontend/pp/ppimpl.h"
-#include "common/buf.h"
+#include "common/buffer.h"
 #include <ctype.h>
 #include <dlfcn.h>
 #include <errno.h>

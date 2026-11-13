@@ -1,6 +1,6 @@
 /* The narrated style: each record told as sentences. */
 #include "../frontend/pp/ppimpl.h"
-#include "common/buf.h"
+#include "common/buffer.h"
 #include <ctype.h>
 #include <dlfcn.h>
 #include <errno.h>

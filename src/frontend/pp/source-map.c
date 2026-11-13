@@ -1,6 +1,6 @@
 /* The source map: a location's file entry, presumed file and line, system-header and main-file tests. */
 #include "../pp/ppimpl.h"
-#include "common/buf.h"
+#include "common/buffer.h"
 #include <ctype.h>
 #include <dlfcn.h>
 #include <errno.h>

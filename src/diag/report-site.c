@@ -1,6 +1,6 @@
 /* The VCC_TRACK_DIAG debug aid: where in vcc each diagnostic was reported. */
 #include "../frontend/pp/ppimpl.h"
-#include "common/buf.h"
+#include "common/buffer.h"
 #include <ctype.h>
 #include <dlfcn.h>
 #include <errno.h>

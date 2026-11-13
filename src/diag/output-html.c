@@ -1,6 +1,6 @@
 /* The standalone HTML page of a TU's diagnostics. */
 #include "../frontend/pp/ppimpl.h"
-#include "common/buf.h"
+#include "common/buffer.h"
 #include <ctype.h>
 #include <dlfcn.h>
 #include <errno.h>

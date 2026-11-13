@@ -63,31 +63,31 @@ VPRIV void sym_name(cc *c, tbuf *b, uint32_t s)
 	y = &c->syms[s];
 	a = sym_attrs(c, s);
 	if (a->asmname) {
-		tb_s(b, c->strs[a->asmname - 1].s);
+		vtext_string_append(b, c->strs[a->asmname - 1].s);
 		return;
 	}
 	if (!y->name) {
-		tb_s(b, ".Lcl.");
-		tb_u(b, s);
+		vtext_string_append(b, ".Lcl.");
+		vtext_unsigned_append(b, s);
 		return;
 	}
 	if (DARWIN(c))
-		tb_c(b, '_');
+		vtext_char_append(b, '_');
 	if ((WASM(c) || X86(c)) && sym_quoted(c, s)) {
 		/* LLVM's wasm and x86 assemblers require quotes around non-ASCII names. */
-		tb_c(b, '"');
-		tb_put(b, vintern_ents[y->name].s, vintern_ents[y->name].len);
+		vtext_char_append(b, '"');
+		vtext_append(b, vintern_ents[y->name].s, vintern_ents[y->name].len);
 		if (y->depth > 0 && y->kind == S_VAR && y->sc == SC_STATIC) {
-			tb_c(b, '.');
-			tb_u(b, s);
+			vtext_char_append(b, '.');
+			vtext_unsigned_append(b, s);
 		}
-		tb_c(b, '"');
+		vtext_char_append(b, '"');
 		return;
 	}
-	tb_put(b, vintern_ents[y->name].s, vintern_ents[y->name].len);
+	vtext_append(b, vintern_ents[y->name].s, vintern_ents[y->name].len);
 	if (y->depth > 0 && y->kind == S_VAR && y->sc == SC_STATIC) {
-		tb_c(b, '.');
-		tb_u(b, s);
+		vtext_char_append(b, '.');
+		vtext_unsigned_append(b, s);
 	}
 }
 
@@ -115,28 +115,28 @@ VPRIV void ref_name(cc *c, tbuf *b, uint32_t r)
 		sym_name(c, b, i);
 		break;
 	case RK_STR:
-		tb_s(b, ".L.str.");
-		tb_u(b, i);
+		vtext_string_append(b, ".L.str.");
+		vtext_unsigned_append(b, i);
 		break;
 	case RK_LBL:
-		tb_s(b, ".Ltmp.lbl.");
-		tb_u(b, i);
+		vtext_string_append(b, ".Ltmp.lbl.");
+		vtext_unsigned_append(b, i);
 		break;
 	case RK_TABLE:
-		tb_s(b, ".Lswitch.values.");
-		tb_u(b, i);
+		vtext_string_append(b, ".Lswitch.values.");
+		vtext_unsigned_append(b, i);
 		break;
 	case RK_NAME:
 		if (DARWIN(c))
-			tb_c(b, '_');
+			vtext_char_append(b, '_');
 		if (i >= 0x8000000u) {
-			tb_s(b, fixed_names[i - 0x8000000u]);
+			vtext_string_append(b, fixed_names[i - 0x8000000u]);
 		} else {
 			const char *n = cc_builtin_name(i);
 
 			if (!strncmp(n, "__builtin_", 10))
 				n += 10;
-			tb_s(b, n);
+			vtext_string_append(b, n);
 		}
 		break;
 	}
@@ -146,9 +146,9 @@ VPRIV void ref_off(cc *c, tbuf *b, uint32_t r, int64_t off)
 {
 	ref_name(c, b, r);
 	if (off > 0) {
-		tb_c(b, '+');
-		tb_i(b, off);
+		vtext_char_append(b, '+');
+		vtext_signed_append(b, off);
 	} else if (off < 0) {
-		tb_i(b, off);
+		vtext_signed_append(b, off);
 	}
 }

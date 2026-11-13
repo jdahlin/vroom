@@ -1,6 +1,6 @@
 /* Reporting: the queue, de-duplication, counting, fatal errors and the end of a run. */
 #include "../frontend/pp/ppimpl.h"
-#include "common/buf.h"
+#include "common/buffer.h"
 #include <ctype.h>
 #include <dlfcn.h>
 #include <errno.h>

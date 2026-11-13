@@ -1,6 +1,6 @@
 /* Clang's text style: colours, include stack, snippet and the text of a record. */
 #include "../frontend/pp/ppimpl.h"
-#include "common/buf.h"
+#include "common/buffer.h"
 #include <ctype.h>
 #include <dlfcn.h>
 #include <errno.h>

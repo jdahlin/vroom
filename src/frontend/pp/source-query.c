@@ -1,6 +1,6 @@
 /* The parser's source-text queries: limits, include point, token text and extent, `defined`. */
 #include "../pp/ppimpl.h"
-#include "common/buf.h"
+#include "common/buffer.h"
 #include <ctype.h>
 #include <dlfcn.h>
 #include <errno.h>

@@ -544,7 +544,13 @@ fit the code, or the step needed a decision:
 - The comment of `diagout.c` (lines 1-22, JSON and SARIF both) opens
   output-json.c whole; step 3 rewrites it per file.
 - `gen-diagids.py --check` says out of date on origin/main too (before this
-  step); not touched.
+  step); not touched.  First differences when regenerated (needs `work/clang-td`):
+  added `err_builtin_invalid_arg_type`, `err_cannot_open_file`,
+  `err_invalid_mask_type_size`; dropped `err_enumerator_wrapped`,
+  `err_return_block_has_expr`.  Someone should run `src/tools/gen-diagids.py`.
+- The tree-wide rename (#159) touched the old files only in `common/buf.h` ->
+  `common/buffer.h`; applied to the new files by sed because
+  `rename-table.py` refuses on a tree where the table is already applied.
 - `bench/vcc-same.py` reports 7 `-E` differences (arm_neon.h, stdatomic users):
   only the absolute path of `src/headers/` in the line markers, which differs
   because base and new are built in different directories.

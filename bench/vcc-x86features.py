@@ -39,7 +39,7 @@ with tempfile.TemporaryDirectory() as td:
  if not a.vpp:
   src=pathlib.Path(td)/'probe.c'
   src.write_text(r'''
-#include "common/buf.h"
+#include "common/buffer.h"
 typedef vbuf buf;
 #define bstr vbuf_s
 #include "src/driver/x86predefines.h"

@@ -2,8 +2,8 @@
 #include "driver-internal.h"
 
 #define BUF_REG (1u << 24)
-vmpool bufpool = VMPOOL_INIT(4);
-_Thread_local vmreg *bufr;	/* this job's (ppd_run) */
+vjob_region_pool bufpool = VJOB_REGION_POOL_INIT(4);
+_Thread_local vjob_region *bufr;	/* this job's (ppd_run) */
 
 VPRIV void bput(buf *b, const char *s, size_t n)
 {
@@ -14,7 +14,7 @@ VPRIV void bput(buf *b, const char *s, size_t n)
 		while (nc < b->n + n + 256)
 			nc *= 2;
 		if (!b->cap && b->r && nc == BUF_REG) {
-			b->p = vmreg_get(b->r, BUF_REG, "ppdriver.buf");
+			b->p = vjob_region_acquire(b->r, BUF_REG, "ppdriver.buf");
 			b->cap = BUF_REG;
 			goto put;
 		}
@@ -24,7 +24,7 @@ VPRIV void bput(buf *b, const char *s, size_t n)
 		if (b->p) {
 			memcpy(np, b->p, b->n);
 			if (b->r)
-				vmreg_put(b->r, b->n);
+				vjob_region_release(b->r, b->n);
 			else
 				munmap(b->p, b->cap);
 		}
@@ -58,7 +58,7 @@ VPRIV void define_arg(buf *b, const char *d)
 VPRIV void bfree(buf *b)
 {
 	if (b->p && b->r)
-		vmreg_put(b->r, b->n + 256);
+		vjob_region_release(b->r, b->n + 256);
 	else if (b->p)
 		munmap(b->p, b->cap);
 	b->p = NULL;

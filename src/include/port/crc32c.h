@@ -1,7 +1,7 @@
 /* CRC32C for host string hashes. x86 dispatches once at startup; the
  * software and SSE4.2 implementations use the same polynomial as ACLE. */
-#ifndef VCC_LIB_HOSTCRC_H
-#define VCC_LIB_HOSTCRC_H
+#ifndef VCC_PORT_CRC32C_H
+#define VCC_PORT_CRC32C_H
 #if defined(__x86_64__)
 #include <stdint.h>
 extern uint32_t (*vcrc32cd)(uint32_t, uint64_t);

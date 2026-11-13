@@ -51,7 +51,7 @@ static bool obj_valid(Obj *o, const Ehdr *eh)
 	for (uint32_t s = 0; s < o->nsh; s++) {	/* (0 too: shstrndx and sh_link may name it) */
 		const Shdr *h = &o->sh[s];
 
-		if (h->sh_type != SHT_NOBITS && h->sh_type != SHT_NULL && !vckd_range(h->sh_offset, h->sh_size, n))
+		if (h->sh_type != SHT_NOBITS && h->sh_type != SHT_NULL && !vchecked_range(h->sh_offset, h->sh_size, n))
 			BAD("%s: section %u goes past the end of the file", o->path, s);
 		if (h->sh_addralign & (h->sh_addralign - 1))
 			BAD("%s: section %u: sh_addralign is not a power of 2", o->path, s);

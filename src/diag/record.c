@@ -1,6 +1,6 @@
 /* The diagnostic record: ids, level names and the builder that fills it. */
 #include "../frontend/pp/ppimpl.h"
-#include "common/buf.h"
+#include "common/buffer.h"
 #include <ctype.h>
 #include <dlfcn.h>
 #include <errno.h>
