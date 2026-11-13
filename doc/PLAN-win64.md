@@ -193,7 +193,37 @@ start as soon as WIN3 runs (its `ci/premerge.sh win64` grows with the steps).
 
 ## Status
 
-### WIN0-WIN10 (2026-11-13): planned
+### WIN0 (2026-11-13): done
+
+`bench/fetch-testsuites.sh llvm-mingw` fetches llvm-mingw 20261104 (UCRT,
+x86-64 Linux host; SHA-256 checked) to `work/llvm-mingw/`.
+`bench/hostenv.py` has `MINGW_SYSROOT` (`VCC_MINGW_SYSROOT`), `WINE`
+(`WINE`), `wine_env` and `wine_start` (a prefix per build tree,
+`BUILD/wine`, created once, one `wineserver -p60`; `WINEDEBUG=-all`, no
+display, no Mono/Gecko, no winedbg).  `bench/vcc-win64.py` (from
+`vcc-x86.py`) builds every test with the host's clang 23 and links with
+`clang --target=x86_64-w64-mingw32 --sysroot=S -resource-dir=S/lib/clang/23
+-rtlib=compiler-rt --unwindlib=none -fuse-ld=lld -static` (llvm-mingw's
+resource dir for the compiler-rt builtins only; the default unwindlib looks
+for libgcc_s).  The test runtime: `src/test/rt/include-win64/` before
+`rt/include` (`setjmp.h`: the 256-byte `_JUMP_BUFFER`, UCRT's `_setjmp` with
+a null frame, so `longjmp` does not unwind; `errno.h`: `_errno()`), and
+`rt/win64.c` linked into both sides: `stdin`/`stdout`/`stderr` as variables,
+the printf family through `__mingw_v*printf` (80-bit `long double`, as
+`__USE_MINGW_ANSI_STDIO=1`), `abort()` exits 3 quietly, an unhandled
+exception prints its code and exits 255.
+
+`--ref-only`, measured: 2172 tests (gcc 1701, tcc 143, vcc 328), 2012
+reference-ok (1612, 106, 294), 160 excluded: 68 clang-rejects, 26 ref-fail,
+28 tcc-specific, 2 static (return-addr, a vcc-noref) — all as for x86-64
+Linux — and 36 only for this target, each in `WIN64_WHY` with its reason:
+lp64 22 (20 of them our own `src/test/vcc` tests with a 64-bit `long`; they
+can move to `long long`), sjlj 4 (`__builtin_setjmp`), ub-trap 3 (clang makes
+`unreachable` an `int3` on Windows), ms-layout 2, libc 2, frame 1, asm 1,
+abi 1.  60 s cold at `-j 6` on this host, 0.3 s from the cache.  vcc's side
+is wired (`vpp -S`, `--obj`, `--objcmp`) and fails at `as` until WIN1-WIN3.
+
+### WIN1-WIN10 (2026-11-13): planned
 
 Nothing implemented.  The reference chain was checked by hand (clang 23 ->
 COFF -> `ld.lld -m i386pep` -> Wine 11 exit code); the sysroot is not
