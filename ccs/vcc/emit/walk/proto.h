@@ -31,7 +31,7 @@ VPRIV bool wk_pk_get(ecx *e, uint32_t s, val *v);	/* a provisional constant of p
 VPRIV bool wk_weak0(cc *c, val v);	/* the address of a weak undefined symbol (may be 0) */
 VPRIV val wk_conv(ecx *e, val v, qty from, qty to);
 VPRIV val wk_inline(ecx *e, uint32_t n, uint32_t s);	/* the call n to s, inlined (wk_can_inline) */
-VPRIV bool wk_can_inline(ecx *e, uint32_t s);
+VPRIV bool wk_can_inline(ecx *e, uint32_t s, uint32_t call);
 VPRIV void wk_function(ecx *e, uint32_t s);	/* emit/walk/func.c: what emit/tu.c calls for x86-64 */
 VPRIV int64_t wk_slot(ecx *e, uint64_t size, uint32_t align);	/* a temporary: free again after the statement */
 VPRIV int64_t wk_pslot(ecx *e, uint64_t size, uint32_t align);	/* for the whole function */

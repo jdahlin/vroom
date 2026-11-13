@@ -168,6 +168,8 @@ enum { SA_WRITTEN = 1, SA_CLEANUP_FN = 2, SA_MUSTFOLD = 4, SA_CWRITE = 8, SA_CMU
 /* CWRITE: only ever assigned integer constants (all cwval unless CMULTI) */	/* per sym; MUSTFOLD: a function that calls an error() function */
 enum { NA_LABEL = 1, NA_ALLOCA = 2 };				/* per node: statement contains a label or case */
 
+typedef struct em_cg_edge {uint32_t callee,call;} em_cg_edge;
+
 typedef struct emitter {
 	cc *c;
 	const cc_opts *o;
@@ -176,10 +178,12 @@ typedef struct emitter {
 	_Atomic uint8_t *extref;	/* per sym: referenced (for .weak of undefined syms) */
 	_Atomic uint8_t *walked;
 	uint16_t *fnsize;		/* per function: AST nodes (prepass) */
+	uint8_t *inl_read; /* parameter references outside a direct (void)param discard */
 	uint8_t *once;			/* VIR lowering on: per function, bit 0 when its one reference is a direct call (fn_once), bit 1 when it calls setjmp (prepass); else NULL */
 	/* VIR lowering on (with once): the direct call graph the prepass records, per
 	   function its size with the callees it inlines (fn_isize) and its recursion group */
-	uint32_t *cg, ncg, capcg, *cgoff, *cgn, *scc;
+	em_cg_edge *cg;
+	uint32_t ncg, capcg, *cgoff, *cgn, *scc;
 	uint16_t *isz;
 	bool cgrec;			/* the prepass records calls (before the workers start) */
 	uint16_t *luse;			/* per local: uses weighted by loop depth (prepass) */
@@ -935,10 +939,17 @@ VPRIV bool sve_codegen_ok(cc *c);
 VPRIV bool bitint_codegen_ok(cc *c);
 VPRIV void ensure_walked(emitter *E, cc *c, uint32_t s);
 VPRIV uint8_t *fn_once(cc *c);
+#ifndef WK_INLINE_ONCE
+#define WK_INLINE_ONCE 4000 /* under VIR: a static function with one call */
+#endif
 #ifndef WK_INLINE_VIR
 #define WK_INLINE_VIR 150	/* under VIR: AST nodes of a callee with what it inlines (fn_isize) */
 #endif
+#ifndef WK_INLINE_CONST_FACTOR
+#define WK_INLINE_CONST_FACTOR 4
+#endif
 VPRIV void fn_isize(emitter *E, cc *c, uint32_t lim);	/* E->isz, E->scc: VIR's inlining sizes */
+VPRIV bool inl_constarg(const emitter *E, cc *c, uint32_t callee, uint32_t call);
 VPRIV bool inl_cand(emitter *E, cc *c, uint32_t s);	/* VIR could inline a call to s (size aside) */	/* per function: 1 when its one reference in the TU is a direct call */
 VPRIV int u32_cmp(const void *a, const void *b);
 /* tu.c */

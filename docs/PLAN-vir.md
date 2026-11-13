@@ -240,6 +240,46 @@ ekvivalenstestning återstår. Genererade program använder inga externa anrop.
 ### V4 x86-64 mot clang -O2 (2026-11-12), mål högst 5 % långsammare
 
 
+2026-11-13, gemensam kontextkänslig inlining:
+VIR:s delade prepass/walker sparar nu anropsplatsen i anropsgrafen. En
+konstant heltals- eller nullpekare till en refererad parameter kan ge upp
+till 600 AST-noders budget, mot ordinarie 150. Referenser som enbart är
+`(void)param` ger ingen bonus: SQLite:s oanvända BtreeNext-flaggor ska inte
+orsaka större kopior. Detta är en lönsamhetsheuristik; befintlig vikning
+av den inlinade kroppen sköter specialiseringen. O0/O1 ändras inte.
+ARM och x86 använder samma regel, utan ny CPU-specifik optimeringskod.
+
+Bottom-up-storleken räknar också med engångsanropens befintliga
+4000-nodersbonus. Tidigare kunde en liten wrapper med en stor inlinad
+engångskropp själv räknas som liten och kopieras vidare. Mättade summor
+förhindrar omslag; SCC-, noinline-, VLA- och targetgränser kvarstår.
+Regressionen täcker denna wrapper, konstanta/okända argument, en verklig
+parameterreferens efter `(void)param`, samt en helt ignorerad parameter.
+
+Fem alternerade speedtest1-main-prov, storlek 100, CPU 7; samma valda
+SQLite-binär i tre serier (slutbygget är byteidentiskt):
+
+| Serie | clang CPU ms | Före CPU ms | Efter CPU ms | Efter/clang |
+|---|---:|---:|---:|---:|
+| A | 1111,25 | 1244,90 | 1238,60 | 1,115× |
+| B | 1107,02 | 1247,98 | 1233,83 | 1,115× |
+| C | 1114,08 | 1248,77 | 1240,06 | 1,113× |
+
+Vinst 0,5–1,1 %, men **1,05×-målet är fortfarande öppet**. Dynamiska
+instruktioner/clang 1,320× → 1,314×. VdbeExec 26743 → 24854 statiska
+instruktioner och ram 2888 → 2680 byte; hela amalgamationen växer
+369505 → 387383 instruktioner. Enbart korrigerad engångsstorlek var
+0,5–0,9 % långsammare. 450-nodersbonus var neutral (1248,77 → 1247,72),
+750 var långsammare (1247,98 → 1254,03); bonus endast inom loopar var
+också långsammare (1248,72 → 1261,31). Dessa varianter är borttagna.
+Underlag `work/vir-x86-perf/inline-{cost,nested,realused3,realused4,realused5,loop4,final}`.
+Alla validerar samma speedtest1-checksumma.
+
+Validerat: egna x86 316/316, GCC 1615/1615, TCC 105/105 och samma fem
+kända inlinefel; fokuserat ASan/UBSan och filvist bygge gröna, O0/O1
+oförändrade. ARM/QEMU 47/47 VIR-prov. TSVC 151/151 kontrollsummor,
+**83** vektorloopar kvar; walk-prefixkontrollen 134 namn.
+
 2026-11-13, redan utvidgade index i små heta funktioner:
 x86 återanvänder samma fysiska signutvidgningsbevis i vanlig ext och
 NSW-skalade adresser. En osignerad 8/16-bitarsladdning har redan rätt höga

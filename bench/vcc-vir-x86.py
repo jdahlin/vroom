@@ -81,6 +81,7 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
         ('vir_x86_select.c', {'choose', 'uchoose', 'keep', 'boolean', 'pointer'}, {}),
         ('vir_x86_bytes.c', {'be16', 'be32', 'signed32', 'signedlow32', 'signedvol32', 'be64', 'be48', 'offset32', 'bev64', 'indexed16', 'indexed32', 'bev16', 'signed16', 'changed'}, {}),
         ('vir_x86_inline.c', {'work'}, {}),
+        ('vir_inline_context.c', {'wrapped', 'layer1', 'layer2', 'constant0', 'constant1', 'general', 'ignored0', 'ignored1'}, {}),
         ('vir_x86_nsw_index.c', {'be16p', 'be16cast', 'be32cast', 'be64cast', 'load4signed', 'store4signed', 'shared', 'keep_input', 'rawshift', 'vol', 'min32', 'min64', 'clean16', 'clean8', 'change', 'pressure_indices'}, {}),
         ('vir_x86_index.c', {'load8', 'load4', 'load2', 'load1', 'store8', 'store4', 'cast8', 'cast4', 'cast2', 'caststore4', 'castmod', 'cast3', 'sharedcast'}, {}),
         ('vir_vector_stride.c', {'stride', 'intstride', 'wide', 'reverse', 'ordered', 'residue', 'gather', 'carry', 'chain', 'maxval', 'maxindex', 'lastnegative'}, {'stride': 'mulps', 'intstride': 'mulps', 'reverse': 'addpd', 'ordered': 'mulps', 'residue': 'addps', 'gather': 'mulps', 'carry': 'mulps'}),
@@ -108,6 +109,16 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
                 body = asm.read_text().split('work:\n', 1)[1].split('.Lfunc_end', 1)[0]
                 if re.search(r'\bcall\w*\b', body):
                     raise SystemExit('work: single-call helper was not inlined')
+            if filename == 'vir_inline_context.c':
+                bodies = {name: asm.read_text().split(name + ':\n', 1)[1].split('.Lfunc_end', 1)[0]
+                          for name in required_more}
+                for name in ('constant0', 'constant1', 'wrapped'):
+                    if re.search(r'\bcall\w*\b', bodies[name]):
+                        raise SystemExit(f'{name}: selected helper was not inlined')
+                for name, target in [('layer1', 'wrapped'), ('layer2', 'wrapped'), ('general', 'specialize'),
+                                     ('ignored0', 'unused'), ('ignored1', 'unused')]:
+                    if not re.search(r'\bcall\w*\s+' + target + r'\b', bodies[name]):
+                        raise SystemExit(f'{name}: helper with no applicable inline budget was copied')
             if filename == 'vir_x86_select.c':
                 for name in required_more:
                     body = asm.read_text().split(name + ':\n', 1)[1].split('.Lfunc_end', 1)[0]

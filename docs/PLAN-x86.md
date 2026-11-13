@@ -1128,3 +1128,18 @@ ramlösa syskonanrop gav ingen säker helprogramvinst och är borttagna;
 mätunderlag och lärdomar under V4 i PLAN-vir.md.
 Validerat: egna x86 315/315 och samma fem kända inlinefel, ARM/QEMU 46/46,
 ASan/UBSan och filvist bygge gröna. TSVC 151/151 och **83** vektorloopar.
+
+
+### 2026-11-13: delad kontextkänslig inlining
+
+Konstanta argument till refererade parametrar kan ge 600 i stället för
+150 AST-noders VIR-budget. Enbart `(void)param` räknas inte. Prepassens
+bottom-up-storlek inkluderar både dessa platser och engångskroppar, så en
+wrapper inte felaktigt räknas som liten efter inlining. Regeln delas med
+ARM; O0/O1 oförändrade. Tre femprovserier på speedtest1 main ger 0,5–1,1 %
+vinst, 1,113–1,115× clang. Målet 1,05× är fortsatt öppet. 450, 750 och
+bonus bara inom loopar gav ingen vinst och behålls inte; underlag under V4
+i PLAN-vir.md.
+Validerat: egna x86 316/316, GCC 1615/1615, TCC 105/105, samma fem kända
+inlinefel; ARM/QEMU 47/47, ASan/UBSan och filvist bygge gröna. TSVC
+151/151 och **83** vektorloopar, prefixkontroll 134 namn.

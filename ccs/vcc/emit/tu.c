@@ -526,10 +526,10 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	for (int i = 1; i < nthr; i++)
 		pthread_join(th[i], NULL);
 	t2 = now();
-	free(E.once);
-	E.once = NULL;
+	free(E.once);free(E.inl_read);
+	E.once = E.inl_read = NULL;
 	free(E.cg), free(E.cgoff), free(E.cgn), free(E.scc), free(E.isz);
-	E.cg = E.cgoff = E.cgn = E.scc = NULL, E.isz = NULL;
+	E.cg = NULL; E.cgoff = E.cgn = E.scc = NULL, E.isz = NULL;
 	/* stitch */
 	qsort(E.chunks, E.nchunk, sizeof(chunk), chunk_cmp);
 	tb_reg(&hdr, &er[12], (size_t)1 << 26, "emit.hdr");

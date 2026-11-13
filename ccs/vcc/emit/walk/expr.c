@@ -2191,7 +2191,7 @@ static val wk_call(ecx *e, uint32_t n)
 		} else if (em_plain_mem_kind(e, s, (int)x->c) && wk_mem_inline(e, n, em_plain_mem_kind(e, s, (int)x->c), &mv)) {
 			if (args != argbuf) free(args);
 			return mv;
-		} else if (wk_can_inline(e, s)) {
+		} else if (wk_can_inline(e, s, n)) {
 			if (args != argbuf) free(args);
 			return wk_inline(e, n, s);
 		} else if (unlikely(sym_attrs(c, s)->error_fn) && e->reach) {
