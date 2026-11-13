@@ -7,17 +7,11 @@
 #include "simplify.h"
 #include "vectorize.h"
 
-VPRIV bool vw_emit(ecx *e)
+/* seal: every placeholder gets its operands, then trivial ones go */
+static void vw_seal(ecx *e)
 {
 	vwst *V = e->vw;
-	cc *c = e->c;
-	vir_fn *f = &V->f;
-	uint32_t lastloc = UINT32_MAX;
 
-	vw_thread(e);
-	vw_rpo(e);
-	vw_preds(e);
-	/* seal: every placeholder gets its operands, then trivial ones go */
 	V->sealing = true;
 	GROW(V->fwd, 0, V->cfwd, V->np + 1);
 	for (uint32_t i = 0; i < V->np; i++)
@@ -29,35 +23,29 @@ VPRIV bool vw_emit(ecx *e)
 			if (V->p[p].in.b == VW_NOBLK)
 				vw_phiops(e, p, b);
 	}
-	vw_promote(e);
-	while (vw_trivial(e))
-		;
-	vw_deadparams(e);
-	vw_simplify(e);
-	/* simplifying can free a slot's address (an inlined call's pointer argument parked as an
-	   integer comes back as i2p(p2i $slot)): promote again, then simplify what it forwards */
-	if (vw_promote(e)) {
-		while (vw_trivial(e))
-			;
-		vw_deadparams(e);
-		vw_simplify(e);
-	}
-	if (vw_condmerge(e))
-		while (vw_trivial(e))
-			;
-	if (vw_ifconv(e))
-		while (vw_trivial(e))
-			;
-	vw_vectorize(e);
-	vw_split(e);
-	/* stores to a slot that is not exposed and that nothing reads are dead */
+}
+
+/* stores to a slot that is not exposed and that nothing reads are dead */
+static void vw_slot_uses(ecx *e)
+{
+	vwst *V = e->vw;
+
 	for (uint32_t s = 0; s < V->nsl; s++)
 		V->sl[s].used = 0, V->sl[s].fin = VW_NOBLK;
 	for (uint32_t i = 0; i < V->norder; i++)
 		for (uint32_t q = V->b[V->order[i]].head; q; q = V->p[q].next)
 			if (V->p[q].in.op == VO_LOAD && V->p[q].slot)
 				V->sl[V->p[q].slot - 1].used = 1;
-	/* emission */
+}
+
+/* emission */
+static bool vw_to_vir(ecx *e)
+{
+	vwst *V = e->vw;
+	cc *c = e->c;
+	vir_fn *f = &V->f;
+	uint32_t lastloc = UINT32_MAX;
+
 	vir_begin(f, X86(c) ? VTG_X86_64_LINUX : DARWIN(c) ? VTG_A64_DARWIN : VTG_A64_LINUX, REF(RK_SYM, e->wk->fsym),
 		  (T(c, c->syms[e->wk->fsym].ty)->flags & TF_VARIADIC) ? VF_VARIADIC : 0);
 	GROW(V->map, 0, V->cmap, V->np + 1);
@@ -98,5 +86,40 @@ VPRIV bool vw_emit(ecx *e)
 	}
 	if (vir_failed())
 		return false;
-	return vir_canon(f);
+	return true;
+}
+
+VPRIV bool vw_emit(ecx *e)
+{
+	vwst *V = e->vw;
+
+	vw_thread(e);
+	vw_rpo(e);
+	vw_preds(e);
+	vw_seal(e);
+	vw_promote(e);
+	while (vw_trivial(e))
+		;
+	vw_deadparams(e);
+	vw_simplify(e);
+	/* simplifying can free a slot's address (an inlined call's pointer argument parked as an
+	   integer comes back as i2p(p2i $slot)): promote again, then simplify what it forwards */
+	if (vw_promote(e)) {
+		while (vw_trivial(e))
+			;
+		vw_deadparams(e);
+		vw_simplify(e);
+	}
+	if (vw_condmerge(e))
+		while (vw_trivial(e))
+			;
+	if (vw_ifconv(e))
+		while (vw_trivial(e))
+			;
+	vw_vectorize(e);
+	vw_split(e);
+	vw_slot_uses(e);
+	if (!vw_to_vir(e))
+		return false;
+	return vir_canon(&V->f);
 }
