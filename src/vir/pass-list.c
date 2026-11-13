@@ -22,13 +22,15 @@ static bool vir_compact_run(vir_fn *f, vir_pass_context *ctx)
 	return n != 0;
 }
 
-static const vir_pass_info vir_passes[] = {
-	/* name       run              needs  keeps                              flags */
-	{ "compact", vir_compact_run, 0,     VIR_VALID_CFG | VIR_VALID_DOM,      0 },
-};
+const vir_pass_info vir_pass_compact = { "compact", vir_compact_run, 0, VIR_VALID_CFG | VIR_VALID_DOM, 0 };
+/* it calls vir_cfg itself (the predecessor lists are what makes parameters late); it changes no block, edge or terminator */
+const vir_pass_info vir_pass_redundant_extensions = { "redundant-extensions", vir_redundant_extensions_remove, VIR_VALID_CFG,
+						      VIR_VALID_CFG | VIR_VALID_DOM, 0 };
+
+static const vir_pass_info *const vir_passes[] = { &vir_pass_compact, &vir_pass_redundant_extensions };
 #define VIR_NPASS ((uint32_t)(sizeof vir_passes / sizeof *vir_passes))
 
-const vir_pass_info *vir_pass_list(uint32_t *n)
+const vir_pass_info *const *vir_pass_list(uint32_t *n)
 {
 	*n = VIR_NPASS;
 	return vir_passes;
@@ -37,8 +39,8 @@ const vir_pass_info *vir_pass_list(uint32_t *n)
 const vir_pass_info *vir_pass_find(const char *name, size_t n)
 {
 	for (uint32_t i = 0; i < VIR_NPASS; i++)
-		if (strlen(vir_passes[i].name) == n && !memcmp(vir_passes[i].name, name, n))
-			return &vir_passes[i];
+		if (strlen(vir_passes[i]->name) == n && !memcmp(vir_passes[i]->name, name, n))
+			return vir_passes[i];
 	return NULL;
 }
 

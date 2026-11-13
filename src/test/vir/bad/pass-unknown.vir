@@ -9,4 +9,4 @@ b0:
   ret v0
 }
 ; ---
-bad/pass-unknown.vir: unknown pass `no-such-pass` (passes: canon compact)
+bad/pass-unknown.vir: unknown pass `no-such-pass` (passes: canon compact redundant-extensions)

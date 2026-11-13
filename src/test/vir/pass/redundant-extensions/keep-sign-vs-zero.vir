@@ -1,0 +1,38 @@
+; PASSES: canon,redundant-extensions
+; CHANGES: yes
+; a zero extension of a signed load and a sign extension of an unsigned one differ
+vir 1
+target arm64-linux
+extern @g
+sig %s = (int, int) -> int
+sig %gs = (int) -> int
+func @f %s {
+b0:
+  v0:ptr = param 0.0
+  v1:i32 = load.1s v0
+  v2:i32 = ext.1u v1
+  v3:i32 = load.1u v0
+  v4:i32 = ext.1s v3
+  v5:i32 = add v2, v4
+  v6:i64 = ext.4u v5
+  ret v6
+}
+; ---
+vir 1
+target arm64-linux
+extern @g
+sig %s0 = (int, int) -> int
+sig %s1 = (int) -> int
+
+func @f %s0 {
+b0:
+  v0:ptr = param 0.0
+  v1:i32 = load.1s v0
+  v2:i32 = ext.1u v1
+  v3:i32 = load.1u v0
+  v4:i32 = ext.1s v3
+  v5:i32 = add v2, v4
+  v6:i64 = ext.4u v5
+  ret v6
+}
+; pass redundant-extensions @f: unchanged

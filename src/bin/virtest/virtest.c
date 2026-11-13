@@ -355,12 +355,12 @@ static bool add_steps(step *steps, uint32_t *ns, const char *s, size_t n, const 
 		} else {
 			const vir_pass_info *p = vir_pass_find(s + i, e - i);
 			uint32_t np;
-			const vir_pass_info *all = vir_pass_list(&np);
+			const vir_pass_info *const *all = vir_pass_list(&np);
 
 			if (!p) {
 				vbuffer_format_append(err, "%s: unknown pass `%.*s` (passes: canon", path, (int)(e - i), s + i);
 				for (uint32_t k = 0; k < np; k++)
-					vbuffer_format_append(err, " %s", all[k].name);
+					vbuffer_format_append(err, " %s", all[k]->name);
 				vbuffer_string_append(err, ")\n");
 				return false;
 			}

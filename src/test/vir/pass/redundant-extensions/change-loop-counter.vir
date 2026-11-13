@@ -1,0 +1,49 @@
+; PASSES: canon,redundant-extensions
+; CHANGES: yes
+; a counter masked to a byte around a loop: the fixed point is z = 8, the ext in the body is gone
+vir 1
+target arm64-linux
+extern @g
+sig %s = (int, int) -> int
+sig %gs = (int) -> int
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  v1:i32 = trunc v0
+  br b1(0)
+b1(v2:i32) loop:
+  v3:i32 = ext.1u v2
+  v4:i32 = add v3, 1
+  v5:i32 = and v4, 255
+  v6:i32 = icmp.ult v5, v1
+  brif v6, b2, b3
+b2:
+  br b1(v5)
+b3:
+  v7:i64 = ext.4u v3
+  ret v7
+}
+; ---
+vir 1
+target arm64-linux
+extern @g
+sig %s0 = (int, int) -> int
+sig %s1 = (int) -> int
+
+func @f %s0 {
+b0:
+  v0:i64 = param 0.0
+  v1:i32 = trunc v0
+  br b1(0)
+b1(v2:i32) loop:
+  v3:i32 = add v2, 1
+  v4:i32 = and v3, 255
+  v5:i32 = icmp.ult v4, v1
+  brif v5, b2, b3
+b2:
+  br b1(v4)
+b3:
+  v6:i64 = ext.4u v2
+  ret v6
+}
+; pass redundant-extensions @f: changed, 1 instructions

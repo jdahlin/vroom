@@ -1,0 +1,36 @@
+; PASSES: canon,redundant-extensions
+; CHANGES: yes
+; a vector and and an fext are not candidates
+vir 1
+target arm64-linux
+extern @g
+sig %s = (int, int) -> int
+sig %gs = (int) -> int
+func @f %s {
+b0:
+  v0:ptr = param 0.0
+  v1:i32x4 = load.4 v0 align 4
+  v2:i32x4 = and v1, v1
+  v3:f32 = load.4 v0
+  v4:f64 = fext v3
+  v5:i64 = bitcast v4
+  ret v5
+}
+; ---
+vir 1
+target arm64-linux
+extern @g
+sig %s0 = (int, int) -> int
+sig %s1 = (int) -> int
+
+func @f %s0 {
+b0:
+  v0:ptr = param 0.0
+  v1:i32x4 = load.4 v0 align 4
+  v2:i32x4 = and v1, v1
+  v3:f32 = load.4 v0
+  v4:f64 = fext v3
+  v5:i64 = bitcast v4
+  ret v5
+}
+; pass redundant-extensions @f: unchanged

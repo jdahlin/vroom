@@ -43,7 +43,11 @@ typedef struct vir_pass_info {
 } vir_pass_info;
 
 const vir_pass_info *vir_pass_find(const char *name, size_t n);	/* NULL: no such pass */
-const vir_pass_info *vir_pass_list(uint32_t *n);
+const vir_pass_info *const *vir_pass_list(uint32_t *n);	/* n entries */
+
+/* the registry's rows (the compiler's pass table points at them) and their entry points */
+extern const vir_pass_info vir_pass_compact, vir_pass_redundant_extensions;
+bool vir_redundant_extensions_remove(vir_fn *f, vir_pass_context *ctx);
 
 /* Runs p on f.  Returns whether it changed f.  When ctx->checked or VCC_VIR_CHECK_ANALYSES=1, then
  * after the run every analysis in p->keeps that is still valid in f->valid is computed again and
