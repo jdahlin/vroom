@@ -12,8 +12,8 @@ W=../contrib/wasm
 OUT=${OUT:-../build/wasm}
 mkdir -p $OUT/obj
 CFLAGS="-Iport/wasm/compat -Iinclude -std=c11 -O2 -sMEMORY64=1 -msimd128 -mfpu=neon -D_GNU_SOURCE -DVCC_INCDIR=\"/vcc/include\" -Wno-unused-parameter ${WFLAGS}"
-SRC="bin/vpp/vpp.c frontend/lex/lex.c common/intern.c arch/a64/as/enc.c platform/darwin/macho.c arch/wasm/as/as.c platform/wasm/wasm.c
- frontend/pp/dircache.c driver/ppdriver.c driver/ccsnap.c common/ldhash.c"
+SRC="bin/vpp/vpp.c frontend/lex/lex.c common/intern.c frontend/c/keywords.c common/fail.c port/crc32c.c port/stack-guard.c port/job-regions.c arch/a64/as/enc.c platform/darwin/macho.c arch/wasm/as/as.c platform/wasm/wasm.c
+ frontend/pp/dircache.c driver/ppdriver.c driver/ccsnap.c common/digest-xxh3.c common/digest-blake3.c common/digest-sha256.c"
 for m in as obj cc pp emit; do
 	case $m in
 	as) f="as/as.c arch/a64/as/parse.c";;
