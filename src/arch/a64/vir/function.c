@@ -18,8 +18,8 @@
  * layout stays finish_function's.  Edge moves of a branch that is not a `br`
  * go into a small block after the branch's own (a label, the moves, a jump).
  */
-#include "../emitimpl.h"
-#include "preir.h"
+#include "../../../codegen/emitimpl.h"
+#include "../../../codegen/vir/preir.h"
 #include "vir/layout.h"
 
 #define VL_MAXOP 512

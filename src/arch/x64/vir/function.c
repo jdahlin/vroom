@@ -4,7 +4,7 @@
  * allocated when the remaining GP scratch suffices for this function's edges.
  * Keep vector instructions in opaque records until the record vocabulary has SIMD ops.
  */
-#include "x64impl.h"
+#include "../codegen/x64impl.h"
 #include "../../../codegen/walk/proto.h"
 #include "../../../codegen/vir/preir.h"
 #include "vir/layout.h"
