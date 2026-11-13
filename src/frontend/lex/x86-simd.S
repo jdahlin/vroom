@@ -119,7 +119,7 @@ function SYM(lex_bytes_classify_avx2)
 	vpshufb %ymm11, %ymm14, %ymm14
 	vpcmpeqb %ymm13, %ymm12, %ymm15
 	vpand %ymm15, %ymm14, %ymm14
-	vpor %ymm14, \out, \out
+	vpor \out, %ymm14, \out
 	vpaddb %ymm4, %ymm13, %ymm13
 	addq $16, %rax
 	cmpq $(16*\rows), %rax

@@ -222,7 +222,7 @@ VPRIV int x64_i_avx512(as_context *a, char *mn, XOp *o, int n)
 			    .opsz16=ops[i].prefix == 1, .rep=ops[i].prefix == 2 ? 0xf3 : 0);
 		if (ops[i].map == 1) bytes[1] = bytes[2], f.nop = 2;
 		if (form == K_STORE) {
-			if (rm->kind != XK_REG || rm->cls != XR_MASK ||
+			if (rm->kind != XK_REG || rm->cls != XR_MASK || rm->mask ||
 			    (dst->kind != XK_MEM && dst->kind != XK_EXPR)) break;
 			f.reg = rm->reg;
 			f.rm = dst;

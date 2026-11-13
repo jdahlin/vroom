@@ -357,7 +357,13 @@ VPRIV int x64_emit(as_context *a, XForm *f)
 
 			if (base >= 0 && base & 8) rex |= 1;
 			if (index >= 0 && index & 8) rex |= 2;
-			md = dsym ? 2 : (base < 0 ? 0 : disp == 0 && (base & 7) != 5 ? 0 : disp % (f->tuple ? f->tuple : 1) == 0 && fits8(disp / (f->tuple ? f->tuple : 1)) ? 1 : 2);
+			int64_t disp8 = disp;
+			if (f->tuple) {
+				/* EVEX disp8 is in units of the memory tuple. */
+				disp8 = disp % f->tuple ? 128 : disp / f->tuple;
+			}
+			md = dsym ? 2 : (base < 0 ? 0 : disp == 0 && (base & 7) != 5 ? 0 : fits8(disp8) ? 1 : 2);
+			if (md == 1) disp = disp8;
 			if (base < 0) {
 				/* no base: SIB base 101 with mod 00 means disp32 */
 				modrm[nm++] = (uint8_t)((f->reg & 7) << 3 | 4);
@@ -436,7 +442,7 @@ VPRIV int x64_emit(as_context *a, XForm *f)
 				ew(&x, 0, 4);
 			}
 		} else {
-			ew(&x, dispsz == 1 && f->tuple ? disp / f->tuple : disp, dispsz);
+			ew(&x, disp, dispsz);
 		}
 	}
 	if (f->isz) {
