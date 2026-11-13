@@ -1,4 +1,16 @@
-/* The predefined macros of a job, as clang predefines them for the target, the standard and the flags. */
+/*
+ * predef.c: the text of a job's predefined macros, as clang predefines them for the target, the
+ * language standard and the flags.
+ *
+ * The per-target base (Linux arm64, Linux x86-64, Darwin) is a table generated from clang once
+ * (frontend/pp/ppdata-predef.inc by gen-ppdata.sh, ppdata-x86.inc by gen-x86data.sh): no clang runs
+ * here.  driver_predef_build appends it to job->pre as `#define` lines, then what the options change:
+ * __STDC_VERSION__ (the tables are for gnu11), -funsigned-char, the math flags, C23 additions,
+ * assembler mode.  It also picks the order -dD prints them in (po.dd_order) and po.target.  What is
+ * added here must be what clang prints for the same flags: `bench/vcc-diff.py dm` and `dd` compare
+ * it byte for byte.  The Darwin system and framework directory lists live here because they come out
+ * of the same generated data.
+ */
 #include "driver-internal.h"
 #include "../frontend/pp/ppdata-predef.inc"
 #define PPDATA_X86_PREDEF

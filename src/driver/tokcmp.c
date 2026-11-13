@@ -1,4 +1,17 @@
-/* The token-stream comparison of --cmp (with its hash cache) and the token hash of --vcc-tokhash: test aids, not product. */
+/*
+ * tokcmp.c: --cmp, comparing our -E output with clang's token by token, and --vcc-tokhash, a hash of
+ * the token stream the parser sees.  Test aids for bench/vcc-diff.py and the parity runs, not part of
+ * the product.
+ *
+ * The comparison lexes both sides with vcc's own lexer and compares kind and spelling, so spacing and
+ * line markers do not count; the first difference is shown and the status is 1 (2 when the reference
+ * cannot be opened).  The reference's token-stream hash is kept in REF.i.th, keyed by the reference's
+ * size and mtime: when ours hashes the same, the reference is not read again (VPP_CMP_NOCACHE=1
+ * compares in full).  The cache file is written through a temporary name and renamed, so parallel
+ * runs are safe.  Lexing here turns identifier interning off (lex_identifiers_not_interned) because
+ * the token copies are freed: do not keep pointers into them.  The token hash covers kind, spacing
+ * flags, location, spelling and the file names (VPP_TOKCOUNT=1 only counts).
+ */
 #include "driver-internal.h"
 
 #ifdef __APPLE__
