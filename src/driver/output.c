@@ -3,11 +3,11 @@
  *
  * Files are written to a temporary next to the target and renamed over it, so an interrupted or failed
  * job leaves the old file or none, never a torn one (a device or fifo is written in place).  A new
- * file gets the client's umask (ppd_umask, set by the vccd dispatcher) and a job whose client has
- * gone (ppd_conn closed) writes nothing.  The object state (assembler, ElfObj, 4 GB reserved output
+ * file gets the client's umask (driver_client_umask, set by the vccd dispatcher) and a job whose client has
+ * gone (driver_client_connection closed) writes nothing.  The object state (assembler, ElfObj, 4 GB reserved output
  * buffer) is expensive to build, so a thread takes one from a locked free list at the start of a -c
- * job (obj_state) and returns it at the end (obj_release); tl_as, tl_obj and tl_objbuf are valid in
- * between only.  write_obj lays out the object (ELF, or Mach-O for Darwin targets) and writes it
+ * job (obj_state) and returns it at the end (driver_object_state_release); driver_assembler, driver_object and driver_object_buffer are valid in
+ * between only.  driver_object_write lays out the object (ELF, or Mach-O for Darwin targets) and writes it
  * with one write.  Failures are reported on the job's error fd and returned as 1.
  */
 #include "driver-internal.h"
@@ -38,27 +38,27 @@ VPRIV int write_all(int fd, const char *p, size_t n)
 
 /* outputs go to a temporary next to the target, renamed over it when complete:
    an interrupted or failed job leaves the old file or none, never a torn one */
-_Thread_local int ppd_umask = -1;
-_Thread_local int ppd_conn = -1;
+_Thread_local int driver_client_umask = -1;
+_Thread_local int driver_client_connection = -1;
 
 /* the client closed its end (it was killed, or make was interrupted): the
  * request is all it sends, so anything readable now is the EOF */
-VPRIV bool client_gone(void)
+VPRIV bool driver_client_is_gone(void)
 {
-	struct pollfd pf = { ppd_conn, POLLIN, 0 };
+	struct pollfd pf = { driver_client_connection, POLLIN, 0 };
 	char c;
 
-	return ppd_conn >= 0 && poll(&pf, 1, 0) == 1 && recv(ppd_conn, &c, 1, MSG_PEEK | MSG_DONTWAIT) == 0;
+	return driver_client_connection >= 0 && poll(&pf, 1, 0) == 1 && recv(driver_client_connection, &c, 1, MSG_PEEK | MSG_DONTWAIT) == 0;
 }
 
 /* a new output's mode: the client's umask under vccd */
-VPRIV void out_mode(int fd)
+VPRIV void driver_output_mode_set(int fd)
 {
-	if (ppd_umask >= 0)
-		fchmod(fd, 0666 & ~(mode_t)ppd_umask);
+	if (driver_client_umask >= 0)
+		fchmod(fd, 0666 & ~(mode_t)driver_client_umask);
 }
 
-VPRIV bool tmp_name(char *t, size_t cap, const char *f)
+VPRIV bool driver_output_temporary_name(char *t, size_t cap, const char *f)
 {
 	static _Atomic unsigned seq;
 	struct stat st;
@@ -78,16 +78,16 @@ VPRIV int write_file(const char *cwd, const char *path, const char *s, size_t n,
 	const char *f = at(cwd, path, b, sizeof(b));
 	int fd;
 
-	bool tmp = tmp_name(t, sizeof(t), f);
+	bool tmp = driver_output_temporary_name(t, sizeof(t), f);
 
-	if (client_gone()) {
+	if (driver_client_is_gone()) {
 		dprintf(errfd, "vcc: %s not written: the client has gone\n", path);
 		return 1;
 	}
 
 	fd = open(t, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0666);
 	if (fd >= 0 && tmp)
-		out_mode(fd);
+		driver_output_mode_set(fd);
 	if (fd < 0 || write_all(fd, s, n) || close(fd) || (tmp && rename(t, f))) {
 		int e = errno;
 
@@ -107,10 +107,10 @@ VPRIV int write_out(const char *cwd, const char *out, int outfd, const char *s, 
 }
 
 /* phase times over all -c jobs (ns): front end + codegen, assembler, finish + write */
-_Atomic unsigned long long ppd_ns_cc, ppd_ns_emit, ppd_ns_obj, ppd_bytes_obj, ppd_tok_out, ppd_tok_skip;
-_Thread_local vperf ppd_ph[PPD_NPH];
+_Atomic unsigned long long driver_compile_nanoseconds, driver_emit_nanoseconds, driver_object_nanoseconds, driver_object_bytes, driver_tokens_taken, driver_tokens_skipped;
+_Thread_local vperf driver_phase_counters[DRIVER_PHASE_COUNT];
 
-VPRIV unsigned long long nsnow(void)
+VPRIV unsigned long long driver_clock_nanoseconds(void)
 {
 	struct timespec ts;
 
@@ -123,92 +123,92 @@ VPRIV unsigned long long nsnow(void)
  * process-wide pool, so it outlives threads (vpp --batch starts some per pass)
  */
 
-_Thread_local as_context *tl_as;
-_Thread_local ElfObj *tl_obj;
-_Thread_local uint8_t *tl_objbuf;
-#define OBJBUF_CAP ((size_t)1 << 32)
+_Thread_local as_context *driver_assembler;
+_Thread_local ElfObj *driver_object;
+_Thread_local uint8_t *driver_object_buffer;
+#define DRIVER_OBJECT_BUFFER_CAPACITY ((size_t)1 << 32)
 
 
 
-static struct objst { as_context *as; ElfObj *obj; uint8_t *buf; struct objst *next; } *obj_free;
-static _Thread_local struct objst *tl_os;
-static pthread_mutex_t obj_mu = PTHREAD_MUTEX_INITIALIZER;
+static struct driver_object_state { as_context *as; ElfObj *obj; uint8_t *buf; struct driver_object_state *next; } *driver_object_state_free_list;
+static _Thread_local struct driver_object_state *driver_object_state_current;
+static pthread_mutex_t driver_object_state_lock = PTHREAD_MUTEX_INITIALIZER;
 
 
 VPRIV void obj_state(void)
 {
-	struct objst *s;
+	struct driver_object_state *s;
 
-	if (tl_os)
+	if (driver_object_state_current)
 		return;
-	pthread_mutex_lock(&obj_mu);
-	s = obj_free;
+	pthread_mutex_lock(&driver_object_state_lock);
+	s = driver_object_state_free_list;
 	if (s)
-		obj_free = s->next;
-	pthread_mutex_unlock(&obj_mu);
+		driver_object_state_free_list = s->next;
+	pthread_mutex_unlock(&driver_object_state_lock);
 	if (!s) {
 		s = calloc(1, sizeof(*s));
 		s->as = as_new();
 		s->obj = elf_new();
-		s->buf = mmap(NULL, OBJBUF_CAP, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
+		s->buf = mmap(NULL, DRIVER_OBJECT_BUFFER_CAPACITY, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
 		if (s->buf == MAP_FAILED)
 			abort();
 	}
-	tl_os = s;
-	tl_as = s->as, tl_obj = s->obj, tl_objbuf = s->buf;
+	driver_object_state_current = s;
+	driver_assembler = s->as, driver_object = s->obj, driver_object_buffer = s->buf;
 }
 
 
-VPRIV void obj_release(void)
+VPRIV void driver_object_state_release(void)
 {
-	struct objst *s = tl_os;
+	struct driver_object_state *s = driver_object_state_current;
 
 	if (!s)
 		return;
-	tl_os = NULL;
-	tl_as = NULL, tl_obj = NULL, tl_objbuf = NULL;
-	pthread_mutex_lock(&obj_mu);
-	s->next = obj_free;
-	obj_free = s;
-	pthread_mutex_unlock(&obj_mu);
+	driver_object_state_current = NULL;
+	driver_assembler = NULL, driver_object = NULL, driver_object_buffer = NULL;
+	pthread_mutex_lock(&driver_object_state_lock);
+	s->next = driver_object_state_free_list;
+	driver_object_state_free_list = s;
+	pthread_mutex_unlock(&driver_object_state_lock);
 }
 
 /* -c for wasm64: the object's bytes (arch/wasm/as, platform/wasm) */
 
-_Thread_local vbuffer tl_wasm_obj;
+_Thread_local vbuffer driver_wasm_object;
 
 
 
-/* lay out tl_obj and write it to out */
+/* lay out driver_object and write it to out */
 
-VPRIV int write_obj(const char *cwd, const char *out, int outfd, int errfd, int macho)
+VPRIV int driver_object_write(const char *cwd, const char *out, int outfd, int errfd, int macho)
 {
-	unsigned long long t0 = nsnow();
+	unsigned long long t0 = driver_clock_nanoseconds();
 	vperf v0 = vperformance_now();
-	size_t n = macho ? macho_finish(tl_obj) : elf_finish(tl_obj);
+	size_t n = macho ? macho_finish(driver_object) : elf_finish(driver_object);
 	int r;
 
-	if (!n || tl_obj->has_err) {
-		dprintf(errfd, "vcc: error: %s\n", tl_obj->err[0] ? tl_obj->err : "cannot lay out the object");
+	if (!n || driver_object->has_err) {
+		dprintf(errfd, "vcc: error: %s\n", driver_object->err[0] ? driver_object->err : "cannot lay out the object");
 		return 1;
 	}
-	if (n > OBJBUF_CAP) {
+	if (n > DRIVER_OBJECT_BUFFER_CAPACITY) {
 		dprintf(errfd, "vcc: error: object too large\n");
 		return 1;
 	}
 	if (macho)
-		macho_emit(tl_obj, tl_objbuf);
+		macho_emit(driver_object, driver_object_buffer);
 	else
-		elf_emit(tl_obj, tl_objbuf);
-	r = write_out(cwd, out, outfd, (const char *)tl_objbuf, n, errfd);
-	ppd_ns_obj += nsnow() - t0;
-	ppd_ph_add(PPD_PH_OBJ, v0);
-	ppd_bytes_obj += n;
+		elf_emit(driver_object, driver_object_buffer);
+	r = write_out(cwd, out, outfd, (const char *)driver_object_buffer, n, errfd);
+	driver_object_nanoseconds += driver_clock_nanoseconds() - t0;
+	driver_phase_add(DRIVER_PHASE_OBJECT, v0);
+	driver_object_bytes += n;
 	return r;
 }
 
 /* the default object name: the source's basename with .o */
-VPRIV const char *obj_name(const char *main_file, char *buf, size_t cap)
+VPRIV const char *driver_object_name(const char *main_file, char *buf, size_t cap)
 {
 	const char *b = strrchr(main_file, '/') ? strrchr(main_file, '/') + 1 : main_file;
 	const char *dot = strrchr(b, '.');

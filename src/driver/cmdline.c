@@ -14,7 +14,7 @@
 #include "driver-internal.h"
 
 /* an input file by its suffix, as clang's driver: .c .h .i (C), .S .s (assembly), .dts */
-static bool src_suffix(const char *a)
+static bool driver_input_is_source(const char *a)
 {
 	static const char *const sfx[] = { ".c", ".h", ".i", ".S", ".s", ".dts" };
 	size_t l = strlen(a);
@@ -251,7 +251,7 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
 		if ((v = ARG("-D"))) {
 			if (!strncmp(v, "__KERNEL__", 10) && (!v[10] || v[10] == '='))
 				job->vcc_kernel = 1;	/* the kernel: its error() calls rely on clang -O2 folding */
-			define_arg(&job->cmdl, v);
+			driver_buffer_append_define(&job->cmdl, v);
 			continue;
 		}
 		if ((v = ARG("-U"))) { bstr(&job->cmdl, "#undef "); bstr(&job->cmdl, v); bstr(&job->cmdl, "\n"); continue; }
@@ -340,8 +340,8 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
 		else if (!strcmp(a, "-msse2")) job->nosse2 = 0;
 		else if (!strcmp(a, "-mno-mmx")) job->nommx = 1;
 		else if (!strcmp(a, "-mmmx")) job->nommx = 0;
-		else if (!strncmp(a, "-march=", 7) && arch_lse(a + 7, false) >= 0) job->march_lse = arch_lse(a + 7, false);
-		else if (!strncmp(a, "-mcpu=", 6) && arch_lse(a + 6, true) >= 0) job->mcpu_lse = arch_lse(a + 6, true);
+		else if (!strncmp(a, "-march=", 7) && driver_target_lse_detect(a + 7, false) >= 0) job->march_lse = driver_target_lse_detect(a + 7, false);
+		else if (!strncmp(a, "-mcpu=", 6) && driver_target_lse_detect(a + 6, true) >= 0) job->mcpu_lse = driver_target_lse_detect(a + 6, true);
 		else if (!strcmp(a, "-mcmodel=tiny")) job->tiny = 1;
 		else if (!strcmp(a, "-fcf-protection=branch") || !strcmp(a, "-fcf-protection=full") || !strcmp(a, "-fcf-protection")) job->xcf |= 1;
 		else if (!strcmp(a, "-fcf-protection=none") || !strcmp(a, "-fcf-protection=return")) job->xcf &= ~1;
@@ -363,7 +363,7 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
 		else if (!strcmp(a, "-ftrivial-auto-var-init=uninitialized")) job->autozero = 0;
 		else if (!strcmp(a, "-"))
 			job->main_file = a;	/* stdin, as clang: "<stdin>" in diagnostics and line markers */
-		else if (a[0] != '-' && a[0] && (job->xlang || src_suffix(a))) {
+		else if (a[0] != '-' && a[0] && (job->xlang || driver_input_is_source(a))) {
 			size_t l = strlen(a);
 
 			job->main_file = a;

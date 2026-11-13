@@ -1,7 +1,7 @@
 /*
  * depfile.c: the make rule of -MD/-MMD/-M/-MM, and the name and target it is written under.
  *
- * write_deps reproduces clang's DependencyFileGenerator byte for byte (bench/vcc-diff.py deps checks
+ * driver_depfile_write reproduces clang's DependencyFileGenerator byte for byte (bench/vcc-diff.py deps checks
  * it): names from pp_file_names wrapped at 75 columns, `./` dropped, `<stdin>` left out, -MMD/-MM
  * without system headers, -MP phony targets for every file but the main one.  `first` is a file that
  * comes before the rest (Darwin's SDKSettings.json, which clang reads).  driver_depfile_names sets
@@ -15,7 +15,7 @@
 /* the make rule, as clang's DependencyFileGenerator: lines wrapped at 75
  * columns, -MMD/-MM without system headers, -MP phony targets.
  * depfile NULL: to -o or stdout (-M/-MM). */
-VPRIV int write_deps(const pp *p, const char *cwd, const char *depfile, const char *target, int nosys, int phony,
+VPRIV int driver_depfile_write(const pp *p, const char *cwd, const char *depfile, const char *target, int nosys, int phony,
 		      const char *first, const char *out, int outfd, int errfd)
 {
 	static _Thread_local const char **names;
@@ -28,7 +28,7 @@ VPRIV int write_deps(const pp *p, const char *cwd, const char *depfile, const ch
 		cap = cap ? 2 * cap : 4096;
 		names = malloc(cap * sizeof(*names));
 	}
-	buf d = { .r = &bufr[3] };
+	buf d = { .r = &driver_buffer_region[3] };
 	int r;
 
 	bstr(&d, target);
@@ -62,7 +62,7 @@ VPRIV int write_deps(const pp *p, const char *cwd, const char *depfile, const ch
 			bstr(&d, ":\n");
 		}
 	r = depfile ? write_file(cwd, depfile, d.p, d.n, errfd) : write_out(cwd, out, outfd, d.p, d.n, errfd);
-	bfree(&d);
+	driver_buffer_free(&d);
 	return r;
 }
 
@@ -76,9 +76,9 @@ VPRIV void driver_depfile_names(struct driver_job *job)
 	job->dfirst = NULL;
 
 	if (!job->dtarget)
-		job->dtarget = job->out && strcmp(job->out, "-") && !job->mdeps ? job->out : obj_name(job->main_file, job->dtbuf, sizeof(job->dtbuf));
+		job->dtarget = job->out && strcmp(job->out, "-") && !job->mdeps ? job->out : driver_object_name(job->main_file, job->dtbuf, sizeof(job->dtbuf));
 	if (job->md && !job->mdeps && !job->depfile) {
-		const char *st = job->out && strcmp(job->out, "-") ? job->out : obj_name(job->main_file, job->dtbuf + 2048, 2048);
+		const char *st = job->out && strcmp(job->out, "-") ? job->out : driver_object_name(job->main_file, job->dtbuf + 2048, 2048);
 		const char *sl = strrchr(st, '/'), *dot = strrchr(st, '.');
 
 		if (dot && sl && dot < sl)

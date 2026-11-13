@@ -52,12 +52,12 @@ int main(int argc, char **argv)
 		len += strlen(argv[i]) + 1;
 	for (char **e = environ; *e; e++, envc++)
 		len += strlen(*e) + 1;
-	if (len > VROOM_MAX_PAYLOAD)
+	if (len > VCCD_PROTOCOL_PAYLOAD_MAX)
 		fallback(argv);
 
-	char *buf = malloc(sizeof(struct vroom_req_hdr) + len);
-	struct vroom_req_hdr *h = (struct vroom_req_hdr *)buf;
-	h->magic = VROOM_MAGIC;
+	char *buf = malloc(sizeof(struct vccd_request_header) + len);
+	struct vccd_request_header *h = (struct vccd_request_header *)buf;
+	h->magic = VCCD_PROTOCOL_MAGIC;
 	h->argc = argc;
 	h->envc = envc;
 	h->payload_len = len;

@@ -1,14 +1,14 @@
 /*
- * job.c: one compile job from a clang command line (ppd_run): parse the options, then run one of
+ * job.c: one compile job from a clang command line (driver_job_run): parse the options, then run one of
  * four modes (--cmp token comparison, -S/-c compile, assembler source, plain -E) and write the output.
  *
  * Callers: vpp (parity tests) and vccd (server/dispatch.c, compile.c, probe.c, host-programs.c), one
  * job per call and per thread.  The job is thread safe and touches no process state: the working
- * directory, environment and file descriptors come in through ppd_env (ppdriver.h), so under vccd
+ * directory, environment and file descriptors come in through driver_environment (driver.h), so under vccd
  * they are the client's.  The only per-thread state is the buffer regions (job-buffer.c) and the
  * object state (output.c: one assembler, one ElfObj, one output buffer per thread).
  *
- * The order in ppd_run1 matters: the option loop (cmdline.c) and its checks come first, defaults
+ * The order in driver_job_run_one matters: the option loop (cmdline.c) and its checks come first, defaults
  * that depend on the target (PIE, CFI) are fixed after them, and the search paths and predefined
  * macros are built before pp_open lexes the main file.  A job ends by setting job->status
  * (0 ok, 1 failed, 2 usage error) and jumping to `out`; a full table or an overflow in the
@@ -28,7 +28,7 @@ static double now(void)
 }
 
 /* a variable of the job's environment: the client's under vccd */
-VPRIV const char *ppd_getenv(const ppd_env *env, const char *name)
+VPRIV const char *driver_environment_get(const driver_environment *env, const char *name)
 {
 	size_t l = strlen(name);
 
@@ -41,7 +41,7 @@ VPRIV const char *ppd_getenv(const ppd_env *env, const char *name)
 }
 
 /* a .s file (or -x assembler): straight to the assembler, as clang */
-static void driver_assemble_source(struct driver_job *job, const ppd_env *env)
+static void driver_source_assemble(struct driver_job *job, const driver_environment *env)
 {
 		/* a .s file (or -x assembler): straight to the assembler, as clang */
 		char path[4096];
@@ -49,7 +49,7 @@ static void driver_assemble_source(struct driver_job *job, const ppd_env *env)
 
 		obj_state();
 		if (!job->out)
-			job->out = obj_name(job->main_file, job->objbuf, sizeof(job->objbuf));
+			job->out = driver_object_name(job->main_file, job->objbuf, sizeof(job->objbuf));
 		snprintf(path, sizeof(path), "%s%s%s", job->main_file[0] == '/' || !env->cwd ? "" : env->cwd,
 			 job->main_file[0] == '/' || !env->cwd ? "" : "/", job->main_file);
 		VAUTOCLOSE int fd = open(path, O_RDONLY);
@@ -70,8 +70,8 @@ static void driver_assemble_source(struct driver_job *job, const ppd_env *env)
 			job->status = 1;
 			return;
 		}
-		as_include_directory_set(tl_as, env->cwd);
-		elf_set_machine(tl_obj, job->x86 ? EM_X86_64 : EM_AARCH64);
+		as_include_directory_set(driver_assembler, env->cwd);
+		elf_set_machine(driver_object, job->x86 ? EM_X86_64 : EM_AARCH64);
 		size_t tn = (size_t)got;
 
 		if (job->darwin) {
@@ -81,16 +81,16 @@ static void driver_assemble_source(struct driver_job *job, const ppd_env *env)
 			free(t);
 			t = d;
 		}
-		if (as_run(tl_as, tl_obj, t, tn, job->main_file, &msg)) {
+		if (as_run(driver_assembler, driver_object, t, tn, job->main_file, &msg)) {
 			dprintf(job->errfd, "vcc: error: %s\n", msg);
 			job->status = 1;
 		} else
-			job->status = write_obj(env->cwd, job->out, env->outfd, job->errfd, job->darwin);
+			job->status = driver_object_write(env->cwd, job->out, env->outfd, job->errfd, job->darwin);
 		return;
 }
 
 /* the first half of pp_opts: the directories' lists, the language switches, the epoch */
-static void job_pp_opts_first(struct driver_job *job, const ppd_env *env)
+static void driver_job_pp_options_prepare(struct driver_job *job, const driver_environment *env)
 {
 	job->po.c23 = job->std == 23;
 	job->po.c89 = job->std == 89 && job->strict;
@@ -103,7 +103,7 @@ static void job_pp_opts_first(struct driver_job *job, const ppd_env *env)
 	job->po.fatal_continue = !job->emit && !job->objmode && !job->syntax && !job->layout && !job->tokhash;
 	job->po.trigraphs = job->tri >= 0 ? job->tri : job->strict && job->std != 23;	/* clang: strict modes before C23 */
 	{
-		const char *ep = ppd_getenv(env, "SOURCE_DATE_EPOCH");
+		const char *ep = driver_environment_get(env, "SOURCE_DATE_EPOCH");
 		char *end;
 
 		if (ep && *ep) {
@@ -114,7 +114,7 @@ static void job_pp_opts_first(struct driver_job *job, const ppd_env *env)
 }
 
 /* the second half: what follows the predefine text (markers, the main file, diagnostics, -fmacro-prefix-map) */
-static void job_pp_opts_second(struct driver_job *job, const ppd_env *env, int argc, char **argv)
+static void driver_job_pp_options_finish(struct driver_job *job, const driver_environment *env, int argc, char **argv)
 {
 	job->po.markers = job->nomarkers || job->cmp || !job->po.fatal_continue || job->dmacros ? 0 : job->undef ? 2 : 1;
 	job->po.predef_cmdl = (unsigned)job->pre.n;
@@ -156,9 +156,9 @@ static void job_pp_opts_second(struct driver_job *job, const ppd_env *env, int a
 }
 
 /* -fsyntax-only, -S, -c of C: the front end and code generator, then the output files */
-static void job_compile(struct driver_job *job, pp *p, const ppd_env *env)
+static void driver_job_compile(struct driver_job *job, pp *p, const driver_environment *env)
 {
-		const char *field_uses = ppd_getenv(env, "VCC_FIELD_USES");	/* test aid: frontend/c/field-uses.c */
+		const char *field_uses = driver_environment_get(env, "VCC_FIELD_USES");	/* test aid: frontend/c/field-uses.c */
 
 		if (__builtin_expect(field_uses != NULL, 0)) {
 			if (!job->syntax || job->emit || job->layout) {
@@ -193,9 +193,9 @@ static void job_compile(struct driver_job *job, pp *p, const ppd_env *env)
 		if (job->debug)
 			co.dbg_dir = env->cwd ? env->cwd : getcwd(dbgdir, sizeof dbgdir);
 		co.nthreads = getenv("VCC_THREADS") ? atoi(getenv("VCC_THREADS")) : 1;
-		co.obj = tl_obj;
-		co.as = tl_as;
-		co.wasm_obj = &tl_wasm_obj;
+		co.obj = driver_object;
+		co.as = driver_assembler;
+		co.wasm_obj = &driver_wasm_object;
 		if ((job->layout || job->emit == 1) && job->out && strcmp(job->out, "-")) {
 			char path[4096];
 
@@ -204,10 +204,10 @@ static void job_compile(struct driver_job *job, pp *p, const ppd_env *env)
 			else
 				snprintf(path, sizeof(path), "%s", job->out);
 			snprintf(outpath, sizeof(outpath), "%s", path);
-			outrename = tmp_name(outtmp, sizeof(outtmp), path);
+			outrename = driver_output_temporary_name(outtmp, sizeof(outtmp), path);
 			fd = open(outtmp, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0666);
 			if (fd >= 0 && outrename)
-				out_mode(fd);
+				driver_output_mode_set(fd);
 			if (fd < 0) {
 				dprintf(job->errfd, "vcc: error: cannot open %s\n", job->out);
 				job->status = 1;
@@ -216,17 +216,17 @@ static void job_compile(struct driver_job *job, pp *p, const ppd_env *env)
 			co.outfd = fd;
 		}
 		{
-			unsigned long long t1 = nsnow();
+			unsigned long long t1 = driver_clock_nanoseconds();
 			vperf v1 = vperformance_now();
 
 			job->status = cc_run(p, &co) || pp_error_count(p) ? 1 : 0;
-			ppd_ns_cc += nsnow() - t1;
-			ppd_ph_add(PPD_PH_CC, v1);
-			ppd_tok_out += pp_token_count(p);
-			ppd_tok_skip += pp_skipped_token_count(p);
+			driver_compile_nanoseconds += driver_clock_nanoseconds() - t1;
+			driver_phase_add(DRIVER_PHASE_COMPILE, v1);
+			driver_tokens_taken += pp_token_count(p);
+			driver_tokens_skipped += pp_skipped_token_count(p);
 		}
 		if (fd >= 0) {
-			if (!job->status && client_gone())
+			if (!job->status && driver_client_is_gone())
 				job->status = 1;	/* (the temporary is removed below) */
 			if (close(fd) || (!job->status && outrename && rename(outtmp, outpath))) {
 				dprintf(job->errfd, "vcc: error: cannot write %s: %s\n", job->out, strerror(errno));
@@ -236,18 +236,18 @@ static void job_compile(struct driver_job *job, pp *p, const ppd_env *env)
 				unlink(outtmp);
 		}
 		if (!job->status && job->emit == 2 && PP_IS_WASM(job->po.target))
-			job->status = write_out(env->cwd, job->out, env->outfd, tl_wasm_obj.p, tl_wasm_obj.n, job->errfd);
+			job->status = write_out(env->cwd, job->out, env->outfd, driver_wasm_object.p, driver_wasm_object.n, job->errfd);
 		else if (!job->status && job->emit == 2)
-			job->status = write_obj(env->cwd, job->out, env->outfd, job->errfd, job->darwin);
+			job->status = driver_object_write(env->cwd, job->out, env->outfd, job->errfd, job->darwin);
 		if (!job->status && job->emit && job->depfile)	/* -S and -c */
-			job->status = write_deps(p, env->cwd, job->depfile, job->dtarget, job->dnosys, job->mphony, job->dfirst, NULL, -1, job->errfd);
+			job->status = driver_depfile_write(p, env->cwd, job->depfile, job->dtarget, job->dnosys, job->mphony, job->dfirst, NULL, -1, job->errfd);
 		if (getenv("VPP_TIME"))
 			dprintf(job->errfd, "vcc: %.1f ms\n", (now() - job->t0) * 1e3);
 		return;
 }
 
 /* -E, -dM, -M, and -c of preprocessed assembler */
-static void job_preprocess(struct driver_job *job, pp *p, const ppd_env *env)
+static void driver_job_preprocess(struct driver_job *job, pp *p, const driver_environment *env)
 {
 	buf o = { 0 };
 
@@ -279,49 +279,49 @@ static void job_preprocess(struct driver_job *job, pp *p, const ppd_env *env)
 			write_out(env->cwd, job->out, env->outfd, o.p, o.n, job->errfd);
 		job->status = 1;
 	} else if (job->cmp) {
-		job->status = ppd_compare(o.p, o.n, job->cmp);
+		job->status = driver_tokens_compare(o.p, o.n, job->cmp);
 	} else if (job->objmode) {
 		const char *msg;
 
-		as_include_directory_set(tl_as, env->cwd);
-		elf_set_machine(tl_obj, job->x86 ? EM_X86_64 : EM_AARCH64);	/* (a .S file: preprocessed, then assembled) */
+		as_include_directory_set(driver_assembler, env->cwd);
+		elf_set_machine(driver_object, job->x86 ? EM_X86_64 : EM_AARCH64);	/* (a .S file: preprocessed, then assembled) */
 		char *dt = NULL;
 		size_t dn = o.n;
 
 		if (job->darwin)
 			dt = macho_dialect_translate(o.p, o.n, &dn);
-		if (as_run(tl_as, tl_obj, dt ? dt : o.p, dn, job->main_file, &msg)) {
+		if (as_run(driver_assembler, driver_object, dt ? dt : o.p, dn, job->main_file, &msg)) {
 			dprintf(job->errfd, "vcc: error: %s\n", msg);
 			job->status = 1;
 		} else {
-			job->status = write_obj(env->cwd, job->out, env->outfd, job->errfd, job->darwin);
+			job->status = driver_object_write(env->cwd, job->out, env->outfd, job->errfd, job->darwin);
 		}
 		free(dt);
 		if (!job->status && job->depfile)
-			job->status = write_deps(p, env->cwd, job->depfile, job->dtarget, job->dnosys, job->mphony, job->dfirst, NULL, -1, job->errfd);
+			job->status = driver_depfile_write(p, env->cwd, job->depfile, job->dtarget, job->dnosys, job->mphony, job->dfirst, NULL, -1, job->errfd);
 	} else {
 		if (job->mdeps)
-			job->status = write_deps(p, env->cwd, job->depfile, job->dtarget, job->dnosys, job->mphony, job->dfirst, job->out, env->outfd, job->errfd);
+			job->status = driver_depfile_write(p, env->cwd, job->depfile, job->dtarget, job->dnosys, job->mphony, job->dfirst, job->out, env->outfd, job->errfd);
 		else
 			job->status = write_out(env->cwd, job->out, env->outfd, o.p, o.n, job->errfd);
 		if (!job->status && job->depfile && !job->mdeps)
-			job->status = write_deps(p, env->cwd, job->depfile, job->dtarget, job->dnosys, job->mphony, job->dfirst, NULL, -1, job->errfd);
+			job->status = driver_depfile_write(p, env->cwd, job->depfile, job->dtarget, job->dnosys, job->mphony, job->dfirst, NULL, -1, job->errfd);
 	}
 }
 
-static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_env *env);
+static __attribute__((noinline)) int driver_job_run_one(int argc, char **argv, const driver_environment *env);
 
-/* (--explain apart: a call at the top of ppd_run1 costs its token loop registers) */
-int ppd_run(int argc, char **argv, const ppd_env *env)
+/* (--explain apart: a call at the top of driver_job_run_one costs its token loop registers) */
+int driver_job_run(int argc, char **argv, const driver_environment *env)
 {
 	int x = explain(argc, argv, env);
 
-	return x >= 0 ? x : ppd_run1(argc, argv, env);
+	return x >= 0 ? x : driver_job_run_one(argc, argv, env);
 }
 
-static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_env *env)
+static __attribute__((noinline)) int driver_job_run_one(int argc, char **argv, const driver_environment *env)
 {
-	vjob_region *br = bufr = vjob_region_pool_take(&bufpool);
+	vjob_region *br = driver_buffer_region = vjob_region_pool_take(&driver_buffer_pool);
 	struct driver_job jobstore = {
 		.errfd = env->errfd, .hosted = 1, .raw_asm = -1, .march_lse = -1, .mcpu_lse = -1, .pie = -1, .cfi = -1,
 		.x86_cpu = "x86-64", .omit_frame_pointer = -1, .uchar = -1, .tri = -1, .gnu89_inline = -1,
@@ -355,7 +355,7 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 		goto out;
 	if (job->emit == 1 && !job->objmode && !job->out && !job->layout) {
 		/* clang: -S writes the source's basename with .s */
-		job->out = obj_name(job->main_file, job->objbuf, sizeof(job->objbuf));
+		job->out = driver_object_name(job->main_file, job->objbuf, sizeof(job->objbuf));
 		job->objbuf[strlen(job->objbuf) - 1] = 's';
 	}
 	if (job->raw_asm == 1 && !job->objmode) {
@@ -364,13 +364,13 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 		goto out;
 	}
 	if (job->raw_asm == 1) {
-		driver_assemble_source(job, env);
+		driver_source_assemble(job, env);
 		goto out;
 	}
 	if (job->objmode) {
 		obj_state();
 		if (!job->out)
-			job->out = obj_name(job->main_file, job->objbuf, sizeof(job->objbuf));
+			job->out = driver_object_name(job->main_file, job->objbuf, sizeof(job->objbuf));
 		if (!job->asm_mode) {
 			job->syntax = 1;
 			job->emit = 2;
@@ -387,9 +387,9 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 			job->cfi = hl && !job->freestanding;
 	}
 	driver_searchpath_build(job, env);
-	job_pp_opts_first(job, env);
+	driver_job_pp_options_prepare(job, env);
 	driver_predef_build(job);
-	job_pp_opts_second(job, env, argc, argv);
+	driver_job_pp_options_finish(job, env, argc, argv);
 
 	job->t0 = now();
 	{	/* pp_open lexes the main file: a full identifier table there ends the job too
@@ -417,26 +417,26 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 	}
 	vjob_jb = &jb;	/* as/elf overflow ends this TU too */
 	if (job->tokhash) {
-		driver_tokhash_run(job, p, env);
+		driver_tokens_hash_run(job, p, env);
 		goto done;
 	}
 	if (job->syntax) {
-		job_compile(job, p, env);
+		driver_job_compile(job, p, env);
 		goto done;
 	}
-	job_preprocess(job, p, env);
+	driver_job_preprocess(job, p, env);
 done:
 	vjob_jb = NULL;
 	pp_diag_summary(p);
 	pp_close(p);	/* frees the text in o */
 out:
 	vjob_fail_fd = 2;
-	bfree(&job->pre);
-	bfree(&job->cmdl);
-	bfree(&job->incl);
-	bfree(&job->imac);
-	vjob_region_pool_give(&bufpool, br);
-	bufr = NULL;
-	obj_release();
+	driver_buffer_free(&job->pre);
+	driver_buffer_free(&job->cmdl);
+	driver_buffer_free(&job->incl);
+	driver_buffer_free(&job->imac);
+	vjob_region_pool_give(&driver_buffer_pool, br);
+	driver_buffer_region = NULL;
+	driver_object_state_release();
 	return job->status;
 }

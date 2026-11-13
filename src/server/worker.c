@@ -13,18 +13,18 @@
  *     core goes to the next queued job meanwhile
  *     (doc/quality/WORK-scheduler.md 1.4).
  * Either way a connection is served start to end on one thread: its context
- * (ppd_conn, the request buffers) is in thread-locals. */
+ * (driver_client_connection, the request buffers) is in thread-locals. */
 #include "vccd-internal.h"
 
 /* the request buffers of this thread: mmap'ed once, kept for its life */
-static struct worker *worker_buffers(void)
+static struct worker *vccd_worker_buffers_get(void)
 {
 	static _Thread_local struct worker w;
 
 	if (!w.raw) {
-		w.raw = mmap(NULL, sizeof(struct vroom_req_hdr) + VROOM_MAX_PAYLOAD,
+		w.raw = mmap(NULL, sizeof(struct vccd_request_header) + VCCD_PROTOCOL_PAYLOAD_MAX,
 			     PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
-		w.strs = mmap(NULL, MAX_STRS * sizeof(char *), PROT_READ | PROT_WRITE,
+		w.strs = mmap(NULL, VCCD_STRINGS_MAX * sizeof(char *), PROT_READ | PROT_WRITE,
 			      MAP_PRIVATE | MAP_ANON, -1, 0);
 		if (w.raw == MAP_FAILED || w.strs == MAP_FAILED) {
 			perror("vccd: mmap");
@@ -34,7 +34,7 @@ static struct worker *worker_buffers(void)
 	return &w;
 }
 
-/* one connection, taken from the queue (counted in n_active): receive the
+/* one connection, taken from the queue (counted in vccd_active_count): receive the
    request, run it, answer, close */
 static void serve(struct worker *w, int conn)
 {
@@ -46,75 +46,75 @@ static void serve(struct worker *w, int conn)
 	int i;
 
 	vtask_blocking_begin();	/* a client that has not sent yet: up to 2 s */
-	got = recv_req(w, conn, &r);
+	got = vccd_request_receive(w, conn, &r);
 	vtask_blocking_end();
 	if (got) {
-		struct vroom_req_hdr *h = (struct vroom_req_hdr *)w->raw;
+		struct vccd_request_header *h = (struct vccd_request_header *)w->raw;
 
-		if (h->build && self_build && h->build != self_build) {
-			status = (int32_t)VROOM_STATUS_MISMATCH, kind = "mismatch";
+		if (h->build && vccd_self_build_id && h->build != vccd_self_build_id) {
+			status = (int32_t)VCCD_STATUS_MISMATCH, kind = "mismatch";
 		} else {
 			/* a diagnostics query belongs to no build: it must not end the one it asks about */
 			bool q = r.argc == 2 && !strncmp(r.argv[1], "--vccd-diagnostics", 18);
 			int g;
 
 			vtask_blocking_begin();	/* (waits while another build drains) */
-			g = gen_enter(q ? 0 : h->pgrp);
+			g = vccd_generation_enter(q ? 0 : h->pgrp);
 			vtask_blocking_end();
 			if (g) {
-				status = (int32_t)VROOM_STATUS_RETRY, kind = "retry";
+				status = (int32_t)VCCD_STATUS_RETRY, kind = "retry";
 				if (g == 2) {	/* answer first: the exec drops every fd we hold */
-					(void)write_full(conn, (char *)&status, sizeof(status));
+					(void)vccd_fd_write_full(conn, (char *)&status, sizeof(status));
 					close(conn);
 					for (i = 0; i < 3; i++)
 						if (r.fds[i] >= 0)
 							close(r.fds[i]), r.fds[i] = -1;
-					do_restart();
+					vccd_generation_restart();
 					conn = open("/dev/null", O_RDWR);	/* (exec failed: the close below) */
 				}
 			} else {
-				ppd_conn = conn;
+				driver_client_connection = conn;
 				status = handle(&r, &kind);
-				ppd_conn = -1;
-				gen_leave();
+				driver_client_connection = -1;
+				vccd_generation_leave();
 			}
 		}
 	}
 	vtask_blocking_begin();
-	(void)write_full(conn, (char *)&status, sizeof(status));
+	(void)vccd_fd_write_full(conn, (char *)&status, sizeof(status));
 	close(conn);
 	for (i = 0; i < 3; i++)
 		if (r.fds[i] >= 0)
 			close(r.fds[i]);
 	vtask_blocking_end();
-	log_req(&r, kind, status, t0);
-	atomic_fetch_sub(&n_active, 1);
+	vccd_request_log(&r, kind, status, t0);
+	atomic_fetch_sub(&vccd_active_count, 1);
 }
 
-VPRIV void *worker_main(void *arg)
+VPRIV void *vccd_worker_main(void *arg)
 {
-	struct worker *w = worker_buffers();
+	struct worker *w = vccd_worker_buffers_get();
 
 	(void)arg;
 	for (;;)
-		serve(w, queue_pop());	/* (counts itself in n_active) */
+		serve(w, vccd_queue_pop());	/* (counts itself in vccd_active_count) */
 	return NULL;
 }
 
 /* --shared-pool: one job per accepted socket (spawned by the accept thread
-   after queue_push); the socket waits in the queue, so a restart can still
+   after vccd_queue_push); the socket waits in the queue, so a restart can still
    answer the ones no job has taken */
-VPRIV void pool_job(void *arg)
+VPRIV void vccd_worker_pool_job(void *arg)
 {
-	int conn = queue_try_pop();
+	int conn = vccd_queue_pop_try();
 
 	(void)arg;
 	if (conn >= 0)
-		serve(worker_buffers(), conn);
+		serve(vccd_worker_buffers_get(), conn);
 }
 
 /* SIGTERM: no new connections; the queued and running jobs finish, then exit */
-VPRIV __attribute__((noreturn)) void drain_exit(int ls, const char *sock)
+VPRIV __attribute__((noreturn)) void vccd_server_drain_exit(int ls, const char *sock)
 {
 	close(ls);
 	unlink(sock);
@@ -122,8 +122,8 @@ VPRIV __attribute__((noreturn)) void drain_exit(int ls, const char *sock)
 		bool idle;
 
 		{
-			VLOCK(qlock);
-			idle = qhead == qtail && !atomic_load(&n_active);
+			VLOCK(vccd_queue_lock);
+			idle = vccd_queue_head == vccd_queue_tail && !atomic_load(&vccd_active_count);
 		}
 		if (idle)
 			exit(0);

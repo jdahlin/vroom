@@ -95,10 +95,10 @@ common_SRC = common/fail.c common/intern.c common/digest-xxh3.c common/digest-bl
 port_SRC   = port/crc32c.c port/stack-guard.c port/job-regions.c port/task.c
 LIB_SRC    = $(common_SRC) $(port_SRC)
 LEX_SRC = frontend/lex/lex.c frontend/c/keywords.c
-PP_SRC  = frontend/pp/dircache.c driver/ccsnap.c
-VCCD_SRC = server/dstore.c server/caps.c utils/fixdep.c utils/ar.c utils/rsh.c
-# the server proper (vccd.c has main), one TU like the split modules; dstore.c and caps.c stay apart
-server_SRC = $(filter-out server/dstore.c server/caps.c,$(wildcard server/*.c))
+PP_SRC  = frontend/pp/dircache.c driver/declaration-cache.c
+VCCD_SRC = server/diagnostics-store.c server/capabilities.c utils/fixdep.c utils/ar.c utils/shell.c
+# the server proper (vccd.c has main), one TU like the split modules; diagnostics-store.c and capabilities.c stay apart
+server_SRC = $(filter-out server/diagnostics-store.c server/capabilities.c,$(wildcard server/*.c))
 # Split modules: a list of files each (MOD_SRC, in this order).  By default
 # each module is compiled as one TU (obj/unity/MOD.c #includes its files, as
 # SQLite's amalgamation), so the code generator sees all of it, also in `make
@@ -112,8 +112,8 @@ vir_SRC  = vir/table.c vir/vir.c vir/print.c vir/parse.c vir/verify.c vir/facts.
 VIRA_SRC = vir/loops.c vir/alloc.c vir/allocchk.c vir/allocdump.c	# (not in the unity TU: own statics)
 obj_SRC  = obj/obj.c arch/a64/obj/fixup.c arch/x64/obj/fixup.c platform/linux/elf.c
 cc_SRC   = $(filter-out frontend/c/keywords.c frontend/c/replay.c,$(wildcard frontend/c/*.c)) frontend/c/replay.c
-# the compile job (ppd_run); ccsnap.c stays a TU of its own
-driver_SRC = $(filter-out driver/ccsnap.c,$(wildcard driver/*.c))
+# the compile job (driver_job_run); declaration-cache.c stays a TU of its own
+driver_SRC = $(filter-out driver/declaration-cache.c,$(wildcard driver/*.c))
 # pp: the preprocessor and, for now, the diagnostics engine (it uses pp-internal.h)
 pp_SRC   = $(filter-out frontend/pp/dircache.c,$(wildcard frontend/pp/*.c)) $(wildcard diag/*.c)
 codegen_SRC = $(wildcard codegen/*.c codegen/opt/*.c codegen/rec/*.c codegen/flow/*.c arch/a64/codegen/*.c arch/a64/vir/*.c $(if $(VCC_WASM),arch/wasm/codegen/*.c) codegen/walk/*.c arch/x64/codegen/*.c arch/x64/vir/*.c codegen/vir/*.c)

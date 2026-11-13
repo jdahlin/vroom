@@ -15,10 +15,10 @@
 #include "../frontend/pp/ppdata-predef.inc"
 #define PPDATA_X86_PREDEF
 #include "../frontend/pp/ppdata-x86.inc"
-#include "x86predefines.h"
+#include "x86-predefines.h"
 
 /* -f[un]signed-char against the target's default, the math flags, -pthread */
-static __attribute__((noinline, cold)) void predef_flags(buf *pre, int darwin, int uchar_def, int uchar, int fmath)
+static __attribute__((noinline, cold)) void driver_predef_flags_append(buf *pre, int darwin, int uchar_def, int uchar, int fmath)
 {
 	if (uchar >= 0 && uchar != uchar_def)
 		bstr(pre, uchar ? "#define __CHAR_UNSIGNED__ 1\n" : "#undef __CHAR_UNSIGNED__\n");
@@ -37,7 +37,7 @@ static __attribute__((noinline, cold)) void predef_flags(buf *pre, int darwin, i
 }
 
 /* C23: char8_t and the %B/%b formats (out of line: the caller's loops stay as compiled) */
-static __attribute__((noinline, cold)) void predef_c23(buf *pre, int darwin)
+static __attribute__((noinline, cold)) void driver_predef_c23_append(buf *pre, int darwin)
 {
 	/* char8_t and the %B/%b formats */
 	static const char *const fmt[][2] = {
@@ -60,13 +60,13 @@ static __attribute__((noinline, cold)) void predef_c23(buf *pre, int darwin)
 	}
 }
 
-VPRIV const char *const *driver_predef_darwin_sysdirs(size_t *n)
+VPRIV const char *const *driver_predef_darwin_system_directories(size_t *n)
 {
 	*n = sizeof(sysdirs_darwin) / sizeof(sysdirs_darwin[0]);
 	return sysdirs_darwin;
 }
 
-VPRIV const char *const *driver_predef_darwin_fwdirs(size_t *n)
+VPRIV const char *const *driver_predef_darwin_framework_directories(size_t *n)
 {
 	*n = sizeof(fwdirs_darwin) / sizeof(fwdirs_darwin[0]);
 	return fwdirs_darwin;
@@ -105,7 +105,7 @@ VPRIV void driver_predef_build(struct driver_job *job)
 		if (job->strict)
 			bstr(&job->pre, "#define __STRICT_ANSI__ 1\n#undef linux\n#undef unix\n");
 		if (job->std == 23)
-			predef_c23(&job->pre, job->darwin);
+			driver_predef_c23_append(&job->pre, job->darwin);
 	} else if (!job->undef && !job->asm_mode) {
 		bstr(&job->pre, "#undef __STDC_VERSION__\n#define __STDC_VERSION__ 201710L\n");
 	}
@@ -138,7 +138,7 @@ VPRIV void driver_predef_build(struct driver_job *job)
 			   "#undef __WCHAR_WIDTH__\n#define __WCHAR_WIDTH__ 32\n"
 			   "#undef __clang_wide_literal_encoding__\n#define __clang_wide_literal_encoding__ \"UTF-32\"\n");
 	if (!job->undef && (job->fmath || (job->uchar >= 0 && job->uchar != job->lnx)))	/* char is unsigned by default on aarch64 Linux only */
-		predef_flags(&job->pre, job->darwin, job->lnx, job->uchar, job->x86 ? job->fmath & ~32 : job->fmath);	/* no __ARM_FP_FAST on x86 */
+		driver_predef_flags_append(&job->pre, job->darwin, job->lnx, job->uchar, job->x86 ? job->fmath & ~32 : job->fmath);	/* no __ARM_FP_FAST on x86 */
 	if (job->darwin && job->macos_min && !job->undef) {
 		/* clang: MMmmpp (10.x before 10.10: 10mp) */
 		unsigned maj = 0, min = 0, pat = 0, vv;
@@ -176,7 +176,7 @@ VPRIV void driver_predef_build(struct driver_job *job)
 			   "#undef __ARM_FEATURE_SHA3\n#undef __ARM_FEATURE_SHA512\n#undef __ARM_FP\n"
 			   "#undef __ARM_NEON\n#undef __ARM_NEON_FP\n");
 	if (job->x86 && !job->undef) {
-		x86_feature_predefines(&job->pre, job->x86_features_, job->x86_cpu);
+		driver_x86_feature_predefines_append(&job->pre, job->x86_features_, job->x86_cpu);
 		/* clang: -mgeneral-regs-only is -mno-sse -mno-mmx; without SSE2 no _Float16 either */
 		if (job->gregs || job->nosse)
 			bstr(&job->pre, "#undef __SSE__\n#undef __SSE_MATH__\n");

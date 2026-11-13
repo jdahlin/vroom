@@ -23,7 +23,7 @@
 #include "common/fail.h"
 #include "frontend/pp/pp.h"
 #include "frontend/c/cc.h"
-#include "driver/ppdriver.h"
+#include "driver/driver.h"
 #include "as/as.h"
 #include "obj/obj.h"
 #include "port/job-regions.h"
@@ -45,14 +45,14 @@
 typedef struct buf {
 	char *p;
 	size_t n, cap;
-	vjob_region *r;	/* the first 16 MB come from this per-thread region (bfree puts it back) */
+	vjob_region *r;	/* the first 16 MB come from this per-thread region (driver_buffer_free puts it back) */
 } buf;
 
 /* job-buffer.c */
-extern vjob_region_pool bufpool;
-extern _Thread_local vjob_region *bufr;	/* this job's (ppd_run) */
+extern vjob_region_pool driver_buffer_pool;
+extern _Thread_local vjob_region *driver_buffer_region;	/* this job's (driver_job_run) */
 
-/* One job's parsed command line and the state its pieces share: what ppd_run1 held as
+/* One job's parsed command line and the state its pieces share: what driver_job_run_one held as
    locals before it was cut by job (Q-drv-02). */
 struct driver_job {
 	/* search path lists (searchpath.c): each holds at most argc entries */
@@ -102,55 +102,55 @@ struct driver_job {
 };
 
 /* output.c: the job's object state (assembler, ELF writer, serialised output) */
-extern _Thread_local as_context *tl_as;
-extern _Thread_local ElfObj *tl_obj;
-extern _Thread_local uint8_t *tl_objbuf;
-extern _Thread_local vbuffer tl_wasm_obj;
+extern _Thread_local as_context *driver_assembler;
+extern _Thread_local ElfObj *driver_object;
+extern _Thread_local uint8_t *driver_object_buffer;
+extern _Thread_local vbuffer driver_wasm_object;
 
 /* job-buffer.c */
 VPRIV void bput(buf *b, const char *s, size_t n);
 VPRIV void bstr(buf *b, const char *s);
-VPRIV void bfree(buf *b);
-VPRIV void define_arg(buf *b, const char *d);
+VPRIV void driver_buffer_free(buf *b);
+VPRIV void driver_buffer_append_define(buf *b, const char *d);
 /* output.c */
 VPRIV const char *at(const char *cwd, const char *path, char *buf, size_t cap);
 VPRIV int write_all(int fd, const char *p, size_t n);
-VPRIV bool client_gone(void);
-VPRIV void out_mode(int fd);
-VPRIV bool tmp_name(char *t, size_t cap, const char *f);
+VPRIV bool driver_client_is_gone(void);
+VPRIV void driver_output_mode_set(int fd);
+VPRIV bool driver_output_temporary_name(char *t, size_t cap, const char *f);
 VPRIV int write_file(const char *cwd, const char *path, const char *s, size_t n, int errfd);
 VPRIV int write_out(const char *cwd, const char *out, int outfd, const char *s, size_t n, int errfd);
-VPRIV unsigned long long nsnow(void);
+VPRIV unsigned long long driver_clock_nanoseconds(void);
 VPRIV void obj_state(void);
-VPRIV void obj_release(void);
-VPRIV int write_obj(const char *cwd, const char *out, int outfd, int errfd, int macho);
-VPRIV const char *obj_name(const char *main_file, char *buf, size_t cap);
+VPRIV void driver_object_state_release(void);
+VPRIV int driver_object_write(const char *cwd, const char *out, int outfd, int errfd, int macho);
+VPRIV const char *driver_object_name(const char *main_file, char *buf, size_t cap);
 /* depfile.c */
-VPRIV int write_deps(const pp *p, const char *cwd, const char *depfile, const char *target, int nosys, int phony,
+VPRIV int driver_depfile_write(const pp *p, const char *cwd, const char *depfile, const char *target, int nosys, int phony,
 		     const char *first, const char *out, int outfd, int errfd);
 VPRIV void driver_depfile_names(struct driver_job *job);
 /* tokcmp.c */
-VPRIV void driver_tokhash_run(struct driver_job *job, pp *p, const ppd_env *env);
+VPRIV void driver_tokens_hash_run(struct driver_job *job, pp *p, const driver_environment *env);
 /* searchpath.c */
-VPRIV void driver_searchpath_alloc(struct driver_job *job, int argc, const ppd_env *env);
-VPRIV void driver_searchpath_build(struct driver_job *job, const ppd_env *env);
+VPRIV void driver_searchpath_alloc(struct driver_job *job, int argc, const driver_environment *env);
+VPRIV void driver_searchpath_build(struct driver_job *job, const driver_environment *env);
 /* predef.c */
 VPRIV void driver_predef_build(struct driver_job *job);
-VPRIV const char *const *driver_predef_darwin_sysdirs(size_t *n);
-VPRIV const char *const *driver_predef_darwin_fwdirs(size_t *n);
+VPRIV const char *const *driver_predef_darwin_system_directories(size_t *n);
+VPRIV const char *const *driver_predef_darwin_framework_directories(size_t *n);
 /* target-a64.c, target-x64.c */
-VPRIV int arch_lse(const char *v, bool cpu);
+VPRIV int driver_target_lse_detect(const char *v, bool cpu);
 VPRIV int driver_target_features_check(struct driver_job *job, int argc, char **argv);
 /* input.c */
-VPRIV int driver_input_read(struct driver_job *job, const ppd_env *env);
+VPRIV int driver_input_read(struct driver_job *job, const driver_environment *env);
 /* explain.c */
-VPRIV int explain(int argc, char **argv, const ppd_env *env);
+VPRIV int explain(int argc, char **argv, const driver_environment *env);
 /* cmdline.c: 0 to go on, 1 to end the job (status set), 2 to return 1 at once (the -ftls-model= error) */
 VPRIV int driver_cmdline_parse(struct driver_job *job, int argc, char **argv);
 VPRIV int driver_cmdline_check(struct driver_job *job);
 /* warning-groups.c */
 VPRIV int driver_warning_groups_check(struct driver_job *job);
 /* job.c */
-VPRIV const char *ppd_getenv(const ppd_env *env, const char *name);
+VPRIV const char *driver_environment_get(const driver_environment *env, const char *name);
 
 #endif

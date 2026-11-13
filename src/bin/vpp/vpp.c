@@ -1,5 +1,5 @@
 /*
- * vpp: the preprocessor alone (the driver is ppd_run in driver/job.c), for parity tests.
+ * vpp: the preprocessor alone (the driver is driver_job_run in driver/job.c), for parity tests.
  *
  *   vpp [--cmp REF.i] [-o OUT] CLANG-ARGS...
  *   vpp --cmp-files OURS REF      compare two -E outputs
@@ -37,8 +37,8 @@
 #include <unistd.h>
 
 #include "frontend/pp/pp.h"
-#include "driver/ccsnap.h"
-#include "driver/ppdriver.h"
+#include "driver/declaration-cache.h"
+#include "driver/driver.h"
 #include "port/task.h"
 
 typedef struct job {
@@ -46,11 +46,11 @@ typedef struct job {
 	int ac;
 	int status;
 	double ms;
-	vperf all, ph[PPD_NPH];
+	vperf all, ph[DRIVER_PHASE_COUNT];
 } job;
 
 static job *jobs;
-static int njobs, cmpmode, warmup;
+static int njobs, vpp_compare_mode, vpp_warmup;
 static const char *bdir;
 
 static double now(void)
@@ -64,31 +64,31 @@ static double now(void)
 static int nul = -1;	/* /dev/null: the jobs' output and (without VPP_BATCH_ERR) diagnostics */
 
 /* one TU of the batch, on whichever thread of the pool takes it */
-static void run_job(void *arg, size_t k)
+static void vpp_job_run(void *arg, size_t k)
 {
 	job *j = &jobs[k];
-	ppd_env e = { .cwd = bdir, .outfd = nul, .errfd = getenv("VPP_BATCH_ERR") ? 2 : nul };
-	vperf v0, ph0[PPD_NPH];
+	driver_environment e = { .cwd = bdir, .outfd = nul, .errfd = getenv("VPP_BATCH_ERR") ? 2 : nul };
+	vperf v0, ph0[DRIVER_PHASE_COUNT];
 	double t0;
 
 	(void)arg;
-	memcpy(ph0, ppd_ph, sizeof(ph0));	/* (per thread: the job's own work is the delta) */
+	memcpy(ph0, driver_phase_counters, sizeof(ph0));	/* (per thread: the job's own work is the delta) */
 	t0 = now();
 	v0 = vperformance_now();
-	j->status = ppd_run(j->ac, j->av, &e);
+	j->status = driver_job_run(j->ac, j->av, &e);
 	j->all = vperformance_subtract(vperformance_now(), v0);
 	j->ms = (now() - t0) * 1e3;
-	for (int i = 0; i < PPD_NPH; i++)
-		j->ph[i] = vperformance_subtract(ppd_ph[i], ph0[i]);
+	for (int i = 0; i < DRIVER_PHASE_COUNT; i++)
+		j->ph[i] = vperformance_subtract(driver_phase_counters[i], ph0[i]);
 }
 
 /* every job once, nthr at a time: the TUs on the shared pool (port/task.c),
    whose threads get a stack as large as main's, so that a TU nests as deep
    in a batch as it does alone; emit helpers (VCC_THREADS) come from the same
    budget, so they only run when TUs leave threads idle */
-static void run_pass(int nthr)
+static void vpp_pass_run(int nthr)
 {
-	vtask_parallel_for((size_t)njobs, nthr, run_job, NULL, 0);
+	vtask_parallel_for((size_t)njobs, nthr, vpp_job_run, NULL, 0);
 }
 
 static int batch(const char *file, int nthr, const char *statsf)
@@ -97,7 +97,7 @@ static int batch(const char *file, int nthr, const char *statsf)
 	struct stat st;
 	char *s, *e;
 	double t0, wall, sum = 0;
-	vperf tot = { 0, 0 }, ph[PPD_NPH] = { { 0, 0 } };
+	vperf tot = { 0, 0 }, ph[DRIVER_PHASE_COUNT] = { { 0, 0 } };
 	int bad = 0;
 
 	if (fd < 0 || fstat(fd, &st)) {
@@ -128,7 +128,7 @@ static int batch(const char *file, int nthr, const char *statsf)
 		j->av = calloc((size_t)n + 5, sizeof(char *));
 		ref = strsep(&l, "\x1f");
 		j->av[j->ac++] = "vpp";
-		if (cmpmode) {
+		if (vpp_compare_mode) {
 			j->av[j->ac++] = "--cmp";
 			j->av[j->ac++] = ref;
 		} else {
@@ -144,16 +144,16 @@ static int batch(const char *file, int nthr, const char *statsf)
 		nthr = 1;
 	vtask_budget_set(nthr);
 	nul = open("/dev/null", O_WRONLY);
-	for (int w = 0; w < warmup; w++)
-		run_pass(nthr);
+	for (int w = 0; w < vpp_warmup; w++)
+		vpp_pass_run(nthr);
 	t0 = now();
-	run_pass(nthr);
+	vpp_pass_run(nthr);
 	wall = now() - t0;
 	for (int i = 0; i < njobs; i++) {
 		sum += jobs[i].ms;
 		tot.ins += jobs[i].all.ins;
 		tot.cyc += jobs[i].all.cyc;
-		for (int k = 0; k < PPD_NPH; k++) {
+		for (int k = 0; k < DRIVER_PHASE_COUNT; k++) {
 			ph[k].ins += jobs[i].ph[k].ins;
 			ph[k].cyc += jobs[i].ph[k].cyc;
 		}
@@ -167,7 +167,7 @@ static int batch(const char *file, int nthr, const char *statsf)
 
 		pp_header_cache_statistics_format(hs, sizeof(hs));
 		printf("%s\n", hs);
-		dc_stats(hs, sizeof(hs));
+		driver_declaration_cache_statistics_format(hs, sizeof(hs));
 		printf("%s\n", hs);
 		cc_lz_stats(hs, sizeof(hs));
 		printf("%s\n", hs);
@@ -189,15 +189,15 @@ static int batch(const char *file, int nthr, const char *statsf)
 		printf("%d/%d ok; wall %.0f ms on %d threads, job sum %.0f ms; cpu user %.2f s sys %.2f s\n", njobs - bad, njobs,
 		       wall * 1e3, nthr, sum, ru.ru_utime.tv_sec + ru.ru_utime.tv_usec * 1e-6, ru.ru_stime.tv_sec + ru.ru_stime.tv_usec * 1e-6);
 		printf("perf: %llu instructions, %llu cycles (jobs); cc_run %llu, emit %llu, obj %llu instructions; emit %llu cycles\n",
-		       (unsigned long long)tot.ins, (unsigned long long)tot.cyc, (unsigned long long)ph[PPD_PH_CC].ins,
-		       (unsigned long long)ph[PPD_PH_EMIT].ins, (unsigned long long)ph[PPD_PH_OBJ].ins,
-		       (unsigned long long)ph[PPD_PH_EMIT].cyc);
-		if (ppd_bytes_obj)
-			printf("-c: cc_run %.0f ms (codegen+as %.0f ms), finish+write %.0f ms, %.1f MB objects\n", ppd_ns_cc / 1e6,
-			       ppd_ns_emit / 1e6, ppd_ns_obj / 1e6, ppd_bytes_obj / 1e6);
-		if (ppd_tok_out)
+		       (unsigned long long)tot.ins, (unsigned long long)tot.cyc, (unsigned long long)ph[DRIVER_PHASE_COMPILE].ins,
+		       (unsigned long long)ph[DRIVER_PHASE_EMIT].ins, (unsigned long long)ph[DRIVER_PHASE_OBJECT].ins,
+		       (unsigned long long)ph[DRIVER_PHASE_EMIT].cyc);
+		if (driver_object_bytes)
+			printf("-c: cc_run %.0f ms (codegen+as %.0f ms), finish+write %.0f ms, %.1f MB objects\n", driver_compile_nanoseconds / 1e6,
+			       driver_emit_nanoseconds / 1e6, driver_object_nanoseconds / 1e6, driver_object_bytes / 1e6);
+		if (driver_tokens_taken)
 			printf("-c: %.1f M tokens to the parser, %.1f M skipped by the decl cache; %.0f instructions per token\n",
-			       ppd_tok_out / 1e6, ppd_tok_skip / 1e6, (double)ph[PPD_PH_CC].ins / (double)ppd_tok_out);
+			       driver_tokens_taken / 1e6, driver_tokens_skipped / 1e6, (double)ph[DRIVER_PHASE_COMPILE].ins / (double)driver_tokens_taken);
 	}
 	if (statsf) {
 		FILE *f = fopen(statsf, "w");
@@ -216,8 +216,8 @@ static int batch(const char *file, int nthr, const char *statsf)
 					break;
 				}
 			fprintf(f, "%d\t%.3f\t%llu\t%llu\t%llu\t%llu\t%llu\t%s\n", j->status, j->ms, (unsigned long long)j->all.ins,
-				(unsigned long long)j->all.cyc, (unsigned long long)j->ph[PPD_PH_CC].ins,
-				(unsigned long long)j->ph[PPD_PH_EMIT].ins, (unsigned long long)j->ph[PPD_PH_OBJ].ins, mf);
+				(unsigned long long)j->all.cyc, (unsigned long long)j->ph[DRIVER_PHASE_COMPILE].ins,
+				(unsigned long long)j->ph[DRIVER_PHASE_EMIT].ins, (unsigned long long)j->ph[DRIVER_PHASE_OBJECT].ins, mf);
 		}
 		fclose(f);
 	}
@@ -226,7 +226,7 @@ static int batch(const char *file, int nthr, const char *statsf)
 
 int main(int argc, char **argv)
 {
-	ppd_env e = { .outfd = 1, .errfd = 2 };
+	driver_environment e = { .outfd = 1, .errfd = 2 };
 	const char *w = getenv("VPP_WARM");
 
 	if (argc == 4 && !strcmp(argv[1], "--cmp-files")) {
@@ -235,7 +235,7 @@ int main(int argc, char **argv)
 
 		if (fd < 0 || fstat(fd, &st))
 			return 2;
-		return ppd_compare(mmap(NULL, (size_t)st.st_size + 1, PROT_READ, MAP_PRIVATE, fd, 0),
+		return driver_tokens_compare(mmap(NULL, (size_t)st.st_size + 1, PROT_READ, MAP_PRIVATE, fd, 0),
 				   (size_t)st.st_size, argv[3]);
 	}
 	if (argc >= 3 && !strcmp(argv[1], "--batch")) {
@@ -248,9 +248,9 @@ int main(int argc, char **argv)
 			else if (!strcmp(argv[i], "-C") && i + 1 < argc)
 				bdir = argv[++i];
 			else if (!strcmp(argv[i], "--cmp"))
-				cmpmode = 1;
+				vpp_compare_mode = 1;
 			else if (!strcmp(argv[i], "--warm") && i + 1 < argc)
-				warmup = atoi(argv[++i]);
+				vpp_warmup = atoi(argv[++i]);
 			else if (!strcmp(argv[i], "--stats") && i + 1 < argc)
 				statsf = argv[++i];
 		}
@@ -258,7 +258,7 @@ int main(int argc, char **argv)
 	}
 
 	for (int r = w ? atoi(w) : 0; r > 0; r--) {
-		ppd_env q = { .outfd = -1, .errfd = 2 };
+		driver_environment q = { .outfd = -1, .errfd = 2 };
 		char *av[argc + 3];
 		int n = 0;
 
@@ -267,7 +267,7 @@ int main(int argc, char **argv)
 		av[n++] = "-o";
 		av[n++] = "/dev/null";
 		av[n] = NULL;
-		ppd_run(n, av, &q);
+		driver_job_run(n, av, &q);
 	}
-	return ppd_run(argc, argv, &e);
+	return driver_job_run(argc, argv, &e);
 }

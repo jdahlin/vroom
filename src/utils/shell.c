@@ -1,7 +1,7 @@
 /*
- * rsh: kbuild's recipe subset of sh, run in vccd (see rsh.h).
+ * rsh: kbuild's recipe subset of sh, run in vccd (see shell.h).
  *
- * Two passes: tokenize and parse the whole script into a command list,
+ * Two passes: shell_tokenize and parse the whole script into a command list,
  * declining on anything outside the subset, then run it.  printf's output is
  * computed while parsing (its arguments are literals), which is also what
  * lets `printf ... | xargs TOOL` become one TOOL call with the words
@@ -15,19 +15,19 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "utils/rsh.h"
+#include "utils/shell.h"
 #include "common/buffer.h"
 
 /* ---------------- growable buffers ---------------- */
 
 /* ---------------- tokens ---------------- */
 
-enum { T_WORD, T_SEMI, T_PIPE, T_GT };
+enum { SHELL_TOKEN_WORD, T_SEMI, T_PIPE, SHELL_TOKEN_REDIRECT };
 
 struct tok {
 	int kind;
 	bool assign;	/* NAME= before any quote */
-	char *s;	/* T_WORD: the word, quotes removed (malloc'ed) */
+	char *s;	/* SHELL_TOKEN_WORD: the word, quotes removed (malloc'ed) */
 };
 
 struct toks {
@@ -35,7 +35,7 @@ struct toks {
 	int n, cap;
 };
 
-static bool tk_push(struct toks *v, int kind, bool assign, char *s)
+static bool shell_token_push(struct toks *v, int kind, bool assign, char *s)
 {
 	if (v->n == v->cap) {
 		int cap = v->cap ? 2 * v->cap : 64;
@@ -50,19 +50,19 @@ static bool tk_push(struct toks *v, int kind, bool assign, char *s)
 	return true;
 }
 
-static bool name_char(char c, bool first)
+static bool shell_char_is_name(char c, bool first)
 {
 	return c == '_' || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
 	       (!first && c >= '0' && c <= '9');
 }
 
 /* characters that mean more shell than rsh knows, outside quotes */
-static bool bail_char(char c)
+static bool shell_char_is_unsupported(char c)
 {
 	return strchr("$`&()<{}*?[]~#!\n\r", c) != NULL;
 }
 
-static bool tokenize(const char *s, struct toks *v)
+static bool shell_tokenize(const char *s, struct toks *v)
 {
 	vbuffer w = VBUFFER_STICKY_INIT;
 
@@ -75,12 +75,12 @@ static bool tokenize(const char *s, struct toks *v)
 		if (!*s)
 			break;
 		if (*s == ';' || *s == '|' || *s == '>') {
-			int k = *s == ';' ? T_SEMI : *s == '|' ? T_PIPE : T_GT;
+			int k = *s == ';' ? T_SEMI : *s == '|' ? T_PIPE : SHELL_TOKEN_REDIRECT;
 
 			/* ;; || >> >| are other operators */
 			if (s[1] == ';' || s[1] == '|' || s[1] == '>' || s[1] == '&')
 				return false;
-			if (!tk_push(v, k, false, NULL))
+			if (!shell_token_push(v, k, false, NULL))
 				return false;
 			s++;
 			continue;
@@ -126,13 +126,13 @@ static bool tokenize(const char *s, struct toks *v)
 			} else if (c == '>') {
 				/* 2>file and the like: an fd number glued to the redirection */
 				goto fail;
-			} else if (bail_char(c)) {
+			} else if (shell_char_is_unsupported(c)) {
 				goto fail;
 			} else {
 				if (!quoted && !assign) {
 					if (c == '=' && name_end == w.n && w.n > 0)
 						assign = true;
-					else if (name_end == w.n && name_char(c, w.n == 0))
+					else if (name_end == w.n && shell_char_is_name(c, w.n == 0))
 						name_end++;
 				}
 				if (!vbuffer_append(&w, s, 1))
@@ -143,7 +143,7 @@ static bool tokenize(const char *s, struct toks *v)
 		{
 			char *word = strdup(w.p);
 
-			if (!word || !tk_push(v, T_WORD, assign, word)) {
+			if (!word || !shell_token_push(v, SHELL_TOKEN_WORD, assign, word)) {
 				free(word);
 				goto fail;
 			}
@@ -158,16 +158,16 @@ fail:
 
 /* ---------------- commands ---------------- */
 
-enum { C_NOP, C_SET_E, C_TEXT, C_RM, C_MKDIR, C_TOOL, C_FIXDEP };
+enum { SHELL_COMMAND_NOP, SHELL_COMMAND_SET_E, SHELL_COMMAND_TEXT, SHELL_COMMAND_RM, SHELL_COMMAND_MKDIR, SHELL_COMMAND_TOOL, SHELL_COMMAND_FIXDEP };
 
 struct cmd {
 	int kind;
-	char **argv;		/* C_RM, C_MKDIR: the paths; C_TOOL: the tool's argv (owned array) */
-	char **assign;		/* C_TOOL: NAME=VALUE (owned array) */
-	const char *redir;	/* C_TEXT: > FILE */
-	char *text;		/* C_TEXT: what echo/printf write (malloc'ed) */
+	char **argv;		/* SHELL_COMMAND_RM, SHELL_COMMAND_MKDIR: the paths; SHELL_COMMAND_TOOL: the tool's argv (owned array) */
+	char **assign;		/* SHELL_COMMAND_TOOL: NAME=VALUE (owned array) */
+	const char *redir;	/* SHELL_COMMAND_TEXT: > FILE */
+	char *text;		/* SHELL_COMMAND_TEXT: what echo/printf write (malloc'ed) */
 	size_t textlen;
-	bool xargs;		/* C_TOOL run as printf | xargs: map the status */
+	bool xargs;		/* SHELL_COMMAND_TOOL run as printf | xargs: map the status */
 };
 
 struct script {
@@ -175,7 +175,7 @@ struct script {
 	int n, cap;
 };
 
-static struct cmd *sc_add(struct script *sc)
+static struct cmd *shell_script_command_add(struct script *sc)
 {
 	if (sc->n == sc->cap) {
 		int cap = sc->cap ? 2 * sc->cap : 16;
@@ -191,7 +191,7 @@ static struct cmd *sc_add(struct script *sc)
 }
 
 /* NULL-terminated copy of n token words (the strings stay owned by the tokens) */
-static char **wordv(struct tok *t, int n, vbuffer *extra)
+static char **shell_words_to_argv(struct tok *t, int n, vbuffer *extra)
 {
 	int nx = 0, i;
 	char **v, *p;
@@ -227,7 +227,7 @@ static char **wordv(struct tok *t, int n, vbuffer *extra)
 }
 
 /* POSIX printf with %s and %% and \n \t \\: the format is reused while arguments remain */
-static bool do_printf(struct tok *a, int n, vbuffer *out)
+static bool shell_printf_format(struct tok *a, int n, vbuffer *out)
 {
 	const char *fmt = a[0].s;
 	int ai = 1;
@@ -273,7 +273,7 @@ static bool do_printf(struct tok *a, int n, vbuffer *out)
  * One simple command, tokens t[0..n): leading assignments, words, at most
  * one > FILE.  pipe_in: printf's output for the xargs side of a pipe.
  */
-static bool parse_simple(struct tok *t, int n, struct script *sc, const struct rsh_ops *ops,
+static bool shell_command_parse(struct tok *t, int n, struct script *sc, const struct shell_callbacks *ops,
 			 vbuffer *pipe_in, vbuffer *pipe_out)
 {
 	struct tok w[n > 0 ? n : 1];
@@ -282,11 +282,11 @@ static bool parse_simple(struct tok *t, int n, struct script *sc, const struct r
 	struct cmd *c;
 
 	for (i = 0; i < n; i++) {
-		if (t[i].kind == T_GT) {
-			if (redir || i + 1 >= n || t[i + 1].kind != T_WORD)
+		if (t[i].kind == SHELL_TOKEN_REDIRECT) {
+			if (redir || i + 1 >= n || t[i + 1].kind != SHELL_TOKEN_WORD)
 				return false;
 			redir = t[++i].s;
-		} else if (t[i].kind != T_WORD) {
+		} else if (t[i].kind != SHELL_TOKEN_WORD) {
 			return false;
 		} else if (t[i].assign && nw == nasg && !redir) {
 			w[nw++] = t[i];
@@ -307,12 +307,12 @@ static bool parse_simple(struct tok *t, int n, struct script *sc, const struct r
 			;
 		if (!pipe_in->p[i])
 			return false;	/* empty input: GNU and BSD xargs differ */
-		if (!(c = sc_add(sc)))
+		if (!(c = shell_script_command_add(sc)))
 			return false;
-		c->kind = C_TOOL;
+		c->kind = SHELL_COMMAND_TOOL;
 		c->xargs = true;
-		c->argv = wordv(w + 1, nw - 1, pipe_in);
-		c->assign = wordv(w, 0, NULL);
+		c->argv = shell_words_to_argv(w + 1, nw - 1, pipe_in);
+		c->assign = shell_words_to_argv(w, 0, NULL);
 		c->text = pipe_in->p;	/* the argv strings point into it */
 		pipe_in->p = NULL;
 		return c->argv && c->assign;
@@ -321,12 +321,12 @@ static bool parse_simple(struct tok *t, int n, struct script *sc, const struct r
 		return false;
 	if (nasg && !ops->is_tool(ops->ctx, name))
 		return false;	/* VAR=x builtin: rsh only passes env to tools */
-	if (!(c = sc_add(sc)))
+	if (!(c = shell_script_command_add(sc)))
 		return false;
 	if (!strcmp(name, "set")) {
 		if (nw != 2 || strcmp(w[1].s, "-e") || redir)
 			return false;
-		c->kind = C_SET_E;
+		c->kind = SHELL_COMMAND_SET_E;
 	} else if (!strcmp(name, ":") || !strcmp(name, "true") || !strcmp(name, "trap")) {
 		if (name[0] == 't' && name[1] == 'r')	/* trap: signal handlers only; EXIT/0 must run */
 			for (int i = 2; i < nw; i++)
@@ -336,7 +336,7 @@ static bool parse_simple(struct tok *t, int n, struct script *sc, const struct r
 			return false;
 		if (redir)
 			return false;	/* : > file creates it */
-		c->kind = C_NOP;
+		c->kind = SHELL_COMMAND_NOP;
 	} else if (!strcmp(name, "echo")) {
 		vbuffer b = VBUFFER_STICKY_INIT;
 
@@ -354,14 +354,14 @@ static bool parse_simple(struct tok *t, int n, struct script *sc, const struct r
 			free(b.p);
 			return false;
 		}
-		c->kind = C_TEXT;
+		c->kind = SHELL_COMMAND_TEXT;
 		c->text = b.p;
 		c->textlen = b.n;
 		c->redir = redir;
 	} else if (!strcmp(name, "printf")) {
 		vbuffer b = VBUFFER_STICKY_INIT;
 
-		if (nw < 2 || !do_printf(w + 1, nw - 1, &b)) {
+		if (nw < 2 || !shell_printf_format(w + 1, nw - 1, &b)) {
 			free(b.p);
 			return false;
 		}
@@ -370,7 +370,7 @@ static bool parse_simple(struct tok *t, int n, struct script *sc, const struct r
 			*pipe_out = b;
 			return true;
 		}
-		c->kind = C_TEXT;
+		c->kind = SHELL_COMMAND_TEXT;
 		c->text = b.p;
 		c->textlen = b.n;
 		c->redir = redir;
@@ -380,8 +380,8 @@ static bool parse_simple(struct tok *t, int n, struct script *sc, const struct r
 		for (i = 2; i < nw; i++)
 			if (w[i].s[0] == '-')
 				return false;
-		c->kind = C_RM;
-		c->argv = wordv(w + 2, nw - 2, NULL);
+		c->kind = SHELL_COMMAND_RM;
+		c->argv = shell_words_to_argv(w + 2, nw - 2, NULL);
 		return c->argv != NULL;
 	} else if (!strcmp(name, "mkdir") || !strcmp(name, "/bin/mkdir")) {
 		/* mkdir -p: $(shell mkdir -p $(obj)) in every submake */
@@ -390,24 +390,24 @@ static bool parse_simple(struct tok *t, int n, struct script *sc, const struct r
 		for (i = 2; i < nw; i++)
 			if (w[i].s[0] == '-' || !w[i].s[0])
 				return false;
-		c->kind = C_MKDIR;
-		c->argv = wordv(w + 2, nw - 2, NULL);
+		c->kind = SHELL_COMMAND_MKDIR;
+		c->argv = shell_words_to_argv(w + 2, nw - 2, NULL);
 		return c->argv != NULL;
 	} else if (ops->fixdep && strlen(name) >= 20 && !strcmp(name + strlen(name) - 20, "scripts/basic/fixdep")
 		   && (strlen(name) == 20 || name[strlen(name) - 21] == '/') && !access(name, X_OK)) {
 		/* fixdep D T CMD > FILE */
 		if (nw != 4 || !redir)
 			return false;
-		c->kind = C_FIXDEP;
-		c->argv = wordv(w + 1, 3, NULL);
+		c->kind = SHELL_COMMAND_FIXDEP;
+		c->argv = shell_words_to_argv(w + 1, 3, NULL);
 		c->redir = redir;
 		return c->argv != NULL;
 	} else if (ops->is_tool(ops->ctx, name)) {
 		if (redir)
 			return false;
-		c->kind = C_TOOL;
-		c->argv = wordv(w + nasg, nw - nasg, NULL);
-		c->assign = wordv(w, nasg, NULL);
+		c->kind = SHELL_COMMAND_TOOL;
+		c->argv = shell_words_to_argv(w + nasg, nw - nasg, NULL);
+		c->assign = shell_words_to_argv(w, nasg, NULL);
 		return c->argv && c->assign;
 	} else {
 		return false;
@@ -415,7 +415,7 @@ static bool parse_simple(struct tok *t, int n, struct script *sc, const struct r
 	return true;
 }
 
-static bool parse(struct toks *v, struct script *sc, const struct rsh_ops *ops)
+static bool parse(struct toks *v, struct script *sc, const struct shell_callbacks *ops)
 {
 	int i = 0;
 
@@ -434,13 +434,13 @@ static bool parse(struct toks *v, struct script *sc, const struct rsh_ops *ops)
 			return false;	/* empty command: a syntax error for sh */
 		if (p >= 0) {
 			vbuffer out = VBUFFER_STICKY_INIT;
-			bool ok = parse_simple(v->t + a, p - a, sc, ops, NULL, &out) &&
-				  parse_simple(v->t + p + 1, i - p - 1, sc, ops, &out, NULL);
+			bool ok = shell_command_parse(v->t + a, p - a, sc, ops, NULL, &out) &&
+				  shell_command_parse(v->t + p + 1, i - p - 1, sc, ops, &out, NULL);
 
 			free(out.p);
 			if (!ok)
 				return false;
-		} else if (!parse_simple(v->t + a, i - a, sc, ops, NULL, NULL)) {
+		} else if (!shell_command_parse(v->t + a, i - a, sc, ops, NULL, NULL)) {
 			return false;
 		}
 		if (i < v->n)
@@ -476,7 +476,7 @@ static void err(int fd, const char *a, const char *b, const char *c)
 }
 
 /* "<a><b>': <strerror>" as coreutils (EPERM on a directory: unlink's answer on macOS) */
-static void rm_err(int fd, const char *a, const char *b, int e)
+static void shell_rm_error_report(int fd, const char *a, const char *b, int e)
 {
 	char m[128] = "': ";
 
@@ -494,7 +494,7 @@ static bool is_dir(int dir, const char *p)
 }
 
 /* mkdir -p: the whole path, then each missing parent from the top (mode 0777 & ~umask) */
-static bool mkdir_p(int dir, const char *path)
+static bool shell_directories_create(int dir, const char *path)
 {
 	char buf[4096];
 	size_t n = strlen(path), i;
@@ -518,27 +518,27 @@ static bool mkdir_p(int dir, const char *path)
 }
 
 static int run(const char *cwd, struct script *sc, bool errexit, const int fds[3],
-	       const struct rsh_ops *ops)
+	       const struct shell_callbacks *ops)
 {
 	int dir = -1, st = 0, i;
 
 	for (i = 0; i < sc->n; i++) {
 		struct cmd *c = &sc->c[i];
 
-		if ((c->kind == C_RM || c->kind == C_MKDIR || (c->redir && c->kind != C_FIXDEP)) && dir < 0 &&
+		if ((c->kind == SHELL_COMMAND_RM || c->kind == SHELL_COMMAND_MKDIR || (c->redir && c->kind != SHELL_COMMAND_FIXDEP)) && dir < 0 &&
 		    (dir = open(cwd, O_RDONLY | O_DIRECTORY | O_CLOEXEC)) < 0) {
 			err(fds[2], "sh: cannot open ", cwd, "");
 			return 2;
 		}
 		switch (c->kind) {
-		case C_NOP:
+		case SHELL_COMMAND_NOP:
 			st = 0;
 			break;
-		case C_SET_E:
+		case SHELL_COMMAND_SET_E:
 			errexit = true;
 			st = 0;
 			break;
-		case C_TEXT:
+		case SHELL_COMMAND_TEXT:
 			if (c->redir) {
 				int fd = openat(dir, c->redir, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0666);
 
@@ -554,26 +554,26 @@ static int run(const char *cwd, struct script *sc, bool errexit, const int fds[3
 				st = write_all(fds[1], c->text, c->textlen) ? 0 : 1;
 			}
 			break;
-		case C_RM:
+		case SHELL_COMMAND_RM:
 			st = 0;
 			for (char **p = c->argv; *p; p++)
 				if (unlinkat(dir, *p, 0) < 0 && errno != ENOENT) {
-					rm_err(fds[2], "rm: cannot remove '", *p, errno);
+					shell_rm_error_report(fds[2], "rm: cannot remove '", *p, errno);
 					st = 1;
 				}
 			break;
-		case C_MKDIR:
+		case SHELL_COMMAND_MKDIR:
 			st = 0;
 			for (char **p = c->argv; *p; p++)
-				if (!mkdir_p(dir, *p)) {
-					rm_err(fds[2], "mkdir: cannot create directory '", *p, errno == EEXIST ? ENOTDIR : errno);
+				if (!shell_directories_create(dir, *p)) {
+					shell_rm_error_report(fds[2], "mkdir: cannot create directory '", *p, errno == EEXIST ? ENOTDIR : errno);
 					st = 1;
 				}
 			break;
-		case C_FIXDEP:
+		case SHELL_COMMAND_FIXDEP:
 			st = ops->fixdep(ops->ctx, c->argv[0], c->argv[1], c->argv[2], c->redir, fds[2]);
 			break;
-		case C_TOOL:
+		case SHELL_COMMAND_TOOL:
 			st = ops->run_tool(ops->ctx, c->argv, c->assign, fds);
 			if (c->xargs && st)
 				st = st == 255 ? 124 : st >= 128 ? 125 : st == 127 ? 127 : st == 126 ? 126 : 123;
@@ -587,14 +587,14 @@ static int run(const char *cwd, struct script *sc, bool errexit, const int fds[3
 	return st;
 }
 
-int rsh_run(const char *cwd, const char *script, bool errexit, const int fds[3],
-	    const struct rsh_ops *ops)
+int shell_run(const char *cwd, const char *script, bool errexit, const int fds[3],
+	    const struct shell_callbacks *ops)
 {
 	struct toks v = { 0 };
 	struct script sc = { 0 };
-	int st = RSH_DECLINE, i;
+	int st = SHELL_DECLINE, i;
 
-	if (tokenize(script, &v) && parse(&v, &sc, ops))
+	if (shell_tokenize(script, &v) && parse(&v, &sc, ops))
 		st = run(cwd, &sc, errexit, fds, ops);
 	for (i = 0; i < sc.n; i++) {
 		free(sc.c[i].argv);

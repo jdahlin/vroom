@@ -4,7 +4,7 @@
 #                           Linux host's /usr/include (glibc), so that hosted
 #                           Linux builds get clang's answers for its queries
 #
-# Data the preprocessor takes from clang once, like caps.c: the predefined
+# Data the preprocessor takes from clang once, like capabilities.c: the predefined
 # macros for the targets vcc builds for (the kernel: aarch64-linux-gnu;
 # host tools: arm64 darwin; wasm64- and wasm32-unknown-emscripten, PLAN-wasm.md;
 # wasm32 shares wasm64's feature-query column), darwin's

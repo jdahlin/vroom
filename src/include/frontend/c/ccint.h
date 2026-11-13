@@ -268,7 +268,7 @@ struct cc {
 	uint32_t *tlasm;	/* file-scope asm("...") statements (N_ASM nodes) */
 	uint32_t ntlasm;
 	uint32_t ndiag;		/* diagnostics reported */
-	struct dcst *dc;	/* declaration cache (ccsnap.c), NULL: off */
+	struct driver_declaration_cache_state *dc;	/* declaration cache (declaration-cache.c), NULL: off */
 
 	/* lazy bodies */
 	lztok *lzt;

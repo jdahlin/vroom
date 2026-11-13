@@ -2,50 +2,50 @@
  * dispatch.c: which kind of request goes where.  handle() is the single entry every request passes,
  * both from a connection (worker.c) and from a recipe's tool call (recipe.c).
  *
- * The order of the tests in handle1 is the specification: the tool name first (sh, var/ar, nm,
+ * The order of the tests in vccd_request_dispatch is the specification: the tool name first (sh, var/ar, nm,
  * objcopy, vld/ld), then vcc's own queries (--version, -dumpmachine, -print-file-name, --explain,
- * --fix, --vccd-diagnostics), toolchain probes answered from caps.c, -E, host programs, and last the compiles, which vcc takes itself and, when a
+ * --fix, --vccd-diagnostics), toolchain probes answered from capabilities.c, -E, host programs, and last the compiles, which vcc takes itself and, when a
  * backend is configured, falls back to it for a TU vcc fails on.  Each branch names its kind in
  * *kind (the log and the counters use it) and returns the exit status to send back; a branch that
- * needs the client's umask relies on handle() setting ppd_umask from VCC_UMASK first.  Without
+ * needs the client's umask relies on handle() setting driver_client_umask from VCC_UMASK first.  Without
  * --backend-sock nothing is forwarded: a request vcc cannot do fails, with vcc's diagnostics.  A
- * compile that succeeded gets the fixdep step (fixdep_after) in handle().
+ * compile that succeeded gets the fixdep step (vccd_compile_fixdep_after) in handle().
  */
 #include "vccd-internal.h"
 
-static int handle1(const struct req *r, const char **kind);
+static int vccd_request_dispatch(const struct req *r, const char **kind);
 
 VPRIV int handle(const struct req *r, const char **kind)
 {
 	int status;
 
-	ppd_umask = -1;	/* the shim sends VCC_UMASK; outputs then get 0666 & ~umask */
+	driver_client_umask = -1;	/* the shim sends VCC_UMASK; outputs then get 0666 & ~umask */
 	for (char **e = r->envp; *e; e++)
 		if (!strncmp(*e, "VCC_UMASK=", 10))
-			ppd_umask = (int)(strtoul(*e + 10, NULL, 8) & 0777);
-	status = handle1(r, kind);
+			driver_client_umask = (int)(strtoul(*e + 10, NULL, 8) & 0777);
+	status = vccd_request_dispatch(r, kind);
 
 	if (!strcmp(*kind, "cc-own") || !strcmp(*kind, "cc") || !strcmp(*kind, "cc-fallbk") || !strcmp(*kind, "cc-link") || !strcmp(*kind, "cc-host"))
-		status = fixdep_after(r, status);
+		status = vccd_compile_fixdep_after(r, status);
 	return status;
 }
 
-VPRIV int run_sh(const struct req *r);
+VPRIV int vccd_recipe_run(const struct req *r);
 
-static int handle1(const struct req *r, const char **kind)
+static int vccd_request_dispatch(const struct req *r, const char **kind)
 {
 	int probe;
 
 	if (!strcmp(r->tool, "sh")) {
 		/* vsh: a recipe, run here if rsh knows all of it */
-		int st = run_sh(r);
+		int st = vccd_recipe_run(r);
 
-		*kind = st == RSH_DECLINE ? "sh-decl" : "sh";
-		atomic_fetch_add(st == RSH_DECLINE ? &n_sh_decl : &n_sh, 1);
-		return st == RSH_DECLINE ? VROOM_STATUS_DECLINE : st;
+		*kind = st == SHELL_DECLINE ? "sh-decl" : "sh";
+		atomic_fetch_add(st == SHELL_DECLINE ? &vccd_recipe_declined_count : &vccd_recipe_count, 1);
+		return st == SHELL_DECLINE ? VCCD_STATUS_DECLINE : st;
 	}
 	if (!strcmp(r->tool, "vcc")) {
-		const char *dg = req_env(r, "VCC_DELEGATE");
+		const char *dg = vccd_request_environment_get(r, "VCC_DELEGATE");
 
 		if (dg && *dg)
 			return delegate(r, dg, kind);
@@ -53,48 +53,48 @@ static int handle1(const struct req *r, const char **kind)
 	if (!strcmp(r->tool, "var") || !strcmp(r->tool, "ar") || !strcmp(r->tool, "llvm-ar")) {
 		/* the archiver: thin archives written here (ar.c), never llvm-ar */
 		*kind = "ar";
-		atomic_fetch_add(&n_ar, 1);
+		atomic_fetch_add(&vccd_archive_count, 1);
 		return ar_run(r->cwd, r->argc, r->argv, r->fds[1], r->fds[2]);
 	}
 	if (!strcmp(r->tool, "vcc-nm") || !strcmp(r->tool, "vcc-objcopy")) {
 		/* ld/objcopy.c in this thread: the build's nm and objcopy, not llvm's */
 		*kind = r->tool[4] == 'n' ? "nm" : "objcopy";
-		atomic_fetch_add(&n_objcopy, 1);
-		return objcopy_run_req(r, r->tool[4] == 'n');
+		atomic_fetch_add(&vccd_objcopy_count, 1);
+		return vccd_objcopy_run(r, r->tool[4] == 'n');
 	}
 	if (!strcmp(r->tool, "vld") || !strcmp(r->tool, "ld")) {
-		if (ld_is_probe(r)) {
+		if (vccd_probe_ld_is_query(r)) {
 			*kind = "ld-probe";
-			atomic_fetch_add(&n_probe, 1);
-			return ld_probe(r);
+			atomic_fetch_add(&vccd_probe_count, 1);
+			return vccd_probe_ld_answer(r);
 		}
 		if (r->argc == 2 && (!strcmp(r->argv[1], "-v") || !strcmp(r->argv[1], "--version"))) {
 			*kind = "ld-version";
-			atomic_fetch_add(&n_probe, 1);
-			return write_full(r->fds[1], ld_version_text, strlen(ld_version_text)) ? 0 : 1;
+			atomic_fetch_add(&vccd_probe_count, 1);
+			return vccd_fd_write_full(r->fds[1], vccd_capabilities_ld_version_text, strlen(vccd_capabilities_ld_version_text)) ? 0 : 1;
 		}
 		for (int i = 1; i < r->argc; i++)
-			if (ld_rejects(r->argv[i], i + 1 < r->argc ? r->argv[i + 1] : NULL)) {
+			if (vccd_capabilities_ld_option_is_rejected(r->argv[i], i + 1 < r->argc ? r->argv[i + 1] : NULL)) {
 				*kind = "ld-reject";
-				atomic_fetch_add(&n_probe, 1);
+				atomic_fetch_add(&vccd_probe_count, 1);
 				say(r, "%s: error: unsupported option '%s'\n",
 				    strcmp(r->argv[i], "-z") ? r->argv[i] : r->argv[i + 1]);
 				return 1;
 			}
-		if (ld_backend) {	/* --ld PROG */
-			atomic_fetch_add(&n_spawn, 1);
+		if (vccd_linker_backend) {	/* --ld PROG */
+			atomic_fetch_add(&vccd_spawn_count, 1);
 			*kind = "ld-spawn";
-			return spawn(r, ld_backend);
+			return spawn(r, vccd_linker_backend);
 		}
 		/* links: vld (ld/ld.c) in this thread */
 		*kind = "ld";
-		atomic_fetch_add(&n_ld, 1);
-		return ld_run(r);
+		atomic_fetch_add(&vccd_link_count, 1);
+		return vccd_linker_run(r);
 	}
 	if (r->argc == 2 && !strcmp(r->argv[1], "--version")) {
 		*kind = "cc-version";
-		atomic_fetch_add(&n_probe, 1);
-		return write_full(r->fds[1], cc_version_text, strlen(cc_version_text)) ? 0 : 1;
+		atomic_fetch_add(&vccd_probe_count, 1);
+		return vccd_fd_write_full(r->fds[1], vccd_capabilities_cc_version_text, strlen(vccd_capabilities_cc_version_text)) ? 0 : 1;
 	}
 	if (r->argc == 3 && !strcmp(r->argv[2], "-dumpmachine") && !strncmp(r->argv[1], "--target=", 9)
 	    && !strchr(r->argv[1], ' ')) {
@@ -104,12 +104,12 @@ static int handle1(const struct req *r, const char **kind)
 		int n;
 
 		*kind = "cc-print";
-		atomic_fetch_add(&n_probe, 1);
+		atomic_fetch_add(&vccd_probe_count, 1);
 		if (d2 && !strchr(d2 + 1, '-') && !strncmp(d1 + 1, "linux", 5))
 			n = snprintf(line, sizeof line, "%.*s-unknown%s\n", (int)(d1 - t), t, d1);
 		else
 			n = snprintf(line, sizeof line, "%s\n", t);
-		return n < (int)sizeof line && write_full(r->fds[1], line, n) ? 0 : 1;
+		return n < (int)sizeof line && vccd_fd_write_full(r->fds[1], line, n) ? 0 : 1;
 	}
 	if (r->argc == 2 && !strncmp(r->argv[1], "-print-file-name=", 17)) {
 		const char *name = r->argv[1] + 17;
@@ -117,46 +117,46 @@ static int handle1(const struct req *r, const char **kind)
 		int n;
 
 		*kind = "cc-print";
-		atomic_fetch_add(&n_probe, 1);
-		n = snprintf(line, sizeof(line), "%s\n", strcmp(name, "include") ? name : cc_resource_include);
-		return n < (int)sizeof(line) && write_full(r->fds[1], line, n) ? 0 : 1;
+		atomic_fetch_add(&vccd_probe_count, 1);
+		n = snprintf(line, sizeof(line), "%s\n", strcmp(name, "include") ? name : vccd_capabilities_resource_include);
+		return n < (int)sizeof(line) && vccd_fd_write_full(r->fds[1], line, n) ? 0 : 1;
 	}
 	for (int i = 1; i < r->argc; i++)
 		if (!strcmp(r->argv[i], "--explain") || !strncmp(r->argv[i], "--explain=", 10) || !strcmp(r->argv[i], "--fix")) {
 			/* vcc's own: the client's output and diagnostics, no clang to fall back to */
-			ppd_env e = { .cwd = r->cwd, .outfd = r->fds[1], .errfd = r->fds[2], .envp = r->envp, .infd = r->fds[0] };
+			driver_environment e = { .cwd = r->cwd, .outfd = r->fds[1], .errfd = r->fds[2], .envp = r->envp, .infd = r->fds[0] };
 
 			*kind = r->argv[i][2] == 'e' ? "cc-explain" : "cc-fix";
 			atomic_fetch_add(&n_cc, 1);
-			return ppd_run(r->argc, r->argv, &e);
+			return driver_job_run(r->argc, r->argv, &e);
 		}
 	if (r->argc == 2 && !strncmp(r->argv[1], "--vccd-diagnostics", 18) && (!r->argv[1][18] || r->argv[1][18] == '=')) {
 		*kind = "cc-diags";
-		atomic_fetch_add(&n_probe, 1);
-		return dstore_query(r->argv[1][18] ? r->argv[1] + 19 : NULL, r->fds[1], r->fds[2]);
+		atomic_fetch_add(&vccd_probe_count, 1);
+		return vccd_diagnostics_query(r->argv[1][18] ? r->argv[1] + 19 : NULL, r->fds[1], r->fds[2]);
 	}
-	probe = cc_probe_kind(r);
+	probe = vccd_probe_kind_classify(r);
 	if (probe) {
 		static const char *const names[] = { "", "cc-probe", "as-probe", "src-probe", "link-probe" };
 
 		*kind = names[probe];
-		atomic_fetch_add(&n_probe, 1);
-		return cc_probe(r, probe);
+		atomic_fetch_add(&vccd_probe_count, 1);
+		return vccd_probe_cc_answer(r, probe);
 	}
-	if (cc_is_pp(r)) {
-		ppd_env e = { .cwd = r->cwd, .outfd = r->fds[1], .errfd = r->fds[2], .envp = r->envp, .infd = r->fds[0] };
+	if (vccd_request_is_preprocess(r)) {
+		driver_environment e = { .cwd = r->cwd, .outfd = r->fds[1], .errfd = r->fds[2], .envp = r->envp, .infd = r->fds[0] };
 
 		*kind = "cc-E";
-		atomic_fetch_add(&n_pp, 1);
-		return ppd_run(r->argc, r->argv, &e);
+		atomic_fetch_add(&vccd_preprocess_count, 1);
+		return driver_job_run(r->argc, r->argv, &e);
 	}
-	if (backend_sock && host_cc_link(r)) {
+	if (vccd_backend_socket && vccd_request_is_host_link(r)) {
 		/* vcc compiles, the backend links the object with the command's options */
-		const char *in = cc_input(r), *out = NULL, *td = getenv("TMPDIR");
+		const char *in = vccd_request_input_find(r), *out = NULL, *td = getenv("TMPDIR");
 		char tmp[4096], **av = malloc((size_t)(r->argc + 4) * sizeof(char *)), **lv;
 		bool deps = false, mt = false;
 		int n = 0, ln = 0, fd, st;
-		ppd_env e = { .cwd = r->cwd, .outfd = r->fds[1], .errfd = log_requests ? 2 : -1, .envp = r->envp, .infd = r->fds[0] };
+		driver_environment e = { .cwd = r->cwd, .outfd = r->fds[1], .errfd = vccd_log_requests ? 2 : -1, .envp = r->envp, .infd = r->fds[0] };
 
 		snprintf(tmp, sizeof(tmp), "%s/vccd-%s-XXXXXX.o", td && *td ? td : "/tmp", "host");
 		if (!av || (fd = mkstemps(tmp, 2)) < 0) {
@@ -186,7 +186,7 @@ static int handle1(const struct req *r, const char **kind)
 		if (deps && !mt)
 			av[n++] = "-MT", av[n++] = (char *)out;
 		av[n] = NULL;
-		if (lv && ppd_run(n, av, &e) == 0) {
+		if (lv && driver_job_run(n, av, &e) == 0) {
 			/* the link: the object for the source, no dependency options */
 			for (int i = 0; i < r->argc; i++) {
 				const char *a = r->argv[i];
@@ -201,9 +201,9 @@ static int handle1(const struct req *r, const char **kind)
 			}
 			lv[ln] = NULL;
 			atomic_fetch_add(&n_cc, 1);
-			atomic_fetch_add(&n_fwd, 1);
+			atomic_fetch_add(&vccd_forward_count, 1);
 			*kind = "cc-link";
-			st = forward_argv(r, ln, lv);
+			st = vccd_backend_forward_argv(r, ln, lv);
 			unlink(tmp);
 			free(av);
 			free(lv);
@@ -212,62 +212,62 @@ static int handle1(const struct req *r, const char **kind)
 		unlink(tmp);
 		free(av);
 		free(lv);
-		atomic_fetch_add(&n_fallback, 1);
-		if (log_requests)
+		atomic_fetch_add(&vccd_fallback_count, 1);
+		if (vccd_log_requests)
 			fprintf(stderr, "vccd fallback to clang: %s\n", in);
 		*kind = "cc-fallbk";
-		atomic_fetch_add(&n_fwd, 1);
-		return forward(r, backend_sock);
+		atomic_fetch_add(&vccd_forward_count, 1);
+		return forward(r, vccd_backend_socket);
 	}
 plain:
-	if (cc_is_compile(r) && !backend_sock) {
+	if (vccd_request_is_compile(r) && !vccd_backend_socket) {
 		/* no fallback: what vcc cannot compile fails, with vcc's diagnostics */
-		int status = cc_own(r, NULL, 0, true);
+		int status = vccd_compile_in_process(r, NULL, 0, true);
 
 		*kind = "cc-own";
-		atomic_fetch_add(status ? &n_fail : &n_cc, 1);
+		atomic_fetch_add(status ? &vccd_failure_count : &n_cc, 1);
 		return status;
 	}
-	if (cc_is_compile(r)) {
-		bool in_stdin = !strcmp(cc_input(r), "-");
+	if (vccd_request_is_compile(r)) {
+		bool in_stdin = !strcmp(vccd_request_input_find(r), "-");
 		char *src = NULL;
 		size_t len = 0;
 		int st;
 
 		if (in_stdin) {
 			/* read here: a fallback to clang needs the same bytes */
-			if (read_all(r->fds[0], &src, &len)) {
+			if (vccd_fd_read_all(r->fds[0], &src, &len)) {
 				free(src);
 				say(r, "%s: error: %s\n", "cannot read stdin");
 				return 1;
 			}
 		}
-		if ((st = cc_own(r, src, len, false)) == 0) {
+		if ((st = vccd_compile_in_process(r, src, len, false)) == 0) {
 			free(src);
 			*kind = "cc-own";
 			atomic_fetch_add(&n_cc, 1);
 			return 0;
 		}
-		atomic_fetch_add(&n_fallback, 1);
-		if (log_requests)
-			fprintf(stderr, "vccd fallback to clang: %s\n", cc_input(r));
+		atomic_fetch_add(&vccd_fallback_count, 1);
+		if (vccd_log_requests)
+			fprintf(stderr, "vccd fallback to clang: %s\n", vccd_request_input_find(r));
 		*kind = "cc-fallbk";
 		if (in_stdin) {
-			atomic_fetch_add(&n_fwd, 1);
-			st = compile_stdin(r, src, len);
+			atomic_fetch_add(&vccd_forward_count, 1);
+			st = vccd_probe_stdin_compile(r, src, len);
 			free(src);
 			return st;
 		}
-	} else if (!backend_sock) {
+	} else if (!vccd_backend_socket) {
 		/* the rest: host programs (no Linux target), compiled for macOS by vcc, linked by vld */
-		int status = host_cc(r);
+		int status = vccd_host_program_compile(r);
 
 		*kind = "cc-host";
-		atomic_fetch_add(status ? &n_fail : &n_host, 1);
+		atomic_fetch_add(status ? &vccd_failure_count : &vccd_host_count, 1);
 		return status;
 	} else {
 		*kind = "cc";
-		if (log_requests) {
+		if (vccd_log_requests) {
 			/* the whole command line: what is still forwarded, and why, is read from here */
 			flockfile(stderr);
 			fputs("vccd forward:", stderr);
@@ -277,6 +277,6 @@ plain:
 			funlockfile(stderr);
 		}
 	}
-	atomic_fetch_add(&n_fwd, 1);
-	return forward(r, backend_sock);
+	atomic_fetch_add(&vccd_forward_count, 1);
+	return forward(r, vccd_backend_socket);
 }

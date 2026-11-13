@@ -6,13 +6,13 @@
  * driver (driver/job.c) as they are, which compiles for the host when there is no --target.  A link
  * compiles each source to a temporary object next to the output and links the objects with vld's
  * Mach-O path (platform/darwin/macho-linker.c, libSystem only; -l maps to it, -fuse-ld= is ignored); the
- * temporary objects are removed after the link.  A command line with a target that cc_is_compile or
- * cc_is_pp does not take is refused here, never guessed at.  Runs in the calling thread.
+ * temporary objects are removed after the link.  A command line with a target that vccd_request_is_compile or
+ * vccd_request_is_preprocess does not take is refused here, never guessed at.  Runs in the calling thread.
  */
 #include "vccd-internal.h"
 
 /* options that take the next argv entry */
-static bool host_with_arg(const char *a)
+static bool vccd_host_option_takes_value(const char *a)
 {
 	static const char *const w[] = { "-o", "-include", "-isystem", "-iquote", "-idirafter", "-x", "-MF", "-MT",
 					 "-MQ", "-I", "-D", "-U", "-L", "-arch", "-target", "-isysroot", NULL };
@@ -22,7 +22,7 @@ static bool host_with_arg(const char *a)
 	return false;
 }
 
-static bool is_src(const char *a)
+static bool vccd_host_is_source(const char *a)
 {
 	size_t n = strlen(a);
 	return n > 2 && a[n - 2] == '.' && (a[n - 1] == 'c' || a[n - 1] == 'S' || a[n - 1] == 's');
@@ -30,12 +30,12 @@ static bool is_src(const char *a)
 
 /*
  * A host job (no --target: the build machine's own programs).  -c/-S/-E go
- * to ppdriver as they are (it compiles for the host when there is no
+ * to the driver as they are (it compiles for the host when there is no
  * --target).  A link, with or without sources: each source is compiled to a
  * temporary object next to the output, then vld (macho-linker.c) links the
  * objects; -l maps to libSystem.  -fuse-ld= is ignored: vld is the linker.
  */
-VPRIV int host_cc(const struct req *r)
+VPRIV int vccd_host_program_compile(const struct req *r)
 {
 	bool compile_only = false;
 	const char *out = "a.out";
@@ -48,7 +48,7 @@ VPRIV int host_cc(const struct req *r)
 	for (int i = 1; i < r->argc; i++) {
 		const char *a = r->argv[i];
 		if (!strncmp(a, "--target=", 9) || !strcmp(a, "-target")) {
-			/* a target job vcc does not take (cc_is_compile, cc_is_pp): no fallback */
+			/* a target job vcc does not take (vccd_request_is_compile, vccd_request_is_preprocess): no fallback */
 			say(r, "%s: error: unsupported job for target '%s'\n", a[1] == '-' ? a + 9 : "?");
 			return 1;
 		}
@@ -56,14 +56,14 @@ VPRIV int host_cc(const struct req *r)
 			compile_only = true;
 		else if (!strcmp(a, "-o") && i + 1 < r->argc)
 			out = r->argv[i + 1];
-		else if (!strcmp(a, "-") || (a[0] != '-' && is_src(a)))
+		else if (!strcmp(a, "-") || (a[0] != '-' && vccd_host_is_source(a)))
 			nsrc++;
-		if (a[0] == '-' && host_with_arg(a))
+		if (a[0] == '-' && vccd_host_option_takes_value(a))
 			i++;
 	}
 	if (compile_only) {
-		ppd_env e = { .cwd = r->cwd, .outfd = r->fds[1], .errfd = r->fds[2], .envp = r->envp, .infd = r->fds[0] };
-		return ppd_run(r->argc, r->argv, &e);
+		driver_environment e = { .cwd = r->cwd, .outfd = r->fds[1], .errfd = r->fds[2], .envp = r->envp, .infd = r->fds[0] };
+		return driver_job_run(r->argc, r->argv, &e);
 	}
 
 	/* compile + link: the compile options, then per source "-c SRC -o TMP" */
@@ -103,22 +103,22 @@ VPRIV int host_cc(const struct req *r)
 		}
 		if (a[0] == '-' && a[1]) {
 			cav[nc++] = (char *)a;
-			if (host_with_arg(a) && i + 1 < r->argc)
+			if (vccd_host_option_takes_value(a) && i + 1 < r->argc)
 				cav[nc++] = (char *)r->argv[++i];
 			continue;
 		}
-		if (!strcmp(a, "-") || is_src(a))
+		if (!strcmp(a, "-") || vccd_host_is_source(a))
 			continue;	/* compiled below */
 		lav[nl++] = (char *)a;	/* an object */
 	}
 	for (int i = 1; i < r->argc && !status; i++) {
 		const char *a = r->argv[i];
 		if (a[0] == '-' && a[1]) {
-			if (host_with_arg(a))
+			if (vccd_host_option_takes_value(a))
 				i++;
 			continue;
 		}
-		if (strcmp(a, "-") && !is_src(a))
+		if (strcmp(a, "-") && !vccd_host_is_source(a))
 			continue;
 		snprintf(tmp[ntmp], sizeof(tmp[ntmp]), "%s.vcc-%d.o", out, ntmp);
 		int k = nc;
@@ -128,12 +128,12 @@ VPRIV int host_cc(const struct req *r)
 		cav[k++] = tmp[ntmp];
 		cav[k] = NULL;
 		lav[nl++] = tmp[ntmp++];
-		ppd_env e = { .cwd = r->cwd, .outfd = r->fds[1], .errfd = r->fds[2], .envp = r->envp, .infd = r->fds[0] };
-		status = ppd_run(k, cav, &e);
+		driver_environment e = { .cwd = r->cwd, .outfd = r->fds[1], .errfd = r->fds[2], .envp = r->envp, .infd = r->fds[0] };
+		status = driver_job_run(k, cav, &e);
 	}
 	lav[nl] = NULL;
 	if (!status)
-		status = ld_in_process(r, nl, lav);
+		status = vccd_linker_run_in_process(r, nl, lav);
 	for (int t = 0; t < ntmp; t++) {
 		char path[8192];
 		snprintf(path, sizeof(path), "%s%s%s", tmp[t][0] == '/' ? "" : r->cwd, tmp[t][0] == '/' ? "" : "/", tmp[t]);

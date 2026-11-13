@@ -67,7 +67,7 @@ static size_t find_sep(const char *s, size_t n)
 	return n;
 }
 
-static bool parse_regs(const char *s, uint32_t r[4])
+static bool viralloc_registers_parse(const char *s, uint32_t r[4])
 {
 	return sscanf(s, "%u,%u,%u,%u", &r[0], &r[1], &r[2], &r[3]) >= 2;
 }
@@ -134,7 +134,7 @@ int main(int argc, char **argv)
 
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--regs") && i + 1 < argc) {
-			if (!parse_regs(argv[++i], regs))
+			if (!viralloc_registers_parse(argv[++i], regs))
 				goto usage;
 		} else if (!strcmp(argv[i], "--x86")) {
 			x86 = true;
@@ -172,7 +172,7 @@ int main(int argc, char **argv)
 		if (src[i] != ';' && e > i)
 			break;
 		if (!strncmp(src + i, "; REGS:", 7))
-			parse_regs(src + i + 7, regs);
+			viralloc_registers_parse(src + i + 7, regs);
 		else if (!strncmp(src + i, "; X86: yes", 10))
 			x86 = true;
 		else if (!strncmp(src + i, "; SWEEP: yes", 12))

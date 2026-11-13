@@ -1,9 +1,9 @@
 /*
- * probe.c: recognise toolchain probes (cc_probe_kind) and answer them from the capability table
- * without compiling anything (cc_probe).
+ * probe.c: recognise toolchain probes (vccd_probe_kind_classify) and answer them from the capability table
+ * without compiling anything (vccd_probe_cc_answer).
  *
  * Kconfig and kbuild try dozens of options and snippets on every configuration; each answer is a
- * function of the options (caps.c) or of the snippet read from stdin, so no process or compile is
+ * function of the options (capabilities.c) or of the snippet read from stdin, so no process or compile is
  * needed.  The kinds are described below.  The rule for recognising a probe is strict: anything that
  * reads a real file or writes a real output is a real job, because answering a real compile
  * with a probe's "yes" would produce no object.  A source that is not in the table is compiled for
@@ -15,24 +15,24 @@
 /*
  * Probes: jobs whose answer vcc's capability table gives without compiling.
  *
- *   PROBE_CC    -c/-S of C from /dev/null (cc-option, Kconfig's cc-probe):
+ *   VCCD_PROBE_CC    -c/-S of C from /dev/null (cc-option, Kconfig's cc-probe):
  *               the answer depends on the options alone;
- *   PROBE_AS    -c of assembler-with-cpp from stdin into /dev/null or a
+ *   VCCD_PROBE_AS    -c of assembler-with-cpp from stdin into /dev/null or a
  *               try-run temporary (as-instr),
- *   PROBE_SRC   -c/-S of C from stdin into the same (`echo ... | $(CC)`):
+ *   VCCD_PROBE_SOURCE   -c/-S of C from stdin into the same (`echo ... | $(CC)`):
  *               the source is looked up, and compiled for real (forwarded
  *               with the bytes already read) if it is not in the table;
- *   PROBE_LINK  a link of C from stdin into /dev/null (cc-can-link.sh).
+ *   VCCD_PROBE_LINK  a link of C from stdin into /dev/null (cc-can-link.sh).
  *
  * Anything else (a real file, stdin into a real output) is a real job.
  */
 
-static bool probe_output(const char *out)
+static bool vccd_probe_output_is_discard(const char *out)
 {
 	return out && (!strcmp(out, "/dev/null") || strstr(out, ".tmp_"));
 }
 
-VPRIV int cc_probe_kind(const struct req *r)
+VPRIV int vccd_probe_kind_classify(const struct req *r)
 {
 	bool compile = false, devnull = false, in_stdin = false;
 	const char *lang = "c", *out = NULL;
@@ -46,28 +46,28 @@ VPRIV int cc_probe_kind(const struct req *r)
 		if (!strcmp(a, "-c") || !strcmp(a, "-S"))
 			compile = true;
 		if (!strcmp(a, "-E"))
-			return PROBE_NONE;
+			return VCCD_PROBE_NONE;
 		if (!strcmp(a, "--param") || !strcmp(a, "-mllvm")) {
-			i++;	/* its value is not an input; cc_probe rejects the option */
+			i++;	/* its value is not an input; vccd_probe_cc_answer rejects the option */
 			continue;
 		}
 		if (!strcmp(a, "-")) {
 			if (in_stdin)
-				return PROBE_NONE;
+				return VCCD_PROBE_NONE;
 			in_stdin = true;
 			continue;
 		}
 		if (!strcmp(a, "--param") && i + 1 < r->argc) {
-			i++;	/* its value is no input (cc_probe rejects --param, as clang: unused) */
+			i++;	/* its value is no input (vccd_probe_cc_answer rejects --param, as clang: unused) */
 			continue;
 		}
 		if (a[0] != '-') {
 			if (strcmp(a, "/dev/null"))
-				return PROBE_NONE;
+				return VCCD_PROBE_NONE;
 			devnull = true;
 			continue;
 		}
-		n = cc_option(a, i + 1 < r->argc ? r->argv[i + 1] : NULL, &why);
+		n = vccd_capabilities_cc_option_arity(a, i + 1 < r->argc ? r->argv[i + 1] : NULL, &why);
 		if (n == 2) {
 			if (!strcmp(a, "-x"))
 				lang = r->argv[i + 1];
@@ -77,20 +77,20 @@ VPRIV int cc_probe_kind(const struct req *r)
 		}
 	}
 	if (devnull && !in_stdin && compile && !strcmp(lang, "c"))
-		return PROBE_CC;
+		return VCCD_PROBE_CC;
 	if (in_stdin && !devnull && compile && !strcmp(lang, "assembler-with-cpp") &&
-	    probe_output(out))
-		return PROBE_AS;
-	if (in_stdin && !devnull && compile && !strcmp(lang, "c") && probe_output(out))
-		return PROBE_SRC;
+	    vccd_probe_output_is_discard(out))
+		return VCCD_PROBE_AS;
+	if (in_stdin && !devnull && compile && !strcmp(lang, "c") && vccd_probe_output_is_discard(out))
+		return VCCD_PROBE_SOURCE;
 	if (in_stdin && !devnull && !compile && !strcmp(lang, "c") && out &&
 	    !strcmp(out, "/dev/null"))
-		return PROBE_LINK;
-	return PROBE_NONE;
+		return VCCD_PROBE_LINK;
+	return VCCD_PROBE_NONE;
 }
 
 /* the probe's stdin, up to sizeof(buf); -1 if it is larger or unreadable */
-static ssize_t read_stdin(const struct req *r, char *buf, size_t size)
+static ssize_t vccd_probe_stdin_read(const struct req *r, char *buf, size_t size)
 {
 	size_t n = 0;
 
@@ -112,7 +112,7 @@ static ssize_t read_stdin(const struct req *r, char *buf, size_t size)
 VPRIV int forward(const struct req *r, const char *sock);
 
 /* all of fd into a malloc'ed *buf (*len bytes); nonzero on a read error */
-VPRIV int read_all(int fd, char **buf, size_t *len)
+VPRIV int vccd_fd_read_all(int fd, char **buf, size_t *len)
 {
 	size_t cap = 0, n = 0;
 	char *b = NULL;
@@ -142,10 +142,10 @@ VPRIV int read_all(int fd, char **buf, size_t *len)
 
 /* compile r for real with src[0..n) (already read from its stdin) as stdin:
    vcc, or the backend if there is one */
-VPRIV int compile_stdin(const struct req *r, const char *src, size_t n)
+VPRIV int vccd_probe_stdin_compile(const struct req *r, const char *src, size_t n)
 {
 	struct req r2 = *r;
-	ppd_env e = { .cwd = r->cwd, .outfd = r->fds[1], .errfd = r->fds[2], .envp = r->envp, .infd = -1 };
+	driver_environment e = { .cwd = r->cwd, .outfd = r->fds[1], .errfd = r->fds[2], .envp = r->envp, .infd = -1 };
 	int fd, status;
 
 	if (n > 8192) {
@@ -157,7 +157,7 @@ VPRIV int compile_stdin(const struct req *r, const char *src, size_t n)
 		if ((fd = mkstemp(path)) < 0)
 			return 127;
 		unlink(path);
-		if (!write_full(fd, src, n) || lseek(fd, 0, SEEK_SET)) {
+		if (!vccd_fd_write_full(fd, src, n) || lseek(fd, 0, SEEK_SET)) {
 			close(fd);
 			return 127;
 		}
@@ -167,7 +167,7 @@ VPRIV int compile_stdin(const struct req *r, const char *src, size_t n)
 		if (pipe(p))
 			return 127;
 		/* a probe source fits in the pipe buffer: write it all, then compile */
-		if (!write_full(p[1], src, n)) {
+		if (!vccd_fd_write_full(p[1], src, n)) {
 			close(p[0]);
 			close(p[1]);
 			return 127;
@@ -175,25 +175,25 @@ VPRIV int compile_stdin(const struct req *r, const char *src, size_t n)
 		close(p[1]);
 		fd = p[0];
 	}
-	if (backend_sock) {
+	if (vccd_backend_socket) {
 		r2.fds[0] = fd;
-		status = forward(&r2, backend_sock);
+		status = forward(&r2, vccd_backend_socket);
 	} else {
 		e.infd = fd;
-		status = ppd_run(r->argc, r->argv, &e);
+		status = driver_job_run(r->argc, r->argv, &e);
 	}
 	close(fd);
 	return status;
 }
 
-VPRIV int cc_probe(const struct req *r, int kind)
+VPRIV int vccd_probe_cc_answer(const struct req *r, int kind)
 {
 	const char *out = NULL, *why;
 	bool werror = false;
 	int i, n;
 
-	if (kind == PROBE_LINK) {
-		if (!cc_can_link) {
+	if (kind == VCCD_PROBE_LINK) {
+		if (!vccd_capabilities_can_link) {
 			say(r, "%s: error: %s\n", "cannot link user-space programs");
 			return 1;
 		}
@@ -207,13 +207,13 @@ VPRIV int cc_probe(const struct req *r, int kind)
 
 		if (a[0] != '-' || !a[1])
 			continue;	/* the input: /dev/null or - */
-		n = cc_option(a, i + 1 < r->argc ? r->argv[i + 1] : NULL, &why);
+		n = vccd_capabilities_cc_option_arity(a, i + 1 < r->argc ? r->argv[i + 1] : NULL, &why);
 		if (!n) {
 			say(r, "%s: error: unsupported option '%s'\n", why);
 			return 1;
 		}
 		/* -D of a macro vcc predefines: -Wmacro-redefined, an error with -Werror */
-		if (werror && !strncmp(a, "-D", 2) && cc_predefined(a + 2)) {
+		if (werror && !strncmp(a, "-D", 2) && vccd_capabilities_macro_is_predefined(a + 2)) {
 			say(r, "%s: error: '%s' macro redefined\n", a + 2);
 			return 1;
 		}
@@ -223,19 +223,19 @@ VPRIV int cc_probe(const struct req *r, int kind)
 			i++;
 		}
 	}
-	if (kind == PROBE_AS || kind == PROBE_SRC) {
+	if (kind == VCCD_PROBE_AS || kind == VCCD_PROBE_SOURCE) {
 		char src[4096];
-		ssize_t len = read_stdin(r, src, sizeof(src));
+		ssize_t len = vccd_probe_stdin_read(r, src, sizeof(src));
 		int ok;
 
 		if (len < 0) {
 			say(r, "%s: error: %s\n", "probe input too large");
 			return 1;
 		}
-		ok = kind == PROBE_AS ? as_source_probe(src, len) : c_source_probe(src, len);
+		ok = kind == VCCD_PROBE_AS ? vccd_capabilities_as_source_probe(src, len) : vccd_capabilities_c_source_probe(src, len);
 		if (ok < 0) {
-			atomic_fetch_add(&n_probe_cc, 1);
-			return compile_stdin(r, src, len);
+			atomic_fetch_add(&vccd_probe_compile_count, 1);
+			return vccd_probe_stdin_compile(r, src, len);
 		}
 		if (!ok) {
 			say(r, "%s: error: %s\n", "probe source rejected");
@@ -262,18 +262,18 @@ VPRIV int cc_probe(const struct req *r, int kind)
 }
 
 /* `ld -v <opt>...`: version query plus options; answered from the table */
-VPRIV bool ld_is_probe(const struct req *r)
+VPRIV bool vccd_probe_ld_is_query(const struct req *r)
 {
 	return r->argc >= 3 && !strcmp(r->argv[1], "-v");
 }
 
-VPRIV int ld_probe(const struct req *r)
+VPRIV int vccd_probe_ld_answer(const struct req *r)
 {
 	const char *why;
 	int i;
 
 	for (i = 2; i < r->argc; i++)
-		if (!ld_option(r->argv[i], &why)) {
+		if (!vccd_capabilities_ld_option_is_accepted(r->argv[i], &why)) {
 			say(r, "%s: error: unknown argument '%s'\n", why);
 			return 1;
 		}

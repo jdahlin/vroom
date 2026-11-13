@@ -1,9 +1,9 @@
 /*
  * tools.c: run the linker, nm and objcopy inside the server instead of as processes.
  *
- * ld_in_process calls ld_main (ELF, or Mach-O by the first input) with the request's cwd as a
- * directory fd and a FILE on its stderr, so the link needs no fork.  ld_run adds --vroom-stubs and
- * answers -v.  nm and objcopy keep state in globals, so objcopy_run_req runs them one at a time
+ * vccd_linker_run_in_process calls ld_main (ELF, or Mach-O by the first input) with the request's cwd as a
+ * directory fd and a FILE on its stderr, so the link needs no fork.  vccd_linker_run adds --vroom-stubs and
+ * answers -v.  nm and objcopy keep state in globals, so vccd_objcopy_run runs them one at a time
  * (under a task-aware mutex: a waiting job gives its core away).  Ownership: the fds and FILEs made
  * here are closed here on every path; the request's own fds are not (the worker closes them).
  */
@@ -11,7 +11,7 @@
 
 
 /* argv[0] plus extra, then argv[1..]: a NULL-terminated copy (free it) */
-static char **argv_with(const struct req *r, const char *extra)
+static char **vccd_argv_with_extra(const struct req *r, const char *extra)
 {
 	char **av = malloc(((size_t)r->argc + 2) * sizeof(char *));
 	int n = 0;
@@ -28,7 +28,7 @@ static char **argv_with(const struct req *r, const char *extra)
 }
 
 /* ld_main (ELF, or Mach-O by the first input) with the request's cwd and stderr */
-VPRIV int ld_in_process(const struct req *r, int argc, char **argv)
+VPRIV int vccd_linker_run_in_process(const struct req *r, int argc, char **argv)
 {
 	int dfd = open(r->cwd, O_RDONLY | O_DIRECTORY | O_CLOEXEC), efd = dup(r->fds[2]), status = 1;
 	FILE *err = efd >= 0 ? fdopen(efd, "w") : NULL;
@@ -53,7 +53,7 @@ VPRIV int ld_in_process(const struct req *r, int argc, char **argv)
  * exist; vld defines them as trapping stubs (listed in OUT.vroom-stubs).
  * A clean link has none.  -v/--version without inputs: the version line.
  */
-VPRIV int ld_run(const struct req *r)
+VPRIV int vccd_linker_run(const struct req *r)
 {
 	bool version = false, input = false;
 	char **av;
@@ -70,20 +70,20 @@ VPRIV int ld_run(const struct req *r)
 	if (version && !input) {
 		static const char pre[] = "vld (vroom) ";
 
-		return write_full(r->fds[1], pre, sizeof pre - 1) &&
-		       write_full(r->fds[1], ld_version_text, strlen(ld_version_text)) ? 0 : 1;
+		return vccd_fd_write_full(r->fds[1], pre, sizeof pre - 1) &&
+		       vccd_fd_write_full(r->fds[1], vccd_capabilities_ld_version_text, strlen(vccd_capabilities_ld_version_text)) ? 0 : 1;
 	}
-	if (!(av = argv_with(r, "--vroom-stubs"))) {
+	if (!(av = vccd_argv_with_extra(r, "--vroom-stubs"))) {
 		say(r, "%s: error: %s\n", "out of memory");
 		return 1;
 	}
-	status = ld_in_process(r, r->argc + 1, av);
+	status = vccd_linker_run_in_process(r, r->argc + 1, av);
 	free(av);
 	return status;
 }
 
 /* vcc-nm / vcc-objcopy: ld/objcopy.c keeps per-run state in globals, so one at a time */
-VPRIV int objcopy_run_req(const struct req *r, bool nm)
+VPRIV int vccd_objcopy_run(const struct req *r, bool nm)
 {
 	static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 	int dfd = open(r->cwd, O_RDONLY | O_DIRECTORY | O_CLOEXEC), efd = dup(r->fds[2]), ofd = nm ? dup(r->fds[1]) : -1;

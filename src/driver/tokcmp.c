@@ -21,7 +21,7 @@
 #endif
 
 /* the tokens of a file (whole, zero padded), lexed */
-static lex_file lexbuf(const char *s, size_t n)
+static lex_file driver_tokens_lex_string(const char *s, size_t n)
 {
 	lex_file f = { 0 };
 	char *src = mmap(NULL, n + 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
@@ -38,7 +38,7 @@ static lex_file lexbuf(const char *s, size_t n)
 	return f;
 }
 
-static void lexfree(lex_file *f)
+static void driver_tokens_lex_free(lex_file *f)
 {
 	munmap((void *)f->src, f->size + 4096);
 	munmap((void *)f->tok, (f->size + 2) * sizeof(lex_token));
@@ -75,11 +75,11 @@ static void show(const char *what, const lex_file *f, uint32_t i)
 	fputc('\n', stderr);
 }
 
-static int cmp_toks(const lex_file *pa, const lex_file *pb, char *ba, char *bb);
+static int driver_tokens_compare_buffers(const lex_file *pa, const lex_file *pb, char *ba, char *bb);
 
 /* XXH3 of a token stream: per token the kind, the clean spelling's length and
- * the spelling (what cmp_toks compares) */
-static uint64_t tokstream_hash(const lex_file *f)
+ * the spelling (what driver_tokens_compare_buffers compares) */
+static uint64_t driver_tokens_hash(const lex_file *f)
 {
 	size_t cap = (size_t)f->size + (size_t)f->ntok * 5 + 64, n = 0;
 	unsigned char *b = mmap(NULL, cap, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
@@ -103,7 +103,7 @@ static uint64_t tokstream_hash(const lex_file *f)
 
 /* REF.i.th: "size mtime_ns ntok hash" of REF.i's token stream, so a run that
  * matches lexes only our side; written on the first compare of a REF.i */
-static int refhash_read(const char *refpath, const struct stat *st, uint64_t *h)
+static int driver_tokens_hash_cache_read(const char *refpath, const struct stat *st, uint64_t *h)
 {
 	char path[4096], b[128];
 	unsigned long long sz, mt, nt, hv;
@@ -125,7 +125,7 @@ static int refhash_read(const char *refpath, const struct stat *st, uint64_t *h)
 	return 1;
 }
 
-static void refhash_write(const char *refpath, const struct stat *st, uint32_t ntok, uint64_t h)
+static void driver_tokens_hash_cache_write(const char *refpath, const struct stat *st, uint32_t ntok, uint64_t h)
 {
 	char path[4096], tmp[4200], b[128];
 	int fd, n;
@@ -143,7 +143,7 @@ static void refhash_write(const char *refpath, const struct stat *st, uint32_t n
 		unlink(tmp);
 }
 
-int ppd_compare(const char *ours, size_t on, const char *refpath)
+int driver_tokens_compare(const char *ours, size_t on, const char *refpath)
 {
 	vintern_init();
 	VAUTOCLOSE int fd = open(refpath, O_RDONLY);
@@ -162,32 +162,32 @@ int ppd_compare(const char *ours, size_t on, const char *refpath)
 		bb = malloc(1 << 20);
 	}
 	lex_identifiers_not_interned = 1;	/* the copies are freed: nothing may point into them */
-	A = lexbuf(ours, on);
+	A = driver_tokens_lex_string(ours, on);
 	/* VPP_CMP_NOCACHE=1: always lex and compare the reference */
-	cached = !getenv("VPP_CMP_NOCACHE") && refhash_read(refpath, &st, &rh);
-	if (cached && tokstream_hash(&A) == rh) {
+	cached = !getenv("VPP_CMP_NOCACHE") && driver_tokens_hash_cache_read(refpath, &st, &rh);
+	if (cached && driver_tokens_hash(&A) == rh) {
 		lex_identifiers_not_interned = 0;
 		printf("same: %u tokens\n", A.ntok);
-		lexfree(&A);
+		driver_tokens_lex_free(&A);
 		return 0;
 	}
 	{
 		char *m = mmap(NULL, (size_t)st.st_size + 1, PROT_READ, MAP_PRIVATE, fd, 0);
 
 		VCLOSE(fd);
-		B = lexbuf(m, (size_t)st.st_size);
+		B = driver_tokens_lex_string(m, (size_t)st.st_size);
 		lex_identifiers_not_interned = 0;
 		munmap(m, (size_t)st.st_size + 1);
 	}
 	if (!cached)
-		refhash_write(refpath, &st, B.ntok, tokstream_hash(&B));
-	r = cmp_toks(&A, &B, ba, bb);
-	lexfree(&A);
-	lexfree(&B);
+		driver_tokens_hash_cache_write(refpath, &st, B.ntok, driver_tokens_hash(&B));
+	r = driver_tokens_compare_buffers(&A, &B, ba, bb);
+	driver_tokens_lex_free(&A);
+	driver_tokens_lex_free(&B);
 	return r;
 }
 
-static int cmp_toks(const lex_file *pa, const lex_file *pb, char *ba, char *bb)
+static int driver_tokens_compare_buffers(const lex_file *pa, const lex_file *pb, char *ba, char *bb)
 {
 	const lex_file A = *pa, B = *pb;
 
@@ -217,7 +217,7 @@ static int cmp_toks(const lex_file *pa, const lex_file *pb, char *ba, char *bb)
 }
 
 /* --vcc-tokhash: a hash of what pp_token_next hands the parser */
-VPRIV void driver_tokhash_run(struct driver_job *job, pp *p, const ppd_env *env)
+VPRIV void driver_tokens_hash_run(struct driver_job *job, pp *p, const driver_environment *env)
 {
 	{
 		/* a hash of what pp_token_next hands the parser: kind, SOL/SPACE, spelling, id, file:line:col, sys */

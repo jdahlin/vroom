@@ -13,9 +13,9 @@
  */
 #include "driver-internal.h"
 
-/* CPATH-style lists (kept out of ppd_run: its size decides how clang
+/* CPATH-style lists (kept out of driver_job_run: its size decides how clang
    compiles the argument loop; vbench pp +3.7 % instructions inline) */
-static __attribute__((noinline)) size_t env_ndirs(const char *v)
+static __attribute__((noinline)) size_t driver_searchpath_environment_count(const char *v)
 {
 	size_t k = v && *v ? 1 : 0;
 
@@ -26,7 +26,7 @@ static __attribute__((noinline)) size_t env_ndirs(const char *v)
 
 /* the elements of v appended to all[n..] (not repeating one from nquote on); an
    empty element is the current directory.  slot: which per-thread copy holds them */
-static __attribute__((noinline)) int env_dirs(const char *v, const char **all, int n, int nquote, int slot)
+static __attribute__((noinline)) int driver_searchpath_environment_split(const char *v, const char **all, int n, int nquote, int slot)
 {
 	static _Thread_local char *copy[2];
 	char *s, *t;
@@ -52,12 +52,12 @@ static __attribute__((noinline)) int env_dirs(const char *v, const char **all, i
 
 /* each list holds at most argc entries, all of them plus the defaults: one
    per-thread allocation, grown to the longest command line seen */
-VPRIV void driver_searchpath_alloc(struct driver_job *job, int argc, const ppd_env *env)
+VPRIV void driver_searchpath_alloc(struct driver_job *job, int argc, const driver_environment *env)
 {
 	static _Thread_local const char **dirv;
 	static _Thread_local size_t dircap;
-	job->cpath = ppd_getenv(env, "CPATH"), job->cipath = ppd_getenv(env, "C_INCLUDE_PATH");
-	size_t nenvd = env_ndirs(job->cpath) + env_ndirs(job->cipath);
+	job->cpath = driver_environment_get(env, "CPATH"), job->cipath = driver_environment_get(env, "C_INCLUDE_PATH");
+	size_t nenvd = driver_searchpath_environment_count(job->cpath) + driver_searchpath_environment_count(job->cipath);
 	size_t per = (size_t)argc + 64 + nenvd;
 
 	if (5 * per > dircap) {
@@ -69,18 +69,18 @@ VPRIV void driver_searchpath_alloc(struct driver_job *job, int argc, const ppd_e
 	job->all = dirv + 4 * per;
 }
 
-VPRIV void driver_searchpath_build(struct driver_job *job, const ppd_env *env)
+VPRIV void driver_searchpath_build(struct driver_job *job, const driver_environment *env)
 {
 	size_t nsys, nfwdirs;
-	const char *const *sysdirs_darwin = driver_predef_darwin_sysdirs(&nsys);
-	const char *const *fwdirs_darwin = driver_predef_darwin_fwdirs(&nfwdirs);
+	const char *const *sysdirs_darwin = driver_predef_darwin_system_directories(&nsys);
+	const char *const *fwdirs_darwin = driver_predef_darwin_framework_directories(&nfwdirs);
 
 	/* search path: -iquote, -I, -isystem, -idirafter; exact duplicates dropped */
 	for (int k = 0; k < job->nq; k++) job->all[job->n++] = job->dirs_q[k];
 	job->po.nquote = job->n;
 #define ADD(d) do { int dup_ = 0; for (int j = job->po.nquote; j < job->n; j++) dup_ |= !strcmp(job->all[j], d); if (!dup_) job->all[job->n++] = d; } while (0)
 	for (int k = 0; k < job->ni; k++) ADD(job->dirs_i[k]);
-	job->n = env_dirs(job->cpath, job->all, job->n, job->po.nquote, 0);	/* CPATH: after -I, as clang */
+	job->n = driver_searchpath_environment_split(job->cpath, job->all, job->n, job->po.nquote, 0);	/* CPATH: after -I, as clang */
 	job->po.nsys1 = job->n + 1;
 	for (int k = 0; k < job->ns; k++) {
 		/* vcc's own headers (arm_neon.h) go before the clang resource directory */
@@ -89,7 +89,7 @@ VPRIV void driver_searchpath_build(struct driver_job *job, const ppd_env *env)
 			ADD(VCC_INCDIR);
 		ADD(job->dirs_s[k]);
 	}
-	job->n = env_dirs(job->cipath, job->all, job->n, job->po.nquote, 1);	/* C_INCLUDE_PATH: after -isystem */
+	job->n = driver_searchpath_environment_split(job->cipath, job->all, job->n, job->po.nquote, 1);	/* C_INCLUDE_PATH: after -isystem */
 	/* Darwin: vcc's own <stdatomic.h>, <arm_neon.h>, <arm_acle.h> ahead of the SDK's */
 	if (job->darwin && !job->nostdinc)
 		ADD(VCC_INCDIR);
