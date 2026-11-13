@@ -89,11 +89,6 @@ static int cmp_cond(int op, bool sg)
 	}
 }
 
-VPRIV bool em_is_cmp(int op)
-{
-	return op == T_LESS || op == T_LESSEQ || op == T_GREATER || op == T_GREATEREQ || op == T_EQUALEQUAL || op == T_EXCLAIMEQ;
-}
-
 /* compare a with b (width x); returns the condition for "op is true" */
 VPRIV int emit_cmp(ecx *e, int op, int x, bool sg, val *a, val *b)
 {

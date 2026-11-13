@@ -418,3 +418,15 @@ allocation changes.  Counts are from main at d602dfa2 (grep), before steps
 Per step: the PR, the proof commands with their results (numbers), what
 was not run and why, the files touched outside "Owns" (none expected; any
 is a stop-and-report), and what this order got wrong.
+
+## Status
+
+- Step 1: done (PR "codegen: WORK-codegen-surviving step 1").  Deviations
+  from the table: `back_edge` (static helper of `kv_edge`, defined in
+  `label.c`) moved with `kv_edge` into `branches.c`; `ref_align` stays
+  `static` in `memory-access.c` (no caller outside that file today); `kbits`,
+  `imm_fits` became `VPRIV` and `ctor_entry` got a prototype, all three in
+  `emitimpl.h`; `value.c` keeps a duplicate prototype of `sym_needs_got` (left,
+  it is the walker's file).  Nothing was needed in `src/codegen/vir/` or
+  `tu.c`.  Note: `bench/gen-walkprefix.py` is `src/tools/gen-walkprefix.py`
+  now, and `vcc-ctests.py` takes the binaries from `VCC_BIN`, not `--bin-dir`.
