@@ -40,7 +40,7 @@ static inline a64_record *a64_record_emit(codegen_context *e, int op)
 	}
 	i = &e->records[e->record_count++];
 	memset(i, 0, sizeof(*i));
-	i->op = (uint8_t)op;
+	i->opcode = (uint8_t)op;
 	return i;
 }
 
@@ -51,7 +51,7 @@ static inline void a64_record_emit_three_registers(codegen_context *e, int op, i
 	if (!e->is_reachable)
 		return;
 	i = a64_record_emit(e, op);
-	i->sz = (uint8_t)x, i->rd = (uint8_t)rd, i->rn = (uint8_t)rn, i->rm = (uint8_t)rm;
+	i->size = (uint8_t)x, i->rd = (uint8_t)rd, i->rn = (uint8_t)rn, i->rm = (uint8_t)rm;
 }
 
 static inline void a64_record_emit_three_registers_shifted(codegen_context *e, int op, int x, int rd, int rn, int rm, int kind, int sh)
@@ -61,8 +61,8 @@ static inline void a64_record_emit_three_registers_shifted(codegen_context *e, i
 	if (!e->is_reachable)
 		return;
 	i = a64_record_emit(e, op);
-	i->sz = (uint8_t)x, i->rd = (uint8_t)rd, i->rn = (uint8_t)rn, i->rm = (uint8_t)rm;
-	i->cond = (uint8_t)kind, i->sh = (uint8_t)sh;
+	i->size = (uint8_t)x, i->rd = (uint8_t)rd, i->rn = (uint8_t)rn, i->rm = (uint8_t)rm;
+	i->condition = (uint8_t)kind, i->shift = (uint8_t)sh;
 }
 
 static inline void a64_record_emit_four_registers(codegen_context *e, int op, int x, int rd, int rn, int rm, int ra)
@@ -72,7 +72,7 @@ static inline void a64_record_emit_four_registers(codegen_context *e, int op, in
 	if (!e->is_reachable)
 		return;
 	i = a64_record_emit(e, op);
-	i->sz = (uint8_t)x, i->rd = (uint8_t)rd, i->rn = (uint8_t)rn, i->rm = (uint8_t)rm, i->ra = (uint8_t)ra;
+	i->size = (uint8_t)x, i->rd = (uint8_t)rd, i->rn = (uint8_t)rn, i->rm = (uint8_t)rm, i->ra = (uint8_t)ra;
 }
 
 static inline void a64_record_emit_immediate(codegen_context *e, int op, int x, int rd, int rn, int64_t imm)
@@ -82,8 +82,8 @@ static inline void a64_record_emit_immediate(codegen_context *e, int op, int x, 
 	if (!e->is_reachable)
 		return;
 	i = a64_record_emit(e, op);
-	i->sz = (uint8_t)x, i->rd = (uint8_t)rd, i->rn = (uint8_t)rn;
-	i->imm = imm;
+	i->size = (uint8_t)x, i->rd = (uint8_t)rd, i->rn = (uint8_t)rn;
+	i->immediate = imm;
 	if (rn == A64_REGISTER_FRAME)
 		a64_record_slot_tag(e, i, imm, -1);	/* an address: may point just past the end */
 }
@@ -95,8 +95,8 @@ static inline void a64_record_emit_bitfield(codegen_context *e, int op, int x, i
 	if (!e->is_reachable)
 		return;
 	i = a64_record_emit(e, op);
-	i->sz = (uint8_t)x, i->rd = (uint8_t)rd, i->rn = (uint8_t)rn;
-	i->imm = immr, i->sh = (uint8_t)imms;
+	i->size = (uint8_t)x, i->rd = (uint8_t)rd, i->rn = (uint8_t)rn;
+	i->immediate = immr, i->shift = (uint8_t)imms;
 }
 
 static inline void a64_record_emit_move_immediate(codegen_context *e, int x, int rd, int64_t v) { a64_record_emit_immediate(e, A64_OP_MOVI, x, rd, 0, v); }
@@ -109,7 +109,7 @@ static inline void a64_record_emit_condition_set(codegen_context *e, int rd, int
 	if (!e->is_reachable)
 		return;
 	i = a64_record_emit(e, A64_OP_CSINC);
-	i->sz = 0, i->rd = (uint8_t)rd, i->rn = ZR, i->rm = ZR, i->cond = (uint8_t)(cond ^ 1);
+	i->size = 0, i->rd = (uint8_t)rd, i->rn = ZR, i->rm = ZR, i->condition = (uint8_t)(cond ^ 1);
 }
 
 /* the last record is `cset v.r, cond` (nothing since, no label: the flags still say it): cond, else -1.
@@ -121,9 +121,9 @@ static inline int a64_record_condition_set_last(codegen_context *e, const codege
 	if (v->kind != CODEGEN_VALUE_REGISTER || !e->is_reachable || !e->record_count || e->unit->options->opt < 1)
 		return -1;
 	i = &e->records[e->record_count - 1];
-	if (i->op != A64_OP_CSINC || i->rn != ZR || i->rm != ZR || i->rd != v->register_number)
+	if (i->opcode != A64_OP_CSINC || i->rn != ZR || i->rm != ZR || i->rd != v->register_number)
 		return -1;
-	return i->cond ^ 1;
+	return i->condition ^ 1;
 }
 
 static inline void a64_record_emit_memory(codegen_context *e, int op, int sz, int ext, int rd, int base, int64_t off)
@@ -133,8 +133,8 @@ static inline void a64_record_emit_memory(codegen_context *e, int op, int sz, in
 	if (!e->is_reachable)
 		return;
 	i = a64_record_emit(e, op);
-	i->sz = (uint8_t)sz, i->cond = (uint8_t)ext, i->rd = (uint8_t)rd, i->rn = (uint8_t)base;
-	i->imm = off;
+	i->size = (uint8_t)sz, i->condition = (uint8_t)ext, i->rd = (uint8_t)rd, i->rn = (uint8_t)base;
+	i->immediate = off;
 	if (base == A64_REGISTER_FRAME)
 		a64_record_slot_tag(e, i, off, (int64_t)1 << sz);
 }
@@ -146,8 +146,8 @@ static inline void a64_record_emit_symbol(codegen_context *e, int op, int sz, in
 	if (!e->is_reachable)
 		return;
 	i = a64_record_emit(e, op);
-	i->sz = (uint8_t)sz, i->cond = (uint8_t)ext, i->rd = (uint8_t)rd, i->rn = (uint8_t)rn;
-	i->ref = ref, i->off = (int32_t)off;
+	i->size = (uint8_t)sz, i->condition = (uint8_t)ext, i->rd = (uint8_t)rd, i->rn = (uint8_t)rn;
+	i->reference = ref, i->offset = (int32_t)off;
 }
 
 /* ---------------- floating point ---------------- */
@@ -163,7 +163,7 @@ static inline void a64_record_emit_symbol(codegen_context *e, int op, int sz, in
 static inline void a64_record_emit_word(codegen_context *e, uint32_t w)
 {
 	if (e->is_reachable)
-		a64_record_emit(e, A64_OP_WORD)->imm = w;
+		a64_record_emit(e, A64_OP_WORD)->immediate = w;
 }
 
 static inline uint32_t a64_word_fmov_to_vector(int d, int vr, int r) { return (d ? 0x9e670000u : 0x1e270000u) | (unsigned)r << 5 | (unsigned)vr; }	/* fmov v, x/w */

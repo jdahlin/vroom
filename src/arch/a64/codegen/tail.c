@@ -41,7 +41,7 @@ VPRIV bool a64_tail_return(codegen_context *e, uint32_t expr)
 	uint32_t ref = CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, callee);
 
 	codegen_reference_note(e, ref);
-	a64_record_emit(e, A64_OP_TAIL)->ref = ref;
+	a64_record_emit(e, A64_OP_TAIL)->reference = ref;
 	e->is_reachable = false;
 	return true;
 }
@@ -51,7 +51,7 @@ VPRIV uint32_t a64_tail_ref(const codegen_context *e)
 {
 	uint32_t k = e->record_count;
 
-	while (k && e->records[k - 1].op == A64_OP_LABEL)
+	while (k && e->records[k - 1].opcode == A64_OP_LABEL)
 		k--;
-	return k && e->records[k - 1].op == A64_OP_TAIL && !e->records[k - 1].cond ? e->records[k - 1].ref : 0;
+	return k && e->records[k - 1].opcode == A64_OP_TAIL && !e->records[k - 1].condition ? e->records[k - 1].reference : 0;
 }

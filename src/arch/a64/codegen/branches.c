@@ -77,7 +77,7 @@ VPRIV void a64_branch_condition_emit(codegen_context *e, int cond, uint32_t l)
 		return;
 	a64_label_edge_add(e, l);
 	i = a64_record_emit(e, A64_OP_BC);
-	i->cond = (uint8_t)cond;
+	i->condition = (uint8_t)cond;
 	i->label = l;
 	e->label_reference_counts[l]++;
 }
@@ -90,7 +90,7 @@ VPRIV void a64_branch_compare_zero_emit(codegen_context *e, bool nz, int x, int 
 		return;
 	a64_label_edge_add(e, l);
 	i = a64_record_emit(e, nz ? A64_OP_CBNZ : A64_OP_CBZ);
-	i->sz = (uint8_t)x, i->rd = (uint8_t)r;
+	i->size = (uint8_t)x, i->rd = (uint8_t)r;
 	i->label = l;
 	e->label_reference_counts[l]++;
 }
@@ -104,7 +104,7 @@ VPRIV void a64_branch_test_bit_emit(codegen_context *e, bool nz, int r, int bit,
 		return;
 	a64_label_edge_add(e, l);
 	i = a64_record_emit(e, nz ? A64_OP_TBNZ : A64_OP_TBZ);
-	i->sz = bit >= 32, i->rd = (uint8_t)r, i->sh = (uint8_t)bit;
+	i->size = bit >= 32, i->rd = (uint8_t)r, i->shift = (uint8_t)bit;
 	i->label = l;
 	e->label_reference_counts[l]++;
 }

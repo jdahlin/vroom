@@ -266,7 +266,7 @@ VPRIV codegen_value do_call(codegen_context *e, uint32_t ref, codegen_value *fnv
 		a64_record_emit_memory(e, A64_OP_LD, 3, 0, R_X16, A64_REGISTER_FRAME, fslot);
 		a64_record_emit(e, A64_OP_BLR)->rn = R_X16;
 	} else {
-		a64_record_emit(e, A64_OP_BL)->ref = ref;
+		a64_record_emit(e, A64_OP_BL)->reference = ref;
 	}
 	if (codegen_type_is_void(c, rty)) {
 		res = codegen_value_none();
@@ -638,7 +638,7 @@ static void pair(codegen_context *e, int op, int r1, int r2, int base, int64_t o
 	if (!e->is_reachable)
 		return;
 	i = a64_record_emit(e, op);
-	i->sz = 1, i->rd = (uint8_t)r1, i->ra = (uint8_t)r2, i->rn = (uint8_t)base, i->imm = off;
+	i->size = 1, i->rd = (uint8_t)r1, i->ra = (uint8_t)r2, i->rn = (uint8_t)base, i->immediate = off;
 }
 
 /* memcpy of 16 to 128 bytes: ldp/stp pairs, the rest as copy_mem */

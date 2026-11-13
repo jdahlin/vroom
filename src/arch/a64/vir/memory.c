@@ -67,8 +67,8 @@ VPRIV void a64_vir_load_lower(a64_vir_context *L, uint32_t i, const vir_insn *in
 	if (L->index_value && L->index_value == L->operand_values[0]) {
 		a64_record *x = a64_record_emit(e, A64_OP_LDX);
 
-		x->sz = (uint8_t)w, x->cond = (uint8_t)ext, x->rd = (uint8_t)rd, x->rn = (uint8_t)L->index_base;
-		x->rm = (uint8_t)L->index_register, x->ra = L->index_extension, x->sh = L->index_shift;
+		x->size = (uint8_t)w, x->condition = (uint8_t)ext, x->rd = (uint8_t)rd, x->rn = (uint8_t)L->index_base;
+		x->rm = (uint8_t)L->index_register, x->ra = L->index_extension, x->shift = L->index_shift;
 		L->index_value = 0;
 		if (fl && res != VIR_REGISTER_NONE)
 			a64_record_emit_word(e, a64_word_fmov_to_vector(in->type == VIR_TYPE_F64, a64_vir_vector_register(res), R_X16));
@@ -89,7 +89,7 @@ VPRIV void a64_vir_load_lower(a64_vir_context *L, uint32_t i, const vir_insn *in
 		return;
 	} else {
 		a64_record_emit_memory(e, A64_OP_LD, w, ext, rd, l.kind == CODEGEN_LVALUE_FRAME ? A64_REGISTER_FRAME : l.register_number, l.offset);
-		if ((in->flags & VIR_INSN_FLAG_VOL) && l.kind != CODEGEN_LVALUE_FRAME && e->is_reachable && e->records[e->record_count - 1].op == A64_OP_LD)
+		if ((in->flags & VIR_INSN_FLAG_VOL) && l.kind != CODEGEN_LVALUE_FRAME && e->is_reachable && e->records[e->record_count - 1].opcode == A64_OP_LD)
 			e->records[e->record_count - 1].ra = A64_LOAD_VOLATILE;	/* (not merged with its neighbours: opt.c's fold) */
 	}
 	e->volatile_untag_depth -= (in->flags & VIR_INSN_FLAG_VOL) != 0;
@@ -134,8 +134,8 @@ VPRIV void a64_vir_store_lower(a64_vir_context *L, const vir_insn *in)
 	if (xa) {
 		a64_record *x = a64_record_emit(e, A64_OP_STX);
 
-		x->sz = (uint8_t)w, x->rd = (uint8_t)rs, x->rn = (uint8_t)L->index_base, x->rm = (uint8_t)L->index_register;
-		x->ra = L->index_extension, x->sh = L->index_shift;
+		x->size = (uint8_t)w, x->rd = (uint8_t)rs, x->rn = (uint8_t)L->index_base, x->rm = (uint8_t)L->index_register;
+		x->ra = L->index_extension, x->shift = L->index_shift;
 		L->index_value = 0;
 	} else if (l.kind == CODEGEN_LVALUE_SYMBOL) {
 		a64_lvalue_store(e, rs, &l, 0, 1 << w);
@@ -166,7 +166,7 @@ VPRIV void a64_vir_memory_block_lower(a64_vir_context *L, const vir_insn *in)
 
 	if (a64_vir_insn_is_big_memory(L->function, in)) {
 		e->has_calls = true;
-		a64_record_emit(e, A64_OP_BL)->ref = CODEGEN_FIXED_REFERENCE(in->op == VIR_OP_MEMCPY ? CODEGEN_LIBRARY_MEMCPY : CODEGEN_LIBRARY_MEMSET);
+		a64_record_emit(e, A64_OP_BL)->reference = CODEGEN_FIXED_REFERENCE(in->op == VIR_OP_MEMCPY ? CODEGEN_LIBRARY_MEMCPY : CODEGEN_LIBRARY_MEMSET);
 		return;
 	}
 	if (in->op == VIR_OP_MEMSET && !a64_vir_value_is_zero(L->function, in->b))

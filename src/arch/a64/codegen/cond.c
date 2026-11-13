@@ -54,9 +54,9 @@ VPRIV void gen_cond(codegen_context *e, uint32_t n, bool jump_if, uint32_t l)
 				return;
 			}
 			/* gen left a cset: turn it back into a branch on the flags */
-			if (e->is_reachable && e->record_count && e->records[e->record_count - 1].op == A64_OP_CSINC && e->records[e->record_count - 1].rn == ZR &&
+			if (e->is_reachable && e->record_count && e->records[e->record_count - 1].opcode == A64_OP_CSINC && e->records[e->record_count - 1].rn == ZR &&
 			    e->records[e->record_count - 1].rm == ZR && e->records[e->record_count - 1].rd == v.register_number) {
-				int cond = e->records[e->record_count - 1].cond ^ 1;
+				int cond = e->records[e->record_count - 1].condition ^ 1;
 
 				e->record_count--;
 				a64_branch_condition_emit(e, jump_if ? cond : cond ^ 1, l);

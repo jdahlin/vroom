@@ -113,8 +113,8 @@ VPRIV codegen_lvalue gen_lval(codegen_context *e, uint32_t n)
 			if (e->is_reachable) {
 				a64_record *t = a64_record_emit(e, A64_OP_TLV);
 
-				t->ref = CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, cs);
-				t->cond = (uint8_t)model;
+				t->reference = CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, cs);
+				t->condition = (uint8_t)model;
 			}
 			r = treg(e);
 			a64_record_emit_move(e, 1, r, 0);

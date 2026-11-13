@@ -63,7 +63,7 @@ VPRIV void a64_record_slot_tag(codegen_context *e, a64_record *i, int64_t off, i
 				if (id2 > 0xffff)
 					i->rm = i->ra = 0;	/* untagged */
 				else
-					i->cond = (uint8_t)id2, i->sh = (uint8_t)(id2 >> 8);
+					i->condition = (uint8_t)id2, i->shift = (uint8_t)(id2 >> 8);
 			}
 		}
 	}

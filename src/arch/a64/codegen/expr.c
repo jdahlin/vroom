@@ -334,8 +334,8 @@ static codegen_value gen_vbin(codegen_context *e, int op, int ra, int rb, ast_qu
 	a64_register_name_append(rb_, rd, 1);
 	vtext_char_append(rb_, ']');
 	i = a64_record_emit(e, A64_OP_RAW);
-	i->off = (int32_t)st;
-	i->ref = (uint32_t)(rb_->n - st);
+	i->offset = (int32_t)st;
+	i->reference = (uint32_t)(rb_->n - st);
 	return codegen_value_register(rd);
 }
 
@@ -576,7 +576,7 @@ static codegen_value gen_binary(codegen_context *e, uint32_t n)
 		}
 		if ((op == LEX_TOKEN_EQUAL_EQUAL || op == LEX_TOKEN_EXCLAMATION_EQUAL) && b.kind == CODEGEN_VALUE_CONSTANT && b.integer == 0 && a64_record_condition_set_last(e, &a) >= 0) {
 			if (op == LEX_TOKEN_EQUAL_EQUAL)	/* (cond) == 0: the inverse cset */
-				e->records[e->record_count - 1].cond ^= 1;
+				e->records[e->record_count - 1].condition ^= 1;
 			return a;
 		}
 		if (codegen_type_is_wide(c, lt))
@@ -664,7 +664,7 @@ static codegen_value gen_unary(codegen_context *e, uint32_t n)
 		if (v.kind == CODEGEN_VALUE_CONSTANT)
 			return codegen_value_constant(!v.integer);
 		if (a64_record_condition_set_last(e, &v) >= 0)
-			e->records[e->record_count - 1].cond ^= 1;
+			e->records[e->record_count - 1].condition ^= 1;
 		else
 			a64_record_emit_immediate(e, A64_OP_EORI, 0, v.register_number, v.register_number, 1);
 		return v;

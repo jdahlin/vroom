@@ -335,7 +335,7 @@ typedef struct codegen_slot_allocation {
  * (CODEGEN_SLOT_TAG_SECOND).  finish_function clears the tags before the frame layout.
  */
 #define CODEGEN_SLOT_TAG(i) ((uint32_t)(i)->rm | (uint32_t)(i)->ra << 8)
-#define CODEGEN_SLOT_TAG_SECOND(i) ((uint32_t)(i)->cond | (uint32_t)(i)->sh << 8)
+#define CODEGEN_SLOT_TAG_SECOND(i) ((uint32_t)(i)->condition | (uint32_t)(i)->shift << 8)
 
 #define CODEGEN_VLA_SIZE_MAX 64		/* VLA size expressions live at once in a function */
 

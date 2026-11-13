@@ -159,18 +159,18 @@ VPRIV void a64_vir_call_lower(a64_vir_context *L, uint32_t b, uint32_t i, const 
 			L->frame_is_at_risk = true;
 		a64_vir_callee_saved_float_save(L, true, L->operand_registers[0] != VIR_REGISTER_NONE ? R_X17 : R_X16);
 		t = a64_record_emit(e, A64_OP_TAIL);
-		t->sh = L->is_before_save_point;
+		t->shift = L->is_before_save_point;
 
 		if (L->operand_registers[0] == VIR_REGISTER_NONE) {
 			const vir_insn *k = &f->insns[in->a];
 
 			if (k->op != VIR_OP_SYMADDR || k->b || k->c)
 				a64_vir_fail(L, VIRBUILD_FAILURE(indirect_callee_without_register));
-			t->cond = 2;
-			t->ref = f->insns[in->a].a;
-			codegen_reference_note(e, t->ref);
+			t->condition = 2;
+			t->reference = f->insns[in->a].a;
+			codegen_reference_note(e, t->reference);
 		} else {
-			t->cond = 3;
+			t->condition = 3;
 			t->rn = (uint8_t)a64_vir_general_register(L->operand_registers[0]);
 		}
 		e->is_reachable = false;
@@ -188,13 +188,13 @@ VPRIV void a64_vir_call_lower(a64_vir_context *L, uint32_t b, uint32_t i, const 
 		codegen_reference_note(e, k->a);
 		a64_record *c = a64_record_emit(e, A64_OP_BL);
 
-		c->ref = k->a;
-		c->cond = A64_CALL_ARGUMENT_REGISTERS, c->sh = gm;
+		c->reference = k->a;
+		c->condition = A64_CALL_ARGUMENT_REGISTERS, c->shift = gm;
 	} else {
 		a64_record *c = a64_record_emit(e, A64_OP_BLR);
 
 		c->rn = (uint8_t)a64_vir_general_register(L->operand_registers[0]);
-		c->cond = A64_CALL_ARGUMENT_REGISTERS, c->sh = gm;
+		c->condition = A64_CALL_ARGUMENT_REGISTERS, c->shift = gm;
 	}
 }
 

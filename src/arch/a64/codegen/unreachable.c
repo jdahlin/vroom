@@ -2,7 +2,7 @@
 #include "../../../codegen/codegen-internal.h"
 
 typedef struct a64_unreachable_debug {
-	codegen_context *e;
+	codegen_context *context;
 	uint32_t cursor;
 } a64_unreachable_debug;
 
@@ -10,7 +10,7 @@ static void a64_unreachable_remap(void *ctx, uint32_t old, uint32_t next)
 {
 	a64_unreachable_debug *d = ctx;
 
-	codegen_debug_rows_remap(d->e, &d->cursor, old, next);
+	codegen_debug_rows_remap(d->context, &d->cursor, old, next);
 }
 
 VPRIV void a64_unreachable_remove(codegen_context *e)
@@ -45,6 +45,6 @@ VPRIV void a64_unreachable_remove(codegen_context *e)
 #undef A64_NEXT
 	a64_unreachable_debug d = { e, 0 };
 
-	e->record_count = record_unreachable_remove(e->records, e->record_count, sizeof(a64_record), offsetof(a64_record, op), flow, sizeof(flow),
+	e->record_count = record_unreachable_remove(e->records, e->record_count, sizeof(a64_record), offsetof(a64_record, opcode), flow, sizeof(flow),
 				    e->debug_row_count ? a64_unreachable_remap : NULL, &d);
 }

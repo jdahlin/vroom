@@ -38,7 +38,7 @@ static void a64_function_items_finish(codegen_context *e, uint32_t s, uint32_t a
 	start = b->n;
 	codegen_symbol_header_append(e, b, s, true, "\t.text\n", align);
 	for (uint32_t k = 0; k < e->record_count && !sym_labels; k++)
-		sym_labels = e->records[k].op == A64_OP_RAW;
+		sym_labels = e->records[k].opcode == A64_OP_RAW;
 	h = codegen_item_open(e, CODEGEN_ITEM_CODE);
 	ch = codegen_item_room_need(e, sizeof *ch);
 	in = codegen_item_room_need(e, ((size_t)e->record_count + 2 * (size_t)ncs + 8) * sizeof(a64_record));
@@ -48,39 +48,39 @@ static void a64_function_items_finish(codegen_context *e, uint32_t s, uint32_t a
 	if (ctor & 8)
 		;
 	else if (a64_frame_shape.is_stack_pointer_leaf)
-		PUT(.op = A64_OP_SUBI, .sz = 1, .rd = SP, .rn = SP, .imm = a64_frame_shape.frame_size);
-	else if (PUT(.op = A64_OP_STP, .sz = 1, .rd = R_FP, .ra = R_LR, .rn = SP, .cond = 1, .imm = -16),
-		 PUT(.op = A64_OP_MOV, .sz = 1, .rd = R_FP, .rn = SP), e->frame_alignment > 16) {	/* sp = (sp - frame) & -falign */
-		PUT(.op = A64_OP_SUBI, .sz = 1, .rd = R_X16, .rn = SP, .imm = total - 16);
-		PUT(.op = A64_OP_ANDI, .sz = 1, .rd = SP, .rn = R_X16, .imm = -(int64_t)e->frame_alignment);
+		PUT(.opcode = A64_OP_SUBI, .size = 1, .rd = SP, .rn = SP, .immediate = a64_frame_shape.frame_size);
+	else if (PUT(.opcode = A64_OP_STP, .size = 1, .rd = R_FP, .ra = R_LR, .rn = SP, .condition = 1, .immediate = -16),
+		 PUT(.opcode = A64_OP_MOV, .size = 1, .rd = R_FP, .rn = SP), e->frame_alignment > 16) {	/* sp = (sp - frame) & -falign */
+		PUT(.opcode = A64_OP_SUBI, .size = 1, .rd = R_X16, .rn = SP, .immediate = total - 16);
+		PUT(.opcode = A64_OP_ANDI, .size = 1, .rd = SP, .rn = R_X16, .immediate = -(int64_t)e->frame_alignment);
 	} else if (total > 16) {
-		PUT(.op = A64_OP_SUBI, .sz = 1, .rd = SP, .rn = SP, .imm = total - 16);
+		PUT(.opcode = A64_OP_SUBI, .size = 1, .rd = SP, .rn = SP, .immediate = total - 16);
 	}
 	for (int k = 0; k + 1 < ncs; k += 2)
-		PUT(.op = A64_OP_STP, .sz = 1, .rd = (uint8_t)cs[k], .ra = (uint8_t)cs[k + 1], .rn = (uint8_t)a64_frame_save_base(), .imm = a64_frame_save_offset(csave, k));
+		PUT(.opcode = A64_OP_STP, .size = 1, .rd = (uint8_t)cs[k], .ra = (uint8_t)cs[k + 1], .rn = (uint8_t)a64_frame_save_base(), .immediate = a64_frame_save_offset(csave, k));
 	if (ncs & 1)
-		PUT(.op = A64_OP_ST, .sz = 3, .rd = (uint8_t)cs[ncs - 1], .rn = (uint8_t)a64_frame_save_base(), .imm = a64_frame_save_offset(csave, ncs - 1));
+		PUT(.opcode = A64_OP_ST, .size = 3, .rd = (uint8_t)cs[ncs - 1], .rn = (uint8_t)a64_frame_save_base(), .immediate = a64_frame_save_offset(csave, ncs - 1));
 	if (ctor & 4)
-		PUT(.op = A64_OP_MOV, .sz = 1, .rd = A64_REGISTER_FRAME_BASE, .rn = SP);
+		PUT(.opcode = A64_OP_MOV, .size = 1, .rd = A64_REGISTER_FRAME_BASE, .rn = SP);
 	memcpy(in + n, e->records + rest, (size_t)(e->record_count - rest) * sizeof(a64_record));
 	n += e->record_count - rest;
 	for (int k = 0; k + 1 < ncs; k += 2)
-		PUT(.op = A64_OP_LDP, .sz = 1, .rd = (uint8_t)cs[k], .ra = (uint8_t)cs[k + 1], .rn = (uint8_t)a64_frame_save_base(), .imm = a64_frame_save_offset(csave, k));
+		PUT(.opcode = A64_OP_LDP, .size = 1, .rd = (uint8_t)cs[k], .ra = (uint8_t)cs[k + 1], .rn = (uint8_t)a64_frame_save_base(), .immediate = a64_frame_save_offset(csave, k));
 	if (ncs & 1)
-		PUT(.op = A64_OP_LD, .sz = 3, .rd = (uint8_t)cs[ncs - 1], .rn = (uint8_t)a64_frame_save_base(), .imm = a64_frame_save_offset(csave, ncs - 1));
+		PUT(.opcode = A64_OP_LD, .size = 3, .rd = (uint8_t)cs[ncs - 1], .rn = (uint8_t)a64_frame_save_base(), .immediate = a64_frame_save_offset(csave, ncs - 1));
 	if (ctor & 8)
 		;
 	else if (a64_frame_shape.is_stack_pointer_leaf) {
-		PUT(.op = A64_OP_ADDI, .sz = 1, .rd = SP, .rn = SP, .imm = a64_frame_shape.frame_size);
+		PUT(.opcode = A64_OP_ADDI, .size = 1, .rd = SP, .rn = SP, .immediate = a64_frame_shape.frame_size);
 	} else {
 		if (!a64_frame_shape.no_move)
-			PUT(.op = A64_OP_MOV, .sz = 1, .rd = SP, .rn = R_FP);
-		PUT(.op = A64_OP_LDP, .sz = 1, .rd = R_FP, .ra = R_LR, .rn = SP, .cond = 2, .imm = 16);
+			PUT(.opcode = A64_OP_MOV, .size = 1, .rd = SP, .rn = R_FP);
+		PUT(.opcode = A64_OP_LDP, .size = 1, .rd = R_FP, .ra = R_LR, .rn = SP, .condition = 2, .immediate = 16);
 	}
 	if (tail)
-		PUT(.op = A64_OP_TAIL, .cond = 1, .ref = tail);
+		PUT(.opcode = A64_OP_TAIL, .condition = 1, .reference = tail);
 	else
-		PUT(.op = A64_OP_RET);
+		PUT(.opcode = A64_OP_RET);
 #undef PUT
 	/* give back the unused room, then the inline asm text */
 	b->n -= ((size_t)e->record_count + 2 * (size_t)ncs + 8 - n) * sizeof(a64_record);
@@ -108,7 +108,7 @@ static void a64_function_items_finish(codegen_context *e, uint32_t s, uint32_t a
 }
 
 typedef struct a64_fallthrough_debug {
-	codegen_context *e;
+	codegen_context *context;
 	uint32_t cursor;
 } a64_fallthrough_debug;
 
@@ -116,13 +116,13 @@ static void a64_fallthrough_remap(void *ctx, uint32_t old, uint32_t next)
 {
 	a64_fallthrough_debug *d = ctx;
 
-	codegen_debug_rows_remap(d->e, &d->cursor, old, next);
+	codegen_debug_rows_remap(d->context, &d->cursor, old, next);
 }
 
 static void a64_fallthrough_drop(codegen_context *e)
 {
 	static const record_layout layout = {
-		sizeof(a64_record), offsetof(a64_record, op), offsetof(a64_record, label), A64_OP_B, A64_OP_LABEL,
+		sizeof(a64_record), offsetof(a64_record, opcode), offsetof(a64_record, label), A64_OP_B, A64_OP_LABEL,
 	};
 	a64_fallthrough_debug d = { e, 0 };
 
@@ -151,8 +151,8 @@ static void a64_jump_tables_expand(codegen_context *e, uint32_t fid)
 	if (!e->jump_table_count)
 		return;
 	for (uint32_t k = 0; k < e->record_count; k++) {
-		raw |= e->records[k].op == A64_OP_RAW;
-		if (e->records[k].op == A64_OP_JT)
+		raw |= e->records[k].opcode == A64_OP_RAW;
+		if (e->records[k].opcode == A64_OP_JT)
 			total += 5 + a64_jump_table_find(e, e->records[k].label)->entry_count;
 	}
 	raw &= codegen_context_is_direct(e);
@@ -160,7 +160,7 @@ static void a64_jump_tables_expand(codegen_context *e, uint32_t fid)
 		codegen_fatal_report(e, 0, "function too large");
 	for (uint32_t r = 0, j = 0, extra = 0; r < e->debug_row_count; r++) {
 		for (; j < e->debug_rows[r].record_index && j < e->record_count; j++)
-			if (e->records[j].op == A64_OP_JT)
+			if (e->records[j].opcode == A64_OP_JT)
 				extra += 5 + a64_jump_table_find(e, e->records[j].label)->entry_count;
 		e->debug_rows[r].record_index += extra;
 	}
@@ -168,7 +168,7 @@ static void a64_jump_tables_expand(codegen_context *e, uint32_t fid)
 	for (uint32_t k = e->record_count; k-- > 0; ) {
 		a64_record x = e->records[k];
 
-		if (x.op != A64_OP_JT) {
+		if (x.opcode != A64_OP_JT) {
 			e->records[--d] = x;
 			continue;
 		}
@@ -176,12 +176,12 @@ static void a64_jump_tables_expand(codegen_context *e, uint32_t fid)
 
 		d -= 6 + j->entry_count;
 		a64_record *o = &e->records[d];
-		o[0] = (a64_record){ .op = A64_OP_ADR, .rd = R_X16, .label = x.label };
-		o[1] = (a64_record){ .op = A64_OP_ADD, .sz = 1, .rd = R_X17, .rn = R_X16, .rm = x.rd, .sh = 2, .cond = x.cond ? 8 + 2 : 0 };
-		o[2] = (a64_record){ .op = A64_OP_LD, .sz = 2, .cond = 1, .rd = R_X17, .rn = R_X17 };
-		o[3] = (a64_record){ .op = A64_OP_ADD, .sz = 1, .rd = R_X16, .rn = R_X16, .rm = R_X17 };
-		o[4] = (a64_record){ .op = A64_OP_BR, .rn = R_X16 };
-		o[5] = (a64_record){ .op = A64_OP_LABEL, .label = j->table_label };
+		o[0] = (a64_record){ .opcode = A64_OP_ADR, .rd = R_X16, .label = x.label };
+		o[1] = (a64_record){ .opcode = A64_OP_ADD, .size = 1, .rd = R_X17, .rn = R_X16, .rm = x.rd, .shift = 2, .condition = x.condition ? 8 + 2 : 0 };
+		o[2] = (a64_record){ .opcode = A64_OP_LD, .size = 2, .condition = 1, .rd = R_X17, .rn = R_X17 };
+		o[3] = (a64_record){ .opcode = A64_OP_ADD, .size = 1, .rd = R_X16, .rn = R_X16, .rm = R_X17 };
+		o[4] = (a64_record){ .opcode = A64_OP_BR, .rn = R_X16 };
+		o[5] = (a64_record){ .opcode = A64_OP_LABEL, .label = j->table_label };
 		for (uint32_t n = 0; n < j->entry_count; n++) {
 			uint32_t target = e->jump_table_labels[j->first_entry + n];
 
@@ -189,10 +189,10 @@ static void a64_jump_tables_expand(codegen_context *e, uint32_t fid)
 				char b[64];
 				int len = snprintf(b, sizeof b, "\t.word\t.LBB%x_%x-.LBB%x_%x", fid, target, fid, j->table_label);
 
-				o[6 + n] = (a64_record){ .op = A64_OP_RAW, .off = (int32_t)e->raw.n, .ref = (uint32_t)len };
+				o[6 + n] = (a64_record){ .opcode = A64_OP_RAW, .offset = (int32_t)e->raw.n, .reference = (uint32_t)len };
 				vtext_append(&e->raw, b, (size_t)len);
 			} else {
-				o[6 + n] = (a64_record){ .op = A64_OP_JTE, .off = (int32_t)target, .ref = j->table_label };
+				o[6 + n] = (a64_record){ .opcode = A64_OP_JTE, .offset = (int32_t)target, .reference = j->table_label };
 			}
 		}
 	}
@@ -210,7 +210,7 @@ static void a64_test_branch_relax(codegen_context *e)
 	uint32_t m = 0, n = e->record_count, *at, total = 0;
 
 	for (uint32_t k = 0; k < n; k++)
-		m += e->records[k].op == A64_OP_TBZ || e->records[k].op == A64_OP_TBNZ;
+		m += e->records[k].opcode == A64_OP_TBZ || e->records[k].opcode == A64_OP_TBNZ;
 	if (!m)
 		return;
 	at = malloc(((size_t)n + 1 + e->label_count) * sizeof *at);
@@ -220,7 +220,7 @@ static void a64_test_branch_relax(codegen_context *e)
 
 	for (uint32_t k = 0; k < n; k++) {
 		at[k] = total;
-		if (e->records[k].op == A64_OP_LABEL)
+		if (e->records[k].opcode == A64_OP_LABEL)
 			lat[e->records[k].label] = total;
 		total += a64_record_word_count(&e->records[k]);
 		if (total > (1u << 30))
@@ -237,7 +237,7 @@ static void a64_test_branch_relax(codegen_context *e)
 		a64_record t = e->records[k];
 		int64_t d;
 
-		if (t.op != A64_OP_TBZ && t.op != A64_OP_TBNZ) {
+		if (t.opcode != A64_OP_TBZ && t.opcode != A64_OP_TBNZ) {
 			e->records[--w] = t;
 			continue;
 		}
@@ -251,9 +251,9 @@ static void a64_test_branch_relax(codegen_context *e)
 		for (uint32_t r = 0; r < e->debug_row_count; r++)	/* (-g rows after it move by the two records) */
 			if (e->debug_rows[r].record_index > k)
 				e->debug_rows[r].record_index += 2;
-		e->records[--w] = (a64_record){ .op = A64_OP_LABEL, .label = l };
-		e->records[--w] = (a64_record){ .op = A64_OP_B, .label = t.label };
-		t.op = t.op == A64_OP_TBZ ? A64_OP_TBNZ : A64_OP_TBZ;
+		e->records[--w] = (a64_record){ .opcode = A64_OP_LABEL, .label = l };
+		e->records[--w] = (a64_record){ .opcode = A64_OP_B, .label = t.label };
+		t.opcode = t.opcode == A64_OP_TBZ ? A64_OP_TBNZ : A64_OP_TBZ;
 		t.label = l;
 		e->label_reference_counts[l] = 1;
 		e->records[--w] = t;
@@ -275,7 +275,7 @@ static void a64_tail_expand(codegen_context *e, const int *cs, int ncs, int32_t 
 	bool dup = (ncs + 1) / 2 + (leaf ? 0 : a64_frame_shape.is_stack_pointer_leaf || a64_frame_shape.no_move ? 1 : 2) + 1 <= 6;
 
 	for (uint32_t k = 0; k < e->record_count; k++)
-		m += e->records[k].op == A64_OP_TAIL && e->records[k].cond >= 2;
+		m += e->records[k].opcode == A64_OP_TAIL && e->records[k].condition >= 2;
 	if (!m)
 		return;
 	cfi &= !leaf;	/* (no frame: the CFA stays sp) */
@@ -289,53 +289,53 @@ static void a64_tail_expand(codegen_context *e, const int *cs, int ncs, int32_t 
 		a64_record t = e->records[k], seq[20];
 		uint32_t q = 0;
 
-		if (t.op != A64_OP_TAIL || t.cond < 2) {
+		if (t.opcode != A64_OP_TAIL || t.condition < 2) {
 			e->records[--w] = t;
 			continue;
 		}
-		if (t.sh) {	/* in front of the prologue (shrink-wrapping): nothing to restore */
-			e->records[--w] = t.cond == 2 ? (a64_record){ .op = A64_OP_TAIL, .cond = 1, .ref = t.ref } :
-				     t.cond == 4 ? (a64_record){ .op = A64_OP_RET } : (a64_record){ .op = A64_OP_BR, .rn = R_X16 };
-			if (t.cond == 3 && t.rn != R_X16)
-				e->records[--w] = (a64_record){ .op = A64_OP_MOV, .sz = 1, .rd = R_X16, .rn = t.rn };
+		if (t.shift) {	/* in front of the prologue (shrink-wrapping): nothing to restore */
+			e->records[--w] = t.condition == 2 ? (a64_record){ .opcode = A64_OP_TAIL, .condition = 1, .reference = t.reference } :
+				     t.condition == 4 ? (a64_record){ .opcode = A64_OP_RET } : (a64_record){ .opcode = A64_OP_BR, .rn = R_X16 };
+			if (t.condition == 3 && t.rn != R_X16)
+				e->records[--w] = (a64_record){ .opcode = A64_OP_MOV, .size = 1, .rd = R_X16, .rn = t.rn };
 			continue;
 		}
-		if (t.cond == 4) {
+		if (t.condition == 4) {
 			uint32_t j = k + 1;
 
-			while (j < e->record_count && e->records[j].op == A64_OP_LABEL)
+			while (j < e->record_count && e->records[j].opcode == A64_OP_LABEL)
 				j++;
 			if (j == e->record_count)	/* the last record: falls into the shared epilogue */
 				continue;
 			if (!dup) {
-				e->records[--w] = (a64_record){ .op = A64_OP_B, .label = t.label };
+				e->records[--w] = (a64_record){ .opcode = A64_OP_B, .label = t.label };
 				continue;
 			}
 		}
-		if (t.cond == 3 && t.rn != R_X16)
-			seq[q++] = (a64_record){ .op = A64_OP_MOV, .sz = 1, .rd = R_X16, .rn = t.rn };
+		if (t.condition == 3 && t.rn != R_X16)
+			seq[q++] = (a64_record){ .opcode = A64_OP_MOV, .size = 1, .rd = R_X16, .rn = t.rn };
 		if (cfi)
-			seq[q++] = (a64_record){ .op = A64_OP_NOP, .cond = A64_NOP_CFI_REMEMBER };
+			seq[q++] = (a64_record){ .opcode = A64_OP_NOP, .condition = A64_NOP_CFI_REMEMBER };
 		for (int j = 0; j + 1 < ncs; j += 2)
-			seq[q++] = (a64_record){ .op = A64_OP_LDP, .sz = 1, .rd = (uint8_t)cs[j], .ra = (uint8_t)cs[j + 1], .rn = (uint8_t)a64_frame_save_base(),
-					  .imm = a64_frame_save_offset(csave, j) };
+			seq[q++] = (a64_record){ .opcode = A64_OP_LDP, .size = 1, .rd = (uint8_t)cs[j], .ra = (uint8_t)cs[j + 1], .rn = (uint8_t)a64_frame_save_base(),
+					  .immediate = a64_frame_save_offset(csave, j) };
 		if (ncs & 1)
-			seq[q++] = (a64_record){ .op = A64_OP_LD, .sz = 3, .rd = (uint8_t)cs[ncs - 1], .rn = (uint8_t)a64_frame_save_base(), .imm = a64_frame_save_offset(csave, ncs - 1) };
+			seq[q++] = (a64_record){ .opcode = A64_OP_LD, .size = 3, .rd = (uint8_t)cs[ncs - 1], .rn = (uint8_t)a64_frame_save_base(), .immediate = a64_frame_save_offset(csave, ncs - 1) };
 		if (leaf)
 			;
 		else if (a64_frame_shape.is_stack_pointer_leaf) {
-			seq[q++] = (a64_record){ .op = A64_OP_ADDI, .sz = 1, .rd = SP, .rn = SP, .imm = a64_frame_shape.frame_size };
+			seq[q++] = (a64_record){ .opcode = A64_OP_ADDI, .size = 1, .rd = SP, .rn = SP, .immediate = a64_frame_shape.frame_size };
 		} else {
 			if (!a64_frame_shape.no_move)
-				seq[q++] = (a64_record){ .op = A64_OP_MOV, .sz = 1, .rd = SP, .rn = R_FP };
-			seq[q++] = (a64_record){ .op = A64_OP_LDP, .sz = 1, .rd = R_FP, .ra = R_LR, .rn = SP, .cond = 2, .imm = 16 };
+				seq[q++] = (a64_record){ .opcode = A64_OP_MOV, .size = 1, .rd = SP, .rn = R_FP };
+			seq[q++] = (a64_record){ .opcode = A64_OP_LDP, .size = 1, .rd = R_FP, .ra = R_LR, .rn = SP, .condition = 2, .immediate = 16 };
 		}
 		if (cfi)
-			seq[q++] = (a64_record){ .op = A64_OP_NOP, .cond = A64_NOP_CFI_EPILOGUE };
-		seq[q++] = t.cond == 2 ? (a64_record){ .op = A64_OP_TAIL, .cond = 1, .ref = t.ref } :
-			   t.cond == 4 ? (a64_record){ .op = A64_OP_RET } : (a64_record){ .op = A64_OP_BR, .rn = R_X16 };
+			seq[q++] = (a64_record){ .opcode = A64_OP_NOP, .condition = A64_NOP_CFI_EPILOGUE };
+		seq[q++] = t.condition == 2 ? (a64_record){ .opcode = A64_OP_TAIL, .condition = 1, .reference = t.reference } :
+			   t.condition == 4 ? (a64_record){ .opcode = A64_OP_RET } : (a64_record){ .opcode = A64_OP_BR, .rn = R_X16 };
 		if (cfi)
-			seq[q++] = (a64_record){ .op = A64_OP_NOP, .cond = A64_NOP_CFI_RESTORE };
+			seq[q++] = (a64_record){ .opcode = A64_OP_NOP, .condition = A64_NOP_CFI_RESTORE };
 		w -= q;
 		memcpy(&e->records[w], seq, q * sizeof(a64_record));
 	}
@@ -436,49 +436,49 @@ VPRIV void a64_function_finish(codegen_context *e, uint32_t s)
 
 	A64_RECORD_PASS_BEGIN(e);
 	for (uint32_t k = 0; k < e->record_count; k++)
-		if (e->records[k].op == A64_OP_NOP && e->records[k].cond == A64_NOP_PROLOGUE) {
+		if (e->records[k].opcode == A64_OP_NOP && e->records[k].condition == A64_NOP_PROLOGUE) {
 			if (!leaf && !bp && !e->dynamic_frame && e->frame_alignment <= 16 && !e->unit->options->debug && !(e->unit->options->cfi && !CODEGEN_IS_DARWIN(c)) &&
 			    a64_function_is_frameless(e, k))
 				kpro = k;
 			else
-				e->records[k].cond = 0;
+				e->records[k].condition = 0;
 			break;
 		}
 	A64_RECORD_PASS_END(e, A64_RECORD_PASS_FRAMELESS);
 	A64_RECORD_PASS_BEGIN(e);
 	if (kpro == UINT32_MAX)
 		for (uint32_t k = 0; k < e->record_count; k++)
-			if (e->records[k].op == A64_OP_TAIL)
-				e->records[k].sh = 0;
+			if (e->records[k].opcode == A64_OP_TAIL)
+				e->records[k].shift = 0;
 	a64_tail_expand(e, cs, ncs, csave, leaf, e->unit->options->cfi && !CODEGEN_IS_DARWIN(c));
 	A64_RECORD_PASS_END(e, A64_RECORD_PASS_TAIL_EXPAND);
 	if (kpro != UINT32_MAX)
-		for (kpro = 0; e->records[kpro].op != A64_OP_NOP || e->records[kpro].cond != A64_NOP_PROLOGUE; kpro++)
+		for (kpro = 0; e->records[kpro].opcode != A64_OP_NOP || e->records[kpro].condition != A64_NOP_PROLOGUE; kpro++)
 			;
 	/* rewrite frame-slot references */
 	A64_RECORD_PASS_BEGIN(e);
 	for (uint32_t k = 0; k < e->record_count; k++) {
 		a64_record *i = &e->records[k];
 
-		if (i->op == A64_OP_ADDI && i->rn == SP && i->cond == 0xee) {
-			i->imm += outs;
-			i->cond = 0;
+		if (i->opcode == A64_OP_ADDI && i->rn == SP && i->condition == 0xee) {
+			i->immediate += outs;
+			i->condition = 0;
 			continue;
 		}
 		if (i->rn != A64_REGISTER_FRAME)
 			continue;
 		i->rm = i->ra = 0;	/* slot tags */
-		if (i->op != A64_OP_LD && i->op != A64_OP_ST)
-			i->cond = i->sh = 0;
+		if (i->opcode != A64_OP_LD && i->opcode != A64_OP_ST)
+			i->condition = i->shift = 0;
 		if (bp) {
 			i->rn = A64_REGISTER_FRAME_BASE;
-			i->imm = i->imm - csave + (total - 16);
+			i->immediate = i->immediate - csave + (total - 16);
 		} else if (e->dynamic_frame) {
 			i->rn = R_FP;
-			i->imm = i->imm - csave;
+			i->immediate = i->immediate - csave;
 		} else {
 			i->rn = SP;
-			i->imm = i->imm - csave + (total - 16);
+			i->immediate = i->immediate - csave + (total - 16);
 		}
 	}
 	A64_RECORD_PASS_END(e, A64_RECORD_PASS_FRAME_REWRITE);
@@ -519,7 +519,7 @@ VPRIV void a64_function_finish(codegen_context *e, uint32_t s)
 			if (leaf)
 				;
 			else if (a64_frame_shape.is_stack_pointer_leaf) {
-				a64_record i = { .op = A64_OP_SUBI, .sz = 1, .rd = SP, .rn = SP, .imm = a64_frame_shape.frame_size };
+				a64_record i = { .opcode = A64_OP_SUBI, .size = 1, .rd = SP, .rn = SP, .immediate = a64_frame_shape.frame_size };
 
 				a64_record_print(c, b, &i, s, e->raw.p);
 				if (cfi)
@@ -527,13 +527,13 @@ VPRIV void a64_function_finish(codegen_context *e, uint32_t s)
 			} else if (vtext_string_append(b, cfi ? "\tstp\tx29, x30, [sp, #-16]!\n\t.cfi_def_cfa_offset 16\n\tmov\tx29, sp\n"
 					      "\t.cfi_def_cfa w29, 16\n\t.cfi_offset w30, -8\n\t.cfi_offset w29, -16\n" :
 					      "\tstp\tx29, x30, [sp, #-16]!\n\tmov\tx29, sp\n"), e->frame_alignment > 16) {
-				a64_record i = { .op = A64_OP_SUBI, .sz = 1, .rd = R_X16, .rn = SP, .imm = total - 16 };
-				a64_record a = { .op = A64_OP_ANDI, .sz = 1, .rd = SP, .rn = R_X16, .imm = -(int64_t)e->frame_alignment };
+				a64_record i = { .opcode = A64_OP_SUBI, .size = 1, .rd = R_X16, .rn = SP, .immediate = total - 16 };
+				a64_record a = { .opcode = A64_OP_ANDI, .size = 1, .rd = SP, .rn = R_X16, .immediate = -(int64_t)e->frame_alignment };
 
 				a64_record_print(c, b, &i, s, e->raw.p);
 				a64_record_print(c, b, &a, s, e->raw.p);
 			} else if (total > 16) {
-				a64_record i = { .op = A64_OP_SUBI, .sz = 1, .rd = SP, .rn = SP, .imm = total - 16 };
+				a64_record i = { .opcode = A64_OP_SUBI, .size = 1, .rd = SP, .rn = SP, .immediate = total - 16 };
 
 				a64_record_print(c, b, &i, s, e->raw.p);
 			}
@@ -557,13 +557,13 @@ VPRIV void a64_function_finish(codegen_context *e, uint32_t s)
 			if (dj + 1 == e->debug_row_count || e->debug_rows[dj + 1].record_index != k)	/* the last of several at one place */
 				vtext_format_append(b, dj ? "\t.loc\t%u %u %u\n" : "\t.loc\t%u %u %u prologue_end\n",
 				     e->debug_rows[dj].file, e->debug_rows[dj].line, e->debug_rows[dj].column);
-		if (far && ((i->op == A64_OP_BC && i->cond < 14) || i->op == A64_OP_CBZ || i->op == A64_OP_CBNZ)) {
+		if (far && ((i->opcode == A64_OP_BC && i->condition < 14) || i->opcode == A64_OP_CBZ || i->opcode == A64_OP_CBNZ)) {
 			a64_record n = *i;
 
-			if (n.op == A64_OP_BC)
-				n.cond ^= 1;
+			if (n.opcode == A64_OP_BC)
+				n.condition ^= 1;
 			else
-				n.op = n.op == A64_OP_CBZ ? A64_OP_CBNZ : A64_OP_CBZ;
+				n.opcode = n.opcode == A64_OP_CBZ ? A64_OP_CBNZ : A64_OP_CBZ;
 			n.label = 0;
 			a64_record_print(c, b, &n, s, e->raw.p);
 			{
@@ -579,10 +579,10 @@ VPRIV void a64_function_finish(codegen_context *e, uint32_t s)
 			}
 			continue;
 		}
-		if (i->op == A64_OP_NOP && cfi && i->cond >= A64_NOP_CFI_REMEMBER) {
-			if (i->cond == A64_NOP_CFI_REMEMBER) {
+		if (i->opcode == A64_OP_NOP && cfi && i->condition >= A64_NOP_CFI_REMEMBER) {
+			if (i->condition == A64_NOP_CFI_REMEMBER) {
 				vtext_string_append(b, "\t.cfi_remember_state\n");
-			} else if (i->cond == A64_NOP_CFI_RESTORE) {
+			} else if (i->condition == A64_NOP_CFI_RESTORE) {
 				vtext_string_append(b, "\t.cfi_restore_state\n");
 			} else {
 				for (int k = 0; k < ncs; k++)
@@ -609,7 +609,7 @@ VPRIV void a64_function_finish(codegen_context *e, uint32_t s)
 	if (leaf)
 		;
 	else if (a64_frame_shape.is_stack_pointer_leaf) {
-		a64_record i = { .op = A64_OP_ADDI, .sz = 1, .rd = SP, .rn = SP, .imm = a64_frame_shape.frame_size };
+		a64_record i = { .opcode = A64_OP_ADDI, .size = 1, .rd = SP, .rn = SP, .immediate = a64_frame_shape.frame_size };
 
 		a64_record_print(c, b, &i, s, e->raw.p);
 	} else
@@ -622,7 +622,7 @@ VPRIV void a64_function_finish(codegen_context *e, uint32_t s)
 				vtext_string_append(b, "\t.cfi_restore w29\n\t.cfi_restore w30\n");
 			vtext_string_append(b, "\t.cfi_def_cfa wsp, 0\n");
 		}
-		a64_record i = { .op = A64_OP_TAIL, .cond = 1, .ref = tail };
+		a64_record i = { .opcode = A64_OP_TAIL, .condition = 1, .reference = tail };
 
 		a64_record_print(c, b, &i, s, e->raw.p);
 	} else {

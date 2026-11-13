@@ -196,7 +196,7 @@ VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i, uint8_
 		} else {	/* one: less or greater */
 			a64_record_emit_condition_set(e, rd, A64_CONDITION_MI);
 			a64_record_emit_three_registers_shifted(e, A64_OP_CSINC, 0, rd, rd, ZR, 0, 0);
-			e->records[e->record_count - 1].cond = A64_CONDITION_LE;
+			e->records[e->record_count - 1].condition = A64_CONDITION_LE;
 		}
 		return;
 	}
@@ -207,7 +207,7 @@ VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i, uint8_
 			a64_record_emit_word(e, 0x1e200c00u | (unsigned)d << 22 | (unsigned)a64_vir_operand_float_register(L, 2) << 16 | (unsigned)cc << 12 |
 				(unsigned)a64_vir_operand_float_register(L, 1) << 5 | (unsigned)vd);
 		else
-			a64_record_emit_three_registers_shifted(e, A64_OP_CSEL, x, rd, a64_vir_operand_general_register(L, 1, R_X16), a64_vir_operand_general_register(L, 2, R_X17), 0, 0), e->records[e->record_count - 1].cond = (uint8_t)cc;
+			a64_record_emit_three_registers_shifted(e, A64_OP_CSEL, x, rd, a64_vir_operand_general_register(L, 1, R_X16), a64_vir_operand_general_register(L, 2, R_X17), 0, 0), e->records[e->record_count - 1].condition = (uint8_t)cc;
 		return;
 	}
 	case VIR_OP_FADD: case VIR_OP_FSUB: case VIR_OP_FMUL: case VIR_OP_FDIV: {
@@ -330,7 +330,7 @@ VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i, uint8_
 		a64_vir_return_lower(L);
 		return;
 	case VIR_OP_TRAP:
-		a64_record_emit(e, A64_OP_BRK)->imm = 1;
+		a64_record_emit(e, A64_OP_BRK)->immediate = 1;
 		e->is_reachable = false;
 		return;
 	default: {

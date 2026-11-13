@@ -913,7 +913,7 @@ VPRIV codegen_value gen_builtin(codegen_context *e, uint32_t n)
 		return codegen_value_none();
 	case CC_BUILTIN_TRAP:
 		if (e->is_reachable)
-			a64_record_emit(e, A64_OP_BRK)->imm = 0x3e8;
+			a64_record_emit(e, A64_OP_BRK)->immediate = 0x3e8;
 		e->is_reachable = false;
 		return codegen_value_none();
 	case CC_BUILTIN_ARM_NOP: case CC_BUILTIN_ARM_YIELD: case CC_BUILTIN_ARM_WFE: case CC_BUILTIN_ARM_WFI: case CC_BUILTIN_ARM_SEV: case CC_BUILTIN_ARM_SEVL:
@@ -934,9 +934,9 @@ VPRIV codegen_value gen_builtin(codegen_context *e, uint32_t n)
 		if (!e->is_reachable)
 			return codegen_value_none();
 		if (x->aux == CC_BUILTIN_ARM_TRAP)
-			a64_record_emit(e, A64_OP_BRK)->imm = (int64_t)(cv.i & 0xffff);
+			a64_record_emit(e, A64_OP_BRK)->immediate = (int64_t)(cv.i & 0xffff);
 		else
-			a64_record_emit(e, A64_OP_WORD)->imm = w[x->aux - CC_BUILTIN_ARM_NOP] | (x->aux >= CC_BUILTIN_ARM_ISB ? (uint32_t)(cv.i & 15) << 8 : 0);
+			a64_record_emit(e, A64_OP_WORD)->immediate = w[x->aux - CC_BUILTIN_ARM_NOP] | (x->aux >= CC_BUILTIN_ARM_ISB ? (uint32_t)(cv.i & 15) << 8 : 0);
 		return codegen_value_none();
 	}
 	case CC_BUILTIN_ROTL8: case CC_BUILTIN_ROTL16: case CC_BUILTIN_ROTL32: case CC_BUILTIN_ROTL64:
@@ -965,7 +965,7 @@ VPRIV codegen_value gen_builtin(codegen_context *e, uint32_t n)
 	}
 	case CC_BUILTIN_DEBUGTRAP:
 		if (e->is_reachable)
-			a64_record_emit(e, A64_OP_BRK)->imm = 0xf000;
+			a64_record_emit(e, A64_OP_BRK)->immediate = 0xf000;
 		return codegen_value_none();
 	case CC_BUILTIN_RETURN_ADDRESS: case CC_BUILTIN_FRAME_ADDRESS: {
 		codegen_value depth = gen(e, arg[0]);
@@ -1031,7 +1031,7 @@ VPRIV codegen_value gen_builtin(codegen_context *e, uint32_t n)
 		a64_record_emit_three_registers(e, A64_OP_SUB, 1, SP, SP, r);
 		if (e->is_reachable) {
 			i = a64_record_emit(e, A64_OP_ADDI);
-			i->sz = 1, i->rd = (uint8_t)r, i->rn = SP, i->imm = 0, i->cond = 0xee;	/* + outgoing area */
+			i->size = 1, i->rd = (uint8_t)r, i->rn = SP, i->immediate = 0, i->condition = 0xee;	/* + outgoing area */
 		}
 		/* Older VLA scopes must not reclaim this function-lifetime allocation. */
 		for (int k = e->function_instance && e->function_instance->is_inlined ? e->function_instance->cleanup_base : 0; k < e->cleanup_count; ++k) {
@@ -1059,7 +1059,7 @@ VPRIV codegen_value gen_builtin(codegen_context *e, uint32_t n)
 
 		val_free(e, &m);
 		if (e->is_reachable && x->aux == CC_BUILTIN_ATOMIC_THREAD_FENCE)
-			a64_record_emit(e, A64_OP_WORD)->imm = 0xd5033bbf;	/* dmb ish */
+			a64_record_emit(e, A64_OP_WORD)->immediate = 0xd5033bbf;	/* dmb ish */
 		return codegen_value_none();
 	}
 	case CC_BUILTIN_ATOMIC_LOCK_FREE: {
@@ -1080,7 +1080,7 @@ VPRIV codegen_value gen_builtin(codegen_context *e, uint32_t n)
 			a64_record *i = a64_record_emit(e, A64_OP_MRS);
 
 			i->rd = (uint8_t)r;
-			i->ref = N(sn)->a;
+			i->reference = N(sn)->a;
 		}
 		return codegen_value_register(r);
 	}
@@ -1090,7 +1090,7 @@ VPRIV codegen_value gen_builtin(codegen_context *e, uint32_t n)
 		if (e->is_reachable) {
 			a64_record *i = a64_record_emit(e, A64_OP_WORD);
 
-			i->imm = 0xd53b4400 | (unsigned)r;	/* mrs xR, FPCR */
+			i->immediate = 0xd53b4400 | (unsigned)r;	/* mrs xR, FPCR */
 		}
 		a64_record_emit_immediate(e, A64_OP_ADDI, 0, r, r, 1 << 22);
 		a64_record_emit_bitfield(e, A64_OP_UBFM, 0, r, r, 22, 23);

@@ -46,7 +46,7 @@ static void vl_target_block_enter(void *ctx, uint32_t b)
 	a64_vir_context *L = ctx;
 
 	if (b == L->save_point)
-		a64_record_emit(L->context, A64_OP_NOP)->cond = A64_NOP_PROLOGUE;
+		a64_record_emit(L->context, A64_OP_NOP)->condition = A64_NOP_PROLOGUE;
 	L->is_before_save_point = L->save_point != VIR_BLOCK_NONE && !vir_block_dominates(L->function, L->save_point, b);
 	L->at = b;
 	L->fallok = true;

@@ -72,7 +72,7 @@ VPRIV void a64_vir_switch_lower(a64_vir_context *L, uint32_t b, const vir_insn *
 		e->jump_tables[e->jump_table_count++] = (struct codegen_jump_table){ tab, off, (uint32_t)span + 1 };
 		a64_record *i = a64_record_emit(e, A64_OP_JT);
 		i->rd = (uint8_t)ix;
-		i->cond = ix != R_X17 && !x ? 2 : 0;
+		i->condition = ix != R_X17 && !x ? 2 : 0;
 		i->label = tab;
 		e->is_reachable = false;
 		return;

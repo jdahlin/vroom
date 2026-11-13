@@ -30,8 +30,8 @@ VPRIV void a64_vir_return_lower(a64_vir_context *L)
 		return;
 	a64_vir_callee_saved_float_save(L, true, R_X16);
 	t = a64_record_emit(e, A64_OP_TAIL);
-	t->cond = 4;
-	t->sh = L->is_before_save_point;
+	t->condition = 4;
+	t->shift = L->is_before_save_point;
 	t->label = L->return_label;
 	e->label_reference_counts[L->return_label]++;
 	e->is_reachable = false;

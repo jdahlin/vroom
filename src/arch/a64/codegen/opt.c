@@ -43,7 +43,7 @@ enum { BR_NONE, BR_UNCOND, BR_COND, BR_END, BR_INDIRECT };
 
 static unsigned roles_sw(const a64_record *i)
 {
-	switch (i->op) {
+	switch (i->opcode) {
 	case A64_OP_ADD: case A64_OP_SUB: case A64_OP_ADDS: case A64_OP_SUBS: case A64_OP_AND: case A64_OP_ORR: case A64_OP_EOR:
 	case A64_OP_ANDS: case A64_OP_BIC: case A64_OP_ORN: case A64_OP_ADC: case A64_OP_SBC: case A64_OP_ADCS: case A64_OP_SBCS:
 	case A64_OP_SDIV: case A64_OP_UDIV: case A64_OP_SMULH: case A64_OP_UMULH: case A64_OP_LSLV: case A64_OP_LSRV: case A64_OP_ASRV:
@@ -67,9 +67,9 @@ static unsigned roles_sw(const a64_record *i)
 	case A64_OP_ST: case A64_OP_STLO:
 		return RD_R | RN_R;
 	case A64_OP_LDP:
-		return RN_R | RD_W | RA_W | (i->cond ? RN_W : 0);
+		return RN_R | RD_W | RA_W | (i->condition ? RN_W : 0);
 	case A64_OP_STP:
-		return RD_R | RA_R | RN_R | (i->cond ? RN_W : 0);
+		return RD_R | RA_R | RN_R | (i->condition ? RN_W : 0);
 	case A64_OP_CBZ: case A64_OP_CBNZ: case A64_OP_TBZ: case A64_OP_TBNZ:
 		return RD_R;
 	case A64_OP_PRFM:
@@ -86,14 +86,14 @@ static unsigned roles_sw(const a64_record *i)
 	case A64_OP_RET:
 		return OP_RET;	/* reads x0, x1 */
 	case A64_OP_TAIL:
-		if (i->cond == 4)
+		if (i->condition == 4)
 			return OP_RET;	/* (VIR's return in the body: the epilogue and ret) */
-		return OP_TAIL | (i->cond == 3 ? RN_R : 0);	/* outgoing x0-x7 survive until the sibling branch */
+		return OP_TAIL | (i->condition == 3 ? RN_R : 0);	/* outgoing x0-x7 survive until the sibling branch */
 	case A64_OP_LABEL: case A64_OP_B: case A64_OP_BC: case A64_OP_NOP:
 	case A64_OP_BRK:	/* a trap (BUG, WARN, __builtin_trap): the handler may print registers, needs none */
 		return 0;
 	case A64_OP_RAW:
-		return i->cond == A64_RAW_HAS_REGISTER_MASKS ? OP_ASM : OP_ALL;
+		return i->condition == A64_RAW_HAS_REGISTER_MASKS ? OP_ASM : OP_ALL;
 	default:	/* A64_OP_RAW, A64_OP_WORD, I_MOVSP: unknown registers */
 		return OP_ALL;
 	}
@@ -111,7 +111,7 @@ static int brkind_sw(const a64_record *i);
 __attribute__((constructor)) static void opt_tables(void)
 {
 	for (unsigned op = 0; op < 256; op++) {
-		a64_record x = { .op = (uint8_t)op };
+		a64_record x = { .opcode = (uint8_t)op };
 
 		RT[op] = (uint16_t)roles_sw(&x);
 		BT[op] = (uint8_t)brkind_sw(&x);
@@ -124,16 +124,16 @@ __attribute__((constructor)) static void opt_tables(void)
 
 static inline unsigned roles(const a64_record *i)
 {
-	unsigned r = RT[i->op];
+	unsigned r = RT[i->opcode];
 
 	return r & OP_VAR ? roles_sw(i) : r;
 }
 
-static inline int brkind(const a64_record *i) { return BT[i->op]; }
+static inline int brkind(const a64_record *i) { return BT[i->opcode]; }
 
 static int brkind_sw(const a64_record *i)
 {
-	switch (i->op) {
+	switch (i->opcode) {
 	case A64_OP_B: return BR_UNCOND;
 	case A64_OP_BC: case A64_OP_CBZ: case A64_OP_CBNZ: case A64_OP_TBZ: case A64_OP_TBNZ: return BR_COND;
 	case A64_OP_RET: case A64_OP_TAIL: case A64_OP_JT: return BR_END;
@@ -152,7 +152,7 @@ __attribute__((noinline)) static record_register_mask reads_slow(const a64_recor
 	if (ro & OP_ALL)
 		return GPRS;
 	if (ro & OP_ASM) {
-		memcpy(&s, rawp + i->off + i->ref, sizeof(s));
+		memcpy(&s, rawp + i->offset + i->reference, sizeof(s));
 		return s & GPRS;
 	}
 	if (ro & RD_R) s |= m(i->rd);
@@ -160,7 +160,7 @@ __attribute__((noinline)) static record_register_mask reads_slow(const a64_recor
 	if (ro & RM_R) s |= m(i->rm);
 	if (ro & RA_R) s |= m(i->ra);
 	if (ro & OP_CALL)	/* x0-x8: arguments, indirect result (VIR's: the arguments it passes) */
-		s |= i->cond == A64_CALL_ARGUMENT_REGISTERS && (i->op == A64_OP_BL || i->op == A64_OP_BLR) ? (record_register_mask)i->sh : RB(9) - 1;
+		s |= i->condition == A64_CALL_ARGUMENT_REGISTERS && (i->opcode == A64_OP_BL || i->opcode == A64_OP_BLR) ? (record_register_mask)i->shift : RB(9) - 1;
 	if (ro & OP_RET)
 		s |= retreads;
 	if (ro & OP_TAIL)
@@ -173,7 +173,7 @@ __attribute__((noinline)) static record_register_mask writes_slow(const a64_reco
 	record_register_mask s = 0;
 
 	if (ro & OP_ASM) {
-		memcpy(&s, rawp + i->off + i->ref + sizeof(s), sizeof(s));
+		memcpy(&s, rawp + i->offset + i->reference + sizeof(s), sizeof(s));
 		return s & GPRS;
 	}
 	if (ro & RD_W) s |= m(i->rd);
@@ -182,7 +182,7 @@ __attribute__((noinline)) static record_register_mask writes_slow(const a64_reco
 	if (ro & OP_CALL)
 		s |= CALLW;
 	if (ro & OP_TLV)
-		s |= i->cond ? RB(0) | RB(1) | RB(30) : RB(0) | RB(16) | RB(30);
+		s |= i->condition ? RB(0) | RB(1) | RB(30) : RB(0) | RB(16) | RB(30);
 	return s;
 }
 
@@ -264,28 +264,28 @@ static bool liveness(codegen_context *e)
 
 		for (uint32_t k = 0; k < n; k++) {
 			const a64_record *i = &in[k];
-			unsigned ro = roles(i), bk = BT[i->op];
+			unsigned ro = roles(i), bk = BT[i->opcode];
 
 			rop[k] = (uint16_t)ro;
 			rr[k] = reads(i, ro), ww[k] = writes(i, ro);
 			if (bk == BR_INDIRECT)
 				return false;
-			if (bk - BR_UNCOND <= BR_COND - BR_UNCOND || (i->op == A64_OP_LABEL && (e->label_reference_counts[i->label] & CODEGEN_LABEL_EXTERNAL)))
+			if (bk - BR_UNCOND <= BR_COND - BR_UNCOND || (i->opcode == A64_OP_LABEL && (e->label_reference_counts[i->label] & CODEGEN_LABEL_EXTERNAL)))
 				lpos[i->label] = UINT32_MAX;
 		}
 	}
 	for (uint32_t k = 0, prev = BR_UNCOND; k < n; k++) {
 		const a64_record *i = &in[k];
 
-		if (prev != BR_NONE || (i->op == A64_OP_LABEL && W.lpos[i->label])) {
+		if (prev != BR_NONE || (i->opcode == A64_OP_LABEL && W.lpos[i->label])) {
 			if (nb)
 				W.be[nb - 1] = k - 1;
 			W.bs[nb++] = k;
 		}
 		W.blk[k] = nb - 1;
-		if (i->op == A64_OP_LABEL)
+		if (i->opcode == A64_OP_LABEL)
 			W.lpos[i->label] = nb;	/* the label's block + 1 */
-		prev = BT[i->op];
+		prev = BT[i->opcode];
 	}
 	if (!n)
 		return false;
@@ -365,7 +365,7 @@ static void rewrite(a64_record *i, unsigned ro, int t, int v)
 
 static bool is_copy(const a64_record *i)
 {
-	return i->op == A64_OP_MOV && i->sz == 1 && i->rd < 64 && i->rn < 64 && i->rd != i->rn &&
+	return i->opcode == A64_OP_MOV && i->size == 1 && i->rd < 64 && i->rn < 64 && i->rd != i->rn &&
 	       (COPYOK & RB(i->rd)) && (COPYOK & RB(i->rn));
 }
 
@@ -397,7 +397,7 @@ static bool backward(codegen_context *e, uint32_t k)
 		unsigned ro;
 		record_register_mask r, w;
 
-		if (i->op == DELETED)
+		if (i->opcode == DELETED)
 			continue;
 		ro = W.ro[j];
 		if (ro & (OP_ALL | OP_CALL))
@@ -412,7 +412,7 @@ static bool backward(codegen_context *e, uint32_t k)
 			W.ww[j] = RB(v);
 			for (uint32_t q = j; q < k; q++)
 				W.la[q] |= RB(v);
-			in[k].op = DELETED;
+			in[k].opcode = DELETED;
 			return true;
 		}
 		if ((r & RB(t)) || ((r | w) & RB(v)))
@@ -463,19 +463,19 @@ static void *grow_to(void *p, uint32_t *cap, uint32_t n, size_t sz)
 /* the load at i, its value taken from register r instead (the slot holds r's low bits) */
 static void load_from_reg(a64_record *i, int r)
 {
-	int sz = i->sz, ex = i->cond;
+	int sz = i->size, ex = i->condition;
 	a64_record n = { .rd = i->rd, .rn = (uint8_t)r };
 
 	if (r == ZR) {
-		n.op = A64_OP_MOVI, n.sz = 1, n.rn = 0, n.imm = 0;
+		n.opcode = A64_OP_MOVI, n.size = 1, n.rn = 0, n.immediate = 0;
 	} else if (sz == 3) {
-		n.op = A64_OP_MOV, n.sz = 1;
+		n.opcode = A64_OP_MOV, n.size = 1;
 	} else if (sz == 2 && ex != 1) {
-		n.op = A64_OP_MOV, n.sz = 0;	/* ldr w: zero-extended */
+		n.opcode = A64_OP_MOV, n.size = 0;	/* ldr w: zero-extended */
 	} else {
-		n.op = ex ? A64_OP_SBFM : A64_OP_UBFM;
-		n.sz = ex == 2 ? 0 : 1;	/* 2: sign-extended into w */
-		n.imm = 0, n.sh = (uint8_t)(sz == 0 ? 7 : sz == 1 ? 15 : 31);
+		n.opcode = ex ? A64_OP_SBFM : A64_OP_UBFM;
+		n.size = ex == 2 ? 0 : 1;	/* 2: sign-extended into w */
+		n.immediate = 0, n.shift = (uint8_t)(sz == 0 ? 7 : sz == 1 ? 15 : 31);
 	}
 	*i = n;
 }
@@ -493,14 +493,14 @@ static void slots(codegen_context *e)
 		const a64_record *i = &in[k];
 		uint32_t id;
 
-		if (i->rn != A64_REGISTER_FRAME || i->op == DELETED)
+		if (i->rn != A64_REGISTER_FRAME || i->opcode == DELETED)
 			continue;
 		id = CODEGEN_SLOT_TAG(i);
-		if (i->op == A64_OP_LD || i->op == A64_OP_ST) {
-			record_slot_collect(cells, id, i->imm, 1u << i->sz);
-		} else if (i->op == A64_OP_LDF || i->op == A64_OP_STF) {
+		if (i->opcode == A64_OP_LD || i->opcode == A64_OP_ST) {
+			record_slot_collect(cells, id, i->immediate, 1u << i->size);
+		} else if (i->opcode == A64_OP_LDF || i->opcode == A64_OP_STF) {
 			/* an FP register's access: no value to track, so its object is one the pass leaves alone */
-			record_slot_collect(cells, id, i->imm, 1u << i->sz);
+			record_slot_collect(cells, id, i->immediate, 1u << i->size);
 			if (id)
 				record_slot_escape(cells, id);
 		} else {
@@ -520,9 +520,9 @@ static void slots(codegen_context *e)
 		uint32_t id, cell;
 
 		SL.rc[k] = -1;
-		if (i->rn != A64_REGISTER_FRAME || (i->op != A64_OP_LD && i->op != A64_OP_ST) || !(id = CODEGEN_SLOT_TAG(i)))
+		if (i->rn != A64_REGISTER_FRAME || (i->opcode != A64_OP_LD && i->opcode != A64_OP_ST) || !(id = CODEGEN_SLOT_TAG(i)))
 			continue;
-		cell = record_slot_find(cells, id, i->imm, 1u << i->sz);
+		cell = record_slot_find(cells, id, i->immediate, 1u << i->size);
 		if (!(cells->flags[cell] & RECORD_SLOT_BAD))
 			SL.rc[k] = (int32_t)cell;
 	}
@@ -535,13 +535,13 @@ static void slots(codegen_context *e)
 		for (uint32_t k = W.bs[b]; k <= W.be[b]; k++) {
 			a64_record *i = &in[k];
 			int32_t ci = SL.rc[k];
-			record_slot_value *a = ci >= 0 ? record_slot_value_get(&SL.values, (uint32_t)ci, gen, i->op == A64_OP_LD) : NULL;
+			record_slot_value *a = ci >= 0 ? record_slot_value_get(&SL.values, (uint32_t)ci, gen, i->opcode == A64_OP_LD) : NULL;
 			bool esc = ci >= 0 && (cells->flags[ci] & RECORD_SLOT_ESCAPED);
 			record_register_mask w;
 
-			if (i->op == DELETED)
+			if (i->opcode == DELETED)
 				continue;
-			if (a && i->op == A64_OP_LD) {
+			if (a && i->opcode == A64_OP_LD) {
 				uint32_t version = a->value < ZR ? ver[a->value] : a->version;
 
 				if (record_slot_value_is_available(a, version, mver, esc)) {
@@ -555,8 +555,8 @@ static void slots(codegen_context *e)
 					W.ro[k] = (uint16_t)roles(i);
 					W.rr[k] = reads(i, W.ro[k]);
 					SL.rc[k] = -1;
-					if (i->op == A64_OP_MOV && i->sz == 1 && i->rd == i->rn) {
-						i->op = DELETED;
+					if (i->opcode == A64_OP_MOV && i->size == 1 && i->rd == i->rn) {
+						i->opcode = DELETED;
 						continue;
 					}
 				}
@@ -566,18 +566,18 @@ static void slots(codegen_context *e)
 			for (; w; w &= w - 1)
 				ver[__builtin_ctzll(w)]++;
 			if (SL.rc[k] < 0) {
-				if (i->op == A64_OP_ST || i->op == A64_OP_STX || i->op == A64_OP_STLO || i->op == A64_OP_STP || i->op == A64_OP_STF || i->op == A64_OP_BL || i->op == A64_OP_BLR ||
-				    i->op == A64_OP_TLV || i->op == A64_OP_RAW || W.rr[k] == GPRS)
+				if (i->opcode == A64_OP_ST || i->opcode == A64_OP_STX || i->opcode == A64_OP_STLO || i->opcode == A64_OP_STP || i->opcode == A64_OP_STF || i->opcode == A64_OP_BL || i->opcode == A64_OP_BLR ||
+				    i->opcode == A64_OP_TLV || i->opcode == A64_OP_RAW || W.rr[k] == GPRS)
 					mver++;	/* may write an escaped cell */
 				continue;
 			}
-			uint32_t overwritten = record_slot_value_note(a, i->op == A64_OP_LD, esc, i->rd,
+			uint32_t overwritten = record_slot_value_note(a, i->opcode == A64_OP_LD, esc, i->rd,
 				i->rd == ZR ? 0 : ver[i->rd], mver, k);
 
-			if (i->op == A64_OP_ST)
+			if (i->opcode == A64_OP_ST)
 				SL.rc[nst++] = (int32_t)k; /* rc of earlier records is done with */
 			if (overwritten != RECORD_SLOT_NO_STORE)
-				in[overwritten].op = DELETED;
+				in[overwritten].opcode = DELETED;
 		}
 	}
 	/* a cell no load reads: its stores go */
@@ -585,11 +585,11 @@ static void slots(codegen_context *e)
 		a64_record *i = &in[SL.rc[q]];
 		uint32_t cell = CODEGEN_SLOT_TAG(i);
 
-		if (i->op != A64_OP_ST)
+		if (i->opcode != A64_OP_ST)
 			continue;	/* (deleted meanwhile) */
-		cell = record_slot_find(cells, cell, i->imm, 1u << i->sz);
+		cell = record_slot_find(cells, cell, i->immediate, 1u << i->size);
 		if (record_slot_value_is_dead(&SL.values, cell, cells->flags[cell] & RECORD_SLOT_ESCAPED))
-			i->op = DELETED;
+			i->opcode = DELETED;
 	}
 }
 
@@ -630,23 +630,23 @@ static inline unsigned sbits(int64_t v) { return 64 - (unsigned)__builtin_clrsbl
 /* the record's result: its z and s, or false if nothing is known of it */
 static bool xresult(const xf *f, const a64_record *i, unsigned *zo, unsigned *so)
 {
-	int rn = i->rn, rm = i->rm, x = i->sz;
+	int rn = i->rn, rm = i->rm, x = i->size;
 	unsigned z = XU, s = XU, w = x ? 64 : 32;
 	unsigned zn = xz(f, rn), sn = xs(f, rn);
 
-	switch (i->op) {
+	switch (i->opcode) {
 	case A64_OP_LD: case A64_OP_LDX: case A64_OP_LDLO:
-		if (i->sz == 3)
+		if (i->size == 3)
 			return false;
-		if (i->cond == 0)
-			z = 8u << i->sz;
-		else if (i->cond == 1)
-			s = 8u << i->sz;
+		if (i->condition == 0)
+			z = 8u << i->size;
+		else if (i->condition == 1)
+			s = 8u << i->size;
 		else
 			z = 32;	/* sign-extended into w */
 		goto done;
 	case A64_OP_MOVI: {
-		uint64_t v = x ? (uint64_t)i->imm : (uint32_t)i->imm;
+		uint64_t v = x ? (uint64_t)i->immediate : (uint32_t)i->immediate;
 
 		z = zbits(v), s = sbits((int64_t)v);
 		goto done;
@@ -668,7 +668,7 @@ static bool xresult(const xf *f, const a64_record *i, unsigned *zo, unsigned *so
 		z = umax(zn, xz(f, rm)), s = umax(sn, xs(f, rm));
 		break;
 	case A64_OP_UBFM: {
-		unsigned r = (unsigned)i->imm, h = i->sh;
+		unsigned r = (unsigned)i->immediate, h = i->shift;
 
 		if (h >= r)	/* bits r..h to 0 (lsr, ubfx) */
 			z = umin(h - r + 1, zn > r ? zn - r : 0);
@@ -677,7 +677,7 @@ static bool xresult(const xf *f, const a64_record *i, unsigned *zo, unsigned *so
 		break;
 	}
 	case A64_OP_SBFM: {
-		unsigned r = (unsigned)i->imm, h = i->sh;
+		unsigned r = (unsigned)i->immediate, h = i->shift;
 
 		if (r == 0) {	/* sxt: bits 0..h */
 			if (zn < h + 1)
@@ -693,7 +693,7 @@ static bool xresult(const xf *f, const a64_record *i, unsigned *zo, unsigned *so
 		break;
 	}
 	case A64_OP_ANDI: {
-		uint64_t v = x ? (uint64_t)i->imm : (uint32_t)i->imm;
+		uint64_t v = x ? (uint64_t)i->immediate : (uint32_t)i->immediate;
 
 		z = umin(zn, zbits(v));
 		if (x && (int64_t)v < 0 && zbits(~v) < sn)
@@ -701,22 +701,22 @@ static bool xresult(const xf *f, const a64_record *i, unsigned *zo, unsigned *so
 		break;
 	}
 	case A64_OP_AND: case A64_OP_ORR: case A64_OP_EOR:
-		if (i->sh)
+		if (i->shift)
 			break;
-		if (i->op == A64_OP_AND)
+		if (i->opcode == A64_OP_AND)
 			z = umin(zn, xz(f, rm));
 		else
 			z = umax(zn, xz(f, rm));
 		s = umax(sn, xs(f, rm));
 		break;
 	case A64_OP_ORRI: case A64_OP_EORI: {
-		uint64_t v = x ? (uint64_t)i->imm : (uint32_t)i->imm;
+		uint64_t v = x ? (uint64_t)i->immediate : (uint32_t)i->immediate;
 
 		z = umax(zn, zbits(v)), s = umax(sn, sbits((int64_t)v));
 		break;
 	}
 	case A64_OP_ADD:
-		if (i->sh || i->cond)	/* (shifted, or rm extended, cond 8 + option: nothing known) */
+		if (i->shift || i->condition)	/* (shifted, or rm extended, cond 8 + option: nothing known) */
 			break;
 		{
 			unsigned a = umax(zn, xz(f, rm)), b = umax(sn, xs(f, rm));
@@ -725,11 +725,11 @@ static bool xresult(const xf *f, const a64_record *i, unsigned *zo, unsigned *so
 		}
 		break;
 	case A64_OP_ADDI: case A64_OP_SUBI: {
-		int64_t v = i->imm;
+		int64_t v = i->immediate;
 
 		if (v == INT64_MIN)
 			break;
-		if (i->op == A64_OP_SUBI)
+		if (i->opcode == A64_OP_SUBI)
 			v = -v;
 		if (v >= 0) {
 			unsigned a = umax(zn, zbits((uint64_t)v));
@@ -758,7 +758,7 @@ static bool xresult(const xf *f, const a64_record *i, unsigned *zo, unsigned *so
 		z = 7;
 		break;
 	default:
-		if (x || i->op == A64_OP_ADRP || i->op == A64_OP_ADR || i->op == A64_OP_LDGOT || i->op == A64_OP_MRS || i->op == A64_OP_RAW)
+		if (x || i->opcode == A64_OP_ADRP || i->opcode == A64_OP_ADR || i->opcode == A64_OP_LDGOT || i->opcode == A64_OP_MRS || i->opcode == A64_OP_RAW)
 			return false;
 		break;	/* another 32-bit operation: its upper half is zero */
 	}
@@ -788,18 +788,18 @@ static bool xredundant(const xf *f, const a64_record *i)
 
 	if (rn >= 31)
 		return false;
-	switch (i->op) {
+	switch (i->opcode) {
 	case A64_OP_UBFM:
-		return i->imm == 0 && zn <= (unsigned)i->sh + 1u;
+		return i->immediate == 0 && zn <= (unsigned)i->shift + 1u;
 	case A64_OP_SBFM:
-		return i->imm == 0 && (zn < (unsigned)i->sh + 1u || (i->sz && sn <= (unsigned)i->sh + 1u));
+		return i->immediate == 0 && (zn < (unsigned)i->shift + 1u || (i->size && sn <= (unsigned)i->shift + 1u));
 	case A64_OP_MOV:
-		return !i->sz && zn <= 32;
+		return !i->size && zn <= 32;
 	case A64_OP_ANDI: {
-		uint64_t v = i->sz ? (uint64_t)i->imm : (uint32_t)i->imm;
+		uint64_t v = i->size ? (uint64_t)i->immediate : (uint32_t)i->immediate;
 		uint64_t lo = zn >= 64 ? ~0ull : (1ull << zn) - 1;
 
-		return zn <= (i->sz ? 64u : 32u) && (v & lo) == lo;
+		return zn <= (i->size ? 64u : 32u) && (v & lo) == lo;
 	}
 	default:
 		return false;
@@ -829,7 +829,7 @@ static void xblock(codegen_context *e, uint32_t b, xf *f, uint8_t *red)
 		unsigned z, s;
 		int rd = i->rd;
 
-		if (i->op == DELETED)
+		if (i->opcode == DELETED)
 			continue;
 		if (W.rr[k] == GPRS) {	/* OP_ALL */
 			memset(f, XU, sizeof(*f));
@@ -837,7 +837,7 @@ static void xblock(codegen_context *e, uint32_t b, xf *f, uint8_t *red)
 		}
 		if (!W.ww[k])
 			continue;
-		if (XT[i->op])
+		if (XT[i->opcode])
 			red[k] = (uint8_t)xredundant(f, i);
 		if (W.ww[k] == RB(rd) && rd < 31 && (COPYOK & RB(rd)) && xresult(f, i, &z, &s)) {
 			f->z[rd] = (uint8_t)z, XS(f)[rd] = (uint8_t)s;
@@ -857,7 +857,7 @@ static void exts(codegen_context *e)
 	for (uint32_t k = 0; k < n; k++) {
 		const a64_record *i = &e->records[k];
 
-		nc += XT[i->op] && (i->op == A64_OP_ANDI || (i->op == A64_OP_MOV ? !i->sz : !i->imm));
+		nc += XT[i->opcode] && (i->opcode == A64_OP_ANDI || (i->opcode == A64_OP_MOV ? !i->size : !i->immediate));
 	}
 	if (!nc)
 		return;	/* no extension to find redundant */
@@ -873,7 +873,7 @@ static void exts(codegen_context *e)
 	for (uint32_t b = 0; b < nb; b++) {
 		const a64_record *l = &e->records[W.bs[b]];
 
-		XF.vis[b] = b == 0 || (l->op == A64_OP_LABEL && (e->label_reference_counts[l->label] & CODEGEN_LABEL_EXTERNAL)) ? 2 : 0;
+		XF.vis[b] = b == 0 || (l->opcode == A64_OP_LABEL && (e->label_reference_counts[l->label] & CODEGEN_LABEL_EXTERNAL)) ? 2 : 0;
 		if (XF.vis[b])
 			memset(&XF.in[b], XU, sizeof(xf));
 	}
@@ -929,8 +929,8 @@ static void exts(codegen_context *e)
 		if (XF.red[k]) {
 			a64_record *i = &e->records[k];
 
-			i->op = i->rd == i->rn ? DELETED : A64_OP_MOV;
-			i->sz = 1;
+			i->opcode = i->rd == i->rn ? DELETED : A64_OP_MOV;
+			i->size = 1;
 		}
 }
 
@@ -939,7 +939,7 @@ static void exts(codegen_context *e)
 /* an instruction with no effect but its rd (no flags, memory, traps) */
 static bool pure(const a64_record *i)
 {
-	switch (i->op) {
+	switch (i->opcode) {
 	case A64_OP_ADD: case A64_OP_SUB: case A64_OP_AND: case A64_OP_ORR: case A64_OP_EOR: case A64_OP_BIC: case A64_OP_ORN: case A64_OP_ADC: case A64_OP_SBC:
 	case A64_OP_ADDI: case A64_OP_SUBI: case A64_OP_ANDI: case A64_OP_ORRI: case A64_OP_EORI:
 	case A64_OP_MOVI: case A64_OP_MOV: case A64_OP_MADD: case A64_OP_MSUB: case A64_OP_SMADDL: case A64_OP_UMADDL:
@@ -974,10 +974,10 @@ static void dead(codegen_context *e)
 		for (uint32_t k = W.be[b] + 1; k-- > W.bs[b];) {
 			a64_record *i = &in[k];
 
-			if (i->op == DELETED)
+			if (i->opcode == DELETED)
 				continue;
 			if (i->rd < 29 && !(live & RB(i->rd)) && pure(i)) {
-				i->op = DELETED;
+				i->opcode = DELETED;
 				continue;
 			}
 			live = (live & ~W.ww[k]) | W.rr[k];
@@ -1029,11 +1029,11 @@ VPRIV uint64_t a64_registers_used(codegen_context *e, unsigned *fl)
 		unsigned ro;
 		record_register_mask r, w;
 
-		if (i->op == A64_OP_JT) {	/* (OP_ALL for the clean-ups, which do not follow it; its registers are known) */
+		if (i->opcode == A64_OP_JT) {	/* (OP_ALL for the clean-ups, which do not follow it; its registers are known) */
 			u |= RBT[i->rd] | RB(16) | RB(17);
 			continue;
 		}
-		if (i->op == A64_OP_WORD && e->vir_lowering && a64_word_registers((uint32_t)i->imm, &r)) {
+		if (i->opcode == A64_OP_WORD && e->vir_lowering && a64_word_registers((uint32_t)i->immediate, &r)) {
 			u |= r;	/* (VIR's lowering: FP, vector and system instructions with their registers in them) */
 			continue;
 		}
@@ -1070,17 +1070,17 @@ VPRIV bool a64_function_is_frameless(codegen_context *e, uint32_t n)
 		unsigned ro;
 		record_register_mask r;
 
-		if (i->op == A64_OP_JT)
+		if (i->opcode == A64_OP_JT)
 			continue;	/* (its index is not callee-saved: the registers before it are checked) */
-		if (i->op == A64_OP_WORD) {
-			if (!a64_word_registers((uint32_t)i->imm, &r) || (r & (RB(31) - RB(19))))
+		if (i->opcode == A64_OP_WORD) {
+			if (!a64_word_registers((uint32_t)i->immediate, &r) || (r & (RB(31) - RB(19))))
 				return false;
 			continue;
 		}
 		ro = roles(i);
 		if ((ro & (OP_ALL | OP_CALL | OP_ASM | OP_TLV)) || i->rn == A64_REGISTER_FRAME || i->rn == SP || i->rd == SP)
 			return false;
-		if (i->op == A64_OP_TAIL && i->cond >= 2 && !i->sh)
+		if (i->opcode == A64_OP_TAIL && i->condition >= 2 && !i->shift)
 			return false;
 		if ((reads(i, ro) | writes(i, ro)) & (RB(31) - RB(19)))
 			return false;
@@ -1103,24 +1103,24 @@ typedef struct fdef { int kind, src, sh, opt, bits; } fdef;	/* FD_EXT: option (0
 
 static fdef fclass(const a64_record *d)
 {
-	int w = d->sz ? 64 : 32, r = (int)d->imm, s = d->sh;
+	int w = d->size ? 64 : 32, r = (int)d->immediate, s = d->shift;
 
-	if (d->op == A64_OP_UBFM && s != w - 1 && r == (s + 1) % w)
+	if (d->opcode == A64_OP_UBFM && s != w - 1 && r == (s + 1) % w)
 		return (fdef){ FD_LSL, d->rn, w - 1 - s, 0, 0 };
-	if ((d->op == A64_OP_UBFM || d->op == A64_OP_SBFM) && s == w - 1 && r > 0)
-		return (fdef){ d->op == A64_OP_UBFM ? FD_LSR : FD_ASR, d->rn, r, 0, 0 };
-	if ((d->op == A64_OP_UBFM || d->op == A64_OP_SBFM) && (s == 7 || s == 15 || (s == 31 && d->sz))) {
-		int sg = d->op == A64_OP_SBFM ? 4 : 0, o = sg | (s == 7 ? 0 : s == 15 ? 1 : 2);
+	if ((d->opcode == A64_OP_UBFM || d->opcode == A64_OP_SBFM) && s == w - 1 && r > 0)
+		return (fdef){ d->opcode == A64_OP_UBFM ? FD_LSR : FD_ASR, d->rn, r, 0, 0 };
+	if ((d->opcode == A64_OP_UBFM || d->opcode == A64_OP_SBFM) && (s == 7 || s == 15 || (s == 31 && d->size))) {
+		int sg = d->opcode == A64_OP_SBFM ? 4 : 0, o = sg | (s == 7 ? 0 : s == 15 ? 1 : 2);
 
 		if (r == 0)
 			return (fdef){ FD_EXT, d->rn, 0, o, s + 1 };
 		if (r > s && w - r <= 4)	/* sbfiz/ubfiz: the field moved up by w - r */
 			return (fdef){ FD_EXT, d->rn, w - r, o, s + 1 };
 	}
-	if (d->op == A64_OP_MOV && !d->sz && d->rn < 31)
+	if (d->opcode == A64_OP_MOV && !d->size && d->rn < 31)
 		return (fdef){ FD_EXT, d->rn, 0, 2, 32 };
-	if (d->op == A64_OP_ANDI && (d->imm == 0xff || d->imm == 0xffff))
-		return (fdef){ FD_EXT, d->rn, 0, d->imm == 0xff ? 0 : 1, d->imm == 0xff ? 8 : 16 };
+	if (d->opcode == A64_OP_ANDI && (d->immediate == 0xff || d->immediate == 0xffff))
+		return (fdef){ FD_EXT, d->rn, 0, d->immediate == 0xff ? 0 : 1, d->immediate == 0xff ? 8 : 16 };
 	return (fdef){ FD_NONE, 0, 0, 0, 0 };
 }
 
@@ -1132,7 +1132,7 @@ static fdef fclass(const a64_record *d)
 /* record i is one instruction of exactly its own registers: it cannot rebuild x16/x17 */
 static bool fplain(const a64_record *i)
 {
-	switch (i->op) {
+	switch (i->opcode) {
 	case A64_OP_ADD: case A64_OP_SUB: case A64_OP_ADDS: case A64_OP_SUBS: case A64_OP_AND: case A64_OP_ORR: case A64_OP_EOR: case A64_OP_ANDS:
 	case A64_OP_BIC: case A64_OP_ORN: case A64_OP_ADC: case A64_OP_SBC: case A64_OP_ADCS: case A64_OP_SBCS:
 	case A64_OP_MOV: case A64_OP_MADD: case A64_OP_MSUB: case A64_OP_SMADDL: case A64_OP_UMADDL:
@@ -1142,9 +1142,9 @@ static bool fplain(const a64_record *i)
 	case A64_OP_LDX: case A64_OP_STX: case A64_OP_MOVI: case A64_OP_LABEL:
 		return i->rn < 32 && i->rd < 32;
 	case A64_OP_ADDI: case A64_OP_SUBI: case A64_OP_ADDSI: case A64_OP_SUBSI:
-		return i->rn < 32 && i->rd < 32 && i->imm > -4096 && i->imm < 4096;
+		return i->rn < 32 && i->rd < 32 && i->immediate > -4096 && i->immediate < 4096;
 	case A64_OP_LD: case A64_OP_ST:	/* (an offset both the scaled and the unscaled form reach whatever the size) */
-		return i->rn < 32 && i->imm >= 0 && i->imm < 256;
+		return i->rn < 32 && i->immediate >= 0 && i->immediate < 256;
 	default:
 		return false;
 	}
@@ -1160,7 +1160,7 @@ static int32_t fdefof(codegen_context *e, uint32_t k, int r)
 	if (r >= 29 || ((W.la[k] & RB(r)) && !(W.ww[k] & RB(r))))
 		return -1;
 	for (uint32_t j = k; j-- > lo && n < 32;) {
-		if (in[j].op == DELETED)
+		if (in[j].opcode == DELETED)
 			continue;
 		n++;
 		if (W.ro[j] & OP_SLOW)
@@ -1181,7 +1181,7 @@ static const a64_record *fwriter(codegen_context *e, uint32_t k, int r)
 	bool scr = false;
 
 	for (uint32_t j = k; j-- > lo && n < 32;) {	/* (bounded, as fdefof) */
-		if (e->records[j].op == DELETED)
+		if (e->records[j].opcode == DELETED)
 			continue;
 		n++;
 		if (W.ro[j] & OP_SLOW)
@@ -1197,7 +1197,7 @@ static const a64_record *fwriter(codegen_context *e, uint32_t k, int r)
 static bool fkept(codegen_context *e, uint32_t d, uint32_t k, record_register_mask src)
 {
 	for (uint32_t j = d + 1; j < k; j++)
-		if (e->records[j].op != DELETED && ((W.ww[j] & src) || ((src & FSCR) && !fplain(&e->records[j]))))
+		if (e->records[j].opcode != DELETED && ((W.ww[j] & src) || ((src & FSCR) && !fplain(&e->records[j]))))
 			return false;
 	return true;
 }
@@ -1207,7 +1207,7 @@ static void fdone(codegen_context *e, uint32_t d, uint32_t k)
 	a64_record *in = e->records;
 	record_register_mask src = W.rr[d];
 
-	in[d].op = DELETED;
+	in[d].opcode = DELETED;
 	W.rr[d] = W.ww[d] = 0;
 	W.ro[k] = (uint16_t)roles(&in[k]);
 	W.rr[k] = reads(&in[k], W.ro[k]);
@@ -1222,15 +1222,15 @@ static bool fold1(codegen_context *e, uint32_t k)
 {
 	a64_record *in = e->records, *i = &in[k];
 	int32_t d;
-	int w = i->sz ? 64 : 32;
+	int w = i->size ? 64 : 32;
 
-	switch (i->op) {
+	switch (i->opcode) {
 	case A64_OP_ADD: case A64_OP_SUB: case A64_OP_ADDS: case A64_OP_SUBS: case A64_OP_AND: case A64_OP_ORR: case A64_OP_EOR: case A64_OP_ANDS:
 	case A64_OP_BIC: case A64_OP_ORN: {
-		bool as = i->op <= A64_OP_SUBS, comm = i->op == A64_OP_ADD || i->op == A64_OP_ADDS || i->op == A64_OP_AND || i->op == A64_OP_ORR ||
-							i->op == A64_OP_EOR || i->op == A64_OP_ANDS;
+		bool as = i->opcode <= A64_OP_SUBS, comm = i->opcode == A64_OP_ADD || i->opcode == A64_OP_ADDS || i->opcode == A64_OP_AND || i->opcode == A64_OP_ORR ||
+							i->opcode == A64_OP_EOR || i->opcode == A64_OP_ANDS;
 
-		if (i->sh || i->cond || i->rd >= 32 || i->rn >= 32 || i->rn == i->rm)
+		if (i->shift || i->condition || i->rd >= 32 || i->rn >= 32 || i->rn == i->rm)
 			return false;
 		for (int side = 0; side < 2; side++) {
 			int r = side ? i->rn : i->rm;
@@ -1243,41 +1243,41 @@ static bool fold1(codegen_context *e, uint32_t k)
 			fdef f = fclass(di);
 
 			/* madd/msub: the product's register read once */
-			if ((di->op == A64_OP_MADD || di->op == A64_OP_SMADDL || di->op == A64_OP_UMADDL) && di->ra == ZR &&
-			    (di->op == A64_OP_MADD ? di->sz == i->sz : i->sz) && (i->op == A64_OP_ADD || (i->op == A64_OP_SUB && !side))) {
+			if ((di->opcode == A64_OP_MADD || di->opcode == A64_OP_SMADDL || di->opcode == A64_OP_UMADDL) && di->ra == ZR &&
+			    (di->opcode == A64_OP_MADD ? di->size == i->size : i->size) && (i->opcode == A64_OP_ADD || (i->opcode == A64_OP_SUB && !side))) {
 				int a = side ? i->rm : i->rn;
 
 				if (a >= 31 && a != ZR)
 					continue;
 				if (!fkept(e, (uint32_t)d, k, RB(di->rn) | RB(di->rm)))
 					continue;
-				if (di->op != A64_OP_MADD && i->op == A64_OP_SUB)
+				if (di->opcode != A64_OP_MADD && i->opcode == A64_OP_SUB)
 					continue;
-				*i = (a64_record){ .op = di->op == A64_OP_MADD ? (i->op == A64_OP_ADD ? A64_OP_MADD : A64_OP_MSUB) : di->op, .sz = i->sz,
+				*i = (a64_record){ .opcode = di->opcode == A64_OP_MADD ? (i->opcode == A64_OP_ADD ? A64_OP_MADD : A64_OP_MSUB) : di->opcode, .size = i->size,
 					    .rd = i->rd, .rn = di->rn, .rm = di->rm, .ra = (uint8_t)a };
 				fdone(e, (uint32_t)d, k);
 				return true;
 			}
 			/* (an extension into w that zero-extends serves an x reader too) */
 			if (f.kind == FD_NONE || !fgpr(f.src) || !fkept(e, (uint32_t)d, k, RB(f.src)) ||
-			    (di->sz != i->sz && (f.kind != FD_EXT || di->sz || (f.opt & 4))))
+			    (di->size != i->size && (f.kind != FD_EXT || di->size || (f.opt & 4))))
 				continue;
 			if (f.kind == FD_EXT) {
 				/* extended register: add/sub only; zr as rn (or rd without flags) would be sp */
-				if (!as || f.sh > 4 || i->rn == ZR || (i->rd == ZR && (i->op == A64_OP_ADD || i->op == A64_OP_SUB)) ||
-				    (!i->sz && (f.opt & 3) == 2) || (side && i->op != A64_OP_ADD && i->op != A64_OP_ADDS))
+				if (!as || f.sh > 4 || i->rn == ZR || (i->rd == ZR && (i->opcode == A64_OP_ADD || i->opcode == A64_OP_SUB)) ||
+				    (!i->size && (f.opt & 3) == 2) || (side && i->opcode != A64_OP_ADD && i->opcode != A64_OP_ADDS))
 					continue;
 				if (side)
 					i->rn = i->rm;
 				i->rm = (uint8_t)f.src;
-				i->cond = (uint8_t)(8 + f.opt);
-				i->sh = (uint8_t)f.sh;
+				i->condition = (uint8_t)(8 + f.opt);
+				i->shift = (uint8_t)f.sh;
 			} else {
 				if (side)
 					i->rn = i->rm;
 				i->rm = (uint8_t)f.src;
-				i->cond = (uint8_t)(f.kind - FD_LSL);
-				i->sh = (uint8_t)f.sh;
+				i->condition = (uint8_t)(f.kind - FD_LSL);
+				i->shift = (uint8_t)f.sh;
 			}
 			fdone(e, (uint32_t)d, k);
 			return true;
@@ -1287,49 +1287,49 @@ static bool fold1(codegen_context *e, uint32_t k)
 	case A64_OP_LD: case A64_OP_ST: {
 		int r = i->rn;
 
-		if (i->imm || (i->op == A64_OP_ST && i->rd == r) || (d = fdefof(e, k, r)) < 0)
+		if (i->immediate || (i->opcode == A64_OP_ST && i->rd == r) || (d = fdefof(e, k, r)) < 0)
 			return false;
 		const a64_record *di = &in[d];
 		int ix;
 
-		if (di->op != A64_OP_ADD || !di->sz || di->rd >= 31 || di->rn >= 31 || !fgpr(di->rm) ||
-		    (di->sh && di->sh != i->sz))
+		if (di->opcode != A64_OP_ADD || !di->size || di->rd >= 31 || di->rn >= 31 || !fgpr(di->rm) ||
+		    (di->shift && di->shift != i->size))
 			return false;
-		if (di->cond == 0 || di->cond == 8 + 3 || di->cond == 8 + 7)
+		if (di->condition == 0 || di->condition == 8 + 3 || di->condition == 8 + 7)
 			ix = 3;	/* lsl */
-		else if (di->cond == 8 + 6 || di->cond == 8 + 2)
-			ix = di->cond - 8;	/* sxtw, uxtw */
+		else if (di->condition == 8 + 6 || di->condition == 8 + 2)
+			ix = di->condition - 8;	/* sxtw, uxtw */
 		else
 			return false;
 		if (!fkept(e, (uint32_t)d, k, RB(di->rn) | RB(di->rm)))
 			return false;
-		i->op = i->op == A64_OP_LD ? A64_OP_LDX : A64_OP_STX;
+		i->opcode = i->opcode == A64_OP_LD ? A64_OP_LDX : A64_OP_STX;
 		i->rn = di->rn;
 		i->rm = di->rm;
 		i->ra = (uint8_t)ix;
-		i->sh = di->sh != 0;
+		i->shift = di->shift != 0;
 		fdone(e, (uint32_t)d, k);
 		return true;
 	}
 	case A64_OP_MADD: {	/* of two sign (zero) extended words: smaddl (umaddl) */
 		int32_t d2;
 
-		if (!i->sz || i->rn == i->rm || i->ra == i->rn || i->ra == i->rm)
+		if (!i->size || i->rn == i->rm || i->ra == i->rn || i->ra == i->rm)
 			return false;
 		for (int side = 0; side < 2; side++) {	/* one of them a constant word */
 			int r = side ? i->rn : i->rm, c = side ? i->rm : i->rn;
 			const a64_record *mk = fwriter(e, k, c);
 
-			if ((d = fdefof(e, k, r)) < 0 || !mk || mk->op != A64_OP_MOVI || !fgpr(c))
+			if ((d = fdefof(e, k, r)) < 0 || !mk || mk->opcode != A64_OP_MOVI || !fgpr(c))
 				continue;
 			fdef f = fclass(&in[d]);
-			int64_t v = mk->sz ? mk->imm : (int64_t)(uint32_t)mk->imm;
+			int64_t v = mk->size ? mk->immediate : (int64_t)(uint32_t)mk->immediate;
 
-			if (f.kind != FD_EXT || f.sh || (f.opt & 3) != 2 || !in[d].sz || !fgpr(f.src) ||
+			if (f.kind != FD_EXT || f.sh || (f.opt & 3) != 2 || !in[d].size || !fgpr(f.src) ||
 			    !(f.opt & 4 ? v >= INT32_MIN && v <= INT32_MAX : v >= 0 && v <= UINT32_MAX) ||
 			    !fkept(e, (uint32_t)d, k, RB(f.src)) || in[d].rd == c)
 				continue;
-			i->op = f.opt & 4 ? A64_OP_SMADDL : A64_OP_UMADDL;
+			i->opcode = f.opt & 4 ? A64_OP_SMADDL : A64_OP_UMADDL;
 			i->rn = (uint8_t)f.src;
 			i->rm = (uint8_t)c;
 			fdone(e, (uint32_t)d, k);
@@ -1340,7 +1340,7 @@ static bool fold1(codegen_context *e, uint32_t k)
 		fdef f = fclass(&in[d]), g = fclass(&in[d2]);
 
 		if (f.kind != FD_EXT || g.kind != FD_EXT || f.sh || g.sh || f.opt != g.opt || (f.opt & 3) != 2 ||
-		    !in[d].sz || !in[d2].sz || !fgpr(f.src) || !fgpr(g.src))
+		    !in[d].size || !in[d2].size || !fgpr(f.src) || !fgpr(g.src))
 			return false;
 		uint32_t lo = d < d2 ? (uint32_t)d : (uint32_t)d2;
 
@@ -1350,7 +1350,7 @@ static bool fold1(codegen_context *e, uint32_t k)
 		/* (the later definition must not read the earlier one's register: it reads its own source) */
 		if (in[d].rd == g.src || in[d2].rd == f.src)
 			return false;
-		i->op = f.opt & 4 ? A64_OP_SMADDL : A64_OP_UMADDL;
+		i->opcode = f.opt & 4 ? A64_OP_SMADDL : A64_OP_UMADDL;
 		i->rn = (uint8_t)f.src;
 		i->rm = (uint8_t)g.src;
 		fdone(e, (uint32_t)d, k);
@@ -1358,7 +1358,7 @@ static bool fold1(codegen_context *e, uint32_t k)
 		return true;
 	}
 	case A64_OP_ANDI: {	/* (x >> k) & (2^n - 1): ubfx */
-		uint64_t m = i->sz ? (uint64_t)i->imm : (uint32_t)i->imm;
+		uint64_t m = i->size ? (uint64_t)i->immediate : (uint32_t)i->immediate;
 		int n;
 
 		if (!m || (m & (m + 1)) || i->rd >= 31 || (d = fdefof(e, k, i->rn)) < 0)
@@ -1366,10 +1366,10 @@ static bool fold1(codegen_context *e, uint32_t k)
 		n = 64 - __builtin_clzll(m);
 		fdef f = fclass(&in[d]);
 
-		if ((f.kind != FD_LSR && f.kind != FD_ASR) || in[d].sz != i->sz || f.sh + n > w || !fgpr(f.src) ||
+		if ((f.kind != FD_LSR && f.kind != FD_ASR) || in[d].size != i->size || f.sh + n > w || !fgpr(f.src) ||
 		    !fkept(e, (uint32_t)d, k, RB(f.src)))
 			return false;
-		*i = (a64_record){ .op = A64_OP_UBFM, .sz = i->sz, .rd = i->rd, .rn = (uint8_t)f.src, .imm = f.sh, .sh = (uint8_t)(f.sh + n - 1) };
+		*i = (a64_record){ .opcode = A64_OP_UBFM, .size = i->size, .rd = i->rd, .rn = (uint8_t)f.src, .immediate = f.sh, .shift = (uint8_t)(f.sh + n - 1) };
 		fdone(e, (uint32_t)d, k);
 		return true;
 	}
@@ -1381,11 +1381,11 @@ static bool fold1(codegen_context *e, uint32_t k)
 		const a64_record *di = &in[d];
 		fdef f = fclass(di);
 
-		if (!fgpr(f.src) || (di->sz != i->sz && (f.kind != FD_EXT || di->sz || (f.opt & 4) || di->op == A64_OP_ANDI)))
+		if (!fgpr(f.src) || (di->size != i->size && (f.kind != FD_EXT || di->size || (f.opt & 4) || di->opcode == A64_OP_ANDI)))
 			return false;
-		if (me.kind == FD_LSL && (f.kind == FD_EXT || (di->op == A64_OP_ANDI && !((uint64_t)di->imm & ((uint64_t)di->imm + 1))))) {
+		if (me.kind == FD_LSL && (f.kind == FD_EXT || (di->opcode == A64_OP_ANDI && !((uint64_t)di->immediate & ((uint64_t)di->immediate + 1))))) {
 			/* (x & (2^n - 1)) << k, an extension << k: ubfiz/sbfiz */
-			int bits = f.kind == FD_EXT ? f.bits : 64 - __builtin_clzll((uint64_t)di->imm), sg;
+			int bits = f.kind == FD_EXT ? f.bits : 64 - __builtin_clzll((uint64_t)di->immediate), sg;
 
 			if (f.kind == FD_EXT && f.sh)
 				return false;
@@ -1397,10 +1397,10 @@ static bool fold1(codegen_context *e, uint32_t k)
 			if (bits >= w - me.sh) {	/* the field fills the rest: just the shift */
 				i->rn = (uint8_t)src;
 			} else {
-				i->op = sg ? A64_OP_SBFM : A64_OP_UBFM;
+				i->opcode = sg ? A64_OP_SBFM : A64_OP_UBFM;
 				i->rn = (uint8_t)src;
-				i->imm = (w - me.sh) % w;
-				i->sh = (uint8_t)(bits - 1);
+				i->immediate = (w - me.sh) % w;
+				i->shift = (uint8_t)(bits - 1);
 			}
 			fdone(e, (uint32_t)d, k);
 			return true;
@@ -1410,8 +1410,8 @@ static bool fold1(codegen_context *e, uint32_t k)
 			if (!fkept(e, (uint32_t)d, k, RB(f.src)))
 				return false;
 			i->rn = (uint8_t)f.src;
-			i->imm = me.sh - f.sh;
-			i->sh = (uint8_t)(w - 1 - f.sh);
+			i->immediate = me.sh - f.sh;
+			i->shift = (uint8_t)(w - 1 - f.sh);
 			fdone(e, (uint32_t)d, k);
 			return true;
 		}
@@ -1432,14 +1432,14 @@ static bool fconst(codegen_context *e, uint32_t k)
 	a64_record *in = e->records, *i = &in[k];
 	int32_t d;
 
-	switch (i->op) {
+	switch (i->opcode) {
 	case A64_OP_ST: case A64_OP_STX: case A64_OP_STP:
 		for (int q = 0; q < 2; q++) {
 			int r = q ? i->ra : i->rd;
 
-			if ((q && i->op != A64_OP_STP) || r >= 31 || r == i->rn || (i->op == A64_OP_STX && r == i->rm) ||
-			    (i->op == A64_OP_STP && i->rd == i->ra) || (d = fdefof(e, k, r)) < 0 || in[d].op != A64_OP_MOVI ||
-			    ((uint64_t)in[d].imm & (i->op == A64_OP_STP || i->sz == 3 ? ~0ull : ((1ull << (8 << i->sz)) - 1))))
+			if ((q && i->opcode != A64_OP_STP) || r >= 31 || r == i->rn || (i->opcode == A64_OP_STX && r == i->rm) ||
+			    (i->opcode == A64_OP_STP && i->rd == i->ra) || (d = fdefof(e, k, r)) < 0 || in[d].opcode != A64_OP_MOVI ||
+			    ((uint64_t)in[d].immediate & (i->opcode == A64_OP_STP || i->size == 3 ? ~0ull : ((1ull << (8 << i->size)) - 1))))
 				continue;
 			if (q)
 				i->ra = ZR;
@@ -1450,24 +1450,24 @@ static bool fconst(codegen_context *e, uint32_t k)
 		}
 		return false;
 	case A64_OP_ADD: case A64_OP_SUB: case A64_OP_ADDS: case A64_OP_SUBS: case A64_OP_AND: case A64_OP_ORR: case A64_OP_EOR: case A64_OP_ANDS: {
-		bool as = i->op <= A64_OP_SUBS, comm = i->op != A64_OP_SUB && i->op != A64_OP_SUBS;
+		bool as = i->opcode <= A64_OP_SUBS, comm = i->opcode != A64_OP_SUB && i->opcode != A64_OP_SUBS;
 
-		if (i->sh || i->cond || i->rn >= 31 || i->rn == i->rm || (i->rd == ZR && (i->op == A64_OP_ADD || i->op == A64_OP_SUB ||
-		    i->op == A64_OP_AND || i->op == A64_OP_ORR || i->op == A64_OP_EOR)) || i->rd >= 32)
+		if (i->shift || i->condition || i->rn >= 31 || i->rn == i->rm || (i->rd == ZR && (i->opcode == A64_OP_ADD || i->opcode == A64_OP_SUB ||
+		    i->opcode == A64_OP_AND || i->opcode == A64_OP_ORR || i->opcode == A64_OP_EOR)) || i->rd >= 32)
 			return false;
 		for (int side = 0; side < 2; side++) {
 			int r = side ? i->rn : i->rm, a = side ? i->rm : i->rn;
 
-			if ((side && !comm) || r >= 31 || a >= 31 || (d = fdefof(e, k, r)) < 0 || in[d].op != A64_OP_MOVI)
+			if ((side && !comm) || r >= 31 || a >= 31 || (d = fdefof(e, k, r)) < 0 || in[d].opcode != A64_OP_MOVI)
 				continue;
-			int64_t v = i->sz ? in[d].imm : (int64_t)(int32_t)in[d].imm, u = v < 0 ? -v : v;
+			int64_t v = i->size ? in[d].immediate : (int64_t)(int32_t)in[d].immediate, u = v < 0 ? -v : v;
 			static const uint8_t to[] = { [A64_OP_ADD] = A64_OP_ADDI, [A64_OP_SUB] = A64_OP_SUBI, [A64_OP_ADDS] = A64_OP_ADDSI, [A64_OP_SUBS] = A64_OP_SUBSI,
 						      [A64_OP_AND] = A64_OP_ANDI, [A64_OP_ORR] = A64_OP_ORRI, [A64_OP_EOR] = A64_OP_EORI, [A64_OP_ANDS] = A64_OP_ANDSI };
 
-			if (as ? v == INT64_MIN || !(u < 4096 || (!(u & 0xfff) && u < (1 << 24))) || (i->sz == 0 && u > 0x7fffffff)
-			       : !a64_logical_immediate_is_encodable(i->sz ? (uint64_t)v : (uint32_t)v, i->sz))
+			if (as ? v == INT64_MIN || !(u < 4096 || (!(u & 0xfff) && u < (1 << 24))) || (i->size == 0 && u > 0x7fffffff)
+			       : !a64_logical_immediate_is_encodable(i->size ? (uint64_t)v : (uint32_t)v, i->size))
 				continue;
-			*i = (a64_record){ .op = to[i->op], .sz = i->sz, .rd = i->rd, .rn = (uint8_t)a, .imm = as ? v : (i->sz ? v : (int64_t)(uint32_t)v) };
+			*i = (a64_record){ .opcode = to[i->opcode], .size = i->size, .rd = i->rd, .rn = (uint8_t)a, .immediate = as ? v : (i->size ? v : (int64_t)(uint32_t)v) };
 			fdone(e, (uint32_t)d, k);
 			return true;
 		}
@@ -1486,23 +1486,23 @@ static bool fconst(codegen_context *e, uint32_t k)
 static void fmulk(codegen_context *e, uint32_t k)
 {
 	a64_record *in = e->records, *i = &in[k];
-	int w = i->sz ? 64 : 32;
+	int w = i->size ? 64 : 32;
 
-	if (i->op != A64_OP_MADD || i->ra != ZR || i->rd >= 31 || i->rn == i->rm)
+	if (i->opcode != A64_OP_MADD || i->ra != ZR || i->rd >= 31 || i->rn == i->rm)
 		return;
 	for (int side = 0; side < 2; side++) {
 		int r = side ? i->rn : i->rm, a = side ? i->rm : i->rn;
 		int32_t d = fdefof(e, k, r);
-		uint64_t c, m = i->sz ? ~0ull : 0xffffffffull;
+		uint64_t c, m = i->size ? ~0ull : 0xffffffffull;
 		int n, sh;
 
-		if (d < 0 || in[d].op != A64_OP_MOVI || !fgpr(a))
+		if (d < 0 || in[d].opcode != A64_OP_MOVI || !fgpr(a))
 			continue;
-		c = (uint64_t)in[d].imm & m;
+		c = (uint64_t)in[d].immediate & m;
 		if (!c)
 			continue;
 		if (c == m) {	/* -1: neg */
-			*i = (a64_record){ .op = A64_OP_SUB, .sz = i->sz, .rd = i->rd, .rn = ZR, .rm = (uint8_t)a };
+			*i = (a64_record){ .opcode = A64_OP_SUB, .size = i->size, .rd = i->rd, .rn = ZR, .rm = (uint8_t)a };
 			fdone(e, (uint32_t)d, k);
 			return;
 		}
@@ -1511,7 +1511,7 @@ static void fmulk(codegen_context *e, uint32_t k)
 		if (c > 1 && !((c - 1) & (c - 2)) && sh < w) {	/* (2^n + 1) << sh */
 			n = __builtin_ctzll(c - 1);
 			if (!sh) {
-				*i = (a64_record){ .op = A64_OP_ADD, .sz = i->sz, .rd = i->rd, .rn = (uint8_t)a, .rm = (uint8_t)a, .sh = (uint8_t)n };
+				*i = (a64_record){ .opcode = A64_OP_ADD, .size = i->size, .rd = i->rd, .rn = (uint8_t)a, .rm = (uint8_t)a, .shift = (uint8_t)n };
 				fdone(e, (uint32_t)d, k);
 				return;
 			}
@@ -1524,11 +1524,11 @@ static void fmulk(codegen_context *e, uint32_t k)
 		if (!fkept(e, (uint32_t)d, k, RB(a)) || !(W.la[d] & RB(a)))
 			continue;
 		if (sh) {	/* add r, a, a, lsl n; lsl d, r, sh */
-			in[d] = (a64_record){ .op = A64_OP_ADD, .sz = i->sz, .rd = (uint8_t)r, .rn = (uint8_t)a, .rm = (uint8_t)a, .sh = (uint8_t)n };
-			*i = (a64_record){ .op = A64_OP_UBFM, .sz = i->sz, .rd = i->rd, .rn = (uint8_t)r, .imm = (w - sh) % w, .sh = (uint8_t)(w - 1 - sh) };
+			in[d] = (a64_record){ .opcode = A64_OP_ADD, .size = i->size, .rd = (uint8_t)r, .rn = (uint8_t)a, .rm = (uint8_t)a, .shift = (uint8_t)n };
+			*i = (a64_record){ .opcode = A64_OP_UBFM, .size = i->size, .rd = i->rd, .rn = (uint8_t)r, .immediate = (w - sh) % w, .shift = (uint8_t)(w - 1 - sh) };
 		} else {	/* lsl r, a, n; sub d, r, a */
-			in[d] = (a64_record){ .op = A64_OP_UBFM, .sz = i->sz, .rd = (uint8_t)r, .rn = (uint8_t)a, .imm = (w - n) % w, .sh = (uint8_t)(w - 1 - n) };
-			*i = (a64_record){ .op = A64_OP_SUB, .sz = i->sz, .rd = i->rd, .rn = (uint8_t)r, .rm = (uint8_t)a };
+			in[d] = (a64_record){ .opcode = A64_OP_UBFM, .size = i->size, .rd = (uint8_t)r, .rn = (uint8_t)a, .immediate = (w - n) % w, .shift = (uint8_t)(w - 1 - n) };
+			*i = (a64_record){ .opcode = A64_OP_SUB, .size = i->size, .rd = i->rd, .rn = (uint8_t)r, .rm = (uint8_t)a };
 		}
 		W.ro[d] = (uint16_t)roles(&in[d]);
 		W.rr[d] = reads(&in[d], W.ro[d]);
@@ -1559,15 +1559,15 @@ static bool fbytes(codegen_context *e, uint32_t j, int r, int s, int sz, fbyte *
 	const a64_record *di = &in[d];
 
 	ch[(*nch)++] = (uint32_t)d;
-	if (di->op == A64_OP_LD) {
-		if (di->sz || di->rn >= 31 || di->ra == A64_LOAD_VOLATILE || *nb >= FB_MAX || (s & 7))
+	if (di->opcode == A64_OP_LD) {
+		if (di->size || di->rn >= 31 || di->ra == A64_LOAD_VOLATILE || *nb >= FB_MAX || (s & 7))
 			return false;
-		b[(*nb)++] = (fbyte){ (uint32_t)d, di->rn, di->imm, s, di->cond };
+		b[(*nb)++] = (fbyte){ (uint32_t)d, di->rn, di->immediate, s, di->condition };
 		return true;
 	}
-	if (di->sz > sz)
+	if (di->size > sz)
 		return false;
-	if (di->sz < sz) {	/* a w value in an x one: zero above bit 31, if its bytes stay below */
+	if (di->size < sz) {	/* a w value in an x one: zero above bit 31, if its bytes stay below */
 		int n0 = *nb;
 
 		if (!fbytes(e, j, r, 0, 0, b, nb, ch, nch))	/* (d in ch twice: harmless) */
@@ -1578,9 +1578,9 @@ static bool fbytes(codegen_context *e, uint32_t j, int r, int s, int sz, fbyte *
 		}
 		return true;
 	}
-	if (di->op == A64_OP_ORR && !di->cond && di->rn != di->rm)
+	if (di->opcode == A64_OP_ORR && !di->condition && di->rn != di->rm)
 		return fbytes(e, (uint32_t)d, di->rn, s, sz, b, nb, ch, nch) &&
-		       fbytes(e, (uint32_t)d, di->rm, s + di->sh, sz, b, nb, ch, nch);
+		       fbytes(e, (uint32_t)d, di->rm, s + di->shift, sz, b, nb, ch, nch);
 	fdef f = fclass(di);
 
 	if (f.kind == FD_LSL)
@@ -1593,14 +1593,14 @@ static void fbswap(codegen_context *e, uint32_t k)
 	a64_record *in = e->records, *i = &in[k];
 	fbyte b[FB_MAX];
 	uint32_t ch[FB_CHAIN], first = k, lastld = 0;
-	int nb = 0, nch = 0, n, lg, w = i->sz ? 64 : 32;
+	int nb = 0, nch = 0, n, lg, w = i->size ? 64 : 32;
 	int64_t lo = INT64_MAX;
 	bool le = true, be = true;
 	uint8_t seen = 0;
 
-	if (i->op != A64_OP_ORR || i->cond || i->rd >= 29 || i->rn == i->rm || i->rn >= 31 || i->rm >= 31)
+	if (i->opcode != A64_OP_ORR || i->condition || i->rd >= 29 || i->rn == i->rm || i->rn >= 31 || i->rm >= 31)
 		return;
-	if (!fbytes(e, k, i->rn, 0, i->sz, b, &nb, ch, &nch) || !fbytes(e, k, i->rm, i->sh, i->sz, b, &nb, ch, &nch))
+	if (!fbytes(e, k, i->rn, 0, i->size, b, &nb, ch, &nch) || !fbytes(e, k, i->rm, i->shift, i->size, b, &nb, ch, &nch))
 		return;
 	n = nb;
 	if (n != 2 && n != 4 && n != 8)
@@ -1632,7 +1632,7 @@ static void fbswap(codegen_context *e, uint32_t k)
 
 	for (int q = 0; q < n; q++)
 		if (b[q].sgn) {
-			if (b[q].sh != 8 * (n - 1) || (i->sz && b[q].sgn == 2))
+			if (b[q].sh != 8 * (n - 1) || (i->size && b[q].sgn == 2))
 				return;
 			sgn = 8 * n < w;
 		}
@@ -1640,13 +1640,13 @@ static void fbswap(codegen_context *e, uint32_t k)
 	for (uint32_t j = first; j <= k; j++) {
 		bool inch = j == k;
 
-		if (in[j].op == DELETED)
+		if (in[j].opcode == DELETED)
 			continue;
 		for (int q = 0; q < nch && !inch; q++)
 			inch = ch[q] == j;
 		if (inch)
 			continue;
-		unsigned op = in[j].op;
+		unsigned op = in[j].opcode;
 
 		if ((W.ro[j] & OP_SLOW) || op == A64_OP_ST || op == A64_OP_STX || op == A64_OP_STP || op == A64_OP_STLO || op == A64_OP_STF || op == A64_OP_BL ||
 		    op == A64_OP_BLR || ((W.rr[j] | W.ww[j]) & RB(i->rd)) || (j < lastld && (W.ww[j] & RB(b[0].base))))
@@ -1655,7 +1655,7 @@ static void fbswap(codegen_context *e, uint32_t k)
 	for (int q = 0; q < nch; q++)	/* (a chain load writing the base: the last) */
 		if (ch[q] < lastld && in[ch[q]].rd == b[0].base)
 			return;
-	int rd = i->rd, base = b[0].base, sz = i->sz;
+	int rd = i->rd, base = b[0].base, sz = i->size;
 
 	/* rev (big endian) and the sign extension, the last at k, the rev before it in a
 	 * chain record's place (there are at least three: two loads and an or) */
@@ -1669,23 +1669,23 @@ static void fbswap(codegen_context *e, uint32_t k)
 			return;	/* (cannot happen) */
 	}
 	for (int q = 0; q < nch; q++) {
-		in[ch[q]].op = DELETED;
+		in[ch[q]].opcode = DELETED;
 		W.rr[ch[q]] = W.ww[ch[q]] = 0;
 	}
-	in[first] = (a64_record){ .op = A64_OP_LD, .sz = (uint8_t)lg, .rd = (uint8_t)rd, .rn = (uint8_t)base, .imm = lo };
+	in[first] = (a64_record){ .opcode = A64_OP_LD, .size = (uint8_t)lg, .rd = (uint8_t)rd, .rn = (uint8_t)base, .immediate = lo };
 	W.ro[first] = (uint16_t)roles(&in[first]);
 	W.rr[first] = reads(&in[first], W.ro[first]);
 	W.ww[first] = writes(&in[first], W.ro[first]);
-	in[k].op = DELETED;
+	in[k].opcode = DELETED;
 	W.rr[k] = W.ww[k] = 0;
 	if (!le)
-		in[at[0]] = (a64_record){ .op = n == 2 ? A64_OP_REV16 : A64_OP_REV, .sz = (uint8_t)(n == 8 ? 1 : 0), .rd = (uint8_t)rd, .rn = (uint8_t)rd };
+		in[at[0]] = (a64_record){ .opcode = n == 2 ? A64_OP_REV16 : A64_OP_REV, .size = (uint8_t)(n == 8 ? 1 : 0), .rd = (uint8_t)rd, .rn = (uint8_t)rd };
 	if (sgn)
-		in[k] = (a64_record){ .op = A64_OP_SBFM, .sz = (uint8_t)sz, .rd = (uint8_t)rd, .rn = (uint8_t)rd, .imm = 0, .sh = (uint8_t)(8 * n - 1) };
+		in[k] = (a64_record){ .opcode = A64_OP_SBFM, .size = (uint8_t)sz, .rd = (uint8_t)rd, .rn = (uint8_t)rd, .immediate = 0, .shift = (uint8_t)(8 * n - 1) };
 	for (uint32_t q = 0; q < 2; q++) {
 		uint32_t j = q ? k : at[0];
 
-		if (in[j].op == DELETED)
+		if (in[j].opcode == DELETED)
 			continue;
 		W.ro[j] = (uint16_t)roles(&in[j]);
 		W.rr[j] = reads(&in[j], W.ro[j]);
@@ -1698,16 +1698,16 @@ static void fbswap(codegen_context *e, uint32_t k)
 static void fold(codegen_context *e)
 {
 	for (uint32_t k = 0; k < e->record_count; k++)
-		if (e->records[k].op != DELETED)
+		if (e->records[k].opcode != DELETED)
 			for (int n = 0; n < 4 && fold1(e, k); n++)
 				;
 	for (uint32_t k = e->record_count; k-- > 0;)
-		if (e->records[k].op != DELETED)
+		if (e->records[k].opcode != DELETED)
 			fbswap(e, k);
 	for (uint32_t k = 0; k < e->record_count; k++)
-		if (e->records[k].op != DELETED) {
+		if (e->records[k].opcode != DELETED) {
 			fmulk(e, k);
-			if (e->records[k].op != DELETED)
+			if (e->records[k].opcode != DELETED)
 				fconst(e, k);
 		}
 }
@@ -1749,12 +1749,12 @@ static void flags(codegen_context *e)
 	for (uint32_t l = 0; l < nl; l++)
 		ls[l] = NOCMP, lp[l] = UINT32_MAX;
 	for (uint32_t k = 0; k < e->record_count; k++)
-		if (in[k].op == A64_OP_LABEL)
+		if (in[k].opcode == A64_OP_LABEL)
 			lp[in[k].label] = k;
 	for (uint32_t l = 0; l < nl; l++)	/* (ls: branched to yet; NOCMP below means "nothing came") */
 		ls[l] = e->label_reference_counts[l] & CODEGEN_LABEL_EXTERNAL ? MIXED : NOCMP - 2;
 	for (uint32_t k = 0; k < e->record_count; k++) {	/* a label something branches back to: nothing known at it */
-		int bk = in[k].op == DELETED ? BR_NONE : brkind(&in[k]);
+		int bk = in[k].opcode == DELETED ? BR_NONE : brkind(&in[k]);
 
 		if ((bk == BR_COND || bk == BR_UNCOND) && in[k].label < nl && lp[in[k].label] <= k)
 			ls[in[k].label] = MIXED;
@@ -1764,9 +1764,9 @@ static void flags(codegen_context *e)
 		unsigned ro;
 		int bk;
 
-		if (i->op == DELETED)
+		if (i->opcode == DELETED)
 			continue;
-		if (i->op == A64_OP_LABEL) {
+		if (i->opcode == A64_OP_LABEL) {
 			uint32_t w = ls[i->label];
 
 			if (w == NOCMP - 2)	/* only falling through */
@@ -1778,22 +1778,22 @@ static void flags(codegen_context *e)
 			fall = true;
 			continue;
 		}
-		if (sets_flags(i->op) && i->rd == ZR) {
+		if (sets_flags(i->opcode) && i->rd == ZR) {
 			uint32_t j = k;
 
-			while (j && in[j - 1].op == DELETED)
+			while (j && in[j - 1].opcode == DELETED)
 				j--;
 			if (c != NOCMP && !memcmp(&in[c], i, sizeof *i))
-				i->op = DELETED;
-			else if (j && in[j - 1].op == (i->op == A64_OP_SUBS ? A64_OP_SUB : i->op == A64_OP_SUBSI ? A64_OP_SUBI : DELETED) &&
-				 in[j - 1].rd < 31 && in[j - 1].rd != i->rn && (i->op == A64_OP_SUBSI || in[j - 1].rd != i->rm)) {
+				i->opcode = DELETED;
+			else if (j && in[j - 1].opcode == (i->opcode == A64_OP_SUBS ? A64_OP_SUB : i->opcode == A64_OP_SUBSI ? A64_OP_SUBI : DELETED) &&
+				 in[j - 1].rd < 31 && in[j - 1].rd != i->rn && (i->opcode == A64_OP_SUBSI || in[j - 1].rd != i->rm)) {
 				/* the subtraction just before it, of the same operands: that one sets the flags */
 				a64_record t = in[j - 1];
 
-				t.op = i->op, t.rd = ZR;
+				t.opcode = i->opcode, t.rd = ZR;
 				if (!memcmp(&t, i, sizeof t)) {
-					in[j - 1].op = i->op;
-					i->op = DELETED;
+					in[j - 1].opcode = i->opcode;
+					i->opcode = DELETED;
 					c = NOCMP;
 				} else
 					c = k;
@@ -1804,12 +1804,12 @@ static void flags(codegen_context *e)
 		}
 		ro = roles(i);
 		bk = brkind(i);
-		if (c != NOCMP && (sets_flags(i->op) || (ro & OP_SLOW) || (writes(i, ro) & reads(&in[c], roles(&in[c])))))
+		if (c != NOCMP && (sets_flags(i->opcode) || (ro & OP_SLOW) || (writes(i, ro) & reads(&in[c], roles(&in[c])))))
 			c = NOCMP;
-		if ((bk == BR_COND || bk == BR_UNCOND || i->op == A64_OP_ADR) && i->label < nl) {
+		if ((bk == BR_COND || bk == BR_UNCOND || i->opcode == A64_OP_ADR) && i->label < nl) {
 			uint32_t *w = &ls[i->label];
 
-			if (i->op == A64_OP_ADR || lp[i->label] < k || c == NOCMP)
+			if (i->opcode == A64_OP_ADR || lp[i->label] < k || c == NOCMP)
 				*w = MIXED;
 			else if (*w == NOCMP - 2)
 				*w = c;
@@ -1829,19 +1829,19 @@ static void copies(codegen_context *e)
 {
 	a64_record *in = e->records;
 	const record_copy_scan scan = {
-		.records = in, .stride = sizeof(a64_record), .op_offset = offsetof(a64_record, op), .deleted_op = DELETED,
+		.records = in, .stride = sizeof(a64_record), .op_offset = offsetof(a64_record, opcode), .deleted_op = DELETED,
 		.flags = W.ro, .flags_stride = sizeof(*W.ro), .opaque_mask = OP_ALL,
 		.read = W.rr, .write = W.ww, .live = W.la, .rewrite = a64_copy_rewrite, .ctx = e,
 	};
 
 	for (uint32_t k = 0; k < e->record_count; k++) {
-		if (in[k].op == A64_OP_MOV && in[k].sz == 1 && in[k].rd == in[k].rn && in[k].rd < 31) {
-			in[k].op = DELETED;	/* mov x, x */
+		if (in[k].opcode == A64_OP_MOV && in[k].size == 1 && in[k].rd == in[k].rn && in[k].rd < 31) {
+			in[k].opcode = DELETED;	/* mov x, x */
 			continue;
 		}
 		if (is_copy(&in[k])) {
 			if (!(W.la[k] & RB(in[k].rd)) && in[k].rd != 29 && in[k].rd != 30)
-				in[k].op = DELETED;	/* dead */
+				in[k].opcode = DELETED;	/* dead */
 			else if (TEMPS & RB(in[k].rd))
 				record_copy_forward(&scan, k, W.be[W.blk[k]], in[k].rd, in[k].rn);
 		}
@@ -1892,9 +1892,9 @@ VPRIV void rp_count(codegen_context *e, int pass)
 	if (pass != A64_RECORD_PASS_FUNCTION) {
 		if (e->record_count == rp_n) {
 			for (uint32_t k = 0; k < rp_n; k++) {
-				if (rp_buf[k].op == DELETED)
+				if (rp_buf[k].opcode == DELETED)
 					continue;
-				if (e->records[k].op == DELETED)
+				if (e->records[k].opcode == DELETED)
 					rm++;
 				else if (memcmp(&rp_buf[k], &e->records[k], sizeof(a64_record)))
 					ch++;
@@ -1952,13 +1952,13 @@ VPRIV void opt_function(codegen_context *e)
 	/* a temporary saved around a call and dead after its restore: neither */
 	A64_RECORD_PASS_BEGIN(e);
 	for (uint32_t k = 0; k < e->record_count; k++)
-		if (in[k].op == A64_OP_LD && in[k].sh == A64_SPILL_RECORD && !(W.la[k] & RB(in[k].rd))) {
+		if (in[k].opcode == A64_OP_LD && in[k].shift == A64_SPILL_RECORD && !(W.la[k] & RB(in[k].rd))) {
 			for (uint32_t j = k; j-- > W.bs[W.blk[k]];)
-				if (in[j].op == A64_OP_ST && in[j].sh == A64_SPILL_RECORD && in[j].rd == in[k].rd && in[j].imm == in[k].imm) {
-					in[j].op = DELETED;
+				if (in[j].opcode == A64_OP_ST && in[j].shift == A64_SPILL_RECORD && in[j].rd == in[k].rd && in[j].immediate == in[k].immediate) {
+					in[j].opcode = DELETED;
 					break;
 				}
-			in[k].op = DELETED;
+			in[k].opcode = DELETED;
 		}
 	A64_RECORD_PASS_END(e, A64_RECORD_PASS_SPILL_PAIRS);
 	/* copies first, so slots sees the registers values really stay in */
@@ -1990,7 +1990,7 @@ VPRIV void opt_function(codegen_context *e)
 	for (uint32_t k = 0; k < e->record_count; k++) {
 		if (e->debug_row_count)
 			codegen_debug_rows_remap(e, &dj, k, n);
-		if (in[k].op != DELETED)
+		if (in[k].opcode != DELETED)
 			in[n++] = in[k];
 	}
 	if (e->debug_row_count)

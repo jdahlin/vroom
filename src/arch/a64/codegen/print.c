@@ -67,13 +67,13 @@ static const char a64_load_names[2][4][3][8] = {
 };
 static const char a64_store_names[2][4][8] = { { "strb", "strh", "str", "str" }, { "sturb", "sturh", "stur", "stur" } };
 
-static inline int a64_print_load_is_wide(const a64_record *i) { return i->sz == 3 || ((i->op == A64_OP_LD || i->op == A64_OP_LDX || i->op == A64_OP_LDLO) && i->cond == 1); }
+static inline int a64_print_load_is_wide(const a64_record *i) { return i->size == 3 || ((i->opcode == A64_OP_LD || i->opcode == A64_OP_LDX || i->opcode == A64_OP_LDLO) && i->condition == 1); }
 
 static void a64_print_memory(tbuf *b, const a64_record *i)
 {
-	int64_t off = i->imm;
-	int sz = i->sz, scaled, base = i->rn;
-	int x = i->op == A64_OP_ST ? sz == 3 : a64_print_load_is_wide(i), v = i->op == A64_OP_LDF || i->op == A64_OP_STF;
+	int64_t off = i->immediate;
+	int sz = i->size, scaled, base = i->rn;
+	int x = i->opcode == A64_OP_ST ? sz == 3 : a64_print_load_is_wide(i), v = i->opcode == A64_OP_LDF || i->opcode == A64_OP_STF;
 
 	scaled = off >= 0 && (off & ((1 << sz) - 1)) == 0 && (off >> sz) < 4096;
 	if (!scaled && !(off >= -256 && off < 256)) {
@@ -86,10 +86,10 @@ static void a64_print_memory(tbuf *b, const a64_record *i)
 		scaled = 1;
 	}
 	vtext_char_append(b, '\t');
-	if (i->op == A64_OP_ST || i->op == A64_OP_STF)
+	if (i->opcode == A64_OP_ST || i->opcode == A64_OP_STF)
 		vtext_name_append(b, a64_store_names[!scaled][sz]);
 	else
-		vtext_name_append(b, a64_load_names[!scaled][sz][v ? 0 : i->cond]);
+		vtext_name_append(b, a64_load_names[!scaled][sz][v ? 0 : i->condition]);
 	vtext_char_append(b, '\t');
 	if (v) {
 		vtext_char_append(b, sz == 3 ? 'd' : 's');
@@ -124,17 +124,17 @@ static void a64_print_three_registers(tbuf *b, const char *mn, const a64_record 
 	vtext_char_append(b, '\t');
 	vtext_name_append(b, mn);
 	vtext_char_append(b, '\t');
-	a64_register_name_append(b, i->rd, i->sz);
+	a64_register_name_append(b, i->rd, i->size);
 	vtext_string_append(b, ", ");
-	a64_register_name_append(b, i->rn, i->sz);
+	a64_register_name_append(b, i->rn, i->size);
 	vtext_string_append(b, ", ");
-	a64_register_name_append(b, i->rm, i->sz);
+	a64_register_name_append(b, i->rm, i->size);
 }
 
 static void a64_print_add_immediate(tbuf *b, const a64_record *i)
 {
-	int op = i->op;
-	int64_t v = i->imm;
+	int op = i->opcode;
+	int64_t v = i->immediate;
 	bool flags = op == A64_OP_ADDSI || op == A64_OP_SUBSI;
 	bool sub = op == A64_OP_SUBI || op == A64_OP_SUBSI;
 
@@ -142,7 +142,7 @@ static void a64_print_add_immediate(tbuf *b, const a64_record *i)
 		v = -v;
 		sub = !sub;
 	}
-	if (!i->sz)
+	if (!i->size)
 		v &= 0xffffffff;
 	if (v >= 0 && (v < 4096 || ((v & 0xfff) == 0 && v < (1 << 24)) || (!flags && v < (1 << 24)))) {
 		const char *mn = sub ? (flags ? "subs" : "sub") : (flags ? "adds" : "add");
@@ -150,29 +150,29 @@ static void a64_print_add_immediate(tbuf *b, const a64_record *i)
 
 		if (v >= 4096 && (v & 0xfff)) {
 			vtext_char_append(b, '\t'), vtext_string_append(b, mn), vtext_char_append(b, '\t');
-			a64_register_name_append(b, i->rd, i->sz);
+			a64_register_name_append(b, i->rd, i->size);
 			vtext_string_append(b, ", ");
-			a64_register_name_append(b, rn, i->sz);
+			a64_register_name_append(b, rn, i->size);
 			vtext_string_append(b, ", #"), vtext_signed_append(b, v >> 12), vtext_string_append(b, ", lsl #12\n");
 			rn = i->rd;
 			v &= 0xfff;
 		}
 		vtext_char_append(b, '\t'), vtext_string_append(b, mn), vtext_char_append(b, '\t');
-		a64_register_name_append(b, i->rd, i->sz);
+		a64_register_name_append(b, i->rd, i->size);
 		vtext_string_append(b, ", ");
-		a64_register_name_append(b, rn, i->sz);
+		a64_register_name_append(b, rn, i->size);
 		if ((v & 0xfff) == 0 && v)
 			vtext_string_append(b, ", #"), vtext_signed_append(b, v >> 12), vtext_string_append(b, ", lsl #12\n");
 		else
 			vtext_string_append(b, ", #"), vtext_signed_append(b, v), vtext_char_append(b, '\n');
 		return;
 	}
-	a64_print_move_immediate(b, R_X17, i->sz, (uint64_t)v);
+	a64_print_move_immediate(b, R_X17, i->size, (uint64_t)v);
 	vtext_char_append(b, '\t'), vtext_string_append(b, sub ? (flags ? "subs" : "sub") : (flags ? "adds" : "add")), vtext_char_append(b, '\t');
-	a64_register_name_append(b, i->rd, i->sz);
+	a64_register_name_append(b, i->rd, i->size);
 	vtext_string_append(b, ", ");
-	a64_register_name_append(b, i->rn, i->sz);
-	vtext_string_append(b, i->sz ? ", x17\n" : ", w17\n");
+	a64_register_name_append(b, i->rn, i->size);
+	vtext_string_append(b, i->size ? ", x17\n" : ", w17\n");
 }
 
 /* a register name (x0, w30, b1, q7, v31, sp, xzr, ...) */
@@ -197,38 +197,38 @@ static bool a64_print_text_is_register(const char *p, size_t n)
 
 VPRIV void a64_record_print(cc *c, tbuf *b, const a64_record *i, uint32_t fid, const char *raw)
 {
-	switch (i->op) {
+	switch (i->opcode) {
 	case A64_OP_LABEL:
 		a64_print_label(b, fid, i->label);
 		vtext_string_append(b, ":\n");
 		return;
 	case A64_OP_RAW:
-		if (i->cond)	/* inline asm between clang's markers (bench/vcc-fpcheck.py) */
+		if (i->condition)	/* inline asm between clang's markers (bench/vcc-fpcheck.py) */
 			vtext_string_append(b, "\t//APP\n");
-		vtext_append(b, raw + i->off, i->ref);
+		vtext_append(b, raw + i->offset, i->reference);
 		vtext_char_append(b, '\n');
-		if (i->cond)
+		if (i->condition)
 			vtext_string_append(b, "\t//NO_APP\n");
 		return;
 	case A64_OP_ADD: case A64_OP_SUB: case A64_OP_ADDS: case A64_OP_SUBS: case A64_OP_AND: case A64_OP_ORR: case A64_OP_EOR:
 	case A64_OP_ANDS: case A64_OP_BIC: case A64_OP_ORN: case A64_OP_ADC: case A64_OP_SBC: case A64_OP_ADCS: case A64_OP_SBCS:
-		if (i->cond >= 8) {	/* extended register */
+		if (i->condition >= 8) {	/* extended register */
 			static const char xn[8][5] = { "uxtb", "uxth", "uxtw", "uxtx", "sxtb", "sxth", "sxtw", "sxtx" };
-			int o = i->cond - 8;
+			int o = i->condition - 8;
 
-			vtext_char_append(b, '\t'), vtext_name_append(b, a64_alu_names[i->op]), vtext_char_append(b, '\t');
-			a64_register_name_append(b, i->rd, i->sz), vtext_string_append(b, ", ");
-			a64_register_name_append(b, i->rn, i->sz), vtext_string_append(b, ", ");
+			vtext_char_append(b, '\t'), vtext_name_append(b, a64_alu_names[i->opcode]), vtext_char_append(b, '\t');
+			a64_register_name_append(b, i->rd, i->size), vtext_string_append(b, ", ");
+			a64_register_name_append(b, i->rn, i->size), vtext_string_append(b, ", ");
 			a64_register_name_append(b, i->rm, (o & 3) == 3), vtext_string_append(b, ", "), vtext_string_append(b, xn[o]);
-			if (i->sh)
-				vtext_string_append(b, " #"), vtext_unsigned_append(b, i->sh);
+			if (i->shift)
+				vtext_string_append(b, " #"), vtext_unsigned_append(b, i->shift);
 			vtext_char_append(b, '\n');
 			return;
 		}
-		a64_print_three_registers(b, a64_alu_names[i->op], i);
-		if (i->sh) {
-			vtext_string_append(b, i->cond == 0 ? ", lsl #" : i->cond == 1 ? ", lsr #" : ", asr #");
-			vtext_unsigned_append(b, i->sh);
+		a64_print_three_registers(b, a64_alu_names[i->opcode], i);
+		if (i->shift) {
+			vtext_string_append(b, i->condition == 0 ? ", lsl #" : i->condition == 1 ? ", lsr #" : ", asr #");
+			vtext_unsigned_append(b, i->shift);
 		}
 		vtext_char_append(b, '\n');
 		return;
@@ -237,68 +237,68 @@ VPRIV void a64_record_print(cc *c, tbuf *b, const a64_record *i, uint32_t fid, c
 		return;
 	case A64_OP_ANDI: case A64_OP_ORRI: case A64_OP_EORI: case A64_OP_ANDSI:
 		vtext_char_append(b, '\t');
-		vtext_name_append(b, a64_alu_names[i->op]);
+		vtext_name_append(b, a64_alu_names[i->opcode]);
 		vtext_char_append(b, '\t');
-		a64_register_name_append(b, i->rd, i->sz);
+		a64_register_name_append(b, i->rd, i->size);
 		vtext_string_append(b, ", ");
-		a64_register_name_append(b, i->rn, i->sz);
+		a64_register_name_append(b, i->rn, i->size);
 		vtext_string_append(b, ", #");
-		vtext_hex_prefixed_append(b, i->sz ? (uint64_t)i->imm : (uint32_t)i->imm);
+		vtext_hex_prefixed_append(b, i->size ? (uint64_t)i->immediate : (uint32_t)i->immediate);
 		vtext_char_append(b, '\n');
 		return;
 	case A64_OP_MOVI:
-		a64_print_move_immediate(b, i->rd, i->sz, (uint64_t)i->imm);
+		a64_print_move_immediate(b, i->rd, i->size, (uint64_t)i->immediate);
 		return;
 	case A64_OP_MOV:
 		vtext_string_append(b, "\tmov\t");
-		a64_register_name_append(b, i->rd, i->sz);
+		a64_register_name_append(b, i->rd, i->size);
 		vtext_string_append(b, ", ");
-		a64_register_name_append(b, i->rn, i->sz);
+		a64_register_name_append(b, i->rn, i->size);
 		vtext_char_append(b, '\n');
 		return;
 	case A64_OP_MADD: case A64_OP_MSUB:
-		a64_print_three_registers(b, a64_alu_names[i->op], i);
+		a64_print_three_registers(b, a64_alu_names[i->opcode], i);
 		vtext_string_append(b, ", ");
-		a64_register_name_append(b, i->ra, i->sz);
+		a64_register_name_append(b, i->ra, i->size);
 		vtext_char_append(b, '\n');
 		return;
 	case A64_OP_SDIV: case A64_OP_UDIV: case A64_OP_SMULH: case A64_OP_UMULH: case A64_OP_LSLV: case A64_OP_LSRV: case A64_OP_ASRV:
-		a64_print_three_registers(b, a64_alu_names[i->op], i);
+		a64_print_three_registers(b, a64_alu_names[i->opcode], i);
 		vtext_char_append(b, '\n');
 		return;
 	case A64_OP_SBFM: case A64_OP_UBFM: case A64_OP_BFM:
 		vtext_char_append(b, '\t');
-		vtext_name_append(b, a64_alu_names[i->op]);
+		vtext_name_append(b, a64_alu_names[i->opcode]);
 		vtext_char_append(b, '\t');
-		a64_register_name_append(b, i->rd, i->sz);
+		a64_register_name_append(b, i->rd, i->size);
 		vtext_string_append(b, ", ");
-		a64_register_name_append(b, i->rn, i->sz);
+		a64_register_name_append(b, i->rn, i->size);
 		vtext_string_append(b, ", #");
-		vtext_unsigned_append(b, (uint64_t)i->imm);
+		vtext_unsigned_append(b, (uint64_t)i->immediate);
 		vtext_string_append(b, ", #");
-		vtext_unsigned_append(b, i->sh);
+		vtext_unsigned_append(b, i->shift);
 		vtext_char_append(b, '\n');
 		return;
 	case A64_OP_CSEL: case A64_OP_CSINC: case A64_OP_CSINV: case A64_OP_CSNEG:
-		a64_print_three_registers(b, a64_alu_names[i->op], i);
+		a64_print_three_registers(b, a64_alu_names[i->opcode], i);
 		vtext_string_append(b, ", ");
-		vtext_name_append(b, a64_condition_names[i->cond]);
+		vtext_name_append(b, a64_condition_names[i->condition]);
 		vtext_char_append(b, '\n');
 		return;
 	case A64_OP_CLZ: case A64_OP_CLS: case A64_OP_RBIT: case A64_OP_REV: case A64_OP_REV16: case A64_OP_REV32:
 		vtext_char_append(b, '\t');
-		vtext_name_append(b, a64_alu_names[i->op]);
+		vtext_name_append(b, a64_alu_names[i->opcode]);
 		vtext_char_append(b, '\t');
-		a64_register_name_append(b, i->rd, i->sz);
+		a64_register_name_append(b, i->rd, i->size);
 		vtext_string_append(b, ", ");
-		a64_register_name_append(b, i->rn, i->sz);
+		a64_register_name_append(b, i->rn, i->size);
 		vtext_char_append(b, '\n');
 		return;
 	case A64_OP_LD: case A64_OP_ST: case A64_OP_LDF: case A64_OP_STF:
 		a64_print_memory(b, i);
 		return;
 	case A64_OP_SMADDL: case A64_OP_UMADDL:
-		vtext_string_append(b, i->op == A64_OP_SMADDL ? "\tsmaddl\t" : "\tumaddl\t");
+		vtext_string_append(b, i->opcode == A64_OP_SMADDL ? "\tsmaddl\t" : "\tumaddl\t");
 		a64_register_name_append(b, i->rd, 1);
 		vtext_string_append(b, ", ");
 		a64_register_name_append(b, i->rn, 0);
@@ -310,47 +310,47 @@ VPRIV void a64_record_print(cc *c, tbuf *b, const a64_record *i, uint32_t fid, c
 		return;
 	case A64_OP_LDX: case A64_OP_STX:
 		vtext_char_append(b, '\t');
-		vtext_name_append(b, i->op == A64_OP_STX ? a64_store_names[0][i->sz] : a64_load_names[0][i->sz][i->cond]);
+		vtext_name_append(b, i->opcode == A64_OP_STX ? a64_store_names[0][i->size] : a64_load_names[0][i->size][i->condition]);
 		vtext_char_append(b, '\t');
-		a64_register_name_append(b, i->rd, i->op == A64_OP_STX ? i->sz == 3 : a64_print_load_is_wide(i));
+		a64_register_name_append(b, i->rd, i->opcode == A64_OP_STX ? i->size == 3 : a64_print_load_is_wide(i));
 		vtext_string_append(b, ", [");
 		a64_register_name_append(b, i->rn, 1);
 		vtext_string_append(b, ", ");
 		a64_register_name_append(b, i->rm, i->ra == 3);
 		if (i->ra != 3)
 			vtext_string_append(b, i->ra == 6 ? ", sxtw" : ", uxtw");
-		else if (i->sh)
+		else if (i->shift)
 			vtext_string_append(b, ", lsl");
-		if (i->sh) {
+		if (i->shift) {
 			vtext_string_append(b, " #");
-			vtext_signed_append(b, i->sz);
+			vtext_signed_append(b, i->size);
 		}
 		vtext_string_append(b, "]\n");
 		return;
 	case A64_OP_LDP: case A64_OP_STP:
-		vtext_string_append(b, i->op == A64_OP_LDP ? "\tldp\t" : "\tstp\t");
+		vtext_string_append(b, i->opcode == A64_OP_LDP ? "\tldp\t" : "\tstp\t");
 		a64_register_name_append(b, i->rd, 1);
 		vtext_string_append(b, ", ");
 		a64_register_name_append(b, i->ra, 1);
 		vtext_string_append(b, ", [");
 		a64_register_name_append(b, i->rn, 1);
-		if (i->cond == 2) {
+		if (i->condition == 2) {
 			vtext_string_append(b, "], #");
-			vtext_signed_append(b, i->imm);
+			vtext_signed_append(b, i->immediate);
 			vtext_char_append(b, '\n');
 		} else {
-			if (i->imm) {
+			if (i->immediate) {
 				vtext_string_append(b, ", #");
-				vtext_signed_append(b, i->imm);
+				vtext_signed_append(b, i->immediate);
 			}
-			vtext_string_append(b, i->cond == 1 ? "]!\n" : "]\n");
+			vtext_string_append(b, i->condition == 1 ? "]!\n" : "]\n");
 		}
 		return;
 	case A64_OP_ADRP:
 		vtext_string_append(b, "\tadrp\t");
 		a64_register_name_append(b, i->rd, 1);
 		vtext_string_append(b, ", ");
-		codegen_reference_offset_append(c, b, i->ref, i->off);
+		codegen_reference_offset_append(c, b, i->reference, i->offset);
 		vtext_char_append(b, '\n');
 		return;
 	case A64_OP_ADDLO:
@@ -359,38 +359,38 @@ VPRIV void a64_record_print(cc *c, tbuf *b, const a64_record *i, uint32_t fid, c
 		vtext_string_append(b, ", ");
 		a64_register_name_append(b, i->rn, 1);
 		vtext_string_append(b, ", :lo12:");
-		codegen_reference_offset_append(c, b, i->ref, i->off);
+		codegen_reference_offset_append(c, b, i->reference, i->offset);
 		vtext_char_append(b, '\n');
 		return;
 	case A64_OP_LDLO: case A64_OP_STLO:
 		vtext_char_append(b, '\t');
-		vtext_string_append(b, i->op == A64_OP_STLO ? a64_store_names[0][i->sz] : a64_load_names[0][i->sz][i->cond]);
+		vtext_string_append(b, i->opcode == A64_OP_STLO ? a64_store_names[0][i->size] : a64_load_names[0][i->size][i->condition]);
 		vtext_char_append(b, '\t');
-		a64_register_name_append(b, i->rd, i->op == A64_OP_STLO ? i->sz == 3 : a64_print_load_is_wide(i));
+		a64_register_name_append(b, i->rd, i->opcode == A64_OP_STLO ? i->size == 3 : a64_print_load_is_wide(i));
 		vtext_string_append(b, ", [");
 		a64_register_name_append(b, i->rn, 1);
 		vtext_string_append(b, ", :lo12:");
-		codegen_reference_offset_append(c, b, i->ref, i->off);
+		codegen_reference_offset_append(c, b, i->reference, i->offset);
 		vtext_string_append(b, "]\n");
 		return;
 	case A64_OP_LDGOT:
 		vtext_string_append(b, "\tadrp\t");
 		a64_register_name_append(b, i->rd, 1);
 		vtext_string_append(b, ", :got:");
-		codegen_reference_name_append(c, b, i->ref);
+		codegen_reference_name_append(c, b, i->reference);
 		vtext_string_append(b, "\n\tldr\t");
 		a64_register_name_append(b, i->rd, 1);
 		vtext_string_append(b, ", [");
 		a64_register_name_append(b, i->rd, 1);
 		vtext_string_append(b, ", :got_lo12:");
-		codegen_reference_name_append(c, b, i->ref);
+		codegen_reference_name_append(c, b, i->reference);
 		vtext_string_append(b, "]\n");
 		return;
 	case A64_OP_JTE:
 		vtext_string_append(b, "\t.word\t");
 		a64_print_label(b, fid, i->label);
 		vtext_char_append(b, '-');
-		a64_print_label(b, fid, i->ref);
+		a64_print_label(b, fid, i->reference);
 		vtext_char_append(b, '\n');
 		return;
 	case A64_OP_ADR:
@@ -407,37 +407,37 @@ VPRIV void a64_record_print(cc *c, tbuf *b, const a64_record *i, uint32_t fid, c
 		return;
 	case A64_OP_BC:
 		vtext_string_append(b, "\tb.");
-		vtext_name_append(b, a64_condition_names[i->cond]);
+		vtext_name_append(b, a64_condition_names[i->condition]);
 		vtext_char_append(b, '\t');
 		a64_print_label(b, fid, i->label);
 		vtext_char_append(b, '\n');
 		return;
 	case A64_OP_CBZ: case A64_OP_CBNZ:
-		vtext_string_append(b, i->op == A64_OP_CBZ ? "\tcbz\t" : "\tcbnz\t");
-		a64_register_name_append(b, i->rd, i->sz);
+		vtext_string_append(b, i->opcode == A64_OP_CBZ ? "\tcbz\t" : "\tcbnz\t");
+		a64_register_name_append(b, i->rd, i->size);
 		vtext_string_append(b, ", ");
 		a64_print_label(b, fid, i->label);
 		vtext_char_append(b, '\n');
 		return;
 	case A64_OP_TBZ: case A64_OP_TBNZ:
-		vtext_string_append(b, i->op == A64_OP_TBZ ? "\ttbz\t" : "\ttbnz\t");
-		a64_register_name_append(b, i->rd, i->sz);
+		vtext_string_append(b, i->opcode == A64_OP_TBZ ? "\ttbz\t" : "\ttbnz\t");
+		a64_register_name_append(b, i->rd, i->size);
 		vtext_string_append(b, ", #");
-		vtext_unsigned_append(b, i->sh);
+		vtext_unsigned_append(b, i->shift);
 		vtext_string_append(b, ", ");
 		a64_print_label(b, fid, i->label);
 		vtext_char_append(b, '\n');
 		return;
 	case A64_OP_TAIL:
-		if (!i->cond)
+		if (!i->condition)
 			return;
 		/* symbol quoting is identical for bl and b. */
 		__attribute__((fallthrough));
 	case A64_OP_BL: {
-		vtext_string_append(b, i->op == A64_OP_TAIL ? "\tb\t" : "\tbl\t");
+		vtext_string_append(b, i->opcode == A64_OP_TAIL ? "\tb\t" : "\tbl\t");
 		size_t at = b->n;
 
-		codegen_reference_name_append(c, b, i->ref);
+		codegen_reference_name_append(c, b, i->reference);
 		if (a64_print_text_is_register(b->p + at, b->n - at)) {
 			/* "bl b1" is a register operand to the assembler (llvm-mc too): quote it */
 			size_t n = b->n - at;
@@ -451,7 +451,7 @@ VPRIV void a64_record_print(cc *c, tbuf *b, const a64_record *i, uint32_t fid, c
 		return;
 	}
 	case A64_OP_BLR: case A64_OP_BR:
-		vtext_string_append(b, i->op == A64_OP_BLR ? "\tblr\t" : "\tbr\t");
+		vtext_string_append(b, i->opcode == A64_OP_BLR ? "\tblr\t" : "\tbr\t");
 		a64_register_name_append(b, i->rn, 1);
 		vtext_char_append(b, '\n');
 		return;
@@ -460,7 +460,7 @@ VPRIV void a64_record_print(cc *c, tbuf *b, const a64_record *i, uint32_t fid, c
 		return;
 	case A64_OP_BRK:
 		vtext_string_append(b, "\tbrk\t#");
-		vtext_hex_prefixed_append(b, (uint64_t)i->imm);
+		vtext_hex_prefixed_append(b, (uint64_t)i->immediate);
 		vtext_char_append(b, '\n');
 		return;
 	case A64_OP_PRFM:
@@ -472,14 +472,14 @@ VPRIV void a64_record_print(cc *c, tbuf *b, const a64_record *i, uint32_t fid, c
 		vtext_string_append(b, "\tmrs\t");
 		a64_register_name_append(b, i->rd, 1);
 		vtext_string_append(b, ", ");
-		vtext_string_append(b, c->strs[i->ref].s);
+		vtext_string_append(b, c->strs[i->reference].s);
 		vtext_char_append(b, '\n');
 		return;
 	case A64_OP_NOP:
 		return;
 	case A64_OP_WORD:
 		vtext_string_append(b, "\t.inst\t");
-		vtext_hex_prefixed_append(b, (uint32_t)i->imm);
+		vtext_hex_prefixed_append(b, (uint32_t)i->immediate);
 		vtext_char_append(b, '\n');
 		return;
 	case A64_OP_TLV: {
@@ -491,11 +491,11 @@ VPRIV void a64_record_print(cc *c, tbuf *b, const a64_record *i, uint32_t fid, c
 			{ "\tadrp\tx0, :tlsdesc:", "\n\tldr\tx1, [x0, :tlsdesc_lo12:", "]\n\tadd\tx0, x0, :tlsdesc_lo12:",
 			  "\n\t.tlsdesccall\t", "\n\tblr\tx1\n\tmrs\tx1, TPIDR_EL0\n\tadd\tx0, x1, x0\n" },
 		};
-		const char *const *q = seq[i->cond < 4 ? i->cond : 0];
+		const char *const *q = seq[i->condition < 4 ? i->condition : 0];
 
 		for (int k = 0; q[k + 1]; k++) {
 			vtext_string_append(b, q[k]);
-			codegen_reference_name_append(c, b, i->ref);
+			codegen_reference_name_append(c, b, i->reference);
 		}
 		for (int k = 0; q[k]; k++)
 			if (!q[k + 1])

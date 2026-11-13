@@ -342,7 +342,7 @@ VPRIV void a64_abi_temporaries_spill(codegen_context *e, a64_abi_spill *s)
 			s->slots[i] = a64_frame_slot_allocate(e, 8, 8);
 			a64_record_emit_memory(e, A64_OP_ST, 3, 0, codegen_temporary_registers[i], A64_REGISTER_FRAME, s->slots[i]);
 			if (e->is_reachable)
-				e->records[e->record_count - 1].sh = A64_SPILL_RECORD;
+				e->records[e->record_count - 1].shift = A64_SPILL_RECORD;
 			s->mask |= 1u << i;
 		}
 }
@@ -353,7 +353,7 @@ VPRIV void a64_abi_temporaries_restore(codegen_context *e, const a64_abi_spill *
 		if (s->mask & (1u << i)) {
 			a64_record_emit_memory(e, A64_OP_LD, 3, 0, codegen_temporary_registers[i], A64_REGISTER_FRAME, s->slots[i]);
 			if (e->is_reachable)
-				e->records[e->record_count - 1].sh = A64_SPILL_RECORD;
+				e->records[e->record_count - 1].shift = A64_SPILL_RECORD;
 		}
 }
 
@@ -375,6 +375,6 @@ VPRIV void a64_call_memory_function_emit(codegen_context *e, int fn, int a0, int
 		a64_record_emit_move(e, 1, 1, a1);
 	a64_record_emit_move_immediate(e, 1, 2, n);
 	i = a64_record_emit(e, A64_OP_BL);
-	i->ref = CODEGEN_FIXED_REFERENCE(fn);
+	i->reference = CODEGEN_FIXED_REFERENCE(fn);
 	a64_abi_temporaries_restore(e, &sp);
 }

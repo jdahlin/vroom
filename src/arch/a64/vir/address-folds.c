@@ -111,7 +111,7 @@ static void a64_vir_chain_consumer_act(a64_vir_context *L, uint32_t c, uint8_t r
 	case A64_VIR_CHAIN_EXT: {
 		a64_record *n = a64_record_emit(e, op == VIR_OP_SUB ? A64_OP_SUB : A64_OP_ADD);	/* (extended register: cond 8 + option) */
 
-		n->sz = 1, n->rd = (uint8_t)rd, n->rn = (uint8_t)a, n->rm = (uint8_t)L->index_register, n->cond = (uint8_t)(8 + x->opt), n->sh = x->sh;
+		n->size = 1, n->rd = (uint8_t)rd, n->rn = (uint8_t)a, n->rm = (uint8_t)L->index_register, n->condition = (uint8_t)(8 + x->opt), n->shift = x->sh;
 		return;
 	}
 	case A64_VIR_CHAIN_LSL:

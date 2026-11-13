@@ -79,12 +79,12 @@ enum { A64_NOP_PROLOGUE = 0xc0 };
 /* A64_OP_TAIL.sh: 1 on a return or sibling call (cond 2-4) in front of A64_NOP_PROLOGUE: no epilogue */
 
 typedef struct a64_record {
-	uint8_t op, sz;		/* sz: 1 = 64-bit (x), 0 = 32-bit (w); memory: log2 bytes */
+	uint8_t opcode, size;		/* sz: 1 = 64-bit (x), 0 = 32-bit (w); memory: log2 bytes */
 	uint8_t rd, rn, rm, ra;
-	uint8_t cond, sh;
+	uint8_t condition, shift;
 	union {
-		int64_t imm;
-		struct { int32_t off; uint32_t ref; };
+		int64_t immediate;
+		struct { int32_t offset; uint32_t reference; };
 		uint32_t label;
 	};
 } a64_record;

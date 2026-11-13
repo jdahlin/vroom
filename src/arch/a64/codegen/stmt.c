@@ -393,10 +393,10 @@ static void a64_switch_table(codegen_context *e, const em_switch_case *cases, ui
 		own = 1;
 		if (lo) {
 			a64_record *i = a64_record_emit(e, A64_OP_SUBI);
-			i->sz = (uint8_t)cx, i->rd = (uint8_t)t, i->rn = (uint8_t)r, i->imm = (int64_t)lo;
+			i->size = (uint8_t)cx, i->rd = (uint8_t)t, i->rn = (uint8_t)r, i->immediate = (int64_t)lo;
 		} else {
 			a64_record *i = a64_record_emit(e, A64_OP_MOV);
-			i->sz = 0, i->rd = (uint8_t)t, i->rn = (uint8_t)r;
+			i->size = 0, i->rd = (uint8_t)t, i->rn = (uint8_t)r;
 		}
 	}
 	codegen_value a = codegen_value_register(t), b = codegen_value_constant((i128)span);
@@ -852,7 +852,7 @@ static void gen_vla_decl(codegen_context *e, const node *x, uint32_t s)
 	a64_record_emit_three_registers(e, A64_OP_SUB, 1, SP, SP, r);
 	if (e->is_reachable) {
 		i = a64_record_emit(e, A64_OP_ADDI);
-		i->sz = 1, i->rd = (uint8_t)t, i->rn = SP, i->imm = 0, i->cond = 0xee;	/* + outgoing area */
+		i->size = 1, i->rd = (uint8_t)t, i->rn = SP, i->immediate = 0, i->condition = 0xee;	/* + outgoing area */
 	}
 	if (al > 16) {
 		a64_record_emit_immediate(e, A64_OP_ADDI, 1, t, t, al - 1);
@@ -1141,8 +1141,8 @@ static void gen_stmt1(codegen_context *e, uint32_t n)
 			char b[48];
 			int k = snprintf(b, sizeof(b), ".Ltmp.lbl.%u:", x->a);
 
-			i->off = (int32_t)e->raw.n;
-			i->ref = (uint32_t)k;
+			i->offset = (int32_t)e->raw.n;
+			i->reference = (uint32_t)k;
 			vtext_append(&e->raw, b, (size_t)k);
 		}
 		gen_stmt(e, x->c);
