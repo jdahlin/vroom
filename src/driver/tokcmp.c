@@ -83,7 +83,7 @@ static uint64_t tokstream_hash(const vlex_file *f)
 		memcpy(b + n + 1, &(uint32_t){ (uint32_t)l }, 4);
 		n += 5 + l;
 	}
-	h = ld_xxh3(b, n) ^ f->ntok;
+	h = vdigest_xxh3(b, n) ^ f->ntok;
 	munmap(b, cap);
 	return h;
 }

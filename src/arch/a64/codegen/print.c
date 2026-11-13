@@ -5,10 +5,10 @@
 
 VPRIV void p_lbl(tbuf *b, uint32_t fid, uint32_t l)
 {
-	tb_s(b, ".LBB");
-	tb_x(b, fid);
-	tb_c(b, '_');
-	tb_x(b, l);
+	vtext_string_append(b, ".LBB");
+	vtext_hex_digits_append(b, fid);
+	vtext_char_append(b, '_');
+	vtext_hex_digits_append(b, l);
 }
 
 static void p_movi(tbuf *b, int rd, int x, uint64_t v)
@@ -25,14 +25,14 @@ static void p_movi(tbuf *b, int rd, int x, uint64_t v)
 		nf += h == 0xffff;
 	}
 	if (nz <= 1 || (chunks - nf) <= 1 || logimm_ok(v, x)) {
-		tb_s(b, "\tmov\t");
+		vtext_string_append(b, "\tmov\t");
 		reg(b, rd, x);
-		tb_s(b, ", #");
+		vtext_string_append(b, ", #");
 		if (x)
-			tb_hex(b, v);
+			vtext_hex_prefixed_append(b, v);
 		else
-			tb_hex(b, (uint32_t)v);
-		tb_c(b, '\n');
+			vtext_hex_prefixed_append(b, (uint32_t)v);
+		vtext_char_append(b, '\n');
 		return;
 	}
 	neg = nf > nz;
@@ -42,20 +42,20 @@ static void p_movi(tbuf *b, int rd, int x, uint64_t v)
 		if (h == (neg ? 0xffff : 0))
 			continue;
 		if (first) {
-			tb_s(b, neg ? "\tmovn\t" : "\tmovz\t");
+			vtext_string_append(b, neg ? "\tmovn\t" : "\tmovz\t");
 			h = neg ? (uint16_t)~h : h;
 			first = false;
 		} else {
-			tb_s(b, "\tmovk\t");
+			vtext_string_append(b, "\tmovk\t");
 		}
 		reg(b, rd, x);
-		tb_s(b, ", #");
-		tb_u(b, h);
+		vtext_string_append(b, ", #");
+		vtext_unsigned_append(b, h);
 		if (i) {
-			tb_s(b, ", lsl #");
-			tb_u(b, (uint64_t)(16 * i));
+			vtext_string_append(b, ", lsl #");
+			vtext_unsigned_append(b, (uint64_t)(16 * i));
 		}
-		tb_c(b, '\n');
+		vtext_char_append(b, '\n');
 	}
 	if (first)
 		p_movi(b, rd, x, 0);
@@ -78,32 +78,32 @@ static void p_mem(tbuf *b, const ins *i)
 	scaled = off >= 0 && (off & ((1 << sz) - 1)) == 0 && (off >> sz) < 4096;
 	if (!scaled && !(off >= -256 && off < 256)) {
 		p_movi(b, R_X17, 1, (uint64_t)off);
-		tb_s(b, "\tadd\tx17, ");
+		vtext_string_append(b, "\tadd\tx17, ");
 		reg(b, base, 1);
-		tb_s(b, ", x17\n");
+		vtext_string_append(b, ", x17\n");
 		base = R_X17;
 		off = 0;
 		scaled = 1;
 	}
-	tb_c(b, '\t');
+	vtext_char_append(b, '\t');
 	if (i->op == I_ST || i->op == I_STF)
-		tb_n8(b, st_name[!scaled][sz]);
+		vtext_name_append(b, st_name[!scaled][sz]);
 	else
-		tb_n8(b, ld_name[!scaled][sz][v ? 0 : i->cond]);
-	tb_c(b, '\t');
+		vtext_name_append(b, ld_name[!scaled][sz][v ? 0 : i->cond]);
+	vtext_char_append(b, '\t');
 	if (v) {
-		tb_c(b, sz == 3 ? 'd' : 's');
-		tb_u(b, i->rd);
+		vtext_char_append(b, sz == 3 ? 'd' : 's');
+		vtext_unsigned_append(b, i->rd);
 	} else {
 		reg(b, i->rd, x);
 	}
-	tb_s(b, ", [");
+	vtext_string_append(b, ", [");
 	reg(b, base, 1);
 	if (off) {
-		tb_s(b, ", #");
-		tb_i(b, off);
+		vtext_string_append(b, ", #");
+		vtext_signed_append(b, off);
 	}
-	tb_s(b, "]\n");
+	vtext_string_append(b, "]\n");
 }
 
 static const char alu_name[][8] = {
@@ -121,13 +121,13 @@ static const char alu_name[][8] = {
 
 static void p_rrr(tbuf *b, const char *mn, const ins *i)
 {
-	tb_c(b, '\t');
-	tb_n8(b, mn);
-	tb_c(b, '\t');
+	vtext_char_append(b, '\t');
+	vtext_name_append(b, mn);
+	vtext_char_append(b, '\t');
 	reg(b, i->rd, i->sz);
-	tb_s(b, ", ");
+	vtext_string_append(b, ", ");
 	reg(b, i->rn, i->sz);
-	tb_s(b, ", ");
+	vtext_string_append(b, ", ");
 	reg(b, i->rm, i->sz);
 }
 
@@ -149,30 +149,30 @@ static void p_addi(tbuf *b, const ins *i)
 		int rn = i->rn;
 
 		if (v >= 4096 && (v & 0xfff)) {
-			tb_c(b, '\t'), tb_s(b, mn), tb_c(b, '\t');
+			vtext_char_append(b, '\t'), vtext_string_append(b, mn), vtext_char_append(b, '\t');
 			reg(b, i->rd, i->sz);
-			tb_s(b, ", ");
+			vtext_string_append(b, ", ");
 			reg(b, rn, i->sz);
-			tb_s(b, ", #"), tb_i(b, v >> 12), tb_s(b, ", lsl #12\n");
+			vtext_string_append(b, ", #"), vtext_signed_append(b, v >> 12), vtext_string_append(b, ", lsl #12\n");
 			rn = i->rd;
 			v &= 0xfff;
 		}
-		tb_c(b, '\t'), tb_s(b, mn), tb_c(b, '\t');
+		vtext_char_append(b, '\t'), vtext_string_append(b, mn), vtext_char_append(b, '\t');
 		reg(b, i->rd, i->sz);
-		tb_s(b, ", ");
+		vtext_string_append(b, ", ");
 		reg(b, rn, i->sz);
 		if ((v & 0xfff) == 0 && v)
-			tb_s(b, ", #"), tb_i(b, v >> 12), tb_s(b, ", lsl #12\n");
+			vtext_string_append(b, ", #"), vtext_signed_append(b, v >> 12), vtext_string_append(b, ", lsl #12\n");
 		else
-			tb_s(b, ", #"), tb_i(b, v), tb_c(b, '\n');
+			vtext_string_append(b, ", #"), vtext_signed_append(b, v), vtext_char_append(b, '\n');
 		return;
 	}
 	p_movi(b, R_X17, i->sz, (uint64_t)v);
-	tb_c(b, '\t'), tb_s(b, sub ? (flags ? "subs" : "sub") : (flags ? "adds" : "add")), tb_c(b, '\t');
+	vtext_char_append(b, '\t'), vtext_string_append(b, sub ? (flags ? "subs" : "sub") : (flags ? "adds" : "add")), vtext_char_append(b, '\t');
 	reg(b, i->rd, i->sz);
-	tb_s(b, ", ");
+	vtext_string_append(b, ", ");
 	reg(b, i->rn, i->sz);
-	tb_s(b, i->sz ? ", x17\n" : ", w17\n");
+	vtext_string_append(b, i->sz ? ", x17\n" : ", w17\n");
 }
 
 /* a register name (x0, w30, b1, q7, v31, sp, xzr, ...) */
@@ -200,15 +200,15 @@ VPRIV void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *raw
 	switch (i->op) {
 	case I_LABEL:
 		p_lbl(b, fid, i->label);
-		tb_s(b, ":\n");
+		vtext_string_append(b, ":\n");
 		return;
 	case I_RAW:
 		if (i->cond)	/* inline asm between clang's markers (bench/vcc-fpcheck.py) */
-			tb_s(b, "\t//APP\n");
-		tb_put(b, raw + i->off, i->ref);
-		tb_c(b, '\n');
+			vtext_string_append(b, "\t//APP\n");
+		vtext_append(b, raw + i->off, i->ref);
+		vtext_char_append(b, '\n');
 		if (i->cond)
-			tb_s(b, "\t//NO_APP\n");
+			vtext_string_append(b, "\t//NO_APP\n");
 		return;
 	case I_ADD: case I_SUB: case I_ADDS: case I_SUBS: case I_AND: case I_ORR: case I_EOR:
 	case I_ANDS: case I_BIC: case I_ORN: case I_ADC: case I_SBC: case I_ADCS: case I_SBCS:
@@ -216,217 +216,217 @@ VPRIV void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *raw
 			static const char xn[8][5] = { "uxtb", "uxth", "uxtw", "uxtx", "sxtb", "sxth", "sxtw", "sxtx" };
 			int o = i->cond - 8;
 
-			tb_c(b, '\t'), tb_n8(b, alu_name[i->op]), tb_c(b, '\t');
-			reg(b, i->rd, i->sz), tb_s(b, ", ");
-			reg(b, i->rn, i->sz), tb_s(b, ", ");
-			reg(b, i->rm, (o & 3) == 3), tb_s(b, ", "), tb_s(b, xn[o]);
+			vtext_char_append(b, '\t'), vtext_name_append(b, alu_name[i->op]), vtext_char_append(b, '\t');
+			reg(b, i->rd, i->sz), vtext_string_append(b, ", ");
+			reg(b, i->rn, i->sz), vtext_string_append(b, ", ");
+			reg(b, i->rm, (o & 3) == 3), vtext_string_append(b, ", "), vtext_string_append(b, xn[o]);
 			if (i->sh)
-				tb_s(b, " #"), tb_u(b, i->sh);
-			tb_c(b, '\n');
+				vtext_string_append(b, " #"), vtext_unsigned_append(b, i->sh);
+			vtext_char_append(b, '\n');
 			return;
 		}
 		p_rrr(b, alu_name[i->op], i);
 		if (i->sh) {
-			tb_s(b, i->cond == 0 ? ", lsl #" : i->cond == 1 ? ", lsr #" : ", asr #");
-			tb_u(b, i->sh);
+			vtext_string_append(b, i->cond == 0 ? ", lsl #" : i->cond == 1 ? ", lsr #" : ", asr #");
+			vtext_unsigned_append(b, i->sh);
 		}
-		tb_c(b, '\n');
+		vtext_char_append(b, '\n');
 		return;
 	case I_ADDI: case I_SUBI: case I_ADDSI: case I_SUBSI:
 		p_addi(b, i);
 		return;
 	case I_ANDI: case I_ORRI: case I_EORI: case I_ANDSI:
-		tb_c(b, '\t');
-		tb_n8(b, alu_name[i->op]);
-		tb_c(b, '\t');
+		vtext_char_append(b, '\t');
+		vtext_name_append(b, alu_name[i->op]);
+		vtext_char_append(b, '\t');
 		reg(b, i->rd, i->sz);
-		tb_s(b, ", ");
+		vtext_string_append(b, ", ");
 		reg(b, i->rn, i->sz);
-		tb_s(b, ", #");
-		tb_hex(b, i->sz ? (uint64_t)i->imm : (uint32_t)i->imm);
-		tb_c(b, '\n');
+		vtext_string_append(b, ", #");
+		vtext_hex_prefixed_append(b, i->sz ? (uint64_t)i->imm : (uint32_t)i->imm);
+		vtext_char_append(b, '\n');
 		return;
 	case I_MOVI:
 		p_movi(b, i->rd, i->sz, (uint64_t)i->imm);
 		return;
 	case I_MOV:
-		tb_s(b, "\tmov\t");
+		vtext_string_append(b, "\tmov\t");
 		reg(b, i->rd, i->sz);
-		tb_s(b, ", ");
+		vtext_string_append(b, ", ");
 		reg(b, i->rn, i->sz);
-		tb_c(b, '\n');
+		vtext_char_append(b, '\n');
 		return;
 	case I_MADD: case I_MSUB:
 		p_rrr(b, alu_name[i->op], i);
-		tb_s(b, ", ");
+		vtext_string_append(b, ", ");
 		reg(b, i->ra, i->sz);
-		tb_c(b, '\n');
+		vtext_char_append(b, '\n');
 		return;
 	case I_SDIV: case I_UDIV: case I_SMULH: case I_UMULH: case I_LSLV: case I_LSRV: case I_ASRV:
 		p_rrr(b, alu_name[i->op], i);
-		tb_c(b, '\n');
+		vtext_char_append(b, '\n');
 		return;
 	case I_SBFM: case I_UBFM: case I_BFM:
-		tb_c(b, '\t');
-		tb_n8(b, alu_name[i->op]);
-		tb_c(b, '\t');
+		vtext_char_append(b, '\t');
+		vtext_name_append(b, alu_name[i->op]);
+		vtext_char_append(b, '\t');
 		reg(b, i->rd, i->sz);
-		tb_s(b, ", ");
+		vtext_string_append(b, ", ");
 		reg(b, i->rn, i->sz);
-		tb_s(b, ", #");
-		tb_u(b, (uint64_t)i->imm);
-		tb_s(b, ", #");
-		tb_u(b, i->sh);
-		tb_c(b, '\n');
+		vtext_string_append(b, ", #");
+		vtext_unsigned_append(b, (uint64_t)i->imm);
+		vtext_string_append(b, ", #");
+		vtext_unsigned_append(b, i->sh);
+		vtext_char_append(b, '\n');
 		return;
 	case I_CSEL: case I_CSINC: case I_CSINV: case I_CSNEG:
 		p_rrr(b, alu_name[i->op], i);
-		tb_s(b, ", ");
-		tb_n8(b, cond_name[i->cond]);
-		tb_c(b, '\n');
+		vtext_string_append(b, ", ");
+		vtext_name_append(b, cond_name[i->cond]);
+		vtext_char_append(b, '\n');
 		return;
 	case I_CLZ: case I_CLS: case I_RBIT: case I_REV: case I_REV16: case I_REV32:
-		tb_c(b, '\t');
-		tb_n8(b, alu_name[i->op]);
-		tb_c(b, '\t');
+		vtext_char_append(b, '\t');
+		vtext_name_append(b, alu_name[i->op]);
+		vtext_char_append(b, '\t');
 		reg(b, i->rd, i->sz);
-		tb_s(b, ", ");
+		vtext_string_append(b, ", ");
 		reg(b, i->rn, i->sz);
-		tb_c(b, '\n');
+		vtext_char_append(b, '\n');
 		return;
 	case I_LD: case I_ST: case I_LDF: case I_STF:
 		p_mem(b, i);
 		return;
 	case I_SMADDL: case I_UMADDL:
-		tb_s(b, i->op == I_SMADDL ? "\tsmaddl\t" : "\tumaddl\t");
+		vtext_string_append(b, i->op == I_SMADDL ? "\tsmaddl\t" : "\tumaddl\t");
 		reg(b, i->rd, 1);
-		tb_s(b, ", ");
+		vtext_string_append(b, ", ");
 		reg(b, i->rn, 0);
-		tb_s(b, ", ");
+		vtext_string_append(b, ", ");
 		reg(b, i->rm, 0);
-		tb_s(b, ", ");
+		vtext_string_append(b, ", ");
 		reg(b, i->ra, 1);
-		tb_c(b, '\n');
+		vtext_char_append(b, '\n');
 		return;
 	case I_LDX: case I_STX:
-		tb_c(b, '\t');
-		tb_n8(b, i->op == I_STX ? st_name[0][i->sz] : ld_name[0][i->sz][i->cond]);
-		tb_c(b, '\t');
+		vtext_char_append(b, '\t');
+		vtext_name_append(b, i->op == I_STX ? st_name[0][i->sz] : ld_name[0][i->sz][i->cond]);
+		vtext_char_append(b, '\t');
 		reg(b, i->rd, i->op == I_STX ? i->sz == 3 : ld_x(i));
-		tb_s(b, ", [");
+		vtext_string_append(b, ", [");
 		reg(b, i->rn, 1);
-		tb_s(b, ", ");
+		vtext_string_append(b, ", ");
 		reg(b, i->rm, i->ra == 3);
 		if (i->ra != 3)
-			tb_s(b, i->ra == 6 ? ", sxtw" : ", uxtw");
+			vtext_string_append(b, i->ra == 6 ? ", sxtw" : ", uxtw");
 		else if (i->sh)
-			tb_s(b, ", lsl");
+			vtext_string_append(b, ", lsl");
 		if (i->sh) {
-			tb_s(b, " #");
-			tb_i(b, i->sz);
+			vtext_string_append(b, " #");
+			vtext_signed_append(b, i->sz);
 		}
-		tb_s(b, "]\n");
+		vtext_string_append(b, "]\n");
 		return;
 	case I_LDP: case I_STP:
-		tb_s(b, i->op == I_LDP ? "\tldp\t" : "\tstp\t");
+		vtext_string_append(b, i->op == I_LDP ? "\tldp\t" : "\tstp\t");
 		reg(b, i->rd, 1);
-		tb_s(b, ", ");
+		vtext_string_append(b, ", ");
 		reg(b, i->ra, 1);
-		tb_s(b, ", [");
+		vtext_string_append(b, ", [");
 		reg(b, i->rn, 1);
 		if (i->cond == 2) {
-			tb_s(b, "], #");
-			tb_i(b, i->imm);
-			tb_c(b, '\n');
+			vtext_string_append(b, "], #");
+			vtext_signed_append(b, i->imm);
+			vtext_char_append(b, '\n');
 		} else {
 			if (i->imm) {
-				tb_s(b, ", #");
-				tb_i(b, i->imm);
+				vtext_string_append(b, ", #");
+				vtext_signed_append(b, i->imm);
 			}
-			tb_s(b, i->cond == 1 ? "]!\n" : "]\n");
+			vtext_string_append(b, i->cond == 1 ? "]!\n" : "]\n");
 		}
 		return;
 	case I_ADRP:
-		tb_s(b, "\tadrp\t");
+		vtext_string_append(b, "\tadrp\t");
 		reg(b, i->rd, 1);
-		tb_s(b, ", ");
+		vtext_string_append(b, ", ");
 		ref_off(c, b, i->ref, i->off);
-		tb_c(b, '\n');
+		vtext_char_append(b, '\n');
 		return;
 	case I_ADDLO:
-		tb_s(b, "\tadd\t");
+		vtext_string_append(b, "\tadd\t");
 		reg(b, i->rd, 1);
-		tb_s(b, ", ");
+		vtext_string_append(b, ", ");
 		reg(b, i->rn, 1);
-		tb_s(b, ", :lo12:");
+		vtext_string_append(b, ", :lo12:");
 		ref_off(c, b, i->ref, i->off);
-		tb_c(b, '\n');
+		vtext_char_append(b, '\n');
 		return;
 	case I_LDLO: case I_STLO:
-		tb_c(b, '\t');
-		tb_s(b, i->op == I_STLO ? st_name[0][i->sz] : ld_name[0][i->sz][i->cond]);
-		tb_c(b, '\t');
+		vtext_char_append(b, '\t');
+		vtext_string_append(b, i->op == I_STLO ? st_name[0][i->sz] : ld_name[0][i->sz][i->cond]);
+		vtext_char_append(b, '\t');
 		reg(b, i->rd, i->op == I_STLO ? i->sz == 3 : ld_x(i));
-		tb_s(b, ", [");
+		vtext_string_append(b, ", [");
 		reg(b, i->rn, 1);
-		tb_s(b, ", :lo12:");
+		vtext_string_append(b, ", :lo12:");
 		ref_off(c, b, i->ref, i->off);
-		tb_s(b, "]\n");
+		vtext_string_append(b, "]\n");
 		return;
 	case I_LDGOT:
-		tb_s(b, "\tadrp\t");
+		vtext_string_append(b, "\tadrp\t");
 		reg(b, i->rd, 1);
-		tb_s(b, ", :got:");
+		vtext_string_append(b, ", :got:");
 		ref_name(c, b, i->ref);
-		tb_s(b, "\n\tldr\t");
+		vtext_string_append(b, "\n\tldr\t");
 		reg(b, i->rd, 1);
-		tb_s(b, ", [");
+		vtext_string_append(b, ", [");
 		reg(b, i->rd, 1);
-		tb_s(b, ", :got_lo12:");
+		vtext_string_append(b, ", :got_lo12:");
 		ref_name(c, b, i->ref);
-		tb_s(b, "]\n");
+		vtext_string_append(b, "]\n");
 		return;
 	case I_JTE:
-		tb_s(b, "\t.word\t");
+		vtext_string_append(b, "\t.word\t");
 		p_lbl(b, fid, i->label);
-		tb_c(b, '-');
+		vtext_char_append(b, '-');
 		p_lbl(b, fid, i->ref);
-		tb_c(b, '\n');
+		vtext_char_append(b, '\n');
 		return;
 	case I_ADR:
-		tb_s(b, "\tadr\t");
+		vtext_string_append(b, "\tadr\t");
 		reg(b, i->rd, 1);
-		tb_s(b, ", ");
+		vtext_string_append(b, ", ");
 		p_lbl(b, fid, i->label);
-		tb_c(b, '\n');
+		vtext_char_append(b, '\n');
 		return;
 	case I_B:
-		tb_s(b, "\tb\t");
+		vtext_string_append(b, "\tb\t");
 		p_lbl(b, fid, i->label);
-		tb_c(b, '\n');
+		vtext_char_append(b, '\n');
 		return;
 	case I_BC:
-		tb_s(b, "\tb.");
-		tb_n8(b, cond_name[i->cond]);
-		tb_c(b, '\t');
+		vtext_string_append(b, "\tb.");
+		vtext_name_append(b, cond_name[i->cond]);
+		vtext_char_append(b, '\t');
 		p_lbl(b, fid, i->label);
-		tb_c(b, '\n');
+		vtext_char_append(b, '\n');
 		return;
 	case I_CBZ: case I_CBNZ:
-		tb_s(b, i->op == I_CBZ ? "\tcbz\t" : "\tcbnz\t");
+		vtext_string_append(b, i->op == I_CBZ ? "\tcbz\t" : "\tcbnz\t");
 		reg(b, i->rd, i->sz);
-		tb_s(b, ", ");
+		vtext_string_append(b, ", ");
 		p_lbl(b, fid, i->label);
-		tb_c(b, '\n');
+		vtext_char_append(b, '\n');
 		return;
 	case I_TBZ: case I_TBNZ:
-		tb_s(b, i->op == I_TBZ ? "\ttbz\t" : "\ttbnz\t");
+		vtext_string_append(b, i->op == I_TBZ ? "\ttbz\t" : "\ttbnz\t");
 		reg(b, i->rd, i->sz);
-		tb_s(b, ", #");
-		tb_u(b, i->sh);
-		tb_s(b, ", ");
+		vtext_string_append(b, ", #");
+		vtext_unsigned_append(b, i->sh);
+		vtext_string_append(b, ", ");
 		p_lbl(b, fid, i->label);
-		tb_c(b, '\n');
+		vtext_char_append(b, '\n');
 		return;
 	case I_TAIL:
 		if (!i->cond)
@@ -434,7 +434,7 @@ VPRIV void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *raw
 		/* symbol quoting is identical for bl and b. */
 		__attribute__((fallthrough));
 	case I_BL: {
-		tb_s(b, i->op == I_TAIL ? "\tb\t" : "\tbl\t");
+		vtext_string_append(b, i->op == I_TAIL ? "\tb\t" : "\tbl\t");
 		size_t at = b->n;
 
 		ref_name(c, b, i->ref);
@@ -442,45 +442,45 @@ VPRIV void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *raw
 			/* "bl b1" is a register operand to the assembler (llvm-mc too): quote it */
 			size_t n = b->n - at;
 
-			tb_c(b, '"');
-			tb_c(b, '"');
+			vtext_char_append(b, '"');
+			vtext_char_append(b, '"');
 			memmove(b->p + at + 1, b->p + at, n);
 			b->p[at] = '"';
 		}
-		tb_c(b, '\n');
+		vtext_char_append(b, '\n');
 		return;
 	}
 	case I_BLR: case I_BR:
-		tb_s(b, i->op == I_BLR ? "\tblr\t" : "\tbr\t");
+		vtext_string_append(b, i->op == I_BLR ? "\tblr\t" : "\tbr\t");
 		reg(b, i->rn, 1);
-		tb_c(b, '\n');
+		vtext_char_append(b, '\n');
 		return;
 	case I_RET:
-		tb_s(b, "\tret\n");
+		vtext_string_append(b, "\tret\n");
 		return;
 	case I_BRK:
-		tb_s(b, "\tbrk\t#");
-		tb_hex(b, (uint64_t)i->imm);
-		tb_c(b, '\n');
+		vtext_string_append(b, "\tbrk\t#");
+		vtext_hex_prefixed_append(b, (uint64_t)i->imm);
+		vtext_char_append(b, '\n');
 		return;
 	case I_PRFM:
-		tb_s(b, "\tprfm\tpldl1keep, [");
+		vtext_string_append(b, "\tprfm\tpldl1keep, [");
 		reg(b, i->rn, 1);
-		tb_s(b, "]\n");
+		vtext_string_append(b, "]\n");
 		return;
 	case I_MRS:
-		tb_s(b, "\tmrs\t");
+		vtext_string_append(b, "\tmrs\t");
 		reg(b, i->rd, 1);
-		tb_s(b, ", ");
-		tb_s(b, c->strs[i->ref].s);
-		tb_c(b, '\n');
+		vtext_string_append(b, ", ");
+		vtext_string_append(b, c->strs[i->ref].s);
+		vtext_char_append(b, '\n');
 		return;
 	case I_NOP:
 		return;
 	case I_WORD:
-		tb_s(b, "\t.inst\t");
-		tb_hex(b, (uint32_t)i->imm);
-		tb_c(b, '\n');
+		vtext_string_append(b, "\t.inst\t");
+		vtext_hex_prefixed_append(b, (uint32_t)i->imm);
+		vtext_char_append(b, '\n');
 		return;
 	case I_TLV: {
 		/* ELF: the sequences of obj.c; x0 = the address */
@@ -494,16 +494,16 @@ VPRIV void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *raw
 		const char *const *q = seq[i->cond < 4 ? i->cond : 0];
 
 		for (int k = 0; q[k + 1]; k++) {
-			tb_s(b, q[k]);
+			vtext_string_append(b, q[k]);
 			ref_name(c, b, i->ref);
 		}
 		for (int k = 0; q[k]; k++)
 			if (!q[k + 1])
-				tb_s(b, q[k]);
+				vtext_string_append(b, q[k]);
 		return;
 	}
 	default:
-		tb_s(b, "\t// ?\n");
+		vtext_string_append(b, "\t// ?\n");
 		return;
 	}
 }

@@ -23,7 +23,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 
-#include "common/ckd.h"
+#include "common/checked-arithmetic.h"
 #include <unistd.h>
 
 int wasm_ld_main(int argc, char **argv);
@@ -984,12 +984,12 @@ static void load_member(int a, uint32_t off)
 			return;
 	GROW(A->loaded, A->nloaded, A->cloaded);
 	A->loaded[A->nloaded++] = off;
-	if (!vckd_range(off, 60, A->n)) {
+	if (!vchecked_range(off, 60, A->n)) {
 		err("%s: bad member offset", A->name);
 		return;
 	}
 	sz = ar_size(h);
-	if (!vckd_range((uint64_t)off + 60, sz, A->n)) {
+	if (!vchecked_range((uint64_t)off + 60, sz, A->n)) {
 		err("%s: member goes past the end of the archive", A->name);
 		return;
 	}
@@ -1024,10 +1024,10 @@ static void add_archive(const char *name, const uint8_t *p, size_t n)
 	A->p = p;
 	A->n = n;
 	/* the long-name table first */
-	for (size_t o2 = 8; vckd_range(o2, 60, n);) {
+	for (size_t o2 = 8; vchecked_range(o2, 60, n);) {
 		uint64_t sz = ar_size(p + o2), next;
 
-		if (!vckd_range(o2 + 60, sz, n))
+		if (!vchecked_range(o2 + 60, sz, n))
 			break;
 		if (!memcmp(p + o2, "//              ", 16)) {
 			A->longnames = (const char *)p + o2 + 60;
@@ -1036,7 +1036,7 @@ static void add_archive(const char *name, const uint8_t *p, size_t n)
 		}
 		if (memcmp(p + o2, "/ ", 2) && memcmp(p + o2, "/SYM64/", 7))
 			break;
-		if (!vckd_add(o2 + 60 + sz, sz & 1, &next))
+		if (!vchecked_add(o2 + 60 + sz, sz & 1, &next))
 			break;
 		o2 = next;
 	}
@@ -1050,13 +1050,13 @@ static void add_archive(const char *name, const uint8_t *p, size_t n)
 		bool w64 = !memcmp(p + off, "/SYM64/", 7);
 
 		w = w64 ? 8 : 4;
-		if (!vckd_range(off + 60, sz, n) || sz < w) {
+		if (!vchecked_range(off + 60, sz, n) || sz < w) {
 			err("%s: malformed archive symbol table", name);
 			return;
 		}
 		cnt = w64 ? ((uint64_t)be32(s) << 32 | be32(s + 4)) : be32(s);
 		/* the count and the offsets must fit in the member: cnt * w can wrap */
-		if (!vckd_mul(cnt, w, &tab) || !vckd_range(w, tab, sz)) {
+		if (!vchecked_multiply(cnt, w, &tab) || !vchecked_range(w, tab, sz)) {
 			err("%s: malformed archive symbol table", name);
 			return;
 		}

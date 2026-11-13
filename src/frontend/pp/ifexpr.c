@@ -155,7 +155,7 @@ static ival eprimary_(ev *e, bool live)
 	ival r = { 0, false };
 	pp *p = e->p;
 
-	if (vstack_low())
+	if (vstack_guard_low())
 		fatal(p, e->t.loc, "#if expression nested too deeply");
 	switch (e->t.kind) {
 	case T_NUMBER:

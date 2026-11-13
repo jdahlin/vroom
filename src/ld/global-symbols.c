@@ -43,7 +43,7 @@ static _Atomic uint32_t ngsyms;
 static uint32_t hmask;
 static VVEC(uint32_t) gorder;		/* ids in symbol table order */
 
-static inline uint32_t strhash(const char *s, size_t n) { return (uint32_t)ld_xxh3(s, n); }
+static inline uint32_t strhash(const char *s, size_t n) { return (uint32_t)vdigest_xxh3(s, n); }
 
 static uint32_t visrank(uint8_t v)
 {

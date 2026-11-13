@@ -68,7 +68,7 @@ relative to it); `TODO.md` stays at the top.
     resources through `cleanup` (`defer.h`: VAUTOFREE, VAUTOCLOSE, VLOCK; not
     across a longjmp), attributes for our own declarations (`attr.h`: VUSE,
     VNONNULL) and overflow-checked bounds for sizes read from input files
-    (`ckd.h`: vckd_range, vckd_add, vckd_mul).  Variants not yet merged are
+    (`ckd.h`: vchecked_range, vchecked_add, vchecked_multiply).  Variants not yet merged are
     listed in TODO.md.
   - `port/`: what depends on the host (headers in `include/port/`): file
     mapping (`mapfile.h`), thread counters (`vperf.h`), the stack guard
@@ -273,7 +273,7 @@ bench/vir-failures.py [-n N]        # why VIR gives up on functions (VCC_VIR_STA
 bench/record-passes.py -j 3 [-n 200]  # arm64 record clean-ups: records each pass changes, default path vs VCC_VIR=bl (VCC_REC_STATS=1); suites, kernel sample, SQLite (~1 min)
 bench/vcc-bflayout.py               # generated bit-field records, layouts checked by clang, Linux + Apple (~1 s)
 bench/vcc-ldconst.py                # generated long double literals and folds, bits vs clang (~2 s)
-bench/vcc-f80.sh [N]                # x87 long double folding (include/common/f128.h) vs this x86-64 host's FPU (~3 s)
+bench/vcc-f80.sh [N]                # x87 long double folding (include/common/softfloat.h) vs this x86-64 host's FPU (~3 s)
 bench/vccd-test.py                  # vccd as a service: socket, bad requests, cache invalidation (~11 s)
 vcc --vccd-diagnostics[=json]       # vccd's diagnostics store: summary by flag/file, or every TU's records (JSON lines)
 VCC_DIAG_DEDUP=1 make ...           # under vccd: a header warning another TU of the build printed is left out
@@ -353,7 +353,7 @@ harness that imports `vcc-diff.py`.  The big reservations (16 GB shared pp
 region, 4 GB arenas, all MAP_NORESERVE) need no special handling; on Linux
 (CI) run ASan with `ASAN_OPTIONS=detect_leaks=0` (LeakSanitizer is on by
 default there; vcc exits with its arenas mapped) and the default 8 MB stack
-(`ulimit -s unlimited` leaves `vstack_low()` without a stack bottom).  A TSan batch takes
+(`ulimit -s unlimited` leaves `vstack_guard_low()` without a stack bottom).  A TSan batch takes
 65-100 s (15-20x the normal build), an ASan suite 12-25 s.  Limits: ASan does
 not see over-reads inside our own mmap'ed arenas (they are never poisoned),
 only in malloc, globals and the stack.  Contract that ASan checks: strings

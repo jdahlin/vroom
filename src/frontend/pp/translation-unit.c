@@ -53,8 +53,8 @@ static void bi_init(void)
 }
 
 /* a TU's tables, reused from one TU to the next (pp_open takes a set, pp_close gives it back) */
-static vmpool pppool = VMPOOL_INIT(8);
-static _Thread_local vmreg *ppr;
+static vjob_region_pool pppool = VJOB_REGION_POOL_INIT(8);
+static _Thread_local vjob_region *ppr;
 
 /* the main file from stdin (pp_opts.main_src): lexed here as <built-in> is, its bytes immortal like a cached file's */
 static __attribute__((noinline, cold)) const vlex_file *stdin_file(pp *p, const pp_opts *o)
@@ -63,7 +63,7 @@ static __attribute__((noinline, cold)) const vlex_file *stdin_file(pp *p, const 
 	char *ms = salloc(ml + 129);
 	vlex_file *f = varena_alloc(&p->perm, sizeof(*f));
 	vtok *mt = varena_alloc(&p->perm, (ml + 2) * sizeof(vtok));
-	void *scratch = vmreg_get(&ppr[7], vlex_scratch_size(ml) + 4096, "pp.lexscratch");
+	void *scratch = vjob_region_acquire(&ppr[7], vlex_scratch_size(ml) + 4096, "pp.lexscratch");
 
 	memcpy(ms, o->main_src, ml);
 	memset(ms + ml, 0, 129);
@@ -73,13 +73,13 @@ static __attribute__((noinline, cold)) const vlex_file *stdin_file(pp *p, const 
 	f->size = (uint32_t)ml;
 	f->ntok = vlex(ms, ml, mt, scratch);
 	f->tok = mt;
-	vmreg_put(&ppr[7], VMREG_SCRATCH);
+	vjob_region_release(&ppr[7], VJOB_REGION_SCRATCH);
 	return f;
 }
 
 pp *pp_open(const pp_opts *o)
 {
-	pp *p = vmreg_get(&(ppr = vmpool_take(&pppool))[0], sizeof(pp), "pp");
+	pp *p = vjob_region_acquire(&(ppr = vjob_region_pool_take(&pppool))[0], sizeof(pp), "pp");
 	const vlex_file *mf;
 	size_t n = strlen(o->predef);
 	char *src;
@@ -95,20 +95,20 @@ pp *pp_open(const pp_opts *o)
 		p->dtrack = t && *t && *t != '0';
 	}
 	p->color = o->diag_color > 0 || (o->diag_color == 0 && isatty(o->errfd ? o->errfd : 2));
-	p->cx = vmreg_get(&ppr[1], MAXCTX * sizeof(ctx), "pp.cx");
-	p->perm.base = p->perm.p = vmreg_get(&ppr[2], 1ull << 30, "pp.perm");
+	p->cx = vjob_region_acquire(&ppr[1], MAXCTX * sizeof(ctx), "pp.cx");
+	p->perm.base = p->perm.p = vjob_region_acquire(&ppr[2], 1ull << 30, "pp.perm");
 	p->perm.end = p->perm.base + (1ull << 30);
-	p->tmp.base = p->tmp.p = vmreg_get(&ppr[3], 1ull << 32, "pp.tmp");
+	p->tmp.base = p->tmp.p = vjob_region_acquire(&ppr[3], 1ull << 32, "pp.tmp");
 	p->tmp.end = p->tmp.base + (1ull << 32);
 	p->psig = varena_alloc(&p->perm, ((size_t)o->ndirs + 1) * sizeof(uint32_t));
 	if (!sig_of(o, &p->sig, p->psig))
 		p->sig = HNONE;
-	p->sv = vmreg_get(&ppr[4], SVMAX * sizeof(ptok), "pp.sv");
-	p->fe = vmreg_get(&ppr[5], (1u << 20) * sizeof(fent), "pp.fe");
+	p->sv = vjob_region_acquire(&ppr[4], SVMAX * sizeof(ptok), "pp.sv");
+	p->fe = vjob_region_acquire(&ppr[5], (1u << 20) * sizeof(fent), "pp.fe");
 	p->once = varena_alloc(&p->perm, 256 * sizeof(*p->once));
 	p->oncecap = 256;
 	p->pushed = varena_alloc(&p->perm, 4096 * sizeof(*p->pushed));
-	p->lm = vmreg_get(&ppr[6], 65536 * sizeof(*p->lm), "pp.lm");
+	p->lm = vjob_region_acquire(&ppr[6], 65536 * sizeof(*p->lm), "pp.lm");
 	{
 		static pthread_once_t once = PTHREAD_ONCE_INIT;
 
@@ -169,13 +169,13 @@ pp *pp_open(const pp_opts *o)
 	memcpy(src, o->predef, n);
 	memset(src + n, 0, 129);
 	tok = varena_alloc(&p->perm, (n + 2) * sizeof(vtok));
-	scratch = vmreg_get(&ppr[7], vlex_scratch_size(n) + 4096, "pp.lexscratch");
+	scratch = vjob_region_acquire(&ppr[7], vlex_scratch_size(n) + 4096, "pp.lexscratch");
 	p->builtin.path = "<built-in>";
 	p->builtin.src = src;
 	p->builtin.size = (uint32_t)n;
 	p->builtin.ntok = vlex(src, n, tok, scratch);
 	p->builtin.tok = tok;
-	vmreg_put(&ppr[7], VMREG_SCRATCH);
+	vjob_region_release(&ppr[7], VJOB_REGION_SCRATCH);
 	if (o->no_digraphs)
 		p->builtin = *vlex_nodigraphs(&p->builtin);
 	enter_file(p, &p->builtin, "<built-in>", -1);
@@ -230,12 +230,12 @@ void pp_close(pp *p)
 {
 	diag_text_flush(p);	/* a record still waiting for its notes (no summary ran) */
 	/* back to the thread: the stacks and tmp (reused all along the TU) as they are */
-	vmreg_put(&ppr[1], VMREG_SCRATCH);
-	vmreg_put(&ppr[2], (size_t)(p->perm.p - p->perm.base) + 64);
-	vmreg_put(&ppr[3], VMREG_SCRATCH);
-	vmreg_put(&ppr[4], VMREG_SCRATCH);
-	vmreg_put(&ppr[5], ((size_t)p->nfe + 1) * sizeof(fent));
-	vmreg_put(&ppr[6], ((size_t)p->nlm + 1) * sizeof(*p->lm));
+	vjob_region_release(&ppr[1], VJOB_REGION_SCRATCH);
+	vjob_region_release(&ppr[2], (size_t)(p->perm.p - p->perm.base) + 64);
+	vjob_region_release(&ppr[3], VJOB_REGION_SCRATCH);
+	vjob_region_release(&ppr[4], VJOB_REGION_SCRATCH);
+	vjob_region_release(&ppr[5], ((size_t)p->nfe + 1) * sizeof(fent));
+	vjob_region_release(&ppr[6], ((size_t)p->nlm + 1) * sizeof(*p->lm));
 	if (p->out) {
 		if (out_spare_cap < p->capout) {
 			if (out_spare)
@@ -266,7 +266,7 @@ void pp_close(pp *p)
 		munmap(p->rec.cp, (HC_MAXCP + 1) * sizeof(cprov));
 		munmap(p->rec.lk, HC_MAXLK * sizeof(hlook));
 	}
-	vmreg_put(&ppr[0], sizeof(pp));
-	vmpool_give(&pppool, ppr);
+	vjob_region_release(&ppr[0], sizeof(pp));
+	vjob_region_pool_give(&pppool, ppr);
 	ppr = NULL;
 }
