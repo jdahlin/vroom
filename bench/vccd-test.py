@@ -332,7 +332,7 @@ def other_build_refused():
         argv = [SHIM] + TARGET + ['-c', src]
         good = b''.join(s.encode() + b'\0' for s in [d] + argv)
         st = raw_request(v.sock, d, argv, header=hdr(MAGIC, len(argv), 0, len(good), build=12345), payload=good)
-        check(st == 0x7fff0001, f'status {st} for a foreign build id (want VROOM_STATUS_MISMATCH)')
+        check(st == 0x7fff0001, f'status {st} for a foreign build id (want VCCD_STATUS_MISMATCH)')
         st, err = v.cc(d, src)
         check(st == 0, f'the real shim (same build) is served: {st} {err[-300:]}')
     finally: v.stop()
@@ -659,7 +659,7 @@ def links_in_process_independent():
             open(f'{d}/{name}', 'w').write(text)
         links = [['--eh-frame-hdr', '-T', 'a.lds'], ['-T', 'b.lds'], ['-T', 'a.lds', '-e', 'f7'],
                  ['-T', 'b.lds', '-e', 'f3']]
-        ref = {}	# vccd's vld adds --vroom-stubs (ld_run)
+        ref = {}	# vccd's vld adds --vroom-stubs (vccd_linker_run)
         for i, a in enumerate(links):
             r = subprocess.run([f'{vd.BIN}/vlink', '--vroom-stubs', '-o', f'ref{i}', 'm.o'] + a, cwd=d, capture_output=True,
                                text=True, timeout=30)

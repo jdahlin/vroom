@@ -4,7 +4,8 @@
 #ifdef __ARM_NEON
 #include <arm_neon.h>
 #endif
-#ifdef __x86_64__
+#if defined(__x86_64__) && !defined(VLEX_SCALAR) && !defined(VCC_BOOTSTRAP_PORTABLE)
+#define LEX_X86_SIMD 1
 #include <immintrin.h>
 #endif
 #include <errno.h>
@@ -263,7 +264,7 @@ static inline size_t lex_quote_find(const char *s, size_t p, uint8_t q)
 
 #else /* !__ARM_NEON */
 
-#if defined(__x86_64__) && !defined(VLEX_SCALAR)
+#ifdef LEX_X86_SIMD
 #define LEX_AVX2 __attribute__((target("avx2")))
 #define LEX_AVX512 __attribute__((target("avx2,avx512f,avx512bw,avx512vbmi")))
 
@@ -384,7 +385,7 @@ static LEX_AVX2 size_t lex_quote_find_avx2(const char *s, size_t p, uint8_t q)
 
 #endif /* x86 SIMD implementations */
 
-#if defined(__x86_64__) && !defined(VLEX_SCALAR)
+#ifdef LEX_X86_SIMD
 #define pp_paste_result_classify classify_scalar
 #define lex_comment_end_find find_cend_scalar
 #define lex_line_end_find find_nl_scalar
@@ -453,7 +454,7 @@ static inline size_t lex_quote_find(const char *s, size_t p, uint8_t q)
 			return p;
 	}
 }
-#if defined(__x86_64__) && !defined(VLEX_SCALAR)
+#ifdef LEX_X86_SIMD
 #undef pp_paste_result_classify
 #undef lex_comment_end_find
 #undef lex_line_end_find
@@ -506,7 +507,7 @@ static uint8_t lex_punctuator_kind_table[1 << 16];		/* punctuator kind by its fi
 
 static void lex_tables_init(void)
 {
-#if defined(__x86_64__) && !defined(VLEX_SCALAR)
+#ifdef LEX_X86_SIMD
 	lex_simd_init_x86();
 #endif
 	for (int c = 0; c < 256; c++) {

@@ -110,7 +110,7 @@ VPRIV void pragma_weak(cc *c, const char *s, const char *e, const char *base, ui
 		return;
 	}
 #undef WLOC
-	dc_kill(c);	/* (the pending list is not in the declaration cache's snapshots) */
+	driver_declaration_cache_kill(c);	/* (the pending list is not in the declaration cache's snapshots) */
 	k = file_scope_sym(c, target ? target : name);
 	if (k && fn_or_var(&c->syms[k])) {
 		sym *y = &c->syms[k];
@@ -150,12 +150,12 @@ VPRIV void weak_declared(cc *c, uint32_t s)
 /* the end of the TU: never declared, or an alias of nothing */
 VPRIV void weak_finish(cc *c)
 {
-	int st = pp_wstate(c->p, "", true, NULL);
+	int st = diag_warning_state(c->p, "", true, NULL);
 
 	for (uint32_t i = 0; i < c->npweak; i++) {
 		const struct pweak *w = &c->pweak[i];
 
-		if (!w->sym && st && !pp_in_system_header(c->p, w->loc))
+		if (!w->sym && st && !pp_location_is_in_system_header(c->p, w->loc))
 			report(c, st == 2 ? "error" : "warning", w->loc, NULL, 0, NULL, 0, "weak identifier '%.*s' never declared%s",
 			       IDF(w->key), st == 2 ? " [-Werror]" : "");
 	}

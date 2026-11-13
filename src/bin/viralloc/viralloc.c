@@ -30,7 +30,7 @@
 #include "vir/alloc.h"
 #include "vir/synth.h"
 
-static char *slurp(const char *path, size_t *n)
+static char *viralloc_file_read(const char *path, size_t *n)
 {
 	FILE *fp = fopen(path, "rb");
 	char *b;
@@ -53,7 +53,7 @@ static char *slurp(const char *path, size_t *n)
 	return b;
 }
 
-static size_t find_sep(const char *s, size_t n)
+static size_t viralloc_separator_find(const char *s, size_t n)
 {
 	for (size_t i = 0; i < n;) {
 		size_t e = i;
@@ -67,12 +67,12 @@ static size_t find_sep(const char *s, size_t n)
 	return n;
 }
 
-static bool parse_regs(const char *s, uint32_t r[4])
+static bool viralloc_registers_parse(const char *s, uint32_t r[4])
 {
 	return sscanf(s, "%u,%u,%u,%u", &r[0], &r[1], &r[2], &r[3]) >= 2;
 }
 
-static double now(void)
+static double viralloc_clock_seconds(void)
 {
 	struct timespec t;
 
@@ -81,7 +81,7 @@ static double now(void)
 }
 
 /* allocate and check one function with one configuration; 0 ok */
-static uint32_t one(vir_fn *f, const vir_unit *u, const vir_loops *lp, uint32_t r[4], bool x86, uint64_t pool, vbuffer *out,
+static uint32_t viralloc_function_allocate(vir_fn *f, const vir_unit *u, const vir_loops *lp, uint32_t r[4], bool x86, uint64_t pool, vbuffer *out,
 		    bool print)
 {
 	vir_synth t;
@@ -134,7 +134,7 @@ int main(int argc, char **argv)
 
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--regs") && i + 1 < argc) {
-			if (!parse_regs(argv[++i], regs))
+			if (!viralloc_registers_parse(argv[++i], regs))
 				goto usage;
 		} else if (!strcmp(argv[i], "--x86")) {
 			x86 = true;
@@ -158,12 +158,12 @@ int main(int argc, char **argv)
 	}
 	if (!path)
 		goto usage;
-	src = slurp(path, &n);
+	src = viralloc_file_read(path, &n);
 	if (!src) {
 		fprintf(stderr, "viralloc: cannot read %s\n", path);
 		return 2;
 	}
-	sep = find_sep(src, n);
+	sep = viralloc_separator_find(src, n);
 	for (size_t i = 0; i < sep;) {
 		size_t e = i;
 
@@ -172,7 +172,7 @@ int main(int argc, char **argv)
 		if (src[i] != ';' && e > i)
 			break;
 		if (!strncmp(src + i, "; REGS:", 7))
-			parse_regs(src + i + 7, regs);
+			viralloc_registers_parse(src + i + 7, regs);
 		else if (!strncmp(src + i, "; X86: yes", 10))
 			x86 = true;
 		else if (!strncmp(src + i, "; SWEEP: yes", 12))
@@ -208,7 +208,7 @@ int main(int argc, char **argv)
 			nbad++;
 			continue;
 		}
-		nbad += one(&f, &u, &lp, regs, x86, pool, &out, !quiet);
+		nbad += viralloc_function_allocate(&f, &u, &lp, regs, x86, pool, &out, !quiet);
 		if (sweep) {
 			uint32_t cnt = 0, fails = 0;
 
@@ -218,12 +218,12 @@ int main(int argc, char **argv)
 						for (int xx = 0; xx < 2; xx++) {
 							uint32_t r[4] = { ni, nf, cs == 0 ? 0 : cs == 1 ? (ni - 2 < 2 ? ni - 2 : 2) : ni - 2,
 									  cs == 0 ? 0 : cs == 1 ? (nf - 2 < 1 ? nf - 2 : 1) : nf - 2 };
-							uint32_t k = one(&f, &u, &lp, r, xx, pool, &out, false);
+							uint32_t k = viralloc_function_allocate(&f, &u, &lp, r, xx, pool, &out, false);
 
 							cnt++;
 							fails += k != 0;
 							if (pool == 0 && !k) {	/* linear mode too */
-								k = one(&f, &u, &lp, r, xx, 1, &out, false);
+								k = viralloc_function_allocate(&f, &u, &lp, r, xx, 1, &out, false);
 								cnt++;
 								fails += k != 0;
 							}
@@ -299,12 +299,12 @@ int main(int argc, char **argv)
 
 			vir_synth_init(&t, regs[0], regs[1], regs[2], regs[3], x86, err, sizeof(err));
 			for (uint32_t k = 0; k < rep; k++) {
-				t0 = now();
+				t0 = viralloc_clock_seconds();
 				vir_loops_build(&f, &lp);
-				double t1 = now();
+				double t1 = viralloc_clock_seconds();
 
 				vir_alloc(&f, &lp, &t.regs, &opt, &o);
-				double t2 = now();
+				double t2 = viralloc_clock_seconds();
 
 				if (t2 - t1 < best)
 					best = t2 - t1;

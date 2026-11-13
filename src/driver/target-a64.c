@@ -2,7 +2,7 @@
  * target-a64.c: the arm64 property of the command line that needs a table: does -march or -mcpu name
  * a core with LSE atomics.
  *
- * arch_lse answers as clang's __ARM_FEATURE_ATOMICS would; -1 means "no opinion, keep the previous
+ * driver_target_lse_detect answers as clang's __ARM_FEATURE_ATOMICS would; -1 means "no opinion, keep the previous
  * answer" so that the option loop can take -march and -mcpu in command-line order.  `+lse` and
  * `+nolse` suffixes override the base.  A -mcpu name that is not in the list of old cores (including
  * `native`, which here is an Apple core) has LSE.  The result becomes a predefined macro and the code
@@ -12,7 +12,7 @@
 
 /* does -march=/-mcpu= name a target with LSE atomics (as clang's
    __ARM_FEATURE_ATOMICS)?  -1: no opinion (keep the previous answer) */
-VPRIV int arch_lse(const char *v, bool cpu)
+VPRIV int driver_target_lse_detect(const char *v, bool cpu)
 {
 	const char *plus = strchr(v, '+');
 	size_t n = plus ? (size_t)(plus - v) : strlen(v);

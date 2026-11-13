@@ -37,19 +37,19 @@ const uint8_t tempregs[NTEMP] = { 9, 10, 11, 12, 13, 14, 15, 19, 20, 21, 22, 23,
 __attribute__((format(printf, 3, 4)))
 VPRIV void ediag(ecx *e, uint32_t loc, const char *fmt, ...)
 {
-	pp_diag_pc = __builtin_return_address(0);
+	diag_report_site_pc = __builtin_return_address(0);
 	va_list ap;
 
 	VLOCK(e->E->emu);
 	va_start(ap, fmt);
-	pp_vdiag(e->c->p, loc, "note", fmt, ap);
+	diag_report_va(e->c->p, loc, "note", fmt, ap);
 	va_end(ap);
 }
 
 __attribute__((format(printf, 3, 4)))
 VPRIV void eerror(ecx *e, uint32_t loc, const char *fmt, ...)
 {
-	pp_diag_pc = __builtin_return_address(0);
+	diag_report_site_pc = __builtin_return_address(0);
 	va_list ap;
 
 	if (e->vtry) {	/* the VIR walker: the function falls back (codegen/vir/) */
@@ -60,7 +60,7 @@ VPRIV void eerror(ecx *e, uint32_t loc, const char *fmt, ...)
 	{
 		VLOCK(e->E->emu);
 		va_start(ap, fmt);
-		pp_vdiag(e->c->p, loc, "error", fmt, ap);
+		diag_report_va(e->c->p, loc, "error", fmt, ap);
 		va_end(ap);
 	}
 	e->E->errors++;
@@ -69,7 +69,7 @@ VPRIV void eerror(ecx *e, uint32_t loc, const char *fmt, ...)
 __attribute__((format(printf, 3, 4), noreturn))
 VPRIV void efatal(ecx *e, uint32_t loc, const char *fmt, ...)
 {
-	pp_diag_pc = __builtin_return_address(0);
+	diag_report_site_pc = __builtin_return_address(0);
 	va_list ap;
 
 	if (e->vtry) {	/* the VIR walker: no diagnostic, the function falls back (codegen/vir/) */
@@ -80,7 +80,7 @@ VPRIV void efatal(ecx *e, uint32_t loc, const char *fmt, ...)
 	{	/* (the lock is dropped before the longjmp: cleanups do not run on it) */
 		VLOCK(e->E->emu);
 		va_start(ap, fmt);
-		pp_vdiag(e->c->p, loc, "error", fmt, ap);
+		diag_report_va(e->c->p, loc, "error", fmt, ap);
 		va_end(ap);
 	}
 	e->E->errors++;
@@ -212,7 +212,7 @@ static void do_item(ecx *e, uint32_t it)
 		emit_string(e, it & 0x7fffffffu);
 		return;
 	}
-	if (c->syms[it].kind == S_FUNC && WASM(c)) {
+	if (WASM(c) && c->syms[it].kind == S_FUNC) {
 		wasm_emit_function(e, it);
 	} else if (c->syms[it].kind == S_FUNC && X86(c)) {
 		if (!vw_try(e, it))
@@ -303,7 +303,7 @@ static void as_error(cc *c, const char *fmt, ...)
 	va_list ap;
 
 	va_start(ap, fmt);
-	pp_vdiag(c->p, 0, "error", fmt, ap);
+	diag_report_va(c->p, 0, "error", fmt, ap);
 	va_end(ap);
 }
 
@@ -784,7 +784,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
  * VCC_EMIT_REPEAT=N: generate N times over the same AST (profiling), write once.
  * A round that marks functions for inlining (need_fold) is generated again.
  */
-extern _Atomic unsigned long long ppd_ns_emit;
+extern _Atomic unsigned long long driver_emit_nanoseconds;
 
 int emit_tu(cc *c, const cc_opts *o)
 {
@@ -817,7 +817,7 @@ int emit_tu(cc *c, const cc_opts *o)
 	keep_free(&K[1]);
 	vjob_region_release(mfr, c->nsym + 64);
 	vjob_region_pool_give(&mfpool, mfr);
-	ppd_ns_emit += (unsigned long long)((now() - t0) * 1e9);
-	ppd_ph_add(PPD_PH_EMIT, v0);
+	driver_emit_nanoseconds += (unsigned long long)((now() - t0) * 1e9);
+	driver_phase_add(DRIVER_PHASE_EMIT, v0);
 	return err;
 }

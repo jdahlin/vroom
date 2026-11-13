@@ -149,3 +149,12 @@ and server; the backend path (Q-drv-22) is deleted if Johan agrees.
 Files and file-scope functions to `driver_*` and `vccd_*` in `module_noun_verb`
 form, scripted (`src/tools/rename-table.py`), the table reviewed against
 STYLE.md.  `ppd_*` public names in `include/driver/ppdriver.h` follow.
+
+Status (2026-11-13): applied from `rename-driver-server.tsv`: the 363 word and
+path rows by `rename-table.py` (whole word, tree wide: the table's names are
+unique), the 104 `unsafe` rows file by file with a C-aware script (calls,
+type uses, declarations; comments only for names with an underscore or a call;
+locals and parameters that share a row's old name were left), and the 163
+field rows (172 with owners named twice) by `rename-table.py --fields` from a
+macOS and a Linux report.  Not renamed, by the table's own rule: environment
+variables, command-line options, strings, the wire format's values.

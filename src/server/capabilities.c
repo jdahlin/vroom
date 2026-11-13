@@ -16,9 +16,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "caps.h"
+#include "capabilities.h"
 
-static bool in(const char *s, const char *const *list)
+static bool vccd_capabilities_list_contains(const char *s, const char *const *list)
 {
 	for (; *list; list++)
 		if (!strcmp(s, *list))
@@ -26,17 +26,17 @@ static bool in(const char *s, const char *const *list)
 	return false;
 }
 
-static bool prefix(const char *s, const char *p)
+static bool vccd_capabilities_has_prefix(const char *s, const char *p)
 {
 	return !strncmp(s, p, strlen(p));
 }
 
 /* options taking the next argument */
-static const char *const cc_with_arg[] = {
+static const char *const vccd_capabilities_cc_with_argument[] = {
 	"-o", "-include", "-isystem", "-iquote", "-x", "-MF", "-MT", "-MQ", "--explain", NULL
 };
 
-static const char *const cc_exact[] = {
+static const char *const vccd_capabilities_cc_exact[] = {
 	"-c", "-S", "-E", "-P", "-C", "-nostdinc", "-pipe", "-g0",
 	"-O0", "-O1", "-O2", "-O3", "-Os",
 	"--target=aarch64-linux-gnu", "-fintegrated-as",
@@ -56,7 +56,7 @@ static const char *const cc_exact[] = {
 	/* language */
 	"-fms-anonymous-structs", "-fms-extensions", "-fstrict-flex-arrays=3",
 	"-std=gnu11", "-std=gnu89", "-std=c11", "-std=gnu99",
-	/* diagnostics (ppdriver.c parses them) */
+	/* diagnostics (driver/cmdline.c parses them) */
 	"-fcolor-diagnostics", "-fno-color-diagnostics", "-fdiagnostics-color", "-fno-diagnostics-color",
 	"-fdiagnostics-color=always", "-fdiagnostics-color=never", "-fdiagnostics-color=auto",
 	"-fno-caret-diagnostics", "-fcaret-diagnostics", "-fdiagnostics-show-id", "-fno-diagnostics-show-id",
@@ -68,7 +68,7 @@ static const char *const cc_exact[] = {
 	NULL
 };
 
-static const char *const cc_prefix[] = {
+static const char *const vccd_capabilities_cc_prefix[] = {
 	"-D", "-U", "-I", "-fmacro-prefix-map=", "-ffile-prefix-map=",
 	"-falign-functions=", "-fno-builtin-", "-Wp,-MMD,", "-Wp,-MD,",
 	"-ferror-limit=", "-fmacro-backtrace-limit=", "-fspell-checking-limit=", "-fdiagnostics-add-output=sarif:file=",
@@ -76,7 +76,7 @@ static const char *const cc_prefix[] = {
 };
 
 /* assembler options accepted through -Wa, */
-static bool as_option_ok(const char *o, size_t n)
+static bool vccd_capabilities_as_option_is_ok(const char *o, size_t n)
 {
 	static const char *const ok[] = { "--fatal-warnings", NULL };
 	char tmp[256];
@@ -85,14 +85,14 @@ static bool as_option_ok(const char *o, size_t n)
 		return false;
 	memcpy(tmp, o, n);
 	tmp[n] = 0;
-	return in(tmp, ok) || prefix(tmp, "-march=armv8") || prefix(tmp, "-march=armv9");
+	return vccd_capabilities_list_contains(tmp, ok) || vccd_capabilities_has_prefix(tmp, "-march=armv8") || vccd_capabilities_has_prefix(tmp, "-march=armv9");
 }
 
-static const char *const warning_groups[] = {
+static const char *const vccd_capabilities_warning_groups[] = {
 #include "warnings.inc"
 };
 
-static int cmp_str(const void *k, const void *e)
+static int vccd_capabilities_string_compare(const void *k, const void *e)
 {
 	return strcmp(k, *(const char *const *)e);
 }
@@ -101,7 +101,7 @@ static int cmp_str(const void *k, const void *e)
  * -W<name>, -Wno-<name>, -Werror=<name>, -Wno-error=<name>, -W<name>=<n>:
  * accepted if <name> is a known warning group.
  */
-static bool warning_ok(const char *a)
+static bool vccd_capabilities_warning_is_ok(const char *a)
 {
 	char name[128];
 	const char *s = a + 2;
@@ -118,40 +118,40 @@ static bool warning_ok(const char *a)
 		return false;
 	memcpy(name, s, n);
 	name[n] = 0;
-	return bsearch(name, warning_groups, sizeof(warning_groups) / sizeof(warning_groups[0]),
-		       sizeof(warning_groups[0]), cmp_str) != NULL;
+	return bsearch(name, vccd_capabilities_warning_groups, sizeof(vccd_capabilities_warning_groups) / sizeof(vccd_capabilities_warning_groups[0]),
+		       sizeof(vccd_capabilities_warning_groups[0]), vccd_capabilities_string_compare) != NULL;
 }
 
-int cc_option(const char *a, const char *next, const char **why)
+int vccd_capabilities_cc_option_arity(const char *a, const char *next, const char **why)
 {
 	*why = a;
-	if (in(a, cc_with_arg))
+	if (vccd_capabilities_list_contains(a, vccd_capabilities_cc_with_argument))
 		return next ? 2 : 0;
-	if (in(a, cc_exact))
+	if (vccd_capabilities_list_contains(a, vccd_capabilities_cc_exact))
 		return 1;
-	for (const char *const *p = cc_prefix; *p; p++)
-		if (prefix(a, *p))
+	for (const char *const *p = vccd_capabilities_cc_prefix; *p; p++)
+		if (vccd_capabilities_has_prefix(a, *p))
 			return 1;
-	if (prefix(a, "-Wa,")) {
+	if (vccd_capabilities_has_prefix(a, "-Wa,")) {
 		const char *s = a + 4;
 
 		while (*s) {
 			const char *e = strchr(s, ',');
 			size_t n = e ? (size_t)(e - s) : strlen(s);
 
-			if (!as_option_ok(s, n))
+			if (!vccd_capabilities_as_option_is_ok(s, n))
 				return 0;
 			s += n + (e != NULL);
 		}
 		return 1;
 	}
 	/* warning options: diagnostics only, but must name a known group */
-	if (a[0] == '-' && a[1] == 'W' && !prefix(a, "-Wl,") && !prefix(a, "-Wp,"))
-		return warning_ok(a);
+	if (a[0] == '-' && a[1] == 'W' && !vccd_capabilities_has_prefix(a, "-Wl,") && !vccd_capabilities_has_prefix(a, "-Wp,"))
+		return vccd_capabilities_warning_is_ok(a);
 	return 0;
 }
 
-static const char *const ld_exact[] = {
+static const char *const vccd_capabilities_ld_exact[] = {
 	"-maarch64elf", "-EL", "--gc-sections", "--orphan-handling=warn",
 	"--orphan-handling=error", "--build-id=sha1", "--no-undefined",
 	"-z", "norelro", "noexecstack", "max-page-size=4096", "separate-code",
@@ -159,10 +159,10 @@ static const char *const ld_exact[] = {
 	"--no-dynamic-linker", "--fix-cortex-a53-843419", NULL
 };
 
-int ld_option(const char *a, const char **why)
+int vccd_capabilities_ld_option_is_accepted(const char *a, const char **why)
 {
 	*why = a;
-	return in(a, ld_exact);
+	return vccd_capabilities_list_contains(a, vccd_capabilities_ld_exact);
 }
 
 /*
@@ -170,27 +170,27 @@ int ld_option(const char *a, const char **why)
  * __clang_major__ etc., ld-version.sh and CC_VERSION_TEXT from --version), so
  * they are what clang/lld 23.1.4 print: the .config stays the same.
  */
-const char cc_version_text[] = "Homebrew clang version 23.1.4\n";
-const char ld_version_text[] = "Homebrew LLD 23.1.4 (compatible with GNU linkers)\n";
+const char vccd_capabilities_cc_version_text[] = "Homebrew clang version 23.1.4\n";
+const char vccd_capabilities_ld_version_text[] = "Homebrew LLD 23.1.4 (compatible with GNU linkers)\n";
 
 /* `-print-file-name=include`: the compiler's own headers (stddef.h, ...) */
 #ifdef VCC_RESDIR
-const char cc_resource_include[] = VCC_RESDIR;
+const char vccd_capabilities_resource_include[] = VCC_RESDIR;
 #else
-const char cc_resource_include[] = "/opt/homebrew/opt/llvm/lib/clang/23/include";
+const char vccd_capabilities_resource_include[] = "/opt/homebrew/opt/llvm/lib/clang/23/include";
 #endif
 
 /* vcc builds the kernel only: no target libc, so no user-space links */
-const bool cc_can_link = false;
+const bool vccd_capabilities_can_link = false;
 
 /*
  * Link options vld rejects up front, so that a probe link (Kconfig's
  * tools-support-relr.sh) fails without running a linker: vld does not pack
  * relative relocations (RELR), and TOOLS_SUPPORT_RELR stays n.
  */
-bool ld_rejects(const char *a, const char *next)
+bool vccd_capabilities_ld_option_is_rejected(const char *a, const char *next)
 {
-	return prefix(a, "--pack-dyn-relocs=") || !strcmp(a, "-zpack-relative-relocs") ||
+	return vccd_capabilities_has_prefix(a, "--pack-dyn-relocs=") || !strcmp(a, "-zpack-relative-relocs") ||
 	       (!strcmp(a, "-z") && next && !strcmp(next, "pack-relative-relocs"));
 }
 
@@ -201,12 +201,12 @@ bool ld_rejects(const char *a, const char *next)
  * not listed is compiled for real (vccd forwards it), so the list only has to
  * cover the probes on the critical path; all answers equal clang's.
  */
-struct probe_src {
+struct vccd_capabilities_probe_source {
 	const char *src;
 	bool ok;
 };
 
-static const struct probe_src as_sources[] = {
+static const struct vccd_capabilities_probe_source vccd_capabilities_as_sources[] = {
 	{ "1:\n.inst 0\n.rept . - 1b\n\nnop\n.endr", true },		/* arm64 Kconfig (negated) */
 	{ ".cfi_startproc\n.cfi_negate_ra_state\n.cfi_endproc", true },	/* AS_HAS_CFI_NEGATE_RA_STATE */
 	{ ".arch armv8.5-a+memtag\nstgm xzr,[x0]", true },			/* ARM64_AS_HAS_MTE */
@@ -217,7 +217,7 @@ static const struct probe_src as_sources[] = {
 	{ NULL, false }
 };
 
-static const struct probe_src c_sources[] = {
+static const struct vccd_capabilities_probe_source vccd_capabilities_c_sources[] = {
 	/* arm64 Makefile: "K" takes a 32-bit logical immediate, 0xffffffff is not one */
 	{ "int main(void) { asm volatile(\"and w0, w0, %w0\" :: \"K\" (4294967295)); return 0; }", false },
 	{ "__attribute__((no_profile_instrument_function)) int x();", true },
@@ -228,7 +228,7 @@ static const struct probe_src c_sources[] = {
 	{ NULL, false }
 };
 
-static int lookup(const struct probe_src *t, const char *src, size_t n)
+static int vccd_capabilities_probe_lookup(const struct vccd_capabilities_probe_source *t, const char *src, size_t n)
 {
 	while (n && src[n - 1] == '\n')
 		n--;
@@ -238,18 +238,18 @@ static int lookup(const struct probe_src *t, const char *src, size_t n)
 	return -1;
 }
 
-int as_source_probe(const char *src, size_t n)
+int vccd_capabilities_as_source_probe(const char *src, size_t n)
 {
-	return lookup(as_sources, src, n);
+	return vccd_capabilities_probe_lookup(vccd_capabilities_as_sources, src, n);
 }
 
-int c_source_probe(const char *src, size_t n)
+int vccd_capabilities_c_source_probe(const char *src, size_t n)
 {
-	return lookup(c_sources, src, n);
+	return vccd_capabilities_probe_lookup(vccd_capabilities_c_sources, src, n);
 }
 
 /* macros vcc predefines (with a value of its own) */
-bool cc_predefined(const char *def)
+bool vccd_capabilities_macro_is_predefined(const char *def)
 {
 	static const char *const predef[] = {
 		"__SIZEOF_INT128__", "__aarch64__", "__AARCH64EL__", "__LP64__",

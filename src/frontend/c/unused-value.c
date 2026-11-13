@@ -28,7 +28,7 @@ VPRIV void unused_result(cc *c, uint32_t e, bool last)
 		while (N(f)->op == N_CAST && N(f)->a)
 			f = N(f)->a;
 		if (N(f)->op == N_VAR && (c->syms[N(f)->a].flags & SF_WUR)) {
-			pp_span r = rng(c, e);
+			diag_span r = rng(c, e);
 			const attrs *a = &c->attr[c->syms[N(f)->a].attrs];
 
 			cc_warnx(c, "unused-result", true, NULL, rng(c, N(e)->a).b, &r, 1, NULL, 0,
@@ -39,7 +39,7 @@ VPRIV void unused_result(cc *c, uint32_t e, bool last)
 }
 
 /* clang's Expr::isUnusedResultAWarning: does dropping e's value warn, where */
-typedef struct uvw { uint32_t loc; pp_span r[2]; int nr; uint32_t e; } uvw;
+typedef struct uvw { uint32_t loc; diag_span r[2]; int nr; uint32_t e; } uvw;
 
 static bool vol(cc *c, uint32_t e)
 {
@@ -154,16 +154,16 @@ VPRIV bool unused_cmp(cc *c, uint32_t e)
 	{
 		int k = N(e)->aux;
 		uint32_t op = N(e)->loc;
-		pp_span r = { rng_np(c, N(e)->a).b, rng_np(c, N(e)->b).e };
+		diag_span r = { rng_np(c, N(e)->a).b, rng_np(c, N(e)->b).e };
 		bool eq = k == LEX_TOKEN_EQUAL_EQUAL || k == LEX_TOKEN_EXCLAMATION_EQUAL;
 
 		if (cc_warnx(c, "unused-comparison", true, w_all, op, &r, 1, NULL, 0, "%s comparison result unused",
 			  eq ? "equality" : "relational") && k == LEX_TOKEN_EQUAL_EQUAL) {
-			pp_span orr = { op, op + 2 };
-			pp_fixit fx = { op, op + 2, "=", 0 };
-			pp_dinfo d = { "note", op, &orr, 1, &fx, 1, NULL, 0 };
+			diag_span orr = { op, op + 2 };
+			diag_fixit fx = { op, op + 2, "=", 0 };
+			diag_info d = { "note", op, &orr, 1, &fx, 1, NULL, 0 };
 
-			pp_diagx(c->p, &d, "use '=' to turn this equality comparison into an assignment");
+			diag_report_extended(c->p, &d, "use '=' to turn this equality comparison into an assignment");
 		}
 	}
 	return true;

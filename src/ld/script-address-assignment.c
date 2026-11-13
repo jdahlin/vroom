@@ -40,13 +40,13 @@ static bool ld_script_symbol_assign(ld_assignment *a, bool insec)
 	if (a->sym == LD_NONE) {
 		ld_expression_value v = ld_assignment_operator_apply(a->op, ld_dot_expression_value(), ld_expression_eval(a->e));
 		uint64_t val = ld_expression_value_resolve(v);
-		if (insec && val < dot) {
+		if (insec && val < ctx->layout.dot) {
 			char *m = ld_region_alloc(160);
 			snprintf(m, 160, "unable to move location counter (0x%llx) backward to 0x%llx for section '%s'",
-				 (unsigned long long)dot, (unsigned long long)val, osecs.v[cur_osec].name);
+				 (unsigned long long)ctx->layout.dot, (unsigned long long)val, osecs.v[ctx->layout.current_output_section].name);
 			VVEC_PUSH(recorded, m, ld_region_alloc);
 		}
-		dot = val;
+		ctx->layout.dot = val;
 		return false;
 	}
 	if (!a->defined)
@@ -62,26 +62,23 @@ static bool ld_script_symbol_assign(ld_assignment *a, bool insec)
 	return old.kind != s->ev.kind || old.idx != s->ev.idx || old.val != s->ev.val;
 }
 
-/* lld: .tbss takes no address space; consecutive ones stack from here */
-static uint64_t tbss_off;
-
 /* assignOffsets(); returns true if the section address changed */
 static bool ld_output_section_offsets_assign(uint32_t oi, bool *symchg)
 {
 	ld_output_section *os = &osecs.v[oi];
-	uint64_t saved = dot;
+	uint64_t saved = ctx->layout.dot;
 	bool tbss = (os->flags & (SHF_ALLOC | SHF_TLS)) == (SHF_ALLOC | SHF_TLS) && os->type == SHT_NOBITS;
 	if (tbss)
-		dot += tbss_off;
+		ctx->layout.dot += ctx->layout.tbss_offset;
 	if (!(os->flags & SHF_ALLOC))
-		dot = 0;
+		ctx->layout.dot = 0;
 	else if (os->addr)
-		dot = ld_expression_value_resolve(ld_expression_eval(os->addr));
-	cur_osec = oi;
+		ctx->layout.dot = ld_expression_value_resolve(ld_expression_eval(os->addr));
+	ctx->layout.current_output_section = oi;
 	if (!os->addr)
-		dot = ld_value_align_up(dot, os->addralign);
-	bool changed = os->va != dot;
-	os->va = dot;
+		ctx->layout.dot = ld_value_align_up(ctx->layout.dot, os->addralign);
+	bool changed = os->va != ctx->layout.dot;
+	os->va = ctx->layout.dot;
 	for (uint32_t c = 0; c < os->cmds.n; c++) {
 		ld_command *cm = &os->cmds.v[c];
 		if (cm->kind == LD_COMMAND_ASSIGNMENT) {
@@ -91,17 +88,17 @@ static bool ld_output_section_offsets_assign(uint32_t oi, bool *symchg)
 		ld_input_section_description *d = &isds.v[cm->idx];
 		for (uint32_t k = 0; k < d->secs.n; k++) {
 			ld_input_section *is = &isecs.v[d->secs.v[k]];
-			dot = ld_value_align_up(dot, is->align);
-			is->off = dot - os->va;
-			dot += is->size;
+			ctx->layout.dot = ld_value_align_up(ctx->layout.dot, is->align);
+			is->off = ctx->layout.dot - os->va;
+			ctx->layout.dot += is->size;
 		}
 	}
-	os->size = dot - os->va;
+	os->size = ctx->layout.dot - os->va;
 	if (!(os->flags & SHF_ALLOC))
-		dot = saved;
+		ctx->layout.dot = saved;
 	else if (tbss) {
-		tbss_off = dot - saved;
-		dot = saved;
+		ctx->layout.tbss_offset = ctx->layout.dot - saved;
+		ctx->layout.dot = saved;
 	}
 	return changed;
 }
@@ -109,9 +106,9 @@ static bool ld_output_section_offsets_assign(uint32_t oi, bool *symchg)
 static bool ld_addresses_assign(void)
 {
 	bool changed = false, symchg = false;
-	dot = 0;
-	tbss_off = 0;
-	cur_osec = LD_OUTPUT_SECTION_AETHER;
+	ctx->layout.dot = 0;
+	ctx->layout.tbss_offset = 0;
+	ctx->layout.current_output_section = LD_OUTPUT_SECTION_AETHER;
 	recorded.n = 0;
 	assert_fail.n = 0;
 	for (uint32_t i = 0; i < topcmds.n; i++) {
@@ -150,8 +147,8 @@ static void ld_script_symbol_add(ld_assignment *a)
 
 static void ld_symbol_assignments_process(void)
 {
-	dot = 0;
-	cur_osec = LD_OUTPUT_SECTION_AETHER;
+	ctx->layout.dot = 0;
+	ctx->layout.current_output_section = LD_OUTPUT_SECTION_AETHER;
 	for (uint32_t i = 0; i < topcmds.n; i++) {
 		ld_command *c = &topcmds.v[i];
 		if (c->kind == LD_COMMAND_ASSIGNMENT) {

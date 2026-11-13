@@ -97,27 +97,27 @@ VPRIV void cc_lint_naming_report(cc *c)
 		for (uint32_t s = i; s; s = c->syms[s].next)
 			defined |= (c->syms[s].flags & (fn ? SF_DEFINED : (SF_DEFINED | SF_TENTATIVE))) != 0;
 		at = y->defloc ? y->defloc : y->loc;
-		if (!defined || !pp_in_main_file(c->p, at))
+		if (!defined || !pp_location_is_in_main_file(c->p, at))
 			continue;
-		pp_where(c->p, at, &file, &flen, &line, &col);
+		pp_location_describe(c->p, at, &file, &flen, &line, &col);
 		m = lint_module_of(file, flen);
 		name = idstr_(y->name);
 		nlen = (uint32_t)idlen_(y->name);
 		if (!m || lint_name_ok(m, name, nlen))
 			continue;
 		{
-			pp_span r = { at, pp_tok_end(c->p, at) };
-			pp_dinfo d = { "warning", at, &r, 1, NULL, 0, name, nlen };
+			diag_span r = { at, pp_token_end_find(c->p, at) };
+			diag_info d = { "warning", at, &r, 1, NULL, 0, name, nlen };
 			char want[64] = "";
 
 			for (int k = 0; k < 3 && m->prefix[k]; k++)
 				snprintf(want + strlen(want), sizeof want - strlen(want), "%s%s", k ? "' or '" : "",
 					 m->prefix[k][1] ? m->prefix[k] : "v<facility>_");
 			if (fn)
-				pp_warnx(c->p, "vcc-lint-naming", true, g, &d, "function '%.*s' should be named '%s...' (module src/%s)",
+				diag_warning_report(c->p, "vcc-lint-naming", true, g, &d, "function '%.*s' should be named '%s...' (module src/%s)",
 					 (int)nlen, name, want, m->dir);
 			else
-				pp_warnx(c->p, "vcc-lint-naming", true, g, &d, "global variable '%.*s' should be named '%s...' (module src/%s)",
+				diag_warning_report(c->p, "vcc-lint-naming", true, g, &d, "global variable '%.*s' should be named '%s...' (module src/%s)",
 					 (int)nlen, name, want, m->dir);
 		}
 	}

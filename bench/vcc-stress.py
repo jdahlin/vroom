@@ -132,7 +132,7 @@ def cases(d):
          ''.join(f' int v{i}=a+{i};\n' for i in range(66000)) + ' while(g(a)){\n' +
          ''.join(f' v{i}+=a;\n' for i in range(66000)) + ' }\n long r=0;\n' +
          ''.join(f' r+=v{i};\n' for i in range(66000)) + ' return r; }\n'}, 'a.c', ['-O2'])
-    # the decl cache (driver/ccsnap.c): TUs restore the snapshot of a shared header prefix on
+    # the decl cache (driver/declaration-cache.c): TUs restore the snapshot of a shared header prefix on
     # other threads; a parse error after the restore jumps to this TU's recovery point
     hdr = ''.join(f'struct s{i} {{ int a; long b; }};\nint f{i}(struct s{i} *p);\n' for i in range(400))
     files = {'h.h': hdr}

@@ -141,7 +141,9 @@ where the two differ.
 | Who does it | The top model writes a module's work order (file map, rename table, comment drafts) from its review; a cheaper model and scripts carry it out; the top model checks the result |
 | Delivery | Johan reads results, not previews.  Each pass must land safely on tooling alone (identical output, gates, premerge) and modules must be workable in parallel: a work order names the files it owns, and two orders never share a file |
 | Shared pool (later, same day, after wave 1) | vccd's shared pool stays off by default and uncapped; vccd joins make's jobserver later, after the cleanup.  No scheduler work in wave 2 |
-| Where VIR's optimizer lives (later, same day) | On VIR itself: new passes, and passes moved from the direct emitters, work on the documented VIR format and are testable with `virtest` on `.vir` files.  Existing pre-IR passes stay until each is ported.  A 2-3 % compile-time loss on VIR is acceptable |
+| Where VIR's optimizer lives (later, same day) | On VIR itself: new passes, and passes moved from the direct emitters, work on the documented VIR format and are testable with `virtest` on `.vir` files.  Existing pre-IR passes stay until each is ported.  A 2-3 % compile-time loss on VIR is acceptable.  Moving existing passes onto VIR is parked: see the next row |
+| Moving optimizations onto VIR (later, same day, 20:58) | Parked for later.  It is fine that some optimization stays on the AST and in the record optimizer and some is on VIR.  The row above still holds for where a new VIR pass goes; what is parked is the moves |
+| Ratchet regressions of wave 1 (later, same day, 21:45) | Accepted: `bench/quality-baseline.json` is blessed at main's numbers (redundant_tokens 45173, realloc_calls 97, thread_locals 112, environment_knobs 65, functions_over_300_lines 31).  A focused run to bring them back down comes later; PR #196 lists which PR moved each number.  Track G (linker) is no longer held: an agent finishes `WORK-linker.md` from PR #183 on |
 | Struct field renames (later, same day) | Done with a mode of vcc's own front end that reports every use of a given struct field with its location; the rename script applies them.  No clang tooling |
 | Integrator (later, same day) | Coordinates as before: spawns workers, checks proofs, merges; the PR's agent keeps it mergeable and green |
 
@@ -201,6 +203,34 @@ Merged in wave 2 so far (#176 onwards):
   not moved onto `bigint.h`; `unlikely_vi` is still in `intern.h` (a bare
   `unlikely` collides with private defines).
 - #189: lex, pp and diag renamed by table (fields with short names deferred).
+- #194, #195, #197, #199, #200: opening comments for `src/driver`, `src/server`,
+  `src/codegen` (shared part), `src/include` and `src/vir`.
+- #196: the quality baseline blessed for the legitimate moves of waves 1 and 2.
+- #198: the linker's rename table applied (scoped), file moves, WORK-linker status.
+- #201: `vpp --lint`, the naming check against STYLE.md module prefixes.
+- #202: `VCC_FIELD_USES`, the front-end mode reporting uses of selected struct fields.
+- #203: VIR pass infrastructure (WORK-vir 4.0): `src/include/vir/pass.h`, registry,
+  `vir_function_compact`, `virtest --passes`; output identical.
+- #204: one lowering driver for arm64 and x86-64 (step 2e, Q-VIRB-02).
+- #205: `field-uses.py` and `rename-table.py --fields`: struct field renames from
+  the front end's report.
+- #206: the remaining field rows of `rename-as.tsv`, the first user of `--fields`.
+
+#### Track H (VIR optimizer) stopped, owner's decision 2026-11-13 20:58
+
+Track H stopped after what merged: #203 and #204.  Step 4.1
+`redundant-extensions` is parked: draft PR #207, branch
+`quality/vir-redundant-extensions`, not to be merged.  Measured for the
+record, with the same vpp and the pass on and off, the record clean-up `exts`
+still on: zlib 0.00 %, SQLite -0.095 % instructions executed, compile cost
++0.13 % cc.  The pass's worker measured the `exts` counter on VIR output at
+-28 % (suites and SQLite) and the pass's own cost at 0.3 % of build+lower on
+the suites but 3.0 % on SQLite.  Whether `exts` can be removed was not
+measured.  Step 3 (inline assembly, debug info on VIR) is not pushed in this
+wave: 3.0 has a local unpushed WIP branch `quality/vir-debug-rows`, blocked on
+`finish_function` in `src/arch/a64/codegen/func.c` dropping shrink-wrapping
+under `-g` (so `-g` would change `.text` with VIR).  No work on deleting the
+record optimizer's clean-ups.
 
 ### 2026-11-13: on the reorganised tree
 

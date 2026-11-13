@@ -149,6 +149,11 @@ per-link variables keep their names and the part files still do not compile
 alone.  Names the owner may revisit: `macho-linker.c` and `macho_link`,
 `elf-definitions.h` with `elf_*` types, `region.c`.
 
+The link context (the other half): the design is decided and its first step
+is applied (`link-context.md`, "Design (decided)": the diagnostics and layout
+groups are fields of `struct ld_context`); the remaining groups and the
+parameter series are listed there, one PR each.
+
 ### 3. The shared layer
 
 Move what ELF, wasm, Mach-O, objcopy/nm and `ar` each wrote on their own
@@ -164,16 +169,20 @@ resolution and section assignment, with a format writer each.  The decision
 of `PLAN-quality.md` ("one linker core, not three linkers") applies; the
 step is designed when 2 and 3 are done.
 
-## Known problem, to investigate
+## Known problem: two LDCMP cases (cause found, decision open)
 
-`VCC_LDCMP=1 bench/vcc-ctests.py -j 3 --no-cache` on a macOS host fails two
-cases on `origin/main`, before and after step 1 (the same objects, the same
-`vlink`): `vcc/data_sections` and `vcc/tls_static`, both "link: vlink image
-differs from lld".  Not caused by the split; the cause is open (the host's
-lld, or a real difference in how `vlink` lays out those two sections; the
-`tls_static` case touches `tls_start`, see `link-context.md`).  Whoever takes
-step 2 should look at them first, since step 2's proof depends on this
-comparison being green.
+`VCC_LDCMP=1 bench/vcc-ctests.py --no-cache` on a macOS host fails two cases
+on `origin/main` (rechecked at 7749c528, 2026-11-13): `vcc/data_sections` and
+`vcc/tls_static`, both "ref-fail: link: vlink image differs from lld" (clang's
+objects, linked by lld and by vlink).  The cause: the host's lld (Homebrew LLD
+23.1.4) relaxes a TLS local-exec `add xN, xN, #:tprel_hi12:sym, lsl #12` to a
+`nop` when the high 12 bits of the offset are zero; `vlink` writes the `add`
+with 0.  The two images differ in exactly those instructions (one in
+`tls_static`, two in `data_sections`); the program headers and the section
+layout are identical.  Making `vlink` do the same is a change of output bytes
+(and depends on which lld is the reference: the kernel build's lld may be
+older), so it is a question for the owner, not done here.  Until then a
+context PR's proof is "no new failure".
 
 ## Proof for step 1
 

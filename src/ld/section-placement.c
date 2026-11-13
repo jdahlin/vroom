@@ -4,44 +4,40 @@
 
 static uint64_t ld_headers_size(void)
 {
-	return sizeof(elf_file_header) + (uint64_t)(have_phdrs ? sphdrs.n : phdrs.n) * sizeof(elf_program_header);
+	return sizeof(elf_file_header) + (uint64_t)(have_phdrs ? sphdrs.n : ctx->layout.program_headers.n) * sizeof(elf_program_header);
 }
 
 /* ---------------- section assignment ---------------- */
 
-/* input section name -> its ld_input_section_description (or LD_NONE), open addressing; grown at half
-   full: an -ffunction-sections link has about as many names as sections */
-typedef struct { const char *name; uint32_t h; uint32_t isd; } ld_name_cache_entry;
-static ld_name_cache_entry *ncache;
-static uint32_t ncmask, ncount;
-
+/* the input-section-name cache (ld_layout.name_cache): grown at half full, an
+   -ffunction-sections link has about as many names as sections */
 static void ld_name_cache_grow(void)
 {
-	uint32_t ncap = (ncmask + 1) * 2;
+	uint32_t ncap = (ctx->layout.name_cache_mask + 1) * 2;
 	ld_name_cache_entry *nc = ld_region_alloc(ncap * sizeof *nc);
 
 	memset(nc, 0, ncap * sizeof *nc);
-	for (uint32_t i = 0; i <= ncmask; i++)
-		if (ncache[i].name) {
-			uint32_t j = ncache[i].h & (ncap - 1);
+	for (uint32_t i = 0; i <= ctx->layout.name_cache_mask; i++)
+		if (ctx->layout.name_cache[i].name) {
+			uint32_t j = ctx->layout.name_cache[i].h & (ncap - 1);
 
 			while (nc[j].name)
 				j = (j + 1) & (ncap - 1);
-			nc[j] = ncache[i];
+			nc[j] = ctx->layout.name_cache[i];
 		}
-	ncache = nc;
-	ncmask = ncap - 1;
+	ctx->layout.name_cache = nc;
+	ctx->layout.name_cache_mask = ncap - 1;
 }
 
 static uint32_t ld_input_section_description_match(const char *name)
 {
 	size_t n = strlen(name);
 	uint32_t h = ld_name_hash(name, n);
-	uint32_t j = h & ncmask;
-	while (ncache[j].name) {
-		if (ncache[j].h == h && !strcmp(ncache[j].name, name))
-			return ncache[j].isd;
-		j = (j + 1) & ncmask;
+	uint32_t j = h & ctx->layout.name_cache_mask;
+	while (ctx->layout.name_cache[j].name) {
+		if (ctx->layout.name_cache[j].h == h && !strcmp(ctx->layout.name_cache[j].name, name))
+			return ctx->layout.name_cache[j].isd;
+		j = (j + 1) & ctx->layout.name_cache_mask;
 	}
 	uint32_t res = LD_NONE;
 	for (uint32_t i = 0; i < topcmds.n && res == LD_NONE; i++) {
@@ -61,8 +57,8 @@ static uint32_t ld_input_section_description_match(const char *name)
 				}
 		}
 	}
-	ncache[j] = (ld_name_cache_entry){.name = name, .h = h, .isd = res};
-	if (++ncount * 2 > ncmask + 1)
+	ctx->layout.name_cache[j] = (ld_name_cache_entry){.name = name, .h = h, .isd = res};
+	if (++ctx->layout.name_cache_count * 2 > ctx->layout.name_cache_mask + 1)
 		ld_name_cache_grow();
 	return res;
 }
@@ -81,8 +77,6 @@ static int ld_section_alignment_stable_cmp(const void *a, const void *b)
 		return ax > ay ? -1 : 1;
 	return (x > y) - (x < y);
 }
-
-static VVEC(uint32_t) orphans;
 
 static void ld_section_commit(ld_output_section *os, ld_input_section *is)
 {
@@ -158,15 +152,15 @@ static int ld_output_section_rank(uint32_t oi)
 
 static void ld_name_cache_init(void)
 {
-	if (ncache)
+	if (ctx->layout.name_cache)
 		return;
 	uint32_t ncap = 1024;
 	while (ncap < isecs.n / 4)
 		ncap *= 2;
-	ncache = ld_region_alloc(ncap * sizeof *ncache);
-	memset(ncache, 0, ncap * sizeof *ncache);
-	ncmask = ncap - 1;
-	ncount = 0;
+	ctx->layout.name_cache = ld_region_alloc(ncap * sizeof *ctx->layout.name_cache);
+	memset(ctx->layout.name_cache, 0, ncap * sizeof *ctx->layout.name_cache);
+	ctx->layout.name_cache_mask = ncap - 1;
+	ctx->layout.name_cache_count = 0;
 }
 
 /* __start_NAME / __stop_NAME with NAME a C identifier: the NAME, else NULL */

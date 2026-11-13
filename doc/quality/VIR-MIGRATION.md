@@ -50,6 +50,10 @@ of VIR failures by reason over the kernel, PostgreSQL and SQLite.
 
 ## Passes on the direct path, and their fate
 
+**Parked by owner, 2026-11-13.**  Moving these passes onto VIR is not scheduled:
+some optimization may stay on the AST and in the record optimizer and some be on
+VIR.  The gates and the table below stay as the record of the analysis.
+
 ### arm64 record clean-ups (`arch/a64/codegen/opt.c`, `func.c:474`)
 
 | Pass | What it does | On VIR | How to decide |
@@ -119,6 +123,10 @@ pass moves:
    lowerings share only two helper files today (`Q-VIRB-02`, `Q-VIRB-03`).
 
 ## Order
+
+**Items 3-5 (closing the failure reasons for deletion, moving passes, deleting
+the walker and record optimizer) are parked by owner, 2026-11-13: nothing is
+scheduled; the list stays as the record of the analysis.**
 
 1. The failure counter (G1) and the per-pass counters on the record
    clean-ups.  Small, no behaviour change, gives every later step its numbers.

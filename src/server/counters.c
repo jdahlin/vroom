@@ -1,7 +1,7 @@
 /*
  * counters.c: the request counters (one per kind of request) and what vccd prints about itself.
  *
- * The counters are atomics bumped by every worker and printed by print_counts on SIGUSR1, at a
+ * The counters are atomics bumped by every worker and printed by vccd_counters_print on SIGUSR1, at a
  * restart and at exit: what the benchmarks read to see how many TUs vcc compiled
  * itself and how many fell back to clang.
  * Also prints the shared caches' statistics and the process's CPU time and peak RSS.  Adding a
@@ -9,24 +9,24 @@
  */
 #include "vccd-internal.h"
 
-atomic_ulong n_probe, n_probe_cc, n_fwd, n_spawn, n_pp, n_cc, n_fail, n_fallback, n_ar, n_ld, n_host,
-	n_objcopy, n_sh, n_sh_decl;
-VPRIV void print_counts(void)
+atomic_ulong vccd_probe_count, vccd_probe_compile_count, vccd_forward_count, vccd_spawn_count, vccd_preprocess_count, vccd_compile_count, vccd_failure_count, vccd_fallback_count, vccd_archive_count, vccd_link_count, vccd_host_count,
+	vccd_objcopy_count, vccd_recipe_count, vccd_recipe_declined_count;
+VPRIV void vccd_counters_print(void)
 {
 	fprintf(stderr, "vccd: %lu probes (%lu compiled), %lu -E, %lu compiled by vcc, %lu failed, %lu fell back to clang, %lu host, "
 		"%lu forwarded in all, %lu spawned, %lu ar, %lu links, %lu nm/objcopy, %lu recipes run, %lu passed to sh; "
 		"%lu builds (cache flushes)\n",
-		atomic_load(&n_probe), atomic_load(&n_probe_cc), atomic_load(&n_pp), atomic_load(&n_cc), atomic_load(&n_fail),
-		atomic_load(&n_fallback), atomic_load(&n_host), atomic_load(&n_fwd), atomic_load(&n_spawn),
-		atomic_load(&n_ar), atomic_load(&n_ld), atomic_load(&n_objcopy),
-		atomic_load(&n_sh), atomic_load(&n_sh_decl), atomic_load(&n_flush));
+		atomic_load(&vccd_probe_count), atomic_load(&vccd_probe_compile_count), atomic_load(&vccd_preprocess_count), atomic_load(&vccd_compile_count), atomic_load(&vccd_failure_count),
+		atomic_load(&vccd_fallback_count), atomic_load(&vccd_host_count), atomic_load(&vccd_forward_count), atomic_load(&vccd_spawn_count),
+		atomic_load(&vccd_archive_count), atomic_load(&vccd_link_count), atomic_load(&vccd_objcopy_count),
+		atomic_load(&vccd_recipe_count), atomic_load(&vccd_recipe_declined_count), atomic_load(&vccd_flush_count));
 	{	/* the shared caches, as vpp --batch prints them */
 		char hs[512];
 		struct rusage ru;
 
 		pp_header_cache_statistics_format(hs, sizeof(hs));
 		fprintf(stderr, "vccd: %s\n", hs);
-		dc_stats(hs, sizeof(hs));
+		driver_declaration_cache_statistics_format(hs, sizeof(hs));
 		fprintf(stderr, "vccd: %s\n", hs);
 		getrusage(RUSAGE_SELF, &ru);
 		fprintf(stderr, "vccd: cpu user %.2f s sys %.2f s, max rss %.0f MB\n",

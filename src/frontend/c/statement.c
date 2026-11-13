@@ -32,17 +32,17 @@ static void assign_cond_warn(cc *c, uint32_t e)
 {
 	if (N(e)->op == N_ASSIGN && !N(e)->aux && !(N(e)->flags & (NF_PAREN | NF_MACRO | NF_ERR))) {
 		uint32_t op = N(e)->loc;
-		pp_span r[2] = { rng(c, N(e)->a), rng(c, N(e)->b) };
-		pp_span all = { r[0].b, r[1].e };
-		pp_fixit p2[2] = { { all.b, all.b, "(", VDA_MAYBE }, { all.e, all.e, ")", VDA_MAYBE } };
-		pp_fixit eq = { op, op + 1, "==", VDA_MAYBE };
+		diag_span r[2] = { rng(c, N(e)->a), rng(c, N(e)->b) };
+		diag_span all = { r[0].b, r[1].e };
+		diag_fixit p2[2] = { { all.b, all.b, "(", DIAG_APPLICABILITY_MAYBE }, { all.e, all.e, ")", DIAG_APPLICABILITY_MAYBE } };
+		diag_fixit eq = { op, op + 1, "==", DIAG_APPLICABILITY_MAYBE };
 
 		if (cc_warnx(c, "parentheses", true, w_all, op, &all, 1, NULL, 0,
 			  "using the result of an assignment as a condition without parentheses")) {
-			pp_dinfo d1 = { "note", op, NULL, 0, p2, 2, NULL, 0 }, d2 = { "note", op, NULL, 0, &eq, 1, NULL, 0 };
+			diag_info d1 = { "note", op, NULL, 0, p2, 2, NULL, 0 }, d2 = { "note", op, NULL, 0, &eq, 1, NULL, 0 };
 
-			pp_diagx(c->p, &d1, "place parentheses around the assignment to silence this warning");
-			pp_diagx(c->p, &d2, "use '==' to turn this assignment into an equality comparison");
+			diag_report_extended(c->p, &d1, "place parentheses around the assignment to silence this warning");
+			diag_report_extended(c->p, &d2, "use '==' to turn this assignment into an equality comparison");
 		}
 	}
 }
@@ -138,7 +138,7 @@ static void switch_enum_warn(cc *c, qty et, uint32_t cnd)
 	if (nmiss > 3)
 		snprintf(b + k, sizeof(b) - k, ", and %u more", nmiss - 3);
 	{
-		pp_span r = rng(c, cnd);
+		diag_span r = rng(c, cnd);
 
 		cc_warnx(c, "switch", true, w_all, r.b, NULL, 0, NULL, 0, "enumeration value%s %s not handled in switch",
 		      nmiss > 1 ? "s" : "", b);
@@ -368,7 +368,7 @@ static void block_item(cc *c, uint32_t loc, vec *items, bool se, uint32_t *sedon
 		*sedone = items->n;
 	}
 	if (is(c, LEX_TOKEN_EOF)) {
-		report(c, "error", pp_main_eof(c->p), NULL, 0, NULL, 0, "expected '}'");
+		report(c, "error", pp_main_file_end(c->p), NULL, 0, NULL, 0, "expected '}'");
 		note(c, loc, "to match this '{'");
 		longjmp(c->bail, 1);
 	}
@@ -720,7 +720,7 @@ VPRIV uint32_t statement(cc *c)
 			c->cnd--;
 			if (c->o->std != 89) scope_close(c);
 			n = mkstmt(c, N_IF, loc, cnd, th, el);
-			c->span[n] = (pp_span){ loc, rp };
+			c->span[n] = (diag_span){ loc, rp };
 			return n;
 		}
 	}
@@ -827,7 +827,7 @@ VPRIV uint32_t statement(cc *c)
 		cnd = rvalue(c, cnd);
 		expect_close(c, LEX_TOKEN_RIGHT_PAREN, open, cnd);
 		if (!is_integer(c, N(cnd)->ty)) {
-			pp_span r = rng(c, cnd);
+			diag_span r = rng(c, cnd);
 
 			report(c, "error", loc, &r, 1, NULL, 0, "statement requires expression of integer type ('%s' invalid)",
 			       tyname(c, N(cnd)->ty));
@@ -852,7 +852,7 @@ VPRIV uint32_t statement(cc *c)
 					for (uint32_t i = c->case_base; i < c->ncase && !hit; i++)
 						hit = cv.i >= c->cases[i].lo && cv.i <= c->cases[i].hi;
 					if (!hit) {
-						pp_span r = rng(c, cnd);
+						diag_span r = rng(c, cnd);
 
 						report(c, "warning", r.b, NULL, 0, NULL, 0, is_signed(c, N(cnd)->ty) ?
 						       "no case matching constant switch condition '%lld'" : "no case matching constant switch condition '%llu'",
@@ -891,7 +891,7 @@ VPRIV uint32_t statement(cc *c)
 			if (!is_void(c, rt) && !is_void(c, N(e)->ty))
 				e = is_record(c, rt) && !is_complex(c, rt) ? e : convert_as(c, e, rt, CX_RETURN, loc);
 			else if (!is_void(c, rt) && is_void(c, N(e)->ty) && !(N(e)->flags & NF_ERR)) {
-				pp_span r = rng(c, e);
+				diag_span r = rng(c, e);
 				char f[256];
 
 				snprintf(f, sizeof f, "%s", tyname(c, N(e)->ty));	/* tyname: one buffer */
@@ -899,7 +899,7 @@ VPRIV uint32_t statement(cc *c)
 				       tyname(c, rt));
 			}
 			else if (is_void(c, rt) && !is_void(c, N(e)->ty) && c->fn && !(N(e)->flags & NF_ERR)) {
-				pp_span r = rng(c, e);
+				diag_span r = rng(c, e);
 
 				cc_errorx(c, "return-mismatch", (const char *const[]){"return-type", NULL}, loc, &r, 1, "void function '%.*s' should not return a value",
 				       IDF(c->syms[c->fn].name));

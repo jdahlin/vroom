@@ -203,33 +203,33 @@ static void a64_ld_input_section_relocate(uint32_t si, uint8_t *buf)
 				     (uint32_t)(((uint64_t)v & 3) << 29 | (((uint64_t)v >> 2) & 0x7ffff) << 5));
 			break;
 		case R_AARCH64_TLSLE_ADD_TPREL_HI12:
-			v = (int64_t)(t.va - tls_tp);
-			if (!has_tls || v < 0 || v >= 1 << 24)
+			v = (int64_t)(t.va - ctx->layout.tls_thread_pointer);
+			if (!ctx->layout.has_tls || v < 0 || v >= 1 << 24)
 				a64_ld_relocation_error_report(o, is, rl, "out of range (TLS offset)", v);
 			a64_ld_instruction_immediate_store(loc, 0xfffu << 10, (uint32_t)((v >> 12) & 0xfff) << 10);
 			break;
 		case R_AARCH64_TLSLE_ADD_TPREL_LO12:
 		case R_AARCH64_TLSLE_ADD_TPREL_LO12_NC:
-			v = (int64_t)(t.va - tls_tp);
+			v = (int64_t)(t.va - ctx->layout.tls_thread_pointer);
 			if (type == R_AARCH64_TLSLE_ADD_TPREL_LO12 && (v < 0 || v >= 1 << 12))
 				a64_ld_relocation_error_report(o, is, rl, "out of range (TLS offset)", v);
 			a64_ld_instruction_immediate_store(loc, 0xfffu << 10, (uint32_t)(v & 0xfff) << 10);
 			break;
 		/* lld relaxTlsIeToLe / relaxTlsGdToLe: movz/movk of the offset, nops */
 		case R_AARCH64_TLSIE_ADR_GOTTPREL_PAGE21:
-			v = (int64_t)(t.va - tls_tp);
+			v = (int64_t)(t.va - ctx->layout.tls_thread_pointer);
 			ld_u32_store(loc, 0xd2a00000u | (ld_u32_load(loc) & 0x1f) | (uint32_t)((v >> 16) & 0xffff) << 5);
 			break;
 		case R_AARCH64_TLSIE_LD64_GOTTPREL_LO12_NC:
-			v = (int64_t)(t.va - tls_tp);
+			v = (int64_t)(t.va - ctx->layout.tls_thread_pointer);
 			ld_u32_store(loc, 0xf2800000u | (ld_u32_load(loc) & 0x1f) | (uint32_t)(v & 0xffff) << 5);
 			break;
 		case R_AARCH64_TLSDESC_ADR_PAGE21:	/* movz x0, #hi, lsl 16 */
-			v = (int64_t)(t.va - tls_tp);
+			v = (int64_t)(t.va - ctx->layout.tls_thread_pointer);
 			ld_u32_store(loc, 0xd2a00000u | (uint32_t)((v >> 16) & 0xffff) << 5);
 			break;
 		case R_AARCH64_TLSDESC_LD64_LO12:	/* movk x0, #lo */
-			v = (int64_t)(t.va - tls_tp);
+			v = (int64_t)(t.va - ctx->layout.tls_thread_pointer);
 			ld_u32_store(loc, 0xf2800000u | (uint32_t)(v & 0xffff) << 5);
 			break;
 		case R_AARCH64_TLSDESC_ADD_LO12:

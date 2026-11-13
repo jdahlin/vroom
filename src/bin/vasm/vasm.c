@@ -20,7 +20,7 @@
 #include <time.h>
 #include <unistd.h>
 
-static const char *map(const char *path, size_t *n)
+static const char *vasm_file_map(const char *path, size_t *n)
 {
 	int fd = open(path, O_RDONLY);
 	if (fd < 0) { perror(path); exit(1); }
@@ -31,7 +31,7 @@ static const char *map(const char *path, size_t *n)
 	return p;
 }
 
-static double now(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec + t.tv_nsec * 1e-9; }
+static double vasm_clock_seconds(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec + t.tv_nsec * 1e-9; }
 
 int main(int argc, char **argv)
 {
@@ -49,12 +49,12 @@ int main(int argc, char **argv)
 		size_t *ns = calloc((size_t)nf, sizeof *ns), tin = 0, tout = 0;
 		static uint8_t *buf; static size_t cap;
 		volatile unsigned sink = 0;
-		for (int i = 0; i < nf; i++) { ps[i] = map(argv[first + i], &ns[i]); for (size_t j = 0; j < ns[i]; j += 4096) sink += (unsigned char)ps[i][j]; }
+		for (int i = 0; i < nf; i++) { ps[i] = vasm_file_map(argv[first + i], &ns[i]); for (size_t j = 0; j < ns[i]; j += 4096) sink += (unsigned char)ps[i][j]; }
 		double best = 1e9;
 		vperf vbest = { ~0ull, ~0ull };
 		uint64_t h = 1469598103934665603ull;
 		for (int r = 0; r < bench; r++) {
-			double t0 = now();
+			double t0 = vasm_clock_seconds();
 			vperf v0 = vperformance_now();
 			for (int i = 0; i < nf; i++) {
 				const char *msg;
@@ -72,7 +72,7 @@ int main(int argc, char **argv)
 				vbest.ins = v0.ins < vbest.ins ? v0.ins : vbest.ins;
 				vbest.cyc = v0.cyc < vbest.cyc ? v0.cyc : vbest.cyc;
 			}
-			double t = now() - t0;
+			double t = vasm_clock_seconds() - t0;
 			if (t < best) best = t;
 		}
 		uint64_t st, sb;
@@ -95,7 +95,7 @@ int main(int argc, char **argv)
 		else in = argv[i];
 	}
 	if (!in) { fprintf(stderr, "usage: vasm [--target=wasm64-...|arm64-apple-macos|x86_64-linux-gnu] [-o out.o] in.s\n"); return 2; }
-	size_t n; const char *p = map(in, &n);
+	size_t n; const char *p = vasm_file_map(in, &n);
 	const char *msg;
 #ifndef VCC_WASM
 	if (wasm) { fprintf(stderr, "vcc: error: this build has no WebAssembly support (make VCC_WASM=1)\n"); return 1; }

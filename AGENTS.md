@@ -10,7 +10,7 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
   parallel, minimal allocation, mmap, separate I/O and CPU threads).
 - No clang dependency at run time.  Data taken from clang once (capability
   tables, predefined macros, `__has_*` answers) lives in generated files
-  (`src/server/caps.c`, `src/frontend/pp/ppdata*.inc` via `gen-ppdata.sh`).
+  (`src/server/capabilities.c`, `src/frontend/pp/ppdata*.inc` via `gen-ppdata.sh`).
 - Do not replace make.
 - The machine is shared: keep benchmarks short and use `-j 6` for
   parallel diff runs.
@@ -131,10 +131,10 @@ relative to it); `TODO.md` stays at the top.
     `wasmld.c` is vlink for WebAssembly (as `wasm-ld` or with `-mwasm64`).
   - `driver/`: one compile job from a clang command line (`job.c` calls the
     pieces: `cmdline.c`, `searchpath.c`, `predef.c`, `depfile.c`, `output.c`, ...;
-    `driver-internal.h`), the declaration cache (`ccsnap.c`), `--explain` pages (`explain.inc`).
+    `driver-internal.h`), the declaration cache (`declaration-cache.c`), `--explain` pages (`explain.inc`).
   - `server/`: vccd (`vccd.c`, with its main; one file per job beside it,
     `vccd-internal.h`), the diagnostics store
-    (`dstore.c`), the capability table (`caps.c`) and the warning groups
+    (`diagnostics-store.c`), the capability table (`capabilities.c`) and the warning groups
     (`warnings.inc`).  Without `--backend-sock` vccd runs the whole kernel
     build itself: probes, `-E`/`-c`/`-S` (stdin too), links (vld in-process;
     `--ld PROG` spawns one), nm/objcopy behind the `vcc-nm`/`vcc-objcopy`
@@ -142,7 +142,7 @@ relative to it); `TODO.md` stays at the top.
     falls back to clang.
   - `utils/`: what runs inside vccd for kbuild: fixdep, the archiver (`ar.c`:
     thin archives, llvm-ar-identical, so the build uses no llvm-ar) and
-    `rsh.c`, kbuild's recipe subset of sh, run for `vsh`
+    `shell.c`, kbuild's recipe subset of sh, run for `vsh`
     (`build/src/vsh/sh`, the shim with `-DVSH`), make's SHELL in
     `bench/vccd-kbuild.sh`; anything outside the subset goes to `$VSH_REAL`.
   - `bin/<prog>/`: one directory per program's main: `vcc/shim.c` (the

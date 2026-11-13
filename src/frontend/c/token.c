@@ -57,8 +57,8 @@ VPRIV void init_keywords(void)
 VPRIV __attribute__((noinline)) void fetch_directive(cc *c, ptok *t)
 {
 	do {
-		if (unlikely(dc_stale(c)))
-			dc_materialize(c);	/* (the pragma acts on the real state) */
+		if (unlikely(driver_declaration_cache_is_stale(c)))
+			driver_declaration_cache_materialize(c);	/* (the pragma acts on the real state) */
 		pragma(c, t);
 		if (unlikely(c->lz_on))
 			lz_fetch(c, t);
@@ -157,9 +157,9 @@ VPRIV __attribute__((noinline, cold, noreturn)) void expect_fail(cc *c, const ch
 	size_t n = strlen(what);
 
 	if (n >= 3 && n <= 5 && what[0] == '\'' && what[n - 1] == '\'' && c->prevloc && !(c->prevflags & PP_TOKEN_FLAG_FROM_MACRO)) {
-		uint32_t e = pp_tok_end(c->p, c->prevloc);
+		uint32_t e = pp_token_end_find(c->p, c->prevloc);
 		char *s = halloc(c, n - 1);
-		pp_fixit fx = { e, e, s, VDA_MAYBE };
+		diag_fixit fx = { e, e, s, DIAG_APPLICABILITY_MAYBE };
 
 		memcpy(s, what + 1, n - 2), s[n - 2] = 0;
 		report(c, "error", e, NULL, 0, &fx, 1, "expected %s", what);
@@ -190,13 +190,13 @@ VPRIV __attribute__((noinline, cold, noreturn)) void lparen_fail(cc *c, const ch
    ("struct s a b", "int fint x)": the mutation corpus, D6) */
 VPRIV int semi_app(cc *c)
 {
-	return (c->tk[0].flags & LEX_TOKEN_FLAG_LINE_START) && c->tk[0].kind != LEX_TOKEN_LEFT_BRACE ? VDA_MACHINE : VDA_MAYBE;
+	return (c->tk[0].flags & LEX_TOKEN_FLAG_LINE_START) && c->tk[0].kind != LEX_TOKEN_LEFT_BRACE ? DIAG_APPLICABILITY_MACHINE : DIAG_APPLICABILITY_MAYBE;
 }
 
 VPRIV bool expect_semi(cc *c, const char *after)
 {
 	uint32_t e;
-	pp_fixit fx;
+	diag_fixit fx;
 
 	if (likely(c->tk[0].kind == LEX_TOKEN_SEMICOLON)) {
 		next(c);
@@ -204,7 +204,7 @@ VPRIV bool expect_semi(cc *c, const char *after)
 	}
 	if ((c->tk[0].kind == LEX_TOKEN_RIGHT_PAREN || c->tk[0].kind == LEX_TOKEN_RIGHT_SQUARE) && peek(c, 1)->kind == LEX_TOKEN_SEMICOLON) {
 		/* clang: "f);": the stray ')' (or ']') and the ';' are consumed */
-		pp_fixit fx = { c->tk[0].loc, c->tk[0].loc + 1, "", VDA_MAYBE };	/* (or a '(' was lost) */
+		diag_fixit fx = { c->tk[0].loc, c->tk[0].loc + 1, "", DIAG_APPLICABILITY_MAYBE };	/* (or a '(' was lost) */
 
 		report(c, "error", c->tk[0].loc, NULL, 0, &fx, !(c->tk[0].flags & PP_TOKEN_FLAG_FROM_MACRO), "extraneous '%s' before ';'",
 		       c->tk[0].kind == LEX_TOKEN_RIGHT_PAREN ? ")" : "]");
@@ -219,13 +219,13 @@ VPRIV bool expect_semi(cc *c, const char *after)
 	if (c->tk[0].kind == LEX_TOKEN_COMMA || c->tk[0].kind == LEX_TOKEN_COLON) {
 		/* clang's common typo: ',' or ':' for ';', replaced; parsing goes on after it */
 		e = c->tk[0].loc;
-		fx = (pp_fixit){ e, pp_tok_end(c->p, e), ";", VDA_MACHINE };
+		fx = (diag_fixit){ e, pp_token_end_find(c->p, e), ";", DIAG_APPLICABILITY_MACHINE };
 		report(c, "error", e, NULL, 0, &fx, 1, "expected ';' %s", after);
 		next(c);
 		return false;
 	}
-	e = pp_tok_end(c->p, c->prevloc);
-	fx = (pp_fixit){ e, e, ";", semi_app(c) };
+	e = pp_token_end_find(c->p, c->prevloc);
+	fx = (diag_fixit){ e, e, ";", semi_app(c) };
 	report(c, "error", e, NULL, 0, &fx, 1, "expected ';' %s", after);
 	return true;
 }
@@ -269,14 +269,14 @@ VPRIV bool decl_comma_typo(cc *c)
 {
 	uint32_t l = c->tk[0].loc;
 	const ptok *t;
-	pp_fixit fx;
+	diag_fixit fx;
 
 	if (c->tk[0].kind != LEX_TOKEN_COMMA)
 		return false;
 	t = peek(c, 1);
 	if (!(t->flags & LEX_TOKEN_FLAG_LINE_START) || might_be_declarator(c, t))
 		return false;
-	fx = (pp_fixit){ l, pp_tok_end(c->p, l), ";", VDA_MACHINE };
+	fx = (diag_fixit){ l, pp_token_end_find(c->p, l), ";", DIAG_APPLICABILITY_MACHINE };
 	report(c, "error", l, NULL, 0, &fx, 1, "expected ';' at end of declaration");
 	next(c);
 	return true;

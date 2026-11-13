@@ -62,7 +62,7 @@ static int driver_optimization_find(const char *name)
 	return -1;
 }
 
-/* a is an option of this file: it is recorded in job (a bad value: job->badval); false: not one */
+/* a is an option of this file: it is recorded in job (a bad value: job->bad_value_option); false: not one */
 VPRIV bool driver_optimization_option(struct driver_job *job, const char *a)
 {
 	cc_vir_aids *v = &job->vir_aid;
@@ -93,13 +93,13 @@ VPRIV bool driver_optimization_option(struct driver_job *job, const char *a)
 
 		v->ccmp = !strcmp(m, "all") ? CC_CCMP_ALL : !strcmp(m, "none") ? CC_CCMP_NONE : CC_CCMP_SELECT;
 		if (v->ccmp == CC_CCMP_SELECT && strcmp(m, "select"))
-			job->badval = a;
+			job->bad_value_option = a;
 	} else if (!no && !strncmp(name, "vir-probe=", 10)) {
 		char *end;
 		long mask = strtol(name + 10, &end, 0);
 
 		if (end == name + 10 || *end || mask < 0 || mask > 255)
-			job->badval = a;
+			job->bad_value_option = a;
 		v->probe = (int)mask;
 	} else if (!no && !strncmp(name, "vir-passes=", 11))
 		v->passes = name + 11;
@@ -119,10 +119,10 @@ VPRIV cc_optimizations driver_optimization_resolve(const struct driver_job *job)
 	bool vir;
 
 	for (int i = 0; i < CC_OPTIMIZATION_COUNT; i++)
-		on[i] = job->optimization[i] ? job->optimization[i] > 0 : job->olevel >= driver_optimizations[i].level;
+		on[i] = job->optimization[i] ? job->optimization[i] > 0 : job->optimization_level >= driver_optimizations[i].level;
 	/* VIR is -O2's code generator: an option does not bring it to a lower level, and without
 	   it there is nothing for the other rows to work on */
-	vir = on[DRIVER_OPT_vir] && job->olevel >= 2;
+	vir = on[DRIVER_OPT_vir] && job->optimization_level >= 2;
 	return (cc_optimizations){
 #define X(field, name, level) .field = vir && on[DRIVER_OPT_##field],
 		CC_OPTIMIZATIONS(X)

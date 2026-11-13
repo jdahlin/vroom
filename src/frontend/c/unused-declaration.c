@@ -19,25 +19,25 @@ VPRIV void unused_vars(cc *c, uint32_t m)
 	for (uint32_t i = m; i < c->nsstack; i++) {
 		sym *y = &c->syms[c->sstack[i]];
 		const attrs *a = y->attrs ? &c->attr[y->attrs] : NULL;
-		pp_span r;
+		diag_span r;
 
 		if (y->kind != S_VAR || !y->name || (y->flags & (SF_PARAM | SF_ATTR_USED)) ||
 		    y->sc == SC_EXTERN || (a && (a->unused || a->cleanup || a->used)))
 			continue;
 		if (y->flags & SF_REF) {	/* -Wunused-but-set-variable: only assigned */
 			if (!y->nref) {
-				pp_dinfo d = { "warning", y->loc, NULL, 0, NULL, 0, idstr_(y->name), (uint32_t)idlen_(y->name) };
+				diag_info d = { "warning", y->loc, NULL, 0, NULL, 0, idstr_(y->name), (uint32_t)idlen_(y->name) };
 				static const char *const gb[] = { "unused-but-set", "unused", "all", "most", NULL };
 
-				pp_warnx(c->p, "unused-but-set-variable", false, gb, &d, "variable '%.*s' set but not used", IDF(y->name));
+				diag_warning_report(c->p, "unused-but-set-variable", false, gb, &d, "variable '%.*s' set but not used", IDF(y->name));
 			}
 			continue;
 		}
-		r = (pp_span){ y->loc, pp_tok_end(c->p, y->loc) };
+		r = (diag_span){ y->loc, pp_token_end_find(c->p, y->loc) };
 		{
-			pp_dinfo d = { "warning", y->loc, &r, 1, NULL, 0, idstr_(y->name), (uint32_t)idlen_(y->name) };
+			diag_info d = { "warning", y->loc, &r, 1, NULL, 0, idstr_(y->name), (uint32_t)idlen_(y->name) };
 
-			pp_warnx(c->p, "unused-variable", false, g, &d, "unused variable '%.*s'", IDF(y->name));
+			diag_warning_report(c->p, "unused-variable", false, g, &d, "unused variable '%.*s'", IDF(y->name));
 		}
 	}
 }
@@ -75,13 +75,13 @@ VPRIV void unused_statics(cc *c)
 			skip |= a && (a->unused || a->used || a->alias || a->constructor || a->destructor);
 		}
 		at = y->defloc ? y->defloc : y->loc;
-		if (used || skip || !pp_in_main_file(c->p, at)	/* clang: also a non-inline header function (vcc: its references from unparsed lazy bodies are unknown) */)
+		if (used || skip || !pp_location_is_in_main_file(c->p, at)	/* clang: also a non-inline header function (vcc: its references from unparsed lazy bodies are unknown) */)
 			continue;
 		{
 			qty t = y->ty;
 			bool k = false;
-			pp_span r = { at, pp_tok_end(c->p, at) };
-			pp_dinfo d = { "warning", at, &r, 1, NULL, 0, idstr_(y->name), (uint32_t)idlen_(y->name) };
+			diag_span r = { at, pp_token_end_find(c->p, at) };
+			diag_info d = { "warning", at, &r, 1, NULL, 0, idstr_(y->name), (uint32_t)idlen_(y->name) };
 
 			if (!fn) {
 				while (KIND(c, t) == TY_ARRAY)
@@ -91,12 +91,12 @@ VPRIV void unused_statics(cc *c)
 			if (ref) {	/* named only where it is not evaluated (sizeof, typeof) */
 				static const char *const gu[] = { "unused-function", "unused", "all", "most", NULL };
 
-				pp_warnx(c->p, "unneeded-internal-declaration", false, gu, &d, "%s '%.*s' is not needed and will not be emitted",
+				diag_warning_report(c->p, "unneeded-internal-declaration", false, gu, &d, "%s '%.*s' is not needed and will not be emitted",
 					 fn ? "function" : "variable", IDF(y->name));
 			} else if (fn)
-				pp_warnx(c->p, "unused-function", false, g, &d, "unused function '%.*s'", IDF(y->name));
+				diag_warning_report(c->p, "unused-function", false, g, &d, "unused function '%.*s'", IDF(y->name));
 			else
-				pp_warnx(c->p, k ? "unused-const-variable" : "unused-variable", false, k ? gc : g, &d,
+				diag_warning_report(c->p, k ? "unused-const-variable" : "unused-variable", false, k ? gc : g, &d,
 					 "unused variable '%.*s'", IDF(y->name));
 		}
 	}
@@ -116,9 +116,9 @@ VPRIV void unused_typedefs(cc *c)
 		if (y->kind != S_TYPEDEF || !y->depth || !y->name || (y->flags & SF_REF) || (a && (a->unused || a->used)))
 			continue;
 		{
-			pp_dinfo d = { "warning", y->loc, NULL, 0, NULL, 0, idstr_(y->name), (uint32_t)idlen_(y->name) };
+			diag_info d = { "warning", y->loc, NULL, 0, NULL, 0, idstr_(y->name), (uint32_t)idlen_(y->name) };
 
-			pp_warnx(c->p, "unused-local-typedef", false, g, &d, "unused typedef '%.*s'", IDF(y->name));
+			diag_warning_report(c->p, "unused-local-typedef", false, g, &d, "unused typedef '%.*s'", IDF(y->name));
 		}
 	}
 }
