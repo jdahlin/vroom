@@ -1,4 +1,12 @@
-/* x86-64 assembler: general-purpose instructions: jumps and calls, setcc/cmovcc, shifts and bit tests, the integer families, movz/movs */
+/* gpr.c: x86-64 assembler, the general-purpose families: x64_i_jump (jmp, call, jcc: a branch to a
+ * label is a relaxable variable item), x64_i_setcc (setcc, cmovcc), x64_i_bits (shld/shrd, the bt
+ * family, prefetch), x64_i_int (the integer instructions, tried by full name and then as stem plus
+ * operand-size suffix) and x64_i_movx (movz and movs: movzbl, movsbq, movslq ...).
+ *
+ * Each returns X64_NEXT for a mnemonic that is not theirs, so asm.c's dispatcher tries the next
+ * family; the order is in x64as.h.  Immediates and displacements that are symbols become fixups on
+ * the encoded bytes (x64_emit); operand-size suffixes are split by split_sfx.  Encodings are those
+ * LLVM MC picks, so objects stay byte-identical with clang's; bench/vas-enc.py checks them. */
 #include "x64as.h"
 
 VPRIV int x64_i_jump(as_context *a, char *mn, XOp *o, int nops)

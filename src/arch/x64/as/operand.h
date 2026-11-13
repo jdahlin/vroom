@@ -1,4 +1,10 @@
-/* Structured operands shared by the assembler and direct object emitter. */
+/* operand.h: the x86-64 assembler's structured operand (XOp: register, immediate, memory, or bare
+ * expression) and as_x64_insn, the entry that encodes already parsed operands.
+ *
+ * Two producers share it: the assembler's AT&T text parser (asm.c) and the direct object emitter
+ * (arch/x64/codegen/obj.c), which builds XOps itself and skips text.  as_x64_insn may modify the
+ * mnemonic and the operands in place, so callers pass copies they do not reuse.  It reports errors
+ * through as_error_report on the context given. */
 #ifndef VCC_X64_OPERAND_H
 #define VCC_X64_OPERAND_H
 #include "as/as.h"

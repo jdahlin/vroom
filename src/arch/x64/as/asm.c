@@ -2,7 +2,7 @@
  * x86-64 instructions in AT&T syntax: the parser and the encoder, choosing
  * the encodings LLVM MC chooses (clang -c), so an object is byte-identical
  * with clang's for the same text.  Jumps to labels are variable items the
- * assembler relaxes (as.c: as_variable_item_branch_add).
+ * assembler relaxes (as/variable-items.c: as_variable_item_branch_add).
  */
 #include "x64as.h"
 

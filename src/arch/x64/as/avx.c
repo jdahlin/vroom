@@ -1,4 +1,11 @@
-/* x86-64 assembler: AVX/AVX2 (VEX) and BMI2 */
+/* avx.c: x86-64 assembler, family x64_i_avx: VEX-encoded instructions (AVX, AVX2) and a few BMI2 ones
+ * (rorx ...), as a table of mnemonic, prefix, opcode map and operand form, encoded by x64_emit
+ * through the vex fields of XForm.
+ *
+ * Operand order is AT&T (sources first); the vector length comes from the destination's width.
+ * Returns X64_NEXT for a mnemonic it does not know (asm.c tries it after the SSE family and before
+ * SSE4); a known mnemonic with operands of the wrong shape fails the assembly through
+ * as_error_report.  The bytes must equal LLVM MC's: bench/vas-enc.py checks them. */
 #include "x64as.h"
 
 VPRIV int x64_i_avx(as_context *a, char *mn, XOp *o, int nops)
