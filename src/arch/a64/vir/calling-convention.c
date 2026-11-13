@@ -160,16 +160,20 @@ static void a64_vir_fixed_registers_get(const vir_function *f, uint32_t v, vir_r
 	}
 }
 
-static uint8_t a64_vir_operand_fixes[256];
+/* the operations whose operands the allocator must place where the lowering wants them:
+   a constant table, since every lowering thread hands it to the allocator */
+static const uint8_t a64_vir_operand_fixes[256] = {
+#define A64_VIR_FIXES(op) [VIR_OP_##op] = 1,
+	A64_VIR_FIXES(PARAM) A64_VIR_FIXES(CALL) A64_VIR_FIXES(RET) A64_VIR_FIXES(MEMCPY) A64_VIR_FIXES(MEMSET)
+	A64_VIR_FIXES(LOAD) A64_VIR_FIXES(STORE) A64_VIR_FIXES(ADD) A64_VIR_FIXES(SUB) A64_VIR_FIXES(AND)
+	A64_VIR_FIXES(OR) A64_VIR_FIXES(XOR) A64_VIR_FIXES(ICMP) A64_VIR_FIXES(PTRADD) A64_VIR_FIXES(SHL)
+	A64_VIR_FIXES(LSHR) A64_VIR_FIXES(ASHR) A64_VIR_FIXES(MUL) A64_VIR_FIXES(I2P) A64_VIR_FIXES(P2I)
+	A64_VIR_FIXES(TRUNC) A64_VIR_FIXES(EXT) A64_VIR_FIXES(SELECT)
+#undef A64_VIR_FIXES
+};
 
 VPRIV void a64_vir_registers_describe(vir_target_registers *r, bool darwin, bool fcs)
 {
-	static const uint8_t ops[] = { VIR_OP_PARAM, VIR_OP_CALL, VIR_OP_RET, VIR_OP_MEMCPY, VIR_OP_MEMSET, VIR_OP_LOAD, VIR_OP_STORE, VIR_OP_ADD, VIR_OP_SUB,
-				       VIR_OP_AND, VIR_OP_OR, VIR_OP_XOR, VIR_OP_ICMP, VIR_OP_PTRADD, VIR_OP_SHL, VIR_OP_LSHR, VIR_OP_ASHR, VIR_OP_MUL,
-				       VIR_OP_I2P, VIR_OP_P2I, VIR_OP_TRUNC, VIR_OP_EXT, VIR_OP_SELECT };
-
-	for (size_t i = 0; i < sizeof ops; i++)
-		a64_vir_operand_fixes[ops[i]] = 1;
 	*r = (vir_target_registers){ 0 };
 	r->alloc[0] = A64_VIR_ALLOCATABLE_INTEGER;
 	r->alloc[1] = A64_VIR_ALLOCATABLE_FLOAT | (fcs ? A64_VIR_CALLEE_SAVED_FLOAT_LOW : 0);
