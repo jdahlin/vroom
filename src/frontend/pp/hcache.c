@@ -2,8 +2,6 @@
 #include "ppimpl.h"
 #include "port/hostcrc.h"
 
-hstat_t hstat;
-
 #define HKEY_BITS 16
 static _Atomic(hkey *) hkey_tab[1u << HKEY_BITS];
 size_t hc_mem_max;

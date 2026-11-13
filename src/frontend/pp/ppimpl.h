@@ -662,8 +662,10 @@ typedef struct {
 } rec_spare_t;
 
 /* ---------------- across files ---------------- */
+/* next-token.c */
+VPRIV void hc_mode(pp *p, int mode);
 
-/* setup.c */
+/* translation-unit.c */
 VPRIV void *vm(size_t n);
 static inline int utoa(char *b, unsigned long long v);
 /* file.c */
@@ -718,7 +720,7 @@ VPRIV void diag_fixits_out(pp *p);
 VPRIV uint8_t inc_sys(pp *p, int32_t sdir);
 VPRIV void dep_only(pp *p, const char *path, uint8_t sys);
 
-/* macro.c: -dD */
+/* macro-dump.c: -dD */
 VPRIV void dd_out(pp *p, uint32_t id, const pmacro *m, bool builtin);
 VPRIV void dd_flush(pp *p);
 
@@ -779,6 +781,13 @@ static inline __attribute__((always_inline)) void next_exp(pp *p, ptok *t);
 VPRIV void macro_note_(pp *p, const pmacro *m, uint32_t before, const char *msg);
 VPRIV bool is_strlit(int k);
 extern const uint8_t idch_tab[256];
+static inline __attribute__((always_inline)) void next_tok(pp *p, ptok *t)
+{
+	if (p->depth == p->nfile && !p->svn && !p->hold_tmp)
+		p->tmp.p = p->tmp.base;	/* nothing above file level refers to tmp */
+	next_exp(p, t);
+}
+
 static inline bool idch(unsigned char c);
 VPRIV int expand(pp *p, const pmacro *m, ptok *t);
 /* builtin.c */
