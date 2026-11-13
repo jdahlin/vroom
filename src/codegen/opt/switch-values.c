@@ -19,14 +19,14 @@ typedef struct svproof {
  bool pending_default, default_seen, have_default, mode_set, is_return, assigned;
  uint64_t fallback, pending_value;
  uint32_t destination;
- qty ty;
+ ast_qualified_type ty;
 } svproof;
 
-static bool sv_integer(cc *c, qty t)
+static bool sv_integer(cc *c, ast_qualified_type t)
 {
  uint64_t z = tsize(c, t);
  return is_integer(c,t) && !em_bitint(c,t) && !em_bigint(c,t) &&
-        !(T(c,t)->flags & TF_ATOMIC) && (z==1 || z==2 || z==4 || z==8);
+        !(T(c,t)->flags & AST_TYPE_FLAG_ATOMIC) && (z==1 || z==2 || z==4 || z==8);
 }
 
 /* cc_eval is called only after this small pure integer expression proof. */
@@ -38,21 +38,21 @@ static bool sv_constant(svproof *p, uint32_t n, uint64_t *v)
  if (!sv_integer(c,x->ty)) return false;
  uint64_t unused;
  switch (x->op) {
- case N_NUM: break;
- case N_CAST:
-  if (x->aux!=CK_INT && x->aux!=CK_NOP && x->aux!=CK_BOOL) return false;
+ case AST_NODE_NUMBER: break;
+ case AST_NODE_CAST:
+  if (x->aux!=AST_CAST_INTEGER && x->aux!=AST_CAST_NOP && x->aux!=AST_CAST_BOOL) return false;
   if (!sv_constant(p,x->a,&unused)) return false;
   break;
- case N_UNARY:
+ case AST_NODE_UNARY:
   if (!sv_constant(p,x->a,&unused)) return false;
   break;
- case N_BINARY:
+ case AST_NODE_BINARY:
   if (!sv_constant(p,x->a,&unused) || !sv_constant(p,x->b,&unused)) return false;
   break;
  default: return false;
  }
- cval cv;
- if (!cc_eval(c,n,&cv) || cv.kind!=CV_INT) return false;
+ cc_value cv;
+ if (!cc_eval(c,n,&cv) || cv.kind!=CC_VALUE_INTEGER) return false;
  *v=(uint64_t)em_trunc_to(c,cv.i,x->ty);
  return true;
 }
@@ -62,23 +62,23 @@ static bool sv_terminal(svproof *p, uint32_t n, unsigned depth)
  cc *c=p->c;
  if (!n || !p->budget-- || depth>4) return false;
  const node *x=N(n);
- if (x->op==N_BLOCK) {
+ if (x->op==AST_NODE_BLOCK) {
   for (uint32_t i=0;i<x->c;i++)
    if (!sv_terminal(p,c->lists[x->b+i],depth+1)) return false;
   return true;
  }
- bool ret=x->op==N_RETURN;
- if (ret || (x->op==N_EXPR && x->a && N(x->a)->op==N_ASSIGN)) {
+ bool ret=x->op==AST_NODE_RETURN;
+ if (ret || (x->op==AST_NODE_EXPRESSION && x->a && N(x->a)->op==AST_NODE_ASSIGN)) {
   if ((p->first==p->n && !p->pending_default) || p->assigned) return false;
   uint32_t expr=x->a, destination=0;
-  qty ty;
+  ast_qualified_type ty;
   if (!ret) {
    const node *a=N(expr), *lhs=N(a->a);
-   if (a->aux || lhs->op!=N_VAR) return false;
+   if (a->aux || lhs->op!=AST_NODE_VARIABLE) return false;
    const sym *s=&c->syms[lhs->a];
    ty=lhs->ty;
-   if (s->kind!=S_VAR || !s->depth || s->sc==SC_STATIC || s->sc==SC_EXTERN ||
-       (QQ(ty)&Q_VOLATILE) || sym_attrs(c,lhs->a)->cleanup) return false;
+   if (s->kind!=AST_SYMBOL_VARIABLE || !s->depth || s->sc==AST_STORAGE_STATIC || s->sc==AST_STORAGE_EXTERN ||
+       (AST_QUALIFIED_TYPE_QUALIFIERS(ty)&AST_QUALIFIER_VOLATILE) || sym_attrs(c,lhs->a)->cleanup) return false;
    destination=a->a;
    expr=a->b;
   } else {
@@ -86,7 +86,7 @@ static bool sv_terminal(svproof *p, uint32_t n, unsigned depth)
    ty=N(expr)->ty;
   }
   if (!sv_integer(c,ty)) return false;
-  if (p->mode_set && (p->is_return!=ret || QUNQ(p->ty)!=QUNQ(ty) ||
+  if (p->mode_set && (p->is_return!=ret || AST_QUALIFIED_TYPE_UNQUALIFIED(p->ty)!=AST_QUALIFIED_TYPE_UNQUALIFIED(ty) ||
       (!ret && N(p->destination)->a!=N(destination)->a))) return false;
   uint64_t value;
   if (!sv_constant(p,expr,&value)) return false;
@@ -94,7 +94,7 @@ static bool sv_terminal(svproof *p, uint32_t n, unsigned depth)
   if (destination) p->destination=destination;
   if (!ret) {p->assigned=true; p->pending_value=value; return true;}
   p->pending_value=value;
- } else if (x->op==N_BREAK) {
+ } else if (x->op==AST_NODE_BREAK) {
   if (!p->assigned) return false;
   p->assigned=false;
  } else return false;
@@ -108,19 +108,19 @@ static bool sv_terminal(svproof *p, uint32_t n, unsigned depth)
 
 VPRIV bool em_switch_values_plan(cc *c, uint32_t n, em_switch_values_recipe *r)
 {
- if (n>0x0fffffffu || N(n)->op!=N_SWITCH) return false;
+ if (n>0x0fffffffu || N(n)->op!=AST_NODE_SWITCH) return false;
  const node *sw=N(n), *body=N(sw->b);
- qty ct=N(sw->a)->ty;
+ ast_qualified_type ct=N(sw->a)->ty;
  unsigned bits=(unsigned)tsize(c,ct)*8;
- if (body->op!=N_BLOCK || body->c<7 || body->c>128 ||
+ if (body->op!=AST_NODE_BLOCK || body->c<7 || body->c>128 ||
      !sv_integer(c,ct) || (bits!=32 && bits!=64)) return false;
  svproof p={.c=c,.budget=128};
  for (uint32_t i=0;i<body->c;i++) {
   uint32_t s=c->lists[body->b+i];
-  while (s && (N(s)->op==N_CASE || N(s)->op==N_DEFAULT)) {
+  while (s && (N(s)->op==AST_NODE_CASE || N(s)->op==AST_NODE_DEFAULT)) {
    if (!p.budget-- || p.assigned) return false;
    const node *x=N(s);
-   if (x->op==N_DEFAULT) {
+   if (x->op==AST_NODE_DEFAULT) {
     if (p.default_seen) return false;
     p.default_seen=p.pending_default=true;
    } else {
@@ -149,7 +149,7 @@ VPRIV bool em_switch_values_plan(cc *c, uint32_t n, em_switch_values_recipe *r)
  }
  if (covered<6 || covered*2<slots || distinct<3) return false;
  /* A literal selector already has a cheaper existing selected-case path. */
- if (N(sw->a)->op==N_NUM) return false;
+ if (N(sw->a)->op==AST_NODE_NUMBER) return false;
  *r=(em_switch_values_recipe){.lo=lo,.fallback=p.fallback,.ty=p.ty,
   .destination=p.destination,.slots=(uint16_t)slots,.selector_bits=(uint8_t)bits,
   .element_bytes=(uint8_t)tsize(c,p.ty),.is_return=p.is_return};

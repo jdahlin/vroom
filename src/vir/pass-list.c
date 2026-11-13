@@ -11,10 +11,10 @@
  */
 #include <pthread.h>
 
-#include "virimpl.h"
+#include "vir-internal.h"
 #include "vir/pass.h"
 
-static bool vir_compact_run(vir_fn *f, vir_pass_context *ctx)
+static bool vir_compact_run(vir_function *f, vir_pass_context *ctx)
 {
 	uint32_t n = vir_function_compact(f);
 
@@ -57,21 +57,21 @@ static void vir_check_read(void)
 /* The analyses of `keeps` still marked valid in f are computed again and compared.  Debug runs only: it
  * copies what it compares (malloc), puts f back as it found it, and returns the name of the first stale
  * analysis or NULL. */
-static const char *vir_analyses_check(vir_fn *f, uint8_t keeps)
+static const char *vir_analyses_check(vir_function *f, uint8_t keeps)
 {
-	vir_ctx *x = vir_ctx_get();
-	uint32_t was = f->valid, chk = was & keeps, nextra = f->nextra, mark = x->cfg_mark, end = x->cfg_end, nb = f->nblk;
-	vir_blk *snap;
+	vir_context *x = vir_context_get();
+	uint32_t was = f->valid, vir_alloc_checker = was & keeps, nextra = f->extra_count, mark = x->cfg_mark, end = x->cfg_end, nb = f->block_count;
+	vir_block *snap;
 	uint32_t *lists = NULL, nl = 0;
-	const char *bad = NULL;
+	const char *vir_alloc_check_failure_add = NULL;
 
-	if (!chk || !nb)
+	if (!vir_alloc_checker || !nb)
 		return NULL;
 	snap = malloc((size_t)nb * sizeof *snap);
 	if (!snap)
 		return NULL;
-	memcpy(snap, f->blk, (size_t)nb * sizeof *snap);
-	if ((chk & VIR_VALID_CFG) && end >= mark && end <= f->nextra) {
+	memcpy(snap, f->blocks, (size_t)nb * sizeof *snap);
+	if ((vir_alloc_checker & VIR_VALID_CFG) && end >= mark && end <= f->extra_count) {
 		nl = end - mark;
 		lists = malloc((size_t)(nl ? nl : 1) * 4);
 		if (!lists) {
@@ -81,40 +81,40 @@ static const char *vir_analyses_check(vir_fn *f, uint8_t keeps)
 		memcpy(lists, f->extra + mark, (size_t)nl * 4);
 	}
 	f->valid = 0;
-	if (!vir_cfg(f)) {
-		bad = "cfg";
+	if (!vir_cfg_build(f)) {
+		vir_alloc_check_failure_add = "cfg";
 	} else {
-		if (chk & VIR_VALID_CFG) {
-			for (uint32_t b = 0; b < nb && !bad; b++) {
-				if (f->blk[b].npred != snap[b].npred || f->blk[b].pred != snap[b].pred)
-					bad = "cfg";
+		if (vir_alloc_checker & VIR_VALID_CFG) {
+			for (uint32_t b = 0; b < nb && !vir_alloc_check_failure_add; b++) {
+				if (f->blocks[b].predecessor_count != snap[b].predecessor_count || f->blocks[b].predecessor_first != snap[b].predecessor_first)
+					vir_alloc_check_failure_add = "cfg";
 				else
-					for (uint32_t j = 0; j < snap[b].npred; j++)
-						if (f->extra[snap[b].pred + j] != lists[snap[b].pred + j - mark])
-							bad = "cfg";
+					for (uint32_t j = 0; j < snap[b].predecessor_count; j++)
+						if (f->extra[snap[b].predecessor_first + j] != lists[snap[b].predecessor_first + j - mark])
+							vir_alloc_check_failure_add = "cfg";
 			}
 		}
-		if (!bad && (chk & VIR_VALID_DOM)) {
-			if (!vir_dom(f))
-				bad = "dom";
-			for (uint32_t b = 0; b < nb && !bad; b++)
-				if (f->blk[b].idom != snap[b].idom || f->blk[b].pre != snap[b].pre || f->blk[b].post != snap[b].post)
-					bad = "dom";
+		if (!vir_alloc_check_failure_add && (vir_alloc_checker & VIR_VALID_DOM)) {
+			if (!vir_dominators_build(f))
+				vir_alloc_check_failure_add = "dom";
+			for (uint32_t b = 0; b < nb && !vir_alloc_check_failure_add; b++)
+				if (f->blocks[b].immediate_dominator != snap[b].immediate_dominator || f->blocks[b].preorder != snap[b].preorder || f->blocks[b].preorder_last != snap[b].preorder_last)
+					vir_alloc_check_failure_add = "dom";
 		}
 	}
-	memcpy(f->blk, snap, (size_t)nb * sizeof *snap);
+	memcpy(f->blocks, snap, (size_t)nb * sizeof *snap);
 	if (lists)
 		memcpy(f->extra + mark, lists, (size_t)nl * 4);
-	f->nextra = nextra;
+	f->extra_count = nextra;
 	x->cfg_mark = mark;
 	x->cfg_end = end;
 	f->valid = was;
 	free(lists);
 	free(snap);
-	return bad;
+	return vir_alloc_check_failure_add;
 }
 
-bool vir_pass_run(vir_fn *f, const vir_pass_info *p, vir_pass_context *ctx, char *err, size_t n)
+bool vir_pass_run(vir_function *f, const vir_pass_info *p, vir_pass_context *ctx, char *err, size_t n)
 {
 	bool changed = p->run(f, ctx);
 
@@ -122,10 +122,10 @@ bool vir_pass_run(vir_fn *f, const vir_pass_info *p, vir_pass_context *ctx, char
 		*err = 0;
 	pthread_once(&vir_check_once, vir_check_read);
 	if (n && (ctx->checked || vir_check_env)) {
-		const char *bad = vir_analyses_check(f, p->keeps);
+		const char *vir_alloc_check_failure_add = vir_analyses_check(f, p->keeps);
 
-		if (bad)
-			snprintf(err, n, "its `keeps` names the %s analysis, which a fresh computation does not reproduce", bad);
+		if (vir_alloc_check_failure_add)
+			snprintf(err, n, "its `keeps` names the %s analysis, which a fresh computation does not reproduce", vir_alloc_check_failure_add);
 	}
 	return changed;
 }

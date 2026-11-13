@@ -1,31 +1,31 @@
 /* vcc front end: literals: numbers, characters, strings */
-#include "ccimpl.h"
+#include "cc-internal.h"
 
 /* ---------------- literals ---------------- */
 
 /* the type of an integer literal (C11 6.4.4.1p5) */
-static inline qty int_lit_type(cc *c, u128 v, int l, bool u, bool dec)
+static inline ast_qualified_type cc_literal_integer_type(cc *c, u128 v, int l, bool u, bool dec)
 {
 	/* long: 64 bits, or 32 under ILP32 and LLP64 */
 	u128 lmax = CC_LONG32(c) ? INT32_MAX : INT64_MAX, ulmax = CC_LONG32(c) ? UINT32_MAX : UINT64_MAX;
 
 	if (l == 0 && !u && v <= INT32_MAX)
-		return prim(TY_INT);
+		return cc_type_basic(AST_TYPE_INT);
 	if (l == 0 && (u || !dec) && v <= UINT32_MAX)
-		return prim(TY_UINT);
+		return cc_type_basic(AST_TYPE_UNSIGNED_INT);
 	if (l <= 1 && !u && v <= lmax)
-		return prim(TY_LONG);
+		return cc_type_basic(AST_TYPE_LONG);
 	if (l <= 1 && (u || !dec) && v <= ulmax)
-		return prim(TY_ULONG);
+		return cc_type_basic(AST_TYPE_UNSIGNED_LONG);
 	if (!u && v <= INT64_MAX)
-		return prim(TY_LLONG);
-	return l <= 1 && !CC_LONG32(c) ? prim(TY_ULONG) : prim(TY_ULLONG);
+		return cc_type_basic(AST_TYPE_LONG_LONG);
+	return l <= 1 && !CC_LONG32(c) ? cc_type_basic(AST_TYPE_UNSIGNED_LONG) : cc_type_basic(AST_TYPE_UNSIGNED_LONG_LONG);
 }
 
-static uint32_t number_s(cc *c, const ptok *t, const char *s, size_t n);
+static uint32_t cc_literal_number_parse_text(cc *c, const ptok *t, const char *s, size_t n);
 
 /* a constant; the GNU suffix i (or j) makes it imaginary: 0 + v i */
-static __attribute__((noinline)) uint32_t number_slow(cc *c, const ptok *t)
+static __attribute__((noinline)) uint32_t cc_literal_number_parse_slow(cc *c, const ptok *t)
 {
 	char tmp[t->len + 1];
 	size_t n;
@@ -38,19 +38,19 @@ static __attribute__((noinline)) uint32_t number_slow(cc *c, const ptok *t)
 
 			memcpy(b, s, k - 1);
 			memcpy(b + k - 1, s + k, n - k);
-			v = number_s(c, t, b, n - 1);
-			return mk_cplx(c, ty_complex(c, N(v)->ty), zero_of(c, N(v)->ty, t->loc), v, t->loc);
+			v = cc_literal_number_parse_text(c, t, b, n - 1);
+			return cc_complex_node_new(c, cc_type_complex(c, AST_NODE(v)->ty), cc_lowering_zero(c, AST_NODE(v)->ty, t->loc), v, t->loc);
 		}
 	}
-	return number_s(c, t, s, n);
+	return cc_literal_number_parse_text(c, t, s, n);
 }
 
 /* -Wliteral-range: a constant that rounds to infinity, or to zero although a digit is not 0 */
-static __attribute__((noinline, cold)) void literal_range(cc *c, const ptok *t, const char *s, size_t k, qty ty, bool big)
+static __attribute__((noinline, cold)) void cc_literal_range_warn(cc *c, const ptok *t, const char *s, size_t k, ast_qualified_type ty, bool big)
 {
 	bool hex = k > 1 && s[0] == '0' && (s[1] | 32) == 'x';
-	int kd = KIND(c, ty);
-	bool q = is_q(c, ty);
+	int kd = AST_TYPE_KIND(c, ty);
+	bool q = cc_type_is_float128(c, ty);
 	const char *lim;
 	diag_record *d;
 
@@ -63,20 +63,20 @@ static __attribute__((noinline, cold)) void literal_range(cc *c, const ptok *t, 
 		if (!nz)
 			return;
 	}
-	if (kd == TY_FLOAT16)
+	if (kd == AST_TYPE_FLOAT16)
 		lim = big ? "6.5504E+4" : "5.96046E-8";
-	else if (kd == TY_FLOAT)
+	else if (kd == AST_TYPE_FLOAT)
 		lim = big ? "3.40282347E+38" : "1.40129846E-45";
 	else if (q)
 		lim = big ? "1.18973149535723176508575932662800702E+4932" : "6.47517511943802511092443895822764655E-4966";
 	else
 		lim = big ? "1.7976931348623157E+308" : "4.9406564584124654E-324";
-	d = cc_warn_begin(c, "literal-range", true, NULL, t->loc, "magnitude of floating-point constant too %s for type '%s'; %s is %s",
+	d = cc_report_warning_begin(c, "literal-range", true, NULL, t->loc, "magnitude of floating-point constant too %s for type '%s'; %s is %s",
 			  big ? "large" : "small", tyname(c, ty), big ? "maximum" : "minimum", lim);
 	if (!d)
 		return;
 	diag_record_label_add(c->p, d, t->loc, pp_token_end_find(c->p, t->loc), NULL);
-	if (kd == TY_LDOUBLE && !q) {	/* a constant binary128 holds: written for Arm Linux */
+	if (kd == AST_TYPE_LONG_DOUBLE && !q) {	/* a constant binary128 holds: written for Arm Linux */
 		u128 v = vsoftfloat_parse(s, k);
 		unsigned ex = (unsigned)(v >> 112) & 0x7fff;
 
@@ -87,7 +87,7 @@ static __attribute__((noinline, cold)) void literal_range(cc *c, const ptok *t, 
 	diag_record_emit(c->p, d);
 }
 
-static uint32_t number_s(cc *c, const ptok *t, const char *s, size_t n)
+static uint32_t cc_literal_number_parse_text(cc *c, const ptok *t, const char *s, size_t n)
 {
 	size_t i = 0;
 	unsigned base = 10;
@@ -108,49 +108,49 @@ static uint32_t number_s(cc *c, const ptok *t, const char *s, size_t n)
 	}
 	if (isf) {
 		size_t k = n;
-		qty ty = prim(TY_DOUBLE);
+		ast_qualified_type ty = cc_type_basic(AST_TYPE_DOUBLE);
 		double d;
 
 		if (k >= 3 && (s[k - 3] | 32) == 'f' && s[k - 2] == '1' && s[k - 1] == '6') {
 			uint16_t h = vsoftfloat_to_half(vsoftfloat_parse(s, k - 3));
 
-			ty = prim(TY_FLOAT16);
+			ty = cc_type_basic(AST_TYPE_FLOAT16);
 			if ((h & 0x7fff) == 0x7c00 || !(h & 0x7fff))
-				literal_range(c, t, s, k - 3, ty, (h & 0x7fff) == 0x7c00);
-			return mk_flt(c, h_to_d(h), ty, t->loc);
+				cc_literal_range_warn(c, t, s, k - 3, ty, (h & 0x7fff) == 0x7c00);
+			return cc_node_float_new(c, h_to_d(h), ty, t->loc);
 		}
 		while (k > 0 && (s[k - 1] == 'f' || s[k - 1] == 'F' || s[k - 1] == 'l' || s[k - 1] == 'L' ||
 				 s[k - 1] == 'q' || s[k - 1] == 'Q'))
 			k--;
 		if (k < n && (s[k] == 'f' || s[k] == 'F'))
-			ty = prim(TY_FLOAT);
+			ty = cc_type_basic(AST_TYPE_FLOAT);
 		else if (k < n && (s[k] == 'q' || s[k] == 'Q'))	/* __float128 (x86-64; binary128 long double elsewhere) */
-			ty = prim(CC_X86_64(c) ? TY_FLOAT128 : TY_LDOUBLE);
+			ty = cc_type_basic(CC_X86_64(c) ? AST_TYPE_FLOAT128 : AST_TYPE_LONG_DOUBLE);
 		else if (k < n)
-			ty = prim(TY_LDOUBLE);
+			ty = cc_type_basic(AST_TYPE_LONG_DOUBLE);
 		if (k >= sizeof(buf))
 			k = sizeof(buf) - 1;
-		if (is_q(c, ty)) {
-			u128 q = vsoftfloat_parse_with_precision(s, k, q_prec(c, ty));
+		if (cc_type_is_float128(c, ty)) {
+			u128 q = vsoftfloat_parse_with_precision(s, k, cc_float_precision_bits(c, ty));
 			unsigned ex = (unsigned)(q >> 112) & 0x7fff;
 
 			if (unlikely(ex == 0x7fff || !(q << 1)))
-				literal_range(c, t, s, k, ty, ex == 0x7fff);
-			return mk_fltq(c, q, ty, t->loc);
+				cc_literal_range_warn(c, t, s, k, ty, ex == 0x7fff);
+			return cc_node_float128_new(c, q, ty, t->loc);
 		}
 		memcpy(buf, s, k);
 		buf[k] = 0;
-		d = KIND(c, ty) == TY_FLOAT ? (double)strtof(buf, NULL) : strtod(buf, NULL);	/* one rounding */
+		d = AST_TYPE_KIND(c, ty) == AST_TYPE_FLOAT ? (double)strtof(buf, NULL) : strtod(buf, NULL);	/* one rounding */
 		if (unlikely(isinf(d) || d == 0))
-			literal_range(c, t, s, k, ty, isinf(d));
-		return mk_flt(c, d, ty, t->loc);
+			cc_literal_range_warn(c, t, s, k, ty, isinf(d));
+		return cc_node_float_new(c, d, ty, t->loc);
 	}
 	if (n > 1 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X'))
 		base = 16, i = 2;
 	else if (n > 1 && s[0] == '0' && (s[1] == 'b' || s[1] == 'B')) {
 		base = 2, i = 2;
 		if (c->o->std != 23)
-			EXT_WARN(c, "c23-extensions", w_ped, t->loc, "binary integer literals are a C23 extension");
+			CC_REPORT_EXTENSION(c, "c23-extensions", cc_warning_group_pedantic, t->loc, "binary integer literals are a C23 extension");
 	} else if (s[0] == '0')
 		base = 8;
 	for (; i < n; i++) {
@@ -168,7 +168,7 @@ static uint32_t number_s(cc *c, const ptok *t, const char *s, size_t n)
 		else
 			break;
 		if (d >= base) {
-			cc_error(c, t->loc, "invalid digit '%c' in %s constant", ch, base == 8 ? "octal" : "binary");
+			cc_report_error(c, t->loc, "invalid digit '%c' in %s constant", ch, base == 8 ? "octal" : "binary");
 			break;
 		}
 		if (v > (UINT64_MAX - d) / base)
@@ -184,7 +184,7 @@ static uint32_t number_s(cc *c, const ptok *t, const char *s, size_t n)
 		if ((ch == 'w' && i + 1 < n && s[i + 1] == 'b') ||
 		    (ch == 'W' && i + 1 < n && s[i + 1] == 'B')) {
 			if (wb || l)
-				cc_error(c, t->loc, "invalid suffix on bit-precise integer constant");
+				cc_report_error(c, t->loc, "invalid suffix on bit-precise integer constant");
 			wb = true;
 			i++;
 		} else if (ch == 'u' || ch == 'U')
@@ -192,33 +192,33 @@ static uint32_t number_s(cc *c, const ptok *t, const char *s, size_t n)
 		else if (ch == 'l' || ch == 'L')
 			l++;
 		else {
-			cc_error(c, t->loc, "invalid suffix '%.*s' on integer constant", (int)(n - i), s + i);
+			cc_report_error(c, t->loc, "invalid suffix '%.*s' on integer constant", (int)(n - i), s + i);
 			break;
 		}
 	}
 	if (wb) {
 		if (n - suffix != (u ? 3u : 2u))
-			cc_error(c, t->loc, "invalid suffix on bit-precise integer constant");
+			cc_report_error(c, t->loc, "invalid suffix on bit-precise integer constant");
 		unsigned bits = v >> 64 ? 128 - (unsigned)__builtin_clzll((uint64_t)(v >> 64)) :
 			v ? 64 - (unsigned)__builtin_clzll((uint64_t)v) : 1;
 
 		bits += !u;
 		if (bits > 128 || over128)
-			return big_literal(c, s, suffix, base, u, t->loc);
-		return mk_int(c, (i128)v, ty_bitint(c, bits, u), t->loc);
+			return cc_bitint_literal_parse(c, s, suffix, base, u, t->loc);
+		return cc_node_integer_new(c, (i128)v, cc_type_bitint(c, bits, u), t->loc);
 	}
 	if (over)
-		cc_error(c, t->loc, "integer literal is too large to be represented in any integer type");
+		cc_report_error(c, t->loc, "integer literal is too large to be represented in any integer type");
 	{
-		uint32_t r = mk_int(c, (i128)v, int_lit_type(c, v, l, u, base == 10), t->loc);
+		uint32_t r = cc_node_integer_new(c, (i128)v, cc_literal_integer_type(c, v, l, u, base == 10), t->loc);
 
-		N(r)->aux = base != 10 ? NUM_RADIX : 0;	/* spelled with a leading 0 (-Wconstant-conversion) */
+		AST_NODE(r)->aux = base != 10 ? AST_NUMBER_RADIX : 0;	/* spelled with a leading 0 (-Wconstant-conversion) */
 		return r;
 	}
 }
 
 /* the common case: a clean decimal or hex integer with an optional u/l suffix */
-VPRIV uint32_t number(cc *c, const ptok *t)
+CC_PRIVATE uint32_t cc_literal_number_parse(cc *c, const ptok *t)
 {
 	const unsigned char *s = (const unsigned char *)t->s, *e = s + t->len;
 	uint64_t v = 0;
@@ -226,14 +226,14 @@ VPRIV uint32_t number(cc *c, const ptok *t)
 	int l = 0;
 
 	if (unlikely(t->flags & LEX_TOKEN_FLAG_SPLICED))
-		return number_slow(c, t);
+		return cc_literal_number_parse_slow(c, t);
 	if (s[0] == '0' && e - s > 1) {
 		if ((s[1] | 32) != 'x' || e - s > 18)
-			return number_slow(c, t);	/* octal, binary, 0.5, long hex */
+			return cc_literal_number_parse_slow(c, t);	/* octal, binary, 0.5, long hex */
 		dec = false;
 		s += 2;
 		if (s == e)
-			return number_slow(c, t);
+			return cc_literal_number_parse_slow(c, t);
 		for (; s < e; s++) {
 			unsigned d = *s - '0', h = (*s | 32) - 'a';
 
@@ -246,7 +246,7 @@ VPRIV uint32_t number(cc *c, const ptok *t)
 		}
 	} else {
 		if (e - s > 19)
-			return number_slow(c, t);
+			return cc_literal_number_parse_slow(c, t);
 		for (; s < e; s++) {
 			unsigned d = *s - '0';
 
@@ -261,18 +261,18 @@ VPRIV uint32_t number(cc *c, const ptok *t)
 		else if ((*s | 32) == 'l' && l < 2)
 			l++;
 		else
-			return number_slow(c, t);	/* float, separators, odd suffixes */
+			return cc_literal_number_parse_slow(c, t);	/* float, separators, odd suffixes */
 	}
 	{
-		uint32_t r = mk_int(c, (i128)v, int_lit_type(c, v, l, u, dec), t->loc);
+		uint32_t r = cc_node_integer_new(c, (i128)v, cc_literal_integer_type(c, v, l, u, dec), t->loc);
 
-		N(r)->aux = dec ? 0 : NUM_RADIX;	/* spelled with a leading 0 (-Wconstant-conversion) */
+		AST_NODE(r)->aux = dec ? 0 : AST_NUMBER_RADIX;	/* spelled with a leading 0 (-Wconstant-conversion) */
 		return r;
 	}
 }
 
 /* one (possibly multi-byte UTF-8) escape or character of a literal */
-static uint32_t lit_char(cc *c, const char **ps, const char *e, const ptok *t, int kind, bool *wide_ok)
+static uint32_t cc_literal_character_parse(cc *c, const char **ps, const char *e, const ptok *t, int kind, bool *wide_ok)
 {
 	const unsigned char *s = (const unsigned char *)*ps;
 	uint32_t v;
@@ -320,7 +320,7 @@ static uint32_t lit_char(cc *c, const char **ps, const char *e, const ptok *t, i
 			if (!(t->flags & (LEX_TOKEN_FLAG_SPLICED | PP_TOKEN_FLAG_FROM_MACRO)))
 				loc += (uint32_t)(*ps - (e + 1 - t->len)) +
 				       (t->kind == LEX_TOKEN_UTF8_CHARACTER && t->s[0] == '\'' ? 2 : 0);
-			cc_error(c, loc, "hex escape sequence out of range");
+			cc_report_error(c, loc, "hex escape sequence out of range");
 		}
 		break;
 	}
@@ -346,7 +346,7 @@ static uint32_t lit_char(cc *c, const char **ps, const char *e, const ptok *t, i
 			/* Spliced or expanded spelling has no direct byte offset in the source. */
 			if (!(t->flags & (LEX_TOKEN_FLAG_SPLICED | PP_TOKEN_FLAG_FROM_MACRO)))
 				loc += (uint32_t)(*ps - t->s);
-			cc_warnx(c, "unknown-escape-sequence", true, NULL, loc, NULL, 0, NULL, 0,
+			cc_report_warning(c, "unknown-escape-sequence", true, NULL, loc, NULL, 0, NULL, 0,
 				 "unknown escape sequence '\\%c'", *s);
 			v = *s++;
 		}
@@ -355,7 +355,7 @@ static uint32_t lit_char(cc *c, const char **ps, const char *e, const ptok *t, i
 	return v;
 }
 
-static int lit_esz(int kind, int target)
+static int cc_literal_element_size(int kind, int target)
 {
 	switch (kind) {
 	case LEX_TOKEN_WIDE_STRING: case LEX_TOKEN_WIDE_CHARACTER: return target ? 2 : 4;
@@ -365,7 +365,7 @@ static int lit_esz(int kind, int target)
 	}
 }
 
-static size_t utf8_enc(uint32_t cp, char *o)
+static size_t cc_literal_utf8_encode(uint32_t cp, char *o)
 {
 	if (cp < 0x80) { o[0] = (char)cp; return 1; }
 	if (cp < 0x800) { o[0] = (char)(0xC0 | cp >> 6); o[1] = (char)(0x80 | (cp & 63)); return 2; }
@@ -378,10 +378,10 @@ static size_t utf8_enc(uint32_t cp, char *o)
 	return 4;
 }
 
-VPRIV bool is_strtok(int k) { return k >= LEX_TOKEN_STRING && k <= LEX_TOKEN_UTF32_STRING; }
+CC_PRIVATE bool cc_token_kind_is_string(int k) { return k >= LEX_TOKEN_STRING && k <= LEX_TOKEN_UTF32_STRING; }
 
-/* adjacent string literals -> one N_STR of type char[N] (or wide) */
-VPRIV uint32_t string_lit(cc *c)
+/* adjacent string literals -> one AST_NODE_STRING of type char[AST_NODE] (or wide) */
+CC_PRIVATE uint32_t cc_literal_string_parse(cc *c)
 {
 	uint32_t loc = tok(c)->loc;
 	int kind = LEX_TOKEN_STRING;
@@ -392,13 +392,13 @@ VPRIV uint32_t string_lit(cc *c)
 	 * the prefixed token. Save the complete run before decoding; pp's
 	 * temporary spellings must survive advancing beyond its token window. */
 	pp_temporary_hold(c->p, 1);
-	while (is_strtok(tok(c)->kind)) {
+	while (cc_token_kind_is_string(tok(c)->kind)) {
 		ptok *t = tok(c);
 		if (count == cap) {
 			cap *= 2;
 			ptok *more = malloc(cap * sizeof(*more));
 			if (!more)
-				fatal(c, loc, "out of memory");
+				cc_report_fatal(c, loc, "out of memory");
 			memcpy(more, tokens, count * sizeof(*more));
 			if (tokens != local)
 				free(tokens);
@@ -407,13 +407,13 @@ VPRIV uint32_t string_lit(cc *c)
 		tokens[count++] = *t;
 		if (t->kind != LEX_TOKEN_STRING) {
 			if (kind != LEX_TOKEN_STRING && kind != t->kind)
-				cc_error(c, t->loc, "unsupported non-standard concatenation of string literals");
+				cc_report_error(c, t->loc, "unsupported non-standard concatenation of string literals");
 			else
 				kind = t->kind;
 		}
 		next(c);
 	}
-	int esz = lit_esz(kind, c->o->short_wchar);
+	int esz = cc_literal_element_size(kind, c->o->short_wchar);
 	char *buf = c->hp; /* decoding does not fetch tokens or allocate AST data */
 	for (size_t i = 0; i < count; i++) {
 		const ptok *t = &tokens[i];
@@ -426,7 +426,7 @@ VPRIV uint32_t string_lit(cc *c)
 		e = s + sl - 1;
 		/* each source byte gives at most 4 bytes */
 		if (unlikely(buf + n + sl * 4 + 16 > c->hend)) {
-			fatal(c, t->loc, "translation unit too large (front-end heap full)");
+			cc_report_fatal(c, t->loc, "translation unit too large (front-end heap full)");
 		}
 
 		while (*s != '"')
@@ -447,10 +447,10 @@ VPRIV uint32_t string_lit(cc *c)
 				if (s == e)
 					break;
 			}
-			v = lit_char(c, &s, e, t, kind, &ok);
+			v = cc_literal_character_parse(c, &s, e, t, kind, &ok);
 			if (esz == 1) {
 				if (!ok && (v & 0x80000000u))
-					n += utf8_enc(v & 0x7fffffffu, buf + n);
+					n += cc_literal_utf8_encode(v & 0x7fffffffu, buf + n);
 				else
 					buf[n++] = (char)v;
 			} else {
@@ -489,23 +489,23 @@ VPRIV uint32_t string_lit(cc *c)
 	memset(buf + n, 0, (size_t)esz);
 	n += (size_t)esz;
 	{
-		char *keep = halloc(c, n);
+		char *keep = cc_heap_allocate(c, n);
 		uint32_t si = c->nstr++;
-		qty et;
+		ast_qualified_type et;
 
 		c->strs[si] = (cstr){ keep, (uint32_t)(n / (size_t)esz), (uint8_t)esz, (uint8_t)kind };
-		et = esz == 1 ? prim(kind == LEX_TOKEN_UTF8_STRING && kwmap == kwmap_c23 ? TY_UCHAR : TY_CHAR) : kind == LEX_TOKEN_WIDE_STRING ? c->t_wchar : kind == LEX_TOKEN_UTF16_STRING ? c->t_char16 : c->t_char32;
+		et = esz == 1 ? cc_type_basic(kind == LEX_TOKEN_UTF8_STRING && cc_keyword_map == cc_keyword_map_c23 ? AST_TYPE_UNSIGNED_CHAR : AST_TYPE_CHAR) : kind == LEX_TOKEN_WIDE_STRING ? c->t_wchar : kind == LEX_TOKEN_UTF16_STRING ? c->t_char16 : c->t_char32;
 		{
-			uint32_t r = mk(c, N_STR, ty_array(c, et, n / (size_t)esz, 0), loc);
+			uint32_t r = cc_node_new(c, AST_NODE_STRING, cc_type_array(c, et, n / (size_t)esz, 0), loc);
 
 			c->nodes[r].a = si;
-			c->nodes[r].flags = NF_LVALUE;
+			c->nodes[r].flags = AST_NODE_FLAG_LVALUE;
 			return r;
 		}
 	}
 }
 
-VPRIV uint32_t char_lit(cc *c)
+CC_PRIVATE uint32_t cc_literal_character_build(cc *c)
 {
 	ptok *t = tok(c);
 	char tmp[t->len + 1];
@@ -514,7 +514,7 @@ VPRIV uint32_t char_lit(cc *c)
 	int kind = t->kind;
 	i128 v = 0;
 	int nch = 0;
-	qty ty = prim(TY_INT);
+	ast_qualified_type ty = cc_type_basic(AST_TYPE_INT);
 	uint32_t loc;
 
 	while (*s != '\'')
@@ -522,12 +522,12 @@ VPRIV uint32_t char_lit(cc *c)
 	s++;
 	while (s < e) {
 		bool ok;
-		uint32_t x = lit_char(c, &s, e, t, kind, &ok);
+		uint32_t x = cc_literal_character_parse(c, &s, e, t, kind, &ok);
 
 		if (kind == LEX_TOKEN_CHARACTER) {
 			if (!ok && (x & 0x80000000u)) {
 				char u[4];
-				size_t k = utf8_enc(x & 0x7fffffffu, u);
+				size_t k = cc_literal_utf8_encode(x & 0x7fffffffu, u);
 
 				for (size_t j = 0; j < k; j++)
 					v = (v << 8) | (unsigned char)u[j], nch++;
@@ -554,13 +554,13 @@ VPRIV uint32_t char_lit(cc *c)
 		if (kind == LEX_TOKEN_CHARACTER) {
 			/* clang: 4 characters are -Wfour-char-constants (off); more is too long as well */
 			if (nch != 4)
-				cc_warnx(c, "multichar", true, NULL, t->loc, NULL, 0, NULL, 0, "multi-character character constant");
+				cc_report_warning(c, "multichar", true, NULL, t->loc, NULL, 0, NULL, 0, "multi-character character constant");
 			if (nch > 4)
 				report(c, "warning", t->loc, NULL, 0, NULL, 0, "character constant too long for its type");
 		} else if (kind == LEX_TOKEN_WIDE_CHARACTER) {
-			cc_error(c, t->loc, "wide character literals may not contain multiple characters");
+			cc_report_error(c, t->loc, "wide character literals may not contain multiple characters");
 		} else {
-			cc_error(c, t->loc, "Unicode character literals may not contain multiple characters");
+			cc_report_error(c, t->loc, "Unicode character literals may not contain multiple characters");
 		}
 	}
 	if (kind == LEX_TOKEN_CHARACTER) {
@@ -578,10 +578,10 @@ VPRIV uint32_t char_lit(cc *c)
 	} else if (kind == LEX_TOKEN_UTF32_CHARACTER) {
 		ty = c->t_char32;
 	} else if (kind == LEX_TOKEN_UTF8_CHARACTER) {
-		ty = c->o->unsigned_char ? prim(TY_UCHAR) : prim(TY_CHAR);
-		ty = prim(TY_UCHAR);
+		ty = c->o->unsigned_char ? cc_type_basic(AST_TYPE_UNSIGNED_CHAR) : cc_type_basic(AST_TYPE_CHAR);
+		ty = cc_type_basic(AST_TYPE_UNSIGNED_CHAR);
 	}
 	loc = t->loc;	/* (t is the next token after next()) */
 	next(c);
-	return mk_int(c, v, ty, loc);
+	return cc_node_integer_new(c, v, ty, loc);
 }

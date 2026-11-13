@@ -2,8 +2,8 @@
  * vpp --lint, the naming check: a file-scope function or object defined in a file named on the
  * command line must carry its module's prefix (doc/STYLE.md, "Module prefixes").
  *
- * Runs once at the end of the TU (cc_run), on the symbol table the parse built anyway: no AST is
- * kept for it and nothing runs unless cc_opts.lint is set (only `vpp --lint`, driver/cmdline.c).
+ * Runs once at the end of the TU (cc_translation_unit_run), on the symbol table the parse built anyway: no AST is
+ * kept for it and nothing runs unless cc_options.lint is set (only `vpp --lint`, driver/cmdline.c).
  * The module is the file's path after its last "src/": the longest directory in the table below
  * decides.  A file outside the table (bin/, test/, tools/, headers/, arch/wasm, a file not under
  * src/ at all) is not checked: no finding.  Names in headers the file includes are not checked,
@@ -12,7 +12,7 @@
  * [-Wvcc-lint-naming] whose text names the expected prefix; no fix-it, since the new name is
  * not unambiguous.
  */
-#include "ccimpl.h"
+#include "cc-internal.h"
 
 typedef struct lint_module {
 	const char *dir;	/* after src/, with the trailing slash */
@@ -81,7 +81,7 @@ static bool lint_name_ok(const lint_module *m, const char *name, uint32_t len)
 	return false;
 }
 
-VPRIV void cc_lint_naming_report(cc *c)
+CC_PRIVATE void cc_lint_naming_report(cc *c)
 {
 	static const char *const g[] = { "vcc-lint", NULL };
 
@@ -90,19 +90,19 @@ VPRIV void cc_lint_naming_report(cc *c)
 		const lint_module *m;
 		const char *file, *name;
 		uint32_t flen, line, col, nlen, at;
-		bool fn = y->kind == S_FUNC, defined = false;
+		bool fn = y->kind == AST_SYMBOL_FUNCTION, defined = false;
 
-		if ((y->kind != S_VAR && !fn) || y->depth || !y->name || lookup(c, y->name) != i || (y->flags & SF_OVERLOAD))
+		if ((y->kind != AST_SYMBOL_VARIABLE && !fn) || y->depth || !y->name || cc_symbol_lookup(c, y->name) != i || (y->flags & AST_SYMBOL_FLAG_OVERLOAD))
 			continue;
 		for (uint32_t s = i; s; s = c->syms[s].next)
-			defined |= (c->syms[s].flags & (fn ? SF_DEFINED : (SF_DEFINED | SF_TENTATIVE))) != 0;
+			defined |= (c->syms[s].flags & (fn ? AST_SYMBOL_FLAG_DEFINED : (AST_SYMBOL_FLAG_DEFINED | AST_SYMBOL_FLAG_TENTATIVE))) != 0;
 		at = y->defloc ? y->defloc : y->loc;
 		if (!defined || !pp_location_is_in_main_file(c->p, at))
 			continue;
 		pp_location_describe(c->p, at, &file, &flen, &line, &col);
 		m = lint_module_of(file, flen);
-		name = idstr_(y->name);
-		nlen = (uint32_t)idlen_(y->name);
+		name = cc_identifier_string(y->name);
+		nlen = (uint32_t)cc_identifier_length(y->name);
 		if (!m || lint_name_ok(m, name, nlen))
 			continue;
 		{

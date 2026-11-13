@@ -2,157 +2,157 @@
 
 #include "lowering-internal.h"
 
-VPRIV const uint8_t vl_icc[10] = { C_EQ, C_NE, C_LT, C_LE, C_GT, C_GE, C_LO, C_LS, C_HI, C_HS };
+VPRIV const uint8_t a64_vir_integer_condition_codes[10] = { C_EQ, C_NE, C_LT, C_LE, C_GT, C_GE, C_LO, C_LS, C_HI, C_HS };
 
-VPRIV const int8_t vl_fccs[8] = { C_EQ, C_NE, C_MI, C_LS, C_GT, C_GE, C_VS, -1 };
+VPRIV const int8_t a64_vir_float_condition_codes[8] = { C_EQ, C_NE, C_MI, C_LS, C_GT, C_GE, C_VS, -1 };
 
-VPRIV const uint8_t vl_swapcc[10] = { 0, 1, 4, 5, 2, 3, 8, 9, 6, 7 };	/* icmp codes, operands swapped */
+VPRIV const uint8_t a64_vir_condition_swapped[10] = { 0, 1, 4, 5, 2, 3, 8, 9, 6, 7 };	/* icmp codes, operands swapped */
 
-VPRIV int vl_cmp(vl *L, const vir_ins *in)	/* the flags for an icmp; its code (swapped if the operands were) */
+VPRIV int a64_vir_integer_compare_lower(a64_vir_context *L, const vir_insn *in)	/* the flags for an icmp; its code (swapped if the operands were) */
 {
-	ecx *e = L->e;
-	int x = vl_x(L->f, in->a), a;
+	ecx *e = L->context;
+	int x = a64_vir_value_is_64_bit(L->function, in->a), a;
 
-	if (L->opr[0] == VR_NONE && vl_iconst(L->f, in->a) && L->opr[1] != VR_NONE) {
-		opi(e, I_SUBSI, x, ZR, vl_gx(L->opr[1]), vl_ival(&L->f->ins[in->a]));
-		return vl_swapcc[in->fl & 15];
+	if (L->operand_registers[0] == VIR_REGISTER_NONE && a64_vir_value_is_integer_constant(L->function, in->a) && L->operand_registers[1] != VIR_REGISTER_NONE) {
+		opi(e, I_SUBSI, x, ZR, a64_vir_general_register(L->operand_registers[1]), a64_vir_constant_integer(&L->function->insns[in->a]));
+		return a64_vir_condition_swapped[in->flags & 15];
 	}
-	a = vl_ix(L, 0, R_X16);
-	if (L->opr[1] == VR_NONE && vl_iconst(L->f, in->b)) {
-		int64_t k = vl_ival(&L->f->ins[in->b]);
+	a = a64_vir_operand_general_register(L, 0, R_X16);
+	if (L->operand_registers[1] == VIR_REGISTER_NONE && a64_vir_value_is_integer_constant(L->function, in->b)) {
+		int64_t k = a64_vir_constant_integer(&L->function->insns[in->b]);
 
 		opi(e, I_SUBSI, x, ZR, a, k);
 	} else {
-		op3(e, I_SUBS, x, ZR, a, vl_ix(L, 1, R_X17));
+		op3(e, I_SUBS, x, ZR, a, a64_vir_operand_general_register(L, 1, R_X17));
 	}
-	return in->fl & 15;
+	return in->flags & 15;
 }
 
-VPRIV void vl_fcmp(vl *L, const vir_ins *in)
+VPRIV void a64_vir_float_compare_lower(a64_vir_context *L, const vir_insn *in)
 {
-	int d = L->f->ins[in->a].ty == VT_F64;
+	int d = L->function->insns[in->a].type == VIR_TYPE_F64;
 
-	word(L->e, 0x1e202000u | (unsigned)d << 22 | (unsigned)vl_fx(L, 1) << 16 | (unsigned)vl_fx(L, 0) << 5);
+	word(L->context, 0x1e202000u | (unsigned)d << 22 | (unsigned)a64_vir_operand_float_register(L, 1) << 16 | (unsigned)a64_vir_operand_float_register(L, 0) << 5);
 }
 
 /*
  * Compares joined into one condition: icmp, then (icmp, and/or of the value so far and
  * that compare) once or more, then the brif or select reading the last and/or; every
- * value read once, nothing in between (the builder's vw_condmerge lays `a && b` out so).
+ * value read once, nothing in between (the builder's virbuild_conditions_merge lays `a && b` out so).
  * One cmp, then a ccmp per further compare: no register holds a truth value.
  */
-VPRIV bool vl_chain(vl *L, uint32_t b, uint32_t i)
+VPRIV bool a64_vir_compare_chain_lower(a64_vir_context *L, uint32_t b, uint32_t i)
 {
-	const vir_fn *f = L->f;
-	uint32_t end = f->blk[b].first + f->blk[b].n, v = i, j = i + 1;
+	const vir_function *f = L->function;
+	uint32_t end = f->blocks[b].first + f->blocks[b].insn_count, v = i, j = i + 1;
 
 	for (;;) {
-		const vir_ins *c, *k;
+		const vir_insn *c, *k;
 
-		if (j + 2 >= end || L->uses[v] != 1 || L->o->slot[v] != VIR_NOBLK || L->uses[j] != 1 || L->o->slot[j] != VIR_NOBLK)
+		if (j + 2 >= end || L->uses[v] != 1 || L->allocation->slot[v] != VIR_BLOCK_NONE || L->uses[j] != 1 || L->allocation->slot[j] != VIR_BLOCK_NONE)
 			return false;
-		c = &f->ins[j], k = &f->ins[j + 1];
-		if (c->op != VO_ICMP || (k->op != VO_AND && k->op != VO_OR) || k->ty != VT_I32 || k->a != v || k->b != j)
+		c = &f->insns[j], k = &f->insns[j + 1];
+		if (c->op != VIR_OP_ICMP || (k->op != VIR_OP_AND && k->op != VIR_OP_OR) || k->type != VIR_TYPE_I32 || k->a != v || k->b != j)
 			return false;
 		v = j + 1, j += 2;
-		if (f->ins[j].op == VO_ICMP)
+		if (f->insns[j].op == VIR_OP_ICMP)
 			continue;
-		if ((f->ins[j].op != VO_BRIF && f->ins[j].op != VO_SELECT) || f->ins[j].a != v || L->uses[v] != 1 ||
-		    L->o->slot[v] != VIR_NOBLK)
+		if ((f->insns[j].op != VIR_OP_BRIF && f->insns[j].op != VIR_OP_SELECT) || f->insns[j].a != v || L->uses[v] != 1 ||
+		    L->allocation->slot[v] != VIR_BLOCK_NONE)
 			return false;
-		L->cclo = i, L->cchi = v;
+		L->chain_low = i, L->chain_high = v;
 		return true;
 	}
 }
 
 /* a further compare of a chain: flags = its compare when the condition so far allows it (and: holds,
  * or: fails), else flags that make the joined condition false (and) or true (or) */
-VPRIV void vl_ccmp(vl *L, const vir_ins *in, bool isor)
+VPRIV void a64_vir_compare_chained_lower(a64_vir_context *L, const vir_insn *in, bool isor)
 {
 	static const uint8_t sat[16] = { 4, 0, 2, 0, 8, 0, 1, 0, 2, 0, 0, 8, 0, 4, 0, 0 };	/* nzcv satisfying a condition */
-	ecx *e = L->e;
-	int x = vl_x(L->f, in->a), code = in->fl & 15, cc, rn, rm = -1;
+	ecx *e = L->context;
+	int x = a64_vir_value_is_64_bit(L->function, in->a), code = in->flags & 15, cc, rn, rm = -1;
 	int64_t k = 0;
 	bool imm = false;
 	uint32_t w;
 
-	if (L->opr[0] == VR_NONE && vl_iconst(L->f, in->a) && L->opr[1] != VR_NONE) {	/* (as vl_cmp: operands swapped) */
-		rn = vl_gx(L->opr[1]), k = vl_ival(&L->f->ins[in->a]), imm = true;
-		code = vl_swapcc[code];
+	if (L->operand_registers[0] == VIR_REGISTER_NONE && a64_vir_value_is_integer_constant(L->function, in->a) && L->operand_registers[1] != VIR_REGISTER_NONE) {	/* (as a64_vir_integer_compare_lower: operands swapped) */
+		rn = a64_vir_general_register(L->operand_registers[1]), k = a64_vir_constant_integer(&L->function->insns[in->a]), imm = true;
+		code = a64_vir_condition_swapped[code];
 	} else {
-		rn = vl_ix(L, 0, R_X16);
-		if (L->opr[1] == VR_NONE && vl_iconst(L->f, in->b))
-			k = vl_ival(&L->f->ins[in->b]), imm = true;
+		rn = a64_vir_operand_general_register(L, 0, R_X16);
+		if (L->operand_registers[1] == VIR_REGISTER_NONE && a64_vir_value_is_integer_constant(L->function, in->b))
+			k = a64_vir_constant_integer(&L->function->insns[in->b]), imm = true;
 		else
-			rm = vl_ix(L, 1, R_X17);
+			rm = a64_vir_operand_general_register(L, 1, R_X17);
 	}
 	if (imm && (k < -31 || k > 31)) {
 		rm = rn == R_X17 ? R_X16 : R_X17;
 		movi(e, 1, rm, k);
 		imm = false;
 	}
-	cc = vl_icc[code];
-	w = (imm && k < 0 ? 0x3a400000u : 0x7a400000u) | (unsigned)x << 31 | (unsigned)(isor ? L->ccrun ^ 1 : L->ccrun) << 12 |
+	cc = a64_vir_integer_condition_codes[code];
+	w = (imm && k < 0 ? 0x3a400000u : 0x7a400000u) | (unsigned)x << 31 | (unsigned)(isor ? L->chain_condition ^ 1 : L->chain_condition) << 12 |
 	    (unsigned)(rn & 31) << 5 | sat[isor ? cc : cc ^ 1];
 	if (imm)
 		w |= 0x800u | (unsigned)(k < 0 ? -k : k) << 16;
 	else
 		w |= (unsigned)(rm & 31) << 16;
 	word(e, w);
-	L->ccrun = cc;
+	L->chain_condition = cc;
 }
 
 /* the flags of a condition value (operand 0): the fused compare's, else `cmp w, #0` and NE */
-VPRIV int vl_cond(vl *L, const vir_ins *in)
+VPRIV int a64_vir_condition_flags_get(a64_vir_context *L, const vir_insn *in)
 {
-	if (L->fcc >= 0 && L->fval == in->a) {
-		int c = L->fcc;
+	if (L->flag_condition >= 0 && L->flag_value == in->a) {
+		int c = L->flag_condition;
 
-		L->fcc = -1;
+		L->flag_condition = -1;
 		return c;
 	}
-	opi(L->e, I_SUBSI, vl_x(L->f, in->a), ZR, vl_ix(L, 0, R_X16), 0);	/* (a condition of either width) */
+	opi(L->context, I_SUBSI, a64_vir_value_is_64_bit(L->function, in->a), ZR, a64_vir_operand_general_register(L, 0, R_X16), 0);	/* (a condition of either width) */
 	return C_NE;
 }
 
-VPRIV vlcc vl_brcond(vl *L, const vir_ins *in)
+VPRIV a64_vir_condition a64_vir_branch_condition_get(a64_vir_context *L, const vir_insn *in)
 {
-	if (L->fcc >= 0 && L->fval == in->a) {
-		vlcc c = { L->fcc, L->fzr, L->fzx, L->fbit };
+	if (L->flag_condition >= 0 && L->flag_value == in->a) {
+		a64_vir_condition c = { L->flag_condition, L->zero_test_register, L->zero_test_is_64_bit, L->test_bit };
 
-		L->fcc = -1, L->fzr = -1, L->fbit = -1;
+		L->flag_condition = -1, L->zero_test_register = -1, L->test_bit = -1;
 		return c;
 	}
-	return (vlcc){ C_NE, vl_ix(L, 0, R_X16), vl_x(L->f, in->a), -1 };
+	return (a64_vir_condition){ C_NE, a64_vir_operand_general_register(L, 0, R_X16), a64_vir_value_is_64_bit(L->function, in->a), -1 };
 }
 
-VPRIV void vl_bc(ecx *e, vlcc c, bool inv, uint32_t l)
+VPRIV void a64_vir_branch_conditional_emit(ecx *e, a64_vir_condition c, bool inv, uint32_t l)
 {
-	int cc = inv ? c.cc ^ 1 : c.cc;
+	int cc = inv ? c.code ^ 1 : c.code;
 
-	if (c.r >= 0 && c.bit >= 0)
-		tbz(e, cc == C_NE, c.r, c.bit, l);
-	else if (c.r >= 0)
-		cbz(e, cc == C_NE, c.x, c.r, l);
+	if (c.register_number >= 0 && c.bit >= 0)
+		tbz(e, cc == C_NE, c.register_number, c.bit, l);
+	else if (c.register_number >= 0)
+		cbz(e, cc == C_NE, c.is_64_bit, c.register_number, l);
 	else
 		bcond(e, cc, l);
 }
 
 /* register r (VIR's) is still there at instruction upto: no edit after the current
  * instruction and up to upto writes it (x16, the edits' scratch: no edit at all) */
-VPRIV bool vl_kept(const vl *L, uint8_t r, uint32_t upto)
+VPRIV bool a64_vir_register_is_kept(const a64_vir_context *L, uint8_t r, uint32_t upto)
 {
-	for (uint32_t x = L->ei; x < L->eend && L->o->edit[x].pos <= upto; x++)
-		if (L->o->edit[x].dst == r || vl_gx(r) == R_X16)
+	for (uint32_t x = L->edit_next; x < L->edit_end && L->allocation->edit[x].pos <= upto; x++)
+		if (L->allocation->edit[x].dst == r || a64_vir_general_register(r) == R_X16)
 			return false;
 	return true;
 }
 
 /* instruction j of block b is used once, by j + 1, and not spilled */
-static bool vl_once1(const vl *L, uint32_t b, uint32_t j)
+static bool a64_vir_value_is_used_by_next(const a64_vir_context *L, uint32_t b, uint32_t j)
 {
-	return L->uses[j] == 1 && L->o->slot[j] == VIR_NOBLK && j + 1 < L->f->blk[b].first + L->f->blk[b].n &&
-	       L->f->ins[j + 1].a == j;
+	return L->uses[j] == 1 && L->allocation->slot[j] == VIR_BLOCK_NONE && j + 1 < L->function->blocks[b].first + L->function->blocks[b].insn_count &&
+	       L->function->insns[j + 1].a == j;
 }
 
 /*
@@ -161,48 +161,48 @@ static bool vl_once1(const vl *L, uint32_t b, uint32_t j)
  * operand's register for one bit, else tst and b.ne/b.eq (as LLVM).  Lowered at the
  * chain's first instruction i; the others up to the brif leave nothing.
  */
-VPRIV bool vl_tfold(vl *L, uint32_t b, uint32_t i)
+VPRIV bool a64_vir_test_branch_fold(a64_vir_context *L, uint32_t b, uint32_t i)
 {
-	const vir_fn *f = L->f;
-	const vir_ins *in = &f->ins[i];
+	const vir_function *f = L->function;
+	const vir_insn *in = &f->insns[i];
 	uint32_t j = i;
-	int x = in->ty != VT_I32, cc = C_NE, k = 0;
+	int x = in->type != VIR_TYPE_I32, cc = C_NE, k = 0;
 	uint64_t wm = x ? ~0ull : 0xffffffffull, m, tm = ~0ull;
 
-	if (L->opr[0] == VR_NONE || !vl_once1(L, b, i))
+	if (L->operand_registers[0] == VIR_REGISTER_NONE || !a64_vir_value_is_used_by_next(L, b, i))
 		return false;
-	if (in->op == VO_LSHR || in->op == VO_ASHR) {	/* (a constant in a register too: the immediate) */
-		if (!vl_iconst(f, in->b) || (k = (int)vl_ival(&f->ins[in->b])) <= 0 || k >= (x ? 64 : 32))
+	if (in->op == VIR_OP_LSHR || in->op == VIR_OP_ASHR) {	/* (a constant in a register too: the immediate) */
+		if (!a64_vir_value_is_integer_constant(f, in->b) || (k = (int)a64_vir_constant_integer(&f->insns[in->b])) <= 0 || k >= (x ? 64 : 32))
 			return false;
-		if (!vl_once1(L, b, ++j))
+		if (!a64_vir_value_is_used_by_next(L, b, ++j))
 			return false;
 	}
-	if (f->ins[j].op != VO_AND || !vl_iconst(f, f->ins[j].b) || (f->ins[j].ty != VT_I32) != (x != 0))
+	if (f->insns[j].op != VIR_OP_AND || !a64_vir_value_is_integer_constant(f, f->insns[j].b) || (f->insns[j].type != VIR_TYPE_I32) != (x != 0))
 		return false;
-	m = vl_lval(&f->ins[f->ins[j].b]) & wm;
+	m = a64_vir_constant_logical_immediate(&f->insns[f->insns[j].b]) & wm;
 	j++;
-	if (f->ins[j].op == VO_TRUNC && f->ins[j].ty == VT_I32 && vl_once1(L, b, j))
+	if (f->insns[j].op == VIR_OP_TRUNC && f->insns[j].type == VIR_TYPE_I32 && a64_vir_value_is_used_by_next(L, b, j))
 		tm = 0xffffffffull, j++;
-	if (f->ins[j].op == VO_ICMP && (f->ins[j].fl & 15) <= 1 && vl_iconst(f, f->ins[j].b) &&
-	    !vl_ival(&f->ins[f->ins[j].b]) && vl_once1(L, b, j))
-		cc = f->ins[j].fl & 15 ? C_NE : C_EQ, j++;
-	if (f->ins[j].op != VO_BRIF || f->ins[j].a != j - 1)
+	if (f->insns[j].op == VIR_OP_ICMP && (f->insns[j].flags & 15) <= 1 && a64_vir_value_is_integer_constant(f, f->insns[j].b) &&
+	    !a64_vir_constant_integer(&f->insns[f->insns[j].b]) && a64_vir_value_is_used_by_next(L, b, j))
+		cc = f->insns[j].flags & 15 ? C_NE : C_EQ, j++;
+	if (f->insns[j].op != VIR_OP_BRIF || f->insns[j].a != j - 1)
 		return false;
 	m &= tm;
-	if (in->op == VO_ASHR && k && (m >> ((x ? 64 : 32) - k)))
+	if (in->op == VIR_OP_ASHR && k && (m >> ((x ? 64 : 32) - k)))
 		return false;	/* (it would test copies of the sign) */
 	m = (m << k) & wm;
 	if (!m || !logimm_ok(m, x))
 		return false;
-	L->fcc = cc;
-	L->fval = j - 1;
-	L->fzr = -1, L->fbit = -1;
-	L->tlo = i, L->thi = j;
-	if (!(m & (m - 1)) && vl_kept(L, L->opr[0], j)) {
-		L->fzr = vl_gx(L->opr[0]);
-		L->fbit = __builtin_ctzll(m);
+	L->flag_condition = cc;
+	L->flag_value = j - 1;
+	L->zero_test_register = -1, L->test_bit = -1;
+	L->folded_low = i, L->folded_high = j;
+	if (!(m & (m - 1)) && a64_vir_register_is_kept(L, L->operand_registers[0], j)) {
+		L->zero_test_register = a64_vir_general_register(L->operand_registers[0]);
+		L->test_bit = __builtin_ctzll(m);
 		return true;
 	}
-	opi(L->e, I_ANDSI, x, ZR, vl_gx(L->opr[0]), (int64_t)m);
+	opi(L->context, I_ANDSI, x, ZR, a64_vir_general_register(L->operand_registers[0]), (int64_t)m);
 	return true;
 }

@@ -13,16 +13,16 @@
  */
 #include "emitimpl.h"
 
-VPRIV i128 em_trunc_to(cc *c, i128 v, qty t)
+VPRIV i128 em_trunc_to(cc *c, i128 v, ast_qualified_type t)
 {
 	int k = KIND(c, t);
 	unsigned bits;
 
-	if (k == TY_BOOL)
+	if (k == AST_TYPE_BOOL)
 		return v != 0;
-	if (k == TY_PTR)
+	if (k == AST_TYPE_POINTER)
 		return (i128)(uint64_t)v;
-	bits = is_integer(c, t) && T(c, t)->n && !(T(c, t)->flags & TF_ATOMIC) ?
+	bits = is_integer(c, t) && T(c, t)->n && !(T(c, t)->flags & AST_TYPE_FLAG_ATOMIC) ?
 		T(c, t)->n : (unsigned)tsize(c, t) * 8;
 	if (bits >= 128)
 		return is_signed(c, t) ? v : (i128)(u128)v;
@@ -90,7 +90,7 @@ VPRIV void sym_name(cc *c, tbuf *b, uint32_t s)
 		/* LLVM's wasm and x86 assemblers require quotes around non-ASCII names. */
 		vtext_char_append(b, '"');
 		vtext_append(b, vintern_ents[y->name].s, vintern_ents[y->name].len);
-		if (y->depth > 0 && y->kind == S_VAR && y->sc == SC_STATIC) {
+		if (y->depth > 0 && y->kind == AST_SYMBOL_VARIABLE && y->sc == AST_STORAGE_STATIC) {
 			vtext_char_append(b, '.');
 			vtext_unsigned_append(b, s);
 		}
@@ -98,7 +98,7 @@ VPRIV void sym_name(cc *c, tbuf *b, uint32_t s)
 		return;
 	}
 	vtext_append(b, vintern_ents[y->name].s, vintern_ents[y->name].len);
-	if (y->depth > 0 && y->kind == S_VAR && y->sc == SC_STATIC) {
+	if (y->depth > 0 && y->kind == AST_SYMBOL_VARIABLE && y->sc == AST_STORAGE_STATIC) {
 		vtext_char_append(b, '.');
 		vtext_unsigned_append(b, s);
 	}
@@ -145,7 +145,7 @@ VPRIV void ref_name(cc *c, tbuf *b, uint32_t r)
 		if (i >= 0x8000000u) {
 			vtext_string_append(b, fixed_names[i - 0x8000000u]);
 		} else {
-			const char *n = cc_builtin_name(i);
+			const char *n = cc_builtin_name_get(i);
 
 			if (!strncmp(n, "__builtin_", 10))
 				n += 10;

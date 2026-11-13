@@ -1,5 +1,5 @@
 /* vcc front end: __builtin_os_log_format and _buffer_size (Apple's os/trace_base.h); see builtin-table.c for where a builtin's other facts live */
-#include "ccimpl.h"
+#include "cc-internal.h"
 
 /* ---- __builtin_os_log_format / _buffer_size (Apple's os/trace_base.h) ----
  * clang's OSLog.cpp, checked byte for byte against clang: a buffer of
@@ -13,17 +13,17 @@
  * constant: the item's flags), of any other conversion a '*' is a scalar.
  * The data is the argument after default promotions; a conversion without
  * an argument has no item, an argument without a conversion is not evaluated. */
-enum { OSL_MAX = 64 };
-typedef struct { uint8_t desc, size; int arg; uint64_t imm; } oslog_item;
+enum { CC_BUILTIN_OS_LOG_MAX = 64 };
+typedef struct { uint8_t desc, size; int arg; uint64_t imm; } cc_builtin_os_log_item;
 
-static int oslog_layout(cc *c, const char *f, size_t len, const uint32_t *args, unsigned nargs,
-                        oslog_item *it, uint32_t loc)
+static int cc_builtin_os_log_layout(cc *c, const char *f, size_t len, const uint32_t *args, unsigned nargs,
+                        cc_builtin_os_log_item *it, uint32_t loc)
 {
 	int n = 0;
 	unsigned next = 0;
 	const char *e = f + len;
 
-#define OSL_ADD(D, ARG, IMM, SZ) do { if (n == OSL_MAX) { cc_error(c, loc, "os_log() format has too many arguments"); return -1; } \
+#define CC_BUILTIN_OS_LOG_ADD(D, ARG, IMM, SZ) do { if (n == CC_BUILTIN_OS_LOG_MAX) { cc_report_error(c, loc, "os_log() format has too many arguments"); return -1; } \
 	it[n].desc = (uint8_t)(D), it[n].arg = (ARG), it[n].imm = (IMM), it[n].size = (uint8_t)(SZ); n++; } while (0)
 	for (const char *p = f; p < e; p++) {
 		if (*p != '%')
@@ -52,7 +52,7 @@ static int oslog_layout(cc *c, const char *f, size_t len, const uint32_t *args, 
 					for (size_t i = 5; i < l; i++)
 						maskv |= (uint64_t)(uint8_t)s[i] << 8 * (i - 5);
 				} else if (l >= 5 && !memcmp(s, "mask.", 5)) {
-					cc_error(c, loc, "mask type size must be between 1-byte and 8-bytes");
+					cc_report_error(c, loc, "mask type size must be between 1-byte and 8-bytes");
 					return -1;
 				}
 				a = z < p ? z + 1 : z;
@@ -65,7 +65,7 @@ static int oslog_layout(cc *c, const char *f, size_t len, const uint32_t *args, 
 			break;
 		if (*p == '%')
 			continue;
-		/* N$: the argument of this conversion */
+		/* AST_NODE$: the argument of this conversion */
 		int pos = -1;
 		{
 			const char *q = p;
@@ -110,7 +110,7 @@ static int oslog_layout(cc *c, const char *f, size_t len, const uint32_t *args, 
 		case '@': kind = 4; break;
 		case 'm': kind = 6; break;
 		case 'n':
-			cc_error(c, loc, "os_log() '%%n' format specifier is not allowed");
+			cc_report_error(c, loc, "os_log() '%%n' format specifier is not allowed");
 			return -1;
 		case 'd': case 'i': case 'u': case 'o': case 'x': case 'X': case 'c': case 'C': case 'p':
 		case 'f': case 'F': case 'e': case 'E': case 'g': case 'G': case 'a': case 'A': case 'D': case 'O': case 'U':
@@ -119,67 +119,67 @@ static int oslog_layout(cc *c, const char *f, size_t len, const uint32_t *args, 
 			continue;	/* not a conversion: nothing (clang) */
 		}
 		if (mask)
-			OSL_ADD(0x70, -1, maskv, 8);
+			CC_BUILTIN_OS_LOG_ADD(0x70, -1, maskv, 8);
 		if (warg >= 0 && (unsigned)warg < nargs)
-			OSL_ADD(0, warg, 0, 0);
+			CC_BUILTIN_OS_LOG_ADD(0, warg, 0, 0);
 		if (kind == 2 || kind == 3) {
 			if (parg >= 0 && (unsigned)parg < nargs)
-				OSL_ADD(0x10, parg, 0, 0);
+				CC_BUILTIN_OS_LOG_ADD(0x10, parg, 0, 0);
 			else if (parg == -1)
-				OSL_ADD(0x10 | flags, -1, prec, 4);
+				CC_BUILTIN_OS_LOG_ADD(0x10 | flags, -1, prec, 4);
 		} else if (parg >= 0 && (unsigned)parg < nargs)
-			OSL_ADD(0, parg, 0, 0);
+			CC_BUILTIN_OS_LOG_ADD(0, parg, 0, 0);
 		if (kind == 6) {
-			OSL_ADD(0x60 | flags, -1, 0, 0);
+			CC_BUILTIN_OS_LOG_ADD(0x60 | flags, -1, 0, 0);
 			continue;
 		}
 		int a = pos >= 0 ? pos : (int)next++;
 		if ((unsigned)a < nargs)
-			OSL_ADD(kind << 4 | flags, a, 0, 0);
+			CC_BUILTIN_OS_LOG_ADD(kind << 4 | flags, a, 0, 0);
 	}
-#undef OSL_ADD
+#undef CC_BUILTIN_OS_LOG_ADD
 	for (int i = 0; i < n; i++)
 		if (it[i].arg >= 0)
-			it[i].size = (uint8_t)ty_size(c, N(args[it[i].arg])->ty);
+			it[i].size = (uint8_t)cc_type_size(c, AST_NODE(args[it[i].arg])->ty);
 	return n;
 }
 
 /* an argument after default promotions (its type gives the item size) */
-static uint32_t oslog_arg(cc *c, uint32_t a)
+static uint32_t cc_builtin_os_log_argument(cc *c, uint32_t a)
 {
-	a = rvalue(c, decay(c, a));
-	if (KIND(c, N(a)->ty) == TY_FLOAT)
-		return cast_node(c, a, prim(TY_DOUBLE), CK_F2F);
-	if (is_integer(c, N(a)->ty))
-		return convert(c, a, promote(c, N(a)->ty));
+	a = cc_node_rvalue(c, cc_conversion_decay(c, a));
+	if (AST_TYPE_KIND(c, AST_NODE(a)->ty) == AST_TYPE_FLOAT)
+		return cc_cast_insert(c, a, cc_type_basic(AST_TYPE_DOUBLE), AST_CAST_FLOAT_TO_FLOAT);
+	if (cc_type_is_integer(c, AST_NODE(a)->ty))
+		return cc_conversion_apply(c, a, cc_type_promote(c, AST_NODE(a)->ty));
 	return a;
 }
 
-VPRIV uint32_t os_log_call(cc *c, int id, uint32_t loc)
+CC_PRIVATE uint32_t cc_builtin_os_log_build(cc *c, int id, uint32_t loc)
 {
-	vec args;
-	args_list(c, &args);
-	unsigned first = id == BI_OS_LOG_FORMAT ? 1 : 0;
+	cc_id_list args;
+	cc_builtin_arguments_parse(c, &args);
+	unsigned first = id == CC_BUILTIN_OS_LOG_FORMAT ? 1 : 0;
 	if (args.n < first + 1) {
-		arity(c, loc, first + 1, &args);
-		return err_node(c, loc);
+		cc_builtin_arity_check(c, loc, first + 1, &args);
+		return cc_node_error_new(c, loc);
 	}
 	uint32_t s = args.v[first];
-	while (N(s)->op == N_CAST)
-		s = N(s)->a;
-	if (N(s)->op != N_STR) {
-		cc_error(c, N(args.v[first])->loc, "os_log() format must be a string literal");
-		return err_node(c, loc);
+	while (AST_NODE(s)->op == AST_NODE_CAST)
+		s = AST_NODE(s)->a;
+	if (AST_NODE(s)->op != AST_NODE_STRING) {
+		cc_report_error(c, AST_NODE(args.v[first])->loc, "os_log() format must be a string literal");
+		return cc_node_error_new(c, loc);
 	}
-	const char *f = c->strs[N(s)->a].s;
+	const char *f = c->strs[AST_NODE(s)->a].s;
 	uint32_t *va = args.v + first + 1;
 	unsigned nva = args.n - first - 1;
 	for (unsigned i = 0; i < nva; i++)
-		va[i] = oslog_arg(c, va[i]);
-	oslog_item it[OSL_MAX];
-	int n = oslog_layout(c, f, strlen(f), va, nva, it, loc);
+		va[i] = cc_builtin_os_log_argument(c, va[i]);
+	cc_builtin_os_log_item it[CC_BUILTIN_OS_LOG_MAX];
+	int n = cc_builtin_os_log_layout(c, f, strlen(f), va, nva, it, loc);
 	if (n < 0)
-		return err_node(c, loc);
+		return cc_node_error_new(c, loc);
 	uint64_t size = 2;
 	uint8_t summary = 0;
 	for (int i = 0; i < n; i++) {
@@ -189,45 +189,45 @@ VPRIV uint32_t os_log_call(cc *c, int id, uint32_t loc)
 		if (it[i].desc >> 4)
 			summary |= 2;
 	}
-	if (id == BI_OS_LOG_SIZE)
-		return mk_int(c, size, c->t_size, loc);
+	if (id == CC_BUILTIN_OS_LOG_SIZE)
+		return cc_node_integer_new(c, size, c->t_size, loc);
 
-	/* ({ unsigned char *p = buf; p[0] = summary; ...; *(T *)(p + k) = arg; ...; (void *)p; }) */
-	vec body;
-	vinit(&body);
-	qty u8p = ty_ptr(c, prim(TY_UCHAR));
-	uint32_t buf = rvalue(c, decay(c, args.v[0]));
-	if (!is_ptr(c, N(buf)->ty)) {
-		cc_error(c, N(args.v[0])->loc, "os_log() buffer must be a pointer");
-		return err_node(c, loc);
+	/* ({ unsigned char *p = buf; p[0] = summary; ...; *(AST_TYPE *)(p + k) = arg; ...; (void *)p; }) */
+	cc_id_list body;
+	cc_id_list_init(&body);
+	ast_qualified_type u8p = cc_type_pointer(c, cc_type_basic(AST_TYPE_UNSIGNED_CHAR));
+	uint32_t buf = cc_node_rvalue(c, cc_conversion_decay(c, args.v[0]));
+	if (!cc_type_is_pointer(c, AST_NODE(buf)->ty)) {
+		cc_report_error(c, AST_NODE(args.v[0])->loc, "os_log() buffer must be a pointer");
+		return cc_node_error_new(c, loc);
 	}
-	uint32_t p = bitcount_local(c, &body, u8p, cast_node(c, buf, u8p, CK_NOP), loc);
-#define OSL_AT(OFF) deref(c, binop(c, LEX_TOKEN_PLUS, rvalue(c, p), mk_int(c, (OFF), prim(TY_LONG), loc), loc), loc)
-#define OSL_BYTE(OFF, V) bitcount_statement(c, &body, assign(c, 0, OSL_AT(OFF), mk_int(c, (V), prim(TY_UCHAR), loc), loc), loc)
-	OSL_BYTE(0, summary);
-	OSL_BYTE(1, (unsigned)n);
+	uint32_t p = cc_lowering_local_new(c, &body, u8p, cc_cast_insert(c, buf, u8p, AST_CAST_NOP), loc);
+#define CC_BUILTIN_OS_LOG_AT(OFF) cc_dereference_build(c, cc_binary_build(c, LEX_TOKEN_PLUS, cc_node_rvalue(c, p), cc_node_integer_new(c, (OFF), cc_type_basic(AST_TYPE_LONG), loc), loc), loc)
+#define CC_BUILTIN_OS_LOG_BYTE(OFF, V) cc_lowering_statement_append(c, &body, cc_assignment_build(c, 0, CC_BUILTIN_OS_LOG_AT(OFF), cc_node_integer_new(c, (V), cc_type_basic(AST_TYPE_UNSIGNED_CHAR), loc), loc), loc)
+	CC_BUILTIN_OS_LOG_BYTE(0, summary);
+	CC_BUILTIN_OS_LOG_BYTE(1, (unsigned)n);
 	uint64_t off = 2;
 	for (int i = 0; i < n; i++) {
-		OSL_BYTE(off, it[i].desc);
-		OSL_BYTE(off + 1, it[i].size);
+		CC_BUILTIN_OS_LOG_BYTE(off, it[i].desc);
+		CC_BUILTIN_OS_LOG_BYTE(off + 1, it[i].size);
 		off += 2;
 		if (it[i].size) {
 			uint32_t v = it[i].arg >= 0 ? va[it[i].arg]
-			           : mk_int(c, (i128)it[i].imm, it[i].size == 8 ? prim(TY_ULLONG) : prim(TY_UINT), loc);
-			qty t = N(v)->ty;
-			uint32_t at = binop(c, LEX_TOKEN_PLUS, rvalue(c, p), mk_int(c, (i128)off, prim(TY_LONG), loc), loc);
-			uint32_t dst = deref(c, cast_node(c, at, ty_ptr(c, QUNQ(t)), CK_NOP), loc);
-			bitcount_statement(c, &body, assign(c, 0, dst, v, loc), loc);
+			           : cc_node_integer_new(c, (i128)it[i].imm, it[i].size == 8 ? cc_type_basic(AST_TYPE_UNSIGNED_LONG_LONG) : cc_type_basic(AST_TYPE_UNSIGNED_INT), loc);
+			ast_qualified_type t = AST_NODE(v)->ty;
+			uint32_t at = cc_binary_build(c, LEX_TOKEN_PLUS, cc_node_rvalue(c, p), cc_node_integer_new(c, (i128)off, cc_type_basic(AST_TYPE_LONG), loc), loc);
+			uint32_t dst = cc_dereference_build(c, cc_cast_insert(c, at, cc_type_pointer(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t)), AST_CAST_NOP), loc);
+			cc_lowering_statement_append(c, &body, cc_assignment_build(c, 0, dst, v, loc), loc);
 			off += it[i].size;
 		}
 	}
 	/* an argument without a conversion is not evaluated (clang) */
-#undef OSL_BYTE
-#undef OSL_AT
-	qty vp = ty_ptr(c, prim(TY_VOID));
-	bitcount_statement(c, &body, cast_node(c, rvalue(c, p), vp, CK_NOP), loc);
-	uint32_t block = mkstmt(c, N_BLOCK, loc, 0, vfreeze(c, &body), body.n);
-	uint32_t out = mk(c, N_STMTEXPR, vp, loc);
-	N(out)->a = block;
+#undef CC_BUILTIN_OS_LOG_BYTE
+#undef CC_BUILTIN_OS_LOG_AT
+	ast_qualified_type vp = cc_type_pointer(c, cc_type_basic(AST_TYPE_VOID));
+	cc_lowering_statement_append(c, &body, cc_cast_insert(c, cc_node_rvalue(c, p), vp, AST_CAST_NOP), loc);
+	uint32_t block = cc_statement_new(c, AST_NODE_BLOCK, loc, 0, cc_id_list_freeze(c, &body), body.n);
+	uint32_t out = cc_node_new(c, AST_NODE_STATEMENT_EXPRESSION, vp, loc);
+	AST_NODE(out)->a = block;
 	return out;
 }

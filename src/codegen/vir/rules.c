@@ -1,49 +1,49 @@
 /* The simplifier's rewrite rules: what one instruction becomes, given its operands. */
-#define WK_PREFIX vw_
-#define LO_PREFIX vw_
+#define WK_PREFIX virbuild_
+#define LO_PREFIX virbuild_
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
 #include "simplify.h"
 
-VPRIV void vw_inc(vwst *V, vwsimp *S, uint32_t v)
+VPRIV void virbuild_use_count_increment(virbuild_context *V, virbuild_simplify_state *S, uint32_t v)
 {
-	if (v < S->n0 && V->p[v].blk != VW_NOBLK)
-		S->cnt[v]++;
+	if (v < S->constant_start && V->insns[v].block != VIRBUILD_BLOCK_NONE)
+		S->use_counts[v]++;
 }
 
-VPRIV void vw_dec(vwst *V, vwsimp *S, uint32_t v)
+VPRIV void virbuild_use_count_decrement(virbuild_context *V, virbuild_simplify_state *S, uint32_t v)
 {
-	if (v < S->n0 && V->p[v].blk != VW_NOBLK && S->cnt[v])
-		S->cnt[v]--;
+	if (v < S->constant_start && V->insns[v].block != VIRBUILD_BLOCK_NONE && S->use_counts[v])
+		S->use_counts[v]--;
 }
 
-VPRIV bool vw_kint(const vwst *V, uint32_t v, int64_t *k)
+VPRIV bool virbuild_value_integer_constant(const virbuild_context *V, uint32_t v, int64_t *k)
 {
-	const vir_ins *in = &V->p[v].in;
+	const vir_insn *in = &V->insns[v].insn;
 
-	if (in->op != VO_ICONST)
+	if (in->op != VIR_OP_ICONST)
 		return false;
-	*k = in->ty == VT_I32 ? (int64_t)(int32_t)in->b : (int64_t)((uint64_t)in->b | (uint64_t)in->c << 32);
+	*k = in->type == VIR_TYPE_I32 ? (int64_t)(int32_t)in->b : (int64_t)((uint64_t)in->b | (uint64_t)in->c << 32);
 	return true;
 }
 
 /* bytes v is zero-extended from (its type's size: nothing known) */
-static uint32_t vw_zw(const vwst *V, uint32_t v)
+static uint32_t virbuild_value_zero_extended_bytes(const virbuild_context *V, uint32_t v)
 {
-	const vir_ins *in = &V->p[v].in;
-	uint32_t sz = vir_tysize(in->ty);
+	const vir_insn *in = &V->insns[v].insn;
+	uint32_t sz = vir_type_size(in->type);
 	int64_t k;
 
 	switch (in->op) {
-	case VO_LOAD:
-		return (in->fl & VIF_MS) ? sz : 1u << VIF_W(in->fl) < sz ? 1u << VIF_W(in->fl) : sz;
-	case VO_EXT:
-		return (in->fl & VIF_MS) ? sz : 1u << VIF_W(in->fl);
-	case VO_ICMP: case VO_FCMP:
+	case VIR_OP_LOAD:
+		return (in->flags & VIR_INSN_FLAG_MS) ? sz : 1u << VIR_INSN_FLAG_WIDTH_LOG2(in->flags) < sz ? 1u << VIR_INSN_FLAG_WIDTH_LOG2(in->flags) : sz;
+	case VIR_OP_EXT:
+		return (in->flags & VIR_INSN_FLAG_MS) ? sz : 1u << VIR_INSN_FLAG_WIDTH_LOG2(in->flags);
+	case VIR_OP_ICMP: case VIR_OP_FCMP:
 		return 1;
-	case VO_AND:
-		if (vw_kint(V, in->b, &k) && k >= 0)
+	case VIR_OP_AND:
+		if (virbuild_value_integer_constant(V, in->b, &k) && k >= 0)
 			return k <= 0xff ? 1 : k <= 0xffff ? 2 : k <= 0xffffffffll ? 4 : sz;
 		return sz;
 	default:
@@ -52,66 +52,70 @@ static uint32_t vw_zw(const vwst *V, uint32_t v)
 }
 
 /* bytes v is sign-extended from */
-static uint32_t vw_sw(const vwst *V, uint32_t v)
+static uint32_t virbuild_value_sign_extended_bytes(const virbuild_context *V, uint32_t v)
 {
-	const vir_ins *in = &V->p[v].in;
-	uint32_t sz = vir_tysize(in->ty), z;
+	const vir_insn *in = &V->insns[v].insn;
+	uint32_t sz = vir_type_size(in->type), z;
 
-	if ((in->op == VO_LOAD || in->op == VO_EXT) && (in->fl & VIF_MS))
-		return 1u << VIF_W(in->fl) < sz ? 1u << VIF_W(in->fl) : sz;
-	z = vw_zw(V, v);
+	if ((in->op == VIR_OP_LOAD || in->op == VIR_OP_EXT) && (in->flags & VIR_INSN_FLAG_MS))
+		return 1u << VIR_INSN_FLAG_WIDTH_LOG2(in->flags) < sz ? 1u << VIR_INSN_FLAG_WIDTH_LOG2(in->flags) : sz;
+	z = virbuild_value_zero_extended_bytes(V, v);
 	return z < sz ? 2 * z : sz;	/* (zero-extended from z bytes: a signed 2z-byte value) */
 }
 
-VPRIV uint32_t vw_undefk(ecx *e, vwsimp *S, uint32_t ty)
+VPRIV uint32_t virbuild_simplify_undefined_value(ecx *e, virbuild_simplify_state *S, uint32_t ty)
 {
-	if (!S->undef[ty])
-		S->undef[ty] = vw_undef(e, ty);
-	return S->undef[ty];
+	if (!S->undefined_values[ty])
+		S->undefined_values[ty] = virbuild_undefined_value(e, ty);
+	return S->undefined_values[ty];
 }
 
 /* q rewritten in place (true), or the value that replaces it in *r */
-VPRIV bool vw_simp1(ecx *e, vwsimp *S, uint32_t q, uint32_t *r)
+VPRIV bool virbuild_insn_simplify(ecx *e, virbuild_simplify_state *S, uint32_t q, uint32_t *r)
 {
-	vwst *V = e->vw;
-	vir_ins in = V->p[q].in;
+	virbuild_context *V = e->vw;
+	vir_insn in = V->insns[q].insn;
 	int64_t k, k2;
 
 	*r = q;
-	if (vw_commutes(in.op) && vw_kint(V, in.a, &k) && !vw_kint(V, in.b, &k2)) {
-		V->p[q].in.a = in.b, V->p[q].in.b = in.a;	/* the constant second (an immediate) */
-		in = V->p[q].in;
+	if (virbuild_opcode_is_commutative(in.op) && virbuild_value_integer_constant(V, in.a, &k) && !virbuild_value_integer_constant(V, in.b, &k2)) {
+		V->insns[q].insn.a = in.b, V->insns[q].insn.b = in.a;	/* the constant second (an immediate) */
+		in = V->insns[q].insn;
 	}
 	switch (in.op) {
-	case VO_I2P: case VO_P2I:	/* a pointer and its address as an integer are the same bits */
-		if (V->p[in.a].in.op == (in.op == VO_I2P ? VO_P2I : VO_I2P))
-			*r = V->p[in.a].in.a;
+	case VIR_OP_I2P: case VIR_OP_P2I:	/* a pointer and its address as an integer are the same bits */
+		if (in.op == VIR_OP_I2P && V->insns[in.a].insn.type == VIR_TYPE_PTR) {
+			*r = in.a;
+			return false;
+		}
+		if (V->insns[in.a].insn.op == (in.op == VIR_OP_I2P ? VIR_OP_P2I : VIR_OP_I2P))
+			*r = V->insns[in.a].insn.a;
 		return false;
-	case VO_STORE: {	/* only the low bytes go to memory: not their extension, nor a truncation to more */
-		vir_ins xi = V->p[in.b].in;
+	case VIR_OP_STORE: {	/* only the low bytes go to memory: not their extension, nor a truncation to more */
+		vir_insn xi = V->insns[in.b].insn;
 
-		if (vw_promdead(V, q))
+		if (virbuild_promote_store_is_dead(V, q))
 			return false;	/* (it goes: its operands are not counted) */
-		if (V->p[in.b].blk != VW_NOBLK && ((xi.op == VO_EXT && VIF_W(xi.fl) >= VIF_W(in.fl)) ||
-						   (xi.op == VO_TRUNC && VIF_W(in.fl) <= 2))) {
-			vw_dec(V, S, in.b), vw_inc(V, S, xi.a);
-			V->p[q].in.b = xi.a;
+		if (V->insns[in.b].block != VIRBUILD_BLOCK_NONE && ((xi.op == VIR_OP_EXT && VIR_INSN_FLAG_WIDTH_LOG2(xi.flags) >= VIR_INSN_FLAG_WIDTH_LOG2(in.flags)) ||
+						   (xi.op == VIR_OP_TRUNC && VIR_INSN_FLAG_WIDTH_LOG2(in.flags) <= 2))) {
+			virbuild_use_count_decrement(V, S, in.b), virbuild_use_count_increment(V, S, xi.a);
+			V->insns[q].insn.b = xi.a;
 			return true;
 		}
 		return false;
 	}
-	case VO_EXT: {
-		uint32_t x = in.a, K = 1u << VIF_W(in.fl), ts = vir_tysize(in.ty);
-		bool s = in.fl & VIF_MS;
-		vir_ins xi = V->p[x].in;
-		uint32_t xs = vir_tysize(xi.ty);
+	case VIR_OP_EXT: {
+		uint32_t x = in.a, K = 1u << VIR_INSN_FLAG_WIDTH_LOG2(in.flags), ts = vir_type_size(in.type);
+		bool s = in.flags & VIR_INSN_FLAG_MS;
+		vir_insn xi = V->insns[x].insn;
+		uint32_t xs = vir_type_size(xi.type);
 
-		if (vw_kint(V, x, &k)) {
+		if (virbuild_value_integer_constant(V, x, &k)) {
 			uint64_t u = (uint64_t)k & (K == 8 ? ~0ull : (1ull << 8 * K) - 1);
 
 			if (s && K < 8 && (u >> (8 * K - 1)) & 1)
 				u |= ~0ull << 8 * K;
-			*r = vw_iconst(e, in.ty, (int64_t)u);
+			*r = virbuild_constant_integer(e, in.type, (int64_t)u);
 			return false;
 		}
 		if (K >= ts) {	/* (the whole value: a copy or a plain widening) */
@@ -120,145 +124,145 @@ VPRIV bool vw_simp1(ecx *e, vwsimp *S, uint32_t q, uint32_t *r)
 				return false;
 			}
 		}
-		if (xs == ts && (s ? vw_sw(V, x) <= K : vw_zw(V, x) <= K)) {
+		if (xs == ts && (s ? virbuild_value_sign_extended_bytes(V, x) <= K : virbuild_value_zero_extended_bytes(V, x) <= K)) {
 			*r = x;
 			return false;
 		}
-		if (xs == ts && s && vw_zw(V, x) < K) {
+		if (xs == ts && s && virbuild_value_zero_extended_bytes(V, x) < K) {
 			*r = x;
 			return false;
 		}
-		if (xi.op == VO_EXT && vir_tysize(V->p[xi.a].in.ty) <= ts) {
-			uint32_t M = 1u << VIF_W(xi.fl);
+		if (xi.op == VIR_OP_EXT && vir_type_size(V->insns[xi.a].insn.type) <= ts) {
+			uint32_t M = 1u << VIR_INSN_FLAG_WIDTH_LOG2(xi.flags);
 
 			if (K <= M) {	/* the low K bytes of x are y's */
-				vw_dec(V, S, x), vw_inc(V, S, xi.a);
-				V->p[q].in.a = xi.a;
+				virbuild_use_count_decrement(V, S, x), virbuild_use_count_increment(V, S, xi.a);
+				V->insns[q].insn.a = xi.a;
 				return true;
 			}
-			if (s == !!(xi.fl & VIF_MS) || !(xi.fl & VIF_MS)) {	/* x's extension is q's */
-				vw_dec(V, S, x), vw_inc(V, S, xi.a);
-				V->p[q].in.a = xi.a;
-				V->p[q].in.fl = xi.fl;
+			if (s == !!(xi.flags & VIR_INSN_FLAG_MS) || !(xi.flags & VIR_INSN_FLAG_MS)) {	/* x's extension is q's */
+				virbuild_use_count_decrement(V, S, x), virbuild_use_count_increment(V, S, xi.a);
+				V->insns[q].insn.a = xi.a;
+				V->insns[q].insn.flags = xi.flags;
 				return true;
 			}
 		}
 		/* a load only q reads: the load extends */
-		if (xi.op == VO_LOAD && !(xi.fl & VIF_VOL) && S->cnt[x] == 1 && (1u << VIF_W(xi.fl)) == K) {
-			V->p[x].in.ty = (uint8_t)in.ty;
-			V->p[x].in.fl = (uint16_t)((xi.fl & ~VIF_MS) | (s ? VIF_MS : 0));
+		if (xi.op == VIR_OP_LOAD && !(xi.flags & VIR_INSN_FLAG_VOL) && S->use_counts[x] == 1 && (1u << VIR_INSN_FLAG_WIDTH_LOG2(xi.flags)) == K) {
+			V->insns[x].insn.type = (uint8_t)in.type;
+			V->insns[x].insn.flags = (uint16_t)((xi.flags & ~VIR_INSN_FLAG_MS) | (s ? VIR_INSN_FLAG_MS : 0));
 			*r = x;
 			return false;
 		}
-		if (xi.op == VO_LOAD && !(xi.fl & VIF_VOL) && S->cnt[x] == 1 && (1u << VIF_W(xi.fl)) < K &&
-		    (s ? vw_sw(V, x) <= K : vw_zw(V, x) <= K)) {
-			V->p[x].in.ty = (uint8_t)in.ty;
+		if (xi.op == VIR_OP_LOAD && !(xi.flags & VIR_INSN_FLAG_VOL) && S->use_counts[x] == 1 && (1u << VIR_INSN_FLAG_WIDTH_LOG2(xi.flags)) < K &&
+		    (s ? virbuild_value_sign_extended_bytes(V, x) <= K : virbuild_value_zero_extended_bytes(V, x) <= K)) {
+			V->insns[x].insn.type = (uint8_t)in.type;
 			*r = x;
 			return false;
 		}
 		return false;
 	}
-	case VO_TRUNC: {
+	case VIR_OP_TRUNC: {
 		uint32_t x = in.a;
-		vir_ins xi = V->p[x].in;
+		vir_insn xi = V->insns[x].insn;
 
-		if (vw_kint(V, x, &k)) {
-			*r = vw_iconst(e, VT_I32, (int64_t)(uint32_t)k);
+		if (virbuild_value_integer_constant(V, x, &k)) {
+			*r = virbuild_constant_integer(e, VIR_TYPE_I32, (int64_t)(uint32_t)k);
 			return false;
 		}
-		if (xi.op == VO_EXT && V->p[xi.a].in.ty == VT_I32 && VIF_W(xi.fl) >= 2) {
+		if (xi.op == VIR_OP_EXT && V->insns[xi.a].insn.type == VIR_TYPE_I32 && VIR_INSN_FLAG_WIDTH_LOG2(xi.flags) >= 2) {
 			*r = xi.a;
 			return false;
 		}
-		if (xi.op == VO_EXT && V->p[xi.a].in.ty == VT_I32) {	/* a narrower extension, in i32 */
-			vw_dec(V, S, x), vw_inc(V, S, xi.a);
-			V->p[q].in = (vir_ins){ VO_EXT, VT_I32, xi.fl, xi.a, 0, 0 };
+		if (xi.op == VIR_OP_EXT && V->insns[xi.a].insn.type == VIR_TYPE_I32) {	/* a narrower extension, in i32 */
+			virbuild_use_count_decrement(V, S, x), virbuild_use_count_increment(V, S, xi.a);
+			V->insns[q].insn = (vir_insn){ VIR_OP_EXT, VIR_TYPE_I32, xi.flags, xi.a, 0, 0 };
 			return true;
 		}
-		if (xi.op == VO_EXT && VIF_W(xi.fl) >= 2) {	/* trunc of a widening of the low half */
-			vw_dec(V, S, x), vw_inc(V, S, xi.a);
-			V->p[q].in.a = xi.a;
+		if (xi.op == VIR_OP_EXT && VIR_INSN_FLAG_WIDTH_LOG2(xi.flags) >= 2) {	/* trunc of a widening of the low half */
+			virbuild_use_count_decrement(V, S, x), virbuild_use_count_increment(V, S, xi.a);
+			V->insns[q].insn.a = xi.a;
 			return true;
 		}
-		if (xi.op == VO_LOAD && !(xi.fl & VIF_VOL) && S->cnt[x] == 1 && VIF_W(xi.fl) <= 2) {
-			V->p[x].in.ty = VT_I32;
-			if (VIF_W(xi.fl) == 2)
-				V->p[x].in.fl &= (uint16_t)~VIF_MS;
+		if (xi.op == VIR_OP_LOAD && !(xi.flags & VIR_INSN_FLAG_VOL) && S->use_counts[x] == 1 && VIR_INSN_FLAG_WIDTH_LOG2(xi.flags) <= 2) {
+			V->insns[x].insn.type = VIR_TYPE_I32;
+			if (VIR_INSN_FLAG_WIDTH_LOG2(xi.flags) == 2)
+				V->insns[x].insn.flags &= (uint16_t)~VIR_INSN_FLAG_MS;
 			*r = x;
 			return false;
 		}
 		return false;
 	}
-	case VO_S2F: case VO_U2F:	/* a constant converted: the constant (to nearest, as the instruction) */
-		if (vw_kint(V, in.a, &k)) {
-			bool w = V->p[in.a].in.ty != VT_I32;
-			double d = in.op == VO_S2F ? (w ? (double)k : (double)(int32_t)k) : (w ? (double)(uint64_t)k : (double)(uint32_t)k);
-			float f = in.op == VO_S2F ? (w ? (float)k : (float)(int32_t)k) : (w ? (float)(uint64_t)k : (float)(uint32_t)k);
+	case VIR_OP_S2F: case VIR_OP_U2F:	/* a constant converted: the constant (to nearest, as the instruction) */
+		if (virbuild_value_integer_constant(V, in.a, &k)) {
+			bool w = V->insns[in.a].insn.type != VIR_TYPE_I32;
+			double d = in.op == VIR_OP_S2F ? (w ? (double)k : (double)(int32_t)k) : (w ? (double)(uint64_t)k : (double)(uint32_t)k);
+			float f = in.op == VIR_OP_S2F ? (w ? (float)k : (float)(int32_t)k) : (w ? (float)(uint64_t)k : (float)(uint32_t)k);
 			uint64_t bits;
 			uint32_t fb;
 
 			memcpy(&bits, &d, 8), memcpy(&fb, &f, 4);
-			*r = in.ty == VT_F32 ? vw_k(e, VO_FCONST, VT_F32, 0, fb, 0) : vw_k(e, VO_FCONST, VT_F64, 0, (uint32_t)bits, (uint32_t)(bits >> 32));
+			*r = in.type == VIR_TYPE_F32 ? virbuild_constant_make(e, VIR_OP_FCONST, VIR_TYPE_F32, 0, fb, 0) : virbuild_constant_make(e, VIR_OP_FCONST, VIR_TYPE_F64, 0, (uint32_t)bits, (uint32_t)(bits >> 32));
 		}
 		return false;
-	case VO_FEXT: case VO_FTRUNC:
-		if (V->p[in.a].in.op == VO_FCONST && V->p[in.a].blk == VW_NOBLK) {
-			uint64_t bits = (uint64_t)V->p[in.a].in.b | (uint64_t)V->p[in.a].in.c << 32;
+	case VIR_OP_FEXT: case VIR_OP_FTRUNC:
+		if (V->insns[in.a].insn.op == VIR_OP_FCONST && V->insns[in.a].block == VIRBUILD_BLOCK_NONE) {
+			uint64_t bits = (uint64_t)V->insns[in.a].insn.b | (uint64_t)V->insns[in.a].insn.c << 32;
 			uint32_t fb = (uint32_t)bits;
 			double d;
 			float f;
 
-			if (in.op == VO_FEXT) {
+			if (in.op == VIR_OP_FEXT) {
 				memcpy(&f, &fb, 4);
 				d = f;
 				if (d != d)
 					return false;	/* (a NaN's payload: left to the instruction) */
 				memcpy(&bits, &d, 8);
-				*r = vw_k(e, VO_FCONST, VT_F64, 0, (uint32_t)bits, (uint32_t)(bits >> 32));
+				*r = virbuild_constant_make(e, VIR_OP_FCONST, VIR_TYPE_F64, 0, (uint32_t)bits, (uint32_t)(bits >> 32));
 			} else {
 				memcpy(&d, &bits, 8);
 				f = (float)d;
 				if (f != f)
 					return false;
 				memcpy(&fb, &f, 4);
-				*r = vw_k(e, VO_FCONST, VT_F32, 0, fb, 0);
+				*r = virbuild_constant_make(e, VIR_OP_FCONST, VIR_TYPE_F32, 0, fb, 0);
 			}
 		}
 		return false;
-	case VO_ADD: case VO_SUB: case VO_OR: case VO_XOR: case VO_SHL: case VO_LSHR: case VO_ASHR:
-		if (vw_kint(V, in.b, &k) && !k)
+	case VIR_OP_ADD: case VIR_OP_SUB: case VIR_OP_OR: case VIR_OP_XOR: case VIR_OP_SHL: case VIR_OP_LSHR: case VIR_OP_ASHR:
+		if (virbuild_value_integer_constant(V, in.b, &k) && !k)
 			*r = in.a;
 		return false;
-	case VO_MUL:
-		if (vw_kint(V, in.b, &k) && k == 1)
+	case VIR_OP_MUL:
+		if (virbuild_value_integer_constant(V, in.b, &k) && k == 1)
 			*r = in.a;
 		return false;
-	case VO_AND:
-		if (vw_kint(V, in.b, &k) && (k == -1 || (in.ty == VT_I32 && (uint32_t)k == 0xffffffffu)))
+	case VIR_OP_AND:
+		if (virbuild_value_integer_constant(V, in.b, &k) && (k == -1 || (in.type == VIR_TYPE_I32 && (uint32_t)k == 0xffffffffu)))
 			*r = in.a;
-		else if (vw_kint(V, in.b, &k) && k > 0 && !((uint64_t)k & ((uint64_t)k + 1)) && vw_zw(V, in.a) < 8 &&
-			 (uint64_t)k >= (vw_zw(V, in.a) == 8 ? ~0ull : (1ull << 8 * vw_zw(V, in.a)) - 1))
+		else if (virbuild_value_integer_constant(V, in.b, &k) && k > 0 && !((uint64_t)k & ((uint64_t)k + 1)) && virbuild_value_zero_extended_bytes(V, in.a) < 8 &&
+			 (uint64_t)k >= (virbuild_value_zero_extended_bytes(V, in.a) == 8 ? ~0ull : (1ull << 8 * virbuild_value_zero_extended_bytes(V, in.a)) - 1))
 			*r = in.a;	/* the mask keeps every bit that can be set */
 		return false;
-	case VO_PTRADD:
-		if (!vw_kint(V, in.b, &k))
+	case VIR_OP_PTRADD:
+		if (!virbuild_value_integer_constant(V, in.b, &k))
 			return false;
 		if (!k) {
 			*r = in.a;
 			return false;
 		}
-		if (V->p[in.a].in.op == VO_SLOTADDR && V->p[in.a].blk == VW_NOBLK) {	/* $s+k2 + k: $s+(k2+k) */
-			vir_ins a = V->p[in.a].in;	/* (a copy: vw_k can move V->p) */
+		if (V->insns[in.a].insn.op == VIR_OP_SLOTADDR && V->insns[in.a].block == VIRBUILD_BLOCK_NONE) {	/* $s+k2 + k: $s+(k2+k) */
+			vir_insn a = V->insns[in.a].insn;	/* (a copy: virbuild_constant_make can move V->p) */
 
 			k2 = (int64_t)((uint64_t)a.b | (uint64_t)a.c << 32) + k;
-			*r = vw_k(e, VO_SLOTADDR, VT_PTR, a.a, (uint32_t)k2, (uint32_t)((uint64_t)k2 >> 32));
+			*r = virbuild_constant_make(e, VIR_OP_SLOTADDR, VIR_TYPE_PTR, a.a, (uint32_t)k2, (uint32_t)((uint64_t)k2 >> 32));
 			return false;
 		}
-		if (V->p[in.a].in.op == VO_PTRADD && V->p[in.a].blk != VW_NOBLK && vw_kint(V, V->p[in.a].in.b, &k2)) {
-			uint32_t y = V->p[in.a].in.a, c = vw_iconst(e, VT_I64, (int64_t)((uint64_t)k + (uint64_t)k2));
+		if (V->insns[in.a].insn.op == VIR_OP_PTRADD && V->insns[in.a].block != VIRBUILD_BLOCK_NONE && virbuild_value_integer_constant(V, V->insns[in.a].insn.b, &k2)) {
+			uint32_t y = V->insns[in.a].insn.a, c = virbuild_constant_integer(e, VIR_TYPE_I64, (int64_t)((uint64_t)k + (uint64_t)k2));
 
-			vw_dec(V, S, in.a), vw_inc(V, S, y);
-			V->p[q].in.a = y, V->p[q].in.b = c;
+			virbuild_use_count_decrement(V, S, in.a), virbuild_use_count_increment(V, S, y);
+			V->insns[q].insn.a = y, V->insns[q].insn.b = c;
 			return true;
 		}
 		return false;
@@ -267,8 +271,8 @@ VPRIV bool vw_simp1(ecx *e, vwsimp *S, uint32_t q, uint32_t *r)
 	}
 }
 
-VPRIV bool vw_commutes(uint32_t op)
+VPRIV bool virbuild_opcode_is_commutative(uint32_t op)
 {
-	return op == VO_ADD || op == VO_MUL || op == VO_AND || op == VO_OR || op == VO_XOR ||
-	       op == VO_UMULHI || op == VO_SMULHI;
+	return op == VIR_OP_ADD || op == VIR_OP_MUL || op == VIR_OP_AND || op == VIR_OP_OR || op == VIR_OP_XOR ||
+	       op == VIR_OP_UMULHI || op == VIR_OP_SMULHI;
 }

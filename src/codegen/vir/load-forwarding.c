@@ -1,6 +1,6 @@
 /* The simplifier's loads across blocks. */
-#define WK_PREFIX vw_
-#define LO_PREFIX vw_
+#define WK_PREFIX virbuild_
+#define LO_PREFIX virbuild_
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
@@ -26,153 +26,153 @@
  */
 
 /* a = base + off: a value or a slot, and the constant offsets added to it */
-VPRIV void vw_baseoff(vwst *V, uint32_t a, vwaddr *A)
+VPRIV void virbuild_address_decompose(virbuild_context *V, uint32_t a, virbuild_address *A)
 {
 	uint64_t off = 0;
 	int64_t k;
 
-	a = vw_find(V, a);
+	a = virbuild_value_resolve(V, a);
 	for (int hop = 0; hop < 16; hop++) {
-		const vir_ins *in = &V->p[a].in;
+		const vir_insn *in = &V->insns[a].insn;
 
-		if (in->op != VO_PTRADD || V->p[a].blk == VW_NOBLK || !vw_kint(V, vw_find(V, in->b), &k))
+		if (in->op != VIR_OP_PTRADD || V->insns[a].block == VIRBUILD_BLOCK_NONE || !virbuild_value_integer_constant(V, virbuild_value_resolve(V, in->b), &k))
 			break;
 		off += (uint64_t)k;
-		a = vw_find(V, in->a);
+		a = virbuild_value_resolve(V, in->a);
 	}
-	A->slot = V->p[a].in.op == VO_SLOTADDR && V->p[a].blk == VW_NOBLK;
+	A->slot = V->insns[a].insn.op == VIR_OP_SLOTADDR && V->insns[a].block == VIRBUILD_BLOCK_NONE;
 	if (A->slot) {
-		off += (uint64_t)V->p[a].in.b | (uint64_t)V->p[a].in.c << 32;
-		a = V->p[a].in.a;
+		off += (uint64_t)V->insns[a].insn.b | (uint64_t)V->insns[a].insn.c << 32;
+		a = V->insns[a].insn.a;
 	}
 	A->base = a;
 	A->off = (int64_t)off;
 }
 
 /* nothing at positions (lo, hi] may write the w bytes at A */
-static bool vw_unwritten(vwst *V, vwsimp *S, uint32_t lo, uint32_t hi, const vwaddr *A, int64_t w)
+static bool virbuild_bytes_are_unwritten(virbuild_context *V, virbuild_simplify_state *S, uint32_t lo, uint32_t hi, const virbuild_address *A, int64_t w)
 {
-	uint32_t i = 0, n = S->nwr;
+	uint32_t i = 0, n = S->writer_count;
 
 	while (i < n) {	/* the first writer after lo */
 		uint32_t m = i + (n - i) / 2;
 
-		if (S->seq[S->wr[m]] <= lo)
+		if (S->positions[S->writers[m]] <= lo)
 			i = m + 1;
 		else
 			n = m;
 	}
-	for (n = 0; i < S->nwr && S->seq[S->wr[i]] <= hi; i++, n++) {
-		const vir_ins *in = &V->p[S->wr[i]].in;
-		vwaddr B;
+	for (n = 0; i < S->writer_count && S->positions[S->writers[i]] <= hi; i++, n++) {
+		const vir_insn *in = &V->insns[S->writers[i]].insn;
+		virbuild_address B;
 		int64_t sw;
 
-		if (n == VW_FARMAX || in->op != VO_STORE)
+		if (n == VIRBUILD_FAR_LOAD_WRITERS_MAX || in->op != VIR_OP_STORE)
 			return false;
-		vw_baseoff(V, in->a, &B);
-		sw = (int64_t)1 << VIF_W(in->fl);
-		if (B.base != A->base || B.slot != A->slot || B.off <= -VW_FAROFF || B.off >= VW_FAROFF ||
+		virbuild_address_decompose(V, in->a, &B);
+		sw = (int64_t)1 << VIR_INSN_FLAG_WIDTH_LOG2(in->flags);
+		if (B.base != A->base || B.slot != A->slot || B.off <= -VIRBUILD_FAR_LOAD_OFFSET_MAX || B.off >= VIRBUILD_FAR_LOAD_OFFSET_MAX ||
 		    !(B.off + sw <= A->off || A->off + w <= B.off))
 			return false;
 	}
 	return true;
 }
 
-/* positions, writers and loops for vw_far (the blocks in reverse postorder) */
-VPRIV void vw_far_init(ecx *e, vwsimp *S)
+/* positions, writers and loops for virbuild_far_load_find (the blocks in reverse postorder) */
+VPRIV void virbuild_far_load_init(ecx *e, virbuild_simplify_state *S)
 {
-	vwst *V = e->vw;
-	uint32_t n = V->norder, pos = 0, sp = 0, nl = 0, *stk, *iend;
+	virbuild_context *V = e->vw;
+	uint32_t n = V->block_order_count, pos = 0, sp = 0, nl = 0, *stk, *iend;
 
-	S->seq = calloc((size_t)S->n0 + 1, sizeof *S->seq);
-	S->wr = malloc(((size_t)S->n0 + 1) * sizeof *S->wr);
-	S->ri = malloc(((size_t)V->nb + 1) * sizeof *S->ri);
-	S->bend = calloc((size_t)V->nb + 1, sizeof *S->bend);
-	S->linner = malloc(((size_t)n + 1) * sizeof *S->linner);
-	S->lstart = malloc(((size_t)n + 1) * sizeof *S->lstart);
-	S->lend = malloc(((size_t)n + 1) * sizeof *S->lend);
-	S->lpar = malloc(((size_t)n + 1) * sizeof *S->lpar);
-	S->lmerged = calloc((size_t)n + 1, 1);
+	S->positions = calloc((size_t)S->constant_start + 1, sizeof *S->positions);
+	S->writers = malloc(((size_t)S->constant_start + 1) * sizeof *S->writers);
+	S->reverse_postorder_index = malloc(((size_t)V->block_count + 1) * sizeof *S->reverse_postorder_index);
+	S->block_end_positions = calloc((size_t)V->block_count + 1, sizeof *S->block_end_positions);
+	S->loop_innermost = malloc(((size_t)n + 1) * sizeof *S->loop_innermost);
+	S->loop_start = malloc(((size_t)n + 1) * sizeof *S->loop_start);
+	S->loop_end = malloc(((size_t)n + 1) * sizeof *S->loop_end);
+	S->loop_parent = malloc(((size_t)n + 1) * sizeof *S->loop_parent);
+	S->loop_is_merged = calloc((size_t)n + 1, 1);
 	stk = malloc(((size_t)n + 1) * sizeof *stk);
 	iend = malloc(((size_t)n + 1) * sizeof *iend);
-	if (!S->seq || !S->wr || !S->ri || !S->bend || !S->linner || !S->lstart || !S->lend || !S->lpar ||
-	    !S->lmerged || !stk || !iend)
-		vw_fail(e, VIRFAIL(out_of_memory));
-	for (uint32_t b = 0; b < V->nb; b++)
-		S->ri[b] = VW_NOBLK;
+	if (!S->positions || !S->writers || !S->reverse_postorder_index || !S->block_end_positions || !S->loop_innermost || !S->loop_start || !S->loop_end || !S->loop_parent ||
+	    !S->loop_is_merged || !stk || !iend)
+		virbuild_fail(e, VIRBUILD_FAILURE(out_of_memory));
+	for (uint32_t b = 0; b < V->block_count; b++)
+		S->reverse_postorder_index[b] = VIRBUILD_BLOCK_NONE;
 	for (uint32_t i = 0; i < n; i++)
-		S->ri[V->order[i]] = i;
+		S->reverse_postorder_index[V->block_order[i]] = i;
 	for (uint32_t i = 0; i < n; i++) {
-		uint32_t b = V->order[i];
+		uint32_t b = V->block_order[i];
 
-		for (uint32_t q = V->b[b].head;; q = V->p[q].next) {
-			uint32_t x = q ? q : V->b[b].term, op, eff;
+		for (uint32_t q = V->blocks[b].first_insn;; q = V->insns[q].next) {
+			uint32_t x = q ? q : V->blocks[b].terminator, op, eff;
 
 			if (!x)
 				break;
-			op = V->p[x].in.op;
-			eff = vir_optab[op].eff;
-			if (x < S->n0 && vw_find(V, x) == x && !vw_promdead(V, x)) {
-				S->seq[x] = ++pos;
-				if (eff & (EF_W | EF_C | EF_A) || op == VO_BARRIER || op == VO_VA_ARG || op == VO_VA_START)
-					S->wr[S->nwr++] = x;
+			op = V->insns[x].insn.op;
+			eff = vir_opcode_table[op].effects;
+			if (x < S->constant_start && virbuild_value_resolve(V, x) == x && !virbuild_promote_store_is_dead(V, x)) {
+				S->positions[x] = ++pos;
+				if (eff & (VIR_EFFECT_W | VIR_EFFECT_C | VIR_EFFECT_A) || op == VIR_OP_BARRIER || op == VIR_OP_VA_ARG || op == VIR_OP_VA_START)
+					S->writers[S->writer_count++] = x;
 			}
 			if (!q)
 				break;
 		}
-		S->bend[b] = pos;
+		S->block_end_positions[b] = pos;
 		/* the last index a retreating edge comes from */
-		iend[i] = VW_NOBLK;
-		for (uint32_t j = 0; j < V->b[b].npred; j++) {
-			uint32_t r = S->ri[V->pr[V->b[b].pred + j]];
+		iend[i] = VIRBUILD_BLOCK_NONE;
+		for (uint32_t j = 0; j < V->blocks[b].predecessor_count; j++) {
+			uint32_t r = S->reverse_postorder_index[V->predecessors[V->blocks[b].predecessor_first + j]];
 
-			if (r != VW_NOBLK && r >= i && (iend[i] == VW_NOBLK || r > iend[i]))
+			if (r != VIRBUILD_BLOCK_NONE && r >= i && (iend[i] == VIRBUILD_BLOCK_NONE || r > iend[i]))
 				iend[i] = r;
 		}
 	}
 	for (uint32_t i = 0; i < n; i++) {
-		while (sp && S->lend[stk[sp - 1]] < i)
+		while (sp && S->loop_end[stk[sp - 1]] < i)
 			sp--;
-		if (iend[i] != VW_NOBLK) {
-			if (sp && S->lend[stk[sp - 1]] < iend[i]) {
+		if (iend[i] != VIRBUILD_BLOCK_NONE) {
+			if (sp && S->loop_end[stk[sp - 1]] < iend[i]) {
 				/* it leaves the open loops it ends after: one loop with each of them */
-				for (uint32_t k = sp; k-- > 0 && S->lend[stk[k]] < iend[i];)
-					S->lend[stk[k]] = iend[i], S->lmerged[stk[k]] = 1;
+				for (uint32_t k = sp; k-- > 0 && S->loop_end[stk[k]] < iend[i];)
+					S->loop_end[stk[k]] = iend[i], S->loop_is_merged[stk[k]] = 1;
 			} else {
-				S->lstart[nl] = i, S->lend[nl] = iend[i];
-				S->lpar[nl] = sp ? stk[sp - 1] : VW_NOBLK;
+				S->loop_start[nl] = i, S->loop_end[nl] = iend[i];
+				S->loop_parent[nl] = sp ? stk[sp - 1] : VIRBUILD_BLOCK_NONE;
 				stk[sp++] = nl++;
 			}
 		}
-		S->linner[i] = sp ? stk[sp - 1] : VW_NOBLK;
+		S->loop_innermost[i] = sp ? stk[sp - 1] : VIRBUILD_BLOCK_NONE;
 	}
 	free(stk), free(iend);
 }
 
 /* load q of the bytes at A: the table's entry for them, and whether its load (an earlier
  * one in a dominating block) still holds at q */
-VPRIV vwhe *vw_far(vwst *V, vwsimp *S, uint32_t q, const vwaddr *A, bool *ok)
+VPRIV virbuild_value_entry *virbuild_far_load_find(virbuild_context *V, virbuild_simplify_state *S, uint32_t q, const virbuild_address *A, bool *ok)
 {
-	const vir_ins *in = &V->p[q].in;
-	vwhe key = { VO_LOAD | 0x100, in->ty, (in->fl & (3 | VIF_MS)) | (A->slot ? 0x100 : 0), A->base,
+	const vir_insn *in = &V->insns[q].insn;
+	virbuild_value_entry key = { VIR_OP_LOAD | 0x100, in->type, (in->flags & (3 | VIR_INSN_FLAG_MS)) | (A->slot ? 0x100 : 0), A->base,
 		     (uint32_t)(uint64_t)A->off, (uint32_t)((uint64_t)A->off >> 32), 0, 0 };
-	vwhe *t = vw_hlook(S, &key);
-	uint32_t l1 = t->v, hi = S->seq[q], ia;
+	virbuild_value_entry *t = virbuild_value_table_lookup(S, &key);
+	uint32_t l1 = t->value, hi = S->positions[q], ia;
 
 	*ok = false;
 	if (!l1) {
 		*t = key;	/* (the caller sets v and logs it) */
 		return t;
 	}
-	if (!S->seq[l1] || S->seq[l1] >= S->seq[q] || vw_find(V, l1) != l1 || V->p[l1].in.op != VO_LOAD)
+	if (!S->positions[l1] || S->positions[l1] >= S->positions[q] || virbuild_value_resolve(V, l1) != l1 || V->insns[l1].insn.op != VIR_OP_LOAD)
 		return t;
-	ia = S->ri[V->p[l1].blk];
-	for (uint32_t l = S->linner[S->ri[V->p[q].blk]]; l != VW_NOBLK; l = S->lpar[l]) {
-		if (S->lstart[l] <= ia && !S->lmerged[l])
+	ia = S->reverse_postorder_index[V->insns[l1].block];
+	for (uint32_t l = S->loop_innermost[S->reverse_postorder_index[V->insns[q].block]]; l != VIRBUILD_BLOCK_NONE; l = S->loop_parent[l]) {
+		if (S->loop_start[l] <= ia && !S->loop_is_merged[l])
 			break;	/* it holds l1 too: round it is through l1 again */
-		if (S->bend[V->order[S->lend[l]]] > hi)
-			hi = S->bend[V->order[S->lend[l]]];
+		if (S->block_end_positions[V->block_order[S->loop_end[l]]] > hi)
+			hi = S->block_end_positions[V->block_order[S->loop_end[l]]];
 	}
-	*ok = vw_unwritten(V, S, S->seq[l1], hi, A, (int64_t)1 << VIF_W(in->fl));
+	*ok = virbuild_bytes_are_unwritten(V, S, S->positions[l1], hi, A, (int64_t)1 << VIR_INSN_FLAG_WIDTH_LOG2(in->flags));
 	return t;
 }

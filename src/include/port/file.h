@@ -6,6 +6,7 @@
  *                                    failure (open, fstat, mmap).  Also filled: st
  *   vfile_map_at(dirfd, path, &m)    the same relative to a directory (AT_FDCWD for the
  *                                    process's); no stat result
+ *   vfile_map_fd(fd, &m, &st)        the same for a file the caller opened (it closes fd)
  *   vfile_unmap(&m)                  and VAUTOUNMAP, which does it at the end of a block
  *   vfile_read(dirfd, path, &n)      the whole file in malloc'ed memory with a NUL after
  *                                    its n bytes (free() it), or NULL with errno set
@@ -36,8 +37,8 @@ typedef struct vfile_mapping {
 	size_t n;
 } vfile_mapping;
 
-/* map an open file (st is its fstat) */
-static inline bool vfile_map_fd_(int fd, vfile_mapping *m, struct stat *st)
+/* map an open file (st is its fstat): as vfile_map, for a caller that opens the file itself */
+static inline bool vfile_map_fd(int fd, vfile_mapping *m, struct stat *st)
 {
 	void *p;
 
@@ -65,7 +66,7 @@ static inline VUSE VNONNULL_ALL bool vfile_map(const char *abs, vfile_mapping *m
 	m->n = 0;
 	if (fd < 0)
 		return false;
-	ok = vfile_map_fd_(fd, m, st);
+	ok = vfile_map_fd(fd, m, st);
 	saved = errno;
 	close(fd);
 	errno = saved;
@@ -83,7 +84,7 @@ static inline VUSE VNONNULL_ALL bool vfile_map_at(int dirfd, const char *path, v
 	m->n = 0;
 	if (fd < 0)
 		return false;
-	ok = vfile_map_fd_(fd, m, &st);
+	ok = vfile_map_fd(fd, m, &st);
 	saved = errno;
 	close(fd);
 	errno = saved;

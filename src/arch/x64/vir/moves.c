@@ -2,7 +2,7 @@
 
 #include "lowering-internal.h"
 
-VPRIV void *vx_grow(void *p, uint32_t *cap, uint32_t n, size_t size)
+VPRIV void *x64_vir_array_grow(void *p, uint32_t *cap, uint32_t n, size_t size)
 {
 	if (n <= *cap) return p;
 	*cap = n + n / 2 + 16;
@@ -11,134 +11,173 @@ VPRIV void *vx_grow(void *p, uint32_t *cap, uint32_t n, size_t size)
 	return p;
 }
 
-VPRIV int vx_reg(uint8_t r)
+VPRIV int x64_vir_register_number(uint8_t r)
 {
-	return r == VR_SCR0 ? R11 : r == VR_SCR1 ? XMM15 : VR_CLASS(r) ? XMM0 + VR_NUM(r) : VR_NUM(r);
+	return r == VIR_REGISTER_SCRATCH0 ? R11 : r == VIR_REGISTER_SCRATCH1 ? XMM15 : VIR_REGISTER_CLASS(r) ? XMM0 + VIR_REGISTER_NUMBER(r) : VIR_REGISTER_NUMBER(r);
 }
 
-VPRIV int vx_size(uint32_t t) { return vir_isvec(t) ? 16 : t == VT_I32 || t == VT_F32 ? 4 : 8; }
+VPRIV int x64_vir_type_size(uint32_t t) { return vir_type_is_vector(t) ? 16 : t == VIR_TYPE_I32 || t == VIR_TYPE_F32 ? 4 : 8; }
 
-VPRIV int64_t vx_bits(const vir_ins *i) { return (int64_t)((uint64_t)i->c << 32 | i->b); }
+VPRIV int64_t x64_vir_constant_bits(const vir_insn *i) { return (int64_t)((uint64_t)i->c << 32 | i->b); }
 
-VPRIV void vx_raw(vx *L, const char *s)
+VPRIV void x64_vir_text_append(x64_vir_context *L, const char *s)
 {
-	rec *r = x64_put(L->e, X_RAW);
-	r->off = L->e->raw.n;
+	rec *r = x64_put(L->context, X_RAW);
+	r->off = L->context->raw.n;
 	r->ref = strlen(s);
-	vtext_string_append(&L->e->raw, s);
+	vtext_string_append(&L->context->raw, s);
 }
 
-VPRIV void vx_simd(vx *L, const char *op, int d, int a, int b)
+/* ARM-compatible probe bits 0..7; bit 8 is a definition store, 10 an edge
+ * exchange. Bit 9 only maps ordinary lowering (which may branch).
+ * Mapping brackets emitted sites (including
+ * layout duplicates), not just the allocator's static edit list. Raw records
+ * deliberately stop folds: compare probes to a similarly mapped control. */
+VPRIV void vx_mark(x64_vir_context *L, bool begin, unsigned bit, uint32_t b, uint32_t pos,
+		    uint32_t v, uint32_t dst, uint32_t src, uint32_t to)
+{
+	if (!L->map) return;
+	char text[384];
+	if (!begin) { x64_vir_text_append(L,"\t# vl-end\n"); return; }
+	uint32_t slot=v?L->allocation->slot[v]:VIR_BLOCK_NONE;
+	uint32_t param=0;
+	if(to!=VIR_BLOCK_NONE)for(uint32_t j=0;j<L->function->blocks[to].parameter_count;j++) {
+		uint32_t q=L->function->blocks[to].first+j;
+		uint32_t loc=L->allocation->operand_registers[L->allocation->block_offsets[to]+j];
+		if(loc==VIR_REGISTER_NONE && L->allocation->slot[q]!=VIR_BLOCK_NONE)loc=VIR_LOCATION_SLOT|L->allocation->slot[q];
+		if(loc==dst){param=q;break;}
+	}
+	snprintf(text,sizeof text,"\t# vl-site id=%u bit=%u b=%u pos=%u v=%u dst=%u src=%u to=%u param=%u slot=%u off=%lld op=%s ty=%s bits=%llu\n",
+		L->site++,bit,b,pos,v,dst,src,to,param,slot,
+		(long long)(slot==VIR_BLOCK_NONE?0:L->spill[slot]),
+		v?vir_opcode_table[L->function->insns[v].op].name:"none",
+		v?vir_type_names[L->function->insns[v].type]:"void",
+		(unsigned long long)(v && v<L->function->constant_count?x64_vir_constant_bits(&L->function->insns[v]):0));
+	x64_vir_text_append(L,text);
+}
+VPRIV void vx_probe(x64_vir_context *L,unsigned bit)
+{
+	if (L->probe & (1u<<bit)) x64_vir_text_append(L,"\tnop\n");
+}
+VPRIV void x64_vir_simd_emit(x64_vir_context *L, const char *op, int d, int a, int b)
 {
 	char s[160];
 	/* A three-address noncommutative operation may overwrite its second source. */
 	int out = d == b && d != a ? (XMM0 + 14) : d;
-	if (out != a) x64_op3(L->e, X_MOV, 16, out, a, XNOREG);
+	if (out != a) x64_op3(L->context, X_MOV, 16, out, a, XNOREG);
 	snprintf(s, sizeof s, "\t%s\t%%xmm%d, %%xmm%d\n", op, b - XMM0, out - XMM0);
-	vx_raw(L, s);
-	if (out != d) x64_op3(L->e, X_MOV, 16, d, out, XNOREG);
+	x64_vir_text_append(L, s);
+	if (out != d) x64_op3(L->context, X_MOV, 16, d, out, XNOREG);
 }
 
-VPRIV void vx_mat(vx *L, uint8_t dst, uint32_t v)
+VPRIV void x64_vir_constant_materialize(x64_vir_context *L, uint8_t dst, uint32_t v)
 {
-	const vir_ins *i = &L->f->ins[v];
-	int d = vx_reg(dst);
-	if (i->op == VO_FCONST) {
-		x64_movi(L->e, L->gtmp, vx_bits(i));
-		x64_op3(L->e, X_MOV, vx_size(i->ty), d, L->gtmp, XNOREG);
-	} else if (i->op == VO_ICONST) {
-		x64_movi(L->e, d, vx_bits(i));
-	} else if (i->op == VO_SYMADDR && sym_needs_got(L->e->c, i->a)) {
-		rec *r = x64_op3(L->e, X_GOT, 8, d, XNOREG, XNOREG);
+	const vir_insn *i = &L->function->insns[v];
+	int d = x64_vir_register_number(dst);
+	if (i->op == VIR_OP_FCONST) {
+		x64_movi(L->context, L->general_temporary, x64_vir_constant_bits(i));
+		x64_op3(L->context, X_MOV, x64_vir_type_size(i->type), d, L->general_temporary, XNOREG);
+	} else if (i->op == VIR_OP_ICONST) {
+		x64_movi(L->context, d, x64_vir_constant_bits(i));
+	} else if (i->op == VIR_OP_SYMADDR && sym_needs_got(L->context->c, i->a)) {
+		rec *r = x64_op3(L->context, X_GOT, 8, d, XNOREG, XNOREG);
 		r->ref = i->a;
-		if (vx_bits(i)) x64_op3(L->e, X_ADDI, 8, d, d, XNOREG)->imm = vx_bits(i);
+		if (x64_vir_constant_bits(i)) x64_op3(L->context, X_ADDI, 8, d, d, XNOREG)->imm = x64_vir_constant_bits(i);
 	} else {
-		lval a = { .k = i->op == VO_SLOTADDR ? L_FRAME : L_SYM,
-			.off = vx_bits(i) + (i->op == VO_SLOTADDR ? L->slot[i->a] : 0), .ref = i->a };
-		x64_mem(L->e, X_LEA, 8, d, &a, false);
+		lval a = { .k = i->op == VIR_OP_SLOTADDR ? L_FRAME : L_SYM,
+			.off = x64_vir_constant_bits(i) + (i->op == VIR_OP_SLOTADDR ? L->slot[i->a] : 0), .ref = i->a };
+		x64_mem(L->context, X_LEA, 8, d, &a, false);
 	}
 }
 
-VPRIV void vx_memslot(vx *L, bool load, uint8_t reg, uint32_t s)
+VPRIV void x64_vir_slot_access(x64_vir_context *L, bool load, uint8_t reg, uint32_t s)
 {
 	lval a = { .k = L_FRAME, .off = L->spill[s] };
-	x64_mem(L->e, load ? X_LD : X_ST, L->o->ssz[s], vx_reg(reg), &a, false);
+	x64_mem(L->context, load ? X_LD : X_ST, L->allocation->slot_sizes[s], x64_vir_register_number(reg), &a, false);
 }
 
-VPRIV void vx_edit(vx *L, const vir_edit *x)
+VPRIV void vx_edit(x64_vir_context *L, const vir_edit *x)
 {
+	unsigned bit=x->kind==VIR_EDIT_RELOAD?0:x->kind==VIR_EDIT_REMATERIALIZE?1:x->kind==VIR_EDIT_MOVE?2:3;
+	vx_mark(L,true,bit,L->map_block,x->pos,x->value,x->dst,x->src,VIR_BLOCK_NONE);
 	switch (x->kind) {
-	case VE_REMAT: vx_mat(L, x->dst, x->v); break;
-	case VE_RELOAD: vx_memslot(L, true, x->dst, L->o->slot[x->v]); break;
-	case VE_STORE: vx_memslot(L, false, x->src, L->o->slot[x->v]); break;
-	case VE_MOVE: x64_mov(L->e, vx_reg(x->dst), vx_reg(x->src)); break;
-	default: abort(); /* no swapped/tied operands in vx_fixed */
+	case VIR_EDIT_REMATERIALIZE: x64_vir_constant_materialize(L, x->dst, x->value); break;
+	case VIR_EDIT_RELOAD: x64_vir_slot_access(L, true, x->dst, L->allocation->slot[x->value]); break;
+	case VIR_EDIT_STORE: x64_vir_slot_access(L, false, x->src, L->allocation->slot[x->value]); break;
+	case VIR_EDIT_MOVE: x64_mov(L->context, x64_vir_register_number(x->dst), x64_vir_register_number(x->src)); break;
+	default: abort(); /* no swapped/tied operands in x64_vir_fixed_registers_get */
 	}
+	vx_probe(L,bit);
+	vx_mark(L,false,bit,0,0,0,0,0,0);
 }
 
-VPRIV void vx_edge(vx *L, uint32_t b, uint32_t k)
+VPRIV void x64_vir_edge_emit(x64_vir_context *L, uint32_t b, uint32_t k)
 {
-	uint32_t g = L->o->eidx[L->o->soff[b] + k];
-	if (g == VIR_NOBLK) return;
+	uint32_t g = L->allocation->edge_indices[L->allocation->slot_offsets[b] + k];
+	if (g == VIR_BLOCK_NONE) return;
 	vx_edge_moves(L, g);
 }
 
 /* edge g's moves */
-VPRIV void vx_edge_moves(vx *L, uint32_t g)
+VPRIV void vx_edge_moves(x64_vir_context *L, uint32_t g)
 {
-	const vir_aedge *ed = &L->o->edge[g];
-	for (uint32_t j = 0; j < ed->n; j++) {
-		const vir_emove *m = &L->o->move[ed->first + j];
-		bool ds = m->dst & VL_SLOT, ss = m->src & VL_SLOT;
-		uint32_t d = m->dst & ~VL_SLOT, s = m->src & ~VL_SLOT;
-		uint8_t tmp = vir_rclass(L->f->ins[m->v].ty) ? VR_MAKE(1, 14) : L->gtmp;
-		if (m->kind == VE_REMAT) {
-			vx_mat(L, ds ? tmp : d, m->v);
-			if (ds) vx_memslot(L, false, tmp, d);
-		} else if (m->kind == VE_XCHG) {
+	const vir_alloc_edge *ed = &L->allocation->edge[g];
+	for (uint32_t j = 0; j < ed->count; j++) {
+		const vir_edge_move *m = &L->allocation->move[ed->first + j];
+		bool ds = m->dst & VIR_LOCATION_SLOT, ss = m->src & VIR_LOCATION_SLOT;
+		uint32_t d = m->dst & ~VIR_LOCATION_SLOT, s = m->src & ~VIR_LOCATION_SLOT;
+		uint8_t tmp = vir_register_class(L->function->insns[m->value].type) ? VIR_REGISTER_MAKE(1, 14) : L->general_temporary;
+		unsigned bit=m->kind==VIR_EDIT_REMATERIALIZE?4:m->kind==VIR_EDIT_EXCHANGE?10:ds?5:ss?6:7;
+		vx_mark(L,true,bit,ed->from,ed->first+j,m->value,m->dst,m->src,ed->to);
+		if (m->kind == VIR_EDIT_REMATERIALIZE) {
+			x64_vir_constant_materialize(L, ds ? tmp : d, m->value);
+			if (ds) x64_vir_slot_access(L, false, tmp, d);
+		} else if (m->kind == VIR_EDIT_EXCHANGE) {
 			/* Exchanges are register-only; use the second reserved scratch. */
-			x64_mov(L->e, vx_reg(tmp), vx_reg(d));
-			x64_mov(L->e, vx_reg(d), vx_reg(s));
-			x64_mov(L->e, vx_reg(s), vx_reg(tmp));
+			x64_mov(L->context, x64_vir_register_number(tmp), x64_vir_register_number(d));
+			x64_mov(L->context, x64_vir_register_number(d), x64_vir_register_number(s));
+			x64_mov(L->context, x64_vir_register_number(s), x64_vir_register_number(tmp));
 		} else if (ds && ss) {
-			vx_memslot(L, true, tmp, s);
-			vx_memslot(L, false, tmp, d);
-		} else if (ds) vx_memslot(L, false, s, d);
-		else if (ss) vx_memslot(L, true, d, s);
-		else x64_mov(L->e, vx_reg(d), vx_reg(s));
+			x64_vir_slot_access(L, true, tmp, s);
+			x64_vir_slot_access(L, false, tmp, d);
+		} else if (ds) x64_vir_slot_access(L, false, s, d);
+		else if (ss) x64_vir_slot_access(L, true, d, s);
+		else x64_mov(L->context, x64_vir_register_number(d), x64_vir_register_number(s));
+		vx_probe(L,bit);
+		vx_mark(L,false,bit,0,0,0,0,0,0);
 	}
 }
 
 /* Put edge copies out of line. Branches without copies name their real block. */
-VPRIV uint32_t vx_target(vx *L,uint32_t b,uint32_t k,uint32_t target)
+VPRIV uint32_t x64_vir_edge_target(x64_vir_context *L,uint32_t b,uint32_t k,uint32_t target)
 {
-	uint32_t g=L->o->eidx[L->o->soff[b]+k];
-	if(g==VIR_NOBLK || !L->o->edge[g].n)return L->label[L->chase[target]];
-	if(!L->edgelab[g])L->edgelab[g]=wk_newlabel(L->e);
-	return L->edgelab[g];
+	uint32_t g=L->allocation->edge_indices[L->allocation->slot_offsets[b]+k];
+	if(g==VIR_BLOCK_NONE || !L->allocation->edge[g].count)return L->label[L->chase[target]];
+	if(!L->edge_labels[g])L->edge_labels[g]=wk_newlabel(L->context);
+	return L->edge_labels[g];
 }
 
-VPRIV uint32_t vx_next(const vx *L)
+VPRIV uint32_t x64_vir_block_next(const x64_vir_context *L)
 {
-	if (!L->fallok)
-		return VIR_NOBLK;
-	uint32_t p = L->position[L->at], nb = L->f->nblk;
+	if (!L->may_fall_through)
+		return VIR_BLOCK_NONE;
+	uint32_t p = L->position[L->block_current], nb = L->function->block_count;
 
 	while (++p < nb && L->order[p] && L->chase[L->order[p]] != L->order[p])
 		;
-	return p < nb ? L->order[p] : VIR_NOBLK;
+	return p < nb ? L->order[p] : VIR_BLOCK_NONE;
 }
 
-VPRIV void vx_goto(vx *L, uint32_t b, uint32_t target)
+VPRIV void x64_vir_goto_emit(x64_vir_context *L, uint32_t b, uint32_t target)
 {
-	uint32_t t = L->chase[target], next = vx_next(L);
+	uint32_t t = L->chase[target], next = x64_vir_block_next(L);
 
-	if (vir_layout_duplicate(L->f, L->lp, L->rotation, b, t, next, L->dup, !L->e->E->noopt)) {
+	if (vir_layout_duplicate(L->function, L->loops, L->rotations, b, t, next, L->dup, !L->context->E->noopt)) {
 		L->dup++;
 		virbuild_lower_block(&L->drv, t);
 		L->dup--;
 		return;
 	}
 	if (t != next)
-		x64_jump(L->e, L->label[t]);
+		x64_jump(L->context, L->label[t]);
 }

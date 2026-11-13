@@ -9,15 +9,15 @@ static bool x64_local_profitable(ecx *e, uint32_t s)
 {
 	cc *c = e->c;
 	const sym *y = &c->syms[s];
-	cval cv;
+	cc_value cv;
 
 	if (e->E->luse[s] < 4)
 		return false;
 	/* wk_decl binds these constants without any storage. Reserving a physical
 	   home would add callee saves while removing no memory accesses. */
-	if (!(y->flags & SF_PARAM) && y->sc != SC_REGISTER && y->body &&
+	if (!(y->flags & AST_SYMBOL_FLAG_PARAMETER) && y->sc != AST_STORAGE_REGISTER && y->body &&
 	    !(e->E->sflags[s] & (SA_WRITTEN | SA_CWRITE)) &&
-	    !side_effects(c, y->body) && cc_eval(c, y->body, &cv) && cv.kind == CV_INT)
+	    !side_effects(c, y->body) && cc_eval(c, y->body, &cv) && cv.kind == CC_VALUE_INTEGER)
 		return false;
 	return true;
 }
@@ -81,7 +81,7 @@ VPRIV bool x64_byref(ecx *e, uint32_t s)
 {
 	wkarg a;
 
-	if (!e->x64->msfn || e->wk->inst || !(e->c->syms[s].flags & SF_PARAM))
+	if (!e->x64->msfn || e->wk->inst || !(e->c->syms[s].flags & AST_SYMBOL_FLAG_PARAMETER))
 		return false;
 	x64w_classify(e, e->c->syms[s].ty, &a, false);
 	return (a.mem || a.up) && !(a.mem && a.up);	/* (a split vector is copied: its halves come apart) */

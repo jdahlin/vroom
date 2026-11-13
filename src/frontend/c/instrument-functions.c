@@ -1,91 +1,91 @@
 /* vcc front end: -finstrument-functions and -pg calls inserted into a body */
-#include "ccimpl.h"
+#include "cc-internal.h"
 
 /* a call of void name(void *this_fn, void *call_site) (declared if need be) */
-static uint32_t profile_call(cc *c, const char *name, uint32_t fn, uint32_t loc)
+static uint32_t cc_instrument_call_new(cc *c, const char *name, uint32_t fn, uint32_t loc)
 {
 	uint32_t id = vintern_find(name, strlen(name), vintern_hash(name, strlen(name))), f, v, n;
-	qty vp = ty_ptr(c, prim(TY_VOID));
-	vec args;
+	ast_qualified_type vp = cc_type_pointer(c, cc_type_basic(AST_TYPE_VOID));
+	cc_id_list args;
 
-	f = id ? file_scope_sym(c, id) : 0;
-	if (!f || c->syms[f].kind != S_FUNC) {
-		qty pt[2] = { vp, vp };
+	f = id ? cc_symbol_file_scope_find(c, id) : 0;
+	if (!f || c->syms[f].kind != AST_SYMBOL_FUNCTION) {
+		ast_qualified_type pt[2] = { vp, vp };
 
 		if (!id)
 			id = vintern(name, strlen(name), vintern_hash(name, strlen(name)));
-		f = sym_new(c, S_FUNC, id, ty_func(c, prim(TY_VOID), pt, 2, 0), loc);
-		c->syms[f].sc = SC_EXTERN;
-		c->syms[f].flags |= SF_GLOBAL;
+		f = cc_symbol_new(c, AST_SYMBOL_FUNCTION, id, cc_type_function(c, cc_type_basic(AST_TYPE_VOID), pt, 2, 0), loc);
+		c->syms[f].sc = AST_STORAGE_EXTERN;
+		c->syms[f].flags |= AST_SYMBOL_FLAG_GLOBAL;
 	}
-	c->syms[f].flags |= SF_USED;
-	vinit(&args);
-	v = mk(c, N_VAR, c->syms[fn].ty, loc);
-	N(v)->a = fn;
-	c->syms[fn].flags |= SF_USED | SF_ADDR_TAKEN;
-	vpush(c, &args, cast_node(c, rvalue(c, v), vp, CK_P2P));
+	c->syms[f].flags |= AST_SYMBOL_FLAG_USED;
+	cc_id_list_init(&args);
+	v = cc_node_new(c, AST_NODE_VARIABLE, c->syms[fn].ty, loc);
+	AST_NODE(v)->a = fn;
+	c->syms[fn].flags |= AST_SYMBOL_FLAG_USED | AST_SYMBOL_FLAG_ADDRESS_TAKEN;
+	cc_id_list_append(c, &args, cc_cast_insert(c, cc_node_rvalue(c, v), vp, AST_CAST_POINTER_TO_POINTER));
 	{
-		vec ra;
+		cc_id_list ra;
 
-		vinit(&ra);
-		vpush(c, &ra, mk_int(c, 0, prim(TY_UINT), loc));
-		vpush(c, &args, mk_builtin(c, BI_RETURN_ADDRESS, vp, loc, &ra));
+		cc_id_list_init(&ra);
+		cc_id_list_append(c, &ra, cc_node_integer_new(c, 0, cc_type_basic(AST_TYPE_UNSIGNED_INT), loc));
+		cc_id_list_append(c, &args, cc_builtin_node_new(c, CC_BUILTIN_RETURN_ADDRESS, vp, loc, &ra));
 	}
-	v = mk(c, N_VAR, c->syms[f].ty, loc);
-	N(v)->a = f;
-	n = mk(c, N_CALL, prim(TY_VOID), loc);
-	N(n)->a = rvalue(c, v);
-	N(n)->b = vfreeze(c, &args);
-	N(n)->c = args.n;
+	v = cc_node_new(c, AST_NODE_VARIABLE, c->syms[f].ty, loc);
+	AST_NODE(v)->a = f;
+	n = cc_node_new(c, AST_NODE_CALL, cc_type_basic(AST_TYPE_VOID), loc);
+	AST_NODE(n)->a = cc_node_rvalue(c, v);
+	AST_NODE(n)->b = cc_id_list_freeze(c, &args);
+	AST_NODE(n)->c = args.n;
 	return n;
 }
 
 /* -finstrument-functions: every return of fn (in statements st) calls the exit hook first */
-static void instrument_returns(cc *c, uint32_t fn, uint32_t st)
+static void cc_instrument_returns(cc *c, uint32_t fn, uint32_t st)
 {
 	node *x;
 
 	if (!st)
 		return;
-	x = N(st);
+	x = AST_NODE(st);
 	switch (x->op) {
-	case N_BLOCK:
+	case AST_NODE_BLOCK:
 		for (uint32_t i = 0; i < x->c; i++)
-			instrument_returns(c, fn, c->lists[x->b + i]);
+			cc_instrument_returns(c, fn, c->lists[x->b + i]);
 		break;
-	case N_IF:
-		instrument_returns(c, fn, x->b);
-		instrument_returns(c, fn, x->c);
+	case AST_NODE_IF:
+		cc_instrument_returns(c, fn, x->b);
+		cc_instrument_returns(c, fn, x->c);
 		break;
-	case N_WHILE: case N_DO: case N_SWITCH:
-		instrument_returns(c, fn, x->b);
+	case AST_NODE_WHILE: case AST_NODE_DO: case AST_NODE_SWITCH:
+		cc_instrument_returns(c, fn, x->b);
 		break;
-	case N_FOR:
-		instrument_returns(c, fn, c->lists[x->c + 1]);
+	case AST_NODE_FOR:
+		cc_instrument_returns(c, fn, c->lists[x->c + 1]);
 		break;
-	case N_CASE: case N_DEFAULT: case N_LABEL:
-		instrument_returns(c, fn, x->c);
+	case AST_NODE_CASE: case AST_NODE_DEFAULT: case AST_NODE_LABEL:
+		cc_instrument_returns(c, fn, x->c);
 		break;
-	case N_RETURN: {
-		uint32_t ex = profile_call(c, "__cyg_profile_func_exit", fn, x->loc), e = x->a;
+	case AST_NODE_RETURN: {
+		uint32_t ex = cc_instrument_call_new(c, "__cyg_profile_func_exit", fn, x->loc), e = x->a;
 
-		if (!e || is_void(c, N(e)->ty)) {
-			N(st)->a = e ? mk2(c, N_COMMA, prim(TY_VOID), x->loc, e, ex) : ex;
+		if (!e || cc_type_is_void(c, AST_NODE(e)->ty)) {
+			AST_NODE(st)->a = e ? cc_node_new_operands(c, AST_NODE_COMMA, cc_type_basic(AST_TYPE_VOID), x->loc, e, ex) : ex;
 		} else {
 			uint32_t pre, t;
 
 			/* return (tmp = e, exit(), tmp) */
-			t = cplx_reuse(c, e, &pre);
+			t = cc_lowering_once(c, e, &pre);
 			if (!pre) {
-				uint32_t s = sym_new(c, S_VAR, 0, QUNQ(N(e)->ty), x->loc);
+				uint32_t s = cc_symbol_new(c, AST_SYMBOL_VARIABLE, 0, AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE(e)->ty), x->loc);
 
-				c->syms[s].sc = SC_AUTO;
-				t = mk(c, N_VAR, QUNQ(N(e)->ty), x->loc);
-				N(t)->a = s;
-				N(t)->flags = NF_LVALUE;
-				pre = mk2(c, N_ASSIGN, QUNQ(N(e)->ty), x->loc, t, e);
+				c->syms[s].sc = AST_STORAGE_AUTO;
+				t = cc_node_new(c, AST_NODE_VARIABLE, AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE(e)->ty), x->loc);
+				AST_NODE(t)->a = s;
+				AST_NODE(t)->flags = AST_NODE_FLAG_LVALUE;
+				pre = cc_node_new_operands(c, AST_NODE_ASSIGN, AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE(e)->ty), x->loc, t, e);
 			}
-			N(st)->a = mk2(c, N_COMMA, N(t)->ty, x->loc, pre, mk2(c, N_COMMA, N(t)->ty, x->loc, ex, rvalue(c, t)));
+			AST_NODE(st)->a = cc_node_new_operands(c, AST_NODE_COMMA, AST_NODE(t)->ty, x->loc, pre, cc_node_new_operands(c, AST_NODE_COMMA, AST_NODE(t)->ty, x->loc, ex, cc_node_rvalue(c, t)));
 		}
 		break;
 	}
@@ -94,16 +94,16 @@ static void instrument_returns(cc *c, uint32_t fn, uint32_t st)
 	}
 }
 
-VPRIV uint32_t instrument(cc *c, uint32_t fn, uint32_t body)
+CC_PRIVATE uint32_t cc_instrument_functions(cc *c, uint32_t fn, uint32_t body)
 {
-	vec items;
-	uint32_t loc = N(body)->loc;
+	cc_id_list items;
+	uint32_t loc = AST_NODE(body)->loc;
 
-	instrument_returns(c, fn, body);
-	vinit(&items);
-	vpush(c, &items, mkstmt(c, N_EXPR, loc, profile_call(c, "__cyg_profile_func_enter", fn, loc), 0, 0));
-	for (uint32_t i = 0; i < N(body)->c; i++)
-		vpush(c, &items, c->lists[N(body)->b + i]);
-	vpush(c, &items, mkstmt(c, N_EXPR, loc, profile_call(c, "__cyg_profile_func_exit", fn, loc), 0, 0));
-	return mkstmt(c, N_BLOCK, loc, 0, vfreeze(c, &items), items.n);
+	cc_instrument_returns(c, fn, body);
+	cc_id_list_init(&items);
+	cc_id_list_append(c, &items, cc_statement_new(c, AST_NODE_EXPRESSION, loc, cc_instrument_call_new(c, "__cyg_profile_func_enter", fn, loc), 0, 0));
+	for (uint32_t i = 0; i < AST_NODE(body)->c; i++)
+		cc_id_list_append(c, &items, c->lists[AST_NODE(body)->b + i]);
+	cc_id_list_append(c, &items, cc_statement_new(c, AST_NODE_EXPRESSION, loc, cc_instrument_call_new(c, "__cyg_profile_func_exit", fn, loc), 0, 0));
+	return cc_statement_new(c, AST_NODE_BLOCK, loc, 0, cc_id_list_freeze(c, &items), items.n);
 }

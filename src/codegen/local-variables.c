@@ -18,6 +18,6 @@ VPRIV bool is_local_var(cc *c, uint32_t s)
 {
 	const sym *y = &c->syms[s];
 
-	return y->kind == S_VAR && y->depth > 0 && (y->sc == SC_AUTO || y->sc == SC_REGISTER || (y->flags & SF_PARAM) ||
-						   (y->sc == SC_NONE && !(y->flags & SF_GLOBAL)));
+	return y->kind == AST_SYMBOL_VARIABLE && y->depth > 0 && (y->sc == AST_STORAGE_AUTO || y->sc == AST_STORAGE_REGISTER || (y->flags & AST_SYMBOL_FLAG_PARAMETER) ||
+						   (y->sc == AST_STORAGE_NONE && !(y->flags & AST_SYMBOL_FLAG_GLOBAL)));
 }

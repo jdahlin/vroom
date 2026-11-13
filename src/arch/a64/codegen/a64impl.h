@@ -174,12 +174,12 @@ static inline uint32_t q_in_hi(int vr, int r) { return 0x9eaf0000u | (unsigned)r
 static inline uint32_t q_out_hi(int r, int vr) { return 0x9eae0000u | (unsigned)vr << 5 | (unsigned)r; }
 
 /* Address-valued arbitrary-width integers, canonical little-endian limbs. */
-VPRIV val a64_bigconst(ecx *e, qty t, const uint32_t *words, i128 small);
-VPRIV val a64_bigbin(ecx *e, int op, qty t, val a, val b);
-VPRIV val a64_bigcmp(ecx *e, int op, qty t, val a, val b);
-VPRIV val a64_bigcvt(ecx *e, val v, qty from, qty to);
-VPRIV val a64_bigbool(ecx *e, val v, qty t);
-VPRIV val a64_bigcopy(ecx *e, val v, qty t);
+VPRIV val a64_bigconst(ecx *e, ast_qualified_type t, const uint32_t *words, i128 small);
+VPRIV val a64_bigbin(ecx *e, int op, ast_qualified_type t, val a, val b);
+VPRIV val a64_bigcmp(ecx *e, int op, ast_qualified_type t, val a, val b);
+VPRIV val a64_bigcvt(ecx *e, val v, ast_qualified_type from, ast_qualified_type to);
+VPRIV val a64_bigbool(ecx *e, val v, ast_qualified_type t);
+VPRIV val a64_bigcopy(ecx *e, val v, ast_qualified_type t);
 
 /*
  * VCC_REC_STATS: what each record clean-up pass of finish_function does, per TU, for the

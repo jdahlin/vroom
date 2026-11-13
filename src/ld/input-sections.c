@@ -1,5 +1,7 @@
 /* Turning an object's section headers into input sections, and dropping .note.gnu.property. */
 
+#include "ld-internal.h"
+
 static bool ld_section_header_is_content(const elf_section_header *s)
 {
 	switch (s->sh_type) {
@@ -12,49 +14,49 @@ static bool ld_section_header_is_content(const elf_section_header *s)
 	}
 }
 
-static void ld_input_sections_fill(void *arg, size_t i)
+VPRIV void ld_input_sections_fill(void *arg, size_t i)
 {
-	(void)arg;
-	ld_object *o = objs.v[i];
-	if (!o->buf)
+	struct ld_context *ctx = arg;
+	ld_object *o = ctx->inputs.objects.v[i];
+	if (!o->file_bytes)
 		return;
-	for (uint32_t s = 0; s < o->nsh; s++) {
-		const elf_section_header *h = &o->sh[s];
-		ld_input_section *is = &isecs.v[o->isec0 + s];
-		is->obj = o->idx;
-		is->shndx = s;
-		is->osec = LD_NONE;
-		is->isd = LD_NONE;
-		is->aux = LD_NONE;
-		is->name = o->shstr + h->sh_name;
+	for (uint32_t s = 0; s < o->section_header_count; s++) {
+		const elf_section_header *h = &o->section_headers[s];
+		ld_input_section *is = &ctx->inputs.sections.v[o->first_input_section + s];
+		is->object = o->index;
+		is->section_header_index = s;
+		is->output_section = LD_NONE;
+		is->input_description = LD_NONE;
+		is->auxiliary_index = LD_NONE;
+		is->name = o->section_name_table + h->sh_name;
 		if (h->sh_type == SHT_RELA) {
-			if (h->sh_info < o->nsh) {
-				ld_input_section *t = &isecs.v[o->isec0 + h->sh_info];
-				t->rela = (const elf_rela *)(o->buf + h->sh_offset);
-				t->nrela = h->sh_size / sizeof(elf_rela);
+			if (h->sh_info < o->section_header_count) {
+				ld_input_section *t = &ctx->inputs.sections.v[o->first_input_section + h->sh_info];
+				t->rela = (const elf_rela *)(o->file_bytes + h->sh_offset);
+				t->rela_count = h->sh_size / sizeof(elf_rela);
 			}
 			continue;
 		}
 		if (h->sh_type == SHT_REL) {
-			ld_error_report("%s: SHT_REL not supported", o->path);
+			ld_error_report(ctx, "%s: SHT_REL not supported", o->path);
 			continue;
 		}
-		if (!ld_section_header_is_content(h) || (h->sh_flags & SHF_EXCLUDE && !opt.relocatable))
+		if (!ld_section_header_is_content(h) || (h->sh_flags & SHF_EXCLUDE && !ctx->options.relocatable))
 			continue;
-		if (opt.strip_debug && !(h->sh_flags & SHF_ALLOC) && !strncmp(is->name, ".debug", 6))
+		if (ctx->options.strip_debug && !(h->sh_flags & SHF_ALLOC) && !strncmp(is->name, ".debug", 6))
 			continue;
 		is->kind = LD_SECTION_KIND_NORMAL;
-		is->data = h->sh_type == SHT_NOBITS ? NULL : o->buf + h->sh_offset;
+		is->data = h->sh_type == SHT_NOBITS ? NULL : o->file_bytes + h->sh_offset;
 		is->size = h->sh_size;
 		is->flags = h->sh_flags & ~(uint64_t)SHF_GROUP;
 		is->type = h->sh_type;
-		is->align = h->sh_addralign ? h->sh_addralign : 1;
-		is->entsize = h->sh_entsize;
-		if (!opt.relocatable && (h->sh_flags & SHF_MERGE) && h->sh_size && h->sh_entsize) {
+		is->alignment = h->sh_addralign ? h->sh_addralign : 1;
+		is->entry_size = h->sh_entsize;
+		if (!ctx->options.relocatable && (h->sh_flags & SHF_MERGE) && h->sh_size && h->sh_entsize) {
 			if (h->sh_size % h->sh_entsize)
-				ld_error_report("%s:(%s): SHF_MERGE section size must be a multiple of sh_entsize", o->path, is->name);
+				ld_error_report(ctx, "%s:(%s): SHF_MERGE section size must be a multiple of sh_entsize", o->path, is->name);
 			if (h->sh_flags & SHF_WRITE)
-				ld_error_report("%s:(%s): writable SHF_MERGE section is not supported", o->path, is->name);
+				ld_error_report(ctx, "%s:(%s): writable SHF_MERGE section is not supported", o->path, is->name);
 			is->kind = LD_SECTION_KIND_MERGE_INPUT;
 		}
 	}
@@ -64,23 +66,23 @@ static void ld_input_sections_fill(void *arg, size_t i)
  * input's FEATURE_1_AND (an input without the note counts as 0).  Only the
  * common case is done: when the AND is 0 every input note is dropped, as lld
  * emits none; otherwise the inputs stay as they are (TODO: the merged note) */
-static void ld_gnu_property_drop(void)
+VPRIV void ld_gnu_property_drop(struct ld_context *ctx)
 {
-	const uint32_t want = x86_ld ? 0xc0000002u : 0xc0000000u;	/* X86 / AARCH64 FEATURE_1_AND */
+	const uint32_t want = ctx->inputs.x86 ? 0xc0000002u : 0xc0000000u;	/* X86 / AARCH64 FEATURE_1_AND */
 	uint32_t and = ~0u;
 
-	if (opt.relocatable)
+	if (ctx->options.relocatable)
 		return;
-	for (uint32_t i = 0; i < objs.n && and; i++) {
-		ld_object *o = objs.v[i];
+	for (uint32_t i = 0; i < ctx->inputs.objects.n && and; i++) {
+		ld_object *o = ctx->inputs.objects.v[i];
 		uint32_t f = 0;
 
-		for (uint32_t s = 0; o->buf && s < o->nsh; s++) {
-			const elf_section_header *h = &o->sh[s];
+		for (uint32_t s = 0; o->file_bytes && s < o->section_header_count; s++) {
+			const elf_section_header *h = &o->section_headers[s];
 
-			if (h->sh_type != SHT_NOTE || strcmp(isecs.v[o->isec0 + s].name, ".note.gnu.property"))
+			if (h->sh_type != SHT_NOTE || strcmp(ctx->inputs.sections.v[o->first_input_section + s].name, ".note.gnu.property"))
 				continue;
-			const uint8_t *p = o->buf + h->sh_offset, *e = p + h->sh_size;
+			const uint8_t *p = o->file_bytes + h->sh_offset, *e = p + h->sh_size;
 			while (e - p >= 16) {
 				uint32_t nn, dn, ty;
 				memcpy(&nn, p, 4); memcpy(&dn, p + 4, 4); memcpy(&ty, p + 8, 4);
@@ -101,11 +103,11 @@ static void ld_gnu_property_drop(void)
 	}
 	if (and)
 		return;
-	for (uint32_t i = 0; i < objs.n; i++) {
-		ld_object *o = objs.v[i];
+	for (uint32_t i = 0; i < ctx->inputs.objects.n; i++) {
+		ld_object *o = ctx->inputs.objects.v[i];
 
-		for (uint32_t s = 0; o->buf && s < o->nsh; s++)
-			if (o->sh[s].sh_type == SHT_NOTE && !strcmp(isecs.v[o->isec0 + s].name, ".note.gnu.property"))
-				isecs.v[o->isec0 + s].kind = LD_SECTION_KIND_NONE;
+		for (uint32_t s = 0; o->file_bytes && s < o->section_header_count; s++)
+			if (o->section_headers[s].sh_type == SHT_NOTE && !strcmp(ctx->inputs.sections.v[o->first_input_section + s].name, ".note.gnu.property"))
+				ctx->inputs.sections.v[o->first_input_section + s].kind = LD_SECTION_KIND_NONE;
 	}
 }

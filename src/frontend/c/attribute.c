@@ -1,76 +1,76 @@
 /* vcc front end: attribute tables, parsing, merging, typo correction and asm labels */
-#include "ccimpl.h"
+#include "cc-internal.h"
 
 /* ---------------- attributes ---------------- */
 
 enum {
-	A_NONE, A_INTERRUPT, A_MS_STRUCT, A_ALIGNED, A_PACKED, A_SECTION, A_MODE, A_CLEANUP, A_ALIAS, A_WEAK, A_USED, A_UNUSED,
-	A_NORETURN, A_ALWAYS_INLINE, A_NOINLINE, A_GNU_INLINE, A_TRANSPARENT_UNION, A_VISIBILITY,
-	A_CONSTRUCTOR, A_DESTRUCTOR, A_COUNTED_BY, A_VECTOR_SIZE, A_COLD, A_NONSTRING, A_MAY_ALIAS,
-	A_WEAKREF, A_NAKED, A_NOCF, A_ERROR, A_OVERLOADABLE, A_NOINSTR, A_TLS_MODEL, A_EXT_VECTOR, A_DEPRECATED, A_WUR, A_NODISCARD, A_IFUNC, A_NONNULL, A_FORMAT, A_FORMAT_ARG,
-	A_PURE, A_CONST, A_UNAVAILABLE, A_TARGET, A_RETURNS_TWICE, A_DISABLE_TAIL_CALLS, A_NOT_TAIL_CALLED, A_OPTNONE,
-	/* from here on only where clang knows them for the target (attr_known): else "unknown attribute" */
-	A_GCC_STRUCT, A_MS_ABI, A_SYSV_ABI, A_DLLIMPORT, A_DLLEXPORT,
-	A_CDECL, A_STDCALL, A_FASTCALL, A_THISCALL, A_VECTORCALL, A_PASCAL, A_REGCALL,
-	A_COUNT
+	CC_ATTRIBUTE_NONE, CC_ATTRIBUTE_INTERRUPT, CC_ATTRIBUTE_MS_STRUCT, CC_ATTRIBUTE_ALIGNED, CC_ATTRIBUTE_PACKED, CC_ATTRIBUTE_SECTION, CC_ATTRIBUTE_MODE, CC_ATTRIBUTE_CLEANUP, CC_ATTRIBUTE_ALIAS, CC_ATTRIBUTE_WEAK, CC_ATTRIBUTE_USED, CC_ATTRIBUTE_UNUSED,
+	CC_ATTRIBUTE_NORETURN, CC_ATTRIBUTE_ALWAYS_INLINE, CC_ATTRIBUTE_NOINLINE, CC_ATTRIBUTE_GNU_INLINE, CC_ATTRIBUTE_TRANSPARENT_UNION, CC_ATTRIBUTE_VISIBILITY,
+	CC_ATTRIBUTE_CONSTRUCTOR, CC_ATTRIBUTE_DESTRUCTOR, CC_ATTRIBUTE_COUNTED_BY, CC_ATTRIBUTE_VECTOR_SIZE, CC_ATTRIBUTE_COLD, CC_ATTRIBUTE_NONSTRING, CC_ATTRIBUTE_MAY_ALIAS,
+	CC_ATTRIBUTE_WEAKREF, CC_ATTRIBUTE_NAKED, CC_ATTRIBUTE_NOCF, CC_ATTRIBUTE_ERROR, CC_ATTRIBUTE_OVERLOADABLE, CC_ATTRIBUTE_NOINSTR, CC_ATTRIBUTE_TLS_MODEL, CC_ATTRIBUTE_EXT_VECTOR, CC_ATTRIBUTE_DEPRECATED, CC_ATTRIBUTE_WUR, CC_ATTRIBUTE_NODISCARD, CC_ATTRIBUTE_IFUNC, CC_ATTRIBUTE_NONNULL, CC_ATTRIBUTE_FORMAT, CC_ATTRIBUTE_FORMAT_ARG,
+	CC_ATTRIBUTE_PURE, CC_ATTRIBUTE_CONST, CC_ATTRIBUTE_UNAVAILABLE, CC_ATTRIBUTE_TARGET, CC_ATTRIBUTE_RETURNS_TWICE, CC_ATTRIBUTE_DISABLE_TAIL_CALLS, CC_ATTRIBUTE_NOT_TAIL_CALLED, CC_ATTRIBUTE_OPTNONE,
+	/* from here on only where clang knows them for the target (cc_attribute_is_known): else "unknown attribute" */
+	CC_ATTRIBUTE_GCC_STRUCT, CC_ATTRIBUTE_MS_ABI, CC_ATTRIBUTE_SYSV_ABI, CC_ATTRIBUTE_DLLIMPORT, CC_ATTRIBUTE_DLLEXPORT,
+	CC_ATTRIBUTE_CDECL, CC_ATTRIBUTE_STDCALL, CC_ATTRIBUTE_FASTCALL, CC_ATTRIBUTE_THISCALL, CC_ATTRIBUTE_VECTORCALL, CC_ATTRIBUTE_PASCAL, CC_ATTRIBUTE_REGCALL,
+	CC_ATTRIBUTE_COUNT
 };
 
-static const char *const attr_names[A_COUNT] = {
-	[A_INTERRUPT] = "interrupt",
-	[A_MS_STRUCT] = "ms_struct", [A_ALIGNED] = "aligned", [A_PACKED] = "packed", [A_SECTION] = "section", [A_MODE] = "mode",
-	[A_CLEANUP] = "cleanup", [A_ALIAS] = "alias", [A_WEAK] = "weak", [A_USED] = "used",
-	[A_UNUSED] = "unused", [A_NORETURN] = "noreturn", [A_ALWAYS_INLINE] = "always_inline",
-	[A_NOINLINE] = "noinline", [A_GNU_INLINE] = "gnu_inline", [A_TRANSPARENT_UNION] = "transparent_union",
-	[A_VISIBILITY] = "visibility", [A_CONSTRUCTOR] = "constructor", [A_DESTRUCTOR] = "destructor",
-	[A_COUNTED_BY] = "counted_by", [A_VECTOR_SIZE] = "vector_size", [A_COLD] = "cold",
-	[A_NONSTRING] = "nonstring", [A_MAY_ALIAS] = "may_alias", [A_WEAKREF] = "weakref",
-	[A_NOINSTR] = "no_instrument_function", [A_NAKED] = "naked", [A_NOCF] = "nocf_check", [A_ERROR] = "error",
-	[A_OVERLOADABLE] = "overloadable", [A_TLS_MODEL] = "tls_model", [A_EXT_VECTOR] = "ext_vector_type",
-	[A_TARGET] = "target", [A_PURE] = "pure", [A_CONST] = "const", [A_UNAVAILABLE] = "unavailable",
-	[A_RETURNS_TWICE] = "returns_twice", [A_DISABLE_TAIL_CALLS] = "disable_tail_calls",
-	[A_NOT_TAIL_CALLED] = "not_tail_called", [A_OPTNONE] = "optnone",
-	[A_GCC_STRUCT] = "gcc_struct", [A_MS_ABI] = "ms_abi", [A_SYSV_ABI] = "sysv_abi", [A_DLLIMPORT] = "dllimport",
-	[A_DLLEXPORT] = "dllexport", [A_CDECL] = "cdecl", [A_STDCALL] = "stdcall", [A_FASTCALL] = "fastcall",
-	[A_THISCALL] = "thiscall", [A_VECTORCALL] = "vectorcall", [A_PASCAL] = "pascal", [A_REGCALL] = "regcall",
-	[A_DEPRECATED] = "deprecated", [A_WUR] = "warn_unused_result", [A_NODISCARD] = "nodiscard", [A_IFUNC] = "ifunc", [A_NONNULL] = "nonnull", [A_FORMAT] = "format", [A_FORMAT_ARG] = "format_arg",
+static const char *const cc_attribute_names[CC_ATTRIBUTE_COUNT] = {
+	[CC_ATTRIBUTE_INTERRUPT] = "interrupt",
+	[CC_ATTRIBUTE_MS_STRUCT] = "ms_struct", [CC_ATTRIBUTE_ALIGNED] = "aligned", [CC_ATTRIBUTE_PACKED] = "packed", [CC_ATTRIBUTE_SECTION] = "section", [CC_ATTRIBUTE_MODE] = "mode",
+	[CC_ATTRIBUTE_CLEANUP] = "cleanup", [CC_ATTRIBUTE_ALIAS] = "alias", [CC_ATTRIBUTE_WEAK] = "weak", [CC_ATTRIBUTE_USED] = "used",
+	[CC_ATTRIBUTE_UNUSED] = "unused", [CC_ATTRIBUTE_NORETURN] = "noreturn", [CC_ATTRIBUTE_ALWAYS_INLINE] = "always_inline",
+	[CC_ATTRIBUTE_NOINLINE] = "noinline", [CC_ATTRIBUTE_GNU_INLINE] = "gnu_inline", [CC_ATTRIBUTE_TRANSPARENT_UNION] = "transparent_union",
+	[CC_ATTRIBUTE_VISIBILITY] = "visibility", [CC_ATTRIBUTE_CONSTRUCTOR] = "constructor", [CC_ATTRIBUTE_DESTRUCTOR] = "destructor",
+	[CC_ATTRIBUTE_COUNTED_BY] = "counted_by", [CC_ATTRIBUTE_VECTOR_SIZE] = "vector_size", [CC_ATTRIBUTE_COLD] = "cold",
+	[CC_ATTRIBUTE_NONSTRING] = "nonstring", [CC_ATTRIBUTE_MAY_ALIAS] = "may_alias", [CC_ATTRIBUTE_WEAKREF] = "weakref",
+	[CC_ATTRIBUTE_NOINSTR] = "no_instrument_function", [CC_ATTRIBUTE_NAKED] = "naked", [CC_ATTRIBUTE_NOCF] = "nocf_check", [CC_ATTRIBUTE_ERROR] = "error",
+	[CC_ATTRIBUTE_OVERLOADABLE] = "overloadable", [CC_ATTRIBUTE_TLS_MODEL] = "tls_model", [CC_ATTRIBUTE_EXT_VECTOR] = "ext_vector_type",
+	[CC_ATTRIBUTE_TARGET] = "target", [CC_ATTRIBUTE_PURE] = "pure", [CC_ATTRIBUTE_CONST] = "const", [CC_ATTRIBUTE_UNAVAILABLE] = "unavailable",
+	[CC_ATTRIBUTE_RETURNS_TWICE] = "returns_twice", [CC_ATTRIBUTE_DISABLE_TAIL_CALLS] = "disable_tail_calls",
+	[CC_ATTRIBUTE_NOT_TAIL_CALLED] = "not_tail_called", [CC_ATTRIBUTE_OPTNONE] = "optnone",
+	[CC_ATTRIBUTE_GCC_STRUCT] = "gcc_struct", [CC_ATTRIBUTE_MS_ABI] = "ms_abi", [CC_ATTRIBUTE_SYSV_ABI] = "sysv_abi", [CC_ATTRIBUTE_DLLIMPORT] = "dllimport",
+	[CC_ATTRIBUTE_DLLEXPORT] = "dllexport", [CC_ATTRIBUTE_CDECL] = "cdecl", [CC_ATTRIBUTE_STDCALL] = "stdcall", [CC_ATTRIBUTE_FASTCALL] = "fastcall",
+	[CC_ATTRIBUTE_THISCALL] = "thiscall", [CC_ATTRIBUTE_VECTORCALL] = "vectorcall", [CC_ATTRIBUTE_PASCAL] = "pascal", [CC_ATTRIBUTE_REGCALL] = "regcall",
+	[CC_ATTRIBUTE_DEPRECATED] = "deprecated", [CC_ATTRIBUTE_WUR] = "warn_unused_result", [CC_ATTRIBUTE_NODISCARD] = "nodiscard", [CC_ATTRIBUTE_IFUNC] = "ifunc", [CC_ATTRIBUTE_NONNULL] = "nonnull", [CC_ATTRIBUTE_FORMAT] = "format", [CC_ATTRIBUTE_FORMAT_ARG] = "format_arg",
 };
 
-static uint32_t *attr_dir[NDIR];
+static uint32_t *cc_attribute_directory[CC_DIRECTORY_COUNT];
 
-VPRIV void init_attrs(void)
+CC_PRIVATE void cc_attribute_table_init(void)
 {
 	static bool done;
 
 	if (__atomic_load_n(&done, __ATOMIC_ACQUIRE))
 		return;
-	for (int i = 1; i < A_COUNT; i++) {
+	for (int i = 1; i < CC_ATTRIBUTE_COUNT; i++) {
 		char b[2][64];
-		size_t l = strlen(attr_names[i]);
+		size_t l = strlen(cc_attribute_names[i]);
 
 		memset(b, 0, sizeof(b));
-		memcpy(b[0], attr_names[i], l);
+		memcpy(b[0], cc_attribute_names[i], l);
 		b[1][0] = b[1][1] = '_';
-		memcpy(b[1] + 2, attr_names[i], l);
+		memcpy(b[1] + 2, cc_attribute_names[i], l);
 		b[1][l + 2] = b[1][l + 3] = '_';
 		for (int k = 0; k < 2; k++) {
 			uint32_t id = vintern_copy(b[k], k ? l + 4 : l);
 
-			if (!attr_dir[id >> DIR_BITS])
-				attr_dir[id >> DIR_BITS] = calloc(DIR_PAGE, sizeof(uint32_t));
-			attr_dir[id >> DIR_BITS][id & (DIR_PAGE - 1)] = (uint32_t)i;
+			if (!cc_attribute_directory[id >> CC_DIRECTORY_BITS])
+				cc_attribute_directory[id >> CC_DIRECTORY_BITS] = calloc(CC_DIRECTORY_PAGE, sizeof(uint32_t));
+			cc_attribute_directory[id >> CC_DIRECTORY_BITS][id & (CC_DIRECTORY_PAGE - 1)] = (uint32_t)i;
 		}
 	}
 	__atomic_store_n(&done, true, __ATOMIC_RELEASE);
 }
 
-static int attr_of(uint32_t id)
+static int cc_attribute_lookup(uint32_t id)
 {
-	uint32_t *pg = attr_dir[id >> DIR_BITS];
+	uint32_t *pg = cc_attribute_directory[id >> CC_DIRECTORY_BITS];
 
-	return pg ? (int)pg[id & (DIR_PAGE - 1)] : 0;
+	return pg ? (int)pg[id & (CC_DIRECTORY_PAGE - 1)] : 0;
 }
 
-VPRIV uint32_t skip_balanced(cc *c)
+CC_PRIVATE uint32_t cc_token_skip_balanced(cc *c)
 {
 	int depth = 0;
 	uint32_t last;
@@ -83,40 +83,40 @@ VPRIV uint32_t skip_balanced(cc *c)
 			depth++;
 		else if (k == LEX_TOKEN_RIGHT_PAREN || k == LEX_TOKEN_RIGHT_SQUARE || k == LEX_TOKEN_RIGHT_BRACE)
 			depth--;
-		else if (is(c, LEX_TOKEN_EOF))
-			fatal(c, tok(c)->loc, "unexpected end of file in attribute");
+		else if (cc_token_is(c, LEX_TOKEN_EOF))
+			cc_report_fatal(c, tok(c)->loc, "unexpected end of file in attribute");
 		next(c);
 	} while (depth > 0);
 	return last;
 }
 
 /* a string literal argument; attr: the attribute's name (0: none).  On an error the
-   argument is skipped up to its ')', so the caller's expect() does not report again */
-VPRIV uint32_t string_index(cc *c, uint32_t attr)
+   argument is skipped up to its ')', so the caller's cc_token_expect() does not report again */
+CC_PRIVATE uint32_t cc_attribute_string_parse(cc *c, uint32_t attr)
 {
 	uint32_t n;
 
-	if (!is_strtok(tok(c)->kind)) {
+	if (!cc_token_kind_is_string(tok(c)->kind)) {
 		if (attr) {
 			int l;
-			const char *s = idname(attr, &l);	/* as written: clang keeps '__alias__' */
+			const char *s = cc_identifier_name(attr, &l);	/* as written: clang keeps '__alias__' */
 
-			cc_error(c, tok(c)->loc, "expected string literal as argument of '%.*s' attribute", l, s);
-			for (int d = 0; !is(c, LEX_TOKEN_EOF) && !is(c, LEX_TOKEN_SEMICOLON) && (d || !is(c, LEX_TOKEN_RIGHT_PAREN)); next(c))
-				d += is(c, LEX_TOKEN_LEFT_PAREN) - is(c, LEX_TOKEN_RIGHT_PAREN);
+			cc_report_error(c, tok(c)->loc, "expected string literal as argument of '%.*s' attribute", l, s);
+			for (int d = 0; !cc_token_is(c, LEX_TOKEN_EOF) && !cc_token_is(c, LEX_TOKEN_SEMICOLON) && (d || !cc_token_is(c, LEX_TOKEN_RIGHT_PAREN)); next(c))
+				d += cc_token_is(c, LEX_TOKEN_LEFT_PAREN) - cc_token_is(c, LEX_TOKEN_RIGHT_PAREN);
 		} else {
-			cc_error(c, tok(c)->loc, "expected string literal");
+			cc_report_error(c, tok(c)->loc, "expected string literal");
 		}
 		return 0;
 	}
-	n = string_lit(c);
-	return N(n)->a + 1;
+	n = cc_literal_string_parse(c);
+	return AST_NODE(n)->a + 1;
 }
 
-VPRIV int mode_kind(cc *c, uint32_t id, bool sgn)
+CC_PRIVATE int cc_attribute_mode_kind(cc *c, uint32_t id, bool sgn)
 {
 	int l;
-	const char *s = idname(id, &l);
+	const char *s = cc_identifier_name(id, &l);
 	char b[16] = { 0 };
 
 	if (l > 2 && s[0] == '_' && s[1] == '_')
@@ -125,14 +125,14 @@ VPRIV int mode_kind(cc *c, uint32_t id, bool sgn)
 		return 0;
 	memcpy(b, s, (size_t)l);
 	(void)c;
-	if (!strcmp(b, "SF")) return TY_FLOAT;
-	if (!strcmp(b, "DF")) return TY_DOUBLE;
-	if (!strcmp(b, "QI")) return sgn ? TY_SCHAR : TY_UCHAR;
-	if (!strcmp(b, "HI")) return sgn ? TY_SHORT : TY_USHORT;
-	if (!strcmp(b, "SI")) return sgn ? TY_INT : TY_UINT;
+	if (!strcmp(b, "SF")) return AST_TYPE_FLOAT;
+	if (!strcmp(b, "DF")) return AST_TYPE_DOUBLE;
+	if (!strcmp(b, "QI")) return sgn ? AST_TYPE_SIGNED_CHAR : AST_TYPE_UNSIGNED_CHAR;
+	if (!strcmp(b, "HI")) return sgn ? AST_TYPE_SHORT : AST_TYPE_UNSIGNED_SHORT;
+	if (!strcmp(b, "SI")) return sgn ? AST_TYPE_INT : AST_TYPE_UNSIGNED_INT;
 	if (!strcmp(b, "DI")) return CC_I64(c, !sgn);
 	if (!strcmp(b, "word") || !strcmp(b, "pointer")) return CC_INTPTR(c, !sgn);	/* the pointer's width */
-	if (!strcmp(b, "TI")) return sgn ? TY_INT128 : TY_UINT128;
+	if (!strcmp(b, "TI")) return sgn ? AST_TYPE_INT128 : AST_TYPE_UINT128;
 	return 0;
 }
 
@@ -141,7 +141,7 @@ VPRIV int mode_kind(cc *c, uint32_t id, bool sgn)
 #include "attrnames-win64.inc"
 
 /* x86-64: name in one of its sorted lists (gen-x86data.sh, gen-win64data.sh) */
-static bool attr_x86(const char *const *tab, size_t n, const char *k, size_t kn)
+static bool cc_attribute_x86_is_known(const char *const *tab, size_t n, const char *k, size_t kn)
 {
 	size_t lo = 0, hi = n;
 
@@ -162,41 +162,41 @@ static bool attr_x86(const char *const *tab, size_t n, const char *k, size_t kn)
 }
 
 /* name without __x__, as clang normalises it */
-static void attr_norm(const char **s, size_t *n)
+static void cc_attribute_name_normalize(const char **s, size_t *n)
 {
 	if (*n >= 4 && (*s)[0] == '_' && (*s)[1] == '_' && (*s)[*n - 2] == '_' && (*s)[*n - 1] == '_')
 		*s += 2, *n -= 4;
 }
 
 /* scope of a [[...]] attribute as clang prints it: "" (none), "gnu::", "clang::" */
-static const char *const attr_scopes[] = { "", "gnu::", "clang::" };
+static const char *const cc_attribute_scopes[] = { "", "gnu::", "clang::" };
 
 /*
  * whether clang knows attribute s for the target: GNU syntax (scope < 0, its
  * __has_attribute), or [[scope::s]] (__has_c_attribute)
  */
-static bool attr_known(cc *c, int scope, const char *s, size_t n)
+static bool cc_attribute_is_known(cc *c, int scope, const char *s, size_t n)
 {
 	int bit = 1 << (c->o->target == PP_WASM32 ? PP_WASM64 : c->o->target);
-	size_t lo = 0, hi = scope < 0 ? sizeof(gnu_attrs) / sizeof(gnu_attrs[0]) : sizeof(c_attrs) / sizeof(c_attrs[0]);
+	size_t lo = 0, hi = scope < 0 ? sizeof(cc_attribute_gnu_names) / sizeof(cc_attribute_gnu_names[0]) : sizeof(cc_attribute_c_names) / sizeof(cc_attribute_c_names[0]);
 	char k[160];
 
-	attr_norm(&s, &n);
+	cc_attribute_name_normalize(&s, &n);
 	if (scope >= 0) {
-		int l = snprintf(k, sizeof(k), "%s%.*s", attr_scopes[scope], (int)n, s);
+		int l = snprintf(k, sizeof(k), "%s%.*s", cc_attribute_scopes[scope], (int)n, s);
 
 		if (l < 0 || (size_t)l >= sizeof(k))
 			return false;
 		if (CC_WIN64(c))
-			return attr_x86(c_attrs_win64, sizeof(c_attrs_win64) / sizeof(*c_attrs_win64), k, (size_t)l);
+			return cc_attribute_x86_is_known(c_attrs_win64, sizeof(c_attrs_win64) / sizeof(*c_attrs_win64), k, (size_t)l);
 		if (CC_X86_64(c))
-			return attr_x86(c_attrs_x86, sizeof(c_attrs_x86) / sizeof(*c_attrs_x86), k, (size_t)l);
+			return cc_attribute_x86_is_known(cc_attribute_c_x86_names, sizeof(cc_attribute_c_x86_names) / sizeof(*cc_attribute_c_x86_names), k, (size_t)l);
 		while (lo < hi) {
 			size_t mid = (lo + hi) / 2;
-			int r = strcmp(c_attrs[mid].name, k);
+			int r = strcmp(cc_attribute_c_names[mid].name, k);
 
 			if (!r)
-				return c_attrs[mid].on & bit;
+				return cc_attribute_c_names[mid].on & bit;
 			if (r < 0)
 				lo = mid + 1;
 			else
@@ -205,17 +205,17 @@ static bool attr_known(cc *c, int scope, const char *s, size_t n)
 		return false;
 	}
 	if (CC_WIN64(c))
-		return attr_x86(gnu_attrs_win64, sizeof(gnu_attrs_win64) / sizeof(*gnu_attrs_win64), s, n);
+		return cc_attribute_x86_is_known(gnu_attrs_win64, sizeof(gnu_attrs_win64) / sizeof(*gnu_attrs_win64), s, n);
 	if (CC_X86_64(c))
-		return attr_x86(gnu_attrs_x86, sizeof(gnu_attrs_x86) / sizeof(*gnu_attrs_x86), s, n);
+		return cc_attribute_x86_is_known(cc_attribute_gnu_x86_names, sizeof(cc_attribute_gnu_x86_names) / sizeof(*cc_attribute_gnu_x86_names), s, n);
 	while (lo < hi) {
 		size_t mid = (lo + hi) / 2;
-		int r = strncmp(gnu_attrs[mid].name, s, n);
+		int r = strncmp(cc_attribute_gnu_names[mid].name, s, n);
 
-		if (!r && gnu_attrs[mid].name[n])
+		if (!r && cc_attribute_gnu_names[mid].name[n])
 			r = 1;
 		if (!r)
-			return gnu_attrs[mid].on & bit;
+			return cc_attribute_gnu_names[mid].on & bit;
 		if (r < 0)
 			lo = mid + 1;
 		else
@@ -224,8 +224,8 @@ static bool attr_known(cc *c, int scope, const char *s, size_t n)
 	return false;
 }
 
-/* Levenshtein distance (clang's StringRef::edit_distance with replacements) */
-static unsigned edit_distance(const char *a, size_t na, const char *b, size_t nb)
+/* Levenshtein distance (clang's StringRef::cc_attribute_edit_distance with replacements) */
+static unsigned cc_attribute_edit_distance(const char *a, size_t na, const char *b, size_t nb)
 {
 	unsigned row[128];
 
@@ -256,37 +256,37 @@ static unsigned edit_distance(const char *a, size_t na, const char *b, size_t nb
  * nearest spelling within (n + 2) / 3 edits, candidates whose length differs
  * by d skipped unless n / d >= 3; then only if clang knows it.
  */
-static const char *attr_correction(cc *c, int scope, const char *s, size_t n)
+static const char *cc_attribute_name_correction(cc *c, int scope, const char *s, size_t n)
 {
 	unsigned max, best;
 	const char *bn = NULL;
 
-	attr_norm(&s, &n);
+	cc_attribute_name_normalize(&s, &n);
 	max = (unsigned)(n + 2) / 3, best = max + 1;
-	for (size_t i = 0; i < sizeof(attr_spellings) / sizeof(attr_spellings[0]); i++) {
-		size_t cn = strlen(attr_spellings[i]), ld = cn > n ? cn - n : n - cn;
+	for (size_t i = 0; i < sizeof(cc_attribute_spellings) / sizeof(cc_attribute_spellings[0]); i++) {
+		size_t cn = strlen(cc_attribute_spellings[i]), ld = cn > n ? cn - n : n - cn;
 		unsigned d;
 
 		if (ld && n / ld < 3)
 			continue;
-		d = edit_distance(s, n, attr_spellings[i], cn);
+		d = cc_attribute_edit_distance(s, n, cc_attribute_spellings[i], cn);
 		if (d < best)
-			best = d, bn = attr_spellings[i];
+			best = d, bn = cc_attribute_spellings[i];
 	}
-	if (!bn || !best || !attr_known(c, scope, bn, strlen(bn)))
+	if (!bn || !best || !cc_attribute_is_known(c, scope, bn, strlen(bn)))
 		return NULL;
 	return bn;
 }
 
 /* GNU __attribute__((...)) and C23 [[...]] (gnu::name is the GNU attribute) */
-__attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
+__attribute__((noinline)) CC_PRIVATE void cc_attribute_list_parse_slow(cc *c, attrs *a)
 {
 	for (;;) {
-		bool std = at_std_attr(c);
+		bool std = cc_token_at_standard_attribute(c);
 		int close = std ? LEX_TOKEN_RIGHT_SQUARE : LEX_TOKEN_RIGHT_PAREN;
 		const char *cs = std ? "']'" : "')'";
 
-		if (!std && !iskw(c, KW___attribute__) && !iskw(c, KW___attribute))
+		if (!std && !cc_token_is_keyword(c, KW___attribute__) && !cc_token_is_keyword(c, KW___attribute))
 			break;
 		bool srcbr = std && !(tok(c)->flags & PP_TOKEN_FLAG_FROM_MACRO);	/* [[ written in the source */
 
@@ -294,18 +294,18 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 		if (std) {
 			next(c);
 		} else {
-			expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
-			expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
+			cc_token_expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
+			cc_token_expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
 		}
-		while (!is(c, close)) {
+		while (!cc_token_is(c, close)) {
 			ptok *t = tok(c);
-			int an, scope = std ? 0 : -1;	/* attr_scopes index; -1: GNU syntax */
+			int an, scope = std ? 0 : -1;	/* cc_attribute_scopes index; -1: GNU syntax */
 			uint32_t loc = t->loc, sloc = t->loc, sid = 0, aid;
 
-			if (accept(c, LEX_TOKEN_COMMA))
+			if (cc_token_accept(c, LEX_TOKEN_COMMA))
 				continue;
 			if (std && t->kind == LEX_TOKEN_NUMBER && t->len == 1 && t->s[0] == '1' && (t->flags & PP_TOKEN_FLAG_FROM_MACRO) &&
-			    peek(c, 1)->kind == LEX_TOKEN_COLON_COLON && srcbr && pp_location_spells(c->p, loc, "__clang__", 9)) {
+			    cc_token_peek(c, 1)->kind == LEX_TOKEN_COLON_COLON && srcbr && pp_location_spells(c->p, loc, "__clang__", 9)) {
 				/* [[__clang__::x]] as written (not through a macro): clang warns and takes it as clang:: */
 				diag_span r = { loc, pp_token_end_find(c->p, loc) };
 				diag_fixit fx = { loc, pp_token_end_find(c->p, loc), "_Clang", DIAG_APPLICABILITY_NAME };	/* (__clang__ itself) */
@@ -316,9 +316,9 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 					 "'__clang__' is a predefined macro name, not an attribute scope specifier; did you mean '_Clang' instead?");
 				t->kind = LEX_TOKEN_IDENTIFIER, t->id = vintern_cstr("_Clang");
 			}
-			if (t->kind != LEX_TOKEN_IDENTIFIER && !(std && kwof(t)))
-				expect(c, close, cs);	/* clang: expected ']' or ')' */
-			if (std && peek(c, 1)->kind == LEX_TOKEN_COLON_COLON) {
+			if (t->kind != LEX_TOKEN_IDENTIFIER && !(std && cc_token_keyword(t)))
+				cc_token_expect(c, close, cs);	/* clang: expected ']' or ')' */
+			if (std && cc_token_peek(c, 1)->kind == LEX_TOKEN_COLON_COLON) {
 				/* vendor::name: gnu and clang name GNU attributes, others are ignored */
 				const vident *ns = &vintern_ents[t->id];
 				bool cl = (ns->len == 5 && !memcmp(ns->s, "clang", 5)) || (ns->len == 6 && !memcmp(ns->s, "_Clang", 6));
@@ -331,300 +331,300 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 				next(c);
 				t = tok(c);
 				loc = t->loc;
-				if (t->kind != LEX_TOKEN_IDENTIFIER && !kwof(t))
-					fatal(c, loc, "expected attribute name");
+				if (t->kind != LEX_TOKEN_IDENTIFIER && !cc_token_keyword(t))
+					cc_report_fatal(c, loc, "expected attribute name");
 				if (!gnu) {	/* other vendors: ignored, with clang's warning */
 					uint32_t end = t->loc;
 					const vident *sn = &vintern_ents[sid], *nm = &vintern_ents[t->id];
 
 					next(c);
-					if (is(c, LEX_TOKEN_LEFT_PAREN))
-						end = skip_balanced(c);
+					if (cc_token_is(c, LEX_TOKEN_LEFT_PAREN))
+						end = cc_token_skip_balanced(c);
 					{
 						diag_span r = { sloc, pp_token_end_find(c->p, end) };
 
-						cc_warnx(c, "unknown-attributes", true, NULL, sloc, &r, 1, NULL, 0,
+						cc_report_warning(c, "unknown-attributes", true, NULL, sloc, &r, 1, NULL, 0,
 							 "unknown attribute '%.*s::%.*s' ignored", (int)sn->len, sn->s, (int)nm->len, nm->s);
 					}
 					continue;
 				}
 			}
 			aid = t->id;	/* t is gone after next() */
-			an = attr_of(aid);
-			if (!an && kwof(t) == KW_const)
-				an = A_NONE;
+			an = cc_attribute_lookup(aid);
+			if (!an && cc_token_keyword(t) == KW_const)
+				an = CC_ATTRIBUTE_NONE;
 			const uint32_t tid = t->id;	/* t is the queue head: stale after next() */
 
-			if (an >= A_GCC_STRUCT && !attr_known(c, scope, vintern_ents[tid].s, vintern_ents[tid].len))
-				an = A_NONE;	/* (dllimport on Linux, ms_abi on arm64: clang's unknown attribute) */
+			if (an >= CC_ATTRIBUTE_GCC_STRUCT && !cc_attribute_is_known(c, scope, vintern_ents[tid].s, vintern_ents[tid].len))
+				an = CC_ATTRIBUTE_NONE;	/* (dllimport on Linux, ms_abi on arm64: clang's unknown attribute) */
 			next(c);
 			switch (an) {
-			case A_ALIGNED:
-				if (accept(c, LEX_TOKEN_LEFT_PAREN)) {
+			case CC_ATTRIBUTE_ALIGNED:
+				if (cc_token_accept(c, LEX_TOKEN_LEFT_PAREN)) {
 					i128 v;
 
-					const_expr(c, &v, NULL);
-					expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
+					cc_constant_expression_parse(c, &v, NULL);
+					cc_token_expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 					if (v <= 0 || (v & (v - 1)))
-						cc_error(c, loc, "requested alignment is not a power of 2");
+						cc_report_error(c, loc, "requested alignment is not a power of 2");
 					else if ((uint32_t)v > a->aligned)
 						a->aligned = (uint32_t)v;
 				} else if (16 > a->aligned) {
 					a->aligned = 16;
 				}
 				continue;
-			case A_TARGET: {
-				expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
-				uint32_t ts = string_index(c, aid);
-				expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
-				target_attr(c, a, ts, loc);
+			case CC_ATTRIBUTE_TARGET: {
+				cc_token_expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
+				uint32_t ts = cc_attribute_string_parse(c, aid);
+				cc_token_expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
+				cc_x86_target_attribute_parse(c, a, ts, loc);
 				continue;
 			}
-			case A_IFUNC:
+			case CC_ATTRIBUTE_IFUNC:
 				a->ifunc = 1;
-				an = A_ALIAS;
+				an = CC_ATTRIBUTE_ALIAS;
 				__attribute__((fallthrough));
-			case A_SECTION:
-			case A_ALIAS:
-			case A_VISIBILITY:
-				expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
+			case CC_ATTRIBUTE_SECTION:
+			case CC_ATTRIBUTE_ALIAS:
+			case CC_ATTRIBUTE_VISIBILITY:
+				cc_token_expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
 				{
 					uint32_t sloc = tok(c)->loc;
-					uint32_t s = string_index(c, aid);
+					uint32_t s = cc_attribute_string_parse(c, aid);
 
-					if (an == A_SECTION && c->o->target == PP_DARWIN && s && !strchr(c->strs[s - 1].s, ','))
-						cc_error(c, sloc, "argument to 'section' attribute is not valid for this target: "
+					if (an == CC_ATTRIBUTE_SECTION && c->o->target == PP_DARWIN && s && !strchr(c->strs[s - 1].s, ','))
+						cc_report_error(c, sloc, "argument to 'section' attribute is not valid for this target: "
 							 "mach-o section specifier requires a segment and section separated by a comma");
-					if (an == A_SECTION)
+					if (an == CC_ATTRIBUTE_SECTION)
 						a->section = s;
-					else if (an == A_ALIAS)
+					else if (an == CC_ATTRIBUTE_ALIAS)
 						a->alias = s;
 					else
 						a->visibility = s;
 				}
-				expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
+				cc_token_expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 				continue;
-			case A_TLS_MODEL: {
-				if (!accept(c, LEX_TOKEN_LEFT_PAREN)) {
-					cc_error(c, loc, "'tls_model' attribute takes one argument");
+			case CC_ATTRIBUTE_TLS_MODEL: {
+				if (!cc_token_accept(c, LEX_TOKEN_LEFT_PAREN)) {
+					cc_report_error(c, loc, "'tls_model' attribute takes one argument");
 					continue;
 				}
 				uint32_t argloc = tok(c)->loc, si = 0;
-				bool empty = is(c, LEX_TOKEN_RIGHT_PAREN);
+				bool empty = cc_token_is(c, LEX_TOKEN_RIGHT_PAREN);
 
 				if (!empty)
-					si = string_index(c, aid);
-				if (empty || is(c, LEX_TOKEN_COMMA)) {
-					cc_error(c, loc, "'tls_model' attribute takes one argument");
-					while (!is(c, LEX_TOKEN_RIGHT_PAREN) && !is(c, LEX_TOKEN_EOF) && !is(c, LEX_TOKEN_SEMICOLON)) {
-						if (is(c, LEX_TOKEN_LEFT_PAREN)) skip_balanced(c);
+					si = cc_attribute_string_parse(c, aid);
+				if (empty || cc_token_is(c, LEX_TOKEN_COMMA)) {
+					cc_report_error(c, loc, "'tls_model' attribute takes one argument");
+					while (!cc_token_is(c, LEX_TOKEN_RIGHT_PAREN) && !cc_token_is(c, LEX_TOKEN_EOF) && !cc_token_is(c, LEX_TOKEN_SEMICOLON)) {
+						if (cc_token_is(c, LEX_TOKEN_LEFT_PAREN)) cc_token_skip_balanced(c);
 						else next(c);
 					}
 				} else if (si) {
-					uint8_t model = (uint8_t)vcc_tls_model(c->strs[si - 1].s);
+					uint8_t model = (uint8_t)cc_tls_model_parse(c->strs[si - 1].s);
 
 					if (!model)
-						cc_error(c, argloc, "tls_model must be \"global-dynamic\", \"local-dynamic\", \"initial-exec\" or \"local-exec\"");
+						cc_report_error(c, argloc, "tls_model must be \"global-dynamic\", \"local-dynamic\", \"initial-exec\" or \"local-exec\"");
 					else
 						a->tlsmodel = model, a->tlsloc = loc;
 				}
-				expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
+				cc_token_expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 				continue;
 			}
-			case A_MODE:
-				expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
-				if (is(c, LEX_TOKEN_IDENTIFIER))
+			case CC_ATTRIBUTE_MODE:
+				cc_token_expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
+				if (cc_token_is(c, LEX_TOKEN_IDENTIFIER))
 					a->mode = tok(c)->id;
 				next(c);
-				expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
+				cc_token_expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 				continue;
-			case A_CLEANUP:
-				expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
-				if (is(c, LEX_TOKEN_IDENTIFIER)) {
-					uint32_t s = lookup(c, tok(c)->id);
+			case CC_ATTRIBUTE_CLEANUP:
+				cc_token_expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
+				if (cc_token_is(c, LEX_TOKEN_IDENTIFIER)) {
+					uint32_t s = cc_symbol_lookup(c, tok(c)->id);
 
-					if (!s || c->syms[s].kind != S_FUNC)
-						cc_error(c, tok(c)->loc, "'cleanup' argument is not a function");
+					if (!s || c->syms[s].kind != AST_SYMBOL_FUNCTION)
+						cc_report_error(c, tok(c)->loc, "'cleanup' argument is not a function");
 					a->cleanup = s;
 					if (s)
-						c->syms[s].flags |= SF_REF | SF_USED;
+						c->syms[s].flags |= AST_SYMBOL_FLAG_REFERENCED | AST_SYMBOL_FLAG_USED;
 				}
 				next(c);
-				expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
+				cc_token_expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 				continue;
-			case A_COUNTED_BY:
-				expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
-				if (is(c, LEX_TOKEN_IDENTIFIER))
+			case CC_ATTRIBUTE_COUNTED_BY:
+				cc_token_expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
+				if (cc_token_is(c, LEX_TOKEN_IDENTIFIER))
 					a->counted_by = tok(c)->id;
 				next(c);
-				expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
+				cc_token_expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 				continue;
-			case A_PURE:
-			case A_CONST:	/* (-Wunused-value: a discarded call) */
-				a->pure = an == A_PURE ? 1 : 2;
+			case CC_ATTRIBUTE_PURE:
+			case CC_ATTRIBUTE_CONST:	/* (-Wunused-value: a discarded call) */
+				a->pure = an == CC_ATTRIBUTE_PURE ? 1 : 2;
 				break;
-			case A_VECTOR_SIZE: {
+			case CC_ATTRIBUTE_VECTOR_SIZE: {
 				i128 v;
 
-				expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
-				const_expr(c, &v, NULL);
-				expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
+				cc_token_expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
+				cc_constant_expression_parse(c, &v, NULL);
+				cc_token_expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 				if (v <= 0 || (v & (v - 1)) || v > 1024)
-					cc_error(c, loc, "invalid vector size");
+					cc_report_error(c, loc, "invalid vector size");
 				else
 					a->vecsize = (uint32_t)v;
 				continue;
 			}
-			case A_DEPRECATED:	/* deprecated or deprecated("msg"[, "replacement"]) */
-			case A_UNAVAILABLE:	/* unavailable or unavailable("msg") */
-				a->depr = loc, a->deprmsg = 0, a->unavail = an == A_UNAVAILABLE;
-				if (is(c, LEX_TOKEN_LEFT_PAREN) && is_strtok(peek(c, 1)->kind)) {
+			case CC_ATTRIBUTE_DEPRECATED:	/* deprecated or deprecated("msg"[, "replacement"]) */
+			case CC_ATTRIBUTE_UNAVAILABLE:	/* unavailable or unavailable("msg") */
+				a->depr = loc, a->deprmsg = 0, a->unavail = an == CC_ATTRIBUTE_UNAVAILABLE;
+				if (cc_token_is(c, LEX_TOKEN_LEFT_PAREN) && cc_token_kind_is_string(cc_token_peek(c, 1)->kind)) {
 					next(c);
-					a->deprmsg = string_index(c, aid);
-					if (accept(c, LEX_TOKEN_COMMA) && is_strtok(tok(c)->kind))
-						string_index(c, aid);	/* (the replacement, for a fix-it) */
-					expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
+					a->deprmsg = cc_attribute_string_parse(c, aid);
+					if (cc_token_accept(c, LEX_TOKEN_COMMA) && cc_token_kind_is_string(tok(c)->kind))
+						cc_attribute_string_parse(c, aid);	/* (the replacement, for a fix-it) */
+					cc_token_expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 				}
 				break;
-			case A_WUR: a->wur = 1; break;
-			case A_NONNULL:	/* nonnull or nonnull(i, ...) */
-				if (!accept(c, LEX_TOKEN_LEFT_PAREN)) {
+			case CC_ATTRIBUTE_WUR: a->wur = 1; break;
+			case CC_ATTRIBUTE_NONNULL:	/* nonnull or nonnull(i, ...) */
+				if (!cc_token_accept(c, LEX_TOKEN_LEFT_PAREN)) {
 					a->nonnull |= 1;
 					continue;
 				}
-				if (accept(c, LEX_TOKEN_RIGHT_PAREN)) {
+				if (cc_token_accept(c, LEX_TOKEN_RIGHT_PAREN)) {
 					a->nonnull |= 1;
 					continue;
 				}
 				for (;;) {
 					i128 v;
 
-					const_expr(c, &v, NULL);
+					cc_constant_expression_parse(c, &v, NULL);
 					if (v >= 1 && v <= 31)
 						a->nonnull |= 1u << v;
-					if (!accept(c, LEX_TOKEN_COMMA))
+					if (!cc_token_accept(c, LEX_TOKEN_COMMA))
 						break;
 				}
-				expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
+				cc_token_expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 				continue;
-			case A_FORMAT_ARG: {	/* format_arg(i): the call returns its i-th argument's format */
+			case CC_ATTRIBUTE_FORMAT_ARG: {	/* format_arg(i): the call returns its i-th argument's format */
 				i128 v = 0;
 
-				expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
-				const_expr(c, &v, NULL);
-				expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
+				cc_token_expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
+				cc_constant_expression_parse(c, &v, NULL);
+				cc_token_expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 				a->fmtarg = v >= 1 && v <= 255 ? (uint8_t)v : 0;
 				continue;
 			}
-			case A_FORMAT: {	/* format(archetype, fmt, first): printf checked by -Wformat */
+			case CC_ATTRIBUTE_FORMAT: {	/* format(archetype, fmt, first): printf checked by -Wformat */
 				uint32_t arch = 0;
 				i128 fi = 0, fa = 0;
 
-				expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
-				if (is(c, LEX_TOKEN_IDENTIFIER)) {
-					size_t l = idlen_(tok(c)->id);
-					const char *n = idstr_(tok(c)->id);
+				cc_token_expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
+				if (cc_token_is(c, LEX_TOKEN_IDENTIFIER)) {
+					size_t l = cc_identifier_length(tok(c)->id);
+					const char *n = cc_identifier_string(tok(c)->id);
 
 					if ((l == 6 && !memcmp(n, "printf", 6)) || (l == 10 && !memcmp(n, "__printf__", 10)) ||
 					    (l == 10 && !memcmp(n, "gnu_printf", 10)) || (l == 14 && !memcmp(n, "__gnu_printf__", 14)))
 						arch = 1;
 					next(c);
 				}
-				if (accept(c, LEX_TOKEN_COMMA)) {
-					const_expr(c, &fi, NULL);
-					if (accept(c, LEX_TOKEN_COMMA))
-						const_expr(c, &fa, NULL);
+				if (cc_token_accept(c, LEX_TOKEN_COMMA)) {
+					cc_constant_expression_parse(c, &fi, NULL);
+					if (cc_token_accept(c, LEX_TOKEN_COMMA))
+						cc_constant_expression_parse(c, &fa, NULL);
 				}
-				expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
+				cc_token_expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 				a->fmt = arch && fi >= 1 && fi <= 255 && fa >= 0 && fa <= 255 ? arch << 16 | (uint32_t)fi << 8 | (uint32_t)fa : 0;
 				continue;
 			}
-			case A_NODISCARD: a->wur = 2; break;
-			case A_EXT_VECTOR: {	/* ext_vector_type(N): N elements (typedefs only) */
+			case CC_ATTRIBUTE_NODISCARD: a->wur = 2; break;
+			case CC_ATTRIBUTE_EXT_VECTOR: {	/* ext_vector_type(AST_NODE): AST_NODE elements (typedefs only) */
 				i128 v;
 
-				expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
-				const_expr(c, &v, NULL);
-				expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
+				cc_token_expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
+				cc_constant_expression_parse(c, &v, NULL);
+				cc_token_expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 				if (v <= 0 || v > 4096)
-					cc_error(c, loc, "invalid vector size");
+					cc_report_error(c, loc, "invalid vector size");
 				else
 					a->extvec = (uint32_t)v;
 				continue;
 			}
-			case A_MS_STRUCT:
-			case A_GCC_STRUCT:
-				if (an == A_MS_STRUCT ? a->gcc_struct : a->ms_struct) {
-					cc_error(c, loc, "'%s' and '%s' attributes are not compatible", an == A_MS_STRUCT ? "ms_struct" : "gcc_struct",
-						 an == A_MS_STRUCT ? "gcc_struct" : "ms_struct");
-					note(c, an == A_MS_STRUCT ? a->gcc_struct : a->ms_struct, "conflicting attribute is here");
-				} else if (an == A_MS_STRUCT) {
+			case CC_ATTRIBUTE_MS_STRUCT:
+			case CC_ATTRIBUTE_GCC_STRUCT:
+				if (an == CC_ATTRIBUTE_MS_STRUCT ? a->gcc_struct : a->ms_struct) {
+					cc_report_error(c, loc, "'%s' and '%s' attributes are not compatible", an == CC_ATTRIBUTE_MS_STRUCT ? "ms_struct" : "gcc_struct",
+						 an == CC_ATTRIBUTE_MS_STRUCT ? "gcc_struct" : "ms_struct");
+					cc_report_note(c, an == CC_ATTRIBUTE_MS_STRUCT ? a->gcc_struct : a->ms_struct, "conflicting attribute is here");
+				} else if (an == CC_ATTRIBUTE_MS_STRUCT) {
 					a->ms_struct = loc;
 				} else {
 					a->gcc_struct = loc;
 				}
 				break;
-			case A_MS_ABI:
-			case A_SYSV_ABI:
-				a->fnabi = an == A_MS_ABI ? CC_FNABI_MS : CC_FNABI_SYSV, a->fnabi_loc = loc;
+			case CC_ATTRIBUTE_MS_ABI:
+			case CC_ATTRIBUTE_SYSV_ABI:
+				a->fnabi = an == CC_ATTRIBUTE_MS_ABI ? CC_FNABI_MS : CC_FNABI_SYSV, a->fnabi_loc = loc;
 				break;
-			case A_DLLIMPORT: if (a->dll != CC_DLLEXPORT) a->dll = CC_DLLIMPORT; break;	/* (dllexport wins, as clang) */
-			case A_DLLEXPORT: a->dll = CC_DLLEXPORT; break;
-			case A_STDCALL: case A_FASTCALL: case A_THISCALL: case A_PASCAL:
+			case CC_ATTRIBUTE_DLLIMPORT: if (a->dll != CC_DLLEXPORT) a->dll = CC_DLLIMPORT; break;	/* (dllexport wins, as clang) */
+			case CC_ATTRIBUTE_DLLEXPORT: a->dll = CC_DLLEXPORT; break;
+			case CC_ATTRIBUTE_STDCALL: case CC_ATTRIBUTE_FASTCALL: case CC_ATTRIBUTE_THISCALL: case CC_ATTRIBUTE_PASCAL:
 				/* x86-64: 32-bit conventions; Windows ignores all but pascal silently (clang) */
-				if (an == A_PASCAL || !CC_WIN64(c)) {
+				if (an == CC_ATTRIBUTE_PASCAL || !CC_WIN64(c)) {
 					const vident *nm = &vintern_ents[tid];
 					diag_span r = { loc, pp_token_end_find(c->p, loc) };
 
-					cc_warnx(c, "ignored-attributes", true, NULL, loc, &r, 1, NULL, 0,
+					cc_report_warning(c, "ignored-attributes", true, NULL, loc, &r, 1, NULL, 0,
 						 "'%.*s' calling convention is not supported for this target", (int)nm->len, nm->s);
 				}
 				break;
-			case A_CDECL: case A_VECTORCALL: case A_REGCALL: break;	/* x86-64: the target's own convention */
-			case A_PACKED: a->packed = 1; break;
-			case A_WEAK: a->weak = 1; break;
-			case A_USED: a->used = 1; break;
-			case A_UNUSED: a->unused = 1; break;
-			case A_NORETURN: a->noreturn = 1; break;
-			case A_ALWAYS_INLINE: a->always_inline = 1; break;
-			case A_INTERRUPT: a->interrupt = 1; a->noinline = 1; break;
-			case A_NOINLINE: a->noinline = 1; break;
-			case A_NOINSTR: a->noinstr = 1; break;
-			case A_RETURNS_TWICE: a->flags |= AF_TAIL_RETURNS_TWICE; break;
-			case A_DISABLE_TAIL_CALLS: a->flags |= AF_TAIL_DISABLE; break;
-			case A_NOT_TAIL_CALLED: a->flags |= AF_TAIL_NOT_CALLED; break;
-			case A_OPTNONE: a->flags |= AF_OPTNONE; break;
-			case A_OVERLOADABLE: a->overloadable = 1; break;
-			case A_GNU_INLINE: a->gnu_inline = 1; break;
-			case A_TRANSPARENT_UNION: a->transparent = 1; break;
-			case A_CONSTRUCTOR:
-			case A_DESTRUCTOR:
-				if (an == A_CONSTRUCTOR)
+			case CC_ATTRIBUTE_CDECL: case CC_ATTRIBUTE_VECTORCALL: case CC_ATTRIBUTE_REGCALL: break;	/* x86-64: the target's own convention */
+			case CC_ATTRIBUTE_PACKED: a->packed = 1; break;
+			case CC_ATTRIBUTE_WEAK: a->weak = 1; break;
+			case CC_ATTRIBUTE_USED: a->used = 1; break;
+			case CC_ATTRIBUTE_UNUSED: a->unused = 1; break;
+			case CC_ATTRIBUTE_NORETURN: a->noreturn = 1; break;
+			case CC_ATTRIBUTE_ALWAYS_INLINE: a->always_inline = 1; break;
+			case CC_ATTRIBUTE_INTERRUPT: a->interrupt = 1; a->noinline = 1; break;
+			case CC_ATTRIBUTE_NOINLINE: a->noinline = 1; break;
+			case CC_ATTRIBUTE_NOINSTR: a->noinstr = 1; break;
+			case CC_ATTRIBUTE_RETURNS_TWICE: a->flags |= CC_ATTRIBUTE_FLAG_TAIL_RETURNS_TWICE; break;
+			case CC_ATTRIBUTE_DISABLE_TAIL_CALLS: a->flags |= CC_ATTRIBUTE_FLAG_TAIL_DISABLE; break;
+			case CC_ATTRIBUTE_NOT_TAIL_CALLED: a->flags |= CC_ATTRIBUTE_FLAG_TAIL_NOT_CALLED; break;
+			case CC_ATTRIBUTE_OPTNONE: a->flags |= CC_ATTRIBUTE_FLAG_OPTNONE; break;
+			case CC_ATTRIBUTE_OVERLOADABLE: a->overloadable = 1; break;
+			case CC_ATTRIBUTE_GNU_INLINE: a->gnu_inline = 1; break;
+			case CC_ATTRIBUTE_TRANSPARENT_UNION: a->transparent = 1; break;
+			case CC_ATTRIBUTE_CONSTRUCTOR:
+			case CC_ATTRIBUTE_DESTRUCTOR:
+				if (an == CC_ATTRIBUTE_CONSTRUCTOR)
 					a->constructor = 1;
 				else
 					a->destructor = 1;
-				if (is(c, LEX_TOKEN_LEFT_PAREN)) {
+				if (cc_token_is(c, LEX_TOKEN_LEFT_PAREN)) {
 					/* the priority: lower runs first */
 					i128 v;
 
 					next(c);
-					const_expr(c, &v, NULL);
-					expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
+					cc_constant_expression_parse(c, &v, NULL);
+					cc_token_expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 					if (v < 0 || v > 65535)
-						cc_error(c, loc, "'%s' priority out of range", an == A_CONSTRUCTOR ? "constructor" : "destructor");
+						cc_report_error(c, loc, "'%s' priority out of range", an == CC_ATTRIBUTE_CONSTRUCTOR ? "constructor" : "destructor");
 					else
 						a->prio = (uint16_t)v;
 				}
 				continue;
-			case A_COLD: a->cold = 1; break;
-			case A_NONSTRING: a->nonstring = 1; break;
-			case A_MAY_ALIAS: a->may_alias = 1; break;
-			case A_ERROR:	/* a call left after folding is a build error */
+			case CC_ATTRIBUTE_COLD: a->cold = 1; break;
+			case CC_ATTRIBUTE_NONSTRING: a->nonstring = 1; break;
+			case CC_ATTRIBUTE_MAY_ALIAS: a->may_alias = 1; break;
+			case CC_ATTRIBUTE_ERROR:	/* a call left after folding is a build error */
 				a->error_fn = 1;
-				if (is(c, LEX_TOKEN_LEFT_PAREN) && is_strtok(peek(c, 1)->kind)) {
+				if (cc_token_is(c, LEX_TOKEN_LEFT_PAREN) && cc_token_kind_is_string(cc_token_peek(c, 1)->kind)) {
 					next(c);
-					a->errmsg = string_index(c, aid);
-					expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
+					a->errmsg = cc_attribute_string_parse(c, aid);
+					cc_token_expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 				}
 				break;
 			default: break;
@@ -633,35 +633,35 @@ __attribute__((noinline)) VPRIV void attribute_list_(cc *c, attrs *a)
 				uint32_t end = loc;
 				const vident *nm = &vintern_ents[tid];
 
-				if (is(c, LEX_TOKEN_LEFT_PAREN))
-					end = skip_balanced(c);
-				if (an == A_NONE && !attr_known(c, scope, nm->s, nm->len)) {
+				if (cc_token_is(c, LEX_TOKEN_LEFT_PAREN))
+					end = cc_token_skip_balanced(c);
+				if (an == CC_ATTRIBUTE_NONE && !cc_attribute_is_known(c, scope, nm->s, nm->len)) {
 					/* [[gnu::x]]: from the scope, printed as gnu:: (also for __gnu__::) */
-					const char *sp = scope > 0 ? attr_scopes[scope] : "";
+					const char *sp = scope > 0 ? cc_attribute_scopes[scope] : "";
 					diag_span r = { sloc, pp_token_end_find(c->p, end) };
-					const char *fix = attr_correction(c, scope, nm->s, nm->len);
+					const char *fix = cc_attribute_name_correction(c, scope, nm->s, nm->len);
 					const char *ns = nm->s;
 					size_t nn = nm->len;
 
 					if (scope >= 0)	/* [[__x__]] prints as x, __attribute__((__x__)) as written */
-						attr_norm(&ns, &nn);
+						cc_attribute_name_normalize(&ns, &nn);
 
 					if (fix) {
 						char fb[160];
 						diag_fixit fx = { sloc, pp_token_end_find(c->p, loc), fb, 0 };
 
 						snprintf(fb, sizeof(fb), "%s%s", sp, fix);
-						cc_warnx(c, "unknown-attributes", true, NULL, sloc, &r, 1, &fx, 1,
+						cc_report_warning(c, "unknown-attributes", true, NULL, sloc, &r, 1, &fx, 1,
 							 "unknown attribute '%s%.*s' ignored; did you mean '%s'?", sp, (int)nn, ns, fb);
 					} else {
-						cc_warnx(c, "unknown-attributes", true, NULL, sloc, &r, 1, NULL, 0,
+						cc_report_warning(c, "unknown-attributes", true, NULL, sloc, &r, 1, NULL, 0,
 							 "unknown attribute '%s%.*s' ignored", sp, (int)nn, ns);
 					}
 				}
 			}
 		}
-		expect(c, close, cs);
-		expect(c, close, cs);
+		cc_token_expect(c, close, cs);
+		cc_token_expect(c, close, cs);
 	}
 }
 
@@ -670,9 +670,9 @@ _Static_assert(offsetof(attrs, packed) % sizeof(uint32_t) == 0 &&
 	       offsetof(attrs, noinstr) == offsetof(attrs, packed) + 17 && offsetof(attrs, pure) == offsetof(attrs, noinstr) + 1 &&
 	       offsetof(attrs, unavail) == offsetof(attrs, pure) + 1, "attrs layout");
 
-VPRIV void merge_attrs(attrs *to, const attrs *from)
+CC_PRIVATE void cc_attribute_merge(attrs *to, const attrs *from)
 {
-	if (attrs_empty(from))
+	if (cc_attribute_is_empty(from))
 		return;
 	if (from->x86_target) to->x86_features = from->x86_features, to->x86_target = 1;
 	if (from->aligned > to->aligned)
@@ -715,16 +715,16 @@ VPRIV void merge_attrs(attrs *to, const attrs *from)
 }
 
 /* GNU asm("label") after a declarator */
-VPRIV void asm_label(cc *c, attrs *a)
+CC_PRIVATE void cc_asm_label_parse(cc *c, attrs *a)
 {
-	int kw = kwof(tok(c));
+	int kw = cc_token_keyword(tok(c));
 
 	if (kw != KW_asm && kw != KW___asm__ && kw != KW___asm)
 		return;
 	if (kw == KW_asm)
-		EXT_WARN_MS(c, "asm", "language-extension-token", w_ped, tok(c)->loc, "extension used");
+		CC_REPORT_EXTENSION_MICROSOFT(c, "asm", "language-extension-token", cc_warning_group_pedantic, tok(c)->loc, "extension used");
 	next(c);
-	expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
-	a->asmname = string_index(c, 0);
-	expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
+	cc_token_expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
+	a->asmname = cc_attribute_string_parse(c, 0);
+	cc_token_expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 }

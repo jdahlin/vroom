@@ -10,12 +10,12 @@ VPRIV uint32_t align_at(uint64_t off, uint32_t a)
 	return a ? a : 1;
 }
 
-VPRIV uint64_t elem_size(cc *c, qty ptr)
+VPRIV uint64_t elem_size(cc *c, ast_qualified_type ptr)
 {
-	qty b = T(c, ptr)->base;
+	ast_qualified_type b = T(c, ptr)->base;
 	int k = KIND(c, b);
 
-	if (k == TY_VOID || k == TY_FUNC)
+	if (k == AST_TYPE_VOID || k == AST_TYPE_FUNCTION)
 		return 1;
 	return tsize(c, b);
 }
@@ -56,9 +56,9 @@ VPRIV val ptr_add(ecx *e, val p, val i, int64_t scale, bool sub)
 }
 
 /* p + i elements of a pointer to a VLA: the element size is computed now */
-VPRIV val ptr_add_vla(ecx *e, val p, val i, qty ptr, bool sub)
+VPRIV val ptr_add_vla(ecx *e, val p, val i, ast_qualified_type ptr, bool sub)
 {
-	val b = vla_bytes(e, e->c->ty[QI(ptr)].base);
+	val b = vla_bytes(e, e->c->ty[AST_QUALIFIED_TYPE_INDEX(ptr)].base);
 	int ri = toreg(e, &i), rb = toreg(e, &b);
 
 	op4(e, I_MADD, 1, ri, ri, rb, ZR);
@@ -73,13 +73,13 @@ VPRIV lval gen_lval(ecx *e, uint32_t n)
 	lval l = { 0 };
 
 	switch (x->op) {
-	case N_VAR: {
+	case AST_NODE_VARIABLE: {
 		uint32_t s = x->a, cs;
 
 		if (is_local_var(c, s))
 			return local_lval(e, s);
 		cs = canon_sym(c, s);
-		if (c->syms[cs].sc == SC_REGISTER && c->syms[cs].depth == 0) {
+		if (c->syms[cs].sc == AST_STORAGE_REGISTER && c->syms[cs].depth == 0) {
 			int r = regvar_reg(c, cs);
 
 			if (r < 0)
@@ -88,7 +88,7 @@ VPRIV lval gen_lval(ecx *e, uint32_t n)
 			l.r = (uint8_t)r;
 			return l;
 		}
-		if (!WASM(c) && ((c->syms[cs].flags | c->syms[s].flags) & SF_THREAD)) {
+		if (!WASM(c) && ((c->syms[cs].flags | c->syms[s].flags) & AST_SYMBOL_FLAG_THREAD)) {
 			/*
 			 * x0 = the address.  Darwin: the TLV descriptor's thunk.  ELF as
 			 * clang: -fPIC TLSDESC (a call), else local-exec for a symbol
@@ -101,11 +101,11 @@ VPRIV lval gen_lval(ecx *e, uint32_t n)
 				const attrs *ta = sym_attrs(c, cs);
 				int want = ta && ta->tlsmodel ? ta->tlsmodel : c->o->tlsmodel, def;
 
-				def = c->o->pic == 2 ? VCC_TLS_GD :
-				      (c->syms[cs].flags & (SF_DEFINED | SF_TENTATIVE)) ? VCC_TLS_LE : VCC_TLS_IE;
+				def = c->o->pic == 2 ? CC_TLS_GLOBAL_DYNAMIC :
+				      (c->syms[cs].flags & (AST_SYMBOL_FLAG_DEFINED | AST_SYMBOL_FLAG_TENTATIVE)) ? CC_TLS_LOCAL_EXEC : CC_TLS_INITIAL_EXEC;
 				if (want > def)
 					def = want;
-				model = def == VCC_TLS_LE ? TLS_LE : def == VCC_TLS_IE ? TLS_IE : TLS_DESC;
+				model = def == CC_TLS_LOCAL_EXEC ? TLS_LE : def == CC_TLS_INITIAL_EXEC ? TLS_IE : TLS_DESC;
 			}
 			note_ref(e, REF(RK_SYM, cs));
 			if (model == 0 || model == TLS_DESC)
@@ -128,23 +128,23 @@ VPRIV lval gen_lval(ecx *e, uint32_t n)
 		l.align = sym_align(c, cs);
 		return l;
 	}
-	case N_STR:
+	case AST_NODE_STRING:
 		l.k = L_SYM;
 		l.ref = REF(RK_STR, x->a);
 		l.align = c->strs[x->a].esz;
 		return l;
-	case N_DEREF: {
+	case AST_NODE_DEREFERENCE: {
 		val p = gen(e, x->a);
-		qty bt = T(c, N(x->a)->ty)->base;
+		ast_qualified_type bt = T(c, N(x->a)->ty)->base;
 
-		return lfromval(e, p, KIND(c, bt) == TY_VOID ? 1 : talign(c, bt));
+		return lfromval(e, p, KIND(c, bt) == AST_TYPE_VOID ? 1 : talign(c, bt));
 	}
-	case N_MEMBER: {
+	case AST_NODE_MEMBER: {
 		const field *f = &c->tags[x->b].f[x->c];
 		const node *b = N(x->a);
 
-		if (b->flags & NF_LVALUE || b->op == N_VAR || b->op == N_DEREF || b->op == N_MEMBER || b->op == N_INDEX ||
-		    b->op == N_COMPLIT || b->op == N_STR)
+		if (b->flags & AST_NODE_FLAG_LVALUE || b->op == AST_NODE_VARIABLE || b->op == AST_NODE_DEREFERENCE || b->op == AST_NODE_MEMBER || b->op == AST_NODE_INDEX ||
+		    b->op == AST_NODE_COMPOUND_LITERAL || b->op == AST_NODE_STRING)
 			l = gen_lval(e, x->a);
 		else
 			l = lfromval(e, gen(e, x->a), talign(c, b->ty));
@@ -160,10 +160,10 @@ VPRIV lval gen_lval(ecx *e, uint32_t n)
 		}
 		return l;
 	}
-	case N_INDEX: {
+	case AST_NODE_INDEX: {
 		val p = gen(e, x->a), i = gen(e, x->b);
 		uint64_t es = elem_size(c, N(x->a)->ty);
-		qty et = T(c, N(x->a)->ty)->base;
+		ast_qualified_type et = T(c, N(x->a)->ty)->base;
 
 		if (x->aux == 1) {
 			if (i.k == V_CONST) {
@@ -174,11 +174,11 @@ VPRIV lval gen_lval(ecx *e, uint32_t n)
 			}
 			int ri = toreg(e, &i), rb = treg(e);
 			mov(e, 1, rb, ri);
-			val bit = arith(e, LEX_TOKEN_AMPERSAND, prim(TY_ULONG), vreg(rb), vconst(7));
+			val bit = arith(e, LEX_TOKEN_AMPERSAND, prim(AST_TYPE_UNSIGNED_LONG), vreg(rb), vconst(7));
 			lval bs = { .k = L_FRAME, .off = slot(e, 8, 8), .align = 8 };
-			store(e, &bs, prim(TY_ULONG), &bit);
+			store(e, &bs, prim(AST_TYPE_UNSIGNED_LONG), &bit);
 			val_free(e, &bit);
-			i = arith(e, LEX_TOKEN_GREATER_GREATER, prim(TY_ULONG), vreg(ri), vconst(3));
+			i = arith(e, LEX_TOKEN_GREATER_GREATER, prim(AST_TYPE_UNSIGNED_LONG), vreg(ri), vconst(3));
 			l = lfromval(e, ptr_add(e, p, i, 1, false), 1);
 			l.bf = 1, l.width = 1, l.dynbit_slot = bs.off;
 			return l;
@@ -203,11 +203,11 @@ VPRIV lval gen_lval(ecx *e, uint32_t n)
 		p = ptr_add(e, p, i, (int64_t)es, false);
 		return lfromval(e, p, talign(c, et));
 	}
-	case N_COMPLIT: {
+	case AST_NODE_COMPOUND_LITERAL: {
 		uint32_t s = x->b;
 		const sym *y = &c->syms[s];
 
-		if (y->sc == SC_STATIC || (y->flags & SF_GLOBAL)) {
+		if (y->sc == AST_STORAGE_STATIC || (y->flags & AST_SYMBOL_FLAG_GLOBAL)) {
 			l.k = L_SYM;
 			l.ref = REF(RK_SYM, s);
 			l.align = sym_align(c, s);
@@ -225,8 +225,8 @@ VPRIV lval gen_lval(ecx *e, uint32_t n)
 			return d;
 		}
 	}
-	case N_CAST:
-		if (x->aux == CK_NOP && (N(x->a)->flags & NF_LVALUE))
+	case AST_NODE_CAST:
+		if (x->aux == AST_CAST_NOP && (N(x->a)->flags & AST_NODE_FLAG_LVALUE))
 			return gen_lval(e, x->a);
 		__attribute__((fallthrough));
 	default: {
@@ -241,17 +241,17 @@ VPRIV lval gen_lval(ecx *e, uint32_t n)
 static int bf_bytes(int bits) { return bits <= 8 ? 1 : bits <= 16 ? 2 : bits <= 32 ? 4 : 8; }
 
 /*
- * _Atomic objects (TF_ATOMIC) in memory: every access is sequentially
+ * _Atomic objects (AST_TYPE_FLAG_ATOMIC) in memory: every access is sequentially
  * consistent through LSE, as clang does for armv8.1-a: ldar, stlr, and
  * casal loops for read-modify-write (expr.c atomic_rmw).
  */
-VPRIV bool is_atomic_lv(ecx *e, const lval *l, qty t)
+VPRIV bool is_atomic_lv(ecx *e, const lval *l, ast_qualified_type t)
 {
-	return unlikely(T(e->c, t)->flags & TF_ATOMIC) && l->k != L_GLOBREG && !l->bf;
+	return unlikely(T(e->c, t)->flags & AST_TYPE_FLAG_ATOMIC) && l->k != L_GLOBREG && !l->bf;
 }
 
 /* log2 of an atomic access's size; fatal for what has no single instruction */
-VPRIV int atomic_sz(ecx *e, qty t)
+VPRIV int atomic_sz(ecx *e, ast_qualified_type t)
 {
 	cc *c = e->c;
 	uint64_t n = tsize(c, t);
@@ -278,7 +278,7 @@ VPRIV int atomic_addr(ecx *e, lval *l, bool *own)
 	return toreg(e, &a);
 }
 
-static val ldar_load(ecx *e, lval *l, qty t)
+static val ldar_load(ecx *e, lval *l, ast_qualified_type t)
 {
 	cc *c = e->c;
 	int sz = atomic_sz(e, t), r, ra;
@@ -304,7 +304,7 @@ static val ldar_load(ecx *e, lval *l, qty t)
 	return vreg(r);
 }
 
-static void stlr_store(ecx *e, lval *l, qty t, val *v)
+static void stlr_store(ecx *e, lval *l, ast_qualified_type t, val *v)
 {
 	cc *c = e->c;
 	int sz = atomic_sz(e, t), r, ra;
@@ -312,7 +312,7 @@ static void stlr_store(ecx *e, lval *l, qty t, val *v)
 	bool aggregate = is_agg(c, t);
 
 	if (aggregate) {
-		qty plain = QT(T(c, t)->n, 0);
+		ast_qualified_type plain = AST_QUALIFIED_TYPE(T(c, t)->n, 0);
 		uint64_t bytes = tsize(c, plain);
 		lval src = { .k = L_REG, .r = toreg(e, v), .align = talign(c, plain) };
 		if (bytes != (1u << sz)) {
@@ -412,7 +412,7 @@ static val bf_load_wide(ecx *e, const lval *l)
 
 /* Materialize a wide scalar field without reading outside its covered bytes.
  * Extend from the field precision, rather than the declared storage width. */
-static val bf_load_big(ecx *e, const lval *l, qty t)
+static val bf_load_big(ecx *e, const lval *l, ast_qualified_type t)
 {
 	uint64_t size = tsize(e->c, t);
 	lval dst = { .k = L_FRAME, .off = slot(e, size, talign(e->c, t)), .align = 8 };
@@ -437,13 +437,13 @@ static val bf_load_big(ecx *e, const lval *l, qty t)
 	return laddr(e, &dst);
 }
 
-static val load1(ecx *e, lval *l, qty t);
+static val load1(ecx *e, lval *l, ast_qualified_type t);
 
 /* a volatile access stays untagged: opt.c then leaves its slot alone */
-VPRIV val load(ecx *e, lval *l, qty t)
+VPRIV val load(ecx *e, lval *l, ast_qualified_type t)
 {
 	val v;
-	int vol = (QQ(t) & Q_VOLATILE) != 0;
+	int vol = (AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_VOLATILE) != 0;
 
 	e->novtag += vol;
 	v = load1(e, l, t);
@@ -451,7 +451,7 @@ VPRIV val load(ecx *e, lval *l, qty t)
 	return v;
 }
 
-static val load1(ecx *e, lval *l, qty t)
+static val load1(ecx *e, lval *l, ast_qualified_type t)
 {
 	cc *c = e->c;
 	uint64_t size = tsize(c, t);
@@ -474,8 +474,8 @@ static val load1(ecx *e, lval *l, qty t)
 		lval bs = { .k = L_FRAME, .off = l->dynbit_slot, .align = 8 };
 		r = treg(e);
 		load_n(e, r, l, 1, 0);
-		val v = arith(e, LEX_TOKEN_GREATER_GREATER, prim(TY_ULONG), vreg(r), load(e, &bs, prim(TY_ULONG)));
-		return arith(e, LEX_TOKEN_AMPERSAND, prim(TY_ULONG), v, vconst(1));
+		val v = arith(e, LEX_TOKEN_GREATER_GREATER, prim(AST_TYPE_UNSIGNED_LONG), vreg(r), load(e, &bs, prim(AST_TYPE_UNSIGNED_LONG)));
+		return arith(e, LEX_TOKEN_AMPERSAND, prim(AST_TYPE_UNSIGNED_LONG), v, vconst(1));
 	}
 
 	if (l->bf && size == 16)
@@ -525,18 +525,18 @@ static val load1(ecx *e, lval *l, qty t)
 }
 
 /* store v (of type t) to l; v is consumed unless keep; returns v (in a register if kept) */
-static void store1(ecx *e, lval *l, qty t, val *v);
+static void store1(ecx *e, lval *l, ast_qualified_type t, val *v);
 
-VPRIV void store(ecx *e, lval *l, qty t, val *v)
+VPRIV void store(ecx *e, lval *l, ast_qualified_type t, val *v)
 {
-	int vol = (QQ(t) & Q_VOLATILE) != 0;
+	int vol = (AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_VOLATILE) != 0;
 
 	e->novtag += vol;
 	store1(e, l, t, v);
 	e->novtag -= vol;
 }
 
-static void store1(ecx *e, lval *l, qty t, val *v)
+static void store1(ecx *e, lval *l, ast_qualified_type t, val *v)
 {
 	cc *c = e->c;
 	uint64_t size = tsize(c, t);
@@ -604,18 +604,18 @@ static void store1(ecx *e, lval *l, qty t, val *v)
 	}
 	if (l->dynbit_slot) {
 		lval bs = { .k = L_FRAME, .off = l->dynbit_slot, .align = 8 };
-		val mask = arith(e, LEX_TOKEN_LESS_LESS, prim(TY_ULONG), vconst(1), load(e, &bs, prim(TY_ULONG)));
+		val mask = arith(e, LEX_TOKEN_LESS_LESS, prim(AST_TYPE_UNSIGNED_LONG), vconst(1), load(e, &bs, prim(AST_TYPE_UNSIGNED_LONG)));
 		int rm = treg(e), rv = toreg(e, v), ro = treg(e), rn = treg(e);
 		mov(e, 1, rm, mask.r);
 		load_n(e, ro, l, 1, 0);
-		val old = arith(e, LEX_TOKEN_AMPERSAND, prim(TY_ULONG), vreg(ro), arith(e, LEX_TOKEN_CARET, prim(TY_ULONG), mask, vconst(-1)));
+		val old = arith(e, LEX_TOKEN_AMPERSAND, prim(AST_TYPE_UNSIGNED_LONG), vreg(ro), arith(e, LEX_TOKEN_CARET, prim(AST_TYPE_UNSIGNED_LONG), mask, vconst(-1)));
 		mov(e, 1, rn, rv);
-		val nv = arith(e, LEX_TOKEN_MINUS, prim(TY_ULONG), vconst(0), vreg(rn));
-		nv = arith(e, LEX_TOKEN_AMPERSAND, prim(TY_ULONG), nv, vreg(rm));
-		old = arith(e, LEX_TOKEN_PIPE, prim(TY_ULONG), old, nv);
+		val nv = arith(e, LEX_TOKEN_MINUS, prim(AST_TYPE_UNSIGNED_LONG), vconst(0), vreg(rn));
+		nv = arith(e, LEX_TOKEN_AMPERSAND, prim(AST_TYPE_UNSIGNED_LONG), nv, vreg(rm));
+		old = arith(e, LEX_TOKEN_PIPE, prim(AST_TYPE_UNSIGNED_LONG), old, nv);
 		lval byte = *l;
 		byte.bf = 0, byte.dynbit_slot = 0;
-		store(e, &byte, prim(TY_UCHAR), &old);
+		store(e, &byte, prim(AST_TYPE_UNSIGNED_CHAR), &old);
 		val_free(e, &old);
 		return;
 	}

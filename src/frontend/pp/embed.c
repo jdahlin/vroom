@@ -7,8 +7,8 @@
 typedef struct pp_embed_parameters {
 	uint64_t limit, offset;
 	bool has_limit, unknown, bad;
-	const ptok *pre, *suf, *if_empty;	/* prefix(), suffix(), if_empty() token lists */
-	uint32_t npre, nsuf, if_empty_count;
+	const ptok *prefix, *suffix, *if_empty;	/* prefix(), suffix(), if_empty() token lists */
+	uint32_t prefix_count, suffix_count, if_empty_count;
 } pp_embed_parameters;
 
 /* the spelling of n (0..255): pp_embed_digit_spellings[4 n] */
@@ -43,7 +43,7 @@ static bool pp_embed_tokens_read(pp *p, const ptok **out, uint32_t *n, bool exp)
 			buf[k++] = t;
 	}
 	{
-		ptok *c = varena_alloc(&p->tmp, (k ? k : 1) * sizeof(ptok));
+		ptok *c = varena_alloc(&p->temporary_region, (k ? k : 1) * sizeof(ptok));
 
 		memcpy(c, buf, k * sizeof(ptok));
 		*out = c, *n = k;
@@ -118,10 +118,10 @@ static void pp_embed_parameters_read(pp *p, pp_embed_parameters *m, bool paren, 
 			if (!pp_embed_integer_read(p, &m->offset))
 				m->bad = true;
 		} else if (!strcmp(nm, "prefix")) {
-			if (!pp_embed_tokens_read(p, &m->pre, &m->npre, false))
+			if (!pp_embed_tokens_read(p, &m->prefix, &m->prefix_count, false))
 				m->bad = true;
 		} else if (!strcmp(nm, "suffix")) {
-			if (!pp_embed_tokens_read(p, &m->suf, &m->nsuf, false))
+			if (!pp_embed_tokens_read(p, &m->suffix, &m->suffix_count, false))
 				m->bad = true;
 		} else if (!strcmp(nm, "if_empty")) {
 			if (!pp_embed_tokens_read(p, &m->if_empty, &m->if_empty_count, false))
@@ -158,17 +158,17 @@ static const lex_file *pp_embed_file_find(pp *p, const pp_context *from, const c
 	if (name[0] == '/') {
 		memcpy(buf, name, nlen), buf[nlen] = 0;
 		*path = pp_string_copy(p, buf, nlen);
-		return pp_path_try(p->o, buf, nlen);
+		return pp_path_try(p->options, buf, nlen);
 	}
 	if (!angled) {
-		fp = from && from->f != &p->builtin ? from->spath : "./";
+		fp = from && from->lex_file != &p->builtin_file ? from->spelled_path : "./";
 		sl = strrchr(fp, '/');
 		dl = sl ? (size_t)(sl - fp) + 1 : 0;
 		if (!sl && fp[0])
 			fp = "./", dl = 2;
 		if (dl + nlen + 1 < sizeof(buf)) {
 			memcpy(buf, fp, dl), memcpy(buf + dl, name, nlen), buf[dl + nlen] = 0;
-			if ((f = pp_path_try(p->o, buf, dl + nlen))) {
+			if ((f = pp_path_try(p->options, buf, dl + nlen))) {
 				*path = pp_string_copy(p, buf, dl + nlen);
 				return f;
 			}
@@ -176,13 +176,13 @@ static const lex_file *pp_embed_file_find(pp *p, const pp_context *from, const c
 		/* In particular, __FILE__ may already contain the relative directory
 		 * of the source. Retrying it under that directory would double it. */
 		memcpy(buf, name, nlen), buf[nlen] = 0;
-		if ((f = pp_path_try(p->o, buf, nlen))) {
+		if ((f = pp_path_try(p->options, buf, nlen))) {
 			*path = pp_string_copy(p, buf, nlen);
 			return f;
 		}
 	}
-	for (int k = 0; k < p->o->nedirs; k++) {	/* --embed-dir, in order */
-		const char *d = p->o->edirs[k];
+	for (int k = 0; k < p->options->nedirs; k++) {	/* --embed-dir, in order */
+		const char *d = p->options->edirs[k];
 		size_t l = strlen(d);
 
 		if (l + nlen + 2 >= sizeof(buf))
@@ -191,7 +191,7 @@ static const lex_file *pp_embed_file_find(pp *p, const pp_context *from, const c
 		if (l && buf[l - 1] != '/')
 			buf[l++] = '/';
 		memcpy(buf + l, name, nlen), l += nlen, buf[l] = 0;
-		if ((f = pp_path_try(p->o, buf, l))) {
+		if ((f = pp_path_try(p->options, buf, l))) {
 			*path = pp_string_copy(p, buf, l);
 			return f;
 		}
@@ -202,7 +202,7 @@ static const lex_file *pp_embed_file_find(pp *p, const pp_context *from, const c
 /* path names the main file (clang lists it once in -M) */
 static bool pp_embed_path_is_main(const pp *p, const char *path)
 {
-	const char *m = p->o->main;
+	const char *m = p->options->main;
 
 	if (!m)
 		return false;
@@ -221,11 +221,11 @@ static bool pp_embed_file_map(const pp *p, const char *path, vfile_mapping *m)
 	struct stat st;
 	size_t cl, l = strlen(path);
 
-	if (p->o->cwd && path[0] != '/') {
-		cl = strlen(p->o->cwd);
+	if (p->options->cwd && path[0] != '/') {
+		cl = strlen(p->options->cwd);
 		if (cl + l + 2 > sizeof(abs))
 			return false;
-		memcpy(abs, p->o->cwd, cl);
+		memcpy(abs, p->options->cwd, cl);
 		abs[cl] = '/';
 		memcpy(abs + cl + 1, path, l + 1);
 		path = abs;
@@ -251,7 +251,7 @@ VPRIV void pp_embed_run(pp *p, pp_context *c, uint32_t b, uint32_t e, uint32_t l
 	bool angled, ok;
 	const char *path;
 	const lex_file *f;
-	int d = p->depth;
+	int d = p->context_depth;
 	ptok t;
 	uint32_t floc;
 	pp_embed_parameters m = { 0 };
@@ -259,7 +259,7 @@ VPRIV void pp_embed_run(pp *p, pp_context *c, uint32_t b, uint32_t e, uint32_t l
 	vfile_mapping raw_;
 
 	pthread_once(&pp_embed_digits_once, pp_embed_digits_init);
-	if (!p->o->c23) {
+	if (!p->options->c23) {
 		diag_info di = { "warning", nloc, NULL, 0, NULL, 0, NULL, 0 };
 
 		diag_warning_report(p, "c23-extensions", true, NULL, &di, "#embed is a C23 extension");
@@ -284,35 +284,35 @@ VPRIV void pp_embed_run(pp *p, pp_context *c, uint32_t b, uint32_t e, uint32_t l
 		diag_info di = { "fatal error", floc, NULL, 0, NULL, 0, NULL, 0 };	/* (clang: no range for #embed) */
 
 		diag_report_extended(p, &di, "'%.*s' file not found", (int)n, buf);
-		if (p->fatal_jump && !p->o->fatal_continue)
+		if (p->fatal_jump && !p->options->fatal_continue)
 			longjmp(*p->fatal_jump, 1);
 		return;
 	}
-	if (p->o->deps && !pp_embed_path_is_main(p, path))
+	if (p->options->deps && !pp_embed_path_is_main(p, path))
 		pp_dependency_add(p, path, false);
 	if (!pp_embed_file_map(p, path, &raw_)) {
 		diag_info di = { "fatal error", floc, NULL, 0, NULL, 0, NULL, 0 };
 
 		diag_report_extended(p, &di, "cannot open file '%s': %s", path, strerror(errno));
-		if (p->fatal_jump && !p->o->fatal_continue)
+		if (p->fatal_jump && !p->options->fatal_continue)
 			longjmp(*p->fatal_jump, 1);
 		return;
 	}
 	pp_embed_range_compute(raw_.n, &m, &ob, &on);
-	if (p->rec.n)	/* the header cache does not record #embed's bytes: the open regions are not cached */
-		p->rec.nbad = p->rec.n;
+	if (p->recording.level_count)	/* the header cache does not record #embed's bytes: the open regions are not cached */
+		p->recording.uncacheable_levels = p->recording.level_count;
 	{
-		uint64_t nt = on ? m.npre + 2 * on - 1 + m.nsuf : m.if_empty_count;
+		uint64_t nt = on ? m.prefix_count + 2 * on - 1 + m.suffix_count : m.if_empty_count;
 		ptok *o, *w;
 
 		if (!nt) {
 			vfile_unmap(&raw_);
 			return;
 		}
-		o = w = varena_alloc(&p->tmp, nt * sizeof(ptok));
+		o = w = varena_alloc(&p->temporary_region, nt * sizeof(ptok));
 		if (on) {
-			if (m.npre)	/* no prefix: m.pre is NULL, and memcpy's arguments are nonnull */
-				memcpy(w, m.pre, m.npre * sizeof(ptok)), w += m.npre;
+			if (m.prefix_count)	/* no prefix: m.pre is NULL, and memcpy's arguments are nonnull */
+				memcpy(w, m.prefix, m.prefix_count * sizeof(ptok)), w += m.prefix_count;
 			for (uint64_t i = 0; i < on; i++) {
 				unsigned char v = raw_.p[ob + i];
 
@@ -323,14 +323,14 @@ VPRIV void pp_embed_run(pp *p, pp_context *c, uint32_t b, uint32_t e, uint32_t l
 					       (uint8_t)(i ? LEX_TOKEN_FLAG_SPACE_BEFORE : 0), 0 };
 			}
 			w[-1].flags |= PP_TOKEN_FLAG_EMBED_END;
-			if (m.nsuf)
-				memcpy(w, m.suf, m.nsuf * sizeof(ptok)), w += m.nsuf;
+			if (m.suffix_count)
+				memcpy(w, m.suffix, m.suffix_count * sizeof(ptok)), w += m.suffix_count;
 		} else {
 			memcpy(w, m.if_empty, m.if_empty_count * sizeof(ptok)), w += m.if_empty_count;
 		}
 		w[-1].flags |= PP_TOKEN_FLAG_EMBED_END;
 		vfile_unmap(&raw_);
-		p->embed_tail = !on ? 1 : m.nsuf ? 2 : 0;	/* markers left: 2 bytes then suffix, 1 if_empty/suffix */
+		p->embed_tail = !on ? 1 : m.suffix_count ? 2 : 0;	/* markers left: 2 bytes then suffix, 1 if_empty/suffix */
 		pp_context_tokens_push(p, o, (uint32_t)(w - o), 0, 0, 0);
 	}
 }
@@ -363,7 +363,7 @@ VPRIV int pp_embed_has_query(pp *p, const pp_context *fc, uint32_t loc)
 	f = pp_embed_file_find(p, fc, buf, n, angled, &path);
 	if (!f)
 		return 0;
-	if (p->o->deps && !pp_embed_path_is_main(p, path))
+	if (p->options->deps && !pp_embed_path_is_main(p, path))
 		pp_dependency_add(p, path, false);
 	vfile_mapping raw_;
 

@@ -227,7 +227,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [ ] **arm64: the hardening options are accepted and ignored.**
   `-ftrivial-auto-var-init=zero`, `-fstack-protector*`, `-fpatchable-function-entry`
   (and on x86 only `-fcf-protection`, `-mfunction-return=`, `-mretpoline-external-thunk`)
-  are implemented for x86-64 (cc_opts.xcf ...); arm64 accepts them silently,
+  are implemented for x86-64 (cc_options.xcf ...); arm64 accepts them silently,
   so a kernel built with them lacks the protection.
   *Validate:* `src/test/vcc/autoinit_zero.c` (xfail on arm64).
 
@@ -274,7 +274,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   Wider atomic operations on other targets remain unsupported.
 
 - [x] **`_Atomic` dropped** [P].  Done: `_Atomic(T)` and the qualifier
-  (also `T *_Atomic`) make a type of its own (`TF_ATOMIC`, `ty_atomic()` in
+  (also `T *_Atomic`) make a type of its own (`AST_TYPE_FLAG_ATOMIC`, `ty_atomic()` in
   frontend/c/type.c) with clang's layout; lvalue conversion (`decay_slow`) yields
   T; emit loads with `ldar`, stores with `stlr`, and every compound
   assignment and `++`/`--` is a `casal` loop around the operator's usual
@@ -433,7 +433,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* T1 `desig_override.c`, static and automatic variants, with
   side-effect counters (clang's behaviour is the oracle).
 - [x] **Header/snapshot cache keys incomplete** [R].  *Done:* `opt_sig` hashes every
-  `cc_opts` field before `outfd` (cc.h says parse options go there) plus emit;
+  `cc_options` field before `outfd` (cc.h says parse options go there) plus emit;
   `sig_of` adds wargs and error_limit; `bench/vcc-cachekey.py` 6/6 (the decl
   cache rows need bigger headers to reach a restore).  Was:  `opt_sig`
   `driver/declaration-cache.c:356` misses `-std`, `-fgnu89-inline`, `-finstrument-functions`,
@@ -706,7 +706,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* `bench/vcc-wasm.py -j 6 --suite vcc --no-cache -v` using emcc 7
   and Node 24; every named probe must become XPASS when repaired, then remove
   its corresponding entry and rerun. Also retain the unmarked GCC/TCC gates.
-- [ ] **PIC/PIE** [P]: done: `cc_opts.pic` from the driver (PIE the hosted
+- [ ] **PIC/PIE** [P]: done: `cc_options.pic` from the driver (PIE the hosted
   default, `-fno-pic`), `sym_needs_got` (arch/a64/codegen/value.c) as clang:
   `-fPIC` every default-visibility non-static symbol, `-fPIE` those not
   defined in the TU, hidden/protected direct, calls direct; checked by
@@ -1461,7 +1461,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `diag_warning_error_named`).  Done: diag `conv_flags*.c` (`diag-flags:` in
   vcc-diag.py), 12 flag combinations identical to clang.
 - [x] **-Winteger-overflow**: signed `+ - *` and unary `-` of constants
-  whose exact value does not fit (innermost only, `NF_OVF`), value with
+  whose exact value does not fit (innermost only, `AST_NODE_FLAG_OVERFLOW_REPORTED`), value with
   clang's digit separators.  Done: diag `int_overflow.c`; not modelled:
   overflow inside casts/conditionals reached through other operators.
 - [x] **-Wunused-variable**, `-Wunused-const-variable`: block-scope
@@ -1475,7 +1475,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   the taken one when the condition is constant; a comma's right operand).
   Narrowing waits for the end of the function as clang's
   DiagRuntimeBehavior; same-width sign changes skip literals spelled with a
-  leading 0 (`N_NUM` aux) and chars in braces.  Done: diag `const_conv.c`,
+  leading 0 (`AST_NODE_NUMBER` aux) and chars in braces.  Done: diag `const_conv.c`,
   kernel/PostgreSQL/test suites 0 differences.  Not modelled: clang drops
   the deferred ones in unreachable code (vcc: only under a constant-false
   condition, `c->dead`); a member
@@ -1602,7 +1602,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   "; dereference with *" hint and fix-it (simple operands), `int *const`
   spelled as clang, a decayed array named `int[2]`, and "not a compile-time
   constant" after a conversion error: diag `ptr_discards_quals.c`,
-  `deref_hint.c`, `ptr_const_spelling.c`; `ext_vector_type` splat (CK_SPLAT),
+  `deref_hint.c`, `ptr_const_spelling.c`; `ext_vector_type` splat (AST_CAST_SPLAT),
   the scalar-to-vector truncation error, `.xyzw`/`.rgba`/`.sN`/`.hi`/`.lo`/
   `.even`/`.odd` swizzles: `test/vcc/ext_swizzle.c`, diag
   `ext_vector_splat.c`, `vector_scalar_trunc.c`, `ext_swizzle_range.c`.)
@@ -1693,7 +1693,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   OOM policy for code inside vccd (fail the request, never abort) decides
   the buffer.  *Validate:* outputs byte-identical (objects, `-S`, `-E`),
   `bench/vbench.py gate`.
-- [ ] **The linker as a split module** (restructure 2026-11-09).  `ld/ld.c`
+- [x] **The linker as a split module** (restructure 2026-11-09; done 2026-11-13:
+  `ld-internal.h`, the link context, the fragments as `arch/*/ld/*.c`, each part
+  compiles alone with `make VCC_UNITY=`; doc/quality/WORK-linker.md step 2).  `ld/ld.c`
   is one TU of ~4400 lines over process-wide globals (`objs`, `isecs`,
   `gsyms`, ... of anonymous `VVEC` types); its arm64 parts are fragments
   (`arch/a64/ld/*.inc`) it #includes.  Make it files by topic with an

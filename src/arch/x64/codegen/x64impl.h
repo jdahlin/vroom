@@ -178,16 +178,16 @@ VPRIV bool x64_nosimd(ecx *e);
 VPRIV void x64_nofp(ecx *e);
 VPRIV void x64_x87(ecx *e, int xf, const lval *l, int sz);	/* an x87 record (fp.c) */	/* fatal under -mgeneral-regs-only / -mno-sse */
 VPRIV void x64_call_xmms(ecx *e, const wkarg *r);	/* abi.c, both conventions: a result in xmm0, xmm1, ... */
-VPRIV void x64_call_park(ecx *e, qty rt);	/* abi.c, both conventions: a call's integer result to r11 */
-VPRIV val x64_call_value(ecx *e, val *fn, qty rt, const wkarg *r);	/* ... and its value as the walker takes it */
+VPRIV void x64_call_park(ecx *e, ast_qualified_type rt);	/* abi.c, both conventions: a call's integer result to r11 */
+VPRIV val x64_call_value(ecx *e, val *fn, ast_qualified_type rt, const wkarg *r);	/* ... and its value as the walker takes it */
 /* abi-win64.c: the Microsoft x64 convention */
 VPRIV int x64w_argreg(int i);
-VPRIV void x64w_classify(ecx *e, qty t, wkarg *a, bool unnamed);
-VPRIV val x64w_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool variadic, const wkarg *r, qty rt);
+VPRIV void x64w_classify(ecx *e, ast_qualified_type t, wkarg *a, bool unnamed);
+VPRIV val x64w_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool variadic, const wkarg *r, ast_qualified_type rt);
 VPRIV void x64w_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic);
 VPRIV void x64w_va_start(ecx *e, int rap);
-VPRIV int x64w_va_arg(ecx *e, int rap, qty t);
-VPRIV void x64w_helper(ecx *e, int fn, const int64_t *in, const qty *types, int n, int64_t res, qty rt);
+VPRIV int x64w_va_arg(ecx *e, int rap, ast_qualified_type t);
+VPRIV void x64w_helper(ecx *e, int fn, const int64_t *in, const ast_qualified_type *types, int n, int64_t res, ast_qualified_type rt);
 VPRIV void x64w_xmm_part(ecx *e, int op, int64_t off, int size);
 /* the current function's helper calls (__divti3, __addtf3, ...) follow Microsoft's convention */
 static inline bool x64w_helpers(const ecx *e) { return WIN64(e->c); }

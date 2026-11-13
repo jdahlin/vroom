@@ -2,107 +2,107 @@
 
 #include "lowering-internal.h"
 
-VPRIV void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, uint8_t res)
+VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, uint8_t res)
 {
-	ecx *e = L->e;
-	const vir_ins *i = &L->f->ins[v];
-	int d = res == VR_NONE ? (vir_rclass(i->ty) ? XMM0 + 14 : L->gtmp) : vx_reg(res);
-	int a = n ? vx_reg(p[0]) : XNOREG, c = n > 1 ? vx_reg(p[1]) : XNOREG;
-	int sz = vx_size(i->ty);
-	static const uint8_t alu[VO_N] = { [VO_ADD]=X_ADD, [VO_PTRADD]=X_ADD, [VO_SUB]=X_SUB, [VO_PSUB]=X_SUB,
-		[VO_MUL]=X_IMUL, [VO_AND]=X_AND, [VO_OR]=X_OR, [VO_XOR]=X_XOR,
-		[VO_FADD]=X_FADD, [VO_FSUB]=X_FSUB, [VO_FMUL]=X_FMUL, [VO_FDIV]=X_FDIV };
-	if(L->testv) {
-		if(v<L->testv)return;
-		if(v==L->testv) {
-			rec *r=x64_op3(e,X_TESTM,L->testsize,XNOREG,L->membase,XNOREG);
-			r->r[3]=L->indexed?L->memindex:XNOREG;r->sh=L->memsh;r->off=L->memoff;r->ref=(uint32_t)L->testimm;
-			L->cmp=v;L->cmpblock=b;L->setrec=e->x64->nin;
-			x64_op3(e,X_SETCC,4,d,XNOREG,XNOREG)->cond=(i->fl&15)?CC_NE:CC_E;
-			L->testv=0;return;
+	ecx *e = L->context;
+	const vir_insn *i = &L->function->insns[v];
+	int d = res == VIR_REGISTER_NONE ? (vir_register_class(i->type) ? XMM0 + 14 : L->general_temporary) : x64_vir_register_number(res);
+	int a = n ? x64_vir_register_number(p[0]) : XNOREG, c = n > 1 ? x64_vir_register_number(p[1]) : XNOREG;
+	int sz = x64_vir_type_size(i->type);
+	static const uint8_t alu[VIR_OP_COUNT] = { [VIR_OP_ADD]=X_ADD, [VIR_OP_PTRADD]=X_ADD, [VIR_OP_SUB]=X_SUB, [VIR_OP_PSUB]=X_SUB,
+		[VIR_OP_MUL]=X_IMUL, [VIR_OP_AND]=X_AND, [VIR_OP_OR]=X_OR, [VIR_OP_XOR]=X_XOR,
+		[VIR_OP_FADD]=X_FADD, [VIR_OP_FSUB]=X_FSUB, [VIR_OP_FMUL]=X_FMUL, [VIR_OP_FDIV]=X_FDIV };
+	if(L->test_value) {
+		if(v<L->test_value)return;
+		if(v==L->test_value) {
+			rec *r=x64_op3(e,X_TESTM,L->test_size,XNOREG,L->memory_base,XNOREG);
+			r->r[3]=L->memory_is_indexed?L->memory_index:XNOREG;r->sh=L->memory_shift;r->off=L->memory_offset;r->ref=(uint32_t)L->test_immediate;
+			L->compare_condition=v;L->compare_block=b;L->setcc_record=e->x64->nin;
+			x64_op3(e,X_SETCC,4,d,XNOREG,XNOREG)->cond=(i->flags&15)?CC_NE:CC_E;
+			L->test_value=0;return;
 		}
 	}
-	if(L->memskip==v){L->memskip=0;return;}
-	if(L->scaledskip==v){L->scaledskip=0;return;}
-	if(L->bev) {
-		if(v<L->bev)return;
-		if(v==L->bev) {
-			lval at={.k=L_REG,.r=L->bebase,.off=L->beoff};
-			if(L->beindexed) {
-				rec *r=x64_op3(e,X_LDX,L->bewidth,d,at.r,XNOREG);r->r[3]=L->beindex;r->sh=L->besh;r->off=at.off;
-			} else x64_mem(e,X_LD,L->bewidth,d,&at,false);
-			x64_op3(e,X_BSWAP,L->bewidth,d,d,XNOREG);L->bev=0;return;
+	if(L->memory_skip==v){L->memory_skip=0;return;}
+	if(L->scaled_skip==v){L->scaled_skip=0;return;}
+	if(L->big_endian_value) {
+		if(v<L->big_endian_value)return;
+		if(v==L->big_endian_value) {
+			lval at={.k=L_REG,.r=L->big_endian_base,.off=L->big_endian_offset};
+			if(L->big_endian_is_indexed) {
+				rec *r=x64_op3(e,X_LDX,L->big_endian_width,d,at.r,XNOREG);r->r[3]=L->big_endian_index;r->sh=L->big_endian_shift;r->off=at.off;
+			} else x64_mem(e,X_LD,L->big_endian_width,d,&at,false);
+			x64_op3(e,X_BSWAP,L->big_endian_width,d,d,XNOREG);L->big_endian_value=0;return;
 		}
 	}
 	/* A single-use ordinary unsigned load, constant mask and zero comparison
 	 * can test the exact source width in memory. Preserve the address until
 	 * the comparison; neither skipped definition may spill or have edits. */
-	if(i->op==VO_LOAD && (i->ty==VT_I32 || i->ty==VT_I64) && !(i->fl&(VIF_VOL|VIF_MS)) &&
-	   v+2<L->f->blk[b].first+L->f->blk[b].n && L->uses[v]==1 && L->o->slot[v]==VIR_NOBLK) {
-		const vir_ins *mask=&L->f->ins[v+1],*cmp=&L->f->ins[v+2];int64_t k,zero;
-		if(mask->op==VO_AND && mask->ty==i->ty && mask->a==v && vx_imm(L->f,mask->b,&k) &&
-		   L->uses[v+1]==1 && L->o->slot[v+1]==VIR_NOBLK && cmp->op==VO_ICMP &&
-		   (cmp->fl&15)<2 && cmp->a==v+1 && vx_imm(L->f,cmp->b,&zero) && !zero &&
-		   vx_foldedits(L,b,v+1,XNOREG) && vx_foldedits(L,b,v+2,XNOREG)) {
-			L->testv=v+2;L->testsize=1<<VIF_W(i->fl);L->testimm=k;
-			if(L->memv==i->a)L->memv=0;
-			else {L->membase=a;L->memoff=0;L->indexed=false;L->memsh=0;}
+	if(i->op==VIR_OP_LOAD && (i->type==VIR_TYPE_I32 || i->type==VIR_TYPE_I64) && !(i->flags&(VIR_INSN_FLAG_VOL|VIR_INSN_FLAG_MS)) &&
+	   v+2<L->function->blocks[b].first+L->function->blocks[b].insn_count && L->uses[v]==1 && L->allocation->slot[v]==VIR_BLOCK_NONE) {
+		const vir_insn *mask=&L->function->insns[v+1],*cmp=&L->function->insns[v+2];int64_t k,zero;
+		if(mask->op==VIR_OP_AND && mask->type==i->type && mask->a==v && x64_vir_value_immediate(L->function,mask->b,&k) &&
+		   L->uses[v+1]==1 && L->allocation->slot[v+1]==VIR_BLOCK_NONE && cmp->op==VIR_OP_ICMP &&
+		   (cmp->flags&15)<2 && cmp->a==v+1 && x64_vir_value_immediate(L->function,cmp->b,&zero) && !zero &&
+		   x64_vir_fold_edits_check(L,b,v+1,XNOREG) && x64_vir_fold_edits_check(L,b,v+2,XNOREG)) {
+			L->test_value=v+2;L->test_size=1<<VIR_INSN_FLAG_WIDTH_LOG2(i->flags);L->test_immediate=k;
+			if(L->memory_value==i->a)L->memory_value=0;
+			else {L->memory_base=a;L->memory_offset=0;L->memory_is_indexed=false;L->memory_shift=0;}
 			return;
 		}
 	}
 	/* Fold an adjacent private scalar load into its comparison. Narrow
 	 * equality with a representable immediate needs no promotion bits. */
-	if(i->op==VO_LOAD && (i->ty==VT_I32 || i->ty==VT_I64) && !(i->fl&VIF_VOL) &&
-	   L->uses[v]==1 && L->o->slot[v]==VIR_NOBLK && v+1<L->f->blk[b].first+L->f->blk[b].n &&
-	   vx_foldedits(L,b,v+1,XNOREG)) {
-		const vir_ins *next=&L->f->ins[v+1];unsigned width=1<<VIF_W(i->fl);int64_t k=0;
+	if(i->op==VIR_OP_LOAD && (i->type==VIR_TYPE_I32 || i->type==VIR_TYPE_I64) && !(i->flags&VIR_INSN_FLAG_VOL) &&
+	   L->uses[v]==1 && L->allocation->slot[v]==VIR_BLOCK_NONE && v+1<L->function->blocks[b].first+L->function->blocks[b].insn_count &&
+	   x64_vir_fold_edits_check(L,b,v+1,XNOREG)) {
+		const vir_insn *next=&L->function->insns[v+1];unsigned width=1<<VIR_INSN_FLAG_WIDTH_LOG2(i->flags);int64_t k=0;
 		bool side=next->b==v,ok=false;
-		if(next->op==VO_ICMP && (next->a==v || side)) {
+		if(next->op==VIR_OP_ICMP && (next->a==v || side)) {
 			uint32_t other=side?next->a:next->b;
-			bool imm=vx_imm(L->f,other,&k);
-			if(width==vx_size(i->ty))ok=!imm || (!side && (width==4 || k==(int32_t)k));
-			else if(!side && imm && (next->fl&15)<2) {
-				int64_t lo=(i->fl&VIF_MS)?-(INT64_C(1)<<(width*8-1)):0;
-				int64_t hi=(INT64_C(1)<<(width*8-!!(i->fl&VIF_MS)))-1;
+			bool imm=x64_vir_value_immediate(L->function,other,&k);
+			if(width==x64_vir_type_size(i->type))ok=!imm || (!side && (width==4 || k==(int32_t)k));
+			else if(!side && imm && (next->flags&15)<2) {
+				int64_t lo=(i->flags&VIR_INSN_FLAG_MS)?-(INT64_C(1)<<(width*8-1)):0;
+				int64_t hi=(INT64_C(1)<<(width*8-!!(i->flags&VIR_INSN_FLAG_MS)))-1;
 				ok=k>=lo && k<=hi;
 			}
 		}
 		if(ok) {
-			L->cmpmemv=v+1;L->cmpmemsize=width;L->cmpmemside=side;
-			if(L->memv==i->a)L->memv=0;
-			else {L->membase=a;L->memoff=0;L->indexed=false;L->memsh=0;}
+			L->compare_memory_value=v+1;L->compare_memory_size=width;L->compare_memory_side=side;
+			if(L->memory_value==i->a)L->memory_value=0;
+			else {L->memory_base=a;L->memory_offset=0;L->memory_is_indexed=false;L->memory_shift=0;}
 			return;
 		}
 	}
-	if(i->op==VO_LOAD) {
-		uint32_t end;unsigned width=vx_readword(L,b,v,&end);
+	if(i->op==VIR_OP_LOAD) {
+		uint32_t end;unsigned width=x64_vir_word_read_match(L,b,v,&end);
 		if(width) {
-			L->bev=end;L->bewidth=width;L->bebase=a;L->beoff=0;L->beindexed=false;
-			if(L->memv==i->a) {
-				L->bebase=L->membase;L->beoff=L->memoff;L->beindexed=L->indexed;
-				L->beindex=L->memindex;L->besh=L->memsh;L->memv=0;
+			L->big_endian_value=end;L->big_endian_width=width;L->big_endian_base=a;L->big_endian_offset=0;L->big_endian_is_indexed=false;
+			if(L->memory_value==i->a) {
+				L->big_endian_base=L->memory_base;L->big_endian_offset=L->memory_offset;L->big_endian_is_indexed=L->memory_is_indexed;
+				L->big_endian_index=L->memory_index;L->big_endian_shift=L->memory_shift;L->memory_value=0;
 			}
 			return;
 		}
 	}
 	/* The walker also spells pointer arithmetic as add.i64 + i2p. The
 	 * cast is an identity; keep both inputs until the immediate memory use. */
-	if(i->op==VO_ADD || i->op==VO_PTRADD) {
-		uint32_t end;unsigned width=vx_beaddr(L,b,v,&end);
+	if(i->op==VIR_OP_ADD || i->op==VIR_OP_PTRADD) {
+		uint32_t end;unsigned width=x64_vir_big_endian_address_match(L,b,v,&end);
 		if(width) {
-			L->bev=end;L->bewidth=width;L->bebase=a;L->beoff=0;
-			L->beindexed=!vx_imm(L->f,i->b,&L->beoff);
-			L->beindex=L->scaledv==i->b?L->scaleindex:c;
-			L->besh=L->scaledv==i->b?L->scalesh:0;return;
+			L->big_endian_value=end;L->big_endian_width=width;L->big_endian_base=a;L->big_endian_offset=0;
+			L->big_endian_is_indexed=!x64_vir_value_immediate(L->function,i->b,&L->big_endian_offset);
+			L->big_endian_index=L->scaled_value==i->b?L->scaled_index:c;
+			L->big_endian_shift=L->scaled_value==i->b?L->scaled_shift:0;return;
 		}
 	}
-	if(vx_castmem(L,b,v)) {
-		L->memv=v+1;L->memskip=v+1;L->membase=a;L->memoff=0;
-		L->indexed=!vx_imm(L->f,i->b,&L->memoff);
-		L->memindex=L->scaledv==i->b?L->scaleindex:c;
-		L->memsh=L->scaledv==i->b?L->scalesh:0;return;
+	if(x64_vir_memory_cast_fold(L,b,v)) {
+		L->memory_value=v+1;L->memory_skip=v+1;L->memory_base=a;L->memory_offset=0;
+		L->memory_is_indexed=!x64_vir_value_immediate(L->function,i->b,&L->memory_offset);
+		L->memory_index=L->scaled_value==i->b?L->scaled_index:c;
+		L->memory_shift=L->scaled_value==i->b?L->scaled_shift:0;return;
 	}
-	if (i->op == VO_MUL && i->ty == VT_I32X4) {
+	if (i->op == VIR_OP_MUL && i->type == VIR_TYPE_I32X4) {
 		char text[600];
 		snprintf(text, sizeof text,
 			"\tmovaps %%xmm%d, %%xmm14\n\tmovaps %%xmm%d, %%xmm15\n"
@@ -110,106 +110,106 @@ VPRIV void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, u
 			"\tmovaps %%xmm%d, %%xmm15\n\tmovaps %%xmm%d, %%xmm%d\n\tpmuludq %%xmm15, %%xmm%d\n"
 			"\tpshufd $8, %%xmm%d, %%xmm%d\n\tpunpckldq %%xmm14, %%xmm%d\n",
 			a-XMM0, c-XMM0, c-XMM0, a-XMM0, d-XMM0, d-XMM0, d-XMM0, d-XMM0, d-XMM0);
-		vx_raw(L, text); return;
+		x64_vir_text_append(L, text); return;
 	}
 	/* Keep the unscaled signed index in the product's allocated register.
 	 * The shared proof permits extending it before the hardware scale. */
 	unsigned signed_scale;
-	if(i->op==VO_SHL && i->ty==VT_I32 && (i->fl&VIF_NSW) &&
-	   vir_sext_shift(L->f,v,&signed_scale) && signed_scale<=3 && L->uses[v]==1 &&
-	   L->o->slot[v]==VIR_NOBLK && v+3<L->f->blk[b].first+L->f->blk[b].n &&
-	   L->uses[v+1]==1 && L->o->slot[v+1]==VIR_NOBLK && L->f->ins[v+2].b==v+1 &&
-	   vx_addrmem(L,b,v+2) && vx_foldedits(L,b,v+1,XNOREG) && vx_foldedits(L,b,v+2,d)) {
-		if(vx_sign64(L,i->a))x64_mov(e,d,a);
+	if(i->op==VIR_OP_SHL && i->type==VIR_TYPE_I32 && (i->flags&VIR_INSN_FLAG_NSW) &&
+	   vir_sign_extend_shift_match(L->function,v,&signed_scale) && signed_scale<=3 && L->uses[v]==1 &&
+	   L->allocation->slot[v]==VIR_BLOCK_NONE && v+3<L->function->blocks[b].first+L->function->blocks[b].insn_count &&
+	   L->uses[v+1]==1 && L->allocation->slot[v+1]==VIR_BLOCK_NONE && L->function->insns[v+2].b==v+1 &&
+	   x64_vir_address_memory_fold(L,b,v+2) && x64_vir_fold_edits_check(L,b,v+1,XNOREG) && x64_vir_fold_edits_check(L,b,v+2,d)) {
+		if(x64_vir_value_is_sign_extended(L,i->a))x64_mov(e,d,a);
 		else x64_op3(e,X_EXT,4,d,a,XNOREG)->cond=1;
-		L->scaledv=v+1;L->scaledskip=v+1;L->scaleindex=d;L->scalesh=signed_scale;return;
+		L->scaled_value=v+1;L->scaled_skip=v+1;L->scaled_index=d;L->scaled_shift=signed_scale;return;
 	}
-	if ((i->op==VO_MUL || i->op==VO_SHL) && i->ty==VT_I64 && L->uses[v]==1 && L->o->slot[v]==VIR_NOBLK &&
-	    v+2<L->f->blk[b].first+L->f->blk[b].n && L->f->ins[v+1].b==v &&
-	    vx_addrmem(L,b,v+1) &&
-	    vx_foldedits(L,b,v+1,a)) {
+	if ((i->op==VIR_OP_MUL || i->op==VIR_OP_SHL) && i->type==VIR_TYPE_I64 && L->uses[v]==1 && L->allocation->slot[v]==VIR_BLOCK_NONE &&
+	    v+2<L->function->blocks[b].first+L->function->blocks[b].insn_count && L->function->insns[v+1].b==v &&
+	    x64_vir_address_memory_fold(L,b,v+1) &&
+	    x64_vir_fold_edits_check(L,b,v+1,a)) {
 		int64_t k;
-		if(vx_imm(L->f,i->b,&k) && (i->op==VO_SHL ? k>=0 && k<=3 : k==1 || k==2 || k==4 || k==8)) {
-			L->scaledv=v;L->scaleindex=a;
-			L->scalesh=i->op==VO_SHL?k:k==8?3:k==4?2:k==2?1:0;
+		if(x64_vir_value_immediate(L->function,i->b,&k) && (i->op==VIR_OP_SHL ? k>=0 && k<=3 : k==1 || k==2 || k==4 || k==8)) {
+			L->scaled_value=v;L->scaled_index=a;
+			L->scaled_shift=i->op==VIR_OP_SHL?k:k==8?3:k==4?2:k==2?1:0;
 			return;
 		}
 	}
-	if (i->op==VO_PTRADD && vx_memnext(L,b,v)) {
-		L->memv=v;L->membase=a;L->memoff=0;
-		L->indexed=!vx_imm(L->f,i->b,&L->memoff);
-		L->memindex=L->scaledv==i->b?L->scaleindex:c;
-		L->memsh=L->scaledv==i->b?L->scalesh:0;
+	if (i->op==VIR_OP_PTRADD && x64_vir_memory_next_fold(L,b,v)) {
+		L->memory_value=v;L->memory_base=a;L->memory_offset=0;
+		L->memory_is_indexed=!x64_vir_value_immediate(L->function,i->b,&L->memory_offset);
+		L->memory_index=L->scaled_value==i->b?L->scaled_index:c;
+		L->memory_shift=L->scaled_value==i->b?L->scaled_shift:0;
 		return;
 	}
 	if (alu[i->op]) {
-		if (n>1 && p[1]==VR_NONE && !vir_rclass(i->ty)) {
-			static const uint8_t immop[VO_N]={[VO_ADD]=X_ADDI,[VO_PTRADD]=X_ADDI,[VO_SUB]=X_SUBI,[VO_PSUB]=X_SUBI,
-				[VO_AND]=X_ANDI,[VO_OR]=X_ORI,[VO_XOR]=X_XORI,[VO_MUL]=X_IMULI};
-			int64_t k;vx_imm(L->f,i->b,&k);
-			if(i->op==VO_PTRADD || i->op==VO_ADD) {
+		if (n>1 && p[1]==VIR_REGISTER_NONE && !vir_register_class(i->type)) {
+			static const uint8_t immop[VIR_OP_COUNT]={[VIR_OP_ADD]=X_ADDI,[VIR_OP_PTRADD]=X_ADDI,[VIR_OP_SUB]=X_SUBI,[VIR_OP_PSUB]=X_SUBI,
+				[VIR_OP_AND]=X_ANDI,[VIR_OP_OR]=X_ORI,[VIR_OP_XOR]=X_XORI,[VIR_OP_MUL]=X_IMULI};
+			int64_t k;x64_vir_value_immediate(L->function,i->b,&k);
+			if(i->op==VIR_OP_PTRADD || i->op==VIR_OP_ADD) {
 				lval at={.k=L_REG,.r=(uint8_t)a,.off=k};x64_mem(e,X_LEA,sz,d,&at,false);
 			} else x64_op3(e,immop[i->op],sz,d,a,XNOREG)->imm=k;
 			return;
 		}
-		if (vir_isvec(i->ty)) {
-			const char *op = i->op == VO_ADD ? (i->ty == VT_I32X4 ? "paddd" : "paddq") :
-				i->op == VO_SUB ? (i->ty == VT_I32X4 ? "psubd" : "psubq") :
-				i->op == VO_AND ? "pand" : i->op == VO_OR ? "por" : i->op == VO_XOR ? "pxor" :
-				i->op == VO_FADD ? (i->ty == VT_F32X4 ? "addps" : "addpd") :
-				i->op == VO_FSUB ? (i->ty == VT_F32X4 ? "subps" : "subpd") :
-				i->op == VO_FMUL ? (i->ty == VT_F32X4 ? "mulps" : "mulpd") :
-				(i->ty == VT_F32X4 ? "divps" : "divpd");
-			vx_simd(L, op, d, a, c);
-		} else if (i->op==VO_ADD || i->op==VO_PTRADD) x64_op3(e,X_LEASCALE,sz,d,a,c)->sh=0;
+		if (vir_type_is_vector(i->type)) {
+			const char *op = i->op == VIR_OP_ADD ? (i->type == VIR_TYPE_I32X4 ? "paddd" : "paddq") :
+				i->op == VIR_OP_SUB ? (i->type == VIR_TYPE_I32X4 ? "psubd" : "psubq") :
+				i->op == VIR_OP_AND ? "pand" : i->op == VIR_OP_OR ? "por" : i->op == VIR_OP_XOR ? "pxor" :
+				i->op == VIR_OP_FADD ? (i->type == VIR_TYPE_F32X4 ? "addps" : "addpd") :
+				i->op == VIR_OP_FSUB ? (i->type == VIR_TYPE_F32X4 ? "subps" : "subpd") :
+				i->op == VIR_OP_FMUL ? (i->type == VIR_TYPE_F32X4 ? "mulps" : "mulpd") :
+				(i->type == VIR_TYPE_F32X4 ? "divps" : "divpd");
+			x64_vir_simd_emit(L, op, d, a, c);
+		} else if (i->op==VIR_OP_ADD || i->op==VIR_OP_PTRADD) x64_op3(e,X_LEASCALE,sz,d,a,c)->sh=0;
 		else x64_op3(e, alu[i->op], sz, d, a, c);
 		return;
 	}
 	switch (i->op) {
-	case VO_NOP: case VO_BPARAM: return;
-	case VO_BARRIER: x64_put(e, X_BARRIER); return;
-	case VO_MEMCPY: case VO_MEMSET:
-		if(vx_smallmem(L->f,i)){vx_memblock(L,i,a,c);return;}
-		x64_put(e, X_REP)->cond = i->op == VO_MEMSET;
+	case VIR_OP_NOP: case VIR_OP_BPARAM: return;
+	case VIR_OP_BARRIER: x64_put(e, X_BARRIER); return;
+	case VIR_OP_MEMCPY: case VIR_OP_MEMSET:
+		if(x64_vir_memory_block_is_small(L->function,i)){x64_vir_memory_block_lower(L,i,a,c);return;}
+		x64_put(e, X_REP)->cond = i->op == VIR_OP_MEMSET;
 		return;
-	case VO_CALL: {
-		uint32_t ng = L->f->extra[i->c];
+	case VIR_OP_CALL: {
+		uint32_t ng = L->function->extra[i->c];
 		int total = 0, nf = 0;
 		for (uint32_t k = 0; k < ng; k++) {
 			int off;
-			uint8_t r = vx_arg(L->f, i->b, k, &off, L->ms);
-			if (r == VR_NONE) total = off - 8;
-			else if (VR_CLASS(r)) nf++;
+			uint8_t r = x64_vir_argument_register(L->function, i->b, k, &off, L->ms);
+			if (r == VIR_REGISTER_NONE) total = off - 8;
+			else if (VIR_REGISTER_CLASS(r)) nf++;
 		}
 		if (L->ms && total < 32) total = 32;	/* the shadow space */
 		total = (total + 15) & ~15;
 		if (total) x64_put(e, X_ADJSP)->imm = -total;
 		for (uint32_t k = 0; k < ng; k++) {
 			int off;
-			if (vx_arg(L->f, i->b, k, &off, L->ms) != VR_NONE) continue;
-			uint32_t value = L->f->extra[i->c + 1 + k];
+			if (x64_vir_argument_register(L->function, i->b, k, &off, L->ms) != VIR_REGISTER_NONE) continue;
+			uint32_t value = L->function->extra[i->c + 1 + k];
 			uint8_t r = p[k + 1];
-			if (r == VR_NONE) {
-				r = vir_rclass(L->f->ins[value].ty) ? VR_MAKE(1, 14) : L->gtmp;
-				if (value < L->f->nconst) vx_mat(L, r, value);
-				else vx_memslot(L, true, r, L->o->slot[value]);
+			if (r == VIR_REGISTER_NONE) {
+				r = vir_register_class(L->function->insns[value].type) ? VIR_REGISTER_MAKE(1, 14) : L->general_temporary;
+				if (value < L->function->constant_count) x64_vir_constant_materialize(L, r, value);
+				else x64_vir_slot_access(L, true, r, L->allocation->slot[value]);
 			}
 			lval at = { .k = L_REG, .r = RSP, .off = off - 16 };
-			x64_mem(e, X_ST, vx_size(L->f->ins[value].ty), vx_reg(r), &at, false);
+			x64_mem(e, X_ST, x64_vir_type_size(L->function->insns[value].type), x64_vir_register_number(r), &at, false);
 		}
-		bool indirect = p[0] != VR_NONE;
+		bool indirect = p[0] != VIR_REGISTER_NONE;
 		if (indirect) x64_mov(e, R11, a); /* al is set for variadic calls */
-		if (L->ms && VSIG_VARIADIC(L->f->extra[i->b]))
+		if (L->ms && VIR_SIGNATURE_IS_VARIADIC(L->function->extra[i->b]))
 			for (uint32_t k = 0; k < ng && k < 4; k++) {	/* a float also in its integer register */
 				int off;
-				uint8_t r = vx_arg(L->f, i->b, k, &off, true);
-				if (VR_CLASS(r)) x64_op3(e, X_MOV, 8, x64w_argreg((int)k), vx_reg(r), XNOREG);
+				uint8_t r = x64_vir_argument_register(L->function, i->b, k, &off, true);
+				if (VIR_REGISTER_CLASS(r)) x64_op3(e, X_MOV, 8, x64w_argreg((int)k), x64_vir_register_number(r), XNOREG);
 			}
-		else if (VSIG_VARIADIC(L->f->extra[i->b])) x64_movi(e, RAX, nf);
+		else if (VIR_SIGNATURE_IS_VARIADIC(L->function->extra[i->b])) x64_movi(e, RAX, nf);
 		rec *call;
 		if (indirect) call = x64_op3(e, X_CALLR, 8, XNOREG, R11, XNOREG);
 		else {
-			const vir_ins *callee = &L->f->ins[i->a];
+			const vir_insn *callee = &L->function->insns[i->a];
 			note_ref(e, callee->a);
 			call = x64_put(e, X_CALL);
 			call->ref = callee->a;
@@ -219,202 +219,202 @@ VPRIV void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, u
 		e->calls = true;
 		return;
 	}
-	case VO_PARAM: {
+	case VIR_OP_PARAM: {
 		int stack;
-		if (vx_arg(L->f, L->f->sig, i->a, &stack, L->ms) == VR_NONE) {
+		if (x64_vir_argument_register(L->function, L->function->signature, i->a, &stack, L->ms) == VIR_REGISTER_NONE) {
 			lval at = { .k = L_FRAME, .off = stack };
 			x64_mem(e, X_LD, sz, d, &at, false);
 		}
 		return;
 	}
-	case VO_ALOAD: case VO_LOAD: case VO_STORE: {
+	case VIR_OP_ALOAD: case VIR_OP_LOAD: case VIR_OP_STORE: {
 		lval at = { .k = L_REG, .r = a };
-		bool folded=L->memv==i->a;
-		if(folded) {at.r=L->membase;at.off=L->memoff;L->memv=0;}
-		bool load = i->op != VO_STORE;
-		int ty = load ? i->ty : L->f->ins[i->b].ty;
-		int width=vir_isvec(ty)?16:1<<VIF_W(i->fl);
-		if(folded && L->indexed) {
+		bool folded=L->memory_value==i->a;
+		if(folded) {at.r=L->memory_base;at.off=L->memory_offset;L->memory_value=0;}
+		bool load = i->op != VIR_OP_STORE;
+		int ty = load ? i->type : L->function->insns[i->b].type;
+		int width=vir_type_is_vector(ty)?16:1<<VIR_INSN_FLAG_WIDTH_LOG2(i->flags);
+		if(folded && L->memory_is_indexed) {
 			rec *r=x64_op3(e,load?X_LDX:X_STX,width,load?d:XNOREG,at.r,load?XNOREG:c);
-			r->r[3]=L->memindex;r->sh=L->memsh;r->cond=!!(i->fl & VIF_MS);r->off=at.off;
-		} else x64_mem(e,load?X_LD:X_ST,width,load?d:c,&at,i->fl & VIF_MS);
+			r->r[3]=L->memory_index;r->sh=L->memory_shift;r->cond=!!(i->flags & VIR_INSN_FLAG_MS);r->off=at.off;
+		} else x64_mem(e,load?X_LD:X_ST,width,load?d:c,&at,i->flags & VIR_INSN_FLAG_MS);
 		return;
 	}
-	case VO_NEG: case VO_NOT:
-		if (vir_isvec(i->ty)) {
+	case VIR_OP_NEG: case VIR_OP_NOT:
+		if (vir_type_is_vector(i->type)) {
 			char text[200];
 			snprintf(text, sizeof text, "\t%s %%xmm14, %%xmm14\n\t%s %%xmm%d, %%xmm14\n\tmovaps %%xmm14, %%xmm%d\n",
-				i->op == VO_NEG ? "pxor" : "pcmpeqd",
-				i->op == VO_NOT ? "pxor" : i->ty == VT_I32X4 ? "psubd" : "psubq", a-XMM0, d-XMM0);
-			vx_raw(L, text);
-		} else x64_op3(e, i->op == VO_NEG ? X_NEG : X_NOT, sz, d, a, XNOREG);
+				i->op == VIR_OP_NEG ? "pxor" : "pcmpeqd",
+				i->op == VIR_OP_NOT ? "pxor" : i->type == VIR_TYPE_I32X4 ? "psubd" : "psubq", a-XMM0, d-XMM0);
+			x64_vir_text_append(L, text);
+		} else x64_op3(e, i->op == VIR_OP_NEG ? X_NEG : X_NOT, sz, d, a, XNOREG);
 		return;
-	case VO_P2I: case VO_I2P: case VO_TRUNC: case VO_BITCAST:
+	case VIR_OP_P2I: case VIR_OP_I2P: case VIR_OP_TRUNC: case VIR_OP_BITCAST:
 		/* An i32 value does not promise anything about the upper GPR bits;
 		 * a later unsigned EXT is responsible for clearing them if needed. */
 		if (d==a) return;
 		x64_op3(e, X_MOV, sz, d, a, XNOREG); return;
-	case VO_EXT: {
-		if (VIF_W(i->fl) == 3) { x64_mov(e, d, a); return; }
-		if(VIF_W(i->fl)==2 && ((i->fl&VIF_MS)?vx_sign64(L,i->a):vx_clear32(L->f,i->a))) {
+	case VIR_OP_EXT: {
+		if (VIR_INSN_FLAG_WIDTH_LOG2(i->flags) == 3) { x64_mov(e, d, a); return; }
+		if(VIR_INSN_FLAG_WIDTH_LOG2(i->flags)==2 && ((i->flags&VIR_INSN_FLAG_MS)?x64_vir_value_is_sign_extended(L,i->a):x64_vir_value_upper_half_is_clear(L->function,i->a))) {
 			x64_mov(e,d,a);return;
 		}
-		rec *r = x64_op3(e, X_EXT, 1 << VIF_W(i->fl), d, a, XNOREG);
-		r->cond = !!(i->fl & VIF_MS); return;
+		rec *r = x64_op3(e, X_EXT, 1 << VIR_INSN_FLAG_WIDTH_LOG2(i->flags), d, a, XNOREG);
+		r->cond = !!(i->flags & VIR_INSN_FLAG_MS); return;
 	}
-	case VO_SHL: case VO_LSHR: case VO_ASHR:
+	case VIR_OP_SHL: case VIR_OP_LSHR: case VIR_OP_ASHR:
 		int64_t count;
-		if (vx_imm(L->f,i->b,&count) && count>=0 && count<(i->ty==VT_I32?32:64)) {
-			x64_op3(e,i->op==VO_SHL?X_SHLI:i->op==VO_LSHR?X_SHRI:X_SARI,sz,d,a,XNOREG)->imm=count;return;
+		if (x64_vir_value_immediate(L->function,i->b,&count) && count>=0 && count<(i->type==VIR_TYPE_I32?32:64)) {
+			x64_op3(e,i->op==VIR_OP_SHL?X_SHLI:i->op==VIR_OP_LSHR?X_SHRI:X_SARI,sz,d,a,XNOREG)->imm=count;return;
 		}
 		/* The result may be rcx: moving the first operand there would destroy cl.
 		 * Shift in the reserved scratch, then publish the allocated result. */
-		x64_mov(e, L->gtmp, a);
-		x64_op3(e, i->op == VO_SHL ? X_SHL : i->op == VO_LSHR ? X_SHR : X_SAR, sz, L->gtmp, L->gtmp, c);
-		x64_op3(e, X_MOV, sz, d, L->gtmp, XNOREG); return;
-	case VO_ICMP: {
+		x64_mov(e, L->general_temporary, a);
+		x64_op3(e, i->op == VIR_OP_SHL ? X_SHL : i->op == VIR_OP_LSHR ? X_SHR : X_SAR, sz, L->general_temporary, L->general_temporary, c);
+		x64_op3(e, X_MOV, sz, d, L->general_temporary, XNOREG); return;
+	case VIR_OP_ICMP: {
 		static const uint8_t cc[] = { CC_E, CC_NE, CC_L, CC_LE, CC_G, CC_GE, CC_B, CC_BE, CC_A, CC_AE };
-		if(L->cmpmemv==v) {
-			int other=L->cmpmemside?a:c;
-			rec *r=x64_op3(e,X_CMPM,L->cmpmemsize,XNOREG,L->membase,other);
-			r->r[3]=L->indexed?L->memindex:XNOREG;r->sh=L->memsh;r->off=L->memoff;r->cond=L->cmpmemside;
-			if(!L->cmpmemside && p[1]==VR_NONE) {int64_t k;vx_imm(L->f,i->b,&k);r->r[2]=XNOREG;r->ref=(uint32_t)k;}
-			L->cmpmemv=0;
+		if(L->compare_memory_value==v) {
+			int other=L->compare_memory_side?a:c;
+			rec *r=x64_op3(e,X_CMPM,L->compare_memory_size,XNOREG,L->memory_base,other);
+			r->r[3]=L->memory_is_indexed?L->memory_index:XNOREG;r->sh=L->memory_shift;r->off=L->memory_offset;r->cond=L->compare_memory_side;
+			if(!L->compare_memory_side && p[1]==VIR_REGISTER_NONE) {int64_t k;x64_vir_value_immediate(L->function,i->b,&k);r->r[2]=XNOREG;r->ref=(uint32_t)k;}
+			L->compare_memory_value=0;
 		} else
-		if (p[1]==VR_NONE) {int64_t k;vx_imm(L->f,i->b,&k);vx_cmpconst(L,a,vx_size(L->f->ins[i->a].ty),(uint64_t)k);}
-		else x64_op3(e, X_CMP, vx_size(L->f->ins[i->a].ty), XNOREG, a, c);
-		L->cmp=v;L->cmpblock=b;L->setrec=e->x64->nin;
-		x64_op3(e, X_SETCC, 4, d, XNOREG, XNOREG)->cond = cc[i->fl & 15]; return;
+		if (p[1]==VIR_REGISTER_NONE) {int64_t k;x64_vir_value_immediate(L->function,i->b,&k);x64_vir_constant_compare_emit(L,a,x64_vir_type_size(L->function->insns[i->a].type),(uint64_t)k);}
+		else x64_op3(e, X_CMP, x64_vir_type_size(L->function->insns[i->a].type), XNOREG, a, c);
+		L->compare_condition=v;L->compare_block=b;L->setcc_record=e->x64->nin;
+		x64_op3(e, X_SETCC, 4, d, XNOREG, XNOREG)->cond = cc[i->flags & 15]; return;
 	}
-	case VO_FCMP: {
-		int cc = i->fl & 15;
+	case VIR_OP_FCMP: {
+		int cc = i->flags & 15;
 		bool swap = cc == 2 || cc == 3;
-		x64_op3(e, X_FCMP, vx_size(L->f->ins[i->a].ty), XNOREG, swap ? c : a, swap ? a : c);
+		x64_op3(e, X_FCMP, x64_vir_type_size(L->function->insns[i->a].type), XNOREG, swap ? c : a, swap ? a : c);
 		if (cc < 2) x64_op3(e, X_FSETCC, 4, d, XNOREG, XNOREG)->cond = cc;
 		else x64_op3(e, X_SETCC, 4, d, XNOREG, XNOREG)->cond =
 			cc == 6 ? CC_P : cc == 7 ? CC_NE : cc == 2 || cc == 4 ? CC_A : CC_AE;
 		return;
 	}
-	case VO_SELECT: {
-		if(!vir_rclass(i->ty)) {
-			uint8_t cc=vx_condition(L,b,v,i->a,a);
-			int no=vx_reg(p[2]);
+	case VIR_OP_SELECT: {
+		if(!vir_register_class(i->type)) {
+			uint8_t cc=x64_vir_condition_lower(L,b,v,i->a,a);
+			int no=x64_vir_register_number(p[2]);
 			if(d==c){int swap=c;c=no;no=swap;cc^=1;}
 			x64_op3(e,X_CMOV,sz,d,no,c)->cond=cc;return;
 		}
-		int tmp = vir_rclass(i->ty) ? XMM0 + 14 : L->gtmp;
+		int tmp = vir_register_class(i->type) ? XMM0 + 14 : L->general_temporary;
 		uint32_t done = wk_newlabel(e);
-		x64_op3(e, X_TEST, vx_size(L->f->ins[i->a].ty), XNOREG, a, a);
-		x64_op3(e, X_MOV, sz, tmp, vx_reg(p[2]), XNOREG);
+		x64_op3(e, X_TEST, x64_vir_type_size(L->function->insns[i->a].type), XNOREG, a, a);
+		x64_op3(e, X_MOV, sz, tmp, x64_vir_register_number(p[2]), XNOREG);
 		rec *r = x64_put(e, X_JCC); r->cond = CC_E; r->label = done;
 		x64_op3(e, X_MOV, sz, tmp, c, XNOREG);
 		x64_label(e, done);
 		x64_op3(e, X_MOV, sz, d, tmp, XNOREG); return;
 	}
-	case VO_FEXT: case VO_FTRUNC: x64_op3(e, X_CVTF2F, sz, d, a, XNOREG); return;
-	case VO_S2F: case VO_U2F: {
-		int from = vx_size(L->f->ins[i->a].ty);
-		if (i->op == VO_U2F) { x64_op3(e, X_MOV, 4, L->gtmp, a, XNOREG); a = L->gtmp; from = 8; }
+	case VIR_OP_FEXT: case VIR_OP_FTRUNC: x64_op3(e, X_CVTF2F, sz, d, a, XNOREG); return;
+	case VIR_OP_S2F: case VIR_OP_U2F: {
+		int from = x64_vir_type_size(L->function->insns[i->a].type);
+		if (i->op == VIR_OP_U2F) { x64_op3(e, X_MOV, 4, L->general_temporary, a, XNOREG); a = L->general_temporary; from = 8; }
 		x64_op3(e, X_CVTI2F, sz, d, a, XNOREG)->sh = from; return;
 	}
-	case VO_F2S: case VO_F2U: {
-		int to = i->op == VO_F2U ? 8 : sz;
-		x64_op3(e, X_CVTF2I, to, d, a, XNOREG)->sh = vx_size(L->f->ins[i->a].ty);
-		if (i->op == VO_F2U) x64_op3(e, X_MOV, 4, d, d, XNOREG);
+	case VIR_OP_F2S: case VIR_OP_F2U: {
+		int to = i->op == VIR_OP_F2U ? 8 : sz;
+		x64_op3(e, X_CVTF2I, to, d, a, XNOREG)->sh = x64_vir_type_size(L->function->insns[i->a].type);
+		if (i->op == VIR_OP_F2U) x64_op3(e, X_MOV, 4, d, d, XNOREG);
 		return;
 	}
-	case VO_FNEG: case VO_FABS: {
-		bool wide = vir_velem(i->ty) == VT_F64;
+	case VIR_OP_FNEG: case VIR_OP_FABS: {
+		bool wide = vir_type_element(i->type) == VIR_TYPE_F64;
 		char text[240];
 		snprintf(text, sizeof text, "\tpcmpeqd %%xmm14, %%xmm14\n\t%s $%d, %%xmm14\n\t%s %%xmm%d, %%xmm14\n\tmovaps %%xmm14, %%xmm%d\n",
-			i->op == VO_FNEG ? (wide ? "psllq" : "pslld") : (wide ? "psrlq" : "psrld"),
-			i->op == VO_FNEG ? (wide ? 63 : 31) : 1,
-			i->op == VO_FNEG ? "pxor" : "pand", a-XMM0, d-XMM0);
-		vx_raw(L, text);
+			i->op == VIR_OP_FNEG ? (wide ? "psllq" : "pslld") : (wide ? "psrlq" : "psrld"),
+			i->op == VIR_OP_FNEG ? (wide ? 63 : 31) : 1,
+			i->op == VIR_OP_FNEG ? "pxor" : "pand", a-XMM0, d-XMM0);
+		x64_vir_text_append(L, text);
 		return;
 	}
-	case VO_FSQRT:
-		if (vir_isvec(i->ty)) {
+	case VIR_OP_FSQRT:
+		if (vir_type_is_vector(i->type)) {
 			char text[100];
-			snprintf(text, sizeof text, "\t%s %%xmm%d, %%xmm%d\n", i->ty == VT_F32X4 ? "sqrtps" : "sqrtpd", a-XMM0, d-XMM0);
-			vx_raw(L, text);
+			snprintf(text, sizeof text, "\t%s %%xmm%d, %%xmm%d\n", i->type == VIR_TYPE_F32X4 ? "sqrtps" : "sqrtpd", a-XMM0, d-XMM0);
+			x64_vir_text_append(L, text);
 		} else x64_op3(e, X_FSQRT, sz, d, a, XNOREG);
 		return;
-	case VO_VS2F:
-		if (i->ty == VT_F32X4) {
-			char text[100]; snprintf(text, sizeof text, "\tcvtdq2ps %%xmm%d, %%xmm%d\n", a-XMM0, d-XMM0); vx_raw(L, text);
+	case VIR_OP_VS2F:
+		if (i->type == VIR_TYPE_F32X4) {
+			char text[100]; snprintf(text, sizeof text, "\tcvtdq2ps %%xmm%d, %%xmm%d\n", a-XMM0, d-XMM0); x64_vir_text_append(L, text);
 		} else {
-			char text[100]; snprintf(text, sizeof text, "\tpshufd $78, %%xmm%d, %%xmm14\n", a-XMM0); vx_raw(L, text);
-			x64_op3(e, X_MOV, 8, L->gtmp, a, XNOREG);
-			x64_op3(e, X_CVTI2F, 8, d, L->gtmp, XNOREG)->sh = 8;
-			x64_op3(e, X_MOV, 8, L->gtmp, XMM0+14, XNOREG);
-			x64_op3(e, X_CVTI2F, 8, XMM15, L->gtmp, XNOREG)->sh = 8;
-			snprintf(text, sizeof text, "\tunpcklpd %%xmm15, %%xmm%d\n", d-XMM0); vx_raw(L, text);
+			char text[100]; snprintf(text, sizeof text, "\tpshufd $78, %%xmm%d, %%xmm14\n", a-XMM0); x64_vir_text_append(L, text);
+			x64_op3(e, X_MOV, 8, L->general_temporary, a, XNOREG);
+			x64_op3(e, X_CVTI2F, 8, d, L->general_temporary, XNOREG)->sh = 8;
+			x64_op3(e, X_MOV, 8, L->general_temporary, XMM0+14, XNOREG);
+			x64_op3(e, X_CVTI2F, 8, XMM15, L->general_temporary, XNOREG)->sh = 8;
+			snprintf(text, sizeof text, "\tunpcklpd %%xmm15, %%xmm%d\n", d-XMM0); x64_vir_text_append(L, text);
 		}
 		return;
-	case VO_VBITSEL: {
+	case VIR_OP_VBITSEL: {
 		char text[300];
 		snprintf(text, sizeof text, "\tmovaps %%xmm%d, %%xmm14\n\tmovaps %%xmm%d, %%xmm15\n"
 			"\tpand %%xmm%d, %%xmm14\n\tpandn %%xmm%d, %%xmm15\n\tpor %%xmm14, %%xmm15\n\tmovaps %%xmm15, %%xmm%d\n",
-			a-XMM0, a-XMM0, c-XMM0, vx_reg(p[2])-XMM0, d-XMM0);
-		vx_raw(L, text); return;
+			a-XMM0, a-XMM0, c-XMM0, x64_vir_register_number(p[2])-XMM0, d-XMM0);
+		x64_vir_text_append(L, text); return;
 	}
-	case VO_VFCMP: {
-		int cc = i->fl & 15;
+	case VIR_OP_VFCMP: {
+		int cc = i->flags & 15;
 		bool swap = cc == 4 || cc == 5;
 		int pred = cc == 0 ? 0 : cc == 1 || cc == 7 ? 4 : cc == 2 || cc == 4 ? 1 : cc == 6 ? 3 : 2;
-		const char *op = i->ty == VT_I32X4 ? "cmpps" : "cmppd";
+		const char *op = i->type == VIR_TYPE_I32X4 ? "cmpps" : "cmppd";
 		char text[300];
 		snprintf(text, sizeof text, "\tmovaps %%xmm%d, %%xmm14\n\t%s $%d, %%xmm%d, %%xmm14\n",
 			(swap ? c : a)-XMM0, op, pred, (swap ? a : c)-XMM0);
-		vx_raw(L, text);
+		x64_vir_text_append(L, text);
 		if (cc == 7) {
 			snprintf(text, sizeof text, "\tmovaps %%xmm%d, %%xmm15\n\t%s $7, %%xmm%d, %%xmm15\n\tpand %%xmm15, %%xmm14\n", a-XMM0, op, c-XMM0);
-			vx_raw(L, text);
+			x64_vir_text_append(L, text);
 		}
 		x64_mov(e, d, XMM0+14); return;
 	}
-	case VO_VICMP: {
-		int cc = i->fl & 15;
+	case VIR_OP_VICMP: {
+		int cc = i->flags & 15;
 		bool swap = cc == 2 || cc == 5, invert = cc == 1 || cc == 3 || cc == 5;
 		char text[260];
 		snprintf(text, sizeof text, "\tmovaps %%xmm%d, %%xmm14\n\t%s %%xmm%d, %%xmm14\n",
 			(swap ? c : a)-XMM0, cc < 2 ? "pcmpeqd" : "pcmpgtd", (swap ? a : c)-XMM0);
-		vx_raw(L, text);
-		if (invert) vx_raw(L, "\tpcmpeqd %xmm15, %xmm15\n\tpxor %xmm15, %xmm14\n");
+		x64_vir_text_append(L, text);
+		if (invert) x64_vir_text_append(L, "\tpcmpeqd %xmm15, %xmm15\n\tpxor %xmm15, %xmm14\n");
 		x64_mov(e, d, XMM0+14); return;
 	}
-	case VO_VSPLAT: {
+	case VIR_OP_VSPLAT: {
 		char s[160];
-		int lane = vx_size(vir_velem(i->ty));
+		int lane = x64_vir_type_size(vir_type_element(i->type));
 		x64_op3(e, X_MOV, lane, d, a, XNOREG);
 		snprintf(s, sizeof s, "\t%s\t$0, %%xmm%d, %%xmm%d\n", lane == 4 ? "pshufd" : "shufpd", d-XMM0, d-XMM0);
-		vx_raw(L, s); return;
+		x64_vir_text_append(L, s); return;
 	}
-	case VO_VSERIES: {
+	case VIR_OP_VSERIES: {
 		/* Construct the lane numbers with SSE2, without a constant pool. */
 		char s[240];
-		x64_movi(e, L->gtmp, i->ty == VT_I32X4 ? 0x0000000100000000LL : 0);
-		x64_op3(e, X_MOV, 8, d, L->gtmp, XNOREG);
-		x64_movi(e, L->gtmp, i->ty == VT_I32X4 ? 0x0000000300000002LL : 1);
-		x64_op3(e, X_MOV, 8, (XMM0 + 14), L->gtmp, XNOREG);
+		x64_movi(e, L->general_temporary, i->type == VIR_TYPE_I32X4 ? 0x0000000100000000LL : 0);
+		x64_op3(e, X_MOV, 8, d, L->general_temporary, XNOREG);
+		x64_movi(e, L->general_temporary, i->type == VIR_TYPE_I32X4 ? 0x0000000300000002LL : 1);
+		x64_op3(e, X_MOV, 8, (XMM0 + 14), L->general_temporary, XNOREG);
 		snprintf(s, sizeof s, "\tpunpcklqdq\t%%xmm14, %%xmm%d\n", d-XMM0);
-		vx_raw(L, s); return;
+		x64_vir_text_append(L, s); return;
 	}
-	case VO_SMULHI: case VO_UMULHI:
+	case VIR_OP_SMULHI: case VIR_OP_UMULHI:
 		x64_op3(e,X_MOV,sz,R11,c,XNOREG);
-		x64_op3(e,i->op==VO_SMULHI?X_SMULW:X_MULW,sz,XNOREG,R11,XNOREG);return;
-	case VO_SDIV: case VO_UDIV: case VO_SREM: case VO_UREM: {
-		bool sign = i->op == VO_SDIV || i->op == VO_SREM;
+		x64_op3(e,i->op==VIR_OP_SMULHI?X_SMULW:X_MULW,sz,XNOREG,R11,XNOREG);return;
+	case VIR_OP_SDIV: case VIR_OP_UDIV: case VIR_OP_SREM: case VIR_OP_UREM: {
+		bool sign = i->op == VIR_OP_SDIV || i->op == VIR_OP_SREM;
 		x64_op3(e, X_MOV, sz, R11, c, XNOREG);
 		if (sign) x64_op3(e, X_CQO, sz, RDX, RAX, XNOREG);
 		else x64_op3(e, X_XOR, 4, RDX, RDX, RDX);
 		x64_op3(e, sign ? X_IDIV : X_DIV, sz, XNOREG, R11, XNOREG);
 		return;
 	}
-	case VO_VINSERT: {
+	case VIR_OP_VINSERT: {
 		char text[320];
-		int width = vx_size(vir_velem(i->ty));
+		int width = x64_vir_type_size(vir_type_element(i->type));
 		static const unsigned swap32[4] = {228,225,198,39};
 		unsigned perm = width == 4 ? swap32[i->c] : i->c ? 78 : 228;
 		/* Save the scalar first: the result may share its register. Swap the
@@ -423,48 +423,48 @@ VPRIV void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, u
 		snprintf(text, sizeof text,
 			"\tpshufd $%u, %%xmm%d, %%xmm15\n\t%s %%xmm14, %%xmm15\n\tpshufd $%u, %%xmm15, %%xmm%d\n",
 			perm, a-XMM0, width == 4 ? "movss" : "movsd", perm, d-XMM0);
-		vx_raw(L,text); return;
+		x64_vir_text_append(L,text); return;
 	}
-	case VO_VEXTRACT: {
+	case VIR_OP_VEXTRACT: {
 		char text[160];
-		snprintf(text,sizeof text,"\tmovaps %%xmm%d, %%xmm14\n\tpsrldq $%d, %%xmm14\n",a-XMM0,(int)i->b * vx_size(i->ty));
-		vx_raw(L,text); x64_op3(e,X_MOV,vx_size(i->ty),d,XMM0+14,XNOREG); return;
+		snprintf(text,sizeof text,"\tmovaps %%xmm%d, %%xmm14\n\tpsrldq $%d, %%xmm14\n",a-XMM0,(int)i->b * x64_vir_type_size(i->type));
+		x64_vir_text_append(L,text); x64_op3(e,X_MOV,x64_vir_type_size(i->type),d,XMM0+14,XNOREG); return;
 	}
-	case VO_VREV: {
+	case VIR_OP_VREV: {
 		char s[160];
-		snprintf(s, sizeof s, "\tpshufd\t$%d, %%xmm%d, %%xmm%d\n", vx_size(vir_velem(i->ty)) == 4 ? 27 : 78, a-XMM0, d-XMM0);
-		vx_raw(L, s); return;
+		snprintf(s, sizeof s, "\tpshufd\t$%d, %%xmm%d, %%xmm%d\n", x64_vir_type_size(vir_type_element(i->type)) == 4 ? 27 : 78, a-XMM0, d-XMM0);
+		x64_vir_text_append(L, s); return;
 	}
-	case VO_VREDUCE: {
+	case VIR_OP_VREDUCE: {
 		char s[320];
-		bool narrow = i->ty == VT_I32;
+		bool narrow = i->type == VIR_TYPE_I32;
 		snprintf(s, sizeof s, "\tpshufd\t$78, %%xmm%d, %%xmm14\n\t%s\t%%xmm%d, %%xmm14\n", a-XMM0, narrow ? "paddd" : "paddq", a-XMM0);
-		vx_raw(L, s);
+		x64_vir_text_append(L, s);
 		if (narrow) {
-			vx_raw(L, "\tpshufd\t$177, %xmm14, %xmm15\n\tpaddd\t%xmm15, %xmm14\n");
+			x64_vir_text_append(L, "\tpshufd\t$177, %xmm14, %xmm15\n\tpaddd\t%xmm15, %xmm14\n");
 		}
 		x64_op3(e, X_MOV, sz, d, (XMM0 + 14), XNOREG); return;
 	}
-	case VO_AFENCE: x64_put(e,X_MFENCE); return;
-	case VO_ASTORE:
-		x64_op3(e,X_MOV,sz=vx_size(L->f->ins[i->b].ty),L->gtmp,c,XNOREG);
-		x64_op3(e,X_XCHG,1<<VIF_W(i->fl),L->gtmp,a,XNOREG);return;
-	case VO_SWITCH: vx_switch(L,b,i,a); return;
-	case VO_BR: vx_edge(L, b, 0); vx_goto(L,b,i->a); return;
-	case VO_BRIF: {
-		uint32_t yes = vx_target(L,b,0,i->b), no=vx_target(L,b,1,i->c), nt=i->c;
-		uint32_t next=vx_next(L);
-		uint8_t cc=vx_condition(L,b,v,i->a,a);
+	case VIR_OP_AFENCE: x64_put(e,X_MFENCE); return;
+	case VIR_OP_ASTORE:
+		x64_op3(e,X_MOV,sz=x64_vir_type_size(L->function->insns[i->b].type),L->general_temporary,c,XNOREG);
+		x64_op3(e,X_XCHG,1<<VIR_INSN_FLAG_WIDTH_LOG2(i->flags),L->general_temporary,a,XNOREG);return;
+	case VIR_OP_SWITCH: x64_vir_switch_lower(L,b,i,a); return;
+	case VIR_OP_BR: x64_vir_edge_emit(L, b, 0); x64_vir_goto_emit(L,b,i->a); return;
+	case VIR_OP_BRIF: {
+		uint32_t yes = x64_vir_edge_target(L,b,0,i->b), no=x64_vir_edge_target(L,b,1,i->c), nt=i->c;
+		uint32_t next=x64_vir_block_next(L);
+		uint8_t cc=x64_vir_condition_lower(L,b,v,i->a,a);
 		/* Let the next placed block fall through, including the true edge.
 		 * A deferred edge-copy stub is a different label and cannot fall through. */
-		if(next!=VIR_NOBLK && yes==L->label[next]) {
+		if(next!=VIR_BLOCK_NONE && yes==L->label[next]) {
 			uint32_t swap=yes;yes=no;no=swap;cc^=1;nt=i->b;
 		}
 		rec *r = x64_put(e, X_JCC); r->cond = cc; r->label = yes;
-		if(no==L->label[L->chase[nt]])vx_goto(L,b,nt);else x64_jump(e,no);return;
+		if(no==L->label[L->chase[nt]])x64_vir_goto_emit(L,b,nt);else x64_jump(e,no);return;
 	}
-	case VO_RET: x64_jump(e, L->ret); return;
-	case VO_TRAP: x64_put(e, X_UD2); return;
+	case VIR_OP_RET: x64_jump(e, L->ret); return;
+	case VIR_OP_TRAP: x64_put(e, X_UD2); return;
 	default: abort();
 	}
 }

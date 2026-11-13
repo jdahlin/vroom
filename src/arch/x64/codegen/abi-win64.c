@@ -25,7 +25,7 @@ VPRIV int x64w_argreg(int i) { return x64w_gpr[i]; }
 
 /* the classes: n 1 one 8-byte word in a register (cls WA_INT or WA_SSE); up: returned in xmm0
    (16 bytes), passed by reference; mem: by reference both ways; n 0 and not mem: nothing */
-VPRIV void x64w_classify(ecx *e, qty t, wkarg *a, bool unnamed)
+VPRIV void x64w_classify(ecx *e, ast_qualified_type t, wkarg *a, bool unnamed)
 {
 	cc *c = e->c;
 	uint64_t size = tsize(c, t);
@@ -61,15 +61,15 @@ VPRIV void x64w_classify(ecx *e, qty t, wkarg *a, bool unnamed)
 		a->mem = true;
 		return;
 	}
-	if ((k == TY_INT128 || k == TY_UINT128) && !em_bitint(c, t)) {	/* (_BitInt(65..128): by reference both ways) */
+	if ((k == AST_TYPE_INT128 || k == AST_TYPE_UINT128) && !em_bitint(c, t)) {	/* (_BitInt(65..128): by reference both ways) */
 		a->n = 1, a->cls[0] = WA_SSE, a->up = true;	/* MinGW: returned in xmm0 */
 		return;
 	}
-	if (k == TY_LDOUBLE && !WIN64(c)) {
+	if (k == AST_TYPE_LONG_DOUBLE && !WIN64(c)) {
 		a->mem = a->x87 = true;	/* ms_abi elsewhere (no MinGW rule): by reference, returned in st(0) */
 		return;
 	}
-	if (k == TY_LDOUBLE || k == TY_FLOAT128 || size > 8) {
+	if (k == AST_TYPE_LONG_DOUBLE || k == AST_TYPE_FLOAT128 || size > 8) {
 		a->mem = true;
 		return;
 	}
@@ -130,7 +130,7 @@ static int64_t x64w_outgoing(ecx *e, int n)
 	return total;
 }
 
-VPRIV val x64w_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool variadic, const wkarg *r, qty rt)
+VPRIV val x64w_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool variadic, const wkarg *r, ast_qualified_type rt)
 {
 	xst *X = e->x64;
 	int first = r && r->mem && !r->up && !r->x87 ? 1 : 0;	/* the hidden result pointer takes position 0 */
@@ -235,7 +235,7 @@ VPRIV void x64w_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic)
 	}
 	for (int k = 0, p = first; k < n; p += x64w_npos(&a[k]), k++) {
 		uint32_t sym = c->lists[body->a + (uint32_t)k];
-		qty ty = c->syms[sym].ty;
+		ast_qualified_type ty = c->syms[sym].ty;
 		lval home;
 		bool local = x64_local(e, sym, &home);
 
@@ -298,9 +298,9 @@ VPRIV void x64w_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic)
 		/* MinGW's main calls __main first (the constructors), as clang */
 		const sym *y = &c->syms[e->wk->fsym];
 
-		if (y->sc != SC_STATIC && y->name && EM_IDENT_IS(y->name, "main")) {
+		if (y->sc != AST_STORAGE_STATIC && y->name && EM_IDENT_IS(y->name, "main")) {
 			e->calls = true;
-			x64w_call(e, FIXED(FN___MAIN), NULL, NULL, 0, false, NULL, prim(TY_VOID));
+			x64w_call(e, FIXED(FN___MAIN), NULL, NULL, 0, false, NULL, prim(AST_TYPE_VOID));
 		}
 	}
 }
@@ -316,7 +316,7 @@ VPRIV void x64w_va_start(ecx *e, int rap)
 }
 
 /* the address of the next argument of type t: its 8-byte word, or the object it points to */
-VPRIV int x64w_va_arg(ecx *e, int rap, qty t)
+VPRIV int x64w_va_arg(ecx *e, int rap, ast_qualified_type t)
 {
 	wkarg a;
 	lval ap = { .k = L_REG, .r = (uint8_t)rap };
@@ -341,7 +341,7 @@ VPRIV int x64w_va_arg(ecx *e, int rap, qty t)
  * type's object), types[k] its type; the result (type rt) is stored to the frame slot res (at
  * least 8 bytes; 16 for __int128, __float128, long double).
  */
-VPRIV void x64w_helper(ecx *e, int fn, const int64_t *in, const qty *types, int n, int64_t res, qty rt)
+VPRIV void x64w_helper(ecx *e, int fn, const int64_t *in, const ast_qualified_type *types, int n, int64_t res, ast_qualified_type rt)
 {
 	wkarg a[4], r;
 

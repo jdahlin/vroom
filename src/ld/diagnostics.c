@@ -1,11 +1,13 @@
 /* Error and warning output, with the error count and limit, in lld's wording. */
 
+#include "ld-internal.h"
+
 /* ---------------- diagnostics ---------------- */
 
 static pthread_mutex_t ld_diagnostics_lock = PTHREAD_MUTEX_INITIALIZER;
 static const char *argv0 = "vld";
 
-static void ld_diagnostic_print(const char *kind, const char *fmt, va_list ap)
+static void ld_diagnostic_print(struct ld_context *ctx, const char *kind, const char *fmt, va_list ap)
 {
 	va_list aq;
 	char small[512], *m = small;
@@ -28,7 +30,7 @@ static void ld_diagnostic_print(const char *kind, const char *fmt, va_list ap)
 	if (m != small)
 		free(m);
 }
-static void ld_error_report(const char *fmt, ...)
+VPRIV void ld_error_report(struct ld_context *ctx, const char *fmt, ...)
 {
 	int n = atomic_fetch_add(&ctx->diagnostics.error_count, 1);
 	if (ctx->diagnostics.error_limit && n >= ctx->diagnostics.error_limit) {
@@ -40,13 +42,13 @@ static void ld_error_report(const char *fmt, ...)
 	}
 	va_list ap;
 	va_start(ap, fmt);
-	ld_diagnostic_print("error", fmt, ap);
+	ld_diagnostic_print(ctx, "error", fmt, ap);
 	va_end(ap);
 }
-static void ld_warning_report(const char *fmt, ...)
+VPRIV void ld_warning_report(struct ld_context *ctx, const char *fmt, ...)
 {
 	va_list ap;
 	va_start(ap, fmt);
-	ld_diagnostic_print("warning", fmt, ap);
+	ld_diagnostic_print(ctx, "warning", fmt, ap);
 	va_end(ap);
 }

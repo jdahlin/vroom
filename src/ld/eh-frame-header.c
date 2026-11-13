@@ -1,5 +1,7 @@
 /* Writing .eh_frame_hdr (lld's EhFrameHeader::write). */
 
+#include "ld-internal.h"
+
 /* .eh_frame_hdr (lld EhFrameHeader::write): version 1, eh_frame_ptr pcrel
  * sdata4, fde_count udata4, a table datarel sdata4 of (initial location,
  * FDE) sorted by location, duplicate locations dropped; read from the
@@ -9,35 +11,35 @@ static int ld_eh_frame_header_pair_cmp(const void *a, const void *b)
 	const uint64_t *x = a, *y = b;
 	return x[0] != y[0] ? (x[0] < y[0] ? -1 : 1) : x[1] < y[1] ? -1 : x[1] > y[1];	/* lld stable_sort: output order */
 }
-static void ld_eh_frame_header_write(void)
+VPRIV void ld_eh_frame_header_write(struct ld_context *ctx)
 {
-	if (ehhdr_isec == LD_NONE)
+	if (ctx->output.eh_frame_header_section == LD_NONE)
 		return;
-	uint32_t ho = ld_input_section_output_section(ehhdr_isec);
+	uint32_t ho = ld_input_section_output_section(ctx, ctx->output.eh_frame_header_section);
 
 	if (ho == LD_NONE || ho == LD_OUTPUT_SECTION_DISCARD)
 		return;
-	uint64_t hva = ld_input_section_address(ehhdr_isec, 0);
-	uint8_t *h = out + osecs.v[ho].offset + isecs.v[ehhdr_isec].off;
+	uint64_t hva = ld_input_section_address(ctx, ctx->output.eh_frame_header_section, 0);
+	uint8_t *h = ctx->output.image + ctx->script.sections.v[ho].offset + ctx->inputs.sections.v[ctx->output.eh_frame_header_section].offset;
 	uint64_t (*t)[2] = ld_region_alloc((ctx->layout.eh_frame_fdes.n + 1) * sizeof *t);
 	uint32_t n = 0;
 	uint64_t ehva = 0;
 
 	for (uint32_t k = 0; k < ctx->layout.eh_frame_fdes.n; k++) {
-		uint32_t f = ctx->layout.eh_frame_fdes.v[k], fo = ld_input_section_output_section(f);
-		const uint8_t *b = out + osecs.v[fo].offset + isecs.v[f].off;
-		uint64_t fva = ld_input_section_address(f, 0);
+		uint32_t f = ctx->layout.eh_frame_fdes.v[k], fo = ld_input_section_output_section(ctx, f);
+		const uint8_t *b = ctx->output.image + ctx->script.sections.v[fo].offset + ctx->inputs.sections.v[f].offset;
+		uint64_t fva = ld_input_section_address(ctx, f, 0);
 
 		if (!k)
-			ehva = osecs.v[fo].va;
+			ehva = ctx->script.sections.v[fo].address;
 		t[n][0] = fva + 8 + (uint64_t)(int64_t)(int32_t)ld_u32_load(b + 8);	/* pc_begin: pcrel sdata4 (vcc, clang) */
 		t[n][1] = fva;
 		n++;
 	}
-	if (!ctx->layout.eh_frame_fdes.n && isecs.n)
-		for (uint32_t i = 0; i < isecs.n; i++)
-			if (!strcmp(isecs.v[i].name, ".eh_frame") && isecs.v[i].kind == LD_SECTION_KIND_NORMAL && ld_input_section_output_section(i) < osecs.n) {
-				ehva = osecs.v[ld_input_section_output_section(i)].va;
+	if (!ctx->layout.eh_frame_fdes.n && ctx->inputs.sections.n)
+		for (uint32_t i = 0; i < ctx->inputs.sections.n; i++)
+			if (!strcmp(ctx->inputs.sections.v[i].name, ".eh_frame") && ctx->inputs.sections.v[i].kind == LD_SECTION_KIND_NORMAL && ld_input_section_output_section(ctx, i) < ctx->script.sections.n) {
+				ehva = ctx->script.sections.v[ld_input_section_output_section(ctx, i)].address;
 				break;
 			}
 	qsort(t, n, sizeof *t, ld_eh_frame_header_pair_cmp);

@@ -1,37 +1,37 @@
 /* vcc front end: -Wunused-value, -Wunused-result and -Wunused-comparison on a dropped value */
-#include "ccimpl.h"
+#include "cc-internal.h"
 
 /*
  * -Wunused-result for the value e that is dropped: a call of a
  * warn_unused_result/nodiscard function; a statement expression: its last
  * expression statement (last: the whole value is dropped), else the others
  */
-VPRIV void unused_result(cc *c, uint32_t e, bool last)
+CC_PRIVATE void cc_unused_result_check(cc *c, uint32_t e, bool last)
 {
-	if (N(e)->op == N_STMTEXPR) {
-		uint32_t b = N(e)->a, n = N(b)->c;
+	if (AST_NODE(e)->op == AST_NODE_STATEMENT_EXPRESSION) {
+		uint32_t b = AST_NODE(e)->a, n = AST_NODE(b)->c;
 		/* clang: a statement expression from a macro (drmm_mutex_init) does not warn for its
 		   value dropped */
-		bool mac = last && (N(e)->flags & NF_MACRO);
+		bool mac = last && (AST_NODE(e)->flags & AST_NODE_FLAG_FROM_MACRO);
 
 		for (uint32_t i = 0; i < n; i++) {
-			uint32_t s = c->lists[N(b)->b + i];
+			uint32_t s = c->lists[AST_NODE(b)->b + i];
 
-			if (N(s)->op == N_EXPR && N(s)->a && (i + 1 < n ? !last : last && !mac))
-				unused_result(c, N(s)->a, true);
+			if (AST_NODE(s)->op == AST_NODE_EXPRESSION && AST_NODE(s)->a && (i + 1 < n ? !last : last && !mac))
+				cc_unused_result_check(c, AST_NODE(s)->a, true);
 		}
 		return;
 	}
-	if (N(e)->op == N_CALL) {
-		uint32_t f = N(e)->a;
+	if (AST_NODE(e)->op == AST_NODE_CALL) {
+		uint32_t f = AST_NODE(e)->a;
 
-		while (N(f)->op == N_CAST && N(f)->a)
-			f = N(f)->a;
-		if (N(f)->op == N_VAR && (c->syms[N(f)->a].flags & SF_WUR)) {
-			diag_span r = rng(c, e);
-			const attrs *a = &c->attr[c->syms[N(f)->a].attrs];
+		while (AST_NODE(f)->op == AST_NODE_CAST && AST_NODE(f)->a)
+			f = AST_NODE(f)->a;
+		if (AST_NODE(f)->op == AST_NODE_VARIABLE && (c->syms[AST_NODE(f)->a].flags & AST_SYMBOL_FLAG_WARN_UNUSED_RESULT)) {
+			diag_span r = cc_node_range(c, e);
+			const attrs *a = &c->attr[c->syms[AST_NODE(f)->a].attrs];
 
-			cc_warnx(c, "unused-result", true, NULL, rng(c, N(e)->a).b, &r, 1, NULL, 0,
+			cc_report_warning(c, "unused-result", true, NULL, cc_node_range(c, AST_NODE(e)->a).b, &r, 1, NULL, 0,
 				 "ignoring return value of function declared with '%s' attribute",
 				 a->wur == 2 ? "nodiscard" : "warn_unused_result");
 		}
@@ -39,21 +39,21 @@ VPRIV void unused_result(cc *c, uint32_t e, bool last)
 }
 
 /* clang's Expr::isUnusedResultAWarning: does dropping e's value warn, where */
-typedef struct uvw { uint32_t loc; diag_span r[2]; int nr; uint32_t e; } uvw;
+typedef struct cc_unused_value_state { uint32_t loc; diag_span r[2]; int nr; uint32_t e; } cc_unused_value_state;
 
 static bool vol(cc *c, uint32_t e)
 {
-	return (QQ(N(e)->ty) & Q_VOLATILE) != 0;
+	return (AST_QUALIFIED_TYPE_QUALIFIERS(AST_NODE(e)->ty) & AST_QUALIFIER_VOLATILE) != 0;
 }
 
-static bool uv_warn(cc *c, uint32_t e, uvw *w)
+static bool cc_unused_value_walk(cc *c, uint32_t e, cc_unused_value_state *w)
 {
 	const node *x;
 
 	for (;;) {
-		x = N(e);
-		if (x->op == N_CAST && !c->span[e].e && x->a) {	/* implicit */
-			if (vol(c, x->a) && (N(x->a)->flags & NF_LVALUE))
+		x = AST_NODE(e);
+		if (x->op == AST_NODE_CAST && !c->span[e].e && x->a) {	/* implicit */
+			if (vol(c, x->a) && (AST_NODE(x->a)->flags & AST_NODE_FLAG_LVALUE))
 				return false;	/* a volatile load */
 			e = x->a;
 			continue;
@@ -62,102 +62,102 @@ static bool uv_warn(cc *c, uint32_t e, uvw *w)
 	}
 	w->e = e, w->nr = 0;
 	switch (x->op) {
-	case N_PREINC: case N_PREDEC: case N_POSTINC: case N_POSTDEC: case N_ASSIGN: case N_CALL: case N_BUILTIN:
-	case N_VAARG: case N_ZERO: case N_NONE:
+	case AST_NODE_PRE_INCREMENT: case AST_NODE_PRE_DECREMENT: case AST_NODE_POST_INCREMENT: case AST_NODE_POST_DECREMENT: case AST_NODE_ASSIGN: case AST_NODE_CALL: case AST_NODE_BUILTIN:
+	case AST_NODE_VA_ARG: case AST_NODE_ZERO: case AST_NODE_NONE:
 		return false;
-	case N_UNARY:
+	case AST_NODE_UNARY:
 		if (x->aux == LEX_TOKEN_PLUS || x->aux == LEX_TOKEN_MINUS || x->aux == LEX_TOKEN_TILDE || x->aux == LEX_TOKEN_EXCLAMATION)
 			goto unop;
 		return false;
-	case N_DEREF:
+	case AST_NODE_DEREFERENCE:
 		if (vol(c, e))
 			return false;
 		__attribute__((fallthrough));
-	case N_ADDR:
+	case AST_NODE_ADDRESS:
 	unop:
-		w->loc = x->loc, w->r[0] = rng_np(c, x->a), w->nr = 1;
+		w->loc = x->loc, w->r[0] = cc_node_range_bare(c, x->a), w->nr = 1;
 		return true;
-	case N_COMMA: {
-		if (x->aux == N_PREINC || x->aux == N_PREDEC || x->aux == N_POSTINC || x->aux == N_POSTDEC)
+	case AST_NODE_COMMA: {
+		if (x->aux == AST_NODE_PRE_INCREMENT || x->aux == AST_NODE_PRE_DECREMENT || x->aux == AST_NODE_POST_INCREMENT || x->aux == AST_NODE_POST_DECREMENT)
 			return false; /* lowered complex increment/decrement */
 		uint32_t r = x->b;
 
-		while (N(r)->op == N_CAST && !c->span[r].e && N(r)->a)
-			r = N(r)->a;
-		if (N(r)->op == N_NUM && c->ipool[N(r)->a] == 0)
+		while (AST_NODE(r)->op == AST_NODE_CAST && !c->span[r].e && AST_NODE(r)->a)
+			r = AST_NODE(r)->a;
+		if (AST_NODE(r)->op == AST_NODE_NUMBER && c->ipool[AST_NODE(r)->a] == 0)
 			return false;	/* ((x = y), 0): the idiom */
-		return uv_warn(c, x->b, w);
+		return cc_unused_value_walk(c, x->b, w);
 	}
-	case N_LOGAND: case N_LOGOR: {
-		uvw t;
+	case AST_NODE_LOGICAL_AND: case AST_NODE_LOGICAL_OR: {
+		cc_unused_value_state t;
 
-		if (!uv_warn(c, x->b, &t))
+		if (!cc_unused_value_walk(c, x->b, &t))
 			return false;
-		w->loc = x->loc, w->r[0] = rng_np(c, x->a), w->r[1] = rng_np(c, x->b), w->nr = 2;
+		w->loc = x->loc, w->r[0] = cc_node_range_bare(c, x->a), w->r[1] = cc_node_range_bare(c, x->b), w->nr = 2;
 		return true;
 	}
-	case N_BINARY:
-		w->loc = x->loc, w->r[0] = rng_np(c, x->a), w->r[1] = rng_np(c, x->b), w->nr = 2;
+	case AST_NODE_BINARY:
+		w->loc = x->loc, w->r[0] = cc_node_range_bare(c, x->a), w->r[1] = cc_node_range_bare(c, x->b), w->nr = 2;
 		return true;
-	case N_COND: {
-		uvw t;
+	case AST_NODE_CONDITIONAL: {
+		cc_unused_value_state t;
 
-		if (x->b && !uv_warn(c, x->b, &t))
+		if (x->b && !cc_unused_value_walk(c, x->b, &t))
 			return false;
-		return uv_warn(c, x->c, w);
+		return cc_unused_value_walk(c, x->c, w);
 	}
-	case N_MEMBER:
+	case AST_NODE_MEMBER:
 		if (vol(c, e))
 			return false;
-		w->loc = c->span[e].e ? c->span[e].e : x->loc, w->r[0] = rng_np(c, x->a), w->nr = 1;	/* the member's name */
+		w->loc = c->span[e].e ? c->span[e].e : x->loc, w->r[0] = cc_node_range_bare(c, x->a), w->nr = 1;	/* the member's name */
 		return true;
-	case N_INDEX:
+	case AST_NODE_INDEX:
 		if (vol(c, e))
 			return false;
-		w->loc = c->span[e].e ? c->span[e].e : x->loc, w->r[0] = rng_np(c, x->a), w->r[1] = rng_np(c, x->b), w->nr = 2;
+		w->loc = c->span[e].e ? c->span[e].e : x->loc, w->r[0] = cc_node_range_bare(c, x->a), w->r[1] = cc_node_range_bare(c, x->b), w->nr = 2;
 		return true;
-	case N_VAR:
+	case AST_NODE_VARIABLE:
 		if (vol(c, e))
 			return false;	/* a volatile load */
 		goto plain;
-	case N_STMTEXPR: {
-		if (x->aux == N_ASSIGN || x->aux == N_PREINC || x->aux == N_PREDEC || x->aux == N_POSTINC || x->aux == N_POSTDEC)
+	case AST_NODE_STATEMENT_EXPRESSION: {
+		if (x->aux == AST_NODE_ASSIGN || x->aux == AST_NODE_PRE_INCREMENT || x->aux == AST_NODE_PRE_DECREMENT || x->aux == AST_NODE_POST_INCREMENT || x->aux == AST_NODE_POST_DECREMENT)
 			return false; /* lowered atomic complex increment/decrement */
-		uint32_t b = x->a, n = N(b)->c, ls = n ? c->lists[N(b)->b + n - 1] : 0;
+		uint32_t b = x->a, n = AST_NODE(b)->c, ls = n ? c->lists[AST_NODE(b)->b + n - 1] : 0;
 
-		while (ls && N(ls)->op == N_LABEL)
-			ls = N(ls)->c;
-		if (ls && N(ls)->op == N_EXPR && N(ls)->a)
-			return uv_warn(c, N(ls)->a, w);
-		if (is_void(c, x->ty))
+		while (ls && AST_NODE(ls)->op == AST_NODE_LABEL)
+			ls = AST_NODE(ls)->c;
+		if (ls && AST_NODE(ls)->op == AST_NODE_EXPRESSION && AST_NODE(ls)->a)
+			return cc_unused_value_walk(c, AST_NODE(ls)->a, w);
+		if (cc_type_is_void(c, x->ty))
 			return false;
-		w->loc = x->loc, w->r[0] = rng_np(c, e), w->nr = 1;
+		w->loc = x->loc, w->r[0] = cc_node_range_bare(c, e), w->nr = 1;
 		return true;
 	}
-	case N_CAST:	/* explicit */
-		if (x->aux == CK_VOID)
+	case AST_NODE_CAST:	/* explicit */
+		if (x->aux == AST_CAST_VOID)
 			return false;
-		w->loc = c->span[e].b, w->r[0] = rng_np(c, x->a), w->nr = 1;
+		w->loc = c->span[e].b, w->r[0] = cc_node_range_bare(c, x->a), w->nr = 1;
 		return true;
 	default:
 	plain:
-		w->loc = rng_np(c, e).b, w->r[0] = rng_np(c, e), w->nr = 1;
+		w->loc = cc_node_range_bare(c, e).b, w->r[0] = cc_node_range_bare(c, e), w->nr = 1;
 		return true;
 	}
 }
 
 /* -Wunused-comparison: e, a dropped comparison (not parenthesized, not from a macro); true if it is one */
-VPRIV bool unused_cmp(cc *c, uint32_t e)
+CC_PRIVATE bool cc_unused_comparison_check(cc *c, uint32_t e)
 {
-	if (N(e)->op != N_BINARY || !is_cmp(N(e)->aux) || (N(e)->flags & (NF_PAREN | NF_MACRO | NF_ERR)))
+	if (AST_NODE(e)->op != AST_NODE_BINARY || !cc_operator_is_comparison(AST_NODE(e)->aux) || (AST_NODE(e)->flags & (AST_NODE_FLAG_PARENTHESIZED | AST_NODE_FLAG_FROM_MACRO | AST_NODE_FLAG_ERROR)))
 		return false;
 	{
-		int k = N(e)->aux;
-		uint32_t op = N(e)->loc;
-		diag_span r = { rng_np(c, N(e)->a).b, rng_np(c, N(e)->b).e };
+		int k = AST_NODE(e)->aux;
+		uint32_t op = AST_NODE(e)->loc;
+		diag_span r = { cc_node_range_bare(c, AST_NODE(e)->a).b, cc_node_range_bare(c, AST_NODE(e)->b).e };
 		bool eq = k == LEX_TOKEN_EQUAL_EQUAL || k == LEX_TOKEN_EXCLAMATION_EQUAL;
 
-		if (cc_warnx(c, "unused-comparison", true, w_all, op, &r, 1, NULL, 0, "%s comparison result unused",
+		if (cc_report_warning(c, "unused-comparison", true, cc_warning_group_all, op, &r, 1, NULL, 0, "%s comparison result unused",
 			  eq ? "equality" : "relational") && k == LEX_TOKEN_EQUAL_EQUAL) {
 			diag_span orr = { op, op + 2 };
 			diag_fixit fx = { op, op + 2, "=", 0 };
@@ -170,43 +170,43 @@ VPRIV bool unused_cmp(cc *c, uint32_t e)
 }
 
 /* clang's MaybeDecrementCount: a discarded full expression that only assigns a local variable */
-VPRIV void set_only(cc *c, uint32_t e)
+CC_PRIVATE void cc_unused_set_only_check(cc *c, uint32_t e)
 {
-	const node *x = N(e);
+	const node *x = AST_NODE(e);
 	uint32_t v;
 	bool comp;
 
-	if (x->op == N_ASSIGN)
+	if (x->op == AST_NODE_ASSIGN)
 		v = x->a, comp = x->aux != 0;
-	else if (x->op == N_PREINC || x->op == N_PREDEC || x->op == N_POSTINC || x->op == N_POSTDEC)
+	else if (x->op == AST_NODE_PRE_INCREMENT || x->op == AST_NODE_PRE_DECREMENT || x->op == AST_NODE_POST_INCREMENT || x->op == AST_NODE_POST_DECREMENT)
 		v = x->a, comp = true;
 	else
 		return;
-	if (N(v)->op != N_VAR || (N(v)->flags & NF_PAREN) || (comp && (QQ(N(v)->ty) & Q_VOLATILE)))
+	if (AST_NODE(v)->op != AST_NODE_VARIABLE || (AST_NODE(v)->flags & AST_NODE_FLAG_PARENTHESIZED) || (comp && (AST_QUALIFIED_TYPE_QUALIFIERS(AST_NODE(v)->ty) & AST_QUALIFIER_VOLATILE)))
 		return;
-	if (c->syms[N(v)->a].nref && c->syms[N(v)->a].nref != 0xffff)
-		c->syms[N(v)->a].nref--;
+	if (c->syms[AST_NODE(v)->a].nref && c->syms[AST_NODE(v)->a].nref != 0xffff)
+		c->syms[AST_NODE(v)->a].nref--;
 }
 
 /* -Wunused-value: e's value is dropped (a statement; comma: the left operand of a comma) */
-VPRIV void unused_value(cc *c, uint32_t e, bool comma)
+CC_PRIVATE void cc_unused_value_check(cc *c, uint32_t e, bool comma)
 {
 	static const char *const g[] = { "unused", "all", "most", NULL };
-	uvw w;
+	cc_unused_value_state w;
 	const char *ms = NULL;
 	uint32_t ml = 0;
 
-	if (!c->fn || !e || (N(e)->flags & NF_ERR))
+	if (!c->fn || !e || (AST_NODE(e)->flags & AST_NODE_FLAG_ERROR))
 		return;
-	if (comma && N(e)->op == N_BINARY && is_cmp(N(e)->aux) && !(N(e)->flags & (NF_PAREN | NF_MACRO)) &&
-	    (c->in_stmtexpr || unused_cmp(c, e)))
+	if (comma && AST_NODE(e)->op == AST_NODE_BINARY && cc_operator_is_comparison(AST_NODE(e)->aux) && !(AST_NODE(e)->flags & (AST_NODE_FLAG_PARENTHESIZED | AST_NODE_FLAG_FROM_MACRO)) &&
+	    (c->in_stmtexpr || cc_unused_comparison_check(c, e)))
 		return;	/* a comparison: -Wunused-comparison instead */
-	if (c->dead || !uv_warn(c, e, &w))
+	if (c->dead || !cc_unused_value_walk(c, e, &w))
 		return;
-	if (N(e)->op == N_STMTEXPR && (N(e)->flags & NF_MACRO))
+	if (AST_NODE(e)->op == AST_NODE_STATEMENT_EXPRESSION && (AST_NODE(e)->flags & AST_NODE_FLAG_FROM_MACRO))
 		return;	/* clang: a statement expression from a macro */
-	if (N(w.e)->op == N_VAR)
-		ms = idstr_(c->syms[N(w.e)->a].name), ml = (uint32_t)idlen_(c->syms[N(w.e)->a].name);
-	rt_defer(c, "unused-value", g, w.loc, w.r, w.nr, ms, ml, "%s",
+	if (AST_NODE(w.e)->op == AST_NODE_VARIABLE)
+		ms = cc_identifier_string(c->syms[AST_NODE(w.e)->a].name), ml = (uint32_t)cc_identifier_length(c->syms[AST_NODE(w.e)->a].name);
+	cc_report_runtime_defer(c, "unused-value", g, w.loc, w.r, w.nr, ms, ml, "%s",
 		 comma ? "left operand of comma operator has no effect" : "expression result unused");
 }

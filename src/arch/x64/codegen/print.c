@@ -146,7 +146,7 @@ static void x64_imm(tbuf *b, int64_t v)
 /* the stack protector's guard into r11: %fs:40 (glibc's TCB), or as -mstack-protector-guard-* say */
 static void x64_guard(ecx *e, tbuf *b)
 {
-	const cc_opts *o = e->E->o;
+	const cc_options *o = e->E->o;
 
 	if (WIN64(e->c) && !o->sp_sym && !o->sp_gs)
 		vtext_string_append(b, "\tmovq\t__stack_chk_guard(%rip), %r11\n");	/* MinGW: libssp's variable */
@@ -390,7 +390,7 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 					   [X_SHR] = "shr", [X_SAR] = "sar", [X_NEG] = "neg", [X_NOT] = "not" };
 	int64_t frame = (e->wk->foff + 15) & ~(int64_t)15;
 	uint32_t A = e->wk->falign;
-	bool uintr = x86_feature_has(cc_x86_features(c, s), X86_FEATURE_UINTR);
+	bool uintr = x86_feature_has(cc_x86_features_get(c, s), X86_FEATURE_UINTR);
 	bool cfi = e->E->o->cfi && !X->winframe;	/* unwind tables: .cfi_* as clang writes them (Windows: .seh_*) */
 	uint32_t dj = 0;		/* -g: the next row */
 	uint32_t tail = x64_tail_ref(e);

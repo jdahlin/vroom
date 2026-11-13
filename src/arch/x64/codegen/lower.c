@@ -175,7 +175,7 @@ VPRIV void x64_tkeep(ecx *e, int r)
 VPRIV bool x64_nosimd(ecx *e)
 {
 	uint32_t fn = e->wk->inl ? e->wk->inl->fn : e->wk->fsym;
-	return !x86_feature_has(cc_x86_features(e->c, fn), X86_FEATURE_SSE2);
+	return !x86_feature_has(cc_x86_features_get(e->c, fn), X86_FEATURE_SSE2);
 }
 
 VPRIV void x64_nofp(ecx *e)
@@ -889,14 +889,14 @@ VPRIV val x64_bitop(ecx *e, int bi, int size, val a)
 	if (size == 4)
 		x64_ext(e, r, 4, false);	/* (the count sees the 32 bits only) */
 	switch (bi) {
-	case BI_CLZ: case BI_CLZL: case BI_CLZLL:
+	case CC_BUILTIN_CLZ: case CC_BUILTIN_CLZL: case CC_BUILTIN_CLZLL:
 		x64_op3(e, X_BSR, size, r, r, XNOREG);
 		x64_op3(e, X_XORI, 4, r, r, XNOREG)->imm = bits - 1;
 		break;
-	case BI_CTZ: case BI_CTZL: case BI_CTZLL:
+	case CC_BUILTIN_CTZ: case CC_BUILTIN_CTZL: case CC_BUILTIN_CTZLL:
 		x64_op3(e, X_BSF, size, r, r, XNOREG);
 		break;
-	case BI_FFS: case BI_FFSL: case BI_FFSLL: {
+	case CC_BUILTIN_FFS: case CC_BUILTIN_FFSL: case CC_BUILTIN_FFSLL: {
 		/* x ? ctz(x) + 1 : 0 */
 		uint32_t lz = wk_newlabel(e);
 		rec *j;
@@ -910,18 +910,18 @@ VPRIV val x64_bitop(ecx *e, int bi, int size, val a)
 		x64_label(e, lz);
 		break;
 	}
-	case BI_POPCOUNT: case BI_POPCOUNTL: case BI_POPCOUNTLL:
+	case CC_BUILTIN_POPCOUNT: case CC_BUILTIN_POPCOUNTL: case CC_BUILTIN_POPCOUNTLL:
 		x64_popcount(e, r, size);
 		break;
-	case BI_PARITY: case BI_PARITYL: case BI_PARITYLL:
+	case CC_BUILTIN_PARITY: case CC_BUILTIN_PARITYL: case CC_BUILTIN_PARITYLL:
 		x64_popcount(e, r, size);
 		x64_op3(e, X_ANDI, 4, r, r, XNOREG)->imm = 1;
 		break;
-	case BI_BSWAP16:
+	case CC_BUILTIN_BSWAP16:
 		x64_op3(e, X_BSWAP, 4, r, r, XNOREG);
 		x64_op3(e, X_SHRI, 4, r, r, XNOREG)->imm = 16;
 		break;
-	case BI_BSWAP32: case BI_BSWAP64:
+	case CC_BUILTIN_BSWAP32: case CC_BUILTIN_BSWAP64:
 		x64_op3(e, X_BSWAP, size, r, r, XNOREG);
 		break;
 	default:
@@ -991,10 +991,10 @@ VPRIV val x64_pcmpstr(ecx *e, uint32_t n)
 	cc *c = e->c;
 	const node *x = N(n);
 	const uint32_t *arg = &c->lists[x->b];
-	cval cv;
-	bool blend = x->aux == BI_X86_BLENDVB;
+	cc_value cv;
+	bool blend = x->aux == CC_BUILTIN_X86_BLENDVB;
 	uint32_t fn = e->wk->inl ? e->wk->inl->fn : e->wk->fsym;
-	if (!x86_feature_has(cc_x86_features(c, fn), blend ? X86_FEATURE_SSE41 : X86_FEATURE_SSE42))
+	if (!x86_feature_has(cc_x86_features_get(c, fn), blend ? X86_FEATURE_SSE41 : X86_FEATURE_SSE42))
 		efatal(e, x->loc, "builtin requires target feature '%s'", blend ? "sse4.1" : "sse4.2");
 	if (!blend) cc_eval(c, arg[x->c - 1], &cv);
 	unsigned mode = blend ? 1 : (unsigned)cv.i, kind = mode & 7;
@@ -1014,7 +1014,7 @@ VPRIV val x64_pcmpstr(ecx *e, uint32_t n)
 		if (vector) {
 			v = wk_putmem(e, &l, N(arg[i])->ty, v);
 		} else {
-			int r = wk_reg(e, &v, prim(TY_INT));
+			int r = wk_reg(e, &v, prim(AST_TYPE_INT));
 			x64_store(e, r, &l, 4);
 		}
 		wk_free(e, &v);

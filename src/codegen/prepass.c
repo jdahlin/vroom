@@ -46,26 +46,26 @@ VPRIV bool sve_codegen_ok(cc *c)
 		const sym *s = &c->syms[i];
 		const ctype *t = T(c, s->ty);
 
-		if (s->kind != S_FUNC || !s->body)
+		if (s->kind != AST_SYMBOL_FUNCTION || !s->body)
 			continue;
-		if (KIND(c, t->base) == TY_SVE)
+		if (KIND(c, t->base) == AST_TYPE_SVE_BUILTIN)
 			loc = s->loc;
 		for (uint32_t j = 0; j < t->n && !loc; j++)
-			if (KIND(c, c->params[t->aux + j]) == TY_SVE)
+			if (KIND(c, c->params[t->aux + j]) == AST_TYPE_SVE_BUILTIN)
 				loc = s->loc;
 	}
 	for (uint32_t i = 1; i < c->nnode && !loc; i++) {
 		const node *n = &c->nodes[i];
 
-		if (n->op == N_CALL)
+		if (n->op == AST_NODE_CALL)
 			for (uint32_t j = 0; j < n->c && !loc; j++)
-				if (KIND(c, N(c->lists[n->b + j])->ty) == TY_SVE)
+				if (KIND(c, N(c->lists[n->b + j])->ty) == AST_TYPE_SVE_BUILTIN)
 					loc = n->loc;
-		if (KIND(c, n->ty) != TY_SVE)
+		if (KIND(c, n->ty) != AST_TYPE_SVE_BUILTIN)
 			continue;
-		if (n->op == N_CALL || n->op == N_VAARG)
+		if (n->op == AST_NODE_CALL || n->op == AST_NODE_VA_ARG)
 			loc = n->loc;
-		else if (n->op == N_BINARY || n->op == N_UNARY || (n->op == N_CAST && n->aux != CK_NOP))
+		else if (n->op == AST_NODE_BINARY || n->op == AST_NODE_UNARY || (n->op == AST_NODE_CAST && n->aux != AST_CAST_NOP))
 			loc = n->loc, what = "an operator on an SVE value";
 	}
 	if (!loc)
@@ -85,7 +85,7 @@ VPRIV bool bitint_codegen_ok(cc *c)
 		const ctype *t = T(c, s->ty);
 		bool bad = false;
 
-		if (s->kind != S_FUNC || !s->body)
+		if (s->kind != AST_SYMBOL_FUNCTION || !s->body)
 			continue;
 		bad = em_bitint(c, t->base);
 		for (uint32_t j = 0; j < t->n && !bad; j++)
@@ -128,11 +128,11 @@ VPRIV bool is_aconst(cc *c, uint32_t n)
 
 	uint32_t b;
 
-	if (x->op != N_INDEX || N(x->a)->op != N_CAST || N(x->a)->aux != CK_DECAY || N(N(x->a)->a)->op != N_VAR)
+	if (x->op != AST_NODE_INDEX || N(x->a)->op != AST_NODE_CAST || N(x->a)->aux != AST_CAST_ARRAY_DECAY || N(N(x->a)->a)->op != AST_NODE_VARIABLE)
 		return false;
-	for (b = x->b; N(b)->op == N_CAST && is_integer(c, N(b)->ty) && is_integer(c, N(N(b)->a)->ty); b = N(b)->a)
+	for (b = x->b; N(b)->op == AST_NODE_CAST && is_integer(c, N(b)->ty) && is_integer(c, N(N(b)->a)->ty); b = N(b)->a)
 		;
-	return N(b)->op == N_NUM && c->ipool[N(b)->a] >= 0 && c->ipool[N(b)->a] < (i128)1 << 32;
+	return N(b)->op == AST_NODE_NUMBER && c->ipool[N(b)->a] >= 0 && c->ipool[N(b)->a] < (i128)1 << 32;
 }
 
 /* the index of a[CONST] (is_aconst) */
@@ -140,13 +140,13 @@ VPRIV uint32_t aconst_idx(cc *c, uint32_t n)
 {
 	uint32_t b;
 
-	for (b = N(n)->b; N(b)->op == N_CAST; b = N(b)->a)
+	for (b = N(n)->b; N(b)->op == AST_NODE_CAST; b = N(b)->a)
 		;
 	return (uint32_t)c->ipool[N(b)->a];
 }
 
 /* va_list is a pointer (Apple), not an array of one record (AAPCS64): it can be a register variable */
-static bool scalar_valist(cc *c) { return T(c, c->t_valist)->kind != TY_ARRAY; }
+static bool scalar_valist(cc *c) { return T(c, c->t_valist)->kind != AST_TYPE_ARRAY; }
 
 static void mark_written(pre *P, uint32_t n, bool addr)
 {
@@ -155,14 +155,14 @@ static void mark_written(pre *P, uint32_t n, bool addr)
 	for (;;) {
 		const node *x = N(n);
 
-		if (x->op == N_COMMA) {
+		if (x->op == AST_NODE_COMMA) {
 			n = x->b;	/* match the emitters' comma-lvalue addressing */
-		} else if (x->op == N_MEMBER || (x->op == N_CAST && (x->aux == CK_NOP || x->aux == CK_DECAY))) {
+		} else if (x->op == AST_NODE_MEMBER || (x->op == AST_NODE_CAST && (x->aux == AST_CAST_NOP || x->aux == AST_CAST_ARRAY_DECAY))) {
 			n = x->a;
-		} else if (x->op == N_INDEX) {
+		} else if (x->op == AST_NODE_INDEX) {
 			const node *b = N(x->a);
 
-			if (b->op == N_CAST && b->aux == CK_DECAY)
+			if (b->op == AST_NODE_CAST && b->aux == AST_CAST_ARRAY_DECAY)
 				n = b->a;
 			else
 				return;
@@ -170,12 +170,12 @@ static void mark_written(pre *P, uint32_t n, bool addr)
 			break;
 		}
 	}
-	if (N(n)->op == N_VAR && is_local_var(c, N(n)->a)) {
+	if (N(n)->op == AST_NODE_VARIABLE && is_local_var(c, N(n)->a)) {
 		P->E->sflags[N(n)->a] |= SA_WRITTEN | SA_AESC, P->E->ffacts[N(n)->a] |= FF_BAD;
 		if (addr && is_local_var(P->c, N(n)->a))
 			P->E->lnoreg[N(n)->a] = 1;
 	}
-	else if (N(n)->op == N_COMPLIT && is_local_var(c, N(n)->b))
+	else if (N(n)->op == AST_NODE_COMPOUND_LITERAL && is_local_var(c, N(n)->b))
 		P->E->sflags[N(n)->b] |= SA_WRITTEN;
 }
 
@@ -191,34 +191,34 @@ static void note_fwrite(pre *P, uint32_t s, uint32_t rhs)
 	cc *c = P->c;
 	uint8_t *f = &P->E->ffacts[s], k = FF_BAD;
 	uint32_t ref, callee;
-	cval cv;
+	cc_value cv;
 
 	if (!is_flt(c, c->syms[s].ty) || !is_local_var(c, s))
 		return;
-	while (N(rhs)->op == N_CAST && is_flt(c, N(rhs)->ty) && is_flt(c, N(N(rhs)->a)->ty) &&
+	while (N(rhs)->op == AST_NODE_CAST && is_flt(c, N(rhs)->ty) && is_flt(c, N(N(rhs)->a)->ty) &&
 	       tsize(c, N(rhs)->ty) >= tsize(c, N(N(rhs)->a)->ty))
 		rhs = N(rhs)->a;
-	if (cc_eval(c, rhs, &cv) && (cv.kind == CV_FLT || cv.kind == CV_INT)) {
-		double v = cv.kind == CV_FLT ? cv.f : (double)cv.i;
+	if (cc_eval(c, rhs, &cv) && (cv.kind == CC_VALUE_FLOAT || cv.kind == CC_VALUE_INTEGER)) {
+		double v = cv.kind == CC_VALUE_FLOAT ? cv.f : (double)cv.i;
 
-		if (cv.kind == CV_FLT && cv.ld)	/* f may be 0 or inf where q is not */
+		if (cv.kind == CC_VALUE_FLOAT && cv.ld)	/* f may be 0 or inf where q is not */
 			k = cv.q == 0 ? FF_NONNEG | FF_ZERO : !(cv.q >> 127) && (cv.q << 1) <= ((u128)0x7fff << 113) ? FF_NONNEG : 0;
 		else
 			k = v == 0 && !__builtin_signbit(v) ? FF_NONNEG | FF_ZERO : v >= 0 ? FF_NONNEG : 0;
-	} else if (N(rhs)->op == N_COMMA && (N(rhs)->aux & NC_FP_NONNEG)) {
+	} else if (N(rhs)->op == AST_NODE_COMMA && (N(rhs)->aux & AST_NODE_COMMA_FP_NONNEGATIVE)) {
 		k = FF_NONNEG;
-	} else if (N(rhs)->op == N_CALL && (callee = direct_callee(c, N(rhs)->a, &ref))) {
+	} else if (N(rhs)->op == AST_NODE_CALL && (callee = direct_callee(c, N(rhs)->a, &ref))) {
 		const sym *fn = &c->syms[callee];
 		const ctype *ft = T(c, fn->ty);
-		int want = EM_IDENT_IS(fn->name, "fabs") ? TY_DOUBLE :
-			   EM_IDENT_IS(fn->name, "fabsf") ? TY_FLOAT : -1;
+		int want = EM_IDENT_IS(fn->name, "fabs") ? AST_TYPE_DOUBLE :
+			   EM_IDENT_IS(fn->name, "fabsf") ? AST_TYPE_FLOAT : -1;
 		bool enabled = !P->E->o->no_builtin;
 		/* The per-name option table belongs to the front end; conservatively
 		   avoid library facts whenever any named builtin was disabled. */
 		for (unsigned i = 0; i < CC_DISABLED_BUILTIN_WORDS; i++)
 			if (P->E->o->disabled_builtins[i]) enabled = false;
-		if (enabled && want >= 0 && (fn->flags & SF_GLOBAL) && fn->sc != SC_STATIC && !sym_attrs(c, callee)->asmname &&
-		    ft->kind == TY_FUNC && KIND(c, ft->base) == want && ft->n == 1 &&
+		if (enabled && want >= 0 && (fn->flags & AST_SYMBOL_FLAG_GLOBAL) && fn->sc != AST_STORAGE_STATIC && !sym_attrs(c, callee)->asmname &&
+		    ft->kind == AST_TYPE_FUNCTION && KIND(c, ft->base) == want && ft->n == 1 &&
 		    KIND(c, c->params[ft->aux]) == want)
 			k = FF_NONNEG;
 	}
@@ -230,11 +230,11 @@ static void note_assign(pre *P, uint32_t s, uint32_t rhs)
 {
 	cc *c = P->c;
 	emitter *E = P->E;
-	cval cv;
+	cc_value cv;
 
 	if (!is_local_var(c, s) || (E->sflags[s] & SA_WRITTEN))
 		return;
-	if (!is_integer(c, c->syms[s].ty) || !cc_eval(c, rhs, &cv) || cv.kind != CV_INT) {
+	if (!is_integer(c, c->syms[s].ty) || !cc_eval(c, rhs, &cv) || cv.kind != CC_VALUE_INTEGER) {
 		E->sflags[s] |= SA_WRITTEN;
 		return;
 	}
@@ -263,16 +263,16 @@ VPRIV uint8_t *fn_once(cc *c)
 		const node *x = &c->nodes[n];
 		uint32_t s;
 
-		if (x->op == N_VAR) {
+		if (x->op == AST_NODE_VARIABLE) {
 			s = x->a;
-			if (s < c->nsym && c->syms[s].kind == S_FUNC && ((r[s = canon_sym(c, s)] & 3) != 3))
+			if (s < c->nsym && c->syms[s].kind == AST_SYMBOL_FUNCTION && ((r[s = canon_sym(c, s)] & 3) != 3))
 				r[s]++;
-		} else if (x->op == N_CALL) {
+		} else if (x->op == AST_NODE_CALL) {
 			const node *f = &c->nodes[x->a];
 
-			while (f->op == N_CAST && (f->aux == CK_FDECAY || f->aux == CK_NOP || f->aux == CK_P2P))
+			while (f->op == AST_NODE_CAST && (f->aux == AST_CAST_FUNCTION_DECAY || f->aux == AST_CAST_NOP || f->aux == AST_CAST_POINTER_TO_POINTER))
 				f = &c->nodes[f->a];
-			if (f->op == N_VAR && f->a < c->nsym && c->syms[f->a].kind == S_FUNC && ((r[s = canon_sym(c, f->a)] >> 2) != 3))
+			if (f->op == AST_NODE_VARIABLE && f->a < c->nsym && c->syms[f->a].kind == AST_SYMBOL_FUNCTION && ((r[s = canon_sym(c, f->a)] >> 2) != 3))
 				r[s] += 4;
 		}
 	}
@@ -288,10 +288,10 @@ VPRIV bool inl_constarg(const emitter *E,cc *c,uint32_t callee,uint32_t call)
  const node *site=N(call),*body=N(c->syms[callee].body);
  for(uint32_t k=0;k<site->c && k<body->aux;k++) {
   if(!E->inl_read[c->lists[body->a+k]])continue;
-  uint32_t a=c->lists[site->b+k];cval cv;
+  uint32_t a=c->lists[site->b+k];cc_value cv;
   if(!cc_eval(c,a,&cv))continue;
-  if(cv.kind==CV_INT && is_integer(c,N(a)->ty))return true;
-  if(cv.kind==CV_ADDR && !cv.i && !cv.sym && !cv.str && !cv.label && !cv.sublabel)return true;
+  if(cv.kind==CC_VALUE_INTEGER && is_integer(c,N(a)->ty))return true;
+  if(cv.kind==CC_VALUE_ADDRESS && !cv.i && !cv.sym && !cv.str && !cv.label && !cv.sublabel)return true;
  }
  return false;
 }
@@ -302,14 +302,14 @@ VPRIV bool inl_cand(emitter *E, cc *c, uint32_t s)
 	const sym *y = &c->syms[s];
 	const ctype *ft;
 
-	if (y->kind != S_FUNC || !(y->flags & SF_DEFINED) || !y->body)
+	if (y->kind != AST_SYMBOL_FUNCTION || !(y->flags & AST_SYMBOL_FLAG_DEFINED) || !y->body)
 		return false;
 	ft = T(c, y->ty);
-	if ((ft->flags & (TF_VARIADIC | TF_NOPROTO)) || N(y->body)->aux > 64 || (E->sflags[s] & SA_NOINL) || (E->once[s] & 2))
+	if ((ft->flags & (AST_TYPE_FLAG_VARIADIC | AST_TYPE_FLAG_NO_PROTOTYPE)) || N(y->body)->aux > 64 || (E->sflags[s] & SA_NOINL) || (E->once[s] & 2))
 		return false;
-	if (y->flags & SF_ALWAYS_INLINE)
+	if (y->flags & AST_SYMBOL_FLAG_ALWAYS_INLINE)
 		return true;
-	return !(y->flags & SF_NOINLINE) && ((y->flags & SF_INLINE) || y->sc == SC_STATIC);
+	return !(y->flags & AST_SYMBOL_FLAG_NOINLINE) && ((y->flags & AST_SYMBOL_FLAG_INLINE) || y->sc == AST_STORAGE_STATIC);
 }
 
 /*
@@ -336,7 +336,7 @@ VPRIV void fn_isize(emitter *E, cc *c, uint32_t lim)
 		abort();
 	E->cgrec = true;
 	for (uint32_t s = 1; s < n; s++)
-		if (c->syms[s].kind == S_FUNC && c->syms[s].body && (c->syms[s].flags & SF_DEFINED) && canon_sym(c, s) == s) {
+		if (c->syms[s].kind == AST_SYMBOL_FUNCTION && c->syms[s].body && (c->syms[s].flags & AST_SYMBOL_FLAG_DEFINED) && canon_sym(c, s) == s) {
 			E->cgoff[s] = E->ncg;
 			ensure_walked(E, c, s);
 			E->cgn[s] = E->ncg - E->cgoff[s];
@@ -344,7 +344,7 @@ VPRIV void fn_isize(emitter *E, cc *c, uint32_t lim)
 	E->cgrec = false;
 	/* Tarjan, iterative; a group is finished callees first, so its isz is computed there */
 	for (uint32_t r = 1; r < n; r++) {
-		if (idx[r] || c->syms[r].kind != S_FUNC)
+		if (idx[r] || c->syms[r].kind != AST_SYMBOL_FUNCTION)
 			continue;
 		cs[csp] = r, ci[csp++] = 0;
 		idx[r] = low[r] = ++nidx, stk[sp++] = r, on[r] = 1;
@@ -381,9 +381,9 @@ VPRIV void fn_isize(emitter *E, cc *c, uint32_t lim)
 					uint32_t t=edge.callee;
 
 					if(E->scc[t]==v || !inl_cand(E,c,t))continue;
-					bool take=c->syms[t].flags&SF_ALWAYS_INLINE;
+					bool take=c->syms[t].flags&AST_SYMBOL_FLAG_ALWAYS_INLINE;
 					if(!take) {
-						bool once=(E->once[t]&1) && c->syms[t].sc==SC_STATIC && !sym_attrs(c,t)->used &&
+						bool once=(E->once[t]&1) && c->syms[t].sc==AST_STORAGE_STATIC && !sym_attrs(c,t)->used &&
 						          E->fnsize[s]<=WK_INLINE_ONCE;
 						take=once ? E->fnsize[t]<=WK_INLINE_ONCE : E->isz[t]<=lim ||
 						 (E->isz[t]<=lim*WK_INLINE_CONST_FACTOR && inl_constarg(E,c,t,edge.call));
@@ -442,16 +442,16 @@ static bool init_has_labeladdr(cc *c, uint32_t n)
 		return false;
 	x = N(n);
 	switch (x->op) {
-	case N_LABELADDR:
+	case AST_NODE_LABEL_ADDRESS:
 		return true;
-	case N_INIT:
+	case AST_NODE_INITIALIZER:
 		for (uint32_t i = 0; i < x->c; i++)	/* the layout side_effects() reads */
 			if (init_has_labeladdr(c, x->aux == 1 ? c->lists[x->b + 3 * i + 2] : c->lists[x->b + i]))
 				return true;
 		return false;
-	case N_CAST: case N_ADDR: case N_UNARY:
+	case AST_NODE_CAST: case AST_NODE_ADDRESS: case AST_NODE_UNARY:
 		return init_has_labeladdr(c, x->a);
-	case N_BINARY:
+	case AST_NODE_BINARY:
 		return init_has_labeladdr(c, x->a) || init_has_labeladdr(c, x->b);
 	default:
 		return false;
@@ -470,8 +470,8 @@ static int walk(pre *P, uint32_t n)
 	x = N(n);
 	P->nodes++;
 	switch (x->op) {
-	case N_VAR:
-		if(P->E->inl_read && !P->discard_param && (c->syms[x->a].flags&SF_PARAM))
+	case AST_NODE_VARIABLE:
+		if(P->E->inl_read && !P->discard_param && (c->syms[x->a].flags&AST_SYMBOL_FLAG_PARAMETER))
 			P->E->inl_read[x->a]=1;
 		/* locals belong to this walk alone (globals' flags are shared between threads) */
 		if (is_local_var(c, x->a)) {
@@ -481,52 +481,52 @@ static int walk(pre *P, uint32_t n)
 			const sym *y = &c->syms[x->a];
 
 			/* a static local holding a label address: the function has one copy */
-			if (y->kind == S_VAR && y->sc == SC_STATIC && !(y->flags & SF_GLOBAL) && y->body &&
+			if (y->kind == AST_SYMBOL_VARIABLE && y->sc == AST_STORAGE_STATIC && !(y->flags & AST_SYMBOL_FLAG_GLOBAL) && y->body &&
 			    init_has_labeladdr(c, y->body))
 				P->E->sflags[P->fn] |= SA_NOINL;
 		}
 		return false;
-	case N_NUM: case N_BIGNUM: case N_FNUM: case N_STR: case N_ZERO:
+	case AST_NODE_NUMBER: case AST_NODE_BITINT_NUMBER: case AST_NODE_FLOAT_NUMBER: case AST_NODE_STRING: case AST_NODE_ZERO:
 		return false;
-	case N_SIZEOF_VLA:
+	case AST_NODE_SIZEOF_VLA:
 		lab = walk(P, x->a);
-		for (qty t = x->b; is_array(c, t); t = T(c, t)->base)
-			if ((T(c, t)->flags & TF_VLA) && T(c, t)->n)
+		for (ast_qualified_type t = x->b; is_array(c, t); t = T(c, t)->base)
+			if ((T(c, t)->flags & AST_TYPE_FLAG_VLA) && T(c, t)->n)
 				lab |= walk(P, T(c, t)->n);
 		break;
-	case N_LABELADDR:
+	case AST_NODE_LABEL_ADDRESS:
 		P->E->lref[x->a] |= LR_REF | LR_BACK;
 		return false;
-	case N_VAARG:	/* va_arg reads and advances a scalar va_list through its address */
+	case AST_NODE_VA_ARG:	/* va_arg reads and advances a scalar va_list through its address */
 		if (scalar_valist(c))
 			mark_written(P, x->a, true);
 		lab = walk(P, x->a);
 		break;
-	case N_MEMBER: case N_DEREF: case N_UNARY:
+	case AST_NODE_MEMBER: case AST_NODE_DEREFERENCE: case AST_NODE_UNARY:
 		lab = walk(P, x->a);
 		break;
-	case N_CAST: {
-		if (x->aux == CK_DECAY || (x->aux == CK_BITS && (N(x->a)->flags & NF_LVALUE)))
+	case AST_NODE_CAST: {
+		if (x->aux == AST_CAST_ARRAY_DECAY || (x->aux == AST_CAST_BIT_CAST && (N(x->a)->flags & AST_NODE_FLAG_LVALUE)))
 			mark_written(P, x->a, true);
 		bool saved=P->discard_param;
-		if(KIND(c,x->ty)==TY_VOID) {
+		if(KIND(c,x->ty)==AST_TYPE_VOID) {
 			uint32_t a=x->a;
-			while(N(a)->op==N_CAST)a=N(a)->a;
-			if(N(a)->op==N_VAR && (c->syms[N(a)->a].flags&SF_PARAM))P->discard_param=true;
+			while(N(a)->op==AST_NODE_CAST)a=N(a)->a;
+			if(N(a)->op==AST_NODE_VARIABLE && (c->syms[N(a)->a].flags&AST_SYMBOL_FLAG_PARAMETER))P->discard_param=true;
 		}
 		lab = walk(P, x->a);P->discard_param=saved;
 		break;
 	}
-	case N_ADDR:
+	case AST_NODE_ADDRESS:
 		mark_written(P, x->a, true);
 		lab = walk(P, x->a);
 		break;
-	case N_PREINC: case N_PREDEC: case N_POSTINC: case N_POSTDEC:
+	case AST_NODE_PRE_INCREMENT: case AST_NODE_PRE_DECREMENT: case AST_NODE_POST_INCREMENT: case AST_NODE_POST_DECREMENT:
 		mark_written(P, x->a, false);
 		lab = walk(P, x->a);
 		break;
-	case N_ASSIGN:
-		if (!x->aux && N(x->a)->op == N_VAR)
+	case AST_NODE_ASSIGN:
+		if (!x->aux && N(x->a)->op == AST_NODE_VARIABLE)
 			note_assign(P, N(x->a)->a, x->b), note_fwrite(P, N(x->a)->a, x->b);
 		else if (!x->aux && is_aconst(c, x->a)) {
 			uint32_t s = N(N(N(x->a)->a)->a)->a;
@@ -538,27 +538,27 @@ static int walk(pre *P, uint32_t n)
 			mark_written(P, x->a, false);
 		lab = walk(P, x->a) | walk(P, x->b);
 		break;
-	case N_INDEX:
+	case AST_NODE_INDEX:
 		if (is_aconst(c, n)) {
 			/* a[CONST]: the array does not escape here */
 			lab = walk(P, N(x->a)->a) | walk(P, x->b);
 			break;
 		}
 		__attribute__((fallthrough));
-	case N_BINARY: case N_LOGAND: case N_LOGOR: case N_COMMA: case N_CPLX:
+	case AST_NODE_BINARY: case AST_NODE_LOGICAL_AND: case AST_NODE_LOGICAL_OR: case AST_NODE_COMMA: case AST_NODE_COMPLEX:
 		lab = walk(P, x->a) | walk(P, x->b);
 		break;
-	case N_COND:
+	case AST_NODE_CONDITIONAL:
 		lab = walk(P, x->a) | walk(P, x->b) | walk(P, x->c);
 		break;
-	case N_CALL: {
+	case AST_NODE_CALL: {
 		uint32_t ref, callee = direct_callee(c, x->a, &ref);
 
 		if (callee && sym_attrs(c, callee)->error_fn)
 			P->E->sflags[P->fn] |= SA_MUSTFOLD;
 		/* VIR: a function calling setjmp is not inlined (as LLVM): the caller's promoted
 		   locals would take their values at the setjmp after a longjmp */
-		if (callee && P->E->once && ((sym_attrs(c, callee)->flags & AF_TAIL_RETURNS_TWICE) ||
+		if (callee && P->E->once && ((sym_attrs(c, callee)->flags & CC_ATTRIBUTE_FLAG_TAIL_RETURNS_TWICE) ||
 		    EM_IDENT_IS(c->syms[callee].name, "setjmp") || EM_IDENT_IS(c->syms[callee].name, "_setjmp") ||
 		    EM_IDENT_IS(c->syms[callee].name, "sigsetjmp") || EM_IDENT_IS(c->syms[callee].name, "__sigsetjmp")))
 			P->E->once[P->fn] |= 2;
@@ -577,8 +577,8 @@ static int walk(pre *P, uint32_t n)
 		lab = walk(P, x->a);
 	}
 		__attribute__((fallthrough));
-	case N_BUILTIN:
-		if (x->op == N_BUILTIN && (x->aux == BI_ALLOCA || x->aux == BI_ALLOCA_UNINIT))
+	case AST_NODE_BUILTIN:
+		if (x->op == AST_NODE_BUILTIN && (x->aux == CC_BUILTIN_ALLOCA || x->aux == CC_BUILTIN_ALLOCA_UNINITIALIZED))
 			P->E->nflags[c->syms[P->fn].body] |= NA_ALLOCA;
 		for (uint32_t i = 0; i < x->c; i++)
 			lab |= walk(P, c->lists[x->b + i]);
@@ -586,18 +586,18 @@ static int walk(pre *P, uint32_t n)
 		 * The va builtins take their va_lists' addresses (Apple's char *
 		 * could otherwise be a register variable): every operand.
 		 */
-		if (x->op == N_BUILTIN && (x->aux == BI_VA_START || x->aux == BI_VA_COPY || x->aux == BI_VA_END))
-			for (uint32_t i = 0; i < x->c && i < (x->aux == BI_VA_COPY ? 2u : 1u); i++)
-				if ((i == 0 && x->aux != BI_VA_END) || scalar_valist(c))
+		if (x->op == AST_NODE_BUILTIN && (x->aux == CC_BUILTIN_VA_START || x->aux == CC_BUILTIN_VA_COPY || x->aux == CC_BUILTIN_VA_END))
+			for (uint32_t i = 0; i < x->c && i < (x->aux == CC_BUILTIN_VA_COPY ? 2u : 1u); i++)
+				if ((i == 0 && x->aux != CC_BUILTIN_VA_END) || scalar_valist(c))
 					mark_written(P, c->lists[x->b + i], true);
 		break;
-	case N_STMTEXPR:
+	case AST_NODE_STATEMENT_EXPRESSION:
 		lab = walk(P, x->a);
 		break;
-	case N_COMPLIT:
+	case AST_NODE_COMPOUND_LITERAL:
 		lab = walk(P, x->a);
 		break;
-	case N_INIT:
+	case AST_NODE_INITIALIZER:
 		if (x->aux == 1) {
 			for (uint32_t i = 0; i < x->c; i++)
 				lab |= walk(P, c->lists[x->b + 3 * i + 2]);
@@ -606,7 +606,7 @@ static int walk(pre *P, uint32_t n)
 				lab |= walk(P, c->lists[x->b + i]);
 		}
 		break;
-	case N_BLOCK: {
+	case AST_NODE_BLOCK: {
 		int cd = P->cdepth;
 
 		for (uint32_t i = 0; i < x->c; i++)
@@ -614,58 +614,58 @@ static int walk(pre *P, uint32_t n)
 		P->cdepth = cd;
 		break;
 	}
-	case N_EXPR:
-	case N_RETURN:
-	case N_GOTO_IND:
+	case AST_NODE_EXPRESSION:
+	case AST_NODE_RETURN:
+	case AST_NODE_GOTO_INDIRECT:
 		lab = walk(P, x->a);
 		break;
-	case N_DECL: {
+	case AST_NODE_DECLARATION: {
 		const sym *y = &c->syms[x->a];
 
 		lab = walk(P, x->b);
 		if (!x->aux)
-			for (qty t = y->ty; is_array(c, t) || is_ptr(c, t); t = T(c, t)->base)
-				if ((T(c, t)->flags & TF_VLA) && T(c, t)->n)
+			for (ast_qualified_type t = y->ty; is_array(c, t) || is_ptr(c, t); t = T(c, t)->base)
+				if ((T(c, t)->flags & AST_TYPE_FLAG_VLA) && T(c, t)->n)
 					lab |= walk(P, T(c, t)->n);
-		if (x->b && y->kind == S_VAR)
+		if (x->b && y->kind == AST_SYMBOL_VARIABLE)
 			note_fwrite(P, x->a, x->b);
 		if (is_local_var(c, x->a)) {
 			note_local(P, x->a);
-			if (x->b && (N(x->b)->op == N_INIT || N(x->b)->op == N_ZERO || N(x->b)->op == N_STR))
+			if (x->b && (N(x->b)->op == AST_NODE_INITIALIZER || N(x->b)->op == AST_NODE_ZERO || N(x->b)->op == AST_NODE_STRING))
 				P->E->lnoreg[x->a] = 1;	/* gen_init_local works on memory */
 		}
-		if (sym_attrs(c, x->a)->cleanup || (y->kind == S_VAR && (T(c, y->ty)->flags & TF_VLA)))
+		if (sym_attrs(c, x->a)->cleanup || (y->kind == AST_SYMBOL_VARIABLE && (T(c, y->ty)->flags & AST_TYPE_FLAG_VLA)))
 			P->cdepth++;
 		/* a __used static local is emitted with its function, referenced or not */
-		if (y->kind == S_VAR && y->sc == SC_STATIC && sym_attrs(c, x->a)->used &&
+		if (y->kind == AST_SYMBOL_VARIABLE && y->sc == AST_STORAGE_STATIC && sym_attrs(c, x->a)->used &&
 		    !atomic_load_explicit(&P->E->claimed[x->a], memory_order_relaxed) &&
 		    !atomic_exchange(&P->E->claimed[x->a], 1))
 			enqueue(P->E, x->a);
 		break;
 	}
-	case N_IF:
+	case AST_NODE_IF:
 		lab = walk(P, x->a) | walk(P, x->b) | walk(P, x->c);
 		break;
 	/* in the order the code is generated: LR_BACK means a jump back */
-	case N_SWITCH:
+	case AST_NODE_SWITCH:
 		lab = walk(P, x->a) | walk(P, x->b);
 		break;
-	case N_WHILE:
+	case AST_NODE_WHILE:
 		P->loopd++;
 		lab = walk(P, x->a) | walk(P, x->b);
 		P->loopd--;
 		break;
-	case N_DO:
+	case AST_NODE_DO:
 		P->loopd++;
 		lab = walk(P, x->b);
 		lab |= walk(P, x->a);
 		P->loopd--;
 		break;
-	case N_FOR: {
+	case AST_NODE_FOR: {
 		int cd = P->cdepth;
 
 		/* the init's declarations live in the for statement (gen does not open a block for them) */
-		if (x->a && N(x->a)->op == N_BLOCK) {
+		if (x->a && N(x->a)->op == AST_NODE_BLOCK) {
 			for (uint32_t i = 0; i < N(x->a)->c; i++)
 				lab |= walk(P, c->lists[N(x->a)->b + i]);
 		} else {
@@ -679,11 +679,11 @@ static int walk(pre *P, uint32_t n)
 		P->cdepth = cd;
 		break;
 	}
-	case N_CASE: case N_DEFAULT:
+	case AST_NODE_CASE: case AST_NODE_DEFAULT:
 		walk(P, x->c);
 		lab = 1;
 		break;
-	case N_LABEL:
+	case AST_NODE_LABEL:
 		P->E->lcdepth[x->a] = (uint16_t)P->cdepth;
 		P->E->lref[x->a] |= LR_DEF;
 		if (c->labels[x->a].addr_taken)
@@ -691,18 +691,18 @@ static int walk(pre *P, uint32_t n)
 		walk(P, x->c);
 		lab = 1;
 		break;
-	case N_GOTO:
+	case AST_NODE_GOTO:
 		P->E->lref[x->a] |= LR_REF | (P->E->lref[x->a] & LR_DEF ? LR_BACK : 0);
 		break;
-	case N_ASM: {
-		const casm *a = &c->asms[x->a];
+	case AST_NODE_ASM: {
+		const ast_asm_statement *a = &c->asms[x->a];
 
 		for (uint32_t i = 0; i < a->nout + a->nin; i++) {
 			if (i < a->nout)
 				mark_written(P, a->ops[i].expr, true);
 			else if (strpbrk(c->strs[a->ops[i].constraint - 1].s, "mQo"))
 				mark_written(P, a->ops[i].expr, true);
-			else if (strpbrk(c->strs[a->ops[i].constraint - 1].s, "gVX<>") && N(a->ops[i].expr)->op == N_VAR &&
+			else if (strpbrk(c->strs[a->ops[i].constraint - 1].s, "gVX<>") && N(a->ops[i].expr)->op == AST_NODE_VARIABLE &&
 				 is_local_var(c, N(a->ops[i].expr)->a))
 				P->E->lnoreg[N(a->ops[i].expr)->a] = 1;	/* may become a memory operand */
 			lab |= walk(P, a->ops[i].expr);
@@ -733,19 +733,19 @@ VPRIV bool inline_object_size(ecx *e, uint32_t fn, uint32_t call, uint32_t point
 {
 	cc *c = e->c;
 	if (!fn || !call) return false;
-	while (N(pointer)->op == N_CAST) pointer = N(pointer)->a;
-	if (N(pointer)->op != N_VAR) return false;
+	while (N(pointer)->op == AST_NODE_CAST) pointer = N(pointer)->a;
+	if (N(pointer)->op != AST_NODE_VARIABLE) return false;
 	uint32_t p = N(pointer)->a;
-	if (!is_ptr(c, c->syms[p].ty) || (c->syms[p].flags & SF_ADDR_TAKEN) ||
-	    (e->E->sflags[p] & (SA_WRITTEN | SA_CWRITE)) || (QQ(c->syms[p].ty) & Q_VOLATILE))
+	if (!is_ptr(c, c->syms[p].ty) || (c->syms[p].flags & AST_SYMBOL_FLAG_ADDRESS_TAKEN) ||
+	    (e->E->sflags[p] & (SA_WRITTEN | SA_CWRITE)) || (AST_QUALIFIED_TYPE_QUALIFIERS(c->syms[p].ty) & AST_QUALIFIER_VOLATILE))
 		return false;
 	const node *body = N(c->syms[fn].body), *x = N(call);
-	cval cv;
-	if (!cc_eval(c, mode, &cv) || cv.kind != CV_INT || cv.i < 0 || cv.i > 3) return false;
+	cc_value cv;
+	if (!cc_eval(c, mode, &cv) || cv.kind != CC_VALUE_INTEGER || cv.i < 0 || cv.i > 3) return false;
 	for (uint32_t i = 0; i < body->aux && i < x->c; i++) {
 		if (c->lists[body->a + i] != p) continue;
 		uint32_t arg = c->lists[x->b + i];
-		return !side_effects(c, arg) && cc_object_size(c, arg, (unsigned)cv.i, size);
+		return !side_effects(c, arg) && cc_builtin_object_size(c, arg, (unsigned)cv.i, size);
 	}
 	return false;
 }

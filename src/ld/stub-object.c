@@ -1,8 +1,10 @@
 /* The in-memory stub object that defines the symbols the -O0 kernel references only in dead branches. */
 
+#include "ld-internal.h"
+
 /* ---------------- stubs for unresolved symbols (-O0 dead branches) ---------------- */
 
-static int ld_string_cmp(const void *a, const void *b) { return strcmp(*(char *const *)a, *(char *const *)b); }
+VPRIV int ld_string_cmp(const void *a, const void *b) { return strcmp(*(char *const *)a, *(char *const *)b); }
 
 /*
  * The -O0 kernel references symbols that only exist in configurations
@@ -12,7 +14,7 @@ static int ld_string_cmp(const void *a, const void *b) { return strcmp(*(char *c
  * object is synthesized here, in memory, so the result is identical to
  * that retry without running anything.
  */
-static ld_object *ld_stub_object_create(const char **names, uint32_t n)
+VPRIV ld_object *ld_stub_object_create(struct ld_context *ctx, const char **names, uint32_t n)
 {
 	size_t strsz = 1 + 3;
 	for (uint32_t i = 0; i < n; i++)
@@ -26,7 +28,7 @@ static ld_object *ld_stub_object_create(const char **names, uint32_t n)
 	char *shstr = str + strsz;
 	memcpy(eh->e_ident, "\177ELF\2\1\1", 7);
 	eh->e_type = 1;
-	eh->e_machine = x86_ld ? 62 : 183;
+	eh->e_machine = ctx->inputs.x86 ? 62 : 183;
 	eh->e_shoff = sizeof(elf_file_header);
 	eh->e_shnum = 5;
 	eh->e_shstrndx = 1;
@@ -52,15 +54,15 @@ static ld_object *ld_stub_object_create(const char **names, uint32_t n)
 	}
 	ld_object *o = ld_region_alloc(sizeof *o);
 	o->path = "<vroom-stubs>";
-	o->buf = b;
+	o->file_bytes = b;
 	o->size = (uint8_t *)shstr + 32 + datasz - b;
-	o->sh = sh;
-	o->nsh = 5;
-	o->shstr = shstr;
-	o->sym = sy;
-	o->nsym = n + 2;
-	o->firstg = 2;
-	o->str = str;
-	o->gs = ld_region_alloc(n * sizeof(uint32_t));
+	o->section_headers = sh;
+	o->section_header_count = 5;
+	o->section_name_table = shstr;
+	o->symbols = sy;
+	o->symbol_count = n + 2;
+	o->first_global_index = 2;
+	o->string_table = str;
+	o->global_slots = ld_region_alloc(n * sizeof(uint32_t));
 	return o;
 }

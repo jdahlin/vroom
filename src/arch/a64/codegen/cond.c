@@ -16,9 +16,9 @@ VPRIV void gen_cond(ecx *e, uint32_t n, bool jump_if, uint32_t l)
 		return;
 	}
 	switch (x->op) {
-	case N_LOGAND:
-	case N_LOGOR: {
-		bool isand = x->op == N_LOGAND;
+	case AST_NODE_LOGICAL_AND:
+	case AST_NODE_LOGICAL_OR: {
+		bool isand = x->op == AST_NODE_LOGICAL_AND;
 
 		if (isand != jump_if) {
 			/* && jumping on false / || jumping on true: both operands jump to l */
@@ -33,19 +33,19 @@ VPRIV void gen_cond(ecx *e, uint32_t n, bool jump_if, uint32_t l)
 		}
 		return;
 	}
-	case N_UNARY:
+	case AST_NODE_UNARY:
 		if (x->aux == LEX_TOKEN_EXCLAMATION) {
 			gen_cond(e, x->a, !jump_if, l);
 			return;
 		}
 		break;
-	case N_CAST:
-		if (x->aux == CK_BOOL) {
+	case AST_NODE_CAST:
+		if (x->aux == AST_CAST_BOOL) {
 			gen_cond(e, x->a, jump_if, l);
 			return;
 		}
 		break;
-	case N_BINARY:
+	case AST_NODE_BINARY:
 		if (em_is_cmp(x->aux) && !is_wide(c, N(x->a)->ty) && !is_flt(c, N(x->a)->ty)) {
 			val v = gen(e, n);
 

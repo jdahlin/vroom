@@ -7,8 +7,8 @@
  * slots for locals, labels and the loop stack, the call sequence, switch
  * strategy.  What an operation becomes is the target's: every call into it
  * goes through LO(name), x64_name (arch/x64/codegen/) in the first
- * instantiation and vw_name, the VIR builder, in the second, which
- * codegen/vir/walk.c compiles with WK_PREFIX and LO_PREFIX defined.
+ * instantiation and virbuild_function_name_get, the VIR builder, in the second, which
+ * codegen/vir/walker-instance.c compiles with WK_PREFIX and LO_PREFIX defined.
  *
  * Values are the emitter's val (constant, address, physical register);
  * lvalues its lval (frame slot, symbol, register base).  Frame slots are
@@ -48,7 +48,7 @@ typedef struct wkael { uint32_t s, gen, inst; int64_t idx; i128 v; } wkael;	/* a
 typedef struct wkinl {
 	struct wkinl *up;
 	uint32_t fn, endlbl, inst, call;
-	qty rty;
+	ast_qualified_type rty;
 	int64_t rslot;		/* the result's slot (a value held by address: its object) */
 	int cbase;		/* the cleanups live at the call */
 	int vbase;		/* caller VLA saves must outlive callee alloca */
@@ -78,7 +78,7 @@ typedef struct wkst {
 	uint32_t *sgen;		/* per sym */
 	int64_t *soff;		/* per sym: frame offset */
 	uint32_t *lgen, *ulbl;	/* per user label: local label */
-	uint32_t *clbl;		/* per node (N_CASE/N_DEFAULT): local label, valid when cgen == gen */
+	uint32_t *clbl;		/* per node (AST_NODE_CASE/AST_NODE_DEFAULT): local label, valid when cgen == gen */
 	uint32_t *cgen;
 	uint32_t *vgen, *vinst;	/* per-node VLA size slot, keyed by function and inline instance */
 	int64_t *voff;
@@ -88,7 +88,7 @@ typedef struct wkst {
 	wkcase *cases;
 	uint32_t ncases;
 	uint32_t retlbl;
-	qty rty;
+	ast_qualified_type rty;
 	wkarg rrec;		/* a record result: as the ABI returns it */
 	uint32_t fsym;
 	uint32_t clean[WK_MAXCLEAN];	/* variables with __attribute__((cleanup)) in scope, innermost last */
@@ -107,7 +107,7 @@ typedef struct wkst {
 	uint32_t inst, ninst, *linst, *cinst;
 	struct wkinl *inl;	/* the innermost inlined call, NULL in the function itself */
 	int depth;
-	bool cjump;	/* wk_cond jumped whatever the condition (N_IF: the branch it skips is dead) */
+	bool cjump;	/* wk_cond jumped whatever the condition (AST_NODE_IF: the branch it skips is dead) */
 	/* a[K] = constant for local arrays used only as a[CONST] (no SA_AESC): straight-line
 	   code only (a label drops them all), as arm64's ael */
 	wkael ael[16];
@@ -129,7 +129,7 @@ typedef struct wkst {
    LO(params), LO(va_start) or LO(va_arg) is for (e->msabi; PLAN-win64.md WIN2): fty a function
    type or a pointer to one, 0 the target's own (library helpers).  Set right before each: the
    evaluation of an argument may make other calls in between.  (em_: one copy for both walkers) */
-static inline void em_abi(ecx *e, qty fty)
+static inline void em_abi(ecx *e, ast_qualified_type fty)
 {
 	e->msabi = X86(e->c) && (fty ? cc_func_abi(e->c, fty) == CC_FNABI_MS : WIN64(e->c));
 }

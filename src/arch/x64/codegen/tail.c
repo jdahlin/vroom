@@ -25,7 +25,7 @@ VPRIV bool x64_tail_return(ecx *e, uint32_t expr)
 	   Literal values need no frame slot and are materialized after snapshots. */
 	for (uint32_t i = 0; i < call->c; i++) {
 		uint32_t a = c->lists[call->b + i];
-		qty ty = N(a)->ty;
+		ast_qualified_type ty = N(a)->ty;
 		values[i] = wk_gen(e, a);
 		slots[i] = 0;
 		if (values[i].k != V_CONST) {
@@ -37,7 +37,7 @@ VPRIV bool x64_tail_return(ecx *e, uint32_t expr)
 		}
 	}
 	for (uint32_t i = 0; i < call->c; i++) {
-		qty ty = N(c->lists[call->b + i])->ty;
+		ast_qualified_type ty = N(c->lists[call->b + i])->ty;
 		if (slots[i]) {
 			lval from = { .k = L_FRAME, .off = slots[i], .align = 8 };
 

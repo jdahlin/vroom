@@ -686,7 +686,7 @@ static bool emit_function1(ecx *e, uint32_t s, int nlreg)
 	const sym *y = &c->syms[s];
 	const node *body = N(y->body);
 	const ctype *ft = T(c, y->ty);
-	qty rty = ft->base;
+	ast_qualified_type rty = ft->base;
 	fnctx F;
 	int ngrn = 0, nsaa = 0;
 
@@ -712,7 +712,7 @@ static bool emit_function1(ecx *e, uint32_t s, int nlreg)
 	e->top = s;
 	e->asmk = 0;
 	e->inline_depth = 0;
-	e->vararg = (ft->flags & TF_VARIADIC) != 0;
+	e->vararg = (ft->flags & AST_TYPE_FLAG_VARIADIC) != 0;
 	choose_lregs(e, s, nlreg);
 	memset(&F, 0, sizeof(F));
 	F.fn = s;
@@ -738,15 +738,15 @@ static bool emit_function1(ecx *e, uint32_t s, int nlreg)
 	e->nsrn = 0;
 	for (uint32_t i = 0; i < body->aux; i++) {
 		uint32_t p = c->lists[body->a + i];
-		qty pt = c->syms[p].ty;
+		ast_qualified_type pt = c->syms[p].ty;
 		abiarg ab;
 		bind *bd = binding(e, p);
 		uint64_t sz = tsize(c, pt);
 
 		/* a K&R definition without a prototype gets a float as a double (default promotions) */
-		bool kfl = (T(c, c->syms[s].ty)->flags & TF_NOPROTO) && KIND(c, pt) == TY_FLOAT;
+		bool kfl = (T(c, c->syms[s].ty)->flags & AST_TYPE_FLAG_NO_PROTOTYPE) && KIND(c, pt) == AST_TYPE_FLOAT;
 
-		classify(e, kfl ? prim(TY_DOUBLE) : pt, &ngrn, &nsaa, &ab);
+		classify(e, kfl ? prim(AST_TYPE_DOUBLE) : pt, &ngrn, &nsaa, &ab);
 		if (kfl && ab.kind == A_VREG) {
 			word(e, 0x1e624000u | (unsigned)ab.reg << 5 | ab.reg);	/* fcvt s, d */
 			ab.size = 4;
@@ -831,7 +831,7 @@ static bool emit_function1(ecx *e, uint32_t s, int nlreg)
 		}
 	}
 	for (uint32_t i = 0; i < body->aux; i++) {	/* int (*a)[n]: n as on entry */
-		qty pt = c->syms[c->lists[body->a + i]].ty;
+		ast_qualified_type pt = c->syms[c->lists[body->a + i]].ty;
 
 		if (unlikely(vm_type(c, pt)))
 			vla_fix(e, pt, true);

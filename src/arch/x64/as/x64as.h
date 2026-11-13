@@ -36,6 +36,7 @@ typedef struct {
 	int64_t imm; int isz; as_value immv; int immsym, immsgn, immmod;
 	int gotx;
 	int oreg;			/* a register in the last opcode byte, + 1 (0: none) */
+	int tuple, mask, zero;        /* EVEX disp8 scale (0 for legacy/VEX), writemask */
 	int vex, vvvv, vl;		/* VEX: the second source (0..15), 256-bit; the map from op (0f, 0f 38, 0f 3a) */
 } XForm;
 #define F(...) ((XForm){ __VA_ARGS__ })
@@ -71,6 +72,7 @@ VPRIV int x64_i_jump(as_context *a, char *mn, XOp *o, int nops);
 VPRIV int x64_i_setcc(as_context *a, char *mn, XOp *o, int nops);
 VPRIV int x64_i_x87(as_context *a, char *mn, XOp *o, int nops);
 VPRIV int x64_i_sse(as_context *a, char *mn, XOp *o, int nops);
+VPRIV int x64_i_avx512(as_context *a, char *mn, XOp *o, int nops);
 VPRIV int x64_i_avx(as_context *a, char *mn, XOp *o, int nops);
 VPRIV int x64_i_sse4(as_context *a, char *mn, XOp *o, int nops);
 VPRIV int x64_i_ssepk(as_context *a, char *mn, XOp *o, int nops);

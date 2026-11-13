@@ -21,7 +21,7 @@ VPRIV bool wk_udivconst_ok(ecx *e, val a, const em_udivconst_recipe *r)
 
 /* Unsigned32 uses a complete widened product. Unsigned64 asks the target for
  * the high half, including preservation of any implicit machine registers. */
-VPRIV val wk_udivconst(ecx *e, qty ty, val a, const em_udivconst_recipe *r)
+VPRIV val wk_udivconst(ecx *e, ast_qualified_type ty, val a, const em_udivconst_recipe *r)
 {
 	int size = r->bits / 8, input = wk_reg(e, &a, ty), saved = -1;
 	if (r->bits == 32)

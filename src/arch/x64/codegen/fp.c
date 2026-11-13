@@ -5,9 +5,9 @@
 
 VPRIV bool x64_ldmem(void) { return true; }
 
-static bool x64_isld(cc *c, qty t) { return KIND(c, t) == TY_LDOUBLE; }
-static bool x64_isq(cc *c, qty t) { return KIND(c, t) == TY_FLOAT128; }
-static int x64_fsz(cc *c, qty t) { return KIND(c, t) == TY_FLOAT ? 4 : 8; }
+static bool x64_isld(cc *c, ast_qualified_type t) { return KIND(c, t) == AST_TYPE_LONG_DOUBLE; }
+static bool x64_isq(cc *c, ast_qualified_type t) { return KIND(c, t) == AST_TYPE_FLOAT128; }
+static int x64_fsz(cc *c, ast_qualified_type t) { return KIND(c, t) == AST_TYPE_FLOAT ? 4 : 8; }
 static val x64_vr(int r) { return (val){ .k = V_REG, .r = (uint8_t)r }; }
 
 /* an x87 instruction, with its memory operand l (NULL: none) */
@@ -61,11 +61,11 @@ static void x64_jcc(ecx *e, int cc, uint32_t l)
 
 static val x64_qbin(ecx *e, int k, val a, val b);
 static val x64_qcmp(ecx *e, int op, val a, val b);
-static val x64_qcvt(ecx *e, val v, qty from, qty to);
+static val x64_qcvt(ecx *e, val v, ast_qualified_type from, ast_qualified_type to);
 static val x64_qzero(ecx *e);
 /* Compiler-runtime conversion helpers take/return half bits in xmm0.
    Use the regular ABI call path so every live temporary survives. */
-static val x64_half_call(ecx *e, int name, val v, qty from, qty to)
+static val x64_half_call(ecx *e, int name, val v, ast_qualified_type from, ast_qualified_type to)
 {
 	wkarg a;
 	lval slot = x64_tmpslot(e, 16);
@@ -94,17 +94,17 @@ VPRIV val x64_fconst(ecx *e, uint64_t bits, int size)
 	return x64_vr(r);
 }
 
-VPRIV val x64_fbin(ecx *e, int op, qty t, val a, val b)
+VPRIV val x64_fbin(ecx *e, int op, ast_qualified_type t, val a, val b)
 {
 	cc *c = e->c;
 	int k = op == LEX_TOKEN_PLUS ? 0 : op == LEX_TOKEN_MINUS ? 1 : op == LEX_TOKEN_STAR ? 2 : 3;
 
 	if (x64_isq(c, t))
 		return x64_qbin(e, k, a, b);
-	if (KIND(c, t) == TY_FLOAT16 || KIND(c, t) == TY_BFLOAT16) {
-		a = x64_cvt(e, a, t, prim(TY_FLOAT));
-		b = x64_cvt(e, b, t, prim(TY_FLOAT));
-		return x64_cvt(e, x64_fbin(e, op, prim(TY_FLOAT), a, b), prim(TY_FLOAT), t);
+	if (KIND(c, t) == AST_TYPE_FLOAT16 || KIND(c, t) == AST_TYPE_BFLOAT16) {
+		a = x64_cvt(e, a, t, prim(AST_TYPE_FLOAT));
+		b = x64_cvt(e, b, t, prim(AST_TYPE_FLOAT));
+		return x64_cvt(e, x64_fbin(e, op, prim(AST_TYPE_FLOAT), a, b), prim(AST_TYPE_FLOAT), t);
 	}
 
 	if (x64_isld(c, t)) {
@@ -125,7 +125,7 @@ VPRIV val x64_fbin(ecx *e, int op, qty t, val a, val b)
 	return a;
 }
 
-VPRIV val x64_fsqrt(ecx *e, qty t, val a)
+VPRIV val x64_fsqrt(ecx *e, ast_qualified_type t, val a)
 {
 	x64_op3(e, X_FSQRT, x64_fsz(e->c, t), a.r, a.r, XNOREG);
 	return a;
@@ -139,7 +139,7 @@ VPRIV val x64_root4(ecx *e, val a)
 	return a;
 }
 
-VPRIV val x64_fneg(ecx *e, qty t, val a)
+VPRIV val x64_fneg(ecx *e, ast_qualified_type t, val a)
 {
 	cc *c = e->c;
 
@@ -170,14 +170,14 @@ VPRIV val x64_fneg(ecx *e, qty t, val a)
 		x64_tfree(e, ra);
 		return x64_vr(rd);
 	}
-	x64_movi(e, R11, (KIND(c, t) == TY_FLOAT16 || KIND(c, t) == TY_BFLOAT16) ? 0x8000 : x64_fsz(c, t) == 4 ? (int64_t)0x80000000 : INT64_MIN);
+	x64_movi(e, R11, (KIND(c, t) == AST_TYPE_FLOAT16 || KIND(c, t) == AST_TYPE_BFLOAT16) ? 0x8000 : x64_fsz(c, t) == 4 ? (int64_t)0x80000000 : INT64_MIN);
 	x64_op3(e, X_MOV, x64_fsz(c, t), XMM15, R11, XNOREG);
 	x64_op3(e, X_FXOR, 8, a.r, a.r, XMM15);
 	return a;
 }
 
 /* a op b as 0 or 1: false when unordered, but for != */
-VPRIV val x64_fcmp(ecx *e, int op, qty t, val a, val b)
+VPRIV val x64_fcmp(ecx *e, int op, ast_qualified_type t, val a, val b)
 {
 	cc *c = e->c;
 	bool swap = op == LEX_TOKEN_LESS || op == LEX_TOKEN_LESS_EQUAL;	/* a < b is b > a: "above" is false for NaN */
@@ -186,10 +186,10 @@ VPRIV val x64_fcmp(ecx *e, int op, qty t, val a, val b)
 
 	if (x64_isq(c, t))
 		return x64_qcmp(e, op, a, b);
-	if (KIND(c, t) == TY_FLOAT16 || KIND(c, t) == TY_BFLOAT16) {
-		a = x64_cvt(e, a, t, prim(TY_FLOAT));
-		b = x64_cvt(e, b, t, prim(TY_FLOAT));
-		return x64_fcmp(e, op, prim(TY_FLOAT), a, b);
+	if (KIND(c, t) == AST_TYPE_FLOAT16 || KIND(c, t) == AST_TYPE_BFLOAT16) {
+		a = x64_cvt(e, a, t, prim(AST_TYPE_FLOAT));
+		b = x64_cvt(e, b, t, prim(AST_TYPE_FLOAT));
+		return x64_fcmp(e, op, prim(AST_TYPE_FLOAT), a, b);
 	}
 	if (op == WK_FCMP_UNORDERED)
 		cc = CC_P;
@@ -247,10 +247,10 @@ static val x64_tfcall(ecx *e, int fn, const tfarg *a, int n, int rk)
 	if (x64w_helpers(e)) {
 		/* Microsoft's convention: the 16-byte types by reference to a copy in the frame,
 		   __float128 and long double results through a hidden pointer, __int128 in xmm0 */
-		static const int kinds[] = { [TQ] = TY_FLOAT128, [TX] = TY_LDOUBLE, [TD] = TY_DOUBLE, [TF] = TY_FLOAT,
-					     [TI] = TY_LLONG, [TW] = TY_INT128 };
+		static const int kinds[] = { [TQ] = AST_TYPE_FLOAT128, [TX] = AST_TYPE_LONG_DOUBLE, [TD] = AST_TYPE_DOUBLE, [TF] = AST_TYPE_FLOAT,
+					     [TI] = AST_TYPE_LONG_LONG, [TW] = AST_TYPE_INT128 };
 		int64_t in[2];
-		qty ty[2];
+		ast_qualified_type ty[2];
 
 		for (int k = 0; k < n; k++) {
 			lval d = x64_tmpslot(e, a[k].k == TQ || a[k].k == TX || a[k].k == TW ? 16 : 8);
@@ -433,27 +433,27 @@ static val x64_qzero(ecx *e)
 }
 
 /* conversions with a __float128 side (to: not _Bool) */
-static val x64_qcvt(ecx *e, val v, qty from, qty to)
+static val x64_qcvt(ecx *e, val v, ast_qualified_type from, ast_qualified_type to)
 {
 	cc *c = e->c;
 	bool fq = x64_isq(c, from);
-	qty o = fq ? to : from;	/* the other side */
+	ast_qualified_type o = fq ? to : from;	/* the other side */
 	int os = wk_size(c, o), k = KIND(c, o);
 	bool sg = wk_signed(c, o);
 
 	if (fq && x64_isq(c, to))
 		return v;
 	if (is_flt(c, o)) {
-		tfarg a = { k == TY_LDOUBLE ? TX : fq ? TQ : k == TY_FLOAT ? TF : TD,
+		tfarg a = { k == AST_TYPE_LONG_DOUBLE ? TX : fq ? TQ : k == AST_TYPE_FLOAT ? TF : TD,
 			    v.k == V_REG ? v.r : x64_toreg(e, &v, 8) };
 
 		if (fq)
-			return x64_tfcall(e, k == TY_LDOUBLE ? FN_TRUNCTFXF2 : k == TY_FLOAT ? FN_TRUNCTFSF2 : FN_TRUNCTFDF2,
-					  &(tfarg){ TQ, a.r }, 1, k == TY_LDOUBLE ? TX : k == TY_FLOAT ? TF : TD);
-		return x64_tfcall(e, k == TY_LDOUBLE ? FN_EXTENDXFTF2 : k == TY_FLOAT ? FN_EXTENDSFTF2 : FN_EXTENDDFTF2,
+			return x64_tfcall(e, k == AST_TYPE_LONG_DOUBLE ? FN_TRUNCTFXF2 : k == AST_TYPE_FLOAT ? FN_TRUNCTFSF2 : FN_TRUNCTFDF2,
+					  &(tfarg){ TQ, a.r }, 1, k == AST_TYPE_LONG_DOUBLE ? TX : k == AST_TYPE_FLOAT ? TF : TD);
+		return x64_tfcall(e, k == AST_TYPE_LONG_DOUBLE ? FN_EXTENDXFTF2 : k == AST_TYPE_FLOAT ? FN_EXTENDSFTF2 : FN_EXTENDDFTF2,
 				  &a, 1, TQ);
 	}
-	if (k == TY_INT128 || k == TY_UINT128) {
+	if (k == AST_TYPE_INT128 || k == AST_TYPE_UINT128) {
 		tfarg a = { fq ? TQ : TW, x64_toreg(e, &v, 8) };
 
 		return x64_tfcall(e, fq ? (sg ? FN_FIXTFTI : FN_FIXUNSTFTI) : (sg ? FN_FLOATTITF : FN_FLOATUNTITF), &a, 1, fq ? TW : TQ);
@@ -541,14 +541,14 @@ static val x64_f2i(ecx *e, int x, int fs, int ts, bool sgn)
 }
 
 /* v of type from as type to, a float on at least one side (to may be _Bool) */
-VPRIV val x64_cvt(ecx *e, val v, qty from, qty to)
+VPRIV val x64_cvt(ecx *e, val v, ast_qualified_type from, ast_qualified_type to)
 {
 	cc *c = e->c;
 	bool ff = is_flt(c, from), tf = is_flt(c, to), fl = x64_isld(c, from), tl = x64_isld(c, to);
 	int fs = wk_size(c, from), ts = wk_size(c, to);
 
-	if (KIND(c, from) == TY_BFLOAT16) {
-		if (KIND(c, to) == TY_BFLOAT16) return v;
+	if (KIND(c, from) == AST_TYPE_BFLOAT16) {
+		if (KIND(c, to) == AST_TYPE_BFLOAT16) return v;
 		if (WIN64(c) && v.k == V_REG) {
 			/* the float with the same top 16 bits, as clang (MinGW's compiler-rt takes
 			   __extendbfsf2's argument in an integer register) */
@@ -559,40 +559,40 @@ VPRIV val x64_cvt(ecx *e, val v, qty from, qty to)
 			x64_op3(e, X_MOV, 4, q, r, XNOREG);
 			x64_tfree(e, r);
 			x64_tfree(e, v.r);
-			return x64_cvt(e, x64_vr(q), prim(TY_FLOAT), to);
+			return x64_cvt(e, x64_vr(q), prim(AST_TYPE_FLOAT), to);
 		}
-		v = x64_half_call(e, FN_EXTENDBFSF2, v, from, prim(TY_FLOAT));
-		return x64_cvt(e, v, prim(TY_FLOAT), to);
+		v = x64_half_call(e, FN_EXTENDBFSF2, v, from, prim(AST_TYPE_FLOAT));
+		return x64_cvt(e, v, prim(AST_TYPE_FLOAT), to);
 	}
-	if (KIND(c, to) == TY_BFLOAT16) {
+	if (KIND(c, to) == AST_TYPE_BFLOAT16) {
 		if (x64_isq(c, from))
 			return x64_tfcall(e, FN_TRUNCTFBF2,
 					  &(tfarg){ TQ, x64_toreg(e, &v, 8) }, 1, TF);
-		if (KIND(c, from) == TY_FLOAT16)
-			v = x64_cvt(e, v, from, prim(TY_FLOAT)), from = prim(TY_FLOAT);
+		if (KIND(c, from) == AST_TYPE_FLOAT16)
+			v = x64_cvt(e, v, from, prim(AST_TYPE_FLOAT)), from = prim(AST_TYPE_FLOAT);
 		if (!ff)
-			v = x64_cvt(e, v, from, prim(TY_DOUBLE)), from = prim(TY_DOUBLE);
-		return x64_half_call(e, x64_isld(c, from) ? FN_TRUNCXFBF2 : KIND(c, from) == TY_FLOAT ? FN_TRUNCSFBF2 : FN_TRUNCDFBF2, v, from, to);
+			v = x64_cvt(e, v, from, prim(AST_TYPE_DOUBLE)), from = prim(AST_TYPE_DOUBLE);
+		return x64_half_call(e, x64_isld(c, from) ? FN_TRUNCXFBF2 : KIND(c, from) == AST_TYPE_FLOAT ? FN_TRUNCSFBF2 : FN_TRUNCDFBF2, v, from, to);
 	}
-	if (KIND(c, from) == TY_FLOAT16) {
-		if (KIND(c, to) == TY_FLOAT16)
+	if (KIND(c, from) == AST_TYPE_FLOAT16) {
+		if (KIND(c, to) == AST_TYPE_FLOAT16)
 			return v;
-		v = x64_half_call(e, FN_EXTENDHFSF2, v, from, prim(TY_FLOAT));
-		return x64_cvt(e, v, prim(TY_FLOAT), to);
+		v = x64_half_call(e, FN_EXTENDHFSF2, v, from, prim(AST_TYPE_FLOAT));
+		return x64_cvt(e, v, prim(AST_TYPE_FLOAT), to);
 	}
-	if (KIND(c, to) == TY_FLOAT16) {
+	if (KIND(c, to) == AST_TYPE_FLOAT16) {
 		if (x64_isq(c, from))
 			return x64_tfcall(e, FN_TRUNCTFHF2,
 					  &(tfarg){ TQ, x64_toreg(e, &v, 8) }, 1, TF);
 		if (!ff)
-			v = x64_cvt(e, v, from, prim(TY_DOUBLE)), from = prim(TY_DOUBLE);
-		return x64_half_call(e, x64_isld(c, from) ? FN_TRUNCXFHF2 : KIND(c, from) == TY_FLOAT ? FN_TRUNCSFHF2 : FN_TRUNCDFHF2, v, from, to);
+			v = x64_cvt(e, v, from, prim(AST_TYPE_DOUBLE)), from = prim(AST_TYPE_DOUBLE);
+		return x64_half_call(e, x64_isld(c, from) ? FN_TRUNCXFHF2 : KIND(c, from) == AST_TYPE_FLOAT ? FN_TRUNCSFHF2 : FN_TRUNCDFHF2, v, from, to);
 	}
-	if (x64_isq(c, from) && KIND(c, to) == TY_BOOL)
+	if (x64_isq(c, from) && KIND(c, to) == AST_TYPE_BOOL)
 		return x64_qcmp(e, LEX_TOKEN_EXCLAMATION_EQUAL, v, x64_qzero(e));
 	if (x64_isq(c, from) || x64_isq(c, to))
 		return x64_qcvt(e, v, from, to);
-	if (KIND(c, to) == TY_BOOL) {
+	if (KIND(c, to) == AST_TYPE_BOOL) {
 		int rd;
 
 		if (fl) {

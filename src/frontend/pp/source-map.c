@@ -10,19 +10,19 @@
 
 VPRIV const pp_file_entry *pp_location_file_entry(const pp *p, uint32_t loc)
 {
-	uint32_t lo = 0, hi = p->nfe;
+	uint32_t lo = 0, hi = p->file_count;
 
 	while (hi - lo > 1) {
 		uint32_t mid = (lo + hi) / 2;
 
-		if (p->fe[mid].base <= loc)
+		if (p->files[mid].location_base <= loc)
 			lo = mid;
 		else
 			hi = mid;
 	}
-	while (lo > 0 && !p->fe[lo].f)	/* a dependency-only entry (pp_dependency_add) */
+	while (lo > 0 && !p->files[lo].lex_file)	/* a dependency-only entry (pp_dependency_add) */
 		lo--;
-	return p->nfe ? &p->fe[lo] : NULL;
+	return p->file_count ? &p->files[lo] : NULL;
 }
 
 VPRIV uint32_t pp_location_line(const pp *p, uint32_t loc)
@@ -32,25 +32,25 @@ VPRIV uint32_t pp_location_line(const pp *p, uint32_t loc)
 
 	if (!e)
 		return 0;
-	l = pp_file_line_of_offset(e->f, e->fi, loc - e->base);
-	fe = (uint32_t)(e - p->fe);
-	for (uint32_t i = p->nlm; i-- > 0;)
-		if (p->lm[i].fe == fe && p->lm[i].off <= loc - e->base)
-			return p->lm[i].line + (l - p->lm[i].pline);
+	l = pp_file_line_of_offset(e->lex_file, e->skeleton, loc - e->location_base);
+	fe = (uint32_t)(e - p->files);
+	for (uint32_t i = p->line_mark_count; i-- > 0;)
+		if (p->line_marks[i].file == fe && p->line_marks[i].offset <= loc - e->location_base)
+			return p->line_marks[i].line + (l - p->line_marks[i].physical_line);
 	return l;
 }
 
 /* the presumed file name at loc in file context fc (#line can change it) */
 VPRIV const char *pp_location_presumed_name(const pp *p, uint32_t fe, uint32_t loc, uint32_t *len)
 {
-	const pp_file_entry *e = &p->fe[fe];
+	const pp_file_entry *e = &p->files[fe];
 
-	for (uint32_t i = p->nlm; i-- > 0;)
-		if (p->lm[i].fe == fe && p->lm[i].off <= loc - e->base && p->lm[i].name) {
-			*len = p->lm[i].namelen;
-			return p->lm[i].name;
+	for (uint32_t i = p->line_mark_count; i-- > 0;)
+		if (p->line_marks[i].file == fe && p->line_marks[i].offset <= loc - e->location_base && p->line_marks[i].name) {
+			*len = p->line_marks[i].name_length;
+			return p->line_marks[i].name;
 		}
-	*len = e->namelen;
+	*len = e->name_length;
 	return e->name;
 }
 
@@ -58,14 +58,14 @@ int pp_location_is_in_system_header(const pp *p, uint32_t loc)
 {
 	const pp_file_entry *e = pp_location_file_entry(p, loc);
 
-	return e && loc - e->base <= e->f->size && e->sys;
+	return e && loc - e->location_base <= e->lex_file->size && e->is_system;
 }
 
 int pp_location_is_in_main_file(const pp *p, uint32_t loc)
 {
 	const pp_file_entry *e = pp_location_file_entry(p, loc);
 
-	return e && e->f == p->fe[0].f && loc - e->base <= e->f->size;
+	return e && e->lex_file == p->files[0].lex_file && loc - e->location_base <= e->lex_file->size;
 }
 
 int pp_location_describe(const pp *p, uint32_t loc, const char **name, uint32_t *namelen, uint32_t *line, uint32_t *col)
@@ -73,16 +73,16 @@ int pp_location_describe(const pp *p, uint32_t loc, const char **name, uint32_t 
 	const pp_file_entry *e = pp_location_file_entry(p, loc);
 	uint32_t off, b;
 
-	if (!e || loc - e->base > e->f->size) {
+	if (!e || loc - e->location_base > e->lex_file->size) {
 		*name = "<built-in>", *namelen = 10, *line = *col = 0;
 		return 0;
 	}
-	off = loc - e->base;
-	for (b = off; b > 0 && e->f->src[b - 1] != '\n'; b--)
+	off = loc - e->location_base;
+	for (b = off; b > 0 && e->lex_file->src[b - 1] != '\n'; b--)
 		;
 	*line = pp_location_line(p, loc);
 	*col = off - b + 1;
-	*name = pp_location_presumed_name(p, (uint32_t)(e - p->fe), loc, namelen);
+	*name = pp_location_presumed_name(p, (uint32_t)(e - p->files), loc, namelen);
 	return 1;
 }
 
@@ -91,5 +91,5 @@ int pp_location_describe(const pp *p, uint32_t loc, const char **name, uint32_t 
 VPRIV bool pp_location_is_valid(const pp *p, uint32_t loc, const pp_file_entry **e)
 {
 	*e = pp_location_file_entry(p, loc);
-	return *e && loc >= (*e)->base && loc - (*e)->base <= (*e)->f->size;
+	return *e && loc >= (*e)->location_base && loc - (*e)->location_base <= (*e)->lex_file->size;
 }

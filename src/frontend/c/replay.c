@@ -13,9 +13,9 @@
  *   - the types it interned or created, in order (the type log);
  *   - what it created (own records, index-addressed, in A's index space) and
  *     the writes to W (records whose post state differs).
- * Replaying it in TU B unifies W with B's state from the same names
- * (structurally, building the A -> B maps), replays the type log through B's
- * interning, appends the own records translated into B's index space and
+ * Replaying it in TU CC_COMPLEX_BINARY unifies W with CC_COMPLEX_BINARY's state from the same names
+ * (structurally, building the A -> CC_COMPLEX_BINARY maps), replays the type log through CC_COMPLEX_BINARY's
+ * interning, appends the own records translated into CC_COMPLEX_BINARY's index space and
  * applies the writes; the preprocessor then drops the region's tokens
  * (pp_hit_skip).  Anything not covered (diagnostics, #pragma weak/pack, lazy
  * bodies, labels, asm, _Complex, a reference that does not map) is not
@@ -33,9 +33,9 @@
 #include <stdatomic.h>
 #include <stddef.h>
 
-#include "ccimpl.h"
+#include "cc-internal.h"
 
-#define VEC(T) struct { T *v; uint32_t n, cap; }
+#define VEC(AST_TYPE) struct { AST_TYPE *v; uint32_t n, cap; }
 #define VGROW(x, k)                                                                                 \
 	do {                                                                                        \
 		if ((x).n + (k) > (x).cap) {                                                        \
@@ -66,7 +66,7 @@ static void *xdup(const void *p, size_t n)
 enum {
 	K_IMM,		/* a value */
 	K_LOC,		/* a location (ext records: not compared) */
-	K_SHADOW,	/* sym.shadow (not compared; unmappable: 0, rebound by sym_bind) */
+	K_SHADOW,	/* sym.shadow (not compared; unmappable: 0, rebound by cc_symbol_bind) */
 	K_SYM, K_TAG,
 	K_TYPE,		/* qty */
 	K_TIDX,		/* type index */
@@ -79,7 +79,7 @@ enum {
 	K_STR,		/* string index */
 	K_STR1,		/* string index + 1, 0: none */
 	K_ATTR,
-	K_PARAMS,	/* function type's aux (by ty_func) */
+	K_PARAMS,	/* function type's aux (by cc_type_function) */
 	K_BAD,		/* not supported */
 };
 
@@ -87,8 +87,8 @@ enum {
 #define LK_DEAD 0xfe	/* a list nothing in the state refers to (declarator scratch): copied as is */
 
 typedef struct fd { uint16_t off, size; uint8_t kind; } fd;
-#define FD(T, f, k) ((fd){ offsetof(T, f), sizeof(((T *)0)->f), (k) })
-#define FDR(T, f0, f1, k) ((fd){ offsetof(T, f0), offsetof(T, f1) + sizeof(((T *)0)->f1) - offsetof(T, f0), (k) })
+#define FD(AST_TYPE, f, k) ((fd){ offsetof(AST_TYPE, f), sizeof(((AST_TYPE *)0)->f), (k) })
+#define FDR(AST_TYPE, f0, f1, k) ((fd){ offsetof(AST_TYPE, f0), offsetof(AST_TYPE, f1) + sizeof(((AST_TYPE *)0)->f1) - offsetof(AST_TYPE, f0), (k) })
 
 static int sym_fd(const sym *s, fd *o)
 {
@@ -100,7 +100,7 @@ static int sym_fd(const sym *s, fd *o)
 	o[n++] = FD(sym, flags, K_IMM);
 	o[n++] = FD(sym, ty, K_TYPE);
 	o[n++] = FD(sym, align, K_IMM);
-	o[n++] = FD(sym, val, s->kind == S_TAG ? K_TAG : K_IMM);
+	o[n++] = FD(sym, val, s->kind == CC_SYMBOL_NAMESPACE_TAG ? K_TAG : K_IMM);
 	o[n++] = FD(sym, body, K_NODE);
 	o[n++] = FD(sym, asmname, K_IMM);
 	o[n++] = FD(sym, attrs, K_ATTR);
@@ -159,7 +159,7 @@ static int field_fd(fd *o)
 #define TY_W ((sizeof(ctype) + 7) / 8)
 static uint64_t vm_sym[2][SYM_W], vm_field[FIELD_W], vm_ty[32][TY_W];
 
-static bool is_tagkind(int k) { return k == TY_STRUCT || k == TY_UNION || k == TY_ENUM; }
+static bool is_tagkind(int k) { return k == AST_TYPE_STRUCT || k == AST_TYPE_UNION || k == AST_TYPE_ENUM; }
 
 static int ty_fd(const ctype *t, fd *o)
 {
@@ -169,9 +169,9 @@ static int ty_fd(const ctype *t, fd *o)
 	o[n++] = FD(ctype, align, K_IMM);
 	o[n++] = FD(ctype, size, K_IMM);
 	o[n++] = FD(ctype, base, K_TYPE);
-	o[n++] = FD(ctype, n, t->flags & TF_VLA ? K_NODE : t->flags & TF_ATOMIC ? K_TIDX : K_IMM);
-	o[n++] = FD(ctype, aux, is_tagkind(t->kind) ? K_TAG : t->kind == TY_FUNC ? K_PARAMS : K_IMM);
-	o[n++] = FD(ctype, canon, t->flags & TF_ALIGNED ? K_TIDX : K_SELF);
+	o[n++] = FD(ctype, n, t->flags & AST_TYPE_FLAG_VLA ? K_NODE : t->flags & AST_TYPE_FLAG_ATOMIC ? K_TIDX : K_IMM);
+	o[n++] = FD(ctype, aux, is_tagkind(t->kind) ? K_TAG : t->kind == AST_TYPE_FUNCTION ? K_PARAMS : K_IMM);
+	o[n++] = FD(ctype, canon, t->flags & AST_TYPE_FLAG_ALIGNED ? K_TIDX : K_SELF);
 	return n;
 }
 
@@ -199,32 +199,32 @@ static void node_kinds(const node *x, uint8_t k[3])
 {
 	k[0] = k[1] = k[2] = K_IMM;
 	switch (x->op) {
-	case N_NONE: case N_ZERO: case N_BREAK: case N_CONTINUE: break;
-	case N_NUM: k[0] = K_IPOOL; break;
-	case N_BIGNUM: k[0] = K_LIST; break;
-	case N_FNUM: k[0] = K_FPOOL; break;
-	case N_STR: k[0] = K_STR; break;
-	case N_VAR: k[0] = K_SYM; break;
-	case N_MEMBER: k[0] = K_NODE, k[1] = K_TAG; break;
-	case N_INDEX: case N_BINARY: case N_LOGAND: case N_LOGOR: case N_ASSIGN: case N_COMMA: case N_CPLX:
-	case N_WHILE: case N_DO: case N_SWITCH:
+	case AST_NODE_NONE: case AST_NODE_ZERO: case AST_NODE_BREAK: case AST_NODE_CONTINUE: break;
+	case AST_NODE_NUMBER: k[0] = K_IPOOL; break;
+	case AST_NODE_BITINT_NUMBER: k[0] = K_LIST; break;
+	case AST_NODE_FLOAT_NUMBER: k[0] = K_FPOOL; break;
+	case AST_NODE_STRING: k[0] = K_STR; break;
+	case AST_NODE_VARIABLE: k[0] = K_SYM; break;
+	case AST_NODE_MEMBER: k[0] = K_NODE, k[1] = K_TAG; break;
+	case AST_NODE_INDEX: case AST_NODE_BINARY: case AST_NODE_LOGICAL_AND: case AST_NODE_LOGICAL_OR: case AST_NODE_ASSIGN: case AST_NODE_COMMA: case AST_NODE_COMPLEX:
+	case AST_NODE_WHILE: case AST_NODE_DO: case AST_NODE_SWITCH:
 		k[0] = k[1] = K_NODE;
 		break;
-	case N_COND: case N_IF: k[0] = k[1] = k[2] = K_NODE; break;
-	case N_CALL: k[0] = K_NODE, k[1] = K_LIST; break;
-	case N_BUILTIN: case N_INIT: k[1] = K_LIST; break;
-	case N_CAST: k[0] = k[2] = K_NODE; break;
-	case N_UNARY: case N_ADDR: case N_DEREF: case N_PREINC: case N_PREDEC: case N_POSTINC:
-	case N_POSTDEC: case N_STMTEXPR: case N_VAARG: case N_EXPR: case N_GOTO_IND: case N_RETURN:
+	case AST_NODE_CONDITIONAL: case AST_NODE_IF: k[0] = k[1] = k[2] = K_NODE; break;
+	case AST_NODE_CALL: k[0] = K_NODE, k[1] = K_LIST; break;
+	case AST_NODE_BUILTIN: case AST_NODE_INITIALIZER: k[1] = K_LIST; break;
+	case AST_NODE_CAST: k[0] = k[2] = K_NODE; break;
+	case AST_NODE_UNARY: case AST_NODE_ADDRESS: case AST_NODE_DEREFERENCE: case AST_NODE_PRE_INCREMENT: case AST_NODE_PRE_DECREMENT: case AST_NODE_POST_INCREMENT:
+	case AST_NODE_POST_DECREMENT: case AST_NODE_STATEMENT_EXPRESSION: case AST_NODE_VA_ARG: case AST_NODE_EXPRESSION: case AST_NODE_GOTO_INDIRECT: case AST_NODE_RETURN:
 		k[0] = K_NODE;
 		break;
-	case N_SIZEOF_VLA: k[0] = K_NODE, k[1] = K_TYPE; break;
-	case N_COMPLIT: k[0] = K_NODE, k[1] = K_SYM; break;
-	case N_BLOCK: k[0] = x->aux ? K_LIST : K_LISTO, k[1] = K_LIST; break;
-	case N_DECL: k[0] = K_SYM, k[1] = K_NODE; break;
-	case N_FOR: k[0] = k[1] = K_NODE, k[2] = K_LIST; break;
-	case N_CASE: k[0] = k[1] = K_IPOOL, k[2] = K_NODE; break;
-	case N_DEFAULT: k[2] = K_NODE; break;
+	case AST_NODE_SIZEOF_VLA: k[0] = K_NODE, k[1] = K_TYPE; break;
+	case AST_NODE_COMPOUND_LITERAL: k[0] = K_NODE, k[1] = K_SYM; break;
+	case AST_NODE_BLOCK: k[0] = x->aux ? K_LIST : K_LISTO, k[1] = K_LIST; break;
+	case AST_NODE_DECLARATION: k[0] = K_SYM, k[1] = K_NODE; break;
+	case AST_NODE_FOR: k[0] = k[1] = K_NODE, k[2] = K_LIST; break;
+	case AST_NODE_CASE: k[0] = k[1] = K_IPOOL, k[2] = K_NODE; break;
+	case AST_NODE_DEFAULT: k[2] = K_NODE; break;
 	default: k[0] = K_BAD; break;	/* labels, asm, designators */
 	}
 }
@@ -306,7 +306,7 @@ typedef struct xrec { uint32_t w, mask; union { sym s; tag t; attrs r; ctype y; 
  * an own type its index in the region.
  */
 enum { RA_SYM, RA_TAG, RA_NODE, RA_SPAN, RA_LIST, RA_ATTR, RA_HEAP, RA_N };
-enum { RO_DS, RO_DT, RO_DN, RO_DL, RO_DI, RO_DF, RO_DR, RO_DA,	/* own: + (B start - A start) */
+enum { RO_DS, RO_DT, RO_DN, RO_DL, RO_DI, RO_DF, RO_DR, RO_DA,	/* own: + (CC_COMPLEX_BINARY start - A start) */
        RO_ZERO, RO_W, RO_W1, RO_TYOWN, RO_TYW, RO_TIOWN, RO_TIW };
 typedef struct drrel { uint32_t off; uint8_t op, size, wk, _pad; uint32_t arg; } drrel;
 
@@ -335,21 +335,21 @@ typedef struct drent {
 	wstr *wst;
 	wlist *wl;
 	field *wf;
-	qty *wp;
+	ast_qualified_type *wp;
 	char *wb;
 	uint32_t *wv;
 	uint32_t *wvp;		/* per wv element: its W position (W_SYM), UINT32_MAX: none */
 	/* the type log */
 	drop *ops;
 	uint32_t nops;
-	qty *opar;
+	ast_qualified_type *opar;
 	ctype *fin;		/* per op: the final content (NEW) */
 	/* own records, A's indices; heap pointers as offset + 1 into heap */
 	sym *syms;
 	tag *tags;
 	node *nodes;
 	diag_span *spans;
-	struct cparen *parens;
+	struct cc_node_parentheses *parens;
 	uint32_t *lists;
 	uint8_t *lk;		/* per list element: K_* */
 	i128 *ip;
@@ -365,7 +365,7 @@ typedef struct drent {
 	uint32_t dn[RA_N][RO_DA + 2];
 	uint32_t *bind, nbind;	/* syms bound at file scope, in order */
 	uint32_t *tl, ntl;	/* toplevel */
-	lzfn *lz;		/* lazy bodies the region kept (all from the header cache), A's */
+	cc_lazy_function *lz;		/* lazy bodies the region kept (all from the header cache), A's */
 	uint32_t nlz;
 	xrec *xs, *xt, *xa, *xy;
 	uint32_t nxs, nxt, nxa, nxy;
@@ -485,7 +485,7 @@ struct drrec {
 	uint64_t ntot;		/* the region's tokens (pp) */
 	int npack0, errors0, pperr0;
 	uint32_t ndiag0;
-	uint32_t cplx0[TY_NKINDS];
+	uint32_t cplx0[AST_TYPE_KIND_COUNT];
 	uint32_t fail;		/* F_* bits */
 	size_t heap0;		/* heap used at the start */
 	/* reads */
@@ -501,16 +501,16 @@ struct drrec {
 	VEC(wstr) wst;
 	VEC(wlist) wl;
 	VEC(field) wf;
-	VEC(qty) wp;
+	VEC(ast_qualified_type) wp;
 	VEC(char) wb;
 	VEC(uint32_t) wv;
 	VEC(uint64_t) work;	/* (kind << 32 | position) */
 	/* the type log */
 	VEC(drop) ops;
-	VEC(qty) opar;
-	uint32_t *rt, rcap, rn;		/* the region's ty_intern table */
+	VEC(ast_qualified_type) opar;
+	uint32_t *rt, rcap, rn;		/* the region's cc_type_intern table */
 	uint32_t *real, realcap;
-	uint32_t *rf, rfcap, rfn;	/* the region's ty_func table */
+	uint32_t *rf, rfcap, rfn;	/* the region's cc_type_function table */
 	uint32_t *freal, frealcap, fnreal;
 	/* VCC_DRCHECK: the state at the start */
 	sym *ssym;
@@ -523,12 +523,12 @@ struct drrec {
 	uint32_t *stamp[3], cstamp[3], gen;
 	uint32_t *tymap, ctymap;
 	VEC(uint64_t) uw;
-	VEC(qty) tpar;
+	VEC(ast_qualified_type) tpar;
 	/* per tag: the interned values (wtag.k) a successful validation compared it with, NULL: none or written
 	   since (tag_memo) */
 	const void **tk;
 	uint32_t ctk;
-	VEC(uint64_t) tdone;	/* this try's fully compared tags: (W position << 32 | B index) */
+	VEC(uint64_t) tdone;	/* this try's fully compared tags: (W position << 32 | CC_COMPLEX_BINARY index) */
 	/* VCC_DR + VCC_DRCHECK: the region is parsed and compared with what this entry's replay would do */
 	const struct drent *chk;
 	uint32_t chk_base;
@@ -565,7 +565,7 @@ static void count(int k, uint64_t tok)
  * its fields, its enumerators) are interned process-wide, one copy per
  * distinct content: tc_intern.  A TU remembers per tag which content a
  * successful validation compared it with (tk).  Any write to the tag since
- * clears that (DR_TAGWRITE for parsed code, apply for replayed writes, a
+ * clears that (CC_REPLAY_TAG_WRITE_LOG for parsed code, apply for replayed writes, a
  * restore for all), so a tag that matches its memo has those values, and
  * validation only pairs its references (tag_known).  Enumerators are never
  * written after their enum body.
@@ -811,7 +811,7 @@ static void w_refs(cc *c, const void *rec, const fd *f, int n)
 		switch (f[i].kind) {
 		case K_SYM: w_sym(c, (uint32_t)v); break;
 		case K_TAG: w_tag(c, (uint32_t)v); break;
-		case K_TYPE: w_ty(c, QI((uint32_t)v), false); break;
+		case K_TYPE: w_ty(c, AST_QUALIFIED_TYPE_INDEX((uint32_t)v), false); break;
 		case K_TIDX: w_ty(c, (uint32_t)v, false); break;
 		case K_ATTR: w_attr(c, (uint32_t)v); break;
 		case K_STR: w_str(c, (uint32_t)v); break;
@@ -840,9 +840,9 @@ static void w_ty(cc *c, uint32_t i, bool intern)
 		return;
 	}
 	w.a = i, w.t = *t, w.intern = intern, w.po = r->wp.n;
-	if (t->kind == TY_FUNC) {
+	if (t->kind == AST_TYPE_FUNCTION) {
 		VGROW(r->wp, t->n);
-		memcpy(r->wp.v + r->wp.n, &c->params[t->aux], t->n * sizeof(qty));
+		memcpy(r->wp.v + r->wp.n, &c->params[t->aux], t->n * sizeof(ast_qualified_type));
 		r->wp.n += t->n;
 	}
 	VPUSH(r->wy, w);
@@ -866,12 +866,12 @@ static void w_drain(cc *c)
 
 			n = sym_fd(&s, f);
 			w_refs(c, &s, f, n);
-			if (s.body && s.kind == S_VAR)
+			if (s.body && s.kind == AST_SYMBOL_VARIABLE)
 				r->fail |= 1u << F_BODY;
 			if (s.psyms) {
-				const ctype *t = &c->ty[QI(s.ty)];
+				const ctype *t = &c->ty[AST_QUALIFIED_TYPE_INDEX(s.ty)];
 
-				if (t->kind != TY_FUNC)
+				if (t->kind != AST_TYPE_FUNCTION)
 					r->fail |= 1u << F_UNMAPPED;
 				else
 					w_list(c, s.psyms - 1, t->n);
@@ -898,11 +898,11 @@ static void w_drain(cc *c)
 
 			n = ty_fd(&w.t, f);
 			w_refs(c, &w.t, f, n);
-			if (w.t.flags & TF_VLA)
+			if (w.t.flags & AST_TYPE_FLAG_VLA)
 				r->fail |= 1u << F_UNMAPPED;
-			if (w.t.kind == TY_FUNC)
+			if (w.t.kind == AST_TYPE_FUNCTION)
 				for (uint32_t i = 0; i < w.t.n; i++)
-					w_ty(c, QI(r->wp.v[w.po + i]), false);
+					w_ty(c, AST_QUALIFIED_TYPE_INDEX(r->wp.v[w.po + i]), false);
 			break;
 		}
 		case W_ATTR: {
@@ -922,7 +922,7 @@ static bool dr_pays(uint64_t tok, uint64_t lzt, uint64_t nw, uint64_t own);
 static uint64_t w_count(const struct drrec *r);
 
 /* a name lookup (ns 0: ordinary, 1: tag) gave s */
-VPRIV __attribute__((noinline)) void dr_read(cc *c, int ns, uint32_t id, uint32_t s)
+CC_PRIVATE __attribute__((noinline)) void cc_replay_symbol_read(cc *c, int ns, uint32_t id, uint32_t s)
 {
 	struct drrec *r = c->dr;
 
@@ -964,7 +964,7 @@ static void rt_insert(struct drrec *r, cc *c, uint32_t idx)
 
 			if (!x)
 				continue;
-			for (k = ty_hash(&c->ty[x]) & (ncap - 1); nh[k]; k = (k + 1) & (ncap - 1))
+			for (k = cc_type_hash(&c->ty[x]) & (ncap - 1); nh[k]; k = (k + 1) & (ncap - 1))
 				;
 			nh[k] = x;
 		}
@@ -973,7 +973,7 @@ static void rt_insert(struct drrec *r, cc *c, uint32_t idx)
 		c->tyhash = r->rt, c->tyhcap = r->rcap;
 	}
 	m = r->rcap - 1;
-	for (uint32_t k = ty_hash(&c->ty[idx]) & m;; k = (k + 1) & m)
+	for (uint32_t k = cc_type_hash(&c->ty[idx]) & m;; k = (k + 1) & m)
 		if (!r->rt[k]) {
 			r->rt[k] = idx, r->rn++;
 			return;
@@ -982,17 +982,17 @@ static void rt_insert(struct drrec *r, cc *c, uint32_t idx)
 
 /*
  * While a region is recorded, c->tyhash and c->fnhash are tables of its own,
- * so ty_intern and ty_func reach dr_intern / dr_func once per structural type
- * the region interns: its type log.  The TU's tables stay complete.  ty_ptr's
+ * so cc_type_intern and cc_type_function reach cc_replay_type_intern / cc_replay_type_function once per structural type
+ * the region interns: its type log.  The TU's tables stay complete.  cc_type_pointer's
  * cache ignores pointer types from before the region (ptr_lo).
  */
-VPRIV __attribute__((noinline)) uint32_t dr_intern(cc *c, const ctype *t)
+CC_PRIVATE __attribute__((noinline)) uint32_t cc_replay_type_intern(cc *c, const ctype *t)
 {
 	struct drrec *r = c->dr;
 	uint32_t i;
 
 	c->tyhash = r->real, c->tyhcap = r->realcap, c->dr_on = 0;
-	i = ty_intern(c, t);
+	i = cc_type_intern(c, t);
 	r->real = c->tyhash, r->realcap = c->tyhcap, c->dr_on = 1;
 	c->tyhash = r->rt, c->tyhcap = r->rcap;
 	rt_insert(r, c, i);
@@ -1015,7 +1015,7 @@ static void rf_insert(struct drrec *r, cc *c, uint32_t idx)
 
 			if (!x)
 				continue;
-			for (k = fn_hash(f->base, &c->params[f->aux], f->n, f->flags | f->ext << 8) & (ncap - 1); nh[k];
+			for (k = cc_type_function_hash(f->base, &c->params[f->aux], f->n, f->flags | f->ext << 8) & (ncap - 1); nh[k];
 			     k = (k + 1) & (ncap - 1))
 				;
 			nh[k] = x;
@@ -1028,7 +1028,7 @@ static void rf_insert(struct drrec *r, cc *c, uint32_t idx)
 	{
 		const ctype *f = &c->ty[idx];
 
-		for (uint32_t k = fn_hash(f->base, &c->params[f->aux], f->n, f->flags | f->ext << 8) & m;; k = (k + 1) & m)
+		for (uint32_t k = cc_type_function_hash(f->base, &c->params[f->aux], f->n, f->flags | f->ext << 8) & m;; k = (k + 1) & m)
 			if (!r->rf[k]) {
 				r->rf[k] = idx, r->rfn++;
 				return;
@@ -1036,36 +1036,36 @@ static void rf_insert(struct drrec *r, cc *c, uint32_t idx)
 	}
 }
 
-VPRIV __attribute__((noinline)) qty dr_func(cc *c, qty ret, const qty *par, uint32_t n, int flags)
+CC_PRIVATE __attribute__((noinline)) ast_qualified_type cc_replay_type_function(cc *c, ast_qualified_type ret, const ast_qualified_type *par, uint32_t n, int flags)
 {
 	struct drrec *r = c->dr;
 	uint32_t nfn = c->nfn;
-	qty q;
+	ast_qualified_type q;
 	drop o = { OP_FUNC, 0, r->opar.n, { 0 } };
 
 	c->fnhash = r->freal, c->fnhcap = r->frealcap, c->nfn = r->fnreal, c->dr_on = 0;
-	q = ty_func(c, ret, par, n, flags);
+	q = cc_type_function(c, ret, par, n, flags);
 	r->freal = c->fnhash, r->frealcap = c->fnhcap, r->fnreal = c->nfn, c->dr_on = 1;
 	c->fnhash = r->rf, c->fnhcap = r->rfcap, c->nfn = nfn;
-	rf_insert(r, c, QI(q));
-	o.a = QI(q);
-	o.t.kind = TY_FUNC, o.t.flags = (uint8_t)flags, o.t.ext = (uint16_t)(flags >> 8), o.t.base = ret, o.t.n = n;
+	rf_insert(r, c, AST_QUALIFIED_TYPE_INDEX(q));
+	o.a = AST_QUALIFIED_TYPE_INDEX(q);
+	o.t.kind = AST_TYPE_FUNCTION, o.t.flags = (uint8_t)flags, o.t.ext = (uint16_t)(flags >> 8), o.t.base = ret, o.t.n = n;
 	VGROW(r->opar, n);
 	if (n)	/* par may be NULL (implicit, unprototyped): memcpy(_, NULL, 0) is UB */
-		memcpy(r->opar.v + r->opar.n, par, n * sizeof(qty));
+		memcpy(r->opar.v + r->opar.n, par, n * sizeof(ast_qualified_type));
 	r->opar.n += n;
 	VPUSH(r->ops, o);
-	if (QI(q) < r->y0)
-		w_ty(c, QI(q), true);
+	if (AST_QUALIFIED_TYPE_INDEX(q) < r->y0)
+		w_ty(c, AST_QUALIFIED_TYPE_INDEX(q), true);
 	return q;
 }
 
-VPRIV __attribute__((noinline)) void dr_new(cc *c, uint32_t idx)
+CC_PRIVATE __attribute__((noinline)) void cc_replay_type_new_log(cc *c, uint32_t idx)
 {
 	VPUSH(c->dr->ops, ((drop){ OP_NEW, idx, 0, c->ty[idx] }));
 }
 
-VPRIV __attribute__((noinline)) void dr_pragma(cc *c, int kind)
+CC_PRIVATE __attribute__((noinline)) void cc_replay_pragma_log(cc *c, int kind)
 {
 	struct drrec *r = c->dr;
 
@@ -1074,8 +1074,8 @@ VPRIV __attribute__((noinline)) void dr_pragma(cc *c, int kind)
 	r->fail |= 1u << (kind == 1 ? F_WEAK : F_PRAGMA);
 }
 
-/* DR_TAGWRITE: tag ti is written by the code being parsed */
-VPRIV __attribute__((noinline)) void dr_tagwrite(cc *c, uint32_t ti)
+/* CC_REPLAY_TAG_WRITE_LOG: tag ti is written by the code being parsed */
+CC_PRIVATE __attribute__((noinline)) void cc_replay_tag_write_log(cc *c, uint32_t ti)
 {
 	struct drrec *r = c->dr;
 
@@ -1163,14 +1163,14 @@ static void rec_open(cc *c, uint64_t b, const void *he, uint32_t base, unsigned 
 	count(S_OPEN, 0);
 }
 
-/* ---------------- translation (A's indices to B's) ---------------- */
+/* ---------------- translation (A's indices to CC_COMPLEX_BINARY's) ---------------- */
 
 typedef struct trx {
-	cc *c;			/* B (check: A) */
+	cc *c;			/* CC_COMPLEX_BINARY (check: A) */
 	const drent *e;
 	struct drrec *r;
 	bool check, bad;
-	int64_t ds, dt, dn, dl, di, df, dr, da;	/* own records: B start - A start */
+	int64_t ds, dt, dn, dl, di, df, dr, da;	/* own records: CC_COMPLEX_BINARY start - A start */
 	uint32_t baseB;
 	char *heapB;
 } trx;
@@ -1190,7 +1190,7 @@ static int64_t wfind(const drent *e, int k, uint32_t a)
 	}
 }
 
-/* a W member's B index (check: present) */
+/* a W member's CC_COMPLEX_BINARY index (check: present) */
 static uint32_t tr_w(trx *x, int k, uint32_t a, bool *ok)
 {
 	int64_t p = wfind(x->e, k, a);
@@ -1264,7 +1264,7 @@ static uint64_t tr(trx *x, int k, uint64_t v64)
 		x->bad = true;
 		return 0;
 	case K_TYPE:
-		return QT(tr_ty(x, QI(v)), QQ(v));
+		return AST_QUALIFIED_TYPE(tr_ty(x, AST_QUALIFIED_TYPE_INDEX(v)), AST_QUALIFIED_TYPE_QUALIFIERS(v));
 	case K_TIDX:
 		return tr_ty(x, v);
 	case K_NODE:
@@ -1355,7 +1355,7 @@ static void fail_count(uint32_t fail, uint64_t tok)
 		}
 }
 
-static uint64_t opt_sig(const cc_opts *o)
+static uint64_t opt_sig(const cc_options *o)
 {
 	uint64_t sig = (uint64_t)o->target | (uint64_t)!!o->unsigned_char << 8 | (uint64_t)!!o->ms_anon << 9 |
 	       (uint64_t)!!o->short_wchar << 10 | (uint64_t)o->std << 11 | (uint64_t)!!o->implicit_int << 20 |
@@ -1440,7 +1440,7 @@ static inline __attribute__((always_inline)) bool rel_one(const drent *e, relset
 		}
 		return v < e->ntag_bi;
 	case K_TYPE: case K_TIDX:
-		ix = k == K_TYPE ? QI(v) : v;
+		ix = k == K_TYPE ? AST_QUALIFIED_TYPE_INDEX(v) : v;
 		if (ix < e->nty_bi)
 			return true;
 		if (ix >= e->y0 && ix < e->y1) {
@@ -1532,14 +1532,14 @@ static bool rel_build(drent *e)
 	int n;
 	bool ok = true;
 
-#define R1(T, rec, fl, k) (ok &= rel_one(e, rs, off, FD(T, fl, k), rd(rec, FD(T, fl, k))))
+#define R1(AST_TYPE, rec, fl, k) (ok &= rel_one(e, rs, off, FD(AST_TYPE, fl, k), rd(rec, FD(AST_TYPE, fl, k))))
 	for (uint32_t i = 0; i < e->s1 - e->s0; i++) {
 		const sym *y = &e->syms[i];
 		uint32_t off = i * (uint32_t)sizeof(sym);
 		relset *rs = &rl[RA_SYM];
 
 #define X(fl, k)                                                     \
-	if (offsetof(sym, fl) != offsetof(sym, val) || y->kind == S_TAG) \
+	if (offsetof(sym, fl) != offsetof(sym, val) || y->kind == CC_SYMBOL_NAMESPACE_TAG) \
 		R1(sym, y, fl, k);
 		SYM_REFS(X)
 #undef X
@@ -1653,8 +1653,8 @@ static void rel_apply(const trx *x, char *base, int a)
 		case RO_ZERO: v = 0; break;
 		case RO_W: v = r->slot[q->wk][q->arg] - 1; break;
 		case RO_W1: v = r->slot[q->wk][q->arg]; break;
-		case RO_TYOWN: v = QT(r->tymap[q->arg], QQ((uint32_t)v)); break;
-		case RO_TYW: v = QT(r->slot[W_TY][q->arg] - 1, QQ((uint32_t)v)); break;
+		case RO_TYOWN: v = AST_QUALIFIED_TYPE(r->tymap[q->arg], AST_QUALIFIED_TYPE_QUALIFIERS((uint32_t)v)); break;
+		case RO_TYW: v = AST_QUALIFIED_TYPE(r->slot[W_TY][q->arg] - 1, AST_QUALIFIED_TYPE_QUALIFIERS((uint32_t)v)); break;
 		case RO_TIOWN: v = r->tymap[q->arg]; break;
 		case RO_TIW: v = r->slot[W_TY][q->arg] - 1; break;
 		default: v = (uint32_t)(v + d[q->op]); break;
@@ -1663,7 +1663,7 @@ static void rel_apply(const trx *x, char *base, int a)
 	}
 }
 
-/* the locations of copied own records: + (B base - A base), 0 stays */
+/* the locations of copied own records: + (CC_COMPLEX_BINARY base - A base), 0 stays */
 #define REL_LOC(x_, lb_) ((x_) = (x_) ? (x_) + (lb_) : 0)
 
 static void drcheck(cc *c);
@@ -1684,13 +1684,13 @@ static uint64_t w_count(const struct drrec *r)
 }
 
 /*
- * A lazy body the region kept, in B: its tokens are in the header cache entry
+ * A lazy body the region kept, in CC_COMPLEX_BINARY: its tokens are in the header cache entry
  * z.e, which is immutable and the same in every TU replaying the region, so
  * only its indices and locations move.
  */
-static lzfn lz_tr(const drent *e, const lzfn *a, int64_t ds, int64_t dl, uint32_t lb, uint32_t nlzt)
+static cc_lazy_function lz_tr(const drent *e, const cc_lazy_function *a, int64_t ds, int64_t dl, uint32_t lb, uint32_t nlzt)
 {
-	lzfn b = *a;
+	cc_lazy_function b = *a;
 
 	b.sym = (uint32_t)(a->sym + ds);
 	b.wm = (uint32_t)(a->wm + ds);
@@ -1706,7 +1706,7 @@ static lzfn lz_tr(const drent *e, const lzfn *a, int64_t ds, int64_t dl, uint32_
 }
 
 /* a lazy body's indices and locations map (lz_tr) */
-static bool lz_ok(const drent *e, const lzfn *a)
+static bool lz_ok(const drent *e, const cc_lazy_function *a)
 {
 #define LOC_OK(v) (!(v) || (v) - e->base <= e->span)
 	return a->hc && !a->done && !a->ntk && a->sym >= e->s0 && a->sym < e->s1 && a->wm >= e->s0 && a->wm <= e->s1 &&
@@ -1715,7 +1715,7 @@ static bool lz_ok(const drent *e, const lzfn *a)
 #undef LOC_OK
 }
 
-static bool lz_eq(const lzfn *a, const lzfn *b)
+static bool lz_eq(const cc_lazy_function *a, const cc_lazy_function *b)
 {
 	return a->sym == b->sym && a->tk == b->tk && a->ntk == b->ntk && a->wm == b->wm && a->name == b->name &&
 	       a->loc == b->loc && (!a->npsyms || a->psyms == b->psyms) && a->npsyms == b->npsyms && a->plb == b->plb &&
@@ -1838,7 +1838,7 @@ static void rec_close(cc *c, uint64_t endpos)
 
 		if (!memcmp(a, b, sizeof(ctype)))
 			continue;
-		if (r->wy.v[i].intern || !is_tagkind(a->kind) || (a->flags & (TF_ALIGNED | TF_ATOMIC))) {
+		if (r->wy.v[i].intern || !is_tagkind(a->kind) || (a->flags & (AST_TYPE_FLAG_ALIGNED | AST_TYPE_FLAG_ATOMIC))) {
 			fail |= 1u << F_TYWRITE;	/* (an interned type: its hash would change) */
 			continue;
 		}
@@ -1944,9 +1944,9 @@ static void rec_close(cc *c, uint64_t endpos)
 		fd f_ = (fdx);                                                                    \
 		uint64_t v_ = rd((rec), f_);                                                      \
 		if (f_.kind == K_TYPE || f_.kind == K_TIDX) {                                     \
-			uint32_t ix_ = f_.kind == K_TYPE ? QI((uint32_t)v_) : (uint32_t)v_;       \
+			uint32_t ix_ = f_.kind == K_TYPE ? AST_QUALIFIED_TYPE_INDEX((uint32_t)v_) : (uint32_t)v_;       \
 			if (ix_ >= r->nty_bi)                                                     \
-				v_ = f_.kind == K_TYPE ? QQ((uint32_t)v_) | 1ull << 40 : 1ull << 40; \
+				v_ = f_.kind == K_TYPE ? AST_QUALIFIED_TYPE_QUALIFIERS((uint32_t)v_) | 1ull << 40 : 1ull << 40; \
 		} else {                                                                          \
 			v_ = v_ ? 1ull << 41 : 0;                                                 \
 		}                                                                                 \
@@ -1954,16 +1954,16 @@ static void rec_close(cc *c, uint64_t endpos)
 		memcpy(cb.v + cb.n, &v_, 8);                                                      \
 		cb.n += 8;                                                                        \
 	} while (0)
-#define PUT(rec, fds, nf)                                                                         \
+#define CC_EXPRESSION_OPERAND_NAME_APPEND(rec, fds, nf)                                                                         \
 	for (int q_ = 0; q_ < (nf); q_++) {                                                       \
 		uint64_t v_ = rd((rec), (fds)[q_]);                                               \
 		int k_ = (fds)[q_].kind;                                                          \
 		if (k_ == K_LOC || k_ == K_SHADOW)                                                \
 			continue;                                                                 \
 		if (k_ == K_TYPE || k_ == K_TIDX) {                                               \
-			uint32_t ix_ = k_ == K_TYPE ? QI((uint32_t)v_) : (uint32_t)v_;            \
+			uint32_t ix_ = k_ == K_TYPE ? AST_QUALIFIED_TYPE_INDEX((uint32_t)v_) : (uint32_t)v_;            \
 			if (ix_ >= r->nty_bi)                                                     \
-				v_ = k_ == K_TYPE ? QQ((uint32_t)v_) | 1ull << 40 : 1ull << 40;   \
+				v_ = k_ == K_TYPE ? AST_QUALIFIED_TYPE_QUALIFIERS((uint32_t)v_) | 1ull << 40 : 1ull << 40;   \
 		} else if (k_ != K_IMM) {                                                         \
 			v_ = v_ ? 1ull << 41 : 0;                                                 \
 		}                                                                                 \
@@ -1972,7 +1972,7 @@ static void rec_close(cc *c, uint64_t endpos)
 		cb.n += 8;                                                                        \
 	}
 			n = tag_fd(&w->t, f);
-			PUT(&w->t, f, n);
+			CC_EXPRESSION_OPERAND_NAME_APPEND(&w->t, f, n);
 			for (uint32_t j = 0; j < w->t.nfield && w->t.f; j++) {
 				const field *y = &r->wf.v[w->fo + j];
 
@@ -1994,11 +1994,11 @@ static void rec_close(cc *c, uint64_t endpos)
 					{
 						const sym *y = &r->ws.v[sp].s;
 
-						if (y->kind != S_ENUMCONST || y->attrs || y->body || y->next || y->ovl || y->psyms) {
+						if (y->kind != AST_SYMBOL_ENUMERATOR || y->attrs || y->body || y->next || y->ovl || y->psyms) {
 							ok = false;	/* (tag_known pairs only an enumerator's type) */
 							break;
 						}
-						PUTM(y, vm_sym[0], SYM_W);	/* (S_ENUMCONST) */
+						PUTM(y, vm_sym[0], SYM_W);	/* (AST_SYMBOL_ENUMERATOR) */
 #define X(fl, k)                                          \
 	if ((k) != K_LOC && (k) != K_SHADOW && offsetof(sym, fl) != offsetof(sym, val)) \
 		PUTR(y, FD(sym, fl, k));
@@ -2007,7 +2007,7 @@ static void rec_close(cc *c, uint64_t endpos)
 					}
 				}
 			}
-#undef PUT
+#undef CC_EXPRESSION_OPERAND_NAME_APPEND
 #undef PUTM
 #undef PUTR
 			w->k = ok ? tc_intern(cb.v, cb.n) : NULL;
@@ -2029,14 +2029,14 @@ static void rec_close(cc *c, uint64_t endpos)
 	e->wst = xdup(r->wst.v, r->wst.n * sizeof(wstr));
 	e->wl = xdup(r->wl.v, r->wl.n * sizeof(wlist));
 	e->wf = xdup(r->wf.v, r->wf.n * sizeof(field));
-	e->wp = xdup(r->wp.v, r->wp.n * sizeof(qty));
+	e->wp = xdup(r->wp.v, r->wp.n * sizeof(ast_qualified_type));
 	e->wb = xdup(r->wb.v, r->wb.n);
 	e->wv = xdup(r->wv.v, r->wv.n * sizeof(uint32_t));
 	e->wvp = malloc((r->wv.n + 1) * sizeof(uint32_t));
 	for (uint32_t i = 0; i < r->wv.n; i++)
 		e->wvp[i] = r->wv.v[i] ? wm_find(&r->wm, (uint64_t)W_SYM << 32 | r->wv.v[i]) : UINT32_MAX;
 	e->ops = xdup(r->ops.v, r->ops.n * sizeof(drop)), e->nops = r->ops.n;
-	e->opar = xdup(r->opar.v, r->opar.n * sizeof(qty));
+	e->opar = xdup(r->opar.v, r->opar.n * sizeof(ast_qualified_type));
 	e->fin = malloc((r->ops.n + 1) * sizeof(ctype));
 	x = (trx){ c, e, r, true, false, 0, 0, 0, 0, 0, 0, 0, 0, 0, NULL };
 
@@ -2049,7 +2049,7 @@ static void rec_close(cc *c, uint64_t endpos)
 		if (o->a >= e->y0)
 			ownty++;
 		if (o->op == OP_NEW) {
-			if (o->a < e->y0 || now->kind == TY_FUNC)
+			if (o->a < e->y0 || now->kind == AST_TYPE_FUNCTION)
 				fail |= 1u << F_OPS;
 			n = ty_fd(now, f);
 			tr_rec(&x, &e->fin[i], f, n, o->a);
@@ -2057,20 +2057,20 @@ static void rec_close(cc *c, uint64_t endpos)
 			tr(&x, K_TYPE, o->t.base);
 			for (uint32_t k = 0; k < o->t.n; k++)
 				tr(&x, K_TYPE, e->opar[o->po + k]);
-			if (o->a >= e->y0 && (now->kind != TY_FUNC || now->flags != o->t.flags || now->base != o->t.base ||
+			if (o->a >= e->y0 && (now->kind != AST_TYPE_FUNCTION || now->flags != o->t.flags || now->base != o->t.base ||
 					      now->n != o->t.n || now->size != 1 || now->align != 4))
 				fail |= 1u << F_TYMUT;
 		} else {
 			ctype t = o->t;
 
-			if (t.kind == TY_FUNC)
+			if (t.kind == AST_TYPE_FUNCTION)
 				fail |= 1u << F_OPS;
 			n = ty_fd(&t, f);
 			tr_rec(&x, &t, f, n, o->a);
 			if (o->a >= e->y0) {
 				ctype a = o->t, b = *now;
 
-				if (!(a.flags & TF_ALIGNED))
+				if (!(a.flags & AST_TYPE_FLAG_ALIGNED))
 					a.canon = b.canon = 0;
 				if (memcmp(&a, &b, sizeof(ctype)))
 					fail |= 1u << F_TYMUT;
@@ -2120,20 +2120,20 @@ static void rec_close(cc *c, uint64_t endpos)
 		diag_span *s = &e->spans[i];
 
 		switch (d->op) {
-		case N_CALL: case N_BUILTIN: MARK(d->b, d->c, K_NODE, false); break;
-		case N_BLOCK:
+		case AST_NODE_CALL: case AST_NODE_BUILTIN: MARK(d->b, d->c, K_NODE, false); break;
+		case AST_NODE_BLOCK:
 			MARK(d->b, d->c, K_NODE, false);
 			if (d->aux)
 				MARK(d->a, d->aux, K_SYM, false);
 			break;
-		case N_BIGNUM: MARK(d->a, d->b, LK_IMM, false); break;
-		case N_INIT:
+		case AST_NODE_BITINT_NUMBER: MARK(d->a, d->b, LK_IMM, false); break;
+		case AST_NODE_INITIALIZER:
 			if (d->aux == 1)
 				MARK(d->b, d->c * 3, j_ % 3 == 2 ? K_NODE : LK_IMM, false);
 			else
 				MARK(d->b, d->c, K_NODE, false);
 			break;
-		case N_FOR: MARK(d->c, 2, K_NODE, false); break;
+		case AST_NODE_FOR: MARK(d->c, 2, K_NODE, false); break;
 		}
 		(void)s;
 	}
@@ -2141,9 +2141,9 @@ static void rec_close(cc *c, uint64_t endpos)
 		const sym *s = &c->syms[e->s0 + i];
 
 		if (s->psyms) {
-			const ctype *t = &c->ty[QI(s->ty)];
+			const ctype *t = &c->ty[AST_QUALIFIED_TYPE_INDEX(s->ty)];
 
-			if (t->kind != TY_FUNC)
+			if (t->kind != AST_TYPE_FUNCTION)
 				x.bad = true;
 			else
 				MARK(s->psyms - 1, t->n, K_SYM, true);
@@ -2165,9 +2165,9 @@ static void rec_close(cc *c, uint64_t endpos)
 		const sym *s = &c->syms[r->ws.v[i].a];
 
 		if (s->psyms && s->psyms - 1 >= e->l0) {
-			const ctype *t = &c->ty[QI(s->ty)];
+			const ctype *t = &c->ty[AST_QUALIFIED_TYPE_INDEX(s->ty)];
 
-			if (t->kind != TY_FUNC)
+			if (t->kind != AST_TYPE_FUNCTION)
 				x.bad = true;
 			else
 				MARK(s->psyms - 1, t->n, K_SYM, true);
@@ -2249,7 +2249,7 @@ static void rec_close(cc *c, uint64_t endpos)
 	e->ntl = c->ntoplevel - r->tl0;
 	e->tl = xdup(&c->toplevel[r->tl0], e->ntl * sizeof(uint32_t));
 	e->nlz = c->nlzf - r->lzf0;
-	e->lz = xdup(&c->lzf[r->lzf0], e->nlz * sizeof(lzfn));
+	e->lz = xdup(&c->lzf[r->lzf0], e->nlz * sizeof(cc_lazy_function));
 	for (uint32_t i = 0; i < e->nlz; i++)
 		if (!lz_ok(e, &e->lz[i]))
 			x.bad = true;
@@ -2271,7 +2271,7 @@ static void rec_close(cc *c, uint64_t endpos)
 		   r->opar.n * 4 + (e->s1 - e->s0) * sizeof(sym) + (e->t1 - e->t0) * sizeof(tag) +
 		   (e->n1 - e->n0) * (sizeof(node) + sizeof(diag_span)) + (e->l1 - e->l0) * 5 + (e->i1 - e->i0) * 16 +
 		   (e->f1 - e->f0) * 8 + (e->r1 - e->r0) * sizeof(cstr) + (e->a1 - e->a0) * sizeof(attrs) + e->nheap +
-		   e->nfpc * 4 + e->nbind * 4 + e->ntl * 4 + e->nlz * sizeof(lzfn) + (e->nxs + e->nxt + e->nxa + e->nxy) * sizeof(xrec);
+		   e->nfpc * 4 + e->nbind * 4 + e->ntl * 4 + e->nlz * sizeof(cc_lazy_function) + (e->nxs + e->nxt + e->nxa + e->nxy) * sizeof(xrec);
 	for (int k = 0; k < RA_N; k++)
 		e->bytes += e->nrel[k] * sizeof(drrel) + e->dn[k][RO_DA + 1] * 4;
 	for (int k = 0; k < W_N; k++)
@@ -2345,7 +2345,7 @@ static uint32_t *ensure(uint32_t **a, uint32_t *cap, uint32_t n, bool zero)
 	return *a;
 }
 
-/* map W member a (kind k) to B's b; false on a conflict */
+/* map W member a (kind k) to CC_COMPLEX_BINARY's b; false on a conflict */
 static bool pair_wp(un *u, int k, uint32_t a, uint32_t b, bool *found, bool push);
 
 static bool pair_w(un *u, int k, uint32_t a, uint32_t b, bool *found)
@@ -2372,7 +2372,7 @@ static bool pair_wp(un *u, int k, uint32_t a, uint32_t b, bool *found, bool push
 		if (b >= lim)
 			return false;
 		if (st[b] == u->r->gen)
-			return false;	/* (two A records for one of B's) */
+			return false;	/* (two A records for one of CC_COMPLEX_BINARY's) */
 		st[b] = u->r->gen;
 	}
 	if (push && (k != W_TY || !u->e->wy[p].intern))
@@ -2393,7 +2393,7 @@ static bool refs_rest(un *u, const void *a, const void *b, const fd *f, int n)
 		if (k == K_IMM || k == K_LOC || k == K_SHADOW)
 			continue;
 		v = rd(a, f[i]);
-		if (k == K_TYPE ? QI((uint32_t)v) < u->e->nty_bi : k == K_TIDX ? v < u->e->nty_bi : !v)
+		if (k == K_TYPE ? AST_QUALIFIED_TYPE_INDEX((uint32_t)v) < u->e->nty_bi : k == K_TIDX ? v < u->e->nty_bi : !v)
 			continue;
 		if (!pair(u, k, v, rd(b, f[i])))
 			return false;
@@ -2401,7 +2401,7 @@ static bool refs_rest(un *u, const void *a, const void *b, const fd *f, int n)
 	return true;
 }
 
-/* map W member p (kind k) to B's b without comparing it (pair_wp with the position known) */
+/* map W member p (kind k) to CC_COMPLEX_BINARY's b without comparing it (pair_wp with the position known) */
 static bool slot_set(un *u, int k, uint32_t p, uint32_t b)
 {
 	uint32_t *s = &u->r->slot[k][p], lim, *st;
@@ -2419,7 +2419,7 @@ static bool slot_set(un *u, int k, uint32_t p, uint32_t b)
 	return true;
 }
 
-/* a W tag that B's tag b was already found equal to (tk): pair the references of it, its fields and enumerators */
+/* a W tag that CC_COMPLEX_BINARY's tag b was already found equal to (tk): pair the references of it, its fields and enumerators */
 static bool tag_known(un *u, const wtag *w, uint32_t b, bool *ok)
 {
 	struct drrec *r = u->r;
@@ -2439,9 +2439,9 @@ static bool tag_known(un *u, const wtag *w, uint32_t b, bool *ok)
 	if (!refs_rest(u, &w->t, bt, f, n))
 		return true;
 	for (uint32_t i = 0; i < w->t.nfield && w->t.f; i++) {
-		qty a = e->wf[w->fo + i].ty;
+		ast_qualified_type a = e->wf[w->fo + i].ty;
 
-		if (QI(a) >= e->nty_bi && !pair(u, K_TYPE, a, bt->f[i].ty))
+		if (AST_QUALIFIED_TYPE_INDEX(a) >= e->nty_bi && !pair(u, K_TYPE, a, bt->f[i].ty))
 			return true;
 	}
 	if (w->t.nenum) {
@@ -2455,12 +2455,12 @@ static bool tag_known(un *u, const wtag *w, uint32_t b, bool *ok)
 		l = &e->wl[q];
 		for (uint32_t i = 0; i < l->n; i++) {
 			uint32_t sp = e->wvp[l->vo + i];
-			qty a;
+			ast_qualified_type a;
 
 			if (sp == UINT32_MAX || !slot_set(u, W_SYM, sp, bl[i]))
 				return true;
 			a = e->ws[sp].s.ty;	/* (the rest of an enumerator: values, or 0) */
-			if (QI(a) >= e->nty_bi && !pair(u, K_TYPE, a, u->c->syms[bl[i]].ty))
+			if (AST_QUALIFIED_TYPE_INDEX(a) >= e->nty_bi && !pair(u, K_TYPE, a, u->c->syms[bl[i]].ty))
 				return true;
 		}
 	}
@@ -2494,9 +2494,9 @@ static bool pair(un *u, int k, uint64_t a64, uint64_t b64)
 			return false;
 		return found || (a < e->ntag_bi && a == b);
 	case K_TYPE:
-		if (QQ(a) != QQ(b))
+		if (AST_QUALIFIED_TYPE_QUALIFIERS(a) != AST_QUALIFIED_TYPE_QUALIFIERS(b))
 			return false;
-		a = QI(a), b = QI(b);
+		a = AST_QUALIFIED_TYPE_INDEX(a), b = AST_QUALIFIED_TYPE_INDEX(b);
 		__attribute__((fallthrough));
 	case K_TIDX:
 		if (a < e->nty_bi || b < e->nty_bi)
@@ -2542,8 +2542,8 @@ static uint8_t nty_refs[32];
 
 static int ty_vx(const ctype *t)
 {
-	return (t->flags & TF_VLA ? 1 : 0) | (t->flags & TF_ATOMIC ? 2 : 0) | (is_tagkind(t->kind) ? 4 : 0) |
-	       (t->kind == TY_FUNC ? 8 : 0) | (t->flags & TF_ALIGNED ? 16 : 0);
+	return (t->flags & AST_TYPE_FLAG_VLA ? 1 : 0) | (t->flags & AST_TYPE_FLAG_ATOMIC ? 2 : 0) | (is_tagkind(t->kind) ? 4 : 0) |
+	       (t->kind == AST_TYPE_FUNCTION ? 8 : 0) | (t->flags & AST_TYPE_FLAG_ALIGNED ? 16 : 0);
 }
 
 static void vm_build(const fd *f, int n, uint64_t *m)
@@ -2560,7 +2560,7 @@ static void vm_init(void)
 	sym s = { 0 };
 
 	for (int t = 0; t < 2; t++) {
-		s.kind = t ? S_TAG : S_VAR;
+		s.kind = t ? CC_SYMBOL_NAMESPACE_TAG : AST_SYMBOL_VARIABLE;
 		n = sym_fd(&s, f);
 		vm_build(f, n, vm_sym[t]);
 	}
@@ -2569,8 +2569,8 @@ static void vm_init(void)
 	for (int v = 0; v < 32; v++) {
 		ctype y = { 0 };
 
-		y.kind = v & 4 ? TY_STRUCT : v & 8 ? TY_FUNC : TY_ARRAY;
-		y.flags = (v & 1 ? TF_VLA : 0) | (v & 2 ? TF_ATOMIC : 0) | (v & 16 ? TF_ALIGNED : 0);
+		y.kind = v & 4 ? AST_TYPE_STRUCT : v & 8 ? AST_TYPE_FUNCTION : AST_TYPE_ARRAY;
+		y.flags = (v & 1 ? AST_TYPE_FLAG_VLA : 0) | (v & 2 ? AST_TYPE_FLAG_ATOMIC : 0) | (v & 16 ? AST_TYPE_FLAG_ALIGNED : 0);
 		if ((v & 4) && (v & 8))
 			continue;
 		n = ty_fd(&y, f);
@@ -2602,10 +2602,10 @@ static bool pair(un *u, int k, uint64_t a64, uint64_t b64);
 
 static bool un_sym(un *u, const sym *a, const sym *b)
 {
-	if (!vm_eq(a, b, vm_sym[a->kind == S_TAG], SYM_W, sizeof(sym)))
+	if (!vm_eq(a, b, vm_sym[a->kind == CC_SYMBOL_NAMESPACE_TAG], SYM_W, sizeof(sym)))
 		return false;
 #define X(fl, k)                                                                                 \
-	if ((k) != K_LOC && (k) != K_SHADOW && (offsetof(sym, fl) != offsetof(sym, val) || a->kind == S_TAG)) { \
+	if ((k) != K_LOC && (k) != K_SHADOW && (offsetof(sym, fl) != offsetof(sym, val) || a->kind == CC_SYMBOL_NAMESPACE_TAG)) { \
 		uint64_t av_ = rd(a, FD(sym, fl, k)), bv_ = rd(b, FD(sym, fl, k));                    \
 		if ((av_ | bv_) && !pair(u, k, av_, bv_))	/* (0, 0: equal for every kind here) */     \
 			return false;                                                                \
@@ -2683,9 +2683,9 @@ static bool unify_one(un *u, int k, uint32_t p)
 
 		if (!un_ty(u, &w->t, bt))
 			return false;
-		if (!(w->t.flags & TF_ALIGNED) && (w->t.canon != w->a || bt->canon != b))
+		if (!(w->t.flags & AST_TYPE_FLAG_ALIGNED) && (w->t.canon != w->a || bt->canon != b))
 			return false;
-		if (w->t.kind == TY_FUNC)
+		if (w->t.kind == AST_TYPE_FUNCTION)
 			for (uint32_t i = 0; i < w->t.n; i++)
 				if (!pair(u, K_TYPE, e->wp[w->po + i], c->params[bt->aux + i]))
 					return false;
@@ -2731,14 +2731,14 @@ static bool validate(cc *c, const drent *e)
 	/* first the bindings themselves (bound or not, kind, flags): most variants that fail, fail here */
 	for (uint32_t i = 0; i < e->nrd; i++) {
 		const drread *d = &e->rd[i];
-		uint32_t b = dget(d->ns ? c->tdir : c->odir, d->id);
+		uint32_t b = cc_scope_get(d->ns ? c->tdir : c->odir, d->id);
 
 		if (!d->s != !b || (b && (c->syms[b].kind != d->kind || c->syms[b].flags != d->flags)))
 			return false;
 	}
 	for (uint32_t i = 0; i < e->nrd; i++) {
 		const drread *d = &e->rd[i];
-		uint32_t b = dget(d->ns ? c->tdir : c->odir, d->id);
+		uint32_t b = cc_scope_get(d->ns ? c->tdir : c->odir, d->id);
 
 		if (!pair(&u, K_SYM, d->s, b))
 			return false;
@@ -2778,19 +2778,19 @@ static void apply(cc *c, const drent *e, uint32_t baseB)
 		uint32_t b;
 
 		if (o->op == OP_NEW) {
-			b = ty_new(c, o->t.kind);
+			b = cc_type_new(c, o->t.kind);
 		} else if (o->op == OP_FUNC) {
 			r->tpar.n = 0;
 			VGROW(r->tpar, o->t.n);
 			for (uint32_t k = 0; k < o->t.n; k++)
-				r->tpar.v[k] = (qty)tr(&x, K_TYPE, e->opar[o->po + k]);
-			b = QI(ty_func(c, (qty)tr(&x, K_TYPE, o->t.base), r->tpar.v, o->t.n, o->t.flags | o->t.ext << 8));
+				r->tpar.v[k] = (ast_qualified_type)tr(&x, K_TYPE, e->opar[o->po + k]);
+			b = AST_QUALIFIED_TYPE_INDEX(cc_type_function(c, (ast_qualified_type)tr(&x, K_TYPE, o->t.base), r->tpar.v, o->t.n, o->t.flags | o->t.ext << 8));
 		} else {
 			ctype t = o->t;
 
 			n = ty_fd(&t, f);
 			tr_rec(&x, &t, f, n, 0);
-			b = ty_intern(c, &t);
+			b = cc_type_intern(c, &t);
 		}
 		if (o->a >= e->y0) {
 			r->tymap[o->a - e->y0] = b;
@@ -2828,7 +2828,7 @@ static void apply(cc *c, const drent *e, uint32_t baseB)
 		tag *to = &c->tags[c->ntag];
 
 		if (e->nheap) {
-			x.heapB = halloc(c, e->nheap + 16);
+			x.heapB = cc_heap_allocate(c, e->nheap + 16);
 			x.heapB = (char *)(((uintptr_t)x.heapB + 15) & ~(uintptr_t)15);
 			memcpy(x.heapB, e->heap, e->nheap);
 			rel_apply(&x, x.heapB, RA_HEAP);
@@ -2886,7 +2886,7 @@ static void apply(cc *c, const drent *e, uint32_t baseB)
 		memcpy(to, e->attr, na * sizeof(attrs));
 		rel_apply(&x, (char *)to, RA_ATTR);
 	}
-	/* 3. the final content of the region's records and enums (and its other ty_new types) */
+	/* 3. the final content of the region's records and enums (and its other cc_type_new types) */
 	for (uint32_t i = 0; i < e->nops; i++)
 		if (e->ops[i].op == OP_NEW) {
 			uint32_t b = r->tymap[e->ops[i].a - e->y0];
@@ -2941,13 +2941,13 @@ static void apply(cc *c, const drent *e, uint32_t baseB)
 	}
 	/* 5. file-scope bindings, toplevel, the last token */
 	for (uint32_t i = 0; i < e->nbind; i++)
-		sym_bind(c, (uint32_t)(e->bind[i] + x.ds));
+		cc_symbol_bind(c, (uint32_t)(e->bind[i] + x.ds));
 	for (uint32_t i = 0; i < e->ntl; i++)
 		c->toplevel[c->ntoplevel++] = (uint32_t)tr(&x, K_SYM, e->tl[i]);
 	for (uint32_t i = 0; i < e->nlz; i++)
 		c->lzf[c->nlzf++] = lz_tr(e, &e->lz[i], x.ds, x.dl, lb, c->nlzt);
 	if (e->nlz)
-		lazy_replayed(e->lz, e->nlz);
+		cc_lazy_body_replayed(e->lz, e->nlz);
 	c->prevloc = (uint32_t)tr(&x, K_LOC, e->prevloc);
 	c->prevflags = e->prevflags;
 }
@@ -3119,7 +3119,7 @@ static void drcheck(cc *c)
 			ok = chk_rec(c, &x, "type", b, &e->fin[i], &c->ty[b], f, n, b);
 		}
 	for (uint32_t i = 0; ok && i < e->nlz; i++) {
-		lzfn want = lz_tr(e, &e->lz[i], x.ds, x.dl, r->chk_base - e->base, r->lzt0);
+		cc_lazy_function want = lz_tr(e, &e->lz[i], x.ds, x.dl, r->chk_base - e->base, r->lzt0);
 
 		if (!lz_eq(&want, &c->lzf[r->lzf0 + i])) {
 			chk_report(c, "lazy body", r->lzf0 + i, 0, want.sym, c->lzf[r->lzf0 + i].sym);
@@ -3183,7 +3183,7 @@ static void drcheck(cc *c)
 /* ---------------- boundaries ---------------- */
 
 /* at a file-scope declaration boundary, before the declaration cache: a recording whose region ends here */
-VPRIV void dr_close(cc *c)
+CC_PRIVATE void cc_replay_region_close(cc *c)
 {
 	struct drrec *r = c->dr;
 	uint64_t pos, b;
@@ -3222,7 +3222,7 @@ VPRIV void dr_close(cc *c)
 }
 
 /* after the declaration cache: replay a region starting at tk[0], or record it; true if replayed */
-VPRIV bool dr_boundary(cc *c)
+CC_PRIVATE bool cc_replay_boundary(cc *c)
 {
 	struct drrec *r = c->dr;
 	uint64_t pos, b;
@@ -3289,7 +3289,7 @@ VPRIV bool dr_boundary(cc *c)
 				ADD(tk_apply, ticks() - t0);
 			}
 			pp_hit_skip(c->p, 0);
-			cc_fetch(c, &c->tk[0]);
+			cc_token_fetch_out_of_line(c, &c->tk[0]);
 			return true;
 		}
 		count(any ? S_MISS : S_NOENT, 0);
@@ -3345,10 +3345,10 @@ static void schema_check(void)
 		fd want[24];
 		int m = 0;
 
-		s.kind = pass == 0 ? S_TAG : S_VAR;
+		s.kind = pass == 0 ? CC_SYMBOL_NAMESPACE_TAG : AST_SYMBOL_VARIABLE;
 		n = pass < 2 ? sym_fd(&s, f) : field_fd(f);
 #define X(fl, k)                                                         \
-	if (offsetof(sym, fl) != offsetof(sym, val) || s.kind == S_TAG) \
+	if (offsetof(sym, fl) != offsetof(sym, val) || s.kind == CC_SYMBOL_NAMESPACE_TAG) \
 		want[m++] = FD(sym, fl, k);
 #define Y(fl, k) want[m++] = FD(field, fl, k);
 		if (pass < 2) {
@@ -3390,7 +3390,7 @@ static void dr_env(void)
 	atomic_store(&dr_max, (uint64_t)(m ? atoll(m) : 512) << 20);
 }
 
-VPRIV void dr_begin(cc *c)
+CC_PRIVATE void cc_replay_region_begin(cc *c)
 {
 	static pthread_once_t once = PTHREAD_ONCE_INIT;
 
@@ -3403,7 +3403,7 @@ VPRIV void dr_begin(cc *c)
 	c->dr->nsym_bi = c->nsym, c->dr->nty_bi = c->nty, c->dr->ntag_bi = c->ntag;
 }
 
-VPRIV void dr_end(cc *c)
+CC_PRIVATE void cc_replay_region_end(cc *c)
 {
 	struct drrec *r = c->dr;
 
@@ -3430,7 +3430,7 @@ VPRIV void dr_end(cc *c)
 }
 
 /* a declaration-cache restore replaced the state: a recording in progress is void */
-void dr_restored(cc *c)
+void cc_replay_restored(cc *c)
 {
 	if (c->dr && c->dr->ctk)	/* (the tags are the snapshot's) */
 		memset(c->dr->tk, 0, c->dr->ctk * sizeof(*c->dr->tk));
@@ -3446,7 +3446,7 @@ void dr_restored(cc *c)
 #define M(x) ((double)atomic_load(&(x)) / 1e6)
 #define K(x) ((unsigned long long)atomic_load(&(x)))
 
-void cc_dr_stats(char *buf, size_t n)
+void cc_replay_statistics(char *buf, size_t n)
 {
 	int k;
 

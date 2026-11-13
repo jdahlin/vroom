@@ -1,8 +1,8 @@
 /* vcc front end: "did you mean" for undeclared identifiers and keywords (clang's typo correction) */
-#include "ccimpl.h"
+#include "cc-internal.h"
 
 /* Levenshtein distance, giving up above max */
-static int edit_dist(const char *a, int na, const char *b, int nb, int max)
+static int cc_typo_edit_distance(const char *a, int na, const char *b, int nb, int max)
 {
 	int row[nb + 1];
 
@@ -33,19 +33,19 @@ static int edit_dist(const char *a, int na, const char *b, int nb, int max)
 
 /* keywords clang offers as corrections (Sema's CTypeSpecs) where a type may stand,
    and at the start of a statement the statement keywords too */
-static const uint16_t kw_types[] = {
+static const uint16_t cc_typo_keywords_type[] = {
 	KW_char, KW_const, KW_double, KW_enum, KW_float, KW_int, KW_long, KW_short, KW_signed,
 	KW_struct, KW_union, KW_unsigned, KW_void, KW_volatile, KW__Complex, KW_extern, KW_inline,
 	KW_static, KW_typedef, KW_restrict, KW__Bool, KW_bool,
 };
-static const uint16_t kw_stmts[] = {
+static const uint16_t cc_typo_keywords_statement[] = {
 	KW_return, KW_goto, KW_else, KW_if, KW_for, KW_while, KW_do, KW_switch, KW_break, KW_continue,
 	KW_case, KW_default,
 };
 
-static bool kw_offered(cc *c, uint16_t k)
+static bool cc_typo_keyword_is_offered(cc *c, uint16_t k)
 {
-	if (!kwmap[k])	/* bool before C23 */
+	if (!cc_keyword_map[k])	/* bool before C23 */
 		return false;
 	if (k == KW_break)
 		return c->in_loop || c->in_switch;
@@ -60,10 +60,10 @@ static bool kw_offered(cc *c, uint16_t k)
    (len + 2) / 3), of a type name (types) or of anything else, or with kws (KWS_*)
    a keyword closer than any symbol (*kw); rejected, as clang does, when the name is
    under three times as long as the distance.  Returns the symbol, 0 if none */
-static uint32_t typo_sym(cc *c, uint32_t id, bool types, int kws, uint32_t *kw)
+static uint32_t cc_typo_symbol_find(cc *c, uint32_t id, bool types, int kws, uint32_t *kw)
 {
 	int n, max, best;
-	const char *s = idname(id, &n);
+	const char *s = cc_identifier_name(id, &n);
 	uint32_t pick = 0, kpick = 0;
 	int lim = pp_option_spell_limit(c->p);
 
@@ -78,31 +78,31 @@ static uint32_t typo_sym(cc *c, uint32_t id, bool types, int kws, uint32_t *kw)
 		int m, d;
 		const char *t;
 
-		if (!y->name || y->name == id || (y->kind == S_TYPEDEF) != types || y->kind == S_BUILTIN)
+		if (!y->name || y->name == id || (y->kind == AST_SYMBOL_TYPEDEF) != types || y->kind == AST_SYMBOL_BUILTIN)
 			continue;
-		t = idname(y->name, &m);
+		t = cc_identifier_name(y->name, &m);
 		if (m > 1 && t[0] == '_' && (t[1] == '_' || (t[1] >= 'A' && t[1] <= 'Z')))
 			continue;
-		if (lookup(c, y->name) != i)
+		if (cc_symbol_lookup(c, y->name) != i)
 			continue;
-		d = edit_dist(s, n, t, m, max);
+		d = cc_typo_edit_distance(s, n, t, m, max);
 		if (d <= max && (!pick || d < best))
 			pick = i, best = d;
 	}
 	for (int l = 0; kws && l < 2; l++) {
-		const uint16_t *v = l ? kw_stmts : kw_types;
-		size_t nv = l ? sizeof(kw_stmts) / sizeof(kw_stmts[0]) : sizeof(kw_types) / sizeof(kw_types[0]);
+		const uint16_t *v = l ? cc_typo_keywords_statement : cc_typo_keywords_type;
+		size_t nv = l ? sizeof(cc_typo_keywords_statement) / sizeof(cc_typo_keywords_statement[0]) : sizeof(cc_typo_keywords_type) / sizeof(cc_typo_keywords_type[0]);
 
-		if (l && !(kws & KWS_STMT))
+		if (l && !(kws & CC_TYPO_KEYWORDS_STATEMENT))
 			break;
 		for (size_t i = 0; i < nv; i++) {
 			int m, d;
 			const char *t;
 
-			if (!kw_offered(c, v[i]))
+			if (!cc_typo_keyword_is_offered(c, v[i]))
 				continue;
-			t = idname(v[i], &m);
-			d = edit_dist(s, n, t, m, max);
+			t = cc_identifier_name(v[i], &m);
+			d = cc_typo_edit_distance(s, n, t, m, max);
 			if (d <= max && (!(pick || kpick) || d < best))
 				kpick = v[i], pick = 0, best = d;
 		}
@@ -114,20 +114,20 @@ static uint32_t typo_sym(cc *c, uint32_t id, bool types, int kws, uint32_t *kw)
 	return pick;
 }
 
-/* the keyword id is a typo of at the start of a statement (KWS_STMT) or where a type
-   may stand (KWS_TYPE), if a keyword is its best correction; 0 if not */
-VPRIV uint32_t typo_keyword(cc *c, uint32_t id, int kws)
+/* the keyword id is a typo of at the start of a statement (CC_TYPO_KEYWORDS_STATEMENT) or where a type
+   may stand (CC_TYPO_KEYWORDS_TYPE), if a keyword is its best correction; 0 if not */
+CC_PRIVATE uint32_t cc_typo_keyword_find(cc *c, uint32_t id, int kws)
 {
 	uint32_t kw;
 
 	if (tok(c)->flags & PP_TOKEN_FLAG_FROM_MACRO)
 		return 0;
-	typo_sym(c, id, kws == KWS_TYPE, kws, &kw);
+	cc_typo_symbol_find(c, id, kws == CC_TYPO_KEYWORDS_TYPE, kws, &kw);
 	return kw;
 }
 
 /* id is a keyword in C23 (or in the GNU modes) but not in this -std: what to use instead */
-static const char *c23_word(cc *c, uint32_t id)
+static const char *cc_typo_c23_word(cc *c, uint32_t id)
 {
 	static const struct { const char *w, *h; } t[] = {
 		{ "alignas", "'alignas' is a keyword in C23: before it, use '_Alignas' or include <stdalign.h>" },
@@ -147,16 +147,16 @@ static const char *c23_word(cc *c, uint32_t id)
 
 	if (c->o->std >= 23)
 		return NULL;
-	n = idname(id, &m);
+	n = cc_identifier_name(id, &m);
 	for (size_t i = 0; i < sizeof t / sizeof t[0]; i++)
 		if ((int)strlen(t[i].w) == m && !memcmp(t[i].w, n, (size_t)m))
 			return t[i].h;
 	return NULL;
 }
 
-VPRIV void c23_word_help(cc *c, diag_record *d, uint32_t id)
+CC_PRIVATE void cc_typo_c23_word_help(cc *c, diag_record *d, uint32_t id)
 {
-	const char *h = c23_word(c, id);
+	const char *h = cc_typo_c23_word(c, id);
 
 	if (h)
 		diag_record_help_set(c->p, d, "%s", h);
@@ -165,11 +165,11 @@ VPRIV void c23_word_help(cc *c, diag_record *d, uint32_t id)
 /* "<msg> 'id'; did you mean 'x'?" with the fix-it and the "declared here" note,
    or just "<msg> 'id'"; returns the correction, a symbol or with kws (KWS_*) and kw
    a keyword in *kw */
-VPRIV uint32_t undeclared(cc *c, const char *msg, uint32_t id, uint32_t loc, bool types, int kws, uint32_t *kw)
+CC_PRIVATE uint32_t cc_undeclared_report(cc *c, const char *msg, uint32_t id, uint32_t loc, bool types, int kws, uint32_t *kw)
 {
 	/* clang does not correct a name from a macro expansion (and says where it was spelled) */
 	bool mac = (tok(c)->loc == loc ? tok(c)->flags : c->prevflags) & PP_TOKEN_FLAG_FROM_MACRO;
-	uint32_t k = 0, s = mac ? 0 : typo_sym(c, id, types, kw ? kws : 0, &k);
+	uint32_t k = 0, s = mac ? 0 : cc_typo_symbol_find(c, id, types, kw ? kws : 0, &k);
 	diag_span r = { loc, pp_token_end_find(c->p, loc) };
 	bool tn = msg[1] == 'n';	/* "unknown type name", else "use of undeclared identifier" */
 
@@ -177,55 +177,55 @@ VPRIV uint32_t undeclared(cc *c, const char *msg, uint32_t id, uint32_t loc, boo
 		*kw = k;
 	if (mac) {
 		int m;
-		const char *t = idname(id, &m);
+		const char *t = cc_identifier_name(id, &m);
 		diag_info d = { "error", loc, &r, 1, NULL, 0, t, (uint32_t)m };
 
-		error_limit(c), c->errors++, c->ndiag++;
-		diag_report_extended(c->p, &d, tn ? "unknown type name '%.*s'" : "use of undeclared identifier '%.*s'", IDF(id));
+		cc_report_error_limit(c), c->errors++, c->ndiag++;
+		diag_report_extended(c->p, &d, tn ? "unknown type name '%.*s'" : "use of undeclared identifier '%.*s'", CC_IDENTIFIER(id));
 		return 0;
 	}
 
 	if (s || k) {
 		int m;
-		const char *t = idname(s ? c->syms[s].name : k, &m);
-		char *fs = halloc(c, (size_t)m + 1);
+		const char *t = cc_identifier_name(s ? c->syms[s].name : k, &m);
+		char *fs = cc_heap_allocate(c, (size_t)m + 1);
 		diag_fixit fx;
 
 		memcpy(fs, t, m), fs[m] = 0;
 		fx = (diag_fixit){ r.b, r.e, fs, DIAG_APPLICABILITY_MAYBE };
 		report(c, "error", loc, &r, 1, &fx, 1, tn ? "unknown type name '%.*s'; did you mean '%s'?"
-		       : "use of undeclared identifier '%.*s'; did you mean '%s'?", IDF(id), fs);
+		       : "use of undeclared identifier '%.*s'; did you mean '%s'?", CC_IDENTIFIER(id), fs);
 		if (s)
-			note(c, c->syms[s].loc, "'%s' declared here", fs);
+			cc_report_note(c, c->syms[s].loc, "'%s' declared here", fs);
 	} else {
 		/* clang: a caret alone under an unknown type name, a range under an undeclared identifier */
-		const char *h = lib_header(c, id), *w = c23_word(c, id);
+		const char *h = cc_library_header(c, id), *w = cc_typo_c23_word(c, id);
 
 		if (h || w) {
 			diag_record *d;
 
-			error_limit(c), c->errors++, c->ndiag++;
+			cc_report_error_limit(c), c->errors++, c->ndiag++;
 			d = diag_record_begin(c->p, DIAG_LEVEL_ERROR, loc, tn ? "unknown type name '%.*s'" : "use of undeclared identifier '%.*s'",
-					  IDF(id));
+					  CC_IDENTIFIER(id));
 			if (!tn)
 				diag_record_label_add(c->p, d, r.b, r.e, NULL);
 			if (w)
 				diag_record_help_set(c->p, d, "%s", w);
 			else
-				diag_record_help_set(c->p, d, "'%.*s' is declared in <%s>", IDF(id), h);
+				diag_record_help_set(c->p, d, "'%.*s' is declared in <%s>", CC_IDENTIFIER(id), h);
 			if (h)
-				include_fix(c, d, loc, h);
+				cc_library_include_fixit(c, d, loc, h);
 			diag_record_emit(c->p, d);
 		} else
 			report(c, "error", loc, &r, tn ? 0 : 1, NULL, 0, tn ? "unknown type name '%.*s'"
-			       : "use of undeclared identifier '%.*s'", IDF(id));
+			       : "use of undeclared identifier '%.*s'", CC_IDENTIFIER(id));
 	}
 	return s;
 }
 
-VPRIV bool is_typedef_name(cc *c, const ptok *t)
+CC_PRIVATE bool cc_token_is_typedef_name(cc *c, const ptok *t)
 {
-	if (t->kind != LEX_TOKEN_IDENTIFIER || kwof(t))
+	if (t->kind != LEX_TOKEN_IDENTIFIER || cc_token_keyword(t))
 		return false;
-	return typedef_id(c, t->id);
+	return cc_symbol_is_typedef_identifier(c, t->id);
 }

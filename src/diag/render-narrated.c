@@ -22,8 +22,8 @@ VPRIV void diag_narrated_record_render(pp *p, vbuffer *b, const diag_record *d)
 	const pp_file_entry *e;
 
 	if (diag_head_render(p, b, d, &e)) {
-		const char *s = e->f->src;
-		uint32_t ls = lstart(s, d->loc - e->base), le = lend(s, e->f->size, ls);
+		const char *s = e->lex_file->src;
+		uint32_t ls = lstart(s, d->loc - e->location_base), le = lend(s, e->lex_file->size, ls);
 
 		vbuffer_format_append(b, "  the source line is: ");
 		while (ls < le && (s[ls] == ' ' || s[ls] == '\t'))
