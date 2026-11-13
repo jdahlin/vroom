@@ -361,6 +361,42 @@ Push/pop måste räknas med vid stackjämförelsen: clang har 0,122/0,109 G,
 vcc 0,001/0,001 G. Underlag och körskript i
 `work/vir-x86-perf/dynamic-mix/{results.txt,extra-results.txt,run.py,extra.py}`.
 
+2026-11-13, privat switchselektor direkt i dispatchregistret:
+x86:s dense-tabell och allokeringskrav använder nu samma formberäkning.
+En selektor med exakt en VIR-användning kan produceras direkt i r10;
+förbrukningen är en sen clobber. Glesa intervallkedjor behöver originalet
+flera gånger och behåller sin tidiga clobber. Omedelbart föregående
+osignerad 32-bitarsdefinition behöver ingen ny movl för nollning av överdelen.
+I vdbeRecordCompareInt försvinner movl efter movzbl av serialtypen.
+
+Gemensamma allokeraren släpper en död operand/fixed-kopia **bara i de
+register terminatorn clobbrar**, före bevarandet av levande värden. Ett
+nytt @dead-prov går från en onödig kopia till noll; @keep och @loop behåller
+levande selektorer. Att köra hela fas 3 för alla terminatorer avvisades:
+slumpfrö 17 gav checkfel som basen inte har. Den snäva regeln passerar
+frö 1–30 (240 funktioner), inklusive detta frö. SQLite-binären är exakt
+identisk med den tidigare lokala, bredare prototypens: dess två femprovserier
+1293,87 → 1279,28 respektive 1286,27 → 1280,22 ms gäller även slutversionen.
+Cirka 0,5–1,1 % CPU-vinst, 1,131×/1,118× clang, instruktioner 1,322× →
+1,321×; små layoutkänsliga vinster, inte nått 1,05×-mål. Underlag
+`work/vir-x86-perf/{switch-sole,deadclob}`.
+En tredje, mer belastad femprovserie: 1370,78 → 1333,07 ms, 1,140× clang.
+Absoluta kvoter varierar med belastningen; 1,118× är inte en stängd grind.
+Validerat efter den snäva regeln: egna x86 315/315, GCC 1615/1615,
+TCC 105/105 och samma fem kända inlinefel. Allokatorprov 20/20, 30
+slumpenheter/240 funktioner, VIR-formatprov 130/130, ARM/QEMU 46/46,
+ASan/UBSan och filvist bygge gröna. TSVC 151/151, **83** vektorloopar.
+
+Avvisade föregående försök: flaggcache inom block tar bort 102 statiska
+instruktioner men är neutral i speedtest1 (1289,22 → 1288,37 ms).
+Selectgräns 4 eller 2 ändrar bara planeringsfunktioner och ger ingen vinst;
+flerresultats-select utan spekulativt armarbete förbättrar inte heller
+(1268,87 → 1277,47 ms). Allmän fixed r10 för dense switchar, även delade
+selektorer, ökar bevarandekopior: instruktioner 1,330× clang, högre än basens
+1,322×. Även med döda operander släppta och onödig movl borttagen blir
+1,327× och neutral CPU. Dessa försök behålls inte. Underlag
+`work/vir-x86-perf/{cond-flags,select4,select2,select-work,switch-late,term-kill,switch-u32}`.
+
 2026-11-13, signerad 32-bitars avkodning i små SQLite-funktioner:
 `vir_read_be` accepterar nu även en signerad första byte när dess i32-shift
 är 24 bitar. Signextensionens höga bitar försvinner i exakt den shiften;

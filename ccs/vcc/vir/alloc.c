@@ -1704,9 +1704,13 @@ static bool instr(A *a, uint32_t b, uint32_t i, bool term)
 	for (uint32_t j = 0; j < n; j++)
 		ax.opr[a->nopr++] = byte[j];
 	if (term) {
-		/* Terminators may use target temporaries too. Preserve live holders
-		 * before recording the edge state; operands remain readable until
-		 * the machine terminator clobbers these registers. */
+		/* A dead operand or fixed-register copy in a clobbered register needs
+		 * no preservation. The physical input remains readable until dispatch. */
+		for (uint32_t j = 0; j < n; j++) {
+			uint32_t r=byte[j],v=ops[j];
+			if(r!=VR_NONE && ((fx.clob[VR_CLASS(r)]|fx.eclob[VR_CLASS(r)]) >> VR_NUM(r) & 1) &&
+			   ax.regval[r]==v && (ax.reg[v]!=r || ax.dmark[v]==i))clearreg(a,r);
+		}
 		clobbers(a, &fx, lock, fixm, i);
 		save_state(a, ax.end_off, ax.end_n, b);
 		return true;

@@ -19,7 +19,7 @@ typedef struct vx {
 	uint8_t *uses;
 	const vir_loops *lp;
 	uint32_t *order,*position,*rotation,*chase,at;
-	unsigned dup;bool fallok;
+	unsigned dup;bool fallok,r10;
 	uint32_t memv, memskip, scaledv, scaledskip; int membase, memindex, scaleindex; uint8_t memsh, scalesh; bool indexed; int64_t memoff;
 	uint32_t bev; int bebase,beindex; uint8_t besh,bewidth; bool beindexed; int64_t beoff;
 	uint32_t cmpmemv; uint8_t cmpmemsize; bool cmpmemside;
@@ -72,17 +72,43 @@ static bool vx_smallmem(const vir_fn *f,const vir_ins *i)
 	const vir_ins *byte=&f->ins[i->b];
 	return n<=256 && byte->op==VO_ICONST && !(byte->b&255);
 }
+/* The allocation constraints and dispatch must agree about when the
+ * selector is consumed before R10 is overwritten. Sparse range chains
+ * need the original selector for every comparison. */
+static bool vx_dense_switch(const vir_fn *f,const vir_ins *in,uint64_t *low,uint64_t *range)
+{
+	bool wide=f->ins[in->a].ty==VT_I64;
+	uint32_t stride=wide?5:3,n=f->extra[in->c];
+	const uint32_t *cases=&f->extra[in->c+1];
+	uint64_t lo=0,span=0,count=0;
+	if(n) {
+		lo=wide?(uint64_t)cases[1]<<32|cases[0]:cases[0];
+		uint64_t hi=wide?(uint64_t)cases[stride*(n-1)+3]<<32|cases[stride*(n-1)+2]:cases[stride*(n-1)+1];
+		span=hi-lo;
+		for(uint32_t k=0;k<n;k++) {
+			uint64_t a=wide?(uint64_t)cases[stride*k+1]<<32|cases[stride*k]:cases[stride*k];
+			uint64_t h=wide?(uint64_t)cases[stride*k+3]<<32|cases[stride*k+2]:cases[stride*k+1];
+			count+=h-a>=64?64:h-a+1;
+		}
+	}
+	if(low)*low=lo;
+	if(range)*range=span;
+	return n>=6 && span<4096 && span+1<=4*count;
+}
 static void vx_fixed(const vir_fn *f, uint32_t v, vir_fix *x, void *ctx)
 {
 	const vir_ins *i = &f->ins[v];
-	bool r10=ctx && *(const bool *)ctx;
+	const vx *target=ctx;
+	bool r10=target && target->r10;
 	if (i->op == VO_PARAM) {
 		int stack;
 		x->res = vx_arg(f, f->sig, i->a, &stack);
 	} else if(i->op==VO_SWITCH && r10) {
-		/* The selector must survive range comparisons; r10 is a temporary
-		 * only for the dispatch itself, not reserved throughout the function. */
-		x->eclob[0]=UINT64_C(1)<<R10;
+		/* A private dense selector can be produced directly in the dispatch
+		 * register. Range chains and shared selectors keep their original. */
+		if(target->uses[i->a]==1 && vx_dense_switch(f,i,NULL,NULL)) {
+			x->nopnd=1;x->opnd[0]=R10;x->clob[0]=UINT64_C(1)<<R10;
+		} else x->eclob[0]=UINT64_C(1)<<R10;
 	} else if (i->op == VO_MEMCPY || i->op == VO_MEMSET) {
 		x->nopnd = 3;
 		if(vx_smallmem(f,i)) {x->mem=i->op==VO_MEMSET?6:4;return;}
@@ -300,20 +326,11 @@ static void vx_switch(vx *L, uint32_t block, const vir_ins *in, int selector)
 	uint32_t *labels = malloc(((size_t)n+1)*sizeof *labels);
 	if (!labels) abort();
 	for (uint32_t k=0;k<=n;k++) labels[k]=vx_target(L,block,k,k?cases[stride*(k-1)+stride-1]:in->b);
-	uint64_t lo=0,span=0,count=0;
-	if (n) {
-		lo = wide ? (uint64_t)cases[1]<<32 | cases[0] : cases[0];
-		uint64_t hi = wide ? (uint64_t)cases[stride*(n-1)+3]<<32 | cases[stride*(n-1)+2] : cases[stride*(n-1)+1];
-		span = hi-lo;
-		for (uint32_t k=0;k<n;k++) {
-			uint64_t a=wide ? (uint64_t)cases[stride*k+1]<<32 | cases[stride*k] : cases[stride*k];
-			uint64_t h=wide ? (uint64_t)cases[stride*k+3]<<32 | cases[stride*k+2] : cases[stride*k+1];
-			count += h-a >= 64 ? 64 : h-a+1;
-		}
-	}
-	if (n >= 6 && span < 4096 && span+1 <= 4*count) {
+	uint64_t lo,span;
+	if(vx_dense_switch(f,in,&lo,&span)) {
 		uint32_t table=wk_newlabel(e);
-		x64_op3(e,X_MOV,size,R10,selector,XNOREG);
+		if(selector!=R10 || (size==4 && !x64_last_u32(e,R10)))
+			x64_op3(e,X_MOV,size,R10,selector,XNOREG);
 		if (lo) {
 			x64_movi(e,R11,size==4?(int64_t)(int32_t)lo:(int64_t)lo);
 			x64_op3(e,X_SUB,size,R10,R10,R11);
@@ -973,9 +990,9 @@ VPRIV bool vw_x64(ecx *e, uint32_t sym, const char **why)
 	bool r10=true;
 	uint64_t cs = (1u << RBX) | (1u << R12) | (1u << R13) | (1u << R14) | (1u << R15);
 	if(spframe)cs|=1u<<RBP;
-	vir_regs regs = { .alloc = { (X_TEMPS & ~(1u << R10)) | cs, (1u << 14) - 1 },
-		.callee = { cs, 0 }, .fixed = vx_fixed, .ctx=&r10 };
 	vx L = { .e = e, .f = f, .o = &V->ao };
+	vir_regs regs = { .alloc = { (X_TEMPS & ~(1u << R10)) | cs, (1u << 14) - 1 },
+		.callee = { cs, 0 }, .fixed = vx_fixed, .ctx=&L };
 	*why = "VIR x86-64: unsupported operation or ABI";
 	if (e->E->o->debug || e->E->o->sprot || x64_nosimd(e)) return false;
 	const attrs *attrs = sym_attrs(e->c, sym);
@@ -1007,7 +1024,7 @@ VPRIV bool vw_x64(ecx *e, uint32_t sym, const char **why)
 	}
 	if (framesz > INT32_MAX / 2) return false;
 	L.uses=V->xuses=vx_grow(V->xuses,&V->cxuses,f->nins+1,1);
-	vir_uses(f,L.uses);
+	vir_uses(f,L.uses);L.r10=r10;
 	if(r10)regs.alloc[0]|=1u<<R10;
 	if(!vir_loops_build(f,&V->lp)){*why="VIR x86-64: loop analysis failed";return false;}
 	bool allocated=vir_alloc(f,&V->lp,&regs,NULL,&V->ao),scratch=false;
@@ -1018,7 +1035,7 @@ VPRIV bool vw_x64(ecx *e, uint32_t sym, const char **why)
 	if(r10 && (!allocated || scratch)) {
 		/* A cycle may need the allocator's GP scratch at the same time as
 		 * a slot-to-slot copy. Keep the second reserve for those functions. */
-		r10=false;regs.alloc[0]&=~(UINT64_C(1)<<R10);
+		r10=L.r10=false;regs.alloc[0]&=~(UINT64_C(1)<<R10);
 		allocated=vir_alloc(f,&V->lp,&regs,NULL,&V->ao);
 	}
 	L.gtmp=r10?R11:R10;

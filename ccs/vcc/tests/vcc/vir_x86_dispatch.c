@@ -11,6 +11,13 @@ NI int dense(unsigned x,int a,int b) {
  }
  return r*3+a;
 }
+NI int byte_switch(const unsigned char *p,int a) {
+ switch(*p) {
+ case 0:return a+31;case 1:return a-17;case 2:return a*43;
+ case 3:return a^11;case 4:return a*-91;case 5:return a+23;
+ case 6:return a*5;case 7:return a|-7;default:return a+99;
+ }
+}
 NI int signed_range(long x,int a) {
  switch(x) {case -9 ... -5:return a+2;case 7 ... 11:return a-3;
  case 0x100000000L:return a*5;case (-0x7fffffffffffffffL-1):return a*7;default:return a^91;}
@@ -31,6 +38,11 @@ int main(void) {
   if(dense(x,a,b)!=r)return 1;
  }
  if(dense(~0u,2,3)!=74)return 2;
+ static const int expected[8]={38,-10,301,12,-637,30,35,-1};
+ for(unsigned i=0;i<256;i++) {
+  unsigned char x=i;
+  if(byte_switch(&x,7)!=(i<8?expected[i]:106))return 8;
+ }
  for(long i=-15;i<16;i++)if(signed_range(i,17)!=(i>=-9&&i<=-5?19:i>=7&&i<=11?14:(17^91)))return 3;
  if(signed_range(0x100000000L,17)!=85||signed_range(-0x7fffffffffffffffL-1,17)!=119)return 4;
  unsigned long u=~0UL; if(high(u)!=u/37)return 5;

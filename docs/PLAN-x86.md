@@ -1099,3 +1099,18 @@ Gemensamma vir_read_be kan kombinera även signerad första byte när en
 (−9,8 %), clang 28,225 ms. Hela speedtest1 förbättras varierande 0,1–1,1 %
 i två korta serier, så ingen stabil helprogramvinst utlovas. Målet 1,05×
 är fortfarande öppet; detaljer och mätunderlag under V4 i PLAN-vir.md.
+
+
+### 2026-11-13: privat switchselektor och döda clobbers
+
+En privat dense-selektor kan produceras direkt i r10 i stället för att
+kopieras dit. Formberäkningen delas mellan targetkrav och dispatch.
+Allokeraren bevarar inte döda operander i terminatorns clobbrade register;
+levande värden bevaras som förr. vdbeRecordCompareInt tappar en movl.
+Två femprovserier av identisk SQLite-binär ger 0,5–1,1 % lägre CPU-tid;
+1,131×/1,118× clang. Målet 1,05× är öppet. Den bredare fas-3-idén avvisades
+av slumpfrö 17; den snäva regeln passerar 30 frön/240 funktioner. Detaljer
+under V4 i PLAN-vir.md.
+Validerat: egna x86 315/315 och samma fem kända inlinefel; ARM/QEMU 46/46,
+ASan/UBSan, filvist bygge och allokatorns 30 slumpenheter gröna. TSVC
+151/151 kontrollsummor, **83** vektorloopar kvar.

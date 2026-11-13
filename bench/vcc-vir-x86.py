@@ -84,7 +84,7 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
         ('vir_x86_nsw_index.c', {'be16p', 'be16cast', 'be32cast', 'be64cast', 'load4signed', 'store4signed', 'shared', 'keep_input', 'rawshift', 'vol', 'min32', 'min64'}, {}),
         ('vir_x86_index.c', {'load8', 'load4', 'load2', 'load1', 'store8', 'store4', 'cast8', 'cast4', 'cast2', 'caststore4', 'castmod', 'cast3', 'sharedcast'}, {}),
         ('vir_vector_stride.c', {'stride', 'intstride', 'wide', 'reverse', 'ordered', 'residue', 'gather', 'carry', 'chain', 'maxval', 'maxindex', 'lastnegative'}, {'stride': 'mulps', 'intstride': 'mulps', 'reverse': 'addpd', 'ordered': 'mulps', 'residue': 'addps', 'gather': 'mulps', 'carry': 'mulps'}),
-        ('vir_x86_dispatch.c', {'dense', 'signed_range', 'high', 'shigh', 'atom'}, {}),
+        ('vir_x86_dispatch.c', {'dense', 'byte_switch', 'signed_range', 'high', 'shigh', 'atom'}, {}),
         ('vir_x86_calls.c', {'ints', 'floats', 'caller', 'indirect', 'variadic_caller'}, {}),
         ('vir_x86_vectors.c', {'eq', 'ne', 'lt', 'le', 'gt', 'ge', 'compare', 'mul', 'cvt', 'cvt64', 'negate'},
          {'eq': 'cmpps', 'ne': 'cmpps', 'lt': 'cmpps', 'le': 'cmpps', 'gt': 'cmpps', 'ge': 'cmpps',
@@ -113,6 +113,12 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
                     body = asm.read_text().split(name + ':\n', 1)[1].split('.Lfunc_end', 1)[0]
                     if 'cmov' not in body:
                         raise SystemExit(f'{name}: missing conditional move')
+            if filename == 'vir_x86_dispatch.c':
+                body = asm.read_text().split('byte_switch:\n', 1)[1].split('.Lfunc_end', 1)[0]
+                if not re.search(r'movzbl\s+[^\n]+, %r10d', body):
+                    raise SystemExit('byte_switch: selector was not loaded into dispatch register')
+                if re.search(r'mov[lq]\s+%r10d?,', body):
+                    raise SystemExit('byte_switch: dead selector was copied or unnecessarily widened')
             if filename == 'vir_x86_ext.c':
                 body = asm.read_text().split('mask:\n', 1)[1].split('.Lfunc_end', 1)[0]
                 if 'movslq' in body:
