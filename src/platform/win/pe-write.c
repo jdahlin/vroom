@@ -101,19 +101,28 @@ static void pe_strtab_finalize(void)
 	pe_strtab_size = size - 4;
 }
 
+/* the chunk a symbol is in: an __imp_ symbol (also a copy made by auto-import) is its file's IAT slot */
+static pe_chunk *pe_sym_chunk(const pe_symbol *s)
+{
+	if (s->kind == PE_SYM_IMPORT_DATA)
+		return s->file ? s->file->location : NULL;
+	return s->chunk;
+}
+
 /* the symbol's RVA (lld Defined::getRVA) */
 static uint64_t pe_symbol_rva(const pe_symbol *s)
 {
+	pe_chunk *c = pe_sym_chunk(s);
 	switch (s->kind) {
 	case PE_SYM_REGULAR:
-		return (uint64_t)s->chunk->rva + s->value;
+		return (uint64_t)c->rva + s->value;
 	case PE_SYM_COMMON:
 	case PE_SYM_IMPORT_DATA:
 	case PE_SYM_IMPORT_THUNK:
 	case PE_SYM_LOCAL_IMPORT:
-		return s->chunk ? s->chunk->rva : 0;
+		return c ? c->rva : 0;
 	case PE_SYM_SYNTHETIC:
-		return s->chunk ? (uint64_t)s->chunk->rva + s->value : 0;
+		return c ? (uint64_t)c->rva + s->value : 0;
 	case PE_SYM_ABSOLUTE:
 		return s->value - cfg.image_base;
 	default:
@@ -123,14 +132,12 @@ static uint64_t pe_symbol_rva(const pe_symbol *s)
 
 static pe_output *pe_symbol_output(const pe_symbol *s)
 {
-	if (s->kind == PE_SYM_ABSOLUTE || s->kind == PE_SYM_UNDEFINED || s->kind == PE_SYM_LAZY_ARCHIVE || !s->chunk)
+	if (s->kind == PE_SYM_ABSOLUTE || s->kind == PE_SYM_UNDEFINED || s->kind == PE_SYM_LAZY_ARCHIVE)
 		return NULL;
-	pe_chunk *c = s->chunk;
-	if (!c->os || c->os->removed)
+	pe_chunk *c = pe_sym_chunk(s);
+	if (!c || !c->os || c->os->removed)
 		return NULL;
-	if (c->kind == PE_CHUNK_SECTION && !c->live)
-		return NULL;
-	if (c->kind == PE_CHUNK_COMMON && !c->live)
+	if ((c->kind == PE_CHUNK_SECTION || c->kind == PE_CHUNK_COMMON) && !c->live)
 		return NULL;
 	return c->os;
 }

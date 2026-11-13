@@ -538,6 +538,28 @@ static pe_symbol *pe_create_regular(pe_file *f, const uint8_t *cs)
 	return s;
 }
 
+/* lld readAssociativeDefinition: read the section if its parent prevails */
+static void pe_read_associative(pe_file *f, uint32_t secnum, uint32_t parent)
+{
+	pe_chunk *p = f->sparse[parent];
+	if (p == PE_PENDING_COMDAT)
+		return;		/* (a parent read later, or without symbols: lld reports and keeps it pending) */
+	if (!p) {
+		f->sparse[secnum] = NULL;
+		return;
+	}
+	pe_chunk *c = pe_section_read(f, secnum, true);
+	f->sparse[secnum] = c;
+	if (!c)
+		return;
+	c->selection = IMAGE_COMDAT_SELECT_ASSOCIATIVE;
+	c->assoc_next = NULL;
+	pe_chunk **tail = &p->assoc_first;
+	while (*tail)
+		tail = &(*tail)->assoc_next;
+	*tail = c;
+}
+
 static void pe_comdat_duplicate(pe_symbol *leader, pe_file *f)
 {
 	pe_report_duplicate(leader, f);
@@ -563,6 +585,8 @@ static bool pe_obj_parse(pe_file *f)
 	struct { pe_symbol *sym; uint32_t tag; uint32_t characteristics; } *weak = pe_alloc(((size_t)f->nsyms + 1) * sizeof *weak);
 	uint32_t nweak = 0;
 	const char *fn = pe_file_name(f);
+	struct { const char *s; size_t n; uint32_t sec; } *prevailing_names = pe_alloc(((size_t)f->nsections + 1) * sizeof *prevailing_names);
+	uint32_t nprevailing = 0;
 
 	for (uint32_t i = 0; i < f->nsyms; i++) {
 		const uint8_t *cs = pe_obj_sym(f, i);
@@ -712,6 +736,20 @@ static bool pe_obj_parse(pe_file *f)
 			} else
 				f->sparse[secnum] = NULL;
 			f->syms[i] = leader;
+			/* lld recordPrevailingSymbolForMingw */
+			pe_chunk *pc = f->sparse[secnum];
+			if (prevailing && pc && (pc->chars & IMAGE_SCN_MEM_EXECUTE)) {
+				const char *dollar = strchr(pc->name, '$');
+				const char *suffix = dollar ? dollar + 1 : "";
+				uint32_t k2 = 0;
+				while (k2 < nprevailing && !(prevailing_names[k2].n == strlen(suffix) && !memcmp(prevailing_names[k2].s, suffix, strlen(suffix))))
+					k2++;
+				if (k2 == nprevailing)
+					nprevailing++;
+				prevailing_names[k2].s = suffix;
+				prevailing_names[k2].n = strlen(suffix);
+				prevailing_names[k2].sec = (uint32_t)secnum;
+			}
 		} else if (f->sparse[secnum] == PE_PENDING_COMDAT) {
 			if (naux && pe_coff_is_section_definition(cs) && sc == IMAGE_SYM_CLASS_STATIC) {
 				const uint8_t *def = pe_obj_sym(f, i + 1);
@@ -738,31 +776,25 @@ static bool pe_obj_parse(pe_file *f)
 		if (cs[17] && pe_coff_is_section_definition(cs) && cs[16] == IMAGE_SYM_CLASS_STATIC) {
 			const uint8_t *def = pe_obj_sym(f, i + 1);
 			if (def[14] == IMAGE_COMDAT_SELECT_ASSOCIATIVE) {
-				/* lld readAssociativeDefinition */
 				uint32_t parent = pe_rd16(def + 12);
 				if (parent == 0 || parent > f->nsections || (int32_t)parent == secnum) {
 					pe_error("%s: associative comdat %s has invalid reference to section %u", fn,
 						 f->secnames[secnum], parent);
 					return false;
 				}
-				pe_chunk *p = f->sparse[parent];
-				if (p == PE_PENDING_COMDAT) {
-					/* the parent is an associative one read later: lld reads in this order too */
-					f->sparse[secnum] = NULL;
-				} else if (!p)
-					f->sparse[secnum] = NULL;
-				else {
-					pe_chunk *c = pe_section_read(f, (uint32_t)secnum, true);
-					f->sparse[secnum] = c;
-					if (c) {
-						c->assoc_next = NULL;
-						pe_chunk **tail = &p->assoc_first;
-						while (*tail)
-							tail = &(*tail)->assoc_next;
-						*tail = c;
-						c->live = p->live;
-					}
-				}
+				pe_read_associative(f, (uint32_t)secnum, parent);
+			} else {
+				/* MinGW: .pdata$F, .xdata$F, .eh_frame$F belong to the prevailing .text$F (lld maybeAssociateSEHForMingw) */
+				size_t nlen;
+				const char *nm = pe_obj_symbol_name(f, cs, &nlen);
+				size_t pre = nlen > 7 && (!memcmp(nm, ".pdata$", 7) || !memcmp(nm, ".xdata$", 7)) ? 7 :
+					     nlen > 10 && !memcmp(nm, ".eh_frame$", 10) ? 10 : 0;
+				if (pre)
+					for (uint32_t k2 = 0; k2 < nprevailing; k2++)
+						if (prevailing_names[k2].n == nlen - pre && !memcmp(prevailing_names[k2].s, nm + pre, nlen - pre)) {
+							pe_read_associative(f, (uint32_t)secnum, prevailing_names[k2].sec);
+							break;
+						}
 			}
 		}
 		if (f->sparse[secnum] == PE_PENDING_COMDAT) {

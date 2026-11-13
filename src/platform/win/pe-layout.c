@@ -444,7 +444,8 @@ static void pe_runtime_pseudo_relocs(void)
 				const uint8_t *rel = c->relocs + (size_t)r * COFF_RELOCATION_SIZE;
 				uint32_t ix = pe_rd32(rel + 4);
 				pe_symbol *t = ix < f->nsyms ? f->syms[ix] : NULL;
-				if (!t || !t->runtime_pseudo_reloc || !pe_sym_is_defined(t) || !t->chunk)
+				if (!t || !t->runtime_pseudo_reloc || !pe_sym_is_defined(t) ||
+				    !(t->kind == PE_SYM_IMPORT_DATA ? (t->file ? t->file->location : NULL) : t->chunk))
 					continue;
 				uint16_t type = pe_rd16(rel + 8);
 				int bits = type == IMAGE_REL_AMD64_ADDR64 ? 64 :
@@ -568,9 +569,9 @@ static void pe_export_table(void)
 	}
 	pe_chunk *dll = pe_synth(PE_CHUNK_STRING, (uint32_t)strlen(pe_basename(cfg.output)) + 1, 1);
 	dll->str = pe_basename(cfg.output);
-	pe_chunk *addr = pe_synth(PE_CHUNK_EXPORT_ADDRESS_TABLE, max * 4, 4);
-	pe_chunk *names = pe_synth(PE_CHUNK_EXPORT_NAME_POINTERS, nnames * 4, 4);
-	pe_chunk *ords = pe_synth(PE_CHUNK_EXPORT_ORDINALS, nnames * 2, 2);
+	pe_chunk *addr = pe_synth(PE_CHUNK_EXPORT_ADDRESS_TABLE, max * 4, 1);
+	pe_chunk *names = pe_synth(PE_CHUNK_EXPORT_NAME_POINTERS, nnames * 4, 1);
+	pe_chunk *ords = pe_synth(PE_CHUNK_EXPORT_ORDINALS, nnames * 2, 1);
 	pe_chunk *dir = pe_synth(PE_CHUNK_EXPORT_DIRECTORY, PE_EXPORT_DIRECTORY_SIZE, 4);
 	pe_chunk **strs = pe_alloc((nnames + 1) * sizeof *strs);
 	uint32_t k = 0;

@@ -2,7 +2,7 @@
 """vcc-win64.py: the C test suites through vcc's Windows x64 target (PLAN-win64.md).
 
   bench/vcc-win64.py [-j N] [--suite gcc|tcc|vcc|inline] [--ref-only] [--obj] [--objcmp]
-                     [-v] [--show CAT] [--no-cache] [PAT]
+                     [--vlink-ref] [-v] [--show CAT] [--no-cache] [PAT]
 
 Every test of the three suites of vcc-x86.py (gcc torture, tcc tests2, our
 own; --suite inline adds the inlining suite) is built for x86_64-w64-mingw32
@@ -12,6 +12,11 @@ Wine.  vcc passes when its program prints what clang's prints and exits the
 same way.  By default vcc's side uses `vpp -S`, assembled by clang; --obj
 uses the direct `vpp -c` path, and --objcmp compares both with clang's
 assembler.  --ref-only builds and runs clang's side only (WIN0).
+--vlink-ref (WIN7) links clang's object twice with the same command line,
+by lld and by vlink (clang --ld-path, SOURCE_DATE_EPOCH fixed): vlink's
+program must run as the reference does (runs-ok) and its file should be
+byte-identical to lld's (image-identical; a test that runs but differs is
+`fail differs`, with the first differing structure in the reason).
 
 The chain (bench/hostenv.py: MINGW_SYSROOT, WINE): the host's clang compiles
 with the test runtime headers (src/test/rt/include-win64 before
@@ -361,6 +366,91 @@ def objcmp(t):
     return t, 'pass', '', ''
 
 
+# --vlink-ref: clang's object linked by lld and by vlink with the same link line
+VLINK = os.path.join(os.path.dirname(VPP), 'vlink')
+VLENV = dict(os.environ, SOURCE_DATE_EPOCH='1700000000')
+
+
+def _vlink_hash():
+    try:
+        return hashlib.sha1(open(VLINK, 'rb').read()).hexdigest()[:16]
+    except OSError:
+        return '?'
+
+
+def pe_differs(a, b):
+    """where two PE files differ first: the headers, a section (by name), the symbol table"""
+    import struct
+    why = '' if len(a) == len(b) else f'size {len(b)} vs lld {len(a)}'
+    try:
+        pe = struct.unpack_from('<I', a, 60)[0]
+        nsec = struct.unpack_from('<H', a, pe + 6)[0]
+        sh_ = pe + 24 + struct.unpack_from('<H', a, pe + 20)[0]
+        end = sh_ + 40 * nsec
+        if a[:end] != b[:end]:
+            off = next(i for i in range(min(end, len(b))) if a[i] != b[i])
+            return f'headers (offset {off:#x}) {why}'.strip()
+        for i in range(nsec):
+            name, vs, va, rs, ro = struct.unpack_from('<8sIIII', a, sh_ + 40 * i)
+            if a[ro:ro + rs] != b[ro:ro + rs]:
+                return f'section {name.rstrip(bytes(1)).decode(errors="replace")} {why}'.strip()
+        return f'symbol table {why}'.strip()
+    except (struct.error, StopIteration, IndexError):
+        return f'unreadable {why}'.strip()
+
+
+def vlinkref(t):
+    suite, name, path = t
+    src = open(path, 'rb').read().decode('latin-1')
+    s = static_skip(suite, name, src)
+    if s:
+        return t, 'skip', s[0], s[1]
+    flags = flags_of(suite, name, src)
+    wd = f'{OUT}/vl/{suite}/{name}'
+    os.makedirs(wd, exist_ok=True)
+    ref = reference(suite, name, path, flags, wd)
+    if 'error' in ref:
+        return t, 'error', ref['error'], ref['why']
+    if 'skip' in ref:
+        shutil.rmtree(wd, ignore_errors=True)
+        return t, 'skip', ref['skip'], ref['why']
+    os.makedirs(wd, exist_ok=True)
+    rc, _, err = sh([CL] + BASE + ct.CLFL + flags + ['-c', path, '-o', f'{wd}/ref.o'], cwd=os.path.dirname(path))
+    if rc:
+        return t, 'error', 'compile', ct.first_err(err.decode(errors='replace'))
+    obj = open(f'{wd}/ref.o', 'rb').read()
+    pk = hashlib.sha1(obj + ref['key'].encode() + VLHASH.encode()).hexdigest()
+    pf = f'{OUT}/pass-vlink/{suite}/{name}'
+    if not NOCACHE:
+        try:
+            if open(pf).read() == pk:
+                shutil.rmtree(wd, ignore_errors=True)
+                return t, 'pass', '', ''
+        except OSError:
+            pass
+    objs = [f'{wd}/ref.o', RTO]
+    rc, _, err = sh(LINK + objs + ['-o', f'{wd}/lld.exe'], timeout=60, env=VLENV)
+    if rc:
+        return t, 'error', 'lld', ct.first_err(err.decode(errors='replace'))
+    rc, _, err = sh(LINK + [f'--ld-path={VLINK}'] + objs + ['-o', f'{wd}/vlink.exe'], timeout=60, env=VLENV)
+    if rc:
+        e = err.decode(errors='replace')
+        return t, 'fail', 'vlink', (ct.first_err(e) if isinstance(rc, int) and rc > 0 else f'vlink: signal/timeout {rc}: ' + ct.first_err(e))[:150]
+    a, b = open(f'{wd}/lld.exe', 'rb').read(), open(f'{wd}/vlink.exe', 'rb').read()
+    rc, out, err = run(f'{wd}/vlink.exe')
+    if rc != ref['rc'] or out != ref['out']:
+        m = EXC.search(err) if rc == 255 else None
+        why = f'exception {m.group(1)}' if m else f'exit {rc} (clang {ref["rc"]})' if rc != ref['rc'] else 'output differs'
+        return t, 'fail', 'run', why + ('' if a == b else ' [image differs: ' + pe_differs(a, b) + ']')
+    if a != b:
+        return t, 'fail', 'differs', pe_differs(a, b)
+    os.makedirs(os.path.dirname(pf), exist_ok=True)
+    open(pf, 'w').write(pk)
+    shutil.rmtree(wd, ignore_errors=True)
+    return t, 'pass', '', ''
+
+
+VLHASH = _vlink_hash()
 NOCACHE = REF_ONLY = OBJ = False
 
 
@@ -373,9 +463,10 @@ if __name__ == '__main__':
     av = [part for arg in sys.argv[1:]
           for part in (('-j', arg[2:]) if re.fullmatch(r'-j[0-9]+', arg) else (arg,))]
     j, suite, show, verbose = 6, None, None, False
-    flags = {a for a in av if a in ('--no-cache', '--ref-only', '--obj', '--objcmp', '-v')}
+    flags = {a for a in av if a in ('--no-cache', '--ref-only', '--obj', '--objcmp', '--vlink-ref', '-v')}
     av = [a for a in av if a not in flags]
     nocache, ref_only, obj, ocmode, verbose = (f in flags for f in ('--no-cache', '--ref-only', '--obj', '--objcmp', '-v'))
+    vlmode = '--vlink-ref' in flags
     for opt in ('-j', '--suite', '--show'):
         if opt in av:
             k = av.index(opt); v = av[k + 1]; del av[k:k + 2]
@@ -393,7 +484,7 @@ if __name__ == '__main__':
     rt_obj()
     hostenv.wine_start(PREFIX)
     with Pool(j, initializer=init, initargs=(nocache, ref_only, obj)) as pool:
-        res = pool.map(objcmp if ocmode else one, ts, chunksize=1)
+        res = pool.map(vlinkref if vlmode else objcmp if ocmode else one, ts, chunksize=1)
     by = defaultdict(Counter)
     whys = defaultdict(Counter)
     for (s, n, _), st, cat, why in res:
@@ -421,5 +512,8 @@ if __name__ == '__main__':
                   f'{c["skip"]} excluded, {c["error"]} oracle errors   {det}')
         else:
             print(f'{s:4s} {c["pass"]}/{run_} pass ({100 * c["pass"] / max(run_, 1):.1f}%), {c["skip"]} skipped   {det}')
+    if vlmode:
+        print(f'vlink: runs-ok {tot["pass"] + tot["fail:differs"]}/{tot["pass"] + tot["fail"]}, '
+              f'image-identical {tot["pass"]}/{tot["pass"] + tot["fail"]}')
     print(f'{time.time() - t0:.1f} s')
     sys.exit(1 if tot['fail'] or tot['error'] else 0)

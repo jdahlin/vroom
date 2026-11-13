@@ -642,8 +642,14 @@ static void pe_exports_fixup(void);
 
 static bool pe_resolve_run(void)
 {
-	for (uint32_t i = 0; i < pe_input_count; i++)
-		pe_queue_path(pe_inputs[i].path, pe_inputs[i].whole_archive);
+	/* lld findFileIfNew: a file named twice is read once (the name compared case-insensitively) */
+	for (uint32_t i = 0; i < pe_input_count; i++) {
+		bool seen = false;
+		for (uint32_t k = 0; k < i && !seen; k++)
+			seen = !strcasecmp(pe_inputs[k].path, pe_inputs[i].path);
+		if (!seen)
+			pe_queue_path(pe_inputs[i].path, pe_inputs[i].whole_archive);
+	}
 	pe_run();
 	if (pe_error_count)
 		return false;
