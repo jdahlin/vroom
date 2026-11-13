@@ -1,4 +1,16 @@
-/* Shared object-item stream: data, symbols and target record replay. */
+/*
+ * obj.c: the object-item stream: write a chunk's items while generating, and replay them into the
+ * assembler and ElfObj to make the object (cc_opts.emit == 2, `-c`).
+ *
+ * During generation a chunk is not text but a sequence of items (emitimpl.h "object backend": IT_TEXT,
+ * IT_CODE, IT_X64, IT_DATA, IT_LABEL, IT_BYTES, IT_SYMHDR, IT_FEND, IT_OSIZE), each a kind, a length
+ * and a payload padded to 8 bytes: it_open/it_room/it_close build one in the function's text buffer
+ * (`direct(e)` says whether this is the object path; otherwise those calls do nothing).  Replay
+ * (r_chunk, called by tu.c after the chunks are put in order) makes exactly the calls the assembler
+ * would make for the text the printer would have produced, so the object is byte-identical to the
+ * text path; bench/vcc-asdiff.py checks that.  A failure is reported through elf_error and returns -1,
+ * which fails the TU.  Replay is single-threaded per TU.
+ */
 #include "emitimpl.h"
 
 VPRIV int r_fail(rctx *R, const char *msg)

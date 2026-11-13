@@ -1,5 +1,14 @@
-/* Constant results at the extrema of a converted integer comparison.
- * The caller must evaluate and discard the returned operand. */
+/*
+ * cmpbounds.c: constant results of an integer comparison against the extreme value of its type
+ * (x < INT_MIN is 0, x <= INT_MAX is 1 ...).
+ *
+ * em_cmpbounds(e, n, &operand) returns 0 or 1 when the comparison n is constant, else -1; operand
+ * is the non-constant side, which the caller must still evaluate and discard (it may have effects).
+ * Only 4- and 8-byte integers, and only at -O1 and up (cc_opts.opt, not VCC_NOOPT).  em_bound_constant
+ * proves a small expression pure and constant within a budget before asking the constant evaluator,
+ * so enumerators and casts of them fold but nothing with a call or a volatile read is traversed.
+ * Called by the shared walker (walk/expr.c), arm64's and wasm's emitters.
+ */
 #include "../emitimpl.h"
 
 /* Prove a small integer constant expression pure before asking the existing

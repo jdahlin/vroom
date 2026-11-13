@@ -1,4 +1,12 @@
-/* vcc code generator: queries about what an expression does */
+/*
+ * expression-effects.c: strip_casts and side_effects: what evaluating an expression does.
+ *
+ * side_effects follows clang's Expr::HasSideEffects, with "possible" effects counted: calls, writes,
+ * increments, inline asm, volatile and atomic accesses, and the builtins that store or trap.  The
+ * answer errs towards true (loops, gotos, unknown nodes: yes), so callers use it only to prove that
+ * dropping or reordering an expression is safe, never to find dead code from a `false`.  Used by the
+ * shared walker, the prepass and the arm64, x86-64 and wasm emitters.
+ */
 #include "emitimpl.h"
 
 VPRIV uint32_t strip_casts(cc *c, uint32_t n)
