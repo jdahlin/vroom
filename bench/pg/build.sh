@@ -5,7 +5,7 @@
 #   bench/pg/build.sh clang|vcc|vccd [setup|build|test|corpus|all]   (default: all)
 #
 #   vcc    CC is bench/pg/cc (Python): one vpp process per C file
-#   vccd   CC is vcc's native shim (build/ccs/vcc) talking to a private vccd
+#   vccd   CC is vcc's native shim (build/src/vcc) talking to a private vccd
 #          started for the run: vccd compiles -c of .c itself, with the
 #          header and declaration caches shared by all TUs, and runs
 #          bench/pg/cc for everything else (VCC_DELEGATE: probes, links, any
@@ -45,10 +45,10 @@ PREFIX=${VCC_PG_PREFIX:-$W/pg-$V-inst}
 CB=${VCC_PG_CLANG_BUILD:-$W/build-pg-clang}
 CL=${VCC_PG_CLANG_LOG_BASE:-$W/build-pg-clang}
 if [ "$(uname -s)" = Darwin ]; then
-    DEFAULT_BIN=$ROOT/build/ccs
+    DEFAULT_BIN=$ROOT/build/src
     DEFAULT_CLANG=/opt/homebrew/opt/llvm/bin/clang
 else
-    DEFAULT_BIN=$ROOT/build/linux/ccs
+    DEFAULT_BIN=$ROOT/build/linux/src
     DEFAULT_CLANG=$(command -v clang || true)
 fi
 BIN=${VCC_BIN:-$DEFAULT_BIN}

@@ -15,8 +15,8 @@ MUTATORS), runs `-fsyntax-only` with both compilers and measures:
 Sources: `torture` (tests/gcc-torture/execute, tests/tcc-tests2, tests/vcc,
 with vcc-ctests.py's flags) and `kernel` (work/build-o0 TUs, as vcc-sema.py).
 The seed is fixed, so a run is deterministic; clang's results are cached in
-build/ccs/mutate/clang/ (keyed by the mutant and the flags), so a rerun only
-runs vcc.  Details of every mutant go to build/ccs/mutate/last.jsonl.
+build/src/mutate/clang/ (keyed by the mutant and the flags), so a rerun only
+runs vcc.  Details of every mutant go to build/src/mutate/last.jsonl.
 
   bench/vcc-mutate.py [-j N] [-n N] [--kernel-share F] [--seed S] [--src torture|kernel|all] [--formats]
       --formats: also check every mutant's JSON records rebuild its text, its SARIF log and its HTML page (layer 5a)
@@ -35,7 +35,7 @@ from hostenv import llvm, BUILD
 import importlib.util
 
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-T = f'{R}/ccs/vcc/tests'
+T = f'{R}/src/test'
 CL = llvm('clang')
 VPP = os.path.join(os.environ.get('VCC_BIN') or BUILD, 'vpp')
 OUT = f'{BUILD}/mutate'

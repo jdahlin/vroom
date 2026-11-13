@@ -50,7 +50,7 @@ def main():
     arch = args.target.split('-')[0]
     if args.run and arch == 'wasm64' and '--experimental-wasm-memory64' in opt.run([args.node, '--v8-options']):
         args.node_flags.append('--experimental-wasm-memory64')
-    source = Path(R) / 'ccs/vcc/tests/vcc/switch_bitsets.c'
+    source = Path(R) / 'src/test/vcc/switch_bitsets.c'
     with tempfile.TemporaryDirectory(prefix='vcc-switch-bitsets-') as temp:
         directory = Path(temp)
         for name, level, disabled in [('O0', 0, False), ('O1', 1, False), ('O2', 2, False),

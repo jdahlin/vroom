@@ -11,7 +11,7 @@ from hostenv import R, llvm
 SOURCE = r'''
 #include <assert.h>
 #include <stdio.h>
-#include "vcc/arch/x64/emit/asm.c"
+#include "arch/x64/codegen/asm.c"
 
 vident *vintern_ents;
 static vident names[2];
@@ -72,7 +72,7 @@ int main(void)
 
 BUILTINS = r'''
 #include <assert.h>
-#include "vcc/cc/builtin.c"
+#include "frontend/c/builtin.c"
 int (*pp_builtin_known)(const char *);
 bool lib_builtin_known(const char *name) { (void)name; return false; }
 int main(void) {
@@ -106,7 +106,7 @@ with tempfile.TemporaryDirectory(prefix='vcc-emit-names-') as tmp:
     for program in (SOURCE, BUILTINS):
         source.write_text(program)
         command = [llvm('clang'), '-std=c11', '-D_GNU_SOURCE', '-O1', '-ffunction-sections',
-                   '-fdata-sections', '-I' + str(Path(R) / 'ccs'), *flags, str(source),
+                   '-fdata-sections', '-I' + str(Path(R) / 'src'), '-I' + str(Path(R) / 'src' / 'include'), *flags, str(source),
                    ('-Wl,-dead_strip' if platform.system() == 'Darwin' else '-Wl,--gc-sections'),
                    '-o', str(binary)]
         subprocess.run(command, check=True)

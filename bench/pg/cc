@@ -3,7 +3,7 @@
 
     CC=bench/pg/cc meson setup ...      (see bench/pg/build.sh)
 
-- `-c` or `-S` of C (including `-x c` stdin): vcc (`$VPP`, default build/ccs/vpp) writes the object and
+- `-c` or `-S` of C (including `-x c` stdin): vcc (`$VPP`, default build/src/vpp) writes the object and
   the depfile (-MQ becomes -MT, which is what vpp reads).
 - compile-and-link of .c files (meson's links()/run() probes): each .c is
   compiled by vcc to a temporary object, then clang links.
@@ -29,7 +29,7 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_BUILD = os.path.join(HERE, "..", "..", "build", *(["linux", "ccs"] if platform.system() == "Linux" else ["ccs"]))
+DEFAULT_BUILD = os.path.join(HERE, "..", "..", "build", *(["linux", "src"] if platform.system() == "Linux" else ["src"]))
 BUILD = os.environ.get("VCC_BIN") or DEFAULT_BUILD
 VPP = os.environ.get("VPP") or os.path.join(BUILD, "vpp")
 DEFAULT_CLANG = "/opt/homebrew/opt/llvm/bin/clang" if platform.system() == "Darwin" else shutil.which("clang")

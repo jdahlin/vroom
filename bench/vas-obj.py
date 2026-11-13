@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """vas-obj.py: whole-object parity of vasm with clang -c on small .s files.
 
-  bench/vas-obj.py [DIR...]     default: ccs/vcc/tests/vas-obj
+  bench/vas-obj.py [DIR...]     default: src/test/vas-obj
 
 Each file is assembled by clang (--target=aarch64-linux-gnu; x86-*.s files
 --target=x86_64-linux-gnu, vasm --target=x86_64) and by vasm;
@@ -17,7 +17,7 @@ VAS = os.environ.get('VAS', f'{BUILD}/vasm')
 CL = llvm('clang'); RE = llvm('llvm-readelf')
 
 def main():
-    dirs = sys.argv[1:] or [f'{R}/ccs/vcc/tests/vas-obj']
+    dirs = sys.argv[1:] or [f'{R}/src/test/vas-obj']
     files = sorted(f for d in dirs for f in glob.glob(f'{d}/*.s'))
     ok = bad = 0
     with tempfile.TemporaryDirectory() as t:

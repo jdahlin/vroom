@@ -1,6 +1,6 @@
 /* Synthetic CPU/OS fixtures: never execute optional host instructions. */
 #include <assert.h>
-#include "ccs/vcc/lib/x86native.h"
+#include "port/x86native.h"
 typedef struct fixture { unsigned max, submax, xcr, osxsave, xcalls, subcalls; } fixture;
 static bool read_cpuid(void *arg, unsigned leaf, unsigned sub, unsigned *a,
                       unsigned *b, unsigned *c, unsigned *d)

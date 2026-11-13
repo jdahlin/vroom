@@ -28,7 +28,7 @@ permissions:
 jobs:
   arm64:
     uses: ./.github/workflows/arm64.yml
-  # wasm is disabled (2026-11-13, docs/PLAN-wasm.md): wasm.yml is manual-only
+  # wasm is disabled (2026-11-13, doc/PLAN-wasm.md): wasm.yml is manual-only
   gate:
     needs: [arm64]
     if: always()

@@ -9,7 +9,7 @@
 #   ci/premerge.sh arm64    vcc build, the C suites under qemu, fast harnesses
 #   ci/premerge.sh asan     ASan+UBSan build: vcc suite, diag, stress, vccd, vlink-bad
 #   ci/premerge.sh tsan     TSan build: vcc suite (threaded emitter), vccd
-#   ci/premerge.sh wasm     the C suites for wasm64 (emcc + node); DISABLED, manual (docs/PLAN-wasm.md)
+#   ci/premerge.sh wasm     the C suites for wasm64 (emcc + node); DISABLED, manual (doc/PLAN-wasm.md)
 #
 # Locally (Debian arm64 container, as CI):  env/linux/run.sh ci/premerge.sh arm64
 # Each step's output goes to build/linux/ci-logs/STEP.log (CI uploads it on
@@ -45,7 +45,7 @@ step() {	# step NAME CMD...: run, log, report; keep going on failure
 
 build() {	# build MAKE-TARGET [VAR=VALUE]: a build failure ends the job
 	echo "::group::make $1"
-	if ! make -C ccs -j "$J" "$@" > "$LOGS/make-$1.log" 2>&1; then
+	if ! make -C src -j "$J" "$@" > "$LOGS/make-$1.log" 2>&1; then
 		tail -n 60 "$LOGS/make-$1.log"; echo "::endgroup::"
 		echo "FAIL make $1"; exit 1
 	fi
@@ -65,7 +65,7 @@ arm64)
 	step runtime-exceptions python3 bench/test-runtime-exceptions.py
 	step pg-cc-contract python3 bench/pg/test-cc.py
 	step pg-speed-accounting python3 bench/pg/test-speed.py
-	step memory-cells-generated python3 bench/gen-memory-cells.py --check
+	step memory-cells-generated python3 src/tools/gen-memory-cells.py --check
 	step ctests       python3 bench/vcc-ctests.py -j "$J"
 	step switch-plan python3 bench/vcc-switch-plan.py --sanitize
 	step udivconst python3 bench/vcc-udivconst.py --sanitize
@@ -134,7 +134,7 @@ arm64)
 	;;
 asan)
 	build vcc-asan
-	B=$(dirname "$BUILD")/ccs-asan
+	B=$(dirname "$BUILD")/src-asan
 	# LeakSanitizer is on by default on Linux (not on macOS): vcc exits with
 	# its arenas and caches mapped, by design, so every compile would "leak"
 	export ASAN_OPTIONS=${ASAN_OPTIONS:+$ASAN_OPTIONS:}detect_leaks=0
@@ -151,7 +151,7 @@ asan)
 	;;
 tsan)
 	build vcc-tsan
-	B=$(dirname "$BUILD")/ccs-tsan
+	B=$(dirname "$BUILD")/src-tsan
 	if [ "$(uname -s)/$(uname -m)" = Linux/x86_64 ]; then
 		step vir-x86-tsan python3 bench/vcc-vir-x86.py --bin-dir "$B"
 	fi

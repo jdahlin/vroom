@@ -17,7 +17,7 @@ VLINK, VPP = f'{BUILD}/vlink', f'{BUILD}/vpp'
 LLD = shutil.which('ld.lld') or llvm('ld.lld')
 OC = llvm('llvm-objcopy')
 # as the C suites: vlink's layout without a script is another TODO.md item
-LDS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'ccs/vcc/tests/rt/link.ld')
+LDS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'src/test/rt/link.ld')
 
 # (name, args); {o}: the objects, {m}: the main object alone, {a}: the archive directory
 CASES = [
