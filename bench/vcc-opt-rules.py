@@ -160,11 +160,11 @@ def check_cmpbounds(assembly, arch):
             raise RuntimeError(f'{name}: retained comparison against a bound\n{text}')
     for name in ['cb_effect', 'cb_branch', 'cb_expr_effect', 'cb_expr_effect_left']:
         text = body(assembly, name, wasm)
-        if len(re.findall(r'\b(?:callq?|bl)\s+next\b', text)) != 1:
+        if len(re.findall(r'\b(?:callq?|bl|b|jmpq?)\s+next\b', text)) != 1:
             raise RuntimeError(f'{name}: expected one call to next\n{text}')
     for name in ['cb_impure_rhs', 'cb_impure_tree']:
         text = body(assembly, name, wasm)
-        if len(re.findall(r'\b(?:callq?|bl)\s+next\b', text)) != 1:
+        if len(re.findall(r'\b(?:callq?|bl|b|jmpq?)\s+next\b', text)) != 1:
             raise RuntimeError(f'{name}: expected one call to next\n{text}')
     loads = {'x86_64': (r'observed\(%rip\)', r'mov[lq]\s+\(%r'),
              'aarch64': (r'\bldr\b[^\n]*observed', r'(?:\bldar\b|\.inst\b)'),
@@ -198,7 +198,7 @@ def check_pow2(assembly, arch):
     for name in ['effect_div', 'effect_rem', 'effect_zero',
                  'effect_denominator', 'effect_remdenominator']:
         text = body(assembly, name, wasm)
-        calls = re.findall(r'\b(?:callq?|bl)\s+next\b', text)
+        calls = re.findall(r'\b(?:callq?|bl|b|jmpq?)\s+next\b', text)
         if len(calls) != 1:
             raise RuntimeError(f'{name}: expected exactly one call to next\n{text}')
     # These are outside this rule. Keep a genuine divide in the dynamic
@@ -249,7 +249,7 @@ def check_identities(assembly, arch):
                  'id_effect_orones', 'id_effect_mulone', 'id_rhs_add',
                  'id_rhs_mulzero', 'id_rhs_andones']:
         text = body(assembly, name, wasm)
-        if len(re.findall(r'\b(?:callq?|bl)\s+id_next\b', text)) != 1:
+        if len(re.findall(r'\b(?:callq?|bl|b|jmpq?)\s+id_next\b', text)) != 1:
             raise RuntimeError(f'{name}: expected exactly one call to id_next\n{text}')
     for name in ['id_volatile_zero', 'id_volatile_compound']:
         text = body(assembly, name, wasm)
@@ -340,10 +340,10 @@ def check_unreachable(assembly, arch):
             raise RuntimeError(f'{name}: retained unreachable volatile store\n{text}')
     # Effects on both conditional paths and cleanup transfers must survive.
     text = body(assembly, 'dc_condition', False)
-    if len(re.findall(r'\b(?:callq?|bl)\s+dc_effect\b', text)) != 2:
+    if len(re.findall(r'\b(?:callq?|bl|b|jmpq?)\s+dc_effect\b', text)) != 2:
         raise RuntimeError(f'dc_condition: lost a reachable conditional effect\n{text}')
     text = body(assembly, 'dc_cleanup', False)
-    if not re.search(r'\b(?:callq?|bl)\s+dc_clean\b', text):
+    if not re.search(r'\b(?:callq?|bl|b|jmpq?)\s+dc_clean\b', text):
         raise RuntimeError(f'dc_cleanup: lost reachable cleanup\n{text}')
     if arch == 'x86_64':
         # The a64 optimizer currently deletes this block before the shared
@@ -385,7 +385,7 @@ def check_signedpow2(assembly, arch):
             raise RuntimeError(f'{name}: retained signed power-of-two divide/remainder\n{text}')
     for name in ['sp_effect_div', 'sp_effect_rem']:
         text = body(assembly, name, wasm)
-        if len(re.findall(r'\b(?:callq?|bl)\s+sp_next\b', text)) != 1:
+        if len(re.findall(r'\b(?:callq?|bl|b|jmpq?)\s+sp_next\b', text)) != 1:
             raise RuntimeError(f'{name}: expected exactly one call to sp_next\n{text}')
     for name in ['sp_volatile_div', 'sp_compound']:
         text = body(assembly, name, wasm)
@@ -505,7 +505,7 @@ def check_sdivconst(assembly, arch, optimized=True):
                 raise RuntimeError(f'{name}: lost genuine runtime division')
     for name in ['sd_effect', 'sd_effect_r', 'sd_rhs', 'sd_rhs_r', 'sd_compound_rhs']:
         text = body(assembly, name, wasm)
-        if len(re.findall(r'\b(?:callq?|bl)\s+next\b', text)) != 1:
+        if len(re.findall(r'\b(?:callq?|bl|b|jmpq?)\s+next\b', text)) != 1:
             raise RuntimeError(f'{name}: expected one call to next\n{text}')
 
 
@@ -526,7 +526,7 @@ def check_udivconst64(assembly, arch):
             raise RuntimeError(f'{name}: retained unsigned64 constant division\n{text}')
     for name in ['u64_effect','u64_effectrem','u64_rhs','u64_rhsrem']:
         text = body(assembly,name,wasm)
-        if len(re.findall(r'\b(?:callq?|bl)\s+next\b',text)) != 1:
+        if len(re.findall(r'\b(?:callq?|bl|b|jmpq?)\s+next\b',text)) != 1:
             raise RuntimeError(f'{name}: expected one call to next\n{text}')
     if wasm:
         for name in ['u64_q3','u64_r3']:
@@ -560,7 +560,7 @@ def check_udivconst(assembly, arch):
             raise RuntimeError(f'{name}: retained constant division/remainder\n{text}')
     for name in ['ud_effect', 'ud_effectrem', 'ud_rhs', 'ud_rhsrem', 'ud_compound_rhs']:
         text = body(assembly, name, wasm)
-        if len(re.findall(r'\b(?:callq?|bl)\s+next\b', text)) != 1:
+        if len(re.findall(r'\b(?:callq?|bl|b|jmpq?)\s+next\b', text)) != 1:
             raise RuntimeError(f'{name}: expected one call to next\n{text}')
     if wasm:
         for name in ['ud_q7', 'ud_r3']:
@@ -652,7 +652,7 @@ def check_switchvalues(assembly, arch, optimized=True):
             raise RuntimeError(f'{name}: unsafe switch converted to table')
     if optimized:
         text = body(assembly, 'sv_effect', wasm)
-        if len(re.findall(r'\b(?:callq?|bl)\s+sv_next\b', text)) != 1:
+        if len(re.findall(r'\b(?:callq?|bl|b|jmpq?)\s+sv_next\b', text)) != 1:
             raise RuntimeError('switch selector call must execute once')
     # Native inlining initially declines tables; wasm keeps a real function.
     if not wasm and '.Lswitch.values.' in body(assembly, 'sv_inline_twice', False):
@@ -801,7 +801,7 @@ def check_postfix(assembly, arch):
         if actual != expected:
             raise RuntimeError(f'{name}: expected reads/writes {expected}, found {actual}\n{text}')
     text = body(assembly, 'pe_address_post', arch.startswith('wasm'))
-    if len(re.findall(r'\b(?:callq?|bl)\s+pe_address\b', text)) != 1:
+    if len(re.findall(r'\b(?:callq?|bl|b|jmpq?)\s+pe_address\b', text)) != 1:
         raise RuntimeError(f'pe_address_post: address must be evaluated once\n{text}')
     if arch == 'x86_64':
         for name in ['pe_atomic_post', 'pe_atomic_pre']:
@@ -833,7 +833,7 @@ def check_bitrules(assembly, arch):
     for name, callee in [('br_call', 'br_next'), ('br_rhs', 'br_next'),
                          ('br_pointer_mul', 'br_pointer'), ('br_pointer_xor', 'br_pointer')]:
         text = body(assembly, name, wasm)
-        if len(re.findall(r'\b(?:callq?|bl)\s+' + callee + r'\b', text)) != 1:
+        if len(re.findall(r'\b(?:callq?|bl|b|jmpq?)\s+' + callee + r'\b', text)) != 1:
             raise RuntimeError(f'{name}: expected one operand call\n{text}')
     for name in ['br_volatile', 'br_volatile_xor']:
         text = body(assembly, name, wasm)
@@ -887,10 +887,10 @@ def check_unusedinit(assembly, arch, optimized=True):
             raise RuntimeError(f'ui_pure: unexpectedly optimized disabled initializer\n{text}')
     for name in ['ui_call', 'ui_comma', 'ui_short_effect', 'ui_braced', 'ui_vla', 'ui_cleanup']:
         text = body(assembly, name, wasm)
-        if len(re.findall(r'\b(?:callq?|bl)\s+ui_touch\b', text)) != 1:
+        if len(re.findall(r'\b(?:callq?|bl|b|jmpq?)\s+ui_touch\b', text)) != 1:
             raise RuntimeError(f'{name}: expected exactly one retained effect call\n{text}')
     text = body(assembly, 'ui_cleanup', wasm)
-    if not re.search(r'\b(?:callq?|bl)\s+ui_clean\b', text):
+    if not re.search(r'\b(?:callq?|bl|b|jmpq?)\s+ui_clean\b', text):
         raise RuntimeError(f'ui_cleanup: lost cleanup call\n{text}')
     text = body(assembly, 'ui_volatile_read', wasm)
     read = r'\bi32\.load\b' if wasm else r'\bldr(?:sw)?\s' if arch == 'aarch64' else r'\bmov(?:slq|[lq])?\s+[^\n,]*\([^)]*\)[^\n,]*,\s*%'
@@ -927,7 +927,7 @@ def check_unusedinit(assembly, arch, optimized=True):
         raise RuntimeError(f'ui_float_conversion: lost internal FP divide/conversion\n{text}')
     if optimized:
         text = body(assembly, 'ui_call', wasm)
-        after_call = re.split(r'\b(?:callq?|bl)\s+ui_touch\b', text, maxsplit=1)[1]
+        after_call = re.split(r'\b(?:callq?|bl|b|jmpq?)\s+ui_touch\b', text, maxsplit=1)[1]
         if wasm:
             if not re.match(r'\s*drop\b', after_call):
                 raise RuntimeError(f'ui_call: initializer result retained in destination local\n{text}')
