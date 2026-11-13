@@ -17,6 +17,7 @@ passes when
     level, -W flag) as clang's, in order, and the exit status agrees.
 A deliberate difference from clang in layer 1 (a better place, fewer
 follow-on errors) is declared in the case: /* diag-differs: why */.
+/* diag-vpp-flags: F */ adds flags for vcc alone (clang has no --lint).
 A test with /* diag-mode: -c */ is compiled (-c -o /dev/null) instead, for
 diagnostics that come from code generation (the error attribute).
 The summary also counts the cases whose text in -fdiagnostics-style=clang is
@@ -60,6 +61,9 @@ def run(cmd, name, extra=()):
         fl = [f for f in FL if f != '-fsyntax-only'] + ['-c', '-o', '/dev/null']
     m = re.search(r'/\*\s*diag-flags:\s*(.*?)\s*\*/', src)	# flags for both compilers
     if m:
+        fl = fl + m.group(1).split()
+    m = re.search(r'/\*\s*diag-vpp-flags:\s*(.*?)\s*\*/', src)	# flags for vpp only (--lint)
+    if m and cmd[0] != CL:
         fl = fl + m.group(1).split()
     fl = fl + list(extra)
     p = subprocess.run(cmd + fl + [name], cwd=D, capture_output=True, timeout=30)
