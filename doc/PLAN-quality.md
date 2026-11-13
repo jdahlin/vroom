@@ -174,6 +174,34 @@ Wave 2's tracks:
 - The first optimizer pass on VIR itself, then VIR-MIGRATION steps 2e and 3.
 - Diagnostics as a module and the option tables, after the renames.
 
+#### Wave 2, decided by the owner during the wave
+
+- Track G (the linker's context struct and the one linker core) is held by
+  owner, wave 2.  Draft PR #183 (branch `quality/ld-context-1`: the design in
+  `link-context.md` and step 1) stays open and unmerged.
+- Track I (diagnostics as their own module; one option table per tool) is held
+  by owner, wave 2, and not started.
+- The field-use mode (track D) stays a plain rename helper; its output is not
+  generalised for other tools.
+- New: a cheap lint mode `vpp --lint` (STYLE.md naming for declarations, front
+  end only, normal diagnostics), not wired into premerge.
+
+Merged in wave 2 so far (#176 onwards):
+- #176 wave 2 decisions and status.
+- #177, #178, #179, #180: opening comments for `src/as`, `src/obj` and
+  `src/platform`, `src/arch/*/as` and `arch/a64/obj`, `src/utils` and `src/bin`.
+- #181, #182, #186, #188, #190: rename tables for driver/server/utils/bin, the
+  linker, the C front end, VIR and the surviving code generator.
+- #184: design of the struct-field rename mode.
+- #185: VIR optimizer design (passes on VIR itself; WORK-vir decision closed).
+- #187, #191, #192: WORK-common's pilot, steps 4-6 (variants merged, the
+  missing facilities, comments and the gates).  The pilot is done.  Left open:
+  `common/` still includes `port/` in four places (`intern.c`, `intern.h`,
+  `text-buffer.h`; the gate holds the count at 4); `qbig` in `softfloat.h` is
+  not moved onto `bigint.h`; `unlikely_vi` is still in `intern.h` (a bare
+  `unlikely` collides with private defines).
+- #189: lex, pp and diag renamed by table (fields with short names deferred).
+
 ### 2026-11-13: on the reorganised tree
 
 PR #134 is on main (`src/`, `doc/`); PR #136 took wasm out of the default
