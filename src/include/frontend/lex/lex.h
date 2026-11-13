@@ -98,6 +98,10 @@ const vlex_file *vlex_digitsep(const vlex_file *f);
 const vlex_file *vlex_c89(const vlex_file *f);
 const vlex_file *vlex_nodigraphs(const vlex_file *f);
 void vlex_cache_flush(void);	/* only with no lookups in flight */
+/* The cache epoch (vccd): vcache_new_epoch() makes every cached answer (files, directories, include
+ * lookups) be checked against the file system once before it is used again; safe with lookups in flight. */
+uint32_t vcache_epoch(void);
+void vcache_new_epoch(void);
 /*
  * Read-ahead hint: path will probably be needed.  I/O threads open and read
  * it, so that vlex_get() only lexes.  Never required for correctness.

@@ -24,6 +24,7 @@ struct incent {
 	int32_t mode;		/* start * 4 + angled * 2 + next */
 	uint32_t used, usig;	/* directories looked at, psig[used] */
 	int32_t sdir;
+	uint32_t epoch;		/* the cache epoch (lex.h) it was computed in */
 	const vlex_file *f;
 	const char *path;
 	char key[];		/* includer's directory, '\0', name; zero padded to 8 */
@@ -195,7 +196,7 @@ static inline bool inc_same(const incent *e, uint64_t h, uint32_t sig, uint32_t 
 /* e's answer holds for p: the directories it looked at are p's */
 static inline bool inc_valid(const pp *p, const incent *e)
 {
-	return e->used <= (uint32_t)p->o->ndirs && p->psig[e->used] == e->usig;
+	return e->used <= (uint32_t)p->o->ndirs && p->psig[e->used] == e->usig && e->epoch == vcache_epoch();
 }
 
 /* the search path prefix the lookup depended on is an input of the open regions */
@@ -295,7 +296,9 @@ static const vlex_file *find_include_at(pp *p, const ctx *from, const char *name
 	const char *fp;
 	size_t dl, kl, kp;
 	int32_t mode;
-	incent *e;
+	incent *e, *old = NULL;
+	_Atomic(incent *) *stale = NULL;
+	uint32_t ep;
 	uint64_t h, w;
 
 	if (ie)
@@ -318,15 +321,20 @@ static const vlex_file *find_include_at(pp *p, const ctx *from, const char *name
 		h = (h ^ w) * 0x9E3779B97F4A7C15ull;
 		h ^= h >> 29;
 	}
+	ep = vcache_epoch();
 	for (i = (uint32_t)(h >> (64 - INC_BITS));; i = (i + 1) & ((1u << INC_BITS) - 1)) {
 		e = atomic_load_explicit(&inc_tab[i], memory_order_acquire);
 		if (!e)
 			break;
-		if (inc_same(e, h, sig, fsig, mode, kb, kl) && inc_valid(p, e))
-			goto hit;
+		if (inc_same(e, h, sig, fsig, mode, kb, kl)) {
+			if (inc_valid(p, e))
+				goto hit;
+			if (e->epoch != ep && !stale)	/* an answer of an older epoch: replaced below */
+				stale = &inc_tab[i], old = e;
+		}
 	}
 	f = find_include_(p, from, name, nlen, angled, next, sdir, path, &used);
-	if (p->psig[used] == HNONE || atomic_fetch_add(&inc_n, 1) >= (3u << INC_BITS) / 4)
+	if (p->psig[used] == HNONE || (!stale && atomic_fetch_add(&inc_n, 1) >= (3u << INC_BITS) / 4))
 		goto done;
 	{
 		size_t pl = f ? strlen(*path) : 0;
@@ -334,11 +342,17 @@ static const vlex_file *find_include_at(pp *p, const ctx *from, const char *name
 
 		m->hash = h, m->sig = sig, m->fsig = fsig, m->klen = (uint32_t)kl, m->mode = mode;
 		m->used = used, m->usig = p->psig[used], m->sdir = *sdir, m->f = f;
+		m->epoch = ep;
 		memcpy(m->key, kb, kp);
 		m->path = NULL;
 		if (f) {
 			memcpy(m->key + kp, *path, pl + 1);
 			m->path = m->key + kp;
+		}
+		if (stale && atomic_compare_exchange_strong_explicit(stale, &old, m, memory_order_acq_rel,
+								     memory_order_acquire)) {
+			e = m;
+			goto hit;
 		}
 		for (;; i = (i + 1) & ((1u << INC_BITS) - 1)) {
 			e = NULL;

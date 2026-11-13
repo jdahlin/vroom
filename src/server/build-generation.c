@@ -3,15 +3,24 @@
 
 /*
  * Builds.  The caches answer "what is at this path" for the server's life;
- * between builds files change.  A request from a new process group is a new
- * make invocation: before it runs, the running jobs finish and the file,
- * directory and include caches are emptied (old entries stay allocated, so
- * nothing in flight dangles).  Jobs of the same group never wait.
+ * between builds files change.  A request from a process group the server
+ * has not seen lately is a new make invocation: if no job is running, the
+ * file, directory and include caches are emptied first (old entries stay
+ * allocated, so nothing in flight dangles).  If jobs are running the caches
+ * stay and nothing waits, but a new cache epoch begins (vcache_new_epoch):
+ * every cached file, directory and include answer is checked against the
+ * file system once (a stat, no lock held) before the next lookup uses it,
+ * and an answer that no longer holds is dropped and found again.  Two makes
+ * through one server thus share the caches instead of draining each other,
+ * and a file edited between them is seen.
+ * A group stays known for GEN_KEEP_MS after its last request, so a make with
+ * gaps between its jobs does not look new when it comes back.
  */
+#define GEN_KEEP_MS 10000.0
+#define GEN_GROUPS 64
 static pthread_mutex_t gen_mu = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t gen_cv = PTHREAD_COND_INITIALIZER;
-static uint32_t gen_pgrp;
-static int gen_running, gen_flushing;
+static struct { uint32_t pgrp; double ms; } gen_grp[GEN_GROUPS];
+static int gen_ngrp, gen_running;
 _Atomic unsigned long n_flush;
 
 int g_argc, g_ls = -1;
@@ -122,37 +131,42 @@ VPRIV void do_restart(void)
 VPRIV int gen_enter(uint32_t pgrp)
 {
 	VLOCK(gen_mu);
-	while (gen_flushing && !atomic_load(&gen_restart))
-		pthread_cond_wait(&gen_cv, &gen_mu);
-	if (atomic_load(&gen_restart)) {
+	if (atomic_load(&gen_restart))
 		return 1;
-	}
 	if (atomic_load(&vtables_full) && !gen_running && g_ls >= 0 && self_exe[0]) {
 		/* identifiers are never freed: a full table fails every later TU */
 		atomic_store(&gen_restart, 1);
-		pthread_cond_broadcast(&gen_cv);
 		return 2;
 	}
-	if (pgrp && pgrp != gen_pgrp) {
-		if (gen_pgrp) {
-			gen_flushing = 1;
-			while (gen_running)
-				pthread_cond_wait(&gen_cv, &gen_mu);
-			if (restart_due()) {
-				atomic_store(&gen_restart, 1);
-				gen_flushing = 0;
-				pthread_cond_broadcast(&gen_cv);	/* (waiters see gen_restart) */
-				return 2;
+	if (pgrp) {
+		double t = now_ms();
+		int i, k = 0;
+
+		for (i = 0; i < gen_ngrp; i++)
+			if (gen_grp[i].pgrp == pgrp)
+				break;
+		if (i == gen_ngrp) {	/* a new build */
+			if (gen_ngrp && !gen_running) {
+				if (restart_due()) {
+					atomic_store(&gen_restart, 1);
+					return 2;
+				}
+				vlex_cache_flush();
+				vdir_flush();
+				dstore_new_build();
+				pp_include_flush();
+				atomic_fetch_add(&n_flush, 1);
+			} else if (gen_ngrp) {	/* jobs are running: keep the caches, but check each answer once before it is reused */
+				vcache_new_epoch();
 			}
-			vlex_cache_flush();
-			vdir_flush();
-			dstore_new_build();
-			pp_include_flush();
-			atomic_fetch_add(&n_flush, 1);
-			gen_flushing = 0;
-			pthread_cond_broadcast(&gen_cv);
+			for (int j = 0; j < gen_ngrp; j++)	/* forget the groups long gone */
+				if (t - gen_grp[j].ms < GEN_KEEP_MS)
+					gen_grp[k++] = gen_grp[j];
+			gen_ngrp = k < GEN_GROUPS ? k : GEN_GROUPS - 1;	/* (all live: the last one makes room) */
+			i = gen_ngrp++;
+			gen_grp[i].pgrp = pgrp;
 		}
-		gen_pgrp = pgrp;
+		gen_grp[i].ms = t;
 	}
 	gen_running++;
 	return 0;
@@ -161,6 +175,5 @@ VPRIV int gen_enter(uint32_t pgrp)
 VPRIV void gen_leave(void)
 {
 	VLOCK(gen_mu);
-	if (!--gen_running)
-		pthread_cond_broadcast(&gen_cv);
+	gen_running--;
 }	/* connections taken by a worker, not yet answered */
