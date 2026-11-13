@@ -1196,6 +1196,13 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 			const char *m = strstr(a, "-macos");
 
 			wasm = strstr(a, "wasm64") ? 64 : strstr(a, "wasm32") ? 32 : 0;
+#ifndef VCC_WASM
+			if (wasm) {
+				dprintf(errfd, "vcc: error: this build has no WebAssembly support (make VCC_WASM=1)\n");
+				status = 1;
+				goto out;
+			}
+#endif
 			darwin = !wasm && (strstr(a, "darwin") || strstr(a, "apple"));
 			x86 = !wasm && !darwin && strstr(a, "x86_64");
 			hosted = 0;

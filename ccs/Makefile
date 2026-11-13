@@ -60,7 +60,7 @@ VCC_CC     = $(CCACHE) $(HOST_CC)
 VCC_SAN   ?=
 VCC_SANLD ?=
 VCC_OPT   ?= -O3 $(HOST_CPU)
-VCC_CFLAGS = -std=c11 -O2 -Wall -Wextra -Wimplicit-fallthrough -Wno-unused-parameter $(HOST_DEFS) -DVCC_INCDIR='"$(abspath vcc/include)"' $(VCC_SAN)
+VCC_CFLAGS = $(if $(VCC_WASM),-DVCC_WASM) -std=c11 -O2 -Wall -Wextra -Wimplicit-fallthrough -Wno-unused-parameter $(HOST_DEFS) -DVCC_INCDIR='"$(abspath vcc/include)"' $(VCC_SAN)
 # LTO: off; the split modules are one TU each (SPLIT_MODS), which gives the
 # inlining LTO would.  `make VCC_LTO=-flto=thin` turns it on (vbench: pp +0.5 %,
 # emit -2.5 % instructions, -c as a whole the same).
@@ -80,7 +80,10 @@ OBJ        = $(OUT)/obj
 vcc: $(OUT)/vcc $(OUT)/vsh/sh $(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vcc-nm $(OUT)/vcc-objcopy $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vlink $(OUT)/vasm $(OUT)/virtest $(OUT)/viralloc
 
 o = $(patsubst vcc/%.c,$(OBJ)/%.o,$(1))
-AS_FILES = vcc/arch/a64/as/enc.c vcc/platform/darwin/macho.c vcc/arch/wasm/as/as.c vcc/platform/wasm/wasm.c
+# WebAssembly is off by default (disabled 2026-11-13, docs/PLAN-wasm.md): its
+# sources are not built and a wasm target is an error.  `make VCC_WASM=1` builds it.
+VCC_WASM ?=
+AS_FILES = vcc/arch/a64/as/enc.c vcc/platform/darwin/macho.c $(if $(VCC_WASM),vcc/arch/wasm/as/as.c vcc/platform/wasm/wasm.c)
 as_SRC   = vcc/as/as.c vcc/arch/a64/as/parse.c vcc/arch/x64/as/asm.c vcc/arch/x64/as/sys.c vcc/arch/x64/as/gpr.c \
            vcc/arch/x64/as/x87.c vcc/arch/x64/as/sse.c vcc/arch/x64/as/avx.c
 LEX_SRC = vcc/lex/lex.c vcc/lib/intern.c
@@ -100,7 +103,7 @@ VIRA_SRC = vcc/vir/loops.c vcc/vir/alloc.c vcc/vir/allocchk.c vcc/vir/allocdump.
 obj_SRC  = vcc/obj/obj.c vcc/arch/a64/obj/fixup.c vcc/arch/x64/obj/fixup.c vcc/platform/linux/elf.c
 cc_SRC   = $(wildcard vcc/cc/*.c)
 pp_SRC   = $(filter-out vcc/pp/dircache.c,$(wildcard vcc/pp/*.c))
-emit_SRC = $(wildcard vcc/emit/*.c vcc/emit/opt/*.c vcc/emit/rec/*.c vcc/emit/flow/*.c vcc/arch/a64/emit/*.c vcc/arch/wasm/emit/*.c vcc/emit/walk/*.c vcc/arch/x64/emit/*.c vcc/emit/vir/*.c)
+emit_SRC = $(wildcard vcc/emit/*.c vcc/emit/opt/*.c vcc/emit/rec/*.c vcc/emit/flow/*.c vcc/arch/a64/emit/*.c $(if $(VCC_WASM),vcc/arch/wasm/emit/*.c) vcc/emit/walk/*.c vcc/arch/x64/emit/*.c vcc/emit/vir/*.c)
 VCC_UNITY ?= y
 SPLIT_SRC = $(foreach m,$(SPLIT_MODS),$($(m)_SRC))
 SPLIT_OBJ = $(if $(VCC_UNITY),$(patsubst %,$(OBJ)/unity/%.o,$(SPLIT_MODS)),$(call o,$(SPLIT_SRC)))
@@ -109,7 +112,7 @@ PP_OBJ  = $(call o,$(PP_SRC)) $(SPLIT_OBJ) $(call mod,vir) $(call o,$(VIRA_SRC))
 mod = $(if $(VCC_UNITY),$(OBJ)/unity/$(1).o,$(call o,$($(1)_SRC)))
 AS_SRC  = $(AS_FILES) $(as_SRC) $(obj_SRC)
 AS_OBJ  = $(call o,$(AS_FILES)) $(call mod,as) $(call mod,obj)
-LD_SRC  = vcc/ld/ld.c vcc/lib/ldhash.c vcc/ld/objcopy.c vcc/ld/wasmld.c vcc/platform/darwin/ldmacho.c
+LD_SRC  = vcc/ld/ld.c vcc/lib/ldhash.c vcc/ld/objcopy.c $(if $(VCC_WASM),vcc/ld/wasmld.c) vcc/platform/darwin/ldmacho.c
 
 $(OBJ)/%.o: vcc/%.c Makefile | $(OBJ)
 	@mkdir -p $(dir $@)
