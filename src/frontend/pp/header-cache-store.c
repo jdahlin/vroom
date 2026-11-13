@@ -50,7 +50,7 @@ static const pp_header_cache_chunk *pp_header_cache_chunk_get(pp *p, const void 
 	const pp_header_cache_chunk **cc = &p->chunk_cache_by_hash[h >> 52];
 	_Atomic(const pp_header_cache_chunk *) *tab;
 
-	if (*cc && (*cc)->h == h && (*cc)->n == n && (*cc)->esz == esz && !memcmp((*cc)->d, a, bytes))
+	if (*cc && (*cc)->h == h && (*cc)->n == n && (*cc)->element_size == esz && !memcmp((*cc)->d, a, bytes))
 		return *cc;
 	tab = atomic_load_explicit(&pp_header_cache_chunk_table, memory_order_relaxed);
 
@@ -62,7 +62,7 @@ static const pp_header_cache_chunk *pp_header_cache_chunk_get(pp *p, const void 
 				mine = pp_header_cache_allocate(p, sizeof(pp_header_cache_chunk) + bytes + 16);
 				mine->h = h;
 				mine->n = n;
-				mine->esz = esz;
+				mine->element_size = esz;
 				memcpy(mine->d, a, bytes);
 				memset(mine->d + bytes, 0, 16);
 			}
@@ -70,14 +70,14 @@ static const pp_header_cache_chunk *pp_header_cache_chunk_get(pp *p, const void 
 								    memory_order_acquire))
 				return *cc = mine;
 		}
-		if (e->h == h && e->n == n && e->esz == esz && !memcmp(e->d, a, bytes))
+		if (e->h == h && e->n == n && e->element_size == esz && !memcmp(e->d, a, bytes))
 			return *cc = e;	/* (a chunk of ours that lost a race stays unused) */
 	}
 	if (!mine) {
 		mine = pp_header_cache_allocate(p, sizeof(pp_header_cache_chunk) + bytes + 16);
 		mine->h = h;
 		mine->n = n;
-		mine->esz = esz;
+		mine->element_size = esz;
 		memcpy(mine->d, a, bytes);
 		memset(mine->d + bytes, 0, 16);
 	}
@@ -110,7 +110,7 @@ VPRIV pp_header_cache_vector pp_header_cache_vector_store(pp *p, const void *a, 
 
 	if (!n)
 		return v;
-	tmp = varena_alloc(&p->tmp, (size_t)n * sizeof(*tmp));
+	tmp = varena_alloc(&p->temporary_region, (size_t)n * sizeof(*tmp));
 	for (uint32_t i = 0; i < n; i++) {
 		uint32_t id;
 
@@ -124,7 +124,7 @@ VPRIV pp_header_cache_vector pp_header_cache_vector_store(pp *p, const void *a, 
 			memcpy(&id0, q, 4);
 			vc = &p->chunk_cache_by_ids[(((uint64_t)id0 * 0x9E3779B97F4A7C15ull) ^ ((uint64_t)id * 0xc2b2ae3d27d4eb4full) ^
 				      ((uint64_t)m << 8 | esz)) * 0xff51afd7ed558ccdull >> 52];
-			if (!*vc || (*vc)->n != m || (*vc)->esz != esz || memcmp((*vc)->d, q, (size_t)m * esz))
+			if (!*vc || (*vc)->n != m || (*vc)->element_size != esz || memcmp((*vc)->d, q, (size_t)m * esz))
 				*vc = pp_header_cache_chunk_get(p, q, m, esz);
 			tmp[nc++] = *vc;
 			st = i + 1;
@@ -132,7 +132,7 @@ VPRIV pp_header_cache_vector pp_header_cache_vector_store(pp *p, const void *a, 
 	}
 	c = pp_header_cache_allocate(p, nc * sizeof(*c));
 	memcpy(c, tmp, nc * sizeof(*c));
-	v.c = c;
-	v.nc = nc;
+	v.chunks = c;
+	v.chunk_count = nc;
 	return v;
 }

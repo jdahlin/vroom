@@ -61,8 +61,8 @@ static __attribute__((noinline, cold)) const lex_file *pp_stdin_file_lex(pp *p, 
 {
 	size_t ml = o->main_len;
 	char *ms = pp_shared_allocate(ml + 129);
-	lex_file *f = varena_alloc(&p->perm, sizeof(*f));
-	lex_token *mt = varena_alloc(&p->perm, (ml + 2) * sizeof(lex_token));
+	lex_file *f = varena_alloc(&p->permanent_region, sizeof(*f));
+	lex_token *mt = varena_alloc(&p->permanent_region, (ml + 2) * sizeof(lex_token));
 	void *lex_scratch = vjob_region_acquire(&pp_translation_unit_regions[7], lex_scratch_size(ml) + 4096, "pp.lexscratch");
 
 	memcpy(ms, o->main_src, ml);
@@ -87,7 +87,7 @@ pp *pp_open(const pp_opts *o)
 	void *lex_scratch;
 
 	vintern_init();
-	p->o = o;
+	p->options = o;
 	p->warning_cache_options = NULL;	/* (the region may be a previous TU's) */
 	p->keep_macro_text = false;
 	{
@@ -95,23 +95,23 @@ pp *pp_open(const pp_opts *o)
 
 		p->diagnostic_track = t && *t && *t != '0';
 	}
-	p->color = o->diag_color > 0 || (o->diag_color == 0 && isatty(o->errfd ? o->errfd : 2));
-	p->cx = vjob_region_acquire(&pp_translation_unit_regions[1], PP_CONTEXT_MAX * sizeof(pp_context), "pp.cx");
-	p->perm.base = vjob_region_acquire(&pp_translation_unit_regions[2], 1ull << 30, "pp.perm");
-	p->perm.used = 0;
-	p->perm.cap = 1ull << 30;
-	p->tmp.base = vjob_region_acquire(&pp_translation_unit_regions[3], 1ull << 32, "pp.tmp");
-	p->tmp.used = 0;
-	p->tmp.cap = 1ull << 32;
-	p->psig = varena_alloc(&p->perm, ((size_t)o->ndirs + 1) * sizeof(uint32_t));
-	if (!pp_header_cache_signatures_get(o, &p->sig, p->psig))
-		p->sig = PP_HEADER_CACHE_NONE;
-	p->sv = vjob_region_acquire(&pp_translation_unit_regions[4], PP_SCRATCH_TOKENS_MAX * sizeof(ptok), "pp.sv");
-	p->fe = vjob_region_acquire(&pp_translation_unit_regions[5], (1u << 20) * sizeof(pp_file_entry), "pp.fe");
-	p->once = varena_alloc(&p->perm, 256 * sizeof(*p->once));
+	p->diagnostic_color = o->diag_color > 0 || (o->diag_color == 0 && isatty(o->errfd ? o->errfd : 2));
+	p->contexts = vjob_region_acquire(&pp_translation_unit_regions[1], PP_CONTEXT_MAX * sizeof(pp_context), "pp.cx");
+	p->permanent_region.base = vjob_region_acquire(&pp_translation_unit_regions[2], 1ull << 30, "pp.perm");
+	p->permanent_region.used = 0;
+	p->permanent_region.cap = 1ull << 30;
+	p->temporary_region.base = vjob_region_acquire(&pp_translation_unit_regions[3], 1ull << 32, "pp.tmp");
+	p->temporary_region.used = 0;
+	p->temporary_region.cap = 1ull << 32;
+	p->search_path_signatures = varena_alloc(&p->permanent_region, ((size_t)o->ndirs + 1) * sizeof(uint32_t));
+	if (!pp_header_cache_signatures_get(o, &p->options_signature, p->search_path_signatures))
+		p->options_signature = PP_HEADER_CACHE_NONE;
+	p->scratch_tokens = vjob_region_acquire(&pp_translation_unit_regions[4], PP_SCRATCH_TOKENS_MAX * sizeof(ptok), "pp.sv");
+	p->files = vjob_region_acquire(&pp_translation_unit_regions[5], (1u << 20) * sizeof(pp_file_entry), "pp.fe");
+	p->once_files = varena_alloc(&p->permanent_region, 256 * sizeof(*p->once_files));
 	p->once_file_capacity = 256;
-	p->pushed = varena_alloc(&p->perm, 4096 * sizeof(*p->pushed));
-	p->lm = vjob_region_acquire(&pp_translation_unit_regions[6], 65536 * sizeof(*p->lm), "pp.lm");
+	p->pushed_macros = varena_alloc(&p->permanent_region, 4096 * sizeof(*p->pushed_macros));
+	p->line_marks = vjob_region_acquire(&pp_translation_unit_regions[6], 65536 * sizeof(*p->line_marks), "pp.lm");
 	{
 		static pthread_once_t once = PTHREAD_ONCE_INIT;
 
@@ -129,7 +129,7 @@ pp *pp_open(const pp_opts *o)
 	} else {
 		/* the caller's string is unpadded; lex_file_get hashes by words (ASan) */
 		size_t ml = strlen(o->main);
-		char *mp = varena_alloc(&p->perm, ml + 16);
+		char *mp = varena_alloc(&p->permanent_region, ml + 16);
 
 		memcpy(mp, o->main, ml);
 		memset(mp + ml, 0, 16);
@@ -164,29 +164,29 @@ pp *pp_open(const pp_opts *o)
 		pp_file_enter(p, mf, o->main, -1);
 		p->fatal_jump = NULL;
 	}
-	p->base_file_name = p->fe[0].name;
-	p->base_file_name_length = p->fe[0].namelen;
+	p->base_file_name = p->files[0].name;
+	p->base_file_name_length = p->files[0].name_length;
 
 	/* "<built-in>": the predefines, -D/-U and -include, on top of the main file */
 	src = pp_shared_allocate(n + 129);	/* interned identifiers point into it: immortal */
 	memcpy(src, o->predef, n);
 	memset(src + n, 0, 129);
-	tok = varena_alloc(&p->perm, (n + 2) * sizeof(lex_token));
+	tok = varena_alloc(&p->permanent_region, (n + 2) * sizeof(lex_token));
 	lex_scratch = vjob_region_acquire(&pp_translation_unit_regions[7], lex_scratch_size(n) + 4096, "pp.lexscratch");
-	p->builtin.path = "<built-in>";
-	p->builtin.src = src;
-	p->builtin.size = (uint32_t)n;
-	p->builtin.ntok = lex_tokenize(src, n, tok, lex_scratch);
-	p->builtin.tok = tok;
+	p->builtin_file.path = "<built-in>";
+	p->builtin_file.src = src;
+	p->builtin_file.size = (uint32_t)n;
+	p->builtin_file.ntok = lex_tokenize(src, n, tok, lex_scratch);
+	p->builtin_file.tok = tok;
 	vjob_region_release(&pp_translation_unit_regions[7], VJOB_REGION_SCRATCH);
 	if (o->no_digraphs)
-		p->builtin = *lex_file_without_digraphs(&p->builtin);
-	pp_file_enter(p, &p->builtin, "<built-in>", -1);
+		p->builtin_file = *lex_file_without_digraphs(&p->builtin_file);
+	pp_file_enter(p, &p->builtin_file, "<built-in>", -1);
 	return p;
 }
 int pp_error_count(const pp *p)
 {
-	return p->errors;
+	return p->error_count;
 }
 
 void pp_fatal_jump_set(pp *p, jmp_buf *jb)
@@ -200,19 +200,19 @@ size_t pp_file_names(const pp *p, const char **lex_token_kind_names, size_t max,
 	uint32_t cap = 64, stk[1024], *tab;
 	size_t n = 0;
 
-	while (cap < 2 * p->nfe)
+	while (cap < 2 * p->file_count)
 		cap *= 2;
 	tab = cap <= 1024 ? stk : malloc(cap * sizeof(*tab));
 	if (!tab)
 		abort();
 	memset(tab, 0, cap * sizeof(*tab));
-	for (uint32_t i = 0; i < p->nfe; i++) {
-		const char *s = p->fe[i].spath;
+	for (uint32_t i = 0; i < p->file_count; i++) {
+		const char *s = p->files[i].spelled_path;
 		uint64_t h = 14695981039346656037ull;
 		size_t l = 0;
 		uint32_t k;
 
-		if (p->fe[i].f == &p->builtin || (nosys && p->fe[i].sys))
+		if (p->files[i].lex_file == &p->builtin_file || (nosys && p->files[i].is_system))
 			continue;
 		for (; s[l]; l++)
 			h = (h ^ (unsigned char)s[l]) * 1099511628211ull;
@@ -234,40 +234,40 @@ void pp_close(pp *p)
 	diag_vcc_flush(p);	/* a record still waiting for its notes (no summary ran) */
 	/* back to the thread: the stacks and tmp (reused all along the TU) as they are */
 	vjob_region_release(&pp_translation_unit_regions[1], VJOB_REGION_SCRATCH);
-	vjob_region_release(&pp_translation_unit_regions[2], p->perm.used + 64);
+	vjob_region_release(&pp_translation_unit_regions[2], p->permanent_region.used + 64);
 	vjob_region_release(&pp_translation_unit_regions[3], VJOB_REGION_SCRATCH);
 	vjob_region_release(&pp_translation_unit_regions[4], VJOB_REGION_SCRATCH);
-	vjob_region_release(&pp_translation_unit_regions[5], ((size_t)p->nfe + 1) * sizeof(pp_file_entry));
-	vjob_region_release(&pp_translation_unit_regions[6], ((size_t)p->nlm + 1) * sizeof(*p->lm));
-	if (p->out) {
+	vjob_region_release(&pp_translation_unit_regions[5], ((size_t)p->file_count + 1) * sizeof(pp_file_entry));
+	vjob_region_release(&pp_translation_unit_regions[6], ((size_t)p->line_mark_count + 1) * sizeof(*p->line_marks));
+	if (p->output) {
 		if (pp_output_spare_capacity < p->output_capacity) {
 			if (pp_output_spare)
 				munmap(pp_output_spare, pp_output_spare_capacity);
-			pp_output_spare = p->out, pp_output_spare_capacity = p->output_capacity;
+			pp_output_spare = p->output, pp_output_spare_capacity = p->output_capacity;
 		} else {
-			munmap(p->out, p->output_capacity);
+			munmap(p->output, p->output_capacity);
 		}
 	}
-	if (p->rec.tk) {
+	if (p->recording.tokens) {
 		if (!pp_recording_spare_tokens) {
-			pp_recording_spare_tokens = p->rec.tk, pp_recording_spare_spellings = p->rec.sb;
+			pp_recording_spare_tokens = p->recording.tokens, pp_recording_spare_spellings = p->recording.spellings;
 		} else {
-			munmap(p->rec.tk, PP_HEADER_CACHE_TOKEN_MAX * sizeof(ptok));
-			munmap(p->rec.sb, PP_HEADER_CACHE_SPELLING_BYTES_MAX);
+			munmap(p->recording.tokens, PP_HEADER_CACHE_TOKEN_MAX * sizeof(ptok));
+			munmap(p->recording.spellings, PP_HEADER_CACHE_SPELLING_BYTES_MAX);
 		}
 	}
-	if (p->rec.t && !pp_recording_spare_buffers.t) {
-		pp_recording_spare_buffers.t = p->rec.t, pp_recording_spare_buffers.ord = p->rec.ord, pp_recording_spare_buffers.ctr = p->rec.ctr;
-		pp_recording_spare_buffers.crd = p->rec.crd, pp_recording_spare_buffers.seg = p->rec.seg, pp_recording_spare_buffers.cp = p->rec.cp;
-		pp_recording_spare_buffers.kid = p->rec.kid, pp_recording_spare_buffers.kex = p->rec.kex, pp_recording_spare_buffers.lk = p->rec.lk;
-	} else if (p->rec.t) {
-		munmap(p->rec.t, PP_HEADER_CACHE_TOUCH_MAX * sizeof(pp_header_cache_touch_record));
-		munmap(p->rec.ord, PP_HEADER_CACHE_ONCE_MARK_MAX * sizeof(pp_header_cache_once_mark));
-		munmap(p->rec.ctr, PP_HEADER_CACHE_COUNTER_PROVENANCE_MAX * sizeof(pp_header_cache_counter_position));
-		munmap(p->rec.crd, PP_HEADER_CACHE_COUNTER_READ_MAX * sizeof(pp_header_cache_counter_read));
-		munmap(p->rec.seg, PP_HEADER_CACHE_SEGMENT_MAX * sizeof(pp_header_cache_recorded_segment));
-		munmap(p->rec.cp, (PP_HEADER_CACHE_COUNTER_PROVENANCE_MAX + 1) * sizeof(pp_header_cache_counter_provenance));
-		munmap(p->rec.lk, PP_HEADER_CACHE_LOOKUP_MAX * sizeof(pp_header_cache_lookup));
+	if (p->recording.touches && !pp_recording_spare_buffers.t) {
+		pp_recording_spare_buffers.t = p->recording.touches, pp_recording_spare_buffers.ord = p->recording.once_marks, pp_recording_spare_buffers.ctr = p->recording.counter_positions;
+		pp_recording_spare_buffers.crd = p->recording.counter_reads, pp_recording_spare_buffers.seg = p->recording.segments, pp_recording_spare_buffers.cp = p->recording.counter_provenance;
+		pp_recording_spare_buffers.kid = p->recording.children, pp_recording_spare_buffers.kex = p->recording.child_exclusions, pp_recording_spare_buffers.lk = p->recording.lookups;
+	} else if (p->recording.touches) {
+		munmap(p->recording.touches, PP_HEADER_CACHE_TOUCH_MAX * sizeof(pp_header_cache_touch_record));
+		munmap(p->recording.once_marks, PP_HEADER_CACHE_ONCE_MARK_MAX * sizeof(pp_header_cache_once_mark));
+		munmap(p->recording.counter_positions, PP_HEADER_CACHE_COUNTER_PROVENANCE_MAX * sizeof(pp_header_cache_counter_position));
+		munmap(p->recording.counter_reads, PP_HEADER_CACHE_COUNTER_READ_MAX * sizeof(pp_header_cache_counter_read));
+		munmap(p->recording.segments, PP_HEADER_CACHE_SEGMENT_MAX * sizeof(pp_header_cache_recorded_segment));
+		munmap(p->recording.counter_provenance, (PP_HEADER_CACHE_COUNTER_PROVENANCE_MAX + 1) * sizeof(pp_header_cache_counter_provenance));
+		munmap(p->recording.lookups, PP_HEADER_CACHE_LOOKUP_MAX * sizeof(pp_header_cache_lookup));
 	}
 	vjob_region_release(&pp_translation_unit_regions[0], sizeof(pp));
 	vjob_region_pool_give(&pp_translation_unit_pool, pp_translation_unit_regions);
