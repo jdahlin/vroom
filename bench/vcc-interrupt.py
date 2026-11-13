@@ -18,7 +18,7 @@ a = p.parse_args()
 root = Path(__file__).resolve().parent.parent
 vpp = str(Path(a.bin_dir).resolve() / 'vpp')
 clang = llvm('clang')
-src = root / 'ccs/vcc/tests/interrupt'
+src = root / 'src/test/interrupt'
 base = ['--target=x86_64-linux-gnu', '-fasynchronous-unwind-tables']
 
 def run(cmd):

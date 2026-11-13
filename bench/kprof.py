@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Where a cold kernel build's time goes: make recipes (bench/tsh.c) + vccd jobs.
 
-    cc -O2 -o build/ccs/trace/sh bench/tsh.c      # named sh: make keeps its fast path
-    TSH_LOG=OUT.tsh bench/vccd-kbuild.sh OUT -j 14 SHELL=$PWD/build/ccs/trace/sh
+    cc -O2 -o build/src/trace/sh bench/tsh.c      # named sh: make keeps its fast path
+    TSH_LOG=OUT.tsh bench/vccd-kbuild.sh OUT -j 14 SHELL=$PWD/build/src/trace/sh
     bench/kprof.py OUT
 
 Prints, per 0.5 s: sub-make recipes, leaf recipes and vccd compiles in flight;

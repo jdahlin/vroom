@@ -10,7 +10,7 @@ cross-call generators. It accepts --count, --start, --suite, -j and Linux
 A caller comment `/* abi-targets: linux; reason */` requires the fixture only
 on Linux; other targets report the explicit contract exclusion, never a pass.
 
-Every ccs/vcc/tests/abi/NAME/ has caller.c (main, the checks) and callee.c
+Every src/test/abi/NAME/ has caller.c (main, the checks) and callee.c
 (the functions it calls, and callbacks into the caller); a header there is
 on the include path. Each half can specify extra compiler options with
 `/* vcc-flags: ... */`, as in the C runtime suite.

@@ -5,7 +5,7 @@
 set -e
 R=$(cd "$(dirname "$0")/.." && pwd)
 W=$R/../../../work/build-o0; [ -d "$W" ] || W=$R/work/build-o0
-B=$R/build/ccs
+B=$R/build/src
 L=${LLVM:-/opt/homebrew/opt/llvm/bin}
 IN=${1:-$W/vmlinux.unstripped}
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT

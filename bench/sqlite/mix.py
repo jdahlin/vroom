@@ -6,7 +6,7 @@ unchanged build's is how often that class runs.  Works on any compiler's .s.
   cd DIR                      # holds NAME.s (sqlite3.c compiled with -S) and t.o (speedtest1.c)
   bench/sqlite/mix.py NAME [CLASS...]
 
-  vpp:   VCC_VIR=bl build/ccs/vpp -O2 -DSQLITE_OMIT_LOAD_EXTENSION -DSQLITE_THREADSAFE=0 -I. -S sqlite3.c -o v.s
+  vpp:   VCC_VIR=bl build/src/vpp -O2 -DSQLITE_OMIT_LOAD_EXTENSION -DSQLITE_THREADSAFE=0 -I. -S sqlite3.c -o v.s
   clang: clang -O2 ... -S sqlite3.c -o c.s
 
 A class whose nops push a tbz out of range is run in 2, 4, ... parts and summed.  Run one

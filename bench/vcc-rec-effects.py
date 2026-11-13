@@ -13,8 +13,8 @@ from hostenv import R, llvm
 
 SOURCE = r'''
 #include <assert.h>
-#include "vcc/arch/x64/emit/effects.c"
-#include "vcc/arch/x64/emit/extensions.c"
+#include "arch/x64/codegen/effects.c"
+#include "arch/x64/codegen/extensions.c"
 
 static rec instruction(int op, int size)
 {
@@ -185,7 +185,7 @@ def main():
         binary = Path(tmp) / 'effects'
         source.write_text(SOURCE)
         flags = ['-fsanitize=address,undefined', '-fno-omit-frame-pointer'] if args.sanitize else []
-        subprocess.run([args.cc, '-std=gnu11', '-O1', '-g', '-I', str(Path(R) / 'ccs'),
+        subprocess.run([args.cc, '-std=gnu11', '-O1', '-g', '-I', str(Path(R) / 'src'), '-I', str(Path(R) / 'src' / 'include'),
                         *flags, str(source), '-o', str(binary)], check=True, timeout=30)
         subprocess.run([str(binary)], check=True, timeout=10)
     print('machine record effect contracts: PASS')

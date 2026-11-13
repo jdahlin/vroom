@@ -29,7 +29,7 @@ W = os.path.join(os.environ.get('VROOM_WORK') or os.path.join(ROOT, 'work'), 'sq
 SRC = os.path.join(W, f'sqlite-src-{VER}')
 TCL = os.environ.get('SQLITE_TCL') or '/opt/homebrew/opt/tcl-tk'
 CLANG = os.environ.get('CLANG') or ('/opt/homebrew/opt/llvm/bin/clang' if os.path.exists('/opt/homebrew/opt/llvm/bin/clang') else 'clang')
-VPP = os.environ.get('VPP') or os.path.join(ROOT, 'build', 'ccs', 'vpp')
+VPP = os.environ.get('VPP') or os.path.join(ROOT, 'build', 'src', 'vpp')
 
 
 def find_gcc():

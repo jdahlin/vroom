@@ -2,13 +2,13 @@
 # Run a command in the Debian arm64 container (Docker Desktop: Apple
 # Virtualization.framework, native arm64, no emulation).
 #
-#   env/linux/run.sh make -C ccs -j 8 vcc
+#   env/linux/run.sh make -C src -j 8 vcc
 #   env/linux/run.sh bench/vcc-ctests.py -j 6
 #   env/linux/run.sh bench/vcc-diff.py cmp -j 6 --kernel
 #
 # The repo is bind-mounted at /vroom; that is Docker Desktop's host share
 # (virtiofs), slow for many small files, so only sources are read from it.
-# build/linux (vcc objects, binaries, ctests scratch; see ccs/Makefile and
+# build/linux (vcc objects, binaries, ctests scratch; see src/Makefile and
 # bench/hostenv.py) is the ext4 volume vroom-build, and /tmp is tmpfs.  The kernel trees live in the Docker
 # volume vroom-work (ext4 in the VM: Docker Desktop cannot share the
 # work.sparsebundle mount), at the Mac's absolute work/ path because kbuild's

@@ -16,7 +16,7 @@ ap = argparse.ArgumentParser(description=__doc__)
 ap.add_argument('--bin-dir', default=os.environ.get('VCC_BIN', BUILD))
 a = ap.parse_args()
 vpp = str(Path(a.bin_dir).resolve() / 'vpp')
-source = ROOT / 'ccs/vcc/tests/vcc/vir_x86_leaf.c'
+source = ROOT / 'src/test/vcc/vir_x86_leaf.c'
 resource = subprocess.check_output([llvm('clang'), '-print-resource-dir'], text=True).strip()
 flags = ['--target=x86_64-linux-gnu', '-ffp-contract=off', '-fno-pie', '-isystem', resource + '/include']
 # Shared loop/join regressions use the native Linux C library headers.

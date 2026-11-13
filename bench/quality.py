@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Source quality report for the toolchain's own code (docs/PLAN-quality.md, P0).
+Source quality report for the toolchain's own code (doc/PLAN-quality.md, P0).
 
 Reads every C source of the tree (not tests, not generated tables) once and
 prints the numbers the quality work is measured by:

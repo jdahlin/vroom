@@ -8,7 +8,7 @@ p.add_argument('--bin-dir', default=BUILD)
 p.add_argument('--output', type=pathlib.Path, required=True)
 a = p.parse_args()
 out = a.output.resolve(); out.mkdir(parents=True, exist_ok=True)
-fixture = pathlib.Path(__file__).resolve().parent.parent/'ccs/vcc/tests/c90'
+fixture = pathlib.Path(__file__).resolve().parent.parent/'src/test/c90'
 vpp = str(pathlib.Path(a.bin_dir).resolve()/'vpp'); clang = llvm('clang')
 modes = [('c89',0,0), ('c90',0,0), ('iso9899:1990',0,0), ('iso9899:199409',1,0), ('gnu89',1,0), ('gnu90',1,0), ('c99',1,1)]
 records = []; jobs = []; references = {}
