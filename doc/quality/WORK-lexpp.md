@@ -106,6 +106,24 @@ iterator.
 
 ### 5. Rename (scripted, as `WORK-common.md` step 2)
 
+The table is `doc/quality/rename-lexpp.tsv` (`old new kind where comment`:
+functions, variables, fields, types, constants and macros of `pp/` and
+`lex/`; kind `public` marks what `pp.h`, `lex.h` or `dircache.h` export, so
+it touches other modules; the fifth column is the comment text to write where
+the meaning took reading to find).  The grouping of `struct pp` is in
+`doc/quality/rename-lexpp-groups.md`.  The script applies whole-word renames
+across `src/` (fields by struct: `p->old` and `.old` only where the owning
+struct is that one; `where` names it), `bench/`, `ci/` and
+`src/tools/gen-ppdata.sh` (the generated tables name `has_tab`).  The
+diagnostics files read `struct pp` fields and constants (`diagnostic_*`,
+`T_*`): the script edits them, a worker owning them must not have open work.
+Public lines are applied last and by themselves (the `T_*` kinds and `vtok`,
+`vlex_file` touch every module).  Names with no good word yet, to be decided
+when the table is applied: `hent.span`, `struct pp.top_rec`, `rst`, `hm`,
+`pend`, the `drcov` family (`pp_coverage_*`), `lex_mask_pack`, `pp_address_space_reserve`
+(`vm`), `pp_if_*` for the `#if` parser, and the header cache's `region`
+(glossary: bump allocator).
+
 `doc/quality/rename-lexpp.tsv`: every file-scope function gets `pp_`/`lex_`,
 `ppimpl.h` becomes `pp-internal.h`, `hent`, `hkey`, `ctx`, `fent`, `pmacro`
 get module prefixes and words, `struct pp` fields get words, the
@@ -125,6 +143,12 @@ API in `pp.h` is `quality-diag`'s; the options record is
 `quality-driver-server`'s).
 
 ## Status
+
+`make -C src fuzz-regress` does not build on this branch:
+`test/fuzz/fuzz-pp.c:119` sets `o.nsys`, a field `pp_opts` no longer has
+(`pp.h:51` has `nsys1`).  The same break is on origin/main (the file and
+`pp.h` are identical there); it is not from this pass.  Fix it before relying
+on fuzz-regress as a proof in steps 2-5.
 
 Step 1 done (PR "pp: one job per file (moves only)").  Left in place, on
 purpose:
