@@ -89,7 +89,7 @@ typedef struct vsbuf {
 
 static inline VNONNULL(1) void vsbuf_put(vsbuf *b, const void *s, size_t n)
 {
-	if (b->oom)
+	if (b->oom || !n)	/* (an empty append: b->p may be NULL, which memcpy must not get) */
 		return;
 	if (b->n + n > b->cap) {
 		size_t cap = b->cap ? b->cap : 4096;
