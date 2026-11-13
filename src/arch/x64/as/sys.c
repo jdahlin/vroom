@@ -1,4 +1,12 @@
-/* x86-64 assembler: system and control instructions: control/debug registers, the no-operand table, system, cache and port instructions */
+/* sys.c: x86-64 assembler, the system and control families: x64_i_crdr (mov to and from control,
+ * debug and segment registers), x64_i_zero (instructions without operands, from one table: ret,
+ * leave, the fences, ...) and x64_i_sys (system and cache instructions on one memory or register
+ * operand, the kernel's).
+ *
+ * Each returns X64_NEXT for a mnemonic that is not theirs; the order in which asm.c tries the
+ * families is in x64as.h.  Segment registers are carried as their prefix bytes (0x26 ... 0x65), not
+ * as architectural indices.  The bytes equal LLVM MC's (bench/vas-enc.py); a bad operand shape
+ * fails the assembly through as_error_report. */
 #include "x64as.h"
 
 VPRIV int x64_i_crdr(as_context *a, char *mn, XOp *o, int nops)

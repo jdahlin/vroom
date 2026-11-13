@@ -1,7 +1,7 @@
 #ifndef VCC_OBJ_H
 #define VCC_OBJ_H
 /*
- * In-memory ELF64 relocatable object writer for AArch64, byte-compatible
+ * In-memory ELF64 relocatable object writer for AArch64 and x86-64, byte-compatible
  * with LLVM MC's ELFObjectWriter (clang -c / -cc1as, LLVM 23).
  *
  * One ElfObj per thread; nothing is shared and nothing is locked.  All
