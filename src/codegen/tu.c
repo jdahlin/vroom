@@ -212,7 +212,7 @@ static void do_item(ecx *e, uint32_t it)
 		emit_string(e, it & 0x7fffffffu);
 		return;
 	}
-	if (c->syms[it].kind == S_FUNC && WASM(c)) {
+	if (WASM(c) && c->syms[it].kind == S_FUNC) {
 		wasm_emit_function(e, it);
 	} else if (c->syms[it].kind == S_FUNC && X86(c)) {
 		if (!vw_try(e, it))
