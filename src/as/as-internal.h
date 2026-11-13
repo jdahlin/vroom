@@ -103,7 +103,7 @@ struct as_context {
 	as_register_alias *al; uint32_t alias_count, alias_capacity;
 	uint32_t alias_buckets[AS_ALIAS_BUCKETS];	/* .req buckets: newest entry, index + 1 */
 	as_variable *variables; uint32_t variable_mask, variable_count;
-	void *pool_dummy; struct PoolS *pool; uint32_t literal_pool_count, literal_pool_capacity;
+	struct PoolS *pool; uint32_t literal_pool_count, literal_pool_capacity;
 	uint32_t ninst;		/* \@ */
 	uint64_t statement_count, statement_bytes;	/* statistics: statements and their bytes */
 	const char *file_name;
