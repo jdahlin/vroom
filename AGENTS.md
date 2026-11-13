@@ -49,6 +49,9 @@ relative to it); `TODO.md` stays at the top.
 - `RESEARCH-regalloc.md`: register allocation (GCC, LLVM, SSA-based, linear
   scan and its descendants, optimal and learned methods) and the allocator
   `SPEC-vir.md` section 15 specifies for VIR, with its fallback.
+- `RESEARCH-cplusplus.md`: whether vroom's architecture (vccd, prefix
+  snapshots, direct -O0 emitter) carries to C++, prior compile-server work on
+  the LLVM/GCC/kernel lists, and the inputs where it stops paying.
 - `src/`: the toolchain; `src/Makefile` builds into `build/src/`.  The tree
   follows PostgreSQL's (`PLAN-tree.md`): generic code in the component
   directories, code for one target CPU in `arch/<cpu>/<component>/`, code for
