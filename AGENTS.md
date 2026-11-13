@@ -16,6 +16,8 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
   parallel diff runs.
 
 ## Layout
+Plans, specs, research notes and reviews are in `docs/` (names below are
+relative to it); `TODO.md` stays at the top.
 - `PLAN.md`, `PLAN-fas2.md`, `PLAN-wasm.md` (WebAssembly as a target), `PLAN-x86.md`
   (x86-64 Linux as a target): plans
   and per-step status (Swedish).  Update the
