@@ -27,6 +27,7 @@
 #include <unistd.h>
 
 #include "common/attributes.h"
+#include "common/fail.h"
 
 /* ---------------- vbuf ---------------- */
 
@@ -44,7 +45,7 @@ static inline VNONNULL(1) void vbuf_put(vbuf *b, const void *s, size_t n)
 			c *= 2;
 		b->p = realloc(b->p, c);
 		if (!b->p)
-			abort();
+			vout_of_memory();
 		b->cap = c;
 	}
 	if (n)	/* (an empty append to an empty buffer: b->p is NULL, which memcpy must not get) */
