@@ -1,604 +1,629 @@
-# WebAssembly som mål: ny arch och ny platform i vcc
+# WebAssembly as a target: new arch and new platform in vcc
 
-**Mål:** `vcc --target=wasm64-unknown-emscripten -c x.c` ger ett wasm-objekt som
-`wasm-ld` länkar och som körs med samma resultat som clangs. `-S` ger LLVM:s
-textsyntax för wasm. Slutmålet är att vcc kompilerar sig själv till wasm och att
-explorer-sidan (`contrib/wasm/`) kör den versionen i stället för emscripten-bygget.
+**Goal:** `vcc --target=wasm64-unknown-emscripten -c x.c` produces a wasm object
+that `wasm-ld` links and that runs with the same result as clang's. `-S` gives
+LLVM's text syntax for wasm. The final goal is that vcc compiles itself to wasm
+and that the explorer page (`contrib/wasm/`) runs that version instead of the
+emscripten build.
 
-**Varför:** I dag är det emscripten (clang) som kompilerar vcc till wasm
-(`contrib/wasm/build.sh`). Med en egen wasm-backend behövs clang inte för det, och vcc
-får ett andra mål vid sidan av arm64. Det tvingar fram den uppdelning mellan
-generiskt och målspecifikt som x86-64 också behöver (TODO.md: "Target-OS code out
-of the generic files").
+**Why:** Today emscripten (clang) compiles vcc to wasm (`contrib/wasm/build.sh`).
+With our own wasm backend clang is not needed for that, and vcc gets a second
+target next to arm64. It forces the split between generic and target-specific
+code that x86-64 also needs (TODO.md: "Target-OS code out of the generic
+files").
 
-**Regler:** samma som fas 2. Clang är referensen (`--target=wasm64-unknown-emscripten`
-och `wasm32-wasip1`), inget från clang/LLVM vid körning. `wasm-ld` och emscriptens
-libc används för länkning och test tills steg W7. arm64-utdata får inte ändras av
-något steg: varje commit verifieras mot de 1 326 utdata som användes vid
-katalogomflyttningen (PLAN-fas2.md, "Status katalogstruktur").
+**Rules:** same as phase 2. Clang is the reference
+(`--target=wasm64-unknown-emscripten` and `wasm32-wasip1`), nothing from
+clang/LLVM at run time. `wasm-ld` and emscripten's libc are used for linking and
+testing until step W7. No step may change arm64 output: every commit is verified
+against the 1 326 outputs used at the directory move (PLAN-fas2.md, "Status
+directory structure").
 
-## Utgångsläge (2026-11-09)
+## Starting point (2026-11-09)
 
-- Emittern genererar direkt från AST:t utan IR. Den generiska delen `codegen/` är
-  2 462 rader (kö, trådar, data, förpass, typer), arm64-delen `arch/a64/codegen/` är
-  10 292 rader. arm64-delen innehåller också sådant som inte är arm64-specifikt:
-  konstantvikning under genereringen, nåbarhetsflaggan, inlining av
-  `__always_inline`, `__builtin_constant_p`-regler och `need_fold`-omgenereringen.
-- Typstorlekarna är en statisk LP64-tabell (`frontend/c/type.c:6`), `__builtin_va_list` är
-  AAPCS64-structen eller Apples `char *` (`frontend/c/tu.c:94`).
-- Predefines finns för två mål (`ppdata-predef.inc`: aarch64-linux, Darwin).
-- Objektskrivarna är ELF (`platform/linux/elf.c`) och Mach-O
-  (`platform/darwin/macho.c`) ovanpå den gemensamma objektmodellen `include/obj/obj.h`
-  (sektioner, frags, symboler, fixups).
-- Emscripten 7.0.0 finns (Homebrew), med en wasm64-sysroot (libc, compiler-rt).
-  Node 26 kör memory64 utan flaggor. Clang 23 skriver wasm-`.s` och objekt för
-  båda bredderna.
+- The emitter generates straight from the AST without an IR. The generic part
+  `codegen/` is 2 462 lines (queue, threads, data, prepass, types), the arm64 part
+  `arch/a64/codegen/` is 10 292 lines. The arm64 part also contains things that are
+  not arm64-specific: constant folding during generation, the reachability flag,
+  inlining of `__always_inline`, the `__builtin_constant_p` rules and the
+  `need_fold` regeneration.
+- The type sizes are a static LP64 table (`frontend/c/type.c:6`), `__builtin_va_list` is
+  the AAPCS64 struct or Apple's `char *` (`frontend/c/tu.c:94`).
+- Predefines exist for two targets (`ppdata-predef.inc`: aarch64-linux, Darwin).
+- The object writers are ELF (`platform/linux/elf.c`) and Mach-O
+  (`platform/darwin/macho.c`) on top of the common object model `include/obj/obj.h`
+  (sections, frags, symbols, fixups).
+- Emscripten 7.0.0 is available (Homebrew), with a wasm64 sysroot (libc,
+  compiler-rt). Node 26 runs memory64 without flags. Clang 23 writes wasm `.s`
+  and objects for both widths.
 
-## Datamodellen: wasm64 först
+## The data model: wasm64 first
 
 | | aarch64-linux | wasm64-emscripten | wasm32-wasip1 |
 |---|---|---|---|
-| `long`, pekare, `size_t` | 8 | 8 | **4** |
+| `long`, pointer, `size_t` | 8 | 8 | **4** |
 | `long double` | binary128 | binary128 | binary128 |
 | `char` | unsigned | **signed** | **signed** |
-| `va_list` | AAPCS64-struct | `void *` | `void *` |
-| största alignment | 16 | 16 | 16 |
+| `va_list` | AAPCS64 struct | `void *` | `void *` |
+| largest alignment | 16 | 16 | 16 |
 
-wasm64 är LP64 som arm64, så typtabellen kan stå kvar. Det som skiljer är `char`
-(som Darwin) och `va_list` (`void *`, Darwin har `char *`). Explorern är också
-memory64. wasm32 (ILP32) kräver en typtabell per mål och 32-bitarspekare genom
-hela emittern, så det kommer sist (W6).
+wasm64 is LP64 like arm64, so the type table can stay. What differs is `char`
+(as on Darwin) and `va_list` (`void *`, Darwin has `char *`). The explorer is
+also memory64. wasm32 (ILP32) needs a type table per target and 32-bit pointers
+throughout the emitter, so it comes last (W6).
 
-## Arkitektur
+## Architecture
 
-| Del | Fil(er) | Innehåll |
+| Part | File(s) | Contents |
 |---|---|---|
-| Målval | `driver/ppdriver.c`, `frontend/c/`, `codegen/` | Ett `target`-värde (cpu, os, pekarbredd) i stället för `darwin`-flaggan; `--target=wasm64-*`/`wasm32-*` |
-| Predefines, `__has_*` | `frontend/pp/ppdata-predef.inc` via `gen-ppdata.sh` | En tabell till per mål, tagen från clang en gång |
-| Layout | `frontend/c/type.c`, `frontend/c/layout.c` | `char` signed, `va_list` som `char *`; senare tabell per mål |
-| Generisk kodgenerering | `codegen/` | Det som lyfts ut ur `arch/a64/codegen/`: vikning, nåbarhet, inlining, `__builtin_constant_p` |
-| Kodgenerator | `arch/wasm/codegen/` | AST → wasm-instruktioner: stackmaskin, locals, strukturerad kontrollflöde, skuggstack |
-| Textutdata | `arch/wasm/codegen/print.c` | `-S` i LLVM:s syntax (`.functype`, `.local`, `local.get`, `block`/`loop`/`end_block`) |
-| Kodare | `arch/wasm/as/enc.c` | Opkoder, LEB128 (5/10 byte med utfyllnad där en relokering ska in) |
-| Assembler | `arch/wasm/as/parse.c` | wasm-`.s` som `vas` läser: `-S` → `-c` går runt, och `.s`-tester mot llvm-mc |
+| Target selection | `driver/ppdriver.c`, `frontend/c/`, `codegen/` | A `target` value (cpu, os, pointer width) instead of the `darwin` flag; `--target=wasm64-*`/`wasm32-*` |
+| Predefines, `__has_*` | `frontend/pp/ppdata-predef.inc` via `gen-ppdata.sh` | One more table per target, taken from clang once |
+| Layout | `frontend/c/type.c`, `frontend/c/layout.c` | `char` signed, `va_list` as `char *`; later a table per target |
+| Generic code generation | `codegen/` | What is lifted out of `arch/a64/codegen/`: folding, reachability, inlining, `__builtin_constant_p` |
+| Code generator | `arch/wasm/codegen/` | AST → wasm instructions: stack machine, locals, structured control flow, shadow stack |
+| Text output | `arch/wasm/codegen/print.c` | `-S` in LLVM's syntax (`.functype`, `.local`, `local.get`, `block`/`loop`/`end_block`) |
+| Encoder | `arch/wasm/as/enc.c` | Opcodes, LEB128 (5/10 bytes with padding where a relocation goes) |
+| Assembler | `arch/wasm/as/parse.c` | wasm `.s` as `vas` reads it: `-S` → `-c` round trip, and `.s` tests against llvm-mc |
 | Fixups | `arch/wasm/obj/fixup.c`, `reloc.h` | `R_WASM_FUNCTION_INDEX_LEB`, `R_WASM_MEMORY_ADDR_LEB64`/`SLEB64`/`I64`, `R_WASM_TABLE_INDEX_*`, `R_WASM_GLOBAL_INDEX_LEB`, `R_WASM_TYPE_INDEX_LEB` |
-| Objektskrivare | `platform/wasm/wasm.c` | Typ-, import-, funktions-, kod- och datasektioner; `linking` (symboltabell, segment, init-funktioner) och `reloc.CODE`/`reloc.DATA`. Objektformatet är detsamma för emscripten och WASI; skillnaderna mellan OS:en (libc, startkod, sjlj) ligger i drivern och ABI-koden |
+| Object writer | `platform/wasm/wasm.c` | Type, import, function, code and data sections; `linking` (symbol table, segments, init functions) and `reloc.CODE`/`reloc.DATA`. The object format is the same for emscripten and WASI; the differences between the OSes (libc, startup code, sjlj) are in the driver and the ABI code |
 
-### Kodgeneratorn
+### The code generator
 
-Att emittern arbetar från AST:t passar wasm bra, eftersom C:s strukturerade
-satser blir wasm:s strukturerade kontrollflöde rakt av:
+That the emitter works from the AST suits wasm well, since C's structured
+statements become wasm's structured control flow directly:
 
-- `if`/`else` → `block`/`br_if` eller `if`/`else`/`end`; `while`/`for`/`do` → `block` + `loop`;
-  `break`/`continue` → `br` till rätt djup.
-- `switch` → `br_table` när fallen är täta (som arm64:s hopptabell), annars en
-  jämförelsekedja. Hopp in i en loop (Duffs device) hanteras som `goto`.
-- `goto`: i det vanliga fallet (framåt ut ur nästling, `goto out`/`goto err`) ett
-  `block` runt hoppet. Annars en stackifier för funktionen: grundblock, dominatorträd
-  och samma algoritm som LLVM:s `WebAssemblyCFGStackify`. Oreducerbar kontrollflöde
-  blir en `loop` med en `br_table`-dispatcher på en etikettvariabel (LLVM:s
-  `FixIrreducibleControlFlow`). Indirekt `goto` stöds inte, och clang avvisar det också.
-- Värden lever på operandstacken inom ett uttryck. Variabler och temporärer blir
-  wasm-locals (obegränsat antal: ingen registerallokering, `opt.c` behövs inte).
-  Lokala variabler vars adress tas, arrayer och structs läggs på en skuggstack i
-  linjärt minne via den globala `__stack_pointer`, som clang gör.
-- Anrop: direkta `call`, indirekta `call_indirect` via tabellen med typindex.
-  ABI som clangs `WebAssemblyABIInfo`: skalärer i parametrar; en struct med ett
-  enda skalärt fält skickas som skalären, andra aggregat som pekare till en kopia;
-  aggregat returneras via dold sret-pekare; varargs i en buffert på anroparens
-  skuggstack, anroparen skickar pekaren.
-- `__int128` och binary128 `long double` via compiler-rt-anrop (`__multi3`,
-  `__addtf3`, …), som clang. Atomics som vanliga laddningar och lagringar utan
-  delat minne, med `i64.atomic.*` under `-matomics`/`-pthread`.
-- `setjmp`/`longjmp` som emscriptens wasm-EH-variant (`__wasm_setjmp`,
-  `__wasm_setjmp_test`, `__wasm_longjmp`, `try_table`). vcc behöver det själv: pp och
-  cc hoppar ut med `longjmp` vid fel.
-- Inline asm: wasm-`.s`-fragment via `arch/wasm/as/parse.c`. Det är sällsynt i C för
-  wasm och kan komma sent.
+- `if`/`else` → `block`/`br_if` or `if`/`else`/`end`; `while`/`for`/`do` → `block` + `loop`;
+  `break`/`continue` → `br` to the right depth.
+- `switch` → `br_table` when the cases are dense (like arm64's jump table),
+  otherwise a comparison chain. A jump into a loop (Duff's device) is handled as
+  `goto`.
+- `goto`: in the common case (forward out of nesting, `goto out`/`goto err`) a
+  `block` around the jump. Otherwise a stackifier for the function: basic
+  blocks, dominator tree and the same algorithm as LLVM's
+  `WebAssemblyCFGStackify`. Irreducible control flow becomes a `loop` with a
+  `br_table` dispatcher on a label variable (LLVM's
+  `FixIrreducibleControlFlow`). Indirect `goto` is not supported, and clang
+  rejects it too.
+- Values live on the operand stack within an expression. Variables and
+  temporaries become wasm locals (unlimited number: no register allocation,
+  `opt.c` is not needed). Local variables whose address is taken, arrays and
+  structs are placed on a shadow stack in linear memory via the global
+  `__stack_pointer`, as clang does.
+- Calls: direct `call`, indirect `call_indirect` via the table with a type
+  index. ABI as clang's `WebAssemblyABIInfo`: scalars in parameters; a struct
+  with a single scalar field is passed as the scalar, other aggregates as a
+  pointer to a copy; aggregates are returned through a hidden sret pointer;
+  varargs in a buffer on the caller's shadow stack, the caller passes the
+  pointer.
+- `__int128` and binary128 `long double` via compiler-rt calls (`__multi3`,
+  `__addtf3`, …), as clang. Atomics as plain loads and stores without shared
+  memory, with `i64.atomic.*` under `-matomics`/`-pthread`.
+- `setjmp`/`longjmp` as emscripten's wasm-EH variant (`__wasm_setjmp`,
+  `__wasm_setjmp_test`, `__wasm_longjmp`, `try_table`). vcc needs it itself: pp
+  and cc jump out with `longjmp` on errors.
+- Inline asm: wasm `.s` fragments via `arch/wasm/as/parse.c`. It is rare in C
+  for wasm and can come late.
 
-## Steg
+## Steps
 
-| # | Leverans | Kriterium |
+| # | Deliverable | Criterion |
 |---|----------|-----------|
-| W0 | **Målval och front end.** `target` i stället för `darwin`; `--target=wasm64-unknown-emscripten`; predefines från clang; `char` signed och `va_list` som `void *` för wasm | `vpp -dM -E` = `clang -dM -E` för målet; `vcc-sema.py layout` med wasm64 som mål (layouter, konstanter, typer kontrollerade av clang); arm64-utdata byte-identiska |
-| W1 | **Arch-krokar i `codegen/`.** `do_item`, huvudet och svansen i `tu.c` och data-direktiven i `data.c` väljer per mål; wasm-generatorn viker själv med `cc_eval` (omplanerat: vikning och inlining lyfts inte ut ur `arch/a64/codegen/` förrän wasm behöver dem) | arm64-utdata byte-identiska (`vcc-same.py`), `vbench.py check` |
-| W2 | **Första wasm-utdata.** `arch/wasm/codegen/` för heltalsaritmetik, locals, parametrar, `return`, direkta anrop, `if`/loopar/`break`/`continue`; `-S`. Explorern får målet "wasm64" | Utdata assembleras av `clang --target=wasm64-unknown-emscripten -c`, länkas av emcc och körs i node med samma resultat som clangs; nytt harness `bench/vcc-wasm.py` |
-| W3 | **Minne och data.** Globala variabler, strängar, initierare, pekararitmetik, skuggstack för adresstagna lokala variabler, arrayer och structs, `memcpy`/`memset` för aggregat | `vcc-ctests.py --suite vcc` med `--target wasm64` i node |
-| W4 | **Hela C.** Structs som värden (ABI ovan), varargs, `switch` med `br_table`, `goto` med stackifier, flyttal, bit-fält, VLA/`alloca`, `__int128` och `long double` via compiler-rt, atomics, `setjmp`/`longjmp` | gcc-torture och tcc-tests2 i node via emcc: samma godkända som clang; `bench/vcc-abi.py --target wasm64` (clang/vcc × anropare/anropad) |
-| W5 | **Objektfiler.** `arch/wasm/as/enc.c`, `arch/wasm/obj/fixup.c`, `platform/wasm/wasm.c`; `-c` direkt utan text; `vas` läser wasm-`.s` | Länkas av `wasm-ld` och körs: allt från W4 med `-c`; kodare mot `llvm-mc` (`bench/vas-enc.py`); `wasm-objdump -x` jämförs mot clangs objekt för samma `.s` |
-| W6 | **vcc kompilerar sig själv till wasm64.** NEON-lexern som skalär `VLEX_SCALAR`, CRC32C i mjukvara, `src/port/wasm/mman.c` som i dag; emcc länkar bara | `-S`-utdata från den självbyggda `vcc.wasm` byte-identisk med emscripten-byggets på testfilerna; explorern använder den |
-| W7 | **wasm32 (ILP32).** Typtabell per mål, pekarbredd 4 genom emittern och objektskrivaren, wasi-libc | Samma sviter som W4 med `--target=wasm32-wasip1` |
-| W8 | **Egen wasm-länkare** i `ld/` (valfritt; regeln om inget LLVM) | Ett program länkat av `vlink` körs som det länkat av `wasm-ld`; tider mot `wasm-ld` |
+| W0 | **Target selection and front end.** `target` instead of `darwin`; `--target=wasm64-unknown-emscripten`; predefines from clang; `char` signed and `va_list` as `void *` for wasm | `vpp -dM -E` = `clang -dM -E` for the target; `vcc-sema.py layout` with wasm64 as target (layouts, constants, types checked by clang); arm64 output byte-identical |
+| W1 | **Arch hooks in `codegen/`.** `do_item`, the head and tail in `tu.c` and the data directives in `data.c` choose per target; the wasm generator folds by itself with `cc_eval` (replanned: folding and inlining are not lifted out of `arch/a64/codegen/` until wasm needs them) | arm64 output byte-identical (`vcc-same.py`), `vbench.py check` |
+| W2 | **First wasm output.** `arch/wasm/codegen/` for integer arithmetic, locals, parameters, `return`, direct calls, `if`/loops/`break`/`continue`; `-S`. The explorer gets the target "wasm64" | Output is assembled by `clang --target=wasm64-unknown-emscripten -c`, linked by emcc and run in node with the same result as clang's; new harness `bench/vcc-wasm.py` |
+| W3 | **Memory and data.** Global variables, strings, initializers, pointer arithmetic, shadow stack for address-taken locals, arrays and structs, `memcpy`/`memset` for aggregates | `vcc-ctests.py --suite vcc` with `--target wasm64` in node |
+| W4 | **All of C.** Structs as values (ABI above), varargs, `switch` with `br_table`, `goto` with stackifier, floating point, bit-fields, VLA/`alloca`, `__int128` and `long double` via compiler-rt, atomics, `setjmp`/`longjmp` | gcc-torture and tcc-tests2 in node via emcc: same passes as clang; `bench/vcc-abi.py --target wasm64` (clang/vcc × caller/callee) |
+| W5 | **Object files.** `arch/wasm/as/enc.c`, `arch/wasm/obj/fixup.c`, `platform/wasm/wasm.c`; `-c` directly without text; `vas` reads wasm `.s` | Linked by `wasm-ld` and run: everything from W4 with `-c`; encoder against `llvm-mc` (`bench/vas-enc.py`); `wasm-objdump -x` compared against clang's object for the same `.s` |
+| W6 | **vcc compiles itself to wasm64.** The NEON lexer as scalar `VLEX_SCALAR`, CRC32C in software, `src/port/wasm/mman.c` as today; emcc only links | `-S` output from the self-built `vcc.wasm` byte-identical with the emscripten build's on the test files; the explorer uses it |
+| W7 | **wasm32 (ILP32).** Type table per target, pointer width 4 through the emitter and the object writer, wasi-libc | Same suites as W4 with `--target=wasm32-wasip1` |
+| W8 | **Own wasm linker** in `ld/` (optional; the no-LLVM rule) | A program linked by `vlink` runs like the one linked by `wasm-ld`; times against `wasm-ld` |
 
-Ordningen gör att varje steg syns: W2 ger utdata i explorern och W5 körbara objekt.
-W1 kan delvis gå parallellt med W0.
+The order makes every step visible: W2 gives output in the explorer and W5
+runnable objects. W1 can partly run in parallel with W0.
 
-## Validering
+## Validation
 
-- **Referens:** clang 23 med samma mål. `-S` jämförs inte rad för rad, eftersom
-  instruktionsvalet skiljer sig. Det som jämförs är beteende (körning), ABI
-  (anrop mellan clang- och vcc-objekt) och layout (`vcc-sema.py layout`).
-- **Körning:** emcc länkar mot emscriptens wasm64-libc och node kör. Samma upplägg
-  som `bench/vcc-ctests.py` med qemu för arm64. Cache som där: ett objekt
-  byte-identiskt med ett som redan gått igenom körs inte igen.
-- **arm64 oförändrat:** varje commit i W0, W1 och W7 verifieras mot de 1 326 utdata
-  och `vbench.py gate`.
+- **Reference:** clang 23 with the same target. `-S` is not compared line by
+  line, since instruction selection differs. What is compared is behaviour
+  (running), ABI (calls between clang and vcc objects) and layout
+  (`vcc-sema.py layout`).
+- **Running:** emcc links against emscripten's wasm64 libc and node runs. Same
+  setup as `bench/vcc-ctests.py` with qemu for arm64. Cache as there: an object
+  byte-identical to one that has already passed is not run again.
+- **arm64 unchanged:** every commit in W0, W1 and W7 is verified against the
+  1 326 outputs and `vbench.py gate`.
 
-## Risker och öppna frågor
+## Risks and open questions
 
-- **W1 är det svåra steget.** Vikning och inlining är sammanvävda med arm64:s
-  registerhantering (`B_REG`, `fnctx.retreg`). Att lyfta ut dem utan att ändra en
-  enda byte i arm64-utdata kräver små steg. Alternativet är att wasm-generatorn
-  får en egen kopia av vikningen. Det går fortare men ger två ställen att hålla i
-  takt med clangs regler, så det väljs bara om W1 drar ut på tiden.
-- **`goto`-tung kod:** kärnan och vcc själv har mest `goto out`-mönster som klaras
-  med ett omgivande `block`. Stackifiern behövs ändå för gcc-torture.
-- **setjmp via wasm-EH** måste matcha emscriptens runtime exakt (symboler, taggar).
-  Testas tidigt i W4 med ett litet program.
-- **Prestanda:** wasm-utdata ska kosta ungefär som arm64-utdata per funktion (inga
-  extra pass utöver stackifiern, som bara körs för funktioner med `goto`). Mäts med
-  `vbench.py` när W5 är klart.
+- **W1 is the hard step.** Folding and inlining are intertwined with arm64's
+  register handling (`B_REG`, `fnctx.retreg`). Lifting them out without changing
+  a single byte of arm64 output requires small steps. The alternative is that
+  the wasm generator gets its own copy of the folding. It is faster but gives
+  two places to keep in step with clang's rules, so it is chosen only if W1
+  drags on.
+- **`goto`-heavy code:** the kernel and vcc itself mostly have `goto out`
+  patterns that are handled with a surrounding `block`. The stackifier is needed
+  anyway for gcc-torture.
+- **setjmp via wasm-EH** must match emscripten's runtime exactly (symbols,
+  tags). Tested early in W4 with a small program.
+- **Performance:** wasm output should cost about the same as arm64 output per
+  function (no extra passes beyond the stackifier, which only runs for functions
+  with `goto`). Measured with `vbench.py` when W5 is done.
 
 ## Status
 
-### W9 (2026-11-11): ersätt Emscripten, första fristående testvägen klar
+### W9 (2026-11-11): replace Emscripten, first standalone test path done
 
-Målet är att bygga och köra wasm utan emcc/emsdk. Emscripten är i dag
-test-/runtimeinfrastruktur, inte en nödvändig del av vcc:s wasm-kodgenerator.
-Vcc har redan assembler, objektskrivare och `ld/wasmld.c`; W8 ersätter
-länkaren men den gamla testvägens emcc väljer fortfarande bibliotek och
-genererar JS. `wasm*-unknown-emscripten` anger nuvarande mål-ABI, inte att
-programmet måste byggas eller startas med Emscripten.
+The goal is to build and run wasm without emcc/emsdk. Emscripten is today
+test/runtime infrastructure, not a necessary part of vcc's wasm code generator.
+Vcc already has an assembler, an object writer and `ld/wasmld.c`; W8 replaces
+the linker, but the old test path's emcc still chooses libraries and generates
+JS. `wasm*-unknown-emscripten` names the current target ABI, not that the
+program must be built or started with Emscripten.
 
-| Steg | Leverans | Status och verifiering |
+| Step | Deliverable | Status and verification |
 | --- | --- | --- |
-| W9.1 | Libc-fri testväg: vpp -S för kodkrav, vpp -c för eget objekt, vlink för modul, liten Node-launcher | Klar för OPT1:s första regel: `bench/vcc-opt-rules.py --target wasm32-unknown-emscripten --run` och motsvarande wasm64. O0–O3 kör samma C-regression. Ingen emcc, LLVM-assembler, wasm-ld eller SDK används i denna wasm-väg. Verifierat med systemets `/usr/bin/node` 24.22.2 och därefter 25.9.0 utan SDK-sökväg. Tidigare Node 22 saknade table64 och kunde inte köra denna wasm64-modul. |
-| W9.2 | Egen test-runtime för ett uttryckligt urval av de vendrade C-sviterna | Planerad. Återanvänd portabel C ur `test/rt/rt.c` eller granskade libc/compiler-rt-källor; bygg med vcc. Separera arm64-start, UART/exit- och FP-asm. Lägg små JS-importer för output/exit samt heap med memory.grow. Behåll samma deklarationer/testkontrakt och verifiera även referenskompilatorns program mot runtime. |
-| W9.3 | Komplett bibliotek-/builtinsstöd för testkorpuset, inklusive exceptionbaserad setjmp | Planerad. Inventera faktiska undefined-symboler; implementera eller vcc-bygg kompatibla __int128/binary128/complex-hjälpare och libc/libm-källor. __wasm_setjmp/__wasm_longjmp och __c_longjmp-taggen kräver egna ABI-/EH-tester. Saknade funktioner ger uttryckligt unsupported, inte falskt godkända eller tyst filtrerade tester. |
-| W9.4 | Fristående explorer och självbygge | Planerad. Ersätt em-config/sysroot-val, libc-header/runtimeleverans, startup/argv/stdout/exit och genererade VccModule/FS/callMain/ExitStatus med egen adapter. Packa filerna i VFS; behåll worker-API eller migrera worker/selfrun i samma steg. Testa filer, minnestillväxt, diagnostik och självbyggets stage2=stage3. |
-| W9.5 | GHA:s obligatoriska wasm-grind använder den egna kedjan | Påbörjad med W9.1-regressionerna i `ci/premerge.sh`; den gamla fullsviten behöver fortfarande emcc. Ta bort SDK-installationen först när samma beslutade korpus och ABI-tester går med W9.2–W9.4. Emscripten kan därefter finnas som valfri jämförelsereferens, aldrig som obligatorisk bygg-/runtimekomponent. |
+| W9.1 | Libc-free test path: vpp -S for code requirements, vpp -c for our own object, vlink for the module, a small Node launcher | Done for OPT1's first rule: `bench/vcc-opt-rules.py --target wasm32-unknown-emscripten --run` and the same for wasm64. O0–O3 run the same C regression. No emcc, LLVM assembler, wasm-ld or SDK is used in this wasm path. Verified with the system's `/usr/bin/node` 24.22.2 and then 25.9.0 without an SDK path. Earlier Node 22 lacked table64 and could not run this wasm64 module. |
+| W9.2 | Own test runtime for an explicit selection of the vendored C suites | Planned. Reuse portable C from `test/rt/rt.c` or reviewed libc/compiler-rt sources; build with vcc. Separate the arm64 startup, UART/exit and FP asm. Add small JS imports for output/exit and a heap with memory.grow. Keep the same declarations/test contract and also verify the reference compiler's programs against the runtime. |
+| W9.3 | Complete library/builtin support for the test corpus, including exception-based setjmp | Planned. Inventory the actual undefined symbols; implement or vcc-build compatible __int128/binary128/complex helpers and libc/libm sources. __wasm_setjmp/__wasm_longjmp and the __c_longjmp tag need their own ABI/EH tests. Missing functions give an explicit unsupported, not falsely passed or silently filtered tests. |
+| W9.4 | Standalone explorer and self-build | Planned. Replace em-config/sysroot selection, libc header/runtime delivery, startup/argv/stdout/exit and the generated VccModule/FS/callMain/ExitStatus with our own adapter. Pack the files in the VFS; keep the worker API or migrate worker/selfrun in the same step. Test files, memory growth, diagnostics and the self-build's stage2=stage3. |
+| W9.5 | GHA's mandatory wasm gate uses our own chain | In progress with the W9.1 regressions in `ci/premerge.sh`; the old full suite still needs emcc. Remove the SDK installation only when the same decided corpus and ABI tests run with W9.2–W9.4. Emscripten can then exist as an optional comparison reference, never as a mandatory build/runtime component. |
 
-Det krävs inte en nyskriven full libc. Valda befintliga källor kan byggas
-av vcc, med dokumenterat ursprung/licens och testad wasm32/64-ABI. Den
-generiska optimeraren väntar inte på detta runtimearbete: W9.1 ger redan
-egen kedja för dess positiva kodkrav och sidoeffekts-/gränsvärdestester.
-Installation på värden och aktivering av emsdk är inte en produktleverans.
+A newly written full libc is not required. Selected existing sources can be
+built by vcc, with documented origin/licence and a tested wasm32/64 ABI. The
+shared optimizer does not wait for this runtime work: W9.1 already gives its own
+chain for the positive code requirements and the side-effect/boundary-value
+tests. Installing on the host and activating emsdk is not a product deliverable.
 
-Kodinventering: `bench/vcc-wasm.py` använder emcc för `rt/wasm.c` och
-slutlänk/JS; `rt/wasm.c` är bara assert-adaptern mot extern libc.
-`contrib/wasm/build.sh` använder Emscriptens sysroot och JS-fil-/processglue.
-`explorer/worker.js` och `selfrun.mjs` använder VccModule, FS och callMain.
-`src/port/wasm/mman.c` äger redan reservationspolicyn men behöver sbrk, pread,
-errno och standardbiblioteksfunktioner. Wasm-generatorn emitterar
-compiler-rt-anrop och EH-ramar men levererar ännu inte deras runtime.
+Code inventory: `bench/vcc-wasm.py` uses emcc for `rt/wasm.c` and the final
+link/JS; `rt/wasm.c` is only the assert adapter against an external libc.
+`contrib/wasm/build.sh` uses Emscripten's sysroot and JS file/process glue.
+`explorer/worker.js` and `selfrun.mjs` use VccModule, FS and callMain.
+`src/port/wasm/mman.c` already owns the reservation policy but needs sbrk, pread,
+errno and standard library functions. The wasm generator emits compiler-rt calls
+and EH frames but does not yet deliver their runtime.
 
-### Gemensamma optimeringar (2026-11-11): planerade för wasm32 och wasm64
+### Shared optimizations (2026-11-11): planned for wasm32 and wasm64
 
-`PLAN-fas2.md`, **Gemensam optimerare utan SSA**, OPT0–OPT8 äger den nya
-optimeringsplanen. Wasm är obligatorisk konsument av gemensamma C-regler
-och strategier tillsammans med x86 och arm64. Anslutningar finns i
-`wexpr.c` (`wbinary`/`warith`, `wknown`, `wlocal`, `wvlanes`), `wstmt.c`
-(`wswitch`, nåbarhet) och `wcall.c:wcall`. Behåll operandstack, wasm-lokaler,
-strukturerade resultatblock och `br_table`; inga fysiska registerpass krävs.
-Gemensam inliningpolicy måste kompletteras med verkliga wasm-bindningar
-och retur-/goto-/cleanup-remappning. Native-only verktyg eller en x86-grön
-audit räknas inte som wasm-verifiering. Kör båda pekarbredderna, med
-scalar-fallback utan SIMD/tail-call-features. Rena extraktioner skall ge
-samma utdata; nya regler får avsedda, testade förbättringar på wasm också.
-Ingen regel implementerad i detta steg; befintliga W-statusar ändras inte.
+`PLAN-fas2.md`, **Shared optimizer without SSA**, OPT0–OPT8 owns the new
+optimization plan. Wasm is a mandatory consumer of the shared C rules and
+strategies together with x86 and arm64. Connections are in `wexpr.c`
+(`wbinary`/`warith`, `wknown`, `wlocal`, `wvlanes`), `wstmt.c` (`wswitch`,
+reachability) and `wcall.c:wcall`. Keep the operand stack, wasm locals,
+structured result blocks and `br_table`; no physical register passes are
+required. The shared inlining policy must be completed with real wasm bindings
+and return/goto/cleanup remapping. Native-only tools or an x86-green audit do
+not count as wasm verification. Run both pointer widths, with a scalar fallback
+without the SIMD/tail-call features. Pure extractions must give the same
+output; new rules get intended, tested improvements on wasm too. No rule is
+implemented in this step; existing W statuses are unchanged.
 
-Före planen: wasm-*bygget* av vcc via emscripten (`contrib/wasm/`, commit 8e9f9da) och
-explorer-sidan.
+Before the plan: the wasm *build* of vcc via emscripten (`contrib/wasm/`, commit
+8e9f9da) and the explorer page.
 
-### Integrering (2026-11-09): gren `claude/wasm`
-Allt färdigt i en gren: W5 och W8 (`claude/wasm-w5-objects`,
-`claude/wasm-w8-linker`), W7:s front end (`claude/wasm-w7-wasm32`) och resten
-av W4 (`claude/wasm-compiler-explorer-5ed0bf`). Inte med: cleanup-attributet
-(`claude/wasm-cleanup-wip`, ett oförklarat körfel). Konflikter bara i
-`emitimpl.h` (`WASM()` täcker nu wasm32, plus `inline_only`) och
-`bench/vcc-wasm.py` (`rt/wasm.c` länkas också med `--vlink`).
+### Integration (2026-11-09): branch `claude/wasm`
+Everything done in one branch: W5 and W8 (`claude/wasm-w5-objects`,
+`claude/wasm-w8-linker`), W7's front end (`claude/wasm-w7-wasm32`) and the rest
+of W4 (`claude/wasm-compiler-explorer-5ed0bf`). Not included: the cleanup
+attribute (`claude/wasm-cleanup-wip`, an unexplained run-time failure).
+Conflicts only in `emitimpl.h` (`WASM()` now covers wasm32, plus `inline_only`)
+and `bench/vcc-wasm.py` (`rt/wasm.c` is also linked with `--vlink`).
 - `vcc-wasm.py -j 6`: 1 717/1 742 (gcc 1 588/1 605, tcc 97/104, vcc 32/33).
-- arm64: `vcc-same.py` 13 165/13 181; de 16 avvikelserna är avsedda
-  (`ctor_priority.c`: `.init_array.N` som clang, W5; `36_array_initialisers.c`
-  och `composite_array.c`: storleken från en tidigare deklaration, rättelse i
-  front end). `vcc-ctests` 1 745/1 745, `vcc-sema batch` 878/879, bygget fil
-  för fil utan varningar.
+- arm64: `vcc-same.py` 13 165/13 181; the 16 deviations are intended
+  (`ctor_priority.c`: `.init_array.N` as clang, W5; `36_array_initialisers.c`
+  and `composite_array.c`: the size from an earlier declaration, a fix in the
+  front end). `vcc-ctests` 1 745/1 745, `vcc-sema batch` 878/879, the file by
+  file build without warnings.
 
-### W4 (2026-11-09): nästan klar
-Gjort sedan W2: `goto` (dispatch-loopar med tillståndslocals och `br_table`,
-hopp in i nästlade satser), etikettadresser och beräknat `goto`, inline asm
-med tom mall, vektorer (lane för lane, sret), `__int128`/`long double` via
-compiler-rt (16-byte-värden som adresser till platser), VLA (under
-`__stack_pointer`, återlämnas vid blockslut, `break`/`continue` och bakåthopp),
-`alloca`, atomics som vanliga laddningar/lagringar (som clang utan
-atomics-funktionen), överspillsinbyggda, död kod efter hopp och kända villkor,
-lokala kopior av inline-only-funktioner (emittern inlinar inte), funktions-
-adresser i data (`.int32`/`.int64`, tabellindex), varargs-platser minst 4 byte.
-Återstår (fel, inte tyst fel):
-- `emit` 13: cleanup-attributet (2, WIP-gren), `asm goto` (2), `goto` till en
-  etikett som inte står i en sammansatt sats (2), `case` i en nästlad sats
-  (1), `switch` på 128 bitar (1), överspillsinbyggda på `__int128` (1),
-  `_Atomic`-objekt (1), bit-fält över 8 byte (1), `atomic_signal_fence` (1,
-  front end), destruktorer (1, W5).
-- `link` 6: testerna förutsätter att optimeringen tar bort `link_error`-anrop.
-- `run` 6: optimeringsberoende (`bcp-1`, `builtin-constant`,
-  `frame-address`, `20030125-1`), `complex-6` (`long double _Complex`) och
-  `24_math_library` (bibliotekets signaturer för implicit deklarerade).
-- `bench/vcc-abi.py --target wasm64|wasm32 [--vlink]` (2026-11-10): de fyra
-  kombinationerna clang/vcc × anropare/anropad, `vpp -c`, länkade av emcc och
-  körda i node.  Nytt test `test/abi/aggregates` (poster 0..48 byte, ett
-  element, unioner, bit-fält, `__int128`, `long double`, `_Complex`, varargs
-  med poster, återanrop åt båda hållen) och `aligned_args`.  Det hittade:
-  en vektor med en lane returneras som skalär (som LLVM), inte genom pekare.
-  wasm64 9/9, wasm32 8/8 (`bitfield_layout` kräver LP64), `--vlink` 9/9.
-  Samma tester hittade fyra arm64-fel (rättade): Linux rundar till ett jämnt
-  registerpar efter clangs "unadjusted" justering (inte postens egen
-  `aligned()`), Apple rundar aldrig; Apples `long double` (8 byte) i HFA;
-  Apples HFA på stacken med elementets justering och storlek.
+### W4 (2026-11-09): almost done
+Done since W2: `goto` (dispatch loops with state locals and `br_table`, jumps
+into nested statements), label addresses and computed `goto`, inline asm with
+an empty template, vectors (lane by lane, sret), `__int128`/`long double` via
+compiler-rt (16-byte values as addresses of slots), VLA (below
+`__stack_pointer`, released at block end, `break`/`continue` and backward
+jumps), `alloca`, atomics as plain loads/stores (as clang without the atomics
+feature), overflow builtins, dead code after jumps and known conditions, local
+copies of inline-only functions (the emitter does not inline), function
+addresses in data (`.int32`/`.int64`, table index), varargs slots of at least 4
+bytes.
+Remaining (errors, not silent errors):
+- `emit` 13: the cleanup attribute (2, WIP branch), `asm goto` (2), `goto` to a
+  label that is not in a compound statement (2), `case` in a nested statement
+  (1), `switch` on 128 bits (1), overflow builtins on `__int128` (1),
+  `_Atomic` objects (1), bit-fields over 8 bytes (1), `atomic_signal_fence` (1,
+  front end), destructors (1, W5).
+- `link` 6: the tests assume that optimization removes the `link_error` calls.
+- `run` 6: optimization-dependent (`bcp-1`, `builtin-constant`,
+  `frame-address`, `20030125-1`), `complex-6` (`long double _Complex`) and
+  `24_math_library` (the library's signatures for implicitly declared).
+- `bench/vcc-abi.py --target wasm64|wasm32 [--vlink]` (2026-11-10): the four
+  combinations clang/vcc × caller/callee, `vpp -c`, linked by emcc and run in
+  node.  New test `test/abi/aggregates` (records 0..48 bytes, one element,
+  unions, bit-fields, `__int128`, `long double`, `_Complex`, varargs with
+  records, callbacks in both directions) and `aligned_args`.  It found: a
+  vector with one lane is returned as a scalar (as LLVM), not through a
+  pointer.  wasm64 9/9, wasm32 8/8 (`bitfield_layout` requires LP64), `--vlink`
+  9/9.  The same tests found four arm64 bugs (fixed): Linux rounds to an even
+  register pair after clang's "unadjusted" alignment (not the record's own
+  `aligned()`), Apple never rounds; Apple's `long double` (8 bytes) in an HFA;
+  Apple's HFA on the stack with the element's alignment and size.
 
-Senare samma dag: `setjmp`/`longjmp` genom wasm-EH (`-mllvm -wasm-enable-sjlj`,
-som emscriptens `-sSUPPORT_LONGJMP=wasm`: `__wasm_setjmp`/`__wasm_longjmp`,
-`try`/`catch __c_longjmp`, taggar i assemblern, objektet och vlink;
-`test/vcc/setjmp_sites.c`), destruktorer, `asm goto` med tom mall, `switch`
-på `__int128`, breda bit-fält, `_Atomic`-objekt, matematikfunktioner som
-instruktioner. `vcc-wasm.py -j 6`: 1 739/1 746 i alla lägen (`-S`, `--objcmp`
-byte för byte, `--obj --vlink`); kvar är de 6 `link_error`-testerna (kräver
-optimering) och `bcp-1`.
+Later the same day: `setjmp`/`longjmp` through wasm-EH (`-mllvm -wasm-enable-sjlj`,
+like emscripten's `-sSUPPORT_LONGJMP=wasm`: `__wasm_setjmp`/`__wasm_longjmp`,
+`try`/`catch __c_longjmp`, tags in the assembler, the object and vlink;
+`test/vcc/setjmp_sites.c`), destructors, `asm goto` with an empty template,
+`switch` on `__int128`, wide bit-fields, `_Atomic` objects, math functions as
+instructions. `vcc-wasm.py -j 6`: 1 739/1 746 in all modes (`-S`, `--objcmp`
+byte for byte, `--obj --vlink`); what remains are the 6 `link_error` tests
+(require optimization) and `bcp-1`.
 
-### W6 (2026-11-10): klar, explorern inte bytt
-vcc kompilerar sig själv till wasm64: `VCC=build/src/vpp OUT=../build/wasm-self
-sh contrib/wasm/build.sh` (från `src/`) gör varje objekt med vcc:s wasm-generator,
-assembler och objektskrivare mot emscriptens libc-huvuden; emcc länkar bara
-(`-sSUPPORT_LONGJMP=wasm`, vcc:s setjmp är wasm-EH).  Det som behövdes:
-- vcc:s `<arm_neon.h>`/`<arm_acle.h>` har C-versioner av inline-asm-
-  intrinsics för andra mål än arm64 (lane för lane; CRC32/CRC32C en nibble i
-  taget), provade mot clangs NEON på 20 000 slumpade indata;
-- `_Thread_local` som vanliga objekt på wasm, som LLVM gör utan delat minne
+### W6 (2026-11-10): done, explorer not switched
+vcc compiles itself to wasm64: `VCC=build/src/vpp OUT=../build/wasm-self
+sh contrib/wasm/build.sh` (from `src/`) makes every object with vcc's wasm
+generator, assembler and object writer against emscripten's libc headers; emcc
+only links (`-sSUPPORT_LONGJMP=wasm`, vcc's setjmp is wasm-EH).  What was needed:
+- vcc's `<arm_neon.h>`/`<arm_acle.h>` have C versions of the inline-asm
+  intrinsics for targets other than arm64 (lane by lane; CRC32/CRC32C one
+  nibble at a time), tested against clang's NEON on 20 000 random inputs;
+- `_Thread_local` as plain objects on wasm, as LLVM does without shared memory
   (`test/vcc/thread_local.c`);
-- `__builtin_bitreverse8..64`, `__builtin_isinf`/`isfinite` i wasm-generatorn
-  (`test/vcc/bitreverse.c`, `fp_class_builtins.c`).
-`bench/vcc-self.py -j 6`: varje test i sviterna, förbehandlat av den native
-vpp för aarch64 och wasm64, kompileras `-O2 -S` av både emcc-bygget och det
-självbyggda `vcc.wasm` (`contrib/wasm/selfrun.mjs`, node): 3 741/3 741 utdata
-byte-identiska (3 428 kompilerade, resten samma diagnostik), 37 s.
-`vcc.wasm` 1,26 MB mot emcc:s 1,61 MB, men ~7x långsammare (9,0 s mot 1,2 s
-på 41 MB `many_probes`): ingen optimering, intrinsics lane för lane.
-Explorern använder fortfarande emcc-bygget; att byta är ett beslut (hastighet)
-och en ny publicering av sidan.
+- `__builtin_bitreverse8..64`, `__builtin_isinf`/`isfinite` in the wasm
+  generator (`test/vcc/bitreverse.c`, `fp_class_builtins.c`).
+`bench/vcc-self.py -j 6`: every test in the suites, preprocessed by the native
+vpp for aarch64 and wasm64, is compiled `-O2 -S` by both the emcc build and the
+self-built `vcc.wasm` (`contrib/wasm/selfrun.mjs`, node): 3 741/3 741 outputs
+byte-identical (3 428 compiled, the rest the same diagnostics), 37 s.
+`vcc.wasm` 1,26 MB against emcc's 1,61 MB, but ~7x slower (9,0 s against 1,2 s
+on the 41 MB `many_probes`): no optimization, intrinsics lane by lane.
+The explorer still uses the emcc build; switching is a decision (speed) and a
+new publication of the page.
 
-### W7 (2026-11-09): klar
-`--target=wasm32-unknown-emscripten`: predefines som clang, ILP32 i front end,
-och nu hela vägen: pekarbredden per mål i generatorn (`WPT(c)`, `wrep()`:
-`i32`-adressering, `__stack_pointer` och tabellindex som i32, `.int32`-
-adresser i data, compiler-rt-signaturer med `P`), sjlj-nyttolasten
-`{env, val}` på 4+4 byte, assemblern med `R_MEMORY_ADDR_LEB` (5 byte) för
-symboler i memarg, objektskrivaren med i32-gränser för minne och tabell och
-`i32.const`-offset, och `vlink` som läser bredden ur objektens minnesimport
-(fel vid blandning).  Två rättelser i front end som wasm32 hittade (ILP32 gör
-`1ul << 40` till ett överskift): konstanta skift viks som clangs C (antal ≥
-bredd blir bredd−1, negativt antal skiftar åt andra hållet,
-`test/vcc/const_shift.c`), och `-Wno-[error=]int-conversion`,
-`incompatible-pointer-types` och `incompatible-function-pointer-types` gör
-felet till en varning som clang.
-- `vcc-wasm.py -j 6 --wasm32`: 1 739/1 746, `--objcmp` byte för byte med
-  clangs objekt, `--obj --vlink` (`build/src/wasmtests32`); samma 7 kvar som
-  wasm64.
+### W7 (2026-11-09): done
+`--target=wasm32-unknown-emscripten`: predefines as clang, ILP32 in the front
+end, and now all the way through: pointer width per target in the generator
+(`WPT(c)`, `wrep()`: `i32` addressing, `__stack_pointer` and table indexes as
+i32, `.int32` addresses in data, compiler-rt signatures with `P`), the sjlj
+payload `{env, val}` at 4+4 bytes, the assembler with `R_MEMORY_ADDR_LEB` (5
+bytes) for symbols in memarg, the object writer with i32 limits for memory and
+table and `i32.const` offset, and `vlink` reading the width from the objects'
+memory import (error on mixing).  Two fixes in the front end that wasm32 found
+(ILP32 makes `1ul << 40` an over-shift): constant shifts fold as clang's C
+(count ≥ width becomes width−1, a negative count shifts the other way,
+`test/vcc/const_shift.c`), and `-Wno-[error=]int-conversion`,
+`incompatible-pointer-types` and `incompatible-function-pointer-types` turn the
+error into a warning as clang.
+- `vcc-wasm.py -j 6 --wasm32`: 1 739/1 746, `--objcmp` byte for byte with
+  clang's objects, `--obj --vlink` (`build/src/wasmtests32`); the same 7 remain
+  as for wasm64.
 
-### W8 (2026-11-09): egen länkare, i gren `claude/wasm-w8-linker` (på W5)
-- `ld/wasmld.c`: `vlink` länkar wasm när det anropas som `wasm-ld` eller med
-  `-mwasm64`. Läser relokerbara wasm-objekt (clangs och vccs), arkiv (SysV-
-  symboltabell, medlemmar hämtas lat av starka referenser, `--export` och
-  `--export-if-defined` som i wasm-ld) och emscriptens stubbibliotek
-  (`#STUB`: symboler som JS ger, med beroenden som blir rötter).
-  Symbolupplösning (stark före svag, dubbletter är fel), GC från rötterna
-  (exporter, `NO_STRIP`, konstruktorer), `__wasm_call_ctors` (init-funktioner
-  efter prioritet), odefinierade svaga funktioner som stubbar som fäller och
-  null i tabellen, syntetiska `__stack_pointer`, `__heap_base`, `__data_end`,
-  `__stack_low/high`, `__start_/__stop_X`; minneslayout med `--stack-first`,
+### W8 (2026-11-09): own linker, in branch `claude/wasm-w8-linker` (on W5)
+- `ld/wasmld.c`: `vlink` links wasm when called as `wasm-ld` or with
+  `-mwasm64`. Reads relocatable wasm objects (clang's and vcc's), archives
+  (SysV symbol table, members fetched lazily by strong references, `--export`
+  and `--export-if-defined` as in wasm-ld) and emscripten's stub libraries
+  (`#STUB`: symbols that JS provides, with dependencies that become roots).
+  Symbol resolution (strong before weak, duplicates are errors), GC from the
+  roots (exports, `NO_STRIP`, constructors), `__wasm_call_ctors` (init
+  functions by priority), undefined weak functions as stubs that trap and null
+  in the table, synthetic `__stack_pointer`, `__heap_base`, `__data_end`,
+  `__stack_low/high`, `__start_/__stop_X`; memory layout with `--stack-first`,
   `-z stack-size`, `--initial-heap`, `--no-growable-memory`, `--table-base`;
-  segment slås ihop per namn (`.rodata`, `.data`, `.bss` utelämnas), data-
-  symboler exporteras som oföränderliga globaler, relokeringar skrivs i de
-  utfyllda fälten, `target_features` som unionen plus `--extra-features`.
-- emcc använder den genom `EM_LLVM_ROOT` = en katalog med emscriptens LLVM-
-  verktyg där `wasm-ld` pekar på `vlink` (`EM_FROZEN_CACHE=1`, cachen läses
-  bara). `bench/vcc-wasm.py --vlink` länkar vccs sida så; `--obj --vlink` är
-  hela vcc-kedjan (vpp -c, vlink) med bara emscriptens libc och JS kvar.
-- Validering: `vcc-wasm.py -j 6 --vlink` och `--obj --vlink`: samma 1 590
-  godkända som med wasm-ld (två fel hittade och rättade på vägen:
-  `--export-if-defined` måste hämta arkivmedlemmar, annars saknas `fflush`
-  och utdata utan radslut försvinner; odefinierad svag funktion ska ha
-  tabellplats 0). Tid för emccs länk av t1.c (libc, dlmalloc, stubbar):
-  `vlink` 5,4 ms mot `wasm-ld` 29,2 ms (bäst av 10, belastad maskin).
-- Saknas (ger fel, inte tyst fel): COMDAT, TLS-segment i flertrådat läge,
-  `--entry`/`_start`, `name`-sektionen (felsökningsnamn), `--growable-table`
-  utan max, delade minnen, PIC/`-shared`. Utdata är inte byte för byte som
-  wasm-ld:s (exportordning, segmentindelning); det krävs inte.
+  segments merged by name (`.rodata`, `.data`, `.bss` omitted), data symbols
+  exported as immutable globals, relocations written into the padded fields,
+  `target_features` as the union plus `--extra-features`.
+- emcc uses it through `EM_LLVM_ROOT` = a directory with emscripten's LLVM
+  tools where `wasm-ld` points to `vlink` (`EM_FROZEN_CACHE=1`, the cache is
+  only read). `bench/vcc-wasm.py --vlink` links vcc's side this way; `--obj
+  --vlink` is the whole vcc chain (vpp -c, vlink) with only emscripten's libc
+  and JS left.
+- Validation: `vcc-wasm.py -j 6 --vlink` and `--obj --vlink`: the same 1 590
+  passes as with wasm-ld (two bugs found and fixed on the way:
+  `--export-if-defined` must fetch archive members, otherwise `fflush` is
+  missing and output without a final newline disappears; an undefined weak
+  function must have table slot 0). Time for emcc's link of t1.c (libc,
+  dlmalloc, stubs): `vlink` 5,4 ms against `wasm-ld` 29,2 ms (best of 10,
+  loaded machine).
+- Missing (gives an error, not a silent error): COMDAT, TLS segments in
+  multithreaded mode, `--entry`/`_start`, the `name` section (debug names),
+  `--growable-table` without max, shared memories, PIC/`-shared`. Output is not
+  byte for byte as wasm-ld's (export order, segment division); that is not
+  required.
 
-### W5 (2026-11-09): objektfiler, i gren `claude/wasm-w5-objects`
-- `arch/wasm/as/as.c` (+ `was.h`, gränssnittet `wasmas.h`): LLVM:s wasm-`.s`
-  (det generatorn skriver: `.functype`, `.globaltype`, `.tabletype`, `.local`,
-  sektioner, `.globl`/`.weak`/`.hidden`/`.type`/`.size`/`.p2align`, `x = y`,
-  `.set`, data-direktiv och strängar; hela MVP-instruktionsuppsättningen,
-  sign-ext, `trunc_sat`, `memory.copy`/`fill`) till en modell; instruktioner
-  kodas direkt, symboloperander lämnar fasta LEB-fält (5/10 byte) och
-  relokeringar. `platform/wasm/wasm.c` lägger ut modellen som LLVM:s
-  WasmObjectWriter: symboler, funktioner, importer och typer i den ordning
-  assemblern registrerade symbolerna (`call_indirect`-signaturer där
-  instruktionen står), utfyllda sektions- och delsektionsstorlekar,
-  ELEM-segment och tabellimport när en funktionsadress tas,
-  `linking` (symboltabell, segment) och `reloc.CODE`/`reloc.DATA`.
-- `-c` för wasm64: `emit_tu` tar texten (som `VCC_OBJ_TEXT`) genom
-  `wasm_assemble`; drivern skriver bytena (`cc_opts.wasm_obj`). Ännu genom
-  text, inte direkt från generatorn (planens "utan text" återstår, en
-  prestandafråga). `vasm --target=wasm64-…` läser wasm-`.s`.
-- Validering: `bench/vcc-wasm.py --objcmp` jämför `vpp -c`:s objekt byte för
-  byte med clangs objekt för samma `.s`: **alla identiska** (0 avvikelser på
-  sviterna, 1 590 tester godkända länkade av emcc och körda i node på grenens
-  bas 1856415, samma som `-S`-vägen). `--obj` kör sviterna med vccs objekt.
-- arm64 oförändrat: `vcc-same.py` 13 167/13 167 mot bygget före wasm,
-  `vcc-ctests` 1 743/1 743, bygget fil för fil utan varningar; emscripten-bygget
-  (`contrib/wasm/build.sh`) tar med de nya filerna.
-- Tillägg (i `claude/wasm-w8-linker`): konstruktorer. Generatorn tappade
-  `__attribute__((constructor))` tyst för wasm; nu `.init_array[.N]`, som
-  assemblern gör till objektets init-funktioner (linking-delsektion 6, i
-  sektionernas ordning som LLVM); prioriteten `constructor(N)` sparas i
-  `attrs.prio` (front end tappade den, även för arm64, som nu skriver
-  `.init_array.N` som clang). Assemblern tar också egna sektioner
-  (`.custom_section.X`; `producers` och `target_features` sist),
-  `.no_dead_strip` (tabellimporten clang -O0 tvingar fram), segmentflaggan
-  `"S"` och symboler som minnesoffset (`i32.store x`, MEMORY_ADDR_LEB64):
-  clangs egen `-O0`-`.s` ger nu samma objekt som clang. Test
-  `test/vcc/ctor_priority.c` (arm64 och wasm); destruktorer ger fel för
-  wasm (clang gör dem till `__cxa_atexit`-anrop).
-  Namn utanför ASCII skrivs inom citattecken (`"привет"`, sektionen
-  `".data.привет"`) som clang -S; LLVM:s wasm-assembler tar inte tillbaka
-  dem (clangs egen `.s` faller också), så `vcc-wasm.py` bygger då vccs sida
-  med `vpp -c` (tcc/83_utf8_in_identifiers godkänt).
-- Återstår i W5: generatorn direkt till modellen (utan text), destruktorer,
-  TLS, `vas` i vccd.
+### W5 (2026-11-09): object files, in branch `claude/wasm-w5-objects`
+- `arch/wasm/as/as.c` (+ `was.h`, the interface `wasmas.h`): LLVM's wasm `.s`
+  (what the generator writes: `.functype`, `.globaltype`, `.tabletype`,
+  `.local`, sections, `.globl`/`.weak`/`.hidden`/`.type`/`.size`/`.p2align`,
+  `x = y`, `.set`, data directives and strings; the whole MVP instruction set,
+  sign-ext, `trunc_sat`, `memory.copy`/`fill`) into a model; instructions are
+  encoded directly, symbol operands leave fixed LEB fields (5/10 bytes) and
+  relocations. `platform/wasm/wasm.c` lays out the model as LLVM's
+  WasmObjectWriter: symbols, functions, imports and types in the order the
+  assembler registered the symbols (`call_indirect` signatures where the
+  instruction is), padded section and subsection sizes, ELEM segments and table
+  import when a function address is taken, `linking` (symbol table, segments)
+  and `reloc.CODE`/`reloc.DATA`.
+- `-c` for wasm64: `emit_tu` takes the text (as `VCC_OBJ_TEXT`) through
+  `wasm_assemble`; the driver writes the bytes (`cc_opts.wasm_obj`). Still
+  through text, not yet directly from the generator (the plan's "without text"
+  remains, a performance question). `vasm --target=wasm64-…` reads wasm `.s`.
+- Validation: `bench/vcc-wasm.py --objcmp` compares `vpp -c`'s object byte for
+  byte with clang's object for the same `.s`: **all identical** (0 deviations
+  on the suites, 1 590 tests passed linked by emcc and run in node on the
+  branch's base 1856415, the same as the `-S` path). `--obj` runs the suites
+  with vcc's objects.
+- arm64 unchanged: `vcc-same.py` 13 167/13 167 against the build before wasm,
+  `vcc-ctests` 1 743/1 743, the file by file build without warnings; the
+  emscripten build (`contrib/wasm/build.sh`) includes the new files.
+- Addition (in `claude/wasm-w8-linker`): constructors. The generator silently
+  dropped `__attribute__((constructor))` for wasm; now `.init_array[.N]`, which
+  the assembler turns into the object's init functions (linking subsection 6,
+  in the sections' order as LLVM); the priority `constructor(N)` is saved in
+  `attrs.prio` (the front end dropped it, also for arm64, which now writes
+  `.init_array.N` as clang). The assembler also takes custom sections
+  (`.custom_section.X`; `producers` and `target_features` last),
+  `.no_dead_strip` (the table import clang -O0 forces), the segment flag `"S"`
+  and symbols as memory offset (`i32.store x`, MEMORY_ADDR_LEB64): clang's own
+  `-O0` `.s` now gives the same object as clang. Test `test/vcc/ctor_priority.c`
+  (arm64 and wasm); destructors give an error for wasm (clang makes them
+  `__cxa_atexit` calls).
+  Names outside ASCII are written in quotes (`"привет"`, the section
+  `".data.привет"`) as clang -S; LLVM's wasm assembler does not read them back
+  (clang's own `.s` fails too), so `vcc-wasm.py` then builds vcc's side with
+  `vpp -c` (tcc/83_utf8_in_identifiers passed).
+- Remaining in W5: the generator directly to the model (without text),
+  destructors, TLS, `vas` in vccd.
 
-### W1, W2 (2026-11-09): klara
-- W1 omplanerat: i stället för att lyfta ut vikning och inlining ur
-  `arch/a64/codegen/` (riskabelt, se Risker) väljer `codegen/` generator per mål:
-  `do_item` (funktioner till `wasm_emit_function`), huvudet (`wasm_header`:
-  `.globaltype __stack_pointer`, `.tabletype`, en `.functype` per refererad
-  funktion, sorterad och unik, ur varje tråds lista), svansen (ingen
-  `.note.GNU-stack`) och `data.c` (en sektion per objekt, `.long`/`.quad`,
-  strängar i `.rodata..L.str.N`). `ecx.w` håller wasm-tillståndet (en pool).
-- W2: `arch/wasm/codegen/` (`wimpl.h`, `wasm.c` funktioner/ABI/huvud, `wexpr.c`
-  uttryck/lvärden, `wcall.c` anrop/varargs/inbyggda, `wstmt.c` satser/initierare).
-  Ett värde per C-uttryck på operandstacken; skalära lokala variabler utan tagen
-  adress (prepassets `lnoreg`) i wasm-locals, resten i en ram på skuggstacken
-  (`__stack_pointer`, återställd från en sparad local); `return` som `br` ut ur
-  funktionens yttersta block med värdet i en local. ABI som clang: en struct med
-  ett element som skalären, tomma ignoreras, andra som pekare till en kopia,
-  sret; `__int128`/`long double` som två i64; varargs i en buffert på anroparens
-  ram (justering enligt typen, steg avrundat till 4, som `emitVoidPtrVAArg`).
-  `main` byter namn som hos clang (`__main_argc_argv`, eller `__original_main`
-  plus omslaget `main(i32, i64)` och `__main_void`). Implicit deklarerade
-  biblioteksfunktioner får bibliotekets prototyp (nytt `cc_lib_sig`, bara uppslag);
-  anrop till en K&R-definition i samma fil använder definitionens parametrar.
-  `switch` med `br_table` (täta fall) eller jämförelsekedja, fallen på
-  toppnivån i kroppen. Med i W2 redan: globala data, strängar, initierare,
-  pekararitmetik, bit-fält, structs som värden, varargs, `alloca`, flyttal.
-- Explorern har målet `wasm64-unknown-emscripten` (vcc i wasm som ger wasm).
-- Nytt `bench/vcc-wasm.py`: sviterna från `vcc-ctests.py` byggda av clang och av
-  vcc (`-S`, assemblerat av clang) för wasm64, länkade av emcc, körda i node.
-  LLVM:s assembler typkontrollerar `call_indirect`-index mot en i32-tabell (clangs
-  egen `-S` faller likadant), så en fil vars enda fel är det assembleras om med
-  `-Wa,--no-type-check`. Resultat: gcc 1 411/1 605, tcc 85/104, vcc 22/30
-  (alla 1 518/1 739, 87,3 %). Det som återstår (W4): `goto` (44), inline asm (36),
-  vektorer (36), `__int128`/`long double` (31), VLA (14), atomics och några
-  inbyggda, cleanup, Duffs device.
-- arm64 oförändrat: `vcc-same.py` 13 160/13 160 mot bygget före, `vbench.py
-  check --quick` 66/66; `vcc-ctests --suite vcc` 34/34, `vcc-sema batch` 878/879,
-  bygget fil för fil (`VCC_UNITY=`) utan varningar.
+### W1, W2 (2026-11-09): done
+- W1 replanned: instead of lifting folding and inlining out of
+  `arch/a64/codegen/` (risky, see Risks) `codegen/` chooses the generator per target:
+  `do_item` (functions to `wasm_emit_function`), the head (`wasm_header`:
+  `.globaltype __stack_pointer`, `.tabletype`, one `.functype` per referenced
+  function, sorted and unique, from each thread's list), the tail (no
+  `.note.GNU-stack`) and `data.c` (one section per object, `.long`/`.quad`,
+  strings in `.rodata..L.str.N`). `ecx.w` holds the wasm state (one pool).
+- W2: `arch/wasm/codegen/` (`wimpl.h`, `wasm.c` functions/ABI/head, `wexpr.c`
+  expressions/lvalues, `wcall.c` calls/varargs/builtins, `wstmt.c`
+  statements/initializers).
+  One value per C expression on the operand stack; scalar local variables
+  without a taken address (the prepass's `lnoreg`) in wasm locals, the rest in a
+  frame on the shadow stack (`__stack_pointer`, restored from a saved local);
+  `return` as `br` out of the function's outermost block with the value in a
+  local. ABI as clang: a struct with one element as the scalar, empty ones
+  ignored, others as a pointer to a copy, sret; `__int128`/`long double` as two
+  i64; varargs in a buffer on the caller's frame (alignment per the type, step
+  rounded to 4, as `emitVoidPtrVAArg`). `main` is renamed as in clang
+  (`__main_argc_argv`, or `__original_main` plus the wrapper `main(i32, i64)`
+  and `__main_void`). Implicitly declared library functions get the library's
+  prototype (new `cc_lib_sig`, lookup only); calls to a K&R definition in the
+  same file use the definition's parameters.
+  `switch` with `br_table` (dense cases) or a comparison chain, the cases at the
+  top level of the body. Already included in W2: global data, strings,
+  initializers, pointer arithmetic, bit-fields, structs as values, varargs,
+  `alloca`, floating point.
+- The explorer has the target `wasm64-unknown-emscripten` (vcc in wasm that
+  gives wasm).
+- New `bench/vcc-wasm.py`: the suites from `vcc-ctests.py` built by clang and by
+  vcc (`-S`, assembled by clang) for wasm64, linked by emcc, run in node.
+  LLVM's assembler type-checks `call_indirect` indexes against an i32 table
+  (clang's own `-S` fails the same way), so a file whose only error is that is
+  reassembled with `-Wa,--no-type-check`. Result: gcc 1 411/1 605, tcc 85/104,
+  vcc 22/30 (all 1 518/1 739, 87,3 %). What remains (W4): `goto` (44), inline
+  asm (36), vectors (36), `__int128`/`long double` (31), VLA (14), atomics and
+  some builtins, cleanup, Duff's device.
+- arm64 unchanged: `vcc-same.py` 13 160/13 160 against the build before,
+  `vbench.py check --quick` 66/66; `vcc-ctests --suite vcc` 34/34, `vcc-sema
+  batch` 878/879, the file by file build (`VCC_UNITY=`) without warnings.
 
-### W0 (2026-11-09): klar
-- `--target=wasm64-…` ger `PP_WASM64` (tredje kolumnen i `has_tab`, `pp.h`); drivern
-  skiljer `lnx` (aarch64 Linux) från Darwin och wasm, så Linux-tilläggen (`-fshort-wchar`-
-  tabellen, `__ARM_NEON`, LSE) inte hamnar i wasm-predefines. `gen-ppdata.sh` ger
-  `predef_wasm64`, `predef_order_wasm64` och wasm-svaren på `__has_*`; körd med
-  `EXTRA_INC="work/glibc-include <emscriptens sysroot/include>"`. Linux- och
-  Darwin-kolumnerna och -tabellerna är oförändrade; 23 nya namn ur emscriptens headers.
-- Front end för wasm64, kontrollerat mot clang 23: `char` signed, `wchar_t` `int`,
-  `__builtin_va_list` `void *`, `long double` binary128 med alignment 8 (emscripten),
-  namnlösa bit-fält som Apple (påverkar inte postens alignment), GNU-vektorer
-  alignade till hela storleken (arm64: högst 16).
-- `-S`/`-c` för wasm64 ger ett fel som pekar på W2 tills kodgeneratorn finns.
-- Verifierat: `vpp -dM -E` = clang för wasm64 med `-O0/-O1/-O2/-Os`, `-std=c99`,
-  `-fPIC`, `-ffreestanding` (C23 avviker, som för Linux redan före);
-  `vcc-bflayout.py` 6 604 påståenden per mål, 0 avvisade för alla tre målen;
-  layoutpåståenden (`--vcc-layout-checks`) för 1 880 testfiler med wasm64 som mål:
-  83 858 påståenden, de 9 filer clang avvisar har samma avvisningar för aarch64-linux
-  (befintliga, `_Atomic`-kompatibilitet m.m.). arm64 oförändrat: nytt
-  `bench/vcc-same.py` 13 160/13 160 utdata identiska (1 880 filer × -c -O0/-O1/-O2,
-  -S, -E, Darwin -c/-S) mot bygget före, `vbench.py check --quick` 66/66;
-  `vcc-diff batch --cmp --kernel` 873/873, `vcc-sema batch` 878/879, `vcc-driver`
-  41/41, `vcc-ctests --suite vcc` 34/34.
+### W0 (2026-11-09): done
+- `--target=wasm64-…` gives `PP_WASM64` (the third column in `has_tab`,
+  `pp.h`); the driver distinguishes `lnx` (aarch64 Linux) from Darwin and wasm,
+  so the Linux additions (the `-fshort-wchar` table, `__ARM_NEON`, LSE) do not
+  end up in wasm predefines. `gen-ppdata.sh` gives `predef_wasm64`,
+  `predef_order_wasm64` and the wasm answers to `__has_*`; run with
+  `EXTRA_INC="work/glibc-include <emscripten's sysroot/include>"`. The Linux and
+  Darwin columns and tables are unchanged; 23 new names from emscripten's
+  headers.
+- Front end for wasm64, checked against clang 23: `char` signed, `wchar_t`
+  `int`, `__builtin_va_list` `void *`, `long double` binary128 with alignment 8
+  (emscripten), unnamed bit-fields as Apple (does not affect the record's
+  alignment), GNU vectors aligned to the full size (arm64: at most 16).
+- `-S`/`-c` for wasm64 gives an error pointing to W2 until the code generator
+  exists.
+- Verified: `vpp -dM -E` = clang for wasm64 with `-O0/-O1/-O2/-Os`, `-std=c99`,
+  `-fPIC`, `-ffreestanding` (C23 deviates, as for Linux already before);
+  `vcc-bflayout.py` 6 604 claims per target, 0 rejected for all three targets;
+  layout claims (`--vcc-layout-checks`) for 1 880 test files with wasm64 as
+  target: 83 858 claims, the 9 files clang rejects have the same rejections for
+  aarch64-linux (existing, `_Atomic` compatibility etc.). arm64 unchanged: new
+  `bench/vcc-same.py` 13 160/13 160 outputs identical (1 880 files × -c
+  -O0/-O1/-O2, -S, -E, Darwin -c/-S) against the build before,
+  `vbench.py check --quick` 66/66; `vcc-diff batch --cmp --kernel` 873/873,
+  `vcc-sema batch` 878/879, `vcc-driver` 41/41, `vcc-ctests --suite vcc` 34/34.
 
-## Referenskontrakt för GCC-körtesterna
+## Reference contract for the GCC run tests
 
-`bench/vcc-wasm.py` respekterar GCC:s uttryckliga, ovillkorliga
-`dg-require-effective-target label_values` före kompilering: LLVM:s Wasm-mål
-kan inte representera GNU-etikettadresser som lämnar funktionen eller lagras i
-data. Dessa fall redovisas som `skip:unsupported-target`, inte som godkända test.
-Att en enklare etikettadress kan optimeras bort innebär inte stöd för kravet.
-Övriga målvillkor, exempelvis `indirect_jumps`, omfattas inte av denna regel.
+`bench/vcc-wasm.py` respects GCC's explicit, unconditional
+`dg-require-effective-target label_values` before compiling: LLVM's Wasm target
+cannot represent GNU label addresses that leave the function or are stored in
+data. These cases are reported as `skip:unsupported-target`, not as passed
+tests. That a simpler label address can be optimized away does not mean the
+requirement is supported. Other target conditions, for example `indirect_jumps`,
+are not covered by this rule.
 
-Verifierat med LLVM 23 på `20071220-1`, `20071220-2` (etikettadress i statisk
-tabell) och `990208-1` (etikettadress lämnar inline-funktionen). Utan
-målvillkorskontrollen ger LLVM fatala backendfel med stackdump. Dessa fel är
-fortfarande `error:oracle-compile` för test utan detta uttryckliga källkontrakt;
-diagnostiktext får aldrig omklassificera en krasch, timeout eller verktygsfel
-till en skip. `bench/test-runtime-oracle.py` kontrollerar båda vägarna.
-Oväntade `fail` och `error` skriver alltid svit/testnamn även utan `-v`.
+Verified with LLVM 23 on `20071220-1`, `20071220-2` (label address in a static
+table) and `990208-1` (label address leaves the inline function). Without the
+target-condition check LLVM gives fatal backend errors with a stack dump. These
+errors are still `error:oracle-compile` for tests without this explicit source
+contract; diagnostic text must never reclassify a crash, timeout or tool error
+as a skip. `bench/test-runtime-oracle.py` checks both paths. Unexpected `fail`
+and `error` always print the suite/test name even without `-v`.
 
-### OPT5: typade ramcellsoperationer (pågående)
+### OPT5: typed frame cell operations (in progress)
 
-Wasm delar nu den exakta cell-/överlappsanalysen (`codegen/rec/slots.c`) och
-värdetillgängligheten (`codegen/rec/slot-values.c`) med arm64. Den separata
-adaptern `arch/wasm/codegen/slots.c` registrerar typade load/store-, överlapps-
-och kontrollhändelser när kroppen produceras. Optimeraren väljer handlingar
-före renderingen; ingen assemblertext läses eller mönstermatchas. Stabila
-allokerings-ID:n följer direkta ramobjekt och deras structfält. Endast utvalda
-vidarebefordringar får egna wasm-locals, som inte återanvänds av temporärpoolen.
+Wasm now shares the exact cell/overlap analysis (`codegen/rec/slots.c`) and the
+value availability (`codegen/rec/slot-values.c`) with arm64. The separate adapter
+`arch/wasm/codegen/slots.c` registers typed load/store, overlap and control events
+as the body is produced. The optimizer chooses actions before the rendering; no
+assembler text is read or pattern-matched. Stable allocation IDs follow direct
+frame objects and their struct fields. Only selected forwardings get their own
+wasm locals, which are not reused by the temporary pool.
 
-Första delen ersätter exakta 4/8-bytes heltals- och flyttalsladdningar samt
-tar bort överskrivna butiker inom raka kodsegment vid O1–O3. Operanderna
-utvärderas fortfarande: en laddning blir `drop; local.get`, en borttagen
-butik konsumerar fortfarande adress och högerled. Överlapp, volatile och
-atomic utesluts via samma cellanalys; okända minnesoperationer, anrop, asm
-och strukturerade kontrollgränser bryter tillgängligheten. Objekt vars adress
-lämnar den direkta åtkomsten utesluts. VLA/dynamiska ramar och setjmp-funktioner
-optimeras ännu inte. Smala celler, allmänt olästa butiker och borttagning av
-överflödiga adressproducenter återstår.
+The first part replaces exact 4/8-byte integer and floating-point loads and
+removes overwritten stores within straight code segments at O1–O3. The operands
+are still evaluated: a load becomes `drop; local.get`, a removed store still
+consumes address and right-hand side. Overlap, volatile and atomic are excluded
+via the same cell analysis; unknown memory operations, calls, asm and
+structured control boundaries break availability. Objects whose address leaves
+the direct access are excluded. VLA/dynamic frames and setjmp functions are not
+yet optimized. Narrow cells, generally unread stores and removal of redundant
+address producers remain.
 
-Verifierat lokalt: unity- och fil-för-fil-bygge samt 16 kombinationer i
-`bench/vcc-wasm-cells.py` (wasm32/64 × O0–O3 × två källfiler), med både
-kodformskrav och körning genom egna assemblern/länkaren och Node. Kraven
-visar borttagna laddningar från oberoende structfält, två butiker till en,
-tre laddningar till en efter asm-gräns, samt bevarade volatile/atomic-
-operationer. Körfallen täcker också högerledseffekter, union/bitfält,
-kontrollflöde och adresser som lämnar objektet. Kostnadsmätning och CI återstår;
-detta är delprogress, inte full O2-täckning.
+Verified locally: unity and file by file build and 16 combinations in
+`bench/vcc-wasm-cells.py` (wasm32/64 × O0–O3 × two source files), with both
+code-shape requirements and running through our own assembler/linker and Node.
+The requirements show removed loads from independent struct fields, two stores
+to one, three loads to one after an asm boundary, and preserved volatile/atomic
+operations. The run cases also cover right-hand side effects, union/bit-field,
+control flow and addresses that leave the object. Cost measurement and CI
+remain; this is partial progress, not full O2 coverage.
 
-Kostnadsprov mot `opt/slot-values` (`e6bad4c`), båda värdbyggen med
-`-O3 -march=x86-64-v3`, Callgrind hela processen inklusive start, 500
-funktioner per prov, wasm32/64 och O1/O2:
+Cost test against `opt/slot-values` (`e6bad4c`), both host builds with
+`-O3 -march=x86-64-v3`, Callgrind whole process including startup, 500
+functions per test, wasm32/64 and O1/O2:
 
-| Prov | Ökning i värdinstruktioner |
+| Test | Increase in host instructions |
 |---|---:|
-| Ren heltalskod, ingen ram | +0,185–0,186 % |
-| Pekarladdningsslinga, ingen optimerbar ramcell | +0,298 % |
-| Struct med två fält och upprepade åtkomster | +8,19 % |
+| Pure integer code, no frame | +0,185–0,186 % |
+| Pointer-load loop, no optimizable frame cell | +0,298 % |
+| Struct with two fields and repeated accesses | +8,19 % |
 
-Structprovet tar bort tre laddningar och en överskriven butik per funktion
-(sex minnesoperationer till två). Mätningen visar adapterkostnaden när den
-faktiskt arbetar; den uppfyller inte en generell kostnadsgräns på 1 % och
-påstår ingen förbättring i programmets körtid. Binär-/källhashar, kommandon
-och profiler finns lokalt i `work/opt-profile/wasm-cells-cost/result.json`.
-Det gamla bygget avvisas av det nya positiva kodformskravet. Samma 16
-kombinationer passerar också med ASan+UBSan. Kostnadsgranskning och CI är
-fortfarande öppna leveransvillkor.
+The struct test removes three loads and one overwritten store per function (six
+memory operations to two). The measurement shows the adapter cost when it
+actually works; it does not meet a general cost limit of 1 % and claims no
+improvement in the program's run time. Binary/source hashes, commands and
+profiles are local in `work/opt-profile/wasm-cells-cost/result.json`. The old
+build is rejected by the new positive code-shape requirement. The same 16
+combinations also pass with ASan+UBSan. Cost review and CI are still open
+delivery conditions.
 
-Separat liten kostnadsändring: högst 16 cellintervall sorteras med begränsad
-insättningssortering i den gemensamma klassificeraren; större mängder behåller
-`qsort`. Samma positiva 500-funktionsprov går från cirka +8,19 % till +7,03 %
-hela processens värdinstruktioner mot basen. De tolv assemblerutdata för
-kontroll-, sling- och structproven är byteidentiska före/efter sorteringsbytet.
-De sanitiserade intervall-/värdekontrakten och 16 wasm-kombinationer passerar;
-intervallprovet har också uttryckliga fall på båda sidor om gränsen 16.
+Separate small cost change: at most 16 cell intervals are sorted with a bounded
+insertion sort in the shared classifier; larger sets keep `qsort`. The same
+positive 500-function test goes from about +8,19 % to +7,03 % whole-process host
+instructions against the base. The twelve assembler outputs for the control,
+loop and struct tests are byte-identical before/after the sort change. The
+sanitized interval/value contracts and 16 wasm combinations pass; the interval
+test also has explicit cases on both sides of the limit 16.
 
-Ett kort blandat C-prov efter sorteringsändringen kompilerar elva befintliga
-regressionsfiler till wasm64 O2: djupa blandade uttryck, registerlokaler,
-bitkastningar, ramceller, heltalsregler, djupa villkor, potenstvådivisioner,
-atomics, minnesinbyggda och de nya ramcellsfallen. Resurshuvuden från LLVM 23
-anges uttryckligen. Summan för elva separata processer är 96 456 389 till
-97 034 041 värdinstruktioner (+0,599 %); enskilda filer ligger på +0,115 till
-+1,337 %. `_BitInt`-runtimefilen avvisas redan av basbygget och räknas inte
-som godkänd eller in i summan. Kommandon, käll-/binärhashar och feltext finns
-lokalt i `work/opt-profile/wasm-cells-mixed-configured-cost/result.json`.
-Detta avgränsade kompileringsprov ersätter inte den ordinarie fulla
-prestandagrinden eller belägger programmets körtid; CI återstår.
+A short mixed C test after the sort change compiles eleven existing regression
+files to wasm64 O2: deep mixed expressions, register locals, bit casts, frame
+cells, integer rules, deep conditions, power-of-two divisions, atomics, memory
+builtins and the new frame cell cases. Resource headers from LLVM 23 are given
+explicitly. The sum for eleven separate processes is 96 456 389 to 97 034 041
+host instructions (+0,599 %); individual files are at +0,115 to +1,337 %. The
+`_BitInt` runtime file is already rejected by the base build and is not counted
+as passed or in the sum. Commands, source/binary hashes and error text are
+local in `work/opt-profile/wasm-cells-mixed-configured-cost/result.json`. This
+delimited compile test does not replace the ordinary full performance gate or
+prove the program's run time; CI remains.
 
-### OPT5 integrationskontroll (2026-11-11)
+### OPT5 integration check (2026-11-11)
 
-På `opt/wasm-memory`, utifrån PR46 och wasm-steget: unity och fil-för-fil
-bygger. 6120/6120 arm64-objekt/text är identiska mot värdekärnan e6bad4c
-(2040 filer × O1-objekt/O2-objekt/O2-text), inklusive den nya portabla
-wasm_frame_cells-regressionen. Sanitiserade cell-/värdekontrakt och alla
-16 observable-kodkrav (fyra mål × O0–O3), med borttagen unread volatile
-store som negativ mutation, passerar. CI kör nu även observable-kontraktet.
+On `opt/wasm-memory`, based on PR46 and the wasm step: unity and file by file
+build. 6120/6120 arm64 objects/text are identical against the host kernel
+e6bad4c (2040 files × O1 object/O2 object/O2 text), including the new portable
+wasm_frame_cells regression. Sanitized cell/value contracts and all 16
+observable code requirements (four targets × O0–O3), with a removed unread
+volatile store as a negative mutation, pass. CI now also runs the observable
+contract.
 
-Hela egna wasm32-sviten: 149/149 pass, 30 körda XFAIL och 15
-referensundantag. `parenthesized_function` var felaktigt märkt som XFAIL
-även på wasm32; både f866a31-baslinjen och kandidaten passerar, så wasm32
-kräver nu PASS medan wasm64:s kvarstående signaturbugg fortsatt körs XFAIL.
-Hela egna wasm64-sviten: 153 pass, 31 körda XFAIL, nio referensundantag
-och ett synligt oracle-compile-fel: lokal clang23 kraschar på isinf_sign:s
-unsupported `_Float16`. Samma krasch reproduceras med f866a31-binären;
-ingen referenskrasch döljs eller räknas som PASS. Loggar:
+The whole own wasm32 suite: 149/149 pass, 30 run XFAIL and 15 reference
+exceptions. `parenthesized_function` was wrongly marked XFAIL on wasm32 too;
+both the f866a31 baseline and the candidate pass, so wasm32 now requires PASS
+while wasm64's remaining signature bug is still run as XFAIL. The whole own
+wasm64 suite: 153 pass, 31 run XFAIL, nine reference exceptions and one visible
+oracle-compile error: the local clang23 crashes on isinf_sign's unsupported
+`_Float16`. The same crash is reproduced with the f866a31 binary; no reference
+crash is hidden or counted as PASS. Logs:
 `work/opt-pr-tmp/wasm-memory-{own64,baseline-oracle,own32-final}.log`.
-Detta är en lokal referensbegränsning, inte ett påstående att hela
-wasm64-sviten är grön. Ny CI och bredare prestandagrind återstår.
+This is a local reference limitation, not a claim that the whole wasm64 suite
+is green. New CI and a broader performance gate remain.
 
-### OPT6: kortslutna konstanta kontrollbeslut (delsteg)
+### OPT6: short-circuited constant control decisions (substep)
 
-Den målgemensamma hjälparen `codegen/opt/control.c` används nu också i wasm:
-rena kombinationer av `__builtin_constant_p`, `!`, `&&`/`||` och literal
-`__builtin_strcmp` väljer bara den levande grenen vid O1–O3. Befintlig
-constant_p-policy och O0-utdata bevaras; okända eller effektfulla uttryck
-fortsätter genom den gamla vägen. `if_call_const` och `cond_dead_and`
-passerar wasm32/64 och är obligatoriska. Nytt SDK-fritt prov
-`bench/vcc-constant-control.py` kör alla fyra nivåer och ligger i CI för
-båda wasm-lägena och native-målen. Inlining, konstant switch med borttagna
-segment och WARN-statement expressions är fortsatt öppna; WARN-provet med
-volatile asm `nop` behöver dessutom stöd för den instruktionen i wasm-asm.
-Se OPT6-status i `PLAN-fas2.md` för bevis, kostnader och avgränsning.
+The target-shared helper `codegen/opt/control.c` is now also used in wasm: pure
+combinations of `__builtin_constant_p`, `!`, `&&`/`||` and literal
+`__builtin_strcmp` choose only the live branch at O1–O3. The existing
+constant_p policy and O0 output are preserved; unknown or side-effecting
+expressions continue through the old path. `if_call_const` and `cond_dead_and`
+pass wasm32/64 and are mandatory. A new SDK-free test
+`bench/vcc-constant-control.py` runs all four levels and is in CI for both wasm
+modes and the native targets. Inlining, constant switch with removed segments
+and WARN statement expressions remain open; the WARN test with volatile asm
+`nop` also needs support for that instruction in wasm asm. See the OPT6 status
+in `PLAN-fas2.md` for evidence, costs and delimitation.
 
-### OPT5 fortsättning: privata stores genom strukturerade joins
+### OPT5 continuation: private stores through structured joins
 
-På `1d8e29a` (flödesförälder `7691f6c`) använder den separata wasm-adaptern
-`arch/wasm/codegen/flow.c` den gemensamma `codegen/flow`-grafen och budgeterade
-masklösaren. Typade kontrollhändelser fångas från funktionsinträdet under
-ordinarie emission; unika öppningstoken skiljer branchmål även när lexikalt
-djup återanvänds. Ingen ny AST-vandring, SSA eller assemblertextparsning.
+On `1d8e29a` (flow parent `7691f6c`) the separate wasm adapter
+`arch/wasm/codegen/flow.c` uses the shared `codegen/flow` graph and the budgeted mask
+solver. Typed control events are captured from the function entry during
+ordinary emission; unique opening tokens distinguish branch targets even when
+lexical depth is reused. No new AST walk, SSA or assembler text parsing.
 
-Privata exakta 4/8-byte heltals-/flyttalsceller får överskrivnings-DSE över
-if/else-joins och nästlade diamanter. Rena kontrollfences bryter fortfarande
-lokal forwarding; riktiga minnes-/anropsbarriärer bryter också DSE och får
-bara sammanslås inom samma kontrollepok. Det bevarar barriären efter en tom
-gren på alla vägar. Befintlig renderer behåller adress-/RHS-effekter och
-lokala värdefångster. Full konvergens och separat staging krävs före ändring.
-Alla celler är konservativt levande vid utgång: generell unread-DSE ingår
-inte. Loopar, switch/dispatchers, goto, asm, SJLJ och dynamiska ramar avstår.
-Capture-, cell- och arbetsgränser ger fallback; O0/noopt avstår. Grafen
-byggs först efter komplett emission, exakt cellklassificering och verkliga
-upprepade privata stores genom en join.
+Private exact 4/8-byte integer/floating-point cells get overwrite DSE across
+if/else joins and nested diamonds. Pure control fences still break local
+forwarding; real memory/call barriers also break DSE and may only be merged
+within the same control epoch. That preserves the barrier after an empty branch
+on all paths. The existing renderer keeps address/RHS effects and local value
+captures. Full convergence and separate staging are required before change. All
+cells are conservatively live at exit: general unread DSE is not included.
+Loops, switch/dispatchers, goto, asm, SJLJ and dynamic frames abstain.
+Capture, cell and work limits give a fallback; O0/noopt abstain. The graph is
+built only after complete emission, exact cell classification and real repeated
+private stores through a join.
 
-114 konfigurationer passerar genom egna verktyg och Node: 10 nya flödesfall
-(wasm32/64 × O0–O3 kodform/körning, samt O2/noopt-kodform), 16 befintliga
-cellfall och 88 opt-regelkontroller. Positiva fall har exakt en slutstore;
-volatile/atomic, läsningar före overwrite, utgångar, alias/escape, effekter,
-flyttalsbitar och uteslutna kontrollformer kontrolleras. En isolerad mutant
-utan fence-epokvillkor avvisas av den avsedda tom-else-kodkontrollen på
-båda bredderna; originalkällorna lämnas intakta. Unitybygge med `-j 1`,
-fristående syntaxkontroll av ändrade wasm-C-filer och oberoende review är
-klara. Snabbgrinden kör nu `bench/vcc-wasm-flow.py`; fjärr-CI återstår.
+114 configurations pass through our own tools and Node: 10 new flow cases
+(wasm32/64 × O0–O3 code shape/running, and O2/noopt code shape), 16 existing
+cell cases and 88 opt rule checks. Positive cases have exactly one final store;
+volatile/atomic, reads before overwrite, exits, alias/escape, effects,
+floating-point bits and excluded control shapes are checked. An isolated mutant
+without the fence-epoch condition is rejected by the intended empty-else code
+check on both widths; the original sources are left intact. Unity build with
+`-j 1`, standalone syntax check of the changed wasm C files and independent
+review are done. The quick gate now runs `bench/vcc-wasm-flow.py`; remote CI
+remains.
 
-Hela egna SDK-baserade sviter på samma revision avslutar med status 0:
+The whole own SDK-based suites on the same revision end with status 0:
 
-| Mål | PASS | Körda XFAIL | Skips |
+| Target | PASS | Run XFAIL | Skips |
 |---|---:|---:|---|
 | wasm32 | 178/178 | 36 | 16: 12 clang-reject, 1 noref, 3 ref-fail |
 | wasm64 | 182/182 | 37 | 11: 8 clang-reject, 1 noref, 2 ref-fail |
 
-Undantag räknas inte som PASS. Loggarna är
-`work/opt-pr-tmp/wasm-flow-full32.log` och `wasm-flow-full64.log`.
-Fokuserad validering, källbevis och isolerade mutantloggar/hashar finns i
-`build/linux/flow-evidence/`. Efter integration av exakt flödesförälder
-`f7327bd` till `1458a90` passerar samma 114 konfigurationer och fristående
-syntaxkontroll igen. 66 O0-/O2-noopt-par är byteidentiska mot föräldern;
-två ytterligare par avvisas av bådas befintliga ILP32-layoutassert i
-`atomic_ops`. SDK-helsvitssiffrorna ovan gäller fortfarande `1d8e29a`.
+Exceptions do not count as PASS. The logs are
+`work/opt-pr-tmp/wasm-flow-full32.log` and `wasm-flow-full64.log`.
+Focused validation, source evidence and isolated mutant logs/hashes are in
+`build/linux/flow-evidence/`. After integrating the exact flow parent
+`f7327bd` into `1458a90`, the same 114 configurations and standalone syntax
+check pass again. 66 O0/O2-noopt pairs are byte-identical against the parent;
+two further pairs are rejected by both's existing ILP32 layout assert in
+`atomic_ops`. The SDK whole-suite figures above still apply to `1d8e29a`.
 
-Matchade clang 23-värdbyggen med `-O3 -march=x86-64-v3`, exakt `f7327bd`
-mot `1458a90`, ger följande separata Callgrind-underlag. Hela processen
-inklusive start räknas, wasm32/64 O2 `-S`, seriellt en gång per prov/binär:
-200-funktionskontroller med rak kod, villkor och uteslutna loopar kostar
-+0,314–0,552 % värd-Ir med byteidentisk assembler och objekt. Två positiva
-diamantprov kostar +4,494–4,683 % extra värd-Ir; stores går från 800/1000
-till 200 och vanliga `-c`-objekt minskar 2,886–3,325 %. Aktiv analys är
-alltså dyrare än 1 % i dessa koncentrerade positiva prov.
+Matched clang 23 host builds with `-O3 -march=x86-64-v3`, exactly `f7327bd`
+against `1458a90`, give the following separate Callgrind evidence. The whole
+process including startup is counted, wasm32/64 O2 `-S`, serially once per
+test/binary: 200-function controls with straight code, conditions and excluded
+loops cost +0,314–0,552 % host Ir with byte-identical assembler and objects.
+Two positive diamond tests cost +4,494–4,683 % extra host Ir; stores go from
+800/1000 to 200 and ordinary `-c` objects shrink 2,886–3,325 %. Active analysis
+is thus more expensive than 1 % in these concentrated positive tests.
 
-En fast blandning av befintliga regressionsfiler ger sammanlagt +0,106 %
-värd-Ir på wasm32 (10 filer) och +0,095 % på wasm64 (11 filer).
-`atomic_ops` utesluts på wasm32 eftersom båda byggen avvisar dess
-LP64-layoutassert; detta är inte PASS. Två assemblerutdata ändras per mål.
-Kommandon, hashmanifest, råprofiler, objekt och undantag finns i
-`build/linux/flow-evidence/cost/result.json`; hela tabellen står i
-`PLAN-fas2.md`. Relocerbar objektstorlek är inte laddad kodstorlek eller
-programfart, och detta ersätter inte full prestandagrind eller fjärr-CI.
-Programkörtidsvinst är fortfarande omätt; bredare kontrollflöde, generell
-DSE, OPT5/O2 och G5/G7 återstår.
+A fixed mix of existing regression files gives in total +0,106 % host Ir on
+wasm32 (10 files) and +0,095 % on wasm64 (11 files). `atomic_ops` is excluded
+on wasm32 because both builds reject its LP64 layout assert; this is not PASS.
+Two assembler outputs change per target. Commands, hash manifest, raw profiles,
+objects and exceptions are in `build/linux/flow-evidence/cost/result.json`; the
+whole table is in `PLAN-fas2.md`. Relocatable object size is not loaded code
+size or program speed, and this does not replace the full performance gate or
+remote CI. Program run-time gain is still unmeasured; broader control flow,
+general DSE, OPT5/O2 and G5/G7 remain.

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Genererar ett mikroprojekt: en stor header (big.h) och N små .c-filer.
+"""Generates a micro project: one big header (big.h) and N small .c files.
 
-Headern ska likna kärnans headers: många structs, enums, makron, prototyper och
-framför allt många `static inline`-funktioner, varav varje .c-fil bara använder
-ett fåtal. Inga systemheaders används, så alla kompilatorer parsar samma kod.
+The header should resemble the kernel's headers: many structs, enums, macros, prototypes and
+above all many `static inline` functions, of which each .c file uses only
+a few. No system headers are used, so all compilers parse the same code.
 
     python3 gen.py [--out DIR] [--files 10] [--scale 1.0] [--seed 1]
 """
@@ -31,7 +31,7 @@ def gen_header(rng, scale):
       "#define NULL ((void *)0)\n")
 
     for i in range(n_macro):
-        k = i % 4  # MASK_i finns när i % 4 == 1
+        k = i % 4  # MASK_i exists when i % 4 == 1
         if k == 0:
             w(f"#define CONST_{i} {rng.randrange(1, 1 << 20)}\n")
         elif k == 1:
@@ -96,7 +96,7 @@ def gen_c(rng, idx, n_struct, n_inline, n_proto):
         for _ in range(rng.randrange(8, 16)):
             k = rng.randrange(3)
             if k == 0:
-                # Ingen struct-cast: inline-funktionerna tar olika struct-typer, så vi skickar NULL
+                # No struct cast: the inline functions take different struct types, so we pass NULL
                 w(f"\tacc += inl_{rng.randrange(n_inline)}((void *)0, acc + n);\n")
             elif k == 1:
                 w(f"\tfor (long i = 0; i < n; i++) acc = acc * 3 + (i ^ {rng.randrange(1, 255)});\n")
@@ -126,8 +126,8 @@ def main():
         f.write('#include "big.h"\n')
     with open(os.path.join(a.out, "nothing.c"), "w") as f:
         f.write("int nothing;\n")
-    print(f"big.h: {hdr.count(chr(10))} rader, {len(hdr) / 1e6:.2f} MB; "
-          f"{a.files} .c-filer i {a.out}")
+    print(f"big.h: {hdr.count(chr(10))} lines, {len(hdr) / 1e6:.2f} MB; "
+          f"{a.files} .c files in {a.out}")
 
 
 if __name__ == "__main__":

@@ -1083,10 +1083,12 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* T5 (sparse 3 GB file → "file too large").
 - [ ] **x86-64 host build** (builds and runs since 2026-11-10, PLAN-x86.md X0):
   `classify` and the three searches in `frontend/lex/lex.c` have a scalar version
-  for hosts without NEON, CRC32C is SSE4.2 (`include/port/hostcrc.h`), `pause` for
-  `yield`, `-march=native -msse4.2`, the fuzz targets use the host's clang
-  and libFuzzer.  Left: an SSE2/AVX2 `classify` (the scalar one is a byte
-  at a time), and the kernel parity runs on this host (no `work/` here).
+  for hosts without NEON, CRC32C selects SSE4.2 or software at runtime
+  (`include/port/hostcrc.h`), `pause` for `yield`, baseline `-march=x86-64`,
+  the fuzz targets use the host's clang
+  and libFuzzer. AVX2/AVX-512 classification and AVX2 searches added
+  2026-11-13 (PLAN-x86.md X0), selected at runtime with scalar fallback. Left: full kernel
+  parity runs on this host.
   *Validate:* `fuzz-regress`; `fuzz-lex` (window path vs reference) ~1M
   runs clean; `-S`/`-c`/`-E` of the C suites byte-identical between the
   x86-64 build and an arm64 cross build under qemu-aarch64 (1903 files x 4).
@@ -1368,7 +1370,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   turns from xfail to XPASS (drop it from `INLINE_XFAIL`).
 
 - [ ] **Optimizer shared across x86, arm64 and wasm**. Implementation
-  owner: `PLAN-fas2.md`, **Gemensam optimerare utan SSA**, OPT0–OPT8.
+  owner: `PLAN-fas2.md`, **Shared optimizer without SSA**, OPT0–OPT8.
   arm64 already has register locals, copy/dead-result cleanup, stack-cell
   forwarding and extension facts; wasm already has scalar locals. Extract
   and reuse those algorithms rather than treating x86's gaps as missing

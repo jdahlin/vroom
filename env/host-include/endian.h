@@ -1,4 +1,4 @@
-/* Shim för macOS: glibc-kompatibel <endian.h> */
+/* Shim for macOS: glibc-compatible <endian.h> */
 #ifndef VROOM_ENDIAN_H
 #define VROOM_ENDIAN_H
 #include <machine/endian.h>

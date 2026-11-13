@@ -1,9 +1,9 @@
-/* vroom: protokoll mellan vroom-cc (klient) och vroomd (server).
+/* vroom: protocol between vroom-cc (client) and vroomd (server).
  *
- * Klienten ansluter till en AF_UNIX/SOCK_STREAM-socket och skickar ETT meddelande
- * med sendmsg(): en header + nyttolast, och fd 0,1,2 som SCM_RIGHTS.
- * Nyttolasten är NUL-separerade strängar: cwd, argv[0..argc-1], envp[0..envc-1].
- * Servern svarar med en int32: exitstatus (0–255), eller 128+signal.
+ * The client connects to an AF_UNIX/SOCK_STREAM socket and sends ONE message
+ * with sendmsg(): a header + payload, and fd 0,1,2 as SCM_RIGHTS.
+ * The payload is NUL-separated strings: cwd, argv[0..argc-1], envp[0..envc-1].
+ * The server replies with an int32: exit status (0-255), or 128+signal.
  */
 #ifndef VROOM_PROTOCOL_H
 #define VROOM_PROTOCOL_H

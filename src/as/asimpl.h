@@ -119,6 +119,8 @@ struct As {
 	   after one, .uleb128/.sleb128 of a label difference), relaxed at the end */
 	struct VarItem { uint32_t frag, end; uint8_t kind, p2, code, fill; uint64_t max, size; Val v; } *pfa;
 	uint32_t npfa, pfacap;		/* a .loc waits for its instruction; a table is due */
+	uint32_t *var_rank, var_n;	/* section-order ranks during relaxation */
+	uint64_t *var_tree, *var_oldoff;	/* live sizes (Fenwick), previous-pass offsets */
 	struct { uint32_t sym; char reg[8]; } *ralias;	/* x86: name = %reg, the register by another name */
 	uint32_t nralias, raliascap;
 	int x64_lock, x64_isz;	/* x86: "lock insn" on one line (after 0x66, as MC); the operation's size (a constant immediate is taken at it) */
@@ -209,6 +211,7 @@ VPRIV int flush_pools(As *a);
 VPRIV int ltorg(As *a);
 VPRIV int instruction(As *a, const char *p, const char *e, size_t wn);
 /* arch/x64/as/asm.c (EM_X86_64 objects) */
+VPRIV void loc_row(As *a);
 VPRIV int x64_instruction(As *a, const char *p, const char *e, size_t wn);
 /* as.c: an x86-64 jump as a relaxed variable item (cc 16: jmp) */
 VPRIV int as_branch(As *a, int cc, Val v, int mod);

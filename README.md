@@ -172,8 +172,8 @@ setup, and the working conventions.
 
 ## Documentation
 
-Plans and status notes are written in Swedish; the specs, research notes
-and agent notes are in English.
+All documentation (plans, status notes, specs, research notes and agent
+notes) is in English.
 
 - [PLAN.md](doc/PLAN.md), [PLAN-fas2.md](doc/PLAN-fas2.md): phase 1 (measurement, clang-based) and phase 2 (own toolchain), with measured status per step
 - [PLAN-release.md](doc/PLAN-release.md): what vcc 1.0 is and its release gates

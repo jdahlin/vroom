@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""vroom-ld: ld.lld-omslag för kärnbyggen med -O0.
+"""vroom-ld: ld.lld wrapper for kernel builds with -O0.
 
-Vid -O0 tas död kod inte bort. Grenar som -O2 bevisar döda med aktuell config
-(t.ex. `if (system_supports_sme())` när SME är avslaget) refererar då symboler som
-inte finns, och länkningen faller. Om lld bara klagar på odefinierade symboler
-genereras ett stubobjekt: varje symbol blir 64 nollbyte i .data (skrivbar, så att statiska
-nycklar fungerar; ej körbar). 0x00000000 är
-`udf #0` på arm64 och .data är NX, så om en sådan gren ändå körs blir det ett
-undantag (som BUG()), och läsningar ger 0.
+At -O0 dead code is not removed. Branches that -O2 proves dead with the current config
+(e.g. `if (system_supports_sme())` when SME is off) then refer to symbols that
+do not exist, and the link fails. If lld only complains about undefined symbols,
+a stub object is generated: each symbol becomes 64 zero bytes in .data (writable, so that static
+keys work; not executable). 0x00000000 is
+`udf #0` on arm64 and .data is NX, so if such a branch is run anyway it raises an
+exception (like BUG()), and reads give 0.
 
-Listan över stubbade symboler skrivs till <utfil>.vroom-stubs.
+The list of stubbed symbols is written to <outfile>.vroom-stubs.
 """
 import os
 import re
@@ -31,7 +31,7 @@ def main():
     err = p.stderr.decode(errors="replace")
     errors = [l for l in err.splitlines() if "error:" in l]
     undef = sorted({m.group(1) for m in re.finditer(r"error: undefined symbol: (\S+)", err)})
-    # Bara odefinierade symboler – allt annat är riktiga fel.
+    # Only undefined symbols - everything else is a real error.
     if not undef or any("undefined symbol" not in l for l in errors) or "-r" in args:
         sys.stderr.write(err)
         return p.returncode

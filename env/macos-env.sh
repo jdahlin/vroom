@@ -1,4 +1,4 @@
-# source this: GNU-verktyg först i PATH för kärnbyggen på macOS
+# source this: GNU tools first in PATH for kernel builds on macOS
 B=/opt/homebrew/opt
 export PATH="$B/make/libexec/gnubin:$B/gnu-sed/libexec/gnubin:$B/findutils/libexec/gnubin:$B/coreutils/libexec/gnubin:$B/grep/libexec/gnubin:$B/bison/bin:$B/flex/bin:$B/llvm/bin:$B/lld/bin:$PATH"
 VROOM_ENV="$(cd "$(dirname "${BASH_SOURCE[0]:-${(%):-%x}}")" && pwd)"

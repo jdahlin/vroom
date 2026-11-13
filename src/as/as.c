@@ -653,7 +653,6 @@ static int parse_name(As *a, const char **pp, const char *e, Sv *out)
 static Sv trim(const char *p, const char *e);
 static int d_dwfile(As *a, const char *p, const char *e);
 static int d_loc(As *a, const char *p, const char *e);
-static void loc_row(As *a);
 static uint64_t frag_base(As *a, uint32_t frag);
 static int d_prefalign(As *a, const char *p, const char *e);
 enum { VI_PREFALIGN, VI_ALIGN, VI_ULEB, VI_SLEB, VI_X86BR, VI_SKIP };	/* VI_SKIP: .skip v, fill with v settled by the layout */	/* VI_X86BR: jmp (code 16) / jcc (code cc) to v */
@@ -2560,6 +2559,7 @@ void as_begin(As *a, ElfObj *o, const char *name)
 	a->nident = 0; a->ended = 0; a->altmacro = 0; a->eofline = 0;
 	a->ncfi = a->cficap = a->nfde = a->fdecap = 0; a->infde = 0; a->cfi_eh = 0; a->nsv = a->svcap = 0; a->nasg = a->asgcap = 0;
 	a->ndwf = a->dwfcap = a->ndwd = a->dwdcap = a->ndwl = a->dwlcap = 0; a->npfa = a->pfacap = 0; a->dwlocp = a->dwtab = 0;
+	a->var_rank = NULL;
 	memset(&a->dwcur, 0, sizeof a->dwcur); a->dwcur.flags = 1;
 	a->mmask = 255; a->mcount = 0;
 	a->mtab = rget(&a->defs, sizeof(Macro *) * (a->mmask + 1));
@@ -2782,6 +2782,20 @@ static void sleb(Buf8 *b, int64_t v)
 	}
 }
 
+/* After relaxation, debug encoders only read the layout until they append
+ * their completed table. Cache the offsets once for that immutable interval. */
+static void frag_bases(ElfObj *o)
+{
+	for (uint32_t s = 1; s < o->nsec; s++) {
+		uint64_t off = 0;
+		for (uint32_t f = s; f; f = elf_frag(o, f)->next) {
+			ElfFrag *p = elf_frag(o, f);
+			p->base = off;
+			off += p->size;
+		}
+	}
+}
+
 /* .eh_frame as MC's FrameEmitterImpl writes it: per FDE, its CIE first when
  * it is new; entries padded to 4 with DW_CFA_nop */
 static void cfi_finish(As *a)
@@ -2794,6 +2808,7 @@ static void cfi_finish(As *a)
 	uint32_t fr = sec;
 	if (elf_sec(o, sec)->align < 3) elf_sec(o, sec)->align = 3;
 	elf_data(o, fr);
+	frag_bases(o);
 	struct { uint32_t key, off; } cies[8]; uint32_t ncie = 0;
 	size_t cap = 64;
 	for (uint32_t i = 0; i < a->nfde; i++) cap += 64 + 16 * (size_t)a->fde[i].n;
@@ -2857,7 +2872,7 @@ static void cfi_finish(As *a)
 			uint64_t d;
 			if (x->frag == y->frag) d = y->value - x->value;
 			else if (elf_frag(o, x->frag)->sec == elf_frag(o, y->frag)->sec)	/* split by .prefalign/alignment */
-				d = frag_base(a, y->frag) + y->value - frag_base(a, x->frag) - x->value;
+				d = elf_frag(o, y->frag)->base + y->value - elf_frag(o, x->frag)->base - x->value;
 			else { err(a, "CFI across sections is not supported"); return; }
 			if (d) {
 				if (d < 0x40) b.p[b.n++] = (uint8_t)(0x40 | d);
@@ -2975,9 +2990,35 @@ static int d_prefalign(As *a, const char *p, const char *e)
 /* sizes before the variable items are final: offsets with the current estimates */
 static _Thread_local const uint64_t *var_prev;	/* sizes of the previous relaxation pass (MC's stale offsets), or NULL */
 
+/* Section ids grow upwards, continuation/subsection ids downwards. Keep the
+ * index dense without allocating a table for the unused reservation. */
+static uint32_t var_index(ElfObj *o, uint32_t f)
+{
+	return f < o->nsec ? f : o->nsec + (uint32_t)(o->frags.cap / sizeof(ElfFrag)) - 1 - f;
+}
+
+static uint64_t var_sum(As *a, uint32_t i)
+{
+	uint64_t sum = 0;
+	for (; i; i &= i - 1) sum += a->var_tree[i];
+	return sum;
+}
+
+static void var_add(As *a, uint32_t i, uint64_t delta)
+{
+	/* Unsigned wrap also represents a size decrease. */
+	for (; i <= a->var_n; i += i & -i) a->var_tree[i] += delta;
+}
+
 static uint64_t frag_base(As *a, uint32_t frag)
 {
 	ElfObj *o = a->o;
+	if (a->var_rank) {
+		uint32_t rank = a->var_rank[var_index(o, frag)];
+		if (var_prev) return a->var_oldoff[rank];
+		uint32_t first = a->var_rank[var_index(o, elf_frag(o, frag)->sec)];
+		return var_sum(a, rank - 1) - var_sum(a, first - 1);
+	}
 	uint64_t off = 0;
 	for (uint32_t f = elf_frag(o, frag)->sec; f && f != frag; f = elf_frag(o, f)->next) {
 		off += elf_frag(o, f)->size;
@@ -3048,12 +3089,35 @@ static void var_finish(As *a)
 {
 	ElfObj *o = a->o;
 	for (uint32_t i = 0; i < a->npfa; i++) elf_frag(o, a->pfa[i].frag)->aux = i + 1;
+	uint32_t count = o->nsec + (uint32_t)(o->frags.cap / sizeof(ElfFrag)) - 1 - o->nfrag;
+	a->var_rank = rget(&a->defs, sizeof(uint32_t) * count);
+	a->var_tree = rget(&a->defs, sizeof(uint64_t) * count);
+	a->var_oldoff = rget(&a->defs, sizeof(uint64_t) * count);
+	memset(a->var_tree, 0, sizeof(uint64_t) * count);
+	a->var_n = count - 1;
+	uint32_t rank = 0;
+	for (uint32_t s = 1; s < o->nsec; s++)
+		for (uint32_t f = s; f; f = elf_frag(o, f)->next) {
+			ElfFrag *p = elf_frag(o, f);
+			a->var_rank[var_index(o, f)] = ++rank;
+			var_add(a, rank, p->size + (p->cont && p->aux ? a->pfa[p->aux - 1].size : 0));
+		}
 	uint64_t *prev = rget(&a->defs, sizeof(uint64_t) * (a->npfa + 1));
 	/* pass -1 lays out the items with every jump short (MC's first layout); then each pass
 	   relaxes the jumps against the previous pass's layout and lays the rest out again */
 	for (int it = -1;; it++) {
 		int changed = 0;
 		for (uint32_t i = 0; i < a->npfa; i++) prev[i] = a->pfa[i].size;
+		/* Jumps see the whole previous pass, while alignments/LEBs see the
+		 * live layout, including size changes earlier in this pass. */
+		for (uint32_t s = 1; s < o->nsec; s++) {
+			uint64_t off = 0;
+			for (uint32_t f = s; f; f = elf_frag(o, f)->next) {
+				ElfFrag *p = elf_frag(o, f);
+				a->var_oldoff[a->var_rank[var_index(o, f)]] = off;
+				off += p->size + (p->cont && p->aux ? prev[p->aux - 1] : 0);
+			}
+		}
 		for (uint32_t i = 0; i < a->npfa; i++) {
 			struct VarItem *v = &a->pfa[i];
 			uint64_t end = frag_base(a, v->frag) + elf_frag(o, v->frag)->size, ns = 0;
@@ -3113,7 +3177,11 @@ static void var_finish(As *a)
 				ns = (uint64_t)leb_len(x, v->kind == VI_SLEB);
 				if (ns < v->size) ns = v->size;	/* never shrink: converges */
 			}
-			if (ns != v->size) { v->size = ns; changed = 1; }
+			if (ns != v->size) {
+				if (elf_frag(o, v->frag)->cont)
+					var_add(a, a->var_rank[var_index(o, v->frag)], ns - v->size);
+				v->size = ns; changed = 1;
+			}
 		}
 		if (!changed && it >= 0) break;
 		if (it == 64) { err(a, "relaxation did not converge"); return; }
@@ -3162,6 +3230,7 @@ static void var_finish(As *a)
 		memset(q, 0, z);
 		for (q += z, pad -= z; pad; pad -= 4, q += 4) { q[0] = 0x1f; q[1] = 0x20; q[2] = 0x03; q[3] = 0xd5; }
 	}
+	a->var_rank = NULL;
 }
 
 /* ---------------------------------------------------------------- DWARF lines */
@@ -3306,7 +3375,7 @@ static int d_loc(As *a, const char *p, const char *e)
 }
 
 /* the pending .loc becomes a row at the current position */
-static void loc_row(As *a)
+VPRIV void loc_row(As *a)
 {
 	a->dwlocp = 0;
 	if (a->ndwl == a->dwlcap) {
@@ -3418,6 +3487,7 @@ static void dwline_finish(As *a)
 	uint32_t hlen = (uint32_t)(b.n - hl - 4);
 	memcpy(b.p + hl, &hlen, 4);
 	/* sequences: one per section, in order of first row */
+	frag_bases(o);
 	uint32_t *afix = rget(&a->defs, sizeof(uint32_t) * 2 * (a->ndwl + 1));
 	uint32_t nafix = 0;
 	uint8_t *done = rget(&a->defs, a->ndwl + 1);
@@ -3430,7 +3500,7 @@ static void dwline_finish(As *a)
 		for (uint32_t i = s; i < a->ndwl; i++) {
 			struct DwLoc *l = &a->dwl[i];
 			if (elf_frag(o, l->frag)->sec != sc) continue;
-			uint64_t at = frag_base(a, l->frag) + l->off;
+			uint64_t at = elf_frag(o, l->frag)->base + l->off;
 			done[i] = 1;
 			if (b.n + 64 > cap) { err(a, "line table overflow"); return; }
 			int64_t ld = (int64_t)l->line - line;

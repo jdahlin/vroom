@@ -349,7 +349,7 @@ headers marked, which that algorithm needs.
   per-CPU op table (`opdesc`). Shared pieces without SSA: algebra rules in
   `codegen/opt/`, record passes in `codegen/rec/`, block graph and bounded liveness
   in `codegen/flow/` (`PLAN-fas2.md`, OPT0-OPT8).
-- `PLAN-x86.md` ("Vad som inte går utan SSA") names what this leaves out:
+- `PLAN-x86.md` ("What cannot be done without SSA") names what this leaves out:
   GVN, LICM and real register allocation, to be done by an optional SSA pass
   with virtual registers at `-O2`. VIR is that pass.
 - arm64, static instruction count on 80 kernel TUs: 1.51x clang -O2; clang's
