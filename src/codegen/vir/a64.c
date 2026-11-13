@@ -1267,7 +1267,7 @@ static void vl_switch(vl *L, uint32_t b, const vir_ins *in)
 			uint64_t a = x ? (uint64_t)cw[stride * k + 1] << 32 | cw[stride * k] : cw[stride * k];
 			uint64_t h = x ? (uint64_t)cw[stride * k + 3] << 32 | cw[stride * k + 2] : cw[stride * k + 1];
 
-			cnt += h - a + 1 > 64 ? 64 : h - a + 1;
+			cnt += h - a >= 64 ? 64 : h - a + 1;	/* (h - a + 1 wraps to 0 for a range of all 2^64 values) */
 		}
 	}
 	if (n >= 6 && span < 4096 && span + 1 <= 4 * cnt && !e->E->noopt) {
