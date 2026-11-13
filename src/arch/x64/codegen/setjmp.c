@@ -10,7 +10,7 @@ VPRIV codegen_value x64_setjmp(codegen_context *e, int rb)
 	record *i;
 	int r;
 	uint32_t persistent = (1u << RBX) | (1u << R12) | (1u << R13) | (1u << R14) | (1u << R15);
-	uint32_t saved = (e->x64_context->live & (X64_TEMPORARIES | X64_FLOAT_TEMPORARIES) & ~(1u << rb)) | persistent;
+	uint32_t saved = (e->x64_context->temporaries_in_use & (X64_TEMPORARIES | X64_FLOAT_TEMPORARIES) & ~(1u << rb)) | persistent;
 	int64_t slots[32] = {0};
 
 	/* Besides live expression temporaries, preserve every non-frame ABI

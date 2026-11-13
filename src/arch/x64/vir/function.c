@@ -206,8 +206,8 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym, const char *
 	}
 	e->is_reachable = true;
 	x64_begin(e, sym);
-	e->x64_context->spframe=spframe;
-	e->x64_context->interrupt = e->x64_context->nlreg = 0;
+	e->x64_context->stack_pointer_frame=spframe;
+	e->x64_context->interrupt = e->x64_context->local_register_count = 0;
 	e->walk_state->statement_depth = e->walk_state->temporary_slot_in_use_count = e->walk_state->temporary_slot_free_count = 0;
 	e->walk_state->frame_offset = 0; e->walk_state->frame_alignment = 16; e->walk_state->label_count = 0;
 	e->walk_state->stack_pointer_needed = false; e->walk_state->canary = 0;

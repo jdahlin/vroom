@@ -40,7 +40,7 @@ static unsigned x64_copy_fields(const record *i)
 static bool x64_copy_rewrite(void *ctx, uint32_t j, uint8_t from, uint8_t to, bool apply)
 {
 	codegen_context *e = ctx;
-	record *i = &e->x64_context->in[j];
+	record *i = &e->x64_context->records[j];
 	unsigned fields = x64_copy_fields(i);
 	if (!fields)
 		return false;
@@ -63,7 +63,7 @@ static bool x64_copy_rewrite(void *ctx, uint32_t j, uint8_t from, uint8_t to, bo
 static bool x64_copy_inspect(void *ctx, uint32_t j, uint64_t *read, uint64_t *write)
 {
 	codegen_context *e = ctx;
-	record_effects f = x64_record_effects(e, &e->x64_context->in[j]);
+	record_effects f = x64_record_effects(e, &e->x64_context->records[j]);
 	if (f.branch != RECORD_BRANCH_NONE || (f.flags & (RECORD_EFFECT_LABEL | RECORD_EFFECT_BARRIER | RECORD_EFFECT_CALL)))
 		return false;
 	*read = f.used;
@@ -76,20 +76,20 @@ static bool x64_copy_inspect(void *ctx, uint32_t j, uint64_t *read, uint64_t *wr
 VPRIV bool x64_copy_forward_at(codegen_context *e, uint32_t k)
 {
 	x64_lowering_context *x = e->x64_context;
-	const record *i = &x->in[k];
+	const record *i = &x->records[k];
 	/* Return copies usually precede an epilogue jump. Reject these without
 	 * decoding effects or setting up a transaction. Labels also end a block. */
-	if (k + 1 >= x->nin || x->in[k + 1].opcode == X64_OP_JMP || x->in[k + 1].opcode == X64_OP_LABEL)
+	if (k + 1 >= x->record_count || x->records[k + 1].opcode == X64_OP_JMP || x->records[k + 1].opcode == X64_OP_LABEL)
 		return false;
-	if (k + 1 >= x->nin || i->opcode != X64_OP_MOV || i->size != 8 ||
+	if (k + 1 >= x->record_count || i->opcode != X64_OP_MOV || i->size != 8 ||
 		i->registers[0] >= XMM0 || i->registers[1] >= XMM0 || i->registers[0] == i->registers[1] ||
 		!(X64_TEMPORARIES & (1u << i->registers[0])) || i->registers[1] == RSP ||
 		i->registers[1] == RBP || i->registers[1] == R11 || i->registers[1] == R12)
 		return false;
 	record_copy_scan scan = {
-		.records = x->in, .stride = sizeof(record), .op_offset = offsetof(record, opcode),
+		.records = x->records, .stride = sizeof(record), .op_offset = offsetof(record, opcode),
 		.deleted_op = X_COPY_DELETED, .inspect = x64_copy_inspect,
 		.rewrite = x64_copy_rewrite, .ctx = e,
 	};
-	return record_copy_forward(&scan, k, x->nin - 1, i->registers[0], i->registers[1]);
+	return record_copy_forward(&scan, k, x->record_count - 1, i->registers[0], i->registers[1]);
 }

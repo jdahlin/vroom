@@ -25,20 +25,20 @@ VPRIV void x64_two_address_convert(codegen_context *e)
 	bool copies = e->unit->options->opt >= 1 && !e->unit->cleanups_disabled;
 	x64_lowering_context *X = e->x64_context;
 	uint32_t n = 0;
-	record *o = X->tw;
+	record *o = X->two_address_records;
 
 	uint32_t j = 0;
 
-	X->framefree = x64_framefree_candidate(e);
-	for (uint32_t k = 0; k < X->nin; k++) {
-		record i = X->in[k];
+	X->frame_free = x64_framefree_candidate(e);
+	for (uint32_t k = 0; k < X->record_count; k++) {
+		record i = X->records[k];
 
 		if (e->debug_row_count)
 			codegen_debug_rows_remap(e, &j, k, n);	/* (-g rows: to the first record emitted for k) */
 		if (copies && i.opcode == X64_OP_MOV && x64_copy_forward_at(e, k))
 			continue;
-		if (X->framefree && !x64_framefree_record(e, &i))
-			X->framefree = false;
+		if (X->frame_free && !x64_framefree_record(e, &i))
+			X->frame_free = false;
 		if (x64_record_is_tied(i.opcode) && i.registers[0] != i.registers[1]) {
 			if (i.registers[2] != X64_REGISTER_NONE && i.registers[0] == i.registers[2]) {
 				if (x64_operation_is_commutative(i.opcode)) {
@@ -59,9 +59,9 @@ VPRIV void x64_two_address_convert(codegen_context *e)
 	}
 	if (e->debug_row_count)
 		codegen_debug_rows_remap(e, &j, UINT32_MAX, n);
-	X->tw = X->in;
-	X->in = o;
-	X->nin = n;
+	X->two_address_records = X->records;
+	X->records = o;
+	X->record_count = n;
 }
 
 /* ---------------- printing ---------------- */
@@ -103,7 +103,7 @@ static void x64_memory_operand_append(codegen_context *e, tbuf *b, const record 
 	int base = i->registers[1];
 	int64_t off=i->offset;
 	if(base==X64_REGISTER_FRAME) {
-		base=RSP;off+=e->x64_context->framesz-8-e->x64_context->spdelta;
+		base=RSP;off+=e->x64_context->frame_size-8-e->x64_context->stack_pointer_delta;
 	}
 
 	/* Incoming stack arguments retain rbp; local slots use the realigned base. */
@@ -155,9 +155,9 @@ static void x64_stack_guard_append(codegen_context *e, tbuf *b)
 /* Prologue callee-save slots can follow a frame larger than disp32. */
 static void x64_callee_save_access_append(codegen_context *e, tbuf *b, int r, bool load)
 {
-	int64_t off = e->x64_context->csslot[r];
+	int64_t off = e->x64_context->callee_save_slots[r];
 	int base = e->walk_state->frame_alignment > 16 ? R12 : RBP;
-	if(e->x64_context->spframe) {base=RSP;off+=e->x64_context->framesz-8;}
+	if(e->x64_context->stack_pointer_frame) {base=RSP;off+=e->x64_context->frame_size-8;}
 	if (off < INT32_MIN || off > INT32_MAX) {
 		vtext_string_append(b, "\tmovabsq\t$"); vtext_signed_append(b, off);
 		vtext_string_append(b, ", %r11\n\taddq\t"); x64_register_name_append(b, base, 8);
@@ -209,8 +209,8 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
 	uint32_t tail = x64_tail_ref(e);
 	size_t objitem = codegen_item_open(e, CODEGEN_ITEM_TEXT);
 	bool objcode = false;
-	if(X->spframe && (frame || e->has_calls))frame+=8;
-	X->framesz=frame;X->spdelta=0;
+	if(X->stack_pointer_frame && (frame || e->has_calls))frame+=8;
+	X->frame_size=frame;X->stack_pointer_delta=0;
 
 	if (unlikely(e->unit->options->debug)) {
 		/* the function's own line (its body's '{', column 0), as clang */
@@ -256,7 +256,7 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
 		if (cfi && !x64_target_has_no_simd(e))
 			for (int k = 0; k < 16; k++) x64_callee_save_cfi_append(b, 17 + k, 160 + 16 * k);
 	} else {
-		if (!X->framefree && !X->spframe)
+		if (!X->frame_free && !X->stack_pointer_frame)
 			vtext_string_append(b, cfi ? "\tpushq\t%rbp\n\t.cfi_def_cfa_offset 16\n\t.cfi_offset %rbp, -16\n"
 				      "\tmovq\t%rsp, %rbp\n\t.cfi_def_cfa_register %rbp\n" : "\tpushq\t%rbp\n\tmovq\t%rsp, %rbp\n");
 		if (A > 16) {
@@ -276,22 +276,22 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
 		vtext_signed_append(b, frame);
 		vtext_string_append(b, ", %rsp\n");
 	}
-	if(cfi && X->spframe && frame)vtext_format_append(b,"\t.cfi_def_cfa_offset %lld\n",(long long)frame+8);
+	if(cfi && X->stack_pointer_frame && frame)vtext_format_append(b,"\t.cfi_def_cfa_offset %lld\n",(long long)frame+8);
 	if (e->walk_state->stack_pointer_needed) {
 		/* -fstack-protector: the guard into the canary slot (r11: no argument lives there) */
 		x64_stack_guard_append(e, b);
 		vtext_format_append(b, "\tmovq\t%%r11, %d(%s)\n", e->walk_state->canary, A > 16 ? "%r12" : "%rbp");
 	}
 	for (int r = 0; r < 16; r++)
-		if (X->csslot[r]) {
+		if (X->callee_save_slots[r]) {
 			x64_callee_save_access_append(e, b, r, false);
 			if (cfi) {
-				if (A > 16) x64_callee_save_cfi_append(b, r, X->csslot[r]);
-				else vtext_format_append(b, "\t.cfi_offset %%%s, %lld\n", x64_register_names_64[r], (long long)(X->csslot[r] - 16));
+				if (A > 16) x64_callee_save_cfi_append(b, r, X->callee_save_slots[r]);
+				else vtext_format_append(b, "\t.cfi_offset %%%s, %lld\n", x64_register_names_64[r], (long long)(X->callee_save_slots[r] - 16));
 			}
 		}
-	for (uint32_t k = 0; k < X->nin; k++) {
-		const record *i = &X->in[k];
+	for (uint32_t k = 0; k < X->record_count; k++) {
+		const record *i = &X->records[k];
 		int sz = i->size;
 
 		if (objcode && dj < e->debug_row_count && e->debug_rows[dj].record_index == k) {
@@ -520,8 +520,8 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
 			vtext_string_append(b, i->immediate < 0 ? "\tsubq\t$" : "\taddq\t$");
 			vtext_signed_append(b, i->immediate < 0 ? -i->immediate : i->immediate);
 			vtext_string_append(b, ", %rsp");
-			if(X->spframe) {
-				X->spdelta+=i->immediate;
+			if(X->stack_pointer_frame) {
+				X->stack_pointer_delta+=i->immediate;
 				if(cfi)vtext_format_append(b,"\n\t.cfi_adjust_cfa_offset %lld",(long long)-i->immediate);
 			}
 			break;
@@ -757,13 +757,13 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
 		codegen_item_close(e, objitem);
 		objitem = codegen_item_open(e, CODEGEN_ITEM_TEXT);
 	}
-	if(X->spframe && X->spdelta)codegen_fatal_report(e,e->current_location,"internal error: unbalanced VIR outgoing arguments");
+	if(X->stack_pointer_frame && X->stack_pointer_delta)codegen_fatal_report(e,e->current_location,"internal error: unbalanced VIR outgoing arguments");
 	if (e->walk_state->stack_pointer_needed) {
 		x64_stack_guard_append(e, b);
 		vtext_format_append(b, "\tcmpq\t%d(%s), %%r11\n\tjne\t.Lspfail%u\n", e->walk_state->canary, e->walk_state->frame_alignment > 16 ? "%r12" : "%rbp", s);
 	}
 	for (int r = 0; r < 16; r++)
-		if (X->csslot[r]) {
+		if (X->callee_save_slots[r]) {
 			x64_callee_save_access_append(e, b, r, true);
 			if (cfi) vtext_format_append(b, "\t.cfi_same_value %%%s\n", x64_register_names_64[r]);
 		}
@@ -793,10 +793,10 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
 			vtext_string_append(b, "\tmovq\t-8(%rbp), %r12\n");
 			if (cfi) vtext_string_append(b, "\t.cfi_same_value %r12\n");
 		}
-		if(X->spframe) {
+		if(X->stack_pointer_frame) {
 			if(frame)vtext_format_append(b,"\taddq\t$%lld, %%rsp\n",(long long)frame);
 			if(cfi && frame)vtext_string_append(b,"\t.cfi_def_cfa_offset 8\n");
-		} else if (!X->framefree)
+		} else if (!X->frame_free)
 			vtext_string_append(b, cfi ? "\tmovq\t%rbp, %rsp\n\tpopq\t%rbp\n\t.cfi_def_cfa %rsp, 8\n" : "\tmovq\t%rbp, %rsp\n\tpopq\t%rbp\n");
 		if (tail) {
 			vtext_string_append(b, "\tjmp\t");

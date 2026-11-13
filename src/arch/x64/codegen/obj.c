@@ -27,7 +27,7 @@ VPRIV bool x64_record_object_prepare(codegen_context *e, const record *i, record
 	*out = *i;
 	if (i->opcode == X64_OP_LD || i->opcode == X64_OP_LDX || i->opcode == X64_OP_ST || i->opcode == X64_OP_STX || i->opcode == X64_OP_LEA) {
 		if (i->registers[1] == X64_REGISTER_FRAME) {
-			int64_t off = i->offset + e->x64_context->framesz - 8 - e->x64_context->spdelta;
+			int64_t off = i->offset + e->x64_context->frame_size - 8 - e->x64_context->stack_pointer_delta;
 			/* Preserve the textual path for a displacement wider than rec.off. */
 			if (off < INT32_MIN || off > INT32_MAX) return false;
 			out->registers[1] = RSP; out->offset = (int32_t)off;

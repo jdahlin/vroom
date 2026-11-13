@@ -98,26 +98,26 @@ enum { X64_X87_LDT, X64_X87_STPT, X64_X87_LD, X64_X87_STP, X64_X87_ILD, X64_X87_
 enum { X64_CONDITION_O, X64_CONDITION_NO, X64_CONDITION_B, X64_CONDITION_AE, X64_CONDITION_E, X64_CONDITION_NE, X64_CONDITION_BE, X64_CONDITION_A, X64_CONDITION_S, X64_CONDITION_NS, X64_CONDITION_P, X64_CONDITION_NP, X64_CONDITION_L, X64_CONDITION_GE, X64_CONDITION_LE, X64_CONDITION_G };
 
 typedef struct x64_lowering_context {
-	record *in;		/* the function's records */
-	uint32_t nin, capin;
-	record *tw;		/* twoaddr.c's output */
-	uint32_t ntw;
-	uint32_t live;		/* temporaries in use (bit = register) */
-	bool asmcs;		/* inside an asm: out of temporaries, take a callee-saved register (saved by the prologue) */
-	int pushes;		/* 8-byte pushes outstanding (the call alignment) */
-	bool framefree;		/* frame.c: no frame/stack dependency in the final body */
-	bool spframe;		/* allocated VIR: virtual frame base, leaving rbp allocatable */
-	int64_t framesz, spdelta; /* printer's final frame and temporary outgoing arguments */
+	record *records;		/* the function's records */
+	uint32_t record_count, record_capacity;
+	record *two_address_records;		/* twoaddr.c's output */
+	uint32_t two_address_record_count;
+	uint32_t temporaries_in_use;		/* temporaries in use (bit = register) */
+	bool asm_callee_saved;		/* inside an asm: out of temporaries, take a callee-saved register (saved by the prologue) */
+	int outstanding_pushes;		/* 8-byte pushes outstanding (the call alignment) */
+	bool frame_free;		/* frame.c: no frame/stack dependency in the final body */
+	bool stack_pointer_frame;		/* allocated VIR: virtual frame base, leaving rbp allocatable */
+	int64_t frame_size, stack_pointer_delta; /* printer's final frame and temporary outgoing arguments */
 	/* locals.c: persistent homes, disjoint from expression temporaries and R12. */
-	uint32_t lsym[4];
-	uint8_t lreg[4], nlreg;
+	uint32_t local_symbols[4];
+	uint8_t local_registers[4], local_register_count;
 	/* the function's incoming arguments (abi.c) */
 	int interrupt;		/* interrupt handler parameter count, zero for normal ABI */
-	int ngp, nfp;		/* named arguments in general and vector registers */
-	int32_t stk;		/* bytes of named stack arguments */
-	int64_t sret;		/* frame slot of the hidden result pointer (0: none) */
-	int64_t save;		/* variadic: the register save area's slot (0: none) */
-	int64_t csslot[16];	/* callee saves for asm and register locals: prologue/epilogue + CFI */
+	int general_register_arguments, float_register_arguments;		/* named arguments in general and vector registers */
+	int32_t stack_argument_bytes;		/* bytes of named stack arguments */
+	int64_t result_pointer_slot;		/* frame slot of the hidden result pointer (0: none) */
+	int64_t variadic_save_slot;		/* variadic: the register save area's slot (0: none) */
+	int64_t callee_save_slots[16];	/* callee saves for asm and register locals: prologue/epilogue + CFI */
 } x64_lowering_context;
 
 /* the integer argument registers, in order */

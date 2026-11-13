@@ -13,9 +13,9 @@ VPRIV x64_lowering_context *x64_context_get(codegen_context *e)
 
 	if (!X) {
 		X = calloc(1, sizeof *X);
-		X->in = codegen_memory_reserve(X64_RECORD_BUFFER * sizeof(record));
-		X->tw = codegen_memory_reserve(X64_RECORD_BUFFER * sizeof(record));
-		X->capin = X64_RECORD_MAX;
+		X->records = codegen_memory_reserve(X64_RECORD_BUFFER * sizeof(record));
+		X->two_address_records = codegen_memory_reserve(X64_RECORD_BUFFER * sizeof(record));
+		X->record_capacity = X64_RECORD_MAX;
 		e->x64_context = X;
 	}
 	return X;
@@ -27,8 +27,8 @@ VPRIV void x64_ecx_free(codegen_context *e)
 
 	if (!X)
 		return;
-	munmap(X->in, X64_RECORD_BUFFER * sizeof(record));
-	munmap(X->tw, X64_RECORD_BUFFER * sizeof(record));
+	munmap(X->records, X64_RECORD_BUFFER * sizeof(record));
+	munmap(X->two_address_records, X64_RECORD_BUFFER * sizeof(record));
 	free(X);
 	e->x64_context = NULL;
 }
@@ -48,9 +48,9 @@ VPRIV record *x64_record_emit(codegen_context *e, int op)
 		sink.registers[0] = sink.registers[1] = sink.registers[2] = sink.registers[3] = X64_REGISTER_NONE;
 		return &sink;
 	}
-	if (unlikely(X->nin == X->capin))
+	if (unlikely(X->record_count == X->record_capacity))
 		codegen_fatal_report(e, e->current_location, "function too large");
-	r = &X->in[X->nin++];
+	r = &X->records[X->record_count++];
 	memset(r, 0, sizeof *r);
 	r->opcode = (uint8_t)op;
 	r->registers[0] = r->registers[1] = r->registers[2] = r->registers[3] = X64_REGISTER_NONE;
@@ -77,7 +77,7 @@ VPRIV int x64_memory_base_register(codegen_context *e, const codegen_lvalue *l, 
 {
 	*ref = 0;
 	if (l->kind == CODEGEN_LVALUE_FRAME)
-		return e->x64_context->spframe ? X64_REGISTER_FRAME : RBP;
+		return e->x64_context->stack_pointer_frame ? X64_REGISTER_FRAME : RBP;
 	if (l->kind != CODEGEN_LVALUE_SYMBOL)
 		return l->register_number;
 	if (codegen_symbol_needs_got(e->compile_context, l->reference)) {
@@ -99,9 +99,9 @@ VPRIV void x64_record_emit_memory(codegen_context *e, int op, int sz, int r, con
 	if (l->offset < INT32_MIN || l->offset > INT32_MAX) {
 		if (op == X64_OP_ST && r == R11 && l->kind == CODEGEN_LVALUE_SYMBOL && codegen_symbol_needs_got(e->compile_context, l->reference))
 			codegen_fatal_report(e, e->current_location, "internal error: a store through the GOT from r11");
-		uint32_t live = e->x64_context->live;
-		if (r < 32) e->x64_context->live |= 1u << r;
-		if (l->kind == CODEGEN_LVALUE_REGISTER && l->register_number < 32) e->x64_context->live |= 1u << l->register_number;
+		uint32_t live = e->x64_context->temporaries_in_use;
+		if (r < 32) e->x64_context->temporaries_in_use |= 1u << r;
+		if (l->kind == CODEGEN_LVALUE_REGISTER && l->register_number < 32) e->x64_context->temporaries_in_use |= 1u << l->register_number;
 		int address = x64_treg(e), offset = x64_treg(e);
 		codegen_lvalue origin = *l;
 		/* A negative frame displacement marks a local for the printer's final
@@ -112,7 +112,7 @@ VPRIV void x64_record_emit_memory(codegen_context *e, int op, int sz, int r, con
 		x64_record_emit_three_registers(e, X64_OP_ADD, 8, address, address, offset);
 		codegen_lvalue at = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = (uint8_t)address };
 		x64_record_emit_memory(e, op, sz, r, &at, sgn);
-		e->x64_context->live = live;
+		e->x64_context->temporaries_in_use = live;
 		return;
 	}
 	uint32_t ref;
@@ -141,18 +141,18 @@ VPRIV int x64_treg(codegen_context *e)
 	x64_lowering_context *X = e->x64_context;
 
 	for (int k = 0; k < 8; k++)
-		if (!(X->live & (1u << x64_order[k]))) {
-			X->live |= 1u << x64_order[k];
+		if (!(X->temporaries_in_use & (1u << x64_order[k]))) {
+			X->temporaries_in_use |= 1u << x64_order[k];
 			return x64_order[k];
 		}
-	if (X->asmcs) {
+	if (X->asm_callee_saved) {
 		/* an asm that clobbers every temporary (call_on_stack): its operands in callee-saved
 		   registers, as clang (the prologue saves them) */
 		static const int cs[] = { RBX, R12, R13, R14, R15 };
 
 		for (int k = 0; k < 5; k++)
-			if (!(X->live & (1u << cs[k]))) {
-				X->live |= 1u << cs[k];
+			if (!(X->temporaries_in_use & (1u << cs[k]))) {
+				X->temporaries_in_use |= 1u << cs[k];
 				x64_callee_save_use(e, cs[k]);
 				return cs[k];
 			}
@@ -163,13 +163,13 @@ VPRIV int x64_treg(codegen_context *e)
 VPRIV void x64_tfree(codegen_context *e, int r)
 {
 	if (r < 32)
-		e->x64_context->live &= ~(1u << r);
+		e->x64_context->temporaries_in_use &= ~(1u << r);
 }
 
 VPRIV void x64_tkeep(codegen_context *e, int r)
 {
 	if (r < 32)
-		e->x64_context->live |= 1u << r;
+		e->x64_context->temporaries_in_use |= 1u << r;
 }
 
 VPRIV bool x64_target_has_no_simd(codegen_context *e)
@@ -190,15 +190,15 @@ VPRIV int x64_ftreg(codegen_context *e)
 
 	x64_nofp(e);
 	for (int r = XMM8; r < XMM15; r++)
-		if (!(X->live & (1u << r))) {
-			X->live |= 1u << r;
+		if (!(X->temporaries_in_use & (1u << r))) {
+			X->temporaries_in_use |= 1u << r;
 			return r;
 		}
 	codegen_fatal_report(e, e->current_location, "x86-64: expression too complex (out of vector registers)");
 }
 
-VPRIV int x64_nfree(codegen_context *e) { return 8 - __builtin_popcount(e->x64_context->live & X64_TEMPORARIES); }
-VPRIV int x64_nffree(codegen_context *e) { return XMM15 - XMM8 - __builtin_popcount(e->x64_context->live & X64_FLOAT_TEMPORARIES); }
+VPRIV int x64_nfree(codegen_context *e) { return 8 - __builtin_popcount(e->x64_context->temporaries_in_use & X64_TEMPORARIES); }
+VPRIV int x64_nffree(codegen_context *e) { return XMM15 - XMM8 - __builtin_popcount(e->x64_context->temporaries_in_use & X64_FLOAT_TEMPORARIES); }
 
 VPRIV int x64_toreg(codegen_context *e, codegen_value *v, int size)
 {
@@ -272,14 +272,14 @@ VPRIV uint32_t x64_save(codegen_context *e, const uint8_t *regs, int n, int k0, 
 	uint32_t sv = 0;
 
 	for (int k = 0; k < n; k++)
-		if ((X->live & (1u << regs[k])) && regs[k] != k0 && regs[k] != k1)
+		if ((X->temporaries_in_use & (1u << regs[k])) && regs[k] != k0 && regs[k] != k1)
 			sv |= 1u << regs[k];
 	/* x64_restore pops in descending register order, independent of the
 	   caller's list order. Match it even when several registers are live. */
 	for (int r = 0; r < 16; r++)
 		if (sv & (1u << r)) {
 			x64_record_emit_three_registers(e, X64_OP_PUSH, 8, X64_REGISTER_NONE, r, X64_REGISTER_NONE);
-			X->pushes++;
+			X->outstanding_pushes++;
 		}
 	return sv;
 }
@@ -291,7 +291,7 @@ VPRIV void x64_restore(codegen_context *e, uint32_t sv)
 	for (int r = 15; r >= 0; r--)
 		if (sv & (1u << r)) {
 			x64_record_emit_three_registers(e, X64_OP_POP, 8, r, X64_REGISTER_NONE, X64_REGISTER_NONE);
-			X->pushes--;
+			X->outstanding_pushes--;
 		}
 }
 
@@ -378,9 +378,9 @@ static codegen_value x64_div(codegen_context *e, int op, int size, bool sgn, cod
 	static const uint8_t fx[2] = { RAX, RDX };
 
 	for (int k = 0; k < 2; k++)
-		if ((X->live & (1u << fx[k])) && fx[k] != ra && fx[k] != rb) {
+		if ((X->temporaries_in_use & (1u << fx[k])) && fx[k] != ra && fx[k] != rb) {
 			x64_record_emit_three_registers(e, X64_OP_PUSH, 8, X64_REGISTER_NONE, fx[k], X64_REGISTER_NONE);
-			X->pushes++;
+			X->outstanding_pushes++;
 			sv[k] = true;
 		}
 	if (rb == RAX || rb == RDX) {
@@ -400,7 +400,7 @@ static codegen_value x64_div(codegen_context *e, int op, int size, bool sgn, cod
 	for (int k = 1; k >= 0; k--)
 		if (sv[k]) {
 			x64_record_emit_three_registers(e, X64_OP_POP, 8, fx[k], X64_REGISTER_NONE, X64_REGISTER_NONE);
-			X->pushes--;
+			X->outstanding_pushes--;
 		}
 	x64_tfree(e, rb);
 	return (codegen_value){ .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)ra };
@@ -416,9 +416,9 @@ static codegen_value x64_shift(codegen_context *e, int op, int size, codegen_val
 	if (dst == R11)
 		x64_mov(e, R11, ra);
 	if (rb != RCX) {
-		if ((X->live & (1u << RCX)) && ra != RCX) {
+		if ((X->temporaries_in_use & (1u << RCX)) && ra != RCX) {
 			x64_record_emit_three_registers(e, X64_OP_PUSH, 8, X64_REGISTER_NONE, RCX, X64_REGISTER_NONE);
-			X->pushes++;
+			X->outstanding_pushes++;
 			sv = true;
 		}
 		x64_mov(e, RCX, rb);
@@ -428,7 +428,7 @@ static codegen_value x64_shift(codegen_context *e, int op, int size, codegen_val
 		x64_mov(e, ra, R11);
 	if (sv) {
 		x64_record_emit_three_registers(e, X64_OP_POP, 8, RCX, X64_REGISTER_NONE, X64_REGISTER_NONE);
-		X->pushes--;
+		X->outstanding_pushes--;
 	}
 	if (rb != ra)
 		x64_tfree(e, rb);
@@ -572,7 +572,7 @@ VPRIV void x64_brz(codegen_context *e, codegen_value a, int size, bool nz, uint3
 /* -g: a line-table row at the next record (arm64's codegen_debug_row_add, on x86's records) */
 VPRIV void x64_dbgrow(codegen_context *e, uint32_t loc)
 {
-	uint32_t file, line, col, nin = e->x64_context->nin;
+	uint32_t file, line, col, nin = e->x64_context->record_count;
 
 	if (!codegen_debug_location_get(e, loc, &file, &line, &col))
 		return;
@@ -602,20 +602,20 @@ VPRIV void x64_begin(codegen_context *e, uint32_t s)
 	x64_lowering_context *X = x64_context_get(e);
 
 	(void)s;
-	X->nin = 0;
-	X->spframe = false;
-	X->framesz = X->spdelta = 0;
-	X->live = 0;
-	X->pushes = 0;
+	X->record_count = 0;
+	X->stack_pointer_frame = false;
+	X->frame_size = X->stack_pointer_delta = 0;
+	X->temporaries_in_use = 0;
+	X->outstanding_pushes = 0;
 	e->discarded_scalar = false;
-	memset(X->csslot, 0, sizeof X->csslot);
+	memset(X->callee_save_slots, 0, sizeof X->callee_save_slots);
 	e->debug_row_count = 0;
 	e->raw.n = 0;
 	e->asm_statement_count = 0;
 }
 
 typedef struct x64_compact_debug {
-	codegen_context *e;
+	codegen_context *context;
 	uint32_t cursor;
 } x64_compact_debug;
 
@@ -623,7 +623,7 @@ static void x64_compact_remap(void *ctx, uint32_t old, uint32_t next)
 {
 	x64_compact_debug *d = ctx;
 
-	codegen_debug_rows_remap(d->e, &d->cursor, old, next);
+	codegen_debug_rows_remap(d->context, &d->cursor, old, next);
 }
 
 VPRIV void x64_finish(codegen_context *e, uint32_t s)
@@ -635,14 +635,14 @@ VPRIV void x64_finish(codegen_context *e, uint32_t s)
 	size_t start;
 	x64_compact_debug d = { e, 0 };
 
-	if (e->x64_context->live)
-		codegen_fatal_report(e, e->current_location, "internal error: x86-64 temporaries left live (%#x)", e->x64_context->live);
+	if (e->x64_context->temporaries_in_use)
+		codegen_fatal_report(e, e->current_location, "internal error: x86-64 temporaries left live (%#x)", e->x64_context->temporaries_in_use);
 	if (e->unit->options->opt >= 1 && !e->unit->cleanups_disabled)
-		e->x64_context->nin = record_unreachable_remove(e->x64_context->in, e->x64_context->nin, sizeof(record), offsetof(record, opcode),
+		e->x64_context->record_count = record_unreachable_remove(e->x64_context->records, e->x64_context->record_count, sizeof(record), offsetof(record, opcode),
 						x64_flow_table(), X64_OP_COUNT, e->debug_row_count ? x64_compact_remap : NULL, &d);
 	d.cursor = 0;
 	if (e->unit->options->opt >= 1)
-		e->x64_context->nin = record_fallthrough_drop(e->x64_context->in, e->x64_context->nin, &layout,
+		e->x64_context->record_count = record_fallthrough_drop(e->x64_context->records, e->x64_context->record_count, &layout,
 					       e->debug_row_count ? x64_compact_remap : NULL, &d);
 	if (e->unit->options->opt >= 1 && !e->unit->cleanups_disabled)
 		x64_dead(e);
@@ -697,13 +697,13 @@ VPRIV int x64_tlsaddr(codegen_context *e, uint32_t ref, int model)
 	}
 	/* general dynamic: a call; the live temporaries saved around it, rsp 16-aligned */
 	{
-		uint32_t saved = X->live & X64_TEMPORARIES, fsaved = X->live & X64_FLOAT_TEMPORARIES;
+		uint32_t saved = X->temporaries_in_use & X64_TEMPORARIES, fsaved = X->temporaries_in_use & X64_FLOAT_TEMPORARIES;
 		int pad;
 
 		for (int q = 0; q < 16; q++)
 			if (saved & (1u << q)) {
 				x64_record_emit_three_registers(e, X64_OP_PUSH, 8, X64_REGISTER_NONE, q, X64_REGISTER_NONE);
-				X->pushes++;
+				X->outstanding_pushes++;
 			}
 		for (int q = XMM8; q < XMM15; q++)
 			if (fsaved & (1u << q)) {
@@ -711,9 +711,9 @@ VPRIV int x64_tlsaddr(codegen_context *e, uint32_t ref, int model)
 
 				x64_record_emit(e, X64_OP_ADJSP)->immediate = -8;
 				x64_record_emit_memory(e, X64_OP_ST, 8, q, &d, false);
-				X->pushes++;
+				X->outstanding_pushes++;
 			}
-		pad = X->pushes % 2 ? 8 : 0;
+		pad = X->outstanding_pushes % 2 ? 8 : 0;
 		if (pad)
 			x64_record_emit(e, X64_OP_ADJSP)->immediate = -pad;
 		i = x64_record_emit(e, X64_OP_TLS);
@@ -729,12 +729,12 @@ VPRIV int x64_tlsaddr(codegen_context *e, uint32_t ref, int model)
 
 				x64_record_emit_memory(e, X64_OP_LD, 8, q, &s, false);
 				x64_record_emit(e, X64_OP_ADJSP)->immediate = 8;
-				X->pushes--;
+				X->outstanding_pushes--;
 			}
 		for (int q = 15; q >= 0; q--)
 			if (saved & (1u << q)) {
 				x64_record_emit_three_registers(e, X64_OP_POP, 8, q, X64_REGISTER_NONE, X64_REGISTER_NONE);
-				X->pushes--;
+				X->outstanding_pushes--;
 			}
 		r = x64_treg(e);
 		x64_mov(e, r, R11);
@@ -781,12 +781,12 @@ VPRIV int x64_atomic(codegen_context *e, int op, int size, int rp, int rv, int r
 		x64_ext(e, r, size, false);
 		return r;
 	default: {	/* WALK_ATOMIC_COMPARE_EXCHANGE: rax is the comparand (saved if it holds something) */
-		bool save = (X->live & (1u << RAX)) != 0;
+		bool save = (X->temporaries_in_use & (1u << RAX)) != 0;
 		record *i;
 
 		if (save) {
 			x64_record_emit_three_registers(e, X64_OP_PUSH, 8, X64_REGISTER_NONE, RAX, X64_REGISTER_NONE);
-			X->pushes++;
+			X->outstanding_pushes++;
 		}
 		if (rv == RAX || rp == RAX) {
 			x64_mov(e, R11, RAX);
@@ -799,7 +799,7 @@ VPRIV int x64_atomic(codegen_context *e, int op, int size, int rp, int rv, int r
 		if (save) {
 			x64_mov(e, R11, RAX);
 			x64_record_emit_three_registers(e, X64_OP_POP, 8, RAX, X64_REGISTER_NONE, X64_REGISTER_NONE);
-			X->pushes--;
+			X->outstanding_pushes--;
 			r = x64_treg(e);
 			x64_mov(e, r, R11);
 		} else {
@@ -979,7 +979,7 @@ VPRIV codegen_value x64_pcmpstr(codegen_context *e, uint32_t n)
 	if (!blend) cc_eval(c, arg[count], &cv);
 	unsigned control = blend ? 0 : (unsigned)cv.i;
 	int64_t slot[4], saved[32] = { 0 };
-	uint32_t live = e->x64_context->live;
+	uint32_t live = e->x64_context->temporaries_in_use;
 	uint32_t fixed = (1u << XMM0) | (1u << (XMM0 + 1)) | (blend ? (1u << (XMM0 + 2)) : (1u << RCX)) |
 		(explicit ? (1u << RAX) | (1u << RDX) : 0);
 	x64_nofp(e);
@@ -1001,7 +1001,7 @@ VPRIV codegen_value x64_pcmpstr(codegen_context *e, uint32_t n)
 			codegen_lvalue l = { .kind = CODEGEN_LVALUE_FRAME, .offset = saved[r] = walk_slot_temporary(e, size, size) };
 			x64_store(e, r, &l, size);
 		}
-	e->x64_context->live |= fixed;
+	e->x64_context->temporaries_in_use |= fixed;
 	for (unsigned i = 0; i < count; i++) {
 		bool vector = !explicit || !(i & 1);
 		int r = blend ? XMM0 + (i == 2 ? 0 : (int)i + 1) :
@@ -1032,6 +1032,6 @@ VPRIV codegen_value x64_pcmpstr(codegen_context *e, uint32_t n)
 			codegen_lvalue l = { .kind = CODEGEN_LVALUE_FRAME, .offset = saved[r] };
 			x64_load(e, r, &l, r >= XMM0 ? 16 : 8, false);
 		}
-	e->x64_context->live = live | (1u << result.register_number);
+	e->x64_context->temporaries_in_use = live | (1u << result.register_number);
 	return result;
 }

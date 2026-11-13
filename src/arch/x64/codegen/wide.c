@@ -71,14 +71,14 @@ VPRIV codegen_value x64_wbitint(codegen_context *e, codegen_value v, unsigned bi
 static void x64_lcall(codegen_context *e, int fn, const int64_t *words, int nw, int xmmarg, int64_t res, int resw, bool fres)
 {
 	x64_lowering_context *X = e->x64_context;
-	uint32_t saved = X->live & X64_TEMPORARIES, fsaved = X->live & X64_FLOAT_TEMPORARIES;
+	uint32_t saved = X->temporaries_in_use & X64_TEMPORARIES, fsaved = X->temporaries_in_use & X64_FLOAT_TEMPORARIES;
 	int pad;
 	record *i;
 
 	for (int q = 0; q < 16; q++)
 		if (saved & (1u << q)) {
 			x64_record_emit_three_registers(e, X64_OP_PUSH, 8, X64_REGISTER_NONE, q, X64_REGISTER_NONE);
-			X->pushes++;
+			X->outstanding_pushes++;
 		}
 	for (int q = XMM8; q < XMM15; q++)
 		if (fsaved & (1u << q)) {
@@ -86,12 +86,12 @@ static void x64_lcall(codegen_context *e, int fn, const int64_t *words, int nw, 
 
 			x64_record_emit(e, X64_OP_ADJSP)->immediate = -8;
 			x64_record_emit_memory(e, X64_OP_ST, 8, q, &d, false);
-			X->pushes++;
+			X->outstanding_pushes++;
 		}
-	pad = X->pushes & 1;
+	pad = X->outstanding_pushes & 1;
 	if (pad) {
 		x64_record_emit(e, X64_OP_ADJSP)->immediate = -8;
-		X->pushes++;
+		X->outstanding_pushes++;
 	}
 	for (int k = 0; k < nw; k++) {
 		codegen_lvalue s = { .kind = CODEGEN_LVALUE_FRAME, .offset = words[k], .align = 8 };
@@ -107,7 +107,7 @@ static void x64_lcall(codegen_context *e, int fn, const int64_t *words, int nw, 
 	}
 	if (pad) {
 		x64_record_emit(e, X64_OP_ADJSP)->immediate = 8;
-		X->pushes--;
+		X->outstanding_pushes--;
 	}
 	for (int q = XMM15 - 1; q >= XMM8; q--)
 		if (fsaved & (1u << q)) {
@@ -115,12 +115,12 @@ static void x64_lcall(codegen_context *e, int fn, const int64_t *words, int nw, 
 
 			x64_record_emit_memory(e, X64_OP_LD, 8, q, &s, false);
 			x64_record_emit(e, X64_OP_ADJSP)->immediate = 8;
-			X->pushes--;
+			X->outstanding_pushes--;
 		}
 	for (int q = 15; q >= 0; q--)
 		if (saved & (1u << q)) {
 			x64_record_emit_three_registers(e, X64_OP_POP, 8, q, X64_REGISTER_NONE, X64_REGISTER_NONE);
-			X->pushes--;
+			X->outstanding_pushes--;
 		}
 }
 

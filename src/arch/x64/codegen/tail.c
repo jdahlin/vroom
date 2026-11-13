@@ -52,8 +52,8 @@ VPRIV uint32_t x64_tail_ref(const codegen_context *e)
 	const x64_lowering_context *X = e->x64_context;
 
 	/* Only the common return label may follow this slice's terminal marker. */
-	for (uint32_t k = X->nin; k-- > 0;)
-		if (X->in[k].opcode != X64_OP_LABEL)
-			return X->in[k].opcode == X64_OP_TAIL ? X->in[k].reference : 0;
+	for (uint32_t k = X->record_count; k-- > 0;)
+		if (X->records[k].opcode != X64_OP_LABEL)
+			return X->records[k].opcode == X64_OP_TAIL ? X->records[k].reference : 0;
 	return 0;
 }

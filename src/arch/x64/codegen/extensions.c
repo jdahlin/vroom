@@ -6,9 +6,9 @@
 VPRIV bool x64_last_u32(const codegen_context *e, int r)
 {
 	const x64_lowering_context *x = e->x64_context;
-	if (r < 0 || r >= XMM0 || !x->nin)
+	if (r < 0 || r >= XMM0 || !x->record_count)
 		return false;
-	const record *i = &x->in[x->nin - 1];
+	const record *i = &x->records[x->record_count - 1];
 	if (i->registers[0] != r)
 		return false;
 	if (i->opcode == X64_OP_MOVI)

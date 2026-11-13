@@ -168,14 +168,14 @@ VPRIV uint8_t x64_vir_condition_lower(x64_vir_context *L,uint32_t b,uint32_t v,u
 	bool flags=L->compare_condition==value && L->compare_block==b && v==value+1;
 	uint8_t cc=X64_CONDITION_NE;
 	if (flags) {
-		for(uint32_t k=L->setcc_record+1;k<e->x64_context->nin;k++)
-			if(x64_record_effects(e,&e->x64_context->in[k]).flags & (RECORD_EFFECT_WRITES_FLAGS|RECORD_EFFECT_BARRIER|RECORD_EFFECT_CALL)) {flags=false;break;}
+		for(uint32_t k=L->setcc_record+1;k<e->x64_context->record_count;k++)
+			if(x64_record_effects(e,&e->x64_context->records[k]).flags & (RECORD_EFFECT_WRITES_FLAGS|RECORD_EFFECT_BARRIER|RECORD_EFFECT_CALL)) {flags=false;break;}
 	}
 	if(flags) {
-		cc=e->x64_context->in[L->setcc_record].condition;
+		cc=e->x64_context->records[L->setcc_record].condition;
 		if(L->uses[value]==1 && L->allocation->slot[value]==VIR_BLOCK_NONE) {
-			memmove(&e->x64_context->in[L->setcc_record],&e->x64_context->in[L->setcc_record+1],(e->x64_context->nin-L->setcc_record-1)*sizeof(record));
-			e->x64_context->nin--;
+			memmove(&e->x64_context->records[L->setcc_record],&e->x64_context->records[L->setcc_record+1],(e->x64_context->record_count-L->setcc_record-1)*sizeof(record));
+			e->x64_context->record_count--;
 		}
 	} else x64_record_emit_three_registers(e, X64_OP_TEST, x64_vir_type_size(L->function->insns[value].type), X64_REGISTER_NONE, reg, reg);
 	return cc;

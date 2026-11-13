@@ -17,7 +17,7 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v, const 
 		if(v==L->test_value) {
 			record *r=x64_record_emit_three_registers(e,X64_OP_TESTM,L->test_size,X64_REGISTER_NONE,L->memory_base,X64_REGISTER_NONE);
 			r->registers[3]=L->memory_is_indexed?L->memory_index:X64_REGISTER_NONE;r->shift=L->memory_shift;r->offset=L->memory_offset;r->reference=(uint32_t)L->test_immediate;
-			L->compare_condition=v;L->compare_block=b;L->setcc_record=e->x64_context->nin;
+			L->compare_condition=v;L->compare_block=b;L->setcc_record=e->x64_context->record_count;
 			x64_record_emit_three_registers(e,X64_OP_SETCC,4,d,X64_REGISTER_NONE,X64_REGISTER_NONE)->condition=(i->flags&15)?X64_CONDITION_NE:X64_CONDITION_E;
 			L->test_value=0;return;
 		}
@@ -273,7 +273,7 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v, const 
 		} else
 		if (p[1]==VIR_REGISTER_NONE) {int64_t k;x64_vir_value_immediate(L->function,i->b,&k);x64_vir_constant_compare_emit(L,a,x64_vir_type_size(L->function->insns[i->a].type),(uint64_t)k);}
 		else x64_record_emit_three_registers(e, X64_OP_CMP, x64_vir_type_size(L->function->insns[i->a].type), X64_REGISTER_NONE, a, c);
-		L->compare_condition=v;L->compare_block=b;L->setcc_record=e->x64_context->nin;
+		L->compare_condition=v;L->compare_block=b;L->setcc_record=e->x64_context->record_count;
 		x64_record_emit_three_registers(e, X64_OP_SETCC, 4, d, X64_REGISTER_NONE, X64_REGISTER_NONE)->condition = cc[i->flags & 15]; return;
 	}
 	case VIR_OP_FCMP: {

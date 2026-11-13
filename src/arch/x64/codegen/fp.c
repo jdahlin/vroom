@@ -15,13 +15,13 @@ VPRIV void x64_x87(codegen_context *e, int xf, const codegen_lvalue *l, int sz)
 {
 	x64_nofp(e);
 	if (l && (l->offset < INT32_MIN || l->offset > INT32_MAX)) {
-		uint32_t live = e->x64_context->live;
-		if (l->kind == CODEGEN_LVALUE_REGISTER && l->register_number < 32) e->x64_context->live |= 1u << l->register_number;
+		uint32_t live = e->x64_context->temporaries_in_use;
+		if (l->kind == CODEGEN_LVALUE_REGISTER && l->register_number < 32) e->x64_context->temporaries_in_use |= 1u << l->register_number;
 		int address = x64_treg(e);
 		x64_record_emit_memory(e, X64_OP_LEA, 8, address, l, false);
 		codegen_lvalue at = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = (uint8_t)address };
 		x64_x87(e, xf, &at, sz);
-		e->x64_context->live = live;
+		e->x64_context->temporaries_in_use = live;
 		return;
 	}
 	uint32_t ref = 0;
@@ -245,14 +245,14 @@ static codegen_value x64_tfcall(codegen_context *e, int fn, const tfarg *a, int 
 
 	for (int k = 0; k < n; k++)
 		x64_tfree(e, a[k].r);	/* (the values stay in their registers until loaded below) */
-	saved = X->live & X64_TEMPORARIES, fsaved = X->live & X64_FLOAT_TEMPORARIES;
+	saved = X->temporaries_in_use & X64_TEMPORARIES, fsaved = X->temporaries_in_use & X64_FLOAT_TEMPORARIES;
 	if (rk == TQ || rk == TX || rk == TW)
 		out = x64_tmpslot(e, 16);
 	e->has_calls = true;
 	for (int q = 0; q < 16; q++)
 		if (saved & (1u << q)) {
 			x64_record_emit_three_registers(e, X64_OP_PUSH, 8, X64_REGISTER_NONE, q, X64_REGISTER_NONE);
-			X->pushes++;
+			X->outstanding_pushes++;
 		}
 	for (int q = XMM8; q < XMM15; q++)
 		if (fsaved & (1u << q)) {
@@ -260,11 +260,11 @@ static codegen_value x64_tfcall(codegen_context *e, int fn, const tfarg *a, int 
 
 			x64_record_emit(e, X64_OP_ADJSP)->immediate = -8;
 			x64_record_emit_memory(e, X64_OP_ST, 8, q, &d, false);
-			X->pushes++;
+			X->outstanding_pushes++;
 		}
 	for (int k = 0; k < n; k++)
 		stk += a[k].k == TX ? 16 : 0;
-	pad = X->pushes & 1 ? 8 : 0;
+	pad = X->outstanding_pushes & 1 ? 8 : 0;
 	if (pad + stk)
 		x64_record_emit(e, X64_OP_ADJSP)->immediate = -(pad + stk);
 	for (int k = 0, so = 0; k < n; k++) {
@@ -333,12 +333,12 @@ static codegen_value x64_tfcall(codegen_context *e, int fn, const tfarg *a, int 
 
 			x64_record_emit_memory(e, X64_OP_LD, 8, q, &s2, false);
 			x64_record_emit(e, X64_OP_ADJSP)->immediate = 8;
-			X->pushes--;
+			X->outstanding_pushes--;
 		}
 	for (int q = 15; q >= 0; q--)
 		if (saved & (1u << q)) {
 			x64_record_emit_three_registers(e, X64_OP_POP, 8, q, X64_REGISTER_NONE, X64_REGISTER_NONE);
-			X->pushes--;
+			X->outstanding_pushes--;
 		}
 	if (rk == TQ || rk == TX || rk == TW)
 		return x64_vr(x64_laddr(e, &out));
