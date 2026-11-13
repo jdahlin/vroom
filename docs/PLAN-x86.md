@@ -1021,3 +1021,15 @@ allokeras när rampekaren utelämnas; CFI, stackargument och bevarande av rbp
 är körprovade. Egna 305/305, GCC/TCC 1615/105, samma fem inline-undantag;
 TSVC 151/151 och 82 vektorloopar, unity/nonunity och ASan/UBSan gröna.
 Se V4 i PLAN-vir.md; högst 10 % långsammare är fortfarande öppet.
+
+
+### 2026-11-13: gemensam VIR-layout från ARM
+
+Block chasing, looprotation med kopierat inträdestest och små join-kopior
+planeras nu i `vir/layout.c`, samma kod för ARM och x86. ARM:s SQLite-output
+är byteidentisk; x86 får cirka 0,6–0,9 % lägre CPU-tid i två femprovserier
+av speedtest1 storlek 100. Senaste serie: 1,154× → 1,148× clang -O2;
+instruktioner 1,382× → 1,364×. Målet högst 1,05× är fortfarande öppet.
+VIR 130/130, egna x86 307/307, GCC/TCC gröna, samma fem kända inlinefel;
+TSVC 151/151 och 82 vektoriseringar. Fokusprov kör även ARM:s befintliga
+rotations-/joinfall, ASan/UBSan och filvist bygge. Detaljer i PLAN-vir.md.

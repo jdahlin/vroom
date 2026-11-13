@@ -20,6 +20,7 @@
 #include <string.h>
 
 #include "vir.h"
+#include "layout.h"
 
 static char *slurp(const char *path, size_t *n)
 {
@@ -175,6 +176,39 @@ static int selftest(void)
 	vir_low32(&f,true,cnt);
 	for(uint32_t i=f.nconst;i<f.nins;i++)
 		if(f.ins[i].op==VO_BPARAM || f.ins[i].op==VO_EXT)CHECK(cnt[i]);
+	/* The layout is a plan, including the entry guard; a reordered latch
+	 * alone would add a jump on every entry into a short loop. */
+	{
+	 uint32_t chase[4]={0,1,2,3},order[4],position[4],rotation[4],path[4];
+	 vir_loop loop={.head=1,.end=2,.parent=VIR_NOBLK,.depth=1};
+	 vir_loops lp={.l=&loop,.n=1};
+	 vir_layout_order(&f,&lp,chase,false,order,position,rotation);
+	 CHECK(order[0]==0 && order[1]==1 && order[2]==2 && order[3]==3);
+	 vir_layout_order(&f,&lp,chase,true,order,position,rotation);
+	 CHECK(order[0]==0 && order[1]==2 && order[2]==1 && order[3]==3 && position[1]==2);
+	 CHECK(rotation[1]==0 && vir_layout_duplicate(&f,&lp,rotation,0,1,2,0,true));
+	 CHECK(!vir_layout_duplicate(&f,&lp,rotation,2,1,1,0,true));
+	 CHECK(!vir_layout_duplicate(&f,&lp,rotation,1,1,2,0,true));
+	 CHECK(!vir_layout_duplicate(&f,&lp,rotation,0,1,2,8,true));
+	 CHECK(vir_layout_duplicate(&f,&lp,rotation,0,3,1,0,true));
+	 f.blk[1].fl|=VB_ADDR;
+	 vir_layout_order(&f,&lp,chase,true,order,position,rotation);
+	 CHECK(order[1]==1 && rotation[1]==VIR_NOBLK);
+	 f.blk[1].fl&=~VB_ADDR;
+	 uint32_t soff[5]={0,1,3,4,4},eidx[4]={VIR_NOBLK,VIR_NOBLK,VIR_NOBLK,VIR_NOBLK},boff[10]={0};
+	 vir_alloc_out o={.soff=soff,.eidx=eidx,.boff=boff};
+	 vir_layout_chases(&f,&o,chase,path);
+	 CHECK(chase[0]==0 && chase[1]==1 && chase[2]==1 && chase[3]==3);
+	 uint32_t branch=f.blk[2].first;
+	 f.ins[branch].a=2;
+	 vir_layout_chases(&f,&o,chase,path);CHECK(chase[2]==2);
+	 f.ins[branch].a=1;
+	 boff[8]=boff[9]=1;
+	 vir_layout_chases(&f,&o,chase,path);CHECK(chase[2]==2);
+	 boff[8]=boff[9]=0;
+	 vir_aedge edge={.n=1};o.edge=&edge;eidx[3]=0;
+	 vir_layout_chases(&f,&o,chase,path);CHECK(chase[2]==2);
+	}
 	/* the limit of the constant table: the 2^23+1st constant fails, and the next function starts clean */
 	vir_begin(&f, VTG_X86_64_LINUX, sym, 0);
 	for (uint32_t i = 0; i <= VIR_MAX_CONST; i++)

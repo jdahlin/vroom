@@ -71,6 +71,7 @@ typedef struct vwst {
 	int64_t *xslot, *xspill;
 	uint8_t *xuses; uint32_t cxuses;
 	uint32_t *xedgelab, cxedgelab;
+	uint32_t *xlayout, cxlayout;
 	uint32_t *xlabel, cxslot, cxspill, cxlabel; /* x86 lowering buffers, reused per ecx */
 	vir_loops lp;
 	vir_alloc_out ao;

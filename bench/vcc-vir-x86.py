@@ -19,6 +19,9 @@ vpp = str(Path(a.bin_dir).resolve() / 'vpp')
 source = ROOT / 'ccs/vcc/tests/vcc/vir_x86_leaf.c'
 resource = subprocess.check_output([llvm('clang'), '-print-resource-dir'], text=True).strip()
 flags = ['--target=x86_64-linux-gnu', '-ffp-contract=off', '-fno-pie', '-isystem', resource + '/include']
+# Shared loop/join regressions use the native Linux C library headers.
+if Path('/usr/include/x86_64-linux-gnu').is_dir():
+    flags += ['-isystem', '/usr/include/x86_64-linux-gnu', '-isystem', '/usr/include']
 required = {'vx_shift', 'vx_stack', 'vx_fp', 'vx_rotate', 'vx_f32', 'vx_f64', 'vx_i32', 'vx_sum', 'vx_series', 'vx_division', 'vx_srem', 'vx_udiv64', 'vx_udiv32'}
 vector = {'vx_f32': 'mulps', 'vx_f64': 'mulpd', 'vx_i32': 'paddd', 'vx_sum': 'paddq', 'vx_series': 'paddq'}
 env = dict(os.environ, VCC_VIR='bvls', VCC_VIR_CHECK='1', VCC_VIR_VEC='r', VCC_THREADS='1')
@@ -65,6 +68,8 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
             if run([str(exe)]).stdout != expected:
                 raise SystemExit('output differs from clang')
     for filename, required_more, packed in (
+        ('vir_loop_rotate.c', {'sum', 'nest', 'skips', 'twoways', 'str', 'middle', 'counted'}, {}),
+        ('vir_join_dup.c', {'search', 'chain', 'onearm', 'cmp1', 'cmp2'}, {}),
         ('vir_low32.c', {'lowloop', 'wideloop', 'lowselect', 'wideselect', 'narrowarg', 'widearg'}, {}),
         ('vir_x86_scratch.c', {'rotate', 'negd', 'absd', 'negf', 'absf'}, {}),
         ('vir_x86_frame.c', {'frames', 'pressure', 'callee'}, {}),

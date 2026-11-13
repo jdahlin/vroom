@@ -307,7 +307,7 @@ inte som del av uttaget.
 |---|---|
 | `ef98fd06`, PR126 | Allokatorns loop-entry-, argumentflytts- och callee-save-regler ligger redan i `vir/alloc.c`; ingen ny x86-port behövs. |
 | `6d7fc7f8`, `7d51e03c` | Inlining och dominanta återanvända laster ligger i den gemensamma byggaren; x86 använder dem redan. |
-| `f1bc6bc1`, `eaa9b8f8` | Rotations-/join-kopieringsplan och säkerhetsbevis bör bli gemensamma; även kopian av inträdestestet måste ingå, inte bara blockordningen. |
+| `f1bc6bc1`, `eaa9b8f8` | Nu gemensamt i `vir/layout.c`, inklusive kopian av inträdestestet. Båda emitterarna använder planen. |
 | `25157280`, `5f05a106` | Beviset att ramen inte undkommer och att ett resultat bara vidarebefordras till retur är IR-gemensamt. ABI, registerflyttar och epilog/jump hör till målet. |
 | `0c2ec7ed` | Matchning av fältadresser, skala och extension kan ge en gemensam adressform. ARM:s tillåtna extend/scale och x86:s SIB-regler avgörs därefter per mål. |
 | `1795593f` | Save-point-analysen finns i allokatorn; målens val av instruktioner som behöver ram samt prolog/epilog-emission återstår per CPU. |
@@ -318,9 +318,38 @@ filvis bygge. Det nya C-provet går på ARM64/QEMU; bytejämförelserna ovan
 kontrollerar båda målens SQLite-output. Ingen runtime-vinst hävdas för
 refaktoreringen.
 
-Nästa portar av rotation och syskonanrop ska därför börja med att flytta
-IR-bevis/planering till en gemensam modul, med målspecifika legalitets- och
-kostnadsbeslut. Ingen andra kopia av `vl_order`/`vl_sibling` i x86-filen.
+**Gemensam layout inkopplad (2026-11-13).** `vir/layout.c` äger nu
+chasing av tomma grenar (med bevarade allocator-edits/edge moves), loopordning,
+rotationsplan och beslut om kopior av inträdestest/små joins. Både ARM och x86
+anropar samma implementation. Emitterarna sköter fortfarande sina register,
+instruktioner, kantrörelser och ramgränser. Ingen kopia av ARM:s planerare i
+x86-filen. `VCC_VIR_ROT=0` stänger nu av rotation även på x86.
+
+ARM:s SQLite-assembly är byteidentisk. x86 använder faktiskt rotation med
+inträdestestets kopia, inte bara flyttad blockordning. Fem alternerade korta
+speedtest1-prov, storlek 100 på CPU 7:
+
+| Serie | clang CPU ms | Före CPU ms | Delad layout CPU ms | Delad layout/clang |
+|---|---:|---:|---:|---:|
+| Första | 1116,16 | 1283,71 | 1271,89 | 1,140× |
+| Upprepning | 1112,49 | 1284,06 | 1276,63 | 1,148× |
+
+Instruktioner/clang: 1,382× → 1,364×. Förbättringen mot föregående x86 är
+cirka 0,6–0,9 % CPU, men **målet 1,05× är fortfarande öppet**. Kostnaden är
+mer kod: sqlite3VdbeExec 107831 → 116982 byte. En kort byggmätning för
+sqlite3.c via -S är cirka 0,83 → 0,88 s. Underlag:
+`work/vir-x86-perf/shared-layout/{results100,repeat100}`.
+
+Validerat: egna x86 307/307, GCC 1615/1615, TCC 105/105; inline 83/88 med
+samma fem kända fel. TSVC 151/151 kontrollsummor, 82 verkliga vektorloopar,
+158 funktioner sänkta. `virtest --selftest` prövar ordning, guardkopior,
+adresstagna block, självcykel, kantrörelser och edits som förbjuder chasing.
+VIR-formatprov 130/130. Befintliga ARM-prov `vir_loop_rotate.c` och
+`vir_join_dup.c` ingår även i den fokuserade x86-riggen (assembly, egen
+objektväg, ett/sex emittertrådar). ASan/UBSan och filvist bygge är gröna.
+
+Nästa port av syskonanrop ska på samma sätt börja med gemensamma IR-bevis
+för frame escape och returvidarebefordran, med målspecifik epilog/emission.
 
 Efter rebase på main `06c688f4` finns PR126:s gemensamma allokatorregler
 med. Första x86-skivan: sekventiellt konsistenta atomiska laster/lagringar,

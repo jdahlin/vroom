@@ -93,7 +93,7 @@ SPLIT_MODS = cc pp emit
 # the object writer: the model, the CPU's fixups, the ELF writer (linked with as)
 # VIR (SPEC-vir.md): the format and its tools, register allocation (V4); linked into the
 # compiler for emit/vir/ (VCC_VIR)
-vir_SRC  = vcc/vir/table.c vcc/vir/vir.c vcc/vir/print.c vcc/vir/parse.c vcc/vir/verify.c vcc/vir/facts.c
+vir_SRC  = vcc/vir/table.c vcc/vir/vir.c vcc/vir/print.c vcc/vir/parse.c vcc/vir/verify.c vcc/vir/facts.c vcc/vir/layout.c
 VIRA_SRC = vcc/vir/loops.c vcc/vir/alloc.c vcc/vir/allocchk.c vcc/vir/allocdump.c	# (not in the unity TU: own statics)
 obj_SRC  = vcc/obj/obj.c vcc/arch/a64/obj/fixup.c vcc/arch/x64/obj/fixup.c vcc/platform/linux/elf.c
 cc_SRC   = $(wildcard vcc/cc/*.c)

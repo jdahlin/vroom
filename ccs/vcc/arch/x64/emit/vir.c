@@ -7,6 +7,7 @@
 #include "x64impl.h"
 #include "../../../emit/walk/proto.h"
 #include "../../../emit/vir/vw.h"
+#include "../../../vir/layout.h"
 
 typedef struct vx {
 	ecx *e;
@@ -16,6 +17,9 @@ typedef struct vx {
 	int gtmp;
 	uint32_t *label, *edgelab, ret, cmp, cmpblock, setrec;
 	uint8_t *uses;
+	const vir_loops *lp;
+	uint32_t *order,*position,*rotation,*chase,at;
+	unsigned dup;bool fallok;
 	uint32_t memv, memskip, scaledv; int membase, memindex, scaleindex; uint8_t memsh, scalesh; bool indexed; int64_t memoff;
 	uint32_t bev; int bebase,beindex; uint8_t besh,bewidth; bool beindexed; int64_t beoff;
 	uint32_t testv; uint8_t testsize; int64_t testimm;
@@ -212,9 +216,36 @@ static void vx_edge(vx *L, uint32_t b, uint32_t k)
 static uint32_t vx_target(vx *L,uint32_t b,uint32_t k,uint32_t target)
 {
 	uint32_t g=L->o->eidx[L->o->soff[b]+k];
-	if(g==VIR_NOBLK || !L->o->edge[g].n)return L->label[target];
+	if(g==VIR_NOBLK || !L->o->edge[g].n)return L->label[L->chase[target]];
 	if(!L->edgelab[g])L->edgelab[g]=wk_newlabel(L->e);
 	return L->edgelab[g];
+}
+
+static void vx_block(vx *L,uint32_t b);
+
+static uint32_t vx_next(const vx *L)
+{
+	if (!L->fallok)
+		return VIR_NOBLK;
+	uint32_t p = L->position[L->at], nb = L->f->nblk;
+
+	while (++p < nb && L->order[p] && L->chase[L->order[p]] != L->order[p])
+		;
+	return p < nb ? L->order[p] : VIR_NOBLK;
+}
+
+static void vx_goto(vx *L, uint32_t b, uint32_t target)
+{
+	uint32_t t = L->chase[target], next = vx_next(L);
+
+	if (vir_layout_duplicate(L->f, L->lp, L->rotation, b, t, next, L->dup, !L->e->E->noopt)) {
+		L->dup++;
+		vx_block(L, t);
+		L->dup--;
+		return;
+	}
+	if (t != next)
+		x64_jump(L->e, L->label[t]);
 }
 
 static bool vx_supported(const vir_fn *f, uint32_t v)
@@ -831,22 +862,45 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 		x64_op3(e,X_MOV,sz=vx_size(L->f->ins[i->b].ty),L->gtmp,c,XNOREG);
 		x64_op3(e,X_XCHG,1<<VIF_W(i->fl),L->gtmp,a,XNOREG);return;
 	case VO_SWITCH: vx_switch(L,b,i,a); return;
-	case VO_BR: vx_edge(L, b, 0); x64_jump(e, L->label[i->a]); return;
+	case VO_BR: vx_edge(L, b, 0); vx_goto(L,b,i->a); return;
 	case VO_BRIF: {
-		uint32_t yes = vx_target(L,b,0,i->b), no=vx_target(L,b,1,i->c);
+		uint32_t yes = vx_target(L,b,0,i->b), no=vx_target(L,b,1,i->c), nt=i->c;
+		uint32_t next=vx_next(L);
 		uint8_t cc=vx_condition(L,b,v,i->a,a);
-		/* Let the next emitted block fall through, including the true edge.
+		/* Let the next placed block fall through, including the true edge.
 		 * A deferred edge-copy stub is a different label and cannot fall through. */
-		if(b+1<L->f->nblk && yes==L->label[b+1]) {
-			uint32_t swap=yes;yes=no;no=swap;cc^=1;
+		if(next!=VIR_NOBLK && yes==L->label[next]) {
+			uint32_t swap=yes;yes=no;no=swap;cc^=1;nt=i->b;
 		}
 		rec *r = x64_put(e, X_JCC); r->cond = cc; r->label = yes;
-		x64_jump(e, no); return;
+		if(no==L->label[L->chase[nt]])vx_goto(L,b,nt);else x64_jump(e,no);return;
 	}
 	case VO_RET: x64_jump(e, L->ret); return;
 	case VO_TRAP: x64_put(e, X_UD2); return;
 	default: abort();
 	}
+}
+
+/* The same allocated block can be emitted as a rotation guard or small join. */
+static void vx_block(vx *L, uint32_t b)
+{
+	vir_fn *f = L->f;
+	const vir_alloc_out *o = L->o;
+	L->cmp = UINT32_MAX;
+	L->memv = L->memskip = L->scaledv = L->bev = L->testv = 0;
+	uint32_t at = o->boff[b], ei = o->boff[f->nblk + 1 + b], end = o->boff[f->nblk + 2 + b];
+	for (uint32_t i = f->blk[b].first; i < f->blk[b].first + f->blk[b].n; i++) {
+		uint32_t n = 0;
+		vir_oit it; uint32_t *p;
+		vir_oit_init(&it, f, &f->ins[i], false);
+		while ((p = vir_oit_next(&it))) { (void)p; n++; }
+		vx_edits(L, &ei, end, i);
+		uint8_t res = f->ins[i].ty != VT_VOID ? o->opr[at + n] : VR_NONE;
+		vx_ins(L, b, i, &o->opr[at], n, res);
+		at += n + (f->ins[i].ty != VT_VOID);
+		if (res != VR_NONE && o->slot[i] != VIR_NOBLK && o->sdef[i]) vx_memslot(L, false, res, o->slot[i]);
+	}
+	vx_edits(L, &ei, end, f->blk[b].first + f->blk[b].n);
 }
 
 /* setjmp headers do not universally attach returns_twice to their declaration. */
@@ -968,27 +1022,21 @@ VPRIV bool vw_x64(ecx *e, uint32_t sym, const char **why)
 	for (uint32_t k = 0; k < V->ao.nspill; k++) L.spill[k] = wk_slot(e, V->ao.ssz[k], V->ao.ssz[k]);
 	for (uint32_t b = 0; b < f->nblk; b++) L.label[b] = wk_newlabel(e);
 	L.ret = wk_newlabel(e);
+	uint32_t *layout=V->xlayout=vx_grow(V->xlayout,&V->cxlayout,5*f->nblk,sizeof(uint32_t));
+	L.order=layout;L.position=layout+f->nblk;L.rotation=layout+2*f->nblk;L.chase=layout+3*f->nblk;L.lp=&V->lp;
+	vir_layout_chases(f,L.o,L.chase,layout+4*f->nblk);
+	const char *rotate=getenv("VCC_VIR_ROT");
+	vir_layout_order(f,L.lp,L.chase,!e->E->noopt && !(rotate && *rotate=='0'),L.order,L.position,L.rotation);
+
 	for (int r = 0; r < 16; r++)
 		if (V->ao.callee[0] >> r & 1) x64_csused(e, r);
-	for (uint32_t b = 0; b < f->nblk; b++) {
-		x64_label(e, L.label[b]);
-		uint32_t at = V->ao.boff[b], ei = V->ao.boff[f->nblk + 1 + b], end = V->ao.boff[f->nblk + 2 + b];
-		for (uint32_t i = f->blk[b].first; i < f->blk[b].first + f->blk[b].n; i++) {
-			uint32_t n = 0;
-			vir_oit it; uint32_t *p;
-			vir_oit_init(&it, f, &f->ins[i], false);
-			while ((p = vir_oit_next(&it))) { (void)p; n++; }
-			vx_edits(&L, &ei, end, i);
-			uint8_t res = f->ins[i].ty != VT_VOID ? V->ao.opr[at + n] : VR_NONE;
-			vx_ins(&L, b, i, &V->ao.opr[at], n, res);
-			at += n + (f->ins[i].ty != VT_VOID);
-			if (res != VR_NONE && V->ao.slot[i] != VIR_NOBLK && V->ao.sdef[i]) vx_memslot(&L, false, res, V->ao.slot[i]);
-		}
-		vx_edits(&L, &ei, end, f->blk[b].first + f->blk[b].n);
+	for(uint32_t p=0;p<f->nblk;p++) {
+	 uint32_t b=L.order[p];if(b && L.chase[b]!=b)continue;
+	 x64_label(e,L.label[b]);L.at=b;L.fallok=true;vx_block(&L,b);
 	}
 	for(uint32_t g=0;g<V->ao.nedge;g++)if(L.edgelab[g]) {
 		const vir_aedge *edge=&V->ao.edge[g];
-		x64_label(e,L.edgelab[g]);vx_edge(&L,edge->from,edge->k);x64_jump(e,L.label[edge->to]);
+		x64_label(e,L.edgelab[g]);vx_edge(&L,edge->from,edge->k);L.fallok=false;vx_goto(&L,edge->from,edge->to);
 	}
 	x64_label(e, L.ret);
 	x64_finish(e, sym);
