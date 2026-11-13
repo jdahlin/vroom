@@ -61,13 +61,13 @@ static uint32_t sizeof_operand(cc *c, qty *ty, pp_span *r)
 {
 	uint32_t n;
 
-	if (is(c, T_LPAREN)) {
+	if (is(c, LEX_TOKEN_LEFT_PAREN)) {
 		uint32_t ploc = tok(c)->loc;
 
 		next(c);
 		if (is_type_start(c, tok(c))) {
 			*ty = type_name(c);
-			expect_match(c, T_RPAREN, ploc);
+			expect_match(c, LEX_TOKEN_RIGHT_PAREN, ploc);
 			if (r)
 				*r = (pp_span){ ploc, c->prevloc };	/* resolved by sizeof_type if needed */
 			return UINT32_MAX;
@@ -90,9 +90,9 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 	int kw = kwof(t);
 
 	switch (t->kind) {
-	case T_PLUSPLUS:
-	case T_MINUSMINUS: {
-		int op = t->kind == T_PLUSPLUS ? N_PREINC : N_PREDEC;
+	case LEX_TOKEN_PLUS_PLUS:
+	case LEX_TOKEN_MINUS_MINUS: {
+		int op = t->kind == LEX_TOKEN_PLUS_PLUS ? N_PREINC : N_PREDEC;
 
 		next(c);
 		/* Parenthesized type-names may begin an lvalue compound literal. */
@@ -103,7 +103,7 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 		if (is_complex(c, N(n)->ty))
 			return cplx_incdec(c, n, op, loc);
 		if ((T(c, N(n)->ty)->flags & TF_ATOMIC) && atomic_wide(c, N(n)->ty))
-			return atomic_assign_expr(c, n, 0, op == N_PREINC ? T_PLUS : T_MINUS, false, loc);
+			return atomic_assign_expr(c, n, 0, op == N_PREINC ? LEX_TOKEN_PLUS : LEX_TOKEN_MINUS, false, loc);
 		need_scalar(c, n, "increment");
 		if (is_ptr(c, N(n)->ty) && KIND(c, T(c, N(n)->ty)->base) == TY_SVE)
 			cc_error(c, loc, "arithmetic on a pointer to sizeless type '%s'", tyname(c, T(c, N(n)->ty)->base));
@@ -114,15 +114,15 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 			return r;
 		}
 	}
-	case T_AMP:
+	case LEX_TOKEN_AMPERSAND:
 		next(c);
-		c->after_amp = is(c, T_STAR);
+		c->after_amp = is(c, LEX_TOKEN_STAR);
 		n = cast_expr(c);
 		if (ISERR(n))
 			return n;
 		bounds_warn(c, n, true);
 		return addr_of(c, n, loc);	/* (addr_of: &r of a register variable) */
-	case T_STAR: {
+	case LEX_TOKEN_STAR: {
 		bool amp = c->after_amp;
 
 		c->after_amp = false;
@@ -139,9 +139,9 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 		}
 		return n;
 	}
-	case T_PLUS:
-	case T_MINUS:
-	case T_TILDE: {
+	case LEX_TOKEN_PLUS:
+	case LEX_TOKEN_MINUS:
+	case LEX_TOKEN_TILDE: {
 		int op = t->kind;
 
 		next(c);
@@ -151,8 +151,8 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 		n = rvalue(c, n);
 		if (is_complex(c, N(n)->ty))
 			return cplx_unary(c, op, n, loc);
-		if (is_vector(c, N(n)->ty) ? op == T_TILDE && !is_integer(c, T(c, N(n)->ty)->base)
-		    : !is_arith(c, N(n)->ty) || (op == T_TILDE && !is_integer(c, N(n)->ty))) {
+		if (is_vector(c, N(n)->ty) ? op == LEX_TOKEN_TILDE && !is_integer(c, T(c, N(n)->ty)->base)
+		    : !is_arith(c, N(n)->ty) || (op == LEX_TOKEN_TILDE && !is_integer(c, N(n)->ty))) {
 			pp_span r = rng(c, n);
 
 			report(c, "error", loc, &r, 1, NULL, 0, "invalid argument type '%s' to unary expression", tyname(c, N(n)->ty));
@@ -163,14 +163,14 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 
 			N(r)->aux = (uint16_t)op;
 			N(r)->a = n;
-			if (op == T_MINUS) {
+			if (op == LEX_TOKEN_MINUS) {
 				setspan(c, r, loc);
 				ovf_warn(c, op, r, loc, n, 0);
 			}
 			return big_fold_node(c, r);
 		}
 	}
-	case T_EXCLAIM: {
+	case LEX_TOKEN_EXCLAMATION: {
 		uint32_t r;
 
 		next(c);
@@ -179,20 +179,20 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 			return n;
 		if (is_bool_vector(c, N(n)->ty)) {
 			r = mk(c, N_UNARY, QUNQ(N(n)->ty), loc);
-			N(r)->aux = T_TILDE, N(r)->a = rvalue(c, n);
+			N(r)->aux = LEX_TOKEN_TILDE, N(r)->a = rvalue(c, n);
 			return r;
 		}
 		n = scalar_cond(c, rvalue(c, n), "'!'");
 		r = mk(c, N_UNARY, prim(TY_INT), loc);
-		N(r)->aux = T_EXCLAIM;
+		N(r)->aux = LEX_TOKEN_EXCLAMATION;
 		N(r)->a = n;
 		return big_fold_node(c, r);
 	}
-	case T_AMPAMP: {	/* &&label */
+	case LEX_TOKEN_AMPERSAND_AMPERSAND: {	/* &&label */
 		uint32_t r;
 
 		next(c);
-		if (!is(c, T_IDENT))
+		if (!is(c, LEX_TOKEN_IDENTIFIER))
 			fatal(c, tok(c)->loc, "expected identifier");
 		EXT_WARN_MS(c, "&&", "gnu-label-as-value", w_gnu, loc, "use of GNU address-of-label extension");
 		r = mk(c, N_LABELADDR, ty_ptr(c, prim(TY_VOID)), loc);
@@ -212,7 +212,7 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 		next(c);
 		n = sizeof_operand(c, &ty, &r);
 		if (n == UINT32_MAX) {
-			if (is(c, T_LBRACE)) {	/* sizeof (T){...} */
+			if (is(c, LEX_TOKEN_LEFT_BRACE)) {	/* sizeof (T){...} */
 				uint32_t init, s, cl;
 
 				init = initializer(c, &ty, !c->fn);
@@ -280,11 +280,11 @@ static uint32_t unary(cc *c)
 	uint32_t b = t->loc, n;
 
 	switch (t->kind) {
-	case T_PLUSPLUS: case T_MINUSMINUS: case T_AMP: case T_STAR: case T_PLUS: case T_MINUS:
-	case T_TILDE: case T_EXCLAIM: case T_AMPAMP:
+	case LEX_TOKEN_PLUS_PLUS: case LEX_TOKEN_MINUS_MINUS: case LEX_TOKEN_AMPERSAND: case LEX_TOKEN_STAR: case LEX_TOKEN_PLUS: case LEX_TOKEN_MINUS:
+	case LEX_TOKEN_TILDE: case LEX_TOKEN_EXCLAMATION: case LEX_TOKEN_AMPERSAND_AMPERSAND:
 		n = unary_op(c);
 		break;
-	case T_IDENT:
+	case LEX_TOKEN_IDENTIFIER:
 		switch (kwof(t)) {
 		case KW_sizeof: case KW__Alignof: case KW___alignof__: case KW___alignof:
 		case KW___extension__: case KW___real__: case KW___real: case KW___imag__: case KW___imag:
@@ -426,8 +426,8 @@ static __attribute__((noinline)) uint32_t cast_paren(cc *c, uint32_t loc)
 
 		ty = type_name(c);
 		bad = c->errors != e0;	/* the type had its error: clang's invalid cast, silent */
-		expect_match(c, T_RPAREN, loc);
-		if (is(c, T_LBRACE)) {	/* compound literal */
+		expect_match(c, LEX_TOKEN_RIGHT_PAREN, loc);
+		if (is(c, LEX_TOKEN_LEFT_BRACE)) {	/* compound literal */
 			uint32_t init, s;
 			bool st = !c->fn;
 
@@ -464,10 +464,10 @@ static bool paren_type_typo(cc *c)
 	uint32_t kw;
 	int k;
 
-	if (t->kind != T_IDENT || kwof(t) || lookup(c, t->id) || peek(c, 1)->kind != T_RPAREN)
+	if (t->kind != LEX_TOKEN_IDENTIFIER || kwof(t) || lookup(c, t->id) || peek(c, 1)->kind != LEX_TOKEN_RIGHT_PAREN)
 		return false;	/* declared: no peek */
 	k = peek(c, 2)->kind;
-	if (k != T_IDENT && k != T_NUMBER && k != T_CHAR && k != T_LPAREN)
+	if (k != LEX_TOKEN_IDENTIFIER && k != LEX_TOKEN_NUMBER && k != LEX_TOKEN_CHARACTER && k != LEX_TOKEN_LEFT_PAREN)
 		return false;
 	t = tok(c);
 	if (!(kw = typo_keyword(c, t->id, KWS_TYPE)) || !(kwclass[kwmap[kw]] & KC_TYPE))
@@ -484,7 +484,7 @@ VPRIV uint32_t cast_expr(cc *c)
 	if (vstack_guard_low())	/* every nested expression comes through here */
 		fatal(c, b, "expression nested too deeply");
 
-	if (is(c, T_LPAREN)) {
+	if (is(c, LEX_TOKEN_LEFT_PAREN)) {
 		/* consumed first: no lookahead token to shift out later */
 		next(c);
 		if (is_type_start(c, tok(c)) || paren_type_typo(c))
@@ -501,16 +501,16 @@ VPRIV uint32_t cast_expr(cc *c)
 static int binprec(int k)
 {
 	switch (k) {
-	case T_STAR: case T_SLASH: case T_PERCENT: return 10;
-	case T_PLUS: case T_MINUS: return 9;
-	case T_LESSLESS: case T_GREATERGREATER: return 8;
-	case T_LESS: case T_LESSEQ: case T_GREATER: case T_GREATEREQ: return 7;
-	case T_EQUALEQUAL: case T_EXCLAIMEQ: return 6;
-	case T_AMP: return 5;
-	case T_CARET: return 4;
-	case T_PIPE: return 3;
-	case T_AMPAMP: return 2;
-	case T_PIPEPIPE: return 1;
+	case LEX_TOKEN_STAR: case LEX_TOKEN_SLASH: case LEX_TOKEN_PERCENT: return 10;
+	case LEX_TOKEN_PLUS: case LEX_TOKEN_MINUS: return 9;
+	case LEX_TOKEN_LESS_LESS: case LEX_TOKEN_GREATER_GREATER: return 8;
+	case LEX_TOKEN_LESS: case LEX_TOKEN_LESS_EQUAL: case LEX_TOKEN_GREATER: case LEX_TOKEN_GREATER_EQUAL: return 7;
+	case LEX_TOKEN_EQUAL_EQUAL: case LEX_TOKEN_EXCLAMATION_EQUAL: return 6;
+	case LEX_TOKEN_AMPERSAND: return 5;
+	case LEX_TOKEN_CARET: return 4;
+	case LEX_TOKEN_PIPE: return 3;
+	case LEX_TOKEN_AMPERSAND_AMPERSAND: return 2;
+	case LEX_TOKEN_PIPE_PIPE: return 1;
 	default: return 0;
 	}
 }
@@ -524,7 +524,7 @@ static inline void self_cmp(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 
 static inline void ptr_cmp(cc *c, int op, uint32_t l, uint32_t r)
 {
-	if (op != T_EQUALEQUAL && op != T_EXCLAIMEQ)
+	if (op != LEX_TOKEN_EQUAL_EQUAL && op != LEX_TOKEN_EXCLAMATION_EQUAL)
 		return;
 	if (is_npc(c, r) && !is_npc(c, l))
 		null_compare(c, op, l, r);
@@ -564,17 +564,17 @@ static __attribute__((noinline)) uint32_t binary_ops(cc *c, int minp, uint32_t l
 
 		if (!p || p < minp)
 			return l;
-		bool mac = tok(c)->flags & PF_MACRO;
+		bool mac = tok(c)->flags & PP_TOKEN_FLAG_FROM_MACRO;
 
 		loc = tok(c)->loc;
 		next(c);
 		{
 			/* 0 && r, 1 || r: r is not evaluated (no runtime-behaviour warnings) */
 			cval cv;
-			bool dead = (op == T_AMPAMP || op == T_PIPEPIPE) && cc_eval(c, l, &cv) && cv.kind == CV_INT &&
-				    (cv.i != 0) == (op == T_PIPEPIPE);
+			bool dead = (op == LEX_TOKEN_AMPERSAND_AMPERSAND || op == LEX_TOKEN_PIPE_PIPE) && cc_eval(c, l, &cv) && cv.kind == CV_INT &&
+				    (cv.i != 0) == (op == LEX_TOKEN_PIPE_PIPE);
 
-			bool lg = op == T_AMPAMP || op == T_PIPEPIPE;
+			bool lg = op == LEX_TOKEN_AMPERSAND_AMPERSAND || op == LEX_TOKEN_PIPE_PIPE;
 
 			c->dead += dead;
 			c->cnd += lg;	/* (a conditional branch: -Wsometimes-uninitialized's filter) */
@@ -590,7 +590,7 @@ static __attribute__((noinline)) uint32_t binary_ops(cc *c, int minp, uint32_t l
 		} else {
 			uint32_t l0 = l;
 
-			if ((op == T_AMPAMP || op == T_PIPEPIPE) && !mac)
+			if ((op == LEX_TOKEN_AMPERSAND_AMPERSAND || op == LEX_TOKEN_PIPE_PIPE) && !mac)
 				logic_const(c, op, l, r, loc);
 			else if (is_cmp(op) && !mac) {
 				self_cmp(c, op, l, r, loc);
@@ -605,7 +605,7 @@ static __attribute__((noinline)) uint32_t binary_ops(cc *c, int minp, uint32_t l
 			setspan(c, l, b);
 			if (is_cmp(op) && !mac && !quiet_rt(c))
 				range_cmp(c, l, loc);
-			if (op == T_PLUS || op == T_MINUS || op == T_STAR)
+			if (op == LEX_TOKEN_PLUS || op == LEX_TOKEN_MINUS || op == LEX_TOKEN_STAR)
 				ovf_warn(c, op, l, loc, l0, r);
 			else if ((N(l0)->flags | N(r)->flags) & NF_OVF)
 				N(l)->flags |= NF_OVF;
@@ -637,13 +637,13 @@ static __attribute__((noinline)) uint32_t cond_rest(cc *c, uint32_t cnd)
 		k = cc_eval(c, cnd, &cv) && cv.kind == CV_INT ? cv.i != 0 : -1;
 		c->dead += k == 0;
 		c->cnd++;
-		if (!is(c, T_COLON))
+		if (!is(c, LEX_TOKEN_COLON))
 			a = expr(c);
 		else
 			EXT_WARN_MS(c, ":", "gnu-conditional-omitted-operand", w_gnu, tok(c)->loc,
 				 "use of GNU ?: conditional expression extension, omitting middle operand");
 		c->dead -= k == 0;
-		expect(c, T_COLON, "':'");
+		expect(c, LEX_TOKEN_COLON, "':'");
 		c->dead += k == 1;
 		b = cond_expr(c);
 		c->cnd--;
@@ -658,7 +658,7 @@ VPRIV uint32_t cond_expr(cc *c)
 {
 	uint32_t cnd = binary(c, 1);
 
-	if (likely(!is(c, T_QUESTION)))
+	if (likely(!is(c, LEX_TOKEN_QUESTION)))
 		return cnd;
 	{
 		uint32_t b = rng(c, cnd).b, n = cond_rest(c, cnd);
@@ -671,17 +671,17 @@ VPRIV uint32_t cond_expr(cc *c)
 static int assign_op(int k)
 {
 	switch (k) {
-	case T_EQUAL: return -1;
-	case T_STAREQ: return T_STAR;
-	case T_SLASHEQ: return T_SLASH;
-	case T_PERCENTEQ: return T_PERCENT;
-	case T_PLUSEQ: return T_PLUS;
-	case T_MINUSEQ: return T_MINUS;
-	case T_LESSLESSEQ: return T_LESSLESS;
-	case T_GREATERGREATEREQ: return T_GREATERGREATER;
-	case T_AMPEQ: return T_AMP;
-	case T_CARETEQ: return T_CARET;
-	case T_PIPEEQ: return T_PIPE;
+	case LEX_TOKEN_EQUAL: return -1;
+	case LEX_TOKEN_STAR_EQUAL: return LEX_TOKEN_STAR;
+	case LEX_TOKEN_SLASH_EQUAL: return LEX_TOKEN_SLASH;
+	case LEX_TOKEN_PERCENT_EQUAL: return LEX_TOKEN_PERCENT;
+	case LEX_TOKEN_PLUS_EQUAL: return LEX_TOKEN_PLUS;
+	case LEX_TOKEN_MINUS_EQUAL: return LEX_TOKEN_MINUS;
+	case LEX_TOKEN_LESS_LESS_EQUAL: return LEX_TOKEN_LESS_LESS;
+	case LEX_TOKEN_GREATER_GREATER_EQUAL: return LEX_TOKEN_GREATER_GREATER;
+	case LEX_TOKEN_AMPERSAND_EQUAL: return LEX_TOKEN_AMPERSAND;
+	case LEX_TOKEN_CARET_EQUAL: return LEX_TOKEN_CARET;
+	case LEX_TOKEN_PIPE_EQUAL: return LEX_TOKEN_PIPE;
 	default: return 0;
 	}
 }
@@ -689,7 +689,7 @@ static int assign_op(int k)
 static __attribute__((noinline)) uint32_t assign_rest(cc *c, uint32_t l, int op)
 {
 	uint32_t loc = tok(c)->loc, r;
-	bool mac = tok(c)->flags & PF_MACRO;
+	bool mac = tok(c)->flags & PP_TOKEN_FLAG_FROM_MACRO;
 
 	next(c);
 	{
@@ -704,7 +704,7 @@ static __attribute__((noinline)) uint32_t assign_rest(cc *c, uint32_t l, int op)
 	}
 	if (ISERR(l) || ISERR(r))
 		return err_node(c, loc);
-	if (op < 0 && !mac && !(c->prevflags & PF_MACRO))	/* (the right side's last token) */
+	if (op < 0 && !mac && !(c->prevflags & PP_TOKEN_FLAG_FROM_MACRO))	/* (the right side's last token) */
 		self_assign(c, l, r, loc);
 	r = assign(c, op < 0 ? 0 : op, l, r, loc);
 	if (mac)
@@ -724,7 +724,7 @@ VPRIV uint32_t assign_expr(cc *c)
 
 static __attribute__((noinline)) uint32_t comma_rest(cc *c, uint32_t l)
 {
-	while (is(c, T_COMMA) && !not_expr_start(c, peek(c, 1))) {
+	while (is(c, LEX_TOKEN_COMMA) && !not_expr_start(c, peek(c, 1))) {
 		uint32_t loc = tok(c)->loc, r;
 
 		next(c);
@@ -744,7 +744,7 @@ VPRIV uint32_t expr(cc *c)
 {
 	uint32_t l = assign_expr(c);
 
-	if (likely(!is(c, T_COMMA)))
+	if (likely(!is(c, LEX_TOKEN_COMMA)))
 		return l;
 	return comma_rest(c, l);
 }

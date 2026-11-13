@@ -8,7 +8,7 @@ VPRIV uint32_t em_double_unary(ecx *e, uint32_t n)
 	uint64_t size;
 
 	if (!e->E->o->opt || e->E->noopt || x->op != N_UNARY ||
-	    (x->aux != T_MINUS && x->aux != T_TILDE))
+	    (x->aux != LEX_TOKEN_MINUS && x->aux != LEX_TOKEN_TILDE))
 		return 0;
 	inner = N(x->a);
 	if (inner->op != N_UNARY || inner->aux != x->aux)

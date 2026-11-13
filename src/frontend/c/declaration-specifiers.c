@@ -39,7 +39,7 @@ VPRIV void unknown_type(cc *c, dspec *ds, bool allow_sc)
 
 VPRIV bool is_type_start(cc *c, const ptok *t)
 {
-	if (t->kind != T_IDENT)
+	if (t->kind != LEX_TOKEN_IDENTIFIER)
 		return false;
 	if (t->id < KW_END && kwmap[t->id])
 		return kwclass[kwmap[t->id]] & KC_TYPE;
@@ -48,7 +48,7 @@ VPRIV bool is_type_start(cc *c, const ptok *t)
 
 VPRIV bool is_decl_start(cc *c, const ptok *t)
 {
-	if (t->kind != T_IDENT)
+	if (t->kind != LEX_TOKEN_IDENTIFIER)
 		return false;
 	if (t->id < KW_END && kwmap[t->id])
 		return kwclass[kwmap[t->id]] & KC_DECL;
@@ -184,7 +184,7 @@ static qty typeof_spec(cc *c, bool unqual)
 			cc_error(c, loc, "invalid application of 'typeof' to bit-field");
 		t = typeof_evaluated(c, N(n)->ty, &n, loc);
 	}
-	expect_match(c, T_RPAREN, open);
+	expect_match(c, LEX_TOKEN_RIGHT_PAREN, open);
 	return unqual ? QUNQ(t) : t;
 }
 
@@ -195,8 +195,8 @@ static bool after_declarator_id(const ptok *t)
 	int kw = kwof(t);
 
 	switch (t->kind) {
-	case T_LSQUARE: case T_LPAREN: case T_RPAREN: case T_SEMI: case T_COMMA: case T_EQUAL:
-	case T_LBRACE: case T_COLON:
+	case LEX_TOKEN_LEFT_SQUARE: case LEX_TOKEN_LEFT_PAREN: case LEX_TOKEN_RIGHT_PAREN: case LEX_TOKEN_SEMICOLON: case LEX_TOKEN_COMMA: case LEX_TOKEN_EQUAL:
+	case LEX_TOKEN_LEFT_BRACE: case LEX_TOKEN_COLON:
 		return true;
 	default:
 		return kw == KW_asm || kw == KW___asm__ || kw == KW___asm;
@@ -252,7 +252,7 @@ static void tag_semi(cc *c, int kind);
    be, so that the many "struct S" of a valid TU pay nothing for it */
 static bool tag_line_end(cc *c, const dspec *ds)
 {
-	if (!ds->tag_bare || !(tok(c)->flags & TF_SOL) || c->in_tyname)
+	if (!ds->tag_bare || !(tok(c)->flags & LEX_TOKEN_FLAG_LINE_START) || c->in_tyname)
 		return false;
 	tag_semi(c, KIND(c, QT(c->tags[ds->tagdecl].ty, 0)));
 	return true;
@@ -304,12 +304,12 @@ static __attribute__((noinline, cold)) bool valid_after_tag(cc *c)
 	int kw;
 
 	switch (t->kind) {
-	case T_SEMI: case T_STAR: case T_AMP: case T_AMPAMP: case T_RPAREN: case T_LPAREN:
-	case T_COMMA: case T_LSQUARE: case T_ELLIPSIS: case T_RBRACE:
+	case LEX_TOKEN_SEMICOLON: case LEX_TOKEN_STAR: case LEX_TOKEN_AMPERSAND: case LEX_TOKEN_AMPERSAND_AMPERSAND: case LEX_TOKEN_RIGHT_PAREN: case LEX_TOKEN_LEFT_PAREN:
+	case LEX_TOKEN_COMMA: case LEX_TOKEN_LEFT_SQUARE: case LEX_TOKEN_ELLIPSIS: case LEX_TOKEN_RIGHT_BRACE:
 		return true;
-	case T_COLON:
+	case LEX_TOKEN_COLON:
 		return c->in_struct;
-	case T_IDENT:
+	case LEX_TOKEN_IDENTIFIER:
 		break;
 	default:
 		return false;
@@ -324,7 +324,7 @@ static __attribute__((noinline, cold)) bool valid_after_tag(cc *c)
 	case KW__Thread_local: case KW_constexpr: {
 		/* likely the next declaration's, unless a type specifier follows (isKnownToBeTypeSpecifier) */
 		const ptok *n = peek(c, 1);
-		int k = n->kind == T_IDENT ? kwof(n) : 0;
+		int k = n->kind == LEX_TOKEN_IDENTIFIER ? kwof(n) : 0;
 
 		return !(k && (kwclass[k] & KC_TYPE) && !(k == KW_const || k == KW___const__ || k == KW___const ||
 			 k == KW_volatile || k == KW___volatile__ || k == KW___volatile || k == KW_restrict ||
@@ -341,11 +341,11 @@ static __attribute__((noinline, cold)) bool valid_after_tag(cc *c)
    previous token, with the insertion, and parsing goes on as if it were there */
 static __attribute__((noinline, cold)) void tag_semi(cc *c, int kind)
 {
-	uint32_t e = c->prevflags & PF_MACRO ? tok(c)->loc : pp_tok_end(c->p, c->prevloc);
+	uint32_t e = c->prevflags & PP_TOKEN_FLAG_FROM_MACRO ? tok(c)->loc : pp_tok_end(c->p, c->prevloc);
 	pp_fixit fx = { e, e, ";", VDA_MAYBE };	/* (a guess: often two names in a row) */
 	ptok *t = c->tk;
 
-	report(c, "error", e, NULL, 0, &fx, !(c->prevflags & PF_MACRO), "expected ';' after %s",
+	report(c, "error", e, NULL, 0, &fx, !(c->prevflags & PP_TOKEN_FLAG_FROM_MACRO), "expected ';' after %s",
 	       kind == TY_ENUM ? "enum" : kind == TY_UNION ? "union" : "struct");
 	peek(c, 0);
 	if (c->ntk >= 4)
@@ -354,14 +354,14 @@ static __attribute__((noinline, cold)) void tag_semi(cc *c, int kind)
 		c->ntk = 1;
 	memmove(t + 1, t, c->ntk * sizeof(*t));
 	c->ntk++;
-	t[0] = (ptok){ .s = ";", .len = 1, .loc = e, .kind = T_SEMI };
+	t[0] = (ptok){ .s = ";", .len = 1, .loc = e, .kind = LEX_TOKEN_SEMICOLON };
 }
 
 /* after a struct, union or enum body: clang's missing ';' when what follows cannot
    follow a type specifier (out of decl_specs' loop, which it would cost registers) */
 static __attribute__((noinline)) void tag_body_end(cc *c, int kind)
 {
-	if (likely(is(c, T_SEMI)) || c->in_tyname || valid_after_tag(c))
+	if (likely(is(c, LEX_TOKEN_SEMICOLON)) || c->in_tyname || valid_after_tag(c))
 		return;
 	tag_semi(c, kind);
 }
@@ -386,9 +386,9 @@ static __attribute__((noinline, cold)) void spec_clash(cc *c, const dspec *ds, i
 		attrs a = { 0 };
 
 		attribute_list(c, &a);
-		if (is(c, T_IDENT) && !kwof(tok(c)))
+		if (is(c, LEX_TOKEN_IDENTIFIER) && !kwof(tok(c)))
 			next(c);
-		if (is(c, T_LBRACE))
+		if (is(c, LEX_TOKEN_LEFT_BRACE))
 			skip_balanced(c);
 	}
 }
@@ -420,9 +420,9 @@ static __attribute__((noinline, cold)) void implicit_int_error(cc *c)
 {
 	uint32_t i = 0, at = tok(c)->loc;
 
-	while (i < 16 && (peek(c, i)->kind == T_STAR || peek(c, i)->kind == T_LPAREN || is_cvr(kwof(peek(c, i)))))
+	while (i < 16 && (peek(c, i)->kind == LEX_TOKEN_STAR || peek(c, i)->kind == LEX_TOKEN_LEFT_PAREN || is_cvr(kwof(peek(c, i)))))
 		i++;
-	if (peek(c, i)->kind == T_IDENT && !kwof(peek(c, i)))
+	if (peek(c, i)->kind == LEX_TOKEN_IDENTIFIER && !kwof(peek(c, i)))
 		at = peek(c, i)->loc;
 	if (c->o->std == 23)
 		cc_error(c, at, "a type specifier is required for all declarations");
@@ -459,7 +459,7 @@ again:
 				next(c);
 				continue;
 			}
-			if (!have_named && !base && !nlong && !sgn && t->kind == T_IDENT && typedef_id(c, t->id)) {
+			if (!have_named && !base && !nlong && !sgn && t->kind == LEX_TOKEN_IDENTIFIER && typedef_id(c, t->id)) {
 				uint32_t ts = lookup(c, t->id);
 
 				if (unlikely(c->syms[ts].flags & SF_DEPRECATED))
@@ -520,7 +520,7 @@ again:
 			uint32_t aloc = t->loc;
 
 			next(c);
-			if (is(c, T_LPAREN)) {
+			if (is(c, LEX_TOKEN_LEFT_PAREN)) {
 				uint32_t open = tok(c)->loc;
 
 				next(c);
@@ -537,7 +537,7 @@ again:
 				named = ty_atomic(c, operand, aloc);
 				ds->invalid |= c->errors != errors;
 				have_named = true;
-				expect_match(c, T_RPAREN, open);
+				expect_match(c, LEX_TOKEN_RIGHT_PAREN, open);
 				any = true;
 			} else {
 				atomic = aloc ? aloc : 1;	/* the qualifier: applied to the type below */
@@ -568,7 +568,7 @@ again:
 				}
 				a = v < 0 || (v & (v - 1)) ? 0 : (uint32_t)v;
 			}
-			expect_match(c, T_RPAREN, open);
+			expect_match(c, LEX_TOKEN_RIGHT_PAREN, open);
 			if (a > ds->align)
 				ds->align = a;
 			continue;
@@ -587,7 +587,7 @@ again:
 			next(c);
 			open = expect_lparen(c);
 			const_expr(c, &width, NULL);
-			expect_match(c, T_RPAREN, open);
+			expect_match(c, LEX_TOKEN_RIGHT_PAREN, open);
 			if (width < 1 || width > 8388608) {
 				cc_error(c, loc, "_BitInt width must be between 1 and 8388608");
 				width = 2;
@@ -687,13 +687,13 @@ again:
 			}
 			next(c);
 			attribute_list(c, &pre);
-			if (is(c, T_IDENT) && !kwof(tok(c))) {
+			if (is(c, LEX_TOKEN_IDENTIFIER) && !kwof(tok(c))) {
 				name = tok(c)->id;
 				loc = tok(c)->loc;
 				next(c);
 			}
-			body = is(c, T_LBRACE) || (kind == TY_ENUM && is(c, T_COLON));
-			ti = tag_lookup_or_new(c, kind, name, loc, body, !body && is(c, T_SEMI) && !c->in_struct);
+			body = is(c, LEX_TOKEN_LEFT_BRACE) || (kind == TY_ENUM && is(c, LEX_TOKEN_COLON));
+			ti = tag_lookup_or_new(c, kind, name, loc, body, !body && is(c, LEX_TOKEN_SEMICOLON) && !c->in_struct);
 			if (!body && c->tags[ti].depr)
 				deprecated_use(c, loc, name, &c->attr[c->tags[ti].depr], c->tags[ti].loc);
 			if (body) {
@@ -754,7 +754,7 @@ again:
 	}
 done:
 	/* any: also a base, width, sign, _Complex or named type */
-	if (unlikely(!any) && is(c, T_IDENT) && (q || atomic || ds->sc || ds->inline_ || ds->noreturn || ds->thread)) {
+	if (unlikely(!any) && is(c, LEX_TOKEN_IDENTIFIER) && (q || atomic || ds->sc || ds->inline_ || ds->noreturn || ds->thread)) {
 		qty it = implicit_int_name(c, ds);
 
 		if (it) {

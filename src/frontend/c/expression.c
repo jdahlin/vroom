@@ -7,8 +7,8 @@
 
 VPRIV bool is_cmp(int op)
 {
-	return op == T_LESS || op == T_LESSEQ || op == T_GREATER || op == T_GREATEREQ ||
-	       op == T_EQUALEQUAL || op == T_EXCLAIMEQ;
+	return op == LEX_TOKEN_LESS || op == LEX_TOKEN_LESS_EQUAL || op == LEX_TOKEN_GREATER || op == LEX_TOKEN_GREATER_EQUAL ||
+	       op == LEX_TOKEN_EQUAL_EQUAL || op == LEX_TOKEN_EXCLAMATION_EQUAL;
 }
 
 /* clang -pedantic: arithmetic on void * (GNU: element size 1) */
@@ -174,10 +174,10 @@ VPRIV uint32_t binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 {
 	qty lt, rt;
 
-	if (op == T_AMPAMP || op == T_PIPEPIPE) {
+	if (op == LEX_TOKEN_AMPERSAND_AMPERSAND || op == LEX_TOKEN_PIPE_PIPE) {
 		l = scalar_cond(c, decay(c, l), "logical operator");
 		r = scalar_cond(c, decay(c, r), "logical operator");
-		return mk2(c, op == T_AMPAMP ? N_LOGAND : N_LOGOR, prim(TY_INT), loc, l, r);
+		return mk2(c, op == LEX_TOKEN_AMPERSAND_AMPERSAND ? N_LOGAND : N_LOGOR, prim(TY_INT), loc, l, r);
 	}
 	l = rvalue(c, l), r = rvalue(c, r);
 	lt = N(l)->ty, rt = N(r)->ty;
@@ -188,15 +188,15 @@ VPRIV uint32_t binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 		 * comparisons give the signed integer vector of the same lanes (-1 / 0) */
 		qty vt = QUNQ(is_vector(c, lt) ? lt : rt), et = T(c, vt)->base;
 		bool both = is_vector(c, lt) && is_vector(c, rt);
-		bool shift = op == T_LESSLESS || op == T_GREATERGREATER;
+		bool shift = op == LEX_TOKEN_LESS_LESS || op == LEX_TOKEN_GREATER_GREATER;
 		qty res = vt;
 
-		if (is_bool_vector(c, vt) && !(op == T_AMP || op == T_PIPE || op == T_CARET || is_cmp(op)))
+		if (is_bool_vector(c, vt) && !(op == LEX_TOKEN_AMPERSAND || op == LEX_TOKEN_PIPE || op == LEX_TOKEN_CARET || is_cmp(op)))
 			bad_operands(c, op, l, r, loc);
 
 		if ((both && T(c, lt)->size != T(c, rt)->size) ||
 		    (!both && !is_arith(c, is_vector(c, lt) ? rt : lt)) ||
-		    ((op == T_PERCENT || op == T_AMP || op == T_PIPE || op == T_CARET || shift) && !is_integer(c, et)))
+		    ((op == LEX_TOKEN_PERCENT || op == LEX_TOKEN_AMPERSAND || op == LEX_TOKEN_PIPE || op == LEX_TOKEN_CARET || shift) && !is_integer(c, et)))
 			bad_operands(c, op, l, r, loc);
 		else if (!both && !shift && !vec_scalar_check(c, is_vector(c, lt) ? r : l, vt, loc))
 			return mk_bin(c, op, is_cmp(op) ? vec_mask_type(c, vt) : vt, l, l, loc);	/* (stands in; diagnosed) */
@@ -215,30 +215,30 @@ VPRIV uint32_t binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 	if (is_arith(c, lt) && is_arith(c, rt)) {
 		qty ct;
 
-		if (op == T_LESSLESS || op == T_GREATERGREATER) {
+		if (op == LEX_TOKEN_LESS_LESS || op == LEX_TOKEN_GREATER_GREATER) {
 			if (!is_integer(c, lt) || !is_integer(c, rt))
 				bad_operands(c, op, l, r, loc);
 			return mk_bin(c, op, lt, l, r, loc);
 		}
-		if ((op == T_PERCENT || op == T_AMP || op == T_PIPE || op == T_CARET) &&
+		if ((op == LEX_TOKEN_PERCENT || op == LEX_TOKEN_AMPERSAND || op == LEX_TOKEN_PIPE || op == LEX_TOKEN_CARET) &&
 		    (!is_integer(c, lt) || !is_integer(c, rt)))
 			bad_operands(c, op, l, r, loc);
 		ct = arith_conv(c, lt, rt);
 		l = convert(c, l, ct), r = convert(c, r, ct);
 		return mk_bin(c, op, is_cmp(op) ? prim(TY_INT) : ct, l, r, loc);
 	}
-	if (op == T_PLUS && is_ptr(c, rt) && is_integer(c, lt)) {
+	if (op == LEX_TOKEN_PLUS && is_ptr(c, rt) && is_integer(c, lt)) {
 		uint32_t t = l;
 
 		l = r, r = t;
 		lt = N(l)->ty, rt = N(r)->ty;
 	}
-	if ((op == T_PLUS || op == T_MINUS) && is_ptr(c, lt) && is_integer(c, rt)) {
+	if ((op == LEX_TOKEN_PLUS || op == LEX_TOKEN_MINUS) && is_ptr(c, lt) && is_integer(c, rt)) {
 		void_ptr_arith(c, lt, loc, false);
 		r = convert(c, r, prim(TY_LONG));
 		return mk_bin(c, op, lt, l, r, loc);
 	}
-	if (op == T_MINUS && is_ptr(c, lt) && is_ptr(c, rt)) {
+	if (op == LEX_TOKEN_MINUS && is_ptr(c, lt) && is_ptr(c, rt)) {
 		void_ptr_arith(c, lt, loc, true);
 		return mk_bin(c, op, c->t_ptrdiff, l, r, loc);
 	}
@@ -287,20 +287,20 @@ VPRIV uint32_t assign(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 
 		r = rvalue(c, r);
 		rt = N(r)->ty;
-		if (is_ptr(c, lt) && (op == T_PLUS || op == T_MINUS)) {
+		if (is_ptr(c, lt) && (op == LEX_TOKEN_PLUS || op == LEX_TOKEN_MINUS)) {
 			void_ptr_arith(c, lt, loc, false);
 			r = convert(c, r, prim(TY_LONG));
 			pt = lt;
 		} else if (is_vector(c, lt)) {
-			if (is_bool_vector(c, lt) && op != T_AMP && op != T_PIPE && op != T_CARET)
+			if (is_bool_vector(c, lt) && op != LEX_TOKEN_AMPERSAND && op != LEX_TOKEN_PIPE && op != LEX_TOKEN_CARET)
 				cc_error(c, loc, "invalid operands to compound assignment");
 			if (is_vector(c, rt) ? T(c, lt)->size != T(c, rt)->size : !is_arith(c, rt))
 				cc_error(c, loc, "invalid operands to compound assignment");
-			else if (!is_vector(c, rt) && op != T_LESSLESS && op != T_GREATERGREATER)
+			else if (!is_vector(c, rt) && op != LEX_TOKEN_LESS_LESS && op != LEX_TOKEN_GREATER_GREATER)
 				vec_scalar_check(c, r, QUNQ(lt), loc);
 			r = convert(c, r, is_vector(c, rt) ? QUNQ(lt) : T(c, lt)->base);
 			pt = QUNQ(lt);
-		} else if (op == T_LESSLESS || op == T_GREATERGREATER) {
+		} else if (op == LEX_TOKEN_LESS_LESS || op == LEX_TOKEN_GREATER_GREATER) {
 			/* computation type is the promoted lhs */
 		} else if (is_arith(c, pt) && is_arith(c, rt)) {
 			pt = arith_conv(c, pt, rt);
@@ -336,9 +336,9 @@ VPRIV uint32_t conditional(cc *c, uint32_t cond, uint32_t a, uint32_t b, uint32_
 		uint32_t pre = 0;
 		cond = cplx_reuse(c, rvalue(c, cond), &pre);
 		uint32_t neg = mk(c, N_UNARY, vt, loc);
-		N(neg)->aux = T_TILDE, N(neg)->a = cond;
-		uint32_t result = binop(c, T_PIPE, binop(c, T_AMP, cond, convert(c, ra, vt), loc),
-		                        binop(c, T_AMP, neg, convert(c, rb, vt), loc), loc);
+		N(neg)->aux = LEX_TOKEN_TILDE, N(neg)->a = cond;
+		uint32_t result = binop(c, LEX_TOKEN_PIPE, binop(c, LEX_TOKEN_AMPERSAND, cond, convert(c, ra, vt), loc),
+		                        binop(c, LEX_TOKEN_AMPERSAND, neg, convert(c, rb, vt), loc), loc);
 		return with_pre(c, pre, result);
 	}
 	if ((is_complex(c, at) || is_complex(c, bt)) && (is_arith(c, at) || is_complex(c, at)) &&
@@ -579,24 +579,24 @@ static uint32_t generic_sel(cc *c, uint32_t loc)
 	ctl = decay(c, assign_expr(c));
 	c->unevaluated--;
 	ct = QUNQ(N(ctl)->ty);	/* lvalue conversion: no qualifiers, no promotion */
-	while (accept(c, T_COMMA)) {
+	while (accept(c, LEX_TOKEN_COMMA)) {
 		uint32_t e;
 
 		if (iskw(c, KW_default)) {
 			next(c);
-			expect(c, T_COLON, "':'");
+			expect(c, LEX_TOKEN_COLON, "':'");
 			e = assign_expr(c);
 			def = e;
 		} else {
 			qty t = type_name(c);
 
-			expect(c, T_COLON, "':'");
+			expect(c, LEX_TOKEN_COLON, "':'");
 			e = assign_expr(c);
 			if (!chosen && compatible(c, QUNQ(t), ct) && QQ(t) == 0)
 				chosen = e;
 		}
 	}
-	expect_match(c, T_RPAREN, open);
+	expect_match(c, LEX_TOKEN_RIGHT_PAREN, open);
 	if (!chosen)
 		chosen = def;
 	if (!chosen) {
@@ -620,7 +620,7 @@ static uint32_t func_name(cc *c, uint32_t loc)
 
 	memcpy(buf, s, (size_t)len);
 	buf[len] = 0;
-	c->strs[si] = (cstr){ buf, (uint32_t)len + 1, 1, T_STRING };
+	c->strs[si] = (cstr){ buf, (uint32_t)len + 1, 1, LEX_TOKEN_STRING };
 	n = mk(c, N_STR, ty_array(c, QT(TY_CHAR, Q_CONST), (uint64_t)len + 1, 0), loc);
 	N(n)->a = si;
 	N(n)->flags = NF_LVALUE;
@@ -659,12 +659,12 @@ static inline __attribute__((always_inline)) uint32_t primary_sym(cc *c, uint32_
 		if (unlikely(y->flags & SF_INVALID))
 			N(n)->flags |= NF_ERR;
 		/* (clang: a function's references from its own body do not use it) */
-		if ((!c->unevaluated || c->bcp) && !((y->flags & SF_OVERLOAD) && is(c, T_LPAREN)) && s != c->fn)
+		if ((!c->unevaluated || c->bcp) && !((y->flags & SF_OVERLOAD) && is(c, LEX_TOKEN_LEFT_PAREN)) && s != c->fn)
 			y->flags |= SF_USED;
 		if (unlikely(y->flags & SF_UVPEND)) {
-			if (tok(c)->kind == T_PERIOD)
+			if (tok(c)->kind == LEX_TOKEN_PERIOD)
 				y->flags &= ~SF_UVPEND;	/* s.m: initializes it for the analysis */
-			else if (tok(c)->kind != T_EQUAL) {
+			else if (tok(c)->kind != LEX_TOKEN_EQUAL) {
 				y->flags &= ~SF_UVPEND;
 				c->uv_any |= 4;	/* read (or &) before any assignment: run the analysis */
 			} else if (!uv_deeper(c, s))
@@ -752,18 +752,18 @@ static __attribute__((noinline)) uint32_t primary_unbound(cc *c, uint32_t id, ui
 	{
 		const builtin *b = builtin_of(id);
 
-		if (b && is(c, T_LPAREN))
+		if (b && is(c, LEX_TOKEN_LEFT_PAREN))
 			return builtin_call(c, b, loc);
 	}
 	if (id == c->id_func || id == c->id_FUNCTION || id == c->id_PRETTY)
 		return func_name(c, loc);
 	{
-		uint32_t s = is(c, T_LPAREN) ? lib_builtin(c, id, loc) : 0;
+		uint32_t s = is(c, LEX_TOKEN_LEFT_PAREN) ? lib_builtin(c, id, loc) : 0;
 
 		if (s)
 			return primary_sym(c, s, id, loc);
 	}
-	if (is(c, T_LPAREN)) {
+	if (is(c, LEX_TOKEN_LEFT_PAREN)) {
 		uint32_t ls = lib_func(c, id, loc);
 		qty lt;
 
@@ -825,7 +825,7 @@ static __attribute__((noinline)) uint32_t stmt_expr(cc *c, uint32_t loc)
 	b = compound_stmt(c, &last);
 	c->for_head = fh;
 	c->in_stmtexpr--;
-	expect_match(c, T_RPAREN, loc);
+	expect_match(c, LEX_TOKEN_RIGHT_PAREN, loc);
 	n = mk(c, N_STMTEXPR, last, loc);
 	N(n)->a = b;
 	if (!c->in_stmtexpr)
@@ -838,11 +838,11 @@ VPRIV uint32_t paren_expr(cc *c, uint32_t loc)
 {
 	uint32_t n;
 
-	if (is(c, T_LBRACE)) {
+	if (is(c, LEX_TOKEN_LEFT_BRACE)) {
 		static const char *const g[] = { "gnu-statement-expression", "gnu", "pedantic", NULL };
-		bool mac = tok(c)->flags & PF_MACRO;
+		bool mac = tok(c)->flags & PP_TOKEN_FLAG_FROM_MACRO;
 
-		if (!(c->prevflags & PF_MACRO))
+		if (!(c->prevflags & PP_TOKEN_FLAG_FROM_MACRO))
 			EXT_WARN(c, "gnu-statement-expression", w_gnu, tok(c)->loc, "use of GNU statement expression extension");
 		else if (unlikely(ext_on(c, "gnu-statement-expression-from-macro-expansion", g))) {
 			c->dms = "{";	/* (clang: the '(' from a macro; the caret at the invocation) */
@@ -855,14 +855,14 @@ VPRIV uint32_t paren_expr(cc *c, uint32_t loc)
 		return n;
 	}
 	n = expr(c);
-	if (likely(is(c, T_RPAREN)) && !ISERR(n)) {
+	if (likely(is(c, LEX_TOKEN_RIGHT_PAREN)) && !ISERR(n)) {
 		/* the parentheses around it, as distances (no location fix-up in the caches) */
 		uint32_t b = c->span[n].e ? c->span[n].b : N(n)->loc, e = c->span[n].e ? c->span[n].e : N(n)->loc, rp = tok(c)->loc;
 
 		if (b >= loc && b - loc < 65536 && rp >= e && rp - e < 65536)
 			c->paren[n] = (struct cparen){ (uint16_t)(b - loc), (uint16_t)(rp - e) };
 	}
-	expect_close(c, T_RPAREN, loc, n);
+	expect_close(c, LEX_TOKEN_RIGHT_PAREN, loc, n);
 	N(n)->flags |= NF_PAREN;
 	return n;
 }
@@ -882,20 +882,20 @@ static uint32_t primary_(cc *c)
 	uint32_t loc = t->loc;
 
 	switch (t->kind) {
-	case T_NUMBER: {
+	case LEX_TOKEN_NUMBER: {
 		uint32_t n = number(c, t);
 
 		next(c);
 		return n;
 	}
-	case T_CHAR: case T_WCHAR: case T_U8CHAR: case T_U16CHAR: case T_U32CHAR:
+	case LEX_TOKEN_CHARACTER: case LEX_TOKEN_WIDE_CHARACTER: case LEX_TOKEN_UTF8_CHARACTER: case LEX_TOKEN_UTF16_CHARACTER: case LEX_TOKEN_UTF32_CHARACTER:
 		return char_lit(c);
-	case T_STRING: case T_WSTRING: case T_U8STRING: case T_U16STRING: case T_U32STRING:
+	case LEX_TOKEN_STRING: case LEX_TOKEN_WIDE_STRING: case LEX_TOKEN_UTF8_STRING: case LEX_TOKEN_UTF16_STRING: case LEX_TOKEN_UTF32_STRING:
 		return string_lit(c);
-	case T_LPAREN:
+	case LEX_TOKEN_LEFT_PAREN:
 		next(c);
 		return paren_expr(c, loc);
-	case T_IDENT: {
+	case LEX_TOKEN_IDENTIFIER: {
 		uint32_t id = t->id, s;
 		int kw = kwof(t);
 
@@ -905,9 +905,9 @@ static uint32_t primary_(cc *c)
 			/* C23 u8'a': the lexer gives u8 and 'a' (C17 tokens) */
 			ptok *q = peek(c, 1);
 
-			if (q->kind == T_CHAR && q->loc == loc + 2) {
+			if (q->kind == LEX_TOKEN_CHARACTER && q->loc == loc + 2) {
 				next(c);
-				tok(c)->kind = T_U8CHAR, tok(c)->loc = loc;
+				tok(c)->kind = LEX_TOKEN_UTF8_CHARACTER, tok(c)->loc = loc;
 				return char_lit(c);
 			}
 		}
@@ -1005,24 +1005,24 @@ static __attribute__((noinline, cold)) uint32_t postfix_err(cc *c, uint32_t n)
 {
 	for (;;) {
 		switch (tok(c)->kind) {
-		case T_LSQUARE:
+		case LEX_TOKEN_LEFT_SQUARE:
 			next(c);
 			expr(c);
-			expect(c, T_RSQUARE, "']'");
+			expect(c, LEX_TOKEN_RIGHT_SQUARE, "']'");
 			break;
-		case T_LPAREN: {
+		case LEX_TOKEN_LEFT_PAREN: {
 			vec args;
 
 			args_list(c, &args);
 			break;
 		}
-		case T_PERIOD: case T_ARROW:
+		case LEX_TOKEN_PERIOD: case LEX_TOKEN_ARROW:
 			next(c);
-			if (!is(c, T_IDENT))
+			if (!is(c, LEX_TOKEN_IDENTIFIER))
 				fatal(c, tok(c)->loc, "expected identifier");
 			next(c);
 			break;
-		case T_PLUSPLUS: case T_MINUSMINUS:
+		case LEX_TOKEN_PLUS_PLUS: case LEX_TOKEN_MINUS_MINUS:
 			next(c);
 			break;
 		default:	/* an error node of no type a conversion would look at (decay drops the flag) */
@@ -1041,14 +1041,14 @@ VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 		if (unlikely(ISERR(n)))
 			return postfix_err(c, n);
 		switch (tok(c)->kind) {
-		case T_LSQUARE: {
+		case LEX_TOKEN_LEFT_SQUARE: {
 			uint32_t ix, r;
 			qty at, it;
 			qty vector_type = is_vector(c, N(n)->ty) ? N(n)->ty : 0;
 
 			next(c);
 			ix = expr(c);
-			expect(c, T_RSQUARE, "']'");
+			expect(c, LEX_TOKEN_RIGHT_SQUARE, "']'");
 			if (unlikely(ISERR(ix))) {
 				n = err_node(c, loc);
 				continue;
@@ -1103,12 +1103,12 @@ VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 			n = r;
 			continue;
 		}
-		case T_LPAREN:
+		case LEX_TOKEN_LEFT_PAREN:
 			n = call(c, n, loc);
 			continue;
-		case T_PERIOD:
+		case LEX_TOKEN_PERIOD:
 			next(c);
-			if (!is(c, T_IDENT))
+			if (!is(c, LEX_TOKEN_IDENTIFIER))
 				fatal(c, tok(c)->loc, "expected identifier");
 			{
 				uint32_t id = tok(c)->id, nloc = tok(c)->loc;
@@ -1138,9 +1138,9 @@ VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 				n = member(c, n, id, loc);
 			}
 			continue;
-		case T_ARROW:
+		case LEX_TOKEN_ARROW:
 			next(c);
-			if (!is(c, T_IDENT))
+			if (!is(c, LEX_TOKEN_IDENTIFIER))
 				fatal(c, tok(c)->loc, "expected identifier");
 			{
 				uint32_t id = tok(c)->id;
@@ -1165,9 +1165,9 @@ VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 				}
 			}
 			continue;
-		case T_PLUSPLUS:
-		case T_MINUSMINUS: {
-			int op = tok(c)->kind == T_PLUSPLUS ? N_POSTINC : N_POSTDEC;
+		case LEX_TOKEN_PLUS_PLUS:
+		case LEX_TOKEN_MINUS_MINUS: {
+			int op = tok(c)->kind == LEX_TOKEN_PLUS_PLUS ? N_POSTINC : N_POSTDEC;
 			uint32_t r;
 
 			next(c);
@@ -1177,7 +1177,7 @@ VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 				continue;
 			}
 			if ((T(c, N(n)->ty)->flags & TF_ATOMIC) && atomic_wide(c, N(n)->ty)) {
-				n = atomic_assign_expr(c, n, 0, op == N_POSTINC ? T_PLUS : T_MINUS, true, loc);
+				n = atomic_assign_expr(c, n, 0, op == N_POSTINC ? LEX_TOKEN_PLUS : LEX_TOKEN_MINUS, true, loc);
 				continue;
 			}
 			need_scalar(c, n, "increment");

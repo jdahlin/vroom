@@ -1,5 +1,5 @@
 /* The narrated style: each record told as sentences. */
-#include "../frontend/pp/ppimpl.h"
+#include "../frontend/pp/pp-internal.h"
 #include "common/buffer.h"
 #include <ctype.h>
 #include <dlfcn.h>
@@ -19,7 +19,7 @@ static void say_place(pp *p, vbuffer *b, const char *what, uint32_t loc)
 
 VPRIV void render_narr(pp *p, vbuffer *b, const vdiag *d)
 {
-	const fent *e;
+	const pp_file_entry *e;
 
 	if (render_head(p, b, d, &e)) {
 		const char *s = e->f->src;

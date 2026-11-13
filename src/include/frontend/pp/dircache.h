@@ -6,6 +6,6 @@
  * syscall after the first probe of that directory), -1 if open() must
  * decide.  Shared by all threads.
  */
-int vdir_exists(const char *path, size_t len);
-void vdir_flush(void);	/* forget every directory (a new build); none in flight */
+int pp_directory_exists(const char *path, size_t len);
+void pp_directory_cache_flush(void);	/* forget every directory (a new build); none in flight */
 #endif

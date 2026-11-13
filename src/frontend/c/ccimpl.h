@@ -215,7 +215,7 @@ extern const char *const w_ped[];	/* { "pedantic" } */
 /* ... the token at loc (from the source, not a macro: tf its flags) with a fix-it removing it */
 #define EXT_WARN_DEL(c, ms, tf, flag, groups, loc, ...) \
 	do { if (unlikely(ext_on((c), (flag), (groups)))) { (c)->dms = (ms); \
-		if (!((tf) & PF_MACRO)) (c)->dfx = (pp_fixit){ (loc), (loc) + (uint32_t)strlen(ms), "", VDA_MACHINE }; \
+		if (!((tf) & PP_TOKEN_FLAG_FROM_MACRO)) (c)->dfx = (pp_fixit){ (loc), (loc) + (uint32_t)strlen(ms), "", VDA_MACHINE }; \
 		ext_warn((c), (flag), (groups), (loc), __VA_ARGS__); } } while (0)
 VPRIV void cc_errorx(cc *c, const char *flag, const char *const *groups, uint32_t loc,
                      const pp_span *r, int nr, const char *fmt, ...) __attribute__((format(printf, 7, 8)));
@@ -627,17 +627,17 @@ static inline u128 fnum_q(const cc *c, uint32_t a) { u128 q; memcpy(&q, &c->fpoo
 
 static inline int kwof(const ptok *t)
 {
-	return t->kind == T_IDENT && t->id < KW_END ? (int)kwmap[t->id] : 0;
+	return t->kind == LEX_TOKEN_IDENTIFIER && t->id < KW_END ? (int)kwmap[t->id] : 0;
 }
 
-/* inline at every token consumer: a call to pp_next and a test; the rest out of line */
+/* inline at every token consumer: a call to pp_token_next and a test; the rest out of line */
 static inline __attribute__((always_inline)) void fetch(cc *c, ptok *t)
 {
 	if (unlikely(c->lz_on))
 		lz_fetch(c, t);
 	else
-		pp_next(c->p, t);
-	if (unlikely(t->kind == P_DIRECTIVE))
+		pp_token_next(c->p, t);
+	if (unlikely(t->kind == PP_TOKEN_KIND_DIRECTIVE_LINE))
 		fetch_directive(c, t);
 }
 
@@ -646,7 +646,7 @@ static inline ptok *tok(cc *c) { return &c->tk[0]; }
 /* clang's nullability qualifiers: no meaning for code generation */
 static inline bool is_nullability(const cc *c, const ptok *t)
 {
-	return t->kind == T_IDENT && (t->id == c->id_null[0] || t->id == c->id_null[1] ||
+	return t->kind == LEX_TOKEN_IDENTIFIER && (t->id == c->id_null[0] || t->id == c->id_null[1] ||
 				      t->id == c->id_null[2] || t->id == c->id_null[3]);
 }
 
@@ -686,7 +686,7 @@ static inline __attribute__((always_inline)) uint32_t expect_lparen(cc *c)
 {
 	uint32_t l = c->tk[0].loc;
 
-	expect(c, T_LPAREN, "'('");
+	expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
 	return l;
 }
 
@@ -794,7 +794,7 @@ static inline uint32_t postfix(cc *c, uint32_t n)
 {
 	int k = tok(c)->kind;
 
-	if (likely(k != T_LSQUARE && k != T_LPAREN && k != T_PERIOD && k != T_ARROW && k != T_PLUSPLUS && k != T_MINUSMINUS))
+	if (likely(k != LEX_TOKEN_LEFT_SQUARE && k != LEX_TOKEN_LEFT_PAREN && k != LEX_TOKEN_PERIOD && k != LEX_TOKEN_ARROW && k != LEX_TOKEN_PLUS_PLUS && k != LEX_TOKEN_MINUS_MINUS))
 		return n;
 	return postfix_ops(c, n);
 }
@@ -809,7 +809,7 @@ static inline bool at_attribute(cc *c)
 /* C23 "[[" starts an attribute specifier */
 static inline bool at_std_attr(cc *c)
 {
-	return is(c, T_LSQUARE) && peek(c, 1)->kind == T_LSQUARE;
+	return is(c, LEX_TOKEN_LEFT_SQUARE) && peek(c, 1)->kind == LEX_TOKEN_LEFT_SQUARE;
 }
 
 /* most declarators have none: keep the check inline */

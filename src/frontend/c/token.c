@@ -1,4 +1,4 @@
-/* vcc front end: the parser's token window over pp_next, and the diagnostics of a missing token */
+/* vcc front end: the parser's token window over pp_token_next, and the diagnostics of a missing token */
 #include "ccimpl.h"
 
 uint8_t kwclass[KW_END];
@@ -63,30 +63,30 @@ VPRIV __attribute__((noinline)) void fetch_directive(cc *c, ptok *t)
 		if (unlikely(c->lz_on))
 			lz_fetch(c, t);
 		else
-			pp_next(c->p, t);
-	} while (t->kind == P_DIRECTIVE);
+			pp_token_next(c->p, t);
+	} while (t->kind == PP_TOKEN_KIND_DIRECTIVE_LINE);
 }
 
-/* a lazy body's next token (lazy.c), T_EOF after its '}' */
+/* a lazy body's next token (lazy.c), LEX_TOKEN_EOF after its '}' */
 VPRIV __attribute__((noinline)) void lz_fetch(cc *c, ptok *t)
 {
 	const lztok *z;
 
 	if (c->lz_hc && c->lzz.k <= c->lzz.close) {
-		pp_lazy_tok(c->p, &c->lzz, t);
-		c->lze = t->loc;	/* (the T_EOF's location) */
+		pp_lazy_body_token_get(c->p, &c->lzz, t);
+		c->lze = t->loc;	/* (the LEX_TOKEN_EOF's location) */
 		return;
 	}
 	if (c->lz_hc) {
 		memset(t, 0, sizeof(*t));
-		t->kind = T_EOF;
+		t->kind = LEX_TOKEN_EOF;
 		t->s = "";
 		t->loc = c->lze;
 		return;
 	}
 	if (c->lzc >= c->lze) {
 		memset(t, 0, sizeof(*t));
-		t->kind = T_EOF;
+		t->kind = LEX_TOKEN_EOF;
 		t->s = "";
 		t->loc = c->lze ? c->lzt[c->lze - 1].loc : 0;
 		return;
@@ -97,7 +97,7 @@ VPRIV __attribute__((noinline)) void lz_fetch(cc *c, ptok *t)
 	t->loc = z->loc;
 	t->ctr = 0;
 	t->len = z->len;
-	if (z->kind == T_IDENT) {
+	if (z->kind == LEX_TOKEN_IDENTIFIER) {
 		t->id = z->v;
 		t->s = vintern_ents[z->v].s;
 	} else {
@@ -112,10 +112,10 @@ VPRIV ptok *peek(cc *c, int k)
 {
 	/* tk[0..ntk) may point into pp's tmp arena: keep it while looking ahead */
 	if (c->ntk <= k) {
-		pp_hold_tmp(c->p, 1);
+		pp_temporary_hold(c->p, 1);
 		while (c->ntk <= k)
 			fetch(c, &c->tk[c->ntk++]);
-		pp_hold_tmp(c->p, 0);
+		pp_temporary_hold(c->p, 0);
 	}
 	return &c->tk[k];
 }
@@ -138,9 +138,9 @@ VPRIV const char *tokspell(const ptok *t, char *buf, size_t cap)
 	char tmp[t->len + 1];
 	const char *s;
 
-	if (t->kind == T_EOF)
+	if (t->kind == LEX_TOKEN_EOF)
 		return "end of file";
-	s = pp_spell(t, tmp, &n);
+	s = pp_token_spell(t, tmp, &n);
 	if (n >= cap)
 		n = cap - 1;
 	memcpy(buf, s, n);
@@ -156,7 +156,7 @@ VPRIV __attribute__((noinline, cold, noreturn)) void expect_fail(cc *c, const ch
 {
 	size_t n = strlen(what);
 
-	if (n >= 3 && n <= 5 && what[0] == '\'' && what[n - 1] == '\'' && c->prevloc && !(c->prevflags & PF_MACRO)) {
+	if (n >= 3 && n <= 5 && what[0] == '\'' && what[n - 1] == '\'' && c->prevloc && !(c->prevflags & PP_TOKEN_FLAG_FROM_MACRO)) {
 		uint32_t e = pp_tok_end(c->p, c->prevloc);
 		char *s = halloc(c, n - 1);
 		pp_fixit fx = { e, e, s, VDA_MAYBE };
@@ -190,7 +190,7 @@ VPRIV __attribute__((noinline, cold, noreturn)) void lparen_fail(cc *c, const ch
    ("struct s a b", "int fint x)": the mutation corpus, D6) */
 VPRIV int semi_app(cc *c)
 {
-	return (c->tk[0].flags & TF_SOL) && c->tk[0].kind != T_LBRACE ? VDA_MACHINE : VDA_MAYBE;
+	return (c->tk[0].flags & LEX_TOKEN_FLAG_LINE_START) && c->tk[0].kind != LEX_TOKEN_LEFT_BRACE ? VDA_MACHINE : VDA_MAYBE;
 }
 
 VPRIV bool expect_semi(cc *c, const char *after)
@@ -198,16 +198,16 @@ VPRIV bool expect_semi(cc *c, const char *after)
 	uint32_t e;
 	pp_fixit fx;
 
-	if (likely(c->tk[0].kind == T_SEMI)) {
+	if (likely(c->tk[0].kind == LEX_TOKEN_SEMICOLON)) {
 		next(c);
 		return false;
 	}
-	if ((c->tk[0].kind == T_RPAREN || c->tk[0].kind == T_RSQUARE) && peek(c, 1)->kind == T_SEMI) {
+	if ((c->tk[0].kind == LEX_TOKEN_RIGHT_PAREN || c->tk[0].kind == LEX_TOKEN_RIGHT_SQUARE) && peek(c, 1)->kind == LEX_TOKEN_SEMICOLON) {
 		/* clang: "f);": the stray ')' (or ']') and the ';' are consumed */
 		pp_fixit fx = { c->tk[0].loc, c->tk[0].loc + 1, "", VDA_MAYBE };	/* (or a '(' was lost) */
 
-		report(c, "error", c->tk[0].loc, NULL, 0, &fx, !(c->tk[0].flags & PF_MACRO), "extraneous '%s' before ';'",
-		       c->tk[0].kind == T_RPAREN ? ")" : "]");
+		report(c, "error", c->tk[0].loc, NULL, 0, &fx, !(c->tk[0].flags & PP_TOKEN_FLAG_FROM_MACRO), "extraneous '%s' before ';'",
+		       c->tk[0].kind == LEX_TOKEN_RIGHT_PAREN ? ")" : "]");
 		next(c), next(c);
 		return false;
 	}
@@ -216,7 +216,7 @@ VPRIV bool expect_semi(cc *c, const char *after)
 		report(c, "error", c->tk[0].loc, NULL, 0, NULL, 0, "expected ';' in 'for' statement specifier");
 		return false;
 	}
-	if (c->tk[0].kind == T_COMMA || c->tk[0].kind == T_COLON) {
+	if (c->tk[0].kind == LEX_TOKEN_COMMA || c->tk[0].kind == LEX_TOKEN_COLON) {
 		/* clang's common typo: ',' or ':' for ';', replaced; parsing goes on after it */
 		e = c->tk[0].loc;
 		fx = (pp_fixit){ e, pp_tok_end(c->p, e), ";", VDA_MACHINE };
@@ -236,9 +236,9 @@ VPRIV bool not_expr_start(cc *c, const ptok *t)
 {
 	int kw;
 
-	if (t->kind == T_LBRACE || t->kind == T_RBRACE)
+	if (t->kind == LEX_TOKEN_LEFT_BRACE || t->kind == LEX_TOKEN_RIGHT_BRACE)
 		return true;
-	if (t->kind != T_IDENT)
+	if (t->kind != LEX_TOKEN_IDENTIFIER)
 		return false;
 	kw = kwof(t);
 	if (kw == KW_for || kw == KW_while || kw == KW_if || kw == KW_else || kw == KW_goto)
@@ -253,9 +253,9 @@ static bool might_be_declarator(cc *c, const ptok *t)
 {
 	int kw;
 
-	if (t->kind == T_STAR || t->kind == T_LPAREN || t->kind == T_LSQUARE)
+	if (t->kind == LEX_TOKEN_STAR || t->kind == LEX_TOKEN_LEFT_PAREN || t->kind == LEX_TOKEN_LEFT_SQUARE)
 		return true;
-	if (t->kind != T_IDENT)
+	if (t->kind != LEX_TOKEN_IDENTIFIER)
 		return false;
 	kw = kwof(t);
 	if (kw == KW___attribute__ || kw == KW___attribute)
@@ -271,10 +271,10 @@ VPRIV bool decl_comma_typo(cc *c)
 	const ptok *t;
 	pp_fixit fx;
 
-	if (c->tk[0].kind != T_COMMA)
+	if (c->tk[0].kind != LEX_TOKEN_COMMA)
 		return false;
 	t = peek(c, 1);
-	if (!(t->flags & TF_SOL) || might_be_declarator(c, t))
+	if (!(t->flags & LEX_TOKEN_FLAG_LINE_START) || might_be_declarator(c, t))
 		return false;
 	fx = (pp_fixit){ l, pp_tok_end(c->p, l), ";", VDA_MACHINE };
 	report(c, "error", l, NULL, 0, &fx, 1, "expected ';' at end of declaration");

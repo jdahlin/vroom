@@ -1,15 +1,15 @@
 /*
- * fuzz-lex: vlex() on arbitrary bytes.
+ * fuzz-lex: lex_tokenize() on arbitrary bytes.
  *
  * Oracles, besides ASan/UBSan:
  *   - the token array is well formed: kinds in range, tokens in order and
- *     non-empty, inside the input, one T_EOF at the end;
+ *     non-empty, inside the input, one LEX_TOKEN_EOF at the end;
  *   - tokens cover the input: what lies between two tokens is only
  *     whitespace, NUL, line splices and comments;
  *   - the NEON path agrees with the scalar reference (lexref.c: lex.c with
  *     VLEX_SCALAR) on every token's offset, length, kind and flags;
  *   - the result does not depend on where the buffer starts (alignment);
- *   - vlex_spell() of a token is no longer than the token, and the same
+ *   - lex_token_spell() of a token is no longer than the token, and the same
  *     for clean tokens; interned identifiers spell like their token.
  *
  * The source buffer is allocated with exactly the 128 zero bytes the lexer
@@ -22,7 +22,7 @@
 #include "frontend/lex/lex.h"
 #include "fuzz.h"
 
-uint32_t vlex_ref(const char *src, size_t size, vtok *out, void *scratch);
+uint32_t vlex_ref(const char *src, size_t size, lex_token *out, void *scratch);
 extern _Thread_local int vlex_no_intern_ref;
 
 #define MAXIN (1u << 20)
@@ -112,15 +112,15 @@ static bool gap_ok(const char *s, size_t n, size_t from, size_t to, size_t *wher
 	return p == to;
 }
 
-static void check_array(const char *s, size_t n, const vtok *t, uint32_t nt)
+static void check_array(const char *s, size_t n, const lex_token *t, uint32_t nt)
 {
 	size_t end = 0, where = 0;
 
 	FUZZ_CHECK(nt <= n, "%u tokens for %zu bytes", nt, n);
-	FUZZ_CHECK(t[nt].kind == T_EOF && t[nt].off == n && t[nt].len == 0,
+	FUZZ_CHECK(t[nt].kind == LEX_TOKEN_EOF && t[nt].off == n && t[nt].len == 0,
 		   "bad EOF token: kind %u off %u len %u", t[nt].kind, t[nt].off, t[nt].len);
 	for (uint32_t i = 0; i < nt; i++) {
-		FUZZ_CHECK(t[i].kind != T_EOF && t[i].kind < T_NKINDS, "token %u: kind %u", i, t[i].kind);
+		FUZZ_CHECK(t[i].kind != LEX_TOKEN_EOF && t[i].kind < LEX_TOKEN_KIND_COUNT, "token %u: kind %u", i, t[i].kind);
 		FUZZ_CHECK(t[i].len > 0, "token %u: empty", i);
 		FUZZ_CHECK(t[i].off >= end, "token %u at %u overlaps the previous one (ends %zu)", i, t[i].off, end);
 		FUZZ_CHECK((size_t)t[i].off + t[i].len <= n, "token %u: %u+%u past the end %zu", i, t[i].off, t[i].len, n);
@@ -132,14 +132,14 @@ static void check_array(const char *s, size_t n, const vtok *t, uint32_t nt)
 		   (uint8_t)s[where], where);
 }
 
-static void check_same(const char *what, const vtok *a, uint32_t na, const vtok *b, uint32_t nb)
+static void check_same(const char *what, const lex_token *a, uint32_t na, const lex_token *b, uint32_t nb)
 {
 	FUZZ_CHECK(na == nb, "%s: %u vs %u tokens", what, na, nb);
 	for (uint32_t i = 0; i <= na; i++)
 		FUZZ_CHECK(a[i].off == b[i].off && a[i].len == b[i].len && a[i].kind == b[i].kind &&
 			   a[i].flags == b[i].flags,
 			   "%s: token %u: off %u/%u len %u/%u kind %s/%s flags %u/%u", what, i, a[i].off, b[i].off,
-			   a[i].len, b[i].len, vtok_name(a[i].kind), vtok_name(b[i].kind), a[i].flags, b[i].flags);
+			   a[i].len, b[i].len, lex_token_name(a[i].kind), lex_token_name(b[i].kind), a[i].flags, b[i].flags);
 }
 
 int LLVMFuzzerInitialize(int *argc, char ***argv)
@@ -153,7 +153,7 @@ int LLVMFuzzerInitialize(int *argc, char ***argv)
 int LLVMFuzzerTestOneInput(const uint8_t *d, size_t n)
 {
 	char *b0, *b1, *s, *s1, *sp;
-	vtok *t0, *t1, *t2;
+	lex_token *t0, *t1, *t2;
 	void *scr;
 	uint32_t n0, n1, n2, before;
 	size_t off;
@@ -162,31 +162,31 @@ int LLVMFuzzerTestOneInput(const uint8_t *d, size_t n)
 	if (n > MAXIN)
 		return 0;
 	s = place(d, n, 0, &b0);
-	t0 = malloc((n + 2) * sizeof(vtok));
-	t1 = malloc((n + 2) * sizeof(vtok));
-	t2 = malloc((n + 2) * sizeof(vtok));
-	scr = malloc(vlex_scratch_size(n));
+	t0 = malloc((n + 2) * sizeof(lex_token));
+	t1 = malloc((n + 2) * sizeof(lex_token));
+	t2 = malloc((n + 2) * sizeof(lex_token));
+	scr = malloc(lex_scratch_size(n));
 	sp = malloc(n + 1);
 
 	/* the real thing, interning while the table has room */
 	before = vintern_count();
 	intern = before < INTERN_MAX;
-	vlex_no_intern = !intern;
-	n0 = vlex(s, n, t0, scr);
+	lex_identifiers_not_interned = !intern;
+	n0 = lex_tokenize(s, n, t0, scr);
 	check_array(s, n, t0, n0);
 	for (uint32_t i = 0; i < n0; i++) {
-		size_t l = vlex_spell(s, &t0[i], sp);
+		size_t l = lex_token_spell(s, &t0[i], sp);
 
-		FUZZ_CHECK(l <= t0[i].len && (l > 0 || t0[i].kind == T_UNKNOWN),
+		FUZZ_CHECK(l <= t0[i].len && (l > 0 || t0[i].kind == LEX_TOKEN_UNKNOWN),
 			   "token %u: spelling %zu bytes, raw %u", i, l, t0[i].len);
-		FUZZ_CHECK((t0[i].flags & TF_DIRTY) || (l == t0[i].len && !memcmp(sp, s + t0[i].off, l)),
+		FUZZ_CHECK((t0[i].flags & LEX_TOKEN_FLAG_SPLICED) || (l == t0[i].len && !memcmp(sp, s + t0[i].off, l)),
 			   "token %u: clean token spelled differently", i);
-		if (t0[i].kind == T_IDENT && intern) {
+		if (t0[i].kind == LEX_TOKEN_IDENTIFIER && intern) {
 			FUZZ_CHECK(t0[i].id != 0, "identifier %u not interned", i);
 			FUZZ_CHECK(vintern_ents[t0[i].id].len == l && !memcmp(vintern_ents[t0[i].id].s, sp, l),
 				   "identifier %u: id %u spells '%.*s', token '%.*s'", i, t0[i].id,
 				   (int)vintern_ents[t0[i].id].len, vintern_ents[t0[i].id].s, (int)l, sp);
-		} else if (t0[i].kind != T_IDENT) {
+		} else if (t0[i].kind != LEX_TOKEN_IDENTIFIER) {
 			FUZZ_CHECK(t0[i].id == 0, "non-identifier %u has id %u", i, t0[i].id);
 		}
 	}
@@ -198,9 +198,9 @@ int LLVMFuzzerTestOneInput(const uint8_t *d, size_t n)
 	/* another alignment: the 64-byte blocks fall elsewhere */
 	off = 1 + (n * 7 + (n ? d[0] : 0)) % 63;
 	s1 = place(d, n, off, &b1);
-	vlex_no_intern = 1;
-	n2 = vlex(s1, n, t2, scr);
-	vlex_no_intern = 0;
+	lex_identifiers_not_interned = 1;
+	n2 = lex_tokenize(s1, n, t2, scr);
+	lex_identifiers_not_interned = 0;
 	check_same("offset 0 vs shifted", t0, n0, t2, n2);
 
 	/* interned identifiers point into the source: keep it if any were added */

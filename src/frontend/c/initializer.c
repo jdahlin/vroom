@@ -4,7 +4,7 @@
 /* at '{': "{}" before C23 (clang -pedantic) */
 static inline void empty_init_ext(cc *c)
 {
-	if (unlikely(ext_on(c, "c23-extensions", w_ped)) && c->o->std != 23 && peek(c, 1)->kind == T_RBRACE)
+	if (unlikely(ext_on(c, "c23-extensions", w_ped)) && c->o->std != 23 && peek(c, 1)->kind == LEX_TOKEN_RIGHT_BRACE)
 		ext_warn(c, "c23-extensions", w_ped, tok(c)->loc, "use of an empty initializer is a C23 extension");
 }
 
@@ -295,11 +295,11 @@ static pp_span skip_braces(cc *c)
 
 	do {
 		r.e = tok(c)->loc;
-		if (is(c, T_LBRACE))
+		if (is(c, LEX_TOKEN_LEFT_BRACE))
 			depth++;
-		else if (is(c, T_RBRACE))
+		else if (is(c, LEX_TOKEN_RIGHT_BRACE))
 			depth--;
-		else if (is(c, T_EOF))
+		else if (is(c, LEX_TOKEN_EOF))
 			fatal(c, tok(c)->loc, "expected '}'");
 		next(c);
 	} while (depth > 0);
@@ -381,9 +381,9 @@ static bool brace_string(cc *c)
 	if (!is_strtok(peek(c, 1)->kind))
 		return false;
 	k = peek(c, 2)->kind;
-	if (is_strtok(k) || k == T_RBRACE)
+	if (is_strtok(k) || k == LEX_TOKEN_RIGHT_BRACE)
 		return true;
-	return k == T_COMMA && peek(c, 3)->kind == T_RBRACE;
+	return k == LEX_TOKEN_COMMA && peek(c, 3)->kind == LEX_TOKEN_RIGHT_BRACE;
 }
 
 /* one element at pos: braces, a value, or brace elision into a sub-aggregate */
@@ -391,14 +391,14 @@ static void il_elem(cc *c, ilist *l, uint64_t pos, uint32_t v, bool st)
 {
 	qty et = il_elem_type(c, l, pos);
 
-	if (!v && is(c, T_LBRACE)) {
+	if (!v && is(c, LEX_TOKEN_LEFT_BRACE)) {
 		if (is_char_array(c, et) && brace_string(c)) {	/* { "string" } */
 			uint32_t sv;
 
 			next(c), c->ibr++;
 			sv = string_lit(c);
-			accept(c, T_COMMA);
-			expect(c, T_RBRACE, "'}'"), c->ibr--;
+			accept(c, LEX_TOKEN_COMMA);
+			expect(c, LEX_TOKEN_RIGHT_BRACE, "'}'"), c->ibr--;
 			str_fit(c, et, sv);
 			il_set(c, l, pos, sv, NULL);
 			return;
@@ -411,7 +411,7 @@ static void il_elem(cc *c, ilist *l, uint64_t pos, uint32_t v, bool st)
 			empty_init_ext(c);
 			next(c), c->ibr++;
 			il_fill(c, s, 0, true, 0, st);
-			expect_match(c, T_RBRACE, ob), c->ibr--;
+			expect_match(c, LEX_TOKEN_RIGHT_BRACE, ob), c->ibr--;
 			il_set(c, l, pos, 0, s);
 		} else {
 			il_set(c, l, pos, init_braced(c, et, st), NULL);
@@ -446,17 +446,17 @@ static bool at_designator(cc *c, int k)
 {
 	int t = peek(c, k)->kind;
 
-	return t == T_PERIOD || t == T_LSQUARE || (t == T_IDENT && peek(c, k + 1)->kind == T_COLON);
+	return t == LEX_TOKEN_PERIOD || t == LEX_TOKEN_LEFT_SQUARE || (t == LEX_TOKEN_IDENTIFIER && peek(c, k + 1)->kind == LEX_TOKEN_COLON);
 }
 
 /* after an element of an unbraced (elided) list: go on with the next one if it belongs here */
 static void il_continue(cc *c, ilist *l, uint64_t pos, bool st)
 {
 	pos = il_next_pos(c, l, pos);
-	if (il_full(l, pos) || !is(c, T_COMMA))
+	if (il_full(l, pos) || !is(c, LEX_TOKEN_COMMA))
 		return;
 	{
-		if (peek(c, 1)->kind == T_RBRACE || at_designator(c, 1))
+		if (peek(c, 1)->kind == LEX_TOKEN_RIGHT_BRACE || at_designator(c, 1))
 			return;
 	}
 	next(c);
@@ -470,11 +470,11 @@ static uint64_t il_designation_path(cc *c, ilist *l, bool st, vec *cursor)
 	uint32_t path[FM_DEPTH];
 	int depth = 1;
 
-	if (accept(c, T_PERIOD) || (is(c, T_IDENT) && peek(c, 1)->kind == T_COLON)) {
+	if (accept(c, LEX_TOKEN_PERIOD) || (is(c, LEX_TOKEN_IDENTIFIER) && peek(c, 1)->kind == LEX_TOKEN_COLON)) {
 		uint32_t name;
 		int d;
 
-		if (!is(c, T_IDENT))
+		if (!is(c, LEX_TOKEN_IDENTIFIER))
 			fatal(c, tok(c)->loc, "expected a field designator, such as '.field = 4'");
 		name = tok(c)->id;
 		if (l->array) {
@@ -496,12 +496,12 @@ static uint64_t il_designation_path(cc *c, ilist *l, bool st, vec *cursor)
 	} else {
 		i128 a, b;
 
-		expect(c, T_LSQUARE, "'['");
+		expect(c, LEX_TOKEN_LEFT_SQUARE, "'['");
 		const_expr(c, &a, NULL);
 		b = a;
-		if (accept(c, T_ELLIPSIS))
+		if (accept(c, LEX_TOKEN_ELLIPSIS))
 			const_expr(c, &b, NULL);
-		expect(c, T_RSQUARE, "']'");
+		expect(c, LEX_TOKEN_RIGHT_SQUARE, "']'");
 		if (!l->array) {
 			cc_error(c, tok(c)->loc, "array designator cannot initialize non-array type '%s'", tyname(c, l->ty));
 			return 0;
@@ -532,18 +532,18 @@ static uint64_t il_designation_path(cc *c, ilist *l, bool st, vec *cursor)
 		{
 			uint64_t last = path[depth - 1];
 
-			if (is(c, T_PERIOD) || is(c, T_LSQUARE)) {
+			if (is(c, LEX_TOKEN_PERIOD) || is(c, LEX_TOKEN_LEFT_SQUARE)) {
 				ilist *t = il_child(c, s, last);
 				il_designation_path(c, t, st, cursor);
 			} else {
-				if (!accept(c, T_EQUAL))
-					accept(c, T_COLON);
+				if (!accept(c, LEX_TOKEN_EQUAL))
+					accept(c, LEX_TOKEN_COLON);
 				il_elem(c, s, last, 0, st);
 			}
 		}
 		return lo + 1;
 	}
-	if (is(c, T_PERIOD) || is(c, T_LSQUARE)) {
+	if (is(c, LEX_TOKEN_PERIOD) || is(c, LEX_TOKEN_LEFT_SQUARE)) {
 		ilist *t = il_child(c, l, lo);
 		il_designation_path(c, t, st, cursor);
 		if (lo != hi) t->shared = true;
@@ -551,8 +551,8 @@ static uint64_t il_designation_path(cc *c, ilist *l, bool st, vec *cursor)
 			il_set(c, l, i, 0, t);	/* range of the same sub-object */
 		return hi + 1;
 	}
-	if (!accept(c, T_EQUAL))
-		accept(c, T_COLON);	/* old GNU "field: value" */
+	if (!accept(c, LEX_TOKEN_EQUAL))
+		accept(c, LEX_TOKEN_COLON);	/* old GNU "field: value" */
 	if (lo == hi) {
 		il_elem(c, l, lo, 0, st);
 	} else {
@@ -560,7 +560,7 @@ static uint64_t il_designation_path(cc *c, ilist *l, bool st, vec *cursor)
 		qty et = il_elem_type(c, l, lo);
 		uint32_t v;
 
-		if (is(c, T_LBRACE)) {
+		if (is(c, LEX_TOKEN_LEFT_BRACE)) {
 			if (is_ilagg(c, et)) {
 				ilist *s = il_new(c, et);
 
@@ -569,7 +569,7 @@ static uint64_t il_designation_path(cc *c, ilist *l, bool st, vec *cursor)
 				empty_init_ext(c);
 				next(c), c->ibr++;
 				il_fill(c, s, 0, true, 0, st);
-				expect_match(c, T_RBRACE, ob), c->ibr--;
+				expect_match(c, LEX_TOKEN_RIGHT_BRACE, ob), c->ibr--;
 				il_run(c, l, lo, hi, 0, s);
 			} else {
 				il_run(c, l, lo, hi, init_braced(c, et, st), NULL);
@@ -637,15 +637,15 @@ static void il_fill(cc *c, ilist *l, uint64_t pos, bool braced, uint32_t first, 
 		il_elem(c, l, pos, first, st);
 		pos = il_next_pos(c, l, pos + 1);
 		if (!braced) {
-			if (il_full(l, pos) || !is(c, T_COMMA) || peek(c, 1)->kind == T_RBRACE || at_designator(c, 1))
+			if (il_full(l, pos) || !is(c, LEX_TOKEN_COMMA) || peek(c, 1)->kind == LEX_TOKEN_RIGHT_BRACE || at_designator(c, 1))
 				return;
 			next(c);
-		} else if (!accept(c, T_COMMA)) {
+		} else if (!accept(c, LEX_TOKEN_COMMA)) {
 			return;
 		}
 	}
 	for (;;) {
-		if (is(c, T_RBRACE))
+		if (is(c, LEX_TOKEN_RIGHT_BRACE))
 			return;
 		if (at_designator(c, 0)) {
 			if (!braced)
@@ -656,7 +656,7 @@ static void il_fill(cc *c, ilist *l, uint64_t pos, bool braced, uint32_t first, 
 				return;
 			if (il_full(l, pos)) {
 				/* excess elements: clang warns and drops them */
-				if (is(c, T_LBRACE)) {
+				if (is(c, LEX_TOKEN_LEFT_BRACE)) {
 					excess_warn(c, l->ty, &excess, skip_braces(c));
 				} else {
 					uint32_t v = assign_expr(c);
@@ -670,12 +670,12 @@ static void il_fill(cc *c, ilist *l, uint64_t pos, bool braced, uint32_t first, 
 		}
 		pos = il_next_pos(c, l, pos);
 		if (!braced) {
-			if (il_full(l, pos) || !is(c, T_COMMA) || peek(c, 1)->kind == T_RBRACE || at_designator(c, 1))
+			if (il_full(l, pos) || !is(c, LEX_TOKEN_COMMA) || peek(c, 1)->kind == LEX_TOKEN_RIGHT_BRACE || at_designator(c, 1))
 				return;
 			next(c);
 			continue;
 		}
-		if (!accept(c, T_COMMA))
+		if (!accept(c, LEX_TOKEN_COMMA))
 			return;
 	}
 }
@@ -719,29 +719,29 @@ static uint32_t init_braced(cc *c, qty ty, bool st)
 	uint32_t v = 0, loc = tok(c)->loc;
 
 	empty_init_ext(c);
-	expect(c, T_LBRACE, "'{'");
-	if (is(c, T_RBRACE)) {
+	expect(c, LEX_TOKEN_LEFT_BRACE, "'{'");
+	if (is(c, LEX_TOKEN_RIGHT_BRACE)) {
 		next(c);
 		return mk(c, N_ZERO, QUNQ(ty), loc);
 	}
 	c->ibr++;
-	if (is(c, T_LBRACE))
+	if (is(c, LEX_TOKEN_LEFT_BRACE))
 		v = init_braced(c, ty, st);
 	else
 		v = convert_as(c, decay(c, assign_expr(c)), ty, c->cv_what == CX_INIT ? CX_INIT : 0, c->cv_loc);
 	{
 		bool excess = false;
 
-		while (accept(c, T_COMMA)) {
-			if (is(c, T_RBRACE))
+		while (accept(c, LEX_TOKEN_COMMA)) {
+			if (is(c, LEX_TOKEN_RIGHT_BRACE))
 				break;
-			if (is(c, T_LBRACE))
+			if (is(c, LEX_TOKEN_LEFT_BRACE))
 				excess_warn(c, ty, &excess, skip_braces(c));
 			else
 				excess_warn(c, ty, &excess, rng(c, assign_expr(c)));
 		}
 	}
-	expect(c, T_RBRACE, "'}'"), c->ibr--;
+	expect(c, LEX_TOKEN_RIGHT_BRACE, "'}'"), c->ibr--;
 	return v;
 }
 
@@ -795,14 +795,14 @@ VPRIV uint32_t initializer(cc *c, qty *ty, bool st)
 	uint32_t loc = tok(c)->loc;
 	qty t = *ty;
 
-	if (is(c, T_LBRACE)) {
+	if (is(c, LEX_TOKEN_LEFT_BRACE)) {
 		if (is_char_array(c, t) && brace_string(c)) {
 			uint32_t s;
 
 			next(c), c->ibr++;
 			s = string_lit(c);
-			accept(c, T_COMMA);
-			expect(c, T_RBRACE, "'}'"), c->ibr--;
+			accept(c, LEX_TOKEN_COMMA);
+			expect(c, LEX_TOKEN_RIGHT_BRACE, "'}'"), c->ibr--;
 			str_fit(c, t, s);
 			if (T(c, t)->flags & TF_INCOMPLETE)
 				*ty = QT(QI(ty_array(c, T(c, t)->base, c->strs[N(s)->a].n, 0)), QQ(t));
@@ -824,7 +824,7 @@ VPRIV uint32_t initializer(cc *c, qty *ty, bool st)
 			empty_init_ext(c);
 			next(c), c->ibr++;
 			il_fill(c, l, 0, true, 0, st);
-			expect_match(c, T_RBRACE, ob), c->ibr--;
+			expect_match(c, LEX_TOKEN_RIGHT_BRACE, ob), c->ibr--;
 			n = il_finish(c, l, loc);
 			*ty = QT(QI(N(n)->ty), QQ(t));
 			return n;

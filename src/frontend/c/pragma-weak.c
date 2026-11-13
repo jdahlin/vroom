@@ -27,7 +27,7 @@ static uint32_t id_string(cc *c, uint32_t id)
 
 	memcpy(k, s, (size_t)l);
 	k[l] = 0;
-	c->strs[c->nstr++] = (cstr){ k, (uint32_t)l + 1, 1, T_STRING };
+	c->strs[c->nstr++] = (cstr){ k, (uint32_t)l + 1, 1, LEX_TOKEN_STRING };
 	return c->nstr;		/* (attrs hold index + 1) */
 }
 

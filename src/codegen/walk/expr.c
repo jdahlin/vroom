@@ -91,23 +91,23 @@ static bool wk_fold(cc *c, int op, qty t, i128 a, i128 b, i128 *r)
 
 	a = em_trunc_to(c, a, t), b = em_trunc_to(c, b, t);
 	switch (op) {
-	case T_PLUS: *r = (i128)(ua + ub); break;
-	case T_MINUS: *r = (i128)(ua - ub); break;
-	case T_STAR: *r = (i128)(ua * ub); break;
-	case T_AMP: *r = a & b; break;
-	case T_PIPE: *r = a | b; break;
-	case T_CARET: *r = a ^ b; break;
-	case T_SLASH: case T_PERCENT:
+	case LEX_TOKEN_PLUS: *r = (i128)(ua + ub); break;
+	case LEX_TOKEN_MINUS: *r = (i128)(ua - ub); break;
+	case LEX_TOKEN_STAR: *r = (i128)(ua * ub); break;
+	case LEX_TOKEN_AMPERSAND: *r = a & b; break;
+	case LEX_TOKEN_PIPE: *r = a | b; break;
+	case LEX_TOKEN_CARET: *r = a ^ b; break;
+	case LEX_TOKEN_SLASH: case LEX_TOKEN_PERCENT:
 		if (!b || (sg && b == -1))
 			return false;	/* trap or overflow: at run time */
-		*r = sg ? (op == T_SLASH ? a / b : a % b) : (i128)(op == T_SLASH ? ua / ub : ua % ub);
+		*r = sg ? (op == LEX_TOKEN_SLASH ? a / b : a % b) : (i128)(op == LEX_TOKEN_SLASH ? ua / ub : ua % ub);
 		break;
-	case T_LESSLESS:
+	case LEX_TOKEN_LESS_LESS:
 		if (b < 0 || b >= bits)
 			return false;
 		*r = (i128)(ua << (int)b);
 		break;
-	case T_GREATERGREATER:
+	case LEX_TOKEN_GREATER_GREATER:
 		if (b < 0 || b >= bits)
 			return false;
 		*r = sg ? a >> (int)b : (i128)(ua >> (int)b);
@@ -121,7 +121,7 @@ static bool wk_fold(cc *c, int op, qty t, i128 a, i128 b, i128 *r)
 
 static bool wk_is_cmp(int op)
 {
-	return op == T_LESS || op == T_LESSEQ || op == T_GREATER || op == T_GREATEREQ || op == T_EQUALEQUAL || op == T_EXCLAIMEQ;
+	return op == LEX_TOKEN_LESS || op == LEX_TOKEN_LESS_EQUAL || op == LEX_TOKEN_GREATER || op == LEX_TOKEN_GREATER_EQUAL || op == LEX_TOKEN_EQUAL_EQUAL || op == LEX_TOKEN_EXCLAMATION_EQUAL;
 }
 
 static bool wk_fold_cmp(int op, bool sg, i128 a, i128 b)
@@ -129,11 +129,11 @@ static bool wk_fold_cmp(int op, bool sg, i128 a, i128 b)
 	u128 ua = (u128)a, ub = (u128)b;
 
 	switch (op) {
-	case T_LESS: return sg ? a < b : ua < ub;
-	case T_LESSEQ: return sg ? a <= b : ua <= ub;
-	case T_GREATER: return sg ? a > b : ua > ub;
-	case T_GREATEREQ: return sg ? a >= b : ua >= ub;
-	case T_EQUALEQUAL: return a == b;
+	case LEX_TOKEN_LESS: return sg ? a < b : ua < ub;
+	case LEX_TOKEN_LESS_EQUAL: return sg ? a <= b : ua <= ub;
+	case LEX_TOKEN_GREATER: return sg ? a > b : ua > ub;
+	case LEX_TOKEN_GREATER_EQUAL: return sg ? a >= b : ua >= ub;
+	case LEX_TOKEN_EQUAL_EQUAL: return a == b;
 	default: return a != b;
 	}
 }
@@ -365,12 +365,12 @@ VPRIV lval wk_lval(ecx *e, uint32_t n)
 			}
 			int ri = wk_reg(e, &i, prim(TY_LONG)), rb = LO(treg)(e);
 			LO(mov)(e, rb, ri);
-			val bit = LO(bin)(e, T_AMP, 8, false, wk_vreg(rb), vconst(7));
+			val bit = LO(bin)(e, LEX_TOKEN_AMPERSAND, 8, false, wk_vreg(rb), vconst(7));
 			lval bs = { .k = L_FRAME, .off = wk_slot(e, 8, 8), .align = 8 };
 			LO(store)(e, bit.r, &bs, 8);
 			LO(tfree)(e, bit.r);
-			i = LO(bin)(e, T_GREATERGREATER, 8, false, wk_vreg(ri), vconst(3));
-			l = wk_fromval(e, LO(bin)(e, T_PLUS, 8, false, p, i), et);
+			i = LO(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, false, wk_vreg(ri), vconst(3));
+			l = wk_fromval(e, LO(bin)(e, LEX_TOKEN_PLUS, 8, false, p, i), et);
 			l.bf = 1, l.width = 1, l.dynbit_slot = bs.off;
 			return l;
 		}
@@ -396,7 +396,7 @@ VPRIV lval wk_lval(ecx *e, uint32_t n)
 
 			if (wk_size(c, it) < 8)
 				LO(ext)(e, ri, wk_size(c, it), wk_signed(c, it));
-			p = LO(bin)(e, T_PLUS, 8, false, p, LO(bin)(e, T_STAR, 8, false, wk_vreg(ri), vconst(es)));
+			p = LO(bin)(e, LEX_TOKEN_PLUS, 8, false, p, LO(bin)(e, LEX_TOKEN_STAR, 8, false, wk_vreg(ri), vconst(es)));
 			return wk_fromval(e, p, et);
 		}
 	}
@@ -474,12 +474,12 @@ static val wk_bf_load_split(ecx *e, lval u, int pos, int width)
 		if (bits > width) bits = width;
 		LO(load)(e, v.r, &u, size, false);
 		if (pos)
-			v = LO(bin)(e, T_GREATERGREATER, 8, false, v, vconst(pos));
+			v = LO(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, false, v, vconst(pos));
 		if (bits < 64)
-			v = LO(bin)(e, T_AMP, 8, false, v, vconst(((uint64_t)1 << bits) - 1));
+			v = LO(bin)(e, LEX_TOKEN_AMPERSAND, 8, false, v, vconst(((uint64_t)1 << bits) - 1));
 		if (done)
-			v = LO(bin)(e, T_LESSLESS, 8, false, v, vconst(done));
-		out = done ? LO(bin)(e, T_PIPE, 8, false, out, v) : v;
+			v = LO(bin)(e, LEX_TOKEN_LESS_LESS, 8, false, v, vconst(done));
+		out = done ? LO(bin)(e, LEX_TOKEN_PIPE, 8, false, out, v) : v;
 		done += bits, width -= bits, pos = 0, u.off += size;
 	}
 	return out;
@@ -499,16 +499,16 @@ static void wk_bf_store_split(ecx *e, lval u, int pos, int width, int rv)
 
 		LO(mov)(e, v.r, rv);
 		if (done)
-			v = LO(bin)(e, T_GREATERGREATER, 8, false, v, vconst(done));
+			v = LO(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, false, v, vconst(done));
 		if (pos)
-			v = LO(bin)(e, T_LESSLESS, 8, false, v, vconst(pos));
+			v = LO(bin)(e, LEX_TOKEN_LESS_LESS, 8, false, v, vconst(pos));
 		if (bits < size * 8) {
 			val old = { .k = V_REG, .r = (uint8_t)LO(treg)(e) };
 
 			LO(load)(e, old.r, &u, size, false);
-			old = LO(bin)(e, T_AMP, 8, false, old, vconst((i128)(int64_t)~mask));
-			v = LO(bin)(e, T_AMP, 8, false, v, vconst((i128)(int64_t)mask));
-			v = LO(bin)(e, T_PIPE, 8, false, v, old);
+			old = LO(bin)(e, LEX_TOKEN_AMPERSAND, 8, false, old, vconst((i128)(int64_t)~mask));
+			v = LO(bin)(e, LEX_TOKEN_AMPERSAND, 8, false, v, vconst((i128)(int64_t)mask));
+			v = LO(bin)(e, LEX_TOKEN_PIPE, 8, false, v, old);
 		}
 		LO(store)(e, v.r, &u, size);
 		LO(tfree)(e, v.r);
@@ -525,8 +525,8 @@ static val wk_bf_load_wide(ecx *e, const lval *l)
 	int low = l->width < 64 ? l->width : 64;
 	val lo = wk_bf_load_split(e, src, l->bitoff, low), hi;
 	if (l->sgn && low < 64) {
-		lo = LO(bin)(e, T_LESSLESS, 8, false, lo, vconst(64 - low));
-		lo = LO(bin)(e, T_GREATERGREATER, 8, true, lo, vconst(64 - low));
+		lo = LO(bin)(e, LEX_TOKEN_LESS_LESS, 8, false, lo, vconst(64 - low));
+		lo = LO(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, true, lo, vconst(64 - low));
 	}
 	LO(store)(e, lo.r, &dst, 8);
 	if (l->width > 64) {
@@ -534,11 +534,11 @@ static val wk_bf_load_wide(ecx *e, const lval *l)
 		src.off += 8;
 		hi = wk_bf_load_split(e, src, l->bitoff, l->width - 64);
 		if (l->sgn && l->width < 128) {
-			hi = LO(bin)(e, T_LESSLESS, 8, false, hi, vconst(128 - l->width));
-			hi = LO(bin)(e, T_GREATERGREATER, 8, true, hi, vconst(128 - l->width));
+			hi = LO(bin)(e, LEX_TOKEN_LESS_LESS, 8, false, hi, vconst(128 - l->width));
+			hi = LO(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, true, hi, vconst(128 - l->width));
 		}
 	} else if (l->sgn) {
-		hi = LO(bin)(e, T_GREATERGREATER, 8, true, lo, vconst(63));
+		hi = LO(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, true, lo, vconst(63));
 	} else {
 		wk_free(e, &lo);
 		hi = vconst(0);
@@ -567,12 +567,12 @@ static val wk_bf_load_big(ecx *e, const lval *l, qty t)
 			wk_free(e, &v);
 			v = wk_bf_load_split(e, src, l->bitoff, (int)bits);
 			if (l->sgn && bits < 64) {
-				v = LO(bin)(e, T_LESSLESS, 8, false, v, vconst(64-bits));
-				v = LO(bin)(e, T_GREATERGREATER, 8, true, v, vconst(64-bits));
+				v = LO(bin)(e, LEX_TOKEN_LESS_LESS, 8, false, v, vconst(64-bits));
+				v = LO(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, true, v, vconst(64-bits));
 			}
 			src.off += 8;
 		} else if ((i-1)*64 < l->width) {
-			if (l->sgn) v = LO(bin)(e, T_GREATERGREATER, 8, true, v, vconst(63));
+			if (l->sgn) v = LO(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, true, v, vconst(63));
 			else { wk_free(e, &v); v = vconst(0); }
 		}
 		int r = wk_reg(e, &v, prim(TY_ULONG));
@@ -612,8 +612,8 @@ static val wk_bf_load(ecx *e, const lval *l, qty t)
 		v = wk_vreg(LO(treg)(e));
 		LO(load)(e, v.r, l, 1, false);
 		LO(load)(e, bit.r, &bs, 8, false);
-		v = LO(bin)(e, T_GREATERGREATER, 8, false, v, bit);
-		return LO(bin)(e, T_AMP, 8, false, v, vconst(1));
+		v = LO(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, false, v, bit);
+		return LO(bin)(e, LEX_TOKEN_AMPERSAND, 8, false, v, vconst(1));
 	}
 
 	wk_bf_unit(e, l, t, &uo, &us, &pos);
@@ -627,15 +627,15 @@ static val wk_bf_load(ecx *e, const lval *l, qty t)
 	}
 	if (l->sgn) {
 		if (64 - pos - w)
-			v = LO(bin)(e, T_LESSLESS, 8, false, v, vconst(64 - pos - w));
+			v = LO(bin)(e, LEX_TOKEN_LESS_LESS, 8, false, v, vconst(64 - pos - w));
 		if (64 - w)
-			v = LO(bin)(e, T_GREATERGREATER, 8, true, v, vconst(64 - w));
+			v = LO(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, true, v, vconst(64 - w));
 		return v;
 	}
 	if (pos)
-		v = LO(bin)(e, T_GREATERGREATER, 8, false, v, vconst(pos));
+		v = LO(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, false, v, vconst(pos));
 	if (w < 64)
-		v = LO(bin)(e, T_AMP, 8, false, v, vconst((i128)(((uint64_t)1 << w) - 1)));
+		v = LO(bin)(e, LEX_TOKEN_AMPERSAND, 8, false, v, vconst((i128)(((uint64_t)1 << w) - 1)));
 	return v;
 }
 
@@ -656,17 +656,17 @@ static void wk_bf_store(ecx *e, const lval *l, qty t, int rv)
 		lval bs = { .k = L_FRAME, .off = l->dynbit_slot, .align = 8 };
 		val bit = wk_vreg(LO(treg)(e));
 		LO(load)(e, bit.r, &bs, 8, false);
-		val mask = LO(bin)(e, T_LESSLESS, 8, false, vconst(1), bit);
+		val mask = LO(bin)(e, LEX_TOKEN_LESS_LESS, 8, false, vconst(1), bit);
 		int rm = LO(treg)(e);
 		LO(mov)(e, rm, mask.r);
 		old = wk_vreg(LO(treg)(e));
 		LO(load)(e, old.r, l, 1, false);
-		old = LO(bin)(e, T_AMP, 8, false, old, LO(bin)(e, T_CARET, 8, false, mask, vconst(-1)));
+		old = LO(bin)(e, LEX_TOKEN_AMPERSAND, 8, false, old, LO(bin)(e, LEX_TOKEN_CARET, 8, false, mask, vconst(-1)));
 		nv = wk_vreg(LO(treg)(e));
 		LO(mov)(e, nv.r, rv);
-		nv = LO(bin)(e, T_MINUS, 8, false, vconst(0), nv);
-		nv = LO(bin)(e, T_AMP, 8, false, nv, wk_vreg(rm));
-		old = LO(bin)(e, T_PIPE, 8, false, old, nv);
+		nv = LO(bin)(e, LEX_TOKEN_MINUS, 8, false, vconst(0), nv);
+		nv = LO(bin)(e, LEX_TOKEN_AMPERSAND, 8, false, nv, wk_vreg(rm));
+		old = LO(bin)(e, LEX_TOKEN_PIPE, 8, false, old, nv);
 		LO(store)(e, old.r, l, 1);
 		LO(tfree)(e, old.r);
 		return;
@@ -683,13 +683,13 @@ static void wk_bf_store(ecx *e, const lval *l, qty t, int rv)
 		m &= ((uint64_t)1 << (us * 8)) - 1;
 	old = (val){ .k = V_REG, .r = (uint8_t)LO(treg)(e) };
 	LO(load)(e, old.r, &u, us, false);
-	old = LO(bin)(e, T_AMP, 8, false, old, vconst((i128)(int64_t)~m));
+	old = LO(bin)(e, LEX_TOKEN_AMPERSAND, 8, false, old, vconst((i128)(int64_t)~m));
 	nv = (val){ .k = V_REG, .r = (uint8_t)LO(treg)(e) };
 	LO(mov)(e, nv.r, rv);
 	if (pos)
-		nv = LO(bin)(e, T_LESSLESS, 8, false, nv, vconst(pos));
-	nv = LO(bin)(e, T_AMP, 8, false, nv, vconst((i128)(int64_t)m));
-	old = LO(bin)(e, T_PIPE, 8, false, old, nv);
+		nv = LO(bin)(e, LEX_TOKEN_LESS_LESS, 8, false, nv, vconst(pos));
+	nv = LO(bin)(e, LEX_TOKEN_AMPERSAND, 8, false, nv, vconst((i128)(int64_t)m));
+	old = LO(bin)(e, LEX_TOKEN_PIPE, 8, false, old, nv);
 	LO(store)(e, old.r, &u, us);
 	LO(tfree)(e, old.r);
 }
@@ -819,7 +819,7 @@ VPRIV val wk_conv(ecx *e, val v, qty from, qty to)
 			return vconst(v.i != 0);
 		if (v.k == V_ADDR && !wk_weak0(c, v))
 			return vconst(1);
-		return LO(cmp)(e, T_EXCLAIMEQ, fs > 4 ? 8 : 4, false, v, vconst(0));
+		return LO(cmp)(e, LEX_TOKEN_EXCLAMATION_EQUAL, fs > 4 ? 8 : 4, false, v, vconst(0));
 	}
 	if (v.k == V_CONST)
 		return wk_const(c, v.i, to);
@@ -891,8 +891,8 @@ static val wk_cast(ecx *e, uint32_t n)
 						part.bf = 0;
 						v = wk_bf_load_split(e, part, part.bitoff, part.width);
 						if (part.sgn) {
-							v = LO(bin)(e, T_LESSLESS, 8, false, v, vconst(64 - part.width));
-							v = LO(bin)(e, T_GREATERGREATER, 8, true, v, vconst(64 - part.width));
+							v = LO(bin)(e, LEX_TOKEN_LESS_LESS, 8, false, v, vconst(64 - part.width));
+							v = LO(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, true, v, vconst(64 - part.width));
 						}
 					}
 					int r = wk_reg(e, &v, prim(TY_ULONG));
@@ -986,7 +986,7 @@ static val wk_arith(ecx *e, int op, qty t, val a, val b)
 		return LO(wbin)(e, op, wk_signed(c, t), a, b);
 	if (a.k == V_CONST && b.k == V_CONST && wk_fold(c, op, t, a.i, b.i, &r))
 		return vconst(r);
-	if (e->E->o->opt && !e->E->noopt && (op == T_STAR || op == T_CARET)) {
+	if (e->E->o->opt && !e->E->noopt && (op == LEX_TOKEN_STAR || op == LEX_TOKEN_CARET)) {
 		/* Constants commute here; both operands have already been evaluated. */
 		if (a.k == V_CONST && b.k != V_CONST) {
 			val tmp = a;
@@ -994,7 +994,7 @@ static val wk_arith(ecx *e, int op, qty t, val a, val b)
 		}
 		if (b.k == V_CONST) {
 			if (em_xor_not(c, t, op, b.i))
-				return LO(un)(e, T_TILDE, wk_opw(c, t), a);
+				return LO(un)(e, LEX_TOKEN_TILDE, wk_opw(c, t), a);
 			/* VIR retains signed multiplication's no-overflow fact when it
 			 * selects the shift. The direct targets select it here. */
 			if(!(e->vtry && wk_signed(c,t) && !e->E->o->wrapv))em_mulshift(c, t, &op, &b.i);
@@ -1002,15 +1002,15 @@ static val wk_arith(ecx *e, int op, qty t, val a, val b)
 	}
 
 	/* x & 0, x * 0, 0 & x, 0 * x: 0 (x evaluated already, its effects done: IS_DAX(i) = i->i_flags & 0) */
-	if ((op == T_AMP || op == T_STAR) && ((b.k == V_CONST && b.i == 0) || (a.k == V_CONST && a.i == 0))) {
+	if ((op == LEX_TOKEN_AMPERSAND || op == LEX_TOKEN_STAR) && ((b.k == V_CONST && b.i == 0) || (a.k == V_CONST && a.i == 0))) {
 		e->discarded_scalar |= a.k == V_REG || b.k == V_REG;
 		wk_free(e, &a);
 		wk_free(e, &b);
 		return vconst(0);
 	}
 	/* 0 << x, 0 >> x, -1 >> x (signed): the constant, whatever x is (as arm64) */
-	if ((op == T_LESSLESS || op == T_GREATERGREATER) && a.k == V_CONST && b.k != V_CONST &&
-	    (em_trunc_to(c, a.i, t) == 0 || (op == T_GREATERGREATER && wk_signed(c, t) && em_trunc_to(c, a.i, t) == -1))) {
+	if ((op == LEX_TOKEN_LESS_LESS || op == LEX_TOKEN_GREATER_GREATER) && a.k == V_CONST && b.k != V_CONST &&
+	    (em_trunc_to(c, a.i, t) == 0 || (op == LEX_TOKEN_GREATER_GREATER && wk_signed(c, t) && em_trunc_to(c, a.i, t) == -1))) {
 		e->discarded_scalar |= b.k == V_REG;
 		wk_free(e, &b);
 		return vconst(em_trunc_to(c, a.i, t));
@@ -1042,7 +1042,7 @@ static val wk_arith(ecx *e, int op, qty t, val a, val b)
 			if (em_sdivpow2(c, t, op, b.i, &recipe))
 				return wk_sdivpow2(e, t, a, &recipe);
 		}
-		if ((op == T_SLASH || op == T_PERCENT) && e->E->o->opt && !e->E->noopt) {
+		if ((op == LEX_TOKEN_SLASH || op == LEX_TOKEN_PERCENT) && e->E->o->opt && !e->E->noopt) {
 			em_udivconst_recipe recipe;
 			em_sdivconst_recipe signed_recipe;
 			/* Bound the extra live temporaries; pressure retains native divide. */
@@ -1053,8 +1053,8 @@ static val wk_arith(ecx *e, int op, qty t, val a, val b)
 		}
 		em_divpow2(c, t, &op, &b.i);
 	}
-	if (a.k == V_ADDR && b.k == V_CONST && (op == T_PLUS || op == T_MINUS))
-		return (val){ .k = V_ADDR, .ref = a.ref, .i = op == T_PLUS ? a.i + b.i : a.i - b.i };
+	if (a.k == V_ADDR && b.k == V_CONST && (op == LEX_TOKEN_PLUS || op == LEX_TOKEN_MINUS))
+		return (val){ .k = V_ADDR, .ref = a.ref, .i = op == LEX_TOKEN_PLUS ? a.i + b.i : a.i - b.i };
 	{
 		val v = LO(bin)(e, op, wk_opw(c, t), wk_signed(c, t), a, b);
 
@@ -1075,7 +1075,7 @@ static val wk_ptradd(ecx *e, val p, val i, qty it, int64_t es, bool sub)
 	}
 
 	if (i.k == V_CONST)
-		return wk_arith(e, sub ? T_MINUS : T_PLUS, prim(TY_ULONG), p, vconst(i.i * es));
+		return wk_arith(e, sub ? LEX_TOKEN_MINUS : LEX_TOKEN_PLUS, prim(TY_ULONG), p, vconst(i.i * es));
 	{
 		int ri = wk_reg(e, &i, it);
 
@@ -1083,8 +1083,8 @@ static val wk_ptradd(ecx *e, val p, val i, qty it, int64_t es, bool sub)
 			LO(ext)(e, ri, wk_size(c, it), wk_signed(c, it));
 		i = wk_vreg(ri);
 		if (es != 1)
-			i = LO(bin)(e, T_STAR, 8, false, i, vconst(es));
-		return LO(bin)(e, sub ? T_MINUS : T_PLUS, 8, false, p, i);
+			i = LO(bin)(e, LEX_TOKEN_STAR, 8, false, i, vconst(es));
+		return LO(bin)(e, sub ? LEX_TOKEN_MINUS : LEX_TOKEN_PLUS, 8, false, p, i);
 	}
 }
 
@@ -1154,7 +1154,7 @@ VPRIV val wk_vla_bytes(ecx *e, qty t)
 		return vconst(tsize(c, t));
 	n = wk_vla_len(e, a->n);
 	b = wk_vla_bytes(e, a->base);
-	return wk_arith(e, T_STAR, prim(TY_ULONG), n, b);
+	return wk_arith(e, LEX_TOKEN_STAR, prim(TY_ULONG), n, b);
 }
 
 /* p +- i elements of a pointer to a VLA */
@@ -1169,8 +1169,8 @@ static val wk_ptradd_vla(ecx *e, val p, val i, qty it, qty pt, bool sub)
 
 	if (wk_size(c, it) < 8)
 		LO(ext)(e, ri, wk_size(c, it), wk_signed(c, it));
-	i = wk_arith(e, T_STAR, prim(TY_ULONG), wk_vreg(ri), wk_vla_bytes(e, T(c, pt)->base));
-	return wk_arith(e, sub ? T_MINUS : T_PLUS, prim(TY_ULONG), p, i);
+	i = wk_arith(e, LEX_TOKEN_STAR, prim(TY_ULONG), wk_vreg(ri), wk_vla_bytes(e, T(c, pt)->base));
+	return wk_arith(e, sub ? LEX_TOKEN_MINUS : LEX_TOKEN_PLUS, prim(TY_ULONG), p, i);
 }
 
 VPRIV void wk_vla_decl(ecx *e, uint32_t s, bool zero)
@@ -1206,14 +1206,14 @@ VPRIV void wk_vla_decl(ecx *e, uint32_t s, bool zero)
 	/* Leave enough padding to round the returned pointer up independently
 	   of the stack pointer; the saved stack pointer still releases it all. */
 	if (align > 16) {
-		n = wk_arith(e, T_PLUS, prim(TY_ULONG), wk_vreg(r), vconst(align - 16));
+		n = wk_arith(e, LEX_TOKEN_PLUS, prim(TY_ULONG), wk_vreg(r), vconst(align - 16));
 		r = wk_reg(e, &n, prim(TY_ULONG));
 	}
 	e->wk->spneed |= e->wk->canary != 0;	/* (alloca'd memory below the frame) */
 	p = LO(alloca)(e, wk_vreg(r));
 	if (align > 16) {
-		p = wk_arith(e, T_PLUS, prim(TY_ULONG), p, vconst(align - 1));
-		p = wk_arith(e, T_AMP, prim(TY_ULONG), p, vconst(-(int64_t)align));
+		p = wk_arith(e, LEX_TOKEN_PLUS, prim(TY_ULONG), p, vconst(align - 1));
+		p = wk_arith(e, LEX_TOKEN_AMPERSAND, prim(TY_ULONG), p, vconst(-(int64_t)align));
 		wk_reg(e, &p, prim(TY_ULONG));
 	}
 	LO(store)(e, p.r, &la, 8);
@@ -1224,8 +1224,8 @@ VPRIV void wk_vla_decl(ecx *e, uint32_t s, bool zero)
 		val zv = vconst(0);
 
 		LO(load)(e, k, &ln, 8, false);
-		k = LO(bin)(e, T_PLUS, 8, false, wk_vreg(k), vconst(7)).r;
-		k = LO(bin)(e, T_AMP, 8, false, wk_vreg(k), vconst(-8)).r;
+		k = LO(bin)(e, LEX_TOKEN_PLUS, 8, false, wk_vreg(k), vconst(7)).r;
+		k = LO(bin)(e, LEX_TOKEN_AMPERSAND, 8, false, wk_vreg(k), vconst(-8)).r;
 		wk_label(e, top);
 		LO(brz)(e, wk_vreg(k), 8, false, done);
 		LO(tkeep)(e, k);
@@ -1236,8 +1236,8 @@ VPRIV void wk_vla_decl(ecx *e, uint32_t s, bool zero)
 			LO(store)(e, z, &d, 8);
 		}
 		LO(tfree)(e, z);
-		p = LO(bin)(e, T_PLUS, 8, false, p, vconst(8));
-		k = LO(bin)(e, T_MINUS, 8, false, wk_vreg(k), vconst(8)).r;
+		p = LO(bin)(e, LEX_TOKEN_PLUS, 8, false, p, vconst(8));
+		k = LO(bin)(e, LEX_TOKEN_MINUS, 8, false, wk_vreg(k), vconst(8)).r;
 		LO(jump)(e, top);
 		wk_label(e, done);
 		LO(tfree)(e, k);
@@ -1324,18 +1324,18 @@ static val wk_vlanes(ecx *e, int op, qty at, val a, qty bt, val b, qty rt, bool 
 		val x = wk_lane(e, at, ra, i), r;
 
 		if (unary) {
-			if (op == T_EXCLAIM)
-				r = wk_arith(e, T_MINUS, re, WK_LK(re, 0), wk_conv(e, wk_cmpv(e, T_EQUALEQUAL, et, x, WK_LK(et, 0)), prim(TY_INT), re));
-			else if (op == T_MINUS)
-				r = is_flt(c, et) ? LO(fneg)(e, et, x) : wk_arith(e, T_MINUS, et, WK_LK(et, 0), x);
+			if (op == LEX_TOKEN_EXCLAMATION)
+				r = wk_arith(e, LEX_TOKEN_MINUS, re, WK_LK(re, 0), wk_conv(e, wk_cmpv(e, LEX_TOKEN_EQUAL_EQUAL, et, x, WK_LK(et, 0)), prim(TY_INT), re));
+			else if (op == LEX_TOKEN_MINUS)
+				r = is_flt(c, et) ? LO(fneg)(e, et, x) : wk_arith(e, LEX_TOKEN_MINUS, et, WK_LK(et, 0), x);
 			else
-				r = wk_arith(e, T_CARET, et, x, WK_LK(et, -1));
+				r = wk_arith(e, LEX_TOKEN_CARET, et, x, WK_LK(et, -1));
 		} else {
 			val y = wk_lane(e, bt, rb, i);
 
 			if (wk_is_cmp(op))
-				r = wk_arith(e, T_MINUS, re, WK_LK(re, 0), wk_conv(e, wk_cmpv(e, op, et, x, y), prim(TY_INT), re));
-			else if ((op == T_LESSLESS || op == T_GREATERGREATER) && wk_wide(c, et))	/* (a 128-bit shift counts in an int) */
+				r = wk_arith(e, LEX_TOKEN_MINUS, re, WK_LK(re, 0), wk_conv(e, wk_cmpv(e, op, et, x, y), prim(TY_INT), re));
+			else if ((op == LEX_TOKEN_LESS_LESS || op == LEX_TOKEN_GREATER_GREATER) && wk_wide(c, et))	/* (a 128-bit shift counts in an int) */
 				r = wk_arith(e, op, et, x, wk_conv(e, y, is_vec(c, bt) ? T(c, bt)->base : bt, prim(TY_INT)));
 			else
 				r = wk_arith(e, op, et, x, y);
@@ -1426,29 +1426,29 @@ static val wk_binary(ecx *e, uint32_t n)
 	wk_scalar(e, n, x->ty);
 	a = wk_gen(e, x->a);
 	b = wk_rhs(e, &a, x->b, lt);
-	if (is_ptr(c, lt) && is_ptr(c, rt) && op == T_MINUS && ptr_to_vla(c, lt)) {
-		val d = wk_arith(e, T_MINUS, prim(TY_LONG), a, b);
+	if (is_ptr(c, lt) && is_ptr(c, rt) && op == LEX_TOKEN_MINUS && ptr_to_vla(c, lt)) {
+		val d = wk_arith(e, LEX_TOKEN_MINUS, prim(TY_LONG), a, b);
 
-		return wk_arith(e, T_SLASH, prim(TY_LONG), d, wk_vla_bytes(e, T(c, lt)->base));
+		return wk_arith(e, LEX_TOKEN_SLASH, prim(TY_LONG), d, wk_vla_bytes(e, T(c, lt)->base));
 	}
-	if (is_ptr(c, lt) && ptr_to_vla(c, lt) && (op == T_PLUS || op == T_MINUS))
-		return wk_ptradd_vla(e, a, b, rt, lt, op == T_MINUS);
-	if (is_ptr(c, rt) && ptr_to_vla(c, rt) && op == T_PLUS)
+	if (is_ptr(c, lt) && ptr_to_vla(c, lt) && (op == LEX_TOKEN_PLUS || op == LEX_TOKEN_MINUS))
+		return wk_ptradd_vla(e, a, b, rt, lt, op == LEX_TOKEN_MINUS);
+	if (is_ptr(c, rt) && ptr_to_vla(c, rt) && op == LEX_TOKEN_PLUS)
 		return wk_ptradd_vla(e, b, a, lt, rt, false);
-	if (is_ptr(c, lt) && is_ptr(c, rt) && op == T_MINUS) {
+	if (is_ptr(c, lt) && is_ptr(c, rt) && op == LEX_TOKEN_MINUS) {
 		int64_t es = (int64_t)tsize(c, T(c, lt)->base);
-		val d = wk_arith(e, T_MINUS, prim(TY_LONG), a, b);
+		val d = wk_arith(e, LEX_TOKEN_MINUS, prim(TY_LONG), a, b);
 
 		if (es <= 1)
 			return d;
-		return wk_arith(e, T_SLASH, prim(TY_LONG), d, vconst(es));
+		return wk_arith(e, LEX_TOKEN_SLASH, prim(TY_LONG), d, vconst(es));
 	}
-	if (is_ptr(c, lt) && (op == T_PLUS || op == T_MINUS))
-		return wk_ptradd(e, a, b, rt, (int64_t)tsize(c, T(c, lt)->base) ?: 1, op == T_MINUS);
-	if (is_ptr(c, rt) && op == T_PLUS)
+	if (is_ptr(c, lt) && (op == LEX_TOKEN_PLUS || op == LEX_TOKEN_MINUS))
+		return wk_ptradd(e, a, b, rt, (int64_t)tsize(c, T(c, lt)->base) ?: 1, op == LEX_TOKEN_MINUS);
+	if (is_ptr(c, rt) && op == LEX_TOKEN_PLUS)
 		return wk_ptradd(e, b, a, lt, (int64_t)tsize(c, T(c, rt)->base) ?: 1, false);
 	/* Wide integer values are addresses; shift helpers need a scalar count. */
-	if ((op == T_LESSLESS || op == T_GREATERGREATER) && (wk_wide(c, rt) || em_bigint(c, rt)))
+	if ((op == LEX_TOKEN_LESS_LESS || op == LEX_TOKEN_GREATER_GREATER) && (wk_wide(c, rt) || em_bigint(c, rt)))
 		b = wk_conv(e, b, rt, prim(TY_INT));
 	return wk_arith(e, op, x->ty, a, b);
 }
@@ -1646,7 +1646,7 @@ static qty wk_optype(cc *c, int op, qty lt, qty rt)
 	qty pl = wk_size(c, lt) >= 4 ? lt : prim(TY_INT);
 
 	if (em_bigint(c, lt) || em_bigint(c, rt)) {
-		if (op == T_LESSLESS || op == T_GREATERGREATER) return lt;
+		if (op == LEX_TOKEN_LESS_LESS || op == LEX_TOKEN_GREATER_GREATER) return lt;
 		unsigned lb = em_bigint(c, lt) ? T(c, lt)->n : (unsigned)tsize(c, lt)*8;
 		unsigned rb = em_bigint(c, rt) ? T(c, rt)->n : (unsigned)tsize(c, rt)*8;
 		return rb > lb || (rb == lb && !wk_signed(c, rt)) ? rt : lt;
@@ -1654,7 +1654,7 @@ static qty wk_optype(cc *c, int op, qty lt, qty rt)
 
 	if (is_flt(c, lt) || is_flt(c, rt))
 		return !is_flt(c, lt) || (is_flt(c, rt) && KIND(c, rt) > KIND(c, lt)) ? rt : lt;
-	if (op == T_LESSLESS || op == T_GREATERGREATER)
+	if (op == LEX_TOKEN_LESS_LESS || op == LEX_TOKEN_GREATER_GREATER)
 		return pl;
 	if (wk_size(c, rt) > wk_size(c, pl) || (wk_size(c, rt) == wk_size(c, pl) && !wk_signed(c, rt)))
 		return rt;
@@ -1674,8 +1674,8 @@ static val wk_bitint_value(ecx *e, val v, qty t)
 		if (v.k == V_CONST)
 			return wk_const(c, v.i, t);
 		if (bits < 64) {
-			v = LO(bin)(e, T_LESSLESS, 8, false, v, vconst(64 - bits));
-			v = LO(bin)(e, T_GREATERGREATER, 8, is_signed(c, t), v, vconst(64 - bits));
+			v = LO(bin)(e, LEX_TOKEN_LESS_LESS, 8, false, v, vconst(64 - bits));
+			v = LO(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, is_signed(c, t), v, vconst(64 - bits));
 		}
 	}
 	return v;
@@ -1742,7 +1742,7 @@ static val wk_assign_(ecx *e, uint32_t n)
 
 		/* as clang: the right side first, then the left's address and value */
 		b = wk_gen(e, x->b);
-		if ((x->aux == T_LESSLESS || x->aux == T_GREATERGREATER) && (wk_wide(c, rt) || em_bigint(c, rt))) {
+		if ((x->aux == LEX_TOKEN_LESS_LESS || x->aux == LEX_TOKEN_GREATER_GREATER) && (wk_wide(c, rt) || em_bigint(c, rt))) {
 			b = wk_conv(e, b, rt, prim(TY_INT));
 			rt = prim(TY_INT);
 		}
@@ -1763,14 +1763,14 @@ static val wk_assign_(ecx *e, uint32_t n)
 		if (em_bitint(c, lt) && !em_bigint(c, lt))
 			a = wk_bitint_value(e, a, lt);
 		if (is_ptr(c, lt) && ptr_to_vla(c, lt)) {
-			v = wk_ptradd_vla(e, a, b, rt, lt, x->aux == T_MINUS);
+			v = wk_ptradd_vla(e, a, b, rt, lt, x->aux == LEX_TOKEN_MINUS);
 		} else if (is_ptr(c, lt)) {
-			v = wk_ptradd(e, a, b, rt, (int64_t)tsize(c, T(c, lt)->base) ?: 1, x->aux == T_MINUS);
+			v = wk_ptradd(e, a, b, rt, (int64_t)tsize(c, T(c, lt)->base) ?: 1, x->aux == LEX_TOKEN_MINUS);
 		} else {
 			qty ct = wk_optype(c, x->aux, lt, rt);
 
 			a = wk_conv(e, a, lt, ct);
-			if (x->aux != T_LESSLESS && x->aux != T_GREATERGREATER)
+			if (x->aux != LEX_TOKEN_LESS_LESS && x->aux != LEX_TOKEN_GREATER_GREATER)
 				b = wk_conv(e, b, rt, ct);	/* (a shift count stays as it is) */
 			v = wk_conv(e, wk_arith(e, x->aux, ct, a, b), ct, lt);
 		}
@@ -1817,11 +1817,11 @@ static val wk_incval(ecx *e, qty t, bool dec, val a)
 			wk_free(e, &a);
 			return vconst(1);
 		}
-		return LO(cmp)(e, T_EQUALEQUAL, 4, false, a, vconst(0));
+		return LO(cmp)(e, LEX_TOKEN_EQUAL_EQUAL, 4, false, a, vconst(0));
 	}
 	if (is_ptr(c, t) && ptr_to_vla(c, t))
 		return wk_ptradd_vla(e, a, vconst(1), prim(TY_LONG), t, dec);
-	return wk_arith(e, dec ? T_MINUS : T_PLUS, is_ptr(c, t) ? prim(TY_ULONG) : t, a,
+	return wk_arith(e, dec ? LEX_TOKEN_MINUS : LEX_TOKEN_PLUS, is_ptr(c, t) ? prim(TY_ULONG) : t, a,
 			is_flt(c, t) ? wk_conv(e, vconst(1), prim(TY_INT), t) : vconst(d ? d : 1));
 }
 
@@ -1876,14 +1876,14 @@ static val wk_atomic_rmw(ecx *e, uint32_t n)
 
 			LO(load)(e, b.r, &bs, 8, false);
 			if (is_ptr(c, lt) && ptr_to_vla(c, lt)) {
-				v = wk_ptradd_vla(e, a, b, rt, lt, x->aux == T_MINUS);
+				v = wk_ptradd_vla(e, a, b, rt, lt, x->aux == LEX_TOKEN_MINUS);
 			} else if (is_ptr(c, lt)) {
-				v = wk_ptradd(e, a, b, rt, (int64_t)tsize(c, T(c, lt)->base) ?: 1, x->aux == T_MINUS);
+				v = wk_ptradd(e, a, b, rt, (int64_t)tsize(c, T(c, lt)->base) ?: 1, x->aux == LEX_TOKEN_MINUS);
 			} else {
 				qty ct = wk_optype(c, x->aux, lt, rt);
 
 				a = wk_conv(e, a, lt, ct);
-				if (x->aux != T_LESSLESS && x->aux != T_GREATERGREATER)
+				if (x->aux != LEX_TOKEN_LESS_LESS && x->aux != LEX_TOKEN_GREATER_GREATER)
 					b = wk_conv(e, b, rt, ct);
 				v = wk_conv(e, wk_arith(e, x->aux, ct, a, b), ct, lt);
 			}
@@ -1896,7 +1896,7 @@ static val wk_atomic_rmw(ecx *e, uint32_t n)
 		LO(load)(e, nw, &s, sz, false);
 		got = LO(atomic)(e, WK_ACAS, sz, ra, nw, o);
 		LO(tfree)(e, nw);
-		LO(cmpbr)(e, T_EQUALEQUAL, 8, false, wk_vreg(got), wk_vreg(o), done);
+		LO(cmpbr)(e, LEX_TOKEN_EQUAL_EQUAL, 8, false, wk_vreg(got), wk_vreg(o), done);
 		LO(tkeep)(e, got);
 		LO(tkeep)(e, o);
 		LO(mov)(e, o, got);
@@ -1988,11 +1988,11 @@ static val wk_unary(ecx *e, uint32_t n)
 		return wk_gen(e, operand);
 	if (unlikely(is_vec(c, x->ty))) {
 		a = wk_gen(e, x->a);
-		if (x->aux == T_PLUS)
+		if (x->aux == LEX_TOKEN_PLUS)
 			return a;
 		return wk_vlanes(e, x->aux, N(x->a)->ty, a, N(x->a)->ty, vconst(0), x->ty, true);
 	}
-	if (x->aux == T_EXCLAIM) {
+	if (x->aux == LEX_TOKEN_EXCLAMATION) {
 		/* !call() with the call folded or inlined to a constant (!__builtin_strcmp(op, "<")):
 		   the constant; else as a condition */
 		uint32_t tc = x->a;
@@ -2008,23 +2008,23 @@ static val wk_unary(ecx *e, uint32_t n)
 			if (v.k == V_ADDR)
 				return wk_free(e, &v), vconst(0);
 			v = wk_conv(e, v, N(x->a)->ty, prim(TY_BOOL));
-			return wk_arith(e, T_CARET, prim(TY_INT), wk_conv(e, v, prim(TY_BOOL), prim(TY_INT)), vconst(1));
+			return wk_arith(e, LEX_TOKEN_CARET, prim(TY_INT), wk_conv(e, v, prim(TY_BOOL), prim(TY_INT)), vconst(1));
 		}
 		return wk_condval(e, n);
 	}
 	wk_scalar(e, n, x->ty);
 	a = wk_gen(e, x->a);
-	if (x->aux == T_PLUS)
+	if (x->aux == LEX_TOKEN_PLUS)
 		return a;
 	if (is_flt(c, x->ty))
 		return LO(fneg)(e, x->ty, a);
 	if (em_bigint(c, x->ty))
-		return LO(bigbin)(e, x->aux == T_MINUS ? T_MINUS : T_CARET, x->ty,
-			LO(bigconst)(e, x->ty, NULL, x->aux == T_MINUS ? 0 : -1), a);
+		return LO(bigbin)(e, x->aux == LEX_TOKEN_MINUS ? LEX_TOKEN_MINUS : LEX_TOKEN_CARET, x->ty,
+			LO(bigconst)(e, x->ty, NULL, x->aux == LEX_TOKEN_MINUS ? 0 : -1), a);
 	if (wk_wide(c, x->ty))
 		return LO(wun)(e, x->aux, a);
 	if (a.k == V_CONST)
-		return wk_const(c, x->aux == T_MINUS ? -a.i : ~a.i, x->ty);
+		return wk_const(c, x->aux == LEX_TOKEN_MINUS ? -a.i : ~a.i, x->ty);
 	{
 		val v = LO(un)(e, x->aux, wk_opw(c, x->ty), a);
 
@@ -2436,7 +2436,7 @@ static val wk_atomic(ecx *e, uint32_t n)
 
 		LO(load)(e, ex, &le, sz, false);
 		old = LO(atomic)(e, WK_ACAS, sz, rp, r2, ex);
-		ok = LO(cmp)(e, T_EQUALEQUAL, 8, false, wk_vreg(wk_dup(e, old)), wk_vreg(wk_dup(e, ex)));
+		ok = LO(cmp)(e, LEX_TOKEN_EQUAL_EQUAL, 8, false, wk_vreg(wk_dup(e, old)), wk_vreg(wk_dup(e, ex)));
 		LO(brz)(e, ok, 4, true, done);
 		LO(tkeep)(e, ok.r);
 		LO(store)(e, old, &le, sz);
@@ -2457,7 +2457,7 @@ static val wk_atomic(ecx *e, uint32_t n)
 		LO(tfree)(e, r1);
 		LO(tfree)(e, r2);
 		if (id == BI_SYNC_BOOL_CAS) {
-			r = LO(cmp)(e, T_EQUALEQUAL, 8, false, wk_vreg(r), wk_vreg(ex)).r;
+			r = LO(cmp)(e, LEX_TOKEN_EQUAL_EQUAL, 8, false, wk_vreg(r), wk_vreg(ex)).r;
 			sg = false;
 		} else {
 			LO(tfree)(e, ex);
@@ -2466,13 +2466,13 @@ static val wk_atomic(ecx *e, uint32_t n)
 	}
 	case BI_ATOMIC_FETCH_ADD: case BI_ATOMIC_FETCH_SUB: case BI_ATOMIC_ADD_FETCH: case BI_ATOMIC_SUB_FETCH: {
 		bool sub = id == BI_ATOMIC_FETCH_SUB || id == BI_ATOMIC_SUB_FETCH;
-		int a = sub ? LO(un)(e, T_MINUS, 8, wk_vreg(wk_dup(e, r1))).r : r1;
+		int a = sub ? LO(un)(e, LEX_TOKEN_MINUS, 8, wk_vreg(wk_dup(e, r1))).r : r1;
 
 		r = LO(atomic)(e, WK_AXADD, sz, rp, a, -1);
 		if (sub)
 			LO(tfree)(e, a);
 		if (id == BI_ATOMIC_ADD_FETCH || id == BI_ATOMIC_SUB_FETCH)
-			r = LO(bin)(e, sub ? T_MINUS : T_PLUS, 8, false, wk_vreg(r), wk_vreg(r1)).r;
+			r = LO(bin)(e, sub ? LEX_TOKEN_MINUS : LEX_TOKEN_PLUS, 8, false, wk_vreg(r), wk_vreg(r1)).r;
 		else
 			LO(tfree)(e, r1);
 		break;
@@ -2481,7 +2481,7 @@ static val wk_atomic(ecx *e, uint32_t n)
 		/* and, or, xor, nand, max, min: old = *p; do new = old op v while CAS(p, old, new) != old
 		   (old = what it held) */
 		int base = id >= BI_ATOMIC_ADD_FETCH ? id - BI_ATOMIC_ADD_FETCH : id - BI_ATOMIC_FETCH_ADD;
-		static const int bop[] = { T_PLUS, T_MINUS, T_AMP, T_PIPE, T_CARET };
+		static const int bop[] = { LEX_TOKEN_PLUS, LEX_TOKEN_MINUS, LEX_TOKEN_AMPERSAND, LEX_TOKEN_PIPE, LEX_TOKEN_CARET };
 		uint32_t top = wk_newlabel(e), done = wk_newlabel(e);
 		int old = LO(atomic)(e, WK_ALOAD, sz, rp, -1, -1), nw, got;
 
@@ -2489,8 +2489,8 @@ static val wk_atomic(ecx *e, uint32_t n)
 		if (base < 5) {
 			nw = LO(bin)(e, bop[base], 8, false, wk_vreg(wk_dup(e, old)), wk_vreg(wk_dup(e, r1))).r;
 		} else if (base == 5) {	/* nand: ~(old & v) */
-			nw = LO(bin)(e, T_AMP, 8, false, wk_vreg(wk_dup(e, old)), wk_vreg(wk_dup(e, r1))).r;
-			nw = LO(un)(e, T_TILDE, 8, wk_vreg(nw)).r;
+			nw = LO(bin)(e, LEX_TOKEN_AMPERSAND, 8, false, wk_vreg(wk_dup(e, old)), wk_vreg(wk_dup(e, r1))).r;
+			nw = LO(un)(e, LEX_TOKEN_TILDE, 8, wk_vreg(nw)).r;
 		} else {	/* max, min as the object's type compares */
 			uint32_t keep = wk_newlabel(e);
 			int a = wk_dup(e, old), b = wk_dup(e, r1);
@@ -2500,12 +2500,12 @@ static val wk_atomic(ecx *e, uint32_t n)
 				LO(ext)(e, b, sz, sg);
 			}
 			nw = wk_dup(e, old);
-			LO(cmpbr)(e, base == 6 ? T_GREATEREQ : T_LESSEQ, sz > 4 ? 8 : 4, sg, wk_vreg(a), wk_vreg(b), keep);
+			LO(cmpbr)(e, base == 6 ? LEX_TOKEN_GREATER_EQUAL : LEX_TOKEN_LESS_EQUAL, sz > 4 ? 8 : 4, sg, wk_vreg(a), wk_vreg(b), keep);
 			LO(mov)(e, nw, r1);
 			wk_label(e, keep);
 		}
 		got = LO(atomic)(e, WK_ACAS, sz, rp, nw, old);
-		LO(cmpbr)(e, T_EQUALEQUAL, 8, false, wk_vreg(got), wk_vreg(old), done);
+		LO(cmpbr)(e, LEX_TOKEN_EQUAL_EQUAL, 8, false, wk_vreg(got), wk_vreg(old), done);
 		LO(tkeep)(e, got);
 		LO(tkeep)(e, old);
 		LO(mov)(e, old, got);
@@ -2566,12 +2566,12 @@ static val wk_fpattern(ecx *e, qty t, int64_t sl, int *eb)
 	if (k == TY_FLOAT16 || k == TY_BFLOAT16) {
 		LO(load)(e, r, &l, 2, false);
 		*eb = k == TY_BFLOAT16 ? 8 : 5;
-		return wk_arith(e, T_LESSLESS, u, wk_vreg(r), vconst(49));
+		return wk_arith(e, LEX_TOKEN_LESS_LESS, u, wk_vreg(r), vconst(49));
 	}
 	if (k == TY_FLOAT || k == TY_DOUBLE) {
 		LO(load)(e, r, &l, k == TY_FLOAT ? 4 : 8, false);
 		*eb = k == TY_FLOAT ? 8 : 11;
-		return wk_arith(e, T_LESSLESS, u, wk_vreg(r), vconst(k == TY_FLOAT ? 33 : 1));
+		return wk_arith(e, LEX_TOKEN_LESS_LESS, u, wk_vreg(r), vconst(k == TY_FLOAT ? 33 : 1));
 	}
 	{
 		int m = LO(treg)(e);
@@ -2581,13 +2581,13 @@ static val wk_fpattern(ecx *e, qty t, int64_t sl, int *eb)
 		LO(load)(e, m, &l, 8, false);
 		if (k == TY_LDOUBLE && !wk_quad(c, t)) {	/* x87 */
 			LO(load)(e, r, &h, 2, false);
-			s = wk_arith(e, T_LESSLESS, u, wk_vreg(m), vconst(1));
-			s = LO(cmp)(e, T_EXCLAIMEQ, 8, false, s, vconst(0));
-			return wk_arith(e, T_PIPE, u, wk_arith(e, T_LESSLESS, u, wk_vreg(r), vconst(49)), s);
+			s = wk_arith(e, LEX_TOKEN_LESS_LESS, u, wk_vreg(m), vconst(1));
+			s = LO(cmp)(e, LEX_TOKEN_EXCLAMATION_EQUAL, 8, false, s, vconst(0));
+			return wk_arith(e, LEX_TOKEN_PIPE, u, wk_arith(e, LEX_TOKEN_LESS_LESS, u, wk_vreg(r), vconst(49)), s);
 		}
 		LO(load)(e, r, &h, 8, false);
-		s = LO(cmp)(e, T_EXCLAIMEQ, 8, false, wk_vreg(m), vconst(0));
-		return wk_arith(e, T_PIPE, u, wk_arith(e, T_LESSLESS, u, wk_vreg(r), vconst(1)), s);
+		s = LO(cmp)(e, LEX_TOKEN_EXCLAMATION_EQUAL, 8, false, wk_vreg(m), vconst(0));
+		return wk_arith(e, LEX_TOKEN_PIPE, u, wk_arith(e, LEX_TOKEN_LESS_LESS, u, wk_vreg(r), vconst(1)), s);
 	}
 }
 
@@ -2600,13 +2600,13 @@ static val wk_fptest(ecx *e, int bi, qty t, int64_t sl)
 
 	if (bi == BI_ISNORMAL) {
 		/* exponent - 1 below all ones - 1: neither zero/subnormal nor inf/NaN */
-		p = wk_arith(e, T_GREATERGREATER, prim(TY_ULONG), p, vconst(64 - eb));
-		p = wk_arith(e, T_MINUS, prim(TY_ULONG), p, vconst(1));
-		return LO(cmp)(e, T_LESS, 8, false, p, vconst((i128)((1ull << eb) - 2)));
+		p = wk_arith(e, LEX_TOKEN_GREATER_GREATER, prim(TY_ULONG), p, vconst(64 - eb));
+		p = wk_arith(e, LEX_TOKEN_MINUS, prim(TY_ULONG), p, vconst(1));
+		return LO(cmp)(e, LEX_TOKEN_LESS, 8, false, p, vconst((i128)((1ull << eb) - 2)));
 	}
 	if (bi == 0)	/* zero */
-		return LO(cmp)(e, T_EQUALEQUAL, 8, false, p, vconst(0));
-	return LO(cmp)(e, bi == BI_ISNAN ? T_GREATER : bi == BI_ISINF ? T_EQUALEQUAL : T_LESS, 8, false, p, vconst((i128)top));
+		return LO(cmp)(e, LEX_TOKEN_EQUAL_EQUAL, 8, false, p, vconst(0));
+	return LO(cmp)(e, bi == BI_ISNAN ? LEX_TOKEN_GREATER : bi == BI_ISINF ? LEX_TOKEN_EQUAL_EQUAL : LEX_TOKEN_LESS, 8, false, p, vconst((i128)top));
 }
 
 /* isnan, isinf, isfinite, isnormal, isinf_sign, fpclassify on a value */
@@ -2675,10 +2675,10 @@ static val wk_fpclass(ecx *e, uint32_t n)
 		l.off += k == TY_FLOAT16 || k == TY_BFLOAT16 ? 1 : k == TY_FLOAT ? 3 : k == TY_DOUBLE ? 7 : wk_quad(c, t) ? 15 : 9;
 		r = LO(treg)(e);
 		LO(load)(e, r, &l, 1, false);
-		sg = LO(bin)(e, T_GREATERGREATER, 4, false, wk_vreg(r), vconst(7));
-		sg = LO(bin)(e, T_STAR, 4, false, sg, vconst(-2));
-		sg = LO(bin)(e, T_PLUS, 4, false, sg, vconst(1));	/* 1 or -1 */
-		return LO(bin)(e, T_STAR, 4, false, sg, inf);
+		sg = LO(bin)(e, LEX_TOKEN_GREATER_GREATER, 4, false, wk_vreg(r), vconst(7));
+		sg = LO(bin)(e, LEX_TOKEN_STAR, 4, false, sg, vconst(-2));
+		sg = LO(bin)(e, LEX_TOKEN_PLUS, 4, false, sg, vconst(1));	/* 1 or -1 */
+		return LO(bin)(e, LEX_TOKEN_STAR, 4, false, sg, inf);
 	}
 	return wk_fptest(e, x->aux, t, sl);
 }
@@ -2762,7 +2762,7 @@ static int64_t wk_ovextend(ecx *e, val v, qty t)
 	wk_free(e, &wide);
 	for (int i = 4; i < 8; i++) {
 		val sign = wk_signed(e->c, t)
-			? LO(bin)(e, T_GREATERGREATER, 4, true, wk_ovload(e, slot, 3), vconst(31)) : vconst(0);
+			? LO(bin)(e, LEX_TOKEN_GREATER_GREATER, 4, true, wk_ovload(e, slot, 3), vconst(31)) : vconst(0);
 		wk_ovstore(e, slot, i, sign);
 	}
 	return slot;
@@ -2777,28 +2777,28 @@ static val wk_overflow_wide(ecx *e, const uint32_t *arg, int op)
 	int64_t rs = wk_slot(e, 32, 16), carry = wk_slot(e, 4, 4);
 	lval dst = wk_fromval(e, wk_gen(e, arg[2]), tr);
 	for (int i = 0; i < 8; i++) wk_ovstore(e, rs, i, vconst(0));
-	if (op == T_STAR) {
+	if (op == LEX_TOKEN_STAR) {
 		for (int i = 0; i < 8; i++) {
 			wk_ovstore(e, carry, 0, vconst(0));
 			for (int j = 0; j < 8 - i; j++) {
-				val v = LO(bin)(e, T_STAR, 8, false, wk_ovload(e, as, i), wk_ovload(e, bs, j));
-				v = LO(bin)(e, T_PLUS, 8, false, v, wk_ovload(e, rs, i + j));
-				v = LO(bin)(e, T_PLUS, 8, false, v, wk_ovload(e, carry, 0));
+				val v = LO(bin)(e, LEX_TOKEN_STAR, 8, false, wk_ovload(e, as, i), wk_ovload(e, bs, j));
+				v = LO(bin)(e, LEX_TOKEN_PLUS, 8, false, v, wk_ovload(e, rs, i + j));
+				v = LO(bin)(e, LEX_TOKEN_PLUS, 8, false, v, wk_ovload(e, carry, 0));
 				int r = wk_reg(e, &v, prim(TY_ULONG));
 				wk_ovstore(e, rs, i + j, wk_vreg(wk_dup(e, r)));
-				wk_ovstore(e, carry, 0, LO(bin)(e, T_GREATERGREATER, 8, false, v, vconst(32)));
+				wk_ovstore(e, carry, 0, LO(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, false, v, vconst(32)));
 			}
 		}
 	} else {
-		wk_ovstore(e, carry, 0, vconst(op == T_MINUS));
+		wk_ovstore(e, carry, 0, vconst(op == LEX_TOKEN_MINUS));
 		for (int i = 0; i < 8; i++) {
 			val b = wk_ovload(e, bs, i);
-			if (op == T_MINUS) b = LO(bin)(e, T_CARET, 8, false, b, vconst(0xffffffffu));
-			val v = LO(bin)(e, T_PLUS, 8, false, wk_ovload(e, as, i), b);
-			v = LO(bin)(e, T_PLUS, 8, false, v, wk_ovload(e, carry, 0));
+			if (op == LEX_TOKEN_MINUS) b = LO(bin)(e, LEX_TOKEN_CARET, 8, false, b, vconst(0xffffffffu));
+			val v = LO(bin)(e, LEX_TOKEN_PLUS, 8, false, wk_ovload(e, as, i), b);
+			v = LO(bin)(e, LEX_TOKEN_PLUS, 8, false, v, wk_ovload(e, carry, 0));
 			int r = wk_reg(e, &v, prim(TY_ULONG));
 			wk_ovstore(e, rs, i, wk_vreg(wk_dup(e, r)));
-			wk_ovstore(e, carry, 0, LO(bin)(e, T_GREATERGREATER, 8, false, v, vconst(32)));
+			wk_ovstore(e, carry, 0, LO(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, false, v, vconst(32)));
 		}
 	}
 	lval result = { .k = L_FRAME, .off = rs, .align = 16 };
@@ -2807,8 +2807,8 @@ static val wk_overflow_wide(ecx *e, const uint32_t *arg, int op)
 		unsigned bits = T(c, tr)->n;
 		if (bits > 64 && bits < 128) v = LO(wbitint)(e, v, bits, wk_signed(c, tr));
 		else if (bits < 64) {
-			v = LO(bin)(e, T_LESSLESS, 8, false, v, vconst(64 - bits));
-			v = LO(bin)(e, T_GREATERGREATER, 8, wk_signed(c, tr), v, vconst(64 - bits));
+			v = LO(bin)(e, LEX_TOKEN_LESS_LESS, 8, false, v, vconst(64 - bits));
+			v = LO(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, wk_signed(c, tr), v, vconst(64 - bits));
 		}
 	}
 	/* Compare the exact value with the destination conversion, sign-extended
@@ -2827,10 +2827,10 @@ static val wk_overflow_wide(ecx *e, const uint32_t *arg, int op)
 	}
 	val different = vconst(0);
 	for (int i = 0; i < 8; i++) {
-		val d = LO(bin)(e, T_CARET, 4, false, wk_ovload(e, rs, i), wk_ovload(e, back, i));
-		different = LO(bin)(e, T_PIPE, 4, false, different, d);
+		val d = LO(bin)(e, LEX_TOKEN_CARET, 4, false, wk_ovload(e, rs, i), wk_ovload(e, back, i));
+		different = LO(bin)(e, LEX_TOKEN_PIPE, 4, false, different, d);
 	}
-	return LO(cmp)(e, T_EXCLAIMEQ, 4, false, different, vconst(0));
+	return LO(cmp)(e, LEX_TOKEN_EXCLAMATION_EQUAL, 4, false, different, vconst(0));
 }
 
 /* The same non-emitting constant_p policy serves values and control proofs. */
@@ -3011,10 +3011,10 @@ static val wk_builtin(ecx *e, uint32_t n)
 		val v = wk_conv(e, wk_gen(e, arg[0]), at, sz == 8 ? prim(TY_LONG) : prim(TY_INT)), t;
 		int r = wk_reg(e, &v, prim(TY_LONG));
 
-		t = LO(bin)(e, T_GREATERGREATER, sz, true, wk_vreg(wk_dup(e, r)), vconst(sz * 8 - 1));
-		v = LO(bin)(e, T_CARET, sz, false, wk_vreg(r), t);
-		v = LO(bin)(e, T_LESSLESS, sz, false, v, vconst(1));
-		v = LO(bin)(e, T_PIPE, sz, false, v, vconst(1));
+		t = LO(bin)(e, LEX_TOKEN_GREATER_GREATER, sz, true, wk_vreg(wk_dup(e, r)), vconst(sz * 8 - 1));
+		v = LO(bin)(e, LEX_TOKEN_CARET, sz, false, wk_vreg(r), t);
+		v = LO(bin)(e, LEX_TOKEN_LESS_LESS, sz, false, v, vconst(1));
+		v = LO(bin)(e, LEX_TOKEN_PIPE, sz, false, v, vconst(1));
 		return LO(bitop)(e, sz == 8 ? BI_CLZLL : BI_CLZ, sz, v);
 	}
 	case BI_BITREVERSE8: case BI_BITREVERSE16: case BI_BITREVERSE32: case BI_BITREVERSE64: {
@@ -3036,21 +3036,21 @@ static val wk_builtin(ecx *e, uint32_t n)
 		if (bits < 64)
 			LO(ext)(e, r, bits / 8, false);
 		for (int k = 0; k < 3; k++) {
-			val lo = LO(bin)(e, T_AMP, 8, false, wk_vreg(wk_dup(e, r)), vconst((i128)m[k]));
-			val hi = LO(bin)(e, T_GREATERGREATER, 8, false, wk_vreg(r), vconst(1 << k));
+			val lo = LO(bin)(e, LEX_TOKEN_AMPERSAND, 8, false, wk_vreg(wk_dup(e, r)), vconst((i128)m[k]));
+			val hi = LO(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, false, wk_vreg(r), vconst(1 << k));
 
-			hi = LO(bin)(e, T_AMP, 8, false, hi, vconst((i128)m[k]));
-			lo = LO(bin)(e, T_LESSLESS, 8, false, lo, vconst(1 << k));
-			r = LO(bin)(e, T_PIPE, 8, false, lo, hi).r;
+			hi = LO(bin)(e, LEX_TOKEN_AMPERSAND, 8, false, hi, vconst((i128)m[k]));
+			lo = LO(bin)(e, LEX_TOKEN_LESS_LESS, 8, false, lo, vconst(1 << k));
+			r = LO(bin)(e, LEX_TOKEN_PIPE, 8, false, lo, hi).r;
 		}
 		v = LO(bitop)(e, BI_BSWAP64, 8, wk_vreg(r));
 		if (bits < 64)
-			v = LO(bin)(e, T_GREATERGREATER, 8, false, v, vconst(64 - bits));
+			v = LO(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, false, v, vconst(64 - bits));
 		return v;
 	}
 	case BI_ADD_OVERFLOW: case BI_SUB_OVERFLOW: case BI_MUL_OVERFLOW: {
 		if (LO(i128mem)() && (wk_size(c, N(arg[0])->ty) > 8 || wk_size(c, N(arg[1])->ty) > 8 || (em_bitint(c, T(c, N(arg[2])->ty)->base) && wk_size(c, T(c, N(arg[2])->ty)->base) > 8)))
-			return wk_overflow_wide(e, arg, x->aux == BI_ADD_OVERFLOW ? T_PLUS : x->aux == BI_SUB_OVERFLOW ? T_MINUS : T_STAR);
+			return wk_overflow_wide(e, arg, x->aux == BI_ADD_OVERFLOW ? LEX_TOKEN_PLUS : x->aux == BI_SUB_OVERFLOW ? LEX_TOKEN_MINUS : LEX_TOKEN_STAR);
 		if (wk_size(c, N(arg[0])->ty) <= 8 && wk_size(c, N(arg[1])->ty) <= 8 && (KIND(c, T(c, N(arg[2])->ty)->base) == TY_INT128 || KIND(c, T(c, N(arg[2])->ty)->base) == TY_UINT128) &&
 		    !em_bitint(c, T(c, N(arg[2])->ty)->base) && LO(i128mem)()) {
 			/*
@@ -3059,8 +3059,8 @@ static val wk_builtin(ecx *e, uint32_t n)
 			 * the overflow is its sign against the result's signedness.
 			 */
 			qty ta = N(arg[0])->ty, tb = N(arg[1])->ty, tr = T(c, N(arg[2])->ty)->base, w = prim(TY_INT128);
-			int op = x->aux == BI_ADD_OVERFLOW ? T_PLUS : x->aux == BI_SUB_OVERFLOW ? T_MINUS : T_STAR;
-			bool uu = op == T_STAR && !wk_signed(c, ta) && !wk_signed(c, tb);
+			int op = x->aux == BI_ADD_OVERFLOW ? LEX_TOKEN_PLUS : x->aux == BI_SUB_OVERFLOW ? LEX_TOKEN_MINUS : LEX_TOKEN_STAR;
+			bool uu = op == LEX_TOKEN_STAR && !wk_signed(c, ta) && !wk_signed(c, tb);
 			val a = wk_conv(e, wk_gen(e, arg[0]), ta, w), b = wk_conv(e, wk_gen(e, arg[1]), tb, w), r, d;
 			lval hi;
 			int rr, s;
@@ -3079,14 +3079,14 @@ static val wk_builtin(ecx *e, uint32_t n)
 				s = LO(treg)(e);
 				LO(load)(e, s, &hi, 8, false);
 				LO(tfree)(e, rr);
-				return LO(bin)(e, T_GREATERGREATER, 8, false, wk_vreg(s), vconst(63));
+				return LO(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, false, wk_vreg(s), vconst(63));
 			}
 			LO(tfree)(e, rr);
 			return vconst(0);
 		}
 		/* the exact result in 128 bits; overflow when it differs from the stored one extended back */
 		qty ta = N(arg[0])->ty, tb = N(arg[1])->ty, tr = T(c, N(arg[2])->ty)->base, w = prim(TY_INT128);
-		int op = x->aux == BI_ADD_OVERFLOW ? T_PLUS : x->aux == BI_SUB_OVERFLOW ? T_MINUS : T_STAR;
+		int op = x->aux == BI_ADD_OVERFLOW ? LEX_TOKEN_PLUS : x->aux == BI_SUB_OVERFLOW ? LEX_TOKEN_MINUS : LEX_TOKEN_STAR;
 		val a, b, r, lo, back;
 		lval l;
 		int rr, cp, rs;
@@ -3104,14 +3104,14 @@ static val wk_builtin(ecx *e, uint32_t n)
 		if (em_bitint(c, tr) && T(c, tr)->n < 64) {
 			unsigned shift = 64 - T(c, tr)->n;
 
-			lo = LO(bin)(e, T_LESSLESS, 8, false, lo, vconst(shift));
-			lo = LO(bin)(e, T_GREATERGREATER, 8, is_signed(c, tr), lo, vconst(shift));
+			lo = LO(bin)(e, LEX_TOKEN_LESS_LESS, 8, false, lo, vconst(shift));
+			lo = LO(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, is_signed(c, tr), lo, vconst(shift));
 		}
 		rs = wk_reg(e, &lo, tr);
 		LO(store)(e, rs, &l, wk_size(c, tr));
 		wk_lfree(e, &l);
 		back = wk_conv(e, lo, tr, w);
-		return LO(wcmp)(e, T_EXCLAIMEQ, true, (val){ .k = V_REG, .r = (uint8_t)rr }, back);
+		return LO(wcmp)(e, LEX_TOKEN_EXCLAMATION_EQUAL, true, (val){ .k = V_REG, .r = (uint8_t)rr }, back);
 	}
 	case BI_ISINF_SIGN: case BI_FPCLASSIFY:
 		return wk_fpclass(e, n);
@@ -3131,11 +3131,11 @@ static val wk_builtin(ecx *e, uint32_t n)
 			LO(load)(e, lo, &l, 8, false);
 			LO(load)(e, hi, &h, 8, false);
 			wk_lfree(e, &l);
-			val sticky = LO(cmp)(e, T_EXCLAIMEQ, 8, false, wk_vreg(lo), vconst(0));
-			val bits = LO(bin)(e, T_AMP, 8, false, wk_vreg(hi), vconst(0x7fffffffffffffffULL));
-			bits = LO(bin)(e, T_PIPE, 8, false, bits, sticky);
-			bits = LO(bin)(e, T_MINUS, 8, false, bits, vconst(0x7fff000000000001ULL));
-			return LO(cmp)(e, T_LESS, 8, false, bits, vconst(0x7fffffffffffULL));
+			val sticky = LO(cmp)(e, LEX_TOKEN_EXCLAMATION_EQUAL, 8, false, wk_vreg(lo), vconst(0));
+			val bits = LO(bin)(e, LEX_TOKEN_AMPERSAND, 8, false, wk_vreg(hi), vconst(0x7fffffffffffffffULL));
+			bits = LO(bin)(e, LEX_TOKEN_PIPE, 8, false, bits, sticky);
+			bits = LO(bin)(e, LEX_TOKEN_MINUS, 8, false, bits, vconst(0x7fff000000000001ULL));
+			return LO(cmp)(e, LEX_TOKEN_LESS, 8, false, bits, vconst(0x7fffffffffffULL));
 		}
 		if (wk_mem(e, at)) {
 			/* x87 stores an explicit integer bit next to its 63 fraction bits. */
@@ -3145,57 +3145,57 @@ static val wk_builtin(ecx *e, uint32_t n)
 
 			hi.off += 8;
 			LO(load)(e, re, &hi, 2, false);
-			exp = LO(bin)(e, T_AMP, 4, false, wk_vreg(re), vconst(0x7fff));
+			exp = LO(bin)(e, LEX_TOKEN_AMPERSAND, 4, false, wk_vreg(re), vconst(0x7fff));
 			re = LO(treg)(e);
 			LO(load)(e, re, &l, 8, false);
 			wk_lfree(e, &l);
 			val sig = wk_vreg(re);
 			val integer = vconst(0);
 			if (x->aux == BI_ISFINITE || x->aux == BI_ISNORMAL || x->aux == BI_ISNAN)
-				integer = LO(cmp)(e, T_GREATEREQ, 8, false, wk_vreg(wk_dup(e, sig.r)), vconst((i128)1 << 63));
+				integer = LO(cmp)(e, LEX_TOKEN_GREATER_EQUAL, 8, false, wk_vreg(wk_dup(e, sig.r)), vconst((i128)1 << 63));
 			if (x->aux == BI_ISFINITE || x->aux == BI_ISNORMAL) {
 				val valid = integer;
 				if (x->aux == BI_ISFINITE) {
-					val zeroexp = LO(cmp)(e, T_EQUALEQUAL, 4, false, wk_vreg(wk_dup(e, exp.r)), vconst(0));
-					valid = LO(bin)(e, T_PIPE, 4, false, valid, zeroexp);
+					val zeroexp = LO(cmp)(e, LEX_TOKEN_EQUAL_EQUAL, 4, false, wk_vreg(wk_dup(e, exp.r)), vconst(0));
+					valid = LO(bin)(e, LEX_TOKEN_PIPE, 4, false, valid, zeroexp);
 				} else
-					exp = LO(bin)(e, T_MINUS, 4, false, exp, vconst(1));
-				exp = LO(cmp)(e, T_LESS, 4, false, exp, vconst(x->aux == BI_ISNORMAL ? 0x7ffe : 0x7fff));
+					exp = LO(bin)(e, LEX_TOKEN_MINUS, 4, false, exp, vconst(1));
+				exp = LO(cmp)(e, LEX_TOKEN_LESS, 4, false, exp, vconst(x->aux == BI_ISNORMAL ? 0x7ffe : 0x7fff));
 				LO(tfree)(e, sig.r);
-				return LO(bin)(e, T_AMP, 4, false, exp, valid);
+				return LO(bin)(e, LEX_TOKEN_AMPERSAND, 4, false, exp, valid);
 			}
 			if (x->aux == BI_ISSIGNALING) {
 				/* Unsupported encodings (integer bit clear) are quiet NaNs. */
-				mant = LO(bin)(e, T_MINUS, 8, false, sig, vconst(((i128)1 << 63) + 1));
-				mant = LO(cmp)(e, T_LESS, 8, false, mant, vconst(((i128)1 << 62) - 1));
-				exp = LO(cmp)(e, T_EQUALEQUAL, 4, false, exp, vconst(0x7fff));
-				return LO(bin)(e, T_AMP, 4, false, exp, mant);
+				mant = LO(bin)(e, LEX_TOKEN_MINUS, 8, false, sig, vconst(((i128)1 << 63) + 1));
+				mant = LO(cmp)(e, LEX_TOKEN_LESS, 8, false, mant, vconst(((i128)1 << 62) - 1));
+				exp = LO(cmp)(e, LEX_TOKEN_EQUAL_EQUAL, 4, false, exp, vconst(0x7fff));
+				return LO(bin)(e, LEX_TOKEN_AMPERSAND, 4, false, exp, mant);
 			}
 			val unsupported = vconst(0);
 			if (x->aux == BI_ISNAN) {
-				val nonzero = LO(cmp)(e, T_EXCLAIMEQ, 4, false, wk_vreg(wk_dup(e, exp.r)), vconst(0));
-				val nointeger = LO(bin)(e, T_CARET, 4, false, integer, vconst(1));
-				unsupported = LO(bin)(e, T_AMP, 4, false, nonzero, nointeger);
+				val nonzero = LO(cmp)(e, LEX_TOKEN_EXCLAMATION_EQUAL, 4, false, wk_vreg(wk_dup(e, exp.r)), vconst(0));
+				val nointeger = LO(bin)(e, LEX_TOKEN_CARET, 4, false, integer, vconst(1));
+				unsupported = LO(bin)(e, LEX_TOKEN_AMPERSAND, 4, false, nonzero, nointeger);
 			}
-			mant = LO(cmp)(e, x->aux == BI_ISNAN ? T_EXCLAIMEQ : T_EQUALEQUAL,
+			mant = LO(cmp)(e, x->aux == BI_ISNAN ? LEX_TOKEN_EXCLAMATION_EQUAL : LEX_TOKEN_EQUAL_EQUAL,
 				8, false, sig, vconst((i128)1 << 63));
-			exp = LO(cmp)(e, T_EQUALEQUAL, 4, false, exp, vconst(0x7fff));
-			val result = LO(bin)(e, T_AMP, 4, false, exp, mant);
-			return x->aux == BI_ISNAN ? LO(bin)(e, T_PIPE, 4, false, result, unsupported) : result;
+			exp = LO(cmp)(e, LEX_TOKEN_EQUAL_EQUAL, 4, false, exp, vconst(0x7fff));
+			val result = LO(bin)(e, LEX_TOKEN_AMPERSAND, 4, false, exp, mant);
+			return x->aux == BI_ISNAN ? LO(bin)(e, LEX_TOKEN_PIPE, 4, false, result, unsupported) : result;
 		}
 		v = LO(fbits)(e, v, sz);
-		v = LO(bin)(e, T_AMP, 8, false, v,
+		v = LO(bin)(e, LEX_TOKEN_AMPERSAND, 8, false, v,
 			vconst(sz == 2 ? 0x7fffULL : sz == 4 ? 0x7fffffffULL : 0x7fffffffffffffffULL));
 		if (x->aux == BI_ISSIGNALING) {
-			v = LO(bin)(e, T_MINUS, 8, false, v, vconst(KIND(c, at) == TY_BFLOAT16 ? 0x7f81ULL : sz == 2 ? 0x7c01ULL : sz == 4 ? 0x7f800001ULL : 0x7ff0000000000001ULL));
-			return LO(cmp)(e, T_LESS, 8, false, v, vconst(KIND(c, at) == TY_BFLOAT16 ? 0x3fULL : sz == 2 ? 0x1ffULL : sz == 4 ? 0x3fffffULL : 0x7ffffffffffffULL));
+			v = LO(bin)(e, LEX_TOKEN_MINUS, 8, false, v, vconst(KIND(c, at) == TY_BFLOAT16 ? 0x7f81ULL : sz == 2 ? 0x7c01ULL : sz == 4 ? 0x7f800001ULL : 0x7ff0000000000001ULL));
+			return LO(cmp)(e, LEX_TOKEN_LESS, 8, false, v, vconst(KIND(c, at) == TY_BFLOAT16 ? 0x3fULL : sz == 2 ? 0x1ffULL : sz == 4 ? 0x3fffffULL : 0x7ffffffffffffULL));
 		}
 		if (x->aux == BI_ISNORMAL) {
-			v = LO(bin)(e, T_GREATERGREATER, 8, false, v, vconst(KIND(c, at) == TY_BFLOAT16 ? 7 : sz == 2 ? 10 : sz == 4 ? 23 : 52));
-			v = LO(bin)(e, T_MINUS, 8, false, v, vconst(1));
-			return LO(cmp)(e, T_LESS, 8, false, v, vconst(KIND(c, at) == TY_BFLOAT16 ? 0xfe : sz == 2 ? 0x1e : sz == 4 ? 0xfe : 0x7fe));
+			v = LO(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, false, v, vconst(KIND(c, at) == TY_BFLOAT16 ? 7 : sz == 2 ? 10 : sz == 4 ? 23 : 52));
+			v = LO(bin)(e, LEX_TOKEN_MINUS, 8, false, v, vconst(1));
+			return LO(cmp)(e, LEX_TOKEN_LESS, 8, false, v, vconst(KIND(c, at) == TY_BFLOAT16 ? 0xfe : sz == 2 ? 0x1e : sz == 4 ? 0xfe : 0x7fe));
 		}
-		return LO(cmp)(e, x->aux == BI_ISNAN ? T_GREATER : x->aux == BI_ISINF ? T_EQUALEQUAL : T_LESS,
+		return LO(cmp)(e, x->aux == BI_ISNAN ? LEX_TOKEN_GREATER : x->aux == BI_ISINF ? LEX_TOKEN_EQUAL_EQUAL : LEX_TOKEN_LESS,
 			8, false, v, vconst(KIND(c, at) == TY_BFLOAT16 ? 0x7f80ULL : sz == 2 ? 0x7c00ULL : sz == 4 ? 0x7f800000ULL : 0x7ff0000000000000ULL));
 	}
 	case BI_SIGNBIT: {
@@ -3210,17 +3210,17 @@ static val wk_builtin(ecx *e, uint32_t n)
 			l.off += wk_quad(c, at) ? 14 : 8;
 			LO(load)(e, r, &l, 2, false);
 			wk_lfree(e, &l);
-			return LO(bin)(e, T_GREATERGREATER, 4, false, (val){ .k = V_REG, .r = (uint8_t)r }, vconst(15));
+			return LO(bin)(e, LEX_TOKEN_GREATER_GREATER, 4, false, (val){ .k = V_REG, .r = (uint8_t)r }, vconst(15));
 		}
 		v = LO(fbits)(e, v, wk_size(c, at));
-		return LO(bin)(e, T_GREATERGREATER, 8, false, v, vconst(wk_size(c, at) * 8 - 1));
+		return LO(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, false, v, vconst(wk_size(c, at) * 8 - 1));
 	}
 	case BI_ISGREATER: case BI_ISGREATEREQUAL: case BI_ISLESS:
 	case BI_ISLESSEQUAL: case BI_ISLESSGREATER: case BI_ISUNORDERED: {
-		static const int ops[] = { T_GREATER, T_GREATEREQ, T_LESS, T_LESSEQ,
+		static const int ops[] = { LEX_TOKEN_GREATER, LEX_TOKEN_GREATER_EQUAL, LEX_TOKEN_LESS, LEX_TOKEN_LESS_EQUAL,
 			WK_FCMP_ORDERED_NE, WK_FCMP_UNORDERED };
 		qty at = N(arg[0])->ty, bt = N(arg[1])->ty;
-		qty ct = wk_optype(c, T_PLUS, at, bt);
+		qty ct = wk_optype(c, LEX_TOKEN_PLUS, at, bt);
 		val a = wk_gen(e, arg[0]), b = wk_rhs(e, &a, arg[1], at);
 
 		a = wk_conv(e, a, at, ct);
@@ -3548,10 +3548,10 @@ static bool wk_ival(ecx *e, uint32_t n, i128 *out)
 	case N_UNARY:
 		if (!wk_ival(e, x->a, &a)) return false;
 		switch (x->aux) {
-		case T_PLUS: v = a; break;
-		case T_MINUS: v = (i128)((u128)0 - (u128)a); break;
-		case T_TILDE: v = ~a; break;
-		case T_EXCLAIM: v = !a; break;
+		case LEX_TOKEN_PLUS: v = a; break;
+		case LEX_TOKEN_MINUS: v = (i128)((u128)0 - (u128)a); break;
+		case LEX_TOKEN_TILDE: v = ~a; break;
+		case LEX_TOKEN_EXCLAMATION: v = !a; break;
 		default: return false;
 		}
 		*out = em_trunc_to(c, v, x->ty);
@@ -3563,8 +3563,8 @@ static bool wk_ival(ecx *e, uint32_t n, i128 *out)
 			*out = known;
 			return true;
 		}
-		if ((x->aux == T_LESSLESS || x->aux == T_GREATERGREATER) &&
-		    (a == 0 || (a == -1 && x->aux == T_GREATERGREATER && wk_signed(c, x->ty)))) {
+		if ((x->aux == LEX_TOKEN_LESS_LESS || x->aux == LEX_TOKEN_GREATER_GREATER) &&
+		    (a == 0 || (a == -1 && x->aux == LEX_TOKEN_GREATER_GREATER && wk_signed(c, x->ty)))) {
 			*out = a;
 			return true;
 		}
@@ -3648,7 +3648,7 @@ VPRIV void wk_cond(ecx *e, uint32_t n, bool jump_if, uint32_t lbl)
 		return;
 	}
 	case N_UNARY:
-		if (x->aux == T_EXCLAIM) {
+		if (x->aux == LEX_TOKEN_EXCLAMATION) {
 			wk_cond(e, x->a, !jump_if, lbl);
 			return;
 		}
@@ -3683,8 +3683,8 @@ VPRIV void wk_cond(ecx *e, uint32_t n, bool jump_if, uint32_t lbl)
 				return;
 			}
 			if (!jump_if)
-				op = op == T_LESS ? T_GREATEREQ : op == T_LESSEQ ? T_GREATER : op == T_GREATER ? T_LESSEQ :
-				     op == T_GREATEREQ ? T_LESS : op == T_EQUALEQUAL ? T_EXCLAIMEQ : T_EQUALEQUAL;
+				op = op == LEX_TOKEN_LESS ? LEX_TOKEN_GREATER_EQUAL : op == LEX_TOKEN_LESS_EQUAL ? LEX_TOKEN_GREATER : op == LEX_TOKEN_GREATER ? LEX_TOKEN_LESS_EQUAL :
+				     op == LEX_TOKEN_GREATER_EQUAL ? LEX_TOKEN_LESS : op == LEX_TOKEN_EQUAL_EQUAL ? LEX_TOKEN_EXCLAMATION_EQUAL : LEX_TOKEN_EQUAL_EQUAL;
 			LO(cmpbr)(e, op, is_ptr(c, lt) ? 8 : wk_opw(c, lt), wk_signed(c, lt), a, b, lbl);
 			return;
 		}

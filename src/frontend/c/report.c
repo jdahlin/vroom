@@ -11,7 +11,7 @@ VPRIV void error_limit(cc *c)
 
 	if (!lim)
 		lim = 19;
-	if (lim > 0 && pp_errors(c->p) >= lim) {
+	if (lim > 0 && pp_error_count(c->p) >= lim) {
 		pp_dinfo d = { "fatal error", UINT32_MAX, NULL, 0, NULL, 0, NULL, 0 };
 
 		pp_diagx(c->p, &d, "too many errors emitted, stopping now [-ferror-limit=]");
@@ -31,7 +31,7 @@ static void unknown_toks(cc *c)
 	for (int i = 0; i < c->ntk; i++) {
 		const ptok *t = &c->tk[i];
 
-		if (t->kind == T_UNKNOWN && !(t->flags & PF_MACRO) && t->loc != c->unk_loc) {
+		if (t->kind == LEX_TOKEN_UNKNOWN && !(t->flags & PP_TOKEN_FLAG_FROM_MACRO) && t->loc != c->unk_loc) {
 			c->unk_loc = t->loc;
 			pp_invalid_tok(c->p, t->s, t->len, t->loc);
 		}
@@ -91,8 +91,8 @@ VPRIV const char *punct_spell(int k)
 		"-=", "~", "!", "!=", "/", "/=", "%", "%=", "<", "<<", "<=", "<<=", ">", ">>", ">=", ">>=", "^", "^=",
 		"|", "||", "|=", "?", ":", "::", ";", "=", "==", ",", "#", "##",
 	};
-	_Static_assert(sizeof(s) / sizeof(s[0]) == T_NKINDS - T_LSQUARE, "punctuators");
-	return k >= T_LSQUARE && k < T_NKINDS ? s[k - T_LSQUARE] : "";
+	_Static_assert(sizeof(s) / sizeof(s[0]) == LEX_TOKEN_KIND_COUNT - LEX_TOKEN_LEFT_SQUARE, "punctuators");
+	return k >= LEX_TOKEN_LEFT_SQUARE && k < LEX_TOKEN_KIND_COUNT ? s[k - LEX_TOKEN_LEFT_SQUARE] : "";
 }
 
 static vdiag *rec(cc *c, int level, uint32_t loc, const pp_span *r, int nr, const pp_fixit *fx, int nfx,

@@ -17,7 +17,7 @@
  * (structurally, building the A -> B maps), replays the type log through B's
  * interning, appends the own records translated into B's index space and
  * applies the writes; the preprocessor then drops the region's tokens
- * (pp_skip_hit).  Anything not covered (diagnostics, #pragma weak/pack, lazy
+ * (pp_hit_skip).  Anything not covered (diagnostics, #pragma weak/pack, lazy
  * bodies, labels, asm, _Complex, a reference that does not map) is not
  * published, so the region is parsed instead.
  *
@@ -1115,14 +1115,14 @@ static void rec_open(cc *c, uint64_t b, const void *he, uint32_t base, unsigned 
 
 	r->open = true;
 	r->b = b, r->he = he, r->base = base, r->ctr = ctr, r->span = span;
-	r->ntot = pp_hit_ntok(he);
+	r->ntot = pp_hit_token_count(he);
 	r->pack = pack_key(c);
 	r->s0 = c->nsym, r->t0 = c->ntag, r->y0 = c->nty, r->n0 = c->nnode, r->l0 = c->nlist;
 	r->i0 = c->nipool, r->f0 = c->nfpool, r->st0 = c->nstr, r->a0 = c->nattr, r->r0 = c->nparams;
 	r->as0 = c->nasm, r->lb0 = c->nlabel, r->tl0 = c->ntoplevel, r->tla0 = c->ntlasm;
 	r->lzseen = c->nlzf;
 	r->lzf0 = c->nlzf, r->lzt0 = c->nlzt, r->lzs0 = c->nlzs, r->pw0 = c->npweak;
-	r->npack0 = c->npack, r->errors0 = c->errors, r->ndiag0 = c->ndiag, r->pperr0 = pp_errors(c->p);
+	r->npack0 = c->npack, r->errors0 = c->errors, r->ndiag0 = c->ndiag, r->pperr0 = pp_error_count(c->p);
 	memcpy(r->cplx0, c->cplx, sizeof(r->cplx0));
 	r->fail = 0;
 	if (r->hn) {
@@ -1728,7 +1728,7 @@ static uint32_t own_fail(cc *c, struct drrec *r, bool all)
 {
 	uint32_t fail = 0;
 
-	if (all && (c->errors != r->errors0 || c->ndiag != r->ndiag0 || pp_errors(c->p) != r->pperr0))
+	if (all && (c->errors != r->errors0 || c->ndiag != r->ndiag0 || pp_error_count(c->p) != r->pperr0))
 		fail |= 1u << F_DIAG;
 	if (c->npack != r->npack0)
 		fail |= 1u << F_PRAGMA;
@@ -1753,7 +1753,7 @@ static uint32_t own_fail(cc *c, struct drrec *r, bool all)
 static void rec_doomed(cc *c, uint32_t fail)
 {
 	struct drrec *r = c->dr;
-	uint64_t tok = pp_ntok(c->p) - 1 - r->b;
+	uint64_t tok = pp_token_count(c->p) - 1 - r->b;
 
 	rec_stop(c);
 	count(S_NOPUB, tok);
@@ -3197,7 +3197,7 @@ VPRIV void dr_close(cc *c)
 		count(S_ABANDON, 0);
 		return;
 	}
-	pos = pp_ntok(c->p) - 1;
+	pos = pp_token_count(c->p) - 1;
 	h = pp_hit_regions(c->p, &n);
 	for (uint32_t i = n; i-- > 0 && h[i].b >= r->b;)
 		if (h[i].b == r->b) {
@@ -3214,7 +3214,7 @@ VPRIV void dr_close(cc *c)
 			}
 			return;
 		}
-	if (pp_open_hit(c->p, &b, &he, NULL, NULL, NULL) && b == r->b)
+	if (pp_hit_open_get(c->p, &b, &he, NULL, NULL, NULL) && b == r->b)
 		return;	/* still in it */
 	rec_stop(c);
 	count(S_ABANDON, 0);
@@ -3229,16 +3229,16 @@ VPRIV bool dr_boundary(cc *c)
 	uint32_t base, span, pack;
 	unsigned ctr;
 
-	if (r->open || c->ntk != 1 || !pp_open_hit(c->p, &b, &he, &base, &ctr, &span))
+	if (r->open || c->ntk != 1 || !pp_hit_open_get(c->p, &b, &he, &base, &ctr, &span))
 		return false;
-	pos = pp_ntok(c->p) - 1;
+	pos = pp_token_count(c->p) - 1;
 	if (b != pos)
 		return false;
 	pack = pack_key(c);
 	bool any = false;
 	uint32_t nvar = 0;
 
-	if (pp_skip_hit(c->p, 1)) {
+	if (pp_hit_skip(c->p, 1)) {
 		uint64_t sig = opt_sig(c->o);
 		uint32_t h = key_hash(he, ctr, pack, sig);
 
@@ -3287,7 +3287,7 @@ VPRIV bool dr_boundary(cc *c)
 				apply(c, e, base);
 				ADD(tk_apply, ticks() - t0);
 			}
-			pp_skip_hit(c->p, 0);
+			pp_hit_skip(c->p, 0);
 			cc_fetch(c, &c->tk[0]);
 			return true;
 		}

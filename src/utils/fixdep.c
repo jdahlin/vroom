@@ -5,7 +5,7 @@
  * the CONFIG_ scan is the same raw-text scan (comments and strings count).
  *
  * The difference is where the text comes from: every listed file goes
- * through the token cache (vlex_get), where the compile has usually just
+ * through the token cache (lex_file_get), where the compile has usually just
  * read it, and each file's CONFIG_ names are found once per process and
  * kept (files never change under vccd, as for the token cache).  fixdep
  * opens and reads all ~900 headers of a TU every time (~29 ms CPU per TU).
@@ -117,9 +117,9 @@ static char *scan_configs(const char *text)
 }
 
 /* f's names, computed once per file (the cache entry is immortal); a racing thread may scan too */
-static const char *file_configs(const vlex_file *f)
+static const char *file_configs(const lex_file *f)
 {
-	vlex_file *w = (vlex_file *)f;
+	lex_file *w = (lex_file *)f;
 	char *names = __atomic_load_n(&w->fixdep, __ATOMIC_ACQUIRE), *exp = NULL;
 
 	if (names)
@@ -154,14 +154,14 @@ typedef struct job {
 static int use_file(job *j, const char *path)
 {
 	char abs[4096];
-	const vlex_file *f;
+	const lex_file *f;
 	const char *names;
 
 	if (path[0] != '/' && j->cwd)
 		snprintf(abs, sizeof(abs), "%s/%s", j->cwd, path);
 	else
 		snprintf(abs, sizeof(abs), "%s", path);
-	f = vlex_get(abs, strlen(abs));
+	f = lex_file_get(abs, strlen(abs));
 	if (!f) {
 		snprintf(j->err, sizeof(j->err), "fixdep: error opening file: %s: %s\n", path, strerror(ENOENT));
 		return -1;

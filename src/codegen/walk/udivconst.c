@@ -23,15 +23,15 @@ VPRIV val wk_udivconst(ecx *e, qty ty, val a, const em_udivconst_recipe *r)
 	}
 	val q;
 	if (r->compare) {
-		q = LO(cmp)(e, T_GREATEREQ, size, false, a, vconst(r->divisor));
+		q = LO(cmp)(e, LEX_TOKEN_GREATER_EQUAL, size, false, a, vconst(r->divisor));
 	} else {
 		if (r->bits == 64) {
 			q = LO(umulhi)(e, a, vconst(r->magic));
 			if (!r->add && r->shift)
-				q = LO(bin)(e, T_GREATERGREATER, 8, false, q, vconst(r->shift));
+				q = LO(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, false, q, vconst(r->shift));
 		} else {
-			q = LO(bin)(e, T_STAR, 8, false, a, vconst(r->magic));
-			q = LO(bin)(e, T_GREATERGREATER, 8, false, q,
+			q = LO(bin)(e, LEX_TOKEN_STAR, 8, false, a, vconst(r->magic));
+			q = LO(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, false, q,
 				    vconst(r->add ? 32 : 32 + r->shift));
 		}
 		if (r->add) {
@@ -42,16 +42,16 @@ VPRIV val wk_udivconst(ecx *e, qty ty, val a, const em_udivconst_recipe *r)
 			}
 			val n = { .k=V_REG, .r=(uint8_t)correction };
 			int qr = q.r;
-			n = LO(bin)(e, T_MINUS, size, false, n, q);
+			n = LO(bin)(e, LEX_TOKEN_MINUS, size, false, n, q);
 			LO(tkeep)(e, qr);
-			n = LO(bin)(e, T_GREATERGREATER, size, false, n, vconst(1));
-			q = LO(bin)(e, T_PLUS, size, false, n, q);
-			q = LO(bin)(e, T_GREATERGREATER, size, false, q, vconst(r->shift));
+			n = LO(bin)(e, LEX_TOKEN_GREATER_GREATER, size, false, n, vconst(1));
+			q = LO(bin)(e, LEX_TOKEN_PLUS, size, false, n, q);
+			q = LO(bin)(e, LEX_TOKEN_GREATER_GREATER, size, false, q, vconst(r->shift));
 		}
 	}
 	if (r->remainder) {
-		q = LO(bin)(e, T_STAR, size, false, q, vconst(r->divisor));
-		q = LO(bin)(e, T_MINUS, size, false, (val){ .k=V_REG, .r=(uint8_t)saved }, q);
+		q = LO(bin)(e, LEX_TOKEN_STAR, size, false, q, vconst(r->divisor));
+		q = LO(bin)(e, LEX_TOKEN_MINUS, size, false, (val){ .k=V_REG, .r=(uint8_t)saved }, q);
 	}
 	return q;
 }

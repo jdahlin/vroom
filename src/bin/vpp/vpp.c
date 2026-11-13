@@ -159,7 +159,7 @@ static int batch(const char *file, int nthr, const char *statsf)
 	{
 		char hs[512];
 
-		pp_hc_stats(hs, sizeof(hs));
+		pp_header_cache_statistics_format(hs, sizeof(hs));
 		printf("%s\n", hs);
 		dc_stats(hs, sizeof(hs));
 		printf("%s\n", hs);

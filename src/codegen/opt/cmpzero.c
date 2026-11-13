@@ -12,7 +12,7 @@ VPRIV bool em_cmpzero(ecx *e, uint32_t n, uint32_t *operand)
 	if (!e->E->o->opt || e->E->noopt || x->op != N_BINARY)
 		return false;
 	op = x->aux;
-	if (op != T_EQUALEQUAL && op != T_LESSEQ && op != T_GREATEREQ)
+	if (op != LEX_TOKEN_EQUAL_EQUAL && op != LEX_TOKEN_LESS_EQUAL && op != LEX_TOKEN_GREATER_EQUAL)
 		return false;
 	a = N(x->a); b = N(x->b);
 	if (QUNQ(a->ty) != QUNQ(b->ty) || !is_integer(c, a->ty) || em_bitint(c, a->ty))
@@ -21,12 +21,12 @@ VPRIV bool em_cmpzero(ecx *e, uint32_t n, uint32_t *operand)
 	if (size != 4 && size != 8)
 		return false;
 	if (em_bound_constant(c, x->b, &value) && em_trunc_to(c, value, b->ty) == 0 &&
-	    (op == T_EQUALEQUAL || (op == T_LESSEQ && !is_signed(c, a->ty)))) {
+	    (op == LEX_TOKEN_EQUAL_EQUAL || (op == LEX_TOKEN_LESS_EQUAL && !is_signed(c, a->ty)))) {
 		*operand = x->a;
 		return true;
 	}
 	if (em_bound_constant(c, x->a, &value) && em_trunc_to(c, value, a->ty) == 0 &&
-	    (op == T_EQUALEQUAL || (op == T_GREATEREQ && !is_signed(c, a->ty)))) {
+	    (op == LEX_TOKEN_EQUAL_EQUAL || (op == LEX_TOKEN_GREATER_EQUAL && !is_signed(c, a->ty)))) {
 		*operand = x->b;
 		return true;
 	}

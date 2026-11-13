@@ -790,7 +790,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* test/diag case with each form; `vcc-sema.py warn` stays 879/879.
 - [ ] **C23 / per-TU `-std`** [P] (partly done: per-TU keyword map `kwmap` (C23 spellings ->
   GNU keywords; true/false/nullptr/constexpr), `#if true`, digit separators through a
-  translated copy (vlex_digitsep: `-E` and `#x` print them without the `'`, clang keeps them),
+  translated copy (lex_file_digit_separators_remove: `-E` and `#x` print them without the `'`, clang keeps them),
   test/vcc/c23_keywords.c, c99_ids.c; C23 `auto` type inference and strict `-std=c11` without
   `typeof`/`asm` keywords (D5.5, test/diag/c23_auto.c).  Left: `u8'a'` (one token only in C23: the lexer
   cache needs a per-mode entry, which would also give exact separators), nullptr_t,
@@ -978,13 +978,13 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   extended with a directory fixture (symlink, hardlink, `a/../a/x.h`),
   compared with `clang -E -P`.
 - [x] **UTF-8 BOM not skipped** [P].  *Done:* read_file blanks a leading BOM
-  (columns kept); test/vcc/bom.c with bom_inc.h.  (vlex_get_hook inputs,
+  (columns kept); test/vcc/bom.c with bom_inc.h.  (lex_file_get_hook inputs,
   fuzz-pp, are not filtered.)
 - [x] **Trigraphs** under strict `-std=c89/c99/c11/c17` or `-trigraphs` [P].  (Done:
-  `vlex_trigraphs` lexes a translated copy; `-ftrigraphs`/`-fno-trigraphs` too; test/vcc/trigraphs.c.
+  `lex_file_trigraphs_replace` lexes a translated copy; `-ftrigraphs`/`-fno-trigraphs` too; test/vcc/trigraphs.c.
   No `-Wtrigraphs` warnings yet.)
 - [x] **No `//` comments in C89** (`-ansi`, `-std=c89`): clang lexes `//` as two `/` there [P].
-  (Done: `vlex_c89` copy, strict c89 only as clang; test/vcc/c89_comments.c.)
+  (Done: `lex_file_c89_convert` copy, strict c89 only as clang; test/vcc/c89_comments.c.)
   *Validate:* pp-diff fixtures with each `-std`.
 - [x] **`SOURCE_DATE_EPOCH`; `__TIMESTAMP__` from file mtime** [P].  (Both done:
   __TIMESTAMP__ is the current file's mtime, `??? ...` when stat fails, as clang.)

@@ -126,12 +126,12 @@ VPRIV val ld_compare(ecx *e, int op, qty t, val a, val b)
 	val res;
 
 	switch (op) {
-	case T_EQUALEQUAL: fn = FN_EQTF2, cond = C_EQ; break;
-	case T_EXCLAIMEQ: fn = FN_NETF2, cond = C_NE; break;
-	case T_LESS: fn = FN_LTTF2, cond = C_LT; break;
-	case T_LESSEQ: fn = FN_LETF2, cond = C_LE; break;
-	case T_GREATER: fn = FN_GTTF2, cond = C_GT; break;
-	case T_GREATEREQ: fn = FN_GETF2, cond = C_GE; break;
+	case LEX_TOKEN_EQUAL_EQUAL: fn = FN_EQTF2, cond = C_EQ; break;
+	case LEX_TOKEN_EXCLAMATION_EQUAL: fn = FN_NETF2, cond = C_NE; break;
+	case LEX_TOKEN_LESS: fn = FN_LTTF2, cond = C_LT; break;
+	case LEX_TOKEN_LESS_EQUAL: fn = FN_LETF2, cond = C_LE; break;
+	case LEX_TOKEN_GREATER: fn = FN_GTTF2, cond = C_GT; break;
+	case LEX_TOKEN_GREATER_EQUAL: fn = FN_GETF2, cond = C_GE; break;
 	default: efatal(e, e->curloc, "unsupported floating point comparison");
 	}
 	res = ld_call(e, fn, v, ts, 2, prim(TY_INT));
@@ -154,9 +154,9 @@ VPRIV val f_arith(ecx *e, int op, qty ty, val a, val b)
 	if (is_ld(e->c, ty)) {
 		val v[2] = { a, b };
 		qty ts[2] = { ty, ty };
-		int fn = op == T_PLUS ? FN_ADDTF3 : op == T_MINUS ? FN_SUBTF3 : op == T_STAR ? FN_MULTF3 : FN_DIVTF3;
+		int fn = op == LEX_TOKEN_PLUS ? FN_ADDTF3 : op == LEX_TOKEN_MINUS ? FN_SUBTF3 : op == LEX_TOKEN_STAR ? FN_MULTF3 : FN_DIVTF3;
 
-		if (op != T_PLUS && op != T_MINUS && op != T_STAR && op != T_SLASH)
+		if (op != LEX_TOKEN_PLUS && op != LEX_TOKEN_MINUS && op != LEX_TOKEN_STAR && op != LEX_TOKEN_SLASH)
 			efatal(e, e->curloc, "unsupported floating point operator");
 		return ld_call(e, fn, v, ts, 2, ty);
 	}
@@ -165,17 +165,17 @@ VPRIV val f_arith(ecx *e, int op, qty ty, val a, val b)
 		double x = f_val(d, a.i), y = f_val(d, b.i);
 
 		switch (op) {
-		case T_PLUS: return f_const(d, d ? x + y : (double)((float)x + (float)y));
-		case T_MINUS: return f_const(d, d ? x - y : (double)((float)x - (float)y));
-		case T_STAR: return f_const(d, d ? x * y : (double)((float)x * (float)y));
-		case T_SLASH: return f_const(d, d ? x / y : (double)((float)x / (float)y));
+		case LEX_TOKEN_PLUS: return f_const(d, d ? x + y : (double)((float)x + (float)y));
+		case LEX_TOKEN_MINUS: return f_const(d, d ? x - y : (double)((float)x - (float)y));
+		case LEX_TOKEN_STAR: return f_const(d, d ? x * y : (double)((float)x * (float)y));
+		case LEX_TOKEN_SLASH: return f_const(d, d ? x / y : (double)((float)x / (float)y));
 		}
 	}
 	switch (op) {
-	case T_PLUS: w = 0x1e202800u; break;
-	case T_MINUS: w = 0x1e203800u; break;
-	case T_STAR: w = 0x1e200800u; break;
-	case T_SLASH: w = 0x1e201800u; break;
+	case LEX_TOKEN_PLUS: w = 0x1e202800u; break;
+	case LEX_TOKEN_MINUS: w = 0x1e203800u; break;
+	case LEX_TOKEN_STAR: w = 0x1e200800u; break;
+	case LEX_TOKEN_SLASH: w = 0x1e201800u; break;
 	default: efatal(e, e->curloc, "unsupported floating point operator");
 	}
 	f_load(e, d, FV0, &a);
@@ -198,12 +198,12 @@ VPRIV int f_cmp(ecx *e, int op, int d, val *a, val *b)
 		word(e, 0x1e202008u | (unsigned)d << 22 | FV0 << 5);
 	}
 	switch (op) {
-	case T_EQUALEQUAL: return C_EQ;
-	case T_EXCLAIMEQ: return C_NE;	/* true when unordered */
-	case T_LESS: return C_MI;
-	case T_LESSEQ: return C_LS;
-	case T_GREATER: return C_GT;
-	case T_GREATEREQ: return C_GE;
+	case LEX_TOKEN_EQUAL_EQUAL: return C_EQ;
+	case LEX_TOKEN_EXCLAMATION_EQUAL: return C_NE;	/* true when unordered */
+	case LEX_TOKEN_LESS: return C_MI;
+	case LEX_TOKEN_LESS_EQUAL: return C_LS;
+	case LEX_TOKEN_GREATER: return C_GT;
+	case LEX_TOKEN_GREATER_EQUAL: return C_GE;
 	}
 	efatal(e, e->curloc, "unsupported floating point comparison");
 }
@@ -225,12 +225,12 @@ VPRIV val f_compare(ecx *e, int op, qty t, val a, val b)
 		double x = f_val(d, a.i), y = f_val(d, b.i);
 
 		switch (op) {
-		case T_EQUALEQUAL: return vconst(x == y);
-		case T_EXCLAIMEQ: return vconst(x != y);
-		case T_LESS: return vconst(x < y);
-		case T_LESSEQ: return vconst(x <= y);
-		case T_GREATER: return vconst(x > y);
-		case T_GREATEREQ: return vconst(x >= y);
+		case LEX_TOKEN_EQUAL_EQUAL: return vconst(x == y);
+		case LEX_TOKEN_EXCLAMATION_EQUAL: return vconst(x != y);
+		case LEX_TOKEN_LESS: return vconst(x < y);
+		case LEX_TOKEN_LESS_EQUAL: return vconst(x <= y);
+		case LEX_TOKEN_GREATER: return vconst(x > y);
+		case LEX_TOKEN_GREATER_EQUAL: return vconst(x >= y);
 		}
 	}
 	cond = f_cmp(e, op, d, &a, &b);
@@ -250,13 +250,13 @@ VPRIV val f_tobool(ecx *e, val v, qty t)
 	if (is_ld(e->c, t)) {
 		if (v.k == V_CONST)
 			return vconst(((u128)v.i << 1) != 0);
-		return ld_compare(e, T_EXCLAIMEQ, t, v, vconst(0));
+		return ld_compare(e, LEX_TOKEN_EXCLAMATION_EQUAL, t, v, vconst(0));
 	}
 	d = fpk(e, t);
 
 	if (v.k == V_CONST)
 		return vconst(f_val(d, v.i) != 0);
-	f_cmp(e, T_EXCLAIMEQ, d, &v, NULL);
+	f_cmp(e, LEX_TOKEN_EXCLAMATION_EQUAL, d, &v, NULL);
 	cset(e, v.r, C_NE);
 	return v;
 }

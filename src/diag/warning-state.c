@@ -1,5 +1,5 @@
 /* The warning state: `#pragma diagnostic`, the -W options and each warning's level. */
-#include "../frontend/pp/ppimpl.h"
+#include "../frontend/pp/pp-internal.h"
 #include "common/buffer.h"
 #include <ctype.h>
 #include <dlfcn.h>
@@ -15,10 +15,10 @@ enum { PD_IGNORED = 1, PD_WARNING, PD_ERROR };
 /* a new state at loc (the current one + node n, or a popped one) */
 static void dtrans(pp *p, uint32_t st, uint32_t loc)
 {
-	if (!p->dtr)
-		p->dtr = varena_alloc(&p->perm, 4096 * sizeof(*p->dtr));
+	if (!p->diagnostic_transitions)
+		p->diagnostic_transitions = varena_alloc(&p->perm, 4096 * sizeof(*p->diagnostic_transitions));
 	if (p->ndtr < 4096)
-		p->dtr[p->ndtr].loc = loc, p->dtr[p->ndtr++].st = st;
+		p->diagnostic_transitions[p->ndtr].loc = loc, p->diagnostic_transitions[p->ndtr++].st = st;
 	p->dcur = st;
 }
 
@@ -35,12 +35,12 @@ VPRIV void diag_pragma(pp *p, const char *q, const char *e, uint32_t loc)
 		;
 	if (n == 4 && !memcmp(q, "push", 4)) {
 		if (p->ndstk < 64)
-			p->dstk[p->ndstk++] = p->dcur;
+			p->diagnostic_stack[p->ndstk++] = p->dcur;
 		return;
 	}
 	if (n == 3 && !memcmp(q, "pop", 3)) {
 		if (p->ndstk)	/* (clang: "pragma diagnostic pop could not pop, no matching push") */
-			dtrans(p, p->dstk[--p->ndstk], loc);
+			dtrans(p, p->diagnostic_stack[--p->ndstk], loc);
 		return;
 	}
 	for (int i = 0; i < 4; i++)
@@ -69,7 +69,7 @@ VPRIV void diag_pragma(pp *p, const char *q, const char *e, uint32_t loc)
 	p->dn[p->ndn].act = (uint8_t)act;
 	memcpy(p->dn[p->ndn].name, q, n);
 	p->dn[p->ndn].name[n] = 0;
-	p->nden += act != PD_IGNORED;
+	p->diagnostic_enabling_count += act != PD_IGNORED;
 	dtrans(p, p->ndn++, loc);
 }
 
@@ -77,20 +77,20 @@ VPRIV void diag_pragma(pp *p, const char *q, const char *e, uint32_t loc)
    entered in (clang's DiagStateMap) */
 static uint32_t dstate_at(const pp *p, uint32_t loc)
 {
-	const fent *e = loc_fent(p, loc);
+	const pp_file_entry *e = loc_fent(p, loc);
 
 	if (!e || loc - e->base > e->f->size)
 		return p->dcur;
 	for (uint32_t i = p->ndtr; i-- > 0;)
-		if (p->dtr[i].loc >= e->base && p->dtr[i].loc < loc)
-			return p->dtr[i].st;
-	return e->dstate;
+		if (p->diagnostic_transitions[i].loc >= e->base && p->diagnostic_transitions[i].loc < loc)
+			return p->diagnostic_transitions[i].st;
+	return e->diagnostic_state;
 }
 
 /* leaving file fe: a state it changed holds in the includer from the #include on (clang) */
 VPRIV void diag_file_end(pp *p, uint32_t fe)
 {
-	const fent *e = &p->fe[fe];
+	const pp_file_entry *e = &p->fe[fe];
 
 	if (e->from && p->dcur != dstate_at(p, e->from + 1))
 		dtrans(p, p->dcur, e->from + 1);
@@ -125,7 +125,7 @@ const char *const *pp_diag_wargs(const pp *p, int *n)
 
 const uint32_t *pp_diag_nenable_ref(const pp *p)
 {
-	return &p->nden;
+	return &p->diagnostic_enabling_count;
 }
 
 /* the command line's state of flag; *w: -w (no pragma turns it on) */
@@ -189,9 +189,9 @@ VPRIV void pp_wc_fill(pp *p)
 {
 	static const char *const g[] = { "pedantic", NULL };
 
-	p->wc_o = p->o;
-	p->wc[PPW_C2Y] = pp_wstate(p, "c2y-extensions", false, g) != 0;
-	p->wc[PPW_VARIADIC] = pp_wstate(p, "variadic-macros", false, g) != 0;
+	p->warning_cache_options = p->o;
+	p->wc[PP_WARNING_C2Y] = pp_wstate(p, "c2y-extensions", false, g) != 0;
+	p->wc[PP_WARNING_VARIADIC_MACRO] = pp_wstate(p, "variadic-macros", false, g) != 0;
 }
 
 /* the level a warning of flag is reported at at loc: VDL_WARNING, VDL_ERROR (-Werror), or -1 (off) */

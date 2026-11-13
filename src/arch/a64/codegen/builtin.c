@@ -1201,10 +1201,10 @@ runtime:
 		         (is_flt(c, bt) && tsize(c, bt) == 8) ? prim(TY_DOUBLE) : prim(TY_FLOAT);
 		val a = cast(e, gen(e, arg[0]), at, ct, CK_INT);
 		val b = cast(e, gen(e, arg[1]), bt, ct, CK_INT);
-		int op = x->aux == BI_ISGREATER ? T_GREATER :
-		         x->aux == BI_ISGREATEREQUAL ? T_GREATEREQ :
-		         x->aux == BI_ISLESS ? T_LESS :
-		         x->aux == BI_ISLESSEQUAL ? T_LESSEQ : T_EXCLAIMEQ;
+		int op = x->aux == BI_ISGREATER ? LEX_TOKEN_GREATER :
+		         x->aux == BI_ISGREATEREQUAL ? LEX_TOKEN_GREATER_EQUAL :
+		         x->aux == BI_ISLESS ? LEX_TOKEN_LESS :
+		         x->aux == BI_ISLESSEQUAL ? LEX_TOKEN_LESS_EQUAL : LEX_TOKEN_EXCLAMATION_EQUAL;
 
 		if (!is_ld(c, ct)) {
 			int cond = f_cmp(e, op, fpk(e, ct), &a, &b);
@@ -1238,7 +1238,7 @@ runtime:
 			int lo = operands[i].r, hi = operands[i].r2;
 			opi(e, I_SUBSI, 1, ZR, lo, 0);
 			cset(e, lo, C_NE);
-			shift_imm(e, T_LESSLESS, 1, hi, hi, 1);
+			shift_imm(e, LEX_TOKEN_LESS_LESS, 1, hi, hi, 1);
 			op3(e, I_ORR, 1, hi, hi, lo);
 			tfree(e, lo);
 			opi(e, I_SUBSI, 1, ZR, hi, (int64_t)0xfffe000000000000ULL);
@@ -1252,7 +1252,7 @@ runtime:
 		opi(e, I_EORI, 0, nanregs[0], nanregs[0], 1);
 		a = load(e, &saved[0], ct);
 		b = load(e, &saved[1], ct);
-		val ne = f_compare(e, T_EXCLAIMEQ, ct, a, b);
+		val ne = f_compare(e, LEX_TOKEN_EXCLAMATION_EQUAL, ct, a, b);
 		toreg(e, &ne);
 		op3(e, I_AND, 0, ne.r, ne.r, nanregs[0]);
 		tfree(e, nanregs[0]);
@@ -1273,20 +1273,20 @@ runtime:
 			shift_imm(e, I_ASRV, 1, sign, r, 63);
 			opi(e, I_SUBSI, 1, ZR, a.r, 0);
 			cset(e, a.r, C_NE);
-			shift_imm(e, T_LESSLESS, 1, r, r, 1);
+			shift_imm(e, LEX_TOKEN_LESS_LESS, 1, r, r, 1);
 			op3(e, I_ORR, 1, r, r, a.r);
 			tfree(e, a.r);
 			inf = UINT64_C(0xfffe000000000000);
 		} else {
 			r = toreg(e, &a);
 			if (half) {
-				shift_imm(e, T_LESSLESS, 0, sign, r, 16);
+				shift_imm(e, LEX_TOKEN_LESS_LESS, 0, sign, r, 16);
 				shift_imm(e, I_ASRV, 0, sign, sign, 31);
 				opi(e, I_ANDI, 0, r, r, 0x7fff);
 				inf = bf ? 0x7f80 : 0x7c00;
 			} else {
 				shift_imm(e, I_ASRV, d, sign, r, d ? 63 : 31);
-				shift_imm(e, T_LESSLESS, d, r, r, 1);
+				shift_imm(e, LEX_TOKEN_LESS_LESS, d, r, r, 1);
 				inf = d ? UINT64_C(0xffe0000000000000) : UINT64_C(0xff000000);
 			}
 		}
@@ -1309,7 +1309,7 @@ runtime:
 			r = a.r2, d = 1;
 			opi(e, I_SUBSI, 1, ZR, a.r, 0);
 			cset(e, a.r, C_NE);
-			shift_imm(e, T_LESSLESS, 1, r, r, 1);
+			shift_imm(e, LEX_TOKEN_LESS_LESS, 1, r, r, 1);
 			op3(e, I_ORR, 1, r, r, a.r);
 			tfree(e, a.r);
 			inf = UINT64_C(0xfffe000000000000), quiet = UINT64_C(1) << 48;
@@ -1345,7 +1345,7 @@ runtime:
 			if (x->aux != BI_SIGNBIT) {
 				opi(e, I_SUBSI, 1, ZR, v.r, 0);
 				cset(e, v.r, C_NE);
-				shift_imm(e, T_LESSLESS, 1, r, r, 1);
+				shift_imm(e, LEX_TOKEN_LESS_LESS, 1, r, r, 1);
 				op3(e, I_ORR, 1, r, r, v.r);
 				tfree(e, v.r);
 				if (x->aux == BI_ISNORMAL) {
@@ -1386,7 +1386,7 @@ runtime:
 			shift_imm(e, I_LSRV, d, r, r, bits - 1);
 			return vreg(r);
 		}
-		shift_imm(e, T_LESSLESS, d, r, r, 1);
+		shift_imm(e, LEX_TOKEN_LESS_LESS, d, r, r, 1);
 		if (x->aux == BI_ISNORMAL) {
 			shift_imm(e, I_LSRV, d, r, r, mant + 1);
 			opi(e, I_SUBI, d, r, r, 1);

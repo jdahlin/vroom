@@ -25,7 +25,7 @@ typedef struct cstr {		/* a string literal */
 	const char *s;		/* bytes, element size each, zero terminated */
 	uint32_t n;		/* elements, terminator included */
 	uint8_t esz;		/* element size: 1, 2, 4 */
-	uint8_t kind;		/* T_STRING / T_WSTRING / ... */
+	uint8_t kind;		/* LEX_TOKEN_STRING / LEX_TOKEN_WIDE_STRING / ... */
 } cstr;
 
 typedef struct label {
@@ -100,7 +100,7 @@ typedef struct casm {
  */
 typedef struct lztok {
 	uint32_t loc;
-	uint32_t v;		/* T_IDENT: interned id; otherwise: offset of the spelling in lzs */
+	uint32_t v;		/* LEX_TOKEN_IDENTIFIER: interned id; otherwise: offset of the spelling in lzs */
 	uint32_t len;
 	uint8_t kind, flags;
 	uint16_t _pad;
@@ -136,7 +136,7 @@ struct cc {
 	/* tokens: tk[0] is the current one */
 	ptok tk[4];
 	int ntk;
-	/* the previous token's loc, kind, flags (PF_MACRO: diagnostics), as ptok lays
+	/* the previous token's loc, kind, flags (PP_TOKEN_FLAG_FROM_MACRO: diagnostics), as ptok lays
 	   them out: next() copies the 8 bytes with one load and one store */
 	union {
 		struct {
@@ -276,7 +276,7 @@ struct cc {
 	uint32_t nlzf;
 	char *lzs;
 	uint32_t nlzs;
-	bool lz_on;		/* tokens come from lzt[lzc, lze) or lzz (lz_hc), then T_EOF */
+	bool lz_on;		/* tokens come from lzt[lzc, lze) or lzz (lz_hc), then LEX_TOKEN_EOF */
 	bool lz_hc;
 	uint32_t lzc, lze;
 	pp_lazy lzz;

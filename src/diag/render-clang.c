@@ -1,5 +1,5 @@
 /* Clang's text style: colours, include stack, snippet and the text of a record. */
-#include "../frontend/pp/ppimpl.h"
+#include "../frontend/pp/pp-internal.h"
 #include "common/buffer.h"
 #include <ctype.h>
 #include <dlfcn.h>
@@ -34,20 +34,20 @@ static const char *dcolor(const char *what)
 VPRIV int diag_where(const pp *p, uint32_t loc, const char **name, uint32_t *nl, uint32_t *line, uint32_t *col)
 {
 	int r = pp_where(p, loc, name, nl, line, col);
-	const fent *e = loc_fent(p, loc);
+	const pp_file_entry *e = loc_fent(p, loc);
 
 	if (r && e && e->spath && loc - e->base <= e->f->size && *name == e->name)	/* (not a #line name) */
 		*name = e->spath, *nl = (uint32_t)strlen(e->spath);
 	return r;
 }
 
-VPRIV void include_stack(pp *p, vbuffer *b, const fent *e)
+VPRIV void include_stack(pp *p, vbuffer *b, const pp_file_entry *e)
 {
-	const fent *chain[64];
+	const pp_file_entry *chain[64];
 	int n = 0;
 
-	for (const fent *x = e; x && x->from && n < 64; ) {
-		const fent *y = loc_fent(p, x->from);
+	for (const pp_file_entry *x = e; x && x->from && n < 64; ) {
+		const pp_file_entry *y = loc_fent(p, x->from);
 
 		chain[n++] = x;
 		x = y;
@@ -77,7 +77,7 @@ static uint32_t sn_ls(const char *s, uint32_t o)
 
 /* one source line [ls, le) with its marker line: ~ under the ranges' parts on it, ^ at off if
    caret; the marker line only when it has a mark (clang) */
-static void sn_line(pp *p, vbuffer *b, const fent *e, const vdiag *d, uint32_t ls, uint32_t le, uint32_t line,
+static void sn_line(pp *p, vbuffer *b, const pp_file_entry *e, const vdiag *d, uint32_t ls, uint32_t le, uint32_t line,
 		    uint32_t width, bool caret, uint32_t off, vbuffer *cl)
 {
 	const char *s = e->f->src;
@@ -180,7 +180,7 @@ static void sn_line(pp *p, vbuffer *b, const fent *e, const vdiag *d, uint32_t l
 	}
 }
 
-static void snippet(pp *p, vbuffer *b, const fent *e, const vdiag *d)
+static void snippet(pp *p, vbuffer *b, const pp_file_entry *e, const vdiag *d)
 {
 	const char *s = e->f->src;
 	uint32_t off = d->loc - e->base, size = e->f->size, ls, le, line, width, nd;
@@ -269,18 +269,18 @@ static void snippet(pp *p, vbuffer *b, const fent *e, const vdiag *d)
 }
 
 /* a record's first line (clang's, in every style); true and *ep when it has a source line */
-VPRIV bool render_head(pp *p, vbuffer *b, const vdiag *d, const fent **ep)
+VPRIV bool render_head(pp *p, vbuffer *b, const vdiag *d, const pp_file_entry **ep)
 {
 	const char *name, *what = pp_diag_level(d->level);
 	uint32_t nl, line, col;
-	const fent *e = NULL;
+	const pp_file_entry *e = NULL;
 	bool has = d->loc != UINT32_MAX && loc_ok(p, d->loc, &e);	/* UINT32_MAX: no location */
 	bool note = d->level == VDL_NOTE;
 
-	if (has && !note && (uint32_t)(e - p->fe) + 1 != p->diag_fe)
+	if (has && !note && (uint32_t)(e - p->fe) + 1 != p->diagnostic_last_file)
 		include_stack(p, b, e);
 	if (has && !note)
-		p->diag_fe = (uint32_t)(e - p->fe) + 1;
+		p->diagnostic_last_file = (uint32_t)(e - p->fe) + 1;
 	if (p->color)
 		vbuffer_string_append(b, DC_BOLD);
 	if (has && diag_where(p, d->loc, &name, &nl, &line, &col))
@@ -313,7 +313,7 @@ VPRIV bool render_head(pp *p, vbuffer *b, const vdiag *d, const fent **ep)
 		else
 			vbuffer_format_append(b, " [%s]", id);
 	}
-	if (p->dtrack)
+	if (p->diagnostic_track)
 		track_str(b, d->track);
 	if (p->color)
 		vbuffer_string_append(b, DC_RESET);
@@ -365,12 +365,12 @@ VPRIV void parseable_fixits(pp *p, vbuffer *b, const vdiag *d)
 /* one record in clang's text format */
 VPRIV void render_text(pp *p, vbuffer *b, const vdiag *d)
 {
-	const fent *e;
+	const pp_file_entry *e;
 	/* clang (DiagnosticRenderer): no snippet again for a record at the previous one's
 	   location without ranges or fix-its, unless it follows a note and is no note */
-	bool same = d->loc + 1 == p->dlast1 && !d->nspan && !d->nfix && !(p->dlastlv == VDL_NOTE && d->level != VDL_NOTE);
+	bool same = d->loc + 1 == p->diagnostic_previous_location && !d->nspan && !d->nfix && !(p->diagnostic_previous_level == VDL_NOTE && d->level != VDL_NOTE);
 
-	p->dlast1 = d->loc + 1, p->dlastlv = d->level;
+	p->diagnostic_previous_location = d->loc + 1, p->diagnostic_previous_level = d->level;
 	if (render_head(p, b, d, &e) && !same) {
 		snippet(p, b, e, d);
 		parseable_fixits(p, b, d);

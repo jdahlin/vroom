@@ -11,7 +11,7 @@
  * boundary right after it.  The state is a function of the token stream, so a
  * TU whose stream starts with the same regions can take the snapshot instead
  * of parsing them: the preprocessor still applies each region (macros,
- * files, counter) and only its token delivery is dropped (pp_skip_top).
+ * files, counter) and only its token delivery is dropped (pp_top_region_skip).
  *
  * A snapshot is the used part of every per-TU array and of the heap, in 16 KB
  * pages shared with the nearest ancestor's snapshot where equal.  Heap
@@ -452,7 +452,7 @@ void dc_begin(cc *c)
 void dc_end(cc *c)
 {
 	if (c->dc)
-		atomic_fetch_add_explicit(&tok_skip, pp_skipped(c->p), memory_order_relaxed);
+		atomic_fetch_add_explicit(&tok_skip, pp_skipped_token_count(c->p), memory_order_relaxed);
 	free(c->dc);
 	c->dc = NULL;
 }
@@ -488,7 +488,7 @@ void dc_boundary_slow(cc *c)
 	for (;;) {
 		uint32_t n;
 		const pp_topev *ev = pp_top_events(c->p, &n);
-		uint64_t N = pp_ntok(c->p);
+		uint64_t N = pp_token_count(c->p);
 
 		if (!ev || c->ntk != 1) {
 			die(c);
@@ -519,7 +519,7 @@ void dc_boundary_slow(cc *c)
 			atomic_fetch_add_explicit(&d->node->visits, 1, memory_order_relaxed);
 			if (!d->stale && !c->dr_on && atomic_load_explicit(&d->node->visits, memory_order_relaxed) >= 2 &&
 			    !atomic_load_explicit(&d->node->snap, memory_order_acquire) && !c->errors && !c->ndiag &&
-			    !pp_errors(c->p) && atomic_load_explicit(&dc_mem, memory_order_relaxed) <
+			    !pp_error_count(c->p) && atomic_load_explicit(&dc_mem, memory_order_relaxed) <
 			    atomic_load_explicit(&dc_max, memory_order_relaxed)) {
 				dcsnap *s = snap_take(c, d->node, d->base), *z = NULL;
 
@@ -532,7 +532,7 @@ void dc_boundary_slow(cc *c)
 		if (d->is_open && d->open.hit && d->open.pos + 1 == N) {
 			dcnode *x = child(d->node, d->open.e, d->open.ctr, false);
 
-			if (x && atomic_load_explicit(&x->snap, memory_order_acquire) && pp_skip_top(c->p)) {
+			if (x && atomic_load_explicit(&x->snap, memory_order_acquire) && pp_top_region_skip(c->p)) {
 				d->stale = true;
 				d->target = x;
 				atomic_fetch_add_explicit(&st_regions, 1, memory_order_relaxed);

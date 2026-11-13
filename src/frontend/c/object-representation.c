@@ -10,11 +10,11 @@ static u128 bc_mask(unsigned n)
 
 VPRIV uint32_t bitcast_expr(cc *c, uint32_t loc)
 {
-	expect(c, T_LPAREN, "'('");
+	expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
 	qty to = type_name(c);
-	expect(c, T_COMMA, "','");
+	expect(c, LEX_TOKEN_COMMA, "','");
 	uint32_t a = assign_expr(c);
-	expect_here(c, T_RPAREN, "')'");
+	expect_here(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 	qty from = N(a)->ty;
 	if (!complete(c, to) || !complete(c, from) || KIND(c, to) == TY_VOID || KIND(c, from) == TY_FUNC ||
 	    KIND(c, to) == TY_FUNC || KIND(c, to) == TY_SVE || KIND(c, from) == TY_SVE || (T(c, to)->flags & TF_VLA) ||
@@ -801,18 +801,18 @@ static bool bc_lane(bc_state *state, cc *c, uint32_t n, uint64_t lane, cval *v, 
 		if (!bc_lane(state, c, x->a, lane, v, depth + 1))
 			return false;
 		if (v->kind == CV_FLT) {
-			if (x->aux == T_MINUS)
+			if (x->aux == LEX_TOKEN_MINUS)
 				v->f = -v->f, v->q ^= Q_SIGN;
-			else if (x->aux != T_PLUS)
+			else if (x->aux != LEX_TOKEN_PLUS)
 				return false;
 		} else {
-			if (x->aux == T_MINUS)
+			if (x->aux == LEX_TOKEN_MINUS)
 				v->i = (i128)(-(u128)v->i);
-			else if (x->aux == T_TILDE)
+			else if (x->aux == LEX_TOKEN_TILDE)
 				v->i = KIND(c, et) == TY_BOOL ? !v->i : ~v->i;
-			else if (x->aux == T_EXCLAIM)
+			else if (x->aux == LEX_TOKEN_EXCLAMATION)
 				v->i = (vector ? -1 : 1) * (v->i == 0);
-			else if (x->aux != T_PLUS)
+			else if (x->aux != LEX_TOKEN_PLUS)
 				return false;
 			v->i = trunc_to(c, v->i, et);
 		}
@@ -823,31 +823,31 @@ static bool bc_lane(bc_state *state, cc *c, uint32_t n, uint64_t lane, cval *v, 
 		if (!bc_lane(state, c, x->a, lane, &a, depth + 1) || !bc_lane(state, c, x->b, lane, &b, depth + 1))
 			return false;
 		int op = x->aux;
-		bool compare = op == T_LESS || op == T_LESSEQ || op == T_GREATER || op == T_GREATEREQ || op == T_EQUALEQUAL ||
-			       op == T_EXCLAIMEQ;
+		bool compare = op == LEX_TOKEN_LESS || op == LEX_TOKEN_LESS_EQUAL || op == LEX_TOKEN_GREATER || op == LEX_TOKEN_GREATER_EQUAL || op == LEX_TOKEN_EQUAL_EQUAL ||
+			       op == LEX_TOKEN_EXCLAMATION_EQUAL;
 		qty at = is_vector(c, N(x->a)->ty) ? T(c, N(x->a)->ty)->base : N(x->a)->ty;
 		memset(v, 0, sizeof(*v));
 		if (a.kind == CV_FLT || b.kind == CV_FLT) {
 			u128 l = bc_q(&a, is_signed(c, at)), r = bc_q(&b, is_signed(c, at)), q;
 			int cmp = vsoftfloat_compare(l, r), p = q_prec(c, at);
 			if (compare) {
-				bool yes = op == T_LESS		? cmp == -1
-					   : op == T_LESSEQ	? cmp == -1 || cmp == 0
-					   : op == T_GREATER	? cmp == 1
-					   : op == T_GREATEREQ	? cmp == 1 || cmp == 0
-					   : op == T_EQUALEQUAL ? cmp == 0
+				bool yes = op == LEX_TOKEN_LESS		? cmp == -1
+					   : op == LEX_TOKEN_LESS_EQUAL	? cmp == -1 || cmp == 0
+					   : op == LEX_TOKEN_GREATER	? cmp == 1
+					   : op == LEX_TOKEN_GREATER_EQUAL	? cmp == 1 || cmp == 0
+					   : op == LEX_TOKEN_EQUAL_EQUAL ? cmp == 0
 								: cmp != 0;
 				v->kind = CV_INT;
 				v->i = yes ? (vector ? -1 : 1) : 0;
 				return true;
 			}
-			if (op == T_PLUS)
+			if (op == LEX_TOKEN_PLUS)
 				q = vsoftfloat_add_with_precision(l, r, p);
-			else if (op == T_MINUS)
+			else if (op == LEX_TOKEN_MINUS)
 				q = vsoftfloat_subtract_with_precision(l, r, p);
-			else if (op == T_STAR)
+			else if (op == LEX_TOKEN_STAR)
 				q = vsoftfloat_multiply_with_precision(l, r, p);
-			else if (op == T_SLASH)
+			else if (op == LEX_TOKEN_SLASH)
 				q = vsoftfloat_divide_with_precision(l, r, p);
 			else
 				return false;
@@ -861,52 +861,52 @@ static bool bc_lane(bc_state *state, cc *c, uint32_t n, uint64_t lane, cval *v, 
 		bool sg = is_signed(c, at);
 		v->kind = CV_INT;
 		switch (op) {
-		case T_PLUS:
+		case LEX_TOKEN_PLUS:
 			result = l + r;
 			break;
-		case T_MINUS:
+		case LEX_TOKEN_MINUS:
 			result = l - r;
 			break;
-		case T_STAR:
+		case LEX_TOKEN_STAR:
 			result = l * r;
 			break;
-		case T_AMP:
+		case LEX_TOKEN_AMPERSAND:
 			result = l & r;
 			break;
-		case T_PIPE:
+		case LEX_TOKEN_PIPE:
 			result = l | r;
 			break;
-		case T_CARET:
+		case LEX_TOKEN_CARET:
 			result = l ^ r;
 			break;
-		case T_LESSLESS:
-		case T_GREATERGREATER:
+		case LEX_TOKEN_LESS_LESS:
+		case LEX_TOKEN_GREATER_GREATER:
 			if (b.i < 0 || r >= int_bits(c, at))
 				return false;
-			result = op == T_LESSLESS ? l << (unsigned)r : sg ? (u128)(a.i >> (unsigned)r) : l >> (unsigned)r;
+			result = op == LEX_TOKEN_LESS_LESS ? l << (unsigned)r : sg ? (u128)(a.i >> (unsigned)r) : l >> (unsigned)r;
 			break;
-		case T_SLASH:
-		case T_PERCENT:
+		case LEX_TOKEN_SLASH:
+		case LEX_TOKEN_PERCENT:
 			if (!r || (sg && a.i == ((i128)((u128)1 << 127)) && b.i == -1))
 				return false;
-			result = sg ? (u128)(op == T_SLASH ? a.i / b.i : a.i % b.i) : op == T_SLASH ? l / r : l % r;
+			result = sg ? (u128)(op == LEX_TOKEN_SLASH ? a.i / b.i : a.i % b.i) : op == LEX_TOKEN_SLASH ? l / r : l % r;
 			break;
-		case T_EQUALEQUAL:
+		case LEX_TOKEN_EQUAL_EQUAL:
 			result = -(l == r);
 			break;
-		case T_EXCLAIMEQ:
+		case LEX_TOKEN_EXCLAMATION_EQUAL:
 			result = -(l != r);
 			break;
-		case T_LESS:
+		case LEX_TOKEN_LESS:
 			result = -(sg ? a.i < b.i : l < r);
 			break;
-		case T_LESSEQ:
+		case LEX_TOKEN_LESS_EQUAL:
 			result = -(sg ? a.i <= b.i : l <= r);
 			break;
-		case T_GREATER:
+		case LEX_TOKEN_GREATER:
 			result = -(sg ? a.i > b.i : l > r);
 			break;
-		case T_GREATEREQ:
+		case LEX_TOKEN_GREATER_EQUAL:
 			result = -(sg ? a.i >= b.i : l >= r);
 			break;
 		default:

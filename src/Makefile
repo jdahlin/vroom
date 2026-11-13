@@ -114,7 +114,7 @@ obj_SRC  = obj/obj.c arch/a64/obj/fixup.c arch/x64/obj/fixup.c platform/linux/el
 cc_SRC   = $(filter-out frontend/c/keywords.c frontend/c/replay.c,$(wildcard frontend/c/*.c)) frontend/c/replay.c
 # the compile job (ppd_run); ccsnap.c stays a TU of its own
 driver_SRC = $(filter-out driver/ccsnap.c,$(wildcard driver/*.c))
-# pp: the preprocessor and, for now, the diagnostics engine (it uses ppimpl.h)
+# pp: the preprocessor and, for now, the diagnostics engine (it uses pp-internal.h)
 pp_SRC   = $(filter-out frontend/pp/dircache.c,$(wildcard frontend/pp/*.c)) $(wildcard diag/*.c)
 codegen_SRC = $(wildcard codegen/*.c codegen/opt/*.c codegen/rec/*.c codegen/flow/*.c arch/a64/codegen/*.c arch/a64/vir/*.c $(if $(VCC_WASM),arch/wasm/codegen/*.c) codegen/walk/*.c arch/x64/codegen/*.c arch/x64/vir/*.c codegen/vir/*.c)
 VCC_UNITY ?= y

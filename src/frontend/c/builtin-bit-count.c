@@ -65,33 +65,33 @@ VPRIV uint32_t big_bitcount(cc *c, int id, uint32_t x, uint32_t fallback, unsign
 	uint32_t address = mk(c, N_ADDR, ty_ptr(c, N(value)->ty), loc);
 	N(address)->a = value;
 	address = cast_node(c, address, ty_ptr(c, prim(TY_ULLONG)), CK_NOP);
-	uint32_t word = rvalue(c, deref(c, binop(c, T_PLUS, address, rvalue(c, index), loc), loc));
+	uint32_t word = rvalue(c, deref(c, binop(c, LEX_TOKEN_PLUS, address, rvalue(c, index), loc), loc));
 	if (bits & 63) {
-		uint32_t top = binop(c, T_EQUALEQUAL, rvalue(c, index), mk_int(c, limbs - 1, prim(TY_INT), loc), loc);
+		uint32_t top = binop(c, LEX_TOKEN_EQUAL_EQUAL, rvalue(c, index), mk_int(c, limbs - 1, prim(TY_INT), loc), loc);
 		uint32_t mask = mk_int(c, (i128)(UINT64_MAX >> (64 - (bits & 63))), prim(TY_ULLONG), loc);
-		word = conditional(c, top, binop(c, T_AMP, word, mask, loc), word, loc);
+		word = conditional(c, top, binop(c, LEX_TOKEN_AMPERSAND, word, mask, loc), word, loc);
 	}
 	word = bitcount_local(c, &loop, prim(TY_ULLONG), word, loc);
 	uint32_t count = fixed_bitcount(c, id, rvalue(c, word), true, loc);
 	if (id == BI_POPCOUNTG) {
-		bitcount_statement(c, &loop, assign(c, T_PLUS, result, count, loc), loc);
+		bitcount_statement(c, &loop, assign(c, LEX_TOKEN_PLUS, result, count, loc), loc);
 	} else {
-		bitcount_statement(c, &found, assign(c, T_PLUS, result, count, loc), loc);
+		bitcount_statement(c, &found, assign(c, LEX_TOKEN_PLUS, result, count, loc), loc);
 		vpush(c, &found, mkstmt(c, N_BREAK, loc, 0, 0, 0));
 		uint32_t block = mkstmt(c, N_BLOCK, loc, 0, vfreeze(c, &found), found.n);
 		vpush(c, &loop, mkstmt(c, N_IF, loc, rvalue(c, word), block, 0));
-		bitcount_statement(c, &loop, assign(c, T_PLUS, result, mk_int(c, 64, prim(TY_INT), loc), loc), loc);
+		bitcount_statement(c, &loop, assign(c, LEX_TOKEN_PLUS, result, mk_int(c, 64, prim(TY_INT), loc), loc), loc);
 	}
-	bitcount_statement(c, &loop, assign(c, id == BI_CLZG ? T_MINUS : T_PLUS, index, mk_int(c, 1, prim(TY_INT), loc), loc), loc);
-	uint32_t cond = binop(c, id == BI_CLZG ? T_GREATEREQ : T_LESS, rvalue(c, index),
+	bitcount_statement(c, &loop, assign(c, id == BI_CLZG ? LEX_TOKEN_MINUS : LEX_TOKEN_PLUS, index, mk_int(c, 1, prim(TY_INT), loc), loc), loc);
+	uint32_t cond = binop(c, id == BI_CLZG ? LEX_TOKEN_GREATER_EQUAL : LEX_TOKEN_LESS, rvalue(c, index),
 	                     mk_int(c, id == BI_CLZG ? 0 : limbs, prim(TY_INT), loc), loc);
 	uint32_t block = mkstmt(c, N_BLOCK, loc, 0, vfreeze(c, &loop), loop.n);
 	vpush(c, &body, mkstmt(c, N_WHILE, loc, cond, block, 0));
 	uint32_t out = rvalue(c, result);
 	if (id == BI_CLZG && (bits & 63))
-		out = binop(c, T_MINUS, out, mk_int(c, limbs * 64 - bits, prim(TY_INT), loc), loc);
+		out = binop(c, LEX_TOKEN_MINUS, out, mk_int(c, limbs * 64 - bits, prim(TY_INT), loc), loc);
 	if (fb) {
-		uint32_t zero = binop(c, T_EQUALEQUAL, rvalue(c, result), mk_int(c, limbs * 64, prim(TY_INT), loc), loc);
+		uint32_t zero = binop(c, LEX_TOKEN_EQUAL_EQUAL, rvalue(c, result), mk_int(c, limbs * 64, prim(TY_INT), loc), loc);
 		out = conditional(c, zero, rvalue(c, fb), out, loc);
 	}
 	bitcount_statement(c, &body, out, loc);
@@ -140,28 +140,28 @@ VPRIV uint32_t generic_bitcount(cc *c, int id, uint32_t loc)
 	if (width == 128) {
 		uint32_t w = convert(c, x, prim(TY_UINT128));
 		uint32_t lo = convert(c, w, prim(TY_ULLONG));
-		uint32_t hi = convert(c, binop(c, T_GREATERGREATER, w,
+		uint32_t hi = convert(c, binop(c, LEX_TOKEN_GREATER_GREATER, w,
 		                             mk_int(c, 64, prim(TY_INT), loc), loc), prim(TY_ULLONG));
 		uint32_t low = fixed_bitcount(c, id, lo, true, loc);
 		uint32_t high = fixed_bitcount(c, id, hi, true, loc);
 		if (id == BI_POPCOUNTG)
-			r = binop(c, T_PLUS, low, high, loc);
+			r = binop(c, LEX_TOKEN_PLUS, low, high, loc);
 		else {
 			uint32_t first = id == BI_CLZG ? hi : lo;
 			uint32_t count = id == BI_CLZG ? high : low;
 			uint32_t other = id == BI_CLZG ? low : high;
-			uint32_t cond = binop(c, T_EXCLAIMEQ, first, mk_int(c, 0, prim(TY_ULLONG), loc), loc);
+			uint32_t cond = binop(c, LEX_TOKEN_EXCLAMATION_EQUAL, first, mk_int(c, 0, prim(TY_ULLONG), loc), loc);
 			r = conditional(c, cond, count,
-			                binop(c, T_PLUS, mk_int(c, 64, prim(TY_INT), loc), other, loc), loc);
+			                binop(c, LEX_TOKEN_PLUS, mk_int(c, 64, prim(TY_INT), loc), other, loc), loc);
 		}
 	} else {
 		uint32_t w = convert(c, x, prim(width == 64 ? TY_ULLONG : TY_UINT));
 		r = fixed_bitcount(c, id, w, width == 64, loc);
 	}
 	if (id == BI_CLZG && bits < width)
-		r = binop(c, T_MINUS, r, mk_int(c, width - bits, prim(TY_INT), loc), loc);
+		r = binop(c, LEX_TOKEN_MINUS, r, mk_int(c, width - bits, prim(TY_INT), loc), loc);
 	if (args.n == 2)
-		r = conditional(c, binop(c, T_EXCLAIMEQ, x, mk_int(c, 0, xt, loc), loc), r, fb, loc);
+		r = conditional(c, binop(c, LEX_TOKEN_EXCLAMATION_EQUAL, x, mk_int(c, 0, xt, loc), loc), r, fb, loc);
 	return with_pre(c, pre, with_pre(c, fbpre, r));
 }
 
@@ -195,13 +195,13 @@ VPRIV uint32_t stdc_rotate(cc *c, const builtin *b, uint32_t loc)
 	ct = countbits > 128 ? unsigned_of(c, ct) : prim(countbits <= 32 ? TY_UINT : countbits <= 64 ? TY_ULLONG : TY_UINT128);
 	uint32_t x = cplx_reuse(c, convert(c, rvalue(c, args.v[0]), work), &prex);
 	uint32_t count = cplx_reuse(c, convert(c, rvalue(c, args.v[1]), ct), &precount);
-	uint32_t n = binop(c, T_PERCENT, rvalue(c, count), mk_int(c, bits, ct, loc), loc);
+	uint32_t n = binop(c, LEX_TOKEN_PERCENT, rvalue(c, count), mk_int(c, bits, ct, loc), loc);
 	n = cplx_reuse(c, convert(c, n, prim(TY_UINT)), &pren);
-	uint32_t reverse = binop(c, T_MINUS, mk_int(c, bits, prim(TY_UINT), loc), rvalue(c, n), loc);
-	reverse = binop(c, T_PERCENT, reverse, mk_int(c, bits, prim(TY_UINT), loc), loc);
+	uint32_t reverse = binop(c, LEX_TOKEN_MINUS, mk_int(c, bits, prim(TY_UINT), loc), rvalue(c, n), loc);
+	reverse = binop(c, LEX_TOKEN_PERCENT, reverse, mk_int(c, bits, prim(TY_UINT), loc), loc);
 	bool left = b->id == BI_STDC_ROTL;
-	uint32_t a = binop(c, left ? T_LESSLESS : T_GREATERGREATER, rvalue(c, x), rvalue(c, n), loc);
-	uint32_t z = binop(c, left ? T_GREATERGREATER : T_LESSLESS, rvalue(c, x), reverse, loc);
-	uint32_t value = convert(c, binop(c, T_PIPE, a, z, loc), t);
+	uint32_t a = binop(c, left ? LEX_TOKEN_LESS_LESS : LEX_TOKEN_GREATER_GREATER, rvalue(c, x), rvalue(c, n), loc);
+	uint32_t z = binop(c, left ? LEX_TOKEN_GREATER_GREATER : LEX_TOKEN_LESS_LESS, rvalue(c, x), reverse, loc);
+	uint32_t value = convert(c, binop(c, LEX_TOKEN_PIPE, a, z, loc), t);
 	return with_pre(c, prex, with_pre(c, precount, with_pre(c, pren, value)));
 }

@@ -205,8 +205,8 @@ VPRIV __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 		if (k == want && f->n == 1 && KIND(c, c->params[f->aux]) == want) {
 			qty t = prim(want);
 			uint32_t pre, x = cplx_reuse(c, args.v[0], &pre);
-			uint32_t neg = mk_bin(c, T_MINUS, t, mk_int(c, 0, t, loc), x, loc);
-			uint32_t lt = mk_bin(c, T_LESS, prim(TY_INT), x, mk_int(c, 0, t, loc), loc);
+			uint32_t neg = mk_bin(c, LEX_TOKEN_MINUS, t, mk_int(c, 0, t, loc), x, loc);
+			uint32_t lt = mk_bin(c, LEX_TOKEN_LESS, prim(TY_INT), x, mk_int(c, 0, t, loc), loc);
 
 			return with_pre(c, pre, conditional(c, lt, neg, x, loc));
 		}

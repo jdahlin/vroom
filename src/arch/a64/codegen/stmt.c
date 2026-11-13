@@ -358,7 +358,7 @@ static void a64_switch_tree(ecx *e, const em_switch_case *cases, uint32_t n,
 	const em_switch_case *p = &cases[mid];
 	uint32_t left = mid ? newlabel(e) : dflt;
 	val a = vreg(r), b = vconst(p->lo);
-	int cond = emit_cmp(e, T_LESS, cx, sg, &a, &b);
+	int cond = emit_cmp(e, LEX_TOKEN_LESS, cx, sg, &a, &b);
 
 	val_free(e, &b);
 	bcond(e, cond, left);
@@ -367,7 +367,7 @@ static void a64_switch_tree(ecx *e, const em_switch_case *cases, uint32_t n,
 		bcond(e, C_EQ, p->target);
 	} else {
 		b = vconst(p->hi);
-		cond = emit_cmp(e, T_LESSEQ, cx, sg, &a, &b);
+		cond = emit_cmp(e, LEX_TOKEN_LESS_EQUAL, cx, sg, &a, &b);
 		val_free(e, &b);
 		bcond(e, cond, p->target);
 	}
@@ -400,7 +400,7 @@ static void a64_switch_table(ecx *e, const em_switch_case *cases, uint32_t n, in
 		}
 	}
 	val a = vreg(t), b = vconst((i128)span);
-	int cond = emit_cmp(e, T_GREATER, cx, false, &a, &b);
+	int cond = emit_cmp(e, LEX_TOKEN_GREATER, cx, false, &a, &b);
 	val_free(e, &b);
 	bcond(e, cond, dflt);
 	if (e->njtl + (uint32_t)span + 1 > e->capjtl) {
@@ -513,14 +513,14 @@ static void gen_switch(ecx *e, uint32_t n)
 			uint32_t next = newlabel(e);
 			int copy = treg(e);
 			mov(e, 1, copy, source);
-			val test = a64_bigcmp(e, lo == hi ? T_EQUALEQUAL : T_GREATEREQ,
+			val test = a64_bigcmp(e, lo == hi ? LEX_TOKEN_EQUAL_EQUAL : LEX_TOKEN_GREATER_EQUAL,
 			                     ct, vreg(copy), vconst(lo));
 			cbz(e, false, 1, toreg(e, &test), next);
 			val_free(e, &test);
 			if (lo != hi) {
 				copy = treg(e);
 				mov(e, 1, copy, source);
-				test = a64_bigcmp(e, T_LESSEQ, ct, vreg(copy), vconst(hi));
+				test = a64_bigcmp(e, LEX_TOKEN_LESS_EQUAL, ct, vreg(copy), vconst(hi));
 				cbz(e, false, 1, toreg(e, &test), next);
 				val_free(e, &test);
 			}
@@ -572,7 +572,7 @@ static void gen_switch(ecx *e, uint32_t n)
 				if (lo == hi) {
 					val a = vreg(r), b = vconst(lo);
 
-					emit_cmp(e, T_EQUALEQUAL, cx, false, &a, &b);
+					emit_cmp(e, LEX_TOKEN_EQUAL_EQUAL, cx, false, &a, &b);
 					val_free(e, &b);
 					bcond(e, C_EQ, e->caselbl[e->cases[k]]);
 				} else {

@@ -1,5 +1,5 @@
 /* The source map: a location's file entry, presumed file and line, system-header and main-file tests. */
-#include "../pp/ppimpl.h"
+#include "../pp/pp-internal.h"
 #include "common/buffer.h"
 #include <ctype.h>
 #include <dlfcn.h>
@@ -8,7 +8,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-VPRIV const fent *loc_fent(const pp *p, uint32_t loc)
+VPRIV const pp_file_entry *loc_fent(const pp *p, uint32_t loc)
 {
 	uint32_t lo = 0, hi = p->nfe;
 
@@ -20,19 +20,19 @@ VPRIV const fent *loc_fent(const pp *p, uint32_t loc)
 		else
 			hi = mid;
 	}
-	while (lo > 0 && !p->fe[lo].f)	/* a dependency-only entry (dep_only) */
+	while (lo > 0 && !p->fe[lo].f)	/* a dependency-only entry (pp_dependency_add) */
 		lo--;
 	return p->nfe ? &p->fe[lo] : NULL;
 }
 
 VPRIV uint32_t loc_line(const pp *p, uint32_t loc)
 {
-	const fent *e = loc_fent(p, loc);
+	const pp_file_entry *e = loc_fent(p, loc);
 	uint32_t l, fe;
 
 	if (!e)
 		return 0;
-	l = file_line(e->f, e->fi, loc - e->base);
+	l = pp_file_line_of_offset(e->f, e->fi, loc - e->base);
 	fe = (uint32_t)(e - p->fe);
 	for (uint32_t i = p->nlm; i-- > 0;)
 		if (p->lm[i].fe == fe && p->lm[i].off <= loc - e->base)
@@ -43,7 +43,7 @@ VPRIV uint32_t loc_line(const pp *p, uint32_t loc)
 /* the presumed file name at loc in file context fc (#line can change it) */
 VPRIV const char *presumed_name(const pp *p, uint32_t fe, uint32_t loc, uint32_t *len)
 {
-	const fent *e = &p->fe[fe];
+	const pp_file_entry *e = &p->fe[fe];
 
 	for (uint32_t i = p->nlm; i-- > 0;)
 		if (p->lm[i].fe == fe && p->lm[i].off <= loc - e->base && p->lm[i].name) {
@@ -56,21 +56,21 @@ VPRIV const char *presumed_name(const pp *p, uint32_t fe, uint32_t loc, uint32_t
 
 int pp_in_system_header(const pp *p, uint32_t loc)
 {
-	const fent *e = loc_fent(p, loc);
+	const pp_file_entry *e = loc_fent(p, loc);
 
 	return e && loc - e->base <= e->f->size && e->sys;
 }
 
 int pp_in_main_file(const pp *p, uint32_t loc)
 {
-	const fent *e = loc_fent(p, loc);
+	const pp_file_entry *e = loc_fent(p, loc);
 
 	return e && e->f == p->fe[0].f && loc - e->base <= e->f->size;
 }
 
 int pp_where(const pp *p, uint32_t loc, const char **name, uint32_t *namelen, uint32_t *line, uint32_t *col)
 {
-	const fent *e = loc_fent(p, loc);
+	const pp_file_entry *e = loc_fent(p, loc);
 	uint32_t off, b;
 
 	if (!e || loc - e->base > e->f->size) {
@@ -88,7 +88,7 @@ int pp_where(const pp *p, uint32_t loc, const char **name, uint32_t *namelen, ui
 
 /* ---------------- diagnostics in clang's text format ---------------- */
 
-VPRIV bool loc_ok(const pp *p, uint32_t loc, const fent **e)
+VPRIV bool loc_ok(const pp *p, uint32_t loc, const pp_file_entry **e)
 {
 	*e = loc_fent(p, loc);
 	return *e && loc >= (*e)->base && loc - (*e)->base <= (*e)->f->size;

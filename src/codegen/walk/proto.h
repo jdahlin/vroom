@@ -86,11 +86,11 @@ VPRIV val LO(umulhi)(ecx *e, val a, val b);	/* high64(a*b), consumes both, retur
 VPRIV val LO(smulhi)(ecx *e, val a, val b);	/* signed high64(a*b), same ownership as umulhi */
 VPRIV bool wk_sdivconst_ok(ecx *e, val a, const em_sdivconst_recipe *r);
 VPRIV val wk_sdivconst(ecx *e, qty ty, val a, const em_sdivconst_recipe *r);
-VPRIV val LO(bin)(ecx *e, int op, int size, bool sgn, val a, val b);	/* T_PLUS T_MINUS T_STAR T_SLASH T_PERCENT T_AMP T_PIPE T_CARET T_LESSLESS T_GREATERGREATER */
+VPRIV val LO(bin)(ecx *e, int op, int size, bool sgn, val a, val b);	/* LEX_TOKEN_PLUS LEX_TOKEN_MINUS LEX_TOKEN_STAR LEX_TOKEN_SLASH LEX_TOKEN_PERCENT LEX_TOKEN_AMPERSAND LEX_TOKEN_PIPE LEX_TOKEN_CARET LEX_TOKEN_LESS_LESS LEX_TOKEN_GREATER_GREATER */
 VPRIV void LO(switch_bitset)(ecx *e, int r, int size, const em_switch_bitset_recipe *recipe,
 			   uint32_t target, uint32_t dflt);
 VPRIV void LO(switch_table)(ecx *e, int r, int size, const em_switch_case *cases, uint32_t n, uint32_t dflt);
-VPRIV val LO(un)(ecx *e, int op, int size, val a);			/* T_MINUS T_TILDE */
+VPRIV val LO(un)(ecx *e, int op, int size, val a);			/* LEX_TOKEN_MINUS LEX_TOKEN_TILDE */
 VPRIV void LO(ext)(ecx *e, int r, int from, bool sgn);		/* low `from` bytes of r extended to 64 bits */
 VPRIV val LO(cmp)(ecx *e, int op, int size, bool sgn, val a, val b);	/* 0 or 1 */
 VPRIV void LO(cmpbr)(ecx *e, int op, int size, bool sgn, val a, val b, uint32_t lbl);	/* to lbl if a op b */
@@ -108,7 +108,7 @@ VPRIV val LO(bigbin)(ecx *e, int op, qty t, val a, val b);
 VPRIV val LO(bigcmp)(ecx *e, int op, qty t, val a, val b);
 VPRIV val LO(bigcvt)(ecx *e, val v, qty from, qty to);
 VPRIV val LO(wbin)(ecx *e, int op, bool sgn, val a, val b);	/* b an int for << >> */
-VPRIV val LO(wun)(ecx *e, int op, val a);			/* T_MINUS T_TILDE */
+VPRIV val LO(wun)(ecx *e, int op, val a);			/* LEX_TOKEN_MINUS LEX_TOKEN_TILDE */
 VPRIV val LO(wcmp)(ecx *e, int op, bool sgn, val a, val b);
 VPRIV val LO(wcvt)(ecx *e, val v, qty from, qty to);	/* __int128 on either side */
 VPRIV int LO(ftreg)(ecx *e);				/* a free float temporary */

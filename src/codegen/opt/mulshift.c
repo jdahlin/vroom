@@ -4,7 +4,7 @@
 
 VPRIV bool em_mulshift(cc *c, qty ty, int *op, i128 *rhs)
 {
-	if (*op != T_STAR || !is_integer(c, ty) || em_bitint(c, ty))
+	if (*op != LEX_TOKEN_STAR || !is_integer(c, ty) || em_bitint(c, ty))
 		return false;
 	uint64_t size = tsize(c, ty);
 	if (size != 4 && size != 8)
@@ -12,7 +12,7 @@ VPRIV bool em_mulshift(cc *c, qty ty, int *op, i128 *rhs)
 	uint64_t factor = size == 4 ? (uint32_t)*rhs : (uint64_t)*rhs;
 	if (factor < 2 || (factor & (factor - 1)))
 		return false;
-	*op = T_LESSLESS;
+	*op = LEX_TOKEN_LESS_LESS;
 	*rhs = __builtin_ctzll(factor);
 	return true;
 }

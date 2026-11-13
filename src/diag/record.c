@@ -1,5 +1,5 @@
 /* The diagnostic record: ids, level names and the builder that fills it. */
-#include "../frontend/pp/ppimpl.h"
+#include "../frontend/pp/pp-internal.h"
 #include "common/buffer.h"
 #include <ctype.h>
 #include <dlfcn.h>
@@ -12,7 +12,7 @@
 
 /* vcc's formats and their ids (src/tools/gen-diagids.py) */
 static const struct dfmt { const char *fmt, *id; } dfmts[] = {
-#define DID(n, cls, grp)
+#define DID(n, lex_byte_class_table, grp)
 #define DFMT(f, n) { f, #n },
 #include "diagnostic-ids.inc"
 #undef DID

@@ -87,7 +87,7 @@ VPRIV bool em_tail_candidate(ecx *e, uint32_t fn, uint32_t expr, uint32_t maxarg
 
 		if (!em_tail_word(c, pt) || QUNQ(a->ty) != QUNQ(pt))
 			return false;
-		if (a->op == N_NUM || (a->op == N_UNARY && a->aux == T_MINUS && N(a->a)->op == N_NUM))
+		if (a->op == N_NUM || (a->op == N_UNARY && a->aux == LEX_TOKEN_MINUS && N(a->a)->op == N_NUM))
 			continue;
 		if (a->op != N_VAR)
 			return false;

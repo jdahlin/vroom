@@ -5,7 +5,7 @@
    hasUncompilableErrorOccurred */
 static uint32_t hard_errors(cc *c)
 {
-	uint32_t ce = (uint32_t)c->errors, pe = (uint32_t)pp_errors(c->p), e = ce > pe ? ce : pe;
+	uint32_t ce = (uint32_t)c->errors, pe = (uint32_t)pp_error_count(c->p), e = ce > pe ? ce : pe;
 
 	return e > c->nconv ? e - c->nconv : 0;
 }
@@ -107,7 +107,7 @@ VPRIV void unused_typedefs(cc *c)
 {
 	static const char *const g[] = { "unused-local-typedefs", "unused", "all", "most", NULL };
 
-	if (c->errors || pp_errors(c->p))
+	if (c->errors || pp_error_count(c->p))
 		return;
 	for (uint32_t i = 1; i < c->nsym; i++) {
 		const sym *y = &c->syms[i];

@@ -623,15 +623,15 @@ static void wk_switch_tree(ecx *e, const em_switch_case *cases, uint32_t n,
 	const em_switch_case *k = &cases[mid];
 	val v = { .k = V_REG, .r = (uint8_t)r };
 	if (n == 1 && k->lo == k->hi) {
-		LO(cmpbr)(e, T_EQUALEQUAL, w, sg, v, vconst(k->lo), k->target);
+		LO(cmpbr)(e, LEX_TOKEN_EQUAL_EQUAL, w, sg, v, vconst(k->lo), k->target);
 		LO(tkeep)(e, r);
 		LO(jump)(e, dflt);
 		return;
 	}
 	uint32_t left = mid ? wk_newlabel(e) : dflt;
-	LO(cmpbr)(e, T_LESS, w, sg, v, vconst(k->lo), left);
+	LO(cmpbr)(e, LEX_TOKEN_LESS, w, sg, v, vconst(k->lo), left);
 	LO(tkeep)(e, r);
-	LO(cmpbr)(e, T_LESSEQ, w, sg, v, vconst(k->hi), k->target);
+	LO(cmpbr)(e, LEX_TOKEN_LESS_EQUAL, w, sg, v, vconst(k->hi), k->target);
 	LO(tkeep)(e, r);
 	wk_switch_tree(e, k + 1, n - mid - 1, r, w, sg, dflt);
 	if (mid) {
@@ -763,7 +763,7 @@ static void wk_switch(ecx *e, uint32_t n)
 		}
 		if (wk_mem(e, ct)) {
 			/* __int128: each test a 0/1 value (the value is an object, r its address) */
-			val t = em_bigint(c, ct) ? LO(bigcmp)(e, k->lo == k->hi ? T_EQUALEQUAL : T_GREATEREQ, ct, (val){ .k = V_REG, .r = (uint8_t)r }, vconst(k->lo)) : LO(wcmp)(e, k->lo == k->hi ? T_EQUALEQUAL : T_GREATEREQ, sg, (val){ .k = V_REG, .r = (uint8_t)r }, vconst(k->lo));
+			val t = em_bigint(c, ct) ? LO(bigcmp)(e, k->lo == k->hi ? LEX_TOKEN_EQUAL_EQUAL : LEX_TOKEN_GREATER_EQUAL, ct, (val){ .k = V_REG, .r = (uint8_t)r }, vconst(k->lo)) : LO(wcmp)(e, k->lo == k->hi ? LEX_TOKEN_EQUAL_EQUAL : LEX_TOKEN_GREATER_EQUAL, sg, (val){ .k = V_REG, .r = (uint8_t)r }, vconst(k->lo));
 			uint32_t skip = wk_newlabel(e);
 
 			LO(tkeep)(e, r);
@@ -772,20 +772,20 @@ static void wk_switch(ecx *e, uint32_t n)
 				continue;
 			}
 			LO(brz)(e, t, 4, false, skip);
-			t = em_bigint(c, ct) ? LO(bigcmp)(e, T_LESSEQ, ct, (val){ .k = V_REG, .r = (uint8_t)r }, vconst(k->hi)) : LO(wcmp)(e, T_LESSEQ, sg, (val){ .k = V_REG, .r = (uint8_t)r }, vconst(k->hi));
+			t = em_bigint(c, ct) ? LO(bigcmp)(e, LEX_TOKEN_LESS_EQUAL, ct, (val){ .k = V_REG, .r = (uint8_t)r }, vconst(k->hi)) : LO(wcmp)(e, LEX_TOKEN_LESS_EQUAL, sg, (val){ .k = V_REG, .r = (uint8_t)r }, vconst(k->hi));
 			LO(tkeep)(e, r);
 			LO(brz)(e, t, 4, true, l);
 			wk_label(e, skip);
 		} else if (k->lo == k->hi) {
-			LO(cmpbr)(e, T_EQUALEQUAL, w, sg, (val){ .k = V_REG, .r = (uint8_t)r }, vconst(k->lo), l);
+			LO(cmpbr)(e, LEX_TOKEN_EQUAL_EQUAL, w, sg, (val){ .k = V_REG, .r = (uint8_t)r }, vconst(k->lo), l);
 			LO(tkeep)(e, r);
 		} else {
 			/* lo <= v <= hi */
 			uint32_t skip = wk_newlabel(e);
 
-			LO(cmpbr)(e, T_LESS, w, sg, (val){ .k = V_REG, .r = (uint8_t)r }, vconst(k->lo), skip);
+			LO(cmpbr)(e, LEX_TOKEN_LESS, w, sg, (val){ .k = V_REG, .r = (uint8_t)r }, vconst(k->lo), skip);
 			LO(tkeep)(e, r);
-			LO(cmpbr)(e, T_LESSEQ, w, sg, (val){ .k = V_REG, .r = (uint8_t)r }, vconst(k->hi), l);
+			LO(cmpbr)(e, LEX_TOKEN_LESS_EQUAL, w, sg, (val){ .k = V_REG, .r = (uint8_t)r }, vconst(k->hi), l);
 			LO(tkeep)(e, r);
 			wk_label(e, skip);
 		}
@@ -1001,7 +1001,7 @@ static void wk_stmt1(ecx *e, uint32_t n)
 		val test = vnone();
 		uint32_t tc = x->a;
 
-		while ((N(tc)->op == N_CAST && N(tc)->a) || (N(tc)->op == N_UNARY && N(tc)->aux == T_EXCLAIM))
+		while ((N(tc)->op == N_CAST && N(tc)->a) || (N(tc)->op == N_UNARY && N(tc)->aux == LEX_TOKEN_EXCLAMATION))
 			tc = N(tc)->a;
 		/* (a call too: an inlined function or a folded builtin may give a constant,
 		   if (!__builtin_strcmp(op, "<")), if (dax_mapping(m))) */

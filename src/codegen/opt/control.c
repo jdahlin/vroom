@@ -78,7 +78,7 @@ static bool em_control_int(ecx *e, uint32_t n, int (*constant_p)(ecx *, uint32_t
 		*out = x->aux == CK_BOOL ? a != 0 : em_trunc_to(c, a, x->ty);
 		return true;
 	case N_UNARY:
-		if (x->aux != T_EXCLAIM || !em_control_int(e, x->a, constant_p, left, &a))
+		if (x->aux != LEX_TOKEN_EXCLAMATION || !em_control_int(e, x->a, constant_p, left, &a))
 			return false;
 		*out = !a;
 		return true;

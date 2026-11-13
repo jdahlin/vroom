@@ -53,9 +53,9 @@ static void lz_tok(cc *c, const ptok *t)
 	z->loc = t->loc;
 	z->kind = t->kind;
 	z->len = t->len;
-	if (t->kind == T_IDENT) {
+	if (t->kind == LEX_TOKEN_IDENTIFIER) {
 		z->v = t->id;
-		z->flags = t->flags & ~TF_DIRTY;	/* (the interned spelling has no splices) */
+		z->flags = t->flags & ~LEX_TOKEN_FLAG_SPLICED;	/* (the interned spelling has no splices) */
 		z->len = vintern_ents[t->id].len;
 	} else {
 		z->v = c->nlzs;
@@ -90,7 +90,7 @@ VPRIV void lazy_capture(cc *c, uint32_t s, const declr *d)
 	bool eof = false;
 
 	*L = (lzfn){ s, c->nlzt, 0, c->nsym, d->name, d->loc, d->psyms, d->npsyms, d->plb, d->ple, 0, 0, { 0 } };
-	if (pp_lazy_skip(c->p, &c->tk[0], &L->z)) {
+	if (pp_lazy_body_skip(c->p, &c->tk[0], &L->z)) {
 		/* replayed from the header cache: the entry has the tokens, nothing passes through */
 		L->hc = 1;
 		c->syms[s].flags |= SF_DEFINED | SF_LAZY;
@@ -106,14 +106,14 @@ VPRIV void lazy_capture(cc *c, uint32_t s, const declr *d)
 	lz_tok(c, &c->tk[0]);	/* '{' */
 	depth = 1;
 	for (;;) {
-		pp_next(c->p, &t);	/* raw: #pragma comes along as P_DIRECTIVE, applied when parsed */
-		if (t.kind == T_EOF) {
+		pp_token_next(c->p, &t);	/* raw: #pragma comes along as PP_TOKEN_KIND_DIRECTIVE_LINE, applied when parsed */
+		if (t.kind == LEX_TOKEN_EOF) {
 			eof = true;
 			break;
 		}
 		lz_tok(c, &t);
-		depth += t.kind == T_LBRACE;
-		depth -= t.kind == T_RBRACE;
+		depth += t.kind == LEX_TOKEN_LEFT_BRACE;
+		depth -= t.kind == LEX_TOKEN_RIGHT_BRACE;
 		if (!depth)
 			break;
 	}
@@ -162,7 +162,7 @@ static void lazy_parse(cc *c, uint32_t i)
 	c->rec = NULL;	/* another token stream: no recovery outside the body */
 	function_def(c, s, &d);
 	c->rec = rec;
-	if (!is(c, T_EOF))
+	if (!is(c, LEX_TOKEN_EOF))
 		cc_error(c, tok(c)->loc, "expected end of function body");
 	atomic_fetch_add_explicit(&lz_st_pfn, 1, memory_order_relaxed);
 	atomic_fetch_add_explicit(&lz_st_ptok, L->hc ? L->z.close - L->z.open + 1 : L->ntk, memory_order_relaxed);

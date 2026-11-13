@@ -29,7 +29,7 @@
 #define likely(x) __builtin_expect(!!(x), 1)
 #define unlikely(x) __builtin_expect(!!(x), 0)
 
-static const char *const names[T_NKINDS] = {
+static const char *const lex_token_kind_names[LEX_TOKEN_KIND_COUNT] = {
 	"eof", "raw_identifier", "numeric_constant",
 	"char_constant", "wide_char_constant", "utf8_char_constant",
 	"utf16_char_constant", "utf32_char_constant",
@@ -47,9 +47,9 @@ static const char *const names[T_NKINDS] = {
 	"equalequal", "comma", "hash", "hashhash",
 };
 
-const char *vtok_name(int kind)
+const char *lex_token_name(int kind)
 {
-	return kind >= 0 && kind < T_NKINDS ? names[kind] : "?";
+	return kind >= 0 && kind < LEX_TOKEN_KIND_COUNT ? lex_token_kind_names[kind] : "?";
 }
 
 /* ---- pass 1: SIMD classification into bitmasks ---------------------- */
@@ -65,11 +65,11 @@ const char *vtok_name(int kind)
  *   bit 6  hi 0    lo 9,b,c tab vt ff
  *   bit 7  hi 0    lo a,d   newline, carriage return
  */
-static const uint8_t lo_tab[16] = {
+static const uint8_t lex_low_nibble_table[16] = {
 	0x26, 0x07, 0x07, 0x07, 0x17, 0x07, 0x07, 0x07,
 	0x07, 0x47, 0x83, 0x41, 0x41, 0x81, 0x11, 0x09,
 };
-static const uint8_t hi_tab[16] = {
+static const uint8_t lex_high_nibble_table[16] = {
 	0xc0, 0x00, 0x30, 0x04, 0x01, 0x0a, 0x01, 0x02,
 };
 
@@ -86,11 +86,11 @@ static const uint8_t hi_tab[16] = {
  *            bit 7  needs a handler: quotes, '\\', control, '@', '`'
  *   gtab[c]  bit 1 '=', bit 2 '>', bit 3 ':' or '%', bit 6 '/', '*', ':',
  *            '%' or '.', bit 7 '+' or '-'
- * Masks whose property is in bit 7 go to mm4() as they are.
+ * Masks whose property is in bit 7 go to lex_mask_pack() as they are.
  */
-static uint8_t ttab[128], gtab[64], cltab[128];	/* cltab: the byte classes above */
+static uint8_t lex_structure_table[128], lex_group_table[64], lex_class_table[128];	/* cltab: the byte classes above */
 
-static void init_struct_tables(void)
+static void lex_structure_tables_init(void)
 {
 	for (int c = 0; c < 128; c++) {
 		uint8_t t = 0;
@@ -110,18 +110,18 @@ static void init_struct_tables(void)
 			t |= 128;
 		if (c == '/' || c == '%' || c == '.')
 			t |= 64;
-		ttab[c] = t;
+		lex_structure_table[c] = t;
 	}
 	for (int c = 0; c < 128; c++)
-		cltab[c] = lo_tab[c & 15] & hi_tab[c >> 4];
-	gtab['='] = 2;
-	gtab['>'] = 4;
-	gtab[':'] = gtab['%'] = 8 | 64;
-	gtab['/'] = gtab['*'] = gtab['.'] = 64;
-	gtab['+'] = gtab['-'] = 128;
+		lex_class_table[c] = lex_low_nibble_table[c & 15] & lex_high_nibble_table[c >> 4];
+	lex_group_table['='] = 2;
+	lex_group_table['>'] = 4;
+	lex_group_table[':'] = lex_group_table['%'] = 8 | 64;
+	lex_group_table['/'] = lex_group_table['*'] = lex_group_table['.'] = 64;
+	lex_group_table['+'] = lex_group_table['-'] = 128;
 }
 
-enum { M_ID, M_WS, M_NL, M_DIG, M_P, M_PAIR, M_X, M_NS, M_COUNT };
+enum { LEX_MASK_IDENTIFIER, LEX_MASK_WHITESPACE, LEX_MASK_NEWLINE, LEX_MASK_DIGIT, LEX_MASK_PREFIX, LEX_MASK_PAIR, LEX_MASK_HANDLER, LEX_MASK_SIGN_NEXT, LEX_MASK_COUNT };
 
 #ifdef __ARM_NEON
 /*
@@ -130,7 +130,7 @@ enum { M_ID, M_WS, M_NL, M_DIG, M_P, M_PAIR, M_X, M_NS, M_COUNT };
  * a[k] lane j is byte 4j + k, which the shift-insert chain puts at bit
  * 4j + k.  Five instructions instead of the eight of a pairwise-add tree.
  */
-static inline uint64_t mm4(uint8x16_t a0, uint8x16_t a1, uint8x16_t a2, uint8x16_t a3)
+static inline uint64_t lex_mask_pack(uint8x16_t a0, uint8x16_t a1, uint8x16_t a2, uint8x16_t a3)
 {
 	uint8x16_t t0 = vsriq_n_u8(a1, a0, 1), t1 = vsriq_n_u8(a3, a2, 1);
 	uint8x16_t t2 = vsriq_n_u8(t1, t0, 2), t3 = vsriq_n_u8(t2, t2, 4);
@@ -149,7 +149,7 @@ static inline uint64_t mm4(uint8x16_t a0, uint8x16_t a1, uint8x16_t a2, uint8x16
  *   NS    the next byte is + or - (maybe a sign inside a pp-number)
  * Blocks [from, to) of the file at s.
  */
-static void classify(const uint8_t *s, size_t from, size_t to, uint64_t *m[M_COUNT])
+static void pp_paste_result_classify(const uint8_t *s, size_t from, size_t to, uint64_t *m[LEX_MASK_COUNT])
 {
 	const uint8x16_t mid = vdupq_n_u8(0x1f), mdg = vdupq_n_u8(0x04);
 	const uint8x16_t mws = vdupq_n_u8(0xe0);
@@ -171,7 +171,7 @@ static void classify(const uint8_t *s, size_t from, size_t to, uint64_t *m[M_COU
 			 * instead of being live across the loop: that spilled
 			 * and rematerialized ~60 instructions per block.
 			 */
-			const uint8_t *tp = ttab, *gp = gtab, *cp = cltab;
+			const uint8_t *tp = lex_structure_table, *gp = lex_group_table, *cp = lex_class_table;
 			uint8x16_t hv[4];
 
 			__asm__("" : "+r"(tp), "+r"(gp), "+r"(cp));
@@ -193,18 +193,18 @@ static void classify(const uint8_t *s, size_t from, size_t to, uint64_t *m[M_COU
 #define MASK(j, expr) do {						\
 		for (int k = 0; k < 4; k++)					\
 			r[k] = (expr);						\
-		m[j][b] = mm4(r[0], r[1], r[2], r[3]);				\
+		m[j][b] = lex_mask_pack(r[0], r[1], r[2], r[3]);				\
 	} while (0)
-		MASK(M_P, vtstq_u8(t[k], b16));
+		MASK(LEX_MASK_PREFIX, vtstq_u8(t[k], b16));
 		/* bit 7: a pair by the tables, or a doubling character doubled (ttab bit 0 shifted up) */
-		MASK(M_PAIR, vorrq_u8(vtstq_u8(tg[k], pairb), vshlq_n_u8(vandq_u8(t[k], vceqq_u8(v.val[k], vn[k])), 7)));
+		MASK(LEX_MASK_PAIR, vorrq_u8(vtstq_u8(tg[k], pairb), vshlq_n_u8(vandq_u8(t[k], vceqq_u8(v.val[k], vn[k])), 7)));
 		/* bit 7: handler, non-ASCII, comment or digraph */
-		MASK(M_X, vorrq_u8(vorrq_u8(t[k], v.val[k]), vshlq_n_u8(tg[k], 1)));
-		MASK(M_ID, vtstq_u8(c[k], mid));
-		MASK(M_WS, vtstq_u8(c[k], mws));
-		MASK(M_NL, c[k]);
-		MASK(M_DIG, vtstq_u8(c[k], mdg));
-		MASK(M_NS, gn[k]);
+		MASK(LEX_MASK_HANDLER, vorrq_u8(vorrq_u8(t[k], v.val[k]), vshlq_n_u8(tg[k], 1)));
+		MASK(LEX_MASK_IDENTIFIER, vtstq_u8(c[k], mid));
+		MASK(LEX_MASK_WHITESPACE, vtstq_u8(c[k], mws));
+		MASK(LEX_MASK_NEWLINE, c[k]);
+		MASK(LEX_MASK_DIGIT, vtstq_u8(c[k], mdg));
+		MASK(LEX_MASK_SIGN_NEXT, gn[k]);
 #undef MASK
 	}
 }
@@ -212,19 +212,19 @@ static void classify(const uint8_t *s, size_t from, size_t to, uint64_t *m[M_COU
 /* ---- NEON searches -------------------------------------------------- */
 
 /* 4 bits per byte -> 64-bit mask; returns the byte index of the first hit */
-static inline uint64_t nibmask(uint8x16_t eq)
+static inline uint64_t lex_nibbles_first_index(uint8x16_t eq)
 {
 	return vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(eq), 4)), 0);
 }
 
 /* first position >= p holding '*' before '/', a backslash or NUL */
-static inline size_t find_cend(const char *s, size_t p)
+static inline size_t lex_comment_end_find(const char *s, size_t p)
 {
 	const uint8x16_t star = vdupq_n_u8('*'), sl = vdupq_n_u8('/'), bs = vdupq_n_u8('\\');
 
 	for (;; p += 16) {
 		uint8x16_t v = vld1q_u8((const uint8_t *)s + p), w = vld1q_u8((const uint8_t *)s + p + 1);
-		uint64_t m = nibmask(vorrq_u8(vandq_u8(vceqq_u8(v, star), vceqq_u8(w, sl)),
+		uint64_t m = lex_nibbles_first_index(vorrq_u8(vandq_u8(vceqq_u8(v, star), vceqq_u8(w, sl)),
 					      vorrq_u8(vceqq_u8(v, bs), vceqzq_u8(v))));
 
 		if (m)
@@ -233,13 +233,13 @@ static inline size_t find_cend(const char *s, size_t p)
 }
 
 /* first position >= p holding '\n', '\r' or NUL */
-static inline size_t find_nl(const char *s, size_t p)
+static inline size_t lex_line_end_find(const char *s, size_t p)
 {
 	const uint8x16_t nl = vdupq_n_u8('\n'), cr = vdupq_n_u8('\r');
 
 	for (;; p += 16) {
 		uint8x16_t v = vld1q_u8((const uint8_t *)s + p);
-		uint64_t m = nibmask(vorrq_u8(vorrq_u8(vceqq_u8(v, nl), vceqq_u8(v, cr)), vceqzq_u8(v)));
+		uint64_t m = lex_nibbles_first_index(vorrq_u8(vorrq_u8(vceqq_u8(v, nl), vceqq_u8(v, cr)), vceqzq_u8(v)));
 
 		if (m)
 			return p + (__builtin_ctzll(m) >> 2);
@@ -247,14 +247,14 @@ static inline size_t find_nl(const char *s, size_t p)
 }
 
 /* first position >= p holding q, a backslash or a byte <= '\r' */
-static inline size_t find_quote(const char *s, size_t p, uint8_t q)
+static inline size_t lex_quote_find(const char *s, size_t p, uint8_t q)
 {
 	const uint8x16_t vq = vdupq_n_u8(q), bs = vdupq_n_u8('\\'), cr = vdupq_n_u8('\r');
 
 	for (;; p += 16) {
 		uint8x16_t v = vld1q_u8((const uint8_t *)s + p);
 		uint8x16_t hit = vorrq_u8(vorrq_u8(vceqq_u8(v, vq), vceqq_u8(v, bs)), vcleq_u8(v, cr));
-		uint64_t m = nibmask(hit);
+		uint64_t m = lex_nibbles_first_index(hit);
 
 		if (m)
 			return p + (__builtin_ctzll(m) >> 2);
@@ -267,12 +267,12 @@ static inline size_t find_quote(const char *s, size_t p, uint8_t q)
 #define LEX_AVX2 __attribute__((target("avx2")))
 #define LEX_AVX512 __attribute__((target("avx2,avx512f,avx512bw,avx512vbmi")))
 
-static LEX_AVX512 void classify_avx512(const uint8_t *s, size_t from, size_t to, uint64_t *m[M_COUNT])
+static LEX_AVX512 void lex_bytes_classify_avx512(const uint8_t *s, size_t from, size_t to, uint64_t *m[LEX_MASK_COUNT])
 {
-	const __m512i lo = _mm512_broadcast_i32x4(_mm_loadu_si128((const __m128i *)lo_tab));
-	const __m512i hi = _mm512_broadcast_i32x4(_mm_loadu_si128((const __m128i *)hi_tab));
-	const __m512i t0 = _mm512_loadu_si512(ttab), t1 = _mm512_loadu_si512(ttab + 64);
-	const __m512i g = _mm512_loadu_si512(gtab), nib = _mm512_set1_epi8(15);
+	const __m512i lo = _mm512_broadcast_i32x4(_mm_loadu_si128((const __m128i *)lex_low_nibble_table));
+	const __m512i hi = _mm512_broadcast_i32x4(_mm_loadu_si128((const __m128i *)lex_high_nibble_table));
+	const __m512i t0 = _mm512_loadu_si512(lex_structure_table), t1 = _mm512_loadu_si512(lex_structure_table + 64);
+	const __m512i g = _mm512_loadu_si512(lex_group_table), nib = _mm512_set1_epi8(15);
 
 	for (size_t b = from; b < to; b++) {
 		const uint8_t *q = s + 64 * b;
@@ -283,20 +283,20 @@ static LEX_AVX512 void classify_avx512(const uint8_t *s, size_t from, size_t to,
 		__m512i c = _mm512_and_si512(_mm512_shuffle_epi8(lo, _mm512_and_si512(v, nib)),
 			_mm512_shuffle_epi8(hi, _mm512_and_si512(_mm512_srli_epi16(v, 4), nib)));
 
-		m[M_P][b] = _mm512_test_epi8_mask(t, _mm512_set1_epi8(16));
-		m[M_PAIR][b] = _mm512_test_epi8_mask(tg, _mm512_set1_epi8(14)) |
+		m[LEX_MASK_PREFIX][b] = _mm512_test_epi8_mask(t, _mm512_set1_epi8(16));
+		m[LEX_MASK_PAIR][b] = _mm512_test_epi8_mask(tg, _mm512_set1_epi8(14)) |
 			(_mm512_test_epi8_mask(t, _mm512_set1_epi8(1)) & _mm512_cmpeq_epi8_mask(v, vn));
-		m[M_X][b] = _mm512_movepi8_mask(_mm512_or_si512(t, v)) | _mm512_test_epi8_mask(tg, _mm512_set1_epi8(64));
-		m[M_ID][b] = _mm512_test_epi8_mask(c, _mm512_set1_epi8(31));
-		m[M_WS][b] = _mm512_test_epi8_mask(c, _mm512_set1_epi8((char)0xe0));
-		m[M_NL][b] = _mm512_movepi8_mask(c);
-		m[M_DIG][b] = _mm512_test_epi8_mask(c, _mm512_set1_epi8(4));
-		m[M_NS][b] = _mm512_movepi8_mask(gn);
+		m[LEX_MASK_HANDLER][b] = _mm512_movepi8_mask(_mm512_or_si512(t, v)) | _mm512_test_epi8_mask(tg, _mm512_set1_epi8(64));
+		m[LEX_MASK_IDENTIFIER][b] = _mm512_test_epi8_mask(c, _mm512_set1_epi8(31));
+		m[LEX_MASK_WHITESPACE][b] = _mm512_test_epi8_mask(c, _mm512_set1_epi8((char)0xe0));
+		m[LEX_MASK_NEWLINE][b] = _mm512_movepi8_mask(c);
+		m[LEX_MASK_DIGIT][b] = _mm512_test_epi8_mask(c, _mm512_set1_epi8(4));
+		m[LEX_MASK_SIGN_NEXT][b] = _mm512_movepi8_mask(gn);
 	}
 }
 /* PSHUFB looks up sixteen bytes within each lane. Select the ASCII row
  * by the high nibble; bytes outside the table produce zero, as on ARM. */
-static inline LEX_AVX2 __m256i lookup_ascii(const uint8_t *table, int rows, __m256i v)
+static inline LEX_AVX2 __m256i lex_table_ascii_lookup(const uint8_t *table, int rows, __m256i v)
 {
 	__m256i low = _mm256_and_si256(v, _mm256_set1_epi8(15));
 	__m256i high = _mm256_and_si256(_mm256_srli_epi16(v, 4), _mm256_set1_epi8(15));
@@ -310,43 +310,43 @@ static inline LEX_AVX2 __m256i lookup_ascii(const uint8_t *table, int rows, __m2
 	return result;
 }
 
-static inline LEX_AVX2 uint32_t avx_test(__m256i v, int bits)
+static inline LEX_AVX2 uint32_t lex_avx2_bits_test(__m256i v, int bits)
 {
 	return ~(uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(
 		_mm256_and_si256(v, _mm256_set1_epi8((char)bits)), _mm256_setzero_si256()));
 }
 
-static LEX_AVX2 void classify_avx2(const uint8_t *s, size_t from, size_t to, uint64_t *m[M_COUNT])
+static LEX_AVX2 void lex_bytes_classify_avx2(const uint8_t *s, size_t from, size_t to, uint64_t *m[LEX_MASK_COUNT])
 {
-	const __m256i lo = _mm256_broadcastsi128_si256(_mm_loadu_si128((const __m128i *)lo_tab));
-	const __m256i hi = _mm256_broadcastsi128_si256(_mm_loadu_si128((const __m128i *)hi_tab));
+	const __m256i lo = _mm256_broadcastsi128_si256(_mm_loadu_si128((const __m128i *)lex_low_nibble_table));
+	const __m256i hi = _mm256_broadcastsi128_si256(_mm_loadu_si128((const __m128i *)lex_high_nibble_table));
 	const __m256i nib = _mm256_set1_epi8(15);
 
 	for (size_t b = from; b < to; b++) {
-		uint64_t masks[M_COUNT] = { 0 };
+		uint64_t masks[LEX_MASK_COUNT] = { 0 };
 		for (int k = 0; k < 2; k++) {
 			const uint8_t *q = s + 64 * b + 32 * k;
 			__m256i v = _mm256_loadu_si256((const __m256i *)q), vn = _mm256_loadu_si256((const __m256i *)(q + 1));
-			__m256i t = lookup_ascii(ttab, 8, v), gn = lookup_ascii(gtab, 4, vn);
+			__m256i t = lex_table_ascii_lookup(lex_structure_table, 8, v), gn = lex_table_ascii_lookup(lex_group_table, 4, vn);
 			__m256i tg = _mm256_and_si256(t, gn);
 			__m256i c = _mm256_and_si256(_mm256_shuffle_epi8(lo, _mm256_and_si256(v, nib)),
 				_mm256_shuffle_epi8(hi, _mm256_and_si256(_mm256_srli_epi16(v, 4), nib)));
 #define MASK(j, expr) masks[j] |= (uint64_t)(uint32_t)(expr) << (32 * k)
-			MASK(M_P, avx_test(t, 16));
-			MASK(M_PAIR, avx_test(tg, 14) | (avx_test(t, 1) & (uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(v, vn))));
-			MASK(M_X, (uint32_t)_mm256_movemask_epi8(_mm256_or_si256(t, v)) | avx_test(tg, 64));
-			MASK(M_ID, avx_test(c, 31));
-			MASK(M_WS, avx_test(c, 0xe0));
-			MASK(M_NL, _mm256_movemask_epi8(c));
-			MASK(M_DIG, avx_test(c, 4));
-			MASK(M_NS, _mm256_movemask_epi8(gn));
+			MASK(LEX_MASK_PREFIX, lex_avx2_bits_test(t, 16));
+			MASK(LEX_MASK_PAIR, lex_avx2_bits_test(tg, 14) | (lex_avx2_bits_test(t, 1) & (uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(v, vn))));
+			MASK(LEX_MASK_HANDLER, (uint32_t)_mm256_movemask_epi8(_mm256_or_si256(t, v)) | lex_avx2_bits_test(tg, 64));
+			MASK(LEX_MASK_IDENTIFIER, lex_avx2_bits_test(c, 31));
+			MASK(LEX_MASK_WHITESPACE, lex_avx2_bits_test(c, 0xe0));
+			MASK(LEX_MASK_NEWLINE, _mm256_movemask_epi8(c));
+			MASK(LEX_MASK_DIGIT, lex_avx2_bits_test(c, 4));
+			MASK(LEX_MASK_SIGN_NEXT, _mm256_movemask_epi8(gn));
 #undef MASK
 		}
-		for (int j = 0; j < M_COUNT; j++) m[j][b] = masks[j];
+		for (int j = 0; j < LEX_MASK_COUNT; j++) m[j][b] = masks[j];
 	}
 }
 
-static LEX_AVX2 size_t find_cend_avx2(const char *s, size_t p)
+static LEX_AVX2 size_t lex_comment_end_find_avx2(const char *s, size_t p)
 {
 	for (;; p += 32) {
 		__m256i v = _mm256_loadu_si256((const __m256i *)(s + p));
@@ -359,7 +359,7 @@ static LEX_AVX2 size_t find_cend_avx2(const char *s, size_t p)
 	}
 }
 
-static LEX_AVX2 size_t find_nl_avx2(const char *s, size_t p)
+static LEX_AVX2 size_t lex_line_end_find_avx2(const char *s, size_t p)
 {
 	for (;; p += 32) {
 		__m256i v = _mm256_loadu_si256((const __m256i *)(s + p));
@@ -370,7 +370,7 @@ static LEX_AVX2 size_t find_nl_avx2(const char *s, size_t p)
 	}
 }
 
-static LEX_AVX2 size_t find_quote_avx2(const char *s, size_t p, uint8_t q)
+static LEX_AVX2 size_t lex_quote_find_avx2(const char *s, size_t p, uint8_t q)
 {
 	for (;; p += 32) {
 		__m256i v = _mm256_loadu_si256((const __m256i *)(s + p));
@@ -385,15 +385,15 @@ static LEX_AVX2 size_t find_quote_avx2(const char *s, size_t p, uint8_t q)
 #endif /* x86 SIMD implementations */
 
 #if defined(__x86_64__) && !defined(VLEX_SCALAR)
-#define classify classify_scalar
-#define find_cend find_cend_scalar
-#define find_nl find_nl_scalar
-#define find_quote find_quote_scalar
+#define pp_paste_result_classify classify_scalar
+#define lex_comment_end_find find_cend_scalar
+#define lex_line_end_find find_nl_scalar
+#define lex_quote_find find_quote_scalar
 #endif
 
 /* Portable fallback; also independent searches for the scalar oracle. */
 
-static void classify(const uint8_t *s, size_t from, size_t to, uint64_t *m[M_COUNT])
+static void pp_paste_result_classify(const uint8_t *s, size_t from, size_t to, uint64_t *m[LEX_MASK_COUNT])
 {
 	for (size_t b = from; b < to; b++) {
 		const uint8_t *q = s + 64 * b;
@@ -401,8 +401,8 @@ static void classify(const uint8_t *s, size_t from, size_t to, uint64_t *m[M_COU
 
 		for (int i = 0; i < 64; i++) {
 			unsigned x = q[i], y = q[i + 1];
-			unsigned t = x < 128 ? ttab[x] : 0, c = x < 128 ? cltab[x] : 0;
-			unsigned gn = y < 64 ? gtab[y] : 0, tg = t & gn;
+			unsigned t = x < 128 ? lex_structure_table[x] : 0, c = x < 128 ? lex_class_table[x] : 0;
+			unsigned gn = y < 64 ? lex_group_table[y] : 0, tg = t & gn;
 			uint64_t bit = (uint64_t)1 << i;
 
 			if (t & 16)
@@ -422,13 +422,13 @@ static void classify(const uint8_t *s, size_t from, size_t to, uint64_t *m[M_COU
 			if (gn & 128)
 				mns |= bit;
 		}
-		m[M_P][b] = mp, m[M_PAIR][b] = mpair, m[M_X][b] = mx, m[M_ID][b] = mid;
-		m[M_WS][b] = mws, m[M_NL][b] = mnl, m[M_DIG][b] = mdg, m[M_NS][b] = mns;
+		m[LEX_MASK_PREFIX][b] = mp, m[LEX_MASK_PAIR][b] = mpair, m[LEX_MASK_HANDLER][b] = mx, m[LEX_MASK_IDENTIFIER][b] = mid;
+		m[LEX_MASK_WHITESPACE][b] = mws, m[LEX_MASK_NEWLINE][b] = mnl, m[LEX_MASK_DIGIT][b] = mdg, m[LEX_MASK_SIGN_NEXT][b] = mns;
 	}
 }
 
 /* first position >= p holding '*' before '/', a backslash or NUL */
-static inline size_t find_cend(const char *s, size_t p)
+static inline size_t lex_comment_end_find(const char *s, size_t p)
 {
 	for (;; p++)
 		if ((s[p] == '*' && s[p + 1] == '/') || s[p] == '\\' || !s[p])
@@ -436,7 +436,7 @@ static inline size_t find_cend(const char *s, size_t p)
 }
 
 /* first position >= p holding '\n', '\r' or NUL */
-static inline size_t find_nl(const char *s, size_t p)
+static inline size_t lex_line_end_find(const char *s, size_t p)
 {
 	for (;; p++)
 		if (s[p] == '\n' || s[p] == '\r' || !s[p])
@@ -444,7 +444,7 @@ static inline size_t find_nl(const char *s, size_t p)
 }
 
 /* first position >= p holding q, a backslash or a byte <= '\r' */
-static inline size_t find_quote(const char *s, size_t p, uint8_t q)
+static inline size_t lex_quote_find(const char *s, size_t p, uint8_t q)
 {
 	for (;; p++) {
 		uint8_t ch = (uint8_t)s[p];
@@ -454,33 +454,33 @@ static inline size_t find_quote(const char *s, size_t p, uint8_t q)
 	}
 }
 #if defined(__x86_64__) && !defined(VLEX_SCALAR)
-#undef classify
-#undef find_cend
-#undef find_nl
-#undef find_quote
-static void (*classify)(const uint8_t *, size_t, size_t, uint64_t **) = classify_scalar;
-static size_t (*find_cend)(const char *, size_t) = find_cend_scalar;
-static size_t (*find_nl)(const char *, size_t) = find_nl_scalar;
-static size_t (*find_quote)(const char *, size_t, uint8_t) = find_quote_scalar;
+#undef pp_paste_result_classify
+#undef lex_comment_end_find
+#undef lex_line_end_find
+#undef lex_quote_find
+static void (*pp_paste_result_classify)(const uint8_t *, size_t, size_t, uint64_t **) = classify_scalar;
+static size_t (*lex_comment_end_find)(const char *, size_t) = find_cend_scalar;
+static size_t (*lex_line_end_find)(const char *, size_t) = find_nl_scalar;
+static size_t (*lex_quote_find)(const char *, size_t, uint8_t) = find_quote_scalar;
 
-/* Called under tables_once, before the lexer publishes its dispatch table.
+/* Called under lex_tables_once, before the lexer publishes its dispatch table.
  * The compiler's CPU detector checks OSXSAVE/XCR0 as well as CPUID, so a
  * CPU feature is usable only when the OS preserves the required registers.
  * VCC_LEX_SIMD caps the choice for testing; it cannot enable unsupported ISA. */
-static void init_x86_simd(void)
+static void lex_simd_init_x86(void)
 {
 	const char *cap = getenv("VCC_LEX_SIMD");
 	__builtin_cpu_init();
 	if (cap && !strcmp(cap, "scalar")) return;
 	if (!__builtin_cpu_supports("avx2")) return;
-	classify = classify_avx2;
-	find_cend = find_cend_avx2;
-	find_nl = find_nl_avx2;
-	find_quote = find_quote_avx2;
+	pp_paste_result_classify = lex_bytes_classify_avx2;
+	lex_comment_end_find = lex_comment_end_find_avx2;
+	lex_line_end_find = lex_line_end_find_avx2;
+	lex_quote_find = lex_quote_find_avx2;
 	if (cap && !strcmp(cap, "avx2")) return;
 	if (__builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512bw") &&
 	    __builtin_cpu_supports("avx512vbmi"))
-		classify = classify_avx512;
+		pp_paste_result_classify = lex_bytes_classify_avx512;
 }
 #endif
 #endif /* host SIMD */
@@ -488,103 +488,103 @@ static void init_x86_simd(void)
 /* ---- pass 2: tokens ------------------------------------------------- */
 
 enum {
-	C_OTHER, C_WS, C_NL, C_CR, C_NUL, C_ID, C_PFX, C_DIGIT, C_PUNCT,
-	C_SQUOTE, C_DQUOTE, C_BSLASH, C_HIGH,
+	LEX_CLASS_OTHER, LEX_CLASS_WHITESPACE, LEX_CLASS_NEWLINE, LEX_CLASS_CARRIAGE_RETURN, LEX_CLASS_NUL, LEX_CLASS_IDENTIFIER, LEX_CLASS_LITERAL_PREFIX, LEX_CLASS_DIGIT, LEX_CLASS_PUNCTUATOR,
+	LEX_CLASS_SINGLE_QUOTE, LEX_CLASS_DOUBLE_QUOTE, LEX_CLASS_BACKSLASH, LEX_CLASS_HIGH_BIT,
 };
 
-static uint8_t cls[256];
-static uint8_t isid[256];
+static uint8_t lex_byte_class_table[256];
+static uint8_t lex_identifier_byte_table[256];
 
 /* fast path classes and punctuator table */
-enum { K_ID, K_NUM, K_PUNCT, K_SLOW };
-enum { PT_ALT = 1 << 11, PT_SLOW = 1 << 12 };
-static uint8_t fcls[256];
-static uint8_t pidx[256];		/* row in ptab, 0 = not a punctuator */
-static uint16_t ptab[27][256];		/* kind | len << 8 | PT_* */
-static struct { uint8_t c, kind, len; } ptab_alt[T_NKINDS];
-static uint8_t ktab[1 << 16];		/* punctuator kind by its first two bytes (LE) */
+enum { LEX_FAST_IDENTIFIER, LEX_FAST_NUMBER, LEX_FAST_PUNCTUATOR, LEX_FAST_SLOW };
+enum { LEX_PUNCTUATOR_ALTERNATIVE = 1 << 11, LEX_PUNCTUATOR_SLOW = 1 << 12 };
+static uint8_t lex_fast_class_table[256];
+static uint8_t lex_punctuator_row_table[256];		/* row in ptab, 0 = not a punctuator */
+static uint16_t lex_punctuator_table[27][256];		/* kind | len << 8 | PT_* */
+static struct { uint8_t c, kind, len; } lex_punctuator_alternative_table[LEX_TOKEN_KIND_COUNT];
+static uint8_t lex_punctuator_kind_table[1 << 16];		/* punctuator kind by its first two bytes (LE) */
 
-static void init_tables(void)
+static void lex_tables_init(void)
 {
 #if defined(__x86_64__) && !defined(VLEX_SCALAR)
-	init_x86_simd();
+	lex_simd_init_x86();
 #endif
 	for (int c = 0; c < 256; c++) {
-		uint8_t k = C_OTHER;
+		uint8_t k = LEX_CLASS_OTHER;
 
 		if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' || c == '$')
-			k = C_ID;
+			k = LEX_CLASS_IDENTIFIER;
 		if (c == 'L' || c == 'u' || c == 'U' || c == 'R')
-			k = C_PFX;
+			k = LEX_CLASS_LITERAL_PREFIX;
 		if (c >= '0' && c <= '9')
-			k = C_DIGIT;
+			k = LEX_CLASS_DIGIT;
 		if (c >= 0x80)
-			k = C_HIGH;
+			k = LEX_CLASS_HIGH_BIT;
 		if (c && strchr("[](){}.&*+-~!/%<>^|?:;=,#", c))
-			k = C_PUNCT;
-		isid[c] = k == C_ID || k == C_PFX || k == C_DIGIT;
-		cls[c] = k;
+			k = LEX_CLASS_PUNCTUATOR;
+		lex_identifier_byte_table[c] = k == LEX_CLASS_IDENTIFIER || k == LEX_CLASS_LITERAL_PREFIX || k == LEX_CLASS_DIGIT;
+		lex_byte_class_table[c] = k;
 	}
-	cls[' '] = cls['\t'] = cls['\v'] = cls['\f'] = C_WS;
-	cls['\n'] = C_NL;
-	cls['\r'] = C_CR;
-	cls[0] = C_NUL;
-	cls['\''] = C_SQUOTE;
-	cls['"'] = C_DQUOTE;
-	cls['\\'] = C_BSLASH;
+	lex_byte_class_table[' '] = lex_byte_class_table['\t'] = lex_byte_class_table['\v'] = lex_byte_class_table['\f'] = LEX_CLASS_WHITESPACE;
+	lex_byte_class_table['\n'] = LEX_CLASS_NEWLINE;
+	lex_byte_class_table['\r'] = LEX_CLASS_CARRIAGE_RETURN;
+	lex_byte_class_table[0] = LEX_CLASS_NUL;
+	lex_byte_class_table['\''] = LEX_CLASS_SINGLE_QUOTE;
+	lex_byte_class_table['"'] = LEX_CLASS_DOUBLE_QUOTE;
+	lex_byte_class_table['\\'] = LEX_CLASS_BACKSLASH;
 
 	static const char pch[] = "[](){}~?;,.&|+-*^=!#:<>%/";
 	static const struct { char a, b; uint8_t kind; } two[] = {
-		{ '&', '&', T_AMPAMP }, { '&', '=', T_AMPEQ }, { '|', '|', T_PIPEPIPE },
-		{ '|', '=', T_PIPEEQ }, { '+', '+', T_PLUSPLUS }, { '+', '=', T_PLUSEQ },
-		{ '-', '>', T_ARROW }, { '-', '-', T_MINUSMINUS }, { '-', '=', T_MINUSEQ },
-		{ '*', '=', T_STAREQ }, { '^', '=', T_CARETEQ }, { '=', '=', T_EQUALEQUAL },
-		{ '!', '=', T_EXCLAIMEQ }, { '#', '#', T_HASHHASH }, { ':', ':', T_COLONCOLON },
-		{ ':', '>', T_RSQUARE }, { '<', '<', T_LESSLESS }, { '<', '=', T_LESSEQ },
-		{ '<', ':', T_LSQUARE }, { '<', '%', T_LBRACE }, { '>', '>', T_GREATERGREATER },
-		{ '>', '=', T_GREATEREQ }, { '%', '=', T_PERCENTEQ }, { '%', '>', T_RBRACE },
-		{ '/', '=', T_SLASHEQ },
+		{ '&', '&', LEX_TOKEN_AMPERSAND_AMPERSAND }, { '&', '=', LEX_TOKEN_AMPERSAND_EQUAL }, { '|', '|', LEX_TOKEN_PIPE_PIPE },
+		{ '|', '=', LEX_TOKEN_PIPE_EQUAL }, { '+', '+', LEX_TOKEN_PLUS_PLUS }, { '+', '=', LEX_TOKEN_PLUS_EQUAL },
+		{ '-', '>', LEX_TOKEN_ARROW }, { '-', '-', LEX_TOKEN_MINUS_MINUS }, { '-', '=', LEX_TOKEN_MINUS_EQUAL },
+		{ '*', '=', LEX_TOKEN_STAR_EQUAL }, { '^', '=', LEX_TOKEN_CARET_EQUAL }, { '=', '=', LEX_TOKEN_EQUAL_EQUAL },
+		{ '!', '=', LEX_TOKEN_EXCLAMATION_EQUAL }, { '#', '#', LEX_TOKEN_HASH_HASH }, { ':', ':', LEX_TOKEN_COLON_COLON },
+		{ ':', '>', LEX_TOKEN_RIGHT_SQUARE }, { '<', '<', LEX_TOKEN_LESS_LESS }, { '<', '=', LEX_TOKEN_LESS_EQUAL },
+		{ '<', ':', LEX_TOKEN_LEFT_SQUARE }, { '<', '%', LEX_TOKEN_LEFT_BRACE }, { '>', '>', LEX_TOKEN_GREATER_GREATER },
+		{ '>', '=', LEX_TOKEN_GREATER_EQUAL }, { '%', '=', LEX_TOKEN_PERCENT_EQUAL }, { '%', '>', LEX_TOKEN_RIGHT_BRACE },
+		{ '/', '=', LEX_TOKEN_SLASH_EQUAL },
 	};
 	static const uint8_t one[] = {
-		T_LSQUARE, T_RSQUARE, T_LPAREN, T_RPAREN, T_LBRACE, T_RBRACE, T_TILDE,
-		T_QUESTION, T_SEMI, T_COMMA, T_PERIOD, T_AMP, T_PIPE, T_PLUS, T_MINUS,
-		T_STAR, T_CARET, T_EQUAL, T_EXCLAIM, T_HASH, T_COLON, T_LESS, T_GREATER,
-		T_PERCENT, T_SLASH,
+		LEX_TOKEN_LEFT_SQUARE, LEX_TOKEN_RIGHT_SQUARE, LEX_TOKEN_LEFT_PAREN, LEX_TOKEN_RIGHT_PAREN, LEX_TOKEN_LEFT_BRACE, LEX_TOKEN_RIGHT_BRACE, LEX_TOKEN_TILDE,
+		LEX_TOKEN_QUESTION, LEX_TOKEN_SEMICOLON, LEX_TOKEN_COMMA, LEX_TOKEN_PERIOD, LEX_TOKEN_AMPERSAND, LEX_TOKEN_PIPE, LEX_TOKEN_PLUS, LEX_TOKEN_MINUS,
+		LEX_TOKEN_STAR, LEX_TOKEN_CARET, LEX_TOKEN_EQUAL, LEX_TOKEN_EXCLAMATION, LEX_TOKEN_HASH, LEX_TOKEN_COLON, LEX_TOKEN_LESS, LEX_TOKEN_GREATER,
+		LEX_TOKEN_PERCENT, LEX_TOKEN_SLASH,
 	};
 
 	for (int c = 0; c < 256; c++)
-		fcls[c] = K_SLOW;
+		lex_fast_class_table[c] = LEX_FAST_SLOW;
 	for (int c = 0; c < 256; c++)
-		if (isid[c])
-			fcls[c] = c >= '0' && c <= '9' ? K_NUM : K_ID;
+		if (lex_identifier_byte_table[c])
+			lex_fast_class_table[c] = c >= '0' && c <= '9' ? LEX_FAST_NUMBER : LEX_FAST_IDENTIFIER;
 	for (int i = 0; pch[i]; i++) {
 		uint8_t c = (uint8_t)pch[i];
 
-		fcls[c] = K_PUNCT;
-		pidx[c] = (uint8_t)(i + 1);
+		lex_fast_class_table[c] = LEX_FAST_PUNCTUATOR;
+		lex_punctuator_row_table[c] = (uint8_t)(i + 1);
 		for (int d = 0; d < 256; d++)
-			ptab[i + 1][d] = (uint16_t)(one[i] | 1 << 8);
-		ptab[i + 1]['\\'] |= PT_SLOW;	/* maybe a splice */
+			lex_punctuator_table[i + 1][d] = (uint16_t)(one[i] | 1 << 8);
+		lex_punctuator_table[i + 1]['\\'] |= LEX_PUNCTUATOR_SLOW;	/* maybe a splice */
 	}
 	for (unsigned i = 0; i < sizeof(two) / sizeof(two[0]); i++)
-		ptab[pidx[(uint8_t)two[i].a]][(uint8_t)two[i].b] = (uint16_t)(two[i].kind | 2 << 8);
+		lex_punctuator_table[lex_punctuator_row_table[(uint8_t)two[i].a]][(uint8_t)two[i].b] = (uint16_t)(two[i].kind | 2 << 8);
 	/* three-character forms: decided by the third character */
-	ptab[pidx['<']]['<'] |= PT_ALT;
-	ptab_alt[T_LESSLESS].c = '=', ptab_alt[T_LESSLESS].kind = T_LESSLESSEQ, ptab_alt[T_LESSLESS].len = 3;
-	ptab[pidx['>']]['>'] |= PT_ALT;
-	ptab_alt[T_GREATERGREATER].c = '=', ptab_alt[T_GREATERGREATER].kind = T_GREATERGREATEREQ,
-		ptab_alt[T_GREATERGREATER].len = 3;
-	ptab[pidx['.']]['.'] |= PT_ALT;		/* ".." is '.' unless "..." */
-	ptab_alt[T_PERIOD].c = '.', ptab_alt[T_PERIOD].kind = T_ELLIPSIS, ptab_alt[T_PERIOD].len = 3;
+	lex_punctuator_table[lex_punctuator_row_table['<']]['<'] |= LEX_PUNCTUATOR_ALTERNATIVE;
+	lex_punctuator_alternative_table[LEX_TOKEN_LESS_LESS].c = '=', lex_punctuator_alternative_table[LEX_TOKEN_LESS_LESS].kind = LEX_TOKEN_LESS_LESS_EQUAL, lex_punctuator_alternative_table[LEX_TOKEN_LESS_LESS].len = 3;
+	lex_punctuator_table[lex_punctuator_row_table['>']]['>'] |= LEX_PUNCTUATOR_ALTERNATIVE;
+	lex_punctuator_alternative_table[LEX_TOKEN_GREATER_GREATER].c = '=', lex_punctuator_alternative_table[LEX_TOKEN_GREATER_GREATER].kind = LEX_TOKEN_GREATER_GREATER_EQUAL,
+		lex_punctuator_alternative_table[LEX_TOKEN_GREATER_GREATER].len = 3;
+	lex_punctuator_table[lex_punctuator_row_table['.']]['.'] |= LEX_PUNCTUATOR_ALTERNATIVE;		/* ".." is '.' unless "..." */
+	lex_punctuator_alternative_table[LEX_TOKEN_PERIOD].c = '.', lex_punctuator_alternative_table[LEX_TOKEN_PERIOD].kind = LEX_TOKEN_ELLIPSIS, lex_punctuator_alternative_table[LEX_TOKEN_PERIOD].len = 3;
 	/* to the handlers: comments, ".5", "%:" (maybe "%:%:") */
-	ptab[pidx['/']]['*'] |= PT_SLOW;
-	ptab[pidx['/']]['/'] |= PT_SLOW;
-	ptab[pidx['%']][':'] |= PT_SLOW;
+	lex_punctuator_table[lex_punctuator_row_table['/']]['*'] |= LEX_PUNCTUATOR_SLOW;
+	lex_punctuator_table[lex_punctuator_row_table['/']]['/'] |= LEX_PUNCTUATOR_SLOW;
+	lex_punctuator_table[lex_punctuator_row_table['%']][':'] |= LEX_PUNCTUATOR_SLOW;
 	for (int d = '0'; d <= '9'; d++)
-		ptab[pidx['.']][d] |= PT_SLOW;
+		lex_punctuator_table[lex_punctuator_row_table['.']][d] |= LEX_PUNCTUATOR_SLOW;
 	for (int c = 0; c < 256; c++)
 		for (int d = 0; d < 256; d++)
-			ktab[c | d << 8] = (uint8_t)(ptab[pidx[c]][d] & 0xff);
+			lex_punctuator_kind_table[c | d << 8] = (uint8_t)(lex_punctuator_table[lex_punctuator_row_table[c]][d] & 0xff);
 	/*
 	 * The structural loop takes every token's kind from ktab: a token
 	 * starting with an identifier character is an identifier or (digit) a
@@ -592,15 +592,15 @@ static void init_tables(void)
 	 */
 	for (int c = 0; c < 256; c++)
 		for (int d = 0; d < 256; d++) {
-			if (isid[c])
-				ktab[c | d << 8] = c >= '0' && c <= '9' ? T_NUMBER : T_IDENT;
+			if (lex_identifier_byte_table[c])
+				lex_punctuator_kind_table[c | d << 8] = c >= '0' && c <= '9' ? LEX_TOKEN_NUMBER : LEX_TOKEN_IDENTIFIER;
 			if (c == '.' && d >= '0' && d <= '9')
-				ktab[c | d << 8] = T_NUMBER;
+				lex_punctuator_kind_table[c | d << 8] = LEX_TOKEN_NUMBER;
 		}
 }
 
 /* length of the line splice ("\\", horizontal space, newline) at p, or 0 */
-static inline size_t splice_len(const char *s, size_t p)
+static inline size_t lex_splice_length(const char *s, size_t p)
 {
 	size_t q = p + 1;
 
@@ -614,28 +614,28 @@ static inline size_t splice_len(const char *s, size_t p)
 	return q + 1 + ((s[q + 1] == '\n' || s[q + 1] == '\r') && s[q + 1] != s[q]) - p;
 }
 
-static inline size_t skip_splices(const char *s, size_t p)
+static inline size_t lex_splices_skip(const char *s, size_t p)
 {
 	size_t n;
 
-	while ((n = splice_len(s, p)))
+	while ((n = lex_splice_length(s, p)))
 		p += n;
 	return p;
 }
 
 /* position of the logical character after the one at p */
-static inline size_t nx(const char *s, size_t p)
+static inline size_t lex_character_next(const char *s, size_t p)
 {
 	p++;
 	if (unlikely(s[p] == '\\'))
-		p = skip_splices(s, p);
+		p = lex_splices_skip(s, p);
 	return p;
 }
 
-static size_t utf8_len(const uint8_t *s);
+static size_t lex_utf8_length(const uint8_t *s);
 
 /* C11 annex D: characters allowed in identifiers */
-static bool c11_id(uint32_t c, bool first)
+static bool lex_character_is_c11_identifier(uint32_t c, bool first)
 {
 	static const uint32_t r[][2] = {
 		{ 0xa8, 0xa8 }, { 0xaa, 0xaa }, { 0xad, 0xad }, { 0xaf, 0xaf },
@@ -661,7 +661,7 @@ static bool c11_id(uint32_t c, bool first)
 	return false;
 }
 
-static inline int hexval(uint8_t c)
+static inline int lex_hex_digit_value(uint8_t c)
 {
 	if (c >= '0' && c <= '9')
 		return c - '0';
@@ -673,7 +673,7 @@ static inline int hexval(uint8_t c)
  * Length of an identifier character outside ASCII at p: a UCN (\uXXXX,
  * \UXXXXXXXX) or a UTF-8 sequence for an allowed code point; else 0.
  */
-static size_t ext_id(const char *s, size_t p, bool first)
+static size_t lex_identifier_extended_length(const char *s, size_t p, bool first)
 {
 	const uint8_t *u = (const uint8_t *)s + p;
 	uint32_t c = 0;
@@ -684,7 +684,7 @@ static size_t ext_id(const char *s, size_t p, bool first)
 		if (!n)
 			return 0;
 		for (size_t i = 0; i < n; i++) {
-			int h = hexval(u[2 + i]);
+			int h = lex_hex_digit_value(u[2 + i]);
 
 			if (h < 0)
 				return 0;
@@ -692,7 +692,7 @@ static size_t ext_id(const char *s, size_t p, bool first)
 		}
 		n += 2;
 	} else if (u[0] >= 0x80) {
-		n = utf8_len(u);
+		n = lex_utf8_length(u);
 		if (n == 1)
 			return 0;
 		c = n == 2 ? u[0] & 0x1f : n == 3 ? u[0] & 0x0f : u[0] & 0x07;
@@ -701,35 +701,35 @@ static size_t ext_id(const char *s, size_t p, bool first)
 	} else {
 		return 0;
 	}
-	return c11_id(c, first) ? n : 0;
+	return lex_character_is_c11_identifier(c, first) ? n : 0;
 }
 
-static inline bool is_exp(char c)
+static inline bool lex_character_is_exponent(char c)
 {
 	return c == 'e' || c == 'E' || c == 'p' || c == 'P';
 }
 
 /* end of a pp-number whose first character ends before p */
-static inline size_t idrun(const char *s, size_t p)
+static inline size_t lex_number_run_end(const char *s, size_t p)
 {
-	while (isid[(uint8_t)s[p]])
+	while (lex_identifier_byte_table[(uint8_t)s[p]])
 		p++;
 	return p;
 }
 
-static size_t number_end(const char *s, size_t p, unsigned *fl)
+static size_t lex_number_end(const char *s, size_t p, unsigned *fl)
 {
 	for (;;) {
 		char c;
 
-		p = idrun(s, p);
+		p = lex_number_run_end(s, p);
 		c = s[p];
-		if (c == '.' || ((c == '+' || c == '-') && is_exp(s[p - 1]))) {
+		if (c == '.' || ((c == '+' || c == '-') && lex_character_is_exponent(s[p - 1]))) {
 			p++;
 			continue;
 		}
-		if (unlikely((uint8_t)c >= 0x80 || (c == '\\' && ext_id(s, p, false)))) {
-			size_t l = ext_id(s, p, false);
+		if (unlikely((uint8_t)c >= 0x80 || (c == '\\' && lex_identifier_extended_length(s, p, false)))) {
+			size_t l = lex_identifier_extended_length(s, p, false);
 
 			if (l) {
 				p += l;
@@ -737,19 +737,19 @@ static size_t number_end(const char *s, size_t p, unsigned *fl)
 			}
 		}
 		if (unlikely(c == '\\')) {
-			size_t q = skip_splices(s, p);
+			size_t q = lex_splices_skip(s, p);
 			char d = s[q];
 
 			size_t l;
 
-			if (q != p && (isid[(uint8_t)d] || d == '.' ||
-				       ((d == '+' || d == '-') && is_exp(s[p - 1])))) {
-				*fl |= TF_DIRTY;
+			if (q != p && (lex_identifier_byte_table[(uint8_t)d] || d == '.' ||
+				       ((d == '+' || d == '-') && lex_character_is_exponent(s[p - 1])))) {
+				*fl |= LEX_TOKEN_FLAG_SPLICED;
 				p = q + 1;
 				continue;
 			}
-			if (q != p && (l = ext_id(s, q, false))) {
-				*fl |= TF_DIRTY;
+			if (q != p && (l = lex_identifier_extended_length(s, q, false))) {
+				*fl |= LEX_TOKEN_FLAG_SPLICED;
 				p = q + l;
 				continue;
 			}
@@ -758,19 +758,19 @@ static size_t number_end(const char *s, size_t p, unsigned *fl)
 	}
 }
 
-static inline size_t ident_end(const char *s, size_t p, unsigned *fl)
+static inline size_t lex_identifier_end(const char *s, size_t p, unsigned *fl)
 {
-	p = idrun(s, p);
+	p = lex_number_run_end(s, p);
 	while (unlikely(s[p] == '\\' || (uint8_t)s[p] >= 0x80)) {
-		size_t q = skip_splices(s, p), l;
+		size_t q = lex_splices_skip(s, p), l;
 
-		if (q != p && isid[(uint8_t)s[q]]) {
-			*fl |= TF_DIRTY;
-			p = idrun(s, q);
-		} else if ((l = ext_id(s, q, false))) {
+		if (q != p && lex_identifier_byte_table[(uint8_t)s[q]]) {
+			*fl |= LEX_TOKEN_FLAG_SPLICED;
+			p = lex_number_run_end(s, q);
+		} else if ((l = lex_identifier_extended_length(s, q, false))) {
 			if (q != p)
-				*fl |= TF_DIRTY;
-			p = idrun(s, q + l);
+				*fl |= LEX_TOKEN_FLAG_SPLICED;
+			p = lex_number_run_end(s, q + l);
 		} else {
 			break;
 		}
@@ -782,27 +782,27 @@ static inline size_t ident_end(const char *s, size_t p, unsigned *fl)
  * Character or string literal; p is at the opening quote.  Returns the end,
  * or 0 if it is unterminated (the caller makes an unknown token up to *end).
  */
-static size_t quoted_end(const char *s, size_t n, size_t p, uint8_t q, unsigned *fl, size_t *bad)
+static size_t lex_quoted_end(const char *s, size_t n, size_t p, uint8_t q, unsigned *fl, size_t *bad)
 {
 	for (p++;;) {
 		uint8_t c;
 
-		p = find_quote(s, p, q);
+		p = lex_quote_find(s, p, q);
 		c = s[p];
 		if (c == q)
 			return p + 1;
 		if (c == '\\') {
-			size_t l = splice_len(s, p);
+			size_t l = lex_splice_length(s, p);
 
 			if (l) {
-				*fl |= TF_DIRTY;
+				*fl |= LEX_TOKEN_FLAG_SPLICED;
 				p += l;
 				continue;
 			}
 			/* escape: skip the next logical character */
-			l = skip_splices(s, p + 1);
+			l = lex_splices_skip(s, p + 1);
 			if (l != p + 1)
-				*fl |= TF_DIRTY;
+				*fl |= LEX_TOKEN_FLAG_SPLICED;
 			if (s[l] == '\n' || s[l] == '\r' || l >= n) {
 				*bad = l;
 				return 0;
@@ -818,17 +818,17 @@ static size_t quoted_end(const char *s, size_t n, size_t p, uint8_t q, unsigned 
 	}
 }
 
-static inline bool raw_delim_char(uint8_t c)
+static inline bool lex_character_is_raw_delimiter(uint8_t c)
 {
 	return c > ' ' && c < 0x7f && c != '(' && c != ')' && c != '\\';
 }
 
 /* raw string literal; p is at the '"'.  0 if invalid (*bad = end) */
-static size_t raw_end(const char *s, size_t n, size_t p, size_t *bad)
+static size_t lex_raw_string_end(const char *s, size_t n, size_t p, size_t *bad)
 {
 	size_t d = p + 1, dl = 0, i;
 
-	while (dl < 16 && raw_delim_char(s[d + dl]))
+	while (dl < 16 && lex_character_is_raw_delimiter(s[d + dl]))
 		dl++;
 	if (s[d + dl] != '(') {
 		for (i = d; i < n && s[i] != '"'; i++)
@@ -845,7 +845,7 @@ static size_t raw_end(const char *s, size_t n, size_t p, size_t *bad)
 }
 
 /* length of the UTF-8 sequence at p (1 if invalid) */
-static size_t utf8_len(const uint8_t *s)
+static size_t lex_utf8_length(const uint8_t *s)
 {
 	if (s[0] >= 0xc2 && s[0] <= 0xdf && (s[1] & 0xc0) == 0x80)
 		return 2;
@@ -857,21 +857,21 @@ static size_t utf8_len(const uint8_t *s)
 	return 1;
 }
 
-size_t vlex_scratch_size(size_t size)
+size_t lex_scratch_size(size_t size)
 {
 	/* four masks (with two spare words) and the identifier list */
-	return M_COUNT * (size / 64 + 3) * sizeof(uint64_t) + (size + 2) * sizeof(uint32_t);
+	return LEX_MASK_COUNT * (size / 64 + 3) * sizeof(uint64_t) + (size + 2) * sizeof(uint32_t);
 }
 
-_Thread_local int vlex_no_intern;
-static pthread_once_t tables_once = PTHREAD_ONCE_INIT;
+_Thread_local int lex_identifiers_not_interned;
+static pthread_once_t lex_tables_once = PTHREAD_ONCE_INIT;
 
 /*
  * Mask bits from position p: one unaligned load at byte p / 8, so only the
  * low 64 - p % 8 bits are valid, the rest are zero (m[(p >> 6) + 1] must
  * exist).
  */
-static inline uint64_t win(const uint64_t *m, size_t p)
+static inline uint64_t lex_mask_window(const uint64_t *m, size_t p)
 {
 	uint64_t x;
 
@@ -884,30 +884,30 @@ static inline uint64_t win(const uint64_t *m, size_t p)
  * a quote (perhaps after splices) follows.  Returns the end of the literal
  * and sets *kind, or 0 if st..p is not a prefix (it is an identifier).
  */
-static __attribute__((noinline)) size_t prefixed(const char *s, size_t n, size_t st, size_t p,
+static __attribute__((noinline)) size_t lex_literal_prefixed_end(const char *s, size_t n, size_t st, size_t p,
 						 unsigned *fl, unsigned *kind)
 {
 	static const struct { char s[4]; uint8_t sq, dq; } pf[] = {
-		{ "L", T_WCHAR, T_WSTRING }, { "u", T_U16CHAR, T_U16STRING },
-		{ "U", T_U32CHAR, T_U32STRING }, { "u8", 0, T_U8STRING },
-		{ "R", 0, T_STRING }, { "LR", 0, T_WSTRING },
-		{ "uR", 0, T_U16STRING }, { "UR", 0, T_U32STRING },
-		{ "u8R", 0, T_U8STRING },
+		{ "L", LEX_TOKEN_WIDE_CHARACTER, LEX_TOKEN_WIDE_STRING }, { "u", LEX_TOKEN_UTF16_CHARACTER, LEX_TOKEN_UTF16_STRING },
+		{ "U", LEX_TOKEN_UTF32_CHARACTER, LEX_TOKEN_UTF32_STRING }, { "u8", 0, LEX_TOKEN_UTF8_STRING },
+		{ "R", 0, LEX_TOKEN_STRING }, { "LR", 0, LEX_TOKEN_WIDE_STRING },
+		{ "uR", 0, LEX_TOKEN_UTF16_STRING }, { "UR", 0, LEX_TOKEN_UTF32_STRING },
+		{ "u8R", 0, LEX_TOKEN_UTF8_STRING },
 	};
-	size_t q = s[p] == '\\' ? skip_splices(s, p) : p, l = 0, a, b, bad;
+	size_t q = s[p] == '\\' ? lex_splices_skip(s, p) : p, l = 0, a, b, bad;
 	uint8_t qc = (uint8_t)s[q];
 	char pre[8];
 
 	if (qc != '"' && qc != '\'')
 		return 0;
-	if (p - st <= 3 && !(*fl & TF_DIRTY)) {
+	if (p - st <= 3 && !(*fl & LEX_TOKEN_FLAG_SPLICED)) {
 		memcpy(pre, s + st, p - st);
 		l = p - st;
 	} else if (p - st < 64) {
 		char tmp[64];
-		vtok tt = { .off = (uint32_t)st, .len = (uint32_t)(p - st), .flags = TF_DIRTY };
+		lex_token tt = { .off = (uint32_t)st, .len = (uint32_t)(p - st), .flags = LEX_TOKEN_FLAG_SPLICED };
 
-		l = vlex_spell(s, &tt, tmp);
+		l = lex_token_spell(s, &tt, tmp);
 		if (l <= 3)
 			memcpy(pre, tmp, l);
 		else
@@ -917,29 +917,29 @@ static __attribute__((noinline)) size_t prefixed(const char *s, size_t n, size_t
 		if (strlen(pf[i].s) != l || memcmp(pf[i].s, pre, l))
 			continue;
 		if (qc == '"' && pre[l - 1] == 'R') {
-			a = raw_end(s, n, q, &bad);
+			a = lex_raw_string_end(s, n, q, &bad);
 			*kind = pf[i].dq;
 			if (a)
-				*fl |= TF_RAW;
+				*fl |= LEX_TOKEN_FLAG_RAW_STRING;
 		} else if (qc == '"') {
-			a = quoted_end(s, n, q, '"', fl, &bad);
+			a = lex_quoted_end(s, n, q, '"', fl, &bad);
 			*kind = pf[i].dq;
 		} else if (pf[i].sq) {
-			b = nx(s, q);
+			b = lex_character_next(s, q);
 			if (s[b] == '\'') {
 				a = 0;
 				bad = b + 1;
 			} else {
-				a = quoted_end(s, n, q, '\'', fl, &bad);
+				a = lex_quoted_end(s, n, q, '\'', fl, &bad);
 			}
 			*kind = pf[i].sq;
 		} else {
 			return 0;
 		}
 		if (q != p)
-			*fl |= TF_DIRTY;
+			*fl |= LEX_TOKEN_FLAG_SPLICED;
 		if (!a) {
-			*kind = T_UNKNOWN;
+			*kind = LEX_TOKEN_UNKNOWN;
 			a = bad;
 		}
 		return a;
@@ -948,11 +948,11 @@ static __attribute__((noinline)) size_t prefixed(const char *s, size_t n, size_t
 }
 
 /* an identifier with a splice in it: intern its cleaned spelling */
-static __attribute__((noinline)) uint32_t intern_dirty(const char *s, size_t st, size_t p)
+static __attribute__((noinline)) uint32_t lex_identifier_dirty_intern(const char *s, size_t st, size_t p)
 {
 	char tmp[4096];
-	vtok tt = { .off = (uint32_t)st, .len = (uint32_t)(p - st), .flags = TF_DIRTY };
-	size_t l = p - st < sizeof(tmp) ? vlex_spell(s, &tt, tmp) : 0;
+	lex_token tt = { .off = (uint32_t)st, .len = (uint32_t)(p - st), .flags = LEX_TOKEN_FLAG_SPLICED };
+	size_t l = p - st < sizeof(tmp) ? lex_token_spell(s, &tt, tmp) : 0;
 
 	return vintern_copy(tmp, l);
 }
@@ -961,11 +961,11 @@ static __attribute__((noinline)) uint32_t intern_dirty(const char *s, size_t st,
  * intern the identifiers il[0..ni): their token addresses truncated to 32
  * bits, taken relative to out (a loop of its own: registers)
  */
-static __attribute__((noinline)) void intern_list(vintern_cache *ic, const char *s, vtok *out,
+static __attribute__((noinline)) void lex_identifiers_intern(vintern_cache *ic, const char *s, lex_token *out,
 						  const uint32_t *il, uint32_t ni)
 {
 	for (uint32_t i = 0; i < ni; i++) {
-		vtok *k = (vtok *)((char *)out + (uint32_t)(il[i] - (uint32_t)(uintptr_t)out));
+		lex_token *k = (lex_token *)((char *)out + (uint32_t)(il[i] - (uint32_t)(uintptr_t)out));
 
 		k->id = vintern_fast(ic, s + k->off, k->len);
 	}
@@ -975,23 +975,23 @@ static __attribute__((noinline)) void intern_list(vintern_cache *ic, const char 
  * Classify blocks [from, to) clamped to the file's nblk blocks; the block
  * holding the end gets nothing but X past it.  Returns the new end.
  */
-static size_t classify_upto(const char *s, size_t n, size_t nblk, size_t from, size_t to,
-			    uint64_t *m[M_COUNT])
+static size_t lex_blocks_classify(const char *s, size_t n, size_t nblk, size_t from, size_t to,
+			    uint64_t *m[LEX_MASK_COUNT])
 {
 	if (to > nblk)
 		to = nblk;
-	classify((const uint8_t *)s, from, to, m);
+	pp_paste_result_classify((const uint8_t *)s, from, to, m);
 	if (from <= (n >> 6) && (n >> 6) < to) {
-		for (int j = 0; j < M_COUNT; j++)
-			if (j != M_X)
+		for (int j = 0; j < LEX_MASK_COUNT; j++)
+			if (j != LEX_MASK_HANDLER)
 				m[j][n >> 6] &= ~(~0ull << (n & 63));
-		m[M_X][n >> 6] |= ~0ull << (n & 63);
+		m[LEX_MASK_HANDLER][n >> 6] |= ~0ull << (n & 63);
 	}
 	return to == nblk ? (size_t)-1 >> 1 : to;
 }
 
 /* a token with a splice before its first character starts at the splice */
-#define FLAGS() ((uint8_t)(fl | (gap != st ? TF_DIRTY : 0)))
+#define FLAGS() ((uint8_t)(fl | (gap != st ? LEX_TOKEN_FLAG_SPLICED : 0)))
 
 #define DISPATCH() do { STAT((uint8_t)s[p]); goto *disp[(uint8_t)s[st = p]]; } while (0)
 
@@ -1000,7 +1000,7 @@ unsigned long vlex_stat[512];
 #define STAT(i) (vlex_stat[i]++)
 #define STAT_T0() uint64_t t0_ = __builtin_readcyclecounter()
 #define STAT_T1(i) (vlex_stat[i] += __builtin_readcyclecounter() - t0_)
-__attribute__((destructor)) static void stat_dump(void)
+__attribute__((destructor)) static void lex_statistics_dump(void)
 {
 	fprintf(stderr, "intern: lookups %lu local-miss %lu long %lu global-ticks %lu\n",
 		vlex_stat[310], vlex_stat[311], vlex_stat[312], vlex_stat[321]);
@@ -1030,24 +1030,24 @@ __attribute__((destructor)) static void stat_dump(void)
 #define PUNCT(k, K, e) do {						\
 	p = (e);							\
 	if (unlikely(p - st != (k)))					\
-		fl |= TF_DIRTY;						\
+		fl |= LEX_TOKEN_FLAG_SPLICED;						\
 	EMIT(K);							\
 } while (0)
 
 /* identifier body: the first character ends before p */
 #define IDENT_REST() do {						\
-	p = idrun(s, p);						\
+	p = lex_number_run_end(s, p);						\
 	if (unlikely(s[p] == '\\' || (uint8_t)s[p] >= 0x80))		\
-		p = ident_end(s, p, &fl);				\
+		p = lex_identifier_end(s, p, &fl);				\
 } while (0)
 
 /* clean identifiers are interned after the token loop, see il[] */
 #define EMIT_IDENT() do {						\
 	uint32_t i_ = 0;						\
-	if (unlikely(vlex_no_intern))					\
+	if (unlikely(lex_identifiers_not_interned))					\
 		;							\
-	else if (fl & TF_DIRTY)						\
-		i_ = intern_dirty(s, st, p);				\
+	else if (fl & LEX_TOKEN_FLAG_SPLICED)						\
+		i_ = lex_identifier_dirty_intern(s, st, p);				\
 	else if (gap == st)						\
 		il[ni++] = (uint32_t)(uintptr_t)t;			\
 	else								\
@@ -1055,7 +1055,7 @@ __attribute__((destructor)) static void stat_dump(void)
 	t->off = (uint32_t)gap;						\
 	t->len = (uint32_t)(p - gap);					\
 	t->id = i_;							\
-	t->kind = T_IDENT;						\
+	t->kind = LEX_TOKEN_IDENTIFIER;						\
 	t->flags = FLAGS();						\
 	t++;								\
 	fl = 0;								\
@@ -1063,15 +1063,15 @@ __attribute__((destructor)) static void stat_dump(void)
 	NEXT();								\
 } while (0)
 
-static uint32_t lex_mode(const char *s, size_t n, vtok *out, void *scratch, bool digraphs)
+static uint32_t lex_tokenize_mode(const char *s, size_t n, lex_token *out, void *lex_scratch, bool digraphs)
 {
 	static const void *disp[256];
 	size_t nb = n / 64 + 3, nblk = n / 64 + 1, p = 0, st = 0, q, a, b, bad;
-	uint64_t *m[M_COUNT];
-	uint32_t *il = (uint32_t *)((uint64_t *)scratch + M_COUNT * nb), ni = 0;
-	unsigned fl = TF_SOL, kind;
+	uint64_t *m[LEX_MASK_COUNT];
+	uint32_t *il = (uint32_t *)((uint64_t *)lex_scratch + LEX_MASK_COUNT * nb), ni = 0;
+	unsigned fl = LEX_TOKEN_FLAG_LINE_START, kind;
 	vintern_cache *ic = vintern_local();
-	vtok *t = out;
+	lex_token *t = out;
 	/*
 	 * end of the last whitespace, comment or token: a token directly after
 	 * a line splice starts at the splice, as in clang (it matters for
@@ -1104,10 +1104,10 @@ static uint32_t lex_mode(const char *s, size_t n, vtok *out, void *scratch, bool
 		 * thread is already lexing with the table.
 		 */
 		if (!atomic_load_explicit((_Atomic(const void *) *)&disp[0], memory_order_relaxed)) {
-			pthread_once(&tables_once, init_tables);
-			init_struct_tables();
+			pthread_once(&lex_tables_once, lex_tables_init);
+			lex_structure_tables_init();
 			for (int c = 1; c < 256; c++)
-				disp[c] = c >= 0x80 ? &&l_high : isid[c] ? &&l_ident : &&l_other;
+				disp[c] = c >= 0x80 ? &&l_high : lex_identifier_byte_table[c] ? &&l_ident : &&l_other;
 			for (unsigned i = 0; i < sizeof(map) / sizeof(map[0]); i++)
 				for (const char *c = map[i].chars; *c; c++)
 					disp[(uint8_t)*c] = map[i].label;
@@ -1116,8 +1116,8 @@ static uint32_t lex_mode(const char *s, size_t n, vtok *out, void *scratch, bool
 		pthread_mutex_unlock(&lock);
 	}
 
-	for (int i = 0; i < M_COUNT; i++)
-		m[i] = (uint64_t *)scratch + i * nb;
+	for (int i = 0; i < LEX_MASK_COUNT; i++)
+		m[i] = (uint64_t *)lex_scratch + i * nb;
 	/*
 	 * Masks are computed lazily, CHUNK blocks ahead of the window, so the
 	 * bytes of comments (a third of kernel headers) are never classified:
@@ -1128,17 +1128,17 @@ static uint32_t lex_mode(const char *s, size_t n, vtok *out, void *scratch, bool
 #define ENSURE(w) do {							\
 	if (unlikely((w) >= cl_end)) {					\
 		size_t f_ = (w) - 1 > cl_end && (w) > 0 ? (w) - 1 : cl_end;	\
-		cl_end = classify_upto(s, n, nblk, f_, f_ + CHUNK, m);	\
+		cl_end = lex_blocks_classify(s, n, nblk, f_, f_ + CHUNK, m);	\
 	}								\
 } while (0)
 
-	if (unlikely(vlex_no_intern == 2)) {
-		classify_upto(s, n, nblk, 0, nb, m);
+	if (unlikely(lex_identifiers_not_interned == 2)) {
+		lex_blocks_classify(s, n, nblk, 0, nb, m);
 		return 0;
 	}
 	for (size_t i = nblk; i < nb; i++)
-		for (int j = 0; j < M_COUNT; j++)
-			m[j][i] = j == M_X ? ~0ull : 0;
+		for (int j = 0; j < LEX_MASK_COUNT; j++)
+			m[j][i] = j == LEX_MASK_HANDLER ? ~0ull : 0;
 
 	/*
 	 * Structural pass over 64-byte windows: every token start in the
@@ -1156,21 +1156,21 @@ fast:
 	ENSURE((p >> 6) + 1);
 	{
 		/* N: [A-Za-z0-9_$.], P: punctuator characters and '.' */
-		const uint64_t N = win(m[M_ID], p), W = win(m[M_WS], p), NL = win(m[M_NL], p);
-		const uint64_t D = win(m[M_DIG], p), P = win(m[M_P], p), DOT = N & P;
-		const uint64_t PR = win(m[M_PAIR], p);
+		const uint64_t N = lex_mask_window(m[LEX_MASK_IDENTIFIER], p), W = lex_mask_window(m[LEX_MASK_WHITESPACE], p), NL = lex_mask_window(m[LEX_MASK_NEWLINE], p);
+		const uint64_t D = lex_mask_window(m[LEX_MASK_DIGIT], p), P = lex_mask_window(m[LEX_MASK_PREFIX], p), DOT = N & P;
+		const uint64_t PR = lex_mask_window(m[LEX_MASK_PAIR], p);
 		/* the bits past the valid ones are an X: the window is 57..64 bytes */
 		const unsigned valid = 64 - (unsigned)(p & 7);
-		uint64_t X = win(m[M_X], p) | ~(~0ull >> (p & 7));
+		uint64_t X = lex_mask_window(m[LEX_MASK_HANDLER], p) | ~(~0ull >> (p & 7));
 		/* pp-numbers: from a digit starting a run of [A-Za-z0-9_$.], or
 		 * from a '.' before a digit, to the end of that run */
 		const uint64_t A = (D & ~(N << 1)) | (DOT & (D >> 1));
 		const uint64_t NUM = (N & ~(N + A)) | A;
 		const uint64_t IDp = N & ~(NUM | P);
-		const uint64_t NS = win(m[M_NS], p);
+		const uint64_t NS = lex_mask_window(m[LEX_MASK_SIGN_NEXT], p);
 
 		/*
-		 * Left to the handlers (besides the X of classify(), which has
+		 * Left to the handlers (besides the X of pp_paste_result_classify(), which has
 		 * every ".." with ellipses, "..5" and "..\<newline>."):
 		 * overlapping pairs (<<=, ->=) and a number before + or -: in
 		 * 1e+5 the sign belongs to it (numbers before a sign are rare).
@@ -1184,7 +1184,7 @@ fast:
 		const uint64_t NLF = (W & ~(W + NL)) | NL;
 		const uint64_t SP = W << 1, SOL = NLF << 1;
 		const unsigned lim = X ? (unsigned)__builtin_ctzll(X) : 64;	/* <= valid */
-		const uint8_t *kt = ktab;
+		const uint8_t *kt = lex_punctuator_kind_table;
 
 		__asm__("" : "+r"(kt));	/* in a register, not rematerialized per token */
 		/*
@@ -1195,7 +1195,7 @@ fast:
 		uint64_t rs = __builtin_bitreverse64(S);
 		uint64_t re = __builtin_bitreverse64(B & ~((W << 1) | 1));
 		unsigned pend = fl;
-		vtok *const t0 = t;
+		lex_token *const t0 = t;
 
 		/*
 		 * No test of rs: when the starts run out, the next end is at
@@ -1209,7 +1209,7 @@ fast:
 
 			const unsigned o = (unsigned)__builtin_clzll(rs);
 			const size_t at = p + o;
-			const unsigned f = ((SP >> o) & 1) * TF_SPACE | ((SOL >> o) & 1) * TF_SOL;
+			const unsigned f = ((SP >> o) & 1) * LEX_TOKEN_FLAG_SPACE_BEFORE | ((SOL >> o) & 1) * LEX_TOKEN_FLAG_LINE_START;
 			uint16_t c01;
 
 			memcpy(&c01, s + at, 2);
@@ -1221,10 +1221,10 @@ fast:
 			t->kind = (uint8_t)kind;
 			t->flags = (uint8_t)(f | pend);
 			pend = 0;
-			/* see intern_list(); the asm keeps the compiler from a second induction variable */
+			/* see lex_identifiers_intern(); the asm keeps the compiler from a second induction variable */
 			__asm__("" : "+r"(t));
 			il[ni] = (uint32_t)(uintptr_t)t;
-			ni += kind == T_IDENT;
+			ni += kind == LEX_TOKEN_IDENTIFIER;
 			t++;
 			rs ^= (1ull << 63) >> o;
 			re ^= (1ull << 63) >> e;
@@ -1240,7 +1240,7 @@ fast:
 			 */
 			if (lim < valid && !(~W & (~0ull << last) & ~(~0ull << lim))) {
 				if (lim > last)
-					fl |= TF_SPACE | (NL & (~0ull << last) & ~(~0ull << lim) ? TF_SOL : 0);
+					fl |= LEX_TOKEN_FLAG_SPACE_BEFORE | (NL & (~0ull << last) & ~(~0ull << lim) ? LEX_TOKEN_FLAG_LINE_START : 0);
 				p = gap = p + lim;
 				DISPATCH();
 			}
@@ -1251,7 +1251,7 @@ fast:
 			/* the first token needs a handler (or is longer than the window) */
 			const unsigned o = (unsigned)__builtin_ctzll(S);
 
-			fl |= ((SP >> o) & 1) * TF_SPACE | ((SOL >> o) & 1) * TF_SOL;
+			fl |= ((SP >> o) & 1) * LEX_TOKEN_FLAG_SPACE_BEFORE | ((SOL >> o) & 1) * LEX_TOKEN_FLAG_LINE_START;
 			p = gap = p + o;
 			DISPATCH();
 		}
@@ -1260,7 +1260,7 @@ fast:
 			const unsigned o = ~W ? (unsigned)__builtin_ctzll(~W) : 64;	/* <= valid */
 
 			if (o) {
-				fl |= TF_SPACE | (NL & (o == 64 ? ~0ull : (1ull << o) - 1) ? TF_SOL : 0);
+				fl |= LEX_TOKEN_FLAG_SPACE_BEFORE | (NL & (o == 64 ? ~0ull : (1ull << o) - 1) ? LEX_TOKEN_FLAG_LINE_START : 0);
 				p = gap = p + o;
 			}
 			if (o >= valid)
@@ -1277,195 +1277,195 @@ l_prefix:
 	p++;
 	IDENT_REST();
 	if (unlikely(s[p] == '"' || s[p] == '\'' || s[p] == '\\') &&
-	    (q = prefixed(s, n, st, p, &fl, &kind))) {
+	    (q = lex_literal_prefixed_end(s, n, st, p, &fl, &kind))) {
 		p = q;
 		EMIT(kind);
 	}
 	EMIT_IDENT();
 l_digit:
-	p = number_end(s, p + 1, &fl);
-	EMIT(T_NUMBER);
+	p = lex_number_end(s, p + 1, &fl);
+	EMIT(LEX_TOKEN_NUMBER);
 l_space:	/* only after a NUL or a splice the masks did not cover */
-	fl |= TF_SPACE | (s[p] == '\n' || s[p] == '\r' ? TF_SOL : 0);
+	fl |= LEX_TOKEN_FLAG_SPACE_BEFORE | (s[p] == '\n' || s[p] == '\r' ? LEX_TOKEN_FLAG_LINE_START : 0);
 	gap = ++p;
 	NEXT();
 l_nul:
 	if (p >= n)
 		goto done;
 	gap = ++p;
-	fl |= TF_SPACE;
+	fl |= LEX_TOKEN_FLAG_SPACE_BEFORE;
 	NEXT();
 l_bslash:
-	if ((q = splice_len(s, p))) {
+	if ((q = lex_splice_length(s, p))) {
 		p += q;
 		NEXT();
 	}
-	if ((q = ext_id(s, p, true))) {
-		p = ident_end(s, p + q, &fl);
+	if ((q = lex_identifier_extended_length(s, p, true))) {
+		p = lex_identifier_end(s, p + q, &fl);
 		EMIT_IDENT();
 	}
 	/* a well-formed UCN that may not start an identifier */
 	q = s[p + 1] == 'u' ? 4 : s[p + 1] == 'U' ? 8 : 0;
-	for (a = 0; a < q && hexval((uint8_t)s[p + 2 + a]) >= 0; a++)
+	for (a = 0; a < q && lex_hex_digit_value((uint8_t)s[p + 2 + a]) >= 0; a++)
 		;
 	p += q && a == q ? q + 2 : 1;
-	EMIT(T_UNKNOWN);
+	EMIT(LEX_TOKEN_UNKNOWN);
 l_dquote:
-	q = quoted_end(s, n, p, '"', &fl, &bad);
-	kind = T_STRING;
+	q = lex_quoted_end(s, n, p, '"', &fl, &bad);
+	kind = LEX_TOKEN_STRING;
 	goto lit;
 l_squote:
-	if (s[a = nx(s, p)] == '\'') {
+	if (s[a = lex_character_next(s, p)] == '\'') {
 		q = 0;
 		bad = a + 1;
 		if (a != p + 1)
-			fl |= TF_DIRTY;
+			fl |= LEX_TOKEN_FLAG_SPLICED;
 	} else {
-		q = quoted_end(s, n, p, '\'', &fl, &bad);
+		q = lex_quoted_end(s, n, p, '\'', &fl, &bad);
 	}
-	kind = T_CHAR;
+	kind = LEX_TOKEN_CHARACTER;
 lit:
 	if (q) {
 		p = q;
 		EMIT(kind);
 	}
 	p = bad;
-	EMIT(T_UNKNOWN);
+	EMIT(LEX_TOKEN_UNKNOWN);
 l_high:
-	if ((q = ext_id(s, p, true))) {
-		p = ident_end(s, p + q, &fl);
+	if ((q = lex_identifier_extended_length(s, p, true))) {
+		p = lex_identifier_end(s, p + q, &fl);
 		EMIT_IDENT();
 	}
-	p += utf8_len((const uint8_t *)s + p);
-	EMIT(T_UNKNOWN);
+	p += lex_utf8_length((const uint8_t *)s + p);
+	EMIT(LEX_TOKEN_UNKNOWN);
 l_other:
 	p++;
-	EMIT(T_UNKNOWN);
+	EMIT(LEX_TOKEN_UNKNOWN);
 
-l_lsquare:	PUNCT(1, T_LSQUARE, p + 1);
-l_rsquare:	PUNCT(1, T_RSQUARE, p + 1);
-l_lparen:	PUNCT(1, T_LPAREN, p + 1);
-l_rparen:	PUNCT(1, T_RPAREN, p + 1);
-l_lbrace:	PUNCT(1, T_LBRACE, p + 1);
-l_rbrace:	PUNCT(1, T_RBRACE, p + 1);
-l_tilde:	PUNCT(1, T_TILDE, p + 1);
-l_question:	PUNCT(1, T_QUESTION, p + 1);
-l_semi:		PUNCT(1, T_SEMI, p + 1);
-l_comma:	PUNCT(1, T_COMMA, p + 1);
+l_lsquare:	PUNCT(1, LEX_TOKEN_LEFT_SQUARE, p + 1);
+l_rsquare:	PUNCT(1, LEX_TOKEN_RIGHT_SQUARE, p + 1);
+l_lparen:	PUNCT(1, LEX_TOKEN_LEFT_PAREN, p + 1);
+l_rparen:	PUNCT(1, LEX_TOKEN_RIGHT_PAREN, p + 1);
+l_lbrace:	PUNCT(1, LEX_TOKEN_LEFT_BRACE, p + 1);
+l_rbrace:	PUNCT(1, LEX_TOKEN_RIGHT_BRACE, p + 1);
+l_tilde:	PUNCT(1, LEX_TOKEN_TILDE, p + 1);
+l_question:	PUNCT(1, LEX_TOKEN_QUESTION, p + 1);
+l_semi:		PUNCT(1, LEX_TOKEN_SEMICOLON, p + 1);
+l_comma:	PUNCT(1, LEX_TOKEN_COMMA, p + 1);
 l_period:
-	a = nx(s, p);
+	a = lex_character_next(s, p);
 	if (s[a] >= '0' && s[a] <= '9') {
 		if (a != p + 1)
-			fl |= TF_DIRTY;
-		p = number_end(s, a + 1, &fl);
-		EMIT(T_NUMBER);
+			fl |= LEX_TOKEN_FLAG_SPLICED;
+		p = lex_number_end(s, a + 1, &fl);
+		EMIT(LEX_TOKEN_NUMBER);
 	}
-	if (s[a] == '.' && s[b = nx(s, a)] == '.')
-		PUNCT(3, T_ELLIPSIS, b + 1);
-	PUNCT(1, T_PERIOD, p + 1);
+	if (s[a] == '.' && s[b = lex_character_next(s, a)] == '.')
+		PUNCT(3, LEX_TOKEN_ELLIPSIS, b + 1);
+	PUNCT(1, LEX_TOKEN_PERIOD, p + 1);
 l_amp:
-	a = nx(s, p);
-	if (s[a] == '&') PUNCT(2, T_AMPAMP, a + 1);
-	if (s[a] == '=') PUNCT(2, T_AMPEQ, a + 1);
-	PUNCT(1, T_AMP, p + 1);
+	a = lex_character_next(s, p);
+	if (s[a] == '&') PUNCT(2, LEX_TOKEN_AMPERSAND_AMPERSAND, a + 1);
+	if (s[a] == '=') PUNCT(2, LEX_TOKEN_AMPERSAND_EQUAL, a + 1);
+	PUNCT(1, LEX_TOKEN_AMPERSAND, p + 1);
 l_pipe:
-	a = nx(s, p);
-	if (s[a] == '|') PUNCT(2, T_PIPEPIPE, a + 1);
-	if (s[a] == '=') PUNCT(2, T_PIPEEQ, a + 1);
-	PUNCT(1, T_PIPE, p + 1);
+	a = lex_character_next(s, p);
+	if (s[a] == '|') PUNCT(2, LEX_TOKEN_PIPE_PIPE, a + 1);
+	if (s[a] == '=') PUNCT(2, LEX_TOKEN_PIPE_EQUAL, a + 1);
+	PUNCT(1, LEX_TOKEN_PIPE, p + 1);
 l_plus:
-	a = nx(s, p);
-	if (s[a] == '+') PUNCT(2, T_PLUSPLUS, a + 1);
-	if (s[a] == '=') PUNCT(2, T_PLUSEQ, a + 1);
-	PUNCT(1, T_PLUS, p + 1);
+	a = lex_character_next(s, p);
+	if (s[a] == '+') PUNCT(2, LEX_TOKEN_PLUS_PLUS, a + 1);
+	if (s[a] == '=') PUNCT(2, LEX_TOKEN_PLUS_EQUAL, a + 1);
+	PUNCT(1, LEX_TOKEN_PLUS, p + 1);
 l_minus:
-	a = nx(s, p);
-	if (s[a] == '>') PUNCT(2, T_ARROW, a + 1);
-	if (s[a] == '-') PUNCT(2, T_MINUSMINUS, a + 1);
-	if (s[a] == '=') PUNCT(2, T_MINUSEQ, a + 1);
-	PUNCT(1, T_MINUS, p + 1);
+	a = lex_character_next(s, p);
+	if (s[a] == '>') PUNCT(2, LEX_TOKEN_ARROW, a + 1);
+	if (s[a] == '-') PUNCT(2, LEX_TOKEN_MINUS_MINUS, a + 1);
+	if (s[a] == '=') PUNCT(2, LEX_TOKEN_MINUS_EQUAL, a + 1);
+	PUNCT(1, LEX_TOKEN_MINUS, p + 1);
 l_star:
-	a = nx(s, p);
-	if (s[a] == '=') PUNCT(2, T_STAREQ, a + 1);
-	PUNCT(1, T_STAR, p + 1);
+	a = lex_character_next(s, p);
+	if (s[a] == '=') PUNCT(2, LEX_TOKEN_STAR_EQUAL, a + 1);
+	PUNCT(1, LEX_TOKEN_STAR, p + 1);
 l_caret:
-	a = nx(s, p);
-	if (s[a] == '=') PUNCT(2, T_CARETEQ, a + 1);
-	PUNCT(1, T_CARET, p + 1);
+	a = lex_character_next(s, p);
+	if (s[a] == '=') PUNCT(2, LEX_TOKEN_CARET_EQUAL, a + 1);
+	PUNCT(1, LEX_TOKEN_CARET, p + 1);
 l_equal:
-	a = nx(s, p);
-	if (s[a] == '=') PUNCT(2, T_EQUALEQUAL, a + 1);
-	PUNCT(1, T_EQUAL, p + 1);
+	a = lex_character_next(s, p);
+	if (s[a] == '=') PUNCT(2, LEX_TOKEN_EQUAL_EQUAL, a + 1);
+	PUNCT(1, LEX_TOKEN_EQUAL, p + 1);
 l_exclaim:
-	a = nx(s, p);
-	if (s[a] == '=') PUNCT(2, T_EXCLAIMEQ, a + 1);
-	PUNCT(1, T_EXCLAIM, p + 1);
+	a = lex_character_next(s, p);
+	if (s[a] == '=') PUNCT(2, LEX_TOKEN_EXCLAMATION_EQUAL, a + 1);
+	PUNCT(1, LEX_TOKEN_EXCLAMATION, p + 1);
 l_hash:
-	a = nx(s, p);
-	if (s[a] == '#') PUNCT(2, T_HASHHASH, a + 1);
-	PUNCT(1, T_HASH, p + 1);
+	a = lex_character_next(s, p);
+	if (s[a] == '#') PUNCT(2, LEX_TOKEN_HASH_HASH, a + 1);
+	PUNCT(1, LEX_TOKEN_HASH, p + 1);
 l_colon:
-	a = nx(s, p);
-	if (s[a] == ':') PUNCT(2, T_COLONCOLON, a + 1);
-	if (s[a] == '>' && digraphs) PUNCT(2, T_RSQUARE, a + 1);
-	PUNCT(1, T_COLON, p + 1);
+	a = lex_character_next(s, p);
+	if (s[a] == ':') PUNCT(2, LEX_TOKEN_COLON_COLON, a + 1);
+	if (s[a] == '>' && digraphs) PUNCT(2, LEX_TOKEN_RIGHT_SQUARE, a + 1);
+	PUNCT(1, LEX_TOKEN_COLON, p + 1);
 l_less:
-	a = nx(s, p);
+	a = lex_character_next(s, p);
 	if (s[a] == '<') {
-		if (s[b = nx(s, a)] == '=') PUNCT(3, T_LESSLESSEQ, b + 1);
-		PUNCT(2, T_LESSLESS, a + 1);
+		if (s[b = lex_character_next(s, a)] == '=') PUNCT(3, LEX_TOKEN_LESS_LESS_EQUAL, b + 1);
+		PUNCT(2, LEX_TOKEN_LESS_LESS, a + 1);
 	}
-	if (s[a] == '=') PUNCT(2, T_LESSEQ, a + 1);
-	if (s[a] == ':' && digraphs) PUNCT(2, T_LSQUARE, a + 1);
-	if (s[a] == '%' && digraphs) PUNCT(2, T_LBRACE, a + 1);
-	PUNCT(1, T_LESS, p + 1);
+	if (s[a] == '=') PUNCT(2, LEX_TOKEN_LESS_EQUAL, a + 1);
+	if (s[a] == ':' && digraphs) PUNCT(2, LEX_TOKEN_LEFT_SQUARE, a + 1);
+	if (s[a] == '%' && digraphs) PUNCT(2, LEX_TOKEN_LEFT_BRACE, a + 1);
+	PUNCT(1, LEX_TOKEN_LESS, p + 1);
 l_greater:
-	a = nx(s, p);
+	a = lex_character_next(s, p);
 	if (s[a] == '>') {
-		if (s[b = nx(s, a)] == '=') PUNCT(3, T_GREATERGREATEREQ, b + 1);
-		PUNCT(2, T_GREATERGREATER, a + 1);
+		if (s[b = lex_character_next(s, a)] == '=') PUNCT(3, LEX_TOKEN_GREATER_GREATER_EQUAL, b + 1);
+		PUNCT(2, LEX_TOKEN_GREATER_GREATER, a + 1);
 	}
-	if (s[a] == '=') PUNCT(2, T_GREATEREQ, a + 1);
-	PUNCT(1, T_GREATER, p + 1);
+	if (s[a] == '=') PUNCT(2, LEX_TOKEN_GREATER_EQUAL, a + 1);
+	PUNCT(1, LEX_TOKEN_GREATER, p + 1);
 l_percent:
-	a = nx(s, p);
-	if (s[a] == '=') PUNCT(2, T_PERCENTEQ, a + 1);
-	if (s[a] == '>' && digraphs) PUNCT(2, T_RBRACE, a + 1);
+	a = lex_character_next(s, p);
+	if (s[a] == '=') PUNCT(2, LEX_TOKEN_PERCENT_EQUAL, a + 1);
+	if (s[a] == '>' && digraphs) PUNCT(2, LEX_TOKEN_RIGHT_BRACE, a + 1);
 	if (s[a] == ':' && digraphs) {
-		b = nx(s, a);
-		if (s[b] == '%' && s[q = nx(s, b)] == ':') PUNCT(4, T_HASHHASH, q + 1);
-		PUNCT(2, T_HASH, a + 1);
+		b = lex_character_next(s, a);
+		if (s[b] == '%' && s[q = lex_character_next(s, b)] == ':') PUNCT(4, LEX_TOKEN_HASH_HASH, q + 1);
+		PUNCT(2, LEX_TOKEN_HASH, a + 1);
 	}
-	PUNCT(1, T_PERCENT, p + 1);
+	PUNCT(1, LEX_TOKEN_PERCENT, p + 1);
 l_slash:
-	a = nx(s, p);
+	a = lex_character_next(s, p);
 	if (s[a] == '*') {
 		/* block comment: stops at its end, at backslashes (a splice in the end?) and at NULs */
 		for (q = a + 1;; q++) {
-			q = find_cend(s, q);
+			q = lex_comment_end_find(s, q);
 			if (q >= n) {
 				/* unterminated: an error token */
 				p = n;
-				EMIT(T_UNKNOWN);
+				EMIT(LEX_TOKEN_UNKNOWN);
 			}
 			if (s[q] == '*') {
 				q += 2;
 				break;
 			}
 			if (s[q] == '\\' && q - 1 > a && s[q - 1] == '*' &&
-			    s[b = skip_splices(s, q)] == '/' && b != q) {
+			    s[b = lex_splices_skip(s, q)] == '/' && b != q) {
 				q = b + 1;
 				break;
 			}
 		}
 		p = gap = q;
-		fl |= TF_SPACE;
+		fl |= LEX_TOKEN_FLAG_SPACE_BEFORE;
 		NEXT();
 	}
 	if (s[a] == '/') {
 		/* line comment: up to an unspliced \n or \r */
 		for (q = a + 1;;) {
-			b = find_nl(s, q);
+			b = lex_line_end_find(s, q);
 			if (b >= n)
 				break;
 			if (!s[b]) {
@@ -1479,7 +1479,7 @@ l_slash:
 			while (e > q && (s[e - 1] == ' ' || s[e - 1] == '\t' ||
 					 s[e - 1] == '\v' || s[e - 1] == '\f'))
 				e--;
-			if (e == q || s[e - 1] != '\\' || !splice_len(s, e - 1))
+			if (e == q || s[e - 1] != '\\' || !lex_splice_length(s, e - 1))
 				break;
 			q = b + 1;
 			/* skip the other half of this splice's newline */
@@ -1487,47 +1487,47 @@ l_slash:
 				q++;
 		}
 		p = gap = b < n ? b : n;
-		fl |= TF_SPACE;
+		fl |= LEX_TOKEN_FLAG_SPACE_BEFORE;
 		NEXT();
 	}
-	if (s[a] == '=') PUNCT(2, T_SLASHEQ, a + 1);
-	PUNCT(1, T_SLASH, p + 1);
+	if (s[a] == '=') PUNCT(2, LEX_TOKEN_SLASH_EQUAL, a + 1);
+	PUNCT(1, LEX_TOKEN_SLASH, p + 1);
 
 done:
 	t->off = (uint32_t)n;
 	t->len = 0;
 	t->id = 0;
-	t->kind = T_EOF;
+	t->kind = LEX_TOKEN_EOF;
 	t->flags = (uint8_t)fl;
 	/* intern the clean identifiers: no unpredictable branches left here */
 	STAT_T0();
-	if (!vlex_no_intern)
-		intern_list(ic, s, out, il, ni);
+	if (!lex_identifiers_not_interned)
+		lex_identifiers_intern(ic, s, out, il, ni);
 	STAT_T1(320);
 	return (uint32_t)(t - out);
 }
 
-uint32_t vlex(const char *s, size_t n, vtok *out, void *scratch)
+uint32_t lex_tokenize(const char *s, size_t n, lex_token *out, void *lex_scratch)
 {
-	return lex_mode(s, n, out, scratch, true);
+	return lex_tokenize_mode(s, n, out, lex_scratch, true);
 }
 
-size_t vlex_spell(const char *s, const vtok *t, char *buf)
+size_t lex_token_spell(const char *s, const lex_token *t, char *buf)
 {
 	size_t p = t->off, e = t->off + t->len, n = 0;
 
-	if (!(t->flags & TF_DIRTY)) {
+	if (!(t->flags & LEX_TOKEN_FLAG_SPLICED)) {
 		memcpy(buf, s + p, t->len);
 		return t->len;
 	}
 	while (p < e) {
-		size_t l = splice_len(s, p);
+		size_t l = lex_splice_length(s, p);
 
 		if (l) {
 			p += l;
 			continue;
 		}
-		if ((t->flags & TF_RAW) && s[p] == '"') {
+		if ((t->flags & LEX_TOKEN_FLAG_RAW_STRING) && s[p] == '"') {
 			/* raw string body: splices are not removed */
 			memcpy(buf + n, s + p, e - p);
 			return n + (e - p);
@@ -1540,14 +1540,14 @@ size_t vlex_spell(const char *s, const vtok *t, char *buf)
 /* ---- token cache ---------------------------------------------------- */
 
 /* per-thread bump arena: virtual reservations, pages faulted on use */
-static _Thread_local char *ar_cur, *ar_end;
+static _Thread_local char *lex_region_cursor, *lex_region_end;
 
-static void *arena(size_t n)
+static void *lex_region_allocate(size_t n)
 {
 	char *p;
 
 	n = (n + 63) & ~(size_t)63;
-	if ((size_t)(ar_end - ar_cur) < n) {
+	if ((size_t)(lex_region_end - lex_region_cursor) < n) {
 		size_t sz = n > (64u << 20) ? n : (64u << 20);
 
 		p = mmap(NULL, sz, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
@@ -1555,22 +1555,22 @@ static void *arena(size_t n)
 			perror("vcc: mmap");
 			abort();
 		}
-		ar_cur = p;
-		ar_end = p + sz;
+		lex_region_cursor = p;
+		lex_region_end = p + sz;
 	}
-	p = ar_cur;
-	ar_cur += n;
+	p = lex_region_cursor;
+	lex_region_cursor += n;
 	return p;
 }
 
-/* give back the unused tail of the last arena() allocation */
-static void arena_trim(void *p, size_t used)
+/* give back the unused tail of the last lex_region_allocate() allocation */
+static void lex_region_trim(void *p, size_t used)
 {
-	ar_cur = (char *)p + ((used + 63) & ~(size_t)63);
+	lex_region_cursor = (char *)p + ((used + 63) & ~(size_t)63);
 }
 
-static _Thread_local void *scratch;
-static _Thread_local size_t scratch_size;
+static _Thread_local void *lex_scratch;
+static _Thread_local size_t lex_scratch_bytes;
 
 /*
  * The file's bytes, read into the arena with 128 zero bytes after them (the
@@ -1578,9 +1578,9 @@ static _Thread_local size_t scratch_size;
  * second mapping for files whose last page has no slack, fewer faults.
  * Returns the bytes actually read (the file may have shrunk meanwhile).
  */
-static char *read_file(int fd, size_t size, size_t *got)
+static char *lex_file_read(int fd, size_t size, size_t *got)
 {
-	char *b = arena(size + 128);	/* not always fresh: arena_trim gives tails back */
+	char *b = lex_region_allocate(size + 128);	/* not always fresh: lex_region_trim gives tails back */
 	size_t n = 0;
 
 	while (n < size) {
@@ -1601,7 +1601,7 @@ static char *read_file(int fd, size_t size, size_t *got)
 }
 
 /* open + read: the file's bytes in this thread's arena, false if unreadable */
-static bool read_src(const char *path, const char **src, size_t *size, uint64_t id[4])
+static bool lex_source_read(const char *path, const char **src, size_t *size, uint64_t id[4])
 {
 	struct stat st;
 	int fd;
@@ -1615,7 +1615,7 @@ static bool read_src(const char *path, const char **src, size_t *size, uint64_t 
 		close(fd);
 		return false;
 	}
-	*src = read_file(fd, (size_t)st.st_size, size);
+	*src = lex_file_read(fd, (size_t)st.st_size, size);
 	id[0] = (uint64_t)st.st_dev;
 	id[1] = (uint64_t)st.st_ino;
 	id[2] = (uint64_t)st.st_size;
@@ -1628,90 +1628,90 @@ static bool read_src(const char *path, const char **src, size_t *size, uint64_t 
 	return true;
 }
 
-/* lex src (from read_src) into f, tokens in this thread's arena */
-static void lex_src_mode(vlex_file *f, const char *src, size_t size, bool digraphs)
+/* lex src (from lex_source_read) into f, tokens in this thread's arena */
+static void lex_source_tokenize_mode(lex_file *f, const char *src, size_t size, bool digraphs)
 {
-	size_t need = vlex_scratch_size(size);
-	vtok *tok;
+	size_t need = lex_scratch_size(size);
+	lex_token *tok;
 
-	if (need > scratch_size) {
-		if (scratch)
-			munmap(scratch, scratch_size);
-		scratch_size = need < (1u << 20) ? (1u << 20) : need * 2;
-		scratch = mmap(NULL, scratch_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
-		if (scratch == MAP_FAILED)
+	if (need > lex_scratch_bytes) {
+		if (lex_scratch)
+			munmap(lex_scratch, lex_scratch_bytes);
+		lex_scratch_bytes = need < (1u << 20) ? (1u << 20) : need * 2;
+		lex_scratch = mmap(NULL, lex_scratch_bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+		if (lex_scratch == MAP_FAILED)
 			abort();
 	}
-	tok = arena((size + 2) * sizeof(vtok));
+	tok = lex_region_allocate((size + 2) * sizeof(lex_token));
 	f->src = src;
 	f->size = (uint32_t)size;
-	f->ntok = lex_mode(src, size, tok, scratch, digraphs);
+	f->ntok = lex_tokenize_mode(src, size, tok, lex_scratch, digraphs);
 	f->tok = tok;
-	arena_trim(tok, (f->ntok + 1) * sizeof(vtok));
+	lex_region_trim(tok, (f->ntok + 1) * sizeof(lex_token));
 }
 
-static void lex_src(vlex_file *f, const char *src, size_t size)
+static void lex_source_tokenize(lex_file *f, const char *src, size_t size)
 {
-	lex_src_mode(f, src, size, true);
+	lex_source_tokenize_mode(f, src, size, true);
 }
 
 /* Strict C90 uses private tokens; never change the shared cached file.
  * Retain source bytes and offsets, including digraph-looking text in strings
  * and comments and the spacing of adjacent tokens used by stringization. */
-const vlex_file *vlex_nodigraphs(const vlex_file *f)
+const lex_file *lex_file_without_digraphs(const lex_file *f)
 {
-	vlex_file *nf = arena(sizeof(*nf));
+	lex_file *nf = lex_region_allocate(sizeof(*nf));
 
 	memset(nf, 0, sizeof(*nf));
 	nf->path = f->path;
 	nf->dev = f->dev;
 	nf->ino = f->ino;
-	lex_src_mode(nf, f->src, f->size, false);
+	lex_source_tokenize_mode(nf, f->src, f->size, false);
 	return nf;
 }
 
-static bool load(vlex_file *f, const char *path, uint64_t sm[2])
+static bool lex_file_load(lex_file *f, const char *path, uint64_t sm[2])
 {
 	const char *src;
 	size_t size;
 
 	uint64_t id[4];
 
-	if (!read_src(path, &src, &size, id))
+	if (!lex_source_read(path, &src, &size, id))
 		return false;
 	f->dev = id[0];
 	f->ino = id[1];
 	sm[0] = id[2];
 	sm[1] = id[3];
-	lex_src(f, src, size);
+	lex_source_tokenize(f, src, size);
 	return true;
 }
 
-/* benchmarking: lex path as vlex_get() would, without the cache (leaks) */
-int vlex_load_uncached(const char *path, vlex_file *f)
+/* benchmarking: lex path as lex_file_get() would, without the cache (leaks) */
+int lex_file_load_uncached(const char *path, lex_file *f)
 {
 	uint64_t sm[2];
 
-	return load(f, path, sm);
+	return lex_file_load(f, path, sm);
 }
 
 /*
- * Cache entry states.  QUEUED: waiting for an I/O thread (vlex_prefetch);
+ * Cache entry states.  QUEUED: waiting for an I/O thread (lex_file_prefetch);
  * READING: an I/O thread has it; READ: bytes in f.src, not lexed; LOADING:
  * a lexing thread has it; OK / MISSING: final.
  */
-enum { CE_QUEUED, CE_READING, CE_READ, CE_LOADING, CE_OK, CE_MISSING };
+enum { LEX_CACHE_QUEUED, LEX_CACHE_READING, LEX_CACHE_READ, LEX_CACHE_LOADING, LEX_CACHE_OK, LEX_CACHE_MISSING };
 
-typedef struct centry {
-	vlex_file f;
-	struct centry *next;	/* the bucket's chain, newest first; set before publication */
+typedef struct lex_cache_entry {
+	lex_file f;
+	struct lex_cache_entry *next;	/* the bucket's chain, newest first; set before publication */
 	uint32_t hash, len;
 	_Atomic int state;
 	_Atomic uint32_t epoch;	/* the cache epoch this entry was last known to match the file system in */
 	_Atomic int dead;	/* found changed: later lookups skip it (the file is read again) */
 	uint64_t sm[2];		/* size and mtime (ns) of the file as read */
 	char path[];
-} centry;
+} lex_cache_entry;
 
 /*
  * Validation (vccd, Q-SCHED-01).  A new make that starts while jobs of another
@@ -1734,13 +1734,13 @@ void vcache_new_epoch(void)
 	atomic_fetch_add_explicit(&cache_epoch, 1, memory_order_acq_rel);
 }
 
-static bool entry_fresh(const centry *e, int st)
+static bool entry_fresh(const lex_cache_entry *e, int st)
 {
 	struct stat s;
 
 	if (stat(e->path, &s))
-		return st == CE_MISSING;
-	if (st != CE_OK)
+		return st == LEX_CACHE_MISSING;
+	if (st != LEX_CACHE_OK)
 		return false;	/* it exists now */
 	return S_ISREG(s.st_mode) && (uint64_t)s.st_dev == e->f.dev && (uint64_t)s.st_ino == e->f.ino &&
 	       (uint64_t)s.st_size == e->sm[0] &&
@@ -1755,24 +1755,24 @@ static bool entry_fresh(const centry *e, int st)
  * Chained, never full: every probed path (missing ones too) gets an entry,
  * and a long batch (vccd, vpp --batch) probes far more than any table size.
  */
-#define CBITS 16
-static _Atomic(centry *) ctab[1u << CBITS];
+#define LEX_CACHE_TABLE_BITS 16
+static _Atomic(lex_cache_entry *) lex_cache_table[1u << LEX_CACHE_TABLE_BITS];
 
 /* the entry for path, inserted in state st0 if absent (*ins set then) */
-static centry *centry_get(const char *path, size_t len, int st0, bool *ins)
+static lex_cache_entry *lex_cache_entry_get(const char *path, size_t len, int st0, bool *ins)
 {
 	uint32_t h = vintern_hash(path, len);
-	_Atomic(centry *) *b = &ctab[h >> (32 - CBITS)];
-	centry *head = atomic_load_explicit(b, memory_order_acquire), *seen = NULL, *mine = NULL;
+	_Atomic(lex_cache_entry *) *b = &lex_cache_table[h >> (32 - LEX_CACHE_TABLE_BITS)];
+	lex_cache_entry *head = atomic_load_explicit(b, memory_order_acquire), *seen = NULL, *mine = NULL;
 
 	*ins = false;
 	for (;;) {
-		for (centry *e = head; e != seen; e = e->next)
+		for (lex_cache_entry *e = head; e != seen; e = e->next)
 			if (e->hash == h && e->len == len && !memcmp(e->path, path, len) &&
 			    !atomic_load_explicit(&e->dead, memory_order_relaxed))
 				return e;	/* mine, if allocated, is wasted arena space: rare */
 		if (!mine) {
-			mine = arena(sizeof(*mine) + len + 1);
+			mine = lex_region_allocate(sizeof(*mine) + len + 1);
 			memset(mine, 0, sizeof(*mine));
 			mine->hash = h;
 			mine->len = (uint32_t)len;
@@ -1792,30 +1792,30 @@ static centry *centry_get(const char *path, size_t len, int st0, bool *ins)
 	}
 }
 
-static bool claim(centry *e, int from, int to)
+static bool lex_cache_entry_claim(lex_cache_entry *e, int from, int to)
 {
 	return atomic_compare_exchange_strong_explicit(&e->state, &from, to,
 			memory_order_acq_rel, memory_order_acquire);
 }
 
-static void publish(centry *e, bool ok)
+static void pp_header_cache_entry_publish(lex_cache_entry *e, bool ok)
 {
-	atomic_store_explicit(&e->state, ok ? CE_OK : CE_MISSING, memory_order_release);
+	atomic_store_explicit(&e->state, ok ? LEX_CACHE_OK : LEX_CACHE_MISSING, memory_order_release);
 }
 
-const vlex_file *vlex_trigraphs(const vlex_file *f)
+const lex_file *lex_file_trigraphs_replace(const lex_file *f)
 {
 	static const char from[] = "=/'()!<>-", to[] = "#\\^[]|{}~";
 	const char *s = f->src, *q = memmem(s, f->size, "??", 2);
 	size_t n = f->size, o = 0;
 	char *b;
-	vlex_file *nf;
+	lex_file *nf;
 
 	while (q && (q + 2 >= s + n || !strchr(from, q[2]) || !q[2]))
 		q = q + 1 < s + n ? memmem(q + 1, (size_t)(s + n - q - 1), "??", 2) : NULL;
 	if (!q)
 		return f;
-	b = arena(n + 128);
+	b = lex_region_allocate(n + 128);
 	for (size_t i = 0; i < n; i++) {
 		const char *t;
 
@@ -1827,22 +1827,22 @@ const vlex_file *vlex_trigraphs(const vlex_file *f)
 		}
 	}
 	memset(b + o, 0, 128);
-	nf = arena(sizeof(*nf));
+	nf = lex_region_allocate(sizeof(*nf));
 	memset(nf, 0, sizeof(*nf));
 	nf->path = f->path;
 	nf->dev = f->dev;
 	nf->ino = f->ino;
-	lex_src(nf, b, o);
+	lex_source_tokenize(nf, b, o);
 	return nf;
 }
 
-static bool lx_alnum(char ch)
+static bool lex_character_is_alphanumeric(char ch)
 {
 	return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_';
 }
 
 /* end of the comment or literal at s[i] (s[i] is '/' or a quote), i + 1 if neither */
-static size_t lx_skip(const char *s, size_t n, size_t i)
+static size_t lex_literal_or_comment_skip(const char *s, size_t n, size_t i)
 {
 	if (s[i] == '/' && i + 1 < n && s[i + 1] == '/') {
 		while (i < n && s[i] != '\n')
@@ -1864,40 +1864,40 @@ static size_t lx_skip(const char *s, size_t n, size_t i)
 	return i + 1;
 }
 
-const vlex_file *vlex_digitsep(const vlex_file *f)
+const lex_file *lex_file_digit_separators_remove(const lex_file *f)
 {
 	const char *s = f->src;
 	size_t n = f->size, o = 0, i = 0;
 	bool any = false;
 	char *b;
-	vlex_file *nf;
+	lex_file *nf;
 
 	/* quick: a ' between two alphanumerics somewhere at all */
 	for (const char *q = memchr(s, '\'', n); q; q = memchr(q + 1, '\'', (size_t)(s + n - q - 1)))
-		if (q > s && q + 1 < s + n && lx_alnum(q[-1]) && lx_alnum(q[1])) {
+		if (q > s && q + 1 < s + n && lex_character_is_alphanumeric(q[-1]) && lex_character_is_alphanumeric(q[1])) {
 			any = true;
 			break;
 		}
 	if (!any)
 		return f;
-	b = arena(n + 128);
+	b = lex_region_allocate(n + 128);
 	any = false;
 	while (i < n) {
 		char ch = s[i];
 		size_t j;
 
 		if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_') {
-			for (j = i; j < n && lx_alnum(s[j]); j++)
+			for (j = i; j < n && lex_character_is_alphanumeric(s[j]); j++)
 				;
 		} else if ((ch >= '0' && ch <= '9') || (ch == '.' && i + 1 < n && s[i + 1] >= '0' && s[i + 1] <= '9')) {
 			/* a pp-number: digit separators (' between alphanumerics) dropped */
 			for (j = i; j < n;) {
-				if (lx_alnum(s[j]) || s[j] == '.') {
+				if (lex_character_is_alphanumeric(s[j]) || s[j] == '.') {
 					if ((s[j] == 'e' || s[j] == 'E' || s[j] == 'p' || s[j] == 'P') && j + 1 < n &&
 					    (s[j + 1] == '+' || s[j + 1] == '-'))
 						b[o++] = s[j++];
 					b[o++] = s[j++];
-				} else if (s[j] == '\'' && j + 1 < n && lx_alnum(s[j + 1])) {
+				} else if (s[j] == '\'' && j + 1 < n && lex_character_is_alphanumeric(s[j + 1])) {
 					j++;
 					any = true;
 				} else {
@@ -1907,7 +1907,7 @@ const vlex_file *vlex_digitsep(const vlex_file *f)
 			i = j;
 			continue;
 		} else if (ch == '/' || ch == '"' || ch == '\'') {
-			j = lx_skip(s, n, i);
+			j = lex_literal_or_comment_skip(s, n, i);
 		} else {
 			j = i + 1;
 		}
@@ -1918,30 +1918,30 @@ const vlex_file *vlex_digitsep(const vlex_file *f)
 	if (!any)
 		return f;
 	memset(b + o, 0, 128);
-	nf = arena(sizeof(*nf));
+	nf = lex_region_allocate(sizeof(*nf));
 	memset(nf, 0, sizeof(*nf));
 	nf->path = f->path;
 	nf->dev = f->dev;
 	nf->ino = f->ino;
-	lex_src(nf, b, o);
+	lex_source_tokenize(nf, b, o);
 	return nf;
 }
 
 /* C89 (strict): no line comments; "//" outside comments and literals is
  * two '/' tokens.  The copy has a space between them, so a column after one
  * moves by one. */
-const vlex_file *vlex_c89(const vlex_file *f)
+const lex_file *lex_file_c89_convert(const lex_file *f)
 {
 	const char *s = f->src;
 	size_t n = f->size, o = 0, i = 0, cnt = 0;
 	char *b;
-	vlex_file *nf;
+	lex_file *nf;
 
 	if (!memmem(s, n, "//", 2))
 		return f;
 	for (const char *q = s; (q = memmem(q, (size_t)(s + n - q), "//", 2)); q++)
 		cnt++;
-	b = arena(n + cnt + 128);
+	b = lex_region_allocate(n + cnt + 128);
 	cnt = 0;
 	while (i < n) {
 		char ch = s[i];
@@ -1954,7 +1954,7 @@ const vlex_file *vlex_c89(const vlex_file *f)
 			cnt++;
 			continue;
 		}
-		j = ch == '/' || ch == '"' || ch == '\'' ? lx_skip(s, n, i) : i + 1;
+		j = ch == '/' || ch == '"' || ch == '\'' ? lex_literal_or_comment_skip(s, n, i) : i + 1;
 		memcpy(b + o, s + i, j - i);
 		o += j - i;
 		i = j;
@@ -1962,65 +1962,65 @@ const vlex_file *vlex_c89(const vlex_file *f)
 	if (!cnt)
 		return f;
 	memset(b + o, 0, 128);
-	nf = arena(sizeof(*nf));
+	nf = lex_region_allocate(sizeof(*nf));
 	memset(nf, 0, sizeof(*nf));
 	nf->path = f->path;
 	nf->dev = f->dev;
 	nf->ino = f->ino;
-	lex_src(nf, b, o);
+	lex_source_tokenize(nf, b, o);
 	return nf;
 }
 
-const vlex_file *(*vlex_get_hook)(const char *path, size_t len);
+const lex_file *(*lex_file_get_hook)(const char *path, size_t len);
 
 /* forget every file (a new build: vccd, idle): later lookups read and lex
  * again.  Old entries are not freed, so pointers into them stay valid. */
-void vlex_cache_flush(void)
+void lex_cache_flush(void)
 {
-	for (size_t i = 0; i < (1u << CBITS); i++)
-		atomic_store_explicit(&ctab[i], NULL, memory_order_release);
+	for (size_t i = 0; i < (1u << LEX_CACHE_TABLE_BITS); i++)
+		atomic_store_explicit(&lex_cache_table[i], NULL, memory_order_release);
 }
 
-const vlex_file *vlex_get(const char *path, size_t len)
+const lex_file *lex_file_get(const char *path, size_t len)
 {
 	bool ins;
-	centry *e;
+	lex_cache_entry *e;
 
-	if (unlikely(vlex_get_hook != NULL))
-		return vlex_get_hook(path, len);
-	e = centry_get(path, len, CE_LOADING, &ins);
+	if (unlikely(lex_file_get_hook != NULL))
+		return lex_file_get_hook(path, len);
+	e = lex_cache_entry_get(path, len, LEX_CACHE_LOADING, &ins);
 
 	if (ins) {
-		bool ok = load(&e->f, e->path, e->sm);
+		bool ok = lex_file_load(&e->f, e->path, e->sm);
 
-		publish(e, ok);
+		pp_header_cache_entry_publish(e, ok);
 		return ok ? &e->f : NULL;
 	}
 	for (int spin = 0;; spin++) {
 		int st = atomic_load_explicit(&e->state, memory_order_acquire);
 
-		if (st == CE_OK || st == CE_MISSING) {
+		if (st == LEX_CACHE_OK || st == LEX_CACHE_MISSING) {
 			uint32_t cur = vcache_epoch();
 
 			if (likely(atomic_load_explicit(&e->epoch, memory_order_relaxed) == cur))
-				return st == CE_OK ? &e->f : NULL;
+				return st == LEX_CACHE_OK ? &e->f : NULL;
 			if (entry_fresh(e, st)) {	/* (no lock: threads that race each stat once) */
 				atomic_store_explicit(&e->epoch, cur, memory_order_relaxed);
-				return st == CE_OK ? &e->f : NULL;
+				return st == LEX_CACHE_OK ? &e->f : NULL;
 			}
 			atomic_store_explicit(&e->dead, 1, memory_order_relaxed);
-			return vlex_get(path, len);	/* a fresh entry, read now */
+			return lex_file_get(path, len);	/* a fresh entry, read now */
 		}
-		if (st == CE_QUEUED && claim(e, CE_QUEUED, CE_LOADING)) {
+		if (st == LEX_CACHE_QUEUED && lex_cache_entry_claim(e, LEX_CACHE_QUEUED, LEX_CACHE_LOADING)) {
 			/* not reached by the I/O threads yet: do it here */
-			bool ok = load(&e->f, e->path, e->sm);
+			bool ok = lex_file_load(&e->f, e->path, e->sm);
 
-			publish(e, ok);
+			pp_header_cache_entry_publish(e, ok);
 			return ok ? &e->f : NULL;
 		}
-		if (st == CE_READ && claim(e, CE_READ, CE_LOADING)) {
-			lex_src(&e->f, e->f.src, e->f.size);
-			publish(e, true);
+		if (st == LEX_CACHE_READ && lex_cache_entry_claim(e, LEX_CACHE_READ, LEX_CACHE_LOADING)) {
+			lex_source_tokenize(&e->f, e->f.src, e->f.size);
+			pp_header_cache_entry_publish(e, true);
 			return &e->f;
 		}
 #if defined(__aarch64__)
@@ -2042,88 +2042,88 @@ const vlex_file *vlex_get(const char *path, size_t len)
  * adds contention), so a few I/O threads open and read files that will be
  * needed, and the lexing threads only lex.
  */
-enum { IO_THREADS = 3 };
-static pthread_mutex_t ioq_mu = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t ioq_cv = PTHREAD_COND_INITIALIZER;
-static centry **ioq;
-static size_t ioq_head, ioq_tail, ioq_cap;
+enum { LEX_PREFETCH_THREADS = 3 };
+static pthread_mutex_t lex_prefetch_queue_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t lex_prefetch_queue_condition = PTHREAD_COND_INITIALIZER;
+static lex_cache_entry **lex_prefetch_queue;
+static size_t lex_prefetch_queue_head, lex_prefetch_queue_tail, lex_prefetch_queue_capacity;
 
-static void *io_thread(void *arg)
+static void *lex_prefetch_thread_run(void *arg)
 {
 	(void)arg;
 #ifdef __APPLE__
 	pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
 #endif
 	for (;;) {
-		centry *e;
+		lex_cache_entry *e;
 
-		pthread_mutex_lock(&ioq_mu);
-		while (ioq_head == ioq_tail)
-			pthread_cond_wait(&ioq_cv, &ioq_mu);
-		e = ioq[ioq_head++ % ioq_cap];
-		pthread_mutex_unlock(&ioq_mu);
-		if (claim(e, CE_QUEUED, CE_READING)) {
+		pthread_mutex_lock(&lex_prefetch_queue_mutex);
+		while (lex_prefetch_queue_head == lex_prefetch_queue_tail)
+			pthread_cond_wait(&lex_prefetch_queue_condition, &lex_prefetch_queue_mutex);
+		e = lex_prefetch_queue[lex_prefetch_queue_head++ % lex_prefetch_queue_capacity];
+		pthread_mutex_unlock(&lex_prefetch_queue_mutex);
+		if (lex_cache_entry_claim(e, LEX_CACHE_QUEUED, LEX_CACHE_READING)) {
 			const char *src;
 			size_t size;
 
 			uint64_t id[4];
 
-			if (read_src(e->path, &src, &size, id)) {
+			if (lex_source_read(e->path, &src, &size, id)) {
 				e->f.dev = id[0];
 				e->f.ino = id[1];
 				e->sm[0] = id[2];
 				e->sm[1] = id[3];
 				e->f.src = src;
 				e->f.size = (uint32_t)size;
-				atomic_store_explicit(&e->state, CE_READ, memory_order_release);
+				atomic_store_explicit(&e->state, LEX_CACHE_READ, memory_order_release);
 			} else {
-				publish(e, false);
+				pp_header_cache_entry_publish(e, false);
 			}
 		}
 	}
 	return NULL;
 }
 
-static void start_io(void)
+static void lex_prefetch_threads_start(void)
 {
 	const char *e = getenv("VLEX_IO_THREADS");
-	int n = e ? atoi(e) : IO_THREADS;
+	int n = e ? atoi(e) : LEX_PREFETCH_THREADS;
 
-	for (int i = 0; i < (n > 0 && n <= 32 ? n : IO_THREADS); i++) {
+	for (int i = 0; i < (n > 0 && n <= 32 ? n : LEX_PREFETCH_THREADS); i++) {
 		pthread_t t;
 
-		pthread_create(&t, NULL, io_thread, NULL);
+		pthread_create(&t, NULL, lex_prefetch_thread_run, NULL);
 		pthread_detach(t);
 	}
 }
 
-void vlex_prefetch(const char *path, size_t len)
+void lex_file_prefetch(const char *path, size_t len)
 {
 	static pthread_once_t once = PTHREAD_ONCE_INIT;
 	bool ins;
-	centry *e;
+	lex_cache_entry *e;
 
 #ifdef __EMSCRIPTEN__
 	return;	/* no threads: the reader loads the file itself */
 #endif
-	e = centry_get(path, len, CE_QUEUED, &ins);
+	e = lex_cache_entry_get(path, len, LEX_CACHE_QUEUED, &ins);
 	if (!ins)
 		return;
-	pthread_mutex_lock(&ioq_mu);
-	if (ioq_tail - ioq_head == ioq_cap) {	/* grow, keeping FIFO order */
-		size_t cap = ioq_cap ? 2 * ioq_cap : 4096;
-		centry **q = malloc(cap * sizeof(*q));
+	pthread_mutex_lock(&lex_prefetch_queue_mutex);
+	if (lex_prefetch_queue_tail - lex_prefetch_queue_head == lex_prefetch_queue_capacity) {	/* grow, keeping FIFO order */
+		size_t cap = lex_prefetch_queue_capacity ? 2 * lex_prefetch_queue_capacity : 4096;
+		lex_cache_entry **q = malloc(cap * sizeof(*q));
 
-		for (size_t i = 0; i < ioq_tail - ioq_head; i++)
-			q[i] = ioq[(ioq_head + i) % ioq_cap];
-		ioq_tail -= ioq_head;
-		ioq_head = 0;
-		free(ioq);
-		ioq = q;
-		ioq_cap = cap;
+		for (size_t i = 0; i < lex_prefetch_queue_tail - lex_prefetch_queue_head; i++)
+			q[i] = lex_prefetch_queue[(lex_prefetch_queue_head + i) % lex_prefetch_queue_capacity];
+		lex_prefetch_queue_tail -= lex_prefetch_queue_head;
+		lex_prefetch_queue_head = 0;
+		free(lex_prefetch_queue);
+		lex_prefetch_queue = q;
+		lex_prefetch_queue_capacity = cap;
 	}
-	ioq[ioq_tail++ % ioq_cap] = e;
-	pthread_cond_signal(&ioq_cv);
-	pthread_mutex_unlock(&ioq_mu);
-	pthread_once(&once, start_io);
+	lex_prefetch_queue[lex_prefetch_queue_tail++ % lex_prefetch_queue_capacity] = e;
+	pthread_cond_signal(&lex_prefetch_queue_condition);
+	pthread_mutex_unlock(&lex_prefetch_queue_mutex);
+	pthread_once(&once, lex_prefetch_threads_start);
 }

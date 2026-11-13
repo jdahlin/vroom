@@ -35,10 +35,10 @@
 #define MAXREC 24
 
 static const char *const name = "/fuzz/main.c";
-static vlex_file file;
+static lex_file file;
 static int devnull, print;
 
-static const vlex_file *hook(const char *path, size_t len)
+static const lex_file *hook(const char *path, size_t len)
 {
 	return strlen(name) == len && !memcmp(name, path, len) ? &file : NULL;
 }
@@ -51,7 +51,7 @@ int LLVMFuzzerInitialize(int *argc, char ***argv)
 	print = getenv("FUZZ_DIAG_PRINT") != NULL;
 	devnull = print ? 2 : open("/dev/null", O_WRONLY);
 	vintern_init();
-	vlex_get_hook = hook;
+	lex_file_get_hook = hook;
 	return 0;
 }
 
@@ -156,7 +156,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *d, size_t n)
 	uint32_t before = vintern_count();
 	size_t cn, sn;
 	char *src;
-	vtok *tk;
+	lex_token *tk;
 	void *scr;
 
 	if (!sep || n > MAXIN || before > INTERN_MAX)
@@ -165,10 +165,10 @@ int LLVMFuzzerTestOneInput(const uint8_t *d, size_t n)
 	src = malloc(sn + 128);
 	memcpy(src, sep + 1, sn);
 	memset(src + sn, 0, 128);
-	tk = malloc((sn + 2) * sizeof(vtok));
-	scr = malloc(vlex_scratch_size(sn));
-	file = (vlex_file){ .path = name, .src = src, .size = (uint32_t)sn };
-	file.ntok = vlex(src, sn, tk, scr);
+	tk = malloc((sn + 2) * sizeof(lex_token));
+	scr = malloc(lex_scratch_size(sn));
+	file = (lex_file){ .path = name, .src = src, .size = (uint32_t)sn };
+	file.ntok = lex_tokenize(src, sn, tk, scr);
 	file.tok = tk;
 	free(scr);
 
@@ -190,14 +190,14 @@ int LLVMFuzzerTestOneInput(const uint8_t *d, size_t n)
 		p = pp_open(&o);
 		if (!p)
 			break;
-		pp_set_fatal(p, &jb);
+		pp_fatal_jump_set(p, &jb);
 		if (!setjmp(jb)) {
 			ptok t;
 			uint32_t eof, base;
 
 			do
-				pp_next(p, &t);
-			while (t.kind != T_EOF);
+				pp_token_next(p, &t);
+			while (t.kind != LEX_TOKEN_EOF);
 			eof = pp_main_eof(p);
 			base = eof - (sn && src[sn - 1] == '\n' ? (uint32_t)sn - 1 : (uint32_t)sn);
 			records(p, d, cn, src, base, (uint32_t)sn);

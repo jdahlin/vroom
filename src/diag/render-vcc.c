@@ -1,5 +1,5 @@
 /* Vcc's own text style and its flush. */
-#include "../frontend/pp/ppimpl.h"
+#include "../frontend/pp/pp-internal.h"
 #include "common/buffer.h"
 #include <ctype.h>
 #include <dlfcn.h>
@@ -97,7 +97,7 @@ static int cmp_line(const void *a, const void *b)
 }
 
 /* a range's mark: in the file of e, else none */
-static bool mk(const fent *e, uint32_t b, uint32_t en, char ch, const char *label, mark *m)
+static bool mk(const pp_file_entry *e, uint32_t b, uint32_t en, char ch, const char *label, mark *m)
 {
 	const char *s = e->f->src;
 	uint32_t size = e->f->size;
@@ -117,7 +117,7 @@ static bool mk(const fent *e, uint32_t b, uint32_t en, char ch, const char *labe
 }
 
 /* a note that can fold into its record's snippet: one place in the same file, near */
-static bool foldable(const fent *e, const vdiag *k, uint32_t pls)
+static bool foldable(const pp_file_entry *e, const vdiag *k, uint32_t pls)
 {
 	const char *s = e->f->src;
 	uint32_t off, ls;
@@ -150,7 +150,7 @@ static void bar(pp *p, vbuffer *b, uint32_t width)
 }
 
 /* one source line with its marks, labels and fix-its */
-static void one_line(pp *p, vbuffer *b, const fent *e, const vdiag *d, const mark *m, int nm, uint32_t ls,
+static void one_line(pp *p, vbuffer *b, const pp_file_entry *e, const vdiag *d, const mark *m, int nm, uint32_t ls,
 		     uint32_t width)
 {
 	const char *s = e->f->src;
@@ -303,7 +303,7 @@ static void one_line(pp *p, vbuffer *b, const fent *e, const vdiag *d, const mar
 }
 
 /* the snippet of d (in file e) with the notes in fold[] as labels */
-static void snippet_vcc(pp *p, vbuffer *b, const fent *e, const vdiag *d, vdiag *const *fold, int nfold)
+static void snippet_vcc(pp *p, vbuffer *b, const pp_file_entry *e, const vdiag *d, vdiag *const *fold, int nfold)
 {
 	const char *s = e->f->src;
 	uint32_t size = e->f->size, off = d->loc - e->base, pls = lstart(s, off);
@@ -453,7 +453,7 @@ static const vdiag *macro_run_last(const vdiag *k)
 
 static void render_vcc(pp *p, vbuffer *b, vdiag *top)
 {
-	const fent *e;
+	const pp_file_entry *e;
 	vdiag *fold[MAXMARKS];
 	const vdiag *run_first = NULL, *run_last = NULL;
 	int nfold = 0;
@@ -497,12 +497,12 @@ static void render_vcc(pp *p, vbuffer *b, vdiag *top)
 VPRIV void diag_text_flush(pp *p)
 {
 	int fd = p->o->errfd ? p->o->errfd : 2;
-	vdiag *d = p->tpend;
+	vdiag *d = p->diagnostic_pending_text;
 	vbuffer b = { 0 };
 
 	if (!d)
 		return;
-	p->tpend = NULL;
+	p->diagnostic_pending_text = NULL;
 	render_vcc(p, &b, d);
 	(void)!write(fd, b.p, b.n);
 	free(b.p);

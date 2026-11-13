@@ -120,7 +120,7 @@ VPRIV uint32_t typo_keyword(cc *c, uint32_t id, int kws)
 {
 	uint32_t kw;
 
-	if (tok(c)->flags & PF_MACRO)
+	if (tok(c)->flags & PP_TOKEN_FLAG_FROM_MACRO)
 		return 0;
 	typo_sym(c, id, kws == KWS_TYPE, kws, &kw);
 	return kw;
@@ -168,7 +168,7 @@ VPRIV void c23_word_help(cc *c, vdiag *d, uint32_t id)
 VPRIV uint32_t undeclared(cc *c, const char *msg, uint32_t id, uint32_t loc, bool types, int kws, uint32_t *kw)
 {
 	/* clang does not correct a name from a macro expansion (and says where it was spelled) */
-	bool mac = (tok(c)->loc == loc ? tok(c)->flags : c->prevflags) & PF_MACRO;
+	bool mac = (tok(c)->loc == loc ? tok(c)->flags : c->prevflags) & PP_TOKEN_FLAG_FROM_MACRO;
 	uint32_t k = 0, s = mac ? 0 : typo_sym(c, id, types, kw ? kws : 0, &k);
 	pp_span r = { loc, pp_tok_end(c->p, loc) };
 	bool tn = msg[1] == 'n';	/* "unknown type name", else "use of undeclared identifier" */
@@ -225,7 +225,7 @@ VPRIV uint32_t undeclared(cc *c, const char *msg, uint32_t id, uint32_t loc, boo
 
 VPRIV bool is_typedef_name(cc *c, const ptok *t)
 {
-	if (t->kind != T_IDENT || kwof(t))
+	if (t->kind != LEX_TOKEN_IDENTIFIER || kwof(t))
 		return false;
 	return typedef_id(c, t->id);
 }

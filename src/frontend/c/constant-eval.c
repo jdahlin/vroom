@@ -686,23 +686,23 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 		*v = a;
 		if (a.kind == CV_FLT) {
 			v->ice = false;
-			if (x->aux == T_MINUS)
+			if (x->aux == LEX_TOKEN_MINUS)
 				v->f = -a.f, v->q = a.q ^ Q_SIGN;
-			else if (x->aux == T_EXCLAIM)
+			else if (x->aux == LEX_TOKEN_EXCLAMATION)
 				v->kind = CV_INT, v->i = !cv_nz(c, &a), v->ld = false;
 			return true;
 		}
 		if (a.kind == CV_ADDR) {
-			if (x->aux == T_EXCLAIM && !cv_weak(c, &a)) {
+			if (x->aux == LEX_TOKEN_EXCLAMATION && !cv_weak(c, &a)) {
 				v->kind = CV_INT, v->i = 0, v->ice = false, v->sym = v->str = v->label = 0;
 				return true;
 			}
 			return false;
 		}
 		switch (x->aux) {
-		case T_MINUS: v->i = trunc_to(c, (i128)((u128)0 - (u128)a.i), x->ty); break;
-		case T_TILDE: v->i = trunc_to(c, ~a.i, x->ty); break;
-		case T_EXCLAIM: v->i = a.i == 0; break;
+		case LEX_TOKEN_MINUS: v->i = trunc_to(c, (i128)((u128)0 - (u128)a.i), x->ty); break;
+		case LEX_TOKEN_TILDE: v->i = trunc_to(c, ~a.i, x->ty); break;
+		case LEX_TOKEN_EXCLAMATION: v->i = a.i == 0; break;
 		}
 		return true;
 	case N_COMPLIT:	/* (T){ v } of scalar type: its value */
@@ -757,10 +757,10 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 					return false;
 				*v = *pv;
 				v->ice = false;
-				v->i += (op == T_MINUS ? -iv->i : iv->i) * (i128)es;
+				v->i += (op == LEX_TOKEN_MINUS ? -iv->i : iv->i) * (i128)es;
 				return true;
 			}
-			if (op == T_MINUS && is_ptr(c, lt) && is_ptr(c, rt) && a.kind == CV_ADDR && b.kind == CV_ADDR &&
+			if (op == LEX_TOKEN_MINUS && is_ptr(c, lt) && is_ptr(c, rt) && a.kind == CV_ADDR && b.kind == CV_ADDR &&
 			    a.label && b.label && a.label != b.label && !a.sublabel && !b.sublabel) {
 				/* &&l1 - &&l0 */
 				*v = a;
@@ -769,17 +769,17 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 				v->i = a.i - b.i;
 				return true;
 			}
-			if (op == T_MINUS && is_ptr(c, lt) && is_ptr(c, rt)) {
+			if (op == LEX_TOKEN_MINUS && is_ptr(c, lt) && is_ptr(c, rt)) {
 				if (a.kind != b.kind || a.sym != b.sym || a.str != b.str || a.label != b.label)
 					return false;
 				v->i = (a.i - b.i) / (i128)elem_size(c, lt);
 				return true;
 			}
 			/* an address cast to a 64-bit integer, plus or minus an integer: a relocation */
-			if ((op == T_PLUS || op == T_MINUS) && ty_size(c, x->ty) == 8 &&
-			    ((a.kind == CV_ADDR && b.kind == CV_INT) || (op == T_PLUS && a.kind == CV_INT && b.kind == CV_ADDR))) {
+			if ((op == LEX_TOKEN_PLUS || op == LEX_TOKEN_MINUS) && ty_size(c, x->ty) == 8 &&
+			    ((a.kind == CV_ADDR && b.kind == CV_INT) || (op == LEX_TOKEN_PLUS && a.kind == CV_INT && b.kind == CV_ADDR))) {
 				const cval *pv = a.kind == CV_ADDR ? &a : &b, *iv = a.kind == CV_ADDR ? &b : &a;
-				i128 d = op == T_MINUS ? -iv->i : iv->i;
+				i128 d = op == LEX_TOKEN_MINUS ? -iv->i : iv->i;
 
 				*v = *pv;
 				v->ice = false;
@@ -793,20 +793,20 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 				if (!same) {
 					/* &obj vs null */
 					if (((a.kind == CV_INT && a.i == 0) || (b.kind == CV_INT && b.i == 0)) && !cv_weak(c, &a) && !cv_weak(c, &b)) {
-						if (op == T_EQUALEQUAL) { v->i = 0; return true; }
-						if (op == T_EXCLAIMEQ) { v->i = 1; return true; }
+						if (op == LEX_TOKEN_EQUAL_EQUAL) { v->i = 0; return true; }
+						if (op == LEX_TOKEN_EXCLAMATION_EQUAL) { v->i = 1; return true; }
 					}
 					return false;
 				}
 			}
 			switch (op) {
-			case T_EQUALEQUAL: v->i = a.i == b.i; return true;
-			case T_EXCLAIMEQ: v->i = a.i != b.i; return true;
-			case T_LESS: v->i = (u128)a.i < (u128)b.i; return true;
-			case T_LESSEQ: v->i = (u128)a.i <= (u128)b.i; return true;
-			case T_GREATER: v->i = (u128)a.i > (u128)b.i; return true;
-			case T_GREATEREQ: v->i = (u128)a.i >= (u128)b.i; return true;
-			case T_AMP: case T_PIPE: case T_CARET: case T_PLUS: case T_MINUS:
+			case LEX_TOKEN_EQUAL_EQUAL: v->i = a.i == b.i; return true;
+			case LEX_TOKEN_EXCLAMATION_EQUAL: v->i = a.i != b.i; return true;
+			case LEX_TOKEN_LESS: v->i = (u128)a.i < (u128)b.i; return true;
+			case LEX_TOKEN_LESS_EQUAL: v->i = (u128)a.i <= (u128)b.i; return true;
+			case LEX_TOKEN_GREATER: v->i = (u128)a.i > (u128)b.i; return true;
+			case LEX_TOKEN_GREATER_EQUAL: v->i = (u128)a.i >= (u128)b.i; return true;
+			case LEX_TOKEN_AMPERSAND: case LEX_TOKEN_PIPE: case LEX_TOKEN_CARET: case LEX_TOKEN_PLUS: case LEX_TOKEN_MINUS:
 				if (a.kind == CV_INT && b.kind == CV_INT)
 					break;	/* integers cast from pointers */
 				return false;
@@ -823,16 +823,16 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 			v->ice = false;
 			v->ld = false;
 			switch (op) {
-			case T_PLUS: set_q(v, vsoftfloat_add_with_precision(l, r, p)); break;
-			case T_MINUS: set_q(v, vsoftfloat_subtract_with_precision(l, r, p)); break;
-			case T_STAR: set_q(v, vsoftfloat_multiply_with_precision(l, r, p)); break;
-			case T_SLASH: set_q(v, vsoftfloat_divide_with_precision(l, r, p)); break;
-			case T_LESS: v->i = k == -1; break;
-			case T_LESSEQ: v->i = k == -1 || k == 0; break;
-			case T_GREATER: v->i = k == 1; break;
-			case T_GREATEREQ: v->i = k == 1 || k == 0; break;
-			case T_EQUALEQUAL: v->i = k == 0; break;
-			case T_EXCLAIMEQ: v->i = k != 0; break;
+			case LEX_TOKEN_PLUS: set_q(v, vsoftfloat_add_with_precision(l, r, p)); break;
+			case LEX_TOKEN_MINUS: set_q(v, vsoftfloat_subtract_with_precision(l, r, p)); break;
+			case LEX_TOKEN_STAR: set_q(v, vsoftfloat_multiply_with_precision(l, r, p)); break;
+			case LEX_TOKEN_SLASH: set_q(v, vsoftfloat_divide_with_precision(l, r, p)); break;
+			case LEX_TOKEN_LESS: v->i = k == -1; break;
+			case LEX_TOKEN_LESS_EQUAL: v->i = k == -1 || k == 0; break;
+			case LEX_TOKEN_GREATER: v->i = k == 1; break;
+			case LEX_TOKEN_GREATER_EQUAL: v->i = k == 1 || k == 0; break;
+			case LEX_TOKEN_EQUAL_EQUAL: v->i = k == 0; break;
+			case LEX_TOKEN_EXCLAMATION_EQUAL: v->i = k != 0; break;
 			default: return false;
 			}
 			if (v->kind != CV_FLT)
@@ -844,16 +844,16 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 
 			v->ice = false;
 			switch (op) {
-			case T_PLUS: v->kind = CV_FLT, v->f = l + r; break;
-			case T_MINUS: v->kind = CV_FLT, v->f = l - r; break;
-			case T_STAR: v->kind = CV_FLT, v->f = l * r; break;
-			case T_SLASH: v->kind = CV_FLT, v->f = l / r; break;
-			case T_LESS: v->i = l < r; break;
-			case T_LESSEQ: v->i = l <= r; break;
-			case T_GREATER: v->i = l > r; break;
-			case T_GREATEREQ: v->i = l >= r; break;
-			case T_EQUALEQUAL: v->i = l == r; break;
-			case T_EXCLAIMEQ: v->i = l != r; break;
+			case LEX_TOKEN_PLUS: v->kind = CV_FLT, v->f = l + r; break;
+			case LEX_TOKEN_MINUS: v->kind = CV_FLT, v->f = l - r; break;
+			case LEX_TOKEN_STAR: v->kind = CV_FLT, v->f = l * r; break;
+			case LEX_TOKEN_SLASH: v->kind = CV_FLT, v->f = l / r; break;
+			case LEX_TOKEN_LESS: v->i = l < r; break;
+			case LEX_TOKEN_LESS_EQUAL: v->i = l <= r; break;
+			case LEX_TOKEN_GREATER: v->i = l > r; break;
+			case LEX_TOKEN_GREATER_EQUAL: v->i = l >= r; break;
+			case LEX_TOKEN_EQUAL_EQUAL: v->i = l == r; break;
+			case LEX_TOKEN_EXCLAMATION_EQUAL: v->i = l != r; break;
 			default: return false;
 			}
 			if (v->kind == CV_FLT && KIND(c, x->ty) == TY_BFLOAT16)
@@ -872,25 +872,25 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 
 			ok = true;
 			switch (op) {
-			case T_PLUS: v->i = (i128)((u128)l + (u128)r); break;
-			case T_MINUS: v->i = (i128)((u128)l - (u128)r); break;
-			case T_STAR: v->i = sg ? l * r : (i128)((u128)l * (u128)r); break;
-			case T_SLASH:
-			case T_PERCENT:
+			case LEX_TOKEN_PLUS: v->i = (i128)((u128)l + (u128)r); break;
+			case LEX_TOKEN_MINUS: v->i = (i128)((u128)l - (u128)r); break;
+			case LEX_TOKEN_STAR: v->i = sg ? l * r : (i128)((u128)l * (u128)r); break;
+			case LEX_TOKEN_SLASH:
+			case LEX_TOKEN_PERCENT:
 				if (r == 0)
 					return false;
 				if (sg)
-					v->i = op == T_SLASH ? l / r : l % r;
+					v->i = op == LEX_TOKEN_SLASH ? l / r : l % r;
 				else
-					v->i = (i128)(op == T_SLASH ? (u128)trunc_to(c, l, unsigned_of(c, ot)) / (u128)trunc_to(c, r, unsigned_of(c, ot))
+					v->i = (i128)(op == LEX_TOKEN_SLASH ? (u128)trunc_to(c, l, unsigned_of(c, ot)) / (u128)trunc_to(c, r, unsigned_of(c, ot))
 								    : (u128)trunc_to(c, l, unsigned_of(c, ot)) % (u128)trunc_to(c, r, unsigned_of(c, ot)));
 				break;
-			case T_LESSLESS:
-			case T_GREATERGREATER: {
+			case LEX_TOKEN_LESS_LESS:
+			case LEX_TOKEN_GREATER_GREATER: {
 				/* as clang's C folding (shift-count-overflow warns): a count over the
 				   width is width - 1, a negative count shifts the other way */
 				uint64_t w = int_bits(c, x->ty);
-				bool left = op == T_LESSLESS;
+				bool left = op == LEX_TOKEN_LESS_LESS;
 
 				if (r < 0) {
 					left = !left;
@@ -904,15 +904,15 @@ VPRIV bool eval(cc *c, uint32_t n, cval *v)
 					v->i = is_signed(c, x->ty) ? l >> r : (i128)((u128)trunc_to(c, l, unsigned_of(c, x->ty)) >> r);
 				break;
 			}
-			case T_AMP: v->i = l & r; break;
-			case T_PIPE: v->i = l | r; break;
-			case T_CARET: v->i = l ^ r; break;
-			case T_LESS: v->i = sg ? l < r : (u128)trunc_to(c, l, unsigned_of(c, ot)) < (u128)trunc_to(c, r, unsigned_of(c, ot)); break;
-			case T_LESSEQ: v->i = sg ? l <= r : (u128)trunc_to(c, l, unsigned_of(c, ot)) <= (u128)trunc_to(c, r, unsigned_of(c, ot)); break;
-			case T_GREATER: v->i = sg ? l > r : (u128)trunc_to(c, l, unsigned_of(c, ot)) > (u128)trunc_to(c, r, unsigned_of(c, ot)); break;
-			case T_GREATEREQ: v->i = sg ? l >= r : (u128)trunc_to(c, l, unsigned_of(c, ot)) >= (u128)trunc_to(c, r, unsigned_of(c, ot)); break;
-			case T_EQUALEQUAL: v->i = trunc_to(c, l, ot) == trunc_to(c, r, ot); break;
-			case T_EXCLAIMEQ: v->i = trunc_to(c, l, ot) != trunc_to(c, r, ot); break;
+			case LEX_TOKEN_AMPERSAND: v->i = l & r; break;
+			case LEX_TOKEN_PIPE: v->i = l | r; break;
+			case LEX_TOKEN_CARET: v->i = l ^ r; break;
+			case LEX_TOKEN_LESS: v->i = sg ? l < r : (u128)trunc_to(c, l, unsigned_of(c, ot)) < (u128)trunc_to(c, r, unsigned_of(c, ot)); break;
+			case LEX_TOKEN_LESS_EQUAL: v->i = sg ? l <= r : (u128)trunc_to(c, l, unsigned_of(c, ot)) <= (u128)trunc_to(c, r, unsigned_of(c, ot)); break;
+			case LEX_TOKEN_GREATER: v->i = sg ? l > r : (u128)trunc_to(c, l, unsigned_of(c, ot)) > (u128)trunc_to(c, r, unsigned_of(c, ot)); break;
+			case LEX_TOKEN_GREATER_EQUAL: v->i = sg ? l >= r : (u128)trunc_to(c, l, unsigned_of(c, ot)) >= (u128)trunc_to(c, r, unsigned_of(c, ot)); break;
+			case LEX_TOKEN_EQUAL_EQUAL: v->i = trunc_to(c, l, ot) == trunc_to(c, r, ot); break;
+			case LEX_TOKEN_EXCLAMATION_EQUAL: v->i = trunc_to(c, l, ot) != trunc_to(c, r, ot); break;
 			default: ok = false;
 			}
 			(void)bits;

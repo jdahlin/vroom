@@ -96,7 +96,7 @@ VPRIV val x64_fconst(ecx *e, uint64_t bits, int size)
 VPRIV val x64_fbin(ecx *e, int op, qty t, val a, val b)
 {
 	cc *c = e->c;
-	int k = op == T_PLUS ? 0 : op == T_MINUS ? 1 : op == T_STAR ? 2 : 3;
+	int k = op == LEX_TOKEN_PLUS ? 0 : op == LEX_TOKEN_MINUS ? 1 : op == LEX_TOKEN_STAR ? 2 : 3;
 
 	if (x64_isq(c, t))
 		return x64_qbin(e, k, a, b);
@@ -179,8 +179,8 @@ VPRIV val x64_fneg(ecx *e, qty t, val a)
 VPRIV val x64_fcmp(ecx *e, int op, qty t, val a, val b)
 {
 	cc *c = e->c;
-	bool swap = op == T_LESS || op == T_LESSEQ;	/* a < b is b > a: "above" is false for NaN */
-	int cc = op == T_LESS || op == T_GREATER ? CC_A : CC_AE;
+	bool swap = op == LEX_TOKEN_LESS || op == LEX_TOKEN_LESS_EQUAL;	/* a < b is b > a: "above" is false for NaN */
+	int cc = op == LEX_TOKEN_LESS || op == LEX_TOKEN_GREATER ? CC_A : CC_AE;
 	int rd;
 
 	if (x64_isq(c, t))
@@ -214,8 +214,8 @@ VPRIV val x64_fcmp(ecx *e, int op, qty t, val a, val b)
 		x64_tfree(e, b.r);
 	}
 	rd = x64_treg(e);
-	if (op == T_EQUALEQUAL || op == T_EXCLAIMEQ)
-		x64_op3(e, X_FSETCC, 4, rd, XNOREG, XNOREG)->cond = op == T_EXCLAIMEQ;
+	if (op == LEX_TOKEN_EQUAL_EQUAL || op == LEX_TOKEN_EXCLAMATION_EQUAL)
+		x64_op3(e, X_FSETCC, 4, rd, XNOREG, XNOREG)->cond = op == LEX_TOKEN_EXCLAMATION_EQUAL;
 	else
 		x64_op3(e, X_SETCC, 4, rd, XNOREG, XNOREG)->cond = (uint8_t)cc;
 	return x64_vr(rd);
@@ -371,16 +371,16 @@ static val x64_qcmp(ecx *e, int op, val a, val b)
 		int ac = x64_treg(e), bc = x64_treg(e);
 		x64_mov(e, ac, ar);
 		x64_mov(e, bc, br);
-		val lt = x64_qcmp(e, T_LESS, x64_vr(ac), x64_vr(bc));
-		val gt = x64_qcmp(e, T_GREATER, a, b);
+		val lt = x64_qcmp(e, LEX_TOKEN_LESS, x64_vr(ac), x64_vr(bc));
+		val gt = x64_qcmp(e, LEX_TOKEN_GREATER, a, b);
 		x64_op3(e, X_OR, 4, lt.r, lt.r, gt.r);
 		x64_tfree(e, gt.r);
 		return lt;
 	}
-	int fn = op == WK_FCMP_UNORDERED ? FN_UNORDTF2 : op == T_EQUALEQUAL ? FN_EQTF2 : op == T_EXCLAIMEQ ? FN_NETF2 : op == T_LESS ? FN_LTTF2 :
-		 op == T_LESSEQ ? FN_LETF2 : op == T_GREATER ? FN_GTTF2 : FN_GETF2;
-	int cc = op == WK_FCMP_UNORDERED ? CC_NE : op == T_EQUALEQUAL ? CC_E : op == T_EXCLAIMEQ ? CC_NE : op == T_LESS ? CC_L :
-		 op == T_LESSEQ ? CC_LE : op == T_GREATER ? CC_G : CC_GE;
+	int fn = op == WK_FCMP_UNORDERED ? FN_UNORDTF2 : op == LEX_TOKEN_EQUAL_EQUAL ? FN_EQTF2 : op == LEX_TOKEN_EXCLAMATION_EQUAL ? FN_NETF2 : op == LEX_TOKEN_LESS ? FN_LTTF2 :
+		 op == LEX_TOKEN_LESS_EQUAL ? FN_LETF2 : op == LEX_TOKEN_GREATER ? FN_GTTF2 : FN_GETF2;
+	int cc = op == WK_FCMP_UNORDERED ? CC_NE : op == LEX_TOKEN_EQUAL_EQUAL ? CC_E : op == LEX_TOKEN_EXCLAMATION_EQUAL ? CC_NE : op == LEX_TOKEN_LESS ? CC_L :
+		 op == LEX_TOKEN_LESS_EQUAL ? CC_LE : op == LEX_TOKEN_GREATER ? CC_G : CC_GE;
 	tfarg ar[2] = { { TQ, x64_toreg(e, &a, 8) }, { TQ, x64_toreg(e, &b, 8) } };
 	val r = x64_tfcall(e, fn, ar, 2, TI);
 
@@ -544,7 +544,7 @@ VPRIV val x64_cvt(ecx *e, val v, qty from, qty to)
 		return x64_half_call(e, x64_isld(c, from) ? FN_TRUNCXFHF2 : KIND(c, from) == TY_FLOAT ? FN_TRUNCSFHF2 : FN_TRUNCDFHF2, v, from, to);
 	}
 	if (x64_isq(c, from) && KIND(c, to) == TY_BOOL)
-		return x64_qcmp(e, T_EXCLAIMEQ, v, x64_qzero(e));
+		return x64_qcmp(e, LEX_TOKEN_EXCLAMATION_EQUAL, v, x64_qzero(e));
 	if (x64_isq(c, from) || x64_isq(c, to))
 		return x64_qcvt(e, v, from, to);
 	if (KIND(c, to) == TY_BOOL) {

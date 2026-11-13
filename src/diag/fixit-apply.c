@@ -1,5 +1,5 @@
 /* Applying fix-its to files (--fix) and the unified diff of the change. */
-#include "../frontend/pp/ppimpl.h"
+#include "../frontend/pp/pp-internal.h"
 #include "common/buffer.h"
 #include <ctype.h>
 #include <dlfcn.h>
@@ -10,7 +10,7 @@
 
 /* ---------------- fix-its applied: -fdiagnostics-generate-patch, --fix ---------------- */
 
-typedef struct fedit { const vlex_file *f; uint32_t b, e, seq; const char *s; } fedit;
+typedef struct fedit { const lex_file *f; uint32_t b, e, seq; const char *s; } fedit;
 
 typedef struct fedits { fedit *v; uint32_t n, cap; } fedits;
 
@@ -18,7 +18,7 @@ static void fix_add(const pp *p, fedits *x, const vdiag *d, bool machine)
 {
 	for (uint32_t i = 0; i < d->nfix; i++) {
 		const vdfix *k = &d->fix[i];
-		const fent *f;
+		const pp_file_entry *f;
 
 		if ((machine && k->app != VDA_MACHINE) || !loc_ok(p, k->b, &f) || f->sys || k->e < k->b ||
 		    k->e - f->base > f->f->size || !f->f->path)
@@ -133,7 +133,7 @@ static uint32_t nlines(const char *s, uint32_t n)
 /* a unified diff of one file's edits v[0, n), 3 lines of context (GCC's -fdiagnostics-generate-patch):
    edits on the same or adjacent lines are one block of - and + lines, blocks less than 7 lines
    apart one hunk */
-static void fix_patch(vbuffer *b, const vlex_file *f, const fedit *v, uint32_t n)
+static void fix_patch(vbuffer *b, const lex_file *f, const fedit *v, uint32_t n)
 {
 	const char *s = f->src;
 	uint32_t total = nlines(s, f->size);
@@ -180,7 +180,7 @@ static void fix_patch(vbuffer *b, const vlex_file *f, const fedit *v, uint32_t n
 }
 
 /* --fix: each file's machine-applicable edits written back (a new file renamed over it) */
-static void fix_write(pp *p, int fd, const vlex_file *f, const fedit *v, uint32_t n)
+static void fix_write(pp *p, int fd, const lex_file *f, const fedit *v, uint32_t n)
 {
 	char path[4096], tmp[4200];
 	const char *fp = f->path;

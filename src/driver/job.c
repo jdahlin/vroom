@@ -206,11 +206,11 @@ static void job_compile(struct driver_job *job, pp *p, const ppd_env *env)
 			unsigned long long t1 = nsnow();
 			vperf v1 = vperformance_now();
 
-			job->status = cc_run(p, &co) || pp_errors(p) ? 1 : 0;
+			job->status = cc_run(p, &co) || pp_error_count(p) ? 1 : 0;
 			ppd_ns_cc += nsnow() - t1;
 			ppd_ph_add(PPD_PH_CC, v1);
-			ppd_tok_out += pp_ntok(p);
-			ppd_tok_skip += pp_skipped(p);
+			ppd_tok_out += pp_token_count(p);
+			ppd_tok_skip += pp_skipped_token_count(p);
 		}
 		if (fd >= 0) {
 			if (!job->status && client_gone())
@@ -242,25 +242,25 @@ static void job_preprocess(struct driver_job *job, pp *p, const ppd_env *env)
 		const char *s;
 		size_t l;
 
-		pp_text(p, &s, &l);
+		pp_text_render(p, &s, &l);
 		o.p = (char *)s;
 		o.n = l;
 		if (job->dmacros) {
 			char *m;
 
-			pp_macros(p, &m, &l);
+			pp_macros_dump(p, &m, &l);
 			o.p = m;	/* freed with the process or the next job: small */
 			o.n = l;
 		}
 	}
 	if (getenv("VPP_TIME")) {
-		extern _Atomic unsigned long pp_stat_try, pp_stat_skip, vdir_probes;
+		extern _Atomic unsigned long pp_include_lookup_count, pp_include_guard_skip_count, pp_directory_probe_count;
 
 		dprintf(job->errfd, "vpp: %.1f ms, %zu bytes out; include candidates %lu, %lu ruled out by the directory cache (%lu dirs probed)\n",
-			(now() - job->t0) * 1e3, o.n, atomic_load(&pp_stat_try), atomic_load(&pp_stat_skip),
-			atomic_load(&vdir_probes));
+			(now() - job->t0) * 1e3, o.n, atomic_load(&pp_include_lookup_count), atomic_load(&pp_include_guard_skip_count),
+			atomic_load(&pp_directory_probe_count));
 	}
-	if (pp_errors(p)) {
+	if (pp_error_count(p)) {
 		/* clang: -E to stdout still prints the text; with -o it writes no file */
 		if (!job->cmp && !job->objmode && !job->mdeps && (!job->out || !strcmp(job->out, "-")))	/* -M: nothing */
 			write_out(env->cwd, job->out, env->outfd, o.p, o.n, job->errfd);
@@ -396,7 +396,7 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 		job->status = 1;
 		goto out;
 	}
-	pp_set_fatal(p, &jb);
+	pp_fatal_jump_set(p, &jb);
 	if (setjmp(jb)) {
 		vjob_jb = NULL;
 		job->status = 1;

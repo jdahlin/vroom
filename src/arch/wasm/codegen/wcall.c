@@ -759,9 +759,9 @@ static int wbi_overflow(ecx *e, uint32_t n)
 	const node *x = N(n);
 	uint32_t a = warg_n(c, n, 0), b = warg_n(c, n, 1), p = warg_n(c, n, 2);
 	qty ta = N(a)->ty, tb = N(b)->ty, rt = T(c, N(p)->ty)->base;
-	int op = x->aux == BI_ADD_OVERFLOW ? T_PLUS : x->aux == BI_SUB_OVERFLOW ? T_MINUS : T_STAR;
+	int op = x->aux == BI_ADD_OVERFLOW ? LEX_TOKEN_PLUS : x->aux == BI_SUB_OVERFLOW ? LEX_TOKEN_MINUS : LEX_TOKEN_STAR;
 	/* u64 * u64 needs all 128 bits unsigned; every other case fits signed */
-	qty v = op == T_STAR && !is_signed(c, ta) && !is_signed(c, tb) ? prim(TY_UINT128) : prim(TY_INT128);
+	qty v = op == LEX_TOKEN_STAR && !is_signed(c, ta) && !is_signed(c, tb) ? prim(TY_UINT128) : prim(TY_INT128);
 	uint32_t tr = wtmp(e, WPT(c)), tp = wtmp(e, WPT(c));
 	wlv l = { .k = WL_MEM };
 
@@ -783,7 +783,7 @@ static int wbi_overflow(ecx *e, uint32_t n)
 	w16conv(e, v, rt);
 	w16conv(e, rt, v);
 	wget(e, tr);
-	w16cmp(e, T_EXCLAIMEQ, v);
+	w16cmp(e, LEX_TOKEN_EXCLAMATION_EQUAL, v);
 	if (w16(c, rt) && is_signed(c, rt) != is_signed(c, v)) {
 		/* the same 128 bits, the other signedness: the top bit set is out of range */
 		wget(e, tr);
@@ -935,7 +935,7 @@ static int wbi_atomic(ecx *e, uint32_t n, bool want)
 	default: {
 		/* fetch_op / op_fetch: add sub and or xor nand max min */
 		int base = id >= BI_ATOMIC_ADD_FETCH ? id - BI_ATOMIC_ADD_FETCH : id - BI_ATOMIC_FETCH_ADD;
-		static const int bop[] = { T_PLUS, T_MINUS, T_AMP, T_PIPE, T_CARET };
+		static const int bop[] = { LEX_TOKEN_PLUS, LEX_TOKEN_MINUS, LEX_TOKEN_AMPERSAND, LEX_TOKEN_PIPE, LEX_TOKEN_CARET };
 		qty at = is_ptr(c, vt) ? prim(TY_ULONG) : k == WT_I32 ? prim(TY_INT) : vt;
 		uint32_t nv = wtmp(e, k);
 
@@ -944,9 +944,9 @@ static int wbi_atomic(ecx *e, uint32_t n, bool want)
 		wtee(e, cur);
 		wget(e, v1);
 		if (base == 5) {	/* nand: ~(cur & v) */
-			warith(e, T_AMP, at, 0);
+			warith(e, LEX_TOKEN_AMPERSAND, at, 0);
 			wconst(e, wty(c, at), -1);
-			warith(e, T_CARET, at, 0);
+			warith(e, LEX_TOKEN_CARET, at, 0);
 		} else if (base >= 6) {	/* max/min: select(cur, v, cur > v) */
 			bool sg = is_signed(c, vt);
 

@@ -1,9 +1,9 @@
 /* vcc preprocessor: header cache: option signatures, the key table and the #pragma once set */
-#include "ppimpl.h"
+#include "pp-internal.h"
 
-#define HKEY_BITS 16
-static _Atomic(hkey *) hkey_tab[1u << HKEY_BITS];
-size_t hc_mem_max;
+#define PP_HEADER_CACHE_KEY_TABLE_BITS 16
+static _Atomic(pp_header_cache_key *) pp_header_cache_key_table[1u << PP_HEADER_CACHE_KEY_TABLE_BITS];
+size_t pp_header_cache_memory_limit;
 
 /*
  * Signatures.  The base signature is every option that decides what a
@@ -15,35 +15,35 @@ size_t hc_mem_max;
  * same directories.  (kbuild adds -I for each source directory at the end:
  * that does not split the cache.)
  */
-static pthread_mutex_t sig_mu = PTHREAD_MUTEX_INITIALIZER;
-static char *sig_str[1 << 16];
-static size_t sig_len[1 << 16];
-static uint32_t nsig;
+static pthread_mutex_t pp_signature_mutex = PTHREAD_MUTEX_INITIALIZER;
+static char *pp_signature_strings[1 << 16];
+static size_t pp_signature_lengths[1 << 16];
+static uint32_t pp_signature_count;
 
-static uint32_t sig_intern(char *b, size_t n)
+static uint32_t pp_header_cache_signature_intern(char *b, size_t n)
 {
-	uint32_t r = HNONE;
+	uint32_t r = PP_HEADER_CACHE_NONE;
 
-	pthread_mutex_lock(&sig_mu);
-	for (uint32_t i = 0; i < nsig; i++)
-		if (sig_len[i] == n && !memcmp(sig_str[i], b, n)) {
+	pthread_mutex_lock(&pp_signature_mutex);
+	for (uint32_t i = 0; i < pp_signature_count; i++)
+		if (pp_signature_lengths[i] == n && !memcmp(pp_signature_strings[i], b, n)) {
 			r = i;
 			break;
 		}
-	if (r == HNONE && nsig < (1 << 16)) {
+	if (r == PP_HEADER_CACHE_NONE && pp_signature_count < (1 << 16)) {
 		char *c = malloc(n ? n : 1);
 
 		memcpy(c, b, n);
-		sig_str[nsig] = c;
-		sig_len[nsig] = n;
-		r = nsig++;
+		pp_signature_strings[pp_signature_count] = c;
+		pp_signature_lengths[pp_signature_count] = n;
+		r = pp_signature_count++;
 	}
-	pthread_mutex_unlock(&sig_mu);
+	pthread_mutex_unlock(&pp_signature_mutex);
 	return r;
 }
 
 /* base signature into *sig, prefix ids into psig[0..ndirs]; false if too long */
-VPRIV bool sig_of(const pp_opts *o, uint32_t *sig, uint32_t *psig)
+VPRIV bool pp_header_cache_signatures_get(const pp_opts *o, uint32_t *sig, uint32_t *psig)
 {
 	char *b = malloc(1 << 17);
 	size_t n = 0;
@@ -60,42 +60,42 @@ VPRIV bool sig_of(const pp_opts *o, uint32_t *sig, uint32_t *psig)
 	SIGS(o->cwd);
 	SIGS(o->prefix_from);
 	SIGS(o->prefix_to);
-	*sig = sig_intern(b, n);
+	*sig = pp_header_cache_signature_intern(b, n);
 	n = 0;
-	psig[0] = sig_intern(b, 0);
+	psig[0] = pp_header_cache_signature_intern(b, 0);
 	for (int i = 0; i < o->ndirs && ok; i++) {
 		/* each directory with whether it is a quote-only and a system directory */
 		b[n++] = (char)('0' + (i < o->nquote) + 2 * (o->nsys1 && i >= o->nsys1 - 1));
 		SIGS(o->dirs[i]);
-		psig[i + 1] = sig_intern(b, n);
+		psig[i + 1] = pp_header_cache_signature_intern(b, n);
 	}
 #undef SIGS
 	free(b);
-	return ok && *sig != HNONE;
+	return ok && *sig != PP_HEADER_CACHE_NONE;
 }
 
-VPRIV hkey *hkey_get(uint32_t sig, const vlex_file *f, int32_t sdir, uint32_t nfile, const char *spath, uint8_t sys,
+VPRIV pp_header_cache_key *pp_header_cache_key_get(uint32_t sig, const lex_file *f, int32_t sdir, uint32_t nfile, const char *spath, uint8_t sys,
 		     bool make)
 {
 	size_t sl = strlen(spath);
 	uint64_t h = ((uint64_t)(uintptr_t)f * 0x9E3779B97F4A7C15ull) ^
 		     ((uint64_t)sig << 40 | (uint64_t)(uint32_t)sdir << 16 | (uint64_t)sys << 15 | nfile);
-	hkey *mine = NULL;
+	pp_header_cache_key *mine = NULL;
 
 	h = (h ^ vintern_hash(spath, sl)) * 0xff51afd7ed558ccdull;
 	h ^= h >> 29;
-	for (uint32_t i = (uint32_t)(h >> (64 - HKEY_BITS)), k = 0; k < (1u << HKEY_BITS);
-	     i = (i + 1) & ((1u << HKEY_BITS) - 1), k++) {
-		hkey *e = atomic_load_explicit(&hkey_tab[i], memory_order_acquire);
+	for (uint32_t i = (uint32_t)(h >> (64 - PP_HEADER_CACHE_KEY_TABLE_BITS)), k = 0; k < (1u << PP_HEADER_CACHE_KEY_TABLE_BITS);
+	     i = (i + 1) & ((1u << PP_HEADER_CACHE_KEY_TABLE_BITS) - 1), k++) {
+		pp_header_cache_key *e = atomic_load_explicit(&pp_header_cache_key_table[i], memory_order_acquire);
 
 		if (!e) {
 			if (!make)
 				return NULL;
 			if (!mine) {
-				char *sp = salloc(sl + 1);
+				char *sp = pp_shared_allocate(sl + 1);
 
 				memcpy(sp, spath, sl + 1);
-				mine = salloc(sizeof(*mine));
+				mine = pp_shared_allocate(sizeof(*mine));
 				mine->hash = h;
 				mine->f = f;
 				mine->spath = sp;
@@ -104,7 +104,7 @@ VPRIV hkey *hkey_get(uint32_t sig, const vlex_file *f, int32_t sdir, uint32_t nf
 				mine->sdir = sdir;
 				mine->sys = sys;
 			}
-			if (atomic_compare_exchange_strong_explicit(&hkey_tab[i], &e, mine, memory_order_acq_rel,
+			if (atomic_compare_exchange_strong_explicit(&pp_header_cache_key_table[i], &e, mine, memory_order_acq_rel,
 								    memory_order_acquire))
 				return mine;
 		}
@@ -115,7 +115,7 @@ VPRIV hkey *hkey_get(uint32_t sig, const vlex_file *f, int32_t sdir, uint32_t nf
 	return NULL;
 }
 
-VPRIV int once_index(const pp *p, const vlex_file *f)
+VPRIV int pp_once_file_find(const pp *p, const lex_file *f)
 {
 	/* the same file by any path (symlink, hard link, a/../a): clang's FileEntry */
 	for (uint32_t i = 0; i < p->nonce; i++)
@@ -124,14 +124,14 @@ VPRIV int once_index(const pp *p, const vlex_file *f)
 	return -1;
 }
 
-VPRIV void once_add(pp *p, const vlex_file *f)
+VPRIV void pp_once_file_add(pp *p, const lex_file *f)
 {
-	if (p->nonce == p->oncecap) {
-		const vlex_file **n = varena_alloc(&p->perm, 2 * p->oncecap * sizeof(*n));
+	if (p->nonce == p->once_file_capacity) {
+		const lex_file **n = varena_alloc(&p->perm, 2 * p->once_file_capacity * sizeof(*n));
 
 		memcpy(n, p->once, p->nonce * sizeof(*n));
 		p->once = n;
-		p->oncecap *= 2;
+		p->once_file_capacity *= 2;
 	}
 	p->once[p->nonce++] = f;
 }

@@ -93,8 +93,8 @@ VPRIV uint32_t cplx_bool(cc *c, uint32_t n)
 	qty et = cplx_elem(c, N(n)->ty);
 
 	cplx_parts(c, n, &re, &im, &pre);
-	re = mk_bin(c, T_EXCLAIMEQ, prim(TY_INT), re, zero_of(c, et, loc), loc);
-	im = mk_bin(c, T_EXCLAIMEQ, prim(TY_INT), im, zero_of(c, et, loc), loc);
+	re = mk_bin(c, LEX_TOKEN_EXCLAMATION_EQUAL, prim(TY_INT), re, zero_of(c, et, loc), loc);
+	im = mk_bin(c, LEX_TOKEN_EXCLAMATION_EQUAL, prim(TY_INT), im, zero_of(c, et, loc), loc);
 	return with_pre(c, pre, mk2(c, N_LOGOR, prim(TY_INT), loc, re, im));
 }
 
@@ -230,7 +230,7 @@ VPRIV uint32_t cplx_binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 	uint32_t a, b = 0, cr, d = 0, p1 = 0, p2 = 0, x, y;
 
 	if (!is_arith(c, le) || !is_arith(c, re_) ||
-	    !(op == T_PLUS || op == T_MINUS || op == T_STAR || op == T_SLASH || op == T_EQUALEQUAL || op == T_EXCLAIMEQ)) {
+	    !(op == LEX_TOKEN_PLUS || op == LEX_TOKEN_MINUS || op == LEX_TOKEN_STAR || op == LEX_TOKEN_SLASH || op == LEX_TOKEN_EQUAL_EQUAL || op == LEX_TOKEN_EXCLAMATION_EQUAL)) {
 		bad_operands(c, op, l, r, loc);
 		return mk_int(c, 0, prim(TY_INT), loc);
 	}
@@ -246,21 +246,21 @@ VPRIV uint32_t cplx_binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 		cr = cplx_reuse(c, convert(c, r, et), &p2);
 #define B(o, u, v) mk_bin(c, o, et, u, v, loc)
 	switch (op) {
-	case T_PLUS: case T_MINUS:
+	case LEX_TOKEN_PLUS: case LEX_TOKEN_MINUS:
 		x = B(op, a, cr);
-		y = !lc ? (op == T_MINUS ? neg(c, d) : d) : !rc ? b : B(op, b, d);
+		y = !lc ? (op == LEX_TOKEN_MINUS ? neg(c, d) : d) : !rc ? b : B(op, b, d);
 		break;
-	case T_STAR:
+	case LEX_TOKEN_STAR:
 		if (!lc)
-			x = B(T_STAR, a, cr), y = B(T_STAR, a, d);
+			x = B(LEX_TOKEN_STAR, a, cr), y = B(LEX_TOKEN_STAR, a, d);
 		else if (!rc)
-			x = B(T_STAR, a, cr), y = B(T_STAR, b, cr);
+			x = B(LEX_TOKEN_STAR, a, cr), y = B(LEX_TOKEN_STAR, b, cr);
 		else
-			x = B(T_MINUS, B(T_STAR, a, cr), B(T_STAR, b, d)), y = B(T_PLUS, B(T_STAR, a, d), B(T_STAR, b, cr));
+			x = B(LEX_TOKEN_MINUS, B(LEX_TOKEN_STAR, a, cr), B(LEX_TOKEN_STAR, b, d)), y = B(LEX_TOKEN_PLUS, B(LEX_TOKEN_STAR, a, d), B(LEX_TOKEN_STAR, b, cr));
 		break;
-	case T_SLASH:
+	case LEX_TOKEN_SLASH:
 		if (!rc) {
-			x = B(T_SLASH, a, cr), y = B(T_SLASH, b, cr);
+			x = B(LEX_TOKEN_SLASH, a, cr), y = B(LEX_TOKEN_SLASH, b, cr);
 		} else {
 			if (is_float(c, et)) {
 				uint32_t args[4] = { a, lc ? b : zero_of(c, et, loc), cr, d };
@@ -270,19 +270,19 @@ VPRIV uint32_t cplx_binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 					result = cplx_divcall(c, ct, et, args, loc);
 				return with_pre(c, p1, with_pre(c, p2, result));
 			}
-			uint32_t den = B(T_PLUS, B(T_STAR, cr, cr), B(T_STAR, d, d));
+			uint32_t den = B(LEX_TOKEN_PLUS, B(LEX_TOKEN_STAR, cr, cr), B(LEX_TOKEN_STAR, d, d));
 
 			if (!lc) {
-				x = B(T_SLASH, B(T_STAR, a, cr), den);
-				y = B(T_SLASH, neg(c, B(T_STAR, a, d)), den);
+				x = B(LEX_TOKEN_SLASH, B(LEX_TOKEN_STAR, a, cr), den);
+				y = B(LEX_TOKEN_SLASH, neg(c, B(LEX_TOKEN_STAR, a, d)), den);
 			} else {
-				x = B(T_SLASH, B(T_PLUS, B(T_STAR, a, cr), B(T_STAR, b, d)), den);
-				y = B(T_SLASH, B(T_MINUS, B(T_STAR, b, cr), B(T_STAR, a, d)), den);
+				x = B(LEX_TOKEN_SLASH, B(LEX_TOKEN_PLUS, B(LEX_TOKEN_STAR, a, cr), B(LEX_TOKEN_STAR, b, d)), den);
+				y = B(LEX_TOKEN_SLASH, B(LEX_TOKEN_MINUS, B(LEX_TOKEN_STAR, b, cr), B(LEX_TOKEN_STAR, a, d)), den);
 			}
 		}
 		break;
 	default: {	/* == != */
-		int lop = op == T_EQUALEQUAL ? N_LOGAND : N_LOGOR;
+		int lop = op == LEX_TOKEN_EQUAL_EQUAL ? N_LOGAND : N_LOGOR;
 		uint32_t z = zero_of(c, et, loc);
 
 		x = mk_bin(c, op, prim(TY_INT), a, cr, loc);
@@ -300,10 +300,10 @@ VPRIV uint32_t cplx_unary(cc *c, int op, uint32_t n, uint32_t loc)
 	uint32_t re, im, pre;
 	qty t = QUNQ(N(n)->ty);
 
-	if (op == T_PLUS)
+	if (op == LEX_TOKEN_PLUS)
 		return n;
 	cplx_parts(c, n, &re, &im, &pre);
-	return with_pre(c, pre, mk_cplx(c, t, op == T_MINUS ? neg(c, re) : re, neg(c, im), loc));
+	return with_pre(c, pre, mk_cplx(c, t, op == LEX_TOKEN_MINUS ? neg(c, re) : re, neg(c, im), loc));
 }
 
 /* Atomically update both components with a compare-exchange retry loop.
@@ -340,7 +340,7 @@ static uint32_t cplx_atomic_incdec(cc *c, uint32_t n, int op, uint32_t loc)
 	vpush(c, &args, mk_int(c, 5, prim(TY_INT), loc));
 	uint32_t load = mk_builtin(c, BI_ATOMIC_LOAD, prim(TY_VOID), loc, &args);
 	vpush(c, &body, mkstmt(c, N_EXPR, loc, load, 0, 0));
-	uint32_t re = binop(c, inc ? T_PLUS : T_MINUS, rvalue(c, cplx_part(c, vars[0], 0)), mk_int(c, 1, prim(TY_INT), loc), loc);
+	uint32_t re = binop(c, inc ? LEX_TOKEN_PLUS : LEX_TOKEN_MINUS, rvalue(c, cplx_part(c, vars[0], 0)), mk_int(c, 1, prim(TY_INT), loc), loc);
 	uint32_t desired = mk_cplx(c, t, convert(c, re, et), rvalue(c, cplx_part(c, vars[0], 1)), loc);
 	uint32_t update = assign(c, 0, vars[1], desired, loc);
 	args.n = 0;
@@ -351,7 +351,7 @@ static uint32_t cplx_atomic_incdec(cc *c, uint32_t n, int op, uint32_t loc)
 	vpush(c, &args, mk_int(c, 5, prim(TY_INT), loc));
 	vpush(c, &args, mk_int(c, 5, prim(TY_INT), loc));
 	uint32_t cas = mk_builtin(c, BI_ATOMIC_CMPXCHG, prim(TY_BOOL), loc, &args);
-	uint32_t retry = mk_bin(c, T_EQUALEQUAL, prim(TY_INT), cas, mk_int(c, 0, prim(TY_INT), loc), loc);
+	uint32_t retry = mk_bin(c, LEX_TOKEN_EQUAL_EQUAL, prim(TY_INT), cas, mk_int(c, 0, prim(TY_INT), loc), loc);
 	vpush(c, &body, mkstmt(c, N_DO, loc, retry, mkstmt(c, N_EXPR, loc, update, 0, 0), 0));
 	vpush(c, &body, mkstmt(c, N_EXPR, loc, rvalue(c, vars[post ? 0 : 1]), 0, 0));
 	uint32_t block = mkstmt(c, N_BLOCK, loc, 0, vfreeze(c, &body), body.n);
@@ -376,7 +376,7 @@ VPRIV uint32_t cplx_incdec(cc *c, uint32_t n, int op, uint32_t loc)
 	}
 	if (T(c, N(n)->ty)->flags & TF_ATOMIC) {
 		if (atomic_wide(c, N(n)->ty))
-			return atomic_assign_expr(c, n, 0, inc ? T_PLUS : T_MINUS, post, loc);
+			return atomic_assign_expr(c, n, 0, inc ? LEX_TOKEN_PLUS : LEX_TOKEN_MINUS, post, loc);
 		if (ty_size(c, t) <= 8)
 			return cplx_atomic_incdec(c, n, op, loc);
 		cc_error(c, loc, "atomic complex increment and decrement are not supported yet");
@@ -395,7 +395,7 @@ VPRIV uint32_t cplx_incdec(cc *c, uint32_t n, int op, uint32_t loc)
 	N(tmp)->a = sym;
 	N(tmp)->flags = NF_LVALUE;
 	save = mk2(c, N_ASSIGN, t, loc, tmp, rvalue(c, n));
-	value = binop(c, inc ? T_PLUS : T_MINUS, rvalue(c, cplx_part(c, tmp, 0)), mk_int(c, 1, prim(TY_INT), loc), loc);
+	value = binop(c, inc ? LEX_TOKEN_PLUS : LEX_TOKEN_MINUS, rvalue(c, cplx_part(c, tmp, 0)), mk_int(c, 1, prim(TY_INT), loc), loc);
 	value = convert(c, value, et);
 	/* Materialize the arithmetic once: storing the updated real component
 	 * and producing a prefix result must not repeat a trapping FP operation. */

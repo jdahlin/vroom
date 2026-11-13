@@ -34,7 +34,7 @@ VPRIV void gen_cond(ecx *e, uint32_t n, bool jump_if, uint32_t l)
 		return;
 	}
 	case N_UNARY:
-		if (x->aux == T_EXCLAIM) {
+		if (x->aux == LEX_TOKEN_EXCLAMATION) {
 			gen_cond(e, x->a, !jump_if, l);
 			return;
 		}
