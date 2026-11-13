@@ -158,6 +158,16 @@ static void driver_job_pp_options_finish(struct driver_job *job, const driver_en
 /* -fsyntax-only, -S, -c of C: the front end and code generator, then the output files */
 static void driver_job_compile(struct driver_job *job, pp *p, const driver_environment *env)
 {
+		if (job->cxx) {	/* C++ (PLAN-cxx.md): parsing only, so far */
+			cxx_options xo = { .standard = job->cxx, .errfd = job->errfd, .progress = driver_environment_get(env, "VCC_CXX_PROGRESS") != NULL };
+
+			job->status = cxx_run(p, &xo) || pp_error_count(p) ? 1 : 0;
+			if (!job->status && !job->syntax_only) {
+				dprintf(job->errfd, "vcc: error: C++ code generation is not implemented yet\n");
+				job->status = 1;
+			}
+			return;
+		}
 		const char *field_uses = driver_environment_get(env, "VCC_FIELD_USES");	/* test aid: frontend/c/field-uses.c */
 
 		if (__builtin_expect(field_uses != NULL, 0)) {

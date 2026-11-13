@@ -321,4 +321,19 @@ own.
   all 71 json TUs give clang++'s `-E -P` token stream.  The parser joins of
   `.*`, `->*`, `<=>` are for X3/X4.  libc++ is reused as is; a library of
   our own may come later.
-- X1, X3-X7: not started.  Next: `bench/cxx-json.py --stage syntax`.
+- X3/X4 (parsing, first form): all 71 json TUs parse (2026-11-13;
+  `bench/cxx-json.py --stage syntax`: 60.3 M tokens, 71/71).  `src/frontend/cxx/`
+  is a recognizer with name lookup: the TU's tokens in one array (backtracking
+  by index, `>>` splits through an undo log), scopes for namespaces (inline
+  ones and using-directives), classes (bases; a dependent base is skipped by
+  unqualified lookup, two-phase), templates (specializations recorded with
+  their template), member bodies parsed when the outermost class is complete,
+  C++20's implicit typename, deduction guides, structured bindings, the
+  `<::` rule, user-defined literals.  No AST, no semantic checks yet: it
+  accepts code clang would reject on types.  The rules it needed are in
+  `src/test/cxx/parse` (`bench/cxx-parse-tests.py`, each case checked with
+  clang).  Not a speed number yet: parsing unit-32bit takes 0.13 s against
+  clang -fsyntax-only's 1.17 s, but clang also checks and instantiates.
+  Development started at 0.1 % of the tokens; libc++ was 80 % of the work.
+- X1, X5-X7: not started.  Next: the AST (what X1's split and X4's recorded
+  instantiations need), then instantiation.
