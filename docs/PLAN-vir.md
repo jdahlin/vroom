@@ -247,6 +247,10 @@ relevanta familjerna mot källkod. Rekommendation: överför tillväxtkontroll,
 frekvensvägda kostnader och begränsat analysarbete; inga numeriska standarder
 kopieras utan kalibrering i jämförbara enheter. Nästa implementation börjar
 med räknare för budgetstopp och tillväxt, därefter inline-/allokatorpolicy.
+Kodgranskningens konkreta arbetspaket finns i forskningens avsnitt
+"Current-code follow-up": först dynamisk x86-attribution av befintliga
+allokatorändringar, sedan kostnad för blockinträde och deterministiska
+inlinebeslut per anrop; målberoende lönsamhet och aliasbudgetar följer.
 Inga kompilatorändringar, ingen ny prestandavinst eller stängd releasegrind.
 
 

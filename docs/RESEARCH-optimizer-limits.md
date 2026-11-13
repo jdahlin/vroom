@@ -289,3 +289,131 @@ the shared rule affects both, and retain existing correctness/sanitizer gates.
 This review adds no new performance requirement to CI and claims no release
 gate passed. Native portfolio runs and threshold calibration belong to the
 implementation experiments, not to this read-only reference inventory.
+
+## Current-code follow-up: concrete work packets (2026-11-13)
+
+This follow-up reviews the implementation, not just the reference thresholds.
+The order below refines the earlier list: start with a small allocator attribution
+experiment, then choose between allocator policy and inlining using its evidence.
+No runtime improvement is established by this review.
+
+### 1. Attribute allocator edits on x86 before changing their policy
+
+`vir/alloc.h` already has `vir_astats`: intra-block reload/remat/move/store counts
+and separate edge counts. Reuse these. `emit/vir/a64.c` already implements
+`VCC_VL_PROBE`; x86 needs equivalent attribution at its edit-emission sites, plus
+an optional mapping from an edit to its block, value and entry-state decision.
+Keep reports opt-in and function names as diagnostic filters only.
+
+The measured SQLite VM has 165 million zero materializations near dispatch
+edges and 92 million reloads of the aMem stack location. These are candidates,
+not proof of dead code or allocator mistakes. Determine which are remats,
+edge reconciliation, ordinary lowering, or loads that alias analysis must retain.
+The existing instruction-category probe cannot answer that distinction.
+
+Deliverable: dynamic edit counts linked to static allocator decisions. Verify
+unchanged objects with diagnostics disabled and matching program results when
+enabled. Nop probes require alignment-controlled probe/control binaries; use
+unmodified binaries for runtime comparisons. Counts in VdbeExec remain exclusive
+of out-of-line callees, so also report whole-program performance.
+
+### 2. Price block-entry choices by the work they cause
+
+`vir/alloc.c:enter` chooses an already-processed predecessor using live-in
+register count, coldness, physical adjacency and a strongly dominant loop-depth
+term. It inherits that predecessor's live-in register states, including
+constants. This can make other incoming edges pay to recreate a cheap constant
+while useful nonconstant values compete for registers. Whether this explains
+the measured zeros remains to be established by packet 1.
+
+First experiment: estimate reconciliation work for a bounded set of candidate
+entry states, distinguishing register copies, reloads, stores and rematerialized
+constants. Start with existing loop/cold information and deterministic tie breaks;
+do not present those as measured execution frequencies. Compare a candidate with
+the current choice before installing it. Include later/backedge reconciliation
+in validation even though their register states are unavailable at this point.
+Avoid a quadratic predecessor-by-live-value search on giant switch functions.
+
+Keep victim selection separate: `victim` currently uses next-use distance with
+a constant tie preference. Replacing that and entry selection simultaneously
+would hide the cause of a result. LLVM's ML reward weights are not suitable
+replacement costs. Use the allocator checker/sweeps and randomized cases, then
+ARM/x86 correctness and native runtime tests. Success means lower useful dynamic
+edge work and a runtime benefit, not merely fewer static moves.
+
+### 3. Plan inline decisions once, with caller growth and specialization cost
+
+`emit/prepass.c:fn_isize` already computes bottom-up expanded sizes and recursion
+groups before worker emission. Preserve this deterministic design.
+`inl_constarg` only establishes that a referenced parameter receives a constant;
+it does not estimate the code remaining after specialization. The fourfold
+allowance can therefore reward constants that remove almost no work. The
+single-use rule tests original caller/callee sizes, not cumulative caller growth.
+
+Add per-callsite decision records in the prepass, consumed by
+`emit/walk/stmt.c:wk_can_inline`, so estimates and admission cannot drift apart.
+First record original caller size, accumulated expansion, admission reason and
+resulting emitted size. Then trial a caller-growth guard separately from a
+bounded constant-substitution estimate. Estimate removable branches and work
+without mutating the shared AST; cache only summaries with a valid argument
+context. Keep always-inline semantics, recursion restrictions and target-feature
+legality intact. Do not add a shared budget mutated by emission workers.
+
+Transfer GCC/LLVM's distinction between call overhead, simplified body and
+aggregate growth; retain vcc units until calibrated. Single-use removal of an
+out-of-line body and growth of its caller are different costs. Check output
+stability across worker counts and the inline regression suite. Evaluate both
+large amalgamations and ordinary multi-file projects before choosing a limit.
+
+### 4. Add small target cost hooks where profitability is currently structural
+
+- **If-conversion:** `vw_armempty` permits up to two cheap instructions and
+  `vw_ifconv` up to eight selects. Price the executed work on both arms and the
+  select dependency chain; do not translate GCC's 20/40 directly into these
+  counts. Measure predictable and unpredictable branches separately.
+- **Vectorization:** `vec.inc` already reports rejection reasons and rejects
+  ordered-reduction-only loops on ARM after a measured regression. Preserve
+  that evidence while estimating setup, tail and serial lane extraction on
+  each target. Vectorized-loop count is not an acceptance metric. Start with
+  these supported forms before adding general unrolling or runtime versioning.
+- **Layout/duplication:** include allocator reconciliation and final code size
+  in duplication experiments. A locally shorter branch sequence can increase
+  edge traffic or worsen instruction-cache behavior. Reuse packet 1's counts.
+
+These should share documented target-cost units where meaningful, but do not
+require a large universal cost-model framework before the first experiment.
+
+### 5. Separate missing alias proofs from exhausted search budgets
+
+`emit/vir/build.c:vw_unwritten` stops at 32 writers, but also stops immediately
+at a non-store writer, an unproved base relationship, an excessive offset or an
+overlapping store. Split those rejection counters first. Raising 32 cannot fix
+unknown aliasing. If budget exhaustion is rare, investigate a narrowly justified
+alias proof instead of a larger scan. Retain conservative fallback on every
+unfinished proof.
+
+Most current scalar work runs on builder IR in `vw_emit`, including a second
+promotion/simplification round. Implement improvements at the phase with the
+needed facts; do not assume the compiler lacks promotion or needs an entire
+MemorySSA/LICM infrastructure to make progress.
+
+### What should wait, and the gate for each experiment
+
+Do not lead with another range-analysis or local-DSE expansion for SQLite.
+The experiments recorded in `PLAN-vir.md` at commit `feaaed26` removed instructions
+but regressed runtime: the range change by about 1.1–1.4%; the later DSE trial
+removed 69 static instructions overall without reducing the measured instruction
+ratio. They may help a different corpus, but need fresh evidence. Also defer
+bulk threshold increases, copying greedy-allocator reward constants, and
+function/opcode-name exceptions.
+
+For each packet, freeze a baseline and change one decision policy. Run its
+focused correctness checks, then short interleaved native comparisons on ARM
+and x86 where available. Use SQLite plus non-SQLite development workloads from
+zlib, PostgreSQL, FFmpeg and TSVC, reserving independent programs/input cases as
+holdouts before tuning. Report runtime, emitted text size, compile time and
+instructions, and the diagnostic quantity the policy intended to improve.
+Record unavailable target/project runs rather than claiming portability from
+QEMU timings. Lock regression tolerances and repetition rules before the sweep;
+retain only changes whose benefit survives reruns and holdouts without violating
+the compiler's compile-time budget. No new arbitrary tolerance is approved here.
