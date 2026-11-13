@@ -136,7 +136,7 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   --size 100 --memdb: clang -O2 2.49 s, gcc-16 -O2 2.44 s, vcc -O2 3.92 s;
   sqlite3.c compiles in 0.13 s (clang -O2 7.9 s, gcc 22 s).  `bench/sqlite/run.py all`.
   zlib 1.4 on Darwin (2026-11-12, `bench/zlib/run.py all`): vcc and VIR
-  (`VCC_VIR=bl`) pass example, infcover and the minigzip round trips, and
+  (`-O3`) pass example, infcover and the minigzip round trips, and
   deflate at levels 1/6/9 gives clang's bytes.  All 131 functions VIR sees
   are lowered; only `crc32_z` (inline asm) falls back.  zbench on zlib's own
   source tar, CPU time against clang -O2: vcc 1.37x, VIR 1.10x, gcc-16 0.99x

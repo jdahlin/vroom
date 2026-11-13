@@ -659,7 +659,8 @@ follows an instruction that has a location.
 
 `vir_verify(f)` checks every rule below and reports the first failures with
 function, block, instruction and rule id. It runs after the builder and after
-every pass in sanitizer builds and under `VCC_VIR_VERIFY=1`; a failure is an
+every pass in sanitizer builds, and under `-fvir-verify` (after the builder)
+and `-fvir-passes=verify` (after every pass); a failure is an
 internal compiler error with a dump.
 
 | Id | Rule |
@@ -791,11 +792,11 @@ refinement of it, in canonical form. This section first says what exists
   (drops the nops and the constants nothing uses, in place, keeping
   `f->valid`); one that edits blocks or edges ends with `vir_canon`. Its row
   says which analyses it needs and which stay valid (`keeps`); with
-  `VCC_VIR_CHECK_ANALYSES=1`, `virtest` and `VCC_VIR_PASSES=verify` compute
+  `-fvir-passes=analyses`, `virtest` and `-fvir-passes=verify` compute
   each analysis `keeps` claims again after the pass and report a stale one by
   the pass's name. The registry has the pass `compact` (`vir_function_compact`)
   for now. The `-O2` order is the builder's table, which has one row per VIR
-  pass after `canon` (`VCC_VIR_PASSES` names them like the others; a row may
+  pass after `canon` (`-fvir-passes` names them like the others; a row may
   be off by default and asked for with `+NAME`).
 - A pass is tested by `virtest` on `.vir` files (16, 17.1).
 
@@ -1132,13 +1133,15 @@ x86-like constraints) until V2 brings real input.
 | `vpp -fvir-dump=...` | 11.7 |
 | `src/test/fuzz/fuzz-vir` | libFuzzer over the parser, verifier, passes and interpreter: parse must not crash; a verified function must stay verified and equivalent after each pass |
 
-Environment: `VCC_VIR=1` enables VIR before it is the `-O2` default;
-`VCC_VIR_VERIFY=1` verifies after every pass; `VCC_VIR_STATS=1` prints per TU
-how many functions were built as VIR and the reason for each that was not;
-`VCC_VIR_PASSES=a,b,...` overrides the pass list (`-NAME`, `+NAME`, `only=`,
-`verify`, `time`: `src/codegen/vir/pass-table.c`); `VCC_VIR_CHECK_ANALYSES=1`
-checks, after every pass on VIR, that the analyses its `keeps` row names are
-what a fresh computation gives.
+Options (`doc/OPTIMIZATION.md`): VIR is the code generator of `-O2` and up
+(`-O1` or `-fno-vir` leaves it out); `-fvir-verify` verifies each function
+after the builder, `-fvir-passes=verify` after every pass; `-fvir-stats`
+prints per TU how many functions were built as VIR and the reason for each
+that was not; `-fvir-passes=a,b,...` overrides the pass list (`-NAME`,
+`+NAME`, `only=`, `verify`, `time`, `analyses`:
+`src/codegen/vir/pass-table.c`); `-fvir-passes=analyses` checks, after every
+pass on VIR, that the analyses its `keeps` row names are what a fresh
+computation gives.
 
 Reasons a function is not built (stable names, counted): `returns_twice`,
 `alloca`, `wide_int`, `long_double`, `vector`, `asm_unsupported`, `tail`,
@@ -1182,8 +1185,8 @@ requires that `virtest` never crashes.
 - each pass: positive cases, and negative cases for every "allowed when"
   condition in 10.2 that the pass uses.
 
-17.3 End-to-end checks are the existing C suites with `VCC_VIR=1`
-(`PLAN-vir.md`, steps V2-V7).
+17.3 End-to-end checks are the existing C suites at `-O2` and `-O3`
+(`bench/vcc-ctests.py -O3`; `PLAN-vir.md`, steps V2-V7).
 
 ## 18. Limits
 
@@ -1430,7 +1433,7 @@ target passes specially). If it says no, `wk_function` runs as today. If it
 says yes, the VIR walker runs and must succeed; a failure after that point is
 an internal compiler error in development builds, and in release builds falls
 back by walking again with the real target. That fallback requires the
-walker's emitter side effects to be repeatable; `VCC_VIR_STATS` counts such
+walker's emitter side effects to be repeatable; `-fvir-stats` counts such
 late failures and the target is zero.
 
 ### X9. 8-bit register numbers
@@ -1594,7 +1597,7 @@ compares for every later pass.
 | 7 | Lowering | Forward | 15.3; reads the operand registers and edits sequentially |
 
 Section 14 describes `simplify`, `gvn` and `dce` as separate contracts; they
-stay separately callable for tests (`VCC_VIR_PASSES`), and the default
+stay separately callable for tests (`-fvir-passes`), and the default
 pipeline fuses them as above.
 
 ### 22.7 Smaller choices
@@ -1613,14 +1616,14 @@ pipeline fuses them as above.
 - **No pass allocates** except from the thread's reservations; a pass that
   needs a worklist uses `tmp` as an intrusive list.
 - **The verifier is not on this path:** it runs in test and sanitizer builds
-  and under `VCC_VIR_VERIFY=1` only (section 12).
+  and under `-fvir-verify` and `-fvir-passes=verify` only (section 12).
 
 ### 22.8 Measuring
 
 - V1 adds `virgen`-driven microbenchmarks to `bench/vbench.py`: appends per
   second, canon, each sweep, in instructions executed per VIR instruction.
-- From V2, `vbench.py ab emit` reports the emit phase with `VCC_VIR=1` against
-  without, per corpus, and `VCC_VIR_STATS=1` prints per-sweep time and the
-  count of provisional parameters created and removed.
-- The gate from V2 on: with the flag off, emit within 0.1 % of the merge
-  base; with it on, the numbers go into `PLAN-vir.md` with each step.
+- From V2, `vbench.py ab emit` reports the emit phase with VIR (`-O2`)
+  against without (`-O1`), per corpus, and `-fvir-stats` prints per-sweep
+  time and the count of provisional parameters created and removed.
+- The gate from V2 on: without VIR, emit within 0.1 % of the merge
+  base; with it, the numbers go into `PLAN-vir.md` with each step.
