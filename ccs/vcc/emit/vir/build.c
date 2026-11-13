@@ -870,6 +870,12 @@ VPRIV val vw_bin(ecx *e, int op, int size, bool sgn, val a, val b)
 	case T_GREATERGREATER: vop = sgn ? VO_ASHR : VO_LSHR; break;
 	default: vw_fail(e, "VIR: this operator");
 	}
+	uint8_t fl=sgn && !e->E->o->wrapv && (vop==VO_ADD || vop==VO_SUB || vop==VO_MUL)?VIF_NSW:0;
+	if(vop==VO_MUL && (fl&VIF_NSW) && (size==4 || size==8) && b.k==V_CONST && b.i>0 &&
+	   b.i<=(size==4?INT32_MAX:INT64_MAX) &&
+	   !((uint64_t)b.i&((uint64_t)b.i-1))) {
+		vop=VO_SHL;b.i=__builtin_ctzll((uint64_t)b.i);
+	}
 	if ((vop == VO_SHL || vop == VO_ASHR || vop == VO_LSHR) && b.k == V_CONST)
 		b.i &= size * 8 - 1;
 	if (a.k == V_CONST && b.k == V_CONST && vop != VO_SDIV && vop != VO_UDIV && vop != VO_SREM && vop != VO_UREM) {
@@ -879,7 +885,7 @@ VPRIV val vw_bin(ecx *e, int op, int size, bool sgn, val a, val b)
 	y = vw_val(e, &b, ty);
 	r = vw_resname(e, &a, &b);
 	/* signed +, -, *: overflow is undefined (not under -fwrapv), which is what makes an index linear */
-	vw_set(e, r, vw_ins(e, vop, ty, sgn && !e->E->o->wrapv && (vop == VO_ADD || vop == VO_SUB || vop == VO_MUL) ? VIF_NSW : 0, x, y, 0));
+	vw_set(e, r, vw_ins(e, vop, ty, fl, x, y, 0));
 	return (val){ .k = V_REG, .r = (uint8_t)r };
 }
 
@@ -1791,7 +1797,7 @@ VPRIV void vw_ecx_free(ecx *e)
 		return;
 	free(V->p), free(V->b), free(V->x), free(V->h), free(V->lh), free(V->fwd), free(V->lab), free(V->sl), free(V->act);
 	free(V->st), free(V->loc), free(V->vty), free(V->vsgn), free(V->pr), free(V->map), free(V->order), free(V->bmap);
-	free(V->xslot), free(V->xspill), free(V->xlabel);
+	free(V->xslot), free(V->xspill), free(V->xlabel), free(V->xuses), free(V->xedgelab);
 	free(V);
 	e->vw = NULL;
 }
@@ -2033,7 +2039,8 @@ static bool vw_ldconv(uint32_t st, uint32_t ty, uint32_t fl, uint32_t *op)
 {
 	uint32_t w = VIF_W(fl);
 
-	if (w < 2 || (fl & VIF_MS)) {	/* a narrow or sign-extending load: the low bytes, extended */
+	/* A narrow load, or an i32 field read into i64, extends its stored bits. */
+	if (w < 2 || (fl & VIF_MS) || (w == 2 && st == VT_I32 && ty == VT_I64)) {
 		*op = VO_EXT;
 		return st == VT_I32 && (ty == VT_I32 || ty == VT_I64);
 	}
@@ -2194,6 +2201,11 @@ static bool vw_promote(ecx *e)
 		rel = vw_rel(&V->p[a]);
 		size = 1u << VIF_W(q->in.fl);
 		ty = q->in.op == VO_STORE ? V->p[q->in.b].in.ty : VT_VOID;
+		/* Simplification can remove a truncation before a narrow store.
+		 * Its field still holds only the stored low bits, even when another
+		 * store uses an i32 carrier. Normalize before comparing field types. */
+		if (size <= 4 && ty == VT_I64)
+			ty = VT_I32;
 		for (k = sf[s] - 1; k != UINT32_MAX; k = fnx[k] - 1) {	/* (the slot's own fields only) */
 			vwfld *f = &fd[k];
 
@@ -2255,16 +2267,23 @@ static bool vw_promote(ecx *e)
 		if (!any)
 			goto out;
 	}
-	/* a field of pointer and integer stores holds the integer: a pointer store's value goes
-	 * through a p2i right after the store (which promotion makes dead) */
+	/* Normalize each promoted store to its field's carrier: pointer/integer
+	 * fields use p2i, narrow integer fields truncate an i64 source. Place
+	 * the conversion after the store, which promotion makes dead. */
 	for (uint32_t i = 0; i < np0; i++) {
 		uint32_t p, b;
 
-		if (V->p[i].in.op != VO_STORE || !fof[i] || bad[V->p[i].slot - 1] || vw_find(V, i) != i ||
-		    fd[fof[i] - 1].ty != VT_I64 || V->p[V->p[i].in.b].in.ty != VT_PTR)
+		if (V->p[i].in.op != VO_STORE || !fof[i] || bad[V->p[i].slot - 1] || vw_find(V, i) != i)
+			continue;
+		uint32_t to = fd[fof[i] - 1].ty, from = V->p[V->p[i].in.b].in.ty, op;
+		if (to == VT_I64 && from == VT_PTR)
+			op = VO_P2I;
+		else if (to == VT_I32 && from == VT_I64)
+			op = VO_TRUNC;
+		else
 			continue;
 		b = V->p[i].blk;
-		p = vw_put(e, VO_P2I, VT_I64, 0, V->p[i].in.b, 0, 0, b);
+		p = vw_put(e, op, to, 0, V->p[i].in.b, 0, 0, b);
 		V->p[p].next = V->p[i].next;
 		V->p[i].next = p;
 		if (V->b[b].tail == i)

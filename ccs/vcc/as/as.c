@@ -1341,6 +1341,7 @@ static int d_inst(As *a, const char *p, const char *e)
 		if (val_expr(a, &p, e, &v)) return -1;
 		fold(a, &v);
 		if (!is_abs(a, &v)) return err(a, "expected constant expression in .inst");
+		if (a->dwlocp) loc_row(a);
 		elf_insn(a->o, a->cur, (uint32_t)v.c);
 		p = ws(p, e);
 		if (p >= e) return 0;

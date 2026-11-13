@@ -92,6 +92,7 @@ typedef struct pre {
 	int cdepth;		/* cleanup variables in scope */
 	int loopd;		/* loops around the node */
 	uint32_t llo, lhi;	/* local syms seen (lspan) */
+	bool discard_param;
 } pre;
 
 /* a local is read or written here: count it for register allocation (8x per loop level) */
@@ -266,6 +267,21 @@ VPRIV uint8_t *fn_once(cc *c)
 	return r;
 }
 
+/* Shared with the walker: literal control arguments can specialize a copy. */
+VPRIV bool inl_constarg(const emitter *E,cc *c,uint32_t callee,uint32_t call)
+{
+ if(!call)return false;
+ const node *site=N(call),*body=N(c->syms[callee].body);
+ for(uint32_t k=0;k<site->c && k<body->aux;k++) {
+  if(!E->inl_read[c->lists[body->a+k]])continue;
+  uint32_t a=c->lists[site->b+k];cval cv;
+  if(!cc_eval(c,a,&cv))continue;
+  if(cv.kind==CV_INT && is_integer(c,N(a)->ty))return true;
+  if(cv.kind==CV_ADDR && !cv.i && !cv.sym && !cv.str && !cv.label && !cv.sublabel)return true;
+ }
+ return false;
+}
+
 /* VIR could inline a call to s, its size aside (wk_can_inline's other rules, conservatively) */
 VPRIV bool inl_cand(emitter *E, cc *c, uint32_t s)
 {
@@ -295,13 +311,14 @@ VPRIV void fn_isize(emitter *E, cc *c, uint32_t lim)
 	uint32_t n = c->nsym, *idx, *low, *stk, *cs, *ci, sp = 0, csp = 0, nidx = 0;
 	uint8_t *on;
 
+	E->inl_read = calloc((size_t)n + 64, 1);
 	E->cgoff = calloc((size_t)n + 64, 4);
 	E->cgn = calloc((size_t)n + 64, 4);
 	E->scc = calloc((size_t)n + 64, 4);
 	E->isz = calloc((size_t)n + 64, 2);
 	idx = calloc((size_t)n + 64, 4), low = calloc((size_t)n + 64, 4), stk = malloc(((size_t)n + 64) * 4);
 	cs = malloc(((size_t)n + 64) * 4), ci = malloc(((size_t)n + 64) * 4), on = calloc((size_t)n + 64, 1);
-	if (!E->cgoff || !E->cgn || !E->scc || !E->isz || !idx || !low || !stk || !cs || !ci || !on)
+	if (!E->inl_read || !E->cgoff || !E->cgn || !E->scc || !E->isz || !idx || !low || !stk || !cs || !ci || !on)
 		abort();
 	E->cgrec = true;
 	for (uint32_t s = 1; s < n; s++)
@@ -321,7 +338,7 @@ VPRIV void fn_isize(emitter *E, cc *c, uint32_t lim)
 			uint32_t v = cs[csp - 1];
 
 			if (ci[csp - 1] < E->cgn[v]) {
-				uint32_t w = E->cg[E->cgoff[v] + ci[csp - 1]++];
+				uint32_t w = E->cg[E->cgoff[v] + ci[csp - 1]++].callee;
 
 				if (!idx[w]) {
 					cs[csp] = w, ci[csp++] = 0;
@@ -346,11 +363,18 @@ VPRIV void fn_isize(emitter *E, cc *c, uint32_t lim)
 				uint32_t s = stk[k], z = E->fnsize[s];
 
 				for (uint32_t j = 0; j < E->cgn[s]; j++) {
-					uint32_t t = E->cg[E->cgoff[s] + j];
+					em_cg_edge edge=E->cg[E->cgoff[s]+j];
+					uint32_t t=edge.callee;
 
-					if (E->scc[t] != v && inl_cand(E, c, t) &&
-					    ((c->syms[t].flags & SF_ALWAYS_INLINE) || E->isz[t] <= lim))
-						z += E->isz[t];
+					if(E->scc[t]==v || !inl_cand(E,c,t))continue;
+					bool take=c->syms[t].flags&SF_ALWAYS_INLINE;
+					if(!take) {
+						bool once=(E->once[t]&1) && c->syms[t].sc==SC_STATIC && !sym_attrs(c,t)->used &&
+						          E->fnsize[s]<=WK_INLINE_ONCE;
+						take=once ? E->fnsize[t]<=WK_INLINE_ONCE : E->isz[t]<=lim ||
+						 (E->isz[t]<=lim*WK_INLINE_CONST_FACTOR && inl_constarg(E,c,t,edge.call));
+					}
+					if(take)z=z>=65535u-E->isz[t]?65535u:z+E->isz[t];
 				}
 				E->isz[s] = z > 65535 ? 65535 : (uint16_t)z;
 			}
@@ -377,7 +401,7 @@ VPRIV void ensure_walked(emitter *E, cc *c, uint32_t s)
 		return;
 	st = 0;
 	if (atomic_compare_exchange_strong(&E->walked[s], &st, 1)) {
-		pre P = { E, c, s, 0, 0, 0, UINT32_MAX, 0 };
+		pre P = { .E=E, .c=c, .fn=s, .llo=UINT32_MAX };
 		double t = E->stats ? now() : 0;
 		const node *b = &c->nodes[c->syms[s].body];
 
@@ -433,6 +457,8 @@ static int walk(pre *P, uint32_t n)
 	P->nodes++;
 	switch (x->op) {
 	case N_VAR:
+		if(P->E->inl_read && !P->discard_param && (c->syms[x->a].flags&SF_PARAM))
+			P->E->inl_read[x->a]=1;
 		/* locals belong to this walk alone (globals' flags are shared between threads) */
 		if (is_local_var(c, x->a)) {
 			P->E->sflags[x->a] |= SA_USED;
@@ -465,11 +491,18 @@ static int walk(pre *P, uint32_t n)
 	case N_MEMBER: case N_DEREF: case N_UNARY:
 		lab = walk(P, x->a);
 		break;
-	case N_CAST:
+	case N_CAST: {
 		if (x->aux == CK_DECAY || (x->aux == CK_BITS && (N(x->a)->flags & NF_LVALUE)))
 			mark_written(P, x->a, true);
-		lab = walk(P, x->a);
+		bool saved=P->discard_param;
+		if(KIND(c,x->ty)==TY_VOID) {
+			uint32_t a=x->a;
+			while(N(a)->op==N_CAST)a=N(a)->a;
+			if(N(a)->op==N_VAR && (c->syms[N(a)->a].flags&SF_PARAM))P->discard_param=true;
+		}
+		lab = walk(P, x->a);P->discard_param=saved;
 		break;
+	}
 	case N_ADDR:
 		mark_written(P, x->a, true);
 		lab = walk(P, x->a);
@@ -519,13 +552,13 @@ static int walk(pre *P, uint32_t n)
 			emitter *E = P->E;
 
 			if (E->ncg == E->capcg) {
-				uint32_t *g = realloc(E->cg, (size_t)(E->capcg = E->capcg ? 2 * E->capcg : 1024) * 4);
+				em_cg_edge *g = realloc(E->cg, (size_t)(E->capcg = E->capcg ? 2 * E->capcg : 1024) * sizeof *g);
 
 				if (!g)
 					abort();
 				E->cg = g;
 			}
-			E->cg[E->ncg++] = canon_sym(c, callee);
+			E->cg[E->ncg++] = (em_cg_edge){canon_sym(c,callee),n};
 		}
 		lab = walk(P, x->a);
 	}

@@ -20,6 +20,7 @@
  */
 #include "../emitimpl.h"
 #include "vw.h"
+#include "../../vir/layout.h"
 
 #define VL_MAXOP 512
 
@@ -66,7 +67,7 @@ typedef struct vl {
 	int64_t fcs[8];		/* the FRAME offsets where d8-d15 are kept (those in o->callee[1]) */
 	uint32_t skip;		/* an instruction not to lower (the ret after a sibling call), 0 none */
 	uint32_t at;		/* the block whose place in the layout the code is at (a copy of another block's: vl_dup) */
-	int dup;		/* ... copies being lowered, one in another: vl_dupok */
+	int dup;		/* ... copies being lowered, one in another: vir_layout_duplicate */
 	bool fallok;		/* the code may fall through to the block after at (no edge moves follow) */
 	struct { uint32_t l, e, to; } tr[1024];	/* moves of a branch's edges, after the block */
 	uint32_t ntr;
@@ -1418,6 +1419,16 @@ static bool vl_cinfo(const vl *L, uint32_t b, uint32_t c, vlx *x)
 			return true;
 		}
 	}
+	/* The shared no-overflow rule also admits shift.i32 -> sext.i64.
+	 * Preserve the allocator's lifetimes and fold into the native SXTW form. */
+	unsigned signed_scale;
+	if(j+1==c && j>lo && vl_once(L,j) && vl_once(L,j-1) &&
+	   vir_sext_shift(f,j-1,&signed_scale) && signed_scale<=4 && !vl_isconst(f,f->ins[j-1].a)) {
+		bool scaled_mem=mem && signed_scale==w;
+		*x=(vlx){j-1,f->ins[j-1].a,scaled_mem?VX_MEM:VX_EXT,6,
+		         scaled_mem?(signed_scale!=0):signed_scale,0};
+		return true;
+	}
 	if (j + 1 == x->first && j >= lo && vl_once(L, j) && f->ins[j].op == VO_EXT && VIF_W(f->ins[j].fl) == 2 &&
 	    f->ins[j].ty == VT_I64 && !vl_isconst(f, f->ins[j].a) && (mem || kk <= 4)) {
 		x->first = j, x->xv = f->ins[j].a, x->opt = f->ins[j].fl & VIF_MS ? 6 : 2;
@@ -1501,49 +1512,6 @@ static bool vl_cfold(vl *L, uint32_t b, uint32_t i, uint8_t res)
 /* the block a branch to t ends up in: past blocks that are a lone br without moves */
 static uint32_t vl_chase(vl *L, uint32_t t) { return L->chs[t]; }
 
-static bool vl_lonebr(vl *L, uint32_t t)
-{
-	const vir_blk *k = &L->f->blk[t];
-	const vir_ins *in = &L->f->ins[k->first];
-
-	/* (no edits: the save point's block gets moves in front of its br, 15.12) */
-	return !k->nparam && k->n == 1 && in->op == VO_BR && vl_plain(L, t, 0) && !(k->fl & VB_ADDR) &&
-	       L->o->boff[L->f->nblk + 1 + t] == L->o->boff[L->f->nblk + 2 + t];
-}
-
-/* L->chs for every block; in a cycle of lone brs the block the walk reaches twice stays */
-static void vl_chases(vl *L, uint32_t *path)
-{
-	uint32_t nb = L->f->nblk, *c = L->chs;
-	const uint32_t todo = UINT32_MAX, busy = UINT32_MAX - 1;
-
-	for (uint32_t b = 0; b < nb; b++)
-		c[b] = todo;
-	for (uint32_t b = 0; b < nb; b++) {
-		uint32_t t = b, n = 0, r;
-
-		for (;;) {
-			if (c[t] == busy) {
-				r = t;
-				break;
-			}
-			if (c[t] != todo) {
-				r = c[t];
-				break;
-			}
-			if (!vl_lonebr(L, t)) {
-				r = t;
-				break;
-			}
-			c[t] = busy;
-			path[n++] = t;
-			t = L->f->ins[L->f->blk[t].first].a;
-		}
-		c[t] = c[t] == busy || c[t] == todo ? r : c[t];
-		while (n)
-			c[path[--n]] = r;
-	}
-}
 
 /* a return: the epilogue and ret, or a jump to the shared one (finish_function decides) */
 /* d8-d15 as the caller had them: at the entry into their slots, before every way out back */
@@ -1584,38 +1552,17 @@ static void vl_ret(vl *L)
  * Copies of blocks with work in them (a loop's test at the end of the latch) measured
  * more instructions on speedtest1: their constants and edge moves are lowered again.
  */
-static bool vl_dupok(vl *L, uint32_t t);
-static bool vl_rotok(const vir_fn *f, uint32_t b);
-static bool vl_plainblk(const vir_fn *f, uint32_t b, uint8_t term);
-
-/* A jump forward from b to a block t that only tests (a join's `brif` on what its
- * predecessors made, one instruction before it at most): a copy of t in place of the jump,
- * as LLVM's tail duplication at its default size.  The way to t's taken side is then one
- * branch instead of two.  Measured on speedtest1 (PLAN-vir.md): -0.3 % instructions for
- * +2.7 % code; larger blocks buy less per byte.  Not from a cold block. */
-static bool vl_small(vl *L, uint32_t b, uint32_t t)
-{
-	const vir_blk *k = &L->f->blk[t];
-
-	if (L->e->E->noopt || t <= b || L->dup >= 2 || k->n - k->nparam > 2 || (L->f->blk[b].fl & VB_COLD))
-		return false;
-	/* ... or does one thing and goes on (the `pOp++` every case of an interpreter's switch
-	 * breaks to, in front of the jump back to the dispatch): two jumps a round become one */
-	return vl_rotok(L->f, t) || vl_plainblk(L->f, t, VO_BR);
-}
-
 /* from block b's code, on to block t (an edge without moves left): a jump, or a copy of t */
 static void vl_goto(vl *L, uint32_t b, uint32_t t)
 {
 	/* into a loop whose test is at its bottom (vl_order): a copy of the test here, so that
 	 * the way in costs no jump (loop rotation with the guard, as LLVM's) */
-	bool in = VLT.hl[t] != VIR_NOBLK && L->dup < 8 && (b < t || b > L->lp->l[VLT.hl[t]].end);
 
 	if (L->bare && vir_dominates(L->f, L->sp, t)) {	/* to the save point: its code runs behind the prologue */
 		jump(L->e, L->lbl[t]);
 		return;
 	}
-	if (t != vl_fnext(L) && t != b && (in || vl_dupok(L, t) || vl_small(L, b, t))) {
+	if (vir_layout_duplicate(L->f, L->lp, VLT.hl, b, t, vl_fnext(L), L->dup, !L->e->E->noopt)) {
 		int d = L->dup++;
 
 		vl_block(L, t);
@@ -1623,20 +1570,6 @@ static void vl_goto(vl *L, uint32_t b, uint32_t t)
 		return;
 	}
 	jump(L->e, vl_lbl(L, t));
-}
-
-static bool vl_dupok(vl *L, uint32_t t)
-{
-	const vir_fn *f = L->f;
-	const vir_blk *k = &f->blk[t];
-	uint32_t n = k->n - k->nparam;
-	uint8_t op = f->ins[k->first + k->n - 1].op;
-
-	if (k->fl & VB_ADDR)
-		return false;
-	if (n == 1 && op == VO_RET)
-		return true;
-	return !L->e->E->noopt && n == 1 && op == VO_BR && L->dup < 8;
 }
 
 /* the call at i will be a sibling call (vl_call's test, before the registers are known) */
@@ -2266,50 +2199,6 @@ static void vl_block(vl *L, uint32_t b)
  * speedtest1 ran more instructions than without the rotation (short loops).  VLT.hl[b] is
  * the loop of a header placed so, else VIR_NOBLK.  VCC_VIR_ROT=0: VIR's order.
  */
-static bool vl_plainblk(const vir_fn *f, uint32_t b, uint8_t term)
-{
-	const vir_blk *k = &f->blk[b];
-
-	if ((k->fl & VB_ADDR) || k->n - k->nparam > 8 || f->ins[k->first + k->n - 1].op != term)
-		return false;
-	for (uint32_t i = k->first + k->nparam; i < k->first + k->n; i++)
-		switch (f->ins[i].op) {
-		case VO_CALL: case VO_ASM: case VO_ASMGOTO: case VO_MEMCPY: case VO_MEMSET: case VO_SWITCH:
-			return false;
-		}
-	return true;
-}
-
-static bool vl_rotok(const vir_fn *f, uint32_t b) { return vl_plainblk(f, b, VO_BRIF); }
-
-static void vl_order_range(vl *L, uint32_t lo, uint32_t hi, uint32_t *n)
-{
-	const vir_fn *f = L->f;
-
-	for (uint32_t b = lo; b <= hi;) {
-		uint32_t l = VLT.hl[b], at = *n, last;
-		const vir_ins *t;
-
-		if (l == VIR_NOBLK || !b || L->lp->l[l].end <= b || L->lp->l[l].end > hi || !vl_rotok(f, b)) {
-			VLT.hl[b] = VIR_NOBLK;
-			L->ord[(*n)++] = b++;
-			continue;
-		}
-		vl_order_range(L, b + 1, L->lp->l[l].end, n);
-		for (last = *n; last > at && vl_skip(L, L->ord[last - 1]); last--)
-			;
-		t = last > at ? &f->ins[f->blk[L->ord[last - 1]].first + f->blk[L->ord[last - 1]].n - 1] : NULL;
-		if (t && t->op == VO_BR && vl_chase(L, t->a) == b) {
-			L->ord[(*n)++] = b;
-		} else {
-			memmove(&L->ord[at + 1], &L->ord[at], (size_t)(*n - at) * sizeof *L->ord);
-			L->ord[at] = b;
-			VLT.hl[b] = VIR_NOBLK;
-			++*n;
-		}
-		b = L->lp->l[l].end + 1;
-	}
-}
 
 static void vl_order(vl *L)
 {
@@ -2322,16 +2211,8 @@ static void vl_order(vl *L)
 
 		rot = !(s && *s == '0');
 	}
-	for (uint32_t b = 0; b < f->nblk; b++)
-		VLT.hl[b] = VIR_NOBLK;
-	if (rot && !L->e->E->noopt && f->nblk < 60000)	/* (the recursion is as deep as the loops are nested) */
-		for (uint32_t l = 0; l < L->lp->n; l++) {	/* per header: its largest loop */
-			uint32_t h = L->lp->l[l].head;
-
-			if (VLT.hl[h] == VIR_NOBLK || L->lp->l[VLT.hl[h]].end < L->lp->l[l].end)
-				VLT.hl[h] = l;
-		}
-	vl_order_range(L, 0, f->nblk - 1, &n);
+	vir_layout_order(f, L->lp, L->chs, rot && !L->e->E->noopt, L->ord, L->opos, VLT.hl);
+	n = f->nblk;
 	if (L->sp != VIR_NOBLK) {
 		/* the blocks in front of the save point first, then it and what it dominates:
 		 * the prologue stands between them (VLT.path: scratch here) */
@@ -2556,62 +2437,11 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 	VLT.lbf = vl_grow(VLT.lbf, &VLT.clf, f->nblk + 1, sizeof(uint32_t));
 	memset(VLT.lbf, 0, (size_t)(f->nblk + 1) * sizeof(uint32_t));
 	L.ord = VLT.ord, L.opos = VLT.opos, L.lp = &V->lp;
-	vl_chases(&L, VLT.path);
+	vir_layout_chases(f, L.o, L.chs, VLT.path);
 	L.ret32 = KIND(c, ft->base) != TY_VOID && is_integer(c, ft->base) && tsize(c, ft->base) == 4;
 	L.tail = !(ft->flags & TF_VARIADIC) && em_tail_caller_ok(e, s) && !vl_notail(&L, VLT.lo32);	/* (lo32: scratch until it is filled) */
 	vir_uses(f, L.uses);
-	/* lo32 by a fixed point: only falls; a br argument is read as its parameter is.  Facts go
-	 * from a use to its operands: blocks and instructions last to first, so one sweep settles
-	 * all but what a back edge carries */
-	memset(L.lo32, 1, f->nins);
-	for (bool ch = true; ch;) {
-		ch = false;
-		for (uint32_t b = f->nblk; b-- > 0;)
-			for (uint32_t i = f->blk[b].first + f->blk[b].n; i-- > f->blk[b].first;) {
-				vir_ins x = f->ins[i];
-				vir_oit it;
-				uint32_t *p;
-
-				if (x.op == VO_TRUNC || (x.op == VO_RET && L.ret32))	/* (a 32-bit return's upper half is unspecified) */
-					continue;
-				if (x.op == VO_BR) {
-					const vir_blk *t = &f->blk[x.a];
-
-					for (uint32_t j = 0; j < t->nparam; j++) {
-						uint32_t a = f->extra[x.c + j];
-
-						if (!L.lo32[t->first + j] && L.lo32[a])
-							L.lo32[a] = 0, ch = true;
-					}
-					continue;
-				}
-				if (x.op == VO_SELECT && L.lo32[i]) {	/* its values are read as it is */
-					if (L.lo32[x.a])
-						L.lo32[x.a] = 0, ch = true;
-					continue;
-				}
-				if (x.op == VO_CALL) {	/* an integer argument of 4 bytes or less: its upper half is unspecified */
-					uint32_t n = f->extra[x.c], hdr = f->extra[x.b];
-
-					for (uint32_t k = 0; k < n; k++) {
-						uint32_t a = f->extra[x.c + 1 + k], w0 = f->extra[x.b + 3 + 2 * k], w1 = f->extra[x.b + 4 + 2 * k];
-
-						if (VSIG_NGROUPS(hdr) == n && VG_KIND(w0) == VG_REG && VG_NPIECE(w0) == 1 &&
-						    VG_CLASS(w0, 0) == VC_INT && VG_SIZE(w1) <= 4)
-							continue;
-						if (L.lo32[a])
-							L.lo32[a] = 0, ch = true;
-					}
-					if (L.lo32[x.a])
-						L.lo32[x.a] = 0, ch = true;
-					continue;
-				}
-				vir_oit_init(&it, f, &x, false);
-				while ((p = vir_oit_next(&it)))
-					if (L.lo32[*p])
-						L.lo32[*p] = 0, ch = true;
-			}
-	}
+	vir_low32(f, L.ret32, L.lo32);
 
 	/* Keep result tables queued by the VIR walker: end_function emits them. */
 	/* the emitter's per-function state, as emit_function1 sets it */

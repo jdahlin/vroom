@@ -1,18 +1,29 @@
 /* Allocated VIR to x86-64 records.  Scalar/SSE2 operations and one-piece SysV calls.
  * Unusual ABI groups and unsupported vector operations fall back per function.
- * r11/xmm15 break edge cycles; r10/xmm14 are lowering scratch, never allocated.
+ * r11/xmm15 break edge cycles; xmm14 is a second FP scratch. R10 can be
+ * allocated when the remaining GP scratch suffices for this function's edges.
  * Keep vector instructions in opaque records until the record vocabulary has SIMD ops.
  */
 #include "x64impl.h"
 #include "../../../emit/walk/proto.h"
 #include "../../../emit/vir/vw.h"
+#include "../../../vir/layout.h"
 
 typedef struct vx {
 	ecx *e;
 	vir_fn *f;
 	vir_alloc_out *o;
 	int64_t *slot, *spill;
-	uint32_t *label, ret;
+	int gtmp;
+	uint32_t *label, *edgelab, ret, cmp, cmpblock, setrec;
+	uint8_t *uses;
+	const vir_loops *lp;
+	uint32_t *order,*position,*rotation,*chase,at;
+	unsigned dup;bool fallok,r10;
+	uint32_t memv, memskip, scaledv, scaledskip; int membase, memindex, scaleindex; uint8_t memsh, scalesh; bool indexed; int64_t memoff;
+	uint32_t bev; int bebase,beindex; uint8_t besh,bewidth; bool beindexed; int64_t beoff;
+	uint32_t cmpmemv; uint8_t cmpmemsize; bool cmpmemside;
+	uint32_t testv; uint8_t testsize; int64_t testimm;
 } vx;
 
 static void *vx_grow(void *p, uint32_t *cap, uint32_t n, size_t size)
@@ -44,15 +55,63 @@ static uint8_t vx_arg(const vir_fn *f, uint32_t sig, uint32_t g, int *stack)
 	}
 	return r;
 }
+static bool vx_imm(const vir_fn *f, uint32_t v, int64_t *value)
+{
+	const vir_ins *i=&f->ins[v];
+	if (i->op!=VO_ICONST) return false;
+	int64_t k=i->ty==VT_I32?(int64_t)(int32_t)i->b:vx_bits(i);
+	if (k!=(int32_t)k) return false;
+	*value=k;return true;
+}
+static bool vx_smallmem(const vir_fn *f,const vir_ins *i)
+{
+	const vir_ins *count=&f->ins[i->c];
+	if(count->op!=VO_ICONST || (i->fl&VIF_VOL))return false;
+	uint64_t n=(uint64_t)vx_bits(count);
+	if(i->op==VO_MEMCPY)return n<=128;
+	const vir_ins *byte=&f->ins[i->b];
+	return n<=256 && byte->op==VO_ICONST && !(byte->b&255);
+}
+/* The allocation constraints and dispatch must agree about when the
+ * selector is consumed before R10 is overwritten. Sparse range chains
+ * need the original selector for every comparison. */
+static bool vx_dense_switch(const vir_fn *f,const vir_ins *in,uint64_t *low,uint64_t *range)
+{
+	bool wide=f->ins[in->a].ty==VT_I64;
+	uint32_t stride=wide?5:3,n=f->extra[in->c];
+	const uint32_t *cases=&f->extra[in->c+1];
+	uint64_t lo=0,span=0,count=0;
+	if(n) {
+		lo=wide?(uint64_t)cases[1]<<32|cases[0]:cases[0];
+		uint64_t hi=wide?(uint64_t)cases[stride*(n-1)+3]<<32|cases[stride*(n-1)+2]:cases[stride*(n-1)+1];
+		span=hi-lo;
+		for(uint32_t k=0;k<n;k++) {
+			uint64_t a=wide?(uint64_t)cases[stride*k+1]<<32|cases[stride*k]:cases[stride*k];
+			uint64_t h=wide?(uint64_t)cases[stride*k+3]<<32|cases[stride*k+2]:cases[stride*k+1];
+			count+=h-a>=64?64:h-a+1;
+		}
+	}
+	if(low)*low=lo;
+	if(range)*range=span;
+	return n>=6 && span<4096 && span+1<=4*count;
+}
 static void vx_fixed(const vir_fn *f, uint32_t v, vir_fix *x, void *ctx)
 {
 	const vir_ins *i = &f->ins[v];
-	(void)ctx;
+	const vx *target=ctx;
+	bool r10=target && target->r10;
 	if (i->op == VO_PARAM) {
 		int stack;
 		x->res = vx_arg(f, f->sig, i->a, &stack);
+	} else if(i->op==VO_SWITCH && r10) {
+		/* A private dense selector can be produced directly in the dispatch
+		 * register. Range chains and shared selectors keep their original. */
+		if(target->uses[i->a]==1 && vx_dense_switch(f,i,NULL,NULL)) {
+			x->nopnd=1;x->opnd[0]=R10;x->clob[0]=UINT64_C(1)<<R10;
+		} else x->eclob[0]=UINT64_C(1)<<R10;
 	} else if (i->op == VO_MEMCPY || i->op == VO_MEMSET) {
 		x->nopnd = 3;
+		if(vx_smallmem(f,i)) {x->mem=i->op==VO_MEMSET?6:4;return;}
 		x->opnd[0] = RDI;
 		x->opnd[1] = i->op == VO_MEMSET ? RAX : RSI;
 		x->opnd[2] = RCX;
@@ -67,20 +126,36 @@ static void vx_fixed(const vir_fn *f, uint32_t v, vir_fix *x, void *ctx)
 		}
 		const vir_ins *callee = &f->ins[i->a];
 		if (callee->op == VO_SYMADDR && !callee->b && !callee->c) x->mem |= 1;
-		x->clob[0] = X_TEMPS & ~(1u << R10);
+		x->clob[0] = r10?X_TEMPS:X_TEMPS & ~(1u << R10);
 		x->clob[1] = (1u << 14) - 1;
 		if (i->ty != VT_VOID) x->res = vir_rclass(i->ty) ? VR_MAKE(1, 0) : RAX;
 	} else if (i->op == VO_RET && f->extra[i->c]) {
 		x->nopnd = 1;
 		x->opnd[0] = vir_rclass(f->ins[f->extra[i->c + 1]].ty) ? VR_MAKE(1, 0) : RAX;
-	} else if (i->op == VO_SDIV || i->op == VO_UDIV || i->op == VO_SREM || i->op == VO_UREM) {
+	} else if (i->op == VO_SDIV || i->op == VO_UDIV || i->op == VO_SREM || i->op == VO_UREM || i->op == VO_SMULHI || i->op == VO_UMULHI) {
 		x->nopnd = 2;
 		x->opnd[0] = RAX;
-		x->res = i->op == VO_SREM || i->op == VO_UREM ? RDX : RAX;
+		x->res = i->op == VO_SREM || i->op == VO_UREM || i->op == VO_SMULHI || i->op == VO_UMULHI ? RDX : RAX;
 		x->clob[0] = (1u << RAX) | (1u << RDX);
 	} else if (i->op == VO_SHL || i->op == VO_LSHR || i->op == VO_ASHR) {
 		x->nopnd = 2;
-		x->opnd[1] = RCX;
+		int64_t k;
+		if (vx_imm(f,i->b,&k) && k>=0 && k<(i->ty==VT_I32?32:64)) x->mem=2;
+		else x->opnd[1] = RCX;
+	}
+	int64_t k;
+	if (!vir_rclass(i->ty) && (i->op==VO_ADD || i->op==VO_SUB || i->op==VO_PTRADD || i->op==VO_PSUB ||
+	    i->op==VO_AND || i->op==VO_OR || i->op==VO_XOR || i->op==VO_MUL || i->op==VO_ICMP) && vx_imm(f,i->b,&k)) {
+		x->nopnd=2;x->mem|=2;
+	}
+	/* Prefer the dying first input for x86's destructive operations. */
+	switch(i->op) {
+	case VO_SUB: case VO_PSUB: case VO_MUL: case VO_AND: case VO_OR: case VO_XOR:
+	case VO_NEG: case VO_NOT: case VO_SHL: case VO_LSHR: case VO_ASHR:
+	case VO_EXT: case VO_TRUNC: case VO_P2I: case VO_I2P:
+	case VO_FADD: case VO_FSUB: case VO_FMUL: case VO_FDIV:
+		x->fl|=VFX_TIED;break;
+	default:break;
 	}
 }
 static void vx_raw(vx *L, const char *s)
@@ -105,8 +180,8 @@ static void vx_mat(vx *L, uint8_t dst, uint32_t v)
 	const vir_ins *i = &L->f->ins[v];
 	int d = vx_reg(dst);
 	if (i->op == VO_FCONST) {
-		x64_movi(L->e, R10, vx_bits(i));
-		x64_op3(L->e, X_MOV, vx_size(i->ty), d, R10, XNOREG);
+		x64_movi(L->e, L->gtmp, vx_bits(i));
+		x64_op3(L->e, X_MOV, vx_size(i->ty), d, L->gtmp, XNOREG);
 	} else if (i->op == VO_ICONST) {
 		x64_movi(L->e, d, vx_bits(i));
 	} else if (i->op == VO_SYMADDR && sym_needs_got(L->e->c, i->a)) {
@@ -146,7 +221,7 @@ static void vx_edge(vx *L, uint32_t b, uint32_t k)
 		const vir_emove *m = &L->o->move[ed->first + j];
 		bool ds = m->dst & VL_SLOT, ss = m->src & VL_SLOT;
 		uint32_t d = m->dst & ~VL_SLOT, s = m->src & ~VL_SLOT;
-		uint8_t tmp = vir_rclass(L->f->ins[m->v].ty) ? VR_MAKE(1, 14) : R10;
+		uint8_t tmp = vir_rclass(L->f->ins[m->v].ty) ? VR_MAKE(1, 14) : L->gtmp;
 		if (m->kind == VE_REMAT) {
 			vx_mat(L, ds ? tmp : d, m->v);
 			if (ds) vx_memslot(L, false, tmp, d);
@@ -164,6 +239,42 @@ static void vx_edge(vx *L, uint32_t b, uint32_t k)
 	}
 }
 
+/* Put edge copies out of line. Branches without copies name their real block. */
+static uint32_t vx_target(vx *L,uint32_t b,uint32_t k,uint32_t target)
+{
+	uint32_t g=L->o->eidx[L->o->soff[b]+k];
+	if(g==VIR_NOBLK || !L->o->edge[g].n)return L->label[L->chase[target]];
+	if(!L->edgelab[g])L->edgelab[g]=wk_newlabel(L->e);
+	return L->edgelab[g];
+}
+
+static void vx_block(vx *L,uint32_t b);
+
+static uint32_t vx_next(const vx *L)
+{
+	if (!L->fallok)
+		return VIR_NOBLK;
+	uint32_t p = L->position[L->at], nb = L->f->nblk;
+
+	while (++p < nb && L->order[p] && L->chase[L->order[p]] != L->order[p])
+		;
+	return p < nb ? L->order[p] : VIR_NOBLK;
+}
+
+static void vx_goto(vx *L, uint32_t b, uint32_t target)
+{
+	uint32_t t = L->chase[target], next = vx_next(L);
+
+	if (vir_layout_duplicate(L->f, L->lp, L->rotation, b, t, next, L->dup, !L->e->E->noopt)) {
+		L->dup++;
+		vx_block(L, t);
+		L->dup--;
+		return;
+	}
+	if (t != next)
+		x64_jump(L->e, L->label[t]);
+}
+
 static bool vx_supported(const vir_fn *f, uint32_t v)
 {
 	const vir_ins *i = &f->ins[v];
@@ -171,13 +282,13 @@ static bool vx_supported(const vir_fn *f, uint32_t v)
 	switch (i->op) {
 	case VO_NOP: case VO_BPARAM: case VO_PARAM: case VO_LOAD: case VO_STORE:
 	case VO_BR: case VO_BRIF: case VO_RET: case VO_TRAP: case VO_BARRIER: case VO_CALL:
-	case VO_MEMCPY: case VO_MEMSET:
+	case VO_MEMCPY: case VO_MEMSET: case VO_SWITCH: case VO_ALOAD: case VO_ASTORE: case VO_AFENCE:
 	case VO_PTRADD: case VO_PSUB: case VO_P2I: case VO_I2P: case VO_EXT: case VO_TRUNC:
 	case VO_ICMP: case VO_FCMP: case VO_SELECT: case VO_SHL: case VO_LSHR: case VO_ASHR: case VO_BITCAST:
 	case VO_S2F: case VO_F2S: case VO_VFCMP: case VO_VBITSEL: case VO_VS2F:
 	case VO_FNEG: case VO_FABS: case VO_FSQRT: case VO_NEG: case VO_NOT:
 		return true;
-	case VO_SDIV: case VO_UDIV: case VO_SREM: case VO_UREM: return true;
+	case VO_SDIV: case VO_UDIV: case VO_SREM: case VO_UREM: case VO_SMULHI: case VO_UMULHI: return true;
 	case VO_U2F: return f->ins[i->a].ty == VT_I32;
 	case VO_F2U: return i->ty == VT_I32;
 	case VO_VICMP: return i->ty == VT_I32X4 && (i->fl & 15) < 6;
@@ -193,16 +304,297 @@ static bool vx_supported(const vir_fn *f, uint32_t v)
 	default: return false;
 	}
 }
+/* Switch edges retain their allocator edits in separate stubs. Dense tables use
+ * signed offsets from a RIP-relative base, so the dispatch stays position independent. */
+static void vx_cmpconst(vx *L, int reg, int size, uint64_t value)
+{
+	int64_t k = size == 4 ? (int64_t)(int32_t)value : (int64_t)value;
+	if (k == (int32_t)k)
+		x64_op3(L->e, X_CMPI, size, XNOREG, reg, XNOREG)->imm = k;
+	else {
+		x64_movi(L->e, R11, k);
+		x64_op3(L->e, X_CMP, size, XNOREG, reg, R11);
+	}
+}
+static void vx_switch(vx *L, uint32_t block, const vir_ins *in, int selector)
+{
+	ecx *e = L->e;
+	vir_fn *f = L->f;
+	bool wide = f->ins[in->a].ty == VT_I64;
+	uint32_t size = wide ? 8 : 4, stride = wide ? 5 : 3, n = f->extra[in->c];
+	const uint32_t *cases = &f->extra[in->c+1];
+	uint32_t *labels = malloc(((size_t)n+1)*sizeof *labels);
+	if (!labels) abort();
+	for (uint32_t k=0;k<=n;k++) labels[k]=vx_target(L,block,k,k?cases[stride*(k-1)+stride-1]:in->b);
+	uint64_t lo,span;
+	if(vx_dense_switch(f,in,&lo,&span)) {
+		uint32_t table=wk_newlabel(e);
+		if(selector!=R10 || (size==4 && !x64_last_u32(e,R10)))
+			x64_op3(e,X_MOV,size,R10,selector,XNOREG);
+		if (lo) {
+			x64_movi(e,R11,size==4?(int64_t)(int32_t)lo:(int64_t)lo);
+			x64_op3(e,X_SUB,size,R10,R10,R11);
+		}
+		vx_cmpconst(L,R10,size,span);
+		rec *r=x64_put(e,X_JCC);r->cond=CC_A;r->label=labels[0];
+		x64_op3(e,X_LEAL,8,R11,XNOREG,XNOREG)->label=table;
+		r=x64_op3(e,X_LDX,4,R10,R11,XNOREG);r->r[3]=R10;r->sh=2;r->cond=1;
+		x64_op3(e,X_ADD,8,R10,R10,R11);
+		x64_op3(e,X_JMPR,8,XNOREG,R10,XNOREG);
+		x64_label(e,table);
+		uint32_t k=0;
+		for (uint64_t offset=0;offset<=span;offset++) {
+			uint64_t v=lo+offset,h,a;
+			while (k<n && (h=wide?(uint64_t)cases[stride*k+3]<<32|cases[stride*k+2]:cases[stride*k+1])<v) k++;
+			a=k<n?(wide?(uint64_t)cases[stride*k+1]<<32|cases[stride*k]:cases[stride*k]):0;
+			r=x64_put(e,X_JTE);r->label=k<n && a<=v?labels[k+1]:labels[0];r->ref=table;
+		}
+	} else {
+		for (uint32_t k=0;k<n;k++) {
+			uint64_t a=wide?(uint64_t)cases[stride*k+1]<<32|cases[stride*k]:cases[stride*k];
+			uint64_t h=wide?(uint64_t)cases[stride*k+3]<<32|cases[stride*k+2]:cases[stride*k+1];
+			int reg=selector;
+			if (a!=h) {
+				x64_movi(e,R11,size==4?(int64_t)(int32_t)a:(int64_t)a);
+				x64_op3(e,X_SUB,size,R10,selector,R11);reg=R10;
+			}
+			vx_cmpconst(L,reg,size,a==h?a:h-a);
+			rec *r=x64_put(e,X_JCC);r->cond=a==h?CC_E:CC_BE;r->label=labels[k+1];
+		}
+		x64_jump(e,labels[0]);
+	}
+	free(labels);
+}
+
+/* Edits are sorted by instruction. A folded index must survive the intervening
+ * reloads/rematerializations; memory consumers require no intervening edit. */
+static bool vx_foldedits(vx *L,uint32_t b,uint32_t pos,int keep)
+{
+	uint32_t lo=L->o->boff[L->f->nblk+1+b],hi=L->o->boff[L->f->nblk+2+b],end=hi;
+	while(lo<hi) {uint32_t m=lo+(hi-lo)/2;if(L->o->edit[m].pos<pos)lo=m+1;else hi=m;}
+	for(uint32_t k=lo;k<end && L->o->edit[k].pos==pos;k++) {
+		const vir_edit *edit=&L->o->edit[k];
+		if(keep==XNOREG || (edit->kind!=VE_REMAT && edit->kind!=VE_RELOAD) || vx_reg(edit->dst)==keep)return false;
+	}
+	return true;
+}
+static bool vx_memnext(vx *L,uint32_t b,uint32_t v)
+{
+	return v+1<L->f->blk[b].first+L->f->blk[b].n && L->uses[v]==1 && L->o->slot[v]==VIR_NOBLK &&
+		L->f->ins[v+1].a==v && (L->f->ins[v+1].op==VO_LOAD || L->f->ins[v+1].op==VO_STORE) &&
+		vx_foldedits(L,b,v+1,XNOREG);
+}
+
+/* Integer-address form of the same single memory consumer. */
+static bool vx_castmem(vx *L,uint32_t b,uint32_t v)
+{
+	const vir_fn *f=L->f;
+	return f->ins[v].op==VO_ADD && f->ins[v].ty==VT_I64 && L->uses[v]==1 && L->o->slot[v]==VIR_NOBLK &&
+	 v+2<f->blk[b].first+f->blk[b].n && f->ins[v+1].op==VO_I2P && f->ins[v+1].a==v &&
+	 vx_memnext(L,b,v+1) && vx_foldedits(L,b,v+1,XNOREG);
+}
+
+/* Exact consecutive big-endian byte assembly, with no observable access or
+ * allocator edit interleaved. Never widen beyond the bytes actually read. */
+static unsigned vx_readword(vx *L,uint32_t b,uint32_t v,uint32_t *end)
+{
+	unsigned width=vir_read_be(L->f,L->uses,v,L->f->blk[b].first+L->f->blk[b].n,end);
+	if(!width)return 0;
+	for(uint32_t k=v;k<*end;k++)
+	 if(L->o->slot[k]!=VIR_NOBLK || !vx_foldedits(L,b,k+1,XNOREG))return 0;
+	return width;
+}
+
+/* An address private to one exact byte-assembly expression. */
+static unsigned vx_beaddr(vx *L,uint32_t b,uint32_t v,uint32_t *end)
+{
+	const vir_fn *f=L->f;const vir_ins *i=&f->ins[v];
+	uint32_t ptr=v,load=v+1;
+	if(L->o->slot[v]!=VIR_NOBLK)return 0;
+	if(i->op==VO_ADD && i->ty==VT_I64) {
+		if(L->uses[v]!=1 || v+2>=f->blk[b].first+f->blk[b].n ||
+		   f->ins[v+1].op!=VO_I2P || f->ins[v+1].a!=v || L->o->slot[v+1]!=VIR_NOBLK ||
+		   !vx_foldedits(L,b,v+1,XNOREG))return 0;
+		ptr=v+1;load=v+2;
+	} else if(i->op!=VO_PTRADD)return 0;
+	if(load>=f->blk[b].first+f->blk[b].n || f->ins[load].a!=ptr || !vx_foldedits(L,b,load,XNOREG))return 0;
+	unsigned width=vx_readword(L,b,load,end);
+	return width && L->uses[ptr]==width?width:0;
+}
+static bool vx_addrmem(vx *L,uint32_t b,uint32_t v)
+{
+	uint32_t end;
+	return (L->f->ins[v].op==VO_PTRADD && vx_memnext(L,b,v)) || vx_castmem(L,b,v) || vx_beaddr(L,b,v,&end);
+}
+
+
+/* An IR i32 does not itself guarantee zero upper bits: parameters, calls,
+ * signed narrow loads and identity truncations can retain arbitrary bits. */
+static bool vx_clear32(const vir_fn *f,uint32_t v)
+{
+	const vir_ins *i=&f->ins[v];
+	if(i->ty!=VT_I32)return false;
+	switch(i->op) {
+	case VO_ICONST:return !(i->b>>31);
+	case VO_LOAD: case VO_EXT:return !(i->fl&VIF_MS);
+	case VO_ADD: case VO_SUB: case VO_MUL: case VO_AND: case VO_OR: case VO_XOR:
+	case VO_NEG: case VO_NOT: case VO_ICMP: case VO_FCMP: case VO_F2S: case VO_F2U:
+	case VO_SDIV: case VO_UDIV: case VO_SREM: case VO_UREM: case VO_SMULHI: case VO_UMULHI:return true;
+	case VO_BITCAST:return vir_rclass(f->ins[i->a].ty);
+	default:return false;
+	}
+}
+
+/* Whether an i32 holder already has the physical sign extension required
+ * by a signed index. A 4-byte spill reload destroys a negative sign extension. */
+static bool vx_sign64(vx *L,uint32_t v)
+{
+	const vir_ins *source=&L->f->ins[v];
+	if(source->ty!=VT_I32)return false;
+	if((source->op==VO_LOAD || source->op==VO_EXT) && (source->fl&VIF_MS) &&
+				VIF_W(source->fl)<=2 && L->o->slot[v]==VIR_NOBLK)return true;
+	return vx_clear32(L->f,v) && !(vir_mask32(L->f,v,8)>>31);
+}
+
+/* Small constant blocks do not need REP's fixed registers or their clobbers.
+ * SSE2 handles complete 16-byte pieces; scalar tails never overread. */
+static void vx_memblock(vx *L,const vir_ins *i,int dst,int src)
+{
+	ecx *e=L->e;
+	uint64_t n=(uint64_t)vx_bits(&L->f->ins[i->c]);
+	bool copy=i->op==VO_MEMCPY;
+	if(!copy) {
+		if(n>=16)x64_op3(e,X_FXOR,16,XMM0+14,XMM0+14,XMM0+14);
+		if(n&15)x64_movi(e,L->gtmp,0);
+	}
+	for(uint64_t off=0;off<n;) {
+		unsigned width=n-off>=16?16:n-off>=8?8:n-off>=4?4:n-off>=2?2:1;
+		int scratch=width==16?XMM0+14:L->gtmp;
+		lval from={.k=L_REG,.r=src,.off=(int64_t)off},to={.k=L_REG,.r=dst,.off=(int64_t)off};
+		if(copy)x64_mem(e,X_LD,width,scratch,&from,false);
+		x64_mem(e,X_ST,width,scratch,&to,false);off+=width;
+	}
+}
+
+static uint8_t vx_condition(vx *L,uint32_t b,uint32_t v,uint32_t value,int reg)
+{
+	ecx *e=L->e;
+	bool flags=L->cmp==value && L->cmpblock==b && v==value+1;
+	uint8_t cc=CC_NE;
+	if (flags) {
+		for(uint32_t k=L->setrec+1;k<e->x64->nin;k++)
+			if(x64_effects(e,&e->x64->in[k]).fl & (OD_WFLAGS|OD_BARRIER|OD_CALL)) {flags=false;break;}
+	}
+	if(flags) {
+		cc=e->x64->in[L->setrec].cond;
+		if(L->uses[value]==1 && L->o->slot[value]==VIR_NOBLK) {
+			memmove(&e->x64->in[L->setrec],&e->x64->in[L->setrec+1],(e->x64->nin-L->setrec-1)*sizeof(rec));
+			e->x64->nin--;
+		}
+	} else x64_op3(e, X_TEST, vx_size(L->f->ins[value].ty), XNOREG, reg, reg);
+	return cc;
+}
+
 static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, uint8_t res)
 {
 	ecx *e = L->e;
 	const vir_ins *i = &L->f->ins[v];
-	int d = res == VR_NONE ? (vir_rclass(i->ty) ? XMM0 + 14 : R10) : vx_reg(res);
+	int d = res == VR_NONE ? (vir_rclass(i->ty) ? XMM0 + 14 : L->gtmp) : vx_reg(res);
 	int a = n ? vx_reg(p[0]) : XNOREG, c = n > 1 ? vx_reg(p[1]) : XNOREG;
 	int sz = vx_size(i->ty);
 	static const uint8_t alu[VO_N] = { [VO_ADD]=X_ADD, [VO_PTRADD]=X_ADD, [VO_SUB]=X_SUB, [VO_PSUB]=X_SUB,
 		[VO_MUL]=X_IMUL, [VO_AND]=X_AND, [VO_OR]=X_OR, [VO_XOR]=X_XOR,
 		[VO_FADD]=X_FADD, [VO_FSUB]=X_FSUB, [VO_FMUL]=X_FMUL, [VO_FDIV]=X_FDIV };
+	if(L->testv) {
+		if(v<L->testv)return;
+		if(v==L->testv) {
+			rec *r=x64_op3(e,X_TESTM,L->testsize,XNOREG,L->membase,XNOREG);
+			r->r[3]=L->indexed?L->memindex:XNOREG;r->sh=L->memsh;r->off=L->memoff;r->ref=(uint32_t)L->testimm;
+			L->cmp=v;L->cmpblock=b;L->setrec=e->x64->nin;
+			x64_op3(e,X_SETCC,4,d,XNOREG,XNOREG)->cond=(i->fl&15)?CC_NE:CC_E;
+			L->testv=0;return;
+		}
+	}
+	if(L->memskip==v){L->memskip=0;return;}
+	if(L->scaledskip==v){L->scaledskip=0;return;}
+	if(L->bev) {
+		if(v<L->bev)return;
+		if(v==L->bev) {
+			lval at={.k=L_REG,.r=L->bebase,.off=L->beoff};
+			if(L->beindexed) {
+				rec *r=x64_op3(e,X_LDX,L->bewidth,d,at.r,XNOREG);r->r[3]=L->beindex;r->sh=L->besh;r->off=at.off;
+			} else x64_mem(e,X_LD,L->bewidth,d,&at,false);
+			x64_op3(e,X_BSWAP,L->bewidth,d,d,XNOREG);L->bev=0;return;
+		}
+	}
+	/* A single-use ordinary unsigned load, constant mask and zero comparison
+	 * can test the exact source width in memory. Preserve the address until
+	 * the comparison; neither skipped definition may spill or have edits. */
+	if(i->op==VO_LOAD && (i->ty==VT_I32 || i->ty==VT_I64) && !(i->fl&(VIF_VOL|VIF_MS)) &&
+	   v+2<L->f->blk[b].first+L->f->blk[b].n && L->uses[v]==1 && L->o->slot[v]==VIR_NOBLK) {
+		const vir_ins *mask=&L->f->ins[v+1],*cmp=&L->f->ins[v+2];int64_t k,zero;
+		if(mask->op==VO_AND && mask->ty==i->ty && mask->a==v && vx_imm(L->f,mask->b,&k) &&
+		   L->uses[v+1]==1 && L->o->slot[v+1]==VIR_NOBLK && cmp->op==VO_ICMP &&
+		   (cmp->fl&15)<2 && cmp->a==v+1 && vx_imm(L->f,cmp->b,&zero) && !zero &&
+		   vx_foldedits(L,b,v+1,XNOREG) && vx_foldedits(L,b,v+2,XNOREG)) {
+			L->testv=v+2;L->testsize=1<<VIF_W(i->fl);L->testimm=k;
+			if(L->memv==i->a)L->memv=0;
+			else {L->membase=a;L->memoff=0;L->indexed=false;L->memsh=0;}
+			return;
+		}
+	}
+	/* Fold an adjacent private scalar load into its comparison. Narrow
+	 * equality with a representable immediate needs no promotion bits. */
+	if(i->op==VO_LOAD && (i->ty==VT_I32 || i->ty==VT_I64) && !(i->fl&VIF_VOL) &&
+	   L->uses[v]==1 && L->o->slot[v]==VIR_NOBLK && v+1<L->f->blk[b].first+L->f->blk[b].n &&
+	   vx_foldedits(L,b,v+1,XNOREG)) {
+		const vir_ins *next=&L->f->ins[v+1];unsigned width=1<<VIF_W(i->fl);int64_t k=0;
+		bool side=next->b==v,ok=false;
+		if(next->op==VO_ICMP && (next->a==v || side)) {
+			uint32_t other=side?next->a:next->b;
+			bool imm=vx_imm(L->f,other,&k);
+			if(width==vx_size(i->ty))ok=!imm || (!side && (width==4 || k==(int32_t)k));
+			else if(!side && imm && (next->fl&15)<2) {
+				int64_t lo=(i->fl&VIF_MS)?-(INT64_C(1)<<(width*8-1)):0;
+				int64_t hi=(INT64_C(1)<<(width*8-!!(i->fl&VIF_MS)))-1;
+				ok=k>=lo && k<=hi;
+			}
+		}
+		if(ok) {
+			L->cmpmemv=v+1;L->cmpmemsize=width;L->cmpmemside=side;
+			if(L->memv==i->a)L->memv=0;
+			else {L->membase=a;L->memoff=0;L->indexed=false;L->memsh=0;}
+			return;
+		}
+	}
+	if(i->op==VO_LOAD) {
+		uint32_t end;unsigned width=vx_readword(L,b,v,&end);
+		if(width) {
+			L->bev=end;L->bewidth=width;L->bebase=a;L->beoff=0;L->beindexed=false;
+			if(L->memv==i->a) {
+				L->bebase=L->membase;L->beoff=L->memoff;L->beindexed=L->indexed;
+				L->beindex=L->memindex;L->besh=L->memsh;L->memv=0;
+			}
+			return;
+		}
+	}
+	/* The walker also spells pointer arithmetic as add.i64 + i2p. The
+	 * cast is an identity; keep both inputs until the immediate memory use. */
+	if(i->op==VO_ADD || i->op==VO_PTRADD) {
+		uint32_t end;unsigned width=vx_beaddr(L,b,v,&end);
+		if(width) {
+			L->bev=end;L->bewidth=width;L->bebase=a;L->beoff=0;
+			L->beindexed=!vx_imm(L->f,i->b,&L->beoff);
+			L->beindex=L->scaledv==i->b?L->scaleindex:c;
+			L->besh=L->scaledv==i->b?L->scalesh:0;return;
+		}
+	}
+	if(vx_castmem(L,b,v)) {
+		L->memv=v+1;L->memskip=v+1;L->membase=a;L->memoff=0;
+		L->indexed=!vx_imm(L->f,i->b,&L->memoff);
+		L->memindex=L->scaledv==i->b?L->scaleindex:c;
+		L->memsh=L->scaledv==i->b?L->scalesh:0;return;
+	}
 	if (i->op == VO_MUL && i->ty == VT_I32X4) {
 		char text[600];
 		snprintf(text, sizeof text,
@@ -213,7 +605,46 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 			a-XMM0, c-XMM0, c-XMM0, a-XMM0, d-XMM0, d-XMM0, d-XMM0, d-XMM0, d-XMM0);
 		vx_raw(L, text); return;
 	}
+	/* Keep the unscaled signed index in the product's allocated register.
+	 * The shared proof permits extending it before the hardware scale. */
+	unsigned signed_scale;
+	if(i->op==VO_SHL && i->ty==VT_I32 && (i->fl&VIF_NSW) &&
+	   vir_sext_shift(L->f,v,&signed_scale) && signed_scale<=3 && L->uses[v]==1 &&
+	   L->o->slot[v]==VIR_NOBLK && v+3<L->f->blk[b].first+L->f->blk[b].n &&
+	   L->uses[v+1]==1 && L->o->slot[v+1]==VIR_NOBLK && L->f->ins[v+2].b==v+1 &&
+	   vx_addrmem(L,b,v+2) && vx_foldedits(L,b,v+1,XNOREG) && vx_foldedits(L,b,v+2,d)) {
+		if(vx_sign64(L,i->a))x64_mov(e,d,a);
+		else x64_op3(e,X_EXT,4,d,a,XNOREG)->cond=1;
+		L->scaledv=v+1;L->scaledskip=v+1;L->scaleindex=d;L->scalesh=signed_scale;return;
+	}
+	if ((i->op==VO_MUL || i->op==VO_SHL) && i->ty==VT_I64 && L->uses[v]==1 && L->o->slot[v]==VIR_NOBLK &&
+	    v+2<L->f->blk[b].first+L->f->blk[b].n && L->f->ins[v+1].b==v &&
+	    vx_addrmem(L,b,v+1) &&
+	    vx_foldedits(L,b,v+1,a)) {
+		int64_t k;
+		if(vx_imm(L->f,i->b,&k) && (i->op==VO_SHL ? k>=0 && k<=3 : k==1 || k==2 || k==4 || k==8)) {
+			L->scaledv=v;L->scaleindex=a;
+			L->scalesh=i->op==VO_SHL?k:k==8?3:k==4?2:k==2?1:0;
+			return;
+		}
+	}
+	if (i->op==VO_PTRADD && vx_memnext(L,b,v)) {
+		L->memv=v;L->membase=a;L->memoff=0;
+		L->indexed=!vx_imm(L->f,i->b,&L->memoff);
+		L->memindex=L->scaledv==i->b?L->scaleindex:c;
+		L->memsh=L->scaledv==i->b?L->scalesh:0;
+		return;
+	}
 	if (alu[i->op]) {
+		if (n>1 && p[1]==VR_NONE && !vir_rclass(i->ty)) {
+			static const uint8_t immop[VO_N]={[VO_ADD]=X_ADDI,[VO_PTRADD]=X_ADDI,[VO_SUB]=X_SUBI,[VO_PSUB]=X_SUBI,
+				[VO_AND]=X_ANDI,[VO_OR]=X_ORI,[VO_XOR]=X_XORI,[VO_MUL]=X_IMULI};
+			int64_t k;vx_imm(L->f,i->b,&k);
+			if(i->op==VO_PTRADD || i->op==VO_ADD) {
+				lval at={.k=L_REG,.r=(uint8_t)a,.off=k};x64_mem(e,X_LEA,sz,d,&at,false);
+			} else x64_op3(e,immop[i->op],sz,d,a,XNOREG)->imm=k;
+			return;
+		}
 		if (vir_isvec(i->ty)) {
 			const char *op = i->op == VO_ADD ? (i->ty == VT_I32X4 ? "paddd" : "paddq") :
 				i->op == VO_SUB ? (i->ty == VT_I32X4 ? "psubd" : "psubq") :
@@ -223,13 +654,15 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 				i->op == VO_FMUL ? (i->ty == VT_F32X4 ? "mulps" : "mulpd") :
 				(i->ty == VT_F32X4 ? "divps" : "divpd");
 			vx_simd(L, op, d, a, c);
-		} else x64_op3(e, alu[i->op], sz, d, a, c);
+		} else if (i->op==VO_ADD || i->op==VO_PTRADD) x64_op3(e,X_LEASCALE,sz,d,a,c)->sh=0;
+		else x64_op3(e, alu[i->op], sz, d, a, c);
 		return;
 	}
 	switch (i->op) {
 	case VO_NOP: case VO_BPARAM: return;
 	case VO_BARRIER: x64_put(e, X_BARRIER); return;
 	case VO_MEMCPY: case VO_MEMSET:
+		if(vx_smallmem(L->f,i)){vx_memblock(L,i,a,c);return;}
 		x64_put(e, X_REP)->cond = i->op == VO_MEMSET;
 		return;
 	case VO_CALL: {
@@ -249,7 +682,7 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 			uint32_t value = L->f->extra[i->c + 1 + k];
 			uint8_t r = p[k + 1];
 			if (r == VR_NONE) {
-				r = vir_rclass(L->f->ins[value].ty) ? VR_MAKE(1, 14) : R10;
+				r = vir_rclass(L->f->ins[value].ty) ? VR_MAKE(1, 14) : L->gtmp;
 				if (value < L->f->nconst) vx_mat(L, r, value);
 				else vx_memslot(L, true, r, L->o->slot[value]);
 			}
@@ -277,11 +710,17 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 		}
 		return;
 	}
-	case VO_LOAD: case VO_STORE: {
+	case VO_ALOAD: case VO_LOAD: case VO_STORE: {
 		lval at = { .k = L_REG, .r = a };
-		int ty = i->op == VO_LOAD ? i->ty : L->f->ins[i->b].ty;
-		x64_mem(e, i->op == VO_LOAD ? X_LD : X_ST, vir_isvec(ty) ? 16 : 1 << VIF_W(i->fl),
-			i->op == VO_LOAD ? d : c, &at, i->fl & VIF_MS);
+		bool folded=L->memv==i->a;
+		if(folded) {at.r=L->membase;at.off=L->memoff;L->memv=0;}
+		bool load = i->op != VO_STORE;
+		int ty = load ? i->ty : L->f->ins[i->b].ty;
+		int width=vir_isvec(ty)?16:1<<VIF_W(i->fl);
+		if(folded && L->indexed) {
+			rec *r=x64_op3(e,load?X_LDX:X_STX,width,load?d:XNOREG,at.r,load?XNOREG:c);
+			r->r[3]=L->memindex;r->sh=L->memsh;r->cond=!!(i->fl & VIF_MS);r->off=at.off;
+		} else x64_mem(e,load?X_LD:X_ST,width,load?d:c,&at,i->fl & VIF_MS);
 		return;
 	}
 	case VO_NEG: case VO_NOT:
@@ -294,21 +733,40 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 		} else x64_op3(e, i->op == VO_NEG ? X_NEG : X_NOT, sz, d, a, XNOREG);
 		return;
 	case VO_P2I: case VO_I2P: case VO_TRUNC: case VO_BITCAST:
+		/* An i32 value does not promise anything about the upper GPR bits;
+		 * a later unsigned EXT is responsible for clearing them if needed. */
+		if (d==a) return;
 		x64_op3(e, X_MOV, sz, d, a, XNOREG); return;
 	case VO_EXT: {
 		if (VIF_W(i->fl) == 3) { x64_mov(e, d, a); return; }
+		if(VIF_W(i->fl)==2 && ((i->fl&VIF_MS)?vx_sign64(L,i->a):vx_clear32(L->f,i->a))) {
+			x64_mov(e,d,a);return;
+		}
 		rec *r = x64_op3(e, X_EXT, 1 << VIF_W(i->fl), d, a, XNOREG);
 		r->cond = !!(i->fl & VIF_MS); return;
 	}
 	case VO_SHL: case VO_LSHR: case VO_ASHR:
+		int64_t count;
+		if (vx_imm(L->f,i->b,&count) && count>=0 && count<(i->ty==VT_I32?32:64)) {
+			x64_op3(e,i->op==VO_SHL?X_SHLI:i->op==VO_LSHR?X_SHRI:X_SARI,sz,d,a,XNOREG)->imm=count;return;
+		}
 		/* The result may be rcx: moving the first operand there would destroy cl.
-		 * Shift in reserved r10, then publish the allocated result. */
-		x64_mov(e, R10, a);
-		x64_op3(e, i->op == VO_SHL ? X_SHL : i->op == VO_LSHR ? X_SHR : X_SAR, sz, R10, R10, c);
-		x64_op3(e, X_MOV, sz, d, R10, XNOREG); return;
+		 * Shift in the reserved scratch, then publish the allocated result. */
+		x64_mov(e, L->gtmp, a);
+		x64_op3(e, i->op == VO_SHL ? X_SHL : i->op == VO_LSHR ? X_SHR : X_SAR, sz, L->gtmp, L->gtmp, c);
+		x64_op3(e, X_MOV, sz, d, L->gtmp, XNOREG); return;
 	case VO_ICMP: {
 		static const uint8_t cc[] = { CC_E, CC_NE, CC_L, CC_LE, CC_G, CC_GE, CC_B, CC_BE, CC_A, CC_AE };
-		x64_op3(e, X_CMP, vx_size(L->f->ins[i->a].ty), XNOREG, a, c);
+		if(L->cmpmemv==v) {
+			int other=L->cmpmemside?a:c;
+			rec *r=x64_op3(e,X_CMPM,L->cmpmemsize,XNOREG,L->membase,other);
+			r->r[3]=L->indexed?L->memindex:XNOREG;r->sh=L->memsh;r->off=L->memoff;r->cond=L->cmpmemside;
+			if(!L->cmpmemside && p[1]==VR_NONE) {int64_t k;vx_imm(L->f,i->b,&k);r->r[2]=XNOREG;r->ref=(uint32_t)k;}
+			L->cmpmemv=0;
+		} else
+		if (p[1]==VR_NONE) {int64_t k;vx_imm(L->f,i->b,&k);vx_cmpconst(L,a,vx_size(L->f->ins[i->a].ty),(uint64_t)k);}
+		else x64_op3(e, X_CMP, vx_size(L->f->ins[i->a].ty), XNOREG, a, c);
+		L->cmp=v;L->cmpblock=b;L->setrec=e->x64->nin;
 		x64_op3(e, X_SETCC, 4, d, XNOREG, XNOREG)->cond = cc[i->fl & 15]; return;
 	}
 	case VO_FCMP: {
@@ -321,7 +779,13 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 		return;
 	}
 	case VO_SELECT: {
-		int tmp = vir_rclass(i->ty) ? XMM0 + 14 : R10;
+		if(!vir_rclass(i->ty)) {
+			uint8_t cc=vx_condition(L,b,v,i->a,a);
+			int no=vx_reg(p[2]);
+			if(d==c){int swap=c;c=no;no=swap;cc^=1;}
+			x64_op3(e,X_CMOV,sz,d,no,c)->cond=cc;return;
+		}
+		int tmp = vir_rclass(i->ty) ? XMM0 + 14 : L->gtmp;
 		uint32_t done = wk_newlabel(e);
 		x64_op3(e, X_TEST, vx_size(L->f->ins[i->a].ty), XNOREG, a, a);
 		x64_op3(e, X_MOV, sz, tmp, vx_reg(p[2]), XNOREG);
@@ -333,7 +797,7 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 	case VO_FEXT: case VO_FTRUNC: x64_op3(e, X_CVTF2F, sz, d, a, XNOREG); return;
 	case VO_S2F: case VO_U2F: {
 		int from = vx_size(L->f->ins[i->a].ty);
-		if (i->op == VO_U2F) { x64_op3(e, X_MOV, 4, R10, a, XNOREG); a = R10; from = 8; }
+		if (i->op == VO_U2F) { x64_op3(e, X_MOV, 4, L->gtmp, a, XNOREG); a = L->gtmp; from = 8; }
 		x64_op3(e, X_CVTI2F, sz, d, a, XNOREG)->sh = from; return;
 	}
 	case VO_F2S: case VO_F2U: {
@@ -345,18 +809,11 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 	case VO_FNEG: case VO_FABS: {
 		bool wide = vir_velem(i->ty) == VT_F64;
 		char text[240];
-		if (vir_isvec(i->ty)) {
-			snprintf(text, sizeof text, "\tpcmpeqd %%xmm14, %%xmm14\n\t%s $%d, %%xmm14\n\t%s %%xmm%d, %%xmm14\n\tmovaps %%xmm14, %%xmm%d\n",
-				i->op == VO_FNEG ? (wide ? "psllq" : "pslld") : (wide ? "psrlq" : "psrld"),
-				i->op == VO_FNEG ? (wide ? 63 : 31) : 1,
-				i->op == VO_FNEG ? "pxor" : "pand", a-XMM0, d-XMM0);
-			vx_raw(L, text);
-		} else {
-			x64_op3(e, X_MOV, sz, R10, a, XNOREG);
-			x64_movi(e, R11, i->op == VO_FNEG ? (wide ? INT64_MIN : 0x80000000LL) : (wide ? INT64_MAX : 0x7fffffff));
-			x64_op3(e, i->op == VO_FNEG ? X_XOR : X_AND, sz, R10, R10, R11);
-			x64_op3(e, X_MOV, sz, d, R10, XNOREG);
-		}
+		snprintf(text, sizeof text, "\tpcmpeqd %%xmm14, %%xmm14\n\t%s $%d, %%xmm14\n\t%s %%xmm%d, %%xmm14\n\tmovaps %%xmm14, %%xmm%d\n",
+			i->op == VO_FNEG ? (wide ? "psllq" : "pslld") : (wide ? "psrlq" : "psrld"),
+			i->op == VO_FNEG ? (wide ? 63 : 31) : 1,
+			i->op == VO_FNEG ? "pxor" : "pand", a-XMM0, d-XMM0);
+		vx_raw(L, text);
 		return;
 	}
 	case VO_FSQRT:
@@ -371,10 +828,10 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 			char text[100]; snprintf(text, sizeof text, "\tcvtdq2ps %%xmm%d, %%xmm%d\n", a-XMM0, d-XMM0); vx_raw(L, text);
 		} else {
 			char text[100]; snprintf(text, sizeof text, "\tpshufd $78, %%xmm%d, %%xmm14\n", a-XMM0); vx_raw(L, text);
-			x64_op3(e, X_MOV, 8, R10, a, XNOREG);
-			x64_op3(e, X_CVTI2F, 8, d, R10, XNOREG)->sh = 8;
-			x64_op3(e, X_MOV, 8, R10, XMM0+14, XNOREG);
-			x64_op3(e, X_CVTI2F, 8, XMM15, R10, XNOREG)->sh = 8;
+			x64_op3(e, X_MOV, 8, L->gtmp, a, XNOREG);
+			x64_op3(e, X_CVTI2F, 8, d, L->gtmp, XNOREG)->sh = 8;
+			x64_op3(e, X_MOV, 8, L->gtmp, XMM0+14, XNOREG);
+			x64_op3(e, X_CVTI2F, 8, XMM15, L->gtmp, XNOREG)->sh = 8;
 			snprintf(text, sizeof text, "\tunpcklpd %%xmm15, %%xmm%d\n", d-XMM0); vx_raw(L, text);
 		}
 		return;
@@ -420,13 +877,16 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 	case VO_VSERIES: {
 		/* Construct the lane numbers with SSE2, without a constant pool. */
 		char s[240];
-		x64_movi(e, R10, i->ty == VT_I32X4 ? 0x0000000100000000LL : 0);
-		x64_op3(e, X_MOV, 8, d, R10, XNOREG);
-		x64_movi(e, R10, i->ty == VT_I32X4 ? 0x0000000300000002LL : 1);
-		x64_op3(e, X_MOV, 8, (XMM0 + 14), R10, XNOREG);
+		x64_movi(e, L->gtmp, i->ty == VT_I32X4 ? 0x0000000100000000LL : 0);
+		x64_op3(e, X_MOV, 8, d, L->gtmp, XNOREG);
+		x64_movi(e, L->gtmp, i->ty == VT_I32X4 ? 0x0000000300000002LL : 1);
+		x64_op3(e, X_MOV, 8, (XMM0 + 14), L->gtmp, XNOREG);
 		snprintf(s, sizeof s, "\tpunpcklqdq\t%%xmm14, %%xmm%d\n", d-XMM0);
 		vx_raw(L, s); return;
 	}
+	case VO_SMULHI: case VO_UMULHI:
+		x64_op3(e,X_MOV,sz,R11,c,XNOREG);
+		x64_op3(e,i->op==VO_SMULHI?X_SMULW:X_MULW,sz,XNOREG,R11,XNOREG);return;
 	case VO_SDIV: case VO_UDIV: case VO_SREM: case VO_UREM: {
 		bool sign = i->op == VO_SDIV || i->op == VO_SREM;
 		x64_op3(e, X_MOV, sz, R11, c, XNOREG);
@@ -468,18 +928,50 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 		}
 		x64_op3(e, X_MOV, sz, d, (XMM0 + 14), XNOREG); return;
 	}
-	case VO_BR: vx_edge(L, b, 0); x64_jump(e, L->label[i->a]); return;
+	case VO_AFENCE: x64_put(e,X_MFENCE); return;
+	case VO_ASTORE:
+		x64_op3(e,X_MOV,sz=vx_size(L->f->ins[i->b].ty),L->gtmp,c,XNOREG);
+		x64_op3(e,X_XCHG,1<<VIF_W(i->fl),L->gtmp,a,XNOREG);return;
+	case VO_SWITCH: vx_switch(L,b,i,a); return;
+	case VO_BR: vx_edge(L, b, 0); vx_goto(L,b,i->a); return;
 	case VO_BRIF: {
-		uint32_t yes = wk_newlabel(e);
-		x64_op3(e, X_TEST, vx_size(L->f->ins[i->a].ty), XNOREG, a, a);
-		rec *r = x64_put(e, X_JCC); r->cond = CC_NE; r->label = yes;
-		vx_edge(L, b, 1); x64_jump(e, L->label[i->c]);
-		x64_label(e, yes); vx_edge(L, b, 0); x64_jump(e, L->label[i->b]); return;
+		uint32_t yes = vx_target(L,b,0,i->b), no=vx_target(L,b,1,i->c), nt=i->c;
+		uint32_t next=vx_next(L);
+		uint8_t cc=vx_condition(L,b,v,i->a,a);
+		/* Let the next placed block fall through, including the true edge.
+		 * A deferred edge-copy stub is a different label and cannot fall through. */
+		if(next!=VIR_NOBLK && yes==L->label[next]) {
+			uint32_t swap=yes;yes=no;no=swap;cc^=1;nt=i->b;
+		}
+		rec *r = x64_put(e, X_JCC); r->cond = cc; r->label = yes;
+		if(no==L->label[L->chase[nt]])vx_goto(L,b,nt);else x64_jump(e,no);return;
 	}
 	case VO_RET: x64_jump(e, L->ret); return;
 	case VO_TRAP: x64_put(e, X_UD2); return;
 	default: abort();
 	}
+}
+
+/* The same allocated block can be emitted as a rotation guard or small join. */
+static void vx_block(vx *L, uint32_t b)
+{
+	vir_fn *f = L->f;
+	const vir_alloc_out *o = L->o;
+	L->cmp = UINT32_MAX;
+	L->memv = L->memskip = L->scaledv = L->scaledskip = L->bev = L->testv = L->cmpmemv = 0;
+	uint32_t at = o->boff[b], ei = o->boff[f->nblk + 1 + b], end = o->boff[f->nblk + 2 + b];
+	for (uint32_t i = f->blk[b].first; i < f->blk[b].first + f->blk[b].n; i++) {
+		uint32_t n = 0;
+		vir_oit it; uint32_t *p;
+		vir_oit_init(&it, f, &f->ins[i], false);
+		while ((p = vir_oit_next(&it))) { (void)p; n++; }
+		vx_edits(L, &ei, end, i);
+		uint8_t res = f->ins[i].ty != VT_VOID ? o->opr[at + n] : VR_NONE;
+		vx_ins(L, b, i, &o->opr[at], n, res);
+		at += n + (f->ins[i].ty != VT_VOID);
+		if (res != VR_NONE && o->slot[i] != VIR_NOBLK && o->sdef[i]) vx_memslot(L, false, res, o->slot[i]);
+	}
+	vx_edits(L, &ei, end, f->blk[b].first + f->blk[b].n);
 }
 
 /* setjmp headers do not universally attach returns_twice to their declaration. */
@@ -497,10 +989,13 @@ VPRIV bool vw_x64(ecx *e, uint32_t sym, const char **why)
 {
 	vwst *V = e->vw;
 	vir_fn *f = &V->f;
+	bool spframe=e->E->o->omit_frame_pointer && !e->E->noopt;
+	bool r10=true;
 	uint64_t cs = (1u << RBX) | (1u << R12) | (1u << R13) | (1u << R14) | (1u << R15);
-	vir_regs regs = { .alloc = { (X_TEMPS & ~(1u << R10)) | cs, (1u << 14) - 1 },
-		.callee = { cs, 0 }, .fixed = vx_fixed };
+	if(spframe)cs|=1u<<RBP;
 	vx L = { .e = e, .f = f, .o = &V->ao };
+	vir_regs regs = { .alloc = { (X_TEMPS & ~(1u << R10)) | cs, (1u << 14) - 1 },
+		.callee = { cs, 0 }, .fixed = vx_fixed, .ctx=&L };
 	*why = "VIR x86-64: unsupported operation or ABI";
 	if (e->E->o->debug || e->E->o->sprot || x64_nosimd(e)) return false;
 	const attrs *attrs = sym_attrs(e->c, sym);
@@ -531,7 +1026,23 @@ VPRIV bool vw_x64(ecx *e, uint32_t sym, const char **why)
 		framesz += f->slot[i].size + 16;
 	}
 	if (framesz > INT32_MAX / 2) return false;
-	if (!vir_loops_build(f, &V->lp) || !vir_alloc(f, &V->lp, &regs, NULL, &V->ao)) {
+	L.uses=V->xuses=vx_grow(V->xuses,&V->cxuses,f->nins+1,1);
+	vir_uses(f,L.uses);L.r10=r10;
+	if(r10)regs.alloc[0]|=1u<<R10;
+	if(!vir_loops_build(f,&V->lp)){*why="VIR x86-64: loop analysis failed";return false;}
+	bool allocated=vir_alloc(f,&V->lp,&regs,NULL,&V->ao),scratch=false;
+	if(allocated && r10)for(uint32_t k=0;k<V->ao.nmove;k++) {
+		const vir_emove *m=&V->ao.move[k];
+		if(m->src==VR_SCR0 || m->dst==VR_SCR0){scratch=true;break;}
+	}
+	if(r10 && (!allocated || scratch)) {
+		/* A cycle may need the allocator's GP scratch at the same time as
+		 * a slot-to-slot copy. Keep the second reserve for those functions. */
+		r10=L.r10=false;regs.alloc[0]&=~(UINT64_C(1)<<R10);
+		allocated=vir_alloc(f,&V->lp,&regs,NULL,&V->ao);
+	}
+	L.gtmp=r10?R11:R10;
+	if (!allocated) {
 		*why = "VIR x86-64: allocation failed"; return false;
 	}
 	if (getenv("VCC_VIR_CHECK")) {
@@ -542,6 +1053,8 @@ VPRIV bool vw_x64(ecx *e, uint32_t sym, const char **why)
 		if (n) { *why = "VIR x86-64: allocation check failed"; return false; }
 	}
 	/* No partial function is published before x64_finish; a failed lowering retries the walker. */
+	L.edgelab=V->xedgelab=vx_grow(V->xedgelab,&V->cxedgelab,V->ao.nedge+1,sizeof(uint32_t));
+	memset(L.edgelab,0,V->ao.nedge*sizeof(uint32_t));
 	L.slot = V->xslot = vx_grow(V->xslot, &V->cxslot, f->nslot + 1, sizeof *L.slot);
 	L.spill = V->xspill = vx_grow(V->xspill, &V->cxspill, V->ao.nspill + 1, sizeof *L.spill);
 	L.label = V->xlabel = vx_grow(V->xlabel, &V->cxlabel, f->nblk + 1, sizeof *L.label);
@@ -553,6 +1066,7 @@ VPRIV bool vw_x64(ecx *e, uint32_t sym, const char **why)
 	}
 	e->reach = true;
 	x64_begin(e, sym);
+	e->x64->spframe=spframe;
 	e->x64->interrupt = e->x64->nlreg = 0;
 	e->wk->sdepth = e->wk->ntu = e->wk->ntf = 0;
 	e->wk->foff = 0; e->wk->falign = 16; e->wk->nlabel = 0;
@@ -561,23 +1075,21 @@ VPRIV bool vw_x64(ecx *e, uint32_t sym, const char **why)
 	for (uint32_t k = 0; k < V->ao.nspill; k++) L.spill[k] = wk_slot(e, V->ao.ssz[k], V->ao.ssz[k]);
 	for (uint32_t b = 0; b < f->nblk; b++) L.label[b] = wk_newlabel(e);
 	L.ret = wk_newlabel(e);
+	uint32_t *layout=V->xlayout=vx_grow(V->xlayout,&V->cxlayout,5*f->nblk,sizeof(uint32_t));
+	L.order=layout;L.position=layout+f->nblk;L.rotation=layout+2*f->nblk;L.chase=layout+3*f->nblk;L.lp=&V->lp;
+	vir_layout_chases(f,L.o,L.chase,layout+4*f->nblk);
+	const char *rotate=getenv("VCC_VIR_ROT");
+	vir_layout_order(f,L.lp,L.chase,!e->E->noopt && !(rotate && *rotate=='0'),L.order,L.position,L.rotation);
+
 	for (int r = 0; r < 16; r++)
 		if (V->ao.callee[0] >> r & 1) x64_csused(e, r);
-	for (uint32_t b = 0; b < f->nblk; b++) {
-		x64_label(e, L.label[b]);
-		uint32_t at = V->ao.boff[b], ei = V->ao.boff[f->nblk + 1 + b], end = V->ao.boff[f->nblk + 2 + b];
-		for (uint32_t i = f->blk[b].first; i < f->blk[b].first + f->blk[b].n; i++) {
-			uint32_t n = 0;
-			vir_oit it; uint32_t *p;
-			vir_oit_init(&it, f, &f->ins[i], false);
-			while ((p = vir_oit_next(&it))) { (void)p; n++; }
-			vx_edits(&L, &ei, end, i);
-			uint8_t res = f->ins[i].ty != VT_VOID ? V->ao.opr[at + n] : VR_NONE;
-			vx_ins(&L, b, i, &V->ao.opr[at], n, res);
-			at += n + (f->ins[i].ty != VT_VOID);
-			if (res != VR_NONE && V->ao.slot[i] != VIR_NOBLK && V->ao.sdef[i]) vx_memslot(&L, false, res, V->ao.slot[i]);
-		}
-		vx_edits(&L, &ei, end, f->blk[b].first + f->blk[b].n);
+	for(uint32_t p=0;p<f->nblk;p++) {
+	 uint32_t b=L.order[p];if(b && L.chase[b]!=b)continue;
+	 x64_label(e,L.label[b]);L.at=b;L.fallok=true;vx_block(&L,b);
+	}
+	for(uint32_t g=0;g<V->ao.nedge;g++)if(L.edgelab[g]) {
+		const vir_aedge *edge=&V->ao.edge[g];
+		x64_label(e,L.edgelab[g]);vx_edge(&L,edge->from,edge->k);L.fallok=false;vx_goto(&L,edge->from,edge->to);
 	}
 	x64_label(e, L.ret);
 	x64_finish(e, sym);

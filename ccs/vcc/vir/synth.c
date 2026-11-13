@@ -13,7 +13,8 @@
  *   x86:   two-address integer and float arithmetic (the result in the
  *          first operand's register), shift counts in r2, division with the
  *          dividend and quotient in r0, the remainder in r1, r1 written
- *          before the divisor is read
+ *          before the divisor is read; switch writes r0 after reading the selector
+ *          and r1 before it
  *   both:  a constant second operand of an integer operation, a constant
  *          stored value and a direct callee are immediates
  *
@@ -168,6 +169,12 @@ static void fixed(const vir_fn *f, uint32_t v, vir_fix *x, void *ctx)
 		if (is_iconst(f, in->b))
 			x->mem |= 2;
 		return;
+	case VO_SWITCH:
+		if (t->x86) {
+			x->clob[0] = 1;       /* written after reading the selector */
+			x->eclob[0] = 1u << 1;
+		}
+		return;
 	case VO_ICMP:
 		if (is_iconst(f, in->b))
 			x->mem |= 2;
@@ -195,7 +202,7 @@ bool vir_synth_init(vir_synth *t, uint32_t ni, uint32_t nf, uint32_t ci, uint32_
 {
 	static const uint8_t ops[] = { VO_PARAM, VO_CALL, VO_PROJ, VO_RET, VO_STORE, VO_SDIV, VO_UDIV, VO_SREM, VO_UREM,
 				       VO_SHL, VO_LSHR, VO_ASHR, VO_ADD, VO_MUL, VO_AND, VO_OR, VO_XOR, VO_SUB, VO_ICMP,
-				       VO_NEG, VO_NOT, VO_FADD, VO_FMUL, VO_FSUB, VO_FDIV };
+				       VO_NEG, VO_NOT, VO_FADD, VO_FMUL, VO_FSUB, VO_FDIV, VO_SWITCH };
 
 	if (ni < 3 || ni > 64 || nf < 2 || nf > 64 || ci + 2 > ni || cf + 2 > nf) {
 		snprintf(err, en, "registers: need 3 <= N <= 64 with C <= N-2, 2 <= M <= 64 with D <= M-2 (N %u M %u C %u D %u)",

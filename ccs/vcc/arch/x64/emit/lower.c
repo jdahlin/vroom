@@ -77,7 +77,7 @@ VPRIV int x64_base(ecx *e, const lval *l, uint32_t *ref)
 {
 	*ref = 0;
 	if (l->k == L_FRAME)
-		return RBP;
+		return e->x64->spframe ? XFRAME : RBP;
 	if (l->k != L_SYM)
 		return l->r;
 	if (sym_needs_got(e->c, l->ref)) {
@@ -603,6 +603,8 @@ VPRIV void x64_begin(ecx *e, uint32_t s)
 
 	(void)s;
 	X->nin = 0;
+	X->spframe = false;
+	X->framesz = X->spdelta = 0;
 	X->live = 0;
 	X->pushes = 0;
 	e->discarded_scalar = false;

@@ -1252,9 +1252,6 @@ static void wk_stmt1(ecx *e, uint32_t n)
 /* ---------------- inlining ---------------- */
 
 #define WK_INLINE_NODES 40	/* AST nodes: a few statements (as arm64) */
-#ifndef WK_INLINE_ONCE
-#define WK_INLINE_ONCE 4000	/* under VIR: a static function with one call */
-#endif
 
 VPRIV bool wk_const_sym(ecx *e, uint32_t s, val *v)
 {
@@ -1302,7 +1299,7 @@ static bool wk_tiny_ok(cc *c, uint32_t n)
 	}
 }
 
-VPRIV bool wk_can_inline(ecx *e, uint32_t s)
+VPRIV bool wk_can_inline(ecx *e, uint32_t s, uint32_t call)
 {
 	cc *c = e->c;
 	const sym *y = &c->syms[s];
@@ -1337,9 +1334,19 @@ VPRIV bool wk_can_inline(ecx *e, uint32_t s)
 		   static function called once is its only copy, so inlined up to a large body
 		   (clang's last-call-to-static bonus) */
 		if (e->vtry && e->E->isz) {
-			bool once = (e->E->once[s] & 1) && y->sc == SC_STATIC && !sym_attrs(c, s)->used;
+			uint32_t caller=e->wk->inl?e->wk->inl->fn:e->wk->fsym;
+			/* Keep the ordinary/context budget when the caller already
+			 * exceeds the large-copy budget: even one copy can grow its
+			 * allocation unit and register pressure substantially. */
+			bool once = (e->E->once[s] & 1) && y->sc == SC_STATIC && !sym_attrs(c, s)->used &&
+			            e->E->fnsize[caller]<=WK_INLINE_ONCE;
 
 			lim = once ? WK_INLINE_ONCE : WK_INLINE_VIR;
+			/* fn_isize includes the same constant-argument sites bottom-up,
+			 * so selected nested copies are included in the caller's bound. */
+			if(!once && e->E->isz[s]>WK_INLINE_VIR &&
+			   e->E->isz[s]<=WK_INLINE_CONST_FACTOR*WK_INLINE_VIR && inl_constarg(e->E,c,s,call))
+				lim=WK_INLINE_CONST_FACTOR*WK_INLINE_VIR;
 			walk_fn(e, s);
 			if (!once && e->E->isz[s] > lim)
 				return false;

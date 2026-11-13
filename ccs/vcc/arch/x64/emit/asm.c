@@ -203,7 +203,7 @@ VPRIV void x64_csused(ecx *e, int r)
 {
 	xst *X = e->x64;
 
-	if (r == RBX || (r >= R12 && r <= R15)) {
+	if (r == RBX || (r == RBP && X->spframe) || (r >= R12 && r <= R15)) {
 		if (r == R12 && e->wk->falign > 16)
 			efatal(e, e->curloc, "x86-64: asm using r12 in a function with locals aligned above 16 is not supported");
 		if (!X->csslot[r])

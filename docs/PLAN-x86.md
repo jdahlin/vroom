@@ -996,3 +996,217 @@ PostgreSQL/psql och CPython är provade; de två sistas namngivna kvarvarande
 builtin-/inline-luckor hålls synliga. Se PLAN-vir.md V2/V3 och TODO T13.
 Nya C-prov och assemblerns INT64_MIN-prov går i unity/nonunity och med
 sanitisering; standardvalet och -O0/-O1 är oförändrade.
+
+### 2026-11-12: första profilstyrda VIR-skivan efter PR126
+
+SQLite main, tre korta perf-stat-prov: CPU-tid 1,897x → 1,386x clang -O2;
+instruktioner 2,560x → 1,626x, verifieringshash oförändrad. Atomics, switch
+med relativa tabeller, mulhi, immediates, compare+branch och enkla vikta
+adresser; detaljer, kända testundantag och reproduktion i PLAN-vir.md V4.
+Målet högst 10 % långsammare är öppet; indexerade minnesoperander står näst.
+
+Indexerade minnesoperander är nu sänkta med skala 1/2/4/8, utan separat
+ptradd/skift när engångsvärden och allokator-edits tillåter det. SQLite:
+1,626x → 1,603x instruktioner/clang, CPU oförändrad inom kortprovets brus
+(1,380x → 1,378x). Fortsatt öppet 10 %-mål; V4 i PLAN-vir.md har provdata.
+
+VIR:s gemensamma storleksstyrda inliner är nu aktiv även på x86. Tillsammans
+med fallthrough för true-kanter, färre identitetskopior och tied-preferenser
+ger fem korta SQLite-prov CPU 1,360x → 1,267x clang och instruktioner
+1,603x → 1,505x. Verifieringshash och regressionsprov stämmer; 10 % är öppet.
+
+Efter små blockkopior, vikta flaggtester och stackrelativ VIR-ram är SQLite
+main på 1,189x clang -O2 i fem kortprov (instruktioner 1,389x). rbp kan nu
+allokeras när rampekaren utelämnas; CFI, stackargument och bevarande av rbp
+är körprovade. Egna 305/305, GCC/TCC 1615/105, samma fem inline-undantag;
+TSVC 151/151 och 82 vektorloopar, unity/nonunity och ASan/UBSan gröna.
+Se V4 i PLAN-vir.md; högst 10 % långsammare är fortfarande öppet.
+
+
+### 2026-11-13: gemensam VIR-layout från ARM
+
+Block chasing, looprotation med kopierat inträdestest och små join-kopior
+planeras nu i `vir/layout.c`, samma kod för ARM och x86. ARM:s SQLite-output
+är byteidentisk; x86 får cirka 0,6–0,9 % lägre CPU-tid i två femprovserier
+av speedtest1 storlek 100. Senaste serie: 1,154× → 1,148× clang -O2;
+instruktioner 1,382× → 1,364×. Målet högst 1,05× är fortfarande öppet.
+VIR 130/130, egna x86 307/307, GCC/TCC gröna, samma fem kända inlinefel;
+TSVC 151/151 och 82 vektoriseringar. Fokusprov kör även ARM:s befintliga
+rotations-/joinfall, ASan/UBSan och filvist bygge. Detaljer i PLAN-vir.md.
+
+
+### 2026-11-13: r10 mellan switchar
+
+Gemensamma VIR-allokatorn bevarar nu levande clobber-register även vid
+villkorliga terminatorer. x86 anger switchens r10 som tidig clobber och
+behöver inte reservera det genom hela funktioner med gles/multianvänd switch.
+Två korta femprovserier gav cirka 0,5–0,6 % lägre CPU-tid för SQLite main;
+1,141× clang i den andra serien. Syntetiskt prov reproducerar det gamla
+allokatorfelet och sveper 48 registerkonfigurationer. Se V4 i PLAN-vir.md.
+
+
+### 2026-11-13: små SQLite-avkodare
+
+Gemensamma `vir_read_be` känner igen exakta 16/32/64-bitars byte-läsningar,
+även med konstanta offsetar. x86:s vdbeRecordCompareInt går 102 → 82
+instruktioner, sqlite3VdbeSerialGet 138 → 122 och walDecodeFrame 95 → 71.
+Funktionstider är layoutkänsliga; två femprovserier av hela speedtest1 är
+neutrala, cirka 1,148× clang. Färre instruktioner räknas inte som nått
+1,05×-mål. Detaljer och avvisade flagg-/tabellförsök i PLAN-vir.md.
+
+
+### 2026-11-13: jämförelser direkt i minne
+
+VIR:s vanliga engångsladdningar kan bli cmp med exakt minnesbredd, även
+indexerat. Smala promotionsfall kräver representerbar ==/!=-konstant;
+volatile och fleranvända laddningar kombineras inte. Instruktioner/clang i
+SQLite main 1,358× → 1,344×; CPU-tiden varierar mellan serier (1,141–1,154×).
+Målet 1,05× är öppet. Egna x86 308/308, samma fem kända inlinefel, ASan/UBSan,
+filvist bygge och TSVC 151/151 med 82 vektorloopar gröna. Se V4 i PLAN-vir.md.
+
+
+### 2026-11-13: main PR127–129 och skala genom pekarkast
+
+Rebase på 5a111ce5. Den gemensamma blockplaneraren behåller även main:s nya
+regel för en operation följd av br; ARM och x86 använder samma bevis.
+x86:s indexskalning fälls nu även genom add.i64+i2p. I pcache1Fetch blir
+imulq+load med skala 1 en load med skala 8. Två femprovserier ger 1281/1279
+→ 1249/1250 ms CPU, 1,124× clang; cirka 2,3–2,5 % vinst. Målet 1,05× är
+fortfarande öppet. En föreslagen ändring av 32-bitars ABI-bärare avvisades
+som neutral; SPEC:s O1 är oförändrad. Detaljer i PLAN-vir.md.
+
+
+### 2026-11-13: bevara NSW och dela indexbevis med ARM
+
+VIR behåller signerad multiplikations NSW även när den blir en shift.
+Det gemensamma vir_sext_shift-beviset används av ARM:s extended-register
+adresser och x86:s skalade minnesoperander. I BtreeIndexMoveto räcker
+movslq + läsning med skala 2; shll försvinner. Två femprovserier ger cirka
+0,5–0,8 % CPU-vinst, 1,120×/1,126× clang. Instruktioner 1,329× → 1,322×.
+Målet 1,05× är fortfarande öppet. Försöket att flytta om SSA före
+allokering avvisades; själva legalitetsbeviset delas utan ändrade
+livslängder. Validering och mätunderlag i PLAN-vir.md.
+Validerat: egna x86 315/315 och samma fem kända inlinefel, ARM:s 46 VIR-prov,
+ASan/UBSan och filvist bygge gröna. TSVC x86 151/151 och **83** vektorloopar
+(tidigare 82, s1111 tillkommer); ARM/QEMU 151/151 kontrollsummor.
+
+
+### 2026-11-13: signerad fyrabytesavkodare
+
+Gemensamma vir_read_be kan kombinera även signerad första byte när en
+24-bitars i32-shift kastar bort signextensionen. SQLite SerialGet går
+122 → 114 instruktioner; fast-alignat fyrabytesprov 31,441 → 28,363 ms
+(−9,8 %), clang 28,225 ms. Hela speedtest1 förbättras varierande 0,1–1,1 %
+i två korta serier, så ingen stabil helprogramvinst utlovas. Målet 1,05×
+är fortfarande öppet; detaljer och mätunderlag under V4 i PLAN-vir.md.
+
+
+### 2026-11-13: privat switchselektor och döda clobbers
+
+En privat dense-selektor kan produceras direkt i r10 i stället för att
+kopieras dit. Formberäkningen delas mellan targetkrav och dispatch.
+Allokeraren bevarar inte döda operander i terminatorns clobbrade register;
+levande värden bevaras som förr. vdbeRecordCompareInt tappar en movl.
+Två femprovserier av identisk SQLite-binär ger 0,5–1,1 % lägre CPU-tid;
+1,131×/1,118× clang. Målet 1,05× är öppet. Den bredare fas-3-idén avvisades
+av slumpfrö 17; den snäva regeln passerar 30 frön/240 funktioner. Detaljer
+under V4 i PLAN-vir.md.
+Validerat: egna x86 315/315 och samma fem kända inlinefel; ARM/QEMU 46/46,
+ASan/UBSan, filvist bygge och allokatorns 30 slumpenheter gröna. TSVC
+151/151 kontrollsummor, **83** vektorloopar kvar.
+
+
+### 2026-11-13: utvidgning av redan breda index
+
+Vanlig ext och NSW-indexskalning delar nu samma fysiska 32→64-bevis.
+getCellInfo tappar en movslq efter sin halvordsladdning. Ett beroende
+indexprov går 81,389 → 75,971 ms (−6,7 %); hela speedtest1 är neutralt i
+upprepningen, 1,125× clang, så 1,05×-målet är fortfarande öppet. Regressionen
+håller även 13 signerade index över ett anrop: åtta fyrabytes-spill måste
+behålla signutvidgningen. Övriga försök med GVN, spillplacering och riktiga
+ramlösa syskonanrop gav ingen säker helprogramvinst och är borttagna;
+mätunderlag och lärdomar under V4 i PLAN-vir.md.
+Validerat: egna x86 315/315 och samma fem kända inlinefel, ARM/QEMU 46/46,
+ASan/UBSan och filvist bygge gröna. TSVC 151/151 och **83** vektorloopar.
+
+
+### 2026-11-13: delad kontextkänslig inlining
+
+Konstanta argument till refererade parametrar kan ge 600 i stället för
+150 AST-noders VIR-budget. Enbart `(void)param` räknas inte. Prepassens
+bottom-up-storlek inkluderar både dessa platser och engångskroppar, så en
+wrapper inte felaktigt räknas som liten efter inlining. Regeln delas med
+ARM; O0/O1 oförändrade. Tre femprovserier på speedtest1 main ger 0,5–1,1 %
+vinst, 1,113–1,115× clang. Målet 1,05× är fortsatt öppet. 450, 750 och
+bonus bara inom loopar gav ingen vinst och behålls inte; underlag under V4
+i PLAN-vir.md.
+Validerat: egna x86 316/316, GCC 1615/1615, TCC 105/105, samma fem kända
+inlinefel; ARM/QEMU 47/47, ASan/UBSan och filvist bygge gröna. TSVC
+151/151 och **83** vektorloopar, prefixkontroll 134 namn.
+
+
+### 2026-11-13: mät småfunktionernas återstående helprogrambidrag
+
+Ny `bench/sqlite/vir-x86-swap.py` mäter clangs assembly för RecordCompareInt,
+btreeParseCellPtr, getCellInfo och pcache1Fetch i temporära VIR-hybrider.
+2048-bytes textslotar och kontroll av alla 1478 textsymboladresser håller
+övrig kod på samma adress. Alla verifieringshashar stämmer. Första
+femprovserien vinner bara 0,5 % med alla fyra bytta; en tredje kort serie
+bekräftar 0,8 %. Den mellanliggande upprepningen har tydlig lastvariation. Även hybriderna ligger över 1,05× clang, så nästa fokus är
+VM:n och större sökrutiner. Ingen ny optimeringskod behålls från denna
+omgång; prototyper med färre kopior/tester var neutrala eller långsammare.
+Fulla mätningar och avvisade försök under V4 i PLAN-vir.md. Den återställda
+kompilatorn passerar fokuserade x86-riggen och VIR:s självprov.
+
+
+### 2026-11-13: engångsbonus begränsad i stora anropare
+
+Den delade inlinern behåller vanliga/kontextkänsliga budgetar när en
+anropares egen AST redan är större än engångsbonusens 4000 noder. Därmed
+växer inte en redan stor allokeringsenhet enbart för att hjälparen har en
+referens. Walkern och bottom-up-storleksmodellen fattar samma beslut.
+SQLite VdbeExec 24854 → 17295 instruktioner, 119382 → 82806 kodbyte och
+2680 → 1800 bytes ram. Tre lugnare speedtest1-serier ger 1,1–1,7 % vinst,
+1,099–1,104× clang; kontenderade serier varierar kraftigt och redovisas
+också under V4 i PLAN-vir.md. **1,05×-målet är fortsatt öppet.**
+Validerat: egna x86 317/317, GCC 1615/1615, TCC 105/105 och samma fem kända
+inlinefel; ARM/QEMU 48/48, fokuserat ASan/UBSan och filvist bygge gröna.
+TSVC 151/151 och **83** vektorloopar; prefixkontroll 134 namn. Slutbyggets
+SQLite-binär är byteidentisk med den mätta kandidaten.
+
+
+### 2026-11-13: smala lokalfält med olika heltalsbärare
+
+Förenkling kan ta bort en trunc före en smal lagring. Slotfrämjandet i den
+delade byggaren normaliserar nu i64/i32-bärare efter fältets minnesbredd,
+så blandade lagringsvägar inte lämnar en lokal på stacken. Clang-jämförelsen
+pekade på serial_type i vdbeRecordCompareString, som nu hålls i register.
+Två femprovserier av speedtest1 ger 0,92–0,98 % CPU-vinst, **1,094–1,096×
+clang -O2**. Dynamiska instruktioner 1,272× → 1,263× clang. Målet 1,05× är
+fortsatt öppet; mätunderlag under V4 i PLAN-vir.md.
+Validerat: egna x86 318/318, GCC 1615/1615, TCC 105/105, samma fem kända
+inlinefel, ARM/QEMU 49/49 VIR-prov, fokuserat ASan/UBSan och filvist bygge.
+TSVC behåller 151/151 kontrollsummor och **83** vektorloopar. Regeln delas
+med ARM, vars nativeprestanda inte har mätts.
+
+
+### 2026-11-13: avvisade intervall- och dödlagringsförsök
+
+Dominerande teckenintervall tar bort divisionsbias i
+vdbeRecordCompareString men ger 1,1–1,4 % sämre speedtest1-CPU i två
+femprovserier. Lokal dödlagringsrensning efter lastvidarebefordran tar bara
+69 statiska instruktioner i amalgamationen och ger cirka 0,7 % sämre CPU.
+Båda prototyperna och tillfälliga främjandespårningar är återställda;
+fokusprov och verifieringshashar var gröna. Mätunderlag under V4 i
+PLAN-vir.md. Den behållna kompilatorn ligger fortsatt på 1,094–1,096× clang
+i de senaste jämförbara serierna; 1,05×-målet är öppet.
+
+
+### 2026-11-13: ARM-CI:s debugrad för råa instruktioner
+
+Nya dispatchprovet exponerade att assemblerns `.inst` lät en väntande
+`.loc` hamna efter instruktionen. Raden konsumeras nu före kodbytena,
+som för vanliga mnemoniker. Direkt assemblerregression tillagd. Full
+DWARF-rigg 1591/1591 och assemblerobjekt 62/62, även ASan/UBSan och
+filvist bygge, gröna. SQLite-binären oförändrad mot senaste mätbygget;
+5 %-målet är fortfarande öppet.

@@ -995,7 +995,9 @@ static val wk_arith(ecx *e, int op, qty t, val a, val b)
 		if (b.k == V_CONST) {
 			if (em_xor_not(c, t, op, b.i))
 				return LO(un)(e, T_TILDE, wk_opw(c, t), a);
-			em_mulshift(c, t, &op, &b.i);
+			/* VIR retains signed multiplication's no-overflow fact when it
+			 * selects the shift. The direct targets select it here. */
+			if(!(e->vtry && wk_signed(c,t) && !e->E->o->wrapv))em_mulshift(c, t, &op, &b.i);
 		}
 	}
 
@@ -2189,7 +2191,7 @@ static val wk_call(ecx *e, uint32_t n)
 		} else if (em_plain_mem_kind(e, s, (int)x->c) && wk_mem_inline(e, n, em_plain_mem_kind(e, s, (int)x->c), &mv)) {
 			if (args != argbuf) free(args);
 			return mv;
-		} else if (wk_can_inline(e, s)) {
+		} else if (wk_can_inline(e, s, n)) {
 			if (args != argbuf) free(args);
 			return wk_inline(e, n, s);
 		} else if (unlikely(sym_attrs(c, s)->error_fn) && e->reach) {

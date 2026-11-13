@@ -7,7 +7,7 @@
 static bool x64_tied(int op)
 {
 	return (op >= X_ADD && op <= X_SBB) || (op >= X_ADDI && op <= X_XORI) || (op >= X_SHLI && op <= X_SAR) ||
-	       op == X_NEG || op == X_NOT || op == X_BSWAP || (op >= X_FADD && op <= X_FXOR);
+	       op == X_NEG || op == X_NOT || op == X_BSWAP || op == X_CMOV || (op >= X_FADD && op <= X_FXOR);
 }
 
 static bool x64_commutes(int op)
@@ -101,6 +101,10 @@ static void x64_memop(ecx *e, tbuf *b, const rec *i)
 {
 	cc *c = e->c;
 	int base = i->r[1];
+	int64_t off=i->off;
+	if(base==XFRAME) {
+		base=RSP;off+=e->x64->framesz-8-e->x64->spdelta;
+	}
 
 	/* Incoming stack arguments retain rbp; local slots use the realigned base. */
 	if (base == RBP && i->off < 0 && e->wk->falign > 16)
@@ -110,10 +114,14 @@ static void x64_memop(ecx *e, tbuf *b, const rec *i)
 		tb_s(b, "(%rip)");
 		return;
 	}
-	if (i->off)
-		tb_i(b, i->off);
+	if (off)
+		tb_i(b, off);
 	tb_c(b, '(');
 	x64_reg(b, base, 8);
+	if (i->op == X_LDX || i->op == X_STX || ((i->op == X_TESTM || i->op == X_CMPM) && i->r[3] != XNOREG)) {
+		tb_c(b, ','); x64_reg(b, i->r[3], 8);
+		tb_c(b, ','); tb_u(b, 1u << i->sh);
+	}
 	tb_c(b, ')');
 }
 
@@ -149,6 +157,7 @@ static void x64_cs_access(ecx *e, tbuf *b, int r, bool load)
 {
 	int64_t off = e->x64->csslot[r];
 	int base = e->wk->falign > 16 ? R12 : RBP;
+	if(e->x64->spframe) {base=RSP;off+=e->x64->framesz-8;}
 	if (off < INT32_MIN || off > INT32_MAX) {
 		tb_s(b, "\tmovabsq\t$"); tb_i(b, off);
 		tb_s(b, ", %r11\n\taddq\t"); x64_reg(b, base, 8);
@@ -198,6 +207,8 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 	bool cfi = e->E->o->cfi;	/* unwind tables: .cfi_* as clang writes them */
 	uint32_t dj = 0;		/* -g: the next row */
 	uint32_t tail = x64_tail_ref(e);
+	if(X->spframe && (frame || e->calls))frame+=8;
+	X->framesz=frame;X->spdelta=0;
 
 	if (unlikely(e->E->o->debug)) {
 		/* the function's own line (its body's '{', column 0), as clang */
@@ -243,7 +254,7 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 		if (cfi && !x64_nosimd(e))
 			for (int k = 0; k < 16; k++) x64_cs_cfi(b, 17 + k, 160 + 16 * k);
 	} else {
-		if (!X->framefree)
+		if (!X->framefree && !X->spframe)
 			tb_s(b, cfi ? "\tpushq\t%rbp\n\t.cfi_def_cfa_offset 16\n\t.cfi_offset %rbp, -16\n"
 				      "\tmovq\t%rsp, %rbp\n\t.cfi_def_cfa_register %rbp\n" : "\tpushq\t%rbp\n\tmovq\t%rsp, %rbp\n");
 		if (A > 16) {
@@ -263,6 +274,7 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 		tb_i(b, frame);
 		tb_s(b, ", %rsp\n");
 	}
+	if(cfi && X->spframe && frame)tb_f(b,"\t.cfi_def_cfa_offset %lld\n",(long long)frame+8);
 	if (e->wk->spneed) {
 		/* -fstack-protector: the guard into the canary slot (r11: no argument lives there) */
 		x64_guard(e, b);
@@ -327,7 +339,7 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			}
 			break;
 		}
-		case X_LD:
+		case X_LDX: case X_LD:
 			if (IS_XMM(i->r[0])) {
 				tb_s(b, sz == 4 ? "\tmovss\t" : sz == 8 ? "\tmovsd\t" : "\tmovups\t");
 				x64_memop(e, b, i);
@@ -345,7 +357,7 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			x64_reg(b, i->r[0], i->cond || sz == 8 ? 8 : 4);
 			break;
 			}
-		case X_ST:
+		case X_STX: case X_ST:
 			if (IS_XMM(i->r[2]))
 				tb_s(b, sz == 4 ? "\tmovss\t" : sz == 8 ? "\tmovsd\t" : "\tmovups\t");
 			else
@@ -355,10 +367,10 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			x64_memop(e, b, i);
 			break;
 		case X_LEA:
-			x64_ins(b, "lea", 8);
+			x64_ins(b, "lea", sz);
 			x64_memop(e, b, i);
 			tb_s(b, ", ");
-			x64_reg(b, i->r[0], 8);
+			x64_reg(b, i->r[0], sz);
 			break;
 		case X_LEASCALE:
 			x64_ins(b, "lea", sz);
@@ -418,6 +430,22 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			tb_s(b, ", ");
 			x64_reg(b, i->r[1], sz);
 			break;
+		case X_CMOV:
+			tb_s(b,"\tcmov");tb_s(b,x64_ccn[i->cond]);tb_c(b,x64_sfx(sz));tb_c(b,'\t');
+			x64_reg(b,i->r[2],sz);tb_s(b,", ");x64_reg(b,i->r[0],sz);break;
+		case X_CMPM:
+			x64_ins(b,"cmp",sz);
+			if(i->cond) {x64_memop(e,b,i);tb_s(b,", ");x64_reg(b,i->r[2],sz);}
+			else {
+				if(i->r[2]==XNOREG)x64_imm(b,sz==1?(uint8_t)i->ref:sz==2?(uint16_t)i->ref:(int32_t)i->ref);
+				else x64_reg(b,i->r[2],sz);
+				tb_s(b,", ");x64_memop(e,b,i);
+			}
+			break;
+		case X_TESTM:
+			x64_ins(b,"test",sz);
+			x64_imm(b,sz==1?(uint8_t)i->ref:sz==2?(uint16_t)i->ref:(int32_t)i->ref);
+			tb_s(b,", ");x64_memop(e,b,i);break;
 		case X_SETCC:
 			tb_s(b, "\tset");
 			tb_s(b, x64_ccn[i->cond]);
@@ -467,6 +495,10 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			tb_s(b, i->imm < 0 ? "\tsubq\t$" : "\taddq\t$");
 			tb_i(b, i->imm < 0 ? -i->imm : i->imm);
 			tb_s(b, ", %rsp");
+			if(X->spframe) {
+				X->spdelta+=i->imm;
+				if(cfi)tb_f(b,"\n\t.cfi_adjust_cfa_offset %lld",(long long)-i->imm);
+			}
 			break;
 		case X_CQO:
 			tb_s(b, sz == 8 ? "\tcqto" : "\tcltd");
@@ -575,6 +607,9 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			x64_reg(b, i->r[0], sz);
 			break;
 		case X_BSWAP:
+			if(sz==2) {
+				tb_s(b,"\trorw\t$8, ");x64_reg(b,i->r[0],2);break;
+			}
 			x64_ins(b, "bswap", sz);
 			x64_reg(b, i->r[0], sz);
 			break;
@@ -685,6 +720,7 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 		}
 		tb_c(b, '\n');
 	}
+	if(X->spframe && X->spdelta)efatal(e,e->curloc,"internal error: unbalanced VIR outgoing arguments");
 	if (e->wk->spneed) {
 		x64_guard(e, b);
 		tb_f(b, "\tcmpq\t%d(%s), %%r11\n\tjne\t.Lspfail%u\n", e->wk->canary, e->wk->falign > 16 ? "%r12" : "%rbp", s);
@@ -720,7 +756,10 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			tb_s(b, "\tmovq\t-8(%rbp), %r12\n");
 			if (cfi) tb_s(b, "\t.cfi_same_value %r12\n");
 		}
-		if (!X->framefree)
+		if(X->spframe) {
+			if(frame)tb_f(b,"\taddq\t$%lld, %%rsp\n",(long long)frame);
+			if(cfi && frame)tb_s(b,"\t.cfi_def_cfa_offset 8\n");
+		} else if (!X->framefree)
 			tb_s(b, cfi ? "\tmovq\t%rbp, %rsp\n\tpopq\t%rbp\n\t.cfi_def_cfa %rsp, 8\n" : "\tmovq\t%rbp, %rsp\n\tpopq\t%rbp\n");
 		if (tail) {
 			tb_s(b, "\tjmp\t");

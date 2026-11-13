@@ -13,13 +13,13 @@ VPRIV bool x64_last_u32(const ecx *e, int r)
 		return false;
 	if (i->op == X_MOVI)
 		return (uint64_t)i->imm <= UINT32_MAX;
-	if (i->op == X_LD || i->op == X_EXT)
+	if (i->op == X_LD || i->op == X_LDX || i->op == X_EXT)
 		return !i->cond && (i->sz == 1 || i->sz == 2 || i->sz == 4);
 	if (i->sz != 4)
 		return false;
 	switch (i->op) {
 	case X_MOV:
-	case X_LEASCALE:
+	case X_LEA: case X_LEASCALE:
 	case X_ADD: case X_SUB: case X_AND: case X_OR: case X_XOR:
 	case X_IMUL: case X_ADC: case X_SBB:
 	case X_ADDI: case X_SUBI: case X_ANDI: case X_ORI: case X_XORI: case X_IMULI:

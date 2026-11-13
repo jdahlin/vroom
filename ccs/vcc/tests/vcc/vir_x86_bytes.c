@@ -1,0 +1,69 @@
+/* Combine exact ordinary reads; preserve volatile and lower signed bytes. */
+#define NI __attribute__((noinline))
+NI unsigned be16(const unsigned char *p) {return (p[0]<<8)|p[1];}
+NI unsigned be32(const unsigned char *p) {return ((unsigned)p[0]<<24)|((unsigned)p[1]<<16)|(p[2]<<8)|p[3];}
+NI long signed32(const unsigned char *p) {
+ return ((signed char)p[0]*16777216)|(p[1]<<16)|(p[2]<<8)|p[3];
+}
+NI long signedlow32(const signed char *p) {
+ return (p[0]*16777216)|(p[1]*65536)|(p[2]*256)|p[3];
+}
+NI long signedvol32(const volatile unsigned char *p) {
+ return ((signed char)p[0]*16777216)|(p[1]<<16)|(p[2]<<8)|p[3];
+}
+#define U32(p) (((unsigned)(p)[0]<<24)|((unsigned)(p)[1]<<16)|((p)[2]<<8)|(p)[3])
+NI unsigned long long be64(const unsigned char *p) {
+ unsigned long long hi=U32(p);
+ return (hi<<32)|U32(p+4);
+}
+NI long long be48(const unsigned char *p) {
+ return U32(p+2)+((long long)((signed char)p[0]*256|p[1])*4294967296LL);
+}
+NI unsigned offset32(const unsigned char *p) {return U32(p+2);}
+NI unsigned long long bev64(const volatile unsigned char *p) {
+ unsigned long long hi=U32(p);
+ return (hi<<32)|U32(p+4);
+}
+NI unsigned indexed16(const unsigned char *p,long i) {
+ const unsigned char *q=(const void *)((unsigned long)p+i);
+ return (q[0]<<8)|q[1];
+}
+NI unsigned indexed32(const unsigned char *p,long i) {
+ const unsigned char *q=(const void *)((unsigned long)p+i);
+ return ((unsigned)q[0]<<24)|((unsigned)q[1]<<16)|(q[2]<<8)|q[3];
+}
+NI unsigned bev16(const volatile unsigned char *p) {return (p[0]<<8)|p[1];}
+NI int signed16(const signed char *p) {return p[0]*256|p[1];}
+NI unsigned changed(unsigned char *p) {unsigned hi=p[0]<<8;p[1]=17;return hi|p[1];}
+int main(void) {
+ unsigned char a[259];
+ for(unsigned i=0;i<259;i++)a[i]=(unsigned char)(i*97+13);
+ for(unsigned i=0;i<258;i++) {
+  unsigned x=(unsigned)a[i]*256+a[i+1];
+  if(be16(a+i)!=x||bev16(a+i)!=x)return 1;
+  if(indexed16(a+128,(long)i-128)!=x)return 4;
+  signed char *p=(signed char *)a+i;
+  if(signed16(p)!=((int)p[0]*256|p[1]))return 2;
+ }
+ for(unsigned i=0;i<256;i++) {
+  unsigned x=((unsigned)a[i]<<24)|((unsigned)a[i+1]<<16)|((unsigned)a[i+2]<<8)|a[i+3];
+  if(be32(a+i)!=x||indexed32(a+128,(long)i-128)!=x)return 5;
+  long sx=x<=2147483647u?(long)x:(long)x-4294967296L;
+  if(signed32(a+i)!=sx || signedvol32(a+i)!=sx)return 8;
+  signed char *p=(signed char *)a+i;
+  if(signedlow32(p)!=((p[0]*16777216)|(p[1]*65536)|(p[2]*256)|p[3]))return 9;
+ }
+ for(unsigned i=0;i<252;i++) {
+  unsigned long long x=0;
+  for(unsigned j=0;j<8;j++)x=x*256+a[i+j];
+  if(be64(a+i)!=x || bev64(a+i)!=x)return 6;
+  long long y=(signed char)a[i];
+  for(unsigned j=1;j<6;j++)y=y*256+a[i+j];
+  if(be48(a+i)!=y || offset32(a+i)!=(unsigned)(x>>16))return 7;
+ }
+ for(unsigned i=0;i<258;i++) {
+  unsigned x=(unsigned)a[i]*256+17;
+  if(changed(a+i)!=x||a[i+1]!=17)return 3;
+ }
+ return 0;
+}

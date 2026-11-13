@@ -919,6 +919,26 @@ static void displace(A *a, uint32_t r, uint64_t *avoid, uint32_t p)
 	}
 }
 
+/* Applied after operand placement, including terminators whose outgoing
+ * state must describe the registers after the machine instruction. */
+static void clobbers(A *a, const vir_fix *fx, const uint64_t *lock, const uint64_t *fixm, uint32_t pos)
+{
+	uint64_t avoid[2] = { lock[0] | fixm[0] | fx->clob[0] | fx->eclob[0],
+	                      lock[1] | fixm[1] | fx->clob[1] | fx->eclob[1] };
+
+	for (int c = 0; c < 2; c++) {
+		uint64_t m = (fx->clob[c] | fx->eclob[c]) & a->rg->alloc[c];
+
+		while (m) {
+			uint32_t r = VR_MAKE(c, lowbit(m));
+
+			m &= m - 1;
+			if (ax.regval[r])
+				displace(a, r, avoid, pos);
+		}
+	}
+}
+
 /* ---------------- sweep 6: edges ---------------- */
 
 static bool livein(A *a, uint32_t v, uint32_t b);
@@ -1683,7 +1703,15 @@ static bool instr(A *a, uint32_t b, uint32_t i, bool term)
 	}
 	for (uint32_t j = 0; j < n; j++)
 		ax.opr[a->nopr++] = byte[j];
-	if (term) {	/* the end state keeps the operands for the edges */
+	if (term) {
+		/* A dead operand or fixed-register copy in a clobbered register needs
+		 * no preservation. The physical input remains readable until dispatch. */
+		for (uint32_t j = 0; j < n; j++) {
+			uint32_t r=byte[j],v=ops[j];
+			if(r!=VR_NONE && ((fx.clob[VR_CLASS(r)]|fx.eclob[VR_CLASS(r)]) >> VR_NUM(r) & 1) &&
+			   ax.regval[r]==v && (ax.reg[v]!=r || ax.dmark[v]==i))clearreg(a,r);
+		}
+		clobbers(a, &fx, lock, fixm, i);
 		save_state(a, ax.end_off, ax.end_n, b);
 		return true;
 	}
@@ -1697,19 +1725,7 @@ static bool instr(A *a, uint32_t b, uint32_t i, bool term)
 			clearreg(a, ax.reg[v]);
 	}
 	/* 4: clobbers: live values leave the clobbered registers */
-	for (int c = 0; c < 2; c++) {
-		uint64_t m = (fx.clob[c] | fx.eclob[c]) & a->rg->alloc[c];
-
-		av[0] = lock[0] | fixm[0] | fx.clob[0] | fx.eclob[0];
-		av[1] = lock[1] | fixm[1] | fx.clob[1] | fx.eclob[1];
-		while (m) {
-			uint32_t r = VR_MAKE(c, lowbit(m));
-
-			m &= m - 1;
-			if (ax.regval[r])
-				displace(a, r, av, i);
-		}
-	}
+	clobbers(a, &fx, lock, fixm, i);
 	/* 5: the result */
 	if (in->ty != VT_VOID && in->ty != VT_MULTI) {
 		uint32_t c = vcls(f, i);

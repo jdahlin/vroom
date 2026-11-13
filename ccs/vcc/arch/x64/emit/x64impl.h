@@ -17,7 +17,7 @@
 #include "../../../emit/walk/walk.h"
 
 enum { RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI, R8, R9, R10, R11, R12, R13, R14, R15, XMM0 = 16, XMM8 = 24, XMM15 = 31,
-       RIP = 32, XNOREG = 0xff };
+       RIP = 32, XFRAME = 33, XNOREG = 0xff };
 #define X_TEMPS ((1u << RAX) | (1u << RCX) | (1u << RDX) | (1u << RSI) | (1u << RDI) | (1u << R8) | (1u << R9) | (1u << R10))
 /* floating point temporaries: xmm8-xmm14 (xmm0-7 carry arguments and results, xmm15 is scratch) */
 #define X_FTEMPS (((1u << XMM15) - 1) & ~((1u << XMM8) - 1))
@@ -84,6 +84,10 @@ enum {
 	X_X87,		/* cond: XF_* (with a memory operand where it takes one) */
 	X_JTE,		/* a jump table word: .long label - ref (both labels) */
 	X_RESUME_FRAME,	/* rebuild realigned R12 from restored RBP after builtin longjmp */
+	X_LDX, X_STX,	/* memory at r1 + (r3 << sh) + off; load r0 / store r2 */
+	X_CMOV,		/* r0 = flags[cond] ? r2 : r1 */
+	X_TESTM,		/* flags: [r1 + (r3 << sh) + off] & (int32_t)ref; r3 optional */
+	X_CMPM,		/* compare memory r1+(r3<<sh)+off with r2 (XNOREG: immediate ref); cond reverses operands */
 	X_NOPS
 };
 
@@ -102,6 +106,8 @@ typedef struct xst {
 	bool asmcs;		/* inside an asm: out of temporaries, take a callee-saved register (saved by the prologue) */
 	int pushes;		/* 8-byte pushes outstanding (the call alignment) */
 	bool framefree;		/* frame.c: no frame/stack dependency in the final body */
+	bool spframe;		/* allocated VIR: virtual frame base, leaving rbp allocatable */
+	int64_t framesz, spdelta; /* printer's final frame and temporary outgoing arguments */
 	/* locals.c: persistent homes, disjoint from expression temporaries and R12. */
 	uint32_t lsym[4];
 	uint8_t lreg[4], nlreg;
