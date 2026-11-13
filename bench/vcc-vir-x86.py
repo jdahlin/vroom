@@ -81,7 +81,7 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
         ('vir_x86_select.c', {'choose', 'uchoose', 'keep', 'boolean', 'pointer'}, {}),
         ('vir_x86_bytes.c', {'be16', 'be32', 'signed32', 'signedlow32', 'signedvol32', 'be64', 'be48', 'offset32', 'bev64', 'indexed16', 'indexed32', 'bev16', 'signed16', 'changed'}, {}),
         ('vir_x86_inline.c', {'work'}, {}),
-        ('vir_x86_nsw_index.c', {'be16p', 'be16cast', 'be32cast', 'be64cast', 'load4signed', 'store4signed', 'shared', 'keep_input', 'rawshift', 'vol', 'min32', 'min64'}, {}),
+        ('vir_x86_nsw_index.c', {'be16p', 'be16cast', 'be32cast', 'be64cast', 'load4signed', 'store4signed', 'shared', 'keep_input', 'rawshift', 'vol', 'min32', 'min64', 'clean16', 'clean8', 'change', 'pressure_indices'}, {}),
         ('vir_x86_index.c', {'load8', 'load4', 'load2', 'load1', 'store8', 'store4', 'cast8', 'cast4', 'cast2', 'caststore4', 'castmod', 'cast3', 'sharedcast'}, {}),
         ('vir_vector_stride.c', {'stride', 'intstride', 'wide', 'reverse', 'ordered', 'residue', 'gather', 'carry', 'chain', 'maxval', 'maxindex', 'lastnegative'}, {'stride': 'mulps', 'intstride': 'mulps', 'reverse': 'addpd', 'ordered': 'mulps', 'residue': 'addps', 'gather': 'mulps', 'carry': 'mulps'}),
         ('vir_x86_dispatch.c', {'dense', 'byte_switch', 'signed_range', 'high', 'shigh', 'atom'}, {}),
@@ -182,6 +182,10 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
                 if body.count('movzbl') != 2 or 'rorw' in body:
                     raise SystemExit('bev16: volatile byte reads were combined')
             if filename == 'vir_x86_nsw_index.c':
+                for name in ('clean16', 'clean8'):
+                    body = asm.read_text().split(name + ':\n', 1)[1].split('.Lfunc_end', 1)[0]
+                    if 'movslq' in body:
+                        raise SystemExit(f'{name}: loaded index was sign-extended again')
                 for name, scale in [('be16p', 2), ('be16cast', 2), ('be32cast', 4), ('be64cast', 8), ('load4signed', 4), ('store4signed', 4)]:
                     body = asm.read_text().split(name + ':\n', 1)[1].split('.Lfunc_end', 1)[0]
                     if not re.search(r'\(%\w+,%\w+,' + str(scale) + r'\)', body):

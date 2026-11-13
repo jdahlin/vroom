@@ -240,6 +240,68 @@ ekvivalenstestning återstår. Genererade program använder inga externa anrop.
 ### V4 x86-64 mot clang -O2 (2026-11-12), mål högst 5 % långsammare
 
 
+2026-11-13, redan utvidgade index i små heta funktioner:
+x86 återanvänder samma fysiska signutvidgningsbevis i vanlig ext och
+NSW-skalade adresser. En osignerad 8/16-bitarsladdning har redan rätt höga
+bitar; en signerad laddning/extension kan återanvändas om värdet inte har
+spillslot. Ett i32-spill laddas om med nollad överhalva och får därför
+fortfarande movslq för ett negativt index. Inget ändras i SSA eller i
+allokerarens livslängder. I getCellInfo försvinner movslq efter iCur-läsningen.
+
+Ett beroendekedjeprov (30 miljoner anrop, sju alternerade prov) av en
+halvordsindexerad läsning går 81,389 → 75,971 ms (−6,7 %), identisk checksumma.
+Hela speedtest1: 1301,57 → 1297,17 ms i första femprovserien, 1248,86 →
+1248,94 ms i upprepningen; alltså **ingen säker helprogramvinst**. Andra
+serien är 1,125× clang, instruktionskvoten 1,321× → 1,320×. Målet 1,05× är
+fortfarande öppet. Underlag `work/vir-x86-perf/index-ext`, inklusive
+`latency-results.json`, `results100` och `repeat100`.
+
+Regressionen läser unsigned short- och signed char-index och täcker hela
+byteintervallet. Ett tryckprov håller 13 signerade index över ett anrop
+som ändrar källminnet: fem ospillda index behöver ingen extra utvidgning,
+åtta i32-spill måste fortfarande få den. Vanliga samt -fwrapv-körningar,
+assembly och egen objektväg kontrollerar samma resultat.
+Validerat: egna x86 315/315, GCC 1615/1615, TCC 105/105 och samma fem
+kända inlinefel; fokuserat ASan/UBSan och filvist bygge gröna. ARM/QEMU
+46/46 VIR-prov. TSVC 151/151 kontrollsummor, **83** vektorloopar kvar.
+
+Färsk kort profil av samma huvudtest: VdbeExec 20,3 %, IndexMoveto 8,1 %,
+RecordCompareInt 4,7 %, pcache1Fetch 3,1 %, SerialGet 1,8 %. Följande
+försök sparas bara som mätunderlag, inte som ändringar i kompilatorn:
+
+| Försök | CPU ms före → efter | Slutsats |
+|---|---:|---|
+| Absolut pekartabell i data.rel.ro, direkt minnes-jmp | 1266,43 → 1264,33; 1268,81 → 1277,13 | 1,4 % färre instruktioner men ingen stabil vinst |
+| SIMD-scratch kring GP-kopieringscykler på kanter | 1274,86 → 1285,90 | Friare r10 i fler funktioner hjälper inte; VM-koden var redan lika stor |
+| Förnya GVN:s senaste laddningskandidat efter skrivning | 1254,17 → 1270,29 | Färre laddningar, men långsammare |
+| GVN: hela lagrade värden över icke överlappande skrivningar | 1251,36 → 1270,13 | Långsammare |
+| GVN: även smala lagringar | 1249,35 → 1249,16 | Neutralt |
+| GVN: endast smala värden, över block | 1248,02 → 1256,05 | Långsammare |
+| GVN: smala värden inom block | 1246,47 → 1254,17 | Långsammare |
+| GVN: inom block plus ext i64 → i32 från låg byte/halvord | 1247,62 → 1244,90 | För liten osäker vinst för att behålla passet |
+| Enbart det saknade ext-fallet vid store-forwarding | 1244,65 → 1257,56 | Ändrar bara btreeBeginTrans och ger där fler instruktioner |
+| 32 i stället för 8 kandidater för återbruk av spillslot | 1253,18 → 1252,58 | Neutralt; VM-ramen fortfarande 2888 byte |
+| Återbruk även efter hela phi-webbens konservativa livslängd | 1249,20 → 1252,38 | VM-ram 2888 → 2136 byte, men ingen CPU-vinst; 30 slumpenheter gröna |
+| Omvänd fysisk spillordning nära rsp | 1249,27 → 1250,46 | VM:s korta rsp-displacement 80 → 1464 av 5550 referenser, ändå neutralt |
+| Verkligt ramlösa direkta/indirekta syskonanrop, alla anrop tail | 1248,65 → 1250,65; 1249,88 → 1250,32 | 1,321× → 1,310× instruktioner/clang, neutral CPU |
+
+GVN-försöken använde befintligt base+offset- och skrivintervallsbevis;
+provet med smala heltalslagringar kräver korrekt utvidgning även när en
+i64-bärare läses tillbaka som i32. Själva ext-operationen tillåter detta
+enligt SPEC, men den isolerade regeln förbättrar inte dagens SQLite.
+Syskonanropsprototypen delade ARM:s retur-/br-bevis med x86 och tog även
+indirekta callback-anrop. Den nollade byggarens `e->calls` före sänkning
+så endast verkliga call-instruktioner kräver alignmentram. Utan detta
+kunde äldre prototyper behålla en onödig 8-bytesram. Trots att getCellInfo,
+pcache1Fetch och RecordCompareInt faktiskt tappar sub/add rsp och får
+jmp i stället för call, är helprogramtiden neutral i två serier.
+Enbart nollningen av e->calls lämnar SQLite-amalgamationens assembly lika.
+
+Registerkopieringsgenomgången fann ingen vektorbreddsbugg: X_MOV mellan
+XMM-register skriver redan movaps oberoende av postens skalära storlek.
+Ingen sådan påstådd buggfix behålls. Mätkataloger under
+`work/vir-x86-perf/{abstable,edge-simd-safe,gvn-fresh,gvn-store,gvn-narrow-store,gvn-narrow-only,gvn-local-store,gvn-local-ext,store-ext,slot32,webslot,spill-reverse,tail-leaf,real-calls}`.
+
 2026-11-13, gemensamt bevis för signerad indexskalning: den delade walkern
 låter VIR behålla NSW när en signerad multiplikation med en positiv tvåpotens
 blir en shift. Byggaren producerar samma operation och kod som tidigare,

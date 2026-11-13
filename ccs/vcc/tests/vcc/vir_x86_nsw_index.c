@@ -17,7 +17,28 @@ NI unsigned rawshift(unsigned long base,int i) {const unsigned char *p=(const vo
 NI unsigned vol(const volatile unsigned char *p,int i) {p+=i*2;return BE16(p);}
 NI long min32(int x) {return (long)(x*(-2147483647-1));}
 NI long long min64(long long x) {return x*(-9223372036854775807LL-1);}
+NI unsigned clean16(const unsigned char *p,const unsigned short *i) {return p[2*(int)*i];}
+NI unsigned clean8(const unsigned char *p,const signed char *i) {return p[2*(int)*i];}
+NI int change(signed char *i,int x) {i[0]=(signed char)((unsigned char)i[0]^1);return x+7;}
+NI unsigned pressure_indices(const unsigned char *p,signed char *i,int x) {
+ int a=i[0],b=i[1],c=i[2],d=i[3],e=i[4],f=i[5],g=i[6];
+ int h=i[7],j=i[8],k=i[9],l=i[10],m=i[11],n=i[12];
+ unsigned r=change(i,x);
+ return r+p[2*a]+p[2*b]+p[2*c]+p[2*d]+p[2*e]+p[2*f]+p[2*g]+
+  p[2*h]+p[2*j]+p[2*k]+p[2*l]+p[2*m]+p[2*n];
+}
 int main(void) {
+ static unsigned char table[131073];
+ for(unsigned j=0;j<sizeof table;j++)table[j]=(unsigned char)((j*7)^(j>>3));
+ for(unsigned j=0;j<65536;j+=17) {
+  unsigned short i=j;if(clean16(table,&i)!=table[2*j])return 14;
+ }
+ for(int j=-128;j<128;j++) {
+  signed char i=j;if(clean8(table+512,&i)!=table[512+2*j])return 15;
+  signed char indices[13];unsigned expected=10;
+  for(unsigned k=0;k<13;k++){indices[k]=(signed char)(j+k*37);expected+=table[512+2*(int)indices[k]];}
+  if(pressure_indices(table+512,indices,3)!=expected)return 16;
+ }
  unsigned char bytes[257];
  for(unsigned j=0;j<257;j++)bytes[j]=(unsigned char)(j*97+13);
  const unsigned char *mid=bytes+128;

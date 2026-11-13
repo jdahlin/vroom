@@ -445,6 +445,17 @@ static bool vx_clear32(const vir_fn *f,uint32_t v)
 	}
 }
 
+/* Whether an i32 holder already has the physical sign extension required
+ * by a signed index. A 4-byte spill reload destroys a negative sign extension. */
+static bool vx_sign64(vx *L,uint32_t v)
+{
+	const vir_ins *source=&L->f->ins[v];
+	if(source->ty!=VT_I32)return false;
+	if((source->op==VO_LOAD || source->op==VO_EXT) && (source->fl&VIF_MS) &&
+				VIF_W(source->fl)<=2 && L->o->slot[v]==VIR_NOBLK)return true;
+	return vx_clear32(L->f,v) && !(vir_mask32(L->f,v,8)>>31);
+}
+
 /* Small constant blocks do not need REP's fixed registers or their clobbers.
  * SSE2 handles complete 16-byte pieces; scalar tails never overread. */
 static void vx_memblock(vx *L,const vir_ins *i,int dst,int src)
@@ -602,7 +613,8 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 	   L->o->slot[v]==VIR_NOBLK && v+3<L->f->blk[b].first+L->f->blk[b].n &&
 	   L->uses[v+1]==1 && L->o->slot[v+1]==VIR_NOBLK && L->f->ins[v+2].b==v+1 &&
 	   vx_addrmem(L,b,v+2) && vx_foldedits(L,b,v+1,XNOREG) && vx_foldedits(L,b,v+2,d)) {
-		x64_op3(e,X_EXT,4,d,a,XNOREG)->cond=1;
+		if(vx_sign64(L,i->a))x64_mov(e,d,a);
+		else x64_op3(e,X_EXT,4,d,a,XNOREG)->cond=1;
 		L->scaledv=v+1;L->scaledskip=v+1;L->scaleindex=d;L->scalesh=signed_scale;return;
 	}
 	if ((i->op==VO_MUL || i->op==VO_SHL) && i->ty==VT_I64 && L->uses[v]==1 && L->o->slot[v]==VIR_NOBLK &&
@@ -727,16 +739,7 @@ static void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, 
 		x64_op3(e, X_MOV, sz, d, a, XNOREG); return;
 	case VO_EXT: {
 		if (VIF_W(i->fl) == 3) { x64_mov(e, d, a); return; }
-		const vir_ins *source=&L->f->ins[i->a];
-		if(VIF_W(i->fl)==2 && (i->fl&VIF_MS) && source->ty==VT_I32 &&
-		   (source->op==VO_LOAD || source->op==VO_EXT) && (source->fl&VIF_MS) &&
-		   VIF_W(source->fl)<=2 && L->o->slot[i->a]==VIR_NOBLK) {
-			/* Signed loads already extend to 64 bits. A 4-byte spill reload
-			 * would clear the sign bits, so only unspilled values qualify. */
-			x64_mov(e,d,a);return;
-		}
-		if(VIF_W(i->fl)==2 && vx_clear32(L->f,i->a) &&
-		   (!(i->fl&VIF_MS) || !(vir_mask32(L->f,i->a,8)>>31))) {
+		if(VIF_W(i->fl)==2 && ((i->fl&VIF_MS)?vx_sign64(L,i->a):vx_clear32(L->f,i->a))) {
 			x64_mov(e,d,a);return;
 		}
 		rec *r = x64_op3(e, X_EXT, 1 << VIF_W(i->fl), d, a, XNOREG);

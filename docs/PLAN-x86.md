@@ -1114,3 +1114,17 @@ under V4 i PLAN-vir.md.
 Validerat: egna x86 315/315 och samma fem kända inlinefel; ARM/QEMU 46/46,
 ASan/UBSan, filvist bygge och allokatorns 30 slumpenheter gröna. TSVC
 151/151 kontrollsummor, **83** vektorloopar kvar.
+
+
+### 2026-11-13: utvidgning av redan breda index
+
+Vanlig ext och NSW-indexskalning delar nu samma fysiska 32→64-bevis.
+getCellInfo tappar en movslq efter sin halvordsladdning. Ett beroende
+indexprov går 81,389 → 75,971 ms (−6,7 %); hela speedtest1 är neutralt i
+upprepningen, 1,125× clang, så 1,05×-målet är fortfarande öppet. Regressionen
+håller även 13 signerade index över ett anrop: åtta fyrabytes-spill måste
+behålla signutvidgningen. Övriga försök med GVN, spillplacering och riktiga
+ramlösa syskonanrop gav ingen säker helprogramvinst och är borttagna;
+mätunderlag och lärdomar under V4 i PLAN-vir.md.
+Validerat: egna x86 315/315 och samma fem kända inlinefel, ARM/QEMU 46/46,
+ASan/UBSan och filvist bygge gröna. TSVC 151/151 och **83** vektorloopar.
