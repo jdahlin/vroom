@@ -53,8 +53,8 @@ class Vccd:
             time.sleep(0.02)
         else: raise SystemExit('vccd-test: vccd did not start')
     def alive(self): return self.p.poll() is None
-    def stop(self):
-        if self.alive(): self.p.send_signal(signal.SIGTERM); self.p.wait(5)
+    def stop(self, timeout=5):
+        if self.alive(): self.p.send_signal(signal.SIGTERM); self.p.wait(timeout)
     def cc(self, cwd, src, out='a.o', extra=(), umask=None, timeout=30):
         """compile through the shim: (status, stderr)"""
         pre = (lambda: os.umask(umask)) if umask is not None else None
@@ -305,7 +305,7 @@ def killed_client_no_output():
         check(not os.path.exists(f'{d}/big.o'), 'object written for a client that had gone')
         check(not [f for f in os.listdir(d) if f.endswith('.tmp')], 'temporary left behind')
         st, err = v.cc(d, tu(d)); check(st == 0, f'server after: {st} {err[-300:]}')
-    finally: v.stop()
+    finally: v.stop(300)	# SIGTERM waits for the abandoned job: the next request's new build no longer drains it (Q-SCHED-01)
 
 @test()
 def memory_restart_between_builds():
