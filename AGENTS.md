@@ -245,6 +245,7 @@ bench/vcc-cfi.py -j 6               # -fasynchronous-unwind-tables: .eh_frame pe
 bench/vcc-dwarf.py -j 6             # -g line tables: dwarfdump --verify, .text unchanged, rows vs clang (~2 min)
 bench/vlink-bad.py                  # corrupt objects/archives: vlink (ASan) fails cleanly (<1 s)
 bench/vlink-opts.py                 # vlink options vs ld.lld: errors and loaded image (<1 s)
+bench/vlink-macho.py --base DIR      # vld's Mach-O linker vs a base build: 80 test programs linked, compared, run (macOS, ~1 min)
 build/src/task-test                 # port/task.c: the pool and budget (also under TSan, <1 s)
 bench/sched-measure.py batch|emit|link|vccd|kbuild-log   # scheduling measurements A-F of doc/review/quality-scheduling.md
 bench/vcc-pic.py                    # GOT and TLS relocations per -fno-pic/-fPIE/-fPIC vs clang (<1 s)
