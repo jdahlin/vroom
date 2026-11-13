@@ -240,6 +240,19 @@ ekvivalenstestning återstår. Genererade program använder inga externa anrop.
 ### V4 x86-64 mot clang -O2 (2026-11-12), mål högst 5 % långsammare
 
 
+2026-11-13, avvisat försök att också begränsa konstantargumentsbonusen:
+Samma gräns på anroparens egen AST provades för 600-nodersbonusen i både
+prepass och walker. VM:n krympte ytterligare cirka 11 % och ramen
+1800 → 1672 byte, men speedtest1 main storlek 100 blev långsammare:
+1252,25 → 1262,29 ms i första alternerade femprovserien och
+1225,28 → 1242,53 ms i upprepningen (clang 1130,84 respektive 1113,10).
+Instruktioner/clang 1,272× → 1,273×; alla verifieringshashar stämde.
+Försöket är återställt: den kontextkänsliga budgeten behålls även i stora
+anropare. Underlag `work/vir-x86-perf/large-context/{results100,repeat100}`.
+En ny kort profil av produktionsbygget pekar fortsatt på VdbeExec
+(19,3 %), IndexMoveto (8,6 %) och RecordCompareInt (4,9 %); profilen är
+cirka 2000 cykelprov och används för riktning, inte exakta funktionsvinster.
+
 2026-11-13, begränsa engångsbonus i redan stora anropare:
 Den gemensamma walkern och bottom-up-storleksmodellen ger inte längre
 4000-nodersbonusen till en engångskropp när anroparens egen AST redan är
