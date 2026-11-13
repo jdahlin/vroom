@@ -50,6 +50,8 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 	DR_TAGWRITE(c, ti);
 	c->tags[ti].flags |= RF_BEING_DEFINED;
 	c->in_struct++;
+	if (unlikely(c->field_uses))
+		cc_field_uses_def(c, ti);
 	expect(c, LEX_TOKEN_LEFT_BRACE, "'{'");
 	recov rv;
 
@@ -192,6 +194,8 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 			x->fa[base + nf] = d.at.aligned > ds.align ? d.at.aligned : ds.align;
 			x->fp[base + nf] = d.at.packed;
 			x->fs[base + nf] = f;
+			if (unlikely(c->field_uses) && f.name)
+				cc_field_uses_decl(c, ti, nf, f.name, d.loc);
 			x->n = base + ++nf;
 			if (!accept(c, LEX_TOKEN_COMMA))
 				break;

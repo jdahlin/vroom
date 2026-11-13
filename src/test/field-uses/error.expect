@@ -1,0 +1,7 @@
+tu	error.c	errors
+exit 1
+stderr:
+error.c:3:32: error: no member named 'nosuch' in 'struct S'
+    3 | int g(struct S *s) { return s->nosuch + s->f; }
+      |                             ~  ^
+1 error generated.

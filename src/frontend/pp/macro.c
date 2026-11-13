@@ -143,7 +143,7 @@ VPRIV void pp_macro_define(pp *p, pp_context *c, uint32_t b, uint32_t e)
 				n = (pp_macro *)z;	/* the same definition, built by another TU */
 			m = n;
 		} else {
-			m = pp_macro_canonical_get(n);
+			m = unlikely(p->keep_macro_text) ? NULL : pp_macro_canonical_get(n);
 			if (!m)
 				m = n;
 		}

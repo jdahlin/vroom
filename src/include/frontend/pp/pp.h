@@ -305,6 +305,16 @@ int pp_defined(pp *p, uint32_t id);
 void pp_invalid_tok(pp *p, const char *s, uint32_t len, uint32_t loc);
 /* the source text from loc b to loc e (one file), NULL if unknown */
 const char *pp_src(const pp *p, uint32_t b, uint32_t e, size_t *len);
+/* from now on a #define in the main file keeps its body in the file's text, so that
+   pp_token_spelling_find finds it (VCC_FIELD_USES; the shared copy would not be in a file) */
+void pp_macro_text_keep(pp *p);
+/* where token t is spelled, for VCC_FIELD_USES (tools renaming names): PP_SPELLING_FILE if its
+   bytes are where loc is, PP_SPELLING_MACRO if they are in another file's text (a #define body),
+   PP_SPELLING_NONE if in no file (pasted, header cache), PP_SPELLING_DIRTY if it contains a
+   line splice.  For FILE and MACRO *file and *offset name the bytes. */
+enum { PP_SPELLING_FILE, PP_SPELLING_MACRO, PP_SPELLING_NONE, PP_SPELLING_DIRTY };
+struct lex_file;
+int pp_token_spelling_find(const pp *p, const ptok *t, const struct lex_file **file, uint32_t *offset);
 /* the source text from loc b to the end of its file, NULL if unknown */
 const char *pp_src_rest(const pp *p, uint32_t b, size_t *len);
 /* loc is on a macro name: where an object-like macro's body tokens are (vcc gives them the

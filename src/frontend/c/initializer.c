@@ -490,6 +490,8 @@ static uint64_t il_designation_path(cc *c, ilist *l, bool st, vec *cursor)
 			skip_balanced(c);
 			return l->n;
 		}
+		if (unlikely(c->field_uses))
+			cc_field_uses_path_record(c, FU_DESIGNATOR, T(c, l->ty)->aux, path, d);
 		next(c);
 		depth = d;
 		lo = hi = path[0];

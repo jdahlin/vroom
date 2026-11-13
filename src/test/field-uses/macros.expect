@@ -1,0 +1,16 @@
+tu	macros.c	ok
+use	decl	S	n	macros.c:6	file	macros.c	110	6	16	1	-
+use	decl	S	m	macros.c:6	file	macros.c	117	6	23	1	-
+use	decl	S	cat	macros.c:6	file	macros.c	124	6	30	3	-
+use	decl	S	qq	macros.c:6	file	macros.c	133	6	39	2	-
+use	decl	S	obj	macros.c:6	file	macros.c	141	6	47	3	-
+other	decl	T	n	macros.c:7	file	macros.c	164	7	16	1	-
+use	member	S	m	macros.c:6	file	macros.c	394	19	16	1	-
+use	member	S	n	macros.c:6	macro	macros.c	211	9	23	1	macros.c:19:27
+use	member	S	m	macros.c:6	macro	macros.c	232	10	19	1	macros.c:19:35
+use	member	S	n	macros.c:6	macro	macros.c	211	9	23	1	macros.c:19:54
+use	member	S	cat	macros.c:6	none	macros.c	-1	19	65	3	macros.c:19:65
+use	member	S	qq	macros.c:6	dirty	macros.c	-1	19	90	2	macros.c:19:90
+use	member	S	obj	macros.c:6	macro	macros.c	250	11	17	3	macros.c:19:94
+members	S	macros.c:6	n,m,cat,qq,obj
+macro	obj
