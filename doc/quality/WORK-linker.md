@@ -138,6 +138,11 @@ checked in).  Refresh the opening comments and the stale header of `ld.c`.
 Proof: `VCC_LDCMP=1 bench/vcc-ctests.py`, the kernel link identical, and
 `bench/vbench.py gate` within 1 %.
 
+Status: the context's design is decided and its first step landed
+(`link-context.md`, "Design (decided)": diagnostics and layout moved);
+the remaining groups and the parameter series are listed there, one PR
+each.  The renames of functions and types are `rename-ld.tsv`.
+
 ### 3. The shared layer
 
 Move what ELF, wasm, Mach-O, objcopy/nm and `ar` each wrote on their own
@@ -162,7 +167,9 @@ differs from lld".  Not caused by the split; the cause is open (the host's
 lld, or a real difference in how `vlink` lays out those two sections; the
 `tls_static` case touches `tls_start`, see `link-context.md`).  Whoever takes
 step 2 should look at them first, since step 2's proof depends on this
-comparison being green.
+comparison being green.  Rechecked at ddbb6413 (2026-11-13): the same two
+fail there, so a context PR's proof is "no new failure" until they are
+fixed.
 
 ## Proof for step 1
 
