@@ -1,5 +1,10 @@
-/* CRC32C for host string hashes. x86 dispatches once at startup; the
- * software and SSE4.2 implementations use the same polynomial as ACLE. */
+/*
+ * CRC32C of 8-byte words, the hash of the identifier table (common/intern.h).
+ * On arm64 it is ACLE's __crc32cd; on x86-64 the same names call through
+ * pointers chosen once at start-up (crc32c.c: a software loop or SSE4.2), with
+ * the polynomial of ACLE, so both hosts give the same hash.  vcrc32c_two(h, a, b)
+ * is two words in one step.
+ */
 #ifndef VCC_PORT_CRC32C_H
 #define VCC_PORT_CRC32C_H
 #if defined(__x86_64__)

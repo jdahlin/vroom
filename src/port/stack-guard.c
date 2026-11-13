@@ -1,5 +1,5 @@
 /*
- * The per-thread stack limit behind vstack_guard_low() (vstack.h).
+ * The per-thread stack limit behind vstack_guard_low() (stack-guard.h).
  */
 #include <pthread.h>
 #include "port/stack-guard.h"
