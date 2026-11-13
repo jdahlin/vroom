@@ -427,6 +427,8 @@ enum { FN_MEMCPY, FN_MEMSET, FN_MEMMOVE, FN_UDIVTI3, FN_DIVTI3, FN_UMODTI3, FN_M
  *   IT_CODE   a function's records (prologue and epilogue included) and its
  *             inline asm text, encoded here with a64.h straight into the
  *             current frag; asm statements go through as_snippet in place;
+ *   IT_X64    x86 records, using the assembler encoder and relaxation;
+ *             unhandled records, prologues, CFI and DWARF remain IT_TEXT.
  *   IT_DATA   an object's bytes and relocations; IT_LABEL + IT_BYTES: a
  *             string literal.
  *
@@ -437,7 +439,7 @@ enum { FN_MEMCPY, FN_MEMSET, FN_MEMMOVE, FN_UDIVTI3, FN_DIVTI3, FN_UMODTI3, FN_M
  * Branches inside a function without inline asm are resolved here; with
  * inline asm (which may name the labels: asm goto) labels are .LBB symbols.
  */
-enum { IT_TEXT = 1, IT_CODE, IT_DATA, IT_LABEL, IT_BYTES, IT_SYMHDR, IT_FEND, IT_OSIZE };
+enum { IT_TEXT = 1, IT_CODE, IT_DATA, IT_LABEL, IT_BYTES, IT_SYMHDR, IT_FEND, IT_OSIZE, IT_X64 };
 typedef struct item { uint32_t kind, len; } item;	/* len payload bytes follow, padded to 8 */
 typedef struct code_hdr { uint32_t fid, nin, nraw, nlabel, sym_labels, pad; } code_hdr;
 typedef struct data_hdr { uint64_t size, n; uint32_t nrel, zero; } data_hdr;
@@ -737,6 +739,11 @@ static inline bool direct(const ecx *e);
 VPRIV size_t it_open(ecx *e, uint32_t kind);
 VPRIV void it_close(ecx *e, size_t h);
 VPRIV void *it_room(ecx *e, size_t n);
+VPRIV int a64_replay(rctx *R, const code_hdr *h);
+VPRIV int r_fail(rctx *R, const char *msg);
+VPRIV uint32_t r_sym(rctx *R, uint32_t ref);
+VPRIV bool x64_obj_record(ecx *e, const rec *i, rec *out);
+VPRIV int x64_replay(rctx *R, const char *p, size_t n);
 VPRIV int r_chunk(rctx *R, const char *p, size_t n);
 /* label.c */
 static inline ins *put(ecx *e, int op);

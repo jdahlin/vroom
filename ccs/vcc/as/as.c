@@ -653,7 +653,6 @@ static int parse_name(As *a, const char **pp, const char *e, Sv *out)
 static Sv trim(const char *p, const char *e);
 static int d_dwfile(As *a, const char *p, const char *e);
 static int d_loc(As *a, const char *p, const char *e);
-static void loc_row(As *a);
 static uint64_t frag_base(As *a, uint32_t frag);
 static int d_prefalign(As *a, const char *p, const char *e);
 enum { VI_PREFALIGN, VI_ALIGN, VI_ULEB, VI_SLEB, VI_X86BR, VI_SKIP };	/* VI_SKIP: .skip v, fill with v settled by the layout */	/* VI_X86BR: jmp (code 16) / jcc (code cc) to v */
@@ -3376,7 +3375,7 @@ static int d_loc(As *a, const char *p, const char *e)
 }
 
 /* the pending .loc becomes a row at the current position */
-static void loc_row(As *a)
+VPRIV void loc_row(As *a)
 {
 	a->dwlocp = 0;
 	if (a->ndwl == a->dwlcap) {

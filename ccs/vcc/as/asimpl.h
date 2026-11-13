@@ -211,6 +211,7 @@ VPRIV int flush_pools(As *a);
 VPRIV int ltorg(As *a);
 VPRIV int instruction(As *a, const char *p, const char *e, size_t wn);
 /* arch/x64/as/asm.c (EM_X86_64 objects) */
+VPRIV void loc_row(As *a);
 VPRIV int x64_instruction(As *a, const char *p, const char *e, size_t wn);
 /* as.c: an x86-64 jump as a relaxed variable item (cc 16: jmp) */
 VPRIV int as_branch(As *a, int cc, Val v, int mod);

@@ -7,8 +7,8 @@ Every test of vcc-ctests.py (gcc torture, tcc tests2, our own) is built for
 x86_64-linux-gnu twice: by clang (the oracle) and by vcc, each linked by
 clang against this host's glibc and run natively (an x86-64 Linux host).
 vcc passes when its program prints what clang's prints and exits the same
-way.  vcc's side: `vpp -S`, assembled by clang (vcc writes no x86 objects
-yet, X5).  The test runtime headers (ccs/vcc/tests/rt/include) are used on
+way. By default vcc's side uses `vpp -S`, assembled by clang; --obj uses
+the direct `vpp -c` path, and --objcmp compares both with clang's assembler.  The test runtime headers (ccs/vcc/tests/rt/include) are used on
 both sides, glibc behind them, with rt/wasm.c's __rt_assert.
 
 Failures by stage: emit (vpp fails; "not supported yet" names the plan
@@ -240,6 +240,11 @@ def objcmp(t):
     a, b = open(f'{wd}/ref.o', 'rb').read(), open(f'{wd}/vas.o', 'rb').read()
     if a != b:
         return t, 'fail', 'differs', f'{len(a)} vs {len(b)} bytes'
+    rc, _, err = sh([VPP, '-c'] + BASE + ct.CLFL + flags + [path, '-o', f'{wd}/direct.o'], cwd=os.path.dirname(path))
+    if rc:
+        return t, 'fail', 'direct', ct.first_err(err.decode(errors='replace'))
+    if open(f'{wd}/direct.o', 'rb').read() != b:
+        return t, 'fail', 'direct-differs', 'record path differs from text assembly'
     shutil.rmtree(wd, ignore_errors=True)
     return t, 'pass', '', ''
 
