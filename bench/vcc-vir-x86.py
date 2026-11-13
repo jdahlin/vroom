@@ -79,7 +79,7 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
         ('vir_x86_blocks.c', {'copy1', 'copy24', 'copy127', 'copy128', 'copy129', 'zero24', 'zero256', 'zero257', 'zero_local', 'readbyte', 'dynamic', 'nonzero', 'lowzero'}, {}),
         ('vir_x86_ext.c', {'clean', 'trim', 'mask', 'signedload', 'fromcall'}, {}),
         ('vir_x86_select.c', {'choose', 'uchoose', 'keep', 'boolean', 'pointer'}, {}),
-        ('vir_x86_bytes.c', {'be16', 'be32', 'be64', 'be48', 'offset32', 'bev64', 'indexed16', 'indexed32', 'bev16', 'signed16', 'changed'}, {}),
+        ('vir_x86_bytes.c', {'be16', 'be32', 'signed32', 'signedlow32', 'signedvol32', 'be64', 'be48', 'offset32', 'bev64', 'indexed16', 'indexed32', 'bev16', 'signed16', 'changed'}, {}),
         ('vir_x86_inline.c', {'work'}, {}),
         ('vir_x86_nsw_index.c', {'be16p', 'be16cast', 'be32cast', 'be64cast', 'load4signed', 'store4signed', 'shared', 'keep_input', 'rawshift', 'vol', 'min32', 'min64'}, {}),
         ('vir_x86_index.c', {'load8', 'load4', 'load2', 'load1', 'store8', 'store4', 'cast8', 'cast4', 'cast2', 'caststore4', 'castmod', 'cast3', 'sharedcast'}, {}),
@@ -154,6 +154,13 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
                 body = asm.read_text().split('be32:\n', 1)[1].split('.Lfunc_end', 1)[0]
                 if 'bswapl' not in body:
                     raise SystemExit('be32: missing combined word read and byte swap')
+                body = asm.read_text().split('signed32:\n', 1)[1].split('.Lfunc_end', 1)[0]
+                if 'bswapl' not in body or 'movslq' not in body:
+                    raise SystemExit('signed32: missing combined signed word read')
+                for name in ('signedlow32', 'signedvol32'):
+                    body = asm.read_text().split(name + ':\n', 1)[1].split('.Lfunc_end', 1)[0]
+                    if 'bswap' in body:
+                        raise SystemExit(f'{name}: invalid combined word read')
                 for name, opcode in [('be64', 'bswapq'), ('be48', 'bswapl'), ('offset32', 'bswapl')]:
                     body = asm.read_text().split(name + ':\n', 1)[1].split('.Lfunc_end', 1)[0]
                     if opcode not in body:

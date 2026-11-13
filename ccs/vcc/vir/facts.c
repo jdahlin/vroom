@@ -86,7 +86,7 @@ uint32_t vir_mask32(const vir_fn *f,uint32_t v,unsigned depth)
 	}
 }
 
-/* Consecutive unsigned byte assembly. Keep this proof in VIR: targets choose
+/* Consecutive byte assembly. Keep this proof in VIR: targets choose
  * their unaligned load/reversal and separately check allocation edits. */
 static uint32_t be_address(const vir_fn *f,uint32_t v,uint64_t *off)
 {
@@ -102,7 +102,11 @@ static bool be_word(const vir_fn *f,uint32_t v,uint32_t limit,unsigned width,uin
 	uint32_t at=v,acc=v;
 	if(limit-v<4*width-3)return false;
 	const vir_ins *first=&f->ins[v];
-	if(first->op!=VO_LOAD || first->ty!=VT_I32 || (first->fl&(VIF_VOL|VIF_MS|3)))return false;
+	if(first->op!=VO_LOAD || first->ty!=VT_I32 || (first->fl&(VIF_VOL|3)) ||
+	   ((first->fl&VIF_MS) && width!=4))return false;
+	/* A signed first byte is equivalent only when shifted to bit 24: its
+	 * sign extension is discarded by the i32 shift. A 16-bit assembly would
+	 * retain those sign bits and needs a different result extension. */
 	uint64_t off=0;uint32_t base=be_address(f,first->a,&off);
 	for(unsigned byte=0;byte<width;byte++) {
 		uint32_t part=v;

@@ -1089,3 +1089,13 @@ livslängder. Validering och mätunderlag i PLAN-vir.md.
 Validerat: egna x86 315/315 och samma fem kända inlinefel, ARM:s 46 VIR-prov,
 ASan/UBSan och filvist bygge gröna. TSVC x86 151/151 och **83** vektorloopar
 (tidigare 82, s1111 tillkommer); ARM/QEMU 151/151 kontrollsummor.
+
+
+### 2026-11-13: signerad fyrabytesavkodare
+
+Gemensamma vir_read_be kan kombinera även signerad första byte när en
+24-bitars i32-shift kastar bort signextensionen. SQLite SerialGet går
+122 → 114 instruktioner; fast-alignat fyrabytesprov 31,441 → 28,363 ms
+(−9,8 %), clang 28,225 ms. Hela speedtest1 förbättras varierande 0,1–1,1 %
+i två korta serier, så ingen stabil helprogramvinst utlovas. Målet 1,05×
+är fortfarande öppet; detaljer och mätunderlag under V4 i PLAN-vir.md.

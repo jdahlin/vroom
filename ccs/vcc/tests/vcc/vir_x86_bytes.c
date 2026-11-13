@@ -1,7 +1,16 @@
-/* Ordinary byte reads may combine, volatile reads and signed ones may not. */
+/* Combine exact ordinary reads; preserve volatile and lower signed bytes. */
 #define NI __attribute__((noinline))
 NI unsigned be16(const unsigned char *p) {return (p[0]<<8)|p[1];}
 NI unsigned be32(const unsigned char *p) {return ((unsigned)p[0]<<24)|((unsigned)p[1]<<16)|(p[2]<<8)|p[3];}
+NI long signed32(const unsigned char *p) {
+ return ((signed char)p[0]*16777216)|(p[1]<<16)|(p[2]<<8)|p[3];
+}
+NI long signedlow32(const signed char *p) {
+ return (p[0]*16777216)|(p[1]*65536)|(p[2]*256)|p[3];
+}
+NI long signedvol32(const volatile unsigned char *p) {
+ return ((signed char)p[0]*16777216)|(p[1]<<16)|(p[2]<<8)|p[3];
+}
 #define U32(p) (((unsigned)(p)[0]<<24)|((unsigned)(p)[1]<<16)|((p)[2]<<8)|(p)[3])
 NI unsigned long long be64(const unsigned char *p) {
  unsigned long long hi=U32(p);
@@ -39,6 +48,10 @@ int main(void) {
  for(unsigned i=0;i<256;i++) {
   unsigned x=((unsigned)a[i]<<24)|((unsigned)a[i+1]<<16)|((unsigned)a[i+2]<<8)|a[i+3];
   if(be32(a+i)!=x||indexed32(a+128,(long)i-128)!=x)return 5;
+  long sx=x<=2147483647u?(long)x:(long)x-4294967296L;
+  if(signed32(a+i)!=sx || signedvol32(a+i)!=sx)return 8;
+  signed char *p=(signed char *)a+i;
+  if(signedlow32(p)!=((p[0]*16777216)|(p[1]*65536)|(p[2]*256)|p[3]))return 9;
  }
  for(unsigned i=0;i<252;i++) {
   unsigned long long x=0;

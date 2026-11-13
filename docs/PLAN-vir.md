@@ -361,6 +361,24 @@ Push/pop måste räknas med vid stackjämförelsen: clang har 0,122/0,109 G,
 vcc 0,001/0,001 G. Underlag och körskript i
 `work/vir-x86-perf/dynamic-mix/{results.txt,extra-results.txt,run.py,extra.py}`.
 
+2026-11-13, signerad 32-bitars avkodning i små SQLite-funktioner:
+`vir_read_be` accepterar nu även en signerad första byte när dess i32-shift
+är 24 bitar. Signextensionens höga bitar försvinner i exakt den shiften;
+regeln gäller inte 16-bitarsresultat eller signerade senare byte. Samma
+privata användningar, volatile-gräns och målens edit/spillkontroll gäller.
+`sqlite3VdbeSerialGet` går 122 → 114 maskininstruktioner: fyrabytesfallet
+blir movl + bswapl + movslq i stället för fyra läsningar och skift/OR.
+Ett fast-alignat prov med 30 miljoner anrop och sju roterade prov ger
+31,441 → 28,363 ms CPU (−9,8 %), clang 28,225 ms, lika kontrollsummor.
+Hela speedtest1 är layoutkänsligt: två femprovserier ger 1288,55 → 1274,63
+respektive 1271,56 → 1269,82 ms; instruktionskvoten kvar på 1,322× clang.
+Ingen stabil helprogramvinst på 1 % utlovas. Målet högst 1,05× är öppet.
+Underlag: `work/vir-x86-perf/signed-be/{decoder-results.json,results100,repeat100}`.
+Regressionen täcker alla bytevärden/alignments, negativt resultat,
+signerade senare byte och volatile; både assembly och egen objektväg.
+Validerat: egna x86 315/315, GCC 1615/1615, TCC 105/105 och samma fem
+kända inlinefel. Fokuserat ASan/UBSan, filvist bygge och ARM/QEMU gröna.
+
 2026-11-13, små SQLite-funktioner: byte-sammansättningens strukturella bevis
 har flyttats från x86 till `vir/facts.c` (`vir_read_be`). Det normaliserar
 konstanta pekaroffsetar och känner även igen två 32-bitshalvor som en 64-bit
