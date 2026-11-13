@@ -31,16 +31,16 @@ while stack: pop()
 def stage(p):
     s = set(p)
     if 'lex_prefetch_thread_run' in s: return 'io thread: read source files'
-    if 'vfixdep' in s: return 'fixdep (.cmd files)'
+    if 'fixdep_run' in s: return 'fixdep (.cmd files)'
     if any(x.startswith('emit') for x in p): return 'emit: codegen'
     if any(x.startswith(('as_', 'a64_')) for x in p): return 'assembler'
-    if s & {'write_obj', 'write_file', 'write_deps'}: return 'write .o/.d'
+    if s & {'driver_object_write', 'driver_output_file_write', 'driver_depfile_write'}: return 'write .o/.d'
     if any(x.startswith('ar_') or x == 'var_main' for x in p): return 'ar'
     pp = any(x.startswith(('pp_', 'lex_tokenize', 'lex_')) or x in ('pp_macro_body_substitute', 'pp_directive_run', 'pp_file_enter', 'pp_header_cache_token_record', 'pp_header_cache_read_record', 'pp_token_expanded_next_slow', 'pp_include_find', 'pp_include_find_inner', 'pp_header_cache_entry_publish', 'eval') for x in p)
     if 'cc_run' in s: return 'preprocess (pulled by parser)' if pp else 'parse + sema'
     if pp: return 'preprocess'
-    if 'forward' in s: return 'forward to vroomd'
-    if 'dc_materialize' in s or 'cc_run.cold.3' in s: return 'decl cache'
+    if 'vccd_backend_forward' in s: return 'forward to vroomd'
+    if 'driver_declaration_cache_materialize' in s or 'cc_run.cold.3' in s: return 'decl cache'
     return 'other'
 busy = idle = 0
 tot, top = collections.Counter(), collections.Counter()

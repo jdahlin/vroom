@@ -28,7 +28,7 @@
 #include "vir/layout.h"
 #include "vir/pass.h"
 
-static char *slurp(const char *path, size_t *n)
+static char *virtest_file_read(const char *path, size_t *n)
 {
 	FILE *fp = fopen(path, "rb");
 	char *b;
@@ -52,7 +52,7 @@ static char *slurp(const char *path, size_t *n)
 }
 
 /* the start of the line `; ---`, or n when there is none */
-static size_t find_sep(const char *s, size_t n)
+static size_t virtest_separator_find(const char *s, size_t n)
 {
 	for (size_t i = 0; i < n;) {
 		size_t e = i;
@@ -74,7 +74,7 @@ static size_t find_sep(const char *s, size_t n)
 
 /* the builder API (vir_begin, vir_const, vir_ins_add, ... vir_canon, vir_uses): a function built in the
  * builder form, with a constant created inside a block, a nop, an unreachable block and an unused constant */
-static int selftest(void)
+static int virtest_selftest(void)
 {
 	static const char want[] =
 		"func @f %s0 {\n"
@@ -415,7 +415,7 @@ int main(int argc, char **argv)
 		else if (!strcmp(argv[i], "--bless"))
 			bless = true;
 		else if (!strcmp(argv[i], "--selftest"))
-			return selftest();
+			return virtest_selftest();
 		else if (!strcmp(argv[i], "--passes") && i + 1 < argc)
 			cli_passes = argv[++i];
 		else if (!strcmp(argv[i], "--equiv")) {
@@ -435,12 +435,12 @@ int main(int argc, char **argv)
 		fprintf(stderr, "usage: virtest [--no-verify] [--bless] [--passes A,B,...] FILE\n");
 		return 2;
 	}
-	src = slurp(path, &n);
+	src = virtest_file_read(path, &n);
 	if (!src) {
 		fprintf(stderr, "virtest: cannot read %s\n", path);
 		return 2;
 	}
-	sep = find_sep(src, n);
+	sep = virtest_separator_find(src, n);
 	/* directives: the comment lines at the top */
 	for (size_t i = 0; i < sep;) {
 		size_t e = i;

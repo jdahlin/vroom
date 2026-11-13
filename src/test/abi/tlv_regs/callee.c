@@ -17,7 +17,7 @@ __attribute__((noinline)) static struct st *mk(void)
 
 __attribute__((noinline)) static long *check(long *p) { return p; }
 
-/* as ppdriver.c's obj_state: s from a list or made, a check that leaves -1 in a temporary, then thread-locals set from s */
+/* as driver/output.c's obj_state: s from a list or made, a check that leaves -1 in a temporary, then thread-locals set from s */
 struct st *take(int fresh)
 {
 	struct st *s;

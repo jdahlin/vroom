@@ -32,7 +32,7 @@
 
 #include "frontend/c/ccint.h"
 #include "codegen/emit.h"
-#include "driver/ccsnap.h"
+#include "driver/declaration-cache.h"
 #include "port/job-regions.h"
 #include "common/softfloat.h"
 

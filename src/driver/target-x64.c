@@ -2,10 +2,10 @@
  * target-x64.c: resolve the x86-64 target's CPU and feature set from the options, and reject x86
  * switches on arm64.
  *
- * x86_driver_features follows clang: the CPU first (-march=, `native` asking the host through
+ * driver_target_features_parse follows clang: the CPU first (-march=, `native` asking the host through
  * port/x86native.h), then every -m[no-]feature in command-line order, each applying the feature
  * table's dependencies (include/arch/x64/x86features.h, generated from clang by
- * tools/gen-x86features.py).  Besides the result in job->x86_features_ it keeps the raw, on and off
+ * tools/gen-x86features.py).  Besides the result in job->x64_features it keeps the raw, on and off
  * sets that the code generator and the predefined macros need.  An unknown CPU or feature fails the
  * job with status 1.  On arm64 and Darwin the same switches (-mavx2, -mno-sse ...) are errors, as in
  * clang, except -msse4 and -msse4.2 which clang only calls unused.  Called once per job, after the
@@ -15,7 +15,7 @@
 #include "port/x86native.h"
 
 /* Resolve CPU first, then feature options in command-line order, as clang. */
-static const char *x86_driver_features(int argc, char **argv,
+static const char *driver_target_features_parse(int argc, char **argv,
                                      x86_features *features, x86_features *disabled,
                                      x86_features *raw, x86_features *on, x86_features *off,
                                      const char **cpu)
@@ -101,7 +101,7 @@ static const char *x86_driver_features(int argc, char **argv,
 /* 0 to go on; 1: the job ends (status and message set) */
 VPRIV int driver_target_features_check(struct driver_job *job, int argc, char **argv)
 {
-	if (!job->x86 && !job->wasm) {
+	if (!job->target_x64 && !job->wasm_bits) {
 		/* arm64: x86 instruction-set switches (-mavx2, -mno-sse, ...) are
 		   errors, as clang's TargetSpecific options; -msse4/-msse4.2 are
 		   only unused there, so they stay accepted. */
@@ -120,8 +120,8 @@ VPRIV int driver_target_features_check(struct driver_job *job, int argc, char **
 			return 1;
 		}
 	}
-	if (job->x86) {
-		const char *unsupported = x86_driver_features(argc, argv, &job->x86_features_, &job->x86_disabled, &job->x86_raw, &job->x86_on, &job->x86_off, &job->x86_cpu);
+	if (job->target_x64) {
+		const char *unsupported = driver_target_features_parse(argc, argv, &job->x64_features, &job->x64_features_disabled, &job->x64_features_raw, &job->x64_features_forced_on, &job->x64_features_forced_off, &job->x64_cpu);
 		if (unsupported) {
 			if (!strcmp(unsupported, "native"))
 				dprintf(job->errfd, "vcc: error: -march=native requires a matching x86-64 host; use an explicit x86 CPU name for cross-compilation\n");
@@ -130,10 +130,10 @@ VPRIV int driver_target_features_check(struct driver_job *job, int argc, char **
 			job->status = 1;
 			return 1;
 		}
-		job->nosse = !x86_feature_has(job->x86_features_, X86_FEATURE_SSE);
-		job->nosse2 = !x86_feature_has(job->x86_features_, X86_FEATURE_SSE2);
-		job->nommx = !x86_feature_has(job->x86_features_, X86_FEATURE_MMX);
-		job->gregs = 0; /* already applied in option order; derive SIMD restriction below */
+		job->no_sse = !x86_feature_has(job->x64_features, X86_FEATURE_SSE);
+		job->no_sse2 = !x86_feature_has(job->x64_features, X86_FEATURE_SSE2);
+		job->no_mmx = !x86_feature_has(job->x64_features, X86_FEATURE_MMX);
+		job->general_regs_only = 0; /* already applied in option order; derive SIMD restriction below */
 				}
 	return 0;
 }
