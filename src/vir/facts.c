@@ -1,7 +1,14 @@
-/* Backward value demand, independent of the target's register encoding.
- * Facts only fall. Reverse sweeps settle straight-line uses immediately;
- * repeated sweeps carry full-width demand through loop block parameters.
- * The target supplies whether its return ABI leaves integer high bits unused.
+/*
+ * facts.c: backward value demand, independent of the target's register encoding: which results only
+ * have their low 32 bits observed (vir_low32).
+ *
+ * low32[i] is 1 when no user reads more than the low half of instruction i's result, so a lowering
+ * may use a 32-bit operation or skip a zero extension.  The facts only fall (1 to 0): reverse sweeps
+ * settle straight-line uses at once and repeated sweeps carry full-width demand through block
+ * parameters of loops, to a fixed point.  The target supplies whether its return ABI leaves the high
+ * bits of a 32-bit result unused (ret32), because that is an ABI fact, not an IR one.  The array
+ * is the caller's, with f->nins entries.  Only virtest calls it today; the lowerings do not use
+ * it yet.
  */
 #include "virimpl.h"
 

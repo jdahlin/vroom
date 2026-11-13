@@ -1,4 +1,13 @@
-/* Integer identity recipes shared by every target. */
+/*
+ * identity.c: integer identities with a constant right-hand side (x + 0, x * 1, x & 0, x | -1 ...),
+ * shared by every target.
+ *
+ * em_bin_identity(c, ty, op, rhs) names what the operation does (EM_ID_LEFT: the left operand, _ZERO,
+ * _ONES, _NONE).  It is a recipe only: the caller keeps the effects of the operands and converts the
+ * kept value to ty.  The constant is first wrapped to the type (em_trunc_to), so `x & 0xffffffff` on
+ * a 32-bit type is the identity.  Shift counts are judged by value 0 only, since their type is not
+ * the left operand's.
+ */
 #include "../emitimpl.h"
 
 /* A recipe only: callers retain effects and normalize the retained value to ty. */

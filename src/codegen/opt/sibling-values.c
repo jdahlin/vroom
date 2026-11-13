@@ -1,4 +1,17 @@
-/* Bounded pure expression value numbering for sibling operands. */
+/*
+ * sibling-values.c: bounded value numbering of pure expressions, to find an operation whose value an
+ * operand or a nearby earlier statement already holds.
+ *
+ * em_sibling_values(e, n) asks it of the operands of one expression; em_block_value_reuse(e, block,
+ * first, i, &from, &to) asks, for statement i of a block, whether a pure expression in it repeats the
+ * value of an earlier local (reported as the node `from` that can be replaced by the symbol node
+ * `to`); em_decl_reuse_values is its declaration case.  The value table is the fixed 32-entry one of
+ * flow/values.c.  Everything is bounded and fails closed: at most eight preceding declarations or
+ * pure local assignments are scanned, with a node budget; an effect, a write to a dependency, an
+ * unknown form or a spent budget means "no reuse".  Only plain automatic integers whose address is
+ * never taken take part.  -O1 and up.  Called by the shared walker and by arm64's and wasm's
+ * emitters.
+ */
 #include "../emitimpl.h"
 
 typedef struct em_sibling_state {

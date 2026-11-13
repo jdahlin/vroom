@@ -1,4 +1,13 @@
-/* Identities for two reads of the same ordinary automatic integer. */
+/*
+ * repeated.c: identities for two reads of the same plain local integer: x - x, x ^ x, x == x,
+ * x < x and the like.
+ *
+ * em_repeated_integer(e, n) returns an EM_ID_* recipe (the result is zero, true, or unknown).  Only
+ * for an ordinary automatic variable of 1 to 8 bytes: not static or extern, address never taken, not
+ * volatile or atomic, no asm name.  Anything that another thread or a signal handler could change
+ * is excluded by those rules.  -O1 and up.  Used by the shared walker, arm64's expression code and
+ * wasm's emitter.
+ */
 #include "../emitimpl.h"
 
 VPRIV int em_repeated_integer(ecx *e, uint32_t n)

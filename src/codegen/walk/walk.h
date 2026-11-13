@@ -2,21 +2,22 @@
  * vcc code generator: the AST walker (PLAN-x86.md, layer 1) and the
  * lowering interface it calls (layer 2).
  *
- * The walker makes the decisions at C level, once for every CPU that uses
+ * The walker makes the decisions at C level, once for every target that uses
  * it: what a node means, constant folding of the values it builds, frame
  * slots for locals, labels and the loop stack, the call sequence, switch
- * strategy.  What an operation becomes is the CPU's: every call into it
- * goes through LO(name), today x64_name (arch/x64/codegen/); a second CPU
- * instantiates the walker with its own prefix.
+ * strategy.  What an operation becomes is the target's: every call into it
+ * goes through LO(name), x64_name (arch/x64/codegen/) in the first
+ * instantiation and vw_name, the VIR builder, in the second, which
+ * codegen/vir/walk.c compiles with WK_PREFIX and LO_PREFIX defined.
  *
  * Values are the emitter's val (constant, address, physical register);
  * lvalues its lval (frame slot, symbol, register base).  Frame slots are
  * offsets from the frame base, negative for locals.
  *
  * Part of the codegen unity TU, next to arch/a64/codegen/: every name here
- * starts with wk_.  The reference helpers (note_ref, walk_fn, out_chunk,
- * sym_header, is_local_var, ...) are arm64's files' for now; they are
- * target-independent and move to codegen/ with the arm64 migration.
+ * starts with wk_ (vw_wk_ in the VIR instantiation).  The helpers it shares
+ * with the other backends (note_ref, walk_fn, out_chunk, sym_header,
+ * is_local_var, ...) are in codegen/ (references.c, function-output.c, ...).
  */
 #ifndef VCC_WALK_H
 #define VCC_WALK_H

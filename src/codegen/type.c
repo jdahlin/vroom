@@ -1,4 +1,16 @@
-/* vcc code generator: the type predicates the emitter needs, symbol names */
+/*
+ * type.c: the type and symbol helpers every backend needs: integer truncation to a type's width,
+ * the canonical symbol of a declaration, a symbol's attributes, and the names symbols and
+ * references are written under.
+ *
+ * em_trunc_to wraps a constant to its type (sign or zero extended from the type's bits, bool to 0/1)
+ * and is what every constant fold uses, so folding agrees with the hardware.  canon_sym follows the
+ * `next` chain of a block-scope declaration to the file-scope symbol, so all references to one
+ * object share one entry.  sym_name/ref_name write the assembler name (quoted when needed) and
+ * fixed_names is the table of library functions the emitter may call by itself (memcpy, __udivti3,
+ * soft-float helpers ...), numbered by the FN_* enum in emitimpl.h: the two must stay in the same
+ * order.
+ */
 #include "emitimpl.h"
 
 VPRIV i128 em_trunc_to(cc *c, i128 v, qty t)

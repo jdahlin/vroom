@@ -7,20 +7,6 @@
  * the callee must not see the frame, so no slot's address may leave the loads, stores
  * and copies that use it (as LLVM's TailCallElim: no escaping alloca).
  */
-/* callee k (a symbol's address) returns twice: setjmp and the like */
-static bool vl_twice(vl *L, const vir_ins *k)
-{
-	cc *c = L->e->c;
-	uint32_t s;
-
-	if (k->op != VO_SYMADDR || RKIND(k->a) != RK_SYM)
-		return false;
-	s = canon_sym(c, RIDX(k->a));
-	return (sym_attrs(c, s)->flags & AF_TAIL_RETURNS_TWICE) ||
-	       EM_IDENT_IS(c->syms[s].name, "setjmp") || EM_IDENT_IS(c->syms[s].name, "_setjmp") ||
-	       EM_IDENT_IS(c->syms[s].name, "sigsetjmp") || EM_IDENT_IS(c->syms[s].name, "__sigsetjmp");
-}
-
 VPRIV const char *vl_notail(vl *L, uint8_t *d)
 {
 	const vir_fn *f = L->f;
@@ -38,7 +24,7 @@ VPRIV const char *vl_notail(vl *L, uint8_t *d)
 				if (x.op == VO_ASM || x.op == VO_ASMGOTO || x.op == VO_FRAMEADDR || x.op == VO_RETADDR ||
 				    x.op == VO_VA_START)
 					return "asm or the frame's address";
-				if (x.op == VO_CALL && vl_twice(L, &f->ins[x.a]))
+				if (x.op == VO_CALL && virbuild_call_returns_twice(L->e, &f->ins[x.a]))
 					return "a call that returns twice";
 				vir_oit_init(&it, (vir_fn *)f, &x, false);
 				while ((p = vir_oit_next(&it))) {

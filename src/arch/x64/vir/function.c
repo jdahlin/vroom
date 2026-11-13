@@ -7,38 +7,81 @@
 
 #include "lowering-internal.h"
 
-/* The same allocated block can be emitted as a rotation guard or small join. */
-VPRIV void vx_block(vx *L, uint32_t b)
+/* The callbacks of the shared driver (codegen/vir/lowering-driver.h) */
+
+static void vx_target_block_begin(void *ctx, uint32_t b)
 {
-	vir_fn *f = L->f;
-	const vir_alloc_out *o = L->o;
+	vx *L = ctx;
+
+	(void)b;
 	L->cmp = UINT32_MAX;
 	L->memv = L->memskip = L->scaledv = L->scaledskip = L->bev = L->testv = L->cmpmemv = 0;
-	uint32_t at = o->boff[b], ei = o->boff[f->nblk + 1 + b], end = o->boff[f->nblk + 2 + b];
-	for (uint32_t i = f->blk[b].first; i < f->blk[b].first + f->blk[b].n; i++) {
-		uint32_t n = 0;
-		vir_oit it; uint32_t *p;
-		vir_oit_init(&it, f, &f->ins[i], false);
-		while ((p = vir_oit_next(&it))) { (void)p; n++; }
-		vx_edits(L, &ei, end, i);
-		uint8_t res = f->ins[i].ty != VT_VOID ? o->opr[at + n] : VR_NONE;
-		vx_ins(L, b, i, &o->opr[at], n, res);
-		at += n + (f->ins[i].ty != VT_VOID);
-		if (res != VR_NONE && o->slot[i] != VIR_NOBLK && o->sdef[i]) vx_memslot(L, false, res, o->slot[i]);
-	}
-	vx_edits(L, &ei, end, f->blk[b].first + f->blk[b].n);
 }
 
-/* setjmp headers do not universally attach returns_twice to their declaration. */
-static bool vx_twice(ecx *e, const vir_ins *callee)
+static void vx_target_block_enter(void *ctx, uint32_t b)
 {
-	if (callee->op != VO_SYMADDR || RKIND(callee->a) != RK_SYM) return false;
-	cc *c = e->c;
-	uint32_t sym = canon_sym(c, RIDX(callee->a));
-	return (sym_attrs(c, sym)->flags & AF_TAIL_RETURNS_TWICE) ||
-		EM_IDENT_IS(c->syms[sym].name, "setjmp") || EM_IDENT_IS(c->syms[sym].name, "_setjmp") ||
-		EM_IDENT_IS(c->syms[sym].name, "sigsetjmp") || EM_IDENT_IS(c->syms[sym].name, "__sigsetjmp");
+	vx *L = ctx;
+
+	L->at = b;
+	L->fallok = true;
 }
+
+static void vx_target_instruction(void *ctx, uint32_t b, uint32_t i, const uint8_t *opr, uint32_t nopr, uint8_t res)
+{
+	vx_ins(ctx, b, i, opr, nopr, res);
+}
+
+static void vx_target_result_spill(void *ctx, uint8_t res, uint32_t slot)
+{
+	vx_memslot(ctx, false, res, slot);
+}
+
+static void vx_target_edit(void *ctx, const vir_edit *x)
+{
+	vx_edit(ctx, x);
+}
+
+static void vx_target_edge_moves(void *ctx, uint32_t g)
+{
+	vx_edge_moves(ctx, g);
+}
+
+static void vx_target_label(void *ctx, uint32_t label)
+{
+	x64_label(((vx *)ctx)->e, label);
+}
+
+/* the edge blocks, all after the last block: a label, the edge's moves, a jump */
+static void vx_target_after_blocks(void *ctx)
+{
+	vx *L = ctx;
+	const vir_alloc_out *o = L->o;
+
+	for (uint32_t g = 0; g < o->nedge; g++)
+		if (L->edgelab[g]) {
+			const vir_aedge *edge = &o->edge[g];
+
+			virbuild_lower_edge_block(&L->drv, L->edgelab[g], g);
+			L->fallok = false;
+			vx_goto(L, edge->from, edge->to);
+		}
+}
+
+static const virbuild_lowering_target vx_lowering_target = {
+	.block_begin = vx_target_block_begin,
+	.block_enter = vx_target_block_enter,
+	.instruction = vx_target_instruction,
+	.result_spill = vx_target_result_spill,
+	.edit = vx_target_edit,
+	.edge_moves = vx_target_edge_moves,
+	.label = vx_target_label,
+	.after_blocks = vx_target_after_blocks,
+	/* unresolved differences from arm64 (Q-VIRB-02) */
+	.params_in_loop = true,
+	.edits_at_block_end = true,
+	.skip_multi_operands = false,
+	.rotation_cached = false,
+};
 
 VPRIV bool vw_x64(ecx *e, uint32_t sym, const char **why)
 {
@@ -65,7 +108,7 @@ VPRIV bool vw_x64(ecx *e, uint32_t sym, const char **why)
 		if (f->ins[i].op == VO_CALL && f->extra[f->ins[i].c] >= VIR_FIX_N) {
 			*why = VIRFAIL(x64_too_many_call_arguments);
 			return false;
-		} else if (f->ins[i].op == VO_CALL && vx_twice(e, &f->ins[f->ins[i].a])) {
+		} else if (f->ins[i].op == VO_CALL && virbuild_call_returns_twice(e, &f->ins[f->ins[i].a])) {
 			*why = VIRFAIL(x64_returns_twice);
 			return false;
 		} else if (!vx_supported(f, i)) {
@@ -130,20 +173,13 @@ VPRIV bool vw_x64(ecx *e, uint32_t sym, const char **why)
 	L.ret = wk_newlabel(e);
 	uint32_t *layout=V->xlayout=vx_grow(V->xlayout,&V->cxlayout,5*f->nblk,sizeof(uint32_t));
 	L.order=layout;L.position=layout+f->nblk;L.rotation=layout+2*f->nblk;L.chase=layout+3*f->nblk;L.lp=&V->lp;
-	vir_layout_chases(f,L.o,L.chase,layout+4*f->nblk);
-	const char *rotate=getenv("VCC_VIR_ROT");
-	vir_layout_order(f,L.lp,L.chase,!e->E->noopt && !(rotate && *rotate=='0'),L.order,L.position,L.rotation);
+	L.drv=(virbuild_lowering){ .target=&vx_lowering_target, .ctx=&L, .f=f, .o=&V->ao, .lp=&V->lp,
+		.order=L.order, .position=L.position, .rotation=L.rotation, .chase=L.chase, .path=layout+4*f->nblk,
+		.block_label=L.label, .optimize=!e->E->noopt };
 
 	for (int r = 0; r < 16; r++)
 		if (V->ao.callee[0] >> r & 1) x64_csused(e, r);
-	for(uint32_t p=0;p<f->nblk;p++) {
-	 uint32_t b=L.order[p];if(b && L.chase[b]!=b)continue;
-	 x64_label(e,L.label[b]);L.at=b;L.fallok=true;vx_block(&L,b);
-	}
-	for(uint32_t g=0;g<V->ao.nedge;g++)if(L.edgelab[g]) {
-		const vir_aedge *edge=&V->ao.edge[g];
-		x64_label(e,L.edgelab[g]);vx_edge(&L,edge->from,edge->k);L.fallok=false;vx_goto(&L,edge->from,edge->to);
-	}
+	virbuild_lower_body(&L.drv);
 	x64_label(e, L.ret);
 	x64_finish(e, sym);
 	e->vtry = false;

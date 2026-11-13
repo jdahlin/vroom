@@ -254,6 +254,8 @@ int cc_run(pp *p, const cc_opts *o)
 		}
 		unused_statics(c);
 		unused_typedefs(c);
+		if (unlikely(o->lint))
+			cc_lint_naming_report(c);
 	}
 	delayed_bug_check(c);
 	if (o->dump_layouts && !c->errors)

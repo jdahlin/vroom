@@ -65,17 +65,14 @@ VPRIV void vx_memslot(vx *L, bool load, uint8_t reg, uint32_t s)
 	x64_mem(L->e, load ? X_LD : X_ST, L->o->ssz[s], vx_reg(reg), &a, false);
 }
 
-VPRIV void vx_edits(vx *L, uint32_t *at, uint32_t end, uint32_t pos)
+VPRIV void vx_edit(vx *L, const vir_edit *x)
 {
-	for (; *at < end && L->o->edit[*at].pos == pos; ++*at) {
-		const vir_edit *x = &L->o->edit[*at];
-		switch (x->kind) {
-		case VE_REMAT: vx_mat(L, x->dst, x->v); break;
-		case VE_RELOAD: vx_memslot(L, true, x->dst, L->o->slot[x->v]); break;
-		case VE_STORE: vx_memslot(L, false, x->src, L->o->slot[x->v]); break;
-		case VE_MOVE: x64_mov(L->e, vx_reg(x->dst), vx_reg(x->src)); break;
-		default: abort(); /* no swapped/tied operands in vx_fixed */
-		}
+	switch (x->kind) {
+	case VE_REMAT: vx_mat(L, x->dst, x->v); break;
+	case VE_RELOAD: vx_memslot(L, true, x->dst, L->o->slot[x->v]); break;
+	case VE_STORE: vx_memslot(L, false, x->src, L->o->slot[x->v]); break;
+	case VE_MOVE: x64_mov(L->e, vx_reg(x->dst), vx_reg(x->src)); break;
+	default: abort(); /* no swapped/tied operands in vx_fixed */
 	}
 }
 
@@ -83,6 +80,12 @@ VPRIV void vx_edge(vx *L, uint32_t b, uint32_t k)
 {
 	uint32_t g = L->o->eidx[L->o->soff[b] + k];
 	if (g == VIR_NOBLK) return;
+	vx_edge_moves(L, g);
+}
+
+/* edge g's moves */
+VPRIV void vx_edge_moves(vx *L, uint32_t g)
+{
 	const vir_aedge *ed = &L->o->edge[g];
 	for (uint32_t j = 0; j < ed->n; j++) {
 		const vir_emove *m = &L->o->move[ed->first + j];
@@ -132,7 +135,7 @@ VPRIV void vx_goto(vx *L, uint32_t b, uint32_t target)
 
 	if (vir_layout_duplicate(L->f, L->lp, L->rotation, b, t, next, L->dup, !L->e->E->noopt)) {
 		L->dup++;
-		vx_block(L, t);
+		virbuild_lower_block(&L->drv, t);
 		L->dup--;
 		return;
 	}
