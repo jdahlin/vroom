@@ -4,7 +4,7 @@
 /* ---------------- expressions: unary, cast, binary ---------------- */
 
 /* r: the operand's range for a diagnostic; e (if any) gives it, else r.e is its last token's start */
-static uint32_t sizeof_type(cc *c, qty t, uint32_t loc, uint32_t e, pp_span r)
+static uint32_t sizeof_type(cc *c, qty t, uint32_t loc, uint32_t e, diag_span r)
 {
 	int k = KIND(c, t);
 
@@ -24,7 +24,7 @@ static uint32_t sizeof_type(cc *c, qty t, uint32_t loc, uint32_t e, pp_span r)
 		return mk_int(c, 1, c->t_size, loc);
 	}
 	if (!complete(c, t)) {
-		r = e ? rng(c, e) : (pp_span){ r.b, pp_tok_end(c->p, r.e) };
+		r = e ? rng(c, e) : (diag_span){ r.b, pp_token_end_find(c->p, r.e) };
 		report(c, "error", loc, &r, 1, NULL, 0, "invalid application of 'sizeof' to an incomplete type '%s'", tyname(c, t));
 		if (is_record(c, t) || k == TY_ENUM)
 			note(c, c->tags[T(c, t)->aux].loc, "forward declaration of '%s'", tyname(c, t));
@@ -57,7 +57,7 @@ static uint32_t unary(cc *c);
 /* the operand of sizeof/_Alignof: "( type-name )" gives UINT32_MAX, *ty and its
    span in *r (if r), anything else the (unevaluated) unary expression; '(' is
    consumed before looking at the type */
-static uint32_t sizeof_operand(cc *c, qty *ty, pp_span *r)
+static uint32_t sizeof_operand(cc *c, qty *ty, diag_span *r)
 {
 	uint32_t n;
 
@@ -69,7 +69,7 @@ static uint32_t sizeof_operand(cc *c, qty *ty, pp_span *r)
 			*ty = type_name(c);
 			expect_match(c, LEX_TOKEN_RIGHT_PAREN, ploc);
 			if (r)
-				*r = (pp_span){ ploc, c->prevloc };	/* resolved by sizeof_type if needed */
+				*r = (diag_span){ ploc, c->prevloc };	/* resolved by sizeof_type if needed */
 			return UINT32_MAX;
 		}
 		c->unevaluated++;
@@ -132,7 +132,7 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 			return n;
 		n = deref(c, n, loc);
 		if (!amp && !c->unevaluated && N(n)->op == N_DEREF && KIND(c, N(n)->ty) == TY_VOID) {
-			pp_span r = rng(c, N(n)->a);
+			diag_span r = rng(c, N(n)->a);
 
 			cc_warnx(c, "void-ptr-dereference", true, NULL, loc, &r, 1, NULL, 0,
 				 "ISO C does not allow indirection on operand of type '%s'", tyname(c, N(N(n)->a)->ty));
@@ -153,7 +153,7 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 			return cplx_unary(c, op, n, loc);
 		if (is_vector(c, N(n)->ty) ? op == LEX_TOKEN_TILDE && !is_integer(c, T(c, N(n)->ty)->base)
 		    : !is_arith(c, N(n)->ty) || (op == LEX_TOKEN_TILDE && !is_integer(c, N(n)->ty))) {
-			pp_span r = rng(c, n);
+			diag_span r = rng(c, n);
 
 			report(c, "error", loc, &r, 1, NULL, 0, "invalid argument type '%s' to unary expression", tyname(c, N(n)->ty));
 			return err_node(c, loc);
@@ -207,7 +207,7 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 	switch (kw) {
 	case KW_sizeof: {
 		qty ty;
-		pp_span r;
+		diag_span r;
 
 		next(c);
 		n = sizeof_operand(c, &ty, &r);
@@ -220,13 +220,13 @@ static __attribute__((noinline)) uint32_t unary_op(cc *c)
 				cl = mk2(c, N_COMPLIT, ty, loc, init, s);
 				N(cl)->flags = NF_LVALUE;
 				n = postfix(c, cl);
-				return sizeof_type(c, N(n)->ty, loc, n, (pp_span){ 0, 0 });
+				return sizeof_type(c, N(n)->ty, loc, n, (diag_span){ 0, 0 });
 			}
 			return sizeof_type(c, ty, loc, 0, r);
 		}
 		if (bitfield_of(c, n))
 			cc_error(c, loc, "invalid application of 'sizeof' to bit-field");
-		return sizeof_type(c, N(n)->ty, loc, n, (pp_span){ 0, 0 });
+		return sizeof_type(c, N(n)->ty, loc, n, (diag_span){ 0, 0 });
 	}
 	case KW__Alignof:
 	case KW___alignof__:
@@ -315,7 +315,7 @@ static uint32_t explicit_cast(cc *c, uint32_t n, qty to, uint32_t loc)
 		return cast_node(c, n, QUNQ(to), CK_VOID);
 	if (KIND(c, to) == TY_UNION && !compatible(c, to, N(n)->ty)) {
 		if (!union_member_for(c, to, n)) {
-			pp_span sp = rng(c, n);
+			diag_span sp = rng(c, n);
 
 			report(c, "error", loc, &sp, 1, NULL, 0, "cast to union type from type '%s' not present in union", tyname(c, N(n)->ty));
 		}
@@ -360,7 +360,7 @@ static uint32_t explicit_cast(cc *c, uint32_t n, qty to, uint32_t loc)
 		n = rvalue(c, n);
 	k = conv_kind(c, N(n)->ty, QUNQ(to), n);
 	if (k < 0 && is_scalar(c, to) && !is_scalar(c, N(n)->ty)) {
-		pp_span r = rng(c, n);
+		diag_span r = rng(c, n);
 
 		report(c, "error", r.b, &r, 1, NULL, 0, "operand of type '%s' where arithmetic or pointer type is required",
 		       tyname(c, N(n)->ty));

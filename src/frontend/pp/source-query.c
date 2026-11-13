@@ -8,10 +8,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-int pp_error_limit(const pp *p) { return p->o->error_limit; }
-int pp_spell_limit(const pp *p) { return p->o->spell_limit; }
+int pp_option_error_limit(const pp *p) { return p->o->error_limit; }
+int pp_option_spell_limit(const pp *p) { return p->o->spell_limit; }
 
-uint32_t pp_main_eof(const pp *p)
+uint32_t pp_main_file_end(const pp *p)
 {
 	const pp_file_entry *e = &p->fe[0];
 	uint32_t n = e->f->size;
@@ -39,18 +39,18 @@ int pp_token_spelling_find(const pp *p, const ptok *t, const lex_file **file, ui
 		return PP_SPELLING_NONE;
 	*file = f;
 	*offset = (uint32_t)(t->s - f->src);
-	return loc_ok(p, t->loc, &e) && e->f == f && t->loc - e->base == *offset ? PP_SPELLING_FILE : PP_SPELLING_MACRO;
+	return pp_location_is_valid(p, t->loc, &e) && e->f == f && t->loc - e->base == *offset ? PP_SPELLING_FILE : PP_SPELLING_MACRO;
 }
 
 /* where an #include for a diagnostic at loc goes: the start of the line after the last
    #include before loc in loc's file, else the file's first line; UINT32_MAX: not in a file */
-uint32_t pp_include_point(const pp *p, uint32_t loc)
+uint32_t pp_include_point_find(const pp *p, uint32_t loc)
 {
 	const pp_file_entry *e;
 	const char *s;
 	uint32_t end, at = 0, i = 0;
 
-	if (!loc_ok(p, loc, &e))
+	if (!pp_location_is_valid(p, loc, &e))
 		return UINT32_MAX;
 	s = e->f->src;
 	end = loc - e->base;
@@ -82,18 +82,18 @@ uint32_t pp_include_point(const pp *p, uint32_t loc)
 	return e->base + at;
 }
 
-const char *pp_src(const pp *p, uint32_t b, uint32_t e, size_t *len)
+const char *pp_source_text(const pp *p, uint32_t b, uint32_t e, size_t *len)
 {
 	const pp_file_entry *f;
 
-	if (e < b || !loc_ok(p, b, &f) || e - f->base > f->f->size)
+	if (e < b || !pp_location_is_valid(p, b, &f) || e - f->base > f->f->size)
 		return NULL;
 	*len = e - b;
 	return f->f->src + (b - f->base);
 }
 
 /* -Winvalid-pp-token: an unknown token that is an unterminated character constant or string */
-void pp_invalid_tok(pp *p, const char *s, uint32_t len, uint32_t loc)
+void pp_token_invalid_report(pp *p, const char *s, uint32_t len, uint32_t loc)
 {
 	uint32_t i = 0;
 
@@ -104,49 +104,49 @@ void pp_invalid_tok(pp *p, const char *s, uint32_t len, uint32_t loc)
 	if (i >= len || (s[i] != '\'' && s[i] != '"'))
 		return;
 	{
-		pp_dinfo d = { "warning", loc + i, NULL, 0, NULL, 0, NULL, 0 };
+		diag_info d = { "warning", loc + i, NULL, 0, NULL, 0, NULL, 0 };
 
-		pp_warnx(p, "invalid-pp-token", true, NULL, &d, "missing terminating %s character", s[i] == '"' ? "'\"'" : "'");
+		diag_warning_report(p, "invalid-pp-token", true, NULL, &d, "missing terminating %s character", s[i] == '"' ? "'\"'" : "'");
 	}
 }
 
 /* the source at loc spells s[0, n) as a whole token (not a macro's expansion of it) */
-int pp_spells(const pp *p, uint32_t loc, const char *s, uint32_t n)
+int pp_location_spells(const pp *p, uint32_t loc, const char *s, uint32_t n)
 {
 	const pp_file_entry *e;
 
-	if (!loc_ok(p, loc, &e) || loc - e->base + n > e->f->size || memcmp(e->f->src + (loc - e->base), s, n))
+	if (!pp_location_is_valid(p, loc, &e) || loc - e->base + n > e->f->size || memcmp(e->f->src + (loc - e->base), s, n))
 		return 0;
-	return pp_tok_end(p, loc) == loc + n;
+	return pp_token_end_find(p, loc) == loc + n;
 }
 
 /* the source character at loc, -1 if none */
-int pp_loc_char(const pp *p, uint32_t loc)
+int pp_location_char(const pp *p, uint32_t loc)
 {
 	const pp_file_entry *e;
 
-	if (!loc_ok(p, loc, &e) || loc - e->base >= e->f->size)
+	if (!pp_location_is_valid(p, loc, &e) || loc - e->base >= e->f->size)
 		return -1;
 	return (unsigned char)e->f->src[loc - e->base];
 }
 
-const char *pp_src_rest(const pp *p, uint32_t b, size_t *len)
+const char *pp_source_rest(const pp *p, uint32_t b, size_t *len)
 {
 	const pp_file_entry *f;
 
-	if (!loc_ok(p, b, &f))
+	if (!pp_location_is_valid(p, b, &f))
 		return NULL;
 	*len = f->f->size - (b - f->base);
 	return f->f->src + (b - f->base);
 }
 
-uint32_t pp_tok_end(const pp *p, uint32_t loc)
+uint32_t pp_token_end_find(const pp *p, uint32_t loc)
 {
 	const pp_file_entry *e;
 	const char *s, *end;
 	uint32_t off;
 
-	if (!loc_ok(p, loc, &e))
+	if (!pp_location_is_valid(p, loc, &e))
 		return loc + 1;
 	s = e->f->src, off = loc - e->base, end = s + e->f->size;
 	if (s + off >= end)
@@ -191,7 +191,7 @@ uint32_t pp_tok_end(const pp *p, uint32_t loc)
 	return loc + 1;
 }
 
-int pp_defined(pp *p, uint32_t id)
+int pp_macro_id_is_defined(pp *p, uint32_t id)
 {
 	return pp_macro_is_defined(p, id);
 }

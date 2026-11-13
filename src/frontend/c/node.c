@@ -16,21 +16,21 @@ VPRIV uint32_t mk(cc *c, int op, qty ty, uint32_t loc)
 }
 
 /* the character range of n for a diagnostic (implicit conversions: their operand's) */
-VPRIV pp_span rng_np(cc *c, uint32_t n)
+VPRIV diag_span rng_np(cc *c, uint32_t n)
 {
 	while (n && !c->span[n].e && N(n)->op == N_CAST && N(n)->a)
 		n = N(n)->a;
 	if (!n)
-		return (pp_span){ 0, 0 };
+		return (diag_span){ 0, 0 };
 	if (!c->span[n].e)
-		return (pp_span){ N(n)->loc, pp_tok_end(c->p, N(n)->loc) };
-	return (pp_span){ c->span[n].b, pp_tok_end(c->p, c->span[n].e) };
+		return (diag_span){ N(n)->loc, pp_token_end_find(c->p, N(n)->loc) };
+	return (diag_span){ c->span[n].b, pp_token_end_find(c->p, c->span[n].e) };
 }
 
 /* ... with its outermost parentheses (clang's ParenExpr) */
-VPRIV pp_span rng(cc *c, uint32_t n)
+VPRIV diag_span rng(cc *c, uint32_t n)
 {
-	pp_span r;
+	diag_span r;
 
 	while (n && !c->span[n].e && N(n)->op == N_CAST && N(n)->a)
 		n = N(n)->a;
@@ -38,7 +38,7 @@ VPRIV pp_span rng(cc *c, uint32_t n)
 	if (n && (c->paren[n].l || c->paren[n].r)) {
 		uint32_t e = (c->span[n].e ? c->span[n].e : N(n)->loc) + c->paren[n].r;
 
-		r.b -= c->paren[n].l, r.e = pp_tok_end(c->p, e);
+		r.b -= c->paren[n].l, r.e = pp_token_end_find(c->p, e);
 	}
 	return r;
 }

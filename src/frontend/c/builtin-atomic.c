@@ -48,7 +48,7 @@ VPRIV uint32_t atomic_call(cc *c, const builtin *b, uint32_t loc)
 	}
 	if (b->sig[0] == 's' && (id == BI_ATOMIC_FETCH_NAND || id == BI_ATOMIC_NAND_FETCH))
 	{
-		pp_span r = { loc, pp_tok_end(c->p, loc) };	/* the builtin's name */
+		diag_span r = { loc, pp_token_end_find(c->p, loc) };	/* the builtin's name */
 
 		cc_warnx(c, "sync-fetch-and-nand-semantics-changed", true, NULL, c->args_rp, &r, 1, NULL, 0,
 			 "the semantics of this intrinsic changed with GCC version 4.4 - the newer semantics are provided here");
@@ -59,7 +59,7 @@ VPRIV uint32_t atomic_call(cc *c, const builtin *b, uint32_t loc)
 	}
 	pt = N(args.v[0])->ty;
 	if (!is_ptr(c, pt)) {
-		pp_span r = rng(c, args.v[0]);
+		diag_span r = rng(c, args.v[0]);
 
 		report(c, "error", loc, &r, 1, NULL, 0, "address argument to atomic builtin must be a pointer ('%s' invalid)", tyname(c, pt));
 		return mk_int(c, 0, prim(TY_INT), loc);

@@ -89,7 +89,7 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
 		if (!strncmp(a, "-fdiagnostics-format=", 21)) {
 			const char *f = a + 21;
 
-			job->dformat = !strcmp(f, "json") ? PP_DIAG_JSON : !strcmp(f, "sarif") ? PP_DIAG_SARIF : PP_DIAG_TEXT;
+			job->dformat = !strcmp(f, "json") ? DIAG_FORMAT_JSON : !strcmp(f, "sarif") ? DIAG_FORMAT_SARIF : DIAG_FORMAT_TEXT;
 			continue;
 		}
 		if (!strncmp(a, "-fdiagnostics-add-output=sarif:file=", 36)) { job->po.sarif_file = a + 36; continue; }
@@ -97,8 +97,8 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
 		if (!strncmp(a, "-fdiagnostics-style=", 20)) {	/* vcc (default), clang, narrated */
 			const char *f = a + 20;
 
-			job->dstyle = !strcmp(f, "clang") ? PP_DSTYLE_CLANG : !strcmp(f, "narrated") ? PP_DSTYLE_NARRATED : PP_DSTYLE_VCC;
-			if (job->dstyle == PP_DSTYLE_VCC && strcmp(f, "vcc"))
+			job->dstyle = !strcmp(f, "clang") ? DIAG_STYLE_CLANG : !strcmp(f, "narrated") ? DIAG_STYLE_NARRATED : DIAG_STYLE_VCC;
+			if (job->dstyle == DIAG_STYLE_VCC && strcmp(f, "vcc"))
 				job->badval = a;
 			continue;
 		}
@@ -173,7 +173,7 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
 		if (!strcmp(a, "-fvcc-kernel")) { job->vcc_kernel = 1; continue; }
 		if (!strcmp(a, "-fno-gnu89-inline")) { job->gnu89_inline = 0; continue; }
 		if ((a[1] == 'W' && a[2] && a[3] != ',') || !strcmp(a, "-w") || strstr(a, "-pedantic") == a + (a[1] == '-')) {
-			/* warning options, in order, for pp_wstate (some are also handled below);
+			/* warning options, in order, for diag_warning_state (some are also handled below);
 			   -pedantic is -Wpedantic, -pedantic-errors also -Werror=pedantic (two entries) */
 			if (!job->wargs)
 				job->wargs = calloc((size_t)argc * 2 + 1, sizeof(*job->wargs));
@@ -186,7 +186,7 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
 		}
 		if (!strcmp(a, "-Wno-implicit-int") || !strcmp(a, "-Wno-error=implicit-int")) { job->wimpl_int = 1; continue; }
 		if (!strncmp(a, "-Wno-", 5)) {
-			/* errors clang lets -Wno-error= make warnings (pp_wstate has the -W flags) */
+			/* errors clang lets -Wno-error= make warnings (diag_warning_state has the -W flags) */
 			const char *f = a + 5;
 
 			if (!strncmp(f, "error=", 6))

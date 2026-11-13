@@ -381,6 +381,8 @@ Proof adds: `bench/vcc-vir-x86.py`, and CI's x86-64 job (`bench/vcc-x86.py
 
 #### 2e. One lowering driver (Q-VIRB-02)
 
+**Status: done (#204).**
+
 `src/codegen/vir/lowering-driver.c` (STYLE: the job in full words; it
 needs no walker, so it does not start with the `WK_PREFIX` lines of 2a):
 the block loop, the allocator-edit walk, the edge blocks, the labels and
@@ -433,6 +435,8 @@ Proof: as for 2d (`bench/vcc-same.py` with and without `VCC_VIR=bl`,
 base run with the same variable.
 
 ### 3. Close the failure reasons, most frequent first
+
+**Status: not pushed in wave 2** (3.0 has a local WIP branch, blocked on shrink-wrapping under `-g`).
 
 One PR per sub-step.  These change generated code, so `vcc-same.py` cannot
 prove them.  **Proof for every sub-step** is VIR-MIGRATION's "Validation":
@@ -606,6 +610,8 @@ depends on nothing in `frontend/`, `codegen/` or `arch/`.
 
 ### 4.0 The pass infrastructure (identical output)
 
+**Status: done (#203).**
+
 One PR, `src/vir/`, `src/include/vir/`, `src/bin/virtest/`,
 `src/codegen/vir/pass-table.[ch]`, `src/Makefile` (`vir_SRC`),
 `doc/SPEC-vir.md` (14, 16, 17.1), as the design's sections 1-4 say:
@@ -623,6 +629,8 @@ Proof: step 2's list (identical output with and without `VCC_VIR=bl`), plus
 `bench/vir-test.py -j 3` and `--mutate 3000` under ASan.
 
 ### 4.1 The first pass: `redundant-extensions`
+
+**Status: parked by owner, 2026-11-13 (draft PR #207, not to be merged).**
 
 `src/vir/known-bits.c`, `src/vir/pass/redundant-extensions.c`, its tests in
 `src/test/vir/pass/redundant-extensions/`, one row after `canon` in the

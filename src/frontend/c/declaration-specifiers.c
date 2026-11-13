@@ -341,8 +341,8 @@ static __attribute__((noinline, cold)) bool valid_after_tag(cc *c)
    previous token, with the insertion, and parsing goes on as if it were there */
 static __attribute__((noinline, cold)) void tag_semi(cc *c, int kind)
 {
-	uint32_t e = c->prevflags & PP_TOKEN_FLAG_FROM_MACRO ? tok(c)->loc : pp_tok_end(c->p, c->prevloc);
-	pp_fixit fx = { e, e, ";", VDA_MAYBE };	/* (a guess: often two names in a row) */
+	uint32_t e = c->prevflags & PP_TOKEN_FLAG_FROM_MACRO ? tok(c)->loc : pp_token_end_find(c->p, c->prevloc);
+	diag_fixit fx = { e, e, ";", DIAG_APPLICABILITY_MAYBE };	/* (a guess: often two names in a row) */
 	ptok *t = c->tk;
 
 	report(c, "error", e, NULL, 0, &fx, !(c->prevflags & PP_TOKEN_FLAG_FROM_MACRO), "expected ';' after %s",
@@ -562,7 +562,7 @@ again:
 
 				const_expr(c, &v, &vn);
 				if (v < 0 || (v & (v - 1))) {	/* 0: no effect (C11) */
-					pp_span r = rng(c, vn);
+					diag_span r = rng(c, vn);
 
 					report(c, "error", aloc, &r, vn ? 1 : 0, NULL, 0, "requested alignment is not a power of 2");
 				}
@@ -797,7 +797,7 @@ done:
 			if (c23auto && !nlong && !sgn && !cplx) {
 				/* C23: 'auto' without a type specifier infers the type, as __auto_type */
 				ds->auto_type = true;
-			} else if (!c->o->implicit_int && !pp_in_system_header(c->p, ds->loc))
+			} else if (!c->o->implicit_int && !pp_location_is_in_system_header(c->p, ds->loc))
 				implicit_int_error(c);
 		}
 		ds->ty = int_type(c, nlong, sgn, base, ds->loc);

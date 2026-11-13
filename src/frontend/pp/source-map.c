@@ -8,7 +8,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-VPRIV const pp_file_entry *loc_fent(const pp *p, uint32_t loc)
+VPRIV const pp_file_entry *pp_location_file_entry(const pp *p, uint32_t loc)
 {
 	uint32_t lo = 0, hi = p->nfe;
 
@@ -25,9 +25,9 @@ VPRIV const pp_file_entry *loc_fent(const pp *p, uint32_t loc)
 	return p->nfe ? &p->fe[lo] : NULL;
 }
 
-VPRIV uint32_t loc_line(const pp *p, uint32_t loc)
+VPRIV uint32_t pp_location_line(const pp *p, uint32_t loc)
 {
-	const pp_file_entry *e = loc_fent(p, loc);
+	const pp_file_entry *e = pp_location_file_entry(p, loc);
 	uint32_t l, fe;
 
 	if (!e)
@@ -41,7 +41,7 @@ VPRIV uint32_t loc_line(const pp *p, uint32_t loc)
 }
 
 /* the presumed file name at loc in file context fc (#line can change it) */
-VPRIV const char *presumed_name(const pp *p, uint32_t fe, uint32_t loc, uint32_t *len)
+VPRIV const char *pp_location_presumed_name(const pp *p, uint32_t fe, uint32_t loc, uint32_t *len)
 {
 	const pp_file_entry *e = &p->fe[fe];
 
@@ -54,23 +54,23 @@ VPRIV const char *presumed_name(const pp *p, uint32_t fe, uint32_t loc, uint32_t
 	return e->name;
 }
 
-int pp_in_system_header(const pp *p, uint32_t loc)
+int pp_location_is_in_system_header(const pp *p, uint32_t loc)
 {
-	const pp_file_entry *e = loc_fent(p, loc);
+	const pp_file_entry *e = pp_location_file_entry(p, loc);
 
 	return e && loc - e->base <= e->f->size && e->sys;
 }
 
-int pp_in_main_file(const pp *p, uint32_t loc)
+int pp_location_is_in_main_file(const pp *p, uint32_t loc)
 {
-	const pp_file_entry *e = loc_fent(p, loc);
+	const pp_file_entry *e = pp_location_file_entry(p, loc);
 
 	return e && e->f == p->fe[0].f && loc - e->base <= e->f->size;
 }
 
-int pp_where(const pp *p, uint32_t loc, const char **name, uint32_t *namelen, uint32_t *line, uint32_t *col)
+int pp_location_describe(const pp *p, uint32_t loc, const char **name, uint32_t *namelen, uint32_t *line, uint32_t *col)
 {
-	const pp_file_entry *e = loc_fent(p, loc);
+	const pp_file_entry *e = pp_location_file_entry(p, loc);
 	uint32_t off, b;
 
 	if (!e || loc - e->base > e->f->size) {
@@ -80,16 +80,16 @@ int pp_where(const pp *p, uint32_t loc, const char **name, uint32_t *namelen, ui
 	off = loc - e->base;
 	for (b = off; b > 0 && e->f->src[b - 1] != '\n'; b--)
 		;
-	*line = loc_line(p, loc);
+	*line = pp_location_line(p, loc);
 	*col = off - b + 1;
-	*name = presumed_name(p, (uint32_t)(e - p->fe), loc, namelen);
+	*name = pp_location_presumed_name(p, (uint32_t)(e - p->fe), loc, namelen);
 	return 1;
 }
 
 /* ---------------- diagnostics in clang's text format ---------------- */
 
-VPRIV bool loc_ok(const pp *p, uint32_t loc, const pp_file_entry **e)
+VPRIV bool pp_location_is_valid(const pp *p, uint32_t loc, const pp_file_entry **e)
 {
-	*e = loc_fent(p, loc);
+	*e = pp_location_file_entry(p, loc);
 	return *e && loc >= (*e)->base && loc - (*e)->base <= (*e)->f->size;
 }

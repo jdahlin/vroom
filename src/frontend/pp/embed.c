@@ -260,9 +260,9 @@ VPRIV void pp_embed_run(pp *p, pp_context *c, uint32_t b, uint32_t e, uint32_t l
 
 	pthread_once(&pp_embed_digits_once, pp_embed_digits_init);
 	if (!p->o->c23) {
-		pp_dinfo di = { "warning", nloc, NULL, 0, NULL, 0, NULL, 0 };
+		diag_info di = { "warning", nloc, NULL, 0, NULL, 0, NULL, 0 };
 
-		pp_warnx(p, "c23-extensions", true, NULL, &di, "#embed is a C23 extension");
+		diag_warning_report(p, "c23-extensions", true, NULL, &di, "#embed is a C23 extension");
 	}
 	pp_context_directive_line_push(p, c, b, e);
 	pp_token_raw_next(p, &t);
@@ -281,9 +281,9 @@ VPRIV void pp_embed_run(pp *p, pp_context *c, uint32_t b, uint32_t e, uint32_t l
 		return;
 	f = pp_embed_file_find(p, c, buf, n, angled, &path);
 	if (!f) {
-		pp_dinfo di = { "fatal error", floc, NULL, 0, NULL, 0, NULL, 0 };	/* (clang: no range for #embed) */
+		diag_info di = { "fatal error", floc, NULL, 0, NULL, 0, NULL, 0 };	/* (clang: no range for #embed) */
 
-		pp_diagx(p, &di, "'%.*s' file not found", (int)n, buf);
+		diag_report_extended(p, &di, "'%.*s' file not found", (int)n, buf);
 		if (p->fatal_jump && !p->o->fatal_continue)
 			longjmp(*p->fatal_jump, 1);
 		return;
@@ -291,9 +291,9 @@ VPRIV void pp_embed_run(pp *p, pp_context *c, uint32_t b, uint32_t e, uint32_t l
 	if (p->o->deps && !pp_embed_path_is_main(p, path))
 		pp_dependency_add(p, path, false);
 	if (!pp_embed_file_map(p, path, &raw_)) {
-		pp_dinfo di = { "fatal error", floc, NULL, 0, NULL, 0, NULL, 0 };
+		diag_info di = { "fatal error", floc, NULL, 0, NULL, 0, NULL, 0 };
 
-		pp_diagx(p, &di, "cannot open file '%s': %s", path, strerror(errno));
+		diag_report_extended(p, &di, "cannot open file '%s': %s", path, strerror(errno));
 		if (p->fatal_jump && !p->o->fatal_continue)
 			longjmp(*p->fatal_jump, 1);
 		return;

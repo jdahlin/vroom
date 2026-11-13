@@ -191,7 +191,7 @@ VPRIV __attribute__((noinline)) void pp_token_raw_next(pp *p, ptok *t)
 			if (unlikely(p->rec.on) && p->depth == p->rec.levels[p->rec.n - 1].depth)
 				pp_header_cache_region_end(p);
 			if (unlikely(p->ndtr))
-				diag_file_end(p, c->fe);
+				diag_pragma_file_end(p, c->fe);
 			p->nfile--;
 			p->depth--;
 			if (unlikely(p->output_text_mode))

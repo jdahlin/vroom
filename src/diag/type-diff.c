@@ -8,15 +8,15 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#define DC_OLD "\033[0;1;32m"	/* type diff: the part only the first type has */
-#define DC_NEW "\033[0;1;35m"	/* ... and the second */
+#define DIAG_COLOR_TYPE_OLD "\033[0;1;32m"	/* type diff: the part only the first type has */
+#define DIAG_COLOR_TYPE_NEW "\033[0;1;35m"	/* ... and the second */
 
 /* ---------------- type diff (colour only) ---------------- */
 
 /* the message with the parts in which its two quoted types differ highlighted
    (GCC 15's contrasting colours): the tokens of the first that are not in the
    second, and the other way round, after their common prefix and suffix */
-VPRIV void diag_typediff(vbuffer *b, const vdiag *d, const char *plain)
+VPRIV void diag_type_diff_render(vbuffer *b, const diag_record *d, const char *plain)
 {
 	const char *m = d->msg, *q[4];
 	int nq = 0;
@@ -50,11 +50,11 @@ VPRIV void diag_typediff(vbuffer *b, const vdiag *d, const char *plain)
 		while (suf && (isalnum((unsigned char)a[na - suf]) || a[na - suf] == '_'))
 			suf--;
 		vbuffer_append(b, m, (size_t)(a - m) + pre);
-		vbuffer_string_append(b, DC_OLD);
+		vbuffer_string_append(b, DIAG_COLOR_TYPE_OLD);
 		vbuffer_append(b, a + pre, na - pre - suf);
 		vbuffer_string_append(b, plain);
 		vbuffer_append(b, a + na - suf, (size_t)(c - (a + na - suf)) + pre);
-		vbuffer_string_append(b, DC_NEW);
+		vbuffer_string_append(b, DIAG_COLOR_TYPE_NEW);
 		vbuffer_append(b, c + pre, nc - pre - suf);
 		vbuffer_string_append(b, plain);
 		vbuffer_string_append(b, c + nc - suf);

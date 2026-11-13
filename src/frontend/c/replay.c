@@ -348,7 +348,7 @@ typedef struct drent {
 	sym *syms;
 	tag *tags;
 	node *nodes;
-	pp_span *spans;
+	diag_span *spans;
 	struct cparen *parens;
 	uint32_t *lists;
 	uint8_t *lk;		/* per list element: K_* */
@@ -1527,7 +1527,7 @@ static bool rel_build(drent *e)
 {
 	const char *h = e->heap;
 	relset rl[RA_N] = { 0 };
-	fd f[24], sf[2] = { FD(pp_span, b, K_LOC), FD(pp_span, e, K_LOC) };
+	fd f[24], sf[2] = { FD(diag_span, b, K_LOC), FD(diag_span, e, K_LOC) };
 	int n;
 	bool ok = true;
 
@@ -1559,7 +1559,7 @@ static bool rel_build(drent *e)
 		ok &= rel_one(e, rs, off, FD(node, a, k[0]), y->a);
 		ok &= rel_one(e, rs, off, FD(node, b, k[1]), y->b);
 		ok &= rel_one(e, rs, off, FD(node, c, k[2]), y->c);
-		ok &= rel_rec(e, &rl[RA_SPAN], i * (uint32_t)sizeof(pp_span), &e->spans[i], sf, 2);
+		ok &= rel_rec(e, &rl[RA_SPAN], i * (uint32_t)sizeof(diag_span), &e->spans[i], sf, 2);
 	}
 	for (uint32_t i = 0; i < e->l1 - e->l0; i++)
 		if (e->lk[i] != K_IMM && e->lk[i] != LK_DEAD)
@@ -2095,7 +2095,7 @@ static void rec_close(cc *c, uint64_t endpos)
 		}
 	}
 	e->nodes = xdup(&c->nodes[e->n0], (e->n1 - e->n0) * sizeof(node));
-	e->spans = xdup(&c->span[e->n0], (e->n1 - e->n0) * sizeof(pp_span));
+	e->spans = xdup(&c->span[e->n0], (e->n1 - e->n0) * sizeof(diag_span));
 	e->parens = xdup(&c->paren[e->n0], (e->n1 - e->n0) * sizeof(*c->paren));
 	e->lists = xdup(&c->lists[e->l0], (e->l1 - e->l0) * sizeof(uint32_t));
 	e->lk = calloc(e->l1 - e->l0 + 1, 1);
@@ -2116,7 +2116,7 @@ static void rec_close(cc *c, uint64_t endpos)
 	} while (0)
 	for (uint32_t i = 0; i < e->n1 - e->n0; i++) {
 		node *d = &e->nodes[i];
-		pp_span *s = &e->spans[i];
+		diag_span *s = &e->spans[i];
 
 		switch (d->op) {
 		case N_CALL: case N_BUILTIN: MARK(d->b, d->c, K_NODE, false); break;
@@ -2268,7 +2268,7 @@ static void rec_close(cc *c, uint64_t endpos)
 		   r->wy.n * sizeof(wty) + r->wa.n * sizeof(wattr) + r->wst.n * sizeof(wstr) + r->wl.n * sizeof(wlist) +
 		   r->wf.n * sizeof(field) + r->wp.n * 4 + r->wb.n + r->wv.n * 8 + e->nops * (sizeof(drop) + sizeof(ctype)) +
 		   r->opar.n * 4 + (e->s1 - e->s0) * sizeof(sym) + (e->t1 - e->t0) * sizeof(tag) +
-		   (e->n1 - e->n0) * (sizeof(node) + sizeof(pp_span)) + (e->l1 - e->l0) * 5 + (e->i1 - e->i0) * 16 +
+		   (e->n1 - e->n0) * (sizeof(node) + sizeof(diag_span)) + (e->l1 - e->l0) * 5 + (e->i1 - e->i0) * 16 +
 		   (e->f1 - e->f0) * 8 + (e->r1 - e->r0) * sizeof(cstr) + (e->a1 - e->a0) * sizeof(attrs) + e->nheap +
 		   e->nfpc * 4 + e->nbind * 4 + e->ntl * 4 + e->nlz * sizeof(lzfn) + (e->nxs + e->nxt + e->nxa + e->nxy) * sizeof(xrec);
 	for (int k = 0; k < RA_N; k++)
@@ -2849,10 +2849,10 @@ static void apply(cc *c, const drent *e, uint32_t baseB)
 	{
 		uint32_t nn = e->n1 - e->n0;
 		node *to = &c->nodes[c->nnode];
-		pp_span *sp = &c->span[c->nnode];
+		diag_span *sp = &c->span[c->nnode];
 
 		memcpy(to, e->nodes, nn * sizeof(node));
-		memcpy(sp, e->spans, nn * sizeof(pp_span));
+		memcpy(sp, e->spans, nn * sizeof(diag_span));
 		memcpy(&c->paren[c->nnode], e->parens, nn * sizeof(*c->paren));
 		rel_apply(&x, (char *)to, RA_NODE);
 		for (uint32_t i = 0; i < nn; i++) {
@@ -2962,7 +2962,7 @@ static void chk_report(cc *c, const char *what, uint32_t i, int field, uint64_t 
 
 	if (atomic_fetch_add(&st_chkbad, 1) > 100000)
 		return;
-	pp_where(c->p, c->prevloc, &nm, &nl, &line, &col);
+	pp_location_describe(c->p, c->prevloc, &nm, &nl, &line, &col);
 	fprintf(stderr, "drcheck: %.*s:%u: %s %u field %d: replay %#llx, parse %#llx\n", (int)nl, nm, line, what, i,
 		field, (unsigned long long)want, (unsigned long long)got);
 }
@@ -3071,7 +3071,7 @@ static void drcheck(cc *c)
 		}
 	}
 	for (uint32_t i = 0; ok && i < e->n1 - e->n0; i++) {
-		pp_span sp = e->spans[i];
+		diag_span sp = e->spans[i];
 
 		n = node_fd(&e->nodes[i], f);
 		ok = chk_rec(c, &x, "node", r->n0 + i, &e->nodes[i], &c->nodes[r->n0 + i], f, n, 0);

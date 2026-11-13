@@ -25,9 +25,9 @@ V = f'{R}/src'
 DIRS = ['frontend/pp', 'diag', 'frontend/c', 'codegen', 'arch/a64/codegen', 'driver', 'frontend/lex']
 # function: (index of the format argument, kind or index of the kind argument)
 CALLS = {'cc_error': (2, 'error'), 'cc_errorx': (6, 'error'), 'fatal': (2, 'error'), 'note': (2, 'note'), 'report': (7, 1),
-         'cc_warnx': (9, 'warning'), 'rt_defer': (8, 'warning'), 'fmt_report': (7, 'warning'), 'cc_warn_begin': (5, 'warning'), 'warn_at': (4, 'warning'), 'pp_diag': (3, 2), 'pp_diagx': (2, '?'), 'pp_warnx': (5, 'warning'), 'EXT_WARN': (4, 'warning'), 'EXT_WARN_MS': (5, 'warning'), 'EXT_WARN_DEL': (6, 'warning'), 'ext_warn': (4, 'warning'),
+         'cc_warnx': (9, 'warning'), 'rt_defer': (8, 'warning'), 'fmt_report': (7, 'warning'), 'cc_warn_begin': (5, 'warning'), 'warn_at': (4, 'warning'), 'diag_report': (3, 2), 'diag_report_extended': (2, '?'), 'diag_warning_report': (5, 'warning'), 'EXT_WARN': (4, 'warning'), 'EXT_WARN_MS': (5, 'warning'), 'EXT_WARN_DEL': (6, 'warning'), 'ext_warn': (4, 'warning'),
          'ediag': (2, '?'), 'eerror': (2, 'error'), 'efatal': (2, 'error'), 'pp_macro_note_at': (3, 'note'),
-         'pp_diag_begin': (3, '?'), 'pp_diag_note': (3, 'note'), 'PP_ERROR': (2, 'error'), 'PP_FATAL': (2, 'error'), 'PP_WARN': (2, 'warning')}
+         'diag_record_begin': (3, '?'), 'diag_record_note_add': (3, 'note'), 'PP_ERROR': (2, 'error'), 'PP_FATAL': (2, 'error'), 'PP_WARN': (2, 'warning')}
 # pp's PP_ERROR()/PP_WARN()/PP_FATAL() macros (pp-internal.h): only in the pp module (frontend/pp/, diag/)
 PPONLY = {'PP_ERROR', 'PP_WARN', 'PP_FATAL'}
 MARK = '\x01'		# a printf conversion in a vcc format
@@ -95,7 +95,7 @@ def vcc_messages():
                 src = open(path, errors='replace').read()
                 for m in call.finditer(src):
                     pre = src[max(0, m.start() - 40):m.start()]
-                    if re.search(r'(void|bool|int|vdiag)\s+\**$', pre):	# the definition itself
+                    if re.search(r'(void|bool|int|diag_record)\s+\**$', pre):	# the definition itself
                         continue
                     name = m.group(1)
                     if name in PPONLY and d not in ('frontend/pp', 'diag'):

@@ -588,7 +588,7 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 					v = 0;
 				} else {
 					/* clang: at the name, the initializer underlined */
-					pp_span r = rng(c, assign_expr(c));
+					diag_span r = rng(c, assign_expr(c));
 
 					report(c, "error", d.loc, &r, 1, NULL, 0, "variable-sized object may not be initialized");
 					v = 0;
@@ -654,7 +654,7 @@ VPRIV void declaration(cc *c, vec *out, bool file)
 					c->sie = false;
 				}
 				if (!ok) {
-					pp_span r = rng(c, bad);
+					diag_span r = rng(c, bad);
 
 					report(c, "error", expr_loc(c, bad), &r, 1, NULL, 0, "initializer element is not a compile-time constant");
 					/* the runtime-behaviour warnings only for an initializer that runs (not a constant) */

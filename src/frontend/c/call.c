@@ -22,7 +22,7 @@ static void nonnull_args(cc *c, uint32_t fs, qty ft, const uint32_t *args, uint3
 		if (!is_ptr(c, N(args[i])->ty) || !eval(c, args[i], &cv) || cv.kind != CV_INT || cv.i)
 			continue;
 		{
-			pp_span r = rng(c, args[i]);
+			diag_span r = rng(c, args[i]);
 
 			if (quiet_rt(c))	/* (clang: DiagRuntimeBehavior, at the body's end) */
 				continue;
@@ -67,7 +67,7 @@ VPRIV __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 	callee = fn;
 	ft = N(fn)->ty;
 	if (!is_ptr(c, ft) || !is_func(c, T(c, ft)->base)) {
-		pp_span r = rng(c, fn);
+		diag_span r = rng(c, fn);
 
 		report(c, "error", loc, &r, 1, NULL, 0, "called object type '%s' is not a function or function pointer", tyname(c, ft));
 		if (!have_args)
@@ -89,7 +89,7 @@ VPRIV __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 			const char *v = f->flags & TF_VARIADIC ? "at least " : "";
 			uint32_t fs = N(callee)->op == N_VAR && c->syms[N(callee)->a].kind == S_FUNC ? N(callee)->a : 0;
 			uint32_t p1 = fs && c->syms[fs].psyms && f->n == 1 ? c->lists[c->syms[fs].psyms - 1] : 0;
-			pp_span cr = rng(c, callee);
+			diag_span cr = rng(c, callee);
 
 			if (p1 && !c->syms[p1].name)
 				p1 = 0;
@@ -101,7 +101,7 @@ VPRIV __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 					report(c, "error", c->prevloc, &cr, 1, NULL, 0, "too few arguments to function call, %sexpected %u, have %u",
 					       v, f->n, args.n);
 			} else {
-				pp_span r[2] = { cr, { rng(c, args.v[f->n]).b, rng(c, args.v[args.n - 1]).e } };
+				diag_span r[2] = { cr, { rng(c, args.v[f->n]).b, rng(c, args.v[args.n - 1]).e } };
 
 				if (p1)
 					report(c, "error", r[1].b, r, 2, NULL, 0, "too many arguments to function call, expected single argument '%.*s', have %u arguments",
@@ -112,9 +112,9 @@ VPRIV __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 			}
 			if (fs) {
 				const sym *y = &c->syms[fs];
-				pp_span pr = { y->plb, y->ple };
+				diag_span pr = { y->plb, y->ple };
 				size_t len;
-				const char *t = y->ple > y->plb ? pp_src(c->p, y->plb, y->ple, &len) : NULL;
+				const char *t = y->ple > y->plb ? pp_source_text(c->p, y->plb, y->ple, &len) : NULL;
 
 				if (t) {
 					while (len && (t[len - 1] == ' ' || t[len - 1] == '\t' || t[len - 1] == '\n'))
@@ -151,7 +151,7 @@ VPRIV __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc)
 			/* default argument promotions */
 			a = rvalue(c, a);
 			if (!(N(a)->flags & NF_ERR) && !complete(c, N(a)->ty)) {
-				pp_span r = rng(c, a);
+				diag_span r = rng(c, a);
 
 				report(c, "error", r.b, &r, 1, NULL, 0, "argument type '%s' is incomplete", tyname(c, N(a)->ty));
 				fwd_note(c, N(a)->ty);
