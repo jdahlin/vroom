@@ -18,6 +18,8 @@
 # frontend/c/replay.c is not changed by its owner's decision: no row is listed whose only uses are in it, and a row whose old name also occurs in it says
 # so in its note (applying such a row changes replay.c; the owner decides whether to apply those rows or hold them).
 # The names of keywords.h (KW_*, built by token pasting, used by pp and lex), likely/unlikely and the integer typedefs i128/u128 are not listed: see the PR.
+# Counts: 706 file-scope functions outside replay.c, each with a row (704 rows plus the two merge rows), plus 12 rows for replay.c's hooks that other
+# files call; 36 types, 52 globals, 43 macros, 455 enumerators, 497 fields.  114 non-field rows are commented out as unsafe.
 # Checked: see the dry run in the PR (src/tools/rename-table.py on this file); fields are not part of the dry run.
 #
 # --- files
