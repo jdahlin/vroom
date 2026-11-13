@@ -38,6 +38,7 @@
 #include "common/checked-arithmetic.h"
 #include "common/vector.h"
 #include "common/digest.h"
+#include "port/file.h"
 #include "port/performance-counters.h"
 #include "port/task.h"
 #include "elf-definitions.h"
