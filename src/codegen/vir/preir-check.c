@@ -68,18 +68,18 @@ static void vw_check_operand(vw_check *k, uint32_t q, uint32_t o)
 	uint32_t r;
 
 	if (o == 0 || o >= V->np) {
-		vw_check_fail(k, "v%u (%s) has the operand v%u, %s", q, vir_optab[V->p[q].in.op].name, o,
+		vw_check_fail(k, "v%u (%s) has the operand v%u, %s", q, vir_opcode_table[V->p[q].in.op].name, o,
 			      o ? "past the last value" : "which is none");
 		return;
 	}
 	r = vw_check_find(V, o);
 	if (!r) {
-		vw_check_fail(k, "v%u (%s): its operand v%u forwards in a cycle or out of range", q, vir_optab[V->p[q].in.op].name, o);
+		vw_check_fail(k, "v%u (%s): its operand v%u forwards in a cycle or out of range", q, vir_opcode_table[V->p[q].in.op].name, o);
 		return;
 	}
 	if (V->p[r].blk != VW_NOBLK && !k->live[r])
 		vw_check_fail(k, "v%u (%s) reads v%u (forwarded from v%u, %s in b%u), which is not live", q,
-			      vir_optab[V->p[q].in.op].name, r, o, vir_optab[V->p[r].in.op].name, V->p[r].blk);
+			      vir_opcode_table[V->p[q].in.op].name, r, o, vir_opcode_table[V->p[r].in.op].name, V->p[r].blk);
 }
 
 /* the operands of live instruction q (VW_EACHOP's: a parameter's need the predecessors) */
@@ -87,7 +87,7 @@ static void vw_check_operands(vw_check *k, uint32_t q)
 {
 	vwst *V = k->V;
 
-	if (V->p[q].in.op == VO_BPARAM && V->p[q].in.b != VW_NOBLK &&
+	if (V->p[q].in.op == VIR_OP_BPARAM && V->p[q].in.b != VW_NOBLK &&
 	    (uint64_t)V->p[q].in.b + V->b[V->p[q].blk].npred > V->nx) {
 		vw_check_fail(k, "parameter v%u of b%u: its operand list lies outside the extra words", q, V->p[q].blk);
 		return;
@@ -114,17 +114,17 @@ static void vw_check_lists(vw_check *k, uint32_t b, uint8_t *seen)
 			}
 			if (V->p[q].blk != b)
 				vw_check_fail(k, "b%u: its %s list holds v%u (%s), which says it is in %s%u", b, list ? "parameter" : "instruction",
-					      q, vir_optab[V->p[q].in.op].name, V->p[q].blk == VW_NOBLK ? "no block, a constant," : "b",
+					      q, vir_opcode_table[V->p[q].in.op].name, V->p[q].blk == VW_NOBLK ? "no block, a constant," : "b",
 					      V->p[q].blk == VW_NOBLK ? 0 : V->p[q].blk);
-			else if ((V->p[q].in.op == VO_BPARAM) != (list == 1))
-				vw_check_fail(k, "b%u: v%u (%s) is in its %s list", b, q, vir_optab[V->p[q].in.op].name,
+			else if ((V->p[q].in.op == VIR_OP_BPARAM) != (list == 1))
+				vw_check_fail(k, "b%u: v%u (%s) is in its %s list", b, q, vir_opcode_table[V->p[q].in.op].name,
 					      list ? "parameter" : "instruction");
 		}
 	if (B->term && !k->bad) {
 		if (B->term >= V->np)
 			vw_check_fail(k, "b%u: its terminator v%u is past the last value", b, B->term);
-		else if (V->p[B->term].blk != b || !vir_is_term(V->p[B->term].in.op))
-			vw_check_fail(k, "b%u: its terminator v%u is %s in b%u", b, B->term, vir_optab[V->p[B->term].in.op].name,
+		else if (V->p[B->term].blk != b || !vir_opcode_is_terminator(V->p[B->term].in.op))
+			vw_check_fail(k, "b%u: its terminator v%u is %s in b%u", b, B->term, vir_opcode_table[V->p[B->term].in.op].name,
 				      V->p[B->term].blk);
 	}
 }
@@ -294,8 +294,8 @@ VPRIV const char *vw_preir_check(ecx *e, uint32_t valid, char *buf, size_t n)
 		goto out;
 	}
 	for (uint32_t i = 1; i < V->np && !k.bad; i++)
-		if (vir_is_const_op(V->p[i].in.op) && V->p[i].blk != VW_NOBLK)
-			vw_check_fail(&k, "constant v%u (%s) says it is in b%u", i, vir_optab[V->p[i].in.op].name, V->p[i].blk);
+		if (vir_opcode_is_constant(V->p[i].in.op) && V->p[i].blk != VW_NOBLK)
+			vw_check_fail(&k, "constant v%u (%s) says it is in b%u", i, vir_opcode_table[V->p[i].in.op].name, V->p[i].blk);
 	if (valid & PIR_ORDER) {
 		vw_check_order(&k);
 		for (uint32_t i = 0; i < V->norder && !k.bad; i++)

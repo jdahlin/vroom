@@ -20,29 +20,29 @@ VPRIV void vw_dec(vwst *V, vwsimp *S, uint32_t v)
 
 VPRIV bool vw_kint(const vwst *V, uint32_t v, int64_t *k)
 {
-	const vir_ins *in = &V->p[v].in;
+	const vir_insn *in = &V->p[v].in;
 
-	if (in->op != VO_ICONST)
+	if (in->op != VIR_OP_ICONST)
 		return false;
-	*k = in->ty == VT_I32 ? (int64_t)(int32_t)in->b : (int64_t)((uint64_t)in->b | (uint64_t)in->c << 32);
+	*k = in->type == VIR_TYPE_I32 ? (int64_t)(int32_t)in->b : (int64_t)((uint64_t)in->b | (uint64_t)in->c << 32);
 	return true;
 }
 
 /* bytes v is zero-extended from (its type's size: nothing known) */
 static uint32_t vw_zw(const vwst *V, uint32_t v)
 {
-	const vir_ins *in = &V->p[v].in;
-	uint32_t sz = vir_tysize(in->ty);
+	const vir_insn *in = &V->p[v].in;
+	uint32_t sz = vir_type_size(in->type);
 	int64_t k;
 
 	switch (in->op) {
-	case VO_LOAD:
-		return (in->fl & VIF_MS) ? sz : 1u << VIF_W(in->fl) < sz ? 1u << VIF_W(in->fl) : sz;
-	case VO_EXT:
-		return (in->fl & VIF_MS) ? sz : 1u << VIF_W(in->fl);
-	case VO_ICMP: case VO_FCMP:
+	case VIR_OP_LOAD:
+		return (in->flags & VIR_INSN_FLAG_MS) ? sz : 1u << VIR_INSN_FLAG_WIDTH_LOG2(in->flags) < sz ? 1u << VIR_INSN_FLAG_WIDTH_LOG2(in->flags) : sz;
+	case VIR_OP_EXT:
+		return (in->flags & VIR_INSN_FLAG_MS) ? sz : 1u << VIR_INSN_FLAG_WIDTH_LOG2(in->flags);
+	case VIR_OP_ICMP: case VIR_OP_FCMP:
 		return 1;
-	case VO_AND:
+	case VIR_OP_AND:
 		if (vw_kint(V, in->b, &k) && k >= 0)
 			return k <= 0xff ? 1 : k <= 0xffff ? 2 : k <= 0xffffffffll ? 4 : sz;
 		return sz;
@@ -54,11 +54,11 @@ static uint32_t vw_zw(const vwst *V, uint32_t v)
 /* bytes v is sign-extended from */
 static uint32_t vw_sw(const vwst *V, uint32_t v)
 {
-	const vir_ins *in = &V->p[v].in;
-	uint32_t sz = vir_tysize(in->ty), z;
+	const vir_insn *in = &V->p[v].in;
+	uint32_t sz = vir_type_size(in->type), z;
 
-	if ((in->op == VO_LOAD || in->op == VO_EXT) && (in->fl & VIF_MS))
-		return 1u << VIF_W(in->fl) < sz ? 1u << VIF_W(in->fl) : sz;
+	if ((in->op == VIR_OP_LOAD || in->op == VIR_OP_EXT) && (in->flags & VIR_INSN_FLAG_MS))
+		return 1u << VIR_INSN_FLAG_WIDTH_LOG2(in->flags) < sz ? 1u << VIR_INSN_FLAG_WIDTH_LOG2(in->flags) : sz;
 	z = vw_zw(V, v);
 	return z < sz ? 2 * z : sz;	/* (zero-extended from z bytes: a signed 2z-byte value) */
 }
@@ -74,7 +74,7 @@ VPRIV uint32_t vw_undefk(ecx *e, vwsimp *S, uint32_t ty)
 VPRIV bool vw_simp1(ecx *e, vwsimp *S, uint32_t q, uint32_t *r)
 {
 	vwst *V = e->vw;
-	vir_ins in = V->p[q].in;
+	vir_insn in = V->p[q].in;
 	int64_t k, k2;
 
 	*r = q;
@@ -83,35 +83,35 @@ VPRIV bool vw_simp1(ecx *e, vwsimp *S, uint32_t q, uint32_t *r)
 		in = V->p[q].in;
 	}
 	switch (in.op) {
-	case VO_I2P: case VO_P2I:	/* a pointer and its address as an integer are the same bits */
-		if (V->p[in.a].in.op == (in.op == VO_I2P ? VO_P2I : VO_I2P))
+	case VIR_OP_I2P: case VIR_OP_P2I:	/* a pointer and its address as an integer are the same bits */
+		if (V->p[in.a].in.op == (in.op == VIR_OP_I2P ? VIR_OP_P2I : VIR_OP_I2P))
 			*r = V->p[in.a].in.a;
 		return false;
-	case VO_STORE: {	/* only the low bytes go to memory: not their extension, nor a truncation to more */
-		vir_ins xi = V->p[in.b].in;
+	case VIR_OP_STORE: {	/* only the low bytes go to memory: not their extension, nor a truncation to more */
+		vir_insn xi = V->p[in.b].in;
 
 		if (vw_promdead(V, q))
 			return false;	/* (it goes: its operands are not counted) */
-		if (V->p[in.b].blk != VW_NOBLK && ((xi.op == VO_EXT && VIF_W(xi.fl) >= VIF_W(in.fl)) ||
-						   (xi.op == VO_TRUNC && VIF_W(in.fl) <= 2))) {
+		if (V->p[in.b].blk != VW_NOBLK && ((xi.op == VIR_OP_EXT && VIR_INSN_FLAG_WIDTH_LOG2(xi.flags) >= VIR_INSN_FLAG_WIDTH_LOG2(in.flags)) ||
+						   (xi.op == VIR_OP_TRUNC && VIR_INSN_FLAG_WIDTH_LOG2(in.flags) <= 2))) {
 			vw_dec(V, S, in.b), vw_inc(V, S, xi.a);
 			V->p[q].in.b = xi.a;
 			return true;
 		}
 		return false;
 	}
-	case VO_EXT: {
-		uint32_t x = in.a, K = 1u << VIF_W(in.fl), ts = vir_tysize(in.ty);
-		bool s = in.fl & VIF_MS;
-		vir_ins xi = V->p[x].in;
-		uint32_t xs = vir_tysize(xi.ty);
+	case VIR_OP_EXT: {
+		uint32_t x = in.a, K = 1u << VIR_INSN_FLAG_WIDTH_LOG2(in.flags), ts = vir_type_size(in.type);
+		bool s = in.flags & VIR_INSN_FLAG_MS;
+		vir_insn xi = V->p[x].in;
+		uint32_t xs = vir_type_size(xi.type);
 
 		if (vw_kint(V, x, &k)) {
 			uint64_t u = (uint64_t)k & (K == 8 ? ~0ull : (1ull << 8 * K) - 1);
 
 			if (s && K < 8 && (u >> (8 * K - 1)) & 1)
 				u |= ~0ull << 8 * K;
-			*r = vw_iconst(e, in.ty, (int64_t)u);
+			*r = vw_iconst(e, in.type, (int64_t)u);
 			return false;
 		}
 		if (K >= ts) {	/* (the whole value: a copy or a plain widening) */
@@ -128,134 +128,134 @@ VPRIV bool vw_simp1(ecx *e, vwsimp *S, uint32_t q, uint32_t *r)
 			*r = x;
 			return false;
 		}
-		if (xi.op == VO_EXT && vir_tysize(V->p[xi.a].in.ty) <= ts) {
-			uint32_t M = 1u << VIF_W(xi.fl);
+		if (xi.op == VIR_OP_EXT && vir_type_size(V->p[xi.a].in.type) <= ts) {
+			uint32_t M = 1u << VIR_INSN_FLAG_WIDTH_LOG2(xi.flags);
 
 			if (K <= M) {	/* the low K bytes of x are y's */
 				vw_dec(V, S, x), vw_inc(V, S, xi.a);
 				V->p[q].in.a = xi.a;
 				return true;
 			}
-			if (s == !!(xi.fl & VIF_MS) || !(xi.fl & VIF_MS)) {	/* x's extension is q's */
+			if (s == !!(xi.flags & VIR_INSN_FLAG_MS) || !(xi.flags & VIR_INSN_FLAG_MS)) {	/* x's extension is q's */
 				vw_dec(V, S, x), vw_inc(V, S, xi.a);
 				V->p[q].in.a = xi.a;
-				V->p[q].in.fl = xi.fl;
+				V->p[q].in.flags = xi.flags;
 				return true;
 			}
 		}
 		/* a load only q reads: the load extends */
-		if (xi.op == VO_LOAD && !(xi.fl & VIF_VOL) && S->cnt[x] == 1 && (1u << VIF_W(xi.fl)) == K) {
-			V->p[x].in.ty = (uint8_t)in.ty;
-			V->p[x].in.fl = (uint16_t)((xi.fl & ~VIF_MS) | (s ? VIF_MS : 0));
+		if (xi.op == VIR_OP_LOAD && !(xi.flags & VIR_INSN_FLAG_VOL) && S->cnt[x] == 1 && (1u << VIR_INSN_FLAG_WIDTH_LOG2(xi.flags)) == K) {
+			V->p[x].in.type = (uint8_t)in.type;
+			V->p[x].in.flags = (uint16_t)((xi.flags & ~VIR_INSN_FLAG_MS) | (s ? VIR_INSN_FLAG_MS : 0));
 			*r = x;
 			return false;
 		}
-		if (xi.op == VO_LOAD && !(xi.fl & VIF_VOL) && S->cnt[x] == 1 && (1u << VIF_W(xi.fl)) < K &&
+		if (xi.op == VIR_OP_LOAD && !(xi.flags & VIR_INSN_FLAG_VOL) && S->cnt[x] == 1 && (1u << VIR_INSN_FLAG_WIDTH_LOG2(xi.flags)) < K &&
 		    (s ? vw_sw(V, x) <= K : vw_zw(V, x) <= K)) {
-			V->p[x].in.ty = (uint8_t)in.ty;
+			V->p[x].in.type = (uint8_t)in.type;
 			*r = x;
 			return false;
 		}
 		return false;
 	}
-	case VO_TRUNC: {
+	case VIR_OP_TRUNC: {
 		uint32_t x = in.a;
-		vir_ins xi = V->p[x].in;
+		vir_insn xi = V->p[x].in;
 
 		if (vw_kint(V, x, &k)) {
-			*r = vw_iconst(e, VT_I32, (int64_t)(uint32_t)k);
+			*r = vw_iconst(e, VIR_TYPE_I32, (int64_t)(uint32_t)k);
 			return false;
 		}
-		if (xi.op == VO_EXT && V->p[xi.a].in.ty == VT_I32 && VIF_W(xi.fl) >= 2) {
+		if (xi.op == VIR_OP_EXT && V->p[xi.a].in.type == VIR_TYPE_I32 && VIR_INSN_FLAG_WIDTH_LOG2(xi.flags) >= 2) {
 			*r = xi.a;
 			return false;
 		}
-		if (xi.op == VO_EXT && V->p[xi.a].in.ty == VT_I32) {	/* a narrower extension, in i32 */
+		if (xi.op == VIR_OP_EXT && V->p[xi.a].in.type == VIR_TYPE_I32) {	/* a narrower extension, in i32 */
 			vw_dec(V, S, x), vw_inc(V, S, xi.a);
-			V->p[q].in = (vir_ins){ VO_EXT, VT_I32, xi.fl, xi.a, 0, 0 };
+			V->p[q].in = (vir_insn){ VIR_OP_EXT, VIR_TYPE_I32, xi.flags, xi.a, 0, 0 };
 			return true;
 		}
-		if (xi.op == VO_EXT && VIF_W(xi.fl) >= 2) {	/* trunc of a widening of the low half */
+		if (xi.op == VIR_OP_EXT && VIR_INSN_FLAG_WIDTH_LOG2(xi.flags) >= 2) {	/* trunc of a widening of the low half */
 			vw_dec(V, S, x), vw_inc(V, S, xi.a);
 			V->p[q].in.a = xi.a;
 			return true;
 		}
-		if (xi.op == VO_LOAD && !(xi.fl & VIF_VOL) && S->cnt[x] == 1 && VIF_W(xi.fl) <= 2) {
-			V->p[x].in.ty = VT_I32;
-			if (VIF_W(xi.fl) == 2)
-				V->p[x].in.fl &= (uint16_t)~VIF_MS;
+		if (xi.op == VIR_OP_LOAD && !(xi.flags & VIR_INSN_FLAG_VOL) && S->cnt[x] == 1 && VIR_INSN_FLAG_WIDTH_LOG2(xi.flags) <= 2) {
+			V->p[x].in.type = VIR_TYPE_I32;
+			if (VIR_INSN_FLAG_WIDTH_LOG2(xi.flags) == 2)
+				V->p[x].in.flags &= (uint16_t)~VIR_INSN_FLAG_MS;
 			*r = x;
 			return false;
 		}
 		return false;
 	}
-	case VO_S2F: case VO_U2F:	/* a constant converted: the constant (to nearest, as the instruction) */
+	case VIR_OP_S2F: case VIR_OP_U2F:	/* a constant converted: the constant (to nearest, as the instruction) */
 		if (vw_kint(V, in.a, &k)) {
-			bool w = V->p[in.a].in.ty != VT_I32;
-			double d = in.op == VO_S2F ? (w ? (double)k : (double)(int32_t)k) : (w ? (double)(uint64_t)k : (double)(uint32_t)k);
-			float f = in.op == VO_S2F ? (w ? (float)k : (float)(int32_t)k) : (w ? (float)(uint64_t)k : (float)(uint32_t)k);
+			bool w = V->p[in.a].in.type != VIR_TYPE_I32;
+			double d = in.op == VIR_OP_S2F ? (w ? (double)k : (double)(int32_t)k) : (w ? (double)(uint64_t)k : (double)(uint32_t)k);
+			float f = in.op == VIR_OP_S2F ? (w ? (float)k : (float)(int32_t)k) : (w ? (float)(uint64_t)k : (float)(uint32_t)k);
 			uint64_t bits;
 			uint32_t fb;
 
 			memcpy(&bits, &d, 8), memcpy(&fb, &f, 4);
-			*r = in.ty == VT_F32 ? vw_k(e, VO_FCONST, VT_F32, 0, fb, 0) : vw_k(e, VO_FCONST, VT_F64, 0, (uint32_t)bits, (uint32_t)(bits >> 32));
+			*r = in.type == VIR_TYPE_F32 ? vw_k(e, VIR_OP_FCONST, VIR_TYPE_F32, 0, fb, 0) : vw_k(e, VIR_OP_FCONST, VIR_TYPE_F64, 0, (uint32_t)bits, (uint32_t)(bits >> 32));
 		}
 		return false;
-	case VO_FEXT: case VO_FTRUNC:
-		if (V->p[in.a].in.op == VO_FCONST && V->p[in.a].blk == VW_NOBLK) {
+	case VIR_OP_FEXT: case VIR_OP_FTRUNC:
+		if (V->p[in.a].in.op == VIR_OP_FCONST && V->p[in.a].blk == VW_NOBLK) {
 			uint64_t bits = (uint64_t)V->p[in.a].in.b | (uint64_t)V->p[in.a].in.c << 32;
 			uint32_t fb = (uint32_t)bits;
 			double d;
 			float f;
 
-			if (in.op == VO_FEXT) {
+			if (in.op == VIR_OP_FEXT) {
 				memcpy(&f, &fb, 4);
 				d = f;
 				if (d != d)
 					return false;	/* (a NaN's payload: left to the instruction) */
 				memcpy(&bits, &d, 8);
-				*r = vw_k(e, VO_FCONST, VT_F64, 0, (uint32_t)bits, (uint32_t)(bits >> 32));
+				*r = vw_k(e, VIR_OP_FCONST, VIR_TYPE_F64, 0, (uint32_t)bits, (uint32_t)(bits >> 32));
 			} else {
 				memcpy(&d, &bits, 8);
 				f = (float)d;
 				if (f != f)
 					return false;
 				memcpy(&fb, &f, 4);
-				*r = vw_k(e, VO_FCONST, VT_F32, 0, fb, 0);
+				*r = vw_k(e, VIR_OP_FCONST, VIR_TYPE_F32, 0, fb, 0);
 			}
 		}
 		return false;
-	case VO_ADD: case VO_SUB: case VO_OR: case VO_XOR: case VO_SHL: case VO_LSHR: case VO_ASHR:
+	case VIR_OP_ADD: case VIR_OP_SUB: case VIR_OP_OR: case VIR_OP_XOR: case VIR_OP_SHL: case VIR_OP_LSHR: case VIR_OP_ASHR:
 		if (vw_kint(V, in.b, &k) && !k)
 			*r = in.a;
 		return false;
-	case VO_MUL:
+	case VIR_OP_MUL:
 		if (vw_kint(V, in.b, &k) && k == 1)
 			*r = in.a;
 		return false;
-	case VO_AND:
-		if (vw_kint(V, in.b, &k) && (k == -1 || (in.ty == VT_I32 && (uint32_t)k == 0xffffffffu)))
+	case VIR_OP_AND:
+		if (vw_kint(V, in.b, &k) && (k == -1 || (in.type == VIR_TYPE_I32 && (uint32_t)k == 0xffffffffu)))
 			*r = in.a;
 		else if (vw_kint(V, in.b, &k) && k > 0 && !((uint64_t)k & ((uint64_t)k + 1)) && vw_zw(V, in.a) < 8 &&
 			 (uint64_t)k >= (vw_zw(V, in.a) == 8 ? ~0ull : (1ull << 8 * vw_zw(V, in.a)) - 1))
 			*r = in.a;	/* the mask keeps every bit that can be set */
 		return false;
-	case VO_PTRADD:
+	case VIR_OP_PTRADD:
 		if (!vw_kint(V, in.b, &k))
 			return false;
 		if (!k) {
 			*r = in.a;
 			return false;
 		}
-		if (V->p[in.a].in.op == VO_SLOTADDR && V->p[in.a].blk == VW_NOBLK) {	/* $s+k2 + k: $s+(k2+k) */
-			vir_ins a = V->p[in.a].in;	/* (a copy: vw_k can move V->p) */
+		if (V->p[in.a].in.op == VIR_OP_SLOTADDR && V->p[in.a].blk == VW_NOBLK) {	/* $s+k2 + k: $s+(k2+k) */
+			vir_insn a = V->p[in.a].in;	/* (a copy: vw_k can move V->p) */
 
 			k2 = (int64_t)((uint64_t)a.b | (uint64_t)a.c << 32) + k;
-			*r = vw_k(e, VO_SLOTADDR, VT_PTR, a.a, (uint32_t)k2, (uint32_t)((uint64_t)k2 >> 32));
+			*r = vw_k(e, VIR_OP_SLOTADDR, VIR_TYPE_PTR, a.a, (uint32_t)k2, (uint32_t)((uint64_t)k2 >> 32));
 			return false;
 		}
-		if (V->p[in.a].in.op == VO_PTRADD && V->p[in.a].blk != VW_NOBLK && vw_kint(V, V->p[in.a].in.b, &k2)) {
-			uint32_t y = V->p[in.a].in.a, c = vw_iconst(e, VT_I64, (int64_t)((uint64_t)k + (uint64_t)k2));
+		if (V->p[in.a].in.op == VIR_OP_PTRADD && V->p[in.a].blk != VW_NOBLK && vw_kint(V, V->p[in.a].in.b, &k2)) {
+			uint32_t y = V->p[in.a].in.a, c = vw_iconst(e, VIR_TYPE_I64, (int64_t)((uint64_t)k + (uint64_t)k2));
 
 			vw_dec(V, S, in.a), vw_inc(V, S, y);
 			V->p[q].in.a = y, V->p[q].in.b = c;
@@ -269,6 +269,6 @@ VPRIV bool vw_simp1(ecx *e, vwsimp *S, uint32_t q, uint32_t *r)
 
 VPRIV bool vw_commutes(uint32_t op)
 {
-	return op == VO_ADD || op == VO_MUL || op == VO_AND || op == VO_OR || op == VO_XOR ||
-	       op == VO_UMULHI || op == VO_SMULHI;
+	return op == VIR_OP_ADD || op == VIR_OP_MUL || op == VIR_OP_AND || op == VIR_OP_OR || op == VIR_OP_XOR ||
+	       op == VIR_OP_UMULHI || op == VIR_OP_SMULHI;
 }

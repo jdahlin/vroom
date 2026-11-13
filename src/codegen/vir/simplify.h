@@ -26,7 +26,7 @@ typedef struct vwsimp {
 	uint32_t blk;		/* the block pure instructions are keyed by: one kept live into other
 				 * blocks costs a register more often than it saves an instruction */
 	uint32_t *idom, *dkid, *dnext;	/* the dominator tree */
-	uint32_t undef[VT_N];
+	uint32_t undef[VIR_TYPE_COUNT];
 	/* loads across blocks (vw_far): positions in reverse postorder, what may write, the loops */
 	uint32_t *seq;		/* per value below n0: its position (0: none) */
 	uint32_t *wr, nwr;	/* the instructions that may write memory, by position */

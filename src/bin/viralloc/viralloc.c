@@ -1,6 +1,6 @@
 /*
  * viralloc: VIR register allocation on a text unit, with the synthetic target
- * (synth.c), checked by vir_alloc_check (PLAN-vir.md V4).
+ * (synthetic-target.c), checked by vir_alloc_check (PLAN-vir.md V4).
  *
  *   viralloc [options] FILE
  *     --regs N,M[,C,D]  N integer and M float registers, the top C and D callee-saved (default 6,4,2,1)
@@ -27,8 +27,8 @@
 #include <string.h>
 #include <time.h>
 
-#include "vir/alloc.h"
-#include "vir/synth.h"
+#include "vir/register-allocation.h"
+#include "vir/synthetic-target.h"
 
 static char *viralloc_file_read(const char *path, size_t *n)
 {
@@ -81,12 +81,12 @@ static double viralloc_clock_seconds(void)
 }
 
 /* allocate and check one function with one configuration; 0 ok */
-static uint32_t viralloc_function_allocate(vir_fn *f, const vir_unit *u, const vir_loops *lp, uint32_t r[4], bool x86, uint64_t pool, vbuffer *out,
+static uint32_t viralloc_function_allocate(vir_function *f, const vir_unit *u, const vir_loops *lp, uint32_t r[4], bool x86, uint64_t pool, vbuffer *out,
 		    bool print)
 {
-	vir_synth t;
+	vir_synthetic_target t;
 	vir_alloc_out o;
-	vir_aopt opt = { pool };
+	vir_alloc_options opt = { pool };
 	char err[200];
 	uint32_t nbad;
 
@@ -94,22 +94,22 @@ static uint32_t viralloc_function_allocate(vir_fn *f, const vir_unit *u, const v
 		vbuffer_format_append(out, "viralloc: %s\n", err);
 		return 1;
 	}
-	if (!vir_alloc(f, lp, &t.regs, &opt, &o)) {
-		vbuffer_format_append(out, "; alloc @%s regs %u,%u,%u,%u%s: failed: %s\n", vir_fname(u, f), r[0], r[1], r[2], r[3],
-		       x86 ? " x86" : "", o.err);
+	if (!vir_alloc(f, lp, &t.registers, &opt, &o)) {
+		vbuffer_format_append(out, "; alloc @%s regs %u,%u,%u,%u%s: failed: %s\n", vir_function_name(u, f), r[0], r[1], r[2], r[3],
+		       x86 ? " x86" : "", o.error_message);
 		return 1;
 	}
 	if (print) {
-		vbuffer_format_append(out, "; alloc @%s regs %u,%u,%u,%u%s\n", vir_fname(u, f), r[0], r[1], r[2], r[3], x86 ? " x86" : "");
+		vbuffer_format_append(out, "; alloc @%s regs %u,%u,%u,%u%s\n", vir_function_name(u, f), r[0], r[1], r[2], r[3], x86 ? " x86" : "");
 		vir_alloc_print(out, u, f, lp, &o);
 	}
 	{
 		vbuffer m = { 0 };
 
-		nbad = vir_alloc_check(f, &t.regs, &o, &m);
+		nbad = vir_alloc_check(f, &t.registers, &o, &m);
 		if (nbad) {
 			if (!print) {
-				vbuffer_format_append(out, "; check @%s regs %u,%u,%u,%u%s pool %llu:\n", vir_fname(u, f), r[0], r[1], r[2], r[3],
+				vbuffer_format_append(out, "; check @%s regs %u,%u,%u,%u%s pool %llu:\n", vir_function_name(u, f), r[0], r[1], r[2], r[3],
 				       x86 ? " x86" : "", (unsigned long long)pool);
 			}
 			vbuffer_append(out, m.p, m.n);
@@ -128,7 +128,7 @@ int main(int argc, char **argv)
 	char *src;
 	size_t n, sep;
 	vir_unit u;
-	vir_perr perr;
+	vir_parse_error perr;
 	vbuffer out = { 0 };
 	int rc = 1;
 
@@ -183,17 +183,17 @@ int main(int argc, char **argv)
 	}
 	vir_unit_init(&u);
 	if (!vir_parse(&u, src, sep, &perr)) {
-		vbuffer_format_append(&out, "%s:%u:%u: %s\n", path, perr.line, perr.col, perr.msg);
+		vbuffer_format_append(&out, "%s:%u:%u: %s\n", path, perr.line, perr.col, perr.message);
 		goto done;
 	}
-	for (uint32_t fi = 0; fi < u.nfn; fi++) {
-		vir_fn f;
+	for (uint32_t fi = 0; fi < u.function_count; fi++) {
+		vir_function f;
 		vir_loops lp;
 		vbuffer ver = { 0 };
 
-		vir_fn_load(&f, &u, fi);
+		vir_function_load(&f, &u, fi);
 		if (!vir_canon(&f)) {
-			vbuffer_format_append(&out, "@%s: no canonical form\n", vir_fname(&u, &f));
+			vbuffer_format_append(&out, "@%s: no canonical form\n", vir_function_name(&u, &f));
 			nbad++;
 			continue;
 		}
@@ -204,7 +204,7 @@ int main(int argc, char **argv)
 			continue;
 		}
 		if (!vir_loops_build(&f, &lp)) {
-			vbuffer_format_append(&out, "@%s: no loops\n", vir_fname(&u, &f));
+			vbuffer_format_append(&out, "@%s: no loops\n", vir_function_name(&u, &f));
 			nbad++;
 			continue;
 		}
@@ -229,13 +229,13 @@ int main(int argc, char **argv)
 							}
 						}
 			if (!quiet || fails)
-				vbuffer_format_append(&out, "; sweep @%s: %u configurations, %u failed\n", vir_fname(&u, &f), cnt, fails);
+				vbuffer_format_append(&out, "; sweep @%s: %u configurations, %u failed\n", vir_function_name(&u, &f), cnt, fails);
 			nbad += fails;
 		}
 		if (mut) {
-			vir_synth t;
+			vir_synthetic_target t;
 			vir_alloc_out o;
-			vir_aopt opt = { pool };
+			vir_alloc_options opt = { pool };
 			char err[200];
 			uint32_t caught = 0, tried = 0, seed = 12345;
 
@@ -244,55 +244,55 @@ int main(int argc, char **argv)
 				vbuffer m = { 0 };
 				uint32_t what;
 
-				if (!vir_alloc(&f, &lp, &t.regs, &opt, &o))
+				if (!vir_alloc(&f, &lp, &t.registers, &opt, &o))
 					break;
-#define RND() (seed = seed * 1103515245u + 12345u, seed >> 8)
-				what = RND() % 4;
-				if (what == 0 && o.nopr) {
-					uint32_t x = RND() % o.nopr;
-					uint8_t r = o.opr[x];
+#define VIRALLOC_RANDOM() (seed = seed * 1103515245u + 12345u, seed >> 8)
+				what = VIRALLOC_RANDOM() % 4;
+				if (what == 0 && o.operand_register_count) {
+					uint32_t x = VIRALLOC_RANDOM() % o.operand_register_count;
+					uint8_t r = o.operand_registers[x];
 
-					if (r == VR_NONE || r >= 128)
+					if (r == VIR_REGISTER_NONE || r >= 128)
 						continue;
-					o.opr[x] = VR_MAKE(VR_CLASS(r), (VR_NUM(r) + 1 + RND() % 3) % (VR_CLASS(r) ? regs[1] : regs[0]));
-					if (o.opr[x] == r)
+					o.operand_registers[x] = VIR_REGISTER_MAKE(VIR_REGISTER_CLASS(r), (VIR_REGISTER_NUMBER(r) + 1 + VIRALLOC_RANDOM() % 3) % (VIR_REGISTER_CLASS(r) ? regs[1] : regs[0]));
+					if (o.operand_registers[x] == r)
 						continue;
-				} else if (what == 1 && o.nedit) {
-					vir_edit *e = &o.edit[RND() % o.nedit];
+				} else if (what == 1 && o.edit_count) {
+					vir_edit *e = &o.edit[VIRALLOC_RANDOM() % o.edit_count];
 
-					if (e->kind == VE_SWAP)
+					if (e->kind == VIR_EDIT_SWAP)
 						continue;
-					if (e->kind == VE_STORE)	/* (its dst is unused: the register it stores from) */
-						e->src = VR_MAKE(VR_CLASS(e->src), (VR_NUM(e->src) + 1) % (VR_CLASS(e->src) ? regs[1] : regs[0]));
+					if (e->kind == VIR_EDIT_STORE)	/* (its dst is unused: the register it stores from) */
+						e->src = VIR_REGISTER_MAKE(VIR_REGISTER_CLASS(e->src), (VIR_REGISTER_NUMBER(e->src) + 1) % (VIR_REGISTER_CLASS(e->src) ? regs[1] : regs[0]));
 					else
-						e->dst = VR_MAKE(VR_CLASS(e->dst), (VR_NUM(e->dst) + 1) % (VR_CLASS(e->dst) ? regs[1] : regs[0]));
-				} else if (what == 2 && o.nmove) {
-					vir_emove *e = &o.move[RND() % o.nmove];
+						e->dst = VIR_REGISTER_MAKE(VIR_REGISTER_CLASS(e->dst), (VIR_REGISTER_NUMBER(e->dst) + 1) % (VIR_REGISTER_CLASS(e->dst) ? regs[1] : regs[0]));
+				} else if (what == 2 && o.move_count) {
+					vir_edge_move *e = &o.move[VIRALLOC_RANDOM() % o.move_count];
 
-					if (e->dst & VL_SLOT || e->dst >= 128)
+					if (e->dst & VIR_LOCATION_SLOT || e->dst >= 128)
 						continue;
-					e->dst = VR_MAKE(VR_CLASS(e->dst), (VR_NUM(e->dst) + 1) % (VR_CLASS(e->dst) ? regs[1] : regs[0]));
-				} else if (what == 3 && o.nspill > 1) {
-					uint32_t v = f.nconst + RND() % (f.nins - f.nconst);
+					e->dst = VIR_REGISTER_MAKE(VIR_REGISTER_CLASS(e->dst), (VIR_REGISTER_NUMBER(e->dst) + 1) % (VIR_REGISTER_CLASS(e->dst) ? regs[1] : regs[0]));
+				} else if (what == 3 && o.spill_count > 1) {
+					uint32_t v = f.constant_count + VIRALLOC_RANDOM() % (f.insn_count - f.constant_count);
 
-					if (o.slot[v] == VIR_NOBLK)
+					if (o.slot[v] == VIR_BLOCK_NONE)
 						continue;
-					o.slot[v] = (o.slot[v] + 1) % o.nspill;
+					o.slot[v] = (o.slot[v] + 1) % o.spill_count;
 				} else {
 					continue;
 				}
-#undef RND
+#undef VIRALLOC_RANDOM
 				tried++;
-				if (vir_alloc_check(&f, &t.regs, &o, &m))
+				if (vir_alloc_check(&f, &t.registers, &o, &m))
 					caught++;
 				free(m.p);
 			}
-			vbuffer_format_append(&out, "; mutate @%s: %u mutations, %u caught\n", vir_fname(&u, &f), tried, caught);
+			vbuffer_format_append(&out, "; mutate @%s: %u mutations, %u caught\n", vir_function_name(&u, &f), tried, caught);
 		}
 		if (rep) {
-			vir_synth t;
+			vir_synthetic_target t;
 			vir_alloc_out o;
-			vir_aopt opt = { pool };
+			vir_alloc_options opt = { pool };
 			char err[200];
 			double t0, best = 1e30, bestl = 1e30;
 			uint32_t nb = 0;
@@ -303,7 +303,7 @@ int main(int argc, char **argv)
 				vir_loops_build(&f, &lp);
 				double t1 = viralloc_clock_seconds();
 
-				vir_alloc(&f, &lp, &t.regs, &opt, &o);
+				vir_alloc(&f, &lp, &t.registers, &opt, &o);
 				double t2 = viralloc_clock_seconds();
 
 				if (t2 - t1 < best)
@@ -311,11 +311,11 @@ int main(int argc, char **argv)
 				if (t1 - t0 < bestl)
 					bestl = t1 - t0;
 			}
-			for (uint32_t b = 0; b < f.nblk; b++)
-				nb += f.blk[b].n;
+			for (uint32_t b = 0; b < f.block_count; b++)
+				nb += f.blocks[b].insn_count;
 			fprintf(stderr, "@%s: %u instructions, %u blocks, %u loops: alloc %.1f ns/ins (%.3f ms), loops %.1f ns/ins%s\n",
-				vir_fname(&u, &f), nb, f.nblk, lp.n, best * 1e9 / nb, best * 1e3, bestl * 1e9 / nb,
-				o.st.linear ? " (linear)" : "");
+				vir_function_name(&u, &f), nb, f.block_count, lp.count, best * 1e9 / nb, best * 1e3, bestl * 1e9 / nb,
+				o.statistics.linear ? " (linear)" : "");
 		}
 	}
 	rc = nbad ? 1 : 0;

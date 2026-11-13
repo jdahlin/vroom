@@ -35,10 +35,10 @@
 #ifndef VCC_EMIT_VIR_PREIR_H
 #define VCC_EMIT_VIR_PREIR_H
 #include "vir/vir.h"
-#include "vir/alloc.h"
+#include "vir/register-allocation.h"
 
 typedef struct vwp {	/* a pre-IR instruction: operands are pre-IR values, extras in vwst.x */
-	vir_ins in;
+	vir_insn in;
 	uint32_t blk;	/* its block; VW_NOBLK for a constant */
 	uint32_t next;	/* the next one in the block's list (0: last) */
 	uint32_t loc;	/* source location */
@@ -97,11 +97,11 @@ typedef struct vwst {
 	uint32_t fprod[64];			/* per float name: the product (or its negation) the expression in hand just made, 0 none */
 	uint32_t cur;				/* the block being built */
 	bool sealing;
-	uint32_t rty;				/* the result's type, VT_VOID none */
+	uint32_t rty;				/* the result's type, VIR_TYPE_VOID none */
 	uint32_t nparam, fsig;			/* the function's signature (pre extra offset) */
 	const char *why;
 	char detail[96];			/* what a failure reason leaves out (an opcode, the allocator's message): VCC_VIR_STATS */
-	vir_fn f;				/* the function built (valid until the thread's next vir_begin) */
+	vir_function f;				/* the function built (valid until the thread's next vir_function_begin) */
 	int64_t *xslot, *xspill;
 	uint8_t *xuses; uint32_t cxuses;
 	uint32_t *xedgelab, cxedgelab;
@@ -131,8 +131,8 @@ typedef struct vwst {
 /* the value operands of x (a parameter's: one per predecessor), as words that can be rewritten */
 #define VW_EACHOP(V_, X_, O_, BODY_) do { \
 	vwp *x_ = &(V_)->p[X_]; \
-	const vir_opinfo *oi_ = &vir_optab[x_->in.op]; \
-	if (x_->in.op == VO_BPARAM) { \
+	const vir_opcode_info *oi_ = &vir_opcode_table[x_->in.op]; \
+	if (x_->in.op == VIR_OP_BPARAM) { \
 		if (x_->in.b != VW_NOBLK) \
 			for (uint32_t j_ = 0; j_ < (V_)->b[x_->blk].npred; j_++) { \
 				uint32_t *O_ = &(V_)->x[x_->in.b + j_]; BODY_; \
@@ -140,10 +140,10 @@ typedef struct vwst {
 		break; \
 	} \
 	for (int k_ = 0; k_ < 3; k_++) \
-		if (vw_isval(oi_->k[k_]) && !(x_->in.op == VO_BRIF && k_ > 0)) { \
+		if (vw_isval(oi_->operand_kinds[k_]) && !(x_->in.op == VIR_OP_BRIF && k_ > 0)) { \
 			uint32_t *O_ = &(&x_->in.a)[k_]; BODY_; \
 		} \
-	if (x_->in.op == VO_CALL || x_->in.op == VO_RET) \
+	if (x_->in.op == VIR_OP_CALL || x_->in.op == VIR_OP_RET) \
 		for (uint32_t k_ = 0; k_ < (V_)->x[x_->in.c]; k_++) { \
 			uint32_t *O_ = &(V_)->x[x_->in.c + 1 + k_]; BODY_; \
 		} \
@@ -151,10 +151,10 @@ typedef struct vwst {
 
 static inline bool vw_isval(uint8_t k)
 {
-	return k >= OK_T && k <= OK_BITC ? true : k == OK_CONSTV;
+	return k >= VIR_OPERAND_KIND_T && k <= VIR_OPERAND_KIND_BITC ? true : k == VIR_OPERAND_KIND_CONSTV;
 }
 
-static inline uint32_t vw_ty(ecx *e, uint32_t v) { return e->vw->p[v].in.ty; }
+static inline uint32_t vw_ty(ecx *e, uint32_t v) { return e->vw->p[v].in.type; }
 
 static inline uint32_t vw_find(vwst *V, uint32_t v)
 {
