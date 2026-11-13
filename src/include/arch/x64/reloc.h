@@ -19,4 +19,12 @@ enum {
 	R_X86_64_REX_GOTPCRELX = 42,
 };
 
+/* COFF-only fixup kinds (obj.h, "COFF"): no ELF number, never in an ELF object; above arm64's R_VCC_* */
+enum {
+	R_VCC_COFF_IMGREL32 = 0x10010,	/* sym@IMGREL, .rva: IMAGE_REL_AMD64_ADDR32NB */
+	R_VCC_COFF_SECREL32 = 0x10011,	/* sym@SECREL32, .secrel32: IMAGE_REL_AMD64_SECREL */
+	R_VCC_COFF_SECTION = 0x10012,	/* .secidx: IMAGE_REL_AMD64_SECTION, 2 bytes */
+	R_VCC_COFF_SYMIDX = 0x10013,	/* .symidx: the symbol's index in the symbol table, 4 bytes */
+};
+
 #endif

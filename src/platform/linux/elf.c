@@ -112,6 +112,8 @@ static size_t elf_finish_tail(ElfObj *o, Out *w);
 
 size_t elf_finish(ElfObj *o)
 {
+	if (o->format == OBJ_COFF)
+		return coff_finish(o);
 	Out *w = rpush(&o->arena, sizeof *w, 8);
 	*w = out_of(o);
 	o->fin = w;
@@ -281,6 +283,10 @@ static void shdr(uint8_t *p, uint32_t name, uint32_t type, uint64_t flags, uint6
 
 void elf_emit(ElfObj *o, uint8_t *b)
 {
+	if (o->format == OBJ_COFF) {
+		coff_emit(o, b);
+		return;
+	}
 	Out *w = o->fin;
 	uint32_t ns = o->nsec;
 	memset(b, 0, w->size);

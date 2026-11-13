@@ -279,6 +279,10 @@ static int as_directive_dispatch(as_context *a, as_text w, const char *p, const 
 	const char *d = w.text + 1;
 	size_t n = w.length - 1;
 #define AS_DIRECTIVE_IS(x) (n == sizeof(x) - 1 && !memcmp(d, x, n))
+	if (a->object->format == OBJ_COFF) {
+		int rc;
+		if (as_directive_coff(a, w, p, e, &rc)) return rc;
+	}
 	if (a->object->machine == EM_X86_64) {
 		if (AS_DIRECTIVE_IS("att_syntax") || AS_DIRECTIVE_IS("code64"))
 			return 0;	/* (AT&T, 64-bit: what x86-64 text is anyway) */
@@ -563,6 +567,8 @@ static int as_statement_assemble(as_context *a, const char *p, const char *e)
 	p = as_whitespace_skip(p, e);
 	if (p >= e) return 0;
 	as_text w = as_text_first_word(p, e);
+	if (as_names_have_at(a))	/* @feat.00 = 0 */
+		while (w.text + w.length < e && (w.text[w.length] == '@' || as_char_is_identifier((unsigned char)w.text[w.length]))) w.length++;
 	int rc, lab = 0;
 	if (w.text[0] == '.' && as_directive_conditional(a, w, w.text + w.length, e, &rc)) return rc;
 	if (as_condition_is_ignored(a)) return 0;
@@ -678,6 +684,11 @@ void as_begin(as_context *a, ElfObj *o, const char *name)
 	elf_reset(o);
 	uint32_t text_sec = as_section_standard_find(a, ".text");
 	elf_sec(o, text_sec)->align = 2;
+	if (o->format == OBJ_COFF) {	/* MC's initSections: .text, .data, .bss, all 4-aligned */
+		elf_sec(o, as_section_standard_find(a, ".data"))->align = 2;
+		elf_sec(o, as_section_standard_find(a, ".bss"))->align = 2;
+	}
+	a->coff_symbol_definition = 0;
 	a->fragment_current = a->fragment_previous = text_sec;
 }
 
@@ -739,6 +750,7 @@ int as_end(as_context *a)
 				elf_define(o, vr->symbol, t->frag, t->value + (uint64_t)v.c);
 				s->alias = t->alias ? t->alias : v.add;
 			} else if (!v.add && !v.sub) elf_define_abs(o, vr->symbol, (uint64_t)v.c);
+			else if (o->format == OBJ_COFF && v.add && !v.sub && !v.c) s->alias = v.add;	/* (COFF: x = undefined, MC's variable) */
 			else { as_error_report(a, "unsupported variable '%s'", s->name); break; }
 		}
 	}

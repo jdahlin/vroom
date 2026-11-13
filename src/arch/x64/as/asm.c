@@ -135,7 +135,7 @@ static int x64_expr(as_context *a, const char **pp, const char *e, as_value *v, 
 			depth--;
 		} else if (*q == ',' && depth == 0) {
 			break;
-		} else if (*q == '@' && depth == 0 && !at) {
+		} else if (*q == '@' && depth == 0 && !at && (!as_names_have_at(a) || as_at_is_specifier(q + 1, e))) {
 			at = q;
 		}
 		q++;
@@ -144,6 +144,7 @@ static int x64_expr(as_context *a, const char **pp, const char *e, as_value *v, 
 		static const struct { const char *n; uint8_t m; } mods[] = {
 			{ "PLT", XM_PLT }, { "GOTPCREL", XM_GOTPCREL }, { "TPOFF", XM_TPOFF }, { "GOTTPOFF", XM_GOTTPOFF },
 			{ "TLSGD", XM_TLSGD }, { "TLSLD", XM_TLSLD }, { "DTPOFF", XM_DTPOFF }, { "GOTOFF", XM_GOTOFF }, { "GOT", XM_GOT },
+			{ "IMGREL", XM_IMGREL }, { "SECREL32", XM_SECREL },
 		};
 		const char *m = at + 1, *me = m;
 		const char *x = p;
@@ -153,7 +154,7 @@ static int x64_expr(as_context *a, const char **pp, const char *e, as_value *v, 
 		for (size_t i = 0; i < sizeof mods / sizeof *mods; i++)
 			if ((size_t)(me - m) == strlen(mods[i].n) && !memcmp(m, mods[i].n, (size_t)(me - m)))
 				*mod = mods[i].m;
-		if (*mod == XM_NONE)
+		if (*mod == XM_NONE || ((*mod == XM_IMGREL || *mod == XM_SECREL) && a->object->format != OBJ_COFF))
 			return as_error_report(a, "invalid variant '%.*s'", (int)(me - m), m);
 		if (as_expression_value_parse(a, &x, at, v))
 			return -1;
@@ -315,6 +316,10 @@ VPRIV int x64_rtype(int mod, int pcrel, int size, int sgn, int rexw, int gotx)
 	case XM_DTPOFF: return size == 8 ? R_X86_64_DTPOFF64 : R_X86_64_DTPOFF32;
 	case XM_GOTOFF: return R_X86_64_GOTOFF64;
 	case XM_GOT: return R_X86_64_GOT32;
+	case XM_IMGREL: case XM_SECREL:	/* COFF: a 4-byte field (rip-relative: REL32; an 8-byte one: ADDR64, MC) */
+		if (pcrel) return R_X86_64_PC32;
+		if (size == 4) return mod == XM_IMGREL ? R_VCC_COFF_IMGREL32 : R_VCC_COFF_SECREL32;
+		return size == 8 ? R_X86_64_64 : size == 2 ? R_X86_64_16 : R_X86_64_8;
 	}
 	if (pcrel)
 		return size == 8 ? R_X86_64_PC64 : size == 2 ? R_X86_64_PC16 : size == 1 ? R_X86_64_PC8 : R_X86_64_PC32;
