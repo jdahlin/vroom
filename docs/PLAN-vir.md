@@ -257,6 +257,110 @@ Inga kompilatorändringar, ingen ny prestandavinst eller stängd releasegrind.
 ### V4 x86-64 mot clang -O2 (2026-11-12), mål högst 5 % långsammare
 
 
+2026-11-13, **allokatorns edits tillskrivna före policyändringar**:
+x86 stöder nu ARM:s `VCC_VL_PROBE`-bitar 0–7: omladdning, remat,
+registerflytt och lagring inom block; remat, lagring, omladdning och flytt
+på kanter. Bit 8 räknar definitionslagringar, bit 10 kantutbyten.
+`VCC_VL_MAP=1` skriver befintliga `vir_astats` och en opt-in-observation av
+allokatorns valda föregångare, blockparameterbeslut och slutliga
+registertillstånd vid blockets början. Den generiska allokatorn får bara
+en diagnostisk callback; ingen tilldelningsregel ändras.
+`VCC_VL_FILTER=sqlite3VdbeExec` väljer diagnostik med exakt funktionsnamn,
+aldrig optimeringspolicy.
+
+Assemblymarkörerna kopplar varje **emitterad** edit till id, block,
+instruktionsposition (kant: index i move-listan), värde, käll-/målplats,
+kantmål och spill-slot. `param` är målparametern vars tilldelade plats
+matchar destinationen, annars 0; en live-in behöver inte vara en parameter.
+Slutlig slotdelning rapporteras separat. Layoutduplicering ger flera
+emitterade id för samma statiska beslut. Exempel: statiskt 436 reloads,
+797 remats, 360 eremats; emitterat 466, 829 respektive 727 platser.
+
+`bench/sqlite/vir-edits.py` sparar `sites.json`, entry-/slotbeslut och råa
+perf-räknare; `--site ID` och `--value V` kan mäta en enskild edit eller ett
+värdes edits. Kontroll och varje nop-prob kommer från **samma mappade
+assembly**, med intern alignment borttagen hos båda. Varje binär verifieras.
+Markörernas råa poster stoppar record-folds, liksom ARM:s probe: allmänna
+editräknare är därför övre gränser för överlevande edits i originalet,
+inte ett mått på möjlig hastighetsvinst. Kontrollens hela program har
+22,490 G instruktioner mot originalets 21,065 G. Inga instrumenterade
+binärer används för tidsjämförelser.
+
+SQLite 3.50.4, main storlek 100, CPU 7; två hela räknarserier:
+
+| Edit i VdbeExec | Dynamiskt, miljoner (avrundat) |
+|---|---:|
+| Omladdning inom block | 192,78 |
+| Remat inom block | 212,53 |
+| Registerflytt inom block | 109,45 |
+| Lagring inom block | 122,77 |
+| Kant-remat | 196,62 |
+| Kant-lagring | 297,44 |
+| Kant-omladdning | 348,13 |
+| Kant-registerflytt | 131,68 |
+
+**De två kandidaternas ursprung:** alla 346 nollplatser nära dispatch är
+kant-remats av två live-in-nollkonstanter i **b17**: **v5 (i32) till RCX** och
+**v10 (i64) till RDX**, 173 statiska platser och cirka **82,30 M** exekveringar
+vardera, tillsammans **164,59 M**. De är inte rc-phi:n. b17 väljer
+**b16** som föregångare och ärver v5/v10 i register 1/2.
+Övriga fem noll-remats in till dispatch initialiserar parametrar (cirka
+5,26 M tillsammans). Hela VM:ns noll-MOV:ar delas i cirka **193,25 M**
+kant-remats och **51,34 M** remats inom block; ordinary lowering bidrar
+inte mätbart i denna körning. Alla 789 statiska noll-MOV-platser finns
+även i originalassemblyn.
+
+Alla **207 laddningar av 776(%rsp)** är edits för **v672**, dispatchs
+aMem-parameter (v65 i den omnumrerade textdumpen), **spill-slot 1**:
+119 statiska kantplatser, cirka **54,13 M** dynamiskt; 88 inom block,
+cirka **38,14 M**. Totalt cirka **92,28 M**. Entry-beslutet för b17 är
+`late-call-web-slot`: parametern lever över anrop och behövs sent, så
+föregångarnas kanter skriver web-slotten. Detta är omladdning av ett
+SSA-värde från kompilatorns privata spill, inte vanliga C-laddningar från
+`p->aMem` som aliasanalysen måste behålla. Det bevisar inte att alla
+omladdningar kan tas bort eller att aMem alltid har samma värde: VM:ns
+frame-/subprogramvägar kan byta pekare. Nollorna är verklig
+kantreconciliation, inte bevisat död kod. Ingen policy ändras i detta steg.
+
+De två ursprungliga kandidaternas statiska platser är lika många i
+original och mappad assembly. Hela räknarkontrollen före/efter driver
+1–11 tusen instruktioner mellan processer; små differenser nära noll är
+brus. De stora grupperna varierar mindre än 0,02 M mellan serierna. Ett
+enskilt prov för parameter v674 avviker 4,43 M; det råprovet finns kvar,
+och används inte för en separat parameterkostnad. Parametrarnas
+sammanlagda tal kommer från skillnaden mellan de stabila aggregaten.
+Artefakter: `work/vir-edit-audit/{off,map,probe,counts-final,timing}`.
+
+Reproduktion, efter vanligt bygge (SQLite-källan anges explicit):
+
+```sh
+VCC_VL_MAP=1 VCC_VL_FILTER=sqlite3VdbeExec LLVM=/usr/lib/llvm-23 \
+  python3 bench/sqlite/vir-x86.py build \
+  --source work/vir-x86-corpus/sqlite/st --variants vir --out work/edits-map
+python3 bench/sqlite/vir-edits.py \
+  --asm work/edits-map/vir-sqlite3.s \
+  --speedtest-object work/edits-map/vir-speedtest1.o \
+  --decisions work/edits-map/vir-sqlite3.log --out work/edits-counts \
+  --cpu 7 --size 100 --runs 2
+```
+
+**Hela programmets prestanda, oförändrade binärer:** fem alternerade prov,
+clang **1129,11 ms**, VIR **1230,28 ms**, **1,090× CPU**, **1,090× cykler**,
+**1,263× instruktioner**. VM-räknarna exkluderar out-of-line-anrop;
+helprogramstiden inkluderar dem. 1,05×-målet är fortsatt öppet.
+
+Validerat: diagnostik av ger byteidentiskt SQLite-objekt **och körbar
+binär** mot fryst vpp före ändringen. Oprobad, mappad och mask-255-probad
+SQLite har samma storlek-100-hash
+`23674002 573a4409d3d2efb9a2072aff97c6cefa6111b1b90cc7a0ef`.
+Egna x86-prov **318/318 med map+probe**, fokusharnessen kör både Clangs
+assembler och egna objekten med diagnostik, och ett missande namnfilter
+ger identiska objekt/assembly. Allokator **20/20**, slumpfrön 17–26
+(**80 funktioner**) gröna. Fokus med ASan/UBSan och filvist bygge grönt;
+ett separat anrops-/loop-/vektorprov har byteidentisk ARM- och
+wasm-assembly mot den frysta kompilatorn.
+
+
 2026-11-13, dynamisk VM-granskning efter `52b78073` (ingen kompilatorändring):
 En fryst kopia av vpp och färska SQLite-binärer i `work/vir-vm-audit/`;
 VIR-objektet är byteidentiskt med `promote-width-final`. Ryzen 7 9700X,

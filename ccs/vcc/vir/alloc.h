@@ -143,6 +143,12 @@ typedef struct vir_aopt {
 	uint64_t pool;		/* live-in pool limit in words (0: the reservation) */
 	bool shrink;		/* look for a save point (15.12) */
 	const uint8_t *noframe;	/* with shrink, per instruction: a call that needs no frame (a sibling call); or NULL */
+	/* Optional diagnostic observer, never consulted by allocation policy. v=0 is
+	 * the block's selected predecessor; other records describe entry values.
+	 * Slots are reported by the final output, after slot sharing. */
+	void (*entry)(void *ctx, uint32_t block, uint32_t pred, uint32_t v,
+		      uint8_t reg, bool stored, const char *decision);
+	void *entry_ctx;
 } vir_aopt;
 
 bool vir_alloc(vir_fn *f, const vir_loops *lp, const vir_regs *regs, const vir_aopt *opt, vir_alloc_out *out);

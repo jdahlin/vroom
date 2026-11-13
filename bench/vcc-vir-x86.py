@@ -53,6 +53,28 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
         if threaded.read_bytes() != asm.read_bytes():
             raise SystemExit('assembly differs with six emitter threads')
         text = asm.read_text()
+        if vec == 'r':
+            # Diagnostics observe the final allocation; a name filter must
+            # never change policy. Exercise probes through both assemblers.
+            baseline = d / 'diagnostic-base.o'
+            run([vpp, *flags, '-O2', '-c', str(source), '-o', str(baseline)], env=testenv)
+            for mode in ('filtered', 'map', 'probe'):
+                denv = dict(testenv, VCC_VL_MAP='1', VCC_VL_PROBE='255' if mode == 'probe' else '0',
+                            VCC_VL_FILTER='absent_function' if mode == 'filtered' else 'vx_stack')
+                mapped = d / (mode + '.s')
+                diagnostic = run([vpp, *flags, '-O2', '-S', str(source), '-o', str(mapped)], env=denv)
+                objfile = d / (mode + '.o')
+                run([vpp, *flags, '-O2', '-c', str(source), '-o', str(objfile)], env=denv)
+                if mode == 'filtered':
+                    if mapped.read_bytes() != asm.read_bytes() or objfile.read_bytes() != baseline.read_bytes():
+                        raise SystemExit('a diagnostic filter changed unselected code')
+                elif '# vl-site' not in mapped.read_text() or 'vl-function vx_stack ' not in diagnostic.stderr:
+                    raise SystemExit('missing allocator site/decision mapping')
+                for inp in (mapped, objfile):
+                    exe = d / 'diagnostic-run'
+                    run([llvm('clang'), '-no-pie', str(inp), '-o', str(exe)])
+                    if run([str(exe)]).stdout != expected:
+                        raise SystemExit('allocator diagnostics changed program results')
         if vec != '0':
             for name, opcode in vector.items():
                 body = text.split(name + ':\n', 1)[1].split('.Lfunc_end', 1)[0]

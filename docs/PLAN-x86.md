@@ -1246,6 +1246,32 @@ sektioner/subsektioner, framåt- och bakåthopp, alignment, LEB, CFI och
 DWARF-rader. X5:s direktkodning från maskinposter återstår.
 
 
+### 2026-11-13: attribuera allokator-edits före policyändring
+
+Opt-in `VCC_VL_PROBE` har ARM:s maskbitar på x86;
+`VCC_VL_MAP=1` kopplar emitterade edits till block, värde, slot, kant och
+allokatorns faktiska entry-beslut. Befintliga `vir_astats` återanvänds.
+Namnfilter gäller bara diagnostik. Ingen allokeringspolicy ändrad.
+`bench/sqlite/vir-edits.py` mäter mot alignment-kontrollerade kontroller
+från samma assembly och sparar statiska beslut samt dynamiska räknare.
+
+Dispatchs cirka **164,59 M** noll-MOV:ar är kant-remats av en live-in
+nollkonstanter till RCX/RDX (82,30 M vardera), ärvda från b16; inte
+bevisat död kod. aMem:s cirka
+**92,28 M** laddningar är spill-edits: **54,13 M** på kanter och **38,14 M**
+inom block. Entry-beslutet är `late-call-web-slot`, inte C-aliasladdning.
+Generella editräknare är övre gränser eftersom råa markörer stoppar folds;
+ingen tidsvinst tillskrivs dem. Oförändrade helprogramsbinärer ger
+**1129,11/1230,28 ms**, **1,090× clang**, fem alternerade main-100-prov.
+1,05×-målet är fortfarande öppet. Räknare, precision och reproduktion
+under V4 i PLAN-vir.md.
+
+Diagnostik av: SQLite-objekt och körbar binär byteidentiska före/efter.
+Map/probe ger samma SQLite-hash även vid storlek 100; egna x86 **318/318**
+med båda aktiva, allokator **20/20** och **80** slumpfunktioner gröna.
+Fokus med egen assembler/Clang, ASan/UBSan och filvist bygge grönt.
+
+
 ### X0 (2026-11-13): SIMD-lexer på x86-värden
 
 `classify` använder AVX-512 VBMI/BW när värdbygget stöder det, annars
