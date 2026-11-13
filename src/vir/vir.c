@@ -289,6 +289,14 @@ __attribute__((constructor)) static void fms_init(void)
 					     (vir_optab[op].k[k] == OK_BLK ? 8u : 0) << k);
 }
 
+/* the value fields (bit 0 a, 1 b, 2 c) of an opcode, and VIR_FIELDS_LIST when the operands include an extra list too */
+VPRIV uint8_t vir_value_fields(uint32_t op)
+{
+	if (op >= VO_TARGET0)
+		return 0;
+	return (uint8_t)((fms[op] & 7) | (op == VO_CALL || op == VO_RET || op == VO_BR || op == VO_ASM || op == VO_ASMGOTO ? VIR_FIELDS_LIST : 0));
+}
+
 void vir_oit_init(vir_oit *it, vir_fn *f, vir_ins *in, bool blocks)
 {
 	const vir_opinfo *oi = &vir_optab[in->op];

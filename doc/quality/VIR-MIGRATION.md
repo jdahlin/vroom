@@ -140,6 +140,16 @@ total, tracked as a running sum in this file); code size of the kernel image
 and run time of `speedtest1` and `zbench` no worse than the direct path,
 which stays available as the reference until step 5.
 
+## Budget used
+
+The running sum of the accepted 2-3 % (instructions per TU of a VIR compile,
+`VCC_VIR=bl bench/vbench.py ab cc emit --base DIR`, kernel sample), and the
+pass's own cost (`bench/vir-passes.py`, share of `@build` + `@lower`).
+
+| Step | Net, kernel sample (cc / emit) | Own cost, SQLite (share of build + lower) | Running sum |
+|---|---|---|---|
+| 4.1 `redundant-extensions` | +0.27 % / +0.76 % (noise 0.2 / 0.5 %) | suites 0.3 % (290 M); SQLite 98 M of 3 314 M (3.0 %), over the design's 0.3 % | 0.27 % (cc) |
+
 ## What this does to the quality plan
 
 - Module order: VIR and its builder move up, right after the shared library

@@ -452,7 +452,15 @@ yet), and their facts only ever fall.
 
 Cost: one sweep for code without loops, typically two with them.
 
-**Rewrite.**  `vir_redundant_extensions_remove(f, ctx)`
+Implementation notes (4.1): late parameters are found from the `br`s (a `br` at
+or after its target's block), not from predecessor lists, so the analysis asks
+for no other analysis; only a growth on such a back edge starts another round,
+later rounds sweep the blocks of the loops only; and a fact that grows on a back
+edge is **widened** to the next of 0, 1, 8, 16, 32, 64 (z) and 1, 2, 9, 17, 33,
+64 (s), which is what makes the loop counter of the tests settle at z = 8 inside
+the budget (one bit a round, as the table alone gives, would not).
+
+**Rewrite.**  `vir_redundant_extensions_remove(f, ctx)
 (`src/vir/pass/redundant-extensions.c`):
 
 0. A first scan counts the candidates: `ext`, and `and` whose second operand

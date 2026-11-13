@@ -94,6 +94,8 @@ static const virbuild_pass virbuild_passes[] = {
 	{ "slot-uses",          virbuild_pass_slot_uses,    O,      0,     O | P | D, U | PASS_REQUIRED, NULL },		/* pipeline.c */
 	{ "to-vir",             virbuild_pass_to_vir,       O,      0,     O | P | D, PASS_REQUIRED | PASS_ON_VIR, NULL },	/* pipeline.c, to-vir.c */
 	{ "canon",              virbuild_pass_canon,        0,      0,     O | P | D, PASS_REQUIRED | PASS_ON_VIR, NULL },	/* vir/vir.c */
+	/* the passes on VIR (vir/pass/), in the order they run: the row is the registry's entry */
+	{ "redundant-extensions", NULL,                     0,      0,     O | P | D, PASS_ON_VIR, &vir_pass_redundant_extensions },	/* vir/pass/redundant-extensions.c */
 };
 #define NPASS ((uint32_t)(sizeof virbuild_passes / sizeof *virbuild_passes))
 _Static_assert(sizeof virbuild_passes / sizeof *virbuild_passes <= 32, "virbuild_pass_switch keeps a bit per row");

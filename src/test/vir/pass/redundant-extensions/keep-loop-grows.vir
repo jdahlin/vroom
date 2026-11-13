@@ -1,0 +1,48 @@
+; PASSES: canon,redundant-extensions
+; CHANGES: yes
+; the parameter is shl i, 1 around the loop: the fixed point is nothing known
+vir 1
+target arm64-linux
+extern @g
+sig %s = (int, int) -> int
+sig %gs = (int) -> int
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  v1:i32 = trunc v0
+  br b1(1)
+b1(v2:i32) loop:
+  v3:i32 = ext.1u v2
+  v4:i32 = shl v2, 1
+  v5:i32 = icmp.ult v3, v1
+  brif v5, b2, b3
+b2:
+  br b1(v4)
+b3:
+  v6:i64 = ext.4u v3
+  ret v6
+}
+; ---
+vir 1
+target arm64-linux
+extern @g
+sig %s0 = (int, int) -> int
+sig %s1 = (int) -> int
+
+func @f %s0 {
+b0:
+  v0:i64 = param 0.0
+  v1:i32 = trunc v0
+  br b1(1)
+b1(v2:i32) loop:
+  v3:i32 = ext.1u v2
+  v4:i32 = shl v2, 1
+  v5:i32 = icmp.ult v3, v1
+  brif v5, b2, b3
+b2:
+  br b1(v4)
+b3:
+  v6:i64 = ext.4u v3
+  ret v6
+}
+; pass redundant-extensions @f: unchanged

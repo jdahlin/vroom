@@ -1,0 +1,47 @@
+; PASSES: canon,redundant-extensions
+; CHANGES: yes
+; two byte loads meet in a block parameter: the ext after the join is gone
+vir 1
+target arm64-linux
+extern @g
+sig %s = (int, int) -> int
+sig %gs = (int) -> int
+func @f %s {
+b0:
+  v0:ptr = param 0.0
+  v1:i64 = param 1.0
+  brif v1, b1, b2
+b1:
+  v2:i32 = load.1u v0
+  br b3(v2)
+b2:
+  v3:i32 = load.1u v0 align 1
+  br b3(v3)
+b3(v4:i32):
+  v5:i32 = ext.1u v4
+  v6:i64 = ext.4u v5
+  ret v6
+}
+; ---
+vir 1
+target arm64-linux
+extern @g
+sig %s0 = (int, int) -> int
+sig %s1 = (int) -> int
+
+func @f %s0 {
+b0:
+  v0:ptr = param 0.0
+  v1:i64 = param 1.0
+  brif v1, b1, b2
+b1:
+  v2:i32 = load.1u v0
+  br b3(v2)
+b2:
+  v3:i32 = load.1u v0
+  br b3(v3)
+b3(v4:i32):
+  v5:i64 = ext.4u v4
+  ret v5
+}
+; pass redundant-extensions @f: changed, 1 instructions
