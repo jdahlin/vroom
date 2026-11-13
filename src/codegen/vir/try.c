@@ -19,7 +19,7 @@
 #define LO_PREFIX vw_
 #include "../walk/walk.h"
 #include "../walk/proto.h"
-#include "vw.h"
+#include "preir.h"
 
 /* every reason VIR gives up on a function (failure.h); vfail points at a message of this table */
 VPRIV const vir_failure_info vir_failure_table[VIRFAIL_COUNT] = {

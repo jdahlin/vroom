@@ -1,6 +1,6 @@
-/* The VIR builder's state (codegen/vir/build.c): one per ecx, reused by every function. */
-#ifndef VCC_EMIT_VIR_VW_H
-#define VCC_EMIT_VIR_VW_H
+/* The VIR builder's state (codegen/vir/): one per ecx, reused by every function. */
+#ifndef VCC_EMIT_VIR_PREIR_H
+#define VCC_EMIT_VIR_PREIR_H
 #include "vir/vir.h"
 #include "vir/alloc.h"
 
