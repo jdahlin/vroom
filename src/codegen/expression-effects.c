@@ -1,15 +1,15 @@
 /*
- * expression-effects.c: strip_casts and side_effects: what evaluating an expression does.
+ * expression-effects.c: codegen_expression_casts_strip and codegen_expression_has_side_effects: what evaluating an expression does.
  *
- * side_effects follows clang's Expr::HasSideEffects, with "possible" effects counted: calls, writes,
+ * codegen_expression_has_side_effects follows clang's Expr::HasSideEffects, with "possible" effects counted: calls, writes,
  * increments, inline asm, volatile and atomic accesses, and the builtins that store or trap.  The
  * answer errs towards true (loops, gotos, unknown nodes: yes), so callers use it only to prove that
  * dropping or reordering an expression is safe, never to find dead code from a `false`.  Used by the
  * shared walker, the prepass and the arm64, x86-64 and wasm emitters.
  */
-#include "emitimpl.h"
+#include "codegen-internal.h"
 
-VPRIV uint32_t strip_casts(cc *c, uint32_t n)
+VPRIV uint32_t codegen_expression_casts_strip(cc *c, uint32_t n)
 {
 	while (N(n)->op == AST_NODE_CAST)
 		n = N(n)->a;
@@ -17,7 +17,7 @@ VPRIV uint32_t strip_casts(cc *c, uint32_t n)
 }
 
 /* clang's Expr::HasSideEffects (with possible effects): calls, writes, volatile reads */
-VPRIV bool side_effects(cc *c, uint32_t n)
+VPRIV bool codegen_expression_has_side_effects(cc *c, uint32_t n)
 {
 	const node *x;
 
@@ -48,28 +48,28 @@ VPRIV bool side_effects(cc *c, uint32_t n)
 			if (x->aux >= CC_BUILTIN_ARM_NOP && x->aux <= CC_BUILTIN_ARM_TRAP)
 				return true;
 			for (uint32_t i = 0; i < x->c; i++)
-				if (side_effects(c, c->lists[x->b + i]))
+				if (codegen_expression_has_side_effects(c, c->lists[x->b + i]))
 					return true;
 			return false;
 		}
 	case AST_NODE_MEMBER: case AST_NODE_DEREFERENCE: case AST_NODE_UNARY: case AST_NODE_CAST: case AST_NODE_ADDRESS: case AST_NODE_COMPOUND_LITERAL:
 	case AST_NODE_STATEMENT_EXPRESSION: case AST_NODE_EXPRESSION: case AST_NODE_RETURN:
-		return side_effects(c, x->a);
+		return codegen_expression_has_side_effects(c, x->a);
 	case AST_NODE_INDEX: case AST_NODE_BINARY: case AST_NODE_LOGICAL_AND: case AST_NODE_LOGICAL_OR: case AST_NODE_COMMA: case AST_NODE_COMPLEX:
-		return side_effects(c, x->a) || side_effects(c, x->b);
+		return codegen_expression_has_side_effects(c, x->a) || codegen_expression_has_side_effects(c, x->b);
 	case AST_NODE_CONDITIONAL: case AST_NODE_IF:
-		return side_effects(c, x->a) || side_effects(c, x->b) || side_effects(c, x->c);
+		return codegen_expression_has_side_effects(c, x->a) || codegen_expression_has_side_effects(c, x->b) || codegen_expression_has_side_effects(c, x->c);
 	case AST_NODE_DECLARATION:
-		return side_effects(c, x->b);
+		return codegen_expression_has_side_effects(c, x->b);
 	case AST_NODE_BLOCK: case AST_NODE_INITIALIZER:
 		if (x->op == AST_NODE_INITIALIZER && x->aux == 1) {
 			for (uint32_t i = 0; i < x->c; i++)
-				if (side_effects(c, c->lists[x->b + 3 * i + 2]))
+				if (codegen_expression_has_side_effects(c, c->lists[x->b + 3 * i + 2]))
 					return true;
 			return false;
 		}
 		for (uint32_t i = 0; i < x->c; i++)
-			if (side_effects(c, c->lists[x->b + i]))
+			if (codegen_expression_has_side_effects(c, c->lists[x->b + i]))
 				return true;
 		return false;
 	default:

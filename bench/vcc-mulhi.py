@@ -20,32 +20,32 @@ static int expected_op;
 /* A small interpreter for the lowering interface, not x86 assembly text.
  * save/restore have their existing interface semantics; register moves and
  * the MULW/SMULW instructions execute immediately in this fixture. */
-VPRIV int x64_toreg(ecx *e,val *v,int size)
-{ (void)e;assert(size==8 && v->k==V_REG);return v->r; }
-VPRIV void x64_tfree(ecx *e,int r) { e->x64->live &= ~(1u<<r); }
-VPRIV void x64_mov(ecx *e,int rd,int rs) { (void)e;regs[rd]=regs[rs]; }
-VPRIV rec *x64_op3(ecx *e,int op,int sz,int rd,int rs,int rt)
+VPRIV int x64_toreg(codegen_context *e,codegen_value *v,int size)
+{ (void)e;assert(size==8 && v->kind==CODEGEN_VALUE_REGISTER);return v->register_number; }
+VPRIV void x64_tfree(codegen_context *e,int r) { e->x64_context->live &= ~(1u<<r); }
+VPRIV void x64_mov(codegen_context *e,int rd,int rs) { (void)e;regs[rd]=regs[rs]; }
+VPRIV record *x64_op3(codegen_context *e,int op,int sz,int rd,int rs,int rt)
 {
-    (void)e;(void)rt;static rec record;
+    (void)e;(void)rt;static record record;
     assert(op==expected_op && sz==8 && rd==XNOREG);
     u128 product=op==X_SMULW ? (u128)((i128)(int64_t)regs[RAX]*(i128)(int64_t)regs[rs])
                                 : (u128)regs[RAX]*regs[rs];
     regs[RAX]=(uint64_t)product;regs[RDX]=(uint64_t)(product>>64);
     return &record;
 }
-VPRIV uint32_t x64_save(ecx *e,const uint8_t *fixed,int n,int k0,int k1)
+VPRIV uint32_t x64_save(codegen_context *e,const uint8_t *fixed,int n,int k0,int k1)
 {
     assert(n==2 && fixed[0]==RAX && fixed[1]==RDX);
-    mask=e->x64->live & ((1u<<RAX)|(1u<<RDX));
+    mask=e->x64_context->live & ((1u<<RAX)|(1u<<RDX));
     mask &= ~((1u<<k0)|(1u<<k1));
     for(unsigned r=0;r<16;r++) if(mask&(1u<<r)) snapshot[r]=regs[r];
-    e->x64->pushes+=__builtin_popcount(mask);return mask;
+    e->x64_context->pushes+=__builtin_popcount(mask);return mask;
 }
-VPRIV void x64_restore(ecx *e,uint32_t saved)
+VPRIV void x64_restore(codegen_context *e,uint32_t saved)
 {
     assert(saved==mask);
     for(unsigned r=0;r<16;r++)if(mask&(1u<<r))regs[r]=snapshot[r];
-    e->x64->pushes-=__builtin_popcount(mask);
+    e->x64_context->pushes-=__builtin_popcount(mask);
 }
 int main(void)
 {
@@ -56,7 +56,7 @@ int main(void)
     for(unsigned signed_product=0;signed_product<2;signed_product++)
     for(unsigned a=0;a<8;a++)for(unsigned b=0;b<8;b++)
     for(unsigned live=0;live<4;live++)for(unsigned v=0;v<nv;v++) {
-        xst x={.pushes=7};ecx e={.x64=&x};
+        xst x={.pushes=7};codegen_context e={.x64_context=&x};
         x.live=X_TEMPS & ~((1u<<RAX)|(1u<<RDX));
         if(live&1)x.live|=1u<<RAX;
         if(live&2)x.live|=1u<<RDX;
@@ -69,9 +69,9 @@ int main(void)
                                     : (u128)regs[ra]*regs[rb];
         uint64_t expected=(uint64_t)(product>>64);
         expected_op=signed_product ? X_SMULW : X_MULW;
-        val va={.k=V_REG,.r=ra},vb={.k=V_REG,.r=rb};
-        val result=signed_product ? x64_smulhi(&e,va,vb) : x64_umulhi(&e,va,vb);
-        assert(result.k==V_REG && result.r==ra && regs[ra]==expected);
+        codegen_value va={.kind=CODEGEN_VALUE_REGISTER,.register_number=ra},vb={.kind=CODEGEN_VALUE_REGISTER,.register_number=rb};
+        codegen_value result=signed_product ? x64_smulhi(&e,va,vb) : x64_umulhi(&e,va,vb);
+        assert(result.kind==CODEGEN_VALUE_REGISTER && result.register_number==ra && regs[ra]==expected);
         assert(x.pushes==7);
         assert(x.live==((before_live & ~(1u<<rb)) | (1u<<ra)));
         for(unsigned r=0;r<16;r++)

@@ -41,7 +41,7 @@ extern _Atomic unsigned long long driver_compile_nanoseconds, driver_emit_nanose
 extern _Atomic unsigned long long driver_tokens_taken, driver_tokens_skipped;
 
 /* per-thread instruction/cycle totals by phase (vperf.h), summed over the
- * jobs this thread ran: cc_run (pp + parse + sema + codegen), emit_tu alone
+ * jobs this thread ran: cc_run (pp + parse + sema + codegen), codegen_unit_emit alone
  * (codegen + assembler, calling thread only), object layout + write */
 #include "port/performance-counters.h"
 enum { DRIVER_PHASE_COMPILE, DRIVER_PHASE_EMIT, DRIVER_PHASE_OBJECT, DRIVER_PHASE_COUNT };
