@@ -1,69 +1,7 @@
 /* vcc code generator: reference logging and symbol bindings */
 #include "../../../codegen/emitimpl.h"
 
-VPRIV void note_ref(ecx *e, uint32_t ref)
-{
-	if (!e->reach || e->dry)
-		return;
-	claim_ref(e, ref);
-}
-
-VPRIV void claim_ref(ecx *e, uint32_t ref)
-{
-	emitter *E = e->E;
-	cc *c = e->c;
-
-	rlog(e, RL_REF, ref);
-	if (RKIND(ref) == RK_STR) {
-		uint32_t i = RIDX(ref);
-
-		if (!atomic_load_explicit(&E->strdone[i], memory_order_relaxed) &&
-		    !atomic_exchange(&E->strdone[i], 1))
-			enqueue(E, 0x80000000u | i);
-		return;
-	}
-	if (RKIND(ref) != RK_SYM)
-		return;
-	{
-		uint32_t s = canon_sym(c, RIDX(ref));
-		const sym *y = &c->syms[s];
-
-		if (unlikely((y->flags & SF_WEAK) && !(y->flags & SF_DEFINED)) &&
-		    !atomic_load_explicit(&E->extref[s], memory_order_relaxed) &&
-		    !atomic_exchange(&E->extref[s], 1))
-			e->weakref[e->nweakref++] = s;
-		if (atomic_load_explicit(&E->claimed[s], memory_order_relaxed))
-			return;
-		if (y->kind == S_FUNC) {
-			if (unlikely(y->flags & SF_LAZY))
-				efatal(e, y->loc, "internal error: '%s' is referenced but its body was never parsed",
-				       vintern_ents[y->name].s);
-			if (!(y->flags & SF_DEFINED) || !y->body || (y->sc != SC_STATIC && !(WASM(c) && inline_only(y))))
-				return;
-		} else if (y->kind == S_VAR) {
-			bool local_static = y->depth > 0 && y->sc == SC_STATIC;
-			bool file_static = y->depth == 0 && y->sc == SC_STATIC;
-
-			if (!(local_static || file_static || !y->name))
-				return;
-			if (!(y->flags & (SF_DEFINED | SF_TENTATIVE)) && !local_static && y->name)
-				return;
-		} else {
-			return;
-		}
-		if (unlikely(sym_attrs(c, s)->alias))
-			return;	/* a .set in the tail (emit_tu keeps its target), not storage */
-		if (!atomic_exchange(&E->claimed[s], 1))
-			enqueue(E, s);
-	}
-}
-
 /* ---------------- bindings ---------------- */
-
-VPRIV bind *binding(ecx *e, uint32_t s)
-{
-	return &e->b[s];
-}
 
 VPRIV int regvar_reg(cc *c, uint32_t s)
 {
@@ -180,12 +118,4 @@ VPRIV lval local_lval(ecx *e, uint32_t s)
 	l.k = L_FRAME;
 	l.off = b->slot;
 	return l;
-}
-
-VPRIV bool is_local_var(cc *c, uint32_t s)
-{
-	const sym *y = &c->syms[s];
-
-	return y->kind == S_VAR && y->depth > 0 && (y->sc == SC_AUTO || y->sc == SC_REGISTER || (y->flags & SF_PARAM) ||
-						   (y->sc == SC_NONE && !(y->flags & SF_GLOBAL)));
 }

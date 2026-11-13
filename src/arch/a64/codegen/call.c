@@ -339,12 +339,6 @@ static bool on_inline_stack(ecx *e, uint32_t fn)
 	return false;
 }
 
-VPRIV void walk_fn(ecx *e, uint32_t s)
-{
-	rlog(e, RL_WALK, s);
-	ensure_walked(e->E, e->c, s);
-}
-
 /* a local only ever assigned constants: follow its value (v: the initializer, or none) */
 VPRIV void kv_track(ecx *e, uint32_t s, const val *v)
 {
@@ -363,38 +357,6 @@ VPRIV void kv_track(ecx *e, uint32_t s, const val *v)
 		e->kval[k] = (int64_t)em_trunc_to(c, v->i, y->ty);
 		e->kvalid |= (uint16_t)(1u << k);
 	}
-}
-
-/* the kv slot of a[CONST] (create: allocate one), or -1 */
-VPRIV int ael_slot(ecx *e, uint32_t n, bool create)
-{
-	cc *c = e->c;
-	uint32_t s, idx;
-	const sym *y;
-	const ctype *at;
-	qty et;
-
-	if (!is_aconst(c, n))
-		return -1;
-	s = N(N(N(n)->a)->a)->a, y = &c->syms[s];
-	if (!is_local_var(c, s) || y->sc == SC_STATIC || (e->E->sflags[s] & SA_AESC) || sym_attrs(c, s)->cleanup)
-		return -1;
-	at = T(c, y->ty), et = at->base;
-	if (at->kind != TY_ARRAY || (at->flags & (TF_VLA | TF_INCOMPLETE)) || !is_integer(c, et) || is_wide(c, et) ||
-	    (QQ(et) & Q_VOLATILE) || (T(c, et)->flags & TF_ATOMIC) || (QQ(y->ty) & Q_VOLATILE))
-		return -1;
-	idx = aconst_idx(c, n);
-	if (idx >= at->n)
-		return -1;
-	for (int i = 0; i < e->nael; i++)
-		if (e->ael[i].s == s && e->ael[i].idx == idx)
-			return e->ael[i].kv;
-	if (!create || e->nkv == NKV || e->nael == NKV)
-		return -1;
-	e->ael[e->nael].s = s, e->ael[e->nael].idx = idx, e->ael[e->nael].kv = e->nkv;
-	e->nael++;
-	e->kvalid &= (uint16_t)~(1u << e->nkv);
-	return e->nkv++;
 }
 
 /* may variable s (param or local) be bound to the constant v for good? */
@@ -639,29 +601,6 @@ VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n, uint32_t call)
 		res = load(e, &l, rty);
 	}
 	return res;
-}
-
-/* the callee sym of a direct call, or 0 */
-VPRIV uint32_t direct_callee(cc *c, uint32_t fn, uint32_t *ref)
-{
-	const node *f = N(fn);
-
-	while (f->op == N_CAST && (f->aux == CK_FDECAY || f->aux == CK_NOP || f->aux == CK_P2P) &&
-	       (N(f->a)->op == N_VAR || N(f->a)->op == N_CAST))
-		f = N(f->a);
-	if (f->op != N_VAR)
-		return 0;
-	if (c->syms[f->a].kind == S_BUILTIN) {
-		*ref = REF(RK_NAME, (uint32_t)c->syms[f->a].val);
-		return 0;
-	}
-	if (c->syms[f->a].kind != S_FUNC)
-		return 0;
-	/* calls through a cast to another function type stay direct only if the types agree */
-	if (N(fn)->op == N_CAST && N(N(fn)->a)->op == N_CAST)
-		return 0;
-	*ref = REF(RK_SYM, canon_sym(c, f->a));
-	return canon_sym(c, f->a);
 }
 
 /* __builtin_strcmp of two string literals (the kernel picks operators by name) */
