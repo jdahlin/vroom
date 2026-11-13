@@ -89,11 +89,16 @@ enum {
 
 typedef struct cxx_scope cxx_scope;
 
+/* a type the parser cannot give yet (dependent, a template-id, auto, decltype): qty 0 is void */
+#define CXX_TY_UNKNOWN ((qty)0xFFFFFFFFu)
+
 typedef struct cxx_entity {
 	uint32_t name;			/* interned id */
 	uint8_t kind;
 	uint8_t dependent;		/* a type that depends on template parameters (its members are unknown) */
 	cxx_scope *members;		/* namespace or class: its scope; a typedef to a class: that class's scope */
+	qty ty;				/* a type: its AST type (CXX_TY_UNKNOWN: not known yet) */
+	uint32_t sym;			/* a variable or function: its AST symbol (0: none yet) */
 	cxx_scope **specs;		/* class template: its partial and explicit specializations' scopes */
 	uint32_t nspecs;
 	struct cxx_entity *next;	/* the next entity with the same name in the same scope */
@@ -147,6 +152,22 @@ typedef struct cxx {
 	uint32_t explicit_specialization;	/* > 0: after template<> (the declarator names a specialization) */
 	cxx_scope *qualifier_hint;
 	uint8_t dependent_seen;
+	/* types (types.c): the decl-specifiers' type, a declarator's base and result */
+	qty ds_type, type_in, type_out;
+	qty *fn_params;			/* the last parameter clause's types (types.c) */
+	uint32_t fn_nparams, fn_cparams;
+	uint8_t fn_variadic, fn_unknown;
+	struct cxx_class_build *build;	/* the innermost class being defined (types.c) */
+	qty anonymous_class;		/* the type of the last unnamed class defined (an anonymous member's) */
+	uint8_t defined_unnamed_class;	/* the last decl-specifiers defined an unnamed class */
+	struct cxx_stats {
+		uint32_t classes, classes_laid_out, classes_skipped[8];
+		uint32_t declarations, declarations_typed, symbols;
+	} stats;
+	int layout_fd;			/* VCC_CXX_LAYOUT: static_asserts of the layouts, for clang (-1: off) */
+	char name_path[512];		/* the qualified name of the scope being parsed (for the layout dump) */
+	uint32_t name_path_len;
+	uint8_t name_path_valid;	/* every enclosing scope is nameable (no anonymous namespace, no function) */
 	uint32_t implicit_typename;	/* > 0: C++20 P0634 contexts, where a dependent qualified name is a type */		/* a lookup found something that depends on template parameters */	/* the class the last nested-name-specifier named, even if dependent */
 } cxx;
 
@@ -188,6 +209,30 @@ VPRIV cxx_scope *cxx_declaration_scope(cxx *c);	/* where a declaration lands (te
 VPRIV cxx_entity *cxx_entity_dependent(void);
 VPRIV int cxx_builtin_kind(uint32_t id);	/* CXX_BUILTIN_*: clang's type-trait and type-transform names */
 enum { CXX_BUILTIN_NONE, CXX_BUILTIN_TRAIT, CXX_BUILTIN_TYPE_TRANSFORM, CXX_BUILTIN_TEMPLATE };
+
+/* types (types.c) */
+enum { CXX_SKIP_TEMPLATE, CXX_SKIP_BASES, CXX_SKIP_VIRTUAL, CXX_SKIP_UNKNOWN_MEMBER, CXX_SKIP_BITFIELD, CXX_SKIP_SPECIALIZATION,
+       CXX_SKIP_COUNT };
+typedef struct cxx_spec {
+	uint8_t v_void, v_bool, v_char, v_char8, v_char16, v_char32, v_wchar, v_int, v_float, v_double;
+	uint8_t v_short, v_long, v_signed, v_unsigned, v_int128, v_float128, v_float16, v_bf16, v_unknown, quals;
+	qty named;			/* a type name's type (0 with v_named unset) */
+	uint8_t v_named;
+} cxx_spec;
+VPRIV qty cxx_spec_type(cxx *c, const cxx_spec *s);
+VPRIV qty cxx_type_pointer(cxx *c, qty base, int quals);
+VPRIV qty cxx_type_reference(cxx *c, qty base, bool rvalue);
+VPRIV qty cxx_type_array(cxx *c, qty elem, int64_t n);	/* n < 0: unknown bound */
+VPRIV qty cxx_type_function(cxx *c, qty ret, const qty *params, uint32_t n, bool variadic);
+VPRIV qty cxx_type_parameter_adjust(cxx *c, qty t);
+VPRIV void cxx_class_begin(cxx *c, cxx_entity *e, uint32_t name, uint32_t loc, bool is_union, int skip);
+VPRIV void cxx_class_skip(cxx *c, int reason);
+VPRIV void cxx_class_field(cxx *c, uint32_t name, qty t, uint32_t loc, int bitfield_width);
+VPRIV void cxx_class_end(cxx *c);
+VPRIV void cxx_enum_type(cxx *c, cxx_entity *e, uint32_t name, uint32_t loc, qty underlying);
+VPRIV uint32_t cxx_symbol(cxx *c, int kind, uint32_t name, qty t, uint32_t loc);
+VPRIV void cxx_name_path_push(cxx *c, uint32_t name, uint32_t *saved_len, uint8_t *saved_valid);
+VPRIV void cxx_name_path_pop(cxx *c, uint32_t saved_len, uint8_t saved_valid);
 
 /* parsing (declaration.c, expression.c, statement.c) */
 VPRIV void cxx_translation_unit_parse(cxx *c);

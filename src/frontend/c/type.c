@@ -144,7 +144,7 @@ CC_PRIVATE qty cc_type_pointer(cc *c, qty base)
 	if (likely(i >= c->ptr_lo && i < c->nty)) {	/* (ptr_lo: 1, or a recorded region's first type) */
 		const ctype *p = &c->ty[i];
 
-		if (p->kind == TY_PTR && !p->flags && p->base == base && p->align == CC_PTRSIZE(c))
+		if (p->kind == TY_PTR && !p->flags && !p->ext && p->base == base && p->align == CC_PTRSIZE(c))	/* (ext: a C++ reference) */
 			return QT(i, 0);
 	}
 	{

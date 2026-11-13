@@ -5,7 +5,9 @@
  * first error with how far the parser got (PLAN-cxx.md's measure of
  * progress on json: bench/cxx-json.py --stage syntax).
  */
+#include <fcntl.h>
 #include <stdio.h>
+#include <unistd.h>
 #include "cxx-internal.h"
 
 static void cxx_free(cxx *c)
@@ -30,6 +32,10 @@ int cxx_run(pp *p, const cc_opts *co, const cxx_options *o)
 	c.o = o;
 	c.ast = malloc(sizeof(cc));
 	cc_translation_unit_init(c.ast, p, co);	/* the builtin types, the tables */
+	c.name_path_valid = 1;
+	c.layout_fd = -1;
+	if (getenv("VCC_CXX_LAYOUT"))	/* static_asserts of the layouts built, for clang to check (bench/cxx-layout.py) */
+		c.layout_fd = open(getenv("VCC_CXX_LAYOUT"), O_WRONLY | O_CREAT | O_TRUNC, 0644);
 	cxx_tokens_read(&c);
 	c.global = cxx_scope_new(&c, CXX_SCOPE_NAMESPACE, NULL, NULL);
 	c.scope = c.global;
@@ -40,8 +46,14 @@ int cxx_run(pp *p, const cc_opts *co, const cxx_options *o)
 			"_Float32", "_Float64", "_Float128", "_Float32x", "_Float64x", "__ibm128",
 		};
 
-		for (size_t i = 0; i < sizeof builtin_types / sizeof *builtin_types; i++)
-			cxx_declare(&c, c.global, vintern_cstr(builtin_types[i]), CXX_ENTITY_TYPE);
+		for (size_t i = 0; i < sizeof builtin_types / sizeof *builtin_types; i++) {
+			cxx_entity *e = cxx_declare(&c, c.global, vintern_cstr(builtin_types[i]), CXX_ENTITY_TYPE);
+
+			if (e && i == 0)
+				e->ty = c.ast->t_valist;
+			else if (e && (i == 1 || i == 2))
+				e->ty = cc_type_basic(i == 1 ? TY_INT128 : TY_UINT128);
+		}
 	}
 	c.fail = &top;
 	if (!setjmp(top)) {
@@ -61,8 +73,18 @@ int cxx_run(pp *p, const cc_opts *co, const cxx_options *o)
 		dprintf(o->errfd, "%.*s:%u:%u: error: %s\n  %s\n", (int)nl, name, line, col, c.error, ctx);
 		status = 1;
 	}
-	if (o->progress)
+	if (o->progress) {
+		const struct cxx_stats *st = &c.stats;
+
 		dprintf(o->errfd, "cxx: parsed %u/%u tokens\n", status ? c.error_pos : c.ntok, c.ntok);
+		dprintf(o->errfd, "cxx: declarations %u, typed %u; classes %u, laid out %u, skipped: template %u, bases %u, "
+			"virtual %u, member %u, bit-field %u, specialization %u; symbols %u\n",
+			st->declarations, st->declarations_typed, st->classes, st->classes_laid_out, st->classes_skipped[CXX_SKIP_TEMPLATE],
+			st->classes_skipped[CXX_SKIP_BASES], st->classes_skipped[CXX_SKIP_VIRTUAL], st->classes_skipped[CXX_SKIP_UNKNOWN_MEMBER],
+			st->classes_skipped[CXX_SKIP_BITFIELD], st->classes_skipped[CXX_SKIP_SPECIALIZATION], st->symbols);
+	}
+	if (c.layout_fd >= 0)
+		close(c.layout_fd);
 	cxx_free(&c);
 	return status;
 }
