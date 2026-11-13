@@ -196,6 +196,16 @@ relative to it); `TODO.md` stays at the top.
     `pe-linker-internal.h`, COFF/PE constants in `pe-definitions.h`): chosen
     when the first input is COFF x86-64 or by `-m i386pep`; ld.lld's MinGW
     command line, output byte-identical to lld's (doc/PLAN-win64.md WIN7).
+  - `runtime/`: vcc's run-time support library for x86_64-w64-mingw32
+    (`libvccrt.a`, WIN7R; `make -C src vccrt` runs `runtime/build.sh`, CC and
+    AR as parameters): the helpers generated code calls (`__int128` division
+    and shifts, `__int128` <-> float conversions, `__float128` soft float,
+    `_Float16`/`__bf16` narrowings, complex `*` and `/`, powi) and
+    `___chkstk_ms` (`stack-probe.S`), our own code from the helpers'
+    specifications (no compiler-rt or libgcc source); one rounding routine
+    (`float-rounding.c`) and one bit-layout module (`float-encoding.c`) for
+    every format, internal names `__vccrt_*`, no libc or libm.  Rules that
+    keep it buildable by vcc are in `runtime-internal.h`.
   - `frontend/pp/`, `frontend/c/` and `codegen/` (with `arch/<cpu>/codegen/`) are directories of
     files by topic, one internal header each (`pp-internal.h`, `cc-internal.h`, `emitimpl.h`) with the types, macros
     and prototypes the files share; a shared function is `VPRIV` (static in
@@ -320,6 +330,11 @@ bench/fetch-testsuites.sh llvm-mingw # the pinned MinGW-w64 sysroot (UCRT) -> wo
 bench/vcc-win64.py -j 6 --ref-only  # the C suites for x86_64-w64-mingw32: clang + lld + llvm-mingw sysroot, run under Wine (~60 s cold, <1 s cached)
 bench/vcc-win64.py -j 6 [--obj|--objcmp]   # ... and vcc's side (vpp -S, clang -c, lld, Wine) vs those references (doc/PLAN-win64.md)
 bench/vcc-win64.py -j 4 --vlink-ref # WIN7: clang's objects linked by lld and by vlink (same line): runs under Wine, file byte-identical (~2 min cold)
+bench/vcc-win64.py -j 4 --vccrt-ref # WIN7R: clang's objects linked with libvccrt.a instead of compiler-rt, by lld and by vlink, run under Wine; no compiler-rt/libgcc/libunwind input in the map
+bench/vccrt-test.py needs -j 4      # WIN7R: helpers the target needs (test objects -O0/-O2, the CRT, vcc's codegen) vs what libvccrt.a defines (<2 s cached)
+bench/vccrt-test.py [-n N] [HELPER] # every helper of libvccrt.a vs compiler-rt under Wine, bit for bit on generated inputs (~2 s; -n 300000: 17 M calls, ~20 s)
+bench/vccrt-test.py chkstk          # ___chkstk_ms: registers kept, every page written (write watch), big frames on a 1 MiB thread, under Wine (<1 s)
+bench/vccrt-test.py native          # the same C sources for x86-64 Linux vs the host's compiler-rt and libgcc (known differences listed) (<1 s)
 bench/vcc-wasm.py -j 6 --objcmp     # [VCC_WASM=1] ... and vpp -c's object byte-identical to clang's for the same .s
 bench/vcc-wasm.py -j 6 --obj --vlink  # [VCC_WASM=1] ... vcc's side through vpp -c and vlink as emcc's wasm-ld (~9 min)
 bench/vcc-same.py --base DIR -j 6    # test-suite outputs byte-identical with DIR/vpp (vbench.py mkbase REV), ~80 s
