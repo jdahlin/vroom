@@ -464,9 +464,9 @@ VPRIV int x64_emit(as_context *a, XForm *f)
 		p = elf_grow(a->object, fr, (size_t)x.n);
 		memcpy(p, x.b, (size_t)x.n);
 		if (x.fixtype)
-			elf_fixup(a->object, fr, off + (uint64_t)x.fixat, p + x.fixat, (uint32_t)x.fixtype, x.fixv);
+			elf_fixup_value(a->object, fr, off + (uint64_t)x.fixat, p + x.fixat, (uint32_t)x.fixtype, &x.fixv);
 		if (x.fix2type)
-			elf_fixup(a->object, fr, off + (uint64_t)x.fix2at, p + x.fix2at, (uint32_t)x.fix2type, x.fix2v);
+			elf_fixup_value(a->object, fr, off + (uint64_t)x.fix2at, p + x.fix2at, (uint32_t)x.fix2type, &x.fix2v);
 	}
 	return 0;
 }

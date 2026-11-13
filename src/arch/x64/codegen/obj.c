@@ -39,9 +39,18 @@ VPRIV bool x64_obj_record(ecx *e, const rec *i, rec *out)
 
 static void xo_reg(XOp *operand, int r, int size)
 {
-	*operand = (XOp){ .kind = XK_REG, .cls = IS_XMM(r) ? XR_XMM : XR_GPR,
-		.reg = (uint8_t)(IS_XMM(r) ? r - XMM0 : r), .size = (uint8_t)(IS_XMM(r) ? 16 : size),
-		.needrex = !IS_XMM(r) && size == 1 && r >= 4 };
+	memset(operand, 0, sizeof *operand);
+	operand->kind = XK_REG;
+	if (IS_XMM(r)) {
+		operand->cls = XR_XMM;
+		operand->reg = r - XMM0;
+		operand->size = 16;
+	} else {
+		operand->cls = XR_GPR;
+		operand->reg = r;
+		operand->size = size;
+		operand->needrex = size == 1 && r >= 4;
+	}
 }
 
 static XOp xo_imm(int64_t v)

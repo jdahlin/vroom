@@ -138,7 +138,7 @@ static inline bool inline_only(const sym *y)
 #include "vir/failure.h"
 
 /* references to things with a symbol: kind in the top 4 bits */
-enum { RK_SYM = 0, RK_STR = 1, RK_LBL = 2, RK_NAME = 3, RK_TABLE = 4 };
+enum { RK_SYM = 0, RK_STR = 1, RK_LBL = 2, RK_NAME = 3, RK_TABLE = 4, RK_TLS_LE = 5 };
 #define REF(k, i) (((uint32_t)(k) << 28) | (uint32_t)(i))
 #define RKIND(r) ((r) >> 28)
 #define RIDX(r) ((r) & 0x0fffffffu)

@@ -3639,6 +3639,18 @@ VPRIV void wk_cond(ecx *e, uint32_t n, bool jump_if, uint32_t lbl)
 	}
 
 	switch (x->op) {
+	case N_BUILTIN:
+		if (x->aux == BI_EXPECT || x->aux == BI_EXPECT_PROB) {
+			/* Branch on the original condition. Materializing !!expr here
+			 * would turn a compare-and-branch into a chain of setccs. */
+			for (uint32_t i = 1; i < x->c; i++) {
+				val v = wk_gen(e, c->lists[x->b + i]);
+				wk_free(e, &v);
+			}
+			wk_cond(e, c->lists[x->b], jump_if, lbl);
+			return;
+		}
+		break;
 	case N_LOGAND: case N_LOGOR: {
 		bool and = x->op == N_LOGAND;
 

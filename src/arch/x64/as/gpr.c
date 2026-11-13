@@ -206,14 +206,14 @@ VPRIV int x64_i_int(as_context *a, char *mn, XOp *o, int nops)
 				m = stem;
 			}
 			for (k = 0; k < 8; k++)
-				if (!strcmp(m, alu[k])) {
+				if (m[0] == alu[k][0] && !strcmp(m, alu[k])) {
 					for (int i = 0; i < nops; i++)
 						if (o[i].kind == XK_EXPR)
 							o[i].kind = XK_MEM;
 					return x64_alu(a, k, x64_size(a, sz, &o[0], nops > 1 ? &o[1] : &o[0]), o, nops);
 				}
 			for (k = 0; k < 8; k++)
-				if (!strcmp(m, sh[k])) {
+				if (m[0] == sh[k][0] && !strcmp(m, sh[k])) {
 					XOp *d = &o[nops - 1];
 					int s = x64_size(a, sz, d, d), digit = k == 6 ? 4 : k;
 

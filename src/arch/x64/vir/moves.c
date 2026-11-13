@@ -47,7 +47,18 @@ VPRIV void x64_vir_constant_materialize(x64_vir_context *L, uint8_t dst, uint32_
 		x64_movi(L->context, L->general_temporary, x64_vir_constant_bits(i));
 		x64_op3(L->context, X_MOV, x64_vir_type_size(i->type), d, L->general_temporary, XNOREG);
 	} else if (i->op == VIR_OP_ICONST) {
-		x64_movi(L->context, d, x64_vir_constant_bits(i));
+		uint64_t bits = x64_vir_constant_bits(i);
+		/* A 32-bit destination zero-extends, and MOV preserves flags across edits. */
+		x64_op3(L->context, X_MOVI, bits <= UINT32_MAX ? 4 : 8, d, XNOREG, XNOREG)->imm = bits;
+	} else if (i->op == VIR_OP_SYMADDR && RKIND(i->a) == RK_TLS_LE) {
+		rec *r = x64_put(L->context, X_TLS);
+		r->r[0] = d;
+		r->ref = REF(RK_SYM, RIDX(i->a));
+		/* Rematerialization may run between a compare and its branch. */
+		if (x64_vir_constant_bits(i)) {
+			lval offset = { .k = L_REG, .r = d, .off = x64_vir_constant_bits(i) };
+			x64_mem(L->context, X_LEA, 8, d, &offset, false);
+		}
 	} else if (i->op == VIR_OP_SYMADDR && sym_needs_got(L->context->c, i->a)) {
 		rec *r = x64_op3(L->context, X_GOT, 8, d, XNOREG, XNOREG);
 		r->ref = i->a;

@@ -25,6 +25,10 @@ VPRIV void x64_vir_fixed_registers_get(const vir_function *f, uint32_t v, vir_re
 	if (i->op == VIR_OP_PARAM) {
 		int stack;
 		x->result = x64_vir_argument_register(f, f->signature, i->a, &stack);
+	} else if (i->op == VIR_OP_STORE && f->insns[i->a].op == VIR_OP_SLOTADDR) {
+		/* The frame displacement is part of the store's addressing mode. */
+		x->operand_count = 2;
+		x->mem = 1;
 	} else if(i->op==VIR_OP_SWITCH && r10) {
 		/* A private dense selector can be produced directly in the dispatch
 		 * register. Range chains and shared selectors keep their original. */
@@ -47,7 +51,7 @@ VPRIV void x64_vir_fixed_registers_get(const vir_function *f, uint32_t v, vir_re
 			if (x->operands[k + 1] == VIR_REGISTER_NONE) x->mem |= 1u << (k + 1);
 		}
 		const vir_insn *callee = &f->insns[i->a];
-		if (callee->op == VIR_OP_SYMADDR && !callee->b && !callee->c) x->mem |= 1;
+		if (callee->op == VIR_OP_SYMADDR && RKIND(callee->a) != RK_TLS_LE && !callee->b && !callee->c) x->mem |= 1;
 		x->clobbered[0] = r10?X_TEMPS:X_TEMPS & ~(1u << R10);
 		x->clobbered[1] = (1u << 14) - 1;
 		if (i->type != VIR_TYPE_VOID) x->result = vir_register_class(i->type) ? VIR_REGISTER_MAKE(1, 0) : RAX;

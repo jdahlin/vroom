@@ -221,6 +221,7 @@ static inline void elf_reg(ElfObj *o, uint32_t s) { if (s && !elf_symp(o, s)->re
 /* Fixups: store v at (frag, off) - p points at the field (the bytes from
  * elf_grow).  Data fixups (ABS*, PREL*) store the value little-endian into
  * the field; instruction fixups patch bits.  sub != 0 is a difference. */
+void elf_fixup_value(ElfObj *o, uint32_t frag, uint64_t off, uint8_t *p, uint32_t type, const ElfVal *v);
 void elf_fixup(ElfObj *o, uint32_t frag, uint64_t off, uint8_t *p, uint32_t type, ElfVal v);
 
 /* Lay out, resolve fixups and serialise.  elf_finish() returns the object
