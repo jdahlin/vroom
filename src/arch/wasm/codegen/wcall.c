@@ -395,7 +395,7 @@ VPRIV int wcall(ecx *e, uint32_t n, bool want)
 	uint32_t ref = wcallee(c, x->a);
 	wabi r = wclassify_ret(c, f->base);
 	bool va = (f->flags & TF_VARIADIC) != 0, noproto = (f->flags & TF_NOPROTO) != 0;
-	uint64_t rsl = 0, vbuf = 0, vsize = 0;
+	uint64_t rsl = 0, vbuf_slot = 0, vsize = 0;
 	tbuf *sig = &e->w->sig;
 	const char *sp;
 	int k;
@@ -502,7 +502,7 @@ VPRIV int wcall(ecx *e, uint32_t n, bool want)
 				mal = al;
 		}
 		if (na > nfix)
-			vbuf = wslot(e, vsize, mal > 16 ? mal : 16);
+			vbuf_slot = wslot(e, vsize, mal > 16 ? mal : 16);
 	}
 	{
 		uint64_t vo = 0;
@@ -519,7 +519,7 @@ VPRIV int wcall(ecx *e, uint32_t n, bool want)
 
 				wva_slot(c, at, &sz, &al, &ind);
 				vo = (vo + al - 1) & ~(uint64_t)(al - 1);
-				wslot_addr(e, vbuf + vo);
+				wslot_addr(e, vbuf_slot + vo);
 				if (ind) {
 					warg(e, an, at, (wabi){ WA_IND, (uint8_t)WPT(c), at, 0 });
 					wiu(e, WASM32(c) ? "i32.store" : "i64.store", 0);
@@ -571,7 +571,7 @@ VPRIV int wcall(ecx *e, uint32_t n, bool want)
 	}
 	if (va) {
 		if (na > nfix)
-			wslot_addr(e, vbuf);
+			wslot_addr(e, vbuf_slot);
 		else
 			wpconst(e, 0);
 	}
