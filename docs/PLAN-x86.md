@@ -1402,3 +1402,24 @@ median CPU **442,7 → 391,4 ms** för direktgeneratorn (**11,6 % mindre**),
 309,8/250,8 respektive 644,8/578,1 ms. Stor spridning under samtidig last;
 inte jämförbart med tidigare obelastade absoluta tal.
 Rådata och validering: `results/x64-direct-20261113.json`.
+
+### X6 (2026-11-13) — FFmpeg på Linux x86-64
+
+`CLANG=clang-23 bench/ffmpeg/linux-x86.sh` bygger FFmpeg 8.1.3 i två träd
+och kör FATE utan externa testdata. Med NASM 3.01 byggs 157 fristående
+assemblerobjekt för programmen, och x86-koden med inline asm är aktiverad.
+Det andra trädet använder `--disable-asm` och kör DSP-kodens C-varianter.
+Clang kör konfigurationsproberna och anropar systemlänkaren. Make använder
+vpp direkt för både CC och HOSTCC, även för FATE-verktygen.
+
+Den direkta emittern klarar H.264:s asm-operander med högt registertryck
+och behåller statiska tabeller som refereras från asm under PIC. Assemblern
+kodar de MMX- och SSSE3-former som FFmpeg använder. Frontänden hanterar
+glibcs `stdc_count_ones` och `stdc_trailing_zeros`.
+Båda träden använder en enradsrättning i FFmpegs `mov_read_chnl`, som
+annars returnerar en oinitierad lokal variabel. Patchen finns i
+`bench/ffmpeg/n8.1.3-mov-chnl.patch`.
+
+Resultat: 2739/2739 FATE i vardera konfigurationen. Den asm-aktiverade
+körningen omfattade 91 checkasm-mål. Länkaren varnar för DT_TEXTREL i
+PIE-binärerna i båda byggena.

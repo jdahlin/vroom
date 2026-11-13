@@ -1,0 +1,11 @@
+--- a/libavformat/mov.c
++++ b/libavformat/mov.c
+@@ -1243,7 +1243,7 @@
+         return 0;
+     }
+ 
+-    ff_mov_read_chnl(c->fc, pb, st);
++    ret = ff_mov_read_chnl(c->fc, pb, st);
+ 
+     if (avio_tell(pb) != end) {
+         av_log(c->fc, AV_LOG_WARNING, "skip %" PRId64 " bytes of unknown data inside chnl\n",
