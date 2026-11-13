@@ -8,7 +8,7 @@ VPRIV const int8_t a64_vir_float_condition_codes[8] = { C_EQ, C_NE, C_MI, C_LS, 
 
 VPRIV const uint8_t a64_vir_condition_swapped[10] = { 0, 1, 4, 5, 2, 3, 8, 9, 6, 7 };	/* icmp codes, operands swapped */
 
-VPRIV int a64_vir_integer_compare_lower(vl *L, const vir_insn *in)	/* the flags for an icmp; its code (swapped if the operands were) */
+VPRIV int a64_vir_integer_compare_lower(a64_vir_context *L, const vir_insn *in)	/* the flags for an icmp; its code (swapped if the operands were) */
 {
 	ecx *e = L->e;
 	int x = a64_vir_value_is_64_bit(L->f, in->a), a;
@@ -28,7 +28,7 @@ VPRIV int a64_vir_integer_compare_lower(vl *L, const vir_insn *in)	/* the flags 
 	return in->flags & 15;
 }
 
-VPRIV void a64_vir_float_compare_lower(vl *L, const vir_insn *in)
+VPRIV void a64_vir_float_compare_lower(a64_vir_context *L, const vir_insn *in)
 {
 	int d = L->f->insns[in->a].type == VIR_TYPE_F64;
 
@@ -41,7 +41,7 @@ VPRIV void a64_vir_float_compare_lower(vl *L, const vir_insn *in)
  * value read once, nothing in between (the builder's virbuild_conditions_merge lays `a && b` out so).
  * One cmp, then a ccmp per further compare: no register holds a truth value.
  */
-VPRIV bool a64_vir_compare_chain_lower(vl *L, uint32_t b, uint32_t i)
+VPRIV bool a64_vir_compare_chain_lower(a64_vir_context *L, uint32_t b, uint32_t i)
 {
 	const vir_function *f = L->f;
 	uint32_t end = f->blocks[b].first + f->blocks[b].insn_count, v = i, j = i + 1;
@@ -67,7 +67,7 @@ VPRIV bool a64_vir_compare_chain_lower(vl *L, uint32_t b, uint32_t i)
 
 /* a further compare of a chain: flags = its compare when the condition so far allows it (and: holds,
  * or: fails), else flags that make the joined condition false (and) or true (or) */
-VPRIV void a64_vir_compare_chained_lower(vl *L, const vir_insn *in, bool isor)
+VPRIV void a64_vir_compare_chained_lower(a64_vir_context *L, const vir_insn *in, bool isor)
 {
 	static const uint8_t sat[16] = { 4, 0, 2, 0, 8, 0, 1, 0, 2, 0, 0, 8, 0, 4, 0, 0 };	/* nzcv satisfying a condition */
 	ecx *e = L->e;
@@ -103,7 +103,7 @@ VPRIV void a64_vir_compare_chained_lower(vl *L, const vir_insn *in, bool isor)
 }
 
 /* the flags of a condition value (operand 0): the fused compare's, else `cmp w, #0` and NE */
-VPRIV int a64_vir_condition_flags_get(vl *L, const vir_insn *in)
+VPRIV int a64_vir_condition_flags_get(a64_vir_context *L, const vir_insn *in)
 {
 	if (L->fcc >= 0 && L->fval == in->a) {
 		int c = L->fcc;
@@ -115,7 +115,7 @@ VPRIV int a64_vir_condition_flags_get(vl *L, const vir_insn *in)
 	return C_NE;
 }
 
-VPRIV a64_vir_condition a64_vir_branch_condition_get(vl *L, const vir_insn *in)
+VPRIV a64_vir_condition a64_vir_branch_condition_get(a64_vir_context *L, const vir_insn *in)
 {
 	if (L->fcc >= 0 && L->fval == in->a) {
 		a64_vir_condition c = { L->fcc, L->fzr, L->fzx, L->fbit };
@@ -140,7 +140,7 @@ VPRIV void a64_vir_branch_conditional_emit(ecx *e, a64_vir_condition c, bool inv
 
 /* register r (VIR's) is still there at instruction upto: no edit after the current
  * instruction and up to upto writes it (x16, the edits' scratch: no edit at all) */
-VPRIV bool a64_vir_register_is_kept(const vl *L, uint8_t r, uint32_t upto)
+VPRIV bool a64_vir_register_is_kept(const a64_vir_context *L, uint8_t r, uint32_t upto)
 {
 	for (uint32_t x = L->ei; x < L->eend && L->o->edit[x].pos <= upto; x++)
 		if (L->o->edit[x].dst == r || a64_vir_general_register(r) == R_X16)
@@ -149,7 +149,7 @@ VPRIV bool a64_vir_register_is_kept(const vl *L, uint8_t r, uint32_t upto)
 }
 
 /* instruction j of block b is used once, by j + 1, and not spilled */
-static bool a64_vir_value_is_used_by_next(const vl *L, uint32_t b, uint32_t j)
+static bool a64_vir_value_is_used_by_next(const a64_vir_context *L, uint32_t b, uint32_t j)
 {
 	return L->uses[j] == 1 && L->o->slot[j] == VIR_BLOCK_NONE && j + 1 < L->f->blocks[b].first + L->f->blocks[b].insn_count &&
 	       L->f->insns[j + 1].a == j;
@@ -161,7 +161,7 @@ static bool a64_vir_value_is_used_by_next(const vl *L, uint32_t b, uint32_t j)
  * operand's register for one bit, else tst and b.ne/b.eq (as LLVM).  Lowered at the
  * chain's first instruction i; the others up to the brif leave nothing.
  */
-VPRIV bool a64_vir_test_branch_fold(vl *L, uint32_t b, uint32_t i)
+VPRIV bool a64_vir_test_branch_fold(a64_vir_context *L, uint32_t b, uint32_t i)
 {
 	const vir_function *f = L->f;
 	const vir_insn *in = &f->insns[i];

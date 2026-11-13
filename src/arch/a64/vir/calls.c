@@ -7,7 +7,7 @@
  * the callee must not see the frame, so no slot's address may leave the loads, stores
  * and copies that use it (as LLVM's TailCallElim: no escaping alloca).
  */
-VPRIV const char *a64_vir_tail_call_reason(vl *L, uint8_t *d)
+VPRIV const char *a64_vir_tail_call_reason(a64_vir_context *L, uint8_t *d)
 {
 	const vir_function *f = L->f;
 	bool ch = true;
@@ -46,7 +46,7 @@ VPRIV const char *a64_vir_tail_call_reason(vl *L, uint8_t *d)
 /* from j in block k: past the instructions that only pass *res on (i2p, p2i; under ret32
  * trunc to i32 and ext.4: the low half is the result, the upper half unspecified), *res
  * following them; the first other instruction */
-static uint32_t a64_vir_pass_through_skip(const vl *L, const vir_block *k, uint32_t j, uint32_t *res)
+static uint32_t a64_vir_pass_through_skip(const a64_vir_context *L, const vir_block *k, uint32_t j, uint32_t *res)
 {
 	const vir_function *f = L->f;
 
@@ -63,7 +63,7 @@ static uint32_t a64_vir_pass_through_skip(const vl *L, const vir_block *k, uint3
 
 /* v without the instructions that only pass a value on (a64_vir_pass_through_skip's): a reader may name the
  * value under them, since the lowering reads through i2p and p2i */
-static uint32_t a64_vir_pass_through_value(const vl *L, uint32_t v)
+static uint32_t a64_vir_pass_through_value(const a64_vir_context *L, uint32_t v)
 {
 	const vir_function *f = L->f;
 
@@ -79,7 +79,7 @@ static uint32_t a64_vir_pass_through_value(const vl *L, uint32_t v)
 
 /* the call at i, in b, is a sibling call: what the ret after it returns is its result (or
  * nothing), also through brs to blocks of only what passes the result on */
-VPRIV bool a64_vir_call_is_sibling(vl *L, uint32_t b, uint32_t i)
+VPRIV bool a64_vir_call_is_sibling(a64_vir_context *L, uint32_t b, uint32_t i)
 {
 	const vir_function *f = L->f;
 	const vir_block *k = &f->blocks[b];
@@ -110,7 +110,7 @@ VPRIV bool a64_vir_call_is_sibling(vl *L, uint32_t b, uint32_t i)
 	return !f->extra[r->c] || (f->extra[r->c] == 1 && a64_vir_pass_through_value(L, f->extra[r->c + 1]) == a64_vir_pass_through_value(L, res));
 }
 
-VPRIV void a64_vir_call_lower(vl *L, uint32_t b, uint32_t i, const vir_insn *in)
+VPRIV void a64_vir_call_lower(a64_vir_context *L, uint32_t b, uint32_t i, const vir_insn *in)
 {
 	ecx *e = L->e;
 	const vir_function *f = L->f;
@@ -198,7 +198,7 @@ VPRIV void a64_vir_call_lower(vl *L, uint32_t b, uint32_t i, const vir_insn *in)
 	}
 }
 
-VPRIV void a64_vir_parameter_lower(vl *L, const vir_insn *in, uint8_t res)
+VPRIV void a64_vir_parameter_lower(a64_vir_context *L, const vir_insn *in, uint8_t res)
 {
 	ecx *e = L->e;
 	const vir_function *f = L->f;

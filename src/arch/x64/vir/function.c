@@ -11,7 +11,7 @@
 
 static void vx_target_block_begin(void *ctx, uint32_t b)
 {
-	vx *L = ctx;
+	x64_vir_context *L = ctx;
 
 	(void)b;
 	L->cmp = UINT32_MAX;
@@ -20,7 +20,7 @@ static void vx_target_block_begin(void *ctx, uint32_t b)
 
 static void vx_target_block_enter(void *ctx, uint32_t b)
 {
-	vx *L = ctx;
+	x64_vir_context *L = ctx;
 
 	L->at = b;
 	L->fallok = true;
@@ -48,13 +48,13 @@ static void vx_target_edge_moves(void *ctx, uint32_t g)
 
 static void vx_target_label(void *ctx, uint32_t label)
 {
-	x64_label(((vx *)ctx)->e, label);
+	x64_label(((x64_vir_context *)ctx)->e, label);
 }
 
 /* the edge blocks, all after the last block: a label, the edge's moves, a jump */
 static void vx_target_after_blocks(void *ctx)
 {
-	vx *L = ctx;
+	x64_vir_context *L = ctx;
 	const vir_alloc_out *o = L->o;
 
 	for (uint32_t g = 0; g < o->edge_count; g++)
@@ -91,7 +91,7 @@ VPRIV bool x64_vir_function_lower(ecx *e, uint32_t sym, const char **why)
 	bool r10=true;
 	uint64_t cs = (1u << RBX) | (1u << R12) | (1u << R13) | (1u << R14) | (1u << R15);
 	if(spframe)cs|=1u<<RBP;
-	vx L = { .e = e, .f = f, .o = &V->ao };
+	x64_vir_context L = { .e = e, .f = f, .o = &V->ao };
 	vir_target_registers regs = { .alloc = { (X_TEMPS & ~(1u << R10)) | cs, (1u << 14) - 1 },
 		.callee = { cs, 0 }, .fixed = x64_vir_fixed_registers_get, .context=&L };
 	*why = VIRBUILD_FAILURE(x64_unsupported_target_option);

@@ -2,7 +2,7 @@
 
 #include "lowering-internal.h"
 
-VPRIV void a64_vir_switch_lower(vl *L, uint32_t b, const vir_insn *in)
+VPRIV void a64_vir_switch_lower(a64_vir_context *L, uint32_t b, const vir_insn *in)
 {
 	ecx *e = L->e;
 	const vir_function *f = L->f;

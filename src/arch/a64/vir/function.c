@@ -27,7 +27,7 @@ VPRIV _Thread_local struct a64_vir_thread_state a64_vir_thread_state_instance;
 
 static void vl_target_block_begin(void *ctx, uint32_t b)
 {
-	vl *L = ctx;
+	a64_vir_context *L = ctx;
 	const vir_alloc_out *o = L->o;
 
 	L->fcc = -1, L->fzr = -1, L->fbit = -1;
@@ -43,7 +43,7 @@ static void vl_target_block_begin(void *ctx, uint32_t b)
 /* the label defined by the layout loop: the prologue's nop, and what the code at it may do */
 static void vl_target_block_enter(void *ctx, uint32_t b)
 {
-	vl *L = ctx;
+	a64_vir_context *L = ctx;
 
 	if (b == L->sp)
 		put(L->e, I_NOP)->cond = NOP_PROLOG;
@@ -54,7 +54,7 @@ static void vl_target_block_enter(void *ctx, uint32_t b)
 
 static void vl_target_instruction(void *ctx, uint32_t b, uint32_t i, const uint8_t *opr, uint32_t nopr, uint8_t res)
 {
-	vl *L = ctx;
+	a64_vir_context *L = ctx;
 	ecx *e = L->e;
 
 	(void)opr;	/* (the driver filled L->ov and L->opr) */
@@ -83,13 +83,13 @@ static void vl_target_edge_moves(void *ctx, uint32_t g)
 
 static void vl_target_label(void *ctx, uint32_t label)
 {
-	deflabel_forced(((vl *)ctx)->e, label);
+	deflabel_forced(((a64_vir_context *)ctx)->e, label);
 }
 
 /* the block's branches' edges with moves: a small block each after it (a label, the moves, a jump) */
 static void vl_target_block_end(void *ctx, uint32_t b)
 {
-	vl *L = ctx;
+	a64_vir_context *L = ctx;
 
 	if (L->e->reach)
 		a64_vir_fail(L, VIRBUILD_FAILURE(lowering_block_without_terminator));
@@ -118,7 +118,7 @@ static void vl_target_body_begin(void *ctx)
 
 static void vl_target_after_blocks(void *ctx)
 {
-	vl *L = ctx;
+	a64_vir_context *L = ctx;
 
 	for (uint32_t b = 0; b < L->f->block_count && L->sp != VIR_BLOCK_NONE; b++)
 		if (a64_vir_thread_state_instance.lbf[b]) {	/* a return in front of the save point, for the code behind it */
@@ -169,7 +169,7 @@ static const virbuild_lowering_target vl_lowering_target = {
  */
 static void vl_target_order_adjust(void *ctx)
 {
-	vl *L = ctx;
+	a64_vir_context *L = ctx;
 	const vir_function *f = L->f;
 	uint32_t n = f->block_count;
 
@@ -206,7 +206,7 @@ static void vl_target_order_adjust(void *ctx)
 		L->opos[L->ord[p]] = p;
 }
 
-VPRIV void a64_vir_function_body_lower(vl *L)
+VPRIV void a64_vir_function_body_lower(a64_vir_context *L)
 {
 	virbuild_lower_body(&L->drv);
 }
@@ -284,7 +284,7 @@ VPRIV bool a64_vir_function_lower(ecx *e, uint32_t s, const char **why)
 	virbuild_context *V = e->vw;
 	vir_function *f = &V->f;
 	vir_target_registers regs;
-	vl L = { 0 };
+	a64_vir_context L = { 0 };
 	cc *c = e->c;
 	const ctype *ft = T(c, c->syms[s].ty);
 

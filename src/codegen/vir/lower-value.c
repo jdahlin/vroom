@@ -410,7 +410,7 @@ VPRIV void virbuild_switch_table(ecx *e, int r, int size, const em_switch_case *
 	}
 	qsort(c3, m, 3 * sizeof *c3, virbuild_switch_case_compare);
 	o = virbuild_extra_append(e, &m, 1);
-	GROW(V->x, V->nx, V->cx, m * st);
+	VIRBUILD_ARRAY_GROW(V->x, V->nx, V->cx, m * st);
 	for (uint32_t k = 0; k < m; k++) {
 		uint64_t lo = c3[3 * k], hi = c3[3 * k + 1];
 		uint32_t *w = &V->x[V->nx];

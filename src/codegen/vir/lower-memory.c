@@ -24,9 +24,9 @@ VPRIV void virbuild_slot(ecx *e, int64_t off, uint64_t size, uint32_t align, int
 		V->act[n++] = V->act[i];
 	}
 	V->nact = n;
-	GROW(V->sl, V->nsl, V->csl, 1);
+	VIRBUILD_ARRAY_GROW(V->sl, V->nsl, V->csl, 1);
 	V->sl[V->nsl] = (virbuild_preir_slot){ off, size, align ? align : 1, 0, 0, 0, VIRBUILD_BLOCK_NONE, 0 };
-	GROW(V->act, V->nact, V->cact, 1);
+	VIRBUILD_ARRAY_GROW(V->act, V->nact, V->cact, 1);
 	V->act[V->nact++] = V->nsl++;
 	/* a fresh object: what the store table knew about these bytes is gone */
 	for (uint32_t i = 0; i < V->nst; i++)
@@ -221,7 +221,7 @@ VPRIV void virbuild_store(ecx *e, int rs, const lval *l, int size)
 		for (uint32_t i = 0; i < V->nst; i++)
 			if (V->st[i].slot == slot && V->st[i].off < l->off + size && l->off < V->st[i].off + V->st[i].size)
 				V->st[i--] = V->st[--V->nst];
-		GROW(V->st, V->nst, V->cst, 1);
+		VIRBUILD_ARRAY_GROW(V->st, V->nst, V->cst, 1);
 		V->st[V->nst++] = (virbuild_store_entry){ slot, l->off, size, v };
 	} else {
 		virbuild_store_table_clear(e, true);	/* through a pointer: any exposed slot */
@@ -330,9 +330,9 @@ VPRIV bool virbuild_local(ecx *e, uint32_t s, lval *l)
 		}
 	}
 	V->lh[lj] = V->nloc + 1;
-	GROW(V->loc, V->nloc, V->cloc, 1);
-	GROW(V->vty, V->nloc, V->cvty, 1);
-	GROW(V->vsgn, V->nloc, V->cvsgn, 1);
+	VIRBUILD_ARRAY_GROW(V->loc, V->nloc, V->cloc, 1);
+	VIRBUILD_ARRAY_GROW(V->vty, V->nloc, V->cvty, 1);
+	VIRBUILD_ARRAY_GROW(V->vsgn, V->nloc, V->cvsgn, 1);
 	V->loc[V->nloc] = (virbuild_location){ s, inst };
 	V->vty[V->nloc] = (uint8_t)ty;
 	V->vsgn[V->nloc] = is_integer(c, t) && is_signed(c, t);

@@ -14,7 +14,7 @@ VPRIV void virbuild_blocks_seal(ecx *e)
 	virbuild_context *V = e->vw;
 
 	V->sealing = true;
-	GROW(V->fwd, 0, V->cfwd, V->np + 1);
+	VIRBUILD_ARRAY_GROW(V->fwd, 0, V->cfwd, V->np + 1);
 	for (uint32_t i = 0; i < V->np; i++)
 		V->fwd[i] = i;
 	for (uint32_t i = 0; i < V->norder; i++) {
@@ -49,7 +49,7 @@ VPRIV bool virbuild_function_to_vir(ecx *e)
 
 	vir_function_begin(f, X86(c) ? VIR_TARGET_X86_64_LINUX : DARWIN(c) ? VIR_TARGET_A64_DARWIN : VIR_TARGET_A64_LINUX, REF(RK_SYM, e->wk->fsym),
 		  (T(c, c->syms[e->wk->fsym].ty)->flags & TF_VARIADIC) ? VIR_FUNCTION_FLAG_VARIADIC : 0);
-	GROW(V->map, 0, V->cmap, V->np + 1);
+	VIRBUILD_ARRAY_GROW(V->map, 0, V->cmap, V->np + 1);
 	memset(V->map, 0, (size_t)V->np * sizeof *V->map);
 	for (uint32_t i = 0; i < V->norder; i++)
 		V->b[V->order[i]].fin = i;

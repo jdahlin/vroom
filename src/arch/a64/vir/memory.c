@@ -3,7 +3,7 @@
 #include "lowering-internal.h"
 
 /* load or store at operand 0's address: lv for the symbol or frame cases, else base register */
-VPRIV lval a64_vir_address_get(vl *L, uint32_t w, int t)
+VPRIV lval a64_vir_address_get(a64_vir_context *L, uint32_t w, int t)
 {
 	lval l = { 0 };
 	uint32_t v = L->ov[0];
@@ -33,7 +33,7 @@ VPRIV lval a64_vir_address_get(vl *L, uint32_t w, int t)
 
 /* a float register loaded from or stored to [base, #off] without a general register in between;
  * false when the offset has no such form */
-static bool a64_vir_float_memory_access(vl *L, bool load, bool d, int v, int base, int64_t off)
+static bool a64_vir_float_memory_access(a64_vir_context *L, bool load, bool d, int v, int base, int64_t off)
 {
 	int sz = d ? 8 : 4;
 
@@ -50,7 +50,7 @@ static bool a64_vir_float_memory_access(vl *L, bool load, bool d, int v, int bas
 	return true;
 }
 
-VPRIV void a64_vir_load_lower(vl *L, uint32_t i, const vir_insn *in, uint8_t res)
+VPRIV void a64_vir_load_lower(a64_vir_context *L, uint32_t i, const vir_insn *in, uint8_t res)
 {
 	ecx *e = L->e;
 	int w = VIR_INSN_FLAG_WIDTH_LOG2(in->flags), fl = in->type == VIR_TYPE_F32 || in->type == VIR_TYPE_F64;
@@ -97,7 +97,7 @@ VPRIV void a64_vir_load_lower(vl *L, uint32_t i, const vir_insn *in, uint8_t res
 		word(e, f_in(in->type == VIR_TYPE_F64, a64_vir_vector_register(res), R_X16));
 }
 
-VPRIV void a64_vir_store_lower(vl *L, const vir_insn *in)
+VPRIV void a64_vir_store_lower(a64_vir_context *L, const vir_insn *in)
 {
 	ecx *e = L->e;
 	int w = VIR_INSN_FLAG_WIDTH_LOG2(in->flags);
@@ -147,7 +147,7 @@ VPRIV void a64_vir_store_lower(vl *L, const vir_insn *in)
 }
 
 /* an address operand of memcpy/memset: base register and offset */
-static int a64_vir_memory_block_address_get(vl *L, uint32_t k, int t, int64_t *off)
+static int a64_vir_memory_block_address_get(a64_vir_context *L, uint32_t k, int t, int64_t *off)
 {
 	uint32_t v = L->ov[k];
 
@@ -159,7 +159,7 @@ static int a64_vir_memory_block_address_get(vl *L, uint32_t k, int t, int64_t *o
 	return a64_vir_operand_general_register(L, k, t);
 }
 
-VPRIV void a64_vir_memory_block_lower(vl *L, const vir_insn *in)
+VPRIV void a64_vir_memory_block_lower(a64_vir_context *L, const vir_insn *in)
 {
 	ecx *e = L->e;
 	uint64_t n = (uint64_t)a64_vir_constant_bits(&L->f->insns[in->c]);

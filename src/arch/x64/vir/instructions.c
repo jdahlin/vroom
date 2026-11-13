@@ -2,7 +2,7 @@
 
 #include "lowering-internal.h"
 
-VPRIV void x64_vir_insn_lower(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, uint8_t res)
+VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, uint8_t res)
 {
 	ecx *e = L->e;
 	const vir_insn *i = &L->f->insns[v];

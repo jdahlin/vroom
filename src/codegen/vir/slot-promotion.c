@@ -166,7 +166,7 @@ VPRIV bool virbuild_slots_promote(ecx *e)
 				bad[s] = 1;
 				continue;
 			}
-			GROW(ms, nms, cms, 1);
+			VIRBUILD_ARRAY_GROW(ms, nms, cms, 1);
 			ms[nms] = (struct virbuild_promote_memset){ i, s, virbuild_promote_relative_offset(&V->p[a]), len };
 			fof[i] = UINT32_MAX - nms++;	/* (a memset: its index in ms) */
 			continue;
@@ -195,8 +195,8 @@ VPRIV bool virbuild_slots_promote(ecx *e)
 			continue;
 		if (k == UINT32_MAX) {
 			k = nf;
-			GROW(fd, nf, cf, 1);
-			GROW(fnx, nf, cfnx, 1);
+			VIRBUILD_ARRAY_GROW(fd, nf, cf, 1);
+			VIRBUILD_ARRAY_GROW(fnx, nf, cfnx, 1);
 			fnx[nf] = sf[s];
 			sf[s] = nf + 1;
 			fd[nf++] = (virbuild_promote_field){ s, rel, size, VIR_TYPE_VOID };
@@ -269,7 +269,7 @@ VPRIV bool virbuild_slots_promote(ecx *e)
 	}
 	/* the variables: VIRBUILD_LOCAL_VARIABLE_FIRST + nloc + earlier runs' + field */
 	var0 = V->nloc + V->nprom;
-	GROW(V->vty, var0, V->cvty, nf);
+	VIRBUILD_ARRAY_GROW(V->vty, var0, V->cvty, nf);
 	for (uint32_t k = 0; k < nf; k++)
 		V->vty[var0 + k] = (uint8_t)fd[k].ty;
 	V->nprom += nf;

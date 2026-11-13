@@ -36,7 +36,7 @@ typedef struct {
 	int64_t imm; int isz; as_value immv; int immsym, immsgn, immmod;
 	int gotx;
 	int oreg;			/* a register in the last opcode byte, + 1 (0: none) */
-	int vex, vvvv, vl;		/* VEX: the second source (0..15), 256-bit; the map from op (0f, 0f 38, 0f 3a) */
+	int vex, vvvv, a64_vir_context;		/* VEX: the second source (0..15), 256-bit; the map from op (0f, 0f 38, 0f 3a) */
 } XForm;
 #define F(...) ((XForm){ __VA_ARGS__ })
 

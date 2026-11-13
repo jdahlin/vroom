@@ -20,7 +20,7 @@ VPRIV uint8_t x64_vir_argument_register(const vir_function *f, uint32_t sig, uin
 VPRIV void x64_vir_fixed_registers_get(const vir_function *f, uint32_t v, vir_register_constraint *x, void *ctx)
 {
 	const vir_insn *i = &f->insns[v];
-	const vx *target=ctx;
+	const x64_vir_context *target=ctx;
 	bool r10=target && target->r10;
 	if (i->op == VIR_OP_PARAM) {
 		int stack;

@@ -76,7 +76,7 @@ typedef struct {
 	uint8_t hassym;		/* IMM/MEM offset: v has symbols (not a constant) */
 	uint8_t hash;		/* IMM: written with '#' */
 	uint8_t wb;		/* REG: followed by '!' (MOPS) */
-	uint8_t mulvl;		/* MEM: offset followed by ', mul vl' (SVE) */
+	uint8_t mulvl;		/* MEM: offset followed by ', mul a64_vir_context' (SVE) */
 	uint8_t pq;		/* REG P: /z = 1, /m = 2 (SVE predication) */
 	int64_t imm;		/* IMM value, MEM offset, SHIFT amount */
 	double fimm;		/* FIMM */

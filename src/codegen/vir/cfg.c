@@ -68,9 +68,9 @@ VPRIV void virbuild_block_order_compute(ecx *e)
 	uint32_t n = 0, sp = 0;
 	uint32_t *stk, *it;
 
-	GROW(V->bmap, 0, V->cbmap, 2 * V->nb + 2);
+	VIRBUILD_ARRAY_GROW(V->bmap, 0, V->cbmap, 2 * V->nb + 2);
 	stk = V->bmap, it = V->bmap + V->nb + 1;
-	GROW(V->order, 0, V->corder, V->nb + 1);
+	VIRBUILD_ARRAY_GROW(V->order, 0, V->corder, V->nb + 1);
 	for (uint32_t b = 0; b < V->nb; b++)
 		V->b[b].reach = 0;
 	V->b[0].reach = 1;
@@ -119,7 +119,7 @@ VPRIV void virbuild_block_predecessors_compute(ecx *e)
 		V->npr += V->b[b].npred;
 		V->b[b].npred = 0;
 	}
-	GROW(V->pr, 0, V->cpr, V->npr + 1);
+	VIRBUILD_ARRAY_GROW(V->pr, 0, V->cpr, V->npr + 1);
 	for (uint32_t i = 0; i < V->norder; i++) {
 		uint32_t b = V->order[i], n = virbuild_block_successor_count(V, b);
 
@@ -220,12 +220,12 @@ VPRIV void virbuild_critical_edges_split(ecx *e)
 					eb = virbuild_block_new(e);
 					V->b[eb].term = virbuild_preir_insn_add(e, VIR_OP_BR, VIR_TYPE_VOID, 0, t, 0, 0, eb);
 					V->b[eb].reach = 1;
-					GROW(V->pr, V->npr, V->cpr, 1);
+					VIRBUILD_ARRAY_GROW(V->pr, V->npr, V->cpr, 1);
 					V->b[eb].pred = V->npr;
 					V->pr[V->npr++] = b;
 					V->b[eb].npred = 1;
 					V->pr[V->b[t].pred + j] = eb;
-					GROW(V->order, V->norder, V->corder, 1);
+					VIRBUILD_ARRAY_GROW(V->order, V->norder, V->corder, 1);
 					V->order[V->norder++] = eb;
 					break;
 				}

@@ -53,7 +53,7 @@ VPRIV bool x64_vir_value_is_supported(const vir_function *f, uint32_t v)
 
 /* Edits are sorted by instruction. A folded index must survive the intervening
  * reloads/rematerializations; memory consumers require no intervening edit. */
-VPRIV bool x64_vir_fold_edits_check(vx *L,uint32_t b,uint32_t pos,int keep)
+VPRIV bool x64_vir_fold_edits_check(x64_vir_context *L,uint32_t b,uint32_t pos,int keep)
 {
 	uint32_t lo=L->o->block_offsets[L->f->block_count+1+b],hi=L->o->block_offsets[L->f->block_count+2+b],end=hi;
 	while(lo<hi) {uint32_t m=lo+(hi-lo)/2;if(L->o->edit[m].pos<pos)lo=m+1;else hi=m;}
@@ -64,7 +64,7 @@ VPRIV bool x64_vir_fold_edits_check(vx *L,uint32_t b,uint32_t pos,int keep)
 	return true;
 }
 
-VPRIV bool x64_vir_memory_next_fold(vx *L,uint32_t b,uint32_t v)
+VPRIV bool x64_vir_memory_next_fold(x64_vir_context *L,uint32_t b,uint32_t v)
 {
 	return v+1<L->f->blocks[b].first+L->f->blocks[b].insn_count && L->uses[v]==1 && L->o->slot[v]==VIR_BLOCK_NONE &&
 		L->f->insns[v+1].a==v && (L->f->insns[v+1].op==VIR_OP_LOAD || L->f->insns[v+1].op==VIR_OP_STORE) &&
@@ -72,7 +72,7 @@ VPRIV bool x64_vir_memory_next_fold(vx *L,uint32_t b,uint32_t v)
 }
 
 /* Integer-address form of the same single memory consumer. */
-VPRIV bool x64_vir_memory_cast_fold(vx *L,uint32_t b,uint32_t v)
+VPRIV bool x64_vir_memory_cast_fold(x64_vir_context *L,uint32_t b,uint32_t v)
 {
 	const vir_function *f=L->f;
 	return f->insns[v].op==VIR_OP_ADD && f->insns[v].type==VIR_TYPE_I64 && L->uses[v]==1 && L->o->slot[v]==VIR_BLOCK_NONE &&
@@ -82,7 +82,7 @@ VPRIV bool x64_vir_memory_cast_fold(vx *L,uint32_t b,uint32_t v)
 
 /* Exact consecutive big-endian byte assembly, with no observable access or
  * allocator edit interleaved. Never widen beyond the bytes actually read. */
-VPRIV unsigned x64_vir_word_read_match(vx *L,uint32_t b,uint32_t v,uint32_t *end)
+VPRIV unsigned x64_vir_word_read_match(x64_vir_context *L,uint32_t b,uint32_t v,uint32_t *end)
 {
 	unsigned width=vir_big_endian_read_match(L->f,L->uses,v,L->f->blocks[b].first+L->f->blocks[b].insn_count,end);
 	if(!width)return 0;
@@ -92,7 +92,7 @@ VPRIV unsigned x64_vir_word_read_match(vx *L,uint32_t b,uint32_t v,uint32_t *end
 }
 
 /* An address private to one exact byte-assembly expression. */
-VPRIV unsigned x64_vir_big_endian_address_match(vx *L,uint32_t b,uint32_t v,uint32_t *end)
+VPRIV unsigned x64_vir_big_endian_address_match(x64_vir_context *L,uint32_t b,uint32_t v,uint32_t *end)
 {
 	const vir_function *f=L->f;const vir_insn *i=&f->insns[v];
 	uint32_t ptr=v,load=v+1;
@@ -108,7 +108,7 @@ VPRIV unsigned x64_vir_big_endian_address_match(vx *L,uint32_t b,uint32_t v,uint
 	return width && L->uses[ptr]==width?width:0;
 }
 
-VPRIV bool x64_vir_address_memory_fold(vx *L,uint32_t b,uint32_t v)
+VPRIV bool x64_vir_address_memory_fold(x64_vir_context *L,uint32_t b,uint32_t v)
 {
 	uint32_t end;
 	return (L->f->insns[v].op==VIR_OP_PTRADD && x64_vir_memory_next_fold(L,b,v)) || x64_vir_memory_cast_fold(L,b,v) || x64_vir_big_endian_address_match(L,b,v,&end);
@@ -133,7 +133,7 @@ VPRIV bool x64_vir_value_upper_half_is_clear(const vir_function *f,uint32_t v)
 
 /* Whether an i32 holder already has the physical sign extension required
  * by a signed index. A 4-byte spill reload destroys a negative sign extension. */
-VPRIV bool x64_vir_value_is_sign_extended(vx *L,uint32_t v)
+VPRIV bool x64_vir_value_is_sign_extended(x64_vir_context *L,uint32_t v)
 {
 	const vir_insn *source=&L->f->insns[v];
 	if(source->type!=VIR_TYPE_I32)return false;
@@ -144,7 +144,7 @@ VPRIV bool x64_vir_value_is_sign_extended(vx *L,uint32_t v)
 
 /* Small constant blocks do not need REP's fixed registers or their clobbers.
  * SSE2 handles complete 16-byte pieces; scalar tails never overread. */
-VPRIV void x64_vir_memory_block_lower(vx *L,const vir_insn *i,int dst,int src)
+VPRIV void x64_vir_memory_block_lower(x64_vir_context *L,const vir_insn *i,int dst,int src)
 {
 	ecx *e=L->e;
 	uint64_t n=(uint64_t)x64_vir_constant_bits(&L->f->insns[i->c]);
@@ -162,7 +162,7 @@ VPRIV void x64_vir_memory_block_lower(vx *L,const vir_insn *i,int dst,int src)
 	}
 }
 
-VPRIV uint8_t x64_vir_condition_lower(vx *L,uint32_t b,uint32_t v,uint32_t value,int reg)
+VPRIV uint8_t x64_vir_condition_lower(x64_vir_context *L,uint32_t b,uint32_t v,uint32_t value,int reg)
 {
 	ecx *e=L->e;
 	bool flags=L->cmp==value && L->cmpblock==b && v==value+1;

@@ -279,7 +279,7 @@ def vlink1(t):
         return t, 'skip', 'tcc-specific', ct.TCC_SKIP[name]
     if suite == 'gcc' and name in ct.GCC_SKIP:
         return t, 'skip', 'compiler-specific', ct.GCC_SKIP[name]
-    wd = f'{OUT}/vl/{suite}/{name}'
+    wd = f'{OUT}/a64_vir_context/{suite}/{name}'
     os.makedirs(wd, exist_ok=True)
     cwd = os.path.dirname(path)
     src = open(path, 'rb').read().decode('latin-1')
@@ -314,19 +314,19 @@ def vlink1(t):
     rc, err = link86(LLD, [f'{wd}/vcc.o'], f'{wd}/vcc.lld')
     if rc:
         return t, 'skip', 'lld', ct.first_err(err)
-    rc, err = link86(VLINK, [f'{wd}/vcc.o'], f'{wd}/vcc.vl')
+    rc, err = link86(VLINK, [f'{wd}/vcc.o'], f'{wd}/vcc.a64_vir_context')
     if rc:
         return t, 'fail', 'vlink', ct.first_err(err)[:120]
     oc = os.path.join(os.path.dirname(CL), 'llvm-objcopy')
-    sh([oc, '-O', 'binary', f'{wd}/vcc.lld', f'{wd}/l.bin']); sh([oc, '-O', 'binary', f'{wd}/vcc.vl', f'{wd}/v.bin'])
+    sh([oc, '-O', 'binary', f'{wd}/vcc.lld', f'{wd}/l.bin']); sh([oc, '-O', 'binary', f'{wd}/vcc.a64_vir_context', f'{wd}/v.bin'])
     if open(f'{wd}/l.bin', 'rb').read() != open(f'{wd}/v.bin', 'rb').read():
         return t, 'fail', 'image', 'loaded image differs from lld'
     rd = os.path.join(os.path.dirname(CL), 'llvm-readelf')
     ph = [[l.split() for l in subprocess.run([rd, '-lW', e], capture_output=True, text=True).stdout.splitlines()
-           if l.strip()[:4] in ('LOAD', 'TLS ', 'GNU_', 'PHDR', 'NOTE')] for e in (f'{wd}/vcc.lld', f'{wd}/vcc.vl')]
+           if l.strip()[:4] in ('LOAD', 'TLS ', 'GNU_', 'PHDR', 'NOTE')] for e in (f'{wd}/vcc.lld', f'{wd}/vcc.a64_vir_context')]
     if ph[0] != ph[1]:
         return t, 'fail', 'phdrs', 'program headers differ from lld'
-    rc, out = run(f'{wd}/vcc.vl')
+    rc, out = run(f'{wd}/vcc.a64_vir_context')
     if rc != rrc or out != rout:
         return t, 'fail', 'run', f'exit {rc} (clang {rrc})' if rc != rrc else 'output differs'
     shutil.rmtree(wd, ignore_errors=True)

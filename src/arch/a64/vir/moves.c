@@ -2,7 +2,7 @@
 
 #include "lowering-internal.h"
 
-VPRIV __attribute__((noreturn, cold)) void a64_vir_fail(vl *L, const char *why)
+VPRIV __attribute__((noreturn, cold)) void a64_vir_fail(a64_vir_context *L, const char *why)
 {
 	L->e->vfail = why;	/* (in ecx: L is not volatile across the jump) */
 	_longjmp(L->e->bail, 3);
@@ -20,7 +20,7 @@ VPRIV void *a64_vir_array_grow(void *p, uint32_t *cap, uint32_t n, size_t sz)
 }
 
 /* constant v into general register rd */
-static void a64_vir_constant_materialize(vl *L, uint32_t v, int rd)
+static void a64_vir_constant_materialize(a64_vir_context *L, uint32_t v, int rd)
 {
 	ecx *e = L->e;
 	const vir_insn *k = &L->f->insns[v];
@@ -44,7 +44,7 @@ static void a64_vir_constant_materialize(vl *L, uint32_t v, int rd)
 }
 
 /* constant v into float register vd, through general register t */
-static void a64_vir_float_constant_materialize(vl *L, uint32_t v, int vd, int t)
+static void a64_vir_float_constant_materialize(a64_vir_context *L, uint32_t v, int vd, int t)
 {
 	const vir_insn *k = &L->f->insns[v];
 	int d = k->type == VIR_TYPE_F64;
@@ -60,7 +60,7 @@ static void a64_vir_float_constant_materialize(vl *L, uint32_t v, int vd, int t)
 }
 
 /* operand k as a general register: its register, else the constant or its slot in t */
-VPRIV int a64_vir_operand_general_register(vl *L, uint32_t k, int t)
+VPRIV int a64_vir_operand_general_register(a64_vir_context *L, uint32_t k, int t)
 {
 	uint8_t r = L->opr[k];
 	uint32_t v = L->ov[k];
@@ -80,14 +80,14 @@ VPRIV int a64_vir_operand_general_register(vl *L, uint32_t k, int t)
 	a64_vir_fail(L, VIRBUILD_FAILURE(operand_without_location));
 }
 
-VPRIV int a64_vir_operand_float_register(vl *L, uint32_t k)
+VPRIV int a64_vir_operand_float_register(a64_vir_context *L, uint32_t k)
 {
 	if (L->opr[k] == VIR_REGISTER_NONE)
 		a64_vir_fail(L, VIRBUILD_FAILURE(float_operand_without_register));
 	return a64_vir_vector_register(L->opr[k]);
 }
 
-static void a64_vir_register_move(vl *L, uint8_t dst, uint8_t src)
+static void a64_vir_register_move(a64_vir_context *L, uint8_t dst, uint8_t src)
 {
 	if (dst == src)
 		return;
@@ -100,14 +100,14 @@ static void a64_vir_register_move(vl *L, uint8_t dst, uint8_t src)
 }
 
 /* a vector register and its 16-byte spill slot: the slot's address in t, then ldr/str q */
-static void a64_vir_vector_slot_access(vl *L, bool load, int v, uint32_t s, int t)
+static void a64_vir_vector_slot_access(a64_vir_context *L, bool load, int v, uint32_t s, int t)
 {
 	opi(L->e, I_ADDI, 1, t, FRAME, L->spoff[s]);
 	word(L->e, (load ? 0x3dc00000u : 0x3d800000u) | (unsigned)t << 5 | (unsigned)v);
 }
 
 /* register dst <- spill slot s, through general register t for a float */
-static void a64_vir_register_reload(vl *L, uint8_t dst, uint32_t s, int t)
+static void a64_vir_register_reload(a64_vir_context *L, uint8_t dst, uint32_t s, int t)
 {
 	int sz = a64_vir_slot_size_log2(L, s);
 
@@ -120,7 +120,7 @@ static void a64_vir_register_reload(vl *L, uint8_t dst, uint32_t s, int t)
 	}
 }
 
-VPRIV void a64_vir_register_spill(vl *L, uint8_t src, uint32_t s, int t)
+VPRIV void a64_vir_register_spill(a64_vir_context *L, uint8_t src, uint32_t s, int t)
 {
 	int sz = a64_vir_slot_size_log2(L, s);
 
@@ -133,7 +133,7 @@ VPRIV void a64_vir_register_spill(vl *L, uint8_t src, uint32_t s, int t)
 	}
 }
 
-static void a64_vir_register_rematerialize(vl *L, uint8_t dst, uint32_t v, int t)
+static void a64_vir_register_rematerialize(a64_vir_context *L, uint8_t dst, uint32_t v, int t)
 {
 	if (a64_vir_register_is_float(dst))
 		a64_vir_float_constant_materialize(L, v, a64_vir_vector_register(dst), t);
@@ -154,26 +154,26 @@ static int a64_vir_probe_mask_get(void)
 	return m;
 }
 
-#define PROBE(bit) do { if (a64_vir_probe_mask_get() >> (bit) & 1) word(L->e, 0xd503201f); } while (0)
+#define A64_VIR_PROBE(bit) do { if (a64_vir_probe_mask_get() >> (bit) & 1) word(L->e, 0xd503201f); } while (0)
 
 /* one allocator edit, before the instruction it is positioned at */
-VPRIV void vl_edit(vl *L, const vir_edit *x)
+VPRIV void vl_edit(a64_vir_context *L, const vir_edit *x)
 {
 	const vir_alloc_out *o = L->o;
 
 	L->ei = (uint32_t)(x - o->edit) + 1;	/* (the next edit: what the instruction's folds look past) */
 	switch (x->kind) {
 	case VIR_EDIT_RELOAD:
-		a64_vir_register_reload(L, x->dst, o->slot[x->value], R_X16); PROBE(0);
+		a64_vir_register_reload(L, x->dst, o->slot[x->value], R_X16); A64_VIR_PROBE(0);
 		break;
 	case VIR_EDIT_REMATERIALIZE:
-		a64_vir_register_rematerialize(L, x->dst, x->value, R_X16); PROBE(1);
+		a64_vir_register_rematerialize(L, x->dst, x->value, R_X16); A64_VIR_PROBE(1);
 		break;
 	case VIR_EDIT_MOVE:
-		a64_vir_register_move(L, x->dst, (uint8_t)x->src); PROBE(2);
+		a64_vir_register_move(L, x->dst, (uint8_t)x->src); A64_VIR_PROBE(2);
 		break;
 	case VIR_EDIT_STORE:
-		a64_vir_register_spill(L, x->src, o->slot[x->value], R_X16); PROBE(3);
+		a64_vir_register_spill(L, x->src, o->slot[x->value], R_X16); A64_VIR_PROBE(3);
 		break;
 	default:
 		a64_vir_fail(L, VIRBUILD_FAILURE(swapped_operands));
@@ -181,7 +181,7 @@ VPRIV void vl_edit(vl *L, const vir_edit *x)
 }
 
 /* edge g's sequenced parallel move */
-VPRIV void a64_vir_edge_moves_emit(vl *L, uint32_t g)
+VPRIV void a64_vir_edge_moves_emit(a64_vir_context *L, uint32_t g)
 {
 	const vir_alloc_out *o = L->o;
 	const vir_alloc_edge *ed = &o->edge[g];
@@ -208,7 +208,7 @@ VPRIV void a64_vir_edge_moves_emit(vl *L, uint32_t g)
 			} else {
 				a64_vir_register_rematerialize(L, (uint8_t)dn, mv->value, t);
 			}
-			PROBE(4);
+			A64_VIR_PROBE(4);
 			break;
 		case VIR_EDIT_MOVE:
 			if (ds && ss && L->o->slot_sizes[sn] == 16) {	/* (through v31: no move of this edge may hold it) */
@@ -224,11 +224,11 @@ VPRIV void a64_vir_edge_moves_emit(vl *L, uint32_t g)
 				mem(L->e, I_LD, a64_vir_slot_size_log2(L, sn), 0, t, FRAME, L->spoff[sn]);
 				mem(L->e, I_ST, a64_vir_slot_size_log2(L, dn), 0, t, FRAME, L->spoff[dn]);
 			} else if (ds) {
-				a64_vir_register_spill(L, (uint8_t)sn, dn, t); PROBE(5);
+				a64_vir_register_spill(L, (uint8_t)sn, dn, t); A64_VIR_PROBE(5);
 			} else if (ss) {
-				a64_vir_register_reload(L, (uint8_t)dn, sn, t); PROBE(6);
+				a64_vir_register_reload(L, (uint8_t)dn, sn, t); A64_VIR_PROBE(6);
 			} else {
-				a64_vir_register_move(L, (uint8_t)dn, (uint8_t)sn); PROBE(7);
+				a64_vir_register_move(L, (uint8_t)dn, (uint8_t)sn); A64_VIR_PROBE(7);
 			}
 			break;
 		case VIR_EDIT_EXCHANGE:
@@ -257,7 +257,7 @@ VPRIV void a64_vir_edge_moves_emit(vl *L, uint32_t g)
 /* Block t's label for the code being emitted.  With a save point (shrink-wrapping), code
  * behind the prologue that goes to a block in front of it (a return: a64_vir_blocks_order saw to that)
  * gets a second copy of the block, with the epilogue (a64_vir_thread_state_instance.lbf, emitted last by a64_vir_function_body_lower). */
-VPRIV uint32_t a64_vir_block_label(vl *L, uint32_t t)
+VPRIV uint32_t a64_vir_block_label(a64_vir_context *L, uint32_t t)
 {
 	if (L->sp != VIR_BLOCK_NONE && !L->bare && !vir_block_dominates(L->f, L->sp, t)) {
 		if (!a64_vir_thread_state_instance.lbf[t])
@@ -268,9 +268,9 @@ VPRIV uint32_t a64_vir_block_label(vl *L, uint32_t t)
 }
 
 /* a block every branch goes past (a64_vir_block_chase): not emitted */
-VPRIV bool a64_vir_block_is_skipped(vl *L, uint32_t b) { return b && a64_vir_block_chase(L, b) != b; }
+VPRIV bool a64_vir_block_is_skipped(a64_vir_context *L, uint32_t b) { return b && a64_vir_block_chase(L, b) != b; }
 
-static uint32_t a64_vir_block_next(vl *L, uint32_t b)	/* the block emitted after b */
+static uint32_t a64_vir_block_next(a64_vir_context *L, uint32_t b)	/* the block emitted after b */
 {
 	uint32_t p = L->opos[b], nb = L->f->block_count;
 
@@ -280,11 +280,11 @@ static uint32_t a64_vir_block_next(vl *L, uint32_t b)	/* the block emitted after
 }
 
 /* the block the code being emitted falls through to (none: UINT32_MAX) */
-VPRIV uint32_t a64_vir_block_fallthrough(vl *L) { return L->fallok ? a64_vir_block_next(L, L->at) : UINT32_MAX; }
+VPRIV uint32_t a64_vir_block_fallthrough(a64_vir_context *L) { return L->fallok ? a64_vir_block_next(L, L->at) : UINT32_MAX; }
 
 /* the label a branch from block b to its successor k (block to) takes: the block's, or a
  * new one whose moves follow the block */
-VPRIV uint32_t a64_vir_successor_label(vl *L, uint32_t b, uint32_t k, uint32_t to)
+VPRIV uint32_t a64_vir_successor_label(a64_vir_context *L, uint32_t b, uint32_t k, uint32_t to)
 {
 	const vir_alloc_out *o = L->o;
 	uint32_t g = o->edge_indices[o->slot_offsets[b] + k];
@@ -299,7 +299,7 @@ VPRIV uint32_t a64_vir_successor_label(vl *L, uint32_t b, uint32_t k, uint32_t t
 	return L->tr[L->ntr++].l;
 }
 
-VPRIV bool a64_vir_edge_is_plain(vl *L, uint32_t b, uint32_t k)	/* the edge has no moves */
+VPRIV bool a64_vir_edge_is_plain(a64_vir_context *L, uint32_t b, uint32_t k)	/* the edge has no moves */
 {
 	uint32_t g = L->o->edge_indices[L->o->slot_offsets[b] + k];
 

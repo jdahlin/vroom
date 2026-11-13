@@ -8,7 +8,7 @@
 
 /* instruction i if it makes or consumes a vector: true when it was lowered here.  v31 is the
  * scratch of the two compares that need one */
-VPRIV bool a64_vir_vector_lower(vl *L, const vir_insn *in, uint8_t res)
+VPRIV bool a64_vir_vector_lower(a64_vir_context *L, const vir_insn *in, uint8_t res)
 {
 	ecx *e = L->e;
 	vir_function *f = L->f;

@@ -117,7 +117,7 @@ typedef struct virbuild_context {
 #define VIRBUILD_LOCAL_VARIABLE_FIRST 256	/* locals: VIRBUILD_LOCAL_VARIABLE_FIRST + k */
 #define VIRBUILD_BLOCK_NONE 0xffffffffu
 
-#define GROW(p, n, cap, k) do { \
+#define VIRBUILD_ARRAY_GROW(p, n, cap, k) do { \
 	if ((uint64_t)(n) + (k) > (cap)) { \
 		size_t nc_ = (cap) ? (size_t)(cap) * 2 : 256; \
 		while (nc_ < (uint64_t)(n) + (k)) nc_ *= 2; \

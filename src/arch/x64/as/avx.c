@@ -18,7 +18,7 @@ VPRIV int x64_i_avx(as_context *a, char *mn, XOp *o, int nops)
 	if (mn[0] == 'v') {
 		/* form 0: rm, vvvv, reg (three operands); 1: rm, reg (vvvv unused); 2: shift by imm: imm, rm, vvvv=dst
 		   (/d); 3: store: reg, rm (mov to memory); w 2: WIG (W0); imm: an imm8 first */
-		static const struct { const char *n; uint8_t pp, map, op, form, w, imm, d; } vx[] = {
+		static const struct { const char *n; uint8_t pp, map, op, form, w, imm, d; } x64_vir_context[] = {
 			{ "vpaddd", 1, 1, 0xfe, 0, 0, 0, 0 }, { "vpaddq", 1, 1, 0xd4, 0, 0, 0, 0 }, { "vpaddb", 1, 1, 0xfc, 0, 0, 0, 0 }, { "vpaddw", 1, 1, 0xfd, 0, 0, 0, 0 },
 			{ "vpsubd", 1, 1, 0xfa, 0, 0, 0, 0 }, { "vpsubq", 1, 1, 0xfb, 0, 0, 0, 0 }, { "vpsubb", 1, 1, 0xf8, 0, 0, 0, 0 }, { "vpsubw", 1, 1, 0xf9, 0, 0, 0, 0 },
 			{ "vpxor", 1, 1, 0xef, 0, 0, 0, 0 }, { "vpor", 1, 1, 0xeb, 0, 0, 0, 0 }, { "vpand", 1, 1, 0xdb, 0, 0, 0, 0 }, { "vpandn", 1, 1, 0xdf, 0, 0, 0, 0 },
@@ -46,43 +46,43 @@ VPRIV int x64_i_avx(as_context *a, char *mn, XOp *o, int nops)
 		};
 		XOp *dst = nops ? &o[nops - 1] : NULL;
 
-		for (size_t i = 0; dst && i < sizeof vx / sizeof *vx; i++) {
-			int need = (vx[i].form == 0 ? 3 : 2) + vx[i].imm;
+		for (size_t i = 0; dst && i < sizeof x64_vir_context / sizeof *x64_vir_context; i++) {
+			int need = (x64_vir_context[i].form == 0 ? 3 : 2) + x64_vir_context[i].imm;
 
-			if (strcmp(mn, vx[i].n) || nops != need)
+			if (strcmp(mn, x64_vir_context[i].n) || nops != need)
 				continue;
-			if (vx[i].imm && o[0].kind != XK_IMM)
+			if (x64_vir_context[i].imm && o[0].kind != XK_IMM)
 				continue;
 			{
-				XOp *rm = &o[vx[i].imm], *src1 = vx[i].form == 0 ? &o[vx[i].imm + 1] : NULL;
-				uint8_t ops[3] = { 0x0f, (uint8_t)(vx[i].map == 2 ? 0x38 : 0x3a), vx[i].op };
-				uint8_t ops1[2] = { 0x0f, vx[i].op };
+				XOp *rm = &o[x64_vir_context[i].imm], *src1 = x64_vir_context[i].form == 0 ? &o[x64_vir_context[i].imm + 1] : NULL;
+				uint8_t ops[3] = { 0x0f, (uint8_t)(x64_vir_context[i].map == 2 ? 0x38 : 0x3a), x64_vir_context[i].op };
+				uint8_t ops1[2] = { 0x0f, x64_vir_context[i].op };
 				int64_t c = 0;
-				XForm f = F(.w = vx[i].w == 1, .opsz16 = vx[i].pp == 1, .rep = vx[i].pp == 2 ? 0xf3 : vx[i].pp == 3 ? 0xf2 : 0,
-					    .op = vx[i].map == 1 ? ops1 : ops, .nop = vx[i].map == 1 ? 2 : 3, .isz = vx[i].imm, .vex = 1);
+				XForm f = F(.w = x64_vir_context[i].w == 1, .opsz16 = x64_vir_context[i].pp == 1, .rep = x64_vir_context[i].pp == 2 ? 0xf3 : x64_vir_context[i].pp == 3 ? 0xf2 : 0,
+					    .op = x64_vir_context[i].map == 1 ? ops1 : ops, .nop = x64_vir_context[i].map == 1 ? 2 : 3, .isz = x64_vir_context[i].imm, .vex = 1);
 
-				if (rm->kind == XK_IMM || (vx[i].form == 2 && rm->kind != XK_REG))
+				if (rm->kind == XK_IMM || (x64_vir_context[i].form == 2 && rm->kind != XK_REG))
 					continue;
 				if (rm->kind == XK_EXPR)
 					rm->kind = XK_MEM;
 				if (dst->kind != XK_REG || dst->cls != XR_XMM || (src1 && (src1->kind != XK_REG || src1->cls != XR_XMM)))
 					continue;
 				/* (vinserti128/vperm2i128/broadcasts: L from the destination) */
-				f.vl = dst->size == 32;
-				if (vx[i].form == 2) {	/* imm, src, dst: dst in vvvv, /d */
-					f.reg = vx[i].d, f.rm = rm, f.vvvv = dst->reg;
+				f.a64_vir_context = dst->size == 32;
+				if (x64_vir_context[i].form == 2) {	/* imm, src, dst: dst in vvvv, /d */
+					f.reg = x64_vir_context[i].d, f.rm = rm, f.vvvv = dst->reg;
 				} else {
 					f.reg = dst->reg, f.rm = rm, f.vvvv = src1 ? src1->reg : 0;
 					if (!src1)
 						f.vvvv = 0;
 				}
-				if (vx[i].form == 1)
+				if (x64_vir_context[i].form == 1)
 					f.vvvv = 0;	/* (1111 after inversion) */
-				if (vx[i].imm) {
+				if (x64_vir_context[i].imm) {
 					x64_imm(a, &o[0], &f, &c);
 					f.imm = c;
 				}
-				if (vx[i].form != 0 && vx[i].form != 2)
+				if (x64_vir_context[i].form != 0 && x64_vir_context[i].form != 2)
 					f.vvvv = 0;
 				return x64_emit(a, &f);
 			}
@@ -104,10 +104,10 @@ VPRIV int x64_i_avx(as_context *a, char *mn, XOp *o, int nops)
 			if (!store && m->kind == XK_REG && (m->reg & 8) && !(r->reg & 8)) {
 				ops[1] = (uint8_t)(dq ? 0x7f : al ? 0x29 : 0x11);
 				return x64_emit(a, &F(.opsz16 = pp == 1, .rep = pp == 2 ? 0xf3 : 0, .op = ops, .nop = 2, .reg = m->reg, .rm = r,
-						      .vex = 1, .vl = r->size == 32));
+						      .vex = 1, .a64_vir_context = r->size == 32));
 			}
 			return x64_emit(a, &F(.opsz16 = pp == 1, .rep = pp == 2 ? 0xf3 : 0, .op = ops, .nop = 2, .reg = r->reg, .rm = m,
-					      .vex = 1, .vl = r->size == 32));
+					      .vex = 1, .a64_vir_context = r->size == 32));
 		}
 		if (nops == 2 && (!strcmp(mn, "vmovd") || !strcmp(mn, "vmovq"))) {
 			bool q = mn[4] == 'q';
@@ -135,7 +135,7 @@ VPRIV int x64_i_avx(as_context *a, char *mn, XOp *o, int nops)
 		if (nops == 3 && o[0].kind == XK_IMM && (!strcmp(mn, "vextracti128") || !strcmp(mn, "vextractf128"))) {
 			uint8_t ops[3] = { 0x0f, 0x3a, (uint8_t)(mn[8] == 'i' ? 0x39 : 0x19) };
 			int64_t c = 0;
-			XForm f = F(.opsz16 = 1, .op = ops, .nop = 3, .reg = o[1].reg, .rm = &o[2], .isz = 1, .vex = 1, .vl = 1);
+			XForm f = F(.opsz16 = 1, .op = ops, .nop = 3, .reg = o[1].reg, .rm = &o[2], .isz = 1, .vex = 1, .a64_vir_context = 1);
 
 			if (o[2].kind == XK_EXPR)
 				o[2].kind = XK_MEM;
@@ -164,7 +164,7 @@ VPRIV int x64_i_avx(as_context *a, char *mn, XOp *o, int nops)
 		if (nops == 4 && !strcmp(mn, "vpblendvb")) {
 			uint8_t ops[3] = { 0x0f, 0x3a, 0x4c };
 			XForm f = F(.opsz16 = 1, .op = ops, .nop = 3, .reg = o[3].reg, .rm = &o[1], .vvvv = o[2].reg, .isz = 1,
-				    .vex = 1, .vl = o[3].size == 32);
+				    .vex = 1, .a64_vir_context = o[3].size == 32);
 
 			if (o[1].kind == XK_EXPR)
 				o[1].kind = XK_MEM;

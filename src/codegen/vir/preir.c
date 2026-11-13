@@ -24,11 +24,11 @@ VPRIV uint32_t virbuild_preir_insn_add(ecx *e, uint32_t op, uint32_t ty, uint32_
 	virbuild_context *V = e->vw;
 	uint32_t i = V->np;
 
-	GROW(V->p, V->np, V->cp, 1);
+	VIRBUILD_ARRAY_GROW(V->p, V->np, V->cp, 1);
 	V->np++;
 	V->p[i] = (virbuild_preir_insn){ { (uint8_t)op, (uint8_t)ty, (uint16_t)fl, a, b, c }, blk, 0, e->curloc, 0 };
 	if (V->sealing) {
-		GROW(V->fwd, i, V->cfwd, 1);
+		VIRBUILD_ARRAY_GROW(V->fwd, i, V->cfwd, 1);
 		V->fwd[i] = i;
 	}
 	return i;
@@ -71,7 +71,7 @@ VPRIV uint32_t virbuild_extra_append(ecx *e, const uint32_t *w, uint32_t n)
 	virbuild_context *V = e->vw;
 	uint32_t o = V->nx;
 
-	GROW(V->x, V->nx, V->cx, n ? n : 1);
+	VIRBUILD_ARRAY_GROW(V->x, V->nx, V->cx, n ? n : 1);
 	if (n)
 		memcpy(&V->x[o], w, n * sizeof *w);
 	V->nx += n;
@@ -83,7 +83,7 @@ VPRIV uint32_t virbuild_block_new(ecx *e)
 	virbuild_context *V = e->vw;
 	uint32_t b = V->nb;
 
-	GROW(V->b, V->nb, V->cb, 1);
+	VIRBUILD_ARRAY_GROW(V->b, V->nb, V->cb, 1);
 	V->nb++;
 	V->b[b] = (virbuild_preir_block){ 0 };
 	V->b[b].fin = VIRBUILD_BLOCK_NONE;

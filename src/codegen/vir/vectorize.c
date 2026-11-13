@@ -53,7 +53,7 @@ static virbuild_vectorize_info *virbuild_vectorize_info_touch(virbuild_vectorize
 {
 	ecx *e = S->e;
 
-	GROW(S->touch, S->ntouch, S->ctouch, 1);
+	VIRBUILD_ARRAY_GROW(S->touch, S->ntouch, S->ctouch, 1);
 	S->touch[S->ntouch++] = v;
 	return &S->I[v];
 }
@@ -851,7 +851,7 @@ static uint32_t virbuild_vectorize_block_new(virbuild_vectorize_state *S, uint32
 	virbuild_context *V = e->vw;
 	uint32_t b = virbuild_block_new(e), n = (p0 != VIRBUILD_BLOCK_NONE) + (p1 != VIRBUILD_BLOCK_NONE);
 
-	GROW(V->pr, V->npr, V->cpr, 2);
+	VIRBUILD_ARRAY_GROW(V->pr, V->npr, V->cpr, 2);
 	V->b[b].pred = V->npr, V->b[b].npred = n;
 	if (p0 != VIRBUILD_BLOCK_NONE)
 		V->pr[V->npr++] = p0;
@@ -1093,11 +1093,11 @@ static bool virbuild_vectorize_loop(virbuild_vectorize_state *S)
 	S->VPH = virbuild_vectorize_block_new(S, S->VPRE, VIRBUILD_BLOCK_NONE);
 	S->VB = virbuild_vectorize_block_new(S, S->VPH, VIRBUILD_BLOCK_NONE);
 	V->pr[V->b[S->VB].pred + 1] = S->VB, V->b[S->VB].npred = 2, V->npr = V->b[S->VB].pred + 2;
-	GROW(V->pr, V->npr, V->cpr, 1);
+	VIRBUILD_ARRAY_GROW(V->pr, V->npr, V->cpr, 1);
 	S->VX = virbuild_vectorize_block_new(S, S->VB, VIRBUILD_BLOCK_NONE);
 	S->J = virbuild_vectorize_block_new(S, S->VPRE, S->VX);
 	if (S->nchk) {	/* (J's predecessors are the last in V->pr) */
-		GROW(V->pr, V->npr, V->cpr, 1);
+		VIRBUILD_ARRAY_GROW(V->pr, V->npr, V->cpr, 1);
 		V->pr[V->npr++] = S->VPH, V->b[S->J].npred = 3;
 	}
 	/* VPRE: the span */
@@ -1352,7 +1352,7 @@ static void virbuild_vectorize_blocks_place(virbuild_vectorize_state *S)
 	const uint32_t nb[5] = { S->VPRE, S->VPH, S->VB, S->VX, S->J };
 	uint32_t at = 0;
 
-	GROW(V->order, V->norder, V->corder, 5);
+	VIRBUILD_ARRAY_GROW(V->order, V->norder, V->corder, 5);
 	while (at < V->norder && V->order[at] != S->H)
 		at++;
 	memmove(&V->order[at + 5], &V->order[at], (size_t)(V->norder - at) * sizeof *V->order);

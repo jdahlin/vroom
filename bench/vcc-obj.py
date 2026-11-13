@@ -100,7 +100,7 @@ def cmpobj(t):
     ref = name(obj, 'ref') + '.o'
     if not os.path.exists(ref): return obj, 1, 'no reference (run ref first)', dt, False
     rs, rd, ru, rr, rx = elf(ref)
-    vs, vdf, vu, vr, vx = elf(o)
+    vs, vdf, vu, vr, x64_vir_context = elf(o)
     err, note = [], []
     for n in sorted(set(rd) | set(vdf)):
         a1, b1 = rd.get(n), vdf.get(n)
@@ -118,7 +118,7 @@ def cmpobj(t):
         note.append(f'sections: clang-only {sorted(rs - vs)[:8]} vcc-only {sorted(vs - rs)[:8]}')
     # data: the named globals each data section points at must agree (code differs with inlining;
     # asm-made tables follow the code; section-relative targets name local data)
-    for sec in sorted((set(rr) | set(vr)) - rx - vx):
+    for sec in sorted((set(rr) | set(vr)) - rx - x64_vir_context):
         a1 = {n for n in rr.get(sec, ()) if '->.' not in n and not n.startswith('.')}
         b1 = {n for n in vr.get(sec, ()) if '->.' not in n and not n.startswith('.')}
         if a1 != b1:

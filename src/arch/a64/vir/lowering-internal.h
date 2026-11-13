@@ -19,7 +19,7 @@
 
 typedef struct a64_vir_argument { uint8_t reg; uint8_t size; int32_t stk; } a64_vir_argument;	/* reg VIR_REGISTER_NONE: at stk */
 
-typedef struct vl {
+typedef struct a64_vir_context {
 	ecx *e;
 	vir_function *f;
 	const vir_alloc_out *o;
@@ -65,7 +65,7 @@ typedef struct vl {
 	struct { uint32_t l, e, to; } tr[1024];	/* moves of a branch's edges, after the block */
 	uint32_t ntr;
 	virbuild_lowering drv;	/* the shared driver's inputs (codegen/vir/lowering-driver.h) */
-} vl;
+} a64_vir_context;
 
 struct a64_vir_thread_state { int64_t *soff, *spoff; uint32_t *lbl, *chs, *path, *ord, *opos, *hl, *lbf; uint8_t *nf; uint32_t co, cop, chl, cnf, clf; uint8_t *uses, *lo32; uint32_t cs, csp, cl, cch, cpa, cu, c32; };
 
@@ -127,13 +127,13 @@ static inline int a64_vir_vector_register(uint8_t r) { return r == VIR_REGISTER_
 
 static inline bool a64_vir_register_is_float(uint8_t r) { return r == VIR_REGISTER_SCRATCH1 || (r != VIR_REGISTER_SCRATCH0 && r < 128 && VIR_REGISTER_CLASS(r)); }
 
-static inline int a64_vir_slot_size_log2(const vl *L, uint32_t s) { return L->o->slot_sizes[s] == 4 ? 2 : 3; }
+static inline int a64_vir_slot_size_log2(const a64_vir_context *L, uint32_t s) { return L->o->slot_sizes[s] == 4 ? 2 : 3; }
 
 /* a branch's condition: flags (r < 0) or register r against zero (cc EQ or NE) */
 typedef struct a64_vir_condition { int cc, r, x, bit; } a64_vir_condition;	/* bit >= 0: of r (tbz, tbnz) */
 
 /* a folded value: used once, by the next instruction, never in a slot */
-static inline bool a64_vir_value_is_folded(const vl *L, uint32_t v) { return L->uses[v] == 1 && L->o->slot[v] == VIR_BLOCK_NONE; }
+static inline bool a64_vir_value_is_folded(const a64_vir_context *L, uint32_t v) { return L->uses[v] == 1 && L->o->slot[v] == VIR_BLOCK_NONE; }
 
 typedef struct a64_vir_chain a64_vir_chain;
 
@@ -142,50 +142,50 @@ A64_VIR_DATA const uint8_t a64_vir_integer_condition_codes[10];
 A64_VIR_DATA const int8_t a64_vir_float_condition_codes[8];
 A64_VIR_DATA const uint8_t a64_vir_condition_swapped[10];
 
-VPRIV __attribute__((noreturn, cold)) void a64_vir_fail(vl *L, const char *why);
+VPRIV __attribute__((noreturn, cold)) void a64_vir_fail(a64_vir_context *L, const char *why);
 VPRIV void *a64_vir_array_grow(void *p, uint32_t *cap, uint32_t n, size_t sz);
 VPRIV uint32_t a64_vir_arguments_assign(bool darwin, const uint32_t *w, a64_vir_argument *out, uint32_t max, int32_t *stk);
 VPRIV bool a64_vir_insn_is_big_memory(const vir_function *f, const vir_insn *in);
 VPRIV void a64_vir_registers_describe(vir_target_registers *r, bool darwin, bool fcs);
-VPRIV int a64_vir_operand_general_register(vl *L, uint32_t k, int t);
-VPRIV int a64_vir_operand_float_register(vl *L, uint32_t k);
-VPRIV void a64_vir_register_spill(vl *L, uint8_t src, uint32_t s, int t);
-VPRIV void vl_edit(vl *L, const vir_edit *x);
-VPRIV void a64_vir_edge_moves_emit(vl *L, uint32_t g);
-VPRIV uint32_t a64_vir_block_label(vl *L, uint32_t t);
-VPRIV bool a64_vir_block_is_skipped(vl *L, uint32_t b);
-VPRIV uint32_t a64_vir_block_fallthrough(vl *L);
-VPRIV uint32_t a64_vir_successor_label(vl *L, uint32_t b, uint32_t k, uint32_t to);
-VPRIV bool a64_vir_edge_is_plain(vl *L, uint32_t b, uint32_t k);
-VPRIV int a64_vir_integer_compare_lower(vl *L, const vir_insn *in);
-VPRIV void a64_vir_float_compare_lower(vl *L, const vir_insn *in);
-VPRIV bool a64_vir_compare_chain_lower(vl *L, uint32_t b, uint32_t i);
-VPRIV void a64_vir_compare_chained_lower(vl *L, const vir_insn *in, bool isor);
-VPRIV int a64_vir_condition_flags_get(vl *L, const vir_insn *in);
-VPRIV a64_vir_condition a64_vir_branch_condition_get(vl *L, const vir_insn *in);
+VPRIV int a64_vir_operand_general_register(a64_vir_context *L, uint32_t k, int t);
+VPRIV int a64_vir_operand_float_register(a64_vir_context *L, uint32_t k);
+VPRIV void a64_vir_register_spill(a64_vir_context *L, uint8_t src, uint32_t s, int t);
+VPRIV void vl_edit(a64_vir_context *L, const vir_edit *x);
+VPRIV void a64_vir_edge_moves_emit(a64_vir_context *L, uint32_t g);
+VPRIV uint32_t a64_vir_block_label(a64_vir_context *L, uint32_t t);
+VPRIV bool a64_vir_block_is_skipped(a64_vir_context *L, uint32_t b);
+VPRIV uint32_t a64_vir_block_fallthrough(a64_vir_context *L);
+VPRIV uint32_t a64_vir_successor_label(a64_vir_context *L, uint32_t b, uint32_t k, uint32_t to);
+VPRIV bool a64_vir_edge_is_plain(a64_vir_context *L, uint32_t b, uint32_t k);
+VPRIV int a64_vir_integer_compare_lower(a64_vir_context *L, const vir_insn *in);
+VPRIV void a64_vir_float_compare_lower(a64_vir_context *L, const vir_insn *in);
+VPRIV bool a64_vir_compare_chain_lower(a64_vir_context *L, uint32_t b, uint32_t i);
+VPRIV void a64_vir_compare_chained_lower(a64_vir_context *L, const vir_insn *in, bool isor);
+VPRIV int a64_vir_condition_flags_get(a64_vir_context *L, const vir_insn *in);
+VPRIV a64_vir_condition a64_vir_branch_condition_get(a64_vir_context *L, const vir_insn *in);
 VPRIV void a64_vir_branch_conditional_emit(ecx *e, a64_vir_condition c, bool inv, uint32_t l);
-VPRIV bool a64_vir_register_is_kept(const vl *L, uint8_t r, uint32_t upto);
-VPRIV bool a64_vir_test_branch_fold(vl *L, uint32_t b, uint32_t i);
-VPRIV lval a64_vir_address_get(vl *L, uint32_t w, int t);
-VPRIV void a64_vir_load_lower(vl *L, uint32_t i, const vir_insn *in, uint8_t res);
-VPRIV void a64_vir_store_lower(vl *L, const vir_insn *in);
-VPRIV void a64_vir_memory_block_lower(vl *L, const vir_insn *in);
-VPRIV const char *a64_vir_tail_call_reason(vl *L, uint8_t *d);
-VPRIV bool a64_vir_call_is_sibling(vl *L, uint32_t b, uint32_t i);
-VPRIV void a64_vir_call_lower(vl *L, uint32_t b, uint32_t i, const vir_insn *in);
-VPRIV void a64_vir_parameter_lower(vl *L, const vir_insn *in, uint8_t res);
-VPRIV void a64_vir_switch_lower(vl *L, uint32_t b, const vir_insn *in);
-VPRIV bool a64_vir_pointer_fold(vl *L, uint32_t b, uint32_t i);
-VPRIV bool a64_vir_chain_info_get(const vl *L, uint32_t b, uint32_t c, a64_vir_chain *x);
-VPRIV bool a64_vir_chain_fold(vl *L, uint32_t b, uint32_t i, uint8_t res);
-VPRIV uint32_t a64_vir_block_chase(vl *L, uint32_t t);
-VPRIV void a64_vir_callee_saved_float_save(vl *L, bool restore, int t);
-VPRIV void a64_vir_return_lower(vl *L);
-VPRIV void a64_vir_goto_emit(vl *L, uint32_t b, uint32_t t);
-VPRIV bool a64_vir_call_is_sibling_candidate(vl *L, uint32_t b, uint32_t i);
-VPRIV bool a64_vir_vector_lower(vl *L, const vir_insn *in, uint8_t res);
-VPRIV void a64_vir_insn_lower(vl *L, uint32_t b, uint32_t i, uint8_t res);
-VPRIV void a64_vir_blocks_order(vl *L);
-VPRIV void a64_vir_function_body_lower(vl *L);
+VPRIV bool a64_vir_register_is_kept(const a64_vir_context *L, uint8_t r, uint32_t upto);
+VPRIV bool a64_vir_test_branch_fold(a64_vir_context *L, uint32_t b, uint32_t i);
+VPRIV lval a64_vir_address_get(a64_vir_context *L, uint32_t w, int t);
+VPRIV void a64_vir_load_lower(a64_vir_context *L, uint32_t i, const vir_insn *in, uint8_t res);
+VPRIV void a64_vir_store_lower(a64_vir_context *L, const vir_insn *in);
+VPRIV void a64_vir_memory_block_lower(a64_vir_context *L, const vir_insn *in);
+VPRIV const char *a64_vir_tail_call_reason(a64_vir_context *L, uint8_t *d);
+VPRIV bool a64_vir_call_is_sibling(a64_vir_context *L, uint32_t b, uint32_t i);
+VPRIV void a64_vir_call_lower(a64_vir_context *L, uint32_t b, uint32_t i, const vir_insn *in);
+VPRIV void a64_vir_parameter_lower(a64_vir_context *L, const vir_insn *in, uint8_t res);
+VPRIV void a64_vir_switch_lower(a64_vir_context *L, uint32_t b, const vir_insn *in);
+VPRIV bool a64_vir_pointer_fold(a64_vir_context *L, uint32_t b, uint32_t i);
+VPRIV bool a64_vir_chain_info_get(const a64_vir_context *L, uint32_t b, uint32_t c, a64_vir_chain *x);
+VPRIV bool a64_vir_chain_fold(a64_vir_context *L, uint32_t b, uint32_t i, uint8_t res);
+VPRIV uint32_t a64_vir_block_chase(a64_vir_context *L, uint32_t t);
+VPRIV void a64_vir_callee_saved_float_save(a64_vir_context *L, bool restore, int t);
+VPRIV void a64_vir_return_lower(a64_vir_context *L);
+VPRIV void a64_vir_goto_emit(a64_vir_context *L, uint32_t b, uint32_t t);
+VPRIV bool a64_vir_call_is_sibling_candidate(a64_vir_context *L, uint32_t b, uint32_t i);
+VPRIV bool a64_vir_vector_lower(a64_vir_context *L, const vir_insn *in, uint8_t res);
+VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i, uint8_t res);
+VPRIV void a64_vir_blocks_order(a64_vir_context *L);
+VPRIV void a64_vir_function_body_lower(a64_vir_context *L);
 
 #endif

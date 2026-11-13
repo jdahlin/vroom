@@ -28,7 +28,7 @@ VPRIV bool x64_vir_switch_is_dense(const vir_function *f,const vir_insn *in,uint
 
 /* Switch edges retain their allocator edits in separate stubs. Dense tables use
  * signed offsets from a RIP-relative base, so the dispatch stays position independent. */
-VPRIV void x64_vir_constant_compare_emit(vx *L, int reg, int size, uint64_t value)
+VPRIV void x64_vir_constant_compare_emit(x64_vir_context *L, int reg, int size, uint64_t value)
 {
 	int64_t k = size == 4 ? (int64_t)(int32_t)value : (int64_t)value;
 	if (k == (int32_t)k)
@@ -39,7 +39,7 @@ VPRIV void x64_vir_constant_compare_emit(vx *L, int reg, int size, uint64_t valu
 	}
 }
 
-VPRIV void x64_vir_switch_lower(vx *L, uint32_t block, const vir_insn *in, int selector)
+VPRIV void x64_vir_switch_lower(x64_vir_context *L, uint32_t block, const vir_insn *in, int selector)
 {
 	ecx *e = L->e;
 	vir_function *f = L->f;

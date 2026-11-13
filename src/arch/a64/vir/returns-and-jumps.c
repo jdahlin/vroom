@@ -3,11 +3,11 @@
 #include "lowering-internal.h"
 
 /* the block a branch to t ends up in: past blocks that are a lone br without moves */
-VPRIV uint32_t a64_vir_block_chase(vl *L, uint32_t t) { return L->chs[t]; }
+VPRIV uint32_t a64_vir_block_chase(a64_vir_context *L, uint32_t t) { return L->chs[t]; }
 
 /* a return: the epilogue and ret, or a jump to the shared one (finish_function decides) */
 /* d8-d15 as the caller had them: at the entry into their slots, before every way out back */
-VPRIV void a64_vir_callee_saved_float_save(vl *L, bool restore, int t)
+VPRIV void a64_vir_callee_saved_float_save(a64_vir_context *L, bool restore, int t)
 {
 	for (int r = 8; r < 16; r++)
 		if (L->o->callee[1] >> r & 1) {
@@ -21,7 +21,7 @@ VPRIV void a64_vir_callee_saved_float_save(vl *L, bool restore, int t)
 		}
 }
 
-VPRIV void a64_vir_return_lower(vl *L)
+VPRIV void a64_vir_return_lower(a64_vir_context *L)
 {
 	ecx *e = L->e;
 	ins *t;
@@ -45,7 +45,7 @@ VPRIV void a64_vir_return_lower(vl *L)
  * more instructions on speedtest1: their constants and edge moves are lowered again.
  */
 /* from block b's code, on to block t (an edge without moves left): a jump, or a copy of t */
-VPRIV void a64_vir_goto_emit(vl *L, uint32_t b, uint32_t t)
+VPRIV void a64_vir_goto_emit(a64_vir_context *L, uint32_t b, uint32_t t)
 {
 	/* into a loop whose test is at its bottom (a64_vir_blocks_order): a copy of the test here, so that
 	 * the way in costs no jump (loop rotation with the guard, as LLVM's) */
@@ -65,7 +65,7 @@ VPRIV void a64_vir_goto_emit(vl *L, uint32_t b, uint32_t t)
 }
 
 /* the call at i will be a sibling call (a64_vir_call_lower's test, before the registers are known) */
-VPRIV bool a64_vir_call_is_sibling_candidate(vl *L, uint32_t b, uint32_t i)
+VPRIV bool a64_vir_call_is_sibling_candidate(a64_vir_context *L, uint32_t b, uint32_t i)
 {
 	const vir_function *f = L->f;
 	uint32_t ng = VIR_SIGNATURE_GROUP_COUNT(f->extra[f->insns[i].b]);

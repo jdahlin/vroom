@@ -1385,7 +1385,7 @@ static int k_ldst(Ctx *c, const Mn *m)
 	int scale;
 	if (c->n < 2 || c->n > 3) BADOPS;
 	if (m->x == 0xff && c->n == 2 && isreg(&o[0]) && (o[0].cls == A64_Z || o[0].cls == A64_P)) {
-		/* SVE ldr/str Zt|Pt, [Xn{, #imm, mul vl}] */
+		/* SVE ldr/str Zt|Pt, [Xn{, #imm, mul a64_vir_context}] */
 		const A64Op *mm = &o[1];
 		if (o[0].arr || mm->kind != A64O_MEM || mm->mode != A64M_OFF || mm->hassym || mm->mod ||
 		    (mm->imm && !mm->mulvl) || mm->imm < -256 || mm->imm > 255) BADOPS;

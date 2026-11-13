@@ -16,7 +16,7 @@ struct {
 } x;
 };
 PgHdr **xx;
-volatile int vx;
+volatile int x64_vir_context;
 static inline PgHdr *merge_pagelist(PgHdr *pA, PgHdr *pB)
 {
  PgHdr result;
@@ -33,7 +33,7 @@ static inline PgHdr *merge_pagelist(PgHdr *pA, PgHdr *pB)
      pTail = pB;
      pB = pB->x.pDirty;
    }
-   vx = (*xx)->y;
+   x64_vir_context = (*xx)->y;
  }
  if( pA ){
    pTail->x.pDirty = pA;

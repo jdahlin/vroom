@@ -65,7 +65,7 @@ static uint32_t virbuild_call_signature_make(ecx *e, const wkarg *a, int n, bool
 	cc *c = e->c;
 	uint32_t o = V->nx;
 
-	GROW(V->x, V->nx, V->cx, 3 + 2 * (uint32_t)n);
+	VIRBUILD_ARRAY_GROW(V->x, V->nx, V->cx, 3 + 2 * (uint32_t)n);
 	V->x[o] = VIR_SIGNATURE_HEADER((uint32_t)n, variadic);
 	if (KIND(c, rt) == TY_VOID) {
 		V->x[o + 1] = VIR_GROUP_WORD0(VIR_GROUP_NONE, 0, 0, 0, 0, 0, 0), V->x[o + 2] = 0;
@@ -103,7 +103,7 @@ VPRIV val virbuild_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bo
 	}
 	sig = virbuild_call_signature_make(e, a, n, variadic, rt, &rpc);
 	o = V->nx;
-	GROW(V->x, V->nx, V->cx, 1 + (uint32_t)n);
+	VIRBUILD_ARRAY_GROW(V->x, V->nx, V->cx, 1 + (uint32_t)n);
 	V->nx += 1 + (uint32_t)n;
 	V->x[o] = (uint32_t)n;
 	for (int k = 0; k < n; k++) {
@@ -237,7 +237,7 @@ VPRIV void virbuild_begin(ecx *e, uint32_t s)
 
 	(void)s;
 	V->np = 1;	/* (0 is no instruction) */
-	GROW(V->p, 0, V->cp, 1);
+	VIRBUILD_ARRAY_GROW(V->p, 0, V->cp, 1);
 	V->p[0] = (virbuild_preir_insn){ 0 };
 	V->nb = V->nx = V->nsl = V->nact = V->nst = V->nloc = V->nprom = 0;
 	V->live[0] = V->live[1] = V->live[2] = 0;
@@ -274,7 +274,7 @@ VPRIV void virbuild_finish(ecx *e, uint32_t s)
 		rv = rty != VIR_TYPE_VOID ? virbuild_value_convert(e, virbuild_variable_read(e, VIRBUILD_RESULT_VARIABLE, V->cur, rty), rty) : 0;
 		o = V->nx;
 
-		GROW(V->x, V->nx, V->cx, 2);
+		VIRBUILD_ARRAY_GROW(V->x, V->nx, V->cx, 2);
 		V->x[V->nx++] = rv ? 1 : 0;
 		if (rv)
 			V->x[V->nx++] = rv;

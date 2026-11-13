@@ -56,7 +56,7 @@ VPRIV void virbuild_parameters_dead_remove(ecx *e)
 	virbuild_context *V = e->vw;
 	uint32_t *stk, n = 0;
 
-	GROW(V->map, 0, V->cmap, V->np + 1);
+	VIRBUILD_ARRAY_GROW(V->map, 0, V->cmap, V->np + 1);
 	memset(V->map, 0, (size_t)V->np * sizeof *V->map);
 	stk = malloc((size_t)(V->np + 1) * sizeof *stk);
 	if (!stk)

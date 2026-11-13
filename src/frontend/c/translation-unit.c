@@ -104,12 +104,12 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 	/* predeclared: __builtin_va_list, __int128_t, __uint128_t */
 	{
 		uint32_t s;
-		qty vl;
+		qty a64_vir_context;
 
 		if (o->target == PP_DARWIN) {
-			vl = ty_ptr(c, prim(TY_CHAR));
+			a64_vir_context = ty_ptr(c, prim(TY_CHAR));
 		} else if (PP_IS_WASM(o->target)) {
-			vl = ty_ptr(c, prim(TY_VOID));
+			a64_vir_context = ty_ptr(c, prim(TY_VOID));
 		} else if (o->target == PP_LINUX_X86_64) {
 			/* System V: struct __va_list_tag { unsigned gp_offset, fp_offset; void *overflow_arg_area,
 			   *reg_save_area; } __builtin_va_list[1] */
@@ -125,7 +125,7 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 			lay_record(c, r, NULL, NULL);
 			r->flags |= RF_COMPLETE;
 			c->valist_tag = ti;
-			vl = ty_array(c, QT(r->ty, 0), 1, 0);
+			a64_vir_context = ty_array(c, QT(r->ty, 0), 1, 0);
 		} else {
 			/* struct __va_list { void *__stack, *__gr_top, *__vr_top; int __gr_offs, __vr_offs; } */
 			uint32_t ti = tag_new(c, TY_STRUCT, vintern_copy("__va_list\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 9), 0);
@@ -140,10 +140,10 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 			lay_record(c, r, NULL, NULL);
 			r->flags |= RF_COMPLETE;
 			c->valist_tag = ti;
-			vl = QT(r->ty, 0);
+			a64_vir_context = QT(r->ty, 0);
 		}
-		c->t_valist = vl;
-		s = sym_new(c, S_TYPEDEF, vintern_copy("__builtin_va_list\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 17), vl, 0);
+		c->t_valist = a64_vir_context;
+		s = sym_new(c, S_TYPEDEF, vintern_copy("__builtin_va_list\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 17), a64_vir_context, 0);
 		sym_bind(c, s);
 		s = sym_new(c, S_TYPEDEF, vintern_copy("__int128_t\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 10), prim(TY_INT128), 0);
 		sym_bind(c, s);

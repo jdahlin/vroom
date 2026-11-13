@@ -32,7 +32,7 @@ int was_error(wmod *m, const char *fmt, ...)
 	return -1;
 }
 
-#define GROW(p, n, c) \
+#define VIRBUILD_ARRAY_GROW(p, n, c) \
 	do { \
 		if ((n) >= (c)) { \
 			(c) = (c) ? (c) * 2 : 16; \
@@ -117,7 +117,7 @@ uint32_t was_sym(wmod *m, const char *s, size_t n)
 		if (y->nlen == n && !memcmp(y->name, s, n))
 			return m->ht[j] - 1;
 	}
-	GROW(m->sym, m->nsym, m->csym);
+	VIRBUILD_ARRAY_GROW(m->sym, m->nsym, m->csym);
 	y = &m->sym[m->nsym];
 	memset(y, 0, sizeof *y);
 	y->name = malloc(n + 1);
@@ -138,7 +138,7 @@ void was_reg(wmod *m, uint32_t s)
 	if (m->sym[s].reg)
 		return;
 	m->sym[s].reg = true;
-	GROW(m->reg, m->nreg, m->creg);
+	VIRBUILD_ARRAY_GROW(m->reg, m->nreg, m->creg);
 	m->reg[m->nreg++] = s;
 }
 
@@ -147,7 +147,7 @@ uint32_t was_sig_intern(wmod *m, const wsig *s)
 	for (uint32_t i = 0; i < m->nsig; i++)
 		if (m->sig[i].np == s->np && m->sig[i].nr == s->nr && !memcmp(m->sig[i].t, s->t, s->np + s->nr))
 			return i;
-	GROW(m->sig, m->nsig, m->csig);
+	VIRBUILD_ARRAY_GROW(m->sig, m->nsig, m->csig);
 	m->sig[m->nsig] = *s;
 	return m->nsig++;
 }
@@ -436,7 +436,7 @@ typedef struct was {
 
 static void rel_add(wrel **r, uint32_t *n, uint32_t *c, uint8_t type, uint32_t off, uint32_t sym, int64_t addend)
 {
-	GROW(*r, *n, *c);
+	VIRBUILD_ARRAY_GROW(*r, *n, *c);
 	(*r)[(*n)++] = (wrel){ type, off, sym, addend };
 }
 
@@ -783,7 +783,7 @@ static int section(was *a, const char *s, size_t n)
 			if (strlen(m->cust[i].name) == n && !memcmp(m->cust[i].name, s, n))
 				break;
 		if (i == m->ncust) {
-			GROW(m->cust, m->ncust, m->ccust);
+			VIRBUILD_ARRAY_GROW(m->cust, m->ncust, m->ccust);
 			memset(&m->cust[i], 0, sizeof(wseg));
 			m->cust[i].name = malloc(n + 1);
 			memcpy(m->cust[i].name, s, n);
@@ -803,7 +803,7 @@ static int section(was *a, const char *s, size_t n)
 			a->seg = (int32_t)i;
 			return 0;
 		}
-	GROW(m->seg, m->nseg, m->cseg);
+	VIRBUILD_ARRAY_GROW(m->seg, m->nseg, m->cseg);
 	memset(&m->seg[m->nseg], 0, sizeof(wseg));
 	m->seg[m->nseg].name = malloc(n + 1);
 	memcpy(m->seg[m->nseg].name, s, n);
@@ -905,7 +905,7 @@ static int directive(was *a, const char *d, size_t dn, lx *l)
 
 			if (m->sym[sy].seg >= 0)
 				return was_error(m, "function '%s' defined twice", m->sym[sy].name);
-			GROW(m->fn, m->nfn, m->cfn);
+			VIRBUILD_ARRAY_GROW(m->fn, m->nfn, m->cfn);
 			f = &m->fn[m->nfn];
 			memset(f, 0, sizeof *f);
 			f->sym = (uint32_t)sy;
@@ -1053,7 +1053,7 @@ static int directive(was *a, const char *d, size_t dn, lx *l)
 				return was_error(m, ".init_array: expected a function");
 			sym_use(a, (uint32_t)sy, WS_FUNCTION);
 			m->sym[sy].used_reloc = true;
-			GROW(m->init, m->ninit, m->cinit);
+			VIRBUILD_ARRAY_GROW(m->init, m->ninit, m->cinit);
 			m->init[m->ninit++] = (struct winit){ a->prio, (uint32_t)sy };
 		} while (accept(l, ','));
 		return 0;

@@ -20,7 +20,7 @@ VPRIV int x64_vir_type_size(uint32_t t) { return vir_type_is_vector(t) ? 16 : t 
 
 VPRIV int64_t x64_vir_constant_bits(const vir_insn *i) { return (int64_t)((uint64_t)i->c << 32 | i->b); }
 
-VPRIV void x64_vir_text_append(vx *L, const char *s)
+VPRIV void x64_vir_text_append(x64_vir_context *L, const char *s)
 {
 	rec *r = x64_put(L->e, X_RAW);
 	r->off = L->e->raw.n;
@@ -28,7 +28,7 @@ VPRIV void x64_vir_text_append(vx *L, const char *s)
 	vtext_string_append(&L->e->raw, s);
 }
 
-VPRIV void x64_vir_simd_emit(vx *L, const char *op, int d, int a, int b)
+VPRIV void x64_vir_simd_emit(x64_vir_context *L, const char *op, int d, int a, int b)
 {
 	char s[160];
 	/* A three-address noncommutative operation may overwrite its second source. */
@@ -39,7 +39,7 @@ VPRIV void x64_vir_simd_emit(vx *L, const char *op, int d, int a, int b)
 	if (out != d) x64_op3(L->e, X_MOV, 16, d, out, XNOREG);
 }
 
-VPRIV void x64_vir_constant_materialize(vx *L, uint8_t dst, uint32_t v)
+VPRIV void x64_vir_constant_materialize(x64_vir_context *L, uint8_t dst, uint32_t v)
 {
 	const vir_insn *i = &L->f->insns[v];
 	int d = x64_vir_register_number(dst);
@@ -59,13 +59,13 @@ VPRIV void x64_vir_constant_materialize(vx *L, uint8_t dst, uint32_t v)
 	}
 }
 
-VPRIV void x64_vir_slot_access(vx *L, bool load, uint8_t reg, uint32_t s)
+VPRIV void x64_vir_slot_access(x64_vir_context *L, bool load, uint8_t reg, uint32_t s)
 {
 	lval a = { .k = L_FRAME, .off = L->spill[s] };
 	x64_mem(L->e, load ? X_LD : X_ST, L->o->slot_sizes[s], x64_vir_register_number(reg), &a, false);
 }
 
-VPRIV void vx_edit(vx *L, const vir_edit *x)
+VPRIV void vx_edit(x64_vir_context *L, const vir_edit *x)
 {
 	switch (x->kind) {
 	case VIR_EDIT_REMATERIALIZE: x64_vir_constant_materialize(L, x->dst, x->value); break;
@@ -76,7 +76,7 @@ VPRIV void vx_edit(vx *L, const vir_edit *x)
 	}
 }
 
-VPRIV void x64_vir_edge_emit(vx *L, uint32_t b, uint32_t k)
+VPRIV void x64_vir_edge_emit(x64_vir_context *L, uint32_t b, uint32_t k)
 {
 	uint32_t g = L->o->edge_indices[L->o->slot_offsets[b] + k];
 	if (g == VIR_BLOCK_NONE) return;
@@ -84,7 +84,7 @@ VPRIV void x64_vir_edge_emit(vx *L, uint32_t b, uint32_t k)
 }
 
 /* edge g's moves */
-VPRIV void vx_edge_moves(vx *L, uint32_t g)
+VPRIV void vx_edge_moves(x64_vir_context *L, uint32_t g)
 {
 	const vir_alloc_edge *ed = &L->o->edge[g];
 	for (uint32_t j = 0; j < ed->count; j++) {
@@ -110,7 +110,7 @@ VPRIV void vx_edge_moves(vx *L, uint32_t g)
 }
 
 /* Put edge copies out of line. Branches without copies name their real block. */
-VPRIV uint32_t x64_vir_edge_target(vx *L,uint32_t b,uint32_t k,uint32_t target)
+VPRIV uint32_t x64_vir_edge_target(x64_vir_context *L,uint32_t b,uint32_t k,uint32_t target)
 {
 	uint32_t g=L->o->edge_indices[L->o->slot_offsets[b]+k];
 	if(g==VIR_BLOCK_NONE || !L->o->edge[g].count)return L->label[L->chase[target]];
@@ -118,7 +118,7 @@ VPRIV uint32_t x64_vir_edge_target(vx *L,uint32_t b,uint32_t k,uint32_t target)
 	return L->edgelab[g];
 }
 
-VPRIV uint32_t x64_vir_block_next(const vx *L)
+VPRIV uint32_t x64_vir_block_next(const x64_vir_context *L)
 {
 	if (!L->fallok)
 		return VIR_BLOCK_NONE;
@@ -129,7 +129,7 @@ VPRIV uint32_t x64_vir_block_next(const vx *L)
 	return p < nb ? L->order[p] : VIR_BLOCK_NONE;
 }
 
-VPRIV void x64_vir_goto_emit(vx *L, uint32_t b, uint32_t target)
+VPRIV void x64_vir_goto_emit(x64_vir_context *L, uint32_t b, uint32_t target)
 {
 	uint32_t t = L->chase[target], next = x64_vir_block_next(L);
 

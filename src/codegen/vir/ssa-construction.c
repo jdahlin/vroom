@@ -113,7 +113,7 @@ VPRIV void virbuild_parameter_operands_fill(ecx *e, uint32_t p, uint32_t b)
 	uint32_t var = V->p[p].in.a, ty = V->p[p].in.type, np = V->b[b].npred;
 	uint32_t o = virbuild_extra_append(e, NULL, 0);
 
-	GROW(V->x, V->nx, V->cx, np ? np : 1);
+	VIRBUILD_ARRAY_GROW(V->x, V->nx, V->cx, np ? np : 1);
 	V->nx += np;
 	V->p[p].in.b = o;	/* (set first: a cycle back here reads p itself) */
 	for (uint32_t k = 0; k < np; k++) {

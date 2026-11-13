@@ -5,7 +5,7 @@
 /* ptradd i (operands collected) with a constant offset, used once, by the next
  * instruction as its address: that adds the offset (its base's register is still
  * there unless an edit before it writes it) */
-VPRIV bool a64_vir_pointer_fold(vl *L, uint32_t b, uint32_t i)
+VPRIV bool a64_vir_pointer_fold(a64_vir_context *L, uint32_t b, uint32_t i)
 {
 	const vir_function *f = L->f;
 	const vir_insn *in = &f->insns[i], *nx = &f->insns[i + 1];
@@ -40,7 +40,7 @@ enum { A64_VIR_CHAIN_MEM = 1, A64_VIR_CHAIN_EXT, A64_VIR_CHAIN_LSL, A64_VIR_CHAI
  *   A64_VIR_CHAIN_MADDL a + ext.4s/4u x * K (a ptradd or add): smaddl/umaddl with K in a register.
  * The skipped instructions write no register, so x and a are still where they were when no
  * allocator edit comes in between.  x->first: the chain's first instruction, x->xv: x. */
-VPRIV bool a64_vir_chain_info_get(const vl *L, uint32_t b, uint32_t c, a64_vir_chain *x)
+VPRIV bool a64_vir_chain_info_get(const a64_vir_context *L, uint32_t b, uint32_t c, a64_vir_chain *x)
 {
 	const vir_function *f = L->f;
 	const vir_block *k = &f->blocks[b];
@@ -96,7 +96,7 @@ VPRIV bool a64_vir_chain_info_get(const vl *L, uint32_t b, uint32_t c, a64_vir_c
 }
 
 /* the chain's consumer c: its folded form (A64_VIR_CHAIN_MEM: the next load or store's address) */
-static void a64_vir_chain_consumer_act(vl *L, uint32_t c, uint8_t res)
+static void a64_vir_chain_consumer_act(a64_vir_context *L, uint32_t c, uint8_t res)
 {
 	ecx *e = L->e;
 	uint32_t op = L->f->insns[c].op;
@@ -129,7 +129,7 @@ static void a64_vir_chain_consumer_act(vl *L, uint32_t c, uint8_t res)
  * is handled (nothing to emit, or the consumer's folded form).  Decided at the chain's first
  * instruction, where the index's register is known: between it and the consumer only remats and
  * reloads into other registers (a constant operand, the base), none before the load or store */
-VPRIV bool a64_vir_chain_fold(vl *L, uint32_t b, uint32_t i, uint8_t res)
+VPRIV bool a64_vir_chain_fold(a64_vir_context *L, uint32_t b, uint32_t i, uint8_t res)
 {
 	const vir_function *f = L->f;
 	a64_vir_chain x;
