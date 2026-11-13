@@ -331,7 +331,7 @@ static __attribute__((noinline)) int driver_job_run_one(int argc, char **argv, c
 		.darwin = 1,
 #endif
 #if defined(__x86_64__) && !defined(__APPLE__)
-		.x86 = 1,	/* x86_64-linux-gnu (PLAN-x86.md) */
+		.target_x64 = 1,	/* x86_64-linux-gnu (PLAN-x86.md) */
 #endif
 	}, *job = &jobstore;
 	jmp_buf jb;
